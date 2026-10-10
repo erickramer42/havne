@@ -1,7 +1,7 @@
 # QtTune — Project Status
 
-**Date:** October 7, 2026
-**Version:** v0.2.0 (released, tagged); v0.3.0 Phases 1–1b complete, Phase 2 substantially complete (strip chart remaining)
+**Date:** October 10, 2026
+**Version:** v0.2.0 (released, tagged); v0.3.0 Phases 1–2 complete (LiveView + strip chart done), Phase 3 (J2534 loader) next
 **Repository:** https://github.com/erickramer42/qttune
 **CI:** [![CI](https://github.com/erickramer42/qttune/actions/workflows/ci.yml/badge.svg)](https://github.com/erickramer42/qttune/actions/workflows/ci.yml)
 
@@ -16,8 +16,7 @@ behind a stable C ABI, with UI layers as replaceable skins around it.**
 |   Main / Dashboard / Live /|   720 px width, bottom TabBar below
 |   Log / Settings pages     |   LogPage: live frame table, sort toggle
 |   LiveViewPage: signal     |   subscription checkboxes + live values
-|   table (strip chart       |   (chart = next increment)
-|   pending)                 |
+|   table + strip chart      |   + QML Canvas trace per signal (done)
 +---------------+------------+
                 | QtTuneBridge (thread-marshaling seam)
                 |   worker→GUI via QMetaObject::invokeMethod (QueuedConnection)
@@ -60,8 +59,10 @@ Rules the project is built around:
     100ms coalesce timer ──drain──▶ SignalListModel.updateValues()
               │                        one dataChanged per window
               │                        (contiguous rowrange, ValueRole)
+              │                        + valuesUpdated + history ring push
               ▼
-    QML LiveViewPage: value table (strip chart pending)
+    QML LiveViewPage: value table + strip chart Canvas (redraws on
+    valuesUpdated, pulls data via chartData())
 
 Frame-log path (unchanged from v0.2.0):
 
@@ -76,6 +77,12 @@ Contract highlights:
   handles memory. Stream never freezes.
 - GUI emissions for the LiveView path: one batch per 100ms window
   (10 Hz), decoupled from frame rate (mock 20 fps, future J2534 500 Hz).
+- Strip-chart history timestamps are BATCH-stamped (one timestamp per
+  coalesce window, from a model-side QElapsedTimer restarted per
+  connect). Honest resolution given the staging buffer merges
+  latest-per-ID across the window; the `timestampMs` parameter on
+  `updateValues` is the seam where per-sample timestamps land when
+  decode moves worker-side (J2534).
 
 ## Signals Layer (landed v0.3.0 Phases 1 / 1b)
 
@@ -104,7 +111,7 @@ POD signal metadata + linear decode: `display = raw * scale + offset`.
   test because byte-order/scale inversions pass structural checks but
   produce absurd physics — only range assertions catch that class.
 
-## Coalesced Signal Path (landed v0.3.0 Phase 2)
+## Coalesced Signal Path + Strip Chart (landed v0.3.0 Phase 2, closed 2026-10-10)
 
 - `handleFrameInternal` decodes the mock signal set per frame into
   `m_stagingBuffer` (GUI thread; decode ABI is pure computation).
@@ -115,17 +122,31 @@ POD signal metadata + linear decode: `display = raw * scale + offset`.
 - `SignalListModel` — QAbstractListModel over the signal set: name, unit,
   value, subscribed roles; `toggleSubscribed(row)` Q_INVOKABLE drives the
   LiveView checkboxes. Value updates filter on `subscribed`.
+- **History ring (per signal):** 120-sample fixed-capacity evict-oldest
+  ring inside each model `Entry` — `Sample { timestampMs, value }`,
+  batch-stamped at drain time (see Data Path contract note). No ABI
+  surface touched; ring lives Qt-side so the existing `test_bridge`
+  target covers it headlessly-adjacent (Qt Core only). Unsubscribe
+  freezes history; resubscribe restores the accumulated trace.
+- **`chartData()` pull API:** one Q_INVOKABLE returning a flattened
+  `[ts, val, ...]` sample list per subscribed signal, oldest-first —
+  chosen over a HistoryRole/data-role approach because a Canvas paints
+  outside delegate context; one call per repaint instead of per-row role
+  lookups.
+- `valuesUpdated` — one emission per non-empty batch, the Canvas's sole
+  repaint trigger. (Was declared since v0.2 era and never emitted —
+  a signal promise QML never received until this became its first
+  consumer.)
 - Bridge metrics: `guiNotifyCount` (per-frame instrumentation, baseline
   1:1 with frames) and `signalBatchCount` (~10/s at any frame rate).
   Baseline measured before coalescing: 200 notify emissions / 10 s at
   mock rate → LiveView path now 10/s. **~20× reduction, decoupled from
   frame rate.**
-- LiveViewPage QML: subscription checkboxes + tabular-digit value labels,
-  wired into sidebar/TabBar/StackLayout at index 2 (Home, Dash, **Live**,
-  Log, Setup).
-- Strip chart NOT yet built — needs per-signal rolling history ring
-  (timestamp+value) in SignalListModel + QML Canvas redraw on
-  `valuesUpdated`. This is the remaining Phase 2 increment.
+- LiveViewPage QML: subscription checkboxes, tabular-digit value labels,
+  and strip-chart Canvas — shared time axis across series, per-series
+  value scaling (RPM vs coolant on one shared y-axis would flatten the
+  small signals into noise), legend with live values. Wired into
+  sidebar/TabBar/StackLayout at index 2 (Home, Dash, **Live**, Log, Setup).
 - Known inefficiency (deliberate, mock-rate harmless): decode loop runs
   all signals per frame regardless of subscription; filter decode on
   `isSubscribed(id)` when signal count grows.
@@ -168,14 +189,16 @@ handles:
 | Capability | Verified by |
 |---|---|
 | Core builds standalone with zero Qt deps | `core-and-tests` CI job (Ubuntu, Qt absent) |
-| 40 tests pass: 18 core + 13 signals + 9 bridge | GTest suites; 40/40 locally on Windows/MSVC 2022, green on 3-platform CI matrix |
+| 47 tests pass: 18 core + 15 signals + 14 bridge | GTest suites; 47/47 locally on Windows/MSVC 2022, green on 3-platform CI matrix |
 | Mock transport delivers physically plausible, signal-set-decodable frames | `MockFramesDecodeAgainstMockSignalSet`: real worker frames decoded under every mock definition, physical ranges asserted |
 | Encoder/decoder layout contract | Round-trip integration test catches byte-order/scale inversions invisible to structural validation |
 | Bridge marshal: worker → GUI thread | `FramesMarshalFromWorkerToGuiThread` |
 | Coalesced signal updates at 10 Hz regardless of frame rate | `SignalBatchesAreCoalesced` (bounded ranges, not exact counts); manual: header `batch:` climbs ~10/s while `frames:` climbs ~20/s |
-| Notify instrumentation baseline (1:1 per frame) | `NotifyCountTracksFrameProcessing` |
+| History ring evicts oldest at capacity, order preserved through wrap | `HistoryRingEvictsOldestAtCapacity` (deterministic injected timestamps; 130 pushes into 120 slots, exact retention assert) |
+| valuesUpdated fires once per non-empty batch; unsubscribed signals excluded; empty/unknown-ID batches silent | `ChartDataFiltersUnsubscribedAndEmptyBatchesDoNotEmit` |
+| Strip chart populated end-to-end through real coalescer stream | `StripChartDataPopulatedByLiveStream` (bounded sample counts, monotonic timestamps) |
 | Streaming continues past 10k cumulative frames (no freeze) | `StreamingContinuesPastTenThousandFrames` via `forceFrameCountForTesting` seam |
-| LiveView page shows subscribed decoded values updating in ~100ms steps | Manual smoke: RPM wobble/rev blips visible, coolant rising, throttle/load synced |
+| LiveView page: subscribed values + scrolling strip chart traces, unsubscribe/resubscribe without history loss, resize repaint | Manual smoke: 20+ s run through 120-sample ring wrap, rev-blip spikes render as shape, no clipping/blanking |
 | Sort toggle, clear, mid-stream disconnect, lifecycle idempotency | Existing 6 bridge behaviors + tests |
 | Full app builds Windows (MSVC 2022) + macOS (AppleClang, Qt 6.12.0) | CI jobs |
 | Responsive layout (sidebar ↔ TabBar at 720px) incl. new Live entry | Local run |
@@ -189,10 +212,11 @@ v0.3.0 phases:
       bit extraction, sign extension, validator
 - [x] **Phase 1b — Mock signal emission:** tick-driven simulation;
       round-trip integration test on real worker-thread frames
-- [x] **Phase 2 (mostly) — Coalesced LiveView:** 100ms batch window,
+- [x] **Phase 2 — Coalesced LiveView + strip chart:** 100ms batch window,
       SignalListModel, subscription checkboxes, LiveView value table,
-      in-flight backpressure fix, notify/batch metrics.
-      REMAINING: strip chart (per-signal rolling history + QML Canvas)
+      in-flight backpressure fix, notify/batch metrics, per-signal
+      120-sample history ring, QML Canvas strip chart with shared time
+      axis / per-series value scaling. CLOSED 2026-10-10.
 - [ ] **Phase 3 — J2534 hybrid loader:** registry discovery (dual WOW64
       views), in-process x64 load, surrogate host for x86-only DLLs
 - [ ] **Phase 4 — Record-replay transport:** fixture capture +
@@ -208,19 +232,28 @@ v0.3.0 phases:
    attempted yet.
 3. **Linux full-app build not in CI.** Deliberate (core invariant is the
    Ubuntu job's purpose); add when Linux is a ship target.
-4. **Strip chart absent** — Phase 2 remainder; needs history ring in
-   SignalListModel.
-5. **Decode ignores subscription state** (all signals decoded per
+4. **Decode ignores subscription state** (all signals decoded per
    frame, filtered at model). Harmless at mock rate; filter decode when
    signal counts grow.
-6. **Ascending (oldest-first) log mode lacks auto-follow UX.** v0.3
+5. **Ascending (oldest-first) log mode lacks auto-follow UX.** v0.3
    candidate.
-7. **Session API single-threaded by contract** (bridge is sole caller).
-8. **Drop-counter emit is still per-frame in handleFrameInternal**
+6. **Session API single-threaded by contract** (bridge is sole caller).
+7. **Drop-counter emit is still per-frame in handleFrameInternal**
    (TODO in code from v0.2); move into the coalesce batch for real-data
    rates.
-9. **`SessionStartWithoutTransportFails` is a `SUCCEED()` stub** — weak
+8. **`SessionStartWithoutTransportFails` is a `SUCCEED()` stub** — weak
    test, either implement or delete.
+9. **Mock simulation lacks a scripted drive cycle** (candidate: 2nd-gear
+   pull to WOT with 2→3 shift). Current idle-plus-blips profile exercises
+   the full pipeline but is visually quiet for demos; a scripted pull
+   would exercise throttle/load/RPM coupling dramatically. Needs SimState
+   physics changes + `MockFramesDecodeAgainstMockSignalSet` range updates
+   — future task, not drive-by.
+10. **Strip-chart x-axis resolution is one coalesce window (~100 ms),**
+   not per-frame — batch-stamped by design (staging merge destroys
+   per-frame timestamps anyway); resolved when worker-side decode lands
+   (J2534, Phase 3+) and per-sample timestamps flow through the
+   `updateValues` seam.
 
 ## Roadmap
 
@@ -228,7 +261,7 @@ v0.3.0 phases:
 |-------|-------|--------|
 | v0.1.0 | Skeleton: core ABI, Qt shell, responsive layout | ✅ Released |
 | v0.2.0 | Callback API, mock transport, CI + tests | ✅ Released (tagged) |
-| v0.3.0 | Signals layer, coalesced LiveView, J2534 transport, live vehicle read/logging | 🚧 Phases 1–1b done; Phase 2 mostly done |
+| v0.3.0 | Signals layer, coalesced LiveView, J2534 transport, live vehicle read/logging | 🚧 Phases 1–2 done; Phase 3 (J2534) next |
 | v0.4.0 | Security access discovery, flash capability | Planned |
 | v0.5.0+ | Multi-manufacturer plugin modules | Planned |
 
@@ -290,6 +323,24 @@ statistics with liveness tests. Also: measuring before optimizing — the
 guiNotifyCount instrumentation locked the 20× coalescing-reduction claim
 with a baseline number. New-QML-file linker failures (QmlCacheGeneratedCode
 unresolved externals) mean stale QML cache — clean reconfigure fixes.
+
+**2026-10-10 — strip chart round (Phase 2 close):** (1) The QML paint
+code indexed the LAST ELEMENT of a flattened `[ts, val, ...]` array as
+the newest timestamp — it's the newest VALUE. Symptom was deliciously
+diagnostic: chart fine for ~1.5 s, then stretched/clipped, "recovering"
+exactly during RPM rev blips (blip spikes temporarily pushed the buggy
+max above elapsed-time). **47 green GTests were structurally blind to
+it** — the bug lived in QML `onPaint` arithmetic, outside every C++
+test's reach — the manual smoke tier caught it, which is why that tier
+exists. A consumer of a verified contract can still mis-read the
+contract. (2) Declared-but-never-emitted signals are latent debt:
+`valuesUpdated` sat unemitted since its declaration until the chart
+became its first consumer and exposed the gap. (3) Pull-API beats
+data-roles for Canvas consumers: `chartData()` returns everything a
+repaint needs in one call, avoiding role-number gymnastics from JS
+paint code. (4) Timestamp injection seams make ring tests exact
+arithmetic instead of timing tolerance — same philosophy as assertion
+lesson 2026-10-05 (3), applied to test fixtures.
 
 ---
 

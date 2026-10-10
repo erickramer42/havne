@@ -68,6 +68,10 @@ on a device/emulator.
 - Live signal view: decoded values streamed to a subscription-checked list,
   coalesced to 10 Hz GUI updates (100ms batch window) — decoupled from
   frame rate by design (survives 500 Hz J2534 rates later)
+- Strip chart: per-signal rolling history (120 samples, timestamp+value
+  ring in the model, oldest evicted first) rendered as a QML Canvas
+  trace — one repaint per coalesced batch, subscribing/unsubscribing
+  toggles series visibility without losing recorded history
 - Physically plausible mock data: idle RPM wobble with rev blips, coolant
   warm-up toward thermostat, trailing intake temps, coupled throttle/load —
   every mock frame is decodable by the built-in signal set (round-trip tested)
@@ -83,11 +87,11 @@ on a device/emulator.
 |---------|-----------|--------|
 | v0.1.0  | Skeleton: core ABI, Qt shell, responsive layout | ✅ Released |
 | v0.2.0  | Callback API, mock transport, bridge marshaling, live LogPage | ✅ Released |
-| v0.3.0  | Signals layer, coalesced LiveView, J2534 transport, live vehicle read/logging | 🚧 Phases 1–1b done, Phase 2 mostly done |
+| v0.3.0  | Signals layer, coalesced LiveView, J2534 transport, live vehicle read/logging | 🚧 Phases 1–2 done, Phase 3 (J2534) next |
 | v0.4.0  | Security access discovery, flash capability | Planned |
 | v0.5.0+ | Multi-manufacturer plugins | Future |
 
-Currently 40 automated tests (18 core, 13 signals, 9 bridge), all green
+Currently 47 automated tests (18 core, 15 signals, 14 bridge), all green
 locally on Windows/MSVC 2022 and on CI (3-platform matrix). Per-case ctest
 granularity via `gtest_discover_tests()`. Mock frames and decoded signal
 view only — no real vehicle communication yet. See [STATUS.md](STATUS.md)
@@ -109,6 +113,7 @@ Qt is not bundled in this repository; see qt.io for sources and license text.
 
 MIT — see [LICENSE](LICENSE) file.
 
-⚠️ Early infrastructure. Core callback API, mock transport, and signal
-decoding implemented and unit-tested. No real vehicle communication yet.
+⚠️ Early infrastructure. Core callback API, mock transport, signal
+decoding, and coalesced live view with strip chart implemented and
+unit-tested. No real vehicle communication yet.
 Do not connect to a vehicle expecting functionality.

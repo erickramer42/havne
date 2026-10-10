@@ -1,3 +1,4 @@
+# tests/CMakeLists.txt
 find_package(GTest QUIET)
 
 if(NOT GTest_FOUND)

@@ -137,7 +137,7 @@ Rectangle {
                         console.error("connect failed:", err)
                         return
                     }
-                    gotoPage(2)   // jump to Log
+                    gotoPage(3)   // jump to Log
                 }
             }
         }

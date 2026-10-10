@@ -1,3 +1,7 @@
+// File/layer: app/qttunebridge.cpp | Qt6 Core, app layer, C++17
+// Testing: ring behavior, valuesUpdated cadence, chartData shape in test_bridge;
+// full-app strip chart render verified by manual smoke (LiveViewPage)
+
 #include "qttunebridge.h"
 #include "qttune/version.h"
 #include "qttune/signals.h"
@@ -145,7 +149,7 @@ void SignalListModel::setSignalSet(const QttuneSignalSet* set)
     m_subscribedCount = 0;
 
     for (uint32_t i = 0; i < set->count; ++i) {
-        Entry e = {};
+        Entry e = {};   // value-init zeroes the history ring, head, and count
         e.id = set->defs[i].id;
         strncpy(e.name, set->defs[i].name, sizeof(e.name) - 1);
         strncpy(e.unit, set->defs[i].unit, sizeof(e.unit) - 1);
@@ -154,11 +158,23 @@ void SignalListModel::setSignalSet(const QttuneSignalSet* set)
         m_entries.push_back(e);
     }
     endResetModel();
+
+    // Fallback timestamp source restarts per (re)connect — history and the
+    // clock zero together, so replayed sessions never mix clock epochs.
+    m_clock.restart();
 }
 
-void SignalListModel::updateValues(const std::vector<std::pair<uint16_t, float>>& values)
+void SignalListModel::updateValues(const std::vector<std::pair<uint16_t, float>>& values,
+                                   qint64 timestampMs)
 {
     if (m_entries.empty() || values.empty()) return;
+
+    // Batch-stamped time: the staging buffer merges latest-per-ID across the
+    // coalescing window, so per-frame timestamps are already gone by here —
+    // one timestamp per batch is the honest resolution. timestampMs >= 0
+    // injects a deterministic value (tests today; per-sample real timestamps
+    // when decode moves worker-side under J2534).
+    const qint64 stamp = (timestampMs >= 0) ? timestampMs : m_clock.elapsed();
 
     int firstRow = -1;
     int lastRow = -1;
@@ -167,6 +183,16 @@ void SignalListModel::updateValues(const std::vector<std::pair<uint16_t, float>>
             Entry& e = m_entries[i];
             if (e.id == pair.first && e.subscribed) {
                 e.value = pair.second;
+
+                // Evict-oldest ring push — bounded memory, stream never
+                // freezes; mirrors the FrameListModel philosophy.
+                e.history[e.histHead].timestampMs = stamp;
+                e.history[e.histHead].value = pair.second;
+                e.histHead = (e.histHead + 1) % HistoryCapacity;
+                if (e.histCount < HistoryCapacity) {
+                    ++e.histCount;
+                }
+
                 if (firstRow < 0 || static_cast<int>(i) < firstRow) firstRow = static_cast<int>(i);
                 if (static_cast<int>(i) > lastRow) lastRow = static_cast<int>(i);
             }
@@ -174,7 +200,39 @@ void SignalListModel::updateValues(const std::vector<std::pair<uint16_t, float>>
     }
     if (firstRow >= 0) {
         emit dataChanged(index(firstRow), index(lastRow), {ValueRole});
+        // One emission per batch — the strip chart's sole repaint trigger.
+        // Was declared but never emitted: a signal promise QML never received.
+        emit valuesUpdated();
     }
+}
+
+QVariantList SignalListModel::chartData() const
+{
+    QVariantList out;
+    for (const Entry& e : m_entries) {
+        if (!e.subscribed || e.histCount == 0) continue;
+
+        QVariantMap m;
+        m["id"] = e.id;
+        m["name"] = QString::fromUtf8(e.name);
+        m["unit"] = QString::fromUtf8(e.unit);
+        m["value"] = e.value;
+
+        // Flattened [ts, val, ts, val, ...], oldest first.
+        // When full, the oldest surviving sample sits at histHead (the
+        // next eviction slot); while filling, samples are dense from 0.
+        QVariantList samples;
+        const uint32_t start = (e.histCount == HistoryCapacity)
+                                ? e.histHead : 0;
+        for (uint32_t i = 0; i < e.histCount; ++i) {
+            const Sample& s = e.history[(start + i) % HistoryCapacity];
+            samples.append(static_cast<double>(s.timestampMs));
+            samples.append(static_cast<double>(s.value));
+        }
+        m["samples"] = samples;
+        out.append(m);
+    }
+    return out;
 }
 
 void SignalListModel::toggleSubscribed(int row)
@@ -200,6 +258,7 @@ QtTuneBridge::QtTuneBridge(QObject* parent)
 
     connect(m_coalesceTimer, &QTimer::timeout, this, [this]() {
         if (!m_stagingBuffer.empty()) {
+            // Default timestampMs=-1: model stamps from its own clock.
             m_signalModel->updateValues(m_stagingBuffer);
             m_stagingBuffer.clear();
             ++m_signalBatchCount;

@@ -1,3 +1,6 @@
+// File/layer: app/qttunebridge.h | Qt6 Core, app layer, C++17
+// Testing: SignalListModel history ring covered by test_bridge (Qt-linked target)
+
 #pragma once
 
 #include <QObject>
@@ -6,6 +9,7 @@
 #include <QSortFilterProxyModel>
 #include <QVariantMap>
 #include <QTimer>
+#include <QElapsedTimer>
 
 #include <atomic>
 #include <utility>
@@ -72,6 +76,11 @@ class SignalListModel : public QAbstractListModel
 public:
     explicit SignalListModel(QObject* parent = nullptr);
 
+    // Rolling history depth per signal — strip chart window.
+    // At 10 Hz coalesced batches this is a ~12 s trace. Kept constexpr so
+    // tests can assert exact ring behavior without a config surface.
+    static constexpr int HistoryCapacity = 120;
+
     enum SignalRoles {
         IdRole = Qt::UserRole + 1,
         NameRole,
@@ -83,27 +92,52 @@ public:
     int rowCount(const QModelIndex& parent = {}) const override;
     QVariant data(const QModelIndex& index, int role = Qt::DisplayRole) const override;
     QHash<int, QByteArray> roleNames() const override;
-    void setSignalSet(const QttuneSignalSet* set);  // FIX: typed param, no void* cast at boundary
-    void updateValues(const std::vector<std::pair<uint16_t, float>>& values);
+    void setSignalSet(const QttuneSignalSet* set);
+    // timestampMs < 0  => stamp from the internal clock (production path:
+    // coalesce-drain time, ~100 ms resolution).
+    // timestampMs >= 0  => use as-is (tests inject deterministic values; this
+    // is also the seam for per-sample frame timestamps once decode moves to
+    // the worker side under J2534).
+    void updateValues(const std::vector<std::pair<uint16_t, float>>& values,
+                      qint64 timestampMs = -1);
     int subscribedCount() const { return static_cast<int>(m_subscribedCount); }
 
     Q_INVOKABLE void toggleSubscribed(int row);
+
+    // Strip-chart pull API: one map per SUBSCRIBED signal with non-empty
+    // history: { id, name, unit, value, samples: [ts, val, ts, val, ...] }
+    // Flattened doubles, oldest-first. Called by the QML Canvas once per
+    // valuesUpdated batch (~10 Hz). One call per repaint instead of per-row
+    // role lookups keeps the QML side free of role-number hacks.
+    Q_INVOKABLE QVariantList chartData() const;
 
 signals:
     void valuesUpdated();
     void subscribedCountChanged();
 
 private:
+    struct Sample {
+        qint64 timestampMs;
+        float value;
+    };
+
     struct Entry {
         uint16_t id;
         char name[32];
         char unit[16];
         float value = 0.0f;
         bool subscribed = true;
+        // GUI-thread-only rolling ring (written exclusively by updateValues).
+        // Fixed capacity, evict-oldest — mirrors the FrameListModel ring
+        // philosophy: bounded memory, stream never freezes.
+        Sample history[HistoryCapacity];
+        uint32_t histHead = 0;   // next write slot
+        uint32_t histCount = 0; // valid samples, saturates at HistoryCapacity
     };
 
     std::vector<Entry> m_entries;
     int m_subscribedCount = 0;
+    QElapsedTimer m_clock;   // fallback timestamp source; started in setSignalSet
 };
 
 class QtTuneBridge : public QObject

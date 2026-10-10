@@ -309,3 +309,160 @@ TEST(BridgeTest, BackpressureDropsAreCountedAndReported)
 
     bridge.disconnectSession();
 }
+
+// ---------------------------------------------------------------------------
+// Strip chart: per-signal rolling history ring in SignalListModel
+// ---------------------------------------------------------------------------
+
+namespace {
+
+/* Minimal two-signal set, built test-side. Plain assignments only —
+   designated initializers are C++20 and MSVC-permissive (note 2026-10-07). */
+void buildTestSignalSet(QttuneSignalDef (&defs)[2], QttuneSignalSet& set)
+{
+    QttuneSignalDef& rpm = defs[0];
+    rpm = {};
+    rpm.id = 1001;
+    strncpy(rpm.name, "Engine_RPM", sizeof(rpm.name) - 1);
+    rpm.type = QTTUNE_SIGNAL_TYPE_UINT16;
+    strncpy(rpm.unit, "RPM", sizeof(rpm.unit) - 1);
+
+    QttuneSignalDef& temp = defs[1];
+    temp = {};
+    temp.id = 2001;
+    strncpy(temp.name, "Coolant_Temp", sizeof(temp.name) - 1);
+    temp.type = QTTUNE_SIGNAL_TYPE_INT8;
+    strncpy(temp.unit, "degC", sizeof(temp.unit) - 1);
+
+    set.version = 1;
+    set.count = 2;
+    set.defs = defs;
+}
+
+} // namespace
+
+TEST(BridgeTest, HistoryRingEvictsOldestAtCapacity)
+{
+    /* Deterministic: injected timestamps + values equal to the timestamp,
+       so retention/ordering asserts are exact arithmetic, not timing. */
+    SignalListModel model;
+    QttuneSignalDef defs[2];
+    QttuneSignalSet set;
+    buildTestSignalSet(defs, set);
+    model.setSignalSet(&set);
+
+    // Push 10 MORE batches than capacity: 0..129 into a 120-slot ring.
+    std::vector<std::pair<uint16_t, float>> batch;
+    for (qint64 t = 0; t < SignalListModel::HistoryCapacity + 10; ++t) {
+        batch.clear();
+        batch.emplace_back(uint16_t(1001), float(t));
+        batch.emplace_back(uint16_t(2001), float(t) - 40.0f);
+        model.updateValues(batch, t);
+    }
+
+    const QVariantList data = model.chartData();
+    ASSERT_EQ(data.size(), 2);   // both signals subscribed with history
+
+    for (int s = 0; s < 2; ++s) {
+        const QVariantMap m = data.at(s).toMap();
+        const QVariantList samples = m.value("samples").toList();
+        // Exactly capacity survives — ring size is a hard bound, no leaks
+        ASSERT_EQ(samples.size(), SignalListModel::HistoryCapacity * 2)
+            << "wrong sample count for " << m.value("name").toString().toStdString();
+
+        // Oldest retained = push #(130-120) = timestamp 10; newest = 129.
+        // Exact ints: injected timestamps make wrap position deterministic.
+        EXPECT_EQ(samples.at(0).toDouble(), 10.0);
+        EXPECT_EQ(samples.at(samples.size() - 2).toDouble(), 129.0);
+
+        // Values track their timestamps (order preserved through the wrap)
+        const float offset = (m.value("id").toInt() == 1001) ? 0.0f : -40.0f;
+        EXPECT_NEAR(samples.at(1).toFloat(), 10.0f + offset, 0.01f);
+        EXPECT_NEAR(samples.at(samples.size() - 1).toFloat(), 129.0f + offset, 0.01f);
+
+        // Monotonic timestamps oldest->newest (wrap-around correctness)
+        double prev = -1.0;
+        for (int i = 0; i < samples.size(); i += 2) {
+            EXPECT_GE(samples.at(i).toDouble(), prev);
+            prev = samples.at(i).toDouble();
+        }
+    }
+}
+
+TEST(BridgeTest, ChartDataFiltersUnsubscribedAndEmptyBatchesDoNotEmit)
+{
+    SignalListModel model;
+    QttuneSignalDef defs[2];
+    QttuneSignalSet set;
+    buildTestSignalSet(defs, set);
+    model.setSignalSet(&set);
+
+    int emissions = 0;
+    QObject::connect(&model, &SignalListModel::valuesUpdated,
+                     [&emissions]() { ++emissions; });
+
+    std::vector<std::pair<uint16_t, float>> batch;
+    for (int t = 0; t < 5; ++t) {
+        batch.clear();
+        batch.emplace_back(uint16_t(1001), float(t));
+        batch.emplace_back(uint16_t(2001), float(t));
+        model.updateValues(batch, t);
+    }
+    ASSERT_EQ(emissions, 5);   // one per non-empty batch, per contract
+
+    // Empty batch = silent: no dataChanged, no valuesUpdated
+    model.updateValues({}, 999);
+    EXPECT_EQ(emissions, 5);
+
+    // Unknown IDs = silent too (defensive: staging should never send them)
+    batch.clear();
+    batch.emplace_back(uint16_t(9999), 1.0f);
+    model.updateValues(batch, 1000);
+    EXPECT_EQ(emissions, 5);
+    EXPECT_EQ(model.chartData().size(), 2);
+
+    // Unsubscribe signal 0: excluded from chartData, history frozen
+    model.toggleSubscribed(0);
+    const QVariantList data = model.chartData();
+    ASSERT_EQ(data.size(), 1);
+    EXPECT_EQ(data.at(0).toMap().value("id").toInt(), 2001);
+    EXPECT_EQ(data.at(0).toMap().value("samples").toList().size(), 10); // still 5 samples
+
+    // Resubscribed signal keeps its accumulated history (non-destructive)
+    model.toggleSubscribed(0);
+    EXPECT_EQ(model.chartData().size(), 2);
+    EXPECT_EQ(model.chartData().at(0).toMap().value("samples").toList().size(), 10);
+}
+
+TEST(BridgeTest, StripChartDataPopulatedByLiveStream)
+{
+    /* End-to-end through the coalescer: real mock frames -> decode ->
+       staging -> updateValues -> ring. Bounded ranges + monotonicity:
+       timestamps come from QElapsedTimer (monotonic by contract), counts
+       bounded by 10 Hz scheduling slack. */
+    QtTuneBridge bridge;
+    ASSERT_TRUE(bridge.connectSession("mock://strips").isEmpty());
+    spinLoop(750);   // ~7 batches at 10 Hz coalescing
+
+    const QVariantList data = bridge.signalModel()->chartData();
+    ASSERT_GT(data.size(), 0);
+
+    for (const QVariant& v : data) {
+        const QVariantMap m = v.toMap();
+        const QVariantList samples = m.value("samples").toList();
+
+        // 750ms / 100ms ~= 7 batches; generous bounds for timer slack
+        EXPECT_GE(samples.size(), 4)
+            << "no history for " << m.value("name").toString().toStdString();
+        EXPECT_LE(samples.size(), 40);
+
+        // Timestamps monotonic non-decreasing across the window
+        double prev = -1.0;
+        for (int i = 0; i < samples.size(); i += 2) {
+            EXPECT_GE(samples.at(i).toDouble(), prev);
+            prev = samples.at(i).toDouble();
+        }
+    }
+
+    bridge.disconnectSession();
+}
