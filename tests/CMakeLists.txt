@@ -106,3 +106,20 @@ if(WIN32)
         RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/$<CONFIG>"
     )
 endif()
+
+# J2534 loader tests (Win32-only, HARNESS tier — real LoadLibraryEx
+# against the fake vendor DLL; path baked in at generation time)
+if(WIN32)
+    add_executable(test_j2534_load
+        ../tests/test_j2534_load.cpp
+    )
+    target_link_libraries(test_j2534_load PRIVATE
+        qttune-core
+        GTest::gtest_main
+    )
+    target_compile_definitions(test_j2534_load PRIVATE
+        FAKE_J2534_DLL_PATH="$<TARGET_FILE:fake_j2534>"
+    )
+    add_dependencies(test_j2534_load fake_j2534)
+    gtest_discover_tests(test_j2534_load)
+endif()

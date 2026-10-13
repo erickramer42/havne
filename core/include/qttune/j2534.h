@@ -51,6 +51,30 @@ qttune_status_t qttune_j2534_discover_devices(qttune_j2534_device_t** devices_ou
 /* Frees array from discover. NULL-safe no-op. */
 void qttune_j2534_free_devices(qttune_j2534_device_t* devices);
 
+/* Opaque handle to an opened vendor function-library connection */
+typedef struct qttune_j2534_handle qttune_j2534_handle_t;
+
+/*
+ * Load a discovered vendor's function library and open a device.
+ *
+ * CONTRACTS:
+ * - Loads the DLL named by device->dll_path, resolves ALL seven
+ *   mandatory PassThru exports, and calls the vendor's PassThruOpen
+ * - Any failure (missing DLL, missing export, PassThruOpen refused)
+ *   returns QT_ERR_LOAD_FAILED with NO module left loaded
+ * - On error: *out_handle = NULL
+ * - Caller owns the handle; release with qttune_j2534_close()
+ * - Non-Windows: QT_ERR_NOT_IMPLEMENTED
+ */
+qttune_status_t qttune_j2534_open(const qttune_j2534_device_t* device,
+                                  qttune_j2534_handle_t** out_handle);
+
+/*
+ * Close device, unload module, free handle. NULL is a safe no-op.
+ * Closing INVALIDATES the handle — reuse after close is UB.
+ */
+qttune_status_t qttune_j2534_close(qttune_j2534_handle_t* handle);
+
 #ifdef __cplusplus
 }
 #endif

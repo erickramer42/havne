@@ -52,39 +52,37 @@ namespace fake_j2534 {
  * ================================================================= */
 
 extern "C" __declspec(dllexport)
-long __stdcall PassThruOpen(long* pErrCode)
+long __stdcall PassThruOpen(void* pName, unsigned long* pDeviceID)
 {
-    if (pErrCode == nullptr) {
+    (void)pName;   /* real DLLs receive a device serial/name; fake ignores */
+    if (pDeviceID == nullptr) {
         return STATUS_FAILED;
     }
-    
     fake_j2534::g_handle = 1;
-    *pErrCode = STATUS_NOERROR;
-    return 1;  // Handle ID (must be non-zero for success)
+    *pDeviceID = 1;           /* non-zero device ID = one device present */
+    return STATUS_NOERROR;    /* spec: status via return, ID via out-param */
 }
 
 extern "C" __declspec(dllexport)
-long __stdcall PassThruClose(long hDevice)
+long __stdcall PassThruClose(unsigned long DeviceID)
 {
-    (void)hDevice;
+    (void)DeviceID;
     fake_j2534::g_handle = 0;
     return STATUS_NOERROR;
 }
 
 extern "C" __declspec(dllexport)
-long __stdcall PassThruConnect(long hDevice,
-                               unsigned long Protocol,
+long __stdcall PassThruConnect(unsigned long DeviceID,
+                               unsigned long ProtocolID,
                                unsigned long Flags,
-                               unsigned long Baud,
-                               unsigned long TxFlags,
-                               unsigned long* pChannel)
+                               unsigned long BaudRate,
+                               unsigned long* pChannelID)
 {
-    if (fake_j2534::g_handle != 1 || pChannel == nullptr) {
+    (void)DeviceID; (void)ProtocolID; (void)Flags; (void)BaudRate;
+    if (fake_j2534::g_handle != 1 || pChannelID == nullptr) {
         return STATUS_FAILED;
     }
-    
-    /* Accept any protocol (we're not validating protocol behavior) */
-    *pChannel = 1;  // Fixed channel ID
+    *pChannelID = 1;          /* fixed channel ID */
     return STATUS_NOERROR;
 }
 
