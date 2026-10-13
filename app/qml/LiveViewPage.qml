@@ -5,6 +5,10 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 
+// Lexical id scoping — lets the delegate reference signalList (outer id)
+// statically and is required for the required-property delegate pattern.
+pragma ComponentBehavior: Bound
+
 Page {
     id: root
     background: Rectangle { color: Theme.bg }
@@ -35,10 +39,20 @@ Page {
             clip: true
             model: QtTune.signalModel
 
+            // Roles consumed via required properties: static typing, no
+            // implicit model-chain lookups, updates driven by the model's
+            // dataChanged role filtering (ValueRole re-binds these).
             delegate: Rectangle {
+                id: signalDelegate
+                required property int index
+                required property string name
+                required property string unit
+                required property double value
+                required property bool subscribed
+
                 width: signalList.width
                 height: 48
-                color: index % 2 === 0 ? Theme.surface : Theme.bg
+                color: signalDelegate.index % 2 === 0 ? Theme.surface : Theme.bg
 
                 RowLayout {
                     anchors.fill: parent
@@ -46,19 +60,19 @@ Page {
                     anchors.rightMargin: 12
 
                     CheckBox {
-                        checked: model.subscribed
-                        onToggled: QtTune.signalModel.toggleSubscribed(index)
+                        checked: signalDelegate.subscribed
+                        onToggled: QtTune.signalModel.toggleSubscribed(signalDelegate.index)
                     }
                     Label {
-                        text: model.name
+                        text: signalDelegate.name
                         color: Theme.text
                         Layout.fillWidth: true
                     }
                     Label {
                         text: QtTune.connected
-                            ? "%1 %2".arg(model.value.toFixed(1)).arg(model.unit)
+                            ? "%1 %2".arg(signalDelegate.value.toFixed(1)).arg(signalDelegate.unit)
                             : qsTr("—")
-                        color: model.subscribed ? Theme.primary : Theme.textDim
+                        color: signalDelegate.subscribed ? Theme.primary : Theme.textDim
                         font.family: "Consolas"   // tabular-ish digits, no jitter
                     }
                 }
@@ -94,12 +108,12 @@ Page {
                 }
 
                 onPaint: {
-                    var ctx = getContext("2d")
+                    const ctx = getContext("2d")
                     ctx.reset()
                     ctx.fillStyle = Theme.surface
                     ctx.fillRect(0, 0, width, height)
 
-                    var series = QtTune.signalModel.chartData()
+                    const series = QtTune.signalModel.chartData()
                     if (!series || series.length === 0) {
                         ctx.fillStyle = Theme.textDim
                         ctx.font = "12px sans-serif"
@@ -110,16 +124,13 @@ Page {
 
                     // Shared TIME axis across series (actual timestamps),
                     // per-series VALUE scaling (kept independent deliberately).
-                    var tMin = Infinity, tMax = -Infinity
-                    for (var s = 0; s < series.length; ++s) {
-                        var sp = series[s].samples
+                    let tMin = Infinity, tMax = -Infinity
+                    for (let s = 0; s < series.length; ++s) {
+                        const sp = series[s].samples
                         if (sp.length >= 2) {
                             if (sp[0] < tMin) tMin = sp[0]
-                            // FIXED: flattened pairs end with a VALUE, not a
-                            // timestamp — the last timestamp is at length-2.
-                            // Bug made tMax = latest signal value, so traces
-                            // clipped off-canvas once elapsed-ms exceeded it,
-                            // briefly "recovering" on RPM rev-blip spikes.
+                            // flattened pairs end with a VALUE, not a
+                            // timestamp — the last timestamp is at length-2
                             if (sp[sp.length - 2] > tMax) tMax = sp[sp.length - 2]
                         }
                     }
@@ -129,36 +140,36 @@ Page {
                     ctx.strokeStyle = Theme.bg
                     ctx.lineWidth = 1
                     ctx.beginPath()
-                    for (var g = 1; g < 4; ++g) {
-                        var gy = height * g / 4
+                    for (let g = 1; g < 4; ++g) {
+                        const gy = height * g / 4
                         ctx.moveTo(0, gy)
                         ctx.lineTo(width, gy)
                     }
                     ctx.stroke()
 
-                    var topPad = 6, botPad = 6
-                    var colorIdx = 0
-                    for (var s = 0; s < series.length; ++s) {
-                        var sp = series[s].samples
+                    const topPad = 6, botPad = 6
+                    let colorIdx = 0
+                    for (let s = 0; s < series.length; ++s) {
+                        const sp = series[s].samples
                         if (sp.length < 2) continue
 
-                        var vMin = sp[1], vMax = sp[1]
-                        for (var i = 1; i < sp.length; i += 2) {
+                        let vMin = sp[1], vMax = sp[1]
+                        for (let i = 1; i < sp.length; i += 2) {
                             if (sp[i] < vMin) vMin = sp[i]
                             if (sp[i] > vMax) vMax = sp[i]
                         }
                         if (vMax <= vMin) { vMin -= 1; vMax += 1 }   // flat line guard
 
-                        var color = seriesColors[colorIdx % seriesColors.length]
+                        const color = seriesColors[colorIdx % seriesColors.length]
                         ++colorIdx
 
                         ctx.strokeStyle = color
                         ctx.lineWidth = 2
                         ctx.beginPath()
-                        for (var i = 0; i < sp.length; i += 2) {
-                            var x = (sp[i] - tMin) / (tMax - tMin) * (width - 1)
-                            var yNorm = (sp[i + 1] - vMin) / (vMax - vMin)
-                            var y = height - botPad - yNorm * (height - topPad - botPad)
+                        for (let i = 0; i < sp.length; i += 2) {
+                            const x = (sp[i] - tMin) / (tMax - tMin) * (width - 1)
+                            const yNorm = (sp[i + 1] - vMin) / (vMax - vMin)
+                            const y = height - botPad - yNorm * (height - topPad - botPad)
                             if (i === 0) ctx.moveTo(x, y)
                             else ctx.lineTo(x, y)
                         }

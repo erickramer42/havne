@@ -1,5 +1,8 @@
+// File/layer: app/qml/HomePage.qml | Qt6 Quick, UI layer
+// Testing: manual smoke — logo renders centered at 96px, bars animate
+// inside it, status dot visible, button lands on LiveView after connect
+
 import QtQuick
-import QtQuick.Controls
 import QtQuick.Layouts
 
 Rectangle {
@@ -11,7 +14,8 @@ Rectangle {
 
         // Logo block — animated equalizer mark
         Rectangle {
-            width: 96; height: 96; radius: Theme.radius
+            implicitWidth: 96; implicitHeight: 96   // layout-managed: implicit, not width/height
+            radius: Theme.radius
             color: Theme.surface
             Layout.alignment: Qt.AlignHCenter
 
@@ -107,7 +111,8 @@ Rectangle {
                 anchors.margins: 12
 
                 Rectangle {
-                    width: 10; height: 10; radius: 5
+                    implicitWidth: 10; implicitHeight: 10   // layout-managed
+                    radius: 5
                     color: QtTune.connected ? Theme.success : Theme.danger
                 }
                 Text {
@@ -132,12 +137,12 @@ Rectangle {
                 if (QtTune.connected) {
                     QtTune.disconnectSession()
                 } else {
-                    var err = QtTune.connectSession("mock://demo")
+                    const err = QtTune.connectSession("mock://demo")
                     if (err !== "") {
                         console.error("connect failed:", err)
                         return
                     }
-                    gotoPage(3)   // jump to Log
+                    gotoPage(2) // land on LiveView — subscribed values + strip chart
                 }
             }
         }

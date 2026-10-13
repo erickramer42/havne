@@ -1,6 +1,11 @@
+// File/layer: app/qml/Main.qml | Qt6 Quick, UI layer
+// Testing: manual smoke — navigation, sidebar↔TabBar at 720px, header bindings
+
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
+
+pragma ComponentBehavior: Bound
 
 ApplicationWindow {
     id: root
@@ -88,6 +93,7 @@ ApplicationWindow {
                     { label: qsTr("Settings"),  icon: "" }
                 ]
                 delegate: NavButton {
+                    id: navBtn
                     required property var modelData
                     required property int index
                     Layout.fillWidth: true
@@ -122,9 +128,10 @@ ApplicationWindow {
 
         // per-button styling since TabBar doesn't propagate backgrounds
         component ThemedTabButton: TabButton {
+            id: btn
             contentItem: Label {
-                text: parent.text
-                color: parent.checked ? Theme.primary : Theme.textDim
+                text: btn.text
+                color: btn.checked ? Theme.primary : Theme.textDim
                 horizontalAlignment: Text.AlignHCenter
                 verticalAlignment: Text.AlignVCenter
             }
