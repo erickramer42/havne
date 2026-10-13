@@ -26,11 +26,13 @@ kits are pending first on-device build.
 
 - **Windows:** VC++ 2019 Redistributable (auto-installed by MSVC workload)
 - **Linux/macOS:** Qt runtime libraries (provided by package manager or Qt installer)
+- **J2534 vendor driver (Windows):** optional — required only for live-vehicle
+  communication (BENCH tier, not yet verified); the J2534 transport ships with
+  a fake vendor DLL for fully offline HARNESS-tier testing
 
 ### Development (Optional)
 
 - **Python 3.13+** (64-bit) — for future trace analysis tooling
-- **J2534 driver** — optional, only needed for live vehicle testing in v0.3+
 
 Mobile builds additionally require Qt Creator with Android/iOS kits configured.
 
@@ -63,6 +65,10 @@ on a device/emulator.
 - Qt-free C++ core behind a stable C ABI — UI layers are replaceable skins
 - Live frame logging: mock transport streams synthetic CAN frames end-to-end
   — core worker thread → GUI-thread bridge → sort proxy → virtualized log table
+- J2534 transport (Windows): registry vendor discovery, `LoadLibraryEx` of
+  vendor function libraries, ISO 15765 connect, `ReadMsgs` polling loop
+  delivering frames through the same session callback path as the mock;
+  `j2534://` URI routing (`j2534://`, `j2534://<vendor>`, `j2534://<path.dll>`)
 - Signal decoding: POD signal definitions with scale/offset linear decode,
   LSB-first bitfield extraction, signed-type sign extension (core, unit-tested)
 - Live signal view: decoded values streamed to a subscription-checked list,
@@ -87,14 +93,15 @@ on a device/emulator.
 |---------|-----------|--------|
 | v0.1.0  | Skeleton: core ABI, Qt shell, responsive layout | ✅ Released |
 | v0.2.0  | Callback API, mock transport, bridge marshaling, live LogPage | ✅ Released |
-| v0.3.0  | Signals layer, coalesced LiveView, J2534 transport, live vehicle read/logging | 🚧 Phases 1–2 done, Phase 3 (J2534) next |
+| v0.3.0  | Signals layer, coalesced LiveView, J2534 transport, live vehicle read/logging | 🚧 Phases 1–2 done; Phase 3 HARNESS-complete (fake-DLL verified), live-vehicle + x86 surrogate host pending |
 | v0.4.0  | Security access discovery, flash capability | Planned |
 | v0.5.0+ | Multi-manufacturer plugins | Future |
 
-Currently 47 automated tests (18 core, 15 signals, 14 bridge), all green
-locally on Windows/MSVC 2022 and on CI (3-platform matrix). Per-case ctest
-granularity via `gtest_discover_tests()`. Mock frames and decoded signal
-view only — no real vehicle communication yet. See [STATUS.md](STATUS.md)
+Currently 58 automated tests (18 core, 15 signals, 14 bridge, 11 J2534),
+all green locally on Windows/MSVC 2022 and on CI (3-platform matrix).
+Per-case ctest granularity via `gtest_discover_tests()`. The J2534 stack
+is verified end-to-end against a fake vendor DLL (HARNESS tier) — no real
+vehicle or vendor hardware yet. See [STATUS.md](STATUS.md)
 for verified test matrix and engineering notes.
 
 Flash capabilities require discovering each manufacturer's secure gateway authentication. Vehicle communication research is tracked separately and outside this repo for now.
@@ -114,6 +121,7 @@ Qt is not bundled in this repository; see qt.io for sources and license text.
 MIT — see [LICENSE](LICENSE) file.
 
 ⚠️ Early infrastructure. Core callback API, mock transport, signal
-decoding, and coalesced live view with strip chart implemented and
-unit-tested. No real vehicle communication yet.
+decoding, coalesced live view with strip chart, and a HARNESS-verified
+J2534 transport (fake vendor DLL only) implemented and unit-tested.
+No real vehicle communication verified yet.
 Do not connect to a vehicle expecting functionality.

@@ -1,7 +1,7 @@
 # QtTune — Project Status
 
-**Date:** October 10, 2026
-**Version:** v0.2.0 (released, tagged); v0.3.0 Phases 1–2 complete (LiveView + strip chart done), Phase 3 (J2534 loader) next
+**Date:** October 13, 2026
+**Version:** v0.2.0 (released, tagged); v0.3.0 Phases 1–2 complete, Phase 3 (J2534) HARNESS-complete — live-vehicle + x86 surrogate host pending
 **Repository:** https://github.com/erickramer42/qttune
 **CI:** [![CI](https://github.com/erickramer42/qttune/actions/workflows/ci.yml/badge.svg)](https://github.com/erickramer42/qttune/actions/workflows/ci.yml)
 
@@ -26,9 +26,11 @@ behind a stable C ABI, with UI layers as replaceable skins around it.**
 |  * Session lifecycle       |   ZERO Qt dependencies (CI-enforced)
 |  * Version/status reporting|
 |  * Frame callbacks (done)  |
-|  * Transports (mock done)  |
+|  * Transports:             |   pluggable vtable ops — mock (all
+|    mock (done), j2534      |   platforms) + j2534 (Win32) attach via
+|    (Win32, HARNESS) (done) |   URI routing in qttune_session_create
 |  * Signals: decode + mock  |   signal_sets.cpp, SimState emission
-|  *   set + emission (done) |
+|    set + emission (done)   |
 |  * Frame model (qtab)      |
 +----------------------------+
 
@@ -46,6 +48,12 @@ Rules the project is built around:
 ## Data Path
 
     [MockTransport worker thread]         std::thread, 50ms tick
+    — or —
+    [J2534 transport worker thread]       std::thread, 20ms poll,
+                                          ReadMsgs → qttune_frame_t
+    (Win32 only; ISO 15765, j2534:// URI) PASSTHRU_MSG layout shared
+                                          with the fake DLL via
+                                          j2534_ptypes.h
               │  qttune_frame_t (stack-owned)
               ▼
     core: snapshot-dispatch callbacks    (register/unregister safe mid-dispatch)
@@ -82,7 +90,10 @@ Contract highlights:
   connect). Honest resolution given the staging buffer merges
   latest-per-ID across the window; the `timestampMs` parameter on
   `updateValues` is the seam where per-sample timestamps land when
-  decode moves worker-side (J2534).
+  decode moves worker-side.
+- J2534 teardown ordering is a hard contract: worker joined BEFORE
+  `PassThruDisconnect`/`FreeLibrary` — the worker calls ReadMsgs through
+  function pointers that dangle the instant the module unmaps.
 
 ## Signals Layer (landed v0.3.0 Phases 1 / 1b)
 
@@ -151,6 +162,60 @@ POD signal metadata + linear decode: `display = raw * scale + offset`.
   all signals per frame regardless of subscription; filter decode on
   `isSubscribed(id)` when signal count grows.
 
+## J2534 Transport (landed v0.3.0 Phase 3, HARNESS tier, 2026-10-13)
+
+Transport stack for real Pass-Thru devices (Windows). **Verified against
+a fake vendor DLL only — no vendor hardware or live vehicle has been
+connected.** Landmarks, in commit order:
+
+- **`844f44e` — transport vtable refactor:** `qttune_transport_ops_t`
+  ({start, detach}); session routes through ops only. Mock migrated with
+  zero test changes (behavior-preserving).
+- **`1752fc9` — registry discovery:** enumerate
+  `HKLM\SOFTWARE\Pass-Thru Support.04.04` subkeys in BOTH WOW64 views
+  (KEY_WOW64_64KEY / _32KEY flags, not hardcoded WOW6432Node — works
+  from any process bitness); read `FUNCTIONLIBRARY` per vendor; dedupe
+  across views (dll_path + vendor name). C-ABI array out, NULL-safe free.
+- **`9b33aeb` / `6b58c3a` / `0fa4883` — fake DLL + status code + loader:**
+  `tests/fake_j2534.cpp` implements the seven mandatory PassThru exports
+  with SAE J2534-1 signatures (`__stdcall`, `long` status return,
+  32-bit `unsigned long` IDs) plus three test hooks. Loader
+  (`qttune_j2534_open`) does `LoadLibraryExA(..., LOAD_WITH_ALTERED_SEARCH_PATH)`
+  → resolve all 7 exports → `PassThruOpen`, with single-site failure
+  unwinding (no leaked HMODULE on any failure path). `QT_ERR_LOAD_FAILED`
+  added append-only to the status enum.
+- **`SESSION-INTEGRATED TRANSPORT (Commit C):** `j2534_transport.cpp`
+  plugs into the session vtable. Handle opens at ATTACH (load failures
+  surface at `qttune_session_create`, where the caller can pick another
+  URI); `PassThruConnect` (ISO 15765, 500k) happens at START;
+  `ReadMsgs` polling on a worker thread (20ms poll interval) dispatches
+  frames through the identical callback path as the mock.
+- **URI grammar:** `j2534://` (first discovered device),
+  `j2534://<vendor-name>` (case-insensitive discovered match),
+  `j2534://<path ending .dll or containing \\ or />` (direct load —
+  the test/dev route to the fake). Misses return `QT_ERR_NO_TRANSPORT`,
+  preserving `test_core`'s `UnknownTransportUriRejected`.
+- **Shared internal contract:** `core/include/qttune/j2534_ptypes.h`
+  defines `PASSTHRU_MSG` consumed by BOTH the loader and the fake DLL —
+  layout drift between them is structurally impossible. ⚠️ BENCH-tier
+  caveat: the field order is from training knowledge, not from a vendor
+  header; diff against a real vendor's `j2534.h` before first live use.
+  Nothing in the HARNESS tier can catch that divergence — the fake
+  accepts whatever the header says.
+- **Deterministic fake:** `InjectFrame` enqueues into a mutex-guarded
+  16-slot FIFO (test thread races the polling worker safely);
+  `ReadMsgs` dequeues one message per call; `GetCurrentHandle` observes
+  open/close state. Stream tests assert EXACT counts and payload
+  fidelity — a fabricated frame or a dropped injection fails the suite.
+- Teardown ordering (see Data Path contract): join worker → disconnect
+  channel → `PassThruClose` → `FreeLibrary`.
+
+**Phase 3 remains OPEN. Outstanding:** x86-surrogate host for 32-bit-only
+vendor DLLs (J2534-1 mandates only that they be in-proc; many ship x86
+only and can't load into the x64 app), `?baud=`/`?flags=` URI parameters,
+SettingsPage device picker fed by `qttune_j2534_discover_devices`, and the
+BENCH-tier live-DLL verification round.
+
 ## Backpressure (corrected 2026-10-07)
 
 Original v0.2.0 design gated delivery on `m_currentFrameCount >= 10k`
@@ -189,8 +254,12 @@ handles:
 | Capability | Verified by |
 |---|---|
 | Core builds standalone with zero Qt deps | `core-and-tests` CI job (Ubuntu, Qt absent) |
-| 47 tests pass: 18 core + 15 signals + 14 bridge | GTest suites; 47/47 locally on Windows/MSVC 2022, green on 3-platform CI matrix |
+| 58 tests pass: 18 core + 15 signals + 14 bridge + 11 J2534 | GTest suites; 58/58 locally on Windows/MSVC 2022, green on 3-platform CI matrix |
 | Mock transport delivers physically plausible, signal-set-decodable frames | `MockFramesDecodeAgainstMockSignalSet`: real worker frames decoded under every mock definition, physical ranges asserted |
+| J2534 registry discovery finds real installed vendors, dedupes WOW64 views | `test_j2534_discovery` suite on live machine registry |
+| J2534 loader: LoadLibraryEx → 7-export resolution → PassThruOpen, clean unwind on missing DLL/exports | `test_j2534_load` suite (incl. proven-unmapped assertion after failed load) |
+| J2534 end-to-end: `j2534://<path.dll>` session → connect → worker poll → InjectFrame → callback, exact counts and payload fidelity | `test_j2534_stream` suite (3 tests; FIFO order asserted) |
+| Vendor API call ordering at teardown (PassThruClose before FreeLibrary; worker joined before any of it) | `FakeFixture.OpenCloseCycleHitsVendorApi` state transitions 1→0→1 |
 | Encoder/decoder layout contract | Round-trip integration test catches byte-order/scale inversions invisible to structural validation |
 | Bridge marshal: worker → GUI thread | `FramesMarshalFromWorkerToGuiThread` |
 | Coalesced signal updates at 10 Hz regardless of frame rate | `SignalBatchesAreCoalesced` (bounded ranges, not exact counts); manual: header `batch:` climbs ~10/s while `frames:` climbs ~20/s |
@@ -201,8 +270,12 @@ handles:
 | LiveView page: subscribed values + scrolling strip chart traces, unsubscribe/resubscribe without history loss, resize repaint | Manual smoke: 20+ s run through 120-sample ring wrap, rev-blip spikes render as shape, no clipping/blanking |
 | Sort toggle, clear, mid-stream disconnect, lifecycle idempotency | Existing 6 bridge behaviors + tests |
 | Full app builds Windows (MSVC 2022) + macOS (AppleClang, Qt 6.12.0) | CI jobs |
-| Responsive layout (sidebar ↔ TabBar at 720px) incl. new Live entry | Local run |
-| Version banner `core 0.2.0` from generated version.h | Local run; single source of truth in root CMake `project()` |
+| Responsive layout (sidebar ↔ TabBar at 720px) incl. Live entry | Local run |
+| Version banner from generated version.h | Local run; single source of truth in root CMake `project()` |
+
+**Not verified (explicit gaps):** any real vendor DLL, any live vehicle,
+32-bit-only vendor DLL loading, and the PASSTHRU_MSG field order against
+a vendor header (see J2534 section caveat).
 
 ## In Progress
 
@@ -212,13 +285,15 @@ v0.3.0 phases:
       bit extraction, sign extension, validator
 - [x] **Phase 1b — Mock signal emission:** tick-driven simulation;
       round-trip integration test on real worker-thread frames
-- [x] **Phase 2 — Coalesced LiveView + strip chart:** 100ms batch window,
-      SignalListModel, subscription checkboxes, LiveView value table,
-      in-flight backpressure fix, notify/batch metrics, per-signal
-      120-sample history ring, QML Canvas strip chart with shared time
-      axis / per-series value scaling. CLOSED 2026-10-10.
-- [ ] **Phase 3 — J2534 hybrid loader:** registry discovery (dual WOW64
-      views), in-process x64 load, surrogate host for x86-only DLLs
+- [x] **Phase 2 — Coalesced LiveView + strip chart:** CLOSED 2026-10-10.
+- [x] **Phase 3 — J2534 (HARNESS tier):** vtable refactor, registry
+      discovery, loader, session-integrated transport, URI routing,
+      deterministic fake + stream tests. CLOSED 2026-10-13 at the
+      fake-DLL tier.
+- [ ] **Phase 3 remainder:** x86 surrogate host for 32-bit-only vendor
+      DLLs; BENCH-tier live-DLL verification (incl. PASSTHRU_MSG header
+      diff); URI parameters (`?baud=`, `?flags=`); SettingsPage device
+      picker.
 - [ ] **Phase 4 — Record-replay transport:** fixture capture +
       deterministic playback through the same frame API
 
@@ -252,8 +327,15 @@ v0.3.0 phases:
 10. **Strip-chart x-axis resolution is one coalesce window (~100 ms),**
    not per-frame — batch-stamped by design (staging merge destroys
    per-frame timestamps anyway); resolved when worker-side decode lands
-   (J2534, Phase 3+) and per-sample timestamps flow through the
-   `updateValues` seam.
+   and per-sample timestamps flow through the `updateValues` seam.
+11. **J2534 read path collapses all nonzero vendor statuses to
+   "no frame."** Real devices signal ERR_TIMEOUT vs. hard errors
+   distinctly; v0.3.0's uniform treatment masks device faults as
+   silence. Splitting them is BENCH-tier work (needs a device that
+   produces real error codes).
+12. **J2534 timestamps pass through untranslated** (vendor-defined
+   units → `timestamp_us` unexamined). Normalization deferred until a
+   real device reveals what vendors actually emit.
 
 ## Roadmap
 
@@ -261,7 +343,7 @@ v0.3.0 phases:
 |-------|-------|--------|
 | v0.1.0 | Skeleton: core ABI, Qt shell, responsive layout | ✅ Released |
 | v0.2.0 | Callback API, mock transport, CI + tests | ✅ Released (tagged) |
-| v0.3.0 | Signals layer, coalesced LiveView, J2534 transport, live vehicle read/logging | 🚧 Phases 1–2 done; Phase 3 (J2534) next |
+| v0.3.0 | Signals layer, coalesced LiveView, J2534 transport, live vehicle read/logging | 🚧 Phases 1–3 HARNESS-complete; Phase 3 remainder (surrogate host, live verify) + vehicle work pending |
 | v0.4.0 | Security access discovery, flash capability | Planned |
 | v0.5.0+ | Multi-manufacturer plugin modules | Planned |
 
@@ -341,6 +423,44 @@ repaint needs in one call, avoiding role-number gymnastics from JS
 paint code. (4) Timestamp injection seams make ring tests exact
 arithmetic instead of timing tolerance — same philosophy as assertion
 lesson 2026-10-05 (3), applied to test fixtures.
+
+**2026-10-13 — J2534 round (Phase 3, HARNESS tier):** seven lessons,
+several of them paid for in build-break debugging. (1) **An
+anonymous-namespace definition does not complete a global forward
+declaration** — putting `struct qttune_j2534_handle {}` inside
+`namespace {}` creates a SECOND, internal-linkage type; the header's
+opaque typedef keeps targeting the never-completed global tag, and
+every member access dies with C2027. Everything the ABI references by
+name lives at file scope, ordered before first use. (2) **Spec-shaped
+signatures are load-bearing even against your own fake:** the fake's
+`PassThruOpen` initially returned 1 as a "handle" where the real
+J2534-1 contract returns STATUS_NOERROR with the device ID in the
+out-parameter. The spec-shaped loader caught it as a clean
+`QT_ERR_LOAD_FAILED` — status code 7 — instead of a stack mismatch;
+had the fake's shape leaked into the loader's typedefs, the bug would
+have surfaced only against real hardware. (3) **Calling-convention
+mismatches are silent on x64** — `__stdcall` folds into the default
+convention there, so an int-returning hook called through a
+void(int*)-typed pointer doesn't crash, it just quietly writes nothing
+(left the test's sentinel at −1). Function-pointer typedefs must match
+the artifact's actual declaration, verified against source, not memory
+of what "should" be there. (4) **CMake literal `$(Configuration)` vs
+genex `$<CONFIG>`:** the literal survives into the .vcxproj where
+MSBuild expands it, AND CMake's multi-config behavior auto-appends a
+per-config subdir to plain RUNTIME_OUTPUT_DIRECTORY strings — net
+result `build/lib/Release/Release/`. Generator expressions do neither
+trick; use them for any per-config output path. (5) **Identical COMDAT
+folding is a thing you'll meet in dumpbin:** two exports sharing an RVA
+is MSVC merging byte-identical function bodies, not corruption.
+(6) **Baked absolute paths via `$<TARGET_FILE:...>` beat any
+cwd/search-order scheme for test DLLs** — the test never depends on
+where ctest launches it from. Side effect: the IDE's IntelliSense
+doesn't see the compile definition (cosmetic squiggle, documented in
+.vscode). (7) **Exact-count assertions against a deterministic fake are
+the harness version of range assertions against physics**: `EXPECT_EQ(count, 3)`
+means a fabricated fourth frame fails the suite, the same way an
+absurd-RPM decode does — a fake that emits anything you didn't inject
+is broken, and the test should say so.
 
 ---
 
