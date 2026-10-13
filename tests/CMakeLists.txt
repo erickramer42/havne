@@ -85,3 +85,24 @@ if(WIN32)
     )
     gtest_discover_tests(test_j2534_discovery)
 endif()
+
+# Fake J2534 DLL target (Windows only, HARNESS tier)
+if(WIN32)
+    add_library(fake_j2534 SHARED
+        fake_j2534.cpp
+    )
+
+    target_compile_definitions(fake_j2534 PRIVATE
+        TEST_HOOKS_ENABLED
+    )
+
+    target_include_directories(fake_j2534 PRIVATE
+        ${CMAKE_SOURCE_DIR}/core/include
+    )
+
+    set_target_properties(fake_j2534 PROPERTIES
+        PREFIX ""
+        OUTPUT_NAME "fake_j2534"
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/$<CONFIG>"
+    )
+endif()
