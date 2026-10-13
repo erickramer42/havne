@@ -1,3 +1,6 @@
+// File/layer: core/src/mock_transport.cpp | C++17, Qt-free, CI-validated headless build
+// Testing: All core tests must pass UNCHANGED after refactor
+
 #include "qttune/core.h"
 #include "qttune/internal.h"
 #include "session.h"
@@ -102,7 +105,7 @@ void encode_payload(const SimState& sim, uint8_t out[8])
 struct qttune_mock_transport {
     std::atomic<bool> stop_requested{false};
     std::thread worker;
-    qttune_session_t* session = nullptr;
+    qttune_session_t* session = nullptr;  // Need this for dispatch
     uint32_t interval_ms = DEFAULT_FRAME_INTERVAL_MS;
     uint64_t frame_counter = 0;
     SimState sim;   /* owned by worker — only touched on worker thread */
@@ -110,6 +113,7 @@ struct qttune_mock_transport {
 
 namespace {
 
+/* Worker thread entrypoint */
 void mock_worker(qttune_mock_transport* t)
 {
     const auto interval = std::chrono::milliseconds(t->interval_ms);
@@ -134,31 +138,11 @@ void mock_worker(qttune_mock_transport* t)
     }
 }
 
-} // namespace
+/* ---- ops implementations: static, dispatched via the vtable ---- */
 
-extern "C" {
-
-qttune_status_t qttune_mock_transport_attach(qttune_session_t* session,
-                                             const char* /*uri*/)
+qttune_status_t mock_start(qttune_session_t* session, void* impl)
 {
-    /* uri params (?interval=...) are a later addition */
-    if (session->transport != nullptr) {
-        return QT_OK; /* idempotent */
-    }
-    try {
-        session->transport = new qttune_mock_transport();
-    } catch (...) {
-        return QT_ERR_OUT_OF_MEMORY;
-    }
-    session->transport->session = session;
-    /* NOTE: worker thread NOT started here — explicit start required.
-     * Keeps registration-only sessions single-threaded for tests. */
-    return QT_OK;
-}
-
-qttune_status_t qttune_mock_transport_start(qttune_session_t* session)
-{
-    qttune_mock_transport* t = session->transport;
+    qttune_mock_transport* t = static_cast<qttune_mock_transport*>(impl);
     if (t == nullptr) {
         return QT_ERR_NO_TRANSPORT;
     }
@@ -173,12 +157,15 @@ qttune_status_t qttune_mock_transport_start(qttune_session_t* session)
     }
 }
 
-void qttune_mock_transport_detach(qttune_session_t* session)
+void mock_detach(qttune_session_t* session, void* impl)
 {
-    qttune_mock_transport* t = session->transport;
+    qttune_mock_transport* t = static_cast<qttune_mock_transport*>(impl);
     if (t == nullptr) {
         return;
     }
+
+    /* The transport wrapper holds `impl`; we must free both. */
+    qttune_transport_t* wrapper = session->transport;
     session->transport = nullptr;
 
     t->stop_requested.store(true);
@@ -186,6 +173,43 @@ void qttune_mock_transport_detach(qttune_session_t* session)
         t->worker.join();
     }
     delete t;
+    delete wrapper;
 }
+
+/* Static ops table — one per transport implementation, immutable. */
+const qttune_transport_ops_t kMockTransportOps = {
+    mock_start,
+    mock_detach
+};
+
+} // namespace
+
+extern "C" {
+
+qttune_status_t qttune_mock_transport_attach(qttune_session_t* session,
+                                             const char* /*uri*/)
+{
+    /* uri params (?interval=...) are a later addition */
+    if (session->transport != nullptr) {
+        return QT_OK; /* idempotent */
+    }
+    try {
+        qttune_mock_transport* impl = new qttune_mock_transport();
+        try {
+            session->transport = new qttune_transport_t{&kMockTransportOps, impl};
+        } catch (...) {
+            delete impl;   /* wrapper alloc failed — no leak */
+            return QT_ERR_OUT_OF_MEMORY;
+        }
+        impl->session = session;  /* for callback dispatch */
+    } catch (...) {
+        return QT_ERR_OUT_OF_MEMORY;
+    }
+    /* NOTE: worker thread NOT started here — explicit start required.
+     * Keeps registration-only sessions single-threaded for tests. */
+    return QT_OK;
+}
+
+/* ---- Legacy stubs removed: session now routes through ops only. ---- */
 
 } // extern "C"

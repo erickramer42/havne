@@ -1,6 +1,6 @@
 // File/layer: core/src/core.cpp | C++17, Qt-free, CI-validated headless build
-// Testing: Unit test required for registration/unregister/idempotence
-//          See tests/test_core.cpp MockTransport* tests
+// Testing: All 18 core tests must pass UNCHANGED — this is a behavior-
+//          preserving refactor; any test modification here is a red flag
 
 #include "qttune/version.h"
 #include "qttune/core.h"
@@ -44,8 +44,8 @@ const char* qttune_status_string(qttune_status_t status)
         case QT_ERR_NULL_ARGUMENT:   return "null argument";
         case QT_ERR_NOT_IMPLEMENTED: return "not implemented yet";
         case QT_ERR_NO_TRANSPORT:    return "no transport available";
-        case QT_ERR_OUT_OF_MEMORY:   return "out of memory";
-        case QT_ERR_SESSION_CLOSED:  return "session already closed";
+        case QT_ERR_OUT_OF_MEMORY:  return "out of memory";
+        case QT_ERR_SESSION_CLOSED: return "session already closed";
         case QT_ERR_ALREADY_REGISTERED: return "already registered";
         default:                     return "unknown status";
     }
@@ -60,7 +60,8 @@ qttune_status_t qttune_session_create(
     }
 
     if (strncmp(transport_uri, "mock://", 7) != 0) {
-        /* Only mock:// is routable in v0.2. j2534:// and friends: v0.3 */
+        /* URI routing table grows here in Phase 3 (j2534:// etc.);
+         * for now mock:// remains the only routable scheme. */
         return QT_ERR_NO_TRANSPORT;
     }
 
@@ -91,7 +92,7 @@ qttune_status_t qttune_session_start(qttune_session_t* session)
     if (session->transport == nullptr) {
         return QT_ERR_NO_TRANSPORT;
     }
-    return qttune_mock_transport_start(session);
+    return session->transport->ops->start(session, session->transport->impl);
 }
 
 qttune_status_t qttune_session_close(qttune_session_t* session)
@@ -105,7 +106,12 @@ qttune_status_t qttune_session_close(qttune_session_t* session)
         return QT_ERR_SESSION_CLOSED;
     }
 
-    qttune_mock_transport_detach(session);
+    if (session->transport != nullptr) {
+        session->transport->ops->detach(session, session->transport->impl);
+        /* detach() frees the transport wrapper; NULL for double-close
+         * defense even though the closed flag already gates it. */
+        session->transport = nullptr;
+    }
 
     {
         std::lock_guard<std::mutex> lock(session->callback_mutex);
