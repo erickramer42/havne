@@ -47,6 +47,7 @@ const char* qttune_status_string(qttune_status_t status)
         case QT_ERR_OUT_OF_MEMORY:  return "out of memory";
         case QT_ERR_SESSION_CLOSED: return "session already closed";
         case QT_ERR_ALREADY_REGISTERED: return "already registered";
+        case QT_ERR_LOAD_FAILED:    return "failed to load transport library";
         default:                     return "unknown status";
     }
 }

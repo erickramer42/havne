@@ -38,7 +38,8 @@ typedef enum {
     QT_ERR_NO_TRANSPORT = 3,
     QT_ERR_OUT_OF_MEMORY = 4,
     QT_ERR_SESSION_CLOSED = 5,
-    QT_ERR_ALREADY_REGISTERED = 6   /* Kept for backward compat if needed */
+    QT_ERR_ALREADY_REGISTERED = 6,  /* Kept for backward compat if needed */
+    QT_ERR_LOAD_FAILED = 7          /* New: DLL load/export resolution failed */
 } qttune_status_t;
 
 /* Lifecycle */

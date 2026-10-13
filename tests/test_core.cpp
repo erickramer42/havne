@@ -46,6 +46,7 @@ TEST(CoreTest, StatusStringValidValues) {
     EXPECT_STREQ(qttune_status_string(QT_ERR_OUT_OF_MEMORY), "out of memory");
     EXPECT_STREQ(qttune_status_string(QT_ERR_SESSION_CLOSED), "session already closed");
     EXPECT_STREQ(qttune_status_string(QT_ERR_ALREADY_REGISTERED), "already registered");
+    EXPECT_STREQ(qttune_status_string(QT_ERR_LOAD_FAILED), "failed to load transport library");
     
     /* Explicit cast required by MSVC for enum conversion */
     EXPECT_STRNE(qttune_status_string(static_cast<qttune_status_t>(999)), nullptr);
