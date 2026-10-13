@@ -123,3 +123,19 @@ if(WIN32)
     add_dependencies(test_j2534_load fake_j2534)
     gtest_discover_tests(test_j2534_load)
 endif()
+
+# J2534 end-to-end stream tests (Win32-only, HARNESS tier)
+if(WIN32)
+    add_executable(test_j2534_stream
+        ../tests/test_j2534_stream.cpp
+    )
+    target_link_libraries(test_j2534_stream PRIVATE
+        qttune-core
+        GTest::gtest_main
+    )
+    target_compile_definitions(test_j2534_stream PRIVATE
+        FAKE_J2534_DLL_PATH="$<TARGET_FILE:fake_j2534>"
+    )
+    add_dependencies(test_j2534_stream fake_j2534)
+    gtest_discover_tests(test_j2534_stream)
+endif()

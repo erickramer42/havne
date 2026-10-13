@@ -1,72 +1,54 @@
 // File/layer: tests/fake_j2534.cpp | Fake J2534 vendor DLL, HARNESS tier
-// Testing: Fake DLL artifact — unit-tested via LoadLibraryEx in j2534_load tests
+// Testing: exercised via LoadLibraryEx by test_j2534_load/_stream;
+//          PASSTHRU_MSG layout shared with core via j2534_ptypes.h
+// NOTE: InjectFrame/ReadMsgs share a mutex-guarded FIFO — injections
+//      from the test thread race safely against the polling worker.
 
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
-#include <cstdint>
+
+#include "qttune/j2534_ptypes.h"
+
 #include <cstring>
+#include <mutex>
 
-/* =================================================================
- * SAE J2534-1 v4.04 Type Definitions (minimal subset for fake impl)
- * Uses SDK types where available, avoids collisions.
- * ================================================================= */
+#define FAKE_QUEUE_DEPTH 16
+#define STATUS_NOERROR QTTUNE_PT_STATUS_NOERROR
+#define STATUS_FAILED  QTTUNE_PT_STATUS_FAILED
 
-/* Protocol constants (subset, enough for canned response) */
-#define PASSTHRU_ISO15765   0x00000100
-#define PASSTHRU_ISO9141    0x00000020
-#define PASSTHRU_J1850VPW   0x00000010
-#define PASSTHRU_J1850SPWM  0x00000040
-#define PASSTHRU_CAN        0x00000080
+namespace fake_j2534 {
 
-/* Message structure (matches real J2534 spec layout) */
-struct PASSTHRU_MSG {
-    DWORD RxStatus;
-    DWORD TxFlags;
-    DWORD timestamp;
-    DWORD statusBlock;
-    DWORD extraDataIndex;
-    unsigned char Data[256];
-    unsigned char ExtraData[1024];
-    DWORD Size;
-    DWORD NetworkID;
+struct FrameSlot {
+    unsigned char data[64];
+    unsigned long size;
+    unsigned long timestamp_us;
 };
 
-/* Error codes (subset) */
-#define STATUS_NOERROR          0
-#define STATUS_NOTUSED          1
-#define STATUS_FAILED           0xC0000000L
-#define STATUS_BUFFER_OVERFLOW  0xC0000001L
-#define STATUS_NOT_SUPPORTED    0xC0000002L
+std::mutex g_lock;
+int g_handle = 0;                       /* 1 between Open and Close */
+FrameSlot g_queue[FAKE_QUEUE_DEPTH];
+unsigned long g_queue_len = 0;
 
-/* =================================================================
- * Global state (test hook access)
- * ================================================================= */
-namespace fake_j2534 {
-    static int g_handle = 0;      // Track if PassThruOpen was called
-    static unsigned char g_buffer[256];  // Buffer for injection
-    static size_t g_buffer_size = 0;
-}
-
-/* =================================================================
- * J2534 API Implementation (minimal for testing)
- * ================================================================= */
+} // namespace fake_j2534
 
 extern "C" __declspec(dllexport)
 long __stdcall PassThruOpen(void* pName, unsigned long* pDeviceID)
 {
-    (void)pName;   /* real DLLs receive a device serial/name; fake ignores */
+    (void)pName;
     if (pDeviceID == nullptr) {
         return STATUS_FAILED;
     }
+    std::lock_guard<std::mutex> lk(fake_j2534::g_lock);
     fake_j2534::g_handle = 1;
-    *pDeviceID = 1;           /* non-zero device ID = one device present */
-    return STATUS_NOERROR;    /* spec: status via return, ID via out-param */
+    *pDeviceID = 1;
+    return STATUS_NOERROR;
 }
 
 extern "C" __declspec(dllexport)
 long __stdcall PassThruClose(unsigned long DeviceID)
 {
     (void)DeviceID;
+    std::lock_guard<std::mutex> lk(fake_j2534::g_lock);
     fake_j2534::g_handle = 0;
     return STATUS_NOERROR;
 }
@@ -79,67 +61,77 @@ long __stdcall PassThruConnect(unsigned long DeviceID,
                                unsigned long* pChannelID)
 {
     (void)DeviceID; (void)ProtocolID; (void)Flags; (void)BaudRate;
+    std::lock_guard<std::mutex> lk(fake_j2534::g_lock);
     if (fake_j2534::g_handle != 1 || pChannelID == nullptr) {
         return STATUS_FAILED;
     }
-    *pChannelID = 1;          /* fixed channel ID */
+    *pChannelID = 1;
     return STATUS_NOERROR;
 }
 
 extern "C" __declspec(dllexport)
-long __stdcall PassThruDisconnect(long hChannel)
+long __stdcall PassThruDisconnect(unsigned long ChannelID)
 {
-    (void)hChannel;
-    /* Disconnect is idempotent, doesn't affect global state */
+    (void)ChannelID;
     return STATUS_NOERROR;
 }
 
 extern "C" __declspec(dllexport)
-long __stdcall PassThruReadMsgs(long hChannel,
+long __stdcall PassThruReadMsgs(unsigned long ChannelID,
                                 PASSTHRU_MSG* pMsg,
                                 unsigned long* pNumMsgs,
                                 unsigned long Timeout)
 {
-    (void)hChannel;
-    (void)pNumMsgs;
-    (void)Timeout;
-    
-    /* Default: timeout without data (fake device with no traffic) */
-    pMsg->RxStatus = 0;
-    pMsg->Size = 0;
-    pMsg->timestamp = 0;
-    
+    (void)ChannelID; (void)Timeout;
+    if (pMsg == nullptr || pNumMsgs == nullptr) {
+        return STATUS_FAILED;
+    }
+
+    std::lock_guard<std::mutex> lk(fake_j2534::g_lock);
+    if (fake_j2534::g_queue_len == 0) {
+        *pNumMsgs = 0;   /* quiet bus — idle, not an error */
+        return STATUS_NOERROR;
+    }
+
+    const fake_j2534::FrameSlot& slot = fake_j2534::g_queue[0];
+    memcpy(pMsg->Data, slot.data, slot.size);
+    pMsg->DataSize      = slot.size;
+    pMsg->ProtocolID    = QTTUNE_PT_PROTOCOL_ISO15765;
+    pMsg->RxStatus      = 0;
+    pMsg->Timestamp     = slot.timestamp_us;
+    pMsg->ExtraDataIndex = 0;
+
+    /* FIFO shift — depth 16 makes O(n) irrelevant */
+    for (unsigned long i = 1; i < fake_j2534::g_queue_len; ++i) {
+        fake_j2534::g_queue[i - 1] = fake_j2534::g_queue[i];
+    }
+    fake_j2534::g_queue_len--;
+
+    *pNumMsgs = 1;
     return STATUS_NOERROR;
 }
 
 extern "C" __declspec(dllexport)
-long __stdcall PassThruWriteMsgs(long hChannel,
+long __stdcall PassThruWriteMsgs(unsigned long ChannelID,
                                  PASSTHRU_MSG* pMsg,
                                  unsigned long* pNumMsgs,
                                  unsigned long Timeout)
 {
-    (void)hChannel;
-    (void)pNumMsgs;
-    (void)Timeout;
-    return STATUS_NOERROR;  // Echo-back mode: accept and discard
+    (void)ChannelID; (void)pMsg; (void)pNumMsgs; (void)Timeout;
+    return STATUS_NOERROR;   /* echo-accept: consume and discard */
 }
 
 extern "C" __declspec(dllexport)
-long __stdcall PassThruIoCtl(long hChannel,
+long __stdcall PassThruIoCtl(unsigned long ChannelID,
                              long IoControlID,
                              void* pInput,
                              void* pOutput)
 {
-    (void)hChannel;
-    (void)IoControlID;
-    (void)pInput;
-    (void)pOutput;
-    return STATUS_NOT_SUPPORTED;
+    (void)ChannelID; (void)IoControlID; (void)pInput; (void)pOutput;
+    return STATUS_FAILED;   /* not supported by the fake */
 }
 
-/* =================================================================
- * Test Hook (exported only in DEBUG/Test builds)
- * ================================================================= */
+/* ================= Test hooks (TEST_HOOKS_ENABLED only) ============== */
 #if defined(TEST_HOOKS_ENABLED) || defined(_DEBUG)
 
 extern "C" __declspec(dllexport)
@@ -148,29 +140,42 @@ void InjectFrame(const unsigned char* data, unsigned long size,
                  unsigned long is_extended,
                  unsigned long channel_id)
 {
-    if (size > sizeof(fake_j2534::g_buffer)) {
+    (void)is_extended; (void)channel_id;
+    if (data == nullptr || size == 0 || size > 64) {
         return;
     }
-    
-    /* Copy frame data to internal buffer */
-    memcpy(fake_j2534::g_buffer, data, size);
-    fake_j2534::g_buffer_size = size;
-    
-    /* Mark as ready for next ReadMsgs call */
-    /* Note: in a full impl, this would queue the frame for async delivery */
-    /* For fake DLL, the next ReadMsgs polls this buffer */
+
+    std::lock_guard<std::mutex> lk(fake_j2534::g_lock);
+    if (fake_j2534::g_queue_len >= FAKE_QUEUE_DEPTH) {
+        return;   /* queue full — documented drop, keeps tests honest */
+    }
+    fake_j2534::FrameSlot& slot =
+        fake_j2534::g_queue[fake_j2534::g_queue_len++];
+    memcpy(slot.data, data, size);
+    slot.size = size;
+    slot.timestamp_us = timestamp_us;
 }
 
 extern "C" __declspec(dllexport)
 void GetBufferState(unsigned char** out_buffer, unsigned long* out_size)
 {
-    *out_buffer = fake_j2534::g_buffer;
-    *out_size = static_cast<unsigned long>(fake_j2534::g_buffer_size);
+    if (out_buffer == nullptr || out_size == nullptr) {
+        return;
+    }
+    std::lock_guard<std::mutex> lk(fake_j2534::g_lock);
+    if (fake_j2534::g_queue_len > 0) {
+        *out_buffer = fake_j2534::g_queue[0].data;
+        *out_size   = fake_j2534::g_queue[0].size;
+    } else {
+        *out_buffer = nullptr;
+        *out_size = 0;
+    }
 }
 
 extern "C" __declspec(dllexport)
 int GetCurrentHandle(void)
 {
+    std::lock_guard<std::mutex> lk(fake_j2534::g_lock);
     return fake_j2534::g_handle;
 }
 

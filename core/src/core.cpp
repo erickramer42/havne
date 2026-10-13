@@ -60,20 +60,29 @@ qttune_status_t qttune_session_create(
         return QT_ERR_NULL_ARGUMENT;
     }
 
-    if (strncmp(transport_uri, "mock://", 7) != 0) {
-        /* URI routing table grows here in Phase 3 (j2534:// etc.);
-         * for now mock:// remains the only routable scheme. */
-        return QT_ERR_NO_TRANSPORT;
-    }
-
     try {
         *out_session = new qttune_session();
     } catch (...) {
         return QT_ERR_OUT_OF_MEMORY;
     }
 
-    qttune_status_t status = qttune_mock_transport_attach(*out_session,
-                                                           transport_uri);
+    qttune_status_t status = QT_ERR_NO_TRANSPORT;
+
+#ifdef _WIN32
+    /* URI routing table — Phase 3. mock:// (any platform),
+     * j2534:// (Win32 only; non-Windows stub returns
+     * QT_ERR_NOT_IMPLEMENTED if ever reached, and the guard keeps
+     * core's cross-platform behavior byte-identical on Linux/mac). */
+    if (strncmp(transport_uri, "j2534://", 8) == 0) {
+        status = qttune_j2534_transport_attach(*out_session,
+                                               transport_uri);
+    } else
+#endif
+    if (strncmp(transport_uri, "mock://", 7) == 0) {
+        status = qttune_mock_transport_attach(*out_session,
+                                              transport_uri);
+    }
+
     if (status != QT_OK) {
         delete *out_session;
         *out_session = nullptr;

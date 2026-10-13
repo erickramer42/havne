@@ -2,6 +2,7 @@
 #define QTTUNE_INTERNAL_H
 
 #include "qttune/core.h"
+#include "qttune/j2534.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -37,6 +38,32 @@ typedef struct qttune_transport {
 /* Mock transport factory — attaches a transport to a session (idempotent) */
 qttune_status_t qttune_mock_transport_attach(qttune_session_t* session,
                                             const char* uri);
+
+/*
+ * J2534 transport factory (Win32). URI grammar:
+ *   j2534://                        first discovered device
+ *   j2534://<vendor-name>           discovered vendor, matched
+ *                                   case-insensitively; no match =
+ *                                   QT_ERR_NO_TRANSPORT
+ *   j2534://<path ending .dll or    direct DLL load (tests/dev)
+ *            containing \ or />)
+ * Attaches a transport to the session (idempotent like mock).
+ */
+qttune_status_t qttune_j2534_transport_attach(qttune_session_t* session,
+                                              const char* uri);
+
+/* Vendor-call helpers implemented in j2534_loader.cpp —
+ * j2534_transport.cpp policy layer goes through these so the vendor
+ * ABI lives in exactly one TU. */
+qttune_status_t qttune_j2534_connect_channel(qttune_j2534_handle_t* handle,
+                                             unsigned long* out_channel);
+qttune_status_t qttune_j2534_disconnect_channel(qttune_j2534_handle_t* handle,
+                                                unsigned long channel);
+qttune_status_t qttune_j2534_read_frame(qttune_j2534_handle_t* handle,
+                                       unsigned long channel,
+                                       qttune_frame_t* out_frame,
+                                       uint32_t timeout_ms,
+                                       bool* got_frame);
 
 #ifdef __cplusplus
 }

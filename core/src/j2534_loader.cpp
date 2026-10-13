@@ -1,34 +1,27 @@
 // File/layer: core/src/j2534_loader.cpp | C++17, Win32-guarded
-// Testing: HARNESS — registry live-machine tests + test_j2534_load
-//          against the fake vendor DLL (real LoadLibraryEx cycle)
-// CI: compiled out entirely on non-Windows (CMake target_sources guard)
+// Testing: HARNESS — live-registry discovery tests + test_j2534_load
+//          (load/export/open/close) + test_j2534_stream (end-to-end)
+// CI: non-Windows gets linking stubs only; core.cpp guards routing
 
 #include "qttune/j2534.h"
 #include "qttune/core.h"
+#include "qttune/internal.h"
 
 #ifdef _WIN32
 
 #include <windows.h>
+#include "qttune/j2534_ptypes.h"
 
 #include <vector>
 #include <algorithm>
 
 /* ================================================================
  * GLOBAL SCOPE — completes types the header forward-declares.
- * Order matters: PASSTHRU_MSG_FWD -> typedefs -> handle struct.
- * Nothing here may sit inside an anonymous namespace; the header's
- * typedef targets the global tag name and anything internal-linkage
- * becomes a distinct, never-completed type (C2027 trap).
+ * Order matters: typedefs -> handle struct. Nothing here may sit
+ * inside an anonymous namespace; the header's typedef targets the
+ * global tag name (C2027 trap, learned the hard way).
  * ================================================================ */
 
-/* Opaque forward — Commit C replaces with the real PASSTHRU_MSG
- * layout shared with the fake DLL. */
-struct PASSTHRU_MSG_FWD;
-
-/* SAE J2534-1 signature typedefs. `long` status returns, 32-bit
- * `unsigned long` IDs. __stdcall matches 32-bit vendor DLLs; on
- * x64/ARM64 MSVC folds it to the default convention, identical to
- * the fake DLL's exports. */
 typedef long (__stdcall *fn_pt_open)(void* pName, unsigned long* pDeviceID);
 typedef long (__stdcall *fn_pt_close)(unsigned long DeviceID);
 typedef long (__stdcall *fn_pt_connect)(unsigned long DeviceID,
@@ -38,11 +31,11 @@ typedef long (__stdcall *fn_pt_connect)(unsigned long DeviceID,
                                         unsigned long* pChannelID);
 typedef long (__stdcall *fn_pt_disconnect)(unsigned long ChannelID);
 typedef long (__stdcall *fn_pt_read_msgs)(unsigned long ChannelID,
-                                          PASSTHRU_MSG_FWD* pMsg,
+                                          PASSTHRU_MSG* pMsg,
                                           unsigned long* pNumMsgs,
                                           unsigned long Timeout);
 typedef long (__stdcall *fn_pt_write_msgs)(unsigned long ChannelID,
-                                           PASSTHRU_MSG_FWD* pMsg,
+                                           PASSTHRU_MSG* pMsg,
                                            unsigned long* pNumMsgs,
                                            unsigned long Timeout);
 typedef long (__stdcall *fn_pt_ioctl)(unsigned long ChannelID,
@@ -65,12 +58,8 @@ struct qttune_j2534_handle {
 
 namespace {
 
-/* SAE J2534-1 (v4.04) status codes (subset). */
-constexpr long kPtStatusNoError = 0;
-constexpr long kPtStatusFailed  = 0xC0000000L;
+constexpr long kPtStatusNoError = QTTUNE_PT_STATUS_NOERROR;
 
-/* resolve_export keeps open()'s failure path (FreeLibrary + delete)
- * provably single-site. */
 template <typename FnPtr>
 FnPtr resolve_export(HMODULE module, const char* name, bool& all_ok)
 {
@@ -82,14 +71,8 @@ FnPtr resolve_export(HMODULE module, const char* name, bool& all_ok)
     return reinterpret_cast<FnPtr>(proc);
 }
 
-/* SAE J2534-1 (v4.04) function-library registration root.
- * Vendor subkeys sit DIRECTLY under this key (no "Vendors" level —
- * corrects an earlier draft; verified against the spec's mandated path).
- * Dual-view enumeration uses WOW64 access flags, not a hardcoded
- * WOW6432Node path, so it behaves correctly from any process bitness. */
 constexpr const wchar_t* kPassThruRoot = L"SOFTWARE\\Pass-Thru Support.04.04";
 
-/* Read the vendor's FUNCTIONLIBRARY path (REG_SZ, ANSI query converts). */
 bool read_function_library(HKEY hvendor, char* out, size_t out_size)
 {
     DWORD type = 0;
@@ -99,15 +82,13 @@ bool read_function_library(HKEY hvendor, char* out, size_t out_size)
     if (rc != ERROR_SUCCESS || (type != REG_SZ && type != REG_EXPAND_SZ)) {
         return false;
     }
-    /* Guarantee termination; registry strings may omit it in edge cases */
     out[out_size - 1] = '\0';
     if (size > 0 && out[size - 1] != '\0' && size < out_size) {
         out[size] = '\0';
     }
-    return out[0] != '\0';   /* empty value = unusable entry */
+    return out[0] != '\0';
 }
 
-/* Enumerate one registry view (KEY_WOW64_64KEY or KEY_WOW64_32KEY). */
 void enumerate_view(REGSAM wow64_flag,
                     std::vector<qttune_j2534_device_t>& out_devices)
 {
@@ -115,7 +96,7 @@ void enumerate_view(REGSAM wow64_flag,
     LONG rc = RegOpenKeyExW(HKEY_LOCAL_MACHINE, kPassThruRoot, 0,
                             KEY_READ | wow64_flag, &hroot);
     if (rc != ERROR_SUCCESS || hroot == nullptr) {
-        return;   /* key absent in this view — no vendors, not an error */
+        return;
     }
 
     DWORD subkey_count = 0;
@@ -144,7 +125,6 @@ void enumerate_view(REGSAM wow64_flag,
         qttune_j2534_device_t dev = {};
         dev.vendor_id = static_cast<uint32_t>(out_devices.size());
 
-        /* Vendor name = registry subkey name, narrowed to UTF-8 */
         WideCharToMultiByte(CP_UTF8, 0, subkey_name, -1,
                             dev.vendor_name, QTTUNE_J2534_VENDOR_NAME_LEN,
                             nullptr, nullptr);
@@ -179,9 +159,6 @@ qttune_status_t qttune_j2534_discover_devices(qttune_j2534_device_t** devices_ou
     enumerate_view(KEY_WOW64_64KEY, devices);
     enumerate_view(KEY_WOW64_32KEY, devices);
 
-    /* De-duplicate across views: 64-bit DLLs can register under both
-     * views in edge cases, and vendor_id must be stable. Match on
-     * dll_path (case-insensitive on Windows) AND vendor name. */
     std::vector<qttune_j2534_device_t> unique;
     for (const auto& d : devices) {
         bool dup = false;
@@ -197,11 +174,11 @@ qttune_status_t qttune_j2534_discover_devices(qttune_j2534_device_t** devices_ou
         }
     }
     for (auto& d : unique) {
-        d.vendor_id = static_cast<uint32_t>(&d - &unique[0]); /* re-index */
+        d.vendor_id = static_cast<uint32_t>(&d - &unique[0]);
     }
 
     if (unique.empty()) {
-        return QT_OK;   /* no vendors — not an error */
+        return QT_OK;
     }
 
     try {
@@ -229,10 +206,6 @@ qttune_status_t qttune_j2534_open(const qttune_j2534_device_t* device,
     }
     *out_handle = nullptr;
 
-    /* LOAD_WITH_ALTERED_SEARCH_PATH: vendor DLLs frequently ship
-     * support DLLs beside them; default search order misses those
-     * when launched from a different cwd. Requires an absolute
-     * path (which the registry contract guarantees). */
     HMODULE module = LoadLibraryExA(device->dll_path, nullptr,
                                     LOAD_WITH_ALTERED_SEARCH_PATH);
     if (module == nullptr) {
@@ -278,8 +251,6 @@ qttune_status_t qttune_j2534_close(qttune_j2534_handle_t* handle)
     if (handle == nullptr) {
         return QT_OK;
     }
-    /* ORDER MATTERS: vendor call while the module is still mapped,
-     * then unmap, then free the struct holding now-dangling pointers. */
     if (handle->close != nullptr) {
         handle->close(handle->device_id);
     }
@@ -290,12 +261,76 @@ qttune_status_t qttune_j2534_close(qttune_j2534_handle_t* handle)
     return QT_OK;
 }
 
+/* ---- Vendor-call helpers used by j2534_transport.cpp ---- */
+
+qttune_status_t qttune_j2534_connect_channel(qttune_j2534_handle_t* handle,
+                                             unsigned long* out_channel)
+{
+    if (handle == nullptr || out_channel == nullptr) {
+        return QT_ERR_NULL_ARGUMENT;
+    }
+    long rc = handle->connect(handle->device_id,
+                              QTTUNE_PT_PROTOCOL_ISO15765,
+                              0,   /* Flags */
+                              QTTUNE_PT_BAUD_ISO15765_500K,
+                              out_channel);
+    return (rc == kPtStatusNoError) ? QT_OK : QT_ERR_NO_TRANSPORT;
+}
+
+qttune_status_t qttune_j2534_disconnect_channel(qttune_j2534_handle_t* handle,
+                                                unsigned long channel)
+{
+    if (handle == nullptr) {
+        return QT_ERR_NULL_ARGUMENT;
+    }
+    /* Best-effort at teardown: vendor failure during shutdown must
+     * not block the detach path. */
+    long rc = handle->disconnect(channel);
+    return (rc == kPtStatusNoError) ? QT_OK : QT_OK;
+}
+
+qttune_status_t qttune_j2534_read_frame(qttune_j2534_handle_t* handle,
+                                        unsigned long channel,
+                                        qttune_frame_t* out_frame,
+                                        uint32_t timeout_ms,
+                                        bool* got_frame)
+{
+    if (handle == nullptr || out_frame == nullptr || got_frame == nullptr) {
+        return QT_ERR_NULL_ARGUMENT;
+    }
+    *got_frame = false;
+
+    PASSTHRU_MSG msg = {};
+    unsigned long num = 1;
+    long rc = handle->read_msgs(channel, &msg, &num, timeout_ms);
+
+    /* NOTE: any nonzero vendor status (including idle-timeout on a
+     * real device) is uniformly "no frame" in v0.3.0. Distinguishing
+     * ERR_TIMEOUT from hard device errors is BENCH-tier work; the
+     * fake never returns nonzero here. */
+    if (rc != kPtStatusNoError || num == 0) {
+        return QT_OK;
+    }
+
+    out_frame->channel_id = 0;
+    out_frame->is_extended = 0;   /* ISO 15765 29-bit flag: later work */
+    out_frame->timestamp_us = msg.Timestamp;   /* pass-through; unit
+                                                * normalization deferred */
+    unsigned long n = msg.DataSize;
+    if (n > sizeof(out_frame->data)) {
+        n = sizeof(out_frame->data);   /* clamp — CAN-FD sized buffer */
+    }
+    out_frame->data_length = static_cast<uint8_t>(n);
+    memcpy(out_frame->data, msg.Data, n);
+
+    *got_frame = true;
+    return QT_OK;
+}
+
 } // extern "C"
 
 #else
 
-/* Non-Windows stubs — keeps the header contract satisfied so tests
- * compile everywhere; discovery and loading are inherently Win32. */
 extern "C" {
 
 qttune_status_t qttune_j2534_discover_devices(qttune_j2534_device_t** devices_out,
@@ -324,6 +359,30 @@ qttune_status_t qttune_j2534_open(const qttune_j2534_device_t* /*device*/,
 
 qttune_status_t qttune_j2534_close(qttune_j2534_handle_t* /*handle*/)
 {
+    return QT_ERR_NOT_IMPLEMENTED;
+}
+
+qttune_status_t qttune_j2534_connect_channel(qttune_j2534_handle_t* /*h*/,
+                                             unsigned long* /*ch*/)
+{
+    return QT_ERR_NOT_IMPLEMENTED;
+}
+
+qttune_status_t qttune_j2534_disconnect_channel(qttune_j2534_handle_t* /*h*/,
+                                                unsigned long /*ch*/)
+{
+    return QT_ERR_NOT_IMPLEMENTED;
+}
+
+qttune_status_t qttune_j2534_read_frame(qttune_j2534_handle_t* /*h*/,
+                                        unsigned long /*ch*/,
+                                        qttune_frame_t* /*f*/,
+                                        uint32_t /*t*/,
+                                        bool* got_frame)
+{
+    if (got_frame != nullptr) {
+        *got_frame = false;
+    }
     return QT_ERR_NOT_IMPLEMENTED;
 }
 
