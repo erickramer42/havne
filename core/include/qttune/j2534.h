@@ -1,0 +1,58 @@
+// File/layer: core/include/qttune/j2534.h | C ABI, internal/public discovery API
+// Testing: see tests/test_j2534_discovery.cpp
+
+#ifndef QTTUNE_J2534_H
+#define QTTUNE_J2534_H
+
+#include "qttune/core.h"   /* qttune_status_t — missing include broke the build */
+
+#include <stdint.h>
+#include <stddef.h>
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+/*
+ * J2534 vendor discovery.
+ *
+ * Enumerates registered Pass-Thru function libraries per SAE J2534-1 (v4.04):
+ *   HKLM\SOFTWARE\Pass-Thru Support.04.04\<VendorName>  → FUNCTIONLIBRARY
+ * (both WOW64 registry views; see implementation).
+ *
+ * v0.3.0 Phase 3 Step 1: discovery only. Device communication
+ * (LoadLibraryEx, PassThru* calls) lands in Step 2.
+ */
+#define QTTUNE_J2534_MAX_VENDORS 16
+#define QTTUNE_J2534_VENDOR_NAME_LEN 64
+#define QTTUNE_J2534_DLL_PATH_LEN 256
+
+typedef struct qttune_j2534_device {
+    uint32_t vendor_id;           /* Index in discovery order (0-based) */
+    char vendor_name[QTTUNE_J2534_VENDOR_NAME_LEN];
+    char dll_path[QTTUNE_J2534_DLL_PATH_LEN];
+    uint32_t supported_protocols; /* 0 — reserved for PROTOCOLS bitmask parse */
+    uint32_t reserved[8];         /* ABI-stable expansion room */
+} qttune_j2534_device_t;
+
+/*
+ * Discover J2534 vendor function libraries.
+ *
+ * CONTRACTS:
+ * - Returns QT_OK with count=0 when no vendors are installed (not an error)
+ * - On error: *devices_out = NULL, *device_count = 0
+ * - Caller must qttune_j2534_free_devices() the array (even for count=0
+ *   it is safe to call with NULL)
+ * - Non-Windows: returns QT_ERR_NOT_IMPLEMENTED
+ */
+qttune_status_t qttune_j2534_discover_devices(qttune_j2534_device_t** devices_out,
+                                              uint32_t* device_count);
+
+/* Frees array from discover. NULL-safe no-op. */
+void qttune_j2534_free_devices(qttune_j2534_device_t* devices);
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif /* QTTUNE_J2534_H */

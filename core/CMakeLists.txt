@@ -2,6 +2,7 @@
 add_library(qttune-core STATIC
     src/core.cpp
     src/mock_transport.cpp
+    src/j2534_loader.cpp
     src/signals.cpp  
     src/signal_sets.cpp
 )

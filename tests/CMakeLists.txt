@@ -70,3 +70,18 @@ if(NOT QTTUNE_BUILD_CORE_ONLY)
     # Tell ctest/gtest_discover where Qt DLLs live at runtime
     get_filename_component(QT_BIN_DIR "${Qt6Core_DIR}/../../bin" REALPATH)
 endif()
+
+# J2534 discovery tests (Win32-only)
+if(WIN32)
+    add_executable(test_j2534_discovery
+        ../tests/test_j2534_discovery.cpp
+    )
+    target_link_libraries(test_j2534_discovery PRIVATE
+        qttune-core
+        GTest::gtest_main
+    )
+    set_target_properties(test_j2534_discovery PROPERTIES
+        VS_DEBUGGER_WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+    )
+    gtest_discover_tests(test_j2534_discovery)
+endif()
