@@ -428,7 +428,8 @@ run tests per suite:
   ./build/tests/Release/test_core.exe
   ./build/tests/Release/test_signals.exe
   ./build/tests/Release/test_bridge.exe
-  etc
+  or
+  ctest --test-dir build -C Release -R J2534Surrogate --output-on-failure
 run full testing: 
   ctest --test-dir build -C Release --output-on-failure
 ./build/app/Release/qttune.exe (for full app end to end and manual testing)

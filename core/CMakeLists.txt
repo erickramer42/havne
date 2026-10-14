@@ -6,6 +6,7 @@ add_library(qttune-core STATIC
     src/j2534_transport.cpp
     src/signals.cpp  
     src/signal_sets.cpp
+    src/j2534_surrogate_client.cpp
 )
 
 target_include_directories(qttune-core

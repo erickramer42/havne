@@ -156,3 +156,36 @@ if(WIN32)
     add_dependencies(test_j2534_stream fake_j2534)
     gtest_discover_tests(test_j2534_stream)
 endif()
+
+# J2534 surrogate host tests (Win32-only, HARNESS tier — real process
+# spawn: named pipe + shared ring + kill-on-close job, end to end)
+# Arch note: in this tree's configure this is the all-same-arch IPC test
+# (CI-valid); the true cross-arch case (x64 test -> x86 surrogate -> x86
+# fake) runs on a dev machine with QTTUNE_SURROGATE_EXE pointing at
+# artifacts from a second, Win32 (-A Win32) configure of the same tree.
+if(WIN32)
+    add_executable(test_j2534_surrogate
+        test_j2534_surrogate.cpp
+    )
+    target_link_libraries(test_j2534_surrogate PRIVATE
+        qttune-core
+        GTest::gtest_main
+    )
+    target_compile_definitions(test_j2534_surrogate PRIVATE
+        FAKE_J2534_DLL_PATH="$<TARGET_FILE:fake_j2534>"
+    )
+    add_dependencies(test_j2534_surrogate fake_j2534)
+    add_dependencies(test_j2534_surrogate qttune-j2534-surrogate)
+
+    # Deploy the surrogate exe next to the test exe: the client's
+    # build_exe_path() resolves it by walking its own image directory
+    # (same discipline as the baked fake-DLL path — no PATH games).
+    add_custom_command(TARGET test_j2534_surrogate POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            $<TARGET_FILE:qttune-j2534-surrogate>
+            $<TARGET_FILE_DIR:test_j2534_surrogate>
+        COMMENT "Deploying surrogate exe next to test_j2534_surrogate"
+    )
+
+    gtest_discover_tests(test_j2534_surrogate)
+endif()

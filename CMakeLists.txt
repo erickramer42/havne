@@ -21,6 +21,7 @@ configure_file(
 option(QTTUNE_BUILD_CORE_ONLY "Build core library and tests; skip Qt app" OFF)
 
 add_subdirectory(core)
+add_subdirectory(surrogate)
 
 include(CTest)
 if(BUILD_TESTING)
