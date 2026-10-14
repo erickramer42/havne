@@ -466,3 +466,50 @@ TEST(BridgeTest, StripChartDataPopulatedByLiveStream)
 
     bridge.disconnectSession();
 }
+
+// ---------------------------------------------------------------------------
+// J2534 picker surface: discovery marshaling + currentUri contract
+// ---------------------------------------------------------------------------
+
+TEST(BridgeTest, DiscoveredDevicesHaveWellFormedEntries)
+{
+    /* Marshaling only — the discovery itself is covered by
+       test_j2534_discovery against the live registry. Count is
+       registry-dependent (0..16, empty on non-Windows), so this pins
+       SHAPE: every entry carries string vendorName/dllPath. An entry
+       with a missing or non-string field would feed garbage into the
+       SettingsPage picker's bindings. */
+    QtTuneBridge bridge;
+    const QVariantList devices = bridge.discoverJ2534Devices();
+
+    EXPECT_GE(devices.size(), 0);   // documents the legitimate empty case
+    for (const QVariant& v : devices) {
+        ASSERT_TRUE(v.canConvert<QVariantMap>()) << "entry not a map";
+        const QVariantMap m = v.toMap();
+        ASSERT_TRUE(m.contains("vendorName")) << "missing vendorName";
+        ASSERT_TRUE(m.contains("dllPath")) << "missing dllPath";
+        ASSERT_TRUE(m.value("vendorName").canConvert<QString>());
+        ASSERT_TRUE(m.value("dllPath").canConvert<QString>());
+    }
+}
+
+TEST(BridgeTest, CurrentUriTracksConnectState)
+{
+    /* currentUri: empty while disconnected, set after a successful
+       connect, cleared by disconnect. The QML picker displays it as
+       the ground truth of what's live — staleness here lies to the
+       user. Failed connects must not leave a residue either. */
+    QtTuneBridge bridge;
+    EXPECT_TRUE(bridge.currentUri().isEmpty());
+
+    ASSERT_TRUE(bridge.connectSession("mock://uri-track").isEmpty());
+    EXPECT_EQ(bridge.currentUri(), QStringLiteral("mock://uri-track"));
+
+    bridge.disconnectSession();
+    EXPECT_TRUE(bridge.currentUri().isEmpty());
+
+    // Failed connect leaves no stale URI behind
+    EXPECT_FALSE(bridge.connectSession("j2534://definitely-not-a-vendor").isEmpty());
+    EXPECT_TRUE(bridge.currentUri().isEmpty());
+    EXPECT_FALSE(bridge.connected());
+}

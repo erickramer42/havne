@@ -1,5 +1,6 @@
 // File/layer: app/qttunebridge.h | Qt6 Core, app layer, C++17
-// Testing: SignalListModel history ring covered by test_bridge (Qt-linked target)
+// Testing: SignalListModel history ring covered by test_bridge (Qt-linked target);
+//          discoverJ2534Devices marshaling shape covered by test_bridge (addition)
 
 #pragma once
 
@@ -7,6 +8,7 @@
 #include <QString>
 #include <QAbstractListModel>
 #include <QSortFilterProxyModel>
+#include <QVariantList>
 #include <QVariantMap>
 #include <QTimer>
 #include <QElapsedTimer>
@@ -152,6 +154,7 @@ class QtTuneBridge : public QObject
     Q_PROPERTY(int guiNotifyCount READ guiNotifyCount NOTIFY notifyCountChanged)
     Q_PROPERTY(int signalBatchCount READ signalBatchCount NOTIFY signalBatchChanged)
     Q_PROPERTY(SignalListModel* signalModel READ signalModel CONSTANT)
+    Q_PROPERTY(QString currentUri READ currentUri NOTIFY currentUriChanged)
 
 public:
     explicit QtTuneBridge(QObject* parent = nullptr);
@@ -166,12 +169,22 @@ public:
     int guiNotifyCount() const { return m_guiNotifyCount; }
     int signalBatchCount() const { return m_signalBatchCount; }
     SignalListModel* signalModel() const { return m_signalModel; }
+    QString currentUri() const { return m_currentUri; }
     void dispatchFrameForTesting(const qttune_frame_t& frame);
     static constexpr int maxInFlightForTesting() { return MaxInFlightFrames; }
 
     Q_INVOKABLE QString statusString(int statusCode) const;
     Q_INVOKABLE int maxFrameCount() const { return FrameListModel::MaxFrames; }
     Q_INVOKABLE void forceFrameCountForTesting(int count);
+
+    // J2534 device discovery (Windows; empty list elsewhere). One map per
+    // installed Pass-Thru interface driver: { vendorName, dllPath } — both
+    // QString. Registry read, no session attached; bounded at
+    // QTTUNE_J2534_MAX_VENDORS by core. Safe to call synchronously from
+    // QML (few reg keys, no I/O beyond the registry). UI sees display
+    // values only (rule 2) — dllPath is exposed because it is the user's
+    // route to a direct-load URI, not for parsing.
+    Q_INVOKABLE QVariantList discoverJ2534Devices() const;
 
 public slots:
     Q_INVOKABLE QString connectSession(const QString& uri);
@@ -186,6 +199,7 @@ signals:
     void droppedFramesChanged(int);
     void notifyCountChanged(int newCount);
     void signalBatchChanged();
+    void currentUriChanged();
 
 private:
     static void onFrame(const qttune_frame_t* frame, void* user_data);

@@ -65,13 +65,18 @@ on a device/emulator.
 - Qt-free C++ core behind a stable C ABI — UI layers are replaceable skins
 - Live frame logging: mock transport streams synthetic CAN frames end-to-end
   — core worker thread → GUI-thread bridge → sort proxy → virtualized log table
-- J2534 transport (Windows): registry vendor discovery, `LoadLibraryEx` of
-  vendor function libraries, ISO 15765 connect, `ReadMsgs` polling loop
-  delivering frames through the same session callback path as the mock;
-  `j2534://` URI routing (`j2534://`, `j2534://<vendor>`,
-  `j2534://<path.dll>`) with optional `?baud=<decimal>` and
-  `?flags=<0xHEX|decimal>` query parameters (strict parsing — malformed
-  URIs rejected at session create, before any DLL load)
+- J2534 transport (Windows): registry vendor discovery (spec + no-hyphen
+  root spellings, both WOW64 views — verified against real installed
+  drivers), `LoadLibraryEx` of vendor function libraries, ISO 15765
+  connect, `ReadMsgs` polling loop delivering frames through the same
+  session callback path as the mock; `j2534://` URI routing (`j2534://`,
+  `j2534://<vendor>`, `j2534://<path.dll>`) with optional
+  `?baud=<decimal>` and `?flags=<0xHEX|decimal>` query parameters
+  (strict parsing — malformed URIs rejected at session create, before
+  any DLL load)
+- Transport selection: Settings page with a discovered-interface picker,
+  manual URI entry with presets, and connect/disconnect with error
+  surfacing
 - Signal decoding: POD signal definitions with scale/offset linear decode,
   LSB-first bitfield extraction, signed-type sign extension (core, unit-tested)
 - Live signal view: decoded values streamed to a subscription-checked list,
@@ -85,7 +90,7 @@ on a device/emulator.
   warm-up toward thermostat, trailing intake temps, coupled throttle/load —
   every mock frame is decodable by the built-in signal set (round-trip tested)
 - Session lifecycle: create/start/stop/close with clean worker quiesce
-- Thread-safe by construction: UI receives display values only; all parsing in core
+- Thread-safe by construction: UI receives display values, never raw frames
 - Backpressure: bounded in-flight event-queue depth with honest accounting;
   rolling 10k-row log window via model ring eviction (stream never freezes)
 - Sort toggle: newest-first (live edge at viewport top) / oldest-first (chronological)
@@ -96,16 +101,17 @@ on a device/emulator.
 |---------|-----------|--------|
 | v0.1.0  | Skeleton: core ABI, Qt shell, responsive layout | ✅ Released |
 | v0.2.0  | Callback API, mock transport, bridge marshaling, live LogPage | ✅ Released |
-| v0.3.0  | Signals layer, coalesced LiveView, J2534 transport, live vehicle read/logging | 🚧 Phases 1–2 done; Phase 3 HARNESS-complete (fake-DLL verified) incl. URI query params; live-vehicle + x86 surrogate host pending |
+| v0.3.0  | Signals layer, coalesced LiveView, J2534 transport, live vehicle read/logging | 🚧 Phases 1–2 done; Phase 3 HARNESS-complete (fake-DLL verified) incl. URI query params + device picker (discovery verified against real drivers); live-vehicle + x86 surrogate host pending |
 | v0.4.0  | Security access discovery, flash capability | Planned |
 | v0.5.0+ | Multi-manufacturer plugins | Future |
 
-Currently 62 automated tests (18 core, 15 signals, 14 bridge, 15 J2534),
+Currently 64 automated tests (18 core, 15 signals, 16 bridge, 15 J2534),
 all green locally on Windows/MSVC 2022 and on CI (3-platform matrix).
 Per-case ctest granularity via `gtest_discover_tests()`. The J2534 stack
-is verified end-to-end against a fake vendor DLL (HARNESS tier) — no real
-vehicle or vendor hardware yet. See [STATUS.md](STATUS.md)
-for verified test matrix and engineering notes.
+is verified end-to-end against a fake vendor DLL (HARNESS tier);
+discovery is additionally verified against real installed drivers
+(OBDX Pro VT/VX). No real vendor DLL load/connect or live vehicle yet.
+See [STATUS.md](STATUS.md) for verified test matrix and engineering notes.
 
 Flash capabilities require discovering each manufacturer's secure gateway authentication. Vehicle communication research is tracked separately and outside this repo for now.
 
@@ -125,7 +131,9 @@ MIT — see [LICENSE](LICENSE) file.
 
 ⚠️ Early infrastructure. Core callback API, mock transport, signal
 decoding, coalesced live view with strip chart, and a HARNESS-verified
-J2534 transport (fake vendor DLL only, incl. `?baud=`/`?flags=` query
-parameters) implemented and unit-tested.
+J2534 transport (fake vendor DLL verified end-to-end; discovery
+verified against real installed drivers, incl. `?baud=`/`?flags=` query
+parameters and the Settings-page device picker) implemented and
+unit-tested.
 No real vehicle communication verified yet.
 Do not connect to a vehicle expecting functionality.

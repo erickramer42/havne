@@ -1,10 +1,12 @@
 // File/layer: app/qttunebridge.cpp | Qt6 Core, app layer, C++17
 // Testing: ring behavior, valuesUpdated cadence, chartData shape in test_bridge;
-// full-app strip chart render verified by manual smoke (LiveViewPage)
+//          discoverJ2534Devices marshaling shape in test_bridge (addition);
+//          full-app SettingsPage picker verified by manual smoke
 
 #include "qttunebridge.h"
 #include "qttune/version.h"
 #include "qttune/signals.h"
+#include "qttune/j2534.h"
 
 #include <QMetaObject>
 #include <QByteArray>
@@ -293,6 +295,25 @@ QString QtTuneBridge::statusString(int statusCode) const
     return QString::fromUtf8(qttune_status_string(static_cast<qttune_status_t>(statusCode)));
 }
 
+QVariantList QtTuneBridge::discoverJ2534Devices() const
+{
+    QVariantList out;
+
+    qttune_j2534_device_t* devices = nullptr;
+    uint32_t count = 0;
+    if (qttune_j2534_discover_devices(&devices, &count) != QT_OK) {
+        return out;   // includes non-Windows NOT_IMPLEMENTED -> empty list
+    }
+    for (uint32_t i = 0; i < count; ++i) {
+        QVariantMap m;
+        m["vendorName"] = QString::fromUtf8(devices[i].vendor_name);
+        m["dllPath"] = QString::fromUtf8(devices[i].dll_path);
+        out.append(m);
+    }
+    qttune_j2534_free_devices(devices);
+    return out;
+}
+
 QString QtTuneBridge::connectSession(const QString& uri)
 {
     if (m_connected.load(std::memory_order_acquire)) return {};
@@ -305,11 +326,14 @@ QString QtTuneBridge::connectSession(const QString& uri)
     }
     m_session = session;
     m_currentUri = uri;
+    emit currentUriChanged();   // display value updates even if start fails below
 
     rc = qttune_register_frame_callback(session, &QtTuneBridge::onFrame, this);
     if (rc != QT_OK) {
         qttune_session_close(session);
         m_session = nullptr;
+        m_currentUri.clear();
+        emit currentUriChanged();
         return QString::fromUtf8(qttune_status_string(rc));
     }
 
@@ -318,6 +342,8 @@ QString QtTuneBridge::connectSession(const QString& uri)
         qttune_unregister_frame_callback(session, &QtTuneBridge::onFrame, this);
         qttune_session_close(session);
         m_session = nullptr;
+        m_currentUri.clear();
+        emit currentUriChanged();
         return QString::fromUtf8(qttune_status_string(rc));
     }
 
@@ -342,6 +368,10 @@ void QtTuneBridge::disconnectSession()
         m_session = nullptr;
     }
     m_coalesceTimer->stop();
+    if (!m_currentUri.isEmpty()) {
+        m_currentUri.clear();
+        emit currentUriChanged();
+    }
     emit connectedChanged(false);
 }
 

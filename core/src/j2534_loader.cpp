@@ -71,7 +71,16 @@ FnPtr resolve_export(HMODULE module, const char* name, bool& all_ok)
     return reinterpret_cast<FnPtr>(proc);
 }
 
-constexpr const wchar_t* kPassThruRoot = L"SOFTWARE\\Pass-Thru Support.04.04";
+/* Root registry keys swept by discovery, per SAE J2534-1 v4.04 §5.3
+ * ("Pass-Thru Support.04.04") PLUS the no-hyphen variant some vendor
+ * installers write ("PassThruSupport.04.04" — observed: OBDX Pro).
+ * Both spellings exist in the wild; the spec spelling is kept first
+ * so conforming vendors keep discovery-order precedence. Dedupe in
+ * qttune_j2534_discover_devices absorbs a vendor writing both. */
+constexpr const wchar_t* kPassThruRoots[] = {
+    L"SOFTWARE\\Pass-Thru Support.04.04",
+    L"SOFTWARE\\PassThruSupport.04.04",
+};
 
 bool read_function_library(HKEY hvendor, char* out, size_t out_size)
 {
@@ -89,11 +98,12 @@ bool read_function_library(HKEY hvendor, char* out, size_t out_size)
     return out[0] != '\0';
 }
 
-void enumerate_view(REGSAM wow64_flag,
+void enumerate_view(const wchar_t* root_path,
+                    REGSAM wow64_flag,
                     std::vector<qttune_j2534_device_t>& out_devices)
 {
     HKEY hroot = nullptr;
-    LONG rc = RegOpenKeyExW(HKEY_LOCAL_MACHINE, kPassThruRoot, 0,
+    LONG rc = RegOpenKeyExW(HKEY_LOCAL_MACHINE, root_path, 0,
                             KEY_READ | wow64_flag, &hroot);
     if (rc != ERROR_SUCCESS || hroot == nullptr) {
         return;
@@ -156,8 +166,15 @@ qttune_status_t qttune_j2534_discover_devices(qttune_j2534_device_t** devices_ou
     std::vector<qttune_j2534_device_t> devices;
     devices.reserve(4);
 
-    enumerate_view(KEY_WOW64_64KEY, devices);
-    enumerate_view(KEY_WOW64_32KEY, devices);
+    /* Both root spellings x both WOW64 views = 4 sweeps. Identical
+     * entries across sweeps collapse in the dedupe below (dll_path +
+     * vendor name); a vendor that wrote only the compacted root under
+     * the 32-bit view (the OBDX Pro case) is found on exactly one
+     * sweep and passes straight through. */
+    for (const wchar_t* root : kPassThruRoots) {
+        enumerate_view(root, KEY_WOW64_64KEY, devices);
+        enumerate_view(root, KEY_WOW64_32KEY, devices);
+    }
 
     std::vector<qttune_j2534_device_t> unique;
     for (const auto& d : devices) {

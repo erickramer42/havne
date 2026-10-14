@@ -1,7 +1,7 @@
 # QtTune — Project Status
 
 **Date:** October 14, 2026
-**Version:** v0.2.0 (released, tagged); v0.3.0 Phases 1–2 complete, Phase 3 (J2534) HARNESS-complete incl. URI query params — live-vehicle + x86 surrogate host + device picker pending
+**Version:** v0.2.0 (released, tagged); v0.3.0 Phases 1–2 complete, Phase 3 (J2534) HARNESS-complete incl. URI query params + device picker — live-vehicle + x86 surrogate host pending
 **Repository:** https://github.com/erickramer42/qttune
 **CI:** [![CI](https://github.com/erickramer42/qttune/actions/workflows/ci.yml/badge.svg)](https://github.com/erickramer42/qttune/actions/workflows/ci.yml)
 
@@ -15,8 +15,8 @@ behind a stable C ABI, with UI layers as replaceable skins around it.**
 |   Qt Quick UI (desktop)    |   Responsive QML shell — sidebar above
 |   Main / Dashboard / Live /|   720 px width, bottom TabBar below
 |   Log / Settings pages     |   LogPage: live frame table, sort toggle
-|   LiveViewPage: signal     |   subscription checkboxes + live values
-|   table + strip chart      |   + QML Canvas trace per signal (done)
+|   LiveViewPage: signal     |   SettingsPage: J2534 device picker +
+|   table + strip chart      |   manual URI connect (done)
 +---------------+------------+
                 | QtTuneBridge (thread-marshaling seam)
                 |   worker→GUI via QMetaObject::invokeMethod (QueuedConnection)
@@ -160,22 +160,23 @@ POD signal metadata + linear decode: `display = raw * scale + offset`.
   sidebar/TabBar/StackLayout at index 2 (Home, Dash, **Live**, Log, Setup).
 - Known inefficiency (deliberate, mock-rate harmless): decode loop runs
   all signals per frame regardless of subscription; filter decode on
-  `isSubscribed(id)` when signal count grows.
+  `isSubscribed(id)` when signal counts grow.
 
 ## J2534 Transport (landed v0.3.0 Phase 3, HARNESS tier, 2026-10-13)
 
 Transport stack for real Pass-Thru devices (Windows). **Verified against
-a fake vendor DLL only — no vendor hardware or live vehicle has been
-connected.** Landmarks, in commit order:
+a fake vendor DLL end-to-end; discovery additionally verified against
+real installed drivers — no vendor DLL has been loaded and no live
+vehicle has been connected.** Landmarks, in commit order:
 
 - **`844f44e` — transport vtable refactor:** `qttune_transport_ops_t`
   ({start, detach}); session routes through ops only. Mock migrated with
   zero test changes (behavior-preserving).
-- **`1752fc9` — registry discovery:** enumerate
-  `HKLM\SOFTWARE\Pass-Thru Support.04.04` subkeys in BOTH WOW64 views
-  (KEY_WOW64_64KEY / _32KEY flags, not hardcoded WOW6432Node — works
-  from any process bitness); read `FUNCTIONLIBRARY` per vendor; dedupe
-  across views (dll_path + vendor name). C-ABI array out, NULL-safe free.
+- **`1752fc9` — registry discovery:** enumerate Pass-Thru Support
+  subkeys in BOTH WOW64 views (KEY_WOW64_64KEY / _32KEY flags, not
+  hardcoded WOW6432Node — works from any process bitness); read
+  `FUNCTIONLIBRARY` per vendor; dedupe across sweeps (dll_path +
+  vendor name). C-ABI array out, NULL-safe free.
 - **`9b33aeb` / `6b58c3a` / `0fa4883` — fake DLL + status code + loader:**
   `tests/fake_j2534.cpp` implements the seven mandatory PassThru exports
   with SAE J2534-1 signatures (`__stdcall`, `long` status return,
@@ -212,6 +213,23 @@ connected.** Landmarks, in commit order:
   discovered match), `<path ending .dll or containing \ or />` (direct load —
   the test/dev route to the fake). Misses return `QT_ERR_NO_TRANSPORT`,
   preserving `test_core`'s `UnknownTransportUriRejected`.
+- **`DEVICE PICKER + REAL-VENDOR DISCOVERY (Commit E, 2026-10-14):**
+  Bridge exposes `discoverJ2534Devices()` (QVariantList of
+  {vendorName, dllPath} — display values only, rule 2) and `currentUri`
+  (cleared on failed connect — no stale-binding promise, 2026-10-05
+  lesson applied at birth). SettingsPage: discovery list with refresh,
+  manual URI field with presets (mock, bare j2534://), connect/disconnect
+  with error surfacing, empty-state hint (non-Windows degrades cleanly).
+  Discovery itself gained a DUAL-ROOT sweep: the SAE-spec
+  `Pass-Thru Support.04.04` plus the no-hyphen `PassThruSupport.04.04`
+  variant real installers write (observed: OBDX Pro, in WOW6432Node
+  only), 2 roots × 2 WOW64 views = 4 sweeps, dedupe absorbs overlap.
+  Spec spelling is swept first so conforming vendors keep discovery
+  order precedence. First real-contact finding: the OBDX Pro VX subkey
+  declares ISO15765=1 — the exact protocol this transport connects
+  with — so it is a genuine connect candidate pending the architecture
+  check (DLL lives under Program Files (x86); x86-only DLLs cannot load
+  into the x64 app — the surrogate-host wall).
 - **Shared internal contract:** `core/include/qttune/j2534_ptypes.h`
   defines `PASSTHRU_MSG` consumed by BOTH the loader and the fake DLL —
   layout drift between them is structurally impossible. ⚠️ BENCH-tier
@@ -230,9 +248,9 @@ connected.** Landmarks, in commit order:
 
 **Phase 3 remains OPEN. Outstanding:** x86-surrogate host for 32-bit-only
 vendor DLLs (J2534-1 mandates only that they be in-proc; many ship x86
-only and can't load into the x64 app), SettingsPage device picker fed by
-`qttune_j2534_discover_devices`, and the BENCH-tier live-DLL verification
-round.
+only and can't load into the x64 app) and the BENCH-tier live-DLL
+verification round (incl. PASSTHRU_MSG header diff and the first
+real-vendor load/connect attempt).
 
 ## Backpressure (corrected 2026-10-07)
 
@@ -272,12 +290,15 @@ handles:
 | Capability | Verified by |
 |---|---|
 | Core builds standalone with zero Qt deps | `core-and-tests` CI job (Ubuntu, Qt absent) |
-| 62 tests pass: 18 core + 15 signals + 14 bridge + 15 J2534 | GTest suites; 62/62 locally on Windows/MSVC 2022, green on 3-platform CI matrix |
+| 64 tests pass: 18 core + 15 signals + 16 bridge + 15 J2534 | GTest suites; 64/64 locally on Windows/MSVC 2022, green on 3-platform CI matrix |
 | Mock transport delivers physically plausible, signal-set-decodable frames | `MockFramesDecodeAgainstMockSignalSet`: real worker frames decoded under every mock definition, physical ranges asserted |
-| J2534 registry discovery finds real installed vendors, dedupes WOW64 views | `test_j2534_discovery` suite on live machine registry |
+| J2534 registry discovery finds real installed vendors (OBDX Pro VT/VX on dev machine), dual-root spec + no-hyphen spelling, dedupes cross-sweep | `test_j2534_discovery` suite + manual smoke: picker populates from live registry |
 | J2534 loader: LoadLibraryEx → 7-export resolution → PassThruOpen, clean unwind on missing DLL/exports | `test_j2534_load` suite (incl. proven-unmapped assertion after failed load) |
 | J2534 end-to-end: `j2534://<path.dll>` session → connect → worker poll → InjectFrame → callback, exact counts and payload fidelity | `test_j2534_stream` suite (7 tests; FIFO order asserted) |
 | `?baud=`/`?flags=` query params reach `PassThruConnect`; defaults preserve ISO 15765 @ 500k / flags=0; malformed queries rejected at parse before any DLL load | `J2534QueryParamTest` fixture: default-preservation, explicit params (decimal + hex flags, last-wins duplicates), malformed matrix incl. real-fake-path rejects |
+| Bridge discovery marshaling: every discovered entry carries string vendorName/dllPath | `DiscoveredDevicesHaveWellFormedEntries` (shape contract; empty list legitimate on non-Windows) |
+| currentUri tracks connect state, cleared on failed connect | `CurrentUriTracksConnectState` |
+| SettingsPage picker: device list + refresh, manual URI connect/disconnect, error surfacing, empty-state hint | Manual smoke (Windows, live registry) |
 | Vendor API call ordering at teardown (PassThruClose before FreeLibrary; worker joined before any of it) | `FakeFixture.OpenCloseCycleHitsVendorApi` state transitions 1→0→1 |
 | Encoder/decoder layout contract | Round-trip integration test catches byte-order/scale inversions invisible to structural validation |
 | Bridge marshal: worker → GUI thread | `FramesMarshalFromWorkerToGuiThread` |
@@ -292,9 +313,11 @@ handles:
 | Responsive layout (sidebar ↔ TabBar at 720px) incl. Live entry | Local run |
 | Version banner from generated version.h | Local run; single source of truth in root CMake `project()` |
 
-**Not verified (explicit gaps):** any real vendor DLL, any live vehicle,
-32-bit-only vendor DLL loading, and the PASSTHRU_MSG field order against
-a vendor header (see J2534 section caveat).
+**Not verified (explicit gaps):** any real vendor DLL LOAD/CONNECT
+(drivers are discovered and listed; none has been loaded or connected
+through the app), any live vehicle, 32-bit-only vendor DLL loading,
+and the PASSTHRU_MSG field order against a vendor header (see J2534
+section caveat).
 
 ## In Progress
 
@@ -311,9 +334,14 @@ v0.3.0 phases:
       fake-DLL tier.
 - [x] **Phase 3 remainder (URI params):** `?baud=`/`?flags=` strict
       query parsing landed 2026-10-14 (Commit D).
+- [x] **Phase 3 remainder (device picker):** SettingsPage picker +
+      bridge discovery surface + dual-root registry sweep landed
+      2026-10-14 (Commit E), picker verified against real installed
+      drivers (OBDX Pro VT/VX).
 - [ ] **Phase 3 remainder:** x86 surrogate host for 32-bit-only vendor
       DLLs; BENCH-tier live-DLL verification (incl. PASSTHRU_MSG header
-      diff); SettingsPage device picker.
+      diff, dumpbin architecture check on the OBDX DLL, first real
+      vendor load/connect).
 - [ ] **Phase 4 — Record-replay transport:** fixture capture +
       deterministic playback through the same frame API
 
@@ -356,6 +384,17 @@ v0.3.0 phases:
 12. **J2534 timestamps pass through untranslated** (vendor-defined
    units → `timestamp_us` unexamined). Normalization deferred until a
    real device reveals what vendors actually emit.
+13. **Picker treats one registry entry as one device.** Multiple
+   physical dongles behind a single vendor DLL (selectable via
+   `PassThruOpen`'s pName argument, currently passed as nullptr =
+   default device) are indistinguishable. Documented granularity limit
+   of the Commit E picker.
+14. **Discovery tests are shape-only / potentially vacuous** on a
+   machine with no discoverable vendors — they were green for weeks
+   while the dev machine's real drivers (OBDX, no-hyphen root) were
+   invisible to the code. Candidate fix: seeded-registry fixture with
+   admin-elevation guard, or documented count-positive assertions on
+   the known dev machine.
 
 ## Roadmap
 
@@ -363,7 +402,7 @@ v0.3.0 phases:
 |-------|-------|--------|
 | v0.1.0 | Skeleton: core ABI, Qt shell, responsive layout | ✅ Released |
 | v0.2.0 | Callback API, mock transport, CI + tests | ✅ Released (tagged) |
-| v0.3.0 | Signals layer, coalesced LiveView, J2534 transport, live vehicle read/logging | 🚧 Phases 1–3 HARNESS-complete incl. URI query params; remainder (surrogate host, device picker, live verify) + vehicle work pending |
+| v0.3.0 | Signals layer, coalesced LiveView, J2534 transport, live vehicle read/logging | 🚧 Phases 1–3 HARNESS-complete incl. URI params + device picker (discovery verified against real drivers); remainder (surrogate host, live verify) + vehicle work pending |
 | v0.4.0 | Security access discovery, flash capability | Planned |
 | v0.5.0+ | Multi-manufacturer plugin modules | Planned |
 
@@ -514,6 +553,30 @@ hook) exists because the feature changed what flows into
 `PassThruConnect`, and only an observation of that specific call site
 could notice. Same genus as 2026-10-13 (7): test the contract you
 changed, at the point it changed.
+
+**2026-10-14 — device picker + real-vendor discovery round (Commit E):**
+four lessons, one of them a benchmark for what the manual tier is FOR.
+(1) **The registry spec describes an ideal world; installers live in
+the real one.** First contact with a real driver (OBDX Pro VX/VT) showed
+a no-hyphen root spelling `PassThruSupport.04.04` living ONLY in
+WOW6432Node — invisible to a spec-spelled, single-root query. Found via
+`reg query` archaeology prompted by the picker's empty state, NOT by any
+test: see (2). Fix: dual-root sweep (spec spelling first for
+precedence) × both WOW64 views, dedupe absorbing overlap. (2) **Green
+tests can be vacuously green against machine-dependent data:** the
+discovery suite had been passing for weeks while the dev machine's real
+drivers were invisible to the code — every vendor-loop assertion
+iterated an empty array. Shape contracts are fine for marshaling;
+against live external state, either seed the state (fixture registry
+key, admin-guarded) or admit the test verifies the code path, not the
+data. (3) **A picker's first real-world duty is diagnosing its own
+environment:** the empty-state hint turned "it doesn't work" into a
+bounded investigation in three commands — UI states are diagnostic
+tools, not just decoration. (4) **Unverified war stories rot:** a
+half-remembered "tests failed because they found drivers" from early
+Phase 3 could not be reconciled with the code (which never saw those
+drivers). Either keep CI logs as the record or let the memory go —
+folklore debugging wastes a round of suspicion on the wrong suspect.
 
 ---
 
