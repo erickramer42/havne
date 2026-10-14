@@ -545,7 +545,7 @@ TEST(BridgeTest, StripChartDataPopulatedByLiveStream)
 }
 
 // ---------------------------------------------------------------------------
-// J2534 picker surface (Commit E): discovery marshaling + currentUri contract
+// J2534 picker surface: discovery marshaling + currentUri contract
 // ---------------------------------------------------------------------------
 
 TEST(BridgeTest, DiscoveredDevicesHaveWellFormedEntries)
@@ -553,9 +553,9 @@ TEST(BridgeTest, DiscoveredDevicesHaveWellFormedEntries)
     /* Marshaling only — the discovery itself is covered by
        test_j2534_discovery against the live registry. Count is
        registry-dependent (0..16, empty on non-Windows), so this pins
-       SHAPE: every entry carries string vendorName/dllPath. An entry
-       with a missing or non-string field would feed garbage into the
-       SettingsPage picker's bindings. */
+       SHAPE: every entry carries string vendorName/dllPath/architecture.
+       An entry with a missing or non-string field would feed garbage
+       into the SettingsPage picker's bindings. */
     QtTuneBridge bridge;
     const QVariantList devices = bridge.discoverJ2534Devices();
 
@@ -565,8 +565,10 @@ TEST(BridgeTest, DiscoveredDevicesHaveWellFormedEntries)
         const QVariantMap m = v.toMap();
         ASSERT_TRUE(m.contains("vendorName")) << "missing vendorName";
         ASSERT_TRUE(m.contains("dllPath")) << "missing dllPath";
+        ASSERT_TRUE(m.contains("architecture")) << "missing architecture";
         ASSERT_TRUE(m.value("vendorName").canConvert<QString>());
         ASSERT_TRUE(m.value("dllPath").canConvert<QString>());
+        ASSERT_TRUE(m.value("architecture").canConvert<QString>());
     }
 }
 

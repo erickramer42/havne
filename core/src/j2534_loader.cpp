@@ -98,6 +98,48 @@ bool read_function_library(HKEY hvendor, char* out, size_t out_size)
     return out[0] != '\0';
 }
 
+/* Sniff PE header architecture from a DLL path.
+ * Returns: 1=x86, 2=x64, 0=unknown (defaults to x86).
+ * Safe fallbacks: file open/read failures, invalid PE headers,
+ * or truncated files all return x86 (the conservative route
+ * for legacy drivers). */
+static uint32_t sniff_pe_architecture(const char* dll_path)
+{
+    HANDLE hFile = CreateFileA(dll_path, GENERIC_READ, FILE_SHARE_READ,
+                               NULL, OPEN_EXISTING,
+                               FILE_ATTRIBUTE_NORMAL, NULL);
+    if (hFile == INVALID_HANDLE_VALUE) {
+        return 1; // default to x86 on failure
+    }
+
+    DWORD bytes_read;
+    IMAGE_DOS_HEADER dos_hdr = {};
+    if (!ReadFile(hFile, &dos_hdr, sizeof(dos_hdr), &bytes_read, NULL) ||
+        dos_hdr.e_magic != IMAGE_DOS_SIGNATURE) {
+        CloseHandle(hFile);
+        return 1;
+    }
+
+    SetFilePointer(hFile, dos_hdr.e_lfanew, NULL, FILE_BEGIN);
+    IMAGE_NT_HEADERS nt_hdr = {};
+    if (!ReadFile(hFile, &nt_hdr, sizeof(nt_hdr), &bytes_read, NULL) ||
+        nt_hdr.Signature != IMAGE_NT_SIGNATURE) {
+        CloseHandle(hFile);
+        return 1;
+    }
+
+    uint16_t machine = nt_hdr.FileHeader.Machine;
+    CloseHandle(hFile);
+
+    if (machine == IMAGE_FILE_MACHINE_I386) {
+        return 1; // x86
+    } else if (machine == IMAGE_FILE_MACHINE_AMD64) {
+        return 2; // x64
+    } else {
+        return 1; // unknown → safe default to x86
+    }
+}
+
 void enumerate_view(const wchar_t* root_path,
                     REGSAM wow64_flag,
                     std::vector<qttune_j2534_device_t>& out_devices)
@@ -141,6 +183,12 @@ void enumerate_view(const wchar_t* root_path,
 
         if (read_function_library(hvendor, dev.dll_path,
                                   sizeof(dev.dll_path))) {
+            /* Annotate architecture (reserved[0]: 1=x86, 2=x64, per
+             * j2534.h) — feeds the picker's x86/x64 labeling and,
+             * later, the surrogate-vs-inproc routing decision. Cheap
+             * file-I/O per discovered vendor (typically 1-3 entries);
+             * the file was just validated as openable-by-name anyway. */
+            dev.reserved[0] = sniff_pe_architecture(dev.dll_path);                       
             out_devices.push_back(dev);
         }
         RegCloseKey(hvendor);

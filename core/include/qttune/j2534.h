@@ -32,7 +32,8 @@ typedef struct qttune_j2534_device {
     char vendor_name[QTTUNE_J2534_VENDOR_NAME_LEN];
     char dll_path[QTTUNE_J2534_DLL_PATH_LEN];
     uint32_t supported_protocols; /* 0 — reserved for PROTOCOLS bitmask parse */
-    uint32_t reserved[8];         /* ABI-stable expansion room */
+    uint32_t reserved[8];         /* ABI-stable expansion room
+                                   * [0]: architecture (1=x86, 2=x64, 0=unknown) */
 } qttune_j2534_device_t;
 
 /*

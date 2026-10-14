@@ -320,6 +320,13 @@ QVariantList QtTuneBridge::discoverJ2534Devices() const
         QVariantMap m;
         m["vendorName"] = QString::fromUtf8(devices[i].vendor_name);
         m["dllPath"] = QString::fromUtf8(devices[i].dll_path);
+        /* reserved[0] annotated by the loader's PE sniffer: 1=x86,
+         * 2=x64, 0/anything-else treated as x86 (sniffer's conservative
+         * default). Display value only (rule 2) — the routing decision
+         * itself lives core-side when the surrogate host lands. */
+        m["architecture"] = (devices[i].reserved[0] == 2)
+                                ? QStringLiteral("x64")
+                                : QStringLiteral("x86");
         out.append(m);
     }
     qttune_j2534_free_devices(devices);
