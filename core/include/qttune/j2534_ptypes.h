@@ -30,6 +30,15 @@
 #define QTTUNE_PT_PROTOCOL_ISO15765  0x05UL
 #define QTTUNE_PT_BAUD_ISO15765_500K 500000UL
 
+/* J2534-1 v4.04 RxStatus bit for 29-bit identifiers (CAN_29BIT_ID).
+ * ISO 15765 traffic is 29-bit by construction, so the bit is normally
+ * set — we still read it rather than assume, because misbehaving
+ * vendor DLLs are the whole reason the fake-DLL suite exists.
+ * Value per J2534-1 v4.04 from training knowledge: diff against the
+ * vendor's j2534.h before BENCH work, same caveat as the rest of
+ * this header. */
+#define QTTUNE_PT_CAN_29BIT_ID  0x01000000UL
+
 typedef struct qttune_pt_passthru_msg {
     unsigned long ProtocolID;
     unsigned long RxStatus;

@@ -34,6 +34,8 @@ typedef void (*fn_get_connect_params)(unsigned long*, unsigned long*,
 struct StreamCapture {
     std::atomic<int> count{0};
     unsigned char payloads[8][8]{};
+    unsigned int frame_flags[8]{};     /* F1: QTTUNE_FRAME_FLAG_* translation */
+    uint64_t timestamps[8]{};          /* pass-through contract */
 };
 
 void capture_cb(const qttune_frame_t* frame, void* user_data)
@@ -42,6 +44,8 @@ void capture_cb(const qttune_frame_t* frame, void* user_data)
     const int i = cap->count.fetch_add(1);
     if (i < 8) {
         memcpy(cap->payloads[i], frame->data, 8);
+        cap->frame_flags[i] = static_cast<unsigned int>(frame->flags);
+        cap->timestamps[i] = frame->timestamp_us;
     }
 }
 
@@ -84,6 +88,7 @@ protected:
         last_flags = flags;
         last_protocol = proto;
         qttune_session_close(session);
+        qttune_session_destroy(session);
         return rc;
     }
 
@@ -203,9 +208,9 @@ TEST(J2534StreamTest, DirectLoadUriDeliversInjectedFramesExactly)
     const unsigned char f1[8] = {0x62, 0xF1, 0x90, 0x2A, 0, 0, 0, 0};
     const unsigned char f2[8] = {0xDE, 0xAD, 0xBE, 0xEF, 1, 2, 3, 4};
 
-    inject(f0, 8, 1000, 0, 1);
-    inject(f1, 8, 2000, 0, 1);
-    inject(f2, 8, 3000, 0, 1);
+    inject(f0, 8, 1000, 0, 1);   /* standard */
+    inject(f1, 8, 2000, 1, 1);   /* EXTENDED — exercises the 29-bit path */
+    inject(f2, 8, 3000, 0, 1);   /* standard */
 
     /* Worker polls at 20ms; budget generously, assert EXACTLY 3 —
      * a fourth would mean the fake fabricated traffic. */
@@ -219,7 +224,23 @@ TEST(J2534StreamTest, DirectLoadUriDeliversInjectedFramesExactly)
     ASSERT_EQ(memcmp(cap.payloads[1], f1, 8), 0);
     ASSERT_EQ(memcmp(cap.payloads[2], f2, 8), 0);
 
+        /* F1 flag translation: fake's RxStatus bit -> frame flags word.
+     * Covered both directions for the first time — previously this
+     * mapping had zero coverage because the fake always sent 0. */
+    EXPECT_EQ(cap.frame_flags[0], 0u);
+    EXPECT_EQ(cap.frame_flags[1], QTTUNE_FRAME_FLAG_EXTENDED);
+    EXPECT_EQ(cap.frame_flags[2], 0u);
+
+    /* Timestamps pass through UNTRANSLATED — documented v0.3.0
+     * decision (vendor-defined units, see j2534_ptypes.h). These
+     * asserts pin that decision so a future "helpful" normalization
+     * can't land silently. */
+    EXPECT_EQ(cap.timestamps[0], uint64_t{1000});
+    EXPECT_EQ(cap.timestamps[1], uint64_t{2000});
+    EXPECT_EQ(cap.timestamps[2], uint64_t{3000});
+
     EXPECT_EQ(qttune_session_close(session), QT_OK);   /* joins worker */
+    qttune_session_destroy(session);
     FreeLibrary(mod);
 }
 
@@ -235,6 +256,7 @@ TEST(J2534StreamTest, StartIsIdempotent)
     EXPECT_EQ(qttune_session_start(session), QT_OK);
 
     EXPECT_EQ(qttune_session_close(session), QT_OK);
+    qttune_session_destroy(session);
 }
 
 TEST(J2534StreamTest, UnknownVendorNameRejected)

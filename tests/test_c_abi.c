@@ -1,0 +1,40 @@
+/* File/layer: tests/test_c_abi.c | strict C compilation of public headers
+ * Testing: UNIT — compile-only guarantee that the C ABI headers are C,
+ *          not C++-in-disguise. Reviewer finding: nothing previously
+ *          compiled the headers as C, so `static_assert` spellings,
+ *          name mangling surprises, or stray C++ keywords would only
+ *          surface at a third-party FFI consumer's build.
+ *
+ * Built as a real executable linking qttune-core from a C translation
+ * unit: proves both that the headers parse under C and that exported
+ * symbols resolve unmangled.
+ */
+
+#include <stddef.h>
+#include <stdio.h>
+
+#include "qttune/core.h"
+
+/* Negative-array-size idiom — valid in ALL C standards including
+ * pedantic C89, complementing the header's _Static_assert (C11+). */
+typedef char abi_frame_size_check[(sizeof(qttune_frame_t) == 88) ? 1 : -1];
+typedef char abi_data_offset_check[(offsetof(qttune_frame_t, data) == 16) ? 1 : -1];
+typedef char abi_flags_offset_check[(offsetof(qttune_frame_t, flags) == 80) ? 1 : -1];
+
+int main(void)
+{
+    /* Zeroed frame must be a plain classic CAN data frame (flag value 0). */
+    qttune_frame_t frame;
+    frame.arbitration_id = 0x7FF;
+    frame.channel_id = 0;
+    frame.data_length = 8;
+    frame.flags = QTTUNE_FRAME_FLAG_EXTENDED;
+    frame.reserved = 0;
+
+    /* Exercise a couple of exported symbols from C — catches mangling
+     * regressions at link time. */
+    printf("%s %s\n", qttune_version_string(),
+           qttune_status_string(QT_ERR_SESSION_CLOSED));
+    (void)frame;
+    return 0;
+}

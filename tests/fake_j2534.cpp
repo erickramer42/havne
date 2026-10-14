@@ -25,6 +25,7 @@ struct FrameSlot {
     unsigned char data[64];
     unsigned long size;
     unsigned long timestamp_us;
+    unsigned long rx_status;   /* replayed verbatim into PASSTHRU_MSG.RxStatus */
 };
 
 std::mutex g_lock;
@@ -116,7 +117,7 @@ long __stdcall PassThruReadMsgs(unsigned long ChannelID,
     memcpy(pMsg->Data, slot.data, slot.size);
     pMsg->DataSize      = slot.size;
     pMsg->ProtocolID    = QTTUNE_PT_PROTOCOL_ISO15765;
-    pMsg->RxStatus      = 0;
+    pMsg->RxStatus      = slot.rx_status;
     pMsg->Timestamp     = slot.timestamp_us;
     pMsg->ExtraDataIndex = 0;
 
@@ -159,7 +160,7 @@ void InjectFrame(const unsigned char* data, unsigned long size,
                  unsigned long is_extended,
                  unsigned long channel_id)
 {
-    (void)is_extended; (void)channel_id;
+    (void)channel_id;
     if (data == nullptr || size == 0 || size > 64) {
         return;
     }
@@ -173,6 +174,7 @@ void InjectFrame(const unsigned char* data, unsigned long size,
     memcpy(slot.data, data, size);
     slot.size = size;
     slot.timestamp_us = timestamp_us;
+    slot.rx_status = is_extended ? QTTUNE_PT_CAN_29BIT_ID : 0ul;
 }
 
 extern "C" __declspec(dllexport)

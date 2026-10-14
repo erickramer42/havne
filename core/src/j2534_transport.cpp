@@ -215,9 +215,9 @@ qttune_status_t resolve_uri(const char* uri, qttune_j2534_device_t* dev,
         strchr(selector, '\\') != nullptr || strchr(selector, '/') != nullptr;
 
     if (looks_like_path || has_separator) {
-        strncpy(dev->dll_path, selector, sizeof(dev->dll_path) - 1);
-        strncpy(dev->vendor_name, "direct",
-                sizeof(dev->vendor_name) - 1);
+        strncpy_s(dev->dll_path, sizeof(dev->dll_path), selector, _TRUNCATE);
+        strncpy_s(dev->vendor_name, sizeof(dev->vendor_name), "direct",
+                  _TRUNCATE);
         dev->vendor_id = 0;
         return QT_OK;
     }

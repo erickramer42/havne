@@ -1,6 +1,7 @@
 // File/layer: app/qttunebridge.cpp | Qt6 Core, app layer, C++17
 // Testing: ring behavior, valuesUpdated cadence, chartData shape in test_bridge;
-//          discoverJ2534Devices marshaling shape in test_bridge (addition);
+//          discoverJ2534Devices marshaling shape in test_bridge;
+//          message-ID decode gate covered by test_bridge + core round-trip;
 //          full-app SettingsPage picker verified by manual smoke
 
 #include "qttunebridge.h"
@@ -32,21 +33,23 @@ QVariant FrameListModel::data(const QModelIndex& index, int role) const
     }
     const QVariantMap& frame = m_frames[static_cast<size_t>(index.row())];
     switch (role) {
-        case TimestampRole: return frame.value("timestampUs");
-        case DlcRole:       return frame.value("dlc");
-        case ExtendedRole:  return frame.value("extended");
-        case PayloadRole:   return frame.value("payloadHex");
-        default:            return QVariant();
+        case TimestampRole:    return frame.value("timestampUs");
+        case DlcRole:         return frame.value("dlc");
+        case ExtendedRole:     return frame.value("extended");
+        case PayloadRole:      return frame.value("payloadHex");
+        case ArbitrationIdRole: return frame.value("arbId");
+        default:              return QVariant();
     }
 }
 
 QHash<int, QByteArray> FrameListModel::roleNames() const
 {
     return {
-        {TimestampRole, "timestampUs"},
-        {DlcRole,       "dlc"},
-        {ExtendedRole,  "extended"},
-        {PayloadRole,   "payloadHex"}
+        {TimestampRole,     "timestampUs"},
+        {DlcRole,           "dlc"},
+        {ExtendedRole,      "extended"},
+        {PayloadRole,       "payloadHex"},
+        {ArbitrationIdRole, "arbId"}
     };
 }
 
@@ -272,11 +275,20 @@ QtTuneBridge::QtTuneBridge(QObject* parent)
 QtTuneBridge::~QtTuneBridge()
 {
     if (m_session != nullptr) {
-        qttune_session_close(m_session);
-        m_session = nullptr;
+        destroySessionLocked();
     }
     if (m_initialized) {
         qttune_shutdown();
+    }
+}
+
+void QtTuneBridge::destroySessionLocked()
+{
+    // F1: close-then-destroy (fclose/free split). destroy() auto-closes
+    // if still open — safe either way, one funnel for every teardown path.
+    if (m_session != nullptr) {
+        qttune_session_destroy(m_session);
+        m_session = nullptr;
     }
 }
 
@@ -330,8 +342,7 @@ QString QtTuneBridge::connectSession(const QString& uri)
 
     rc = qttune_register_frame_callback(session, &QtTuneBridge::onFrame, this);
     if (rc != QT_OK) {
-        qttune_session_close(session);
-        m_session = nullptr;
+        destroySessionLocked();
         m_currentUri.clear();
         emit currentUriChanged();
         return QString::fromUtf8(qttune_status_string(rc));
@@ -340,8 +351,7 @@ QString QtTuneBridge::connectSession(const QString& uri)
     rc = qttune_session_start(session);
     if (rc != QT_OK) {
         qttune_unregister_frame_callback(session, &QtTuneBridge::onFrame, this);
-        qttune_session_close(session);
-        m_session = nullptr;
+        destroySessionLocked();
         m_currentUri.clear();
         emit currentUriChanged();
         return QString::fromUtf8(qttune_status_string(rc));
@@ -363,10 +373,7 @@ void QtTuneBridge::disconnectSession()
     if (!m_connected.load(std::memory_order_acquire)) return;
 
     m_connected.store(false, std::memory_order_release);
-    if (m_session != nullptr) {
-        qttune_session_close(m_session);
-        m_session = nullptr;
-    }
+    destroySessionLocked();
     m_coalesceTimer->stop();
     if (!m_currentUri.isEmpty()) {
         m_currentUri.clear();
@@ -429,14 +436,16 @@ void QtTuneBridge::handleFrameInternal(const qttune_frame_t* frame)
 
     // Defensive clamp: a misbehaving transport must never make us read past
     // the inline buffer, even if data_length exceeds the documented 0-64.
-    const uint8_t len = (frame->data_length <= sizeof(frame->data))
-                        ? frame->data_length
-                        : sizeof(frame->data);
+    // (data_length is uint16_t in the F1 frame ABI.)
+    const uint16_t len = (frame->data_length <= sizeof(frame->data))
+                         ? frame->data_length
+                         : static_cast<uint16_t>(sizeof(frame->data));
 
     QVariantMap vm;
     vm["timestampUs"] = QVariant::fromValue<quint64>(frame->timestamp_us);
+    vm["arbId"] = QVariant::fromValue<quint32>(frame->arbitration_id);
     vm["dlc"] = static_cast<uint32_t>(len);
-    vm["extended"] = frame->is_extended != 0;
+    vm["extended"] = (frame->flags & QTTUNE_FRAME_FLAG_EXTENDED) != 0;
     vm["payloadHex"] = QByteArray(
         reinterpret_cast<const char*>(frame->data),
         static_cast<qsizetype>(len)).toHex();
@@ -449,9 +458,18 @@ void QtTuneBridge::handleFrameInternal(const qttune_frame_t* frame)
     // across frames within the 100ms coalescing window. FIX: was hardcoded
     // length 8; uses actual payload length so CAN-FD / short frames decode
     // correctly and out-of-range signals fail cleanly in the decoder.
+    //
+    // F2 message gate: a signal only decodes from the arbitration ID it
+    // declares. Previously EVERY signal decoded against EVERY frame —
+    // with real multi-ID bus traffic that silently corrupts every value.
+    // The mock's every-16th-frame 29-bit diagnostic traffic now exercises
+    // the rejection path continuously.
     const QttuneSignalSet* set = qttune_mock_signal_set();
     for (uint32_t i = 0; i < set->count; ++i) {
         const QttuneSignalDef& def = set->defs[i];
+        if (def.message_id != frame->arbitration_id) {
+            continue;   // signal rides a different CAN message
+        }
         float val = 0.0f;
         if (qttune_decode_signal(&def, frame->data, len, &val) == 0) {
             bool merged = false;

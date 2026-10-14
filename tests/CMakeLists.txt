@@ -31,6 +31,23 @@ target_link_libraries(test_signals PRIVATE
 
 gtest_discover_tests(test_signals)
 
+# --- C ABI compilation check: MUST stay Qt-free, builds everywhere ---
+# Compiles the public headers as strict C and links exported symbols
+# from a C TU — catches C++-isms and name-mangling regressions an FFI
+# consumer would hit. Reviewer finding: nothing else compiled headers as C.
+add_executable(test_c_abi test_c_abi.c)
+
+target_include_directories(test_c_abi PRIVATE
+    ${CMAKE_SOURCE_DIR}/core/include
+)
+
+target_link_libraries(test_c_abi PRIVATE
+    qttune-core
+)
+
+add_test(NAME c_abi COMMAND test_c_abi)
+set_tests_properties(c_abi PROPERTIES LABELS "abi")
+
 # --- Bridge tests: only when the full app (and Qt) is available ---
 if(NOT QTTUNE_BUILD_CORE_ONLY)
 

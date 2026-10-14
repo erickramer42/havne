@@ -338,15 +338,38 @@ qttune_status_t qttune_j2534_read_frame(qttune_j2534_handle_t* handle,
         return QT_OK;
     }
 
+    /* Wipe the whole struct first: the F1 ABI documents reserved as
+     * must-be-zero and flags as a full word — a caller reusing one
+     * frame variable across reads must never inherit stale bits. */
+    *out_frame = qttune_frame_t{};
+
+    /* J2534-1 PASSTHRU_MSG carries NO arbitration ID — CAN identity
+     * is expressed via PassThruStartMsgFilter patterns, and ISO 15765
+     * addressing bytes ride in the payload. Until the transport layer
+     * learns the filter API (and what pattern a real vehicle needs,
+     * BENCH-tier), the J2534 path reports id 0 and the bridge's
+     * message-ID gate therefore does not match these frames. That is
+     * CORRECT for v0.3.0: the mock set (0x0C0) is mock-only by
+     * design; a real signal set for this path arrives with the filter
+     * work. Documented, not silent. */
+    out_frame->arbitration_id = 0;
     out_frame->channel_id = 0;
-    out_frame->is_extended = 0;   /* ISO 15765 29-bit flag: later work */
-    out_frame->timestamp_us = msg.Timestamp;   /* pass-through; unit
-                                                * normalization deferred */
+    out_frame->flags = (msg.RxStatus & QTTUNE_PT_CAN_29BIT_ID)
+                        ? QTTUNE_FRAME_FLAG_EXTENDED : 0u;
+
+    /* Units are vendor-defined (see j2534_ptypes.h) — passed through
+     * untranslated per the documented v0.3.0 decision; normalization
+     * is BENCH work once a real device reveals the vendor epoch. */
+    out_frame->timestamp_us = msg.Timestamp;
+
+    /* Clamp before copy: a buggy vendor DATA_LENGTH is the documented
+     * overflow vector (also flagged high-risk in the surrogate design).
+     * data_length is uint16_t in the F1 ABI — cast follows the clamp. */
     unsigned long n = msg.DataSize;
     if (n > sizeof(out_frame->data)) {
-        n = sizeof(out_frame->data);   /* clamp — CAN-FD sized buffer */
+        n = sizeof(out_frame->data);
     }
-    out_frame->data_length = static_cast<uint8_t>(n);
+    out_frame->data_length = static_cast<uint16_t>(n);
     memcpy(out_frame->data, msg.Data, n);
 
     *got_frame = true;

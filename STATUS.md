@@ -1,7 +1,7 @@
 # QtTune — Project Status
 
 **Date:** October 14, 2026
-**Version:** v0.2.0 (released, tagged); v0.3.0 Phases 1–2 complete, Phase 3 (J2534) HARNESS-complete incl. URI query params + device picker — live-vehicle + x86 surrogate host pending
+**Version:** v0.3.0-dev (ABI-breaking frame redesign + lifecycle split); v0.2.0 still tagged. Phases 1–3 HARNESS-complete incl. URI query params + device picker — live-vehicle + x86 surrogate host pending.
 **Repository:** https://github.com/erickramer42/qttune
 **CI:** [![CI](https://github.com/erickramer42/qttune/actions/workflows/ci.yml/badge.svg)](https://github.com/erickramer42/qttune/actions/workflows/ci.yml)
 
@@ -44,6 +44,8 @@ Rules the project is built around:
 3. **The C ABI is the FFI boundary** — stable handles, flat functions,
    POD structs. Enum values evolve append-only; anything above the ABI
    is disposable.
+  
+* Frame struct redesigned in v0.3.0: `arbitration_id`, `flags` bitfield (extended/FD/etc.), session-relative timestamps, 64-byte payload capacity. Previous struct (`is_extended` flag, 8-byte payload) retired. See commit message `feat!: frame ABI ...` for migration details.
 
 ## Data Path
 
@@ -87,10 +89,7 @@ Contract highlights:
   (10 Hz), decoupled from frame rate (mock 20 fps, future J2534 500 Hz).
 - Strip-chart history timestamps are BATCH-stamped (one timestamp per
   coalesce window, from a model-side QElapsedTimer restarted per
-  connect). Honest resolution given the staging buffer merges
-  latest-per-ID across the window; the `timestampMs` parameter on
-  `updateValues` is the seam where per-sample timestamps land when
-  decode moves worker-side.
+  connect). Honest resolution given the staging buffer merges latest-per-ID across the window; per-sample timestamps arrive when the F2 message-ID gate activates (decode worker-side under J2534).
 - J2534 teardown ordering is a hard contract: worker joined BEFORE
   `PassThruDisconnect`/`FreeLibrary` — the worker calls ReadMsgs through
   function pointers that dangle the instant the module unmaps.
@@ -99,9 +98,8 @@ Contract highlights:
 
 POD signal metadata + linear decode: `display = raw * scale + offset`.
 
-- `QttuneSignalDef` — POD struct: byte/bit position, type enum (UINT8..INT32,
-  FLOAT32), scale/offset, unit string, display hints, reserved fields for
-  ABI-stable growth.
+- `QttuneSignalDef` — POD struct: byte/bit position, type enum, scale/offset, 
+  unit string, `message_id` (CAN arbitration ID for filtering), display hints, reserved fields for ABI-stable growth. Size pinned at 88 bytes (ABI check in `test_signals.cpp`).
 - `qttune_decode_signal(def, payload, len, out)` — Intel (LSB-first) bit
   extraction, sign extension for INT types, IEEE-754 passthrough for
   FLOAT32. Standardized error codes (NULL=1, bounds=2, bit params=3,
@@ -115,6 +113,10 @@ POD signal metadata + linear decode: `display = raw * scale + offset`.
 - **Motorola (MSB-first) bit numbering is a deliberate non-goal** until a
   flags bit selects it — first customer of a reserved flags bit is byte
   order (DBC mixes Motorola and Intel freely).
+- **Message-ID gating (v0.3.0 Phase 2b):** signals declare the CAN arbitration 
+  ID they ride on; the bridge decodes only frames matching that ID. Mock set
+  declares `MOCK_TELEMETRY_ARB_ID = 0x0C0`. J2534 transport reports zero `arbitration_id` until filter-layer support lands (documented inertness —
+  frames flow, signals stay empty, nothing corrupts silently).
 - **Mock emission (Phase 1b):** tick-driven simulation (idle RPM wobble +
   rev blips, coolant warm-up toward thermostat, trailing IAT, coupled
   throttle/load), encoded as the inverse of the signal definitions.
@@ -150,9 +152,8 @@ POD signal metadata + linear decode: `display = raw * scale + offset`.
   consumer.)
 - Bridge metrics: `guiNotifyCount` (per-frame instrumentation, baseline
   1:1 with frames) and `signalBatchCount` (~10/s at any frame rate).
-  Baseline measured before coalescing: 200 notify emissions / 10 s at
-  mock rate → LiveView path now 10/s. **~20× reduction, decoupled from
-  frame rate.**
+  Baseline: 200 frame notifications / 10 s at mock rate → LiveView path now ~10
+  batch emissions / 10 s (100ms windows). **~20× reduction, decoupled from frame rate.**
 - LiveViewPage QML: subscription checkboxes, tabular-digit value labels,
   and strip-chart Canvas — shared time axis across series, per-series
   value scaling (RPM vs coolant on one shared y-axis would flatten the
@@ -232,9 +233,9 @@ vehicle has been connected.** Landmarks, in commit order:
   into the x64 app — the surrogate-host wall).
 - **Shared internal contract:** `core/include/qttune/j2534_ptypes.h`
   defines `PASSTHRU_MSG` consumed by BOTH the loader and the fake DLL —
-  layout drift between them is structurally impossible. ⚠️ BENCH-tier
-  caveat: the field order is from training knowledge, not from a vendor
-  header; diff against a real vendor's `j2534.h` before first live use.
+  layout drift between them is structurally impossible. ⚠️ BENCH-tier caveat: `PASSTHRU_MSG` layout is from training knowledge; diff against the vendor's 
+  `j2534.h` before first live use. Shared header consumed by both loader and
+  fake — layout drift impossible between them.
   Nothing in the HARNESS tier can catch that divergence — the fake
   accepts whatever the header says.
 - **Deterministic fake:** `InjectFrame` enqueues into a mutex-guarded
@@ -245,6 +246,10 @@ vehicle has been connected.** Landmarks, in commit order:
   frame or a dropped injection fails the suite.
 - Teardown ordering (see Data Path contract): join worker → disconnect
   channel → `PassThruClose` → `FreeLibrary`.
+- **F1 Frame ABI redesign (2026-10-14):** `arbitration_id` first-class field (0
+  for J2534 until filter API lands), `flags` bitfield (EXTENDED, FD, BRS, RTR, ERROR, TX_ECHO), session-relative µs timestamps, 64-byte data buffer. Old `is_extended` boolean and implicit padding eliminated. Size-neutral (still 88 bytes), layout hardened with compile-time assertions in `test_c_abi.c`.
+- **F2 Message-ID decode gate (2026-10-14):** signals declare `message_id`;
+  bridge filters on `frame.arbitration_id == def.message_id` before extraction. Prevents corruption from multi-ID bus traffic (previously every signal decoded against every frame). Mock traffic exercises the gate continuously (diagnostic 29-bit frames rejected). J2534 path inert (zero arb ID) — documented, not silent.
 
 **Phase 3 remains OPEN. Outstanding:** x86-surrogate host for 32-bit-only
 vendor DLLs (J2534-1 mandates only that they be in-proc; many ship x86
@@ -290,7 +295,7 @@ handles:
 | Capability | Verified by |
 |---|---|
 | Core builds standalone with zero Qt deps | `core-and-tests` CI job (Ubuntu, Qt absent) |
-| 64 tests pass: 18 core + 15 signals + 16 bridge + 15 J2534 | GTest suites; 64/64 locally on Windows/MSVC 2022, green on 3-platform CI matrix |
+| 70 automated tests pass (18 core + 15 signals + 16 bridge + 15 J2534 + 6 new F1/F2 lifecycle + ABI tests) | GTest suites; 70/70 locally + 3-platform CI matrix green |
 | Mock transport delivers physically plausible, signal-set-decodable frames | `MockFramesDecodeAgainstMockSignalSet`: real worker frames decoded under every mock definition, physical ranges asserted |
 | J2534 registry discovery finds real installed vendors (OBDX Pro VT/VX on dev machine), dual-root spec + no-hyphen spelling, dedupes cross-sweep | `test_j2534_discovery` suite + manual smoke: picker populates from live registry |
 | J2534 loader: LoadLibraryEx → 7-export resolution → PassThruOpen, clean unwind on missing DLL/exports | `test_j2534_load` suite (incl. proven-unmapped assertion after failed load) |
@@ -312,6 +317,9 @@ handles:
 | Full app builds Windows (MSVC 2022) + macOS (AppleClang, Qt 6.12.0) | CI jobs |
 | Responsive layout (sidebar ↔ TabBar at 720px) incl. Live entry | Local run |
 | Version banner from generated version.h | Local run; single source of truth in root CMake `project()` |
+| C ABI headers compile as strict C (no C++-isms) | `test_c_abi.c` — builds on all platforms, links core symbols |
+| Close/destroy lifecycle split prevents use-after-free on double-close | `CloseIsIdempotentAndDestroyIsSafe`, `DestroyAutoClosesActiveSession` |
+| Frame flag translation verified end-to-end (fake `RxStatus` bit → `qttune_frame_t.flags`) | `DirectLoadUriDeliversInjectedFramesExactly` extended with flag assertions |
 
 **Not verified (explicit gaps):** any real vendor DLL LOAD/CONNECT
 (drivers are discovered and listed; none has been loaded or connected
@@ -338,10 +346,10 @@ v0.3.0 phases:
       bridge discovery surface + dual-root registry sweep landed
       2026-10-14 (Commit E), picker verified against real installed
       drivers (OBDX Pro VT/VX).
-- [ ] **Phase 3 remainder:** x86 surrogate host for 32-bit-only vendor
-      DLLs; BENCH-tier live-DLL verification (incl. PASSTHRU_MSG header
-      diff, dumpbin architecture check on the OBDX DLL, first real
-      vendor load/connect).
+- [x] **Phase 3 remainder:** frame ABI redesign (F1), message-ID decode gate (F2),
+      lifecycle split, C ABI verification.
+- [ ] **Phase 3 remainder:** x86 surrogate host for 32-bit-only vendor DLLs; 
+      BENCH-tier live-DLL verification (incl. `PASSTHRU_MSG` header diff, dumpbin architecture check on the OBDX DLL, first real vendor load/connect).
 - [ ] **Phase 4 — Record-replay transport:** fixture capture +
       deterministic playback through the same frame API
 
@@ -395,6 +403,10 @@ v0.3.0 phases:
    invisible to the code. Candidate fix: seeded-registry fixture with
    admin-elevation guard, or documented count-positive assertions on
    the known dev machine.
+15. J2534 message-ID gate is inert (reports zero arbitration_id). The F2 gate 
+    filters on message_id but J2534-1 has no per-message ID field in PASSTHRU_MSG; ISO 15765 addressing rides in the payload. Filter layer (message-pattern registration via PassThruStartMsgFilter) is the next milestone to activate the gate for real traffic. Documented, not silent.
+16. ABI version string still says 0.2.0 — the struct redesign warrants a version
+    bump to 0.3.0-dev in the same commit as the F-series. The string should not advertise a layout it no longer has.
 
 ## Roadmap
 
@@ -402,7 +414,7 @@ v0.3.0 phases:
 |-------|-------|--------|
 | v0.1.0 | Skeleton: core ABI, Qt shell, responsive layout | ✅ Released |
 | v0.2.0 | Callback API, mock transport, CI + tests | ✅ Released (tagged) |
-| v0.3.0 | Signals layer, coalesced LiveView, J2534 transport, live vehicle read/logging | 🚧 Phases 1–3 HARNESS-complete incl. URI params + device picker (discovery verified against real drivers); remainder (surrogate host, live verify) + vehicle work pending |
+| v0.3.0 | Signals layer, coalesced LiveView, J2534 transport, live vehicle read/logging | 🚧 Phases 1–3 HARNESS-complete incl. URI params + device picker + F1/F2 ABI redesign (frame flags/message-ID gate/lifecycle); remainder (surrogate host, live verify) + vehicle work pending |
 | v0.4.0 | Security access discovery, flash capability | Planned |
 | v0.5.0+ | Multi-manufacturer plugin modules | Planned |
 
@@ -577,6 +589,8 @@ half-remembered "tests failed because they found drivers" from early
 Phase 3 could not be reconciled with the code (which never saw those
 drivers). Either keep CI logs as the record or let the memory go —
 folklore debugging wastes a round of suspicion on the wrong suspect.
+
+**2026-10-14 — F-series (Frame ABI + Lifecycle + Gate):** ABI-breaking frame redesign (arbitration ID first-class, flags word, session-relative timestamps, 64-byte payload), close/destroy split eliminating use-after-free on double-close, message-ID decode gate activating signal filtering, C ABI headers verified as strict C (`test_c_abi.c`). Test count rises 64→70. Lessons: (1) ABI breaks require version-string sync — the string advertising a struct layout it no longer has is worse than silence. (2) Poll-until-condition waits in test suites eliminate wall-clock dependence on CI runner speed. (3) Shared constants beat comments (mock arb ID, RxStatus bit); the compiler enforces what we previously trusted.
 
 ---
 

@@ -263,3 +263,32 @@ TEST_F(SignalDecodeTest, DecodeRejectsNonMultipleOfEightLengths) {
     EXPECT_EQ(qttune_decode_signal(&signal, frame, 5, &value), 0);
     EXPECT_NEAR(value, 255.0f, 0.01f);
 }
+
+TEST(SignalsTest, SignalDefLayoutIsPinned)
+{
+    /* ABI pin. Hand-computed for the documented layout:
+     *   id(2)+pad(2), name[32]=2..33, type(enum,4)=36..39,
+     *   start_byte/num_bytes/bit_offset/bit_length=40..43,
+     *   scale(4)=44, offset(4)=48, unit[16]=52..67,
+     *   decimal_places=68+pad(3), flags(4)=72, message_id(4)=76,
+     *   reserved[2](8)=80..87  =>  sizeof == 88.
+     * If this fires, a field was added/removed/resized — bump version.
+     * (2026-10-14: initial pin said 84, wrong by the enum's width;
+     * the compiler was right.) */
+    ASSERT_EQ(sizeof(QttuneSignalDef), 88u);
+    ASSERT_EQ(offsetof(QttuneSignalDef, flags), 72u);
+    ASSERT_EQ(offsetof(QttuneSignalDef, message_id), 76u);
+}
+
+TEST(SignalsTest, MockSignalsDeclareTelemetryMessageId)
+{
+    /* Every mock signal rides the telemetry CAN message. Half of the
+     * bridge's F2 decode gate: transport side is pinned by
+     * MockEmitsKnownArbitrationIds (test_core). */
+    const QttuneSignalSet* set = qttune_mock_signal_set();
+    ASSERT_NE(set, nullptr);
+    for (uint32_t i = 0; i < set->count; ++i) {
+        EXPECT_EQ(set->defs[i].message_id, 0x0C0u)
+            << "signal '" << set->defs[i].name << "' not on telemetry ID";
+    }
+}

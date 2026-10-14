@@ -1,5 +1,5 @@
 // File/layer: core/include/qttune/core.h | C ABI, public interface
-// Testing: Public API contract—every function needs corresponding test
+// Testing: Public API contract — every function needs a corresponding test
 
 #ifndef QTTUNE_CORE_H
 #define QTTUNE_CORE_H
@@ -14,15 +14,49 @@ extern "C" {
 /* Forward-declared opaque handle types */
 typedef struct qttune_session qttune_session_t;
 
-/* Frame structure - POD only, no pointers except length */
+/* Frame flag bitfield. A zeroed frame == plain classic CAN data frame.
+ * Bit positions are ABI-stable; new flags APPEND only, never renumber.
+ */
+#define QTTUNE_FRAME_FLAG_EXTENDED       0x00000001u /* 29-bit arbitration ID */
+#define QTTUNE_FRAME_FLAG_REMOTE          0x00000002u /* remote transmission request */
+#define QTTUNE_FRAME_FLAG_FD              0x00000004u /* CAN-FD frame */
+#define QTTUNE_FRAME_FLAG_BITRATE_SWITCH  0x00000008u /* FD bitrate switch (BRS) */
+#define QTTUNE_FRAME_FLAG_ERROR           0x00000010u /* bus/controller error report */
+#define QTTUNE_FRAME_FLAG_TX_ECHO         0x00000020u /* echo of our own transmit */
+
+/* Frame structure — POD only, no pointers.
+ *
+ * Layout is pinned by the assertions below: sizeof == 88 with ZERO hidden
+ * padding on every supported platform (the old struct was also 88 bytes,
+ * but 7 of them were accidental tail padding). ABI breaking change:
+ * is_extended/rsvd are GONE, replaced by flags/reserved; data_length is
+ * now uint16_t; arbitration_id separates CAN identity from channel index.
+ * Same-size, better geometry.
+ */
 typedef struct qttune_frame {
-    uint64_t timestamp_us;    /* Microseconds since epoch or session start */
-    uint32_t channel_id;      /* Logical channel (e.g., CAN bus ID) */
-    uint8_t data[64];         /* Max CAN-FD payload size */
-    uint8_t data_length;      /* Actual bytes used (0-64) */
-    uint8_t is_extended;      /* Extended frame flag (29-bit address) */
-    uint8_t rsvd[3];          /* Padding for alignment */
+    uint64_t timestamp_us;    /* Microseconds since SESSION START (producer's
+                                 steady clock, monotonic per channel) */
+    uint32_t arbitration_id;  /* CAN identifier: <= 0x7FF standard, up to
+                                 0x1FFFFFFF when FLAG_EXTENDED set */
+    uint16_t channel_id;      /* Bus/channel index only — never multiplexes
+                                 an arbitration ID */
+    uint16_t data_length;     /* Bytes used in data[]: 0..64 */
+    uint8_t  data[64];        /* Classic CAN (8) .. CAN-FD (64) payload */
+    uint32_t flags;           /* QTTUNE_FRAME_FLAG_* bitmask */
+    uint32_t reserved;        /* Producers MUST leave zero; ABI growth space */
 } qttune_frame_t;
+
+/* Compile-time ABI pinning. C++ and C11 paths; C99 falls back to the
+ * negative-array-size idiom in tests/test_c_abi.c. */
+#if defined(__cplusplus)
+static_assert(sizeof(qttune_frame_t) == 88, "qttune_frame_t size is ABI — bump version if this moves");
+static_assert(offsetof(qttune_frame_t, data) == 16, "frame data offset is ABI");
+static_assert(offsetof(qttune_frame_t, flags) == 80, "frame flags offset is ABI");
+#elif defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
+_Static_assert(sizeof(qttune_frame_t) == 88, "qttune_frame_t size is ABI");
+_Static_assert(offsetof(qttune_frame_t, data) == 16, "frame data offset is ABI");
+_Static_assert(offsetof(qttune_frame_t, flags) == 80, "frame flags offset is ABI");
+#endif
 
 /* Callback function signature - called from transport thread */
 typedef void (*qttune_frame_callback_t)(
@@ -39,7 +73,7 @@ typedef enum {
     QT_ERR_OUT_OF_MEMORY = 4,
     QT_ERR_SESSION_CLOSED = 5,
     QT_ERR_ALREADY_REGISTERED = 6,  /* Kept for backward compat if needed */
-    QT_ERR_LOAD_FAILED = 7          /* New: DLL load/export resolution failed */
+    QT_ERR_LOAD_FAILED = 7          /* DLL load/export resolution failed */
 } qttune_status_t;
 
 /* Lifecycle */
@@ -48,13 +82,31 @@ void qttune_shutdown(void);
 const char* qttune_version_string(void);
 const char* qttune_status_string(qttune_status_t status);
 
-/* Session management */
+/* Session management.
+ *
+ * Lifecycle follows FILE/free discipline:
+ * - create()  — allocates and attaches a transport (fopen)
+ * - close()   — stops streaming, detaches the transport, releases worker
+ *               and callback state. IDEMPOTENT-SAFE: a second close returns
+ *               QT_ERR_SESSION_CLOSED, never touches freed memory (fixed
+ *               2026-10-14: close used to delete the session, making the
+ *               closed-flag check itself a use-after-free).
+ * - destroy() — frees the session (free). The handle is INVALID afterward;
+ *               calling any API with it is undefined behavior, exactly as
+ *               free(p); *p. Null is a safe no-op. Auto-closes first if
+ *               still open.
+ *
+ * Recommended order: close() then destroy(). Skip close() only when the
+ * session was never started.
+ */
 qttune_status_t qttune_session_create(
     const char* transport_uri,
     qttune_session_t** out_session
 );
 
 qttune_status_t qttune_session_close(qttune_session_t* session);
+
+qttune_status_t qttune_session_destroy(qttune_session_t* session);
 
 qttune_status_t qttune_session_start(qttune_session_t* session);
 
@@ -76,7 +128,12 @@ qttune_status_t qttune_session_receive(
  * CONTRACTS:
  * - Callbacks execute on transport thread, NOT the calling thread
  * - Callbacks must not block (>10ms risks transport backlog)
- * - Callbacks must not call qttune_* APIs that acquire session lock
+ * - Callbacks must not call qttune_session_close() or
+ *   qttune_session_destroy() — they synchronize with the worker
+ * - register/unregister ARE permitted from inside a callback:
+ *   dispatch snapshots the callback list under lock and invokes
+ *   unlocked, so reentry cannot deadlock (tested:
+ *   SelfUnregisterDuringLiveDispatch)
  * - Duplicate (callback, user_data) pairs are silently deduplicated
  * - unregister is idempotent—calling it twice is safe
  */
@@ -91,14 +148,6 @@ qttune_status_t qttune_unregister_frame_callback(
     qttune_frame_callback_t callback,
     void* user_data
 );
-
-/* Optional: public transport API if you want to expose it */
-qttune_status_t qttune_transport_attach(
-    qttune_session_t* session,
-    const char* transport_uri
-);
-
-void qttune_transport_detach(qttune_session_t* session);
 
 #ifdef __cplusplus
 }

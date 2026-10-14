@@ -1,10 +1,12 @@
 // File/layer: core/src/mock_transport.cpp | C++17, Qt-free, CI-validated headless build
-// Testing: All core tests must pass UNCHANGED after refactor
+// Testing: Core tests must pass after frame ABI change (arbitration IDs,
+//          session-relative timestamps, flags)
 
 #include "qttune/core.h"
 #include "qttune/internal.h"
 #include "session.h"
 #include "qttune/signals.h"   /* SimState only — decode stays consumer-side */
+#include "qttune/signal_sets.h"
 
 #include <atomic>
 #include <chrono>
@@ -14,6 +16,7 @@
 namespace {
 
 constexpr uint32_t DEFAULT_FRAME_INTERVAL_MS = 50;
+constexpr uint32_t MOCK_DIAG_ID = 0x18FF0C00u;
 
 /* ---------------------------------------------------------------
  * Simulated vehicle state: physically plausible, tick-driven.
@@ -108,6 +111,15 @@ struct qttune_mock_transport {
     qttune_session_t* session = nullptr;  // Need this for dispatch
     uint32_t interval_ms = DEFAULT_FRAME_INTERVAL_MS;
     uint64_t frame_counter = 0;
+    /* Session epoch — captured at attach (attach happens inside
+     * session_create, so this IS "session start" for the mock).
+     * Written once before the worker spawns, read-only after: the
+     * thread-creation happens-before edge covers publication, no
+     * synchronization needed. Replaces absolute steady_clock epoch,
+     * which produced meaningless 12-digit timestamps (reviewer
+     * finding: "since epoch or session start" ambiguity — now it's
+     * session-relative, as the header documents). */
+    std::chrono::steady_clock::time_point epoch{};
     SimState sim;   /* owned by worker — only touched on worker thread */
 };
 
@@ -120,12 +132,25 @@ void mock_worker(qttune_mock_transport* t)
 
     while (!t->stop_requested.load()) {
         qttune_frame_t frame{};
+        /* Session-relative, monotonically increasing — the contract
+         * core.h now documents. Small numbers, meaningful deltas. */
         frame.timestamp_us = static_cast<uint64_t>(
             std::chrono::duration_cast<std::chrono::microseconds>(
-                std::chrono::steady_clock::now().time_since_epoch())
-                .count());
-        frame.is_extended = static_cast<uint8_t>((t->frame_counter % 16) == 0);
+                std::chrono::steady_clock::now() - t->epoch).count());
         frame.data_length = 8;
+
+        /* Every 16th frame is a 29-bit "diagnostic" frame carrying the
+         * same payload: exercises FLAG_EXTENDED and, once decode is
+         * message-ID-gated (F2), exercises REJECTION of unrelated IDs
+         * — the isolation the old every-frame-decodes-everything
+         * design couldn't demonstrate. */
+        if ((t->frame_counter % 16) == 0) {
+            frame.flags = QTTUNE_FRAME_FLAG_EXTENDED;
+            frame.arbitration_id = MOCK_DIAG_ID;
+        } else {
+            frame.flags = 0;
+            frame.arbitration_id = MOCK_TELEMETRY_ARB_ID;
+        }
 
         const float throttle = t->sim.throttle_pct;
         t->sim.step();
@@ -142,6 +167,7 @@ void mock_worker(qttune_mock_transport* t)
 
 qttune_status_t mock_start(qttune_session_t* session, void* impl)
 {
+    (void)session;   /* impl carries everything; fixes CI warning C4100 */
     qttune_mock_transport* t = static_cast<qttune_mock_transport*>(impl);
     if (t == nullptr) {
         return QT_ERR_NO_TRANSPORT;
@@ -202,6 +228,7 @@ qttune_status_t qttune_mock_transport_attach(qttune_session_t* session,
             return QT_ERR_OUT_OF_MEMORY;
         }
         impl->session = session;  /* for callback dispatch */
+        impl->epoch = std::chrono::steady_clock::now();  /* session start */
     } catch (...) {
         return QT_ERR_OUT_OF_MEMORY;
     }
@@ -209,7 +236,5 @@ qttune_status_t qttune_mock_transport_attach(qttune_session_t* session,
      * Keeps registration-only sessions single-threaded for tests. */
     return QT_OK;
 }
-
-/* ---- Legacy stubs removed: session now routes through ops only. ---- */
 
 } // extern "C"

@@ -32,7 +32,13 @@ typedef struct QttuneSignalDef {
     char unit[16];
     uint8_t decimal_places;
     uint32_t flags;
-    uint32_t reserved[3];
+    /* NEW (was reserved[0]): CAN arbitration ID this signal rides on.
+     * Consumers gate decode on frame->arbitration_id == message_id
+     * BEFORE extraction; qttune_decode_signal itself remains payload-
+     * only. Promoting a reserved slot: struct size and all other field
+     * offsets are UNCHANGED. */
+    uint32_t message_id;
+    uint32_t reserved[2];
 } QttuneSignalDef;
 
 /* Single canonical definition — no duplicates */

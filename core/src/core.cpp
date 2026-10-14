@@ -1,6 +1,5 @@
 // File/layer: core/src/core.cpp | C++17, Qt-free, CI-validated headless build
-// Testing: All 18 core tests must pass UNCHANGED — this is a behavior-
-//          preserving refactor; any test modification here is a red flag
+// Testing: Core tests must pass after close/destroy split + frame ABI change
 
 #include "qttune/version.h"
 #include "qttune/core.h"
@@ -111,6 +110,11 @@ qttune_status_t qttune_session_close(qttune_session_t* session)
         return QT_ERR_NULL_ARGUMENT;
     }
 
+    /* First-closer wins the CAS; everyone else gets a clean error on
+     * LIVE memory. (Fixed 2026-10-14: close used to `delete` the
+     * session here, so the flag check itself read freed memory on a
+     * second call — UB that only survived because the allocator didn't
+     * reuse the slot within the test's lifetime.) */
     bool expected = false;
     if (!session->closed.compare_exchange_strong(expected, true)) {
         return QT_ERR_SESSION_CLOSED;
@@ -118,8 +122,8 @@ qttune_status_t qttune_session_close(qttune_session_t* session)
 
     if (session->transport != nullptr) {
         session->transport->ops->detach(session, session->transport->impl);
-        /* detach() frees the transport wrapper; NULL for double-close
-         * defense even though the closed flag already gates it. */
+        /* detach() frees the transport wrapper; NULL for defense even
+         * though the closed flag already gates every other path. */
         session->transport = nullptr;
     }
 
@@ -127,6 +131,22 @@ qttune_status_t qttune_session_close(qttune_session_t* session)
         std::lock_guard<std::mutex> lock(session->callback_mutex);
         session->callbacks.clear();
     }
+
+    /* NOTE: no `delete` — destruction moved to qttune_session_destroy
+     * (fclose/free split, see core.h). The session object stays
+     * allocated so the closed flag remains readable; destroy() frees it. */
+    return QT_OK;
+}
+
+qttune_status_t qttune_session_destroy(qttune_session_t* session)
+{
+    if (session == nullptr) {
+        return QT_OK;   /* free(nullptr) semantics */
+    }
+
+    /* Auto-close if still open: safe because close() joins the worker
+     * before returning, so no transport thread outlives the delete. */
+    (void)qttune_session_close(session);
 
     delete session;
     return QT_OK;
@@ -138,6 +158,9 @@ qttune_status_t qttune_session_send(
 {
     if (session == nullptr || frame == nullptr) {
         return QT_ERR_NULL_ARGUMENT;
+    }
+    if (session->closed.load()) {
+        return QT_ERR_SESSION_CLOSED;
     }
     if (frame->data_length > sizeof(frame->data)) {
         return QT_ERR_NULL_ARGUMENT;

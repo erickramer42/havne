@@ -73,7 +73,9 @@ on a device/emulator.
   `j2534://<vendor>`, `j2534://<path.dll>`) with optional
   `?baud=<decimal>` and `?flags=<0xHEX|decimal>` query parameters
   (strict parsing — malformed URIs rejected at session create, before
-  any DLL load)
+  any DLL load). **Message-ID gating**: signals declare their CAN arbitration
+  ID; frames decode only when IDs match (prevents corruption from multi-ID
+  bus traffic).
 - Transport selection: Settings page with a discovered-interface picker,
   manual URI entry with presets, and connect/disconnect with error
   surfacing
@@ -101,11 +103,11 @@ on a device/emulator.
 |---------|-----------|--------|
 | v0.1.0  | Skeleton: core ABI, Qt shell, responsive layout | ✅ Released |
 | v0.2.0  | Callback API, mock transport, bridge marshaling, live LogPage | ✅ Released |
-| v0.3.0  | Signals layer, coalesced LiveView, J2534 transport, live vehicle read/logging | 🚧 Phases 1–2 done; Phase 3 HARNESS-complete (fake-DLL verified) incl. URI query params + device picker (discovery verified against real drivers); live-vehicle + x86 surrogate host pending |
+| v0.3.0  | Signals layer, coalesced LiveView, J2534 transport, live vehicle read/logging | 🚧 Phases 1–3 HARNESS-complete incl. URI query params + device picker + F1/F2 ABI redesign (frame flags/message-ID gate/lifecycle); remainder (surrogate host, live verify) + vehicle work pending |
 | v0.4.0  | Security access discovery, flash capability | Planned |
 | v0.5.0+ | Multi-manufacturer plugins | Future |
 
-Currently 64 automated tests (18 core, 15 signals, 16 bridge, 15 J2534),
+Currently 70 automated tests (18 core, 15 signals, 16 bridge, 15 J2534, 6 F1/F2 ABI + lifecycle),
 all green locally on Windows/MSVC 2022 and on CI (3-platform matrix).
 Per-case ctest granularity via `gtest_discover_tests()`. The J2534 stack
 is verified end-to-end against a fake vendor DLL (HARNESS tier);
@@ -123,6 +125,7 @@ protocol/security layers.
 ## Dependencies
 
 This application uses [Qt](https://www.qt.io), licensed under LGPL-3.0.
+C ABI headers verified as strict C via `test_c_abi.c` (third-party FFI compatibility guard).
 Qt is not bundled in this repository; see qt.io for sources and license text.
 
 ## License
@@ -137,3 +140,4 @@ parameters and the Settings-page device picker) implemented and
 unit-tested.
 No real vehicle communication verified yet.
 Do not connect to a vehicle expecting functionality.
+Frame ABI changed in v0.3.0-dev (arbitration ID, flags, session-relative time). Downstream integrations must migrate from the old `is_extended` flag and implicit 8-byte payload assumption.

@@ -1,6 +1,6 @@
 // File/layer: app/qttunebridge.h | Qt6 Core, app layer, C++17
 // Testing: SignalListModel history ring covered by test_bridge (Qt-linked target);
-//          discoverJ2534Devices marshaling shape covered by test_bridge (addition)
+//          discoverJ2534Devices marshaling shape covered by test_bridge
 
 #pragma once
 
@@ -33,7 +33,8 @@ public:
         TimestampRole = Qt::UserRole + 1,
         DlcRole,
         ExtendedRole,
-        PayloadRole
+        PayloadRole,
+        ArbitrationIdRole   /* appended (F1): additive, existing QML unaffected */
     };
 
     int rowCount(const QModelIndex& parent = {}) const override;
@@ -205,6 +206,7 @@ private:
     static void onFrame(const qttune_frame_t* frame, void* user_data);
     void handleFrameInternal(const qttune_frame_t* frame);
     void notifyDropped();   // FIX: consolidated drop reporting, callable from worker path
+    void destroySessionLocked();  // close-then-destroy in one place (F1)
 
     bool m_initialized = false;
     qttune_session_t* m_session = nullptr;

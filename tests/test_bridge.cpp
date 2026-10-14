@@ -275,9 +275,10 @@ TEST(BridgeTest, DispatchedShortFrameHonorsDataLength)
     // Unique timestamp so we can find OUR row among mock frames
     qttune_frame_t f{};
     f.timestamp_us = 777777;   // steady-clock µs from the mock won't collide
+    f.arbitration_id = 0x0C0;  // telemetry ID — decodes (gate-consistent)
     f.channel_id = 0;
     f.data_length = 4;          // the whole point: NOT 8
-    f.is_extended = 1;
+    f.flags = QTTUNE_FRAME_FLAG_EXTENDED;   // was: f.is_extended = 1
     f.data[0] = 0x34;           // arbitrary RPM-looking bytes
     f.data[1] = 0x12;
     f.data[2] = 0xAA;

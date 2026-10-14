@@ -99,6 +99,7 @@ TEST(CoreTest, SessionCreateRequiresNonNullPointer) {
     
     if (session) {
         qttune_session_close(session);
+        qttune_session_destroy(session);
     }
 }
 
@@ -113,6 +114,7 @@ TEST(CoreTest, RegisterCallbackSuccess) {
     EXPECT_EQ(status, QT_OK);
     
     qttune_session_close(session);
+    qttune_session_destroy(session);
 }
 
 TEST(CoreTest, RegisterDuplicateCallbackIdempotent) {
@@ -130,6 +132,7 @@ TEST(CoreTest, RegisterDuplicateCallbackIdempotent) {
     EXPECT_EQ(status2, QT_OK);  /* Silently deduplicated, not an error */
     
     qttune_session_close(session);
+    qttune_session_destroy(session);
 }
 
 TEST(CoreTest, SameCallbackDifferentUserdataAllowed) {
@@ -144,6 +147,7 @@ TEST(CoreTest, SameCallbackDifferentUserdataAllowed) {
         session, counting_callback, &counter2), QT_OK);
     
     qttune_session_close(session);
+    qttune_session_destroy(session);
 }
 
 TEST(CoreTest, UnregisterCallback) {
@@ -171,6 +175,7 @@ TEST(CoreTest, UnregisterNonexistentCallbackDoesntFail) {
         session, counting_callback, nullptr), QT_OK);
     
     qttune_session_close(session);
+    qttune_session_destroy(session);
 }
 
 TEST(CoreTest, NullPointerHandling) {
@@ -182,6 +187,7 @@ TEST(CoreTest, NullPointerHandling) {
         session, nullptr, nullptr), QT_ERR_NULL_ARGUMENT);
     
     qttune_session_close(session);
+    qttune_session_destroy(session);
 }
 
 /* Threading contract test - validates snapshot pattern compiles */
@@ -205,6 +211,7 @@ TEST(CoreTest, CallbackSnapshotPatternCompiles) {
     qttune_session_dispatch_callbacks(session, nullptr);
     
     qttune_session_close(session);
+    qttune_session_destroy(session);
 }
 
 TEST(CoreTest, CallbackDispatchInvokesRegisteredCallback) {
@@ -226,6 +233,7 @@ TEST(CoreTest, CallbackDispatchInvokesRegisteredCallback) {
     EXPECT_EQ(counter, 2);  // Still 1 per dispatch, dedup worked
 
     qttune_session_close(session);
+    qttune_session_destroy(session);
 }
 
 TEST(CoreTest, MockTransportDeliversFrames) {
@@ -435,4 +443,113 @@ TEST(CoreTest, MockFramesDecodeAgainstMockSignalSet) {
             }
         }
     }
+}
+
+namespace {
+
+struct ArbIdCapture {
+    std::atomic<int> telemetry_count{0};
+    std::atomic<int> diag_count{0};
+    std::atomic<int> other_count{0};
+    std::atomic<int> extended_mismatch{0};
+    std::atomic<uint64_t> last_ts{0};
+    std::atomic<int> ts_regression{0};
+};
+
+void arb_capture_cb(const qttune_frame_t* frame, void* user_data)
+{
+    ArbIdCapture* c = static_cast<ArbIdCapture*>(user_data);
+    const uint64_t prev = c->last_ts.exchange(frame->timestamp_us);
+    if (frame->timestamp_us < prev) {
+        c->ts_regression.fetch_add(1, std::memory_order_relaxed);
+    }
+    if (frame->arbitration_id == 0x0C0) {
+        c->telemetry_count.fetch_add(1, std::memory_order_relaxed);
+        if ((frame->flags & QTTUNE_FRAME_FLAG_EXTENDED) != 0) {
+            c->extended_mismatch.fetch_add(1, std::memory_order_relaxed);
+        }
+    } else if (frame->arbitration_id == 0x18FF0C00) {
+        c->diag_count.fetch_add(1, std::memory_order_relaxed);
+        if ((frame->flags & QTTUNE_FRAME_FLAG_EXTENDED) == 0) {
+            c->extended_mismatch.fetch_add(1, std::memory_order_relaxed);
+        }
+    } else {
+        c->other_count.fetch_add(1, std::memory_order_relaxed);
+    }
+}
+
+} // namespace
+
+/* F1+F2 contract: the mock emits exactly two arbitration IDs — the
+ * telemetry ID the signal set declares (0x0C0) and a 29-bit diagnostic
+ * ID every 16th frame — with FLAG_EXTENDED set iff the ID is 29-bit.
+ * Combined with MockSignalsDeclareTelemetryMessageId (test_signals),
+ * this pins the two halves of the bridge's decode gate; the gate line
+ * itself is exercised end-to-end by MockFramesDecodeAgainstMockSignalSet
+ * continuing to produce sane values from 0x0C0 traffic only. */
+TEST(CoreTest, MockEmitsKnownArbitrationIds)
+{
+    qttune_session_t* session = nullptr;
+    ASSERT_EQ(qttune_session_create("mock://arb", &session), QT_OK);
+
+    ArbIdCapture cap;
+    ASSERT_EQ(qttune_register_frame_callback(session, &arb_capture_cb, &cap),
+              QT_OK);
+    ASSERT_EQ(qttune_session_start(session), QT_OK);
+
+    /* Enough ticks for several 16-frame cycles incl. diag frames */
+    wait_for([&cap]() {
+        return cap.diag_count.load() >= 2 && cap.telemetry_count.load() >= 30;
+    }, 10000);
+
+    qttune_session_close(session);
+    qttune_session_destroy(session);
+
+    EXPECT_EQ(cap.other_count.load(), 0);
+    EXPECT_EQ(cap.extended_mismatch.load(), 0);
+    EXPECT_GE(cap.diag_count.load(), 2);
+    EXPECT_GT(cap.telemetry_count.load(), cap.diag_count.load() * 4);
+    /* Session-relative timestamps must never regress (header contract) */
+    EXPECT_EQ(cap.ts_regression.load(), 0);
+    /* First sample lands within the first tick, not microseconds since
+     * boot — session-relative, not absolute (reviewer finding). */
+    EXPECT_LT(cap.last_ts.load(), uint64_t{600} * 1000 * 1000 * 1000);
+}
+
+TEST(CoreTest, CloseIsIdempotentAndDestroyIsSafe)
+{
+    qttune_session_t* session = nullptr;
+    ASSERT_EQ(qttune_session_create("mock://lifecycle", &session), QT_OK);
+
+    /* Double close: second returns the error code WITHOUT UB
+     * (regression guard — old close() deleted, making this a
+     * use-after-free that only survived allocator luck) */
+    EXPECT_EQ(qttune_session_close(session), QT_OK);
+    EXPECT_EQ(qttune_session_close(session), QT_ERR_SESSION_CLOSED);
+
+    /* Post-close API calls fail cleanly, not UB */
+    EXPECT_EQ(qttune_session_start(session), QT_ERR_SESSION_CLOSED);
+    EXPECT_EQ(qttune_register_frame_callback(
+        session, counting_callback, nullptr), QT_ERR_SESSION_CLOSED);
+
+    /* destroy() is the freeing call; handle invalid after (free()). */
+    EXPECT_EQ(qttune_session_destroy(session), QT_OK);
+
+    /* free(nullptr) semantics */
+    EXPECT_EQ(qttune_session_destroy(nullptr), QT_OK);
+}
+
+TEST(CoreTest, DestroyAutoClosesActiveSession)
+{
+    /* The fclose/free split's convenience path: destroy on an open,
+     * RUNNING session must join the worker and free — no hang, no leak. */
+    qttune_session_t* session = nullptr;
+    ASSERT_EQ(qttune_session_create("mock://autodestroy", &session), QT_OK);
+    ASSERT_EQ(qttune_session_start(session), QT_OK);
+    std::atomic<int> frames{0};
+    static std::atomic<int>* p = &frames;
+    EXPECT_EQ(qttune_register_frame_callback(
+        session, [](const qttune_frame_t*, void*) { (*p)++; }, nullptr), QT_OK);
+    wait_for([&frames]() { return frames.load() >= 1; }, 5000);
+    EXPECT_EQ(qttune_session_destroy(session), QT_OK);
 }
