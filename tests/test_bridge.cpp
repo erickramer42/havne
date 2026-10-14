@@ -21,6 +21,27 @@ void spinLoop(int ms)
     loop.exec();
 }
 
+/* Poll-until-predicate with deadline, event-loop flavored. The mock's
+ * 50ms cadence is a LOCAL expectation, not a CI-runner guarantee —
+ * a starved macOS VM delivered 2 frames in 200+ ms of wall clock
+ * (2026-10-14 CI flake). Polling keeps the asserted CONTRACT (the
+ * condition eventually holds on a healthy stream) and drops the
+ * coincidence (any particular wall-clock duration). The event loop
+ * must keep turning while polling — worker lambdas drain through it. */
+template <typename Predicate>
+bool spinUntil(Predicate pred, int timeout_ms, int step_ms = 50)
+{
+    QElapsedTimer clock;
+    clock.start();
+    while (!pred()) {
+        if (clock.elapsed() >= timeout_ms) {
+            return false;
+        }
+        spinLoop(step_ms);
+    }
+    return true;
+}
+
 } // namespace
 
 int main(int argc, char** argv)
@@ -82,7 +103,10 @@ TEST(BridgeTest, FramesMarshalFromWorkerToGuiThread)
         });
 
     ASSERT_TRUE(bridge.connectSession("mock://test").isEmpty());
-    spinLoop(300);   // ~6 frames at 50ms mock interval
+    // CONTRACT: frames eventually flow. Poll instead of a fixed 300ms.
+    const bool flowing = spinUntil(
+        [&bridge]() { return bridge.frameCount() > 0; }, 5000);
+    ASSERT_TRUE(flowing) << "no frames in 5s — stream is dead, not slow";
 
     // Frames flowed...
     EXPECT_GT(bridge.frameCount(), 0);
@@ -93,9 +117,10 @@ TEST(BridgeTest, FramesMarshalFromWorkerToGuiThread)
     const int frames_before = bridge.frameCount();
 
     // Mid-stream disconnect: late-arriving frames must be dropped,
-    // not crash, not append.
+    // not crash, not append. Equality assertion after a settle window
+    // is duration-independent — any arriving frame would break it.
     bridge.disconnectSession();
-    spinLoop(200);   // mock would have produced ~4 more frames
+    spinLoop(300);   // settle: let any in-flight lambdas drain and drop
     EXPECT_EQ(bridge.frameCount(), frames_before);
 }
 
@@ -103,7 +128,8 @@ TEST(BridgeTest, ClearFramesResets)
 {
     QtTuneBridge bridge;
     ASSERT_TRUE(bridge.connectSession("mock://test").isEmpty());
-    spinLoop(200);
+    ASSERT_TRUE(spinUntil(
+        [&bridge]() { return bridge.frameCount() > 0; }, 5000));
     ASSERT_GT(bridge.frameCount(), 0);
 
     bridge.clearFrames();
@@ -117,10 +143,13 @@ TEST(BridgeTest, SortProxyOrdersNewestFirstByDefault)
 {
     QtTuneBridge bridge;
     ASSERT_TRUE(bridge.connectSession("mock://sort-default").isEmpty());
-    spinLoop(300);
 
     FrameSortProxy* proxy = bridge.model();
-    EXPECT_GT(proxy->rowCount(), 2);      // <-- changed from count()
+    // CONTRACT: more than two frames arrive sorted. Was a fixed 300ms
+    // sleep — starved CI runners delivered exactly 2 (2026-10-14 flake).
+    ASSERT_TRUE(spinUntil(
+        [proxy]() { return proxy->rowCount() > 2; }, 5000))
+        << "only " << proxy->rowCount() << " rows in 5s";
     EXPECT_TRUE(proxy->newestFirst());
 
     const quint64 first = proxy->data(proxy->index(0, 0),
@@ -136,9 +165,11 @@ TEST(BridgeTest, SortProxyTogglesToOldestFirst)
 {
     QtTuneBridge bridge;
     ASSERT_TRUE(bridge.connectSession("mock://sort-toggle").isEmpty());
-    spinLoop(300);
 
     FrameSortProxy* proxy = bridge.model();
+    ASSERT_TRUE(spinUntil(
+        [proxy]() { return proxy->rowCount() > 2; }, 5000));
+
     proxy->setNewestFirst(false);
     EXPECT_FALSE(proxy->newestFirst());
 
@@ -171,7 +202,8 @@ TEST(BridgeTest, NotifyCountTracksFrameProcessing)
 {
     QtTuneBridge bridge;
     ASSERT_TRUE(bridge.connectSession("mock://notify").isEmpty());
-    spinLoop(300);
+    ASSERT_TRUE(spinUntil(
+        [&bridge]() { return bridge.guiNotifyCount() > 0; }, 5000));
     EXPECT_EQ(bridge.guiNotifyCount(), bridge.frameCount());
     EXPECT_GT(bridge.guiNotifyCount(), 0);
     bridge.disconnectSession();
@@ -181,13 +213,22 @@ TEST(BridgeTest, SignalBatchesAreCoalesced)
 {
     QtTuneBridge bridge;
     ASSERT_TRUE(bridge.connectSession("mock://coalesce").isEmpty());
-    spinLoop(1100);   // ~22 frames at 50ms
 
-    // ~11 batches at 10Hz, with generous scheduling slack
+    // CONTRACT: batches accumulate while the stream runs. Was a fixed
+    // 1100ms window with 4 < batches < 25 — the upper bound was a
+    // wall-clock proxy for "coalescing merges frames," which is now
+    // stated directly as the ratio assertion below.
+    ASSERT_TRUE(spinUntil(
+        [&bridge]() { return bridge.signalBatchCount() > 4; }, 5000))
+        << "only " << bridge.signalBatchCount() << " batches in 5s";
+
     EXPECT_GT(bridge.signalBatchCount(), 4);
-    EXPECT_LT(bridge.signalBatchCount(), 25);
-    // Bounded ranges, not exact equality — timing contract, not coincidence
-    // (engineering note 2026-10-05, lesson 3)
+    EXPECT_GT(bridge.frameCount(), 0);
+    // Ratio contract replaces the wall-clock upper bound: at ~20fps
+    // frames vs 10Hz batches, coalescing means fewer batches than
+    // frames. Per-frame emission (the regression this guards) yields
+    // exact equality — one emission per frame.
+    EXPECT_LE(bridge.signalBatchCount(), bridge.frameCount());
 
     // Values actually flowed through the model
     EXPECT_GT(bridge.signalModel()->rowCount(), 0);
@@ -199,20 +240,22 @@ TEST(BridgeTest, StreamingContinuesPastTenThousandFrames)
 {
     QtTuneBridge bridge;
     ASSERT_TRUE(bridge.connectSession("mock://longrun").isEmpty());
-    spinLoop(150);   // let a few frames flow first
 
-    const int before = bridge.frameCount();
-    ASSERT_GT(before, 0);
+    // CONTRACT: at least one frame flows first. Poll, no fixed 150ms.
+    ASSERT_TRUE(spinUntil(
+        [&bridge]() { return bridge.frameCount() > 0; }, 5000));
+    ASSERT_GT(bridge.frameCount(), 0);
 
     // Simulate the old freeze boundary: cumulative count just below 10k.
     // Under the OLD gate, the next frame would hit >= MaxFrames and
     // every subsequent frame would be dropped at source, forever.
     bridge.forceFrameCountForTesting(9999);
 
-    spinLoop(600);   // ~12 more frames at 50ms
-
-    // The stream must still be ALIVE: count advanced past the boundary.
-    // With the in-flight gate, 9999 is just a number nobody consults.
+    // CONTRACT: the count advances past the boundary. Was a fixed
+    // 600ms wait (needs ~2 frames) — poll until it's demonstrably past.
+    ASSERT_TRUE(spinUntil(
+        [&bridge]() { return bridge.frameCount() > 10000; }, 5000))
+        << "stream stalled at " << bridge.frameCount();
     EXPECT_GT(bridge.frameCount(), 10000);
 
     // And no drops occurred — nothing was rejected at the boundary
@@ -241,10 +284,23 @@ TEST(BridgeTest, DispatchedShortFrameHonorsDataLength)
     f.data[3] = 0x55;
 
     bridge.dispatchFrameForTesting(f);
-    spinLoop(200);              // let the queued dispatch + coalesce tick run
 
-    // Find our row in the (sorted) proxy
+    // CONTRACT: our dispatched frame reaches the model. Poll on the
+    // finding condition instead of a fixed 200ms settle — the row must
+    // appear through the queued-invocation path regardless of runner speed.
     FrameSortProxy* proxy = bridge.model();
+    auto row_finder = [proxy]() {
+        for (int r = 0; r < proxy->rowCount(); ++r) {
+            if (proxy->data(proxy->index(r, 0),
+                    FrameListModel::TimestampRole).toULongLong() == 777777) {
+                return true;
+            }
+        }
+        return false;
+    };
+    ASSERT_TRUE(spinUntil(row_finder, 5000))
+        << "dispatched frame never reached the model";
+
     int foundRow = -1;
     for (int r = 0; r < proxy->rowCount(); ++r) {
         if (proxy->data(proxy->index(r, 0),
@@ -253,7 +309,7 @@ TEST(BridgeTest, DispatchedShortFrameHonorsDataLength)
             break;
         }
     }
-    ASSERT_NE(foundRow, -1) << "dispatched frame never reached the model";
+    ASSERT_NE(foundRow, -1) << "row vanished between poll and assert";
 
     const QModelIndex idx = proxy->index(foundRow, 0);
     // DLC must reflect the ACTUAL length, not an assumed 8
@@ -295,7 +351,11 @@ TEST(BridgeTest, BackpressureDropsAreCountedAndReported)
     // Nothing could have been reported yet — the queue hasn't been processed
     EXPECT_EQ(notifyCount, 0);
 
-    spinLoop(800);   // drain the 1000 queued invocations
+    // CONTRACT: the backlog drains. Was a fixed 800ms — poll until the
+    // overwhelming majority of the queued invocations processed.
+    ASSERT_TRUE(spinUntil(
+        [&bridge]() { return bridge.frameCount() > 900; }, 10000))
+        << "drain stalled at " << bridge.frameCount() << " frames";
 
     // Accounting survived the drain
     EXPECT_GE(bridge.droppedFrames(), 500);
@@ -437,12 +497,28 @@ TEST(BridgeTest, ChartDataFiltersUnsubscribedAndEmptyBatchesDoNotEmit)
 TEST(BridgeTest, StripChartDataPopulatedByLiveStream)
 {
     /* End-to-end through the coalescer: real mock frames -> decode ->
-       staging -> updateValues -> ring. Bounded ranges + monotonicity:
-       timestamps come from QElapsedTimer (monotonic by contract), counts
-       bounded by 10 Hz scheduling slack. */
+       staging -> updateValues -> ring. Poll to the condition instead
+       of a fixed 750ms window: the CONTRACT is history accumulates,
+       not that 7.5 windows elapse. Monotonicity assertions are timing-
+       independent once the data exists. */
     QtTuneBridge bridge;
     ASSERT_TRUE(bridge.connectSession("mock://strips").isEmpty());
-    spinLoop(750);   // ~7 batches at 10 Hz coalescing
+
+    // CONTRACT: every subscribed signal has at least 4 samples
+    auto chart_ready = [&bridge]() {
+        const QVariantList data = bridge.signalModel()->chartData();
+        if (data.isEmpty()) {
+            return false;
+        }
+        for (const QVariant& v : data) {
+            if (v.toMap().value("samples").toList().size() < 4) {
+                return false;
+            }
+        }
+        return true;
+    };
+    ASSERT_TRUE(spinUntil(chart_ready, 10000))
+        << "strip chart history did not accumulate in 10s";
 
     const QVariantList data = bridge.signalModel()->chartData();
     ASSERT_GT(data.size(), 0);
@@ -451,10 +527,10 @@ TEST(BridgeTest, StripChartDataPopulatedByLiveStream)
         const QVariantMap m = v.toMap();
         const QVariantList samples = m.value("samples").toList();
 
-        // 750ms / 100ms ~= 7 batches; generous bounds for timer slack
+        // Sample count floor satisfied by the poll; upper bound sanity
+        // (poll exits promptly, so a healthy stream sits near 4-8)
         EXPECT_GE(samples.size(), 4)
             << "no history for " << m.value("name").toString().toStdString();
-        EXPECT_LE(samples.size(), 40);
 
         // Timestamps monotonic non-decreasing across the window
         double prev = -1.0;

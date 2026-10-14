@@ -36,6 +36,28 @@ qttune_session_t* make_test_session(void)
     return session;
 }
 
+/* Poll-until-predicate with deadline. The mock's 50ms cadence is a
+ * LOCAL expectation, not a CI-runner guarantee — a starved macOS VM
+ * was observed delivering 2 frames in 200+ ms of wall clock
+ * (2026-10-14 CI flake). Polling keeps the asserted CONTRACT (the
+ * condition eventually holds on a healthy stream) and drops the
+ * coincidence (any particular wall-clock duration). Deadline is long
+ * enough to absorb pathological runner load, short enough that a
+ * genuinely dead transport still fails the test promptly. */
+template <typename Predicate>
+bool wait_for(Predicate pred, int timeout_ms, int poll_ms = 10)
+{
+    const auto deadline = std::chrono::steady_clock::now()
+                          + std::chrono::milliseconds(timeout_ms);
+    while (std::chrono::steady_clock::now() < deadline) {
+        if (pred()) {
+            return true;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(poll_ms));
+    }
+    return pred();   // final check past the deadline, then give up
+}
+
 } // anonymous namespace
 
 TEST(CoreTest, StatusStringValidValues) {
@@ -220,8 +242,16 @@ TEST(CoreTest, MockTransportDeliversFrames) {
 
     EXPECT_EQ(qttune_session_start(session), QT_OK);
 
-    std::this_thread::sleep_for(std::chrono::milliseconds(200));
-    EXPECT_GE(frame_count.load(), 3);   /* 50ms interval -> ~4 frames */
+    /* CONTRACT: at least 3 frames eventually arrive. The 50ms tick
+     * implies ~4 in 200ms LOCALLY, but CI runners under load have
+     * delivered fewer (observed 2-in-356ms on macOS, 2026-10-14) —
+     * poll to the condition instead of betting on a fixed sleep. */
+    const bool delivered = wait_for(
+        [&frame_count]() { return frame_count.load() >= 3; },
+        5000);
+    EXPECT_TRUE(delivered) << "mock delivered only "
+                           << frame_count.load() << " frames in 5s";
+    EXPECT_GE(frame_count.load(), 3);
 
     /* Close must join the worker without hanging */
     EXPECT_EQ(qttune_session_close(session), QT_OK);
@@ -261,10 +291,12 @@ TEST(CoreTest, CallbackExecutesOnTransportWorkerThread) {
     const auto main_id = std::this_thread::get_id();
     EXPECT_EQ(qttune_session_start(session), QT_OK);
 
-    /* Budget >= 3 intervals (50ms fixed) + scheduling slack */
-    for (int i = 0; i < 40 && seen_id.load() == std::thread::id{}; ++i) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(10));
-    }
+    /* Already a poll loop — widened deadline only (400ms -> 2s) to
+     * cover starved runners; the shape was right. */
+    const bool seen = wait_for(
+        [&seen_id]() { return seen_id.load() != std::thread::id{}; },
+        2000);
+    EXPECT_TRUE(seen);
 
     EXPECT_NE(seen_id.load(), std::thread::id{});
     EXPECT_NE(seen_id.load(), main_id);  /* Marshaling in bridge is MANDATORY */
@@ -313,7 +345,10 @@ TEST(CoreTest, SelfUnregisterDuringLiveDispatch) {
         session, &sibling_counter_cb, &ctx), QT_OK);
 
     EXPECT_EQ(qttune_session_start(session), QT_OK);
-    std::this_thread::sleep_for(std::chrono::milliseconds(250));
+    /* Poll until the sibling has seen >= 3 frames — that implies the
+     * self-callback fired (it dispatched first) and the stream is
+     * flowing. Polls to the CONDITION instead of a fixed 250ms. */
+    wait_for([&ctx]() { return ctx.other_count.load() >= 3; }, 5000);
 
     /* Exactly one self-invocation: snapshot allowed THIS dispatch to
      * complete, and the removal took effect for every frame after. */
@@ -357,8 +392,12 @@ TEST(CoreTest, MockFramesDecodeAgainstMockSignalSet) {
 
     EXPECT_EQ(qttune_session_start(session), QT_OK);
 
-    /* 50 ms tick; 20 frames = 1 s, plus margin */
-    std::this_thread::sleep_for(std::chrono::milliseconds(1400));
+    /* Collect up to kMaxFrames, polling to the condition. Was a fixed
+     * 1400ms sleep; under starvation fewer than the nominal 28 frames
+     * would arrive and the >=5 floor got uncomfortably close. Now we
+     * simply leave as soon as the buffer is full. */
+    wait_for([&cap]() { return cap.count >= MockCapture::kMaxFrames; },
+             10000);
 
     /* Close joins the worker; capture struct outlives dispatch safely */
     EXPECT_EQ(qttune_session_close(session), QT_OK);
@@ -390,7 +429,7 @@ TEST(CoreTest, MockFramesDecodeAgainstMockSignalSet) {
             case MOCK_SIG_LOAD_ID:
                 EXPECT_GE(val, 0.0f);   EXPECT_LE(val, 100.0f); break;
             case MOCK_SIG_IAT_ID:
-                EXPECT_GE(val, 15.0f);  EXPECT_LE(val, 60.0f); break;
+                EXPECT_GE(val, 15.0f);   EXPECT_LE(val, 60.0f); break;
             default:
                 FAIL() << "unknown signal id in mock set: " << def.id;
             }
