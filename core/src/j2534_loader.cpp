@@ -264,15 +264,24 @@ qttune_status_t qttune_j2534_close(qttune_j2534_handle_t* handle)
 /* ---- Vendor-call helpers used by j2534_transport.cpp ---- */
 
 qttune_status_t qttune_j2534_connect_channel(qttune_j2534_handle_t* handle,
+                                             unsigned long baud,
+                                             unsigned long flags,
                                              unsigned long* out_channel)
 {
     if (handle == nullptr || out_channel == nullptr) {
         return QT_ERR_NULL_ARGUMENT;
     }
+    /* baud == 0 is the transport-layer "unset" sentinel (the URI parser
+     * rejects an explicit baud=0, so the ambiguity is closed by
+     * contract); resolve it to the ISO 15765 default. flags pass
+     * through verbatim — 0 is both the default and a legitimate value. */
+    if (baud == 0) {
+        baud = QTTUNE_PT_BAUD_ISO15765_500K;
+    }
     long rc = handle->connect(handle->device_id,
                               QTTUNE_PT_PROTOCOL_ISO15765,
-                              0,   /* Flags */
-                              QTTUNE_PT_BAUD_ISO15765_500K,
+                              flags,
+                              baud,
                               out_channel);
     return (rc == kPtStatusNoError) ? QT_OK : QT_ERR_NO_TRANSPORT;
 }
@@ -363,6 +372,8 @@ qttune_status_t qttune_j2534_close(qttune_j2534_handle_t* /*handle*/)
 }
 
 qttune_status_t qttune_j2534_connect_channel(qttune_j2534_handle_t* /*h*/,
+                                             unsigned long /*baud*/,
+                                             unsigned long /*flags*/,
                                              unsigned long* /*ch*/)
 {
     return QT_ERR_NOT_IMPLEMENTED;

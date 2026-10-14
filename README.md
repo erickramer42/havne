@@ -68,7 +68,10 @@ on a device/emulator.
 - J2534 transport (Windows): registry vendor discovery, `LoadLibraryEx` of
   vendor function libraries, ISO 15765 connect, `ReadMsgs` polling loop
   delivering frames through the same session callback path as the mock;
-  `j2534://` URI routing (`j2534://`, `j2534://<vendor>`, `j2534://<path.dll>`)
+  `j2534://` URI routing (`j2534://`, `j2534://<vendor>`,
+  `j2534://<path.dll>`) with optional `?baud=<decimal>` and
+  `?flags=<0xHEX|decimal>` query parameters (strict parsing — malformed
+  URIs rejected at session create, before any DLL load)
 - Signal decoding: POD signal definitions with scale/offset linear decode,
   LSB-first bitfield extraction, signed-type sign extension (core, unit-tested)
 - Live signal view: decoded values streamed to a subscription-checked list,
@@ -93,11 +96,11 @@ on a device/emulator.
 |---------|-----------|--------|
 | v0.1.0  | Skeleton: core ABI, Qt shell, responsive layout | ✅ Released |
 | v0.2.0  | Callback API, mock transport, bridge marshaling, live LogPage | ✅ Released |
-| v0.3.0  | Signals layer, coalesced LiveView, J2534 transport, live vehicle read/logging | 🚧 Phases 1–2 done; Phase 3 HARNESS-complete (fake-DLL verified), live-vehicle + x86 surrogate host pending |
+| v0.3.0  | Signals layer, coalesced LiveView, J2534 transport, live vehicle read/logging | 🚧 Phases 1–2 done; Phase 3 HARNESS-complete (fake-DLL verified) incl. URI query params; live-vehicle + x86 surrogate host pending |
 | v0.4.0  | Security access discovery, flash capability | Planned |
 | v0.5.0+ | Multi-manufacturer plugins | Future |
 
-Currently 58 automated tests (18 core, 15 signals, 14 bridge, 11 J2534),
+Currently 62 automated tests (18 core, 15 signals, 14 bridge, 15 J2534),
 all green locally on Windows/MSVC 2022 and on CI (3-platform matrix).
 Per-case ctest granularity via `gtest_discover_tests()`. The J2534 stack
 is verified end-to-end against a fake vendor DLL (HARNESS tier) — no real
@@ -122,6 +125,7 @@ MIT — see [LICENSE](LICENSE) file.
 
 ⚠️ Early infrastructure. Core callback API, mock transport, signal
 decoding, coalesced live view with strip chart, and a HARNESS-verified
-J2534 transport (fake vendor DLL only) implemented and unit-tested.
+J2534 transport (fake vendor DLL only, incl. `?baud=`/`?flags=` query
+parameters) implemented and unit-tested.
 No real vehicle communication verified yet.
 Do not connect to a vehicle expecting functionality.

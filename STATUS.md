@@ -1,7 +1,7 @@
 # QtTune — Project Status
 
-**Date:** October 13, 2026
-**Version:** v0.2.0 (released, tagged); v0.3.0 Phases 1–2 complete, Phase 3 (J2534) HARNESS-complete — live-vehicle + x86 surrogate host pending
+**Date:** October 14, 2026
+**Version:** v0.2.0 (released, tagged); v0.3.0 Phases 1–2 complete, Phase 3 (J2534) HARNESS-complete incl. URI query params — live-vehicle + x86 surrogate host + device picker pending
 **Repository:** https://github.com/erickramer42/qttune
 **CI:** [![CI](https://github.com/erickramer42/qttune/actions/workflows/ci.yml/badge.svg)](https://github.com/erickramer42/qttune/actions/workflows/ci.yml)
 
@@ -190,9 +190,26 @@ connected.** Landmarks, in commit order:
   URI); `PassThruConnect` (ISO 15765, 500k) happens at START;
   `ReadMsgs` polling on a worker thread (20ms poll interval) dispatches
   frames through the identical callback path as the mock.
-- **URI grammar:** `j2534://` (first discovered device),
-  `j2534://<vendor-name>` (case-insensitive discovered match),
-  `j2534://<path ending .dll or containing \\ or />` (direct load —
+- **`URI QUERY PARAMETERS (Commit D, 2026-10-14):** `?baud=<decimal>` and
+  `?flags=<0xHEX|decimal>` parsed strictly in `resolve_uri` — the query is
+  split off BEFORE selector resolution, which also fixed two latent bugs
+  (a query glued onto a vendor name defeated discovery matching; a query
+  on a path form reached `LoadLibraryEx` as part of the filename). Params
+  thread transport → `qttune_j2534_connect_channel(handle, baud, flags, ...)`;
+  baud=0 is the internal "unset" sentinel (explicit `baud=0` is rejected
+  at parse) resolved to the ISO 15765 500k default in the loader TU —
+  the one TU owning the vendor ABI constants. flags pass through
+  verbatim with NO bit semantics interpreted pre-BENCH (pending the
+  vendor `j2534.h` diff). Malformed queries (unknown keys, `baud=abc`,
+  `baud=0`, bare `?`, trailing `&`) reject at `qttune_session_create`
+  with `QT_ERR_NO_TRANSPORT` before any DLL load. Fake gained a
+  `GetLastConnectParams` hook recording the last `PassThruConnect`
+  invocation — the existing stream tests couldn't have caught a
+  regression here (any hardcoded connect params would satisfy them);
+  `DefaultConnectUsesIso15765At500k` now pins behavior preservation.
+- **`URI grammar (full):** `j2534://[<selector>][?baud=<decimal>[&flags=<0xHEX|decimal>]]`.
+  Selector: `` (first discovered device), `<vendor-name>` (case-insensitive
+  discovered match), `<path ending .dll or containing \ or />` (direct load —
   the test/dev route to the fake). Misses return `QT_ERR_NO_TRANSPORT`,
   preserving `test_core`'s `UnknownTransportUriRejected`.
 - **Shared internal contract:** `core/include/qttune/j2534_ptypes.h`
@@ -205,16 +222,17 @@ connected.** Landmarks, in commit order:
 - **Deterministic fake:** `InjectFrame` enqueues into a mutex-guarded
   16-slot FIFO (test thread races the polling worker safely);
   `ReadMsgs` dequeues one message per call; `GetCurrentHandle` observes
-  open/close state. Stream tests assert EXACT counts and payload
-  fidelity — a fabricated frame or a dropped injection fails the suite.
+  open/close state; `GetLastConnectParams` observes connect parameters.
+  Stream tests assert EXACT counts and payload fidelity — a fabricated
+  frame or a dropped injection fails the suite.
 - Teardown ordering (see Data Path contract): join worker → disconnect
   channel → `PassThruClose` → `FreeLibrary`.
 
 **Phase 3 remains OPEN. Outstanding:** x86-surrogate host for 32-bit-only
 vendor DLLs (J2534-1 mandates only that they be in-proc; many ship x86
-only and can't load into the x64 app), `?baud=`/`?flags=` URI parameters,
-SettingsPage device picker fed by `qttune_j2534_discover_devices`, and the
-BENCH-tier live-DLL verification round.
+only and can't load into the x64 app), SettingsPage device picker fed by
+`qttune_j2534_discover_devices`, and the BENCH-tier live-DLL verification
+round.
 
 ## Backpressure (corrected 2026-10-07)
 
@@ -254,11 +272,12 @@ handles:
 | Capability | Verified by |
 |---|---|
 | Core builds standalone with zero Qt deps | `core-and-tests` CI job (Ubuntu, Qt absent) |
-| 58 tests pass: 18 core + 15 signals + 14 bridge + 11 J2534 | GTest suites; 58/58 locally on Windows/MSVC 2022, green on 3-platform CI matrix |
+| 62 tests pass: 18 core + 15 signals + 14 bridge + 15 J2534 | GTest suites; 62/62 locally on Windows/MSVC 2022, green on 3-platform CI matrix |
 | Mock transport delivers physically plausible, signal-set-decodable frames | `MockFramesDecodeAgainstMockSignalSet`: real worker frames decoded under every mock definition, physical ranges asserted |
 | J2534 registry discovery finds real installed vendors, dedupes WOW64 views | `test_j2534_discovery` suite on live machine registry |
 | J2534 loader: LoadLibraryEx → 7-export resolution → PassThruOpen, clean unwind on missing DLL/exports | `test_j2534_load` suite (incl. proven-unmapped assertion after failed load) |
-| J2534 end-to-end: `j2534://<path.dll>` session → connect → worker poll → InjectFrame → callback, exact counts and payload fidelity | `test_j2534_stream` suite (3 tests; FIFO order asserted) |
+| J2534 end-to-end: `j2534://<path.dll>` session → connect → worker poll → InjectFrame → callback, exact counts and payload fidelity | `test_j2534_stream` suite (7 tests; FIFO order asserted) |
+| `?baud=`/`?flags=` query params reach `PassThruConnect`; defaults preserve ISO 15765 @ 500k / flags=0; malformed queries rejected at parse before any DLL load | `J2534QueryParamTest` fixture: default-preservation, explicit params (decimal + hex flags, last-wins duplicates), malformed matrix incl. real-fake-path rejects |
 | Vendor API call ordering at teardown (PassThruClose before FreeLibrary; worker joined before any of it) | `FakeFixture.OpenCloseCycleHitsVendorApi` state transitions 1→0→1 |
 | Encoder/decoder layout contract | Round-trip integration test catches byte-order/scale inversions invisible to structural validation |
 | Bridge marshal: worker → GUI thread | `FramesMarshalFromWorkerToGuiThread` |
@@ -290,10 +309,11 @@ v0.3.0 phases:
       discovery, loader, session-integrated transport, URI routing,
       deterministic fake + stream tests. CLOSED 2026-10-13 at the
       fake-DLL tier.
+- [x] **Phase 3 remainder (URI params):** `?baud=`/`?flags=` strict
+      query parsing landed 2026-10-14 (Commit D).
 - [ ] **Phase 3 remainder:** x86 surrogate host for 32-bit-only vendor
       DLLs; BENCH-tier live-DLL verification (incl. PASSTHRU_MSG header
-      diff); URI parameters (`?baud=`, `?flags=`); SettingsPage device
-      picker.
+      diff); SettingsPage device picker.
 - [ ] **Phase 4 — Record-replay transport:** fixture capture +
       deterministic playback through the same frame API
 
@@ -343,7 +363,7 @@ v0.3.0 phases:
 |-------|-------|--------|
 | v0.1.0 | Skeleton: core ABI, Qt shell, responsive layout | ✅ Released |
 | v0.2.0 | Callback API, mock transport, CI + tests | ✅ Released (tagged) |
-| v0.3.0 | Signals layer, coalesced LiveView, J2534 transport, live vehicle read/logging | 🚧 Phases 1–3 HARNESS-complete; Phase 3 remainder (surrogate host, live verify) + vehicle work pending |
+| v0.3.0 | Signals layer, coalesced LiveView, J2534 transport, live vehicle read/logging | 🚧 Phases 1–3 HARNESS-complete incl. URI query params; remainder (surrogate host, device picker, live verify) + vehicle work pending |
 | v0.4.0 | Security access discovery, flash capability | Planned |
 | v0.5.0+ | Multi-manufacturer plugin modules | Planned |
 
@@ -353,10 +373,13 @@ example of full build and testing workflow:
 rm -rf build
 cmake -B build -DCMAKE_PREFIX_PATH=C:/Qt/6.12.0/msvc2022_64
 cmake --build build --config Release
-./build/tests/Release/test_core.exe
-./build/tests/Release/test_signals.exe
-./build/tests/Release/test_bridge.exe
-   (alternate test method command: ctest --test-dir build -C Release --output-on-failure)
+run tests per suite:
+  ./build/tests/Release/test_core.exe
+  ./build/tests/Release/test_signals.exe
+  ./build/tests/Release/test_bridge.exe
+  etc
+run full testing: 
+  ctest --test-dir build -C Release --output-on-failure
 ./build/app/Release/qttune.exe (for full app end to end and manual testing)
 
 For the record and for anyone hitting the same walls: the macOS job
@@ -450,8 +473,8 @@ MSBuild expands it, AND CMake's multi-config behavior auto-appends a
 per-config subdir to plain RUNTIME_OUTPUT_DIRECTORY strings — net
 result `build/lib/Release/Release/`. Generator expressions do neither
 trick; use them for any per-config output path. (5) **Identical COMDAT
-folding is a thing you'll meet in dumpbin:** two exports sharing an RVA
-is MSVC merging byte-identical function bodies, not corruption.
+folding is a thing you'll meet in dumpbin:** two exports sharing an
+RVA is MSVC merging byte-identical function bodies, not corruption.
 (6) **Baked absolute paths via `$<TARGET_FILE:...>` beat any
 cwd/search-order scheme for test DLLs** — the test never depends on
 where ctest launches it from. Side effect: the IDE's IntelliSense
@@ -461,6 +484,36 @@ the harness version of range assertions against physics**: `EXPECT_EQ(count, 3)`
 means a fabricated fourth frame fails the suite, the same way an
 absurd-RPM decode does — a fake that emits anything you didn't inject
 is broken, and the test should say so.
+
+**2026-10-14 — J2534 query-param round (Commit D):** three lessons, two
+paid for in red tests. (1) **Write failure-path assertions against the
+actual failure path, not the intended one:** the malformed-URI matrix
+drafted expecting `QT_ERR_NO_TRANSPORT` for a nonexistent direct path —
+but with the query correctly split, that path legitimately fails later
+at `LoadLibraryEx` with `QT_ERR_LOAD_FAILED`. The failing test wasn't
+catching a product bug; it was encoding a drafting assumption as a
+contract (2026-10-05 (3) resurfacing). Same fix as before: derive each
+expectation from which layer should reject the input, and assert
+against a REAL resolvable path when proving parse-rejection (a
+wrongly-accepted query would load the fake successfully — that's the
+discriminating case). (2) **Paired compiler diagnostics fingerprint a
+lost middle argument:** a hand-applied edit dropped `&num` from the
+`read_msgs` call, producing code-167 (type mismatch: `uint32_t` into
+`unsigned long*`) and code-165 (too few arguments) on the SAME token —
+the argument-shift signature, diagnosable before reading the line. It
+also validates the session ritual again: diagnose from pasted current
+file contents, never from the delivered version (the on-disk file had
+drifted by exactly one argument). Had it compiled by luck of types, the
+bug was worse than a crash — `num` staying 1 with ReadMsgs writing
+nothing meant every poll would fabricate a zeroed frame. (3) **Existing
+green tests can be blind to a regression a new feature introduces in
+shared plumbing:** the three stream tests would pass unchanged with ANY
+hardcoded connect parameters — the observable-behavior pin
+(`DefaultConnectUsesIso15765At500k` via the fake's `GetLastConnectParams`
+hook) exists because the feature changed what flows into
+`PassThruConnect`, and only an observation of that specific call site
+could notice. Same genus as 2026-10-13 (7): test the contract you
+changed, at the point it changed.
 
 ---
 

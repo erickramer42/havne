@@ -41,12 +41,25 @@ qttune_status_t qttune_mock_transport_attach(qttune_session_t* session,
 
 /*
  * J2534 transport factory (Win32). URI grammar:
+ *   j2534://[<selector>][?baud=<decimal>[&flags=<0xHEX|decimal>]]
+ *
+ * Selector (unchanged):
  *   j2534://                        first discovered device
  *   j2534://<vendor-name>           discovered vendor, matched
  *                                   case-insensitively; no match =
  *                                   QT_ERR_NO_TRANSPORT
  *   j2534://<path ending .dll or    direct DLL load (tests/dev)
  *            containing \ or />)
+ *
+ * Query parameters (strict — malformed URIs fail at session_create
+ * with QT_ERR_NO_TRANSPORT, before any DLL load):
+ *   baud    decimal, nonzero; default resolved by connect_channel to
+ *           the ISO 15765 500k default
+ *   flags   0x-prefixed hex or decimal, passed to PassThruConnect
+ *           verbatim — bit SEMANTICS are not interpreted pre-BENCH
+ *           (pending the vendor j2534.h diff); lowercase keys only,
+ *           unknown keys rejected, duplicate keys last-wins
+ *
  * Attaches a transport to the session (idempotent like mock).
  */
 qttune_status_t qttune_j2534_transport_attach(qttune_session_t* session,
@@ -56,6 +69,8 @@ qttune_status_t qttune_j2534_transport_attach(qttune_session_t* session,
  * j2534_transport.cpp policy layer goes through these so the vendor
  * ABI lives in exactly one TU. */
 qttune_status_t qttune_j2534_connect_channel(qttune_j2534_handle_t* handle,
+                                             unsigned long baud,
+                                             unsigned long flags,
                                              unsigned long* out_channel);
 qttune_status_t qttune_j2534_disconnect_channel(qttune_j2534_handle_t* handle,
                                                 unsigned long channel);

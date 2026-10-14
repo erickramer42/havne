@@ -3,6 +3,9 @@
 //          PASSTHRU_MSG layout shared with core via j2534_ptypes.h
 // NOTE: InjectFrame/ReadMsgs share a mutex-guarded FIFO — injections
 //      from the test thread race safely against the polling worker.
+//      Connect params are recorded so tests can assert that URI
+//      parsing reached PassThruConnect (the point where ?baud=/?flags=
+//      bugs would otherwise hide behind the common downstream path).
 
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
@@ -28,6 +31,13 @@ std::mutex g_lock;
 int g_handle = 0;                       /* 1 between Open and Close */
 FrameSlot g_queue[FAKE_QUEUE_DEPTH];
 unsigned long g_queue_len = 0;
+
+/* Last PassThruConnect invocation, recorded BEFORE the validity
+ * check — even a refused connect shows what was asked, which is
+ * what the query-param tests assert against. */
+unsigned long g_last_connect_baud = 0;
+unsigned long g_last_connect_flags = 0;
+unsigned long g_last_connect_protocol = 0;
 
 } // namespace fake_j2534
 
@@ -60,9 +70,18 @@ long __stdcall PassThruConnect(unsigned long DeviceID,
                                unsigned long BaudRate,
                                unsigned long* pChannelID)
 {
-    (void)DeviceID; (void)ProtocolID; (void)Flags; (void)BaudRate;
+    (void)DeviceID;
+    {
+        std::lock_guard<std::mutex> lk(fake_j2534::g_lock);
+        fake_j2534::g_last_connect_protocol = ProtocolID;
+        fake_j2534::g_last_connect_flags = Flags;
+        fake_j2534::g_last_connect_baud = BaudRate;
+    }
+    if (pChannelID == nullptr) {
+        return STATUS_FAILED;
+    }
     std::lock_guard<std::mutex> lk(fake_j2534::g_lock);
-    if (fake_j2534::g_handle != 1 || pChannelID == nullptr) {
+    if (fake_j2534::g_handle != 1) {
         return STATUS_FAILED;
     }
     *pChannelID = 1;
@@ -177,6 +196,27 @@ int GetCurrentHandle(void)
 {
     std::lock_guard<std::mutex> lk(fake_j2534::g_lock);
     return fake_j2534::g_handle;
+}
+
+/* Observes the most recent PassThruConnect parameters — the fake-side
+ * half of the ?baud=/?flags= contract. Mutex-guarded like the other
+ * state; called from the test thread while no connect is in flight.
+ * No reset hook: each query-param test overwrites the record via its
+ * own session_start before asserting, so cross-test pollution is not
+ * possible without also failing the count/idempotency tests. */
+extern "C" __declspec(dllexport)
+void GetLastConnectParams(unsigned long* out_baud,
+                          unsigned long* out_flags,
+                          unsigned long* out_protocol)
+{
+    if (out_baud == nullptr || out_flags == nullptr ||
+        out_protocol == nullptr) {
+        return;
+    }
+    std::lock_guard<std::mutex> lk(fake_j2534::g_lock);
+    *out_baud = fake_j2534::g_last_connect_baud;
+    *out_flags = fake_j2534::g_last_connect_flags;
+    *out_protocol = fake_j2534::g_last_connect_protocol;
 }
 
 #endif // TEST_HOOKS_ENABLED || _DEBUG
