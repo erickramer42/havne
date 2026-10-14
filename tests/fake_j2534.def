@@ -1,0 +1,24 @@
+; File/layer: tests/fake_j2534.def | export-name control for the fake vendor DLL
+; Testing: N/A (linker input)
+;
+; WHY THIS EXISTS: on x86, MSVC decorates __stdcall exports as
+; _PassThruOpen@8 etc., so GetProcAddress("PassThruOpen") fails — the
+; cross-arch surrogate surfaced this (exit code 5, 2026-10-14). The
+; real J2534-1 spec likewise requires undecorated export names; vendor
+; DLLs use def files for the same reason. Bare names in EXPORTS force
+; undecorated exports on BOTH x86 and x64.
+
+LIBRARY fake_j2534
+EXPORTS
+    PassThruOpen
+    PassThruClose
+    PassThruConnect
+    PassThruDisconnect
+    PassThruReadMsgs
+    PassThruWriteMsgs
+    PassThruIoCtl
+    InjectFrame
+    GetBufferState
+    GetCurrentHandle
+    GetLastConnectParams
+    

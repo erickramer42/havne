@@ -150,24 +150,24 @@ int main(int argc, char* argv[])
 
     /* Attach to app-owned named objects. */
     g_map = OpenFileMappingA(FILE_MAP_ALL_ACCESS, FALSE, map_name);
-    if (g_map == nullptr) return 1;
+    if (g_map == nullptr) return 2;
     g_ring = static_cast<qttune_sur_ring_t*>(
         MapViewOfFile(g_map, FILE_MAP_ALL_ACCESS, 0, 0, 0));
     g_evt = OpenEventA(EVENT_MODIFY_STATE, FALSE, evt_name);
-    if (g_ring == nullptr || g_evt == nullptr) return 1;
+    if (g_ring == nullptr || g_evt == nullptr) return 3;
 
     /* Vendor load + mandatory-export resolution (subset the pumps need;
      * full 7-export check happens for the in-proc path — the surrogate
      * adds the remaining two when WRITE/IOCTL land in Part 3). */
     g_module = LoadLibraryA(dll_path);
-    if (g_module == nullptr) return 1;
+    if (g_module == nullptr) return 4;
     g_open       = reinterpret_cast<fn_pt_open>(GetProcAddress(g_module, "PassThruOpen"));
     g_close      = reinterpret_cast<fn_pt_close>(GetProcAddress(g_module, "PassThruClose"));
     g_connect    = reinterpret_cast<fn_pt_connect>(GetProcAddress(g_module, "PassThruConnect"));
     g_disconnect = reinterpret_cast<fn_pt_disconnect>(GetProcAddress(g_module, "PassThruDisconnect"));
     g_read_msgs  = reinterpret_cast<fn_pt_read_msgs>(GetProcAddress(g_module, "PassThruReadMsgs"));
         if (!g_open || !g_close || !g_connect || !g_disconnect || !g_read_msgs) {
-        return 1;
+        return 5;
     }
 
     /* Vendor open happens HERE, before the pipe handshake — if the
@@ -176,7 +176,7 @@ int main(int argc, char* argv[])
      * QT_ERR_LOAD_FAILED. Same failure-point ergonomics as in-proc. */
     long rc = g_open(nullptr, &g_device_id);
     if (rc != QTTUNE_PT_STATUS_NOERROR) {
-        return 1;
+        return 6;
     }
 
     /* WE are the pipe CLIENT — the app created the pipe and is
@@ -190,7 +190,7 @@ int main(int argc, char* argv[])
                          0, nullptr, OPEN_EXISTING, 0, nullptr);
     if (g_pipe == INVALID_HANDLE_VALUE) {
         g_close(g_device_id);
-        return 1;
+        return 7;
     }
 
     /* Byte-mode pipe needs message-boundary sync: one byte-mode write

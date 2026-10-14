@@ -41,6 +41,10 @@ constexpr const char* kSurrogateExeName = "qttune-j2534-surrogate.exe";
 constexpr DWORD kHandshakeTimeoutMs = 8000;
 constexpr DWORD kTransactTimeoutMs   = 3000;
 
+/* TEMP cross-arch diagnostics — stderr surfaces in ctest
+ * --output-on-failure output. Remove once diagnosed. */
+#define SUR_LOG(...) fprintf(stderr, "[sur] " __VA_ARGS__)
+
 /* Surrogate exe lives NEXT TO the running process's image (same
  * discipline as the baked fake-DLL path). Env override FIRST: lets an
  * x64 app/test drive an x86-built surrogate (Win32-configure tree)
@@ -123,12 +127,24 @@ bool ov_read(HANDLE pipe, void* buf, DWORD len, DWORD timeout_ms)
 bool transact(qttune_j2534_sur_handle_t* h, const qttune_sur_request_t& req,
               qttune_sur_response_t* out_resp, DWORD timeout_ms)
 {
-    if (!ov_write(h->pipe, &req, sizeof(req), timeout_ms)) return false;
-    FlushFileBuffers(h->pipe);
-    if (!ov_read(h->pipe, out_resp, sizeof(*out_resp), timeout_ms)) {
+    if (!ov_write(h->pipe, &req, sizeof(req), timeout_ms)) {
+        SUR_LOG("transact: ov_write failed (req_id=%u op=%u err=%lu)\n",
+                req.request_id, req.opcode, GetLastError());
         return false;
     }
-    return out_resp->request_id == req.request_id;
+    FlushFileBuffers(h->pipe);
+    if (!ov_read(h->pipe, out_resp, sizeof(*out_resp), timeout_ms)) {
+        SUR_LOG("transact: ov_read failed (req_id=%u op=%u err=%lu)\n",
+                req.request_id, req.opcode, GetLastError());
+        return false;
+    }
+    if (out_resp->request_id != req.request_id) {
+        SUR_LOG("transact: DESYNC — got req_id=%u want=%u "
+                "(struct layout mismatch?)\n",
+                out_resp->request_id, req.request_id);
+        return false;
+    }
+    return true;
 }
 
 } // namespace
@@ -182,6 +198,8 @@ qttune_status_t qttune_j2534_sur_open(const char* dll_path,
                                1, sizeof(qttune_sur_request_t),
                                sizeof(qttune_sur_response_t), 0, nullptr);
     if (h->data_event == nullptr || h->pipe == INVALID_HANDLE_VALUE) {
+        SUR_LOG("open: pipe/evt create failed (pipe_err=%lu)\n",
+                GetLastError());
         qttune_j2534_sur_close(h);
         return QT_ERR_OUT_OF_MEMORY;
     }
@@ -192,6 +210,7 @@ qttune_status_t qttune_j2534_sur_open(const char* dll_path,
     if (h->job == nullptr ||
         !SetInformationJobObject(h->job, JobObjectExtendedLimitInformation,
                                  &ji, sizeof(ji))) {
+        SUR_LOG("open: job setup failed (err=%lu)\n", GetLastError());
         qttune_j2534_sur_close(h);
         return QT_ERR_OUT_OF_MEMORY;
     }
@@ -204,6 +223,8 @@ qttune_status_t qttune_j2534_sur_open(const char* dll_path,
     PROCESS_INFORMATION pi = {};
     if (!CreateProcessA(nullptr, cmdline, nullptr, nullptr, FALSE,
                         CREATE_SUSPENDED, nullptr, nullptr, &si, &pi)) {
+        SUR_LOG("open: CreateProcessA failed (err=%lu)\n  exe='%s'\n"
+                "  dll='%s'\n", GetLastError(), exe, dll_path);
         qttune_j2534_sur_close(h);
         return QT_ERR_LOAD_FAILED;
     }
@@ -233,8 +254,18 @@ qttune_status_t qttune_j2534_sur_open(const char* dll_path,
         if (wr == WAIT_OBJECT_0) {
             DWORD xfer = 0;
             connected = GetOverlappedResult(h->pipe, &ov, &xfer, FALSE);
+        } else if (wr == WAIT_OBJECT_0 + 1) {
+            DWORD ecx = 0;
+            if (GetExitCodeProcess(h->process, &ecx)) {
+                SUR_LOG("open: child died pre-connect, exit=%lu\n", ecx);
+            }
+        } else {
+            SUR_LOG("open: connect TIMEOUT after %lums\n",
+                    kHandshakeTimeoutMs);
         }
-        /* wr == process-death or timeout: leave connected == false */
+    } else {
+        SUR_LOG("open: ConnectNamedPipe immediate failure (err=%lu)\n",
+                cerr);
     }
     if (!connected) {
         /* Cancel and DRAIN the outstanding operation before teardown:
@@ -255,6 +286,10 @@ qttune_status_t qttune_j2534_sur_open(const char* dll_path,
     qttune_sur_response_t resp = {};
     if (!transact(h, req, &resp, kHandshakeTimeoutMs) ||
         resp.status != static_cast<int32_t>(QTTUNE_PT_STATUS_NOERROR)) {
+        DWORD ecx = 0;
+        GetExitCodeProcess(h->process, &ecx);
+        SUR_LOG("open: OP_OPEN handshake failed (child_exit=%lu "
+                "status=%d)\n", ecx, resp.status);
         qttune_j2534_sur_close(h);
         return QT_ERR_LOAD_FAILED;
     }

@@ -21,6 +21,17 @@
 #include <chrono>
 #include <cstring>
 #include <thread>
+#include <cstdlib>
+
+/* Env override for the cross-arch case: an x86 surrogate can't load
+ * the x64 fake baked at generate time, so the Win32 tree's fake DLL
+ * takes precedence when QTTUNE_FAKE_DLL is set. Mirrors the client's
+ * QTTUNE_SURROGATE_EXE override. */
+static const char* fake_dll_path()
+{
+    const char* env = std::getenv("QTTUNE_FAKE_DLL");
+    return (env != nullptr && env[0] != '\0') ? env : FAKE_J2534_DLL_PATH;
+}
 
 namespace {
 
@@ -77,7 +88,7 @@ TEST(J2534SurrogateTest, OpenConnectInjectReadCloseCycle)
 
     /* Spawn: creates mapping/event/pipe, spawns under the kill-on-close
      * job, surrogate loads the fake DLL, calls PassThruOpen, handshakes. */
-    ASSERT_EQ(qttune_j2534_sur_open(FAKE_J2534_DLL_PATH, &h), QT_OK);
+    ASSERT_EQ(qttune_j2534_sur_open(fake_dll_path(), &h), QT_OK);
     ASSERT_NE(h, nullptr);
 
     /* Connect with default sentinel baud — resolves to ISO 15765 500k
@@ -139,7 +150,7 @@ TEST(J2534SurrogateTest, ReadPumpIsGatedOnConnect)
      * CONNECT — the fake's InjectFrame and ReadMsgs share one queue,
      * so parking is real, not an artifact of separate containers. */
     qttune_j2534_sur_handle_t* h = nullptr;
-    ASSERT_EQ(qttune_j2534_sur_open(FAKE_J2534_DLL_PATH, &h), QT_OK);
+    ASSERT_EQ(qttune_j2534_sur_open(fake_dll_path(), &h), QT_OK);
 
     SurCapture cap;
     const unsigned char f0[8] = {1, 2, 3, 4, 5, 6, 7, 8};

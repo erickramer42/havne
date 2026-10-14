@@ -107,6 +107,7 @@ endif()
 if(WIN32)
     add_library(fake_j2534 SHARED
         fake_j2534.cpp
+        fake_j2534.def
     )
 
     target_compile_definitions(fake_j2534 PRIVATE
