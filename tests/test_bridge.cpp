@@ -544,7 +544,7 @@ TEST(BridgeTest, StripChartDataPopulatedByLiveStream)
 }
 
 // ---------------------------------------------------------------------------
-// J2534 picker surface: discovery marshaling + currentUri contract
+// J2534 picker surface (Commit E): discovery marshaling + currentUri contract
 // ---------------------------------------------------------------------------
 
 TEST(BridgeTest, DiscoveredDevicesHaveWellFormedEntries)
