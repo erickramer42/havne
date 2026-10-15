@@ -17,9 +17,11 @@
 //  * IoCtl: config table (SET stores, GET reads back), fixed VBATT,
 //    CLEAR_* accepted. Unknown ids FAIL like a strict vendor.
 //  * Filters: registration bookkeeping + last-invocation recording.
-//    ReadMsgs stays UNGATED on filters — the spec's ISO15765
-//    receive-requires-filter rule would break every existing inject
-//    test; enforcing it is deferred until tests opt in deliberately.
+//    Filter-aware echo: once a filter is registered, WriteMsgs'
+//    response prepends the filter pattern (4-byte BE CAN ID + pad).
+//    SetFilterGating controls ONLY ReadMsgs dropping (frames whose
+//    first mask_len bytes don't match the active filter are dropped);
+//    the echo shape is unconditional once a filter lands.
 //  * ExtraDataIndex now = DataSize (v4.04 no-extra-data convention).
 
 #define WIN32_LEAN_AND_MEAN
@@ -80,6 +82,8 @@ unsigned long g_cfg_len = 0;
 FilterRecord g_filters[FAKE_FILTER_DEPTH];
 unsigned long g_filter_seq = 0;
 FilterRecord g_last_filter;              /* raw last StartMsgFilter call */
+bool g_filter_gating_enabled = false;    /* SetFilterGating toggle — controls
+                                          * ReadMsgs dropping ONLY, not echo */
 
 /* Last PassThruConnect invocation, recorded BEFORE the validity
  * check — even a refused connect shows what was asked, which is
@@ -87,6 +91,9 @@ FilterRecord g_last_filter;              /* raw last StartMsgFilter call */
 unsigned long g_last_connect_baud = 0;
 unsigned long g_last_connect_flags = 0;
 unsigned long g_last_connect_protocol = 0;
+
+/* Last StopMsgFilter invocation, for detach-ordering assertion. */
+unsigned long g_last_stopped_filter_id = 0;
 
 /* Enqueue into the shared RX FIFO (mutex held by caller). Drops on
  * full exactly like InjectFrame — documented, keeps counts honest. */
@@ -101,6 +108,24 @@ void enqueue_rx_locked(const unsigned char* data, unsigned long size,
     slot.size = size;
     slot.timestamp_us = timestamp_us;
     slot.rx_status = rx_status;
+}
+
+/* Matches the most recent active filter against a frame's first
+ * mask_len bytes (the pattern is applied with the mask — classic
+ * filter semantics). Returns true if the frame passes. The mask is
+ * assumed to be zero-padded beyond the meaningful bytes. */
+bool filter_matches(const unsigned char* frame_data, unsigned long frame_size,
+                    const FilterRecord& f)
+{
+    if (frame_size < f.mask_len) {
+        return false;
+    }
+    for (unsigned long i = 0; i < f.mask_len; ++i) {
+        if ((frame_data[i] & f.mask[i]) != (f.pattern[i] & f.mask[i])) {
+            return false;
+        }
+    }
+    return true;
 }
 
 } // namespace fake_j2534
@@ -171,11 +196,54 @@ long __stdcall PassThruReadMsgs(unsigned long ChannelID,
     }
 
     std::lock_guard<std::mutex> lk(fake_j2534::g_lock);
-    if (fake_j2534::g_queue_len == 0) {
+
+    /* FILTER GATING (SetFilterGating-controlled): model the device's
+     * filter hardware — non-matching frames are DISCARDED, never
+     * parked. Drain rejected frames from the queue head until a
+     * matching frame is found (deliver it) or the queue empties.
+     * Returning "0 messages" while leaving a rejected frame at the
+     * head is HEAD-OF-LINE BLOCKING: the polling worker reads the
+     * same parked frame forever and the stream stalls at whatever
+     * arrived before it. FilterGatingDropsNonMatchingFrames exists to
+     * catch exactly this. Gating enabled with NO active filters
+     * drains everything (spec: an unfiltered ISO 15765 channel
+     * receives nothing). */
+    if (fake_j2534::g_filter_gating_enabled) {
+        bool have_match_at_head = false;
+        while (fake_j2534::g_queue_len > 0) {
+            bool match = false;
+            for (unsigned long i = 0; i < fake_j2534::g_filter_seq &&
+                                      i < FAKE_FILTER_DEPTH; ++i) {
+                if (fake_j2534::g_filters[i].filter_id == 0) {
+                    continue;
+                }
+                if (filter_matches(fake_j2534::g_queue[0].data,
+                                   fake_j2534::g_queue[0].size,
+                                   fake_j2534::g_filters[i])) {
+                    match = true;
+                    break;
+                }
+            }
+            if (match) {
+                have_match_at_head = true;
+                break;
+            }
+            /* Discard the non-matching head (FIFO shift) */
+            for (unsigned long i = 1; i < fake_j2534::g_queue_len; ++i) {
+                fake_j2534::g_queue[i - 1] = fake_j2534::g_queue[i];
+            }
+            fake_j2534::g_queue_len--;
+        }
+        if (!have_match_at_head) {
+            *pNumMsgs = 0;
+            return STATUS_NOERROR;
+        }
+    } else if (fake_j2534::g_queue_len == 0) {
         *pNumMsgs = 0;   /* quiet bus — idle, not an error */
         return STATUS_NOERROR;
     }
 
+    /* Deliver the queue head */
     const fake_j2534::FrameSlot& slot = fake_j2534::g_queue[0];
     memcpy(pMsg->Data, slot.data, slot.size);
     pMsg->DataSize      = slot.size;
@@ -184,7 +252,6 @@ long __stdcall PassThruReadMsgs(unsigned long ChannelID,
     pMsg->Timestamp     = slot.timestamp_us;
     pMsg->ExtraDataIndex = slot.size;   /* v4.04: == DataSize when none */
 
-    /* FIFO shift — depth 16 makes O(n) irrelevant */
     for (unsigned long i = 1; i < fake_j2534::g_queue_len; ++i) {
         fake_j2534::g_queue[i - 1] = fake_j2534::g_queue[i];
     }
@@ -226,18 +293,47 @@ long __stdcall PassThruWriteMsgs(unsigned long ChannelID,
     }
     fake_j2534::g_write_count++;
 
-    /* Deterministic response: echo payload with byte 0 | 0x40 (request
-     * service -> positive-response service, the UDS/OBD convention).
-     * Timestamp from a monotonic counter starting at 0x1000 — far from
-     * every inject-test timestamp (small ints), so a mixed sequence
-     * stays attributable. Generated frames carry rx_status 0. */
+    /* Deterministic response — DEVICE MODEL, filter-aware.
+     *
+     * With no filter registered: raw echo of the payload with byte 0
+     * + 0x40 (Part 4 relay-test semantics — unchanged, keeps the
+     * surrogate/routing write tests byte-compatible).
+     *
+     * With a filter registered: a real ISO 15765 device CONSUMES the
+     * request's 4-byte address header and responds [its own ID BE]
+     * [payload, byte 0 + 0x40]. Modeling the device (not the filter
+     * message shape) is what makes the transport's 4-byte strip leave
+     * a clean payload — and it works from EITHER architecture with no
+     * arming hook (the cross-arch observable).
+     *
+     * Request-side precondition: a filter-registered write is expected
+     * to carry a 4-byte address prefix (the transport always sends
+     * one). Writes shorter than 4 bytes fall back to the raw echo —
+     * defensive, not a contract.
+     */
     if (n > 0) {
         unsigned char echo[64];
-        memcpy(echo, pMsg->Data, n);
-        echo[0] = static_cast<unsigned char>(pMsg->Data[0] + 0x40);
+        unsigned long echo_len;
+
+        const bool has_filter = (fake_j2534::g_last_filter.filter_id != 0)
+                                 && (n >= 4);
+
+        if (has_filter) {
+            /* device model: [pattern ID (4)][payload with +0x40] */
+            memcpy(echo, fake_j2534::g_last_filter.pattern, 4);
+            memcpy(echo + 4, pMsg->Data + 4, n - 4);
+            echo[4] = static_cast<unsigned char>(pMsg->Data[4] + 0x40);
+            echo_len = 4 + (n - 4);
+        } else {
+            /* legacy Part 4 semantics: raw echo, byte 0 + 0x40 */
+            memcpy(echo, pMsg->Data, n);
+            echo[0] = static_cast<unsigned char>(pMsg->Data[0] + 0x40);
+            echo_len = n;
+        }
+
         static unsigned long resp_ts = 0x1000;
         resp_ts += 1;
-        fake_j2534::enqueue_rx_locked(echo, n, resp_ts, 0);
+        fake_j2534::enqueue_rx_locked(echo, echo_len, resp_ts, 0);
     }
 
     return STATUS_NOERROR;   /* *pNumMsgs stays 1 — fully written */
@@ -365,10 +461,6 @@ long __stdcall PassThruStartMsgFilter(unsigned long ChannelID,
     }
     fake_j2534::g_last_filter = rec;
 
-    /* ReadMsgs stays UNGATED on filters in this fake (see header note):
-     * the spec's receive-requires-filter rule would break every
-     * existing inject test — activation is a deliberate future change
-     * paired with new tests. */
     *pFilterID = rec.filter_id;
     return STATUS_NOERROR;
 }
@@ -382,6 +474,8 @@ long __stdcall PassThruStopMsgFilter(unsigned long ChannelID,
         return STATUS_FAILED;
     }
     std::lock_guard<std::mutex> lk(fake_j2534::g_lock);
+    /* Record the invocation for detach-ordering tests */
+    fake_j2534::g_last_stopped_filter_id = FilterID;
     for (unsigned long i = 0; i < fake_j2534::g_filter_seq &&
                               i < FAKE_FILTER_DEPTH; ++i) {
         if (fake_j2534::g_filters[i].filter_id == FilterID) {
@@ -434,12 +528,6 @@ int GetCurrentHandle(void)
     return fake_j2534::g_handle;
 }
 
-/* Observes the most recent PassThruConnect parameters — the fake-side
- * half of the ?baud=/?flags= contract. Mutex-guarded like the other
- * state; called from the test thread while no connect is in flight.
- * No reset hook: each query-param test overwrites the record via its
- * own session_start before asserting, so cross-test pollution is not
- * possible without also failing the count/idempotency tests. */
 extern "C" __declspec(dllexport)
 void GetLastConnectParams(unsigned long* out_baud,
                           unsigned long* out_flags,
@@ -512,6 +600,33 @@ void GetLastFilterStart(unsigned long* out_filter_id,
     memcpy(out_mask, fake_j2534::g_last_filter.mask, 12);
     memcpy(out_pattern, fake_j2534::g_last_filter.pattern, 12);
     *out_len = fake_j2534::g_last_filter.mask_len;
+}
+
+/* Record of the last StopMsgFilter invocation (for detach-ordering
+ * assertion — StopMsgFilter called exactly once with the registered
+ * ID before disconnect). Zero means no stop was ever called. */
+extern "C" __declspec(dllexport)
+void GetLastFilterStop(unsigned long* out_filter_id)
+{
+    if (out_filter_id == nullptr) {
+        return;
+    }
+    std::lock_guard<std::mutex> lk(fake_j2534::g_lock);
+    *out_filter_id = fake_j2534::g_last_stopped_filter_id;
+}
+
+/* SetFilterGating(enable): when armed, ReadMsgs drops frames whose
+ * first mask_len bytes don't match any active filter (spec receive-
+ * requires-filter semantics). Does NOT affect WriteMsgs' echo shape
+ * (that's unconditional once a filter is registered). The x64 test
+ * process cannot reach into the x86 child's fake instance to arm this
+ * (the OP_INJECT gap); filter-aware echo works regardless, making
+ * cross-arch parity achievable without arming. */
+extern "C" __declspec(dllexport)
+void SetFilterGating(int enable)
+{
+    std::lock_guard<std::mutex> lk(fake_j2534::g_lock);
+    fake_j2534::g_filter_gating_enabled = (enable != 0);
 }
 
 #endif // TEST_HOOKS_ENABLED || _DEBUG

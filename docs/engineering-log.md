@@ -1,0 +1,255 @@
+# Engineering log
+
+History and lessons learned, oldest first. This is the record of how
+the project got here. The current state is in
+[STATUS.md](../STATUS.md), and the decisions themselves are in
+[adr/](adr/README.md).
+
+Until 2026-10-15, STATUS.md also carried the long per-milestone
+narratives. The last version with that full text is
+`git show 6aaf441:STATUS.md`.
+
+## Milestone timeline
+
+Dates are commit dates.
+
+| Date | Milestone | Commits |
+|---|---|---|
+| 2026-09-29 | v0.1.0 skeleton: C ABI core, Qt 6 / QML shell, responsive layout | `35ef664` |
+| 2026-09-30 | Multi-platform CI with the core test suite; Qt 6.12.0 LTS | `3e78b2b`, `ff4cf0b` |
+| 2026-10-04 | Session-scoped callback API, mock transport | `6f2657b`, `e08b455` |
+| 2026-10-05 | **v0.2.0**: bridge marshaling, sort proxy, live LogPage (tagged) | `7dbdcec` |
+| 2026-10-06 | v0.3.0 Phase 1 (signal decode ABI), Phase 1b (mock signal emission) | `bb8eb4b`, `601b0b6` |
+| 2026-10-07 | Phase 2: coalesced LiveView; backpressure corrected | `e0c4c31`, `b47687c` |
+| 2026-10-10 | Phase 2 closed: per-signal history ring and strip chart | `a38b896` |
+| 2026-10-13 | Phase 3 HARNESS tier: transport vtable, registry discovery, fake DLL, loader, session-integrated J2534 transport | `844f44e`, `1752fc9`, `9b33aeb`, `0fa4883`, `1cc3334` |
+| 2026-10-13 | URI query parameters; SettingsPage device picker | `728533e`, `167ac88` |
+| 2026-10-14 | Frame ABI redesign, close/destroy split, message-ID decode gate (`feat!`) | `d0fb07e` |
+| 2026-10-14 | Phase 3 Parts 1–3: PE architecture annotation, x86 surrogate host, cross-arch verification, PE routing | `16e3aed`, `96acce9`, `5681ca7`, `d98792f` |
+| 2026-10-14 | J2534-1 v04.04 types verification and fix | `046b320` |
+| 2026-10-15 | Phase 3 Part 4: write/ioctl/filter relay through both backends | `6aaf441` |
+| 2026-10-15 | Phase 3 Part 5: transport adoption ([ADR-0012](adr/0012-j2534-transport-adoption.md)) | `e6ce759` |
+
+## Lessons learned
+
+**2026-10-04 — callback API round:** dropped never-implemented registration
+handle (pair-identity instead), duplicate registration idempotent-success,
+tests assert actual behavior, snapshot-dispatch mandated so callback
+reentry can't deadlock. MSVC caught an implicit int→enum conversion
+(C2664) — three-compiler matrix earns its keep.
+
+**2026-10-05 — bridge + log round:** (1) captureless lambdas unsafe as
+pair-identity C callbacks needing self-reference — named free functions
+only. (2) Thread-identity tests must exercise real execution paths
+(session_start), not manual dispatch. (3) Assertions encode contracts,
+not timing coincidences. Q_PROPERTY NOTIFY is a promise; skipping emit
+leaves QML serving stale values. Windows DLL deployment for test targets
+via `$<TARGET_RUNTIME_DLLS>` copy, not PATH injection (semicolon fragility).
+
+**2026-10-06 — signals round (Phase 1):** (1) error-code precedence is a
+contract — type validation before bit-parameter validation. (2)
+zero-initialized PODs mask string-termination test bugs — corrupt the
+ENTIRE buffer. Also migrated all suites to `gtest_discover_tests()`
+(per-case granularity, free empty-suite detection); DISCOVERY runs the
+test binary at BUILD time on Windows, so runtime DLL copying must be
+ordered before discovery (we hit exit 0xc0000135 until reordered).
+
+**2026-10-07 — emission + coalescing round (Phases 1b/2):** three lessons.
+(1) Designated initializers are C++20 — MSVC accepts permissively, GCC on
+Ubuntu rejects; C++17 code needs plain constructor helpers. (2)
+`strncpy_s`/`_TRUNCATE` are MSVC-only Annex K — absent from glibc —
+"fix a warning" edits can compile locally and fail only CI; direction of
+travel matters (MSVC-green ≠ portable). Use a small bounded-copy helper.
+(3) **Cumulative count is not backpressure**: gating delivery on lifetime
+frame count froze the stream permanently at 10k while the model's ring
+eviction sat unused. Bound in-flight queue depth, not totals; pair drop
+statistics with liveness tests. Also: measuring before optimizing — the
+guiNotifyCount instrumentation locked the 20× coalescing-reduction claim
+with a baseline number. New-QML-file linker failures (QmlCacheGeneratedCode
+unresolved externals) mean stale QML cache — clean reconfigure fixes.
+
+**2026-10-10 — strip chart round (Phase 2 close):** (1) The QML paint
+code indexed the LAST ELEMENT of a flattened `[ts, val, ...]` array as
+the newest timestamp — it's the newest VALUE. Symptom was deliciously
+diagnostic: chart fine for ~1.5 s, then stretched/clipped, "recovering"
+exactly during RPM rev blips. **47 green GTests were structurally blind to
+it** — the bug lived in QML `onPaint` arithmetic, outside every C++
+test's reach — the manual smoke tier caught it, which is why that tier
+exists. (2) Declared-but-never-emitted signals are latent debt. (3)
+Pull-API beats data-roles for Canvas consumers. (4) Timestamp injection
+seams make ring tests exact arithmetic instead of timing tolerance.
+
+**2026-10-13 — J2534 round (Phase 3, HARNESS tier):** seven lessons,
+several of them paid for in build-break debugging. (1) **An
+anonymous-namespace definition does not complete a global forward
+declaration** — C2027 trap; everything the ABI references by name lives
+at file scope, ordered before first use. (2) **Spec-shaped signatures
+are load-bearing even against your own fake.** (3) **Calling-convention
+mismatches are silent on x64** — function-pointer typedefs must match the
+artifact's actual declaration. (4) **CMake literal `$(Configuration)` vs
+genex `$<CONFIG>`** — doubled Release/Release output dirs; use genex for
+per-config paths. (5) **Identical COMDAT folding in dumpbin** is MSVC
+merging byte-identical bodies, not corruption. (6) **Baked absolute
+paths via `$<TARGET_FILE:...>` beat cwd/search-order schemes for test
+DLLs.** (7) **Exact-count assertions against a deterministic fake are
+the harness version of range assertions against physics.**
+
+**2026-10-14 — J2534 query-param round (Commit D):** (1) **Write
+failure-path assertions against the actual failure path, not the intended
+one** — derive each expectation from which layer should reject the input.
+(2) **Paired compiler diagnostics fingerprint a lost middle argument**
+(code-167 + code-165 on the same token = argument shift). (3) **Existing
+green tests can be blind to a regression a new feature introduces in
+shared plumbing** — pin the contract you changed, at the point it
+changed (`DefaultConnectUsesIso15765At500k`).
+
+**2026-10-14 — device picker + real-vendor discovery round (Commit E):**
+(1) **The registry spec describes an ideal world; installers live in the
+real one** — dual-root sweep. (2) **Green tests can be vacuously green
+against machine-dependent data.** (3) **A picker's first real-world duty
+is diagnosing its own environment.** (4) **Unverified war stories rot.**
+
+**2026-10-14 — F-series (Frame ABI + Lifecycle + Gate):** ABI-breaking frame
+redesign, close/destroy split, message-ID decode gate, strict-C ABI
+verification. Test count rises 64→70. Lessons: (1) ABI breaks require
+version-string sync. (2) Poll-until-condition waits eliminate wall-clock
+dependence. (3) Shared constants beat comments.
+
+**2026-10-14 — surrogate host round (Phase 3 Part 2):** five lessons,
+every one paid for in a hang, a ghost theory, or a red test. (1) **A
+synchronous pipe handle silently neuters overlapped I/O:** `ConnectNamedPipe`
+with an OVERLAPPED struct on a handle created WITHOUT
+`FILE_FLAG_OVERLAPPED` *ignores the struct and blocks forever* — the
+carefully-built wait/cancel/fail-fast code downstream of it was dead code,
+never reached. Symptom: same-arch tests passed (their children connect
+instantly) while the dead-DLL test hung forever. The fix is the flag; the
+discipline is knowing that every subsequent ReadFile/WriteFile then needs
+its own OVERLAPPED — pseudo-sync wrappers with timeouts came free with
+the correct fix and closed the wedged-child risk too. (2) **A wait
+predicate that doesn't DO the thing can never fire:** the test waited on
+`count >= 3` while the drain that increments count ran only *after* the
+wait — every run burned the full timeout and then failed. When the
+condition is produced by polling, the predicate must drain inside the
+loop. (3) **x86 `__stdcall` name decoration breaks `GetProcAddress` by
+spec name:** MSVC exports `_PassThruOpen@8` on x86; x64 has one calling
+convention so names go undecorated — the same-arch suite passed for
+weeks while the cross-arch run failed on export resolution (child exit
+code 5). Fix: a linker `.def` file with bare EXPORTS entries — the exact
+mechanism real J2534-1 vendors use to publish undecorated names. The
+spec mandates undecorated exports precisely because of this trap.
+(4) **Instrument BEFORE theorizing:** the hang took three blind fix
+attempts (path dialect, missing x86 CRT — both disproven by one
+`ls /c/Windows/SysWOW64` and one bare-exe run) before distinct child
+exit codes + client-side stage logging turned the next failure into a
+one-command diagnosis. Cheap exit codes on every early-return in a child
+process are permanent diagnosability, not scaffolding. (5) **MSYS shells
+don't translate environment-variable values** — only command arguments
+get path mangling; `/e/...` in an env var reaches CreateProcessA
+verbatim and fails. Windows-style paths (forward slashes are fine) in
+env overrides. Honorable mention: the two failed theories were each
+disproved by a single command because the evidence was checkable — the
+methodology is the lesson, not the guesses.
+
+**2026-10-14 — routing round (Phase 3 Part 3):** (1) **Route at the
+lowest complete boundary:** putting the in-proc/surrogate switch inside
+`qttune_j2534_open` and forwarding one line per vendor-call helper left
+`j2534_transport.cpp` byte-identical — the policy layer is
+backend-blind, proven by a session-level lifecycle running over the
+surrogate with zero transport changes. A routing decision placed higher
+forks every future capability; placed at the loader it is inherited for
+free by all of them. (2) **A sniffer's failure mode is a routing
+decision:** returning "x86" on unreadable PE would have spawned
+surrogate processes for garbage paths; returning "unknown → in-proc"
+preserves the honest LoadLibraryEx failure. The docstring said one
+thing, the code did another — the routing work surfaced the contract
+violation that had been hiding in discovery since Part 1. (3) **Test
+hooks need to exist at the boundary under test:** cross-arch routing
+tests required `qttune_j2534_inject_test_frame` precisely because an
+x64 test process cannot LoadLibrary an x86 fake to reach the shared
+queue — the inject hook routes like everything else and closes the gap.
+
+**2026-10-15 — ptypes verification round (pre-Part 4):** four lessons.
+(1) **No vendor header is the norm, not a red flag** — the SAE
+standard is the contract, and the canonical definition is recoverable
+from multiple independent public references (FreeSSM header, diamondman
+v04.04 header, PEAK manual) that AGREE with each other; verify against
+those, not training memory. (2) **A shared-header fake makes spec
+divergence structurally invisible:** every consumer compiled from
+`j2534_ptypes.h` stays mutually consistent while diverging from every
+real device — 77 green tests proved NOTHING here, the reference diff
+found three dormant bugs. Of the three, the nastiest was ISO15765=0x05
+vs 0x06: connecting with raw CAN's ID half-works, and half-works beats
+fails for damage potential. (3) **Constants in a shared header are ABI
+across separately built binaries:** fixing CAN_29BIT_ID's value while
+one tree was stale produced a cross-process value mismatch — caught
+only because one test asserted the extended-frame bit (the version-skew
+failure). Since then, response-struct size checks fail loudly on
+struct-layout skew, but constant-value skew inside same-sized structs
+remains silent (Known Issue #19: rebuild both trees together).
+(4) **The spec text reorders priorities:** reading v4.04 revealed ISO
+15765 receives NOTHING without a flow-control filter — the planned
+"polish" item was actually the prerequisite for the first byte of
+live data, which reshaped Part 4's scope before any code was written.
+
+**2026-10-15 — WRITE/IOCTL/filter round (Phase 3 Part 4):** five
+lessons. (1) **Expand flat wire forms only where pointers are
+meaningful:** `SCONFIG_LIST` carries `ConfigPtr` — the surrogate child
+materializes the real struct in its own address space, calls the
+vendor, and re-flattens the results; pointer-bearing types never cross
+the boundary and the in-proc/surrogate signatures stay identical by
+construction. The filter triplet got the same treatment for free
+because filters are `PASSTHRU_MSG`s, not a bespoke struct — spec-shaped
+data wire-translates naturally; bespoke structs don't. (2) **Whitelist
+at BOTH ends or the backends disagree:** the first-cut child code
+relayed unknown ioctls with NULL payloads "generously" — a vendor
+might support them! — which meant the loader seam refused FAST_INIT
+while the surrogate would happily pass it to a device. Asymmetric
+backend acceptance is a parity bug by definition; the whitelist is now
+identical at seam and child, and the parity test drives BOTH.
+(3) **Test observability must be architecture-independent:** a
+scripted-response fake requires an ARMING hook, and an x64 test
+process cannot reach into the x86 child's fake instance to arm one
+(the exact gap `OP_INJECT` exists to bridge). The deterministic echo
+(byte 0 + 0x40) makes the full request→response loop observable
+through the ring from either arch with zero new protocol surface —
+design the observable, not the mechanism. (4) **Writing the tests is
+the design review:** composing the caller-facing ioctl test exposed a
+real overflow the code review missed — the loader handed a small
+caller buffer (4-byte VBATT) straight to a client that copies up to
+64 wire bytes. The fix (loader-side staging buffer + cap) was forced
+by thinking about what a CALLER would look like, not what the plumbing
+permitted. Same session: the surrogate's response struct grew a
+payload region, and the pipe length checks — designed as optional
+insurance in Part 2 — became the load-bearing defense against
+cross-tree version skew, catching a stale win32 child loudly where
+the 046b320 round had silently corrupted. (5) **Numbered-opcode
+enums with reserved gaps invite missing identifiers:** the Part 3
+header defined opcodes 1,3,4,5,... reserving 2 for CONNECT — and Part
+4's client compile failed on `QTTUNE_SUR_OP_CONNECT` undefined while
+the header had compiled "fine" for weeks. The compiler is the net
+here and it worked, but the lesson stands: reserve slots by defining
+them (as an unused-but-named constant), not by skipping numbers.
+
+**2026-10-15 — transport adoption round (Phase 3 Part 5):** five
+lessons, all paid for in red tests. (1) **Assert the failure reason,
+not just the failure:** the coupling-rule test passed vacuously — its
+URI was rejected by the strict number parser (bare `0C` isn't hex)
+before the coupling rule ever saw it. Green-but-wrong-reason is the
+same blindness as vacuous-green. (2) **Appended test code outside the
+suite's namespace/ifdef produces identifier soup** — every hook the
+new tests resolved needed a typedef at file scope first; the compiler
+error that looked like "unidentified parameters" was a scoping bug.
+(3) **A rejecting fake must DISCARD, not park:** filter gating that
+rejected a non-matching frame while leaving it queued froze the stream
+at the pre-mismatch count — head-of-line blocking, same failure class
+as the Part 2 wait-predicate bug. Device filter hardware throws frames
+away; a fake that models the device must too. (4) **Predict the
+symptom before the fix:** when six red tests collapsed to three root
+causes, the next failure (0x42 vs 0x02) was pre-announced by reading
+which layer the fake's device-model echo had moved through — diagnosed
+before running. (5) **Dead locals in tests lie by omission** — an
+assigned-never-used `const int n` reads like a dependency of the
+assertions below it. Delete them; /W4 on the test targets would have
+flagged it. Also: fake conventions (+0x40 on byte 0) must be labeled
+as such in tests AND docs, or BENCH inherits them as protocol
+expectations.

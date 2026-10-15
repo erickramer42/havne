@@ -41,13 +41,14 @@ qttune_status_t qttune_mock_transport_attach(qttune_session_t* session,
 
 /*
  * J2534 transport factory (Win32). URI grammar:
- *   j2534://[<selector>][?baud=<decimal>[&flags=<0xHEX|decimal>]]
+ *   j2534://[<selector>][?baud=<decimal>[&flags=<0xHEX|decimal>]
+ *                           [&filter=<CAN_ID>[&txid=<CAN_ID>]
+ *                           [&poll=<PID>]]]
  *
  * Selector (unchanged):
  *   j2534://                        first discovered device
  *   j2534://<vendor-name>           discovered vendor, matched
- *                                   case-insensitively; no match =
- *                                   QT_ERR_NO_TRANSPORT
+ *                                   case-insensitively
  *   j2534://<path ending .dll or    direct DLL load (tests/dev)
  *            containing \ or />)
  *
@@ -57,8 +58,14 @@ qttune_status_t qttune_mock_transport_attach(qttune_session_t* session,
  *           the ISO 15765 500k default
  *   flags   0x-prefixed hex or decimal, passed to PassThruConnect
  *           verbatim — bit SEMANTICS are not interpreted pre-BENCH
- *           (pending the vendor j2534.h diff); lowercase keys only,
- *           unknown keys rejected, duplicate keys last-wins
+ *   filter  CAN id 1..0x1FFFFFFF — receive ID (registers a
+ *           FLOW_CONTROL filter on this ID; ISO 15765 receive
+ *           prerequisite). Frames matching this ID get their
+ *           4-byte address header stripped and arbitration_id stamped.
+ *   txid    CAN id 1..0x1FFFFFFF — transmit ID; default 0x7E0
+ *   poll    PID 1..0xFF — Mode-01 request loop (100 ms cadence)
+ *           COUPLING: poll without filter is rejected at parse time.
+ *   lowercase keys only, unknown keys rejected, duplicate keys last-wins
  *
  * Attaches a transport to the session (idempotent like mock).
  */
