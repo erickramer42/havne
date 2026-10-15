@@ -79,6 +79,18 @@ qttune_status_t qttune_j2534_read_frame(qttune_j2534_handle_t* handle,
                                        qttune_frame_t* out_frame,
                                        uint32_t timeout_ms,
                                        bool* got_frame);
+/* Backend introspection (routing diagnostics + tests): "inproc" or
+ * "surrogate". NULL for a NULL handle. */
+const char* qttune_j2534_backend_name(const qttune_j2534_handle_t* handle);
+
+/* TEST-ONLY: inject a frame into the loaded module's InjectFrame hook
+ * (fake DLL), routed by backend. UNIT/HARNESS use — never in product
+ * paths; real frames arrive via qttune_j2534_read_frame. */
+qttune_status_t qttune_j2534_inject_test_frame(qttune_j2534_handle_t* handle,
+                                               const uint8_t* data,
+                                               uint32_t len,
+                                               uint32_t timestamp,
+                                               uint32_t rx_flags);
 
 #ifdef __cplusplus
 }

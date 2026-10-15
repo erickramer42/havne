@@ -190,3 +190,21 @@ if(WIN32)
 
     gtest_discover_tests(test_j2534_surrogate)
 endif()
+
+# J2534 routing tests (Win32-only, HARNESS tier — backend selection by
+# PE architecture: in-proc for x64 (CI), surrogate for x86 (dev-machine,
+# env-gated via QTTUNE_FAKE_DLL/QTTUNE_SURROGATE_EXE))
+if(WIN32)
+    add_executable(test_j2534_routing
+        test_j2534_routing.cpp
+    )
+    target_link_libraries(test_j2534_routing PRIVATE
+        qttune-core
+        GTest::gtest_main
+    )
+    target_compile_definitions(test_j2534_routing PRIVATE
+        FAKE_J2534_DLL_PATH="$<TARGET_FILE:fake_j2534>"
+    )
+    add_dependencies(test_j2534_routing fake_j2534)
+    gtest_discover_tests(test_j2534_routing)
+endif()

@@ -6,6 +6,7 @@
 #include "qttune/j2534.h"
 #include "qttune/core.h"
 #include "qttune/internal.h"
+#include "qttune/j2534_surrogate.h"
 
 #ifdef _WIN32
 
@@ -43,9 +44,18 @@ typedef long (__stdcall *fn_pt_ioctl)(unsigned long ChannelID,
                                       void* pInput,
                                       void* pOutput);
 
-/* Backing type for the header's opaque qttune_j2534_handle_t. */
+/* Backing type for the header's opaque qttune_j2534_handle_t.
+ *
+ * BACKEND SELECTION (Part 3 routing): qttune_j2534_open sniffs the PE
+ * architecture once and routes — x86 DLLs load in the surrogate
+ * process (an x64 process physically cannot LoadLibrary a 32-bit
+ * DLL); x64/unknown load in-proc. Every downstream helper forwards
+ * on is_surrogate, so the transport layer (j2534_transport.cpp) stays
+ * single-path and unaware of which backend serves any given session. */
 struct qttune_j2534_handle {
-    HMODULE module;
+    bool is_surrogate = false;
+    qttune_j2534_sur_handle_t* sur = nullptr;  /* owned iff is_surrogate */
+    HMODULE module = nullptr;                  /* owned iff !is_surrogate */
     unsigned long device_id;
     fn_pt_open        open;
     fn_pt_close       close;
@@ -99,17 +109,24 @@ bool read_function_library(HKEY hvendor, char* out, size_t out_size)
 }
 
 /* Sniff PE header architecture from a DLL path.
- * Returns: 1=x86, 2=x64, 0=unknown (defaults to x86).
- * Safe fallbacks: file open/read failures, invalid PE headers,
- * or truncated files all return x86 (the conservative route
- * for legacy drivers). */
+ * Returns: 1=x86, 2=x64, 0=unknown — matching j2534.h's documented
+ * reserved[0] contract (which this function's docstring previously
+ * claimed but its code contradicted by defaulting failures to 1).
+ *
+ * ROUTING CONSUMER: qttune_j2534_open sends x86 to the surrogate and
+ * takes everything else in-proc. 0 on unreadable/invalid PE therefore
+ * preserves the pre-routing behavior: LoadLibraryEx fails honestly
+ * with QT_ERR_LOAD_FAILED, no surrogate spawn for garbage paths.
+ * The discovery annotation (reserved[0]) is a UI label; the sniff in
+ * open() is authoritative and covers direct-path selectors that
+ * bypass discovery entirely. */
 static uint32_t sniff_pe_architecture(const char* dll_path)
 {
     HANDLE hFile = CreateFileA(dll_path, GENERIC_READ, FILE_SHARE_READ,
                                NULL, OPEN_EXISTING,
                                FILE_ATTRIBUTE_NORMAL, NULL);
     if (hFile == INVALID_HANDLE_VALUE) {
-        return 1; // default to x86 on failure
+        return 0; // unknown — open() falls back to in-proc
     }
 
     DWORD bytes_read;
@@ -117,7 +134,7 @@ static uint32_t sniff_pe_architecture(const char* dll_path)
     if (!ReadFile(hFile, &dos_hdr, sizeof(dos_hdr), &bytes_read, NULL) ||
         dos_hdr.e_magic != IMAGE_DOS_SIGNATURE) {
         CloseHandle(hFile);
-        return 1;
+        return 0;
     }
 
     SetFilePointer(hFile, dos_hdr.e_lfanew, NULL, FILE_BEGIN);
@@ -125,18 +142,18 @@ static uint32_t sniff_pe_architecture(const char* dll_path)
     if (!ReadFile(hFile, &nt_hdr, sizeof(nt_hdr), &bytes_read, NULL) ||
         nt_hdr.Signature != IMAGE_NT_SIGNATURE) {
         CloseHandle(hFile);
-        return 1;
+        return 0;
     }
 
     uint16_t machine = nt_hdr.FileHeader.Machine;
     CloseHandle(hFile);
 
     if (machine == IMAGE_FILE_MACHINE_I386) {
-        return 1; // x86
+        return 1; // x86 — surrogate required from an x64 host process
     } else if (machine == IMAGE_FILE_MACHINE_AMD64) {
-        return 2; // x64
+        return 2; // x64 — in-proc
     } else {
-        return 1; // unknown → safe default to x86
+        return 0; // ARM64/Itanium/etc — unknown, in-proc attempt
     }
 }
 
@@ -271,6 +288,29 @@ qttune_status_t qttune_j2534_open(const qttune_j2534_device_t* device,
     }
     *out_handle = nullptr;
 
+    /* ROUTING DECISION — exactly one place, exactly once. x86 DLLs
+     * delegate to the surrogate host (exe lookup honors
+     * QTTUNE_SURROGATE_EXE); everything else proceeds in-proc below,
+     * including unknown (sniff 0), so unreadable paths still fail at
+     * LoadLibraryEx with today's ergonomics. */
+    if (sniff_pe_architecture(device->dll_path) == 1) {
+        qttune_j2534_sur_handle_t* sur = nullptr;
+        qttune_status_t st = qttune_j2534_sur_open(device->dll_path, &sur);
+        if (st != QT_OK) {
+            return st;   /* spawn/DLL-load/PassThruOpen failure — already
+                            mapped to QT_ERR_LOAD_FAILED client-side */
+        }
+        qttune_j2534_handle_t* h = new (std::nothrow) qttune_j2534_handle_t();
+        if (h == nullptr) {
+            qttune_j2534_sur_close(sur);
+            return QT_ERR_OUT_OF_MEMORY;
+        }
+        h->is_surrogate = true;
+        h->sur = sur;
+        *out_handle = h;
+        return QT_OK;
+    }
+
     HMODULE module = LoadLibraryExA(device->dll_path, nullptr,
                                     LOAD_WITH_ALTERED_SEARCH_PATH);
     if (module == nullptr) {
@@ -316,6 +356,14 @@ qttune_status_t qttune_j2534_close(qttune_j2534_handle_t* handle)
     if (handle == nullptr) {
         return QT_OK;
     }
+    if (handle->is_surrogate) {
+        /* Polite SHUTDOWN, bounded wait, job-object kill — all inside
+         * the surrogate client. Deleting the box after is safe: the
+         * transport already joined its worker before calling here. */
+        qttune_status_t st = qttune_j2534_sur_close(handle->sur);
+        delete handle;
+        return st;
+    }
     if (handle->close != nullptr) {
         handle->close(handle->device_id);
     }
@@ -335,6 +383,10 @@ qttune_status_t qttune_j2534_connect_channel(qttune_j2534_handle_t* handle,
 {
     if (handle == nullptr || out_channel == nullptr) {
         return QT_ERR_NULL_ARGUMENT;
+    }
+    if (handle->is_surrogate) {
+        return qttune_j2534_sur_connect_channel(handle->sur, baud,
+                                                 flags, out_channel);
     }
     /* baud == 0 is the transport-layer "unset" sentinel (the URI parser
      * rejects an explicit baud=0, so the ambiguity is closed by
@@ -357,6 +409,9 @@ qttune_status_t qttune_j2534_disconnect_channel(qttune_j2534_handle_t* handle,
     if (handle == nullptr) {
         return QT_ERR_NULL_ARGUMENT;
     }
+    if (handle->is_surrogate) {
+        return qttune_j2534_sur_disconnect_channel(handle->sur, channel);
+    }
     /* Best-effort at teardown: vendor failure during shutdown must
      * not block the detach path. */
     long rc = handle->disconnect(channel);
@@ -373,6 +428,12 @@ qttune_status_t qttune_j2534_read_frame(qttune_j2534_handle_t* handle,
         return QT_ERR_NULL_ARGUMENT;
     }
     *got_frame = false;
+
+    if (handle->is_surrogate) {
+        return qttune_j2534_sur_read_frame(handle->sur, channel,
+                                           out_frame, timeout_ms,
+                                           got_frame);
+    }
 
     PASSTHRU_MSG msg = {};
     unsigned long num = 1;
@@ -421,6 +482,47 @@ qttune_status_t qttune_j2534_read_frame(qttune_j2534_handle_t* handle,
     memcpy(out_frame->data, msg.Data, n);
 
     *got_frame = true;
+    return QT_OK;
+}
+
+const char* qttune_j2534_backend_name(const qttune_j2534_handle_t* handle)
+{
+    if (handle == nullptr) {
+        return nullptr;
+    }
+    return handle->is_surrogate ? "surrogate" : "inproc";
+}
+
+/* TEST-ONLY: forward an injected frame into the loaded module's
+ * InjectFrame hook (fake DLL). Routes by backend like everything
+ * else: surrogate mode crosses the control pipe into the child's
+ * module instance; in-proc mode resolves InjectFrame lazily — it is
+ * a test hook, not a J2534 mandatory export, so a DLL without it
+ * yields QT_ERR_NOT_IMPLEMENTED rather than an open-time failure. */
+qttune_status_t qttune_j2534_inject_test_frame(qttune_j2534_handle_t* handle,
+                                               const uint8_t* data,
+                                               uint32_t len,
+                                               uint32_t timestamp,
+                                               uint32_t rx_flags)
+{
+    if (handle == nullptr || data == nullptr || len == 0 || len > 64) {
+        return QT_ERR_NULL_ARGUMENT;
+    }
+    if (handle->is_surrogate) {
+        return qttune_j2534_sur_inject_test_frame(handle->sur, data, len,
+                                                  timestamp, rx_flags);
+    }
+    if (handle->module == nullptr) {
+        return QT_ERR_NO_TRANSPORT;
+    }
+    typedef void (*fn_inject)(const unsigned char*, unsigned long,
+                              unsigned long, unsigned long, unsigned long);
+    fn_inject inject = reinterpret_cast<fn_inject>(
+        GetProcAddress(handle->module, "InjectFrame"));
+    if (inject == nullptr) {
+        return QT_ERR_NOT_IMPLEMENTED;
+    }
+    inject(data, len, timestamp, rx_flags, 0);
     return QT_OK;
 }
 
@@ -482,6 +584,20 @@ qttune_status_t qttune_j2534_read_frame(qttune_j2534_handle_t* /*h*/,
     if (got_frame != nullptr) {
         *got_frame = false;
     }
+    return QT_ERR_NOT_IMPLEMENTED;
+}
+
+const char* qttune_j2534_backend_name(const qttune_j2534_handle_t* /*handle*/)
+{
+    return nullptr;
+}
+
+qttune_status_t qttune_j2534_inject_test_frame(qttune_j2534_handle_t* /*h*/,
+                                              const uint8_t* /*d*/,
+                                              uint32_t /*len*/,
+                                              uint32_t /*ts*/,
+                                              uint32_t /*flags*/)
+{
     return QT_ERR_NOT_IMPLEMENTED;
 }
 
