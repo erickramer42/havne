@@ -68,9 +68,14 @@ only the surrogate exe and vendor DLLs are ever x86):
 Then from the regular (x64) tree, with Windows-style paths
 (MSYS does not translate env var values):
 
-    export QTTUNE_SURROGATE_EXE='E:/.../build-win32/surrogate/Release/qttune-j2534-surrogate.exe'
-    export QTTUNE_FAKE_DLL='E:/.../build-win32/tests/Release/fake_j2534.dll'
+    export QTTUNE_SURROGATE_EXE='.../build-win32/surrogate/Release/qttune-j2534-surrogate.exe'
+    export QTTUNE_FAKE_DLL='.../build-win32/tests/Release/fake_j2534.dll'
     ctest --test-dir build -C Release -R "J2534Routing|J2534Surrogate" --output-on-failure
+
+⚠️ After any change to `j2534_ptypes.h` or `surrogate_protocol.h`, rebuild
+BOTH trees — shared constants are ABI across binaries built from
+separate trees, and a stale child produces silently-wrong IPC data
+(not a loud failure).
 
 ## Build (Mobile) — unvalidated
 
@@ -93,6 +98,13 @@ on a device/emulator.
   `?baud=<decimal>` and `?flags=<0xHEX|decimal>` query parameters
   (strict parsing — malformed URIs rejected at session create, before
   any DLL load)
+- **Vendor-call relay (write/ioctl/filter):** `PassThruWriteMsgs`,
+  `PassThruIoCtl` (GET/SET_CONFIG, READ_VBATT, buffer clears — via
+  flattened SCONFIG pairs, never pointers across the boundary), and
+  `PassThruStartMsgFilter`/`StopMsgFilter` (PASS/BLOCK/FLOW_CONTROL
+  pattern triplets) all work through both backends identically;
+  pointer-bearing ioctls are whitelisted OUT at both ends rather than
+  relayed with guessed layouts
 - **x86 surrogate host:** 32-bit-only vendor DLLs (common among J2534
   drivers) load in a bundled surrogate process — named-pipe control
   plane with bounded-timeout transactions, shared-memory SPSC ring for
@@ -136,19 +148,23 @@ on a device/emulator.
 |---------|-----------|--------|
 | v0.1.0  | Skeleton: core ABI, Qt shell, responsive layout | ✅ Released |
 | v0.2.0  | Callback API, mock transport, bridge marshaling, live LogPage | ✅ Released |
-| v0.3.0  | Signals layer, coalesced LiveView, J2534 transport, live vehicle read/logging | 🚧 Phases 1–3 HARNESS-complete incl. URI params, device picker, F1/F2 ABI redesign, **x86 surrogate host + architecture routing (cross-arch verified)**; remaining: WRITE/IOCTL relay, BENCH live verify, live vehicle |
+| v0.3.0  | Signals layer, coalesced LiveView, J2534 transport, live vehicle read/logging | 🚧 Phases 1–3 COMPLETE incl. URI params, device picker, F1/F2 ABI redesign, x86 surrogate host + architecture routing, J2534-1 v4.04 ptypes verification, **WRITE/IOCTL/filter relay (cross-arch verified)**; remaining: transport-layer adoption of the relay, BENCH live verify, live vehicle |
 | v0.4.0  | Security access discovery, flash capability | Planned |
 | v0.5.0+ | Multi-manufacturer plugins | Future |
 
-Currently 77 automated tests (18 core, 15 signals, 16 bridge, 15 J2534,
-6 F1/F2 ABI + lifecycle, 4 surrogate, 3 routing — one of which is
+Currently 83 automated tests (18 core, 15 signals, 16 bridge, 15 J2534,
+6 F1/F2 ABI + lifecycle, 9 surrogate, 4 routing — one of which is
 env-gated for the dev-machine cross-arch configuration), all green
 locally on Windows/MSVC 2022 and on CI (3-platform matrix).
 Per-case ctest granularity via `gtest_discover_tests()`. The J2534 stack
 is verified end-to-end against a fake vendor DLL (HARNESS tier) in BOTH
-same-arch and cross-arch configurations; discovery is additionally
-verified against real installed drivers (OBDX Pro VT/VX). No real vendor
-DLL load/connect or live vehicle yet.
+same-arch and cross-arch configurations — including the full
+request/write/response loop, ioctl config round trips, and filter
+registration (the fake responds deterministically, OBD-style +0x40);
+discovery is additionally verified against real installed drivers
+(OBDX Pro VT/VX). The shared PASSTHRU types are verified against
+canonical public J2534-1 v4.04 references. No real vendor DLL
+load/connect or live vehicle yet.
 See [STATUS.md](STATUS.md) for verified test matrix and engineering notes.
 
 Flash capabilities require discovering each manufacturer's secure gateway authentication. Vehicle communication research is tracked separately and outside this repo for now.
@@ -172,8 +188,9 @@ MIT — see [LICENSE](LICENSE) file.
 decoding, coalesced live view with strip chart, and a HARNESS-verified
 J2534 transport (fake vendor DLL verified end-to-end in same-arch AND
 cross-arch configurations — x64 app → x86 surrogate → x86 DLL — incl.
-`?baud=`/`?flags=` query parameters, PE-architecture routing, and the
-Settings-page device picker) implemented and unit-tested.
+`?baud=`/`?flags=` query parameters, PE-architecture routing, the
+Settings-page device picker, and the full write/ioctl/filter vendor
+relay verified across both backends) implemented and unit-tested.
 No real vehicle communication verified yet.
 Do not connect to a vehicle expecting functionality.
 Frame ABI changed in v0.3.0-dev (arbitration ID, flags, session-relative time). Downstream integrations must migrate from the old `is_extended` flag and implicit 8-byte payload assumption.

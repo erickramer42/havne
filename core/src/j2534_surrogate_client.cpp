@@ -134,7 +134,8 @@ bool transact(qttune_j2534_sur_handle_t* h, const qttune_sur_request_t& req,
     }
     FlushFileBuffers(h->pipe);
     if (!ov_read(h->pipe, out_resp, sizeof(*out_resp), timeout_ms)) {
-        SUR_LOG("transact: ov_read failed (req_id=%u op=%u err=%lu)\n",
+        SUR_LOG("transact: ov_read failed (req_id=%u op=%u err=%lu "
+                "— struct layout skew between trees?)\n",
                 req.request_id, req.opcode, GetLastError());
         return false;
     }
@@ -261,7 +262,7 @@ qttune_status_t qttune_j2534_sur_open(const char* dll_path,
             }
         } else {
             SUR_LOG("open: connect TIMEOUT after %lums\n",
-                    kHandshakeTimeoutMs);
+                kHandshakeTimeoutMs);
         }
     } else {
         SUR_LOG("open: ConnectNamedPipe immediate failure (err=%lu)\n",
@@ -335,6 +336,180 @@ qttune_status_t qttune_j2534_sur_disconnect_channel(qttune_j2534_sur_handle_t* h
     req.u.disconnect.channel_id = channel;
     qttune_sur_response_t resp = {};
     if (!transact(h, req, &resp, kTransactTimeoutMs)) return QT_ERR_NO_TRANSPORT;
+    return QT_OK;
+}
+
+qttune_status_t qttune_j2534_sur_write_frame(qttune_j2534_sur_handle_t* h,
+                                             unsigned long channel,
+                                             const uint8_t* data,
+                                             uint32_t len,
+                                             uint32_t tx_flags,
+                                             uint32_t timeout_ms,
+                                             uint32_t* out_num_written)
+{
+    if (h == nullptr || data == nullptr || len == 0 ||
+        len > QTTUNE_SUR_MSG_MAX) {
+        return QT_ERR_NULL_ARGUMENT;
+    }
+    if (out_num_written != nullptr) {
+        *out_num_written = 0;
+    }
+
+    qttune_sur_request_t req = {};
+    req.request_id = h->next_request_id++;
+    req.opcode = QTTUNE_SUR_OP_WRITE;
+    req.u.write.channel_id = channel;
+    memcpy(req.u.write.data, data, len);
+    req.u.write.data_len = len;
+    req.u.write.tx_flags = tx_flags;
+    req.u.write.timeout_ms = timeout_ms;
+
+    qttune_sur_response_t resp = {};
+    if (!transact(h, req, &resp, kTransactTimeoutMs)) {
+        return QT_ERR_NO_TRANSPORT;   /* IPC failure — pipe/child/skew */
+    }
+    /* Nonzero vendor status maps like connect_channel does; a PARTIAL
+     * write (vendor NOERROR but count < requested) surfaces via aux —
+     * the caller sees num_written < len and decides. We do not hide
+     * the count, and we do not conflate IPC failure with vendor
+     * refusal — different failure, different path home. */
+    if (resp.status != static_cast<int32_t>(QTTUNE_PT_STATUS_NOERROR)) {
+        return QT_ERR_NO_TRANSPORT;
+    }
+    if (out_num_written != nullptr) {
+        *out_num_written = resp.aux;
+    }
+    return QT_OK;
+}
+
+qttune_status_t qttune_j2534_sur_ioctl(qttune_j2534_sur_handle_t* h,
+                                       unsigned long channel,
+                                       uint32_t ioctl_id,
+                                       const uint8_t* input,
+                                       uint32_t input_len,
+                                       uint8_t* output,
+                                       uint32_t* out_len)
+{
+    if (h == nullptr || input_len > QTTUNE_SUR_IOCTL_DATA_MAX) {
+        return QT_ERR_NULL_ARGUMENT;
+    }
+    if (input == nullptr && input_len != 0) {
+        return QT_ERR_NULL_ARGUMENT;
+    }
+    if (out_len != nullptr) {
+        *out_len = 0;
+    }
+
+    qttune_sur_request_t req = {};
+    req.request_id = h->next_request_id++;
+    req.opcode = QTTUNE_SUR_OP_IOCTL;
+    req.u.ioctl.channel_id = channel;
+    req.u.ioctl.ioctl_id = ioctl_id;
+    if (input_len > 0) {
+        memcpy(req.u.ioctl.input, input, input_len);
+    }
+    req.u.ioctl.input_len = input_len;
+
+    qttune_sur_response_t resp = {};
+    if (!transact(h, req, &resp, kTransactTimeoutMs) ||
+        resp.status != static_cast<int32_t>(QTTUNE_PT_STATUS_NOERROR)) {
+        return QT_ERR_NO_TRANSPORT;
+    }
+
+    /* GET_CONFIG writes results back through pInput (the flattened
+     * array); READ_VBATT puts its ULONG in the output slot. Both come
+     * home in resp.data — copy out, honoring a caller-provided cap.
+     * A NULL output with non-NULL out_len is legal (length probe). */
+    if (output != nullptr && resp.data_len > 0) {
+        memcpy(output, resp.data, resp.data_len);
+    }
+    if (out_len != nullptr) {
+        *out_len = resp.data_len;
+    }
+    return QT_OK;
+}
+
+qttune_status_t qttune_j2534_sur_start_msg_filter(qttune_j2534_sur_handle_t* h,
+                                                  unsigned long channel,
+                                                  uint32_t filter_type,
+                                                  const uint8_t* mask,
+                                                  uint32_t mask_len,
+                                                  const uint8_t* pattern,
+                                                  uint32_t pattern_len,
+                                                  const uint8_t* flow_control,
+                                                  uint32_t fc_len,
+                                                  uint32_t tx_flags,
+                                                  unsigned long* out_filter_id)
+{
+    if (h == nullptr || mask == nullptr || pattern == nullptr ||
+        out_filter_id == nullptr) {
+        return QT_ERR_NULL_ARGUMENT;
+    }
+    /* Spec: pattern 1..12 bytes; mask/pattern lengths must MATCH (the
+     * vendor compares them bitwise). Flow control rides only with
+     * FLOW_CONTROL_FILTER. Enforcing here keeps malformed filter
+     * setups from wasting a pipe round trip and, more importantly,
+     * from reaching a real device in garbage form. */
+    if (mask_len < 1 || mask_len > QTTUNE_SUR_FILTER_PATTERN_MAX ||
+        mask_len != pattern_len) {
+        return QT_ERR_NULL_ARGUMENT;
+    }
+    if (fc_len > QTTUNE_SUR_FILTER_PATTERN_MAX) {
+        return QT_ERR_NULL_ARGUMENT;
+    }
+    if (filter_type == QTTUNE_PT_FLOW_CONTROL_FILTER && fc_len != mask_len) {
+        return QT_ERR_NULL_ARGUMENT;
+    }
+    if (filter_type != QTTUNE_PT_FLOW_CONTROL_FILTER && fc_len != 0) {
+        return QT_ERR_NULL_ARGUMENT;
+    }
+    if (fc_len > 0 && flow_control == nullptr) {
+        return QT_ERR_NULL_ARGUMENT;
+    }
+    *out_filter_id = 0;
+
+    qttune_sur_request_t req = {};
+    req.request_id = h->next_request_id++;
+    req.opcode = QTTUNE_SUR_OP_START_FILTER;
+    req.u.start_filter.channel_id = channel;
+    req.u.start_filter.filter_type = filter_type;
+    req.u.start_filter.tx_flags = tx_flags;
+    memcpy(req.u.start_filter.mask, mask, mask_len);
+    memcpy(req.u.start_filter.pattern, pattern, pattern_len);
+    if (fc_len > 0 && flow_control != nullptr) {
+        memcpy(req.u.start_filter.flow_control, flow_control, fc_len);
+    }
+    req.u.start_filter.mask_len = mask_len;
+    req.u.start_filter.pattern_len = pattern_len;
+    req.u.start_filter.fc_len = fc_len;
+
+    qttune_sur_response_t resp = {};
+    if (!transact(h, req, &resp, kTransactTimeoutMs) ||
+        resp.status != static_cast<int32_t>(QTTUNE_PT_STATUS_NOERROR)) {
+        return QT_ERR_NO_TRANSPORT;
+    }
+    *out_filter_id = resp.handle_or_channel;
+    return QT_OK;
+}
+
+qttune_status_t qttune_j2534_sur_stop_msg_filter(qttune_j2534_sur_handle_t* h,
+                                                  unsigned long channel,
+                                                  unsigned long filter_id)
+{
+    if (h == nullptr) {
+        return QT_ERR_NULL_ARGUMENT;
+    }
+    qttune_sur_request_t req = {};
+    req.request_id = h->next_request_id++;
+    req.opcode = QTTUNE_SUR_OP_STOP_FILTER;
+    req.u.stop_filter.channel_id = channel;
+    req.u.stop_filter.filter_id = filter_id;
+
+    qttune_sur_response_t resp = {};
+    if (!transact(h, req, &resp, kTransactTimeoutMs) ||
+        resp.status != static_cast<int32_t>(QTTUNE_PT_STATUS_NOERROR)) {
+        return QT_ERR_NO_TRANSPORT;
+    }
     return QT_OK;
 }
 
@@ -442,6 +617,23 @@ qttune_status_t qttune_j2534_sur_connect_channel(qttune_j2534_sur_handle_t*, uns
                                                  unsigned long, unsigned long*)
 { return QT_ERR_NOT_IMPLEMENTED; }
 qttune_status_t qttune_j2534_sur_disconnect_channel(qttune_j2534_sur_handle_t*, unsigned long)
+{ return QT_ERR_NOT_IMPLEMENTED; }
+qttune_status_t qttune_j2534_sur_write_frame(qttune_j2534_sur_handle_t*, unsigned long,
+                                             const uint8_t*, uint32_t, uint32_t,
+                                             uint32_t, uint32_t*)
+{ return QT_ERR_NOT_IMPLEMENTED; }
+qttune_status_t qttune_j2534_sur_ioctl(qttune_j2534_sur_handle_t*, unsigned long,
+                                       uint32_t, const uint8_t*, uint32_t,
+                                       uint8_t*, uint32_t*)
+{ return QT_ERR_NOT_IMPLEMENTED; }
+qttune_status_t qttune_j2534_sur_start_msg_filter(qttune_j2534_sur_handle_t*, unsigned long,
+                                                  uint32_t, const uint8_t*, uint32_t,
+                                                  const uint8_t*, uint32_t,
+                                                  const uint8_t*, uint32_t, uint32_t,
+                                                  unsigned long*)
+{ return QT_ERR_NOT_IMPLEMENTED; }
+qttune_status_t qttune_j2534_sur_stop_msg_filter(qttune_j2534_sur_handle_t*, unsigned long,
+                                                  unsigned long)
 { return QT_ERR_NOT_IMPLEMENTED; }
 qttune_status_t qttune_j2534_sur_read_frame(qttune_j2534_sur_handle_t*, unsigned long,
                                             qttune_frame_t*, uint32_t, bool* got)

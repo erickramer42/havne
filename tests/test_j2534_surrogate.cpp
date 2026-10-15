@@ -4,10 +4,16 @@
 //          counts, payload fidelity, RxStatus->flags translation, vendor
 //          timestamp passthrough, FIFO order, pump gating on CONNECT,
 //          clean job-object teardown, and fast failure on a dead DLL.
+//          Part 4: write->echo round trip, ioctl SET->GET + VBATT,
+//          child-side ioctl whitelist, filter start/stop lifecycle.
 //
 // ARCH note: in the x64 configure this is all-x64 (CI-valid IPC test);
 // the true cross-arch case (x64 test process -> x86 surrogate -> x86
 // fake) runs when QTTUNE_SURROGATE_EXE points at Win32-tree artifacts.
+// Part 4 assertions are deliberately observable through RETURN VALUES
+// and the RX ring alone (no fake-instance hooks) so they hold in BOTH
+// architectures unchanged — an x64 test cannot reach into the x86
+// child's fake instance.
 
 #include <gtest/gtest.h>
 
@@ -78,6 +84,23 @@ void drain_sur_frames(qttune_j2534_sur_handle_t* h, SurCapture* cap)
         if (!got) return;
         sur_capture_cb(&f, cap);
     }
+}
+
+/* Flattened-SCONFIG helper: one (Parameter, Value) u32 pair, host
+ * endianness (memcpy) — valid because every participant in this
+ * suite is x86 or x64, both little-endian, and both sides of the
+ * wire use memcpy-based (un)flattening. */
+void put_pair(unsigned char* buf, uint32_t param, uint32_t value)
+{
+    memcpy(buf + 0, &param, 4);
+    memcpy(buf + 4, &value, 4);
+}
+
+uint32_t get_u32(const unsigned char* buf)
+{
+    uint32_t v = 0;
+    memcpy(&v, buf, 4);
+    return v;
 }
 
 } // namespace
@@ -201,6 +224,157 @@ TEST(J2534SurrogateTest, NullArgumentsRejected)
     EXPECT_EQ(qttune_j2534_sur_open(FAKE_J2534_DLL_PATH, nullptr),
               QT_ERR_NULL_ARGUMENT);
     EXPECT_EQ(qttune_j2534_sur_close(nullptr), QT_OK);   /* free(nullptr) */
+}
+
+/* ================= Part 4: WRITE / IOCTL / FILTER ================= */
+
+TEST(J2534SurrogateTest, WriteRoundTripProducesEchoResponse)
+{
+    /* The full vendor request path minus a vehicle: WRITE crosses the
+     * control pipe, the surrogate materializes a PASSTHRU_MSG and
+     * calls PassThruWriteMsgs, the fake records it and enqueues its
+     * deterministic echo (byte 0 + 0x40), the read pump pushes it to
+     * the ring, and we drain it client-side. Observable from EITHER
+     * architecture — no fake-instance hooks involved. */
+    qttune_j2534_sur_handle_t* h = nullptr;
+    ASSERT_EQ(qttune_j2534_sur_open(fake_dll_path(), &h), QT_OK);
+    unsigned long channel = 0;
+    ASSERT_EQ(qttune_j2534_sur_connect_channel(h, 0, 0, &channel), QT_OK);
+
+    /* A realistic Mode-01 request shape (service 0x01, PID 0x0C RPM). */
+    const unsigned char req[3] = {0x01, 0x0C, 0x00};
+    const unsigned char expect[3] = {0x41, 0x0C, 0x00};   /* +0x40 */
+    uint32_t num_written = 0;
+    ASSERT_EQ(qttune_j2534_sur_write_frame(h, channel, req, 3, 0, 1000,
+                                            &num_written),
+              QT_OK);
+    EXPECT_EQ(num_written, 1u);
+
+    SurCapture cap;
+    const bool delivered = wait_until(
+        [&]() { drain_sur_frames(h, &cap); return cap.count.load() >= 1; },
+        10000, 50);
+    ASSERT_TRUE(delivered);
+    ASSERT_EQ(cap.count.load(), 1);
+    EXPECT_EQ(cap.payloads[0][0], expect[0]);
+    EXPECT_EQ(memcmp(cap.payloads[0], expect, 3), 0);
+
+    EXPECT_EQ(qttune_j2534_sur_close(h), QT_OK);
+}
+
+TEST(J2534SurrogateTest, IoctlSetGetConfigRoundTrip)
+{
+    /* SET_CONFIG then GET_CONFIG across the flattened-SCONFIG wire:
+     * the child materializes a real SCONFIG_LIST (pointer valid only
+     * in ITS address space), stores, then GET must report the stored
+     * value back through the re-flattened response payload. */
+    qttune_j2534_sur_handle_t* h = nullptr;
+    ASSERT_EQ(qttune_j2534_sur_open(fake_dll_path(), &h), QT_OK);
+    unsigned long channel = 0;
+    ASSERT_EQ(qttune_j2534_sur_connect_channel(h, 0, 0, &channel), QT_OK);
+
+    constexpr uint32_t kParam = 0x10;        /* arbitrary parameter id */
+    constexpr uint32_t kValue = 0xBEEF;
+
+    unsigned char in[8];
+    put_pair(in, kParam, kValue);
+    ASSERT_EQ(qttune_j2534_sur_ioctl(h, channel, QTTUNE_PT_IOCTL_SET_CONFIG,
+                                     in, 8, nullptr, nullptr),
+              QT_OK);
+
+    unsigned char q[8], out[64];
+    put_pair(q, kParam, 0);
+    uint32_t out_len = 0;
+    ASSERT_EQ(qttune_j2534_sur_ioctl(h, channel, QTTUNE_PT_IOCTL_GET_CONFIG,
+                                     q, 8, out, &out_len),
+              QT_OK);
+    ASSERT_EQ(out_len, 8u);
+    EXPECT_EQ(get_u32(out), kParam);
+    EXPECT_EQ(get_u32(out + 4), kValue);
+
+    EXPECT_EQ(qttune_j2534_sur_close(h), QT_OK);
+}
+
+TEST(J2534SurrogateTest, IoctlReadVbattReturnsFixedVoltage)
+{
+    qttune_j2534_sur_handle_t* h = nullptr;
+    ASSERT_EQ(qttune_j2534_sur_open(fake_dll_path(), &h), QT_OK);
+    unsigned long channel = 0;
+    ASSERT_EQ(qttune_j2534_sur_connect_channel(h, 0, 0, &channel), QT_OK);
+
+    unsigned char out[8] = {};
+    uint32_t out_len = 0;
+    ASSERT_EQ(qttune_j2534_sur_ioctl(h, channel, QTTUNE_PT_IOCTL_READ_VBATT,
+                                     nullptr, 0, out, &out_len),
+              QT_OK);
+    ASSERT_EQ(out_len, 4u);
+    EXPECT_EQ(get_u32(out), 13800u);   /* 13.8 V in mV, per the fake */
+
+    EXPECT_EQ(qttune_j2534_sur_close(h), QT_OK);
+}
+
+TEST(J2534SurrogateTest, IoctlWhitelistRefusesUnsupportedIds)
+{
+    /* Both ends must refuse an out-of-contract ioctl: the loader seam
+     * returns NOT_IMPLEMENTED before the pipe; the CHILD whitelist
+     * (patched into the OP_IOCTL handler) must independently fail it
+     * if a request somehow arrives — vendor FAILED status crosses the
+     * pipe as QT_ERR_NO_TRANSPORT. Driving the client directly (this
+     * suite) exercises the child side. */
+    qttune_j2534_sur_handle_t* h = nullptr;
+    ASSERT_EQ(qttune_j2534_sur_open(fake_dll_path(), &h), QT_OK);
+    unsigned long channel = 0;
+    ASSERT_EQ(qttune_j2534_sur_connect_channel(h, 0, 0, &channel), QT_OK);
+
+    /* 0x05 = FIVE_BAUD_INIT — pointer-bearing, never shapable. */
+    EXPECT_EQ(qttune_j2534_sur_ioctl(h, channel, 0x05,
+                                     nullptr, 0, nullptr, nullptr),
+              QT_ERR_NO_TRANSPORT);
+
+    EXPECT_EQ(qttune_j2534_sur_close(h), QT_OK);
+}
+
+TEST(J2534SurrogateTest, FilterStartStopLifecycle)
+{
+    /* Register a PASS filter for a 29-bit-style 4-byte pattern, stop
+     * it, then stop it AGAIN — the strict-vendor stop-twice refusal
+     * must surface as an error, proving vendor status isn't being
+     * flattened into silent success anywhere on the relay. */
+    qttune_j2534_sur_handle_t* h = nullptr;
+    ASSERT_EQ(qttune_j2534_sur_open(fake_dll_path(), &h), QT_OK);
+    unsigned long channel = 0;
+    ASSERT_EQ(qttune_j2534_sur_connect_channel(h, 0, 0, &channel), QT_OK);
+
+    const unsigned char mask[4]    = {0x00, 0x00, 0x07, 0xFF};
+    const unsigned char pattern[4]  = {0x00, 0x00, 0x07, 0xE8};
+
+    unsigned long filter_id = 0;
+    ASSERT_EQ(qttune_j2534_sur_start_msg_filter(
+                  h, channel, QTTUNE_PT_PASS_FILTER,
+                  mask, 4, pattern, 4,
+                  nullptr, 0, 0, &filter_id),
+              QT_OK);
+    EXPECT_GE(filter_id, 1ul);
+
+    /* Malformed shapes are refused client-side before the pipe. */
+    unsigned long junk = 0;
+    EXPECT_EQ(qttune_j2534_sur_start_msg_filter(
+                  h, channel, QTTUNE_PT_PASS_FILTER,
+                  mask, 4, pattern, 3,     /* length mismatch */
+                  nullptr, 0, 0, &junk),
+              QT_ERR_NULL_ARGUMENT);
+    /* Flow control on a non-FC filter is also refused. */
+    EXPECT_EQ(qttune_j2534_sur_start_msg_filter(
+                  h, channel, QTTUNE_PT_PASS_FILTER,
+                  mask, 4, pattern, 4,
+                  pattern, 4, 0, &junk),
+              QT_ERR_NULL_ARGUMENT);
+
+    EXPECT_EQ(qttune_j2534_sur_stop_msg_filter(h, channel, filter_id), QT_OK);
+    EXPECT_EQ(qttune_j2534_sur_stop_msg_filter(h, channel, filter_id),
+              QT_ERR_NO_TRANSPORT);   /* already stopped — strict vendor */
+
+    EXPECT_EQ(qttune_j2534_sur_close(h), QT_OK);
 }
 
 #endif /* _WIN32 */

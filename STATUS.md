@@ -1,7 +1,7 @@
 # QtTune — Project Status
 
-**Date:** October 14, 2026
-**Version:** v0.3.0-dev (ABI-breaking frame redesign + lifecycle split); v0.2.0 still tagged. Phases 1–3 HARNESS-complete incl. URI query params, device picker, x86 surrogate host, and PE-architecture routing — remaining: WRITE/IOCTL relay, BENCH-tier live-DLL verification, live-vehicle read.
+**Date:** October 15, 2026
+**Version:** v0.3.0-dev (ABI-breaking frame redesign + lifecycle split); v0.2.0 still tagged. Phases 1–3 COMPLETE including WRITE/IOCTL/filter relay (Part 4, 2026-10-15) and the J2534-1 v4.04 ptypes verification/fix (`046b320`) — remaining: BENCH-tier live-DLL verification, live-vehicle read.
 **Repository:** https://github.com/erickramer42/qttune
 **CI:** [![CI](https://github.com/erickramer42/qttune/actions/workflows/ci.yml/badge.svg)](https://github.com/erickramer42/qttune/actions/workflows/ci.yml)
 
@@ -32,7 +32,9 @@ behind a stable C ABI, with UI layers as replaceable skins around it.**
 |  * J2534 loader routing:   |   PE sniff at open() — x86 DLLs delegate
 |    in-proc | surrogate     |   to the surrogate child, x64/unknown
 |                            |   load in-process. Transport layer is
-|                            |   single-path, backend-agnostic.
+|                            |   single-path, backend-agnostic. WRITE/
+|                            |   IOCTL/filter relay alongside the
+|                            |   existing read path (Part 4).
 +-------------+--------------+
               | named pipe (control) + shared-memory SPSC ring (data)
               | + kill-on-close job object
@@ -122,7 +124,7 @@ POD signal metadata + linear decode: `display = raw * scale + offset`.
   order (DBC mixes Motorola and Intel freely).
 - **Message-ID gating (v0.3.0 Phase 2b):** signals declare the CAN arbitration 
   ID they ride on; the bridge decodes only frames matching that ID. Mock set
-  declares `MOCK_TELEMETRY_ARB_ID = 0x0C0`. J2534 transport reports zero `arbitration_id` until filter-layer support lands (documented inertness —
+  declares `MOCK_TELEMETRY_ARB_ID = 0x0C0`. J2534 transport reports zero `arbitration_id` until the transport layer adopts the filter API (relay shipped in Part 4; adoption is the activation step — documented inertness —
   frames flow, signals stay empty, nothing corrupts silently).
 - **Mock emission (Phase 1b):** tick-driven simulation (idle RPM wobble +
   rev blips, coolant warm-up toward thermostat, trailing IAT, coupled
@@ -174,7 +176,8 @@ POD signal metadata + linear decode: `display = raw * scale + offset`.
 
 Transport stack for real Pass-Thru devices (Windows). **Verified against
 a fake vendor DLL end-to-end, in BOTH same-arch and cross-arch (x64 app →
-x86 surrogate → x86 fake) configurations; discovery additionally verified
+x86 surrogate → x86 fake) configurations, including the full
+request/write/response loop (Part 4); discovery additionally verified
 against real installed drivers — no vendor DLL other than the fake has
 been loaded and no live vehicle has been connected.** Landmarks, in commit order:
 
@@ -187,11 +190,11 @@ been loaded and no live vehicle has been connected.** Landmarks, in commit order
   `FUNCTIONLIBRARY` per vendor; dedupe across sweeps (dll_path +
   vendor name). C-ABI array out, NULL-safe free.
 - **`9b33aeb` / `6b58c3a` / `0fa4883` — fake DLL + status code + loader:**
-  `tests/fake_j2534.cpp` implements the seven mandatory PassThru exports
+  `tests/fake_j2534.cpp` implements the mandatory PassThru exports
   with SAE J2534-1 signatures (`__stdcall`, `long` status return,
-  32-bit `unsigned long` IDs) plus three test hooks. Loader
+  32-bit `unsigned long` IDs) plus test hooks. Loader
   (`qttune_j2534_open`) does `LoadLibraryExA(..., LOAD_WITH_ALTERED_SEARCH_PATH)`
-  → resolve all 7 exports → `PassThruOpen`, with single-site failure
+  → resolve all exports → `PassThruOpen`, with single-site failure
   unwinding (no leaked HMODULE on any failure path). `QT_ERR_LOAD_FAILED`
   added append-only to the status enum.
 - **`SESSION-INTEGRATED TRANSPORT (Commit C):** `j2534_transport.cpp`
@@ -209,14 +212,12 @@ been loaded and no live vehicle has been connected.** Landmarks, in commit order
   baud=0 is the internal "unset" sentinel (explicit `baud=0` is rejected
   at parse) resolved to the ISO 15765 500k default in the loader TU —
   the one TU owning the vendor ABI constants. flags pass through
-  verbatim with NO bit semantics interpreted pre-BENCH (pending the
-  vendor `j2534.h` diff). Malformed queries (unknown keys, `baud=abc`,
-  `baud=0`, bare `?`, trailing `&`) reject at `qttune_session_create`
-  with `QT_ERR_NO_TRANSPORT` before any DLL load. Fake gained a
-  `GetLastConnectParams` hook recording the last `PassThruConnect`
-  invocation — the existing stream tests couldn't have caught a
-  regression here (any hardcoded connect params would satisfy them);
-  `DefaultConnectUsesIso15765At500k` now pins behavior preservation.
+  verbatim with NO bit semantics interpreted pre-BENCH. Malformed
+  queries (unknown keys, `baud=abc`, `baud=0`, bare `?`, trailing `&`)
+  reject at `qttune_session_create` with `QT_ERR_NO_TRANSPORT` before
+  any DLL load. Fake gained a `GetLastConnectParams` hook recording the
+  last `PassThruConnect` invocation; `DefaultConnectUsesIso15765At500k`
+  pins behavior preservation.
 - **`URI grammar (full):** `j2534://[<selector>][?baud=<decimal>[&flags=<0xHEX|decimal>]]`.
   Selector: `` (first discovered device), `<vendor-name>` (case-insensitive
   discovered match), `<path ending .dll or containing \ or />` (direct load —
@@ -230,59 +231,115 @@ been loaded and no live vehicle has been connected.** Landmarks, in commit order
   `PassThruSupport.04.04` variant real installers write (observed: OBDX
   Pro, in WOW6432Node only), 2 roots × 2 WOW64 views = 4 sweeps, dedupe
   absorbs overlap. Discovery annotates each device's PE architecture
-  (`reserved[0]`: 1=x86, 2=x64, 0=unknown) via header sniff — feeds both
-  the picker's labeling and (authoritatively, re-sniffed at open) the
-  Part 3 routing decision. First real-contact finding: the OBDX Pro VX
-  subkey declares ISO15765=1, a genuine connect candidate.
+  (`reserved[0]`: 1=x86, 2=x64, 0=unknown) via header sniff. First
+  real-contact finding: the OBDX Pro VX subkey declares ISO15765=1, a
+  genuine connect candidate.
 - **`X86 SURROGATE HOST (2026-10-14/15, Phase 3 Part 2):** a separate
   Win32 executable, `qttune-j2534-surrogate`, that loads a 32-bit vendor
   DLL an x64 process physically cannot. Architecture: the app-side client
   (`core/src/j2534_surrogate_client.cpp`, `qttune_j2534_sur_*` C ABI)
-  creates all named objects (pipe/mapping/event — app-generated names,
-  passed on the child's command line; the child can never know them in
-  advance), spawns the surrogate suspended under a
-  KILL_ON_JOB_CLOSE job object (closing the job handle kills the child
-  on any teardown path, including app crash), then handshakes OP_OPEN.
-  Control plane: overlapped byte-mode named pipe with bounded-timeout
-  transact() and request-id desync detection. Data plane: shared-memory
-  SPSC ring (4096 slots, producer owns head, consumer owns tail, power-of-two
-  index masking) + auto-reset event for consumer wakeup. Surrogate-side:
-  control pump (OPEN/CONNECT/DISCONNECT/SHUTDOWN/INJECT) + read pump
-  (PassThruReadMsgs poll → ring push, gated on channel != 0). Diagnosability:
-  distinct child exit codes 1–7 per failure stage, plus client-side
-  SUR_LOG failure-path tracing. Deployment: exe resolves next to the
-  running image (`QTTUNE_SURROGATE_EXE` env override for cross-arch
-  dev runs); CMake copies it next to every test exe that spawns it.
+  creates all named objects, spawns the surrogate suspended under a
+  KILL_ON_JOB_CLOSE job object, then handshakes OP_OPEN. Control plane:
+  overlapped byte-mode named pipe with bounded-timeout transact() and
+  request-id desync detection. Data plane: shared-memory SPSC ring
+  (4096 slots) + auto-reset event for consumer wakeup. Surrogate-side:
+  control pump + read pump (PassThruReadMsgs poll → ring push, gated on
+  channel != 0). Distinct child exit codes 1–7 per failure stage, plus
+  client-side SUR_LOG failure-path tracing.
 - **`fake_j2534.def`:** undecorated export names via linker def file —
   mandatory because x86 MSVC decorates `__stdcall` exports
   (`_PassThruOpen@8`), breaking `GetProcAddress("PassThruOpen")` in the
-  surrogate (surfaced as exit code 5 in the cross-arch round). Real
-  J2534-1 vendors use the same mechanism; bare EXPORTS entries emit
-  undecorated names on both x86 and x64.
+  surrogate. Real J2534-1 vendors use the same mechanism.
 - **`PE-ARCHITECTURE ROUTING (2026-10-15, Phase 3 Part 3):**
   `qttune_j2534_open` sniffs the DLL's PE machine field once and routes:
   x86 (I386) → surrogate host; x64/unknown → in-proc LoadLibraryEx.
   Unknown (sniff failure — missing/corrupt file) stays in-proc so
-  unreadable paths keep today's honest `QT_ERR_LOAD_FAILED` (no
-  speculative surrogate spawn for garbage). The loader handle boxes a
-  backend mode; `connect_channel`/`disconnect_channel`/`read_frame`/
-  `close` forward one line each on `is_surrogate` —
-  **`j2534_transport.cpp` is unchanged and backend-blind** (single-path
-  by construction; routing is invisible to the policy layer, verified by
-  the session-level smoke over the routed surrogate). New internal
-  surface: `qttune_j2534_backend_name()` ("inproc"/"surrogate", tests +
-  diagnostics) and `qttune_j2534_inject_test_frame()` (routed test hook:
-  lazy InjectFrame resolve in-proc, OP_INJECT pipe relay for surrogate
-  — the hook that made routing tests possible in surrogate mode, since
-  an x64 test process cannot LoadLibrary an x86 fake to inject). The
-  sniffer also now honors its documented contract: returns 0 on
+  unreadable paths keep today's honest `QT_ERR_LOAD_FAILED`. The loader
+  handle boxes a backend mode; every vendor-call helper forwards one
+  line on `is_surrogate` — **`j2534_transport.cpp` is unchanged and
+  backend-blind**. New internal surface: `qttune_j2534_backend_name()`
+  and `qttune_j2534_inject_test_frame()` (routed test hook). The sniffer
+  also now honors its documented contract: returns 0 on
   unreadable/invalid PE (previously returned 1, contradicting the header).
+- **`PTYPES SPEC VERIFICATION (046b320, 2026-10-15):** no vendor header
+  ships with the OBDX Pro driver (checked install + web) — the SAE
+  J2534-1 v4.04 standard IS the contract, so `j2534_ptypes.h` was
+  diffed against the canonical definition cross-verified across three
+  independent public sources (FreeSSM `src/J2534.h`, the diamondman
+  J2534 PassThru Logger v04.04 header, PEAK System's PCAN-PassThru
+  API 04.04 manual). THREE divergences found and fixed, all invisible
+  to the suite BY DESIGN (the fake compiles from the same header, so
+  in-tree consumers stay self-consistent while diverging from every
+  real device): (1) `DataSize`/`ExtraDataIndex` field order was swapped
+  — accidental correctness on unpadded single frames (`EDI == DS` when
+  no extra data), silent corruption on padded/multiframe, wrong tx
+  lengths for writes; (2) `CAN_29BIT_ID` is bit 8 (0x0100), not
+  0x01000000 — the old mask would never fire on a conforming vendor;
+  (3) `ISO15765` is 0x06 (0x05 is raw CAN — connecting with it opens
+  an unfiltered raw-CAN channel instead of an ISO-TP channel; the
+  half-works class of failure). Also verified: Timestamp is
+  microseconds (vendor conformance a BENCH check), filter/ioctl/SCONFIG
+  constants per spec, and — from the spec text — ISO 15765 receives
+  NOTHING without a matching flow-control filter, making filter relay
+  a prerequisite for the first byte of live data, not polish. The fix
+  commit also surfaced the cross-tree ABI coupling: a stale x86
+  build-win32 tree failed the extended-frame test (old RxStatus value
+  baked into the old fake binary vs. new mask in the rebuilt x64
+  client) — the loud failure mode the pipe length checks now
+  formalize. Rebuild BOTH trees on any `j2534_ptypes.h` /
+  `surrogate_protocol.h` change.
+- **`WRITE / IOCTL / FILTER RELAY (2026-10-15, Phase 3 Part 4):** the
+  full vendor control surface crosses both backends. Wire ops:
+  `OP_WRITE` / `OP_IOCTL` activated from their reserved slots,
+  `OP_START_FILTER` (9) / `OP_STOP_FILTER` (10) appended per the
+  append-only rule. Write is single-message (64-byte wire cap = frame
+  ABI cap; ISO-TP multiframe segmentation is transport-layer work).
+  Ioctl carries FLATTENED (Parameter, Value) u32 pairs — `SCONFIG_LIST`
+  contains a pointer and may never cross the pipe; the child
+  materializes the real struct in its own address space before calling
+  the vendor, and re-flattens GET_CONFIG results for the trip home.
+  Filter requests carry flat mask/pattern(/flow-control) byte arrays
+  (1..12 bytes, lengths must match; flow control only with
+  FLOW_CONTROL_FILTER), expanded child-side into `PASSTHRU_MSG`
+  triplets. Ioctl is WHITELISTED identically at the loader seam AND
+  the surrogate child (GET/SET_CONFIG, READ_VBATT, CLEAR_TX/RX_BUFFER,
+  CLEAR_MSG_FILTERS) — pointer-bearing ids (FIVE_BAUD_INIT, FAST_INIT)
+  are refused outright rather than relayed with guessed layouts;
+  asymmetric backend acceptance is a parity bug by definition. New
+  loader helpers: `qttune_j2534_write_frame` / `qttune_j2534_ioctl` /
+  `qttune_j2534_start_msg_filter` / `qttune_j2534_stop_msg_filter`,
+  each one `is_surrogate` branch, each declared in `internal.h`
+  (policy-layer plumbing, not public ABI). Export resolution grew to
+  NINE mandatory functions in BOTH backends (filter functions are
+  J2534-1 mandatory — the pre-Part 4 surrogate demanded only seven,
+  an asymmetry with in-proc now removed); `fake_j2534.def` gained five
+  entries (two filter exports + three new hooks) to keep x86
+  undecoration intact. Vendor statuses surface verbatim: strict-vendor
+  stop-twice refusal crosses as `QT_ERR_NO_TRANSPORT`, partial writes
+  expose actual-written counts via `out_num_written`.
+- **Fake Part 4 semantics:** `PassThruWriteMsgs` records every message
+  (`GetWriteCount`/`GetRecordedWrite` hooks) AND enqueues a
+  deterministic echo response (byte 0 + 0x40, the UDS/OBD
+  positive-response convention) into the RX FIFO — the full
+  request→response loop is observable from EITHER architecture
+  through the ring alone, chosen over script-armed responses because
+  an x64 test cannot reach into the x86 child's fake instance to arm
+  one (the same gap `OP_INJECT` exists to bridge). `PassThruIoCtl`
+  gains a SET/GET config table (unknown params read back as 0xFFFFFFFF
+  "vendor default"), fixed VBATT (13800 mV), accepted CLEAR_*
+  ioctls, and strict unknown-id failure. Filter registration with
+  bookkeeping, `GetLastFilterStart` observation, tombstoned stop.
+  ReadMsgs stays deliberately UNGATED on filters — enforcing the
+  spec's receive-requires-filter rule would break every existing
+  inject test; activation is paired with transport-layer adoption.
+  `ExtraDataIndex = DataSize` everywhere (v4.04 convention).
 - **`Shared internal contract:** `core/include/qttune/j2534_ptypes.h`
   defines `PASSTHRU_MSG` consumed by BOTH the loader, the fake DLL, and
   the surrogate — layout drift among them is structurally impossible.
-  ⚠️ BENCH-tier caveat: `PASSTHRU_MSG` layout is from training knowledge; diff against the vendor's 
-  `j2534.h` before first live use. Nothing in the HARNESS tier can catch
-  that divergence — the fake accepts whatever the header says.
+  Layout is VERIFIED against canonical public reference headers (see
+  the PTYPES VERIFICATION entry); remaining risk is vendor
+  NON-conformance to the spec itself — the only thing that catches a
+  non-conforming vendor is a live device (BENCH tier).
 - **Deterministic fake:** `InjectFrame` enqueues into a mutex-guarded
   16-slot FIFO (test thread races the polling worker safely);
   `ReadMsgs` dequeues one message per call; `GetCurrentHandle` observes
@@ -293,21 +350,27 @@ been loaded and no live vehicle has been connected.** Landmarks, in commit order
   channel → `PassThruClose` → `FreeLibrary`. Surrogate mode mirrors
   this: worker joined before the client's polite-SHUTDOWN/job-kill path.
 - **Cross-arch verification (2026-10-15):** the full test surface —
-  surrogate HARNESS suite and the routing round trips, INCLUDING a
-  complete `session_create → start → close` lifecycle — has been driven
-  in the true cross-arch configuration: x64 test process → x86
-  surrogate exe → x86 fake DLL, frames flowing across pipe + shared
-  ring. That is the exact OBDX Pro VX topology, verified with zero
-  hardware. CI runs the same-arch (all-x64) form; the cross-arch
-  pairing is a documented dev-machine tier via env overrides.
+  surrogate HARNESS suite (9 tests incl. write→echo, SET/GET config,
+  VBATT, ioctl whitelist refusal, filter lifecycle) and the routing
+  round trips (4 tests incl. the Part 4 parity round trips over the
+  routed surrogate) — has been driven in the true cross-arch
+  configuration: x64 test process → x86 surrogate exe → x86 fake DLL,
+  13/13, including a complete `session_create → start → close`
+  lifecycle and request/response over pipe + shared ring. That is the
+  exact OBDX Pro VX topology, verified with zero hardware. CI runs the
+  same-arch (all-x64) form; the cross-arch pairing is a documented
+  dev-machine tier via env overrides.
 
-**Phase 3 remaining work:** WRITE/IOCTL relay through the surrogate
-(request frames and filter/init control — a read-only Mode 01 session
-still needs PassThruWriteMsgs at minimum), fake `PassThruWriteMsgs`
-upgrade from echo-accept to recorded-response for HARNESS round-trip
-coverage, then the BENCH-tier live-DLL verification round (incl.
-PASSTHRU_MSG header diff, first real-vendor load/connect attempt on
-the OBDX Pro VX, and the first live-vehicle session).
+**Phase 3 remaining work:** BENCH-tier live verification only — first
+real vendor DLL load/connect (OBDX Pro VX via the surrogate path,
+OBDLink MX+ via in-proc if its DLL is x64), observing real vendor
+ioctl/filter behavior (spec conformance, timeout semantics, timestamp
+units), and the first live-vehicle read-only session. Between HARNESS
+and BENCH, one deliberate gap: the transport layer has not yet ADOPTED
+the new write/ioctl/filter helpers — `j2534_transport.cpp` remains
+read-only; wiring a Mode-01 request loop and filter-based frame
+identity into the transport is the activation step (and what closes
+Issue #15's inert message-ID gate).
 
 ## Backpressure (corrected 2026-10-07)
 
@@ -347,18 +410,21 @@ handles:
 | Capability | Verified by |
 |---|---|
 | Core builds standalone with zero Qt deps | `core-and-tests` CI job (Ubuntu, Qt absent) |
-| 77 automated tests pass (18 core + 15 signals + 16 bridge + 15 J2534 + 6 F1/F2 ABI+lifecycle + 4 surrogate + 3 routing; +1 routing test env-gated-skip in CI, run on dev machine cross-arch) | GTest suites; 77/77 locally + 3-platform CI matrix green |
+| 83 automated tests pass (18 core + 15 signals + 16 bridge + 15 J2534 + 6 F1/F2 ABI+lifecycle + 9 surrogate + 4 routing — one routing test env-gated-skips in CI, runs cross-arch on dev machine) | GTest suites; 83/83 locally + 3-platform CI matrix green |
 | Mock transport delivers physically plausible, signal-set-decodable frames | `MockFramesDecodeAgainstMockSignalSet` |
 | J2534 registry discovery finds real installed vendors (OBDX Pro VT/VX), dual-root + dual-WOW64 sweep, dedupes, annotates PE architecture | `test_j2534_discovery` suite + manual smoke |
-| J2534 loader: LoadLibraryEx → 7-export resolution → PassThruOpen, clean unwind on missing DLL/exports | `test_j2534_load` suite |
+| J2534 loader: LoadLibraryEx → NINE-export resolution (incl. filter functions) → PassThruOpen, clean unwind on missing DLL/exports | `test_j2534_load` suite |
 | J2534 end-to-end: `j2534://<path.dll>` session → connect → worker poll → InjectFrame → callback, exact counts and payload fidelity | `test_j2534_stream` suite (FIFO order asserted) |
 | `?baud=`/`?flags=` reach PassThruConnect; defaults preserved; malformed rejected at parse before any DLL load | `J2534QueryParamTest` fixture |
 | Bridge discovery marshaling incl. architecture field | `DiscoveredDevicesHaveWellFormedEntries` |
 | SettingsPage picker: device list + refresh, manual URI connect/disconnect, error surfacing | Manual smoke (Windows, live registry) |
 | Surrogate host: spawn under kill-on-close job, overlapped pipe handshake, SPSC shared ring, fail-fast dead-DLL detection (ms, not the 8s deadline), clean teardown | `J2534SurrogateTest` suite (cycle/gating/dead-DLL/nulls) |
-| x86 fake DLL exports undecorated PassThru names (def file; works under both GetProcAddress conventions) | `dumpbin /exports` before/after + all surrogate+load suites |
+| x86 fake DLL exports undecorated PassThru names incl. the new filter + hook exports (def file) | `dumpbin /exports` before/after + all surrogate+load suites |
 | PE-architecture routing: x64 fake → "inproc", missing DLL → honest QT_ERR_LOAD_FAILED with no spawn | `J2534RoutingTest.X64FakeSelectsInprocBackendAndRoundTrips`, `.MissingDllFailsAtOpenThroughInproc` |
-| Cross-arch routing + full session lifecycle over surrogate: x64 test → x86 surrogate → x86 fake DLL, loader-API round trip + session create/start/close | `J2534RoutingTest.X86FakeSelectsSurrogateBackendAndRoundTrips` (dev machine, env-gated) |
+| Write path both backends: single-message PassThruWriteMsgs relay → fake records + deterministic echo (+0x40) → ring → read; written-count surface | `J2534SurrogateTest.WriteRoundTripProducesEchoResponse`, `J2534RoutingTest.InprocWriteIoctlFilterRoundTrips` (+ cross-arch legs of `X86FakeSelectsSurrogateBackendAndRoundTrips`) |
+| Ioctl relay both backends: SET→GET config round trip via flattened SCONFIG pairs, READ_VBATT, and whitelist refusal of pointer-bearing ids AT BOTH the seam and the child | `IoctlSetGetConfigRoundTrip`, `IoctlReadVbattReturnsFixedVoltage`, `IoctlWhitelistRefusesUnsupportedIds`, routing parity case |
+| Filter relay both backends: PASS-filter start/stop, strict-vendor stop-twice refusal surfacing as error, malformed shapes (length mismatch, FC on non-FC filter) refused client-side pre-pipe | `FilterStartStopLifecycle`, routing parity case |
+| Cross-arch routing + full session lifecycle over surrogate: x64 test → x86 surrogate → x86 fake DLL, loader-API round trip incl. write→echo and filter ops + session create/start/close | `J2534RoutingTest.X86FakeSelectsSurrogateBackendAndRoundTrips` (dev machine, env-gated; 13/13 with the surrogate suite) |
 | Vendor API call ordering at teardown (in-proc + surrogate mirror) | `FakeFixture.OpenCloseCycleHitsVendorApi` + surrogate teardown |
 | Encoder/decoder layout contract | Round-trip integration test |
 | Bridge marshal: worker → GUI thread | `FramesMarshalFromWorkerToGuiThread` |
@@ -370,9 +436,11 @@ handles:
 
 **Not verified (explicit gaps):** any REAL vendor DLL load/connect
 (OBDX Pro VX and OBDLink MX+ are installed and discovered but never
-loaded — WRITE/IOCTL relay outstanding before a live session is
-possible), any live vehicle, and the `PASSTHRU_MSG` field order against
-a vendor header (see J2534 section caveat).
+loaded), any live vehicle, and vendor CONFORMANCE to the J2534-1 v4.04
+layout the code now encodes (verified against canonical reference
+headers; only a live device catches a non-conforming vendor). Also not
+yet wired: the transport layer's adoption of the Part 4 helpers (the
+app is still read-only end-to-end; see Phase 3 remaining work).
 
 ## In Progress
 
@@ -397,13 +465,20 @@ v0.3.0 phases:
 - [x] **Phase 3 Part 3 — PE-architecture routing:** landed 2026-10-15;
       loader-boundary routing, backend introspection, routed inject hook;
       cross-arch session lifecycle verified.
-- [ ] **Phase 3 Part 4 — WRITE/IOCTL relay:** PassThruWriteMsgs +
-      PassThruIoCtl through the surrogate control pipe; fake
-      WriteMsgs upgraded from echo-accept to recorded-response so the
-      request/response loop is HARNESS-testable pre-vehicle.
+- [x] **Phase 3 Part 4 — WRITE/IOCTL/filter relay:** landed 2026-10-15;
+      wire ops (WRITE/IOCTL activated, filter ops appended), flattened
+      SCONFIG marshaling, ioctl whitelist at both ends, nine-export
+      resolution, fake recorded-write + deterministic-echo responder.
+      Verified same-arch (CI) and cross-arch (13/13). 83/83 total.
+- [ ] **Transport-layer adoption (post-Part 4):** wire the write/ioctl/
+      filter helpers into `j2534_transport.cpp` — Mode-01 request loop,
+      filter registration deriving frame arbitration identity (closes
+      Issue #15's inert gate), and the receive-requires-filter behavior
+      for ISO 15765 channels.
 - [ ] **Phase 3 close — BENCH-tier live verification:** first real vendor
       DLL load/connect (OBDX Pro VX via the surrogate path, OBDLink MX+
-      via in-proc if its DLL is x64), PASSTHRU_MSG header diff,
+      via in-proc if its DLL is x64), real-vendor spec-conformance
+      observation (timeout semantics, timestamp units, filter behavior),
       first live-vehicle read-only session.
 - [ ] **Phase 4 — Record-replay transport:** fixture capture +
       deterministic playback through the same frame API
@@ -442,9 +517,8 @@ v0.3.0 phases:
 11. **J2534 read path collapses all nonzero vendor statuses to
    "no frame."** Real devices signal ERR_TIMEOUT vs. hard errors
    distinctly. Splitting them is BENCH-tier work.
-12. **J2534 timestamps pass through untranslated** (vendor-defined
-   units). Normalization deferred until a real device reveals what
-   vendors actually emit.
+12. **J2534 timestamps pass through untranslated** (spec says
+   microseconds; vendor conformance unverified until BENCH).
 13. **Picker treats one registry entry as one device.** Multiple
    physical dongles behind a single vendor DLL (selectable via
    `PassThruOpen`'s pName argument, currently passed as nullptr =
@@ -453,19 +527,36 @@ v0.3.0 phases:
    machine with no discoverable vendors. Candidate fix: seeded-registry
    fixture with admin-elevation guard, or documented count-positive
    assertions on the known dev machine.
-15. **J2534 message-ID gate is inert** (reports zero arbitration_id).
-   Filter layer (PassThruStartMsgFilter message-pattern registration) is
-   the next milestone to activate the gate for real traffic. Documented,
-   not silent.
+15. **J2534 message-ID gate is inert** (transport reports zero
+   arbitration_id). The filter RELAY now exists and is verified
+   (Part 4) — activation awaits transport-layer adoption, which must
+   learn what pattern a real vehicle needs (BENCH-informed).
+   Documented, not silent.
 16. **ABI version string still says 0.2.0** — root CMake `project()`
    and the propagated version.h await the v0.3.0 tag (deliberate:
    bumping mid-cycle causes gratuitous rebuild churn).
 17. **Surrogate ring drops frames silently when full** (producer-side
-   backpressure counter is Part 4 work). 4096-slot ring at current rates
-   makes overflow theoretical, but the drop is currently unobservable.
+   backpressure counter still outstanding). 4096-slot ring at current
+   rates makes overflow theoretical, but the drop is currently
+   unobservable.
 18. **Bridge architecture label maps unknown (0) to "x86"** — display-
    only imprecision now that the sniffer can legitimately return 0
    (unreadable PE). Routing itself correctly treats 0 as in-proc.
+19. **Shared-header constants are ABI across TWO build trees.**
+   `j2534_ptypes.h` and `surrogate_protocol.h` values are baked into
+   the x64 tree AND the x86 build-win32 tree's surrogate + fake —
+   a value change (like the 046b320 fix) with only one tree rebuilt
+   produces silently-wrong IPC data, demonstrated 2026-10-15 (caught
+   only because one test asserted the extended-frame bit). The pipe
+   reads now fail loudly on RESPONSE STRUCT SIZE skew, but
+   constant-value skew inside same-sized structs remains silent.
+   Mitigation candidate: a version/magic hash in the OP_OPEN
+   handshake. Discipline until then: rebuild both trees together.
+20. **Pointer-bearing ioctls are out of contract** (FAST_INIT,
+   FIVE_BAUD_INIT). Refused at both the seam and child by whitelist —
+   correct for ISO 15765 (init ioctls are for ISO 9141/KWP), but if a
+   BENCH device needs them, they require a dedicated wire form, not a
+   relaxation of the whitelist.
 
 ## Roadmap
 
@@ -473,13 +564,14 @@ v0.3.0 phases:
 |-------|-------|--------|
 | v0.1.0 | Skeleton: core ABI, Qt shell, responsive layout | ✅ Released |
 | v0.2.0 | Callback API, mock transport, CI + tests | ✅ Released (tagged) |
-| v0.3.0 | Signals layer, coalesced LiveView, J2534 transport, live vehicle read/logging | 🚧 Phases 1–3 HARNESS-complete incl. URI params, device picker, F1/F2 ABI redesign, **x86 surrogate host + PE-architecture routing (cross-arch verified)**; remaining: WRITE/IOCTL relay, BENCH live verify, live vehicle |
+| v0.3.0 | Signals layer, coalesced LiveView, J2534 transport, live vehicle read/logging | 🚧 Phases 1–3 COMPLETE incl. URI params, device picker, F1/F2 ABI redesign, x86 surrogate host, PE-architecture routing, ptypes v4.04 verification, **WRITE/IOCTL/filter relay (cross-arch verified)**; remaining: transport-layer adoption of relay, BENCH live verify, live vehicle |
 | v0.4.0 | Security access discovery, flash capability | Planned |
 | v0.5.0+ | Multi-manufacturer plugin modules | Planned |
 
 ## Recent Engineering Notes
 
 example of full build and testing workflow:
+```
 rm -rf build
 cmake -B build -DCMAKE_PREFIX_PATH=C:/Qt/6.12.0/msvc2022_64
 cmake --build build --config Release
@@ -497,12 +589,16 @@ full app end to end and manual testing
 cross-arch build and test (x64 app with Win32 artifacts/DLLs):
 cmake -B build-win32 -A Win32 -DQTTUNE_BUILD_CORE_ONLY=ON
 cmake --build build-win32 --config Release --target qttune-j2534-surrogate fake_j2534
-export QTTUNE_SURROGATE_EXE='E:/CodeProjects/qttune/build-win32/surrogate/Release/qttune-j2534-surrogate.exe'
-export QTTUNE_FAKE_DLL='E:/CodeProjects/qttune/build-win32/tests/Release/fake_j2534.dll'
+export QTTUNE_SURROGATE_EXE='.../build-win32/surrogate/Release/qttune-j2534-surrogate.exe'
+export QTTUNE_FAKE_DLL='.../build-win32/tests/Release/fake_j2534.dll'
 ctest --test-dir build -C Release -R "J2534Routing|J2534Surrogate" --output-on-failure
 (note: env vars need WINDOWS paths — MSYS does not translate environment
-variable values, only command arguments; use E:/ style with forward
+variable values, only command arguments; use /path/to/ style with forward
 slashes, which Win32 APIs accept)
+CRITICAL after any j2534_ptypes.h or surrogate_protocol.h change: rebuild
+BOTH trees — the shared constants are ABI across binaries built from
+separate trees (see Known Issue #19).
+```
 
 For the record and for anyone hitting the same walls: the macOS job
 initially failed because Apple removed the AGL framework from the Xcode 26
@@ -654,6 +750,68 @@ tests required `qttune_j2534_inject_test_frame` precisely because an
 x64 test process cannot LoadLibrary an x86 fake to reach the shared
 queue — the inject hook routes like everything else and closes the gap.
 
+**2026-10-15 — ptypes verification round (pre-Part 4):** four lessons.
+(1) **No vendor header is the norm, not a red flag** — the SAE
+standard is the contract, and the canonical definition is recoverable
+from multiple independent public references (FreeSSM header, diamondman
+v04.04 header, PEAK manual) that AGREE with each other; verify against
+those, not training memory. (2) **A shared-header fake makes spec
+divergence structurally invisible:** every consumer compiled from
+`j2534_ptypes.h` stays mutually consistent while diverging from every
+real device — 77 green tests proved NOTHING here, the reference diff
+found three dormant bugs. Of the three, the nastiest was ISO15765=0x05
+vs 0x06: connecting with raw CAN's ID half-works, and half-works beats
+fails for damage potential. (3) **Constants in a shared header are ABI
+across separately built binaries:** fixing CAN_29BIT_ID's value while
+one tree was stale produced a cross-process value mismatch — caught
+only because one test asserted the extended-frame bit (the version-skew
+failure). Since then, response-struct size checks fail loudly on
+struct-layout skew, but constant-value skew inside same-sized structs
+remains silent (Known Issue #19: rebuild both trees together).
+(4) **The spec text reorders priorities:** reading v4.04 revealed ISO
+15765 receives NOTHING without a flow-control filter — the planned
+"polish" item was actually the prerequisite for the first byte of
+live data, which reshaped Part 4's scope before any code was written.
+
+**2026-10-15 — WRITE/IOCTL/filter round (Phase 3 Part 4):** five
+lessons. (1) **Expand flat wire forms only where pointers are
+meaningful:** `SCONFIG_LIST` carries `ConfigPtr` — the surrogate child
+materializes the real struct in its own address space, calls the
+vendor, and re-flattens the results; pointer-bearing types never cross
+the boundary and the in-proc/surrogate signatures stay identical by
+construction. The filter triplet got the same treatment for free
+because filters are `PASSTHRU_MSG`s, not a bespoke struct — spec-shaped
+data wire-translates naturally; bespoke structs don't. (2) **Whitelist
+at BOTH ends or the backends disagree:** the first-cut child code
+relayed unknown ioctls with NULL payloads "generously" — a vendor
+might support them! — which meant the loader seam refused FAST_INIT
+while the surrogate would happily pass it to a device. Asymmetric
+backend acceptance is a parity bug by definition; the whitelist is now
+identical at seam and child, and the parity test drives BOTH.
+(3) **Test observability must be architecture-independent:** a
+scripted-response fake requires an ARMING hook, and an x64 test
+process cannot reach into the x86 child's fake instance to arm one
+(the exact gap `OP_INJECT` exists to bridge). The deterministic echo
+(byte 0 + 0x40) makes the full request→response loop observable
+through the ring from either arch with zero new protocol surface —
+design the observable, not the mechanism. (4) **Writing the tests is
+the design review:** composing the caller-facing ioctl test exposed a
+real overflow the code review missed — the loader handed a small
+caller buffer (4-byte VBATT) straight to a client that copies up to
+64 wire bytes. The fix (loader-side staging buffer + cap) was forced
+by thinking about what a CALLER would look like, not what the plumbing
+permitted. Same session: the surrogate's response struct grew a
+payload region, and the pipe length checks — designed as optional
+insurance in Part 2 — became the load-bearing defense against
+cross-tree version skew, catching a stale win32 child loudly where
+the 046b320 round had silently corrupted. (5) **Numbered-opcode
+enums with reserved gaps invite missing identifiers:** the Part 3
+header defined opcodes 1,3,4,5,... reserving 2 for CONNECT — and Part
+4's client compile failed on `QTTUNE_SUR_OP_CONNECT` undefined while
+the header had compiled "fine" for weeks. The compiler is the net
+here and it worked, but the lesson stands: reserve slots by defining
+them (as an unused-but-named constant), not by skipping numbers.
+
 ---
 
 *(This document describes development state only. Safety, regulatory,
@@ -667,5 +825,3 @@ change LogPage to application log messages rather than mock data
 add ability to save data logs to a file (after implementing data being displayed from a live vehicle on LiveView)
 mobile build android/iOS
 macOS and linux build of full desktop version
-WRITE/IOCTL relay through surrogate (PassThruWriteMsgs, PassThruIoCtl, PassThruStartMsgFilter) + fake WriteMsgs recorded-response upgrade
-add WIN32 build to CI (with testing)

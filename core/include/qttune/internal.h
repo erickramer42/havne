@@ -79,6 +79,76 @@ qttune_status_t qttune_j2534_read_frame(qttune_j2534_handle_t* handle,
                                        qttune_frame_t* out_frame,
                                        uint32_t timeout_ms,
                                        bool* got_frame);
+
+/* ---- Part 4: WRITE / IOCTL / FILTER vendor-call helpers ----
+ *
+ * Same routing discipline as the helpers above: each dispatches
+ * branch-on-backend inside j2534_loader.cpp and the policy layer stays
+ * backend-blind. All SCONFIG traffic is FLATTENED (Parameter, Value)
+ * u32 pairs, little-endian, 8 bytes per pair, max
+ * QTTUNE_PT_SCONFIG_MAX_PARAMS pairs — pointer-bearing structs
+ * (SCONFIG_LIST, raw PASSTHRU_MSG*) never cross the internal seam so
+ * the in-proc and surrogate signatures are identical by construction.
+ */
+
+/* Single-message PassThruWriteMsgs relay. data_len <= 64 (frame ABI
+ * cap; ISO-TP multiframe segmentation is transport-layer work, not
+ * loader work). tx_flags carries J2534 TxFlags verbatim (bit 8 =
+ * CAN_29BIT_ID for 29-bit targets). timeout_ms passes through to the
+ * vendor unchanged; 0 = non-blocking. out_num_written may be NULL;
+ * *out_num_written < 1 after QT_OK means the vendor reported
+ * success-but-wrote-nothing — callers treat that as a failed send. */
+qttune_status_t qttune_j2534_write_frame(qttune_j2534_handle_t* handle,
+                                         unsigned long channel,
+                                         const uint8_t* data,
+                                         uint32_t len,
+                                         uint32_t tx_flags,
+                                         uint32_t timeout_ms,
+                                         uint32_t* out_num_written);
+
+/* Generic PassThruIoCtl relay. For GET_CONFIG/SET_CONFIG: input is a
+ * flattened SCONFIG array as described above, input_len a nonzero
+ * multiple of 8; for GET_CONFIG the vendor-updated pairs return in
+ * output. For READ_VBATT: input_len 0, 4-byte result in output.
+ * Pointer-bearing ioctls (FAST_INIT etc.) are out of contract — the
+ * relay refuses them at this seam rather than guessing layouts.
+ * output_cap bounds the copy; *out_len receives the actual length. */
+qttune_status_t qttune_j2534_ioctl(qttune_j2534_handle_t* handle,
+                                  unsigned long channel,
+                                  uint32_t ioctl_id,
+                                  const uint8_t* input,
+                                  uint32_t input_len,
+                                  uint8_t* output,
+                                  uint32_t output_cap,
+                                  uint32_t* out_len);
+
+/* PassThruStartMsgFilter relay. mask/pattern(/flow_control) are flat
+ * byte arrays, 1..12 bytes each (J2534-1 spec max); mask_len MUST
+ * equal pattern_len; flow_control participates only with
+ * QTTUNE_PT_FLOW_CONTROL_FILTER (fc_len must then equal mask_len;
+ * for PASS/BLOCK filters pass fc_len 0 and flow_control NULL).
+ * tx_flags stamps the filter messages' TxFlags (CAN_29BIT_ID for
+ * 29-bit matching — mask and pattern are compared against the frame
+ * ID in the filter messages' Data[], big-endian, per J2534-1 §5.7). */
+qttune_status_t qttune_j2534_start_msg_filter(qttune_j2534_handle_t* handle,
+                                              unsigned long channel,
+                                              uint32_t filter_type,
+                                              const uint8_t* mask,
+                                              uint32_t mask_len,
+                                              const uint8_t* pattern,
+                                              uint32_t pattern_len,
+                                              const uint8_t* flow_control,
+                                              uint32_t fc_len,
+                                              uint32_t tx_flags,
+                                              unsigned long* out_filter_id);
+
+/* PassThruStopMsgFilter relay. Idempotence is the VENDOR'S contract
+ * (stopping a stopped filter returns ERR_FAILED) — we surface the
+ * vendor status verbatim rather than second-guessing it. */
+qttune_status_t qttune_j2534_stop_msg_filter(qttune_j2534_handle_t* handle,
+                                             unsigned long channel,
+                                             unsigned long filter_id);
+
 /* Backend introspection (routing diagnostics + tests): "inproc" or
  * "surrogate". NULL for a NULL handle. */
 const char* qttune_j2534_backend_name(const qttune_j2534_handle_t* handle);

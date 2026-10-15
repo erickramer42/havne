@@ -7,6 +7,12 @@
 ; real J2534-1 spec likewise requires undecorated export names; vendor
 ; DLLs use def files for the same reason. Bare names in EXPORTS force
 ; undecorated exports on BOTH x86 and x64.
+;
+; Part 4 additions: PassThruStartMsgFilter / PassThruStopMsgFilter
+; (now spec-mandatory members of the nine-export table BOTH backends
+; resolve) and the three new observation hooks. Without the filter
+; entries here, an x86 surrogate hosting this fake dies at exit 5 on
+; export resolution — the exact Part 2 trap pointed at the new set.
 
 LIBRARY fake_j2534
 EXPORTS
@@ -17,8 +23,13 @@ EXPORTS
     PassThruReadMsgs
     PassThruWriteMsgs
     PassThruIoCtl
+    PassThruStartMsgFilter
+    PassThruStopMsgFilter
     InjectFrame
     GetBufferState
     GetCurrentHandle
     GetLastConnectParams
+    GetWriteCount
+    GetRecordedWrite
+    GetLastFilterStart
     

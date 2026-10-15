@@ -43,6 +43,14 @@ typedef long (__stdcall *fn_pt_ioctl)(unsigned long ChannelID,
                                       long IoControlID,
                                       void* pInput,
                                       void* pOutput);
+typedef long (__stdcall *fn_pt_start_filter)(unsigned long ChannelID,
+                                             unsigned long FilterType,
+                                             PASSTHRU_MSG* pMaskMsg,
+                                             PASSTHRU_MSG* pPatternMsg,
+                                             PASSTHRU_MSG* pFlowControlMsg,
+                                             unsigned long* pFilterID);
+typedef long (__stdcall *fn_pt_stop_filter)(unsigned long ChannelID,
+                                             unsigned long FilterID);
 
 /* Backing type for the header's opaque qttune_j2534_handle_t.
  *
@@ -57,13 +65,16 @@ struct qttune_j2534_handle {
     qttune_j2534_sur_handle_t* sur = nullptr;  /* owned iff is_surrogate */
     HMODULE module = nullptr;                  /* owned iff !is_surrogate */
     unsigned long device_id;
-    fn_pt_open        open;
-    fn_pt_close       close;
-    fn_pt_connect     connect;
-    fn_pt_disconnect  disconnect;
-    fn_pt_read_msgs   read_msgs;
-    fn_pt_write_msgs  write_msgs;
-    fn_pt_ioctl       ioctl;
+    fn_pt_open         open;
+    fn_pt_close        close;
+    fn_pt_connect      connect;
+    fn_pt_disconnect   disconnect;
+    fn_pt_read_msgs    read_msgs;
+    fn_pt_write_msgs   write_msgs;
+    fn_pt_ioctl        ioctl;
+    fn_pt_start_filter start_filter;   /* Part 4: spec-mandatory, resolved
+                                        * with the rest — surrogate-parity */
+    fn_pt_stop_filter  stop_filter;
 };
 
 namespace {
@@ -205,13 +216,56 @@ void enumerate_view(const wchar_t* root_path,
              * later, the surrogate-vs-inproc routing decision. Cheap
              * file-I/O per discovered vendor (typically 1-3 entries);
              * the file was just validated as openable-by-name anyway. */
-            dev.reserved[0] = sniff_pe_architecture(dev.dll_path);                       
+            dev.reserved[0] = sniff_pe_architecture(dev.dll_path);
             out_devices.push_back(dev);
         }
         RegCloseKey(hvendor);
     }
 
     RegCloseKey(hroot);
+}
+
+/* Build a filter/messages-shape PASSTHRU_MSG from flat bytes. Shared
+ * by the write and filter relays (Part 4) — zeroed FIRST so no stale
+ * field or padding byte ever reaches a vendor comparing struct
+ * contents. ExtraDataIndex = DataSize per the v4.04 no-extra-data
+ * convention (was implicitly 0 pre-fix). */
+static void fill_vendor_msg(PASSTHRU_MSG* msg, const uint8_t* bytes,
+                            uint32_t len, uint32_t tx_flags)
+{
+    *msg = PASSTHRU_MSG{};
+    msg->ProtocolID = QTTUNE_PT_PROTOCOL_ISO15765;
+    msg->TxFlags = tx_flags;
+    msg->DataSize = len;
+    if (len > 0 && bytes != nullptr) {
+        memcpy(msg->Data, bytes, len);
+    }
+    msg->ExtraDataIndex = len;
+}
+
+/* Unflatten (Parameter, Value) u32 LE pairs from the internal-seam
+ * representation into a caller-supplied SCONFIG array. Shared by the
+ * in-proc GET/SET_CONFIG path. Returns param count, or 0 on a
+ * malformed length. */
+static uint32_t unflatten_sconfig(const uint8_t* input, uint32_t input_len,
+                                  SCONFIG* cfg, uint32_t max_params)
+{
+    if (input == nullptr || input_len == 0 ||
+        (input_len % 8) != 0) {
+        return 0;
+    }
+    const uint32_t n = input_len / 8;
+    if (n > max_params) {
+        return 0;
+    }
+    for (uint32_t i = 0; i < n; ++i) {
+        uint32_t param = 0, value = 0;
+        memcpy(&param, input + i * 8, 4);
+        memcpy(&value, input + i * 8 + 4, 4);
+        cfg[i].Parameter = param;
+        cfg[i].Value = value;
+    }
+    return n;
 }
 
 } // namespace
@@ -324,14 +378,20 @@ qttune_status_t qttune_j2534_open(const qttune_j2534_device_t* device,
     }
     h->module = module;
 
+    /* Part 4: NINE mandatory exports — filter functions joined the
+     * set for surrogate-parity (both are J2534-1 v4.04 mandatory). A
+     * real vendor DLL missing them was always non-conforming; it now
+     * fails at open in BOTH backends instead of only in-proc. */
     bool all_resolved = true;
-    h->open       = resolve_export<fn_pt_open>(module, "PassThruOpen", all_resolved);
-    h->close      = resolve_export<fn_pt_close>(module, "PassThruClose", all_resolved);
-    h->connect    = resolve_export<fn_pt_connect>(module, "PassThruConnect", all_resolved);
-    h->disconnect = resolve_export<fn_pt_disconnect>(module, "PassThruDisconnect", all_resolved);
-    h->read_msgs  = resolve_export<fn_pt_read_msgs>(module, "PassThruReadMsgs", all_resolved);
-    h->write_msgs = resolve_export<fn_pt_write_msgs>(module, "PassThruWriteMsgs", all_resolved);
-    h->ioctl      = resolve_export<fn_pt_ioctl>(module, "PassThruIoCtl", all_resolved);
+    h->open          = resolve_export<fn_pt_open>(module, "PassThruOpen", all_resolved);
+    h->close         = resolve_export<fn_pt_close>(module, "PassThruClose", all_resolved);
+    h->connect       = resolve_export<fn_pt_connect>(module, "PassThruConnect", all_resolved);
+    h->disconnect    = resolve_export<fn_pt_disconnect>(module, "PassThruDisconnect", all_resolved);
+    h->read_msgs     = resolve_export<fn_pt_read_msgs>(module, "PassThruReadMsgs", all_resolved);
+    h->write_msgs    = resolve_export<fn_pt_write_msgs>(module, "PassThruWriteMsgs", all_resolved);
+    h->ioctl         = resolve_export<fn_pt_ioctl>(module, "PassThruIoCtl", all_resolved);
+    h->start_filter  = resolve_export<fn_pt_start_filter>(module, "PassThruStartMsgFilter", all_resolved);
+    h->stop_filter   = resolve_export<fn_pt_stop_filter>(module, "PassThruStopMsgFilter", all_resolved);
 
     if (!all_resolved) {
         FreeLibrary(module);
@@ -386,7 +446,7 @@ qttune_status_t qttune_j2534_connect_channel(qttune_j2534_handle_t* handle,
     }
     if (handle->is_surrogate) {
         return qttune_j2534_sur_connect_channel(handle->sur, baud,
-                                                 flags, out_channel);
+                                                flags, out_channel);
     }
     /* baud == 0 is the transport-layer "unset" sentinel (the URI parser
      * rejects an explicit baud=0, so the ambiguity is closed by
@@ -483,6 +543,243 @@ qttune_status_t qttune_j2534_read_frame(qttune_j2534_handle_t* handle,
 
     *got_frame = true;
     return QT_OK;
+}
+
+/* ---- Part 4: WRITE / IOCTL / FILTER vendor-call helpers ---- */
+
+qttune_status_t qttune_j2534_write_frame(qttune_j2534_handle_t* handle,
+                                         unsigned long channel,
+                                         const uint8_t* data,
+                                         uint32_t len,
+                                         uint32_t tx_flags,
+                                         uint32_t timeout_ms,
+                                         uint32_t* out_num_written)
+{
+    if (handle == nullptr || data == nullptr || len == 0 ||
+        len > sizeof(((qttune_frame_t*)0)->data)) {
+        return QT_ERR_NULL_ARGUMENT;
+    }
+    if (out_num_written != nullptr) {
+        *out_num_written = 0;
+    }
+
+    if (handle->is_surrogate) {
+        return qttune_j2534_sur_write_frame(handle->sur, channel, data,
+                                             len, tx_flags, timeout_ms,
+                                             out_num_written);
+    }
+
+    PASSTHRU_MSG msg;
+    fill_vendor_msg(&msg, data, len, tx_flags);
+    unsigned long num = 1;
+    long rc = handle->write_msgs(channel, &msg, &num, timeout_ms);
+    if (rc != kPtStatusNoError) {
+        return QT_ERR_NO_TRANSPORT;
+    }
+    /* Success-but-wrote-nothing is the caller's problem to catch via
+     * out_num_written; we do not fabricate an error for a partial or
+     * zero-count NOERROR return — the vendor said yes, the count
+     * tells the truth. */
+    if (out_num_written != nullptr) {
+        *out_num_written = num;
+    }
+    return QT_OK;
+}
+
+qttune_status_t qttune_j2534_ioctl(qttune_j2534_handle_t* handle,
+                                  unsigned long channel,
+                                  uint32_t ioctl_id,
+                                  const uint8_t* input,
+                                  uint32_t input_len,
+                                  uint8_t* output,
+                                  uint32_t output_cap,
+                                  uint32_t* out_len)
+{
+    if (handle == nullptr || input_len > 64) {
+        return QT_ERR_NULL_ARGUMENT;
+    }
+    if (input == nullptr && input_len != 0) {
+        return QT_ERR_NULL_ARGUMENT;
+    }
+    if (out_len != nullptr) {
+        *out_len = 0;
+    }
+
+    /* Contract: only ioctls we can SHAPE correctly may cross this
+     * seam. Pointer-bearing ids (FAST_INIT, FIVE_BAUD_INIT...) would
+     * require vendor-specific struct marshaling — refusing beats
+     * guessing. Transport-layer init sequences that need them get a
+     * proper wire op if/when required. */
+    const bool is_sconfig = (ioctl_id == QTTUNE_PT_IOCTL_GET_CONFIG ||
+                             ioctl_id == QTTUNE_PT_IOCTL_SET_CONFIG);
+    const bool is_null_form = (ioctl_id == QTTUNE_PT_IOCTL_READ_VBATT ||
+                               ioctl_id == QTTUNE_PT_IOCTL_CLEAR_TX_BUFFER ||
+                               ioctl_id == QTTUNE_PT_IOCTL_CLEAR_RX_BUFFER ||
+                               ioctl_id == QTTUNE_PT_IOCTL_CLEAR_MSG_FILTERS);
+    if (!is_sconfig && !is_null_form) {
+        return QT_ERR_NOT_IMPLEMENTED;
+    }
+
+    if (handle->is_surrogate) {
+        /* Relay through a LOCAL staging buffer: the wire form is capped
+         * at 64 bytes and the sur client has no cap parameter — copying
+         * directly into a caller buffer smaller than 64 would overflow
+         * (e.g. a 4-byte VBATT buffer receiving a 16-byte GET_CONFIG
+         * write-back). out_len reports the FULL produced length; the
+         * copy clamps to cap — truncation detected by comparison. */
+        uint8_t staged[64];
+        uint32_t staged_len = 0;
+        qttune_status_t st = qttune_j2534_sur_ioctl(handle->sur, channel,
+                                                    ioctl_id, input,
+                                                    input_len, staged,
+                                                    &staged_len);
+        if (st != QT_OK) {
+            return st;
+        }
+        if (output != nullptr && staged_len > 0) {
+            const uint32_t cp = (staged_len < output_cap)
+                                 ? staged_len : output_cap;
+            memcpy(output, staged, cp);
+        }
+        if (out_len != nullptr) {
+            *out_len = staged_len;
+        }
+        return QT_OK;
+    }
+
+    if (is_sconfig) {
+        SCONFIG cfg[QTTUNE_PT_SCONFIG_MAX_PARAMS];
+        const uint32_t n = unflatten_sconfig(input, input_len, cfg,
+                                             QTTUNE_PT_SCONFIG_MAX_PARAMS);
+        if (n == 0) {
+            return QT_ERR_NULL_ARGUMENT;   /* malformed flattened array */
+        }
+        SCONFIG_LIST list;
+        list.NumOfParams = n;
+        list.ConfigPtr = cfg;
+        long rc = handle->ioctl(channel, static_cast<long>(ioctl_id),
+                                &list, nullptr);
+        if (rc != kPtStatusNoError) {
+            return QT_ERR_NO_TRANSPORT;
+        }
+        if (ioctl_id == QTTUNE_PT_IOCTL_GET_CONFIG) {
+            /* Re-flatten the vendor-updated pairs. *out_len reports
+             * the FULL produced length; the copy clamps to cap. */
+            const uint32_t full = n * 8;
+            if (output != nullptr) {
+                const uint32_t cp = (full < output_cap) ? full : output_cap;
+                for (uint32_t i = 0; i < cp / 8; ++i) {
+                    memcpy(output + i * 8, &cfg[i].Parameter, 4);
+                    memcpy(output + i * 8 + 4, &cfg[i].Value, 4);
+                }
+            }
+            if (out_len != nullptr) {
+                *out_len = full;
+            }
+        }
+        return QT_OK;
+    }
+
+    if (ioctl_id == QTTUNE_PT_IOCTL_READ_VBATT) {
+        unsigned long vbatt = 0;
+        long rc = handle->ioctl(channel, static_cast<long>(ioctl_id),
+                                nullptr, &vbatt);
+        if (rc != kPtStatusNoError) {
+            return QT_ERR_NO_TRANSPORT;
+        }
+        if (output != nullptr && output_cap >= 4) {
+            memcpy(output, &vbatt, 4);
+        }
+        if (out_len != nullptr) {
+            *out_len = 4;
+        }
+        return QT_OK;
+    }
+
+    /* Remaining NULL/NULL forms: CLEAR_TX/RX_BUFFER, CLEAR_MSG_FILTERS */
+    long rc = handle->ioctl(channel, static_cast<long>(ioctl_id),
+                            nullptr, nullptr);
+    return (rc == kPtStatusNoError) ? QT_OK : QT_ERR_NO_TRANSPORT;
+}
+
+qttune_status_t qttune_j2534_start_msg_filter(qttune_j2534_handle_t* handle,
+                                              unsigned long channel,
+                                              uint32_t filter_type,
+                                              const uint8_t* mask,
+                                              uint32_t mask_len,
+                                              const uint8_t* pattern,
+                                              uint32_t pattern_len,
+                                              const uint8_t* flow_control,
+                                              uint32_t fc_len,
+                                              uint32_t tx_flags,
+                                              unsigned long* out_filter_id)
+{
+    if (handle == nullptr || mask == nullptr || pattern == nullptr ||
+        out_filter_id == nullptr) {
+        return QT_ERR_NULL_ARGUMENT;
+    }
+    /* Spec: pattern 1..12 bytes, mask/pattern lengths equal, flow
+     * control only with FLOW_CONTROL_FILTER and then also matching
+     * lengths. Enforced at the seam — malformed filters must not
+     * reach a real device, whatever the backend. */
+    if (mask_len < 1 || mask_len > QTTUNE_PT_FILTER_PATTERN_MAX ||
+        mask_len != pattern_len ||
+        fc_len > QTTUNE_PT_FILTER_PATTERN_MAX) {
+        return QT_ERR_NULL_ARGUMENT;
+    }
+    if (filter_type == QTTUNE_PT_FLOW_CONTROL_FILTER) {
+        if (fc_len != mask_len || flow_control == nullptr) {
+            return QT_ERR_NULL_ARGUMENT;
+        }
+    } else if (fc_len != 0) {
+        return QT_ERR_NULL_ARGUMENT;
+    }
+    *out_filter_id = 0;
+
+    if (handle->is_surrogate) {
+        return qttune_j2534_sur_start_msg_filter(handle->sur, channel,
+                                                 filter_type, mask,
+                                                 mask_len, pattern,
+                                                 pattern_len, flow_control,
+                                                 fc_len, tx_flags,
+                                                 out_filter_id);
+    }
+
+    PASSTHRU_MSG mask_msg, pattern_msg, fc_msg;
+    fill_vendor_msg(&mask_msg, mask, mask_len, tx_flags);
+    fill_vendor_msg(&pattern_msg, pattern, pattern_len, tx_flags);
+    PASSTHRU_MSG* fc_ptr = nullptr;
+    if (fc_len > 0) {
+        fill_vendor_msg(&fc_msg, flow_control, fc_len, tx_flags);
+        fc_ptr = &fc_msg;
+    }
+    unsigned long filter_id = 0;
+    long rc = handle->start_filter(channel, filter_type, &mask_msg,
+                                   &pattern_msg, fc_ptr, &filter_id);
+    if (rc != kPtStatusNoError) {
+        return QT_ERR_NO_TRANSPORT;
+    }
+    *out_filter_id = filter_id;
+    return QT_OK;
+}
+
+qttune_status_t qttune_j2534_stop_msg_filter(qttune_j2534_handle_t* handle,
+                                             unsigned long channel,
+                                             unsigned long filter_id)
+{
+    if (handle == nullptr) {
+        return QT_ERR_NULL_ARGUMENT;
+    }
+    if (handle->is_surrogate) {
+        return qttune_j2534_sur_stop_msg_filter(handle->sur, channel,
+                                                filter_id);
+    }
+    /* Vendor status verbatim: stopping a stopped filter is the
+     * vendor's ERR_FAILED, surfaced as QT_ERR_NO_TRANSPORT — the
+     * caller learns the truth rather than our guess about
+     * idempotence. */
+    long rc = handle->stop_filter(channel, filter_id);
+    return (rc == kPtStatusNoError) ? QT_OK : QT_ERR_NO_TRANSPORT;
 }
 
 const char* qttune_j2534_backend_name(const qttune_j2534_handle_t* handle)
@@ -584,6 +881,60 @@ qttune_status_t qttune_j2534_read_frame(qttune_j2534_handle_t* /*h*/,
     if (got_frame != nullptr) {
         *got_frame = false;
     }
+    return QT_ERR_NOT_IMPLEMENTED;
+}
+
+qttune_status_t qttune_j2534_write_frame(qttune_j2534_handle_t* /*h*/,
+                                         unsigned long /*ch*/,
+                                         const uint8_t* /*d*/,
+                                         uint32_t /*len*/,
+                                         uint32_t /*flags*/,
+                                         uint32_t /*timeout*/,
+                                         uint32_t* out_num_written)
+{
+    if (out_num_written != nullptr) {
+        *out_num_written = 0;
+    }
+    return QT_ERR_NOT_IMPLEMENTED;
+}
+
+qttune_status_t qttune_j2534_ioctl(qttune_j2534_handle_t* /*h*/,
+                                   unsigned long /*ch*/,
+                                   uint32_t /*id*/,
+                                   const uint8_t* /*in*/,
+                                   uint32_t /*in_len*/,
+                                   uint8_t* /*out*/,
+                                   uint32_t /*cap*/,
+                                   uint32_t* out_len)
+{
+    if (out_len != nullptr) {
+        *out_len = 0;
+    }
+    return QT_ERR_NOT_IMPLEMENTED;
+}
+
+qttune_status_t qttune_j2534_start_msg_filter(qttune_j2534_handle_t* /*h*/,
+                                              unsigned long /*ch*/,
+                                              uint32_t /*type*/,
+                                              const uint8_t* /*mask*/,
+                                              uint32_t /*mask_len*/,
+                                              const uint8_t* /*pattern*/,
+                                              uint32_t /*pattern_len*/,
+                                              const uint8_t* /*fc*/,
+                                              uint32_t /*fc_len*/,
+                                              uint32_t /*tx_flags*/,
+                                              unsigned long* out_filter_id)
+{
+    if (out_filter_id != nullptr) {
+        *out_filter_id = 0;
+    }
+    return QT_ERR_NOT_IMPLEMENTED;
+}
+
+qttune_status_t qttune_j2534_stop_msg_filter(qttune_j2534_handle_t* /*h*/,
+                                             unsigned long /*ch*/,
+                                             unsigned long /*fid*/)
+{
     return QT_ERR_NOT_IMPLEMENTED;
 }
 

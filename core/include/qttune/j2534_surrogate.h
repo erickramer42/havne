@@ -30,6 +30,54 @@ qttune_status_t qttune_j2534_sur_connect_channel(qttune_j2534_sur_handle_t* hand
 qttune_status_t qttune_j2534_sur_disconnect_channel(qttune_j2534_sur_handle_t* handle,
                                                     unsigned long channel);
 
+/* ---- Part 4: WRITE / IOCTL / FILTER relay ---- */
+
+/* One PassThruWriteMsgs call. data_len must be <= 64 (qttune_frame_t
+ * ABI cap; ISO-TP multiframe is a later transport-layer concern).
+ * out_num_written is optional (NULL ok) and receives the vendor's
+ * actual-written count — callers SHOULD treat <1 as a failed send. */
+qttune_status_t qttune_j2534_sur_write_frame(qttune_j2534_sur_handle_t* handle,
+                                              unsigned long channel,
+                                              const uint8_t* data,
+                                              uint32_t len,
+                                              uint32_t tx_flags,
+                                              uint32_t timeout_ms,
+                                              uint32_t* out_num_written);
+
+/* Generic ioctl relay. input is a FLATTENED SCONFIG array (u32
+ * Parameter/Value pairs, little-endian) for GET_CONFIG/SET_CONFIG;
+ * input_len==0 for ioctls taking NULL input. output receives up to
+ * output_cap bytes of response payload (GET_CONFIG write-back or
+ * READ_VBATT's ULONG); out_len receives the actual length. Caps at
+ * 64 bytes — the wire limit; keep caller buffers at least that. */
+qttune_status_t qttune_j2534_sur_ioctl(qttune_j2534_sur_handle_t* handle,
+                                       unsigned long channel,
+                                       uint32_t ioctl_id,
+                                       const uint8_t* input,
+                                       uint32_t input_len,
+                                       uint8_t* output,
+                                       uint32_t* out_len);
+
+/* PassThruStartMsgFilter relay. mask/pattern(/flow_control) are flat
+ * byte arrays (1..12 bytes each, spec max); fc may be NULL when
+ * fc_len==0 (PASS/BLOCK filters). tx_flags carries the filter
+ * messages' TxFlags (CAN_29BIT_ID for 29-bit matching). */
+qttune_status_t qttune_j2534_sur_start_msg_filter(qttune_j2534_sur_handle_t* handle,
+                                                  unsigned long channel,
+                                                  uint32_t filter_type,
+                                                  const uint8_t* mask,
+                                                  uint32_t mask_len,
+                                                  const uint8_t* pattern,
+                                                  uint32_t pattern_len,
+                                                  const uint8_t* flow_control,
+                                                  uint32_t fc_len,
+                                                  uint32_t tx_flags,
+                                                  unsigned long* out_filter_id);
+
+qttune_status_t qttune_j2534_sur_stop_msg_filter(qttune_j2534_sur_handle_t* handle,
+                                                  unsigned long channel,
+                                                  unsigned long filter_id);
+
 /* Drain one frame from the shared ring (the app-side data plane).
  * Same translation contract as the in-proc read path: arb id 0,
  * EXTENDED from rx_status bit, vendor timestamp passthrough, 64-clamp. */
