@@ -123,32 +123,32 @@ if(WIN32)
         OUTPUT_NAME "fake_j2534"
         RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/$<CONFIG>"
     )
+
+    # Spec-spelling fake: SAME source, def exports only 'PassThruIoctl'
+    # — the SAE J2534-1 spelling (J2534-1_0500 §7.3.19), which the first
+    # real vendor tested (OBDX Pro VX) uses. The canonical fake_j2534
+    # keeps exporting this project's legacy 'PassThruIoCtl' spelling, so
+    # between the two fakes BOTH resolver paths are exercised:
+    # spec fake -> primary resolution, legacy fake -> fallback.
+    add_library(fake_j2534_spec SHARED
+        fake_j2534.cpp
+        fake_j2534_spec.def
+    )
+
+    target_compile_definitions(fake_j2534_spec PRIVATE
+        TEST_HOOKS_ENABLED
+    )
+
+    target_include_directories(fake_j2534_spec PRIVATE
+        ${CMAKE_SOURCE_DIR}/core/include
+    )
+
+    set_target_properties(fake_j2534_spec PROPERTIES
+        PREFIX ""
+        OUTPUT_NAME "fake_j2534_spec"
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/$<CONFIG>"
+    )
 endif()
-
-# Spec-spelling fake: SAME source, def exports only 'PassThruIoctl'
-# — the SAE J2534-1 spelling (J2534-1_0500 §7.3.19), which the first
-# real vendor tested (OBDX Pro VX) uses. The canonical fake_j2534
-# keeps exporting this project's legacy 'PassThruIoCtl' spelling, so
-# between the two fakes BOTH resolver paths are exercised:
-# spec fake -> primary resolution, legacy fake -> fallback.
-add_library(fake_j2534_spec SHARED
-    fake_j2534.cpp
-    fake_j2534_spec.def
-)
-
-target_compile_definitions(fake_j2534_spec PRIVATE
-    TEST_HOOKS_ENABLED
-)
-
-target_include_directories(fake_j2534_spec PRIVATE
-    ${CMAKE_SOURCE_DIR}/core/include
-)
-
-set_target_properties(fake_j2534_spec PROPERTIES
-    PREFIX ""
-    OUTPUT_NAME "fake_j2534_spec"
-    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/$<CONFIG>"
-)
 
 # J2534 loader tests (Win32-only, HARNESS tier — real LoadLibraryEx
 # against the fake vendor DLL; path baked in at generation time)

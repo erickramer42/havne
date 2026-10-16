@@ -29,8 +29,8 @@ Dates are commit dates.
 | 2026-10-14 | J2534-1 v04.04 types verification and fix | `046b320` |
 | 2026-10-15 | Phase 3 Part 4: write/ioctl/filter relay through both backends | `6aaf441` |
 | 2026-10-15 | Phase 3 Part 5: transport adoption ([ADR-0012](adr/0012-j2534-transport-adoption.md)) | `161af4a` |
-| 2026-10-16 | Issue #22: async bridge connect; surrogate pipe-first startup | `<hash>` |
-| 2026-10-16 | Issue #22 + IoCtl export-spelling fix; first real-vendor session (VX connect cycle) | `<hash>` |
+| 2026-10-16 | Issue #22: async bridge connect; surrogate pipe-first startup | `eacf1d0` |
+| 2026-10-16 | Issue #22 + IoCtl export-spelling fix; first real-vendor session (VX connect cycle) | `eacf1d0` |
 
 ## Lessons learned
 
