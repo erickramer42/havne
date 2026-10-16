@@ -21,7 +21,8 @@ so `--config` and `-C` are required:
 ```sh
 cmake -B build -DCMAKE_PREFIX_PATH=C:/Qt/6.12.0/msvc2022_64
 cmake --build build --config Release
-build/app/Release/qttune.exe          # windeployqt runs post-build
+# windeployqt runs post-build
+build/app/Release/qttune.exe         
 ```
 
 **Full app, Linux and macOS.** Single-config generators drop the

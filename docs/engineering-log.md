@@ -28,7 +28,9 @@ Dates are commit dates.
 | 2026-10-14 | Phase 3 Parts 1–3: PE architecture annotation, x86 surrogate host, cross-arch verification, PE routing | `16e3aed`, `96acce9`, `5681ca7`, `d98792f` |
 | 2026-10-14 | J2534-1 v04.04 types verification and fix | `046b320` |
 | 2026-10-15 | Phase 3 Part 4: write/ioctl/filter relay through both backends | `6aaf441` |
-| 2026-10-15 | Phase 3 Part 5: transport adoption ([ADR-0012](adr/0012-j2534-transport-adoption.md)) | `e6ce759` |
+| 2026-10-15 | Phase 3 Part 5: transport adoption ([ADR-0012](adr/0012-j2534-transport-adoption.md)) | `161af4a` |
+| 2026-10-16 | Issue #22: async bridge connect; surrogate pipe-first startup | `<hash>` |
+| 2026-10-16 | Issue #22 + IoCtl export-spelling fix; first real-vendor session (VX connect cycle) | `<hash>` |
 
 ## Lessons learned
 
@@ -253,3 +255,51 @@ assertions below it. Delete them; /W4 on the test targets would have
 flagged it. Also: fake conventions (+0x40 on byte 0) must be labeled
 as such in tests AND docs, or BENCH inherits them as protocol
 expectations.
+
+**2026-10-16 — blocked-open round (Issue #22):** four lessons, two
+paid for by a real vendor. (1) **Reorder the pipeline so the protocol
+names the blocked stage:** the child called `PassThruOpen` before the
+pipe connect, so "alive but blocked in vendor open" (adapter absent —
+a real OBDX Pro mode) was invisible to the wire and cost the full 8 s
+handshake with no diagnosis. Moving the vendor open into the `OP_OPEN`
+handler makes pipe-connected prove load+exports and
+OP_OPEN-unanswered mean exactly one thing — instrumentation you don't
+have to build is diagnostics you always have, and it cost zero
+protocol changes. (2) **Environment variables inherit into the child —
+that IS a cross-arch test hook:** arming the fake's open-sleep and
+shrinking the handshake window via env works from an x64 test against
+an x86 child with no protocol surface, where a hook-based arm would
+be unreachable (the OP_INJECT gap, solved by not needing it). (3) **A
+synchronous vendor call on the GUI thread is a bug regardless of the
+vendor's speed:** the picker row clicked straight into `connectSession`;
+the fix wasn't making the vendor faster, it was never blocking the UI
+thread on DLL code we don't control. (4) **Selection is intent, not
+action:** a row click that only fills the URI field can never
+accidentally cost 8 seconds. Also observed, the project's first named real-vendor behaviors: the OBDX Pro VX opens with USB power and no vehicle, and the
+OBDX Pro VT REFUSES open (status 34) in seconds when its adapter
+is absent — the earlier "blocks indefinitely" belief was an
+artifact of the old startup order, where block and refuse were
+indistinguishable; refuse-at-least-some-vendors is the truth.
+
+**2026-10-16 — IoCtl spelling round (first real vendor load):** three
+lessons, one paid for with a confabulation. (1) **`GetProcAddress`
+string literals are ABI too.** The ptypes round verified structs and
+constants against public references — but export NAMES are string
+literals at call sites, outside any shared header, so the verification
+rigor never touched them. Our unverified `PassThruIoCtl` literal
+diverged from the spec's `PassThruIoctl` (J2534-1_0500 §7.3.19; every
+public reference agrees), and the fake exported what the resolver
+asked for — 92 green tests certified our own typo until the first
+real vendor (OBDX Pro VX) died on it in 16 ms. (2) **Check the
+spec before writing the accommodation:** the first fix design had
+primary and fallback BACKWARDS — treating the vendor's spelling as
+the tolerated divergence. The owner challenged it, one web search
+against the spec text reversed the polarity, and the comments now
+record real provenance instead of invented hierarchy. A fallback's
+order encodes a claim about what's normal; verify the claim. (3)
+**Instrument once, harvest repeatedly:** the pipe-first reorder,
+honest read-kinds, exit-code grace, and the TEMP child-stderr log
+built for the blocked-open mystery each paid off again unprompted —
+the export-casing failure named its own cause (exit 5, one line in
+the stage log) and the VT refusal arrived as a labeled status code.
+Diagnostics that survive their incident are infrastructure.

@@ -18,6 +18,7 @@
 #include <cstring>
 #include <cstdint>
 #include <new>
+#include <cstdlib>
 
 #ifdef _WIN32
 
@@ -38,8 +39,25 @@ struct qttune_j2534_sur_handle {
 namespace {
 
 constexpr const char* kSurrogateExeName = "qttune-j2534-surrogate.exe";
-constexpr DWORD kHandshakeTimeoutMs = 8000;
 constexpr DWORD kTransactTimeoutMs   = 3000;
+constexpr DWORD kHandshakeTimeoutMs_default = 8000;
+
+/* Test knob: shrink the handshake window so a blocked-vendor-open test
+ * fails in milliseconds instead of eight seconds. Env, not a code
+ * change, precisely because the child inherits the environment — the
+ * knob arms the child-side fake from an x64 test process without any
+ * protocol surface (the OP_INJECT lesson generalized). */
+DWORD handshake_timeout_ms()
+{
+    char buf[32] = {};
+    const DWORD n = GetEnvironmentVariableA("QTTUNE_SUR_HANDSHAKE_MS",
+                                             buf, sizeof(buf));
+    if (n > 0 && n < sizeof(buf)) {
+        const DWORD v = static_cast<DWORD>(strtoul(buf, nullptr, 10));
+        if (v >= 100) return v;   /* sanity floor */
+    }
+    return kHandshakeTimeoutMs_default;
+}
 
 /* TEMP cross-arch diagnostics — stderr surfaces in ctest
  * --output-on-failure output. Remove once diagnosed. */
@@ -95,29 +113,54 @@ bool ov_write(HANDLE pipe, const void* buf, DWORD len, DWORD timeout_ms)
     return res;
 }
 
-/* Pseudo-sync read on the overlapped pipe: bounded, cancellable. */
-bool ov_read(HANDLE pipe, void* buf, DWORD len, DWORD timeout_ms)
+/* Read outcomes are three different diagnoses, not one bool plus a
+ * stale GetLastError(): SHORT_READ = struct-layout skew between trees;
+ * TIMEOUT = child wedged or vendor blocked; OS_ERROR = broken pipe,
+ * the child died. The first real-VX failure report was misattributed
+ * exactly because these were collapsed. */
+enum read_result { RD_OK, RD_SHORT_READ, RD_TIMEOUT, RD_OS_ERROR };
+
+read_result ov_read(HANDLE pipe, void* buf, DWORD len, DWORD timeout_ms,
+                    DWORD* out_got, DWORD* out_err)
 {
+    *out_got = 0;
+    *out_err = 0;
     OVERLAPPED ov = {};
     ov.hEvent = CreateEventA(nullptr, TRUE, FALSE, nullptr);
-    if (ov.hEvent == nullptr) return false;
+    if (ov.hEvent == nullptr) {
+        *out_err = GetLastError();
+        return RD_OS_ERROR;
+    }
 
     DWORD nread = 0;
     const BOOL ok = ReadFile(pipe, buf, len, &nread, &ov);
-    bool res = false;
+    read_result res = RD_OK;
     if (ok) {
-        res = (nread == len);
+        *out_got = nread;
+        res = (nread == len) ? RD_OK : RD_SHORT_READ;
     } else if (GetLastError() == ERROR_IO_PENDING) {
-        if (WaitForSingleObject(ov.hEvent, timeout_ms) == WAIT_OBJECT_0) {
+        const DWORD wr = WaitForSingleObject(ov.hEvent, timeout_ms);
+        if (wr == WAIT_OBJECT_0) {
             DWORD done = 0;
             if (GetOverlappedResult(pipe, &ov, &done, FALSE)) {
-                res = (done == len);
+                *out_got = done;   /* byte-mode pipe: ANY bytes complete the read */
+                res = (done == len) ? RD_OK : RD_SHORT_READ;
+            } else {
+                *out_err = GetLastError();   /* captured BEFORE CloseHandle */
+                res = RD_OS_ERROR;
             }
-        } else {
+        } else if (wr == WAIT_TIMEOUT) {
             CancelIoEx(pipe, &ov);
             DWORD done = 0;
             GetOverlappedResult(pipe, &ov, &done, TRUE);   /* drain */
+            res = RD_TIMEOUT;
+        } else {
+            *out_err = GetLastError();
+            res = RD_OS_ERROR;
         }
+    } else {
+        *out_err = GetLastError();
+        res = RD_OS_ERROR;
     }
     CloseHandle(ov.hEvent);
     return res;
@@ -133,10 +176,16 @@ bool transact(qttune_j2534_sur_handle_t* h, const qttune_sur_request_t& req,
         return false;
     }
     FlushFileBuffers(h->pipe);
-    if (!ov_read(h->pipe, out_resp, sizeof(*out_resp), timeout_ms)) {
-        SUR_LOG("transact: ov_read failed (req_id=%u op=%u err=%lu "
-                "— struct layout skew between trees?)\n",
-                req.request_id, req.opcode, GetLastError());
+    DWORD got = 0, rerr = 0;
+    const read_result rr = ov_read(h->pipe, out_resp, sizeof(*out_resp),
+                                   timeout_ms, &got, &rerr);
+    if (rr != RD_OK) {
+        const char* kind =
+            (rr == RD_SHORT_READ) ? "SHORT-READ (struct layout skew between trees?)"
+          : (rr == RD_TIMEOUT)    ? "TIMEOUT (child wedged or vendor blocked)"
+          :                         "OS-ERROR (broken pipe — child died?)";
+        SUR_LOG("transact: ov_read failed (req_id=%u op=%u %s got=%lu/%zu err=%lu)\n",
+                req.request_id, req.opcode, kind, got, sizeof(*out_resp), rerr);
         return false;
     }
     if (out_resp->request_id != req.request_id) {
@@ -220,14 +269,48 @@ qttune_status_t qttune_j2534_sur_open(const char* dll_path,
     snprintf(cmdline, sizeof(cmdline), "\"%s\" \"%s\" \"%s\" \"%s\" \"%s\"",
              exe, dll_path, pipe_name, map_name, evt_name);
 
+    /* Child stderr redirect: the surrogate's [surrogate] stage lines are
+     * the load-bearing diagnostics for real-vendor failures, but a GUI
+     * app has no console — they go to %TEMP% instead. bInheritHandles is
+     * safe here because every other handle this client creates passes
+     * nullptr security attributes (non-inheritable), so ONLY this file
+     * crosses into the child. Note: CREATE_ALWAYS means the last spawn
+     * wins; fine for diagnostics, each child rewrites from scratch. */
+    char log_path[MAX_PATH] = {};
+    {
+        const DWORD tn = GetTempPathA(sizeof(log_path), log_path);
+        if (tn == 0 || tn >= sizeof(log_path)) {
+            strcpy_s(log_path, sizeof(log_path), ".qttune-surrogate.log");
+        } else {
+            strcat_s(log_path, sizeof(log_path), "qttune-surrogate.log");
+        }
+    }
+    SECURITY_ATTRIBUTES inherit_sa = { sizeof(inherit_sa), nullptr, TRUE };
+    HANDLE child_log = CreateFileA(log_path, GENERIC_WRITE, FILE_SHARE_READ,
+                                   &inherit_sa, CREATE_ALWAYS,
+                                   FILE_ATTRIBUTE_NORMAL, nullptr);
+
     STARTUPINFOA si = { sizeof(si) };
+    if (child_log != INVALID_HANDLE_VALUE) {
+        si.dwFlags |= STARTF_USESTDHANDLES;
+        si.hStdOutput = child_log;
+        si.hStdError  = child_log;
+    }
     PROCESS_INFORMATION pi = {};
-    if (!CreateProcessA(nullptr, cmdline, nullptr, nullptr, FALSE,
-                        CREATE_SUSPENDED, nullptr, nullptr, &si, &pi)) {
+    /* CREATE_NO_WINDOW: a GUI app must never flash consoles; the
+     * redirected log file replaces the flash as evidence. */
+    if (!CreateProcessA(nullptr, cmdline, nullptr, nullptr,
+                        (child_log != INVALID_HANDLE_VALUE),
+                        CREATE_SUSPENDED | CREATE_NO_WINDOW,
+                        nullptr, nullptr, &si, &pi)) {
         SUR_LOG("open: CreateProcessA failed (err=%lu)\n  exe='%s'\n"
                 "  dll='%s'\n", GetLastError(), exe, dll_path);
+        if (child_log != INVALID_HANDLE_VALUE) CloseHandle(child_log);
         qttune_j2534_sur_close(h);
         return QT_ERR_LOAD_FAILED;
+    }
+    if (child_log != INVALID_HANDLE_VALUE) {
+        CloseHandle(child_log);   /* the child holds its own inherited copy */
     }
     h->process = pi.hProcess;
     AssignProcessToJobObject(h->job, pi.hProcess);
@@ -251,7 +334,7 @@ qttune_status_t qttune_j2534_sur_open(const char* dll_path,
     } else if (cerr == ERROR_IO_PENDING) {
         const HANDLE waits[2] = { ov.hEvent, h->process };
         const DWORD wr = WaitForMultipleObjects(2, waits, FALSE,
-                                                 kHandshakeTimeoutMs);
+                                                 handshake_timeout_ms());
         if (wr == WAIT_OBJECT_0) {
             DWORD xfer = 0;
             connected = GetOverlappedResult(h->pipe, &ov, &xfer, FALSE);
@@ -262,7 +345,7 @@ qttune_status_t qttune_j2534_sur_open(const char* dll_path,
             }
         } else {
             SUR_LOG("open: connect TIMEOUT after %lums\n",
-                kHandshakeTimeoutMs);
+                handshake_timeout_ms());
         }
     } else {
         SUR_LOG("open: ConnectNamedPipe immediate failure (err=%lu)\n",
@@ -285,12 +368,28 @@ qttune_status_t qttune_j2534_sur_open(const char* dll_path,
     req.request_id = h->next_request_id++;
     req.opcode = QTTUNE_SUR_OP_OPEN;
     qttune_sur_response_t resp = {};
-    if (!transact(h, req, &resp, kHandshakeTimeoutMs) ||
-        resp.status != static_cast<int32_t>(QTTUNE_PT_STATUS_NOERROR)) {
+    const ULONGLONG t0 = GetTickCount64();
+    if (!transact(h, req, &resp, handshake_timeout_ms())) {
+        /* Measured facts, not theories. A crashed/exited child can remain
+         * "alive" on the process handle for a moment AFTER the pipe
+         * breaks, so give it a short grace period before ruling — 250 ms
+         * is bounded and keeps the blocked-open test fast. */
         DWORD ecx = 0;
-        GetExitCodeProcess(h->process, &ecx);
-        SUR_LOG("open: OP_OPEN handshake failed (child_exit=%lu "
-                "status=%d)\n", ecx, resp.status);
+        if (WaitForSingleObject(h->process, 250) == WAIT_OBJECT_0 &&
+            GetExitCodeProcess(h->process, &ecx)) {
+            SUR_LOG("open: OP_OPEN failed after %llums — child EXITED, "
+                    "exit=%lu (1=args,2=mapping,3=view/event,4=LoadLibrary,"
+                    "5=export,7=pipe)\n", GetTickCount64() - t0, ecx);
+        } else {
+            SUR_LOG("open: OP_OPEN unanswered after %llums, child ALIVE — "
+                    "child stages in %s\n", GetTickCount64() - t0, log_path);
+        }
+        qttune_j2534_sur_close(h);
+        return QT_ERR_LOAD_FAILED;
+    }
+    if (resp.status != static_cast<int32_t>(QTTUNE_PT_STATUS_NOERROR)) {
+        SUR_LOG("open: vendor PassThruOpen refused (status=%d)\n",
+                resp.status);
         qttune_j2534_sur_close(h);
         return QT_ERR_LOAD_FAILED;
     }

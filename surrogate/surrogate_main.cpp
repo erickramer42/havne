@@ -3,12 +3,20 @@
 // CLI contract: surrogate.exe <dll_path> <pipe_name> <map_name> <event_name>
 //               (all names generated and owned by the x64 app side)
 //
-// Part 4: control pump gains WRITE / IOCTL / START_FILTER / STOP_FILTER
-// relays. The flat wire forms (byte arrays, flattened SCONFIG pairs) are
-// expanded HERE into real vendor-ABI structures — PASSTHRU_MSG and
-// SCONFIG_LIST — in THIS process's address space, because that is the only
-// place their pointers are meaningful. Nothing pointer-shaped ever crosses
-// the pipe.
+// STARTUP ORDER (fixed 2026-10-16, Issue #22): the pipe connects FIRST,
+// then PassThruOpen runs INSIDE the control pump's OP_OPEN handler. The
+// old order (vendor open before pipe connect) made "child alive but
+// blocked in vendor PassThruOpen" — e.g. adapter absent, many drivers
+// wait indefinitely for hardware — indistinguishable from every other
+// pre-pipe stall; the parent burned the full handshake timeout with no
+// stage information. Now, by construction:
+//   - pipe connect succeeding proves DLL load + all nine exports
+//   - OP_OPEN answered  => vendor PassThruOpen completed (or refused)
+//   - OP_OPEN sent but unanswered (child alive) => blocked INSIDE
+//     PassThruOpen — the only remaining possibility
+// A refused vendor open is relayed as a FAILED OP_OPEN response (child
+// exits cleanly after), preserving the caller-visible outcome while
+// retiring child exit code 6 (kept reserved, never renumbered).
 
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
@@ -17,6 +25,8 @@
 #include "qttune/j2534_ptypes.h"
 #include "qttune/surrogate_protocol.h"
 
+#include <cstdio>
+#include <cstdarg>
 #include <cstring>
 
 static HMODULE g_module = nullptr;
@@ -54,6 +64,22 @@ static HANDLE g_pipe = INVALID_HANDLE_VALUE;
 static HANDLE g_map = nullptr;
 static qttune_sur_ring_t* g_ring = nullptr;
 static HANDLE g_evt = nullptr;
+
+/* Stage log — stderr only. Invisible when spawned by the GUI app, but
+ * permanent free diagnostics for manual runs, ctest output, and
+ * Process Explorer "command line" reproduction. Cheap exit codes are
+ * for processes that die; stage logs are for processes that hang —
+ * this file now has both (the 2026-10-16 lesson). */
+static void stage(const char* fmt, ...)
+{
+    va_list ap;
+    va_start(ap, fmt);
+    fputs("[surrogate] ", stderr);
+    vfprintf(stderr, fmt, ap);
+    fputc('\n', stderr);
+    fflush(stderr);
+    va_end(ap);
+}
 
 static void push_slot(const PASSTHRU_MSG* msg)
 {
@@ -108,6 +134,34 @@ static void fill_pattern_msg(PASSTHRU_MSG* msg, const uint8_t* bytes,
     msg->ExtraDataIndex = len;   /* no extra data */
 }
 
+/* Case-sensitive GetProcAddress with ONE named alternate spelling.
+ *
+ * Provenance (checked 2026-10-16): the SPEC spelling is 'PassThruIoctl'
+ * — SAE J2534-1_0500 §7.3.19 titles the function 'PassThruIoctl', and
+ * the v04.04-era public references (DrewTech/Opus IVS docs, PEAK
+ * PCAN-PassThru manual, Kvaser, the diamondman J2534_v0404.h used in
+ * this project's own ptypes verification) all agree. The ONLY known
+ * divergent spelling is this project's own original 'PassThruIoCtl'
+ * string literal (never verified against any reference — the ptypes
+ * round covered structs and constants, not call-site export names).
+ * The first real vendor tested (OBDX Pro VX, OBDXVX_J2534.dll,
+ * 2026-10-16) exports the SPEC spelling and died on our literal.
+ * Spec spelling first, our legacy literal second as a tolerated
+ * alternate — decoration and C++ mangling stay hard failures. */
+static FARPROC resolve_export(HMODULE mod, const char* primary,
+                              const char* alternate)
+{
+    FARPROC p = GetProcAddress(mod, primary);
+    if (p == nullptr) {
+        p = GetProcAddress(mod, alternate);
+        if (p != nullptr) {
+            stage("export '%s' missing — resolved via '%s'",
+                  primary, alternate);
+        }
+    }
+    return p;
+}
+
 static DWORD WINAPI control_pump(LPVOID)
 {
     for (;;) {
@@ -125,8 +179,28 @@ static DWORD WINAPI control_pump(LPVOID)
 
         switch (req.opcode) {
         case QTTUNE_SUR_OP_OPEN:
-            resp.status = QTTUNE_PT_STATUS_NOERROR;
-            resp.handle_or_channel = g_device_id;
+            /* Vendor open happens HERE, not at startup — the parent's
+             * pipe-connect completion already proved load+exports; a
+             * timeout answering THIS request, with the child alive,
+             * means the vendor is blocked inside PassThruOpen (the
+             * absent-adapter mode observed 2026-10-16). Failure is
+             * relayed as a FAILED response and the child quits,
+             * preserving the old exit-code-6 caller outcome. */
+            stage("OP_OPEN: calling PassThruOpen");
+            {
+                unsigned long device = 0;
+                const long rc = g_open(nullptr, &device);
+                stage("OP_OPEN: vendor status %ld", rc);
+                resp.status = rc;
+                if (rc == QTTUNE_PT_STATUS_NOERROR) {
+                    InterlockedExchange(
+                        reinterpret_cast<volatile LONG*>(&g_device_id),
+                        static_cast<LONG>(device));
+                    resp.handle_or_channel = device;
+                } else {
+                    quit = true;   /* refuse-then-exit, old exit-6 path */
+                }
+            }
             break;
         case QTTUNE_SUR_OP_CONNECT: {
             unsigned long ch = 0;
@@ -283,48 +357,61 @@ int main(int argc, char* argv[])
         MapViewOfFile(g_map, FILE_MAP_ALL_ACCESS, 0, 0, 0));
     g_evt = OpenEventA(EVENT_MODIFY_STATE, FALSE, evt_name);
     if (g_ring == nullptr || g_evt == nullptr) return 3;
-
-    /* Vendor load + mandatory-export resolution (Part 4: the full nine
-     * functions the pumps need — the loader's in-proc path resolves the
-     * same set via its own table). */
-    g_module = LoadLibraryA(dll_path);
-    if (g_module == nullptr) return 4;
-    g_open          = reinterpret_cast<fn_pt_open>(GetProcAddress(g_module, "PassThruOpen"));
-    g_close         = reinterpret_cast<fn_pt_close>(GetProcAddress(g_module, "PassThruClose"));
-    g_connect       = reinterpret_cast<fn_pt_connect>(GetProcAddress(g_module, "PassThruConnect"));
-    g_disconnect    = reinterpret_cast<fn_pt_disconnect>(GetProcAddress(g_module, "PassThruDisconnect"));
-    g_read_msgs     = reinterpret_cast<fn_pt_read_msgs>(GetProcAddress(g_module, "PassThruReadMsgs"));
-    g_write_msgs    = reinterpret_cast<fn_pt_write_msgs>(GetProcAddress(g_module, "PassThruWriteMsgs"));
-    g_ioctl         = reinterpret_cast<fn_pt_ioctl>(GetProcAddress(g_module, "PassThruIoCtl"));
-    g_start_filter  = reinterpret_cast<fn_pt_start_filter>(GetProcAddress(g_module, "PassThruStartMsgFilter"));
-    g_stop_filter   = reinterpret_cast<fn_pt_stop_filter>(GetProcAddress(g_module, "PassThruStopMsgFilter"));
-    if (!g_open || !g_close || !g_connect || !g_disconnect || !g_read_msgs ||
-        !g_write_msgs || !g_ioctl || !g_start_filter || !g_stop_filter) {
-        return 5;
-    }
-
-    /* Vendor open happens HERE, before the pipe handshake — if the
-     * DLL refuses, we exit, the app's ConnectNamedPipe (or the
-     * process-alive check after it) fails, and the app reports
-     * QT_ERR_LOAD_FAILED. Same failure-point ergonomics as in-proc. */
-    long rc = g_open(nullptr, &g_device_id);
-    if (rc != QTTUNE_PT_STATUS_NOERROR) {
-        return 6;
-    }
+    stage("attached shared ring");
 
     /* WE are the pipe CLIENT — the app created the pipe and is
-     * blocked in ConnectNamedPipe waiting for us. Bounded wait so a
-     * dead parent can't strand us here (belt-and-braces; the job
-     * object would kill us anyway on parent death). */
+     * blocked in ConnectNamedPipe waiting for us. Pipe FIRST, before
+     * any vendor call: connecting here proves load+exports happened
+     * downstream of it, and keeps vendor-blocking out of the parent's
+     * connect wait. Bounded so a dead parent can't strand us
+     * (belt-and-braces; the job object would kill us anyway). */
     for (int i = 0; i < 200; ++i) {
         if (WaitNamedPipeA(pipe_name, 50)) break;
     }
     g_pipe = CreateFileA(pipe_name, GENERIC_READ | GENERIC_WRITE,
                          0, nullptr, OPEN_EXISTING, 0, nullptr);
     if (g_pipe == INVALID_HANDLE_VALUE) {
-        g_close(g_device_id);
         return 7;
     }
+    stage("pipe connected");
+
+    /* Vendor load + mandatory-export resolution (nine functions).
+     * PassThruIoctl goes through the alternate-spelling fallback —
+     * see resolve_export above. */
+    g_module = LoadLibraryA(dll_path);
+    if (g_module == nullptr) {
+        stage("LoadLibraryA failed for '%s'", dll_path);
+        return 4;
+    }
+    stage("dll loaded");
+    g_open          = reinterpret_cast<fn_pt_open>(GetProcAddress(g_module, "PassThruOpen"));
+    g_close         = reinterpret_cast<fn_pt_close>(GetProcAddress(g_module, "PassThruClose"));
+    g_connect       = reinterpret_cast<fn_pt_connect>(GetProcAddress(g_module, "PassThruConnect"));
+    g_disconnect    = reinterpret_cast<fn_pt_disconnect>(GetProcAddress(g_module, "PassThruDisconnect"));
+    g_read_msgs     = reinterpret_cast<fn_pt_read_msgs>(GetProcAddress(g_module, "PassThruReadMsgs"));
+    g_write_msgs    = reinterpret_cast<fn_pt_write_msgs>(GetProcAddress(g_module, "PassThruWriteMsgs"));
+    g_ioctl         = reinterpret_cast<fn_pt_ioctl>(
+                          resolve_export(g_module, "PassThruIoctl", "PassThruIoCtl"));
+    g_start_filter  = reinterpret_cast<fn_pt_start_filter>(GetProcAddress(g_module, "PassThruStartMsgFilter"));
+    g_stop_filter   = reinterpret_cast<fn_pt_stop_filter>(GetProcAddress(g_module, "PassThruStopMsgFilter"));
+    if (!g_open || !g_close || !g_connect || !g_disconnect || !g_read_msgs ||
+        !g_write_msgs || !g_ioctl || !g_start_filter || !g_stop_filter) {
+        /* Name EVERY miss instead of dying on the first — the exit-5
+         * mystery cost a dumpbin expedition to solve, and the answer
+         * (one character of casing) would have been one line here. */
+        stage("mandatory export missing (x86 decoration? check .def):");
+        if (!g_open)         stage("  PassThruOpen");
+        if (!g_close)        stage("  PassThruClose");
+        if (!g_connect)      stage("  PassThruConnect");
+        if (!g_disconnect)   stage("  PassThruDisconnect");
+        if (!g_read_msgs)    stage("  PassThruReadMsgs");
+        if (!g_write_msgs)    stage("  PassThruWriteMsgs");
+        if (!g_ioctl)        stage("  PassThruIoctl (alternate 'PassThruIoCtl' also missing)");
+        if (!g_start_filter) stage("  PassThruStartMsgFilter");
+        if (!g_stop_filter)  stage("  PassThruStopMsgFilter");
+        return 5;
+    }
+    stage("exports resolved — awaiting OP_OPEN (vendor PassThruOpen)");
 
     /* Byte-mode pipe needs message-boundary sync: one byte-mode write
      * per ReadFile pair on both sides (client writes then flushes;
@@ -336,9 +423,9 @@ int main(int argc, char* argv[])
         InterlockedExchange(&g_stop, 1);
     }
 
-    /* Park until control pump exits (SHUTDOWN or broken pipe). The
-     * read pump observes g_stop and exits on its next poll tick
-     * (< 20 ms latency, irrelevant during teardown). */
+    /* Park until control pump exits (SHUTDOWN, broken pipe, or a
+     * refused vendor open). The read pump observes g_stop and exits
+     * on its next poll tick (< 20 ms latency). */
     if (ctrl != nullptr) {
         WaitForSingleObject(ctrl, INFINITE);
         CloseHandle(ctrl);
@@ -349,13 +436,18 @@ int main(int argc, char* argv[])
     }
 
     /* Teardown order — mirrors the in-proc transport contract
-     * (worker quiesce BEFORE vendor close/unload). Channel first,
-     * best-effort. */
+     * (worker quiesce BEFORE vendor close/unload). Channel and device
+     * are both written by the control pump via InterlockedExchange;
+     * both are best-effort and both are GUARDED — if the vendor open
+     * never completed, neither close call is valid. */
     const unsigned long ch = g_channel;
     if (ch != 0) {
         g_disconnect(ch);
     }
-    g_close(g_device_id);
+    const unsigned long dev = g_device_id;
+    if (dev != 0) {
+        g_close(dev);
+    }
     FreeLibrary(g_module);
 
     if (g_pipe != INVALID_HANDLE_VALUE) CloseHandle(g_pipe);

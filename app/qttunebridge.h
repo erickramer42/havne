@@ -14,6 +14,7 @@
 #include <QElapsedTimer>
 
 #include <atomic>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -149,6 +150,7 @@ class QtTuneBridge : public QObject
     Q_PROPERTY(QString coreVersion READ coreVersion CONSTANT)
     Q_PROPERTY(bool coreInitialized READ coreInitialized NOTIFY coreInitializedChanged)
     Q_PROPERTY(bool connected READ connected NOTIFY connectedChanged)
+    Q_PROPERTY(bool connecting READ connecting NOTIFY connectingChanged)
     Q_PROPERTY(int frameCount READ frameCount NOTIFY frameCountChanged)
     Q_PROPERTY(int droppedFrames READ droppedFrames NOTIFY droppedFramesChanged)
     Q_PROPERTY(FrameSortProxy* model READ model CONSTANT)
@@ -171,6 +173,7 @@ public:
     int signalBatchCount() const { return m_signalBatchCount; }
     SignalListModel* signalModel() const { return m_signalModel; }
     QString currentUri() const { return m_currentUri; }
+    bool connecting() const { return m_connecting; }
     void dispatchFrameForTesting(const qttune_frame_t& frame);
     static constexpr int maxInFlightForTesting() { return MaxInFlightFrames; }
 
@@ -191,6 +194,12 @@ public slots:
     Q_INVOKABLE QString connectSession(const QString& uri);
     Q_INVOKABLE void disconnectSession();
     Q_INVOKABLE void clearFrames();
+    // Async connect: pure-core work (create + register + start, the
+    // DLL load and PassThruOpen included) runs on a worker thread; GUI
+    // state application and the result signal arrive queued on the
+    // GUI thread. Never blocks the UI — a J2534 handshake can legally
+    // take seconds (Issue #22).
+    Q_INVOKABLE void connectSessionAsync(const QString& uri);
 
 signals:
     void coreInitializedChanged();
@@ -201,6 +210,9 @@ signals:
     void notifyCountChanged(int newCount);
     void signalBatchChanged();
     void currentUriChanged();
+    void connectingChanged();
+    void connectResult(const QString& uri, const QString& error);
+    void logMessage(const QString& line);
 
 private:
     static void onFrame(const qttune_frame_t* frame, void* user_data);
@@ -231,4 +243,12 @@ private:
     std::atomic<int> m_inFlightFrames{0};   // posted-but-not-yet-processed count
     std::atomic<bool> m_dropNotifyPending{false};   // FIX: one queued drop-notify at a time
     static constexpr int MaxInFlightFrames = 1000; // queue backlog bound
+
+    // Async connect support. m_connecting is written ONLY on the GUI
+    // thread (in the async entry and the queued completion), so a plain
+    // bool suffices despite the worker's existence.
+    QString connectCoreOnly(const QString& uri, qttune_session_t** out_session);
+    void applyConnectedState(qttune_session_t* session, const QString& uri);
+    std::thread m_connectThread;
+    bool m_connecting = false;
 };

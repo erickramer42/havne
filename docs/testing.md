@@ -13,7 +13,7 @@ where the gaps are. For build and run commands, see
 | **HARNESS** | The J2534 stack end to end against the in-tree fake vendor DLL | CI on Windows (same-arch, all x64) |
 | **Cross-arch** | HARNESS with an x64 test process driving an x86 surrogate and an x86 fake | Dev machine only; needs environment variables ([development.md](development.md#running-tests)) |
 | **Manual smoke** | Running the app: layout, LiveView, strip chart, Settings picker against the live registry | Dev machine |
-| **BENCH** | A real vendor DLL and adapter, no vehicle | **Not yet reached** |
+| **BENCH** | A real vendor DLL and adapter, no vehicle | Informally begun 2026-10-16 (VX connect cycle; see [docs/bench-sessions/bench-runsheet.md](docs/bench-sessions/bench-runsheet.md)); formal session pending |
 | **Vehicle** | A live, read-only vehicle session | **Not yet reached** |
 
 The manual smoke tier earns its place. The 2026-10-10 strip-chart
@@ -66,11 +66,16 @@ it.
 | Settings picker: device list, refresh, manual URI connect and disconnect, error surfacing | Manual smoke (Windows, live registry) |
 | Full app builds on Windows (MSVC 2022) and macOS (AppleClang, Qt 6.12.0) | CI |
 | Transport adoption: `?filter=` registers a FLOW_CONTROL filter; `?txid=` selects the transmit ID; `?poll=` drives a Mode-01 loop; header strip + arbitration_id stamp; filter stopped on detach; gating discards non-matching frames; poll-without-filter rejected at parse | `J2534AdoptionTest` |
+| A blocked vendor `PassThruOpen` fails at the (shrunken) handshake timeout with the child alive, not wedged | `J2534SurrogateTest.BlockedVendorOpenFailsAtHandshakeTimeout` |
+| Spec-spelling export resolution (`PassThruIoctl` primary, legacy `PassThruIoCtl` fallback), both backends | `FakeFixture.SpecSpellingPassThruIoctlResolvesAndWorks` (spec fake, primary path) plus the whole existing suite against the legacy-spelling fake (fallback path) |
 
 ## Gaps (not verified)
 
-- **No real vendor DLL has been loaded.** The OBDX Pro VX and OBDLink
-  MX+ are installed and discovered, but never loaded.
+- **No formal BENCH session yet.** Real vendor DLLs HAVE now been
+  loaded informally (2026-10-16): the OBDX Pro VX completed a full
+  connect/disconnect cycle through the surrogate; the OBDX Pro VT
+  refused open with vendor status 34 (adapter absent). Unverified:
+  filter acceptance, VBATT, ReadMsgs semantics, on-vehicle behavior.
 - **No live vehicle has been connected.**
 - **Vendor conformance to J2534-1 v04.04 is unknown.** The shared
   types header is verified against public references, but only a real

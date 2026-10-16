@@ -31,6 +31,7 @@
 
 #include <cstring>
 #include <mutex>
+#include <cstdlib>
 
 #define FAKE_QUEUE_DEPTH 16
 #define FAKE_WRITE_DEPTH 16
@@ -137,6 +138,22 @@ long __stdcall PassThruOpen(void* pName, unsigned long* pDeviceID)
     if (pDeviceID == nullptr) {
         return STATUS_FAILED;
     }
+
+    /* Test-only open blocking (Issue #22 test): QTTUNE_FAKE_OPEN_DELAY_MS
+     * makes PassThruOpen sleep before doing anything — the blocked-
+     * vendor-open mode. Armed via ENVIRONMENT, not a hook: the child
+     * inherits the parent's environment, so an x64 test arms the x86
+     * child's fake with zero protocol surface. */
+    {
+        char buf[32] = {};
+        const DWORD n = GetEnvironmentVariableA("QTTUNE_FAKE_OPEN_DELAY_MS",
+                                                 buf, sizeof(buf));
+        if (n > 0 && n < sizeof(buf)) {
+            const DWORD delay = static_cast<DWORD>(strtoul(buf, nullptr, 10));
+            if (delay > 0 && delay <= 60000) Sleep(delay);
+        }
+    }
+
     std::lock_guard<std::mutex> lk(fake_j2534::g_lock);
     fake_j2534::g_handle = 1;
     *pDeviceID = 1;

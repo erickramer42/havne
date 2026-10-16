@@ -1,6 +1,6 @@
 # QtTune — Project Status
 
-**Updated:** 2026-10-15 · **Version:** v0.3.0-dev (last tag v0.2.0) ·
+**Updated:** 2026-10-16 · **Version:** v0.3.0-dev (last tag v0.2.0) ·
 [![CI](https://github.com/erickramer42/qttune/actions/workflows/ci.yml/badge.svg)](https://github.com/erickramer42/qttune/actions/workflows/ci.yml)
 
 This file covers the project as it stands: what works, what comes
@@ -26,13 +26,17 @@ adapter, comes next.
   - Discovery finds the real installed drivers, and the Settings page
     can pick one and connect.
 - **Not yet:**
-  - Any real vendor DLL load.
+  - A formal BENCH session. An informal first real-vendor connect
+    (2026-10-16) succeeded: the OBDX Pro VX loaded through the
+    surrogate, opened with USB power, ran a full connect/disconnect
+    cycle; the OBDX Pro VT refuses open (status 34) when its adapter
+    is absent. The run sheet is
+    [docs/bench-sessions/bench-runsheet.md](docs/bench-sessions/bench-runsheet.md).
   - Any live vehicle.
   - J2534 data in LiveView, which needs an OBD-II signal set (#21).
-- **Tests:** 90 ctest cases at `6aaf441`, passing locally
-  (Windows/MSVC 2022) and in CI on all three platforms. The cross-arch
-  routing case skips unless its environment variables are set. Tiers, suites and
-  gaps are in [docs/testing.md](docs/testing.md).
+- **Tests:** 93 ctest cases, passing locally (Windows/MSVC 2022) and in CI on 
+  all three platforms. The cross-arch routing case skips unless its environment variables are set. Tiers, suites and gaps are in 
+  [docs/testing.md](docs/testing.md).
 
 ## Architecture
 
@@ -163,6 +167,12 @@ it a genuine connect candidate.
 7. **Struct-layout conformance to v04.04** cannot be confirmed without
    a device ([ADR-0010](docs/adr/0010-j2534-v0404-shared-types.md)).
 8. **Vendor ioctl and filter behavior** and timeout semantics.
+9. **Export-name conformance.** RESOLVED 2026-10-16, contrary to
+   expectations: the OBDX Pro VX exports the SPEC spelling
+   (`PassThruIoctl`, J2534-1_0500 §7.3.19; all v04.04-era references
+   agree) — this project's `PassThruIoCtl` string was the divergence.
+   Both backends now try spec-first with the legacy spelling as
+   fallback, pinned in both directions by the two fakes.
 
 ## Known issues and technical debt
 
@@ -236,6 +246,22 @@ an issue is resolved it is removed, and its number is not reused.
     `handleFrameInternal`, so J2534 frames reach the Log page but no
     signals decode. This needs an OBD-II PID signal set and a way to
     select the signal set per transport.
+22. **J2534 connect blocked the GUI thread; the pre-fix surrogate
+    startup ran vendor open before the pipe connect. Fixed 2026-10-16.** Observed with the OBDX Pro VT/VX drivers installed and no adapter: the picker
+    row click called the synchronous connect slot (selection was an
+    unintended connect trigger), and Connect did too, freezing the UI ~8 s per attempt while the synchronous path waited on the child — believed at the 
+    time to be a vendor blocked in `PassThruOpen`; post-instrumentation evidence (2026-10-16) shows the installed OBDX drivers REFUSE open in seconds (VT: 
+    status 34) rather than block, so the full 8 s freeze was more likely the pre-fix startup order — vendor open before pipe connect — leaving the parent to burn the
+    handshake window on an already-exited child.
+    Fixes: picker rows fill the URI field only; `connectSessionAsync`
+    runs create/start on a worker thread with queued completion;
+    the surrogate now connects the pipe FIRST and performs
+    `PassThruOpen` inside `OP_OPEN`, so pipe-connected proves
+    load+exports and an unanswered `OP_OPEN` with a live child means
+    exactly "blocked in vendor open"; a refused open is relayed as a
+    FAILED response. Test knobs: `QTTUNE_SUR_HANDSHAKE_MS` (handshake
+    window) and `QTTUNE_FAKE_OPEN_DELAY_MS` (fake open sleep, arming
+    the x86 child from an x64 test via env inheritance). A vendor that genuinely blocks on absent hardware remains possible elsewhere in the ecosystem — and is now distinguishable: unanswered `OP_OPEN` with a live child means exactly that.
 
 ## Roadmap
 
@@ -263,3 +289,10 @@ repo for now.
 - Mobile builds for Android and iOS (#2)
 - macOS and Linux builds of the full desktop app (#3)
 - A scripted mock drive cycle (#9)
+- Distinguish refused vendor open (a status code) from load failure in
+  the URI-facing error text — today both surface as
+  "failed to load transport library"
+- Plumb `PassThruGetLastError` for vendor status text (the VT's
+  status 34 is unlabeled)
+- Picker row URIs templated with `?filter=&txid=&poll=` (the natural
+  flow today produces a mute ISO 15765 session)

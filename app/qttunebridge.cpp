@@ -272,8 +272,18 @@ QtTuneBridge::QtTuneBridge(QObject* parent)
     });
 }
 
+
 QtTuneBridge::~QtTuneBridge()
 {
+    // Async connect worker first: it calls core and posts a queued
+    // completion against `this`. Join before tearing the session or
+    // shutting core down. Worst case bounded by the surrogate handshake
+    // timeout (~8 s) at app exit with a wedged vendor — acceptable for
+    // shutdown, unacceptable for the UI thread mid-session (which is
+    // why connect is async at all).
+    if (m_connectThread.joinable()) {
+        m_connectThread.join();
+    }
     if (m_session != nullptr) {
         destroySessionLocked();
     }
@@ -333,37 +343,47 @@ QVariantList QtTuneBridge::discoverJ2534Devices() const
     return out;
 }
 
-QString QtTuneBridge::connectSession(const QString& uri)
+// Pure-core half: safe on ANY thread. Creates, registers, starts. On
+// failure, cleans up fully (the unregister/destroy calls are core API,
+// mutex-safe off-thread) and returns the error string. On success the
+// caller owns *out_session and must applyConnectedState() on the GUI
+// thread. Touches no Qt models, timers, or properties.
+QString QtTuneBridge::connectCoreOnly(const QString& uri,
+                                       qttune_session_t** out_session)
 {
-    if (m_connected.load(std::memory_order_acquire)) return {};
-
     const QByteArray uri8 = uri.toUtf8();
     qttune_session_t* session = nullptr;
     qttune_status_t rc = qttune_session_create(uri8.constData(), &session);
     if (rc != QT_OK || session == nullptr) {
         return QString::fromUtf8(qttune_status_string(rc));
     }
-    m_session = session;
-    m_currentUri = uri;
-    emit currentUriChanged();   // display value updates even if start fails below
 
     rc = qttune_register_frame_callback(session, &QtTuneBridge::onFrame, this);
     if (rc != QT_OK) {
-        destroySessionLocked();
-        m_currentUri.clear();
-        emit currentUriChanged();
+        qttune_session_destroy(session);
         return QString::fromUtf8(qttune_status_string(rc));
     }
 
     rc = qttune_session_start(session);
     if (rc != QT_OK) {
         qttune_unregister_frame_callback(session, &QtTuneBridge::onFrame, this);
-        destroySessionLocked();
-        m_currentUri.clear();
-        emit currentUriChanged();
+        qttune_session_destroy(session);
         return QString::fromUtf8(qttune_status_string(rc));
     }
 
+    *out_session = session;
+    return {};
+}
+
+// GUI-thread half: state application after a successful connect.
+// Factored out of connectSession so the sync and async paths apply
+// IDENTICAL state (parity by construction, not by care).
+void QtTuneBridge::applyConnectedState(qttune_session_t* session,
+                                        const QString& uri)
+{
+    m_session = session;
+    m_currentUri = uri;
+    emit currentUriChanged();
     m_connected.store(true, std::memory_order_release);
     m_currentFrameCount = 0;
     m_droppedFrames.store(0, std::memory_order_relaxed);
@@ -372,12 +392,67 @@ QString QtTuneBridge::connectSession(const QString& uri)
     m_coalesceTimer->start(100);
     emit connectedChanged(true);
     emit framesReset();
+}
+
+QString QtTuneBridge::connectSession(const QString& uri)
+{
+    if (m_connected.load(std::memory_order_acquire) || m_connecting) {
+        return {};
+    }
+
+    qttune_session_t* session = nullptr;
+    const QString err = connectCoreOnly(uri, &session);
+    if (!err.isEmpty()) {
+        emit logMessage(QStringLiteral("Connect failed: %1 (%2)").arg(uri, err));
+        return err;
+    }
+    applyConnectedState(session, uri);
+    emit logMessage(QStringLiteral("Connected: %1").arg(uri));
     return {};
+}
+
+void QtTuneBridge::connectSessionAsync(const QString& uri)
+{
+    if (m_connected.load(std::memory_order_acquire) || m_connecting) {
+        return;   // one attempt at a time; UI already reflects state
+    }
+    m_connecting = true;
+    emit connectingChanged();
+    emit logMessage(QStringLiteral("Connecting: %1").arg(uri));
+
+    m_connectThread = std::thread([this, uri]() {
+        qttune_session_t* session = nullptr;
+        const QString err = connectCoreOnly(uri, &session);
+
+        QMetaObject::invokeMethod(this, [this, uri, err, session]() {
+            // JOIN FIRST, then clear the flag, then emit: assigning to a
+            // joinable std::thread terminates the process, and a QML
+            // handler can run SYNCHRONOUSLY inside connectingChanged —
+            // this ordering keeps even that nested re-entry safe.
+            if (m_connectThread.joinable()) {
+                m_connectThread.join();
+            }
+            m_connecting = false;
+            emit connectingChanged();
+
+            if (err.isEmpty()) {
+                applyConnectedState(session, uri);
+                emit logMessage(QStringLiteral("Connected: %1").arg(uri));
+                emit connectResult(uri, {});
+            } else {
+                emit logMessage(QStringLiteral("Connect failed: %1 (%2)")
+                                    .arg(uri, err));
+                emit connectResult(uri, err);
+            }
+        }, Qt::QueuedConnection);
+    });
 }
 
 void QtTuneBridge::disconnectSession()
 {
     if (!m_connected.load(std::memory_order_acquire)) return;
+
+    emit logMessage(QStringLiteral("Disconnected: %1").arg(m_currentUri));
 
     m_connected.store(false, std::memory_order_release);
     destroySessionLocked();

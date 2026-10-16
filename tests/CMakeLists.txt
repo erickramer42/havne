@@ -125,6 +125,31 @@ if(WIN32)
     )
 endif()
 
+# Spec-spelling fake: SAME source, def exports only 'PassThruIoctl'
+# — the SAE J2534-1 spelling (J2534-1_0500 §7.3.19), which the first
+# real vendor tested (OBDX Pro VX) uses. The canonical fake_j2534
+# keeps exporting this project's legacy 'PassThruIoCtl' spelling, so
+# between the two fakes BOTH resolver paths are exercised:
+# spec fake -> primary resolution, legacy fake -> fallback.
+add_library(fake_j2534_spec SHARED
+    fake_j2534.cpp
+    fake_j2534_spec.def
+)
+
+target_compile_definitions(fake_j2534_spec PRIVATE
+    TEST_HOOKS_ENABLED
+)
+
+target_include_directories(fake_j2534_spec PRIVATE
+    ${CMAKE_SOURCE_DIR}/core/include
+)
+
+set_target_properties(fake_j2534_spec PROPERTIES
+    PREFIX ""
+    OUTPUT_NAME "fake_j2534_spec"
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/$<CONFIG>"
+)
+
 # J2534 loader tests (Win32-only, HARNESS tier — real LoadLibraryEx
 # against the fake vendor DLL; path baked in at generation time)
 if(WIN32)
@@ -137,8 +162,10 @@ if(WIN32)
     )
     target_compile_definitions(test_j2534_load PRIVATE
         FAKE_J2534_DLL_PATH="$<TARGET_FILE:fake_j2534>"
+        FAKE_J2534_SPEC_DLL_PATH="$<TARGET_FILE:fake_j2534_spec>"
     )
     add_dependencies(test_j2534_load fake_j2534)
+    add_dependencies(test_j2534_load fake_j2534_spec)
     gtest_discover_tests(test_j2534_load)
 endif()
 

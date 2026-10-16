@@ -592,3 +592,31 @@ TEST(BridgeTest, CurrentUriTracksConnectState)
     EXPECT_TRUE(bridge.currentUri().isEmpty());
     EXPECT_FALSE(bridge.connected());
 }
+
+TEST(BridgeTest, AsyncConnectCompletesOffGuiThread)
+{
+    QtTuneBridge bridge;
+    // Run a spinner on the GUI thread DURING the connect: if the
+    // blocking core calls ran on this thread, the spinner would be
+    // starved past its deadline. The mock's connect is fast, so give
+    // a generous-but-finite margin.
+    std::atomic<bool> done{false};
+    QString gotErr = "unset";
+    QObject::connect(&bridge, &QtTuneBridge::connectResult,
+                     [&](const QString&, const QString& error) {
+                         gotErr = error;
+                         done.store(true);
+                     });
+
+    bridge.connectSessionAsync(QStringLiteral("mock://demo"));
+
+    QElapsedTimer timer; timer.start();
+    while (!done.load() && timer.elapsed() < 5000) {
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 50);
+    }
+    ASSERT_TRUE(done.load());
+    EXPECT_EQ(gotErr.toStdString(), "");
+    EXPECT_TRUE(bridge.connected());
+    bridge.disconnectSession();
+    EXPECT_FALSE(bridge.connected());
+}

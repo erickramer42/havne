@@ -81,10 +81,22 @@ namespace {
 
 constexpr long kPtStatusNoError = QTTUNE_PT_STATUS_NOERROR;
 
+/* Resolve by export name. Optional alternate spelling: GetProcAddress
+ * is case-sensitive, and this project's original 'PassThruIoCtl'
+ * literal diverges from the spec's 'PassThruIoctl' (SAE J2534-1_0500
+ * §7.3.19; all v04.04-era public references agree — see the
+ * 2026-10-16 incident note in surrogate_main.cpp). The first real
+ * vendor tested (OBDX Pro VX) exports the SPEC spelling. Spec name
+ * first, legacy literal second. Decoration/mangling stay hard
+ * failures. */
 template <typename FnPtr>
-FnPtr resolve_export(HMODULE module, const char* name, bool& all_ok)
+FnPtr resolve_export(HMODULE module, const char* name, bool& all_ok,
+                     const char* alt_name = nullptr)
 {
     FARPROC proc = GetProcAddress(module, name);
+    if (proc == nullptr && alt_name != nullptr) {
+        proc = GetProcAddress(module, alt_name);
+    }
     if (proc == nullptr) {
         all_ok = false;
         return nullptr;
@@ -389,7 +401,11 @@ qttune_status_t qttune_j2534_open(const qttune_j2534_device_t* device,
     h->disconnect    = resolve_export<fn_pt_disconnect>(module, "PassThruDisconnect", all_resolved);
     h->read_msgs     = resolve_export<fn_pt_read_msgs>(module, "PassThruReadMsgs", all_resolved);
     h->write_msgs    = resolve_export<fn_pt_write_msgs>(module, "PassThruWriteMsgs", all_resolved);
-    h->ioctl         = resolve_export<fn_pt_ioctl>(module, "PassThruIoCtl", all_resolved);
+    /* Spec spelling ('PassThruIoctl') first, this project's legacy
+     * literal second. The alternate-casing fallback must live in BOTH
+     * backends or they disagree on which vendor DLLs load — the
+     * Part 4 parity rule. */
+    h->ioctl         = resolve_export<fn_pt_ioctl>(module, "PassThruIoctl", all_resolved, "PassThruIoCtl");
     h->start_filter  = resolve_export<fn_pt_start_filter>(module, "PassThruStartMsgFilter", all_resolved);
     h->stop_filter   = resolve_export<fn_pt_stop_filter>(module, "PassThruStopMsgFilter", all_resolved);
 

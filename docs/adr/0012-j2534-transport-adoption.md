@@ -1,6 +1,6 @@
 # ADR-0012: J2534 transport adoption: caller-chosen IDs, transport-driven request loop
 
-- **Status:** Accepted. Implemented in Phase 3 Part 5 (commit `e6ce759`, 2026-10-15).
+- **Status:** Accepted. Implemented in Phase 3 Part 5 (commit `161af4a`, 2026-10-15).
 - **Date:** 2026-10-15
 
 ## Context

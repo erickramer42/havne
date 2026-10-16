@@ -28,6 +28,7 @@
 #include <cstring>
 #include <thread>
 #include <cstdlib>
+#include <windows.h>
 
 /* Env override for the cross-arch case: an x86 surrogate can't load
  * the x64 fake baked at generate time, so the Win32 tree's fake DLL
@@ -375,6 +376,35 @@ TEST(J2534SurrogateTest, FilterStartStopLifecycle)
               QT_ERR_NO_TRANSPORT);   /* already stopped — strict vendor */
 
     EXPECT_EQ(qttune_j2534_sur_close(h), QT_OK);
+}
+
+/* Issue #22: a vendor PassThruOpen that blocks (adapter absent) must
+ * fail at the handshake timeout with the child ALIVE, not wedge and
+ * not require process-death to detect. The child inherits the parent's
+ * environment, so arming the fake-side sleep from here works in the
+ * cross-arch configuration too (x64 test -> x86 child). */
+TEST(J2534SurrogateTest, BlockedVendorOpenFailsAtHandshakeTimeout)
+{
+    SetEnvironmentVariableA("QTTUNE_FAKE_OPEN_DELAY_MS", "60000");
+    SetEnvironmentVariableA("QTTUNE_SUR_HANDSHAKE_MS", "500");
+    const auto t0 = std::chrono::steady_clock::now();
+
+    qttune_j2534_sur_handle_t* h = nullptr;
+    const qttune_status_t rc = qttune_j2534_sur_open(fake_dll_path(), &h);
+
+    const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now() - t0).count();
+
+    /* Restore BEFORE assertions: a failing EXPECT would otherwise leak
+     * the knobs into later tests in this process (sequential runs). */
+    SetEnvironmentVariableA("QTTUNE_FAKE_OPEN_DELAY_MS", nullptr);
+    SetEnvironmentVariableA("QTTUNE_SUR_HANDSHAKE_MS", nullptr);
+
+    EXPECT_EQ(rc, QT_ERR_LOAD_FAILED);
+    EXPECT_EQ(h, nullptr);
+    /* Failed at the SHRUNK window (~0.5s), nowhere near the 8s default —
+     * if this approaches 8s, an env knob stopped being honored. */
+    EXPECT_LT(elapsed, 3000);
 }
 
 #endif /* _WIN32 */

@@ -1,0 +1,20 @@
+LIBRARY fake_j2534
+EXPORTS
+    PassThruOpen
+    PassThruClose
+    PassThruConnect
+    PassThruDisconnect
+    PassThruReadMsgs
+    PassThruWriteMsgs
+    PassThruIoctl = PassThruIoCtl
+    PassThruStartMsgFilter
+    PassThruStopMsgFilter
+    InjectFrame
+    GetBufferState
+    GetCurrentHandle
+    GetLastConnectParams
+    GetWriteCount
+    GetRecordedWrite
+    GetLastFilterStart
+    GetLastFilterStop
+    SetFilterGating

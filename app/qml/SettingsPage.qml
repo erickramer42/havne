@@ -1,7 +1,9 @@
 // File/layer: app/qml/SettingsPage.qml | Qt6 Quick, UI layer
 // Testing: manual smoke — discovery list renders (Windows: real registry;
-//          macOS/Linux: empty-state hint), picker row fills URI field,
-//          manual URI connect/disconnect cycle, error label on bad URI
+//          macOS/Linux: empty-state hint), picker row fills URI field only,
+//          Connect button drives connectSessionAsync (UI stays responsive
+//          while a vendor blocks ~8 s), activity log shows connect lifecycle,
+//          error label on bad URI
 
 import QtQuick
 import QtQuick.Controls
@@ -13,6 +15,8 @@ Pane {
     id: page
     background: Rectangle { color: Theme.bg }
 
+    readonly property int maxLogLines: 200
+
     // Discovered Pass-Thru interfaces: [{ vendorName, dllPath }, ...].
     // Empty on non-Windows or when no drivers are installed.
     property var j2534Devices: []
@@ -21,15 +25,42 @@ Pane {
         j2534Devices = QtTune.discoverJ2534Devices()
     }
 
-    function attemptConnect(uri) {
+    // Row click / preset click: selection is INTENT, never action. A row
+    // that only fills the URI field can never accidentally cost 8 seconds.
+    function fillUri(uri) {
         uriField.text = uri
-        const err = QtTune.connectSession(uri)
-        errorLabel.text = err
-        if (err === "")
-            errorLabel.visible = false
+    }
+
+    function requestConnect(uri) {
+        if (uri === "")
+            return
+        QtTune.connectSessionAsync(uri)
+        // Connecting/Connected/failed lines arrive via logMessage.
+    }
+
+    function appendLog(message) {
+        activityLog.append(message)
+        // Bound the log: QML TextArea.append keeps growing otherwise.
+        while (activityLog.lineCount > page.maxLogLines) {
+            activityLog.remove(0, activityLog.text.indexOf("\n") + 1)
+        }
+        activityLog.cursorPosition = activityLog.length
     }
 
     Component.onCompleted: refreshDevices()
+
+    Connections {
+        target: QtTune
+
+        function onLogMessage(message) {
+            page.appendLog(message)
+        }
+
+        function onConnectResult(uri, error) {
+            errorLabel.text = error
+            errorLabel.visible = (error !== "")
+        }
+    }
 
     ColumnLayout {
         anchors.fill: parent
@@ -46,7 +77,9 @@ Pane {
         Label {
             text: QtTune.connected
                   ? qsTr("Connected: %1").arg(QtTune.currentUri)
-                  : qsTr("Not connected")
+                  : (QtTune.connecting
+                       ? qsTr("Connecting…")
+                       : qsTr("Not connected"))
             color: QtTune.connected ? Theme.success : Theme.textDim
         }
 
@@ -57,17 +90,24 @@ Pane {
             TextField {
                 id: uriField
                 Layout.fillWidth: true
-                placeholderText: qsTr("URI — e.g. mock://demo or j2534://Vendor?baud=250000")
-                enabled: !QtTune.connected && QtTune.coreInitialized
+                placeholderText: qsTr("URI — e.g. mock://demo or j2534://Vendor?filter=0x7E8&poll=0x0C")
+                enabled: !QtTune.connected && !QtTune.connecting && QtTune.coreInitialized
                 color: Theme.text
-                onAccepted: page.attemptConnect(text)
+                onAccepted: page.requestConnect(text)
             }
 
             Button {
-                text: QtTune.connected ? qsTr("Disconnect") : qsTr("Connect")
+                text: QtTune.connected
+                      ? qsTr("Disconnect")
+                      : (QtTune.connecting ? qsTr("Connecting…") : qsTr("Connect"))
+                // Disabled while an attempt is in flight — the bridge
+                // guards double-starts anyway, but the UI must not
+                // offer them during a multi-second vendor block.
                 enabled: QtTune.connected
                          ? true
-                         : (QtTune.coreInitialized && uriField.text !== "")
+                         : (!QtTune.connecting
+                            && QtTune.coreInitialized
+                            && uriField.text !== "")
                 background: Rectangle {
                     radius: Theme.radius
                     color: QtTune.connected ? Theme.elevated : Theme.primary
@@ -77,7 +117,7 @@ Pane {
                         QtTune.disconnectSession()
                         errorLabel.visible = false
                     } else {
-                        page.attemptConnect(uriField.text)
+                        page.requestConnect(uriField.text)
                     }
                 }
             }
@@ -100,14 +140,15 @@ Pane {
                 model: ["mock://demo", "j2534://"]
                 Button {
                     required property string modelData
-                    text: modelData === "" ? qsTr("j2534:// (first device)") : modelData
-                    enabled: !QtTune.connected
-                    flat: true
-                    contentItem: Label {
-                        text: parent.text
-                        color: Theme.textDim
+                    text: modelData === ""
+                          ? qsTr("j2534:// (first device)")
+                          : modelData
+                    enabled: !QtTune.connected && !QtTune.connecting
+                    onClicked: page.fillUri(modelData)
+                    background: Rectangle {
+                        radius: Theme.radius
+                        color: parent.enabled ? Theme.elevatedLight : Qt.darker(Theme.elevatedLight, 1.2)
                     }
-                    onClicked: uriField.text = modelData
                 }
             }
         }
@@ -157,7 +198,7 @@ Pane {
                     hoverEnabled: true
                     cursorShape: Qt.PointingHandCursor
                     enabled: !QtTune.connected
-                    onClicked: page.attemptConnect("j2534://" + row.modelData.vendorName)
+                    onClicked: page.fillUri("j2534://" + row.modelData.vendorName)
                 }
 
                 ColumnLayout {
@@ -167,6 +208,9 @@ Pane {
 
                     Label {
                         text: row.modelData.vendorName
+                              + (row.modelData.architecture
+                                   ? "  (" + row.modelData.architecture + ")"
+                                   : "")
                         color: QtTune.connected ? Theme.textDim : Theme.text
                     }
                     Label {
@@ -177,6 +221,31 @@ Pane {
                         Layout.fillWidth: true
                     }
                 }
+            }
+        }
+
+        // ---- Activity log ----
+        Label {
+            text: qsTr("Activity")
+            color: Theme.text
+            font.bold: true
+        }
+
+        ScrollView {
+            Layout.fillWidth: true
+            Layout.preferredHeight: 140
+
+            TextArea {
+                id: activityLog
+                readOnly: true
+                wrapMode: TextArea.WrapAnywhere
+                font.pointSize: 8
+                color: Theme.textDim
+                background: Rectangle {
+                    radius: Theme.radius
+                    color: Theme.elevated
+                }
+                text: qsTr("Ready.")
             }
         }
     }
