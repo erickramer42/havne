@@ -19,6 +19,7 @@ old one, and the old record's status is updated to point at it.
 | [0010](0010-j2534-v0404-shared-types.md) | SAE J2534-1 v04.04 is the contract; one shared types header | Accepted |
 | [0011](0011-vendor-call-relay-wire-forms.md) | Vendor-call relay: flat wire forms, identical ioctl whitelist at both ends | Accepted |
 | [0012](0012-j2534-transport-adoption.md) | J2534 transport adoption: caller-chosen IDs, transport-driven request loop | Accepted |
+| [0013](0013-protocol-profiles.md) | Protocol profiles: URI selection, profile-owned probe and request loop | Accepted |
 
 ## Adding a record
 

@@ -36,7 +36,10 @@ adapter, comes next.
     open (status 34) with its adapter absent. The run sheet template is
     [docs/bench-sessions/bench-runsheet.md](docs/bench-sessions/bench-runsheet.md).
   - Any live vehicle.
-  - J2534 data in LiveView, which needs an OBD-II signal set (#21).
+  - J2534 data in LiveView, which needs the profile layer — the
+    `obd2` signal set and a way to select the signal set per
+    transport (ADR-0013, #21). Designed 2026-10-16; not yet
+    implemented.
 - **Tests:** 93 ctest cases, passing locally (Windows/MSVC 2022) and in CI on 
   all three platforms. The cross-arch routing case skips unless its environment variables are set. Tiers, suites and gaps are in 
   [docs/testing.md](docs/testing.md).
@@ -138,7 +141,12 @@ Contracts along this path:
     #6 partially informed); talking-bus items (#2, #3, #4, #5, #7)
     still open
   - first live, read-only vehicle session
-- [ ] **OBD-II signal set** so J2534 data reaches LiveView (#21)
+- [ ] **Protocol profiles** (ADR-0013): `raw` and `obd2` profiles,
+      the profile registry with the `?profile=` override, the
+      multi-PID scheduler replacing the single-poll loop, and the
+      bridge reading the active signal set instead of hard-wiring
+      the mock set (#21, #15); later `obd2` probe phase and
+      `uds-generic`
 - [ ] **Phase 4, record-replay transport:** capture fixtures, then play
       them back deterministically through the same frame API
 - [ ] **Tag v0.3.0** and bump the version string (#16)
@@ -252,8 +260,11 @@ an issue is resolved it is removed, and its number is not reused.
 21. **LiveView only knows the mock signal set.** The bridge hard-wires
     `qttune_mock_signal_set()` in `connectSession` and
     `handleFrameInternal`, so J2534 frames reach the Log page but no
-    signals decode. This needs an OBD-II PID signal set and a way to
-    select the signal set per transport.
+    signals decode. The fix is the protocol-profile layer
+    (ADR-0013): `raw` and `obd2` profiles with a string-keyed
+    registry, `?profile=` override, and the bridge reading the
+    active signal set over the ABI instead of choosing one. Close
+    this issue in the profile-layer commit, not piecemeal.
 22. **J2534 connect blocked the GUI thread; the pre-fix surrogate
     startup ran vendor open before the pipe connect. Fixed 2026-10-16.** Observed with the OBDX Pro VT/VX drivers installed and no adapter: the picker
     row click called the synchronous connect slot (selection was an
@@ -287,11 +298,17 @@ an issue is resolved it is removed, and its number is not reused.
 | v0.2.0 | Callback API, mock transport, live frame log, CI | ✅ Released (tagged) |
 | v0.3.0 | Signal decoding, LiveView, J2534 transport, live vehicle read and logging | 🚧 [Checklist above](#v030-checklist) |
 | v0.4.0 | Security access discovery, flash capability | Planned |
-| v0.5.0+ | Manufacturer plugin modules | Planned |
+| v0.5.0+ | Manufacturer plugin modules (ADR-0013's profile API) | Planned |
 
 Flash support depends on discovering each manufacturer's
 secure-gateway authentication. That research is tracked outside this
 repo for now.
+Legacy-bus support (ISO 9141-2/KWP, J1850 VPW/PWM) is a missing
+workstream between the profile work and the manufacturer-plugin
+milestone: the expanded target list (pre-2008 Mazda/Ford/GM) needs
+transport-layer protocol support before any profile can serve those
+cars. Whether and when it is built depends on which target vehicles
+matter most — CAN-era targets need none of it.
 
 **Backlog (unscheduled):**
 

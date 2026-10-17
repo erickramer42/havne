@@ -31,7 +31,7 @@ Dates are commit dates.
 | 2026-10-15 | Phase 3 Part 5: transport adoption ([ADR-0012](adr/0012-j2534-transport-adoption.md)) | `161af4a` |
 | 2026-10-16 | Issue #22: async bridge connect; surrogate pipe-first startup | `eacf1d0` |
 | 2026-10-16 | Issue #22 + IoCtl export-spelling fix; first real-vendor session (VX connect cycle) | `eacf1d0` |
-| 2026-10-16 | First formal BENCH session: OBDX Pro VX, quiet bus — filter shape accepted, soak clean | `<hash>` |
+| 2026-10-16 | First formal BENCH session: OBDX Pro VX, quiet bus — filter shape accepted, soak clean | `e60325b` |
 
 ## Lessons learned
 
