@@ -1,5 +1,8 @@
-// File/layer: surrogate/surrogate_main.cpp | Win32, x86-only, Qt-free
-// Testing: HARNESS — spawned by the client and by test_j2534_surrogate
+// File/layer: surrogate/surrogate_main.cpp | Win32, x86, Qt-free; rebuild build-win32
+// Testing: HARNESS — full surrogate/routing/stream suites, both trees rebuilt
+//     together; child-log inspection for the new trace lines (the stage
+//     output lands in %TEMP%/qttune-surrogate.log on manual runs and in
+//     ctest --output-on-failure otherwise)
 // CLI contract: surrogate.exe <dll_path> <pipe_name> <map_name> <event_name>
 //               (all names generated and owned by the x64 app side)
 //
@@ -190,7 +193,7 @@ static DWORD WINAPI control_pump(LPVOID)
             {
                 unsigned long device = 0;
                 const long rc = g_open(nullptr, &device);
-                stage("OP_OPEN: vendor status %ld", rc);
+                stage("OP_OPEN: vendor status %ld, device_id=%lu", rc, device);
                 resp.status = rc;
                 if (rc == QTTUNE_PT_STATUS_NOERROR) {
                     InterlockedExchange(
@@ -207,6 +210,12 @@ static DWORD WINAPI control_pump(LPVOID)
             resp.status = g_connect(g_device_id, req.u.connect.protocol_id,
                                     req.u.connect.flags, req.u.connect.baud, &ch);
             resp.handle_or_channel = ch;
+            /* Issue #23 / review finding 5: IDs in the trace. A vendor
+             * returning channel 0 previously looked identical to a
+             * quiet bus (read pump never starts, nothing printed); now
+             * it names itself in %TEMP%. */
+            stage("OP_CONNECT: vendor status %ld, channel=%lu (device=%lu)",
+                  resp.status, ch, g_device_id);
             if (resp.status == QTTUNE_PT_STATUS_NOERROR) {
                 InterlockedExchange(reinterpret_cast<volatile LONG*>(&g_channel),
                                     static_cast<LONG>(ch));
@@ -263,9 +272,15 @@ static DWORD WINAPI control_pump(LPVOID)
                     resp.data_len = req.u.ioctl.input_len;
                 }
             } else if (id == QTTUNE_PT_IOCTL_READ_VBATT) {
+                /* v04.04: READ_VBATT is DEVICE-scoped — it takes the
+                 * DeviceID, not the channel (review 2026-10-17,
+                 * finding 9). The wire request carries a channel id
+                 * for the channel-scoped ioctls; substitute the device
+                 * id HERE rather than changing the wire ABI (#19: no
+                 * protocol churn across the two trees). */
                 unsigned long vbatt = 0;
-                resp.status = g_ioctl(req.u.ioctl.channel_id,
-                                      static_cast<long>(id), nullptr, &vbatt);
+                resp.status = g_ioctl(g_device_id, static_cast<long>(id),
+                                      nullptr, &vbatt);
                 if (resp.status == QTTUNE_PT_STATUS_NOERROR) {
                     memcpy(resp.data, &vbatt, 4);
                     resp.data_len = 4;
@@ -375,12 +390,15 @@ int main(int argc, char* argv[])
     }
     stage("pipe connected");
 
-    /* Vendor load + mandatory-export resolution (nine functions).
-     * PassThruIoctl goes through the alternate-spelling fallback —
-     * see resolve_export above. */
-    g_module = LoadLibraryA(dll_path);
+    /* Altered search path — PARITY with the in-proc loader
+     * (j2534_loader.cpp): vendor DLLs may depend on siblings in their
+     * own install folder (multi-DLL vendor packages). Plain
+     * LoadLibraryA doesn't search there; the DLL loaded in-proc but
+     * died here with exit 4 (review 2026-10-17, finding 4). */
+    g_module = LoadLibraryExA(dll_path, nullptr, LOAD_WITH_ALTERED_SEARCH_PATH);
     if (g_module == nullptr) {
-        stage("LoadLibraryA failed for '%s'", dll_path);
+        stage("LoadLibraryExA failed for '%s' (err=%lu)", dll_path,
+              GetLastError());
         return 4;
     }
     stage("dll loaded");

@@ -1,6 +1,10 @@
-// File/layer: tests/fake_j2534.cpp | Fake J2534 vendor DLL, HARNESS tier
+// File/layer: tests/fake_j2534.cpp | Fake J2534 vendor DLL, HARNESS tier; 
+//             built in BOTH trees
 // Testing: exercised via LoadLibraryEx by test_j2534_load/_stream and
-//          via the surrogate child (either arch).
+//          via the surrogate child (either arch) - the existing VBATT test now only passes if the loader
+//          really passes the device id. RISK FLAG: channel 0x55 may break an
+//          unseen test asserting channel == 1 — run the full suite; if anything
+//          red cites the channel value, paste that test before touching it.
 // NOTE: InjectFrame/ReadMsgs share a mutex-guarded FIFO — injections
 //      from the test thread race safely against the polling worker.
 //      Connect params are recorded so tests can assert that URI
@@ -190,7 +194,11 @@ long __stdcall PassThruConnect(unsigned long DeviceID,
     if (fake_j2534::g_handle != 1) {
         return STATUS_FAILED;
     }
-    *pChannelID = 1;
+    /* Distinct from the device id (1) ON PURPOSE: the fake's device and
+     * channel used to collide at 1, which hid the READ_VBATT
+     * channel-vs-device bug (review 2026-10-17, finding 9). 0x55 is
+     * arbitrary, nonzero, and unrelated to any protocol constant. */
+    *pChannelID = 0x55;
     return STATUS_NOERROR;
 }
 
@@ -420,6 +428,13 @@ long __stdcall PassThruIoCtl(unsigned long ChannelID,
         return STATUS_NOERROR;
     }
     case QTTUNE_PT_IOCTL_READ_VBATT:
+        /* Contract pin (review finding 9): v04.04 passes the DeviceID
+         * to READ_VBATT. This fake's PassThruOpen returns device 1 and
+         * PassThruConnect returns channel 0x55 — a caller passing the
+         * channel now FAILS here instead of colliding at 1 == 1. */
+        if (ChannelID != 1) {
+            return STATUS_FAILED;
+        }
         if (pOutput != nullptr) {
             *static_cast<unsigned long*>(pOutput) = 13800;  /* 13.8 V in mV */
         }

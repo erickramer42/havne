@@ -1,6 +1,8 @@
-// File/layer: core/src/j2534_loader.cpp | C++17, Win32-guarded
+// File/layer: core/src/j2534_loader.cpp | C++17, Qt-free, CI-validated headless
 // Testing: HARNESS — live-registry discovery tests + test_j2534_load
-//          (load/export/open/close) + test_j2534_stream (end-to-end)
+//          (load/export/open/close) + test_j2534_stream (end-to-end),
+//          test_j2534_stream/load VBATT case must still pass through
+//          BOTH backends; the fake changes below make it a real contract test
 // CI: non-Windows gets linking stubs only; core.cpp guards routing
 
 #include "qttune/j2534.h"
@@ -698,7 +700,12 @@ qttune_status_t qttune_j2534_ioctl(qttune_j2534_handle_t* handle,
 
     if (ioctl_id == QTTUNE_PT_IOCTL_READ_VBATT) {
         unsigned long vbatt = 0;
-        long rc = handle->ioctl(channel, static_cast<long>(ioctl_id),
+        /* v04.04: READ_VBATT is device-scoped — DeviceID, not the
+         * channel (review 2026-10-17, finding 9). The surrogate child
+         * substitutes its device id the same way; both backends now
+         * agree. */
+        long rc = handle->ioctl(handle->device_id,
+                                static_cast<long>(ioctl_id),
                                 nullptr, &vbatt);
         if (rc != kPtStatusNoError) {
             return QT_ERR_NO_TRANSPORT;
