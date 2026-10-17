@@ -13,7 +13,7 @@ where the gaps are. For build and run commands, see
 | **HARNESS** | The J2534 stack end to end against the in-tree fake vendor DLL | CI on Windows (same-arch, all x64) |
 | **Cross-arch** | HARNESS with an x64 test process driving an x86 surrogate and an x86 fake | Dev machine only; needs environment variables ([development.md](development.md#running-tests)) |
 | **Manual smoke** | Running the app: layout, LiveView, strip chart, Settings picker against the live registry | Dev machine |
-| **BENCH** | A real vendor DLL and adapter, no vehicle | Informally begun 2026-10-16 (VX connect cycle; see [docs/bench-sessions/bench-runsheet.md](docs/bench-sessions/bench-runsheet.md)); formal session pending |
+| **BENCH** | A real vendor DLL and adapter, no vehicle | First formal session complete, 2026-10-16, quiet bus ([session sheet](bench-sessions/2026-10-16.md)); talking-bus behaviors pending |
 | **Vehicle** | A live, read-only vehicle session | **Not yet reached** |
 
 The manual smoke tier earns its place. The 2026-10-10 strip-chart
@@ -68,14 +68,18 @@ it.
 | Transport adoption: `?filter=` registers a FLOW_CONTROL filter; `?txid=` selects the transmit ID; `?poll=` drives a Mode-01 loop; header strip + arbitration_id stamp; filter stopped on detach; gating discards non-matching frames; poll-without-filter rejected at parse | `J2534AdoptionTest` |
 | A blocked vendor `PassThruOpen` fails at the (shrunken) handshake timeout with the child alive, not wedged | `J2534SurrogateTest.BlockedVendorOpenFailsAtHandshakeTimeout` |
 | Spec-spelling export resolution (`PassThruIoctl` primary, legacy `PassThruIoCtl` fallback), both backends | `FakeFixture.SpecSpellingPassThruIoctlResolvesAndWorks` (spec fake, primary path) plus the whole existing suite against the legacy-spelling fake (fallback path) |
+| Real-adapter lifecycle: OBDX Pro VX loads through the x86 surrogate, opens with USB power (vendor status 0), clean spawn/exit with disconnect, async connect keeps the UI responsive | BENCH session 2026-10-16, phase 1 |
+| The 8-byte FLOW_CONTROL filter shape (prep #1, `fc_len == mask_len` workaround) is accepted by a real vendor — behaviorally; the child traces no filter ops (Known Issue #23). Quiet-bus read loop at <1% CPU, zero spurious frames | BENCH session 2026-10-16, phase 2 |
 
 ## Gaps (not verified)
 
-- **No formal BENCH session yet.** Real vendor DLLs HAVE now been
-  loaded informally (2026-10-16): the OBDX Pro VX completed a full
-  connect/disconnect cycle through the surrogate; the OBDX Pro VT
-  refused open with vendor status 34 (adapter absent). Unverified:
-  filter acceptance, VBATT, ReadMsgs semantics, on-vehicle behavior.
+- **BENCH coverage stops at the quiet bus.** The formal session
+  (2026-10-16) verified load, open, filter-shape acceptance and
+  quiet-bus read behavior. Still unverified against real hardware:
+  talking-bus behavior (request framing, checksum expectations,
+  timestamp units), VBATT, ReadMsgs timeout-vs-error discrimination
+  (#11), and any vendor status on filter registration itself (#23 —
+  acceptance was inferred, not logged).
 - **No live vehicle has been connected.**
 - **Vendor conformance to J2534-1 v04.04 is unknown.** The shared
   types header is verified against public references, but only a real

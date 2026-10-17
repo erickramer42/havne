@@ -31,6 +31,7 @@ Dates are commit dates.
 | 2026-10-15 | Phase 3 Part 5: transport adoption ([ADR-0012](adr/0012-j2534-transport-adoption.md)) | `161af4a` |
 | 2026-10-16 | Issue #22: async bridge connect; surrogate pipe-first startup | `eacf1d0` |
 | 2026-10-16 | Issue #22 + IoCtl export-spelling fix; first real-vendor session (VX connect cycle) | `eacf1d0` |
+| 2026-10-16 | First formal BENCH session: OBDX Pro VX, quiet bus — filter shape accepted, soak clean | `<hash>` |
 
 ## Lessons learned
 
@@ -303,3 +304,25 @@ built for the blocked-open mystery each paid off again unprompted —
 the export-casing failure named its own cause (exit 5, one line in
 the stage log) and the VT refusal arrived as a labeled status code.
 Diagnostics that survive their incident are infrastructure.
+
+**2026-10-16 — formal BENCH round (first real adapter):** three
+lessons, two paid for during pre-flight. (1) **An env-gated test that
+falls back instead of skipping lies about its failure.** The
+cross-arch routing test with unset `QTTUNE_FAKE_DLL` doesn't skip in
+practice on a machine with the x64 tree built — it fails into the
+baked x64 path looking exactly like a routing regression ("expected
+surrogate, got inproc"), and it took a deliberately-fresh shell to
+see it. Absent config should be a visible skip, never a silent
+substitution. (2) **A copied log has provenance too.** Diagnosing
+the apparent `QT_ERR_LOAD_FAILED`, the `%TEMP%` child log — written
+`CREATE_ALWAYS` by a prior run — showed a full healthy lifecycle
+for a spawn that had never happened. The copy-immediately rule was
+written for adapter evidence; it governs debugging evidence
+identically. (3) **Instrument the op that answers your question.**
+The session's central question — does the VX accept the 8-byte
+flow-control shape? — could only be answered by inference from
+session-start success, because the surrogate traces startup and
+OP_OPEN and nothing else (now Known Issue #23). A quiet test result
+is still a result, but a logged vendor status is a fact; the gap
+between the two is the gap between "passed" and "passed, and here
+is the vendor's word for it."

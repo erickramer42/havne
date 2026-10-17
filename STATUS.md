@@ -26,11 +26,14 @@ adapter, comes next.
   - Discovery finds the real installed drivers, and the Settings page
     can pick one and connect.
 - **Not yet:**
-  - A formal BENCH session. An informal first real-vendor connect
-    (2026-10-16) succeeded: the OBDX Pro VX loaded through the
-    surrogate, opened with USB power, ran a full connect/disconnect
-    cycle; the OBDX Pro VT refuses open (status 34) when its adapter
-    is absent. The run sheet is
+  - BENCH coverage beyond the quiet-bus tier. The formal first BENCH
+    session (2026-10-16, [docs/bench-sessions/2026-10-16.md](docs/bench-sessions/2026-10-16.md))
+    succeeded: the OBDX Pro VX loaded through the surrogate, opened with
+    USB power (vendor status 0), accepted the 8-byte flow-control filter
+    shape (behaviorally — see #23), and survived a 2-minute quiet-bus
+    soak at <1% CPU with clean teardown. Talking-bus behaviors, VBATT,
+    and timestamp units remain untested. The OBDX Pro VT still refuses
+    open (status 34) with its adapter absent. The run sheet template is
     [docs/bench-sessions/bench-runsheet.md](docs/bench-sessions/bench-runsheet.md).
   - Any live vehicle.
   - J2534 data in LiveView, which needs an OBD-II signal set (#21).
@@ -127,8 +130,13 @@ Contracts along this path:
       filter teardown ([ADR-0012](docs/adr/0012-j2534-transport-adoption.md)).
 - [ ] **Phase 3 close, BENCH tier:**
   - first real vendor DLL load and connect: the OBDX Pro VX through
-    the surrogate, and the OBDLink MX+ in-proc if its DLL is x64
-  - work through [BENCH prep](#bench-prep)
+    the surrogate — done, formal session 2026-10-16
+    ([session sheet](docs/bench-sessions/2026-10-16.md)); the OBDLink
+    MX+ in-proc if its DLL is x64 — pending
+  - work through [BENCH prep](#bench-prep) — quiet-bus subset walked
+    2026-10-16 (#1 confirmed behaviorally, #9 resolved earlier,
+    #6 partially informed); talking-bus items (#2, #3, #4, #5, #7)
+    still open
   - first live, read-only vehicle session
 - [ ] **OBD-II signal set** so J2534 data reaches LiveView (#21)
 - [ ] **Phase 4, record-replay transport:** capture fixtures, then play
@@ -262,6 +270,14 @@ an issue is resolved it is removed, and its number is not reused.
     FAILED response. Test knobs: `QTTUNE_SUR_HANDSHAKE_MS` (handshake
     window) and `QTTUNE_FAKE_OPEN_DELAY_MS` (fake open sleep, arming
     the x86 child from an x64 test via env inheritance). A vendor that genuinely blocks on absent hardware remains possible elsewhere in the ecosystem — and is now distinguishable: unanswered `OP_OPEN` with a live child means exactly that.
+23. **The surrogate traces only startup and OP_OPEN.** Filter
+    starts/stops, ioctls, and connect-time config are silent in
+    `%TEMP%\qttune-surrogate.log`, each with its own vendor status.
+    Discovered in the first formal BENCH session (2026-10-16), where
+    filter acceptance had to be inferred from session-start success
+    rather than a logged vendor status. Also: log lines carry no
+    timestamps, so cross-referencing with parent timings is guesswork.
+    Fix alongside the tracing: timestamp every line.
 
 ## Roadmap
 
@@ -296,3 +312,11 @@ repo for now.
   status 34 is unlabeled)
 - Picker row URIs templated with `?filter=&txid=&poll=` (the natural
   flow today produces a mute ISO 15765 session)
+- Skip (not misleadingly fail) the cross-arch J2534 tests when
+  `QTTUNE_FAKE_DLL`/`QTTUNE_SURROGATE_EXE` are unset — they currently
+  fall back to the baked x64 path and fail looking like a routing
+  regression
+- CMake `POST_BUILD` copy deploying the win32 surrogate next to the
+  app, so it launches without `QTTUNE_SURROGATE_EXE` exported
+  (same discipline as the surrogate-deployment step on the test
+  targets)

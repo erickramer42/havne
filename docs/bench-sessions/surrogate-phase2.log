@@ -1,0 +1,6 @@
+[surrogate] attached shared ring
+[surrogate] pipe connected
+[surrogate] dll loaded
+[surrogate] exports resolved — awaiting OP_OPEN (vendor PassThruOpen)
+[surrogate] OP_OPEN: calling PassThruOpen
+[surrogate] OP_OPEN: vendor status 0
