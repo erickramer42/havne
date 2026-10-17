@@ -329,10 +329,6 @@ matter most — CAN-era targets need none of it.
   status 34 is unlabeled)
 - Picker row URIs templated with `?filter=&txid=&poll=` (the natural
   flow today produces a mute ISO 15765 session)
-- Skip (not misleadingly fail) the cross-arch J2534 tests when
-  `QTTUNE_FAKE_DLL`/`QTTUNE_SURROGATE_EXE` are unset — they currently
-  fall back to the baked x64 path and fail looking like a routing
-  regression
 - CMake `POST_BUILD` copy deploying the win32 surrogate next to the
   app, so it launches without `QTTUNE_SURROGATE_EXE` exported
   (same discipline as the surrogate-deployment step on the test
