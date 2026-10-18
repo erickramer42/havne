@@ -1,4 +1,4 @@
-LIBRARY fake_j2534
+LIBRARY fake_j2534_spec
 EXPORTS
     PassThruOpen
     PassThruClose
@@ -6,7 +6,7 @@ EXPORTS
     PassThruDisconnect
     PassThruReadMsgs
     PassThruWriteMsgs
-    PassThruIoctl = PassThruIoCtl
+    PassThruIoCtl = PassThruIoctl
     PassThruStartMsgFilter
     PassThruStopMsgFilter
     InjectFrame

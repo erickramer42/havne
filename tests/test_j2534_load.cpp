@@ -112,16 +112,12 @@ TEST_F(FakeFixture, CloseNullIsSafeNoOp) {
     EXPECT_EQ(qttune_j2534_close(nullptr), QT_OK);
 }
 
-/* Spec-spelling export resolution (incident 2026-10-16): the spec fake
- * exports 'PassThruIoctl' (SAE J2534-1 spelling; J2534-1_0500 §7.3.19).
- * The OBDX Pro VX — the first real vendor tested — exports ONLY the
- * spec spelling, so this test validates PRIMARY-path resolution
- * against a canonical fixture that matches it. Note: dumpbin shows
- * our spec fake also exports 'PassThruIoCtl' as a secondary export
- * (the fallback spelling), so the test does NOT prove primary-only
- * resolution; it proves the resolved function works. The real
- * fidelity test is the VX itself, which exercises true primary-only. */
-TEST_F(FakeFixture, SpecSpellingPassThruIoctlResolvesAndWorks) {
+/* Legacy-spelling fallback (2026-10-16 VX incident family): the
+ * legacy fixture exports 'PassThruIoCtl' ONLY — the fallback some
+ * real vendors ship. Resolution must fall back to it and land on a
+ * working function. The everyday fake exports the spec spelling;
+ * primary resolution is pinned separately below. */
+TEST_F(FakeFixture, LegacySpellingPassThruIoCtlFallsBackAndWorks)
     qttune_j2534_device_t dev{};
     strncpy(dev.dll_path, FAKE_J2534_SPEC_DLL_PATH, sizeof(dev.dll_path) - 1);
     strcpy(dev.vendor_name, "qttune-fake-spec");

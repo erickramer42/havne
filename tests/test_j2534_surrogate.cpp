@@ -378,6 +378,44 @@ TEST(J2534SurrogateTest, FilterStartStopLifecycle)
     EXPECT_EQ(qttune_j2534_sur_close(h), QT_OK);
 }
 
+/* Review finding 1 (2026-10-17): a mid-session vendor call that
+ * outlives the client's 3s transact timeout leaves its response in
+ * flight. The NEXT request must recover — consume the stale
+ * response — not desync against it. Reproduced red before the fix:
+ * this second, valid ioctl failed via the transact ID mismatch.
+ * Knob armed BEFORE open (the child snapshots the environment at
+ * spawn; SetEnvironmentVariableA afterwards does not propagate) and
+ * restored before any later test spawns. */
+TEST(J2534SurrogateTest, TimedOutOpDoesNotDesyncNextRequest)
+{
+    SetEnvironmentVariableA("QTTUNE_FAKE_IOCTL_DELAY_MS", "3500");
+    qttune_j2534_sur_handle_t* h = nullptr;
+    ASSERT_EQ(qttune_j2534_sur_open(fake_dll_path(), &h), QT_OK);
+    SetEnvironmentVariableA("QTTUNE_FAKE_IOCTL_DELAY_MS", nullptr);
+
+    unsigned long channel = 0;
+    ASSERT_EQ(qttune_j2534_sur_connect_channel(h, 0, 0, &channel), QT_OK);
+
+    /* Vendor ioctl sleeps 3.5s — 0.5s past the 3s transact timeout:
+     * parent gives up at ~3s, response lands at ~3.5s. */
+    unsigned char out[8] = {};
+    uint32_t out_len = 0;
+    EXPECT_EQ(qttune_j2534_sur_ioctl(h, channel, QTTUNE_PT_IOCTL_READ_VBATT,
+                                     nullptr, 0, out, &out_len),
+              QT_ERR_NO_TRANSPORT);
+
+    /* The differentiator: with the desync present this FAILS (reads
+     * the stale response, ID mismatch); with recovery it succeeds. */
+    out_len = 0;
+    EXPECT_EQ(qttune_j2534_sur_ioctl(h, channel, QTTUNE_PT_IOCTL_READ_VBATT,
+                                     nullptr, 0, out, &out_len),
+              QT_OK);
+    EXPECT_EQ(out_len, 4u);
+    EXPECT_EQ(get_u32(out), 13800u);
+
+    EXPECT_EQ(qttune_j2534_sur_close(h), QT_OK);
+}
+
 /* Issue #22: a vendor PassThruOpen that blocks (adapter absent) must
  * fail at the handshake timeout with the child ALIVE, not wedge and
  * not require process-death to detect. The child inherits the parent's

@@ -6,7 +6,7 @@ EXPORTS
     PassThruDisconnect
     PassThruReadMsgs
     PassThruWriteMsgs
-    PassThruIoCtl
+    PassThruIoctl
     PassThruStartMsgFilter
     PassThruStopMsgFilter
     InjectFrame

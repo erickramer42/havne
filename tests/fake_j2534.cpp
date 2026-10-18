@@ -2,9 +2,7 @@
 //             built in BOTH trees
 // Testing: exercised via LoadLibraryEx by test_j2534_load/_stream and
 //          via the surrogate child (either arch) - the existing VBATT test now only passes if the loader
-//          really passes the device id. RISK FLAG: channel 0x55 may break an
-//          unseen test asserting channel == 1 — run the full suite; if anything
-//          red cites the channel value, paste that test before touching it.
+//          really passes the device id.
 // NOTE: InjectFrame/ReadMsgs share a mutex-guarded FIFO — injections
 //      from the test thread race safely against the polling worker.
 //      Connect params are recorded so tests can assert that URI
@@ -89,6 +87,11 @@ unsigned long g_filter_seq = 0;
 FilterRecord g_last_filter;              /* raw last StartMsgFilter call */
 bool g_filter_gating_enabled = false;    /* SetFilterGating toggle — controls
                                           * ReadMsgs dropping ONLY, not echo */
+/* One-shot IoCtl stall (review finding 1 repro): env-armed sleep on
+ * the FIRST PassThruIoctl only — a vendor op that outlives the
+ * client's 3s transact timeout, while every later op answers
+ * instantly, isolating the recovery path under test. */
+bool g_ioctl_delay_fired = false;
 
 /* Last PassThruConnect invocation, recorded BEFORE the validity
  * check — even a refused connect shows what was asked, which is
@@ -365,12 +368,35 @@ long __stdcall PassThruWriteMsgs(unsigned long ChannelID,
 }
 
 extern "C" __declspec(dllexport)
-long __stdcall PassThruIoCtl(unsigned long ChannelID,
+long __stdcall PassThruIoctl(unsigned long ChannelID,
                              long IoControlID,
                              void* pInput,
                              void* pOutput)
 {
     (void)ChannelID;
+
+   /* Review finding 1 repro: one-shot env-armed stall. Flag taken
+     * under the lock, SLEEP taken outside it — the read pump calls
+     * PassThruReadMsgs on the same mutex and must keep flowing. */
+    bool do_stall = false;
+    char stall_buf[32] = {};
+    {
+        const DWORD n = GetEnvironmentVariableA("QTTUNE_FAKE_IOCTL_DELAY_MS",
+                                                stall_buf, sizeof(stall_buf));
+        if (n > 0 && n < sizeof(stall_buf)) {
+            std::lock_guard<std::mutex> lk(fake_j2534::g_lock);
+            if (!fake_j2534::g_ioctl_delay_fired) {
+                fake_j2534::g_ioctl_delay_fired = true;
+                do_stall = true;
+            }
+        }
+    }
+    if (do_stall) {
+        const DWORD delay =
+            static_cast<DWORD>(strtoul(stall_buf, nullptr, 10));
+        if (delay > 0 && delay <= 60000) Sleep(delay);
+    }
+
     std::lock_guard<std::mutex> lk(fake_j2534::g_lock);
 
     switch (IoControlID) {

@@ -34,6 +34,8 @@ struct qttune_j2534_sur_handle {
     HANDLE job = nullptr;          /* KILL_ON_JOB_CLOSE owns surrogate */
     HANDLE process = nullptr;
     uint32_t next_request_id = 1;
+    uint32_t pending_response_id = 0;  /* response still in flight from
+                                          a timed-out transaction */
 };
 
 namespace {
@@ -166,19 +168,62 @@ read_result ov_read(HANDLE pipe, void* buf, DWORD len, DWORD timeout_ms,
     return res;
 }
 
-/* One request/response round-trip with a bounded timeout. */
+/* Consume-and-discard the response to a PREVIOUS timed-out
+ * transaction (review finding 1). Without this, the next request's
+ * read mispairs with the stale response and every subsequent op
+ * fails the ID check — the desync. If the stale response never
+ * arrives, the child never answered at all: session unusable, fail
+ * without writing anything new. */
+bool drain_pending(qttune_j2534_sur_handle_t* h, DWORD timeout_ms)
+{
+    qttune_sur_response_t stale = {};
+    DWORD got = 0, rerr = 0;
+    const read_result rr = ov_read(h->pipe, &stale, sizeof(stale),
+                                   timeout_ms, &got, &rerr);
+    if (rr != RD_OK) {
+        SUR_LOG("drain_pending: stale response id=%u never arrived\n",
+                h->pending_response_id);
+        return false;
+    }
+    if (stale.request_id != h->pending_response_id) {
+        SUR_LOG("drain_pending: unexpected id=%u want=%u\n",
+                stale.request_id, h->pending_response_id);
+        return false;
+    }
+    return true;
+}
+
+/* One request/response round-trip with a bounded timeout.
+ * REVIEW FINDING 1 (2026-10-17), two-part fix:
+ *  - FlushFileBuffers REMOVED (confirmed live: a synchronous flush on
+ *    the overlapped pipe handle blocked the parent indefinitely while
+ *    the child sat healthy and idle). Byte-mode pipe, one fixed-size
+ *    struct in flight: no flush needed, ov_write's pseudo-sync already
+ *    guarantees completion or cancellation.
+ *  - Stale-response drain: after a timeout, the response is still in
+ *    flight. Consume it before the next request so the read can't
+ *    mispair against it. */
 bool transact(qttune_j2534_sur_handle_t* h, const qttune_sur_request_t& req,
               qttune_sur_response_t* out_resp, DWORD timeout_ms)
 {
+    if (h->pending_response_id != 0) {
+        if (!drain_pending(h, timeout_ms)) {
+            return false;
+        }
+        h->pending_response_id = 0;
+    }
     if (!ov_write(h->pipe, &req, sizeof(req), timeout_ms)) {
         SUR_LOG("transact: ov_write failed (req_id=%u op=%u err=%lu)\n",
                 req.request_id, req.opcode, GetLastError());
         return false;
     }
-    FlushFileBuffers(h->pipe);
     DWORD got = 0, rerr = 0;
     const read_result rr = ov_read(h->pipe, out_resp, sizeof(*out_resp),
                                    timeout_ms, &got, &rerr);
+    if (rr == RD_TIMEOUT) {
+        /* Remember the orphan: its response is still coming. */
+        h->pending_response_id = req.request_id;
+    }
     if (rr != RD_OK) {
         const char* kind =
             (rr == RD_SHORT_READ) ? "SHORT-READ (struct layout skew between trees?)"
