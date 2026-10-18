@@ -103,6 +103,15 @@ unsigned long g_last_connect_protocol = 0;
 /* Last StopMsgFilter invocation, for detach-ordering assertion. */
 unsigned long g_last_stopped_filter_id = 0;
 
+/* Disconnect counter (issue #24): a successful client disconnect
+ * must clear the child's channel so teardown never issues a SECOND
+ * vendor disconnect. Monotonic, read via GetDisconnectCount —
+ * in-proc instances only. The child's instance is a separate
+ * process (see the OP_INJECT note above), so the automated
+ * cross-process pin lands with the #23 tracing/query-op work;
+ * this hook exists now so that work has its observable ready. */
+unsigned long g_disconnect_count = 0;
+
 /* Enqueue into the shared RX FIFO (mutex held by caller). Drops on
  * full exactly like InjectFrame — documented, keeps counts honest. */
 void enqueue_rx_locked(const unsigned char* data, unsigned long size,
@@ -209,6 +218,11 @@ extern "C" __declspec(dllexport)
 long __stdcall PassThruDisconnect(unsigned long ChannelID)
 {
     (void)ChannelID;
+    /* Tolerant by design: a real vendor's second-disconnect behavior
+     * is vendor swamp we don't model — the COUNT is the contract
+     * observable (issue #24), not the return code. */
+    std::lock_guard<std::mutex> lk(fake_j2534::g_lock);
+    fake_j2534::g_disconnect_count++;
     return STATUS_NOERROR;
 }
 
@@ -367,7 +381,7 @@ long __stdcall PassThruWriteMsgs(unsigned long ChannelID,
     return STATUS_NOERROR;   /* *pNumMsgs stays 1 — fully written */
 }
 
-extern "C" __declspec(dllexport)
+extern "C"
 long __stdcall PassThruIoctl(unsigned long ChannelID,
                              long IoControlID,
                              void* pInput,
@@ -671,6 +685,16 @@ void GetLastFilterStop(unsigned long* out_filter_id)
     }
     std::lock_guard<std::mutex> lk(fake_j2534::g_lock);
     *out_filter_id = fake_j2534::g_last_stopped_filter_id;
+}
+
+/* Monotonic PassThruDisconnect count (issue #24): explicit
+ * client-disconnect-then-close must total exactly 1. In-proc
+ * instances only — cross-process pin pending the #23 query op. */
+extern "C" __declspec(dllexport)
+unsigned long GetDisconnectCount(void)
+{
+    std::lock_guard<std::mutex> lk(fake_j2534::g_lock);
+    return fake_j2534::g_disconnect_count;
 }
 
 /* SetFilterGating(enable): when armed, ReadMsgs drops frames whose

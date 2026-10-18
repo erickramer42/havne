@@ -32,6 +32,7 @@ Dates are commit dates.
 | 2026-10-16 | Issue #22: async bridge connect; surrogate pipe-first startup | `eacf1d0` |
 | 2026-10-16 | Issue #22 + IoCtl export-spelling fix; first real-vendor session (VX connect cycle) | `eacf1d0` |
 | 2026-10-16 | First formal BENCH session: OBDX Pro VX, quiet bus — filter shape accepted, soak clean | `e60325b` |
+| 2026-10-17 | Issue #24: surrogate vendor-call serialization, single disconnect; IoCtl dllexport strip; GetDisconnectCount hook | `<hash>` |
 
 ## Lessons learned
 
@@ -311,3 +312,29 @@ the code: both pre-flight red herrings were wrong env values (x64-tree fake; non
 surrogate, got inproc"), and it took a deliberately-fresh shell to see it. Absent config should be a visible skip, never a silent substitution. (2) **A copied log has provenance too.** Diagnosing the apparent `QT_ERR_LOAD_FAILED`, the `%TEMP%` child log — written `CREATE_ALWAYS` by a prior run — showed a full healthy lifecycle
 for a spawn that had never happened. The copy-immediately rule was written for adapter evidence; it governs debugging evidence identically. (3) **Instrument the op that answers your question.** The session's central question — does the VX accept the 8-byte flow-control shape? — could only be answered by inference from
 session-start success, because the surrogate traces startup and OP_OPEN and nothing else (now Known Issue #23). A quiet test result is still a result, but a logged vendor status is a fact; the gap between the two is the gap between "passed" and "passed, and here is the vendor's word for it."
+
+**2026-10-18 — surrogate serialization round (review finding 2):**
+four lessons. (1) **A committed fallback test can certify nothing
+while green:** `dllexport` on `PassThruIoctl` leaked the spec
+spelling into the legacy fixture through the x64 undecorated export,
+so the fallback test resolved primary and never exercised the
+fallback — the vacuous-green class F8 was filed against, surviving
+inside the F8 fix itself. `dumpbin /exports` on the fixture is one
+command and total proof of the export surface; a test's green says
+nothing the export table doesn't. (2) **Design the observable before
+assuming reachability:** the disconnect-count pin as first imagined
+dies on process isolation — an x64 test counting its own module
+handle counts a different DLL instance than the child's. The
+cross-process pin needs a wire query op (the #23 work); landing
+`GetDisconnectCount` now parks the observable where its consumer
+will meet it instead of building half of one. (3) **Crash becomes
+linger is an upgrade, not a compromise:** holding the vendor lock
+across teardown converts `FreeLibrary`-under-a-live-call into a
+blocked child reaped by the kill-on-close job — the worst case went
+from rare-and-fatal to bounded-and-diagnosable, which is the
+correct direction for code you can't control. (4) **Suite green
+cannot see child stderr:** the single-disconnect fix's direct
+evidence lives only in `%TEMP%\qttune-surrogate.log` — OP_DISCONNECT
+present, teardown-disconnect absent after clean closes — a manual
+check no automated tier can currently make. The check is cheap;
+the discipline is remembering to run it.

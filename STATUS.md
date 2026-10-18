@@ -20,9 +20,12 @@ adapter, comes next.
   - The mock transport drives the live frame log, LiveView and the
     strip chart.
   - J2534 runs end to end against the fake vendor DLL, both in-proc
-    and through the x86 surrogate, including write/ioctl/filter relay on both 
-    backends, and transport adoption: filters, the Mode-01 request loop, and 
-    frame identity via ?filter=/?txid=/?poll= (ADR-0012)
+    and through the x86 surrogate, including write/ioctl/filter relay on both backends, transport adoption: filters, the Mode-01 request loop, and frame identity via ?filter=/?txid=/?poll= (ADR-0012),     and vendor calls through the surrogate are serialized behind one
+    lock (review 2026-10-17 finding 2, issue #24 fixed 2026-10-17):
+    the child never enters a vendor DLL from two threads, and teardown
+    holds the same lock across disconnect/close/FreeLibrary, so a
+    stuck vendor call becomes a job-reaped linger, never an unmap
+    under live vendor code
   - Discovery finds the real installed drivers, and the Settings page
     can pick one and connect.
 - **Not yet:**
@@ -139,6 +142,7 @@ Contracts along this path:
     the surrogate — done, formal session 2026-10-16
     ([session sheet](docs/bench-sessions/2026-10-16.md)); the OBDLink
     MX+ in-proc if its DLL is x64 — pending
+  - [x] **Resolved surrogate serialization bug (#24):** serializes vendor DLL calls, clears `g_channel` on OP_DISCONNECT, prevents double disconnect and unsafe teardown; BENCH gate cleared.
   - work through [BENCH prep](#bench-prep) — quiet-bus subset walked
     2026-10-16 (#1 confirmed behaviorally, #9 resolved earlier,
     #6 partially informed); talking-bus items (#2, #3, #4, #5, #7)
@@ -284,25 +288,10 @@ an issue is resolved it is removed, and its number is not reused.
     FAILED response. Test knobs: `QTTUNE_SUR_HANDSHAKE_MS` (handshake
     window) and `QTTUNE_FAKE_OPEN_DELAY_MS` (fake open sleep, arming
     the x86 child from an x64 test via env inheritance). A vendor that genuinely blocks on absent hardware remains possible elsewhere in the ecosystem — and is now distinguishable: unanswered `OP_OPEN` with a live child means exactly that.
-23. **The surrogate traces only startup, OP_OPEN and OP_CONNECT
-    (with device/channel IDs, 2026-10-18).** Filter starts/stops
-    and ioctls are still silent in `%TEMP%\qttune-surrogate.log`,
-    each with its own vendor status.
-    Discovered in the first formal BENCH session (2026-10-16), where
-    filter acceptance had to be inferred from session-start success
-    rather than a logged vendor status. Also: log lines carry no
-    timestamps, so cross-referencing with parent timings is guesswork.
-    Fix alongside the tracing: timestamp every line.
-24. **The surrogate calls the vendor DLL from two threads and
-    breaks teardown order** (review 2026-10-17, finding 2). The
-    read thread polls `PassThruReadMsgs` while the control thread
-    calls filter start/stop and disconnect; `OP_DISCONNECT` doesn't
-    clear `g_channel` (the read thread keeps reading a disconnected
-    channel, and shutdown disconnects a second time); and shutdown
-    waits only 2 s for the read thread before `FreeLibrary` — if
-    the thread is still inside vendor code, the child crashes.
-    The VX tolerated this on a quiet bus. Fix before the next BENCH
-    session; the in-proc path never makes concurrent calls.
+23. **The surrogate traces only startup, OP_OPEN, OP_CONNECT and
+    OP_DISCONNECT** (IDs and vendor status; OP_DISCONNECT added
+    2026-10-17). Filter starts/stops and ioctls are still silent in
+    `%TEMP%\qttune-surrogate.log`, each with its own vendor status. Discovered in the first formal BENCH session (2026-10-16), where filter acceptance had to be inferred from session-start success rather than a logged vendor status. Also: log lines carry no timestamps, so cross-referencing with parent timings remains guesswork. Target: trace all operations with timestamps and add filter/ioctl operation logs in the next iteration.
 25. **J2534 receive is capped around 50 msgs/s, ~10 in poll mode**
     (review 2026-10-17, finding 3). The worker reads one message
     then sleeps; on the surrogate path the 4096-slot ring fills at

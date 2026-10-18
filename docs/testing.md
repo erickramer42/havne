@@ -70,6 +70,7 @@ it.
 | Spec-spelling export resolution (`PassThruIoctl` primary, legacy `PassThruIoCtl` fallback), both backends | `FakeFixture.SpecSpellingPassThruIoctlResolvesAndWorks` (spec fake, primary path) plus the whole existing suite against the legacy-spelling fake (fallback path) |
 | Real-adapter lifecycle: OBDX Pro VX loads through the x86 surrogate, opens with USB power (vendor status 0), clean spawn/exit with disconnect, async connect keeps the UI responsive | BENCH session 2026-10-16, phase 1 |
 | The 8-byte FLOW_CONTROL filter shape (prep #1, `fc_len == mask_len` workaround) is accepted by a real vendor — behaviorally; the child traces no filter ops (Known Issue #23). Quiet-bus read loop at <1% CPU, zero spurious frames | BENCH session 2026-10-16, phase 2 |
+| Surrogate vendor-call serialization: one lock around every vendor entry (read pump + control pump under real concurrency), single vendor disconnect after a clean client close, crash-on-stuck-vendor replaced by job-reaped linger | The full J2534 suites on both backends (2026-10-18, both trees green) — single-disconnect confirmed by the child trace log: `OP_DISCONNECT: vendor status 0` present, `teardown: disconnect` absent after clean closes |
 
 ## Gaps (not verified)
 

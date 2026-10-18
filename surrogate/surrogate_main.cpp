@@ -1,8 +1,8 @@
 // File/layer: surrogate/surrogate_main.cpp | Win32, x86, Qt-free; rebuild build-win32
 // Testing: HARNESS — full surrogate/routing/stream suites, both trees rebuilt
-//     together; child-log inspection for the new trace lines (the stage
-//     output lands in %TEMP%/qttune-surrogate.log on manual runs and in
-//     ctest --output-on-failure otherwise)
+//     together. The existing suite exercises every serialized path under real
+//     concurrency (read pump at 2ms cadence + all control ops); a lock-design
+//     deadlock surfaces as a bounded Failed (Timeout) under the 30s ceiling.
 // CLI contract: surrogate.exe <dll_path> <pipe_name> <map_name> <event_name>
 //               (all names generated and owned by the x64 app side)
 //
@@ -20,6 +20,16 @@
 // A refused vendor open is relayed as a FAILED OP_OPEN response (child
 // exits cleanly after), preserving the caller-visible outcome while
 // retiring child exit code 6 (kept reserved, never renumbered).
+//
+// VENDOR SERIALIZATION (review 2026-10-17, finding 2 / issue #24): this
+// process enters the vendor DLL from two threads by design (read pump
+// + control pump), and J2534-1 promises no thread safety. One lock is
+// held across every vendor call AND across teardown's disconnect/close/
+// FreeLibrary. A vendor call stuck forever (e.g. ReadMsgs blocking despite
+// timeout 0) blocks teardown on the lock — the child lingers until the
+// parent's kill-on-close job reaps it — instead of the old alternative:
+// FreeLibrary pulling code out from under a live vendor call. Crash
+// becomes linger; the job object owns the linger.
 
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
@@ -34,8 +44,20 @@
 
 static HMODULE g_module = nullptr;
 static unsigned long g_device_id = 0;
-static unsigned long g_channel = 0;         /* set by CONNECT, read by pump */
+static unsigned long g_channel = 0;         /* set by CONNECT, cleared by
+                                               DISCONNECT, read by pump */
 static volatile LONG g_stop = 0;
+
+/* Serializes every vendor-DLL entry (see header note). Initialized in
+ * main before either thread exists; destroyed at the very end, after
+ * the last Leave. Never nested — the lock-ordering hazard is designed
+ * out, not managed. */
+static CRITICAL_SECTION g_vendor_lock;
+
+struct VendorGuard {
+    VendorGuard()  { EnterCriticalSection(&g_vendor_lock); }
+    ~VendorGuard() { LeaveCriticalSection(&g_vendor_lock); }
+};
 
 typedef long (__stdcall *fn_pt_open)(void*, unsigned long*);
 typedef long (__stdcall *fn_pt_close)(unsigned long);
@@ -106,7 +128,14 @@ static void push_slot(const PASSTHRU_MSG* msg)
 
 /* Data plane: vendor ReadMsgs with timeout 0 (non-blocking per
  * J2534-1), short sleep when quiet. Vendor variance in timeout-0
- * semantics is a known swamp — BENCH round arbitrates per-vendor. */
+ * semantics is a known swamp — BENCH round arbitrates per-vendor.
+ * The vendor call runs under g_vendor_lock (review finding 2). The
+ * sleeps are OUTSIDE the lock; the lock is skipped entirely while
+ * there is no channel, so a blocked vendor open cannot stall this
+ * pump pre-connect (preserving the #22 diagnosis story). g_stop is
+ * re-checked INSIDE the lock: a pump that passed the outer check
+ * must not enter vendor code the instant teardown releases the
+ * lock after FreeLibrary. */
 static DWORD WINAPI read_pump(LPVOID)
 {
     for (;;) {
@@ -115,7 +144,13 @@ static DWORD WINAPI read_pump(LPVOID)
         if (ch == 0 || g_read_msgs == nullptr) { Sleep(20); continue; }
         PASSTHRU_MSG msg = {};
         unsigned long num = 1;
-        long rc = g_read_msgs(ch, &msg, &num, 0);
+        EnterCriticalSection(&g_vendor_lock);
+        if (g_stop) {
+            LeaveCriticalSection(&g_vendor_lock);
+            return 0;
+        }
+        const long rc = g_read_msgs(ch, &msg, &num, 0);
+        LeaveCriticalSection(&g_vendor_lock);
         if (rc != QTTUNE_PT_STATUS_NOERROR || num == 0) { Sleep(2); continue; }
         push_slot(&msg);
     }
@@ -188,11 +223,17 @@ static DWORD WINAPI control_pump(LPVOID)
              * means the vendor is blocked inside PassThruOpen (the
              * absent-adapter mode observed 2026-10-16). Failure is
              * relayed as a FAILED response and the child quits,
-             * preserving the old exit-code-6 caller outcome. */
+             * preserving the old exit-code-6 caller outcome.
+             * Under the vendor lock like every vendor call; the read
+             * pump has no channel yet, so it is not contending. */
             stage("OP_OPEN: calling PassThruOpen");
             {
                 unsigned long device = 0;
-                const long rc = g_open(nullptr, &device);
+                long rc;
+                {
+                    VendorGuard vg;
+                    rc = g_open(nullptr, &device);
+                }
                 stage("OP_OPEN: vendor status %ld, device_id=%lu", rc, device);
                 resp.status = rc;
                 if (rc == QTTUNE_PT_STATUS_NOERROR) {
@@ -207,24 +248,46 @@ static DWORD WINAPI control_pump(LPVOID)
             break;
         case QTTUNE_SUR_OP_CONNECT: {
             unsigned long ch = 0;
-            resp.status = g_connect(g_device_id, req.u.connect.protocol_id,
-                                    req.u.connect.flags, req.u.connect.baud, &ch);
+            long rc;
+            {
+                VendorGuard vg;
+                rc = g_connect(g_device_id, req.u.connect.protocol_id,
+                               req.u.connect.flags, req.u.connect.baud, &ch);
+            }
+            resp.status = rc;
             resp.handle_or_channel = ch;
             /* Issue #23 / review finding 5: IDs in the trace. A vendor
              * returning channel 0 previously looked identical to a
              * quiet bus (read pump never starts, nothing printed); now
              * it names itself in %TEMP%. */
             stage("OP_CONNECT: vendor status %ld, channel=%lu (device=%lu)",
-                  resp.status, ch, g_device_id);
-            if (resp.status == QTTUNE_PT_STATUS_NOERROR) {
+                  rc, ch, g_device_id);
+            if (rc == QTTUNE_PT_STATUS_NOERROR) {
                 InterlockedExchange(reinterpret_cast<volatile LONG*>(&g_channel),
                                     static_cast<LONG>(ch));
             }
             break;
         }
-        case QTTUNE_SUR_OP_DISCONNECT:
-            resp.status = g_disconnect(req.u.disconnect.channel_id);
+        case QTTUNE_SUR_OP_DISCONNECT: {
+            /* Review finding 2 / issue #24: clear g_channel on success,
+             * so (a) the read pump stops polling a disconnected
+             * channel, and (b) teardown below does not disconnect a
+             * second time. A vendor-side failure keeps the channel —
+             * teardown's disconnect stays available as a retry. */
+            long rc;
+            {
+                VendorGuard vg;
+                rc = g_disconnect(req.u.disconnect.channel_id);
+            }
+            resp.status = rc;
+            stage("OP_DISCONNECT: vendor status %ld, channel=%lu", rc,
+                  req.u.disconnect.channel_id);
+            if (rc == QTTUNE_PT_STATUS_NOERROR) {
+                InterlockedExchange(reinterpret_cast<volatile LONG*>(&g_channel),
+                                    0);
+            }
             break;
+        }
         case QTTUNE_SUR_OP_WRITE: {
             /* ONE message per request (wire limit 64 bytes; ISO-TP
              * multiframe beyond that is future transport work). */
@@ -232,8 +295,11 @@ static DWORD WINAPI control_pump(LPVOID)
             fill_pattern_msg(&msg, req.u.write.data, req.u.write.data_len,
                              req.u.write.tx_flags);
             unsigned long num = 1;
-            resp.status = g_write_msgs(req.u.write.channel_id, &msg, &num,
-                                       req.u.write.timeout_ms);
+            {
+                VendorGuard vg;
+                resp.status = g_write_msgs(req.u.write.channel_id, &msg,
+                                           &num, req.u.write.timeout_ms);
+            }
             resp.aux = num;   /* actual written — 0 or partial = caller's call */
             break;
         }
@@ -259,8 +325,11 @@ static DWORD WINAPI control_pump(LPVOID)
                     cfg[i].Value = value;
                 }
                 SCONFIG_LIST list = { n, cfg };
-                resp.status = g_ioctl(req.u.ioctl.channel_id,
-                                      static_cast<long>(id), &list, nullptr);
+                {
+                    VendorGuard vg;
+                    resp.status = g_ioctl(req.u.ioctl.channel_id,
+                                          static_cast<long>(id), &list, nullptr);
+                }
                 /* GET_CONFIG writes results back through pInput —
                  * re-flatten for the response. */
                 if (id == QTTUNE_PT_IOCTL_GET_CONFIG &&
@@ -279,8 +348,11 @@ static DWORD WINAPI control_pump(LPVOID)
                  * id HERE rather than changing the wire ABI (#19: no
                  * protocol churn across the two trees). */
                 unsigned long vbatt = 0;
-                resp.status = g_ioctl(g_device_id, static_cast<long>(id),
-                                      nullptr, &vbatt);
+                {
+                    VendorGuard vg;
+                    resp.status = g_ioctl(g_device_id, static_cast<long>(id),
+                                          nullptr, &vbatt);
+                }
                 if (resp.status == QTTUNE_PT_STATUS_NOERROR) {
                     memcpy(resp.data, &vbatt, 4);
                     resp.data_len = 4;
@@ -288,6 +360,7 @@ static DWORD WINAPI control_pump(LPVOID)
             } else if (id == QTTUNE_PT_IOCTL_CLEAR_TX_BUFFER ||
                        id == QTTUNE_PT_IOCTL_CLEAR_RX_BUFFER ||
                        id == QTTUNE_PT_IOCTL_CLEAR_MSG_FILTERS) {
+                VendorGuard vg;
                 resp.status = g_ioctl(req.u.ioctl.channel_id,
                                       static_cast<long>(id), nullptr, nullptr);
             } else {
@@ -314,23 +387,31 @@ static DWORD WINAPI control_pump(LPVOID)
                 fc_ptr = &fc;
             }
             unsigned long filter_id = 0;
-            resp.status = g_start_filter(req.u.start_filter.channel_id,
-                                         req.u.start_filter.filter_type,
-                                         &mask, &pattern, fc_ptr, &filter_id);
+            {
+                VendorGuard vg;
+                resp.status = g_start_filter(req.u.start_filter.channel_id,
+                                            req.u.start_filter.filter_type,
+                                            &mask, &pattern, fc_ptr,
+                                            &filter_id);
+            }
             resp.handle_or_channel = filter_id;
             break;
         }
-        case QTTUNE_SUR_OP_STOP_FILTER:
+        case QTTUNE_SUR_OP_STOP_FILTER: {
+            VendorGuard vg;
             resp.status = g_stop_filter(req.u.stop_filter.channel_id,
-                                        req.u.stop_filter.filter_id);
+                                       req.u.stop_filter.filter_id);
             break;
+        }
         case QTTUNE_SUR_OP_INJECT: {
-            /* TEST-ONLY: forward into the loaded module's hook. */
+            /* TEST-ONLY: forward into the loaded module's hook. Module
+             * code — takes the vendor lock like any other entry. */
             typedef void (*fn_inject)(const unsigned char*, unsigned long,
                                       unsigned long, unsigned long, unsigned long);
             fn_inject inject = reinterpret_cast<fn_inject>(
                 GetProcAddress(g_module, "InjectFrame"));
             if (inject != nullptr) {
+                VendorGuard vg;
                 inject(req.u.inject.data, req.u.inject.len,
                        req.u.inject.timestamp, req.u.inject.rx_flags, 0);
                 resp.status = QTTUNE_PT_STATUS_NOERROR;
@@ -435,6 +516,7 @@ int main(int argc, char* argv[])
      * per ReadFile pair on both sides (client writes then flushes;
      * we respond then flush — mirroring the app's transact()). */
 
+    InitializeCriticalSection(&g_vendor_lock);
     HANDLE ctrl = CreateThread(nullptr, 0, control_pump, nullptr, 0, nullptr);
     HANDLE rd   = CreateThread(nullptr, 0, read_pump, nullptr, 0, nullptr);
     if (ctrl == nullptr || rd == nullptr) {
@@ -449,17 +531,30 @@ int main(int argc, char* argv[])
         CloseHandle(ctrl);
     }
     if (rd != nullptr) {
-        WaitForSingleObject(rd, 2000);   /* bounded: Sleep(20) worst case */
+        if (WaitForSingleObject(rd, 2000) != WAIT_OBJECT_0) {
+            /* Bounded wait expired WITHOUT the pump exiting — it is
+             * stuck inside a vendor call holding the lock (review
+             * finding 2). Proceeding is safe BECAUSE the lock follows:
+             * teardown blocks on it and never reaches FreeLibrary
+             * under live vendor code; the parent's kill-on-close job
+             * reaps the lingering child. */
+            stage("read pump did not exit in 2 s — teardown will block "
+                  "on the vendor lock until it does");
+        }
         CloseHandle(rd);
     }
 
-    /* Teardown order — mirrors the in-proc transport contract
-     * (worker quiesce BEFORE vendor close/unload). Channel and device
-     * are both written by the control pump via InterlockedExchange;
-     * both are best-effort and both are GUARDED — if the vendor open
-     * never completed, neither close call is valid. */
+    /* Teardown under the vendor lock (review finding 2): acquiring it
+     * proves no read-pump vendor call is in flight. Channel and device
+     * are both GUARDED — if the vendor open never completed, neither
+     * close call is valid. A successful OP_DISCONNECT already cleared
+     * the channel, so this disconnect runs only when the parent never
+     * disconnected (or the vendor refused and a retry is warranted).
+     */
+    EnterCriticalSection(&g_vendor_lock);
     const unsigned long ch = g_channel;
     if (ch != 0) {
+        stage("teardown: disconnect channel %lu", ch);
         g_disconnect(ch);
     }
     const unsigned long dev = g_device_id;
@@ -467,6 +562,8 @@ int main(int argc, char* argv[])
         g_close(dev);
     }
     FreeLibrary(g_module);
+    LeaveCriticalSection(&g_vendor_lock);
+    DeleteCriticalSection(&g_vendor_lock);
 
     if (g_pipe != INVALID_HANDLE_VALUE) CloseHandle(g_pipe);
     UnmapViewOfFile(g_ring);
