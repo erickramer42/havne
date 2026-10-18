@@ -12,6 +12,7 @@ extern "C" {
 #include "qttune/internal.h"
 #include "qttune/signals.h"
 #include "qttune/signal_sets.h"
+#include "qttune/profile.h"
 }
 
 namespace {
@@ -553,3 +554,100 @@ TEST(CoreTest, DestroyAutoClosesActiveSession)
     wait_for([&frames]() { return frames.load() >= 1; }, 5000);
     EXPECT_EQ(qttune_session_destroy(session), QT_OK);
 }
+
+// ---------------------------------------------------------------------------
+// ADR-0013 slice 1: profile registry and session-level selection
+// ---------------------------------------------------------------------------
+
+TEST(CoreTest, ProfileLookupRawReturnsOkWithNullSet) {
+    /* THE contract the null-profile design lives or dies on: "raw" is
+     * REGISTERED with a NULL set. Lookup success + null is distinct
+     * from lookup failure — presence and content are separate axes,
+     * and the first sketch of this feature collapsed them. */
+    const QttuneSignalSet* set = nullptr;
+    EXPECT_EQ(qttune_profile_lookup("raw", &set), QT_OK);
+    EXPECT_EQ(set, nullptr);
+}
+
+TEST(CoreTest, ProfileLookupMockReturnsMockSet) {
+    const QttuneSignalSet* set = nullptr;
+    EXPECT_EQ(qttune_profile_lookup("mock", &set), QT_OK);
+    EXPECT_EQ(set, qttune_mock_signal_set());
+}
+
+TEST(CoreTest, ProfileLookupUnknownNameFailsWithoutTouchingOut) {
+    QttuneSignalSet sentinel = {};
+    const QttuneSignalSet* set = &sentinel;
+    EXPECT_EQ(qttune_profile_lookup("no-such-profile", &set),
+              QT_ERR_NO_TRANSPORT);
+    EXPECT_EQ(set, &sentinel);   /* untouched on failure — caller may
+                                    rely on its own initialization */
+}
+
+TEST(CoreTest, ProfileLookupRejectsNullArguments) {
+    const QttuneSignalSet* set = nullptr;
+    EXPECT_EQ(qttune_profile_lookup(nullptr, &set), QT_ERR_NULL_ARGUMENT);
+    EXPECT_EQ(qttune_profile_lookup("raw", nullptr), QT_ERR_NULL_ARGUMENT);
+    EXPECT_EQ(qttune_profile_register(nullptr, nullptr), QT_ERR_NULL_ARGUMENT);
+}
+
+TEST(CoreTest, ProfileRegisterOverwritesLastWins) {
+    /* Duplicate-registration semantics: last wins, matching the URI
+     * grammar's duplicate-key rule. Registered under a throwaway name
+     * so no built-in is disturbed. */
+    QttuneSignalSet mine = {};
+    EXPECT_EQ(qttune_profile_register("test-profile-tmp", &mine), QT_OK);
+    const QttuneSignalSet* got = nullptr;
+    EXPECT_EQ(qttune_profile_lookup("test-profile-tmp", &got), QT_OK);
+    EXPECT_EQ(got, &mine);
+
+    EXPECT_EQ(qttune_profile_register("test-profile-tmp", nullptr), QT_OK);
+    got = &mine;
+    EXPECT_EQ(qttune_profile_lookup("test-profile-tmp", &got), QT_OK);
+    EXPECT_EQ(got, nullptr);
+}
+
+TEST(CoreTest, MockSessionSelectsMockSet) {
+    /* Scheme default: mock:// → the mock profile's set. */
+    qttune_session_t* session = nullptr;
+    ASSERT_EQ(qttune_session_create("mock://profile-default", &session),
+              QT_OK);
+    EXPECT_EQ(qttune_session_signal_set(session), qttune_mock_signal_set());
+    qttune_session_destroy(session);
+}
+
+TEST(CoreTest, ProfileOverrideRawYieldsNullSet) {
+    /* ?profile=raw on a mock session: override to the null profile.
+     * ALSO the probe for mock-transport query tolerance (ASSUMED —
+     * mock_transport.cpp not reviewed): if this goes red, the mock is
+     * choking on the query, and the fix belongs THERE, not here. */
+    qttune_session_t* session = nullptr;
+    ASSERT_EQ(qttune_session_create("mock://x?profile=raw", &session),
+              QT_OK);
+    EXPECT_EQ(qttune_session_signal_set(session), nullptr);
+    qttune_session_destroy(session);
+}
+
+TEST(CoreTest, UnknownProfileRejectedAtCreate) {
+    /* Strict grammar: an unknown name is QT_ERR_NO_TRANSPORT at
+     * session_create — cross-platform, scheme-independent. */
+    qttune_session_t* session = nullptr;
+    EXPECT_EQ(qttune_session_create("mock://x?profile=bogus", &session),
+              QT_ERR_NO_TRANSPORT);
+    EXPECT_EQ(session, nullptr);
+}
+
+#ifdef _WIN32
+TEST(CoreTest, UnknownProfileRejectedBeforeDllLoad) {
+    /* Ordering discriminator, Windows-only: bogus profile on a
+     * NONEXISTENT DLL path. Profile validation must run BEFORE
+     * transport attach — so this yields QT_ERR_NO_TRANSPORT (3), not
+     * QT_ERR_LOAD_FAILED (7). If it ever returns 7, the profile check
+     * moved after the attach and the fail-fast contract broke. */
+    qttune_session_t* session = nullptr;
+    EXPECT_EQ(qttune_session_create(
+        "j2534://C:/qttune-definitely-not-a-real-dll.dll?profile=bogus",
+        &session), QT_ERR_NO_TRANSPORT);
+    EXPECT_EQ(session, nullptr);
+}
+#endif

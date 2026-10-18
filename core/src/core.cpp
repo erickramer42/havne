@@ -1,9 +1,10 @@
 // File/layer: core/src/core.cpp | C++17, Qt-free, CI-validated headless build
-// Testing: Core tests must pass after close/destroy split + frame ABI change
+// Testing: test_core — lifecycle unchanged; new profile-selection cases
 
 #include "qttune/version.h"
 #include "qttune/core.h"
 #include "qttune/internal.h"
+#include "qttune/profile.h"
 #include "session.h"
 
 #include <atomic>
@@ -15,6 +16,48 @@
 
 namespace {
     std::atomic<bool> g_initialized{false};
+
+    /* Extract the LAST value of `key` from the query portion of a URI
+     * body (text after "scheme://"). TOLERANT scanner: full structural
+     * validation belongs to each transport's strict parser, which runs
+     * after this — this only answers "did the user name a profile?"
+     * Duplicate keys: last occurrence wins, matching the grammar.
+     * Returns false when absent, or when the value is empty or too
+     * long to be a registry name. */
+    bool query_value(const char* rest, const char* key,
+                     char* out_val, size_t out_cap)
+    {
+        const char* q = strchr(rest, '?');
+        if (q == nullptr) {
+            return false;
+        }
+        const size_t key_len = strlen(key);
+        bool found = false;
+        const char* cur = q + 1;
+        while (*cur != '\0') {
+            const char* amp = strchr(cur, '&');
+            const char* end = (amp != nullptr) ? amp : cur + strlen(cur);
+            const char* eq = static_cast<const char*>(
+                memchr(cur, '=', static_cast<size_t>(end - cur)));
+            if (eq != nullptr &&
+                static_cast<size_t>(eq - cur) == key_len &&
+                strncmp(cur, key, key_len) == 0) {
+                const char* val = eq + 1;
+                const size_t val_len = static_cast<size_t>(end - val);
+                if (val_len == 0 || val_len >= out_cap) {
+                    return false;
+                }
+                memcpy(out_val, val, val_len);
+                out_val[val_len] = '\0';
+                found = true;
+            }
+            if (amp == nullptr) {
+                break;
+            }
+            cur = amp + 1;
+        }
+        return found;
+    }
 } // namespace
 
 extern "C" {
@@ -65,21 +108,48 @@ qttune_status_t qttune_session_create(
         return QT_ERR_OUT_OF_MEMORY;
     }
 
-    qttune_status_t status = QT_ERR_NO_TRANSPORT;
-
+    /* Scheme routing — unchanged from Phase 3 (j2534 is Win32-only). */
 #ifdef _WIN32
-    /* URI routing table — Phase 3. mock:// (any platform),
-     * j2534:// (Win32 only; non-Windows stub returns
-     * QT_ERR_NOT_IMPLEMENTED if ever reached, and the guard keeps
-     * core's cross-platform behavior byte-identical on Linux/mac). */
-    if (strncmp(transport_uri, "j2534://", 8) == 0) {
-        status = qttune_j2534_transport_attach(*out_session,
-                                               transport_uri);
+    const bool is_j2534 = strncmp(transport_uri, "j2534://", 8) == 0;
+#else
+    const bool is_j2534 = false;
+#endif
+    const bool is_mock = strncmp(transport_uri, "mock://", 7) == 0;
+    if (!is_mock && !is_j2534) {
+        delete *out_session;
+        *out_session = nullptr;
+        return QT_ERR_NO_TRANSPORT;
+    }
+
+    /* ADR-0013 profile selection: default per scheme, ?profile=
+     * override. Resolved and validated BEFORE any transport attach so
+     * an unknown name fails fast with no DLL load and no discovery.
+     * Slice-1 default for j2534 is "raw" (obd2 arrives with the
+     * multi-PID scheduler). */
+    const char* rest = transport_uri + (is_mock ? 7 : 8);
+    char profile_name[64];
+    const char* chosen = nullptr;
+    if (query_value(rest, "profile", profile_name, sizeof(profile_name))) {
+        chosen = profile_name;
+    } else {
+        chosen = is_mock ? "mock" : "raw";
+    }
+
+    const QttuneSignalSet* profile_set = nullptr;
+    if (qttune_profile_lookup(chosen, &profile_set) != QT_OK) {
+        delete *out_session;
+        *out_session = nullptr;
+        return QT_ERR_NO_TRANSPORT;   /* unknown profile name — strict */
+    }
+
+    qttune_status_t status = QT_ERR_NO_TRANSPORT;
+#ifdef _WIN32
+    if (is_j2534) {
+        status = qttune_j2534_transport_attach(*out_session, transport_uri);
     } else
 #endif
-    if (strncmp(transport_uri, "mock://", 7) == 0) {
-        status = qttune_mock_transport_attach(*out_session,
-                                              transport_uri);
+    if (is_mock) {
+        status = qttune_mock_transport_attach(*out_session, transport_uri);
     }
 
     if (status != QT_OK) {
@@ -87,6 +157,7 @@ qttune_status_t qttune_session_create(
         *out_session = nullptr;
         return status;
     }
+    (*out_session)->active_signal_set = profile_set;
     return QT_OK;
 }
 
@@ -111,10 +182,7 @@ qttune_status_t qttune_session_close(qttune_session_t* session)
     }
 
     /* First-closer wins the CAS; everyone else gets a clean error on
-     * LIVE memory. (Fixed 2026-10-14: close used to `delete` the
-     * session here, so the flag check itself read freed memory on a
-     * second call — UB that only survived because the allocator didn't
-     * reuse the slot within the test's lifetime.) */
+     * LIVE memory. */
     bool expected = false;
     if (!session->closed.compare_exchange_strong(expected, true)) {
         return QT_ERR_SESSION_CLOSED;
@@ -122,8 +190,6 @@ qttune_status_t qttune_session_close(qttune_session_t* session)
 
     if (session->transport != nullptr) {
         session->transport->ops->detach(session, session->transport->impl);
-        /* detach() frees the transport wrapper; NULL for defense even
-         * though the closed flag already gates every other path. */
         session->transport = nullptr;
     }
 
@@ -132,9 +198,6 @@ qttune_status_t qttune_session_close(qttune_session_t* session)
         session->callbacks.clear();
     }
 
-    /* NOTE: no `delete` — destruction moved to qttune_session_destroy
-     * (fclose/free split, see core.h). The session object stays
-     * allocated so the closed flag remains readable; destroy() frees it. */
     return QT_OK;
 }
 
@@ -144,10 +207,7 @@ qttune_status_t qttune_session_destroy(qttune_session_t* session)
         return QT_OK;   /* free(nullptr) semantics */
     }
 
-    /* Auto-close if still open: safe because close() joins the worker
-     * before returning, so no transport thread outlives the delete. */
     (void)qttune_session_close(session);
-
     delete session;
     return QT_OK;
 }

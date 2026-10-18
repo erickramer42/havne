@@ -18,6 +18,8 @@
 #include "qttune/j2534.h"
 #include "qttune/core.h"
 #include "qttune/j2534_ptypes.h"
+#include "qttune/profile.h"
+#include "qttune/signal_sets.h"
 
 #ifdef _WIN32
 #include <windows.h>
@@ -615,6 +617,46 @@ TEST_F(J2534AdoptionTest, TxidOverrideChangesRequestTarget)
 
     EXPECT_EQ(qttune_session_close(session), QT_OK);
     qttune_session_destroy(session);
+}
+
+// ---------------------------------------------------------------------------
+// ADR-0013 slice 1: j2534 profile selection (default raw, ?profile=
+// override rides the strict grammar through parse_query)
+// ---------------------------------------------------------------------------
+
+TEST(J2534StreamTest, DefaultProfileIsRaw)
+{
+    /* j2534:// with no override: null active set — Log page only.
+     * Create/destroy without start: the assertion is about selection,
+     * not streaming, so no filter coupling is needed. */
+    const std::string uri = std::string("j2534://") + FAKE_J2534_DLL_PATH;
+    qttune_session_t* session = nullptr;
+    ASSERT_EQ(qttune_session_create(uri.c_str(), &session), QT_OK);
+    EXPECT_EQ(qttune_session_signal_set(session), nullptr);
+    qttune_session_destroy(session);
+}
+
+TEST(J2534StreamTest, ProfileOverrideMockSelectsMockSet)
+{
+    /* The override crosses the transport boundary: the SAME j2534
+     * session can carry a named profile's set. Also proves parse_query
+     * admits the profile key alongside every other strict key. */
+    const std::string uri = std::string("j2534://") + FAKE_J2534_DLL_PATH
+                          + "?profile=mock";
+    qttune_session_t* session = nullptr;
+    ASSERT_EQ(qttune_session_create(uri.c_str(), &session), QT_OK);
+    EXPECT_EQ(qttune_session_signal_set(session), qttune_mock_signal_set());
+    qttune_session_destroy(session);
+}
+
+TEST(J2534StreamTest, UnknownProfileRejectedAtCreate)
+{
+    const std::string uri = std::string("j2534://") + FAKE_J2534_DLL_PATH
+                          + "?profile=bogus";
+    qttune_session_t* session = nullptr;
+    EXPECT_EQ(qttune_session_create(uri.c_str(), &session),
+              QT_ERR_NO_TRANSPORT);
+    EXPECT_EQ(session, nullptr);
 }
 
 } // namespace

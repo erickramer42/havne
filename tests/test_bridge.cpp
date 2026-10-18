@@ -620,3 +620,34 @@ TEST(BridgeTest, AsyncConnectCompletesOffGuiThread)
     bridge.disconnectSession();
     EXPECT_FALSE(bridge.connected());
 }
+
+// ---------------------------------------------------------------------------
+// ADR-0013 slice 1: the bridge renders the SESSION's profile, not a
+// hardcoded set (Known Issue #21)
+// ---------------------------------------------------------------------------
+
+TEST(BridgeTest, RawProfileLeavesSignalModelEmpty)
+{
+    /* A raw session after a mock session must CLEAR the signal model.
+     * Regression shape: setSignalSet used to early-return on NULL
+     * without clearing, so a raw session displayed the PREVIOUS
+     * session's rows with no live updates — stale data posing as live.
+     * Frames still flow to the Log page; decode alone is silenced. */
+    QtTuneBridge bridge;
+    ASSERT_TRUE(bridge.connectSession("mock://profile-then-raw").isEmpty());
+    ASSERT_TRUE(spinUntil(
+        [&bridge]() { return bridge.signalModel()->rowCount() > 0; }, 5000));
+    EXPECT_GT(bridge.signalModel()->rowCount(), 0);
+
+    bridge.disconnectSession();
+
+    ASSERT_TRUE(bridge.connectSession("mock://profile-raw-stage2?profile=raw")
+                    .isEmpty());
+    /* Frames keep arriving (mock streams regardless of profile) —
+     * the Log page stays live while LiveView stays empty. */
+    ASSERT_TRUE(spinUntil(
+        [&bridge]() { return bridge.frameCount() > 0; }, 5000));
+    EXPECT_EQ(bridge.signalModel()->rowCount(), 0);
+
+    bridge.disconnectSession();
+}

@@ -33,6 +33,7 @@ Dates are commit dates.
 | 2026-10-16 | Issue #22 + IoCtl export-spelling fix; first real-vendor session (VX connect cycle) | `eacf1d0` |
 | 2026-10-16 | First formal BENCH session: OBDX Pro VX, quiet bus — filter shape accepted, soak clean | `e60325b` |
 | 2026-10-17 | Issue #24: surrogate vendor-call serialization, single disconnect; IoCtl dllexport strip; GetDisconnectCount hook | `<hash>` |
+| 2026-10-17 | ADR-0013 slice 1: profile registry, raw profile, bridge decoupling (#21 closed) | `<hash>` |
 
 ## Lessons learned
 
@@ -338,3 +339,20 @@ evidence lives only in `%TEMP%\qttune-surrogate.log` — OP_DISCONNECT
 present, teardown-disconnect absent after clean closes — a manual
 check no automated tier can currently make. The check is cheap;
 the discipline is remembering to run it.
+
+**2026-10-18 — ADR-0013 slice 1 (profiles):** three lessons. (1) **Presence
+and content are separate axes:** the first design registered "raw" as a NULL
+signal set and validated profile names with a NULL check — which cannot
+distinguish "registered, empty" from "not registered" and would have rejected
+the feature's own headline case (`?profile=raw`). The registry lookup returns
+a status with an out-param instead; the pin
+(ProfileLookupRawReturnsOkWithNullSet) exists so this collapse can't recur.
+(2) **Fail-fast placement is testable, not just reviewable:**
+UnknownProfileRejectedBeforeDllLoad discriminates QT_ERR_NO_TRANSPORT from
+QT_ERR_LOAD_FAILED by pairing a bogus profile with a nonexistent DLL path —
+ordering contracts deserve an observable discriminator, not a comment.
+(3) **Null isn't an error anymore:** setSignalSet's NULL early-return was
+correct when NULL meant "caller bug"; the moment NULL became the raw
+profile's legitimate value it became a stale-data bug — a raw session
+following a mock session rendered dead mock rows as if live. When a
+sentinel becomes valid state, every guard on it is a bug until audited.

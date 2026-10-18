@@ -1,6 +1,7 @@
 # core/CMakeLists.txt
 add_library(qttune-core STATIC
     src/core.cpp
+    src/profile_registry.cpp
     src/mock_transport.cpp
     src/j2534_loader.cpp
     src/j2534_transport.cpp

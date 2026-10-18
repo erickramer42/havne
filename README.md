@@ -38,6 +38,11 @@ details.
   - Optional `?filter=`, `?txid=` and `?poll=` URI parameters select the
     CAN IDs and run a Mode-01 request loop; received frames are
     header-stripped and carry their arbitration ID.
+- **Protocol profiles.** Sessions select their signal-decoding
+  profile from the URI: `mock://` defaults to the mock set,
+  `j2534://` defaults to `raw` (frames stream to the log, nothing
+  is decoded), and `?profile=<name>` overrides either
+  ([ADR-0013](docs/adr/0013-protocol-profiles.md)).
 - **Mock transport.** Simulated engine data, so the app runs with no
   hardware.
 - **Stable C ABI.** Other front ends (native mobile, Flutter,

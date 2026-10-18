@@ -1,6 +1,6 @@
 # QtTune — Project Status
 
-**Updated:** 2026-10-16 · **Version:** v0.3.0-dev (last tag v0.2.0) ·
+**Updated:** 2026-10-17 · **Version:** v0.3.0-dev (last tag v0.2.0) ·
 [![CI](https://github.com/erickramer42/qttune/actions/workflows/ci.yml/badge.svg)](https://github.com/erickramer42/qttune/actions/workflows/ci.yml)
 
 This file covers the project as it stands: what works, what comes
@@ -26,6 +26,14 @@ adapter, comes next.
     holds the same lock across disconnect/close/FreeLibrary, so a
     stuck vendor call becomes a job-reaped linger, never an unmap
     under live vendor code
+  - Profile selection (ADR-0013 slice 1, 2026-10-17): a
+    string-keyed registry selects the session's signal set —
+    `mock://` defaults to the mock set, `j2534://` defaults to
+    `raw` (no decode, log only), and `?profile=<name>` overrides
+    either. Unknown names are rejected at session_create, before
+    any transport attach or DLL load. The bridge decodes the
+    session's active set instead of the hard-wired mock set (#21
+    closed).
   - Discovery finds the real installed drivers, and the Settings page
     can pick one and connect.
 - **Not yet:**
@@ -39,10 +47,9 @@ adapter, comes next.
     open (status 34) with its adapter absent. The run sheet template is
     [docs/bench-sessions/bench-runsheet.md](docs/bench-sessions/bench-runsheet.md).
   - Any live vehicle.
-  - J2534 data in LiveView, which needs the profile layer — the
-    `obd2` signal set and a way to select the signal set per
-    transport (ADR-0013, #21). Designed 2026-10-16; not yet
-    implemented.
+  - J2534 data in LiveView: profile selection is in (ADR-0013 slice
+    1), but a `j2534://` session still decodes nothing — the `obd2`
+    signal set and multi-PID scheduler are slice 2.
   - **Tests:** 95 ctest cases, passing locally (Windows/MSVC 2022)
     and in CI on all three platforms. The cross-arch routing case
     skips unless its environment variables are set. J2534 suites
@@ -148,12 +155,14 @@ Contracts along this path:
     #6 partially informed); talking-bus items (#2, #3, #4, #5, #7)
     still open
   - first live, read-only vehicle session
-- [ ] **Protocol profiles** (ADR-0013): `raw` and `obd2` profiles,
-      the profile registry with the `?profile=` override, the
-      multi-PID scheduler replacing the single-poll loop, and the
-      bridge reading the active signal set instead of hard-wiring
-      the mock set (#21, #15); later `obd2` probe phase and
-      `uds-generic`
+- [ ] **Protocol profiles** (ADR-0013):
+  - [x] slice 1: profile registry, `raw` profile, `?profile=`
+        override, bridge reads the session's active signal set
+        instead of the hard-wired mock set (#21 closed 2026-10-17)
+  - [ ] slice 2: the `obd2` signal set and the multi-PID scheduler
+        replacing the single-poll loop (paired with #25, the
+        read-rate cap — one workstream per ADR-0013)
+  - [ ] `obd2` PID probe phase and `uds-generic`
 - [ ] **Phase 4, record-replay transport:** capture fixtures, then play
       them back deterministically through the same frame API
 - [ ] **Tag v0.3.0** and bump the version string (#16)
@@ -264,14 +273,6 @@ an issue is resolved it is removed, and its number is not reused.
     since those are ISO 9141/KWP init calls. If a BENCH device needs
     them, give them a dedicated wire form rather than relaxing the
     whitelist.
-21. **LiveView only knows the mock signal set.** The bridge hard-wires
-    `qttune_mock_signal_set()` in `connectSession` and
-    `handleFrameInternal`, so J2534 frames reach the Log page but no
-    signals decode. The fix is the protocol-profile layer
-    (ADR-0013): `raw` and `obd2` profiles with a string-keyed
-    registry, `?profile=` override, and the bridge reading the
-    active signal set over the ABI instead of choosing one. Close
-    this issue in the profile-layer commit, not piecemeal.
 22. **J2534 connect blocked the GUI thread; the pre-fix surrogate
     startup ran vendor open before the pipe connect. Fixed 2026-10-16.** Observed with the OBDX Pro VT/VX drivers installed and no adapter: the picker
     row click called the synchronous connect slot (selection was an

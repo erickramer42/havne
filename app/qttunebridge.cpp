@@ -8,6 +8,7 @@
 #include "qttune/version.h"
 #include "qttune/signals.h"
 #include "qttune/j2534.h"
+#include "qttune/profile.h"
 
 #include <QMetaObject>
 #include <QByteArray>
@@ -144,10 +145,18 @@ QHash<int, QByteArray> SignalListModel::roleNames() const
     };
 }
 
-// FIX: typed parameter — no reinterpretation of a void* at the call site.
 void SignalListModel::setSignalSet(const QttuneSignalSet* set)
 {
-    if (!set || !set->defs) return;
+    // NULL/empty is a VALID state now (ADR-0013 "raw"): clear the
+    // model instead of silently keeping the previous session's rows.
+    if (set == nullptr || set->defs == nullptr || set->count == 0) {
+        beginResetModel();
+        m_entries.clear();
+        m_subscribedCount = 0;
+        endResetModel();
+        m_clock.restart();
+        return;
+    }
 
     beginResetModel();
     m_entries.clear();
@@ -164,8 +173,6 @@ void SignalListModel::setSignalSet(const QttuneSignalSet* set)
     }
     endResetModel();
 
-    // Fallback timestamp source restarts per (re)connect — history and the
-    // clock zero together, so replayed sessions never mix clock epochs.
     m_clock.restart();
 }
 
@@ -263,7 +270,6 @@ QtTuneBridge::QtTuneBridge(QObject* parent)
 
     connect(m_coalesceTimer, &QTimer::timeout, this, [this]() {
         if (!m_stagingBuffer.empty()) {
-            // Default timestampMs=-1: model stamps from its own clock.
             m_signalModel->updateValues(m_stagingBuffer);
             m_stagingBuffer.clear();
             ++m_signalBatchCount;
@@ -378,8 +384,7 @@ QString QtTuneBridge::connectCoreOnly(const QString& uri,
 // GUI-thread half: state application after a successful connect.
 // Factored out of connectSession so the sync and async paths apply
 // IDENTICAL state (parity by construction, not by care).
-void QtTuneBridge::applyConnectedState(qttune_session_t* session,
-                                        const QString& uri)
+void QtTuneBridge::applyConnectedState(qttune_session_t* session, const QString& uri)
 {
     m_session = session;
     m_currentUri = uri;
@@ -388,7 +393,7 @@ void QtTuneBridge::applyConnectedState(qttune_session_t* session,
     m_currentFrameCount = 0;
     m_droppedFrames.store(0, std::memory_order_relaxed);
     m_lastReportedDropped = 0;
-    m_signalModel->setSignalSet(qttune_mock_signal_set());
+    m_signalModel->setSignalSet(qttune_session_signal_set(session));
     m_coalesceTimer->start(100);
     emit connectedChanged(true);
     emit framesReset();
@@ -535,35 +540,28 @@ void QtTuneBridge::handleFrameInternal(const qttune_frame_t* frame)
     m_sourceModel->appendFrame(vm);
     ++m_currentFrameCount;
 
-    // Decode signals into staging buffer — latest value per signal ID wins.
-    // FIX: was clear()-and-refill (last frame's snapshot), now merges
-    // across frames within the 100ms coalescing window. FIX: was hardcoded
-    // length 8; uses actual payload length so CAN-FD / short frames decode
-    // correctly and out-of-range signals fail cleanly in the decoder.
-    //
-    // F2 message gate: a signal only decodes from the arbitration ID it
-    // declares. Previously EVERY signal decoded against EVERY frame —
-    // with real multi-ID bus traffic that silently corrupts every value.
-    // The mock's every-16th-frame 29-bit diagnostic traffic now exercises
-    // the rejection path continuously.
-    const QttuneSignalSet* set = qttune_mock_signal_set();
-    for (uint32_t i = 0; i < set->count; ++i) {
-        const QttuneSignalDef& def = set->defs[i];
-        if (def.message_id != frame->arbitration_id) {
-            continue;   // signal rides a different CAN message
-        }
-        float val = 0.0f;
-        if (qttune_decode_signal(&def, frame->data, len, &val) == 0) {
-            bool merged = false;
-            for (auto& staged : m_stagingBuffer) {
-                if (staged.first == def.id) {
-                    staged.second = val;   // overwrite with newest sample
-                    merged = true;
-                    break;
-                }
+    // ADR-0013: decode against the SESSION's profile set. NULL means
+    // the raw profile — frames stream to the Log page, decode skipped.
+    const QttuneSignalSet* set = qttune_session_signal_set(m_session);
+    if (set != nullptr) {
+        for (uint32_t i = 0; i < set->count; ++i) {
+            const QttuneSignalDef& def = set->defs[i];
+            if (def.message_id != frame->arbitration_id) {
+                continue;   // signal rides a different CAN message
             }
-            if (!merged) {
-                m_stagingBuffer.emplace_back(def.id, val);
+            float val = 0.0f;
+            if (qttune_decode_signal(&def, frame->data, len, &val) == 0) {
+                bool merged = false;
+                for (auto& staged : m_stagingBuffer) {
+                    if (staged.first == def.id) {
+                        staged.second = val;   // overwrite with newest sample
+                        merged = true;
+                        break;
+                    }
+                }
+                if (!merged) {
+                    m_stagingBuffer.emplace_back(def.id, val);
+                }
             }
         }
     }

@@ -287,6 +287,15 @@ qttune_status_t parse_query(const char* query, j2534_uri_params* p)
                 return QT_ERR_NO_TRANSPORT;
             }
             p->tx_id = v;
+        } else if (key_len == 7 && strncmp(cur, "profile", 7) == 0) {
+            /* ADR-0013: the profile NAME rides in the URI, but
+             * selection/validation is core's — it runs in
+             * qttune_session_create BEFORE this parser and before any
+             * DLL load. Accept any nonempty value (<= 63 chars);
+             * unknown names have already failed session_create. */
+            if (val_len == 0 || val_len > 63) {
+                return QT_ERR_NO_TRANSPORT;
+            }
         } else if (key_len == 4 && strncmp(cur, "poll", 4) == 0) {
             unsigned long v = 0;
             if (!parse_number(val, val_len, &v) ||
