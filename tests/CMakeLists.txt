@@ -1,4 +1,3 @@
-# tests/CMakeLists.txt
 find_package(GTest QUIET)
 
 if(NOT GTest_FOUND)
@@ -88,6 +87,15 @@ if(NOT QTTUNE_BUILD_CORE_ONLY)
     get_filename_component(QT_BIN_DIR "${Qt6Core_DIR}/../../bin" REALPATH)
 endif()
 
+# TIMEOUT POLICY (review 2026-10-17, finding 1 fallout): every J2534
+# suite carries a per-test 30s ceiling — the slowest legitimate case
+# (cross-arch TimedOutOp ~3.5s, BlockedVendorOpen ~2.5s) has near-10x
+# headroom, so a slow CI VM cannot false-alarm, but a reintroduced
+# hang (the F1 flush class) becomes a bounded "Failed (Timeout)"
+# instead of a wedged runner. Non-J2534 suites keep ctest defaults —
+# no known hang surface there, and mock tests are sub-2s anyway.
+set(J2534_TEST_TIMEOUT_SECONDS 30)
+
 # J2534 discovery tests (Win32-only)
 if(WIN32)
     add_executable(test_j2534_discovery
@@ -100,7 +108,9 @@ if(WIN32)
     set_target_properties(test_j2534_discovery PROPERTIES
         VS_DEBUGGER_WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
     )
-    gtest_discover_tests(test_j2534_discovery)
+    gtest_discover_tests(test_j2534_discovery
+        PROPERTIES TIMEOUT ${J2534_TEST_TIMEOUT_SECONDS}
+    )
 endif()
 
 # Fake J2534 DLL target (Windows only, HARNESS tier)
@@ -123,23 +133,30 @@ if(WIN32)
         OUTPUT_NAME "fake_j2534"
         RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/$<CONFIG>"
     )
-# Support PassthruIoCtl spelling
-    add_library(fake_j2534_spec SHARED
+
+    # LEGACY-spelling fixture: the fallback-vendor case — exports the
+    # historic 'PassThruIoCtl' spelling via def alias while the shared
+    # source defines the spec spelling. The everyday fake_j2534 above
+    # exports the spec spelling directly, so primary resolution is what
+    # every default test exercises and THIS fixture is what pins the
+    # fallback resolver. (Was 'fake_j2534_spec' — renamed 2026-10-18
+    # because the name overstated its role.)
+    add_library(fake_j2534_legacy SHARED
         fake_j2534.cpp
-        fake_j2534_spec.def
+        fake_j2534_legacy.def
     )
 
-    target_compile_definitions(fake_j2534_spec PRIVATE
+    target_compile_definitions(fake_j2534_legacy PRIVATE
         TEST_HOOKS_ENABLED
     )
 
-    target_include_directories(fake_j2534_spec PRIVATE
+    target_include_directories(fake_j2534_legacy PRIVATE
         ${CMAKE_SOURCE_DIR}/core/include
     )
 
-    set_target_properties(fake_j2534_spec PROPERTIES
+    set_target_properties(fake_j2534_legacy PROPERTIES
         PREFIX ""
-        OUTPUT_NAME "fake_j2534_spec"
+        OUTPUT_NAME "fake_j2534_legacy"
         RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/$<CONFIG>"
     )
 endif()
@@ -156,11 +173,13 @@ if(WIN32)
     )
     target_compile_definitions(test_j2534_load PRIVATE
         FAKE_J2534_DLL_PATH="$<TARGET_FILE:fake_j2534>"
-        FAKE_J2534_SPEC_DLL_PATH="$<TARGET_FILE:fake_j2534_spec>"
+        FAKE_J2534_LEGACY_DLL_PATH="$<TARGET_FILE:fake_j2534_legacy>"
     )
     add_dependencies(test_j2534_load fake_j2534)
-    add_dependencies(test_j2534_load fake_j2534_spec)
-    gtest_discover_tests(test_j2534_load)
+    add_dependencies(test_j2534_load fake_j2534_legacy)
+    gtest_discover_tests(test_j2534_load
+        PROPERTIES TIMEOUT ${J2534_TEST_TIMEOUT_SECONDS}
+    )
 endif()
 
 # J2534 end-to-end stream tests (Win32-only, HARNESS tier)
@@ -176,7 +195,9 @@ if(WIN32)
         FAKE_J2534_DLL_PATH="$<TARGET_FILE:fake_j2534>"
     )
     add_dependencies(test_j2534_stream fake_j2534)
-    gtest_discover_tests(test_j2534_stream)
+    gtest_discover_tests(test_j2534_stream
+        PROPERTIES TIMEOUT ${J2534_TEST_TIMEOUT_SECONDS}
+    )
 endif()
 
 # J2534 surrogate host tests (Win32-only, HARNESS tier — real process
@@ -209,7 +230,9 @@ if(WIN32)
         COMMENT "Deploying surrogate exe next to test_j2534_surrogate"
     )
 
-    gtest_discover_tests(test_j2534_surrogate)
+    gtest_discover_tests(test_j2534_surrogate
+        PROPERTIES TIMEOUT ${J2534_TEST_TIMEOUT_SECONDS}
+    )
 endif()
 
 # J2534 routing tests (Win32-only, HARNESS tier — backend selection by
@@ -227,5 +250,7 @@ if(WIN32)
         FAKE_J2534_DLL_PATH="$<TARGET_FILE:fake_j2534>"
     )
     add_dependencies(test_j2534_routing fake_j2534)
-    gtest_discover_tests(test_j2534_routing)
+    gtest_discover_tests(test_j2534_routing
+        PROPERTIES TIMEOUT ${J2534_TEST_TIMEOUT_SECONDS}
+    )
 endif()

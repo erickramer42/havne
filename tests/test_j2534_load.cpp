@@ -1,7 +1,9 @@
 // File/layer: tests/test_j2534_load.cpp | GTest, HARNESS tier
 // Testing: Exercises real LoadLibraryEx/export-resolution/open/close
-//          against the fake vendor DLL — no hardware, no polling.
-// The fake DLL path is baked in by CMake ($<TARGET_FILE:fake_j2534>).
+//          against the fake vendor DLLs — no hardware, no polling.
+//          The everyday fake (spec spelling) path is baked in by CMake
+//          ($<TARGET_FILE:fake_j2534>); the legacy fixture (fallback
+//          spelling) via FAKE_J2534_LEGACY_DLL_PATH.
 
 #include <gtest/gtest.h>
 
@@ -112,27 +114,33 @@ TEST_F(FakeFixture, CloseNullIsSafeNoOp) {
     EXPECT_EQ(qttune_j2534_close(nullptr), QT_OK);
 }
 
-/* Legacy-spelling fallback (2026-10-16 VX incident family): the
- * legacy fixture exports 'PassThruIoCtl' ONLY — the fallback some
- * real vendors ship. Resolution must fall back to it and land on a
- * working function. The everyday fake exports the spec spelling;
- * primary resolution is pinned separately below. */
-TEST_F(FakeFixture, LegacySpellingPassThruIoCtlFallsBackAndWorks)
-    qttune_j2534_device_t dev{};
-    strncpy(dev.dll_path, FAKE_J2534_SPEC_DLL_PATH, sizeof(dev.dll_path) - 1);
-    strcpy(dev.vendor_name, "qttune-fake-spec");
-
-    /* The spec DLL is x64 in this tree — in-proc path, the same seam
-     * the surrogate child's resolve helper mirrors. */
+/* Spec-spelling PRIMARY resolution (the conformant-vendor case —
+ * what the OBDX Pro VX and every spec-following DLL ships): the
+ * everyday fake exports 'PassThruIoctl' DIRECTLY. Every routing and
+ * surrogate test exercises this resolution implicitly; this pins it
+ * by name, including the negative half (review finding 8): the
+ * legacy spelling must NOT resolve against this fixture, so a
+ * regression back to legacy-only lookup cannot hide behind a
+ * coincidental fallback. */
+TEST_F(FakeFixture, SpecSpellingPassThruIoctlResolvesAndWorks) {
     qttune_j2534_handle_t* h = nullptr;
-    ASSERT_EQ(qttune_j2534_open(&dev, &h), QT_OK);
+    ASSERT_EQ(qttune_j2534_open(&device, &h), QT_OK);
     ASSERT_NE(h, nullptr);
+
+    /* Negative assertion: the everyday fake must not export the
+     * legacy spelling — else this test degrades to the finding-8
+     * vacuous pass (either spelling works, nothing is pinned). */
+    HMODULE probe = LoadLibraryExA(FAKE_J2534_DLL_PATH, nullptr,
+                                    LOAD_WITH_ALTERED_SEARCH_PATH);
+    ASSERT_NE(probe, nullptr);
+    EXPECT_EQ(GetProcAddress(probe, "PassThruIoCtl"), nullptr);
+    FreeLibrary(probe);
 
     uint8_t out[4] = {};
     uint32_t out_len = 0;
     /* VBATT through the seam proves the resolved pointer is the right
      * function, not merely non-null. The fake gates on device_id=1,
-     * so the old loader that passed channel arg 0 would fail this. */
+     * so a loader that passed the channel arg would fail this. */
     EXPECT_EQ(qttune_j2534_ioctl(h, 0, QTTUNE_PT_IOCTL_READ_VBATT,
                                  nullptr, 0, out, sizeof(out), &out_len),
               QT_OK);
@@ -140,6 +148,34 @@ TEST_F(FakeFixture, LegacySpellingPassThruIoCtlFallsBackAndWorks)
     unsigned long vbatt = 0;
     memcpy(&vbatt, out, 4);
     EXPECT_EQ(vbatt, 13800ul);   /* the fake's fixed VBATT — right function */
+
+    EXPECT_EQ(qttune_j2534_close(h), QT_OK);
+}
+
+/* Legacy-spelling FALLBACK (2026-10-16 VX incident family): the
+ * legacy fixture exports 'PassThruIoCtl' ONLY — the historic
+ * spelling some real vendors still ship. Resolution must fall back
+ * to it and land on a working function. */
+TEST_F(FakeFixture, LegacySpellingPassThruIoCtlFallsBackAndWorks) {
+    qttune_j2534_device_t dev{};
+    strncpy(dev.dll_path, FAKE_J2534_LEGACY_DLL_PATH, sizeof(dev.dll_path) - 1);
+    strcpy(dev.vendor_name, "qttune-fake-legacy");
+
+    /* The legacy fixture is x64 in this tree — in-proc path, the same
+     * seam the surrogate child's resolve helper mirrors. */
+    qttune_j2534_handle_t* h = nullptr;
+    ASSERT_EQ(qttune_j2534_open(&dev, &h), QT_OK);
+    ASSERT_NE(h, nullptr);
+
+    uint8_t out[4] = {};
+    uint32_t out_len = 0;
+    EXPECT_EQ(qttune_j2534_ioctl(h, 0, QTTUNE_PT_IOCTL_READ_VBATT,
+                                 nullptr, 0, out, sizeof(out), &out_len),
+              QT_OK);
+    EXPECT_EQ(out_len, 4u);
+    unsigned long vbatt = 0;
+    memcpy(&vbatt, out, 4);
+    EXPECT_EQ(vbatt, 13800ul);
 
     EXPECT_EQ(qttune_j2534_close(h), QT_OK);
 }

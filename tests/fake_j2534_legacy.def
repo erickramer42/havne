@@ -1,4 +1,4 @@
-LIBRARY fake_j2534_spec
+LIBRARY fake_j2534_legacy
 EXPORTS
     PassThruOpen
     PassThruClose
@@ -18,3 +18,4 @@ EXPORTS
     GetLastFilterStart
     GetLastFilterStop
     SetFilterGating
+    

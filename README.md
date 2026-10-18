@@ -14,9 +14,11 @@ desktop (Windows, Linux, macOS) and mobile (Android, iOS). Desktop
 builds are validated; mobile builds are not yet.
 
 **Early development.** The full pipeline runs end to end against a
-simulated transport and against a fake J2534 vendor driver, but QtTune
-has **not yet communicated with a real vehicle**. Do not connect it to
-one expecting it to work. See [STATUS.md](STATUS.md) for details.
+simulated transport and against a fake J2534 vendor driver, and has
+connected to a real adapter on the bench (no vehicle attached). It
+has **not yet communicated with a real vehicle** — do not connect
+it to one expecting it to work. See [STATUS.md](STATUS.md) for
+details.
 
 ## Features
 
@@ -27,8 +29,12 @@ one expecting it to work. See [STATUS.md](STATUS.md) for details.
 - **J2534 Pass-Thru support (Windows).**
   - Finds installed vendor drivers.
   - Pick a device on the Settings page or enter a `j2534://` URI.
-  - 32-bit-only vendor drivers run in a bundled helper process, which
-    is selected automatically.
+  - 32-bit-only vendor drivers run in a separate helper process
+    (the surrogate), selected automatically by driver architecture.
+    On developer setups the surrogate is deployed next to the app at
+    build time; otherwise it is resolved via the
+    `QTTUNE_SURROGATE_EXE` environment variable
+    (see [docs/development.md](docs/development.md)).
   - Optional `?filter=`, `?txid=` and `?poll=` URI parameters select the
     CAN IDs and run a Mode-01 request loop; received frames are
     header-stripped and carry their arbitration ID.
@@ -71,7 +77,7 @@ Runtime requirements:
 
 ```sh
 # Windows (adjust the path to your Qt installation)
-cmake -B build -DCMAKE_PREFIX_PATH=C:/Qt/6.12.0/msvc2022_64
+cmake -B build -DCMAKE_PREFIX_PATH=<qt-install>/msvc2022_64
 cmake --build build --config Release
 ctest --test-dir build -C Release --output-on-failure
 build/app/Release/qttune.exe
@@ -86,10 +92,21 @@ build/app/qttune
 Add `-DQTTUNE_BUILD_CORE_ONLY=ON` to build only the core library and
 its tests, without Qt.
 
+**32-bit vendor drivers (optional):** to run against x86-only J2534
+drivers, build the Win32 surrogate in a second build tree and either
+deploy it next to the app at configure time
+(`-DQTTUNE_SURROGATE_SOURCE=...`) or export
+`QTTUNE_SURROGATE_EXE` at runtime:
+
+```sh
+cmake -B build-win32 -A Win32 -DQTTUNE_BUILD_CORE_ONLY=ON
+cmake --build build-win32 --config Release --target qttune-j2534-surrogate fake_j2534 fake_j2534_legacy
+```
+
 **Mobile (not yet validated):** open the project in Qt Creator, select
 an Android or iOS kit, and Run.
 
-The cross-architecture (x86 driver) test setup and troubleshooting
+The cross-architecture test setup, test fixtures and troubleshooting
 notes are in [docs/development.md](docs/development.md).
 
 ## Documentation

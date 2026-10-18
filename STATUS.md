@@ -40,9 +40,12 @@ adapter, comes next.
     `obd2` signal set and a way to select the signal set per
     transport (ADR-0013, #21). Designed 2026-10-16; not yet
     implemented.
-- **Tests:** 93 ctest cases, passing locally (Windows/MSVC 2022) and in CI on 
-  all three platforms. The cross-arch routing case skips unless its environment variables are set. Tiers, suites and gaps are in 
-  [docs/testing.md](docs/testing.md).
+  - **Tests:** 95 ctest cases, passing locally (Windows/MSVC 2022)
+    and in CI on all three platforms. The cross-arch routing case
+    skips unless its environment variables are set. J2534 suites
+    carry a 30 s per-test timeout — a hang fails bounded instead of
+    wedging the runner (2026-10-17 F1 fallout). Tiers, suites and
+    gaps are in [docs/testing.md](docs/testing.md).
 
 ## Architecture
 
@@ -281,14 +284,31 @@ an issue is resolved it is removed, and its number is not reused.
     FAILED response. Test knobs: `QTTUNE_SUR_HANDSHAKE_MS` (handshake
     window) and `QTTUNE_FAKE_OPEN_DELAY_MS` (fake open sleep, arming
     the x86 child from an x64 test via env inheritance). A vendor that genuinely blocks on absent hardware remains possible elsewhere in the ecosystem — and is now distinguishable: unanswered `OP_OPEN` with a live child means exactly that.
-23. **The surrogate traces only startup and OP_OPEN.** Filter
-    starts/stops, ioctls, and connect-time config are silent in
-    `%TEMP%\qttune-surrogate.log`, each with its own vendor status.
+23. **The surrogate traces only startup, OP_OPEN and OP_CONNECT
+    (with device/channel IDs, 2026-10-18).** Filter starts/stops
+    and ioctls are still silent in `%TEMP%\qttune-surrogate.log`,
+    each with its own vendor status.
     Discovered in the first formal BENCH session (2026-10-16), where
     filter acceptance had to be inferred from session-start success
     rather than a logged vendor status. Also: log lines carry no
     timestamps, so cross-referencing with parent timings is guesswork.
     Fix alongside the tracing: timestamp every line.
+24. **The surrogate calls the vendor DLL from two threads and
+    breaks teardown order** (review 2026-10-17, finding 2). The
+    read thread polls `PassThruReadMsgs` while the control thread
+    calls filter start/stop and disconnect; `OP_DISCONNECT` doesn't
+    clear `g_channel` (the read thread keeps reading a disconnected
+    channel, and shutdown disconnects a second time); and shutdown
+    waits only 2 s for the read thread before `FreeLibrary` — if
+    the thread is still inside vendor code, the child crashes.
+    The VX tolerated this on a quiet bus. Fix before the next BENCH
+    session; the in-proc path never makes concurrent calls.
+25. **J2534 receive is capped around 50 msgs/s, ~10 in poll mode**
+    (review 2026-10-17, finding 3). The worker reads one message
+    then sleeps; on the surrogate path the 4096-slot ring fills at
+    vendor speed and then #17's silent drops start. Must be fixed
+    before or alongside the ADR-0013 multi-PID scheduler, which
+    otherwise subdivides ~10 Hz across N signals.
 
 ## Roadmap
 
@@ -329,7 +349,3 @@ matter most — CAN-era targets need none of it.
   status 34 is unlabeled)
 - Picker row URIs templated with `?filter=&txid=&poll=` (the natural
   flow today produces a mute ISO 15765 session)
-- CMake `POST_BUILD` copy deploying the win32 surrogate next to the
-  app, so it launches without `QTTUNE_SURROGATE_EXE` exported
-  (same discipline as the surrogate-deployment step on the test
-  targets)
