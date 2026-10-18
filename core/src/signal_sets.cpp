@@ -32,6 +32,19 @@ static QttuneSignalDef mk(uint16_t id, const char* name,
     d.offset = offset;
     d.decimal_places = dp;
     d.message_id =  MOCK_TELEMETRY_ARB_ID;   /* all mock signals ride 0x0C0 */
+    /* ADR-0013 slice 2: explicit opt-out of the slice-2 decoder
+     * extensions. The d = {} zero-init already guarantees these
+     * values; stating them documents that the mock set is DELIBERATELY
+     * mux-less and little-endian, and keeps a future field-promotion
+     * from silently activating semantics here. The encoder half of the
+     * contract (mock_transport.cpp) writes plain little-endian
+     * payloads on MOCK_TELEMETRY_ARB_ID — nothing to mux against. */
+    d.flags = 0;               /* QTTUNE_SIGNAL_FLAG_BIG_ENDIAN unset */
+    d.mux_offset = 0;
+    d.mux_length = 0;           /* mux disabled */
+    d.mux_reserved[0] = 0;
+    d.mux_reserved[1] = 0;
+    d.mux_key = 0;
     copy_str(d.name, sizeof(d.name), name);
     copy_str(d.unit, sizeof(d.unit), unit);
     return d;
@@ -42,7 +55,7 @@ static const QttuneSignalDef kMockDefs[] = {
     mk(MOCK_SIG_COOLANT_ID,  "Coolant_Temp",     QTTUNE_SIGNAL_TYPE_INT8,    2, 1, 0, 8,   1.0f, -40.0f, "degC",   0),
     mk(MOCK_SIG_SPEED_ID,    "Vehicle_Speed",    QTTUNE_SIGNAL_TYPE_UINT8,   3, 1, 0, 8,   1.0f,   0.0f, "km/h",   0),
     mk(MOCK_SIG_THROTTLE_ID, "Throttle_Pos",     QTTUNE_SIGNAL_TYPE_UINT8,   4, 1, 0, 8,   100.0f/255.0f, 0.0f, "%", 1),
-    mk(MOCK_SIG_IAT_ID,      "Intake_Air_Temp",  QTTUNE_SIGNAL_TYPE_INT8,   5, 1, 0, 8,   1.0f, -40.0f, "degC",   0),
+    mk(MOCK_SIG_IAT_ID,      "Intake_Air_Temp",  QTTUNE_SIGNAL_TYPE_INT8,    5, 1, 0, 8,   1.0f, -40.0f, "degC",   0),
     mk(MOCK_SIG_LOAD_ID,     "Engine_Load",      QTTUNE_SIGNAL_TYPE_UINT8,   6, 1, 0, 8,   100.0f/255.0f, 0.0f, "%", 1),
 };
 

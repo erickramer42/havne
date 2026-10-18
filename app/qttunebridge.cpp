@@ -1,8 +1,4 @@
-// File/layer: app/qttunebridge.cpp | Qt6 Core, app layer, C++17
-// Testing: ring behavior, valuesUpdated cadence, chartData shape in test_bridge;
-//          discoverJ2534Devices marshaling shape in test_bridge;
-//          message-ID decode gate covered by test_bridge + core round-trip;
-//          full-app SettingsPage picker verified by manual smoke
+// File/layer: core/src/core.cpp | C++17, Qt-free, CI-validated headless build
 
 #include "qttunebridge.h"
 #include "qttune/version.h"
@@ -546,8 +542,11 @@ void QtTuneBridge::handleFrameInternal(const qttune_frame_t* frame)
     if (set != nullptr) {
         for (uint32_t i = 0; i < set->count; ++i) {
             const QttuneSignalDef& def = set->defs[i];
-            if (def.message_id != frame->arbitration_id) {
-                continue;   // signal rides a different CAN message
+            // Gate moved core-side: arb ID + mux key (ADR-0013 slice 2).
+            // For mux-less defs (the mock set) this is byte-for-byte
+            // the old message_id comparison — behavior-preserving.
+            if (qttune_def_matches_frame(&def, frame) != 0) {
+                continue;
             }
             float val = 0.0f;
             if (qttune_decode_signal(&def, frame->data, len, &val) == 0) {

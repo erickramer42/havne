@@ -50,7 +50,7 @@ adapter, comes next.
   - J2534 data in LiveView: profile selection is in (ADR-0013 slice
     1), but a `j2534://` session still decodes nothing — the `obd2`
     signal set and multi-PID scheduler are slice 2.
-  - **Tests:** 95 ctest cases, passing locally (Windows/MSVC 2022)
+  - **Tests:** 108 ctest cases, passing locally (Windows/MSVC 2022)
     and in CI on all three platforms. The cross-arch routing case
     skips unless its environment variables are set. J2534 suites
     carry a 30 s per-test timeout — a hang fails bounded instead of
@@ -235,7 +235,8 @@ an issue is resolved it is removed, and its number is not reused.
 9. **The mock has no scripted drive cycle.** One candidate is a
    2nd-gear WOT pull with a 2→3 shift. It needs `SimState` physics
    changes and updated ranges in
-   `MockFramesDecodeAgainstMockSignalSet`.
+   `MockFramesDecodeAgainstMockSignalSet`. preferred end goal: 2ng-gear pull WOT ->
+    slow down -> 3rd gear pull WOT -> slow down -> 60-130mph pull
 10. **Strip-chart x-axis resolution is one coalesce window, about
     100 ms.** Per-sample timestamps need decoding to move onto the
     worker.

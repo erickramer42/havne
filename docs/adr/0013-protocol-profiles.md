@@ -100,3 +100,173 @@ Additionally, the request loop's placement is wrong: it lives in the J2534 trans
   probing must never be conflated: the vehicle answers an
   OBD-II-flavor query; it cannot announce which profile to use.
 - Everything here remains read-only telemetry. Profiles that write (session control, security access) are v0.4 scope and subject to the regulatory posture in DISCLAIMER.md.
+
+---
+
+## Appendix — slice 2 implementation notes (2026-10-18)
+
+**Status:** implemented; HARNESS-verified
+Extends §6's `obd2` v1 bullet with the concrete mechanisms slice 2
+chose, and records what was learned during implementation. The
+decision text above is unchanged — this appendix is the
+implementation record.
+
+### Mux-key grammar
+
+OBD-II responses arrive on arbitration ID `0x7E8` with the ISO 15765
+address header stripped by the transport worker (`pump_one` in
+`j2534_transport.cpp`). The decoder receives a payload beginning with
+the single-frame PCI byte, followed by the Mode-01 echo
+`0x41 <PID>`, then the data bytes. The same mux fields drive both
+sides: the scheduler derives which PIDs to *request* from the signal
+definitions' mux descriptors, and the decoder correlates responses by
+matching the mux key.
+
+The derivation contract binding definitions to the scheduler: a
+definition drives scheduling iff it carries `mux_offset == 1`,
+`mux_length == 2`, and `mux_key == 0x4100u | PID`. The PID to
+request is the key's LOW byte — the high byte `0x41` is the Mode-01
+response echo. The set validator enforces the shape at registration;
+`qttune_sched_from_set` re-checks defensively at enrollment (cheap,
+and it guards against future profile authors).
+
+Non-mux definitions (raw/mock sets) never enroll; the scheduler comes
+up empty and the worker keeps its legacy behavior.
+
+### Scheduler constants and cadence
+
+- Fixed capacity: 16 PIDs (`QTTUNE_SCHED_MAX_PIDS`). No heap
+  allocation. Owned exclusively by the transport worker thread —
+  single-threaded by construction, so no internal synchronization.
+- Rotation: round-robin in first-seen set order. `obd2` v1 defines
+  eight PIDs, so the cursor wraps every 8 cycles.
+- **Cadence:** one request per 100 ms cycle. Eight PIDs rotate
+  through the cycle, so each PID refreshes every 8 x 100 ms = 800 ms,
+  about 1.25 Hz.
+
+### Worker loop structure (scheduler mode)
+
+Per 100 ms cycle, measured against an absolute deadline from cycle
+START:
+
+1. `qttune_sched_next` yields a PID; build the Mode-01 request
+   (12 wire bytes: 4-byte tx ID big-endian, SF PCI `02`, `01`, PID,
+   zero padding).
+2. Write the request. A failed send retries next cycle — the loop's
+   job is resilience, and persistent failure presents as a silent
+   bus, which is the BENCH diagnostic story rather than a
+   transport-layer error to synthesize here.
+3. **Drain:** up to `J2534_DRAIN_BUDGET` (10) reads with a short
+   20 ms timeout. The first empty read ends the drain. Leftover
+   frames persist into the next cycle's drain — no drops, no
+   head-of-line blocking.
+4. Sleep the cycle remainder against the absolute deadline, so
+   accumulated drain cost cannot drift the request cadence.
+
+### Drain budget rationale (Issue #25)
+
+`DRAIN_BUDGET` bounds the reads per cycle: 10 reads over a 100 ms
+cycle caps the worker at roughly 100 msg/s even fully saturated,
+raising the old poll-mode receive ceiling (about 10/s, Issue #25) by
+an order of magnitude. The 20 ms read timeout is deliberately short:
+on a real device `ReadMsgs` blocks up to the timeout when the queue
+is empty, so draining with the legacy 100 ms timeout would spend the
+whole cycle waiting for silence. The first EMPTY read ends the drain —
+the budget exists for bursts, not for silence.
+
+**Whether roughly 100 msg/s clears a busy real bus is a BENCH
+measurement, not a settled bound.** A VX measurement slot is owed on
+the next bench sheet.
+
+### Generalized coupling rule
+
+Scheduled PIDs require an active receive filter (`?filter=`).
+Rationale, the same one the legacy `?poll=` rule rests on: per
+J2534-1 v4.04 an ISO 15765 channel receives nothing without a
+registered filter, so a scheduler would write requests against
+guaranteed silence forever. A guaranteed-silent session is a delayed
+failure, not a feature — so it fails fast.
+
+Enforcement point: `j2534_start` checks `sched_mode && rx_id == 0`
+and returns `QT_ERR_NO_TRANSPORT` BEFORE connecting the channel. It
+lives at start rather than in `parse_query` because the trigger is
+the profile, not a URI token. The profile-declares-channel
+refinement (§4) will let `obd2` supply the 7E0/7E8 defaults itself;
+this check then becomes the backstop for a user override that did
+not break it.
+
+Failure mode: a refused start leaves the channel closed, so session
+teardown has nothing to disconnect — clean failure, no leaked
+resources.
+
+### Default flip consequence
+
+Plain `j2534://` URIs (no query) now select the `obd2` profile and
+therefore activate the scheduler. Legacy verbatim receive requires
+either `?profile=raw` (log-only mode) or `?filter=0x7E8` (accept the
+scheduler with an explicit channel). Existing harness tests were
+updated with `?profile=raw` opt-outs to pin their legacy semantics;
+the flip itself is pinned by the `DefaultProfileIsObd2` and
+`BareJ2534UriRequiresFilterUnderObd2Default` tests.
+
+### PID table (obd2 v1, set order)
+
+| Index | PID | Name | Bytes | Encoding |
+|---|---|---|---|---|
+| 0 | 0x04 | Engine Load | 1 | `100/255` |
+| 1 | 0x05 | Coolant Temp | 1 | -40, int8 |
+| 2 | 0x0C | RPM | 2 | BE, `0.25` |
+| 3 | 0x0D | Vehicle Speed | 1 | 1 |
+| 4 | 0x0F | Intake Air Temp | 1 | -40, int8 |
+| 5 | 0x11 | Throttle Position | 1 | `100/255` |
+| 6 | 0x2F | Fuel Level | 1 | `100/255` |
+| 7 | 0x42 | Battery Voltage | 2 | BE, `0.001` |
+
+Scale formulas are the standard SAE J1979 Mode-01 conversions. The
+set enumerates SUPPORTED PIDs — what is absent is neither requested
+nor decoded. **Multi-frame responses are out of scope for v1**:
+definitions assume single-frame response shapes. PIDs 0x0C and 0x42
+are 2-byte big-endian; all others are single-byte.
+
+### Decoder extensions (signal set v1)
+
+- **Big-endian support:** `QTTUNE_SIGNAL_FLAG_BIG_ENDIAN` (bit 0)
+  activates byte-reversed extraction. Non-byte-aligned BE fields are
+  rejected at validation time — a configuration error, not a runtime
+  condition.
+- **Mux dispatch:** `qttune_decode_signal` gates muxed definitions on
+  mux-key match before extraction. Definitions with `mux_key == 0`
+  (raw/mock sets) decode unconditionally, unchanged.
+- **Header dependency:** `signals.h` forward-declares
+  `qttune_frame_t` rather than including `core.h`, so the decode
+  layer's public header does not depend on the core header's include
+  graph. This surfaced as a latent defect when
+  `obd2_signal_sets.cpp` became the first TU to include `signals.h`
+  with no `core.h` in scope.
+
+### Fake vendor enhancements
+
+The fake DLL recognizes Mode-01 request shapes (`[02][01][PID]`) and
+responds with proper OBD-II grammar (`[04][41][PID][data]`) carrying
+deterministic canned values (RPM raw 0x1F40 gives 2000 RPM at 0.25
+scale — the one pinned numeric value). Legacy non-Mode-01 traffic
+keeps the echo path. Note: the fake's uniform PCI byte 0x04 is one
+byte fatter than a strict ECU would send for single-byte PIDs
+(0x03) — decoder-irrelevant, to be normalized when multi-frame work
+forces precision.
+
+### Test coverage added
+
+- **UNIT** (headless, all platforms): `test_obd2` — set structure,
+  decoder round-trips against wire bytes, and scheduler
+  rotation/wrap/dedupe/capacity logic.
+- **HARNESS** (Win32, fake DLL): `test_j2534_stream` — scheduler
+  rotation order and wrap read from recorded writes, coupling
+  rejection at start (both explicit and via the default flip), and
+  drain-backlog delivery beyond the per-cycle budget.
+
+Tier discipline: UNIT proves the logic, HARNESS proves the cadence
+and integration, BENCH proves real-device throughput. The drain
+budget mandates HARNESS minimum — no unit test can verify that a
+20 ms timeout plus a 10-read budget actually clears a busy bus within
+the cycle.

@@ -112,7 +112,7 @@ client/transport — in this order:
 4. **Child-log check** when tracing changed. The suite can't see the
    child's stderr; new trace lines are verified manually in
    `%TEMP%\qttune-surrogate.log` (copy before respawning — it is
-   rewritten per spawn). The 2026-10-18 #24 close is the model:
+   rewritten per spawn). The 2026-10-17 #24 close is the model:
    grep for `OP_DISCONNECT: vendor status 0` (present after clean
    closes) and `teardown: disconnect` (absent after clean closes).
 5. If the app is affected, rebuild the `qttune` target so the

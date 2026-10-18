@@ -12,6 +12,10 @@
 //          Adoption tests (Part 5): ?filter=/?txid=/?poll= — filter
 //          registration shape, request framing, header strip + ID
 //          stamp, stop-on-detach, gating, passive receive.
+//          ADR-0013 SLICE 2: j2534 defaults to the obd2 profile
+//          (scheduler + mux decode). Legacy-behavior tests opt out
+//          with ?profile=raw; the obd2 block covers rotation,
+//          coupling, and drain.
 
 #include <gtest/gtest.h>
 
@@ -27,6 +31,7 @@
 #include <chrono>
 #include <cstdio>
 #include <cstring>
+#include <string>
 #include <thread>
 #endif
 
@@ -128,12 +133,15 @@ protected:
 TEST_F(J2534QueryParamTest, DefaultConnectUsesIso15765At500k)
 {
     char uri[512];
-    snprintf(uri, sizeof(uri), "j2534://%s", FAKE_J2534_DLL_PATH);
+    /* ?profile=raw: the slice-2 default is obd2 (scheduler mode);
+     * this test pins the CONNECT defaults, so it opts out of the
+     * scheduler to keep the legacy posture it has always asserted. */
+    snprintf(uri, sizeof(uri), "j2534://%s?profile=raw",
+             FAKE_J2534_DLL_PATH);
 
     ASSERT_EQ(start_session_with_uri(uri), QT_OK);
     /* Unset baud (sentinel 0) resolves to the ISO 15765 500k default;
-     * flags default 0. This is the behavior-preservation proof for the
-     * existing three stream tests, which do not pass a query. */
+     * flags default 0. */
     EXPECT_EQ(last_protocol, QTTUNE_PT_PROTOCOL_ISO15765);
     EXPECT_EQ(last_baud, QTTUNE_PT_BAUD_ISO15765_500K);
     EXPECT_EQ(last_flags, 0u);
@@ -142,7 +150,8 @@ TEST_F(J2534QueryParamTest, DefaultConnectUsesIso15765At500k)
 TEST_F(J2534QueryParamTest, BaudParameterReachesPassThruConnect)
 {
     char uri[600];
-    snprintf(uri, sizeof(uri), "j2534://%s?baud=250000", FAKE_J2534_DLL_PATH);
+    snprintf(uri, sizeof(uri),
+             "j2534://%s?baud=250000&profile=raw", FAKE_J2534_DLL_PATH);
 
     ASSERT_EQ(start_session_with_uri(uri), QT_OK);
     EXPECT_EQ(last_baud, 250000u);
@@ -153,7 +162,8 @@ TEST_F(J2534QueryParamTest, FlagsAcceptHexAndDecimalAndCombineWithBaud)
 {
     char uri[600];
 
-    snprintf(uri, sizeof(uri), "j2534://%s?baud=125000&flags=0x20",
+    snprintf(uri, sizeof(uri),
+             "j2534://%s?baud=125000&flags=0x20&profile=raw",
              FAKE_J2534_DLL_PATH);
     ASSERT_EQ(start_session_with_uri(uri), QT_OK);
     EXPECT_EQ(last_baud, 125000u);
@@ -161,7 +171,7 @@ TEST_F(J2534QueryParamTest, FlagsAcceptHexAndDecimalAndCombineWithBaud)
 
     /* Decimal flags, reversed order, last-wins duplicate */
     snprintf(uri, sizeof(uri),
-             "j2534://%s?flags=10&baud=500000&baud=250000",
+             "j2534://%s?flags=10&baud=500000&baud=250000&profile=raw",
              FAKE_J2534_DLL_PATH);
     ASSERT_EQ(start_session_with_uri(uri), QT_OK);
     EXPECT_EQ(last_baud, 250000u);
@@ -212,7 +222,10 @@ TEST_F(J2534QueryParamTest, MalformedQueriesRejectedAtSessionCreate)
 TEST(J2534StreamTest, DirectLoadUriDeliversInjectedFramesExactly)
 {
     char uri[512];
-    snprintf(uri, sizeof(uri), "j2534://%s", FAKE_J2534_DLL_PATH);
+    /* ?profile=raw: legacy verbatim passive mode — id-0 dispatch,
+     * no scheduler writes interfering with exact-count assertions. */
+    snprintf(uri, sizeof(uri), "j2534://%s?profile=raw",
+             FAKE_J2534_DLL_PATH);
 
     qttune_session_t* session = nullptr;
     ASSERT_EQ(qttune_session_create(uri, &session), QT_OK);
@@ -252,9 +265,7 @@ TEST(J2534StreamTest, DirectLoadUriDeliversInjectedFramesExactly)
     ASSERT_EQ(memcmp(cap.payloads[1], f1, 8), 0);
     ASSERT_EQ(memcmp(cap.payloads[2], f2, 8), 0);
 
-    /* F1 flag translation: fake's RxStatus bit -> frame flags word.
-     * Covered both directions for the first time — previously this
-     * mapping had zero coverage because the fake always sent 0. */
+    /* F1 flag translation: fake's RxStatus bit -> frame flags word. */
     EXPECT_EQ(cap.frame_flags[0], 0u);
     EXPECT_EQ(cap.frame_flags[1], QTTUNE_FRAME_FLAG_EXTENDED);
     EXPECT_EQ(cap.frame_flags[2], 0u);
@@ -268,9 +279,7 @@ TEST(J2534StreamTest, DirectLoadUriDeliversInjectedFramesExactly)
     EXPECT_EQ(static_cast<unsigned>(cap.payload_lens[0]), 8u);
 
     /* Timestamps pass through UNTRANSLATED — documented v0.3.0
-     * decision (vendor-defined units, see j2534_ptypes.h). These
-     * asserts pin that decision so a future "helpful" normalization
-     * can't land silently. */
+     * decision (vendor-defined units, see j2534_ptypes.h). */
     EXPECT_EQ(cap.timestamps[0], uint64_t{1000});
     EXPECT_EQ(cap.timestamps[1], uint64_t{2000});
     EXPECT_EQ(cap.timestamps[2], uint64_t{3000});
@@ -283,7 +292,8 @@ TEST(J2534StreamTest, DirectLoadUriDeliversInjectedFramesExactly)
 TEST(J2534StreamTest, StartIsIdempotent)
 {
     char uri[512];
-    snprintf(uri, sizeof(uri), "j2534://%s", FAKE_J2534_DLL_PATH);
+    snprintf(uri, sizeof(uri), "j2534://%s?profile=raw",
+             FAKE_J2534_DLL_PATH);
 
     qttune_session_t* session = nullptr;
     ASSERT_EQ(qttune_session_create(uri, &session), QT_OK);
@@ -305,7 +315,9 @@ TEST(J2534StreamTest, UnknownVendorNameRejected)
 }
 
 /* ====================================================================
- * Part 5 adoption suite — ?filter= / ?txid= / ?poll=
+ * Part 5 adoption suite — ?filter= / ?txid= / ?poll=  (LEGACY paths;
+ * every URI opts out of the obd2 default with ?profile=raw so these
+ * keep pinning the raw-profile contract)
  * ==================================================================== */
 
 class J2534AdoptionTest : public ::testing::Test {
@@ -361,16 +373,33 @@ protected:
             std::this_thread::sleep_for(std::chrono::milliseconds(10));
         }
     }
+
+    /* Obd2/scheduler variant: wait for the WORK side instead of the
+     * receive side — rotation order is asserted from GetRecordedWrite
+     * indices, so writes are the primary observable. */
+    static void wait_for_writes(fn_get_write_count get_wc,
+                                unsigned long target, int iters)
+    {
+        unsigned long wc = 0;
+        for (int i = 0; i < iters; ++i) {
+            get_wc(&wc);
+            if (wc >= target) return;
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
+    }
 };
 
-/* REQUEST LOOP: ?filter=0x7E8&poll=0x0C — the worker writes a Mode-01
- * request each 100 ms cycle; the fake echoes it back with the filter
- * pattern prefixed; the worker strips the 4-byte address header and
+/* REQUEST LOOP (legacy poll): ?profile=raw&filter=0x7E8&poll=0x0C —
+ * the worker writes a Mode-01 request each 100 ms cycle; the fake
+ * answers Mode-01 shapes with proper OBD-II grammar (ADR-0013 slice
+ * 2 — the fake's response mode is SHAPE-triggered, so the legacy poll
+ * path sees it too); the worker strips the 4-byte address header and
  * stamps arbitration_id. Asserts BOTH directions of the loop. */
 TEST_F(J2534AdoptionTest, RequestLoopWritesMode01AndReceivesStrippedEcho)
 {
     char uri[700];
-    snprintf(uri, sizeof(uri), "j2534://%s?filter=0x7E8&poll=0x0C",
+    snprintf(uri, sizeof(uri),
+             "j2534://%s?profile=raw&filter=0x7E8&poll=0x0C",
              FAKE_J2534_DLL_PATH);
 
     qttune_session_t* session = nullptr;
@@ -412,16 +441,21 @@ TEST_F(J2534AdoptionTest, RequestLoopWritesMode01AndReceivesStrippedEcho)
     EXPECT_EQ(wbuf[4], 0x02u); EXPECT_EQ(wbuf[5], 0x01u);
     EXPECT_EQ(wbuf[6], 0x0Cu);
 
-    /* ---- RX framing: 4-byte header stripped, 8 bytes payload ---- */
-    /* Echo = [7E8][42 01 0C 00 00 00 00 00]; strip removes the 4-byte
-     * ID, payload[0] is the +0x40'd first data byte (0x02 -> 0x42).
-     * The +0x40 is FAKE-DEVICE semantics, not OBD correctness — a
-     * real ECU answers 01 0C with 41 0C (service+0x40 on the service
-     * byte); don't port the 0x42 expectation to BENCH. */
+    /* ---- RX framing: 4-byte header stripped, 8 bytes payload ----
+     * OBD-II response (fake, slice 2): [7E8][04][41][0C][1F][40]
+     * [00][00] — canned RPM raw 0x1F40 (= 2000 RPM at 0.25 scale).
+     * The legacy +0x40 device-model echo is RETIRED for Mode-01
+     * shapes; what's pinned here is grammar the obd2 decoder set
+     * actually consumes. NOTE: the fake's uniform PCI 0x04 is one
+     * byte fatter than a strict ECU would send for single-byte PIDs
+     * (0x03) — decoder-irrelevant, normalized when multi-frame work
+     * forces precision. */
     EXPECT_EQ(cap.arbitration_ids[0], 0x7E8u);
-    EXPECT_EQ(cap.payloads[0][0], 0x42u);   /* SF PCI + 0x40 (device model) */
-    EXPECT_EQ(cap.payloads[0][1], 0x01u);   /* Mode 01 passes through */
-    EXPECT_EQ(cap.payloads[0][2], 0x0Cu);   /* PID passes through */
+    EXPECT_EQ(cap.payloads[0][0], 0x04u);   /* SF PCI (fake shape) */
+    EXPECT_EQ(cap.payloads[0][1], 0x41u);   /* Mode 01 + 0x40 */
+    EXPECT_EQ(cap.payloads[0][2], 0x0Cu);   /* PID echo */
+    EXPECT_EQ(cap.payloads[0][3], 0x1Fu);   /* canned RPM high byte */
+    EXPECT_EQ(cap.payloads[0][4], 0x40u);   /* canned RPM low byte */
     EXPECT_EQ(static_cast<unsigned>(cap.payload_lens[0]), 8u);
 
     EXPECT_EQ(qttune_session_close(session), QT_OK);
@@ -433,7 +467,8 @@ TEST_F(J2534AdoptionTest, RequestLoopWritesMode01AndReceivesStrippedEcho)
 TEST_F(J2534AdoptionTest, FilterRegisteredOnSessionStart)
 {
     char uri[700];
-    snprintf(uri, sizeof(uri), "j2534://%s?filter=0x7E8&poll=0x0C",
+    snprintf(uri, sizeof(uri),
+             "j2534://%s?profile=raw&filter=0x7E8&poll=0x0C",
              FAKE_J2534_DLL_PATH);
 
     qttune_session_t* session = nullptr;
@@ -466,7 +501,8 @@ TEST_F(J2534AdoptionTest, FilterRegisteredOnSessionStart)
 TEST_F(J2534AdoptionTest, DetachStopsFilterBeforeDisconnect)
 {
     char uri[700];
-    snprintf(uri, sizeof(uri), "j2534://%s?filter=0x7E8&poll=0x0C",
+    snprintf(uri, sizeof(uri),
+             "j2534://%s?profile=raw&filter=0x7E8&poll=0x0C",
              FAKE_J2534_DLL_PATH);
 
     qttune_session_t* session = nullptr;
@@ -499,23 +535,26 @@ TEST_F(J2534AdoptionTest, PollWithoutFilterRejectedAtParse)
     qttune_session_t* session = nullptr;
     char uri[700];
 
-    snprintf(uri, sizeof(uri), "j2534://%s?poll=0x0C", FAKE_J2534_DLL_PATH);
+    snprintf(uri, sizeof(uri),
+             "j2534://%s?profile=raw&poll=0x0C", FAKE_J2534_DLL_PATH);
     EXPECT_EQ(qttune_session_create(uri, &session), QT_ERR_NO_TRANSPORT);
     EXPECT_EQ(session, nullptr);
 }
 
-/* PASSIVE RECEIVE: ?filter=0x7E8 without ?poll= — filter registers,
- * no writes generated, frames still stripped and stamped. */
+/* PASSIVE RECEIVE: ?profile=raw&filter=0x7E8 without ?poll= — filter
+ * registers, no writes generated, frames still stripped and stamped. */
 TEST_F(J2534AdoptionTest, PassiveReceiveWithFilterNoPoll)
 {
     char uri[700];
-    snprintf(uri, sizeof(uri), "j2534://%s?filter=0x7E8", FAKE_J2534_DLL_PATH);
+    snprintf(uri, sizeof(uri),
+             "j2534://%s?profile=raw&filter=0x7E8", FAKE_J2534_DLL_PATH);
 
     qttune_session_t* session = nullptr;
     ASSERT_EQ(qttune_session_create(uri, &session), QT_OK);
 
     StreamCapture cap;
-    EXPECT_EQ(qttune_register_frame_callback(session, capture_cb, &cap), QT_OK);
+    EXPECT_EQ(qttune_register_frame_callback(session, capture_cb, &cap),
+              QT_OK);
 
     ASSERT_EQ(qttune_session_start(session), QT_OK);
 
@@ -536,7 +575,7 @@ TEST_F(J2534AdoptionTest, PassiveReceiveWithFilterNoPoll)
     wait_for_count(cap, 1, 50);
     EXPECT_EQ(cap.count.load(), 1u);
 
-    /* Header stripped: payload starts at index 0, length = 4 */
+    /* Header stripped: payload starts at index 0, length = 8 */
     EXPECT_EQ(cap.payloads[0][0], 0x02u);
     EXPECT_EQ(cap.payloads[0][1], 0x01u);
     EXPECT_EQ(cap.payloads[0][2], 0x0Cu);
@@ -552,7 +591,8 @@ TEST_F(J2534AdoptionTest, PassiveReceiveWithFilterNoPoll)
 TEST_F(J2534AdoptionTest, FilterGatingDropsNonMatchingFrames)
 {
     char uri[700];
-    snprintf(uri, sizeof(uri), "j2534://%s?filter=0x7E8", FAKE_J2534_DLL_PATH);
+    snprintf(uri, sizeof(uri),
+             "j2534://%s?profile=raw&filter=0x7E8", FAKE_J2534_DLL_PATH);
 
     qttune_session_t* session = nullptr;
     ASSERT_EQ(qttune_session_create(uri, &session), QT_OK);
@@ -594,7 +634,8 @@ TEST_F(J2534AdoptionTest, FilterGatingDropsNonMatchingFrames)
 TEST_F(J2534AdoptionTest, TxidOverrideChangesRequestTarget)
 {
     char uri[700];
-    snprintf(uri, sizeof(uri), "j2534://%s?filter=0x7E8&poll=0x0C&txid=0x7DF",
+    snprintf(uri, sizeof(uri),
+             "j2534://%s?profile=raw&filter=0x7E8&poll=0x0C&txid=0x7DF",
              FAKE_J2534_DLL_PATH);
 
     qttune_session_t* session = nullptr;
@@ -620,16 +661,29 @@ TEST_F(J2534AdoptionTest, TxidOverrideChangesRequestTarget)
 }
 
 // ---------------------------------------------------------------------------
-// ADR-0013 slice 1: j2534 profile selection (default raw, ?profile=
-// override rides the strict grammar through parse_query)
+// ADR-0013 slice 1: j2534 profile selection (slice 2 flips the default
+// to obd2; ?profile= override rides the strict grammar through
+// parse_query)
 // ---------------------------------------------------------------------------
 
-TEST(J2534StreamTest, DefaultProfileIsRaw)
+TEST(J2534StreamTest, DefaultProfileIsObd2)
 {
-    /* j2534:// with no override: null active set — Log page only.
-     * Create/destroy without start: the assertion is about selection,
-     * not streaming, so no filter coupling is needed. */
+    /* SLICE 2 FLIP: j2534:// with no override selects the obd2 set —
+     * decode + multi-PID scheduler. Create/destroy without start: the
+     * assertion is about selection, not streaming, so no filter
+     * coupling fires (coupling lives in session_start). */
     const std::string uri = std::string("j2534://") + FAKE_J2534_DLL_PATH;
+    qttune_session_t* session = nullptr;
+    ASSERT_EQ(qttune_session_create(uri.c_str(), &session), QT_OK);
+    EXPECT_EQ(qttune_session_signal_set(session), qttune_obd2_signal_set());
+    qttune_session_destroy(session);
+}
+
+TEST(J2534StreamTest, RawProfileRemainsSelectableOnJ2534)
+{
+    /* The escape hatch: log-only sessions on the real transport. */
+    const std::string uri = std::string("j2534://") + FAKE_J2534_DLL_PATH
+                          + "?profile=raw";
     qttune_session_t* session = nullptr;
     ASSERT_EQ(qttune_session_create(uri.c_str(), &session), QT_OK);
     EXPECT_EQ(qttune_session_signal_set(session), nullptr);
@@ -659,6 +713,185 @@ TEST(J2534StreamTest, UnknownProfileRejectedAtCreate)
     EXPECT_EQ(session, nullptr);
 }
 
+// ---------------------------------------------------------------------------
+// ADR-0013 slice 2: obd2 scheduler mode — rotation, coupling, drain
+// ---------------------------------------------------------------------------
+
+/* SCHEDULER ROTATION: ?profile=obd2&filter=0x7E8 — the worker
+ * requests PIDs round-robin in set order. Rotation order is asserted
+ * from the fake's recorded WRITES (deterministic, one per cycle),
+ * not from received frames. */
+TEST_F(J2534AdoptionTest, Obd2SchedulerRotatesPidsInSetOrder)
+{
+    char uri[700];
+    snprintf(uri, sizeof(uri),
+             "j2534://%s?profile=obd2&filter=0x7E8", FAKE_J2534_DLL_PATH);
+
+    qttune_session_t* session = nullptr;
+    ASSERT_EQ(qttune_session_create(uri, &session), QT_OK);
+
+    StreamCapture cap;
+    ASSERT_EQ(qttune_register_frame_callback(session, capture_cb, &cap),
+              QT_OK);
+    ASSERT_EQ(qttune_session_start(session), QT_OK);
+
+    /* 3 cycles = 300 ms minimum; budget 2 s for CI variance. */
+    wait_for_writes(get_write_count, 3, 200);
+
+    unsigned char wbuf[64] = {};
+    unsigned long wlen = 0, wflags = 0;
+
+    /* Write 0..2 = the first three obd2 PIDs in set order:
+     * 0x04 (load), 0x05 (coolant), 0x0C (RPM). Wire shape is the
+     * 12-byte legacy request frame — the scheduler shares the poll
+     * path's builder: [txid BE][02][01][PID][pad to 8]. */
+    get_recorded_write(0, wbuf, &wlen, &wflags);
+    ASSERT_EQ(wlen, 12u);
+    EXPECT_EQ(wbuf[4], 0x02u);   /* SF PCI */
+    EXPECT_EQ(wbuf[5], 0x01u);   /* Mode 01 */
+    EXPECT_EQ(wbuf[6], 0x04u);   /* PID: calculated load */
+
+    get_recorded_write(1, wbuf, &wlen, &wflags);
+    ASSERT_EQ(wlen, 12u);
+    EXPECT_EQ(wbuf[6], 0x05u);   /* PID: coolant temp */
+
+    get_recorded_write(2, wbuf, &wlen, &wflags);
+    ASSERT_EQ(wlen, 12u);
+    EXPECT_EQ(wbuf[6], 0x0Cu);   /* PID: engine RPM */
+
+    /* Wrap-around: 8 PIDs in the v1 set, so write index 8 must be
+     * pid[0] again — proves ROUND-ROBIN, not one-shot enumeration. */
+    wait_for_writes(get_write_count, 9, 250);   /* ~900 ms min, 2.5 s budget */
+    get_recorded_write(8, wbuf, &wlen, &wflags);
+    ASSERT_EQ(wlen, 12u);
+    EXPECT_EQ(wbuf[6], 0x04u);
+
+    /* RX: each cycle writes one request then drains its response in
+     * the same cycle, so the first three received frames answer the
+     * first three requests in order. */
+    wait_for_count(cap, 3, 100);
+    ASSERT_GE(cap.count.load(), 3);
+    for (int i = 0; i < 3; ++i) {
+        EXPECT_EQ(cap.arbitration_ids[i], 0x7E8u);
+        EXPECT_EQ(cap.payloads[i][1], 0x41u);   /* Mode 01 + 0x40 ack */
+    }
+    EXPECT_EQ(cap.payloads[0][2], 0x04u);
+    EXPECT_EQ(cap.payloads[1][2], 0x05u);
+    EXPECT_EQ(cap.payloads[2][2], 0x0Cu);
+    /* Canned RPM raw 0x1F40 -> 2000 RPM at 0.25 scale — the one
+     * canned value pinned, because the loop test already pins it and
+     * RPM is the one 2-byte PID in the first three. Others: pid echo
+     * + mode byte suffice to prove routing. */
+    EXPECT_EQ(cap.payloads[2][3], 0x1Fu);
+    EXPECT_EQ(cap.payloads[2][4], 0x40u);
+
+    EXPECT_EQ(qttune_session_close(session), QT_OK);
+    qttune_session_destroy(session);
+}
+
+/* COUPLING RULE (scheduler arm): obd2 profile with NO receive filter.
+ * Parse and create succeed — the failure is DELIBERATELY at start,
+ * where the worker would otherwise spin requests against a silent
+ * bus forever. */
+TEST(J2534StreamTest, Obd2SchedulerWithoutFilterRejectedAtStart)
+{
+    const std::string uri = std::string("j2534://") + FAKE_J2534_DLL_PATH
+                          + "?profile=obd2";
+    qttune_session_t* session = nullptr;
+    ASSERT_EQ(qttune_session_create(uri.c_str(), &session), QT_OK);
+    EXPECT_EQ(qttune_session_start(session), QT_ERR_NO_TRANSPORT);
+    /* Start refused -> worker never spawned; skip close, destroy
+     * the created-but-unstarted session directly. */
+    qttune_session_destroy(session);
+}
+
+/* COUPLING RULE via the DEFAULT flip: plain j2534:// (no query at
+ * all) selects obd2 — and therefore inherits the filter requirement.
+ * This is the user-visible consequence of the slice-2 default: a
+ * bare URI no longer streams verbatim; it needs ?filter=0x7E8 or
+ * ?profile=raw. */
+TEST(J2534StreamTest, BareJ2534UriRequiresFilterUnderObd2Default)
+{
+    const std::string uri = std::string("j2534://") + FAKE_J2534_DLL_PATH;
+    qttune_session_t* session = nullptr;
+    ASSERT_EQ(qttune_session_create(uri.c_str(), &session), QT_OK);
+    EXPECT_EQ(qttune_session_signal_set(session), qttune_obd2_signal_set());
+    EXPECT_EQ(qttune_session_start(session), QT_ERR_NO_TRANSPORT);
+    qttune_session_destroy(session);
+}
+
+/* DRAIN BUDGET: inject a backlog LARGER than the per-cycle drain
+ * budget (10) and assert every frame is eventually delivered —
+ * leftover frames survive into the next cycle's drain instead of
+ * being dropped or head-of-line-blocking the scheduler responses.
+ * Uses a local 32-slot capture: the shared StreamCapture's 8 slots
+ * would truncate under scheduler traffic + backlog combined. */
+TEST_F(J2534AdoptionTest, SchedulerDrainsBacklogBeyondPerCycleBudget)
+{
+    char uri[700];
+    snprintf(uri, sizeof(uri),
+             "j2534://%s?profile=obd2&filter=0x7E8", FAKE_J2534_DLL_PATH);
+
+    qttune_session_t* session = nullptr;
+    ASSERT_EQ(qttune_session_create(uri, &session), QT_OK);
+
+    struct DrainCapture {
+        std::atomic<int> count{0};
+        unsigned char payloads[32][8]{};
+        uint32_t ids[32]{};
+    } dcap;
+    auto drain_cb = [](const qttune_frame_t* frame, void* user_data) {
+        DrainCapture* c = static_cast<DrainCapture*>(user_data);
+        const int i = c->count.fetch_add(1);
+        if (i < 32) {
+            const unsigned short n = (frame->data_length < 8)
+                                     ? frame->data_length : 8;
+            memcpy(c->payloads[i], frame->data, n);
+            c->ids[i] = frame->arbitration_id;
+        }
+    };
+    ASSERT_EQ(qttune_register_frame_callback(session, drain_cb, &dcap),
+              QT_OK);
+    ASSERT_EQ(qttune_session_start(session), QT_OK);
+
+    /* Backlog of 12 > drain budget of 10: forces at least TWO drain
+     * cycles to clear. Marker bytes 0xB0+i distinguish injected
+     * frames from Mode-01 responses (which start with PCI 0x04). */
+    for (int i = 0; i < 12; ++i) {
+        unsigned char frame[12] = {};
+        frame[2] = 0x07; frame[3] = 0xE8;      /* rx id BE 0x7E8 */
+        frame[4] = static_cast<unsigned char>(0xB0 + i);   /* marker */
+        frame[5] = 0xEE;
+        inject(frame, sizeof(frame), 9000u + i, 0, 1);
+    }
+
+    auto seen_all_markers = [&dcap]() {
+        bool seen[12] = {};
+        int n = dcap.count.load();
+        if (n > 32) n = 32;
+        for (int i = 0; i < n; ++i) {
+            const unsigned char b = dcap.payloads[i][0];
+            if (b >= 0xB0 && b <= 0xBB) {
+                seen[b - 0xB0] = true;
+            }
+        }
+        for (bool s : seen) {
+            if (!s) return false;
+        }
+        return true;
+    };
+
+    /* 12 frames / ~10 per cycle -> ~2 cycles = 200 ms min; budget
+     * 4 s for CI variance (responses consume drain slots too). */
+    for (int i = 0; i < 400 && !seen_all_markers(); ++i) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    EXPECT_TRUE(seen_all_markers());
+
+    EXPECT_EQ(qttune_session_close(session), QT_OK);
+    qttune_session_destroy(session);
+}
+
 } // namespace
 
-#endif /* _WIN32 */
+#endif // _WIN32

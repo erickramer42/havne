@@ -1,5 +1,4 @@
 // File/layer: core/src/core.cpp | C++17, Qt-free, CI-validated headless build
-// Testing: test_core — lifecycle unchanged; new profile-selection cases
 
 #include "qttune/version.h"
 #include "qttune/core.h"
@@ -17,21 +16,24 @@
 namespace {
     std::atomic<bool> g_initialized{false};
 
-    /* Extract the LAST value of `key` from the query portion of a URI
-     * body (text after "scheme://"). TOLERANT scanner: full structural
-     * validation belongs to each transport's strict parser, which runs
-     * after this — this only answers "did the user name a profile?"
-     * Duplicate keys: last occurrence wins, matching the grammar.
-     * Returns false when absent, or when the value is empty or too
-     * long to be a registry name. */
-    bool query_value(const char* rest, const char* key,
-                     char* out_val, size_t out_cap)
+    enum class ProfileQuery { Absent, Valid, Invalid };
+
+    /* Extract the LAST `profile` value from the query portion of a URI
+    * body. TOLERANT structural scanner (strict validation is the
+    * transport parsers' job — this only answers "did the user name a
+    * profile?"). Tri-state: a present-but-malformed value (empty or
+    * over-length) is INVALID and fails session_create — it must NEVER
+    * silently downgrade to the scheme default, which would hand a
+    * typo'd ?profile=raw a decoding session or vice versa. Matches
+    * j2534 parse_query's per-segment strictness: the FIRST malformed
+    * occurrence fails, last-wins applies only across valid values. */
+    ProfileQuery query_profile(const char* rest,
+                                char* out_val, size_t out_cap)
     {
         const char* q = strchr(rest, '?');
         if (q == nullptr) {
-            return false;
+            return ProfileQuery::Absent;
         }
-        const size_t key_len = strlen(key);
         bool found = false;
         const char* cur = q + 1;
         while (*cur != '\0') {
@@ -40,12 +42,12 @@ namespace {
             const char* eq = static_cast<const char*>(
                 memchr(cur, '=', static_cast<size_t>(end - cur)));
             if (eq != nullptr &&
-                static_cast<size_t>(eq - cur) == key_len &&
-                strncmp(cur, key, key_len) == 0) {
+                static_cast<size_t>(eq - cur) == 7 &&
+                strncmp(cur, "profile", 7) == 0) {
                 const char* val = eq + 1;
                 const size_t val_len = static_cast<size_t>(end - val);
                 if (val_len == 0 || val_len >= out_cap) {
-                    return false;
+                    return ProfileQuery::Invalid;
                 }
                 memcpy(out_val, val, val_len);
                 out_val[val_len] = '\0';
@@ -56,7 +58,7 @@ namespace {
             }
             cur = amp + 1;
         }
-        return found;
+        return found ? ProfileQuery::Valid : ProfileQuery::Absent;
     }
 } // namespace
 
@@ -123,16 +125,28 @@ qttune_status_t qttune_session_create(
 
     /* ADR-0013 profile selection: default per scheme, ?profile=
      * override. Resolved and validated BEFORE any transport attach so
-     * an unknown name fails fast with no DLL load and no discovery.
-     * Slice-1 default for j2534 is "raw" (obd2 arrives with the
-     * multi-PID scheduler). */
+     * an unknown or MALFORMED profile fails fast with no DLL load and
+     * no discovery. */
     const char* rest = transport_uri + (is_mock ? 7 : 8);
     char profile_name[64];
     const char* chosen = nullptr;
-    if (query_value(rest, "profile", profile_name, sizeof(profile_name))) {
-        chosen = profile_name;
-    } else {
-        chosen = is_mock ? "mock" : "raw";
+    switch (query_profile(rest, profile_name, sizeof(profile_name))) {
+        case ProfileQuery::Valid:
+            chosen = profile_name;
+            break;
+        case ProfileQuery::Invalid:
+            delete *out_session;
+            *out_session = nullptr;
+            return QT_ERR_NO_TRANSPORT;  /* malformed ?profile= — strict */
+        case ProfileQuery::Absent:
+        default:
+            /* ADR-0013 slice 2, FINAL STEP: j2534 defaults to obd2.
+             * The profile supplies decode AND the multi-PID scheduler;
+             * ?filter= (or the profile's own channel defaults, a later
+             * refinement) satisfies the receive-coupling rule. Raw
+             * log-only sessions remain reachable via ?profile=raw. */
+            chosen = is_mock ? "mock" : "obd2";
+            break;
     }
 
     const QttuneSignalSet* profile_set = nullptr;
@@ -141,6 +155,12 @@ qttune_status_t qttune_session_create(
         *out_session = nullptr;
         return QT_ERR_NO_TRANSPORT;   /* unknown profile name — strict */
     }
+
+    /* The session's set is live BEFORE attach: the transport sees the
+     * profile during attach/start (Phase 4 derives scheduler PIDs
+     * and channel defaults from it). Still single-writer — attach and
+     * any worker run after this store. */
+    (*out_session)->active_signal_set = profile_set;
 
     qttune_status_t status = QT_ERR_NO_TRANSPORT;
 #ifdef _WIN32
@@ -157,7 +177,6 @@ qttune_status_t qttune_session_create(
         *out_session = nullptr;
         return status;
     }
-    (*out_session)->active_signal_set = profile_set;
     return QT_OK;
 }
 

@@ -32,7 +32,7 @@ owns phases 2–3 (filter shape, VBATT, quiet-bus ReadMsgs).
 - [ ] Fresh build of both trees (x64 app + win32 surrogate):
       cmake --build build --config Release
       cmake --build build-win32 --config Release --target qttune-j2534-surrogate
-- [ ] Full suite green: ctest 93/93
+- [ ] Full suite green: ctest 134/134, 1 env-gate skip, 133 executed
 - [ ] `qttune.exe` runs and the Settings picker lists the VX with
       architecture label "x86" (discovery smoke — already verified once;
       re-confirm on today's build)

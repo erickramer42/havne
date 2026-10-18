@@ -4,7 +4,9 @@
 //          asserts ?baud=/?flags= values reach PassThruConnect, and the
 //          ?filter=/txid=/poll= request loop: write framing recorded by the
 //          fake, response received, 4-byte header stripped, arbitration_id
-//          stamped, filter stopped on detach.
+//          stamped, filter stopped on detach. ADR-0013 slice 2 adds the
+//          scheduler + drain path (multi-PID round-robin, #25 receive cap)
+//          — covered end-to-end by the Phase 5 obd2 harness tests.
 // CI: non-Windows builds a linking stub; core.cpp routes j2534://
 //     only on _WIN32, so the stub is unreachable there
 
@@ -12,6 +14,7 @@
 #include "qttune/internal.h"
 #include "session.h"
 #include "qttune/j2534.h"
+#include "pid_scheduler.h"
 
 #include <atomic>
 #include <chrono>
@@ -28,6 +31,25 @@ namespace {
 constexpr uint32_t J2534_POLL_INTERVAL_MS   = 20;
 constexpr uint32_t J2534_READ_TIMEOUT_MS    = 100;
 constexpr uint32_t J2534_REQUEST_CYCLE_MS   = 100;   /* poll cadence */
+
+/* ADR-0013 slice 2 (#25): scheduler-mode constants. The scheduler
+ * paces requests (one per 100 ms cycle, rotating PIDs); the drain
+ * paces receives. DRAIN_BUDGET caps reads at 10 per cycle, so the
+ * worker cannot exceed 100 reads/s: the cycle is never shorter than
+ * the 100 ms deadline, making 10 reads per cycle a hard ceiling
+ * regardless of bus load. (Dropped frames count against the budget
+ * too — it bounds loop time, not delivery.) The normal case is one
+ * response per request: about 10 reads/s, with the v1 set's 8 PIDs
+ * each refreshing every 800 ms. DRAIN_READ_TIMEOUT is deliberately
+ * SHORT: on a real device ReadMsgs blocks up to the timeout when
+ * the queue is empty, so draining with the legacy 100 ms timeout
+ * would spend the whole cycle waiting for silence. 20 ms
+ * accommodates slow ECUs answering the request we just sent while
+ * keeping a quiet-drain bounded. First EMPTY read ends the drain —
+ * the budget exists for bursts, not for silence. Both are BENCH
+ * candidates pending VX observation. */
+constexpr uint32_t J2534_DRAIN_BUDGET          = 10;
+constexpr uint32_t J2534_DRAIN_READ_TIMEOUT_MS  = 20;
 
 /* Address/filter field widths. 4-byte big-endian CAN ID is the J2534
  * convention for both filter patterns and ISO 15765 addressing bytes.
@@ -100,19 +122,28 @@ struct qttune_j2534_transport {
      *                detach BEFORE disconnect — vendor-compatibility
      *                priority (some drivers leak filter state if the
      *                stop is skipped; the spec says disconnect
-     *                invalidates filters, so a failure here is benign) */
+     *                invalidates filters, so a failure here is benign)
+     *   sched        ADR-0013 slice 2: round-robin PID scheduler,
+     *                populated at j2534_start from the session's
+     *                active_signal_set. NONEMPTY scheduler mode
+     *                outranks ?poll= — a set that drives scheduling
+     *                owns the request loop, and ?poll= remains the
+     *                raw-profile debugging override. Frozen before the
+     *                worker exists, hence lock-free on the worker. */
     uint32_t rx_id = 0;
     uint32_t tx_id = J2534_TX_ID_DEFAULT;
     uint32_t poll_pid = 0;
     uint32_t addr_flags = 0;
     bool filter_active = false;
     unsigned long filter_id = 0;
+    qttune_pid_scheduler sched;
     std::atomic<bool> stop_requested{false};
     std::thread worker;
 };
 
-/* Worker entrypoint — mirrors mock_worker's discipline: impl-owned
- * state, dispatch through the session snapshot path, stop via atom.
+/* Read one frame and, if it passes the strip/stamp gate, dispatch it
+ * through the session snapshot path. Returns whether a frame was
+ * read (dispatched or not).
  *
  * RECEIVE FRAMING: j2534_loader's read_frame copies PASSTHRU_MSG.Data
  * verbatim — ISO 15765 rides its 4-byte address header in-band. With
@@ -124,12 +155,62 @@ struct qttune_j2534_transport {
  * Without a filter, frames dispatch verbatim with id 0: byte-for-byte
  * the pre-adoption contract, which is why every existing stream test
  * still passes unmodified. */
+bool pump_one(qttune_j2534_transport* t, uint32_t timeout_ms)
+{
+    qttune_frame_t frame{};
+    bool got = false;
+    qttune_status_t st = qttune_j2534_read_frame(t->handle, t->channel,
+                                                 &frame, timeout_ms, &got);
+    if (st != QT_OK || !got) {
+        return false;
+    }
+    if (t->rx_id != 0) {
+        if (frame.data_length >= J2534_ADDR_LEN) {
+            const uint32_t hdr =
+                (static_cast<uint32_t>(frame.data[0]) << 24) |
+                (static_cast<uint32_t>(frame.data[1]) << 16) |
+                (static_cast<uint32_t>(frame.data[2]) << 8) |
+                 static_cast<uint32_t>(frame.data[3]);
+            if ((hdr & J2534_CAN_ID_MAX) == t->rx_id) {
+                frame.arbitration_id = t->rx_id;
+                const uint16_t n = static_cast<uint16_t>(
+                    frame.data_length - J2534_ADDR_LEN);
+                memmove(frame.data, frame.data + J2534_ADDR_LEN, n);
+                frame.data_length = n;
+                qttune_session_dispatch_callbacks(t->session, &frame);
+            }
+        }
+    } else {
+        qttune_session_dispatch_callbacks(t->session, &frame);
+        /* no filter — verbatim, id 0 */
+    }
+    return true;
+}
+
+/* Worker entrypoint — mirrors mock_worker's discipline: impl-owned
+ * state, dispatch through the session snapshot path, stop via atom.
+ *
+ * Three modes, selected by adoption state (all frozen pre-thread):
+ *   SCHEDULER (ADR-0013 slice 2): sched.count > 0. Per 100 ms cycle:
+ *     next PID -> build Mode-01 request -> write -> DRAIN up to
+ *     J2534_DRAIN_BUDGET frames (short timeout, stop at first empty)
+ *     -> sleep the cycle REMAINDER against an absolute deadline, so
+ *     drain cost does not accumulate as cadence drift.
+ *   POLL (legacy): poll_pid != 0. Byte-identical to the pre-slice
+ *     loop: one request, one read (100 ms timeout), 100 ms sleep.
+ *   PASSIVE (legacy): read one frame per 20 ms, no requests. */
 void j2534_worker(qttune_j2534_transport* t)
 {
+    const bool sched_mode = (t->sched.count > 0);
+
     while (!t->stop_requested.load()) {
-        if (t->poll_pid != 0) {
+        const auto cycle_start = std::chrono::steady_clock::now();
+
+        if (sched_mode) {
+            uint8_t pid = 0;
+            (void)qttune_sched_next(&t->sched, &pid);
             uint8_t req[12];
-            build_mode01_request(req, t->tx_id, t->poll_pid);
+            build_mode01_request(req, t->tx_id, pid);
             uint32_t written = 0;
             /* A failed send retries next cycle — the loop's job is
              * resilience. Persistent failure presents as a silent bus,
@@ -138,47 +219,47 @@ void j2534_worker(qttune_j2534_transport* t)
             (void)qttune_j2534_write_frame(t->handle, t->channel, req,
                                            sizeof(req), t->addr_flags,
                                            0, &written);
-        }
 
-        qttune_frame_t frame{};
-        bool got = false;
-        qttune_status_t st = qttune_j2534_read_frame(t->handle, t->channel,
-                                                     &frame,
-                                                     J2534_READ_TIMEOUT_MS,
-                                                     &got);
-        if (st == QT_OK && got) {
-            bool dispatch = false;
-            if (t->rx_id != 0) {
-                if (frame.data_length >= J2534_ADDR_LEN) {
-                    const uint32_t hdr =
-                        (static_cast<uint32_t>(frame.data[0]) << 24) |
-                        (static_cast<uint32_t>(frame.data[1]) << 16) |
-                        (static_cast<uint32_t>(frame.data[2]) << 8) |
-                         static_cast<uint32_t>(frame.data[3]);
-                    if ((hdr & J2534_CAN_ID_MAX) == t->rx_id) {
-                        frame.arbitration_id = t->rx_id;
-                        const uint16_t n = static_cast<uint16_t>(
-                            frame.data_length - J2534_ADDR_LEN);
-                        memmove(frame.data, frame.data + J2534_ADDR_LEN, n);
-                        frame.data_length = n;
-                        dispatch = true;
-                    }
+            /* DRAIN: budgeted receive (#25). First empty read ends the
+             * drain; the budget bounds bursts, not silence. Each
+             * dispatched frame counts against the budget; dropped
+             * (non-matching/runt) frames do too — the point is
+             * bounding worker loop time, not guaranteed delivery. */
+            for (uint32_t i = 0; i < J2534_DRAIN_BUDGET; ++i) {
+                if (!pump_one(t, J2534_DRAIN_READ_TIMEOUT_MS)) {
+                    break;
                 }
-            } else {
-                dispatch = true;   /* no filter — verbatim, id 0 */
             }
-            if (dispatch) {
-                qttune_session_dispatch_callbacks(t->session, &frame);
-            }
-        }
 
-        /* With polling, the request cycle paces the loop. The fake's
-         * reads return instantly; a real device blocks inside ReadMsgs
-         * up to the timeout, so the effective cadence is the larger of
-         * the two either way. Without polling, the legacy 20 ms. */
-        std::this_thread::sleep_for(std::chrono::milliseconds(
-            (t->poll_pid != 0) ? J2534_REQUEST_CYCLE_MS
-                               : J2534_POLL_INTERVAL_MS));
+            /* Absolute-deadline sleep: 100 ms from cycle START, not
+             * from drain END — accumulated drain cost cannot drift
+             * the request cadence. A negative remainder (drain
+             * somehow exceeded the cycle) clamps to zero. */
+            const auto target = cycle_start +
+                std::chrono::milliseconds(J2534_REQUEST_CYCLE_MS);
+            const auto now = std::chrono::steady_clock::now();
+            if (target > now) {
+                std::this_thread::sleep_until(target);
+            }
+        } else if (t->poll_pid != 0) {
+            uint8_t req[12];
+            build_mode01_request(req, t->tx_id, t->poll_pid);
+            uint32_t written = 0;
+            (void)qttune_j2534_write_frame(t->handle, t->channel, req,
+                                           sizeof(req), t->addr_flags,
+                                           0, &written);
+            (void)pump_one(t, J2534_READ_TIMEOUT_MS);
+            /* With polling, the request cycle paces the loop. The fake's
+             * reads return instantly; a real device blocks inside ReadMsgs
+             * up to the timeout, so the effective cadence is the larger of
+             * the two either way. */
+            std::this_thread::sleep_for(std::chrono::milliseconds(
+                J2534_REQUEST_CYCLE_MS));
+        } else {
+            (void)pump_one(t, J2534_READ_TIMEOUT_MS);
+            std::this_thread::sleep_for(std::chrono::milliseconds(
+                J2534_POLL_INTERVAL_MS));
+        }
     }
 }
 
@@ -424,6 +505,27 @@ qttune_status_t j2534_start(qttune_session_t* /*session*/, void* impl)
     }
     if (t->worker.joinable()) {
         return QT_OK;   /* already running — idempotent per ops contract */
+    }
+
+    /* ADR-0013 slice 2: scheduler ADOPTION. Enrolled from the
+     * session's active signal set (visible here thanks to the
+     * session_create store-before-attach reorder) BEFORE connect —
+     * the set populates nothing (raw/mock) until the obd2 profile
+     * registers, so this is inert until Phase 5.
+     *
+     * GENERALIZED COUPLING RULE: scheduled PIDs require an rx filter
+     * — same J2534-1 rationale as ?poll='s (an unfiltered ISO 15765
+     * channel receives nothing, so a request loop would spin against
+     * guaranteed silence). Checked HERE rather than in parse_query
+     * because the trigger is the profile, not a URI token; Phase 5's
+     * profile-declares-channel refinement will make obd2 supply the
+     * 7E0/7E8 defaults itself, and this check becomes the
+     * user-override-didn't-break-it backstop. */
+    qttune_sched_init(&t->sched);
+    const bool sched_mode =
+        qttune_sched_from_set(&t->sched, t->session->active_signal_set);
+    if (sched_mode && t->rx_id == 0) {
+        return QT_ERR_NO_TRANSPORT;   /* scheduled PIDs require ?filter= */
     }
 
     unsigned long channel = 0;

@@ -1,3 +1,4 @@
+# File/layer: tests/CMakeLists.txt | CMake 3.21+, all three CI platforms
 find_package(GTest QUIET)
 
 if(NOT GTest_FOUND)
@@ -29,6 +30,26 @@ target_link_libraries(test_signals PRIVATE
 )
 
 gtest_discover_tests(test_signals)
+
+# --- OBD-II set + scheduler tests: MUST stay Qt-free (UNIT tier) ---
+# obd2_signal_sets.cpp is ALL-platform (signal data is transport-
+# agnostic), and pid_scheduler.h is header-only, so this suite builds
+# and runs in the headless Ubuntu job alongside test_core/test_signals.
+# The explicit core/src include is required because pid_scheduler.h is
+# INTERNAL — qttune-core's PUBLIC include dirs cover only core/include,
+# and the scheduler is deliberately not part of the public tree.
+add_executable(test_obd2 test_obd2.cpp)
+
+target_include_directories(test_obd2 PRIVATE
+    ${CMAKE_SOURCE_DIR}/core/src
+)
+
+target_link_libraries(test_obd2 PRIVATE
+    qttune-core
+    GTest::gtest_main
+)
+
+gtest_discover_tests(test_obd2)
 
 # --- C ABI compilation check: MUST stay Qt-free, builds everywhere ---
 # Compiles the public headers as strict C and links exported symbols
@@ -139,7 +160,7 @@ if(WIN32)
     # source defines the spec spelling. The everyday fake_j2534 above
     # exports the spec spelling directly, so primary resolution is what
     # every default test exercises and THIS fixture is what pins the
-    # fallback resolver. (Was 'fake_j2534_spec' — renamed 2026-10-18
+    # fallback resolver. (Was 'fake_j2534_spec' — renamed 2026-10-17
     # because the name overstated its role.)
     add_library(fake_j2534_legacy SHARED
         fake_j2534.cpp

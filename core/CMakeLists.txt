@@ -7,6 +7,7 @@ add_library(qttune-core STATIC
     src/j2534_transport.cpp
     src/signals.cpp  
     src/signal_sets.cpp
+    src/obd2_signal_sets.cpp
     src/j2534_surrogate_client.cpp
 )
 

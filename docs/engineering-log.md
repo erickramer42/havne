@@ -314,7 +314,7 @@ surrogate, got inproc"), and it took a deliberately-fresh shell to see it. Absen
 for a spawn that had never happened. The copy-immediately rule was written for adapter evidence; it governs debugging evidence identically. (3) **Instrument the op that answers your question.** The session's central question — does the VX accept the 8-byte flow-control shape? — could only be answered by inference from
 session-start success, because the surrogate traces startup and OP_OPEN and nothing else (now Known Issue #23). A quiet test result is still a result, but a logged vendor status is a fact; the gap between the two is the gap between "passed" and "passed, and here is the vendor's word for it."
 
-**2026-10-18 — surrogate serialization round (review finding 2):**
+**2026-10-17 — surrogate serialization round (review finding 2):**
 four lessons. (1) **A committed fallback test can certify nothing
 while green:** `dllexport` on `PassThruIoctl` leaked the spec
 spelling into the legacy fixture through the x64 undecorated export,
@@ -340,7 +340,7 @@ present, teardown-disconnect absent after clean closes — a manual
 check no automated tier can currently make. The check is cheap;
 the discipline is remembering to run it.
 
-**2026-10-18 — ADR-0013 slice 1 (profiles):** three lessons. (1) **Presence
+**2026-10-17 — ADR-0013 slice 1 (profiles):** three lessons. (1) **Presence
 and content are separate axes:** the first design registered "raw" as a NULL
 signal set and validated profile names with a NULL check — which cannot
 distinguish "registered, empty" from "not registered" and would have rejected

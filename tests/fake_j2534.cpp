@@ -1,29 +1,27 @@
-// File/layer: tests/fake_j2534.cpp | Fake J2534 vendor DLL, HARNESS tier; 
+// File/layer: tests/fake_j2534.cpp | Fake J2534 vendor DLL, HARNESS tier;
 //             built in BOTH trees
 // Testing: exercised via LoadLibraryEx by test_j2534_load/_stream and
-//          via the surrogate child (either arch) - the existing VBATT test now only passes if the loader
-//          really passes the device id.
+//          via the surrogate child (either arch)
 // NOTE: InjectFrame/ReadMsgs share a mutex-guarded FIFO — injections
 //      from the test thread race safely against the polling worker.
 //      Connect params are recorded so tests can assert that URI
 //      parsing reached PassThruConnect.
 //
 // PART 4 SEMANTICS (this revision):
-//  * WriteMsgs: records the message (hook-observable) AND enqueues a
-//    deterministic response — payload echoed with byte 0 + 0x40. This
-//    is TEST-DEVICE SEMANTICS, not OBD correctness: it makes the
-//    request→response loop observable through the RX path alone, from
-//    EITHER architecture, without a script-arming pipe op (an x64 test
-//    cannot reach into the x86 child's fake instance — the reason
-//    OP_INJECT exists; arming scripts would need the same treatment).
+//  * WriteMsgs: records the message (hook-observable). Response
+//    generation is two-mode (ADR-0013 slice 2):
+//      - Mode-01 request shape [..4-byte ID..][02][01][PID]: proper
+//        OBD-II response [rx_id BE][04][41][PID][canned data],
+//        values from g_obd2_canned (SetFakeObd2CannedValueExternal
+//        overrides per-test; GetFakeObd2CannedValueExternal reads).
+//      - Everything else: the legacy deterministic echo (byte 0
+//        +0x40), preserving existing ?poll= framing tests.
 //  * IoCtl: config table (SET stores, GET reads back), fixed VBATT,
 //    CLEAR_* accepted. Unknown ids FAIL like a strict vendor.
 //  * Filters: registration bookkeeping + last-invocation recording.
-//    Filter-aware echo: once a filter is registered, WriteMsgs'
-//    response prepends the filter pattern (4-byte BE CAN ID + pad).
-//    SetFilterGating controls ONLY ReadMsgs dropping (frames whose
-//    first mask_len bytes don't match the active filter are dropped);
-//    the echo shape is unconditional once a filter lands.
+//    Filter-aware echo prepends the filter pattern (4-byte BE CAN ID
+//    + pad). SetFilterGating controls ONLY ReadMsgs dropping; the
+//    echo shape is unconditional once a filter lands.
 //  * ExtraDataIndex now = DataSize (v4.04 no-extra-data convention).
 
 #define WIN32_LEAN_AND_MEAN
@@ -31,6 +29,7 @@
 
 #include "qttune/j2534_ptypes.h"
 
+#include <cstdint>
 #include <cstring>
 #include <mutex>
 #include <cstdlib>
@@ -112,6 +111,28 @@ unsigned long g_last_stopped_filter_id = 0;
  * this hook exists now so that work has its observable ready. */
 unsigned long g_disconnect_count = 0;
 
+/* ---- OBD-II canned response data (HARNESS only, ADR-0013 slice 2) ----
+ * Standard PIDs that express as simple byte-extraction + scale/offset.
+ * Defaults are PHYSICALLY PLAUSIBLE for a cold-idling vehicle:
+ *   RPM 2000, Speed 0, Load ~10%, Throttle ~8%, temps 20 degC,
+ *   fuel ~25%, voltage 13.8 V. Overridable per-test through
+ * SetFakeObd2CannedValueExternal (same mutex discipline as all
+ * other module globals). */
+struct Obd2CannedValues {
+    uint8_t pid_04_engine_load;
+    uint8_t pid_05_coolant_temp;
+    uint8_t pid_0C_rpm_high;
+    uint8_t pid_0C_rpm_low;
+    uint8_t pid_0D_speed;
+    uint8_t pid_0F_iat;
+    uint8_t pid_11_throttle;
+    uint8_t pid_2F_fuel_level;
+    uint8_t pid_42_volt_high;
+    uint8_t pid_42_volt_low;
+};
+
+Obd2CannedValues g_obd2_canned;
+
 /* Enqueue into the shared RX FIFO (mutex held by caller). Drops on
  * full exactly like InjectFrame — documented, keeps counts honest. */
 void enqueue_rx_locked(const unsigned char* data, unsigned long size,
@@ -125,6 +146,24 @@ void enqueue_rx_locked(const unsigned char* data, unsigned long size,
     slot.size = size;
     slot.timestamp_us = timestamp_us;
     slot.rx_status = rx_status;
+}
+
+/* Reset canned OBD-II values to the cold-idle defaults. Called once
+ * per module load from PassThruOpen (function-local static guards the
+ * once-ness); per-test overrides via SetFakeObd2CannedValueExternal
+ * survive subsequent opens because the reset never re-runs. */
+void reset_obd2_canned()
+{
+    g_obd2_canned.pid_04_engine_load = 25;   /* 25 * 100/255 ~= 9.8% */
+    g_obd2_canned.pid_05_coolant_temp = 60;  /* 60 - 40 = 20 degC */
+    g_obd2_canned.pid_0C_rpm_high = 0x1F;    /* 0x1F40 * 0.25 = 2000 RPM */
+    g_obd2_canned.pid_0C_rpm_low = 0x40;
+    g_obd2_canned.pid_0D_speed = 0;          /* 0 km/h */
+    g_obd2_canned.pid_0F_iat = 60;           /* 20 degC */
+    g_obd2_canned.pid_11_throttle = 20;      /* ~= 7.8% */
+    g_obd2_canned.pid_2F_fuel_level = 64;    /* ~= 25% tank */
+    g_obd2_canned.pid_42_volt_high = 0x36;   /* 0x3630 = 13800 mV */
+    g_obd2_canned.pid_42_volt_low = 0x30;
 }
 
 /* Matches the most recent active filter against a frame's first
@@ -145,6 +184,123 @@ bool filter_matches(const unsigned char* frame_data, unsigned long frame_size,
     return true;
 }
 
+/* Build an OBD-II Mode-01 response. Caller (WriteMsgs, mutex HELD)
+ * has already verified the request shape: >= 7 bytes, req[4]==0x02
+ * (SF PCI), req[5]==0x01 (Mode 01). Output: [rx_id BE from the
+ * active filter pattern][04][41][PID][canned data][zero pad] —
+ * 12 bytes total, the same wire shape the transport's strip logic
+ * expects. Mutex-held: reads g_last_filter and g_obd2_canned. */
+void build_obd2_response(const unsigned char* req, unsigned long req_len,
+                         unsigned char* resp, unsigned long* resp_len)
+{
+    (void)req_len;   /* shape pre-validated by the caller */
+    const uint8_t pid = req[6];
+
+    resp[0] = g_last_filter.pattern[0];
+    resp[1] = g_last_filter.pattern[1];
+    resp[2] = g_last_filter.pattern[2];
+    resp[3] = g_last_filter.pattern[3];
+    resp[4] = 0x04;   /* SF PCI — 4 data bytes follow */
+    resp[5] = 0x41;   /* Mode 01 + 0x40 response */
+    resp[6] = pid;    /* PID echo */
+
+    switch (pid) {
+        case 0x00:  /* Supported PIDs bitmask (all zero for v1) */
+            resp[7] = resp[8] = resp[9] = resp[10] = 0;
+            resp[11] = resp[12] = resp[13] = resp[14] = 0;
+            *resp_len = 12;
+            break;
+        case 0x04:  /* Engine Load */
+            resp[7] = g_obd2_canned.pid_04_engine_load;
+            resp[8] = resp[9] = resp[10] = resp[11] = 0;
+            *resp_len = 12;
+            break;
+        case 0x05:  /* Coolant Temp */
+            resp[7] = g_obd2_canned.pid_05_coolant_temp;
+            resp[8] = resp[9] = resp[10] = resp[11] = 0;
+            *resp_len = 12;
+            break;
+        case 0x0C:  /* RPM */
+            resp[7] = g_obd2_canned.pid_0C_rpm_high;
+            resp[8] = g_obd2_canned.pid_0C_rpm_low;
+            resp[9] = resp[10] = resp[11] = 0;
+            *resp_len = 12;
+            break;
+        case 0x0D:  /* Vehicle Speed */
+            resp[7] = g_obd2_canned.pid_0D_speed;
+            resp[8] = resp[9] = resp[10] = resp[11] = 0;
+            *resp_len = 12;
+            break;
+        case 0x0F:  /* Intake Air Temp */
+            resp[7] = g_obd2_canned.pid_0F_iat;
+            resp[8] = resp[9] = resp[10] = resp[11] = 0;
+            *resp_len = 12;
+            break;
+        case 0x11:  /* Throttle Position */
+            resp[7] = g_obd2_canned.pid_11_throttle;
+            resp[8] = resp[9] = resp[10] = resp[11] = 0;
+            *resp_len = 12;
+            break;
+        case 0x2F:  /* Fuel Level */
+            resp[7] = g_obd2_canned.pid_2F_fuel_level;
+            resp[8] = resp[9] = resp[10] = resp[11] = 0;
+            *resp_len = 12;
+            break;
+        case 0x42:  /* Battery Voltage */
+            resp[7] = g_obd2_canned.pid_42_volt_high;
+            resp[8] = g_obd2_canned.pid_42_volt_low;
+            resp[9] = resp[10] = resp[11] = 0;
+            *resp_len = 12;
+            break;
+        default:    /* Unsupported PID — well-formed echo of zeros */
+            resp[7] = resp[8] = resp[9] = resp[10] = 0;
+            resp[11] = resp[12] = resp[13] = resp[14] = 0;
+            *resp_len = 12;
+            break;
+    }
+}
+
+/* Override canned response values for a specific PID. */
+void SetFakeObd2CannedValue(unsigned char pid, unsigned char* data,
+                            unsigned long len)
+{
+    if (data == nullptr || len == 0) return;
+    std::lock_guard<std::mutex> lk(g_lock);
+    switch (pid) {
+        case 0x04: if (len >= 1) g_obd2_canned.pid_04_engine_load = data[0]; break;
+        case 0x05: if (len >= 1) g_obd2_canned.pid_05_coolant_temp = data[0]; break;
+        case 0x0C: if (len >= 2) { g_obd2_canned.pid_0C_rpm_high = data[0];
+                                   g_obd2_canned.pid_0C_rpm_low = data[1]; } break;
+        case 0x0D: if (len >= 1) g_obd2_canned.pid_0D_speed = data[0]; break;
+        case 0x0F: if (len >= 1) g_obd2_canned.pid_0F_iat = data[0]; break;
+        case 0x11: if (len >= 1) g_obd2_canned.pid_11_throttle = data[0]; break;
+        case 0x2F: if (len >= 1) g_obd2_canned.pid_2F_fuel_level = data[0]; break;
+        case 0x42: if (len >= 2) { g_obd2_canned.pid_42_volt_high = data[0];
+                                   g_obd2_canned.pid_42_volt_low = data[1]; } break;
+    }
+}
+
+/* Get current canned value for a PID (for test assertions). */
+void GetFakeObd2CannedValue(unsigned char pid, unsigned char* out_data,
+                            unsigned long* out_len)
+{
+    if (out_data == nullptr || out_len == nullptr) return;
+    std::lock_guard<std::mutex> lk(g_lock);
+    switch (pid) {
+        case 0x04: *out_len = 1; out_data[0] = g_obd2_canned.pid_04_engine_load; break;
+        case 0x05: *out_len = 1; out_data[0] = g_obd2_canned.pid_05_coolant_temp; break;
+        case 0x0C: *out_len = 2; out_data[0] = g_obd2_canned.pid_0C_rpm_high;
+                                    out_data[1] = g_obd2_canned.pid_0C_rpm_low; break;
+        case 0x0D: *out_len = 1; out_data[0] = g_obd2_canned.pid_0D_speed; break;
+        case 0x0F: *out_len = 1; out_data[0] = g_obd2_canned.pid_0F_iat; break;
+        case 0x11: *out_len = 1; out_data[0] = g_obd2_canned.pid_11_throttle; break;
+        case 0x2F: *out_len = 1; out_data[0] = g_obd2_canned.pid_2F_fuel_level; break;
+        case 0x42: *out_len = 2; out_data[0] = g_obd2_canned.pid_42_volt_high;
+                                    out_data[1] = g_obd2_canned.pid_42_volt_low; break;
+        default: *out_len = 0; break;
+    }
+}
+
 } // namespace fake_j2534
 
 extern "C" __declspec(dllexport)
@@ -153,6 +309,16 @@ long __stdcall PassThruOpen(void* pName, unsigned long* pDeviceID)
     (void)pName;
     if (pDeviceID == nullptr) {
         return STATUS_FAILED;
+    }
+
+    /* Initialize canned OBD values ONCE per module load (before the
+     * lock so a test armed on another thread never observes the
+     * half-reset state; once-only means per-test overrides through
+     * SetFakeObd2CannedValueExternal survive later re-opens). */
+    static bool canned_initialized = false;
+    if (!canned_initialized) {
+        fake_j2534::reset_obd2_canned();
+        canned_initialized = true;
     }
 
     /* Test-only open blocking (Issue #22 test): QTTUNE_FAKE_OPEN_DELAY_MS
@@ -259,9 +425,9 @@ long __stdcall PassThruReadMsgs(unsigned long ChannelID,
                 if (fake_j2534::g_filters[i].filter_id == 0) {
                     continue;
                 }
-                if (filter_matches(fake_j2534::g_queue[0].data,
-                                   fake_j2534::g_queue[0].size,
-                                   fake_j2534::g_filters[i])) {
+                if (fake_j2534::filter_matches(fake_j2534::g_queue[0].data,
+                                               fake_j2534::g_queue[0].size,
+                                               fake_j2534::g_filters[i])) {
                     match = true;
                     break;
                 }
@@ -335,41 +501,39 @@ long __stdcall PassThruWriteMsgs(unsigned long ChannelID,
     }
     fake_j2534::g_write_count++;
 
-    /* Deterministic response — DEVICE MODEL, filter-aware.
+    /* RESPONSE GENERATION — filter-aware, two modes (ADR-0013 slice 2).
      *
-     * With no filter registered: raw echo of the payload with byte 0
-     * + 0x40 (Part 4 relay-test semantics — unchanged, keeps the
-     * surrogate/routing write tests byte-compatible).
+     * Mode-01 REQUEST: payload (after the 4-byte address header) starts
+     * [0x02][0x01][PID] — a single-frame Mode-01 request. Emit a proper
+     * OBD-II response: [rx_id BE][0x04][0x41][PID][canned data].
      *
-     * With a filter registered: a real ISO 15765 device CONSUMES the
-     * request's 4-byte address header and responds [its own ID BE]
-     * [payload, byte 0 + 0x40]. Modeling the device (not the filter
-     * message shape) is what makes the transport's 4-byte strip leave
-     * a clean payload — and it works from EITHER architecture with no
-     * arming hook (the cross-arch observable).
-     *
-     * Request-side precondition: a filter-registered write is expected
-     * to carry a 4-byte address prefix (the transport always sends
-     * one). Writes shorter than 4 bytes fall back to the raw echo —
-     * defensive, not a contract.
-     */
+     * Everything ELSE keeps the deterministic echo semantics the
+     * existing ?poll= framing tests pin (no filter: raw echo, byte 0
+     * + 0x40; filter registered: pattern-prefixed echo). The +0x40 is
+     * FAKE-DEVICE semantics, not OBD correctness — a real ECU answers
+     * 01 0C with 41 0C, which the OBD-II mode now models too. */
     if (n > 0) {
+        const unsigned char* req = pMsg->Data;
         unsigned char echo[64];
         unsigned long echo_len;
 
         const bool has_filter = (fake_j2534::g_last_filter.filter_id != 0)
                                  && (n >= 4);
 
-        if (has_filter) {
-            /* device model: [pattern ID (4)][payload with +0x40] */
+        if (has_filter && n >= 7 &&
+            req[4] == 0x02 && req[5] == 0x01) {
+            /* Mode-01 SF request: OBD-II response path */
+            fake_j2534::build_obd2_response(req, n, echo, &echo_len);
+        } else if (has_filter) {
+            /* device model: [pattern ID (4)][payload, byte 0 + 0x40] */
             memcpy(echo, fake_j2534::g_last_filter.pattern, 4);
-            memcpy(echo + 4, pMsg->Data + 4, n - 4);
-            echo[4] = static_cast<unsigned char>(pMsg->Data[4] + 0x40);
+            memcpy(echo + 4, req + 4, n - 4);
+            echo[4] = static_cast<unsigned char>(req[4] + 0x40);
             echo_len = 4 + (n - 4);
         } else {
             /* legacy Part 4 semantics: raw echo, byte 0 + 0x40 */
-            memcpy(echo, pMsg->Data, n);
-            echo[0] = static_cast<unsigned char>(pMsg->Data[0] + 0x40);
+            memcpy(echo, req, n);
+            echo[0] = static_cast<unsigned char>(req[0] + 0x40);
             echo_len = n;
         }
 
@@ -709,6 +873,25 @@ void SetFilterGating(int enable)
 {
     std::lock_guard<std::mutex> lk(fake_j2534::g_lock);
     fake_j2534::g_filter_gating_enabled = (enable != 0);
+}
+
+/* ---- OBD-II canned-value hooks (ADR-0013 slice 2, HARNESS) ---- */
+
+/* Override canned response values for a specific PID. Test-side
+ * configuration so HARNESS tests can assert exact decoded values. */
+extern "C" __declspec(dllexport)
+void SetFakeObd2CannedValueExternal(unsigned char pid, unsigned char* data,
+                                    unsigned long len)
+{
+    fake_j2534::SetFakeObd2CannedValue(pid, data, len);
+}
+
+/* Get current canned value for a PID (for test assertions). */
+extern "C" __declspec(dllexport)
+void GetFakeObd2CannedValueExternal(unsigned char pid, unsigned char* out_data,
+                                    unsigned long* out_len)
+{
+    fake_j2534::GetFakeObd2CannedValue(pid, out_data, out_len);
 }
 
 #endif // TEST_HOOKS_ENABLED || _DEBUG

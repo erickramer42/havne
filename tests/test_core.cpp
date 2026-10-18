@@ -1,5 +1,4 @@
-// File/layer: tests/test_core.cpp | GTest-based, CI-validated
-// Testing: Verifies registration, dedup, dispatch, and lifecycle contracts
+// File/layer: tests/test_core.cpp | GTest, UNIT tier, headless CI job
 
 #include <gtest/gtest.h>
 #include <cstring>
@@ -647,6 +646,107 @@ TEST(CoreTest, UnknownProfileRejectedBeforeDllLoad) {
     qttune_session_t* session = nullptr;
     EXPECT_EQ(qttune_session_create(
         "j2534://C:/qttune-definitely-not-a-real-dll.dll?profile=bogus",
+        &session), QT_ERR_NO_TRANSPORT);
+    EXPECT_EQ(session, nullptr);
+}
+#endif
+
+// ---------------------------------------------------------------------------
+// ADR-0013 slice 2: profile query tri-state — a present-but-malformed
+// ?profile= value must fail session_create, never silently downgrade
+// to the scheme default. Closes the core-vs-parse_query strictness
+// asymmetry from the 2026-10-18 session-open review.
+// ---------------------------------------------------------------------------
+
+TEST(CoreTest, ProfileQueryEmptyValueRejected) {
+    /* ?profile= with nothing after '=': PRESENT but malformed — the
+     * old tolerant scanner silently fell back to the scheme default,
+     * which could hand a typo'd ?profile=raw a decoding session. */
+    qttune_session_t* session = nullptr;
+    EXPECT_EQ(qttune_session_create("mock://x?profile=", &session),
+              QT_ERR_NO_TRANSPORT);
+    EXPECT_EQ(session, nullptr);
+}
+
+TEST(CoreTest, ProfileQueryTooLongValueRejected) {
+    /* 64+ chars can't be a registry name (64-byte scan buffer, room
+     * for the terminator). Fail fast, not truncate-and-confuse. */
+    std::string uri = "mock://x?profile=";
+    uri.append(80, 'a');
+    qttune_session_t* session = nullptr;
+    EXPECT_EQ(qttune_session_create(uri.c_str(), &session),
+              QT_ERR_NO_TRANSPORT);
+    EXPECT_EQ(session, nullptr);
+}
+
+TEST(CoreTest, ProfileQueryBoundaryLengthAcceptedAt63) {
+    /* 63 chars is the last length the scanner accepts. Registered
+     * under exactly that name so this proves the ACCEPTING side of
+     * the boundary — the 64 case above pins the rejecting side. */
+    const std::string name63(63, 'q');
+    const QttuneSignalSet* mock_set = qttune_mock_signal_set();
+    ASSERT_EQ(qttune_profile_register(name63.c_str(), mock_set), QT_OK);
+
+    std::string uri = "mock://boundary?profile=" + name63;
+    qttune_session_t* session = nullptr;
+    ASSERT_EQ(qttune_session_create(uri.c_str(), &session), QT_OK);
+    EXPECT_EQ(qttune_session_signal_set(session), mock_set);
+    qttune_session_destroy(session);
+}
+
+TEST(CoreTest, ProfileQueryMalformedFailsEvenWhenLaterValidExists) {
+    /* Scanner semantics: ANY malformed occurrence fails, last-wins
+     * applies only across syntactically valid values. The empty
+     * first value must not be healed by the valid second one. */
+    qttune_session_t* session = nullptr;
+    EXPECT_EQ(qttune_session_create("mock://x?profile=&profile=mock",
+                                    &session),
+              QT_ERR_NO_TRANSPORT);
+    EXPECT_EQ(session, nullptr);
+
+    /* Reverse order: valid first, malformed LAST — a later malformed
+     * value still poisons the URI (it is not a "drop the bad one,
+     * keep scanning" grammar — it is strict). */
+    EXPECT_EQ(qttune_session_create("mock://x?profile=mock&profile=",
+                                    &session),
+              QT_ERR_NO_TRANSPORT);
+    EXPECT_EQ(session, nullptr);
+}
+
+TEST(CoreTest, ProfileQueryLastValidWinsAcrossDuplicates) {
+    /* Across WELL-FORMED values, the last wins — matching the
+     * documented duplicate-key rule for every other URI parameter.
+     * Distinguished from the malformed cases above by using a real,
+     * registered name that differs from the scheme default. */
+    const std::string name63(63, 'q');   /* registered by the boundary
+                                            test above — but tests
+                                            shouldn't depend on order. */
+    ASSERT_EQ(qttune_profile_register(name63.c_str(),
+                                      qttune_mock_signal_set()), QT_OK);
+
+    std::string uri1 = "mock://x?profile=raw&profile=" + name63;
+    qttune_session_t* session = nullptr;
+    ASSERT_EQ(qttune_session_create(uri1.c_str(), &session), QT_OK);
+    EXPECT_EQ(qttune_session_signal_set(session),
+              qttune_mock_signal_set());   /* last (name63) won */
+    qttune_session_destroy(session);
+
+    /* And the inverse order: raw last → null set */
+    std::string uri2 = "mock://x?profile=" + name63 + "&profile=raw";
+    ASSERT_EQ(qttune_session_create(uri2.c_str(), &session), QT_OK);
+    EXPECT_EQ(qttune_session_signal_set(session), nullptr);
+    qttune_session_destroy(session);
+}
+
+#ifdef _WIN32
+TEST(CoreTest, MalformedProfileRejectedBeforeDllLoad) {
+    /* Ordering discriminator, matching UnknownProfileRejectedBeforeDllLoad:
+     * a MALFORMED profile value on a nonexistent DLL path must yield
+     * NO_TRANSPORT (profile-parse failure), not QT_ERR_LOAD_FAILED.
+     * If it returns 7, the tri-state check moved after attach. */
+    qttune_session_t* session = nullptr;
+    EXPECT_EQ(qttune_session_create(
+        "j2534://C:/qttune-definitely-not-a-real-dll.dll?profile=",
         &session), QT_ERR_NO_TRANSPORT);
     EXPECT_EQ(session, nullptr);
 }

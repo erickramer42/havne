@@ -22,6 +22,10 @@ Registry& registry()
     static Registry r = {
         {"mock", qttune_mock_signal_set()},
         {"raw",  nullptr},   /* null profile — Log page only */
+        /* ADR-0013 slice 2: the OBD-II v1 set — decode via mux-gated
+         * defs + the multi-PID round-robin scheduler (j2534 worker
+         * enrolls from this set at start). */
+        {"obd2", qttune_obd2_signal_set()},
     };
     return r;
 }
