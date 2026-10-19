@@ -16,6 +16,11 @@
 static HMODULE g_module = nullptr;
 static unsigned long g_device_id = 0;
 static unsigned long g_channel = 0;
+/* Presence flags, not 0-sentinels: J2534 does not reserve 0 as an
+ * invalid DeviceID or ChannelID, so a vendor returning 0 would be
+ * treated as "not open" and never read or closed (finding 8). */
+static bool g_have_device = false;
+static bool g_have_channel = false;
 
 typedef long (__stdcall *fn_pt_open)(void*, unsigned long*);
 typedef long (__stdcall *fn_pt_close)(unsigned long);
@@ -51,9 +56,16 @@ static PASSTHRU_MSG s_read_batch[QTTUNE_SUR_MAX_FRAMES_PER_READ];
 
 static void stage(const char* fmt, ...)
 {
+    /* Timestamped: the first talking-bus session has to correlate the
+     * child's vendor calls with the parent's cycles, which is guesswork
+     * without a clock (Known Issue #23). Milliseconds since the child
+     * started, so the numbers stay small and comparable. The
+     * "[surrogate]" prefix is kept — development.md greps for it. */
+    static const ULONGLONG epoch = GetTickCount64();
+    fprintf(stderr, "[surrogate %8llu ms] ",
+            static_cast<unsigned long long>(GetTickCount64() - epoch));
     va_list ap;
     va_start(ap, fmt);
-    fputs("[surrogate] ", stderr);
     vfprintf(stderr, fmt, ap);
     fputc('\n', stderr);
     fflush(stderr);
@@ -78,6 +90,7 @@ static int handle_op_open(void)
     stage("OP_OPEN: vendor status %ld, device_id=%lu", rc, device);
     if (rc == QTTUNE_PT_STATUS_NOERROR) {
         g_device_id = device;
+        g_have_device = true;
     }
     return static_cast<int>(rc);
 }
@@ -89,7 +102,10 @@ static int handle_op_connect(uint32_t protocol_id, uint32_t flags, uint32_t baud
     long rc = g_connect(g_device_id, protocol_id, flags, baud, &ch);
     stage("OP_CONNECT: vendor status %ld, channel=%lu (device=%lu)",
           rc, ch, g_device_id);
-    if (rc == QTTUNE_PT_STATUS_NOERROR) g_channel = ch;
+    if (rc == QTTUNE_PT_STATUS_NOERROR) {
+        g_channel = ch;
+        g_have_channel = true;
+    }
     if (out_ch != nullptr) *out_ch = static_cast<uint32_t>(ch);
     return static_cast<int>(rc);
 }
@@ -98,7 +114,10 @@ static int handle_op_disconnect(unsigned long channel)
 {
     long rc = g_disconnect(channel);
     stage("OP_DISCONNECT: vendor status %ld, channel=%lu", rc, channel);
-    if (rc == QTTUNE_PT_STATUS_NOERROR) g_channel = 0;
+    if (rc == QTTUNE_PT_STATUS_NOERROR) {
+        g_channel = 0;
+        g_have_channel = false;
+    }
     return static_cast<int>(rc);
 }
 
@@ -107,18 +126,18 @@ static int handle_op_read(unsigned long channel, uint32_t timeout_ms,
 {
     (void)channel;   /* child uses g_channel exclusively */
     resp->num_frames = 0;
-    if (g_channel == 0 || g_read_msgs == nullptr) {
+    if (!g_have_channel || g_read_msgs == nullptr) {
         return static_cast<int>(QTTUNE_PT_STATUS_NOERROR);
     }
 
     unsigned long num = QTTUNE_SUR_MAX_FRAMES_PER_READ;
     const long rc = g_read_msgs(g_channel, s_read_batch, &num, timeout_ms);
 
-    /* Vendor status rides home VERBATIM in resp->status */
-    if (rc != QTTUNE_PT_STATUS_NOERROR && num == 0) {
-        return static_cast<int>(rc);
-    }
-
+    /* Frames are collected whatever the status: per J2534-1 a read that
+     * asks for N messages with a nonzero timeout returns ERR_TIMEOUT
+     * together with however many arrived, so on a conforming vendor the
+     * ECU's answer usually arrives with a nonzero status (#26). The
+     * status still rides home verbatim in resp->status. */
     uint32_t n = 0;
     const unsigned long lim = (num < QTTUNE_SUR_MAX_FRAMES_PER_READ)
                               ? num : QTTUNE_SUR_MAX_FRAMES_PER_READ;
@@ -139,6 +158,14 @@ static int handle_op_read(unsigned long channel, uint32_t timeout_ms,
         ++n;
     }
     resp->num_frames = n;
+
+    /* Trace frames and status changes only: an idle drain reads ~10x/s
+     * and would bury everything else (Known Issue #23). */
+    static long last_read_rc = -1;
+    if (n > 0 || rc != last_read_rc) {
+        stage("OP_READ: status %ld, frames %u", rc, n);
+        last_read_rc = rc;
+    }
     return static_cast<int>(rc);
 }
 
@@ -156,7 +183,18 @@ static int handle_op_write(unsigned long channel, const uint8_t* data,
     unsigned long num = 1;
     long rc = g_write_msgs(channel, &msg, &num, timeout_ms);
     if (out_num != nullptr) *out_num = static_cast<uint32_t>(num);
-    stage("OP_WRITE: status %ld, written %lu", rc, num);
+    
+    /* Status-change logging: a healthy scheduler writes ~10/s, and the
+     * per-call line buried the interesting ones (Known Issue #23). The
+     * first write and every change of (status, count) still log. */
+    static long last_write_rc = -1;
+    static unsigned long last_write_num = 0;
+    if (rc != last_write_rc || num != last_write_num) {
+        stage("OP_WRITE: status %ld, written %lu", rc, num);
+        last_write_rc = rc;
+        last_write_num = num;
+    }
+
     return static_cast<int>(rc);
 }
 
@@ -472,8 +510,8 @@ int main(int argc, char* argv[])
     }
 
 shutdown:
-    if (g_channel != 0) g_disconnect(g_channel);
-    if (g_device_id != 0) g_close(g_device_id);
+    if (g_have_channel) g_disconnect(g_channel);
+    if (g_have_device) g_close(g_device_id);
     FreeLibrary(g_module);
     if (g_pipe != INVALID_HANDLE_VALUE) CloseHandle(g_pipe);
     return 0;

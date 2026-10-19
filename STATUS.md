@@ -195,17 +195,20 @@ it a genuine connect candidate.
 1. **Flow-control filter shape.**
    - The loader seam requires the flow-control message length to equal
      the mask length.
-   - So the transport registers 8-byte mask, pattern and flow-control
-     messages: the 4-byte ID, then `30 00 00` (clear-to-send, BS 0,
-     STmin 0), then zero padding. The trailing mask bytes are
-     don't-care.
-   - The equality rule is believed to be stricter than J2534-1
-     requires. Relax it if a real vendor rejects this shape.
-     (`j2534_transport.cpp` points here.)
-2. **Request framing.** The transport supplies the ISO-TP single-frame
-   PCI byte and the 8-byte zero padding itself, giving 12 wire bytes
-   including the 4-byte ID. Some drivers do the framing and padding
-   in-driver instead.
+   - Mask, pattern and flow-control messages are bare 4-byte big-endian
+     CAN IDs: the adapter's ISO-TP stack does the framing, so no PCI
+     byte belongs in the flow-control message. The loader seam's
+     length-equality rule is satisfied trivially at 4 bytes.
+   - This SUPERSEDES the 8-byte shape (`[ID][30 00 00][pad]`) the
+     2026-10-16 session accepted. The 4-byte shape has never met real
+     hardware. If the VX rejects it, the child log now carries the
+     vendor's filter status verbatim — capture it.
+2. **Request framing.** The transport writes the LOGICAL message —
+   `[4-byte tx ID][01][PID]`, 6 bytes — with ISO15765_FRAME_PAD, so the
+   adapter adds the ISO-TP PCI byte and zero-pads the CAN frame. The
+   pre-N1 shape supplied both in-band (12 bytes). Some drivers expect
+   the in-band form; if the VX transmits nothing, this is the first
+   suspect.
 3. **No checksum byte.** This is ISO 15765-4 over CAN, so the K-line
    checksum convention doesn't apply.
 4. **29-bit addressing** is assumed whenever either ID is above
@@ -218,6 +221,9 @@ it a genuine connect candidate.
    observe: which status the VX returns for an empty read, and
    whether it returns `ERR_TIMEOUT` together with a partial batch
    (#26).
+   - #26 is fixed (batches that arrive with ERR_TIMEOUT are now delivered); 
+    still to observe whether the VX returns ERR_TIMEOUT with a partial batch at 
+    all, and which status it gives for a truly empty read.
 7. **Struct-layout conformance to v04.04** cannot be confirmed without
    a device ([ADR-0010](docs/adr/0010-j2534-v0404-shared-types.md)).
 8. **Vendor ioctl and filter behavior** and timeout semantics.

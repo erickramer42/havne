@@ -199,6 +199,23 @@ bool transact(qttune_j2534_sur_handle_t* h, const qttune_sur_request_t& req,
     return true;
 }
 
+/* Decode the child's exit code (j2534.md "Child exit codes") so a spawn
+ * failure names its stage instead of surfacing as a bare LOAD_FAILED.
+ * Safe to call when the child is still running — it then does nothing. */
+void log_child_exit(HANDLE process)
+{
+    DWORD code = 0;
+    if (process == nullptr || !GetExitCodeProcess(process, &code)) return;
+    if (code == STILL_ACTIVE) return;
+    const char* stage =
+        (code == 1) ? "bad argument count"
+      : (code == 4) ? "LoadLibraryEx of the vendor DLL failed"
+      : (code == 5) ? "a mandatory export is missing (named above)"
+      : (code == 7) ? "could not connect to the app's pipe"
+      :               "unknown";
+    SUR_LOG("open: child exited with code %lu (%s)\n", code, stage);
+}
+
 } // namespace
 
 extern "C" {
@@ -274,6 +291,7 @@ qttune_status_t qttune_j2534_sur_open(const char* dll_path,
                         CREATE_SUSPENDED | CREATE_NO_WINDOW,
                         nullptr, nullptr, &si, &pi)) {
         if (child_log != INVALID_HANDLE_VALUE) CloseHandle(child_log);
+        SUR_LOG("open: CreateProcess failed (err=%lu) exe='%s'\n", GetLastError(), exe);
         qttune_j2534_sur_close(h);
         return QT_ERR_LOAD_FAILED;
     }
@@ -315,32 +333,57 @@ qttune_status_t qttune_j2534_sur_open(const char* dll_path,
             DWORD xfer = 0;
             connected = GetOverlappedResult(h->pipe, &ov, &xfer, FALSE);
         } else if (wr == WAIT_OBJECT_0 + 1) {
-            DWORD ecx = 0;
-            if (GetExitCodeProcess(h->process, &ecx)) {
-                SUR_LOG("open: child died pre-connect, exit=%lu\n", ecx);
-            }
+            log_child_exit(h->process);          /* replaces the inline decode */
+        } else {
+            SUR_LOG("open: handshake timeout after %lu ms (child alive, "
+                    "never connected — vendor blocked in PassThruOpen?)\n",
+                    handshake_timeout_ms());
         }
+    }
+
+    /* A failed handshake can leave ConnectNamedPipe pending. Cancel and
+     * drain it BEFORE releasing the event and the pipe, or the kernel
+     * completes that I/O into freed structures (C3). CancelIoEx on an
+     * already-completed request is harmless — it reports NOT_FOUND. */
+    if (!connected) {
+        CancelIoEx(h->pipe, &ov);
+        DWORD drained = 0;
+        (void)GetOverlappedResult(h->pipe, &ov, &drained, TRUE);
     }
     CloseHandle(ov.hEvent);
     if (!connected) {
-        qttune_j2534_sur_close(h);
-        return QT_ERR_LOAD_FAILED;
-    }
-
-    qttune_sur_request_t req = {};
-    req.request_id = h->next_request_id++;
-    req.opcode = QTTUNE_SUR_OP_OPEN;
-    qttune_sur_response_t resp = {};
-    if (!transact(h, req, &resp, handshake_timeout_ms())) {
-        qttune_j2534_sur_close(h);
-        return QT_ERR_LOAD_FAILED;
-    }
-    if (resp.status != static_cast<int32_t>(QTTUNE_PT_STATUS_NOERROR)) {
+        SUR_LOG("open: handshake failed — child never connected\n");
         qttune_j2534_sur_close(h);
         return QT_ERR_LOAD_FAILED;
     }
 
     h->pipe_connected = true;
+
+    /* OP_OPEN: pipe-connected has proven load + all nine exports; this
+     * transaction waits only on the vendor's PassThruOpen. Refused is
+     * a FAILED response; unanswered with a live child is a vendor
+     * blocked on absent hardware (#22). */
+    qttune_sur_request_t req = {};
+    req.request_id = h->next_request_id++;
+    req.opcode = QTTUNE_SUR_OP_OPEN;
+    qttune_sur_response_t resp = {};
+    if (!transact(h, req, &resp, handshake_timeout_ms())) {
+        log_child_exit(h->process);
+        /* The child is wedged inside the vendor's PassThruOpen (or
+         * dead): single-threaded, it cannot service OP_SHUTDOWN, so a
+         * polite close would burn the full 3 s transact window for a
+         * reply that cannot come (#22). Terminate now — the subsequent
+         * sur_close then fails its SHUTDOWN write instantly on a
+         * broken pipe and the process wait returns immediately. */
+        TerminateProcess(h->process, 1);
+        qttune_j2534_sur_close(h);
+        return QT_ERR_LOAD_FAILED;
+    }
+    if (resp.status != static_cast<int32_t>(QTTUNE_PT_STATUS_NOERROR)) {
+        SUR_LOG("open: PassThruOpen refused (vendor status %d)\n", resp.status);
+        qttune_j2534_sur_close(h);
+        return QT_ERR_LOAD_FAILED;
+    }
     *out_handle = h;
     return QT_OK;
 }
@@ -365,6 +408,8 @@ qttune_status_t qttune_j2534_sur_connect_channel(qttune_j2534_sur_handle_t* h,
         return QT_ERR_NO_TRANSPORT;
     }
     if (resp.status != static_cast<int32_t>(QTTUNE_PT_STATUS_NOERROR)) {
+        SUR_LOG("connect: PassThruConnect refused (vendor status %d)\n",
+                resp.status);
         return QT_ERR_NO_TRANSPORT;
     }
     *out_channel = resp.handle_or_channel;
@@ -581,9 +626,23 @@ qttune_status_t qttune_j2534_sur_read_frame(qttune_j2534_sur_handle_t* h,
         return QT_ERR_TRANSPORT_HARD_FAILURE;
     }
 
-    /* Known Issue #26: these status checks run before the cache fill,
-     * so a batch that arrives with ERR_TIMEOUT (normal when fewer than
-     * 16 messages arrive within the timeout) is discarded. */
+    /* Deliver first, judge the status second (#26). Per J2534-1 a read
+     * asking for N messages with a nonzero timeout returns ERR_TIMEOUT
+     * TOGETHER WITH however many arrived, so a conforming vendor reports
+     * nearly every response that way. The in-proc path delivers any
+     * message the vendor returns; this path must too, or the ECU's
+     * answer is dropped and a healthy session shows nothing at all. */
+    if (resp.num_frames > 0) {
+        memcpy(h->pending, resp.frames,
+               sizeof(qttune_sur_frame_t) * resp.num_frames);
+        h->pending_count = resp.num_frames;
+        h->pending_next = 0;
+        /* Recurse once into the cache-dispense path above. */
+        return qttune_j2534_sur_read_frame(h, channel, out_frame,
+                                           timeout_ms, got_frame);
+    }
+
+    /* Empty batch: now the status decides. */
     if (resp.status == static_cast<int32_t>(QTTUNE_PT_STATUS_TIMEOUT)) {
         return QT_ERR_VEHICLE_TIMEOUT;
     }
@@ -593,19 +652,7 @@ qttune_status_t qttune_j2534_sur_read_frame(qttune_j2534_sur_handle_t* h,
         }
         return QT_ERR_TRANSPORT_HARD_FAILURE;
     }
-
-    if (resp.num_frames == 0) {
-        return QT_OK;   /* NOERROR, nothing available */
-    }
-
-    memcpy(h->pending, resp.frames,
-           sizeof(qttune_sur_frame_t) * resp.num_frames);
-    h->pending_count = resp.num_frames;
-    h->pending_next = 0;
-
-    /* Recurse once into the cache-dispense path above. */
-    return qttune_j2534_sur_read_frame(h, channel, out_frame,
-                                       timeout_ms, got_frame);
+    return QT_OK;   /* NOERROR, nothing available */
 }
 
 qttune_status_t qttune_j2534_sur_inject_test_frame(qttune_j2534_sur_handle_t* h,

@@ -32,12 +32,12 @@ Dates are commit dates.
 | 2026-10-16 | Issue #22: async bridge connect; surrogate pipe-first startup | `eacf1d0` |
 | 2026-10-16 | Issue #22 + IoCtl export-spelling fix; first real-vendor session (VX connect cycle) | `eacf1d0` |
 | 2026-10-16 | First formal BENCH session: OBDX Pro VX, quiet bus — filter shape accepted, soak clean | `e60325b` |
-| 2026-10-17 | Issue #24: surrogate vendor-call serialization, single disconnect; IoCtl dllexport strip; GetDisconnectCount hook | `<hash>` |
+| 2026-10-17 | Issue #24: surrogate vendor-call serialization, single disconnect; IoCtl dllexport strip; GetDisconnectCount hook | `1a75862` |
 | 2026-10-17 | ADR-0013 slice 1: profile registry, raw profile, bridge decoupling (#21 closed) | `57d7fcf` |
 | 2026-10-18 | ADR-0013 slice 2: obd2 signal set, multi-PID scheduler, drain budget (formerly #25) | `8305420` |
-| 2026-10-19 | ADR-0013 slice 3: profile-declared channels; bare-URI filter derivation | `<hash>` |
-| 2026-10-19 | Win32 surrogate auto-deploy from sibling build-win32 | `<hash>` |
-| 2026-10-19 | Single-threaded surrogate, batched `OP_READ`, ring retired ([ADR-0014](adr/0014-single-threaded-surrogate.md)); read-status split in both backends (#11 partial); #17 resolved by removal | `<hash>` |
+| 2026-10-19 | ADR-0013 slice 3: profile-declared channels; bare-URI filter derivation | `c5cc6f7` |
+| 2026-10-19 | Win32 surrogate auto-deploy from sibling build-win32 | `c5cc6f7` |
+| 2026-10-19 | Single-threaded surrogate, batched `OP_READ`, ring retired ([ADR-0014](adr/0014-single-threaded-surrogate.md)); read-status split in both backends (#11 partial); #17 resolved by removal | `0b43261` |
 
 ## Lessons learned
 
