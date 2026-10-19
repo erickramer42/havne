@@ -20,7 +20,9 @@ including transport adoption (Part 5).The BENCH tier tested on real adapter with
   - The mock transport drives the live frame log, LiveView and the
     strip chart.
   - J2534 runs end to end against the fake vendor DLL, both in-proc
-    and through the x86 surrogate, including write/ioctl/filter relay on both backends, transport adoption: filters, the Mode-01 request loop, and frame identity via ?filter=/?txid=/?poll= (ADR-0012).
+    and through the x86 surrogate, including write/ioctl/filter relay on both 
+    backends, transport adoption: filters, the Mode-01 request loop, and frame 
+    identity via ?filter=/?txid=/?poll= (ADR-0012).
   - The surrogate child is single-threaded and reads travel over the
     pipe ([ADR-0014](docs/adr/0014-single-threaded-surrogate.md),
     2026-10-19): vendor calls are serialized by construction, the
@@ -57,7 +59,7 @@ including transport adoption (Part 5).The BENCH tier tested on real adapter with
     the BENCH prep list) is still ahead.
   - **Tests:** 136 ctest cases, all passing locally on 2026-10-19
     (Windows/MSVC 2022, both trees rebuilt), plus the cross-arch
-    subset (15/15). CI has not yet run on the ADR-0014 changes; they
+    subset (15/15). CI green on ADR-0014 changes; they
     include the configure fix for building without a `build-win32`
     tree, which the Windows CI job needs. The cross-arch routing case
     skips unless its environment variables are set. J2534 suites
@@ -153,7 +155,7 @@ Contracts along this path:
       `?filter=`/`?txid=`/`?poll=`, header strip and ID stamping, and
       filter teardown ([ADR-0012](docs/adr/0012-j2534-transport-adoption.md)).
 - [ ] **Phase 3 close, BENCH tier:**
-  - first real vendor DLL load and connect: the OBDX Pro VX through
+  - [ ] first real vendor DLL load and connect: the OBDX Pro VX through
     the surrogate — done, formal session 2026-10-16
     ([session sheet](docs/bench-sessions/2026-10-16.md)); the OBDLink
     MX+ in-proc if its DLL is x64 — pending
@@ -333,7 +335,6 @@ an issue is resolved it is removed, and its number is not reused.
       timings is guesswork.
     - Every write is logged, about 10 lines/s while the scheduler
       runs, each flushed. Log on status change instead.
-    - "mandatory export missing" no longer names the missing export.
     - `OP_READ` is not traced, and the parent's own `SUR_LOG` lines go
       to stderr, which the GUI app doesn't have.
 26. **The surrogate discards frames that arrive with a non-success
@@ -350,10 +351,6 @@ an issue is resolved it is removed, and its number is not reused.
     timeout 0 and wait on the client side, or cache frames whenever
     `num_frames > 0`; then add a fake mode that honours `NumMsgs` and
     the timeout.
-27. **Every surrogate close waits 1.5 s.** The child exits on
-    `OP_SHUTDOWN` without replying, so the client's polite-shutdown
-    transaction always runs to its 1.5 s timeout. Disconnect runs on
-    the GUI thread, so the UI stalls for that long.
 28. **In-proc, a dropped indication ends the drain early.** The loader
     drops `TX_INDICATION`/`TX_MSG_TYPE` messages by reporting "no
     frame", and the drain stops at the first "no frame". After each

@@ -1,5 +1,6 @@
 // File/layer: surrogate/surrogate_main.cpp | Win32, x86, Qt-free; rebuild build-win32
-// Testing: HARNESS — full suite
+// Testing: HARNESS — test_j2534_surrogate, plus the cross-arch routing
+//          case against the Win32-tree build (ADR-0014)
 
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
@@ -43,10 +44,9 @@ static fn_pt_stop_filter  g_stop_filter;
 
 static HANDLE g_pipe = INVALID_HANDLE_VALUE;
 
-/* BATCHED read: one vendor call returns up to MAX frames. The array
- * is STATIC, not stack: PASSTHRU_MSG is ~4.2KB each, so 16 of them
- * is ~67KB — legal on a 1MB default stack but needlessly close to
- * the edge. The child is single-threaded; no reentrancy exists. */
+/* Batched read buffer: one ReadMsgs call returns up to 16 messages.
+ * Static rather than on the stack, because 16 PASSTHRU_MSGs are about
+ * 67 KB. Safe because the child is single-threaded. */
 static PASSTHRU_MSG s_read_batch[QTTUNE_SUR_MAX_FRAMES_PER_READ];
 
 static void stage(const char* fmt, ...)
@@ -259,21 +259,29 @@ static int handle_op_start_filter(unsigned long channel_id, uint32_t filter_type
                                   const uint8_t* fc, uint32_t fc_len,
                                   uint32_t tx_flags, uint32_t* out_fid)
 {
+    /* ExtraDataIndex = DataSize on every message (the v4.04
+     * no-extra-data convention), matching the in-proc loader's
+     * fill_vendor_msg so both backends send identical filter messages. */
     PASSTHRU_MSG mask_msg = {}, pattern_msg = {}, fc_msg = {};
     mask_msg.ProtocolID = QTTUNE_PT_PROTOCOL_ISO15765;
     mask_msg.TxFlags = tx_flags;
     mask_msg.DataSize = mask_len;
     if (mask_len > 0) memcpy(mask_msg.Data, mask, mask_len);
+    mask_msg.ExtraDataIndex = mask_len;
+
     pattern_msg.ProtocolID = QTTUNE_PT_PROTOCOL_ISO15765;
     pattern_msg.TxFlags = tx_flags;
     pattern_msg.DataSize = pattern_len;
     if (pattern_len > 0) memcpy(pattern_msg.Data, pattern, pattern_len);
+    pattern_msg.ExtraDataIndex = pattern_len;
+
     PASSTHRU_MSG* fc_ptr = nullptr;
     if (fc_len > 0) {
         fc_msg.ProtocolID = QTTUNE_PT_PROTOCOL_ISO15765;
         fc_msg.TxFlags = tx_flags;
         fc_msg.DataSize = fc_len;
         memcpy(fc_msg.Data, fc, fc_len);
+        fc_msg.ExtraDataIndex = fc_len;
         fc_ptr = &fc_msg;
     }
     unsigned long filter_id = 0;
@@ -293,8 +301,7 @@ static int handle_op_stop_filter(unsigned long channel_id, unsigned long filter_
 
 int main(int argc, char* argv[])
 {
-    /* CLI: surrogate.exe <dll_path> <pipe_name> — two args, argc==3.
-     * The map/event names of the ring era are gone (D1); 1 = bad args. */
+    /* CLI: surrogate.exe <dll_path> <pipe_name>. Exit 1 = bad args. */
     if (argc < 3) return 1;
     const char* dll_path = argv[1];
     const char* pipe_name = argv[2];
@@ -315,20 +322,33 @@ int main(int argc, char* argv[])
     }
     stage("dll loaded");
 
-    g_open          = reinterpret_cast<fn_pt_open>(GetProcAddress(g_module, "PassThruOpen"));
-    g_close         = reinterpret_cast<fn_pt_close>(GetProcAddress(g_module, "PassThruClose"));
-    g_connect       = reinterpret_cast<fn_pt_connect>(GetProcAddress(g_module, "PassThruConnect"));
-    g_disconnect    = reinterpret_cast<fn_pt_disconnect>(GetProcAddress(g_module, "PassThruDisconnect"));
-    g_read_msgs     = reinterpret_cast<fn_pt_read_msgs>(GetProcAddress(g_module, "PassThruReadMsgs"));
-    g_write_msgs    = reinterpret_cast<fn_pt_write_msgs>(GetProcAddress(g_module, "PassThruWriteMsgs"));
-    g_ioctl         = reinterpret_cast<fn_pt_ioctl>(
-                          resolve_export(g_module, "PassThruIoctl", "PassThruIoCtl"));
-    g_start_filter  = reinterpret_cast<fn_pt_start_filter>(GetProcAddress(g_module, "PassThruStartMsgFilter"));
-    g_stop_filter   = reinterpret_cast<fn_pt_stop_filter>(GetProcAddress(g_module, "PassThruStopMsgFilter"));
+    /* Resolve the nine mandatory exports. Ioctl falls back to the
+     * legacy 'PassThruIoCtl' spelling, exactly as the in-proc loader
+     * does, so both backends accept the same vendor DLLs. */
+    g_open         = reinterpret_cast<fn_pt_open>(resolve_export(g_module, "PassThruOpen", nullptr));
+    g_close        = reinterpret_cast<fn_pt_close>(resolve_export(g_module, "PassThruClose", nullptr));
+    g_connect      = reinterpret_cast<fn_pt_connect>(resolve_export(g_module, "PassThruConnect", nullptr));
+    g_disconnect   = reinterpret_cast<fn_pt_disconnect>(resolve_export(g_module, "PassThruDisconnect", nullptr));
+    g_read_msgs    = reinterpret_cast<fn_pt_read_msgs>(resolve_export(g_module, "PassThruReadMsgs", nullptr));
+    g_write_msgs   = reinterpret_cast<fn_pt_write_msgs>(resolve_export(g_module, "PassThruWriteMsgs", nullptr));
+    g_ioctl        = reinterpret_cast<fn_pt_ioctl>(resolve_export(g_module, "PassThruIoctl", "PassThruIoCtl"));
+    g_start_filter = reinterpret_cast<fn_pt_start_filter>(resolve_export(g_module, "PassThruStartMsgFilter", nullptr));
+    g_stop_filter  = reinterpret_cast<fn_pt_stop_filter>(resolve_export(g_module, "PassThruStopMsgFilter", nullptr));
 
     if (!g_open || !g_close || !g_connect || !g_disconnect || !g_read_msgs ||
         !g_write_msgs || !g_ioctl || !g_start_filter || !g_stop_filter) {
-        stage("mandatory export missing");
+        /* Name every missing export, so an exit 5 can be diagnosed
+         * from the log alone (x86 decoration, misspelled names). */
+        stage("mandatory export missing (x86 decoration? check .def):");
+        if (!g_open)         stage("  PassThruOpen");
+        if (!g_close)        stage("  PassThruClose");
+        if (!g_connect)     stage("  PassThruConnect");
+        if (!g_disconnect)   stage("  PassThruDisconnect");
+        if (!g_read_msgs)   stage("  PassThruReadMsgs");
+        if (!g_write_msgs)  stage("  PassThruWriteMsgs");
+        if (!g_ioctl)       stage("  PassThruIoctl (alt 'PassThruIoCtl' missing too)");
+        if (!g_start_filter) stage("  PassThruStartMsgFilter");
+        if (!g_stop_filter) stage("  PassThruStopMsgFilter");
         return 5;
     }
     stage("exports resolved");
@@ -425,20 +445,25 @@ int main(int argc, char* argv[])
             }
             break;
         }
-        case QTTUNE_SUR_OP_SHUTDOWN:
+        case QTTUNE_SUR_OP_SHUTDOWN: {
+            /* Reply before tearing down, so the client's polite
+             * shutdown completes at once instead of waiting out its
+             * 1.5 s timeout. A failed write doesn't matter; we exit
+             * either way. */
             resp.status = QTTUNE_PT_STATUS_NOERROR;
+            DWORD swr = 0;
+            (void)WriteFile(g_pipe, &resp, sizeof(resp), &swr, nullptr);
             goto shutdown;
+        }
         default:
             break;
         }
 
-        /* Per-op status is DATA, not a control signal (D1): the child
-         * stays alive across ERR_TIMEOUT, ERR_BUFFER_EMPTY, refused
-         * ioctls, failed writes and unknown opcodes — the client maps
-         * each to a transport status. Exiting on non-zero killed the
-         * session on the first quiet-bus read against a real vendor
-         * and made the client's tri-state arms unreachable. Only a
-         * broken pipe or OP_SHUTDOWN ends the loop. */
+        /* A vendor status is data, not a reason to exit (ADR-0014):
+         * the child stays alive across ERR_TIMEOUT, ERR_BUFFER_EMPTY,
+         * refused ioctls, failed writes and unknown opcodes, and the
+         * client maps each status. Only a broken pipe or OP_SHUTDOWN
+         * ends the loop. */
         DWORD wr = 0;
         if (!WriteFile(g_pipe, &resp, sizeof(resp), &wr, nullptr) ||
             wr != sizeof(resp)) {

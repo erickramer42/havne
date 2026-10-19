@@ -1,8 +1,7 @@
 // File/layer: core/src/j2534_loader.cpp | C++17, Qt-free, CI-validated headless
-// Testing: HARNESS — live-registry discovery tests + test_j2534_load
-//          (load/export/open/close) + test_j2534_stream (end-to-end),
-//          test_j2534_stream/load VBATT case must still pass through
-//          BOTH backends; the fake changes below make it a real contract test
+// Testing: HARNESS — live-registry discovery tests, test_j2534_load
+//          (load/export/open/close), test_j2534_stream (end to end) and
+//          test_j2534_routing (backend choice and parity)
 // CI: non-Windows gets linking stubs only; core.cpp guards routing
 
 #include "qttune/j2534.h"
@@ -56,7 +55,7 @@ typedef long (__stdcall *fn_pt_stop_filter)(unsigned long ChannelID,
 
 /* Backing type for the header's opaque qttune_j2534_handle_t.
  *
- * BACKEND SELECTION (Part 3 routing): qttune_j2534_open sniffs the PE
+ * BACKEND SELECTION (ADR-0009): qttune_j2534_open sniffs the PE
  * architecture once and routes — x86 DLLs load in the surrogate
  * process (an x64 process physically cannot LoadLibrary a 32-bit
  * DLL); x64/unknown load in-proc. Every downstream helper forwards
@@ -74,8 +73,7 @@ struct qttune_j2534_handle {
     fn_pt_read_msgs    read_msgs;
     fn_pt_write_msgs   write_msgs;
     fn_pt_ioctl        ioctl;
-    fn_pt_start_filter start_filter;   /* Part 4: spec-mandatory, resolved
-                                        * with the rest — surrogate-parity */
+    fn_pt_start_filter start_filter;   /* mandatory in v04.04, like the rest */
     fn_pt_stop_filter  stop_filter;
 };
 
@@ -83,14 +81,12 @@ namespace {
 
 constexpr long kPtStatusNoError = QTTUNE_PT_STATUS_NOERROR;
 
-/* Resolve by export name. Optional alternate spelling: GetProcAddress
- * is case-sensitive, and this project's original 'PassThruIoCtl'
- * literal diverges from the spec's 'PassThruIoctl' (SAE J2534-1_0500
- * §7.3.19; all v04.04-era public references agree — see the
- * 2026-10-16 incident note in surrogate_main.cpp). The first real
- * vendor tested (OBDX Pro VX) exports the SPEC spelling. Spec name
- * first, legacy literal second. Decoration/mangling stay hard
- * failures. */
+/* Resolve by export name, with an optional alternate spelling.
+ * GetProcAddress is case-sensitive: the spec spells it
+ * 'PassThruIoctl' (SAE J2534-1_0500 §7.3.19, and the OBDX Pro VX
+ * exports that), while this project once used 'PassThruIoCtl'. Spec
+ * name first, legacy spelling second. Decorated or mangled names stay
+ * hard failures. */
 template <typename FnPtr>
 FnPtr resolve_export(HMODULE module, const char* name, bool& all_ok,
                      const char* alt_name = nullptr)
@@ -130,21 +126,33 @@ bool read_function_library(HKEY hvendor, char* out, size_t out_size)
     if (size > 0 && out[size - 1] != '\0' && size < out_size) {
         out[size] = '\0';
     }
+    if (out[0] == '\0') {
+        return false;
+    }
+    /* RegQueryValueExA returns REG_EXPAND_SZ unexpanded, so a path
+     * like "%ProgramFiles(x86)%\\..." would pass discovery and then
+     * fail to load. Expand it in place through a bounded buffer.
+     * ExpandEnvironmentStringsA's return includes the terminator. */
+    if (type == REG_EXPAND_SZ) {
+        char expanded[1024];
+        const DWORD n = ExpandEnvironmentStringsA(out, expanded,
+                                                   sizeof(expanded));
+        if (n == 0 || n > out_size) {
+            return false;   /* expansion failed or result won't fit */
+        }
+        memcpy(out, expanded, n);
+    }
     return out[0] != '\0';
 }
 
-/* Sniff PE header architecture from a DLL path.
- * Returns: 1=x86, 2=x64, 0=unknown — matching j2534.h's documented
- * reserved[0] contract (which this function's docstring previously
- * claimed but its code contradicted by defaulting failures to 1).
+/* Sniff the PE architecture of a DLL: 1 = x86, 2 = x64, 0 = unknown
+ * (j2534.h's reserved[0] contract).
  *
- * ROUTING CONSUMER: qttune_j2534_open sends x86 to the surrogate and
- * takes everything else in-proc. 0 on unreadable/invalid PE therefore
- * preserves the pre-routing behavior: LoadLibraryEx fails honestly
- * with QT_ERR_LOAD_FAILED, no surrogate spawn for garbage paths.
- * The discovery annotation (reserved[0]) is a UI label; the sniff in
- * open() is authoritative and covers direct-path selectors that
- * bypass discovery entirely. */
+ * qttune_j2534_open sends x86 to the surrogate and everything else
+ * in-proc, so an unreadable or invalid file fails honestly at
+ * LoadLibraryEx (QT_ERR_LOAD_FAILED) without spawning a surrogate.
+ * The discovery annotation is only a UI label; the sniff in open() is
+ * authoritative and also covers direct-path selectors. */
 static uint32_t sniff_pe_architecture(const char* dll_path)
 {
     HANDLE hFile = CreateFileA(dll_path, GENERIC_READ, FILE_SHARE_READ,
@@ -225,11 +233,9 @@ void enumerate_view(const wchar_t* root_path,
 
         if (read_function_library(hvendor, dev.dll_path,
                                   sizeof(dev.dll_path))) {
-            /* Annotate architecture (reserved[0]: 1=x86, 2=x64, per
-             * j2534.h) — feeds the picker's x86/x64 labeling and,
-             * later, the surrogate-vs-inproc routing decision. Cheap
-             * file-I/O per discovered vendor (typically 1-3 entries);
-             * the file was just validated as openable-by-name anyway. */
+            /* Annotate architecture (reserved[0]) for the picker's
+             * x86/x64 label. Routing re-sniffs at open. One small
+             * file read per vendor (typically 1-3 entries). */
             dev.reserved[0] = sniff_pe_architecture(dev.dll_path);
             out_devices.push_back(dev);
         }
@@ -239,11 +245,11 @@ void enumerate_view(const wchar_t* root_path,
     RegCloseKey(hroot);
 }
 
-/* Build a filter/messages-shape PASSTHRU_MSG from flat bytes. Shared
- * by the write and filter relays (Part 4) — zeroed FIRST so no stale
- * field or padding byte ever reaches a vendor comparing struct
- * contents. ExtraDataIndex = DataSize per the v4.04 no-extra-data
- * convention (was implicitly 0 pre-fix). */
+/* Build a PASSTHRU_MSG from flat bytes for the write and filter
+ * relays. Zeroed first, so no stale field or padding byte reaches a
+ * vendor comparing struct contents. ExtraDataIndex = DataSize (the
+ * v4.04 no-extra-data convention); the surrogate child builds its
+ * messages the same way. */
 static void fill_vendor_msg(PASSTHRU_MSG* msg, const uint8_t* bytes,
                             uint32_t len, uint32_t tx_flags)
 {
@@ -356,11 +362,10 @@ qttune_status_t qttune_j2534_open(const qttune_j2534_device_t* device,
     }
     *out_handle = nullptr;
 
-    /* ROUTING DECISION — exactly one place, exactly once. x86 DLLs
-     * delegate to the surrogate host (exe lookup honors
-     * QTTUNE_SURROGATE_EXE); everything else proceeds in-proc below,
-     * including unknown (sniff 0), so unreadable paths still fail at
-     * LoadLibraryEx with today's ergonomics. */
+    /* ROUTING DECISION — made here, once. x86 DLLs go to the
+     * surrogate (exe next to the app, or QTTUNE_SURROGATE_EXE);
+     * everything else, including unknown (sniff 0), loads in-proc, so
+     * unreadable paths fail at LoadLibraryEx. */
     if (sniff_pe_architecture(device->dll_path) == 1) {
         qttune_j2534_sur_handle_t* sur = nullptr;
         qttune_status_t st = qttune_j2534_sur_open(device->dll_path, &sur);
@@ -392,10 +397,8 @@ qttune_status_t qttune_j2534_open(const qttune_j2534_device_t* device,
     }
     h->module = module;
 
-    /* Part 4: NINE mandatory exports — filter functions joined the
-     * set for surrogate-parity (both are J2534-1 v4.04 mandatory). A
-     * real vendor DLL missing them was always non-conforming; it now
-     * fails at open in BOTH backends instead of only in-proc. */
+    /* The nine v04.04 mandatory exports — the same set the surrogate
+     * child requires, so both backends accept the same DLLs. */
     bool all_resolved = true;
     h->open          = resolve_export<fn_pt_open>(module, "PassThruOpen", all_resolved);
     h->close         = resolve_export<fn_pt_close>(module, "PassThruClose", all_resolved);
@@ -403,10 +406,9 @@ qttune_status_t qttune_j2534_open(const qttune_j2534_device_t* device,
     h->disconnect    = resolve_export<fn_pt_disconnect>(module, "PassThruDisconnect", all_resolved);
     h->read_msgs     = resolve_export<fn_pt_read_msgs>(module, "PassThruReadMsgs", all_resolved);
     h->write_msgs    = resolve_export<fn_pt_write_msgs>(module, "PassThruWriteMsgs", all_resolved);
-    /* Spec spelling ('PassThruIoctl') first, this project's legacy
-     * literal second. The alternate-casing fallback must live in BOTH
-     * backends or they disagree on which vendor DLLs load — the
-     * Part 4 parity rule. */
+    /* Spec spelling first, legacy spelling second. The surrogate
+     * child has the same fallback; without it the backends would
+     * disagree on which DLLs load. */
     h->ioctl         = resolve_export<fn_pt_ioctl>(module, "PassThruIoctl", all_resolved, "PassThruIoCtl");
     h->start_filter  = resolve_export<fn_pt_start_filter>(module, "PassThruStartMsgFilter", all_resolved);
     h->stop_filter   = resolve_export<fn_pt_stop_filter>(module, "PassThruStopMsgFilter", all_resolved);
@@ -491,27 +493,25 @@ qttune_status_t qttune_j2534_disconnect_channel(qttune_j2534_handle_t* handle,
         return qttune_j2534_sur_disconnect_channel(handle->sur, channel);
     }
     /* Best-effort at teardown: vendor failure during shutdown must
-     * not block the detach path. */
-    long rc = handle->disconnect(channel);
-    return (rc == kPtStatusNoError) ? QT_OK : QT_OK;
+     * not block the detach path. The status is deliberately
+     * discarded. */
+    (void)handle->disconnect(channel);
+    return QT_OK;
 }
 
-/* ---- STEP 1: Read frame with timeout vs hard-error distinction ----
+/* ---- Read frame: timeout vs empty vs hard-error distinction ----
  *
- * BEFORE: any nonzero vendor status returned QT_OK + got_frame=false,
- * treating timeout (ERR_TIMEOUT = 0x0C) identically to hard failures.
+ *   NOERROR, no message            -> QT_OK, no frame (idle)
+ *   ERR_BUFFER_EMPTY (0x10)        -> QT_OK, no frame (queue drained)
+ *   ERR_TIMEOUT (0x09)             -> QT_ERR_VEHICLE_TIMEOUT (quiet bus)
+ *   any other nonzero             -> QT_ERR_TRANSPORT_HARD_FAILURE
+ *   num > 0, any status           -> deliver the frame (some vendors
+ *                                     return data with a status code),
+ *                                     except TX indications and
+ *                                     loopback echoes, which are dropped
  *
- * AFTER:
- * - vendor status == ERR_TIMEOUT -> QT_ERR_VEHICLE_TIMEOUT + got_frame=false
- *   (keep trying, surface warning via session error state)
- * - vendor status != 0 and != ERR_TIMEOUT -> QT_ERR_TRANSPORT_HARD_FAILURE
- *   + got_frame=false (report, but don't terminate session)
- * - vendor status == 0 && num > 0 -> QT_OK + got_frame=true (normal frame)
- * - vendor status == 0 && num == 0 -> QT_OK + got_frame=false (idle, no frame)
- *
- * The bridge can read the session's error state (qt
- tune_session_get_error_state) to show "vehicle not responding" while
- * the worker keeps pumping. */
+ * The worker turns these codes into link health, which callers read
+ * through qttune_session_get_error_state (#11). */
 qttune_status_t qttune_j2534_read_frame(qttune_j2534_handle_t* handle,
                                         unsigned long channel,
                                         qttune_frame_t* out_frame,
@@ -524,10 +524,10 @@ qttune_status_t qttune_j2534_read_frame(qttune_j2534_handle_t* handle,
     *got_frame = false;
 
     if (handle->is_surrogate) {
-        /* Surrogate path: pipe/IPC failures are hard errors; empty
-         * ring after timeout is still "no frame" (QT_OK). The ring
-         * producer_drops counter (finding #17) lives in the shared
-         * memory — app-side reads it via the session's error state. */
+        /* Surrogate path: the client maps pipe failure to
+         * QT_ERR_TRANSPORT_HARD_FAILURE and performs the same
+         * timeout/empty/hard-error split on the batched OP_READ
+         * status (#11). */
         return qttune_j2534_sur_read_frame(handle->sur, channel,
                                            out_frame, timeout_ms,
                                            got_frame);
@@ -546,24 +546,19 @@ qttune_status_t qttune_j2534_read_frame(qttune_j2534_handle_t* handle,
             return QT_ERR_VEHICLE_TIMEOUT;
         }
         if (rc == QTTUNE_PT_STATUS_BUFFER_EMPTY) {
-            return QT_OK;   /* queue drained — quiet, not failed.
-                             * Finding 1: this return previously hit
-                             * the hard-failure arm and permanently
-                             * silenced the poll loop, because only a
-                             * good frame healed it — and in scheduler
-                             * mode frames only follow writes. */
+            return QT_OK;   /* queue empty — quiet, not failed */
         }
         return QT_ERR_TRANSPORT_HARD_FAILURE;
     }
 
-    /* num > 0: DELIVER even under a nonzero status — some vendors
-     * return data and a status together; the review's PEAK source
-     * documents RxStatus-bearing reads with success codes. */
+    /* num > 0: deliver even under a nonzero status — some vendors
+     * return data and a status together. */
     *out_frame = qttune_frame_t{};
     if (msg.RxStatus & (QTTUNE_PT_TX_INDICATION |
                         QTTUNE_PT_TX_MSG_TYPE)) {
-        /* Indications are dropped in BOTH backends — same rule as
-         * the surrogate child's filter, one semantics. */
+        /* TX indications and loopback echoes are dropped, as in the
+         * surrogate child. Reporting "no frame" ends the worker's
+         * drain early (Known Issue #28). */
         *got_frame = false;
         return QT_OK;
     }
@@ -580,7 +575,7 @@ qttune_status_t qttune_j2534_read_frame(qttune_j2534_handle_t* handle,
     return QT_OK;
 }
 
-/* ---- Part 4: WRITE / IOCTL / FILTER vendor-call helpers ---- */
+/* ---- Write / ioctl / filter vendor-call helpers ---- */
 
 qttune_status_t qttune_j2534_write_frame(qttune_j2534_handle_t* handle,
                                          unsigned long channel,
@@ -718,9 +713,7 @@ qttune_status_t qttune_j2534_ioctl(qttune_j2534_handle_t* handle,
     if (ioctl_id == QTTUNE_PT_IOCTL_READ_VBATT) {
         unsigned long vbatt = 0;
         /* v04.04: READ_VBATT is device-scoped — DeviceID, not the
-         * channel (review 2026-10-17, finding 9). The surrogate child
-         * substitutes its device id the same way; both backends now
-         * agree. */
+         * channel. The surrogate child does the same. */
         long rc = handle->ioctl(handle->device_id,
                                 static_cast<long>(ioctl_id),
                                 nullptr, &vbatt);

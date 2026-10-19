@@ -141,12 +141,10 @@ read_result ov_read(HANDLE pipe, void* buf, DWORD len, DWORD timeout_ms,
     return res;
 }
 
-/* Consume-and-discard the response to a PREVIOUS timed-out
- * transaction (review finding 1). Without this, the next request's
- * read mispairs with the stale response and every subsequent op
- * fails the ID check — the desync. If the stale response never
- * arrives, the child never answered at all: session unusable, fail
- * without writing anything new. */
+/* Read and discard the late reply to a previous timed-out request, so
+ * the next request isn't paired with it (every later call would fail
+ * the ID check). If that reply never arrives, the child is hung: fail
+ * without sending anything new. */
 bool drain_pending(qttune_j2534_sur_handle_t* h, DWORD timeout_ms)
 {
     qttune_sur_response_t stale = {};
@@ -282,7 +280,19 @@ qttune_status_t qttune_j2534_sur_open(const char* dll_path,
     if (child_log != INVALID_HANDLE_VALUE) CloseHandle(child_log);
 
     h->process = pi.hProcess;
-    AssignProcessToJobObject(h->job, pi.hProcess);
+    /* Kill-on-close is a safety guarantee, not an optimization:
+     * without the assignment a wedged child outlives the app. Fail
+     * fast instead of silently losing the guarantee. The child is
+     * still CREATE_SUSPENDED and no vendor call has run, so a hard
+     * termination here is clean. */
+    if (!AssignProcessToJobObject(h->job, pi.hProcess)) {
+        SUR_LOG("open: AssignProcessToJobObject failed (err=%lu)\n",
+                GetLastError());
+        TerminateProcess(pi.hProcess, 1);
+        CloseHandle(pi.hThread);
+        qttune_j2534_sur_close(h);
+        return QT_ERR_LOAD_FAILED;
+    }
     ResumeThread(pi.hThread);
     CloseHandle(pi.hThread);
 
@@ -571,6 +581,9 @@ qttune_status_t qttune_j2534_sur_read_frame(qttune_j2534_sur_handle_t* h,
         return QT_ERR_TRANSPORT_HARD_FAILURE;
     }
 
+    /* Known Issue #26: these status checks run before the cache fill,
+     * so a batch that arrives with ERR_TIMEOUT (normal when fewer than
+     * 16 messages arrive within the timeout) is discarded. */
     if (resp.status == static_cast<int32_t>(QTTUNE_PT_STATUS_TIMEOUT)) {
         return QT_ERR_VEHICLE_TIMEOUT;
     }
