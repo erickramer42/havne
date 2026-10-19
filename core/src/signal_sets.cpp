@@ -2,9 +2,8 @@
 #include <qttune/signal_sets.h>
 #include <string.h>
 
-/* Safe copy into a fixed-width, always-null-terminated char buffer.
- * Terminates, never overruns, doesn't zero-pad the tail like strncpy
- * (irrelevant here, but why keep the debate alive). */
+/* Bounded copy into a fixed-width buffer, always null-terminated.
+ * Portable stand-in for strncpy_s, which is MSVC-only. */
 static void copy_str(char* dst, size_t dst_size, const char* src)
 {
     size_t n = strlen(src);
@@ -32,13 +31,10 @@ static QttuneSignalDef mk(uint16_t id, const char* name,
     d.offset = offset;
     d.decimal_places = dp;
     d.message_id =  MOCK_TELEMETRY_ARB_ID;   /* all mock signals ride 0x0C0 */
-    /* ADR-0013 slice 2: explicit opt-out of the slice-2 decoder
-     * extensions. The d = {} zero-init already guarantees these
-     * values; stating them documents that the mock set is DELIBERATELY
-     * mux-less and little-endian, and keeps a future field-promotion
-     * from silently activating semantics here. The encoder half of the
-     * contract (mock_transport.cpp) writes plain little-endian
-     * payloads on MOCK_TELEMETRY_ARB_ID — nothing to mux against. */
+    /* The mock set is deliberately mux-less and little-endian, matching
+     * the plain LE payloads mock_transport.cpp encodes. d = {} already
+     * zeroes these; stating them keeps a future default from silently
+     * turning on mux or big-endian decode here. */
     d.flags = 0;               /* QTTUNE_SIGNAL_FLAG_BIG_ENDIAN unset */
     d.mux_offset = 0;
     d.mux_length = 0;           /* mux disabled */
@@ -52,10 +48,9 @@ static QttuneSignalDef mk(uint16_t id, const char* name,
 
 static const QttuneSignalDef kMockDefs[] = {
     mk(MOCK_SIG_RPM_ID,      "Engine_RPM",       QTTUNE_SIGNAL_TYPE_UINT16,  0, 2, 0, 16, 0.25f,  0.0f,  "RPM",    0),
-    /* N2 fix (2026-10-19): coolant/IAT are UINT8 with the -40 offset —
-     * J1979 unsigned A - 40. INT8 sign-extended the warm half of the
-     * range (raw >= 0x80 => about -160 degC on screen); the mock sim
-     * crosses that line ~61 s into a session. */
+    /* Coolant and IAT are UINT8 with a -40 offset (J1979: A - 40, so
+     * -40..215 degC). As INT8, anything from 88 degC up would read as
+     * about -160 degC. */
     mk(MOCK_SIG_COOLANT_ID,  "Coolant_Temp",     QTTUNE_SIGNAL_TYPE_UINT8,    2, 1, 0, 8,   1.0f, -40.0f, "degC",   0),
     mk(MOCK_SIG_SPEED_ID,    "Vehicle_Speed",    QTTUNE_SIGNAL_TYPE_UINT8,    3, 1, 0, 8,   1.0f,   0.0f, "km/h",   0),
     mk(MOCK_SIG_THROTTLE_ID, "Throttle_Pos",    QTTUNE_SIGNAL_TYPE_UINT8,    4, 1, 0, 8,   100.0f/255.0f, 0.0f, "%", 1),
@@ -83,7 +78,7 @@ int qttune_validate_signal_set(const QttuneSignalSet* set)
         int rc = qttune_validate_signal(&set->defs[i]);
         if (rc != 0) return rc;
     }
-    /* N3 (ADR-0013 §4): channel declarations — bounded, legal CAN
+    /* ADR-0013 §4: channel declarations — bounded, legal CAN
      * ids, unique rx. Negative codes so they can't collide with
      * qttune_validate_signal's per-def returns. */
     if (set->channel_count > 0) {

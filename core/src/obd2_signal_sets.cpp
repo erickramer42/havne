@@ -17,24 +17,15 @@
 
 namespace {
 
-/* One def per v1 PID. WIRE GRAMMAR (N1 fix, 2026-10-19; post
- * header-strip, what the bridge hands the decoder): [0x41][PID][A][B]...
- *   - mux key: bytes 0..1 (mode-echo + PID), 16-bit big-endian compare
- *     against 0x4100|PID — the OBD-II response discriminator
- *   - data: starts byte 2 (PID 0x0C/0x42 are 2-byte big-endian; the
- *     rest are single bytes)
- *   - NO PCI BYTE: the adapter's ISO 15765 stack frames the message;
- *     PassThruWriteMsgs receives [ID][01][PID] with
- *     ISO15765_FRAME_PAD. The old [PCI][0x41]... grammar sent a
- *     Mode-02-shaped request on real adapters.
- *   - Temperatures are UINT8 (N2 fix): J1979 defines both as
- *     unsigned A - 40, covering -40..215 degC. INT8 sign-extended
- *     any reading at or above raw 0x80 (88 degC) to about -160 degC.
- * Scale formulas are the standard SAE J1979 Mode-01 conversions; the
- * set enumerates SUPPORTED pids, which is itself the contract (what's
- * absent here is not requested and not decoded).
- * MULTI-FRAME RESPONSES: out of scope v1 — defs assume single-frame;
- * documented as a set-level constraint in ADR-0013 slice 2. */
+/* One def per v1 PID. Payload as the decoder sees it, after the
+ * transport strips the 4-byte address header: [0x41][PID][A][B]...
+ *   - mux key: bytes 0..1, compared as 0x4100|PID (mode echo + PID)
+ *   - data: from byte 2; PIDs 0x0C and 0x42 are 2-byte big-endian,
+ *     the rest single bytes
+ *   - no PCI byte: the adapter does the ISO-TP framing
+ *   - temperatures are UINT8 (J1979: A - 40, so -40..215 degC)
+ * Scaling follows SAE J1979 Mode 01. Only the PIDs listed here are
+ * requested and decoded. Single-frame responses only. */
 QttuneSignalDef obd2_def(uint16_t id, const char* name,
                          QttuneSignalType type, uint8_t num_bytes,
                          float scale, float offset_val, const char* unit,
@@ -89,18 +80,16 @@ const QttuneSignalDef kObd2Defs[] = {
              "V",    2, 0x42, true),
 };
 
-/* N3 (ADR-0013 §4): the obd2 profile DECLARES its channel — the
- * standard physical pairing 0x7E0 (tester) <-> 0x7E8 (ECU). A bare
- * j2534:// URI under the obd2 default now registers its filter and
- * targets its requests from here; ?filter=/?txid= demote to
- * overrides. Future multi-ECU profiles append entries — this is
- * the plugin-facing list shape, per the ADR. */
+/* ADR-0013 §4: the obd2 profile declares the standard physical pair,
+ * 0x7E8 (ECU response) / 0x7E0 (tester request). The transport
+ * registers its receive filter and addresses requests from this list;
+ * ?filter= and ?txid= override it. Multi-ECU profiles add entries. */
 const QttuneChannelDecl kObd2Channels[] = {
     { OBD2_ECU_ARB_ID, OBD2_TESTER_ARB_ID },
 };
 
 const QttuneSignalSet kObd2Set = {
-    2u,                                              /* version (N3: +channels) */
+    2u,                                              /* version 2: adds channels */
     static_cast<uint32_t>(sizeof(kObd2Defs) / sizeof(kObd2Defs[0])),
     kObd2Defs,
     1u,

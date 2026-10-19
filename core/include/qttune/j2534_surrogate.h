@@ -1,6 +1,6 @@
 // File/layer: core/include/qttune/j2534_surrogate.h | C ABI, x86-surrogate client
-// Testing: HARNESS — test_j2534_surrogate spawns the real x86 surrogate
-//          hosting the x86-built fake DLL, end-to-end over the pipe+ring.
+// Testing: HARNESS — test_j2534_surrogate spawns the real surrogate
+//          hosting the fake DLL, end to end over the pipe.
 //          Non-Windows: stubs only.
 
 #ifndef QTTUNE_J2534_SURROGATE_H
@@ -14,10 +14,10 @@ extern "C" {
 
 typedef struct qttune_j2534_sur_handle qttune_j2534_sur_handle_t;
 
-/* Spawn the x86 surrogate hosting dll_path. Creates pipe/ring/event,
- * spawns under a kill-on-close job, handshakes OP_OPEN. Blocking.
- * QT_ERR_LOAD_FAILED: exe missing, spawn failed, DLL load failed, or
- * PassThruOpen refused. QT_ERR_NO_TRANSPORT: handshake timeout. */
+/* Spawn the surrogate hosting dll_path under a kill-on-close job and
+ * handshake with OP_OPEN. Blocking. Every startup failure (exe
+ * missing, spawn failed, DLL load failed, handshake timeout,
+ * PassThruOpen refused) returns QT_ERR_LOAD_FAILED. */
 qttune_status_t qttune_j2534_sur_open(const char* dll_path,
                                       qttune_j2534_sur_handle_t** out_handle);
 
@@ -30,12 +30,11 @@ qttune_status_t qttune_j2534_sur_connect_channel(qttune_j2534_sur_handle_t* hand
 qttune_status_t qttune_j2534_sur_disconnect_channel(qttune_j2534_sur_handle_t* handle,
                                                     unsigned long channel);
 
-/* ---- Part 4: WRITE / IOCTL / FILTER relay ---- */
+/* ---- Write / ioctl / filter relay ---- */
 
-/* One PassThruWriteMsgs call. data_len must be <= 64 (qttune_frame_t
- * ABI cap; ISO-TP multiframe is a later transport-layer concern).
+/* One PassThruWriteMsgs call. data_len must be <= 64 (the wire limit).
  * out_num_written is optional (NULL ok) and receives the vendor's
- * actual-written count — callers SHOULD treat <1 as a failed send. */
+ * actual-written count — callers should treat <1 as a failed send. */
 qttune_status_t qttune_j2534_sur_write_frame(qttune_j2534_sur_handle_t* handle,
                                               unsigned long channel,
                                               const uint8_t* data,
@@ -78,9 +77,12 @@ qttune_status_t qttune_j2534_sur_stop_msg_filter(qttune_j2534_sur_handle_t* hand
                                                   unsigned long channel,
                                                   unsigned long filter_id);
 
-/* Drain one frame from the shared ring (the app-side data plane).
- * Same translation contract as the in-proc read path: arb id 0,
- * EXTENDED from rx_status bit, vendor timestamp passthrough, 64-clamp. */
+/* Return one frame: from the cached batch if one is pending, otherwise
+ * via one OP_READ (up to 16 frames). Same contract as the in-proc read
+ * path: ERR_TIMEOUT -> QT_ERR_VEHICLE_TIMEOUT, ERR_BUFFER_EMPTY -> no
+ * frame, other statuses or a pipe failure -> QT_ERR_TRANSPORT_HARD_FAILURE;
+ * arb id and channel id 0, EXTENDED from RxStatus, vendor timestamp
+ * passed through, payload clamped to 64 bytes. */
 qttune_status_t qttune_j2534_sur_read_frame(qttune_j2534_sur_handle_t* handle,
                                             unsigned long channel,
                                             qttune_frame_t* out_frame,

@@ -98,7 +98,7 @@ Rectangle {
             Layout.alignment: Qt.AlignHCenter
         }
 
-        // Status card — wires up nicely to the bridge later
+        // Status card: session state and core version
         Rectangle {
             Layout.topMargin: 16
             Layout.preferredWidth: 280

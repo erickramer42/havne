@@ -24,18 +24,15 @@ typedef struct qttune_session qttune_session_t;
 #define QTTUNE_FRAME_FLAG_ERROR           0x00000010u /* bus/controller error report */
 #define QTTUNE_FRAME_FLAG_TX_ECHO         0x00000020u /* echo of our own transmit */
 
-/* Frame structure — POD only, no pointers.
- *
- * Layout is pinned by the assertions below: sizeof == 88 with ZERO hidden
- * padding on every supported platform (the old struct was also 88 bytes,
- * but 7 of them were accidental tail padding). ABI breaking change:
- * is_extended/rsvd are GONE, replaced by flags/reserved; data_length is
- * now uint16_t; arbitration_id separates CAN identity from channel index.
- * Same-size, better geometry.
+/* Frame structure — POD only, no pointers. Layout is pinned by the
+ * assertions below: 88 bytes, no hidden padding on any supported
+ * platform (ADR-0006).
  */
 typedef struct qttune_frame {
-    uint64_t timestamp_us;    /* Microseconds since SESSION START (producer's
-                                 steady clock, monotonic per channel) */
+    uint64_t timestamp_us;    /* Microseconds since session start (producer's
+                                 steady clock, monotonic per channel). The
+                                 J2534 transport currently passes the vendor
+                                 timestamp through instead (Known Issue #12) */
     uint32_t arbitration_id;  /* CAN identifier: <= 0x7FF standard, up to
                                  0x1FFFFFFF when FLAG_EXTENDED set */
     uint16_t channel_id;      /* Bus/channel index only — never multiplexes
@@ -91,10 +88,9 @@ const char* qttune_status_string(qttune_status_t status);
  * Lifecycle follows FILE/free discipline:
  * - create()  — allocates and attaches a transport (fopen)
  * - close()   — stops streaming, detaches the transport, releases worker
- *               and callback state. IDEMPOTENT-SAFE: a second close returns
- *               QT_ERR_SESSION_CLOSED, never touches freed memory (fixed
- *               2026-10-14: close used to delete the session, making the
- *               closed-flag check itself a use-after-free).
+ *               and callback state. A second close returns
+ *               QT_ERR_SESSION_CLOSED; the session stays valid until
+ *               destroy().
  * - destroy() — frees the session (free). The handle is INVALID afterward;
  *               calling any API with it is undefined behavior, exactly as
  *               free(p); *p. Null is a safe no-op. Auto-closes first if
@@ -153,11 +149,11 @@ qttune_status_t qttune_unregister_frame_callback(
     void* user_data
 );
 
-/* Session diagnostic surface — ADR-0013 §5 prerequisite. The worker
- * can update these asynchronously on hard-error conditions without
- * terminating the session. The bridge can read them (via the session
- * handle's opaque internals) to surface warnings like "vehicle not
- * responding" while allowing the transport to keep attempting recovery. */
+/* Link health, written by the transport worker while the session keeps
+ * running. last_error is QT_OK, QT_ERR_VEHICLE_TIMEOUT (no frame for
+ * about 1 s) or the status of the latest hard failure; error_count
+ * counts hard-failure episodes. Callable from any thread. The mock
+ * transport never sets them. */
 qttune_status_t qttune_session_get_error_state(
     qttune_session_t* session,
     int32_t* out_last_error,

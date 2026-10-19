@@ -1,13 +1,9 @@
-// File/layer: core/src/pid_scheduler.h | internal implementation detail,
-//             NOT ABI-exported; included by j2534_transport.cpp (single TU
-//             for now — promoted to a .cpp in Phase 5's CMake pass if a
-//             second consumer ever appears).
+// File/layer: core/src/pid_scheduler.h | internal, not ABI-exported;
+//             included by j2534_transport.cpp (its only consumer)
 // C++17, Qt-free, no platform headers.
-// Testing: UNIT — scheduler rotation/cursor wrap/dedupe/capacity logic are
-//     pure and synchronous; the j2534_worker integration that consumes
-//     next_pid() is HARNESS (cadence not provable headlessly) and BENCH
-//     (drain-loop timing on the live VX) — see the #25 verification line
-//     already owed on the BENCH sheet.
+// Testing: UNIT — rotation, cursor wrap, dedupe and capacity (test_obd2);
+//     the worker integration is HARNESS, drain timing on a real adapter
+//     is BENCH.
 
 #ifndef QTTUNE_PID_SCHEDULER_H
 #define QTTUNE_PID_SCHEDULER_H
@@ -27,19 +23,13 @@ extern "C" {
  * allocation, owned exclusively by the transport worker thread —
  * single-threaded by construction, so no synchronization inside.
  *
- * PID derivation rule (the contract binding defs to this scheduler):
- * a def drives scheduling iff it carries a 2-byte mux key at payload
- * offset 0. WIRE GRAMMAR (N1 fix, 2026-10-19): on an ISO 15765
- * channel the ADAPTER owns ISO-TP framing — PassThruWriteMsgs data is
- * [4-byte ID BE][01][PID] (no PCI byte; padding is the
- * ISO15765_FRAME_PAD TxFlag) and a response arrives as
- * [41][PID][A][B]... after the transport strips the 4-byte address
- * header. So the mux pair sits at offset 0 and the PID to REQUEST is
- * the key's LOW byte — the echo grammar guarantees that
- * correspondence. Non-mux defs (raw/mock sets) never enroll; the
- * scheduler simply comes up empty and the worker stays in legacy
- * poll mode. Validators enforce the shape at registration time;
- * from_set() re-checks defensively anyway — it's cheap. */
+ * PID derivation rule: a def drives scheduling iff it has a 2-byte mux
+ * key at payload offset 0 — the [41][PID] echo that opens a Mode-01
+ * response once the transport strips the address header. The PID to
+ * request is the key's low byte. Sets without such defs (raw, mock)
+ * enroll nothing, and the worker falls back to ?poll= or passive
+ * receive. Nothing validates this shape at registration, so
+ * from_set() checks it itself. */
 typedef struct qttune_pid_scheduler {
     uint8_t pids[QTTUNE_SCHED_MAX_PIDS];
     uint32_t count;

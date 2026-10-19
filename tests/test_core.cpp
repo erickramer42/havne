@@ -480,7 +480,7 @@ void arb_capture_cb(const qttune_frame_t* frame, void* user_data)
 
 } // namespace
 
-/* F1+F2 contract: the mock emits exactly two arbitration IDs — the
+/* Contract: the mock emits exactly two arbitration IDs — the
  * telemetry ID the signal set declares (0x0C0) and a 29-bit diagnostic
  * ID every 16th frame — with FLAG_EXTENDED set iff the ID is 29-bit.
  * Combined with MockSignalsDeclareTelemetryMessageId (test_signals),
@@ -512,7 +512,7 @@ TEST(CoreTest, MockEmitsKnownArbitrationIds)
     /* Session-relative timestamps must never regress (header contract) */
     EXPECT_EQ(cap.ts_regression.load(), 0);
     /* First sample lands within the first tick, not microseconds since
-     * boot — session-relative, not absolute (reviewer finding). */
+     * boot — session-relative, not absolute. */
     EXPECT_LT(cap.last_ts.load(), uint64_t{600} * 1000 * 1000 * 1000);
 }
 

@@ -1,5 +1,5 @@
 // File/layer: tests/test_j2534_routing.cpp | GTest, HARNESS tier
-// Testing: the Part 3 routing decision itself. qttune_j2534_open must
+// Testing: the PE routing decision itself (ADR-0009). qttune_j2534_open must
 //          sniff the DLL's PE architecture and pick the backend:
 //          x64 fake -> "inproc" (CI-verifiable), x86 fake -> "surrogate"
 //          (dev-machine cross-arch, env-gated), unknown/missing -> honest
@@ -37,8 +37,8 @@ void make_device(qttune_j2534_device_t* dev, const char* dll_path)
               "routing-test", _TRUNCATE);
 }
 
-/* Poll-until-frame with deadline — read is non-blocking-ish (the fake
- * returns immediately; the surrogate ring may need a pump tick). */
+/* Poll until a frame arrives or the deadline passes. A single read can
+ * come back empty, so don't rely on the first one. */
 bool read_until(qttune_j2534_handle_t* h, unsigned long channel,
                 qttune_frame_t* out_frame, int timeout_ms)
 {

@@ -126,7 +126,7 @@ qttune_status_t qttune_session_create(
         return QT_ERR_OUT_OF_MEMORY;
     }
 
-    /* Scheme routing — unchanged from Phase 3 (j2534 is Win32-only). */
+    /* Scheme routing (j2534 is Win32-only). */
 #ifdef _WIN32
     const bool is_j2534 = strncmp(transport_uri, "j2534://", 8) == 0;
 #else
@@ -156,11 +156,9 @@ qttune_status_t qttune_session_create(
             return QT_ERR_NO_TRANSPORT;  /* malformed ?profile= — strict */
         case ProfileQuery::Absent:
         default:
-            /* ADR-0013 slice 2, FINAL STEP: j2534 defaults to obd2.
-             * The profile supplies decode AND the multi-PID scheduler;
-             * ?filter= (or the profile's own channel defaults, a later
-             * refinement) satisfies the receive-coupling rule. Raw
-             * log-only sessions remain reachable via ?profile=raw. */
+            /* Scheme defaults: mock:// -> mock; j2534:// -> obd2
+             * (decode, the multi-PID scheduler and the declared
+             * 7E0/7E8 channel). ?profile=raw gives a log-only session. */
             chosen = is_mock ? "mock" : "obd2";
             break;
     }
@@ -172,10 +170,9 @@ qttune_status_t qttune_session_create(
         return QT_ERR_NO_TRANSPORT;   /* unknown profile name — strict */
     }
 
-    /* The session's set is live BEFORE attach: the transport sees the
-     * profile during attach/start (Phase 4 derives scheduler PIDs
-     * and channel defaults from it). Still single-writer — attach and
-     * any worker run after this store. */
+    /* Set before attach: the j2534 transport derives its scheduler
+     * PIDs and channels from it during attach. Single writer — attach
+     * and the worker both run after this store. */
     (*out_session)->active_signal_set = profile_set;
 
     qttune_status_t status = QT_ERR_NO_TRANSPORT;

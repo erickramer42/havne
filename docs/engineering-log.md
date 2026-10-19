@@ -399,8 +399,8 @@ already paid for:** a misspelled export (`PassThruStopFilter`) failed
 eight surrogate tests at exit 5. The child log named the stage
 ("mandatory export missing") but no longer named the export, because
 the same rewrite dropped the per-export list added after the
-2026-10-16 dumpbin session. Keep the diagnostics when restructuring
-the code around them. (3) **Know the generator before reasoning about
+2026-10-16 dumpbin session (restored the same day). Keep the
+diagnostics when restructuring the code around them. (3) **Know the generator before reasoning about
 POST_BUILD:** a review claimed the deployed surrogate copy goes stale
 when only `surrogate_main.cpp` changes. That holds for Ninja and
 Makefiles, but the Visual Studio generator runs POST_BUILD steps on

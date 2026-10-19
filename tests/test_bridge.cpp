@@ -623,7 +623,7 @@ TEST(BridgeTest, AsyncConnectCompletesOffGuiThread)
 
 // ---------------------------------------------------------------------------
 // ADR-0013 slice 1: the bridge renders the SESSION's profile, not a
-// hardcoded set (Known Issue #21)
+// hardcoded set (formerly Known Issue #21)
 // ---------------------------------------------------------------------------
 
 TEST(BridgeTest, RawProfileLeavesSignalModelEmpty)

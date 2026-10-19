@@ -41,9 +41,8 @@ qttune_status_t qttune_mock_transport_attach(qttune_session_t* session,
 
 /*
  * J2534 transport factory (Win32). URI grammar:
- *   j2534://[<selector>][?baud=<decimal>[&flags=<0xHEX|decimal>]
- *                           [&filter=<CAN_ID>[&txid=<CAN_ID>]
- *                           [&poll=<PID>]]]
+ *   j2534://[<selector>][?<key>=<value>[&<key>=<value>...]]
+ *   keys: baud, flags, filter, txid, poll, profile (any order)
  *
  * Selector (unchanged):
  *   j2534://                        first discovered device
@@ -58,13 +57,15 @@ qttune_status_t qttune_mock_transport_attach(qttune_session_t* session,
  *           the ISO 15765 500k default
  *   flags   0x-prefixed hex or decimal, passed to PassThruConnect
  *           verbatim — bit SEMANTICS are not interpreted pre-BENCH
- *   filter  CAN id 1..0x1FFFFFFF — receive ID (registers a
- *           FLOW_CONTROL filter on this ID; ISO 15765 receive
- *           prerequisite). Frames matching this ID get their
- *           4-byte address header stripped and arbitration_id stamped.
- *   txid    CAN id 1..0x1FFFFFFF — transmit ID; default 0x7E0
- *   poll    PID 1..0xFF — Mode-01 request loop (100 ms cadence)
- *           COUPLING: poll without filter is rejected at parse time.
+ *   filter  CAN id 1..0x1FFFFFFF — receive ID; overrides the profile's
+ *           declared channels with this single channel (registers a
+ *           FLOW_CONTROL filter; frames matching it get their 4-byte
+ *           address header stripped and arbitration_id stamped)
+ *   txid    CAN id 1..0x1FFFFFFF — transmit ID; default is the
+ *           profile's declared tx, else 0x7E0
+ *   poll    PID 1..0xFF — single-PID Mode-01 loop (100 ms cadence);
+ *           rejected at parse time without filter
+ *   profile name — validated by qttune_session_create, shape-only here
  *   lowercase keys only, unknown keys rejected, duplicate keys last-wins
  *
  * Attaches a transport to the session (idempotent like mock).
@@ -87,7 +88,7 @@ qttune_status_t qttune_j2534_read_frame(qttune_j2534_handle_t* handle,
                                        uint32_t timeout_ms,
                                        bool* got_frame);
 
-/* ---- Part 4: WRITE / IOCTL / FILTER vendor-call helpers ----
+/* ---- Write / ioctl / filter vendor-call helpers ----
  *
  * Same routing discipline as the helpers above: each dispatches
  * branch-on-backend inside j2534_loader.cpp and the policy layer stays
@@ -99,8 +100,7 @@ qttune_status_t qttune_j2534_read_frame(qttune_j2534_handle_t* handle,
  */
 
 /* Single-message PassThruWriteMsgs relay. data_len <= 64 (frame ABI
- * cap; ISO-TP multiframe segmentation is transport-layer work, not
- * loader work). tx_flags carries J2534 TxFlags verbatim (bit 8 =
+ * cap). tx_flags carries J2534 TxFlags verbatim (bit 8 =
  * CAN_29BIT_ID for 29-bit targets). timeout_ms passes through to the
  * vendor unchanged; 0 = non-blocking. out_num_written may be NULL;
  * *out_num_written < 1 after QT_OK means the vendor reported
@@ -113,7 +113,7 @@ qttune_status_t qttune_j2534_write_frame(qttune_j2534_handle_t* handle,
                                          uint32_t timeout_ms,
                                          uint32_t* out_num_written);
 
-/* Generic PassThruIoCtl relay. For GET_CONFIG/SET_CONFIG: input is a
+/* Generic PassThruIoctl relay. For GET_CONFIG/SET_CONFIG: input is a
  * flattened SCONFIG array as described above, input_len a nonzero
  * multiple of 8; for GET_CONFIG the vendor-updated pairs return in
  * output. For READ_VBATT: input_len 0, 4-byte result in output.

@@ -1,12 +1,8 @@
 // File/layer: core/src/j2534_transport.cpp | C++17, Qt-free, Win32-guarded
-// Testing: HARNESS — test_j2534_stream drives the full
-//          InjectFrame -> ReadMsgs -> callback pipeline on a worker thread,
-//          asserts ?baud=/?flags= values reach PassThruConnect, and the
-//          ?filter=/txid=/poll= request loop: write framing recorded by the
-//          fake, response received, 4-byte header stripped, arbitration_id
-//          stamped, filter stopped on detach. ADR-0013 slice 2 adds the
-//          scheduler + drain path (multi-PID round-robin, #25 receive cap)
-//          — covered end-to-end by the Phase 5 obd2 harness tests.
+// Testing: HARNESS — test_j2534_stream: URI parsing, connect parameters,
+//          filter registration, request framing, header strip and
+//          arbitration_id stamp, scheduler rotation and drain. The
+//          link-health logic is untested (Known Issue #11).
 // CI: non-Windows builds a linking stub; core.cpp routes j2534://
 //     only on _WIN32, so the stub is unreachable there
 
@@ -27,7 +23,7 @@
 #ifdef _WIN32
 
 #include "qttune/j2534_ptypes.h"   /* FLOW_CONTROL_FILTER, CAN_29BIT_ID,
-                                      TX_ISO15765_FRAME_PAD (N1) */
+                                      TX_ISO15765_FRAME_PAD */
 
 namespace {
 
@@ -35,49 +31,33 @@ constexpr uint32_t J2534_POLL_INTERVAL_MS   = 20;
 constexpr uint32_t J2534_READ_TIMEOUT_MS    = 100;
 constexpr uint32_t J2534_REQUEST_CYCLE_MS   = 100;   /* poll cadence */
 
-/* ADR-0013 slice 2 (#25): scheduler-mode constants. The scheduler
- * paces requests (one per 100 ms cycle, rotating PIDs); the drain
- * paces receives. DRAIN_BUDGET caps reads at 10 per cycle, so the
- * worker cannot exceed 100 reads/s: the cycle is never shorter than
- * the 100 ms deadline, making 10 reads per cycle a hard ceiling
- * regardless of bus load. (Dropped frames count against the budget
- * too — it bounds loop time, not delivery.) The normal case is one
- * response per request: about 10 reads/s, with the v1 set's 8 PIDs
- * each refreshing every 800 ms. DRAIN_READ_TIMEOUT is deliberately
- * SHORT: on a real device ReadMsgs blocks up to the timeout when
- * the queue is empty, so draining with the legacy 100 ms timeout
- * would spend the whole cycle waiting for silence. 20 ms
- * accommodates slow ECUs answering the request we just sent while
- * keeping a quiet-drain bounded. First EMPTY read ends the drain —
- * the budget exists for bursts, not for silence. Both are BENCH
- * candidates pending VX observation. */
+/* Scheduler mode: one request per 100 ms cycle (rotating PIDs), then
+ * a drain of at most DRAIN_BUDGET reads, so the worker never exceeds
+ * 100 reads/s whatever the bus load. Dropped frames count against the
+ * budget too: it bounds loop time, not delivery. Normally there is one
+ * response per request, so each of the v1 set's 8 PIDs refreshes every
+ * 800 ms. The drain timeout is short because ReadMsgs blocks for the
+ * whole timeout on an empty queue; 20 ms leaves room for a slow ECU
+ * without spending the cycle waiting. The first empty read ends the
+ * drain. Both values are BENCH candidates. */
 constexpr uint32_t J2534_DRAIN_BUDGET          = 10;
 constexpr uint32_t J2534_DRAIN_READ_TIMEOUT_MS  = 20;
 
-/* #11 hard-failure backoff: base 100 ms, doubling, 5 s cap. While
- * hard-failed the worker stops writes and stretches its cycle; a
- * timeout return (adapter answered "silence") or a good frame
- * heals it. 5 s was chosen so a dead-device retry costs ~0.2
- * attempts/s at steady state. */
+/* Hard-failure backoff: 100 ms base, doubling to a 5 s cap (about
+ * 0.2 retries/s against a dead adapter). A good frame, or a debounced
+ * run of ERR_TIMEOUT reads (the adapter is answering), ends it.
+ * Known Issue #11: update_health() resets the backoff to the base on
+ * every failure, so today it never grows. */
 constexpr uint32_t J2534_BACKOFF_BASE_MS = 100;
 constexpr uint32_t J2534_BACKOFF_CAP_MS  = 5000;
 
-/* Address/filter field widths. The 4-byte big-endian CAN ID is the
- * J2534 convention for ISO 15765 filter patterns and in-band
- * addressing bytes.
- * N1 FIX (2026-10-19): FILTER_MSG_LEN is 4, not 8. On an ISO 15765
- * channel the mask/pattern/flow-control filter messages are BARE
- * 4-byte CAN IDs — the adapter's ISO-TP stack does the framing, so
- * no PCI byte belongs in the flow-control message either. The old
- * 8-byte shape carried a hand-built [30 00 00] CTS/BS/STmin triple
- * that a conforming adapter would have treated as address bytes.
- * SAE J2534-1 additionally requires all three filter messages to
- * share the same DataSize and TxFlags — satisfied trivially here.
- * This also retires the old BENCH-prep item 1 (the 8-byte shape
- * and its equality-rule concern): the spec shape has no such
- * tension. VERIFIED: Opus IVS "Constructing an OBDII Message"
- * (4-byte mask/pattern/FC), Quantex pt_start_msgfilt docs, dashlogic
- * J2534_v0404.h. */
+/* On ISO 15765 channels J2534 carries the CAN ID in-band as 4
+ * big-endian bytes, and the filter mask, pattern and flow-control
+ * messages are bare 4-byte IDs: the adapter's ISO-TP stack does the
+ * framing, so no PCI bytes. J2534-1 requires the three filter
+ * messages to share DataSize and TxFlags. Verified: Opus IVS
+ * "Constructing an OBDII Message", Quantex PassThruStartMsgFilter
+ * docs. */
 constexpr uint32_t J2534_ADDR_LEN       = 4;
 constexpr uint32_t J2534_FILTER_MSG_LEN = 4;
 constexpr uint32_t J2534_TX_ID_DEFAULT = OBD2_TESTER_ARB_ID;  /* shared
@@ -85,11 +65,11 @@ constexpr uint32_t J2534_TX_ID_DEFAULT = OBD2_TESTER_ARB_ID;  /* shared
                                        * obd2 set's own declaration */
 constexpr uint32_t J2534_CAN_ID_MAX     = 0x1FFFFFFFu;   /* 29-bit */
 constexpr uint32_t J2534_PID_MAX        = 0xFFu;
-/* Finding 2 (review 2026-10-19): a conforming vendor returns
- * ERR_TIMEOUT for the first empty drain read — every healthy
- * session would flap last_error to VEHICLE_TIMEOUT right after
- * every good frame. "Not responding" means QUIET for this long. */
-constexpr uint32_t J2534_HEALTH_QUIET_CYCLES = 10;   /* ~1 s */
+/* Every drain ends on an empty read, which a conforming vendor reports
+ * as ERR_TIMEOUT, so one timeout means nothing. "Not responding" is
+ * this many consecutive empty or timed-out reads (counted per read;
+ * about 1 s in scheduler mode). */
+constexpr uint32_t J2534_HEALTH_QUIET_CYCLES = 10;
 
 void pack_be32(uint8_t* out, uint32_t v)
 {
@@ -99,33 +79,12 @@ void pack_be32(uint8_t* out, uint32_t v)
     out[3] = static_cast<uint8_t>(v);
 }
 
-/* Classic OBD-II Mode-01 request on an ISO 15765 channel: the
- * 4-byte normal-addressing ID followed by the two logical request
- * bytes [Mode 01][PID] — 6 bytes total, TxFlags =
- * ISO15765_FRAME_PAD so the ADAPTER frames and zero-pads.
- *
- * N1 FIX (2026-10-19): on an ISO 15765 channel the adapter owns the
- * ISO-TP layer. PassThruWriteMsgs takes the LOGICAL message; the
- * SF PCI byte and 8-byte padding are the driver's job (padding is
- * controlled by the ISO15765_FRAME_PAD TxFlag). The previous shape
- * hand-built [ID][02][01][PID][pad-to-8] — a 12-byte write a
- * conforming adapter would transmit as a two-frame ISO-TP message
- * whose service byte reads as Mode 02 (freeze frame), and whose
- * padding duplicated the adapter's own (FRAME_PAD was never set).
- * VERIFIED against Opus IVS ("Constructing an OBDII Message":
- * RPM request is Data=[ID][01][0C], DataSize=6), Quantex
- * PassThruWriteMsgs docs (writes are [ID][SID][...] with
- * ISO15765_FRAME_PAD, no PCI), and dashlogic J2534_v0404.h
- * (ISO15765_FRAME_PAD = 0x0040).
- *
- * NO CHECKSUM BYTE: ISO 15765-4 over CAN has no data-field checksum
- * (the CAN CRC is hardware-handled); a K-line-style sum would be a
- * spurious byte to a real ECU.
- *
- * BENCH-remaining assumption: that the VX honors FRAME_PAD
- * zero-padding (the ISO 15765-4 convention) rather than demanding
- * unpadded transmissions — the flag is the documented knob either
- * way. */
+/* Mode-01 request on an ISO 15765 channel: [4-byte tx ID][01][PID],
+ * 6 bytes, sent with ISO15765_FRAME_PAD. The adapter adds the ISO-TP
+ * PCI byte and pads the CAN frame; ISO 15765-4 has no data checksum.
+ * Verified: Opus IVS (the RPM request is [ID][01][0C], DataSize 6) and
+ * Quantex PassThruWriteMsgs docs. Still to confirm on a real adapter:
+ * that it honours FRAME_PAD. */
 void build_mode01_request(uint8_t out[6], uint32_t tx_id, uint32_t pid)
 {
     pack_be32(out, tx_id);
@@ -133,7 +92,7 @@ void build_mode01_request(uint8_t out[6], uint32_t tx_id, uint32_t pid)
     out[5] = static_cast<uint8_t>(pid);
 }
 
-/* One resolved receive/transmit channel (N3). rx_id doubles as the
+/* One resolved receive/transmit channel. rx_id doubles as the
  * strip/stamp identity in pump_one: a received frame's 4-byte
  * address header matching chans[i].rx_id is stripped and stamped
  * with that rx_id before dispatch. */
@@ -153,16 +112,14 @@ struct qttune_j2534_transport {
      * "unset" sentinel — the URI parser rejects an explicit baud=0 —
      * and j2534_loader's connect_channel substitutes the ISO 15765
      * default. flags pass through verbatim: 0 is both the default and
-     * a legitimate value. Semantics of individual flag bits are NOT
-     * interpreted here (BENCH tier, pending the vendor header diff). */
+     * a legitimate value. Individual flag bits are not interpreted. */
     unsigned long baud = 0;
     unsigned long flags = 0;
     /*   poll_pid     0 = passive receive; nonzero = Mode-01 request
      *                loop (raw-profile debug override; the scheduler
      *                outranks it whenever a mux set is active)
-     *   chans        N3: resolved channel table. Derived from the
-     *                PROFILE's declared channels at attach (the set
-     *                is live before attach per core.cpp), with
+     *   chans        resolved channel table. Derived from the
+     *                profile's declared channels at attach, with
      *                ?filter=/?txid= as overrides. ?filter= wins
      *                outright (single-channel shorthand); ?txid=
      *                alone rewrites every derived tx. Bounded by
@@ -186,8 +143,8 @@ struct qttune_j2534_transport {
 struct j2534_uri_params {
     unsigned long baud = 0;
     unsigned long flags = 0;
-    unsigned long rx_id = 0;     /* 0 = no filter (verbatim read mode) */
-    unsigned long tx_id = 0;     /* 0 = unset; attach substitutes 0x7E0 */
+    unsigned long rx_id = 0;     /* 0 = no ?filter= override */
+    unsigned long tx_id = 0;     /* 0 = unset: profile's tx, else 0x7E0 */
     unsigned long poll_pid = 0;  /* 0 = passive receive */
 };
 
@@ -221,12 +178,10 @@ uint32_t channel_index_for_rx(const qttune_j2534_transport* t, uint32_t rx)
     return 0;
 }
 
-/* N3: derive the channel table from the set + URI overrides.
- * Never fails — bounded by construction, malformed set entries are
- * skipped defensively (the set validator is the enforcement point).
- * ?txid= alone yields NO channel: without an rx there is nothing to
- * register a filter for, matching the pre-N3 semantics where a
- * lone ?txid= on a raw profile stored a tx nothing used. */
+/* Derive the channel table from the set plus URI overrides. Never
+ * fails: bounded by construction, and malformed set entries are
+ * skipped. A lone ?txid= on a profile without channels yields no
+ * channel — there is no receive ID to register a filter for. */
 void resolve_channels(qttune_j2534_transport* t,
                       const QttuneSignalSet* set,
                       const j2534_uri_params& params)
@@ -316,18 +271,16 @@ qttune_status_t pump_one(qttune_j2534_transport* t, bool* out_got,
     return QT_OK;
 }
 
-/* Error-state transition (#11). Session atomics are written ONLY on
- * transitions: a steady timeout costs nothing, a hard-failure episode
- * counts exactly once. health/backoff_ms/quiet_runs are WORKER-LOCAL
- * (caller-owned); only the session's last_error/error_count cross threads.
- * Semantics:
- *   good frame  -> clears last_error, resets backoff/quiet (recovery)
- *   QT_ERR_VEHICLE_TIMEOUT -> marks last_error, no episode count,
- *                 no backoff — a silent bus is a polling state, and
- *                 an ERR_TIMEOUT return proves the ADAPTER answered,
- *                 so it also clears stale hard-failure backoff
- *   QT_ERR_TRANSPORT_HARD_FAILURE -> marks last_error, ONE episode,
- *                 enters backoff (caller sleeps and doubles it) */
+/* Link-health transitions (#11). Session atomics are written only on
+ * transitions; health, backoff_ms and quiet_runs are worker-local.
+ *   good frame      -> last_error = QT_OK; backoff and quiet count reset
+ *   empty read or ERR_TIMEOUT -> counts toward quiet; after
+ *                      J2534_HEALTH_QUIET_CYCLES in a row, last_error =
+ *                      QT_ERR_VEHICLE_TIMEOUT (a timeout run also clears
+ *                      the backoff: the adapter is answering)
+ *   anything else   -> last_error = that status; one error_count episode
+ *                      per transition; backoff set to the base (the
+ *                      caller sleeps and doubles it) */
 void update_health(qttune_j2534_transport* t, int32_t& health,
                    uint32_t& backoff_ms, uint32_t& quiet_runs,
                    qttune_status_t st, bool got)
@@ -399,16 +352,17 @@ bool backoff_sleep(qttune_j2534_transport* t, uint32_t ms)
 /* Worker entrypoint — mirrors mock_worker's discipline: impl-owned
  * state, dispatch through the session snapshot path, stop via atom.
  *
- * Three modes, selected by adoption state (all frozen pre-thread):
- *   SCHEDULER (ADR-0013 slice 2): sched.count > 0. Per 100 ms cycle:
- *     next PID -> build Mode-01 request -> write -> DRAIN up to
- *     J2534_DRAIN_BUDGET frames (short timeout, stop at first empty)
- *     -> sleep the cycle REMAINDER against an absolute deadline, so
- *     drain cost does not accumulate as cadence drift.
- *   POLL (legacy): poll_pid != 0. One request, one read (100 ms
- *     timeout), 100 ms sleep — request shape is the N1 6-byte wire
- *     form shared with the scheduler.
- *   PASSIVE (legacy): read one frame per 20 ms, no requests. */
+ * Three modes, fixed before the thread starts:
+ *   SCHEDULER (ADR-0013): sched.count > 0. Per 100 ms cycle: next PID
+ *     -> Mode-01 request -> write -> drain up to J2534_DRAIN_BUDGET
+ *     frames (short timeout, stop at first empty) -> sleep the cycle
+ *     remainder against an absolute deadline, so drain cost does not
+ *     drift the cadence. Writes continue while hard-failed.
+ *   POLL: poll_pid != 0. One request, one read (100 ms timeout),
+ *     100 ms sleep; same request shape as the scheduler. Skips the
+ *     write while hard-failed (Known Issue #11).
+ *   PASSIVE: one read (100 ms timeout) then a 20 ms sleep; no
+ *     requests. */
 void j2534_worker(qttune_j2534_transport* t)
 {
     const bool sched_mode = (t->sched.count > 0);
@@ -421,13 +375,10 @@ void j2534_worker(qttune_j2534_transport* t)
         const auto cycle_start = std::chrono::steady_clock::now();
 
         if (sched_mode) {
-            /* PROBE HEARTBEAT (finding 1, review 2026-10-19): the
-             * write IS the probe. Silencing writes on hard failure
-             * made recovery impossible in scheduler mode — replies
-             * only follow writes. During backoff the cycle stretches,
-             * so the probe rate decays automatically; a dead adapter
-             * costs ~0.2 probes/s at the 5 s cap, and a recovered one
-             * is answered within one backoff interval. */
+            /* The request doubles as the recovery probe, so it is sent
+             * even while hard-failed: replies only follow writes.
+             * Backoff stretches the cycle, which slows the probing. A
+             * failed write counts as a hard failure. */
             uint8_t pid = 0;
             (void)qttune_sched_next(&t->sched, &pid);
             const uint32_t ci =
@@ -445,9 +396,8 @@ void j2534_worker(qttune_j2534_transport* t)
                               wst, false);
             }
 
-            /* DRAIN (#25 receive cap, unchanged shape): health derives
-             * from the reads the drain already performs. First empty
-             * OR erroring read ends the drain — budget bounds reads. */
+            /* Drain: health comes from these reads. The first empty or
+             * failing read ends the drain; the budget bounds the rest. */
             for (uint32_t i = 0; i < J2534_DRAIN_BUDGET; ++i) {
                 bool got = false;
                 qttune_status_t st = pump_one(t, &got,
@@ -477,8 +427,9 @@ void j2534_worker(qttune_j2534_transport* t)
                 }
             }
         } else if (t->poll_pid != 0) {
-            /* POLL (legacy order preserved: write, then read the
-             * RESPONSE — not the previous cycle's). */
+            /* POLL: write, then read this request's response. Skips
+             * the write while hard-failed, so one hard error stops the
+             * loop (Known Issue #11). */
             if (health != QT_ERR_TRANSPORT_HARD_FAILURE) {
                 uint8_t req[6];
                 build_mode01_request(req, t->chans[0].tx_id, t->poll_pid);
@@ -505,7 +456,7 @@ void j2534_worker(qttune_j2534_transport* t)
                     J2534_REQUEST_CYCLE_MS));
             }
         } else {
-            /* PASSIVE: legacy 100 ms read / 20 ms sleep. */
+            /* PASSIVE: 100 ms read, then a 20 ms sleep. */
             bool got = false;
             qttune_status_t st = pump_one(t, &got,
                                           J2534_READ_TIMEOUT_MS);
@@ -576,18 +527,17 @@ bool parse_number(const char* s, size_t len, unsigned long* out_val)
  *   - lowercase keys only:
  *       baud   decimal, nonzero
  *       flags  0x-hex or decimal; 0 legal
- *       filter CAN id 1..0x1FFFFFFF — receive ID (registers a
- *              FLOW_CONTROL filter; the ISO 15765 receive prerequisite)
- *       txid   CAN id 1..0x1FFFFFFF — transmit ID, default 0x7E0
- *       poll   PID 1..0xFF — Mode-01 request loop
+ *       filter CAN id 1..0x1FFFFFFF — receive ID; replaces the
+ *              profile's channels (registers a FLOW_CONTROL filter)
+ *       txid   CAN id 1..0x1FFFFFFF — transmit ID; default is the
+ *              profile's tx, else 0x7E0
+ *       poll   PID 1..0xFF — single-PID Mode-01 loop
+ *       profile name, 1..63 chars (validated in session_create)
  *   - unknown keys, missing '=', empty segments, trailing '&', and a
  *     bare trailing '?' on the URI are all rejected
  *   - duplicate keys: last occurrence wins
- *   - COUPLING: poll without filter is rejected. Per J2534-1 v4.04 an
- *     ISO 15765 channel receives NOTHING without a registered filter,
- *     so a poll loop would spin against guaranteed silence — a
- *     guaranteed-silent session is a delayed failure, not a feature.
- *     Fail fast at parse, like every other malformed URI. */
+ *   - poll without filter is rejected: an ISO 15765 channel receives
+ *     nothing without a filter, so the loop could only hear silence. */
 qttune_status_t parse_query(const char* query, j2534_uri_params* p)
 {
     const char* cur = query;
@@ -668,11 +618,10 @@ qttune_status_t parse_query(const char* query, j2534_uri_params* p)
 
 /* Resolve a j2534:// URI to a concrete dll_path + connect/adoption
  * params. Grammar (see internal.h): [selector][?query]. The query is
- * split off and parsed BEFORE selector resolution — previously a query
- * glued onto a path reached LoadLibraryEx as part of the filename, and
- * a query on a vendor name defeated the discovery match. Selector
- * routing itself is unchanged: empty = first device; path-like =
- * direct; else vendor-name match. All misses are QT_ERR_NO_TRANSPORT. */
+ * split off and parsed before the selector is resolved, so it never
+ * reaches LoadLibraryEx or the vendor-name match. Selector: empty =
+ * first device; path-like = direct load; else vendor-name match. All
+ * misses are QT_ERR_NO_TRANSPORT. */
 qttune_status_t resolve_uri(const char* uri, qttune_j2534_device_t* dev,
                             j2534_uri_params* params)
 {
@@ -853,9 +802,8 @@ qttune_status_t j2534_attach(qttune_session_t* session, const char* uri)
         return st;
     }
 
-    /* N3: channels + scheduler resolve BEFORE the device opens
-     * (retires the j2534_start ordering note). core.cpp installs the
-     * profile's set ahead of the attach call, so it is live here. */
+    /* Channels and scheduler are resolved before the device opens.
+     * core.cpp installs the profile's set before calling attach. */
     const QttuneSignalSet* set = qttune_session_signal_set(session);
 
     auto* t = new (std::nothrow) qttune_j2534_transport();

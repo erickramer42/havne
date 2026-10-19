@@ -35,7 +35,7 @@ public:
         DlcRole,
         ExtendedRole,
         PayloadRole,
-        ArbitrationIdRole   /* appended (F1): additive, existing QML unaffected */
+        ArbitrationIdRole   /* appended, so existing role numbers are unchanged */
     };
 
     int rowCount(const QModelIndex& parent = {}) const override;
@@ -182,8 +182,8 @@ public:
     Q_INVOKABLE void forceFrameCountForTesting(int count);
 
     // J2534 device discovery (Windows; empty list elsewhere). One map per
-    // installed Pass-Thru interface driver: { vendorName, dllPath } — both
-    // QString. Registry read, no session attached; bounded at
+    // installed Pass-Thru interface driver: { vendorName, dllPath,
+    // architecture } — all QString. Registry read, no session attached; bounded at
     // QTTUNE_J2534_MAX_VENDORS by core. Safe to call synchronously from
     // QML (few reg keys, no I/O beyond the registry). UI sees display
     // values only (rule 2) — dllPath is exposed because it is the user's
@@ -217,8 +217,8 @@ signals:
 private:
     static void onFrame(const qttune_frame_t* frame, void* user_data);
     void handleFrameInternal(const qttune_frame_t* frame);
-    void notifyDropped();   // FIX: consolidated drop reporting, callable from worker path
-    void destroySessionLocked();  // close-then-destroy in one place (F1)
+    void notifyDropped();   // GUI thread: emit droppedFramesChanged if the count moved
+    void destroySessionLocked();  // the one teardown path (destroy auto-closes)
 
     bool m_initialized = false;
     qttune_session_t* m_session = nullptr;
@@ -233,7 +233,7 @@ private:
     FrameSortProxy* m_sortProxy = nullptr;
 
     QTimer* m_coalesceTimer = nullptr;
-    // FIX: latest-value-per-signal-ID staging (merge, not clear-and-refill)
+    // Latest value per signal ID, flushed by the 100 ms coalesce timer
     std::vector<std::pair<uint16_t, float>> m_stagingBuffer;
     int m_signalBatchCount = 0;
 
@@ -241,7 +241,7 @@ private:
     int m_guiNotifyCount = 0;
 
     std::atomic<int> m_inFlightFrames{0};   // posted-but-not-yet-processed count
-    std::atomic<bool> m_dropNotifyPending{false};   // FIX: one queued drop-notify at a time
+    std::atomic<bool> m_dropNotifyPending{false};   // at most one queued drop notification
     static constexpr int MaxInFlightFrames = 1000; // queue backlog bound
 
     // Async connect support. m_connecting is written ONLY on the GUI

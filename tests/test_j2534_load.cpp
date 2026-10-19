@@ -118,7 +118,7 @@ TEST_F(FakeFixture, CloseNullIsSafeNoOp) {
  * what the OBDX Pro VX and every spec-following DLL ships): the
  * everyday fake exports 'PassThruIoctl' DIRECTLY. Every routing and
  * surrogate test exercises this resolution implicitly; this pins it
- * by name, including the negative half (review finding 8): the
+ * by name, including the negative half: the
  * legacy spelling must NOT resolve against this fixture, so a
  * regression back to legacy-only lookup cannot hide behind a
  * coincidental fallback. */
@@ -128,8 +128,8 @@ TEST_F(FakeFixture, SpecSpellingPassThruIoctlResolvesAndWorks) {
     ASSERT_NE(h, nullptr);
 
     /* Negative assertion: the everyday fake must not export the
-     * legacy spelling — else this test degrades to the finding-8
-     * vacuous pass (either spelling works, nothing is pinned). */
+     * legacy spelling — else this test passes vacuously (either
+     * spelling works, nothing is pinned). */
     HMODULE probe = LoadLibraryExA(FAKE_J2534_DLL_PATH, nullptr,
                                     LOAD_WITH_ALTERED_SEARCH_PATH);
     ASSERT_NE(probe, nullptr);

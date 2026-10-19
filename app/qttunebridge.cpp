@@ -1,4 +1,4 @@
-// File/layer: core/app/qttunebridge.cpp
+// File/layer: app/qttunebridge.cpp | Qt6 Core, app layer, C++17
 
 #include "qttunebridge.h"
 #include "qttune/version.h"
@@ -143,8 +143,8 @@ QHash<int, QByteArray> SignalListModel::roleNames() const
 
 void SignalListModel::setSignalSet(const QttuneSignalSet* set)
 {
-    // NULL/empty is a VALID state now (ADR-0013 "raw"): clear the
-    // model instead of silently keeping the previous session's rows.
+    // NULL/empty is valid (the raw profile): clear the model rather
+    // than keep the previous session's rows.
     if (set == nullptr || set->defs == nullptr || set->count == 0) {
         beginResetModel();
         m_entries.clear();
@@ -209,7 +209,6 @@ void SignalListModel::updateValues(const std::vector<std::pair<uint16_t, float>>
     if (firstRow >= 0) {
         emit dataChanged(index(firstRow), index(lastRow), {ValueRole});
         // One emission per batch — the strip chart's sole repaint trigger.
-        // Was declared but never emitted: a signal promise QML never received.
         emit valuesUpdated();
     }
 }
@@ -296,8 +295,7 @@ QtTuneBridge::~QtTuneBridge()
 
 void QtTuneBridge::destroySessionLocked()
 {
-    // F1: close-then-destroy (fclose/free split). destroy() auto-closes
-    // if still open — safe either way, one funnel for every teardown path.
+    // The one teardown path. destroy() closes the session first if needed.
     if (m_session != nullptr) {
         qttune_session_destroy(m_session);
         m_session = nullptr;
@@ -332,10 +330,9 @@ QVariantList QtTuneBridge::discoverJ2534Devices() const
         QVariantMap m;
         m["vendorName"] = QString::fromUtf8(devices[i].vendor_name);
         m["dllPath"] = QString::fromUtf8(devices[i].dll_path);
-        /* reserved[0] annotated by the loader's PE sniffer: 1=x86,
-         * 2=x64, 0/anything-else treated as x86 (sniffer's conservative
-         * default). Display value only (rule 2) — the routing decision
-         * itself lives core-side when the surrogate host lands. */
+        /* reserved[0] is the loader's PE sniff: 1 = x86, 2 = x64,
+         * 0 = unknown. Unknown is shown as "x86" (Known Issue #18);
+         * routing treats it as in-proc. Display value only. */
         m["architecture"] = (devices[i].reserved[0] == 2)
                                 ? QStringLiteral("x64")
                                 : QStringLiteral("x86");
@@ -481,10 +478,9 @@ void QtTuneBridge::onFrame(const qttune_frame_t* frame, void* user_data)
     // Backpressure: bound the QUEUED backlog, not the lifetime count.
     if (self->m_inFlightFrames.load(std::memory_order_relaxed) >= MaxInFlightFrames) {
         self->m_droppedFrames.fetch_add(1, std::memory_order_relaxed);
-        // FIX: report drops from the worker path too. Previously drops were
-        // only surfaced from handleFrameInternal, which never runs while the
-        // backlog is saturated — exactly when the user needs to know.
-        // m_dropNotifyPending collapses this to at most one queued notification.
+        // Report drops from here too: handleFrameInternal doesn't run while
+        // the backlog is saturated, which is exactly when drops happen.
+        // m_dropNotifyPending limits this to one queued notification.
         bool expected = false;
         if (self->m_dropNotifyPending.compare_exchange_strong(expected, true)) {
             QMetaObject::invokeMethod(self, [self]() {
@@ -519,7 +515,6 @@ void QtTuneBridge::handleFrameInternal(const qttune_frame_t* frame)
 
     // Defensive clamp: a misbehaving transport must never make us read past
     // the inline buffer, even if data_length exceeds the documented 0-64.
-    // (data_length is uint16_t in the F1 frame ABI.)
     const uint16_t len = (frame->data_length <= sizeof(frame->data))
                          ? frame->data_length
                          : static_cast<uint16_t>(sizeof(frame->data));
@@ -542,9 +537,8 @@ void QtTuneBridge::handleFrameInternal(const qttune_frame_t* frame)
     if (set != nullptr) {
         for (uint32_t i = 0; i < set->count; ++i) {
             const QttuneSignalDef& def = set->defs[i];
-            // Gate moved core-side: arb ID + mux key (ADR-0013 slice 2).
-            // For mux-less defs (the mock set) this is byte-for-byte
-            // the old message_id comparison — behavior-preserving.
+            // Core-side gate: arbitration ID, plus the mux key when the
+            // def has one.
             if (qttune_def_matches_frame(&def, frame) != 0) {
                 continue;
             }
@@ -587,7 +581,7 @@ void QtTuneBridge::forceFrameCountForTesting(int count)
         return;
     }
     m_currentFrameCount = count;
-    emit frameCountChanged();   // FIX: keep the QML binding consistent
+    emit frameCountChanged();   // keep the QML binding in sync
 }
 
 void QtTuneBridge::dispatchFrameForTesting(const qttune_frame_t& frame)

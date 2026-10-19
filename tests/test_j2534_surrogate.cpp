@@ -1,11 +1,12 @@
 // File/layer: tests/test_j2534_surrogate.cpp | GTest, HARNESS tier
 // Testing: spawns the REAL surrogate process hosting the fake vendor DLL,
-//          and asserts frames cross the pipe+ring boundary intact: exact
-//          counts, payload fidelity, RxStatus->flags translation, vendor
-//          timestamp passthrough, FIFO order, pump gating on CONNECT,
+//          and asserts frames cross the pipe intact: exact counts,
+//          payload fidelity, RxStatus->flags translation, vendor
+//          timestamp passthrough, FIFO order, no reads before CONNECT,
 //          clean job-object teardown, and fast failure on a dead DLL.
-//          Part 4: write->echo round trip, ioctl SET->GET + VBATT,
-//          child-side ioctl whitelist, filter start/stop lifecycle.
+//          Also: write->echo round trip, ioctl SET->GET + VBATT,
+//          child-side ioctl whitelist, filter start/stop lifecycle,
+//          recovery after a timed-out request.
 //
 // ARCH note: in the x64 configure this is all-x64 (CI-valid IPC test);
 // the true cross-arch case (x64 test process -> x86 surrogate -> x86

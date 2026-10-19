@@ -44,9 +44,17 @@ Resolution order:
    cross-arch run below.
 
 Build order matters: build the Win32 tree **first**, then configure
-or reconfigure the x64 tree so auto-detection finds the exe. The
-copy is `copy_if_different`, so rebuilding the Win32 tree and then
-the app target propagates a fresh surrogate.
+or reconfigure the x64 tree so auto-detection finds the exe.
+Detection runs only at configure time, so an x64 tree configured
+before the Win32 surrogate existed has no copy step at all, and
+building it again doesn't add one. Check the configure output for
+`Deploying Win32 J2534 surrogate: <path>`. If it isn't there, re-run
+`cmake -B build` after building the Win32 tree.
+
+Once the copy step exists, the Visual Studio generator runs it on
+every app build (`copy_if_different`). Keep the order on every
+rebuild too: Win32 tree, then app. Building the app first deploys the
+previous surrogate.
 
 **Cache caveat (hit for real, 2026-10-19).** The cache variable
 persists across reconfigures. A tree previously configured with an
@@ -121,9 +129,9 @@ negative assertion will catch it, but best not to trigger it).
 For any change touching the surrogate, the fakes, or the J2534
 client/transport — in this order:
 
-1. **Rebuild both trees.** The cross-arch run consumes `build-win32`
-   artifacts directly, and the app's deployed surrogate copy
-   refreshes on the next app build.
+1. **Rebuild both trees, Win32 first.** The cross-arch run consumes
+   `build-win32` artifacts directly, and the app build copies
+   whatever surrogate `build-win32` holds at that moment.
 2. **Full suite, bare shell** (no env vars — the cross-arch case
    must *skip*, visibly, never silently fall back).
 3. **Cross-arch run** with the variables exported (below).
@@ -135,8 +143,8 @@ client/transport — in this order:
    `OP_DISCONNECT`, `OP_WRITE`, `OP_IOCTL`, `OP_START_FILTER`,
    `OP_STOP_FILTER`); grep for the op you changed. After a clean
    close, `OP_DISCONNECT: vendor status 0` should appear exactly once.
-5. If the app is affected, rebuild the `qttune` target so the
-   deployment copy picks up the new surrogate.
+5. If the app is affected, rebuild the `qttune` target (after the
+   Win32 tree) so the deployment copy picks up the new surrogate.
 
 ## Running tests
 
@@ -196,6 +204,7 @@ skips.
 | Test discovery fails at build time with `0xc0000135` | A DLL is missing. Discovery runs the test binary during the build, so Qt-linked test targets must copy `$<TARGET_RUNTIME_DLLS>` POST_BUILD, ordered before `gtest_discover_tests`. |
 | Surrogate test fails with child exit code 5 | An export can't be found by name, usually because of x86 `__stdcall` decoration. Check the `.def` file. Other exit codes are listed in [j2534.md](j2534.md#surrogate). |
 | Cross-arch test fails with odd values, but same-arch passes | The `build-win32` tree is stale. Rebuild both trees. |
+| In the app, an x86 adapter (for example the OBDX Pro VX) fails with "failed to load transport library", and `%TEMP%\qttune-surrogate.log` is empty | No surrogate next to `qttune.exe`, so the child never launched. The x64 tree was configured before `build-win32` had a surrogate. Build the Win32 tree, re-run `cmake -B build`, check for `Deploying Win32 J2534 surrogate` in the output, and rebuild. Setting `QTTUNE_SURROGATE_EXE` also works. |
 | Cross-arch test fails expecting backend "surrogate", got "inproc" | `QTTUNE_FAKE_DLL` points at an x64 fake (or the wrong tree). Check the value, not the code — unset skips, wrong-value fails. |
 | J2534 test fails as `Failed (Timeout)` | A genuine hang, bounded by the 30 s ceiling. Attach to the surviving test and surrogate processes and check thread wait states before killing; the child log in `%TEMP%\qttune-surrogate.log` is rewritten per spawn — copy before respawning. |
 | Linker warning LNK4070 on a fake DLL | The `.def` file's `LIBRARY` directive disagrees with the output filename. Make them match. |

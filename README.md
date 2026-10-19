@@ -101,18 +101,23 @@ build/app/qttune
 Add `-DQTTUNE_BUILD_CORE_ONLY=ON` to build only the core library and
 its tests, without Qt.
 
-**32-bit vendor drivers (optional):** to run against x86-only J2534
-drivers, build the Win32 surrogate in a second tree first. When the
-sibling `build-win32/` tree exists at app-configure time, the
-surrogate is deployed next to `qttune.exe` automatically — no flags
-needed. Otherwise, deploy it explicitly with
-`-DQTTUNE_SURROGATE_SOURCE=...` or export `QTTUNE_SURROGATE_EXE` at
-runtime ([docs/development.md](docs/development.md)):
+**32-bit vendor drivers (optional):** x86-only J2534 drivers, such as
+the OBDX Pro VX's, need the Win32 surrogate from a second build tree.
+Build it **before** configuring `build`: the app's configure step
+looks for `build-win32/` and, when it finds the surrogate, copies it
+next to `qttune.exe` on every app build — no flags needed. Run these
+before the Windows commands above:
 
 ```sh
 cmake -B build-win32 -A Win32 -DQTTUNE_BUILD_CORE_ONLY=ON
 cmake --build build-win32 --config Release --target qttune-j2534-surrogate fake_j2534 fake_j2534_legacy
 ```
+
+If `build` was already configured, re-run `cmake -B build` afterwards
+and check that its output includes `Deploying Win32 J2534 surrogate`.
+Otherwise, deploy the surrogate explicitly with
+`-DQTTUNE_SURROGATE_SOURCE=...` or export `QTTUNE_SURROGATE_EXE` at
+runtime ([docs/development.md](docs/development.md)).
 
 **Mobile (not yet validated):** open the project in Qt Creator, select
 an Android or iOS kit, and Run.

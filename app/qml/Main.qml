@@ -24,7 +24,7 @@ ApplicationWindow {
     function gotoPage(index) { stack.currentIndex = index }
 
     readonly property bool bridgeConnected: QtTune.connected
-    readonly property bool isConnecting: false  // Future: async loading state
+    readonly property bool isConnecting: false  // unused; QtTune.connecting has the real state
 
     header: ToolBar {
         height: 48

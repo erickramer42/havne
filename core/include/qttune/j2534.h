@@ -4,7 +4,7 @@
 #ifndef QTTUNE_J2534_H
 #define QTTUNE_J2534_H
 
-#include "qttune/core.h"   /* qttune_status_t — missing include broke the build */
+#include "qttune/core.h"   /* qttune_status_t */
 
 #include <stdint.h>
 #include <stddef.h>
@@ -18,10 +18,8 @@ extern "C" {
  *
  * Enumerates registered Pass-Thru function libraries per SAE J2534-1 (v4.04):
  *   HKLM\SOFTWARE\Pass-Thru Support.04.04\<VendorName>  → FUNCTIONLIBRARY
- * (both WOW64 registry views; see implementation).
- *
- * v0.3.0 Phase 3 Step 1: discovery only. Device communication
- * (LoadLibraryEx, PassThru* calls) lands in Step 2.
+ * (both WOW64 registry views, plus the unhyphenated root some
+ * installers write; see implementation).
  */
 #define QTTUNE_J2534_MAX_VENDORS 16
 #define QTTUNE_J2534_VENDOR_NAME_LEN 64
@@ -59,8 +57,9 @@ typedef struct qttune_j2534_handle qttune_j2534_handle_t;
  * Load a discovered vendor's function library and open a device.
  *
  * CONTRACTS:
- * - Loads the DLL named by device->dll_path, resolves ALL seven
- *   mandatory PassThru exports, and calls the vendor's PassThruOpen
+ * - Loads the DLL named by device->dll_path (an x86 DLL loads in the
+ *   surrogate process, ADR-0009), resolves all nine mandatory
+ *   PassThru exports, and calls the vendor's PassThruOpen
  * - Any failure (missing DLL, missing export, PassThruOpen refused)
  *   returns QT_ERR_LOAD_FAILED with NO module left loaded
  * - On error: *out_handle = NULL

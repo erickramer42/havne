@@ -95,7 +95,9 @@ Page {
                 anchors.fill: parent
                 anchors.margins: 4
 
-                // Palette order matches model row order for stable colors
+                // Indexed by position in chartData(), which skips
+                // unsubscribed signals, so unsubscribing one shifts the
+                // colours of the signals after it
                 readonly property var seriesColors: [
                     "#ff5555", "#55ff88", "#55aaff",
                     "#ffd166", "#c792ea", "#f78c6c"

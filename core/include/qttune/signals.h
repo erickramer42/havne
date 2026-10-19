@@ -4,17 +4,9 @@
 #ifndef QTTUNE_SIGNALS_H
 #define QTTUNE_SIGNALS_H
 
-/* Include core.h first to get qttune_frame_t definition. This is safe:
- * core.h does NOT include signals.h, so there is no circular dependency.
- * The match-helper (qttune_def_matches_frame) requires the complete
- * frame type — a forward declaration won't work because core.h already
- * defines qttune_frame_t with the same typedef name. Attempting to
- * forward-declare would trigger C2371 (redefinition) when both headers
- * are included in one TU.
- *
- * REGRESSION CLOSED: obd2_signal_sets.cpp became the first TU to include
- * signals.h with no core.h in scope, which exposed this latent design gap
- * as C4430/C2143. The fix is #include, not a clever typedef trick. */
+/* qttune_def_matches_frame needs the complete qttune_frame_t, so include
+ * core.h (which never includes this header — no cycle). A forward
+ * declaration would clash with core.h's typedef (C2371). */
 #include "qttune/core.h"
 
 #ifdef __cplusplus
@@ -68,7 +60,7 @@ typedef struct QttuneSignalDef {
     uint32_t mux_key;  /* The byte pattern to match at mux_offset */
 } QttuneSignalDef;
 
-/* ADR-0013 §4 (N3): profile-declared channels. rx_id is the
+/* ADR-0013 §4: profile-declared channels. rx_id is the
  * flow-control filter target (receive); tx_id is the request
  * destination. Sets declaring none (raw/mock) keep channel_count
  * 0 — no filters, no requests, exactly today's behavior. This is
@@ -81,12 +73,11 @@ typedef struct QttuneChannelDecl {
     uint32_t tx_id;   /* request destination */
 } QttuneChannelDecl;
 
-/* Single canonical definition — no duplicates */
 typedef struct QttuneSignalSet {
     uint32_t version;
     uint32_t count;
     const QttuneSignalDef* defs;
-    /* N3: bounded channel list. 0/null = none declared. Aggregate
+    /* Bounded channel list. 0/null = none declared. Aggregate
      * initializers with three members still compile (remaining
      * members value-initialize), but update them explicitly when
      * touched — see test_obd2.cpp. */
@@ -110,7 +101,7 @@ int qttune_def_matches_frame(const QttuneSignalDef* signal,
 
 /* Set-level APIs */
 const QttuneSignalSet* qttune_mock_signal_set(void);
-const QttuneSignalSet* qttune_obd2_signal_set(void);  /* NEW: v0.3 Phase 3 */
+const QttuneSignalSet* qttune_obd2_signal_set(void);  /* ADR-0013 obd2 profile */
 int qttune_validate_signal_set(const QttuneSignalSet* set);
 
 #ifdef __cplusplus

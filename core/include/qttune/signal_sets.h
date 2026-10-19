@@ -32,10 +32,9 @@ extern "C" {
 #define OBD2_SIG_THROTTLE_ID     7006
 #define OBD2_SIG_FUEL_LEVEL_ID   7007
 #define OBD2_SIG_BATTERY_V_ID    7008
-/* OBD-II ECU response arbitration ID (functional 0x7E8 for the
- * standard physical-request pairing 0x7E0 <-> 0x7E8). Shared by
- * obd2_signal_sets.cpp (defs), test fixtures, and the fake's canned
- * response header so all three agree on the channel. */
+/* OBD-II ECU #1 physical response ID, paired with the tester request
+ * ID 0x7E0. Shared by obd2_signal_sets.cpp (defs), test fixtures, and
+ * the fake's canned response header so all three agree on the channel. */
 #define OBD2_ECU_ARB_ID  0x7E8u
 
 /* OBD-II tester request arbitration ID — physical pairing with

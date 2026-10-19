@@ -7,9 +7,9 @@
 //      Connect params are recorded so tests can assert that URI
 //      parsing reached PassThruConnect.
 //
-// PART 4 SEMANTICS (this revision):
+// BEHAVIOR:
 //  * WriteMsgs: records the message (hook-observable). Response
-//    generation is two-mode (ADR-0013 slice 2, N1 grammar 2026-10-19):
+//    generation is two-mode:
 //      - Mode-01 request [4-byte ID BE][01][PID] (exactly 6 bytes, the
 //        adapter-framed logical message): response
 //        [rx_id BE][41][PID][canned], values from g_obd2_canned
@@ -22,10 +22,13 @@
 //  * IoCtl: config table (SET stores, GET reads back), fixed VBATT,
 //    CLEAR_* accepted. Unknown ids FAIL like a strict vendor.
 //  * Filters: registration bookkeeping + last-invocation recording.
-//    Filter-aware echo prepends the filter pattern (4-byte BE CAN ID
-//    + pad). SetFilterGating controls ONLY ReadMsgs dropping; the
-//    echo shape is unconditional once a filter lands.
-//  * ExtraDataIndex now = DataSize (v4.04 no-extra-data convention).
+//    Filter-aware echo prepends the filter pattern (4-byte BE CAN ID).
+//    SetFilterGating controls ONLY ReadMsgs dropping; the echo shape
+//    is unconditional once a filter lands.
+//  * ReadMsgs returns at most one message per call, whatever NumMsgs
+//    and Timeout ask for, and STATUS_NOERROR with zero messages on an
+//    empty queue (unless QTTUNE_FAKE_READ_STATUS overrides).
+//  * ExtraDataIndex = DataSize (v4.04 no-extra-data convention).
 
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
@@ -89,7 +92,7 @@ unsigned long g_filter_seq = 0;
 FilterRecord g_last_filter;              /* raw last StartMsgFilter call */
 bool g_filter_gating_enabled = false;    /* SetFilterGating toggle — controls
                                           * ReadMsgs dropping ONLY, not echo */
-/* One-shot IoCtl stall (review finding 1 repro): env-armed sleep on
+/* One-shot ioctl stall: env-armed sleep on
  * the FIRST PassThruIoctl only — a vendor op that outlives the
  * client's 3s transact timeout, while every later op answers
  * instantly, isolating the recovery path under test. */
@@ -187,7 +190,7 @@ bool filter_matches(const unsigned char* frame_data, unsigned long frame_size,
     return true;
 }
 
-/* Build an OBD-II Mode-01 response (N1 wire grammar, 2026-10-19).
+/* Build an OBD-II Mode-01 response.
  * Caller (WriteMsgs, mutex HELD) has verified: exactly 6 bytes
  * [tx_id BE][0x01][PID] and an active filter. Output:
  * [rx_id BE from the filter pattern][0x41][PID][canned data] — NO
@@ -195,7 +198,7 @@ bool filter_matches(const unsigned char* frame_data, unsigned long frame_size,
  * ISO-TP: this queue content is what a conforming adapter delivers
  * from ReadMsgs, and the transport's header strip lands the bridge
  * on [41][PID][A][B]... — the obd2 set's mux-at-offset-0 grammar.
- * Response LENGTH varies per PID (uniform 12 is retired). */
+ * Response length varies per PID. */
 void build_obd2_response(const unsigned char* req, unsigned long req_len,
                          unsigned char* resp, unsigned long* resp_len)
 {
@@ -343,8 +346,8 @@ long __stdcall PassThruConnect(unsigned long DeviceID,
         return STATUS_FAILED;
     }
     /* Distinct from the device id (1) ON PURPOSE: the fake's device and
-     * channel used to collide at 1, which hid the READ_VBATT
-     * channel-vs-device bug (review 2026-10-17, finding 9). 0x55 is
+     * channel used to collide at 1, which hid a READ_VBATT
+     * channel-vs-device bug. 0x55 is
      * arbitrary, nonzero, and unrelated to any protocol constant. */
     *pChannelID = 0x55;
     return STATUS_NOERROR;
@@ -494,7 +497,7 @@ long __stdcall PassThruWriteMsgs(unsigned long ChannelID,
     }
     fake_j2534::g_write_count++;
 
-    /* RESPONSE GENERATION — N1 wire grammar (2026-10-19).
+    /* RESPONSE GENERATION.
      * Mode-01 request: EXACTLY 6 bytes, req[4]==0x01 — the
      * adapter-framed logical message. With an active filter, emit
      * [rx_id BE][41][PID][canned]; without one there is no rx_id to
@@ -537,9 +540,9 @@ long __stdcall PassThruIoctl(unsigned long ChannelID,
 {
     (void)ChannelID;
 
-   /* Review finding 1 repro: one-shot env-armed stall. Flag taken
-     * under the lock, SLEEP taken outside it — the read pump calls
-     * PassThruReadMsgs on the same mutex and must keep flowing. */
+    /* One-shot env-armed stall. The flag is taken under the lock and
+     * the sleep outside it, so other callers of the fake (which share
+     * the mutex) are never blocked by the stall. */
     bool do_stall = false;
     char stall_buf[32] = {};
     {
@@ -616,7 +619,7 @@ long __stdcall PassThruIoctl(unsigned long ChannelID,
         return STATUS_NOERROR;
     }
     case QTTUNE_PT_IOCTL_READ_VBATT:
-        /* Contract pin (review finding 9): v04.04 passes the DeviceID
+        /* Contract pin: v04.04 passes the DeviceID
          * to READ_VBATT. This fake's PassThruOpen returns device 1 and
          * PassThruConnect returns channel 0x55 — a caller passing the
          * channel now FAILS here instead of colliding at 1 == 1. */
@@ -763,7 +766,7 @@ void GetLastConnectParams(unsigned long* out_baud,
     *out_protocol = fake_j2534::g_last_connect_protocol;
 }
 
-/* ---- Part 4 hooks ---- */
+/* ---- Write, filter and disconnect hooks ---- */
 
 /* Total PassThruWriteMsgs messages accepted (monotonic, exceeds the
  * recording depth on overflow — index clamp in GetRecordedWrite). */

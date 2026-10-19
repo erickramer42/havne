@@ -62,8 +62,8 @@ struct StreamCapture {
     std::atomic<int> count{0};
     unsigned char payloads[8][8]{};
     unsigned short payload_lens[8]{};   /* post-strip length (Part 5) */
-    unsigned int frame_flags[8]{};      /* F1: QTTUNE_FRAME_FLAG_* */
-    uint32_t arbitration_ids[8]{};      /* F1 identity stamp (Part 5) */
+    unsigned int frame_flags[8]{};      /* QTTUNE_FRAME_FLAG_* */
+    uint32_t arbitration_ids[8]{};      /* identity stamped by the transport */
     uint64_t timestamps[8]{};           /* pass-through contract */
 };
 
@@ -265,7 +265,7 @@ TEST(J2534StreamTest, DirectLoadUriDeliversInjectedFramesExactly)
     ASSERT_EQ(memcmp(cap.payloads[1], f1, 8), 0);
     ASSERT_EQ(memcmp(cap.payloads[2], f2, 8), 0);
 
-    /* F1 flag translation: fake's RxStatus bit -> frame flags word. */
+    /* Flag translation: fake's RxStatus bit -> frame flags word. */
     EXPECT_EQ(cap.frame_flags[0], 0u);
     EXPECT_EQ(cap.frame_flags[1], QTTUNE_FRAME_FLAG_EXTENDED);
     EXPECT_EQ(cap.frame_flags[2], 0u);
@@ -427,12 +427,12 @@ TEST_F(J2534AdoptionTest, RequestLoopWritesMode01AndReceivesStrippedEcho)
     unsigned char wbuf[64] = {};
     unsigned long wlen = 0, wflags = 0;
     get_recorded_write(0, wbuf, &wlen, &wflags);
-    EXPECT_EQ(wlen, 6u);                     /* N1: adapter-framed, no PCI */
+    EXPECT_EQ(wlen, 6u);                     /* adapter-framed, no PCI */
     EXPECT_EQ(wbuf[0], 0x00u); EXPECT_EQ(wbuf[1], 0x00u);
     EXPECT_EQ(wbuf[2], 0x07u); EXPECT_EQ(wbuf[3], 0xE0u);
     EXPECT_EQ(wbuf[4], 0x01u);               /* Mode 01 */
     EXPECT_EQ(wbuf[5], 0x0Cu);               /* PID */
-    EXPECT_NE(wflags & QTTUNE_PT_TX_ISO15765_FRAME_PAD, 0u);  /* N1 flag */
+    EXPECT_NE(wflags & QTTUNE_PT_TX_ISO15765_FRAME_PAD, 0u);  /* adapter pads */
 
     EXPECT_EQ(cap.arbitration_ids[0], 0x7E8u);
     EXPECT_EQ(cap.payloads[0][0], 0x41u);    /* mode echo at offset 0 */

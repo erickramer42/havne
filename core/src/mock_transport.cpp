@@ -1,11 +1,11 @@
 // File/layer: core/src/mock_transport.cpp | C++17, Qt-free, CI-validated headless build
-// Testing: Core tests must pass after frame ABI change (arbitration IDs,
-//          session-relative timestamps, flags)
+// Testing: UNIT — CoreTest.MockFramesDecodeAgainstMockSignalSet decodes
+//          real worker frames against the mock set
 
 #include "qttune/core.h"
 #include "qttune/internal.h"
 #include "session.h"
-#include "qttune/signals.h"   /* SimState only — decode stays consumer-side */
+#include "qttune/signals.h"
 #include "qttune/signal_sets.h"
 
 #include <atomic>
@@ -82,10 +82,10 @@ uint16_t clamp_u16(float v)
 
 /* Layout MUST mirror kMockDefs in signal_sets.cpp:
  *   [0..1] RPM      LE uint16, scale 0.25
- *   [2]    coolant  int8, offset -40
+ *   [2]    coolant  uint8, offset -40
  *   [3]    speed    uint8, km/h
  *   [4]    throttle uint8, scale 100/255
- *   [5]    IAT      int8, offset -40
+ *   [5]    IAT      uint8, offset -40
  *   [6]    load     uint8, scale 100/255
  *   [7]    pad
  */
@@ -111,14 +111,9 @@ struct qttune_mock_transport {
     qttune_session_t* session = nullptr;  // Need this for dispatch
     uint32_t interval_ms = DEFAULT_FRAME_INTERVAL_MS;
     uint64_t frame_counter = 0;
-    /* Session epoch — captured at attach (attach happens inside
-     * session_create, so this IS "session start" for the mock).
-     * Written once before the worker spawns, read-only after: the
-     * thread-creation happens-before edge covers publication, no
-     * synchronization needed. Replaces absolute steady_clock epoch,
-     * which produced meaningless 12-digit timestamps (reviewer
-     * finding: "since epoch or session start" ambiguity — now it's
-     * session-relative, as the header documents). */
+    /* Session epoch, captured at attach (inside session_create).
+     * Written once before the worker spawns and read-only after, so
+     * thread creation publishes it; no further synchronization. */
     std::chrono::steady_clock::time_point epoch{};
     SimState sim;   /* owned by worker — only touched on worker thread */
 };
@@ -132,18 +127,15 @@ void mock_worker(qttune_mock_transport* t)
 
     while (!t->stop_requested.load()) {
         qttune_frame_t frame{};
-        /* Session-relative, monotonically increasing — the contract
-         * core.h now documents. Small numbers, meaningful deltas. */
+        /* Session-relative and monotonic, per the core.h contract. */
         frame.timestamp_us = static_cast<uint64_t>(
             std::chrono::duration_cast<std::chrono::microseconds>(
                 std::chrono::steady_clock::now() - t->epoch).count());
         frame.data_length = 8;
 
         /* Every 16th frame is a 29-bit "diagnostic" frame carrying the
-         * same payload: exercises FLAG_EXTENDED and, once decode is
-         * message-ID-gated (F2), exercises REJECTION of unrelated IDs
-         * — the isolation the old every-frame-decodes-everything
-         * design couldn't demonstrate. */
+         * same payload. It exercises FLAG_EXTENDED, and because decode
+         * is gated on message ID, it proves unrelated IDs are rejected. */
         if ((t->frame_counter % 16) == 0) {
             frame.flags = QTTUNE_FRAME_FLAG_EXTENDED;
             frame.arbitration_id = MOCK_DIAG_ID;

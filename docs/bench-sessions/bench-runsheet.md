@@ -29,10 +29,16 @@ owns phases 2–3 (filter shape, VBATT, quiet-bus ReadMsgs).
 
 ## Pre-flight (before touching the adapter)
 
-- [ ] Fresh build of both trees (x64 app + win32 surrogate):
-      cmake --build build --config Release
+- [ ] Fresh build of both trees, **Win32 first** (the app build copies
+      whatever surrogate `build-win32` holds at that moment):
       cmake --build build-win32 --config Release --target qttune-j2534-surrogate
-- [ ] Full suite green: ctest 134/134, 1 env-gate skip, 133 executed
+      cmake --build build --config Release
+- [ ] The build output shows "Deploying Win32 J2534 surrogate next to
+      qttune.exe". If it doesn't, re-run `cmake -B build` and rebuild:
+      without the copy, an x86 adapter fails to connect with "failed
+      to load transport library"
+- [ ] Full suite green: every case passes except the 1 env-gated skip
+      (current count in STATUS.md)
 - [ ] `qttune.exe` runs and the Settings picker lists the VX with
       architecture label "x86" (discovery smoke — already verified once;
       re-confirm on today's build)
