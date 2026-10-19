@@ -37,6 +37,7 @@ Dates are commit dates.
 | 2026-10-18 | ADR-0013 slice 2: obd2 signal set, multi-PID scheduler, drain budget (formerly #25) | `8305420` |
 | 2026-10-19 | ADR-0013 slice 3: profile-declared channels; bare-URI filter derivation | `<hash>` |
 | 2026-10-19 | Win32 surrogate auto-deploy from sibling build-win32 | `<hash>` |
+| 2026-10-19 | Single-threaded surrogate, batched `OP_READ`, ring retired ([ADR-0014](adr/0014-single-threaded-surrogate.md)); read-status split in both backends (#11 partial); #17 resolved by removal | `<hash>` |
 
 ## Lessons learned
 
@@ -385,3 +386,28 @@ scheduler-needs-filter rule fired at `j2534_start`, after
 attach moved the check ahead of the open. The slice-2 ORDERING NOTE
 predicted exactly this — the obligation was repaid by the slice
 that retired it.
+
+**2026-10-19 — single-threaded surrogate round (ADR-0014):** four
+lessons. (1) **A vendor status is data, not control flow:** the first
+cut of the new child exited its loop on any non-success status. The
+suite stayed green because the fake answers an empty read with
+`STATUS_NOERROR` and `sur_close` returns `QT_OK` whether or not the
+child is alive, so a conforming vendor's first quiet-bus
+`ERR_TIMEOUT` would have ended every session. Code review caught it,
+not the tests. (2) **A rewrite that deletes diagnostics undoes lessons
+already paid for:** a misspelled export (`PassThruStopFilter`) failed
+eight surrogate tests at exit 5. The child log named the stage
+("mandatory export missing") but no longer named the export, because
+the same rewrite dropped the per-export list added after the
+2026-10-16 dumpbin session. Keep the diagnostics when restructuring
+the code around them. (3) **Know the generator before reasoning about
+POST_BUILD:** a review claimed the deployed surrogate copy goes stale
+when only `surrogate_main.cpp` changes. That holds for Ninja and
+Makefiles, but the Visual Studio generator runs POST_BUILD steps on
+every build. Building the target twice settled it in a minute.
+(4) **A fake that shares the implementer's model certifies it:** the
+fake's `ReadMsgs` ignores `NumMsgs` and the timeout and never returns
+data with a non-success status, so the batched read's status handling
+(#26) is invisible to the suite. This is the same class as the
+2026-10-18 framing bug (N1). When code depends on spec semantics, move
+the fake toward the spec first.

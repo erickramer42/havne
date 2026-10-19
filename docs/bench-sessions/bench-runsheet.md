@@ -92,7 +92,7 @@ observation, any error text verbatim.
 |---|---|
 | Filter registration rejected | Prep #1 — the fc_len==mask_len workaround shape. Capture the exact vendor status code |
 | Connect itself fails | Prep #8/#2 — baud or protocolID conformance |
-| App crashes on quiet bus | ReadMsgs timeout-status path (Issue #11 — timeout vs hard error currently indistinguishable; a real device exercising this path is the best chance to characterize it). Record the vendor status if the debugger catches it |
+| App crashes on quiet bus | ReadMsgs status path (Issue #11). Statuses are split since 2026-10-19 (`ERR_TIMEOUT` → vehicle timeout, `ERR_BUFFER_EMPTY` → no frame, anything else → hard failure); record which status the vendor returns for an empty read, from `%TEMP%\qttune-surrogate.log` or the debugger |
 
 ## Phase 3 — VBATT (first real data)
 

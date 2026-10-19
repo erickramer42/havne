@@ -60,7 +60,7 @@ it.
 | Teardown call order against the vendor API | `FakeFixture.OpenCloseCycleHitsVendorApi`, plus surrogate teardown |
 | `j2534://` session end to end with exact counts, payload fidelity and FIFO order | `J2534StreamTest` |
 | `?baud=` and `?flags=` reach `PassThruConnect`; defaults kept; malformed URIs rejected before any DLL load | `J2534QueryParamTest` |
-| Surrogate: spawn under the job object, pipe handshake, shared ring, dead DLL fails fast, clean teardown | `J2534SurrogateTest` |
+| Surrogate: spawn under the job object, pipe handshake, batched `OP_READ` delivery, dead DLL fails fast, clean teardown | `J2534SurrogateTest` |
 | Write, ioctl and filter relay on both backends, including whitelist refusal and malformed filter shapes | `J2534SurrogateTest`, `J2534RoutingTest.InprocWriteIoctlFilterRoundTrips` |
 | PE routing: x64 goes in-proc; a missing DLL gives an honest load failure with no spawn | `J2534RoutingTest` |
 | Cross-arch: x64 test → x86 surrogate → x86 fake, loader round trip plus full session lifecycle | `J2534RoutingTest.X86FakeSelectsSurrogateBackendAndRoundTrips` (dev machine) |
@@ -71,7 +71,8 @@ it.
 | Spec-spelling export resolution (`PassThruIoctl` primary, legacy `PassThruIoCtl` fallback), both backends | `FakeFixture.SpecSpellingPassThruIoctlResolvesAndWorks` (spec fake, primary path) plus the whole existing suite against the legacy-spelling fake (fallback path) |
 | Real-adapter lifecycle: OBDX Pro VX loads through the x86 surrogate, opens with USB power (vendor status 0), clean spawn/exit with disconnect, async connect keeps the UI responsive | BENCH session 2026-10-16, phase 1 |
 | The 8-byte FLOW_CONTROL filter shape (prep #1, `fc_len == mask_len` workaround) is accepted by a real vendor — behaviorally; the child traces no filter ops (Known Issue #23). Quiet-bus read loop at <1% CPU, zero spurious frames | BENCH session 2026-10-16, phase 2 |
-| Surrogate vendor-call serialization: one lock around every vendor entry (read pump + control pump under real concurrency), single vendor disconnect after a clean client close, crash-on-stuck-vendor replaced by job-reaped linger | The full J2534 suites on both backends (2026-10-17, both trees green) — single-disconnect confirmed by the child trace log: `OP_DISCONNECT: vendor status 0` present, `teardown: disconnect` absent after clean closes |
+| Single-threaded surrogate child ([ADR-0014](adr/0014-single-threaded-surrogate.md)): the whole surrogate and routing suite on the redesigned child, same-arch and cross-arch (x64 test → x86 surrogate → x86 fake) | `J2534SurrogateTest`, `J2534RoutingTest` (2026-10-19, both trees rebuilt: full suite 136/136, cross-arch subset 15/15) |
+| A transaction that times out doesn't put later replies out of step | `J2534SurrogateTest.TimedOutOpDoesNotDesyncNextRequest` |
 | Profile registry: string-keyed lookup, null-set-is-success ("raw"), unknown names fail, last-registration wins | `CoreTest.Profile*` |
 | Profile selection: `mock://`→mock set, `j2534://`→obd2, `?profile=` override honored, unknown names rejected at session_create before any DLL load | `CoreTest.MockSessionSelectsMockSet` et al., `J2534StreamTest.ProfileOverrideMockSelectsMockSet`, `BridgeTest.RawProfileLeavesSignalModelEmpty` |
 | `obd2` signal set: mux grammar, decoder round-trips against canned wire bytes, validator including channel-decl rejection (duplicates, zero/illegal IDs, over-capacity) | `Obd2SetTest`, `Obd2DecodeTest` |
@@ -80,6 +81,32 @@ it.
 
 ## Gaps (not verified)
 
+- **BENCH coverage stops at the quiet bus.** The formal session
+  (2026-10-16) verified load, open, filter-shape acceptance and
+  quiet-bus read behavior. Still unverified against real hardware:
+  talking-bus behavior (request framing, checksum expectations,
+  timestamp units), VBATT, ReadMsgs timeout-vs-error discrimination
+  (#11), and any vendor status on filter registration itself (#23 —
+  acceptance was inferred, not logged).
+- **Read-status handling and link health (#11) have no tests.** No
+  test drives the fake's `QTTUNE_FAKE_READ_STATUS` knob or reads
+  `qttune_session_get_error_state`, so the timeout/empty/hard-failure
+  split, the 10-read timeout debounce, the backoff and the scheduler's
+  probe writes are unverified.
+- **The fake's read model is simpler than J2534's.** Its `ReadMsgs`
+  returns one message per call whatever `NumMsgs` and the timeout ask
+  for, returns `STATUS_NOERROR` with zero messages on an empty queue,
+  and never returns data alongside a non-success status. Batched-read
+  status handling (#26) and real empty-read statuses
+  (`ERR_BUFFER_EMPTY`, `ERR_TIMEOUT`) are therefore invisible to the
+  suite.
+- **The fake emits no ISO 15765 indications.** TX-done and
+  first-frame indications never appear, so indication handling (#28)
+  is untested.
+- **Child survival after a refused op isn't asserted.** The surrogate
+  child must stay alive after a vendor refusal (ADR-0014). Tests check
+  the refusal's status, but `sur_close` returns `QT_OK` whether or not
+  the child is still alive, so an early exit would go unnoticed.
 - **Profile-derived channels against a real vendor.** The
   derived-filter shape and per-PID request routing are
   fake-verified; whether the VX accepts them is the natural first

@@ -24,11 +24,14 @@
  * core error enum maps these to QT_ERR_* codes — do not conflate
  * vendor statuses with qttune_status_t directly. */
 #define QTTUNE_PT_STATUS_NOERROR    0L
-#define QTTUNE_PT_STATUS_FAILED     0x07L  /* ERR_FAILED (v04.04; was 1L — v04.04's 0x01
-                                            * is ERR_NOT_SUPPORTED). Internal-only value:
-                                            * nothing gates on it numerically. */
-#define QTTUNE_PT_STATUS_TIMEOUT    0x09L  /* ERR_TIMEOUT — "silent bus", not a hard error.
-                                           * VERIFIED: dashlogic J2534_v0404.h, 2026-10-19 */
+#define QTTUNE_PT_STATUS_FAILED     0x07L
+#define QTTUNE_PT_STATUS_TIMEOUT    0x09L
+#define QTTUNE_PT_STATUS_BUFFER_EMPTY 0x10L  /* ERR_BUFFER_EMPTY (v04.04) —
+                                             * the common "queue drained /
+                                             * nothing to read" return. NOT
+                                             * a hard error: treat as
+                                             * no-frame. VERIFIED: FreeSSM
+                                             * J2534.h, 2026-10-19 review */
 
 /* ---- ProtocolIDs (J2534-1 v04.04, VERIFIED) ----
  * FIX 2026-10-15: ISO15765 is 0x06. The previous value 0x05 is CAN

@@ -1,6 +1,8 @@
 # ADR-0008: Host 32-bit J2534 DLLs in an x86 surrogate process
 
-- **Status:** Accepted
+- **Status:** Accepted. The data plane (shared-memory ring) and the
+  two-thread surrogate side are superseded by
+  [ADR-0014](0014-single-threaded-surrogate.md).
 - **Date:** 2026-10-14 (Phase 3 Part 2, `96acce9`). Cross-arch
   verification in `5681ca7`.
 

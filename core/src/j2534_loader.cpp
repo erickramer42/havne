@@ -537,61 +537,45 @@ qttune_status_t qttune_j2534_read_frame(qttune_j2534_handle_t* handle,
     unsigned long num = 1;
     long rc = handle->read_msgs(channel, &msg, &num, timeout_ms);
 
-    /* STEP 1 DISTINCTION: vendor status 0x0C (ERR_TIMEOUT) is "bus
-     * silent, keep trying". Anything else nonzero is a hard failure
-     * (device disconnect, corrupted channel, etc.). This surfaces
-     * the distinction the ADR-0013 probe phase requires for its
-     * degrade-vs-fail decision. */
-    if (rc != kPtStatusNoError) {
+    if (num == 0) {
         *got_frame = false;
+        if (rc == kPtStatusNoError) {
+            return QT_OK;   /* idle */
+        }
         if (rc == QTTUNE_PT_STATUS_TIMEOUT) {
             return QT_ERR_VEHICLE_TIMEOUT;
+        }
+        if (rc == QTTUNE_PT_STATUS_BUFFER_EMPTY) {
+            return QT_OK;   /* queue drained — quiet, not failed.
+                             * Finding 1: this return previously hit
+                             * the hard-failure arm and permanently
+                             * silenced the poll loop, because only a
+                             * good frame healed it — and in scheduler
+                             * mode frames only follow writes. */
         }
         return QT_ERR_TRANSPORT_HARD_FAILURE;
     }
 
-    if (num == 0) {
-        /* Idle: vendor says "no error, but nothing available." This
-         * is indistinguishable from timeout in many drivers, so the
-         * caller sees "no frame, no error" — it's a "try again later"
-         * situation. */
+    /* num > 0: DELIVER even under a nonzero status — some vendors
+     * return data and a status together; the review's PEAK source
+     * documents RxStatus-bearing reads with success codes. */
+    *out_frame = qttune_frame_t{};
+    if (msg.RxStatus & (QTTUNE_PT_TX_INDICATION |
+                        QTTUNE_PT_TX_MSG_TYPE)) {
+        /* Indications are dropped in BOTH backends — same rule as
+         * the surrogate child's filter, one semantics. */
+        *got_frame = false;
         return QT_OK;
     }
-
-    /* Wipe the whole struct first: the F1 ABI documents reserved as
-     * must-be-zero and flags as a full word — a caller reusing one
-     * frame variable across reads must never inherit stale bits. */
-    *out_frame = qttune_frame_t{};
-
-    /* J2534-1 PASSTHRU_MSG carries NO arbitration ID — CAN identity
-     * is expressed via PassThruStartMsgFilter patterns, and ISO 15765
-     * addressing bytes ride in the payload. Until the transport layer
-     * learns the filter API (and what pattern a real vehicle needs,
-     * BENCH-tier), the J2534 path reports id 0 and the bridge's
-     * message-ID gate therefore does not match these frames. That is
-     * CORRECT for v0.3.0: the mock set (0x0C0) is mock-only by
-     * design; a real signal set for this path arrives with the filter
-     * work. Documented, not silent. */
     out_frame->arbitration_id = 0;
     out_frame->channel_id = 0;
     out_frame->flags = (msg.RxStatus & QTTUNE_PT_CAN_29BIT_ID)
                         ? QTTUNE_FRAME_FLAG_EXTENDED : 0u;
-
-    /* Units are vendor-defined (see j2534_ptypes.h) — passed through
-     * untranslated per the documented v0.3.0 decision; normalization
-     * is BENCH work once a real device reveals the vendor epoch. */
     out_frame->timestamp_us = msg.Timestamp;
-
-    /* Clamp before copy: a buggy vendor DATA_LENGTH is the documented
-     * overflow vector (also flagged high-risk in the surrogate design).
-     * data_length is uint16_t in the F1 ABI — cast follows the clamp. */
     unsigned long n = msg.DataSize;
-    if (n > sizeof(out_frame->data)) {
-        n = sizeof(out_frame->data);
-    }
+    if (n > sizeof(out_frame->data)) n = sizeof(out_frame->data);
     out_frame->data_length = static_cast<uint16_t>(n);
     memcpy(out_frame->data, msg.Data, n);
-
     *got_frame = true;
     return QT_OK;
 }

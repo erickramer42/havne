@@ -29,12 +29,12 @@ details.
 - **J2534 Pass-Thru support (Windows).**
   - Finds installed vendor drivers.
   - Pick a device on the Settings page or enter a `j2534://` URI.
-- 32-bit-only vendor drivers run in a separate helper process
-    (the surrogate). When a sibling `build-win32/` tree exists, the surrogate is
-    deployed next to the app automatically at build time; otherwise
-    it is resolved via the `QTTUNE_SURROGATE_EXE` environment
-    variable (see [docs/development.md](docs/development.md)).
-- The `obd2` profile supplies the standard CAN IDs itself
+  - 32-bit-only vendor drivers run in a separate helper process
+    (the surrogate). When a sibling `build-win32/` tree exists, the
+    surrogate is deployed next to the app automatically at build
+    time; otherwise it is resolved via the `QTTUNE_SURROGATE_EXE`
+    environment variable (see [docs/development.md](docs/development.md)).
+  - The `obd2` profile supplies the standard CAN IDs itself
     (requests to `0x7E0`, receive filter on `0x7E8`) and runs a
     Mode-01 multi-PID request loop — a bare `j2534://` URI starts
     streaming decoded signals. The `?filter=`, `?txid=` and `?poll=`

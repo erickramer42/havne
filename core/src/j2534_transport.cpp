@@ -85,6 +85,11 @@ constexpr uint32_t J2534_TX_ID_DEFAULT = OBD2_TESTER_ARB_ID;  /* shared
                                        * obd2 set's own declaration */
 constexpr uint32_t J2534_CAN_ID_MAX     = 0x1FFFFFFFu;   /* 29-bit */
 constexpr uint32_t J2534_PID_MAX        = 0xFFu;
+/* Finding 2 (review 2026-10-19): a conforming vendor returns
+ * ERR_TIMEOUT for the first empty drain read — every healthy
+ * session would flap last_error to VEHICLE_TIMEOUT right after
+ * every good frame. "Not responding" means QUIET for this long. */
+constexpr uint32_t J2534_HEALTH_QUIET_CYCLES = 10;   /* ~1 s */
 
 void pack_be32(uint8_t* out, uint32_t v)
 {
@@ -313,10 +318,10 @@ qttune_status_t pump_one(qttune_j2534_transport* t, bool* out_got,
 
 /* Error-state transition (#11). Session atomics are written ONLY on
  * transitions: a steady timeout costs nothing, a hard-failure episode
- * counts exactly once. health/backoff_ms are WORKER-LOCAL (caller-
- * owned); only the session's last_error/error_count cross threads.
+ * counts exactly once. health/backoff_ms/quiet_runs are WORKER-LOCAL
+ * (caller-owned); only the session's last_error/error_count cross threads.
  * Semantics:
- *   good frame  -> clears last_error, resets backoff (recovery)
+ *   good frame  -> clears last_error, resets backoff/quiet (recovery)
  *   QT_ERR_VEHICLE_TIMEOUT -> marks last_error, no episode count,
  *                 no backoff — a silent bus is a polling state, and
  *                 an ERR_TIMEOUT return proves the ADAPTER answered,
@@ -324,7 +329,8 @@ qttune_status_t pump_one(qttune_j2534_transport* t, bool* out_got,
  *   QT_ERR_TRANSPORT_HARD_FAILURE -> marks last_error, ONE episode,
  *                 enters backoff (caller sleeps and doubles it) */
 void update_health(qttune_j2534_transport* t, int32_t& health,
-                   uint32_t& backoff_ms, qttune_status_t st, bool got)
+                   uint32_t& backoff_ms, uint32_t& quiet_runs,
+                   qttune_status_t st, bool got)
 {
     if (got && st == QT_OK) {
         if (health != QT_OK) {
@@ -332,22 +338,41 @@ void update_health(qttune_j2534_transport* t, int32_t& health,
             health = QT_OK;
         }
         backoff_ms = 0;
+        quiet_runs = 0;
         return;
     }
     if (st == QT_OK) {
-        return;   /* idle — nothing to report */
+        /* idle: only counts toward quiet if a cycle produced nothing */
+        ++quiet_runs;
+        if (quiet_runs < J2534_HEALTH_QUIET_CYCLES) {
+            return;
+        }
+        if (health != QT_ERR_VEHICLE_TIMEOUT) {
+            t->session->last_error.store(QT_ERR_VEHICLE_TIMEOUT);
+            health = QT_ERR_VEHICLE_TIMEOUT;
+        }
+        return;
     }
-    if (st == health) {
-        return;   /* steady state — no transition, no writes */
+    if (st == QT_ERR_VEHICLE_TIMEOUT) {
+        ++quiet_runs;
+        if (quiet_runs < J2534_HEALTH_QUIET_CYCLES) {
+            return;   /* transient silence — debounce */
+        }
+        if (health != QT_ERR_VEHICLE_TIMEOUT) {
+            t->session->last_error.store(QT_ERR_VEHICLE_TIMEOUT);
+            health = QT_ERR_VEHICLE_TIMEOUT;
+        }
+        backoff_ms = 0;   /* adapter answered: silence, not death */
+        return;
     }
-    t->session->last_error.store(st);
-    health = st;
-    if (st == QT_ERR_TRANSPORT_HARD_FAILURE) {
+    /* hard failure: immediate, one episode, backoff */
+    if (health != QT_ERR_TRANSPORT_HARD_FAILURE) {
+        t->session->last_error.store(st);
+        health = QT_ERR_TRANSPORT_HARD_FAILURE;
         t->session->error_count.fetch_add(1);
-        backoff_ms = J2534_BACKOFF_BASE_MS;
-    } else {
-        backoff_ms = 0;   /* timeout = adapter alive; heal the backoff */
     }
+    backoff_ms = J2534_BACKOFF_BASE_MS;
+    quiet_runs = 0;
 }
 
 /* Backoff-aware sleep, abortable within 20 ms of a stop request —
@@ -390,26 +415,34 @@ void j2534_worker(qttune_j2534_transport* t)
 
     int32_t health = QT_OK;
     uint32_t backoff_ms = 0;   /* 0 = healthy cadence */
+    uint32_t quiet_runs = 0;
 
     while (!t->stop_requested.load()) {
         const auto cycle_start = std::chrono::steady_clock::now();
 
         if (sched_mode) {
-            /* SCHEDULER: no writes while hard-failed — a write into a
-             * dead adapter is wasted work and possible pipe noise. */
-            if (health != QT_ERR_TRANSPORT_HARD_FAILURE) {
-                uint8_t pid = 0;
-                (void)qttune_sched_next(&t->sched, &pid);
-                const uint32_t ci =
-                    channel_index_for_rx(t, rx_for_pid(t->set, pid));
-                uint8_t req[6];
-                build_mode01_request(req, t->chans[ci].tx_id, pid);
-                uint32_t written = 0;
-                (void)qttune_j2534_write_frame(
-                    t->handle, t->channel, req, sizeof(req),
-                    t->chans[ci].addr_flags |
-                        QTTUNE_PT_TX_ISO15765_FRAME_PAD,
-                    0, &written);
+            /* PROBE HEARTBEAT (finding 1, review 2026-10-19): the
+             * write IS the probe. Silencing writes on hard failure
+             * made recovery impossible in scheduler mode — replies
+             * only follow writes. During backoff the cycle stretches,
+             * so the probe rate decays automatically; a dead adapter
+             * costs ~0.2 probes/s at the 5 s cap, and a recovered one
+             * is answered within one backoff interval. */
+            uint8_t pid = 0;
+            (void)qttune_sched_next(&t->sched, &pid);
+            const uint32_t ci =
+                channel_index_for_rx(t, rx_for_pid(t->set, pid));
+            uint8_t req[6];
+            build_mode01_request(req, t->chans[ci].tx_id, pid);
+            uint32_t written = 0;
+            qttune_status_t wst = qttune_j2534_write_frame(
+                t->handle, t->channel, req, sizeof(req),
+                t->chans[ci].addr_flags |
+                    QTTUNE_PT_TX_ISO15765_FRAME_PAD,
+                0, &written);
+            if (wst != QT_OK) {
+                update_health(t, health, backoff_ms, quiet_runs,
+                              wst, false);
             }
 
             /* DRAIN (#25 receive cap, unchanged shape): health derives
@@ -419,7 +452,7 @@ void j2534_worker(qttune_j2534_transport* t)
                 bool got = false;
                 qttune_status_t st = pump_one(t, &got,
                                              J2534_DRAIN_READ_TIMEOUT_MS);
-                update_health(t, health, backoff_ms, st, got);
+                update_health(t, health, backoff_ms, quiet_runs, st, got);
                 if (!got) {
                     break;
                 }
@@ -459,7 +492,7 @@ void j2534_worker(qttune_j2534_transport* t)
             bool got = false;
             qttune_status_t st = pump_one(t, &got,
                                           J2534_READ_TIMEOUT_MS);
-            update_health(t, health, backoff_ms, st, got);
+            update_health(t, health, backoff_ms, quiet_runs, st, got);
 
             if (backoff_sleep(t, backoff_ms)) {
                 break;
@@ -476,7 +509,7 @@ void j2534_worker(qttune_j2534_transport* t)
             bool got = false;
             qttune_status_t st = pump_one(t, &got,
                                           J2534_READ_TIMEOUT_MS);
-            update_health(t, health, backoff_ms, st, got);
+            update_health(t, health, backoff_ms, quiet_runs, st, got);
 
             if (backoff_sleep(t, backoff_ms)) {
                 break;
