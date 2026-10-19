@@ -17,7 +17,7 @@
 namespace {
 
 /* Wire payload as the bridge hands it to the decoder (header stripped):
- * [PCI][0x41][PID][data...]. Matches the fake's canned response shape. */
+ * [0x41][PID][data...] — N1: header stripped, adapter-owned framing, no PCI byte */
 qttune_frame_t make_obd2_frame(const uint8_t* payload, uint8_t len)
 {
     qttune_frame_t f{};
@@ -63,7 +63,7 @@ TEST(Obd2DecodeTest, RpmBigEndianScaled) {
     const QttuneSignalSet* set = qttune_obd2_signal_set();
     const QttuneSignalDef* d = find_def(set, OBD2_SIG_RPM_ID);
     ASSERT_NE(d, nullptr);
-    const uint8_t wire[] = {0x04, 0x41, 0x0C, 0x1F, 0x40};
+    const uint8_t wire[] = {0x41, 0x0C, 0x1F, 0x40};
     qttune_frame_t f = make_obd2_frame(wire, sizeof wire);
     ASSERT_EQ(qttune_def_matches_frame(d, &f), 0);
     float v = 0.0f;
@@ -75,7 +75,7 @@ TEST(Obd2DecodeTest, CoolantOffsetApplied) {
     const QttuneSignalSet* set = qttune_obd2_signal_set();
     const QttuneSignalDef* d = find_def(set, OBD2_SIG_COOLANT_TEMP_ID);
     ASSERT_NE(d, nullptr);
-    const uint8_t wire[] = {0x04, 0x41, 0x05, 0x3C};
+    const uint8_t wire[] = {0x41, 0x05, 0x3C};
     qttune_frame_t f = make_obd2_frame(wire, sizeof wire);
     float v = 0.0f;
     ASSERT_EQ(qttune_decode_signal(d, f.data, f.data_length, &v), 0);
@@ -89,7 +89,7 @@ TEST(Obd2DecodeTest, BatteryVoltageMillivoltScale) {
     /* 0x3630 = 13872 raw -> 13.872 V at 0.001 scale. Realistic
      * running-system voltage, and the byte pair is chosen so the
      * expected value is DERIVED from it, not asserted from memory. */
-    const uint8_t wire[] = {0x04, 0x41, 0x42, 0x36, 0x30};
+    const uint8_t wire[] = {0x41, 0x42, 0x36, 0x30};
     qttune_frame_t f = make_obd2_frame(wire, sizeof wire);
     float v = 0.0f;
     ASSERT_EQ(qttune_decode_signal(d, f.data, f.data_length, &v), 0);
@@ -100,24 +100,30 @@ TEST(Obd2DecodeTest, EngineLoadPercentScale) {
     const QttuneSignalSet* set = qttune_obd2_signal_set();
     const QttuneSignalDef* d = find_def(set, OBD2_SIG_ENGINE_LOAD_ID);
     ASSERT_NE(d, nullptr);
-    const uint8_t wire[] = {0x04, 0x41, 0x04, 25};
+    const uint8_t wire[] = {0x41, 0x04, 25};
     qttune_frame_t f = make_obd2_frame(wire, sizeof wire);
     float v = 0.0f;
     ASSERT_EQ(qttune_decode_signal(d, f.data, f.data_length, &v), 0);
     EXPECT_NEAR(v, 25.0f * 100.0f / 255.0f, 0.01f);
 }
 
-TEST(Obd2DecodeTest, NegativeTemperatureSignExtends) {
-    /* -40 C raw sentinel (0x00) and a genuinely negative probe (0xF0
-     * -> 240 - 256 = -16 raw -> -56 C) pin the INT8 sign-extension. */
+TEST(Obd2DecodeTest, TemperatureIsUnsignedMinusFortyOffset)
+{
+    /* N2 fix (2026-10-19): J1979 temps are UNSIGNED A - 40. The old
+     * INT8 pin read 0xF0 as -56 C; correct is 240 - 40 = +200 C, and
+     * 0x00 is the -40 C sentinel. Both ends pinned. */
     const QttuneSignalSet* set = qttune_obd2_signal_set();
     const QttuneSignalDef* d = find_def(set, OBD2_SIG_IAT_ID);
     ASSERT_NE(d, nullptr);
-    const uint8_t wire[] = {0x04, 0x41, 0x0F, 0xF0};
-    qttune_frame_t f = make_obd2_frame(wire, sizeof wire);
+    const uint8_t lo[] = {0x41, 0x0F, 0x00};
+    qttune_frame_t f = make_obd2_frame(lo, sizeof lo);
     float v = 0.0f;
     ASSERT_EQ(qttune_decode_signal(d, f.data, f.data_length, &v), 0);
-    EXPECT_FLOAT_EQ(v, -56.0f);
+    EXPECT_FLOAT_EQ(v, -40.0f);
+    const uint8_t hi[] = {0x41, 0x0F, 0xF0};
+    f = make_obd2_frame(hi, sizeof hi);
+    ASSERT_EQ(qttune_decode_signal(d, f.data, f.data_length, &v), 0);
+    EXPECT_FLOAT_EQ(v, 200.0f);
 }
 
 /* ---------- mux gate ---------- */
@@ -128,7 +134,7 @@ TEST(Obd2MuxTest, WrongPidRejectedByMatchAndDecode) {
     ASSERT_NE(rpm, nullptr);
     /* A PID 0x0D response whose data bytes would vacuously decode as
      * RPM if the mux gate were absent — the Blocker-1 scenario. */
-    const uint8_t wire[] = {0x04, 0x41, 0x0D, 0x1F, 0x40};
+    const uint8_t wire[] = {0x41, 0x0D, 0x1F, 0x40};
     qttune_frame_t f = make_obd2_frame(wire, sizeof wire);
     EXPECT_NE(qttune_def_matches_frame(rpm, &f), 0);
     float v = 0.0f;
@@ -139,7 +145,7 @@ TEST(Obd2MuxTest, WrongArbIdRejected) {
     const QttuneSignalSet* set = qttune_obd2_signal_set();
     const QttuneSignalDef* rpm = find_def(set, OBD2_SIG_RPM_ID);
     ASSERT_NE(rpm, nullptr);
-    const uint8_t wire[] = {0x04, 0x41, 0x0C, 0x1F, 0x40};
+    const uint8_t wire[] = {0x41, 0x0C, 0x1F, 0x40};
     qttune_frame_t f = make_obd2_frame(wire, sizeof wire);
     f.arbitration_id = 0x0C0;   /* mock telemetry channel */
     EXPECT_NE(qttune_def_matches_frame(rpm, &f), 0);
@@ -149,7 +155,7 @@ TEST(Obd2MuxTest, ShortFrameRejectedWithoutOverread) {
     const QttuneSignalSet* set = qttune_obd2_signal_set();
     const QttuneSignalDef* rpm = find_def(set, OBD2_SIG_RPM_ID);
     ASSERT_NE(rpm, nullptr);
-    const uint8_t wire[] = {0x04, 0x41};   /* truncated before PID */
+    const uint8_t wire[] = {0x41};   /* truncated before PID */
     qttune_frame_t f = make_obd2_frame(wire, sizeof wire);
     EXPECT_NE(qttune_def_matches_frame(rpm, &f), 0);
     float v = 0.0f;
@@ -211,7 +217,7 @@ TEST(PidSchedulerTest, DedupesSharedPidAndCapsCapacity) {
         defs[i].start_byte = 3;
         defs[i].num_bytes = 1;
         defs[i].bit_length = 8;
-        defs[i].mux_offset = 1;
+        defs[i].mux_offset = 0;
         defs[i].mux_length = 2;
         defs[i].mux_key = 0x4100u |
             ((i == 1) ? 0x0Cu : static_cast<uint32_t>(i + 1));

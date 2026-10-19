@@ -17,13 +17,19 @@
 
 namespace {
 
-/* One def per v1 PID. Wire grammar (post header-strip, what the bridge
- * hands the decoder): [PCI][0x41][PID][A][B]...
- *   - mux key: bytes 1..2 (mode-echo + PID), 16-bit big-endian compare
+/* One def per v1 PID. WIRE GRAMMAR (N1 fix, 2026-10-19; post
+ * header-strip, what the bridge hands the decoder): [0x41][PID][A][B]...
+ *   - mux key: bytes 0..1 (mode-echo + PID), 16-bit big-endian compare
  *     against 0x4100|PID — the OBD-II response discriminator
- *   - data: starts byte 3 (PID 0x0C/0x42 are 2-byte big-endian; the
+ *   - data: starts byte 2 (PID 0x0C/0x42 are 2-byte big-endian; the
  *     rest are single bytes)
- *   - INT8 temperatures carry the -40 offset in `offset`
+ *   - NO PCI BYTE: the adapter's ISO 15765 stack frames the message;
+ *     PassThruWriteMsgs receives [ID][01][PID] with
+ *     ISO15765_FRAME_PAD. The old [PCI][0x41]... grammar sent a
+ *     Mode-02-shaped request on real adapters.
+ *   - Temperatures are UINT8 (N2 fix): J1979 defines both as
+ *     unsigned A - 40, covering -40..215 degC. INT8 sign-extended
+ *     any reading at or above raw 0x80 (88 degC) to about -160 degC.
  * Scale formulas are the standard SAE J1979 Mode-01 conversions; the
  * set enumerates SUPPORTED pids, which is itself the contract (what's
  * absent here is not requested and not decoded).
@@ -38,7 +44,7 @@ QttuneSignalDef obd2_def(uint16_t id, const char* name,
     d.id = id;
     (void)std::snprintf(d.name, sizeof d.name, "%s", name);
     d.type = type;
-    d.start_byte = 3;
+    d.start_byte = 2;
     d.num_bytes = num_bytes;
     d.bit_offset = 0;
     d.bit_length = static_cast<uint8_t>(num_bytes * 8u);
@@ -48,7 +54,7 @@ QttuneSignalDef obd2_def(uint16_t id, const char* name,
     d.decimal_places = decimals;
     d.flags = big_endian ? QTTUNE_SIGNAL_FLAG_BIG_ENDIAN : 0u;
     d.message_id = OBD2_ECU_ARB_ID;       /* 0x7E8 */
-    d.mux_offset = 1;
+    d.mux_offset = 0;
     d.mux_length = 2;
     d.mux_reserved[0] = 0;
     d.mux_reserved[1] = 0;
@@ -61,7 +67,7 @@ const QttuneSignalDef kObd2Defs[] = {
              QTTUNE_SIGNAL_TYPE_UINT8, 1, 100.0f / 255.0f, 0.0f,
              "%",    1, 0x04, false),
     obd2_def(OBD2_SIG_COOLANT_TEMP_ID, "Coolant Temp",
-             QTTUNE_SIGNAL_TYPE_INT8, 1, 1.0f, -40.0f,
+             QTTUNE_SIGNAL_TYPE_UINT8, 1, 1.0f, -40.0f,
              "degC", 0, 0x05, false),
     obd2_def(OBD2_SIG_RPM_ID,          "RPM",
              QTTUNE_SIGNAL_TYPE_UINT16, 2, 0.25f, 0.0f,
@@ -70,7 +76,7 @@ const QttuneSignalDef kObd2Defs[] = {
              QTTUNE_SIGNAL_TYPE_UINT8, 1, 1.0f, 0.0f,
              "km/h", 0, 0x0D, false),
     obd2_def(OBD2_SIG_IAT_ID,          "Intake Air Temp",
-             QTTUNE_SIGNAL_TYPE_INT8, 1, 1.0f, -40.0f,
+             QTTUNE_SIGNAL_TYPE_UINT8, 1, 1.0f, -40.0f,
              "degC", 0, 0x0F, false),
     obd2_def(OBD2_SIG_THROTTLE_ID,     "Throttle Position",
              QTTUNE_SIGNAL_TYPE_UINT8, 1, 100.0f / 255.0f, 0.0f,

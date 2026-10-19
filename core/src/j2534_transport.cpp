@@ -15,6 +15,7 @@
 #include "session.h"
 #include "qttune/j2534.h"
 #include "pid_scheduler.h"
+#include "qttune/profile.h"
 
 #include <atomic>
 #include <chrono>
@@ -24,7 +25,8 @@
 
 #ifdef _WIN32
 
-#include "qttune/j2534_ptypes.h"   /* FLOW_CONTROL_FILTER, CAN_29BIT_ID */
+#include "qttune/j2534_ptypes.h"   /* FLOW_CONTROL_FILTER, CAN_29BIT_ID,
+                                      TX_ISO15765_FRAME_PAD (N1) */
 
 namespace {
 
@@ -51,18 +53,24 @@ constexpr uint32_t J2534_REQUEST_CYCLE_MS   = 100;   /* poll cadence */
 constexpr uint32_t J2534_DRAIN_BUDGET          = 10;
 constexpr uint32_t J2534_DRAIN_READ_TIMEOUT_MS  = 20;
 
-/* Address/filter field widths. 4-byte big-endian CAN ID is the J2534
- * convention for both filter patterns and ISO 15765 addressing bytes.
- * FILTER_MSG_LEN is 8 (not 4) because the Part 4 seam contract
- * requires fc_len == mask_len for FLOW_CONTROL filters, and the flow
- * control message needs its PCI byte: [ID BE][30 00 00][pad]. The
- * trailing zero mask bytes are don't-care, so ID matching is
- * unaffected. SEE the BENCH-prep note in STATUS.md — the equality
- * rule is believed stricter than J2534-1 and is a candidate for
- * relaxation once a real vendor rejects this shape. */
+/* Address/filter field widths. The 4-byte big-endian CAN ID is the
+ * J2534 convention for ISO 15765 filter patterns and in-band
+ * addressing bytes.
+ * N1 FIX (2026-10-19): FILTER_MSG_LEN is 4, not 8. On an ISO 15765
+ * channel the mask/pattern/flow-control filter messages are BARE
+ * 4-byte CAN IDs — the adapter's ISO-TP stack does the framing, so
+ * no PCI byte belongs in the flow-control message either. The old
+ * 8-byte shape carried a hand-built [30 00 00] CTS/BS/STmin triple
+ * that a conforming adapter would have treated as address bytes.
+ * SAE J2534-1 additionally requires all three filter messages to
+ * share the same DataSize and TxFlags — satisfied trivially here.
+ * This also retires the old BENCH-prep item 1 (the 8-byte shape
+ * and its equality-rule concern): the spec shape has no such
+ * tension. VERIFIED: Opus IVS "Constructing an OBDII Message"
+ * (4-byte mask/pattern/FC), Quantex pt_start_msgfilt docs, dashlogic
+ * J2534_v0404.h. */
 constexpr uint32_t J2534_ADDR_LEN       = 4;
-constexpr uint32_t J2534_FILTER_MSG_LEN = 8;
-constexpr uint8_t  J2534_FC_PCI_CTS     = 0x30;   /* FlowControl, CTS */
+constexpr uint32_t J2534_FILTER_MSG_LEN = 4;
 constexpr uint32_t J2534_TX_ID_DEFAULT  = 0x7E0;  /* OBD-II physical */
 constexpr uint32_t J2534_CAN_ID_MAX     = 0x1FFFFFFFu;   /* 29-bit */
 constexpr uint32_t J2534_PID_MAX        = 0xFFu;
@@ -75,26 +83,38 @@ void pack_be32(uint8_t* out, uint32_t v)
     out[3] = static_cast<uint8_t>(v);
 }
 
-/* Classic OBD-II Mode-01 request on an ISO 15765 channel: the 4-byte
- * normal-addressing ID followed by an 8-byte classic CAN data field —
- * SF PCI(02) service(01) PID, zero-padded. 12 wire bytes total.
+/* Classic OBD-II Mode-01 request on an ISO 15765 channel: the
+ * 4-byte normal-addressing ID followed by the two logical request
+ * bytes [Mode 01][PID] — 6 bytes total, TxFlags =
+ * ISO15765_FRAME_PAD so the ADAPTER frames and zero-pads.
+ *
+ * N1 FIX (2026-10-19): on an ISO 15765 channel the adapter owns the
+ * ISO-TP layer. PassThruWriteMsgs takes the LOGICAL message; the
+ * SF PCI byte and 8-byte padding are the driver's job (padding is
+ * controlled by the ISO15765_FRAME_PAD TxFlag). The previous shape
+ * hand-built [ID][02][01][PID][pad-to-8] — a 12-byte write a
+ * conforming adapter would transmit as a two-frame ISO-TP message
+ * whose service byte reads as Mode 02 (freeze frame), and whose
+ * padding duplicated the adapter's own (FRAME_PAD was never set).
+ * VERIFIED against Opus IVS ("Constructing an OBDII Message":
+ * RPM request is Data=[ID][01][0C], DataSize=6), Quantex
+ * PassThruWriteMsgs docs (writes are [ID][SID][...] with
+ * ISO15765_FRAME_PAD, no PCI), and dashlogic J2534_v0404.h
+ * (ISO15765_FRAME_PAD = 0x0040).
  *
  * NO CHECKSUM BYTE: ISO 15765-4 over CAN has no data-field checksum
- * (the CAN CRC is hardware-handled). A mod-256 sum here is a legacy
- * K-line/ISO-9141 convention and would be a spurious byte to a real
- * ECU. Padding is zero-filled — some drivers pad themselves, most
- * tolerate caller padding.
+ * (the CAN CRC is hardware-handled); a K-line-style sum would be a
+ * spurious byte to a real ECU.
  *
- * ASSUMED (first BENCH session on the VX verifies): that the vendor
- * expects caller-supplied ISO-TP framing and 8-byte padding rather
- * than doing either in-driver. */
-void build_mode01_request(uint8_t out[12], uint32_t tx_id, uint32_t pid)
+ * BENCH-remaining assumption: that the VX honors FRAME_PAD
+ * zero-padding (the ISO 15765-4 convention) rather than demanding
+ * unpadded transmissions — the flag is the documented knob either
+ * way. */
+void build_mode01_request(uint8_t out[6], uint32_t tx_id, uint32_t pid)
 {
     pack_be32(out, tx_id);
-    out[4] = 0x02;   /* SF PCI — 2 data bytes follow */
-    out[5] = 0x01;   /* Mode 01 */
-    out[6] = static_cast<uint8_t>(pid);
-    out[7] = 0; out[8] = 0; out[9] = 0; out[10] = 0; out[11] = 0;
+    out[4] = 0x01;   /* Mode 01 */
+    out[5] = static_cast<uint8_t>(pid);
 }
 
 struct qttune_j2534_transport {
@@ -117,7 +137,9 @@ struct qttune_j2534_transport {
      *   tx_id        transmit ID; defaults to 0x7E0 when the URI omits
      *   poll_pid     0 = passive receive (identity stamping only);
      *                nonzero = Mode-01 request loop for this PID
-     *   addr_flags   CAN_29BIT_ID when either ID exceeds 11 bits
+     *   addr_flags   CAN_29BIT_ID when either ID exceeds 11 bits;
+     *                ORed with ISO15765_FRAME_PAD at every write and
+     *                filter registration (N1)
      *   filter_active/filter_id  set at start; stopped BEST-EFFORT at
      *                detach BEFORE disconnect — vendor-compatibility
      *                priority (some drivers leak filter state if the
@@ -139,6 +161,9 @@ struct qttune_j2534_transport {
     qttune_pid_scheduler sched;
     std::atomic<bool> stop_requested{false};
     std::thread worker;
+    qttune_transport_t* self = nullptr;   /* NEW: wrapper back-pointer —
+                                           * detach must free impl AND the
+                                           * envelope (internal.h contract) */
 };
 
 /* Read one frame and, if it passes the strip/stamp gate, dispatch it
@@ -151,10 +176,13 @@ struct qttune_j2534_transport {
  * against the filter ID (defensive: a conforming vendor delivers
  * matching frames only, so a mismatch or a runt frame is dropped, not
  * dispatched), strips the 4 bytes, and stamps arbitration_id — which
- * is what finally closes the bridge's message-ID gate (Issue #15).
- * Without a filter, frames dispatch verbatim with id 0: byte-for-byte
- * the pre-adoption contract, which is why every existing stream test
- * still passes unmodified. */
+ * is what closes the bridge's message-ID gate (Issue #15). Without a
+ * filter, frames dispatch verbatim with id 0: byte-for-byte the
+ * pre-adoption contract, which is why every existing stream test
+ * still passes unmodified.
+ * N1: the post-strip payload is the ISO-TP LOGICAL data —
+ * [0x41][PID][A][B]... with no PCI byte, matching the obd2 signal
+ * set's mux-at-offset-0 grammar. */
 bool pump_one(qttune_j2534_transport* t, uint32_t timeout_ms)
 {
     qttune_frame_t frame{};
@@ -196,12 +224,15 @@ bool pump_one(qttune_j2534_transport* t, uint32_t timeout_ms)
  *     J2534_DRAIN_BUDGET frames (short timeout, stop at first empty)
  *     -> sleep the cycle REMAINDER against an absolute deadline, so
  *     drain cost does not accumulate as cadence drift.
- *   POLL (legacy): poll_pid != 0. Byte-identical to the pre-slice
- *     loop: one request, one read (100 ms timeout), 100 ms sleep.
+ *   POLL (legacy): poll_pid != 0. One request, one read (100 ms
+ *     timeout), 100 ms sleep — request shape is the N1 6-byte wire
+ *     form shared with the scheduler.
  *   PASSIVE (legacy): read one frame per 20 ms, no requests. */
 void j2534_worker(qttune_j2534_transport* t)
 {
     const bool sched_mode = (t->sched.count > 0);
+    const uint32_t write_flags = t->addr_flags |
+                                 QTTUNE_PT_TX_ISO15765_FRAME_PAD;
 
     while (!t->stop_requested.load()) {
         const auto cycle_start = std::chrono::steady_clock::now();
@@ -209,7 +240,7 @@ void j2534_worker(qttune_j2534_transport* t)
         if (sched_mode) {
             uint8_t pid = 0;
             (void)qttune_sched_next(&t->sched, &pid);
-            uint8_t req[12];
+            uint8_t req[6];
             build_mode01_request(req, t->tx_id, pid);
             uint32_t written = 0;
             /* A failed send retries next cycle — the loop's job is
@@ -217,7 +248,7 @@ void j2534_worker(qttune_j2534_transport* t)
              * which is the BENCH-tier diagnostic story, not a
              * transport-layer error to synthesize here. */
             (void)qttune_j2534_write_frame(t->handle, t->channel, req,
-                                           sizeof(req), t->addr_flags,
+                                           sizeof(req), write_flags,
                                            0, &written);
 
             /* DRAIN: budgeted receive (#25). First empty read ends the
@@ -242,11 +273,11 @@ void j2534_worker(qttune_j2534_transport* t)
                 std::this_thread::sleep_until(target);
             }
         } else if (t->poll_pid != 0) {
-            uint8_t req[12];
+            uint8_t req[6];
             build_mode01_request(req, t->tx_id, t->poll_pid);
             uint32_t written = 0;
             (void)qttune_j2534_write_frame(t->handle, t->channel, req,
-                                           sizeof(req), t->addr_flags,
+                                           sizeof(req), write_flags,
                                            0, &written);
             (void)pump_one(t, J2534_READ_TIMEOUT_MS);
             /* With polling, the request cycle paces the loop. The fake's
@@ -459,249 +490,219 @@ qttune_status_t resolve_uri(const char* uri, qttune_j2534_device_t* dev,
             return st;
         }
         if (count == 0) {
-            qttune_j2534_free_devices(devices);
-            return QT_ERR_NO_TRANSPORT;
+            return QT_ERR_NO_TRANSPORT;   /* no vendors installed */
         }
-        *dev = devices[0];
+        *dev = devices[0];   /* first device — documented default */
         qttune_j2534_free_devices(devices);
         return QT_OK;
     }
 
-    const bool looks_like_path =
-        n >= 4 && _stricmp(selector + n - 4, ".dll") == 0;
-    const bool has_separator =
-        strchr(selector, '\\') != nullptr || strchr(selector, '/') != nullptr;
-
-    if (looks_like_path || has_separator) {
-        strncpy_s(dev->dll_path, sizeof(dev->dll_path), selector, _TRUNCATE);
-        strncpy_s(dev->vendor_name, sizeof(dev->vendor_name), "direct",
-                  _TRUNCATE);
-        dev->vendor_id = 0;
+    /* Path-like selector: contains a separator or a .dll suffix.
+     * Reaches LoadLibraryEx verbatim (discover-not-involved). */
+    if (strchr(selector, '\\') != nullptr ||
+        strchr(selector, '/') != nullptr ||
+        (strlen(selector) >= 4 &&
+         _stricmp(selector + strlen(selector) - 4, ".dll") == 0)) {
+        if (strlen(selector) >= QTTUNE_J2534_DLL_PATH_LEN) {
+            return QT_ERR_NO_TRANSPORT;
+        }
+        memcpy(dev->dll_path, selector, strlen(selector) + 1);
         return QT_OK;
     }
 
-    /* Vendor-name match, case-insensitive */
+    /* Otherwise: vendor-name match against discovery, case-insensitive. */
     qttune_status_t st = qttune_j2534_discover_devices(&devices, &count);
     if (st != QT_OK) {
         return st;
     }
+    bool matched = false;
     for (uint32_t i = 0; i < count; ++i) {
         if (_stricmp(devices[i].vendor_name, selector) == 0) {
             *dev = devices[i];
-            qttune_j2534_free_devices(devices);
-            return QT_OK;
+            matched = true;
+            break;
         }
     }
     qttune_j2534_free_devices(devices);
-    return QT_ERR_NO_TRANSPORT;
+    if (!matched) {
+        return QT_ERR_NO_TRANSPORT;
+    }
+    return QT_OK;
 }
 
-qttune_status_t j2534_start(qttune_session_t* /*session*/, void* impl)
+qttune_status_t j2534_start(qttune_session_t* session, void* impl)
 {
-    qttune_j2534_transport* t =
-        static_cast<qttune_j2534_transport*>(impl);
-    if (t == nullptr || t->handle == nullptr) {
-        return QT_ERR_NO_TRANSPORT;
-    }
+    (void)session;
+    auto* t = static_cast<qttune_j2534_transport*>(impl);
     if (t->worker.joinable()) {
-        return QT_OK;   /* already running — idempotent per ops contract */
+        return QT_OK;   /* internal.h: second start on a live
+                         * transport returns QT_OK */
     }
 
-    /* ADR-0013 slice 2: scheduler ADOPTION. Enrolled from the
-     * session's active signal set (visible here thanks to the
-     * session_create store-before-attach reorder) BEFORE connect —
-     * the set populates nothing (raw/mock) until the obd2 profile
-     * registers, so this is inert until Phase 5.
-     *
-     * GENERALIZED COUPLING RULE: scheduled PIDs require an rx filter
-     * — same J2534-1 rationale as ?poll='s (an unfiltered ISO 15765
-     * channel receives nothing, so a request loop would spin against
-     * guaranteed silence). Checked HERE rather than in parse_query
-     * because the trigger is the profile, not a URI token; Phase 5's
-     * profile-declares-channel refinement will make obd2 supply the
-     * 7E0/7E8 defaults itself, and this check becomes the
-     * user-override-didn't-break-it backstop. */
-    qttune_sched_init(&t->sched);
-    const bool sched_mode =
-        qttune_sched_from_set(&t->sched, t->session->active_signal_set);
+    /* ORDERING NOTE (N3, open by design — channel-decl slice owns the
+     * fix): the scheduler-without-filter coupling fires HERE, after
+     * attach already opened the device. ADR-0013 §4 channel-decls
+     * supply 7E0/7E8 from the profile and demote this to a backstop. */
+    const QttuneSignalSet* set = qttune_session_signal_set(t->session);
+    const bool sched_mode = qttune_sched_from_set(&t->sched, set);
     if (sched_mode && t->rx_id == 0) {
-        return QT_ERR_NO_TRANSPORT;   /* scheduled PIDs require ?filter= */
+        return QT_ERR_NO_TRANSPORT;   /* scheduled PIDs need ?filter= */
     }
 
-    unsigned long channel = 0;
-    qttune_status_t st = qttune_j2534_connect_channel(t->handle,
-                                                      t->baud, t->flags,
-                                                      &channel);
-    if (st != QT_OK) {
-        return QT_ERR_NO_TRANSPORT;
-    }
-    t->channel = channel;
-
-    /* SPEC ORDER: filters are registered before any traffic flows, so
-     * a response can never arrive unfiltered and be discarded by the
-     * driver. A registration failure is fatal to the session rather
-     * than degraded — an unfiltered ISO 15765 channel receives nothing,
-     * so continuing would hand the caller a silently dead session. */
     if (t->rx_id != 0) {
-        uint8_t mask[J2534_FILTER_MSG_LEN]    = {0xFF, 0xFF, 0xFF, 0xFF,
-                                                 0, 0, 0, 0};
-        uint8_t pattern[J2534_FILTER_MSG_LEN] = {0, 0, 0, 0, 0, 0, 0, 0};
-        uint8_t fc[J2534_FILTER_MSG_LEN]      = {0, 0, 0, 0, 0, 0, 0, 0};
+        uint8_t mask[J2534_FILTER_MSG_LEN];
+        uint8_t pattern[J2534_FILTER_MSG_LEN];
+        uint8_t fc[J2534_FILTER_MSG_LEN];
+        pack_be32(mask, 0xFFFFFFFFu);   /* all-ones over all 4 bytes: exact ID
+                                        * match; the pattern's leading zeros
+                                        * carry the address-width distinction */
         pack_be32(pattern, t->rx_id);
         pack_be32(fc, t->tx_id);
-        fc[4] = J2534_FC_PCI_CTS;   /* 30 00 00 — CTS, BS=0, STmin=0 */
 
-        unsigned long filter_id = 0;
-        st = qttune_j2534_start_msg_filter(t->handle, t->channel,
-                                           QTTUNE_PT_FLOW_CONTROL_FILTER,
-                                           mask, J2534_FILTER_MSG_LEN,
-                                           pattern, J2534_FILTER_MSG_LEN,
-                                           fc, J2534_FILTER_MSG_LEN,
-                                           t->addr_flags, &filter_id);
+        qttune_status_t st = qttune_j2534_start_msg_filter(
+            t->handle, t->channel,
+            QTTUNE_PT_FLOW_CONTROL_FILTER,
+            mask, J2534_FILTER_MSG_LEN,
+            pattern, J2534_FILTER_MSG_LEN,
+            fc, J2534_FILTER_MSG_LEN,
+            t->addr_flags | QTTUNE_PT_TX_ISO15765_FRAME_PAD,
+            &t->filter_id);
         if (st != QT_OK) {
-            /* Undo the connect so the failed-start state is identical
-             * to a failed-connect state: channel 0, nothing for detach
-             * to disconnect twice. */
-            qttune_j2534_disconnect_channel(t->handle, t->channel);
-            t->channel = 0;
-            return QT_ERR_NO_TRANSPORT;
+            return st;
         }
-        t->filter_id = filter_id;
         t->filter_active = true;
     }
 
+    t->stop_requested.store(false);
     try {
         t->worker = std::thread(j2534_worker, t);
-        return QT_OK;
     } catch (...) {
-        if (t->filter_active && t->channel != 0) {
+        if (t->filter_active) {
             (void)qttune_j2534_stop_msg_filter(t->handle, t->channel,
                                                t->filter_id);
             t->filter_active = false;
-        }
-        if (t->channel != 0) {
-            qttune_j2534_disconnect_channel(t->handle, t->channel);
-            t->channel = 0;
         }
         return QT_ERR_OUT_OF_MEMORY;
     }
+    return QT_OK;
 }
 
+/* detach(session, impl) — void per internal.h, called exactly once from
+ * qttune_session_close AFTER the closed flag is set. Worker joined
+ * FIRST (never alive while vendor code could be unmapped), filter
+ * stop best-effort before disconnect, then free impl AND the wrapper. */
 void j2534_detach(qttune_session_t* session, void* impl)
 {
-    qttune_j2534_transport* t =
-        static_cast<qttune_j2534_transport*>(impl);
-    if (t == nullptr) {
-        return;
-    }
-
-    qttune_transport_t* wrapper = session->transport;
-    session->transport = nullptr;
-
-    /* ORDER: stop + join the worker BEFORE touching the handle — the
-     * worker calls read_msgs through function pointers that dangle the
-     * moment j2534_close unmaps the module. Then stop the filter
-     * BEFORE disconnect (vendor-compatibility priority: the spec says
-     * disconnect invalidates filters, but drivers that leak filter
-     * state on a skipped stop are common enough that the explicit stop
-     * is worth the extra call). Best-effort — a failure here must not
-     * block teardown, and the subsequent disconnect covers it. */
-    t->stop_requested.store(true);
+    (void)session;
+    auto* t = static_cast<qttune_j2534_transport*>(impl);
     if (t->worker.joinable()) {
+        t->stop_requested.store(true);
         t->worker.join();
     }
-    if (t->handle != nullptr) {
-        if (t->filter_active && t->channel != 0) {
-            (void)qttune_j2534_stop_msg_filter(t->handle, t->channel,
-                                               t->filter_id);
-            t->filter_active = false;
-        }
-        if (t->channel != 0) {
-            qttune_j2534_disconnect_channel(t->handle, t->channel);
-        }
-        qttune_j2534_close(t->handle);
+    if (t->filter_active) {
+        (void)qttune_j2534_stop_msg_filter(t->handle, t->channel,
+                                           t->filter_id);
+        t->filter_active = false;
     }
-    delete t;
-    delete wrapper;
+    (void)qttune_j2534_disconnect_channel(t->handle, t->channel);
+    (void)qttune_j2534_close(t->handle);
+
+    qttune_transport_t* wrap = t->self;
+    delete t;      /* impl first */
+    delete wrap;   /* then the envelope — internal.h contract */
 }
 
-const qttune_transport_ops_t kJ2534TransportOps = {
+/* Ops table: static storage owned by this TU (internal.h contract),
+ * defined before attach references it. */
+const qttune_transport_ops_t kJ2534Ops = {
     j2534_start,
     j2534_detach
 };
 
-} // namespace
-
-extern "C" {
-
-qttune_status_t qttune_j2534_transport_attach(qttune_session_t* session,
-                                             const char* uri)
+qttune_status_t j2534_attach(qttune_session_t* session, const char* uri)
 {
-    if (session == nullptr || uri == nullptr) {
-        return QT_ERR_NULL_ARGUMENT;
-    }
+    /* Idempotence (internal.h contract, mock parity): checked FIRST,
+     * before any device open, so the early-out leaks nothing. */
     if (session->transport != nullptr) {
-        return QT_OK;   /* idempotent, mirroring mock attach */
+        return QT_OK;
     }
 
     qttune_j2534_device_t dev = {};
-    j2534_uri_params params;
+    j2534_uri_params params = {};
     qttune_status_t st = resolve_uri(uri, &dev, &params);
     if (st != QT_OK) {
         return st;
     }
 
-    /* Handle opens eagerly at ATTACH (not start) so load failures
-     * surface at session_create, where the caller can pick another
-     * URI — matching the mock's failure-point ergonomics. */
     qttune_j2534_handle_t* handle = nullptr;
     st = qttune_j2534_open(&dev, &handle);
     if (st != QT_OK) {
         return st;
     }
 
-    try {
-        qttune_j2534_transport* impl = new qttune_j2534_transport();
-        try {
-            session->transport =
-                new qttune_transport_t{&kJ2534TransportOps, impl};
-        } catch (...) {
-            delete impl;
-            qttune_j2534_close(handle);
-            return QT_ERR_OUT_OF_MEMORY;
-        }
-        impl->session = session;
-        impl->handle = handle;
-        impl->baud = params.baud;
-        impl->flags = params.flags;
-        impl->rx_id = static_cast<uint32_t>(params.rx_id);
-        impl->tx_id = (params.tx_id != 0)
-                      ? static_cast<uint32_t>(params.tx_id)
-                      : J2534_TX_ID_DEFAULT;
-        impl->poll_pid = static_cast<uint32_t>(params.poll_pid);
-        /* 29-bit addressing is implied by either ID exceeding 11 bits —
-         * the same bit stamps the filter messages and the write. */
-        impl->addr_flags = (impl->rx_id > 0x7FFu || impl->tx_id > 0x7FFu)
-                           ? QTTUNE_PT_CAN_29BIT_ID : 0u;
-    } catch (...) {
+    auto* t = new (std::nothrow) qttune_j2534_transport();
+    if (t == nullptr) {
         qttune_j2534_close(handle);
         return QT_ERR_OUT_OF_MEMORY;
     }
+
+    unsigned long channel = 0;
+    st = qttune_j2534_connect_channel(handle, params.baud, params.flags,
+                                      &channel);
+    if (st != QT_OK) {
+        qttune_j2534_close(handle);
+        delete t;
+        return st;
+    }
+
+    /* The envelope: session owns it polymorphically; detach frees both. */
+    auto* wrap = new (std::nothrow) qttune_transport_t();
+    if (wrap == nullptr) {
+        qttune_j2534_disconnect_channel(handle, channel);
+        qttune_j2534_close(handle);
+        delete t;
+        return QT_ERR_OUT_OF_MEMORY;
+    }
+    wrap->ops = &kJ2534Ops;
+    wrap->impl = t;
+
+    t->session = session;
+    t->handle = handle;
+    t->channel = channel;
+    t->self = wrap;
+    t->baud = params.baud;
+    t->flags = params.flags;
+    t->rx_id = static_cast<uint32_t>(params.rx_id);
+    t->tx_id = (params.tx_id != 0) ? static_cast<uint32_t>(params.tx_id)
+                                   : J2534_TX_ID_DEFAULT;
+    t->poll_pid = static_cast<uint32_t>(params.poll_pid);
+    if (t->rx_id > 0x7FF || t->tx_id > 0x7FF) {
+        t->addr_flags = QTTUNE_PT_CAN_29BIT_ID;
+    }
+
+    session->transport = wrap;   /* session.h member — direct install */
     return QT_OK;
 }
 
-} // extern "C"
+} // namespace
 
-#else
-
-extern "C" {
-
-qttune_status_t qttune_j2534_transport_attach(qttune_session_t* /*session*/,
-                                             const char* /*uri*/)
+extern "C" qttune_status_t qttune_j2534_transport_attach(
+    qttune_session_t* session, const char* uri)
 {
-    return QT_ERR_NOT_IMPLEMENTED;
+    return j2534_attach(session, uri);
 }
 
-} // extern "C"
+#else /* !_WIN32 */
+
+/* Linking stub — core.cpp routes j2534:// only on _WIN32, but the
+ * symbol must exist for the headless-Unix CI build (core links
+ * without Win32 J2534). */
+extern "C" qttune_status_t qttune_j2534_transport_attach(
+    qttune_session_t* session, const char* uri)
+{
+    (void)session;
+    (void)uri;
+    return QT_ERR_NO_TRANSPORT;
+}
 
 #endif /* _WIN32 */

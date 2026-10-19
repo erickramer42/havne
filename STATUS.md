@@ -1,6 +1,6 @@
 # QtTune — Project Status
 
-**Updated:** 2026-10-17 · **Version:** v0.3.0-dev (last tag v0.2.0) ·
+**Updated:** 2026-10-18 · **Version:** v0.3.0-dev (last tag v0.2.0) ·
 [![CI](https://github.com/erickramer42/qttune/actions/workflows/ci.yml/badge.svg)](https://github.com/erickramer42/qttune/actions/workflows/ci.yml)
 
 This file covers the project as it stands: what works, what comes
@@ -13,8 +13,8 @@ Safety, regulatory and warranty caveats are in
 ## Where things stand
 
 **Current phase: v0.3.0 Phase 3 (J2534).** The HARNESS tier is complete, 
-including transport adoption (Part 5).The BENCH tier, meaning the first real 
-adapter, comes next.
+including transport adoption (Part 5).The BENCH tier tested on real adapter with
+"quiet bus" meaning not connected to vehicle, the first real vehicle, comes next.
 
 - **Works:**
   - The mock transport drives the live frame log, LiveView and the
@@ -50,7 +50,7 @@ adapter, comes next.
   - J2534 data in LiveView: profile selection is in (ADR-0013 slice
     1), but a `j2534://` session still decodes nothing — the `obd2`
     signal set and multi-PID scheduler are slice 2.
-  - **Tests:** 108 ctest cases, passing locally (Windows/MSVC 2022)
+  - **Tests:** 134 ctest cases, passing locally (Windows/MSVC 2022)
     and in CI on all three platforms. The cross-arch routing case
     skips unless its environment variables are set. J2534 suites
     carry a 30 s per-test timeout — a hang fails bounded instead of
@@ -159,7 +159,7 @@ Contracts along this path:
   - [x] slice 1: profile registry, `raw` profile, `?profile=`
         override, bridge reads the session's active signal set
         instead of the hard-wired mock set (#21 closed 2026-10-17)
-  - [ ] slice 2: the `obd2` signal set and the multi-PID scheduler
+  - [x] slice 2: the `obd2` signal set and the multi-PID scheduler
         replacing the single-poll loop (paired with #25, the
         read-rate cap — one workstream per ADR-0013)
   - [ ] `obd2` PID probe phase and `uds-generic`
@@ -340,3 +340,9 @@ matter most — CAN-era targets need none of it.
   status 34 is unlabeled)
 - Picker row URIs templated with `?filter=&txid=&poll=` (the natural
   flow today produces a mute ISO 15765 session)
+- update code base, docs, compilation floors to C++20(gives std::span, 
+  coroutines, ranges, std::format, etc) but removes older compiler support 
+  (MSVC 2019, gcc 11, clang 14 all missing full support) - low priority / debatable 
+- android auto / apple car play target for the dashboard of live values to use
+  infotainment as a potential display. More invasive options: direct usage including
+  overwrite or extension of vehicles infotainment system (highly vehicle dependent)

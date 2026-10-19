@@ -17,9 +17,18 @@
 
 /* ---- Status codes (J2534-1 v04.04) ----
  * Subset used by qttune; only NOERROR is load-bearing today — the
- * loader treats any nonzero return as "call failed / no frame." */
-#define QTTUNE_PT_STATUS_NOERROR  0L
-#define QTTUNE_PT_STATUS_FAILED   1L   /* ERR_FAILED */
+ * loader treats any nonzero return as "call failed / no frame."
+ *
+ * NOTE FOR STEP 1: the following are verified against v04.04 public
+ * references (diamondman J2534_v0404.h, DrewTech/Opus IVS docs). The
+ * core error enum maps these to QT_ERR_* codes — do not conflate
+ * vendor statuses with qttune_status_t directly. */
+#define QTTUNE_PT_STATUS_NOERROR    0L
+#define QTTUNE_PT_STATUS_FAILED     0x07L  /* ERR_FAILED (v04.04; was 1L — v04.04's 0x01
+                                            * is ERR_NOT_SUPPORTED). Internal-only value:
+                                            * nothing gates on it numerically. */
+#define QTTUNE_PT_STATUS_TIMEOUT    0x09L  /* ERR_TIMEOUT — "silent bus", not a hard error.
+                                           * VERIFIED: dashlogic J2534_v0404.h, 2026-10-19 */
 
 /* ---- ProtocolIDs (J2534-1 v04.04, VERIFIED) ----
  * FIX 2026-10-15: ISO15765 is 0x06. The previous value 0x05 is CAN
@@ -41,7 +50,11 @@
 #define QTTUNE_PT_ISO15765_ADDR_TYPE    0x0080UL
 #define QTTUNE_PT_CAN_29BIT_ID          0x0100UL
 
-/* TxFlags (J2534-1 v04.04, VERIFIED) — Part 4 write path needs these. */
+/* TxFlags (J2534-1 v04.04) — N1: the adapter owns ISO-TP framing and
+ * padding on ISO 15765 channels; this flag requests zero-padding to
+ * the full 8-byte classic frame. VERIFIED: dashlogic J2534_v0404.h
+ * (ISO15765_FRAME_PAD = 0x0040), 2026-10-19. */
+#define QTTUNE_PT_TX_ISO15765_FRAME_PAD 0x0040UL
 #define QTTUNE_PT_TX_NORMAL_TRANSMIT 0x0000UL
 /* TxFlags CAN_29BIT_ID shares the RxStatus value (0x0100). */
 

@@ -1,4 +1,4 @@
-// File/layer: core/src/core.cpp | C++17, Qt-free, CI-validated headless build
+// File/layer: core/app/qttunebridge.cpp
 
 #include "qttunebridge.h"
 #include "qttune/version.h"

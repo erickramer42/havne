@@ -64,6 +64,20 @@ namespace {
 
 extern "C" {
 
+qttune_status_t qttune_session_get_error_state(
+    qttune_session_t* session,
+    int32_t* out_last_error,
+    uint32_t* out_error_count)
+{
+    if (session == nullptr || out_last_error == nullptr ||
+        out_error_count == nullptr) {
+        return QT_ERR_NULL_ARGUMENT;
+    }
+    *out_last_error = session->last_error.load();
+    *out_error_count = session->error_count.load();
+    return QT_OK;
+}
+
 qttune_status_t qttune_init(void)
 {
     bool expected = false;
@@ -92,6 +106,8 @@ const char* qttune_status_string(qttune_status_t status)
         case QT_ERR_SESSION_CLOSED: return "session already closed";
         case QT_ERR_ALREADY_REGISTERED: return "already registered";
         case QT_ERR_LOAD_FAILED:    return "failed to load transport library";
+        case QT_ERR_VEHICLE_TIMEOUT:        return "vehicle not responding (timeout)";
+        case QT_ERR_TRANSPORT_HARD_FAILURE: return "transport hard failure";
         default:                     return "unknown status";
     }
 }

@@ -254,7 +254,7 @@ TEST(J2534RoutingTest, X86FakeSelectsSurrogateBackendAndRoundTrips)
      * verification stays loader-side: no session API reaches the
      * inject hook.) */
     char uri[600];
-    snprintf(uri, sizeof(uri), "j2534://%s?baud=500000", dll);
+    snprintf(uri, sizeof(uri), "j2534://%s?baud=500000&profile=raw", dll);
     qttune_session_t* session = nullptr;
     ASSERT_EQ(qttune_session_create(uri, &session), QT_OK);
     EXPECT_EQ(qttune_session_start(session), QT_OK);

@@ -9,13 +9,16 @@
 //
 // PART 4 SEMANTICS (this revision):
 //  * WriteMsgs: records the message (hook-observable). Response
-//    generation is two-mode (ADR-0013 slice 2):
-//      - Mode-01 request shape [..4-byte ID..][02][01][PID]: proper
-//        OBD-II response [rx_id BE][04][41][PID][canned data],
-//        values from g_obd2_canned (SetFakeObd2CannedValueExternal
-//        overrides per-test; GetFakeObd2CannedValueExternal reads).
+//    generation is two-mode (ADR-0013 slice 2, N1 grammar 2026-10-19):
+//      - Mode-01 request [4-byte ID BE][01][PID] (exactly 6 bytes, the
+//        adapter-framed logical message): response
+//        [rx_id BE][41][PID][canned], values from g_obd2_canned
+//        (SetFakeObd2CannedValueExternal overrides per-test). NO PCI
+//        byte in either direction — the fake models the adapter side
+//        of ISO-TP, and the transport's 4-byte header strip lands the
+//        bridge on the obd2 set's mux-at-offset-0 grammar.
 //      - Everything else: the legacy deterministic echo (byte 0
-//        +0x40), preserving existing ?poll= framing tests.
+//        +0x40), preserving existing framing tests.
 //  * IoCtl: config table (SET stores, GET reads back), fixed VBATT,
 //    CLEAR_* accepted. Unknown ids FAIL like a strict vendor.
 //  * Filters: registration bookkeeping + last-invocation recording.
@@ -184,78 +187,45 @@ bool filter_matches(const unsigned char* frame_data, unsigned long frame_size,
     return true;
 }
 
-/* Build an OBD-II Mode-01 response. Caller (WriteMsgs, mutex HELD)
- * has already verified the request shape: >= 7 bytes, req[4]==0x02
- * (SF PCI), req[5]==0x01 (Mode 01). Output: [rx_id BE from the
- * active filter pattern][04][41][PID][canned data][zero pad] —
- * 12 bytes total, the same wire shape the transport's strip logic
- * expects. Mutex-held: reads g_last_filter and g_obd2_canned. */
+/* Build an OBD-II Mode-01 response (N1 wire grammar, 2026-10-19).
+ * Caller (WriteMsgs, mutex HELD) has verified: exactly 6 bytes
+ * [tx_id BE][0x01][PID] and an active filter. Output:
+ * [rx_id BE from the filter pattern][0x41][PID][canned data] — NO
+ * PCI BYTE in either direction. The fake models the ADAPTER side of
+ * ISO-TP: this queue content is what a conforming adapter delivers
+ * from ReadMsgs, and the transport's header strip lands the bridge
+ * on [41][PID][A][B]... — the obd2 set's mux-at-offset-0 grammar.
+ * Response LENGTH varies per PID (uniform 12 is retired). */
 void build_obd2_response(const unsigned char* req, unsigned long req_len,
                          unsigned char* resp, unsigned long* resp_len)
 {
     (void)req_len;   /* shape pre-validated by the caller */
-    const uint8_t pid = req[6];
+    const uint8_t pid = req[5];
 
     resp[0] = g_last_filter.pattern[0];
     resp[1] = g_last_filter.pattern[1];
     resp[2] = g_last_filter.pattern[2];
     resp[3] = g_last_filter.pattern[3];
-    resp[4] = 0x04;   /* SF PCI — 4 data bytes follow */
-    resp[5] = 0x41;   /* Mode 01 + 0x40 response */
-    resp[6] = pid;    /* PID echo */
+    resp[4] = 0x41;   /* Mode 01 + 0x40 response */
+    resp[5] = pid;    /* PID echo */
 
     switch (pid) {
         case 0x00:  /* Supported PIDs bitmask (all zero for v1) */
-            resp[7] = resp[8] = resp[9] = resp[10] = 0;
-            resp[11] = resp[12] = resp[13] = resp[14] = 0;
-            *resp_len = 12;
+            resp[6] = resp[7] = resp[8] = resp[9] = 0;
+            *resp_len = 10;
             break;
-        case 0x04:  /* Engine Load */
-            resp[7] = g_obd2_canned.pid_04_engine_load;
-            resp[8] = resp[9] = resp[10] = resp[11] = 0;
-            *resp_len = 12;
-            break;
-        case 0x05:  /* Coolant Temp */
-            resp[7] = g_obd2_canned.pid_05_coolant_temp;
-            resp[8] = resp[9] = resp[10] = resp[11] = 0;
-            *resp_len = 12;
-            break;
-        case 0x0C:  /* RPM */
-            resp[7] = g_obd2_canned.pid_0C_rpm_high;
-            resp[8] = g_obd2_canned.pid_0C_rpm_low;
-            resp[9] = resp[10] = resp[11] = 0;
-            *resp_len = 12;
-            break;
-        case 0x0D:  /* Vehicle Speed */
-            resp[7] = g_obd2_canned.pid_0D_speed;
-            resp[8] = resp[9] = resp[10] = resp[11] = 0;
-            *resp_len = 12;
-            break;
-        case 0x0F:  /* Intake Air Temp */
-            resp[7] = g_obd2_canned.pid_0F_iat;
-            resp[8] = resp[9] = resp[10] = resp[11] = 0;
-            *resp_len = 12;
-            break;
-        case 0x11:  /* Throttle Position */
-            resp[7] = g_obd2_canned.pid_11_throttle;
-            resp[8] = resp[9] = resp[10] = resp[11] = 0;
-            *resp_len = 12;
-            break;
-        case 0x2F:  /* Fuel Level */
-            resp[7] = g_obd2_canned.pid_2F_fuel_level;
-            resp[8] = resp[9] = resp[10] = resp[11] = 0;
-            *resp_len = 12;
-            break;
-        case 0x42:  /* Battery Voltage */
-            resp[7] = g_obd2_canned.pid_42_volt_high;
-            resp[8] = g_obd2_canned.pid_42_volt_low;
-            resp[9] = resp[10] = resp[11] = 0;
-            *resp_len = 12;
-            break;
-        default:    /* Unsupported PID — well-formed echo of zeros */
-            resp[7] = resp[8] = resp[9] = resp[10] = 0;
-            resp[11] = resp[12] = resp[13] = resp[14] = 0;
-            *resp_len = 12;
+        case 0x04: resp[6] = g_obd2_canned.pid_04_engine_load;  *resp_len = 7;  break;
+        case 0x05: resp[6] = g_obd2_canned.pid_05_coolant_temp; *resp_len = 7;  break;
+        case 0x0C: resp[6] = g_obd2_canned.pid_0C_rpm_high;
+                   resp[7] = g_obd2_canned.pid_0C_rpm_low;      *resp_len = 8;  break;
+        case 0x0D: resp[6] = g_obd2_canned.pid_0D_speed;        *resp_len = 7;  break;
+        case 0x0F: resp[6] = g_obd2_canned.pid_0F_iat;          *resp_len = 7;  break;
+        case 0x11: resp[6] = g_obd2_canned.pid_11_throttle;      *resp_len = 7;  break;
+        case 0x2F: resp[6] = g_obd2_canned.pid_2F_fuel_level;    *resp_len = 7;  break;
+        case 0x42: resp[6] = g_obd2_canned.pid_42_volt_high;
+                   resp[7] = g_obd2_canned.pid_42_volt_low;     *resp_len = 8;  break;
+        default:    /* Unsupported PID — bare grammatical echo */
+            *resp_len = 6;
             break;
     }
 }
@@ -403,6 +373,29 @@ long __stdcall PassThruReadMsgs(unsigned long ChannelID,
         return STATUS_FAILED;
     }
 
+    /* #11 test knob (HARNESS): QTTUNE_FAKE_READ_STATUS forces this
+     * call to return the given vendor status with zero messages —
+     * 0x09 (ERR_TIMEOUT) for quiet-bus, a hard code (e.g. 0x07) for
+     * the dead-adapter path. PERSISTENT while set; tests toggle via
+     * _putenv between phases (env re-read per call — the child
+     * inherits it from the parent, same discipline as
+     * QTTUNE_FAKE_OPEN_DELAY_MS). Checked BEFORE the queue: a
+     * simulated dead adapter delivers nothing. NOT modeled:
+     * "timeout WITH delivered messages" — v1 scope is the
+     * empty-return cases the loader split distinguishes. */
+    {
+        char buf[32] = {};
+        const DWORD n = GetEnvironmentVariableA("QTTUNE_FAKE_READ_STATUS",
+                                                 buf, sizeof(buf));
+        if (n > 0 && n < sizeof(buf)) {
+            const long code = strtol(buf, nullptr, 0);
+            if (code != 0) {
+                *pNumMsgs = 0;
+                return code;
+            }
+        }
+    }
+
     std::lock_guard<std::mutex> lk(fake_j2534::g_lock);
 
     /* FILTER GATING (SetFilterGating-controlled): model the device's
@@ -501,17 +494,12 @@ long __stdcall PassThruWriteMsgs(unsigned long ChannelID,
     }
     fake_j2534::g_write_count++;
 
-    /* RESPONSE GENERATION — filter-aware, two modes (ADR-0013 slice 2).
-     *
-     * Mode-01 REQUEST: payload (after the 4-byte address header) starts
-     * [0x02][0x01][PID] — a single-frame Mode-01 request. Emit a proper
-     * OBD-II response: [rx_id BE][0x04][0x41][PID][canned data].
-     *
-     * Everything ELSE keeps the deterministic echo semantics the
-     * existing ?poll= framing tests pin (no filter: raw echo, byte 0
-     * + 0x40; filter registered: pattern-prefixed echo). The +0x40 is
-     * FAKE-DEVICE semantics, not OBD correctness — a real ECU answers
-     * 01 0C with 41 0C, which the OBD-II mode now models too. */
+    /* RESPONSE GENERATION — N1 wire grammar (2026-10-19).
+     * Mode-01 request: EXACTLY 6 bytes, req[4]==0x01 — the
+     * adapter-framed logical message. With an active filter, emit
+     * [rx_id BE][41][PID][canned]; without one there is no rx_id to
+     * address a response to, so the legacy echo applies. Everything
+     * else keeps the deterministic echo semantics. */
     if (n > 0) {
         const unsigned char* req = pMsg->Data;
         unsigned char echo[64];
@@ -520,18 +508,14 @@ long __stdcall PassThruWriteMsgs(unsigned long ChannelID,
         const bool has_filter = (fake_j2534::g_last_filter.filter_id != 0)
                                  && (n >= 4);
 
-        if (has_filter && n >= 7 &&
-            req[4] == 0x02 && req[5] == 0x01) {
-            /* Mode-01 SF request: OBD-II response path */
+        if (n == 6 && req[4] == 0x01 && has_filter) {
             fake_j2534::build_obd2_response(req, n, echo, &echo_len);
         } else if (has_filter) {
-            /* device model: [pattern ID (4)][payload, byte 0 + 0x40] */
             memcpy(echo, fake_j2534::g_last_filter.pattern, 4);
             memcpy(echo + 4, req + 4, n - 4);
             echo[4] = static_cast<unsigned char>(req[4] + 0x40);
             echo_len = 4 + (n - 4);
         } else {
-            /* legacy Part 4 semantics: raw echo, byte 0 + 0x40 */
             memcpy(echo, req, n);
             echo[0] = static_cast<unsigned char>(req[0] + 0x40);
             echo_len = n;

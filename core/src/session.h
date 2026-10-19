@@ -15,10 +15,9 @@ struct qttune_session {
     std::mutex callback_mutex;
     std::vector<std::pair<qttune_frame_callback_t, void*>> callbacks;
     qttune_transport_t* transport = nullptr;
-    /* ADR-0013: set once at session_create from the profile (scheme
-     * default or ?profile= override). NULL = raw profile, no decode.
-     * Single-caller contract: written before any worker exists. */
     const QttuneSignalSet* active_signal_set = nullptr;
+    std::atomic<int32_t> last_error{QT_OK};
+    std::atomic<uint32_t> error_count{0};
 };
 
 #endif /* QTTUNE_SESSION_H */

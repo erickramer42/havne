@@ -29,8 +29,13 @@ extern "C" {
  *
  * PID derivation rule (the contract binding defs to this scheduler):
  * a def drives scheduling iff it carries a 2-byte mux key at payload
- * offset 1 (the OBD-II Mode-01 echo grammar, 41 <PID>). The PID to
- * REQUEST is the key's LOW byte — the echo grammar guarantees that
+ * offset 0. WIRE GRAMMAR (N1 fix, 2026-10-19): on an ISO 15765
+ * channel the ADAPTER owns ISO-TP framing — PassThruWriteMsgs data is
+ * [4-byte ID BE][01][PID] (no PCI byte; padding is the
+ * ISO15765_FRAME_PAD TxFlag) and a response arrives as
+ * [41][PID][A][B]... after the transport strips the 4-byte address
+ * header. So the mux pair sits at offset 0 and the PID to REQUEST is
+ * the key's LOW byte — the echo grammar guarantees that
  * correspondence. Non-mux defs (raw/mock sets) never enroll; the
  * scheduler simply comes up empty and the worker stays in legacy
  * poll mode. Validators enforce the shape at registration time;
@@ -62,8 +67,9 @@ static inline bool qttune_sched_from_set(qttune_pid_scheduler* s,
     }
     for (uint32_t i = 0; i < set->count; ++i) {
         const QttuneSignalDef* d = &set->defs[i];
-        /* OBD-II echo-grammar gate: 2-byte key at offset 1. */
-        if (d->mux_length != 2 || d->mux_offset != 1) {
+        /* OBD-II echo-grammar gate: 2-byte key at offset 0 —
+         * [41][PID], the post-header-strip response payload. */
+        if (d->mux_length != 2 || d->mux_offset != 0) {
             continue;
         }
         const uint8_t pid = (uint8_t)(d->mux_key & 0xFFu);

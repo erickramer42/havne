@@ -389,12 +389,6 @@ protected:
     }
 };
 
-/* REQUEST LOOP (legacy poll): ?profile=raw&filter=0x7E8&poll=0x0C —
- * the worker writes a Mode-01 request each 100 ms cycle; the fake
- * answers Mode-01 shapes with proper OBD-II grammar (ADR-0013 slice
- * 2 — the fake's response mode is SHAPE-triggered, so the legacy poll
- * path sees it too); the worker strips the 4-byte address header and
- * stamps arbitration_id. Asserts BOTH directions of the loop. */
 TEST_F(J2534AdoptionTest, RequestLoopWritesMode01AndReceivesStrippedEcho)
 {
     char uri[700];
@@ -433,37 +427,24 @@ TEST_F(J2534AdoptionTest, RequestLoopWritesMode01AndReceivesStrippedEcho)
     unsigned char wbuf[64] = {};
     unsigned long wlen = 0, wflags = 0;
     get_recorded_write(0, wbuf, &wlen, &wflags);
-    EXPECT_EQ(wlen, 12u);
-    /* First 4 bytes = tx_id BE (0x7E0) */
+    EXPECT_EQ(wlen, 6u);                     /* N1: adapter-framed, no PCI */
     EXPECT_EQ(wbuf[0], 0x00u); EXPECT_EQ(wbuf[1], 0x00u);
     EXPECT_EQ(wbuf[2], 0x07u); EXPECT_EQ(wbuf[3], 0xE0u);
-    /* Byte 4 = SF PCI (02), byte 5 = Mode 01, byte 6 = PID (0C) */
-    EXPECT_EQ(wbuf[4], 0x02u); EXPECT_EQ(wbuf[5], 0x01u);
-    EXPECT_EQ(wbuf[6], 0x0Cu);
+    EXPECT_EQ(wbuf[4], 0x01u);               /* Mode 01 */
+    EXPECT_EQ(wbuf[5], 0x0Cu);               /* PID */
+    EXPECT_NE(wflags & QTTUNE_PT_TX_ISO15765_FRAME_PAD, 0u);  /* N1 flag */
 
-    /* ---- RX framing: 4-byte header stripped, 8 bytes payload ----
-     * OBD-II response (fake, slice 2): [7E8][04][41][0C][1F][40]
-     * [00][00] — canned RPM raw 0x1F40 (= 2000 RPM at 0.25 scale).
-     * The legacy +0x40 device-model echo is RETIRED for Mode-01
-     * shapes; what's pinned here is grammar the obd2 decoder set
-     * actually consumes. NOTE: the fake's uniform PCI 0x04 is one
-     * byte fatter than a strict ECU would send for single-byte PIDs
-     * (0x03) — decoder-irrelevant, normalized when multi-frame work
-     * forces precision. */
     EXPECT_EQ(cap.arbitration_ids[0], 0x7E8u);
-    EXPECT_EQ(cap.payloads[0][0], 0x04u);   /* SF PCI (fake shape) */
-    EXPECT_EQ(cap.payloads[0][1], 0x41u);   /* Mode 01 + 0x40 */
-    EXPECT_EQ(cap.payloads[0][2], 0x0Cu);   /* PID echo */
-    EXPECT_EQ(cap.payloads[0][3], 0x1Fu);   /* canned RPM high byte */
-    EXPECT_EQ(cap.payloads[0][4], 0x40u);   /* canned RPM low byte */
-    EXPECT_EQ(static_cast<unsigned>(cap.payload_lens[0]), 8u);
+    EXPECT_EQ(cap.payloads[0][0], 0x41u);    /* mode echo at offset 0 */
+    EXPECT_EQ(cap.payloads[0][1], 0x0Cu);
+    EXPECT_EQ(cap.payloads[0][2], 0x1Fu);
+    EXPECT_EQ(cap.payloads[0][3], 0x40u);
+    EXPECT_EQ(static_cast<unsigned>(cap.payload_lens[0]), 4u);
 
     EXPECT_EQ(qttune_session_close(session), QT_OK);
     qttune_session_destroy(session);
 }
 
-/* FILTER REGISTERED ON START: verify StartMsgFilter called with
- * FLOW_CONTROL_FILTER, mask=FF...FF 00...00 (8 bytes), pattern=[rx_id BE]. */
 TEST_F(J2534AdoptionTest, FilterRegisteredOnSessionStart)
 {
     char uri[700];
@@ -482,15 +463,13 @@ TEST_F(J2534AdoptionTest, FilterRegisteredOnSessionStart)
 
     EXPECT_NE(fid, 0u);
     EXPECT_EQ(ftype, QTTUNE_PT_FLOW_CONTROL_FILTER);
-    EXPECT_EQ(len, 8u);   /* 8-byte filter message (FC PCI) */
-    /* First 4 mask bytes = FF (ID match), rest = 0 */
+    EXPECT_EQ(len, 4u);                       /* N1: bare-ID filter msgs */
     EXPECT_EQ(mask[0], 0xFFu); EXPECT_EQ(mask[1], 0xFFu);
     EXPECT_EQ(mask[2], 0xFFu); EXPECT_EQ(mask[3], 0xFFu);
-    EXPECT_EQ(mask[4], 0x00u); EXPECT_EQ(mask[5], 0x00u);
-    EXPECT_EQ(mask[6], 0x00u); EXPECT_EQ(mask[7], 0x00u);
-    /* Pattern = rx_id BE */
     EXPECT_EQ(pattern[0], 0x00u); EXPECT_EQ(pattern[1], 0x00u);
     EXPECT_EQ(pattern[2], 0x07u); EXPECT_EQ(pattern[3], 0xE8u);
+    /* FC is the bare tester ID, same 4-byte shape — not exposed by
+     * GetLastFilterStart; equal-length passing is the seam under test. */
 
     EXPECT_EQ(qttune_session_close(session), QT_OK);
     qttune_session_destroy(session);
@@ -652,9 +631,10 @@ TEST_F(J2534AdoptionTest, TxidOverrideChangesRequestTarget)
     unsigned char wbuf[64] = {};
     unsigned long wlen = 0, wflags = 0;
     get_recorded_write(0, wbuf, &wlen, &wflags);
-    EXPECT_EQ(wlen, 12u);
+    EXPECT_EQ(wlen, 6u);
     EXPECT_EQ(wbuf[0], 0x00u); EXPECT_EQ(wbuf[1], 0x00u);
     EXPECT_EQ(wbuf[2], 0x07u); EXPECT_EQ(wbuf[3], 0xDFu);
+    EXPECT_EQ(wbuf[4], 0x01u);
 
     EXPECT_EQ(qttune_session_close(session), QT_OK);
     qttune_session_destroy(session);
@@ -741,30 +721,20 @@ TEST_F(J2534AdoptionTest, Obd2SchedulerRotatesPidsInSetOrder)
     unsigned char wbuf[64] = {};
     unsigned long wlen = 0, wflags = 0;
 
-    /* Write 0..2 = the first three obd2 PIDs in set order:
-     * 0x04 (load), 0x05 (coolant), 0x0C (RPM). Wire shape is the
-     * 12-byte legacy request frame — the scheduler shares the poll
-     * path's builder: [txid BE][02][01][PID][pad to 8]. */
     get_recorded_write(0, wbuf, &wlen, &wflags);
-    ASSERT_EQ(wlen, 12u);
-    EXPECT_EQ(wbuf[4], 0x02u);   /* SF PCI */
-    EXPECT_EQ(wbuf[5], 0x01u);   /* Mode 01 */
-    EXPECT_EQ(wbuf[6], 0x04u);   /* PID: calculated load */
-
+    ASSERT_EQ(wlen, 6u);
+    EXPECT_EQ(wbuf[4], 0x01u);
+    EXPECT_EQ(wbuf[5], 0x04u);               /* PID: calculated load */
     get_recorded_write(1, wbuf, &wlen, &wflags);
-    ASSERT_EQ(wlen, 12u);
-    EXPECT_EQ(wbuf[6], 0x05u);   /* PID: coolant temp */
-
+    ASSERT_EQ(wlen, 6u);
+    EXPECT_EQ(wbuf[5], 0x05u);               /* coolant */
     get_recorded_write(2, wbuf, &wlen, &wflags);
-    ASSERT_EQ(wlen, 12u);
-    EXPECT_EQ(wbuf[6], 0x0Cu);   /* PID: engine RPM */
-
-    /* Wrap-around: 8 PIDs in the v1 set, so write index 8 must be
-     * pid[0] again — proves ROUND-ROBIN, not one-shot enumeration. */
-    wait_for_writes(get_write_count, 9, 250);   /* ~900 ms min, 2.5 s budget */
+    ASSERT_EQ(wlen, 6u);
+    EXPECT_EQ(wbuf[5], 0x0Cu);              /* RPM */
+    wait_for_writes(get_write_count, 9, 250);
     get_recorded_write(8, wbuf, &wlen, &wflags);
-    ASSERT_EQ(wlen, 12u);
-    EXPECT_EQ(wbuf[6], 0x04u);
+    ASSERT_EQ(wlen, 6u);
+    EXPECT_EQ(wbuf[5], 0x04u);              /* wrapped — round-robin */
 
     /* RX: each cycle writes one request then drains its response in
      * the same cycle, so the first three received frames answer the
@@ -773,18 +743,13 @@ TEST_F(J2534AdoptionTest, Obd2SchedulerRotatesPidsInSetOrder)
     ASSERT_GE(cap.count.load(), 3);
     for (int i = 0; i < 3; ++i) {
         EXPECT_EQ(cap.arbitration_ids[i], 0x7E8u);
-        EXPECT_EQ(cap.payloads[i][1], 0x41u);   /* Mode 01 + 0x40 ack */
+        EXPECT_EQ(cap.payloads[i][0], 0x41u);
     }
-    EXPECT_EQ(cap.payloads[0][2], 0x04u);
-    EXPECT_EQ(cap.payloads[1][2], 0x05u);
-    EXPECT_EQ(cap.payloads[2][2], 0x0Cu);
-    /* Canned RPM raw 0x1F40 -> 2000 RPM at 0.25 scale — the one
-     * canned value pinned, because the loop test already pins it and
-     * RPM is the one 2-byte PID in the first three. Others: pid echo
-     * + mode byte suffice to prove routing. */
-    EXPECT_EQ(cap.payloads[2][3], 0x1Fu);
-    EXPECT_EQ(cap.payloads[2][4], 0x40u);
-
+    EXPECT_EQ(cap.payloads[0][1], 0x04u);
+    EXPECT_EQ(cap.payloads[1][1], 0x05u);
+    EXPECT_EQ(cap.payloads[2][1], 0x0Cu);
+    EXPECT_EQ(cap.payloads[2][2], 0x1Fu);
+    EXPECT_EQ(cap.payloads[2][3], 0x40u);
     EXPECT_EQ(qttune_session_close(session), QT_OK);
     qttune_session_destroy(session);
 }
@@ -854,9 +819,6 @@ TEST_F(J2534AdoptionTest, SchedulerDrainsBacklogBeyondPerCycleBudget)
               QT_OK);
     ASSERT_EQ(qttune_session_start(session), QT_OK);
 
-    /* Backlog of 12 > drain budget of 10: forces at least TWO drain
-     * cycles to clear. Marker bytes 0xB0+i distinguish injected
-     * frames from Mode-01 responses (which start with PCI 0x04). */
     for (int i = 0; i < 12; ++i) {
         unsigned char frame[12] = {};
         frame[2] = 0x07; frame[3] = 0xE8;      /* rx id BE 0x7E8 */

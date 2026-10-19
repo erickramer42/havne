@@ -73,7 +73,11 @@ typedef enum {
     QT_ERR_OUT_OF_MEMORY = 4,
     QT_ERR_SESSION_CLOSED = 5,
     QT_ERR_ALREADY_REGISTERED = 6,  /* Kept for backward compat if needed */
-    QT_ERR_LOAD_FAILED = 7          /* DLL load/export resolution failed */
+    QT_ERR_LOAD_FAILED = 7,
+    QT_ERR_VEHICLE_TIMEOUT = 8,
+    QT_ERR_TRANSPORT_HARD_FAILURE = 9,
+
+    /* Append-only rule: new codes go HERE, never renumber */
 } qttune_status_t;
 
 /* Lifecycle */
@@ -147,6 +151,17 @@ qttune_status_t qttune_unregister_frame_callback(
     qttune_session_t* session,
     qttune_frame_callback_t callback,
     void* user_data
+);
+
+/* Session diagnostic surface — ADR-0013 §5 prerequisite. The worker
+ * can update these asynchronously on hard-error conditions without
+ * terminating the session. The bridge can read them (via the session
+ * handle's opaque internals) to surface warnings like "vehicle not
+ * responding" while allowing the transport to keep attempting recovery. */
+qttune_status_t qttune_session_get_error_state(
+    qttune_session_t* session,
+    int32_t* out_last_error,
+    uint32_t* out_error_count
 );
 
 #ifdef __cplusplus

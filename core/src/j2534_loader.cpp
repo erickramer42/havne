@@ -496,6 +496,22 @@ qttune_status_t qttune_j2534_disconnect_channel(qttune_j2534_handle_t* handle,
     return (rc == kPtStatusNoError) ? QT_OK : QT_OK;
 }
 
+/* ---- STEP 1: Read frame with timeout vs hard-error distinction ----
+ *
+ * BEFORE: any nonzero vendor status returned QT_OK + got_frame=false,
+ * treating timeout (ERR_TIMEOUT = 0x0C) identically to hard failures.
+ *
+ * AFTER:
+ * - vendor status == ERR_TIMEOUT -> QT_ERR_VEHICLE_TIMEOUT + got_frame=false
+ *   (keep trying, surface warning via session error state)
+ * - vendor status != 0 and != ERR_TIMEOUT -> QT_ERR_TRANSPORT_HARD_FAILURE
+ *   + got_frame=false (report, but don't terminate session)
+ * - vendor status == 0 && num > 0 -> QT_OK + got_frame=true (normal frame)
+ * - vendor status == 0 && num == 0 -> QT_OK + got_frame=false (idle, no frame)
+ *
+ * The bridge can read the session's error state (qt
+ tune_session_get_error_state) to show "vehicle not responding" while
+ * the worker keeps pumping. */
 qttune_status_t qttune_j2534_read_frame(qttune_j2534_handle_t* handle,
                                         unsigned long channel,
                                         qttune_frame_t* out_frame,
@@ -508,6 +524,10 @@ qttune_status_t qttune_j2534_read_frame(qttune_j2534_handle_t* handle,
     *got_frame = false;
 
     if (handle->is_surrogate) {
+        /* Surrogate path: pipe/IPC failures are hard errors; empty
+         * ring after timeout is still "no frame" (QT_OK). The ring
+         * producer_drops counter (finding #17) lives in the shared
+         * memory — app-side reads it via the session's error state. */
         return qttune_j2534_sur_read_frame(handle->sur, channel,
                                            out_frame, timeout_ms,
                                            got_frame);
@@ -517,11 +537,24 @@ qttune_status_t qttune_j2534_read_frame(qttune_j2534_handle_t* handle,
     unsigned long num = 1;
     long rc = handle->read_msgs(channel, &msg, &num, timeout_ms);
 
-    /* NOTE: any nonzero vendor status (including idle-timeout on a
-     * real device) is uniformly "no frame" in v0.3.0. Distinguishing
-     * ERR_TIMEOUT from hard device errors is BENCH-tier work; the
-     * fake never returns nonzero here. */
-    if (rc != kPtStatusNoError || num == 0) {
+    /* STEP 1 DISTINCTION: vendor status 0x0C (ERR_TIMEOUT) is "bus
+     * silent, keep trying". Anything else nonzero is a hard failure
+     * (device disconnect, corrupted channel, etc.). This surfaces
+     * the distinction the ADR-0013 probe phase requires for its
+     * degrade-vs-fail decision. */
+    if (rc != kPtStatusNoError) {
+        *got_frame = false;
+        if (rc == QTTUNE_PT_STATUS_TIMEOUT) {
+            return QT_ERR_VEHICLE_TIMEOUT;
+        }
+        return QT_ERR_TRANSPORT_HARD_FAILURE;
+    }
+
+    if (num == 0) {
+        /* Idle: vendor says "no error, but nothing available." This
+         * is indistinguishable from timeout in many drivers, so the
+         * caller sees "no frame, no error" — it's a "try again later"
+         * situation. */
         return QT_OK;
     }
 
