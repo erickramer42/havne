@@ -33,6 +33,7 @@ it.
 | `test_j2534_stream` | `J2534StreamTest`, `J2534QueryParamTest`, `J2534AdoptionTest` | Windows and the fake DLL |
 | `test_j2534_surrogate` | `J2534SurrogateTest` | Windows, the fake DLL and the surrogate exe |
 | `test_j2534_routing` | `J2534RoutingTest` | Windows. The cross-arch case skips unless `QTTUNE_FAKE_DLL` is set. |
+| `test_obd2` | `Obd2SetTest`, `Obd2DecodeTest`, `Obd2MuxTest`, `PidSchedulerTest` | Nothing (Qt-free) |
 
 `ctest -N` lists every case. The current total is in
 [STATUS.md](../STATUS.md).
@@ -72,17 +73,17 @@ it.
 | The 8-byte FLOW_CONTROL filter shape (prep #1, `fc_len == mask_len` workaround) is accepted by a real vendor — behaviorally; the child traces no filter ops (Known Issue #23). Quiet-bus read loop at <1% CPU, zero spurious frames | BENCH session 2026-10-16, phase 2 |
 | Surrogate vendor-call serialization: one lock around every vendor entry (read pump + control pump under real concurrency), single vendor disconnect after a clean client close, crash-on-stuck-vendor replaced by job-reaped linger | The full J2534 suites on both backends (2026-10-17, both trees green) — single-disconnect confirmed by the child trace log: `OP_DISCONNECT: vendor status 0` present, `teardown: disconnect` absent after clean closes |
 | Profile registry: string-keyed lookup, null-set-is-success ("raw"), unknown names fail, last-registration wins | `CoreTest.Profile*` |
-| Profile selection: `mock://`→mock set, `j2534://`→raw, `?profile=` override honored, unknown names rejected at session_create before any DLL load | `CoreTest.MockSessionSelectsMockSet` et al., `J2534StreamTest.DefaultProfileIsRaw`, `J2534StreamTest.ProfileOverrideMockSelectsMockSet`, `BridgeTest.RawProfileLeavesSignalModelEmpty` |
+| Profile selection: `mock://`→mock set, `j2534://`→obd2, `?profile=` override honored, unknown names rejected at session_create before any DLL load | `CoreTest.MockSessionSelectsMockSet` et al., `J2534StreamTest.ProfileOverrideMockSelectsMockSet`, `BridgeTest.RawProfileLeavesSignalModelEmpty` |
+| `obd2` signal set: mux grammar, decoder round-trips against canned wire bytes, validator including channel-decl rejection (duplicates, zero/illegal IDs, over-capacity) | `Obd2SetTest`, `Obd2DecodeTest` |
+| Mode-01 scheduler: rotation order in set order, wrap; drain delivers a backlog beyond one cycle's budget | `J2534AdoptionTest` |
+| Channel derivation: a bare `j2534://` URI under `obd2` registers the 7E8 filter with exact mask/pattern shape, sends to 7E0, and starts; a lone `?txid=` keeps the derived 7E8 filter but rewrites the request target | `J2534AdoptionTest.BareJ2534UriDerivesObd2ChannelAndStarts`, `.TxidOverrideRewritesDerivedTransmitTarget` |
 
 ## Gaps (not verified)
 
-- **BENCH coverage stops at the quiet bus.** The formal session
-  (2026-10-16) verified load, open, filter-shape acceptance and
-  quiet-bus read behavior. Still unverified against real hardware:
-  talking-bus behavior (request framing, checksum expectations,
-  timestamp units), VBATT, ReadMsgs timeout-vs-error discrimination
-  (#11), and any vendor status on filter registration itself (#23 —
-  acceptance was inferred, not logged).
+- **Profile-derived channels against a real vendor.** The
+  derived-filter shape and per-PID request routing are
+  fake-verified; whether the VX accepts them is the natural first
+  item for the next bench sheet.
 - **No live vehicle has been connected.**
 - **Vendor conformance to J2534-1 v04.04 is unknown.** The shared
   types header is verified against public references, but only a real

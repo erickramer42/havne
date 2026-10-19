@@ -57,6 +57,40 @@ TEST(Obd2SetTest, PidBandDistinctFromMockIds) {
     }
 }
 
+TEST(Obd2SetTest, DeclaresSingleCanChannel) {
+    const QttuneSignalSet* set = qttune_obd2_signal_set();
+    ASSERT_NE(set, nullptr);
+    EXPECT_EQ(set->channel_count, 1u);
+    ASSERT_NE(set->channels, nullptr);
+    EXPECT_EQ(set->channels[0].rx_id, OBD2_ECU_ARB_ID);
+    EXPECT_EQ(set->channels[0].tx_id, OBD2_TESTER_ARB_ID);
+}
+
+TEST(Obd2SetTest, RejectsDuplicateAndIllegalChannelDecls) {
+    QttuneSignalDef defs[1] = {};
+    defs[0].id = 1;
+    defs[0].type = QTTUNE_SIGNAL_TYPE_UINT8;
+    defs[0].start_byte = 2;
+    defs[0].num_bytes = 1;
+    defs[0].bit_length = 8;
+    defs[0].mux_offset = 0;
+    defs[0].mux_length = 2;
+    defs[0].mux_key = 0x4104u;
+    defs[0].message_id = 0x7E8u;
+
+    const QttuneChannelDecl dup[] = { {0x7E8u, 0x7E0u}, {0x7E8u, 0x7E2u} };
+    const QttuneSignalSet s_dup = { 2u, 1u, defs, 2u, dup };
+    EXPECT_NE(qttune_validate_signal_set(&s_dup), 0);
+
+    const QttuneChannelDecl zero_rx[] = { {0u, 0x7E0u} };
+    const QttuneSignalSet s_zero = { 2u, 1u, defs, 1u, zero_rx };
+    EXPECT_NE(qttune_validate_signal_set(&s_zero), 0);
+
+    const QttuneChannelDecl legal[] = { {0x7E8u, 0x7E0u} };
+    const QttuneSignalSet s_ok = { 2u, 1u, defs, 1u, legal };
+    EXPECT_EQ(qttune_validate_signal_set(&s_ok), 0);
+}
+
 /* ---------- decode round-trips (canned wire bytes) ---------- */
 
 TEST(Obd2DecodeTest, RpmBigEndianScaled) {

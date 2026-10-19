@@ -89,10 +89,22 @@ const QttuneSignalDef kObd2Defs[] = {
              "V",    2, 0x42, true),
 };
 
+/* N3 (ADR-0013 §4): the obd2 profile DECLARES its channel — the
+ * standard physical pairing 0x7E0 (tester) <-> 0x7E8 (ECU). A bare
+ * j2534:// URI under the obd2 default now registers its filter and
+ * targets its requests from here; ?filter=/?txid= demote to
+ * overrides. Future multi-ECU profiles append entries — this is
+ * the plugin-facing list shape, per the ADR. */
+const QttuneChannelDecl kObd2Channels[] = {
+    { OBD2_ECU_ARB_ID, OBD2_TESTER_ARB_ID },
+};
+
 const QttuneSignalSet kObd2Set = {
-    1u,                                              /* version */
+    2u,                                              /* version (N3: +channels) */
     static_cast<uint32_t>(sizeof(kObd2Defs) / sizeof(kObd2Defs[0])),
-    kObd2Defs
+    kObd2Defs,
+    1u,
+    kObd2Channels
 };
 
 } // namespace

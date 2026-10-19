@@ -754,34 +754,76 @@ TEST_F(J2534AdoptionTest, Obd2SchedulerRotatesPidsInSetOrder)
     qttune_session_destroy(session);
 }
 
-/* COUPLING RULE (scheduler arm): obd2 profile with NO receive filter.
- * Parse and create succeed — the failure is DELIBERATELY at start,
- * where the worker would otherwise spin requests against a silent
- * bus forever. */
-TEST(J2534StreamTest, Obd2SchedulerWithoutFilterRejectedAtStart)
+/* N3 FLAGSHIP: a bare j2534:// URI now derives its channel from the
+ * obd2 profile — filter pattern 7E8, requests to 7E0, scheduler
+ * running. The slice-2 footgun (bare URI -> NO_TRANSPORT at start,
+ * after the device was already opened) is gone: ?filter= demotes to
+ * an override. */
+TEST_F(J2534AdoptionTest, BareJ2534UriDerivesObd2ChannelAndStarts)
 {
-    const std::string uri = std::string("j2534://") + FAKE_J2534_DLL_PATH
-                          + "?profile=obd2";
+    char uri[512];
+    snprintf(uri, sizeof(uri), "j2534://%s", FAKE_J2534_DLL_PATH);
+
     qttune_session_t* session = nullptr;
-    ASSERT_EQ(qttune_session_create(uri.c_str(), &session), QT_OK);
-    EXPECT_EQ(qttune_session_start(session), QT_ERR_NO_TRANSPORT);
-    /* Start refused -> worker never spawned; skip close, destroy
-     * the created-but-unstarted session directly. */
+    ASSERT_EQ(qttune_session_create(uri, &session), QT_OK);
+    EXPECT_EQ(qttune_session_signal_set(session), qttune_obd2_signal_set());
+    ASSERT_EQ(qttune_session_start(session), QT_OK);
+
+    /* Derived filter: exact-match mask, pattern 00 00 07 E8 */
+    unsigned long fid = 0, ftype = 0, len = 0;
+    unsigned char mask[12] = {}, pattern[12] = {};
+    get_last_filter(&fid, &ftype, mask, pattern, &len);
+    EXPECT_NE(fid, 0u);
+    EXPECT_EQ(ftype, QTTUNE_PT_FLOW_CONTROL_FILTER);
+    EXPECT_EQ(len, 4u);
+    EXPECT_EQ(mask[0], 0xFFu); EXPECT_EQ(mask[1], 0xFFu);
+    EXPECT_EQ(mask[2], 0xFFu); EXPECT_EQ(mask[3], 0xFFu);
+    EXPECT_EQ(pattern[0], 0x00u); EXPECT_EQ(pattern[1], 0x00u);
+    EXPECT_EQ(pattern[2], 0x07u); EXPECT_EQ(pattern[3], 0xE8u);
+
+    /* Derived tx: requests go to 7E0, rotation starts at PID 0x04 */
+    wait_for_writes(get_write_count, 3, 200);
+    unsigned char wbuf[64] = {};
+    unsigned long wlen = 0, wflags = 0;
+    get_recorded_write(0, wbuf, &wlen, &wflags);
+    ASSERT_EQ(wlen, 6u);
+    EXPECT_EQ(wbuf[2], 0x07u); EXPECT_EQ(wbuf[3], 0xE0u);
+    EXPECT_EQ(wbuf[4], 0x01u);
+    EXPECT_EQ(wbuf[5], 0x04u);
+
+    EXPECT_EQ(qttune_session_close(session), QT_OK);
     qttune_session_destroy(session);
 }
 
-/* COUPLING RULE via the DEFAULT flip: plain j2534:// (no query at
- * all) selects obd2 — and therefore inherits the filter requirement.
- * This is the user-visible consequence of the slice-2 default: a
- * bare URI no longer streams verbatim; it needs ?filter=0x7E8 or
- * ?profile=raw. */
-TEST(J2534StreamTest, BareJ2534UriRequiresFilterUnderObd2Default)
+/* N3 OVERRIDE SEMANTICS: a lone ?txid= under the obd2 default keeps
+ * the derived 7E8 filter but rewrites the request target — the
+ * broadcast-request pattern (?txid=0x7DF) without restating the
+ * channel. Mixed override + derived channel. */
+TEST_F(J2534AdoptionTest, TxidOverrideRewritesDerivedTransmitTarget)
 {
-    const std::string uri = std::string("j2534://") + FAKE_J2534_DLL_PATH;
+    char uri[512];
+    snprintf(uri, sizeof(uri),
+             "j2534://%s?txid=0x7DF", FAKE_J2534_DLL_PATH);
+
     qttune_session_t* session = nullptr;
-    ASSERT_EQ(qttune_session_create(uri.c_str(), &session), QT_OK);
-    EXPECT_EQ(qttune_session_signal_set(session), qttune_obd2_signal_set());
-    EXPECT_EQ(qttune_session_start(session), QT_ERR_NO_TRANSPORT);
+    ASSERT_EQ(qttune_session_create(uri, &session), QT_OK);
+    ASSERT_EQ(qttune_session_start(session), QT_OK);
+
+    unsigned long fid = 0, ftype = 0, len = 0;
+    unsigned char mask[12] = {}, pattern[12] = {};
+    get_last_filter(&fid, &ftype, mask, pattern, &len);
+    EXPECT_NE(fid, 0u);
+    EXPECT_EQ(len, 4u);
+    EXPECT_EQ(pattern[3], 0xE8u);          /* rx stays derived 7E8 */
+
+    wait_for_writes(get_write_count, 3, 200);
+    unsigned char wbuf[64] = {};
+    unsigned long wlen = 0, wflags = 0;
+    get_recorded_write(0, wbuf, &wlen, &wflags);
+    ASSERT_EQ(wlen, 6u);
+    EXPECT_EQ(wbuf[2], 0x07u); EXPECT_EQ(wbuf[3], 0xDFu);   /* tx 7DF */
+
+    EXPECT_EQ(qttune_session_close(session), QT_OK);
     qttune_session_destroy(session);
 }
 

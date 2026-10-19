@@ -33,7 +33,10 @@ Dates are commit dates.
 | 2026-10-16 | Issue #22 + IoCtl export-spelling fix; first real-vendor session (VX connect cycle) | `eacf1d0` |
 | 2026-10-16 | First formal BENCH session: OBDX Pro VX, quiet bus — filter shape accepted, soak clean | `e60325b` |
 | 2026-10-17 | Issue #24: surrogate vendor-call serialization, single disconnect; IoCtl dllexport strip; GetDisconnectCount hook | `<hash>` |
-| 2026-10-17 | ADR-0013 slice 1: profile registry, raw profile, bridge decoupling (#21 closed) | `<hash>` |
+| 2026-10-17 | ADR-0013 slice 1: profile registry, raw profile, bridge decoupling (#21 closed) | `57d7fcf` |
+| 2026-10-18 | ADR-0013 slice 2: obd2 signal set, multi-PID scheduler, drain budget (formerly #25) | `8305420` |
+| 2026-10-19 | ADR-0013 slice 3: profile-declared channels; bare-URI filter derivation | `<hash>` |
+| 2026-10-19 | Win32 surrogate auto-deploy from sibling build-win32 | `<hash>` |
 
 ## Lessons learned
 
@@ -356,3 +359,29 @@ correct when NULL meant "caller bug"; the moment NULL became the raw
 profile's legitimate value it became a stale-data bug — a raw session
 following a mock session rendered dead mock rows as if live. When a
 sentinel becomes valid state, every guard on it is a bug until audited.
+
+**2026-10-19 — channel-decl + surrogate auto-deploy round (slice 3):**
+four lessons, two paid for by corrupted pastes. (1) **A cache
+variable outlives the script that set it:** the poisoned
+`QTTUNE_SURROGATE_SOURCE` value (`;CACHE;PATH;` fragments) survived
+the corrected CMakeLists because cache entries persist across
+reconfigures — the fix and the symptom coexisted, and every rebuild
+re-failed identically. Reading the error message's variable *value*
+(not just its name) named the failure instantly; `cmake -U VAR` is
+the surgical purge and should be muscle memory after any
+cache-variable debugging. (2) **Multi-line `set(...)` cache
+declarations are paste-fragile:** a line-wrapped docstring lost its
+quotes and the `CACHE`/`PATH` keywords became list *values*. Cache
+declarations now use short single-line strings — the fragile syntax
+was removed, not the pastes promised better. (3) **Paste round-trip
+is a lossy channel, in both directions:** placeholder text and a
+scrambled quote each shipped to disk on the same file across
+sessions; the verify-before-writing rule applies to paste-*out* as
+well as paste-in — after the second corruption, the fix was
+requesting the file back and diffing before proposing a third edit.
+(4) **A fail-late coupling check spends hardware first:** slice 2's
+scheduler-needs-filter rule fired at `j2534_start`, after
+`PassThruOpen` had already touched the device; deriving channels at
+attach moved the check ahead of the open. The slice-2 ORDERING NOTE
+predicted exactly this — the obligation was repaid by the slice
+that retired it.

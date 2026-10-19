@@ -83,5 +83,23 @@ int qttune_validate_signal_set(const QttuneSignalSet* set)
         int rc = qttune_validate_signal(&set->defs[i]);
         if (rc != 0) return rc;
     }
+    /* N3 (ADR-0013 §4): channel declarations — bounded, legal CAN
+     * ids, unique rx. Negative codes so they can't collide with
+     * qttune_validate_signal's per-def returns. */
+    if (set->channel_count > 0) {
+        if (!set->channels) return -10;
+        if (set->channel_count > QTTUNE_MAX_CHANNELS) return -11;
+        for (uint32_t i = 0; i < set->channel_count; ++i) {
+            const uint32_t rx = set->channels[i].rx_id;
+            const uint32_t tx = set->channels[i].tx_id;
+            if (rx == 0 || rx > 0x1FFFFFFFu ||
+                tx == 0 || tx > 0x1FFFFFFFu) {
+                return -12;
+            }
+            for (uint32_t j = 0; j < i; ++j) {
+                if (set->channels[j].rx_id == rx) return -13;
+            }
+        }
+    }
     return 0;
 }

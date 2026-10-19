@@ -207,7 +207,7 @@ either `?profile=raw` (log-only mode) or `?filter=0x7E8` (accept the
 scheduler with an explicit channel). Existing harness tests were
 updated with `?profile=raw` opt-outs to pin their legacy semantics;
 the flip itself is pinned by the `DefaultProfileIsObd2` and
-`BareJ2534UriRequiresFilterUnderObd2Default` tests.
+`BareJ2534UriRequiresFilterUnderObd2Default`(replaced in slice 3 — see below) tests.
 
 ### PID table (obd2 v1, set order)
 
@@ -270,3 +270,70 @@ and integration, BENCH proves real-device throughput. The drain
 budget mandates HARNESS minimum — no unit test can verify that a
 20 ms timeout plus a 10-read budget actually clears a busy bus within
 the cycle.
+
+## Appendix — slice 3 implementation notes (channel declarations) (2026-10-19)
+
+**Status:** implemented; HARNESS-verified
+Implements §4 for the `obd2` v1 set. The decision text above is
+unchanged — this appendix is the implementation record.
+
+### Shipped ABI shape
+
+`QttuneChannelDecl` (signals.h) is `{ uint32_t rx_id; uint32_t tx_id; }`
+— the §4 sketch used `unsigned long`; the shipped POD uses
+fixed-width types per the C-ABI rule (append-only, POD-only growth).
+`QttuneSignalSet` gains trailing `channel_count`/`channels` and the
+obd2 set bumps its version to 2. Capacity is `QTTUNE_MAX_CHANNELS`
+(4). Pre-existing aggregate initializers with three members still
+compile (trailing members value-initialize); the obd2 tests state
+all members explicitly rather than lean on that.
+
+Validator additions (negative codes, disjoint from per-def returns):
+missing array with nonzero count (-10), over-capacity (-11), zero or
+out-of-CAN-range ids (-12), duplicate rx (-13).
+
+### Resolution semantics
+
+The channel table is derived at **attach**, before the device opens.
+Priority: an explicit `?filter=` wins outright (single-channel
+shorthand — pre-N3 semantics preserved for hand-built URIs);
+otherwise the profile's declared channels fill the table, with a
+lone `?txid=` rewriting every derived tx. A lone `?txid=` with no
+profile channels yields NO channel: without an rx there is nothing
+to register a filter for, matching the pre-N3 semantics where it
+stored a tx nothing used. Set entries with rx==0 are skipped
+defensively; the validator is the enforcement point.
+
+### Coupling-rule relocation
+
+Slice 2 enforced scheduled-PIDs-need-a-filter at `j2534_start`, after
+`PassThruOpen` — the ORDERING NOTE in its "Generalized coupling
+rule" section. Slice 3 resolves channels at attach and demotes that
+check to a backstop firing before any hardware is touched, reachable
+only by a future set author declaring scheduler-driving defs
+without channels. The retired note's prediction held: the obd2 set
+supplies 7E0/7E8 itself.
+
+### Per-channel filters and routing
+
+`j2534_start` registers one flow-control filter per channel; a
+mid-loop failure unwinds already-registered ones so no partial filter
+state survives a failed start. Detach stops every channel's filter
+best-effort before disconnect (ADR-0012's vendor-compat priority).
+The worker routes scheduler requests by PID → def message_id →
+channel index (`rx_for_pid`), keeping `pid_scheduler.h` profile-
+agnostic; `pump_one` matches the 4-byte header against every
+channel's rx, stripping and stamping on hit. Non-matching frames
+are dropped but still consume drain budget (bounds loop time).
+
+The worker's error/backoff state moved from struct members to
+worker-local variables as part of the rework.
+
+### Consequence for bare URIs
+
+A bare `j2534://` URI under the obd2 default now derives 7E8/7E0,
+registers its filter and runs the scheduler. The two slice-2 tests
+that pinned the rejection at start were replaced:
+`BareJ2534UriDerivesObd2ChannelAndStarts` (filter shape, tx target,
+rotation) and `TxidOverrideRewritesDerivedTransmitTarget` (derived
+rx kept, tx rewritten to the broadcast pattern).

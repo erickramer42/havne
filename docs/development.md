@@ -25,22 +25,40 @@ cmake --build build --config Release
 build/app/Release/qttune.exe
 ```
 
-**Optional: deploy the Win32 surrogate next to the app.** By default
-the app resolves the surrogate through `QTTUNE_SURROGATE_EXE` (see
-the cross-arch run below). Adding this at configure time copies the
-Win32-tree surrogate next to `qttune.exe` on every app build, so the
-app launches without exporting anything:
+**Deploy the Win32 surrogate next to the app (automatic).** With the
+two-tree layout there is nothing to configure: when
+`QTTUNE_SURROGATE_SOURCE` is unset (the default), CMake searches the
+sibling `build-win32/` tree and copies the surrogate next to
+`qttune.exe` on every app build.
+
+Resolution order:
+
+1. `QTTUNE_SURROGATE_SOURCE` cache variable, if set. A configured
+   path that does not exist is a configure-time `FATAL_ERROR`, not a
+   silent no-op.
+2. Otherwise, `<repo>/build-win32/surrogate/*/qttune-j2534-surrogate.exe`,
+   `Release/` preferred over any other config.
+3. Neither found (no `build-win32` tree, non-standard layout): a
+   STATUS message, nothing copied. The app then resolves the
+   surrogate through `QTTUNE_SURROGATE_EXE` at runtime — see the
+   cross-arch run below.
+
+Build order matters: build the Win32 tree **first**, then configure
+or reconfigure the x64 tree so auto-detection finds the exe. The
+copy is `copy_if_different`, so rebuilding the Win32 tree and then
+the app target propagates a fresh surrogate.
+
+**Cache caveat (hit for real, 2026-10-19).** The cache variable
+persists across reconfigures. A tree previously configured with an
+explicit `-DQTTUNE_SURROGATE_SOURCE=...` keeps that value and
+disables auto-detection until it is cleared:
 
 ```sh
-cmake -B build -DCMAKE_PREFIX_PATH=<qt-install>/msvc2022_64 \
-      -DQTTUNE_SURROGATE_SOURCE=<repo>/build-win32/surrogate/Release/qttune-j2534-surrogate.exe
+cmake -B build -U QTTUNE_SURROGATE_SOURCE
 ```
 
-Opt-in with an empty default — unset, nothing is copied and behavior
-is unchanged (contributor machines and CI configure without it). A
-configured-but-nonexistent path is a configure-time error, not a
-silent no-op. The copy is `copy_if_different`, so rebuilding the
-Win32 tree and then the app target propagates a fresh surrogate.
+Blowing away `CMakeCache.txt` is the blunt equivalent and equally
+safe — regeneration is cheap.
 
 **Full app, Linux and macOS.** Single-config generators drop the
 `Release/` path segment:

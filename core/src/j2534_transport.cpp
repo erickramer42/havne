@@ -16,6 +16,7 @@
 #include "qttune/j2534.h"
 #include "pid_scheduler.h"
 #include "qttune/profile.h"
+#include "qttune/signal_sets.h"
 
 #include <atomic>
 #include <chrono>
@@ -79,7 +80,9 @@ constexpr uint32_t J2534_BACKOFF_CAP_MS  = 5000;
  * J2534_v0404.h. */
 constexpr uint32_t J2534_ADDR_LEN       = 4;
 constexpr uint32_t J2534_FILTER_MSG_LEN = 4;
-constexpr uint32_t J2534_TX_ID_DEFAULT  = 0x7E0;  /* OBD-II physical */
+constexpr uint32_t J2534_TX_ID_DEFAULT = OBD2_TESTER_ARB_ID;  /* shared
+                                       * macro — cannot drift from the
+                                       * obd2 set's own declaration */
 constexpr uint32_t J2534_CAN_ID_MAX     = 0x1FFFFFFFu;   /* 29-bit */
 constexpr uint32_t J2534_PID_MAX        = 0xFFu;
 
@@ -125,6 +128,18 @@ void build_mode01_request(uint8_t out[6], uint32_t tx_id, uint32_t pid)
     out[5] = static_cast<uint8_t>(pid);
 }
 
+/* One resolved receive/transmit channel (N3). rx_id doubles as the
+ * strip/stamp identity in pump_one: a received frame's 4-byte
+ * address header matching chans[i].rx_id is stripped and stamped
+ * with that rx_id before dispatch. */
+struct j2534_channel {
+    uint32_t rx_id = 0;
+    uint32_t tx_id = 0;
+    unsigned long filter_id = 0;
+    bool filter_active = false;
+    uint32_t addr_flags = 0;   /* CAN_29BIT_ID when either id > 11 bits */
+};
+
 struct qttune_j2534_transport {
     qttune_session_t* session = nullptr;
     qttune_j2534_handle_t* handle = nullptr;
@@ -137,45 +152,117 @@ struct qttune_j2534_transport {
      * interpreted here (BENCH tier, pending the vendor header diff). */
     unsigned long baud = 0;
     unsigned long flags = 0;
-    /* Adoption parameters (all frozen before the worker starts, so
-     * the worker reads them lock-free and they need no atomics):
-     *   rx_id        0 = no filter registered (legacy verbatim-read
-     *                mode); nonzero = FLOW_CONTROL filter registered
-     *                on this ID and received frames header-stripped
-     *   tx_id        transmit ID; defaults to 0x7E0 when the URI omits
-     *   poll_pid     0 = passive receive (identity stamping only);
-     *                nonzero = Mode-01 request loop for this PID
-     *   addr_flags   CAN_29BIT_ID when either ID exceeds 11 bits;
-     *                ORed with ISO15765_FRAME_PAD at every write and
-     *                filter registration (N1)
-     *   filter_active/filter_id  set at start; stopped BEST-EFFORT at
-     *                detach BEFORE disconnect — vendor-compatibility
-     *                priority (some drivers leak filter state if the
-     *                stop is skipped; the spec says disconnect
-     *                invalidates filters, so a failure here is benign)
-     *   sched        ADR-0013 slice 2: round-robin PID scheduler,
-     *                populated at j2534_start from the session's
-     *                active_signal_set. NONEMPTY scheduler mode
-     *                outranks ?poll= — a set that drives scheduling
-     *                owns the request loop, and ?poll= remains the
-     *                raw-profile debugging override. Frozen before the
-     *                worker exists, hence lock-free on the worker. */
-    uint32_t rx_id = 0;
-    uint32_t tx_id = J2534_TX_ID_DEFAULT;
+    /*   poll_pid     0 = passive receive; nonzero = Mode-01 request
+     *                loop (raw-profile debug override; the scheduler
+     *                outranks it whenever a mux set is active)
+     *   chans        N3: resolved channel table. Derived from the
+     *                PROFILE's declared channels at attach (the set
+     *                is live before attach per core.cpp), with
+     *                ?filter=/?txid= as overrides. ?filter= wins
+     *                outright (single-channel shorthand); ?txid=
+     *                alone rewrites every derived tx. Bounded by
+     *                QTTUNE_MAX_CHANNELS; each entry owns its filter
+     *                id and CAN_29BIT flags. Frozen pre-thread. */
     uint32_t poll_pid = 0;
-    uint32_t addr_flags = 0;
-    bool filter_active = false;
-    unsigned long filter_id = 0;
+    j2534_channel chans[QTTUNE_MAX_CHANNELS] = {};
+    uint32_t chan_count = 0;
+    const QttuneSignalSet* set = nullptr;   /* frozen at attach;
+                                             * worker routes PID->tx */
     qttune_pid_scheduler sched;
     std::atomic<bool> stop_requested{false};
-    std::atomic<int32_t> last_error_state{QT_OK};
-    uint32_t backoff_ms = 0;              /* 0 = no backoff */
-    int32_t cached_health = QT_OK;        /* worker-local snapshot */
     std::thread worker;
-    qttune_transport_t* self = nullptr;   /* NEW: wrapper back-pointer —
-                                           * detach must free impl AND the
-                                           * envelope (internal.h contract) */
+    qttune_transport_t* self = nullptr;
 };
+
+/* Collected URI query parameters — parse_query fills, resolve_uri
+ * passes through, attach stores into the transport impl. One struct
+ * rather than a six-pointer parse signature, and one place for the
+ * coupling rule to live. */
+struct j2534_uri_params {
+    unsigned long baud = 0;
+    unsigned long flags = 0;
+    unsigned long rx_id = 0;     /* 0 = no filter (verbatim read mode) */
+    unsigned long tx_id = 0;     /* 0 = unset; attach substitutes 0x7E0 */
+    unsigned long poll_pid = 0;  /* 0 = passive receive */
+};
+
+/* PID -> def message_id: the mux defs name their ECU via
+ * message_id (= the channel's rx_id). O(set->count) per request —
+ * 8 defs today; this deliberately keeps pid_scheduler.h
+ * per-PID-rx-free so the scheduler stays profile-agnostic. */
+uint32_t rx_for_pid(const QttuneSignalSet* set, uint8_t pid)
+{
+    if (set == nullptr) {
+        return 0;
+    }
+    for (uint32_t i = 0; i < set->count; ++i) {
+        const QttuneSignalDef* d = &set->defs[i];
+        if (d->mux_length > 0 && (d->mux_key & 0xFFu) == pid) {
+            return d->message_id;
+        }
+    }
+    return 0;   /* no muxed def — raw/poll territory */
+}
+
+/* Channel serving a receive id; falls back to channel 0 (single-
+ * channel sets always match on the first iteration anyway). */
+uint32_t channel_index_for_rx(const qttune_j2534_transport* t, uint32_t rx)
+{
+    for (uint32_t i = 0; i < t->chan_count; ++i) {
+        if (t->chans[i].rx_id == rx) {
+            return i;
+        }
+    }
+    return 0;
+}
+
+/* N3: derive the channel table from the set + URI overrides.
+ * Never fails — bounded by construction, malformed set entries are
+ * skipped defensively (the set validator is the enforcement point).
+ * ?txid= alone yields NO channel: without an rx there is nothing to
+ * register a filter for, matching the pre-N3 semantics where a
+ * lone ?txid= on a raw profile stored a tx nothing used. */
+void resolve_channels(qttune_j2534_transport* t,
+                      const QttuneSignalSet* set,
+                      const j2534_uri_params& params)
+{
+    uint32_t n = 0;
+    if (params.rx_id != 0) {
+        uint32_t tx = static_cast<uint32_t>(params.tx_id);
+        if (tx == 0 && set != nullptr && set->channel_count > 0) {
+            tx = set->channels[0].tx_id;
+        }
+        if (tx == 0) {
+            tx = J2534_TX_ID_DEFAULT;
+        }
+        t->chans[0].rx_id = static_cast<uint32_t>(params.rx_id);
+        t->chans[0].tx_id = tx;
+        n = 1;
+    } else if (set != nullptr) {
+        for (uint32_t i = 0; i < set->channel_count &&
+                            n < QTTUNE_MAX_CHANNELS; ++i) {
+            const uint32_t rx = set->channels[i].rx_id;
+            if (rx == 0) {
+                continue;
+            }
+            uint32_t tx = (params.tx_id != 0)
+                            ? static_cast<uint32_t>(params.tx_id)
+                            : set->channels[i].tx_id;
+            if (tx == 0) {
+                tx = J2534_TX_ID_DEFAULT;
+            }
+            t->chans[n].rx_id = rx;
+            t->chans[n].tx_id = tx;
+            ++n;
+        }
+    }
+    for (uint32_t i = 0; i < n; ++i) {
+        t->chans[i].addr_flags =
+            (t->chans[i].rx_id > 0x7FF || t->chans[i].tx_id > 0x7FF)
+                ? QTTUNE_PT_CAN_29BIT_ID : 0;
+    }
+    t->chan_count = n;
+}
 
 /* Read one frame, dispatch if it passes the strip/stamp gate, and
  * return the read status (QT_OK/got, TIMEOUT, HARD_FAILURE). The
@@ -196,25 +283,30 @@ qttune_status_t pump_one(qttune_j2534_transport* t, bool* out_got,
     }
     *out_got = true;
 
-    if (t->rx_id != 0) {
-        if (frame.data_length >= J2534_ADDR_LEN) {
-            const uint32_t hdr =
-                (static_cast<uint32_t>(frame.data[0]) << 24) |
-                (static_cast<uint32_t>(frame.data[1]) << 16) |
-                (static_cast<uint32_t>(frame.data[2]) << 8) |
-                 static_cast<uint32_t>(frame.data[3]);
-            if ((hdr & J2534_CAN_ID_MAX) == t->rx_id) {
-                frame.arbitration_id = t->rx_id;
+    if (t->chan_count == 0) {
+        qttune_session_dispatch_callbacks(t->session, &frame);
+        /* no channels — verbatim, id 0 (raw passive) */
+        return QT_OK;
+    }
+    if (frame.data_length >= J2534_ADDR_LEN) {
+        const uint32_t hdr =
+            (static_cast<uint32_t>(frame.data[0]) << 24) |
+            (static_cast<uint32_t>(frame.data[1]) << 16) |
+            (static_cast<uint32_t>(frame.data[2]) << 8) |
+             static_cast<uint32_t>(frame.data[3]);
+        for (uint32_t i = 0; i < t->chan_count; ++i) {
+            if ((hdr & J2534_CAN_ID_MAX) == t->chans[i].rx_id) {
+                frame.arbitration_id = t->chans[i].rx_id;
                 const uint16_t n = static_cast<uint16_t>(
                     frame.data_length - J2534_ADDR_LEN);
                 memmove(frame.data, frame.data + J2534_ADDR_LEN, n);
                 frame.data_length = n;
                 qttune_session_dispatch_callbacks(t->session, &frame);
+                break;
             }
         }
-    } else {
-        qttune_session_dispatch_callbacks(t->session, &frame);
-        /* no filter — verbatim, id 0 */
+        /* no match — dropped frame; the read still counts against
+         * the drain budget (bounds loop time, not delivery) */
     }
     return QT_OK;
 }
@@ -295,8 +387,7 @@ bool backoff_sleep(qttune_j2534_transport* t, uint32_t ms)
 void j2534_worker(qttune_j2534_transport* t)
 {
     const bool sched_mode = (t->sched.count > 0);
-    const uint32_t write_flags = t->addr_flags |
-                                 QTTUNE_PT_TX_ISO15765_FRAME_PAD;
+
     int32_t health = QT_OK;
     uint32_t backoff_ms = 0;   /* 0 = healthy cadence */
 
@@ -309,12 +400,16 @@ void j2534_worker(qttune_j2534_transport* t)
             if (health != QT_ERR_TRANSPORT_HARD_FAILURE) {
                 uint8_t pid = 0;
                 (void)qttune_sched_next(&t->sched, &pid);
+                const uint32_t ci =
+                    channel_index_for_rx(t, rx_for_pid(t->set, pid));
                 uint8_t req[6];
-                build_mode01_request(req, t->tx_id, pid);
+                build_mode01_request(req, t->chans[ci].tx_id, pid);
                 uint32_t written = 0;
-                (void)qttune_j2534_write_frame(t->handle, t->channel, req,
-                                               sizeof(req), write_flags,
-                                               0, &written);
+                (void)qttune_j2534_write_frame(
+                    t->handle, t->channel, req, sizeof(req),
+                    t->chans[ci].addr_flags |
+                        QTTUNE_PT_TX_ISO15765_FRAME_PAD,
+                    0, &written);
             }
 
             /* DRAIN (#25 receive cap, unchanged shape): health derives
@@ -353,11 +448,13 @@ void j2534_worker(qttune_j2534_transport* t)
              * RESPONSE — not the previous cycle's). */
             if (health != QT_ERR_TRANSPORT_HARD_FAILURE) {
                 uint8_t req[6];
-                build_mode01_request(req, t->tx_id, t->poll_pid);
+                build_mode01_request(req, t->chans[0].tx_id, t->poll_pid);
                 uint32_t written = 0;
-                (void)qttune_j2534_write_frame(t->handle, t->channel, req,
-                                               sizeof(req), write_flags,
-                                               0, &written);
+                (void)qttune_j2534_write_frame(
+                    t->handle, t->channel, req, sizeof(req),
+                    t->chans[0].addr_flags |
+                        QTTUNE_PT_TX_ISO15765_FRAME_PAD,
+                    0, &written);
             }
             bool got = false;
             qttune_status_t st = pump_one(t, &got,
@@ -440,18 +537,6 @@ bool parse_number(const char* s, size_t len, unsigned long* out_val)
     *out_val = value;
     return true;
 }
-
-/* Collected URI query parameters — parse_query fills, resolve_uri
- * passes through, attach stores into the transport impl. One struct
- * rather than a six-pointer parse signature, and one place for the
- * coupling rule to live. */
-struct j2534_uri_params {
-    unsigned long baud = 0;
-    unsigned long flags = 0;
-    unsigned long rx_id = 0;     /* 0 = no filter (verbatim read mode) */
-    unsigned long tx_id = 0;     /* 0 = unset; attach substitutes 0x7E0 */
-    unsigned long poll_pid = 0;  /* 0 = passive receive */
-};
 
 /* URI query parser. Contract (strict — malformed means NO_TRANSPORT,
  * surfaces at session_create before any DLL load):
@@ -640,48 +725,46 @@ qttune_status_t j2534_start(qttune_session_t* session, void* impl)
                          * transport returns QT_OK */
     }
 
-    /* ORDERING NOTE (N3, open by design — channel-decl slice owns the
-     * fix): the scheduler-without-filter coupling fires HERE, after
-     * attach already opened the device. ADR-0013 §4 channel-decls
-     * supply 7E0/7E8 from the profile and demote this to a backstop. */
-    const QttuneSignalSet* set = qttune_session_signal_set(t->session);
-    const bool sched_mode = qttune_sched_from_set(&t->sched, set);
-    if (sched_mode && t->rx_id == 0) {
-        return QT_ERR_NO_TRANSPORT;   /* scheduled PIDs need ?filter= */
-    }
-
-    if (t->rx_id != 0) {
+    for (uint32_t i = 0; i < t->chan_count; ++i) {
         uint8_t mask[J2534_FILTER_MSG_LEN];
         uint8_t pattern[J2534_FILTER_MSG_LEN];
         uint8_t fc[J2534_FILTER_MSG_LEN];
-        pack_be32(mask, 0xFFFFFFFFu);   /* all-ones over all 4 bytes: exact ID
-                                        * match; the pattern's leading zeros
-                                        * carry the address-width distinction */
-        pack_be32(pattern, t->rx_id);
-        pack_be32(fc, t->tx_id);
-
+        pack_be32(mask, 0xFFFFFFFFu);   /* exact-ID match, all 4 bytes */
+        pack_be32(pattern, t->chans[i].rx_id);
+        pack_be32(fc, t->chans[i].tx_id);
         qttune_status_t st = qttune_j2534_start_msg_filter(
             t->handle, t->channel,
             QTTUNE_PT_FLOW_CONTROL_FILTER,
             mask, J2534_FILTER_MSG_LEN,
             pattern, J2534_FILTER_MSG_LEN,
             fc, J2534_FILTER_MSG_LEN,
-            t->addr_flags | QTTUNE_PT_TX_ISO15765_FRAME_PAD,
-            &t->filter_id);
+            t->chans[i].addr_flags | QTTUNE_PT_TX_ISO15765_FRAME_PAD,
+            &t->chans[i].filter_id);
         if (st != QT_OK) {
+            /* Unwind the ones already registered — no partial
+             * filter state survives a failed start. */
+            for (uint32_t j = 0; j < i; ++j) {
+                if (t->chans[j].filter_active) {
+                    (void)qttune_j2534_stop_msg_filter(
+                        t->handle, t->channel, t->chans[j].filter_id);
+                    t->chans[j].filter_active = false;
+                }
+            }
             return st;
         }
-        t->filter_active = true;
+        t->chans[i].filter_active = true;
     }
 
     t->stop_requested.store(false);
     try {
         t->worker = std::thread(j2534_worker, t);
     } catch (...) {
-        if (t->filter_active) {
-            (void)qttune_j2534_stop_msg_filter(t->handle, t->channel,
-                                               t->filter_id);
-            t->filter_active = false;
+        for (uint32_t i = 0; i < t->chan_count; ++i) {
+            if (t->chans[i].filter_active) {
+                (void)qttune_j2534_stop_msg_filter(t->handle, t->channel,
+                                                   t->chans[i].filter_id);
+                t->chans[i].filter_active = false;
+            }
         }
         return QT_ERR_OUT_OF_MEMORY;
     }
@@ -700,10 +783,12 @@ void j2534_detach(qttune_session_t* session, void* impl)
         t->stop_requested.store(true);
         t->worker.join();
     }
-    if (t->filter_active) {
-        (void)qttune_j2534_stop_msg_filter(t->handle, t->channel,
-                                           t->filter_id);
-        t->filter_active = false;
+    for (uint32_t i = 0; i < t->chan_count; ++i) {
+        if (t->chans[i].filter_active) {
+            (void)qttune_j2534_stop_msg_filter(t->handle, t->channel,
+                                               t->chans[i].filter_id);
+            t->chans[i].filter_active = false;
+        }
     }
     (void)qttune_j2534_disconnect_channel(t->handle, t->channel);
     (void)qttune_j2534_close(t->handle);
@@ -735,16 +820,33 @@ qttune_status_t j2534_attach(qttune_session_t* session, const char* uri)
         return st;
     }
 
-    qttune_j2534_handle_t* handle = nullptr;
-    st = qttune_j2534_open(&dev, &handle);
-    if (st != QT_OK) {
-        return st;
-    }
+    /* N3: channels + scheduler resolve BEFORE the device opens
+     * (retires the j2534_start ordering note). core.cpp installs the
+     * profile's set ahead of the attach call, so it is live here. */
+    const QttuneSignalSet* set = qttune_session_signal_set(session);
 
     auto* t = new (std::nothrow) qttune_j2534_transport();
     if (t == nullptr) {
-        qttune_j2534_close(handle);
         return QT_ERR_OUT_OF_MEMORY;
+    }
+    t->set = set;
+    resolve_channels(t, set, params);
+
+    /* Coupling BACKSTOP: scheduled PIDs need at least one channel.
+     * Shipped profiles declare channels, so this arm is reachable
+     * only by a future set author omitting them — which is exactly
+     * what a backstop is for. Fires before any hardware is touched. */
+    const bool sched_mode = qttune_sched_from_set(&t->sched, set);
+    if (sched_mode && t->chan_count == 0) {
+        delete t;
+        return QT_ERR_NO_TRANSPORT;
+    }
+
+    qttune_j2534_handle_t* handle = nullptr;
+    st = qttune_j2534_open(&dev, &handle);
+    if (st != QT_OK) {
+        delete t;
+        return st;
     }
 
     unsigned long channel = 0;
@@ -773,13 +875,7 @@ qttune_status_t j2534_attach(qttune_session_t* session, const char* uri)
     t->self = wrap;
     t->baud = params.baud;
     t->flags = params.flags;
-    t->rx_id = static_cast<uint32_t>(params.rx_id);
-    t->tx_id = (params.tx_id != 0) ? static_cast<uint32_t>(params.tx_id)
-                                   : J2534_TX_ID_DEFAULT;
     t->poll_pid = static_cast<uint32_t>(params.poll_pid);
-    if (t->rx_id > 0x7FF || t->tx_id > 0x7FF) {
-        t->addr_flags = QTTUNE_PT_CAN_29BIT_ID;
-    }
 
     session->transport = wrap;   /* session.h member — direct install */
     return QT_OK;

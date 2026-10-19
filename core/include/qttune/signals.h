@@ -68,11 +68,30 @@ typedef struct QttuneSignalDef {
     uint32_t mux_key;  /* The byte pattern to match at mux_offset */
 } QttuneSignalDef;
 
+/* ADR-0013 §4 (N3): profile-declared channels. rx_id is the
+ * flow-control filter target (receive); tx_id is the request
+ * destination. Sets declaring none (raw/mock) keep channel_count
+ * 0 — no filters, no requests, exactly today's behavior. This is
+ * the seed of the v0.5.0 plugin filter surface: bounded, validated
+ * at registration, consumed by the j2534 transport only. */
+#define QTTUNE_MAX_CHANNELS 4
+
+typedef struct QttuneChannelDecl {
+    uint32_t rx_id;   /* flow-control filter target */
+    uint32_t tx_id;   /* request destination */
+} QttuneChannelDecl;
+
 /* Single canonical definition — no duplicates */
 typedef struct QttuneSignalSet {
     uint32_t version;
     uint32_t count;
     const QttuneSignalDef* defs;
+    /* N3: bounded channel list. 0/null = none declared. Aggregate
+     * initializers with three members still compile (remaining
+     * members value-initialize), but update them explicitly when
+     * touched — see test_obd2.cpp. */
+    uint32_t channel_count;
+    const QttuneChannelDecl* channels;
 } QttuneSignalSet;
 
 int qttune_decode_signal(const QttuneSignalDef* signal,

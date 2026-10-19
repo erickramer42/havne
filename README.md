@@ -29,19 +29,23 @@ details.
 - **J2534 Pass-Thru support (Windows).**
   - Finds installed vendor drivers.
   - Pick a device on the Settings page or enter a `j2534://` URI.
-  - 32-bit-only vendor drivers run in a separate helper process
-    (the surrogate), selected automatically by driver architecture.
-    On developer setups the surrogate is deployed next to the app at
-    build time; otherwise it is resolved via the
-    `QTTUNE_SURROGATE_EXE` environment variable
-    (see [docs/development.md](docs/development.md)).
-  - Optional `?filter=`, `?txid=` and `?poll=` URI parameters select the
-    CAN IDs and run a Mode-01 request loop; received frames are
-    header-stripped and carry their arbitration ID.
+- 32-bit-only vendor drivers run in a separate helper process
+    (the surrogate). When a sibling `build-win32/` tree exists, the surrogate is
+    deployed next to the app automatically at build time; otherwise
+    it is resolved via the `QTTUNE_SURROGATE_EXE` environment
+    variable (see [docs/development.md](docs/development.md)).
+- The `obd2` profile supplies the standard CAN IDs itself
+    (requests to `0x7E0`, receive filter on `0x7E8`) and runs a
+    Mode-01 multi-PID request loop — a bare `j2534://` URI starts
+    streaming decoded signals. The `?filter=`, `?txid=` and `?poll=`
+    URI parameters override or replace the profile-declared channel;
+    received frames are header-stripped and carry their arbitration
+    ID.
 - **Protocol profiles.** Sessions select their signal-decoding
   profile from the URI: `mock://` defaults to the mock set,
-  `j2534://` defaults to `raw` (frames stream to the log, nothing
-  is decoded), and `?profile=<name>` overrides either
+  `j2534://` defaults to `obd2` (standard Mode-01 PIDs decoded to
+  LiveView), `?profile=raw` selects log-only mode with nothing
+  decoded, and `?profile=<name>` overrides either
   ([ADR-0013](docs/adr/0013-protocol-profiles.md)).
 - **Mock transport.** Simulated engine data, so the app runs with no
   hardware.
@@ -98,10 +102,12 @@ Add `-DQTTUNE_BUILD_CORE_ONLY=ON` to build only the core library and
 its tests, without Qt.
 
 **32-bit vendor drivers (optional):** to run against x86-only J2534
-drivers, build the Win32 surrogate in a second build tree and either
-deploy it next to the app at configure time
-(`-DQTTUNE_SURROGATE_SOURCE=...`) or export
-`QTTUNE_SURROGATE_EXE` at runtime:
+drivers, build the Win32 surrogate in a second tree first. When the
+sibling `build-win32/` tree exists at app-configure time, the
+surrogate is deployed next to `qttune.exe` automatically — no flags
+needed. Otherwise, deploy it explicitly with
+`-DQTTUNE_SURROGATE_SOURCE=...` or export `QTTUNE_SURROGATE_EXE` at
+runtime ([docs/development.md](docs/development.md)):
 
 ```sh
 cmake -B build-win32 -A Win32 -DQTTUNE_BUILD_CORE_ONLY=ON

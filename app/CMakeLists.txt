@@ -79,20 +79,32 @@ endif()
 # the x64 one next to the app would make build_exe_path() spawn it for an
 # x86 vendor DLL and die at LoadLibrary with no env var to blame.
 #
-# Opt-in via cache variable (configure with):
-#   -DQTTUNE_SURROGATE_SOURCE=<path to build-win32 .../qttune-j2534-surrogate.exe>
-# Unset = no copy; the app behaves exactly as before (QTTUNE_SURROGATE_EXE
-# env override, checked first, still wins at runtime).
-set(QTTUNE_SURROGATE_SOURCE "" CACHE PATH
-    "Path to the Win32-tree qttune-j2534-surrogate.exe to deploy next to the app")
+# Resolution order:
+#   1. QTTUNE_SURROGATE_SOURCE cache variable (explicit override)
+#   2. Auto-detect: conventional sibling build-win32 tree
+#      (development.md two-tree layout), any config, Release preferred
+#   3. Neither -> STATUS message, no copy; runtime QTTUNE_SURROGATE_EXE
+#      env override still works (checked first by the client).
+# --- Deploy the Win32 J2534 surrogate next to the exe (Windows only) ---
+# The x86 surrogate from build-win32 hosts x86 vendor DLLs; this tree's
+# own surrogate is x64 and MUST NOT be copied here. Resolution: explicit
+# QTTUNE_SURROGATE_SOURCE, else auto-detect in sibling build-win32, else
+# no copy (runtime QTTUNE_SURROGATE_EXE env override still works).
+set(QTTUNE_SURROGATE_SOURCE "" CACHE PATH "Win32-tree qttune-j2534-surrogate.exe to deploy; empty = auto-detect")
+
+if(WIN32 AND QTTUNE_SURROGATE_SOURCE STREQUAL "")
+    file(GLOB _sur_found "${CMAKE_SOURCE_DIR}/build-win32/surrogate/*/qttune-j2534-surrogate.exe")
+    if(EXISTS "${CMAKE_SOURCE_DIR}/build-win32/surrogate/Release/qttune-j2534-surrogate.exe")
+        list(INSERT _sur_found 0 "${CMAKE_SOURCE_DIR}/build-win32/surrogate/Release/qttune-j2534-surrogate.exe")
+    endif()
+    list(GET _sur_found 0 QTTUNE_SURROGATE_SOURCE)
+endif()
 
 if(WIN32 AND NOT QTTUNE_SURROGATE_SOURCE STREQUAL "")
     if(NOT EXISTS "${QTTUNE_SURROGATE_SOURCE}")
-        message(FATAL_ERROR
-            "QTTUNE_SURROGATE_SOURCE points at a nonexistent file:\n"
-            "  ${QTTUNE_SURROGATE_SOURCE}\n"
-            "Build build-win32 first (development.md), or unset the variable.")
+        message(FATAL_ERROR "QTTUNE_SURROGATE_SOURCE not found: ${QTTUNE_SURROGATE_SOURCE}")
     endif()
+    message(STATUS "Deploying Win32 J2534 surrogate: ${QTTUNE_SURROGATE_SOURCE}")
     add_custom_command(TARGET qttune POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
                 "${QTTUNE_SURROGATE_SOURCE}"
@@ -101,10 +113,7 @@ if(WIN32 AND NOT QTTUNE_SURROGATE_SOURCE STREQUAL "")
         VERBATIM
     )
 elseif(WIN32)
-    message(STATUS
-        "QTTUNE_SURROGATE_SOURCE not set: the Win32 J2534 surrogate will "
-        "not be deployed next to the app. Set it (build-win32 surrogate "
-        "exe path) to deploy it, or export QTTUNE_SURROGATE_EXE at runtime.")
+    message(STATUS "No build-win32 surrogate found; build the Win32 tree per development.md and reconfigure, or set QTTUNE_SURROGATE_SOURCE, or export QTTUNE_SURROGATE_EXE at runtime")
 endif()
 
 qt_finalize_executable(qttune)

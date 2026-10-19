@@ -38,6 +38,12 @@ extern "C" {
  * response header so all three agree on the channel. */
 #define OBD2_ECU_ARB_ID  0x7E8u
 
+/* OBD-II tester request arbitration ID — physical pairing with
+ * OBD2_ECU_ARB_ID (0x7E0 <-> 0x7E8). Consumed by the obd2 set's
+ * channel declaration and the transport's fallback, so the two
+ * cannot drift apart (MOCK_TELEMETRY_ARB_ID precedent). */
+#define OBD2_TESTER_ARB_ID  0x7E0u
+
 #ifdef __cplusplus
 }
 #endif

@@ -26,14 +26,17 @@ including transport adoption (Part 5).The BENCH tier tested on real adapter with
     holds the same lock across disconnect/close/FreeLibrary, so a
     stuck vendor call becomes a job-reaped linger, never an unmap
     under live vendor code
-  - Profile selection (ADR-0013 slice 1, 2026-10-17): a
-    string-keyed registry selects the session's signal set —
+  - Profile selection (ADR-0013, slices 1–3, 2026-10-17 → 2026-10-19):
+    a string-keyed registry selects the session's signal set —
     `mock://` defaults to the mock set, `j2534://` defaults to
-    `raw` (no decode, log only), and `?profile=<name>` overrides
-    either. Unknown names are rejected at session_create, before
-    any transport attach or DLL load. The bridge decodes the
-    session's active set instead of the hard-wired mock set (#21
-    closed).
+    `obd2`, and `?profile=<name>` overrides either. Unknown names are
+    rejected at session_create, before any transport attach or DLL
+    load. The bridge decodes the session's active set instead of the
+    hard-wired mock set (#21 closed). The `obd2` set carries the
+    multi-PID round-robin scheduler and declares its CAN channel
+    (7E0/7E8), so the transport derives the receive filter and request
+    target from the profile: a bare `j2534://` URI starts and streams
+    with no `?filter=` required (`?filter=`/`?txid=` remain overrides).
   - Discovery finds the real installed drivers, and the Settings page
     can pick one and connect.
 - **Not yet:**
@@ -47,10 +50,11 @@ including transport adoption (Part 5).The BENCH tier tested on real adapter with
     open (status 34) with its adapter absent. The run sheet template is
     [docs/bench-sessions/bench-runsheet.md](docs/bench-sessions/bench-runsheet.md).
   - Any live vehicle.
-  - J2534 data in LiveView: profile selection is in (ADR-0013 slice
-    1), but a `j2534://` session still decodes nothing — the `obd2`
-    signal set and multi-PID scheduler are slice 2.
-  - **Tests:** 134 ctest cases, passing locally (Windows/MSVC 2022)
+  - J2534 decode on real hardware: the `obd2` set, scheduler and
+    channel derivation are HARNESS-verified against the fake; a
+    live-vehicle session (real ECU responses, talking-bus items in
+    the BENCH prep list) is still ahead.
+  - **Tests:** 136 ctest cases, passing locally (Windows/MSVC 2022)
     and in CI on all three platforms. The cross-arch routing case
     skips unless its environment variables are set. J2534 suites
     carry a 30 s per-test timeout — a hang fails bounded instead of
@@ -162,6 +166,10 @@ Contracts along this path:
   - [x] slice 2: the `obd2` signal set and the multi-PID scheduler
         replacing the single-poll loop (paired with #25, the
         read-rate cap — one workstream per ADR-0013)
+  - [x] slice 3: channel declarations (§4) — profiles declare rx/tx
+        CAN channel pairs; the transport registers one flow-control
+        filter per channel and routes scheduler requests per PID; a
+        bare `j2534://` URI under `obd2` starts with no `?filter=`
   - [ ] `obd2` PID probe phase and `uds-generic`
 - [ ] **Phase 4, record-replay transport:** capture fixtures, then play
       them back deterministically through the same frame API
@@ -294,12 +302,6 @@ an issue is resolved it is removed, and its number is not reused.
     OP_DISCONNECT** (IDs and vendor status; OP_DISCONNECT added
     2026-10-17). Filter starts/stops and ioctls are still silent in
     `%TEMP%\qttune-surrogate.log`, each with its own vendor status. Discovered in the first formal BENCH session (2026-10-16), where filter acceptance had to be inferred from session-start success rather than a logged vendor status. Also: log lines carry no timestamps, so cross-referencing with parent timings remains guesswork. Target: trace all operations with timestamps and add filter/ioctl operation logs in the next iteration.
-25. **J2534 receive is capped around 50 msgs/s, ~10 in poll mode**
-    (review 2026-10-17, finding 3). The worker reads one message
-    then sleeps; on the surrogate path the 4096-slot ring fills at
-    vendor speed and then #17's silent drops start. Must be fixed
-    before or alongside the ADR-0013 multi-PID scheduler, which
-    otherwise subdivides ~10 Hz across N signals.
 
 ## Roadmap
 
@@ -338,8 +340,11 @@ matter most — CAN-era targets need none of it.
   "failed to load transport library"
 - Plumb `PassThruGetLastError` for vendor status text (the VT's
   status 34 is unlabeled)
-- Picker row URIs templated with `?filter=&txid=&poll=` (the natural
-  flow today produces a mute ISO 15765 session)
+- Picker row URIs templated with profile parameters — less urgent
+  now that channel derivation makes the natural flow produce a
+  working `obd2` session; the remaining case worth exposing is
+  `?profile=raw` (log-only) and explicit ID overrides for oddball
+  vehicles
 - update code base, docs, compilation floors to C++20(gives std::span, 
   coroutines, ranges, std::format, etc) but removes older compiler support 
   (MSVC 2019, gcc 11, clang 14 all missing full support) - low priority / debatable 
