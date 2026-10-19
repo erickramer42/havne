@@ -53,6 +53,14 @@ constexpr uint32_t J2534_REQUEST_CYCLE_MS   = 100;   /* poll cadence */
 constexpr uint32_t J2534_DRAIN_BUDGET          = 10;
 constexpr uint32_t J2534_DRAIN_READ_TIMEOUT_MS  = 20;
 
+/* #11 hard-failure backoff: base 100 ms, doubling, 5 s cap. While
+ * hard-failed the worker stops writes and stretches its cycle; a
+ * timeout return (adapter answered "silence") or a good frame
+ * heals it. 5 s was chosen so a dead-device retry costs ~0.2
+ * attempts/s at steady state. */
+constexpr uint32_t J2534_BACKOFF_BASE_MS = 100;
+constexpr uint32_t J2534_BACKOFF_CAP_MS  = 5000;
+
 /* Address/filter field widths. The 4-byte big-endian CAN ID is the
  * J2534 convention for ISO 15765 filter patterns and in-band
  * addressing bytes.
@@ -160,38 +168,34 @@ struct qttune_j2534_transport {
     unsigned long filter_id = 0;
     qttune_pid_scheduler sched;
     std::atomic<bool> stop_requested{false};
+    std::atomic<int32_t> last_error_state{QT_OK};
+    uint32_t backoff_ms = 0;              /* 0 = no backoff */
+    int32_t cached_health = QT_OK;        /* worker-local snapshot */
     std::thread worker;
     qttune_transport_t* self = nullptr;   /* NEW: wrapper back-pointer —
                                            * detach must free impl AND the
                                            * envelope (internal.h contract) */
 };
 
-/* Read one frame and, if it passes the strip/stamp gate, dispatch it
- * through the session snapshot path. Returns whether a frame was
- * read (dispatched or not).
- *
- * RECEIVE FRAMING: j2534_loader's read_frame copies PASSTHRU_MSG.Data
- * verbatim — ISO 15765 rides its 4-byte address header in-band. With
- * a filter registered (rx_id != 0) the worker verifies that header
- * against the filter ID (defensive: a conforming vendor delivers
- * matching frames only, so a mismatch or a runt frame is dropped, not
- * dispatched), strips the 4 bytes, and stamps arbitration_id — which
- * is what closes the bridge's message-ID gate (Issue #15). Without a
- * filter, frames dispatch verbatim with id 0: byte-for-byte the
- * pre-adoption contract, which is why every existing stream test
- * still passes unmodified.
- * N1: the post-strip payload is the ISO-TP LOGICAL data —
- * [0x41][PID][A][B]... with no PCI byte, matching the obd2 signal
- * set's mux-at-offset-0 grammar. */
-bool pump_one(qttune_j2534_transport* t, uint32_t timeout_ms)
+/* Read one frame, dispatch if it passes the strip/stamp gate, and
+ * return the read status (QT_OK/got, TIMEOUT, HARD_FAILURE). The
+ * worker consumes this to update error-state atomics and trigger
+ * backoff. */
+qttune_status_t pump_one(qttune_j2534_transport* t, bool* out_got,
+                         uint32_t timeout_ms)
 {
-    qttune_frame_t frame{};
+    *out_got = false;
+
     bool got = false;
+    qttune_frame_t frame{};
     qttune_status_t st = qttune_j2534_read_frame(t->handle, t->channel,
-                                                 &frame, timeout_ms, &got);
+                                                 &frame, timeout_ms,
+                                                 &got);
     if (st != QT_OK || !got) {
-        return false;
+        return st;   /* TIMEOUT/HARD_FAILURE propagate; idle = QT_OK */
     }
+    *out_got = true;
+
     if (t->rx_id != 0) {
         if (frame.data_length >= J2534_ADDR_LEN) {
             const uint32_t hdr =
@@ -211,6 +215,66 @@ bool pump_one(qttune_j2534_transport* t, uint32_t timeout_ms)
     } else {
         qttune_session_dispatch_callbacks(t->session, &frame);
         /* no filter — verbatim, id 0 */
+    }
+    return QT_OK;
+}
+
+/* Error-state transition (#11). Session atomics are written ONLY on
+ * transitions: a steady timeout costs nothing, a hard-failure episode
+ * counts exactly once. health/backoff_ms are WORKER-LOCAL (caller-
+ * owned); only the session's last_error/error_count cross threads.
+ * Semantics:
+ *   good frame  -> clears last_error, resets backoff (recovery)
+ *   QT_ERR_VEHICLE_TIMEOUT -> marks last_error, no episode count,
+ *                 no backoff — a silent bus is a polling state, and
+ *                 an ERR_TIMEOUT return proves the ADAPTER answered,
+ *                 so it also clears stale hard-failure backoff
+ *   QT_ERR_TRANSPORT_HARD_FAILURE -> marks last_error, ONE episode,
+ *                 enters backoff (caller sleeps and doubles it) */
+void update_health(qttune_j2534_transport* t, int32_t& health,
+                   uint32_t& backoff_ms, qttune_status_t st, bool got)
+{
+    if (got && st == QT_OK) {
+        if (health != QT_OK) {
+            t->session->last_error.store(QT_OK);
+            health = QT_OK;
+        }
+        backoff_ms = 0;
+        return;
+    }
+    if (st == QT_OK) {
+        return;   /* idle — nothing to report */
+    }
+    if (st == health) {
+        return;   /* steady state — no transition, no writes */
+    }
+    t->session->last_error.store(st);
+    health = st;
+    if (st == QT_ERR_TRANSPORT_HARD_FAILURE) {
+        t->session->error_count.fetch_add(1);
+        backoff_ms = J2534_BACKOFF_BASE_MS;
+    } else {
+        backoff_ms = 0;   /* timeout = adapter alive; heal the backoff */
+    }
+}
+
+/* Backoff-aware sleep, abortable within 20 ms of a stop request —
+ * a 5 s capped backoff must not turn into a 5 s join at detach.
+ * Returns true if stop was requested (caller should exit promptly). */
+bool backoff_sleep(qttune_j2534_transport* t, uint32_t ms)
+{
+    const auto deadline = std::chrono::steady_clock::now() +
+        std::chrono::milliseconds(ms);
+    while (!t->stop_requested.load()) {
+        auto now = std::chrono::steady_clock::now();
+        if (now >= deadline) {
+            return false;
+        }
+        auto chunk = deadline - now;
+        if (chunk > std::chrono::milliseconds(20)) {
+            chunk = std::chrono::milliseconds(20);
+        }
+        std::this_thread::sleep_for(chunk);
     }
     return true;
 }
@@ -233,63 +297,100 @@ void j2534_worker(qttune_j2534_transport* t)
     const bool sched_mode = (t->sched.count > 0);
     const uint32_t write_flags = t->addr_flags |
                                  QTTUNE_PT_TX_ISO15765_FRAME_PAD;
+    int32_t health = QT_OK;
+    uint32_t backoff_ms = 0;   /* 0 = healthy cadence */
 
     while (!t->stop_requested.load()) {
         const auto cycle_start = std::chrono::steady_clock::now();
 
         if (sched_mode) {
-            uint8_t pid = 0;
-            (void)qttune_sched_next(&t->sched, &pid);
-            uint8_t req[6];
-            build_mode01_request(req, t->tx_id, pid);
-            uint32_t written = 0;
-            /* A failed send retries next cycle — the loop's job is
-             * resilience. Persistent failure presents as a silent bus,
-             * which is the BENCH-tier diagnostic story, not a
-             * transport-layer error to synthesize here. */
-            (void)qttune_j2534_write_frame(t->handle, t->channel, req,
-                                           sizeof(req), write_flags,
-                                           0, &written);
+            /* SCHEDULER: no writes while hard-failed — a write into a
+             * dead adapter is wasted work and possible pipe noise. */
+            if (health != QT_ERR_TRANSPORT_HARD_FAILURE) {
+                uint8_t pid = 0;
+                (void)qttune_sched_next(&t->sched, &pid);
+                uint8_t req[6];
+                build_mode01_request(req, t->tx_id, pid);
+                uint32_t written = 0;
+                (void)qttune_j2534_write_frame(t->handle, t->channel, req,
+                                               sizeof(req), write_flags,
+                                               0, &written);
+            }
 
-            /* DRAIN: budgeted receive (#25). First empty read ends the
-             * drain; the budget bounds bursts, not silence. Each
-             * dispatched frame counts against the budget; dropped
-             * (non-matching/runt) frames do too — the point is
-             * bounding worker loop time, not guaranteed delivery. */
+            /* DRAIN (#25 receive cap, unchanged shape): health derives
+             * from the reads the drain already performs. First empty
+             * OR erroring read ends the drain — budget bounds reads. */
             for (uint32_t i = 0; i < J2534_DRAIN_BUDGET; ++i) {
-                if (!pump_one(t, J2534_DRAIN_READ_TIMEOUT_MS)) {
+                bool got = false;
+                qttune_status_t st = pump_one(t, &got,
+                                             J2534_DRAIN_READ_TIMEOUT_MS);
+                update_health(t, health, backoff_ms, st, got);
+                if (!got) {
                     break;
                 }
             }
 
-            /* Absolute-deadline sleep: 100 ms from cycle START, not
-             * from drain END — accumulated drain cost cannot drift
-             * the request cadence. A negative remainder (drain
-             * somehow exceeded the cycle) clamps to zero. */
-            const auto target = cycle_start +
-                std::chrono::milliseconds(J2534_REQUEST_CYCLE_MS);
-            const auto now = std::chrono::steady_clock::now();
-            if (target > now) {
-                std::this_thread::sleep_until(target);
+            /* Sleep: normal = cycle remainder vs absolute deadline.
+             * Hard failure = backoff stretch, doubling after each
+             * slept interval, capped. Cadence distortion while dead
+             * is the POINT — retrying a dead device at 10 Hz is not. */
+            if (backoff_sleep(t, backoff_ms) ) {
+                break;
+            }
+            if (backoff_ms > 0) {
+                backoff_ms = (backoff_ms < J2534_BACKOFF_CAP_MS)
+                              ? backoff_ms * 2 : J2534_BACKOFF_CAP_MS;
+            } else {
+                const auto target = cycle_start +
+                    std::chrono::milliseconds(J2534_REQUEST_CYCLE_MS);
+                const auto now = std::chrono::steady_clock::now();
+                if (target > now) {
+                    std::this_thread::sleep_until(target);
+                }
             }
         } else if (t->poll_pid != 0) {
-            uint8_t req[6];
-            build_mode01_request(req, t->tx_id, t->poll_pid);
-            uint32_t written = 0;
-            (void)qttune_j2534_write_frame(t->handle, t->channel, req,
-                                           sizeof(req), write_flags,
-                                           0, &written);
-            (void)pump_one(t, J2534_READ_TIMEOUT_MS);
-            /* With polling, the request cycle paces the loop. The fake's
-             * reads return instantly; a real device blocks inside ReadMsgs
-             * up to the timeout, so the effective cadence is the larger of
-             * the two either way. */
-            std::this_thread::sleep_for(std::chrono::milliseconds(
-                J2534_REQUEST_CYCLE_MS));
+            /* POLL (legacy order preserved: write, then read the
+             * RESPONSE — not the previous cycle's). */
+            if (health != QT_ERR_TRANSPORT_HARD_FAILURE) {
+                uint8_t req[6];
+                build_mode01_request(req, t->tx_id, t->poll_pid);
+                uint32_t written = 0;
+                (void)qttune_j2534_write_frame(t->handle, t->channel, req,
+                                               sizeof(req), write_flags,
+                                               0, &written);
+            }
+            bool got = false;
+            qttune_status_t st = pump_one(t, &got,
+                                          J2534_READ_TIMEOUT_MS);
+            update_health(t, health, backoff_ms, st, got);
+
+            if (backoff_sleep(t, backoff_ms)) {
+                break;
+            }
+            if (backoff_ms > 0) {
+                backoff_ms = (backoff_ms < J2534_BACKOFF_CAP_MS)
+                              ? backoff_ms * 2 : J2534_BACKOFF_CAP_MS;
+            } else {
+                std::this_thread::sleep_for(std::chrono::milliseconds(
+                    J2534_REQUEST_CYCLE_MS));
+            }
         } else {
-            (void)pump_one(t, J2534_READ_TIMEOUT_MS);
-            std::this_thread::sleep_for(std::chrono::milliseconds(
-                J2534_POLL_INTERVAL_MS));
+            /* PASSIVE: legacy 100 ms read / 20 ms sleep. */
+            bool got = false;
+            qttune_status_t st = pump_one(t, &got,
+                                          J2534_READ_TIMEOUT_MS);
+            update_health(t, health, backoff_ms, st, got);
+
+            if (backoff_sleep(t, backoff_ms)) {
+                break;
+            }
+            if (backoff_ms > 0) {
+                backoff_ms = (backoff_ms < J2534_BACKOFF_CAP_MS)
+                              ? backoff_ms * 2 : J2534_BACKOFF_CAP_MS;
+            } else {
+                std::this_thread::sleep_for(std::chrono::milliseconds(
+                    J2534_POLL_INTERVAL_MS));
+            }
         }
     }
 }
