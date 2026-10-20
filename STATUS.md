@@ -375,24 +375,6 @@ an issue is resolved it is removed, and its number is not reused.
     - Test knobs: `QTTUNE_SUR_HANDSHAKE_MS` (handshake window) and
       `QTTUNE_FAKE_OPEN_DELAY_MS` (fake open sleep; it arms the x86
       child from an x64 test through environment inheritance).
-23. **Surrogate tracing: the parent's half is still weak.** Since
-    2026-10-19 the child's log (`%TEMP%\qttune-surrogate.log`) carries
-    millisecond timestamps and the vendor status of every `OPEN`,
-    `CONNECT`, `DISCONNECT`, `IOCTL`, `START_FILTER` and
-    `STOP_FILTER`. `OP_WRITE` is logged when its status changes, and
-    `OP_READ` when its status changes or frames arrive (so about
-    10 lines/s while an ECU answers). The client logs startup failures:
-    CreateProcess, handshake timeout, the child's decoded exit code, and
-    refused `PassThruOpen`/`PassThruConnect`. Still open:
-    - The parent's `SUR_LOG` lines go to stderr, which the GUI app only
-      has when launched with a redirect (`2> sur.log`).
-    - Parent lines carry no timestamps, and the child's clock counts
-      from its pipe connect, so matching the two logs still takes care.
-    - A blocked `OP_OPEN` is logged only as a generic transaction
-      timeout, the handshake-timeout line wrongly suggests a blocked
-      `PassThruOpen`, and the exit-5 text says the missing exports are
-      "named above" when they're in the child's log (code review
-      2026-10-20, finding 3).
 28. **In-proc, a dropped indication ends the drain early.** The loader
     drops `TX_INDICATION`/`TX_MSG_TYPE` messages by reporting "no
     frame", and the drain stops at the first "no frame". After each

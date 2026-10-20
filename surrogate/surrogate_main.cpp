@@ -56,21 +56,33 @@ static PASSTHRU_MSG s_read_batch[QTTUNE_SUR_MAX_FRAMES_PER_READ];
 
 static void stage(const char* fmt, ...)
 {
-    /* Timestamped: the first talking-bus session has to correlate the
-     * child's vendor calls with the parent's cycles, which is guesswork
-     * without a clock (Known Issue #23). Milliseconds since the first
-     * log line (the pipe connect), so the numbers stay small and
-     * comparable. Lines still start with "[surrogate", so a grep for
-     * that prefix matches. */
-    static const ULONGLONG epoch = GetTickCount64();
-    fprintf(stderr, "[surrogate %8llu ms] ",
-            static_cast<unsigned long long>(GetTickCount64() - epoch));
+    /* Local wall-clock time, the same stamp the client puts on its
+     * "[sur ...]" lines in this file, so the session log reads as one
+     * timeline (formerly Known Issue #23). The line is formatted whole
+     * and written with one WriteFile, so a client line can't land in
+     * the middle of it. Lines still start with "[surrogate", so a grep
+     * for that prefix matches. */
+    SYSTEMTIME t;
+    GetLocalTime(&t);
+    char line[512];
+    const int n = snprintf(line, sizeof(line) - 2,
+                           "[surrogate %02u:%02u:%02u.%03u] ",
+                           static_cast<unsigned>(t.wHour),
+                           static_cast<unsigned>(t.wMinute),
+                           static_cast<unsigned>(t.wSecond),
+                           static_cast<unsigned>(t.wMilliseconds));
+    if (n < 0) return;
     va_list ap;
     va_start(ap, fmt);
-    vfprintf(stderr, fmt, ap);
-    fputc('\n', stderr);
-    fflush(stderr);
+    (void)vsnprintf(line + n, sizeof(line) - 2 - static_cast<size_t>(n),
+                    fmt, ap);
     va_end(ap);
+    size_t len = strlen(line);
+    line[len++] = '\r';
+    line[len++] = '\n';
+    DWORD written = 0;
+    (void)WriteFile(GetStdHandle(STD_ERROR_HANDLE), line,
+                    static_cast<DWORD>(len), &written, nullptr);
 }
 
 static FARPROC resolve_export(HMODULE mod, const char* primary,

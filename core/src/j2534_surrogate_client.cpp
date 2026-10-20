@@ -14,6 +14,7 @@
 #ifdef _WIN32
 
 #include <windows.h>
+#include <cstdarg>
 #include <cstdio>
 
 struct qttune_j2534_sur_handle {
@@ -21,6 +22,10 @@ struct qttune_j2534_sur_handle {
     HANDLE pipe = INVALID_HANDLE_VALUE;
     HANDLE job = nullptr;
     HANDLE process = nullptr;
+    /* The session log: the child's stdout/stderr, and the client's own
+     * lines for this session. log_path is "" when there is none. */
+    HANDLE log = INVALID_HANDLE_VALUE;
+    char log_path[MAX_PATH] = {};
     uint32_t next_request_id = 1;
     uint32_t pending_response_id = 0;   /* response in flight from a
                                            timed-out transaction */
@@ -50,7 +55,66 @@ DWORD handshake_timeout_ms()
     return kHandshakeTimeoutMs_default;
 }
 
-#define SUR_LOG(...) fprintf(stderr, "[sur] " __VA_ARGS__)
+/* Client trace line: to stderr, and to the session log when there is
+ * one, so a GUI launch (no stderr) keeps the client's half next to the
+ * child's (formerly Known Issue #23). Stamped with local wall-clock
+ * time, like the child's lines. One WriteFile per line, as on the
+ * child's side, so the two never splice mid-line. h may be null. */
+void sur_log(const qttune_j2534_sur_handle_t* h, const char* fmt, ...)
+{
+    SYSTEMTIME t;
+    GetLocalTime(&t);
+    char line[512];
+    const int n = snprintf(line, sizeof(line) - 2, "[sur %02u:%02u:%02u.%03u] ",
+                           static_cast<unsigned>(t.wHour),
+                           static_cast<unsigned>(t.wMinute),
+                           static_cast<unsigned>(t.wSecond),
+                           static_cast<unsigned>(t.wMilliseconds));
+    if (n < 0) return;
+    va_list ap;
+    va_start(ap, fmt);
+    (void)vsnprintf(line + n, sizeof(line) - 2 - static_cast<size_t>(n),
+                    fmt, ap);
+    va_end(ap);
+    size_t len = strlen(line);
+    while (len > 0 && (line[len - 1] == '\n' || line[len - 1] == '\r')) --len;
+    line[len] = '\0';
+    fprintf(stderr, "%s\n", line);
+    if (h != nullptr && h->log != INVALID_HANDLE_VALUE) {
+        line[len++] = '\r';
+        line[len++] = '\n';
+        DWORD written = 0;
+        (void)WriteFile(h->log, line, static_cast<DWORD>(len), &written, nullptr);
+    }
+}
+
+#define SUR_LOG(h, ...) sur_log((h), __VA_ARGS__)
+
+/* The session log's path. The fixed name keeps the documented path for
+ * the usual single session. A second concurrent session finds it held
+ * (a sharing violation) and gets a per-spawn name, instead of its child
+ * running without a log (code review 2026-10-20, finding 9). Returns
+ * INVALID_HANDLE_VALUE, with path empty, if neither name opens. */
+HANDLE open_session_log(LONG seq, SECURITY_ATTRIBUTES* sa,
+                        char* path, size_t cap)
+{
+    char dir[MAX_PATH] = {};
+    const DWORD tn = GetTempPathA(sizeof(dir), dir);
+    /* No usable TEMP: a dotfile in the current directory. */
+    const char* prefix = (tn == 0 || tn >= sizeof(dir)) ? "." : dir;
+
+    snprintf(path, cap, "%sqttune-surrogate.log", prefix);
+    HANDLE f = CreateFileA(path, GENERIC_WRITE, FILE_SHARE_READ, sa,
+                           CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (f == INVALID_HANDLE_VALUE && GetLastError() == ERROR_SHARING_VIOLATION) {
+        snprintf(path, cap, "%sqttune-surrogate-%lu-%ld.log", prefix,
+                 GetCurrentProcessId(), seq);
+        f = CreateFileA(path, GENERIC_WRITE, FILE_SHARE_READ, sa,
+                        CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+    }
+    if (f == INVALID_HANDLE_VALUE) path[0] = '\0';
+    return f;
+}
 
 bool build_exe_path(char* out, size_t cap)
 {
@@ -144,7 +208,11 @@ read_result ov_read(HANDLE pipe, void* buf, DWORD len, DWORD timeout_ms,
 /* Read and discard the late reply to a previous timed-out request, so
  * the next request isn't paired with it (every later call would fail
  * the ID check). If that reply never arrives, the child is hung: fail
- * without sending anything new. */
+ * without sending anything new.
+ *
+ * If the late reply was an OP_READ's, its frames are dropped with it.
+ * That takes a read the child answered more than 500 ms past its own
+ * timeout, so it's rare, but the drop is logged rather than silent. */
 bool drain_pending(qttune_j2534_sur_handle_t* h, DWORD timeout_ms)
 {
     qttune_sur_response_t stale = {};
@@ -152,14 +220,18 @@ bool drain_pending(qttune_j2534_sur_handle_t* h, DWORD timeout_ms)
     const read_result rr = ov_read(h->pipe, &stale, sizeof(stale),
                                    timeout_ms, &got, &rerr);
     if (rr != RD_OK) {
-        SUR_LOG("drain_pending: stale response id=%u never arrived\n",
+        SUR_LOG(h, "drain_pending: stale response id=%u never arrived\n",
                 h->pending_response_id);
         return false;
     }
     if (stale.request_id != h->pending_response_id) {
-        SUR_LOG("drain_pending: unexpected id=%u want=%u\n",
+        SUR_LOG(h, "drain_pending: unexpected id=%u want=%u\n",
                 stale.request_id, h->pending_response_id);
         return false;
+    }
+    if (stale.num_frames > 0) {
+        SUR_LOG(h, "drain_pending: dropped %u frame(s) from the late reply "
+                "to req_id=%u\n", stale.num_frames, stale.request_id);
     }
     return true;
 }
@@ -174,7 +246,7 @@ bool transact(qttune_j2534_sur_handle_t* h, const qttune_sur_request_t& req,
         h->pending_response_id = 0;
     }
     if (!ov_write(h->pipe, &req, sizeof(req), timeout_ms)) {
-        SUR_LOG("transact: ov_write failed (req_id=%u op=%u err=%lu)\n",
+        SUR_LOG(h, "transact: ov_write failed (req_id=%u op=%u err=%lu)\n",
                 req.request_id, req.opcode, GetLastError());
         return false;
     }
@@ -187,12 +259,12 @@ bool transact(qttune_j2534_sur_handle_t* h, const qttune_sur_request_t& req,
             (rr == RD_SHORT_READ) ? "SHORT-READ"
           : (rr == RD_TIMEOUT)    ? "TIMEOUT"
           :                         "OS-ERROR";
-        SUR_LOG("transact: ov_read failed (req_id=%u op=%u %s got=%lu/%zu err=%lu)\n",
+        SUR_LOG(h, "transact: ov_read failed (req_id=%u op=%u %s got=%lu/%zu err=%lu)\n",
                 req.request_id, req.opcode, kind, got, sizeof(*out_resp), rerr);
         return false;
     }
     if (out_resp->request_id != req.request_id) {
-        SUR_LOG("transact: DESYNC — got req_id=%u want=%u\n",
+        SUR_LOG(h, "transact: DESYNC — got req_id=%u want=%u\n",
                 out_resp->request_id, req.request_id);
         return false;
     }
@@ -202,10 +274,10 @@ bool transact(qttune_j2534_sur_handle_t* h, const qttune_sur_request_t& req,
 /* Decode the child's exit code (j2534.md "Child exit codes") so a spawn
  * failure names its stage instead of surfacing as a bare LOAD_FAILED.
  * Safe to call when the child is still running — it then does nothing. */
-void log_child_exit(HANDLE process)
+void log_child_exit(const qttune_j2534_sur_handle_t* h)
 {
     DWORD code = 0;
-    if (process == nullptr || !GetExitCodeProcess(process, &code)) return;
+    if (h->process == nullptr || !GetExitCodeProcess(h->process, &code)) return;
     if (code == STILL_ACTIVE) return;
     const char* stage =
         (code == 1) ? "bad argument count"
@@ -213,7 +285,7 @@ void log_child_exit(HANDLE process)
       : (code == 5) ? "a mandatory export is missing (named in the child log)"
       : (code == 7) ? "could not connect to the app's pipe"
       :               "unknown";
-    SUR_LOG("open: child exited with code %lu (%s)\n", code, stage);
+    SUR_LOG(h, "open: child exited with code %lu (%s)\n", code, stage);
 }
 
 } // namespace
@@ -266,36 +338,40 @@ qttune_status_t qttune_j2534_sur_open(const char* dll_path,
     snprintf(cmdline, sizeof(cmdline), "\"%s\" \"%s\" \"%s\"",
              exe, dll_path, pipe_name);
 
-    char log_path[MAX_PATH] = {};
-    const DWORD tn = GetTempPathA(sizeof(log_path), log_path);
-    if (tn == 0 || tn >= sizeof(log_path)) {
-        strcpy_s(log_path, sizeof(log_path), ".qttune-surrogate.log");
-    } else {
-        strcat_s(log_path, sizeof(log_path), "qttune-surrogate.log");
-    }
-
+    /* Inheritable only until the spawn: the child gets it as its
+     * stdout/stderr, and the client keeps its own copy for SUR_LOG. */
     SECURITY_ATTRIBUTES inherit_sa = { sizeof(inherit_sa), nullptr, TRUE };
-    HANDLE child_log = CreateFileA(log_path, GENERIC_WRITE, FILE_SHARE_READ,
-                                   &inherit_sa, CREATE_ALWAYS,
-                                   FILE_ATTRIBUTE_NORMAL, nullptr);
+    h->log = open_session_log(seq, &inherit_sa, h->log_path, sizeof(h->log_path));
+    const DWORD log_err = (h->log == INVALID_HANDLE_VALUE) ? GetLastError() : 0;
 
     STARTUPINFOA si = { sizeof(si) };
-    if (child_log != INVALID_HANDLE_VALUE) {
+    if (h->log != INVALID_HANDLE_VALUE) {
         si.dwFlags |= STARTF_USESTDHANDLES;
-        si.hStdOutput = child_log;
-        si.hStdError  = child_log;
+        si.hStdOutput = h->log;
+        si.hStdError  = h->log;
     }
     PROCESS_INFORMATION pi = {};
     if (!CreateProcessA(nullptr, cmdline, nullptr, nullptr,
-                        (child_log != INVALID_HANDLE_VALUE),
+                        (h->log != INVALID_HANDLE_VALUE),
                         CREATE_SUSPENDED | CREATE_NO_WINDOW,
                         nullptr, nullptr, &si, &pi)) {
-        if (child_log != INVALID_HANDLE_VALUE) CloseHandle(child_log);
-        SUR_LOG("open: CreateProcess failed (err=%lu) exe='%s'\n", GetLastError(), exe);
+        SUR_LOG(h, "open: CreateProcess failed (err=%lu) exe='%s'\n", GetLastError(), exe);
         qttune_j2534_sur_close(h);
         return QT_ERR_LOAD_FAILED;
     }
-    if (child_log != INVALID_HANDLE_VALUE) CloseHandle(child_log);
+    if (h->log != INVALID_HANDLE_VALUE) {
+        /* The next session's child must not inherit this session's log. */
+        SetHandleInformation(h->log, HANDLE_FLAG_INHERIT, 0);
+    }
+    /* Logged while the child is still suspended, so it heads the
+     * session log instead of racing the child's first line. */
+    if (h->log_path[0] != '\0') {
+        SUR_LOG(h, "open: child pid %lu, dll '%s', log '%s'\n",
+                pi.dwProcessId, dll_path, h->log_path);
+    } else {
+        SUR_LOG(h, "open: child pid %lu, dll '%s', no log (err=%lu)\n",
+                pi.dwProcessId, dll_path, log_err);
+    }
 
     h->process = pi.hProcess;
     /* Kill-on-close is a safety guarantee, not an optimization:
@@ -304,7 +380,7 @@ qttune_status_t qttune_j2534_sur_open(const char* dll_path,
      * still CREATE_SUSPENDED and no vendor call has run, so a hard
      * termination here is clean. */
     if (!AssignProcessToJobObject(h->job, pi.hProcess)) {
-        SUR_LOG("open: AssignProcessToJobObject failed (err=%lu)\n",
+        SUR_LOG(h, "open: AssignProcessToJobObject failed (err=%lu)\n",
                 GetLastError());
         TerminateProcess(pi.hProcess, 1);
         CloseHandle(pi.hThread);
@@ -333,9 +409,9 @@ qttune_status_t qttune_j2534_sur_open(const char* dll_path,
             DWORD xfer = 0;
             connected = GetOverlappedResult(h->pipe, &ov, &xfer, FALSE);
         } else if (wr == WAIT_OBJECT_0 + 1) {
-            log_child_exit(h->process);          /* replaces the inline decode */
+            log_child_exit(h);                   /* replaces the inline decode */
         } else {
-            SUR_LOG("open: handshake timeout after %lu ms — child alive but "
+            SUR_LOG(h, "open: handshake timeout after %lu ms — child alive but "
                     "never opened the pipe (process startup stalled)\n",
                     handshake_timeout_ms());
         }
@@ -352,7 +428,7 @@ qttune_status_t qttune_j2534_sur_open(const char* dll_path,
     }
     CloseHandle(ov.hEvent);
     if (!connected) {
-        SUR_LOG("open: handshake failed — child never connected\n");
+        SUR_LOG(h, "open: handshake failed — child never connected\n");
         qttune_j2534_sur_close(h);
         return QT_ERR_LOAD_FAILED;
     }
@@ -371,24 +447,32 @@ qttune_status_t qttune_j2534_sur_open(const char* dll_path,
     req.opcode = QTTUNE_SUR_OP_OPEN;
     qttune_sur_response_t resp = {};
     if (!transact(h, req, &resp, handshake_timeout_ms())) {
-        /* Finding 3: the real "vendor blocked" case. transact expired
-         * with the child still alive — a vendor wedged in DllMain or
-         * PassThruOpen cannot reply. log_child_exit is a no-op here,
-         * and the generic transact line doesn't say which stage is
-         * stuck. (A dead child takes the same path and is decoded by
-         * log_child_exit instead.) */
-        if (WaitForSingleObject(h->process, 0) != WAIT_OBJECT_0) {
-            SUR_LOG("open: no reply to OP_OPEN after %lu ms, child alive "
+        /* Finding 3: the real "vendor blocked" case is a reply that
+         * TIMED OUT with the child still alive — a vendor wedged in
+         * DllMain or PassThruOpen can't answer. The other case is a
+         * broken pipe: the child is exiting with code 4 or 5. Its pipe
+         * closes a moment before its process handle signals, so a
+         * liveness check alone called a failed DLL load "blocked"
+         * (seen 2026-10-20 once both halves shared one log). Wait for
+         * that exit and let log_child_exit name the stage instead. */
+        const bool timed_out = (h->pending_response_id == req.request_id);
+        if (timed_out && WaitForSingleObject(h->process, 0) != WAIT_OBJECT_0) {
+            SUR_LOG(h, "open: no reply to OP_OPEN after %lu ms, child alive "
                     "(vendor blocked in DllMain or PassThruOpen)\n",
                     handshake_timeout_ms());
+        } else {
+            WaitForSingleObject(h->process, 1000);
         }
-        log_child_exit(h->process);
+        log_child_exit(h);
+        /* Wait out the kill as well, so close sees a dead child and
+         * skips the polite OP_SHUTDOWN it could never answer. */
         TerminateProcess(h->process, 1);
+        WaitForSingleObject(h->process, 1000);
         qttune_j2534_sur_close(h);
         return QT_ERR_LOAD_FAILED;
     }
     if (resp.status != static_cast<int32_t>(QTTUNE_PT_STATUS_NOERROR)) {
-        SUR_LOG("open: PassThruOpen refused (vendor status %d)\n", resp.status);
+        SUR_LOG(h, "open: PassThruOpen refused (vendor status %d)\n", resp.status);
         qttune_j2534_sur_close(h);
         return QT_ERR_LOAD_FAILED;
     }
@@ -416,7 +500,7 @@ qttune_status_t qttune_j2534_sur_connect_channel(qttune_j2534_sur_handle_t* h,
         return QT_ERR_NO_TRANSPORT;
     }
     if (resp.status != static_cast<int32_t>(QTTUNE_PT_STATUS_NOERROR)) {
-        SUR_LOG("connect: PassThruConnect refused (vendor status %d)\n",
+        SUR_LOG(h, "connect: PassThruConnect refused (vendor status %d)\n",
                 resp.status);
         return QT_ERR_NO_TRANSPORT;
     }
@@ -498,6 +582,15 @@ qttune_status_t qttune_j2534_sur_ioctl(qttune_j2534_sur_handle_t* h,
     qttune_sur_response_t resp = {};
     if (!transact(h, req, &resp, kTransactTimeoutMs) ||
         resp.status != static_cast<int32_t>(QTTUNE_PT_STATUS_NOERROR)) {
+        return QT_ERR_NO_TRANSPORT;
+    }
+    /* Trust boundary, as for read's num_frames: a mismatched child (a
+     * stale build-win32 tree, #19) could claim more than the wire
+     * carries. Callers size output for the wire limit, so copying a
+     * larger claim would overrun both resp.data and their buffer. */
+    if (resp.data_len > QTTUNE_SUR_IOCTL_DATA_MAX) {
+        SUR_LOG(h, "ioctl: data_len=%u exceeds the wire limit (skew?)\n",
+                resp.data_len);
         return QT_ERR_NO_TRANSPORT;
     }
     if (output != nullptr && resp.data_len > 0) {
@@ -629,7 +722,7 @@ qttune_status_t qttune_j2534_sur_read_frame(qttune_j2534_sur_handle_t* h,
     }
     /* Trust boundary: a skewed stale child can send garbage. */
     if (resp.num_frames > QTTUNE_SUR_MAX_FRAMES_PER_READ) {
-        SUR_LOG("read: num_frames=%u exceeds capacity (skew?)\n",
+        SUR_LOG(h, "read: num_frames=%u exceeds capacity (skew?)\n",
                 resp.num_frames);
         return QT_ERR_TRANSPORT_HARD_FAILURE;
     }
@@ -704,8 +797,14 @@ qttune_status_t qttune_j2534_sur_close(qttune_j2534_sur_handle_t* h)
     if (h->pipe != INVALID_HANDLE_VALUE) CloseHandle(h->pipe);
     if (h->process != nullptr) CloseHandle(h->process);
     if (h->job != nullptr) CloseHandle(h->job);
+    if (h->log != INVALID_HANDLE_VALUE) CloseHandle(h->log);
     delete h;
     return QT_OK;
+}
+
+const char* qttune_j2534_sur_log_path(const qttune_j2534_sur_handle_t* h)
+{
+    return (h != nullptr) ? h->log_path : "";
 }
 
 } // extern "C"
@@ -747,6 +846,8 @@ qttune_status_t qttune_j2534_sur_inject_test_frame(qttune_j2534_sur_handle_t*, c
 { return QT_ERR_NOT_IMPLEMENTED; }
 qttune_status_t qttune_j2534_sur_close(qttune_j2534_sur_handle_t*)
 { return QT_ERR_NOT_IMPLEMENTED; }
+const char* qttune_j2534_sur_log_path(const qttune_j2534_sur_handle_t*)
+{ return ""; }
 
 } // extern "C"
 
