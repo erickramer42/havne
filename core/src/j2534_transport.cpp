@@ -113,9 +113,12 @@ struct qttune_j2534_transport {
      * a legitimate value. Individual flag bits are not interpreted. */
     unsigned long baud = 0;
     unsigned long flags = 0;
-    /*   poll_pid     0 = passive receive; nonzero = Mode-01 request
-     *                loop (raw-profile debug override; the scheduler
-     *                outranks it whenever a mux set is active)
+    /*   poll_pid     0 = passive receive; nonzero = single-PID Mode-01
+     *                request loop. Outranks the set's rotation: a
+     *                ?poll= URI never builds the set scheduler
+     *                (finding 12), so "just this PID" means what it
+     *                says. Needs a channel to receive on — ?filter=
+     *                or the profile's own (enforced at attach).
      *   chans        resolved channel table. Derived from the
      *                profile's declared channels at attach, with
      *                ?filter=/?txid= as overrides. ?filter= wins
@@ -369,7 +372,7 @@ bool backoff_sleep(qttune_j2534_transport* t, uint32_t ms)
  * the recovery probe, and replies only follow writes. */
 void j2534_worker(qttune_j2534_transport* t)
 {
-    const bool sched_mode = (t->sched.count > 0);
+    const bool sched_mode = (t->poll_pid == 0) && (t->sched.count > 0);
 
     int32_t health = QT_OK;
     uint32_t backoff_ms = 0;   /* 0 = healthy cadence */
@@ -435,7 +438,9 @@ void j2534_worker(qttune_j2534_transport* t)
              * write is always sent, as in scheduler mode, and a failed
              * write feeds the health machine the same way. */
             uint8_t req[6];
-            build_mode01_request(req, t->chans[0].tx_id, t->poll_pid);
+            const uint32_t ci = channel_index_for_rx(
+                t, rx_for_pid(t->set, static_cast<uint8_t>(t->poll_pid)));
+            build_mode01_request(req, t->chans[ci].tx_id, t->poll_pid);
             uint32_t written = 0;
             qttune_status_t wst = qttune_j2534_write_frame(
                 t->handle, t->channel, req, sizeof(req),
@@ -537,13 +542,16 @@ bool parse_number(const char* s, size_t len, unsigned long* out_val)
  *              profile's channels (registers a FLOW_CONTROL filter)
  *       txid   CAN id 1..0x1FFFFFFF — transmit ID; default is the
  *              profile's tx, else 0x7E0
- *       poll   PID 1..0xFF — single-PID Mode-01 loop
+ *       poll   PID 1..0xFF — single-PID Mode-01 loop; overrides the
+ *              profile's rotation (finding 12)
  *       profile name, 1..63 chars (validated in session_create)
  *   - unknown keys, missing '=', empty segments, trailing '&', and a
  *     bare trailing '?' on the URI are all rejected
  *   - duplicate keys: last occurrence wins
- *   - poll without filter is rejected: an ISO 15765 channel receives
- *     nothing without a filter, so the loop could only hear silence. */
+ *   - poll needs a channel to receive on, but the channel may come
+ *     from the profile: ?filter= supplies one directly, otherwise the
+ *     profile's declared channels do. Enforced in j2534_attach, where
+ *     both are known (finding 12). */
 qttune_status_t parse_query(const char* query, j2534_uri_params* p)
 {
     const char* cur = query;
@@ -616,9 +624,13 @@ qttune_status_t parse_query(const char* query, j2534_uri_params* p)
         }
     }
 
-    if (p->poll_pid != 0 && p->rx_id == 0) {
-        return QT_ERR_NO_TRANSPORT;   /* poll without filter */
-    }
+    /* Finding 12: the poll-needs-a-channel rule is enforced in
+     * j2534_attach, not here. parse_query runs before the profile's
+     * channels are consulted, so rejecting ?poll= without ?filter=
+     * here wrongly refused a profile that declares its own channel
+     * (?profile=obd2&poll=0x0C). Syntax is this function's job;
+     * coupling is attach's — and attach still fires before any DLL
+     * load, so malformed URIs stay fail-fast. */
     return QT_OK;
 }
 
@@ -819,12 +831,23 @@ qttune_status_t j2534_attach(qttune_session_t* session, const char* uri)
     t->set = set;
     resolve_channels(t, set, params);
 
-    /* Coupling BACKSTOP: scheduled PIDs need at least one channel.
-     * Shipped profiles declare channels, so this arm is reachable
-     * only by a future set author omitting them — which is exactly
-     * what a backstop is for. Fires before any hardware is touched. */
-    const bool sched_mode = qttune_sched_from_set(&t->sched, set);
-    if (sched_mode && t->chan_count == 0) {
+    /* Request mode, fixed before the thread starts (finding 12):
+     *   ?poll=    -> single-PID loop; the set's rotation is NOT built,
+     *                so the PID in the URI is the only one requested
+     *   set       -> the set's full rotation
+     *   neither   -> passive receive
+     * The set scheduler used to be built unconditionally, so ?poll=
+     * was silently ignored under any profile with mux defs. */
+    const bool sched_mode = (params.poll_pid == 0)
+                            && qttune_sched_from_set(&t->sched, set);
+
+    /* Coupling BACKSTOP: a request loop needs at least one channel to
+     * receive on. Scheduled PIDs get theirs from the set; ?poll= may
+     * take ?filter= or the profile's declared channels. Shipped
+     * profiles declare channels, so the scheduled arm is reachable
+     * only by a future set author omitting them. Fires before any
+     * hardware is touched. */
+    if ((sched_mode || params.poll_pid != 0) && t->chan_count == 0) {
         delete t;
         return QT_ERR_NO_TRANSPORT;
     }

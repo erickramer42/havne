@@ -423,7 +423,7 @@ TEST_F(J2534AdoptionTest, RequestLoopWritesMode01AndReceivesStrippedEcho)
                       << received << " > " << wc;
     }
 
-    /* ---- TX framing: 12 wire bytes, recorded by the fake ---- */
+    /* ---- TX framing: 6 wire bytes, adapter-framed logical request ---- */
     unsigned char wbuf[64] = {};
     unsigned long wlen = 0, wflags = 0;
     get_recorded_write(0, wbuf, &wlen, &wflags);
@@ -508,8 +508,11 @@ TEST_F(J2534AdoptionTest, DetachStopsFilterBeforeDisconnect)
     qttune_session_destroy(session);
 }
 
-/* COUPLING RULE: ?poll= without ?filter= rejected at parse time */
-TEST_F(J2534AdoptionTest, PollWithoutFilterRejectedAtParse)
+/* COUPLING RULE: ?poll= needs a channel to receive on. Under raw the
+ * profile declares none, so this is rejected — but at ATTACH, not at
+ * parse (finding 12): the rule now consults the profile's channels,
+ * which parse_query can't see. Still before any DLL load. */
+TEST_F(J2534AdoptionTest, PollWithoutChannelRejectedBeforeDllLoad)
 {
     qttune_session_t* session = nullptr;
     char uri[700];
@@ -1062,6 +1065,61 @@ TEST_F(J2534AdoptionTest, UntouchedCountUnderHardErrorReportsUnhealthy)
         }
     }
     EXPECT_TRUE(reached) << "recovery never reported (was " << le << ")";
+
+    EXPECT_EQ(qttune_session_close(session), QT_OK);
+    qttune_session_destroy(session);
+}
+
+/* FINDING 12: ?poll= under a scheduler profile overrides the rotation.
+ * The set scheduler used to be built whatever the URI said, and the
+ * worker checks sched.count before poll_pid — so ?poll=0x0C under obd2
+ * rotated all 8 PIDs and the URI's PID was silently dropped. Five
+ * consecutive writes pin it: rotation would give 0x04, 0x05, 0x0C,
+ * 0x0D, 0x0F. */
+TEST_F(J2534AdoptionTest, PollOverridesSchedulerRotation)
+{
+    char uri[700];
+    snprintf(uri, sizeof(uri),
+             "j2534://%s?profile=obd2&poll=0x0C", FAKE_J2534_DLL_PATH);
+
+    qttune_session_t* session = nullptr;
+    ASSERT_EQ(qttune_session_create(uri, &session), QT_OK);
+    EXPECT_EQ(qttune_session_signal_set(session), qttune_obd2_signal_set());
+
+    StreamCapture cap;
+    ASSERT_EQ(qttune_register_frame_callback(session, capture_cb, &cap),
+              QT_OK);
+    ASSERT_EQ(qttune_session_start(session), QT_OK);
+
+    wait_for_writes(get_write_count, 5, 200);   /* ~550 ms of 100 ms cycles */
+
+    unsigned long wc = 0;
+    get_write_count(&wc);
+    ASSERT_GE(wc, 5u) << "poll loop produced too few writes";
+
+    unsigned char wbuf[64] = {};
+    unsigned long wlen = 0, wflags = 0;
+    for (unsigned long i = 0; i < 5; ++i) {
+        get_recorded_write(i, wbuf, &wlen, &wflags);
+        ASSERT_EQ(wlen, 6u) << "write " << i;
+        EXPECT_EQ(wbuf[4], 0x01u) << "write " << i;   /* Mode 01 */
+        EXPECT_EQ(wbuf[5], 0x0Cu) << "write " << i;   /* the URI's PID */
+    }
+
+    /* The derived channel still applies: request target 7E0, padded. */
+    get_recorded_write(0, wbuf, &wlen, &wflags);
+    EXPECT_EQ(wbuf[2], 0x07u);
+    EXPECT_EQ(wbuf[3], 0xE0u);
+    EXPECT_NE(wflags & QTTUNE_PT_TX_ISO15765_FRAME_PAD, 0u);
+
+    /* And the echo still lands stripped with the 7E8 identity. */
+    wait_for_count(cap, 1, 100);
+    ASSERT_GE(cap.count.load(), 1);
+    EXPECT_EQ(cap.arbitration_ids[0], 0x7E8u);
+    EXPECT_EQ(cap.payloads[0][0], 0x41u);
+    EXPECT_EQ(cap.payloads[0][1], 0x0Cu);
+    EXPECT_EQ(cap.payloads[0][2], 0x1Fu);   /* canned RPM 2000 */
+    EXPECT_EQ(cap.payloads[0][3], 0x40u);
 
     EXPECT_EQ(qttune_session_close(session), QT_OK);
     qttune_session_destroy(session);
