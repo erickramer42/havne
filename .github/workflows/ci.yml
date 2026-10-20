@@ -10,9 +10,13 @@ on:
 permissions:
   contents: read
 
+# Every job sets timeout-minutes at roughly 3-5x its usual duration, so a
+# hung download, build or simulator fails within minutes instead of
+# holding a runner for GitHub's 6 h default.
 jobs:
   core-and-tests:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -25,9 +29,34 @@ jobs:
         run: |
           ctest --test-dir build -C Release --output-on-failure
 
+  # Core and its Qt-free tests under AddressSanitizer and
+  # UndefinedBehaviorSanitizer; LeakSanitizer runs with ASan on Linux, so
+  # a session a test forgets to destroy fails here. The J2534 suites are
+  # Windows-only, so this covers core, signals, obd2 and the C ABI check.
+  core-sanitizers:
+    runs-on: ubuntu-latest
+    needs: core-and-tests
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Build core + tests with ASan and UBSan
+        run: |
+          SAN="-fsanitize=address,undefined -fno-sanitize-recover=undefined -fno-omit-frame-pointer"
+          cmake -B build -DCMAKE_BUILD_TYPE=Debug -DQTTUNE_BUILD_CORE_ONLY=ON \
+            -DCMAKE_C_FLAGS="$SAN" -DCMAKE_CXX_FLAGS="$SAN" \
+            -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=address,undefined"
+          cmake --build build
+
+      - name: Run tests
+        env:
+          UBSAN_OPTIONS: print_stacktrace=1
+        run: ctest --test-dir build --output-on-failure --no-tests=error
+
   win-build:
     runs-on: windows-latest
     needs: core-and-tests
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -49,6 +78,7 @@ jobs:
   macos-build:
     runs-on: macos-latest
     needs: core-and-tests
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -70,6 +100,7 @@ jobs:
   linux-build:
     runs-on: ubuntu-latest
     needs: core-and-tests
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -97,6 +128,7 @@ jobs:
   android-build:
     runs-on: ubuntu-latest
     needs: core-and-tests
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -111,23 +143,44 @@ jobs:
           arch: 'android_arm64_v8a'
           extra: '--autodesktop'
 
-      # Qt 6.12 for Android wants NDK r27 and JDK 21. The runner image
-      # ships both (NDK 27.x is its ANDROID_NDK_ROOT default; JDK 21 is
-      # JAVA_HOME_21_X64), so no SDK or JDK setup action is needed.
+      # Qt 6.12 for Android wants NDK r27 and JDK 21. The Ubuntu 24.04 and
+      # 26.04 images both ship them (NDK 27.x is ANDROID_NDK_ROOT's
+      # default; JDK 21 is JAVA_HOME_21_X64), but image defaults move with
+      # image updates. Select both by version and fail clearly if either
+      # is gone, rather than building with whatever the default became.
+      - name: Select NDK r27 and JDK 21
+        run: |
+          # "|| true": with no match, ls fails, and under the runner's
+          # -eo pipefail that would exit here, before the error below.
+          NDK=$(ls -d "$ANDROID_SDK_ROOT"/ndk/27.* 2>/dev/null | sort -V | tail -n 1 || true)
+          if [ -z "$NDK" ]; then
+            echo "::error::No NDK r27 under $ANDROID_SDK_ROOT/ndk"
+            ls "$ANDROID_SDK_ROOT/ndk"
+            exit 1
+          fi
+          if [ -z "${JAVA_HOME_21_X64:-}" ]; then
+            echo "::error::JAVA_HOME_21_X64 is not set on this runner image"
+            exit 1
+          fi
+          echo "QTTUNE_NDK_ROOT=$NDK" >> "$GITHUB_ENV"
+          echo "JAVA_HOME=$JAVA_HOME_21_X64" >> "$GITHUB_ENV"
+          echo "NDK $(basename "$NDK")"
+          "$JAVA_HOME_21_X64/bin/java" -version
+
       - name: Build APK
         run: |
-          export JAVA_HOME="$JAVA_HOME_21_X64"
           ls "$(dirname "$QT_ROOT_DIR")"
           "$QT_ROOT_DIR/bin/qt-cmake" -B build \
             -DBUILD_TESTING=OFF \
             -DANDROID_SDK_ROOT="$ANDROID_SDK_ROOT" \
-            -DANDROID_NDK_ROOT="$ANDROID_NDK_ROOT"
+            -DANDROID_NDK_ROOT="$QTTUNE_NDK_ROOT"
           cmake --build build
           cmake --build build --target apk
 
   ios-build:
     runs-on: macos-latest
     needs: core-and-tests
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -171,8 +224,8 @@ jobs:
       contains(github.event.head_commit.message, '[ios-smoke]'))
     runs-on: macos-15-intel
     needs: core-and-tests
-    # A wedged simulator boot would otherwise hold the runner for 6 h.
-    timeout-minutes: 30
+    # Runs have taken 19.5-24 min on the Intel runner.
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
