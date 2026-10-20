@@ -169,8 +169,9 @@ TEST(CoreTest, UnregisterCallback) {
     /* Second unregister is also success (idempotent) */
     EXPECT_EQ(qttune_unregister_frame_callback(
         session, counting_callback, &counter), QT_OK);
-    
+
     qttune_session_close(session);
+    qttune_session_destroy(session);
 }
 
 TEST(CoreTest, UnregisterNonexistentCallbackDoesntFail) {
@@ -269,6 +270,7 @@ TEST(CoreTest, MockTransportDeliversFrames) {
 
     /* Close must join the worker without hanging */
     EXPECT_EQ(qttune_session_close(session), QT_OK);
+    qttune_session_destroy(session);
 }
 
 TEST(CoreTest, UnknownTransportUriRejected) {
@@ -316,6 +318,7 @@ TEST(CoreTest, CallbackExecutesOnTransportWorkerThread) {
     EXPECT_NE(seen_id.load(), main_id);  /* Marshaling in bridge is MANDATORY */
 
     EXPECT_EQ(qttune_session_close(session), QT_OK);
+    qttune_session_destroy(session);
 }
 
 namespace {
@@ -372,6 +375,7 @@ TEST(CoreTest, SelfUnregisterDuringLiveDispatch) {
 
     /* Quiesce: close joins worker; must not hang under reentry. */
     EXPECT_EQ(qttune_session_close(session), QT_OK);
+    qttune_session_destroy(session);
 }
 
 namespace {
@@ -424,8 +428,10 @@ TEST(CoreTest, MockFramesDecodeAgainstMockSignalSet) {
     wait_for([&cap]() { return cap.count >= MockCapture::kMaxFrames; },
              10000);
 
-    /* Close joins the worker; capture struct outlives dispatch safely */
+    /* Close joins the worker; capture struct outlives dispatch safely.
+     * Destroy here, before the ASSERTs below can return early. */
     EXPECT_EQ(qttune_session_close(session), QT_OK);
+    qttune_session_destroy(session);
 
     ASSERT_GE(cap.count, size_t{5}) << "expected several frames from mock";
 

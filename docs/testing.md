@@ -48,7 +48,7 @@ and the next run's screenshots confirmed the fixes the same day.
 | Capability | Verified by |
 |---|---|
 | Core builds with zero Qt dependencies | CI `core-and-tests` job (Ubuntu, no Qt installed), plus the configure-time link check in the root `CMakeLists.txt`. That check was verified 2026-10-20 to fire on an injected `Qt6::Core` link, in core-only and in full configures. |
-| Core and the Qt-free tests run clean under ASan and UBSan | CI `core-sanitizers` (Linux, non-blocking; added 2026-10-20, **not yet run**) |
+| Core and the Qt-free tests run clean under ASan and UBSan | CI `core-sanitizers` (Linux, non-blocking). First run, 2026-10-20 (`8dcba3a`): 69/74 passed, with no memory errors and no UBSan reports. The 5 failures were LeakSanitizer reports on tests that closed their session but never destroyed it, and those tests are now fixed. The fix has passed MSVC ASan locally (no leak detection) and is **awaiting a green CI run**. |
 | Public C ABI headers are valid strict C | `c_abi` |
 | Callback registration: dedup, idempotent unregister, reentrant register/unregister during dispatch | `CoreTest` |
 | Callbacks run on the worker thread | `CoreTest`, through `qttune_session_start` |
