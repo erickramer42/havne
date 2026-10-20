@@ -22,7 +22,8 @@ indexing bug lived in QML paint code, and every C++ test was blind to
 it. The simulator screenshots caught two more layout bugs on their
 first good run (2026-10-20). The Home status card was off-centre. And
 the compact layout's tab bar, which only narrow windows show, said
-"Setup" for the page the sidebar calls "Settings".
+"Setup" for the page the sidebar calls "Settings". Both were fixed,
+and the next run's screenshots confirmed the fixes the same day.
 
 ## Suites
 
@@ -72,7 +73,7 @@ the compact layout's tab bar, which only narrow windows show, said
 | Full app builds, and ctest passes, on Windows (MSVC 2022), macOS (AppleClang) and Linux (GCC), Qt 6.12.0 | CI `win-build`, `macos-build`, `linux-build` |
 | Android arm64-v8a APK builds and packages (NDK r27, JDK 21) | CI `android-build` (build only; first green 2026-10-20) |
 | iOS arm64 device build compiles and links, unsigned | CI `ios-build` (build only; first green 2026-10-20) |
-| iOS app launches on the Simulator, stays up, and draws: Qt Quick on Metal ("Apple iOS simulator GPU"), on a 375×667 pt iPhone SE-class device | CI `ios-simulator-smoke`, 2026-10-20 (`4be8ba5`: both shots drawn; the first run's single shot was blank) |
+| iOS app launches on the Simulator, stays up, and draws: Qt Quick on Metal ("Apple iOS simulator GPU"), on a 375×667 pt iPhone SE-class device | CI `ios-simulator-smoke`, 2026-10-20 (`4be8ba5` and `a0f5c0f`: both shots drawn; the first run's single shot was blank) |
 | Transport adoption: `?filter=` registers a FLOW_CONTROL filter; `?txid=` selects the transmit ID; `?poll=` drives a Mode-01 loop; header strip + arbitration_id stamp; filter stopped on detach; gating discards non-matching frames; poll-without-filter rejected at parse | `J2534AdoptionTest` |
 | A blocked vendor `PassThruOpen` fails at the (shrunken) handshake timeout with the child alive, not wedged | `J2534SurrogateTest.BlockedVendorOpenFailsAtHandshakeTimeout` |
 | Spec-spelling export resolution (`PassThruIoctl` primary, legacy `PassThruIoCtl` fallback), both backends | `FakeFixture.SpecSpellingPassThruIoctlResolvesAndWorks` (spec fake, primary path) plus the whole existing suite against the legacy-spelling fake (fallback path) |

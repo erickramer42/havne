@@ -69,16 +69,15 @@ next.
     the BENCH prep list) is still ahead.
   - **Tests:** 139 ctest cases, all passing locally on 2026-10-20
     (Windows/MSVC 2022, both trees rebuilt), plus the cross-arch
-    subset (16/16). CI was green on all seven jobs at `923f479`
-    (2026-10-20, run #73, link-health changes included). That run
-    covers ctest on Windows, macOS and Linux, plus the Android and iOS
-    device cross-builds. `ios-simulator-smoke` passed too, but its
-    first screenshot was blank. The second run (`4be8ba5`) drew the
-    app on Metal by 15 s and showed two layout bugs. Both were fixed
-    the same day but haven't been re-smoked. The job runs on pull
-    requests and on request, not on every push, because it adds about
-    10 min. The cross-arch routing case skips unless its environment
-    variables are set. J2534 suites
+    subset (16/16). CI was green on all seven jobs at `a0f5c0f`
+    (2026-10-20, run #78). That run covers ctest on Windows, macOS and
+    Linux, the Android and iOS device cross-builds, and the simulator
+    smoke, which drew the app at 15 s and 45 s. The smoke's first run
+    (`923f479`) gave a blank frame. Its second (`4be8ba5`) drew and
+    showed two layout bugs, and `a0f5c0f` confirmed both fixes. The
+    smoke runs on pull requests and on request, not on every push,
+    because it roughly doubles CI time. The cross-arch routing case
+    skips unless its environment variables are set. J2534 suites
     carry a 30 s per-test timeout — a hang fails bounded instead of
     wedging the runner (2026-10-17 F1 fallout). Tiers, suites and
     gaps are in [docs/testing.md](docs/testing.md).

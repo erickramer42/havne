@@ -40,7 +40,7 @@ Dates are commit dates.
 | 2026-10-19 | Single-threaded surrogate, batched `OP_READ`, ring retired ([ADR-0014](adr/0014-single-threaded-surrogate.md)); read-status split in both backends (#11 partial); #17 resolved by removal | `0b43261` |
 | 2026-10-19 | Surrogate replies to shutdown (#27); missing exports named again; `REG_EXPAND_SZ` expansion; job assignment checked | `4b1635d` |
 | 2026-10-19 | Timeout-tagged read batches delivered (#26); surrogate open path hardened; timestamped, change-only child log; ID-0 presence flags | `37d770d` |
-| 2026-10-20 | CI on all five targets: Linux full build; Android arm64 and iOS device cross-builds; iOS Simulator launch smoke with screenshots, on pull requests and on request (#3 closed; #30 opened and resolved the same day) | `4dd15ca`, `a430af7`, `923f479`, `f282275`, `4be8ba5` |
+| 2026-10-20 | CI on all five targets: Linux full build; Android arm64 and iOS device cross-builds; iOS Simulator launch smoke with screenshots, on pull requests and on request (#3 closed; #30 opened and resolved the same day) | `4dd15ca`, `a430af7`, `923f479`, `f282275`, `4be8ba5`, `a0f5c0f` |
 
 ## Lessons learned
 
