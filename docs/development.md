@@ -275,7 +275,7 @@ skips.
 | Linker warning LNK4070 on a fake DLL | The `.def` file's `LIBRARY` directive disagrees with the output filename. Make them match. |
 | A mobile build fails during test discovery, or tries to run a test binary | `BUILD_TESTING` is on. Cross builds must pass `-DBUILD_TESTING=OFF` (see Mobile above). |
 | Re-running a skipped `ios-simulator-smoke` skips it again | A re-run replays the original event and commit, so the job's condition comes out the same. Push a commit whose message contains `[ios-smoke]` (an empty one works), or dispatch the workflow. |
-| `ios-simulator-smoke` passes, but the app screenshots are blank | Known Issue #30. Compare them with `home.png`, and check the printed stderr for `QSG_INFO` lines. #30 maps each combination to a cause. |
+| `ios-simulator-smoke` passes, but the app screenshots are blank | Seen once, on the first run (2026-10-20). That run launched the app straight after a cold boot, and the frame was blank at 15 s. With the boot overlapping the build, the next run drew by 15 s. If it recurs: a blank `home.png` means the runner's simulator display is at fault. No `QSG_INFO` lines in stderr means the window was never exposed. `QSG_INFO` present with blank shots means frames aren't reaching the screen, so try another `QSG_RHI_BACKEND`. A blank 15 s shot with a drawn 45 s shot means a slow first frame. |
 | `ios-simulator-smoke` fails with "qttune exited within 45 s", and the printed stderr says `Failed to initialize graphics backend` | Qt Quick couldn't get a Metal device from the runner VM. Check the boot step's `system_profiler` output. Before suspecting the app, try `SIMCTL_CHILD_QSG_RHI_BACKEND=opengl` on the launch line. |
 | `ios-simulator-smoke` fails with "No available iPhone simulator on iOS 18 or later" | The runner image dropped its iOS 18+ runtimes, or the job moved to a runner without them. The step prints the available devices. |
 
@@ -313,13 +313,14 @@ shows that button only when `main`'s copy of `ci.yml` has the
 | `linux-build` | Ubuntu, GCC | Builds the full app, then runs ctest |
 | `android-build` | Ubuntu → Android arm64-v8a | Cross-builds and packages the APK. Build only, no tests. |
 | `ios-build` | macOS (arm64) → iOS device (arm64) | Unsigned device build with the Xcode generator. Build only, no tests. |
-| `ios-simulator-smoke` | macOS 15 Intel → iOS Simulator (x86_64) | **On request only for now** (Known Issue #30): runs when the pushed commit's message contains `[ios-smoke]`, or on manual dispatch; skipped otherwise. Boots the newest iOS 18+ iPhone while the app builds, then installs and launches the app. Passes if QML loaded and the app is still running 45 s later. Uploads the `ios-simulator-smoke` artifact: a home-screen control shot, app shots at 15 s and 45 s, the app's stdout/stderr (with `QSG_INFO`), plus crash reports on failure. The job log also prints the stderr. |
+| `ios-simulator-smoke` | macOS 15 Intel → iOS Simulator (x86_64) | Runs on pull requests, when the pushed commit's message contains `[ios-smoke]`, or on manual dispatch. Skipped on other pushes. Boots the newest iOS 18+ iPhone while the app builds, then installs and launches the app. Passes if QML loaded and the app is still running 45 s later. Uploads the `ios-simulator-smoke` artifact: a home-screen control shot, app shots at 15 s and 45 s, the app's stdout/stderr (with `QSG_INFO`), plus crash reports on failure. The job log also prints the stderr. |
 
-The smoke job proves the app starts and stays up. It doesn't prove
-the app drew anything, tap through the UI, or connect a session. It
-runs on an Intel runner because Qt's simulator libraries are x86_64
-only (Known Issue #29). It took 19.5 min on its first run, against
-about 11 min for the rest of CI.
+The smoke job's pass/fail proves the app starts and stays up. Only
+the screenshots show that it drew anything. It doesn't tap through
+the UI or connect a session. It runs on an Intel runner because Qt's
+simulator libraries are x86_64 only (Known Issue #29). Its first two
+runs took 19.5 and 21.5 min, against about 11 min for the rest of CI,
+so ordinary pushes skip it.
 
 **Kit names that moved:** since Qt 6.7 the Linux desktop arch is
 `linux_gcc_64`, and `gcc_64` no longer resolves for 6.12.0. Android

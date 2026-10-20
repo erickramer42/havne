@@ -1,7 +1,8 @@
 // File/layer: app/qml/HomePage.qml | Qt6 Quick, UI layer
 // Testing: manual smoke — logo renders centered at 96px, bars animate
-//          inside it, status dot reflects link state, button lands on
-//          LiveView after connect
+//          inside it, status card centered (the hint line below is the
+//          column's widest item), status dot reflects link state, button
+//          lands on LiveView after connect
 
 import QtQuick
 import QtQuick.Layouts
@@ -101,6 +102,7 @@ Rectangle {
 
         // Status card: session and link state, core version
         Rectangle {
+            Layout.alignment: Qt.AlignHCenter
             Layout.topMargin: 16
             Layout.preferredWidth: 280
             Layout.preferredHeight: 48

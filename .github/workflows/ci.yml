@@ -157,14 +157,15 @@ jobs:
   # after that this needs Rosetta plus the universal iOS platform, or
   # arm64 simulator libraries from Qt.
   #
-  # On request only until its blank screenshot is explained (Known Issue
-  # #30); otherwise it shows as skipped. Request it with "[ios-smoke]"
-  # in the pushed commit's message, or with Actions > CI > Run workflow.
-  # That button appears only once main's copy of this file has
-  # workflow_dispatch. A re-run replays the original event, so re-running
-  # a skipped smoke skips it again.
+  # Runs on pull requests and on request, not on every push: it takes
+  # ~20 min against ~11 min for the rest of CI. Request it with
+  # "[ios-smoke]" in the pushed commit's message, or with Actions > CI >
+  # Run workflow (that button appears only once main's copy of this file
+  # has workflow_dispatch). A re-run replays the original event, so
+  # re-running a skipped smoke skips it again.
   ios-simulator-smoke:
     if: >-
+      github.event_name == 'pull_request' ||
       github.event_name == 'workflow_dispatch' ||
       (github.event_name == 'push' &&
       contains(github.event.head_commit.message, '[ios-smoke]'))
@@ -185,7 +186,9 @@ jobs:
           extra: '--autodesktop'
 
       # Newest available iPhone on iOS 18 or later (Qt 6.12's floor). It
-      # boots while the app builds; "Wait for simulator" joins it.
+      # boots while the app builds; "Wait for simulator" joins it. That
+      # also keeps the launch off a simulator still settling after a
+      # cold boot, the likely cause of the first run's blank frame.
       - name: Pick and start simulator
         run: |
           UDID=$(xcrun simctl list devices available --json | jq -r '
@@ -222,7 +225,7 @@ jobs:
           system_profiler SPDisplaysDataType | grep -iE 'chipset|metal' || true
           mkdir -p smoke
           # Control shot before the app exists: if the home screen is
-          # blank too, the runner's simulator display is at fault (#30).
+          # blank too, the runner's simulator display is at fault.
           xcrun simctl io "$UDID" screenshot smoke/home.png || true
 
       # main() returns -1 when QML fails to load, and a scene graph that
