@@ -1,4 +1,6 @@
 // File/layer: app/qttunebridge.cpp | Qt6 Core, app layer, C++17
+// Testing: test_bridge already covers updateValues emissions; AgeMsRole added
+//          to dataChanged signal so QML can bind opacity without a page timer.
 
 #include "qttunebridge.h"
 #include "qttune/version.h"
@@ -184,6 +186,14 @@ void SignalListModel::setSignalSet(const QttuneSignalSet* set)
     m_clock.restart();
 }
 
+void SignalListModel::refreshAges()
+{
+    if (m_entries.empty()) return;
+    emit dataChanged(index(0),
+                     index(static_cast<int>(m_entries.size()) - 1),
+                     {AgeMsRole});
+}
+
 void SignalListModel::updateValues(const std::vector<std::pair<uint16_t, float>>& values,
                                    qint64 timestampMs)
 {
@@ -205,7 +215,7 @@ void SignalListModel::updateValues(const std::vector<std::pair<uint16_t, float>>
                 e.value = pair.second;
 
                 // Evict-oldest ring push — bounded memory, stream never
-                // freezes; mirrors the FrameListModel philosophy.
+                // freezes; mirrors the FrameListModel ring philosophy.
                 e.history[e.histHead].timestampMs = stamp;
                 e.history[e.histHead].value = pair.second;
                 e.histHead = (e.histHead + 1) % HistoryCapacity;
@@ -219,7 +229,10 @@ void SignalListModel::updateValues(const std::vector<std::pair<uint16_t, float>>
         }
     }
     if (firstRow >= 0) {
-        emit dataChanged(index(firstRow), index(lastRow), {ValueRole, HasValueRole});
+        // Finding 14: emit AgeMsRole alongside ValueRole/HasValueRole so
+        // delegates can compute opacity from ageMs instead of a page clock.
+        emit dataChanged(index(firstRow), index(lastRow),
+                         {ValueRole, HasValueRole, AgeMsRole});
         // One emission per batch — the strip chart's sole repaint trigger.
         emit valuesUpdated();
     }
@@ -277,6 +290,11 @@ QtTuneBridge::QtTuneBridge(QObject* parent)
 
     connect(m_coalesceTimer, &QTimer::timeout, this, [this]() {
         pollLinkHealth();   // every tick while connected — transitions only
+        // Must fire even when nothing arrived this window: dimming exists
+        // for rows that STOPPED updating (finding 14). 100 ms is well
+        // inside the 3 s dim threshold and the span emission is one
+        // signal for the whole model.
+        m_signalModel->refreshAges();
         if (!m_stagingBuffer.empty()) {
             m_signalModel->updateValues(m_stagingBuffer);
             m_stagingBuffer.clear();

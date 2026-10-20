@@ -93,10 +93,13 @@ public:
         SubscribedRole,
         HasValueRole,   /* appended: false until the first sample, so
                          * QML can show "—" instead of a fake 0 for an
-                         * unsupported PID. No QML binds it yet. */
+                         * unsupported PID. Notified per batch;
+                         * LiveView binds it. */
         AgeMsRole       /* appended: -1 = never arrived; else ms since
                          * the last sample, for dimming stale values.
-                         * No QML binds it yet. */
+                         * Notified per batch and on every coalesce
+                         * tick via refreshAges(); LiveView binds it
+                         * (finding 14, code review 2026-10-20). */
     };
 
     int rowCount(const QModelIndex& parent = {}) const override;
@@ -120,6 +123,14 @@ public:
     // valuesUpdated batch (~10 Hz). One call per repaint instead of per-row
     // role lookups keeps the QML side free of role-number hacks.
     Q_INVOKABLE QVariantList chartData() const;
+
+    /* Periodic age refresh (finding 14): ageMs is computed lazily from
+     * the internal clock, but dataChanged only fires on updateValues —
+     * so a stalled signal's row never re-evaluates and never dims, the
+     * exact row dimming exists for. Emits dataChanged over ALL rows for
+     * AgeMsRole ONLY: views re-query data(), which recomputes elapsed
+     * time. No value/hasValue churn, no reset. */
+    void refreshAges();
 
 signals:
     void valuesUpdated();

@@ -14,7 +14,7 @@ where the gaps are. For build and run commands, see
 | **Cross-arch** | HARNESS with an x64 test process driving an x86 surrogate and an x86 fake | Dev machine only; needs environment variables ([development.md](development.md#running-tests)) |
 | **Simulator smoke** | The iOS app installs and launches on the iOS Simulator, QML loads, and the app is still running 45 s later. Nothing drives the UI. A pass doesn't prove the app drew anything, so look at the screenshots. | CI on pull requests, and on request: `[ios-smoke]` in the commit message, or manual dispatch (`ios-simulator-smoke`, Intel macOS runner) |
 | **Manual smoke** | Running the app: layout, LiveView, strip chart, Settings picker against the live registry | Dev machine |
-| **BENCH** | A real vendor DLL and adapter, no vehicle | First formal session complete, 2026-10-16, quiet bus ([session sheet](bench-sessions/2026-10-16.md)); talking-bus behaviors pending |
+| **BENCH** | A real vendor DLL and adapter, no vehicle | First formal session complete, 2026-10-16, quiet bus ([session sheet](bench-sessions/2026-10-16.md)); informal quiet-bus follow-up 2026-10-20 ([note](bench-sessions/2026-10-20.md)); talking-bus behaviors pending |
 | **Vehicle** | A live, read-only vehicle session | **Not yet reached** |
 
 The manual smoke tier earns its place. The 2026-10-10 strip-chart
@@ -76,11 +76,12 @@ and the next run's screenshots confirmed the fixes the same day.
 | Android arm64-v8a APK builds and packages (NDK r27, JDK 21) | CI `android-build` (build only; first green 2026-10-20) |
 | iOS arm64 device build compiles and links, unsigned | CI `ios-build` (build only; first green 2026-10-20) |
 | iOS app launches on the Simulator, stays up, and draws: Qt Quick on Metal ("Apple iOS simulator GPU"), on a 375×667 pt iPhone SE-class device | CI `ios-simulator-smoke`, 2026-10-20 (`4be8ba5` and `a0f5c0f`: both shots drawn; the first run's single shot was blank) |
-| Transport adoption: `?filter=` registers a FLOW_CONTROL filter; `?txid=` selects the transmit ID; `?poll=` drives a Mode-01 loop; header strip + arbitration_id stamp; filter stopped on detach; gating discards non-matching frames; poll-without-filter rejected at parse | `J2534AdoptionTest` |
+| Transport adoption: `?filter=` registers a FLOW_CONTROL filter; `?txid=` selects the transmit ID; `?poll=` drives a Mode-01 loop; header strip + arbitration_id stamp; filter stopped on detach; gating discards non-matching frames; `?poll=` with no channel (`raw`, no `?filter=`) rejected at attach, before any DLL load | `J2534AdoptionTest` |
+| `?poll=` outranks the profile's rotation: under `obd2`, five consecutive writes all request the URI's PID, to the derived 7E0 channel, and the reply decodes with the 7E8 identity | `J2534AdoptionTest.PollOverridesSchedulerRotation` |
 | A blocked vendor `PassThruOpen` fails at the (shrunken) handshake timeout with the child alive, not wedged | `J2534SurrogateTest.BlockedVendorOpenFailsAtHandshakeTimeout` |
 | Spec-spelling export resolution (`PassThruIoctl` primary, legacy `PassThruIoCtl` fallback), both backends | `FakeFixture.SpecSpellingPassThruIoctlResolvesAndWorks` (spec fake, primary path) plus the whole existing suite against the legacy-spelling fake (fallback path) |
 | Real-adapter lifecycle: OBDX Pro VX loads through the x86 surrogate, opens with USB power (vendor status 0), clean spawn/exit with disconnect, async connect keeps the UI responsive | BENCH session 2026-10-16, phase 1 |
-| The 8-byte FLOW_CONTROL filter shape (prep #1, `fc_len == mask_len` workaround) is accepted by a real vendor — behaviorally, since the child didn't yet log filter ops (Known Issue #23). The 4-byte shape has since replaced it and hasn't met hardware. Quiet-bus read loop at <1% CPU, zero spurious frames | BENCH session 2026-10-16, phase 2 |
+| The 8-byte FLOW_CONTROL filter shape (prep #1, `fc_len == mask_len` workaround) is accepted by a real vendor — behaviorally, since the child didn't yet log filter ops (Known Issue #23). The 4-byte shape that replaced it was accepted on 2026-10-20 (row below). Quiet-bus read loop at <1% CPU, zero spurious frames | BENCH session 2026-10-16, phase 2 |
 | Single-threaded surrogate child ([ADR-0014](adr/0014-single-threaded-surrogate.md)): the whole surrogate and routing suite on the redesigned child, same-arch and cross-arch (x64 test → x86 surrogate → x86 fake) | `J2534SurrogateTest`, `J2534RoutingTest` (2026-10-19, both trees rebuilt: full suite 136/136, cross-arch subset 15/15) |
 | A transaction that times out doesn't put later replies out of step | `J2534SurrogateTest.TimedOutOpDoesNotDesyncNextRequest` |
 | Profile registry: string-keyed lookup, null-set-is-success ("raw"), unknown names fail, last-registration wins | `CoreTest.Profile*` |
@@ -90,7 +91,9 @@ and the next run's screenshots confirmed the fixes the same day.
 | Channel derivation: a bare `j2534://` URI under `obd2` registers the 7E8 filter with exact mask/pattern shape, sends to 7E0, and starts; a lone `?txid=` keeps the derived 7E8 filter but rewrites the request target | `J2534AdoptionTest.BareJ2534UriDerivesObd2ChannelAndStarts`, `.TxidOverrideRewritesDerivedTransmitTarget` |
 | Link health (in-proc): a hard read failure records `QT_ERR_TRANSPORT_HARD_FAILURE` with one episode per outage and recovers through the probe write; a quiet bus debounces to `QT_ERR_VEHICLE_TIMEOUT` with no episode | `J2534AdoptionTest.HardFailureSetsCanonicalErrorAndRecovers`, `.QuietBusDebouncesToVehicleTimeoutWithoutEpisode` |
 | A batch the vendor returns with `ERR_TIMEOUT` is delivered through the surrogate; an empty one maps to a vehicle timeout | `J2534SurrogateTest.SpecTimeoutReadDeliversPartialBatch` (spec-mode fake) |
-| Link-health UI: quiet/fault/degraded banner, activity-log transitions, "—" cells, stale dimming, arbId column | Manual smoke, 2026-10-20 (fake quiet/fault via `QTTUNE_FAKE_READ_STATUS`; mock; recipe above) |
+| A vendor that returns a hard error with the message count untouched delivers no frames: in-proc, the session reports a hard failure, dispatches nothing and recovers once reads are honest; through the surrogate, the read maps to a hard failure and the next request still correlates | `J2534AdoptionTest.UntouchedCountUnderHardErrorReportsUnhealthy`, `J2534SurrogateTest.HardErrorUntouchedCountDeliversNoFrames` (`QTTUNE_FAKE_UNTOUCHED_COUNT_STATUS`) |
+| Signal freshness: `ageMs` is -1 before the first sample and a sane clock delta after; `updateValues` notifies `AgeMsRole`; `refreshAges()` notifies `AgeMsRole` alone, over every row, so a stalled row re-evaluates | `BridgeTest.AgeMsRoleEmittedAndRefreshesWhileStalled` |
+| Link-health UI: quiet/fault/degraded banner, activity-log transitions, "—" cells | Manual smoke, 2026-10-20 (fake quiet/fault via `QTTUNE_FAKE_READ_STATUS`; mock; recipe below). The same smoke recorded stale dimming and the arbId column as working, but neither could work as coded then (code review 2026-10-20, findings 13 and 14; see the recipe notes). Both have since been fixed in code but not re-run. |
 | Fault state on real hardware, clean teardown; 4-byte filter shape accepted with logged vendor status 0 | Informal bench observation 2026-10-20 ([sheet](bench-sessions/2026-10-20.md)) |
 
 ## Manual smoke — link-health UI
@@ -103,35 +106,44 @@ mid-session only works in-proc):
 
 | Goal | Environment | URI | Expected |
 |---|---|---|---|
-| Baseline, dimming | — | `mock://demo` | Values stream; slow signals (IAT) dim past 3 s |
 | Quiet banner | `QTTUNE_FAKE_READ_STATUS=9` | `j2534://<fake.dll>?profile=raw&filter=0x7E8` | Amber "Vehicle not responding" after ~1.2 s; no frames, empty signal list (raw profile) |
 | Fault banner | `QTTUNE_FAKE_READ_STATUS=7` | same | Red "Adapter fault" banner with episode count; clearing the knob mid-session recovers only in-proc |
-| Frames + arbId column | — | `j2534://<fake.dll>?profile=raw&filter=0x7E8&poll=0x0C` | Frames on LogPage with `0x7E8` in the ID column, payload `410c1f40` (2000 RPM canned); link ok |
+| Frames + arbId column | — | `j2534://<fake.dll>?profile=raw&filter=0x7E8&poll=0x0C` | Frames on LogPage with `0x7E8` in the ID column, payload `410c1f40` (2000 RPM canned); link ok. **Re-run required:** finding 13's binding was fixed in `1674f5c`, after this row was recorded. |
+| Dimming baseline | — | `mock://demo` | Values stream at full opacity, steady ones (IAT) included, because every mock signal arrives every 50 ms. Only a signal that stops arriving dims, 3 s after its last sample. **Re-run required:** the 2026-10-20 run expected IAT to dim, which was finding 14 itself; dimming now follows the model's `ageMs`, refreshed every 100 ms tick. |
 | Disconnect reset | after any of the above | Disconnect | Home dot and Settings label show plain disconnected, not the last session's fault/quiet |
 
 All four states (ok/quiet/fault/disconnected) were verified 2026-10-20,
 plus the fault state on the OBDX Pro VX quiet bus (BENCH,
-[bench-sessions/2026-10-20.md](bench-sessions/2026-10-20.md)).
+[bench-sessions/2026-10-20.md](bench-sessions/2026-10-20.md)). The
+dimming and arbId rows were recorded as passing in the same run, but
+the code couldn't produce either result (findings 13 and 14 in the
+2026-10-20 code review), so treat both as unverified. Both findings
+have since been fixed in code; re-run both rows.
 
 ## Gaps (not verified)
 
 - **BENCH coverage stops at the quiet bus.** The formal session
   (2026-10-16) verified load, open, and acceptance of the since-replaced
   8-byte filter shape; an informal 2026-10-20 observation additionally
-  confirmed the current 4-byte shape (logged vendor status 0) and the
-  fault-banner path on the VX. Still unverified against real hardware:
-  talking-bus behavior (request framing, checksum expectations,
-  timestamp units), VBATT, ReadMsgs timeout-vs-error discrimination
-  (#11), and any vendor status on filter registration itself. That
-  session inferred acceptance; the child now logs the vendor's filter
-  status, so the next session can record it (#23).
-- **Link-health coverage is partial.** The two in-proc tests above
-  drive `QTTUNE_FAKE_READ_STATUS` through the worker. Not covered:
-  - the surrogate path's health mapping, end to end;
+  confirmed the current 4-byte shape (logged vendor status 0), the
+  first accepted Mode-01 request, and the fault-banner path on the VX.
+  Still unverified against real hardware: talking-bus behavior
+  (replies to requests, checksum expectations, timestamp units),
+  VBATT, and whether a vendor ever pairs `ERR_TIMEOUT` with data
+  (#11).
+- **Link-health coverage is partial.** The in-proc tests above drive
+  `QTTUNE_FAKE_READ_STATUS` and `QTTUNE_FAKE_UNTOUCHED_COUNT_STATUS`
+  through the worker. Not covered:
+  - the surrogate path's health mapping through the worker, end to
+    end (the surrogate test stops at `read_frame`'s status);
   - backoff growth: the hard-failure test also passes with the old
-    reset-to-base backoff;
-  - a vendor that leaves the message count untouched on error, because
-    the knob always zeroes it (code review 2026-10-20, finding 1);
+    reset-to-base backoff (finding 4);
+  - write failures: no passing test arms a failing write, so the
+    no-ACK bus (findings 6 and 15) is untested.
+    `QTTUNE_FAKE_WRITE_STATUS` exists for this;
+  - `QT_ERR_REQUEST_FAILED` (10), the code reserved for finding 15:
+    nothing publishes it yet, and the bridge has no `linkState` for
+    it, so it would show as `degraded`;
   - the real-vendor flavors on a talking bus: the VX quiet bus was
     observed once (2026-10-20: empty reads return `NOERROR` with zero
     messages; writes fail `ERR_FAILED` after ~8 cycles on a no-ACK
@@ -148,6 +160,8 @@ plus the fault state on the OBDX Pro VX quiet bus (BENCH,
   once instead of waiting out the timeout, and it skips filter gating.
   The worker never reads with timeout 0, so the `ERR_BUFFER_EMPTY`
   mapping is reachable only through `QTTUNE_FAKE_READ_STATUS=0x10`.
+  A vendor that leaves its outputs untouched on error is modelled
+  since 2026-10-20 (`QTTUNE_FAKE_UNTOUCHED_COUNT_STATUS`).
 - **ID 0 handling is untested.** The child now tracks open device and
   channel with flags instead of treating ID 0 as "none", but the fake
   always returns device 1 and channel 0x55.
@@ -160,8 +174,9 @@ plus the fault state on the OBDX Pro VX quiet bus (BENCH,
   the child is still alive, so an early exit would go unnoticed.
 - **Profile-derived channels against a real vendor.** The
   derived-filter shape and per-PID request routing are
-  fake-verified; whether the VX accepts them is the natural first
-  item for the next bench sheet.
+  fake-verified. On 2026-10-20 a bare `j2534://` URI got the derived
+  filter and its first request accepted by the VX, but no ECU
+  answered, so the receive side is unverified.
 - **No live vehicle has been connected.**
 - **Vendor conformance to J2534-1 v04.04 is unknown.** The shared
   types header is verified against public references, but only a real
