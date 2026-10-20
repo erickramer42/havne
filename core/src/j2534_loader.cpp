@@ -536,6 +536,9 @@ qttune_status_t qttune_j2534_read_frame(qttune_j2534_handle_t* handle,
     PASSTHRU_MSG msg = {};
     unsigned long num = 1;
     long rc = handle->read_msgs(channel, &msg, &num, timeout_ms);
+    num = qttune_trusted_count(rc, num);   /* finding 1: dirty count
+                                               under a hard error is
+                                               not a delivered frame */
 
     if (num == 0) {
         *got_frame = false;

@@ -26,6 +26,38 @@
 #define QTTUNE_PT_STATUS_TIMEOUT    0x09L
 #define QTTUNE_PT_STATUS_BUFFER_EMPTY 0x10L
 
+/* Finding 1 (code review 2026-10-20): trust rule for vendor-reported
+ * message counts.
+ *
+ * Some vendors leave pNumMsgs (and the caller's message buffer)
+ * untouched when returning an error, so a nonzero count under a hard
+ * error is not evidence any message was written. Observed live on the
+ * OBDX Pro VX quiet bus: "OP_WRITE: status 7, written 1"
+ * (bench-sessions/2026-10-20.md). Only these statuses carry a count
+ * the caller may trust:
+ *
+ *   STATUS_NOERROR       - all requested messages read
+ *   ERR_TIMEOUT          - partial batch already copied (J2534-1)
+ *   ERR_BUFFER_OVERFLOW  - pNumMsgs = messages actually copied
+ *
+ * Every other status (ERR_FAILED, ERR_BUFFER_EMPTY, device errors,
+ * ...) means "assume nothing was written". Applies to ReadMsgs; the
+ * write-side count is only ever logged, never consumed, and the raw
+ * pair is deliberately preserved in logs (it is diagnostic evidence
+ * of exactly this vendor behavior).
+ */
+static inline unsigned long qttune_trusted_count(unsigned long status,
+                                                 unsigned long reported)
+{
+    switch (status) {
+    case QTTUNE_PT_STATUS_NOERROR:
+    case QTTUNE_PT_STATUS_TIMEOUT:
+        return reported;
+    default:
+        return 0;
+    }
+}
+
 /* ---- ProtocolIDs (J2534-1 v04.04, VERIFIED) ----
  * 0x05 is raw CAN; ISO 15765 (ISO-TP) is 0x06. Connecting with 0x05
  * opens an unfiltered raw-CAN channel instead. */

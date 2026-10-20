@@ -19,7 +19,8 @@ next.
 
 - **Works:**
   - The mock transport drives the live frame log, LiveView and the
-    strip chart.
+    strip chart with a scripted drive cycle: 2nd- and 3rd-gear pulls
+    to the rev limiter, then a quarter-mile run.
   - J2534 runs end to end against the fake vendor DLL, both in-proc
     and through the x86 surrogate. That includes write/ioctl/filter
     relay on both backends and transport adoption: filters, the Mode-01
@@ -147,7 +148,7 @@ Contracts along this path:
 |---|---|---|
 | Core sessions and callbacks | Stable. The frame ABI and close/destroy split changed in v0.3.0-dev. | [ADR-0002](docs/adr/0002-callback-pair-identity-snapshot-dispatch.md), [ADR-0006](docs/adr/0006-frame-abi-v0.3.md) |
 | Signal decode | Linear scaling; Intel byte order by default, big-endian for byte-aligned fields; gated on message ID plus mux key. Two signal sets, `mock` and `obd2`, chosen by profile. | [ADR-0004](docs/adr/0004-signal-decoding-model.md), [ADR-0013](docs/adr/0013-protocol-profiles.md) |
-| Mock transport | Simulates idle RPM with rev blips, coolant warm-up, trailing intake temperature, and coupled throttle/load. Every frame decodes against the mock set. | — |
+| Mock transport | A scripted ~2-minute drive cycle on a small vehicle model (`core/src/mock_drive_cycle.h`): cold-start warm-up, a 2nd-gear WOT pull from ~1550 rpm to the 7000 rpm limiter with a 5 s hold, a longer and hotter 3rd-gear pull with the same hold, then a quarter-mile run from a standstill (~13.4 s, ~176 km/h trap). Every tick of the cycle round-trips through the mock set in `CoreTest.MockDriveCycle*`. | — |
 | Bridge and models | Frame log with sort toggle; coalesced signal model with a 120-sample history per signal; device discovery for the picker; link-health polling (#11) | [ADR-0003](docs/adr/0003-backpressure-bounds-in-flight-frames.md), [ADR-0005](docs/adr/0005-coalesced-signal-updates.md) |
 | QML pages | Home, Live (table and strip chart), Log, Settings (device picker plus manual URI). Dashboard is a placeholder. | — |
 | J2534 | HARNESS-verified, same-arch and cross-arch, including transport adoption (ADR-0012) and profile-derived channels (ADR-0013). BENCH: one adapter, quiet bus. | [docs/j2534.md](docs/j2534.md) |
@@ -291,12 +292,6 @@ an issue is resolved it is removed, and its number is not reused.
    coalesce batch before real-data rates arrive.
 8. **`CoreTest.SessionStartWithoutTransportFails` is a `SUCCEED()`
    stub.** Implement it or delete it.
-9. **The mock has no scripted drive cycle.** One candidate is a
-   2nd-gear WOT pull with a 2→3 shift. It needs `SimState` physics
-   changes and updated ranges in
-   `MockFramesDecodeAgainstMockSignalSet`. The preferred end goal is a
-   2nd-gear WOT pull, slow down, a 3rd-gear WOT pull, slow down, then a
-   60–130 mph pull.
 10. **Strip-chart x-axis resolution is one coalesce window, about
     100 ms.** Per-sample timestamps need decoding to move onto the
     worker.
@@ -446,7 +441,6 @@ matter most — CAN-era targets need none of it.
   mock frame data
 - Save data logs to a file, once live vehicle data shows on LiveView
 - Run the mobile apps on a real device and the Android emulator (#2)
-- A scripted mock drive cycle (#9)
 - Distinguish refused vendor open (a status code) from load failure in
   the URI-facing error text — today both surface as
   "failed to load transport library"

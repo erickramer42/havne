@@ -134,6 +134,14 @@ static int handle_op_read(unsigned long channel, uint32_t timeout_ms,
     unsigned long num = QTTUNE_SUR_MAX_FRAMES_PER_READ;
     const long rc = g_read_msgs(g_channel, s_read_batch, &num, timeout_ms);
 
+    /* Finding 1: trust the count only under the status allowlist. A
+       vendor may leave pNumMsgs untouched on error (VX observed:
+       "status 7, written 1", bench 2026-10-20). A dirty count is
+       doubly dangerous here: s_read_batch is static and never
+       cleared, so it would replay the PREVIOUS read's frames as
+       phantoms. */
+    num = qttune_trusted_count(rc, num);
+
     /* Frames are collected whatever the status: per J2534-1 a read that
      * asks for N messages with a nonzero timeout returns ERR_TIMEOUT
      * together with however many arrived, so on a conforming vendor the

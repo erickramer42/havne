@@ -108,9 +108,10 @@ Pane {
             TextField {
                 id: uriField
                 Layout.fillWidth: true
-                // ?poll= is ignored under the obd2 default (the
-                // scheduler owns requests), so the example pairs it
-                // with ?profile=raw — see docs/j2534.md
+                // ?poll= under any profile overrides the scheduler
+                // (finding 12); the raw profile declares no channels
+                // so ?profile=raw&poll= fails at attach. Pair poll
+                // with ?profile=raw when logging single PIDs.
                 placeholderText: qsTr("URI — e.g. mock://demo or j2534://Vendor?profile=raw&filter=0x7E8&poll=0x0C")
                 enabled: !QtTune.connected && !QtTune.connecting && QtTune.coreInitialized
                 color: Theme.text

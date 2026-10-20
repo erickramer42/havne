@@ -210,7 +210,7 @@ void log_child_exit(HANDLE process)
     const char* stage =
         (code == 1) ? "bad argument count"
       : (code == 4) ? "LoadLibraryEx of the vendor DLL failed"
-      : (code == 5) ? "a mandatory export is missing (named above)"
+      : (code == 5) ? "a mandatory export is missing (named in the child log)"
       : (code == 7) ? "could not connect to the app's pipe"
       :               "unknown";
     SUR_LOG("open: child exited with code %lu (%s)\n", code, stage);
@@ -335,8 +335,8 @@ qttune_status_t qttune_j2534_sur_open(const char* dll_path,
         } else if (wr == WAIT_OBJECT_0 + 1) {
             log_child_exit(h->process);          /* replaces the inline decode */
         } else {
-            SUR_LOG("open: handshake timeout after %lu ms (child alive, "
-                    "never connected — vendor blocked in PassThruOpen?)\n",
+            SUR_LOG("open: handshake timeout after %lu ms — child alive but "
+                    "never opened the pipe (process startup stalled)\n",
                     handshake_timeout_ms());
         }
     }
@@ -371,13 +371,18 @@ qttune_status_t qttune_j2534_sur_open(const char* dll_path,
     req.opcode = QTTUNE_SUR_OP_OPEN;
     qttune_sur_response_t resp = {};
     if (!transact(h, req, &resp, handshake_timeout_ms())) {
+        /* Finding 3: the real "vendor blocked" case. transact expired
+         * with the child still alive — a vendor wedged in DllMain or
+         * PassThruOpen cannot reply. log_child_exit is a no-op here,
+         * and the generic transact line doesn't say which stage is
+         * stuck. (A dead child takes the same path and is decoded by
+         * log_child_exit instead.) */
+        if (WaitForSingleObject(h->process, 0) != WAIT_OBJECT_0) {
+            SUR_LOG("open: no reply to OP_OPEN after %lu ms, child alive "
+                    "(vendor blocked in DllMain or PassThruOpen)\n",
+                    handshake_timeout_ms());
+        }
         log_child_exit(h->process);
-        /* The child is wedged inside the vendor DLL (or dead):
-         * single-threaded, it cannot service OP_SHUTDOWN, so a
-         * polite close would burn the full 3 s transact window for a
-         * reply that cannot come (#22). Terminate now — the subsequent
-         * sur_close then fails its SHUTDOWN write instantly on a
-         * broken pipe and the process wait returns immediately. */
         TerminateProcess(h->process, 1);
         qttune_j2534_sur_close(h);
         return QT_ERR_LOAD_FAILED;
