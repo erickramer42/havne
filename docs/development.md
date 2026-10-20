@@ -309,7 +309,7 @@ every job has a `timeout-minutes` of roughly 3-5x its usual duration:
 | Job | Runner | Does |
 |---|---|---|
 | `core-and-tests` | Ubuntu, GCC, no Qt | Builds core and the Qt-free tests, then runs ctest. This enforces "core never links Qt." Gates every other job. |
-| `core-sanitizers` | Ubuntu, GCC, no Qt | The same build and tests under AddressSanitizer and UndefinedBehaviorSanitizer (Debug). **Non-blocking** (`continue-on-error`) until its first findings are triaged: a failure shows red on the job, not the run. |
+| `core-sanitizers` | Ubuntu, GCC, no Qt | The same build and tests in Debug under AddressSanitizer and UndefinedBehaviorSanitizer. LeakSanitizer runs too, so a test that closes a session without destroying it fails here. Blocking since its first green run (2026-10-20). |
 | `win-build` | Windows, MSVC 2022 | Builds the full app, then runs ctest (bridge and J2534 suites included) |
 | `macos-build` | macOS (arm64), AppleClang | Builds the full app, then runs ctest |
 | `linux-build` | Ubuntu, GCC | Builds the full app, then runs ctest |

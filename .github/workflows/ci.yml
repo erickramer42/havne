@@ -30,14 +30,12 @@ jobs:
           ctest --test-dir build -C Release --output-on-failure
 
   # Core and its Qt-free tests under AddressSanitizer and
-  # UndefinedBehaviorSanitizer. Non-blocking until its first findings are
-  # triaged: a failure marks this job red without failing the run. The
-  # J2534 suites are Windows-only, so this covers core, signals, obd2 and
-  # the C ABI check.
+  # UndefinedBehaviorSanitizer; LeakSanitizer runs with ASan on Linux, so
+  # a session a test forgets to destroy fails here. The J2534 suites are
+  # Windows-only, so this covers core, signals, obd2 and the C ABI check.
   core-sanitizers:
     runs-on: ubuntu-latest
     needs: core-and-tests
-    continue-on-error: true
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
