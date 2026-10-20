@@ -38,10 +38,10 @@ details.
   - The `obd2` profile supplies the standard CAN IDs itself
     (requests to `0x7E0`, receive filter on `0x7E8`) and runs a
     Mode-01 multi-PID request loop — a bare `j2534://` URI starts
-    streaming decoded signals. The `?filter=`, `?txid=` and `?poll=`
-    URI parameters override or replace the profile-declared channel;
-    received frames are header-stripped and carry their arbitration
-    ID.
+    streaming decoded signals. The `?filter=` and `?txid=` URI
+    parameters override the profile-declared channel, and `?poll=`
+    swaps the PID rotation for a single PID; received frames are
+    header-stripped and carry their arbitration ID.
 - **Protocol profiles.** Sessions select their signal-decoding
   profile from the URI: `mock://` defaults to the mock set,
   `j2534://` defaults to `obd2` (standard Mode-01 PIDs decoded to

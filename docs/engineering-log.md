@@ -40,7 +40,11 @@ Dates are commit dates.
 | 2026-10-19 | Single-threaded surrogate, batched `OP_READ`, ring retired ([ADR-0014](adr/0014-single-threaded-surrogate.md)); read-status split in both backends (#11 partial); #17 resolved by removal | `0b43261` |
 | 2026-10-19 | Surrogate replies to shutdown (#27); missing exports named again; `REG_EXPAND_SZ` expansion; job assignment checked | `4b1635d` |
 | 2026-10-19 | Timeout-tagged read batches delivered (#26); surrogate open path hardened; timestamped, change-only child log; ID-0 presence flags | `37d770d` |
+| 2026-10-20 | Link health (#11): growing hard-failure backoff, canonical error code, probe writes in both request modes, spec-mode fake; bridge `linkState` and value freshness; LiveView banner, Home and Settings state, "—" for never-arrived signals | `5924214`, `b100029`, `a7975fe` |
+| 2026-10-20 | Scripted mock drive cycle: warm-up, 2nd- and 3rd-gear limiter pulls, quarter-mile run (#9 closed) | `c0b102d` |
 | 2026-10-20 | CI on all five targets: Linux full build; Android arm64 and iOS device cross-builds; iOS Simulator launch smoke with screenshots, on pull requests and on request (#3 closed; #30 opened and resolved the same day) | `4dd15ca`, `a430af7`, `923f479`, `f282275`, `4be8ba5`, `a0f5c0f` |
+| 2026-10-20 | Code review 2026-10-20 fixes: vendor message counts ignored under hard errors (finding 1), surrogate open diagnostics name the stalled stage (finding 3), `?poll=` outranks the profile's rotation (finding 12), the Log page's ID column binds the real `arbId` role (finding 13) | `6420f09`, `5ec331c`, `90020bd`, `1674f5c` |
+| 2026-10-20 | Code review 2026-10-20 follow-up: stale dimming driven by the model's `ageMs` (finding 14); one health machine for reads and writes, with `QT_ERR_REQUEST_FAILED` latched by failed writes, hard read failures first, unmatched frames read as quiet, one quiet debounce that clears the backoff, and backoff growth pinned (findings 4–7, 15, 17) | `7e9bd5e`, `946bdf5` |
 
 ## Lessons learned
 
@@ -448,3 +452,22 @@ tab bar's "Setup" for Settings. The blank first frame is put down,
 by inference rather than proof, to launching the app on a simulator
 still settling after a cold boot. The boot now overlaps the build.
 Once there was a real picture, the screenshot proved its worth.
+
+**2026-10-20 — code-review fix round (findings 1, 3, 12):** two
+lessons. (1) **An error knob that tidies its outputs certifies the
+tidy case only:** `QTTUNE_FAKE_READ_STATUS` zeroed the count on every
+forced error, so both backends' trust in the vendor's count under a
+hard error was invisible. The evidence came from a change-only log
+line kept for another reason: the VX's "status 7, written 1" on a
+failed write. The fix added the sloppy-vendor knob first
+(`QTTUNE_FAKE_UNTOUCHED_COUNT_STATUS`), went red on each backend, then
+put one trust rule in the shared header. It is the 2026-10-19 lesson
+(4) again, now for error paths: model what a vendor is allowed to do,
+not what you'd like it to do. (2) **Put a check where its inputs
+exist:** the poll-needs-a-filter rule lived in the URI parser, which
+can't see the profile's declared channels. So under `obd2` it refused
+`?poll=` without `?filter=`, and with `?filter=` added, the scheduler
+(built whatever the URI said) silently overrode `?poll=` anyway.
+Deciding the mode and the channel rule at attach, where URI and
+profile meet, fixed both, and the check still fires before any DLL
+loads.

@@ -64,7 +64,9 @@ qttune_status_t qttune_mock_transport_attach(qttune_session_t* session,
  *   txid    CAN id 1..0x1FFFFFFF — transmit ID; default is the
  *           profile's declared tx, else 0x7E0
  *   poll    PID 1..0xFF — single-PID Mode-01 loop (100 ms cadence);
- *           rejected at parse time without filter
+ *           replaces the profile's PID rotation. Needs a channel, from
+ *           filter or the profile's declarations; rejected at attach
+ *           (still before any DLL load) when neither supplies one
  *   profile name — validated by qttune_session_create, shape-only here
  *   lowercase keys only, unknown keys rejected, duplicate keys last-wins
  *

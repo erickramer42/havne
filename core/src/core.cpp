@@ -108,6 +108,7 @@ const char* qttune_status_string(qttune_status_t status)
         case QT_ERR_LOAD_FAILED:    return "failed to load transport library";
         case QT_ERR_VEHICLE_TIMEOUT:        return "vehicle not responding (timeout)";
         case QT_ERR_TRANSPORT_HARD_FAILURE: return "transport hard failure";
+        case QT_ERR_REQUEST_FAILED: return "request failed (vehicle not accepting requests)";
         default:                     return "unknown status";
     }
 }

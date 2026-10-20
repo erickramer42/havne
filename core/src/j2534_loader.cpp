@@ -505,10 +505,13 @@ qttune_status_t qttune_j2534_disconnect_channel(qttune_j2534_handle_t* handle,
  *   ERR_BUFFER_EMPTY (0x10)        -> QT_OK, no frame (queue drained)
  *   ERR_TIMEOUT (0x09)             -> QT_ERR_VEHICLE_TIMEOUT (quiet bus)
  *   any other nonzero             -> QT_ERR_TRANSPORT_HARD_FAILURE
- *   num > 0, any status           -> deliver the frame (some vendors
- *                                     return data with a status code),
- *                                     except TX indications and
- *                                     loopback echoes, which are dropped
+ *   num > 0 under NOERROR or      -> deliver the frame (J2534-1 pairs
+ *     ERR_TIMEOUT                     ERR_TIMEOUT with data), except TX
+ *                                     indications and loopback echoes,
+ *                                     which are dropped
+ *   num > 0 under any other       -> count ignored, mapped as "no
+ *     status                          message" above (finding 1:
+ *                                     qttune_trusted_count)
  *
  * The worker turns these codes into link health, which callers read
  * through qttune_session_get_error_state (#11). */
@@ -554,8 +557,9 @@ qttune_status_t qttune_j2534_read_frame(qttune_j2534_handle_t* handle,
         return QT_ERR_TRANSPORT_HARD_FAILURE;
     }
 
-    /* num > 0: deliver even under a nonzero status — some vendors
-     * return data and a status together. */
+    /* num > 0: deliver even under ERR_TIMEOUT — the trust rule above
+     * let the count through, and a conforming vendor returns data and
+     * that status together. */
     *out_frame = qttune_frame_t{};
     if (msg.RxStatus & (QTTUNE_PT_TX_INDICATION |
                         QTTUNE_PT_TX_MSG_TYPE)) {

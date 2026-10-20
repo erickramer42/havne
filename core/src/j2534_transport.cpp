@@ -1,8 +1,11 @@
 // File/layer: core/src/j2534_transport.cpp | C++17, Qt-free, Win32-guarded
 // Testing: HARNESS — test_j2534_stream: URI parsing, connect parameters,
 //          filter registration, request framing, header strip and
-//          arbitration_id stamp, scheduler rotation and drain. The
-//          link-health logic is untested (Known Issue #11).
+//          arbitration_id stamp, scheduler rotation and drain, ?poll=
+//          precedence, and the link-health machine (Known Issue #11):
+//          hard and quiet reads, untouched counts, the write latch and
+//          its priority, unmatched frames, backoff growth. In-proc
+//          only; no surrogate session drives the health machine.
 // CI: non-Windows builds a linking stub; core.cpp routes j2534://
 //     only on _WIN32, so the stub is unreachable there
 
@@ -43,9 +46,11 @@ constexpr uint32_t J2534_REQUEST_CYCLE_MS   = 100;   /* poll cadence */
 constexpr uint32_t J2534_DRAIN_BUDGET          = 10;
 constexpr uint32_t J2534_DRAIN_READ_TIMEOUT_MS  = 20;
 
-/* Hard-failure backoff: 100 ms base, doubling to a 5 s cap (about
- * 0.2 retries/s against a dead adapter). A good frame, or a debounced
- * run of ERR_TIMEOUT reads (the adapter is answering), ends it. */
+/* Failure backoff, entered on a hard read failure or a failed write:
+ * 100 ms base, doubling to a 5 s cap (about 0.2 retries/s against a
+ * dead adapter). It ends when the adapter shows it is answering: a
+ * matched frame, an unmatched one, a debounced quiet run, or (for
+ * QT_ERR_REQUEST_FAILED) a successful write. */
 constexpr uint32_t J2534_BACKOFF_BASE_MS = 100;
 constexpr uint32_t J2534_BACKOFF_CAP_MS  = 5000;
 
@@ -68,6 +73,17 @@ constexpr uint32_t J2534_PID_MAX        = 0xFFu;
  * this many consecutive empty or timed-out reads (counted per read;
  * about 1 s in scheduler mode). */
 constexpr uint32_t J2534_HEALTH_QUIET_CYCLES = 10;
+
+/* Finding 7: read outcome distinguishes "matched" (stripped and
+ * dispatched to our channel) from "delivered but unmatched" (adapter
+ * talking, wrong filter). The latter clears hard failure/backoff but
+ * transitions to VEHICLE_TIMEOUT rather than OK, leaving the quiet
+ * count as it is. */
+struct read_outcome {
+    qttune_status_t status;
+    bool got;
+    bool matched;
+};
 
 void pack_be32(uint8_t* out, uint32_t v)
 {
@@ -225,30 +241,27 @@ void resolve_channels(qttune_j2534_transport* t,
     t->chan_count = n;
 }
 
-/* Read one frame, dispatch if it passes the strip/stamp gate, and
- * return the read status (QT_OK/got, TIMEOUT, HARD_FAILURE). The
- * worker consumes this to update error-state atomics and trigger
- * backoff. */
-qttune_status_t pump_one(qttune_j2534_transport* t, bool* out_got,
-                         uint32_t timeout_ms)
+/* Reading one frame. Returns the outcome: status, whether a frame
+ * arrived, and whether it was matched (stripped/dispatched to us).
+ * Finding 7: unmatched deliveries are distinguished from silence. */
+read_outcome pump_one(qttune_j2534_transport* t, uint32_t timeout_ms)
 {
-    *out_got = false;
-
     bool got = false;
     qttune_frame_t frame{};
     qttune_status_t st = qttune_j2534_read_frame(t->handle, t->channel,
                                                  &frame, timeout_ms,
                                                  &got);
     if (st != QT_OK || !got) {
-        return st;   /* TIMEOUT/HARD_FAILURE propagate; idle = QT_OK */
+        return {st, false, false};   /* no match if no frame */
     }
-    *out_got = true;
 
     if (t->chan_count == 0) {
         qttune_session_dispatch_callbacks(t->session, &frame);
-        /* no channels — verbatim, id 0 (raw passive) */
-        return QT_OK;
+        /* no channels — verbatim, id 0 (raw passive) counts as matched
+         * since we explicitly requested verbatim delivery. */
+        return {QT_OK, true, true};
     }
+
     if (frame.data_length >= J2534_ADDR_LEN) {
         const uint32_t hdr =
             (static_cast<uint32_t>(frame.data[0]) << 24) |
@@ -263,75 +276,116 @@ qttune_status_t pump_one(qttune_j2534_transport* t, bool* out_got,
                 memmove(frame.data, frame.data + J2534_ADDR_LEN, n);
                 frame.data_length = n;
                 qttune_session_dispatch_callbacks(t->session, &frame);
-                break;
+                return {QT_OK, true, true};   /* matched */
             }
         }
-        /* no match — dropped frame; the read still counts against
-         * the drain budget (bounds loop time, not delivery) */
+        /* no match — delivered but unmatched (finding 7) */
+        return {QT_OK, true, false};
     }
-    return QT_OK;
+    return {QT_OK, true, false};
 }
 
-/* Link-health transitions (#11). Session atomics are written only on
- * transitions; health, backoff_ms and quiet_runs are worker-local.
- *   good frame      -> last_error = QT_OK; backoff and quiet count reset
- *   empty read or ERR_TIMEOUT -> counts toward quiet; after
- *                      J2534_HEALTH_QUIET_CYCLES in a row, last_error =
- *                      QT_ERR_VEHICLE_TIMEOUT (a timeout run also clears
- *                      the backoff: the adapter is answering)
- *   anything else   -> last_error = QT_ERR_TRANSPORT_HARD_FAILURE (always
- *                      that code, whatever the call returned); on the
- *                      transition into failure, one error_count episode
- *                      and backoff starts at the base. While the failure
- *                      persists the backoff is left alone, so the
- *                      caller's sleep-then-double grows it to the cap. */
 void update_health(qttune_j2534_transport* t, int32_t& health,
                    uint32_t& backoff_ms, uint32_t& quiet_runs,
-                   qttune_status_t st, bool got)
+                   bool write_latch, qttune_status_t st,
+                   bool got, bool matched)
 {
-    if (got && st == QT_OK) {
-        if (health != QT_OK) {
-            t->session->last_error.store(QT_OK);
-            health = QT_OK;
+    /* Ordering (approved): a hard READ failure outranks everything,
+     * including a latched write failure — evaluated FIRST. pump_one
+     * guarantees got implies st == QT_OK, so any status other than
+     * QT_OK and the vehicle-timeout translation is hard. */
+    if (st != QT_OK && st != QT_ERR_VEHICLE_TIMEOUT) {
+        if (health != QT_ERR_TRANSPORT_HARD_FAILURE) {
+            t->session->last_error.store(QT_ERR_TRANSPORT_HARD_FAILURE);
+            health = QT_ERR_TRANSPORT_HARD_FAILURE;
+            t->session->error_count.fetch_add(1);
+            backoff_ms = J2534_BACKOFF_BASE_MS;
         }
-        backoff_ms = 0;
         quiet_runs = 0;
         return;
     }
-    if (st == QT_OK) {
-        /* idle: only counts toward quiet if a cycle produced nothing */
-        ++quiet_runs;
-        if (quiet_runs < J2534_HEALTH_QUIET_CYCLES) {
-            return;
-        }
-        if (health != QT_ERR_VEHICLE_TIMEOUT) {
-            t->session->last_error.store(QT_ERR_VEHICLE_TIMEOUT);
-            health = QT_ERR_VEHICLE_TIMEOUT;
+
+    /* Latched write failure (finding 15): good, quiet and unmatched
+     * reads must not move health — REQUEST_FAILED clears only on a
+     * successful write (handle_write_result). Hard failures already
+     * returned above, so the latch cannot suppress them. */
+    if (write_latch) {
+        return;
+    }
+
+    /* Remaining statuses are QT_OK with/without a frame, or
+     * QT_ERR_VEHICLE_TIMEOUT (never with a frame, per pump_one). */
+    if (got) {
+        if (matched) {
+            /* Matched response: full recovery */
+            if (health != QT_OK) {
+                t->session->last_error.store(QT_OK);
+                health = QT_OK;
+            }
+            backoff_ms = 0;
+            quiet_runs = 0;
+        } else {
+            /* Delivered but unmatched (finding 7): the adapter read
+             * the bus, so hard failure and backoff clear — but this
+             * is not a response to us: transition to quiet at once
+             * (no debounce), quiet_runs left as it is, no episode. */
+            if (health != QT_ERR_VEHICLE_TIMEOUT) {
+                t->session->last_error.store(QT_ERR_VEHICLE_TIMEOUT);
+                health = QT_ERR_VEHICLE_TIMEOUT;
+            }
+            backoff_ms = 0;
         }
         return;
     }
-    if (st == QT_ERR_VEHICLE_TIMEOUT) {
-        ++quiet_runs;
-        if (quiet_runs < J2534_HEALTH_QUIET_CYCLES) {
-            return;   /* transient silence — debounce */
-        }
-        if (health != QT_ERR_VEHICLE_TIMEOUT) {
-            t->session->last_error.store(QT_ERR_VEHICLE_TIMEOUT);
-            health = QT_ERR_VEHICLE_TIMEOUT;
-        }
-        backoff_ms = 0;   /* adapter answered: silence, not death */
+
+    /* Quiet (finding 5): an empty NOERROR read and an ERR_TIMEOUT
+     * read mean the same thing — the adapter answered with nothing.
+     * One merged debounce; once it fires, the backoff clears with
+     * it, so the VX's empty NOERROR reads no longer hold a stale
+     * armed backoff. */
+    ++quiet_runs;
+    if (quiet_runs < J2534_HEALTH_QUIET_CYCLES) {
         return;
     }
-    /* hard failure: immediate, one episode, backoff */
-    if (health != QT_ERR_TRANSPORT_HARD_FAILURE) {
-        t->session->last_error.store(QT_ERR_TRANSPORT_HARD_FAILURE);
-        health = QT_ERR_TRANSPORT_HARD_FAILURE;
+    if (health != QT_ERR_VEHICLE_TIMEOUT) {
+        t->session->last_error.store(QT_ERR_VEHICLE_TIMEOUT);
+        health = QT_ERR_VEHICLE_TIMEOUT;
+    }
+    backoff_ms = 0;
+}
+
+/* Finding 15: write-failure latch, separate from read health.
+ * A failed write latches REQUEST_FAILED with ONE episode; a
+ * successful write clears it immediately. Hard READ failure
+ * outranks; quiet reads can't downgrade. */
+void handle_write_result(qttune_j2534_transport* t,
+                         int32_t& health, uint32_t& backoff_ms,
+                         bool& write_failed, qttune_status_t wst)
+{
+    if (wst == QT_OK) {
+        if (write_failed) {
+            write_failed = false;
+            if (health == QT_ERR_REQUEST_FAILED) {
+                t->session->last_error.store(QT_OK);
+                health = QT_OK;
+                backoff_ms = 0;
+            }
+        }
+        return;
+    }
+
+    write_failed = true;
+    if (health == QT_ERR_TRANSPORT_HARD_FAILURE) {
+        return;  /* hard read failure outranks, don't change state */
+    }
+    if (health != QT_ERR_REQUEST_FAILED) {
+        /* Transition INTO requests-failing: ONE episode, backoff at base */
+        t->session->last_error.store(QT_ERR_REQUEST_FAILED);
+        health = QT_ERR_REQUEST_FAILED;
         t->session->error_count.fetch_add(1);
-        backoff_ms = J2534_BACKOFF_BASE_MS;   /* enter backoff */
+        backoff_ms = J2534_BACKOFF_BASE_MS;
     }
-    /* Already hard-failed: keep the current backoff. Resetting it here
-     * would undo the doubling before any sleep accumulated it. */
-    quiet_runs = 0;
+    /* Already REQUEST_FAILED: leave backoff alone, it doubles at sleep site */
 }
 
 /* Backoff-aware sleep, abortable within 20 ms of a stop request —
@@ -368,13 +422,19 @@ bool backoff_sleep(qttune_j2534_transport* t, uint32_t ms)
  *     a 100 ms sleep; same request shape as the scheduler.
  *   PASSIVE: one read (100 ms timeout) then a 20 ms sleep; no
  *     requests.
- * Both request modes keep writing while hard-failed: the request is
- * the recovery probe, and replies only follow writes. */
+ * Both request modes keep writing while hard-failed or request-failed:
+ * the request is the recovery probe, and replies only follow writes.
+ *
+ * A write failure latches REQUEST_FAILED (finding 15); only a
+ * successful write clears it — reads cannot, and a hard read
+ * failure outranks it (update_health evaluates hard first). */
 void j2534_worker(qttune_j2534_transport* t)
 {
     const bool sched_mode = (t->poll_pid == 0) && (t->sched.count > 0);
 
     int32_t health = QT_OK;
+    bool write_failed = false;   /* finding 15: latched by
+                                  * handle_write_result, cleared by it */
     uint32_t backoff_ms = 0;   /* 0 = healthy cadence */
     uint32_t quiet_runs = 0;
 
@@ -385,7 +445,8 @@ void j2534_worker(qttune_j2534_transport* t)
             /* The request doubles as the recovery probe, so it is sent
              * even while hard-failed: replies only follow writes.
              * Backoff stretches the cycle, which slows the probing. A
-             * failed write counts as a hard failure. */
+             * failed write latches QT_ERR_REQUEST_FAILED through
+             * handle_write_result; it is never a hard failure. */
             uint8_t pid = 0;
             (void)qttune_sched_next(&t->sched, &pid);
             const uint32_t ci =
@@ -398,19 +459,16 @@ void j2534_worker(qttune_j2534_transport* t)
                 t->chans[ci].addr_flags |
                     QTTUNE_PT_TX_ISO15765_FRAME_PAD,
                 0, &written);
-            if (wst != QT_OK) {
-                update_health(t, health, backoff_ms, quiet_runs,
-                              wst, false);
-            }
+            handle_write_result(t, health, backoff_ms, write_failed, wst);
 
             /* Drain: health comes from these reads. The first empty or
              * failing read ends the drain; the budget bounds the rest. */
             for (uint32_t i = 0; i < J2534_DRAIN_BUDGET; ++i) {
-                bool got = false;
-                qttune_status_t st = pump_one(t, &got,
-                                             J2534_DRAIN_READ_TIMEOUT_MS);
-                update_health(t, health, backoff_ms, quiet_runs, st, got);
-                if (!got) {
+                read_outcome o = pump_one(t,
+                                          J2534_DRAIN_READ_TIMEOUT_MS);
+                update_health(t, health, backoff_ms, quiet_runs, write_failed,
+                              o.status, o.got, o.matched);
+                if (!o.got) {
                     break;
                 }
             }
@@ -444,17 +502,17 @@ void j2534_worker(qttune_j2534_transport* t)
             uint32_t written = 0;
             qttune_status_t wst = qttune_j2534_write_frame(
                 t->handle, t->channel, req, sizeof(req),
-                t->chans[0].addr_flags |
+                t->chans[ci].addr_flags |   /* finding 17: same channel
+                                             * as tx_id, as in scheduler
+                                             * mode */
                     QTTUNE_PT_TX_ISO15765_FRAME_PAD,
                 0, &written);
-            if (wst != QT_OK) {
-                update_health(t, health, backoff_ms, quiet_runs,
-                              wst, false);
-            }
-            bool got = false;
-            qttune_status_t st = pump_one(t, &got,
-                                          J2534_READ_TIMEOUT_MS);
-            update_health(t, health, backoff_ms, quiet_runs, st, got);
+            handle_write_result(t, health, backoff_ms, write_failed, wst);
+
+            read_outcome o = pump_one(t,
+                                      J2534_READ_TIMEOUT_MS);
+            update_health(t, health, backoff_ms, quiet_runs, write_failed,
+                          o.status, o.got, o.matched);
 
             if (backoff_sleep(t, backoff_ms)) {
                 break;
@@ -468,10 +526,9 @@ void j2534_worker(qttune_j2534_transport* t)
             }
         } else {
             /* PASSIVE: 100 ms read, then a 20 ms sleep. */
-            bool got = false;
-            qttune_status_t st = pump_one(t, &got,
-                                          J2534_READ_TIMEOUT_MS);
-            update_health(t, health, backoff_ms, quiet_runs, st, got);
+            read_outcome o = pump_one(t, J2534_READ_TIMEOUT_MS);
+            update_health(t, health, backoff_ms, quiet_runs, write_failed,
+                          o.status, o.got, o.matched);
 
             if (backoff_sleep(t, backoff_ms)) {
                 break;

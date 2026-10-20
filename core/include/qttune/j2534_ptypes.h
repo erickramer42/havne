@@ -38,13 +38,15 @@
  *
  *   STATUS_NOERROR       - all requested messages read
  *   ERR_TIMEOUT          - partial batch already copied (J2534-1)
- *   ERR_BUFFER_OVERFLOW  - pNumMsgs = messages actually copied
  *
  * Every other status (ERR_FAILED, ERR_BUFFER_EMPTY, device errors,
- * ...) means "assume nothing was written". Applies to ReadMsgs; the
- * write-side count is only ever logged, never consumed, and the raw
- * pair is deliberately preserved in logs (it is diagnostic evidence
- * of exactly this vendor behavior).
+ * ...) means "assume nothing was written". ERR_BUFFER_OVERFLOW (0x12)
+ * would qualify per spec (pNumMsgs = messages actually copied) but is
+ * not defined here, so an overflow read currently drops its batch and
+ * counts as a hard failure. Applies to ReadMsgs; both write paths check
+ * the status before the count, the count is never consumed, and the
+ * surrogate logs the raw pair (it is diagnostic evidence of exactly
+ * this vendor behavior).
  */
 static inline unsigned long qttune_trusted_count(unsigned long status,
                                                  unsigned long reported)

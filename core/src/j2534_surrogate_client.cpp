@@ -730,9 +730,11 @@ qttune_status_t qttune_j2534_sur_read_frame(qttune_j2534_sur_handle_t* h,
     /* Deliver first, judge the status second (#26). Per J2534-1 a read
      * asking for N messages with a nonzero timeout returns ERR_TIMEOUT
      * TOGETHER WITH however many arrived, so a conforming vendor reports
-     * nearly every response that way. The in-proc path delivers any
-     * message the vendor returns; this path must too, or the ECU's
-     * answer is dropped and a healthy session shows nothing at all. */
+     * nearly every response that way. The in-proc path delivers such a
+     * message too; dropping it would hide the ECU's answer and leave a
+     * healthy session showing nothing at all. The child has already
+     * applied the count-trust rule (finding 1), so a non-empty batch
+     * only arrives under NOERROR or ERR_TIMEOUT. */
     if (resp.num_frames > 0) {
         memcpy(h->pending, resp.frames,
                sizeof(qttune_sur_frame_t) * resp.num_frames);

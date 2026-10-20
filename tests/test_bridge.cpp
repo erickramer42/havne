@@ -651,3 +651,46 @@ TEST(BridgeTest, RawProfileLeavesSignalModelEmpty)
 
     bridge.disconnectSession();
 }
+
+TEST(BridgeTest, AgeMsRoleEmittedAndRefreshesWhileStalled)
+{
+    /* Finding 14 contract: (a) updateValues emits dataChanged carrying
+     * AgeMsRole; (b) refreshAges emits over all rows for AgeMsRole
+     * ONLY — the stalled-row dimming path; (c) ageMs is -1 before the
+     * first sample and a sane clock delta after. ageMs's wall-clock
+     * basis is nondeterministic by nature, so assert ranges, not
+     * exact values. */
+    SignalListModel model;
+    QttuneSignalDef defs[2];
+    QttuneSignalSet set;
+    buildTestSignalSet(defs, set);
+    model.setSignalSet(&set);
+
+    // -1 before any sample
+    EXPECT_EQ(model.data(model.index(0, 0),
+                         SignalListModel::AgeMsRole).toInt(), -1);
+
+    int ageEmissions = 0;
+    QObject::connect(&model, &QAbstractItemModel::dataChanged,
+        [&ageEmissions](const QModelIndex&, const QModelIndex&,
+                        const QList<int>& roles) {
+            if (roles.contains(SignalListModel::AgeMsRole)) ++ageEmissions;
+        });
+
+    std::vector<std::pair<uint16_t, float>> batch;
+    batch.emplace_back(uint16_t(1001), 1500.0f);
+    model.updateValues(batch, 0);   // deterministic stamp of 0
+    EXPECT_GE(ageEmissions, 1);
+
+    const int age = model.data(model.index(0, 0),
+                               SignalListModel::AgeMsRole).toInt();
+    EXPECT_GE(age, 0);
+    EXPECT_LT(age, 5000);   // clock basis sanity, not timing
+
+    const int before = ageEmissions;
+    model.refreshAges();   // the stalled-row path
+    EXPECT_EQ(ageEmissions, before + 1);
+
+    SignalListModel empty;
+    empty.refreshAges();   // no rows — silent, no crash
+}

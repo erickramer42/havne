@@ -15,20 +15,6 @@ Page {
     id: root
     background: Rectangle { color: Theme.bg }
 
-    // Staleness clock: the model's ageMs role carries no notify, so
-    // delegates never re-evaluate it when a signal stalls. Each
-    // delegate timestamps its own last real sample instead, and this
-    // page-level property refreshes those bindings at a low rate —
-    // only while connected.
-    property real nowMs: 0
-    Timer {
-        interval: 500
-        running: QtTune.connected
-        repeat: true
-        triggeredOnStart: true
-        onTriggered: root.nowMs = Date.now()
-    }
-
     ColumnLayout {
         anchors.fill: parent
         anchors.margins: 16
@@ -92,13 +78,10 @@ Page {
                 required property double value
                 required property bool subscribed
                 required property bool hasValue
-                // Wall-clock of the last real sample, gated on hasValue
-                // so the instant-before-first-frame value doesn't count
-                // as fresh. Drives dimming against root.nowMs — see
-                // the page clock above for why ageMs isn't used.
-                property double lastValueMs: 0
-                onValueChanged: if (signalDelegate.hasValue)
-                                    signalDelegate.lastValueMs = Date.now()
+                // Finding 14: the model now emits AgeMsRole on dataChanged;
+                // delegates bind directly to it, eliminating the page clock
+                // that existed solely to re-evaluate stale opacity.
+                required property double ageMs          // AgeMsRole; -1 = never arrived
 
                 width: signalList.width
                 height: 48
@@ -126,10 +109,10 @@ Page {
                               : qsTr("—")
                         color: signalDelegate.subscribed ? Theme.primary : Theme.textDim
                         font.family: "Consolas"   // tabular-ish digits, no jitter
-                        // Stale dimming: generous vs the scheduler's full
-                        // PID rotation (~1 s for the 9-PID obd2 set).
+                        // Staleness dimming: generous vs the scheduler's full
+                        // PID rotation (~0.8 s for the 8-PID obd2 set).
                         opacity: signalDelegate.hasValue
-                                 && (root.nowMs - signalDelegate.lastValueMs > 3000)
+                                 && signalDelegate.ageMs > 3000
                                      ? 0.45 : 1.0
                     }
                 }

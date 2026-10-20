@@ -16,6 +16,10 @@
 //          (scheduler + mux decode). Legacy-behavior tests opt out
 //          with ?profile=raw; the obd2 block covers rotation,
 //          coupling, and drain.
+//          Link health (#11), in-proc: canonical hard-failure code,
+//          episode counting, quiet debounce, recovery; then the code
+//          review 2026-10-20 regressions — untouched vendor counts
+//          (finding 1) and ?poll= precedence (finding 12).
 
 #include <gtest/gtest.h>
 
@@ -1123,6 +1127,235 @@ TEST_F(J2534AdoptionTest, PollOverridesSchedulerRotation)
 
     EXPECT_EQ(qttune_session_close(session), QT_OK);
     qttune_session_destroy(session);
+}
+
+/* ====================================================================
+ * Code review 2026-10-20, health machine (findings 4, 6, 7, 15):
+ * write-result latch, hard-read priority, unmatched-delivered frames,
+ * backoff growth. Same fixture and knob idioms as the #11 tests above
+ * (env knob re-read per call in-proc; RAII arm restores even on a
+ * failing ASSERT).
+ * ==================================================================== */
+
+/* Findings 15 + 6: a failed write latches REQUEST_FAILED with ONE
+ * episode; a subsequent successful write clears it immediately,
+ * without needing a matched read (pinned by forcing reads quiet
+ * during recovery: only the write can produce OK). The knob leaves
+ * the write count untouched — the VX's "status 7, written 1" shape. */
+TEST_F(J2534AdoptionTest, WriteFailureLatchesRequestFailedAndClears)
+{
+    struct KnobsArm {
+        ~KnobsArm()
+        {
+            SetEnvironmentVariableA("QTTUNE_FAKE_WRITE_STATUS", nullptr);
+            SetEnvironmentVariableA("QTTUNE_FAKE_READ_STATUS", nullptr);
+        }
+    } arm;
+
+    char uri[512];
+    snprintf(uri, sizeof(uri), "j2534://%s", FAKE_J2534_DLL_PATH);
+
+    qttune_session_t* session = nullptr;
+    ASSERT_EQ(qttune_session_create(uri, &session), QT_OK);
+    ASSERT_EQ(qttune_session_start(session), QT_OK);
+
+    SetEnvironmentVariableA("QTTUNE_FAKE_WRITE_STATUS", "7");   /* reads clean */
+
+    int32_t le = 0;
+    uint32_t ec = 0;
+    bool reached = false;
+    for (int i = 0; i < 500 && !reached; ++i) {   /* 5 s budget */
+        (void)qttune_session_get_error_state(session, &le, &ec);
+        reached = (le == QT_ERR_REQUEST_FAILED);
+        if (!reached) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
+    }
+    EXPECT_TRUE(reached) << "failed write never latched (was " << le << ")";
+    EXPECT_EQ(ec, 1u) << "write failure flapped episodes (finding 6)";
+
+    /* Latch discipline: > 1.5 s in (past the ~1.2 s quiet debounce),
+     * clean-but-empty reads must NOT have flipped the state to
+     * VEHICLE_TIMEOUT — only a write result moves it. */
+    std::this_thread::sleep_for(std::chrono::milliseconds(1500));
+    (void)qttune_session_get_error_state(session, &le, &ec);
+    EXPECT_EQ(le, QT_ERR_REQUEST_FAILED)
+        << "quiet reads overrode the latched write failure";
+    EXPECT_EQ(ec, 1u);
+
+    /* Recovery with reads held QUIET (0x09): a successful write is
+     * itself proof requests flow, so OK can only come from the write
+     * success — no frame can be delivered to produce a matched read.
+     * The backoff may sit near its 5 s cap; budget 12 s. */
+    SetEnvironmentVariableA("QTTUNE_FAKE_WRITE_STATUS", nullptr);
+    SetEnvironmentVariableA("QTTUNE_FAKE_READ_STATUS", "9");
+    reached = false;
+    for (int i = 0; i < 1200 && !reached; ++i) {
+        (void)qttune_session_get_error_state(session, &le, &ec);
+        reached = (le == QT_OK);
+        if (!reached) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
+    }
+    EXPECT_TRUE(reached) << "successful write never cleared (was " << le << ")";
+    EXPECT_EQ(ec, 1u) << "recovery added an episode";
+
+    EXPECT_EQ(qttune_session_close(session), QT_OK);
+    qttune_session_destroy(session);
+}
+
+/* Finding 15, ordering: with writes AND reads both failing, the hard
+ * READ failure outranks requests-failing. Both transitions are
+ * sequential within the first cycle (write, then drain read), so
+ * exactly two episodes: one REQUEST_FAILED, one HARD. While both
+ * persist, the write path must not downgrade back. */
+TEST_F(J2534AdoptionTest, HardReadFailureOutranksRequestFailed)
+{
+    ReadStatusArm arm;
+    char uri[512];
+    snprintf(uri, sizeof(uri), "j2534://%s", FAKE_J2534_DLL_PATH);
+
+    qttune_session_t* session = nullptr;
+    ASSERT_EQ(qttune_session_create(uri, &session), QT_OK);
+    ASSERT_EQ(qttune_session_start(session), QT_OK);
+
+    SetEnvironmentVariableA("QTTUNE_FAKE_WRITE_STATUS", "7");
+    SetEnvironmentVariableA("QTTUNE_FAKE_READ_STATUS", "7");
+
+    int32_t le = 0;
+    uint32_t ec = 0;
+    bool reached = false;
+    for (int i = 0; i < 500 && !reached; ++i) {
+        (void)qttune_session_get_error_state(session, &le, &ec);
+        reached = (le == QT_ERR_TRANSPORT_HARD_FAILURE);
+        if (!reached) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
+    }
+    EXPECT_TRUE(reached) << "hard read failure never reported (was " << le << ")";
+    EXPECT_EQ(ec, 2u) << "expected write-then-read episodes, got " << ec;
+
+    /* Hold: the continued failing writes must not downgrade the
+     * hard-failure state or add episodes. */
+    std::this_thread::sleep_for(std::chrono::milliseconds(600));
+    (void)qttune_session_get_error_state(session, &le, &ec);
+    EXPECT_EQ(le, QT_ERR_TRANSPORT_HARD_FAILURE)
+        << "write path downgraded a hard read failure";
+    EXPECT_EQ(ec, 2u);
+
+    EXPECT_EQ(qttune_session_close(session), QT_OK);
+    qttune_session_destroy(session);
+}
+
+/* Finding 7: a delivered-but-unmatched frame (header matches no
+ * channel) clears hard failure and the backoff — the adapter answered
+ * — but transitions to VEHICLE_TIMEOUT, not OK, and adds no episode.
+ *
+ * The 900 ms budget is the discriminator, so it is NOT generous by
+ * accident: a full-clear regression reaches OK (never TIMEOUT, fails);
+ * a plain-quiet regression needs the ~1.2 s debounce and misses the
+ * window. The passive URI keeps writes out of the picture entirely. */
+TEST_F(J2534AdoptionTest, UnmatchedDeliveredFrameGoesQuietNotHealthy)
+{
+    ReadStatusArm arm;
+    char uri[700];
+    snprintf(uri, sizeof(uri), "j2534://%s?profile=raw&filter=0x7E8",
+             FAKE_J2534_DLL_PATH);
+
+    qttune_session_t* session = nullptr;
+    ASSERT_EQ(qttune_session_create(uri, &session), QT_OK);
+    ASSERT_EQ(qttune_session_start(session), QT_OK);
+
+    /* Force hard failure, then deliver something the adapter DID read */
+    SetEnvironmentVariableA("QTTUNE_FAKE_READ_STATUS", "7");
+
+    int32_t le = 0;
+    uint32_t ec = 0;
+    bool reached = false;
+    for (int i = 0; i < 500 && !reached; ++i) {
+        (void)qttune_session_get_error_state(session, &le, &ec);
+        reached = (le == QT_ERR_TRANSPORT_HARD_FAILURE);
+        if (!reached) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
+    }
+    EXPECT_TRUE(reached);
+    EXPECT_EQ(ec, 1u);
+
+    SetEnvironmentVariableA("QTTUNE_FAKE_READ_STATUS", nullptr);
+    /* Header 0x7D0 — no channel's rx_id (filter registered 0x7E8).
+     * Gating is off, so the fake delivers it; the transport decides. */
+    const unsigned char unmatched[12] = {
+        0x00, 0x00, 0x07, 0xD0,
+        0x62, 0xF1, 0x90, 0x2A, 0, 0, 0, 0
+    };
+    inject(unmatched, sizeof(unmatched), 1000, 0, 1);
+
+    reached = false;
+    for (int i = 0; i < 90 && !reached; ++i) {   /* 900 ms: < debounce */
+        (void)qttune_session_get_error_state(session, &le, &ec);
+        reached = (le == QT_ERR_VEHICLE_TIMEOUT);
+        if (!reached) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
+    }
+    EXPECT_TRUE(reached) << "unmatched frame did not degrade to quiet (was "
+                        << le << ")";
+    EXPECT_EQ(ec, 1u) << "unmatched frame added an episode";
+
+    EXPECT_EQ(qttune_session_close(session), QT_OK);
+    qttune_session_destroy(session);
+}
+
+/* Finding 4: backoff GROWS under sustained hard failure. Writes
+ * continue as the recovery probe but the doubling backoff spaces
+ * them: ~5 probes in 1.5 s (100+200+400+800 ms doublings) against
+ * ~15 with the old reset-to-base. Wide margins on purpose — the two
+ * behaviors differ by 3x, so CI timing noise can't confuse them. */
+TEST_F(J2534AdoptionTest, BackoffGrowsUnderSustainedHardFailure)
+{
+    ReadStatusArm arm;
+    char uri[512];
+    snprintf(uri, sizeof(uri), "j2534://%s", FAKE_J2534_DLL_PATH);
+
+    qttune_session_t* session = nullptr;
+    ASSERT_EQ(qttune_session_create(uri, &session), QT_OK);
+    ASSERT_EQ(qttune_session_start(session), QT_OK);
+
+    SetEnvironmentVariableA("QTTUNE_FAKE_READ_STATUS", "7");   /* writes clean */
+
+    int32_t le = 0;
+    uint32_t ec = 0;
+    bool reached = false;
+    for (int i = 0; i < 500 && !reached; ++i) {
+        (void)qttune_session_get_error_state(session, &le, &ec);
+        reached = (le == QT_ERR_TRANSPORT_HARD_FAILURE);
+        if (!reached) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
+    }
+    ASSERT_TRUE(reached) << "hard failure never reported";
+
+    unsigned long wc0 = 0;
+    get_write_count(&wc0);
+    std::this_thread::sleep_for(std::chrono::milliseconds(1500));
+    unsigned long wc1 = 0;
+    get_write_count(&wc1);
+
+    EXPECT_GE(wc1 - wc0, 1u) << "probe writes stopped entirely";
+    EXPECT_LE(wc1 - wc0, 8u) << "backoff never grew (reset-to-base shape)";
+
+    EXPECT_EQ(qttune_session_close(session), QT_OK);
+    qttune_session_destroy(session);
+}
+
+/* Finding 15: the new code has a distinct, mapped string. */
+TEST(J2534StreamTest, RequestFailedStatusHasDistinctString)
+{
+    const char* s = qttune_status_string(QT_ERR_REQUEST_FAILED);
+    ASSERT_NE(s, nullptr);
+    EXPECT_STRNE(s, "unknown status");
+    EXPECT_STRNE(s, qttune_status_string(QT_ERR_TRANSPORT_HARD_FAILURE));
 }
 
 } // namespace

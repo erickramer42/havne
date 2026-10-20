@@ -42,7 +42,9 @@ next.
     multi-PID round-robin scheduler and declares its CAN channel
     (7E0/7E8), so the transport derives the receive filter and request
     target from the profile: a bare `j2534://` URI starts and streams
-    with no `?filter=` required (`?filter=`/`?txid=` remain overrides).
+    with no `?filter=` required (`?filter=`/`?txid=` remain overrides,
+    and since `90020bd` `?poll=` swaps the rotation for one PID under
+    any profile instead of being ignored).
   - Discovery finds the real installed drivers, and the Settings page
     can pick one and connect.
   - Link health (#11): the J2534 worker tells a quiet bus from a dead
@@ -56,22 +58,24 @@ next.
     session (2026-10-16, [docs/bench-sessions/2026-10-16.md](docs/bench-sessions/2026-10-16.md))
     succeeded: the OBDX Pro VX loaded through the surrogate, opened with
     USB power (vendor status 0), accepted the 8-byte flow-control filter
-    shape (behaviorally —     see #23; the 4-byte shape that replaced it was 
-    accepted with logged vendor status 0 on 2026-10-20, 
-    [bench-sessions/2026-10-20.md](docs/bench-sessions/2026-10-20.md)), and 
-    survived a 2-minute quiet-bus soak at <1% CPU with clean teardown. 
-    Talking-bus behaviors, VBATT, and timestamp units remain untested. The OBDX 
-    Pro VT still refuses open (status 34) with its adapter absent. The run sheet
-    template is [docs/bench-sessions/bench-runsheet.md](docs/bench-sessions/bench-runsheet.md).
+    shape (behaviorally — see #23), and survived a 2-minute quiet-bus
+    soak at <1% CPU with clean teardown. The 4-byte shape that replaced
+    it was accepted with logged vendor status 0 on 2026-10-20
+    ([bench-sessions/2026-10-20.md](docs/bench-sessions/2026-10-20.md)).
+    Talking-bus behaviors, VBATT, and timestamp units remain untested.
+    The OBDX Pro VT still refuses open (status 34) with its adapter
+    absent. The run sheet template is
+    [docs/bench-sessions/bench-runsheet.md](docs/bench-sessions/bench-runsheet.md).
   - Any live vehicle.
   - J2534 decode on real hardware: the `obd2` set, scheduler and
     channel derivation are HARNESS-verified against the fake; a
     live-vehicle session (real ECU responses, talking-bus items in
     the BENCH prep list) is still ahead.
-  - **Tests:** 139 ctest cases, all passing locally on 2026-10-20
-    (Windows/MSVC 2022, both trees rebuilt), plus the cross-arch
-    subset (16/16). CI was green on all seven jobs at `a0f5c0f`
-    (2026-10-20, run #78). That run covers ctest on Windows, macOS and
+  - **Tests:** 153 ctest cases, all passing locally at `946bdf5` on
+    2026-10-20 (Windows/MSVC 2022, both trees rebuilt), plus the
+    cross-arch subset (17/17). CI was last confirmed green on all
+    seven jobs at `a0f5c0f` (2026-10-20, run #78); the later commits'
+    CI results haven't been checked here. That run covers ctest on Windows, macOS and
     Linux, the Android and iOS device cross-builds, and the simulator
     smoke, which drew the app at 15 s and 45 s. The smoke's first run
     (`923f479`) gave a blank frame. Its second (`4be8ba5`) drew and
@@ -181,13 +185,10 @@ Contracts along this path:
         2026-10-19). Read batches that arrive with `ERR_TIMEOUT` are
         delivered (formerly #26, fixed the same day).
   - work through [BENCH prep](#bench-prep) — quiet-bus subset walked
-    2026-10-16 (#1's original 8-byte shape accepted behaviorally, #9
-    resolved, #6 partially informed); #1's current 4-byte shape and
-    the talking-bus items (#2, #3, #4, #5, #7) still open, 2026-10-16 
-    (#9 resolved, #6 partially informed); #1 resolved for
-    both shapes (8-byte behaviorally 2026-10-16, 4-byte with logged
-    vendor status 0 2026-10-20); the talking-bus items (#2, #3, #4,
-    #5, #7) still open
+    2026-10-16 (#9 resolved) and 2026-10-20 (#6 observed for empty
+    reads); #1 resolved for both shapes (8-byte behaviorally
+    2026-10-16, 4-byte with logged vendor status 0 2026-10-20); the
+    talking-bus items (#2, #3, #4, #5, #7) still open
   - first live, read-only vehicle session
 - [ ] **Protocol profiles** (ADR-0013):
   - [x] slice 1: profile registry, `raw` profile, `?profile=`
@@ -220,13 +221,11 @@ it a genuine connect candidate.
      byte belongs in the flow-control message. The loader seam's
      length-equality rule is satisfied trivially at 4 bytes.
    - This SUPERSEDES the 8-byte shape (`[ID][30 00 00][pad]`) the
-     2026-10-16 session accepted. The 4-byte shape has never met real
-     hardware. If the VX rejects it, the child log now carries the
-     vendor's filter status verbatim — capture it.
+     2026-10-16 session accepted.
    - CONFIRMED 2026-10-20 (no vehicle): the VX accepted the 4-byte
      shape through a bare `j2534://` URI (obd2-derived channel),
      `OP_START_FILTER` vendor status 0, filter_id 1
-     ([session note](bench-sessions/2026-10-20.md)).
+     ([session note](docs/bench-sessions/2026-10-20.md)).
 2. **Request framing.** The transport writes the LOGICAL message —
    `[4-byte tx ID][01][PID]`, 6 bytes — with ISO15765_FRAME_PAD, so the
    adapter adds the ISO-TP PCI byte and zero-pads the CAN frame. The
@@ -241,15 +240,18 @@ it a genuine connect candidate.
    says (#12).
 6. **ReadMsgs statuses.** Split in both backends since 2026-10-19:
    `ERR_TIMEOUT` is a vehicle timeout, `ERR_BUFFER_EMPTY` is "no
-   frame", and anything else is a hard failure (#11). Frames are
-   delivered whatever status they arrive with, so a vendor that pairs
-   `ERR_TIMEOUT` with a partial batch loses nothing. The same rule
-   also trusts the count under a hard error (#11).    Observed 2026-10-20 
-   (no vehicle): the VX returns `STATUS_NOERROR` with zero messages for an 
-   empty read — a third flavor, neither of the two the split names; it behaves 
-   as "no frame", and the session's fault state came from the writes, not the 
-   reads ([session note](bench-sessions/2026-10-20.md)). Still to observe on
-   a talking bus: whether it pairs `ERR_TIMEOUT` with data at all.
+   frame", and anything else is a hard failure (#11). Frames that
+   arrive with `STATUS_NOERROR` or `ERR_TIMEOUT` are delivered, so a
+   vendor that pairs `ERR_TIMEOUT` with a partial batch loses nothing.
+   Under any other status the count is ignored (code review
+   2026-10-20, finding 1, fixed in `6420f09`). Observed 2026-10-20
+   (no vehicle): the VX returns `STATUS_NOERROR` with zero messages
+   for an empty read — a third flavor, neither of the two the split
+   names; it behaves as "no frame", and the session's fault state came
+   from the writes, not the reads
+   ([session note](docs/bench-sessions/2026-10-20.md)). Still to
+   observe on a talking bus: whether it pairs `ERR_TIMEOUT` with data
+   at all.
 7. **Struct-layout conformance to v04.04** cannot be confirmed without
    a device ([ADR-0010](docs/adr/0010-j2534-v0404-shared-types.md)).
 8. **Vendor ioctl and filter behavior** and timeout semantics.
@@ -301,27 +303,40 @@ an issue is resolved it is removed, and its number is not reused.
     other statuses (hard failure), and the worker debounces timeouts,
     counts hard-failure episodes and backs off
     ([j2534.md](docs/j2534.md#session-lifecycle)). Both request modes
-    keep sending (each request is the recovery probe), a failure always
-    records `QT_ERR_TRANSPORT_HARD_FAILURE`, and the backoff grows from
-    100 ms to a 5 s cap. Since 2026-10-20, in-proc HARNESS tests cover
-    the canonical code, one episode per outage, the quiet debounce and
-    recovery (`HardFailureSetsCanonicalErrorAndRecovers`,
-    `QuietBusDebouncesToVehicleTimeoutWithoutEpisode`); the bridge polls
+    keep sending (each request is the recovery probe), a hard read
+    failure always records `QT_ERR_TRANSPORT_HARD_FAILURE`, and the
+    backoff grows from 100 ms to a 5 s cap. Since `946bdf5` (code
+    review 2026-10-20, findings 4–7 and 15) the machine also separates
+    writes from reads: a failed write latches `QT_ERR_REQUEST_FAILED`
+    (the no-ACK bus: no ECU awake, adapter fine) until a write succeeds,
+    and a hard read failure outranks it. A frame that matches no
+    channel reads as quiet, not healthy. Empty `NOERROR` reads and
+    `ERR_TIMEOUT` share one quiet debounce, which clears the backoff
+    when it fires. Seven in-proc HARNESS tests pin these rules,
+    including backoff growth ([testing.md](docs/testing.md#what-is-verified)); the bridge polls
     the state on its 100 ms tick, logs transitions to the activity
     log, and publishes `linkState`, which LiveView (banner), the Home
     status card and the Settings connection label show. Never-arrived
-    signals render "—" (`hasValue`, notified per batch), and stale
-    values dim (the QML computes age from a page clock; the `ageMs`
-    role stays unnotified and unused — deliberate, explained in-file).
-    Smoke recipe: [testing.md](docs/testing.md#manual-smoke--link-health-ui).
-    Still open:
-    - Both backends trust the vendor's message count under a
-      hard-error status, so a vendor that leaves `pNumMsgs` untouched
-      produces phantom frames that read as healthy (code review
-      2026-10-20, finding 1). The VX was observed returning
-      `written 1` under a failed write, so the write side of this class
-      is real.
-    - The tests are in-proc only and don't pin backoff growth.
+    signals render "—" (`hasValue`, notified per batch), and a value
+    dims once the model's `ageMs` passes 3 s; the bridge refreshes ages
+    on every 100 ms tick, so a signal that stops arriving dims even with
+    nothing else changing (finding 14). Smoke recipe:
+    [testing.md](docs/testing.md#manual-smoke--link-health-ui); its
+    dimming and ID-column rows need a re-run after the finding 13 and
+    14 fixes. Both
+    backends now ignore the vendor's message count under a hard-error
+    status, so a vendor that leaves `pNumMsgs` untouched can no longer
+    produce phantom frames that read as healthy (code review
+    2026-10-20, finding 1, fixed in `6420f09` and tested on both
+    backends). Still open (finding numbers from that review):
+    - The UI doesn't know `QT_ERR_REQUEST_FAILED` yet. `linkState`
+      maps it to `degraded`, so LiveView shows "Link degraded
+      (error 10)", the Home card shows "Link degraded", the Settings
+      connection label stays green, and the activity log records no
+      transition. On the VX with no vehicle, this is now the state
+      you'll see.
+    - The health tests are in-proc only; no surrogate session drives
+      the worker's health machine (finding 4).
     - Real-vendor coverage is one quiet-bus observation (2026-10-20:
       empty reads are `NOERROR` with zero messages; writes fail after
       ~8 cycles with no ACK); talking-bus flavors remain unknown

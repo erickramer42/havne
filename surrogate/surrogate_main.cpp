@@ -154,11 +154,12 @@ static int handle_op_read(unsigned long channel, uint32_t timeout_ms,
        phantoms. */
     num = qttune_trusted_count(rc, num);
 
-    /* Frames are collected whatever the status: per J2534-1 a read that
-     * asks for N messages with a nonzero timeout returns ERR_TIMEOUT
-     * together with however many arrived, so on a conforming vendor the
-     * ECU's answer usually arrives with a nonzero status (#26). The
-     * status still rides home verbatim in resp->status. */
+    /* Frames are collected under either trusted status, ERR_TIMEOUT
+     * included: per J2534-1 a read that asks for N messages with a
+     * nonzero timeout returns ERR_TIMEOUT together with however many
+     * arrived, so on a conforming vendor the ECU's answer usually
+     * arrives with a nonzero status (#26). The status still rides home
+     * verbatim in resp->status. */
     uint32_t n = 0;
     const unsigned long lim = (num < QTTUNE_SUR_MAX_FRAMES_PER_READ)
                               ? num : QTTUNE_SUR_MAX_FRAMES_PER_READ;
