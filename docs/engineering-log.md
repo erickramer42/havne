@@ -40,6 +40,7 @@ Dates are commit dates.
 | 2026-10-19 | Single-threaded surrogate, batched `OP_READ`, ring retired ([ADR-0014](adr/0014-single-threaded-surrogate.md)); read-status split in both backends (#11 partial); #17 resolved by removal | `0b43261` |
 | 2026-10-19 | Surrogate replies to shutdown (#27); missing exports named again; `REG_EXPAND_SZ` expansion; job assignment checked | `4b1635d` |
 | 2026-10-19 | Timeout-tagged read batches delivered (#26); surrogate open path hardened; timestamped, change-only child log; ID-0 presence flags | `37d770d` |
+| 2026-10-20 | CI on all five targets: Linux full build; Android arm64 and iOS device cross-builds; iOS Simulator launch smoke with screenshots, on pull requests and on request (#3 closed; #30 opened and resolved the same day) | `4dd15ca`, `a430af7`, `923f479`, `f282275`, `4be8ba5`, `a0f5c0f` |
 
 ## Lessons learned
 
@@ -417,3 +418,33 @@ and `SpecTimeoutReadDeliversPartialBatch` pinned the fix. This is the
 same class as the
 2026-10-18 framing bug (N1). When code depends on spec semantics, move
 the fake toward the spec first.
+
+**2026-10-20 — CI matrix round (five targets):** four lessons. (1)
+**Kit identifiers drift between Qt releases:** `gcc_64` stopped
+resolving for 6.12.0 because the Linux desktop arch is `linux_gcc_64`
+since 6.7, and Android kits moved under the `all_os` host. An arch
+string that worked for an older Qt is no evidence for a newer one.
+(2) **Build-time test discovery makes cross builds build-only:**
+`gtest_discover_tests` runs each test binary during the build (the
+2026-10-06 lesson), so with tests on, a target the runner can't
+execute fails at build time. The mobile jobs set `BUILD_TESTING=OFF`,
+which means a green Android or iOS device job proves the code compiles
+and packages, and nothing more. (3) **Check what a prebuilt SDK
+actually ships before picking a runner:** Qt's iOS simulator
+libraries are x86_64 only. On the arm64 `macos-latest` runner the
+simulator would need Rosetta and a separate universal iOS platform
+download, so the smoke job runs on `macos-15-intel`. That swaps one
+cost for a dependency with an announced end date (#29). (4) **A
+liveness check is not a rendering check:** the first simulator run
+went green with a blank screenshot. "Still running after 15 s" can't
+tell an app that draws from one whose window never drew, and the
+artifact's 6.8 KB size said as much before anyone opened it. The job
+was made on-request only rather than left as a green that claims
+more than it proves. The next run carried a home-screen control shot,
+two timed shots and `QSG_INFO`. It drew on Metal by 15 s, so the
+runner's GPU was cleared. Two layout bugs showed up that no desktop
+smoke had caught: the off-centre Home status card, and the compact
+tab bar's "Setup" for Settings. The blank first frame is put down,
+by inference rather than proof, to launching the app on a simulator
+still settling after a cold boot. The boot now overlaps the build.
+Once there was a real picture, the screenshot proved its worth.

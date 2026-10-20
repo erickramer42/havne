@@ -131,6 +131,8 @@ ApplicationWindow {
             id: btn
             contentItem: Label {
                 text: btn.text
+                // 13px keeps "Settings" inside a fifth of a 375pt phone
+                font.pixelSize: 13
                 color: btn.checked ? Theme.primary : Theme.textDim
                 horizontalAlignment: Text.AlignHCenter
                 verticalAlignment: Text.AlignVCenter
@@ -142,6 +144,6 @@ ApplicationWindow {
         ThemedTabButton { text: qsTr("Dash") }
         ThemedTabButton { text: qsTr("Live") }
         ThemedTabButton { text: qsTr("Log") }
-        ThemedTabButton { text: qsTr("Setup") }
+        ThemedTabButton { text: qsTr("Settings") }
     }
 }

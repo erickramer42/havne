@@ -70,10 +70,14 @@ next.
     the BENCH prep list) is still ahead.
   - **Tests:** 139 ctest cases, all passing locally on 2026-10-20
     (Windows/MSVC 2022, both trees rebuilt), plus the cross-arch
-    subset (16/16). CI green on ADR-0014 changes; they
-    include the configure fix for building without a `build-win32`
-    tree, which the Windows CI job needs. The 2026-10-20 working-tree
-    changes haven't been through CI yet. The cross-arch routing case
+    subset (16/16). CI was green on all seven jobs at `a0f5c0f`
+    (2026-10-20, run #78). That run covers ctest on Windows, macOS and
+    Linux, the Android and iOS device cross-builds, and the simulator
+    smoke, which drew the app at 15 s and 45 s. The smoke's first run
+    (`923f479`) gave a blank frame. Its second (`4be8ba5`) drew and
+    showed two layout bugs, and `a0f5c0f` confirmed both fixes. The
+    smoke runs on pull requests and on request, not on every push,
+    because it roughly doubles CI time. The cross-arch routing case
     skips unless its environment variables are set. J2534 suites
     carry a 30 s per-test timeout — a hang fails bounded instead of
     wedging the runner (2026-10-17 F1 fallout). Tiers, suites and
@@ -83,7 +87,7 @@ next.
 
 ```
 +--------------------------------+
-| Qt Quick UI (QML)              |  Home · Dash · Live · Log · Setup
+| Qt Quick UI (QML)              |  Home · Dash · Live · Log · Settings
 |                                |  sidebar at >= 720 px, TabBar below
 +---------------+----------------+
                 | QtTuneBridge: worker -> GUI marshaling, 100 ms coalescing
@@ -268,9 +272,15 @@ an issue is resolved it is removed, and its number is not reused.
      `py7zr==1.1.0`.
    - Go back to the PyPI release once aqtinstall 3.4+ ships the
      layout fix.
-2. **Mobile builds are unvalidated.** No kit build has been attempted.
-3. **The Linux full-app build is not in CI.** This is deliberate until
-   Linux is a ship target.
+2. **The mobile apps are unvalidated.** Since 2026-10-20, CI
+   cross-builds an Android arm64-v8a APK and an unsigned iOS arm64
+   device build. On pull requests and on request, it also launches
+   the iOS app on the Simulator and screenshots it
+   (`ios-simulator-smoke`). Neither app has run on a device, the
+   Android app has never been launched, and no tests run on either
+   (cross builds set `BUILD_TESTING=OFF`). Off Windows the only
+   transport is `mock://`, so a mobile session can't reach a vehicle
+   yet.
 4. **Decoding ignores subscription state.** Every signal is decoded
    for every frame and filtered at the model. Filter at decode time
    once signal counts grow.
@@ -391,6 +401,15 @@ an issue is resolved it is removed, and its number is not reused.
     indications inside the child, so its drain continues: the two
     backends now drain differently. `START_OF_MESSAGE` (first-frame)
     indications are not handled by either backend.
+29. **The iOS simulator smoke depends on Intel macOS runners.** Qt
+    6.12's iOS simulator libraries are x86_64 only, so
+    `ios-simulator-smoke` runs on `macos-15-intel`, where the simulator
+    runs natively. GitHub has announced the end of Intel macOS runners
+    for Fall 2027. The options after that are an arm64 runner with
+    Rosetta plus the universal iOS platform (a large download on every
+    run), or Qt's arm64 simulator libraries if Qt ships them. Apple is
+    also winding down Rosetta, so the first option has its own end
+    date.
 
 ## Roadmap
 
@@ -421,8 +440,7 @@ matter most — CAN-era targets need none of it.
 - Change the Log page to show application log messages instead of
   mock frame data
 - Save data logs to a file, once live vehicle data shows on LiveView
-- Mobile builds for Android and iOS (#2)
-- macOS and Linux builds of the full desktop app (#3)
+- Run the mobile apps on a real device and the Android emulator (#2)
 - Distinguish refused vendor open (a status code) from load failure in
   the URI-facing error text — today both surface as
   "failed to load transport library"

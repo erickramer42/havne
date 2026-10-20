@@ -8,17 +8,22 @@ where the gaps are. For build and run commands, see
 
 | Tier | Meaning | Where it runs |
 |---|---|---|
-| **Unit** | Core, signal and ABI logic with no I/O | CI on all three platforms |
-| **Bridge** | Qt bridge and models, headless (`Qt6::Core` only) against the real 50 ms mock worker | CI on Windows and macOS, and locally |
+| **Unit** | Core, signal and ABI logic with no I/O | CI on all three desktop platforms |
+| **Bridge** | Qt bridge and models, headless (`Qt6::Core` only) against the real 50 ms mock worker | CI on Windows, macOS and Linux, and locally |
 | **HARNESS** | The J2534 stack end to end against the in-tree fake vendor DLL | CI on Windows (same-arch, all x64) |
 | **Cross-arch** | HARNESS with an x64 test process driving an x86 surrogate and an x86 fake | Dev machine only; needs environment variables ([development.md](development.md#running-tests)) |
+| **Simulator smoke** | The iOS app installs and launches on the iOS Simulator, QML loads, and the app is still running 45 s later. Nothing drives the UI. A pass doesn't prove the app drew anything, so look at the screenshots. | CI on pull requests, and on request: `[ios-smoke]` in the commit message, or manual dispatch (`ios-simulator-smoke`, Intel macOS runner) |
 | **Manual smoke** | Running the app: layout, LiveView, strip chart, Settings picker against the live registry | Dev machine |
 | **BENCH** | A real vendor DLL and adapter, no vehicle | First formal session complete, 2026-10-16, quiet bus ([session sheet](bench-sessions/2026-10-16.md)); talking-bus behaviors pending |
 | **Vehicle** | A live, read-only vehicle session | **Not yet reached** |
 
 The manual smoke tier earns its place. The 2026-10-10 strip-chart
 indexing bug lived in QML paint code, and every C++ test was blind to
-it.
+it. The simulator screenshots caught two more layout bugs on their
+first good run (2026-10-20). The Home status card was off-centre. And
+the compact layout's tab bar, which only narrow windows show, said
+"Setup" for the page the sidebar calls "Settings". Both were fixed,
+and the next run's screenshots confirmed the fixes the same day.
 
 ## Suites
 
@@ -66,7 +71,10 @@ it.
 | PE routing: x64 goes in-proc; a missing DLL gives an honest load failure with no spawn | `J2534RoutingTest` |
 | Cross-arch: x64 test → x86 surrogate → x86 fake, loader round trip plus full session lifecycle | `J2534RoutingTest.X86FakeSelectsSurrogateBackendAndRoundTrips` (dev machine) |
 | Settings picker: device list, refresh, manual URI connect and disconnect, error surfacing | Manual smoke (Windows, live registry) |
-| Full app builds on Windows (MSVC 2022) and macOS (AppleClang, Qt 6.12.0) | CI |
+| Full app builds, and ctest passes, on Windows (MSVC 2022), macOS (AppleClang) and Linux (GCC), Qt 6.12.0 | CI `win-build`, `macos-build`, `linux-build` |
+| Android arm64-v8a APK builds and packages (NDK r27, JDK 21) | CI `android-build` (build only; first green 2026-10-20) |
+| iOS arm64 device build compiles and links, unsigned | CI `ios-build` (build only; first green 2026-10-20) |
+| iOS app launches on the Simulator, stays up, and draws: Qt Quick on Metal ("Apple iOS simulator GPU"), on a 375×667 pt iPhone SE-class device | CI `ios-simulator-smoke`, 2026-10-20 (`4be8ba5` and `a0f5c0f`: both shots drawn; the first run's single shot was blank) |
 | Transport adoption: `?filter=` registers a FLOW_CONTROL filter; `?txid=` selects the transmit ID; `?poll=` drives a Mode-01 loop; header strip + arbitration_id stamp; filter stopped on detach; gating discards non-matching frames; poll-without-filter rejected at parse | `J2534AdoptionTest` |
 | A blocked vendor `PassThruOpen` fails at the (shrunken) handshake timeout with the child alive, not wedged | `J2534SurrogateTest.BlockedVendorOpenFailsAtHandshakeTimeout` |
 | Spec-spelling export resolution (`PassThruIoctl` primary, legacy `PassThruIoCtl` fallback), both backends | `FakeFixture.SpecSpellingPassThruIoctlResolvesAndWorks` (spec fake, primary path) plus the whole existing suite against the legacy-spelling fake (fallback path) |
@@ -160,8 +168,15 @@ plus the fault state on the OBDX Pro VX quiet bus (BENCH,
   ([ADR-0010](adr/0010-j2534-v0404-shared-types.md)).
 - **Discovery tests check shape only.** They pass vacuously on a
   machine with no vendors installed (Known Issue #14).
-- **The Linux full app isn't built in CI** (Known Issue #3).
-- **Mobile kits have never been built** (Known Issue #2).
+- **The mobile apps have never run on a device or emulator** (Known
+  Issue #2). CI compiles both kits. The simulator smoke shows the iOS
+  app starts and draws, but nothing taps through its UI, and it skips
+  ordinary pushes. No tests run on either mobile
+  platform, because cross builds set `BUILD_TESTING=OFF`. The Android
+  app has never been launched anywhere.
+- **CI never launches the Linux or macOS desktop app.** Those jobs
+  build the app and run ctest, but nothing opens a window. The manual
+  smoke tier covers that, on the dev machine.
 
 ## Conventions
 
