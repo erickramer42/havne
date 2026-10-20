@@ -90,11 +90,16 @@ and the next run's screenshots confirmed the fixes the same day.
 | Mode-01 scheduler: rotation order in set order, wrap; drain delivers a backlog beyond one cycle's budget | `J2534AdoptionTest` |
 | Channel derivation: a bare `j2534://` URI under `obd2` registers the 7E8 filter with exact mask/pattern shape, sends to 7E0, and starts; a lone `?txid=` keeps the derived 7E8 filter but rewrites the request target | `J2534AdoptionTest.BareJ2534UriDerivesObd2ChannelAndStarts`, `.TxidOverrideRewritesDerivedTransmitTarget` |
 | Link health (in-proc): a hard read failure records `QT_ERR_TRANSPORT_HARD_FAILURE` with one episode per outage and recovers through the probe write; a quiet bus debounces to `QT_ERR_VEHICLE_TIMEOUT` with no episode | `J2534AdoptionTest.HardFailureSetsCanonicalErrorAndRecovers`, `.QuietBusDebouncesToVehicleTimeoutWithoutEpisode` |
+| Write failures (in-proc): a failed write latches `QT_ERR_REQUEST_FAILED` with one episode; empty reads past the quiet debounce don't move it; a successful write alone clears it, with reads held quiet | `J2534AdoptionTest.WriteFailureLatchesRequestFailedAndClears` (`QTTUNE_FAKE_WRITE_STATUS`) |
+| A hard read failure outranks a failing write: exactly two episodes (write, then read), and continued failing writes don't downgrade the state | `J2534AdoptionTest.HardReadFailureOutranksRequestFailed` |
+| A delivered frame that matches no channel ends a hard failure but reads as `QT_ERR_VEHICLE_TIMEOUT`, not `QT_OK`, with no episode, inside the quiet debounce window | `J2534AdoptionTest.UnmatchedDeliveredFrameGoesQuietNotHealthy` |
+| The backoff grows under a sustained hard failure: at most 8 probe writes in 1.5 s, against ~15 with the old reset-to-base | `J2534AdoptionTest.BackoffGrowsUnderSustainedHardFailure` |
+| `QT_ERR_REQUEST_FAILED` has its own status string | `J2534StreamTest.RequestFailedStatusHasDistinctString` |
 | A batch the vendor returns with `ERR_TIMEOUT` is delivered through the surrogate; an empty one maps to a vehicle timeout | `J2534SurrogateTest.SpecTimeoutReadDeliversPartialBatch` (spec-mode fake) |
 | A vendor that returns a hard error with the message count untouched delivers no frames: in-proc, the session reports a hard failure, dispatches nothing and recovers once reads are honest; through the surrogate, the read maps to a hard failure and the next request still correlates | `J2534AdoptionTest.UntouchedCountUnderHardErrorReportsUnhealthy`, `J2534SurrogateTest.HardErrorUntouchedCountDeliversNoFrames` (`QTTUNE_FAKE_UNTOUCHED_COUNT_STATUS`) |
 | Signal freshness: `ageMs` is -1 before the first sample and a sane clock delta after; `updateValues` notifies `AgeMsRole`; `refreshAges()` notifies `AgeMsRole` alone, over every row, so a stalled row re-evaluates | `BridgeTest.AgeMsRoleEmittedAndRefreshesWhileStalled` |
 | Link-health UI: quiet/fault/degraded banner, activity-log transitions, "—" cells | Manual smoke, 2026-10-20 (fake quiet/fault via `QTTUNE_FAKE_READ_STATUS`; mock; recipe below). The same smoke recorded stale dimming and the arbId column as working, but neither could work as coded then (code review 2026-10-20, findings 13 and 14; see the recipe notes). Both have since been fixed in code but not re-run. |
-| Fault state on real hardware, clean teardown; 4-byte filter shape accepted with logged vendor status 0 | Informal bench observation 2026-10-20 ([sheet](bench-sessions/2026-10-20.md)) |
+| Fault state on real hardware, clean teardown; 4-byte filter shape accepted with logged vendor status 0 | Informal bench observation 2026-10-20 ([sheet](bench-sessions/2026-10-20.md)), under the rules before `946bdf5`. The same no-ACK setup now latches `QT_ERR_REQUEST_FAILED` instead, which hasn't been seen on hardware. |
 
 ## Manual smoke — link-health UI
 
@@ -131,19 +136,14 @@ have since been fixed in code; re-run both rows.
   (replies to requests, checksum expectations, timestamp units),
   VBATT, and whether a vendor ever pairs `ERR_TIMEOUT` with data
   (#11).
-- **Link-health coverage is partial.** The in-proc tests above drive
-  `QTTUNE_FAKE_READ_STATUS` and `QTTUNE_FAKE_UNTOUCHED_COUNT_STATUS`
-  through the worker. Not covered:
+- **Link-health coverage is in-proc only.** The tests above drive
+  `QTTUNE_FAKE_READ_STATUS`, `QTTUNE_FAKE_UNTOUCHED_COUNT_STATUS` and
+  `QTTUNE_FAKE_WRITE_STATUS` through the worker. Not covered:
   - the surrogate path's health mapping through the worker, end to
     end (the surrogate test stops at `read_frame`'s status);
-  - backoff growth: the hard-failure test also passes with the old
-    reset-to-base backoff (finding 4);
-  - write failures: no passing test arms a failing write, so the
-    no-ACK bus (findings 6 and 15) is untested.
-    `QTTUNE_FAKE_WRITE_STATUS` exists for this;
-  - `QT_ERR_REQUEST_FAILED` (10), the code reserved for finding 15:
-    nothing publishes it yet, and the bridge has no `linkState` for
-    it, so it would show as `degraded`;
+  - `QT_ERR_REQUEST_FAILED` past the core: the bridge has no
+    `linkState` for it, so it shows as `degraded` (and the Settings
+    label stays green), and nothing tests the bridge's handling of it;
   - the real-vendor flavors on a talking bus: the VX quiet bus was
     observed once (2026-10-20: empty reads return `NOERROR` with zero
     messages; writes fail `ERR_FAILED` after ~8 cycles on a no-ACK

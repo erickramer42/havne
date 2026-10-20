@@ -2,8 +2,10 @@
 // Testing: HARNESS — test_j2534_stream: URI parsing, connect parameters,
 //          filter registration, request framing, header strip and
 //          arbitration_id stamp, scheduler rotation and drain, ?poll=
-//          precedence, and link health (in-proc only; backoff growth
-//          and write failures are not pinned — Known Issue #11).
+//          precedence, and the link-health machine (Known Issue #11):
+//          hard and quiet reads, untouched counts, the write latch and
+//          its priority, unmatched frames, backoff growth. In-proc
+//          only; no surrogate session drives the health machine.
 // CI: non-Windows builds a linking stub; core.cpp routes j2534://
 //     only on _WIN32, so the stub is unreachable there
 
@@ -44,9 +46,11 @@ constexpr uint32_t J2534_REQUEST_CYCLE_MS   = 100;   /* poll cadence */
 constexpr uint32_t J2534_DRAIN_BUDGET          = 10;
 constexpr uint32_t J2534_DRAIN_READ_TIMEOUT_MS  = 20;
 
-/* Hard-failure backoff: 100 ms base, doubling to a 5 s cap (about
- * 0.2 retries/s against a dead adapter). A good frame, or a debounced
- * run of ERR_TIMEOUT reads (the adapter is answering), ends it. */
+/* Failure backoff, entered on a hard read failure or a failed write:
+ * 100 ms base, doubling to a 5 s cap (about 0.2 retries/s against a
+ * dead adapter). It ends when the adapter shows it is answering: a
+ * matched frame, an unmatched one, a debounced quiet run, or (for
+ * QT_ERR_REQUEST_FAILED) a successful write. */
 constexpr uint32_t J2534_BACKOFF_BASE_MS = 100;
 constexpr uint32_t J2534_BACKOFF_CAP_MS  = 5000;
 
@@ -73,8 +77,8 @@ constexpr uint32_t J2534_HEALTH_QUIET_CYCLES = 10;
 /* Finding 7: read outcome distinguishes "matched" (stripped and
  * dispatched to our channel) from "delivered but unmatched" (adapter
  * talking, wrong filter). The latter clears hard failure/backoff but
- * keeps quiet running and transitions to VEHICLE_TIMEOUT rather than
- * OK. */
+ * transitions to VEHICLE_TIMEOUT rather than OK, leaving the quiet
+ * count as it is. */
 struct read_outcome {
     qttune_status_t status;
     bool got;
@@ -323,8 +327,8 @@ void update_health(qttune_j2534_transport* t, int32_t& health,
         } else {
             /* Delivered but unmatched (finding 7): the adapter read
              * the bus, so hard failure and backoff clear — but this
-             * is not a response to us: transition to quiet, keep
-             * quiet_runs counting, no episode. */
+             * is not a response to us: transition to quiet at once
+             * (no debounce), quiet_runs left as it is, no episode. */
             if (health != QT_ERR_VEHICLE_TIMEOUT) {
                 t->session->last_error.store(QT_ERR_VEHICLE_TIMEOUT);
                 health = QT_ERR_VEHICLE_TIMEOUT;
@@ -418,8 +422,8 @@ bool backoff_sleep(qttune_j2534_transport* t, uint32_t ms)
  *     a 100 ms sleep; same request shape as the scheduler.
  *   PASSIVE: one read (100 ms timeout) then a 20 ms sleep; no
  *     requests.
- * Both request modes keep writing while hard-failed: the request is
- * the recovery probe, and replies only follow writes.
+ * Both request modes keep writing while hard-failed or request-failed:
+ * the request is the recovery probe, and replies only follow writes.
  *
  * A write failure latches REQUEST_FAILED (finding 15); only a
  * successful write clears it — reads cannot, and a hard read
@@ -441,7 +445,8 @@ void j2534_worker(qttune_j2534_transport* t)
             /* The request doubles as the recovery probe, so it is sent
              * even while hard-failed: replies only follow writes.
              * Backoff stretches the cycle, which slows the probing. A
-             * failed write counts as a hard failure and latches it. */
+             * failed write latches QT_ERR_REQUEST_FAILED through
+             * handle_write_result; it is never a hard failure. */
             uint8_t pid = 0;
             (void)qttune_sched_next(&t->sched, &pid);
             const uint32_t ci =
@@ -449,9 +454,6 @@ void j2534_worker(qttune_j2534_transport* t)
             uint8_t req[6];
             build_mode01_request(req, t->chans[ci].tx_id, pid);
             uint32_t written = 0;
-            /* Finding 7 fix: poll mode uses t->chans[ci].addr_flags
-             * like scheduler mode, avoiding a 29-bit mismatch if
-             * someone ever combines ?poll= with a multi-channel set. */
             qttune_status_t wst = qttune_j2534_write_frame(
                 t->handle, t->channel, req, sizeof(req),
                 t->chans[ci].addr_flags |
@@ -500,7 +502,9 @@ void j2534_worker(qttune_j2534_transport* t)
             uint32_t written = 0;
             qttune_status_t wst = qttune_j2534_write_frame(
                 t->handle, t->channel, req, sizeof(req),
-                t->chans[ci].addr_flags |   /* Finding 7 fix: consistent */
+                t->chans[ci].addr_flags |   /* finding 17: same channel
+                                             * as tx_id, as in scheduler
+                                             * mode */
                     QTTUNE_PT_TX_ISO15765_FRAME_PAD,
                 0, &written);
             handle_write_result(t, health, backoff_ms, write_failed, wst);

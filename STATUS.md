@@ -71,7 +71,7 @@ next.
     channel derivation are HARNESS-verified against the fake; a
     live-vehicle session (real ECU responses, talking-bus items in
     the BENCH prep list) is still ahead.
-  - **Tests:** 147 ctest cases, all passing locally at `e3def5a` on
+  - **Tests:** 153 ctest cases, all passing locally at `946bdf5` on
     2026-10-20 (Windows/MSVC 2022, both trees rebuilt), plus the
     cross-arch subset (17/17). CI was last confirmed green on all
     seven jobs at `a0f5c0f` (2026-10-20, run #78); the later commits'
@@ -303,12 +303,17 @@ an issue is resolved it is removed, and its number is not reused.
     other statuses (hard failure), and the worker debounces timeouts,
     counts hard-failure episodes and backs off
     ([j2534.md](docs/j2534.md#session-lifecycle)). Both request modes
-    keep sending (each request is the recovery probe), a failure always
-    records `QT_ERR_TRANSPORT_HARD_FAILURE`, and the backoff grows from
-    100 ms to a 5 s cap. Since 2026-10-20, in-proc HARNESS tests cover
-    the canonical code, one episode per outage, the quiet debounce and
-    recovery (`HardFailureSetsCanonicalErrorAndRecovers`,
-    `QuietBusDebouncesToVehicleTimeoutWithoutEpisode`); the bridge polls
+    keep sending (each request is the recovery probe), a hard read
+    failure always records `QT_ERR_TRANSPORT_HARD_FAILURE`, and the
+    backoff grows from 100 ms to a 5 s cap. Since `946bdf5` (code
+    review 2026-10-20, findings 4–7 and 15) the machine also separates
+    writes from reads: a failed write latches `QT_ERR_REQUEST_FAILED`
+    (the no-ACK bus: no ECU awake, adapter fine) until a write succeeds,
+    and a hard read failure outranks it. A frame that matches no
+    channel reads as quiet, not healthy. Empty `NOERROR` reads and
+    `ERR_TIMEOUT` share one quiet debounce, which clears the backoff
+    when it fires. Seven in-proc HARNESS tests pin these rules,
+    including backoff growth ([testing.md](docs/testing.md#what-is-verified)); the bridge polls
     the state on its 100 ms tick, logs transitions to the activity
     log, and publishes `linkState`, which LiveView (banner), the Home
     status card and the Settings connection label show. Never-arrived
@@ -324,13 +329,14 @@ an issue is resolved it is removed, and its number is not reused.
     produce phantom frames that read as healthy (code review
     2026-10-20, finding 1, fixed in `6420f09` and tested on both
     backends). Still open (finding numbers from that review):
-    - A bus where nothing ACKs the requests (no ECU awake) shows as
-      "Adapter fault" though the adapter still answers reads (finding
-      15); write failures can also flap episodes (finding 6).
-    - Empty `NOERROR` reads, the VX's quiet-bus answer, reach the quiet
-      state without clearing the backoff (finding 5).
-    - The tests are in-proc only and don't pin backoff growth (finding
-      4), and nothing drives a failing write.
+    - The UI doesn't know `QT_ERR_REQUEST_FAILED` yet. `linkState`
+      maps it to `degraded`, so LiveView shows "Link degraded
+      (error 10)", the Home card shows "Link degraded", the Settings
+      connection label stays green, and the activity log records no
+      transition. On the VX with no vehicle, this is now the state
+      you'll see.
+    - The health tests are in-proc only; no surrogate session drives
+      the worker's health machine (finding 4).
     - Real-vendor coverage is one quiet-bus observation (2026-10-20:
       empty reads are `NOERROR` with zero messages; writes fail after
       ~8 cycles with no ACK); talking-bus flavors remain unknown

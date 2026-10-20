@@ -108,10 +108,10 @@ Pane {
             TextField {
                 id: uriField
                 Layout.fillWidth: true
-                // ?poll= under any profile overrides the scheduler
-                // (finding 12); the raw profile declares no channels
-                // so ?profile=raw&poll= fails at attach. Pair poll
-                // with ?profile=raw when logging single PIDs.
+                // ?poll= replaces the profile's PID rotation (finding
+                // 12) and needs a channel. The raw profile declares
+                // none, so the example adds ?filter=; under the obd2
+                // default ?poll= alone works and still decodes.
                 placeholderText: qsTr("URI — e.g. mock://demo or j2534://Vendor?profile=raw&filter=0x7E8&poll=0x0C")
                 enabled: !QtTune.connected && !QtTune.connecting && QtTune.coreInitialized
                 color: Theme.text
