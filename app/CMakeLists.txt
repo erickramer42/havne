@@ -43,10 +43,16 @@ target_link_libraries(qttune PRIVATE
     qttune-core
 )
 
-set_target_properties(qttune PROPERTIES
-    MACOSX_BUNDLE TRUE
-    WIN32_EXECUTABLE TRUE
-)
+if(WIN32)
+    set_target_properties(qttune PROPERTIES WIN32_EXECUTABLE TRUE)
+endif()
+if(APPLE)
+    set_target_properties(qttune PROPERTIES MACOSX_BUNDLE TRUE)
+endif()
+if(ANDROID)
+    set_target_properties(qttune PROPERTIES
+        QT_ANDROID_PACKAGE_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/android")
+endif()
 
 # Icon helpers later: qt_add_resources, ios/macos asset catalogs, etc.
 
