@@ -22,7 +22,6 @@ target_compile_options(qttune-core PRIVATE
     $<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-Wall -Wextra>
 )
 
-# Critical invariant for CI: core must compile with NO Qt present.
-if(TARGET Qt6::Core)
-    message(FATAL_ERROR "qttune-core must not link Qt")
-endif()
+# Critical invariant: core never links Qt (ADR-0001). The check lives at
+# the end of the root CMakeLists.txt, after every subdirectory has
+# configured; the CI core-and-tests job also builds core with no Qt at all.

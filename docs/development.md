@@ -303,24 +303,36 @@ on MSVC is not necessarily portable:
 `ci.yml` runs on every push to `main` and `dev`, on every pull
 request to `main`, and on demand (Actions → CI → Run workflow). GitHub
 shows that button only when `main`'s copy of `ci.yml` has the
-`workflow_dispatch` trigger. Every job uses Qt 6.12.0:
+`workflow_dispatch` trigger. Every job that uses Qt uses 6.12.0, and
+every job has a `timeout-minutes` of roughly 3-5x its usual duration:
 
 | Job | Runner | Does |
 |---|---|---|
 | `core-and-tests` | Ubuntu, GCC, no Qt | Builds core and the Qt-free tests, then runs ctest. This enforces "core never links Qt." Gates every other job. |
+| `core-sanitizers` | Ubuntu, GCC, no Qt | The same build and tests under AddressSanitizer and UndefinedBehaviorSanitizer (Debug). **Non-blocking** (`continue-on-error`) until its first findings are triaged: a failure shows red on the job, not the run. |
 | `win-build` | Windows, MSVC 2022 | Builds the full app, then runs ctest (bridge and J2534 suites included) |
 | `macos-build` | macOS (arm64), AppleClang | Builds the full app, then runs ctest |
 | `linux-build` | Ubuntu, GCC | Builds the full app, then runs ctest |
-| `android-build` | Ubuntu → Android arm64-v8a | Cross-builds and packages the APK. Build only, no tests. |
+| `android-build` | Ubuntu → Android arm64-v8a | Selects NDK r27 and JDK 21 by version, failing with a clear error if the image lacks either. Then cross-builds and packages the APK. Build only, no tests. |
 | `ios-build` | macOS (arm64) → iOS device (arm64) | Unsigned device build with the Xcode generator. Build only, no tests. |
 | `ios-simulator-smoke` | macOS 15 Intel → iOS Simulator (x86_64) | Runs on pull requests, when the pushed commit's message contains `[ios-smoke]`, or on manual dispatch. Skipped on other pushes. Boots the newest iOS 18+ iPhone while the app builds, then installs and launches the app. Passes if QML loaded and the app is still running 45 s later. Uploads the `ios-simulator-smoke` artifact: a home-screen control shot, app shots at 15 s and 45 s, the app's stdout/stderr (with `QSG_INFO`), plus crash reports on failure. The job log also prints the stderr. |
 
 The smoke job's pass/fail proves the app starts and stays up. Only
 the screenshots show that it drew anything. It doesn't tap through
 the UI or connect a session. It runs on an Intel runner because Qt's
-simulator libraries are x86_64 only (Known Issue #29). Its first two
-runs took 19.5 and 21.5 min, against about 11 min for the rest of CI,
-so ordinary pushes skip it.
+simulator libraries are x86_64 only (Known Issue #29). Its first three
+runs took 19.5 to 24 min, against about 11 min for the rest of CI, so
+ordinary pushes skip it.
+
+**"Core never links Qt" has two checks.** `core-and-tests` builds core
+on a runner with no Qt installed. And every configure, local or CI,
+ends with a check in the root `CMakeLists.txt` that fails if
+`qttune-core`'s link lists name any `Qt*::` target. That check catches
+a stray link in a full build, where Qt is present and the build would
+otherwise succeed. The check it replaced, `if(TARGET Qt6::Core)` inside
+`core/`, could never fire. It ran before any `find_package(Qt6)`, and
+Qt's imported targets are only visible in the directory that found
+them.
 
 **Kit names that moved:** since Qt 6.7 the Linux desktop arch is
 `linux_gcc_64`, and `gcc_64` no longer resolves for 6.12.0. Android
