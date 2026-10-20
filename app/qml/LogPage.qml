@@ -1,3 +1,7 @@
+// File/layer: app/qml/LogPage.qml | Qt Quick, UI layer
+// Testing: render verified manually; the arbId role binding is
+//          exercised via test_bridge's FrameListModel role names.
+
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
@@ -90,12 +94,6 @@ Pane {
                 clip: true
                 model: QtTune.model          // FrameSortProxy over the bridge's FrameListModel
 
-                // Auto-follow newest frames
-                // onCountChanged: {
-                //     if (atYEnd)
-                //         positionViewAtEnd()
-                // }
-
                 ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
 
                 delegate: RowLayout {
@@ -106,7 +104,10 @@ Pane {
                     required property var model    // role access
                     required property int  index
 
-                    // Roles from FrameListModel::roleNames()
+                    // Roles from FrameListModel::roleNames(): the model
+                    // registers "arbId" — bind exactly that, not a
+                    // paraphrase (finding 13: "arbitrationId" bound to
+                    // nothing and rendered empty).
                     Label {
                         text: model.timestampUs
                         color: Theme.textDim
@@ -126,8 +127,9 @@ Pane {
                         Layout.preferredWidth: 36
                     }
                     Label {
-                        // ArbId arrives as a number (quint32 via QVariantMap) — hex-format it
-                        text: "0x" + model.arbitrationId.toString(16).toUpperCase()
+                        // Role name is "arbId" (quint32 via QVariantMap) —
+                        // hex-format it for display.
+                        text: "0x" + model.arbId.toString(16).toUpperCase()
                         color: Theme.textDim
                         font.family: "monospace"; font.pixelSize: 12
                         Layout.preferredWidth: 64
