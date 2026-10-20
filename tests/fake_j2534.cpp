@@ -25,9 +25,11 @@
 //    Filter-aware echo prepends the filter pattern (4-byte BE CAN ID).
 //    SetFilterGating controls ONLY ReadMsgs dropping; the echo shape
 //    is unconditional once a filter lands.
-//  * ReadMsgs returns at most one message per call, whatever NumMsgs
-//    and Timeout ask for, and STATUS_NOERROR with zero messages on an
-//    empty queue (unless QTTUNE_FAKE_READ_STATUS overrides).
+//  * ReadMsgs, by default, returns at most one message per call,
+//    whatever NumMsgs and Timeout ask for, and STATUS_NOERROR with zero
+//    messages on an empty queue. QTTUNE_FAKE_READ_STATUS forces a
+//    status with no messages; QTTUNE_FAKE_SPEC_READ_SEMANTICS=1
+//    switches to J2534-1 batch and empty statuses.
 //  * ExtraDataIndex = DataSize (v4.04 no-extra-data convention).
 
 #define WIN32_LEAN_AND_MEAN
@@ -168,7 +170,7 @@ void reset_obd2_canned()
     g_obd2_canned.pid_0F_iat = 60;           /* 20 degC */
     g_obd2_canned.pid_11_throttle = 20;      /* ~= 7.8% */
     g_obd2_canned.pid_2F_fuel_level = 64;    /* ~= 25% tank */
-    g_obd2_canned.pid_42_volt_high = 0x36;   /* 0x3630 = 13800 mV */
+    g_obd2_canned.pid_42_volt_high = 0x36;   /* 0x3630 = 13872 mV */
     g_obd2_canned.pid_42_volt_low = 0x30;
 }
 
@@ -379,13 +381,13 @@ long __stdcall PassThruReadMsgs(unsigned long ChannelID,
     /* #11 test knob (HARNESS): QTTUNE_FAKE_READ_STATUS forces this
      * call to return the given vendor status with zero messages —
      * 0x09 (ERR_TIMEOUT) for quiet-bus, a hard code (e.g. 0x07) for
-     * the dead-adapter path. PERSISTENT while set; tests toggle via
-     * _putenv between phases (env re-read per call — the child
-     * inherits it from the parent, same discipline as
-     * QTTUNE_FAKE_OPEN_DELAY_MS). Checked BEFORE the queue: a
-     * simulated dead adapter delivers nothing. NOT modeled:
-     * "timeout WITH delivered messages" — v1 scope is the
-     * empty-return cases the loader split distinguishes. */
+     * the dead-adapter path. Persistent while set and re-read per
+     * call, so in-proc tests toggle it with SetEnvironmentVariableA
+     * between phases; the surrogate child only sees the value it
+     * inherited at spawn (same as QTTUNE_FAKE_OPEN_DELAY_MS). Checked
+     * before the queue, so a simulated dead adapter delivers nothing.
+     * It always zeroes the count. Timeout WITH delivered messages is
+     * spec mode's job, below. */
     {
         char buf[32] = {};
         const DWORD n = GetEnvironmentVariableA("QTTUNE_FAKE_READ_STATUS",
@@ -400,6 +402,48 @@ long __stdcall PassThruReadMsgs(unsigned long ChannelID,
     }
 
     std::lock_guard<std::mutex> lk(fake_j2534::g_lock);
+
+    /* SPEC-CONFORMANT READ MODE (pins the former #26): when
+     * QTTUNE_FAKE_SPEC_READ_SEMANTICS is 1, model the J2534-1 rule
+     * a real vehicle will exercise: a read asking for N messages with
+     * a nonzero timeout returns min(N, available), and if fewer than
+     * requested, ERR_TIMEOUT TOGETHER WITH those messages. Timeout 0
+     * on an empty queue returns ERR_BUFFER_EMPTY. The call returns at
+     * once; the timeout isn't waited out. Filter gating is not
+     * modeled here (the knobs are never combined in tests).
+     * Off by default: the exact-count stream tests pin the legacy
+     * single-message delivery. */
+    {
+        char spec[32] = {};
+        const DWORD sn = GetEnvironmentVariableA(
+            "QTTUNE_FAKE_SPEC_READ_SEMANTICS", spec, sizeof(spec));
+        if (sn > 0 && sn < sizeof(spec) && spec[0] == '1') {
+            const unsigned long requested = *pNumMsgs;
+            unsigned long avail = fake_j2534::g_queue_len;
+            if (avail > requested) avail = requested;
+            for (unsigned long i = 0; i < avail; ++i) {
+                const fake_j2534::FrameSlot& slot = fake_j2534::g_queue[i];
+                memcpy(pMsg[i].Data, slot.data, slot.size);
+                pMsg[i].DataSize       = slot.size;
+                pMsg[i].ProtocolID     = QTTUNE_PT_PROTOCOL_ISO15765;
+                pMsg[i].RxStatus       = slot.rx_status;
+                pMsg[i].Timestamp      = slot.timestamp_us;
+                pMsg[i].ExtraDataIndex  = slot.size;
+            }
+            for (unsigned long i = avail; i < fake_j2534::g_queue_len; ++i) {
+                fake_j2534::g_queue[i - avail] = fake_j2534::g_queue[i];
+            }
+            fake_j2534::g_queue_len -= avail;
+            *pNumMsgs = avail;
+            if (avail < requested && Timeout > 0) {
+                return QTTUNE_PT_STATUS_TIMEOUT;
+            }
+            if (avail == 0 && Timeout == 0) {
+                return QTTUNE_PT_STATUS_BUFFER_EMPTY;
+            }
+            return STATUS_NOERROR;
+        }
+    }
 
     /* FILTER GATING (SetFilterGating-controlled): model the device's
      * filter hardware — non-matching frames are DISCARDED, never

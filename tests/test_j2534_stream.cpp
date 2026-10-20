@@ -896,6 +896,114 @@ TEST_F(J2534AdoptionTest, SchedulerDrainsBacklogBeyondPerCycleBudget)
     qttune_session_destroy(session);
 }
 
+/* ====================================================================
+ * Link health (#11 HARNESS): drive QTTUNE_FAKE_READ_STATUS through the
+ * real worker and assert the error-state contract — canonical codes,
+ * one episode per outage, quiet debounce, recovery via the continued
+ * request probe. In-proc fake: the env knob re-reads per ReadMsgs
+ * call, so arming/clearing is immediate.
+ * ==================================================================== */
+
+struct ReadStatusArm {
+    ~ReadStatusArm()
+    {
+        SetEnvironmentVariableA("QTTUNE_FAKE_READ_STATUS", nullptr);
+    }
+};
+
+TEST_F(J2534AdoptionTest, HardFailureSetsCanonicalErrorAndRecovers)
+{
+    ReadStatusArm arm;   // restore even on a failing ASSERT
+    char uri[512];
+    snprintf(uri, sizeof(uri), "j2534://%s", FAKE_J2534_DLL_PATH);
+
+    qttune_session_t* session = nullptr;
+    ASSERT_EQ(qttune_session_create(uri, &session), QT_OK);
+    ASSERT_EQ(qttune_session_start(session), QT_OK);
+
+    /* Dead adapter: STATUS_FAILED (0x07) on every read */
+    SetEnvironmentVariableA("QTTUNE_FAKE_READ_STATUS", "7");
+
+    int32_t le = 0;
+    uint32_t ec = 0;
+    bool reached = false;
+    for (int i = 0; i < 500 && !reached; ++i) {   /* 5 s budget */
+        (void)qttune_session_get_error_state(session, &le, &ec);
+        reached = (le == QT_ERR_TRANSPORT_HARD_FAILURE);
+        if (!reached) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
+    }
+    EXPECT_TRUE(reached) << "hard failure never reported (was " << le << ")";
+    EXPECT_EQ(ec, 1u);   /* one episode per outage, not per read */
+
+    /* Still exactly one episode while the outage persists — episode
+     * counting is transition-based; the backoff may be doubling under
+     * us but must not re-arm the counter. */
+    std::this_thread::sleep_for(std::chrono::milliseconds(600));
+    (void)qttune_session_get_error_state(session, &le, &ec);
+    EXPECT_EQ(ec, 1u);
+
+    /* Clear the knob; scheduler writes continue as the recovery probe,
+     * so a good frame follows and the link heals. The backoff
+     * may have grown toward the cap, so budget generously. */
+    SetEnvironmentVariableA("QTTUNE_FAKE_READ_STATUS", nullptr);
+    reached = false;
+    for (int i = 0; i < 1000 && !reached; ++i) {   /* 10 s budget */
+        (void)qttune_session_get_error_state(session, &le, &ec);
+        reached = (le == QT_OK);
+        if (!reached) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
+    }
+    EXPECT_TRUE(reached) << "recovery never reported (was " << le << ")";
+    EXPECT_EQ(ec, 1u);   /* recovery adds no episode */
+
+    EXPECT_EQ(qttune_session_close(session), QT_OK);
+    qttune_session_destroy(session);
+}
+
+TEST_F(J2534AdoptionTest, QuietBusDebouncesToVehicleTimeoutWithoutEpisode)
+{
+    ReadStatusArm arm;
+    char uri[512];
+    snprintf(uri, sizeof(uri), "j2534://%s", FAKE_J2534_DLL_PATH);
+
+    qttune_session_t* session = nullptr;
+    ASSERT_EQ(qttune_session_create(uri, &session), QT_OK);
+    ASSERT_EQ(qttune_session_start(session), QT_OK);
+
+    /* Quiet vehicle: ERR_TIMEOUT (0x09) on every read, nothing else */
+    SetEnvironmentVariableA("QTTUNE_FAKE_READ_STATUS", "9");
+
+    int32_t le = 0;
+    uint32_t ec = 0;
+    bool reached = false;
+    for (int i = 0; i < 800 && !reached; ++i) {   /* 8 s: debounce ~1 s + CI */
+        (void)qttune_session_get_error_state(session, &le, &ec);
+        reached = (le == QT_ERR_VEHICLE_TIMEOUT);
+        if (!reached) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
+    }
+    EXPECT_TRUE(reached) << "quiet debounce never fired (was " << le << ")";
+    EXPECT_EQ(ec, 0u);   /* vehicle silence is not an episode */
+
+    SetEnvironmentVariableA("QTTUNE_FAKE_READ_STATUS", nullptr);
+    reached = false;
+    for (int i = 0; i < 500 && !reached; ++i) {   /* 5 s budget */
+        (void)qttune_session_get_error_state(session, &le, &ec);
+        reached = (le == QT_OK);
+        if (!reached) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
+    }
+    EXPECT_TRUE(reached);
+
+    EXPECT_EQ(qttune_session_close(session), QT_OK);
+    qttune_session_destroy(session);
+}
+
 } // namespace
 
 #endif // _WIN32

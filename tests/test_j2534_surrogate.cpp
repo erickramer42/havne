@@ -446,4 +446,52 @@ TEST(J2534SurrogateTest, BlockedVendorOpenFailsAtHandshakeTimeout)
     EXPECT_LT(elapsed, 3000);
 }
 
+/* Former #26: per J2534-1, a read asking for more messages than
+ * arrived, with a nonzero timeout, returns ERR_TIMEOUT TOGETHER WITH
+ * those messages. The spec-mode fake emulates exactly that; the
+ * client must deliver the batch and only judge the status when the
+ * batch is empty. Red against the pre-fix client: the batch was
+ * discarded and a talking bus rendered invisible. Knob armed BEFORE
+ * open — the child snapshots the environment at spawn (same
+ * discipline as QTTUNE_FAKE_IOCTL_DELAY_MS). */
+TEST(J2534SurrogateTest, SpecTimeoutReadDeliversPartialBatch)
+{
+    SetEnvironmentVariableA("QTTUNE_FAKE_SPEC_READ_SEMANTICS", "1");
+    qttune_j2534_sur_handle_t* h = nullptr;
+    ASSERT_EQ(qttune_j2534_sur_open(fake_dll_path(), &h), QT_OK);
+    unsigned long channel = 0;
+    ASSERT_EQ(qttune_j2534_sur_connect_channel(h, 0, 0, &channel), QT_OK);
+
+    const unsigned char f0[8] = {0x41, 0x0C, 0x1F, 0x40, 0, 0, 0, 0};
+    ASSERT_EQ(qttune_j2534_sur_inject_test_frame(h, f0, 8, 4242, 0),
+              QT_OK);
+
+    qttune_frame_t f1 = {};
+    bool got1 = false;
+    const qttune_status_t st1 =
+        qttune_j2534_sur_read_frame(h, 0, &f1, 50, &got1);
+
+    qttune_frame_t f2 = {};
+    bool got2 = false;
+    const qttune_status_t st2 =
+        qttune_j2534_sur_read_frame(h, 0, &f2, 50, &got2);
+
+    /* Restore BEFORE assertions (knob-leak discipline) */
+    SetEnvironmentVariableA("QTTUNE_FAKE_SPEC_READ_SEMANTICS", nullptr);
+
+    /* Child asks for 16 with a 50 ms timeout; one queued -> spec mode
+     * returns 1 message WITH ERR_TIMEOUT. The client must deliver it. */
+    EXPECT_EQ(st1, QT_OK);
+    EXPECT_TRUE(got1);
+    EXPECT_EQ(memcmp(f1.data, f0, 8), 0);
+    EXPECT_EQ(f1.data_length, 8u);
+    EXPECT_EQ(f1.timestamp_us, uint64_t{4242});
+
+    /* Empty queue, nonzero timeout: quiet, not delivered, not hard. */
+    EXPECT_EQ(st2, QT_ERR_VEHICLE_TIMEOUT);
+    EXPECT_FALSE(got2);
+
+    EXPECT_EQ(qttune_j2534_sur_close(h), QT_OK);
+}
+
 #endif /* _WIN32 */

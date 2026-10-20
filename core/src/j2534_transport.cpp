@@ -45,9 +45,7 @@ constexpr uint32_t J2534_DRAIN_READ_TIMEOUT_MS  = 20;
 
 /* Hard-failure backoff: 100 ms base, doubling to a 5 s cap (about
  * 0.2 retries/s against a dead adapter). A good frame, or a debounced
- * run of ERR_TIMEOUT reads (the adapter is answering), ends it.
- * Known Issue #11: update_health() resets the backoff to the base on
- * every failure, so today it never grows. */
+ * run of ERR_TIMEOUT reads (the adapter is answering), ends it. */
 constexpr uint32_t J2534_BACKOFF_BASE_MS = 100;
 constexpr uint32_t J2534_BACKOFF_CAP_MS  = 5000;
 
@@ -278,9 +276,12 @@ qttune_status_t pump_one(qttune_j2534_transport* t, bool* out_got,
  *                      J2534_HEALTH_QUIET_CYCLES in a row, last_error =
  *                      QT_ERR_VEHICLE_TIMEOUT (a timeout run also clears
  *                      the backoff: the adapter is answering)
- *   anything else   -> last_error = that status; one error_count episode
- *                      per transition; backoff set to the base (the
- *                      caller sleeps and doubles it) */
+ *   anything else   -> last_error = QT_ERR_TRANSPORT_HARD_FAILURE (always
+ *                      that code, whatever the call returned); on the
+ *                      transition into failure, one error_count episode
+ *                      and backoff starts at the base. While the failure
+ *                      persists the backoff is left alone, so the
+ *                      caller's sleep-then-double grows it to the cap. */
 void update_health(qttune_j2534_transport* t, int32_t& health,
                    uint32_t& backoff_ms, uint32_t& quiet_runs,
                    qttune_status_t st, bool got)
@@ -320,11 +321,13 @@ void update_health(qttune_j2534_transport* t, int32_t& health,
     }
     /* hard failure: immediate, one episode, backoff */
     if (health != QT_ERR_TRANSPORT_HARD_FAILURE) {
-        t->session->last_error.store(st);
+        t->session->last_error.store(QT_ERR_TRANSPORT_HARD_FAILURE);
         health = QT_ERR_TRANSPORT_HARD_FAILURE;
         t->session->error_count.fetch_add(1);
+        backoff_ms = J2534_BACKOFF_BASE_MS;   /* enter backoff */
     }
-    backoff_ms = J2534_BACKOFF_BASE_MS;
+    /* Already hard-failed: keep the current backoff. Resetting it here
+     * would undo the doubling before any sleep accumulated it. */
     quiet_runs = 0;
 }
 
@@ -357,12 +360,13 @@ bool backoff_sleep(qttune_j2534_transport* t, uint32_t ms)
  *     -> Mode-01 request -> write -> drain up to J2534_DRAIN_BUDGET
  *     frames (short timeout, stop at first empty) -> sleep the cycle
  *     remainder against an absolute deadline, so drain cost does not
- *     drift the cadence. Writes continue while hard-failed.
- *   POLL: poll_pid != 0. One request, one read (100 ms timeout),
- *     100 ms sleep; same request shape as the scheduler. Skips the
- *     write while hard-failed (Known Issue #11).
+ *     drift the cadence.
+ *   POLL: poll_pid != 0. One request, one read (100 ms timeout), then
+ *     a 100 ms sleep; same request shape as the scheduler.
  *   PASSIVE: one read (100 ms timeout) then a 20 ms sleep; no
- *     requests. */
+ *     requests.
+ * Both request modes keep writing while hard-failed: the request is
+ * the recovery probe, and replies only follow writes. */
 void j2534_worker(qttune_j2534_transport* t)
 {
     const bool sched_mode = (t->sched.count > 0);
@@ -427,18 +431,20 @@ void j2534_worker(qttune_j2534_transport* t)
                 }
             }
         } else if (t->poll_pid != 0) {
-            /* POLL: write, then read this request's response. Skips
-             * the write while hard-failed, so one hard error stops the
-             * loop (Known Issue #11). */
-            if (health != QT_ERR_TRANSPORT_HARD_FAILURE) {
-                uint8_t req[6];
-                build_mode01_request(req, t->chans[0].tx_id, t->poll_pid);
-                uint32_t written = 0;
-                (void)qttune_j2534_write_frame(
-                    t->handle, t->channel, req, sizeof(req),
-                    t->chans[0].addr_flags |
-                        QTTUNE_PT_TX_ISO15765_FRAME_PAD,
-                    0, &written);
+            /* POLL: write, then read this request's response. The
+             * write is always sent, as in scheduler mode, and a failed
+             * write feeds the health machine the same way. */
+            uint8_t req[6];
+            build_mode01_request(req, t->chans[0].tx_id, t->poll_pid);
+            uint32_t written = 0;
+            qttune_status_t wst = qttune_j2534_write_frame(
+                t->handle, t->channel, req, sizeof(req),
+                t->chans[0].addr_flags |
+                    QTTUNE_PT_TX_ISO15765_FRAME_PAD,
+                0, &written);
+            if (wst != QT_OK) {
+                update_health(t, health, backoff_ms, quiet_runs,
+                              wst, false);
             }
             bool got = false;
             qttune_status_t st = pump_one(t, &got,
