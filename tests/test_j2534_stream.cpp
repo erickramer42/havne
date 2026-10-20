@@ -1004,6 +1004,69 @@ TEST_F(J2534AdoptionTest, QuietBusDebouncesToVehicleTimeoutWithoutEpisode)
     qttune_session_destroy(session);
 }
 
+/* Finding 1, in-proc half: a dirty count under a hard error must NOT
+ * read as health. The loader requests exactly one message; the knob
+ * leaves num == 1 over a zero-filled PASSTHRU_MSG, which without the
+ * sanitization dispatches as a real frame and the worker reports the
+ * link healthy. Bare URI: the scheduler keeps writing, so recovery to
+ * OK is reachable (passive mode would correctly hold VEHICLE_TIMEOUT
+ * via the quiet debounce — recovery and quiet are different states). */
+TEST_F(J2534AdoptionTest, UntouchedCountUnderHardErrorReportsUnhealthy)
+{
+    struct Arm {
+        ~Arm() {
+            SetEnvironmentVariableA("QTTUNE_FAKE_UNTOUCHED_COUNT_STATUS",
+                                     nullptr);
+        }
+    } arm;
+
+    char uri[512];
+    snprintf(uri, sizeof(uri), "j2534://%s", FAKE_J2534_DLL_PATH);
+
+    qttune_session_t* session = nullptr;
+    ASSERT_EQ(qttune_session_create(uri, &session), QT_OK);
+    StreamCapture cap;
+    ASSERT_EQ(qttune_register_frame_callback(session, capture_cb, &cap),
+              QT_OK);
+    ASSERT_EQ(qttune_session_start(session), QT_OK);
+
+    SetEnvironmentVariableA("QTTUNE_FAKE_UNTOUCHED_COUNT_STATUS", "7");
+
+    int32_t le = 0;
+    uint32_t ec = 0;
+    bool reached = false;
+    for (int i = 0; i < 500 && !reached; ++i) {   /* 5 s budget */
+        (void)qttune_session_get_error_state(session, &le, &ec);
+        reached = (le == QT_ERR_TRANSPORT_HARD_FAILURE);
+        if (!reached) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
+    }
+    EXPECT_TRUE(reached) << "dead adapter reported healthy (was " << le << ")";
+    EXPECT_GE(ec, 1u);
+    /* PHANTOM CHECK, taken BEFORE clearing the knob: scheduler writes
+     * have parked responses in the fake's queue, but the poisoned
+     * reads must dispatch nothing — a positive count would be phantom
+     * frames from the dirty count. */
+    EXPECT_EQ(cap.count.load(), 0);
+
+    /* Recovery: writes continued as the probe, responses flush once
+     * reads return honest counts. */
+    SetEnvironmentVariableA("QTTUNE_FAKE_UNTOUCHED_COUNT_STATUS", nullptr);
+    reached = false;
+    for (int i = 0; i < 1000 && !reached; ++i) {   /* 10 s budget */
+        (void)qttune_session_get_error_state(session, &le, &ec);
+        reached = (le == QT_OK);
+        if (!reached) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
+    }
+    EXPECT_TRUE(reached) << "recovery never reported (was " << le << ")";
+
+    EXPECT_EQ(qttune_session_close(session), QT_OK);
+    qttune_session_destroy(session);
+}
+
 } // namespace
 
 #endif // _WIN32

@@ -401,6 +401,27 @@ long __stdcall PassThruReadMsgs(unsigned long ChannelID,
         }
     }
 
+    /* Finding-1 emulation (the sloppy vendor): unlike
+     * QTTUNE_FAKE_READ_STATUS above, this returns the given hard
+     * status WITHOUT touching *pNumMsgs or the message array — the
+     * caller's request count stays DIRTY and its buffer keeps
+     * whatever the caller put there (zeros, or the surrogate child's
+     * previous batch contents). Mirrors the observed VX behavior
+     * ("status 7, written 1", bench 2026-10-20). Re-read per call:
+     * in-proc tests toggle live, the surrogate child only sees the
+     * spawn-time value. */
+    {
+        char uc[32] = {};
+        const DWORD un = GetEnvironmentVariableA(
+            "QTTUNE_FAKE_UNTOUCHED_COUNT_STATUS", uc, sizeof(uc));
+        if (un > 0 && un < sizeof(uc)) {
+            const long code = strtol(uc, nullptr, 0);
+            if (code != 0) {
+                return code;   /* *pNumMsgs and buffer left untouched */
+            }
+        }
+    }
+
     std::lock_guard<std::mutex> lk(fake_j2534::g_lock);
 
     /* SPEC-CONFORMANT READ MODE (pins the former #26): when

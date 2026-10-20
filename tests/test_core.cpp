@@ -1,10 +1,12 @@
 // File/layer: tests/test_core.cpp | GTest, UNIT tier, headless CI job
 
 #include <gtest/gtest.h>
+#include <cmath>
 #include <cstring>
 #include <atomic>
 #include <chrono>
 #include <thread>
+#include <vector>
 
 extern "C" {
 #include "qttune/core.h"
@@ -12,11 +14,11 @@ extern "C" {
 #include "qttune/signals.h"
 #include "qttune/signal_sets.h"
 #include "qttune/profile.h"
-#include "mock_drive_cycle.h"
-
-#include <cmath>
-#include <vector>
 }
+
+/* C++ header (namespaced classes and inline functions): must stay
+ * outside the extern "C" block above. */
+#include "mock_drive_cycle.h"
 
 namespace {
 

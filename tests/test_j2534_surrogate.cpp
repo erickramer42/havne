@@ -494,4 +494,41 @@ TEST(J2534SurrogateTest, SpecTimeoutReadDeliversPartialBatch)
     EXPECT_EQ(qttune_j2534_sur_close(h), QT_OK);
 }
 
+/* Finding 1 (code review 2026-10-20): a vendor returning a hard
+ * error without touching pNumMsgs leaves the caller's count dirty.
+ * Without sanitization the child's static read batch delivers up to
+ * 16 stale/zero frames and the client reports the batch as healthy.
+ * The knob is sticky in the child (env inherited at spawn; the
+ * parent's clear never propagates), so recovery is not observable
+ * here — instead the follow-up ioctl proves request correlation
+ * survived the poisoned request. */
+TEST(J2534SurrogateTest, HardErrorUntouchedCountDeliversNoFrames)
+{
+    SetEnvironmentVariableA("QTTUNE_FAKE_UNTOUCHED_COUNT_STATUS", "7");
+    qttune_j2534_sur_handle_t* h = nullptr;
+    ASSERT_EQ(qttune_j2534_sur_open(fake_dll_path(), &h), QT_OK);
+    SetEnvironmentVariableA("QTTUNE_FAKE_UNTOUCHED_COUNT_STATUS", nullptr);
+    unsigned long channel = 0;
+    ASSERT_EQ(qttune_j2534_sur_connect_channel(h, 0, 0, &channel), QT_OK);
+
+    qttune_frame_t f = {};
+    bool got = false;
+    const qttune_status_t st =
+        qttune_j2534_sur_read_frame(h, 0, &f, 50, &got);
+
+    EXPECT_EQ(st, QT_ERR_TRANSPORT_HARD_FAILURE);
+    EXPECT_FALSE(got);
+
+    /* No desync and a live channel after the poisoned request. */
+    unsigned char out[8] = {};
+    uint32_t out_len = 0;
+    EXPECT_EQ(qttune_j2534_sur_ioctl(h, channel, QTTUNE_PT_IOCTL_READ_VBATT,
+                                     nullptr, 0, out, &out_len),
+              QT_OK);
+    EXPECT_EQ(out_len, 4u);
+    EXPECT_EQ(get_u32(out), 13800u);
+
+    EXPECT_EQ(qttune_j2534_sur_close(h), QT_OK);
+}
+
 #endif /* _WIN32 */
