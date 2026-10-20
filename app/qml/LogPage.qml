@@ -75,6 +75,8 @@ Pane {
                             Layout.preferredWidth: 36 }
                     Label { text: qsTr("Ext"); color: Theme.textDim; font.pixelSize: 12;
                             Layout.preferredWidth: 36 }
+                    Label { text: qsTr("ID"); color: Theme.textDim; font.pixelSize: 12;
+                            Layout.preferredWidth: 64 }
                     Label { text: qsTr("Payload"); color: Theme.textDim; font.pixelSize: 12;
                             Layout.fillWidth: true }
                 }
@@ -86,7 +88,7 @@ Pane {
                           right: parent.right; bottom: parent.bottom }
                 anchors.margins: 4
                 clip: true
-                model: QtTune.model          // FrameListModel from bridge
+                model: QtTune.model          // FrameSortProxy over the bridge's FrameListModel
 
                 // Auto-follow newest frames
                 // onCountChanged: {
@@ -122,6 +124,14 @@ Pane {
                         text: model.extended ? "E" : "-"
                         color: model.extended ? Theme.success : Theme.textDim
                         Layout.preferredWidth: 36
+                    }
+                    Label {
+                        // ArbId arrives as a number (quint32 via QVariantMap) — hex-format it
+                        text: "0x" + model.arbitrationId.toString(16).toUpperCase()
+                        color: Theme.textDim
+                        font.family: "monospace"; font.pixelSize: 12
+                        Layout.preferredWidth: 64
+                        elide: Text.ElideRight
                     }
                     Label {
                         text: model.payloadHex

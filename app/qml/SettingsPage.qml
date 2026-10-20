@@ -3,7 +3,7 @@
 //          macOS/Linux: empty-state hint), picker row fills URI field only,
 //          Connect button drives connectSessionAsync (UI stays responsive
 //          while a vendor blocks ~8 s), activity log shows connect lifecycle,
-//          error label on bad URI
+//          error label on bad URI, fault states tint the status label
 
 import QtQuick
 import QtQuick.Controls
@@ -17,7 +17,8 @@ Pane {
 
     readonly property int maxLogLines: 200
 
-    // Discovered Pass-Thru interfaces: [{ vendorName, dllPath }, ...].
+    // Discovered Pass-Thru interfaces: [{ vendorName, dllPath,
+    // architecture }, ...] with architecture "x86", "x64" or "unknown".
     // Empty on non-Windows or when no drivers are installed.
     property var j2534Devices: []
 
@@ -41,8 +42,18 @@ Pane {
     function appendLog(message) {
         activityLog.append(message)
         // Bound the log: QML TextArea.append keeps growing otherwise.
+        // Removes whole oldest LINES (split on "\n") — NOT visual
+        // rows. lineCount counts wrapped rows, so a single long
+        // wrapped message can exceed maxLogLines while the text has
+        // no newline at all; indexOf("\n") then returns -1 and
+        // remove(0, 0) removes nothing, spinning forever (the old
+        // bug). The guard breaks the loop instead: such a message
+        // stays until a newline-bearing line can be trimmed.
         while (activityLog.lineCount > page.maxLogLines) {
-            activityLog.remove(0, activityLog.text.indexOf("\n") + 1)
+            const nl = activityLog.text.indexOf("\n")
+            if (nl < 0)
+                break
+            activityLog.remove(0, nl + 1)
         }
         activityLog.cursorPosition = activityLog.length
     }
@@ -80,7 +91,14 @@ Pane {
                   : (QtTune.connecting
                        ? qsTr("Connecting…")
                        : qsTr("Not connected"))
-            color: QtTune.connected ? Theme.success : Theme.textDim
+            // fault also tints the connected label — the activity log
+            // below carries the transitions, but the state should be
+            // visible at a glance, not only in the scrollback
+            color: QtTune.connected
+                     ? (QtTune.linkState === "fault"
+                          ? Theme.danger
+                          : (QtTune.linkState === "quiet" ? "#ffd166" : Theme.success))
+                     : Theme.textDim
         }
 
         RowLayout {
@@ -90,7 +108,10 @@ Pane {
             TextField {
                 id: uriField
                 Layout.fillWidth: true
-                placeholderText: qsTr("URI — e.g. mock://demo or j2534://Vendor?filter=0x7E8&poll=0x0C")
+                // ?poll= is ignored under the obd2 default (the
+                // scheduler owns requests), so the example pairs it
+                // with ?profile=raw — see docs/j2534.md
+                placeholderText: qsTr("URI — e.g. mock://demo or j2534://Vendor?profile=raw&filter=0x7E8&poll=0x0C")
                 enabled: !QtTune.connected && !QtTune.connecting && QtTune.coreInitialized
                 color: Theme.text
                 onAccepted: page.requestConnect(text)
@@ -165,7 +186,7 @@ Pane {
             Label {
                 text: page.j2534Devices.length === 0
                       ? qsTr("None discovered — install a Pass-Thru driver "
-                             + "(Windows) or enter a direct path below")
+                             + "(Windows) or enter a direct path above")
                       : qsTr("%1 found").arg(page.j2534Devices.length)
                 color: page.j2534Devices.length === 0 ? Theme.textDim : Theme.text
                 Layout.fillWidth: true

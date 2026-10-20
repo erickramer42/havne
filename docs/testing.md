@@ -80,12 +80,36 @@ it.
 | Channel derivation: a bare `j2534://` URI under `obd2` registers the 7E8 filter with exact mask/pattern shape, sends to 7E0, and starts; a lone `?txid=` keeps the derived 7E8 filter but rewrites the request target | `J2534AdoptionTest.BareJ2534UriDerivesObd2ChannelAndStarts`, `.TxidOverrideRewritesDerivedTransmitTarget` |
 | Link health (in-proc): a hard read failure records `QT_ERR_TRANSPORT_HARD_FAILURE` with one episode per outage and recovers through the probe write; a quiet bus debounces to `QT_ERR_VEHICLE_TIMEOUT` with no episode | `J2534AdoptionTest.HardFailureSetsCanonicalErrorAndRecovers`, `.QuietBusDebouncesToVehicleTimeoutWithoutEpisode` |
 | A batch the vendor returns with `ERR_TIMEOUT` is delivered through the surrogate; an empty one maps to a vehicle timeout | `J2534SurrogateTest.SpecTimeoutReadDeliversPartialBatch` (spec-mode fake) |
+| Link-health UI: quiet/fault/degraded banner, activity-log transitions, "—" cells, stale dimming, arbId column | Manual smoke, 2026-10-20 (fake quiet/fault via `QTTUNE_FAKE_READ_STATUS`; mock; recipe above) |
+| Fault state on real hardware, clean teardown; 4-byte filter shape accepted with logged vendor status 0 | Informal bench observation 2026-10-20 ([sheet](bench-sessions/2026-10-20.md)) |
+
+## Manual smoke — link-health UI
+
+The QML half of #11 has no automated coverage (nothing drives the
+bridge from QML). Recipe — run the app from a shell so the session
+inherits the knobs at spawn (works for both in-proc and surrogate
+routing; the Win32 child snapshots the environment, so toggling
+mid-session only works in-proc):
+
+| Goal | Environment | URI | Expected |
+|---|---|---|---|
+| Baseline, dimming | — | `mock://demo` | Values stream; slow signals (IAT) dim past 3 s |
+| Quiet banner | `QTTUNE_FAKE_READ_STATUS=9` | `j2534://<fake.dll>?profile=raw&filter=0x7E8` | Amber "Vehicle not responding" after ~1.2 s; no frames, empty signal list (raw profile) |
+| Fault banner | `QTTUNE_FAKE_READ_STATUS=7` | same | Red "Adapter fault" banner with episode count; clearing the knob mid-session recovers only in-proc |
+| Frames + arbId column | — | `j2534://<fake.dll>?profile=raw&filter=0x7E8&poll=0x0C` | Frames on LogPage with `0x7E8` in the ID column, payload `410c1f40` (2000 RPM canned); link ok |
+| Disconnect reset | after any of the above | Disconnect | Home dot and Settings label show plain disconnected, not the last session's fault/quiet |
+
+All four states (ok/quiet/fault/disconnected) were verified 2026-10-20,
+plus the fault state on the OBDX Pro VX quiet bus (BENCH,
+[bench-sessions/2026-10-20.md](bench-sessions/2026-10-20.md)).
 
 ## Gaps (not verified)
 
 - **BENCH coverage stops at the quiet bus.** The formal session
-  (2026-10-16) verified load, open, acceptance of the since-replaced
-  8-byte filter shape, and quiet-bus read behavior. Still unverified against real hardware:
+  (2026-10-16) verified load, open, and acceptance of the since-replaced
+  8-byte filter shape; an informal 2026-10-20 observation additionally
+  confirmed the current 4-byte shape (logged vendor status 0) and the
+  fault-banner path on the VX. Still unverified against real hardware:
   talking-bus behavior (request framing, checksum expectations,
   timestamp units), VBATT, ReadMsgs timeout-vs-error discrimination
   (#11), and any vendor status on filter registration itself. That
@@ -98,7 +122,12 @@ it.
     reset-to-base backoff;
   - a vendor that leaves the message count untouched on error, because
     the knob always zeroes it (code review 2026-10-20, finding 1);
-  - the real-vendor flavors of these statuses (BENCH, prep item 6).
+  - the real-vendor flavors on a talking bus: the VX quiet bus was
+    observed once (2026-10-20: empty reads return `NOERROR` with zero
+    messages; writes fail `ERR_FAILED` after ~8 cycles on a no-ACK
+    bus — [bench-sessions/2026-10-20.md](bench-sessions/2026-10-20.md)),
+    but `ERR_TIMEOUT`-with-data and ECU-present write behavior are
+    still unknown.
 - **The fake's default read model is simpler than J2534's.** By
   default its `ReadMsgs` returns one message per call whatever
   `NumMsgs` and the timeout ask for, and `STATUS_NOERROR` with zero

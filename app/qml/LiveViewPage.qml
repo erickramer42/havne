@@ -1,5 +1,7 @@
 // File/layer: app/qml/LiveViewPage.qml | Qt6 Quick, UI layer
-// Testing: model contract covered by test_bridge; render verified manually
+// Testing: model contract covered by test_bridge; render verified manually.
+// Banner states need a j2534 fake with QTTUNE_FAKE_READ_STATUS armed
+// (0x09 quiet, 0x07 fault) — see docs/testing.md smoke recipe.
 
 import QtQuick
 import QtQuick.Controls
@@ -13,6 +15,20 @@ Page {
     id: root
     background: Rectangle { color: Theme.bg }
 
+    // Staleness clock: the model's ageMs role carries no notify, so
+    // delegates never re-evaluate it when a signal stalls. Each
+    // delegate timestamps its own last real sample instead, and this
+    // page-level property refreshes those bindings at a low rate —
+    // only while connected.
+    property real nowMs: 0
+    Timer {
+        interval: 500
+        running: QtTune.connected
+        repeat: true
+        triggeredOnStart: true
+        onTriggered: root.nowMs = Date.now()
+    }
+
     ColumnLayout {
         anchors.fill: parent
         anchors.margins: 16
@@ -22,6 +38,32 @@ Page {
             text: qsTr("Live Signals")
             font.pixelSize: 20
             color: Theme.text
+        }
+
+        // Link-health banner (#11 UI half): fault/quiet/degraded come
+        // from QtTune.linkState, transitions are mirrored in the
+        // Settings activity log. "quiet" is amber (chart-palette
+        // precedent — Theme has no warning role).
+        Rectangle {
+            visible: QtTune.connected && QtTune.linkState !== "ok"
+            Layout.fillWidth: true
+            implicitHeight: 40
+            radius: Theme.radius
+            color: QtTune.linkState === "quiet"
+                   ? Qt.alpha("#ffd166", 0.12)
+                   : Qt.alpha(Theme.danger, 0.15)
+
+            Label {
+                anchors.centerIn: parent
+                text: QtTune.linkState === "fault"
+                      ? qsTr("Adapter fault — %1 episode(s), retrying with backoff")
+                            .arg(QtTune.errorEpisodes)
+                      : QtTune.linkState === "degraded"
+                        ? qsTr("Link degraded (error %1)").arg(QtTune.linkErrorCode)
+                        : qsTr("Vehicle not responding — quiet bus")
+                color: QtTune.linkState === "quiet" ? "#ffd166" : Theme.danger
+                font.pixelSize: 13
+            }
         }
 
         Label {
@@ -49,6 +91,14 @@ Page {
                 required property string unit
                 required property double value
                 required property bool subscribed
+                required property bool hasValue
+                // Wall-clock of the last real sample, gated on hasValue
+                // so the instant-before-first-frame value doesn't count
+                // as fresh. Drives dimming against root.nowMs — see
+                // the page clock above for why ageMs isn't used.
+                property double lastValueMs: 0
+                onValueChanged: if (signalDelegate.hasValue)
+                                    signalDelegate.lastValueMs = Date.now()
 
                 width: signalList.width
                 height: 48
@@ -69,11 +119,18 @@ Page {
                         Layout.fillWidth: true
                     }
                     Label {
-                        text: QtTune.connected
-                            ? "%1 %2".arg(signalDelegate.value.toFixed(1)).arg(signalDelegate.unit)
-                            : qsTr("—")
+                        // Never-arrived signals render "—", not a
+                        // fabricated 0.0 (unsupported PIDs under obd2).
+                        text: (QtTune.connected && signalDelegate.hasValue)
+                              ? "%1 %2".arg(signalDelegate.value.toFixed(1)).arg(signalDelegate.unit)
+                              : qsTr("—")
                         color: signalDelegate.subscribed ? Theme.primary : Theme.textDim
                         font.family: "Consolas"   // tabular-ish digits, no jitter
+                        // Stale dimming: generous vs the scheduler's full
+                        // PID rotation (~1 s for the 9-PID obd2 set).
+                        opacity: signalDelegate.hasValue
+                                 && (root.nowMs - signalDelegate.lastValueMs > 3000)
+                                     ? 0.45 : 1.0
                     }
                 }
             }

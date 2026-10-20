@@ -1,6 +1,7 @@
 // File/layer: app/qml/HomePage.qml | Qt6 Quick, UI layer
 // Testing: manual smoke — logo renders centered at 96px, bars animate
-// inside it, status dot visible, button lands on LiveView after connect
+//          inside it, status dot reflects link state, button lands on
+//          LiveView after connect
 
 import QtQuick
 import QtQuick.Layouts
@@ -98,7 +99,7 @@ Rectangle {
             Layout.alignment: Qt.AlignHCenter
         }
 
-        // Status card: session state and core version
+        // Status card: session and link state, core version
         Rectangle {
             Layout.topMargin: 16
             Layout.preferredWidth: 280
@@ -113,10 +114,20 @@ Rectangle {
                 Rectangle {
                     implicitWidth: 10; implicitHeight: 10   // layout-managed
                     radius: 5
-                    color: QtTune.connected ? Theme.success : Theme.danger
+                    // linkState refines the old binary dot: fault keeps
+                    // danger while connected, quiet is amber (no Theme
+                    // warning role — chart-palette precedent)
+                    color: !QtTune.connected ? Theme.danger
+                         : QtTune.linkState === "ok" ? Theme.success
+                         : QtTune.linkState === "fault" ? Theme.danger
+                         : "#ffd166"
                 }
                 Text {
-                    text: QtTune.connected ? qsTr("Session active") : qsTr("No session")
+                    text: !QtTune.connected ? qsTr("No session")
+                         : QtTune.linkState === "ok" ? qsTr("Session active")
+                         : QtTune.linkState === "fault" ? qsTr("Adapter fault")
+                         : QtTune.linkState === "quiet" ? qsTr("Link quiet")
+                         : qsTr("Link degraded")
                     color: Theme.textDim
                     font.pixelSize: 13
                 }
@@ -148,7 +159,9 @@ Rectangle {
         }
 
         Text {
-            text: qsTr("Connect a J2534 device for live vehicle data (planned)")
+            // J2534 is working (BENCH-verified) — stop saying "planned";
+            // direct the user where the picker lives
+            text: qsTr("Connect a J2534 device from Settings for live vehicle data")
             font.pixelSize: 12
             color: Theme.textDim
             opacity: 0.7

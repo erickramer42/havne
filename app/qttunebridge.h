@@ -266,5 +266,5 @@ private:
     bool m_connecting = false;
     void pollLinkHealth();
     int m_linkErrorCode = QT_OK;
-    int m_errorEpisodes = 0;
+    uint32_t m_errorEpisodes = 0;
 };

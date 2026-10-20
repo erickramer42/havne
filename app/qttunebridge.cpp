@@ -219,7 +219,7 @@ void SignalListModel::updateValues(const std::vector<std::pair<uint16_t, float>>
         }
     }
     if (firstRow >= 0) {
-        emit dataChanged(index(firstRow), index(lastRow), {ValueRole});
+        emit dataChanged(index(firstRow), index(lastRow), {ValueRole, HasValueRole});
         // One emission per batch — the strip chart's sole repaint trigger.
         emit valuesUpdated();
     }
@@ -482,7 +482,9 @@ void QtTuneBridge::disconnectSession()
         emit currentUriChanged();
     }
     emit connectedChanged(false);
-    emit linkStateChanged();   // "fault"/"quiet" -> "disconnected"
+    m_linkErrorCode = QT_OK;          // 8a: the properties must not
+    m_errorEpisodes = 0;              // outlive the session
+    emit linkStateChanged();          // "fault"/"quiet" -> "disconnected"
 }
 
 void QtTuneBridge::clearFrames()
@@ -651,6 +653,6 @@ QString QtTuneBridge::linkState() const
         case QT_OK: return QStringLiteral("ok");
         case QT_ERR_VEHICLE_TIMEOUT: return QStringLiteral("quiet");
         case QT_ERR_TRANSPORT_HARD_FAILURE: return QStringLiteral("fault");
-        default: return QStringLiteral("degraded");
+        default: return QStringLiteral("degraded"); /* forward-compatible */
     }
 }
