@@ -126,6 +126,16 @@ QVariant SignalListModel::data(const QModelIndex& index, int role) const
         case UnitRole: return QString::fromUtf8(e.unit);
         case ValueRole: return e.value;
         case SubscribedRole: return e.subscribed;
+        case HasValueRole: return e.histCount > 0;
+        case AgeMsRole:
+            if (e.histCount == 0) return -1;
+            {
+                const uint32_t last =
+                    (e.histHead + static_cast<uint32_t>(HistoryCapacity) - 1)
+                    % static_cast<uint32_t>(HistoryCapacity);
+                return static_cast<int>(m_clock.elapsed()
+                                         - e.history[last].timestampMs);
+            }
         default: return QVariant();
     }
 }
@@ -137,7 +147,9 @@ QHash<int, QByteArray> SignalListModel::roleNames() const
         {NameRole, "name"},
         {UnitRole, "unit"},
         {ValueRole, "value"},
-        {SubscribedRole, "subscribed"}
+        {SubscribedRole, "subscribed"},
+        {HasValueRole, "hasValue"},
+        {AgeMsRole, "ageMs"}
     };
 }
 
@@ -264,6 +276,7 @@ QtTuneBridge::QtTuneBridge(QObject* parent)
     m_sortProxy->setSourceModel(m_sourceModel);
 
     connect(m_coalesceTimer, &QTimer::timeout, this, [this]() {
+        pollLinkHealth();   // every tick while connected — transitions only
         if (!m_stagingBuffer.empty()) {
             m_signalModel->updateValues(m_stagingBuffer);
             m_stagingBuffer.clear();
@@ -331,11 +344,14 @@ QVariantList QtTuneBridge::discoverJ2534Devices() const
         m["vendorName"] = QString::fromUtf8(devices[i].vendor_name);
         m["dllPath"] = QString::fromUtf8(devices[i].dll_path);
         /* reserved[0] is the loader's PE sniff: 1 = x86, 2 = x64,
-         * 0 = unknown. Unknown is shown as "x86" (Known Issue #18);
-         * routing treats it as in-proc. Display value only. */
+         * 0 = unknown. Unknown is displayed honestly — routing
+         * treats it as in-proc (x64), which is the load-time
+         * fallback, not a claim about the binary (#18). */
         m["architecture"] = (devices[i].reserved[0] == 2)
                                 ? QStringLiteral("x64")
-                                : QStringLiteral("x86");
+                            : (devices[i].reserved[0] == 1)
+                                ? QStringLiteral("x86")
+                                : QStringLiteral("unknown");
         out.append(m);
     }
     qttune_j2534_free_devices(devices);
@@ -387,6 +403,11 @@ void QtTuneBridge::applyConnectedState(qttune_session_t* session, const QString&
     m_droppedFrames.store(0, std::memory_order_relaxed);
     m_lastReportedDropped = 0;
     m_signalModel->setSignalSet(qttune_session_signal_set(session));
+    m_stagingBuffer.clear();   // previous session's staged values must
+                               // never bleed into this one's first batch
+    m_linkErrorCode = QT_OK;
+    m_errorEpisodes = 0;
+    emit linkStateChanged();
     m_coalesceTimer->start(100);
     emit connectedChanged(true);
     emit framesReset();
@@ -453,13 +474,15 @@ void QtTuneBridge::disconnectSession()
     emit logMessage(QStringLiteral("Disconnected: %1").arg(m_currentUri));
 
     m_connected.store(false, std::memory_order_release);
-    destroySessionLocked();
     m_coalesceTimer->stop();
+    destroySessionLocked();
+    m_stagingBuffer.clear();
     if (!m_currentUri.isEmpty()) {
         m_currentUri.clear();
         emit currentUriChanged();
     }
     emit connectedChanged(false);
+    emit linkStateChanged();   // "fault"/"quiet" -> "disconnected"
 }
 
 void QtTuneBridge::clearFrames()
@@ -587,4 +610,47 @@ void QtTuneBridge::forceFrameCountForTesting(int count)
 void QtTuneBridge::dispatchFrameForTesting(const qttune_frame_t& frame)
 {
     onFrame(&frame, this);
+}
+
+void QtTuneBridge::pollLinkHealth()
+{
+    if (!m_connected.load(std::memory_order_acquire) || m_session == nullptr) {
+        return;
+    }
+    int32_t last_error = QT_OK;
+    uint32_t episodes = 0;
+    (void)qttune_session_get_error_state(m_session, &last_error, &episodes);
+    if (last_error == m_linkErrorCode && episodes == m_errorEpisodes) {
+        return;   // silent on unchanged state — the atomics only move
+                  // on transitions, so this is not a poll storm
+    }
+    const int32_t prev = m_linkErrorCode;
+    m_linkErrorCode = last_error;
+    m_errorEpisodes = static_cast<int>(episodes);
+
+    /* Transitions land in the activity log with ZERO QML work — this
+     * alone turns "connected with frozen values" into a named fault
+     * in the existing log surface. */
+    if (prev != QT_OK && last_error == QT_OK) {
+        emit logMessage(QStringLiteral("Link: recovered"));
+    } else if (last_error == QT_ERR_VEHICLE_TIMEOUT) {
+        emit logMessage(QStringLiteral("Link: vehicle not responding"));
+    } else if (last_error == QT_ERR_TRANSPORT_HARD_FAILURE) {
+        emit logMessage(QStringLiteral("Link: adapter fault (%1 episode(s))")
+                            .arg(m_errorEpisodes));
+    }
+    emit linkStateChanged();
+}
+
+QString QtTuneBridge::linkState() const
+{
+    if (!m_connected.load(std::memory_order_acquire)) {
+        return QStringLiteral("disconnected");
+    }
+    switch (m_linkErrorCode) {
+        case QT_OK: return QStringLiteral("ok");
+        case QT_ERR_VEHICLE_TIMEOUT: return QStringLiteral("quiet");
+        case QT_ERR_TRANSPORT_HARD_FAILURE: return QStringLiteral("fault");
+        default: return QStringLiteral("degraded");
+    }
 }

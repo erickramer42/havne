@@ -90,7 +90,13 @@ public:
         NameRole,
         UnitRole,
         ValueRole,
-        SubscribedRole
+        SubscribedRole,
+        HasValueRole,   /* appended: false until the first sample, so
+                         * QML can show "—" instead of a fake 0 for an
+                         * unsupported PID. No QML binds it yet. */
+        AgeMsRole       /* appended: -1 = never arrived; else ms since
+                         * the last sample, for dimming stale values.
+                         * No QML binds it yet. */
     };
 
     int rowCount(const QModelIndex& parent = {}) const override;
@@ -158,6 +164,9 @@ class QtTuneBridge : public QObject
     Q_PROPERTY(int signalBatchCount READ signalBatchCount NOTIFY signalBatchChanged)
     Q_PROPERTY(SignalListModel* signalModel READ signalModel CONSTANT)
     Q_PROPERTY(QString currentUri READ currentUri NOTIFY currentUriChanged)
+    Q_PROPERTY(QString linkState READ linkState NOTIFY linkStateChanged)
+    Q_PROPERTY(int linkErrorCode READ linkErrorCode NOTIFY linkStateChanged)
+    Q_PROPERTY(int errorEpisodes READ errorEpisodes NOTIFY linkStateChanged)
 
 public:
     explicit QtTuneBridge(QObject* parent = nullptr);
@@ -189,6 +198,9 @@ public:
     // values only (rule 2) — dllPath is exposed because it is the user's
     // route to a direct-load URI, not for parsing.
     Q_INVOKABLE QVariantList discoverJ2534Devices() const;
+    QString linkState() const;
+    int linkErrorCode() const { return m_linkErrorCode; }
+    int errorEpisodes() const { return m_errorEpisodes; }
 
 public slots:
     Q_INVOKABLE QString connectSession(const QString& uri);
@@ -213,6 +225,7 @@ signals:
     void connectingChanged();
     void connectResult(const QString& uri, const QString& error);
     void logMessage(const QString& line);
+    void linkStateChanged();
 
 private:
     static void onFrame(const qttune_frame_t* frame, void* user_data);
@@ -251,4 +264,7 @@ private:
     void applyConnectedState(qttune_session_t* session, const QString& uri);
     std::thread m_connectThread;
     bool m_connecting = false;
+    void pollLinkHealth();
+    int m_linkErrorCode = QT_OK;
+    int m_errorEpisodes = 0;
 };
