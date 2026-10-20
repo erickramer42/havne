@@ -420,9 +420,10 @@ an issue is resolved it is removed, and its number is not reused.
     fits a single flat frame. The app's own background (`#14141c`) is
     nearly black, so this may be that background with nothing drawn
     on it, or nothing at all. The job also took 19.5 min, against
-    about 11 min for the rest of CI. It's manual-only
-    (`workflow_dispatch`) until a run with the new diagnostics settles
-    the cause:
+    about 11 min for the rest of CI. The job runs only on request
+    until a run with the new diagnostics settles the cause. To request
+    it, put `[ios-smoke]` in the pushed commit's message, or dispatch
+    the workflow once `main` has the trigger. The possible outcomes:
     - `home.png` is blank too: the runner's simulator display is at
       fault, not the app.
     - The home screen draws but `launch-15s.png` and `launch-45s.png`

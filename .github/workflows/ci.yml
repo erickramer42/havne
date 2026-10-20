@@ -157,10 +157,17 @@ jobs:
   # after that this needs Rosetta plus the universal iOS platform, or
   # arm64 simulator libraries from Qt.
   #
-  # Manual only (Actions > CI > Run workflow) until its blank screenshot
-  # is explained (Known Issue #30). On push and PR it shows as skipped.
+  # On request only until its blank screenshot is explained (Known Issue
+  # #30); otherwise it shows as skipped. Request it with "[ios-smoke]"
+  # in the pushed commit's message, or with Actions > CI > Run workflow.
+  # That button appears only once main's copy of this file has
+  # workflow_dispatch. A re-run replays the original event, so re-running
+  # a skipped smoke skips it again.
   ios-simulator-smoke:
-    if: github.event_name == 'workflow_dispatch'
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'push' &&
+      contains(github.event.head_commit.message, '[ios-smoke]'))
     runs-on: macos-15-intel
     needs: core-and-tests
     # A wedged simulator boot would otherwise hold the runner for 6 h.

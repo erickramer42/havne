@@ -12,7 +12,7 @@ where the gaps are. For build and run commands, see
 | **Bridge** | Qt bridge and models, headless (`Qt6::Core` only) against the real 50 ms mock worker | CI on Windows, macOS and Linux, and locally |
 | **HARNESS** | The J2534 stack end to end against the in-tree fake vendor DLL | CI on Windows (same-arch, all x64) |
 | **Cross-arch** | HARNESS with an x64 test process driving an x86 surrogate and an x86 fake | Dev machine only; needs environment variables ([development.md](development.md#running-tests)) |
-| **Simulator smoke** | The iOS app installs and launches on the iOS Simulator, QML loads, and the app is still running 45 s later. Nothing drives the UI, and a pass doesn't prove the app drew anything. | CI, manual dispatch only for now (`ios-simulator-smoke`, Intel macOS runner, Known Issue #30) |
+| **Simulator smoke** | The iOS app installs and launches on the iOS Simulator, QML loads, and the app is still running 45 s later. Nothing drives the UI, and a pass doesn't prove the app drew anything. | CI, on request only for now: `[ios-smoke]` in the commit message, or manual dispatch (`ios-simulator-smoke`, Intel macOS runner, Known Issue #30) |
 | **Manual smoke** | Running the app: layout, LiveView, strip chart, Settings picker against the live registry | Dev machine |
 | **BENCH** | A real vendor DLL and adapter, no vehicle | First formal session complete, 2026-10-16, quiet bus ([session sheet](bench-sessions/2026-10-16.md)); talking-bus behaviors pending |
 | **Vehicle** | A live, read-only vehicle session | **Not yet reached** |
