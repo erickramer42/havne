@@ -49,7 +49,9 @@ endif()
 if(APPLE)
     set_target_properties(qttune PROPERTIES MACOSX_BUNDLE TRUE)
 endif()
-if(ANDROID)
+# Custom Android package template (manifest, icons). Only set once the
+# directory exists, so androiddeployqt is never pointed at a missing one.
+if(ANDROID AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/android")
     set_target_properties(qttune PROPERTIES
         QT_ANDROID_PACKAGE_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/android")
 endif()

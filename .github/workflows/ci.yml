@@ -2,13 +2,13 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, dev]
   pull_request:
     branches: [main]
 
 permissions:
   contents: read
-  
+
 jobs:
   core-and-tests:
     runs-on: ubuntu-latest
@@ -71,13 +71,17 @@ jobs:
     needs: core-and-tests
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # Qt 6.7+ names the Linux desktop arch linux_gcc_64 (gcc_64 no
+      # longer resolves for 6.12.0).
       - name: Install Qt 6.12.0 desktop (linux_gcc_64)
         uses: jurplel/install-qt-action@a9c63c7c123f3069cff414e7e482d95dfa9d8125 # v4.4.1
         with:
           version: '6.12.0'
           host: 'linux'
           target: 'desktop'
-          arch: 'gcc_64'
+          arch: 'linux_gcc_64'
+
       - name: Build full app
         run: |
           sudo apt-get update && sudo apt-get install -y libgl1-mesa-dev libxkbcommon-dev
@@ -86,55 +90,61 @@ jobs:
       - name: Run tests
         run: ctest --test-dir build --output-on-failure --no-tests=error
 
+  # Cross builds (Android, iOS) are build-only: BUILD_TESTING=OFF, because
+  # gtest_discover_tests runs each test binary at build time, which can't
+  # work for a target the runner can't execute.
   android-build:
     runs-on: ubuntu-latest
     needs: core-and-tests
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - name: Set up JDK 17
-        uses: actions/setup-java@v4
-        with:
-          distribution: 'temurin'
-          java-version: '17'
-
-      - name: Setup Android SDK + NDK
-        uses: android-actions/setup-android@v3
-
-      - name: Install Qt 6.12.0 (android_arm64_v8a)
+      # Qt 6.7+ publishes Android kits under the all_os host. A mobile kit
+      # needs the desktop Qt of the build host too; --autodesktop installs it.
+      - name: Install Qt 6.12.0 (android_arm64_v8a + linux host)
         uses: jurplel/install-qt-action@a9c63c7c123f3069cff414e7e482d95dfa9d8125 # v4.4.1
         with:
           version: '6.12.0'
-          host: 'linux'
+          host: 'all_os'
           target: 'android'
           arch: 'android_arm64_v8a'
+          extra: '--autodesktop'
 
+      # Qt 6.12 for Android wants NDK r27 and JDK 21. The runner image
+      # ships both (NDK 27.x is its ANDROID_NDK_ROOT default; JDK 21 is
+      # JAVA_HOME_21_X64), so no SDK or JDK setup action is needed.
       - name: Build APK
         run: |
-          cmake -B build \
-            -DCMAKE_PREFIX_PATH="$QT_ROOT_DIR" \
-            -DCMAKE_TOOLCHAIN_FILE="$ANDROID_HOME/ndk-bundle/toolchain..." 
+          export JAVA_HOME="$JAVA_HOME_21_X64"
+          ls "$(dirname "$QT_ROOT_DIR")"
+          "$QT_ROOT_DIR/bin/qt-cmake" -B build \
+            -DBUILD_TESTING=OFF \
+            -DANDROID_SDK_ROOT="$ANDROID_SDK_ROOT" \
+            -DANDROID_NDK_ROOT="$ANDROID_NDK_ROOT"
           cmake --build build
-    
+          cmake --build build --target apk
+
   ios-build:
     runs-on: macos-latest
     needs: core-and-tests
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - name: Install Qt 6.12.0 (ios)
+      - name: Install Qt 6.12.0 (ios + macOS host)
         uses: jurplel/install-qt-action@a9c63c7c123f3069cff414e7e482d95dfa9d8125 # v4.4.1
         with:
           version: '6.12.0'
           host: 'mac'
           target: 'ios'
           arch: 'ios'
+          extra: '--autodesktop'
 
-      - name: Build (no codesign)
+      # qt-cmake applies Qt's iOS toolchain and its minimum deployment
+      # target (iOS 18 for Qt 6.12), so neither is set by hand.
+      - name: Build for device (no code signing)
         run: |
-          cmake -B build -G Xcode \
-            -DCMAKE_PREFIX_PATH="$QT_ROOT_DIR" \
-            -DCMAKE_SYSTEM_NAME=iOS \
-            -DCMAKE_OSX_ARCHITECTURES=arm64 \
-            -DCMAKE_OSX_DEPLOYMENT_TARGET=15.0
-          cmake --build build --config Release -- -allowProvisioningUpdates CODE_SIGNING_ALLOWED=NO
+          ls "$(dirname "$QT_ROOT_DIR")"
+          "$QT_ROOT_DIR/bin/qt-cmake" -B build -G Xcode \
+            -DBUILD_TESTING=OFF \
+            -DCMAKE_OSX_ARCHITECTURES=arm64
+          cmake --build build --config Release -- CODE_SIGNING_ALLOWED=NO
