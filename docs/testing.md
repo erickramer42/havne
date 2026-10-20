@@ -49,6 +49,7 @@ it.
 | Session lifecycle: idempotent close, close/destroy split | `CoreTest` |
 | Signal decode: bit extraction, sign extension, error-code order, validator | `SignalDecodeTest`, `SignalsTest` |
 | Mock frames decode to physically plausible values | `CoreTest.MockFramesDecodeAgainstMockSignalSet` |
+| Mock drive cycle, stepped deterministically: every phase in order; 2nd- and 3rd-gear pulls hold the limiter exactly 5 s; the 3rd-gear pull is longer, faster and hotter; the drag run crosses 402 m in 11–15 s at 150–200 km/h through 4th; every tick of two loops round-trips through the mock set without clamping | `CoreTest.MockDriveCycle*` |
 | Frames marshal from the worker to the GUI thread | `BridgeTest.FramesMarshalFromWorkerToGuiThread` |
 | Signal updates are coalesced to 10 Hz whatever the frame rate | `BridgeTest.SignalBatchesAreCoalesced` |
 | History ring eviction, `valuesUpdated` semantics | `BridgeTest` |

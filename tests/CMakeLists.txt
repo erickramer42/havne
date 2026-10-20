@@ -14,6 +14,11 @@ endif()
 # --- Core tests: MUST stay Qt-free (Ubuntu CI job has no Qt installed) ---
 add_executable(test_core test_core.cpp)
 
+# core/src for mock_drive_cycle.h, which is internal (test_obd2 precedent).
+target_include_directories(test_core PRIVATE
+    ${CMAKE_SOURCE_DIR}/core/src
+)
+
 target_link_libraries(test_core PRIVATE
     qttune-core
     GTest::gtest_main

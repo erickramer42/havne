@@ -1,107 +1,25 @@
 // File/layer: core/src/mock_transport.cpp | C++17, Qt-free, CI-validated headless build
 // Testing: UNIT — CoreTest.MockFramesDecodeAgainstMockSignalSet decodes
-//          real worker frames against the mock set
+//          real worker frames against the mock set; the drive cycle
+//          itself is tested deterministically (CoreTest.MockDriveCycle*)
 
 #include "qttune/core.h"
 #include "qttune/internal.h"
 #include "session.h"
 #include "qttune/signals.h"
 #include "qttune/signal_sets.h"
+#include "mock_drive_cycle.h"
 
 #include <atomic>
 #include <chrono>
-#include <cmath>
 #include <thread>
 
 namespace {
 
+/* One drive-cycle step per frame, so the interval must match
+ * qttune_mock::kTickS. */
 constexpr uint32_t DEFAULT_FRAME_INTERVAL_MS = 50;
 constexpr uint32_t MOCK_DIAG_ID = 0x18FF0C00u;
-
-/* ---------------------------------------------------------------
- * Simulated vehicle state: physically plausible, tick-driven.
- *
- * Encode side of the signal contract with kMockDefs in
- * signal_sets.cpp. The transport NEVER decodes — rule 2 — it
- * only guarantees "emitted payloads are decodable by
- * qttune_mock_signal_set()", which the integration test enforces.
- * --------------------------------------------------------------- */
-struct SimState {
-    uint64_t tick = 0;
-    float coolant_c = 20.0f;
-    float iat_c = 20.0f;
-    float load_pct = 0.0f;
-    float throttle_pct = 0.0f;
-
-    float rpm() const
-    {
-        const float idle =
-            730.0f + 25.0f * std::sin(static_cast<float>(tick) * 0.13f);
-        const uint64_t phase = tick % 200;
-        if (phase < 30) {
-            return idle + std::sin(phase / 30.0f * 3.14159f) * 2400.0f;
-        }
-        return idle;
-    }
-
-    float speed_kmh() const
-    {
-        const float t = static_cast<float>(tick);
-        return 47.5f + 47.5f * std::sin(t * 0.0063f);
-    }
-
-    void step()
-    {
-        /* throttle follows the rev blip, decays to idle creep */
-        const uint64_t phase = tick % 200;
-        if (phase < 30) {
-            throttle_pct = 80.0f * std::sin(phase / 30.0f * 3.14159f);
-        } else {
-            throttle_pct += (8.0f - throttle_pct) * 0.08f;
-        }
-
-        coolant_c += (88.0f - coolant_c) * 0.004f;
-        iat_c += ((coolant_c - 25.0f) - iat_c) * 0.001f;
-        ++tick;
-    }
-};
-
-uint8_t clamp_u8(float v)
-{
-    if (v < 0.0f) return 0;
-    if (v > 255.0f) return 255;
-    return static_cast<uint8_t>(v + 0.5f);
-}
-
-uint16_t clamp_u16(float v)
-{
-    if (v < 0.0f) return 0;
-    if (v > 65535.0f) return 65535;
-    return static_cast<uint16_t>(v + 0.5f);
-}
-
-/* Layout MUST mirror kMockDefs in signal_sets.cpp:
- *   [0..1] RPM      LE uint16, scale 0.25
- *   [2]    coolant  uint8, offset -40
- *   [3]    speed    uint8, km/h
- *   [4]    throttle uint8, scale 100/255
- *   [5]    IAT      uint8, offset -40
- *   [6]    load     uint8, scale 100/255
- *   [7]    pad
- */
-void encode_payload(const SimState& sim, uint8_t out[8])
-{
-    const uint16_t rpm_raw = clamp_u16(sim.rpm() / 0.25f);
-    out[0] = static_cast<uint8_t>(rpm_raw & 0xFF);
-    out[1] = static_cast<uint8_t>((rpm_raw >> 8) & 0xFF);
-
-    out[2] = clamp_u8(sim.coolant_c + 40.0f);
-    out[3] = clamp_u8(sim.speed_kmh());
-    out[4] = clamp_u8(sim.throttle_pct * 255.0f / 100.0f);
-    out[5] = clamp_u8(sim.iat_c + 40.0f);
-    out[6] = clamp_u8(sim.load_pct * 255.0f / 100.0f);
-    out[7] = 0;
-}
 
 } // namespace
 
@@ -115,7 +33,7 @@ struct qttune_mock_transport {
      * Written once before the worker spawns and read-only after, so
      * thread creation publishes it; no further synchronization. */
     std::chrono::steady_clock::time_point epoch{};
-    SimState sim;   /* owned by worker — only touched on worker thread */
+    qttune_mock::DriveCycle sim;   /* owned by worker — only touched on worker thread */
 };
 
 namespace {
@@ -144,10 +62,8 @@ void mock_worker(qttune_mock_transport* t)
             frame.arbitration_id = MOCK_TELEMETRY_ARB_ID;
         }
 
-        const float throttle = t->sim.throttle_pct;
         t->sim.step();
-        t->sim.load_pct = throttle * 0.9f + t->sim.load_pct * 0.1f;
-        encode_payload(t->sim, frame.data);
+        qttune_mock::encode_payload(t->sim, frame.data);
         t->frame_counter++;
 
         qttune_session_dispatch_callbacks(t->session, &frame);

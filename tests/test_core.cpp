@@ -12,6 +12,10 @@ extern "C" {
 #include "qttune/signals.h"
 #include "qttune/signal_sets.h"
 #include "qttune/profile.h"
+#include "mock_drive_cycle.h"
+
+#include <cmath>
+#include <vector>
 }
 
 namespace {
@@ -370,6 +374,17 @@ TEST(CoreTest, SelfUnregisterDuringLiveDispatch) {
 
 namespace {
 
+/* The mock's physical envelope across a whole drive cycle. Shared by
+ * the worker test below, which sees only the first second of the
+ * cycle, and the deterministic cycle tests, which see all of it. */
+constexpr float kMockRpmMin = 600.0f;
+constexpr float kMockRpmMax = 7100.0f;
+constexpr float kMockCoolantMin = 15.0f;
+constexpr float kMockCoolantMax = 110.0f;
+constexpr float kMockSpeedMax = 200.0f;
+constexpr float kMockIatMin = 15.0f;
+constexpr float kMockIatMax = 80.0f;
+
 struct MockCapture {
     static constexpr size_t kMaxFrames = 20;
     uint8_t payloads[kMaxFrames][8]{};
@@ -428,19 +443,239 @@ TEST(CoreTest, MockFramesDecodeAgainstMockSignalSet) {
 
             switch (def.id) {
             case MOCK_SIG_RPM_ID:
-                EXPECT_GE(val, 0.0f);   EXPECT_LT(val, 8000.0f); break;
+                EXPECT_GE(val, kMockRpmMin);  EXPECT_LE(val, kMockRpmMax); break;
             case MOCK_SIG_COOLANT_ID:
-                EXPECT_GE(val, 15.0f);  EXPECT_LE(val, 100.0f); break;
+                EXPECT_GE(val, kMockCoolantMin);
+                EXPECT_LE(val, kMockCoolantMax); break;
             case MOCK_SIG_SPEED_ID:
-                EXPECT_GE(val, 0.0f);   EXPECT_LE(val, 100.0f); break;
+                EXPECT_GE(val, 0.0f);   EXPECT_LE(val, kMockSpeedMax); break;
             case MOCK_SIG_THROTTLE_ID:
             case MOCK_SIG_LOAD_ID:
                 EXPECT_GE(val, 0.0f);   EXPECT_LE(val, 100.0f); break;
             case MOCK_SIG_IAT_ID:
-                EXPECT_GE(val, 15.0f);   EXPECT_LE(val, 60.0f); break;
+                EXPECT_GE(val, kMockIatMin);  EXPECT_LE(val, kMockIatMax); break;
             default:
                 FAIL() << "unknown signal id in mock set: " << def.id;
             }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Mock drive cycle: stepped deterministically, no worker, no wall clock
+// ---------------------------------------------------------------------------
+
+namespace {
+
+using qttune_mock::DriveCycle;
+using qttune_mock::Phase;
+
+constexpr int kPhaseCount = static_cast<int>(Phase::Cooldown) + 1;
+
+struct PhaseStats {
+    uint32_t ticks = 0;
+    float entry_rpm = 0.0f;    /* after the phase's first tick */
+    float entry_kmh = 0.0f;
+    float min_rpm = 1e9f;
+    float peak_rpm = 0.0f;
+    float peak_kmh = 0.0f;
+    float peak_coolant = -100.0f;
+    float peak_iat = -100.0f;
+    int max_gear = 0;
+};
+
+struct LoopRun {
+    PhaseStats phase[kPhaseCount];
+    std::vector<Phase> order;  /* phases in visit order */
+    bool closed = false;       /* looped back to Roll2nd */
+    DriveCycle end;
+};
+
+const PhaseStats& stats(const LoopRun& r, Phase p)
+{
+    return r.phase[static_cast<int>(p)];
+}
+
+/* Step one loop, WarmUp through Cooldown, stopping at the tick that
+ * returns to Roll2nd. Bounded at 10 simulated minutes. */
+LoopRun run_one_loop()
+{
+    LoopRun r;
+    DriveCycle dc;
+    PhaseStats* s = nullptr;
+    for (uint32_t i = 0; i < qttune_mock::ticks_for(600.0f); ++i) {
+        dc.step();
+        if (dc.loops > 0) {
+            r.closed = true;
+            break;
+        }
+        if (r.order.empty() || r.order.back() != dc.phase) {
+            r.order.push_back(dc.phase);
+            s = &r.phase[static_cast<int>(dc.phase)];
+            s->entry_rpm = dc.rpm;
+            s->entry_kmh = dc.speed_kmh;
+        }
+        ++s->ticks;
+        s->min_rpm = std::fmin(s->min_rpm, dc.rpm);
+        s->peak_rpm = std::fmax(s->peak_rpm, dc.rpm);
+        s->peak_kmh = std::fmax(s->peak_kmh, dc.speed_kmh);
+        s->peak_coolant = std::fmax(s->peak_coolant, dc.coolant_c);
+        s->peak_iat = std::fmax(s->peak_iat, dc.iat_c);
+        if (dc.gear > s->max_gear) {
+            s->max_gear = dc.gear;
+        }
+    }
+    r.end = dc;
+    return r;
+}
+
+} // namespace
+
+TEST(CoreTest, MockDriveCycleVisitsEveryPhaseInOrder)
+{
+    const LoopRun r = run_one_loop();
+    ASSERT_TRUE(r.closed) << "the cycle never looped back to Roll2nd";
+    ASSERT_EQ(r.order.size(), static_cast<size_t>(kPhaseCount));
+    for (int i = 0; i < kPhaseCount; ++i) {
+        EXPECT_EQ(static_cast<int>(r.order[static_cast<size_t>(i)]), i)
+            << "visit " << i;
+    }
+    EXPECT_EQ(r.end.phase, Phase::Roll2nd);
+}
+
+TEST(CoreTest, MockDriveCycleSecondGearPullHoldsTheLimiter)
+{
+    const LoopRun r = run_one_loop();
+    const PhaseStats& pull = stats(r, Phase::Pull2nd);
+    const PhaseStats& lim = stats(r, Phase::Limiter2nd);
+
+    /* From low speed and rpm, in 2nd, to the limiter */
+    EXPECT_EQ(pull.max_gear, 2);
+    EXPECT_LT(pull.entry_rpm, 2000.0f);
+    EXPECT_LT(pull.entry_kmh, 35.0f);
+    EXPECT_LE(pull.peak_rpm, qttune_mock::kRevLimitRpm);
+
+    /* Exactly 5 s on the limiter, bouncing just under it */
+    EXPECT_EQ(lim.ticks, qttune_mock::ticks_for(5.0f));
+    EXPECT_GE(lim.min_rpm, qttune_mock::kRevLimitRpm - 200.0f);
+    EXPECT_LE(lim.peak_rpm, qttune_mock::kRevLimitRpm);
+    EXPECT_NEAR(lim.peak_kmh, 113.0f, 5.0f);
+}
+
+TEST(CoreTest, MockDriveCycleThirdGearPullIsLongerFasterAndHotter)
+{
+    const LoopRun r = run_one_loop();
+    const PhaseStats& pull2 = stats(r, Phase::Pull2nd);
+    const PhaseStats& lim2 = stats(r, Phase::Limiter2nd);
+    const PhaseStats& pull3 = stats(r, Phase::Pull3rd);
+    const PhaseStats& lim3 = stats(r, Phase::Limiter3rd);
+
+    EXPECT_EQ(pull3.max_gear, 3);
+    EXPECT_LE(pull3.peak_rpm, qttune_mock::kRevLimitRpm);
+    EXPECT_LT(pull3.entry_rpm, 2200.0f);
+    EXPECT_GT(pull3.entry_kmh, pull2.entry_kmh + 10.0f);
+    EXPECT_GT(pull3.ticks, pull2.ticks * 3 / 2) << "3rd should pull longer";
+
+    EXPECT_EQ(lim3.ticks, qttune_mock::ticks_for(5.0f));
+    EXPECT_GE(lim3.peak_kmh, lim2.peak_kmh + 40.0f);
+
+    const float coolant2 = std::fmax(pull2.peak_coolant, lim2.peak_coolant);
+    const float coolant3 = std::fmax(pull3.peak_coolant, lim3.peak_coolant);
+    const float iat2 = std::fmax(pull2.peak_iat, lim2.peak_iat);
+    const float iat3 = std::fmax(pull3.peak_iat, lim3.peak_iat);
+    /* "Obviously hotter": the longer pull heat-soaks the engine */
+    EXPECT_GT(coolant3, coolant2 + 4.0f);
+    EXPECT_GT(iat3, iat2 + 6.0f);
+}
+
+TEST(CoreTest, MockDriveCycleDragRunCoversAQuarterMile)
+{
+    const LoopRun r = run_one_loop();
+    const PhaseStats& launch = stats(r, Phase::Launch);
+    const PhaseStats& run = stats(r, Phase::DragRun);
+
+    /* Launch control from a standstill */
+    EXPECT_EQ(launch.peak_kmh, 0.0f);
+    EXPECT_LE(launch.peak_rpm, qttune_mock::kLaunchRpm);
+    EXPECT_GE(launch.peak_rpm, qttune_mock::kLaunchRpm - 150.0f);
+
+    /* Through the gears, shifting before the limiter */
+    EXPECT_EQ(run.max_gear, qttune_mock::kTopGear);
+    EXPECT_LT(run.peak_rpm, qttune_mock::kRevLimitRpm);
+
+    /* The run ends on the tick that crosses the line */
+    EXPECT_GE(r.end.distance_m, qttune_mock::kQuarterMileM);
+    EXPECT_LT(r.end.distance_m, qttune_mock::kQuarterMileM + 5.0f);
+    EXPECT_GE(r.end.drag_et_s, 11.0f);
+    EXPECT_LE(r.end.drag_et_s, 15.0f);
+    EXPECT_GE(r.end.drag_trap_kmh, 150.0f);
+    EXPECT_LE(r.end.drag_trap_kmh, 200.0f);
+}
+
+TEST(CoreTest, MockDriveCycleEveryTickRoundTripsThroughTheMockSet)
+{
+    /* Two loops: the cold first one and a warm one. Every tick goes
+     * through the real encoder and decoder. A value the wire can't
+     * carry would clamp in the encoder and show up as a large error. */
+    const QttuneSignalSet* set = qttune_mock_signal_set();
+    ASSERT_NE(set, nullptr);
+
+    float worst_err[8] = {};
+    float lo[8];
+    float hi[8];
+    for (int i = 0; i < 8; ++i) {
+        lo[i] = 1e9f;
+        hi[i] = -1e9f;
+    }
+    ASSERT_LE(set->count, 8u);
+
+    DriveCycle dc;
+    uint32_t steps = 0;
+    while (dc.loops < 2 && steps < qttune_mock::ticks_for(1200.0f)) {
+        dc.step();
+        ++steps;
+        uint8_t payload[8];
+        qttune_mock::encode_payload(dc, payload);
+
+        for (uint32_t i = 0; i < set->count; ++i) {
+            const QttuneSignalDef& def = set->defs[i];
+            float val = 0.0f;
+            ASSERT_EQ(qttune_decode_signal(&def, payload, 8, &val), 0)
+                << def.name << " at tick " << steps;
+            float phys = 0.0f;
+            switch (def.id) {
+            case MOCK_SIG_RPM_ID:      phys = dc.rpm; break;
+            case MOCK_SIG_COOLANT_ID:  phys = dc.coolant_c; break;
+            case MOCK_SIG_SPEED_ID:    phys = dc.speed_kmh; break;
+            case MOCK_SIG_THROTTLE_ID: phys = dc.throttle_pct; break;
+            case MOCK_SIG_IAT_ID:      phys = dc.iat_c; break;
+            case MOCK_SIG_LOAD_ID:     phys = dc.load_pct; break;
+            default: FAIL() << "unknown signal id in mock set: " << def.id;
+            }
+            worst_err[i] = std::fmax(worst_err[i], std::fabs(val - phys));
+            lo[i] = std::fmin(lo[i], val);
+            hi[i] = std::fmax(hi[i], val);
+        }
+    }
+    ASSERT_EQ(dc.loops, 2u) << "two loops never completed";
+
+    for (uint32_t i = 0; i < set->count; ++i) {
+        const QttuneSignalDef& def = set->defs[i];
+        /* Half an LSB of each signal's scale, plus float slack */
+        const float tol = 0.5f * std::fabs(def.scale) + 0.01f;
+        EXPECT_LE(worst_err[i], tol) << def.name << " lost precision or clamped";
+
+        switch (def.id) {
+        case MOCK_SIG_RPM_ID:
+            EXPECT_GE(lo[i], kMockRpmMin);     EXPECT_LE(hi[i], kMockRpmMax); break;
+        case MOCK_SIG_COOLANT_ID:
+            EXPECT_GE(lo[i], kMockCoolantMin); EXPECT_LE(hi[i], kMockCoolantMax); break;
+        case MOCK_SIG_SPEED_ID:
+            EXPECT_GE(lo[i], 0.0f);            EXPECT_LE(hi[i], kMockSpeedMax); break;
+        case MOCK_SIG_IAT_ID:
+            EXPECT_GE(lo[i], kMockIatMin);     EXPECT_LE(hi[i], kMockIatMax); break;
+        default:
+            EXPECT_GE(lo[i], 0.0f);            EXPECT_LE(hi[i], 100.0f); break;
         }
     }
 }
