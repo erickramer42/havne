@@ -69,11 +69,12 @@ next.
     the BENCH prep list) is still ahead.
   - **Tests:** 139 ctest cases, all passing locally on 2026-10-20
     (Windows/MSVC 2022, both trees rebuilt), plus the cross-arch
-    subset (16/16). CI was green on all six jobs at `a430af7`
-    (2026-10-20, link-health changes included). That run covers ctest
-    on Windows, macOS and Linux, plus the Android and iOS device
-    cross-builds. The `ios-simulator-smoke` job added the same day
-    hasn't run yet. The cross-arch routing case
+    subset (16/16). CI was green on all seven jobs at `923f479`
+    (2026-10-20, run #73, link-health changes included). That run
+    covers ctest on Windows, macOS and Linux, plus the Android and iOS
+    device cross-builds. `ios-simulator-smoke` passed too, but its
+    screenshot was blank, so the job is now manual-only (#30). The
+    cross-arch routing case
     skips unless its environment variables are set. J2534 suites
     carry a 30 s per-test timeout — a hang fails bounded instead of
     wedging the runner (2026-10-17 F1 fallout). Tiers, suites and
@@ -270,8 +271,9 @@ an issue is resolved it is removed, and its number is not reused.
      layout fix.
 2. **The mobile apps are unvalidated.** Since 2026-10-20, CI
    cross-builds an Android arm64-v8a APK and an unsigned iOS arm64
-   device build, and launch-smokes the iOS app on the Simulator
-   (`ios-simulator-smoke`). Neither app has run on a device, the
+   device build. A launch smoke for the iOS Simulator
+   (`ios-simulator-smoke`) exists but is manual-only for now (#30).
+   Neither app has run on a device, the
    Android app has never been launched, and no tests run on either
    (cross builds set `BUILD_TESTING=OFF`). Off Windows the only
    transport is `mock://`, so a mobile session can't reach a vehicle
@@ -411,6 +413,26 @@ an issue is resolved it is removed, and its number is not reused.
     run), or Qt's arm64 simulator libraries if Qt ships them. Apple is
     also winding down Rosetta, so the first option has its own end
     date.
+30. **The iOS simulator smoke can't yet show the app drawing.** Its
+    first run (2026-10-20, run #73) passed: the app installed,
+    launched, loaded QML and was still running 15 s later. But the
+    screenshot was blank. The whole artifact zipped to 6.8 KB, which
+    fits a single flat frame. The app's own background (`#14141c`) is
+    nearly black, so this may be that background with nothing drawn
+    on it, or nothing at all. The job also took 19.5 min, against
+    about 11 min for the rest of CI. It's manual-only
+    (`workflow_dispatch`) until a run with the new diagnostics settles
+    the cause:
+    - `home.png` is blank too: the runner's simulator display is at
+      fault, not the app.
+    - The home screen draws but `launch-15s.png` and `launch-45s.png`
+      are blank, and stderr has no `QSG_INFO` lines: the window was
+      never exposed, so the scene graph never started.
+    - `QSG_INFO` lines are present and both shots are still blank: the
+      scene graph started and its frames aren't reaching the screen.
+      Try another `QSG_RHI_BACKEND`.
+    - Only the 15 s shot is blank: the first frame is slow on the
+      Intel VM. Re-enable the job with a longer wait.
 
 ## Roadmap
 

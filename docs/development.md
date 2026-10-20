@@ -274,7 +274,8 @@ skips.
 | J2534 test fails as `Failed (Timeout)` | A genuine hang, bounded by the 30 s ceiling. Attach to the surviving test and surrogate processes and check thread wait states before killing; the child log in `%TEMP%\qttune-surrogate.log` is rewritten per spawn — copy before respawning. |
 | Linker warning LNK4070 on a fake DLL | The `.def` file's `LIBRARY` directive disagrees with the output filename. Make them match. |
 | A mobile build fails during test discovery, or tries to run a test binary | `BUILD_TESTING` is on. Cross builds must pass `-DBUILD_TESTING=OFF` (see Mobile above). |
-| `ios-simulator-smoke` fails with "qttune exited within 15 s", and the uploaded `stderr.log` says `Failed to initialize graphics backend` | Qt Quick couldn't get a Metal device from the runner VM. Check the boot step's `system_profiler` output. Before suspecting the app, try `SIMCTL_CHILD_QSG_RHI_BACKEND=opengl` on the launch line. |
+| `ios-simulator-smoke` passes, but the app screenshots are blank | Known Issue #30. Compare them with `home.png`, and check the printed stderr for `QSG_INFO` lines. #30 maps each combination to a cause. |
+| `ios-simulator-smoke` fails with "qttune exited within 45 s", and the printed stderr says `Failed to initialize graphics backend` | Qt Quick couldn't get a Metal device from the runner VM. Check the boot step's `system_profiler` output. Before suspecting the app, try `SIMCTL_CHILD_QSG_RHI_BACKEND=opengl` on the launch line. |
 | `ios-simulator-smoke` fails with "No available iPhone simulator on iOS 18 or later" | The runner image dropped its iOS 18+ runtimes, or the job moved to a runner without them. The step prints the available devices. |
 
 **QML lint:** run `cmake --build build --config Release --target all_qmllint`.
@@ -298,8 +299,9 @@ on MSVC is not necessarily portable:
 
 ## CI
 
-`ci.yml` runs on every push to `main` and `dev`, and on every pull
-request to `main`. Every job uses Qt 6.12.0:
+`ci.yml` runs on every push to `main` and `dev`, on every pull
+request to `main`, and on demand (Actions → CI → Run workflow). Every
+job uses Qt 6.12.0:
 
 | Job | Runner | Does |
 |---|---|---|
@@ -309,11 +311,13 @@ request to `main`. Every job uses Qt 6.12.0:
 | `linux-build` | Ubuntu, GCC | Builds the full app, then runs ctest |
 | `android-build` | Ubuntu → Android arm64-v8a | Cross-builds and packages the APK. Build only, no tests. |
 | `ios-build` | macOS (arm64) → iOS device (arm64) | Unsigned device build with the Xcode generator. Build only, no tests. |
-| `ios-simulator-smoke` | macOS 15 Intel → iOS Simulator (x86_64) | Builds for the simulator, then installs and launches the app on the newest iOS 18+ iPhone. Passes if QML loaded and the app is still running 15 s later. Uploads a screenshot and the app's stdout/stderr, plus crash reports on failure, as the `ios-simulator-smoke` artifact. |
+| `ios-simulator-smoke` | macOS 15 Intel → iOS Simulator (x86_64) | **Manual runs only for now** (Known Issue #30); skipped on push and PR. Boots the newest iOS 18+ iPhone while the app builds, then installs and launches the app. Passes if QML loaded and the app is still running 45 s later. Uploads the `ios-simulator-smoke` artifact: a home-screen control shot, app shots at 15 s and 45 s, the app's stdout/stderr (with `QSG_INFO`), plus crash reports on failure. The job log also prints the stderr. |
 
-The smoke job proves the app starts and stays up. It doesn't tap
-through the UI or connect a session. It runs on an Intel runner
-because Qt's simulator libraries are x86_64 only (Known Issue #29).
+The smoke job proves the app starts and stays up. It doesn't prove
+the app drew anything, tap through the UI, or connect a session. It
+runs on an Intel runner because Qt's simulator libraries are x86_64
+only (Known Issue #29). It took 19.5 min on its first run, against
+about 11 min for the rest of CI.
 
 **Kit names that moved:** since Qt 6.7 the Linux desktop arch is
 `linux_gcc_64`, and `gcc_64` no longer resolves for 6.12.0. Android

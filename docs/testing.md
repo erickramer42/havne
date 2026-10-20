@@ -12,7 +12,7 @@ where the gaps are. For build and run commands, see
 | **Bridge** | Qt bridge and models, headless (`Qt6::Core` only) against the real 50 ms mock worker | CI on Windows, macOS and Linux, and locally |
 | **HARNESS** | The J2534 stack end to end against the in-tree fake vendor DLL | CI on Windows (same-arch, all x64) |
 | **Cross-arch** | HARNESS with an x64 test process driving an x86 surrogate and an x86 fake | Dev machine only; needs environment variables ([development.md](development.md#running-tests)) |
-| **Simulator smoke** | The iOS app installs and launches on the iOS Simulator, QML loads, and the app is still running 15 s later. Nothing drives the UI. | CI (`ios-simulator-smoke`, Intel macOS runner) |
+| **Simulator smoke** | The iOS app installs and launches on the iOS Simulator, QML loads, and the app is still running 45 s later. Nothing drives the UI, and a pass doesn't prove the app drew anything. | CI, manual dispatch only for now (`ios-simulator-smoke`, Intel macOS runner, Known Issue #30) |
 | **Manual smoke** | Running the app: layout, LiveView, strip chart, Settings picker against the live registry | Dev machine |
 | **BENCH** | A real vendor DLL and adapter, no vehicle | First formal session complete, 2026-10-16, quiet bus ([session sheet](bench-sessions/2026-10-16.md)); talking-bus behaviors pending |
 | **Vehicle** | A live, read-only vehicle session | **Not yet reached** |
@@ -69,7 +69,7 @@ it.
 | Full app builds, and ctest passes, on Windows (MSVC 2022), macOS (AppleClang) and Linux (GCC), Qt 6.12.0 | CI `win-build`, `macos-build`, `linux-build` |
 | Android arm64-v8a APK builds and packages (NDK r27, JDK 21) | CI `android-build` (build only; first green 2026-10-20) |
 | iOS arm64 device build compiles and links, unsigned | CI `ios-build` (build only; first green 2026-10-20) |
-| iOS app launches on the Simulator and stays up | CI `ios-simulator-smoke` (added 2026-10-20, **not yet run**) |
+| iOS app launches on the Simulator and stays up | CI `ios-simulator-smoke` (first green 2026-10-20). Rendering is **unconfirmed**: the screenshot was blank (#30). |
 | Transport adoption: `?filter=` registers a FLOW_CONTROL filter; `?txid=` selects the transmit ID; `?poll=` drives a Mode-01 loop; header strip + arbitration_id stamp; filter stopped on detach; gating discards non-matching frames; poll-without-filter rejected at parse | `J2534AdoptionTest` |
 | A blocked vendor `PassThruOpen` fails at the (shrunken) handshake timeout with the child alive, not wedged | `J2534SurrogateTest.BlockedVendorOpenFailsAtHandshakeTimeout` |
 | Spec-spelling export resolution (`PassThruIoctl` primary, legacy `PassThruIoCtl` fallback), both backends | `FakeFixture.SpecSpellingPassThruIoctlResolvesAndWorks` (spec fake, primary path) plus the whole existing suite against the legacy-spelling fake (fallback path) |
@@ -164,8 +164,9 @@ plus the fault state on the OBDX Pro VX quiet bus (BENCH,
 - **Discovery tests check shape only.** They pass vacuously on a
   machine with no vendors installed (Known Issue #14).
 - **The mobile apps have never run on a device or emulator** (Known
-  Issue #2). CI compiles both kits, and the simulator smoke only shows
-  that the iOS app starts and stays up. No tests run on either mobile
+  Issue #2). CI compiles both kits. The simulator smoke only shows
+  that the iOS app starts and stays up, and its first screenshot was
+  blank (#30). No tests run on either mobile
   platform, because cross builds set `BUILD_TESTING=OFF`. The Android
   app has never been launched anywhere.
 - **CI never launches the Linux or macOS desktop app.** Those jobs

@@ -5,6 +5,7 @@ on:
     branches: [main, dev]
   pull_request:
     branches: [main]
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -150,12 +151,16 @@ jobs:
           cmake --build build --config Release -- CODE_SIGNING_ALLOWED=NO
 
   # Launch smoke on the iOS Simulator: install, launch, and check the app
-  # is still running 15 s later. Qt 6.12's simulator libraries are x86_64
+  # is still running 45 s later. Qt 6.12's simulator libraries are x86_64
   # only, so this runs on an Intel runner where the simulator is native.
   # GitHub has announced the end of Intel macOS runners for Fall 2027;
   # after that this needs Rosetta plus the universal iOS platform, or
   # arm64 simulator libraries from Qt.
+  #
+  # Manual only (Actions > CI > Run workflow) until its blank screenshot
+  # is explained (Known Issue #30). On push and PR it shows as skipped.
   ios-simulator-smoke:
+    if: github.event_name == 'workflow_dispatch'
     runs-on: macos-15-intel
     needs: core-and-tests
     # A wedged simulator boot would otherwise hold the runner for 6 h.
@@ -172,18 +177,9 @@ jobs:
           arch: 'ios'
           extra: '--autodesktop'
 
-      # Qt's toolchain leaves an explicit sysroot and arch alone, so these
-      # select the simulator SDK and Qt's x86_64 simulator slice.
-      - name: Build for simulator (x86_64, no code signing)
-        run: |
-          "$QT_ROOT_DIR/bin/qt-cmake" -B build -G Xcode \
-            -DBUILD_TESTING=OFF \
-            -DCMAKE_OSX_SYSROOT=iphonesimulator \
-            -DCMAKE_OSX_ARCHITECTURES=x86_64
-          cmake --build build --config Release -- CODE_SIGNING_ALLOWED=NO
-
-      # Newest available iPhone on iOS 18 or later (Qt 6.12's floor).
-      - name: Boot simulator
+      # Newest available iPhone on iOS 18 or later (Qt 6.12's floor). It
+      # boots while the app builds; "Wait for simulator" joins it.
+      - name: Pick and start simulator
         run: |
           UDID=$(xcrun simctl list devices available --json | jq -r '
             [.devices | to_entries[]
@@ -200,12 +196,31 @@ jobs:
             exit 1
           fi
           echo "UDID=$UDID" >> "$GITHUB_ENV"
+          xcrun simctl boot "$UDID"
+
+      # Qt's toolchain leaves an explicit sysroot and arch alone, so these
+      # select the simulator SDK and Qt's x86_64 simulator slice.
+      - name: Build for simulator (x86_64, no code signing)
+        run: |
+          "$QT_ROOT_DIR/bin/qt-cmake" -B build -G Xcode \
+            -DBUILD_TESTING=OFF \
+            -DCMAKE_OSX_SYSROOT=iphonesimulator \
+            -DCMAKE_OSX_ARCHITECTURES=x86_64
+          cmake --build build --config Release -- CODE_SIGNING_ALLOWED=NO
+
+      - name: Wait for simulator
+        run: |
           xcrun simctl bootstatus "$UDID" -b
           # Qt Quick renders through Metal; record what the VM exposes.
           system_profiler SPDisplaysDataType | grep -iE 'chipset|metal' || true
+          mkdir -p smoke
+          # Control shot before the app exists: if the home screen is
+          # blank too, the runner's simulator display is at fault (#30).
+          xcrun simctl io "$UDID" screenshot smoke/home.png || true
 
       # main() returns -1 when QML fails to load, and a scene graph that
-      # can't initialize aborts, so "still running" covers both.
+      # can't initialize aborts, so "still running" covers both. It does
+      # not prove the app drew anything; the screenshots are for that.
       - name: Launch and check qttune stays up
         run: |
           APP=$(find build -type d -name qttune.app -path '*iphonesimulator*' | head -n 1)
@@ -214,28 +229,35 @@ jobs:
             exit 1
           fi
           BUNDLE_ID=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$APP/Info.plist")
-          mkdir -p smoke
           xcrun simctl install "$UDID" "$APP"
           # SIMCTL_CHILD_* variables reach the app. Qt on Apple platforms
-          # logs to os_log unless forced to stderr.
-          OUT=$(SIMCTL_CHILD_QT_FORCE_STDERR_LOGGING=1 xcrun simctl launch \
+          # logs to os_log unless forced to stderr. QSG_INFO logs the
+          # scene graph's backend and device once the window is exposed,
+          # so no QSG_INFO lines means it never got that far.
+          OUT=$(SIMCTL_CHILD_QT_FORCE_STDERR_LOGGING=1 SIMCTL_CHILD_QSG_INFO=1 \
+            xcrun simctl launch \
             --stdout="$PWD/smoke/stdout.log" --stderr="$PWD/smoke/stderr.log" \
             "$UDID" "$BUNDLE_ID")
           PID="${OUT##*: }"
           echo "Launched $BUNDLE_ID as pid $PID"
+          # Two shots, so a slow first frame on the Intel VM shows up as a
+          # blank 15 s shot followed by a drawn 45 s one.
           sleep 15
-          xcrun simctl io "$UDID" screenshot smoke/launch.png || true
+          xcrun simctl io "$UDID" screenshot smoke/launch-15s.png || true
+          sleep 30
+          xcrun simctl io "$UDID" screenshot smoke/launch-45s.png || true
+          echo "--- qttune stderr ---"
+          cat smoke/stderr.log 2>/dev/null || true
+          echo "--- end stderr ---"
           if grep -q "QML FAILED TO LOAD" smoke/stderr.log 2>/dev/null; then
             echo "::error::QML failed to load"
-            cat smoke/stderr.log
             exit 1
           fi
           if ! kill -0 "$PID" 2>/dev/null; then
-            echo "::error::qttune exited within 15 s of launch"
-            cat smoke/stderr.log 2>/dev/null || true
+            echo "::error::qttune exited within 45 s of launch"
             exit 1
           fi
-          echo "qttune still running after 15 s"
+          echo "qttune still running after 45 s"
 
       - name: Collect crash reports
         if: failure()
