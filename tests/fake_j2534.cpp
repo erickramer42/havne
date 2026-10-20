@@ -19,6 +19,8 @@
 //        bridge on the obd2 set's mux-at-offset-0 grammar.
 //      - Everything else: the legacy deterministic echo (byte 0
 //        +0x40), preserving existing framing tests.
+//    QTTUNE_FAKE_WRITE_STATUS fails every write with the given status,
+//    recording nothing and echoing nothing.
 //  * IoCtl: config table (SET stores, GET reads back), fixed VBATT,
 //    CLEAR_* accepted. Unknown ids FAIL like a strict vendor.
 //  * Filters: registration bookkeeping + last-invocation recording.
@@ -28,8 +30,11 @@
 //  * ReadMsgs, by default, returns at most one message per call,
 //    whatever NumMsgs and Timeout ask for, and STATUS_NOERROR with zero
 //    messages on an empty queue. QTTUNE_FAKE_READ_STATUS forces a
-//    status with no messages; QTTUNE_FAKE_SPEC_READ_SEMANTICS=1
-//    switches to J2534-1 batch and empty statuses.
+//    status with no messages; QTTUNE_FAKE_UNTOUCHED_COUNT_STATUS
+//    forces a status with the caller's count and buffer left as
+//    passed (the sloppy vendor of finding 1);
+//    QTTUNE_FAKE_SPEC_READ_SEMANTICS=1 switches to J2534-1 batch and
+//    empty statuses.
 //  * ExtraDataIndex = DataSize (v4.04 no-extra-data convention).
 
 #define WIN32_LEAN_AND_MEAN
@@ -540,6 +545,29 @@ long __stdcall PassThruWriteMsgs(unsigned long ChannelID,
     if (pMsg == nullptr || pNumMsgs == nullptr) {
         return STATUS_FAILED;
     }
+
+    /* Finding 15 (code review 2026-10-20): QTTUNE_FAKE_WRITE_STATUS
+     * makes every WriteMsgs return the given vendor status WITHOUT
+     * recording the message or generating a response — the VX quiet-
+     * bus shape: writes fail (no ACK on the bus) while reads stay
+     * clean. Like QTTUNE_FAKE_UNTOUCHED_COUNT_STATUS on the read side,
+     * *pNumMsgs is left as passed (1), the VX's "status 7, written 1",
+     * so a write path that read the count before the status would be
+     * caught. Unrecorded writes don't move GetWriteCount. No test arms
+     * it yet. Re-read per call: in-proc tests toggle live; the child
+     * sees only the spawn-time value. */
+    {
+        char wb[32] = {};
+        const DWORD wn = GetEnvironmentVariableA("QTTUNE_FAKE_WRITE_STATUS",
+                                                 wb, sizeof(wb));
+        if (wn > 0 && wn < sizeof(wb)) {
+            const long code = strtol(wb, nullptr, 0);
+            if (code != 0) {
+                return code;   /* not recorded, no echo enqueued */
+            }
+        }
+    }
+
     if (*pNumMsgs != 1) {
         return STATUS_FAILED;   /* the relay sends one at a time — strict */
     }

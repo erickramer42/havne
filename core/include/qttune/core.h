@@ -73,6 +73,11 @@ typedef enum {
     QT_ERR_LOAD_FAILED = 7,
     QT_ERR_VEHICLE_TIMEOUT = 8,
     QT_ERR_TRANSPORT_HARD_FAILURE = 9,
+    QT_ERR_REQUEST_FAILED = 10,  /* worker writes fail (requests to the
+                                    vehicle rejected/unACKed) while reads
+                                    stay healthy — the ignition-off/
+                                    vehicle-absent shape. Finding 15,
+                                    review 2026-10-20 */
 
     /* Append-only rule: new codes go HERE, never renumber */
 } qttune_status_t;
