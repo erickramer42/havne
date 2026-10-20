@@ -1,6 +1,6 @@
 # QtTune — Project Status
 
-**Updated:** 2026-10-19 · **Version:** v0.3.0-dev (last tag v0.2.0) ·
+**Updated:** 2026-10-20 · **Version:** v0.3.0-dev (last tag v0.2.0) ·
 [![CI](https://github.com/erickramer42/qttune/actions/workflows/ci.yml/badge.svg)](https://github.com/erickramer42/qttune/actions/workflows/ci.yml)
 
 This file covers the project as it stands: what works, what comes
@@ -12,17 +12,19 @@ Safety, regulatory and warranty caveats are in
 
 ## Where things stand
 
-**Current phase: v0.3.0 Phase 3 (J2534).** The HARNESS tier is complete, 
-including transport adoption (Part 5).The BENCH tier tested on real adapter with
-"quiet bus" meaning not connected to vehicle, the first real vehicle, comes next.
+**Current phase: v0.3.0 Phase 3 (J2534).** The HARNESS tier is complete,
+including transport adoption (Part 5). The BENCH tier has covered a real
+adapter on a quiet bus (no vehicle attached). The first real vehicle comes
+next.
 
 - **Works:**
   - The mock transport drives the live frame log, LiveView and the
     strip chart.
   - J2534 runs end to end against the fake vendor DLL, both in-proc
-    and through the x86 surrogate, including write/ioctl/filter relay on both 
-    backends, transport adoption: filters, the Mode-01 request loop, and frame 
-    identity via ?filter=/?txid=/?poll= (ADR-0012).
+    and through the x86 surrogate. That includes write/ioctl/filter
+    relay on both backends and transport adoption: filters, the Mode-01
+    request loop, and frame identity via `?filter=`/`?txid=`/`?poll=`
+    (ADR-0012).
   - The surrogate child is single-threaded and reads travel over the
     pipe ([ADR-0014](docs/adr/0014-single-threaded-surrogate.md),
     2026-10-19): vendor calls are serialized by construction, the
@@ -42,12 +44,16 @@ including transport adoption (Part 5).The BENCH tier tested on real adapter with
     with no `?filter=` required (`?filter=`/`?txid=` remain overrides).
   - Discovery finds the real installed drivers, and the Settings page
     can pick one and connect.
+  - Link health (#11): the J2534 worker tells a quiet bus from a dead
+    adapter, and the bridge logs transitions to the Settings activity
+    log.
 - **Not yet:**
   - BENCH coverage beyond the quiet-bus tier. The formal first BENCH
     session (2026-10-16, [docs/bench-sessions/2026-10-16.md](docs/bench-sessions/2026-10-16.md))
     succeeded: the OBDX Pro VX loaded through the surrogate, opened with
     USB power (vendor status 0), accepted the 8-byte flow-control filter
-    shape (behaviorally — see #23), and survived a 2-minute quiet-bus
+    shape (behaviorally — see #23; the 4-byte shape that replaced it is
+    untried, BENCH prep #1), and survived a 2-minute quiet-bus
     soak at <1% CPU with clean teardown. Talking-bus behaviors, VBATT,
     and timestamp units remain untested. The OBDX Pro VT still refuses
     open (status 34) with its adapter absent. The run sheet template is
@@ -57,11 +63,12 @@ including transport adoption (Part 5).The BENCH tier tested on real adapter with
     channel derivation are HARNESS-verified against the fake; a
     live-vehicle session (real ECU responses, talking-bus items in
     the BENCH prep list) is still ahead.
-  - **Tests:** 136 ctest cases, all passing locally on 2026-10-19
+  - **Tests:** 139 ctest cases, all passing locally on 2026-10-20
     (Windows/MSVC 2022, both trees rebuilt), plus the cross-arch
-    subset (15/15). CI green on ADR-0014 changes; they
+    subset (16/16). CI green on ADR-0014 changes; they
     include the configure fix for building without a `build-win32`
-    tree, which the Windows CI job needs. The cross-arch routing case
+    tree, which the Windows CI job needs. The 2026-10-20 working-tree
+    changes haven't been through CI yet. The cross-arch routing case
     skips unless its environment variables are set. J2534 suites
     carry a 30 s per-test timeout — a hang fails bounded instead of
     wedging the runner (2026-10-17 F1 fallout). Tiers, suites and
@@ -108,7 +115,7 @@ core: snapshot dispatch to registered callbacks ............ ADR-0002
       v
 GUI thread: handleFrameInternal ............................ ADR-0003
       |- FrameListModel (10k ring) -> FrameSortProxy -> LogPage
-      '- decode, gated on message ID -> staging buffer ..... ADR-0004
+      '- decode, gated on ID + mux key -> staging buffer ... ADR-0004
              | 100 ms timer
              v
          SignalListModel::updateValues() -> LiveViewPage
@@ -131,11 +138,11 @@ Contracts along this path:
 | Component | State | Reference |
 |---|---|---|
 | Core sessions and callbacks | Stable. The frame ABI and close/destroy split changed in v0.3.0-dev. | [ADR-0002](docs/adr/0002-callback-pair-identity-snapshot-dispatch.md), [ADR-0006](docs/adr/0006-frame-abi-v0.3.md) |
-| Signal decode | Linear scaling, Intel byte order, gated on message ID. Only the mock signal set exists. | [ADR-0004](docs/adr/0004-signal-decoding-model.md) |
+| Signal decode | Linear scaling; Intel byte order by default, big-endian for byte-aligned fields; gated on message ID plus mux key. Two signal sets, `mock` and `obd2`, chosen by profile. | [ADR-0004](docs/adr/0004-signal-decoding-model.md), [ADR-0013](docs/adr/0013-protocol-profiles.md) |
 | Mock transport | Simulates idle RPM with rev blips, coolant warm-up, trailing intake temperature, and coupled throttle/load. Every frame decodes against the mock set. | — |
-| Bridge and models | Frame log with sort toggle; coalesced signal model with a 120-sample history per signal; device discovery for the picker | [ADR-0003](docs/adr/0003-backpressure-bounds-in-flight-frames.md), [ADR-0005](docs/adr/0005-coalesced-signal-updates.md) |
+| Bridge and models | Frame log with sort toggle; coalesced signal model with a 120-sample history per signal; device discovery for the picker; link-health polling (#11) | [ADR-0003](docs/adr/0003-backpressure-bounds-in-flight-frames.md), [ADR-0005](docs/adr/0005-coalesced-signal-updates.md) |
 | QML pages | Home, Live (table and strip chart), Log, Settings (device picker plus manual URI). Dashboard is a placeholder. | — |
-| J2534 | HARNESS-verified, same-arch and cross-arch, including transport adoption (ADR-0012). | [docs/j2534.md](docs/j2534.md) |
+| J2534 | HARNESS-verified, same-arch and cross-arch, including transport adoption (ADR-0012) and profile-derived channels (ADR-0013). BENCH: one adapter, quiet bus. | [docs/j2534.md](docs/j2534.md) |
 
 ## v0.3.0 checklist
 
@@ -162,12 +169,12 @@ Contracts along this path:
   - [x] **Resolved surrogate serialization bug (#24):** serializes vendor DLL calls, clears `g_channel` on OP_DISCONNECT, prevents double disconnect and unsafe teardown; BENCH gate cleared.
   - [x] **Single-threaded surrogate, reads over the pipe**
         ([ADR-0014](docs/adr/0014-single-threaded-surrogate.md),
-        2026-10-19). Fix #26 before the first talking-bus session, or
-        the surrogate path is likely to deliver no frames.
+        2026-10-19). Read batches that arrive with `ERR_TIMEOUT` are
+        delivered (formerly #26, fixed the same day).
   - work through [BENCH prep](#bench-prep) — quiet-bus subset walked
-    2026-10-16 (#1 confirmed behaviorally, #9 resolved earlier,
-    #6 partially informed); talking-bus items (#2, #3, #4, #5, #7)
-    still open
+    2026-10-16 (#1's original 8-byte shape accepted behaviorally, #9
+    resolved, #6 partially informed); #1's current 4-byte shape and
+    the talking-bus items (#2, #3, #4, #5, #7) still open
   - first live, read-only vehicle session
 - [ ] **Protocol profiles** (ADR-0013):
   - [x] slice 1: profile registry, `raw` profile, `?profile=`
@@ -206,7 +213,7 @@ it a genuine connect candidate.
 2. **Request framing.** The transport writes the LOGICAL message —
    `[4-byte tx ID][01][PID]`, 6 bytes — with ISO15765_FRAME_PAD, so the
    adapter adds the ISO-TP PCI byte and zero-pads the CAN frame. The
-   pre-N1 shape supplied both in-band (12 bytes). Some drivers expect
+   shape used before 2026-10-18 supplied both in-band (12 bytes). Some drivers expect
    the in-band form; if the VX transmits nothing, this is the first
    suspect.
 3. **No checksum byte.** This is ISO 15765-4 over CAN, so the K-line
@@ -217,13 +224,12 @@ it a genuine connect candidate.
    says (#12).
 6. **ReadMsgs statuses.** Split in both backends since 2026-10-19:
    `ERR_TIMEOUT` is a vehicle timeout, `ERR_BUFFER_EMPTY` is "no
-   frame", and anything else is a hard failure (#11). Still to
-   observe: which status the VX returns for an empty read, and
-   whether it returns `ERR_TIMEOUT` together with a partial batch
-   (#26).
-   - #26 is fixed (batches that arrive with ERR_TIMEOUT are now delivered); 
-    still to observe whether the VX returns ERR_TIMEOUT with a partial batch at 
-    all, and which status it gives for a truly empty read.
+   frame", and anything else is a hard failure (#11). Frames are
+   delivered whatever status they arrive with, so a vendor that pairs
+   `ERR_TIMEOUT` with a partial batch loses nothing. The same rule
+   also trusts the count under a hard error (#11). Still to observe:
+   which status the VX returns for an empty read, and whether it pairs
+   `ERR_TIMEOUT` with data at all. The child log records both.
 7. **Struct-layout conformance to v04.04** cannot be confirmed without
    a device ([ADR-0010](docs/adr/0010-j2534-v0404-shared-types.md)).
 8. **Vendor ioctl and filter behavior** and timeout semantics.
@@ -263,29 +269,34 @@ an issue is resolved it is removed, and its number is not reused.
 9. **The mock has no scripted drive cycle.** One candidate is a
    2nd-gear WOT pull with a 2→3 shift. It needs `SimState` physics
    changes and updated ranges in
-   `MockFramesDecodeAgainstMockSignalSet`. preferred end goal: 2ng-gear pull WOT ->
-    slow down -> 3rd gear pull WOT -> slow down -> 60-130mph pull
+   `MockFramesDecodeAgainstMockSignalSet`. The preferred end goal is a
+   2nd-gear WOT pull, slow down, a 3rd-gear WOT pull, slow down, then a
+   60–130 mph pull.
 10. **Strip-chart x-axis resolution is one coalesce window, about
     100 ms.** Per-sample timestamps need decoding to move onto the
     worker.
-11. **J2534 read-status handling and link health are unverified.**
-    Since 2026-10-19 both backends split `ERR_TIMEOUT` (vehicle
-    timeout), `ERR_BUFFER_EMPTY` (no frame) and other statuses (hard
-    failure), and the worker debounces timeouts, counts hard-failure
-    episodes and backs off ([j2534.md](docs/j2534.md#session-lifecycle)).
-    Still open:
-    - No test covers it. Nothing drives the fake's
-      `QTTUNE_FAKE_READ_STATUS` knob or reads
-      `qttune_session_get_error_state`.
-    - The backoff never grows: each hard failure resets it to the
-      100 ms base, so a dead adapter is retried every 100–200 ms
-      instead of backing off to 5 s.
-    - `?poll=` mode still skips writes while hard-failed. Recovery
-      needs a reply, and replies only follow writes, so one hard error
-      stops that loop for good. Scheduler mode keeps writing.
-    - A failed write stores its own status (`QT_ERR_NO_TRANSPORT`) in
-      `last_error` rather than `QT_ERR_TRANSPORT_HARD_FAILURE`.
-    - The bridge never reads the error state, so the UI can't show it.
+11. **J2534 link health is HARNESS-tested but not yet in the UI or
+    seen on a real vendor.** Since 2026-10-19 both backends split
+    `ERR_TIMEOUT` (vehicle timeout), `ERR_BUFFER_EMPTY` (no frame) and
+    other statuses (hard failure), and the worker debounces timeouts,
+    counts hard-failure episodes and backs off
+    ([j2534.md](docs/j2534.md#session-lifecycle)). Both request modes
+    keep sending (each request is the recovery probe), a failure always
+    records `QT_ERR_TRANSPORT_HARD_FAILURE`, and the backoff grows from
+    100 ms to a 5 s cap. Since 2026-10-20, in-proc HARNESS tests cover
+    the canonical code, one episode per outage, the quiet debounce and
+    recovery (`HardFailureSetsCanonicalErrorAndRecovers`,
+    `QuietBusDebouncesToVehicleTimeoutWithoutEpisode`), and the bridge
+    polls the state on its 100 ms tick and logs transitions to the
+    activity log. Still open:
+    - No QML element shows the state, and a signal that never arrived
+      still renders as `0.0`. The bridge's `hasValue` and `ageMs` roles
+      are unused, and they don't notify yet.
+    - Both backends trust the vendor's message count under a
+      hard-error status, so a vendor that leaves `pNumMsgs` untouched
+      produces phantom frames that read as healthy (code review
+      2026-10-20, finding 1).
+    - The tests are in-proc only and don't pin backoff growth.
     - Real-vendor behavior is BENCH-unverified (prep item 6).
 12. **J2534 timestamps pass through untranslated.** The spec says
     microseconds, but vendor conformance is unverified.
@@ -301,9 +312,6 @@ an issue is resolved it is removed, and its number is not reused.
     has changed ([ADR-0006](docs/adr/0006-frame-abi-v0.3.md)). It gets
     bumped at the v0.3.0 tag. Bumping mid-cycle only causes rebuild
     churn.
-18. **The bridge's architecture label shows unknown (0) as "x86".**
-    This only affects the display. Routing correctly treats 0 as
-    in-proc.
 19. **Shared-header constants are ABI across two build trees.**
     - `j2534_ptypes.h` and `surrogate_protocol.h` are compiled into
       both the x64 tree and `build-win32`.
@@ -316,47 +324,47 @@ an issue is resolved it is removed, and its number is not reused.
     since those are ISO 9141/KWP init calls. If a BENCH device needs
     them, give them a dedicated wire form rather than relaxing the
     whitelist.
-22. **J2534 connect blocked the GUI thread; the pre-fix surrogate
-    startup ran vendor open before the pipe connect. Fixed 2026-10-16.** Observed with the OBDX Pro VT/VX drivers installed and no adapter: the picker
-    row click called the synchronous connect slot (selection was an
-    unintended connect trigger), and Connect did too, freezing the UI ~8 s per attempt while the synchronous path waited on the child — believed at the 
-    time to be a vendor blocked in `PassThruOpen`; post-instrumentation evidence (2026-10-16) shows the installed OBDX drivers REFUSE open in seconds (VT: 
-    status 34) rather than block, so the full 8 s freeze was more likely the pre-fix startup order — vendor open before pipe connect — leaving the parent to burn the
-    handshake window on an already-exited child.
-    Fixes: picker rows fill the URI field only; `connectSessionAsync`
-    runs create/start on a worker thread with queued completion;
-    the surrogate now connects the pipe FIRST and performs
-    `PassThruOpen` inside `OP_OPEN`, so pipe-connected proves
-    load+exports and an unanswered `OP_OPEN` with a live child means
-    exactly "blocked in vendor open"; a refused open is relayed as a
-    FAILED response. Test knobs: `QTTUNE_SUR_HANDSHAKE_MS` (handshake
-    window) and `QTTUNE_FAKE_OPEN_DELAY_MS` (fake open sleep, arming
-    the x86 child from an x64 test via env inheritance). A vendor that genuinely blocks on absent hardware remains possible elsewhere in the ecosystem — and is now distinguishable: unanswered `OP_OPEN` with a live child means exactly that.
-23. **Surrogate tracing is incomplete.** Since 2026-10-19 the child
-    logs the vendor status of every `OPEN`, `CONNECT`, `DISCONNECT`,
-    `WRITE`, `IOCTL`, `START_FILTER` and `STOP_FILTER` to
-    `%TEMP%\qttune-surrogate.log`, which answers the 2026-10-16
-    session's filter-acceptance question. Still open:
-    - Log lines carry no timestamps, so matching them to parent
-      timings is guesswork.
-    - Every write is logged, about 10 lines/s while the scheduler
-      runs, each flushed. Log on status change instead.
-    - `OP_READ` is not traced, and the parent's own `SUR_LOG` lines go
-      to stderr, which the GUI app doesn't have.
-26. **The surrogate discards frames that arrive with a non-success
-    read status.** The child asks the vendor for up to 16 messages
-    with the drain's 20 ms timeout. Per J2534-1, a vendor that
-    receives fewer than 16 within the timeout returns `ERR_TIMEOUT`
-    together with the messages it did receive. The client maps
-    `ERR_TIMEOUT` to a vehicle timeout before caching, so those frames
-    are dropped. On a conforming vendor that would be nearly every
-    response, so this blocks the first talking-bus session. In-proc
-    reads one message at a time and delivers any message the vendor
-    returns, so it is unaffected. The fake ignores `NumMsgs` and the
-    timeout, so the suite can't show this. Fix: read the batch with
-    timeout 0 and wait on the client side, or cache frames whenever
-    `num_frames > 0`; then add a fake mode that honours `NumMsgs` and
-    the timeout.
+22. **J2534 connect blocked the GUI thread. Fixed 2026-10-16.**
+    Observed with the OBDX Pro VT/VX drivers installed and no adapter:
+    a picker row click and the Connect button both called the
+    synchronous connect, freezing the UI about 8 s per attempt. It was
+    blamed at the time on a vendor blocked in `PassThruOpen`, but the
+    installed OBDX drivers turned out to refuse open within seconds
+    (VT: status 34). The freeze more likely came from the old startup
+    order, vendor open before the pipe connect, which left the parent
+    waiting out the handshake window on a child that had already
+    exited. Fixes:
+    - Picker rows fill the URI field only.
+    - `connectSessionAsync` runs create and start on a worker thread
+      with a queued completion.
+    - The child connects the pipe first, then loads the DLL, resolves
+      its exports and calls `PassThruOpen` when `OP_OPEN` arrives. A
+      connected pipe proves only that the child started. An unanswered
+      `OP_OPEN` with the child alive means the vendor is blocked in
+      `DllMain` or `PassThruOpen`; the client then terminates the
+      child, which can't answer `OP_SHUTDOWN` from inside vendor code.
+      A refused open comes back as the vendor status.
+    - Test knobs: `QTTUNE_SUR_HANDSHAKE_MS` (handshake window) and
+      `QTTUNE_FAKE_OPEN_DELAY_MS` (fake open sleep; it arms the x86
+      child from an x64 test through environment inheritance).
+23. **Surrogate tracing: the parent's half is still weak.** Since
+    2026-10-19 the child's log (`%TEMP%\qttune-surrogate.log`) carries
+    millisecond timestamps and the vendor status of every `OPEN`,
+    `CONNECT`, `DISCONNECT`, `IOCTL`, `START_FILTER` and
+    `STOP_FILTER`. `OP_WRITE` is logged when its status changes, and
+    `OP_READ` when its status changes or frames arrive (so about
+    10 lines/s while an ECU answers). The client logs startup failures:
+    CreateProcess, handshake timeout, the child's decoded exit code, and
+    refused `PassThruOpen`/`PassThruConnect`. Still open:
+    - The parent's `SUR_LOG` lines go to stderr, which the GUI app only
+      has when launched with a redirect (`2> sur.log`).
+    - Parent lines carry no timestamps, and the child's clock counts
+      from its pipe connect, so matching the two logs still takes care.
+    - A blocked `OP_OPEN` is logged only as a generic transaction
+      timeout, the handshake-timeout line wrongly suggests a blocked
+      `PassThruOpen`, and the exit-5 text says the missing exports are
+      "named above" when they're in the child's log (code review
+      2026-10-20, finding 3).
 28. **In-proc, a dropped indication ends the drain early.** The loader
     drops `TX_INDICATION`/`TX_MSG_TYPE` messages by reporting "no
     frame", and the drain stops at the first "no frame". After each
@@ -415,3 +423,4 @@ matter most — CAN-era targets need none of it.
   infotainment as a potential display. More invasive options: direct usage including
   overwrite or extension of vehicles infotainment system (highly vehicle dependent)
 - expand logging of connections and bus state to the activity log on settings page
+  (link-health transitions are logged there since 2026-10-20)

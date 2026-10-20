@@ -343,7 +343,7 @@ qttune_status_t qttune_j2534_sur_open(const char* dll_path,
 
     /* A failed handshake can leave ConnectNamedPipe pending. Cancel and
      * drain it BEFORE releasing the event and the pipe, or the kernel
-     * completes that I/O into freed structures (C3). CancelIoEx on an
+     * completes that I/O into freed structures. CancelIoEx on an
      * already-completed request is harmless — it reports NOT_FOUND. */
     if (!connected) {
         CancelIoEx(h->pipe, &ov);
@@ -359,18 +359,21 @@ qttune_status_t qttune_j2534_sur_open(const char* dll_path,
 
     h->pipe_connected = true;
 
-    /* OP_OPEN: pipe-connected has proven load + all nine exports; this
-     * transaction waits only on the vendor's PassThruOpen. Refused is
-     * a FAILED response; unanswered with a live child is a vendor
-     * blocked on absent hardware (#22). */
+    /* OP_OPEN: the child connects the pipe before it loads the vendor
+     * DLL, so this transaction covers LoadLibraryEx (the vendor's
+     * DllMain), export resolution and PassThruOpen. A load or export
+     * failure exits the child (codes 4/5, decoded below); a refusal is
+     * a non-success status; no reply with a live child is a vendor
+     * blocked in DllMain or PassThruOpen, typically on absent
+     * hardware (#22). */
     qttune_sur_request_t req = {};
     req.request_id = h->next_request_id++;
     req.opcode = QTTUNE_SUR_OP_OPEN;
     qttune_sur_response_t resp = {};
     if (!transact(h, req, &resp, handshake_timeout_ms())) {
         log_child_exit(h->process);
-        /* The child is wedged inside the vendor's PassThruOpen (or
-         * dead): single-threaded, it cannot service OP_SHUTDOWN, so a
+        /* The child is wedged inside the vendor DLL (or dead):
+         * single-threaded, it cannot service OP_SHUTDOWN, so a
          * polite close would burn the full 3 s transact window for a
          * reply that cannot come (#22). Terminate now — the subsequent
          * sur_close then fails its SHUTDOWN write instantly on a

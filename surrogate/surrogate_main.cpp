@@ -18,7 +18,7 @@ static unsigned long g_device_id = 0;
 static unsigned long g_channel = 0;
 /* Presence flags, not 0-sentinels: J2534 does not reserve 0 as an
  * invalid DeviceID or ChannelID, so a vendor returning 0 would be
- * treated as "not open" and never read or closed (finding 8). */
+ * treated as "not open" and never read or closed. */
 static bool g_have_device = false;
 static bool g_have_channel = false;
 
@@ -58,9 +58,10 @@ static void stage(const char* fmt, ...)
 {
     /* Timestamped: the first talking-bus session has to correlate the
      * child's vendor calls with the parent's cycles, which is guesswork
-     * without a clock (Known Issue #23). Milliseconds since the child
-     * started, so the numbers stay small and comparable. The
-     * "[surrogate]" prefix is kept — development.md greps for it. */
+     * without a clock (Known Issue #23). Milliseconds since the first
+     * log line (the pipe connect), so the numbers stay small and
+     * comparable. Lines still start with "[surrogate", so a grep for
+     * that prefix matches. */
     static const ULONGLONG epoch = GetTickCount64();
     fprintf(stderr, "[surrogate %8llu ms] ",
             static_cast<unsigned long long>(GetTickCount64() - epoch));

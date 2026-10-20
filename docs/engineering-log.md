@@ -38,6 +38,8 @@ Dates are commit dates.
 | 2026-10-19 | ADR-0013 slice 3: profile-declared channels; bare-URI filter derivation | `c5cc6f7` |
 | 2026-10-19 | Win32 surrogate auto-deploy from sibling build-win32 | `c5cc6f7` |
 | 2026-10-19 | Single-threaded surrogate, batched `OP_READ`, ring retired ([ADR-0014](adr/0014-single-threaded-surrogate.md)); read-status split in both backends (#11 partial); #17 resolved by removal | `0b43261` |
+| 2026-10-19 | Surrogate replies to shutdown (#27); missing exports named again; `REG_EXPAND_SZ` expansion; job assignment checked | `4b1635d` |
+| 2026-10-19 | Timeout-tagged read batches delivered (#26); surrogate open path hardened; timestamped, change-only child log; ID-0 presence flags | `37d770d` |
 
 ## Lessons learned
 
@@ -408,6 +410,10 @@ every build. Building the target twice settled it in a minute.
 (4) **A fake that shares the implementer's model certifies it:** the
 fake's `ReadMsgs` ignores `NumMsgs` and the timeout and never returns
 data with a non-success status, so the batched read's status handling
-(#26) is invisible to the suite. This is the same class as the
+(#26) is invisible to the suite. The bug was fixed the same day
+(`37d770d`) by delivering frames before judging the status. On
+2026-10-20 a spec-conformant fake mode (`QTTUNE_FAKE_SPEC_READ_SEMANTICS`)
+and `SpecTimeoutReadDeliversPartialBatch` pinned the fix. This is the
+same class as the
 2026-10-18 framing bug (N1). When code depends on spec semantics, move
 the fake toward the spec first.

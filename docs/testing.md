@@ -70,7 +70,7 @@ it.
 | A blocked vendor `PassThruOpen` fails at the (shrunken) handshake timeout with the child alive, not wedged | `J2534SurrogateTest.BlockedVendorOpenFailsAtHandshakeTimeout` |
 | Spec-spelling export resolution (`PassThruIoctl` primary, legacy `PassThruIoCtl` fallback), both backends | `FakeFixture.SpecSpellingPassThruIoctlResolvesAndWorks` (spec fake, primary path) plus the whole existing suite against the legacy-spelling fake (fallback path) |
 | Real-adapter lifecycle: OBDX Pro VX loads through the x86 surrogate, opens with USB power (vendor status 0), clean spawn/exit with disconnect, async connect keeps the UI responsive | BENCH session 2026-10-16, phase 1 |
-| The 8-byte FLOW_CONTROL filter shape (prep #1, `fc_len == mask_len` workaround) is accepted by a real vendor — behaviorally; the child traces no filter ops (Known Issue #23). Quiet-bus read loop at <1% CPU, zero spurious frames | BENCH session 2026-10-16, phase 2 |
+| The 8-byte FLOW_CONTROL filter shape (prep #1, `fc_len == mask_len` workaround) is accepted by a real vendor — behaviorally, since the child didn't yet log filter ops (Known Issue #23). The 4-byte shape has since replaced it and hasn't met hardware. Quiet-bus read loop at <1% CPU, zero spurious frames | BENCH session 2026-10-16, phase 2 |
 | Single-threaded surrogate child ([ADR-0014](adr/0014-single-threaded-surrogate.md)): the whole surrogate and routing suite on the redesigned child, same-arch and cross-arch (x64 test → x86 surrogate → x86 fake) | `J2534SurrogateTest`, `J2534RoutingTest` (2026-10-19, both trees rebuilt: full suite 136/136, cross-arch subset 15/15) |
 | A transaction that times out doesn't put later replies out of step | `J2534SurrogateTest.TimedOutOpDoesNotDesyncNextRequest` |
 | Profile registry: string-keyed lookup, null-set-is-success ("raw"), unknown names fail, last-registration wins | `CoreTest.Profile*` |
@@ -78,28 +78,40 @@ it.
 | `obd2` signal set: mux grammar, decoder round-trips against canned wire bytes, validator including channel-decl rejection (duplicates, zero/illegal IDs, over-capacity) | `Obd2SetTest`, `Obd2DecodeTest` |
 | Mode-01 scheduler: rotation order in set order, wrap; drain delivers a backlog beyond one cycle's budget | `J2534AdoptionTest` |
 | Channel derivation: a bare `j2534://` URI under `obd2` registers the 7E8 filter with exact mask/pattern shape, sends to 7E0, and starts; a lone `?txid=` keeps the derived 7E8 filter but rewrites the request target | `J2534AdoptionTest.BareJ2534UriDerivesObd2ChannelAndStarts`, `.TxidOverrideRewritesDerivedTransmitTarget` |
+| Link health (in-proc): a hard read failure records `QT_ERR_TRANSPORT_HARD_FAILURE` with one episode per outage and recovers through the probe write; a quiet bus debounces to `QT_ERR_VEHICLE_TIMEOUT` with no episode | `J2534AdoptionTest.HardFailureSetsCanonicalErrorAndRecovers`, `.QuietBusDebouncesToVehicleTimeoutWithoutEpisode` |
+| A batch the vendor returns with `ERR_TIMEOUT` is delivered through the surrogate; an empty one maps to a vehicle timeout | `J2534SurrogateTest.SpecTimeoutReadDeliversPartialBatch` (spec-mode fake) |
 
 ## Gaps (not verified)
 
 - **BENCH coverage stops at the quiet bus.** The formal session
-  (2026-10-16) verified load, open, filter-shape acceptance and
-  quiet-bus read behavior. Still unverified against real hardware:
+  (2026-10-16) verified load, open, acceptance of the since-replaced
+  8-byte filter shape, and quiet-bus read behavior. Still unverified against real hardware:
   talking-bus behavior (request framing, checksum expectations,
   timestamp units), VBATT, ReadMsgs timeout-vs-error discrimination
-  (#11), and any vendor status on filter registration itself (#23 —
-  acceptance was inferred, not logged).
-- **Read-status handling and link health (#11) have no tests.** No
-  test drives the fake's `QTTUNE_FAKE_READ_STATUS` knob or reads
-  `qttune_session_get_error_state`, so the timeout/empty/hard-failure
-  split, the 10-read timeout debounce, the backoff and the scheduler's
-  probe writes are unverified.
-- **The fake's read model is simpler than J2534's.** Its `ReadMsgs`
-  returns one message per call whatever `NumMsgs` and the timeout ask
-  for, returns `STATUS_NOERROR` with zero messages on an empty queue,
-  and never returns data alongside a non-success status. Batched-read
-  status handling (#26) and real empty-read statuses
-  (`ERR_BUFFER_EMPTY`, `ERR_TIMEOUT`) are therefore invisible to the
-  suite.
+  (#11), and any vendor status on filter registration itself. That
+  session inferred acceptance; the child now logs the vendor's filter
+  status, so the next session can record it (#23).
+- **Link-health coverage is partial.** The two in-proc tests above
+  drive `QTTUNE_FAKE_READ_STATUS` through the worker. Not covered:
+  - the surrogate path's health mapping, end to end;
+  - backoff growth: the hard-failure test also passes with the old
+    reset-to-base backoff;
+  - a vendor that leaves the message count untouched on error, because
+    the knob always zeroes it (code review 2026-10-20, finding 1);
+  - the real-vendor flavors of these statuses (BENCH, prep item 6).
+- **The fake's default read model is simpler than J2534's.** By
+  default its `ReadMsgs` returns one message per call whatever
+  `NumMsgs` and the timeout ask for, and `STATUS_NOERROR` with zero
+  messages on an empty queue. The exact-count stream tests are pinned
+  to that. `QTTUNE_FAKE_SPEC_READ_SEMANTICS=1` switches to J2534-1
+  behavior: a short batch comes back with `ERR_TIMEOUT`, and an empty
+  timeout-0 read with `ERR_BUFFER_EMPTY`. Spec mode still returns at
+  once instead of waiting out the timeout, and it skips filter gating.
+  The worker never reads with timeout 0, so the `ERR_BUFFER_EMPTY`
+  mapping is reachable only through `QTTUNE_FAKE_READ_STATUS=0x10`.
+- **ID 0 handling is untested.** The child now tracks open device and
+  channel with flags instead of treating ID 0 as "none", but the fake
+  always returns device 1 and channel 0x55.
 - **The fake emits no ISO 15765 indications.** TX-done and
   first-frame indications never appear, so indication handling (#28)
   is untested.

@@ -111,6 +111,20 @@ chose, and records what was learned during implementation. The
 decision text above is unchanged — this appendix is the
 implementation record.
 
+> **Superseded details (corrected 2026-10-19, fixes N1 and N2).** On
+> ISO 15765 channels the adapter does the ISO-TP framing, so neither
+> direction carries a PCI byte:
+> - The decoder sees `[0x41][PID][data]`, and the mux key sits at
+>   offset 0 (`mux_offset == 0`).
+> - Requests are `[4-byte ID][01][PID]` sent with `ISO15765_FRAME_PAD`.
+> - The fake answers `[rx ID][41][PID][data]`.
+> - Coolant and intake-air temperature are `UINT8` with a −40 offset
+>   (J1979: unsigned A − 40).
+>
+> The slice-2 text below is kept as the record of what slice 2
+> shipped. Where it disagrees with this note, the note and the code are
+> current.
+
 ### Mux-key grammar
 
 OBD-II responses arrive on arbitration ID `0x7E8` with the ISO 15765
@@ -126,9 +140,9 @@ The derivation contract binding definitions to the scheduler: a
 definition drives scheduling iff it carries `mux_offset == 1`,
 `mux_length == 2`, and `mux_key == 0x4100u | PID`. The PID to
 request is the key's LOW byte — the high byte `0x41` is the Mode-01
-response echo. The set validator enforces the shape at registration;
-`qttune_sched_from_set` re-checks defensively at enrollment (cheap,
-and it guards against future profile authors).
+response echo. Nothing enforces the shape at registration
+(`qttune_profile_register` does not run the validator), so
+`qttune_sched_from_set` checks it at enrollment.
 
 Non-mux definitions (raw/mock sets) never enroll; the scheduler comes
 up empty and the worker keeps its legacy behavior.
@@ -214,10 +228,10 @@ the flip itself is pinned by the `DefaultProfileIsObd2` and
 | Index | PID | Name | Bytes | Encoding |
 |---|---|---|---|---|
 | 0 | 0x04 | Engine Load | 1 | `100/255` |
-| 1 | 0x05 | Coolant Temp | 1 | -40, int8 |
+| 1 | 0x05 | Coolant Temp | 1 | -40, uint8 (int8 in slice 2; corrected by N2) |
 | 2 | 0x0C | RPM | 2 | BE, `0.25` |
 | 3 | 0x0D | Vehicle Speed | 1 | 1 |
-| 4 | 0x0F | Intake Air Temp | 1 | -40, int8 |
+| 4 | 0x0F | Intake Air Temp | 1 | -40, uint8 (int8 in slice 2; corrected by N2) |
 | 5 | 0x11 | Throttle Position | 1 | `100/255` |
 | 6 | 0x2F | Fuel Level | 1 | `100/255` |
 | 7 | 0x42 | Battery Voltage | 2 | BE, `0.001` |
@@ -234,15 +248,15 @@ are 2-byte big-endian; all others are single-byte.
   activates byte-reversed extraction. Non-byte-aligned BE fields are
   rejected at validation time — a configuration error, not a runtime
   condition.
-- **Mux dispatch:** `qttune_decode_signal` gates muxed definitions on
-  mux-key match before extraction. Definitions with `mux_key == 0`
-  (raw/mock sets) decode unconditionally, unchanged.
-- **Header dependency:** `signals.h` forward-declares
-  `qttune_frame_t` rather than including `core.h`, so the decode
-  layer's public header does not depend on the core header's include
-  graph. This surfaced as a latent defect when
-  `obd2_signal_sets.cpp` became the first TU to include `signals.h`
-  with no `core.h` in scope.
+- **Mux dispatch:** `qttune_decode_signal` and
+  `qttune_def_matches_frame` gate muxed definitions on a mux-key match
+  before extraction. Mux is keyed on `mux_length`: definitions with
+  `mux_length == 0` (the mock set) decode unconditionally, unchanged.
+- **Header dependency:** `signals.h` includes `core.h` for the complete
+  `qttune_frame_t` that `qttune_def_matches_frame` takes; a forward
+  declaration would clash with core.h's typedef. This surfaced as a
+  latent defect when `obd2_signal_sets.cpp` became the first TU to
+  include `signals.h` with no `core.h` in scope.
 
 ### Fake vendor enhancements
 

@@ -119,7 +119,9 @@ strict vendor refusing READ_VBATT unplugged would be notable).
 
 Everything above is the BENCH tier as scoped. Do NOT plug into a
 vehicle on this sheet — that session (parked, ignition ON, engine OFF,
-read-only URI `?filter=0x7E8` first, `?poll=0x0C` second) is a
+read-only URIs in this order: `?profile=raw&filter=0x7E8` to listen
+with no requests, then `?profile=raw&filter=0x7E8&poll=0x0C` for one
+PID, then a bare `j2534://` for the `obd2` scheduler with decode) is a
 separate sheet with its own abort conditions and a second operator
 or at minimum a posted procedure. Draft it after these results are in
 and the prep list is updated.
