@@ -10,8 +10,9 @@
 QtTune is a cross-platform ECU reader and logger. A Qt-free C++ core,
 behind a stable C ABI, handles vehicle I/O and decoding. The Qt/QML
 front end is a replaceable skin on top of it. One codebase targets
-desktop (Windows, Linux, macOS) and mobile (Android, iOS). Desktop
-builds are validated; mobile builds are not yet.
+desktop (Windows, Linux, macOS) and mobile (Android, iOS). CI builds
+and tests the desktop app on all three platforms. The Android and iOS
+builds compile in CI, but neither has run on a device yet.
 
 **Early development.** The full pipeline runs end to end against a
 simulated transport and against a fake J2534 vendor driver, and has
@@ -119,8 +120,10 @@ Otherwise, deploy the surrogate explicitly with
 `-DQTTUNE_SURROGATE_SOURCE=...` or export `QTTUNE_SURROGATE_EXE` at
 runtime ([docs/development.md](docs/development.md)).
 
-**Mobile (not yet validated):** open the project in Qt Creator, select
-an Android or iOS kit, and Run.
+**Mobile (builds in CI, not yet run on a device):** the Android and
+iOS command lines, including an iOS Simulator build, are in
+[docs/development.md](docs/development.md). Alternatively, open the
+project in Qt Creator with an Android or iOS kit.
 
 The cross-architecture test setup, test fixtures and troubleshooting
 notes are in [docs/development.md](docs/development.md).

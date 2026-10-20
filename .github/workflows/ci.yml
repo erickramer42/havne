@@ -24,7 +24,7 @@ jobs:
         run: |
           ctest --test-dir build -C Release --output-on-failure
 
-  win-full-build:
+  win-build:
     runs-on: windows-latest
     needs: core-and-tests
     steps:
@@ -66,7 +66,7 @@ jobs:
       - name: Run tests
         run: ctest --test-dir build --output-on-failure --no-tests=error
 
-  linux-full-build:
+  linux-build:
     runs-on: ubuntu-latest
     needs: core-and-tests
     steps:
@@ -148,3 +148,105 @@ jobs:
             -DBUILD_TESTING=OFF \
             -DCMAKE_OSX_ARCHITECTURES=arm64
           cmake --build build --config Release -- CODE_SIGNING_ALLOWED=NO
+
+  # Launch smoke on the iOS Simulator: install, launch, and check the app
+  # is still running 15 s later. Qt 6.12's simulator libraries are x86_64
+  # only, so this runs on an Intel runner where the simulator is native.
+  # GitHub has announced the end of Intel macOS runners for Fall 2027;
+  # after that this needs Rosetta plus the universal iOS platform, or
+  # arm64 simulator libraries from Qt.
+  ios-simulator-smoke:
+    runs-on: macos-15-intel
+    needs: core-and-tests
+    # A wedged simulator boot would otherwise hold the runner for 6 h.
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install Qt 6.12.0 (ios + macOS host)
+        uses: jurplel/install-qt-action@a9c63c7c123f3069cff414e7e482d95dfa9d8125 # v4.4.1
+        with:
+          version: '6.12.0'
+          host: 'mac'
+          target: 'ios'
+          arch: 'ios'
+          extra: '--autodesktop'
+
+      # Qt's toolchain leaves an explicit sysroot and arch alone, so these
+      # select the simulator SDK and Qt's x86_64 simulator slice.
+      - name: Build for simulator (x86_64, no code signing)
+        run: |
+          "$QT_ROOT_DIR/bin/qt-cmake" -B build -G Xcode \
+            -DBUILD_TESTING=OFF \
+            -DCMAKE_OSX_SYSROOT=iphonesimulator \
+            -DCMAKE_OSX_ARCHITECTURES=x86_64
+          cmake --build build --config Release -- CODE_SIGNING_ALLOWED=NO
+
+      # Newest available iPhone on iOS 18 or later (Qt 6.12's floor).
+      - name: Boot simulator
+        run: |
+          UDID=$(xcrun simctl list devices available --json | jq -r '
+            [.devices | to_entries[]
+             | select(.key | test("SimRuntime\\.iOS-"))
+             | (.key | capture("iOS-(?<maj>[0-9]+)-(?<min>[0-9]+)")
+                     | [(.maj | tonumber), (.min | tonumber)]) as $v
+             | select($v[0] >= 18)
+             | .value[] | select(.name | startswith("iPhone"))
+             | {udid, v: $v}]
+            | sort_by(.v) | last | .udid // empty')
+          if [ -z "$UDID" ]; then
+            echo "::error::No available iPhone simulator on iOS 18 or later"
+            xcrun simctl list devices available
+            exit 1
+          fi
+          echo "UDID=$UDID" >> "$GITHUB_ENV"
+          xcrun simctl bootstatus "$UDID" -b
+          # Qt Quick renders through Metal; record what the VM exposes.
+          system_profiler SPDisplaysDataType | grep -iE 'chipset|metal' || true
+
+      # main() returns -1 when QML fails to load, and a scene graph that
+      # can't initialize aborts, so "still running" covers both.
+      - name: Launch and check qttune stays up
+        run: |
+          APP=$(find build -type d -name qttune.app -path '*iphonesimulator*' | head -n 1)
+          if [ -z "$APP" ]; then
+            echo "::error::qttune.app not found under build/"
+            exit 1
+          fi
+          BUNDLE_ID=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$APP/Info.plist")
+          mkdir -p smoke
+          xcrun simctl install "$UDID" "$APP"
+          # SIMCTL_CHILD_* variables reach the app. Qt on Apple platforms
+          # logs to os_log unless forced to stderr.
+          OUT=$(SIMCTL_CHILD_QT_FORCE_STDERR_LOGGING=1 xcrun simctl launch \
+            --stdout="$PWD/smoke/stdout.log" --stderr="$PWD/smoke/stderr.log" \
+            "$UDID" "$BUNDLE_ID")
+          PID="${OUT##*: }"
+          echo "Launched $BUNDLE_ID as pid $PID"
+          sleep 15
+          xcrun simctl io "$UDID" screenshot smoke/launch.png || true
+          if grep -q "QML FAILED TO LOAD" smoke/stderr.log 2>/dev/null; then
+            echo "::error::QML failed to load"
+            cat smoke/stderr.log
+            exit 1
+          fi
+          if ! kill -0 "$PID" 2>/dev/null; then
+            echo "::error::qttune exited within 15 s of launch"
+            cat smoke/stderr.log 2>/dev/null || true
+            exit 1
+          fi
+          echo "qttune still running after 15 s"
+
+      - name: Collect crash reports
+        if: failure()
+        run: |
+          mkdir -p smoke
+          cp ~/Library/Logs/DiagnosticReports/qttune* smoke/ 2>/dev/null || true
+
+      - name: Upload smoke artifacts
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ios-simulator-smoke
+          path: smoke/
+          if-no-files-found: ignore

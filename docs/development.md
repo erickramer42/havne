@@ -11,6 +11,8 @@ instructions, see the [README](../README.md#build).
 | Qt | 6.12+ (LGPL) | Core, Gui and Quick. Not needed for core-only builds. |
 | C++ compiler | C++17 | MSVC 19.x (2019+), GCC 11+, Clang 14+ |
 | GoogleTest | 1.14.0 | Fetched automatically on the first configure if it isn't installed |
+| Android NDK, JDK | NDK r27, JDK 21 | Android builds only. Qt 6.12's Android kit expects these versions. |
+| Xcode | 16+ (iOS 18 SDK) | iOS builds only, on a macOS host |
 | Python (optional) | 3.13+, 64-bit | Reserved for future trace-analysis tooling |
 
 ## Build configurations
@@ -77,6 +79,11 @@ cmake --build build
 build/app/qttune
 ```
 
+On Debian or Ubuntu, Qt's desktop kit needs `libgl1-mesa-dev` and
+`libxkbcommon-dev` to build (the `linux-build` CI job installs both).
+To show the window under X11 you also need `libxkbcommon-x11-0` and
+`libxcb-cursor0`. CI never launches the app, so it skips them.
+
 **Core only, no Qt.** This mirrors the Ubuntu CI job:
 
 ```sh
@@ -104,9 +111,67 @@ cmake --build build-win32 --config Release --target qttune-j2534-surrogate fake_
 > compiles into both trees — the surrogate and the fakes — since
 > the cross-arch run loads artifacts from `build-win32` directly.
 
-**Mobile (not yet validated).** Open the project in Qt Creator,
-select an Android or iOS kit, and Run. The QML, bridge and core are
-shared, and only the kit differs.
+**Mobile (builds in CI, not yet run on a device).** The QML, bridge
+and core are shared, and only the kit differs. Use `qt-cmake` from
+the mobile kit, which applies Qt's toolchain file and finds the host
+desktop Qt. Mobile builds set `BUILD_TESTING=OFF`:
+`gtest_discover_tests` runs each test binary at build time, and the
+build host can't execute an Android or iOS binary. Off Windows the
+only transport is `mock://` (Known Issue #2). Qt Creator with an
+Android or iOS kit is the interactive alternative.
+
+*Android* (this mirrors the `android-build` CI job). On Windows, add
+`-G Ninja`, because the Visual Studio generator can't target Android:
+
+```sh
+<qt-install>/android_arm64_v8a/bin/qt-cmake -B build-android \
+    -DBUILD_TESTING=OFF \
+    -DANDROID_SDK_ROOT=<sdk> -DANDROID_NDK_ROOT=<sdk>/ndk/<27.x>
+cmake --build build-android
+cmake --build build-android --target apk
+```
+
+For an emulator on an x86-64 PC, use the `android_x86_64` kit. Since
+Qt 6.7, Qt publishes Android kits under the `all_os` host (the name
+aqtinstall and install-qt-action use). They need the build host's
+desktop Qt, and `--autodesktop` installs it. A custom
+manifest or icons go in `app/android/`. CMake sets
+`QT_ANDROID_PACKAGE_SOURCE_DIR` only when that directory exists, so
+`androiddeployqt` is never pointed at a missing template. No template
+exists yet.
+
+*iOS, device* (macOS host; this mirrors `ios-build`). `qt-cmake` also
+applies Qt's minimum deployment target, iOS 18 for Qt 6.12:
+
+```sh
+<qt-install>/ios/bin/qt-cmake -B build-ios -G Xcode \
+    -DBUILD_TESTING=OFF -DCMAKE_OSX_ARCHITECTURES=arm64
+cmake --build build-ios --config Release -- CODE_SIGNING_ALLOWED=NO
+```
+
+That build is unsigned and can't be installed. Running it on a phone
+needs a development team for signing, and nobody has done that here
+yet.
+
+*iOS, Simulator* (this mirrors `ios-simulator-smoke`). Qt's iOS
+simulator libraries are x86_64 only. On Apple silicon the simulator
+therefore runs under Rosetta. With Xcode 26 and later, first delete
+the default iOS platform component in Xcode's settings, then install
+the universal one
+(`xcodebuild -downloadPlatform iOS -architectureVariant universal`).
+Boot a simulator before installing:
+
+```sh
+<qt-install>/ios/bin/qt-cmake -B build-iossim -G Xcode \
+    -DBUILD_TESTING=OFF \
+    -DCMAKE_OSX_SYSROOT=iphonesimulator -DCMAKE_OSX_ARCHITECTURES=x86_64
+cmake --build build-iossim --config Release -- CODE_SIGNING_ALLOWED=NO
+xcrun simctl install booted build-iossim/app/Release-iphonesimulator/qttune.app
+```
+
+Then launch it from the simulator's home screen. The CI job's launch
+step shows how to read the bundle ID from `Info.plist`, launch the
+app, and send its Qt log output to a file.
 
 ## Test fixtures: the two fake vendors
 
@@ -208,6 +273,9 @@ skips.
 | Cross-arch test fails expecting backend "surrogate", got "inproc" | `QTTUNE_FAKE_DLL` points at an x64 fake (or the wrong tree). Check the value, not the code — unset skips, wrong-value fails. |
 | J2534 test fails as `Failed (Timeout)` | A genuine hang, bounded by the 30 s ceiling. Attach to the surviving test and surrogate processes and check thread wait states before killing; the child log in `%TEMP%\qttune-surrogate.log` is rewritten per spawn — copy before respawning. |
 | Linker warning LNK4070 on a fake DLL | The `.def` file's `LIBRARY` directive disagrees with the output filename. Make them match. |
+| A mobile build fails during test discovery, or tries to run a test binary | `BUILD_TESTING` is on. Cross builds must pass `-DBUILD_TESTING=OFF` (see Mobile above). |
+| `ios-simulator-smoke` fails with "qttune exited within 15 s", and the uploaded `stderr.log` says `Failed to initialize graphics backend` | Qt Quick couldn't get a Metal device from the runner VM. Check the boot step's `system_profiler` output. Before suspecting the app, try `SIMCTL_CHILD_QSG_RHI_BACKEND=opengl` on the launch line. |
+| `ios-simulator-smoke` fails with "No available iPhone simulator on iOS 18 or later" | The runner image dropped its iOS 18+ runtimes, or the job moved to a runner without them. The step prints the available devices. |
 
 **QML lint:** run `cmake --build build --config Release --target all_qmllint`.
 Warnings don't fail the build, and the baseline is noisy. The
@@ -217,8 +285,9 @@ warnings in the files you touched.
 
 ## Portability traps
 
-CI builds core with GCC, MSVC and AppleClang. Code that compiles
-cleanly on MSVC is not necessarily portable:
+CI builds core with GCC, MSVC and AppleClang, and cross-compiles it
+with the Android NDK's Clang and for iOS. Code that compiles cleanly
+on MSVC is not necessarily portable:
 
 - Designated initializers are C++20. MSVC accepts them in C++17 mode
   and GCC rejects them. Use constructor helpers such as `mk()` in
@@ -229,13 +298,27 @@ cleanly on MSVC is not necessarily portable:
 
 ## CI
 
-`ci.yml` runs on every push and pull request to `main`:
+`ci.yml` runs on every push to `main` and `dev`, and on every pull
+request to `main`. Every job uses Qt 6.12.0:
 
 | Job | Runner | Does |
 |---|---|---|
-| `core-and-tests` | Ubuntu, GCC, no Qt | Builds core and the Qt-free tests, then runs ctest. This enforces "core never links Qt." Gates the other two jobs. |
-| `full-build` | Windows, MSVC | Builds the full app, then runs ctest (bridge and J2534 suites included) |
-| `macos-build` | macOS, AppleClang | Builds the full app, then runs ctest |
+| `core-and-tests` | Ubuntu, GCC, no Qt | Builds core and the Qt-free tests, then runs ctest. This enforces "core never links Qt." Gates every other job. |
+| `win-build` | Windows, MSVC 2022 | Builds the full app, then runs ctest (bridge and J2534 suites included) |
+| `macos-build` | macOS (arm64), AppleClang | Builds the full app, then runs ctest |
+| `linux-build` | Ubuntu, GCC | Builds the full app, then runs ctest |
+| `android-build` | Ubuntu → Android arm64-v8a | Cross-builds and packages the APK. Build only, no tests. |
+| `ios-build` | macOS (arm64) → iOS device (arm64) | Unsigned device build with the Xcode generator. Build only, no tests. |
+| `ios-simulator-smoke` | macOS 15 Intel → iOS Simulator (x86_64) | Builds for the simulator, then installs and launches the app on the newest iOS 18+ iPhone. Passes if QML loaded and the app is still running 15 s later. Uploads a screenshot and the app's stdout/stderr, plus crash reports on failure, as the `ios-simulator-smoke` artifact. |
+
+The smoke job proves the app starts and stays up. It doesn't tap
+through the UI or connect a session. It runs on an Intel runner
+because Qt's simulator libraries are x86_64 only (Known Issue #29).
+
+**Kit names that moved:** since Qt 6.7 the Linux desktop arch is
+`linux_gcc_64`, and `gcc_64` no longer resolves for 6.12.0. Android
+kits live under the `all_os` host. The mobile jobs install the host's
+desktop Qt with `--autodesktop`.
 
 `scorecard.yml` runs the OpenSSF Scorecard. Actions are pinned to
 full commit SHAs with a `# vX.Y.Z` comment, and Dependabot bumps them
@@ -250,6 +333,11 @@ weekly.
   seen once, and a clean re-run passed (Known Issue #1).
 - **macOS needs Qt 6.12.** Qt 6.8 and earlier referenced the AGL
   framework, which Apple removed from the Xcode 26 SDK.
+- **The iOS simulator smoke runs on `macos-15-intel`.** GitHub has
+  announced the end of Intel macOS runners for Fall 2027. Before then,
+  move the job to an arm64 runner with Rosetta plus the universal iOS
+  platform, or to Qt's arm64 simulator libraries if Qt ships them
+  (Known Issue #29).
 
 **Ignorable CI noise:** `Qt6TaskTree` and `QmlAssetDownloaderPrivate`
 not-found warnings, and missing Vulkan headers. These come from
