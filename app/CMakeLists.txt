@@ -35,6 +35,15 @@ qt_add_qml_module(qttune
         qml/NavButton.qml
         qml/Theme.qml
         qml/LiveViewPage.qml
+        qml/SignalHub.qml
+        qml/GaugeBase.qml
+        qml/GaugeArc.qml
+        qml/GaugeCard.qml
+        qml/AnalogGauge.qml
+        qml/RingGauge.qml
+        qml/DigitalGauge.qml
+        qml/BarGauge.qml
+        qml/ShiftLightBar.qml
 )
 
 target_link_libraries(qttune PRIVATE
