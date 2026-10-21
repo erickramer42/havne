@@ -11,7 +11,20 @@ QtObject {
     readonly property color text:           "#e8e8f0"
     readonly property color textDim:        "#8888a0"
     readonly property color success:        "#4ade80"
+    readonly property color warning:        "#ffd166"
     readonly property color danger:         "#f87171"
     readonly property int radius:           8
     readonly property int spacing:          8
+
+    // Link state → color. Whitelists the healthy and the explained
+    // states; fault, degraded and any future state fall to danger.
+    function linkColor(state: string): color {
+        switch (state) {
+        case "ok":           return success
+        case "quiet":
+        case "requests":     return warning
+        case "disconnected": return textDim
+        default:             return danger
+        }
+    }
 }

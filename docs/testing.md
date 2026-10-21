@@ -15,7 +15,7 @@ where the gaps are. For build and run commands, see
 | **Simulator smoke** | The iOS app installs and launches on the iOS Simulator, QML loads, and the app is still running 45 s later. Nothing drives the UI. A pass doesn't prove the app drew anything, so look at the screenshots. | CI on pull requests, and on request: `[ios-smoke]` in the commit message, or manual dispatch (`ios-simulator-smoke`, Intel macOS runner) |
 | **Manual smoke** | Running the app: layout, LiveView, strip chart, Settings picker against the live registry | Dev machine |
 | **BENCH** | A real vendor DLL and adapter, no vehicle | First formal session complete, 2026-10-16, quiet bus ([session sheet](bench-sessions/2026-10-16.md)); informal quiet-bus follow-up 2026-10-20 ([note](bench-sessions/2026-10-20.md)); talking-bus behaviors pending |
-| **Vehicle** | A live, read-only vehicle session | **Not yet reached** |
+| **Vehicle** | A live, read-only vehicle session | **Not yet reached**; run sheet ready ([vehicle-runsheet.md](bench-sessions/vehicle-runsheet.md)) |
 
 The manual smoke tier earns its place. The 2026-10-10 strip-chart
 indexing bug lived in QML paint code, and every C++ test was blind to
@@ -83,7 +83,7 @@ and the next run's screenshots confirmed the fixes the same day.
 | A child that exits during `OP_OPEN` (failed DLL load) is reported by its exit code, not as a blocked vendor. A missing surrogate exe leaves its `CreateProcess failed` line in the session log. | Session logs read by hand, 2026-10-20 (`DeadDllFailsFastAtOpen`, `BlockedVendorOpenFailsAtHandshakeTimeout`, and a run with `QTTUNE_SURROGATE_EXE` pointing nowhere) |
 | Spec-spelling export resolution (`PassThruIoctl` primary, legacy `PassThruIoCtl` fallback), both backends | `FakeFixture.SpecSpellingPassThruIoctlResolvesAndWorks` (spec fake, primary path) plus the whole existing suite against the legacy-spelling fake (fallback path) |
 | Real-adapter lifecycle: OBDX Pro VX loads through the x86 surrogate, opens with USB power (vendor status 0), clean spawn/exit with disconnect, async connect keeps the UI responsive | BENCH session 2026-10-16, phase 1 |
-| The 8-byte FLOW_CONTROL filter shape (prep #1, `fc_len == mask_len` workaround) is accepted by a real vendor — behaviorally, since the child didn't yet log filter ops (Known Issue #23). The 4-byte shape that replaced it was accepted on 2026-10-20 (row below). Quiet-bus read loop at <1% CPU, zero spurious frames | BENCH session 2026-10-16, phase 2 |
+| The 8-byte FLOW_CONTROL filter shape (prep #1, `fc_len == mask_len` workaround) is accepted by a real vendor — behaviorally, since the child didn't yet log filter ops (formerly Known Issue #23). The 4-byte shape that replaced it was accepted on 2026-10-20 (row below). Quiet-bus read loop at <1% CPU, zero spurious frames | BENCH session 2026-10-16, phase 2 |
 | Single-threaded surrogate child ([ADR-0014](adr/0014-single-threaded-surrogate.md)): the whole surrogate and routing suite on the redesigned child, same-arch and cross-arch (x64 test → x86 surrogate → x86 fake) | `J2534SurrogateTest`, `J2534RoutingTest` (2026-10-19, both trees rebuilt: full suite 136/136, cross-arch subset 15/15) |
 | A transaction that times out doesn't put later replies out of step | `J2534SurrogateTest.TimedOutOpDoesNotDesyncNextRequest` |
 | Profile registry: string-keyed lookup, null-set-is-success ("raw"), unknown names fail, last-registration wins | `CoreTest.Profile*` |
@@ -100,7 +100,8 @@ and the next run's screenshots confirmed the fixes the same day.
 | A batch the vendor returns with `ERR_TIMEOUT` is delivered through the surrogate; an empty one maps to a vehicle timeout | `J2534SurrogateTest.SpecTimeoutReadDeliversPartialBatch` (spec-mode fake) |
 | A vendor that returns a hard error with the message count untouched delivers no frames: in-proc, the session reports a hard failure, dispatches nothing and recovers once reads are honest; through the surrogate, the read maps to a hard failure and the next request still correlates | `J2534AdoptionTest.UntouchedCountUnderHardErrorReportsUnhealthy`, `J2534SurrogateTest.HardErrorUntouchedCountDeliversNoFrames` (`QTTUNE_FAKE_UNTOUCHED_COUNT_STATUS`) |
 | Signal freshness: `ageMs` is -1 before the first sample and a sane clock delta after; `updateValues` notifies `AgeMsRole`; `refreshAges()` notifies `AgeMsRole` alone, over every row, so a stalled row re-evaluates | `BridgeTest.AgeMsRoleEmittedAndRefreshesWhileStalled` |
-| Link-health UI: quiet/fault/degraded banner, activity-log transitions, "—" cells | Manual smoke, 2026-10-20 (fake quiet/fault via `QTTUNE_FAKE_READ_STATUS`; mock; recipe below). The same smoke recorded stale dimming and the arbId column as working, but neither could work as coded then (code review 2026-10-20, findings 13 and 14; see the recipe notes). Both have since been fixed in code but not re-run. |
+| Link-state mapping: `QT_OK` → `ok`, vehicle timeout → `quiet`, `QT_ERR_REQUEST_FAILED` → `requests`, hard failure → `fault`, any other code → `degraded` | `BridgeTest.LinkStateMapsEveryPublishedCode` (session-free, through `QtTuneBridge::linkStateForError`) |
+| Link-health UI: quiet/fault/degraded banner, activity-log transitions, "—" cells, stale dimming, the arbId column | Manual smoke, 2026-10-20 (fake quiet/fault via `QTTUNE_FAKE_READ_STATUS`; mock; recipe below). The first run recorded dimming and the arbId column as working when the code couldn't produce either (code review 2026-10-20, findings 13 and 14). Both rows were re-run and passed after the fixes, the arbId row through the x86 surrogate. |
 | Fault state on real hardware, clean teardown; 4-byte filter shape accepted with logged vendor status 0 | Informal bench observation 2026-10-20 ([sheet](bench-sessions/2026-10-20.md)), under the rules before `946bdf5`. The same no-ACK setup now latches `QT_ERR_REQUEST_FAILED` instead, which hasn't been seen on hardware. |
 
 ## Manual smoke — link-health UI
@@ -115,17 +116,18 @@ mid-session only works in-proc):
 |---|---|---|---|
 | Quiet banner | `QTTUNE_FAKE_READ_STATUS=9` | `j2534://<fake.dll>?profile=raw&filter=0x7E8` | Amber "Vehicle not responding" after ~1.2 s; no frames, empty signal list (raw profile) |
 | Fault banner | `QTTUNE_FAKE_READ_STATUS=7` | same | Red "Adapter fault" banner with episode count; clearing the knob mid-session recovers only in-proc |
-| Frames + arbId column | — | `j2534://<fake.dll>?profile=raw&filter=0x7E8&poll=0x0C` | Frames on LogPage with `0x7E8` in the ID column, payload `410c1f40` (2000 RPM canned); link ok. **Re-run required:** finding 13's binding was fixed in `1674f5c`, after this row was recorded. |
-| Dimming baseline | — | `mock://demo` | Values stream at full opacity, steady ones (IAT) included, because every mock signal arrives every 50 ms. Only a signal that stops arriving dims, 3 s after its last sample. **Re-run required:** the 2026-10-20 run expected IAT to dim, which was finding 14 itself; dimming now follows the model's `ageMs`, refreshed every 100 ms tick. |
+| Requests banner | `QTTUNE_FAKE_WRITE_STATUS=7` | `j2534://<fake.dll>` (bare: the `obd2` scheduler writes every cycle) | At the first failed write: amber "Requests failing — check the vehicle connection and ignition" on LiveView, "Requests failing" with an amber dot on Home, an amber Settings label, and "Link: requests failing (1 episode(s))" in the activity log. **Not yet run** (W6 landed after the 2026-10-20 smoke) |
+| Frames + arbId column | — | `j2534://<fake.dll>?profile=raw&filter=0x7E8&poll=0x0C` | Frames on LogPage with `0x7E8` in the ID column, DLC 4, payload `410c1f40` (2000 RPM canned); link ok, no banner. **Verified 2026-10-20** after finding 13's fix (`1674f5c`), using the Win32-tree fake (`build-win32/tests/Release/fake_j2534.dll`). The session log confirmed it ran through the x86 surrogate, so this row also covers surrogate routing, the strip/stamp path and poll mode in the app. It doesn't exercise finding 12's precedence: `raw` has no scheduler. |
+| Dimming baseline | — | `mock://demo` | Values stream at full opacity, steady ones (IAT) included, because every mock signal arrives every 50 ms. Only a signal that stops arriving dims, 3 s after its last sample. **Verified 2026-10-20** after finding 14's fix (`7e9bd5e`): nothing dims on mock. The first run had expected IAT to dim, which was the bug itself. |
 | Disconnect reset | after any of the above | Disconnect | Home dot and Settings label show plain disconnected, not the last session's fault/quiet |
 
 All four states (ok/quiet/fault/disconnected) were verified 2026-10-20,
 plus the fault state on the OBDX Pro VX quiet bus (BENCH,
 [bench-sessions/2026-10-20.md](bench-sessions/2026-10-20.md)). The
-dimming and arbId rows were recorded as passing in the same run, but
-the code couldn't produce either result (findings 13 and 14 in the
-2026-10-20 code review), so treat both as unverified. Both findings
-have since been fixed in code; re-run both rows.
+first run's dimming and arbId results couldn't have been real
+(findings 13 and 14 in the 2026-10-20 code review). Both rows were
+re-run after the fixes the same day and passed. The requests-banner
+row covers the `requests` state added by W6 and hasn't been run yet.
 
 ## Gaps (not verified)
 
@@ -142,10 +144,14 @@ have since been fixed in code; re-run both rows.
   `QTTUNE_FAKE_READ_STATUS`, `QTTUNE_FAKE_UNTOUCHED_COUNT_STATUS` and
   `QTTUNE_FAKE_WRITE_STATUS` through the worker. Not covered:
   - the surrogate path's health mapping through the worker, end to
-    end (the surrogate test stops at `read_frame`'s status);
-  - `QT_ERR_REQUEST_FAILED` past the core: the bridge has no
-    `linkState` for it, so it shows as `degraded` (and the Settings
-    label stays green), and nothing tests the bridge's handling of it;
+    end (the surrogate test stops at `read_frame`'s status). Accepted
+    until the first vehicle session, which drives it live through the
+    surrogate, with the session log as the record (code review
+    2026-10-20, finding 4);
+  - how the UI renders `QT_ERR_REQUEST_FAILED`: the bridge's mapping
+    to `requests` is unit-tested, but the QML banner, Home card,
+    Settings label and log line are covered only by the smoke recipe's
+    requests-banner row, which hasn't been run yet;
   - the real-vendor flavors on a talking bus: the VX quiet bus was
     observed once (2026-10-20: empty reads return `NOERROR` with zero
     messages; writes fail `ERR_FAILED` after ~8 cycles on a no-ACK

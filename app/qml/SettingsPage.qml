@@ -91,14 +91,7 @@ Pane {
                   : (QtTune.connecting
                        ? qsTr("Connecting…")
                        : qsTr("Not connected"))
-            // fault also tints the connected label — the activity log
-            // below carries the transitions, but the state should be
-            // visible at a glance, not only in the scrollback
-            color: QtTune.connected
-                     ? (QtTune.linkState === "fault"
-                          ? Theme.danger
-                          : (QtTune.linkState === "quiet" ? "#ffd166" : Theme.success))
-                     : Theme.textDim
+            color: Theme.linkColor(QtTune.linkState)
         }
 
         RowLayout {

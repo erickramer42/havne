@@ -116,18 +116,13 @@ Rectangle {
                 Rectangle {
                     implicitWidth: 10; implicitHeight: 10   // layout-managed
                     radius: 5
-                    // linkState refines the old binary dot: fault keeps
-                    // danger while connected, quiet is amber (no Theme
-                    // warning role — chart-palette precedent)
-                    color: !QtTune.connected ? Theme.danger
-                         : QtTune.linkState === "ok" ? Theme.success
-                         : QtTune.linkState === "fault" ? Theme.danger
-                         : "#ffd166"
+                    color: (!QtTune.connected) ? Theme.danger : Theme.linkColor(QtTune.linkState)
                 }
                 Text {
                     text: !QtTune.connected ? qsTr("No session")
                          : QtTune.linkState === "ok" ? qsTr("Session active")
                          : QtTune.linkState === "fault" ? qsTr("Adapter fault")
+                         : QtTune.linkState === "requests" ? qsTr("Requests failing")
                          : QtTune.linkState === "quiet" ? qsTr("Link quiet")
                          : qsTr("Link degraded")
                     color: Theme.textDim

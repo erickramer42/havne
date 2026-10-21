@@ -655,6 +655,9 @@ void QtTuneBridge::pollLinkHealth()
         emit logMessage(QStringLiteral("Link: recovered"));
     } else if (last_error == QT_ERR_VEHICLE_TIMEOUT) {
         emit logMessage(QStringLiteral("Link: vehicle not responding"));
+    } else if (last_error == QT_ERR_REQUEST_FAILED) {
+        emit logMessage(QStringLiteral("Link: requests failing (%1 episode(s))")
+                            .arg(m_errorEpisodes));
     } else if (last_error == QT_ERR_TRANSPORT_HARD_FAILURE) {
         emit logMessage(QStringLiteral("Link: adapter fault (%1 episode(s))")
                             .arg(m_errorEpisodes));
@@ -662,15 +665,24 @@ void QtTuneBridge::pollLinkHealth()
     emit linkStateChanged();
 }
 
+/* W6: published state strings, one place. Static and session-free so
+ * test_bridge can pin every mapping without a transport — linkState()
+ * itself stays a connected-check + delegation. */
+QString QtTuneBridge::linkStateForError(int32_t errorCode)
+{
+    switch (errorCode) {
+        case QT_OK:                        return QStringLiteral("ok");
+        case QT_ERR_VEHICLE_TIMEOUT:       return QStringLiteral("quiet");
+        case QT_ERR_REQUEST_FAILED:        return QStringLiteral("requests");
+        case QT_ERR_TRANSPORT_HARD_FAILURE: return QStringLiteral("fault");
+        default: return QStringLiteral("degraded"); /* forward-compatible */
+    }
+}
+
 QString QtTuneBridge::linkState() const
 {
     if (!m_connected.load(std::memory_order_acquire)) {
         return QStringLiteral("disconnected");
     }
-    switch (m_linkErrorCode) {
-        case QT_OK: return QStringLiteral("ok");
-        case QT_ERR_VEHICLE_TIMEOUT: return QStringLiteral("quiet");
-        case QT_ERR_TRANSPORT_HARD_FAILURE: return QStringLiteral("fault");
-        default: return QStringLiteral("degraded"); /* forward-compatible */
-    }
+    return linkStateForError(m_linkErrorCode);
 }
