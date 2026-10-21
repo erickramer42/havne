@@ -85,7 +85,7 @@ next.
     channel derivation are HARNESS-verified against the fake; a
     live-vehicle session (real ECU responses, talking-bus items in
     the BENCH prep list) is still ahead.
-  - **Tests:** 159 ctest cases (Windows/MSVC 2022, both trees
+  - **Tests:** 160 ctest cases (Windows/MSVC 2022, both trees
     rebuilt, 2026-10-21), plus the cross-arch subset (19/19). All
     passed except the env-gated cross-arch skip. CI was green on all
     eight jobs on PR #15 (merged as `0956784`), including the
@@ -310,8 +310,8 @@ an issue is resolved it is removed, and its number is not reused.
     A request failure (no ECU awake, adapter fine) reads "Requests
     failing — check the vehicle connection and ignition" in amber;
     `BridgeTest.LinkStateMapsEveryPublishedCode` pins the mapping. The
-    smoke recipe passed on 2026-10-20; its request-failure row hasn't
-    been run yet
+    smoke recipe passed on 2026-10-20, and its request-failure row on
+    2026-10-21
     ([testing.md](docs/testing.md#manual-smoke--link-health-ui)).
     Still open:
     - No surrogate session drives the health machine in the suite.
@@ -401,17 +401,6 @@ an issue is resolved it is removed, and its number is not reused.
     an 11-bit channel unless `?flags=` sets the bit. No shipped profile
     declares a 29-bit channel. Derive the connect flags from the
     channels.
-35. **The failure backoff overshoots its 5 s cap once.** The worker
-    sleeps, then doubles the wait with
-    `backoff_ms < J2534_BACKOFF_CAP_MS ? backoff_ms * 2 : J2534_BACKOFF_CAP_MS`,
-    so from 100 ms the waits run 100, 200, 400, 800, 1600, 3200, 6400,
-    then 5000. A failure that lasts past about 6.3 s can delay the
-    first probe after recovery by up to 6.4 s. The same block appears
-    in all three worker branches of `j2534_transport.cpp`.
-    `BackoffGrowsUnderSustainedHardFailure` covers only the first
-    1.5 s. Clamp with `std::min`, ideally in one shared helper with a
-    test of the step.
-
 ## Roadmap
 
 | Version | Scope | Status |

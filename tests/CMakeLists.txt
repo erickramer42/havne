@@ -212,6 +212,10 @@ if(WIN32)
     add_executable(test_j2534_stream
         ../tests/test_j2534_stream.cpp
     )
+    # core/src for j2534_backoff.h, which is internal (test_obd2 precedent).
+    target_include_directories(test_j2534_stream PRIVATE
+        ${CMAKE_SOURCE_DIR}/core/src
+    )
     target_link_libraries(test_j2534_stream PRIVATE
         qttune-core
         GTest::gtest_main

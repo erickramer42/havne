@@ -14,6 +14,7 @@
 #include "session.h"
 #include "qttune/j2534.h"
 #include "pid_scheduler.h"
+#include "j2534_backoff.h"
 #include "qttune/profile.h"
 #include "qttune/signal_sets.h"
 
@@ -46,13 +47,7 @@ constexpr uint32_t J2534_REQUEST_CYCLE_MS   = 100;   /* poll cadence */
 constexpr uint32_t J2534_DRAIN_BUDGET          = 10;
 constexpr uint32_t J2534_DRAIN_READ_TIMEOUT_MS  = 20;
 
-/* Failure backoff, entered on a hard read failure or a failed write:
- * 100 ms base, doubling to a 5 s cap (about 0.2 retries/s against a
- * dead adapter). It ends when the adapter shows it is answering: a
- * matched frame, an unmatched one, a debounced quiet run, or (for
- * QT_ERR_REQUEST_FAILED) a successful write. */
-constexpr uint32_t J2534_BACKOFF_BASE_MS = 100;
-constexpr uint32_t J2534_BACKOFF_CAP_MS  = 5000;
+/* The failure backoff's constants and step are in j2534_backoff.h. */
 
 /* On ISO 15765 channels J2534 carries the CAN ID in-band as 4
  * big-endian bytes, and the filter mask, pattern and flow-control
@@ -494,8 +489,7 @@ void j2534_worker(qttune_j2534_transport* t)
                 break;
             }
             if (backoff_ms > 0) {
-                backoff_ms = (backoff_ms < J2534_BACKOFF_CAP_MS)
-                              ? backoff_ms * 2 : J2534_BACKOFF_CAP_MS;
+                backoff_ms = j2534_backoff_next(backoff_ms);
             } else {
                 const auto target = cycle_start +
                     std::chrono::milliseconds(J2534_REQUEST_CYCLE_MS);
@@ -531,8 +525,7 @@ void j2534_worker(qttune_j2534_transport* t)
                 break;
             }
             if (backoff_ms > 0) {
-                backoff_ms = (backoff_ms < J2534_BACKOFF_CAP_MS)
-                              ? backoff_ms * 2 : J2534_BACKOFF_CAP_MS;
+                backoff_ms = j2534_backoff_next(backoff_ms);
             } else {
                 std::this_thread::sleep_for(std::chrono::milliseconds(
                     J2534_REQUEST_CYCLE_MS));
@@ -547,8 +540,7 @@ void j2534_worker(qttune_j2534_transport* t)
                 break;
             }
             if (backoff_ms > 0) {
-                backoff_ms = (backoff_ms < J2534_BACKOFF_CAP_MS)
-                              ? backoff_ms * 2 : J2534_BACKOFF_CAP_MS;
+                backoff_ms = j2534_backoff_next(backoff_ms);
             } else {
                 std::this_thread::sleep_for(std::chrono::milliseconds(
                     J2534_POLL_INTERVAL_MS));

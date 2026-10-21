@@ -190,13 +190,12 @@ ignition off, wait 10 s, then turn it back on.
 **Expected:**
 - [ ] Ignition off: the "Requests failing" banner at the first failed
       write (writes may succeed for a few cycles first, as in Phase 0)
-- [ ] Ignition on: values resume within about 8 s, and the activity
+- [ ] Ignition on: values resume within about 7 s, and the activity
       log shows "Link: recovered". While requests fail, the worker
-      waits between probes, doubling from 100 ms toward a 5 s cap.
-      After a 10 s outage it can be in a single 6.4 s wait (Known
-      Issue #35), and the ECU needs a moment to wake. Record the time
-      from ignition-on to the first value; longer than ~10 s is a
-      finding
+      waits between probes, doubling from 100 ms to a 5 s cap, so
+      after a 10 s outage the next probe can be up to 5 s away, and
+      the ECU needs a moment to wake. Record the time from ignition-on
+      to the first value; longer than ~10 s is a finding
 
 ## If it fails, suspect
 

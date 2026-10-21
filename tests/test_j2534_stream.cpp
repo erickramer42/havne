@@ -18,7 +18,8 @@
 //          Link health (Known Issue #11), in-proc: hard and quiet
 //          reads, episode counting, recovery, untouched vendor counts,
 //          the write latch and its priority, unmatched frames, backoff
-//          growth; plus ?poll= precedence over the profile's rotation.
+//          growth and its capped step; plus ?poll= precedence over the
+//          profile's rotation.
 
 #include <gtest/gtest.h>
 
@@ -27,6 +28,7 @@
 #include "qttune/j2534_ptypes.h"
 #include "qttune/profile.h"
 #include "qttune/signal_sets.h"
+#include "j2534_backoff.h"   /* core/src: the worker's backoff step */
 
 #ifdef _WIN32
 #include <windows.h>
@@ -1350,6 +1352,28 @@ TEST_F(J2534AdoptionTest, BackoffGrowsUnderSustainedHardFailure)
 
     EXPECT_EQ(qttune_session_close(session), QT_OK);
     qttune_session_destroy(session);
+}
+
+/* The backoff step, without a session: from the base every wait grows
+ * and none exceeds the cap, including the step that lands on it, and
+ * at the cap it stays. The worker test above can't see this; reaching
+ * the cap takes over 6 s of sustained failure. */
+TEST(J2534StreamTest, BackoffStepDoublesToCapWithoutOvershoot)
+{
+    uint32_t ms = J2534_BACKOFF_BASE_MS;
+    uint32_t steps = 0;
+    while (ms < J2534_BACKOFF_CAP_MS) {
+        const uint32_t next = j2534_backoff_next(ms);
+        EXPECT_GT(next, ms);
+        EXPECT_LE(next, J2534_BACKOFF_CAP_MS) << "overshoot after " << ms;
+        ms = next;
+        ASSERT_LT(++steps, 32u) << "never reached the cap";
+    }
+    EXPECT_EQ(ms, J2534_BACKOFF_CAP_MS);
+    EXPECT_EQ(j2534_backoff_next(J2534_BACKOFF_CAP_MS), J2534_BACKOFF_CAP_MS);
+    EXPECT_EQ(j2534_backoff_next(J2534_BACKOFF_CAP_MS - 1), J2534_BACKOFF_CAP_MS);
+    EXPECT_EQ(j2534_backoff_next(UINT32_MAX), J2534_BACKOFF_CAP_MS)
+        << "doubling must not wrap";
 }
 
 /* QT_ERR_REQUEST_FAILED has a distinct, mapped string. */
