@@ -97,7 +97,7 @@ Pane {
             color: QtTune.connected
                      ? (QtTune.linkState === "fault"
                           ? Theme.danger
-                          : (QtTune.linkState === "quiet" ? "#ffd166" : Theme.success))
+                          : (QtTune.linkState === "quiet" ? Theme.warning : Theme.success))
                      : Theme.textDim
         }
 

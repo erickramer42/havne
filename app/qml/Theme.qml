@@ -12,6 +12,8 @@ QtObject {
     readonly property color textDim:        "#8888a0"
     readonly property color success:        "#4ade80"
     readonly property color danger:         "#f87171"
+    readonly property color warning:        "#ffd166"
+    readonly property color info:           "#60a5fa"
     readonly property int radius:           8
     readonly property int spacing:          8
 }

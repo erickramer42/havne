@@ -28,15 +28,14 @@ Page {
 
         // Link-health banner (#11 UI half): fault/quiet/degraded come
         // from QtTune.linkState, transitions are mirrored in the
-        // Settings activity log. "quiet" is amber (chart-palette
-        // precedent — Theme has no warning role).
+        // Settings activity log. "quiet" is amber (Theme.warning).
         Rectangle {
             visible: QtTune.connected && QtTune.linkState !== "ok"
             Layout.fillWidth: true
             implicitHeight: 40
             radius: Theme.radius
             color: QtTune.linkState === "quiet"
-                   ? Qt.alpha("#ffd166", 0.12)
+                   ? Qt.alpha(Theme.warning, 0.12)
                    : Qt.alpha(Theme.danger, 0.15)
 
             Label {
@@ -47,7 +46,7 @@ Page {
                       : QtTune.linkState === "degraded"
                         ? qsTr("Link degraded (error %1)").arg(QtTune.linkErrorCode)
                         : qsTr("Vehicle not responding — quiet bus")
-                color: QtTune.linkState === "quiet" ? "#ffd166" : Theme.danger
+                color: QtTune.linkState === "quiet" ? Theme.warning : Theme.danger
                 font.pixelSize: 13
             }
         }
