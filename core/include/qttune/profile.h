@@ -12,7 +12,7 @@ extern "C" {
 #endif
 
 /*
- * Protocol profile registry (ADR-0013, slice 1).
+ * Protocol profile registry (ADR-0013).
  *
  * A profile binds a string name to the signal set its sessions use.
  * "raw" is the null profile: registered with a NULL signal set — no

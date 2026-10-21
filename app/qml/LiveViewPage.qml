@@ -82,7 +82,9 @@ Page {
                 required property bool hasValue
                 // The model notifies AgeMsRole per batch and on every
                 // coalesce tick (refreshAges), so a row that stops
-                // updating still re-evaluates and dims (finding 14).
+                // updating still re-evaluates and dims. A delegate-side
+                // clock stamped in onValueChanged would dim steady values
+                // that are still arriving.
                 required property double ageMs          // AgeMsRole; -1 = never arrived
 
                 width: signalList.width
@@ -111,8 +113,9 @@ Page {
                               : qsTr("—")
                         color: signalDelegate.subscribed ? Theme.primary : Theme.textDim
                         font.family: "Consolas"   // tabular-ish digits, no jitter
-                        // Staleness dimming: generous vs the scheduler's full
-                        // PID rotation (~0.8 s for the 8-PID obd2 set).
+                        // Staleness dimming: 3 s is generous against the
+                        // scheduler's full PID rotation (100 ms per PID, so
+                        // about 1 s for the obd2 set).
                         opacity: signalDelegate.hasValue
                                  && signalDelegate.ageMs > 3000
                                      ? 0.45 : 1.0

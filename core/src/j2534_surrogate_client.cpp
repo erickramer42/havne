@@ -57,7 +57,7 @@ DWORD handshake_timeout_ms()
 
 /* Client trace line: to stderr, and to the session log when there is
  * one, so a GUI launch (no stderr) keeps the client's half next to the
- * child's (formerly Known Issue #23). Stamped with local wall-clock
+ * child's. Stamped with local wall-clock
  * time, like the child's lines. One WriteFile per line, as on the
  * child's side, so the two never splice mid-line. h may be null. */
 void sur_log(const qttune_j2534_sur_handle_t* h, const char* fmt, ...)
@@ -92,8 +92,8 @@ void sur_log(const qttune_j2534_sur_handle_t* h, const char* fmt, ...)
 
 /* The session log's path. The fixed name keeps the documented path for
  * the usual single session. A second concurrent session finds it held
- * (a sharing violation) and gets a per-spawn name, instead of its child
- * running without a log (code review 2026-10-20, finding 9). Returns
+ * (a sharing violation) and gets a per-spawn name, so its child never
+ * runs without a log. Returns
  * INVALID_HANDLE_VALUE, with path empty, if neither name opens. */
 HANDLE open_session_log(LONG seq, SECURITY_ATTRIBUTES* sa,
                         char* path, size_t cap)
@@ -441,20 +441,20 @@ qttune_status_t qttune_j2534_sur_open(const char* dll_path,
      * failure exits the child (codes 4/5, decoded below); a refusal is
      * a non-success status; no reply with a live child is a vendor
      * blocked in DllMain or PassThruOpen, typically on absent
-     * hardware (#22). */
+     * hardware. */
     qttune_sur_request_t req = {};
     req.request_id = h->next_request_id++;
     req.opcode = QTTUNE_SUR_OP_OPEN;
     qttune_sur_response_t resp = {};
     if (!transact(h, req, &resp, handshake_timeout_ms())) {
-        /* Finding 3: the real "vendor blocked" case is a reply that
-         * TIMED OUT with the child still alive — a vendor wedged in
-         * DllMain or PassThruOpen can't answer. The other case is a
-         * broken pipe: the child is exiting with code 4 or 5. Its pipe
-         * closes a moment before its process handle signals, so a
-         * liveness check alone called a failed DLL load "blocked"
-         * (seen 2026-10-20 once both halves shared one log). Wait for
-         * that exit and let log_child_exit name the stage instead. */
+        /* Classify by why the transaction failed, not by a liveness
+         * snapshot. A reply that TIMED OUT with the child still alive
+         * is a vendor wedged in DllMain or PassThruOpen. A broken pipe
+         * means the child is exiting with code 4 or 5: its pipe closes
+         * a moment before its process handle signals, so a liveness
+         * check at that instant would call a failed DLL load
+         * "blocked". Wait for that exit and let log_child_exit name
+         * the stage instead. */
         const bool timed_out = (h->pending_response_id == req.request_id);
         if (timed_out && WaitForSingleObject(h->process, 0) != WAIT_OBJECT_0) {
             SUR_LOG(h, "open: no reply to OP_OPEN after %lu ms, child alive "
@@ -727,14 +727,14 @@ qttune_status_t qttune_j2534_sur_read_frame(qttune_j2534_sur_handle_t* h,
         return QT_ERR_TRANSPORT_HARD_FAILURE;
     }
 
-    /* Deliver first, judge the status second (#26). Per J2534-1 a read
+    /* Deliver first, judge the status second. Per J2534-1 a read
      * asking for N messages with a nonzero timeout returns ERR_TIMEOUT
      * TOGETHER WITH however many arrived, so a conforming vendor reports
      * nearly every response that way. The in-proc path delivers such a
      * message too; dropping it would hide the ECU's answer and leave a
      * healthy session showing nothing at all. The child has already
-     * applied the count-trust rule (finding 1), so a non-empty batch
-     * only arrives under NOERROR or ERR_TIMEOUT. */
+     * applied the count-trust rule (qttune_trusted_count), so a
+     * non-empty batch only arrives under NOERROR or ERR_TIMEOUT. */
     if (resp.num_frames > 0) {
         memcpy(h->pending, resp.frames,
                sizeof(qttune_sur_frame_t) * resp.num_frames);
@@ -745,7 +745,7 @@ qttune_status_t qttune_j2534_sur_read_frame(qttune_j2534_sur_handle_t* h,
                                            timeout_ms, got_frame);
     }
 
-    /* Empty batch: now the status decides. */
+    /* Empty batch: the status decides. */
     if (resp.status == static_cast<int32_t>(QTTUNE_PT_STATUS_TIMEOUT)) {
         return QT_ERR_VEHICLE_TIMEOUT;
     }

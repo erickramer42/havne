@@ -44,8 +44,8 @@ qttune_session_t* make_test_session(void)
 
 /* Poll-until-predicate with deadline. The mock's 50ms cadence is a
  * LOCAL expectation, not a CI-runner guarantee — a starved macOS VM
- * was observed delivering 2 frames in 200+ ms of wall clock
- * (2026-10-14 CI flake). Polling keeps the asserted CONTRACT (the
+ * can deliver 2 frames in 200+ ms of wall clock. Polling keeps the
+ * asserted CONTRACT (the
  * condition eventually holds on a healthy stream) and drops the
  * coincidence (any particular wall-clock duration). Deadline is long
  * enough to absorb pathological runner load, short enough that a
@@ -258,9 +258,9 @@ TEST(CoreTest, MockTransportDeliversFrames) {
     EXPECT_EQ(qttune_session_start(session), QT_OK);
 
     /* CONTRACT: at least 3 frames eventually arrive. The 50ms tick
-     * implies ~4 in 200ms LOCALLY, but CI runners under load have
-     * delivered fewer (observed 2-in-356ms on macOS, 2026-10-14) —
-     * poll to the condition instead of betting on a fixed sleep. */
+     * implies ~4 in 200ms LOCALLY, but CI runners under load deliver
+     * fewer (2 in 356 ms has been seen on macOS) — poll to the
+     * condition instead of betting on a fixed sleep. */
     const bool delivered = wait_for(
         [&frame_count]() { return frame_count.load() >= 3; },
         5000);
@@ -764,9 +764,9 @@ TEST(CoreTest, CloseIsIdempotentAndDestroyIsSafe)
     qttune_session_t* session = nullptr;
     ASSERT_EQ(qttune_session_create("mock://lifecycle", &session), QT_OK);
 
-    /* Double close: second returns the error code WITHOUT UB
-     * (regression guard — old close() deleted, making this a
-     * use-after-free that only survived allocator luck) */
+    /* Double close: second returns the error code WITHOUT UB. close()
+     * must not free the session (destroy does), or this second call is
+     * a use-after-free that only survives on allocator luck */
     EXPECT_EQ(qttune_session_close(session), QT_OK);
     EXPECT_EQ(qttune_session_close(session), QT_ERR_SESSION_CLOSED);
 
@@ -798,7 +798,7 @@ TEST(CoreTest, DestroyAutoClosesActiveSession)
 }
 
 // ---------------------------------------------------------------------------
-// ADR-0013 slice 1: profile registry and session-level selection
+// ADR-0013: profile registry and session-level selection
 // ---------------------------------------------------------------------------
 
 TEST(CoreTest, ProfileLookupRawReturnsOkWithNullSet) {
@@ -895,10 +895,10 @@ TEST(CoreTest, UnknownProfileRejectedBeforeDllLoad) {
 #endif
 
 // ---------------------------------------------------------------------------
-// ADR-0013 slice 2: profile query tri-state — a present-but-malformed
+// ADR-0013: profile query tri-state — a present-but-malformed
 // ?profile= value must fail session_create, never silently downgrade
-// to the scheme default. Closes the core-vs-parse_query strictness
-// asymmetry from the 2026-10-18 session-open review.
+// to the scheme default. Core is as strict about ?profile= as
+// parse_query is about every other key.
 // ---------------------------------------------------------------------------
 
 TEST(CoreTest, ProfileQueryEmptyValueRejected) {

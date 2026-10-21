@@ -27,6 +27,9 @@ details.
   oldest-first ordering.
 - **Live signal view.** Decoded values with units, refreshed at 10 Hz,
   plus a rolling strip chart.
+- **Dashboard.** Analog, ring, digital and bar gauges with shift lights,
+  peak hold, and stale-value dimming. A gauge whose signal the active
+  profile doesn't provide says so instead of showing zero.
 - **J2534 Pass-Thru support (Windows).**
   - Finds installed vendor drivers.
   - Pick a device on the Settings page or enter a `j2534://` URI.
@@ -132,6 +135,7 @@ notes are in [docs/development.md](docs/development.md).
 
 | Document | What's in it |
 |---|---|
+| [docs/architecture.md](docs/architecture.md) | Start here: how the parts fit together and why, plus a map of the other docs |
 | [STATUS.md](STATUS.md) | Current state, phase checklist, known issues, detailed roadmap |
 | [docs/development.md](docs/development.md) | Build configurations, running tests, CI, troubleshooting |
 | [docs/testing.md](docs/testing.md) | Test tiers, suites, what is and isn't verified |

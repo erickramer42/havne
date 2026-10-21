@@ -38,8 +38,8 @@ constexpr uint32_t J2534_REQUEST_CYCLE_MS   = 100;   /* poll cadence */
  * a drain of at most DRAIN_BUDGET reads, so the worker never exceeds
  * 100 reads/s whatever the bus load. Dropped frames count against the
  * budget too: it bounds loop time, not delivery. Normally there is one
- * response per request, so each of the v1 set's 8 PIDs refreshes every
- * 800 ms. The drain timeout is short because ReadMsgs blocks for the
+ * response per request, so each of a set's N PIDs refreshes every
+ * N × 100 ms. The drain timeout is short because ReadMsgs blocks for the
  * whole timeout on an empty queue; 20 ms leaves room for a slow ECU
  * without spending the cycle waiting. The first empty read ends the
  * drain. Both values are BENCH candidates. */
@@ -74,11 +74,12 @@ constexpr uint32_t J2534_PID_MAX        = 0xFFu;
  * about 1 s in scheduler mode). */
 constexpr uint32_t J2534_HEALTH_QUIET_CYCLES = 10;
 
-/* Finding 7: read outcome distinguishes "matched" (stripped and
- * dispatched to our channel) from "delivered but unmatched" (adapter
- * talking, wrong filter). The latter clears hard failure/backoff but
- * transitions to VEHICLE_TIMEOUT rather than OK, leaving the quiet
- * count as it is. */
+/* A read's outcome. "matched" (stripped and dispatched to one of our
+ * channels) is kept apart from "delivered but unmatched" (the adapter
+ * is reading the bus, but the frame isn't a reply to us), because only
+ * a matched frame proves the link works end to end. An unmatched one
+ * clears hard failure and the backoff but reads as VEHICLE_TIMEOUT,
+ * not OK, and leaves the quiet count as it is. */
 struct read_outcome {
     qttune_status_t status;
     bool got;
@@ -131,9 +132,9 @@ struct qttune_j2534_transport {
     unsigned long flags = 0;
     /*   poll_pid     0 = passive receive; nonzero = single-PID Mode-01
      *                request loop. Outranks the set's rotation: a
-     *                ?poll= URI never builds the set scheduler
-     *                (finding 12), so "just this PID" means what it
-     *                says. Needs a channel to receive on — ?filter=
+     *                ?poll= URI never builds the set scheduler, so
+     *                "just this PID" means what it says. Needs a
+     *                channel to receive on — ?filter=
      *                or the profile's own (enforced at attach).
      *   chans        resolved channel table. Derived from the
      *                profile's declared channels at attach, with
@@ -167,7 +168,7 @@ struct j2534_uri_params {
 
 /* PID -> def message_id: the mux defs name their ECU via
  * message_id (= the channel's rx_id). O(set->count) per request —
- * 8 defs today; this deliberately keeps pid_scheduler.h
+ * a few dozen defs at most; this deliberately keeps pid_scheduler.h
  * per-PID-rx-free so the scheduler stays profile-agnostic. */
 uint32_t rx_for_pid(const QttuneSignalSet* set, uint8_t pid)
 {
@@ -241,9 +242,9 @@ void resolve_channels(qttune_j2534_transport* t,
     t->chan_count = n;
 }
 
-/* Reading one frame. Returns the outcome: status, whether a frame
- * arrived, and whether it was matched (stripped/dispatched to us).
- * Finding 7: unmatched deliveries are distinguished from silence. */
+/* Read one frame and dispatch it if it matches a channel. Returns the
+ * outcome: status, whether a frame arrived, and whether it matched. An
+ * unmatched delivery is kept distinct from silence (see read_outcome). */
 read_outcome pump_one(qttune_j2534_transport* t, uint32_t timeout_ms)
 {
     bool got = false;
@@ -279,19 +280,29 @@ read_outcome pump_one(qttune_j2534_transport* t, uint32_t timeout_ms)
                 return {QT_OK, true, true};   /* matched */
             }
         }
-        /* no match — delivered but unmatched (finding 7) */
+        /* no match: a frame for another ID got past the adapter's
+         * filter. Dropped, but it still proves the adapter is reading */
         return {QT_OK, true, false};
     }
     return {QT_OK, true, false};
 }
 
+/* Read-side link health (Known Issue #11; full table in docs/j2534.md).
+ * Session atomics are written only on transitions; health, backoff_ms
+ * and quiet_runs are worker-local. First match wins:
+ *   hard read failure  -> TRANSPORT_HARD_FAILURE, one episode, backoff
+ *   write latch set    -> no change (REQUEST_FAILED belongs to writes)
+ *   matched frame      -> OK, backoff and quiet count cleared
+ *   unmatched frame    -> VEHICLE_TIMEOUT at once, backoff cleared
+ *   quiet read         -> after J2534_HEALTH_QUIET_CYCLES in a row,
+ *                         VEHICLE_TIMEOUT and backoff cleared */
 void update_health(qttune_j2534_transport* t, int32_t& health,
                    uint32_t& backoff_ms, uint32_t& quiet_runs,
                    bool write_latch, qttune_status_t st,
                    bool got, bool matched)
 {
-    /* Ordering (approved): a hard READ failure outranks everything,
-     * including a latched write failure — evaluated FIRST. pump_one
+    /* Ordering: a hard READ failure outranks everything, including a
+     * latched write failure, so it's evaluated FIRST. pump_one
      * guarantees got implies st == QT_OK, so any status other than
      * QT_OK and the vehicle-timeout translation is hard. */
     if (st != QT_OK && st != QT_ERR_VEHICLE_TIMEOUT) {
@@ -305,8 +316,8 @@ void update_health(qttune_j2534_transport* t, int32_t& health,
         return;
     }
 
-    /* Latched write failure (finding 15): good, quiet and unmatched
-     * reads must not move health — REQUEST_FAILED clears only on a
+    /* Latched write failure: good, quiet and unmatched reads must not
+     * move health, because REQUEST_FAILED clears only on a
      * successful write (handle_write_result). Hard failures already
      * returned above, so the latch cannot suppress them. */
     if (write_latch) {
@@ -325,8 +336,8 @@ void update_health(qttune_j2534_transport* t, int32_t& health,
             backoff_ms = 0;
             quiet_runs = 0;
         } else {
-            /* Delivered but unmatched (finding 7): the adapter read
-             * the bus, so hard failure and backoff clear — but this
+            /* Delivered but unmatched: the adapter read the bus, so
+             * hard failure and backoff clear — but this
              * is not a response to us: transition to quiet at once
              * (no debounce), quiet_runs left as it is, no episode. */
             if (health != QT_ERR_VEHICLE_TIMEOUT) {
@@ -338,11 +349,10 @@ void update_health(qttune_j2534_transport* t, int32_t& health,
         return;
     }
 
-    /* Quiet (finding 5): an empty NOERROR read and an ERR_TIMEOUT
-     * read mean the same thing — the adapter answered with nothing.
-     * One merged debounce; once it fires, the backoff clears with
-     * it, so the VX's empty NOERROR reads no longer hold a stale
-     * armed backoff. */
+    /* Quiet: an empty NOERROR read and an ERR_TIMEOUT read mean the
+     * same thing — the adapter answered with nothing. One debounce
+     * covers both, and the backoff clears when it fires. That matters
+     * on the VX, which answers every empty read with NOERROR. */
     ++quiet_runs;
     if (quiet_runs < J2534_HEALTH_QUIET_CYCLES) {
         return;
@@ -354,10 +364,13 @@ void update_health(qttune_j2534_transport* t, int32_t& health,
     backoff_ms = 0;
 }
 
-/* Finding 15: write-failure latch, separate from read health.
- * A failed write latches REQUEST_FAILED with ONE episode; a
- * successful write clears it immediately. Hard READ failure
- * outranks; quiet reads can't downgrade. */
+/* Write-side link health, separate from reads, because a bus where no
+ * node ACKs (ignition off, ECU asleep) fails writes while the adapter
+ * still reads cleanly; calling that a hard failure would blame the
+ * adapter. A failed write latches REQUEST_FAILED with ONE episode; a
+ * successful write clears it at once, since an accepted write proves
+ * requests flow. A hard READ failure outranks it; quiet reads can't
+ * downgrade it. */
 void handle_write_result(qttune_j2534_transport* t,
                          int32_t& health, uint32_t& backoff_ms,
                          bool& write_failed, qttune_status_t wst)
@@ -425,16 +438,16 @@ bool backoff_sleep(qttune_j2534_transport* t, uint32_t ms)
  * Both request modes keep writing while hard-failed or request-failed:
  * the request is the recovery probe, and replies only follow writes.
  *
- * A write failure latches REQUEST_FAILED (finding 15); only a
- * successful write clears it — reads cannot, and a hard read
- * failure outranks it (update_health evaluates hard first). */
+ * A write failure latches REQUEST_FAILED; only a successful write
+ * clears it — reads cannot, and a hard read failure outranks it
+ * (update_health evaluates hard first). */
 void j2534_worker(qttune_j2534_transport* t)
 {
     const bool sched_mode = (t->poll_pid == 0) && (t->sched.count > 0);
 
     int32_t health = QT_OK;
-    bool write_failed = false;   /* finding 15: latched by
-                                  * handle_write_result, cleared by it */
+    bool write_failed = false;   /* latched and cleared only by
+                                  * handle_write_result */
     uint32_t backoff_ms = 0;   /* 0 = healthy cadence */
     uint32_t quiet_runs = 0;
 
@@ -502,9 +515,9 @@ void j2534_worker(qttune_j2534_transport* t)
             uint32_t written = 0;
             qttune_status_t wst = qttune_j2534_write_frame(
                 t->handle, t->channel, req, sizeof(req),
-                t->chans[ci].addr_flags |   /* finding 17: same channel
-                                             * as tx_id, as in scheduler
-                                             * mode */
+                t->chans[ci].addr_flags |   /* same channel as tx_id,
+                                             * so a 29-bit channel gets
+                                             * its CAN_29BIT_ID flag */
                     QTTUNE_PT_TX_ISO15765_FRAME_PAD,
                 0, &written);
             handle_write_result(t, health, backoff_ms, write_failed, wst);
@@ -600,7 +613,7 @@ bool parse_number(const char* s, size_t len, unsigned long* out_val)
  *       txid   CAN id 1..0x1FFFFFFF — transmit ID; default is the
  *              profile's tx, else 0x7E0
  *       poll   PID 1..0xFF — single-PID Mode-01 loop; overrides the
- *              profile's rotation (finding 12)
+ *              profile's rotation
  *       profile name, 1..63 chars (validated in session_create)
  *   - unknown keys, missing '=', empty segments, trailing '&', and a
  *     bare trailing '?' on the URI are all rejected
@@ -608,7 +621,7 @@ bool parse_number(const char* s, size_t len, unsigned long* out_val)
  *   - poll needs a channel to receive on, but the channel may come
  *     from the profile: ?filter= supplies one directly, otherwise the
  *     profile's declared channels do. Enforced in j2534_attach, where
- *     both are known (finding 12). */
+ *     both are known. */
 qttune_status_t parse_query(const char* query, j2534_uri_params* p)
 {
     const char* cur = query;
@@ -681,13 +694,12 @@ qttune_status_t parse_query(const char* query, j2534_uri_params* p)
         }
     }
 
-    /* Finding 12: the poll-needs-a-channel rule is enforced in
-     * j2534_attach, not here. parse_query runs before the profile's
-     * channels are consulted, so rejecting ?poll= without ?filter=
-     * here wrongly refused a profile that declares its own channel
-     * (?profile=obd2&poll=0x0C). Syntax is this function's job;
-     * coupling is attach's — and attach still fires before any DLL
-     * load, so malformed URIs stay fail-fast. */
+    /* The poll-needs-a-channel rule lives in j2534_attach, not here:
+     * this parser can't see the profile's declared channels, and
+     * rejecting ?poll= without ?filter= here would refuse a profile
+     * that declares its own (?profile=obd2&poll=0x0C). Syntax is this
+     * function's job; coupling is attach's — and attach still fires
+     * before any DLL load, so malformed URIs stay fail-fast. */
     return QT_OK;
 }
 
@@ -888,22 +900,24 @@ qttune_status_t j2534_attach(qttune_session_t* session, const char* uri)
     t->set = set;
     resolve_channels(t, set, params);
 
-    /* Request mode, fixed before the thread starts (finding 12):
+    /* Request mode, fixed before the thread starts:
      *   ?poll=    -> single-PID loop; the set's rotation is NOT built,
      *                so the PID in the URI is the only one requested
      *   set       -> the set's full rotation
      *   neither   -> passive receive
-     * The set scheduler used to be built unconditionally, so ?poll=
-     * was silently ignored under any profile with mux defs. */
+     * The URI outranks the profile: building the scheduler anyway
+     * would make the worker's scheduler branch win and silently drop
+     * the ?poll= PID. */
     const bool sched_mode = (params.poll_pid == 0)
                             && qttune_sched_from_set(&t->sched, set);
 
-    /* Coupling BACKSTOP: a request loop needs at least one channel to
-     * receive on. Scheduled PIDs get theirs from the set; ?poll= may
-     * take ?filter= or the profile's declared channels. Shipped
-     * profiles declare channels, so the scheduled arm is reachable
-     * only by a future set author omitting them. Fires before any
-     * hardware is touched. */
+    /* Coupling check: a request loop needs at least one channel to
+     * receive on, or it writes against guaranteed silence forever (an
+     * ISO 15765 channel with no filter receives nothing). Scheduled
+     * PIDs get theirs from the set; ?poll= may take ?filter= or the
+     * profile's declared channels. Shipped profiles declare channels,
+     * so the scheduled arm is reachable only by a future set author
+     * omitting them. Fires before any hardware is touched. */
     if ((sched_mode || params.poll_pid != 0) && t->chan_count == 0) {
         delete t;
         return QT_ERR_NO_TRANSPORT;

@@ -210,7 +210,7 @@ TEST_F(SignalDecodeTest, DecodeHonorsActualPayloadLength) {
        shorter frames (CAN classic subsets, partial ISO-TP fragments).
        Signals whose bits live past payload_len must be REJECTED, and
        signals within it must still decode. Out-value must stay untouched
-       on failure. Pins the contract the bridge now depends on. */
+       on failure. Pins the contract the bridge depends on. */
     const QttuneSignalSet* set = qttune_mock_signal_set();
     ASSERT_NE(set, nullptr);
     ASSERT_NE(set->defs, nullptr);
@@ -273,8 +273,8 @@ TEST(SignalsTest, SignalDefLayoutIsPinned)
      *   decimal_places=68+pad(3), flags(4)=72, message_id(4)=76,
      *   reserved[2](8)=80..87  =>  sizeof == 88.
      * If this fires, a field was added/removed/resized — bump version.
-     * (2026-10-14: initial pin said 84, wrong by the enum's width;
-     * the compiler was right.) */
+     * Trust the compiler over hand arithmetic here: the enum's width
+     * is easy to miscount. */
     ASSERT_EQ(sizeof(QttuneSignalDef), 88u);
     ASSERT_EQ(offsetof(QttuneSignalDef, flags), 72u);
     ASSERT_EQ(offsetof(QttuneSignalDef, message_id), 76u);

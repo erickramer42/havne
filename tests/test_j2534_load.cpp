@@ -119,9 +119,9 @@ TEST_F(FakeFixture, CloseNullIsSafeNoOp) {
  * everyday fake exports 'PassThruIoctl' DIRECTLY. Every routing and
  * surrogate test exercises this resolution implicitly; this pins it
  * by name, including the negative half: the
- * legacy spelling must NOT resolve against this fixture, so a
- * regression back to legacy-only lookup cannot hide behind a
- * coincidental fallback. */
+ * legacy spelling must NOT resolve against this fixture, so a loader
+ * that looked up only the legacy name couldn't pass by a coincidental
+ * fallback. */
 TEST_F(FakeFixture, SpecSpellingPassThruIoctlResolvesAndWorks) {
     qttune_j2534_handle_t* h = nullptr;
     ASSERT_EQ(qttune_j2534_open(&device, &h), QT_OK);
@@ -152,10 +152,10 @@ TEST_F(FakeFixture, SpecSpellingPassThruIoctlResolvesAndWorks) {
     EXPECT_EQ(qttune_j2534_close(h), QT_OK);
 }
 
-/* Legacy-spelling FALLBACK (2026-10-16 VX incident family): the
- * legacy fixture exports 'PassThruIoCtl' ONLY — the historic
- * spelling some real vendors still ship. Resolution must fall back
- * to it and land on a working function. */
+/* Legacy-spelling FALLBACK: the legacy fixture exports
+ * 'PassThruIoCtl' ONLY — a spelling some real vendors still ship
+ * (the spec's is 'PassThruIoctl', which the VX uses). Resolution must
+ * fall back to it and land on a working function. */
 TEST_F(FakeFixture, LegacySpellingPassThruIoCtlFallsBackAndWorks) {
     qttune_j2534_device_t dev{};
     strncpy(dev.dll_path, FAKE_J2534_LEGACY_DLL_PATH, sizeof(dev.dll_path) - 1);

@@ -91,15 +91,14 @@ public:
         UnitRole,
         ValueRole,
         SubscribedRole,
-        HasValueRole,   /* appended: false until the first sample, so
-                         * QML can show "—" instead of a fake 0 for an
+        HasValueRole,   /* false until the first sample, so QML can
+                         * show "—" instead of a fake 0 for an
                          * unsupported PID. Notified per batch;
                          * LiveView binds it. */
-        AgeMsRole       /* appended: -1 = never arrived; else ms since
-                         * the last sample, for dimming stale values.
-                         * Notified per batch and on every coalesce
-                         * tick via refreshAges(); LiveView binds it
-                         * (finding 14, code review 2026-10-20). */
+        AgeMsRole       /* -1 = never arrived; else ms since the last
+                         * sample, for dimming stale values. Notified
+                         * per batch and on every coalesce tick via
+                         * refreshAges(); LiveView binds it. */
     };
 
     int rowCount(const QModelIndex& parent = {}) const override;
@@ -124,7 +123,7 @@ public:
     // role lookups keeps the QML side free of role-number hacks.
     Q_INVOKABLE QVariantList chartData() const;
 
-    /* Periodic age refresh (finding 14): ageMs is computed lazily from
+    /* Periodic age refresh: ageMs is computed lazily from
      * the internal clock, but dataChanged only fires on updateValues —
      * so a stalled signal's row never re-evaluates and never dims, the
      * exact row dimming exists for. Emits dataChanged over ALL rows for
@@ -197,7 +196,7 @@ public:
     void dispatchFrameForTesting(const qttune_frame_t& frame);
     static constexpr int maxInFlightForTesting() { return MaxInFlightFrames; }
     Q_INVOKABLE QString linkState() const;
-    static QString linkStateForError(int32_t errorCode);  /* W6: mapping, testable session-free */
+    static QString linkStateForError(int32_t errorCode);  /* code → state string; static so tests need no session */
 
     Q_INVOKABLE QString statusString(int statusCode) const;
     Q_INVOKABLE int maxFrameCount() const { return FrameListModel::MaxFrames; }
@@ -222,7 +221,7 @@ public slots:
     // DLL load and PassThruOpen included) runs on a worker thread; GUI
     // state application and the result signal arrive queued on the
     // GUI thread. Never blocks the UI — a J2534 handshake can legally
-    // take seconds (Issue #22).
+    // take seconds (the surrogate allows 8 s per stage).
     Q_INVOKABLE void connectSessionAsync(const QString& uri);
 
 signals:

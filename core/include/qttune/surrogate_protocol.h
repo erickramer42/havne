@@ -35,8 +35,11 @@
  *                 Reply: aux = messages the vendor reports written.
  *   READ          u.read. PassThruReadMsgs for up to 16 messages on
  *                 the child's open channel (no channel field). Reply:
- *                 num_frames/frames, delivered whatever the status
- *                 (#26), with TX indications already dropped. No open
+ *                 num_frames/frames, the messages the vendor returned
+ *                 under NOERROR or ERR_TIMEOUT (the count-trust rule in
+ *                 j2534_ptypes.h; a conforming vendor pairs ERR_TIMEOUT
+ *                 with a short batch), with TX indications already
+ *                 dropped, plus the vendor status verbatim. No open
  *                 channel: NOERROR with no frames.
  *   SHUTDOWN      no fields. Reply NOERROR, then the child disconnects,
  *                 closes the device, unloads the DLL and exits 0.

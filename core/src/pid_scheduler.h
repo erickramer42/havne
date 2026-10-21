@@ -19,7 +19,7 @@ extern "C" {
 
 #define QTTUNE_SCHED_MAX_PIDS 16u
 
-/* Round-robin PID scheduler (ADR-0013 slice 2). Fixed capacity, no
+/* Round-robin PID scheduler (ADR-0013). Fixed capacity, no
  * allocation, owned exclusively by the transport worker thread —
  * single-threaded by construction, so no synchronization inside.
  *
@@ -44,8 +44,8 @@ static inline void qttune_sched_init(qttune_pid_scheduler* s)
 
 /* Enroll every requestable def from the set, deduped, first-seen order.
  * Returns true when at least one PID enrolled (worker enters
- * scheduler mode); false when the set yields nothing (raw/mock —
- * caller keeps its legacy behavior). Silently stops at capacity:
+ * scheduler mode); false when the set yields nothing (raw/mock — the
+ * worker then runs ?poll= or passive). Silently stops at capacity:
  * exceeding 16 distinct PIDs in one v1 profile is a design error
  * caught by the set's own unit tests, not a runtime condition. */
 static inline bool qttune_sched_from_set(qttune_pid_scheduler* s,

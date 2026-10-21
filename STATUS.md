@@ -1,11 +1,12 @@
 # QtTune — Project Status
 
-**Updated:** 2026-10-20 · **Version:** v0.3.0-dev (last tag v0.2.0) ·
+**Updated:** 2026-10-21 · **Version:** v0.3.0-dev (last tag v0.2.0) ·
 [![CI](https://github.com/erickramer42/qttune/actions/workflows/ci.yml/badge.svg)](https://github.com/erickramer42/qttune/actions/workflows/ci.yml)
 
 This file covers the project as it stands: what works, what comes
-next, and what is known to be wrong. Why it is built this way is in
-[docs/adr/](docs/adr/README.md). How it got here, with lessons
+next, and what is known to be wrong. For how the parts fit together,
+start with [docs/architecture.md](docs/architecture.md). Why it is
+built this way is in [docs/adr/](docs/adr/README.md). How it got here, with lessons
 learned, is in [docs/engineering-log.md](docs/engineering-log.md).
 Safety, regulatory and warranty caveats are in
 [DISCLAIMER.md](DISCLAIMER.md).
@@ -13,7 +14,7 @@ Safety, regulatory and warranty caveats are in
 ## Where things stand
 
 **Current phase: v0.3.0 Phase 3 (J2534).** The HARNESS tier is complete,
-including transport adoption (Part 5). The BENCH tier has covered a real
+including transport adoption (ADR-0012). The BENCH tier has covered a real
 adapter on a quiet bus (no vehicle attached). The first real vehicle comes
 next.
 
@@ -55,7 +56,11 @@ next.
     including a fault on the VX itself (quiet bus, no vehicle). That
     VX fault was under the rules before `946bdf5`; the same no-ACK
     setup now latches `QT_ERR_REQUEST_FAILED`, which the UI shows as
-    "Requests failing" in amber (W6).
+    "Requests failing" in amber.
+  - Dashboard: analog, ring, digital and bar gauges plus shift lights,
+    fed by name through `SignalHub` so one layout serves both the mock
+    and `obd2` profiles. Gauges show peak hold, dim stale values, and
+    say "not in profile" instead of showing zero (PR #12).
   - Surrogate diagnostics: client and child write one session log,
     both stamped `HH:MM:SS.mmm`, so a GUI launch keeps the whole story
     without a stderr redirect; a second concurrent session gets its own
@@ -80,10 +85,11 @@ next.
     channel derivation are HARNESS-verified against the fake; a
     live-vehicle session (real ECU responses, talking-bus items in
     the BENCH prep list) is still ahead.
-  - **Tests:** 156 ctest cases, all passing locally on 2026-10-20
-    with the W6 change on top of `a96892b` (Windows/MSVC 2022, both
-    trees rebuilt), plus the cross-arch subset (19/19). CI was green on all eight jobs on PR #11
-    (merged as `a96892b`), including the simulator smoke. That covers
+  - **Tests:** 158 ctest cases on `668ba25` plus the MAF and TFT
+    additions to the `obd2` set (Windows/MSVC 2022, both trees rebuilt,
+    2026-10-21), plus the cross-arch subset (19/19). All passed except
+    the env-gated cross-arch skip. CI was green on all eight jobs
+    on PR #11 (merged as `a96892b`), including the simulator smoke. That covers
     ctest on Windows, macOS and Linux, Core under ASan and UBSan, the
     Android and iOS device cross-builds, and the simulator smoke. The
     smoke's first run (`923f479`) gave a blank frame. Its second
@@ -92,7 +98,7 @@ next.
     request, not on every push, because it roughly doubles CI time. The cross-arch routing case
     skips unless its environment variables are set. J2534 suites
     carry a 30 s per-test timeout — a hang fails bounded instead of
-    wedging the runner (2026-10-17 F1 fallout). Tiers, suites and
+    wedging the runner. Tiers, suites and
     gaps are in [docs/testing.md](docs/testing.md).
 
 ## Architecture
@@ -162,7 +168,7 @@ Contracts along this path:
 | Signal decode | Linear scaling; Intel byte order by default, big-endian for byte-aligned fields; gated on message ID plus mux key. Two signal sets, `mock` and `obd2`, chosen by profile. | [ADR-0004](docs/adr/0004-signal-decoding-model.md), [ADR-0013](docs/adr/0013-protocol-profiles.md) |
 | Mock transport | A scripted ~2-minute drive cycle on a small vehicle model (`core/src/mock_drive_cycle.h`): cold-start warm-up, a 2nd-gear WOT pull from ~1550 rpm to the 7000 rpm limiter with a 5 s hold, a longer and hotter 3rd-gear pull with the same hold, then a quarter-mile run from a standstill (~13.4 s, ~176 km/h trap). Every tick of the cycle round-trips through the mock set in `CoreTest.MockDriveCycle*`. | — |
 | Bridge and models | Frame log with sort toggle; coalesced signal model with a 120-sample history per signal; device discovery for the picker; link-health polling (#11) | [ADR-0003](docs/adr/0003-backpressure-bounds-in-flight-frames.md), [ADR-0005](docs/adr/0005-coalesced-signal-updates.md) |
-| QML pages | Home, Live (table and strip chart), Log, Settings (device picker plus manual URI). Dashboard is a placeholder. | — |
+| QML pages | Home, Dashboard (gauges and shift lights through `SignalHub`), Live (table and strip chart), Log, Settings (device picker plus manual URI). `Theme` holds the palette and the link-state color and label functions. | [docs/architecture.md](docs/architecture.md#the-ui-layer) |
 | J2534 | HARNESS-verified, same-arch and cross-arch, including transport adoption (ADR-0012) and profile-derived channels (ADR-0013). BENCH: one adapter, quiet bus. | [docs/j2534.md](docs/j2534.md) |
 
 ## v0.3.0 checklist
@@ -251,8 +257,8 @@ it a genuine connect candidate.
    frame", and anything else is a hard failure (#11). Frames that
    arrive with `STATUS_NOERROR` or `ERR_TIMEOUT` are delivered, so a
    vendor that pairs `ERR_TIMEOUT` with a partial batch loses nothing.
-   Under any other status the count is ignored (code review
-   2026-10-20, finding 1, fixed in `6420f09`). Observed 2026-10-20
+   Under any other status the count is ignored, because a vendor may
+   leave it untouched on error (`6420f09`). Observed 2026-10-20
    (no vehicle): the VX returns `STATUS_NOERROR` with zero messages
    for an empty read — a third flavor, neither of the two the split
    names; it behaves as "no frame", and the session's fault state came
@@ -313,19 +319,18 @@ an issue is resolved it is removed, and its number is not reused.
     bridge publishes it as `linkState` (`ok`, `quiet`, `requests`,
     `fault`, `disconnected`) and logs transitions, and LiveView, Home
     and Settings show it; stale values dim from the model's `ageMs`.
-    Since W6, a request failure (no ECU awake, adapter fine) reads
-    "Requests failing — check the vehicle connection and ignition" in
-    amber, not "Link degraded" with a green Settings label;
+    A request failure (no ECU awake, adapter fine) reads "Requests
+    failing — check the vehicle connection and ignition" in amber;
     `BridgeTest.LinkStateMapsEveryPublishedCode` pins the mapping. The
-    smoke recipe passed again on 2026-10-20 after the code-review
-    2026-10-20 fixes; its new request-failure row hasn't been run yet
+    smoke recipe passed on 2026-10-20; its request-failure row hasn't
+    been run yet
     ([testing.md](docs/testing.md#manual-smoke--link-health-ui)).
-    Still open (finding numbers from that review):
-    - No surrogate session drives the health machine in the suite
-      (finding 4). Accepted until the first vehicle session, which runs
-      through the surrogate and records it in the session log.
+    Still open:
+    - No surrogate session drives the health machine in the suite.
+      Accepted until the first vehicle session, which runs through the
+      surrogate and records it in the session log.
     - If reads recover while writes keep failing, the state stays
-      "adapter fault" instead of stepping down to request failure (W9).
+      "adapter fault" instead of stepping down to request failure.
       Accepted for now: it needs a transient read error on a no-ACK
       bus, and the session log tells the two apart (clean `OP_READ`
       lines next to failing `OP_WRITE` lines).
@@ -401,8 +406,6 @@ matter most — CAN-era targets need none of it.
 
 - Hide mock connections behind a developer-mode setting on the
   Settings page
-- A basic dashboard with RPM and speed gauges, maybe one more,
-  customizable later
 - Change the Log page to show application log messages instead of
   mock frame data
 - Save data logs to a file, once live vehicle data shows on LiveView
@@ -420,9 +423,13 @@ matter most — CAN-era targets need none of it.
   coroutines, ranges, std::format, etc) but removes older compiler support 
   (MSVC 2019, gcc 11, clang 14 all missing full support) - low priority / debatable 
 - android auto / apple car play target for the dashboard of live values to use
-  infotainment as a potential display. More invasive options: direct usage including
-  overwrite or extension of vehicles infotainment system (highly vehicle dependent)
+  infotainment as a potential display. Basically a separate, additional frontend.
+  More invasive options: direct usage including overwrite or extension of vehicles 
+  infotainment system (highly vehicle dependent - explicitly out of scope)
 - expand logging of connections and bus state to the activity log on settings page.
   Link-health transitions are logged there since 2026-10-20, and the
   surrogate's session log holds both halves since `995519b`; what's
   left is connect, disconnect and bus state in the activity log
+- color schemes for QML, prioritize low eye strain schemes such as amber, orange and red
+- ELM-327 adoption for OBDLink(BLE) and Apple support, then other transport standards as needed
+- performance improvements to support maximum OBD/signal sets as possible with minimal lag

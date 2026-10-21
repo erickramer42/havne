@@ -13,10 +13,10 @@
 // ARCH note: in the x64 configure this is all-x64 (CI-valid IPC test);
 // the true cross-arch case (x64 test process -> x86 surrogate -> x86
 // fake) runs when QTTUNE_SURROGATE_EXE points at Win32-tree artifacts.
-// Part 4 assertions are deliberately observable through RETURN VALUES
-// and the RX ring alone (no fake-instance hooks) so they hold in BOTH
-// architectures unchanged — an x64 test cannot reach into the x86
-// child's fake instance.
+// The write/ioctl/filter assertions are deliberately observable
+// through RETURN VALUES and frames read back over the pipe alone (no
+// fake-instance hooks) so they hold in BOTH architectures unchanged —
+// an x64 test cannot reach into the x86 child's fake instance.
 
 #include <gtest/gtest.h>
 
@@ -63,8 +63,8 @@ void sur_capture_cb(const qttune_frame_t* frame, void* user_data)
     }
 }
 
-/* Poll-until-condition with deadline — no wall-clock bets (the
- * 2026-10-14 CI-flake lesson, applied from birth this time). */
+/* Poll-until-condition with deadline — no wall-clock bets: a starved
+ * CI runner can take far longer than the local cadence suggests. */
 template <typename Pred>
 bool wait_until(Pred pred, int timeout_ms, int step_ms = 10)
 {
@@ -139,9 +139,10 @@ TEST(J2534SurrogateTest, OpenConnectInjectReadCloseCycle)
                   h, f2, 8, 3000, 0), QT_OK);
 
     SurCapture cap;
-    /* The predicate MUST drain — cap only grows when the ring is
-     * polled, so waiting on count without draining inside the loop
-     * burns the full timeout every run. Sub-second now if IPC works. */
+    /* The predicate MUST drain — cap only grows when reads are
+     * issued over the pipe, so waiting on count without draining
+     * inside the loop burns the full timeout every run. Sub-second
+     * when IPC works. */
     const bool delivered = wait_until(
         [&]() { drain_sur_frames(h, &cap); return cap.count.load() >= 3; },
         10000, 50);
@@ -149,7 +150,7 @@ TEST(J2534SurrogateTest, OpenConnectInjectReadCloseCycle)
     drain_sur_frames(h, &cap);
 
     /* EXACT count: the fake fabricates nothing we did not inject,
-     * and the ring drops nothing we did. (2026-10-13 lesson 7.) */
+     * and the pipe drops nothing we did. */
     ASSERT_EQ(cap.count.load(), 3);
 
     ASSERT_EQ(memcmp(cap.payloads[0], f0, 8), 0);
@@ -230,16 +231,16 @@ TEST(J2534SurrogateTest, NullArgumentsRejected)
     EXPECT_EQ(qttune_j2534_sur_close(nullptr), QT_OK);   /* free(nullptr) */
 }
 
-/* ================= Part 4: WRITE / IOCTL / FILTER ================= */
+/* ================= WRITE / IOCTL / FILTER relay ================= */
 
 TEST(J2534SurrogateTest, WriteRoundTripProducesEchoResponse)
 {
     /* The full vendor request path minus a vehicle: WRITE crosses the
-     * control pipe, the surrogate materializes a PASSTHRU_MSG and
-     * calls PassThruWriteMsgs, the fake records it and enqueues its
-     * deterministic echo (byte 0 + 0x40), the read pump pushes it to
-     * the ring, and we drain it client-side. Observable from EITHER
-     * architecture — no fake-instance hooks involved. */
+     * pipe, the surrogate materializes a PASSTHRU_MSG and calls
+     * PassThruWriteMsgs, the fake records it and enqueues its
+     * deterministic echo (byte 0 + 0x40), and our next OP_READ brings
+     * it back over the pipe. Observable from EITHER architecture — no
+     * fake-instance hooks involved. */
     qttune_j2534_sur_handle_t* h = nullptr;
     ASSERT_EQ(qttune_j2534_sur_open(fake_dll_path(), &h), QT_OK);
     unsigned long channel = 0;
@@ -381,12 +382,11 @@ TEST(J2534SurrogateTest, FilterStartStopLifecycle)
     EXPECT_EQ(qttune_j2534_sur_close(h), QT_OK);
 }
 
-/* Review finding 1 (2026-10-17): a mid-session vendor call that
- * outlives the client's 3s transact timeout leaves its response in
- * flight. The NEXT request must recover — consume the stale
- * response — not desync against it. Reproduced red before the fix:
- * this second, valid ioctl failed via the transact ID mismatch.
- * Knob armed BEFORE open (the child snapshots the environment at
+/* A mid-session vendor call that outlives the client's 3s transact
+ * timeout leaves its response in flight. The NEXT request must
+ * recover — consume the stale response — not desync against it.
+ * Without that, this second, valid ioctl fails on a request-ID
+ * mismatch. Knob armed BEFORE open (the child snapshots the environment at
  * spawn; SetEnvironmentVariableA afterwards does not propagate) and
  * restored before any later test spawns. */
 TEST(J2534SurrogateTest, TimedOutOpDoesNotDesyncNextRequest)
@@ -419,7 +419,7 @@ TEST(J2534SurrogateTest, TimedOutOpDoesNotDesyncNextRequest)
     EXPECT_EQ(qttune_j2534_sur_close(h), QT_OK);
 }
 
-/* Issue #22: a vendor PassThruOpen that blocks (adapter absent) must
+/* A vendor PassThruOpen that blocks (adapter absent) must
  * fail at the handshake timeout with the child ALIVE, not wedge and
  * not require process-death to detect. The child inherits the parent's
  * environment, so arming the fake-side sleep from here works in the
@@ -465,8 +465,7 @@ static std::string read_session_log(const std::string& path)
     return out;
 }
 
-/* Formerly Known Issue #23: the client's own lines go into the
- * session log beside the child's, so a GUI launch (no stderr) keeps
+/* The client's own lines go into the session log beside the child's, so a GUI launch (no stderr) keeps
  * both halves in one file. Each side writes whole lines, so every line
  * starts "[sur" ("[sur ..." from the client, "[surrogate ..." from the
  * child). */
@@ -501,10 +500,10 @@ TEST(J2534SurrogateTest, ClientAndChildLinesShareTheSessionLog)
     EXPECT_GE(lines, 4);   /* client spawn line + child startup stages */
 }
 
-/* Code review 2026-10-20, finding 9: the log was opened CREATE_ALWAYS
- * with FILE_SHARE_READ only, so while one session's child held it, a
- * second concurrent session's open failed and that child ran with no
- * log at all. Now the second session gets a per-spawn name. Holds
+/* The session log is opened CREATE_ALWAYS with FILE_SHARE_READ only,
+ * so while one session's child holds it, a second concurrent
+ * session's open fails. That session must get a per-spawn name, not
+ * run its child with no log at all. Holds
  * whether or not something else (a running app) already has the fixed
  * name: then both sessions get per-spawn names. */
 TEST(J2534SurrogateTest, SecondConcurrentSessionGetsItsOwnLog)
@@ -533,12 +532,12 @@ TEST(J2534SurrogateTest, SecondConcurrentSessionGetsItsOwnLog)
     }
 }
 
-/* Former #26: per J2534-1, a read asking for more messages than
- * arrived, with a nonzero timeout, returns ERR_TIMEOUT TOGETHER WITH
- * those messages. The spec-mode fake emulates exactly that; the
- * client must deliver the batch and only judge the status when the
- * batch is empty. Red against the pre-fix client: the batch was
- * discarded and a talking bus rendered invisible. Knob armed BEFORE
+/* Per J2534-1, a read asking for more messages than arrived, with a
+ * nonzero timeout, returns ERR_TIMEOUT TOGETHER WITH those messages.
+ * The spec-mode fake emulates exactly that; the client must deliver
+ * the batch and only judge the status when the batch is empty. A
+ * client that judged the status first would discard the batch and
+ * render a talking bus invisible. Knob armed BEFORE
  * open — the child snapshots the environment at spawn (same
  * discipline as QTTUNE_FAKE_IOCTL_DELAY_MS). */
 TEST(J2534SurrogateTest, SpecTimeoutReadDeliversPartialBatch)
@@ -581,9 +580,9 @@ TEST(J2534SurrogateTest, SpecTimeoutReadDeliversPartialBatch)
     EXPECT_EQ(qttune_j2534_sur_close(h), QT_OK);
 }
 
-/* Finding 1 (code review 2026-10-20): a vendor returning a hard
- * error without touching pNumMsgs leaves the caller's count dirty.
- * Without sanitization the child's static read batch delivers up to
+/* Count-trust rule, surrogate half: a vendor returning a hard error
+ * without touching pNumMsgs leaves the caller's count dirty. Without
+ * qttune_trusted_count the child's static read batch would deliver up to
  * 16 stale/zero frames and the client reports the batch as healthy.
  * The knob is sticky in the child (env inherited at spawn; the
  * parent's clear never propagates), so recovery is not observable

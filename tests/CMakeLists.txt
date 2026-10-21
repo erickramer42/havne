@@ -59,7 +59,7 @@ gtest_discover_tests(test_obd2)
 # --- C ABI compilation check: MUST stay Qt-free, builds everywhere ---
 # Compiles the public headers as strict C and links exported symbols
 # from a C TU — catches C++-isms and name-mangling regressions an FFI
-# consumer would hit. Reviewer finding: nothing else compiled headers as C.
+# consumer would hit. It is the only target that compiles headers as C.
 add_executable(test_c_abi test_c_abi.c)
 
 target_include_directories(test_c_abi PRIVATE
@@ -113,12 +113,12 @@ if(NOT QTTUNE_BUILD_CORE_ONLY)
     get_filename_component(QT_BIN_DIR "${Qt6Core_DIR}/../../bin" REALPATH)
 endif()
 
-# TIMEOUT POLICY (review 2026-10-17, finding 1 fallout): every J2534
-# suite carries a per-test 30s ceiling — the slowest legitimate case
-# (cross-arch TimedOutOp ~3.5s, BlockedVendorOpen ~2.5s) has near-10x
-# headroom, so a slow CI VM cannot false-alarm, but a reintroduced
-# hang (the F1 flush class) becomes a bounded "Failed (Timeout)"
-# instead of a wedged runner. Non-J2534 suites keep ctest defaults —
+# TIMEOUT POLICY: every J2534 suite carries a per-test 30s ceiling.
+# The slowest legitimate case (cross-arch TimedOutOp ~3.5s,
+# BlockedVendorOpen ~2.5s) has near-10x headroom, so a slow CI VM
+# cannot false-alarm, but a hang in vendor or pipe code (a blocking
+# flush, a wedged child) becomes a bounded "Failed (Timeout)" instead
+# of a wedged runner. Non-J2534 suites keep ctest defaults —
 # no known hang surface there, and mock tests are sub-2s anyway.
 set(J2534_TEST_TIMEOUT_SECONDS 30)
 
@@ -161,12 +161,11 @@ if(WIN32)
     )
 
     # LEGACY-spelling fixture: the fallback-vendor case — exports the
-    # historic 'PassThruIoCtl' spelling via def alias while the shared
+    # legacy 'PassThruIoCtl' spelling via def alias while the shared
     # source defines the spec spelling. The everyday fake_j2534 above
     # exports the spec spelling directly, so primary resolution is what
     # every default test exercises and THIS fixture is what pins the
-    # fallback resolver. (Was 'fake_j2534_spec' — renamed 2026-10-17
-    # because the name overstated its role.)
+    # fallback resolver.
     add_library(fake_j2534_legacy SHARED
         fake_j2534.cpp
         fake_j2534_legacy.def

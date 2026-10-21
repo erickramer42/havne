@@ -1,6 +1,7 @@
 // File/layer: app/qttunebridge.cpp | Qt6 Core, app layer, C++17
-// Testing: test_bridge already covers updateValues emissions; AgeMsRole added
-//          to dataChanged signal so QML can bind opacity without a page timer.
+// Testing: test_bridge (QtCore only): worker→GUI marshaling, coalescing,
+//          in-flight backpressure, the signal model's roles and age
+//          refresh, link-state mapping. QML rendering: manual smoke.
 
 #include "qttunebridge.h"
 #include "qttune/version.h"
@@ -229,8 +230,9 @@ void SignalListModel::updateValues(const std::vector<std::pair<uint16_t, float>>
         }
     }
     if (firstRow >= 0) {
-        // Finding 14: emit AgeMsRole alongside ValueRole/HasValueRole so
-        // delegates can compute opacity from ageMs instead of a page clock.
+        // AgeMsRole rides along with ValueRole/HasValueRole so delegates
+        // bind opacity to ageMs; a QML-side clock stamped on value
+        // changes would dim steady values that are still arriving.
         emit dataChanged(index(firstRow), index(lastRow),
                          {ValueRole, HasValueRole, AgeMsRole});
         // One emission per batch — the strip chart's sole repaint trigger.
@@ -291,7 +293,7 @@ QtTuneBridge::QtTuneBridge(QObject* parent)
     connect(m_coalesceTimer, &QTimer::timeout, this, [this]() {
         pollLinkHealth();   // every tick while connected — transitions only
         // Must fire even when nothing arrived this window: dimming exists
-        // for rows that STOPPED updating (finding 14). 100 ms is well
+        // for rows that STOPPED updating. 100 ms is well
         // inside the 3 s dim threshold and the span emission is one
         // signal for the whole model.
         m_signalModel->refreshAges();
@@ -364,7 +366,7 @@ QVariantList QtTuneBridge::discoverJ2534Devices() const
         /* reserved[0] is the loader's PE sniff: 1 = x86, 2 = x64,
          * 0 = unknown. Unknown is displayed honestly — routing
          * treats it as in-proc (x64), which is the load-time
-         * fallback, not a claim about the binary (#18). */
+         * fallback, not a claim about the binary. */
         m["architecture"] = (devices[i].reserved[0] == 2)
                                 ? QStringLiteral("x64")
                             : (devices[i].reserved[0] == 1)
@@ -665,9 +667,10 @@ void QtTuneBridge::pollLinkHealth()
     emit linkStateChanged();
 }
 
-/* W6: published state strings, one place. Static and session-free so
- * test_bridge can pin every mapping without a transport — linkState()
- * itself stays a connected-check + delegation. */
+/* The published state strings, in one place; QML's Theme.linkColor and
+ * Theme.linkLabel key on them. Static and session-free so test_bridge
+ * can pin every mapping without a transport — linkState() itself stays
+ * a connected-check + delegation. */
 QString QtTuneBridge::linkStateForError(int32_t errorCode)
 {
     switch (errorCode) {

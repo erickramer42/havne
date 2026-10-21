@@ -111,7 +111,8 @@ chose, and records what was learned during implementation. The
 decision text above is unchanged — this appendix is the
 implementation record.
 
-> **Superseded details (corrected 2026-10-19, fixes N1 and N2).** On
+> **Superseded details (corrected 2026-10-19: adapter-owned ISO-TP
+> framing, and unsigned J1979 temperatures).** On
 > ISO 15765 channels the adapter does the ISO-TP framing, so neither
 > direction carries a PCI byte:
 > - The decoder sees `[0x41][PID][data]`, and the mux key sits at
@@ -145,7 +146,7 @@ response echo. Nothing enforces the shape at registration
 `qttune_sched_from_set` checks it at enrollment.
 
 Non-mux definitions (raw/mock sets) never enroll; the scheduler comes
-up empty and the worker keeps its legacy behavior.
+up empty and the worker runs `?poll=` or passive.
 
 ### Scheduler constants and cadence
 
@@ -228,10 +229,10 @@ the flip itself is pinned by the `DefaultProfileIsObd2` and
 | Index | PID | Name | Bytes | Encoding |
 |---|---|---|---|---|
 | 0 | 0x04 | Engine Load | 1 | `100/255` |
-| 1 | 0x05 | Coolant Temp | 1 | -40, uint8 (int8 in slice 2; corrected by N2) |
+| 1 | 0x05 | Coolant Temp | 1 | -40, uint8 (int8 in slice 2; corrected 2026-10-19) |
 | 2 | 0x0C | RPM | 2 | BE, `0.25` |
 | 3 | 0x0D | Vehicle Speed | 1 | 1 |
-| 4 | 0x0F | Intake Air Temp | 1 | -40, uint8 (int8 in slice 2; corrected by N2) |
+| 4 | 0x0F | Intake Air Temp | 1 | -40, uint8 (int8 in slice 2; corrected 2026-10-19) |
 | 5 | 0x11 | Throttle Position | 1 | `100/255` |
 | 6 | 0x2F | Fuel Level | 1 | `100/255` |
 | 7 | 0x42 | Battery Voltage | 2 | BE, `0.001` |
@@ -241,6 +242,14 @@ set enumerates SUPPORTED PIDs — what is absent is neither requested
 nor decoded. **Multi-frame responses are out of scope for v1**:
 definitions assume single-frame response shapes. PIDs 0x0C and 0x42
 are 2-byte big-endian; all others are single-byte.
+
+> **Amended 2026-10-21:** the set adds index 8, PID 0x10 MAF (2 bytes,
+> BE, `0.01` g/s), and index 9, PID 0x5F Trans Fluid Temp (1 byte,
+> −40, uint8). Both fit the v1 shapes above, so the decoder needed no
+> extension. At one request per 100 ms, each PID in an N-PID set
+> refreshes every N × 100 ms, so every PID added slows the rest; at
+> 10 PIDs that's 1 s. `kObd2Defs` in `core/src/obd2_signal_sets.cpp`
+> is the source of truth for the current set.
 
 ### Decoder extensions (signal set v1)
 
@@ -310,12 +319,13 @@ out-of-CAN-range ids (-12), duplicate rx (-13).
 
 The channel table is derived at **attach**, before the device opens.
 Priority: an explicit `?filter=` wins outright (single-channel
-shorthand — pre-N3 semantics preserved for hand-built URIs);
+shorthand — the pre-channel-declaration semantics, preserved for
+hand-built URIs);
 otherwise the profile's declared channels fill the table, with a
 lone `?txid=` rewriting every derived tx. A lone `?txid=` with no
 profile channels yields NO channel: without an rx there is nothing
-to register a filter for, matching the pre-N3 semantics where it
-stored a tx nothing used. Set entries with rx==0 are skipped
+to register a filter for, matching the semantics before channel
+declarations, where it stored a tx nothing used. Set entries with rx==0 are skipped
 defensively; the validator is the enforcement point.
 
 ### Coupling-rule relocation

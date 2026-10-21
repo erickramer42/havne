@@ -58,7 +58,7 @@ static void stage(const char* fmt, ...)
 {
     /* Local wall-clock time, the same stamp the client puts on its
      * "[sur ...]" lines in this file, so the session log reads as one
-     * timeline (formerly Known Issue #23). The line is formatted whole
+     * timeline. The line is formatted whole
      * and written with one WriteFile, so a client line can't land in
      * the middle of it. Lines still start with "[surrogate", so a grep
      * for that prefix matches. */
@@ -146,19 +146,19 @@ static int handle_op_read(unsigned long channel, uint32_t timeout_ms,
     unsigned long num = QTTUNE_SUR_MAX_FRAMES_PER_READ;
     const long rc = g_read_msgs(g_channel, s_read_batch, &num, timeout_ms);
 
-    /* Finding 1: trust the count only under the status allowlist. A
-       vendor may leave pNumMsgs untouched on error (VX observed:
-       "status 7, written 1", bench 2026-10-20). A dirty count is
-       doubly dangerous here: s_read_batch is static and never
-       cleared, so it would replay the PREVIOUS read's frames as
-       phantoms. */
+    /* Trust the count only under the status allowlist
+       (qttune_trusted_count). A vendor may leave pNumMsgs untouched on
+       error; the VX reports "status 7, written 1" on a failed write
+       (docs/bench-sessions/2026-10-20.md). A dirty count is doubly
+       dangerous here: s_read_batch is static and never cleared, so it
+       would replay the PREVIOUS read's frames as phantoms. */
     num = qttune_trusted_count(rc, num);
 
     /* Frames are collected under either trusted status, ERR_TIMEOUT
      * included: per J2534-1 a read that asks for N messages with a
      * nonzero timeout returns ERR_TIMEOUT together with however many
      * arrived, so on a conforming vendor the ECU's answer usually
-     * arrives with a nonzero status (#26). The status still rides home
+     * arrives with a nonzero status. The status still rides home
      * verbatim in resp->status. */
     uint32_t n = 0;
     const unsigned long lim = (num < QTTUNE_SUR_MAX_FRAMES_PER_READ)
@@ -182,7 +182,7 @@ static int handle_op_read(unsigned long channel, uint32_t timeout_ms,
     resp->num_frames = n;
 
     /* Trace frames and status changes only: an idle drain reads ~10x/s
-     * and would bury everything else (formerly Known Issue #23). */
+     * and would bury everything else. */
     static long last_read_rc = -1;
     if (n > 0 || rc != last_read_rc) {
         stage("OP_READ: status %ld, frames %u", rc, n);
@@ -206,9 +206,9 @@ static int handle_op_write(unsigned long channel, const uint8_t* data,
     long rc = g_write_msgs(channel, &msg, &num, timeout_ms);
     if (out_num != nullptr) *out_num = static_cast<uint32_t>(num);
     
-    /* Status-change logging: a healthy scheduler writes ~10/s, and the
-     * per-call line buried the interesting ones (formerly Known Issue #23). The
-     * first write and every change of (status, count) still log. */
+    /* Status-change logging: a healthy scheduler writes ~10/s, and a
+     * per-call line would bury the interesting ones. The first write
+     * and every change of (status, count) still log. */
     static long last_write_rc = -1;
     static unsigned long last_write_num = 0;
     if (rc != last_write_rc || num != last_write_num) {

@@ -13,7 +13,7 @@ where the gaps are. For build and run commands, see
 | **HARNESS** | The J2534 stack end to end against the in-tree fake vendor DLL | CI on Windows (same-arch, all x64) |
 | **Cross-arch** | HARNESS with an x64 test process driving an x86 surrogate and an x86 fake | Dev machine only; needs environment variables ([development.md](development.md#running-tests)) |
 | **Simulator smoke** | The iOS app installs and launches on the iOS Simulator, QML loads, and the app is still running 45 s later. Nothing drives the UI. A pass doesn't prove the app drew anything, so look at the screenshots. | CI on pull requests, and on request: `[ios-smoke]` in the commit message, or manual dispatch (`ios-simulator-smoke`, Intel macOS runner) |
-| **Manual smoke** | Running the app: layout, LiveView, strip chart, Settings picker against the live registry | Dev machine |
+| **Manual smoke** | Running the app: layout, Dashboard gauges, LiveView, strip chart, Settings picker against the live registry | Dev machine |
 | **BENCH** | A real vendor DLL and adapter, no vehicle | First formal session complete, 2026-10-16, quiet bus ([session sheet](bench-sessions/2026-10-16.md)); informal quiet-bus follow-up 2026-10-20 ([note](bench-sessions/2026-10-20.md)); talking-bus behaviors pending |
 | **Vehicle** | A live, read-only vehicle session | **Not yet reached**; run sheet ready ([vehicle-runsheet.md](bench-sessions/vehicle-runsheet.md)) |
 
@@ -79,7 +79,7 @@ and the next run's screenshots confirmed the fixes the same day.
 | Transport adoption: `?filter=` registers a FLOW_CONTROL filter; `?txid=` selects the transmit ID; `?poll=` drives a Mode-01 loop; header strip + arbitration_id stamp; filter stopped on detach; gating discards non-matching frames; `?poll=` with no channel (`raw`, no `?filter=`) rejected at attach, before any DLL load | `J2534AdoptionTest` |
 | `?poll=` outranks the profile's rotation: under `obd2`, five consecutive writes all request the URI's PID, to the derived 7E0 channel, and the reply decodes with the 7E8 identity | `J2534AdoptionTest.PollOverridesSchedulerRotation` |
 | A blocked vendor `PassThruOpen` fails at the (shrunken) handshake timeout with the child alive, not wedged | `J2534SurrogateTest.BlockedVendorOpenFailsAtHandshakeTimeout` |
-| Session log: the client's lines share the child's log file, stamped and written as whole lines. A second concurrent session gets its own per-spawn log instead of none (code review finding 9). | `J2534SurrogateTest.ClientAndChildLinesShareTheSessionLog`, `.SecondConcurrentSessionGetsItsOwnLog`; both also cross-arch (2026-10-20, 19/19) |
+| Session log: the client's lines share the child's log file, stamped and written as whole lines. A second concurrent session gets its own per-spawn log instead of none. | `J2534SurrogateTest.ClientAndChildLinesShareTheSessionLog`, `.SecondConcurrentSessionGetsItsOwnLog`; both also cross-arch (2026-10-20, 19/19) |
 | A child that exits during `OP_OPEN` (failed DLL load) is reported by its exit code, not as a blocked vendor. A missing surrogate exe leaves its `CreateProcess failed` line in the session log. | Session logs read by hand, 2026-10-20 (`DeadDllFailsFastAtOpen`, `BlockedVendorOpenFailsAtHandshakeTimeout`, and a run with `QTTUNE_SURROGATE_EXE` pointing nowhere) |
 | Spec-spelling export resolution (`PassThruIoctl` primary, legacy `PassThruIoCtl` fallback), both backends | `FakeFixture.SpecSpellingPassThruIoctlResolvesAndWorks` (spec fake, primary path) plus the whole existing suite against the legacy-spelling fake (fallback path) |
 | Real-adapter lifecycle: OBDX Pro VX loads through the x86 surrogate, opens with USB power (vendor status 0), clean spawn/exit with disconnect, async connect keeps the UI responsive | BENCH session 2026-10-16, phase 1 |
@@ -101,7 +101,8 @@ and the next run's screenshots confirmed the fixes the same day.
 | A vendor that returns a hard error with the message count untouched delivers no frames: in-proc, the session reports a hard failure, dispatches nothing and recovers once reads are honest; through the surrogate, the read maps to a hard failure and the next request still correlates | `J2534AdoptionTest.UntouchedCountUnderHardErrorReportsUnhealthy`, `J2534SurrogateTest.HardErrorUntouchedCountDeliversNoFrames` (`QTTUNE_FAKE_UNTOUCHED_COUNT_STATUS`) |
 | Signal freshness: `ageMs` is -1 before the first sample and a sane clock delta after; `updateValues` notifies `AgeMsRole`; `refreshAges()` notifies `AgeMsRole` alone, over every row, so a stalled row re-evaluates | `BridgeTest.AgeMsRoleEmittedAndRefreshesWhileStalled` |
 | Link-state mapping: `QT_OK` → `ok`, vehicle timeout → `quiet`, `QT_ERR_REQUEST_FAILED` → `requests`, hard failure → `fault`, any other code → `degraded` | `BridgeTest.LinkStateMapsEveryPublishedCode` (session-free, through `QtTuneBridge::linkStateForError`) |
-| Link-health UI: quiet/fault/degraded banner, activity-log transitions, "—" cells, stale dimming, the arbId column | Manual smoke, 2026-10-20 (fake quiet/fault via `QTTUNE_FAKE_READ_STATUS`; mock; recipe below). The first run recorded dimming and the arbId column as working when the code couldn't produce either (code review 2026-10-20, findings 13 and 14). Both rows were re-run and passed after the fixes, the arbId row through the x86 surrogate. |
+| Dashboard: every gauge the mock set feeds sweeps under `mock://demo`; gauges the profile lacks (MAF, TFT under mock) read "not in profile"; the grid collapses from 4 to 2 columns across 760 px and switches to phone margins at 600 px; fault and quiet states tint correctly | Manual smoke, 2026-10-20 (`40e51ce`; quiet and fault through the knob recipe below). No automated coverage: `SignalHub`'s name lookup and the gauges are QML only |
+| Link-health UI: quiet/fault/degraded banner, activity-log transitions, "—" cells, stale dimming, the arbId column | Manual smoke, 2026-10-20 (fake quiet/fault via `QTTUNE_FAKE_READ_STATUS`; mock; recipe below). The first run recorded dimming and the arbId column as working when the code couldn't produce either (dimming keyed on value changes; the ID column bound a misspelled role). Both rows were re-run and passed after the fixes, the arbId row through the x86 surrogate. |
 | Fault state on real hardware, clean teardown; 4-byte filter shape accepted with logged vendor status 0 | Informal bench observation 2026-10-20 ([sheet](bench-sessions/2026-10-20.md)), under the rules before `946bdf5`. The same no-ACK setup now latches `QT_ERR_REQUEST_FAILED` instead, which hasn't been seen on hardware. |
 
 ## Manual smoke — link-health UI
@@ -116,18 +117,18 @@ mid-session only works in-proc):
 |---|---|---|---|
 | Quiet banner | `QTTUNE_FAKE_READ_STATUS=9` | `j2534://<fake.dll>?profile=raw&filter=0x7E8` | Amber "Vehicle not responding" after ~1.2 s; no frames, empty signal list (raw profile) |
 | Fault banner | `QTTUNE_FAKE_READ_STATUS=7` | same | Red "Adapter fault" banner with episode count; clearing the knob mid-session recovers only in-proc |
-| Requests banner | `QTTUNE_FAKE_WRITE_STATUS=7` | `j2534://<fake.dll>` (bare: the `obd2` scheduler writes every cycle) | At the first failed write: amber "Requests failing — check the vehicle connection and ignition" on LiveView, "Requests failing" with an amber dot on Home, an amber Settings label, and "Link: requests failing (1 episode(s))" in the activity log. **Not yet run** (W6 landed after the 2026-10-20 smoke) |
-| Frames + arbId column | — | `j2534://<fake.dll>?profile=raw&filter=0x7E8&poll=0x0C` | Frames on LogPage with `0x7E8` in the ID column, DLC 4, payload `410c1f40` (2000 RPM canned); link ok, no banner. **Verified 2026-10-20** after finding 13's fix (`1674f5c`), using the Win32-tree fake (`build-win32/tests/Release/fake_j2534.dll`). The session log confirmed it ran through the x86 surrogate, so this row also covers surrogate routing, the strip/stamp path and poll mode in the app. It doesn't exercise finding 12's precedence: `raw` has no scheduler. |
-| Dimming baseline | — | `mock://demo` | Values stream at full opacity, steady ones (IAT) included, because every mock signal arrives every 50 ms. Only a signal that stops arriving dims, 3 s after its last sample. **Verified 2026-10-20** after finding 14's fix (`7e9bd5e`): nothing dims on mock. The first run had expected IAT to dim, which was the bug itself. |
+| Requests banner | `QTTUNE_FAKE_WRITE_STATUS=7` | `j2534://<fake.dll>` (bare: the `obd2` scheduler writes every cycle) | At the first failed write: amber "Requests failing — check the vehicle connection and ignition" on LiveView, "Requests failing" with an amber dot on Home, an amber Settings label, and "Link: requests failing (1 episode(s))" in the activity log. **Not yet run** (the `requests` state landed after the 2026-10-20 smoke) |
+| Frames + arbId column | — | `j2534://<fake.dll>?profile=raw&filter=0x7E8&poll=0x0C` | Frames on LogPage with `0x7E8` in the ID column, DLC 4, payload `410c1f40` (2000 RPM canned); link ok, no banner. **Verified 2026-10-20** after the role-name fix (`1674f5c`), using the Win32-tree fake (`build-win32/tests/Release/fake_j2534.dll`). The session log confirmed it ran through the x86 surrogate, so this row also covers surrogate routing, the strip/stamp path and poll mode in the app. It doesn't exercise `?poll=` outranking a profile's rotation: `raw` has no scheduler. |
+| Dimming baseline | — | `mock://demo` | Values stream at full opacity, steady ones (IAT) included, because every mock signal arrives every 50 ms. Only a signal that stops arriving dims, 3 s after its last sample. **Verified 2026-10-20** after dimming moved to the model's `ageMs` (`7e9bd5e`): nothing dims on mock. The first run had expected IAT to dim, which was the bug itself. |
 | Disconnect reset | after any of the above | Disconnect | Home dot and Settings label show plain disconnected, not the last session's fault/quiet |
 
 All four states (ok/quiet/fault/disconnected) were verified 2026-10-20,
 plus the fault state on the OBDX Pro VX quiet bus (BENCH,
 [bench-sessions/2026-10-20.md](bench-sessions/2026-10-20.md)). The
-first run's dimming and arbId results couldn't have been real
-(findings 13 and 14 in the 2026-10-20 code review). Both rows were
-re-run after the fixes the same day and passed. The requests-banner
-row covers the `requests` state added by W6 and hasn't been run yet.
+first run's dimming and arbId results couldn't have been real. Both
+rows were re-run after the fixes the same day and passed. The
+requests-banner row covers the `requests` state and hasn't been run
+yet.
 
 ## Gaps (not verified)
 
@@ -146,8 +147,7 @@ row covers the `requests` state added by W6 and hasn't been run yet.
   - the surrogate path's health mapping through the worker, end to
     end (the surrogate test stops at `read_frame`'s status). Accepted
     until the first vehicle session, which drives it live through the
-    surrogate, with the session log as the record (code review
-    2026-10-20, finding 4);
+    surrogate, with the session log as the record;
   - how the UI renders `QT_ERR_REQUEST_FAILED`: the bridge's mapping
     to `requests` is unit-tested, but the QML banner, Home card,
     Settings label and log line are covered only by the smoke recipe's

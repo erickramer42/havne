@@ -31,7 +31,7 @@ typedef struct qttune_session qttune_session_t;
 typedef struct qttune_frame {
     uint64_t timestamp_us;    /* Microseconds since session start (producer's
                                  steady clock, monotonic per channel). The
-                                 J2534 transport currently passes the vendor
+                                 J2534 transport passes the vendor's 32-bit
                                  timestamp through instead (Known Issue #12) */
     uint32_t arbitration_id;  /* CAN identifier: <= 0x7FF standard, up to
                                  0x1FFFFFFF when FLAG_EXTENDED set */
@@ -69,15 +69,20 @@ typedef enum {
     QT_ERR_NO_TRANSPORT = 3,
     QT_ERR_OUT_OF_MEMORY = 4,
     QT_ERR_SESSION_CLOSED = 5,
-    QT_ERR_ALREADY_REGISTERED = 6,  /* Kept for backward compat if needed */
+    QT_ERR_ALREADY_REGISTERED = 6,  /* Not returned: a duplicate callback
+                                       registration succeeds (pair identity,
+                                       ADR-0002). Reserved, since codes are
+                                       append-only */
     QT_ERR_LOAD_FAILED = 7,
-    QT_ERR_VEHICLE_TIMEOUT = 8,
-    QT_ERR_TRANSPORT_HARD_FAILURE = 9,
-    QT_ERR_REQUEST_FAILED = 10,  /* worker writes fail (requests to the
-                                    vehicle rejected/unACKed) while reads
-                                    stay healthy — the ignition-off/
-                                    vehicle-absent shape. Finding 15,
-                                    review 2026-10-20 */
+    /* Link-health codes: published by the J2534 worker through
+     * qttune_session_get_error_state while the session keeps running. */
+    QT_ERR_VEHICLE_TIMEOUT = 8,         /* reads answer, but nothing arrives */
+    QT_ERR_TRANSPORT_HARD_FAILURE = 9,  /* reads fail: the adapter isn't
+                                           answering */
+    QT_ERR_REQUEST_FAILED = 10,  /* writes fail while reads stay clean: no
+                                    node ACKs the requests (ignition off,
+                                    ECU asleep, no vehicle). The adapter is
+                                    fine, so this isn't a hard failure */
 
     /* Append-only rule: new codes go HERE, never renumber */
 } qttune_status_t;

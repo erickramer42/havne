@@ -510,8 +510,10 @@ qttune_status_t qttune_j2534_disconnect_channel(qttune_j2534_handle_t* handle,
  *                                     indications and loopback echoes,
  *                                     which are dropped
  *   num > 0 under any other       -> count ignored, mapped as "no
- *     status                          message" above (finding 1:
- *                                     qttune_trusted_count)
+ *     status                          message" above
+ *                                     (qttune_trusted_count: a vendor
+ *                                     may leave the count untouched
+ *                                     on error)
  *
  * The worker turns these codes into link health, which callers read
  * through qttune_session_get_error_state (#11). */
@@ -539,9 +541,9 @@ qttune_status_t qttune_j2534_read_frame(qttune_j2534_handle_t* handle,
     PASSTHRU_MSG msg = {};
     unsigned long num = 1;
     long rc = handle->read_msgs(channel, &msg, &num, timeout_ms);
-    num = qttune_trusted_count(rc, num);   /* finding 1: dirty count
-                                               under a hard error is
-                                               not a delivered frame */
+    num = qttune_trusted_count(rc, num);   /* a count under a hard
+                                               error may be the vendor
+                                               leaving our 1 untouched */
 
     if (num == 0) {
         *got_frame = false;

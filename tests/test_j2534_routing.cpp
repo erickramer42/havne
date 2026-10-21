@@ -118,8 +118,9 @@ TEST(J2534RoutingTest, MissingDllFailsAtOpenThroughInproc)
     EXPECT_EQ(h, nullptr);
 }
 
-/* ---- Part 4 parity: the new ops through the SAME loader helpers
- * both backends serve — in-proc leg here, surrogate leg below. ---- */
+/* ---- Backend parity: write/ioctl/filter through the SAME loader
+ * helpers both backends serve — in-proc leg here, surrogate leg
+ * below. ---- */
 TEST(J2534RoutingTest, InprocWriteIoctlFilterRoundTrips)
 {
     qttune_j2534_device_t dev;
@@ -192,9 +193,8 @@ TEST(J2534RoutingTest, X86FakeSelectsSurrogateBackendAndRoundTrips)
      * env overrides, driven from this (default-tree) x64 test binary.
      * Skipped when the env isn't configured — CI runs the in-proc
      * assertions; the dev machine runs the topology OBDX Pro needs.
-     * Part 4 extension: a WRITE->echo round trip over the routed
-     * surrogate — the OBDX topology doing request/response with zero
-     * hardware. */
+     * It also runs a WRITE->echo round trip over the routed surrogate
+     * — the OBDX topology doing request/response with zero hardware. */
     const char* dll = std::getenv("QTTUNE_FAKE_DLL");
     if (dll == nullptr || dll[0] == '\0') {
         GTEST_SKIP() << "cross-arch routing: QTTUNE_FAKE_DLL unset "
@@ -221,8 +221,8 @@ TEST(J2534RoutingTest, X86FakeSelectsSurrogateBackendAndRoundTrips)
     EXPECT_EQ(memcmp(frame.data, kPayload, 8), 0);
     EXPECT_EQ(frame.timestamp_us, uint64_t{7000});
 
-    /* Part 4: WRITE through the loader seam routes to the surrogate
-     * for free — the parity claim made manifest. */
+    /* WRITE through the loader seam routes to the surrogate with no
+     * caller change — backend parity in one assertion. */
     const unsigned char req[3] = {0x01, 0x0D, 0x00};    /* Mode 01, PID 0D */
     const unsigned char expect[3] = {0x41, 0x0D, 0x00};
     uint32_t num_written = 0;

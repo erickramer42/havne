@@ -46,6 +46,8 @@ Dates are commit dates.
 | 2026-10-20 | Code review 2026-10-20 fixes: vendor message counts ignored under hard errors (finding 1), surrogate open diagnostics name the stalled stage (finding 3), `?poll=` outranks the profile's rotation (finding 12), the Log page's ID column binds the real `arbId` role (finding 13) | `6420f09`, `5ec331c`, `90020bd`, `1674f5c` |
 | 2026-10-20 | Code review 2026-10-20 follow-up: stale dimming driven by the model's `ageMs` (finding 14); one health machine for reads and writes, with `QT_ERR_REQUEST_FAILED` latched by failed writes, hard read failures first, unmatched frames read as quiet, one quiet debounce that clears the backoff, and backoff growth pinned (findings 4–7, 15, 17) | `7e9bd5e`, `946bdf5` |
 | 2026-10-20 | One timestamped session log for the surrogate's client and child (#23 closed); a per-spawn log for a concurrent session (finding 9); `OP_OPEN` tells an exiting child from a blocked vendor; merged via PR #11 | `995519b` |
+| 2026-10-20 | UI for `QT_ERR_REQUEST_FAILED` (a `requests` link state); link-state color and label centralized in `Theme`; every test that arms a fake knob clears all of them | `da3aa57`, `3c28b63`, `25d0a6f` |
+| 2026-10-20 | Dashboard: analog, ring, digital and bar gauges with shift lights and peak hold, fed by name through `SignalHub`; merged via PR #12 | `40e51ce` |
 
 ## Lessons learned
 
@@ -484,3 +486,18 @@ by why the transaction failed instead: only a timeout means
 "blocked", and a broken pipe means "exiting", so the client waits
 for the exit code and decodes it. When two events always happen in
 order, judge by the first one, not by a snapshot taken between them.
+
+**2026-10-21 — comment-debt sweep:** two lessons. (1) **A comment that
+tells history goes stale the moment the history moves on.** About 150
+comments carried change narrative ("used to", "formerly #23", "the old
+bug"), closed-issue numbers, or code-review labels ("finding 12",
+"W6"). The labels pointed into `Testing/`, which is git-ignored, so
+for anyone else they were dead references. A few had also become
+wrong. One test still described the retired shared-memory ring, the
+protocol header still said read frames were delivered "whatever the
+status", and a fake comment said a knob had no tests after three used
+it. Every one was rewritten as the present-tense reason the code is
+the way it is; the narrative stays in commit messages and here. (2)
+**Counts in comments drift.** "The 8-PID set" was wrong as soon as
+MAF and TFT were added to it. State the rule ("N PIDs at 100 ms
+each"), not today's number.

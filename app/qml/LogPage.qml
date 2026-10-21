@@ -106,9 +106,10 @@ Pane {
                     required property int  index
 
                     // Roles from FrameListModel::roleNames(): the model
-                    // registers "arbId" — bind exactly that, not a
-                    // paraphrase (finding 13: "arbitrationId" bound to
-                    // nothing and rendered empty).
+                    // registers "arbId" — bind exactly that name. A
+                    // misspelled role is undefined at runtime, not a
+                    // build error: the column would render empty and
+                    // throw per delegate.
                     Label {
                         text: model.timestampUs
                         color: Theme.textDim

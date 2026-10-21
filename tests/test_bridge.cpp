@@ -23,8 +23,8 @@ void spinLoop(int ms)
 
 /* Poll-until-predicate with deadline, event-loop flavored. The mock's
  * 50ms cadence is a LOCAL expectation, not a CI-runner guarantee —
- * a starved macOS VM delivered 2 frames in 200+ ms of wall clock
- * (2026-10-14 CI flake). Polling keeps the asserted CONTRACT (the
+ * a starved macOS VM can deliver 2 frames in 200+ ms of wall clock.
+ * Polling keeps the asserted CONTRACT (the
  * condition eventually holds on a healthy stream) and drops the
  * coincidence (any particular wall-clock duration). The event loop
  * must keep turning while polling — worker lambdas drain through it. */
@@ -145,8 +145,8 @@ TEST(BridgeTest, SortProxyOrdersNewestFirstByDefault)
     ASSERT_TRUE(bridge.connectSession("mock://sort-default").isEmpty());
 
     FrameSortProxy* proxy = bridge.model();
-    // CONTRACT: more than two frames arrive sorted. Was a fixed 300ms
-    // sleep — starved CI runners delivered exactly 2 (2026-10-14 flake).
+    // CONTRACT: more than two frames arrive sorted. Polled, not a fixed
+    // sleep: starved CI runners can deliver only 2 in 300 ms.
     ASSERT_TRUE(spinUntil(
         [proxy]() { return proxy->rowCount() > 2; }, 5000))
         << "only " << proxy->rowCount() << " rows in 5s";
@@ -214,17 +214,17 @@ TEST(BridgeTest, SignalBatchesAreCoalesced)
     QtTuneBridge bridge;
     ASSERT_TRUE(bridge.connectSession("mock://coalesce").isEmpty());
 
-    // CONTRACT: batches accumulate while the stream runs. Was a fixed
-    // 1100ms window with 4 < batches < 25 — the upper bound was a
-    // wall-clock proxy for "coalescing merges frames," which is now
-    // stated directly as the ratio assertion below.
+    // CONTRACT: batches accumulate while the stream runs. No upper
+    // bound on the count: a wall-clock bound is only a proxy for
+    // "coalescing merges frames," which the ratio assertion below
+    // states directly.
     ASSERT_TRUE(spinUntil(
         [&bridge]() { return bridge.signalBatchCount() > 4; }, 5000))
         << "only " << bridge.signalBatchCount() << " batches in 5s";
 
     EXPECT_GT(bridge.signalBatchCount(), 4);
     EXPECT_GT(bridge.frameCount(), 0);
-    // Ratio contract replaces the wall-clock upper bound: at ~20fps
+    // Ratio contract: at ~20fps
     // frames vs 10Hz batches, coalescing means fewer batches than
     // frames. Per-frame emission (the regression this guards) yields
     // exact equality — one emission per frame.
@@ -378,7 +378,8 @@ TEST(BridgeTest, BackpressureDropsAreCountedAndReported)
 namespace {
 
 /* Minimal two-signal set, built test-side. Plain assignments only —
-   designated initializers are C++20 and MSVC-permissive (note 2026-10-07). */
+   designated initializers are C++20, and MSVC accepts them where GCC
+   rejects them. */
 void buildTestSignalSet(QttuneSignalDef (&defs)[2], QttuneSignalSet& set)
 {
     QttuneSignalDef& rpm = defs[0];
@@ -622,15 +623,15 @@ TEST(BridgeTest, AsyncConnectCompletesOffGuiThread)
 }
 
 // ---------------------------------------------------------------------------
-// ADR-0013 slice 1: the bridge renders the SESSION's profile, not a
-// hardcoded set (formerly Known Issue #21)
+// ADR-0013: the bridge renders the SESSION's profile, not a hardcoded
+// set
 // ---------------------------------------------------------------------------
 
 TEST(BridgeTest, RawProfileLeavesSignalModelEmpty)
 {
     /* A raw session after a mock session must CLEAR the signal model.
-     * Regression shape: setSignalSet used to early-return on NULL
-     * without clearing, so a raw session displayed the PREVIOUS
+     * Failure shape guarded: a setSignalSet that early-returns on NULL
+     * without clearing leaves a raw session displaying the PREVIOUS
      * session's rows with no live updates — stale data posing as live.
      * Frames still flow to the Log page; decode alone is silenced. */
     QtTuneBridge bridge;
@@ -654,7 +655,7 @@ TEST(BridgeTest, RawProfileLeavesSignalModelEmpty)
 
 TEST(BridgeTest, AgeMsRoleEmittedAndRefreshesWhileStalled)
 {
-    /* Finding 14 contract: (a) updateValues emits dataChanged carrying
+    /* Freshness contract: (a) updateValues emits dataChanged carrying
      * AgeMsRole; (b) refreshAges emits over all rows for AgeMsRole
      * ONLY — the stalled-row dimming path; (c) ageMs is -1 before the
      * first sample and a sane clock delta after. ageMs's wall-clock
@@ -697,8 +698,10 @@ TEST(BridgeTest, AgeMsRoleEmittedAndRefreshesWhileStalled)
 
 TEST(BridgeTest, LinkStateMapsEveryPublishedCode)
 {
-    /* W6: the state-string mapping, pinned session-free via the
-     * static helper. Covers all four known codes plus forward-compat. */
+    /* The state-string mapping, pinned session-free via the static
+     * helper. Covers all four link-health codes plus the forward-
+     * compatible fallback; QML's Theme keys colors and labels on
+     * these strings. */
     EXPECT_EQ(QtTuneBridge::linkStateForError(QT_OK), QStringLiteral("ok"));
     EXPECT_EQ(QtTuneBridge::linkStateForError(QT_ERR_VEHICLE_TIMEOUT), QStringLiteral("quiet"));
     EXPECT_EQ(QtTuneBridge::linkStateForError(QT_ERR_REQUEST_FAILED), QStringLiteral("requests"));

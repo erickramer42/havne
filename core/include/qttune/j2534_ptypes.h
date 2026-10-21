@@ -26,15 +26,16 @@
 #define QTTUNE_PT_STATUS_TIMEOUT    0x09L
 #define QTTUNE_PT_STATUS_BUFFER_EMPTY 0x10L
 
-/* Finding 1 (code review 2026-10-20): trust rule for vendor-reported
- * message counts.
+/* Trust rule for vendor-reported message counts.
  *
  * Some vendors leave pNumMsgs (and the caller's message buffer)
  * untouched when returning an error, so a nonzero count under a hard
- * error is not evidence any message was written. Observed live on the
- * OBDX Pro VX quiet bus: "OP_WRITE: status 7, written 1"
- * (bench-sessions/2026-10-20.md). Only these statuses carry a count
- * the caller may trust:
+ * error is not evidence any message was written. The OBDX Pro VX does
+ * this: a failed write reports "status 7, written 1"
+ * (docs/bench-sessions/2026-10-20.md). Trusting such a count on a read
+ * would dispatch stale or zeroed frames as live data and keep the link
+ * looking healthy. Only these statuses carry a count the caller may
+ * trust:
  *
  *   STATUS_NOERROR       - all requested messages read
  *   ERR_TIMEOUT          - partial batch already copied (J2534-1)
@@ -42,8 +43,8 @@
  * Every other status (ERR_FAILED, ERR_BUFFER_EMPTY, device errors,
  * ...) means "assume nothing was written". ERR_BUFFER_OVERFLOW (0x12)
  * would qualify per spec (pNumMsgs = messages actually copied) but is
- * not defined here, so an overflow read currently drops its batch and
- * counts as a hard failure. Applies to ReadMsgs; both write paths check
+ * not defined here, so an overflow read drops its batch and counts as
+ * a hard failure. Applies to ReadMsgs; both write paths check
  * the status before the count, the count is never consumed, and the
  * surrogate logs the raw pair (it is diagnostic evidence of exactly
  * this vendor behavior).

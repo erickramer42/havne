@@ -56,7 +56,7 @@ qttune_status_t qttune_mock_transport_attach(qttune_session_t* session,
  *   baud    decimal, nonzero; default resolved by connect_channel to
  *           the ISO 15765 500k default
  *   flags   0x-prefixed hex or decimal, passed to PassThruConnect
- *           verbatim — bit SEMANTICS are not interpreted pre-BENCH
+ *           verbatim — no bit is interpreted
  *   filter  CAN id 1..0x1FFFFFFF — receive ID; overrides the profile's
  *           declared channels with this single channel (registers a
  *           FLOW_CONTROL filter; frames matching it get their 4-byte

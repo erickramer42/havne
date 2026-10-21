@@ -132,9 +132,9 @@ and `OP_READ` lines (statuses and frame counts).
     j2534://OBDX Pro - VX
 
 **Expected:**
-- [ ] All eight `obd2` signals populate within about one rotation
-      (eight PIDs at one request per 100 ms, so ~0.8 s each); a PID the
-      ECU doesn't support stays "—"
+- [ ] Every `obd2` signal populates within about one rotation (one
+      request per 100 ms, so N PIDs take about N × 100 ms; about 1 s
+      for the current set); a PID the ECU doesn't support stays "—"
 - [ ] Plausible engine-off values:
 
 | Signal | Expect (engine off) |
@@ -146,11 +146,13 @@ and `OP_READ` lines (statuses and frame counts).
 | Coolant Temp, Intake Air Temp | near ambient on a cold engine |
 | Fuel Level | roughly matches the gauge |
 | Battery Voltage | ~12.0–12.6 V |
+| MAF | ~0 g/s |
+| Trans Fluid Temp | near ambient, or "—": many vehicles don't support PID 0x5F |
 
 - [ ] Values stay bright while they keep arriving; nothing dims
 
 **Evidence:** a screenshot of LiveView; the refresh you observe per
-signal (expect ~0.8 s; replies a cycle late are a known item, not a
+signal (expect about one rotation; replies a cycle late are a known item, not a
 failure); the Log page's `timestamp_us` deltas against the wall clock
 over a minute (BENCH prep #5).
 
@@ -186,7 +188,7 @@ ignition off, wait 10 s, then turn it back on.
 | Writes succeed but no frames arrive | The ECU doesn't answer physical 0x7E0: retry Phase 2 with `?poll=0x0C&txid=0x7DF` (functional request, replies still on 0x7E8); then the flow-control filter (prep #1) |
 | `0x7E8` frames on the Log page, but LiveView shows "—" everywhere | Payload shape: stamping already proves the channel matched, so suspect a PCI byte left in-band shifting `[41][PID]`. Record payloads verbatim |
 | Values implausible (−40 °C, huge RPM) | Scaling or byte order: temperatures are UINT8 with a −40 offset; 2-byte PIDs are big-endian |
-| Link flips between ok and quiet while frames arrive | Unmatched frames interleaving with replies (code review 2026-10-20, W4). Note the frame IDs |
+| Link flips between ok and quiet while frames arrive | Unmatched frames interleaving with replies: a single unmatched frame reads as quiet with no debounce, by design. Note the frame IDs |
 | Slow refresh, replies a cycle late | Known refresh-rate item (20 ms first read vs up to 50 ms ECU response). Measure; don't fix in the session |
 | UI freezes on Disconnect | Known: disconnect is synchronous. Wait it out, then note how long |
 | App crashes | Abort. Capture the session log and `sur.log` before relaunching |
@@ -218,7 +220,7 @@ ignition off, wait 10 s, then turn it back on.
 2. Walk the [BENCH prep list](../../STATUS.md#bench-prep): mark each
    item CONFIRMED / REFUTED (with evidence) / STILL UNKNOWN
 3. Update STATUS.md (phase checklist: "first live, read-only vehicle
-   session"), the testing.md tiers and gaps, and the open code-review
-   items the session settles (finding 4's surrogate path, W4, the
-   refresh rate)
+   session"), the testing.md tiers and gaps, and the open items the
+   session settles: the surrogate health path, unmatched-frame
+   flapping, and the refresh rate
 4. Engineering-log entry if a lesson emerged

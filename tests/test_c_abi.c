@@ -1,9 +1,8 @@
 /* File/layer: tests/test_c_abi.c | strict C compilation of public headers
  * Testing: UNIT — compile-only guarantee that the C ABI headers are C,
- *          not C++-in-disguise. Reviewer finding: nothing previously
- *          compiled the headers as C, so `static_assert` spellings,
- *          name mangling surprises, or stray C++ keywords would only
- *          surface at a third-party FFI consumer's build.
+ *          not C++-in-disguise. Without this, `static_assert`
+ *          spellings, name mangling surprises, or stray C++ keywords
+ *          would only surface at a third-party FFI consumer's build.
  *
  * Built as a real executable linking qttune-core from a C translation
  * unit: proves both that the headers parse under C and that exported

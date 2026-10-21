@@ -46,10 +46,10 @@ Pane {
         // Removes whole oldest LINES (split on "\n") — NOT visual
         // rows. lineCount counts wrapped rows, so a single long
         // wrapped message can exceed maxLogLines while the text has
-        // no newline at all; indexOf("\n") then returns -1 and
-        // remove(0, 0) removes nothing, spinning forever (the old
-        // bug). The guard breaks the loop instead: such a message
-        // stays until a newline-bearing line can be trimmed.
+        // no newline at all; indexOf("\n") then returns -1, and
+        // remove(0, 0) would remove nothing and spin forever. The
+        // guard breaks the loop instead: such a message stays until a
+        // newline-bearing line can be trimmed.
         while (activityLog.lineCount > page.maxLogLines) {
             const nl = activityLog.text.indexOf("\n")
             if (nl < 0)
@@ -102,10 +102,10 @@ Pane {
             TextField {
                 id: uriField
                 Layout.fillWidth: true
-                // ?poll= replaces the profile's PID rotation (finding
-                // 12) and needs a channel. The raw profile declares
-                // none, so the example adds ?filter=; under the obd2
-                // default ?poll= alone works and still decodes.
+                // ?poll= replaces the profile's PID rotation and needs
+                // a channel. The raw profile declares none, so the
+                // example adds ?filter=; under the obd2 default ?poll=
+                // alone works and still decodes.
                 placeholderText: qsTr("URI — e.g. mock://demo or j2534://Vendor?profile=raw&filter=0x7E8&poll=0x0C")
                 enabled: !QtTune.connected && !QtTune.connecting && QtTune.coreInitialized
                 color: Theme.text
