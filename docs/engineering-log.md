@@ -45,6 +45,7 @@ Dates are commit dates.
 | 2026-10-20 | CI on all five targets: Linux full build; Android arm64 and iOS device cross-builds; iOS Simulator launch smoke with screenshots, on pull requests and on request (#3 closed; #30 opened and resolved the same day) | `4dd15ca`, `a430af7`, `923f479`, `f282275`, `4be8ba5`, `a0f5c0f` |
 | 2026-10-20 | Code review 2026-10-20 fixes: vendor message counts ignored under hard errors (finding 1), surrogate open diagnostics name the stalled stage (finding 3), `?poll=` outranks the profile's rotation (finding 12), the Log page's ID column binds the real `arbId` role (finding 13) | `6420f09`, `5ec331c`, `90020bd`, `1674f5c` |
 | 2026-10-20 | Code review 2026-10-20 follow-up: stale dimming driven by the model's `ageMs` (finding 14); one health machine for reads and writes, with `QT_ERR_REQUEST_FAILED` latched by failed writes, hard read failures first, unmatched frames read as quiet, one quiet debounce that clears the backoff, and backoff growth pinned (findings 4–7, 15, 17) | `7e9bd5e`, `946bdf5` |
+| 2026-10-20 | One timestamped session log for the surrogate's client and child (#23 closed); a per-spawn log for a concurrent session (finding 9); `OP_OPEN` tells an exiting child from a blocked vendor; merged via PR #11 | `995519b` |
 
 ## Lessons learned
 
@@ -471,3 +472,15 @@ can't see the profile's declared channels. So under `obd2` it refused
 Deciding the mode and the channel rule at attach, where URI and
 profile meet, fixed both, and the check still fires before any DLL
 loads.
+
+**2026-10-20 — session-log round (`995519b`):** one lesson. **A
+liveness snapshot taken right after a pipe breaks races the process
+exit.** The finding-3 fix (`5ec331c`) told a blocked vendor from a
+dead child by asking whether the child was still alive once
+`OP_OPEN` failed. A child that fails to load the DLL closes the pipe
+and exits with code 4 or 5, but the check could run between the two,
+so a missing DLL was logged as a blocked vendor. The fix classifies
+by why the transaction failed instead: only a timeout means
+"blocked", and a broken pipe means "exiting", so the client waits
+for the exit code and decodes it. When two events always happen in
+order, judge by the first one, not by a snapshot taken between them.
