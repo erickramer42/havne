@@ -85,21 +85,18 @@ next.
     channel derivation are HARNESS-verified against the fake; a
     live-vehicle session (real ECU responses, talking-bus items in
     the BENCH prep list) is still ahead.
-  - **Tests:** 158 ctest cases on `668ba25` plus the MAF and TFT
-    additions to the `obd2` set (Windows/MSVC 2022, both trees rebuilt,
-    2026-10-21), plus the cross-arch subset (19/19). All passed except
-    the env-gated cross-arch skip. CI was green on all eight jobs
-    on PR #11 (merged as `a96892b`), including the simulator smoke. That covers
-    ctest on Windows, macOS and Linux, Core under ASan and UBSan, the
-    Android and iOS device cross-builds, and the simulator smoke. The
-    smoke's first run (`923f479`) gave a blank frame. Its second
-    (`4be8ba5`) drew and showed two layout bugs, and `a0f5c0f`
-    confirmed both fixes. The smoke runs on pull requests and on
-    request, not on every push, because it roughly doubles CI time. The cross-arch routing case
-    skips unless its environment variables are set. J2534 suites
-    carry a 30 s per-test timeout — a hang fails bounded instead of
-    wedging the runner. Tiers, suites and
-    gaps are in [docs/testing.md](docs/testing.md).
+  - **Tests:** 159 ctest cases (Windows/MSVC 2022, both trees
+    rebuilt, 2026-10-21), plus the cross-arch subset (19/19). All
+    passed except the env-gated cross-arch skip. CI was green on all
+    eight jobs on PR #15 (merged as `0956784`), including the
+    simulator smoke. That covers ctest on Windows, macOS and Linux,
+    core under ASan and UBSan, the Android and iOS device
+    cross-builds, and the simulator smoke. The smoke runs on pull
+    requests and on request, not on every push, because it roughly
+    doubles CI time. The cross-arch routing case skips unless its
+    environment variables are set. J2534 suites carry a 30 s per-test
+    timeout, so a hang fails bounded instead of wedging the runner.
+    Tiers, suites and gaps are in [docs/testing.md](docs/testing.md).
 
 ## Architecture
 
@@ -292,7 +289,8 @@ an issue is resolved it is removed, and its number is not reused.
    yet.
 4. **Decoding ignores subscription state.** Every signal is decoded
    for every frame and filtered at the model. Filter at decode time
-   once signal counts grow.
+   once signal counts grow, after #31 settles what a subscription
+   gates.
 6. **The session API is single-caller by contract.** The bridge is the
    only caller.
 8. **`CoreTest.SessionStartWithoutTransportFails` is a `SUCCEED()`
@@ -306,8 +304,9 @@ an issue is resolved it is removed, and its number is not reused.
     `QT_ERR_REQUEST_FAILED`, unmatched frames read as quiet, and a
     growing backoff ([j2534.md](docs/j2534.md#session-lifecycle)). The
     bridge publishes it as `linkState` (`ok`, `quiet`, `requests`,
-    `fault`, `disconnected`) and logs transitions, and LiveView, Home
-    and Settings show it; stale values dim from the model's `ageMs`.
+    `fault`, `disconnected`) and logs transitions, and LiveView, Home,
+    Settings and the Dashboard header show it; stale values dim from
+    the model's `ageMs`.
     A request failure (no ECU awake, adapter fine) reads "Requests
     failing — check the vehicle connection and ignition" in amber;
     `BridgeTest.LinkStateMapsEveryPublishedCode` pins the mapping. The
@@ -370,6 +369,38 @@ an issue is resolved it is removed, and its number is not reused.
     run), or Qt's arm64 simulator libraries if Qt ships them. Apple is
     also winding down Rosetta, so the first option has its own end
     date.
+31. **Live's checkboxes also freeze Dashboard gauges.**
+    `SignalListModel::updateValues` updates subscribed rows only, so
+    unchecking RPM on Live, which looks like "don't plot it", stops the
+    tach and shift lights too. After 3 s the gauges dim as stale while
+    RPM frames still arrive, and the Dashboard's `Tap` doesn't read
+    `subscribed`, so nothing says why. The likely fix is to update
+    every row and keep `subscribed` as the chart's filter in
+    `chartData()` only. No test pins the skip:
+    `ChartDataFiltersUnsubscribedAndEmptyBatchesDoNotEmit` sends no
+    batch after unsubscribing.
+32. **Closing the app during an async connect leaks a running
+    session.** The connect thread creates the session, registers the
+    bridge's `onFrame` and starts the worker, then posts the session
+    in a completion queued against the bridge. If the bridge is
+    destroyed first, that completion is dropped, `m_session` was never
+    set, and the destructor has nothing to destroy: the worker keeps
+    calling `onFrame` on a freed bridge until the process exits. The
+    fix is to start the session in `applyConnectedState`, and to have
+    the destructor destroy a session the connect thread produced.
+33. **Disconnect blocks the GUI thread.** `disconnectSession` tears the
+    session down synchronously. A dead surrogate child fails fast on
+    the broken pipe, but a wedged one costs each teardown transaction
+    its full timeout, because the client doesn't latch "broken" after
+    the first timeout. Make disconnect async, and latch after the
+    first transaction timeout.
+34. **29-bit IDs need `?flags=` at connect.** The transport sets
+    `CAN_29BIT_ID` on writes whenever a channel's ID is above `0x7FF`
+    (BENCH prep item 4), but `PassThruConnect` gets only the URI's
+    `?flags=`. A 29-bit `?filter=`, or a future profile channel, opens
+    an 11-bit channel unless `?flags=` sets the bit. No shipped profile
+    declares a 29-bit channel. Derive the connect flags from the
+    channels.
 
 ## Roadmap
 
@@ -464,7 +495,12 @@ after the first vehicle session.
   lb/min). The conversion belongs in core, because the UI receives
   final display values (rule 2 above). Display names and decimal
   places are core's to own for the same reason: `degC` and raw def
-  names such as `Engine_RPM` reach the screen.
+  names such as `Engine_RPM` reach the screen. Today the formatting is
+  split three ways: the Dashboard's `SignalHub.prettyUnit` shows
+  `degC` as `°C` while Live shows `degC`; the MAF tile hard-codes one
+  decimal and Live uses `toFixed(1)`; and nothing reads the defs'
+  `decimal_places`. One model role for decimals, used by both pages,
+  ends the split.
 - **Low-glare and night themes (M).** Amber and red-on-black schemes
   for driving at night.
   - `Theme` already centralizes the palette, but the gauges hard-code
@@ -510,7 +546,13 @@ after the first vehicle session.
   vehicles. Needs Service 22 requests (the scheduler builds Service 01
   only) and the profile API from ADR-0013, and serves as the pilot
   for the v0.5.0 plugin modules.
-- Computed signal coverage -> boost pressure
+- **Computed signals (M).** Values derived from other signals, such
+  as boost pressure: intake manifold absolute pressure (PID 0x0B)
+  minus barometric pressure (PID 0x33). Neither PID is in the `obd2`
+  set yet. A def decodes one field of one frame, so this needs a
+  derived-signal stage in core, which keeps the UI on final display
+  values (rule 2 above). Verify both PIDs against a public J1979
+  table before adding them.
 
 ### Transports and platforms
 

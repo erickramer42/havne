@@ -507,7 +507,7 @@ void QtTuneBridge::disconnectSession()
         emit currentUriChanged();
     }
     emit connectedChanged(false);
-    m_linkErrorCode = QT_OK;          // 8a: the properties must not
+    m_linkErrorCode = QT_OK;          // the properties must not
     m_errorEpisodes = 0;              // outlive the session
     emit linkStateChanged();          // "fault"/"quiet" -> "disconnected"
 }

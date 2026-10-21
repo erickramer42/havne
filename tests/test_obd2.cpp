@@ -165,9 +165,9 @@ TEST(Obd2DecodeTest, MafCentigramScale) {
     const QttuneSignalSet* set = qttune_obd2_signal_set();
     const QttuneSignalDef* d = find_def(set, OBD2_SIG_MAF_ID);
     ASSERT_NE(d, nullptr);
-    /* 0x0064 = 100 raw * 0.01 = 1.00 g/s — the /100 (centi-grams/s)
-     * scale is finer than every existing def, pinning the generic
-     * scale+offset path handles it. */
+    /* 0x0064 = 100 raw * 0.01 = 1.00 g/s — pins the /100 (centi-grams/s)
+     * scale through the generic scale+offset path, with no decoder
+     * special case. */
     const uint8_t wire[] = {0x41, 0x10, 0x00, 0x64};
     qttune_frame_t f = make_obd2_frame(wire, sizeof wire);
     ASSERT_EQ(qttune_def_matches_frame(d, &f), 0);

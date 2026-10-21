@@ -134,7 +134,7 @@ TEST(BridgeTest, ClearFramesResets)
 
     bridge.clearFrames();
     EXPECT_EQ(bridge.frameCount(), 0);
-    EXPECT_EQ(bridge.model()->rowCount(), 0);  // <-- changed from count()
+    EXPECT_EQ(bridge.model()->rowCount(), 0);
 
     bridge.disconnectSession();
 }

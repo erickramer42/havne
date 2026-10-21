@@ -17,6 +17,8 @@ QtObject {
     readonly property int radius:           8
     readonly property int spacing:          8
 
+    // Chart trace colours, one per hue family so traces stay distinct on
+    // the dark surface. LiveView keys them by model row.
     readonly property var seriesColors: [
         "#ff5555",   // red
         "#ffa94d",   // orange
@@ -25,7 +27,7 @@ QtObject {
         "#4aa3ff",   // blue
         "#e39ac9",   // reddish purple
         "#f2f2f2",   // near-white
-        "#5dd9d0",   // aqua 
+        "#5dd9d0",   // aqua
     ]
 
     // Link state → color. Whitelists the healthy and the explained

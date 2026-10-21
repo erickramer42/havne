@@ -9,8 +9,9 @@ import QtQuick.Shapes
 pragma ComponentBehavior: Bound
 
 // Needle dial: tach, speedo. Face, ticks, numerals and zones are
-// static Rectangles, Text and Shape arcs. Per frame only the needle's
-// rotation and, with showProgress, one arc's sweep change. No Canvas:
+// static Rectangles, Text and Shape arcs. Per frame only the needle
+// (shadow and body) rotates and, with showProgress, the three progress
+// arcs (two glow, one core) change their sweep. No Canvas:
 // its repaint is a CPU raster of the whole dial, which a 3x phone
 // screen would pay at animation rate.
 GaugeBase {

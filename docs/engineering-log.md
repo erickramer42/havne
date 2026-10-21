@@ -48,6 +48,12 @@ Dates are commit dates.
 | 2026-10-20 | One timestamped session log for the surrogate's client and child (#23 closed); a per-spawn log for a concurrent session (finding 9); `OP_OPEN` tells an exiting child from a blocked vendor; merged via PR #11 | `995519b` |
 | 2026-10-20 | UI for `QT_ERR_REQUEST_FAILED` (a `requests` link state); link-state color and label centralized in `Theme`; every test that arms a fake knob clears all of them | `da3aa57`, `3c28b63`, `25d0a6f` |
 | 2026-10-20 | Dashboard: analog, ring, digital and bar gauges with shift lights and peak hold, fed by name through `SignalHub`; merged via PR #12 | `40e51ce` |
+| 2026-10-21 | Present-tense comment sweep; docs/architecture.md | `4fd6633` |
+| 2026-10-21 | `obd2` gains MAF (PID 0x10) and a fourth temperature, first as PID 0x5F, then corrected to engine oil temperature (0x5C); the mock set gains MAF and oil, and its frames become 12-byte CAN FD | `bc1ee8c`, `9b71174` |
+| 2026-10-21 | Live: the list scrolls, trace colours key to model rows, and each row's swatch is the legend; LogPage role names pinned | `e119656`, `10bfea6` |
+| 2026-10-21 | Windows Qt install: aqtinstall pinned to a master commit, 7-Zip extraction, install root created first (#1 closed) | `51f1b0d`, `94e16a1` |
+| 2026-10-21 | Oldest-first log follows the tail; drop reports move to the coalesce tick (#5 and #7 closed) | `523cf28` |
+| 2026-10-21 | Dashboard header shows link state through `Theme`; tach red zone from 6800 rpm; chart series palette in `Theme` | `6807e93` |
 
 ## Lessons learned
 
@@ -518,3 +524,26 @@ requires py7zr 1.1.3 or later, so that pin, and the issue's fallback
 of pinning py7zr 1.1.0, could never hold for this job. Unpinned
 master also meant each run took whatever aqtinstall and py7zr were
 newest; the job now pins aqtinstall to a commit.
+
+**2026-10-21 — oil temperature and a committed merge conflict:** two
+lessons. (1) **A fake written from the same memory as the def agrees
+with it.** `bc1ee8c` added "transmission fluid temperature" as PID
+0x5F. SAE J1979 defines 0x5F as the bit-encoded emission-requirements
+byte, and transmission temperature isn't a standard Service 01 PID at
+all; automakers expose it through Mode 22. The def, the fake's canned
+reply and the decode test all came from the same assumption, so the
+suite was green, and a vehicle that supports 0x5F would have shown its
+enum byte as a temperature. `9b71174` replaced it with engine oil
+temperature (0x5C, the same A − 40 shape). It's the J2534 lesson again,
+for PIDs: check every def against a public J1979 table, never memory.
+(2) **A red build can look partial.** `6807e93` committed a
+`git stash pop` conflict in `LiveViewPage.qml`: three marker blocks,
+plus stash-side lines outside them that referred to the other side (a
+mistyped property, a second `ScrollBar.vertical`, a variable declared
+only inside a marker block). qmlcachegen rejects the file, so all five
+app builds failed while the two Qt-free jobs passed. The smoke result
+in the commit message couldn't have come from the committed tree. Run
+`git diff --cached --check` before committing after a merge or stash
+pop, and smoke what is being committed. The conflict's two sides were
+two answers to the same Live problem; the resolution keeps the
+row-keyed colours with `Theme`'s palette and dashes rows past it.

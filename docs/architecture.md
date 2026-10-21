@@ -172,8 +172,12 @@ The bridge polls it on its 100 ms tick and maps it for the UI
   and shift lights), **Live** (value table and strip chart), **Log**
   (raw frames), **Settings** (device picker, URI, activity log).
   Navigation is a sidebar at 720 px and wider, a tab bar below that.
-- **`Theme`** holds the palette and the link-state color and label
-  functions, so every page shows a state the same way.
+- **`Theme`** holds the palette, the chart's series colours and the
+  link-state color and label functions, so every page shows a state
+  the same way.
+- **Live** keys each chart trace's colour to its list row, so the
+  row's swatch is the legend and a trace keeps its colour when
+  another signal is unsubscribed.
 - **`SignalHub`** gives the Dashboard signals by *name*, because gauges
   want "RPM" whichever profile named it (`Engine_RPM` in the mock set,
   `RPM` in `obd2`).

@@ -361,7 +361,11 @@ weekly.
   hand. The job extracts with the runner's 7-Zip (`--external 7z`)
   rather than py7zr, which fails sporadically on Windows with
   `Bad7zFile`. aqtinstall verifies each archive's SHA-256 before
-  extracting, so that error is py7zr's, not the download's.
+  extracting, so that error is py7zr's, not the download's. 7-Zip
+  extracts the archives in parallel, and the extracts race to create
+  the install root ([aqtinstall #1002](https://github.com/miurahr/aqtinstall/issues/1002)),
+  so the step creates the directory before installing. Drop that
+  line with the pin.
 - **macOS needs Qt 6.12.** Qt 6.8 and earlier referenced the AGL
   framework, which Apple removed from the Xcode 26 SDK.
 - **The iOS simulator smoke runs on `macos-15-intel`.** GitHub has
