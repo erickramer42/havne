@@ -1,3 +1,5 @@
+// File/layer: app/qml/Theme.qml | Qt6 Quick singleton, UI layer
+// Testing: manual smoke — palette is visual only; no unit test reads it.
 pragma Singleton
 import QtQuick
 
@@ -18,16 +20,18 @@ QtObject {
     readonly property int spacing:          8
 
     // Chart trace colours, one per hue family so traces stay distinct on
-    // the dark surface. LiveView keys them by model row.
+    // the dark surface. LiveView keys them by model row. Calm hues come
+    // first and alarm red last, so an ordinary signal near the top of the
+    // list doesn't read as a warning (U20).
     readonly property var seriesColors: [
-        "#ff5555",   // red
-        "#ffa94d",   // orange
-        "#f0e442",   // yellow
-        "#31d08c",   // green
         "#4aa3ff",   // blue
-        "#e39ac9",   // reddish purple
-        "#f2f2f2",   // near-white
+        "#31d08c",   // green
         "#5dd9d0",   // aqua
+        "#f0e442",   // yellow
+        "#e39ac9",   // reddish purple
+        "#ffa94d",   // orange
+        "#f2f2f2",   // near-white
+        "#ff5555",   // red
     ]
 
     // Link state → color. Whitelists the healthy and the explained

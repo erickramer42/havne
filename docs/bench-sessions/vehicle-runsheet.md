@@ -1,6 +1,6 @@
 # VEHICLE run sheet — first read-only vehicle session
 
-**Date:** <date>  **Operator:** <initials>  **Second person or posted procedure:** <name / where posted>
+**Date:** <date>  **Operator:** <initials>  **Second person or posted procedure:** <initials / where posted>
 **Adapter:** OBDX Pro VX (USB)  **Vehicle:** <year make model>; CAN-era OBD-II, expected 11-bit IDs at 500 kbit/s
 **QtTune build:** <commit hash>  **Trees:** build, build-win32 both fresh
 
@@ -61,7 +61,11 @@ that runs to the end undocumented.
         ignition": writes fail while reads are clean, the no-ECU or
         ignition-off case;
       - red "Adapter fault": reads fail.
-      The Settings activity log records each transition.
+      The Settings activity log records each transition; Home and the
+      Dashboard header show the same state in short form.
+- [ ] Leave every signal checked on Live. Unchecking one also freezes
+      it on the Dashboard, where it dims as stale while frames still
+      arrive (Known Issue #31)
 - [ ] Settings picker lists the VX as "x86"
 - [ ] Camera or notebook ready
 
@@ -118,7 +122,14 @@ is requested)
 
 **Expected:**
 - [ ] Log page: frames with ID `0x7E8`, DLC 4, payload `410c` + two
-      bytes; engine off, RPM reads 0 or close to it
+      data bytes; engine off, RPM reads 0 or close to it. On the wire
+      the reply is an 8-byte CAN frame with a PCI byte and padding, but
+      the adapter reassembles ISO 15765 and hands over only the data,
+      so DLC 4 is what to expect. Record the DLC either way:
+      - DLC 8 starting `410c`: this adapter passes the padding through.
+        Decoding still works; note the pad bytes;
+      - a payload that doesn't start with `41` (for example
+        `04 41 0c …`): a PCI byte left in-band (see "If it fails")
 - [ ] LiveView: RPM populated; every other signal shows "—"
 - [ ] No banner (link ok)
 
@@ -150,6 +161,9 @@ and `OP_READ` lines (statuses and frame counts).
 | Engine Oil Temp | near ambient on a cold engine, or "—": many vehicles don't support PID 0x5C |
 
 - [ ] Values stay bright while they keep arriving; nothing dims
+- [ ] Every row is reachable on Live (the list scrolls once it fills
+      its share of the page); rows past `Theme.seriesColors` reuse
+      its colours, with dashed chart traces
 
 **Evidence:** a screenshot of LiveView; the refresh you observe per
 signal (expect about one rotation; replies a cycle late are a known item, not a
@@ -175,22 +189,27 @@ ignition off, wait 10 s, then turn it back on.
 
 **Expected:**
 - [ ] Ignition off: the "Requests failing" banner at the first failed
-      write
-- [ ] Ignition on: the first successful request within ~5 s (the
-      backoff caps at 5 s while requests fail), then "Link: recovered"
-      in the activity log and values resume
+      write (writes may succeed for a few cycles first, as in Phase 0)
+- [ ] Ignition on: values resume within about 8 s, and the activity
+      log shows "Link: recovered". While requests fail, the worker
+      waits between probes, doubling from 100 ms toward a 5 s cap.
+      After a 10 s outage it can be in a single 6.4 s wait (Known
+      Issue #35), and the ECU needs a moment to wake. Record the time
+      from ignition-on to the first value; longer than ~10 s is a
+      finding
 
 ## If it fails, suspect
 
 | Symptom | Suspect |
 |---|---|
-| Writes fail with the ignition on (`OP_WRITE: status` nonzero) | BENCH prep #2, request framing (6-byte logical message with `ISO15765_FRAME_PAD`); then baud (500 k assumed) or a 29-bit vehicle (prep #4) |
+| Writes fail with the ignition on (`OP_WRITE: status` nonzero) | BENCH prep #2, request framing (6-byte logical message with `ISO15765_FRAME_PAD`); then baud (500 k assumed) or a 29-bit vehicle (prep #4). The bare URI is 11-bit only, and a 29-bit channel also needs `?flags=0x100` (`CAN_29BIT_ID`) at connect (Known Issue #34): record and stop rather than improvise |
 | Writes succeed but no frames arrive | The ECU doesn't answer physical 0x7E0: retry Phase 2 with `?poll=0x0C&txid=0x7DF` (functional request, replies still on 0x7E8); then the flow-control filter (prep #1) |
 | `0x7E8` frames on the Log page, but LiveView shows "—" everywhere | Payload shape: stamping already proves the channel matched, so suspect a PCI byte left in-band shifting `[41][PID]`. Record payloads verbatim |
 | Values implausible (−40 °C, huge RPM) | Scaling or byte order: temperatures are UINT8 with a −40 offset; 2-byte PIDs are big-endian |
 | Link flips between ok and quiet while frames arrive | Unmatched frames interleaving with replies: a single unmatched frame reads as quiet with no debounce, by design. Note the frame IDs |
 | Slow refresh, replies a cycle late | Known refresh-rate item (20 ms first read vs up to 50 ms ECU response). Measure; don't fix in the session |
-| UI freezes on Disconnect | Known: disconnect is synchronous. Wait it out, then note how long |
+| A Dashboard gauge stops and dims while Live still updates | The signal is unchecked on Live (Known Issue #31). Check it again |
+| UI freezes on Disconnect | Known: disconnect is synchronous (Known Issue #33). Wait it out, then note how long |
 | App crashes | Abort. Capture the session log and `sur.log` before relaunching |
 
 ## Evidence against the BENCH prep list
@@ -216,7 +235,10 @@ ignition off, wait 10 s, then turn it back on.
 
 1. Copy this sheet, filled in, to `docs/bench-sessions/<date>.md`, with
    the session logs alongside (the 2026-10-16 session's
-   `surrogate-phase*.log` files are the precedent)
+   `surrogate-phase*.log` files are the precedent). Before committing,
+   scrub the sheet, the logs and any screenshots: no VIN or
+   calibration IDs, initials rather than names, and no local paths
+   (`%TEMP%` and `C:\Users\…` paths carry the account name)
 2. Walk the [BENCH prep list](../../STATUS.md#bench-prep): mark each
    item CONFIRMED / REFUTED (with evidence) / STILL UNKNOWN
 3. Update STATUS.md (phase checklist: "first live, read-only vehicle
