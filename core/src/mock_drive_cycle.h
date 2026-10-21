@@ -8,6 +8,8 @@
 #ifndef QTTUNE_MOCK_DRIVE_CYCLE_H
 #define QTTUNE_MOCK_DRIVE_CYCLE_H
 
+#include "qttune/signal_sets.h"
+
 #include <cmath>
 #include <cstdint>
 
@@ -142,6 +144,8 @@ struct DriveCycle {
     float load_pct = 18.0f;
     float coolant_c = 20.0f;   /* cold start */
     float iat_c = 20.0f;
+    float maf_gs = 6.0f;
+    float oil_c = 20.0f;       /* cold start */
 
     /* Script and drivetrain state. */
     Phase phase = Phase::WarmUp;
@@ -417,6 +421,16 @@ private:
             distance_m += v_mps * kTickS;
         }
 
+        /* Mass airflow, g/s, speed-density: intake strokes per second
+         * (rpm / 120) times displacement times load-scaled volumetric
+         * efficiency times air density (1.18 g/L). 4.5 L suits the
+         * vehicle model's 400 N*m peak, and VE reaches 0.95 at full
+         * load. Warm idle reads ~7 g/s; WOT near the limiter ~255 g/s,
+         * about 1.3 hp per g/s against the model's ~330 hp, the usual
+         * rule of thumb. */
+        const float ve = 0.05f + 0.90f * (load_pct / 100.0f);
+        maf_gs = (rpm / 120.0f) * 4.5f * ve * 1.18f;
+
         update_temperatures(clampf(power_frac, 0.0f, 1.0f));
     }
 
@@ -444,6 +458,12 @@ private:
         const float soak = (coolant_c - kAmbientC) * 0.32f * (1.0f - airflow);
         const float charge = 45.0f * heat + 25.0f * heat_soak;
         iat_c += (kAmbientC + soak + charge - iat_c) * (kTickS / 4.0f);
+
+        /* Oil: chases coolant with a slower constant plus a load
+         * bias — oil runs hotter than coolant under sustained power
+         * and lags both warm-up and cool-down. */
+        const float oil_target = coolant_c + 4.0f + 14.0f * heat_soak;
+        oil_c += (oil_target - oil_c) * (kTickS / 25.0f);
     }
 };
 
@@ -469,10 +489,12 @@ inline uint16_t clamp_u16(float v)
  *   [4]    throttle uint8, scale 100/255
  *   [5]    IAT      uint8, offset -40
  *   [6]    load     uint8, scale 100/255
- *   [7]    pad
+ *   [7..8] MAF      LE uint16, scale 0.01 g/s
+ *   [9]    oil      uint8, offset -40
+ *   [10..11] pad, up to the CAN FD length (MOCK_TELEMETRY_PAYLOAD_LEN)
  * The transport never decodes (rule 2); the tests round-trip every
  * tick of the cycle through qttune_mock_signal_set(). */
-inline void encode_payload(const DriveCycle& s, uint8_t out[8])
+inline void encode_payload(const DriveCycle& s, uint8_t out[MOCK_TELEMETRY_PAYLOAD_LEN])
 {
     const uint16_t rpm_raw = clamp_u16(s.rpm / 0.25f);
     out[0] = static_cast<uint8_t>(rpm_raw & 0xFF);
@@ -483,7 +505,13 @@ inline void encode_payload(const DriveCycle& s, uint8_t out[8])
     out[4] = clamp_u8(s.throttle_pct * 255.0f / 100.0f);
     out[5] = clamp_u8(s.iat_c + 40.0f);
     out[6] = clamp_u8(s.load_pct * 255.0f / 100.0f);
-    out[7] = 0;
+
+    /* MAF: centigrams per second, little-endian like RPM. */
+    const uint16_t maf_raw = clamp_u16(s.maf_gs / 0.01f);
+    out[7] = static_cast<uint8_t>(maf_raw & 0xFF);
+    out[8] = static_cast<uint8_t>((maf_raw >> 8) & 0xFF);
+    out[9] = clamp_u8(s.oil_c + 40.0f);
+    out[10] = 0; out[11] = 0;   /* pad */
 }
 
 } // namespace qttune_mock

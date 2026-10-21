@@ -49,16 +49,16 @@ void mock_worker(qttune_mock_transport* t)
         frame.timestamp_us = static_cast<uint64_t>(
             std::chrono::duration_cast<std::chrono::microseconds>(
                 std::chrono::steady_clock::now() - t->epoch).count());
-        frame.data_length = 8;
+        frame.data_length = MOCK_TELEMETRY_PAYLOAD_LEN;
 
         /* Every 16th frame is a 29-bit "diagnostic" frame carrying the
          * same payload. It exercises FLAG_EXTENDED, and because decode
          * is gated on message ID, it proves unrelated IDs are rejected. */
         if ((t->frame_counter % 16) == 0) {
-            frame.flags = QTTUNE_FRAME_FLAG_EXTENDED;
+            frame.flags = QTTUNE_FRAME_FLAG_EXTENDED | QTTUNE_FRAME_FLAG_FD;
             frame.arbitration_id = MOCK_DIAG_ID;
         } else {
-            frame.flags = 0;
+            frame.flags = QTTUNE_FRAME_FLAG_FD;
             frame.arbitration_id = MOCK_TELEMETRY_ARB_ID;
         }
 

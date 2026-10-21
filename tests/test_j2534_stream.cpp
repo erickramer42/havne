@@ -738,14 +738,14 @@ TEST_F(J2534AdoptionTest, Obd2SchedulerRotatesPidsInSetOrder)
     EXPECT_EQ(wbuf[5], 0x0Cu);              /* RPM */
     wait_for_writes(get_write_count, 11, 250);
     /* The rotation follows kObd2Defs order. With 10 defs, MAF (0x10) and
-     * TFT (0x5F), the last two, take writes 8 and 9, and write 10 wraps
+     * Oil Temp (0x5C), the last two, take writes 8 and 9, and write 10 wraps
      * to PID 0x04. */
     get_recorded_write(8, wbuf, &wlen, &wflags);
     ASSERT_EQ(wlen, 6u);
     EXPECT_EQ(wbuf[5], 0x10u);               /* MAF */
     get_recorded_write(9, wbuf, &wlen, &wflags);
     ASSERT_EQ(wlen, 6u);
-    EXPECT_EQ(wbuf[5], 0x5Fu);               /* TFT */
+    EXPECT_EQ(wbuf[5], 0x5Cu);               /* Oil Temp */
     get_recorded_write(10, wbuf, &wlen, &wflags);
     ASSERT_EQ(wlen, 6u);
     EXPECT_EQ(wbuf[5], 0x04u);              /* wrapped — round-robin */

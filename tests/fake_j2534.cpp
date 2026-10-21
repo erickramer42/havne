@@ -126,9 +126,11 @@ unsigned long g_disconnect_count = 0;
 
 /* ---- OBD-II canned response data (HARNESS only, ADR-0013) ----
  * Standard PIDs that express as simple byte-extraction + scale/offset.
- * Defaults are PHYSICALLY PLAUSIBLE for a cold-idling vehicle:
- *   RPM 2000, Speed 0, Load ~10%, Throttle ~8%, temps 20 degC,
- *   fuel ~25%, voltage 13.8 V. Overridable per-test through
+ * Each default is a plausible reading on its own, not one consistent
+ * engine state: RPM 2000, speed 0, load ~10%, throttle ~8%, coolant
+ * and IAT 20 degC, oil 80 degC, fuel ~25%, voltage ~13.9 V, MAF
+ * 1.00 g/s. Oil reads warmer than coolant and IAT so a test can tell
+ * the A - 40 temperatures apart. Overridable per-test through
  * SetFakeObd2CannedValueExternal (same mutex discipline as all
  * other module globals). */
 struct Obd2CannedValues {
@@ -144,7 +146,7 @@ struct Obd2CannedValues {
     uint8_t pid_42_volt_low;
     uint8_t pid_10_maf_high;
     uint8_t pid_10_maf_low;
-    uint8_t pid_5F_tft;
+    uint8_t pid_5C_oil_temp;
 };
 
 Obd2CannedValues g_obd2_canned;
@@ -182,7 +184,7 @@ void reset_obd2_canned()
     g_obd2_canned.pid_42_volt_low = 0x30;
     g_obd2_canned.pid_10_maf_high = 0x00;  /* 0x0064 * 0.01 = 1.00 g/s */
     g_obd2_canned.pid_10_maf_low = 0x64;
-    g_obd2_canned.pid_5F_tft = 0x50;        /* 80 - 40 = 40 degC */
+    g_obd2_canned.pid_5C_oil_temp = 0x78;  /* 120 - 40 = 80 degC */
 }
 
 /* Matches the most recent active filter against a frame's first
@@ -242,7 +244,7 @@ void build_obd2_response(const unsigned char* req, unsigned long req_len,
                    resp[7] = g_obd2_canned.pid_42_volt_low;     *resp_len = 8;  break;
         case 0x10: resp[6] = g_obd2_canned.pid_10_maf_high;
                    resp[7] = g_obd2_canned.pid_10_maf_low;      *resp_len = 8;  break;
-        case 0x5F: resp[6] = g_obd2_canned.pid_5F_tft;          *resp_len = 7;  break;
+        case 0x5C: resp[6] = g_obd2_canned.pid_5C_oil_temp;     *resp_len = 7;  break;
         default:    /* Unsupported PID — bare grammatical echo */
             *resp_len = 6;
             break;
@@ -268,7 +270,7 @@ void SetFakeObd2CannedValue(unsigned char pid, unsigned char* data,
                                    g_obd2_canned.pid_42_volt_low = data[1]; } break;
         case 0x10: if (len >= 2) { g_obd2_canned.pid_10_maf_high = data[0];
                                    g_obd2_canned.pid_10_maf_low = data[1]; } break;
-        case 0x5F: if (len >= 1) g_obd2_canned.pid_5F_tft = data[0]; break;
+        case 0x5C: if (len >= 1) g_obd2_canned.pid_5C_oil_temp = data[0]; break;
     }
 }
 
@@ -291,7 +293,7 @@ void GetFakeObd2CannedValue(unsigned char pid, unsigned char* out_data,
                                     out_data[1] = g_obd2_canned.pid_42_volt_low; break;
         case 0x10: *out_len = 2; out_data[0] = g_obd2_canned.pid_10_maf_high;
                                    out_data[1] = g_obd2_canned.pid_10_maf_low; break;
-        case 0x5F: *out_len = 1; out_data[0] = g_obd2_canned.pid_5F_tft; break;
+        case 0x5C: *out_len = 1; out_data[0] = g_obd2_canned.pid_5C_oil_temp; break;
         default: *out_len = 0; break;
     }
 }
