@@ -156,6 +156,9 @@ private:
         char unit[16];
         uint8_t decimals = 0;
         float value = 0.0f;
+        // Whether the strip chart plots this signal. Values and history
+        // update regardless: the Dashboard reads every row, and a signal
+        // plotted again shows the history it kept meanwhile.
         bool subscribed = true;
         // GUI-thread-only rolling ring (written exclusively by updateValues).
         // Fixed capacity, evict-oldest — mirrors the FrameListModel ring
@@ -208,6 +211,7 @@ public:
     bool connecting() const { return m_connecting; }
     void dispatchFrameForTesting(const qttune_frame_t& frame);
     static constexpr int maxInFlightForTesting() { return MaxInFlightFrames; }
+    qttune_session_t* pendingSessionForTesting() const { return m_pendingSession.load(); }
     QString linkState() const;
     static QString linkStateForError(int32_t errorCode);  /* code → state string; static so tests need no session */
 
@@ -232,11 +236,11 @@ public slots:
     Q_INVOKABLE QString connectSession(const QString& uri);
     Q_INVOKABLE void disconnectSession();
     Q_INVOKABLE void clearFrames();
-    // Async connect: pure-core work (create + register + start, the
-    // DLL load and PassThruOpen included) runs on a worker thread; GUI
-    // state application and the result signal arrive queued on the
-    // GUI thread. Never blocks the UI — a J2534 handshake can legally
-    // take seconds (the surrogate allows 8 s per stage).
+    // Async connect: the slow core work (create and register, the DLL
+    // load and PassThruOpen included) runs on a worker thread; starting
+    // the session, GUI state application and the result signal follow
+    // queued on the GUI thread. Never blocks the UI — a J2534 handshake
+    // can legally take seconds (the surrogate allows 8 s per stage).
     Q_INVOKABLE void connectSessionAsync(const QString& uri);
 
 signals:
@@ -289,9 +293,16 @@ private:
     // thread (in the async entry and the queued completion), so a plain
     // bool suffices despite the worker's existence.
     QString connectCoreOnly(const QString& uri, qttune_session_t** out_session);
+    QString startSession(qttune_session_t* session);
     void applyConnectedState(qttune_session_t* session, const QString& uri);
     std::thread m_connectThread;
     bool m_connecting = false;
+    // The created, registered, NOT started session the connect thread
+    // hands back. The queued completion takes it; if the bridge dies
+    // first, the completion is dropped and the destructor destroys it.
+    // Atomic only for the test seam: both owners read it after joining
+    // the connect thread.
+    std::atomic<qttune_session_t*> m_pendingSession{nullptr};
     void pollLinkHealth();
     int m_linkErrorCode = QT_OK;
     uint32_t m_errorEpisodes = 0;

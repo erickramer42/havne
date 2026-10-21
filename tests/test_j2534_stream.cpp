@@ -183,6 +183,62 @@ TEST_F(J2534QueryParamTest, FlagsAcceptHexAndDecimalAndCombineWithBaud)
     EXPECT_EQ(last_flags, 10u);
 }
 
+/* A 29-bit channel opens 29-bit: CAN_29BIT_ID joins the connect flags
+ * whenever the channels' IDs are wider than 11 bits, on top of any
+ * ?flags=, so the channel matches the width its filter and writes use. */
+TEST_F(J2534QueryParamTest, Wide29BitChannelSetsConnectFlag)
+{
+    char uri[700];
+    snprintf(uri, sizeof(uri),
+             "j2534://%s?profile=raw&filter=0x18DAF110&txid=0x18DA10F1",
+             FAKE_J2534_DLL_PATH);
+    ASSERT_EQ(start_session_with_uri(uri), QT_OK);
+    EXPECT_EQ(last_flags, QTTUNE_PT_CAN_29BIT_ID);
+
+    snprintf(uri, sizeof(uri),
+             "j2534://%s?profile=raw&filter=0x18DAF110&txid=0x18DA10F1&flags=0x20",
+             FAKE_J2534_DLL_PATH);
+    ASSERT_EQ(start_session_with_uri(uri), QT_OK);
+    EXPECT_EQ(last_flags, QTTUNE_PT_CAN_29BIT_ID | 0x20u);
+
+    /* 11-bit: the flags stay exactly as given */
+    snprintf(uri, sizeof(uri), "j2534://%s?profile=raw&filter=0x7E8",
+             FAKE_J2534_DLL_PATH);
+    ASSERT_EQ(start_session_with_uri(uri), QT_OK);
+    EXPECT_EQ(last_flags, 0u);
+}
+
+/* Profile-declared channels follow the same rule. Channels mixing 11- and
+ * 29-bit IDs would need CAN_ID_BOTH, which the transport doesn't request,
+ * so that set is rejected at create. Test-only profiles, registered under
+ * throwaway names with static storage (the registry keeps the pointer). */
+TEST_F(J2534QueryParamTest, ProfileChannelWidthDecidesConnectFlag)
+{
+    static const QttuneChannelDecl kWide[] = {{0x18DAF110u, 0x18DA10F1u}};
+    static const QttuneChannelDecl kMixed[] = {{0x7E8u, 0x7E0u},
+                                               {0x18DAF110u, 0x18DA10F1u}};
+    static QttuneSignalSet wide = {};
+    wide.channel_count = 1;
+    wide.channels = kWide;
+    static QttuneSignalSet mixed = {};
+    mixed.channel_count = 2;
+    mixed.channels = kMixed;
+    ASSERT_EQ(qttune_profile_register("test-29bit", &wide), QT_OK);
+    ASSERT_EQ(qttune_profile_register("test-mixed-width", &mixed), QT_OK);
+
+    char uri[700];
+    snprintf(uri, sizeof(uri), "j2534://%s?profile=test-29bit",
+             FAKE_J2534_DLL_PATH);
+    ASSERT_EQ(start_session_with_uri(uri), QT_OK);
+    EXPECT_EQ(last_flags, QTTUNE_PT_CAN_29BIT_ID);
+
+    snprintf(uri, sizeof(uri), "j2534://%s?profile=test-mixed-width",
+             FAKE_J2534_DLL_PATH);
+    qttune_session_t* session = nullptr;
+    EXPECT_EQ(qttune_session_create(uri, &session), QT_ERR_NO_TRANSPORT);
+    EXPECT_EQ(session, nullptr);
+}
+
 TEST_F(J2534QueryParamTest, MalformedQueriesRejectedAtSessionCreate)
 {
     qttune_session_t* session = nullptr;
@@ -211,6 +267,9 @@ TEST_F(J2534QueryParamTest, MalformedQueriesRejectedAtSessionCreate)
         "?band=250000",
         "?baud=250000&",
         "?baud=250000&&flags=1",
+        "?poll=",
+        "?poll=0x100",
+        "?poll=-1",
     };
     for (const char* q : bad_queries) {
         snprintf(uri, sizeof(uri), "j2534://%s%s", FAKE_J2534_DLL_PATH, q);
@@ -445,6 +504,43 @@ TEST_F(J2534AdoptionTest, RequestLoopWritesMode01AndReceivesStrippedEcho)
     EXPECT_EQ(cap.payloads[0][2], 0x1Fu);
     EXPECT_EQ(cap.payloads[0][3], 0x40u);
     EXPECT_EQ(static_cast<unsigned>(cap.payload_lens[0]), 4u);
+
+    EXPECT_EQ(qttune_session_close(session), QT_OK);
+    qttune_session_destroy(session);
+}
+
+/* ?poll=0x00 requests PID 0x00, the supported-PIDs bitmap for 0x01-0x20,
+ * which "0 = no poll" would make unreachable. The fake answers it with an
+ * all-zero bitmap: [41][00][4 bitmap bytes]. */
+TEST_F(J2534AdoptionTest, PollZeroRequestsSupportedPidBitmap)
+{
+    char uri[700];
+    snprintf(uri, sizeof(uri),
+             "j2534://%s?profile=raw&filter=0x7E8&poll=0x00",
+             FAKE_J2534_DLL_PATH);
+
+    qttune_session_t* session = nullptr;
+    ASSERT_EQ(qttune_session_create(uri, &session), QT_OK);
+
+    StreamCapture cap;
+    ASSERT_EQ(qttune_register_frame_callback(session, capture_cb, &cap),
+              QT_OK);
+    ASSERT_EQ(qttune_session_start(session), QT_OK);
+
+    wait_for_count(cap, 1, 100);
+    ASSERT_GE(cap.count.load(), 1) << "no reply to the PID 0x00 request";
+
+    unsigned char wbuf[64] = {};
+    unsigned long wlen = 0, wflags = 0;
+    get_recorded_write(0, wbuf, &wlen, &wflags);
+    EXPECT_EQ(wlen, 6u);
+    EXPECT_EQ(wbuf[4], 0x01u);   /* Mode 01 */
+    EXPECT_EQ(wbuf[5], 0x00u);   /* PID 0x00 */
+
+    EXPECT_EQ(cap.arbitration_ids[0], 0x7E8u);
+    EXPECT_EQ(cap.payloads[0][0], 0x41u);
+    EXPECT_EQ(cap.payloads[0][1], 0x00u);
+    EXPECT_EQ(static_cast<unsigned>(cap.payload_lens[0]), 6u);
 
     EXPECT_EQ(qttune_session_close(session), QT_OK);
     qttune_session_destroy(session);

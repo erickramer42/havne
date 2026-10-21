@@ -63,6 +63,7 @@ and the next run's screenshots confirmed the fixes the same day.
 | A subscription only chooses what the chart plots: an unsubscribed row keeps taking values and history, so the Dashboard stays live | `BridgeTest.UnsubscribedSignalKeepsUpdating` |
 | Display precision: `DecimalsRole` and `chartData()`'s `decimals` carry each def's `decimal_places` | `BridgeTest.DecimalsComeFromTheDefAndReachTheChart` |
 | The signal role names LiveView and `SignalHub` take as required properties (`name`, `unit`, `value`, `subscribed`, `hasValue`, `ageMs`, `decimals`) | `BridgeTest.SignalRoleNamesMatchQmlBindings` |
+| An async connect starts its session only on the GUI thread; a bridge destroyed before the completion runs destroys the unstarted session | `BridgeTest.DestroyedMidConnectLeavesNoRunningSession` (a probe callback sees no frames before the completion) |
 | Streaming continues past 10k cumulative frames; drops are counted and reported | `BridgeTest.StreamingContinuesPastTenThousandFrames`, `.BackpressureDropsAreCountedAndReported` |
 | Log sort toggle (newest first / oldest first) | `BridgeTest.SortProxy*` |
 | The frame role names the Log page binds (`timestampUs`, `dlc`, `extended`, `payloadHex`, `arbId`), read through the sort proxy | `BridgeTest.FrameRoleNamesMatchLogPageBindings` |
@@ -74,6 +75,7 @@ and the next run's screenshots confirmed the fixes the same day.
 | Teardown call order against the vendor API | `FakeFixture.OpenCloseCycleHitsVendorApi`, plus surrogate teardown |
 | `j2534://` session end to end with exact counts, payload fidelity and FIFO order | `J2534StreamTest` |
 | `?baud=` and `?flags=` reach `PassThruConnect`; defaults kept; malformed URIs rejected before any DLL load | `J2534QueryParamTest` |
+| 29-bit channels connect with `CAN_29BIT_ID` (from `?filter=`/`?txid=` or a profile), on top of `?flags=`; a profile mixing 11- and 29-bit channels is rejected at create | `J2534QueryParamTest.Wide29BitChannelSetsConnectFlag`, `.ProfileChannelWidthDecidesConnectFlag` |
 | Surrogate: spawn under the job object, pipe handshake, batched `OP_READ` delivery, dead DLL fails fast, clean teardown | `J2534SurrogateTest` |
 | Write, ioctl and filter relay on both backends, including whitelist refusal and malformed filter shapes | `J2534SurrogateTest`, `J2534RoutingTest.InprocWriteIoctlFilterRoundTrips` |
 | PE routing: x64 goes in-proc; a missing DLL gives an honest load failure with no spawn | `J2534RoutingTest` |
@@ -85,8 +87,11 @@ and the next run's screenshots confirmed the fixes the same day.
 | iOS app launches on the Simulator, stays up, and draws: Qt Quick on Metal ("Apple iOS simulator GPU"), on a 375×667 pt iPhone SE-class device | CI `ios-simulator-smoke`, 2026-10-20 (`4be8ba5` and `a0f5c0f`: both shots drawn; the first run's single shot was blank) |
 | Transport adoption: `?filter=` registers a FLOW_CONTROL filter; `?txid=` selects the transmit ID; `?poll=` drives a Mode-01 loop; header strip + arbitration_id stamp; filter stopped on detach; gating discards non-matching frames; `?poll=` with no channel (`raw`, no `?filter=`) rejected at attach, before any DLL load | `J2534AdoptionTest` |
 | `?poll=` outranks the profile's rotation: under `obd2`, five consecutive writes all request the URI's PID, to the derived 7E0 channel, and the reply decodes with the 7E8 identity | `J2534AdoptionTest.PollOverridesSchedulerRotation` |
+| `?poll=0x00` requests the supported-PIDs bitmap and its reply arrives with the 7E8 identity | `J2534AdoptionTest.PollZeroRequestsSupportedPidBitmap`; in the app through the fake, 2026-10-21 |
 | A blocked vendor `PassThruOpen` fails at the (shrunken) handshake timeout with the child alive, not wedged | `J2534SurrogateTest.BlockedVendorOpenFailsAtHandshakeTimeout` |
 | Session log: the client's lines share the child's log file, stamped and written as whole lines. A second concurrent session gets its own per-spawn log instead of none. | `J2534SurrogateTest.ClientAndChildLinesShareTheSessionLog`, `.SecondConcurrentSessionGetsItsOwnLog`; both also cross-arch (2026-10-20, 19/19) |
+| Payload logging: with `QTTUNE_SUR_LOG_FRAMES=1` at spawn, the child logs every written and read message verbatim (status, TxFlags or RxStatus, vendor timestamp, bytes); without it, no frame lines | `J2534SurrogateTest.FrameLoggingRecordsPayloadsVerbatimWhenEnabled`, also cross-arch (2026-10-21, 20/20); end to end in the app through the x86 surrogate, 2026-10-21 |
+| A child that misses two deadlines in a row is marked unresponsive: later transactions fail at once and close kills it without waiting | `J2534SurrogateTest.UnresponsiveChildFailsFastAfterTwoMissedDeadlines`, also cross-arch (2026-10-21, 21/21) |
 | A child that exits during `OP_OPEN` (failed DLL load) is reported by its exit code, not as a blocked vendor. A missing surrogate exe leaves its `CreateProcess failed` line in the session log. | Session logs read by hand, 2026-10-20 (`DeadDllFailsFastAtOpen`, `BlockedVendorOpenFailsAtHandshakeTimeout`, and a run with `QTTUNE_SURROGATE_EXE` pointing nowhere) |
 | Spec-spelling export resolution (`PassThruIoctl` primary, legacy `PassThruIoCtl` fallback), both backends | `FakeFixture.SpecSpellingPassThruIoctlResolvesAndWorks` (spec fake, primary path) plus the whole existing suite against the legacy-spelling fake (fallback path) |
 | Real-adapter lifecycle: OBDX Pro VX loads through the x86 surrogate, opens with USB power (vendor status 0), clean spawn/exit with disconnect, async connect keeps the UI responsive | BENCH session 2026-10-16, phase 1 |

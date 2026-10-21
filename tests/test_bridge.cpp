@@ -7,6 +7,9 @@
 #include <QVariant>
 
 #include <atomic>
+#include <chrono>
+#include <memory>
+#include <thread>
 
 #include "qttunebridge.h"   // QtTuneBridge + FrameListModel
 
@@ -566,7 +569,7 @@ TEST(BridgeTest, UnsubscribedSignalKeepsUpdating)
     QttuneSignalSet set;
     buildTestSignalSet(defs, set);
     model.setSignalSet(&set);
-    model.toggleSubscribed(0);
+    model.toggleSubscribed(0);   // row 0 is id 1001
 
     bool row0Notified = false;
     QObject::connect(&model, &QAbstractItemModel::dataChanged,
@@ -580,19 +583,26 @@ TEST(BridgeTest, UnsubscribedSignalKeepsUpdating)
 
     std::vector<std::pair<uint16_t, float>> batch;
     batch.emplace_back(uint16_t(1001), 3000.0f);
+    batch.emplace_back(uint16_t(2001), 7.0f);
     model.updateValues(batch, 10);
 
+    const QModelIndex row0 = model.index(0, 0);
     EXPECT_TRUE(row0Notified);
-    EXPECT_FLOAT_EQ(model.data(model.index(0, 0), SignalListModel::ValueRole).toFloat(),
-                    3000.0f);
-    EXPECT_TRUE(model.data(model.index(0, 0), SignalListModel::HasValueRole).toBool());
-    EXPECT_TRUE(model.chartData().isEmpty());   // still not plotted
+    EXPECT_FALSE(model.data(row0, SignalListModel::SubscribedRole).toBool());
+    EXPECT_FLOAT_EQ(model.data(row0, SignalListModel::ValueRole).toFloat(), 3000.0f);
+    EXPECT_TRUE(model.data(row0, SignalListModel::HasValueRole).toBool());
+
+    // Only the subscribed row is plotted
+    const QVariantList plotted = model.chartData();
+    ASSERT_EQ(plotted.size(), 1);
+    EXPECT_EQ(plotted.at(0).toMap().value("id").toInt(), 2001);
 
     // Plotted again: the sample taken while unsubscribed is in its trace
     model.toggleSubscribed(0);
-    const QVariantList data = model.chartData();
-    ASSERT_EQ(data.size(), 1);
-    EXPECT_EQ(data.at(0).toMap().value("samples").toList().size(), 2);
+    const QVariantList both = model.chartData();
+    ASSERT_EQ(both.size(), 2);
+    EXPECT_EQ(both.at(0).toMap().value("id").toInt(), 1001);
+    EXPECT_EQ(both.at(0).toMap().value("samples").toList().size(), 2);   // one [ts, val]
 }
 
 /* LiveView's delegate and SignalHub's Entry take these roles as
@@ -762,6 +772,42 @@ TEST(BridgeTest, AsyncConnectCompletesOffGuiThread)
     EXPECT_TRUE(bridge.connected());
     bridge.disconnectSession();
     EXPECT_FALSE(bridge.connected());
+}
+
+namespace {
+void countFramesCb(const qttune_frame_t*, void* user_data)
+{
+    static_cast<std::atomic<int>*>(user_data)->fetch_add(1);
+}
+}  // namespace
+
+/* An async connect whose completion never runs, because the bridge is
+ * destroyed first, must not leave a running session calling onFrame on
+ * the freed bridge. The connect thread creates and registers but doesn't
+ * start, and the destructor destroys what it left pending. The event
+ * loop isn't spun while the bridge lives, so the completion can't run;
+ * a started mock session would reach the probe callback every 50 ms. */
+TEST(BridgeTest, DestroyedMidConnectLeavesNoRunningSession)
+{
+    auto bridge = std::make_unique<QtTuneBridge>();
+    bridge->connectSessionAsync(QStringLiteral("mock://demo"));
+
+    qttune_session_t* pending = nullptr;
+    for (int i = 0; i < 500 && pending == nullptr; ++i) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        pending = bridge->pendingSessionForTesting();
+    }
+    ASSERT_NE(pending, nullptr) << "the connect thread produced no session";
+
+    std::atomic<int> frames{0};
+    ASSERT_EQ(qttune_register_frame_callback(pending, countFramesCb, &frames), QT_OK);
+    std::this_thread::sleep_for(std::chrono::milliseconds(300));
+    EXPECT_EQ(frames.load(), 0) << "the session started before the GUI thread took it";
+    ASSERT_EQ(qttune_unregister_frame_callback(pending, countFramesCb, &frames), QT_OK);
+
+    bridge.reset();   // the queued completion is dropped; the destructor destroys `pending`
+    spinLoop(50);     // nothing queued may run against the freed bridge
+    EXPECT_EQ(frames.load(), 0);
 }
 
 // ---------------------------------------------------------------------------

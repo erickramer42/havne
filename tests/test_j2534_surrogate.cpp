@@ -500,6 +500,110 @@ TEST(J2534SurrogateTest, ClientAndChildLinesShareTheSessionLog)
     EXPECT_GE(lines, 4);   /* client spawn line + child startup stages */
 }
 
+namespace {
+/* Sets an environment variable for one scope. The child snapshots its
+ * environment at spawn, so arm before open; the destructor clears the
+ * variable even when an ASSERT returns early. */
+struct EnvArm {
+    const char* name;
+    EnvArm(const char* n, const char* v) : name(n) { SetEnvironmentVariableA(n, v); }
+    ~EnvArm() { SetEnvironmentVariableA(name, nullptr); }
+    EnvArm(const EnvArm&) = delete;
+    EnvArm& operator=(const EnvArm&) = delete;
+};
+}  // namespace
+
+/* QTTUNE_SUR_LOG_FRAMES=1 puts every message written and read into the
+ * session log verbatim: status, flags, the vendor timestamp and the
+ * bytes. Without it the log keeps its counts and status changes only. */
+TEST(J2534SurrogateTest, FrameLoggingRecordsPayloadsVerbatimWhenEnabled)
+{
+    const uint8_t req[6] = {0x00, 0x00, 0x07, 0xE0, 0x01, 0x0C};
+    const uint8_t rsp[8] = {0x00, 0x00, 0x07, 0xE8, 0x41, 0x0C, 0x1F, 0x40};
+    std::string logs[2];   /* [0] disabled, [1] enabled */
+
+    for (int enabled = 1; enabled >= 0; --enabled) {
+        EnvArm arm("QTTUNE_SUR_LOG_FRAMES", enabled ? "1" : nullptr);
+        qttune_j2534_sur_handle_t* h = nullptr;
+        ASSERT_EQ(qttune_j2534_sur_open(fake_dll_path(), &h), QT_OK);
+        unsigned long channel = 0;
+        ASSERT_EQ(qttune_j2534_sur_connect_channel(h, 0, 0, &channel), QT_OK);
+
+        uint32_t written = 0;
+        ASSERT_EQ(qttune_j2534_sur_write_frame(h, channel, req, sizeof(req),
+                                               QTTUNE_PT_TX_ISO15765_FRAME_PAD,
+                                               0, &written), QT_OK);
+        ASSERT_EQ(qttune_j2534_sur_inject_test_frame(h, rsp, sizeof(rsp),
+                                                     4242, 0), QT_OK);
+        /* The fake returns one message per read: the write's echo, then
+         * the injected frame. Extra reads come back empty. */
+        for (int i = 0; i < 4; ++i) {
+            qttune_frame_t f = {};
+            bool got = false;
+            (void)qttune_j2534_sur_read_frame(h, channel, &f, 20, &got);
+        }
+
+        const std::string path = qttune_j2534_sur_log_path(h);
+        ASSERT_EQ(qttune_j2534_sur_close(h), QT_OK);   /* child exits: log complete */
+        ASSERT_FALSE(path.empty());
+        logs[enabled] = read_session_log(path);
+    }
+
+    const std::string& on = logs[1];
+    EXPECT_NE(on.find("frame logging on (QTTUNE_SUR_LOG_FRAMES=1)"), std::string::npos) << on;
+    EXPECT_NE(on.find("OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 0C"),
+              std::string::npos) << on;
+    EXPECT_NE(on.find("ts 4242, len 8: 00 00 07 E8 41 0C 1F 40"), std::string::npos) << on;
+
+    const std::string& off = logs[0];
+    EXPECT_EQ(off.find(" frame: "), std::string::npos) << "frame lines without the knob:\n" << off;
+    EXPECT_NE(off.find("OP_WRITE: status 0"), std::string::npos) << off;
+}
+
+/* A child that misses two deadlines in a row (a transaction's, then the
+ * wait for its late reply) is wedged, not slow. Later transactions fail
+ * at once instead of each costing another 3 s, which a teardown would
+ * otherwise pay per filter, for the disconnect and for the close, and
+ * close kills the child without waiting for a polite exit. A slow vendor
+ * that answers inside the second wait still recovers
+ * (TimedOutOpDoesNotDesyncNextRequest). The fake's one-shot ioctl stall
+ * wedges the single-threaded child for 20 s. */
+TEST(J2534SurrogateTest, UnresponsiveChildFailsFastAfterTwoMissedDeadlines)
+{
+    using clock = std::chrono::steady_clock;
+    qttune_j2534_sur_handle_t* h = nullptr;
+    {
+        EnvArm arm("QTTUNE_FAKE_IOCTL_DELAY_MS", "20000");
+        ASSERT_EQ(qttune_j2534_sur_open(fake_dll_path(), &h), QT_OK);
+    }
+    unsigned long channel = 0;
+    ASSERT_EQ(qttune_j2534_sur_connect_channel(h, 0, 0, &channel), QT_OK);
+    const std::string path = qttune_j2534_sur_log_path(h);
+
+    /* First deadline: the ioctl outlives the 3 s transaction timeout. */
+    unsigned char out[8] = {};
+    uint32_t out_len = 0;
+    EXPECT_EQ(qttune_j2534_sur_ioctl(h, channel, QTTUNE_PT_IOCTL_READ_VBATT,
+                                     nullptr, 0, out, &out_len),
+              QT_ERR_NO_TRANSPORT);
+
+    /* Second: its late reply doesn't come within another timeout. */
+    EXPECT_EQ(qttune_j2534_sur_disconnect_channel(h, channel), QT_ERR_NO_TRANSPORT);
+
+    /* From here, every transaction fails at once. */
+    auto t0 = clock::now();
+    EXPECT_EQ(qttune_j2534_sur_stop_msg_filter(h, channel, 1), QT_ERR_NO_TRANSPORT);
+    EXPECT_LT(clock::now() - t0, std::chrono::milliseconds(500));
+
+    /* Close kills the child instead of waiting 1.5 s twice. */
+    t0 = clock::now();
+    EXPECT_EQ(qttune_j2534_sur_close(h), QT_OK);
+    EXPECT_LT(clock::now() - t0, std::chrono::milliseconds(1000));
+
+    const std::string log = read_session_log(path);
+    EXPECT_NE(log.find("child unresponsive"), std::string::npos) << log;
+}
+
 /* The session log is opened CREATE_ALWAYS with FILE_SHARE_READ only,
  * so while one session's child holds it, a second concurrent
  * session's open fails. That session must get a per-spawn name, not

@@ -54,6 +54,14 @@ static HANDLE g_pipe = INVALID_HANDLE_VALUE;
  * 67 KB. Safe because the child is single-threaded. */
 static PASSTHRU_MSG s_read_batch[QTTUNE_SUR_MAX_FRAMES_PER_READ];
 
+/* QTTUNE_SUR_LOG_FRAMES=1 logs every message the vendor returns and
+ * every one written, bytes verbatim, with RxStatus or TxFlags and the
+ * vendor timestamp: the payload evidence a BENCH or vehicle session
+ * records. Off by default, because a polling session then adds a line
+ * per request and per reply. Read once at startup; the child's
+ * environment is fixed at spawn. */
+static bool g_log_frames = false;
+
 static void stage(const char* fmt, ...)
 {
     /* Local wall-clock time, the same stamp the client puts on its
@@ -83,6 +91,24 @@ static void stage(const char* fmt, ...)
     DWORD written = 0;
     (void)WriteFile(GetStdHandle(STD_ERROR_HANDLE), line,
                     static_cast<DWORD>(len), &written, nullptr);
+}
+
+/* "41 0C 1F 40" for the first QTTUNE_SUR_MSG_MAX bytes, then " +N" for
+ * the rest, so a long message can't overrun stage()'s line. */
+static void format_hex(char* out, size_t cap, const unsigned char* data,
+                       unsigned long size)
+{
+    const unsigned long shown = (size < QTTUNE_SUR_MSG_MAX)
+                                ? size : QTTUNE_SUR_MSG_MAX;
+    size_t pos = 0;
+    out[0] = '\0';
+    for (unsigned long i = 0; i < shown && pos + 4 < cap; ++i) {
+        pos += static_cast<size_t>(snprintf(out + pos, cap - pos,
+                                            i ? " %02X" : "%02X", data[i]));
+    }
+    if (size > shown && pos < cap) {
+        (void)snprintf(out + pos, cap - pos, " +%lu", size - shown);
+    }
 }
 
 static FARPROC resolve_export(HMODULE mod, const char* primary,
@@ -165,9 +191,17 @@ static int handle_op_read(unsigned long channel, uint32_t timeout_ms,
                               ? num : QTTUNE_SUR_MAX_FRAMES_PER_READ;
     for (unsigned long i = 0; i < lim; ++i) {
         const PASSTHRU_MSG& m = s_read_batch[i];
+        const bool indication = (m.RxStatus & (QTTUNE_PT_TX_INDICATION |
+                                               QTTUNE_PT_TX_MSG_TYPE)) != 0;
+        if (g_log_frames) {
+            char hex[3 * QTTUNE_SUR_MSG_MAX + 16];
+            format_hex(hex, sizeof(hex), m.Data, m.DataSize);
+            stage("OP_READ frame: status %ld, rx 0x%08lX, ts %lu, len %lu: %s%s",
+                  rc, m.RxStatus, m.Timestamp, m.DataSize, hex,
+                  indication ? " (indication, not delivered)" : "");
+        }
         /* Drop TX indications/echoes — they are transport bookkeeping */
-        if (m.RxStatus & (QTTUNE_PT_TX_INDICATION |
-                          QTTUNE_PT_TX_MSG_TYPE)) {
+        if (indication) {
             continue;
         }
         uint32_t dsz = m.DataSize;
@@ -205,7 +239,14 @@ static int handle_op_write(unsigned long channel, const uint8_t* data,
     unsigned long num = 1;
     long rc = g_write_msgs(channel, &msg, &num, timeout_ms);
     if (out_num != nullptr) *out_num = static_cast<uint32_t>(num);
-    
+
+    if (g_log_frames) {
+        char hex[3 * QTTUNE_SUR_MSG_MAX + 16];
+        format_hex(hex, sizeof(hex), msg.Data, msg.DataSize);
+        stage("OP_WRITE frame: status %ld, tx 0x%08lX, len %lu: %s",
+              rc, msg.TxFlags, msg.DataSize, hex);
+    }
+
     /* Status-change logging: a healthy scheduler writes ~10/s, and a
      * per-call line would bury the interesting ones. The first write
      * and every change of (status, count) still log. */
@@ -373,6 +414,14 @@ int main(int argc, char* argv[])
                          0, nullptr, OPEN_EXISTING, 0, nullptr);
     if (g_pipe == INVALID_HANDLE_VALUE) return 7;
     stage("pipe connected");
+
+    char log_frames[4] = {};
+    if (GetEnvironmentVariableA("QTTUNE_SUR_LOG_FRAMES", log_frames,
+                                sizeof(log_frames)) > 0 &&
+        strcmp(log_frames, "1") == 0) {
+        g_log_frames = true;
+        stage("frame logging on (QTTUNE_SUR_LOG_FRAMES=1)");
+    }
 
     g_module = LoadLibraryExA(dll_path, nullptr, LOAD_WITH_ALTERED_SEARCH_PATH);
     if (g_module == nullptr) {

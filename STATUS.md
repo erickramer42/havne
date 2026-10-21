@@ -64,7 +64,9 @@ next.
   - Surrogate diagnostics: client and child write one session log,
     both stamped `HH:MM:SS.mmm`, so a GUI launch keeps the whole story
     without a stderr redirect; a second concurrent session gets its own
-    log (`995519b`, PR #11).
+    log (`995519b`, PR #11). With `QTTUNE_SUR_LOG_FRAMES=1` at launch,
+    the child also logs every request and reply verbatim, so a bench or
+    vehicle session records its payloads without screenshots.
 - **Not yet:**
   - BENCH coverage beyond the quiet-bus tier. The formal first BENCH
     session (2026-10-16, [docs/bench-sessions/2026-10-16.md](docs/bench-sessions/2026-10-16.md))
@@ -85,8 +87,8 @@ next.
     channel derivation are HARNESS-verified against the fake; a
     live-vehicle session (real ECU responses, talking-bus items in
     the BENCH prep list) is still ahead.
-  - **Tests:** 165 ctest cases (Windows/MSVC 2022, both trees
-    rebuilt, 2026-10-21), plus the cross-arch subset (19/19). All
+  - **Tests:** 171 ctest cases (Windows/MSVC 2022, both trees
+    rebuilt, 2026-10-21), plus the cross-arch subset (21/21). All
     passed except the env-gated cross-arch skip. CI was green on all
     eight jobs on PR #15 (merged as `0956784`), including the
     simulator smoke. That covers ctest on Windows, macOS and Linux,
@@ -246,7 +248,8 @@ it a genuine connect candidate.
 3. **No checksum byte.** This is ISO 15765-4 over CAN, so the K-line
    checksum convention doesn't apply.
 4. **29-bit addressing** is assumed whenever either ID is above
-   `0x7FF`.
+   `0x7FF`: writes carry `CAN_29BIT_ID`, and the channel connects with
+   it.
 5. **Timestamps** are passed through as microseconds, as the spec
    says (#12).
 6. **ReadMsgs statuses.** Split in both backends since 2026-10-19:
@@ -369,28 +372,15 @@ an issue is resolved it is removed, and its number is not reused.
     run), or Qt's arm64 simulator libraries if Qt ships them. Apple is
     also winding down Rosetta, so the first option has its own end
     date.
-32. **Closing the app during an async connect leaks a running
-    session.** The connect thread creates the session, registers the
-    bridge's `onFrame` and starts the worker, then posts the session
-    in a completion queued against the bridge. If the bridge is
-    destroyed first, that completion is dropped, `m_session` was never
-    set, and the destructor has nothing to destroy: the worker keeps
-    calling `onFrame` on a freed bridge until the process exits. The
-    fix is to start the session in `applyConnectedState`, and to have
-    the destructor destroy a session the connect thread produced.
 33. **Disconnect blocks the GUI thread.** `disconnectSession` tears the
     session down synchronously. A dead surrogate child fails fast on
-    the broken pipe, but a wedged one costs each teardown transaction
-    its full timeout, because the client doesn't latch "broken" after
-    the first timeout. Make disconnect async, and latch after the
-    first transaction timeout.
-34. **29-bit IDs need `?flags=` at connect.** The transport sets
-    `CAN_29BIT_ID` on writes whenever a channel's ID is above `0x7FF`
-    (BENCH prep item 4), but `PassThruConnect` gets only the URI's
-    `?flags=`. A 29-bit `?filter=`, or a future profile channel, opens
-    an 11-bit channel unless `?flags=` sets the bit. No shipped profile
-    declares a 29-bit channel. Derive the connect flags from the
-    channels.
+    the broken pipe. A wedged one costs about 6 s at worst: the
+    transaction in flight, plus the one that marks the child
+    unresponsive, after which the rest of the teardown fails at once
+    and close kills the child ([j2534.md](docs/j2534.md#surrogate)).
+    Making disconnect async removes the freeze; it needs a
+    "disconnecting" state in the UI.
+
 ## Roadmap
 
 | Version | Scope | Status |

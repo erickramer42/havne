@@ -29,6 +29,14 @@ struct qttune_j2534_sur_handle {
     uint32_t next_request_id = 1;
     uint32_t pending_response_id = 0;   /* response in flight from a
                                            timed-out transaction */
+    /* The child missed two deadlines in a row: a transaction's, then
+     * the wait for its late reply. A slow vendor answers inside the
+     * second; a wedged one doesn't. From then on every transaction
+     * fails at once instead of costing another timeout each (a
+     * teardown would otherwise pay one per filter, the disconnect and
+     * the close), and close kills the child without the polite
+     * shutdown. */
+    bool unresponsive = false;
     /* Batch cache: one OP_READ returns up to 16 frames; dispensed one
      * per read_frame call. Worker-thread-only by construction (the
      * transport serializes all reads through its worker). */
@@ -207,8 +215,8 @@ read_result ov_read(HANDLE pipe, void* buf, DWORD len, DWORD timeout_ms,
 
 /* Read and discard the late reply to a previous timed-out request, so
  * the next request isn't paired with it (every later call would fail
- * the ID check). If that reply never arrives, the child is hung: fail
- * without sending anything new.
+ * the ID check). If that reply never arrives, the child is hung: mark
+ * the handle unresponsive and fail without sending anything new.
  *
  * If the late reply was an OP_READ's, its frames are dropped with it.
  * That takes a read the child answered more than 500 ms past its own
@@ -220,8 +228,10 @@ bool drain_pending(qttune_j2534_sur_handle_t* h, DWORD timeout_ms)
     const read_result rr = ov_read(h->pipe, &stale, sizeof(stale),
                                    timeout_ms, &got, &rerr);
     if (rr != RD_OK) {
-        SUR_LOG(h, "drain_pending: stale response id=%u never arrived\n",
+        SUR_LOG(h, "drain_pending: stale response id=%u never arrived; "
+                "child unresponsive, later requests fail at once\n",
                 h->pending_response_id);
+        h->unresponsive = true;
         return false;
     }
     if (stale.request_id != h->pending_response_id) {
@@ -239,6 +249,9 @@ bool drain_pending(qttune_j2534_sur_handle_t* h, DWORD timeout_ms)
 bool transact(qttune_j2534_sur_handle_t* h, const qttune_sur_request_t& req,
               qttune_sur_response_t* out_resp, DWORD timeout_ms)
 {
+    if (h->unresponsive) {
+        return false;
+    }
     if (h->pending_response_id != 0) {
         if (!drain_pending(h, timeout_ms)) {
             return false;
@@ -793,9 +806,13 @@ qttune_status_t qttune_j2534_sur_close(qttune_j2534_sur_handle_t* h)
         req.request_id = h->next_request_id++;
         req.opcode = QTTUNE_SUR_OP_SHUTDOWN;
         qttune_sur_response_t resp = {};
-        (void)transact(h, req, &resp, 1500);
+        (void)transact(h, req, &resp, 1500);   /* fails at once if unresponsive */
     }
-    if (h->process != nullptr) WaitForSingleObject(h->process, 1500);
+    /* An unresponsive child won't exit on its own: closing the job
+     * below kills it, so don't wait for it first. */
+    if (h->process != nullptr && !h->unresponsive) {
+        WaitForSingleObject(h->process, 1500);
+    }
     if (h->pipe != INVALID_HANDLE_VALUE) CloseHandle(h->pipe);
     if (h->process != nullptr) CloseHandle(h->process);
     if (h->job != nullptr) CloseHandle(h->job);

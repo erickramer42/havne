@@ -48,10 +48,14 @@ that runs to the end undocumented.
 - [ ] Full suite green: every case passes except the env-gated skip
       (current count in [STATUS.md](../../STATUS.md)), plus the
       cross-arch subset
-- [ ] Launch from a shell with `qttune.exe 2> sur.log`. The session log
-      at `%TEMP%\qttune-surrogate.log` should hold both
-      `[surrogate HH:MM:SS.mmm]` and `[sur …]` lines; the redirect is
-      a backup. **Copy the session log after every connect**: each
+- [ ] Launch from a cmd shell with payload logging on:
+      `set QTTUNE_SUR_LOG_FRAMES=1`, then `qttune.exe 2> sur.log`. The
+      session log at `%TEMP%\qttune-surrogate.log` should hold both
+      `[surrogate HH:MM:SS.mmm]` and `[sur …]` lines, and its second
+      child line reads "frame logging on". Once connected, every request
+      and reply appears as an `OP_WRITE frame` / `OP_READ frame` line
+      with its bytes ([j2534.md](../j2534.md#surrogate)); the redirect
+      is a backup. **Copy the session log after every connect**: each
       spawn rewrites it.
 - [ ] Know the four link states before you need them (see
       [j2534.md](../j2534.md#session-lifecycle)):
@@ -107,7 +111,7 @@ before the first failure.
       correct here
 
 **Evidence:** quiet or unsolicited frames, and if frames, their IDs
-and payloads verbatim.
+and payloads verbatim (the session log's `OP_READ frame` lines).
 
 ## Phase 2 — one PID
 
@@ -123,17 +127,25 @@ is requested)
       data bytes; engine off, RPM reads 0 or close to it. On the wire
       the reply is an 8-byte CAN frame with a PCI byte and padding, but
       the adapter reassembles ISO 15765 and hands over only the data,
-      so DLC 4 is what to expect. Record the DLC either way:
+      so DLC 4 is what to expect. Record the DLC either way (in the
+      session log's `OP_READ frame` lines, `len` includes the 4-byte
+      CAN ID, so DLC 4 is `len 8`):
       - DLC 8 starting `41 0C`: this adapter passes the padding through.
         Decoding still works; note the pad bytes;
       - a payload that doesn't start with `41` (for example
         `04 41 0C …`): a PCI byte left in-band (see "If it fails")
 - [ ] LiveView: RPM populated; every other signal shows "—"
 - [ ] No banner (link ok)
+- [ ] Optional, same ignition state: connect
+      `j2534://OBDX Pro - VX?profile=raw&filter=0x7E8&poll=0x00` and
+      record one reply: `41 00` plus four bitmap bytes naming the
+      supported PIDs 0x01–0x20 (the first byte's top bit is PID 0x01).
+      It predicts which Phase 3 signals stay "—"
 
-**Evidence:** a few payloads verbatim (Pause on the Log page holds the
-rows still while you write them down); the session log's `OP_WRITE` and
-`OP_READ` lines (statuses and frame counts).
+**Evidence:** the session log: its `OP_WRITE frame` and
+`OP_READ frame` lines carry the request and reply bytes, statuses,
+RxStatus and vendor timestamps. To compare a few payloads against the
+Log page, Pause holds its rows still.
 
 ## Phase 3 — full scheduler
 
@@ -200,13 +212,13 @@ ignition off, wait 10 s, then turn it back on.
 
 | Symptom | Suspect |
 |---|---|
-| Writes fail with the ignition on (`OP_WRITE: status` nonzero) | BENCH prep #2, request framing (6-byte logical message with `ISO15765_FRAME_PAD`); then baud (500 k assumed) or a 29-bit vehicle (prep #4). The bare URI is 11-bit only, and a 29-bit channel also needs `?flags=0x100` (`CAN_29BIT_ID`) at connect (Known Issue #34): record and stop rather than improvise |
+| Writes fail with the ignition on (`OP_WRITE: status` nonzero) | BENCH prep #2, request framing (6-byte logical message with `ISO15765_FRAME_PAD`); then baud (500 k assumed) or a 29-bit vehicle (prep #4). The bare URI is 11-bit only. 29-bit IDs given with `?filter=`/`?txid=` connect with `CAN_29BIT_ID` automatically, but no 29-bit OBD IDs are prepared: record and stop rather than improvise |
 | Writes succeed but no frames arrive | The ECU doesn't answer physical 0x7E0: retry Phase 2 with `?poll=0x0C&txid=0x7DF` (functional request, replies still on 0x7E8); then the flow-control filter (prep #1) |
-| `0x7E8` frames on the Log page, but LiveView shows "—" everywhere | Payload shape: stamping already proves the channel matched, so suspect a PCI byte left in-band shifting `[41][PID]`. Record payloads verbatim |
+| `0x7E8` frames on the Log page, but LiveView shows "—" everywhere | Payload shape: stamping already proves the channel matched, so suspect a PCI byte left in-band shifting `[41][PID]`. The `OP_READ frame` lines show the bytes as the vendor returned them |
 | Values implausible (−40 °C, huge RPM) | Scaling or byte order: temperatures are UINT8 with a −40 offset; 2-byte PIDs are big-endian |
 | Link flips between ok and quiet while frames arrive | Unmatched frames interleaving with replies: a single unmatched frame reads as quiet with no debounce, by design. Note the frame IDs |
 | Slow refresh, replies a cycle late | Known refresh-rate item (20 ms first read vs up to 50 ms ECU response). Measure; don't fix in the session |
-| UI freezes on Disconnect | Known: disconnect is synchronous (Known Issue #33). Wait it out, then note how long |
+| UI freezes on Disconnect | Known: disconnect is synchronous (Known Issue #33); against a wedged adapter it can take about 6 s. Wait it out, then note how long and whether the session log says `child unresponsive` |
 | App crashes | Abort. Capture the session log and `sur.log` before relaunching |
 
 ## Evidence against the BENCH prep list
@@ -216,8 +228,8 @@ ignition off, wait 10 s, then turn it back on.
 | #2 Request framing | Phase 2 replies arrive |
 | #3 No checksum byte | Replies decode without a trailing byte |
 | #4 29-bit addressing | 11-bit IDs expected; any 29-bit traffic is news |
-| #5 Timestamp units | Phase 3 `timestamp_us` deltas match the wall clock |
-| #6 ReadMsgs statuses | Session log: does any `OP_READ: status 9` line carry `frames` > 0 (`ERR_TIMEOUT` with data)? |
+| #5 Timestamp units | Phase 3: the `ts` deltas in `OP_READ frame` lines match their wall-clock stamps (µs) |
+| #6 ReadMsgs statuses | Session log: does any `OP_READ frame: status 9` line appear (`ERR_TIMEOUT` with data)? |
 | #7 Struct layout | A correct decode in phases 2–3 implies the layout is right |
 | #8 Vendor timeouts | Read timing visible in the session log stamps |
 
