@@ -510,6 +510,7 @@ after the first vehicle session.
   vehicles. Needs Service 22 requests (the scheduler builds Service 01
   only) and the profile API from ADR-0013, and serves as the pilot
   for the v0.5.0 plugin modules.
+- Computed signal coverage -> boost pressure
 
 ### Transports and platforms
 

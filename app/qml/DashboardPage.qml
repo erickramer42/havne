@@ -100,22 +100,19 @@ Page {
                 Rectangle {
                     implicitWidth: 8; implicitHeight: 8   // layout-managed
                     radius: 4
-                    // Same mapping as the Home status card
-                    color: !QtTune.connected ? Theme.danger
-                         : QtTune.linkState === "ok" ? Theme.success
-                         : QtTune.linkState === "fault" ? Theme.danger
-                         : Theme.warning
+                    color: Theme.linkColor(QtTune.linkState)
                 }
                 Label {
                     Layout.fillWidth: true
                     elide: Text.ElideMiddle
-                    text: !QtTune.connected ? qsTr("No session")
-                         : QtTune.linkState === "ok" ? qsTr("Live · %1").arg(QtTune.currentUri)
-                         : QtTune.linkState === "fault" ? qsTr("Adapter fault")
-                         : QtTune.linkState === "quiet" ? qsTr("Link quiet")
-                         : qsTr("Link degraded")
+                    // Short statuses come from Theme.linkLabel; "ok" keeps
+                    // the richer URI text. Long-form detail (episode
+                    // counts, error codes) stays in LiveView's banner.
+                    text: QtTune.linkState === "ok"
+                          ? qsTr("Live · %1").arg(QtTune.currentUri)
+                          : Theme.linkLabel(QtTune.linkState)
                     font.pixelSize: 13
-                    color: Theme.textDim
+                    color: Theme.linkColor(QtTune.linkState)
                 }
                 ThemedButton {
                     text: qsTr("Reset peaks")
@@ -167,7 +164,9 @@ Page {
                         value: rpm.value; hasValue: rpm.live; stale: rpm.stale; note: rpm.note
                         from: 0; to: 8000
                         majorStep: 1000; minorStep: 250; labelDivisor: 1000
-                        dangerFrom: 7000
+                        // Danger from the shift point (6800), so the red
+                        // zone is entered before the 7000 limiter cuts in
+                        dangerFrom: 6800
                         showProgress: true
                         showPeak: true
                     }
