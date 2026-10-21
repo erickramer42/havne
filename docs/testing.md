@@ -79,6 +79,8 @@ and the next run's screenshots confirmed the fixes the same day.
 | Transport adoption: `?filter=` registers a FLOW_CONTROL filter; `?txid=` selects the transmit ID; `?poll=` drives a Mode-01 loop; header strip + arbitration_id stamp; filter stopped on detach; gating discards non-matching frames; `?poll=` with no channel (`raw`, no `?filter=`) rejected at attach, before any DLL load | `J2534AdoptionTest` |
 | `?poll=` outranks the profile's rotation: under `obd2`, five consecutive writes all request the URI's PID, to the derived 7E0 channel, and the reply decodes with the 7E8 identity | `J2534AdoptionTest.PollOverridesSchedulerRotation` |
 | A blocked vendor `PassThruOpen` fails at the (shrunken) handshake timeout with the child alive, not wedged | `J2534SurrogateTest.BlockedVendorOpenFailsAtHandshakeTimeout` |
+| Session log: the client's lines share the child's log file, stamped and written as whole lines. A second concurrent session gets its own per-spawn log instead of none (code review finding 9). | `J2534SurrogateTest.ClientAndChildLinesShareTheSessionLog`, `.SecondConcurrentSessionGetsItsOwnLog`; both also cross-arch (2026-10-20, 19/19) |
+| A child that exits during `OP_OPEN` (failed DLL load) is reported by its exit code, not as a blocked vendor. A missing surrogate exe leaves its `CreateProcess failed` line in the session log. | Session logs read by hand, 2026-10-20 (`DeadDllFailsFastAtOpen`, `BlockedVendorOpenFailsAtHandshakeTimeout`, and a run with `QTTUNE_SURROGATE_EXE` pointing nowhere) |
 | Spec-spelling export resolution (`PassThruIoctl` primary, legacy `PassThruIoCtl` fallback), both backends | `FakeFixture.SpecSpellingPassThruIoctlResolvesAndWorks` (spec fake, primary path) plus the whole existing suite against the legacy-spelling fake (fallback path) |
 | Real-adapter lifecycle: OBDX Pro VX loads through the x86 surrogate, opens with USB power (vendor status 0), clean spawn/exit with disconnect, async connect keeps the UI responsive | BENCH session 2026-10-16, phase 1 |
 | The 8-byte FLOW_CONTROL filter shape (prep #1, `fc_len == mask_len` workaround) is accepted by a real vendor — behaviorally, since the child didn't yet log filter ops (Known Issue #23). The 4-byte shape that replaced it was accepted on 2026-10-20 (row below). Quiet-bus read loop at <1% CPU, zero spurious frames | BENCH session 2026-10-16, phase 2 |
@@ -172,6 +174,11 @@ have since been fixed in code; re-run both rows.
   child must stay alive after a vendor refusal (ADR-0014). Tests check
   the refusal's status, but `sur_close` returns `QT_OK` whether or not
   the child is still alive, so an early exit would go unnoticed.
+- **The client's skew and late-reply paths aren't exercised.** No test
+  child sends a `num_frames` or ioctl `data_len` past the wire limit,
+  and none answers an `OP_READ` late enough for `drain_pending` to
+  drop frames. Reaching either needs a misbehaving child, such as a
+  fault-injection knob in the surrogate.
 - **Profile-derived channels against a real vendor.** The
   derived-filter shape and per-PID request routing are
   fake-verified. On 2026-10-20 a bare `j2534://` URI got the derived

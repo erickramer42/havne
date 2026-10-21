@@ -200,14 +200,21 @@ client/transport — in this order:
 2. **Full suite, bare shell** (no env vars — the cross-arch case
    must *skip*, visibly, never silently fall back).
 3. **Cross-arch run** with the variables exported (below).
-4. **Child-log check** when tracing changed. The suite can't see the
-   child's stderr; new trace lines are verified manually in
-   `%TEMP%\qttune-surrogate.log` (copy before respawning — it is
-   rewritten per spawn). Since 2026-10-19 the child logs one line
-   per vendor call with its status (`OP_OPEN`, `OP_CONNECT`,
-   `OP_DISCONNECT`, `OP_WRITE`, `OP_IOCTL`, `OP_START_FILTER`,
-   `OP_STOP_FILTER`); grep for the op you changed. After a clean
-   close, `OP_DISCONNECT: vendor status 0` should appear exactly once.
+4. **Session-log check** when tracing changed. The log is
+   `%TEMP%\qttune-surrogate.log`. Copy it before the next spawn,
+   because each spawn rewrites it. It holds the child's lines
+   (`[surrogate HH:MM:SS.mmm]`) and the client's (`[sur ...]`) in time
+   order. A session started while another holds that file logs to
+   `qttune-surrogate-<pid>-<n>.log` instead ([j2534.md](j2534.md#surrogate)).
+   - The child logs one line per vendor call with its status:
+     `OP_OPEN`, `OP_CONNECT`, `OP_DISCONNECT`, `OP_WRITE`,
+     `OP_IOCTL`, `OP_START_FILTER` and `OP_STOP_FILTER`. Grep for the
+     op you changed.
+   - After a clean close, `OP_DISCONNECT: vendor status 0` should
+     appear exactly once.
+   - Tests can read the log through `qttune_j2534_sur_log_path()`, as
+     `ClientAndChildLinesShareTheSessionLog` does. A new trace line is
+     still worth reading by eye once.
 5. If the app is affected, rebuild the `qttune` target (after the
    Win32 tree) so the deployment copy picks up the new surrogate.
 
@@ -269,7 +276,7 @@ skips.
 | Test discovery fails at build time with `0xc0000135` | A DLL is missing. Discovery runs the test binary during the build, so Qt-linked test targets must copy `$<TARGET_RUNTIME_DLLS>` POST_BUILD, ordered before `gtest_discover_tests`. |
 | Surrogate test fails with child exit code 5 | An export can't be found by name, usually because of x86 `__stdcall` decoration. Check the `.def` file. Other exit codes are listed in [j2534.md](j2534.md#surrogate). |
 | Cross-arch test fails with odd values, but same-arch passes | The `build-win32` tree is stale. Rebuild both trees. |
-| In the app, an x86 adapter (for example the OBDX Pro VX) fails with "failed to load transport library", and `%TEMP%\qttune-surrogate.log` is empty | No surrogate next to `qttune.exe`, so the child never launched. The x64 tree was configured before `build-win32` had a surrogate. Build the Win32 tree, re-run `cmake -B build`, check for `Deploying Win32 J2534 surrogate` in the output, and rebuild. Setting `QTTUNE_SURROGATE_EXE` also works. |
+| In the app, an x86 adapter (for example the OBDX Pro VX) fails with "failed to load transport library", and `%TEMP%\qttune-surrogate.log` holds only an `open: CreateProcess failed (err=2) exe='...'` line (before 2026-10-20 it was empty) | No surrogate next to `qttune.exe`, so the child never launched. The x64 tree was configured before `build-win32` had a surrogate. Build the Win32 tree, re-run `cmake -B build`, check for `Deploying Win32 J2534 surrogate` in the output, and rebuild. Setting `QTTUNE_SURROGATE_EXE` also works. |
 | Cross-arch test fails expecting backend "surrogate", got "inproc" | `QTTUNE_FAKE_DLL` points at an x64 fake (or the wrong tree). Check the value, not the code — unset skips, wrong-value fails. |
 | J2534 test fails as `Failed (Timeout)` | A genuine hang, bounded by the 30 s ceiling. Attach to the surviving test and surrogate processes and check thread wait states before killing; the child log in `%TEMP%\qttune-surrogate.log` is rewritten per spawn — copy before respawning. |
 | Linker warning LNK4070 on a fake DLL | The `.def` file's `LIBRARY` directive disagrees with the output filename. Make them match. |

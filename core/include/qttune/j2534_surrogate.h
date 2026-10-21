@@ -45,10 +45,11 @@ qttune_status_t qttune_j2534_sur_write_frame(qttune_j2534_sur_handle_t* handle,
 
 /* Generic ioctl relay. input is a FLATTENED SCONFIG array (u32
  * Parameter/Value pairs, little-endian) for GET_CONFIG/SET_CONFIG;
- * input_len==0 for ioctls taking NULL input. output receives up to
- * output_cap bytes of response payload (GET_CONFIG write-back or
- * READ_VBATT's ULONG); out_len receives the actual length. Caps at
- * 64 bytes — the wire limit; keep caller buffers at least that. */
+ * input_len==0 for ioctls taking NULL input. output receives the
+ * response payload (GET_CONFIG write-back or READ_VBATT's ULONG), and
+ * out_len its length. There is no capacity parameter: size output for
+ * the wire limit, QTTUNE_SUR_IOCTL_DATA_MAX (64) bytes. A reply that
+ * claims more is rejected as a protocol skew (QT_ERR_NO_TRANSPORT). */
 qttune_status_t qttune_j2534_sur_ioctl(qttune_j2534_sur_handle_t* handle,
                                        unsigned long channel,
                                        uint32_t ioctl_id,
@@ -99,6 +100,13 @@ qttune_status_t qttune_j2534_sur_inject_test_frame(qttune_j2534_sur_handle_t* ha
 
 /* Polite SHUTDOWN, bounded wait, then job-object kill. NULL-safe. */
 qttune_status_t qttune_j2534_sur_close(qttune_j2534_sur_handle_t* handle);
+
+/* Path of this session's log, which holds the child's lines and the
+ * client's. Usually %TEMP%\qttune-surrogate.log; a session opened while
+ * another holds that file gets %TEMP%\qttune-surrogate-<pid>-<n>.log.
+ * "" when the session has no log (or handle is NULL, or not Windows).
+ * Valid until qttune_j2534_sur_close. */
+const char* qttune_j2534_sur_log_path(const qttune_j2534_sur_handle_t* handle);
 
 #ifdef __cplusplus
 }

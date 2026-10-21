@@ -9,12 +9,45 @@
 #include <stdint.h>
 
 /* ---- Wire limits ---- */
-#define QTTUNE_SUR_MSG_MAX 64
-#define QTTUNE_SUR_IOCTL_DATA_MAX 64
-#define QTTUNE_SUR_FILTER_PATTERN_MAX 12
-#define QTTUNE_SUR_MAX_FRAMES_PER_READ 16
+#define QTTUNE_SUR_MSG_MAX 64              /* bytes of one CAN message's Data */
+#define QTTUNE_SUR_IOCTL_DATA_MAX 64       /* ioctl input, and reply payload */
+#define QTTUNE_SUR_FILTER_PATTERN_MAX 12   /* mask/pattern/flow-control bytes */
+#define QTTUNE_SUR_MAX_FRAMES_PER_READ 16  /* frames in one OP_READ reply */
 
-/* Request opcodes — append-only, never renumber. */
+/* Request opcodes — append-only, never renumber.
+ *
+ * One request, one response, paired by request_id. The child answers
+ * every request with a qttune_sur_response_t whose status is the
+ * vendor's J2534 status, or STATUS_FAILED when the child refused the
+ * request before calling the vendor (a length over a wire limit, a
+ * non-whitelisted ioctl, an unknown opcode). A non-success status never
+ * ends the child (ADR-0014); only a broken pipe or OP_SHUTDOWN does.
+ *
+ *   OPEN          no fields. PassThruOpen. Reply: status only; the
+ *                 device ID stays in the child.
+ *   CONNECT       u.connect. PassThruConnect on that device.
+ *                 Reply: handle_or_channel = the channel ID.
+ *   IOCTL         u.ioctl. PassThruIoctl, whitelisted IDs only
+ *                 (READ_VBATT, the three CLEARs, GET/SET_CONFIG).
+ *                 Reply: data/data_len (READ_VBATT's 4 bytes, or
+ *                 GET_CONFIG's re-flattened pairs).
+ *   WRITE         u.write. One PassThruWriteMsgs message.
+ *                 Reply: aux = messages the vendor reports written.
+ *   READ          u.read. PassThruReadMsgs for up to 16 messages on
+ *                 the child's open channel (no channel field). Reply:
+ *                 num_frames/frames, delivered whatever the status
+ *                 (#26), with TX indications already dropped. No open
+ *                 channel: NOERROR with no frames.
+ *   SHUTDOWN      no fields. Reply NOERROR, then the child disconnects,
+ *                 closes the device, unloads the DLL and exits 0.
+ *   DISCONNECT    u.disconnect. PassThruDisconnect. Reply: status only.
+ *   INJECT        u.inject. Test-only: hands the frame to the loaded
+ *                 DLL's InjectFrame export (the fake's). STATUS_FAILED
+ *                 when the DLL has none.
+ *   START_FILTER  u.start_filter. PassThruStartMsgFilter.
+ *                 Reply: handle_or_channel = the filter ID.
+ *   STOP_FILTER   u.stop_filter. PassThruStopMsgFilter. Reply: status
+ *                 only. */
 #define QTTUNE_SUR_OP_OPEN       1
 #define QTTUNE_SUR_OP_CONNECT    2
 #define QTTUNE_SUR_OP_IOCTL      3
@@ -27,11 +60,13 @@
 #define QTTUNE_SUR_OP_STOP_FILTER  10
 
 typedef struct qttune_sur_request {
-    uint32_t request_id;
-    uint32_t opcode;
+    uint32_t request_id;   /* client-assigned, increasing; echoed back */
+    uint32_t opcode;       /* QTTUNE_SUR_OP_* */
     union {
         struct { uint32_t protocol_id; uint32_t flags; uint32_t baud; } connect;
         struct { uint32_t channel_id; } disconnect;
+        /* input: flattened SCONFIG pairs (u32 Parameter, u32 Value, LE)
+         * for GET/SET_CONFIG; input_len 0 for NULL-input ioctls. */
         struct { uint32_t channel_id; uint32_t ioctl_id;
                  uint8_t input[QTTUNE_SUR_IOCTL_DATA_MAX];
                  uint32_t input_len; } ioctl;
@@ -39,6 +74,8 @@ typedef struct qttune_sur_request {
                  uint8_t data[QTTUNE_SUR_MSG_MAX];
                  uint32_t data_len; uint32_t tx_flags;
                  uint32_t timeout_ms; } write;
+        /* The vendor's ReadMsgs timeout. The client waits that plus
+         * 500 ms for the reply before it calls the child hung. */
         struct { uint32_t timeout_ms; } read;
         struct { uint8_t data[QTTUNE_SUR_MSG_MAX]; uint32_t len;
                  uint32_t timestamp; uint32_t rx_flags; } inject;
@@ -54,22 +91,24 @@ typedef struct qttune_sur_request {
 
 /* Single frame for batch read responses. */
 typedef struct qttune_sur_frame {
-    uint32_t arbitration_id;
-    uint32_t timestamp;
-    uint32_t rx_flags;
+    uint32_t arbitration_id;  /* always 0: the CAN ID is data[0..3], which
+                                 the transport strips (ADR-0012) */
+    uint32_t timestamp;       /* the vendor's Timestamp, untranslated (#12) */
+    uint32_t rx_flags;        /* the vendor's RxStatus */
     uint8_t  data[QTTUNE_SUR_MSG_MAX];
-    uint8_t  data_len;
+    uint8_t  data_len;        /* the child clamps to QTTUNE_SUR_MSG_MAX */
 } qttune_sur_frame_t;
 
-/* Response with embedded frame array. */
+/* Response with embedded frame array. Fields an opcode doesn't use are
+ * zero. */
 typedef struct qttune_sur_response {
-    uint32_t request_id;
-    int32_t  status;
-    uint32_t handle_or_channel;
-    uint32_t aux;
-    uint8_t  data[QTTUNE_SUR_IOCTL_DATA_MAX];
-    uint32_t data_len;
-    uint32_t num_frames;
+    uint32_t request_id;         /* the request's, for pairing */
+    int32_t  status;             /* vendor J2534 status, or STATUS_FAILED */
+    uint32_t handle_or_channel;  /* CONNECT: channel ID; START_FILTER: filter ID */
+    uint32_t aux;                /* WRITE: messages written */
+    uint8_t  data[QTTUNE_SUR_IOCTL_DATA_MAX];  /* IOCTL reply payload */
+    uint32_t data_len;           /* IOCTL; the client rejects > the limit */
+    uint32_t num_frames;         /* READ; the client rejects > the limit */
     qttune_sur_frame_t frames[QTTUNE_SUR_MAX_FRAMES_PER_READ];
 } qttune_sur_response_t;
 

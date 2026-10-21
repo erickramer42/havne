@@ -448,6 +448,91 @@ TEST(J2534SurrogateTest, BlockedVendorOpenFailsAtHandshakeTimeout)
     EXPECT_LT(elapsed, 3000);
 }
 
+/* Shares read access with the session's writers. "" if it can't open. */
+static std::string read_session_log(const std::string& path)
+{
+    std::string out;
+    HANDLE f = CreateFileA(path.c_str(), GENERIC_READ,
+                           FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                           nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (f == INVALID_HANDLE_VALUE) return out;
+    char buf[4096];
+    DWORD got = 0;
+    while (ReadFile(f, buf, sizeof(buf), &got, nullptr) && got > 0) {
+        out.append(buf, got);
+    }
+    CloseHandle(f);
+    return out;
+}
+
+/* Formerly Known Issue #23: the client's own lines go into the
+ * session log beside the child's, so a GUI launch (no stderr) keeps
+ * both halves in one file. Each side writes whole lines, so every line
+ * starts "[sur" ("[sur ..." from the client, "[surrogate ..." from the
+ * child). */
+TEST(J2534SurrogateTest, ClientAndChildLinesShareTheSessionLog)
+{
+    qttune_j2534_sur_handle_t* h = nullptr;
+    ASSERT_EQ(qttune_j2534_sur_open(fake_dll_path(), &h), QT_OK);
+    const std::string path = qttune_j2534_sur_log_path(h);
+    /* Close first: the child exits, so the file is complete. */
+    ASSERT_EQ(qttune_j2534_sur_close(h), QT_OK);
+    ASSERT_FALSE(path.empty()) << "the session ran without a log";
+
+    const std::string log = read_session_log(path);
+    EXPECT_NE(log.find("[sur "), std::string::npos) << log;
+    EXPECT_NE(log.find("open: child pid"), std::string::npos) << log;
+    EXPECT_NE(log.find("[surrogate "), std::string::npos) << log;
+    EXPECT_NE(log.find("pipe connected"), std::string::npos) << log;
+
+    int lines = 0;
+    size_t pos = 0;
+    while (pos < log.size()) {
+        size_t eol = log.find('\n', pos);
+        if (eol == std::string::npos) eol = log.size();
+        std::string line = log.substr(pos, eol - pos);
+        if (!line.empty() && line.back() == '\r') line.pop_back();
+        if (!line.empty()) {
+            ++lines;
+            EXPECT_EQ(line.rfind("[sur", 0), 0u) << "spliced line: " << line;
+        }
+        pos = eol + 1;
+    }
+    EXPECT_GE(lines, 4);   /* client spawn line + child startup stages */
+}
+
+/* Code review 2026-10-20, finding 9: the log was opened CREATE_ALWAYS
+ * with FILE_SHARE_READ only, so while one session's child held it, a
+ * second concurrent session's open failed and that child ran with no
+ * log at all. Now the second session gets a per-spawn name. Holds
+ * whether or not something else (a running app) already has the fixed
+ * name: then both sessions get per-spawn names. */
+TEST(J2534SurrogateTest, SecondConcurrentSessionGetsItsOwnLog)
+{
+    qttune_j2534_sur_handle_t* a = nullptr;
+    qttune_j2534_sur_handle_t* b = nullptr;
+    ASSERT_EQ(qttune_j2534_sur_open(fake_dll_path(), &a), QT_OK);
+    const qttune_status_t rb = qttune_j2534_sur_open(fake_dll_path(), &b);
+    const std::string path_a = qttune_j2534_sur_log_path(a);
+    const std::string path_b = qttune_j2534_sur_log_path(b);
+    qttune_j2534_sur_close(b);
+    qttune_j2534_sur_close(a);
+
+    ASSERT_EQ(rb, QT_OK);
+    EXPECT_FALSE(path_a.empty());
+    EXPECT_FALSE(path_b.empty()) << "the second session ran without a log";
+    EXPECT_NE(path_a, path_b);
+    EXPECT_NE(read_session_log(path_b).find("pipe connected"),
+              std::string::npos);
+
+    /* Per-spawn names are this test's litter; the fixed name stays. */
+    for (const std::string* p : { &path_a, &path_b }) {
+        if (p->find("qttune-surrogate-") != std::string::npos) {
+            DeleteFileA(p->c_str());
+        }
+    }
+}
+
 /* Former #26: per J2534-1, a read asking for more messages than
  * arrived, with a nonzero timeout, returns ERR_TIMEOUT TOGETHER WITH
  * those messages. The spec-mode fake emulates exactly that; the
