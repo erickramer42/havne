@@ -16,7 +16,22 @@ Page {
     id: root
     background: Rectangle { color: Theme.bg }
 
+    readonly property int rowHeight: 44
+
+    // Trace colours, keyed by model row (chartData's `row`), so a row's
+    // swatch matches its trace and colours hold when another signal is
+    // unsubscribed. Twelve hues spaced for a dark surface, ordered so
+    // the first rows differ most; a larger set wraps. Red comes late, so
+    // an ordinary signal near the top doesn't read as an alarm.
+    readonly property var seriesColors: [
+        "#60a5fa", "#fbbf24", "#4ade80", "#f472b6",
+        "#22d3ee", "#fb923c", "#a78bfa", "#a3e635",
+        "#f87171", "#2dd4bf", "#e879f9", "#818cf8"
+    ]
+    function seriesColor(row) { return root.seriesColors[row % root.seriesColors.length] }
+
     ColumnLayout {
+        id: column
         anchors.fill: parent
         anchors.margins: 16
         spacing: 12
@@ -60,13 +75,25 @@ Page {
             color: QtTune.connected ? Theme.textDim : Theme.danger
         }
 
+        // Sized to its rows, capped so the chart keeps the rest of the
+        // page; past the cap it scrolls, with the bar pinned on so the
+        // hidden rows are visible as such.
         ListView {
             id: signalList
+            readonly property bool overflows: contentHeight > height
+
             Layout.fillWidth: true
-            Layout.preferredHeight: 240
-            Layout.minimumHeight: 140
+            Layout.preferredHeight: count * root.rowHeight
+            Layout.maximumHeight: Math.max(3 * root.rowHeight, column.height * 0.55)
+            Layout.minimumHeight: Math.min(count, 3) * root.rowHeight
             clip: true
+            boundsBehavior: Flickable.StopAtBounds
             model: QtTune.signalModel
+
+            ScrollBar.vertical: ScrollBar {
+                id: listBar
+                policy: signalList.overflows ? ScrollBar.AlwaysOn : ScrollBar.AsNeeded
+            }
 
             // Roles consumed via required properties: static typing, no
             // implicit model-chain lookups, updates driven by the model's
@@ -87,8 +114,9 @@ Page {
                 // that are still arriving.
                 required property double ageMs          // AgeMsRole; -1 = never arrived
 
-                width: signalList.width
-                height: 48
+                // Clear of the pinned scroll bar, so values stay readable
+                width: signalList.width - (signalList.overflows ? listBar.width : 0)
+                height: root.rowHeight
                 color: signalDelegate.index % 2 === 0 ? Theme.surface : Theme.bg
 
                 RowLayout {
@@ -99,6 +127,18 @@ Page {
                     CheckBox {
                         checked: signalDelegate.subscribed
                         onToggled: QtTune.signalModel.toggleSubscribed(signalDelegate.index)
+                    }
+                    // The chart's legend: this row's trace colour, hollow
+                    // while the signal isn't plotted
+                    Rectangle {
+                        id: swatch
+                        readonly property color trace: root.seriesColor(signalDelegate.index)
+                        implicitWidth: 10; implicitHeight: 10   // layout-managed
+                        radius: 2
+                        color: signalDelegate.subscribed ? swatch.trace : "transparent"
+                        border.width: 1
+                        border.color: swatch.trace
+                        opacity: signalDelegate.subscribed ? 1.0 : 0.5
                     }
                     Label {
                         text: signalDelegate.name
@@ -111,7 +151,8 @@ Page {
                         text: (QtTune.connected && signalDelegate.hasValue)
                               ? "%1 %2".arg(signalDelegate.value.toFixed(1)).arg(signalDelegate.unit)
                               : qsTr("—")
-                        color: signalDelegate.subscribed ? Theme.primary : Theme.textDim
+                        color: signalDelegate.subscribed ? Theme.text : Theme.textDim
+                        font.pixelSize: 16
                         font.family: "Consolas"   // tabular-ish digits, no jitter
                         // Staleness dimming: 3 s is generous against the
                         // scheduler's full PID rotation (100 ms per PID, so
@@ -125,11 +166,12 @@ Page {
         }
 
         // ---- Strip chart: per-signal rolling history, one repaint per
-        // coalesced batch. Trace palette is hardcoded: Theme exposes the
-        // few chromatic roles used above only, not a full series palette.
+        // coalesced batch. Each trace takes its list row's colour
+        // (root.seriesColor), so the list is the legend.
         Rectangle {
             Layout.fillWidth: true
             Layout.fillHeight: true
+            Layout.minimumHeight: 120
             color: Theme.surface
             radius: 4
             border.color: Theme.textDim
@@ -139,14 +181,6 @@ Page {
                 id: chart
                 anchors.fill: parent
                 anchors.margins: 4
-
-                // Indexed by position in chartData(), which skips
-                // unsubscribed signals, so unsubscribing one shifts the
-                // colours of the signals after it
-                readonly property var seriesColors: [
-                    "#ff5555", "#55ff88", "#55aaff",
-                    "#ffd166", "#c792ea", "#f78c6c"
-                ]
 
                 Connections {
                     target: QtTune.signalModel
@@ -195,7 +229,6 @@ Page {
                     ctx.stroke()
 
                     const topPad = 6, botPad = 6
-                    let colorIdx = 0
                     for (let s = 0; s < series.length; ++s) {
                         const sp = series[s].samples
                         if (sp.length < 2) continue
@@ -207,10 +240,7 @@ Page {
                         }
                         if (vMax <= vMin) { vMin -= 1; vMax += 1 }   // flat line guard
 
-                        const color = seriesColors[colorIdx % seriesColors.length]
-                        ++colorIdx
-
-                        ctx.strokeStyle = color
+                        ctx.strokeStyle = root.seriesColor(series[s].row)
                         ctx.lineWidth = 2
                         ctx.beginPath()
                         for (let i = 0; i < sp.length; i += 2) {
@@ -221,15 +251,6 @@ Page {
                             else ctx.lineTo(x, y)
                         }
                         ctx.stroke()
-
-                        // Legend: current value, stacked top-left
-                        ctx.fillStyle = color
-                        ctx.font = "11px Consolas"
-                        ctx.textAlign = "left"
-                        ctx.fillText(
-                            series[s].name + "  " +
-                                series[s].value.toFixed(1) + " " + series[s].unit,
-                            8, 16 + colorIdx * 14)
                     }
                 }
 

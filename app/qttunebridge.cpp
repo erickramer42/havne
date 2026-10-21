@@ -243,11 +243,13 @@ void SignalListModel::updateValues(const std::vector<std::pair<uint16_t, float>>
 QVariantList SignalListModel::chartData() const
 {
     QVariantList out;
-    for (const Entry& e : m_entries) {
+    for (size_t row = 0; row < m_entries.size(); ++row) {
+        const Entry& e = m_entries[row];
         if (!e.subscribed || e.histCount == 0) continue;
 
         QVariantMap m;
         m["id"] = e.id;
+        m["row"] = static_cast<int>(row);
         m["name"] = QString::fromUtf8(e.name);
         m["unit"] = QString::fromUtf8(e.unit);
         m["value"] = e.value;
@@ -297,6 +299,9 @@ QtTuneBridge::QtTuneBridge(QObject* parent)
         // inside the 3 s dim threshold and the span emission is one
         // signal for the whole model.
         m_signalModel->refreshAges();
+        // Drop count at tick rate rather than per frame; onFrame also
+        // queues a report as it drops (at most one pending).
+        notifyDropped();
         if (!m_stagingBuffer.empty()) {
             m_signalModel->updateValues(m_stagingBuffer);
             m_stagingBuffer.clear();
@@ -607,8 +612,6 @@ void QtTuneBridge::handleFrameInternal(const qttune_frame_t* frame)
     ++m_guiNotifyCount;
     emit frameCountChanged();
     emit notifyCountChanged(m_guiNotifyCount);
-
-    notifyDropped();
 }
 
 void QtTuneBridge::notifyDropped()
@@ -648,7 +651,7 @@ void QtTuneBridge::pollLinkHealth()
     }
     const int32_t prev = m_linkErrorCode;
     m_linkErrorCode = last_error;
-    m_errorEpisodes = static_cast<int>(episodes);
+    m_errorEpisodes = episodes;
 
     /* Transitions land in the activity log with ZERO QML work — this
      * alone turns "connected with frozen values" into a named fault

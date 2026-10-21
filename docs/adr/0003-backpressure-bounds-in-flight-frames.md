@@ -36,8 +36,8 @@ eviction never ran, because no frame ever reached it.
   It relies on the test-only seam `forceFrameCountForTesting`, which
   app code never calls.
 - There is still one queued lambda per frame. At J2534 rates that may
-  need batching on the worker side (see Known Issue #7 in
-  [STATUS.md](../../STATUS.md)).
+  need batching on the worker side (see the Performance backlog in
+  [STATUS.md](../../STATUS.md#performance)).
 - The broader lesson: pair every drop statistic with a liveness test,
   because confusing a cumulative count with an in-flight count stays
   invisible until someone leaves the app running.

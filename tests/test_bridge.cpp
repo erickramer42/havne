@@ -318,8 +318,23 @@ TEST(BridgeTest, DispatchedShortFrameHonorsDataLength)
     // Hex payload is exactly 4 bytes -> 8 hex chars, not 16
     EXPECT_EQ(proxy->data(idx, FrameListModel::PayloadRole).toString().size(), 8);
     EXPECT_TRUE(proxy->data(idx, FrameListModel::ExtendedRole).toBool());
+    EXPECT_EQ(proxy->data(idx, FrameListModel::ArbitrationIdRole).toUInt(), 0x0C0u);
 
     bridge.disconnectSession();
+}
+
+/* LogPage binds frame columns by role NAME. A name missing here isn't a
+ * build error: the column renders empty and every delegate throws. Read
+ * through the proxy, which is what QML gets as QtTune.model. */
+TEST(BridgeTest, FrameRoleNamesMatchLogPageBindings)
+{
+    QtTuneBridge bridge;
+    const QHash<int, QByteArray> roles = bridge.model()->roleNames();
+    EXPECT_EQ(roles.value(FrameListModel::TimestampRole), QByteArray("timestampUs"));
+    EXPECT_EQ(roles.value(FrameListModel::DlcRole), QByteArray("dlc"));
+    EXPECT_EQ(roles.value(FrameListModel::ExtendedRole), QByteArray("extended"));
+    EXPECT_EQ(roles.value(FrameListModel::PayloadRole), QByteArray("payloadHex"));
+    EXPECT_EQ(roles.value(FrameListModel::ArbitrationIdRole), QByteArray("arbId"));
 }
 
 TEST(BridgeTest, BackpressureDropsAreCountedAndReported)
@@ -488,6 +503,9 @@ TEST(BridgeTest, ChartDataFiltersUnsubscribedAndEmptyBatchesDoNotEmit)
     const QVariantList data = model.chartData();
     ASSERT_EQ(data.size(), 1);
     EXPECT_EQ(data.at(0).toMap().value("id").toInt(), 2001);
+    // `row` is the model row, not the position in chartData(), so the
+    // trace keeps its colour when a signal before it is unsubscribed
+    EXPECT_EQ(data.at(0).toMap().value("row").toInt(), 1);
     EXPECT_EQ(data.at(0).toMap().value("samples").toList().size(), 10); // still 5 samples
 
     // Resubscribed signal keeps its accumulated history (non-destructive)

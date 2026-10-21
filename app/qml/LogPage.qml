@@ -1,7 +1,11 @@
 // File/layer: app/qml/LogPage.qml | Qt Quick, UI layer
 // Testing: render verified manually; the arbId column by the smoke
-//          recipe's "Frames + arbId column" row (docs/testing.md). No
-//          unit test pins the role names this delegate binds.
+//          recipe's "Frames + arbId column" row (docs/testing.md). The
+//          role names this delegate binds are pinned by
+//          BridgeTest.FrameRoleNamesMatchLogPageBindings. Oldest-first
+//          follow: manual smoke — while mock:// streams, scroll up by
+//          drag, wheel and scroll bar (the view holds), then "Latest"
+//          or scrolling to the end resumes following.
 
 import QtQuick
 import QtQuick.Controls
@@ -95,7 +99,48 @@ Pane {
                 clip: true
                 model: QtTune.model          // FrameSortProxy over the bridge's FrameListModel
 
-                ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
+                // Oldest-first reads as a tail: new rows land at the
+                // bottom, and the view follows them while it's at the
+                // end. Scrolling up stops following; scrolling back to
+                // the end, or "Latest", resumes it. Newest-first needs no
+                // follow, since new rows land at the top.
+                property bool follow: true
+                readonly property bool tailing: !QtTune.model.newestFirst
+
+                // Position first, then follow: positioning cancels a flick
+                // still coasting, and that flick's movementEnded would
+                // otherwise clear follow before the view reaches the end.
+                function jumpToLatest() {
+                    positionViewAtEnd()
+                    follow = true
+                }
+                // Named, so Qt.callLater folds a burst of frames into one
+                // reposition per event-loop turn. Re-checks follow: a
+                // scroll may have started since the call was queued.
+                function followTail() { if (follow) jumpToLatest() }
+
+                onCountChanged: {
+                    if (count === 0) follow = true   // cleared or new session
+                    else if (tailing && follow) Qt.callLater(frameList.followTail)
+                }
+                // User scrolling decides. Following stops as a drag, flick
+                // or wheel starts, or the next frame would pull the view
+                // back to the end; where the scroll comes to rest decides
+                // whether it resumes. positionViewAtEnd emits neither.
+                onMovementStarted: follow = false
+                onMovementEnded: follow = atYEnd
+
+                Connections {
+                    target: QtTune.model
+                    function onNewestFirstChanged() {
+                        if (frameList.tailing) Qt.callLater(frameList.jumpToLatest)
+                    }
+                }
+
+                ScrollBar.vertical: ScrollBar {
+                    policy: ScrollBar.AsNeeded
+                    onPressedChanged: frameList.follow = !pressed && frameList.atYEnd
+                }
 
                 delegate: RowLayout {
                     width: frameList.width
@@ -155,6 +200,16 @@ Pane {
                           : qsTr("No session — start one from Home")
                     color: Theme.textDim
                 }
+            }
+
+            // Resumes following after a scroll up; on a phone there's
+            // no scroll bar to drag back down
+            ThemedButton {
+                anchors { right: parent.right; bottom: parent.bottom; margins: 12 }
+                z: 3
+                visible: frameList.tailing && !frameList.follow && frameList.count > 0
+                text: qsTr("Latest ↓")
+                onClicked: frameList.jumpToLatest()
             }
         }
     }
