@@ -352,11 +352,16 @@ weekly.
 
 **Temporary workarounds**, to revert once upstream ships tagged fixes:
 
-- **Windows: Qt is installed with aqtinstall from git master.** The
-  PyPI release builds doubled `qt6_xxxx/qt6_xxxx/` paths for the Qt
-  6.11+ repository layout. Go back to PyPI once aqtinstall 3.4+ ships
-  the fix. A sporadic py7zr `Bad7zFile` extraction failure has been
-  seen once, and a clean re-run passed (Known Issue #1).
+- **Windows: Qt is installed with aqtinstall from a pinned master
+  commit.** The PyPI release (3.3.0) builds doubled
+  `qt6_xxxx/qt6_xxxx/` paths for the Qt 6.11+ Windows repository
+  layout; the fix ([aqtinstall #1000](https://github.com/miurahr/aqtinstall/pull/1000))
+  is on master only. Go back to PyPI once aqtinstall 3.4.0 ships it.
+  Dependabot doesn't track a git pin, so check for the release by
+  hand. The job extracts with the runner's 7-Zip (`--external 7z`)
+  rather than py7zr, which fails sporadically on Windows with
+  `Bad7zFile`. aqtinstall verifies each archive's SHA-256 before
+  extracting, so that error is py7zr's, not the download's.
 - **macOS needs Qt 6.12.** Qt 6.8 and earlier referenced the AGL
   framework, which Apple removed from the Xcode 26 SDK.
 - **The iOS simulator smoke runs on `macos-15-intel`.** GitHub has

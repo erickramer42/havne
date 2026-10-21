@@ -501,3 +501,20 @@ the way it is; the narrative stays in commit messages and here. (2)
 **Counts in comments drift.** "The 8-PID set" was wrong as soon as
 MAF and TFT were added to it. State the rule ("N PIDs at 100 ms
 each"), not today's number.
+
+**2026-10-21 — Windows Qt install (Known Issue #1 closed):** two
+lessons. (1) **Before calling an archive error a flaky download,
+check whether the tool verifies the download.** `win-build`'s one
+`Bad7zFile` looked like network noise, and the issue's plan was a
+retry-friendly pin. But aqtinstall checks every archive's SHA-256
+against Qt's published hash, re-downloading on a mismatch, before it
+extracts, so the bytes py7zr rejected were known good and the fault
+was py7zr's. That pointed at the real fix: extract with the runner's
+7-Zip (`--external 7z`). (2) **A wrapper's dependency pin can be
+outvoted by the tool it wraps.** `install-qt-action` pins py7zr 1.1.0
+against this very bug, then installs aqtinstall separately so that
+aqtinstall "can override py7zr if required". aqtinstall master
+requires py7zr 1.1.3 or later, so that pin, and the issue's fallback
+of pinning py7zr 1.1.0, could never hold for this job. Unpinned
+master also meant each run took whatever aqtinstall and py7zr were
+newest; the job now pins aqtinstall to a commit.
