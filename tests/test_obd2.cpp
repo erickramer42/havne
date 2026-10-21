@@ -176,16 +176,17 @@ TEST(Obd2DecodeTest, MafCentigramScale) {
     EXPECT_NEAR(v, 1.00f, 0.0001f);
 }
 
-TEST(Obd2DecodeTest, TftMatchesCoolantShape) {
+TEST(Obd2DecodeTest, OilTempMatchesCoolantShape) {
     const QttuneSignalSet* set = qttune_obd2_signal_set();
-    const QttuneSignalDef* d = find_def(set, OBD2_SIG_TFT_ID);
+    const QttuneSignalDef* d = find_def(set, OBD2_SIG_OIL_TEMP_ID);
     ASSERT_NE(d, nullptr);
-    const uint8_t wire[] = {0x41, 0x5F, 0x50};
+    /* 0x78 = 120 raw - 40 = 80 degC, the fake's canned default. */
+    const uint8_t wire[] = {0x41, 0x5C, 0x78};
     qttune_frame_t f = make_obd2_frame(wire, sizeof wire);
     ASSERT_EQ(qttune_def_matches_frame(d, &f), 0);
     float v = 0.0f;
     ASSERT_EQ(qttune_decode_signal(d, f.data, f.data_length, &v), 0);
-    EXPECT_FLOAT_EQ(v, 40.0f);   /* 80 - 40 */
+    EXPECT_FLOAT_EQ(v, 80.0f);
 }
 
 /* ---------- mux gate ---------- */
@@ -231,7 +232,7 @@ TEST(PidSchedulerTest, EnrollsFromObd2SetInDefOrder) {
     ASSERT_TRUE(qttune_sched_from_set(&s, qttune_obd2_signal_set()));
     EXPECT_EQ(s.count, 10u);
     const uint8_t expect[] = {0x04, 0x05, 0x0C, 0x0D,
-                               0x0F, 0x11, 0x2F, 0x42, 0x10, 0x5F};
+                               0x0F, 0x11, 0x2F, 0x42, 0x10, 0x5C};
     for (uint32_t i = 0; i < s.count; ++i) {
         EXPECT_EQ(s.pids[i], expect[i]) << "index " << i;
     }
@@ -257,7 +258,7 @@ TEST(PidSchedulerTest, RotationWrapsDeterministically) {
     }
     /* The next call must wrap to the set's first PID. */
     (void)qttune_sched_next(&s, &first_of_next);
-    EXPECT_EQ(last_of_cycle, 0x5Fu);    /* 10th of 10 */
+    EXPECT_EQ(last_of_cycle, 0x5Cu);    /* 10th of 10 */
     EXPECT_EQ(first_of_next, 0x04u);    /* wrapped to 1st */
     EXPECT_EQ(s.cursor, 1u);            /* advanced past the wrap */
 }

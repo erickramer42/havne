@@ -14,10 +14,17 @@ extern "C" {
 #define MOCK_SIG_THROTTLE_ID 4001
 #define MOCK_SIG_IAT_ID      5001
 #define MOCK_SIG_LOAD_ID     6001
+#define MOCK_SIG_MAF_ID      8001
+#define MOCK_SIG_OIL_ID      9001
 /* CAN arbitration ID carrying the mock telemetry payload. SHARED by
  * mock_transport.cpp (encoder) and signal_sets.cpp (signal defs) so
  * the two halves of the round-trip contract cannot drift apart. */
 #define MOCK_TELEMETRY_ARB_ID  0x0C0u
+/* Mock telemetry payload length. The signals need 10 bytes and classic
+ * CAN carries 8, so mock frames are CAN FD (QTTUNE_FRAME_FLAG_FD) at
+ * 12 bytes, the next valid FD length; bytes 10-11 are padding. Shared
+ * by the encoder, the worker and the tests. */
+#define MOCK_TELEMETRY_PAYLOAD_LEN  12u
 
 /* ---- OBD-II v1 set (ADR-0013) ----
  * IDs occupy a distinct band from the mock set (no cross-set def.id
@@ -33,7 +40,7 @@ extern "C" {
 #define OBD2_SIG_FUEL_LEVEL_ID   7007
 #define OBD2_SIG_BATTERY_V_ID    7008
 #define OBD2_SIG_MAF_ID          7009
-#define OBD2_SIG_TFT_ID          7010
+#define OBD2_SIG_OIL_TEMP_ID     7010
 /* OBD-II ECU #1 physical response ID, paired with the tester request
  * ID 0x7E0. Shared by obd2_signal_sets.cpp (defs), test fixtures, and
  * the fake's canned response header so all three agree on the channel. */

@@ -166,19 +166,25 @@ TEST(SignalsTest, MockSetIdsAreUnique) {
 }
 
 TEST(SignalsTest, MockSetDecodesReasonably) {
-    /* Integration test: verify mock set definitions decode to plausible ranges */
+    /* Integration test: verify mock set definitions decode to plausible
+     * ranges. The frame is the full mock payload; MAF and oil are pinned
+     * to exact values, so a layout slip fails instead of landing in a
+     * wide range. */
     const QttuneSignalSet* set = qttune_mock_signal_set();
-    uint8_t frame[8] = {0xE8, 0x03,  // RPM raw 1000
-                        0x64,       // Coolant raw 100 → 60°C
-                        0x3C,       // Speed raw 60 → 60 km/h
-                        0x80,       // Throttle raw 128 → 50.2%
-                        0x74,       // IAT raw 116 → 76°C
-                        0xCD,       // Load raw 0xCD → 50.2%
-                        0x00};      // padding
+    uint8_t frame[MOCK_TELEMETRY_PAYLOAD_LEN] = {
+                         0xE8, 0x03, // RPM raw 1000
+                         0x64,       // Coolant raw 100 → 60°C
+                         0x3C,       // Speed raw 60 → 60 km/h
+                         0x80,       // Throttle raw 128 → 50.2%
+                         0x74,       // IAT raw 116 → 76°C
+                         0xCD,       // Load raw 0xCD → 80.4%
+                         0x84, 0x1D, // MAF raw 0x1D84 = 7556 → 75.56 g/s
+                         0x78,       // Oil raw 120 → 80°C
+                         0x00, 0x00};// bytes 10-11, pad
 
     for (uint32_t i = 0; i < set->count; ++i) {
         float val = 0.0f;
-        int rc = qttune_decode_signal(&set->defs[i], frame, 8, &val);
+        int rc = qttune_decode_signal(&set->defs[i], frame, MOCK_TELEMETRY_PAYLOAD_LEN, &val);
         EXPECT_EQ(rc, 0) << "decode failed for " << set->defs[i].name << " at index " << i;
 
         /* Plausibility checks per signal */
@@ -201,12 +207,18 @@ TEST(SignalsTest, MockSetDecodesReasonably) {
             EXPECT_GE(val, 0.0f);
             EXPECT_LE(val, 100.0f);
             break;
+        case MOCK_SIG_MAF_ID:
+            EXPECT_NEAR(val, 75.56f, 0.01f);
+            break;
+        case MOCK_SIG_OIL_ID:
+            EXPECT_FLOAT_EQ(val, 80.0f);
+            break;
         }
     }
 }
 
 TEST_F(SignalDecodeTest, DecodeHonorsActualPayloadLength) {
-    /* The mock encoder produces 8-byte payloads, but transports may deliver
+    /* The mock encoder produces 12-byte payloads, but transports may deliver
        shorter frames (CAN classic subsets, partial ISO-TP fragments).
        Signals whose bits live past payload_len must be REJECTED, and
        signals within it must still decode. Out-value must stay untouched

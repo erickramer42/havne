@@ -1,8 +1,7 @@
 // File/layer: app/qml/DashboardPage.qml | Qt6 Quick, UI layer
-// Testing: manual smoke — mock://demo drives every gauge whose signal
-//          the mock set has (MAF and TFT read "not in profile"); resize
-//          across 760 px content width (4 ↔ 2 grid columns) and 600 px
-//          (phone margins); gauges sweep once per session
+// Testing: manual smoke — mock://demo drives every gauge; resize across
+//          760 px content width (4 ↔ 2 grid columns) and 600 px (phone
+//          margins); gauges sweep once per session
 
 import QtQuick
 import QtQuick.Controls
@@ -40,7 +39,7 @@ Page {
     Tap { id: rpm;      names: ["Engine_RPM", "RPM"] }
     Tap { id: speed;    names: ["Vehicle_Speed", "Vehicle Speed"] }
     Tap { id: coolant;  names: ["Coolant_Temp", "Coolant Temp"] }
-    Tap { id: tft;      names: ["Trans_Fluid_Temp", "Trans Fluid Temp", "TFT"] }
+    Tap { id: oil;      names: ["Oil_Temp", "Engine Oil Temp"] }
     Tap { id: iat;      names: ["Intake_Air_Temp", "Intake Air Temp"] }
     Tap { id: maf;      names: ["MAF", "Mass_Air_Flow", "MAF Air Flow Rate"] }
     Tap { id: throttle; names: ["Throttle_Pos", "Throttle Position"] }
@@ -56,10 +55,10 @@ Page {
         }
         if (!visible || sweptThisSession) return
         sweptThisSession = true
-        for (const g of [shiftLights, tach, speedo, coolantRing, tftRing]) g.sweep()
+        for (const g of [shiftLights, tach, speedo, coolantRing, oilRing]) g.sweep()
     }
     function resetPeaks() {
-        for (const g of [tach, speedo, coolantRing, tftRing, iatTile, mafTile,
+        for (const g of [tach, speedo, coolantRing, oilRing, iatTile, mafTile,
                          throttleBar, loadBar])
             g.resetPeaks()
     }
@@ -209,13 +208,14 @@ Page {
                     Layout.fillWidth: true
                     Layout.preferredHeight: grid.tileHeight
                     RingGauge {
-                        id: tftRing
+                        id: oilRing
                         anchors.fill: parent
-                        label: qsTr("Trans fluid")
-                        unit: tft.unit || "°C"
-                        value: tft.value; hasValue: tft.live; stale: tft.stale; note: tft.note
-                        from: 20; to: 140
-                        coldBelow: 40; warnFrom: 100; dangerFrom: 120
+                        label: qsTr("Oil temp")
+                        unit: oil.unit || "°C"
+                        value: oil.value; hasValue: oil.live; stale: oil.stale
+                        note: oil.note
+                        from: 50; to: 160
+                        coldBelow: 70; warnFrom: 125; dangerFrom: 140
                     }
                 }
                 GaugeCard {

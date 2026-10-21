@@ -56,6 +56,11 @@ static const QttuneSignalDef kMockDefs[] = {
     mk(MOCK_SIG_THROTTLE_ID, "Throttle_Pos",    QTTUNE_SIGNAL_TYPE_UINT8,    4, 1, 0, 8,   100.0f/255.0f, 0.0f, "%", 1),
     mk(MOCK_SIG_IAT_ID,      "Intake_Air_Temp",  QTTUNE_SIGNAL_TYPE_UINT8,    5, 1, 0, 8,   1.0f, -40.0f, "degC",   0),
     mk(MOCK_SIG_LOAD_ID,     "Engine_Load",     QTTUNE_SIGNAL_TYPE_UINT8,    6, 1, 0, 8,   100.0f/255.0f, 0.0f, "%", 1),
+    /* Layout mirrors encode_payload's tail: MAF at bytes 7-8 (LE,
+     * like RPM), oil temp at byte 9. Centi-grams/s scale is the
+     * same J1979 0x10 formula the obd2 set uses; oil is A - 40. */
+    mk(MOCK_SIG_MAF_ID,      "Mass_Air_Flow",    QTTUNE_SIGNAL_TYPE_UINT16,  7, 2, 0, 16, 0.01f,  0.0f, "g/s",  2),
+    mk(MOCK_SIG_OIL_ID,      "Oil_Temp",         QTTUNE_SIGNAL_TYPE_UINT8,    9, 1, 0, 8,   1.0f, -40.0f, "degC", 0),
 };
 
 static const QttuneSignalSet kMockSet = [] {

@@ -84,11 +84,14 @@ const QttuneSignalDef kObd2Defs[] = {
     obd2_def(OBD2_SIG_MAF_ID,            "MAF",
              QTTUNE_SIGNAL_TYPE_UINT16, 2, 0.01f, 0.0f,
              "g/s",  2, 0x10, true),
-    /* SAE J1979 PID 0x5F: transmission fluid temperature, A − 40 degC.
-     * Same def shape as coolant/IAT. */
-    obd2_def(OBD2_SIG_TFT_ID,            "Trans Fluid Temp",
+    /* SAE J1979 PID 0x5C: engine oil temperature, A - 40 degC, the same
+     * def shape as coolant and IAT. Transmission fluid temperature isn't
+     * a standard Mode-01 PID (it's manufacturer-specific, usually
+     * Mode 22), and PID 0x5F is the bit-encoded emission-requirements
+     * byte, not a temperature. */
+    obd2_def(OBD2_SIG_OIL_TEMP_ID,         "Engine Oil Temp",
              QTTUNE_SIGNAL_TYPE_UINT8, 1, 1.0f, -40.0f,
-             "degC", 0, 0x5F, false),
+             "degC", 0, 0x5C, false),
 };
 
 /* ADR-0013 §4: the obd2 profile declares the standard physical pair,

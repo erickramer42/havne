@@ -147,7 +147,7 @@ and `OP_READ` lines (statuses and frame counts).
 | Fuel Level | roughly matches the gauge |
 | Battery Voltage | ~12.0–12.6 V |
 | MAF | ~0 g/s |
-| Trans Fluid Temp | near ambient, or "—": many vehicles don't support PID 0x5F |
+| Engine Oil Temp | near ambient on a cold engine, or "—": many vehicles don't support PID 0x5C |
 
 - [ ] Values stay bright while they keep arriving; nothing dims
 

@@ -250,6 +250,13 @@ are 2-byte big-endian; all others are single-byte.
 > refreshes every N × 100 ms, so every PID added slows the rest; at
 > 10 PIDs that's 1 s. `kObd2Defs` in `core/src/obd2_signal_sets.cpp`
 > is the source of truth for the current set.
+>
+> **Corrected 2026-10-21:** index 9 is PID 0x5C, engine oil
+> temperature (1 byte, −40, uint8). PID 0x5F is the bit-encoded
+> "emission requirements" byte, and transmission fluid temperature
+> isn't a standard Mode-01 PID (it's manufacturer-specific, usually
+> Mode 22). The 0x5F def was written from memory, and the fake's
+> canned reply shared the assumption, so the tests couldn't catch it.
 
 ### Decoder extensions (signal set v1)
 

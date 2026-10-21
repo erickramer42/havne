@@ -390,10 +390,13 @@ constexpr float kMockCoolantMax = 110.0f;
 constexpr float kMockSpeedMax = 200.0f;
 constexpr float kMockIatMin = 15.0f;
 constexpr float kMockIatMax = 80.0f;
+constexpr float kMockMafMax = 300.0f;   /* WOT near the limiter peaks ~255 */
+constexpr float kMockOilMin = 15.0f;    /* cold start reads 20 */
+constexpr float kMockOilMax = 140.0f;
 
 struct MockCapture {
     static constexpr size_t kMaxFrames = 20;
-    uint8_t payloads[kMaxFrames][8]{};
+    uint8_t payloads[kMaxFrames][MOCK_TELEMETRY_PAYLOAD_LEN]{};
     size_t count = 0;
 };
 
@@ -404,7 +407,7 @@ void capture_payload_cb(const qttune_frame_t* frame, void* user_data)
 {
     MockCapture* cap = static_cast<MockCapture*>(user_data);
     if (cap->count < MockCapture::kMaxFrames) {
-        std::memcpy(cap->payloads[cap->count], frame->data, 8);
+        std::memcpy(cap->payloads[cap->count], frame->data, MOCK_TELEMETRY_PAYLOAD_LEN);
         ++cap->count;
     }
 }
@@ -446,7 +449,7 @@ TEST(CoreTest, MockFramesDecodeAgainstMockSignalSet) {
         for (uint32_t i = 0; i < set->count; ++i) {
             const QttuneSignalDef& def = set->defs[i];
             float val = 0.0f;
-            ASSERT_EQ(qttune_decode_signal(&def, cap.payloads[f], 8, &val), 0)
+            ASSERT_EQ(qttune_decode_signal(&def, cap.payloads[f], MOCK_TELEMETRY_PAYLOAD_LEN, &val), 0)
                 << "frame " << f << ", signal " << def.name;
 
             switch (def.id) {
@@ -462,6 +465,10 @@ TEST(CoreTest, MockFramesDecodeAgainstMockSignalSet) {
                 EXPECT_GE(val, 0.0f);   EXPECT_LE(val, 100.0f); break;
             case MOCK_SIG_IAT_ID:
                 EXPECT_GE(val, kMockIatMin);  EXPECT_LE(val, kMockIatMax); break;
+            case MOCK_SIG_MAF_ID:
+                EXPECT_GE(val, 0.0f);          EXPECT_LE(val, kMockMafMax); break;
+            case MOCK_SIG_OIL_ID:
+                EXPECT_GE(val, kMockOilMin);    EXPECT_LE(val, kMockOilMax); break;
             default:
                 FAIL() << "unknown signal id in mock set: " << def.id;
             }
@@ -628,27 +635,29 @@ TEST(CoreTest, MockDriveCycleEveryTickRoundTripsThroughTheMockSet)
     const QttuneSignalSet* set = qttune_mock_signal_set();
     ASSERT_NE(set, nullptr);
 
-    float worst_err[8] = {};
-    float lo[8];
-    float hi[8];
-    for (int i = 0; i < 8; ++i) {
+    /* Per-signal accumulators, indexed like set->defs. */
+    constexpr uint32_t kMaxDefs = 16;
+    ASSERT_LE(set->count, kMaxDefs);
+    float worst_err[kMaxDefs] = {};
+    float lo[kMaxDefs];
+    float hi[kMaxDefs];
+    for (uint32_t i = 0; i < kMaxDefs; ++i) {
         lo[i] = 1e9f;
         hi[i] = -1e9f;
     }
-    ASSERT_LE(set->count, 8u);
 
     DriveCycle dc;
     uint32_t steps = 0;
     while (dc.loops < 2 && steps < qttune_mock::ticks_for(1200.0f)) {
         dc.step();
         ++steps;
-        uint8_t payload[8];
+        uint8_t payload[MOCK_TELEMETRY_PAYLOAD_LEN];
         qttune_mock::encode_payload(dc, payload);
 
         for (uint32_t i = 0; i < set->count; ++i) {
             const QttuneSignalDef& def = set->defs[i];
             float val = 0.0f;
-            ASSERT_EQ(qttune_decode_signal(&def, payload, 8, &val), 0)
+            ASSERT_EQ(qttune_decode_signal(&def, payload, MOCK_TELEMETRY_PAYLOAD_LEN, &val), 0)
                 << def.name << " at tick " << steps;
             float phys = 0.0f;
             switch (def.id) {
@@ -658,6 +667,8 @@ TEST(CoreTest, MockDriveCycleEveryTickRoundTripsThroughTheMockSet)
             case MOCK_SIG_THROTTLE_ID: phys = dc.throttle_pct; break;
             case MOCK_SIG_IAT_ID:      phys = dc.iat_c; break;
             case MOCK_SIG_LOAD_ID:     phys = dc.load_pct; break;
+            case MOCK_SIG_MAF_ID:      phys = dc.maf_gs; break;
+            case MOCK_SIG_OIL_ID:      phys = dc.oil_c; break;
             default: FAIL() << "unknown signal id in mock set: " << def.id;
             }
             worst_err[i] = std::fmax(worst_err[i], std::fabs(val - phys));
@@ -682,6 +693,10 @@ TEST(CoreTest, MockDriveCycleEveryTickRoundTripsThroughTheMockSet)
             EXPECT_GE(lo[i], 0.0f);            EXPECT_LE(hi[i], kMockSpeedMax); break;
         case MOCK_SIG_IAT_ID:
             EXPECT_GE(lo[i], kMockIatMin);     EXPECT_LE(hi[i], kMockIatMax); break;
+        case MOCK_SIG_MAF_ID:
+            EXPECT_GE(lo[i], 0.0f);    EXPECT_LE(hi[i], kMockMafMax); break;
+        case MOCK_SIG_OIL_ID:
+            EXPECT_GE(lo[i], kMockOilMin); EXPECT_LE(hi[i], kMockOilMax); break;
         default:
             EXPECT_GE(lo[i], 0.0f);            EXPECT_LE(hi[i], 100.0f); break;
         }
@@ -695,6 +710,7 @@ struct ArbIdCapture {
     std::atomic<int> diag_count{0};
     std::atomic<int> other_count{0};
     std::atomic<int> extended_mismatch{0};
+    std::atomic<int> fd_mismatch{0};
     std::atomic<uint64_t> last_ts{0};
     std::atomic<int> ts_regression{0};
 };
@@ -711,10 +727,16 @@ void arb_capture_cb(const qttune_frame_t* frame, void* user_data)
         if ((frame->flags & QTTUNE_FRAME_FLAG_EXTENDED) != 0) {
             c->extended_mismatch.fetch_add(1, std::memory_order_relaxed);
         }
+        if ((frame->flags & QTTUNE_FRAME_FLAG_FD) == 0) {
+            c->fd_mismatch.fetch_add(1, std::memory_order_relaxed);
+        }
     } else if (frame->arbitration_id == 0x18FF0C00) {
         c->diag_count.fetch_add(1, std::memory_order_relaxed);
         if ((frame->flags & QTTUNE_FRAME_FLAG_EXTENDED) == 0) {
             c->extended_mismatch.fetch_add(1, std::memory_order_relaxed);
+        }
+        if ((frame->flags & QTTUNE_FRAME_FLAG_FD) == 0) {
+            c->fd_mismatch.fetch_add(1, std::memory_order_relaxed);
         }
     } else {
         c->other_count.fetch_add(1, std::memory_order_relaxed);
@@ -757,6 +779,7 @@ TEST(CoreTest, MockEmitsKnownArbitrationIds)
     /* First sample lands within the first tick, not microseconds since
      * boot — session-relative, not absolute. */
     EXPECT_LT(cap.last_ts.load(), uint64_t{600} * 1000 * 1000 * 1000);
+    EXPECT_EQ(cap.fd_mismatch.load(), 0) << "FD flag missing on one or more frames";
 }
 
 TEST(CoreTest, CloseIsIdempotentAndDestroyIsSafe)
