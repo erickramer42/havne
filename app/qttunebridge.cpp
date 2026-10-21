@@ -299,6 +299,9 @@ QtTuneBridge::QtTuneBridge(QObject* parent)
         // inside the 3 s dim threshold and the span emission is one
         // signal for the whole model.
         m_signalModel->refreshAges();
+        // Drop count at tick rate rather than per frame; onFrame also
+        // queues a report as it drops (at most one pending).
+        notifyDropped();
         if (!m_stagingBuffer.empty()) {
             m_signalModel->updateValues(m_stagingBuffer);
             m_stagingBuffer.clear();
@@ -609,8 +612,6 @@ void QtTuneBridge::handleFrameInternal(const qttune_frame_t* frame)
     ++m_guiNotifyCount;
     emit frameCountChanged();
     emit notifyCountChanged(m_guiNotifyCount);
-
-    notifyDropped();
 }
 
 void QtTuneBridge::notifyDropped()

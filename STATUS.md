@@ -293,12 +293,8 @@ an issue is resolved it is removed, and its number is not reused.
 4. **Decoding ignores subscription state.** Every signal is decoded
    for every frame and filtered at the model. Filter at decode time
    once signal counts grow.
-5. **Oldest-first log mode has no auto-follow.**
 6. **The session API is single-caller by contract.** The bridge is the
    only caller.
-7. **`notifyDropped()` runs on every frame** in `handleFrameInternal`.
-   It only emits when the count changes, but it should move into the
-   coalesce batch before real-data rates arrive.
 8. **`CoreTest.SessionStartWithoutTransportFails` is a `SUCCEED()`
    stub.** Implement it or delete it.
 10. **Strip-chart x-axis resolution is one coalesce window, about
