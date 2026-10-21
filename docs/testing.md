@@ -61,6 +61,7 @@ and the next run's screenshots confirmed the fixes the same day.
 | History ring eviction, `valuesUpdated` semantics; `chartData()` reports each series' model row, which keys its trace colour | `BridgeTest` |
 | Streaming continues past 10k cumulative frames; drops are counted and reported | `BridgeTest.StreamingContinuesPastTenThousandFrames`, `.BackpressureDropsAreCountedAndReported` |
 | Log sort toggle (newest first / oldest first) | `BridgeTest.SortProxy*` |
+| The frame role names the Log page binds (`timestampUs`, `dlc`, `extended`, `payloadHex`, `arbId`), read through the sort proxy | `BridgeTest.FrameRoleNamesMatchLogPageBindings` |
 | Discovery: dual-root, dual-WOW64 sweep, dedup, PE architecture annotation | `J2534DiscoveryTest`, plus manual smoke against real installed drivers (OBDX Pro VT and VX) |
 | Bridge discovery marshaling, including the architecture field | `BridgeTest.DiscoveredDevicesHaveWellFormedEntries` |
 | Loader: `LoadLibraryEx`, nine-export resolution, `PassThruOpen`, clean unwind on a missing DLL | `FakeFixture` |

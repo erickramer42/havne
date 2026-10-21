@@ -198,7 +198,7 @@ public:
     bool connecting() const { return m_connecting; }
     void dispatchFrameForTesting(const qttune_frame_t& frame);
     static constexpr int maxInFlightForTesting() { return MaxInFlightFrames; }
-    Q_INVOKABLE QString linkState() const;
+    QString linkState() const;
     static QString linkStateForError(int32_t errorCode);  /* code → state string; static so tests need no session */
 
     Q_INVOKABLE QString statusString(int statusCode) const;

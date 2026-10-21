@@ -1,7 +1,8 @@
 // File/layer: app/qml/LogPage.qml | Qt Quick, UI layer
 // Testing: render verified manually; the arbId column by the smoke
-//          recipe's "Frames + arbId column" row (docs/testing.md). No
-//          unit test pins the role names this delegate binds.
+//          recipe's "Frames + arbId column" row (docs/testing.md). The
+//          role names this delegate binds are pinned by
+//          BridgeTest.FrameRoleNamesMatchLogPageBindings.
 
 import QtQuick
 import QtQuick.Controls

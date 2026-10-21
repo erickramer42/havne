@@ -650,7 +650,7 @@ void QtTuneBridge::pollLinkHealth()
     }
     const int32_t prev = m_linkErrorCode;
     m_linkErrorCode = last_error;
-    m_errorEpisodes = static_cast<int>(episodes);
+    m_errorEpisodes = episodes;
 
     /* Transitions land in the activity log with ZERO QML work — this
      * alone turns "connected with frozen values" into a named fault
