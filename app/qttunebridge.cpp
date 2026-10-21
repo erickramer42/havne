@@ -212,7 +212,7 @@ void SignalListModel::updateValues(const std::vector<std::pair<uint16_t, float>>
     for (const auto& pair : values) {
         for (size_t i = 0; i < m_entries.size(); ++i) {
             Entry& e = m_entries[i];
-            if (e.id == pair.first && e.subscribed) {
+            if (e.id == pair.first) {   // subscribed or not: see Entry::subscribed
                 e.value = pair.second;
 
                 // Evict-oldest ring push — bounded memory, stream never
@@ -323,6 +323,12 @@ QtTuneBridge::~QtTuneBridge()
     if (m_connectThread.joinable()) {
         m_connectThread.join();
     }
+    // A connect whose queued completion never ran (it was dropped with
+    // `this`) left its session pending. It was never started, so no
+    // worker is calling onFrame; destroy it like any other.
+    if (qttune_session_t* pending = m_pendingSession.exchange(nullptr)) {
+        qttune_session_destroy(pending);
+    }
     if (m_session != nullptr) {
         destroySessionLocked();
     }
@@ -383,11 +389,13 @@ QVariantList QtTuneBridge::discoverJ2534Devices() const
     return out;
 }
 
-// Pure-core half: safe on ANY thread. Creates, registers, starts. On
-// failure, cleans up fully (the unregister/destroy calls are core API,
-// mutex-safe off-thread) and returns the error string. On success the
-// caller owns *out_session and must applyConnectedState() on the GUI
-// thread. Touches no Qt models, timers, or properties.
+// Pure-core half: safe on ANY thread. Creates and registers, the slow
+// part (DLL load, PassThruOpen), but doesn't start: until the GUI thread
+// has taken the session, no worker may call onFrame with `this`. On
+// failure, cleans up fully (core API, mutex-safe off-thread) and returns
+// the error string. On success the caller owns *out_session and must
+// startSession() and applyConnectedState() on the GUI thread. Touches no
+// Qt models, timers, or properties.
 QString QtTuneBridge::connectCoreOnly(const QString& uri,
                                        qttune_session_t** out_session)
 {
@@ -404,14 +412,21 @@ QString QtTuneBridge::connectCoreOnly(const QString& uri,
         return QString::fromUtf8(qttune_status_string(rc));
     }
 
-    rc = qttune_session_start(session);
+    *out_session = session;
+    return {};
+}
+
+// GUI thread: start the worker of a session connectCoreOnly produced.
+// Frames that arrive before applyConnectedState are dropped by onFrame's
+// connected check. On failure the session is destroyed.
+QString QtTuneBridge::startSession(qttune_session_t* session)
+{
+    const qttune_status_t rc = qttune_session_start(session);
     if (rc != QT_OK) {
         qttune_unregister_frame_callback(session, &QtTuneBridge::onFrame, this);
         qttune_session_destroy(session);
         return QString::fromUtf8(qttune_status_string(rc));
     }
-
-    *out_session = session;
     return {};
 }
 
@@ -445,7 +460,10 @@ QString QtTuneBridge::connectSession(const QString& uri)
     }
 
     qttune_session_t* session = nullptr;
-    const QString err = connectCoreOnly(uri, &session);
+    QString err = connectCoreOnly(uri, &session);
+    if (err.isEmpty()) {
+        err = startSession(session);
+    }
     if (!err.isEmpty()) {
         emit logMessage(QStringLiteral("Connect failed: %1 (%2)").arg(uri, err));
         return err;
@@ -466,15 +484,24 @@ void QtTuneBridge::connectSessionAsync(const QString& uri)
 
     m_connectThread = std::thread([this, uri]() {
         qttune_session_t* session = nullptr;
-        const QString err = connectCoreOnly(uri, &session);
+        const QString core_err = connectCoreOnly(uri, &session);
+        // Handed over through the member, not the lambda: a completion
+        // dropped with `this` would leak a lambda capture, while the
+        // destructor can always find the member.
+        m_pendingSession.store(session);
 
-        QMetaObject::invokeMethod(this, [this, uri, err, session]() {
+        QMetaObject::invokeMethod(this, [this, uri, core_err]() {
             // JOIN FIRST, then clear the flag, then emit: assigning to a
             // joinable std::thread terminates the process, and a QML
             // handler can run SYNCHRONOUSLY inside connectingChanged —
             // this ordering keeps even that nested re-entry safe.
             if (m_connectThread.joinable()) {
                 m_connectThread.join();
+            }
+            qttune_session_t* session = m_pendingSession.exchange(nullptr);
+            QString err = core_err;
+            if (err.isEmpty()) {
+                err = startSession(session);
             }
             m_connecting = false;
             emit connectingChanged();
