@@ -1,7 +1,8 @@
 // File/layer: app/qml/LiveViewPage.qml | Qt6 Quick, UI layer
 // Testing: model contract covered by test_bridge; render verified manually.
-// Banner states need a j2534 fake with QTTUNE_FAKE_READ_STATUS armed
-// (0x09 quiet, 0x07 fault) — see docs/testing.md smoke recipe.
+// Banner states need a j2534 fake with a knob armed before launch:
+// QTTUNE_FAKE_READ_STATUS (0x09 quiet, 0x07 fault) or
+// QTTUNE_FAKE_WRITE_STATUS=7 (requests) — see docs/testing.md smoke recipe.
 
 import QtQuick
 import QtQuick.Controls
@@ -26,9 +27,10 @@ Page {
             color: Theme.text
         }
 
-        // Link-health banner: fault/quiet/degraded come
-        // from QtTune.linkState, transitions are mirrored in the
-        // Settings activity log.
+        // Link-health banner: shown for every state but ok (quiet,
+        // requests, fault, degraded) from QtTune.linkState, colored by
+        // Theme.linkColor. Transitions are mirrored in the Settings
+        // activity log.
         Rectangle {
             visible: QtTune.connected && QtTune.linkState !== "ok"
             Layout.fillWidth: true
@@ -68,7 +70,8 @@ Page {
 
             // Roles consumed via required properties: static typing, no
             // implicit model-chain lookups, updates driven by the model's
-            // dataChanged role filtering (ValueRole re-binds these).
+            // dataChanged role filtering (ValueRole, HasValueRole and
+            // AgeMsRole re-bind these).
             delegate: Rectangle {
                 id: signalDelegate
                 required property int index
@@ -77,9 +80,9 @@ Page {
                 required property double value
                 required property bool subscribed
                 required property bool hasValue
-                // Finding 14: the model now emits AgeMsRole on dataChanged;
-                // delegates bind directly to it, eliminating the page clock
-                // that existed solely to re-evaluate stale opacity.
+                // The model notifies AgeMsRole per batch and on every
+                // coalesce tick (refreshAges), so a row that stops
+                // updating still re-evaluates and dims (finding 14).
                 required property double ageMs          // AgeMsRole; -1 = never arrived
 
                 width: signalList.width

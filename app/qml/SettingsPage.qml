@@ -3,7 +3,8 @@
 //          macOS/Linux: empty-state hint), picker row fills URI field only,
 //          Connect button drives connectSessionAsync (UI stays responsive
 //          while a vendor blocks ~8 s), activity log shows connect lifecycle,
-//          error label on bad URI, fault states tint the status label
+//          error label on bad URI, status label colored by link state
+//          (Theme.linkColor)
 
 import QtQuick
 import QtQuick.Controls

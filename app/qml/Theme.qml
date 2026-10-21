@@ -20,11 +20,25 @@ QtObject {
     // states; fault, degraded and any future state fall to danger.
     function linkColor(state: string): color {
         switch (state) {
-        case "ok":           return success
+        case "ok":              return success
         case "quiet":
-        case "requests":     return warning
-        case "disconnected": return textDim
-        default:             return danger
+        case "requests":        return warning
+        case "disconnected":    return textDim
+        default:                return danger
+        }
+    }
+
+    // Link state → short status label (Home card). Unknown states fall to
+    // "Link degraded", mirroring linkColor. LiveView's banner keeps its own
+    // longer messages, which carry the episode count and error code.
+    function linkLabel(state: string): string {
+        switch (state) {
+        case "ok":              return qsTr("Session active")
+        case "fault":           return qsTr("Adapter fault")
+        case "requests":        return qsTr("Requests failing")
+        case "quiet":           return qsTr("Link quiet")
+        case "disconnected":    return qsTr("No session")
+        default:                return qsTr("Link degraded")
         }
     }
 }

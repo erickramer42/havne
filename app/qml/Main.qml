@@ -30,7 +30,7 @@ ApplicationWindow {
         height: 48
         background: Rectangle {
             color: Theme.surface
-            Rectangle { // 1px accent underline
+            Rectangle { // 2px accent underline
                 anchors { left: parent.left; right: parent.right; bottom: parent.bottom }
                 height: 2; color: Theme.primary
             }
@@ -137,7 +137,7 @@ ApplicationWindow {
                 horizontalAlignment: Text.AlignHCenter
                 verticalAlignment: Text.AlignVCenter
             }
-            background: Rectangle { color: Theme.surface }   // selected highlight below
+            background: Rectangle { color: Theme.surface }   // selection shows as label color only
         }
 
         ThemedTabButton { text: qsTr("Home") }
