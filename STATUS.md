@@ -281,13 +281,6 @@ it a genuine connect candidate.
 These numbers are stable IDs, and code and docs refer to them. When
 an issue is resolved it is removed, and its number is not reused.
 
-1. **Windows CI installs aqtinstall from git master.**
-   - A sporadic py7zr `Bad7zFile` failure has been seen once, and a
-     re-run passed.
-   - If it recurs, pin a known-good post-#1000 commit plus
-     `py7zr==1.1.0`.
-   - Go back to the PyPI release once aqtinstall 3.4+ ships the
-     layout fix.
 2. **The mobile apps are unvalidated.** Since 2026-10-20, CI
    cross-builds an Android arm64-v8a APK and an unsigned iOS arm64
    device build. On pull requests and on request, it also launches
@@ -402,34 +395,167 @@ transport-layer protocol support before any profile can serve those
 cars. Whether and when it is built depends on which target vehicles
 matter most — CAN-era targets need none of it.
 
-**Backlog (unscheduled):**
+## Backlog
 
-- Hide mock connections behind a developer-mode setting on the
-  Settings page
-- Change the Log page to show application log messages instead of
-  mock frame data
-- Save data logs to a file, once live vehicle data shows on LiveView
-- Distinguish refused vendor open (a status code) from load failure in
-  the URI-facing error text — today both surface as
-  "failed to load transport library"
-- Plumb `PassThruGetLastError` for vendor status text (the VT's
-  status 34 is unlabeled)
-- Picker row URIs templated with profile parameters — less urgent
-  now that channel derivation makes the natural flow produce a
-  working `obd2` session; the remaining case worth exposing is
-  `?profile=raw` (log-only) and explicit ID overrides for oddball
-  vehicles
-- update code base, docs, compilation floors to C++20(gives std::span, 
-  coroutines, ranges, std::format, etc) but removes older compiler support 
-  (MSVC 2019, gcc 11, clang 14 all missing full support) - low priority / debatable 
-- android auto / apple car play target for the dashboard of live values to use
-  infotainment as a potential display. Basically a separate, additional frontend.
-  More invasive options: direct usage including overwrite or extension of vehicles 
-  infotainment system (highly vehicle dependent - explicitly out of scope)
-- expand logging of connections and bus state to the activity log on settings page.
-  Link-health transitions are logged there since 2026-10-20, and the
-  surrogate's session log holds both halves since `995519b`; what's
-  left is connect, disconnect and bus state in the activity log
-- color schemes for QML, prioritize low eye strain schemes such as amber, orange and red
-- ELM-327 adoption for OBDLink(BLE) and Apple support, then other transport standards as needed
-- performance improvements to support maximum OBD/signal sets as possible with minimal lag
+Unscheduled work, grouped by theme. Nothing here is committed to a
+release: an item moves into the [v0.3.0 checklist](#v030-checklist) or
+the roadmap above when it is scheduled. Defects and debt live under
+[Known issues](#known-issues-and-technical-debt), not here.
+
+Sizes are rough: **S** is a day or less, **M** a few days, **L** a
+week or more or a design that needs an ADR first.
+
+### Diagnostics and error reporting
+
+These make a failed field session explainable, so they come first
+after the first vehicle session.
+
+- **Say why a connect failed (M).** `qttune_session_create` folds
+  distinct causes into two codes. A refused `PassThruOpen` (a vendor
+  status) and a DLL that won't load both read "failed to load
+  transport library" (`QT_ERR_LOAD_FAILED`); a malformed URI and an
+  unknown profile both read "no transport available"
+  (`QT_ERR_NO_TRANSPORT`). Add status codes (the enum is append-only)
+  or a last-error string on the session API, and show the specific
+  cause and vendor status in the Settings error line.
+- **Vendor error text (S).** After a failed vendor call, fetch
+  `PassThruGetLastError` and put its text in the session log and the
+  error line; the OBDX Pro VT's status 34 has no label without it.
+  Needs a loader helper and a matching surrogate op, tested on both
+  backends.
+- **Session details in the activity log (S).** Connects,
+  disconnects, failed connects and link-health transitions are
+  logged. Add what a support question needs:
+  - the backend (in-proc or surrogate) and the DLL's architecture;
+  - protocol and baud;
+  - the profile and its derived channel IDs;
+  - the adapter's battery voltage (`READ_VBATT`, already relayed on
+    both backends but never requested);
+  - its firmware and DLL versions (`PassThruReadVersion`, not yet
+    wrapped).
+
+### Data capture
+
+- **Record a session to disk (M).** Two outputs from one recording:
+  - decoded signals as CSV (time, signal, value, unit) for
+    spreadsheets and plotting;
+  - raw frames in the format the Phase 4 replay transport reads, so
+    a capture from the road doubles as a regression fixture.
+
+  Start and stop from the UI, one file per session, named by date and
+  vehicle. Define the raw format together with Phase 4, so there is
+  only one. Most useful once live vehicle data reaches LiveView.
+
+### User interface
+
+- **Persisted preferences (S).** Nothing survives a restart: there is
+  no `QSettings` or QML `Settings` use yet. Developer mode, units,
+  theme and the last-used device all need it, so it comes before
+  them. It belongs in the app layer, not core.
+- **Developer mode (S).** A persisted Settings toggle, off by default.
+  With it off the app offers only real devices. With it on, the app
+  also shows:
+  - the mock transport (the header's "Connect Mock", the `mock://demo`
+    preset, and Home's "Start session", which connects mock);
+  - the raw frame log;
+  - the header's frame, notify, batch and drop counters.
+- **Log page as the application log (S).** Show the application's
+  event log on the Log page (it sits at the bottom of Settings) and
+  move the raw frame table into developer mode. Pairs with
+  developer mode.
+- **Units of measure (M).** Metric or imperial globally, with
+  per-signal overrides (°C or °F, km/h or mph, kPa or psi, g/s or
+  lb/min). The conversion belongs in core, because the UI receives
+  final display values (rule 2 above). Display names and decimal
+  places are core's to own for the same reason: `degC` and raw def
+  names such as `Engine_RPM` reach the screen.
+- **Low-glare and night themes (M).** Amber and red-on-black schemes
+  for driving at night.
+  - `Theme` already centralizes the palette, but the gauges hard-code
+    their face, bezel and needle colours, which need Theme roles
+    first.
+  - A near-monochrome scheme must keep warning and danger
+    distinguishable by more than hue, for example with a label or
+    icon.
+- **Picker presets with profiles (S).** Channel derivation already
+  makes the plain flow produce a working `obd2` session. What's left
+  is picker rows for `?profile=raw` (log only) and explicit ID
+  overrides for vehicles that don't use the standard 7E0/7E8 pair.
+- **In-vehicle displays: Android Auto and CarPlay (L, research
+  first).** A second front end over the same C ABI, which is what
+  replaceable UI layers are for. Both platforms admit third-party apps
+  only in approved categories with template-based screens, and Qt
+  targets neither, so the front end would be native (Kotlin, Swift).
+  Confirm that a live-gauge app qualifies before building anything.
+  Out of scope: modifying or replacing a vehicle's own infotainment
+  system.
+
+### Vehicle coverage
+
+- **Full standard OBD-II coverage (L).** Grow the `obd2` set toward
+  the whole SAE J1979 Service 01 table, including PIDs that carry two
+  values (oxygen sensors with fuel trims), which need two defs on one
+  PID.
+  - Depends on the PID-support probe (v0.3.0 checklist): until the
+    ECU's support bitmaps prune the rotation, every PID in a set costs
+    a 100 ms request slot whether the ECU answers or not.
+  - Depends on faster request pacing (Performance, below).
+  - Verify each PID's meaning and formula against a public J1979
+    table. The fake's canned replies share the def's assumptions, so
+    the tests can't catch a wrong PID.
+- **Vehicle identification (M).** Read the VIN and calibration IDs
+  (Service 09) at connect, for the activity log and session
+  recordings. These responses are multi-frame and textual: the adapter
+  reassembles ISO-TP, but the signal model decodes numbers only
+  (`STRING` is rejected), so this needs a string path.
+- **A first manufacturer signal set (L).** One make's enhanced
+  Service 22 data, such as transmission temperature, which the
+  standard set doesn't include. Choose the make from the target
+  vehicles. Needs Service 22 requests (the scheduler builds Service 01
+  only) and the profile API from ADR-0013, and serves as the pilot
+  for the v0.5.0 plugin modules.
+
+### Transports and platforms
+
+- **ELM327 transport (L).** ELM327-compatible adapters over USB serial,
+  Bluetooth and BLE (the OBDLink MX+ and CX among them). This is the
+  path to a vehicle on macOS, Linux, iOS and Android, where only
+  `mock://` exists (Known Issue #2).
+  - It's a new transport, not a J2534 shim: ELM327 is a text
+    AT-command protocol with its own framing and flow control.
+  - Settle in an ADR first: core can't link Qt, so Bluetooth needs
+    either per-platform native code in core (CoreBluetooth, WinRT,
+    BlueZ, the Android SDK) or a byte-stream transport that the app
+    layer feeds.
+- **Legacy buses:** see the roadmap above.
+
+### Performance
+
+- **Full signal sets at full rate (L).** The goal is a per-PID refresh
+  limited by the ECU's response time rather than by a fixed 100 ms
+  slot, with no per-frame GUI-thread cost. The parts:
+  - response-driven request pacing: send the next request when the
+    reply arrives, bounded by the ISO 15765-4 response timeout (P2,
+    50 ms);
+  - decoding on the worker thread, which also brings per-sample
+    timestamps (Known Issue #10) and decode-time subscription filtering
+    (#4);
+  - a fixed ring of plain frame structs for the log, replacing
+    `QVariantMap` rows, whose eviction costs an O(n) erase per frame
+    at the 10k cap.
+
+  Set a measured target before starting: sustained frames per second,
+  and per-PID refresh at N PIDs, recorded in
+  [docs/testing.md](docs/testing.md).
+
+### Toolchain
+
+- **C++20 baseline (M; decide in an ADR first).** Low priority.
+  - **Gains:** `std::span` for the buffer-and-length pairs at the
+    loader and transport seams; `std::format` for log lines; and
+    designated initializers, which GCC rejects under C++17.
+  - **Costs:** older toolchains drop out (`std::format` needs GCC 13
+    or a recent libc++), and every compiler CI uses (MSVC, GCC,
+    AppleClang, the NDK's clang) has to be checked against the
+    features adopted.
+  - The public headers are C, so the ABI doesn't change.
