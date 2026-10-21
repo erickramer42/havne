@@ -64,7 +64,9 @@ next.
   - Surrogate diagnostics: client and child write one session log,
     both stamped `HH:MM:SS.mmm`, so a GUI launch keeps the whole story
     without a stderr redirect; a second concurrent session gets its own
-    log (`995519b`, PR #11).
+    log (`995519b`, PR #11). With `QTTUNE_SUR_LOG_FRAMES=1` at launch,
+    the child also logs every request and reply verbatim, so a bench or
+    vehicle session records its payloads without screenshots.
 - **Not yet:**
   - BENCH coverage beyond the quiet-bus tier. The formal first BENCH
     session (2026-10-16, [docs/bench-sessions/2026-10-16.md](docs/bench-sessions/2026-10-16.md))
@@ -85,8 +87,8 @@ next.
     channel derivation are HARNESS-verified against the fake; a
     live-vehicle session (real ECU responses, talking-bus items in
     the BENCH prep list) is still ahead.
-  - **Tests:** 160 ctest cases (Windows/MSVC 2022, both trees
-    rebuilt, 2026-10-21), plus the cross-arch subset (19/19). All
+  - **Tests:** 161 ctest cases (Windows/MSVC 2022, both trees
+    rebuilt, 2026-10-21), plus the cross-arch subset (20/20). All
     passed except the env-gated cross-arch skip. CI was green on all
     eight jobs on PR #15 (merged as `0956784`), including the
     simulator smoke. That covers ctest on Windows, macOS and Linux,
