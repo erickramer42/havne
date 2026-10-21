@@ -30,7 +30,7 @@ typedef enum {
 
 typedef struct QttuneSignalDef {
     uint16_t id;
-    char name[32];
+    char name[32];            /* display name, UTF-8; UIs show it as is */
     QttuneSignalType type;
     uint8_t start_byte;
     uint8_t num_bytes;
@@ -38,8 +38,8 @@ typedef struct QttuneSignalDef {
     uint8_t bit_length;
     float scale;
     float offset;
-    char unit[16];
-    uint8_t decimal_places;
+    char unit[16];            /* display unit, UTF-8 (a degree sign, "km/h") */
+    uint8_t decimal_places;   /* display precision of the decoded value */
     uint32_t flags;
     
     /* CAN arbitration ID this signal rides on. Consumers gate decode

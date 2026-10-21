@@ -61,11 +61,9 @@ that runs to the end undocumented.
         ignition": writes fail while reads are clean, the no-ECU or
         ignition-off case;
       - red "Adapter fault": reads fail.
-      The Settings activity log records each transition; Home and the
-      Dashboard header show the same state in short form.
-- [ ] Leave every signal checked on Live. Unchecking one also freezes
-      it on the Dashboard, where it dims as stale while frames still
-      arrive (Known Issue #31)
+      The Settings activity log records each transition; the header
+      pill, Home and the Dashboard header show the same state in short
+      form.
 - [ ] Settings picker lists the VX as "x86"
 - [ ] Camera or notebook ready
 
@@ -121,20 +119,21 @@ and payloads verbatim.
 is requested)
 
 **Expected:**
-- [ ] Log page: frames with ID `0x7E8`, DLC 4, payload `410c` + two
+- [ ] Log page: frames with ID `0x7E8`, DLC 4, payload `41 0C` + two
       data bytes; engine off, RPM reads 0 or close to it. On the wire
       the reply is an 8-byte CAN frame with a PCI byte and padding, but
       the adapter reassembles ISO 15765 and hands over only the data,
       so DLC 4 is what to expect. Record the DLC either way:
-      - DLC 8 starting `410c`: this adapter passes the padding through.
+      - DLC 8 starting `41 0C`: this adapter passes the padding through.
         Decoding still works; note the pad bytes;
       - a payload that doesn't start with `41` (for example
-        `04 41 0c …`): a PCI byte left in-band (see "If it fails")
+        `04 41 0C …`): a PCI byte left in-band (see "If it fails")
 - [ ] LiveView: RPM populated; every other signal shows "—"
 - [ ] No banner (link ok)
 
-**Evidence:** a few payloads verbatim; the session log's `OP_WRITE`
-and `OP_READ` lines (statuses and frame counts).
+**Evidence:** a few payloads verbatim (Pause on the Log page holds the
+rows still while you write them down); the session log's `OP_WRITE` and
+`OP_READ` lines (statuses and frame counts).
 
 ## Phase 3 — full scheduler
 
@@ -167,8 +166,8 @@ and `OP_READ` lines (statuses and frame counts).
 
 **Evidence:** a screenshot of LiveView; the refresh you observe per
 signal (expect about one rotation; replies a cycle late are a known item, not a
-failure); the Log page's `timestamp_us` deltas against the wall clock
-over a minute (BENCH prep #5).
+failure); the Log page's time column (seconds, from `timestamp_us`)
+against the wall clock over a minute (BENCH prep #5).
 
 ## Phase 4 — engine idling (optional)
 
@@ -207,7 +206,6 @@ ignition off, wait 10 s, then turn it back on.
 | Values implausible (−40 °C, huge RPM) | Scaling or byte order: temperatures are UINT8 with a −40 offset; 2-byte PIDs are big-endian |
 | Link flips between ok and quiet while frames arrive | Unmatched frames interleaving with replies: a single unmatched frame reads as quiet with no debounce, by design. Note the frame IDs |
 | Slow refresh, replies a cycle late | Known refresh-rate item (20 ms first read vs up to 50 ms ECU response). Measure; don't fix in the session |
-| A Dashboard gauge stops and dims while Live still updates | The signal is unchecked on Live (Known Issue #31). Check it again |
 | UI freezes on Disconnect | Known: disconnect is synchronous (Known Issue #33). Wait it out, then note how long |
 | App crashes | Abort. Capture the session log and `sur.log` before relaunching |
 

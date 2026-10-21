@@ -107,7 +107,7 @@ GaugeBase {
                 readonly property real f: gauge.fractionOf(modelData)
                 // End labels align to the bar's edges, the rest centre
                 x: f <= 0 ? 0 : f >= 1 ? parent.width - width : f * parent.width - width / 2
-                text: gauge.format(modelData)
+                text: gauge.formatScale(modelData)
                 font.pixelSize: 10
                 font.features: ({ "tnum": 1 })
                 color: Qt.alpha(Theme.textDim, 0.8)

@@ -15,8 +15,9 @@ Instantiator {
 
     component Entry: QtObject {
         required property string name
-        required property string unit
+        required property string unit       // as displayed, from core
         required property double value
+        required property int decimals      // core's decimal_places
         required property bool hasValue
         required property double ageMs   // -1 = never arrived
     }
@@ -45,9 +46,5 @@ Instantiator {
             if (e) return e
         }
         return null
-    }
-
-    function prettyUnit(u) {
-        return u === "degC" ? "°C" : u === "degF" ? "°F" : u
     }
 }

@@ -46,22 +46,30 @@ static QttuneSignalDef mk(uint16_t id, const char* name,
     return d;
 }
 
+/* Names, units and decimal places are display strings: the UI shows
+ * them as they are (UTF-8). The names match the obd2 set's, so a gauge
+ * finds the same signal under either profile. */
+#define DEG_C "\xC2\xB0" "C"   /* UTF-8 degree sign, whatever the source encoding */
+
 static const QttuneSignalDef kMockDefs[] = {
-    mk(MOCK_SIG_RPM_ID,      "Engine_RPM",       QTTUNE_SIGNAL_TYPE_UINT16,  0, 2, 0, 16, 0.25f,  0.0f,  "RPM",    0),
+    mk(MOCK_SIG_RPM_ID,      "RPM",               QTTUNE_SIGNAL_TYPE_UINT16,  0, 2, 0, 16, 0.25f,  0.0f,  "RPM",    0),
     /* Coolant and IAT are UINT8 with a -40 offset (J1979: A - 40, so
      * -40..215 degC). As INT8, anything from 88 degC up would read as
      * about -160 degC. */
-    mk(MOCK_SIG_COOLANT_ID,  "Coolant_Temp",     QTTUNE_SIGNAL_TYPE_UINT8,    2, 1, 0, 8,   1.0f, -40.0f, "degC",   0),
-    mk(MOCK_SIG_SPEED_ID,    "Vehicle_Speed",    QTTUNE_SIGNAL_TYPE_UINT8,    3, 1, 0, 8,   1.0f,   0.0f, "km/h",   0),
-    mk(MOCK_SIG_THROTTLE_ID, "Throttle_Pos",    QTTUNE_SIGNAL_TYPE_UINT8,    4, 1, 0, 8,   100.0f/255.0f, 0.0f, "%", 1),
-    mk(MOCK_SIG_IAT_ID,      "Intake_Air_Temp",  QTTUNE_SIGNAL_TYPE_UINT8,    5, 1, 0, 8,   1.0f, -40.0f, "degC",   0),
-    mk(MOCK_SIG_LOAD_ID,     "Engine_Load",     QTTUNE_SIGNAL_TYPE_UINT8,    6, 1, 0, 8,   100.0f/255.0f, 0.0f, "%", 1),
+    mk(MOCK_SIG_COOLANT_ID,  "Coolant Temp",      QTTUNE_SIGNAL_TYPE_UINT8,    2, 1, 0, 8,   1.0f, -40.0f, DEG_C,    0),
+    mk(MOCK_SIG_SPEED_ID,    "Vehicle Speed",     QTTUNE_SIGNAL_TYPE_UINT8,    3, 1, 0, 8,   1.0f,   0.0f, "km/h",   0),
+    mk(MOCK_SIG_THROTTLE_ID, "Throttle Position", QTTUNE_SIGNAL_TYPE_UINT8,    4, 1, 0, 8,   100.0f/255.0f, 0.0f, "%", 1),
+    mk(MOCK_SIG_IAT_ID,      "Intake Air Temp",   QTTUNE_SIGNAL_TYPE_UINT8,    5, 1, 0, 8,   1.0f, -40.0f, DEG_C,    0),
+    mk(MOCK_SIG_LOAD_ID,     "Engine Load",       QTTUNE_SIGNAL_TYPE_UINT8,    6, 1, 0, 8,   100.0f/255.0f, 0.0f, "%", 1),
     /* Layout mirrors encode_payload's tail: MAF at bytes 7-8 (LE,
      * like RPM), oil temp at byte 9. Centi-grams/s scale is the
-     * same J1979 0x10 formula the obd2 set uses; oil is A - 40. */
-    mk(MOCK_SIG_MAF_ID,      "Mass_Air_Flow",    QTTUNE_SIGNAL_TYPE_UINT16,  7, 2, 0, 16, 0.01f,  0.0f, "g/s",  2),
-    mk(MOCK_SIG_OIL_ID,      "Oil_Temp",         QTTUNE_SIGNAL_TYPE_UINT8,    9, 1, 0, 8,   1.0f, -40.0f, "degC", 0),
+     * same J1979 0x10 formula the obd2 set uses; oil is A - 40. The
+     * 0.01 g/s resolution is shown to one decimal. */
+    mk(MOCK_SIG_MAF_ID,      "MAF",               QTTUNE_SIGNAL_TYPE_UINT16,  7, 2, 0, 16, 0.01f,  0.0f, "g/s",  1),
+    mk(MOCK_SIG_OIL_ID,      "Engine Oil Temp",   QTTUNE_SIGNAL_TYPE_UINT8,    9, 1, 0, 8,   1.0f, -40.0f, DEG_C, 0),
 };
+
+#undef DEG_C
 
 static const QttuneSignalSet kMockSet = [] {
     QttuneSignalSet s = {};

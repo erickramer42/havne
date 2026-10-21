@@ -165,22 +165,32 @@ The bridge polls it on its 100 ms tick and maps it for the UI
 - **Bridge threading:** `QtTuneBridge` touches only atomics on the
   worker thread; everything else runs on the GUI thread. It links
   only QtCore, so `test_bridge` can exercise it headless.
-- **Bridge outputs:** it exposes a frame model (behind a sort proxy),
-  a signal model (value, `hasValue`, `ageMs`, a 120-sample history per
-  signal), device discovery, and the link state.
-- **Pages:** **Home** (status and quick start), **Dashboard** (gauges
-  and shift lights), **Live** (value table and strip chart), **Log**
-  (raw frames), **Settings** (device picker, URI, activity log).
+- **Bridge outputs:** it exposes a frame model (behind a sort proxy,
+  with a pause for the Log page), a signal model (value, `hasValue`,
+  `ageMs`, `decimals`, a 120-sample history per signal), device
+  discovery, and the link state.
+- **Display strings come from core:** each def's name, unit and
+  `decimal_places` reach the screen as they are, on Live and the
+  Dashboard alike, so neither page formats a unit or picks a precision
+  of its own.
+- **Pages:** **Home** (status), **Dashboard** (gauges and shift
+  lights), **Live** (value table and strip chart), **Log** (raw
+  frames), **Settings** (device picker, URI, activity log). Settings is
+  the one place a session is connected; the header and Home open it.
   Navigation is a sidebar at 720 px and wider, a tab bar below that.
-- **`Theme`** holds the palette, the chart's series colours and the
-  link-state color and label functions, so every page shows a state
-  the same way.
+- **`Theme`** holds the palette, the chart's series colours, the
+  monospace family and page margin, and the link-state color and
+  label functions, so every page shows a state the same way.
+  `PageHeader` gives every page but Home the same title row.
 - **Live** keys each chart trace's colour to its list row, so the
   row's swatch is the legend and a trace keeps its colour when
-  another signal is unsubscribed.
+  another signal is unsubscribed. The ticks choose what's plotted and
+  nothing else. Each trace scales on its own, so its value is printed
+  at its right-hand end.
 - **`SignalHub`** gives the Dashboard signals by *name*, because gauges
-  want "RPM" whichever profile named it (`Engine_RPM` in the mock set,
-  `RPM` in `obd2`).
+  want "RPM" whichever profile provides it. The mock and `obd2` sets
+  share names; a profile that names a signal differently adds the
+  name to the gauge's `Tap`.
 - **Freshness:** a value never received shows "—", never a fabricated
   0. A value older than 3 s dims; the model refreshes ages every tick,
   so a signal that stops arriving dims even when nothing else changes.

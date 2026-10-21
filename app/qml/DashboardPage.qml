@@ -1,7 +1,7 @@
 // File/layer: app/qml/DashboardPage.qml | Qt6 Quick, UI layer
 // Testing: manual smoke — mock://demo drives every gauge; resize across
-//          760 px content width (4 ↔ 2 grid columns) and 600 px (phone
-//          margins); gauges sweep once per session
+//          760 px content width (4 ↔ 2 grid columns) and 600 px (compact
+//          gaps); gauges sweep once per session
 
 import QtQuick
 import QtQuick.Controls
@@ -14,14 +14,16 @@ Page {
     background: Rectangle { color: Theme.bg }
 
     readonly property bool compact: width < 600
-    readonly property real margin: compact ? 12 : 24
+    readonly property real margin: Theme.pageMargin
     readonly property real gap: compact ? 10 : 16
 
     SignalHub { id: hub }
 
-    // One gauge input: the first alias the active profile provides
-    // (mock and obd2 name signals differently). `note` explains an
-    // empty gauge instead of showing a fake zero.
+    // One gauge input: the first of `names` the active profile provides.
+    // The mock and obd2 sets share display names; a profile that names a
+    // signal differently adds its name to the list. Unit and decimals are
+    // core's display strings. `note` explains an empty gauge instead of
+    // showing a fake zero.
     component Tap: QtObject {
         required property var names
         readonly property SignalHub.Entry entry: hub.lookup(names)
@@ -29,21 +31,22 @@ Page {
         readonly property real value: entry ? entry.value : 0
         // Same 3 s staleness rule as LiveView
         readonly property bool stale: live && entry.ageMs > 3000
-        readonly property string unit: entry ? hub.prettyUnit(entry.unit) : ""
+        readonly property string unit: entry ? entry.unit : ""
+        readonly property int decimals: entry ? entry.decimals : 0
         readonly property string note: !QtTune.connected ? qsTr("no session")
                                      : entry === null ? qsTr("not in profile")
                                      : !entry.hasValue ? qsTr("waiting for data")
                                      : ""
     }
 
-    Tap { id: rpm;      names: ["Engine_RPM", "RPM"] }
-    Tap { id: speed;    names: ["Vehicle_Speed", "Vehicle Speed"] }
-    Tap { id: coolant;  names: ["Coolant_Temp", "Coolant Temp"] }
-    Tap { id: oil;      names: ["Oil_Temp", "Engine Oil Temp"] }
-    Tap { id: iat;      names: ["Intake_Air_Temp", "Intake Air Temp"] }
-    Tap { id: maf;      names: ["MAF", "Mass_Air_Flow", "MAF Air Flow Rate"] }
-    Tap { id: throttle; names: ["Throttle_Pos", "Throttle Position"] }
-    Tap { id: load;     names: ["Engine_Load", "Engine Load"] }
+    Tap { id: rpm;      names: ["RPM"] }
+    Tap { id: speed;    names: ["Vehicle Speed"] }
+    Tap { id: coolant;  names: ["Coolant Temp"] }
+    Tap { id: oil;      names: ["Engine Oil Temp"] }
+    Tap { id: iat;      names: ["Intake Air Temp"] }
+    Tap { id: maf;      names: ["MAF"] }
+    Tap { id: throttle; names: ["Throttle Position"] }
+    Tap { id: load;     names: ["Engine Load"] }
 
     // Ignition-style sweep, once per session, the first time the page
     // is on screen while connected
@@ -88,15 +91,9 @@ Page {
             spacing: root.gap
 
             // ---- Header: title, link state, peak reset
-            RowLayout {
-                Layout.fillWidth: true
-                spacing: 10
+            PageHeader {
+                title: qsTr("Dashboard")
 
-                Label {
-                    text: qsTr("Dashboard")
-                    font.pixelSize: 20
-                    color: Theme.text
-                }
                 Rectangle {
                     implicitWidth: 8; implicitHeight: 8   // layout-managed
                     radius: 4
@@ -161,6 +158,7 @@ Page {
                         label: qsTr("Engine speed")
                         caption: qsTr("×1000 r/min")
                         unit: rpm.unit || qsTr("RPM")
+                        decimals: rpm.decimals
                         value: rpm.value; hasValue: rpm.live; stale: rpm.stale; note: rpm.note
                         from: 0; to: 8000
                         majorStep: 1000; minorStep: 250; labelDivisor: 1000
@@ -181,6 +179,7 @@ Page {
                         label: qsTr("Vehicle speed")
                         caption: speed.unit || qsTr("km/h")
                         unit: speed.unit || qsTr("km/h")
+                        decimals: speed.decimals
                         value: speed.value; hasValue: speed.live; stale: speed.stale; note: speed.note
                         from: 0; to: 260
                         majorStep: 20; minorStep: 10
@@ -197,9 +196,12 @@ Page {
                         anchors.fill: parent
                         label: qsTr("Coolant")
                         unit: coolant.unit || "°C"
+                        decimals: coolant.decimals
                         value: coolant.value; hasValue: coolant.live; stale: coolant.stale
                         note: coolant.note
-                        from: 40; to: 130
+                        // From 0 °C, so a cold engine at ambient reads on
+                        // the scale instead of pinning at its start
+                        from: 0; to: 130
                         coldBelow: 60; warnFrom: 105; dangerFrom: 115
                     }
                 }
@@ -211,9 +213,10 @@ Page {
                         anchors.fill: parent
                         label: qsTr("Oil temp")
                         unit: oil.unit || "°C"
+                        decimals: oil.decimals
                         value: oil.value; hasValue: oil.live; stale: oil.stale
                         note: oil.note
-                        from: 50; to: 160
+                        from: 0; to: 160   // from 0 °C, like coolant
                         coldBelow: 70; warnFrom: 125; dangerFrom: 140
                     }
                 }
@@ -226,6 +229,7 @@ Page {
                         label: qsTr("IAT")
                         description: qsTr("Intake air temperature")
                         unit: iat.unit || "°C"
+                        decimals: iat.decimals
                         value: iat.value; hasValue: iat.live; stale: iat.stale; note: iat.note
                         from: 0; to: 120
                         warnFrom: 55; dangerFrom: 70
@@ -240,9 +244,9 @@ Page {
                         label: qsTr("MAF")
                         description: qsTr("Mass air flow")
                         unit: maf.unit || "g/s"
+                        decimals: maf.decimals
                         value: maf.value; hasValue: maf.live; stale: maf.stale; note: maf.note
                         from: 0; to: 300
-                        decimals: 1
                         accent: Theme.info
                     }
                 }
@@ -257,6 +261,7 @@ Page {
                         anchors.fill: parent
                         label: qsTr("Throttle")
                         unit: throttle.unit || "%"
+                        decimals: throttle.decimals
                         value: throttle.value; hasValue: throttle.live; stale: throttle.stale
                         note: throttle.note
                         accent: Theme.success
@@ -272,6 +277,7 @@ Page {
                         anchors.fill: parent
                         label: qsTr("Engine load")
                         unit: load.unit || "%"
+                        decimals: load.decimals
                         value: load.value; hasValue: load.live; stale: load.stale; note: load.note
                     }
                 }

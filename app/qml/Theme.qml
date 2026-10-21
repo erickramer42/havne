@@ -9,6 +9,7 @@ QtObject {
     readonly property color surface:        "#1e1e2e"
     readonly property color elevated:       "#2a2a3e"
     readonly property color elevatedLight:  "#33334a"
+    readonly property color outline:        "#64647e"   // control borders; 3:1 on bg
     readonly property color primary:        "#6d4aff"
     readonly property color text:           "#e8e8f0"
     readonly property color textDim:        "#8888a0"
@@ -18,11 +19,19 @@ QtObject {
     readonly property color info:           "#60a5fa"
     readonly property int radius:           8
     readonly property int spacing:          8
+    readonly property int pageMargin:       16
+
+    // Fixed-pitch family, so hex columns and digits keep their width row
+    // to row. "monospace" is a fontconfig and Android alias; Windows and
+    // the Apple platforms don't resolve it.
+    readonly property string monoFamily: Qt.platform.os === "windows" ? "Consolas"
+                                       : Qt.platform.os === "osx" || Qt.platform.os === "ios"
+                                         ? "Menlo"
+                                         : "monospace"
 
     // Chart trace colours, one per hue family so traces stay distinct on
-    // the dark surface. LiveView keys them by model row. Calm hues come
-    // first and alarm red last, so an ordinary signal near the top of the
-    // list doesn't read as a warning (U20).
+    // the dark surface. LiveView keys them by model row. No red: it is
+    // the danger colour, so a trace drawn in it would read as an alarm.
     readonly property var seriesColors: [
         "#4aa3ff",   // blue
         "#31d08c",   // green
@@ -31,7 +40,7 @@ QtObject {
         "#e39ac9",   // reddish purple
         "#ffa94d",   // orange
         "#f2f2f2",   // near-white
-        "#ff5555",   // red
+        "#b08cff",   // violet
     ]
 
     // Link state → color. Whitelists the healthy and the explained
@@ -46,9 +55,10 @@ QtObject {
         }
     }
 
-    // Link state → short status label (Home card). Unknown states fall to
-    // "Link degraded", mirroring linkColor. LiveView's banner keeps its own
-    // longer messages, which carry the episode count and error code.
+    // Link state → short status label (header pill, Home card). Unknown
+    // states fall to "Link degraded", mirroring linkColor. LiveView's
+    // banner keeps its own longer messages, which carry the episode count
+    // and error code.
     function linkLabel(state: string): string {
         switch (state) {
         case "ok":              return qsTr("Session active")

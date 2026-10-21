@@ -292,6 +292,41 @@ TEST(SignalsTest, SignalDefLayoutIsPinned)
     ASSERT_EQ(offsetof(QttuneSignalDef, message_id), 76u);
 }
 
+TEST(SignalsTest, MockAndObd2ShareDisplayNamesAndUnits)
+{
+    /* The UI shows names, units and decimal places as core gives them,
+     * and the Dashboard's gauges find their signals by name (the Taps in
+     * DashboardPage.qml). A quantity both sets carry has one name, unit
+     * and precision in both, so a gauge reads under either profile.
+     * Temperatures are a UTF-8 degree sign, never "degC". */
+    const char* const kShared[] = {"RPM", "Vehicle Speed", "Coolant Temp",
+                                   "Engine Oil Temp", "Intake Air Temp", "MAF",
+                                   "Throttle Position", "Engine Load"};
+    auto find = [](const QttuneSignalSet* set, const char* name) -> const QttuneSignalDef* {
+        for (uint32_t i = 0; i < set->count; ++i) {
+            if (std::strcmp(set->defs[i].name, name) == 0) return &set->defs[i];
+        }
+        return nullptr;
+    };
+    const QttuneSignalSet* mock = qttune_mock_signal_set();
+    const QttuneSignalSet* obd2 = qttune_obd2_signal_set();
+
+    for (const char* name : kShared) {
+        const QttuneSignalDef* m = find(mock, name);
+        const QttuneSignalDef* o = find(obd2, name);
+        ASSERT_NE(m, nullptr) << "mock set lacks '" << name << "'";
+        ASSERT_NE(o, nullptr) << "obd2 set lacks '" << name << "'";
+        EXPECT_STREQ(m->unit, o->unit) << name;
+        EXPECT_EQ(m->decimal_places, o->decimal_places) << name;
+    }
+    for (const QttuneSignalSet* set : {mock, obd2}) {
+        for (uint32_t i = 0; i < set->count; ++i) {
+            EXPECT_STRNE(set->defs[i].unit, "degC") << set->defs[i].name;
+        }
+    }
+    EXPECT_STREQ(find(mock, "Coolant Temp")->unit, "\xC2\xB0" "C");
+}
+
 TEST(SignalsTest, MockSignalsDeclareTelemetryMessageId)
 {
     /* Every mock signal rides the telemetry CAN message. Half of the

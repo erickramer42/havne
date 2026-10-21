@@ -315,8 +315,9 @@ TEST(BridgeTest, DispatchedShortFrameHonorsDataLength)
     const QModelIndex idx = proxy->index(foundRow, 0);
     // DLC must reflect the ACTUAL length, not an assumed 8
     EXPECT_EQ(proxy->data(idx, FrameListModel::DlcRole).toUInt(), 4u);
-    // Hex payload is exactly 4 bytes -> 8 hex chars, not 16
-    EXPECT_EQ(proxy->data(idx, FrameListModel::PayloadRole).toString().size(), 8);
+    // Exactly the 4 bytes, not 8, as spaced uppercase hex
+    EXPECT_EQ(proxy->data(idx, FrameListModel::PayloadRole).toString(),
+              QStringLiteral("34 12 AA 55"));
     EXPECT_TRUE(proxy->data(idx, FrameListModel::ExtendedRole).toBool());
     EXPECT_EQ(proxy->data(idx, FrameListModel::ArbitrationIdRole).toUInt(), 0x0C0u);
 
@@ -335,6 +336,45 @@ TEST(BridgeTest, FrameRoleNamesMatchLogPageBindings)
     EXPECT_EQ(roles.value(FrameListModel::ExtendedRole), QByteArray("extended"));
     EXPECT_EQ(roles.value(FrameListModel::PayloadRole), QByteArray("payloadHex"));
     EXPECT_EQ(roles.value(FrameListModel::ArbitrationIdRole), QByteArray("arbId"));
+}
+
+TEST(BridgeTest, LogPauseStopsFrameLogNotDecode)
+{
+    /* Pause holds the frame log still to read: nothing is appended while
+     * paused, but frames are still counted and decoded, so Live and the
+     * Dashboard carry on. Resume appends again, and pause belongs to a
+     * session: disconnect clears it and a new session starts unpaused. */
+    QtTuneBridge bridge;
+    ASSERT_TRUE(bridge.connectSession("mock://pause").isEmpty());
+    FrameSortProxy* proxy = bridge.model();
+    ASSERT_TRUE(spinUntil([proxy]() { return proxy->rowCount() > 0; }, 5000));
+
+    bridge.setLogPaused(true);
+    ASSERT_TRUE(bridge.logPaused());
+    const int rows = proxy->rowCount();
+    const int frames = bridge.frameCount();
+    const int batches = bridge.signalBatchCount();
+
+    // CONTRACT: frames and batches keep coming while the log holds. The
+    // row count is exact: pause is set on the GUI thread, where every
+    // append happens.
+    ASSERT_TRUE(spinUntil([&bridge, frames, batches]() {
+        return bridge.frameCount() > frames + 2 && bridge.signalBatchCount() > batches;
+    }, 5000)) << "stream stopped while paused";
+    EXPECT_EQ(proxy->rowCount(), rows);
+
+    bridge.setLogPaused(false);
+    ASSERT_TRUE(spinUntil([proxy, rows]() { return proxy->rowCount() > rows; }, 5000))
+        << "log did not resume";
+
+    bridge.setLogPaused(true);
+    bridge.disconnectSession();
+    EXPECT_FALSE(bridge.logPaused());
+
+    bridge.setLogPaused(true);
+    ASSERT_TRUE(bridge.connectSession("mock://pause-again").isEmpty());
+    EXPECT_FALSE(bridge.logPaused());
+    bridge.disconnectSession();
 }
 
 TEST(BridgeTest, BackpressureDropsAreCountedAndReported)
@@ -498,7 +538,7 @@ TEST(BridgeTest, ChartDataFiltersUnsubscribedAndEmptyBatchesDoNotEmit)
     EXPECT_EQ(emissions, 5);
     EXPECT_EQ(model.chartData().size(), 2);
 
-    // Unsubscribe signal 0: excluded from chartData, history frozen
+    // Unsubscribe signal 0: excluded from chartData
     model.toggleSubscribed(0);
     const QVariantList data = model.chartData();
     ASSERT_EQ(data.size(), 1);
@@ -512,6 +552,90 @@ TEST(BridgeTest, ChartDataFiltersUnsubscribedAndEmptyBatchesDoNotEmit)
     model.toggleSubscribed(0);
     EXPECT_EQ(model.chartData().size(), 2);
     EXPECT_EQ(model.chartData().at(0).toMap().value("samples").toList().size(), 10);
+}
+
+TEST(BridgeTest, UnsubscribedSignalKeepsUpdating)
+{
+    /* A subscription chooses what the chart plots, nothing else. An
+     * unsubscribed row still takes values, so the Dashboard's gauge for
+     * it stays live instead of dimming as stale while its frames arrive,
+     * and its history keeps growing, so the trace is whole when it's
+     * plotted again. */
+    SignalListModel model;
+    QttuneSignalDef defs[2];
+    QttuneSignalSet set;
+    buildTestSignalSet(defs, set);
+    model.setSignalSet(&set);
+    model.toggleSubscribed(0);
+
+    bool row0Notified = false;
+    QObject::connect(&model, &QAbstractItemModel::dataChanged,
+        [&row0Notified](const QModelIndex& topLeft, const QModelIndex& bottomRight,
+                        const QList<int>& roles) {
+            if (roles.contains(SignalListModel::ValueRole)
+                && topLeft.row() <= 0 && bottomRight.row() >= 0) {
+                row0Notified = true;
+            }
+        });
+
+    std::vector<std::pair<uint16_t, float>> batch;
+    batch.emplace_back(uint16_t(1001), 3000.0f);
+    model.updateValues(batch, 10);
+
+    EXPECT_TRUE(row0Notified);
+    EXPECT_FLOAT_EQ(model.data(model.index(0, 0), SignalListModel::ValueRole).toFloat(),
+                    3000.0f);
+    EXPECT_TRUE(model.data(model.index(0, 0), SignalListModel::HasValueRole).toBool());
+    EXPECT_TRUE(model.chartData().isEmpty());   // still not plotted
+
+    // Plotted again: the sample taken while unsubscribed is in its trace
+    model.toggleSubscribed(0);
+    const QVariantList data = model.chartData();
+    ASSERT_EQ(data.size(), 1);
+    EXPECT_EQ(data.at(0).toMap().value("samples").toList().size(), 2);
+}
+
+/* LiveView's delegate and SignalHub's Entry take these roles as
+ * required properties, by NAME. A missing name isn't a build error: the
+ * delegate fails at creation and its row never shows. */
+TEST(BridgeTest, SignalRoleNamesMatchQmlBindings)
+{
+    SignalListModel model;
+    const QHash<int, QByteArray> roles = model.roleNames();
+    EXPECT_EQ(roles.value(SignalListModel::NameRole), QByteArray("name"));
+    EXPECT_EQ(roles.value(SignalListModel::UnitRole), QByteArray("unit"));
+    EXPECT_EQ(roles.value(SignalListModel::ValueRole), QByteArray("value"));
+    EXPECT_EQ(roles.value(SignalListModel::SubscribedRole), QByteArray("subscribed"));
+    EXPECT_EQ(roles.value(SignalListModel::HasValueRole), QByteArray("hasValue"));
+    EXPECT_EQ(roles.value(SignalListModel::AgeMsRole), QByteArray("ageMs"));
+    EXPECT_EQ(roles.value(SignalListModel::DecimalsRole), QByteArray("decimals"));
+}
+
+TEST(BridgeTest, DecimalsComeFromTheDefAndReachTheChart)
+{
+    /* Display precision has one source, the def's decimal_places:
+     * LiveView and the Dashboard format with DecimalsRole, the strip
+     * chart's value labels with chartData's "decimals". */
+    SignalListModel model;
+    QttuneSignalDef defs[2];
+    QttuneSignalSet set;
+    buildTestSignalSet(defs, set);
+    defs[0].decimal_places = 0;
+    defs[1].decimal_places = 2;
+    model.setSignalSet(&set);
+
+    EXPECT_EQ(model.data(model.index(0, 0), SignalListModel::DecimalsRole).toInt(), 0);
+    EXPECT_EQ(model.data(model.index(1, 0), SignalListModel::DecimalsRole).toInt(), 2);
+    EXPECT_FALSE(model.data(model.index(1, 0), SignalListModel::HasValueRole).toBool());
+
+    std::vector<std::pair<uint16_t, float>> batch;
+    batch.emplace_back(uint16_t(2001), 21.5f);
+    model.updateValues(batch, 0);
+    EXPECT_TRUE(model.data(model.index(1, 0), SignalListModel::HasValueRole).toBool());
+
+    const QVariantList data = model.chartData();
+    ASSERT_EQ(data.size(), 1);
+    EXPECT_EQ(data.at(0).toMap().value("decimals").toInt(), 2);
 }
 
 TEST(BridgeTest, StripChartDataPopulatedByLiveStream)
