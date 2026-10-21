@@ -182,7 +182,7 @@ static int handle_op_read(unsigned long channel, uint32_t timeout_ms,
     resp->num_frames = n;
 
     /* Trace frames and status changes only: an idle drain reads ~10x/s
-     * and would bury everything else (Known Issue #23). */
+     * and would bury everything else (formerly Known Issue #23). */
     static long last_read_rc = -1;
     if (n > 0 || rc != last_read_rc) {
         stage("OP_READ: status %ld, frames %u", rc, n);
@@ -207,7 +207,7 @@ static int handle_op_write(unsigned long channel, const uint8_t* data,
     if (out_num != nullptr) *out_num = static_cast<uint32_t>(num);
     
     /* Status-change logging: a healthy scheduler writes ~10/s, and the
-     * per-call line buried the interesting ones (Known Issue #23). The
+     * per-call line buried the interesting ones (formerly Known Issue #23). The
      * first write and every change of (status, count) still log. */
     static long last_write_rc = -1;
     static unsigned long last_write_num = 0;

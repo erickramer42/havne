@@ -47,18 +47,26 @@ next.
     any profile instead of being ignored).
   - Discovery finds the real installed drivers, and the Settings page
     can pick one and connect.
-  - Link health (#11): the J2534 worker tells a quiet bus from a dead
-    adapter, the bridge logs transitions to the Settings activity
-    log, and LiveView, the Home status card and the Settings
-    connection label all show the state. All states observed
-    2026-10-20, including the fault state on the VX itself (quiet bus,
-    no vehicle).
+  - Link health (#11): the J2534 worker tells a quiet bus, a dead
+    adapter and failing requests apart, the bridge logs transitions to
+    the Settings activity log, and LiveView, the Home status card and
+    the Settings connection label all show the state. The
+    ok/quiet/fault/disconnected states were observed 2026-10-20,
+    including a fault on the VX itself (quiet bus, no vehicle). That
+    VX fault was under the rules before `946bdf5`; the same no-ACK
+    setup now latches `QT_ERR_REQUEST_FAILED`, which the UI shows as
+    "Requests failing" in amber (W6).
+  - Surrogate diagnostics: client and child write one session log,
+    both stamped `HH:MM:SS.mmm`, so a GUI launch keeps the whole story
+    without a stderr redirect; a second concurrent session gets its own
+    log (`995519b`, PR #11).
 - **Not yet:**
   - BENCH coverage beyond the quiet-bus tier. The formal first BENCH
     session (2026-10-16, [docs/bench-sessions/2026-10-16.md](docs/bench-sessions/2026-10-16.md))
     succeeded: the OBDX Pro VX loaded through the surrogate, opened with
     USB power (vendor status 0), accepted the 8-byte flow-control filter
-    shape (behaviorally — see #23), and survived a 2-minute quiet-bus
+    shape (behaviorally, since the child didn't yet log filter ops),
+    and survived a 2-minute quiet-bus
     soak at <1% CPU with clean teardown. The 4-byte shape that replaced
     it was accepted with logged vendor status 0 on 2026-10-20
     ([bench-sessions/2026-10-20.md](docs/bench-sessions/2026-10-20.md)).
@@ -66,22 +74,22 @@ next.
     The OBDX Pro VT still refuses open (status 34) with its adapter
     absent. The run sheet template is
     [docs/bench-sessions/bench-runsheet.md](docs/bench-sessions/bench-runsheet.md).
-  - Any live vehicle.
+  - Any live vehicle. The session's run sheet is
+    [docs/bench-sessions/vehicle-runsheet.md](docs/bench-sessions/vehicle-runsheet.md).
   - J2534 decode on real hardware: the `obd2` set, scheduler and
     channel derivation are HARNESS-verified against the fake; a
     live-vehicle session (real ECU responses, talking-bus items in
     the BENCH prep list) is still ahead.
-  - **Tests:** 153 ctest cases, all passing locally at `946bdf5` on
-    2026-10-20 (Windows/MSVC 2022, both trees rebuilt), plus the
-    cross-arch subset (17/17). CI was last confirmed green on all
-    seven jobs at `a0f5c0f` (2026-10-20, run #78); the later commits'
-    CI results haven't been checked here. That run covers ctest on Windows, macOS and
-    Linux, the Android and iOS device cross-builds, and the simulator
-    smoke, which drew the app at 15 s and 45 s. The smoke's first run
-    (`923f479`) gave a blank frame. Its second (`4be8ba5`) drew and
-    showed two layout bugs, and `a0f5c0f` confirmed both fixes. The
-    smoke runs on pull requests and on request, not on every push,
-    because it roughly doubles CI time. The cross-arch routing case
+  - **Tests:** 156 ctest cases, all passing locally on 2026-10-20
+    with the W6 change on top of `a96892b` (Windows/MSVC 2022, both
+    trees rebuilt), plus the cross-arch subset (19/19). CI was green on all eight jobs on PR #11
+    (merged as `a96892b`), including the simulator smoke. That covers
+    ctest on Windows, macOS and Linux, Core under ASan and UBSan, the
+    Android and iOS device cross-builds, and the simulator smoke. The
+    smoke's first run (`923f479`) gave a blank frame. Its second
+    (`4be8ba5`) drew and showed two layout bugs, and `a0f5c0f`
+    confirmed both fixes. The smoke runs on pull requests and on
+    request, not on every push, because it roughly doubles CI time. The cross-arch routing case
     skips unless its environment variables are set. J2534 suites
     carry a 30 s per-test timeout — a hang fails bounded instead of
     wedging the runner (2026-10-17 F1 fallout). Tiers, suites and
@@ -297,46 +305,30 @@ an issue is resolved it is removed, and its number is not reused.
 10. **Strip-chart x-axis resolution is one coalesce window, about
     100 ms.** Per-sample timestamps need decoding to move onto the
     worker.
-11. **J2534 link health is HARNESS-tested, surfaced in the UI, and
-    BENCH-observed once.** Since 2026-10-19 both backends split
-    `ERR_TIMEOUT` (vehicle timeout), `ERR_BUFFER_EMPTY` (no frame) and
-    other statuses (hard failure), and the worker debounces timeouts,
-    counts hard-failure episodes and backs off
-    ([j2534.md](docs/j2534.md#session-lifecycle)). Both request modes
-    keep sending (each request is the recovery probe), a hard read
-    failure always records `QT_ERR_TRANSPORT_HARD_FAILURE`, and the
-    backoff grows from 100 ms to a 5 s cap. Since `946bdf5` (code
-    review 2026-10-20, findings 4–7 and 15) the machine also separates
-    writes from reads: a failed write latches `QT_ERR_REQUEST_FAILED`
-    (the no-ACK bus: no ECU awake, adapter fine) until a write succeeds,
-    and a hard read failure outranks it. A frame that matches no
-    channel reads as quiet, not healthy. Empty `NOERROR` reads and
-    `ERR_TIMEOUT` share one quiet debounce, which clears the backoff
-    when it fires. Seven in-proc HARNESS tests pin these rules,
-    including backoff growth ([testing.md](docs/testing.md#what-is-verified)); the bridge polls
-    the state on its 100 ms tick, logs transitions to the activity
-    log, and publishes `linkState`, which LiveView (banner), the Home
-    status card and the Settings connection label show. Never-arrived
-    signals render "—" (`hasValue`, notified per batch), and a value
-    dims once the model's `ageMs` passes 3 s; the bridge refreshes ages
-    on every 100 ms tick, so a signal that stops arriving dims even with
-    nothing else changing (finding 14). Smoke recipe:
-    [testing.md](docs/testing.md#manual-smoke--link-health-ui); its
-    dimming and ID-column rows need a re-run after the finding 13 and
-    14 fixes. Both
-    backends now ignore the vendor's message count under a hard-error
-    status, so a vendor that leaves `pNumMsgs` untouched can no longer
-    produce phantom frames that read as healthy (code review
-    2026-10-20, finding 1, fixed in `6420f09` and tested on both
-    backends). Still open (finding numbers from that review):
-    - The UI doesn't know `QT_ERR_REQUEST_FAILED` yet. `linkState`
-      maps it to `degraded`, so LiveView shows "Link degraded
-      (error 10)", the Home card shows "Link degraded", the Settings
-      connection label stays green, and the activity log records no
-      transition. On the VX with no vehicle, this is now the state
-      you'll see.
-    - The health tests are in-proc only; no surrogate session drives
-      the worker's health machine (finding 4).
+11. **J2534 link health: real-bus coverage remains.**
+    The worker's health machine is done and HARNESS-tested in-proc:
+    hard read failures, a quiet debounce, a write latch with
+    `QT_ERR_REQUEST_FAILED`, unmatched frames read as quiet, and a
+    growing backoff ([j2534.md](docs/j2534.md#session-lifecycle)). The
+    bridge publishes it as `linkState` (`ok`, `quiet`, `requests`,
+    `fault`, `disconnected`) and logs transitions, and LiveView, Home
+    and Settings show it; stale values dim from the model's `ageMs`.
+    Since W6, a request failure (no ECU awake, adapter fine) reads
+    "Requests failing — check the vehicle connection and ignition" in
+    amber, not "Link degraded" with a green Settings label;
+    `BridgeTest.LinkStateMapsEveryPublishedCode` pins the mapping. The
+    smoke recipe passed again on 2026-10-20 after the code-review
+    2026-10-20 fixes; its new request-failure row hasn't been run yet
+    ([testing.md](docs/testing.md#manual-smoke--link-health-ui)).
+    Still open (finding numbers from that review):
+    - No surrogate session drives the health machine in the suite
+      (finding 4). Accepted until the first vehicle session, which runs
+      through the surrogate and records it in the session log.
+    - If reads recover while writes keep failing, the state stays
+      "adapter fault" instead of stepping down to request failure (W9).
+      Accepted for now: it needs a transient read error on a no-ACK
+      bus, and the session log tells the two apart (clean `OP_READ`
+      lines next to failing `OP_WRITE` lines).
     - Real-vendor coverage is one quiet-bus observation (2026-10-20:
       empty reads are `NOERROR` with zero messages; writes fail after
       ~8 cycles with no ACK); talking-bus flavors remain unknown
@@ -367,29 +359,6 @@ an issue is resolved it is removed, and its number is not reused.
     since those are ISO 9141/KWP init calls. If a BENCH device needs
     them, give them a dedicated wire form rather than relaxing the
     whitelist.
-22. **J2534 connect blocked the GUI thread. Fixed 2026-10-16.**
-    Observed with the OBDX Pro VT/VX drivers installed and no adapter:
-    a picker row click and the Connect button both called the
-    synchronous connect, freezing the UI about 8 s per attempt. It was
-    blamed at the time on a vendor blocked in `PassThruOpen`, but the
-    installed OBDX drivers turned out to refuse open within seconds
-    (VT: status 34). The freeze more likely came from the old startup
-    order, vendor open before the pipe connect, which left the parent
-    waiting out the handshake window on a child that had already
-    exited. Fixes:
-    - Picker rows fill the URI field only.
-    - `connectSessionAsync` runs create and start on a worker thread
-      with a queued completion.
-    - The child connects the pipe first, then loads the DLL, resolves
-      its exports and calls `PassThruOpen` when `OP_OPEN` arrives. A
-      connected pipe proves only that the child started. An unanswered
-      `OP_OPEN` with the child alive means the vendor is blocked in
-      `DllMain` or `PassThruOpen`; the client then terminates the
-      child, which can't answer `OP_SHUTDOWN` from inside vendor code.
-      A refused open comes back as the vendor status.
-    - Test knobs: `QTTUNE_SUR_HANDSHAKE_MS` (handshake window) and
-      `QTTUNE_FAKE_OPEN_DELAY_MS` (fake open sleep; it arms the x86
-      child from an x64 test through environment inheritance).
 28. **In-proc, a dropped indication ends the drain early.** The loader
     drops `TX_INDICATION`/`TX_MSG_TYPE` messages by reporting "no
     frame", and the drain stops at the first "no frame". After each
@@ -437,7 +406,6 @@ matter most — CAN-era targets need none of it.
 - Change the Log page to show application log messages instead of
   mock frame data
 - Save data logs to a file, once live vehicle data shows on LiveView
-- Run the mobile apps on a real device and the Android emulator (#2)
 - Distinguish refused vendor open (a status code) from load failure in
   the URI-facing error text — today both surface as
   "failed to load transport library"
@@ -454,5 +422,7 @@ matter most — CAN-era targets need none of it.
 - android auto / apple car play target for the dashboard of live values to use
   infotainment as a potential display. More invasive options: direct usage including
   overwrite or extension of vehicles infotainment system (highly vehicle dependent)
-- expand logging of connections and bus state to the activity log on settings page
-  (link-health transitions are logged there since 2026-10-20)
+- expand logging of connections and bus state to the activity log on settings page.
+  Link-health transitions are logged there since 2026-10-20, and the
+  surrogate's session log holds both halves since `995519b`; what's
+  left is connect, disconnect and bus state in the activity log

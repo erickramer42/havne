@@ -124,8 +124,8 @@ with no requests, then `?profile=raw&filter=0x7E8&poll=0x0C` for one
 PID (or `?poll=0x0C` alone, which keeps the `obd2` decode for that
 PID), then a bare `j2534://` for the `obd2` scheduler with decode) is a
 separate sheet with its own abort conditions and a second operator
-or at minimum a posted procedure. Draft it after these results are in
-and the prep list is updated.
+or at minimum a posted procedure:
+[vehicle-runsheet.md](vehicle-runsheet.md).
 
 ## Post-session actions
 

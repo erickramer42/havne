@@ -3,7 +3,8 @@
 //          macOS/Linux: empty-state hint), picker row fills URI field only,
 //          Connect button drives connectSessionAsync (UI stays responsive
 //          while a vendor blocks ~8 s), activity log shows connect lifecycle,
-//          error label on bad URI, fault states tint the status label
+//          error label on bad URI, status label colored by link state
+//          (Theme.linkColor)
 
 import QtQuick
 import QtQuick.Controls
@@ -91,14 +92,7 @@ Pane {
                   : (QtTune.connecting
                        ? qsTr("Connecting…")
                        : qsTr("Not connected"))
-            // fault also tints the connected label — the activity log
-            // below carries the transitions, but the state should be
-            // visible at a glance, not only in the scrollback
-            color: QtTune.connected
-                     ? (QtTune.linkState === "fault"
-                          ? Theme.danger
-                          : (QtTune.linkState === "quiet" ? Theme.warning : Theme.success))
-                     : Theme.textDim
+            color: Theme.linkColor(QtTune.linkState)
         }
 
         RowLayout {

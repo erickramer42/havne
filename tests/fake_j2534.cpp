@@ -119,9 +119,10 @@ unsigned long g_last_stopped_filter_id = 0;
  * must clear the child's channel so teardown never issues a SECOND
  * vendor disconnect. Monotonic, read via GetDisconnectCount —
  * in-proc instances only. The child's instance is a separate
- * process (see the OP_INJECT note above), so the automated
- * cross-process pin lands with the #23 tracing/query-op work;
- * this hook exists now so that work has its observable ready. */
+ * process (see the OP_INJECT note above). The wire query op once
+ * planned for a cross-process pin was never built (formerly Known
+ * Issue #23); a surrogate test could count the child's OP_DISCONNECT
+ * lines in the session log (qttune_j2534_sur_log_path) instead. */
 unsigned long g_disconnect_count = 0;
 
 /* ---- OBD-II canned response data (HARNESS only, ADR-0013 slice 2) ----
@@ -933,7 +934,8 @@ void GetLastFilterStop(unsigned long* out_filter_id)
 
 /* Monotonic PassThruDisconnect count (issue #24): explicit
  * client-disconnect-then-close must total exactly 1. In-proc
- * instances only — cross-process pin pending the #23 query op. */
+ * instances only; for the child, see the session-log note on
+ * g_disconnect_count. */
 extern "C" __declspec(dllexport)
 unsigned long GetDisconnectCount(void)
 {

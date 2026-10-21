@@ -196,6 +196,8 @@ public:
     bool connecting() const { return m_connecting; }
     void dispatchFrameForTesting(const qttune_frame_t& frame);
     static constexpr int maxInFlightForTesting() { return MaxInFlightFrames; }
+    Q_INVOKABLE QString linkState() const;
+    static QString linkStateForError(int32_t errorCode);  /* W6: mapping, testable session-free */
 
     Q_INVOKABLE QString statusString(int statusCode) const;
     Q_INVOKABLE int maxFrameCount() const { return FrameListModel::MaxFrames; }
@@ -209,7 +211,6 @@ public:
     // values only (rule 2) — dllPath is exposed because it is the user's
     // route to a direct-load URI, not for parsing.
     Q_INVOKABLE QVariantList discoverJ2534Devices() const;
-    QString linkState() const;
     int linkErrorCode() const { return m_linkErrorCode; }
     int errorEpisodes() const { return m_errorEpisodes; }
 

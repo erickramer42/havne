@@ -911,16 +911,22 @@ TEST_F(J2534AdoptionTest, SchedulerDrainsBacklogBeyondPerCycleBudget)
  * call, so arming/clearing is immediate.
  * ==================================================================== */
 
-struct ReadStatusArm {
-    ~ReadStatusArm()
+/* W8: clears BOTH knobs on scope exit — a leaked
+ * QTTUNE_FAKE_WRITE_STATUS fails every write of the NEXT test in
+ * the same process, and the write-count pins read it as "probes
+ * stopped" (code review 2026-10-20, W8). ReadStatusArm is the
+ * narrower guard for read-knob-only tests. */
+struct KnobsArm {
+    ~KnobsArm()
     {
         SetEnvironmentVariableA("QTTUNE_FAKE_READ_STATUS", nullptr);
+        SetEnvironmentVariableA("QTTUNE_FAKE_WRITE_STATUS", nullptr);
     }
 };
 
 TEST_F(J2534AdoptionTest, HardFailureSetsCanonicalErrorAndRecovers)
 {
-    ReadStatusArm arm;   // restore even on a failing ASSERT
+    KnobsArm arm;   // restore even on a failing ASSERT
     char uri[512];
     snprintf(uri, sizeof(uri), "j2534://%s", FAKE_J2534_DLL_PATH);
 
@@ -972,7 +978,7 @@ TEST_F(J2534AdoptionTest, HardFailureSetsCanonicalErrorAndRecovers)
 
 TEST_F(J2534AdoptionTest, QuietBusDebouncesToVehicleTimeoutWithoutEpisode)
 {
-    ReadStatusArm arm;
+    KnobsArm arm;
     char uri[512];
     snprintf(uri, sizeof(uri), "j2534://%s", FAKE_J2534_DLL_PATH);
 
@@ -1144,14 +1150,7 @@ TEST_F(J2534AdoptionTest, PollOverridesSchedulerRotation)
  * the write count untouched — the VX's "status 7, written 1" shape. */
 TEST_F(J2534AdoptionTest, WriteFailureLatchesRequestFailedAndClears)
 {
-    struct KnobsArm {
-        ~KnobsArm()
-        {
-            SetEnvironmentVariableA("QTTUNE_FAKE_WRITE_STATUS", nullptr);
-            SetEnvironmentVariableA("QTTUNE_FAKE_READ_STATUS", nullptr);
-        }
-    } arm;
-
+    KnobsArm arm;
     char uri[512];
     snprintf(uri, sizeof(uri), "j2534://%s", FAKE_J2534_DLL_PATH);
 
@@ -1211,7 +1210,7 @@ TEST_F(J2534AdoptionTest, WriteFailureLatchesRequestFailedAndClears)
  * persist, the write path must not downgrade back. */
 TEST_F(J2534AdoptionTest, HardReadFailureOutranksRequestFailed)
 {
-    ReadStatusArm arm;
+    KnobsArm arm;
     char uri[512];
     snprintf(uri, sizeof(uri), "j2534://%s", FAKE_J2534_DLL_PATH);
 
@@ -1257,7 +1256,7 @@ TEST_F(J2534AdoptionTest, HardReadFailureOutranksRequestFailed)
  * window. The passive URI keeps writes out of the picture entirely. */
 TEST_F(J2534AdoptionTest, UnmatchedDeliveredFrameGoesQuietNotHealthy)
 {
-    ReadStatusArm arm;
+    KnobsArm arm;
     char uri[700];
     snprintf(uri, sizeof(uri), "j2534://%s?profile=raw&filter=0x7E8",
              FAKE_J2534_DLL_PATH);
@@ -1314,7 +1313,7 @@ TEST_F(J2534AdoptionTest, UnmatchedDeliveredFrameGoesQuietNotHealthy)
  * behaviors differ by 3x, so CI timing noise can't confuse them. */
 TEST_F(J2534AdoptionTest, BackoffGrowsUnderSustainedHardFailure)
 {
-    ReadStatusArm arm;
+    KnobsArm arm;
     char uri[512];
     snprintf(uri, sizeof(uri), "j2534://%s", FAKE_J2534_DLL_PATH);
 

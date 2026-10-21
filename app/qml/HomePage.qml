@@ -116,19 +116,10 @@ Rectangle {
                 Rectangle {
                     implicitWidth: 10; implicitHeight: 10   // layout-managed
                     radius: 5
-                    // linkState refines the old binary dot: fault keeps
-                    // danger while connected, quiet/degraded are amber
-                    color: !QtTune.connected ? Theme.danger
-                         : QtTune.linkState === "ok" ? Theme.success
-                         : QtTune.linkState === "fault" ? Theme.danger
-                         : Theme.warning
+                    color: Theme.linkColor(QtTune.linkState)
                 }
                 Text {
-                    text: !QtTune.connected ? qsTr("No session")
-                         : QtTune.linkState === "ok" ? qsTr("Session active")
-                         : QtTune.linkState === "fault" ? qsTr("Adapter fault")
-                         : QtTune.linkState === "quiet" ? qsTr("Link quiet")
-                         : qsTr("Link degraded")
+                    text: Theme.linkLabel(QtTune.linkState)
                     color: Theme.textDim
                     font.pixelSize: 13
                 }
@@ -160,8 +151,8 @@ Rectangle {
         }
 
         Text {
-            // J2534 is working (BENCH-verified) — stop saying "planned";
-            // direct the user where the picker lives
+            // Points J2534 users at the Settings picker; this page's
+            // button connects mock only
             text: qsTr("Connect a J2534 device from Settings for live vehicle data")
             font.pixelSize: 12
             color: Theme.textDim

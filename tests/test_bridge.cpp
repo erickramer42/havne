@@ -694,3 +694,14 @@ TEST(BridgeTest, AgeMsRoleEmittedAndRefreshesWhileStalled)
     SignalListModel empty;
     empty.refreshAges();   // no rows — silent, no crash
 }
+
+TEST(BridgeTest, LinkStateMapsEveryPublishedCode)
+{
+    /* W6: the state-string mapping, pinned session-free via the
+     * static helper. Covers all four known codes plus forward-compat. */
+    EXPECT_EQ(QtTuneBridge::linkStateForError(QT_OK), QStringLiteral("ok"));
+    EXPECT_EQ(QtTuneBridge::linkStateForError(QT_ERR_VEHICLE_TIMEOUT), QStringLiteral("quiet"));
+    EXPECT_EQ(QtTuneBridge::linkStateForError(QT_ERR_REQUEST_FAILED), QStringLiteral("requests"));
+    EXPECT_EQ(QtTuneBridge::linkStateForError(QT_ERR_TRANSPORT_HARD_FAILURE), QStringLiteral("fault"));
+    EXPECT_EQ(QtTuneBridge::linkStateForError(static_cast<qttune_status_t>(999)), QStringLiteral("degraded"));
+}
