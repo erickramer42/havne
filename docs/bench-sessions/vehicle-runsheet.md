@@ -67,9 +67,6 @@ that runs to the end undocumented.
       - red "Adapter fault": reads fail.
       The Settings activity log records each transition; Home and the
       Dashboard header show the same state in short form.
-- [ ] Leave every signal checked on Live. Unchecking one also freezes
-      it on the Dashboard, where it dims as stale while frames still
-      arrive (Known Issue #31)
 - [ ] Settings picker lists the VX as "x86"
 - [ ] Camera or notebook ready
 
@@ -138,6 +135,11 @@ is requested)
         `04 41 0c …`): a PCI byte left in-band (see "If it fails")
 - [ ] LiveView: RPM populated; every other signal shows "—"
 - [ ] No banner (link ok)
+- [ ] Optional, same ignition state: connect
+      `j2534://OBDX Pro - VX?profile=raw&filter=0x7E8&poll=0x00` and
+      record one reply: `41 00` plus four bitmap bytes naming the
+      supported PIDs 0x01–0x20 (the first byte's top bit is PID 0x01).
+      It predicts which Phase 3 signals stay "—"
 
 **Evidence:** the session log: its `OP_WRITE frame` and
 `OP_READ frame` lines carry the request and reply bytes, statuses,
@@ -208,14 +210,13 @@ ignition off, wait 10 s, then turn it back on.
 
 | Symptom | Suspect |
 |---|---|
-| Writes fail with the ignition on (`OP_WRITE: status` nonzero) | BENCH prep #2, request framing (6-byte logical message with `ISO15765_FRAME_PAD`); then baud (500 k assumed) or a 29-bit vehicle (prep #4). The bare URI is 11-bit only, and a 29-bit channel also needs `?flags=0x100` (`CAN_29BIT_ID`) at connect (Known Issue #34): record and stop rather than improvise |
+| Writes fail with the ignition on (`OP_WRITE: status` nonzero) | BENCH prep #2, request framing (6-byte logical message with `ISO15765_FRAME_PAD`); then baud (500 k assumed) or a 29-bit vehicle (prep #4). The bare URI is 11-bit only. 29-bit IDs given with `?filter=`/`?txid=` connect with `CAN_29BIT_ID` automatically, but no 29-bit OBD IDs are prepared: record and stop rather than improvise |
 | Writes succeed but no frames arrive | The ECU doesn't answer physical 0x7E0: retry Phase 2 with `?poll=0x0C&txid=0x7DF` (functional request, replies still on 0x7E8); then the flow-control filter (prep #1) |
 | `0x7E8` frames on the Log page, but LiveView shows "—" everywhere | Payload shape: stamping already proves the channel matched, so suspect a PCI byte left in-band shifting `[41][PID]`. The `OP_READ frame` lines show the bytes as the vendor returned them |
 | Values implausible (−40 °C, huge RPM) | Scaling or byte order: temperatures are UINT8 with a −40 offset; 2-byte PIDs are big-endian |
 | Link flips between ok and quiet while frames arrive | Unmatched frames interleaving with replies: a single unmatched frame reads as quiet with no debounce, by design. Note the frame IDs |
 | Slow refresh, replies a cycle late | Known refresh-rate item (20 ms first read vs up to 50 ms ECU response). Measure; don't fix in the session |
-| A Dashboard gauge stops and dims while Live still updates | The signal is unchecked on Live (Known Issue #31). Check it again |
-| UI freezes on Disconnect | Known: disconnect is synchronous (Known Issue #33). Wait it out, then note how long |
+| UI freezes on Disconnect | Known: disconnect is synchronous (Known Issue #33); against a wedged adapter it can take about 6 s. Wait it out, then note how long and whether the session log says `child unresponsive` |
 | App crashes | Abort. Capture the session log and `sur.log` before relaunching |
 
 ## Evidence against the BENCH prep list

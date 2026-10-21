@@ -560,6 +560,50 @@ TEST(J2534SurrogateTest, FrameLoggingRecordsPayloadsVerbatimWhenEnabled)
     EXPECT_NE(off.find("OP_WRITE: status 0"), std::string::npos) << off;
 }
 
+/* A child that misses two deadlines in a row (a transaction's, then the
+ * wait for its late reply) is wedged, not slow. Later transactions fail
+ * at once instead of each costing another 3 s, which a teardown would
+ * otherwise pay per filter, for the disconnect and for the close, and
+ * close kills the child without waiting for a polite exit. A slow vendor
+ * that answers inside the second wait still recovers
+ * (TimedOutOpDoesNotDesyncNextRequest). The fake's one-shot ioctl stall
+ * wedges the single-threaded child for 20 s. */
+TEST(J2534SurrogateTest, UnresponsiveChildFailsFastAfterTwoMissedDeadlines)
+{
+    using clock = std::chrono::steady_clock;
+    qttune_j2534_sur_handle_t* h = nullptr;
+    {
+        EnvArm arm("QTTUNE_FAKE_IOCTL_DELAY_MS", "20000");
+        ASSERT_EQ(qttune_j2534_sur_open(fake_dll_path(), &h), QT_OK);
+    }
+    unsigned long channel = 0;
+    ASSERT_EQ(qttune_j2534_sur_connect_channel(h, 0, 0, &channel), QT_OK);
+    const std::string path = qttune_j2534_sur_log_path(h);
+
+    /* First deadline: the ioctl outlives the 3 s transaction timeout. */
+    unsigned char out[8] = {};
+    uint32_t out_len = 0;
+    EXPECT_EQ(qttune_j2534_sur_ioctl(h, channel, QTTUNE_PT_IOCTL_READ_VBATT,
+                                     nullptr, 0, out, &out_len),
+              QT_ERR_NO_TRANSPORT);
+
+    /* Second: its late reply doesn't come within another timeout. */
+    EXPECT_EQ(qttune_j2534_sur_disconnect_channel(h, channel), QT_ERR_NO_TRANSPORT);
+
+    /* From here, every transaction fails at once. */
+    auto t0 = clock::now();
+    EXPECT_EQ(qttune_j2534_sur_stop_msg_filter(h, channel, 1), QT_ERR_NO_TRANSPORT);
+    EXPECT_LT(clock::now() - t0, std::chrono::milliseconds(500));
+
+    /* Close kills the child instead of waiting 1.5 s twice. */
+    t0 = clock::now();
+    EXPECT_EQ(qttune_j2534_sur_close(h), QT_OK);
+    EXPECT_LT(clock::now() - t0, std::chrono::milliseconds(1000));
+
+    const std::string log = read_session_log(path);
+    EXPECT_NE(log.find("child unresponsive"), std::string::npos) << log;
+}
+
 /* The session log is opened CREATE_ALWAYS with FILE_SHARE_READ only,
  * so while one session's child holds it, a second concurrent
  * session's open fails. That session must get a per-spawn name, not
