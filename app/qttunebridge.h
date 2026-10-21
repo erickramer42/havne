@@ -117,10 +117,13 @@ public:
     Q_INVOKABLE void toggleSubscribed(int row);
 
     // Strip-chart pull API: one map per SUBSCRIBED signal with non-empty
-    // history: { id, name, unit, value, samples: [ts, val, ts, val, ...] }
-    // Flattened doubles, oldest-first. Called by the QML Canvas once per
-    // valuesUpdated batch (~10 Hz). One call per repaint instead of per-row
-    // role lookups keeps the QML side free of role-number hacks.
+    // history: { id, row, name, unit, value, samples: [ts, val, ts, val, ...] }
+    // `row` is the signal's model row, so the trace colour can match the
+    // list row's swatch and stays put when other signals are unsubscribed.
+    // Samples are flattened doubles, oldest-first. Called by the QML
+    // Canvas once per valuesUpdated batch (~10 Hz). One call per repaint
+    // instead of per-row role lookups keeps the QML side free of
+    // role-number hacks.
     Q_INVOKABLE QVariantList chartData() const;
 
     /* Periodic age refresh: ageMs is computed lazily from

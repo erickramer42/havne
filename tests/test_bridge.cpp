@@ -488,6 +488,9 @@ TEST(BridgeTest, ChartDataFiltersUnsubscribedAndEmptyBatchesDoNotEmit)
     const QVariantList data = model.chartData();
     ASSERT_EQ(data.size(), 1);
     EXPECT_EQ(data.at(0).toMap().value("id").toInt(), 2001);
+    // `row` is the model row, not the position in chartData(), so the
+    // trace keeps its colour when a signal before it is unsubscribed
+    EXPECT_EQ(data.at(0).toMap().value("row").toInt(), 1);
     EXPECT_EQ(data.at(0).toMap().value("samples").toList().size(), 10); // still 5 samples
 
     // Resubscribed signal keeps its accumulated history (non-destructive)

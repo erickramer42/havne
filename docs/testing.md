@@ -58,7 +58,7 @@ and the next run's screenshots confirmed the fixes the same day.
 | Mock drive cycle, stepped deterministically: every phase in order; 2nd- and 3rd-gear pulls hold the limiter exactly 5 s; the 3rd-gear pull is longer, faster and hotter; the drag run crosses 402 m in 11–15 s at 150–200 km/h through 4th; every tick of two loops round-trips through the mock set without clamping | `CoreTest.MockDriveCycle*` |
 | Frames marshal from the worker to the GUI thread | `BridgeTest.FramesMarshalFromWorkerToGuiThread` |
 | Signal updates are coalesced to 10 Hz whatever the frame rate | `BridgeTest.SignalBatchesAreCoalesced` |
-| History ring eviction, `valuesUpdated` semantics | `BridgeTest` |
+| History ring eviction, `valuesUpdated` semantics; `chartData()` reports each series' model row, which keys its trace colour | `BridgeTest` |
 | Streaming continues past 10k cumulative frames; drops are counted and reported | `BridgeTest.StreamingContinuesPastTenThousandFrames`, `.BackpressureDropsAreCountedAndReported` |
 | Log sort toggle (newest first / oldest first) | `BridgeTest.SortProxy*` |
 | Discovery: dual-root, dual-WOW64 sweep, dedup, PE architecture annotation | `J2534DiscoveryTest`, plus manual smoke against real installed drivers (OBDX Pro VT and VX) |

@@ -243,11 +243,13 @@ void SignalListModel::updateValues(const std::vector<std::pair<uint16_t, float>>
 QVariantList SignalListModel::chartData() const
 {
     QVariantList out;
-    for (const Entry& e : m_entries) {
+    for (size_t row = 0; row < m_entries.size(); ++row) {
+        const Entry& e = m_entries[row];
         if (!e.subscribed || e.histCount == 0) continue;
 
         QVariantMap m;
         m["id"] = e.id;
+        m["row"] = static_cast<int>(row);
         m["name"] = QString::fromUtf8(e.name);
         m["unit"] = QString::fromUtf8(e.unit);
         m["value"] = e.value;
