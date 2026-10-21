@@ -19,7 +19,7 @@ extern "C" {
  * the two halves of the round-trip contract cannot drift apart. */
 #define MOCK_TELEMETRY_ARB_ID  0x0C0u
 
-/* ---- OBD-II v1 set (ADR-0013 slice 2) ----
+/* ---- OBD-II v1 set (ADR-0013) ----
  * IDs occupy a distinct band from the mock set (no cross-set def.id
  * collision even though only one set is ever active per session).
  * Wire shape pinned by the fake's canned responses AND the HARNESS
@@ -32,6 +32,8 @@ extern "C" {
 #define OBD2_SIG_THROTTLE_ID     7006
 #define OBD2_SIG_FUEL_LEVEL_ID   7007
 #define OBD2_SIG_BATTERY_V_ID    7008
+#define OBD2_SIG_MAF_ID          7009
+#define OBD2_SIG_TFT_ID          7010
 /* OBD-II ECU #1 physical response ID, paired with the tester request
  * ID 0x7E0. Shared by obd2_signal_sets.cpp (defs), test fixtures, and
  * the fake's canned response header so all three agree on the channel. */

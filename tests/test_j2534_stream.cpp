@@ -9,17 +9,16 @@
 //          Query-param tests: ?baud=/?flags= values observed at
 //          PassThruConnect via the fake's GetLastConnectParams hook;
 //          malformed queries rejected at session_create (no DLL load).
-//          Adoption tests (Part 5): ?filter=/?txid=/?poll= — filter
+//          Adoption tests (ADR-0012): ?filter=/?txid=/?poll= — filter
 //          registration shape, request framing, header strip + ID
 //          stamp, stop-on-detach, gating, passive receive.
-//          ADR-0013 SLICE 2: j2534 defaults to the obd2 profile
-//          (scheduler + mux decode). Legacy-behavior tests opt out
-//          with ?profile=raw; the obd2 block covers rotation,
-//          coupling, and drain.
-//          Link health (#11), in-proc: canonical hard-failure code,
-//          episode counting, quiet debounce, recovery; then the code
-//          review 2026-10-20 regressions — untouched vendor counts
-//          (finding 1) and ?poll= precedence (finding 12).
+//          ADR-0013: j2534 defaults to the obd2 profile (scheduler +
+//          mux decode). Raw-contract tests opt out with ?profile=raw;
+//          the obd2 block covers rotation, coupling, and drain.
+//          Link health (Known Issue #11), in-proc: hard and quiet
+//          reads, episode counting, recovery, untouched vendor counts,
+//          the write latch and its priority, unmatched frames, backoff
+//          growth; plus ?poll= precedence over the profile's rotation.
 
 #include <gtest/gtest.h>
 
@@ -65,7 +64,7 @@ typedef void (*fn_get_last_filter_stop)(unsigned long*);
 struct StreamCapture {
     std::atomic<int> count{0};
     unsigned char payloads[8][8]{};
-    unsigned short payload_lens[8]{};   /* post-strip length (Part 5) */
+    unsigned short payload_lens[8]{};   /* post-strip length */
     unsigned int frame_flags[8]{};      /* QTTUNE_FRAME_FLAG_* */
     uint32_t arbitration_ids[8]{};      /* identity stamped by the transport */
     uint64_t timestamps[8]{};           /* pass-through contract */
@@ -319,9 +318,9 @@ TEST(J2534StreamTest, UnknownVendorNameRejected)
 }
 
 /* ====================================================================
- * Part 5 adoption suite — ?filter= / ?txid= / ?poll=  (LEGACY paths;
- * every URI opts out of the obd2 default with ?profile=raw so these
- * keep pinning the raw-profile contract)
+ * Adoption suite (ADR-0012) — ?filter= / ?txid= / ?poll=. Every URI
+ * opts out of the obd2 default with ?profile=raw, so these pin the
+ * raw-profile contract.
  * ==================================================================== */
 
 class J2534AdoptionTest : public ::testing::Test {
@@ -467,7 +466,7 @@ TEST_F(J2534AdoptionTest, FilterRegisteredOnSessionStart)
 
     EXPECT_NE(fid, 0u);
     EXPECT_EQ(ftype, QTTUNE_PT_FLOW_CONTROL_FILTER);
-    EXPECT_EQ(len, 4u);                       /* N1: bare-ID filter msgs */
+    EXPECT_EQ(len, 4u);                       /* bare 4-byte CAN IDs */
     EXPECT_EQ(mask[0], 0xFFu); EXPECT_EQ(mask[1], 0xFFu);
     EXPECT_EQ(mask[2], 0xFFu); EXPECT_EQ(mask[3], 0xFFu);
     EXPECT_EQ(pattern[0], 0x00u); EXPECT_EQ(pattern[1], 0x00u);
@@ -513,9 +512,9 @@ TEST_F(J2534AdoptionTest, DetachStopsFilterBeforeDisconnect)
 }
 
 /* COUPLING RULE: ?poll= needs a channel to receive on. Under raw the
- * profile declares none, so this is rejected — but at ATTACH, not at
- * parse (finding 12): the rule now consults the profile's channels,
- * which parse_query can't see. Still before any DLL load. */
+ * profile declares none, so this is rejected — at ATTACH, not at
+ * parse, because the rule consults the profile's channels, which
+ * parse_query can't see. Still before any DLL load. */
 TEST_F(J2534AdoptionTest, PollWithoutChannelRejectedBeforeDllLoad)
 {
     qttune_session_t* session = nullptr;
@@ -648,9 +647,8 @@ TEST_F(J2534AdoptionTest, TxidOverrideChangesRequestTarget)
 }
 
 // ---------------------------------------------------------------------------
-// ADR-0013 slice 1: j2534 profile selection (slice 2 flips the default
-// to obd2; ?profile= override rides the strict grammar through
-// parse_query)
+// ADR-0013: j2534 profile selection (obd2 is the default; the
+// ?profile= override rides the strict grammar through parse_query)
 // ---------------------------------------------------------------------------
 
 TEST(J2534StreamTest, DefaultProfileIsObd2)
@@ -701,7 +699,7 @@ TEST(J2534StreamTest, UnknownProfileRejectedAtCreate)
 }
 
 // ---------------------------------------------------------------------------
-// ADR-0013 slice 2: obd2 scheduler mode — rotation, coupling, drain
+// ADR-0013: obd2 scheduler mode — rotation, coupling, drain
 // ---------------------------------------------------------------------------
 
 /* SCHEDULER ROTATION: ?profile=obd2&filter=0x7E8 — the worker
@@ -738,8 +736,17 @@ TEST_F(J2534AdoptionTest, Obd2SchedulerRotatesPidsInSetOrder)
     get_recorded_write(2, wbuf, &wlen, &wflags);
     ASSERT_EQ(wlen, 6u);
     EXPECT_EQ(wbuf[5], 0x0Cu);              /* RPM */
-    wait_for_writes(get_write_count, 9, 250);
+    wait_for_writes(get_write_count, 11, 250);
+    /* The rotation follows kObd2Defs order. With 10 defs, MAF (0x10) and
+     * TFT (0x5F), the last two, take writes 8 and 9, and write 10 wraps
+     * to PID 0x04. */
     get_recorded_write(8, wbuf, &wlen, &wflags);
+    ASSERT_EQ(wlen, 6u);
+    EXPECT_EQ(wbuf[5], 0x10u);               /* MAF */
+    get_recorded_write(9, wbuf, &wlen, &wflags);
+    ASSERT_EQ(wlen, 6u);
+    EXPECT_EQ(wbuf[5], 0x5Fu);               /* TFT */
+    get_recorded_write(10, wbuf, &wlen, &wflags);
     ASSERT_EQ(wlen, 6u);
     EXPECT_EQ(wbuf[5], 0x04u);              /* wrapped — round-robin */
 
@@ -761,11 +768,9 @@ TEST_F(J2534AdoptionTest, Obd2SchedulerRotatesPidsInSetOrder)
     qttune_session_destroy(session);
 }
 
-/* N3 FLAGSHIP: a bare j2534:// URI now derives its channel from the
- * obd2 profile — filter pattern 7E8, requests to 7E0, scheduler
- * running. The slice-2 footgun (bare URI -> NO_TRANSPORT at start,
- * after the device was already opened) is gone: ?filter= demotes to
- * an override. */
+/* FLAGSHIP: a bare j2534:// URI derives its channel from the obd2
+ * profile — filter pattern 7E8, requests to 7E0, scheduler running.
+ * No ?filter= needed; when present, it's an override. */
 TEST_F(J2534AdoptionTest, BareJ2534UriDerivesObd2ChannelAndStarts)
 {
     char uri[512];
@@ -802,7 +807,7 @@ TEST_F(J2534AdoptionTest, BareJ2534UriDerivesObd2ChannelAndStarts)
     qttune_session_destroy(session);
 }
 
-/* N3 OVERRIDE SEMANTICS: a lone ?txid= under the obd2 default keeps
+/* OVERRIDE SEMANTICS: a lone ?txid= under the obd2 default keeps
  * the derived 7E8 filter but rewrites the request target — the
  * broadcast-request pattern (?txid=0x7DF) without restating the
  * channel. Mixed override + derived channel. */
@@ -911,11 +916,11 @@ TEST_F(J2534AdoptionTest, SchedulerDrainsBacklogBeyondPerCycleBudget)
  * call, so arming/clearing is immediate.
  * ==================================================================== */
 
-/* W8: clears BOTH knobs on scope exit — a leaked
- * QTTUNE_FAKE_WRITE_STATUS fails every write of the NEXT test in
- * the same process, and the write-count pins read it as "probes
- * stopped" (code review 2026-10-20, W8). ReadStatusArm is the
- * narrower guard for read-knob-only tests. */
+/* Clears BOTH knobs on scope exit — a leaked QTTUNE_FAKE_WRITE_STATUS
+ * fails every write of the NEXT test in the same process (a direct
+ * binary run; ctest isolates each case), and the write-count pins read
+ * it as "probes stopped". ReadStatusArm is the narrower guard for
+ * read-knob-only tests. */
 struct KnobsArm {
     ~KnobsArm()
     {
@@ -1017,10 +1022,10 @@ TEST_F(J2534AdoptionTest, QuietBusDebouncesToVehicleTimeoutWithoutEpisode)
     qttune_session_destroy(session);
 }
 
-/* Finding 1, in-proc half: a dirty count under a hard error must NOT
- * read as health. The loader requests exactly one message; the knob
- * leaves num == 1 over a zero-filled PASSTHRU_MSG, which without the
- * sanitization dispatches as a real frame and the worker reports the
+/* Count-trust rule, in-proc half: a dirty count under a hard error must
+ * NOT read as health. The loader requests exactly one message; the
+ * knob leaves num == 1 over a zero-filled PASSTHRU_MSG, which without
+ * qttune_trusted_count would dispatch as a real frame and report the
  * link healthy. Bare URI: the scheduler keeps writing, so recovery to
  * OK is reachable (passive mode would correctly hold VEHICLE_TIMEOUT
  * via the quiet debounce — recovery and quiet are different states). */
@@ -1080,12 +1085,11 @@ TEST_F(J2534AdoptionTest, UntouchedCountUnderHardErrorReportsUnhealthy)
     qttune_session_destroy(session);
 }
 
-/* FINDING 12: ?poll= under a scheduler profile overrides the rotation.
- * The set scheduler used to be built whatever the URI said, and the
- * worker checks sched.count before poll_pid — so ?poll=0x0C under obd2
- * rotated all 8 PIDs and the URI's PID was silently dropped. Five
- * consecutive writes pin it: rotation would give 0x04, 0x05, 0x0C,
- * 0x0D, 0x0F. */
+/* ?poll= under a scheduler profile overrides the rotation. The worker
+ * checks sched.count before poll_pid, so if attach built the set
+ * scheduler anyway, ?poll=0x0C under obd2 would rotate the whole set and
+ * silently drop the URI's PID. Five consecutive writes pin it:
+ * rotation would give 0x04, 0x05, 0x0C, 0x0D, 0x0F. */
 TEST_F(J2534AdoptionTest, PollOverridesSchedulerRotation)
 {
     char uri[700];
@@ -1136,9 +1140,9 @@ TEST_F(J2534AdoptionTest, PollOverridesSchedulerRotation)
 }
 
 /* ====================================================================
- * Code review 2026-10-20, health machine (findings 4, 6, 7, 15):
- * write-result latch, hard-read priority, unmatched-delivered frames,
- * backoff growth. Same fixture and knob idioms as the #11 tests above
+ * Health machine: write-result latch, hard-read priority,
+ * unmatched-delivered frames, backoff growth. Same fixture and knob
+ * idioms as the link-health tests above
  * (env knob re-read per call in-proc; RAII arm restores even on a
  * failing ASSERT).
  * ==================================================================== */
@@ -1171,7 +1175,7 @@ TEST_F(J2534AdoptionTest, WriteFailureLatchesRequestFailedAndClears)
         }
     }
     EXPECT_TRUE(reached) << "failed write never latched (was " << le << ")";
-    EXPECT_EQ(ec, 1u) << "write failure flapped episodes (finding 6)";
+    EXPECT_EQ(ec, 1u) << "write failure flapped episodes";
 
     /* Latch discipline: > 1.5 s in (past the ~1.2 s quiet debounce),
      * clean-but-empty reads must NOT have flipped the state to
@@ -1203,7 +1207,7 @@ TEST_F(J2534AdoptionTest, WriteFailureLatchesRequestFailedAndClears)
     qttune_session_destroy(session);
 }
 
-/* Finding 15, ordering: with writes AND reads both failing, the hard
+/* Ordering: with writes AND reads both failing, the hard
  * READ failure outranks requests-failing. Both transitions are
  * sequential within the first cycle (write, then drain read), so
  * exactly two episodes: one REQUEST_FAILED, one HARD. While both
@@ -1246,14 +1250,14 @@ TEST_F(J2534AdoptionTest, HardReadFailureOutranksRequestFailed)
     qttune_session_destroy(session);
 }
 
-/* Finding 7: a delivered-but-unmatched frame (header matches no
- * channel) clears hard failure and the backoff — the adapter answered
- * — but transitions to VEHICLE_TIMEOUT, not OK, and adds no episode.
+/* A delivered-but-unmatched frame (header matches no channel) clears
+ * hard failure and the backoff — the adapter answered — but
+ * transitions to VEHICLE_TIMEOUT, not OK, and adds no episode.
  *
  * The 900 ms budget is the discriminator, so it is NOT generous by
- * accident: a full-clear regression reaches OK (never TIMEOUT, fails);
- * a plain-quiet regression needs the ~1.2 s debounce and misses the
- * window. The passive URI keeps writes out of the picture entirely. */
+ * accident: code that fully clears reaches OK (never TIMEOUT, fails);
+ * code that treats the frame as plain quiet needs the ~1.2 s debounce
+ * and misses the window. The passive URI keeps writes out of the picture entirely. */
 TEST_F(J2534AdoptionTest, UnmatchedDeliveredFrameGoesQuietNotHealthy)
 {
     KnobsArm arm;
@@ -1306,10 +1310,10 @@ TEST_F(J2534AdoptionTest, UnmatchedDeliveredFrameGoesQuietNotHealthy)
     qttune_session_destroy(session);
 }
 
-/* Finding 4: backoff GROWS under sustained hard failure. Writes
- * continue as the recovery probe but the doubling backoff spaces
- * them: ~5 probes in 1.5 s (100+200+400+800 ms doublings) against
- * ~15 with the old reset-to-base. Wide margins on purpose — the two
+/* Backoff GROWS under sustained hard failure. Writes continue as the
+ * recovery probe but the doubling backoff spaces them: ~5 probes in
+ * 1.5 s (100+200+400+800 ms doublings), against ~15 if the backoff
+ * reset to its base on every failure. Wide margins on purpose — the two
  * behaviors differ by 3x, so CI timing noise can't confuse them. */
 TEST_F(J2534AdoptionTest, BackoffGrowsUnderSustainedHardFailure)
 {
@@ -1348,7 +1352,7 @@ TEST_F(J2534AdoptionTest, BackoffGrowsUnderSustainedHardFailure)
     qttune_session_destroy(session);
 }
 
-/* Finding 15: the new code has a distinct, mapped string. */
+/* QT_ERR_REQUEST_FAILED has a distinct, mapped string. */
 TEST(J2534StreamTest, RequestFailedStatusHasDistinctString)
 {
     const char* s = qttune_status_string(QT_ERR_REQUEST_FAILED);

@@ -32,7 +32,7 @@
 //    messages on an empty queue. QTTUNE_FAKE_READ_STATUS forces a
 //    status with no messages; QTTUNE_FAKE_UNTOUCHED_COUNT_STATUS
 //    forces a status with the caller's count and buffer left as
-//    passed (the sloppy vendor of finding 1);
+//    passed (a sloppy vendor; see qttune_trusted_count);
 //    QTTUNE_FAKE_SPEC_READ_SEMANTICS=1 switches to J2534-1 batch and
 //    empty statuses.
 //  * ExtraDataIndex = DataSize (v4.04 no-extra-data convention).
@@ -115,17 +115,16 @@ unsigned long g_last_connect_protocol = 0;
 /* Last StopMsgFilter invocation, for detach-ordering assertion. */
 unsigned long g_last_stopped_filter_id = 0;
 
-/* Disconnect counter (issue #24): a successful client disconnect
- * must clear the child's channel so teardown never issues a SECOND
- * vendor disconnect. Monotonic, read via GetDisconnectCount —
- * in-proc instances only. The child's instance is a separate
- * process (see the OP_INJECT note above). The wire query op once
- * planned for a cross-process pin was never built (formerly Known
- * Issue #23); a surrogate test could count the child's OP_DISCONNECT
- * lines in the session log (qttune_j2534_sur_log_path) instead. */
+/* Disconnect counter: a successful client disconnect must clear the
+ * child's channel so teardown never issues a SECOND vendor disconnect.
+ * Monotonic, read via GetDisconnectCount — in-proc instances only. The
+ * child's instance is a separate process (see the OP_INJECT note
+ * above), so this hook can't see it; a surrogate test would count the
+ * child's OP_DISCONNECT lines in the session log
+ * (qttune_j2534_sur_log_path) instead. */
 unsigned long g_disconnect_count = 0;
 
-/* ---- OBD-II canned response data (HARNESS only, ADR-0013 slice 2) ----
+/* ---- OBD-II canned response data (HARNESS only, ADR-0013) ----
  * Standard PIDs that express as simple byte-extraction + scale/offset.
  * Defaults are PHYSICALLY PLAUSIBLE for a cold-idling vehicle:
  *   RPM 2000, Speed 0, Load ~10%, Throttle ~8%, temps 20 degC,
@@ -143,6 +142,9 @@ struct Obd2CannedValues {
     uint8_t pid_2F_fuel_level;
     uint8_t pid_42_volt_high;
     uint8_t pid_42_volt_low;
+    uint8_t pid_10_maf_high;
+    uint8_t pid_10_maf_low;
+    uint8_t pid_5F_tft;
 };
 
 Obd2CannedValues g_obd2_canned;
@@ -178,6 +180,9 @@ void reset_obd2_canned()
     g_obd2_canned.pid_2F_fuel_level = 64;    /* ~= 25% tank */
     g_obd2_canned.pid_42_volt_high = 0x36;   /* 0x3630 = 13872 mV */
     g_obd2_canned.pid_42_volt_low = 0x30;
+    g_obd2_canned.pid_10_maf_high = 0x00;  /* 0x0064 * 0.01 = 1.00 g/s */
+    g_obd2_canned.pid_10_maf_low = 0x64;
+    g_obd2_canned.pid_5F_tft = 0x50;        /* 80 - 40 = 40 degC */
 }
 
 /* Matches the most recent active filter against a frame's first
@@ -235,6 +240,9 @@ void build_obd2_response(const unsigned char* req, unsigned long req_len,
         case 0x2F: resp[6] = g_obd2_canned.pid_2F_fuel_level;    *resp_len = 7;  break;
         case 0x42: resp[6] = g_obd2_canned.pid_42_volt_high;
                    resp[7] = g_obd2_canned.pid_42_volt_low;     *resp_len = 8;  break;
+        case 0x10: resp[6] = g_obd2_canned.pid_10_maf_high;
+                   resp[7] = g_obd2_canned.pid_10_maf_low;      *resp_len = 8;  break;
+        case 0x5F: resp[6] = g_obd2_canned.pid_5F_tft;          *resp_len = 7;  break;
         default:    /* Unsupported PID — bare grammatical echo */
             *resp_len = 6;
             break;
@@ -258,6 +266,9 @@ void SetFakeObd2CannedValue(unsigned char pid, unsigned char* data,
         case 0x2F: if (len >= 1) g_obd2_canned.pid_2F_fuel_level = data[0]; break;
         case 0x42: if (len >= 2) { g_obd2_canned.pid_42_volt_high = data[0];
                                    g_obd2_canned.pid_42_volt_low = data[1]; } break;
+        case 0x10: if (len >= 2) { g_obd2_canned.pid_10_maf_high = data[0];
+                                   g_obd2_canned.pid_10_maf_low = data[1]; } break;
+        case 0x5F: if (len >= 1) g_obd2_canned.pid_5F_tft = data[0]; break;
     }
 }
 
@@ -278,6 +289,9 @@ void GetFakeObd2CannedValue(unsigned char pid, unsigned char* out_data,
         case 0x2F: *out_len = 1; out_data[0] = g_obd2_canned.pid_2F_fuel_level; break;
         case 0x42: *out_len = 2; out_data[0] = g_obd2_canned.pid_42_volt_high;
                                     out_data[1] = g_obd2_canned.pid_42_volt_low; break;
+        case 0x10: *out_len = 2; out_data[0] = g_obd2_canned.pid_10_maf_high;
+                                   out_data[1] = g_obd2_canned.pid_10_maf_low; break;
+        case 0x5F: *out_len = 1; out_data[0] = g_obd2_canned.pid_5F_tft; break;
         default: *out_len = 0; break;
     }
 }
@@ -302,7 +316,7 @@ long __stdcall PassThruOpen(void* pName, unsigned long* pDeviceID)
         canned_initialized = true;
     }
 
-    /* Test-only open blocking (Issue #22 test): QTTUNE_FAKE_OPEN_DELAY_MS
+    /* Test-only open blocking: QTTUNE_FAKE_OPEN_DELAY_MS
      * makes PassThruOpen sleep before doing anything — the blocked-
      * vendor-open mode. Armed via ENVIRONMENT, not a hook: the child
      * inherits the parent's environment, so an x64 test arms the x86
@@ -353,10 +367,10 @@ long __stdcall PassThruConnect(unsigned long DeviceID,
     if (fake_j2534::g_handle != 1) {
         return STATUS_FAILED;
     }
-    /* Distinct from the device id (1) ON PURPOSE: the fake's device and
-     * channel used to collide at 1, which hid a READ_VBATT
-     * channel-vs-device bug. 0x55 is
-     * arbitrary, nonzero, and unrelated to any protocol constant. */
+    /* Distinct from the device id (1) ON PURPOSE: if device and channel
+     * were both 1, a caller passing the channel where J2534 wants the
+     * device (READ_VBATT) would still pass. 0x55 is arbitrary, nonzero,
+     * and unrelated to any protocol constant. */
     *pChannelID = 0x55;
     return STATUS_NOERROR;
 }
@@ -367,7 +381,7 @@ long __stdcall PassThruDisconnect(unsigned long ChannelID)
     (void)ChannelID;
     /* Tolerant by design: a real vendor's second-disconnect behavior
      * is vendor swamp we don't model — the COUNT is the contract
-     * observable (issue #24), not the return code. */
+     * observable, not the return code. */
     std::lock_guard<std::mutex> lk(fake_j2534::g_lock);
     fake_j2534::g_disconnect_count++;
     return STATUS_NOERROR;
@@ -407,13 +421,13 @@ long __stdcall PassThruReadMsgs(unsigned long ChannelID,
         }
     }
 
-    /* Finding-1 emulation (the sloppy vendor): unlike
-     * QTTUNE_FAKE_READ_STATUS above, this returns the given hard
-     * status WITHOUT touching *pNumMsgs or the message array — the
-     * caller's request count stays DIRTY and its buffer keeps
-     * whatever the caller put there (zeros, or the surrogate child's
-     * previous batch contents). Mirrors the observed VX behavior
-     * ("status 7, written 1", bench 2026-10-20). Re-read per call:
+    /* The sloppy vendor: unlike QTTUNE_FAKE_READ_STATUS above, this
+     * returns the given hard status WITHOUT touching *pNumMsgs or the
+     * message array — the caller's request count stays DIRTY and its
+     * buffer keeps whatever the caller put there (zeros, or the
+     * surrogate child's previous batch contents). Mirrors the VX,
+     * which reports "status 7, written 1" on a failed write
+     * (docs/bench-sessions/2026-10-20.md). Re-read per call:
      * in-proc tests toggle live, the surrogate child only sees the
      * spawn-time value. */
     {
@@ -430,7 +444,7 @@ long __stdcall PassThruReadMsgs(unsigned long ChannelID,
 
     std::lock_guard<std::mutex> lk(fake_j2534::g_lock);
 
-    /* SPEC-CONFORMANT READ MODE (pins the former #26): when
+    /* SPEC-CONFORMANT READ MODE: when
      * QTTUNE_FAKE_SPEC_READ_SEMANTICS is 1, model the J2534-1 rule
      * a real vehicle will exercise: a read asking for N messages with
      * a nonzero timeout returns min(N, available), and if fewer than
@@ -547,16 +561,16 @@ long __stdcall PassThruWriteMsgs(unsigned long ChannelID,
         return STATUS_FAILED;
     }
 
-    /* Finding 15 (code review 2026-10-20): QTTUNE_FAKE_WRITE_STATUS
+    /* QTTUNE_FAKE_WRITE_STATUS
      * makes every WriteMsgs return the given vendor status WITHOUT
      * recording the message or generating a response — the VX quiet-
      * bus shape: writes fail (no ACK on the bus) while reads stay
      * clean. Like QTTUNE_FAKE_UNTOUCHED_COUNT_STATUS on the read side,
      * *pNumMsgs is left as passed (1), the VX's "status 7, written 1",
      * so a write path that read the count before the status would be
-     * caught. Unrecorded writes don't move GetWriteCount. No test arms
-     * it yet. Re-read per call: in-proc tests toggle live; the child
-     * sees only the spawn-time value. */
+     * caught. Unrecorded writes don't move GetWriteCount. Re-read per
+     * call: in-proc tests toggle live; the child sees only the
+     * spawn-time value. */
     {
         char wb[32] = {};
         const DWORD wn = GetEnvironmentVariableA("QTTUNE_FAKE_WRITE_STATUS",
@@ -716,7 +730,7 @@ long __stdcall PassThruIoctl(unsigned long ChannelID,
         /* Contract pin: v04.04 passes the DeviceID
          * to READ_VBATT. This fake's PassThruOpen returns device 1 and
          * PassThruConnect returns channel 0x55 — a caller passing the
-         * channel now FAILS here instead of colliding at 1 == 1. */
+         * channel FAILS here instead of passing by coincidence. */
         if (ChannelID != 1) {
             return STATUS_FAILED;
         }
@@ -932,7 +946,7 @@ void GetLastFilterStop(unsigned long* out_filter_id)
     *out_filter_id = fake_j2534::g_last_stopped_filter_id;
 }
 
-/* Monotonic PassThruDisconnect count (issue #24): explicit
+/* Monotonic PassThruDisconnect count: explicit
  * client-disconnect-then-close must total exactly 1. In-proc
  * instances only; for the child, see the session-log note on
  * g_disconnect_count. */
@@ -957,7 +971,7 @@ void SetFilterGating(int enable)
     fake_j2534::g_filter_gating_enabled = (enable != 0);
 }
 
-/* ---- OBD-II canned-value hooks (ADR-0013 slice 2, HARNESS) ---- */
+/* ---- OBD-II canned-value hooks (ADR-0013, HARNESS) ---- */
 
 /* Override canned response values for a specific PID. Test-side
  * configuration so HARNESS tests can assert exact decoded values. */

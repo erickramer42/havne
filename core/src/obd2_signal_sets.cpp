@@ -78,6 +78,17 @@ const QttuneSignalDef kObd2Defs[] = {
     obd2_def(OBD2_SIG_BATTERY_V_ID,    "Battery Voltage",
              QTTUNE_SIGNAL_TYPE_UINT16, 2, 0.001f, 0.0f,
              "V",    2, 0x42, true),
+    /* SAE J1979 PID 0x10: air flow rate, (256·A + B)/100 g/s. Two-byte
+     * big-endian like RPM/0x42; the 0.01 scale needs no decoder
+     * extension (generic raw·scale + offset). */
+    obd2_def(OBD2_SIG_MAF_ID,            "MAF",
+             QTTUNE_SIGNAL_TYPE_UINT16, 2, 0.01f, 0.0f,
+             "g/s",  2, 0x10, true),
+    /* SAE J1979 PID 0x5F: transmission fluid temperature, A − 40 degC.
+     * Same def shape as coolant/IAT. */
+    obd2_def(OBD2_SIG_TFT_ID,            "Trans Fluid Temp",
+             QTTUNE_SIGNAL_TYPE_UINT8, 1, 1.0f, -40.0f,
+             "degC", 0, 0x5F, false),
 };
 
 /* ADR-0013 §4: the obd2 profile declares the standard physical pair,

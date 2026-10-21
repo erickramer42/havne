@@ -17,7 +17,8 @@
 namespace {
 
 /* Wire payload as the bridge hands it to the decoder (header stripped):
- * [0x41][PID][data...] — N1: header stripped, adapter-owned framing, no PCI byte */
+ * [0x41][PID][data...] — header stripped; the adapter owns ISO-TP
+ * framing, so there is no PCI byte */
 qttune_frame_t make_obd2_frame(const uint8_t* payload, uint8_t len)
 {
     qttune_frame_t f{};
@@ -43,7 +44,7 @@ TEST(Obd2SetTest, SetIsValidAndComplete) {
     const QttuneSignalSet* set = qttune_obd2_signal_set();
     ASSERT_NE(set, nullptr);
     EXPECT_EQ(qttune_validate_signal_set(set), 0);
-    EXPECT_EQ(set->count, 8u);
+    EXPECT_EQ(set->count, 10u);
 }
 
 TEST(Obd2SetTest, PidBandDistinctFromMockIds) {
@@ -53,7 +54,7 @@ TEST(Obd2SetTest, PidBandDistinctFromMockIds) {
     for (uint32_t i = 0; i < obd2->count; ++i) {
         const uint16_t id = obd2->defs[i].id;
         EXPECT_GE(id, 7001u);
-        EXPECT_LE(id, 7008u);
+        EXPECT_LE(id, 7010u);
     }
 }
 
@@ -143,9 +144,9 @@ TEST(Obd2DecodeTest, EngineLoadPercentScale) {
 
 TEST(Obd2DecodeTest, TemperatureIsUnsignedMinusFortyOffset)
 {
-    /* N2 fix (2026-10-19): J1979 temps are UNSIGNED A - 40. The old
-     * INT8 pin read 0xF0 as -56 C; correct is 240 - 40 = +200 C, and
-     * 0x00 is the -40 C sentinel. Both ends pinned. */
+    /* J1979 temps are UNSIGNED A - 40. Decoded as INT8, 0xF0 would read
+     * -56 C; correct is 240 - 40 = +200 C, and 0x00 is the -40 C
+     * sentinel. Both ends pinned. */
     const QttuneSignalSet* set = qttune_obd2_signal_set();
     const QttuneSignalDef* d = find_def(set, OBD2_SIG_IAT_ID);
     ASSERT_NE(d, nullptr);
@@ -158,6 +159,33 @@ TEST(Obd2DecodeTest, TemperatureIsUnsignedMinusFortyOffset)
     f = make_obd2_frame(hi, sizeof hi);
     ASSERT_EQ(qttune_decode_signal(d, f.data, f.data_length, &v), 0);
     EXPECT_FLOAT_EQ(v, 200.0f);
+}
+
+TEST(Obd2DecodeTest, MafCentigramScale) {
+    const QttuneSignalSet* set = qttune_obd2_signal_set();
+    const QttuneSignalDef* d = find_def(set, OBD2_SIG_MAF_ID);
+    ASSERT_NE(d, nullptr);
+    /* 0x0064 = 100 raw * 0.01 = 1.00 g/s — the /100 (centi-grams/s)
+     * scale is finer than every existing def, pinning the generic
+     * scale+offset path handles it. */
+    const uint8_t wire[] = {0x41, 0x10, 0x00, 0x64};
+    qttune_frame_t f = make_obd2_frame(wire, sizeof wire);
+    ASSERT_EQ(qttune_def_matches_frame(d, &f), 0);
+    float v = 0.0f;
+    ASSERT_EQ(qttune_decode_signal(d, f.data, f.data_length, &v), 0);
+    EXPECT_NEAR(v, 1.00f, 0.0001f);
+}
+
+TEST(Obd2DecodeTest, TftMatchesCoolantShape) {
+    const QttuneSignalSet* set = qttune_obd2_signal_set();
+    const QttuneSignalDef* d = find_def(set, OBD2_SIG_TFT_ID);
+    ASSERT_NE(d, nullptr);
+    const uint8_t wire[] = {0x41, 0x5F, 0x50};
+    qttune_frame_t f = make_obd2_frame(wire, sizeof wire);
+    ASSERT_EQ(qttune_def_matches_frame(d, &f), 0);
+    float v = 0.0f;
+    ASSERT_EQ(qttune_decode_signal(d, f.data, f.data_length, &v), 0);
+    EXPECT_FLOAT_EQ(v, 40.0f);   /* 80 - 40 */
 }
 
 /* ---------- mux gate ---------- */
@@ -201,9 +229,9 @@ TEST(Obd2MuxTest, ShortFrameRejectedWithoutOverread) {
 TEST(PidSchedulerTest, EnrollsFromObd2SetInDefOrder) {
     qttune_pid_scheduler s;
     ASSERT_TRUE(qttune_sched_from_set(&s, qttune_obd2_signal_set()));
-    EXPECT_EQ(s.count, 8u);
+    EXPECT_EQ(s.count, 10u);
     const uint8_t expect[] = {0x04, 0x05, 0x0C, 0x0D,
-                               0x0F, 0x11, 0x2F, 0x42};
+                               0x0F, 0x11, 0x2F, 0x42, 0x10, 0x5F};
     for (uint32_t i = 0; i < s.count; ++i) {
         EXPECT_EQ(s.pids[i], expect[i]) << "index " << i;
     }
@@ -229,7 +257,7 @@ TEST(PidSchedulerTest, RotationWrapsDeterministically) {
     }
     /* The next call must wrap to the set's first PID. */
     (void)qttune_sched_next(&s, &first_of_next);
-    EXPECT_EQ(last_of_cycle, 0x42u);    /* 8th of 8 */
+    EXPECT_EQ(last_of_cycle, 0x5Fu);    /* 10th of 10 */
     EXPECT_EQ(first_of_next, 0x04u);    /* wrapped to 1st */
     EXPECT_EQ(s.cursor, 1u);            /* advanced past the wrap */
 }
