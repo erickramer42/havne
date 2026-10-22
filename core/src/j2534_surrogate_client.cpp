@@ -1,11 +1,11 @@
 // File/layer: core/src/j2534_surrogate_client.cpp | C++17, Qt-free, Win32-guarded
 // Testing: HARNESS — full stream and cross-arch suites
 
-#include "qttune/j2534_surrogate.h"
-#include "qttune/core.h"
-#include "qttune/j2534.h"
-#include "qttune/j2534_ptypes.h"
-#include "qttune/surrogate_protocol.h"
+#include "ecuio/j2534_surrogate.h"
+#include "ecuio/core.h"
+#include "ecuio/j2534.h"
+#include "ecuio/j2534_ptypes.h"
+#include "ecuio/surrogate_protocol.h"
 
 #include <cstring>
 #include <cstdint>
@@ -22,7 +22,7 @@
 
 #include "win_utf8.h"
 
-struct qttune_j2534_sur_handle {
+struct ecuio_j2534_sur_handle {
     bool    pipe_connected = false;
     HANDLE pipe = INVALID_HANDLE_VALUE;
     HANDLE job = nullptr;
@@ -46,21 +46,21 @@ struct qttune_j2534_sur_handle {
     /* Batch cache: one OP_READ returns up to 16 frames; dispensed one
      * per read_frame call. Worker-thread-only by construction (the
      * transport serializes all reads through its worker). */
-    qttune_sur_frame_t pending[QTTUNE_SUR_MAX_FRAMES_PER_READ];
+    ecuio_sur_frame_t pending[ECUIO_SUR_MAX_FRAMES_PER_READ];
     uint32_t pending_count = 0;
     uint32_t pending_next = 0;
 };
 
 namespace {
 
-constexpr const wchar_t* kSurrogateExeName = L"qttune-j2534-surrogate.exe";
+constexpr const wchar_t* kSurrogateExeName = L"ecuio-j2534-surrogate.exe";
 constexpr DWORD kTransactTimeoutMs   = 3000;
 constexpr DWORD kHandshakeTimeoutMs_default = 8000;
 
 DWORD handshake_timeout_ms()
 {
     char buf[32] = {};
-    const DWORD n = GetEnvironmentVariableA("QTTUNE_SUR_HANDSHAKE_MS",
+    const DWORD n = GetEnvironmentVariableA("ECUIO_SUR_HANDSHAKE_MS",
                                              buf, sizeof(buf));
     if (n > 0 && n < sizeof(buf)) {
         const DWORD v = static_cast<DWORD>(strtoul(buf, nullptr, 10));
@@ -74,7 +74,7 @@ DWORD handshake_timeout_ms()
  * child's. Stamped with local wall-clock
  * time, like the child's lines. One WriteFile per line, as on the
  * child's side, so the two never splice mid-line. h may be null. */
-void sur_log(const qttune_j2534_sur_handle_t* h, const char* fmt, ...)
+void sur_log(const ecuio_j2534_sur_handle_t* h, const char* fmt, ...)
 {
     SYSTEMTIME t;
     GetLocalTime(&t);
@@ -119,16 +119,16 @@ HANDLE open_session_log(LONG seq, SECURITY_ATTRIBUTES* sa,
     const wchar_t* prefix = (tn == 0 || tn >= MAX_PATH) ? L"." : dir;
 
     wchar_t wpath[MAX_PATH + 64];
-    swprintf(wpath, _countof(wpath), L"%lsqttune-surrogate.log", prefix);
+    swprintf(wpath, _countof(wpath), L"%lsecuio-surrogate.log", prefix);
     HANDLE f = CreateFileW(wpath, GENERIC_WRITE, FILE_SHARE_READ, sa,
                            CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
     if (f == INVALID_HANDLE_VALUE && GetLastError() == ERROR_SHARING_VIOLATION) {
-        swprintf(wpath, _countof(wpath), L"%lsqttune-surrogate-%lu-%ld.log",
+        swprintf(wpath, _countof(wpath), L"%lsecuio-surrogate-%lu-%ld.log",
                  prefix, GetCurrentProcessId(), seq);
         f = CreateFileW(wpath, GENERIC_WRITE, FILE_SHARE_READ, sa,
                         CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
     }
-    if (f == INVALID_HANDLE_VALUE || !qttune_wide_to_utf8(wpath, path, cap)) {
+    if (f == INVALID_HANDLE_VALUE || !ecuio_wide_to_utf8(wpath, path, cap)) {
         path[0] = '\0';
     }
     return f;
@@ -143,24 +143,24 @@ bool is_absolute_path(const wchar_t* p)
     return drive || unc;
 }
 
-/* The surrogate exe: QTTUNE_SURROGATE_EXE when set, else the one next
+/* The surrogate exe: ECUIO_SURROGATE_EXE when set, else the one next
  * to the running exe. The variable relocates the surrogate and nothing
  * more: it must be an absolute path to an existing file named
- * qttune-j2534-surrogate.exe, so it can't start some other program, and
+ * ecuio-j2534-surrogate.exe, so it can't start some other program, and
  * the path is always logged. On failure, *why says what was wrong. */
 bool resolve_exe_path(wchar_t* out, size_t cap, bool* from_env, const char** why)
 {
     *from_env = false;
-    const DWORD n = GetEnvironmentVariableW(L"QTTUNE_SURROGATE_EXE",
+    const DWORD n = GetEnvironmentVariableW(L"ECUIO_SURROGATE_EXE",
                                              out, static_cast<DWORD>(cap));
     if (n > 0) {
         *from_env = true;
         if (n >= cap) {
-            *why = "QTTUNE_SURROGATE_EXE is too long";
+            *why = "ECUIO_SURROGATE_EXE is too long";
             return false;
         }
         if (!is_absolute_path(out)) {
-            *why = "QTTUNE_SURROGATE_EXE is not an absolute path";
+            *why = "ECUIO_SURROGATE_EXE is not an absolute path";
             return false;
         }
         /* An absolute path has a separator; the last one starts the
@@ -169,12 +169,12 @@ bool resolve_exe_path(wchar_t* out, size_t cap, bool* from_env, const char** why
         const wchar_t* fwd = wcsrchr(out, L'/');
         if (fwd != nullptr && (sep == nullptr || fwd > sep)) sep = fwd;
         if (_wcsicmp(sep + 1, kSurrogateExeName) != 0) {
-            *why = "QTTUNE_SURROGATE_EXE does not name qttune-j2534-surrogate.exe";
+            *why = "ECUIO_SURROGATE_EXE does not name ecuio-j2534-surrogate.exe";
             return false;
         }
         const DWORD attr = GetFileAttributesW(out);
         if (attr == INVALID_FILE_ATTRIBUTES || (attr & FILE_ATTRIBUTE_DIRECTORY) != 0) {
-            *why = "QTTUNE_SURROGATE_EXE names no file";
+            *why = "ECUIO_SURROGATE_EXE names no file";
             return false;
         }
         return true;
@@ -207,7 +207,7 @@ bool make_pipe_name(LONG seq, char* out, size_t cap)
                                         BCRYPT_USE_SYSTEM_PREFERRED_RNG))) {
         return false;
     }
-    int n = snprintf(out, cap, "\\\\.\\pipe\\qttune-j2534-%lu-%ld-",
+    int n = snprintf(out, cap, "\\\\.\\pipe\\ecuio-j2534-%lu-%ld-",
                      GetCurrentProcessId(), seq);
     for (uint8_t b : rnd) {
         if (n < 0 || static_cast<size_t>(n) + 3 > cap) return false;
@@ -336,9 +336,9 @@ read_result ov_read(HANDLE pipe, void* buf, DWORD len, DWORD timeout_ms,
  * If the late reply was an OP_READ's, its frames are dropped with it.
  * That takes a read the child answered more than 500 ms past its own
  * timeout, so it's rare, but the drop is logged rather than silent. */
-bool drain_pending(qttune_j2534_sur_handle_t* h, DWORD timeout_ms)
+bool drain_pending(ecuio_j2534_sur_handle_t* h, DWORD timeout_ms)
 {
-    qttune_sur_response_t stale = {};
+    ecuio_sur_response_t stale = {};
     DWORD got = 0, rerr = 0;
     const read_result rr = ov_read(h->pipe, &stale, sizeof(stale),
                                    timeout_ms, &got, &rerr);
@@ -361,8 +361,8 @@ bool drain_pending(qttune_j2534_sur_handle_t* h, DWORD timeout_ms)
     return true;
 }
 
-bool transact(qttune_j2534_sur_handle_t* h, const qttune_sur_request_t& req,
-              qttune_sur_response_t* out_resp, DWORD timeout_ms)
+bool transact(ecuio_j2534_sur_handle_t* h, const ecuio_sur_request_t& req,
+              ecuio_sur_response_t* out_resp, DWORD timeout_ms)
 {
     if (h->unresponsive) {
         return false;
@@ -402,7 +402,7 @@ bool transact(qttune_j2534_sur_handle_t* h, const qttune_sur_request_t& req,
 /* Decode the child's exit code (j2534.md "Child exit codes") so a spawn
  * failure names its stage instead of surfacing as a bare LOAD_FAILED.
  * Safe to call when the child is still running — it then does nothing. */
-void log_child_exit(const qttune_j2534_sur_handle_t* h)
+void log_child_exit(const ecuio_j2534_sur_handle_t* h)
 {
     DWORD code = 0;
     if (h->process == nullptr || !GetExitCodeProcess(h->process, &code)) return;
@@ -420,26 +420,26 @@ void log_child_exit(const qttune_j2534_sur_handle_t* h)
 
 extern "C" {
 
-qttune_status_t qttune_j2534_sur_open(const char* dll_path,
-                                      qttune_j2534_sur_handle_t** out_handle)
+ecuio_status_t ecuio_j2534_sur_open(const char* dll_path,
+                                    ecuio_j2534_sur_handle_t** out_handle)
 {
     if (dll_path == nullptr || out_handle == nullptr || dll_path[0] == '\0') {
-        return QTTUNE_ERR_NULL_ARGUMENT;
+        return ECUIO_ERR_NULL_ARGUMENT;
     }
     *out_handle = nullptr;
 
     /* The DLL path reaches the child as UTF-16 on its command line. */
-    wchar_t wdll[QTTUNE_J2534_DLL_PATH_LEN];
-    if (!qttune_utf8_to_wide(dll_path, wdll, _countof(wdll))) {
+    wchar_t wdll[ECUIO_J2534_DLL_PATH_LEN];
+    if (!ecuio_utf8_to_wide(dll_path, wdll, _countof(wdll))) {
         SUR_LOG(nullptr, "open: dll path is not UTF-8 or too long\n");
-        return QTTUNE_ERR_LOAD_FAILED;
+        return ECUIO_ERR_LOAD_FAILED;
     }
 
     static volatile LONG counter = 0;
     const LONG seq = InterlockedIncrement(&counter);
 
-    qttune_j2534_sur_handle_t* h = new (std::nothrow) qttune_j2534_sur_handle_t();
-    if (h == nullptr) return QTTUNE_ERR_OUT_OF_MEMORY;
+    ecuio_j2534_sur_handle_t* h = new (std::nothrow) ecuio_j2534_sur_handle_t();
+    if (h == nullptr) return ECUIO_ERR_OUT_OF_MEMORY;
 
     /* The log opens first, so every startup failure below lands in it.
      * Inheritable only until the spawn: the child gets it as its
@@ -453,11 +453,11 @@ qttune_status_t qttune_j2534_sur_open(const char* dll_path,
     const char* exe_why = "";
     const bool exe_ok = resolve_exe_path(exe, _countof(exe), &exe_from_env, &exe_why);
     char exe8[3 * MAX_PATH];
-    (void)qttune_wide_to_utf8(exe, exe8, sizeof(exe8));
+    (void)ecuio_wide_to_utf8(exe, exe8, sizeof(exe8));
     if (!exe_ok) {
         SUR_LOG(h, "open: no surrogate exe: %s ('%s')\n", exe_why, exe8);
-        qttune_j2534_sur_close(h);
-        return QTTUNE_ERR_LOAD_FAILED;
+        ecuio_j2534_sur_close(h);
+        return ECUIO_ERR_LOAD_FAILED;
     }
 
     /* Local, user-only, unguessable, and refused if the name already
@@ -466,23 +466,23 @@ qttune_status_t qttune_j2534_sur_open(const char* dll_path,
     wchar_t wpipe[128];
     user_only_security sec = {};
     if (!make_pipe_name(seq, pipe_name, sizeof(pipe_name)) ||
-        !qttune_utf8_to_wide(pipe_name, wpipe, _countof(wpipe)) ||
+        !ecuio_utf8_to_wide(pipe_name, wpipe, _countof(wpipe)) ||
         !init_user_only(&sec)) {
         SUR_LOG(h, "open: pipe setup failed (err=%lu)\n", GetLastError());
-        qttune_j2534_sur_close(h);
-        return QTTUNE_ERR_LOAD_FAILED;
+        ecuio_j2534_sur_close(h);
+        return ECUIO_ERR_LOAD_FAILED;
     }
     h->pipe = CreateNamedPipeW(wpipe,
                                PIPE_ACCESS_DUPLEX | FILE_FLAG_OVERLAPPED |
                                    FILE_FLAG_FIRST_PIPE_INSTANCE,
                                PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT |
                                    PIPE_REJECT_REMOTE_CLIENTS,
-                               1, sizeof(qttune_sur_request_t),
-                               sizeof(qttune_sur_response_t), 0, &sec.sa);
+                               1, sizeof(ecuio_sur_request_t),
+                               sizeof(ecuio_sur_response_t), 0, &sec.sa);
     if (h->pipe == INVALID_HANDLE_VALUE) {
         SUR_LOG(h, "open: CreateNamedPipe failed (err=%lu)\n", GetLastError());
-        qttune_j2534_sur_close(h);
-        return QTTUNE_ERR_LOAD_FAILED;
+        ecuio_j2534_sur_close(h);
+        return ECUIO_ERR_LOAD_FAILED;
     }
 
     h->job = CreateJobObjectA(nullptr, nullptr);
@@ -492,15 +492,15 @@ qttune_status_t qttune_j2534_sur_open(const char* dll_path,
         !SetInformationJobObject(h->job, JobObjectExtendedLimitInformation,
                                  &ji, sizeof(ji))) {
         SUR_LOG(h, "open: job object setup failed (err=%lu)\n", GetLastError());
-        qttune_j2534_sur_close(h);
-        return QTTUNE_ERR_LOAD_FAILED;
+        ecuio_j2534_sur_close(h);
+        return ECUIO_ERR_LOAD_FAILED;
     }
 
     wchar_t cmdline[MAX_PATH * 3 + 256];
     if (swprintf(cmdline, _countof(cmdline), L"\"%ls\" \"%ls\" \"%ls\"",
                  exe, wdll, wpipe) < 0) {
-        qttune_j2534_sur_close(h);
-        return QTTUNE_ERR_LOAD_FAILED;
+        ecuio_j2534_sur_close(h);
+        return ECUIO_ERR_LOAD_FAILED;
     }
 
     /* Only the log reaches the child. Inheritance on its own would hand
@@ -518,15 +518,15 @@ qttune_status_t qttune_j2534_sur_open(const char* dll_path,
             !InitializeProcThreadAttributeList(attrs, 1, 0, &attr_size)) {
             SUR_LOG(h, "open: attribute list failed (size %zu)\n",
                     static_cast<size_t>(attr_size));
-            qttune_j2534_sur_close(h);
-            return QTTUNE_ERR_LOAD_FAILED;
+            ecuio_j2534_sur_close(h);
+            return ECUIO_ERR_LOAD_FAILED;
         }
         if (!UpdateProcThreadAttribute(attrs, 0, PROC_THREAD_ATTRIBUTE_HANDLE_LIST,
                                        &h->log, sizeof(h->log), nullptr, nullptr)) {
             DeleteProcThreadAttributeList(attrs);
             SUR_LOG(h, "open: handle list failed (err=%lu)\n", GetLastError());
-            qttune_j2534_sur_close(h);
-            return QTTUNE_ERR_LOAD_FAILED;
+            ecuio_j2534_sur_close(h);
+            return ECUIO_ERR_LOAD_FAILED;
         }
         si.lpAttributeList = attrs;
         si.StartupInfo.dwFlags |= STARTF_USESTDHANDLES;
@@ -547,8 +547,8 @@ qttune_status_t qttune_j2534_sur_open(const char* dll_path,
     }
     if (!spawned) {
         SUR_LOG(h, "open: CreateProcess failed (err=%lu) exe='%s'\n", spawn_err, exe8);
-        qttune_j2534_sur_close(h);
-        return QTTUNE_ERR_LOAD_FAILED;
+        ecuio_j2534_sur_close(h);
+        return ECUIO_ERR_LOAD_FAILED;
     }
     if (h->log != INVALID_HANDLE_VALUE) {
         /* No later spawn, by this client or anyone in the app, inherits
@@ -559,7 +559,7 @@ qttune_status_t qttune_j2534_sur_open(const char* dll_path,
      * session log instead of racing the child's first line. */
     SUR_LOG(h, "open: child pid %lu, surrogate '%s'%s, dll '%s'\n",
             pi.dwProcessId, exe8,
-            exe_from_env ? " (QTTUNE_SURROGATE_EXE)" : "", dll_path);
+            exe_from_env ? " (ECUIO_SURROGATE_EXE)" : "", dll_path);
     if (h->log_path[0] != '\0') {
         SUR_LOG(h, "open: log '%s'\n", h->log_path);
     } else {
@@ -577,8 +577,8 @@ qttune_status_t qttune_j2534_sur_open(const char* dll_path,
                 GetLastError());
         TerminateProcess(pi.hProcess, 1);
         CloseHandle(pi.hThread);
-        qttune_j2534_sur_close(h);
-        return QTTUNE_ERR_LOAD_FAILED;
+        ecuio_j2534_sur_close(h);
+        return ECUIO_ERR_LOAD_FAILED;
     }
     ResumeThread(pi.hThread);
     CloseHandle(pi.hThread);
@@ -586,8 +586,8 @@ qttune_status_t qttune_j2534_sur_open(const char* dll_path,
     OVERLAPPED ov = {};
     ov.hEvent = CreateEventA(nullptr, TRUE, FALSE, nullptr);
     if (ov.hEvent == nullptr) {
-        qttune_j2534_sur_close(h);
-        return QTTUNE_ERR_LOAD_FAILED;
+        ecuio_j2534_sur_close(h);
+        return ECUIO_ERR_LOAD_FAILED;
     }
     BOOL conn = ConnectNamedPipe(h->pipe, &ov);
     DWORD cerr = GetLastError();
@@ -622,8 +622,8 @@ qttune_status_t qttune_j2534_sur_open(const char* dll_path,
     CloseHandle(ov.hEvent);
     if (!connected) {
         SUR_LOG(h, "open: handshake failed — child never connected\n");
-        qttune_j2534_sur_close(h);
-        return QTTUNE_ERR_LOAD_FAILED;
+        ecuio_j2534_sur_close(h);
+        return ECUIO_ERR_LOAD_FAILED;
     }
 
     h->pipe_connected = true;
@@ -635,10 +635,10 @@ qttune_status_t qttune_j2534_sur_open(const char* dll_path,
      * a non-success status; no reply with a live child is a vendor
      * blocked in DllMain or PassThruOpen, typically on absent
      * hardware. */
-    qttune_sur_request_t req = {};
+    ecuio_sur_request_t req = {};
     req.request_id = h->next_request_id++;
-    req.opcode = QTTUNE_SUR_OP_OPEN;
-    qttune_sur_response_t resp = {};
+    req.opcode = ECUIO_SUR_OP_OPEN;
+    ecuio_sur_response_t resp = {};
     if (!transact(h, req, &resp, handshake_timeout_ms())) {
         /* Classify by why the transaction failed, not by a liveness
          * snapshot. A reply that TIMED OUT with the child still alive
@@ -661,175 +661,175 @@ qttune_status_t qttune_j2534_sur_open(const char* dll_path,
          * skips the polite OP_SHUTDOWN it could never answer. */
         TerminateProcess(h->process, 1);
         WaitForSingleObject(h->process, 1000);
-        qttune_j2534_sur_close(h);
-        return QTTUNE_ERR_LOAD_FAILED;
+        ecuio_j2534_sur_close(h);
+        return ECUIO_ERR_LOAD_FAILED;
     }
-    if (resp.status != static_cast<int32_t>(QTTUNE_PT_STATUS_NOERROR)) {
+    if (resp.status != static_cast<int32_t>(ECUIO_PT_STATUS_NOERROR)) {
         SUR_LOG(h, "open: PassThruOpen refused (vendor status %d)\n", resp.status);
-        qttune_j2534_sur_close(h);
-        return QTTUNE_ERR_LOAD_FAILED;
+        ecuio_j2534_sur_close(h);
+        return ECUIO_ERR_LOAD_FAILED;
     }
     *out_handle = h;
-    return QTTUNE_OK;
+    return ECUIO_OK;
 }
 
-qttune_status_t qttune_j2534_sur_connect_channel(qttune_j2534_sur_handle_t* h,
-                                                 unsigned long baud,
-                                                 unsigned long flags,
-                                                 unsigned long* out_channel)
+ecuio_status_t ecuio_j2534_sur_connect_channel(ecuio_j2534_sur_handle_t* h,
+                                               unsigned long baud,
+                                               unsigned long flags,
+                                               unsigned long* out_channel)
 {
-    if (h == nullptr || out_channel == nullptr) return QTTUNE_ERR_NULL_ARGUMENT;
-    if (baud == 0) baud = QTTUNE_PT_BAUD_ISO15765_500K;
+    if (h == nullptr || out_channel == nullptr) return ECUIO_ERR_NULL_ARGUMENT;
+    if (baud == 0) baud = ECUIO_PT_BAUD_ISO15765_500K;
 
-    qttune_sur_request_t req = {};
+    ecuio_sur_request_t req = {};
     req.request_id = h->next_request_id++;
-    req.opcode = QTTUNE_SUR_OP_CONNECT;
-    req.u.connect.protocol_id = QTTUNE_PT_PROTOCOL_ISO15765;
+    req.opcode = ECUIO_SUR_OP_CONNECT;
+    req.u.connect.protocol_id = ECUIO_PT_PROTOCOL_ISO15765;
     req.u.connect.flags = flags;
     req.u.connect.baud = baud;
 
-    qttune_sur_response_t resp = {};
+    ecuio_sur_response_t resp = {};
     if (!transact(h, req, &resp, kTransactTimeoutMs)) {
-        return QTTUNE_ERR_NO_TRANSPORT;
+        return ECUIO_ERR_NO_TRANSPORT;
     }
-    if (resp.status != static_cast<int32_t>(QTTUNE_PT_STATUS_NOERROR)) {
+    if (resp.status != static_cast<int32_t>(ECUIO_PT_STATUS_NOERROR)) {
         SUR_LOG(h, "connect: PassThruConnect refused (vendor status %d)\n",
                 resp.status);
-        return QTTUNE_ERR_NO_TRANSPORT;
+        return ECUIO_ERR_NO_TRANSPORT;
     }
     *out_channel = resp.handle_or_channel;
-    return QTTUNE_OK;
+    return ECUIO_OK;
 }
 
-qttune_status_t qttune_j2534_sur_disconnect_channel(qttune_j2534_sur_handle_t* h,
-                                                    unsigned long channel)
+ecuio_status_t ecuio_j2534_sur_disconnect_channel(ecuio_j2534_sur_handle_t* h,
+                                                  unsigned long channel)
 {
-    if (h == nullptr) return QTTUNE_ERR_NULL_ARGUMENT;
-    qttune_sur_request_t req = {};
+    if (h == nullptr) return ECUIO_ERR_NULL_ARGUMENT;
+    ecuio_sur_request_t req = {};
     req.request_id = h->next_request_id++;
-    req.opcode = QTTUNE_SUR_OP_DISCONNECT;
+    req.opcode = ECUIO_SUR_OP_DISCONNECT;
     req.u.disconnect.channel_id = channel;
-    qttune_sur_response_t resp = {};
-    if (!transact(h, req, &resp, kTransactTimeoutMs)) return QTTUNE_ERR_NO_TRANSPORT;
-    return QTTUNE_OK;
+    ecuio_sur_response_t resp = {};
+    if (!transact(h, req, &resp, kTransactTimeoutMs)) return ECUIO_ERR_NO_TRANSPORT;
+    return ECUIO_OK;
 }
 
-qttune_status_t qttune_j2534_sur_write_frame(qttune_j2534_sur_handle_t* h,
-                                             unsigned long channel,
-                                             const uint8_t* data,
-                                             uint32_t len,
-                                             uint32_t tx_flags,
-                                             uint32_t timeout_ms,
-                                             uint32_t* out_num_written)
+ecuio_status_t ecuio_j2534_sur_write_frame(ecuio_j2534_sur_handle_t* h,
+                                           unsigned long channel,
+                                           const uint8_t* data,
+                                           uint32_t len,
+                                           uint32_t tx_flags,
+                                           uint32_t timeout_ms,
+                                           uint32_t* out_num_written)
 {
     if (h == nullptr || data == nullptr || len == 0 ||
-        len > QTTUNE_SUR_MSG_MAX) {
-        return QTTUNE_ERR_NULL_ARGUMENT;
+        len > ECUIO_SUR_MSG_MAX) {
+        return ECUIO_ERR_NULL_ARGUMENT;
     }
     if (out_num_written != nullptr) *out_num_written = 0;
 
-    qttune_sur_request_t req = {};
+    ecuio_sur_request_t req = {};
     req.request_id = h->next_request_id++;
-    req.opcode = QTTUNE_SUR_OP_WRITE;
+    req.opcode = ECUIO_SUR_OP_WRITE;
     req.u.write.channel_id = channel;
     memcpy(req.u.write.data, data, len);
     req.u.write.data_len = len;
     req.u.write.tx_flags = tx_flags;
     req.u.write.timeout_ms = timeout_ms;
 
-    qttune_sur_response_t resp = {};
+    ecuio_sur_response_t resp = {};
     if (!transact(h, req, &resp, kTransactTimeoutMs)) {
-        return QTTUNE_ERR_NO_TRANSPORT;
+        return ECUIO_ERR_NO_TRANSPORT;
     }
-    if (resp.status != static_cast<int32_t>(QTTUNE_PT_STATUS_NOERROR)) {
-        return QTTUNE_ERR_NO_TRANSPORT;
+    if (resp.status != static_cast<int32_t>(ECUIO_PT_STATUS_NOERROR)) {
+        return ECUIO_ERR_NO_TRANSPORT;
     }
     if (out_num_written != nullptr) *out_num_written = resp.aux;
-    return QTTUNE_OK;
+    return ECUIO_OK;
 }
 
-qttune_status_t qttune_j2534_sur_ioctl(qttune_j2534_sur_handle_t* h,
-                                       unsigned long channel,
-                                       uint32_t ioctl_id,
-                                       const uint8_t* input,
-                                       uint32_t input_len,
-                                       uint8_t* output,
-                                       uint32_t* out_len)
+ecuio_status_t ecuio_j2534_sur_ioctl(ecuio_j2534_sur_handle_t* h,
+                                     unsigned long channel,
+                                     uint32_t ioctl_id,
+                                     const uint8_t* input,
+                                     uint32_t input_len,
+                                     uint8_t* output,
+                                     uint32_t* out_len)
 {
-    if (h == nullptr || input_len > QTTUNE_SUR_IOCTL_DATA_MAX) {
-        return QTTUNE_ERR_NULL_ARGUMENT;
+    if (h == nullptr || input_len > ECUIO_SUR_IOCTL_DATA_MAX) {
+        return ECUIO_ERR_NULL_ARGUMENT;
     }
     if (input == nullptr && input_len != 0) {
-        return QTTUNE_ERR_NULL_ARGUMENT;
+        return ECUIO_ERR_NULL_ARGUMENT;
     }
     if (out_len != nullptr) *out_len = 0;
 
-    qttune_sur_request_t req = {};
+    ecuio_sur_request_t req = {};
     req.request_id = h->next_request_id++;
-    req.opcode = QTTUNE_SUR_OP_IOCTL;
+    req.opcode = ECUIO_SUR_OP_IOCTL;
     req.u.ioctl.channel_id = channel;
     req.u.ioctl.ioctl_id = ioctl_id;
     if (input_len > 0) memcpy(req.u.ioctl.input, input, input_len);
     req.u.ioctl.input_len = input_len;
 
-    qttune_sur_response_t resp = {};
+    ecuio_sur_response_t resp = {};
     if (!transact(h, req, &resp, kTransactTimeoutMs) ||
-        resp.status != static_cast<int32_t>(QTTUNE_PT_STATUS_NOERROR)) {
-        return QTTUNE_ERR_NO_TRANSPORT;
+        resp.status != static_cast<int32_t>(ECUIO_PT_STATUS_NOERROR)) {
+        return ECUIO_ERR_NO_TRANSPORT;
     }
     /* Trust boundary, as for read's num_frames: a mismatched child (a
      * stale build-win32 tree, #19) could claim more than the wire
      * carries. Callers size output for the wire limit, so copying a
      * larger claim would overrun both resp.data and their buffer. */
-    if (resp.data_len > QTTUNE_SUR_IOCTL_DATA_MAX) {
+    if (resp.data_len > ECUIO_SUR_IOCTL_DATA_MAX) {
         SUR_LOG(h, "ioctl: data_len=%u exceeds the wire limit (skew?)\n",
                 resp.data_len);
-        return QTTUNE_ERR_NO_TRANSPORT;
+        return ECUIO_ERR_NO_TRANSPORT;
     }
     if (output != nullptr && resp.data_len > 0) {
         memcpy(output, resp.data, resp.data_len);
     }
     if (out_len != nullptr) *out_len = resp.data_len;
-    return QTTUNE_OK;
+    return ECUIO_OK;
 }
 
-qttune_status_t qttune_j2534_sur_start_msg_filter(qttune_j2534_sur_handle_t* h,
-                                                  unsigned long channel,
-                                                  uint32_t filter_type,
-                                                  const uint8_t* mask,
-                                                  uint32_t mask_len,
-                                                  const uint8_t* pattern,
-                                                  uint32_t pattern_len,
-                                                  const uint8_t* flow_control,
-                                                  uint32_t fc_len,
-                                                  uint32_t tx_flags,
-                                                  unsigned long* out_filter_id)
+ecuio_status_t ecuio_j2534_sur_start_msg_filter(ecuio_j2534_sur_handle_t* h,
+                                                unsigned long channel,
+                                                uint32_t filter_type,
+                                                const uint8_t* mask,
+                                                uint32_t mask_len,
+                                                const uint8_t* pattern,
+                                                uint32_t pattern_len,
+                                                const uint8_t* flow_control,
+                                                uint32_t fc_len,
+                                                uint32_t tx_flags,
+                                                unsigned long* out_filter_id)
 {
     if (h == nullptr || mask == nullptr || pattern == nullptr ||
         out_filter_id == nullptr) {
-        return QTTUNE_ERR_NULL_ARGUMENT;
+        return ECUIO_ERR_NULL_ARGUMENT;
     }
-    if (mask_len < 1 || mask_len > QTTUNE_SUR_FILTER_PATTERN_MAX ||
+    if (mask_len < 1 || mask_len > ECUIO_SUR_FILTER_PATTERN_MAX ||
         mask_len != pattern_len) {
-        return QTTUNE_ERR_NULL_ARGUMENT;
+        return ECUIO_ERR_NULL_ARGUMENT;
     }
-    if (fc_len > QTTUNE_SUR_FILTER_PATTERN_MAX) {
-        return QTTUNE_ERR_NULL_ARGUMENT;
+    if (fc_len > ECUIO_SUR_FILTER_PATTERN_MAX) {
+        return ECUIO_ERR_NULL_ARGUMENT;
     }
-    if (filter_type == QTTUNE_PT_FLOW_CONTROL_FILTER && fc_len != mask_len) {
-        return QTTUNE_ERR_NULL_ARGUMENT;
+    if (filter_type == ECUIO_PT_FLOW_CONTROL_FILTER && fc_len != mask_len) {
+        return ECUIO_ERR_NULL_ARGUMENT;
     }
-    if (filter_type != QTTUNE_PT_FLOW_CONTROL_FILTER && fc_len != 0) {
-        return QTTUNE_ERR_NULL_ARGUMENT;
+    if (filter_type != ECUIO_PT_FLOW_CONTROL_FILTER && fc_len != 0) {
+        return ECUIO_ERR_NULL_ARGUMENT;
     }
     if (fc_len > 0 && flow_control == nullptr) {
-        return QTTUNE_ERR_NULL_ARGUMENT;
+        return ECUIO_ERR_NULL_ARGUMENT;
     }
     *out_filter_id = 0;
 
-    qttune_sur_request_t req = {};
+    ecuio_sur_request_t req = {};
     req.request_id = h->next_request_id++;
-    req.opcode = QTTUNE_SUR_OP_START_FILTER;
+    req.opcode = ECUIO_SUR_OP_START_FILTER;
     req.u.start_filter.channel_id = channel;
     req.u.start_filter.filter_type = filter_type;
     req.u.start_filter.tx_flags = tx_flags;
@@ -842,82 +842,82 @@ qttune_status_t qttune_j2534_sur_start_msg_filter(qttune_j2534_sur_handle_t* h,
     req.u.start_filter.pattern_len = pattern_len;
     req.u.start_filter.fc_len = fc_len;
 
-    qttune_sur_response_t resp = {};
+    ecuio_sur_response_t resp = {};
     if (!transact(h, req, &resp, kTransactTimeoutMs) ||
-        resp.status != static_cast<int32_t>(QTTUNE_PT_STATUS_NOERROR)) {
-        return QTTUNE_ERR_NO_TRANSPORT;
+        resp.status != static_cast<int32_t>(ECUIO_PT_STATUS_NOERROR)) {
+        return ECUIO_ERR_NO_TRANSPORT;
     }
     *out_filter_id = resp.handle_or_channel;
-    return QTTUNE_OK;
+    return ECUIO_OK;
 }
 
-qttune_status_t qttune_j2534_sur_stop_msg_filter(qttune_j2534_sur_handle_t* h,
+ecuio_status_t ecuio_j2534_sur_stop_msg_filter(ecuio_j2534_sur_handle_t* h,
                                                   unsigned long channel,
                                                   unsigned long filter_id)
 {
-    if (h == nullptr) return QTTUNE_ERR_NULL_ARGUMENT;
-    qttune_sur_request_t req = {};
+    if (h == nullptr) return ECUIO_ERR_NULL_ARGUMENT;
+    ecuio_sur_request_t req = {};
     req.request_id = h->next_request_id++;
-    req.opcode = QTTUNE_SUR_OP_STOP_FILTER;
+    req.opcode = ECUIO_SUR_OP_STOP_FILTER;
     req.u.stop_filter.channel_id = channel;
     req.u.stop_filter.filter_id = filter_id;
 
-    qttune_sur_response_t resp = {};
+    ecuio_sur_response_t resp = {};
     if (!transact(h, req, &resp, kTransactTimeoutMs) ||
-        resp.status != static_cast<int32_t>(QTTUNE_PT_STATUS_NOERROR)) {
-        return QTTUNE_ERR_NO_TRANSPORT;
+        resp.status != static_cast<int32_t>(ECUIO_PT_STATUS_NOERROR)) {
+        return ECUIO_ERR_NO_TRANSPORT;
     }
-    return QTTUNE_OK;
+    return ECUIO_OK;
 }
 
-qttune_status_t qttune_j2534_sur_read_frame(qttune_j2534_sur_handle_t* h,
-                                            unsigned long channel,
-                                            qttune_frame_t* out_frame,
-                                            uint32_t timeout_ms,
-                                            bool* got_frame)
+ecuio_status_t ecuio_j2534_sur_read_frame(ecuio_j2534_sur_handle_t* h,
+                                          unsigned long channel,
+                                          ecuio_frame_t* out_frame,
+                                          uint32_t timeout_ms,
+                                          bool* got_frame)
 {
     if (h == nullptr || out_frame == nullptr || got_frame == nullptr) {
-        return QTTUNE_ERR_NULL_ARGUMENT;
+        return ECUIO_ERR_NULL_ARGUMENT;
     }
     *got_frame = false;
 
     /* Dispense from the cache first — no pipe traffic while a batch
      * is partially consumed. */
     if (h->pending_next < h->pending_count) {
-        const qttune_sur_frame_t& s = h->pending[h->pending_next++];
-        *out_frame = qttune_frame_t{};
+        const ecuio_sur_frame_t& s = h->pending[h->pending_next++];
+        *out_frame = ecuio_frame_t{};
         /* channel_id is the frame ABI's bus index (core.h), not the
          * vendor's J2534 ChannelID handle — 0, matching in-proc. */
         out_frame->channel_id = 0;
-        out_frame->flags = (s.rx_flags & QTTUNE_PT_CAN_29BIT_ID)
-                            ? QTTUNE_FRAME_FLAG_EXTENDED : 0u;
+        out_frame->flags = (s.rx_flags & ECUIO_PT_CAN_29BIT_ID)
+                            ? ECUIO_FRAME_FLAG_EXTENDED : 0u;
         out_frame->timestamp_us = s.timestamp;
         uint32_t n = s.data_len;
         if (n > sizeof(out_frame->data)) n = sizeof(out_frame->data);
         out_frame->data_length = static_cast<uint16_t>(n);
         memcpy(out_frame->data, s.data, n);
         *got_frame = true;
-        return QTTUNE_OK;
+        return ECUIO_OK;
     }
 
-    qttune_sur_request_t req = {};
+    ecuio_sur_request_t req = {};
     req.request_id = h->next_request_id++;
-    req.opcode = QTTUNE_SUR_OP_READ;
+    req.opcode = ECUIO_SUR_OP_READ;
     req.u.read.timeout_ms = timeout_ms;
 
-    qttune_sur_response_t resp = {};
+    ecuio_sur_response_t resp = {};
     /* Margin over the vendor timeout: the child spends up to
      * timeout_ms inside ReadMsgs before answering. Transact timing
      * out before the child does means the child is hung, not busy. */
     const DWORD tmo = timeout_ms + 500;
     if (!transact(h, req, &resp, tmo)) {
-        return QTTUNE_ERR_TRANSPORT_HARD_FAILURE;   /* child dead/wedged/skewed */
+        return ECUIO_ERR_TRANSPORT_HARD_FAILURE;    /* child dead/wedged/skewed */
     }
     /* Trust boundary: a skewed stale child can send garbage. */
-    if (resp.num_frames > QTTUNE_SUR_MAX_FRAMES_PER_READ) {
+    if (resp.num_frames > ECUIO_SUR_MAX_FRAMES_PER_READ) {
         SUR_LOG(h, "read: num_frames=%u exceeds capacity (skew?)\n",
                 resp.num_frames);
-        return QTTUNE_ERR_TRANSPORT_HARD_FAILURE;
+        return ECUIO_ERR_TRANSPORT_HARD_FAILURE;
     }
 
     /* Deliver first, judge the status second. Per J2534-1 a read
@@ -926,66 +926,66 @@ qttune_status_t qttune_j2534_sur_read_frame(qttune_j2534_sur_handle_t* h,
      * nearly every response that way. The in-proc path delivers such a
      * message too; dropping it would hide the ECU's answer and leave a
      * healthy session showing nothing at all. The child has already
-     * applied the count-trust rule (qttune_trusted_count), so a
+     * applied the count-trust rule (ecuio_trusted_count), so a
      * non-empty batch only arrives under NOERROR or ERR_TIMEOUT. */
     if (resp.num_frames > 0) {
         memcpy(h->pending, resp.frames,
-               sizeof(qttune_sur_frame_t) * resp.num_frames);
+               sizeof(ecuio_sur_frame_t) * resp.num_frames);
         h->pending_count = resp.num_frames;
         h->pending_next = 0;
         /* Recurse once into the cache-dispense path above. */
-        return qttune_j2534_sur_read_frame(h, channel, out_frame,
-                                           timeout_ms, got_frame);
+        return ecuio_j2534_sur_read_frame(h, channel, out_frame,
+                                          timeout_ms, got_frame);
     }
 
     /* Empty batch: the status decides. */
-    if (resp.status == static_cast<int32_t>(QTTUNE_PT_STATUS_TIMEOUT)) {
-        return QTTUNE_ERR_VEHICLE_TIMEOUT;
+    if (resp.status == static_cast<int32_t>(ECUIO_PT_STATUS_TIMEOUT)) {
+        return ECUIO_ERR_VEHICLE_TIMEOUT;
     }
-    if (resp.status != static_cast<int32_t>(QTTUNE_PT_STATUS_NOERROR)) {
-        if (resp.status == static_cast<int32_t>(QTTUNE_PT_STATUS_BUFFER_EMPTY)) {
-            return QTTUNE_OK;   /* queue drained — quiet, not failed */
+    if (resp.status != static_cast<int32_t>(ECUIO_PT_STATUS_NOERROR)) {
+        if (resp.status == static_cast<int32_t>(ECUIO_PT_STATUS_BUFFER_EMPTY)) {
+            return ECUIO_OK;    /* queue drained — quiet, not failed */
         }
-        return QTTUNE_ERR_TRANSPORT_HARD_FAILURE;
+        return ECUIO_ERR_TRANSPORT_HARD_FAILURE;
     }
-    return QTTUNE_OK;   /* NOERROR, nothing available */
+    return ECUIO_OK;    /* NOERROR, nothing available */
 }
 
-qttune_status_t qttune_j2534_sur_inject_test_frame(qttune_j2534_sur_handle_t* h,
-                                                   const uint8_t* data,
-                                                   uint32_t len,
-                                                   uint32_t timestamp,
-                                                   uint32_t rx_flags)
+ecuio_status_t ecuio_j2534_sur_inject_test_frame(ecuio_j2534_sur_handle_t* h,
+                                                 const uint8_t* data,
+                                                 uint32_t len,
+                                                 uint32_t timestamp,
+                                                 uint32_t rx_flags)
 {
     if (h == nullptr || data == nullptr || len == 0 || len > 64) {
-        return QTTUNE_ERR_NULL_ARGUMENT;
+        return ECUIO_ERR_NULL_ARGUMENT;
     }
-    qttune_sur_request_t req = {};
+    ecuio_sur_request_t req = {};
     req.request_id = h->next_request_id++;
-    req.opcode = QTTUNE_SUR_OP_INJECT;
+    req.opcode = ECUIO_SUR_OP_INJECT;
     memcpy(req.u.inject.data, data, len);
     req.u.inject.len = len;
     req.u.inject.timestamp = timestamp;
     req.u.inject.rx_flags = rx_flags;
 
-    qttune_sur_response_t resp = {};
+    ecuio_sur_response_t resp = {};
     if (!transact(h, req, &resp, kTransactTimeoutMs) ||
-        resp.status != static_cast<int32_t>(QTTUNE_PT_STATUS_NOERROR)) {
-        return QTTUNE_ERR_NO_TRANSPORT;
+        resp.status != static_cast<int32_t>(ECUIO_PT_STATUS_NOERROR)) {
+        return ECUIO_ERR_NO_TRANSPORT;
     }
-    return QTTUNE_OK;
+    return ECUIO_OK;
 }
 
-qttune_status_t qttune_j2534_sur_close(qttune_j2534_sur_handle_t* h)
+ecuio_status_t ecuio_j2534_sur_close(ecuio_j2534_sur_handle_t* h)
 {
-    if (h == nullptr) return QTTUNE_OK;
+    if (h == nullptr) return ECUIO_OK;
     if (h->pipe_connected && h->pipe != INVALID_HANDLE_VALUE &&
         h->process != nullptr &&
         WaitForSingleObject(h->process, 0) != WAIT_OBJECT_0) {
-        qttune_sur_request_t req = {};
+        ecuio_sur_request_t req = {};
         req.request_id = h->next_request_id++;
-        req.opcode = QTTUNE_SUR_OP_SHUTDOWN;
-        qttune_sur_response_t resp = {};
+        req.opcode = ECUIO_SUR_OP_SHUTDOWN;
+        ecuio_sur_response_t resp = {};
         (void)transact(h, req, &resp, 1500);   /* fails at once if unresponsive */
     }
     /* An unresponsive child won't exit on its own: closing the job
@@ -998,10 +998,10 @@ qttune_status_t qttune_j2534_sur_close(qttune_j2534_sur_handle_t* h)
     if (h->job != nullptr) CloseHandle(h->job);
     if (h->log != INVALID_HANDLE_VALUE) CloseHandle(h->log);
     delete h;
-    return QTTUNE_OK;
+    return ECUIO_OK;
 }
 
-const char* qttune_j2534_sur_log_path(const qttune_j2534_sur_handle_t* h)
+const char* ecuio_j2534_sur_log_path(const ecuio_j2534_sur_handle_t* h)
 {
     return (h != nullptr) ? h->log_path : "";
 }
@@ -1012,40 +1012,40 @@ const char* qttune_j2534_sur_log_path(const qttune_j2534_sur_handle_t* h)
 
 extern "C" {
 
-qttune_status_t qttune_j2534_sur_open(const char*, qttune_j2534_sur_handle_t**)
-{ return QTTUNE_ERR_NOT_IMPLEMENTED; }
-qttune_status_t qttune_j2534_sur_connect_channel(qttune_j2534_sur_handle_t*,
-                                                 unsigned long, unsigned long,
-                                                 unsigned long*)
-{ return QTTUNE_ERR_NOT_IMPLEMENTED; }
-qttune_status_t qttune_j2534_sur_disconnect_channel(qttune_j2534_sur_handle_t*, unsigned long)
-{ return QTTUNE_ERR_NOT_IMPLEMENTED; }
-qttune_status_t qttune_j2534_sur_write_frame(qttune_j2534_sur_handle_t*, unsigned long,
-                                             const uint8_t*, uint32_t, uint32_t,
-                                             uint32_t, uint32_t*)
-{ return QTTUNE_ERR_NOT_IMPLEMENTED; }
-qttune_status_t qttune_j2534_sur_ioctl(qttune_j2534_sur_handle_t*, unsigned long,
-                                       uint32_t, const uint8_t*, uint32_t,
-                                       uint8_t*, uint32_t*)
-{ return QTTUNE_ERR_NOT_IMPLEMENTED; }
-qttune_status_t qttune_j2534_sur_start_msg_filter(qttune_j2534_sur_handle_t*, unsigned long,
-                                                  uint32_t, const uint8_t*, uint32_t,
-                                                  const uint8_t*, uint32_t,
-                                                  const uint8_t*, uint32_t, uint32_t,
-                                                  unsigned long*)
-{ return QTTUNE_ERR_NOT_IMPLEMENTED; }
-qttune_status_t qttune_j2534_sur_stop_msg_filter(qttune_j2534_sur_handle_t*, unsigned long,
+ecuio_status_t ecuio_j2534_sur_open(const char*, ecuio_j2534_sur_handle_t**)
+{ return ECUIO_ERR_NOT_IMPLEMENTED; }
+ecuio_status_t ecuio_j2534_sur_connect_channel(ecuio_j2534_sur_handle_t*,
+                                               unsigned long, unsigned long,
+                                               unsigned long*)
+{ return ECUIO_ERR_NOT_IMPLEMENTED; }
+ecuio_status_t ecuio_j2534_sur_disconnect_channel(ecuio_j2534_sur_handle_t*, unsigned long)
+{ return ECUIO_ERR_NOT_IMPLEMENTED; }
+ecuio_status_t ecuio_j2534_sur_write_frame(ecuio_j2534_sur_handle_t*, unsigned long,
+                                           const uint8_t*, uint32_t, uint32_t,
+                                           uint32_t, uint32_t*)
+{ return ECUIO_ERR_NOT_IMPLEMENTED; }
+ecuio_status_t ecuio_j2534_sur_ioctl(ecuio_j2534_sur_handle_t*, unsigned long,
+                                     uint32_t, const uint8_t*, uint32_t,
+                                     uint8_t*, uint32_t*)
+{ return ECUIO_ERR_NOT_IMPLEMENTED; }
+ecuio_status_t ecuio_j2534_sur_start_msg_filter(ecuio_j2534_sur_handle_t*, unsigned long,
+                                                uint32_t, const uint8_t*, uint32_t,
+                                                const uint8_t*, uint32_t,
+                                                const uint8_t*, uint32_t, uint32_t,
+                                                unsigned long*)
+{ return ECUIO_ERR_NOT_IMPLEMENTED; }
+ecuio_status_t ecuio_j2534_sur_stop_msg_filter(ecuio_j2534_sur_handle_t*, unsigned long,
                                                   unsigned long)
-{ return QTTUNE_ERR_NOT_IMPLEMENTED; }
-qttune_status_t qttune_j2534_sur_read_frame(qttune_j2534_sur_handle_t*, unsigned long,
-                                            qttune_frame_t*, uint32_t, bool*)
-{ return QTTUNE_ERR_NOT_IMPLEMENTED; }
-qttune_status_t qttune_j2534_sur_inject_test_frame(qttune_j2534_sur_handle_t*, const uint8_t*,
+{ return ECUIO_ERR_NOT_IMPLEMENTED; }
+ecuio_status_t ecuio_j2534_sur_read_frame(ecuio_j2534_sur_handle_t*, unsigned long,
+                                          ecuio_frame_t*, uint32_t, bool*)
+{ return ECUIO_ERR_NOT_IMPLEMENTED; }
+ecuio_status_t ecuio_j2534_sur_inject_test_frame(ecuio_j2534_sur_handle_t*, const uint8_t*,
                                                   uint32_t, uint32_t, uint32_t)
-{ return QTTUNE_ERR_NOT_IMPLEMENTED; }
-qttune_status_t qttune_j2534_sur_close(qttune_j2534_sur_handle_t*)
-{ return QTTUNE_ERR_NOT_IMPLEMENTED; }
-const char* qttune_j2534_sur_log_path(const qttune_j2534_sur_handle_t*)
+{ return ECUIO_ERR_NOT_IMPLEMENTED; }
+ecuio_status_t ecuio_j2534_sur_close(ecuio_j2534_sur_handle_t*)
+{ return ECUIO_ERR_NOT_IMPLEMENTED; }
+const char* ecuio_j2534_sur_log_path(const ecuio_j2534_sur_handle_t*)
 { return ""; }
 
 } // extern "C"

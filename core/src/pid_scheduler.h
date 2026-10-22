@@ -5,14 +5,14 @@
 //     the worker integration is HARNESS, drain timing on a real adapter
 //     is BENCH.
 
-#ifndef QTTUNE_PID_SCHEDULER_H
-#define QTTUNE_PID_SCHEDULER_H
+#ifndef ECUIO_PID_SCHEDULER_H
+#define ECUIO_PID_SCHEDULER_H
 
-#include "qttune/signals.h"
+#include "ecuio/signals.h"
 
 #include <cstdint>
 
-#define QTTUNE_SCHED_MAX_PIDS 16u
+#define ECUIO_SCHED_MAX_PIDS 16u
 
 /* Round-robin PID scheduler (ADR-0013). Fixed capacity, no
  * allocation, owned exclusively by the transport worker thread —
@@ -25,13 +25,13 @@
  * enroll nothing, and the worker falls back to ?poll= or passive
  * receive. Registration validates each def but not this shape (other
  * mux keys are legal), so from_set() checks it itself. */
-typedef struct qttune_pid_scheduler {
-    uint8_t pids[QTTUNE_SCHED_MAX_PIDS];
+typedef struct ecuio_pid_scheduler {
+    uint8_t pids[ECUIO_SCHED_MAX_PIDS];
     uint32_t count;
     uint32_t cursor;
-} qttune_pid_scheduler;
+} ecuio_pid_scheduler;
 
-inline void qttune_sched_init(qttune_pid_scheduler* s)
+inline void ecuio_sched_init(ecuio_pid_scheduler* s)
 {
     s->count = 0;
     s->cursor = 0;
@@ -43,15 +43,15 @@ inline void qttune_sched_init(qttune_pid_scheduler* s)
  * worker then runs ?poll= or passive). Silently stops at capacity:
  * exceeding 16 distinct PIDs in one v1 profile is a design error
  * caught by the set's own unit tests, not a runtime condition. */
-inline bool qttune_sched_from_set(qttune_pid_scheduler* s,
-                                         const QttuneSignalSet* set)
+inline bool ecuio_sched_from_set(ecuio_pid_scheduler* s,
+                                         const ecuio_signal_set_t* set)
 {
-    qttune_sched_init(s);
+    ecuio_sched_init(s);
     if (set == nullptr || set->defs == nullptr || set->count == 0) {
         return false;
     }
     for (uint32_t i = 0; i < set->count; ++i) {
-        const QttuneSignalDef* d = &set->defs[i];
+        const ecuio_signal_def_t* d = &set->defs[i];
         /* OBD-II echo-grammar gate: 2-byte key at offset 0 —
          * [41][PID], the post-header-strip response payload. */
         if (d->mux_length != 2 || d->mux_offset != 0) {
@@ -65,7 +65,7 @@ inline bool qttune_sched_from_set(qttune_pid_scheduler* s,
         if (dup) {
             continue;
         }
-        if (s->count >= QTTUNE_SCHED_MAX_PIDS) {
+        if (s->count >= ECUIO_SCHED_MAX_PIDS) {
             break;   /* capacity — documented above */
         }
         s->pids[s->count++] = pid;
@@ -77,7 +77,7 @@ inline bool qttune_sched_from_set(qttune_pid_scheduler* s,
  * request. Returns false only for an empty scheduler (callers in
  * scheduler mode never see this — they entered on count > 0 and
  * nothing removes PIDs at runtime). */
-inline bool qttune_sched_next(qttune_pid_scheduler* s,
+inline bool ecuio_sched_next(ecuio_pid_scheduler* s,
                                      uint8_t* out_pid)
 {
     if (s->count == 0 || out_pid == nullptr) {
@@ -88,4 +88,4 @@ inline bool qttune_sched_next(qttune_pid_scheduler* s,
     return true;
 }
 
-#endif /* QTTUNE_PID_SCHEDULER_H */
+#endif /* ECUIO_PID_SCHEDULER_H */

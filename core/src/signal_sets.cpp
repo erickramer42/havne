@@ -1,5 +1,5 @@
-#include <qttune/signals.h>
-#include <qttune/signal_sets.h>
+#include <ecuio/signals.h>
+#include <ecuio/signal_sets.h>
 #include <string.h>
 
 /* Bounded copy into a fixed-width buffer, always null-terminated.
@@ -14,13 +14,13 @@ static void copy_str(char* dst, size_t dst_size, const char* src)
     dst[n] = '\0';
 }
 
-static QttuneSignalDef mk(uint16_t id, const char* name,
-                          QttuneSignalType type,
-                          uint8_t sb, uint8_t nb, uint8_t bo, uint8_t bl,
-                          float scale, float offset,
-                          const char* unit, uint8_t dp)
+static ecuio_signal_def_t mk(uint16_t id, const char* name,
+                             ecuio_signal_type_t type,
+                             uint8_t sb, uint8_t nb, uint8_t bo, uint8_t bl,
+                             float scale, float offset,
+                             const char* unit, uint8_t dp)
 {
-    QttuneSignalDef d = {};
+    ecuio_signal_def_t d = {};
     d.id = id;
     d.type = type;
     d.start_byte = sb;
@@ -30,12 +30,12 @@ static QttuneSignalDef mk(uint16_t id, const char* name,
     d.scale = scale;
     d.offset = offset;
     d.decimal_places = dp;
-    d.message_id =  QTTUNE_MOCK_TELEMETRY_ARB_ID;   /* all mock signals ride 0x0C0 */
+    d.message_id =  ECUIO_MOCK_TELEMETRY_ARB_ID;    /* all mock signals ride 0x0C0 */
     /* The mock set is deliberately mux-less and little-endian, matching
      * the plain LE payloads mock_transport.cpp encodes. d = {} already
      * zeroes these; stating them keeps a future default from silently
      * turning on mux or big-endian decode here. */
-    d.flags = 0;               /* QTTUNE_SIGNAL_FLAG_BIG_ENDIAN unset */
+    d.flags = 0;               /* ECUIO_SIGNAL_FLAG_BIG_ENDIAN unset */
     d.mux_offset = 0;
     d.mux_length = 0;           /* mux disabled */
     d.mux_reserved[0] = 0;
@@ -51,74 +51,74 @@ static QttuneSignalDef mk(uint16_t id, const char* name,
  * finds the same signal under either profile. */
 #define DEG_C "\xC2\xB0" "C"   /* UTF-8 degree sign, whatever the source encoding */
 
-static const QttuneSignalDef kMockDefs[] = {
-    mk(QTTUNE_MOCK_SIG_RPM_ID,      "RPM",               QTTUNE_SIGNAL_TYPE_UINT16,  0, 2, 0, 16, 0.25f,  0.0f,  "RPM",    0),
+static const ecuio_signal_def_t kMockDefs[] = {
+    mk(ECUIO_MOCK_SIG_RPM_ID,       "RPM",               ECUIO_SIGNAL_TYPE_UINT16,   0, 2, 0, 16, 0.25f,  0.0f,  "RPM",    0),
     /* Coolant and IAT are UINT8 with a -40 offset (J1979: A - 40, so
      * -40..215 degC). As INT8, anything from 88 degC up would read as
      * about -160 degC. */
-    mk(QTTUNE_MOCK_SIG_COOLANT_ID,  "Coolant Temp",      QTTUNE_SIGNAL_TYPE_UINT8,    2, 1, 0, 8,   1.0f, -40.0f, DEG_C,    0),
-    mk(QTTUNE_MOCK_SIG_SPEED_ID,    "Vehicle Speed",     QTTUNE_SIGNAL_TYPE_UINT8,    3, 1, 0, 8,   1.0f,   0.0f, "km/h",   0),
-    mk(QTTUNE_MOCK_SIG_THROTTLE_ID, "Throttle Position", QTTUNE_SIGNAL_TYPE_UINT8,    4, 1, 0, 8,   100.0f/255.0f, 0.0f, "%", 1),
-    mk(QTTUNE_MOCK_SIG_IAT_ID,      "Intake Air Temp",   QTTUNE_SIGNAL_TYPE_UINT8,    5, 1, 0, 8,   1.0f, -40.0f, DEG_C,    0),
-    mk(QTTUNE_MOCK_SIG_LOAD_ID,     "Engine Load",       QTTUNE_SIGNAL_TYPE_UINT8,    6, 1, 0, 8,   100.0f/255.0f, 0.0f, "%", 1),
+    mk(ECUIO_MOCK_SIG_COOLANT_ID,   "Coolant Temp",      ECUIO_SIGNAL_TYPE_UINT8,     2, 1, 0, 8,   1.0f, -40.0f, DEG_C,    0),
+    mk(ECUIO_MOCK_SIG_SPEED_ID,     "Vehicle Speed",     ECUIO_SIGNAL_TYPE_UINT8,     3, 1, 0, 8,   1.0f,   0.0f, "km/h",   0),
+    mk(ECUIO_MOCK_SIG_THROTTLE_ID, "Throttle Position", ECUIO_SIGNAL_TYPE_UINT8,      4, 1, 0, 8,   100.0f/255.0f, 0.0f, "%", 1),
+    mk(ECUIO_MOCK_SIG_IAT_ID,       "Intake Air Temp",   ECUIO_SIGNAL_TYPE_UINT8,     5, 1, 0, 8,   1.0f, -40.0f, DEG_C,    0),
+    mk(ECUIO_MOCK_SIG_LOAD_ID,      "Engine Load",       ECUIO_SIGNAL_TYPE_UINT8,     6, 1, 0, 8,   100.0f/255.0f, 0.0f, "%", 1),
     /* Layout mirrors encode_payload's tail: MAF at bytes 7-8 (LE,
      * like RPM), oil temp at byte 9. Centi-grams/s scale is the
      * same J1979 0x10 formula the obd2 set uses; oil is A - 40. The
      * 0.01 g/s resolution is shown to one decimal. */
-    mk(QTTUNE_MOCK_SIG_MAF_ID,      "MAF",               QTTUNE_SIGNAL_TYPE_UINT16,  7, 2, 0, 16, 0.01f,  0.0f, "g/s",  1),
-    mk(QTTUNE_MOCK_SIG_OIL_ID,      "Engine Oil Temp",   QTTUNE_SIGNAL_TYPE_UINT8,    9, 1, 0, 8,   1.0f, -40.0f, DEG_C, 0),
+    mk(ECUIO_MOCK_SIG_MAF_ID,       "MAF",               ECUIO_SIGNAL_TYPE_UINT16,   7, 2, 0, 16, 0.01f,  0.0f, "g/s",  1),
+    mk(ECUIO_MOCK_SIG_OIL_ID,       "Engine Oil Temp",   ECUIO_SIGNAL_TYPE_UINT8,     9, 1, 0, 8,   1.0f, -40.0f, DEG_C, 0),
 };
 
 #undef DEG_C
 
-static const QttuneSignalSet kMockSet = [] {
-    QttuneSignalSet s = {};
+static const ecuio_signal_set_t kMockSet = [] {
+    ecuio_signal_set_t s = {};
     s.version = 1;
     s.count = static_cast<uint32_t>(sizeof(kMockDefs) / sizeof(kMockDefs[0]));
     s.defs = kMockDefs;
     return s;
 }();
 
-const QttuneSignalSet* qttune_mock_signal_set(void)
+const ecuio_signal_set_t* ecuio_mock_signal_set(void)
 {
     return &kMockSet;
 }
 
-int qttune_validate_signal_set(const QttuneSignalSet* set)
+int ecuio_validate_signal_set(const ecuio_signal_set_t* set)
 {
     /* An empty set (no defs) is legal: it decodes nothing, and may
      * still declare channels. */
-    if (!set || (set->count > 0 && !set->defs)) return QTTUNE_VALIDATE_ERR_NULL;
+    if (!set || (set->count > 0 && !set->defs)) return ECUIO_VALIDATE_ERR_NULL;
     for (uint32_t i = 0; i < set->count; ++i) {
-        int rc = qttune_validate_signal(&set->defs[i]);
-        if (rc != QTTUNE_VALIDATE_OK) return rc;
+        int rc = ecuio_validate_signal(&set->defs[i]);
+        if (rc != ECUIO_VALIDATE_OK) return rc;
     }
     /* The bridge keys its staging buffer and model rows by def id, so
      * two defs with one id would overwrite each other's values. */
     for (uint32_t i = 0; i < set->count; ++i) {
         for (uint32_t j = 0; j < i; ++j) {
             if (set->defs[j].id == set->defs[i].id) {
-                return QTTUNE_VALIDATE_ERR_DUPLICATE_ID;
+                return ECUIO_VALIDATE_ERR_DUPLICATE_ID;
             }
         }
     }
     /* ADR-0013 §4: channel declarations — bounded, legal CAN
      * ids, unique rx. Negative codes so they can't collide with
-     * qttune_validate_signal's per-def returns. */
+     * ecuio_validate_signal's per-def returns. */
     if (set->channel_count > 0) {
-        if (!set->channels) return QTTUNE_VALIDATE_ERR_CHANNELS_NULL;
-        if (set->channel_count > QTTUNE_MAX_CHANNELS) return QTTUNE_VALIDATE_ERR_CHANNEL_COUNT;
+        if (!set->channels) return ECUIO_VALIDATE_ERR_CHANNELS_NULL;
+        if (set->channel_count > ECUIO_MAX_CHANNELS) return ECUIO_VALIDATE_ERR_CHANNEL_COUNT;
         for (uint32_t i = 0; i < set->channel_count; ++i) {
             const uint32_t rx = set->channels[i].rx_id;
             const uint32_t tx = set->channels[i].tx_id;
             if (rx == 0 || rx > 0x1FFFFFFFu ||
                 tx == 0 || tx > 0x1FFFFFFFu) {
-                return QTTUNE_VALIDATE_ERR_CHANNEL_ID;
+                return ECUIO_VALIDATE_ERR_CHANNEL_ID;
             }
             for (uint32_t j = 0; j < i; ++j) {
-                if (set->channels[j].rx_id == rx) return QTTUNE_VALIDATE_ERR_DUPLICATE_RX;
+                if (set->channels[j].rx_id == rx) return ECUIO_VALIDATE_ERR_DUPLICATE_RX;
             }
         }
     }
-    return QTTUNE_VALIDATE_OK;
+    return ECUIO_VALIDATE_OK;
 }

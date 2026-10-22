@@ -51,7 +51,7 @@ qt_add_qml_module(qttune
 target_link_libraries(qttune PRIVATE
     Qt6::Quick
     Qt6::QuickControls2
-    qttune-core
+    ecuio-core
 )
 qttune_enable_warnings(qttune)
 # MSVC's C4702 (unreachable code) fires inside Qt's inline headers, as
@@ -109,19 +109,19 @@ endif()
 #   1. QTTUNE_SURROGATE_SOURCE cache variable (explicit override)
 #   2. Auto-detect: conventional sibling build-win32 tree
 #      (development.md two-tree layout), any config, Release preferred
-#   3. Neither -> STATUS message, no copy; runtime QTTUNE_SURROGATE_EXE
+#   3. Neither -> STATUS message, no copy; runtime ECUIO_SURROGATE_EXE
 #      env override still works (checked first by the client).
 # --- Deploy the Win32 J2534 surrogate next to the exe (Windows only) ---
 # The x86 surrogate from build-win32 hosts x86 vendor DLLs; this tree's
 # own surrogate is x64 and MUST NOT be copied here. Resolution: explicit
 # QTTUNE_SURROGATE_SOURCE, else auto-detect in sibling build-win32, else
-# no copy (runtime QTTUNE_SURROGATE_EXE env override still works).
-set(QTTUNE_SURROGATE_SOURCE "" CACHE PATH "Win32-tree qttune-j2534-surrogate.exe to deploy; empty = auto-detect")
+# no copy (runtime ECUIO_SURROGATE_EXE env override still works).
+set(QTTUNE_SURROGATE_SOURCE "" CACHE PATH "Win32-tree ecuio-j2534-surrogate.exe to deploy; empty = auto-detect")
 
 if(WIN32 AND QTTUNE_SURROGATE_SOURCE STREQUAL "")
-    file(GLOB _sur_found "${CMAKE_SOURCE_DIR}/build-win32/surrogate/*/qttune-j2534-surrogate.exe")
-    if(EXISTS "${CMAKE_SOURCE_DIR}/build-win32/surrogate/Release/qttune-j2534-surrogate.exe")
-        list(INSERT _sur_found 0 "${CMAKE_SOURCE_DIR}/build-win32/surrogate/Release/qttune-j2534-surrogate.exe")
+    file(GLOB _sur_found "${CMAKE_SOURCE_DIR}/build-win32/surrogate/*/ecuio-j2534-surrogate.exe")
+    if(EXISTS "${CMAKE_SOURCE_DIR}/build-win32/surrogate/Release/ecuio-j2534-surrogate.exe")
+        list(INSERT _sur_found 0 "${CMAKE_SOURCE_DIR}/build-win32/surrogate/Release/ecuio-j2534-surrogate.exe")
     endif()
     list(LENGTH _sur_found _sur_found_n)
     if(_sur_found_n GREATER 0)
@@ -142,7 +142,7 @@ if(WIN32 AND NOT QTTUNE_SURROGATE_SOURCE STREQUAL "")
         VERBATIM
     )
 elseif(WIN32)
-    message(STATUS "No build-win32 surrogate found; build the Win32 tree per development.md and reconfigure, or set QTTUNE_SURROGATE_SOURCE, or export QTTUNE_SURROGATE_EXE at runtime")
+    message(STATUS "No build-win32 surrogate found; build the Win32 tree per development.md and reconfigure, or set QTTUNE_SURROGATE_SOURCE, or export ECUIO_SURROGATE_EXE at runtime")
 endif()
 
 qt_finalize_executable(qttune)

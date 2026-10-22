@@ -90,7 +90,7 @@ Passive mode is unchanged.
   way, not an outcome. Positive replies are dispatched and decoded as
   today. The class feeds the probe (§4) and link health:
   - a positive or negative reply, or a pending one, is the ECU
-    answering, which sets `QTTUNE_OK`;
+    answering, which sets `ECUIO_OK`;
   - consecutive timeouts count toward the quiet debounce, which keeps
     its role;
   - write failures, hard read failures and the backoff behave as they
@@ -131,7 +131,7 @@ derived from it, so the def alone says what to request.
   DID alone) wouldn't check that byte.
 - **No struct change.** `mux_key` is already 32 bits. The decoder, the
   frame-match helper and the validator accept a key length of 3; keys
-  of length 1 and 2 behave as before. `QttuneSignalSet` doesn't grow,
+  of length 1 and 2 behave as before. `ecuio_signal_set_t` doesn't grow,
   so no set version has to be read, which core doesn't do today.
 - **ADR-0013 §5's callback table is not built.** A manufacturer plugin
   is data: a signal set and its channel list, validated at
@@ -175,7 +175,7 @@ rotation starts.
   | Negative 0x22 (conditions not correct) | Stays: the condition is transient |
   | Timeout | Stays: silence isn't an answer |
 
-- **Re-probe on recovery.** When link health returns to `QTTUNE_OK` from
+- **Re-probe on recovery.** When link health returns to `ECUIO_OK` from
   quiet or requests-failing, the probe runs again. A connect made with
   the ignition off answers nothing, and without a re-probe the session
   would never learn what the ECU supports.
@@ -213,7 +213,7 @@ appendix, before and after the engine.
   can deadlock it or break the teardown contract, and §3 couldn't be
   enforced on it. Everything planned through v0.5.0 is fixed-shape
   request-and-reply that data describes.
-- **A set-wide request service** (a new `QttuneSignalSet` field). One
+- **A set-wide request service** (a new `ecuio_signal_set_t` field). One
   service per profile; it grows a struct that's passed by pointer,
   which needs a version check core has never made; and it doesn't
   check the reply's service byte.

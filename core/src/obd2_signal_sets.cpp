@@ -9,8 +9,8 @@
 // set. mock lives in signal_sets.cpp; manufacturer plugins in v0.5
 // follow this pattern as new files, never edits to existing sets.
 
-#include "qttune/signals.h"
-#include "qttune/signal_sets.h"
+#include "ecuio/signals.h"
+#include "ecuio/signal_sets.h"
 
 #include <cstdint>
 #include <cstdio>
@@ -28,12 +28,12 @@ namespace {
  * requested and decoded. Single-frame responses only.
  * Names, units and decimal places are display strings: the UI shows
  * them as they are (UTF-8). */
-QttuneSignalDef obd2_def(uint16_t id, const char* name,
-                         QttuneSignalType type, uint8_t num_bytes,
-                         float scale, float offset_val, const char* unit,
-                         uint8_t decimals, uint32_t pid, bool big_endian)
+ecuio_signal_def_t obd2_def(uint16_t id, const char* name,
+                            ecuio_signal_type_t type, uint8_t num_bytes,
+                            float scale, float offset_val, const char* unit,
+                            uint8_t decimals, uint32_t pid, bool big_endian)
 {
-    QttuneSignalDef d = {};   /* zero-fill: mux off, BE off by default */
+    ecuio_signal_def_t d = {}; /* zero-fill: mux off, BE off by default */
     d.id = id;
     (void)std::snprintf(d.name, sizeof d.name, "%s", name);
     d.type = type;
@@ -45,8 +45,8 @@ QttuneSignalDef obd2_def(uint16_t id, const char* name,
     d.offset = offset_val;
     (void)std::snprintf(d.unit, sizeof d.unit, "%s", unit);
     d.decimal_places = decimals;
-    d.flags = big_endian ? QTTUNE_SIGNAL_FLAG_BIG_ENDIAN : 0u;
-    d.message_id = QTTUNE_OBD2_ECU_ARB_ID;       /* 0x7E8 */
+    d.flags = big_endian ? ECUIO_SIGNAL_FLAG_BIG_ENDIAN : 0u;
+    d.message_id = ECUIO_OBD2_ECU_ARB_ID;        /* 0x7E8 */
     d.mux_offset = 0;
     d.mux_length = 2;
     d.mux_reserved[0] = 0;
@@ -57,44 +57,44 @@ QttuneSignalDef obd2_def(uint16_t id, const char* name,
 
 #define DEG_C "\xC2\xB0" "C"   /* UTF-8 degree sign, whatever the source encoding */
 
-const QttuneSignalDef kObd2Defs[] = {
-    obd2_def(QTTUNE_OBD2_SIG_ENGINE_LOAD_ID,  "Engine Load",
-             QTTUNE_SIGNAL_TYPE_UINT8, 1, 100.0f / 255.0f, 0.0f,
+const ecuio_signal_def_t kObd2Defs[] = {
+    obd2_def(ECUIO_OBD2_SIG_ENGINE_LOAD_ID,   "Engine Load",
+             ECUIO_SIGNAL_TYPE_UINT8, 1, 100.0f / 255.0f, 0.0f,
              "%",    1, 0x04, false),
-    obd2_def(QTTUNE_OBD2_SIG_COOLANT_TEMP_ID, "Coolant Temp",
-             QTTUNE_SIGNAL_TYPE_UINT8, 1, 1.0f, -40.0f,
+    obd2_def(ECUIO_OBD2_SIG_COOLANT_TEMP_ID, "Coolant Temp",
+             ECUIO_SIGNAL_TYPE_UINT8, 1, 1.0f, -40.0f,
              DEG_C,  0, 0x05, false),
-    obd2_def(QTTUNE_OBD2_SIG_RPM_ID,          "RPM",
-             QTTUNE_SIGNAL_TYPE_UINT16, 2, 0.25f, 0.0f,
+    obd2_def(ECUIO_OBD2_SIG_RPM_ID,           "RPM",
+             ECUIO_SIGNAL_TYPE_UINT16, 2, 0.25f, 0.0f,
              "RPM",  0, 0x0C, true),
-    obd2_def(QTTUNE_OBD2_SIG_SPEED_ID,        "Vehicle Speed",
-             QTTUNE_SIGNAL_TYPE_UINT8, 1, 1.0f, 0.0f,
+    obd2_def(ECUIO_OBD2_SIG_SPEED_ID,         "Vehicle Speed",
+             ECUIO_SIGNAL_TYPE_UINT8, 1, 1.0f, 0.0f,
              "km/h", 0, 0x0D, false),
-    obd2_def(QTTUNE_OBD2_SIG_IAT_ID,          "Intake Air Temp",
-             QTTUNE_SIGNAL_TYPE_UINT8, 1, 1.0f, -40.0f,
+    obd2_def(ECUIO_OBD2_SIG_IAT_ID,           "Intake Air Temp",
+             ECUIO_SIGNAL_TYPE_UINT8, 1, 1.0f, -40.0f,
              DEG_C,  0, 0x0F, false),
-    obd2_def(QTTUNE_OBD2_SIG_THROTTLE_ID,     "Throttle Position",
-             QTTUNE_SIGNAL_TYPE_UINT8, 1, 100.0f / 255.0f, 0.0f,
+    obd2_def(ECUIO_OBD2_SIG_THROTTLE_ID,      "Throttle Position",
+             ECUIO_SIGNAL_TYPE_UINT8, 1, 100.0f / 255.0f, 0.0f,
              "%",    1, 0x11, false),
-    obd2_def(QTTUNE_OBD2_SIG_FUEL_LEVEL_ID,   "Fuel Level",
-             QTTUNE_SIGNAL_TYPE_UINT8, 1, 100.0f / 255.0f, 0.0f,
+    obd2_def(ECUIO_OBD2_SIG_FUEL_LEVEL_ID,    "Fuel Level",
+             ECUIO_SIGNAL_TYPE_UINT8, 1, 100.0f / 255.0f, 0.0f,
              "%",    1, 0x2F, false),
-    obd2_def(QTTUNE_OBD2_SIG_BATTERY_V_ID,    "Battery Voltage",
-             QTTUNE_SIGNAL_TYPE_UINT16, 2, 0.001f, 0.0f,
+    obd2_def(ECUIO_OBD2_SIG_BATTERY_V_ID,     "Battery Voltage",
+             ECUIO_SIGNAL_TYPE_UINT16, 2, 0.001f, 0.0f,
              "V",    2, 0x42, true),
     /* SAE J1979 PID 0x10: air flow rate, (256·A + B)/100 g/s. Two-byte
      * big-endian like RPM/0x42; the 0.01 scale needs no decoder
      * extension (generic raw·scale + offset). Shown to one decimal. */
-    obd2_def(QTTUNE_OBD2_SIG_MAF_ID,            "MAF",
-             QTTUNE_SIGNAL_TYPE_UINT16, 2, 0.01f, 0.0f,
+    obd2_def(ECUIO_OBD2_SIG_MAF_ID,             "MAF",
+             ECUIO_SIGNAL_TYPE_UINT16, 2, 0.01f, 0.0f,
              "g/s",  1, 0x10, true),
     /* SAE J1979 PID 0x5C: engine oil temperature, A - 40 degC, the same
      * def shape as coolant and IAT. Transmission fluid temperature isn't
      * a standard Mode-01 PID (it's manufacturer-specific, usually
      * Mode 22), and PID 0x5F is the bit-encoded emission-requirements
      * byte, not a temperature. */
-    obd2_def(QTTUNE_OBD2_SIG_OIL_TEMP_ID,         "Engine Oil Temp",
-             QTTUNE_SIGNAL_TYPE_UINT8, 1, 1.0f, -40.0f,
+    obd2_def(ECUIO_OBD2_SIG_OIL_TEMP_ID,          "Engine Oil Temp",
+             ECUIO_SIGNAL_TYPE_UINT8, 1, 1.0f, -40.0f,
              DEG_C,  0, 0x5C, false),
 };
 
@@ -104,11 +104,11 @@ const QttuneSignalDef kObd2Defs[] = {
  * 0x7E8 (ECU response) / 0x7E0 (tester request). The transport
  * registers its receive filter and addresses requests from this list;
  * ?filter= and ?txid= override it. Multi-ECU profiles add entries. */
-const QttuneChannelDecl kObd2Channels[] = {
-    { QTTUNE_OBD2_ECU_ARB_ID, QTTUNE_OBD2_TESTER_ARB_ID },
+const ecuio_channel_decl_t kObd2Channels[] = {
+    { ECUIO_OBD2_ECU_ARB_ID, ECUIO_OBD2_TESTER_ARB_ID },
 };
 
-const QttuneSignalSet kObd2Set = {
+const ecuio_signal_set_t kObd2Set = {
     2u,                                              /* version 2: adds channels */
     static_cast<uint32_t>(sizeof(kObd2Defs) / sizeof(kObd2Defs[0])),
     kObd2Defs,
@@ -118,7 +118,7 @@ const QttuneSignalSet kObd2Set = {
 
 } // namespace
 
-extern "C" const QttuneSignalSet* qttune_obd2_signal_set(void)
+extern "C" const ecuio_signal_set_t* ecuio_obd2_signal_set(void)
 {
     return &kObd2Set;
 }

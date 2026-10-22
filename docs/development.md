@@ -58,11 +58,11 @@ Resolution order:
 1. `QTTUNE_SURROGATE_SOURCE` cache variable, if set. A configured
    path that does not exist is a configure-time `FATAL_ERROR`, not a
    silent no-op.
-2. Otherwise, `<repo>/build-win32/surrogate/*/qttune-j2534-surrogate.exe`,
+2. Otherwise, `<repo>/build-win32/surrogate/*/ecuio-j2534-surrogate.exe`,
    `Release/` preferred over any other config.
 3. Neither found (no `build-win32` tree, non-standard layout): a
    STATUS message, nothing copied. The app then resolves the
-   surrogate through `QTTUNE_SURROGATE_EXE` at runtime — see the
+   surrogate through `ECUIO_SURROGATE_EXE` at runtime — see the
    cross-arch run below.
 
 Build order matters: build the Win32 tree **first**, then configure
@@ -119,7 +119,7 @@ DLLs are ever x86:
 
 ```sh
 cmake -B build-win32 -A Win32 -DQTTUNE_BUILD_CORE_ONLY=ON
-cmake --build build-win32 --config Release --target qttune-j2534-surrogate fake_j2534 fake_j2534_legacy
+cmake --build build-win32 --config Release --target ecuio-j2534-surrogate fake_j2534 fake_j2534_legacy
 ```
 
 > ⚠️ **Rebuild both trees** after any change to `j2534_ptypes.h` or
@@ -245,18 +245,18 @@ client/transport — in this order:
    must *skip*, visibly, never silently fall back).
 3. **Cross-arch run** with the variables exported (below).
 4. **Session-log check** when tracing changed. The log is
-   `%TEMP%\qttune-surrogate.log`. Copy it before the next spawn,
+   `%TEMP%\ecuio-surrogate.log`. Copy it before the next spawn,
    because each spawn rewrites it. It holds the child's lines
    (`[surrogate HH:MM:SS.mmm]`) and the client's (`[sur ...]`) in time
    order. A session started while another holds that file logs to
-   `qttune-surrogate-<pid>-<n>.log` instead ([j2534.md](j2534.md#surrogate)).
+   `ecuio-surrogate-<pid>-<n>.log` instead ([j2534.md](j2534.md#surrogate)).
    - The child logs one line per vendor call with its status:
      `OP_OPEN`, `OP_CONNECT`, `OP_DISCONNECT`, `OP_WRITE`,
      `OP_IOCTL`, `OP_START_FILTER` and `OP_STOP_FILTER`. Grep for the
      op you changed.
    - After a clean close, `OP_DISCONNECT: vendor status 0` should
      appear exactly once.
-   - Tests can read the log through `qttune_j2534_sur_log_path()`, as
+   - Tests can read the log through `ecuio_j2534_sur_log_path()`, as
      `ClientAndChildLinesShareTheSessionLog` does. A new trace line is
      still worth reading by eye once.
 5. If the app is affected, rebuild the `qttune` target (after the
@@ -289,8 +289,8 @@ hang (the IPC deadlock class caught 2026-10-17) fails bounded as
 `build-win32`:
 
 ```sh
-export QTTUNE_SURROGATE_EXE='<repo>/build-win32/surrogate/Release/qttune-j2534-surrogate.exe'
-export QTTUNE_FAKE_DLL='<repo>/build-win32/tests/Release/fake_j2534.dll'
+export ECUIO_SURROGATE_EXE='<repo>/build-win32/surrogate/Release/ecuio-j2534-surrogate.exe'
+export ECUIO_FAKE_DLL='<repo>/build-win32/tests/Release/fake_j2534.dll'
 ctest --test-dir build -C Release -R "J2534Routing|J2534Surrogate" --output-on-failure
 ```
 
@@ -307,7 +307,7 @@ skips.
 - A var set to the **wrong value** points the test at the wrong
   arch or a nonexistent path — the failure looks like a routing
   regression (`inproc` instead of `surrogate`) or a fast
-  `QTTUNE_ERR_LOAD_FAILED`. Echo the variable before diagnosing code.
+  `ECUIO_ERR_LOAD_FAILED`. Echo the variable before diagnosing code.
 - The surrogate child log is rewritten on every spawn. Copy it
   before the next spawn if it's evidence; a log you didn't capture
   immediately may be describing an older run.
@@ -320,9 +320,9 @@ skips.
 | Test discovery fails at build time with `0xc0000135` | A DLL is missing. Discovery runs the test binary during the build, so Qt-linked test targets must copy `$<TARGET_RUNTIME_DLLS>` POST_BUILD, ordered before `gtest_discover_tests`. |
 | Surrogate test fails with child exit code 5 | An export can't be found by name, usually because of x86 `__stdcall` decoration. Check the `.def` file. Other exit codes are listed in [j2534.md](j2534.md#surrogate). |
 | Cross-arch test fails with odd values, but same-arch passes | The `build-win32` tree is stale. Rebuild both trees. |
-| In the app, an x86 adapter (for example the OBDX Pro VX) fails with "failed to load transport library", and `%TEMP%\qttune-surrogate.log` holds only an `open: CreateProcess failed (err=2) exe='...'` line (before 2026-10-20 it was empty) | No surrogate next to `qttune.exe`, so the child never launched. The x64 tree was configured before `build-win32` had a surrogate. Build the Win32 tree, re-run `cmake -B build`, check for `Deploying Win32 J2534 surrogate` in the output, and rebuild. Setting `QTTUNE_SURROGATE_EXE` also works. |
-| Cross-arch test fails expecting backend "surrogate", got "inproc" | `QTTUNE_FAKE_DLL` points at an x64 fake (or the wrong tree). Check the value, not the code — unset skips, wrong-value fails. |
-| J2534 test fails as `Failed (Timeout)` | A genuine hang, bounded by the 30 s ceiling. Attach to the surviving test and surrogate processes and check thread wait states before killing; the child log in `%TEMP%\qttune-surrogate.log` is rewritten per spawn — copy before respawning. |
+| In the app, an x86 adapter (for example the OBDX Pro VX) fails with "failed to load transport library", and `%TEMP%\ecuio-surrogate.log` holds only an `open: CreateProcess failed (err=2) exe='...'` line (before 2026-10-20 it was empty) | No surrogate next to `qttune.exe`, so the child never launched. The x64 tree was configured before `build-win32` had a surrogate. Build the Win32 tree, re-run `cmake -B build`, check for `Deploying Win32 J2534 surrogate` in the output, and rebuild. Setting `ECUIO_SURROGATE_EXE` also works. |
+| Cross-arch test fails expecting backend "surrogate", got "inproc" | `ECUIO_FAKE_DLL` points at an x64 fake (or the wrong tree). Check the value, not the code — unset skips, wrong-value fails. |
+| J2534 test fails as `Failed (Timeout)` | A genuine hang, bounded by the 30 s ceiling. Attach to the surviving test and surrogate processes and check thread wait states before killing; the child log in `%TEMP%\ecuio-surrogate.log` is rewritten per spawn — copy before respawning. |
 | Linker warning LNK4070 on a fake DLL | The `.def` file's `LIBRARY` directive disagrees with the output filename. Make them match. |
 | A mobile build fails during test discovery, or tries to run a test binary | `BUILD_TESTING` is on. Cross builds must pass `-DBUILD_TESTING=OFF` (see Mobile above). |
 | Re-running a skipped `ios-simulator-smoke` skips it again | A re-run replays the original event and commit, so the job's condition comes out the same. Start a manual run instead (Actions → CI → Run workflow, or `gh workflow run ci.yml --ref <branch>`); tick `smoke_only` to skip the other platform jobs. A commit whose message contains `[ios-smoke]` also works. |
@@ -391,7 +391,7 @@ ordinary pushes skip it.
 **"Core never links Qt" has two checks.** `core-and-tests` builds core
 on a runner with no Qt installed. And every configure, local or CI,
 ends with a check in the root `CMakeLists.txt` that fails if
-`qttune-core`'s link lists name any `Qt*::` target. That check catches
+`ecuio-core`'s link lists name any `Qt*::` target. That check catches
 a stray link in a full build, where Qt is present and the build would
 otherwise succeed. The check it replaced, `if(TARGET Qt6::Core)` inside
 `core/`, could never fire. It ran before any `find_package(Qt6)`, and

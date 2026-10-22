@@ -11,7 +11,7 @@ routing, every future capability would be implemented twice.
 
 ## Decision
 
-- `qttune_j2534_open` reads the DLL's PE machine field once:
+- `ecuio_j2534_open` reads the DLL's PE machine field once:
 
   | Machine type | Backend |
   |---|---|
@@ -20,13 +20,13 @@ routing, every future capability would be implemented twice.
   | Unknown (missing, corrupt or unreadable file) | In-proc |
 
   Unknown stays in-proc so that such a path still fails honestly with
-  `QTTUNE_ERR_LOAD_FAILED`, instead of spawning a surrogate process for
+  `ECUIO_ERR_LOAD_FAILED`, instead of spawning a surrogate process for
   garbage.
 - The loader handle records which backend it uses. Every vendor-call
   helper forwards on `is_surrogate` in a single line.
 - Internal introspection and test hooks:
-  - `qttune_j2534_backend_name()`
-  - `qttune_j2534_inject_test_frame()`, a test hook routed like
+  - `ecuio_j2534_backend_name()`
+  - `ecuio_j2534_inject_test_frame()`, a test hook routed like
     everything else. It exists because an x64 test process cannot
     load an x86 fake to reach its queue.
 

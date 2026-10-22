@@ -16,12 +16,12 @@ threads onto the GUI thread.
  QtTuneBridge (app/)          the only caller of the core
    │  worker → GUI marshaling, 100 ms coalescing, link-health polling
    ▼  C ABI: core.h · signals.h · profile.h · j2534.h
- qttune-core (core/)          no Qt, ever
+ ecuio-core (core/)           no Qt, ever
    │  sessions + callbacks · profiles + decode · transports
    ├── mock://    worker thread, scripted drive cycle
    └── j2534://   worker thread → loader, which picks a backend:
           ├── in-proc:   vendor DLL loaded into the app (x64 DLLs)
-          └── surrogate: client ══ named pipe ══ qttune-j2534-surrogate.exe
+          └── surrogate: client ══ named pipe ══ ecuio-j2534-surrogate.exe
                          (x86 process hosting x86 vendor DLLs)
 ```
 
@@ -31,7 +31,7 @@ threads onto the GUI thread.
    another UI toolkit) must be able to drive the same core, and the
    core must build on a machine with no Qt. CI enforces this twice: a
    Qt-free job builds the core, and every configure fails if
-   `qttune-core` links a `Qt*::` target
+   `ecuio-core` links a `Qt*::` target
    ([ADR-0001](adr/0001-qt-free-core-c-abi.md)).
 2. **The UI receives final display values.** Decoding, scaling and
    units live in the core, so there is one decode path and QML can't
@@ -40,16 +40,17 @@ threads onto the GUI thread.
    `extern "C"` functions and POD structs with `flags`/`reserved`
    room, and status codes, enum values and wire opcodes are
    append-only. That keeps foreign-language callers working across
-   versions. Every public name carries the project prefix (`qttune_`,
-   `Qttune`, `QTTUNE_`). A strict-C compile of every public header
-   pins it.
+   versions. Every public name carries the core's own prefix,
+   `ecuio_` or `ECUIO_` (ECU I/O). It names the domain rather than
+   the product, so a product rename leaves the ABI alone. A strict-C
+   compile of every public header pins it.
 
 ## A frame's journey
 
 | Step | Where | Thread |
 |---|---|---|
 | 1. The transport produces a frame (the mock's 50 ms tick, or a J2534 read) | `mock_transport.cpp`, `j2534_transport.cpp` | transport worker |
-| 2. The session hands it to every registered callback, from a snapshot of the callback list | `qttune_session_dispatch_callbacks` | transport worker |
+| 2. The session hands it to every registered callback, from a snapshot of the callback list | `ecuio_session_dispatch_callbacks` | transport worker |
 | 3. The bridge copies the 88-byte frame (its payload is inline) and posts it, unless 1000 frames are already in flight | `QtTuneBridge::onFrame` | transport worker |
 | 4. The frame log gets a row (newest kept, 10k cap); the profile's signal defs decode it into a staging buffer | `handleFrameInternal` | GUI |
 | 5. Every 100 ms the staging buffer flushes into the signal model, and link health is polled | coalesce timer | GUI |
@@ -93,7 +94,7 @@ A **profile** is a named signal set ([ADR-0013](adr/0013-protocol-profiles.md)).
   no parameters.
 - **Unknown or malformed profile names** fail at session create,
   before any DLL loads.
-- **Registration validates.** `qttune_profile_register` runs the set
+- **Registration validates.** `ecuio_profile_register` runs the set
   validator, which accepts exactly the defs the decoder can decode and
   rejects duplicate def IDs. The built-ins (`mock`, `raw`, `obd2`)
   can't be replaced or unregistered, and the registry keeps the
@@ -135,7 +136,7 @@ The full reference is [j2534.md](j2534.md).
   *before* loading the DLL. So a handshake timeout means process
   startup stalled, an exit code names a failed load, and an
   unanswered open means a vendor stuck in its own code.
-- **One session log** (`%TEMP%\qttune-surrogate.log`) holds both the
+- **One session log** (`%TEMP%\ecuio-surrogate.log`) holds both the
   client's and the child's lines, stamped on one clock. A GUI launch
   loses nothing.
 - **The pipe is private:** an unguessable name, a first-instance-only
@@ -153,7 +154,7 @@ The full reference is [j2534.md](j2534.md).
   through pointers that dangle once the DLL unmaps.
 - **Never trust a vendor's message count under an error status.** Real
   adapters leave it untouched, so trusting it would replay stale
-  frames as live data (`qttune_trusted_count` in `j2534_ptypes.h`).
+  frames as live data (`ecuio_trusted_count` in `j2534_ptypes.h`).
 
 ## Link health
 
@@ -163,10 +164,10 @@ The bridge polls it on its 100 ms tick and maps it for the UI
 
 | Core code | `linkState` | Means |
 |---|---|---|
-| `QTTUNE_OK` | `ok` | Replies are arriving |
-| `QTTUNE_ERR_VEHICLE_TIMEOUT` | `quiet` | The adapter answers, but nothing arrives (debounced over ~1 s) |
-| `QTTUNE_ERR_REQUEST_FAILED` | `requests` | Writes fail while reads stay clean: nothing on the bus ACKs (ignition off, ECU asleep) |
-| `QTTUNE_ERR_TRANSPORT_HARD_FAILURE` | `fault` | Reads fail: the adapter isn't answering |
+| `ECUIO_OK` | `ok` | Replies are arriving |
+| `ECUIO_ERR_VEHICLE_TIMEOUT` | `quiet` | The adapter answers, but nothing arrives (debounced over ~1 s) |
+| `ECUIO_ERR_REQUEST_FAILED` | `requests` | Writes fail while reads stay clean: nothing on the bus ACKs (ignition off, ECU asleep) |
+| `ECUIO_ERR_TRANSPORT_HARD_FAILURE` | `fault` | Reads fail: the adapter isn't answering |
 | no session | `disconnected` | |
 
 - **Why writes are judged apart from reads:** a quiet bus fails every

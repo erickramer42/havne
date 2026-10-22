@@ -1,23 +1,23 @@
-// File/layer: core/include/qttune/surrogate_protocol.h | shared app<->surrogate contract
+// File/layer: core/include/ecuio/surrogate_protocol.h | shared app<->surrogate contract
 // Testing: structural — compiled by BOTH x64 client and x86 surrogate, so
 //          layout drift is impossible WITHIN a tree. Across trees it fails
 //          loudly: byte-mode pipe reads return the WRITER's struct size.
 
-#ifndef QTTUNE_SURROGATE_PROTOCOL_H
-#define QTTUNE_SURROGATE_PROTOCOL_H
+#ifndef ECUIO_SURROGATE_PROTOCOL_H
+#define ECUIO_SURROGATE_PROTOCOL_H
 
 #include <stdint.h>
 
 /* ---- Wire limits ---- */
-#define QTTUNE_SUR_MSG_MAX 64              /* bytes of one CAN message's Data */
-#define QTTUNE_SUR_IOCTL_DATA_MAX 64       /* ioctl input, and reply payload */
-#define QTTUNE_SUR_FILTER_PATTERN_MAX 12   /* mask/pattern/flow-control bytes */
-#define QTTUNE_SUR_MAX_FRAMES_PER_READ 16  /* frames in one OP_READ reply */
+#define ECUIO_SUR_MSG_MAX 64               /* bytes of one CAN message's Data */
+#define ECUIO_SUR_IOCTL_DATA_MAX 64        /* ioctl input, and reply payload */
+#define ECUIO_SUR_FILTER_PATTERN_MAX 12    /* mask/pattern/flow-control bytes */
+#define ECUIO_SUR_MAX_FRAMES_PER_READ 16   /* frames in one OP_READ reply */
 
 /* Request opcodes — append-only, never renumber.
  *
  * One request, one response, paired by request_id. The child answers
- * every request with a qttune_sur_response_t whose status is the
+ * every request with a ecuio_sur_response_t whose status is the
  * vendor's J2534 status, or STATUS_FAILED when the child refused the
  * request before calling the vendor (a length over a wire limit, a
  * non-whitelisted ioctl, an unknown opcode). A non-success status never
@@ -51,68 +51,68 @@
  *                 Reply: handle_or_channel = the filter ID.
  *   STOP_FILTER   u.stop_filter. PassThruStopMsgFilter. Reply: status
  *                 only. */
-#define QTTUNE_SUR_OP_OPEN       1
-#define QTTUNE_SUR_OP_CONNECT    2
-#define QTTUNE_SUR_OP_IOCTL      3
-#define QTTUNE_SUR_OP_WRITE      4
-#define QTTUNE_SUR_OP_READ       5
-#define QTTUNE_SUR_OP_SHUTDOWN   6
-#define QTTUNE_SUR_OP_DISCONNECT 7
-#define QTTUNE_SUR_OP_INJECT     8
-#define QTTUNE_SUR_OP_START_FILTER 9
-#define QTTUNE_SUR_OP_STOP_FILTER  10
+#define ECUIO_SUR_OP_OPEN        1
+#define ECUIO_SUR_OP_CONNECT     2
+#define ECUIO_SUR_OP_IOCTL       3
+#define ECUIO_SUR_OP_WRITE       4
+#define ECUIO_SUR_OP_READ        5
+#define ECUIO_SUR_OP_SHUTDOWN    6
+#define ECUIO_SUR_OP_DISCONNECT 7
+#define ECUIO_SUR_OP_INJECT      8
+#define ECUIO_SUR_OP_START_FILTER 9
+#define ECUIO_SUR_OP_STOP_FILTER   10
 
-typedef struct qttune_sur_request {
+typedef struct ecuio_sur_request {
     uint32_t request_id;   /* client-assigned, increasing; echoed back */
-    uint32_t opcode;       /* QTTUNE_SUR_OP_* */
+    uint32_t opcode;       /* ECUIO_SUR_OP_* */
     union {
         struct { uint32_t protocol_id; uint32_t flags; uint32_t baud; } connect;
         struct { uint32_t channel_id; } disconnect;
         /* input: flattened SCONFIG pairs (u32 Parameter, u32 Value, LE)
          * for GET/SET_CONFIG; input_len 0 for NULL-input ioctls. */
         struct { uint32_t channel_id; uint32_t ioctl_id;
-                 uint8_t input[QTTUNE_SUR_IOCTL_DATA_MAX];
+                 uint8_t input[ECUIO_SUR_IOCTL_DATA_MAX];
                  uint32_t input_len; } ioctl;
         struct { uint32_t channel_id;
-                 uint8_t data[QTTUNE_SUR_MSG_MAX];
+                 uint8_t data[ECUIO_SUR_MSG_MAX];
                  uint32_t data_len; uint32_t tx_flags;
                  uint32_t timeout_ms; } write;
         /* The vendor's ReadMsgs timeout. The client waits that plus
          * 500 ms for the reply before it calls the child hung. */
         struct { uint32_t timeout_ms; } read;
-        struct { uint8_t data[QTTUNE_SUR_MSG_MAX]; uint32_t len;
+        struct { uint8_t data[ECUIO_SUR_MSG_MAX]; uint32_t len;
                  uint32_t timestamp; uint32_t rx_flags; } inject;
         struct { uint32_t channel_id; uint32_t filter_type; uint32_t tx_flags;
-                 uint8_t mask[QTTUNE_SUR_FILTER_PATTERN_MAX];
-                 uint8_t pattern[QTTUNE_SUR_FILTER_PATTERN_MAX];
-                 uint8_t flow_control[QTTUNE_SUR_FILTER_PATTERN_MAX];
+                 uint8_t mask[ECUIO_SUR_FILTER_PATTERN_MAX];
+                 uint8_t pattern[ECUIO_SUR_FILTER_PATTERN_MAX];
+                 uint8_t flow_control[ECUIO_SUR_FILTER_PATTERN_MAX];
                  uint32_t mask_len; uint32_t pattern_len; uint32_t fc_len;
                  } start_filter;
         struct { uint32_t channel_id; uint32_t filter_id; } stop_filter;
     } u;
-} qttune_sur_request_t;
+} ecuio_sur_request_t;
 
 /* Single frame for batch read responses. */
-typedef struct qttune_sur_frame {
+typedef struct ecuio_sur_frame {
     uint32_t arbitration_id;  /* always 0: the CAN ID is data[0..3], which
                                  the transport strips (ADR-0012) */
     uint32_t timestamp;       /* the vendor's Timestamp, untranslated (#12) */
     uint32_t rx_flags;        /* the vendor's RxStatus */
-    uint8_t  data[QTTUNE_SUR_MSG_MAX];
-    uint8_t  data_len;        /* the child clamps to QTTUNE_SUR_MSG_MAX */
-} qttune_sur_frame_t;
+    uint8_t  data[ECUIO_SUR_MSG_MAX];
+    uint8_t  data_len;        /* the child clamps to ECUIO_SUR_MSG_MAX */
+} ecuio_sur_frame_t;
 
 /* Response with embedded frame array. Fields an opcode doesn't use are
  * zero. */
-typedef struct qttune_sur_response {
+typedef struct ecuio_sur_response {
     uint32_t request_id;         /* the request's, for pairing */
     int32_t  status;             /* vendor J2534 status, or STATUS_FAILED */
     uint32_t handle_or_channel;  /* CONNECT: channel ID; START_FILTER: filter ID */
     uint32_t aux;                /* WRITE: messages written */
-    uint8_t  data[QTTUNE_SUR_IOCTL_DATA_MAX];  /* IOCTL reply payload */
+    uint8_t  data[ECUIO_SUR_IOCTL_DATA_MAX];   /* IOCTL reply payload */
     uint32_t data_len;           /* IOCTL; the client rejects > the limit */
     uint32_t num_frames;         /* READ; the client rejects > the limit */
-    qttune_sur_frame_t frames[QTTUNE_SUR_MAX_FRAMES_PER_READ];
-} qttune_sur_response_t;
+    ecuio_sur_frame_t frames[ECUIO_SUR_MAX_FRAMES_PER_READ];
+} ecuio_sur_response_t;
 
-#endif /* QTTUNE_SURROGATE_PROTOCOL_H */
+#endif /* ECUIO_SURROGATE_PROTOCOL_H */

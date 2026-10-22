@@ -31,7 +31,7 @@ owns phases 2–3 (filter shape, VBATT, quiet-bus ReadMsgs).
 
 - [ ] Fresh build of both trees, **Win32 first** (the app build copies
       whatever surrogate `build-win32` holds at that moment):
-      cmake --build build-win32 --config Release --target qttune-j2534-surrogate
+      cmake --build build-win32 --config Release --target ecuio-j2534-surrogate
       cmake --build build --config Release
 - [ ] The build output shows "Deploying Win32 J2534 surrogate next to
       qttune.exe". If it doesn't, re-run `cmake -B build` and rebuild:
@@ -60,7 +60,7 @@ from filter, in that order)
 
 **Expected:**
 - [ ] Connection succeeds, no error dialog
-- [ ] A surrogate process (qttune-j2534-surrogate.exe, x86) appears in
+- [ ] A surrogate process (ecuio-j2534-surrogate.exe, x86) appears in
       Task Manager and dies when you disconnect
 - [ ] Disconnect cleanly from the Settings page; process exits with it
 
@@ -71,7 +71,7 @@ observation, any error text verbatim.
 
 | Symptom | Suspect |
 |---|---|
-| QTTUNE_ERR_LOAD_FAILED, fast | PE sniff or export resolution; exit codes 4/5 from j2534.md §Surrogate |
+| ECUIO_ERR_LOAD_FAILED, fast | PE sniff or export resolution; exit codes 4/5 from j2534.md §Surrogate |
 | Handshake timeout (8 s) then fail | Pipe/spawn path — check for AV interference or blocked ports |
 | Crash of the app process | Capture crash address; do not guess, bisect |
 
@@ -98,7 +98,7 @@ observation, any error text verbatim.
 |---|---|
 | Filter registration rejected | Prep #1 — the fc_len==mask_len workaround shape. Capture the exact vendor status code |
 | Connect itself fails | Prep #8/#2 — baud or protocolID conformance |
-| App crashes on quiet bus | ReadMsgs status path (Issue #11). Statuses are split since 2026-10-19 (`ERR_TIMEOUT` → vehicle timeout, `ERR_BUFFER_EMPTY` → no frame, anything else → hard failure); record which status the vendor returns for an empty read, from `%TEMP%\qttune-surrogate.log` or the debugger |
+| App crashes on quiet bus | ReadMsgs status path (Issue #11). Statuses are split since 2026-10-19 (`ERR_TIMEOUT` → vehicle timeout, `ERR_BUFFER_EMPTY` → no frame, anything else → hard failure); record which status the vendor returns for an empty read, from `%TEMP%\ecuio-surrogate.log` or the debugger |
 
 ## Phase 3 — VBATT (first real data)
 

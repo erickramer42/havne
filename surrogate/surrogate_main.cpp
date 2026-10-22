@@ -5,9 +5,9 @@
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 
-#include "qttune/j2534.h"
-#include "qttune/j2534_ptypes.h"
-#include "qttune/surrogate_protocol.h"
+#include "ecuio/j2534.h"
+#include "ecuio/j2534_ptypes.h"
+#include "ecuio/surrogate_protocol.h"
 
 #include <cstdio>
 #include <cstdarg>
@@ -52,9 +52,9 @@ static HANDLE g_pipe = INVALID_HANDLE_VALUE;
 /* Batched read buffer: one ReadMsgs call returns up to 16 messages.
  * Static rather than on the stack, because 16 PASSTHRU_MSGs are about
  * 67 KB. Safe because the child is single-threaded. */
-static PASSTHRU_MSG s_read_batch[QTTUNE_SUR_MAX_FRAMES_PER_READ];
+static PASSTHRU_MSG s_read_batch[ECUIO_SUR_MAX_FRAMES_PER_READ];
 
-/* QTTUNE_SUR_LOG_FRAMES=1 logs every message the vendor returns and
+/* ECUIO_SUR_LOG_FRAMES=1 logs every message the vendor returns and
  * every one written, bytes verbatim, with RxStatus or TxFlags and the
  * vendor timestamp: the payload evidence a BENCH or vehicle session
  * records. Off by default, because a polling session then adds a line
@@ -93,13 +93,13 @@ static void stage(const char* fmt, ...)
                     static_cast<DWORD>(len), &written, nullptr);
 }
 
-/* "41 0C 1F 40" for the first QTTUNE_SUR_MSG_MAX bytes, then " +N" for
+/* "41 0C 1F 40" for the first ECUIO_SUR_MSG_MAX bytes, then " +N" for
  * the rest, so a long message can't overrun stage()'s line. */
 static void format_hex(char* out, size_t cap, const unsigned char* data,
                        unsigned long size)
 {
-    const unsigned long shown = (size < QTTUNE_SUR_MSG_MAX)
-                                ? size : QTTUNE_SUR_MSG_MAX;
+    const unsigned long shown = (size < ECUIO_SUR_MSG_MAX)
+                                ? size : ECUIO_SUR_MSG_MAX;
     size_t pos = 0;
     out[0] = '\0';
     for (unsigned long i = 0; i < shown && pos + 4 < cap; ++i) {
@@ -127,7 +127,7 @@ static int handle_op_open(void)
     unsigned long device = 0;
     long rc = g_open(nullptr, &device);
     stage("OP_OPEN: vendor status %ld, device_id=%lu", rc, device);
-    if (rc == QTTUNE_PT_STATUS_NOERROR) {
+    if (rc == ECUIO_PT_STATUS_NOERROR) {
         g_device_id = device;
         g_have_device = true;
     }
@@ -141,7 +141,7 @@ static int handle_op_connect(uint32_t protocol_id, uint32_t flags, uint32_t baud
     long rc = g_connect(g_device_id, protocol_id, flags, baud, &ch);
     stage("OP_CONNECT: vendor status %ld, channel=%lu (device=%lu)",
           rc, ch, g_device_id);
-    if (rc == QTTUNE_PT_STATUS_NOERROR) {
+    if (rc == ECUIO_PT_STATUS_NOERROR) {
         g_channel = ch;
         g_have_channel = true;
     }
@@ -153,7 +153,7 @@ static int handle_op_disconnect(unsigned long channel)
 {
     long rc = g_disconnect(channel);
     stage("OP_DISCONNECT: vendor status %ld, channel=%lu", rc, channel);
-    if (rc == QTTUNE_PT_STATUS_NOERROR) {
+    if (rc == ECUIO_PT_STATUS_NOERROR) {
         g_channel = 0;
         g_have_channel = false;
     }
@@ -161,24 +161,24 @@ static int handle_op_disconnect(unsigned long channel)
 }
 
 static int handle_op_read(unsigned long channel, uint32_t timeout_ms,
-                          qttune_sur_response_t* resp)
+                          ecuio_sur_response_t* resp)
 {
     (void)channel;   /* child uses g_channel exclusively */
     resp->num_frames = 0;
     if (!g_have_channel || g_read_msgs == nullptr) {
-        return static_cast<int>(QTTUNE_PT_STATUS_NOERROR);
+        return static_cast<int>(ECUIO_PT_STATUS_NOERROR);
     }
 
-    unsigned long num = QTTUNE_SUR_MAX_FRAMES_PER_READ;
+    unsigned long num = ECUIO_SUR_MAX_FRAMES_PER_READ;
     const long rc = g_read_msgs(g_channel, s_read_batch, &num, timeout_ms);
 
     /* Trust the count only under the status allowlist
-       (qttune_trusted_count). A vendor may leave pNumMsgs untouched on
+       (ecuio_trusted_count). A vendor may leave pNumMsgs untouched on
        error; the VX reports "status 7, written 1" on a failed write
        (docs/bench-sessions/2026-10-20.md). A dirty count is doubly
        dangerous here: s_read_batch is static and never cleared, so it
        would replay the PREVIOUS read's frames as phantoms. */
-    num = qttune_trusted_count(rc, num);
+    num = ecuio_trusted_count(rc, num);
 
     /* Frames are collected under either trusted status, ERR_TIMEOUT
      * included: per J2534-1 a read that asks for N messages with a
@@ -187,14 +187,14 @@ static int handle_op_read(unsigned long channel, uint32_t timeout_ms,
      * arrives with a nonzero status. The status still rides home
      * verbatim in resp->status. */
     uint32_t n = 0;
-    const unsigned long lim = (num < QTTUNE_SUR_MAX_FRAMES_PER_READ)
-                              ? num : QTTUNE_SUR_MAX_FRAMES_PER_READ;
+    const unsigned long lim = (num < ECUIO_SUR_MAX_FRAMES_PER_READ)
+                              ? num : ECUIO_SUR_MAX_FRAMES_PER_READ;
     for (unsigned long i = 0; i < lim; ++i) {
         const PASSTHRU_MSG& m = s_read_batch[i];
-        const bool indication = (m.RxStatus & (QTTUNE_PT_TX_INDICATION |
-                                               QTTUNE_PT_TX_MSG_TYPE)) != 0;
+        const bool indication = (m.RxStatus & (ECUIO_PT_TX_INDICATION |
+                                               ECUIO_PT_TX_MSG_TYPE)) != 0;
         if (g_log_frames) {
-            char hex[3 * QTTUNE_SUR_MSG_MAX + 16];
+            char hex[3 * ECUIO_SUR_MSG_MAX + 16];
             format_hex(hex, sizeof(hex), m.Data, m.DataSize);
             stage("OP_READ frame: status %ld, rx 0x%08lX, ts %lu, len %lu: %s%s",
                   rc, m.RxStatus, m.Timestamp, m.DataSize, hex,
@@ -205,7 +205,7 @@ static int handle_op_read(unsigned long channel, uint32_t timeout_ms,
             continue;
         }
         uint32_t dsz = m.DataSize;
-        if (dsz > QTTUNE_SUR_MSG_MAX) dsz = QTTUNE_SUR_MSG_MAX;
+        if (dsz > ECUIO_SUR_MSG_MAX) dsz = ECUIO_SUR_MSG_MAX;
         resp->frames[n].arbitration_id = 0;
         resp->frames[n].timestamp = m.Timestamp;
         resp->frames[n].rx_flags = m.RxStatus;
@@ -230,7 +230,7 @@ static int handle_op_write(unsigned long channel, const uint8_t* data,
                            uint32_t timeout_ms, uint32_t* out_num)
 {
     PASSTHRU_MSG msg = {};
-    msg.ProtocolID = QTTUNE_PT_PROTOCOL_ISO15765;
+    msg.ProtocolID = ECUIO_PT_PROTOCOL_ISO15765;
     msg.TxFlags = tx_flags;
     msg.DataSize = len;
     if (len > 0) memcpy(msg.Data, data, len);
@@ -241,7 +241,7 @@ static int handle_op_write(unsigned long channel, const uint8_t* data,
     if (out_num != nullptr) *out_num = static_cast<uint32_t>(num);
 
     if (g_log_frames) {
-        char hex[3 * QTTUNE_SUR_MSG_MAX + 16];
+        char hex[3 * ECUIO_SUR_MSG_MAX + 16];
         format_hex(hex, sizeof(hex), msg.Data, msg.DataSize);
         stage("OP_WRITE frame: status %ld, tx 0x%08lX, len %lu: %s",
               rc, msg.TxFlags, msg.DataSize, hex);
@@ -272,47 +272,47 @@ static int handle_op_ioctl(uint32_t channel_id, uint32_t ioctl_id,
                            const uint8_t* input, uint32_t input_len,
                            uint8_t* output, uint32_t* out_len)
 {
-    if (ioctl_id == QTTUNE_PT_IOCTL_READ_VBATT) {
+    if (ioctl_id == ECUIO_PT_IOCTL_READ_VBATT) {
         unsigned long vbatt = 0;
         /* v04.04: READ_VBATT is device-scoped, not channel-scoped.
          * The fake pins this (device 1, channel 0x55) so a caller
          * passing the channel fails instead of colliding at 1 == 1. */
         long rc = g_ioctl(g_device_id, static_cast<long>(ioctl_id),
                           nullptr, &vbatt);
-        if (rc == QTTUNE_PT_STATUS_NOERROR && output != nullptr) {
+        if (rc == ECUIO_PT_STATUS_NOERROR && output != nullptr) {
             memcpy(output, &vbatt, 4);
             if (out_len != nullptr) *out_len = 4;
         }
         stage("OP_IOCTL: id 0x%X (VBATT), status %ld", ioctl_id, rc);
         return static_cast<int>(rc);
     }
-    if (ioctl_id == QTTUNE_PT_IOCTL_CLEAR_TX_BUFFER ||
-        ioctl_id == QTTUNE_PT_IOCTL_CLEAR_RX_BUFFER ||
-        ioctl_id == QTTUNE_PT_IOCTL_CLEAR_MSG_FILTERS) {
+    if (ioctl_id == ECUIO_PT_IOCTL_CLEAR_TX_BUFFER ||
+        ioctl_id == ECUIO_PT_IOCTL_CLEAR_RX_BUFFER ||
+        ioctl_id == ECUIO_PT_IOCTL_CLEAR_MSG_FILTERS) {
         long rc = g_ioctl(channel_id, static_cast<long>(ioctl_id),
                           nullptr, nullptr);
         stage("OP_IOCTL: id 0x%X (CLEAR), status %ld", ioctl_id, rc);
         return static_cast<int>(rc);
     }
-    if (ioctl_id == QTTUNE_PT_IOCTL_SET_CONFIG ||
-        ioctl_id == QTTUNE_PT_IOCTL_GET_CONFIG) {
+    if (ioctl_id == ECUIO_PT_IOCTL_SET_CONFIG ||
+        ioctl_id == ECUIO_PT_IOCTL_GET_CONFIG) {
         /* Trust boundary: the pipe is untrusted. Shape-check before
          * touching anything — a malformed length must never reach the
          * vendor, and the pair count must fit both the SCONFIG array
          * and the response payload the client sized for this request. */
         if (input == nullptr || input_len == 0 || (input_len % 8) != 0) {
             stage("OP_IOCTL: SCONFIG malformed input_len=%u", input_len);
-            return static_cast<int>(QTTUNE_PT_STATUS_FAILED);
+            return static_cast<int>(ECUIO_PT_STATUS_FAILED);
         }
         const uint32_t num_params = input_len / 8;
-        if (num_params > QTTUNE_PT_SCONFIG_MAX_PARAMS) {
+        if (num_params > ECUIO_PT_SCONFIG_MAX_PARAMS) {
             stage("OP_IOCTL: SCONFIG too many params=%u (max %u)",
-                  num_params, static_cast<unsigned>(QTTUNE_PT_SCONFIG_MAX_PARAMS));
-            return static_cast<int>(QTTUNE_PT_STATUS_FAILED);
+                  num_params, static_cast<unsigned>(ECUIO_PT_SCONFIG_MAX_PARAMS));
+            return static_cast<int>(ECUIO_PT_STATUS_FAILED);
         }
 
         /* Unflatten the wire pairs into a vendor-shaped array. */
-        SCONFIG cfg[QTTUNE_PT_SCONFIG_MAX_PARAMS] = {};
+        SCONFIG cfg[ECUIO_PT_SCONFIG_MAX_PARAMS] = {};
         for (uint32_t i = 0; i < num_params; ++i) {
             uint32_t param = 0, value = 0;
             memcpy(&param, input + i * 8, 4);
@@ -329,8 +329,8 @@ static int handle_op_ioctl(uint32_t channel_id, uint32_t ioctl_id,
         long rc = g_ioctl(channel_id, static_cast<long>(ioctl_id),
                           &list, nullptr);
 
-        if (rc == QTTUNE_PT_STATUS_NOERROR &&
-            ioctl_id == QTTUNE_PT_IOCTL_GET_CONFIG &&
+        if (rc == ECUIO_PT_STATUS_NOERROR &&
+            ioctl_id == ECUIO_PT_IOCTL_GET_CONFIG &&
             output != nullptr) {
             /* Re-flatten the vendor-updated values. Length is exactly
              * input_len (same pair count), so it always fits the
@@ -351,7 +351,7 @@ static int handle_op_ioctl(uint32_t channel_id, uint32_t ioctl_id,
      * bearing ids (FAST_INIT, FIVE_BAUD_INIT...) cannot be shaped
      * across this seam — refusing beats guessing. */
     stage("OP_IOCTL: id 0x%X refused (whitelist)", ioctl_id);
-    return static_cast<int>(QTTUNE_PT_STATUS_FAILED);
+    return static_cast<int>(ECUIO_PT_STATUS_FAILED);
 }
 
 static int handle_op_start_filter(unsigned long channel_id, uint32_t filter_type,
@@ -364,13 +364,13 @@ static int handle_op_start_filter(unsigned long channel_id, uint32_t filter_type
      * no-extra-data convention), matching the in-proc loader's
      * fill_vendor_msg so both backends send identical filter messages. */
     PASSTHRU_MSG mask_msg = {}, pattern_msg = {}, fc_msg = {};
-    mask_msg.ProtocolID = QTTUNE_PT_PROTOCOL_ISO15765;
+    mask_msg.ProtocolID = ECUIO_PT_PROTOCOL_ISO15765;
     mask_msg.TxFlags = tx_flags;
     mask_msg.DataSize = mask_len;
     if (mask_len > 0) memcpy(mask_msg.Data, mask, mask_len);
     mask_msg.ExtraDataIndex = mask_len;
 
-    pattern_msg.ProtocolID = QTTUNE_PT_PROTOCOL_ISO15765;
+    pattern_msg.ProtocolID = ECUIO_PT_PROTOCOL_ISO15765;
     pattern_msg.TxFlags = tx_flags;
     pattern_msg.DataSize = pattern_len;
     if (pattern_len > 0) memcpy(pattern_msg.Data, pattern, pattern_len);
@@ -378,7 +378,7 @@ static int handle_op_start_filter(unsigned long channel_id, uint32_t filter_type
 
     PASSTHRU_MSG* fc_ptr = nullptr;
     if (fc_len > 0) {
-        fc_msg.ProtocolID = QTTUNE_PT_PROTOCOL_ISO15765;
+        fc_msg.ProtocolID = ECUIO_PT_PROTOCOL_ISO15765;
         fc_msg.TxFlags = tx_flags;
         fc_msg.DataSize = fc_len;
         memcpy(fc_msg.Data, fc, fc_len);
@@ -424,11 +424,11 @@ int wmain(int argc, wchar_t* argv[])
     stage("pipe connected");
 
     char log_frames[4] = {};
-    if (GetEnvironmentVariableA("QTTUNE_SUR_LOG_FRAMES", log_frames,
+    if (GetEnvironmentVariableA("ECUIO_SUR_LOG_FRAMES", log_frames,
                                 sizeof(log_frames)) > 0 &&
         strcmp(log_frames, "1") == 0) {
         g_log_frames = true;
-        stage("frame logging on (QTTUNE_SUR_LOG_FRAMES=1)");
+        stage("frame logging on (ECUIO_SUR_LOG_FRAMES=1)");
     }
 
     g_module = LoadLibraryExW(dll_path, nullptr, LOAD_WITH_ALTERED_SEARCH_PATH);
@@ -471,39 +471,39 @@ int wmain(int argc, wchar_t* argv[])
     stage("exports resolved");
 
     while (true) {
-        qttune_sur_request_t req = {};
+        ecuio_sur_request_t req = {};
         DWORD rd = 0;
         if (!ReadFile(g_pipe, &req, sizeof(req), &rd, nullptr) ||
             rd != sizeof(req)) break;
 
-        qttune_sur_response_t resp = {};
+        ecuio_sur_response_t resp = {};
         resp.request_id = req.request_id;
-        resp.status = QTTUNE_PT_STATUS_FAILED;
+        resp.status = ECUIO_PT_STATUS_FAILED;
 
         /* Trust-boundary checks BEFORE calling handlers —
          * the pipe is an untrusted boundary */
         switch (req.opcode) {
-        case QTTUNE_SUR_OP_OPEN:
+        case ECUIO_SUR_OP_OPEN:
             resp.status = handle_op_open();
             break;
-        case QTTUNE_SUR_OP_CONNECT:
+        case ECUIO_SUR_OP_CONNECT:
             resp.status = handle_op_connect(req.u.connect.protocol_id,
                                             req.u.connect.flags,
                                             req.u.connect.baud,
                                             &resp.handle_or_channel);
             break;
-        case QTTUNE_SUR_OP_DISCONNECT:
+        case ECUIO_SUR_OP_DISCONNECT:
             resp.status = handle_op_disconnect(req.u.disconnect.channel_id);
             break;
-        case QTTUNE_SUR_OP_READ:
+        case ECUIO_SUR_OP_READ:
             resp.status = handle_op_read(g_channel,
                                          req.u.read.timeout_ms,
                                          &resp);
             break;
-        case QTTUNE_SUR_OP_WRITE:
+        case ECUIO_SUR_OP_WRITE:
             /* Trust boundary: validate length before memcpy */
-            if (req.u.write.data_len > QTTUNE_SUR_MSG_MAX) {
-                resp.status = QTTUNE_PT_STATUS_FAILED;
+            if (req.u.write.data_len > ECUIO_SUR_MSG_MAX) {
+                resp.status = ECUIO_PT_STATUS_FAILED;
                 break;
             }
             resp.status = handle_op_write(req.u.write.channel_id,
@@ -513,10 +513,10 @@ int wmain(int argc, wchar_t* argv[])
                                           req.u.write.timeout_ms,
                                           &resp.aux);
             break;
-        case QTTUNE_SUR_OP_IOCTL:
+        case ECUIO_SUR_OP_IOCTL:
             /* Trust boundary: validate input length */
-            if (req.u.ioctl.input_len > QTTUNE_SUR_IOCTL_DATA_MAX) {
-                resp.status = QTTUNE_PT_STATUS_FAILED;
+            if (req.u.ioctl.input_len > ECUIO_SUR_IOCTL_DATA_MAX) {
+                resp.status = ECUIO_PT_STATUS_FAILED;
                 break;
             }
             resp.status = handle_op_ioctl(req.u.ioctl.channel_id,
@@ -525,12 +525,12 @@ int wmain(int argc, wchar_t* argv[])
                                           req.u.ioctl.input_len,
                                           resp.data, &resp.data_len);
             break;
-        case QTTUNE_SUR_OP_START_FILTER:
+        case ECUIO_SUR_OP_START_FILTER:
             /* Trust boundary: validate filter pattern lengths */
-            if (req.u.start_filter.mask_len > QTTUNE_SUR_FILTER_PATTERN_MAX ||
-                req.u.start_filter.pattern_len > QTTUNE_SUR_FILTER_PATTERN_MAX ||
-                req.u.start_filter.fc_len > QTTUNE_SUR_FILTER_PATTERN_MAX) {
-                resp.status = QTTUNE_PT_STATUS_FAILED;
+            if (req.u.start_filter.mask_len > ECUIO_SUR_FILTER_PATTERN_MAX ||
+                req.u.start_filter.pattern_len > ECUIO_SUR_FILTER_PATTERN_MAX ||
+                req.u.start_filter.fc_len > ECUIO_SUR_FILTER_PATTERN_MAX) {
+                resp.status = ECUIO_PT_STATUS_FAILED;
                 break;
             }
             resp.status = handle_op_start_filter(
@@ -545,12 +545,12 @@ int wmain(int argc, wchar_t* argv[])
                 req.u.start_filter.tx_flags,
                 &resp.handle_or_channel);
             break;
-        case QTTUNE_SUR_OP_STOP_FILTER:
+        case ECUIO_SUR_OP_STOP_FILTER:
             resp.status = handle_op_stop_filter(
                 req.u.stop_filter.channel_id,
                 req.u.stop_filter.filter_id);
             break;
-        case QTTUNE_SUR_OP_INJECT: {
+        case ECUIO_SUR_OP_INJECT: {
             typedef void (*fn_inject)(const unsigned char*, unsigned long,
                                       unsigned long, unsigned long, unsigned long);
             fn_inject inject = reinterpret_cast<fn_inject>(
@@ -558,16 +558,16 @@ int wmain(int argc, wchar_t* argv[])
             if (inject != nullptr) {
                 inject(req.u.inject.data, req.u.inject.len,
                        req.u.inject.timestamp, req.u.inject.rx_flags, 0);
-                resp.status = QTTUNE_PT_STATUS_NOERROR;
+                resp.status = ECUIO_PT_STATUS_NOERROR;
             }
             break;
         }
-        case QTTUNE_SUR_OP_SHUTDOWN: {
+        case ECUIO_SUR_OP_SHUTDOWN: {
             /* Reply before tearing down, so the client's polite
              * shutdown completes at once instead of waiting out its
              * 1.5 s timeout. A failed write doesn't matter; we exit
              * either way. */
-            resp.status = QTTUNE_PT_STATUS_NOERROR;
+            resp.status = ECUIO_PT_STATUS_NOERROR;
             DWORD swr = 0;
             (void)WriteFile(g_pipe, &resp, sizeof(resp), &swr, nullptr);
             goto shutdown;

@@ -1,5 +1,5 @@
 # core/CMakeLists.txt
-add_library(qttune-core STATIC
+add_library(ecuio-core STATIC
     src/core.cpp
     src/profile_registry.cpp
     src/mock_transport.cpp
@@ -11,18 +11,18 @@ add_library(qttune-core STATIC
     src/j2534_surrogate_client.cpp
 )
 
-target_include_directories(qttune-core
+target_include_directories(ecuio-core
     PUBLIC
         ${CMAKE_CURRENT_SOURCE_DIR}/include
         ${CMAKE_BINARY_DIR}/generated   # generated version.h
 )
 
-qttune_enable_warnings(qttune-core)
+qttune_enable_warnings(ecuio-core)
 
 # bcrypt: BCryptGenRandom names the surrogate's pipe. A static library's
 # private link still reaches whatever links core.
 if(WIN32)
-    target_link_libraries(qttune-core PRIVATE bcrypt)
+    target_link_libraries(ecuio-core PRIVATE bcrypt)
 endif()
 
 # Critical invariant: core never links Qt (ADR-0001). The check lives at

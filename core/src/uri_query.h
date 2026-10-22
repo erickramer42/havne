@@ -6,13 +6,13 @@
 // transport attaches, and each transport reads its own keys with it, so
 // every scheme splits and rejects queries the same way.
 
-#ifndef QTTUNE_URI_QUERY_H
-#define QTTUNE_URI_QUERY_H
+#ifndef ECUIO_URI_QUERY_H
+#define ECUIO_URI_QUERY_H
 
 #include <cstddef>
 #include <cstring>
 
-namespace qttune_uri {
+namespace ecuio_uri {
 
 /* One key=value segment, as views into the URI. */
 struct param {
@@ -75,6 +75,6 @@ bool for_each_param(const char* query, Visit&& visit)
     }
 }
 
-} // namespace qttune_uri
+} // namespace ecuio_uri
 
-#endif /* QTTUNE_URI_QUERY_H */
+#endif /* ECUIO_URI_QUERY_H */

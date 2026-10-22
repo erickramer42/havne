@@ -18,8 +18,8 @@
 #include <utility>
 #include <vector>
 
-#include "qttune/core.h"
-#include "qttune/signals.h"   
+#include "ecuio/core.h"
+#include "ecuio/signals.h"
 
 class FrameListModel : public QAbstractListModel
 {
@@ -107,7 +107,7 @@ public:
     int rowCount(const QModelIndex& parent = {}) const override;
     QVariant data(const QModelIndex& index, int role = Qt::DisplayRole) const override;
     QHash<int, QByteArray> roleNames() const override;
-    void setSignalSet(const QttuneSignalSet* set);
+    void setSignalSet(const ecuio_signal_set_t* set);
     // timestampMs < 0  => stamp from the internal clock (production path:
     // coalesce-drain time, ~100 ms resolution).
     // timestampMs >= 0  => use as-is (tests inject deterministic values; this
@@ -211,9 +211,9 @@ public:
     QString currentUri() const { return m_currentUri; }
     bool connecting() const { return m_connecting; }
     bool disconnecting() const { return m_disconnecting; }
-    void dispatchFrameForTesting(const qttune_frame_t& frame);
+    void dispatchFrameForTesting(const ecuio_frame_t& frame);
     static constexpr int maxInFlightForTesting() { return MaxInFlightFrames; }
-    qttune_session_t* pendingSessionForTesting() const { return m_pendingSession.load(); }
+    ecuio_session_t* pendingSessionForTesting() const { return m_pendingSession.load(); }
     QString linkState() const;
     static QString linkStateForError(int32_t errorCode);  /* code → state string; static so tests need no session */
 
@@ -224,7 +224,7 @@ public:
     // J2534 device discovery (Windows; empty list elsewhere). One map per
     // installed Pass-Thru interface driver: { vendorName, dllPath,
     // architecture } — all QString. Registry read, no session attached; bounded at
-    // QTTUNE_J2534_MAX_VENDORS by core. Safe to call synchronously from
+    // ECUIO_J2534_MAX_VENDORS by core. Safe to call synchronously from
     // QML (few reg keys, no I/O beyond the registry). UI sees display
     // values only (rule 2) — dllPath is exposed because it is the user's
     // route to a direct-load URI, not for parsing.
@@ -268,13 +268,13 @@ signals:
     void logPausedChanged();
 
 private:
-    static void onFrame(const qttune_frame_t* frame, void* user_data);
-    void handleFrameInternal(const qttune_frame_t* frame);
+    static void onFrame(const ecuio_frame_t* frame, void* user_data);
+    void handleFrameInternal(const ecuio_frame_t* frame);
     void notifyDropped();   // GUI thread: emit droppedFramesChanged if the count moved
     void destroySessionLocked();  // the destructor's teardown; disconnectSession tears down on its own thread
 
     bool m_initialized = false;
-    qttune_session_t* m_session = nullptr;
+    ecuio_session_t* m_session = nullptr;
     QString m_currentUri;
 
     std::atomic<bool> m_connected{false};
@@ -301,9 +301,9 @@ private:
     // Async connect support. m_connecting is written ONLY on the GUI
     // thread (in the async entry and the queued completion), so a plain
     // bool suffices despite the worker's existence.
-    QString connectCoreOnly(const QString& uri, qttune_session_t** out_session);
-    QString startSession(qttune_session_t* session);
-    void applyConnectedState(qttune_session_t* session, const QString& uri);
+    QString connectCoreOnly(const QString& uri, ecuio_session_t** out_session);
+    QString startSession(ecuio_session_t* session);
+    void applyConnectedState(ecuio_session_t* session, const QString& uri);
     std::thread m_connectThread;
     bool m_connecting = false;
     // The created, registered, NOT started session the connect thread
@@ -311,13 +311,13 @@ private:
     // first, the completion is dropped and the destructor destroys it.
     // Atomic only for the test seam: both owners read it after joining
     // the connect thread.
-    std::atomic<qttune_session_t*> m_pendingSession{nullptr};
+    std::atomic<ecuio_session_t*> m_pendingSession{nullptr};
     // Async disconnect support, the same shape as connect: the thread
     // owns the session it tears down, and m_disconnecting is written
     // only on the GUI thread (in disconnectSession and its completion).
     std::thread m_disconnectThread;
     bool m_disconnecting = false;
     void pollLinkHealth();
-    int m_linkErrorCode = QTTUNE_OK;
+    int m_linkErrorCode = ECUIO_OK;
     uint32_t m_errorEpisodes = 0;
 };

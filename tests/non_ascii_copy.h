@@ -5,8 +5,8 @@
 // characters, which no ANSI code page has all of: only a path that
 // stays UTF-8 through core and UTF-16 at the Win32 call reaches it.
 
-#ifndef QTTUNE_TEST_NON_ASCII_COPY_H
-#define QTTUNE_TEST_NON_ASCII_COPY_H
+#ifndef ECUIO_TEST_NON_ASCII_COPY_H
+#define ECUIO_TEST_NON_ASCII_COPY_H
 
 #ifdef _WIN32
 
@@ -28,7 +28,7 @@ struct NonAsciiCopy {
             GetTempPathW(MAX_PATH, tmp) == 0) {
             return;
         }
-        swprintf(dir, MAX_PATH, L"%lsqttune-Ω测-%lu", tmp,
+        swprintf(dir, MAX_PATH, L"%lsecuio-Ω测-%lu", tmp,
                  GetCurrentProcessId());
         swprintf(file, MAX_PATH, L"%ls\\fake_j2534.dll", dir);
         if (!CreateDirectoryW(dir, nullptr) && GetLastError() != ERROR_ALREADY_EXISTS) {
@@ -53,4 +53,4 @@ struct NonAsciiCopy {
 
 #endif /* _WIN32 */
 
-#endif /* QTTUNE_TEST_NON_ASCII_COPY_H */
+#endif /* ECUIO_TEST_NON_ASCII_COPY_H */

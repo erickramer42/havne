@@ -4,10 +4,10 @@
 //          refresh, link-state mapping. QML rendering: manual smoke.
 
 #include "qttunebridge.h"
-#include "qttune/version.h"
-#include "qttune/signals.h"
-#include "qttune/j2534.h"
-#include "qttune/profile.h"
+#include "ecuio/version.h"
+#include "ecuio/signals.h"
+#include "ecuio/j2534.h"
+#include "ecuio/profile.h"
 
 #include <QMetaObject>
 #include <QByteArray>
@@ -158,7 +158,7 @@ QHash<int, QByteArray> SignalListModel::roleNames() const
     };
 }
 
-void SignalListModel::setSignalSet(const QttuneSignalSet* set)
+void SignalListModel::setSignalSet(const ecuio_signal_set_t* set)
 {
     // NULL/empty is valid (the raw profile): clear the model rather
     // than keep the previous session's rows.
@@ -297,7 +297,7 @@ QtTuneBridge::QtTuneBridge(QObject* parent)
     , m_coalesceTimer(new QTimer(this))
     , m_signalModel(new SignalListModel(this))
 {
-    m_initialized = (qttune_init() == QTTUNE_OK);
+    m_initialized = (ecuio_init() == ECUIO_OK);
     m_sortProxy->setSourceModel(m_sourceModel);
 
     connect(m_coalesceTimer, &QTimer::timeout, this, [this]() {
@@ -341,14 +341,14 @@ QtTuneBridge::~QtTuneBridge()
     // A connect whose queued completion never ran (it was dropped with
     // `this`) left its session pending. It was never started, so no
     // worker is calling onFrame; destroy it like any other.
-    if (qttune_session_t* pending = m_pendingSession.exchange(nullptr)) {
-        qttune_session_destroy(pending);
+    if (ecuio_session_t* pending = m_pendingSession.exchange(nullptr)) {
+        ecuio_session_destroy(pending);
     }
     if (m_session != nullptr) {
         destroySessionLocked();
     }
     if (m_initialized) {
-        qttune_shutdown();
+        ecuio_shutdown();
     }
 }
 
@@ -356,14 +356,14 @@ void QtTuneBridge::destroySessionLocked()
 {
     // The destructor's teardown. destroy() closes the session first if needed.
     if (m_session != nullptr) {
-        qttune_session_destroy(m_session);
+        ecuio_session_destroy(m_session);
         m_session = nullptr;
     }
 }
 
 QString QtTuneBridge::coreVersion() const
 {
-    return QString::fromUtf8(qttune_version_string());
+    return QString::fromUtf8(ecuio_version_string());
 }
 
 bool QtTuneBridge::coreInitialized() const
@@ -373,16 +373,16 @@ bool QtTuneBridge::coreInitialized() const
 
 QString QtTuneBridge::statusString(int statusCode) const
 {
-    return QString::fromUtf8(qttune_status_string(static_cast<qttune_status_t>(statusCode)));
+    return QString::fromUtf8(ecuio_status_string(static_cast<ecuio_status_t>(statusCode)));
 }
 
 QVariantList QtTuneBridge::discoverJ2534Devices() const
 {
     QVariantList out;
 
-    qttune_j2534_device_t* devices = nullptr;
+    ecuio_j2534_device_t* devices = nullptr;
     uint32_t count = 0;
-    if (qttune_j2534_discover_devices(&devices, &count) != QTTUNE_OK) {
+    if (ecuio_j2534_discover_devices(&devices, &count) != ECUIO_OK) {
         return out;   // includes non-Windows NOT_IMPLEMENTED -> empty list
     }
     for (uint32_t i = 0; i < count; ++i) {
@@ -400,7 +400,7 @@ QVariantList QtTuneBridge::discoverJ2534Devices() const
                                 : QStringLiteral("unknown");
         out.append(m);
     }
-    qttune_j2534_free_devices(devices);
+    ecuio_j2534_free_devices(devices);
     return out;
 }
 
@@ -412,19 +412,19 @@ QVariantList QtTuneBridge::discoverJ2534Devices() const
 // startSession() and applyConnectedState() on the GUI thread. Touches no
 // Qt models, timers, or properties.
 QString QtTuneBridge::connectCoreOnly(const QString& uri,
-                                       qttune_session_t** out_session)
+                                       ecuio_session_t** out_session)
 {
     const QByteArray uri8 = uri.toUtf8();
-    qttune_session_t* session = nullptr;
-    qttune_status_t rc = qttune_session_create(uri8.constData(), &session);
-    if (rc != QTTUNE_OK || session == nullptr) {
-        return QString::fromUtf8(qttune_status_string(rc));
+    ecuio_session_t* session = nullptr;
+    ecuio_status_t rc = ecuio_session_create(uri8.constData(), &session);
+    if (rc != ECUIO_OK || session == nullptr) {
+        return QString::fromUtf8(ecuio_status_string(rc));
     }
 
-    rc = qttune_register_frame_callback(session, &QtTuneBridge::onFrame, this);
-    if (rc != QTTUNE_OK) {
-        qttune_session_destroy(session);
-        return QString::fromUtf8(qttune_status_string(rc));
+    rc = ecuio_register_frame_callback(session, &QtTuneBridge::onFrame, this);
+    if (rc != ECUIO_OK) {
+        ecuio_session_destroy(session);
+        return QString::fromUtf8(ecuio_status_string(rc));
     }
 
     *out_session = session;
@@ -434,13 +434,13 @@ QString QtTuneBridge::connectCoreOnly(const QString& uri,
 // GUI thread: start the worker of a session connectCoreOnly produced.
 // Frames that arrive before applyConnectedState are dropped by onFrame's
 // connected check. On failure the session is destroyed.
-QString QtTuneBridge::startSession(qttune_session_t* session)
+QString QtTuneBridge::startSession(ecuio_session_t* session)
 {
-    const qttune_status_t rc = qttune_session_start(session);
-    if (rc != QTTUNE_OK) {
-        qttune_unregister_frame_callback(session, &QtTuneBridge::onFrame, this);
-        qttune_session_destroy(session);
-        return QString::fromUtf8(qttune_status_string(rc));
+    const ecuio_status_t rc = ecuio_session_start(session);
+    if (rc != ECUIO_OK) {
+        ecuio_unregister_frame_callback(session, &QtTuneBridge::onFrame, this);
+        ecuio_session_destroy(session);
+        return QString::fromUtf8(ecuio_status_string(rc));
     }
     return {};
 }
@@ -448,7 +448,7 @@ QString QtTuneBridge::startSession(qttune_session_t* session)
 // GUI-thread half: state application after a successful connect.
 // Factored out of connectSession so the sync and async paths apply
 // IDENTICAL state (parity by construction, not by care).
-void QtTuneBridge::applyConnectedState(qttune_session_t* session, const QString& uri)
+void QtTuneBridge::applyConnectedState(ecuio_session_t* session, const QString& uri)
 {
     m_session = session;
     m_currentUri = uri;
@@ -457,10 +457,10 @@ void QtTuneBridge::applyConnectedState(qttune_session_t* session, const QString&
     m_currentFrameCount = 0;
     m_droppedFrames.store(0, std::memory_order_relaxed);
     m_lastReportedDropped = 0;
-    m_signalModel->setSignalSet(qttune_session_signal_set(session));
+    m_signalModel->setSignalSet(ecuio_session_signal_set(session));
     m_stagingBuffer.clear();   // previous session's staged values must
                                // never bleed into this one's first batch
-    m_linkErrorCode = QTTUNE_OK;
+    m_linkErrorCode = ECUIO_OK;
     m_errorEpisodes = 0;
     emit linkStateChanged();
     setLogPaused(false);       // a new session always logs
@@ -478,7 +478,7 @@ QString QtTuneBridge::connectSession(const QString& uri)
         return {};
     }
 
-    qttune_session_t* session = nullptr;
+    ecuio_session_t* session = nullptr;
     QString err = connectCoreOnly(uri, &session);
     if (err.isEmpty()) {
         err = startSession(session);
@@ -504,7 +504,7 @@ void QtTuneBridge::connectSessionAsync(const QString& uri)
     emit logMessage(QStringLiteral("Connecting: %1").arg(uri));
 
     m_connectThread = std::thread([this, uri]() {
-        qttune_session_t* session = nullptr;
+        ecuio_session_t* session = nullptr;
         const QString core_err = connectCoreOnly(uri, &session);
         // Handed over through the member, not the lambda: a completion
         // dropped with `this` would leak a lambda capture, while the
@@ -519,7 +519,7 @@ void QtTuneBridge::connectSessionAsync(const QString& uri)
             if (m_connectThread.joinable()) {
                 m_connectThread.join();
             }
-            qttune_session_t* session = m_pendingSession.exchange(nullptr);
+            ecuio_session_t* session = m_pendingSession.exchange(nullptr);
             QString err = core_err;
             if (err.isEmpty()) {
                 err = startSession(session);
@@ -552,13 +552,13 @@ void QtTuneBridge::disconnectSession()
     // false, never a moment where Connect looks available. From here
     // onFrame and handleFrameInternal drop everything, and the GUI
     // thread never touches the session again.
-    qttune_session_t* session = std::exchange(m_session, nullptr);
+    ecuio_session_t* session = std::exchange(m_session, nullptr);
     m_connected.store(false, std::memory_order_release);
     m_disconnecting = true;
     m_coalesceTimer->stop();
     m_stagingBuffer.clear();
     m_currentUri.clear();
-    m_linkErrorCode = QTTUNE_OK;          // the properties must not
+    m_linkErrorCode = ECUIO_OK;           // the properties must not
     m_errorEpisodes = 0;              // outlive the session
 
     emit disconnectingChanged();
@@ -572,7 +572,7 @@ void QtTuneBridge::disconnectSession()
     // The teardown thread is the session's one caller from here: the
     // session API is single-caller by contract.
     m_disconnectThread = std::thread([this, session, uri]() {
-        qttune_session_destroy(session);   // closes first, joining the worker
+        ecuio_session_destroy(session);    // closes first, joining the worker
 
         QMetaObject::invokeMethod(this, [this, uri]() {
             // JOIN FIRST, then clear the flag, then emit, as the
@@ -602,7 +602,7 @@ void QtTuneBridge::clearFrames()
     emit framesReset();
 }
 
-void QtTuneBridge::onFrame(const qttune_frame_t* frame, void* user_data)
+void QtTuneBridge::onFrame(const ecuio_frame_t* frame, void* user_data)
 {
     QtTuneBridge* self = static_cast<QtTuneBridge*>(user_data);
     if (!frame || !self) return;
@@ -627,9 +627,9 @@ void QtTuneBridge::onFrame(const qttune_frame_t* frame, void* user_data)
         return;
     }
 
-    // qttune_frame_t holds its payload INLINE (uint8_t data[64]) — this struct
+    // ecuio_frame_t holds its payload INLINE (uint8_t data[64]) — this struct
     // copy is a deep copy of the payload; no dangling pointer is possible.
-    const qttune_frame_t copy = *frame;
+    const ecuio_frame_t copy = *frame;
     self->m_inFlightFrames.fetch_add(1, std::memory_order_relaxed);
 
     // Lifetime contract: invoking with `self` as context object means the
@@ -642,7 +642,7 @@ void QtTuneBridge::onFrame(const qttune_frame_t* frame, void* user_data)
     }, Qt::QueuedConnection);
 }
 
-void QtTuneBridge::handleFrameInternal(const qttune_frame_t* frame)
+void QtTuneBridge::handleFrameInternal(const ecuio_frame_t* frame)
 {
     if (!m_connected.load(std::memory_order_acquire)) return;
 
@@ -658,7 +658,7 @@ void QtTuneBridge::handleFrameInternal(const qttune_frame_t* frame)
         vm["timestampUs"] = QVariant::fromValue<quint64>(frame->timestamp_us);
         vm["arbId"] = QVariant::fromValue<quint32>(frame->arbitration_id);
         vm["dlc"] = static_cast<uint32_t>(len);
-        vm["extended"] = (frame->flags & QTTUNE_FRAME_FLAG_EXTENDED) != 0;
+        vm["extended"] = (frame->flags & ECUIO_FRAME_FLAG_EXTENDED) != 0;
         // Spaced uppercase bytes ("41 0C 1F 40"), matching the ID column
         vm["payloadHex"] = QByteArray(
             reinterpret_cast<const char*>(frame->data),
@@ -669,17 +669,17 @@ void QtTuneBridge::handleFrameInternal(const qttune_frame_t* frame)
 
     // ADR-0013: decode against the SESSION's profile set. NULL means
     // the raw profile — frames stream to the Log page, decode skipped.
-    const QttuneSignalSet* set = qttune_session_signal_set(m_session);
+    const ecuio_signal_set_t* set = ecuio_session_signal_set(m_session);
     if (set != nullptr) {
         for (uint32_t i = 0; i < set->count; ++i) {
-            const QttuneSignalDef& def = set->defs[i];
+            const ecuio_signal_def_t& def = set->defs[i];
             // Core-side gate: arbitration ID, plus the mux key when the
             // def has one.
-            if (!qttune_def_applies_to_frame(&def, frame)) {
+            if (!ecuio_def_applies_to_frame(&def, frame)) {
                 continue;
             }
             float val = 0.0f;
-            if (qttune_decode_signal(&def, frame->data, len, &val) == QTTUNE_DECODE_OK) {
+            if (ecuio_decode_signal(&def, frame->data, len, &val) == ECUIO_DECODE_OK) {
                 bool merged = false;
                 for (auto& staged : m_stagingBuffer) {
                     if (staged.first == def.id) {
@@ -718,7 +718,7 @@ void QtTuneBridge::forceFrameCountForTesting(int count)
     emit frameCountChanged();   // keep the QML binding in sync
 }
 
-void QtTuneBridge::dispatchFrameForTesting(const qttune_frame_t& frame)
+void QtTuneBridge::dispatchFrameForTesting(const ecuio_frame_t& frame)
 {
     onFrame(&frame, this);
 }
@@ -728,9 +728,9 @@ void QtTuneBridge::pollLinkHealth()
     if (!m_connected.load(std::memory_order_acquire) || m_session == nullptr) {
         return;
     }
-    int32_t last_error = QTTUNE_OK;
+    int32_t last_error = ECUIO_OK;
     uint32_t episodes = 0;
-    (void)qttune_session_get_error_state(m_session, &last_error, &episodes);
+    (void)ecuio_session_get_error_state(m_session, &last_error, &episodes);
     if (last_error == m_linkErrorCode && episodes == m_errorEpisodes) {
         return;   // silent on unchanged state — the atomics only move
                   // on transitions, so this is not a poll storm
@@ -742,14 +742,14 @@ void QtTuneBridge::pollLinkHealth()
     /* Transitions land in the activity log with ZERO QML work — this
      * alone turns "connected with frozen values" into a named fault
      * in the existing log surface. */
-    if (prev != QTTUNE_OK && last_error == QTTUNE_OK) {
+    if (prev != ECUIO_OK && last_error == ECUIO_OK) {
         emit logMessage(QStringLiteral("Link: recovered"));
-    } else if (last_error == QTTUNE_ERR_VEHICLE_TIMEOUT) {
+    } else if (last_error == ECUIO_ERR_VEHICLE_TIMEOUT) {
         emit logMessage(QStringLiteral("Link: vehicle not responding"));
-    } else if (last_error == QTTUNE_ERR_REQUEST_FAILED) {
+    } else if (last_error == ECUIO_ERR_REQUEST_FAILED) {
         emit logMessage(QStringLiteral("Link: requests failing (%1 episode(s))")
                             .arg(m_errorEpisodes));
-    } else if (last_error == QTTUNE_ERR_TRANSPORT_HARD_FAILURE) {
+    } else if (last_error == ECUIO_ERR_TRANSPORT_HARD_FAILURE) {
         emit logMessage(QStringLiteral("Link: adapter fault (%1 episode(s))")
                             .arg(m_errorEpisodes));
     }
@@ -763,10 +763,10 @@ void QtTuneBridge::pollLinkHealth()
 QString QtTuneBridge::linkStateForError(int32_t errorCode)
 {
     switch (errorCode) {
-        case QTTUNE_OK:                        return QStringLiteral("ok");
-        case QTTUNE_ERR_VEHICLE_TIMEOUT:       return QStringLiteral("quiet");
-        case QTTUNE_ERR_REQUEST_FAILED:        return QStringLiteral("requests");
-        case QTTUNE_ERR_TRANSPORT_HARD_FAILURE: return QStringLiteral("fault");
+        case ECUIO_OK:                         return QStringLiteral("ok");
+        case ECUIO_ERR_VEHICLE_TIMEOUT:        return QStringLiteral("quiet");
+        case ECUIO_ERR_REQUEST_FAILED:         return QStringLiteral("requests");
+        case ECUIO_ERR_TRANSPORT_HARD_FAILURE: return QStringLiteral("fault");
         default: return QStringLiteral("degraded"); /* forward-compatible */
     }
 }

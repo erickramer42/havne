@@ -55,9 +55,9 @@ that runs to the end undocumented.
       simulator, so the vehicle is the first talking bus; this is the
       risk that can be retired at the desk
 - [ ] Launch from a cmd shell in `build\app\Release` with payload
-      logging on: `set QTTUNE_SUR_LOG_FRAMES=1`, then
+      logging on: `set ECUIO_SUR_LOG_FRAMES=1`, then
       `qttune.exe 2> sur.log`. The
-      session log at `%TEMP%\qttune-surrogate.log` should hold both
+      session log at `%TEMP%\ecuio-surrogate.log` should hold both
       `[surrogate HH:MM:SS.mmm]` and `[sur …]` lines, and its second
       child line reads "frame logging on". Once connected, every request
       and reply appears as an `OP_WRITE frame` / `OP_READ frame` line
@@ -95,7 +95,7 @@ deployed. Stop and fix it at the desk; the vehicle adds nothing.
       `OP_START_FILTER … status 0`)
 - [ ] The first few writes succeed, then writes fail (`OP_WRITE: status 7`)
       once nothing ACKs them. At the first failed write the link latches
-      `QTTUNE_ERR_REQUEST_FAILED`, one episode, and stays there: amber
+      `ECUIO_ERR_REQUEST_FAILED`, one episode, and stays there: amber
       "Requests failing" banner, and "Link: requests failing
       (1 episode(s))" in the activity log
 - [ ] Disconnect cleanly

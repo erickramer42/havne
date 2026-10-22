@@ -19,11 +19,11 @@
 //        bridge on the obd2 set's mux-at-offset-0 grammar.
 //      - Everything else: the legacy deterministic echo (byte 0
 //        +0x40), preserving existing framing tests.
-//    QTTUNE_FAKE_WRITE_STATUS fails every write with the given status,
+//    ECUIO_FAKE_WRITE_STATUS fails every write with the given status,
 //    recording nothing and echoing nothing.
 //  * IoCtl: config table (SET stores, GET reads back), fixed VBATT,
 //    CLEAR_* accepted. Unknown ids FAIL like a strict vendor.
-//  * Disconnect: counted; QTTUNE_FAKE_DISCONNECT_DELAY_MS sleeps
+//  * Disconnect: counted; ECUIO_FAKE_DISCONNECT_DELAY_MS sleeps
 //    before each one (a slow vendor teardown).
 //  * Filters: registration bookkeeping + last-invocation recording.
 //    Filter-aware echo prepends the filter pattern (4-byte BE CAN ID).
@@ -31,18 +31,18 @@
 //    is unconditional once a filter lands.
 //  * ReadMsgs, by default, returns at most one message per call,
 //    whatever NumMsgs and Timeout ask for, and STATUS_NOERROR with zero
-//    messages on an empty queue. QTTUNE_FAKE_READ_STATUS forces a
-//    status with no messages; QTTUNE_FAKE_UNTOUCHED_COUNT_STATUS
+//    messages on an empty queue. ECUIO_FAKE_READ_STATUS forces a
+//    status with no messages; ECUIO_FAKE_UNTOUCHED_COUNT_STATUS
 //    forces a status with the caller's count and buffer left as
-//    passed (a sloppy vendor; see qttune_trusted_count);
-//    QTTUNE_FAKE_SPEC_READ_SEMANTICS=1 switches to J2534-1 batch and
+//    passed (a sloppy vendor; see ecuio_trusted_count);
+//    ECUIO_FAKE_SPEC_READ_SEMANTICS=1 switches to J2534-1 batch and
 //    empty statuses.
 //  * ExtraDataIndex = DataSize (v4.04 no-extra-data convention).
 
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 
-#include "qttune/j2534_ptypes.h"
+#include "ecuio/j2534_ptypes.h"
 
 #include <cstdint>
 #include <cstring>
@@ -53,8 +53,8 @@
 #define FAKE_WRITE_DEPTH 16
 #define FAKE_FILTER_DEPTH 8
 #define FAKE_CONFIG_DEPTH 16
-#define STATUS_NOERROR QTTUNE_PT_STATUS_NOERROR
-#define STATUS_FAILED  QTTUNE_PT_STATUS_FAILED
+#define STATUS_NOERROR ECUIO_PT_STATUS_NOERROR
+#define STATUS_FAILED  ECUIO_PT_STATUS_FAILED
 
 namespace fake_j2534 {
 
@@ -123,7 +123,7 @@ unsigned long g_last_stopped_filter_id = 0;
  * child's instance is a separate process (see the OP_INJECT note
  * above), so this hook can't see it; a surrogate test would count the
  * child's OP_DISCONNECT lines in the session log
- * (qttune_j2534_sur_log_path) instead. */
+ * (ecuio_j2534_sur_log_path) instead. */
 unsigned long g_disconnect_count = 0;
 
 /* The threads that last ran PassThruOpen and PassThruDisconnect (0 =
@@ -327,14 +327,14 @@ long __stdcall PassThruOpen(void* pName, unsigned long* pDeviceID)
         canned_initialized = true;
     }
 
-    /* Test-only open blocking: QTTUNE_FAKE_OPEN_DELAY_MS
+    /* Test-only open blocking: ECUIO_FAKE_OPEN_DELAY_MS
      * makes PassThruOpen sleep before doing anything — the blocked-
      * vendor-open mode. Armed via ENVIRONMENT, not a hook: the child
      * inherits the parent's environment, so an x64 test arms the x86
      * child's fake with zero protocol surface. */
     {
         char buf[32] = {};
-        const DWORD n = GetEnvironmentVariableA("QTTUNE_FAKE_OPEN_DELAY_MS",
+        const DWORD n = GetEnvironmentVariableA("ECUIO_FAKE_OPEN_DELAY_MS",
                                                  buf, sizeof(buf));
         if (n > 0 && n < sizeof(buf)) {
             const DWORD delay = static_cast<DWORD>(strtoul(buf, nullptr, 10));
@@ -392,13 +392,13 @@ long __stdcall PassThruDisconnect(unsigned long ChannelID)
 {
     (void)ChannelID;
 
-    /* Test-only slow teardown: QTTUNE_FAKE_DISCONNECT_DELAY_MS makes
+    /* Test-only slow teardown: ECUIO_FAKE_DISCONNECT_DELAY_MS makes
      * every PassThruDisconnect sleep first, the slow-vendor teardown
      * an async disconnect must keep off the GUI thread. Re-read per
      * call and slept outside the lock, like the open delay. */
     {
         char buf[32] = {};
-        const DWORD n = GetEnvironmentVariableA("QTTUNE_FAKE_DISCONNECT_DELAY_MS",
+        const DWORD n = GetEnvironmentVariableA("ECUIO_FAKE_DISCONNECT_DELAY_MS",
                                                  buf, sizeof(buf));
         if (n > 0 && n < sizeof(buf)) {
             const DWORD delay = static_cast<DWORD>(strtoul(buf, nullptr, 10));
@@ -426,19 +426,19 @@ long __stdcall PassThruReadMsgs(unsigned long ChannelID,
         return STATUS_FAILED;
     }
 
-    /* #11 test knob (HARNESS): QTTUNE_FAKE_READ_STATUS forces this
+    /* #11 test knob (HARNESS): ECUIO_FAKE_READ_STATUS forces this
      * call to return the given vendor status with zero messages —
      * 0x09 (ERR_TIMEOUT) for quiet-bus, a hard code (e.g. 0x07) for
      * the dead-adapter path. Persistent while set and re-read per
      * call, so in-proc tests toggle it with SetEnvironmentVariableA
      * between phases; the surrogate child only sees the value it
-     * inherited at spawn (same as QTTUNE_FAKE_OPEN_DELAY_MS). Checked
+     * inherited at spawn (same as ECUIO_FAKE_OPEN_DELAY_MS). Checked
      * before the queue, so a simulated dead adapter delivers nothing.
      * It always zeroes the count. Timeout WITH delivered messages is
      * spec mode's job, below. */
     {
         char buf[32] = {};
-        const DWORD n = GetEnvironmentVariableA("QTTUNE_FAKE_READ_STATUS",
+        const DWORD n = GetEnvironmentVariableA("ECUIO_FAKE_READ_STATUS",
                                                  buf, sizeof(buf));
         if (n > 0 && n < sizeof(buf)) {
             const long code = strtol(buf, nullptr, 0);
@@ -449,7 +449,7 @@ long __stdcall PassThruReadMsgs(unsigned long ChannelID,
         }
     }
 
-    /* The sloppy vendor: unlike QTTUNE_FAKE_READ_STATUS above, this
+    /* The sloppy vendor: unlike ECUIO_FAKE_READ_STATUS above, this
      * returns the given hard status WITHOUT touching *pNumMsgs or the
      * message array — the caller's request count stays DIRTY and its
      * buffer keeps whatever the caller put there (zeros, or the
@@ -461,7 +461,7 @@ long __stdcall PassThruReadMsgs(unsigned long ChannelID,
     {
         char uc[32] = {};
         const DWORD un = GetEnvironmentVariableA(
-            "QTTUNE_FAKE_UNTOUCHED_COUNT_STATUS", uc, sizeof(uc));
+            "ECUIO_FAKE_UNTOUCHED_COUNT_STATUS", uc, sizeof(uc));
         if (un > 0 && un < sizeof(uc)) {
             const long code = strtol(uc, nullptr, 0);
             if (code != 0) {
@@ -473,7 +473,7 @@ long __stdcall PassThruReadMsgs(unsigned long ChannelID,
     std::lock_guard<std::mutex> lk(fake_j2534::g_lock);
 
     /* SPEC-CONFORMANT READ MODE: when
-     * QTTUNE_FAKE_SPEC_READ_SEMANTICS is 1, model the J2534-1 rule
+     * ECUIO_FAKE_SPEC_READ_SEMANTICS is 1, model the J2534-1 rule
      * a real vehicle will exercise: a read asking for N messages with
      * a nonzero timeout returns min(N, available), and if fewer than
      * requested, ERR_TIMEOUT TOGETHER WITH those messages. Timeout 0
@@ -485,7 +485,7 @@ long __stdcall PassThruReadMsgs(unsigned long ChannelID,
     {
         char spec[32] = {};
         const DWORD sn = GetEnvironmentVariableA(
-            "QTTUNE_FAKE_SPEC_READ_SEMANTICS", spec, sizeof(spec));
+            "ECUIO_FAKE_SPEC_READ_SEMANTICS", spec, sizeof(spec));
         if (sn > 0 && sn < sizeof(spec) && spec[0] == '1') {
             const unsigned long requested = *pNumMsgs;
             unsigned long avail = fake_j2534::g_queue_len;
@@ -494,7 +494,7 @@ long __stdcall PassThruReadMsgs(unsigned long ChannelID,
                 const fake_j2534::FrameSlot& slot = fake_j2534::g_queue[i];
                 memcpy(pMsg[i].Data, slot.data, slot.size);
                 pMsg[i].DataSize       = slot.size;
-                pMsg[i].ProtocolID     = QTTUNE_PT_PROTOCOL_ISO15765;
+                pMsg[i].ProtocolID     = ECUIO_PT_PROTOCOL_ISO15765;
                 pMsg[i].RxStatus       = slot.rx_status;
                 pMsg[i].Timestamp      = slot.timestamp_us;
                 pMsg[i].ExtraDataIndex  = slot.size;
@@ -505,10 +505,10 @@ long __stdcall PassThruReadMsgs(unsigned long ChannelID,
             fake_j2534::g_queue_len -= avail;
             *pNumMsgs = avail;
             if (avail < requested && Timeout > 0) {
-                return QTTUNE_PT_STATUS_TIMEOUT;
+                return ECUIO_PT_STATUS_TIMEOUT;
             }
             if (avail == 0 && Timeout == 0) {
-                return QTTUNE_PT_STATUS_BUFFER_EMPTY;
+                return ECUIO_PT_STATUS_BUFFER_EMPTY;
             }
             return STATUS_NOERROR;
         }
@@ -564,7 +564,7 @@ long __stdcall PassThruReadMsgs(unsigned long ChannelID,
     const fake_j2534::FrameSlot& slot = fake_j2534::g_queue[0];
     memcpy(pMsg->Data, slot.data, slot.size);
     pMsg->DataSize      = slot.size;
-    pMsg->ProtocolID    = QTTUNE_PT_PROTOCOL_ISO15765;
+    pMsg->ProtocolID    = ECUIO_PT_PROTOCOL_ISO15765;
     pMsg->RxStatus      = slot.rx_status;
     pMsg->Timestamp     = slot.timestamp_us;
     pMsg->ExtraDataIndex = slot.size;   /* v4.04: == DataSize when none */
@@ -589,11 +589,11 @@ long __stdcall PassThruWriteMsgs(unsigned long ChannelID,
         return STATUS_FAILED;
     }
 
-    /* QTTUNE_FAKE_WRITE_STATUS
+    /* ECUIO_FAKE_WRITE_STATUS
      * makes every WriteMsgs return the given vendor status WITHOUT
      * recording the message or generating a response — the VX quiet-
      * bus shape: writes fail (no ACK on the bus) while reads stay
-     * clean. Like QTTUNE_FAKE_UNTOUCHED_COUNT_STATUS on the read side,
+     * clean. Like ECUIO_FAKE_UNTOUCHED_COUNT_STATUS on the read side,
      * *pNumMsgs is left as passed (1), the VX's "status 7, written 1",
      * so a write path that read the count before the status would be
      * caught. Unrecorded writes don't move GetWriteCount. Re-read per
@@ -601,7 +601,7 @@ long __stdcall PassThruWriteMsgs(unsigned long ChannelID,
      * spawn-time value. */
     {
         char wb[32] = {};
-        const DWORD wn = GetEnvironmentVariableA("QTTUNE_FAKE_WRITE_STATUS",
+        const DWORD wn = GetEnvironmentVariableA("ECUIO_FAKE_WRITE_STATUS",
                                                  wb, sizeof(wb));
         if (wn > 0 && wn < sizeof(wb)) {
             const long code = strtol(wb, nullptr, 0);
@@ -682,7 +682,7 @@ long __stdcall PassThruIoctl(unsigned long ChannelID,
     bool do_stall = false;
     char stall_buf[32] = {};
     {
-        const DWORD n = GetEnvironmentVariableA("QTTUNE_FAKE_IOCTL_DELAY_MS",
+        const DWORD n = GetEnvironmentVariableA("ECUIO_FAKE_IOCTL_DELAY_MS",
                                                 stall_buf, sizeof(stall_buf));
         if (n > 0 && n < sizeof(stall_buf)) {
             std::lock_guard<std::mutex> lk(fake_j2534::g_lock);
@@ -701,7 +701,7 @@ long __stdcall PassThruIoctl(unsigned long ChannelID,
     std::lock_guard<std::mutex> lk(fake_j2534::g_lock);
 
     switch (IoControlID) {
-    case QTTUNE_PT_IOCTL_GET_CONFIG: {
+    case ECUIO_PT_IOCTL_GET_CONFIG: {
         if (pInput == nullptr) {
             return STATUS_FAILED;
         }
@@ -724,7 +724,7 @@ long __stdcall PassThruIoctl(unsigned long ChannelID,
         }
         return STATUS_NOERROR;
     }
-    case QTTUNE_PT_IOCTL_SET_CONFIG: {
+    case ECUIO_PT_IOCTL_SET_CONFIG: {
         if (pInput == nullptr) {
             return STATUS_FAILED;
         }
@@ -754,7 +754,7 @@ long __stdcall PassThruIoctl(unsigned long ChannelID,
         }
         return STATUS_NOERROR;
     }
-    case QTTUNE_PT_IOCTL_READ_VBATT:
+    case ECUIO_PT_IOCTL_READ_VBATT:
         /* Contract pin: v04.04 passes the DeviceID
          * to READ_VBATT. This fake's PassThruOpen returns device 1 and
          * PassThruConnect returns channel 0x55 — a caller passing the
@@ -766,9 +766,9 @@ long __stdcall PassThruIoctl(unsigned long ChannelID,
             *static_cast<unsigned long*>(pOutput) = 13800;  /* 13.8 V in mV */
         }
         return STATUS_NOERROR;
-    case QTTUNE_PT_IOCTL_CLEAR_TX_BUFFER:
-    case QTTUNE_PT_IOCTL_CLEAR_RX_BUFFER:
-    case QTTUNE_PT_IOCTL_CLEAR_MSG_FILTERS:
+    case ECUIO_PT_IOCTL_CLEAR_TX_BUFFER:
+    case ECUIO_PT_IOCTL_CLEAR_RX_BUFFER:
+    case ECUIO_PT_IOCTL_CLEAR_MSG_FILTERS:
         return STATUS_NOERROR;
     default:
         return STATUS_FAILED;   /* strict vendor: unknown = failure */
@@ -787,12 +787,12 @@ long __stdcall PassThruStartMsgFilter(unsigned long ChannelID,
     if (pMaskMsg == nullptr || pPatternMsg == nullptr || pFilterID == nullptr) {
         return STATUS_FAILED;
     }
-    if (FilterType != QTTUNE_PT_PASS_FILTER &&
-        FilterType != QTTUNE_PT_BLOCK_FILTER &&
-        FilterType != QTTUNE_PT_FLOW_CONTROL_FILTER) {
+    if (FilterType != ECUIO_PT_PASS_FILTER &&
+        FilterType != ECUIO_PT_BLOCK_FILTER &&
+        FilterType != ECUIO_PT_FLOW_CONTROL_FILTER) {
         return STATUS_FAILED;
     }
-    if (FilterType == QTTUNE_PT_FLOW_CONTROL_FILTER &&
+    if (FilterType == ECUIO_PT_FLOW_CONTROL_FILTER &&
         pFlowControlMsg == nullptr) {
         return STATUS_FAILED;
     }
@@ -861,7 +861,7 @@ void InjectFrame(const unsigned char* data, unsigned long size,
 
     std::lock_guard<std::mutex> lk(fake_j2534::g_lock);
     fake_j2534::enqueue_rx_locked(data, size, timestamp_us,
-                                  is_extended ? QTTUNE_PT_CAN_29BIT_ID : 0ul);
+                                  is_extended ? ECUIO_PT_CAN_29BIT_ID : 0ul);
 }
 
 extern "C" __declspec(dllexport)

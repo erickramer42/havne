@@ -1,9 +1,9 @@
 // File/layer: core/src/core.cpp | C++17, Qt-free, CI-validated headless build
 
-#include "qttune/version.h"
-#include "qttune/core.h"
-#include "qttune/internal.h"
-#include "qttune/profile.h"
+#include "ecuio/version.h"
+#include "ecuio/core.h"
+#include "ecuio/internal.h"
+#include "ecuio/profile.h"
 #include "session.h"
 #include "uri_query.h"
 
@@ -27,16 +27,16 @@ namespace {
     * must NEVER silently downgrade to the scheme default, which would
     * hand a typo'd ?profile=raw a decoding session or vice versa. The
     * FIRST malformed occurrence fails; last-wins applies only across
-    * valid values. out_val holds QTTUNE_PROFILE_NAME_MAX + 1 bytes. */
+    * valid values. out_val holds ECUIO_PROFILE_NAME_MAX + 1 bytes. */
     ProfileQuery query_profile(const char* rest, char* out_val)
     {
         bool found = false;
-        const bool ok = qttune_uri::for_each_param(
-            qttune_uri::query_of(rest), [&](const qttune_uri::param& p) {
+        const bool ok = ecuio_uri::for_each_param(
+            ecuio_uri::query_of(rest), [&](const ecuio_uri::param& p) {
                 if (!p.is("profile")) {
                     return true;
                 }
-                if (p.val_len == 0 || p.val_len > QTTUNE_PROFILE_NAME_MAX) {
+                if (p.val_len == 0 || p.val_len > ECUIO_PROFILE_NAME_MAX) {
                     return false;
                 }
                 memcpy(out_val, p.val, p.val_len);
@@ -53,68 +53,68 @@ namespace {
 
 extern "C" {
 
-qttune_status_t qttune_session_get_error_state(
-    qttune_session_t* session,
+ecuio_status_t ecuio_session_get_error_state(
+    ecuio_session_t* session,
     int32_t* out_last_error,
     uint32_t* out_error_count)
 {
     if (session == nullptr || out_last_error == nullptr ||
         out_error_count == nullptr) {
-        return QTTUNE_ERR_NULL_ARGUMENT;
+        return ECUIO_ERR_NULL_ARGUMENT;
     }
     *out_last_error = session->last_error.load();
     *out_error_count = session->error_count.load();
-    return QTTUNE_OK;
+    return ECUIO_OK;
 }
 
-qttune_status_t qttune_init(void)
+ecuio_status_t ecuio_init(void)
 {
     bool expected = false;
     g_initialized.compare_exchange_strong(expected, true);
-    return QTTUNE_OK;
+    return ECUIO_OK;
 }
 
-void qttune_shutdown(void)
+void ecuio_shutdown(void)
 {
     g_initialized.store(false);
 }
 
-const char* qttune_version_string(void)
+const char* ecuio_version_string(void)
 {
-    return QTTUNE_VERSION_STRING;
+    return ECUIO_VERSION_STRING;
 }
 
-const char* qttune_status_string(qttune_status_t status)
+const char* ecuio_status_string(ecuio_status_t status)
 {
     switch (status) {
-        case QTTUNE_OK:                         return "success";
-        case QTTUNE_ERR_NULL_ARGUMENT:          return "null argument";
-        case QTTUNE_ERR_NOT_IMPLEMENTED:        return "not implemented yet";
-        case QTTUNE_ERR_NO_TRANSPORT:           return "no transport available";
-        case QTTUNE_ERR_OUT_OF_MEMORY:          return "out of memory";
-        case QTTUNE_ERR_SESSION_CLOSED:         return "session already closed";
-        case QTTUNE_ERR_ALREADY_REGISTERED:     return "already registered";
-        case QTTUNE_ERR_LOAD_FAILED:            return "failed to load transport library";
-        case QTTUNE_ERR_VEHICLE_TIMEOUT:        return "vehicle not responding (timeout)";
-        case QTTUNE_ERR_TRANSPORT_HARD_FAILURE: return "transport hard failure";
-        case QTTUNE_ERR_REQUEST_FAILED:         return "request failed (vehicle not accepting requests)";
-        case QTTUNE_ERR_INVALID_ARGUMENT:       return "invalid argument";
+        case ECUIO_OK:                          return "success";
+        case ECUIO_ERR_NULL_ARGUMENT:           return "null argument";
+        case ECUIO_ERR_NOT_IMPLEMENTED:         return "not implemented yet";
+        case ECUIO_ERR_NO_TRANSPORT:            return "no transport available";
+        case ECUIO_ERR_OUT_OF_MEMORY:           return "out of memory";
+        case ECUIO_ERR_SESSION_CLOSED:          return "session already closed";
+        case ECUIO_ERR_ALREADY_REGISTERED:      return "already registered";
+        case ECUIO_ERR_LOAD_FAILED:             return "failed to load transport library";
+        case ECUIO_ERR_VEHICLE_TIMEOUT:         return "vehicle not responding (timeout)";
+        case ECUIO_ERR_TRANSPORT_HARD_FAILURE: return "transport hard failure";
+        case ECUIO_ERR_REQUEST_FAILED:          return "request failed (vehicle not accepting requests)";
+        case ECUIO_ERR_INVALID_ARGUMENT:        return "invalid argument";
         default:                                return "unknown status";
     }
 }
 
-qttune_status_t qttune_session_create(
+ecuio_status_t ecuio_session_create(
     const char* transport_uri,
-    qttune_session_t** out_session)
+    ecuio_session_t** out_session)
 {
     if (out_session == nullptr || transport_uri == nullptr) {
-        return QTTUNE_ERR_NULL_ARGUMENT;
+        return ECUIO_ERR_NULL_ARGUMENT;
     }
 
     try {
-        *out_session = new qttune_session();
+        *out_session = new ecuio_session();
     } catch (...) {
-        return QTTUNE_ERR_OUT_OF_MEMORY;
+        return ECUIO_ERR_OUT_OF_MEMORY;
     }
 
     /* Scheme routing (j2534 is Win32-only). */
@@ -127,7 +127,7 @@ qttune_status_t qttune_session_create(
     if (!is_mock && !is_j2534) {
         delete *out_session;
         *out_session = nullptr;
-        return QTTUNE_ERR_NO_TRANSPORT;
+        return ECUIO_ERR_NO_TRANSPORT;
     }
 
     /* ADR-0013 profile selection: default per scheme, ?profile=
@@ -135,7 +135,7 @@ qttune_status_t qttune_session_create(
      * an unknown or MALFORMED profile fails fast with no DLL load and
      * no discovery. */
     const char* rest = transport_uri + (is_mock ? 7 : 8);
-    char profile_name[QTTUNE_PROFILE_NAME_MAX + 1];
+    char profile_name[ECUIO_PROFILE_NAME_MAX + 1];
     const char* chosen = nullptr;
     switch (query_profile(rest, profile_name)) {
         case ProfileQuery::Valid:
@@ -144,7 +144,7 @@ qttune_status_t qttune_session_create(
         case ProfileQuery::Invalid:
             delete *out_session;
             *out_session = nullptr;
-            return QTTUNE_ERR_NO_TRANSPORT;  /* malformed query or ?profile= — strict */
+            return ECUIO_ERR_NO_TRANSPORT;   /* malformed query or ?profile= — strict */
         case ProfileQuery::Absent:
         default:
             /* Scheme defaults: mock:// -> mock; j2534:// -> obd2
@@ -154,11 +154,11 @@ qttune_status_t qttune_session_create(
             break;
     }
 
-    const QttuneSignalSet* profile_set = nullptr;
-    if (qttune_profile_lookup(chosen, &profile_set) != QTTUNE_OK) {
+    const ecuio_signal_set_t* profile_set = nullptr;
+    if (ecuio_profile_lookup(chosen, &profile_set) != ECUIO_OK) {
         delete *out_session;
         *out_session = nullptr;
-        return QTTUNE_ERR_NO_TRANSPORT;   /* unknown profile name — strict */
+        return ECUIO_ERR_NO_TRANSPORT;    /* unknown profile name — strict */
     }
 
     /* Set before attach: the j2534 transport derives its scheduler
@@ -166,49 +166,49 @@ qttune_status_t qttune_session_create(
      * and the worker both run after this store. */
     (*out_session)->active_signal_set = profile_set;
 
-    qttune_status_t status = QTTUNE_ERR_NO_TRANSPORT;
+    ecuio_status_t status = ECUIO_ERR_NO_TRANSPORT;
 #ifdef _WIN32
     if (is_j2534) {
-        status = qttune_j2534_transport_attach(*out_session, transport_uri);
+        status = ecuio_j2534_transport_attach(*out_session, transport_uri);
     } else
 #endif
     if (is_mock) {
-        status = qttune_mock_transport_attach(*out_session, transport_uri);
+        status = ecuio_mock_transport_attach(*out_session, transport_uri);
     }
 
-    if (status != QTTUNE_OK) {
+    if (status != ECUIO_OK) {
         delete *out_session;
         *out_session = nullptr;
         return status;
     }
-    return QTTUNE_OK;
+    return ECUIO_OK;
 }
 
-qttune_status_t qttune_session_start(qttune_session_t* session)
+ecuio_status_t ecuio_session_start(ecuio_session_t* session)
 {
     if (session == nullptr) {
-        return QTTUNE_ERR_NULL_ARGUMENT;
+        return ECUIO_ERR_NULL_ARGUMENT;
     }
     if (session->closed.load()) {
-        return QTTUNE_ERR_SESSION_CLOSED;
+        return ECUIO_ERR_SESSION_CLOSED;
     }
     if (session->transport == nullptr) {
-        return QTTUNE_ERR_NO_TRANSPORT;
+        return ECUIO_ERR_NO_TRANSPORT;
     }
     return session->transport->ops->start(session, session->transport->impl);
 }
 
-qttune_status_t qttune_session_close(qttune_session_t* session)
+ecuio_status_t ecuio_session_close(ecuio_session_t* session)
 {
     if (session == nullptr) {
-        return QTTUNE_ERR_NULL_ARGUMENT;
+        return ECUIO_ERR_NULL_ARGUMENT;
     }
 
     /* First-closer wins the CAS; everyone else gets a clean error on
      * LIVE memory. */
     bool expected = false;
     if (!session->closed.compare_exchange_strong(expected, true)) {
-        return QTTUNE_ERR_SESSION_CLOSED;
+        return ECUIO_ERR_SESSION_CLOSED;
     }
 
     if (session->transport != nullptr) {
@@ -221,82 +221,82 @@ qttune_status_t qttune_session_close(qttune_session_t* session)
         session->callbacks.clear();
     }
 
-    return QTTUNE_OK;
+    return ECUIO_OK;
 }
 
-qttune_status_t qttune_session_destroy(qttune_session_t* session)
+ecuio_status_t ecuio_session_destroy(ecuio_session_t* session)
 {
     if (session == nullptr) {
-        return QTTUNE_OK;   /* free(nullptr) semantics */
+        return ECUIO_OK;    /* free(nullptr) semantics */
     }
 
-    (void)qttune_session_close(session);
+    (void)ecuio_session_close(session);
     delete session;
-    return QTTUNE_OK;
+    return ECUIO_OK;
 }
 
-qttune_status_t qttune_session_send(
-    qttune_session_t* session,
-    const qttune_frame_t* frame)
+ecuio_status_t ecuio_session_send(
+    ecuio_session_t* session,
+    const ecuio_frame_t* frame)
 {
     if (session == nullptr || frame == nullptr) {
-        return QTTUNE_ERR_NULL_ARGUMENT;
+        return ECUIO_ERR_NULL_ARGUMENT;
     }
     if (session->closed.load()) {
-        return QTTUNE_ERR_SESSION_CLOSED;
+        return ECUIO_ERR_SESSION_CLOSED;
     }
     if (frame->data_length > sizeof(frame->data)) {
-        return QTTUNE_ERR_NULL_ARGUMENT;
+        return ECUIO_ERR_NULL_ARGUMENT;
     }
-    return QTTUNE_ERR_NOT_IMPLEMENTED;
+    return ECUIO_ERR_NOT_IMPLEMENTED;
 }
 
-qttune_status_t qttune_session_receive(
-    qttune_session_t* session,
-    qttune_frame_t* out_frame,
+ecuio_status_t ecuio_session_receive(
+    ecuio_session_t* session,
+    ecuio_frame_t* out_frame,
     uint32_t timeout_ms)
 {
     (void)session;
     (void)out_frame;
     (void)timeout_ms;
-    return QTTUNE_ERR_NOT_IMPLEMENTED;
+    return ECUIO_ERR_NOT_IMPLEMENTED;
 }
 
-qttune_status_t qttune_register_frame_callback(
-    qttune_session_t* session,
-    qttune_frame_callback_t callback,
+ecuio_status_t ecuio_register_frame_callback(
+    ecuio_session_t* session,
+    ecuio_frame_callback_t callback,
     void* user_data)
 {
     if (session == nullptr || callback == nullptr) {
-        return QTTUNE_ERR_NULL_ARGUMENT;
+        return ECUIO_ERR_NULL_ARGUMENT;
     }
     if (session->closed.load()) {
-        return QTTUNE_ERR_SESSION_CLOSED;
+        return ECUIO_ERR_SESSION_CLOSED;
     }
 
     std::lock_guard<std::mutex> lock(session->callback_mutex);
 
     for (const auto& entry : session->callbacks) {
         if (entry.first == callback && entry.second == user_data) {
-            return QTTUNE_OK;
+            return ECUIO_OK;
         }
     }
 
     try {
         session->callbacks.emplace_back(callback, user_data);
-        return QTTUNE_OK;
+        return ECUIO_OK;
     } catch (...) {
-        return QTTUNE_ERR_OUT_OF_MEMORY;
+        return ECUIO_ERR_OUT_OF_MEMORY;
     }
 }
 
-qttune_status_t qttune_unregister_frame_callback(
-    qttune_session_t* session,
-    qttune_frame_callback_t callback,
+ecuio_status_t ecuio_unregister_frame_callback(
+    ecuio_session_t* session,
+    ecuio_frame_callback_t callback,
     void* user_data)
 {
     if (session == nullptr) {
-        return QTTUNE_ERR_NULL_ARGUMENT;
+        return ECUIO_ERR_NULL_ARGUMENT;
     }
 
     std::lock_guard<std::mutex> lock(session->callback_mutex);
@@ -311,12 +311,12 @@ qttune_status_t qttune_unregister_frame_callback(
         }
     }
 
-    return QTTUNE_OK;
+    return ECUIO_OK;
 }
 
-void qttune_session_dispatch_callbacks(
-    qttune_session_t* session,
-    const qttune_frame_t* frame)
+void ecuio_session_dispatch_callbacks(
+    ecuio_session_t* session,
+    const ecuio_frame_t* frame)
 {
     if (session == nullptr || frame == nullptr) {
         return;
@@ -325,7 +325,7 @@ void qttune_session_dispatch_callbacks(
         return;
     }
 
-    std::vector<std::pair<qttune_frame_callback_t, void*>> snapshot;
+    std::vector<std::pair<ecuio_frame_callback_t, void*>> snapshot;
     {
         std::lock_guard<std::mutex> lock(session->callback_mutex);
         snapshot = session->callbacks;

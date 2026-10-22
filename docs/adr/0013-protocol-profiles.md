@@ -6,7 +6,7 @@
 
 ## Context
 
-J2534 transport adoption (ADR-0012) delivered caller-chosen IDs and a transport-driven Mode-01 poll loop. But the decode layer still binds to the mock signal set only: the bridge hard-wires `qttune_mock_signal_set()` in `connectSession` and `handleFrameInternal` (Known Issue #21), so J2534 frames reach the Log page and decode nowhere. Three forces shape the fix:
+J2534 transport adoption (ADR-0012) delivered caller-chosen IDs and a transport-driven Mode-01 poll loop. But the decode layer still binds to the mock signal set only: the bridge hard-wires `ecuio_mock_signal_set()` in `connectSession` and `handleFrameInternal` (Known Issue #21), so J2534 frames reach the Log page and decode nowhere. Three forces shape the fix:
 
 - **Multiple application layers exist ahead.** OBD-II Mode-01 is the universal baseline; manufacturer UDS (Mazda, Honda) provides the enhanced data the project ultimately wants; an unknown vehicle must still connect and log usefully. These differ in request shape and byte decoding, not in transport.
 - **The manufacturer-plugin milestone (v0.5.0) needs a seam to plug into.** Whatever interprets responses must be implementable by a small, safe plugin that cannot deadlock the GUI thread or violate teardown ordering.
@@ -22,7 +22,7 @@ Additionally, the request loop's placement is wrong: it lives in the J2534 trans
    - `mock://` → profile `mock` (the existing mock signal set).
    - `j2534://` → profile `obd2` by default.
    - `?profile=<name>` overrides the default. `?profile=raw` selects the null profile (no requests, no signal set; Log page only) and is today's behavior promoted to a named thing.
-   - Selection rules join the existing strict grammar: lowercase, unknown names rejected at `qttune_session_create` before any DLL loads (`QTTUNE_ERR_NO_TRANSPORT`), last occurrence wins. The URI must fully determine session behavior — every bench sheet records a URI, and it must be complete provenance.
+   - Selection rules join the existing strict grammar: lowercase, unknown names rejected at `ecuio_session_create` before any DLL loads (`ECUIO_ERR_NO_TRANSPORT`), last occurrence wins. The URI must fully determine session behavior — every bench sheet records a URI, and it must be complete provenance.
    - Profiles are string-keyed in a registry, not an ABI enum, so v0.5.0 out-of-tree manufacturer plugins register names without ABI churn.
 
 3. **Probing is a phase inside a profile, never a selection mechanism.** The `obd2` profile gains (in its v2) a post-connect probe: the PID 0x00→0x20→0x40… bitmask chain, driven through the profile's own request/response callbacks. Probe failure degrades to the static signal set; it never fails the session. Selection is never inferred from what the vehicle says, because the things this project ultimately wants to select (Mazda/Honda UDS) cannot be announced. **What you connect to is a decision; what it supports is a discovery.**
@@ -34,7 +34,7 @@ Additionally, the request loop's placement is wrong: it lives in the J2534 trans
    typedef struct {
        unsigned long rx_id;      /* flow-control filter target */
        unsigned long tx_id;      /* request destination */
-   } qttune_channel_decl;
+   } ecuio_channel_decl;
    ```
 
    `?filter=`/`?txid=` remain the user-facing shorthand for the common single-channel case (ADR-0012 unchanged); internally the session registers one filter per declared channel. `obd2` v1 declares exactly one channel (7E0/7E8); UDS profiles will declare more, because enhanced data lives on multiple ECUs (a Mazda oil-temp DID may answer from a gearbox or body module, not 7E8).
@@ -42,17 +42,17 @@ Additionally, the request loop's placement is wrong: it lives in the J2534 trans
 5. **Core drives the loop; plugins never see threads, transport, or filters.** The profile is a POD table of callbacks with an opaque context, called only from the session worker:
 
    ```c
-   typedef struct qttune_profile_ops {
+   typedef struct ecuio_profile_ops {
        const char* name;                            /* registry key */
 
        /* worker-thread only; never the GUI thread */
        int  (*next_request)(void* ctx, unsigned char* buf, int cap);
             /* >0 bytes to send now; 0 = idle this cycle; -1 = fatal */
-       void (*accept_response)(void* ctx, const qttune_frame_t* frame);
+       void (*accept_response)(void* ctx, const ecuio_frame_t* frame);
             /* correlation is the profile's own state machine */
-       const qttune_signal_set_t* (*signal_set)(void* ctx);
+       const ecuio_signal_set_t* (*signal_set)(void* ctx);
             /* re-query after accept_response — probe results reshape it */
-   } qttune_profile_ops;
+   } ecuio_profile_ops;
    ```
 
    Ownership division: core owns threading, filter registration from the channel list, teardown ordering, and transport routing. A buggy profile can mishandle only its own state. This table is, deliberately, the seed of the v0.5.0 plugin API — decide it consciously now so it does not become an accidental ABI later.
@@ -74,7 +74,7 @@ Additionally, the request loop's placement is wrong: it lives in the J2534 trans
 
 ## Consequences
 
-- The bridge's hardcoded `qttune_mock_signal_set()` disappears; LiveView renders whatever the active set contains, and Known Issue #21 closes for every profiled transport.
+- The bridge's hardcoded `ecuio_mock_signal_set()` disappears; LiveView renders whatever the active set contains, and Known Issue #21 closes for every profiled transport.
 - ADR-0012's "one PID per session" ends with the `obd2` scheduler; `?poll=` remains as the single-PID convenience and the probe's primitive.
 - Probe quality depends on splitting ReadMsgs timeout from hard error (Known Issue #11) — the probe elevates that issue from nice-to-have to load-bearing.
 - The channel-decl list is the one surface a plugin can request filters through; it must be bounded and validated at registration (plugins are eventually native code selected by name from a folder — opt-in, like all tuner software, but the blast radius is the filter table, not the process).

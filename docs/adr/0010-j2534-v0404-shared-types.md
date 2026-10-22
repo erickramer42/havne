@@ -14,7 +14,7 @@ because the fake diverges in exactly the same way.
 
 ## Decision
 
-- `core/include/qttune/j2534_ptypes.h` is the single definition of
+- `core/include/ecuio/j2534_ptypes.h` is the single definition of
   `PASSTHRU_MSG` and the J2534 constants. The loader, the surrogate
   and the fake all use it.
 - That header is verified against the canonical v04.04 definitions,

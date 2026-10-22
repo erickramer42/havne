@@ -5,15 +5,15 @@
 //     and round-trip every tick through the mock signal set (test_core);
 //     CoreTest.MockFramesDecodeAgainstMockSignalSet covers the worker.
 
-#ifndef QTTUNE_MOCK_DRIVE_CYCLE_H
-#define QTTUNE_MOCK_DRIVE_CYCLE_H
+#ifndef ECUIO_MOCK_DRIVE_CYCLE_H
+#define ECUIO_MOCK_DRIVE_CYCLE_H
 
-#include "qttune/signal_sets.h"
+#include "ecuio/signal_sets.h"
 
 #include <cmath>
 #include <cstdint>
 
-namespace qttune_mock {
+namespace ecuio_mock {
 
 /* Scripted drive cycle for the mock transport. A small vehicle model
  * (gear ratios, a torque curve, traction, drag and two heat
@@ -491,10 +491,10 @@ inline uint16_t clamp_u16(float v)
  *   [6]    load     uint8, scale 100/255
  *   [7..8] MAF      LE uint16, scale 0.01 g/s
  *   [9]    oil      uint8, offset -40
- *   [10..11] pad, up to the CAN FD length (QTTUNE_MOCK_TELEMETRY_PAYLOAD_LEN)
+ *   [10..11] pad, up to the CAN FD length (ECUIO_MOCK_TELEMETRY_PAYLOAD_LEN)
  * The transport never decodes (rule 2); the tests round-trip every
- * tick of the cycle through qttune_mock_signal_set(). */
-inline void encode_payload(const DriveCycle& s, uint8_t out[QTTUNE_MOCK_TELEMETRY_PAYLOAD_LEN])
+ * tick of the cycle through ecuio_mock_signal_set(). */
+inline void encode_payload(const DriveCycle& s, uint8_t out[ECUIO_MOCK_TELEMETRY_PAYLOAD_LEN])
 {
     const uint16_t rpm_raw = clamp_u16(s.rpm / 0.25f);
     out[0] = static_cast<uint8_t>(rpm_raw & 0xFF);
@@ -514,6 +514,6 @@ inline void encode_payload(const DriveCycle& s, uint8_t out[QTTUNE_MOCK_TELEMETR
     out[10] = 0; out[11] = 0;   /* pad */
 }
 
-} // namespace qttune_mock
+} // namespace ecuio_mock
 
-#endif /* QTTUNE_MOCK_DRIVE_CYCLE_H */
+#endif /* ECUIO_MOCK_DRIVE_CYCLE_H */

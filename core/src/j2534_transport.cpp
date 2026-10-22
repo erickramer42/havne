@@ -9,15 +9,15 @@
 // CI: non-Windows builds a linking stub; core.cpp routes j2534://
 //     only on _WIN32, so the stub is unreachable there
 
-#include "qttune/core.h"
-#include "qttune/internal.h"
+#include "ecuio/core.h"
+#include "ecuio/internal.h"
 #include "session.h"
-#include "qttune/j2534.h"
+#include "ecuio/j2534.h"
 #include "pid_scheduler.h"
 #include "j2534_backoff.h"
 #include "uri_query.h"
-#include "qttune/profile.h"
-#include "qttune/signal_sets.h"
+#include "ecuio/profile.h"
+#include "ecuio/signal_sets.h"
 
 #include <atomic>
 #include <chrono>
@@ -27,7 +27,7 @@
 
 #ifdef _WIN32
 
-#include "qttune/j2534_ptypes.h"   /* FLOW_CONTROL_FILTER, CAN_29BIT_ID,
+#include "ecuio/j2534_ptypes.h"    /* FLOW_CONTROL_FILTER, CAN_29BIT_ID,
                                       TX_ISO15765_FRAME_PAD */
 
 namespace {
@@ -59,7 +59,7 @@ constexpr uint32_t J2534_DRAIN_READ_TIMEOUT_MS  = 20;
  * docs. */
 constexpr uint32_t J2534_ADDR_LEN       = 4;
 constexpr uint32_t J2534_FILTER_MSG_LEN = 4;
-constexpr uint32_t J2534_TX_ID_DEFAULT = QTTUNE_OBD2_TESTER_ARB_ID;  /* shared
+constexpr uint32_t J2534_TX_ID_DEFAULT = ECUIO_OBD2_TESTER_ARB_ID;   /* shared
                                        * macro — cannot drift from the
                                        * obd2 set's own declaration */
 constexpr uint32_t J2534_CAN_ID_MAX     = 0x1FFFFFFFu;   /* 29-bit */
@@ -77,7 +77,7 @@ constexpr uint32_t J2534_HEALTH_QUIET_CYCLES = 10;
  * clears hard failure and the backoff but reads as VEHICLE_TIMEOUT,
  * not OK, and leaves the quiet count as it is. */
 struct read_outcome {
-    qttune_status_t status;
+    ecuio_status_t status;
     bool got;
     bool matched;
 };
@@ -115,9 +115,9 @@ struct j2534_channel {
     uint32_t addr_flags = 0;   /* CAN_29BIT_ID when either id > 11 bits */
 };
 
-struct qttune_j2534_transport {
-    qttune_session_t* session = nullptr;
-    qttune_j2534_handle_t* handle = nullptr;
+struct ecuio_j2534_transport {
+    ecuio_session_t* session = nullptr;
+    ecuio_j2534_handle_t* handle = nullptr;
     unsigned long channel = 0;
     /* Connect parameters from the URI query. baud == 0 is the
      * "unset" sentinel — the URI parser rejects an explicit baud=0 —
@@ -138,18 +138,18 @@ struct qttune_j2534_transport {
      *                ?filter=/?txid= as overrides. ?filter= wins
      *                outright (single-channel shorthand); ?txid=
      *                alone rewrites every derived tx. Bounded by
-     *                QTTUNE_MAX_CHANNELS; each entry owns its filter
+     *                ECUIO_MAX_CHANNELS; each entry owns its filter
      *                id and CAN_29BIT flags. Frozen pre-thread. */
     bool has_poll = false;
     uint32_t poll_pid = 0;
-    j2534_channel chans[QTTUNE_MAX_CHANNELS] = {};
+    j2534_channel chans[ECUIO_MAX_CHANNELS] = {};
     uint32_t chan_count = 0;
-    const QttuneSignalSet* set = nullptr;   /* frozen at attach;
+    const ecuio_signal_set_t* set = nullptr; /* frozen at attach;
                                              * worker routes PID->tx */
-    qttune_pid_scheduler sched;
+    ecuio_pid_scheduler sched;
     std::atomic<bool> stop_requested{false};
     std::thread worker;
-    qttune_transport_t* self = nullptr;
+    ecuio_transport_t* self = nullptr;
 };
 
 /* Collected URI query parameters — parse_query fills, resolve_uri
@@ -170,13 +170,13 @@ struct j2534_uri_params {
  * message_id (= the channel's rx_id). O(set->count) per request —
  * a few dozen defs at most; this deliberately keeps pid_scheduler.h
  * per-PID-rx-free so the scheduler stays profile-agnostic. */
-uint32_t rx_for_pid(const QttuneSignalSet* set, uint8_t pid)
+uint32_t rx_for_pid(const ecuio_signal_set_t* set, uint8_t pid)
 {
     if (set == nullptr) {
         return 0;
     }
     for (uint32_t i = 0; i < set->count; ++i) {
-        const QttuneSignalDef* d = &set->defs[i];
+        const ecuio_signal_def_t* d = &set->defs[i];
         if (d->mux_length > 0 && (d->mux_key & 0xFFu) == pid) {
             return d->message_id;
         }
@@ -186,7 +186,7 @@ uint32_t rx_for_pid(const QttuneSignalSet* set, uint8_t pid)
 
 /* Channel serving a receive id; falls back to channel 0 (single-
  * channel sets always match on the first iteration anyway). */
-uint32_t channel_index_for_rx(const qttune_j2534_transport* t, uint32_t rx)
+uint32_t channel_index_for_rx(const ecuio_j2534_transport* t, uint32_t rx)
 {
     for (uint32_t i = 0; i < t->chan_count; ++i) {
         if (t->chans[i].rx_id == rx) {
@@ -200,8 +200,8 @@ uint32_t channel_index_for_rx(const qttune_j2534_transport* t, uint32_t rx)
  * fails: bounded by construction, and malformed set entries are
  * skipped. A lone ?txid= on a profile without channels yields no
  * channel — there is no receive ID to register a filter for. */
-void resolve_channels(qttune_j2534_transport* t,
-                      const QttuneSignalSet* set,
+void resolve_channels(ecuio_j2534_transport* t,
+                      const ecuio_signal_set_t* set,
                       const j2534_uri_params& params)
 {
     uint32_t n = 0;
@@ -218,7 +218,7 @@ void resolve_channels(qttune_j2534_transport* t,
         n = 1;
     } else if (set != nullptr) {
         for (uint32_t i = 0; i < set->channel_count &&
-                            n < QTTUNE_MAX_CHANNELS; ++i) {
+                            n < ECUIO_MAX_CHANNELS; ++i) {
             const uint32_t rx = set->channels[i].rx_id;
             if (rx == 0) {
                 continue;
@@ -237,7 +237,7 @@ void resolve_channels(qttune_j2534_transport* t,
     for (uint32_t i = 0; i < n; ++i) {
         t->chans[i].addr_flags =
             (t->chans[i].rx_id > 0x7FF || t->chans[i].tx_id > 0x7FF)
-                ? QTTUNE_PT_CAN_29BIT_ID : 0;
+                ? ECUIO_PT_CAN_29BIT_ID : 0;
     }
     t->chan_count = n;
 }
@@ -245,22 +245,22 @@ void resolve_channels(qttune_j2534_transport* t,
 /* Read one frame and dispatch it if it matches a channel. Returns the
  * outcome: status, whether a frame arrived, and whether it matched. An
  * unmatched delivery is kept distinct from silence (see read_outcome). */
-read_outcome pump_one(qttune_j2534_transport* t, uint32_t timeout_ms)
+read_outcome pump_one(ecuio_j2534_transport* t, uint32_t timeout_ms)
 {
     bool got = false;
-    qttune_frame_t frame{};
-    qttune_status_t st = qttune_j2534_read_frame(t->handle, t->channel,
-                                                 &frame, timeout_ms,
-                                                 &got);
-    if (st != QTTUNE_OK || !got) {
+    ecuio_frame_t frame{};
+    ecuio_status_t st = ecuio_j2534_read_frame(t->handle, t->channel,
+                                               &frame, timeout_ms,
+                                               &got);
+    if (st != ECUIO_OK || !got) {
         return {st, false, false};   /* no match if no frame */
     }
 
     if (t->chan_count == 0) {
-        qttune_session_dispatch_callbacks(t->session, &frame);
+        ecuio_session_dispatch_callbacks(t->session, &frame);
         /* no channels — verbatim, id 0 (raw passive) counts as matched
          * since we explicitly requested verbatim delivery. */
-        return {QTTUNE_OK, true, true};
+        return {ECUIO_OK, true, true};
     }
 
     if (frame.data_length >= J2534_ADDR_LEN) {
@@ -276,15 +276,15 @@ read_outcome pump_one(qttune_j2534_transport* t, uint32_t timeout_ms)
                     frame.data_length - J2534_ADDR_LEN);
                 memmove(frame.data, frame.data + J2534_ADDR_LEN, n);
                 frame.data_length = n;
-                qttune_session_dispatch_callbacks(t->session, &frame);
-                return {QTTUNE_OK, true, true};   /* matched */
+                ecuio_session_dispatch_callbacks(t->session, &frame);
+                return {ECUIO_OK, true, true};    /* matched */
             }
         }
         /* no match: a frame for another ID got past the adapter's
          * filter. Dropped, but it still proves the adapter is reading */
-        return {QTTUNE_OK, true, false};
+        return {ECUIO_OK, true, false};
     }
-    return {QTTUNE_OK, true, false};
+    return {ECUIO_OK, true, false};
 }
 
 /* Read-side link health (Known Issue #11; full table in docs/j2534.md).
@@ -296,19 +296,19 @@ read_outcome pump_one(qttune_j2534_transport* t, uint32_t timeout_ms)
  *   unmatched frame    -> VEHICLE_TIMEOUT at once, backoff cleared
  *   quiet read         -> after J2534_HEALTH_QUIET_CYCLES in a row,
  *                         VEHICLE_TIMEOUT and backoff cleared */
-void update_health(qttune_j2534_transport* t, int32_t& health,
+void update_health(ecuio_j2534_transport* t, int32_t& health,
                    uint32_t& backoff_ms, uint32_t& quiet_runs,
-                   bool write_latch, qttune_status_t st,
+                   bool write_latch, ecuio_status_t st,
                    bool got, bool matched)
 {
     /* Ordering: a hard READ failure outranks everything, including a
      * latched write failure, so it's evaluated FIRST. pump_one
-     * guarantees got implies st == QTTUNE_OK, so any status other than
-     * QTTUNE_OK and the vehicle-timeout translation is hard. */
-    if (st != QTTUNE_OK && st != QTTUNE_ERR_VEHICLE_TIMEOUT) {
-        if (health != QTTUNE_ERR_TRANSPORT_HARD_FAILURE) {
-            t->session->last_error.store(QTTUNE_ERR_TRANSPORT_HARD_FAILURE);
-            health = QTTUNE_ERR_TRANSPORT_HARD_FAILURE;
+     * guarantees got implies st == ECUIO_OK, so any status other than
+     * ECUIO_OK and the vehicle-timeout translation is hard. */
+    if (st != ECUIO_OK && st != ECUIO_ERR_VEHICLE_TIMEOUT) {
+        if (health != ECUIO_ERR_TRANSPORT_HARD_FAILURE) {
+            t->session->last_error.store(ECUIO_ERR_TRANSPORT_HARD_FAILURE);
+            health = ECUIO_ERR_TRANSPORT_HARD_FAILURE;
             t->session->error_count.fetch_add(1);
             backoff_ms = J2534_BACKOFF_BASE_MS;
         }
@@ -324,14 +324,14 @@ void update_health(qttune_j2534_transport* t, int32_t& health,
         return;
     }
 
-    /* Remaining statuses are QTTUNE_OK with/without a frame, or
-     * QTTUNE_ERR_VEHICLE_TIMEOUT (never with a frame, per pump_one). */
+    /* Remaining statuses are ECUIO_OK with/without a frame, or
+     * ECUIO_ERR_VEHICLE_TIMEOUT (never with a frame, per pump_one). */
     if (got) {
         if (matched) {
             /* Matched response: full recovery */
-            if (health != QTTUNE_OK) {
-                t->session->last_error.store(QTTUNE_OK);
-                health = QTTUNE_OK;
+            if (health != ECUIO_OK) {
+                t->session->last_error.store(ECUIO_OK);
+                health = ECUIO_OK;
             }
             backoff_ms = 0;
             quiet_runs = 0;
@@ -340,9 +340,9 @@ void update_health(qttune_j2534_transport* t, int32_t& health,
              * hard failure and backoff clear — but this
              * is not a response to us: transition to quiet at once
              * (no debounce), quiet_runs left as it is, no episode. */
-            if (health != QTTUNE_ERR_VEHICLE_TIMEOUT) {
-                t->session->last_error.store(QTTUNE_ERR_VEHICLE_TIMEOUT);
-                health = QTTUNE_ERR_VEHICLE_TIMEOUT;
+            if (health != ECUIO_ERR_VEHICLE_TIMEOUT) {
+                t->session->last_error.store(ECUIO_ERR_VEHICLE_TIMEOUT);
+                health = ECUIO_ERR_VEHICLE_TIMEOUT;
             }
             backoff_ms = 0;
         }
@@ -357,9 +357,9 @@ void update_health(qttune_j2534_transport* t, int32_t& health,
     if (quiet_runs < J2534_HEALTH_QUIET_CYCLES) {
         return;
     }
-    if (health != QTTUNE_ERR_VEHICLE_TIMEOUT) {
-        t->session->last_error.store(QTTUNE_ERR_VEHICLE_TIMEOUT);
-        health = QTTUNE_ERR_VEHICLE_TIMEOUT;
+    if (health != ECUIO_ERR_VEHICLE_TIMEOUT) {
+        t->session->last_error.store(ECUIO_ERR_VEHICLE_TIMEOUT);
+        health = ECUIO_ERR_VEHICLE_TIMEOUT;
     }
     backoff_ms = 0;
 }
@@ -371,16 +371,16 @@ void update_health(qttune_j2534_transport* t, int32_t& health,
  * successful write clears it at once, since an accepted write proves
  * requests flow. A hard READ failure outranks it; quiet reads can't
  * downgrade it. */
-void handle_write_result(qttune_j2534_transport* t,
+void handle_write_result(ecuio_j2534_transport* t,
                          int32_t& health, uint32_t& backoff_ms,
-                         bool& write_failed, qttune_status_t wst)
+                         bool& write_failed, ecuio_status_t wst)
 {
-    if (wst == QTTUNE_OK) {
+    if (wst == ECUIO_OK) {
         if (write_failed) {
             write_failed = false;
-            if (health == QTTUNE_ERR_REQUEST_FAILED) {
-                t->session->last_error.store(QTTUNE_OK);
-                health = QTTUNE_OK;
+            if (health == ECUIO_ERR_REQUEST_FAILED) {
+                t->session->last_error.store(ECUIO_OK);
+                health = ECUIO_OK;
                 backoff_ms = 0;
             }
         }
@@ -388,13 +388,13 @@ void handle_write_result(qttune_j2534_transport* t,
     }
 
     write_failed = true;
-    if (health == QTTUNE_ERR_TRANSPORT_HARD_FAILURE) {
+    if (health == ECUIO_ERR_TRANSPORT_HARD_FAILURE) {
         return;  /* hard read failure outranks, don't change state */
     }
-    if (health != QTTUNE_ERR_REQUEST_FAILED) {
+    if (health != ECUIO_ERR_REQUEST_FAILED) {
         /* Transition INTO requests-failing: ONE episode, backoff at base */
-        t->session->last_error.store(QTTUNE_ERR_REQUEST_FAILED);
-        health = QTTUNE_ERR_REQUEST_FAILED;
+        t->session->last_error.store(ECUIO_ERR_REQUEST_FAILED);
+        health = ECUIO_ERR_REQUEST_FAILED;
         t->session->error_count.fetch_add(1);
         backoff_ms = J2534_BACKOFF_BASE_MS;
     }
@@ -404,7 +404,7 @@ void handle_write_result(qttune_j2534_transport* t,
 /* Backoff-aware sleep, abortable within 20 ms of a stop request —
  * a 5 s capped backoff must not turn into a 5 s join at detach.
  * Returns true if stop was requested (caller should exit promptly). */
-bool backoff_sleep(qttune_j2534_transport* t, uint32_t ms)
+bool backoff_sleep(ecuio_j2534_transport* t, uint32_t ms)
 {
     const auto deadline = std::chrono::steady_clock::now() +
         std::chrono::milliseconds(ms);
@@ -441,11 +441,11 @@ bool backoff_sleep(qttune_j2534_transport* t, uint32_t ms)
  * A write failure latches REQUEST_FAILED; only a successful write
  * clears it — reads cannot, and a hard read failure outranks it
  * (update_health evaluates hard first). */
-void j2534_worker(qttune_j2534_transport* t)
+void j2534_worker(ecuio_j2534_transport* t)
 {
     const bool sched_mode = !t->has_poll && (t->sched.count > 0);
 
-    int32_t health = QTTUNE_OK;
+    int32_t health = ECUIO_OK;
     bool write_failed = false;   /* latched and cleared only by
                                   * handle_write_result */
     uint32_t backoff_ms = 0;   /* 0 = healthy cadence */
@@ -458,19 +458,19 @@ void j2534_worker(qttune_j2534_transport* t)
             /* The request doubles as the recovery probe, so it is sent
              * even while hard-failed: replies only follow writes.
              * Backoff stretches the cycle, which slows the probing. A
-             * failed write latches QTTUNE_ERR_REQUEST_FAILED through
+             * failed write latches ECUIO_ERR_REQUEST_FAILED through
              * handle_write_result; it is never a hard failure. */
             uint8_t pid = 0;
-            (void)qttune_sched_next(&t->sched, &pid);
+            (void)ecuio_sched_next(&t->sched, &pid);
             const uint32_t ci =
                 channel_index_for_rx(t, rx_for_pid(t->set, pid));
             uint8_t req[6];
             build_mode01_request(req, t->chans[ci].tx_id, pid);
             uint32_t written = 0;
-            qttune_status_t wst = qttune_j2534_write_frame(
+            ecuio_status_t wst = ecuio_j2534_write_frame(
                 t->handle, t->channel, req, sizeof(req),
                 t->chans[ci].addr_flags |
-                    QTTUNE_PT_TX_ISO15765_FRAME_PAD,
+                    ECUIO_PT_TX_ISO15765_FRAME_PAD,
                 0, &written);
             handle_write_result(t, health, backoff_ms, write_failed, wst);
 
@@ -512,12 +512,12 @@ void j2534_worker(qttune_j2534_transport* t)
                 t, rx_for_pid(t->set, static_cast<uint8_t>(t->poll_pid)));
             build_mode01_request(req, t->chans[ci].tx_id, t->poll_pid);
             uint32_t written = 0;
-            qttune_status_t wst = qttune_j2534_write_frame(
+            ecuio_status_t wst = ecuio_j2534_write_frame(
                 t->handle, t->channel, req, sizeof(req),
                 t->chans[ci].addr_flags |   /* same channel as tx_id,
                                              * so a 29-bit channel gets
                                              * its CAN_29BIT_ID flag */
-                    QTTUNE_PT_TX_ISO15765_FRAME_PAD,
+                    ECUIO_PT_TX_ISO15765_FRAME_PAD,
                 0, &written);
             handle_write_result(t, health, backoff_ms, write_failed, wst);
 
@@ -611,7 +611,7 @@ bool parse_number(const char* s, size_t len, unsigned long* out_val)
  *              profile's tx, else 0x7E0
  *       poll   PID 1..0xFF — single-PID Mode-01 loop; overrides the
  *              profile's rotation
- *       profile core's key: qttune_session_create has validated it
+ *       profile core's key: ecuio_session_create has validated it
  *              before attach
  *   - unknown keys, and the shared grammar's malformed forms (missing
  *     '=', empty segments, a trailing '&', a bare trailing '?';
@@ -621,9 +621,9 @@ bool parse_number(const char* s, size_t len, unsigned long* out_val)
  *     from the profile: ?filter= supplies one directly, otherwise the
  *     profile's declared channels do. Enforced in j2534_attach, where
  *     both are known. */
-qttune_status_t parse_query(const char* query, j2534_uri_params* p)
+ecuio_status_t parse_query(const char* query, j2534_uri_params* p)
 {
-    const bool ok = qttune_uri::for_each_param(query, [p](const qttune_uri::param& q) {
+    const bool ok = ecuio_uri::for_each_param(query, [p](const ecuio_uri::param& q) {
         unsigned long v = 0;
         if (q.is("baud")) {
             if (!parse_number(q.val, q.val_len, &v) || v == 0) {
@@ -639,7 +639,7 @@ qttune_status_t parse_query(const char* query, j2534_uri_params* p)
         } else if (q.is("profile")) {
             /* ADR-0013: the profile NAME rides in the URI, but
              * selection/validation is core's — it runs in
-             * qttune_session_create BEFORE this parser and before any
+             * ecuio_session_create BEFORE this parser and before any
              * DLL load, so an unknown or malformed name never gets
              * here. */
         } else if (q.is("poll")) {
@@ -665,7 +665,7 @@ qttune_status_t parse_query(const char* query, j2534_uri_params* p)
         return true;
     });
     if (!ok) {
-        return QTTUNE_ERR_NO_TRANSPORT;
+        return ECUIO_ERR_NO_TRANSPORT;
     }
 
     /* The poll-needs-a-channel rule lives in j2534_attach, not here:
@@ -674,7 +674,7 @@ qttune_status_t parse_query(const char* query, j2534_uri_params* p)
      * that declares its own (?profile=obd2&poll=0x0C). Syntax is this
      * function's job; coupling is attach's — and attach still fires
      * before any DLL load, so malformed URIs stay fail-fast. */
-    return QTTUNE_OK;
+    return ECUIO_OK;
 }
 
 /* Resolve a j2534:// URI to a concrete dll_path + connect/adoption
@@ -682,45 +682,45 @@ qttune_status_t parse_query(const char* query, j2534_uri_params* p)
  * split off and parsed before the selector is resolved, so it never
  * reaches LoadLibraryEx or the vendor-name match. Selector: empty =
  * first device; path-like = direct load; else vendor-name match. All
- * misses are QTTUNE_ERR_NO_TRANSPORT. */
-qttune_status_t resolve_uri(const char* uri, qttune_j2534_device_t* dev,
-                            j2534_uri_params* params)
+ * misses are ECUIO_ERR_NO_TRANSPORT. */
+ecuio_status_t resolve_uri(const char* uri, ecuio_j2534_device_t* dev,
+                           j2534_uri_params* params)
 {
     const char* rest = uri + 8;   /* core.cpp verified the prefix */
 
     const char* q = strchr(rest, '?');
 
-    char selector[QTTUNE_J2534_DLL_PATH_LEN];
+    char selector[ECUIO_J2534_DLL_PATH_LEN];
     const size_t n = (q != nullptr)
                      ? static_cast<size_t>(q - rest)
                      : strlen(rest);
     if (n >= sizeof(selector)) {
-        return QTTUNE_ERR_NO_TRANSPORT;   /* longer than any legal selector */
+        return ECUIO_ERR_NO_TRANSPORT;    /* longer than any legal selector */
     }
     memcpy(selector, rest, n);
     selector[n] = '\0';
 
     if (q != nullptr) {
-        qttune_status_t st = parse_query(q + 1, params);
-        if (st != QTTUNE_OK) {
+        ecuio_status_t st = parse_query(q + 1, params);
+        if (st != ECUIO_OK) {
             return st;   /* fail fast — no DLL load on malformed URIs */
         }
     }
 
-    qttune_j2534_device_t* devices = nullptr;
+    ecuio_j2534_device_t* devices = nullptr;
     uint32_t count = 0;
 
     if (selector[0] == '\0') {
-        qttune_status_t st = qttune_j2534_discover_devices(&devices, &count);
-        if (st != QTTUNE_OK) {
+        ecuio_status_t st = ecuio_j2534_discover_devices(&devices, &count);
+        if (st != ECUIO_OK) {
             return st;
         }
         if (count == 0) {
-            return QTTUNE_ERR_NO_TRANSPORT;   /* no vendors installed */
+            return ECUIO_ERR_NO_TRANSPORT;    /* no vendors installed */
         }
         *dev = devices[0];   /* first device — documented default */
-        qttune_j2534_free_devices(devices);
-        return QTTUNE_OK;
+        ecuio_j2534_free_devices(devices);
+        return ECUIO_OK;
     }
 
     /* Path-like selector: contains a separator or a .dll suffix.
@@ -729,16 +729,16 @@ qttune_status_t resolve_uri(const char* uri, qttune_j2534_device_t* dev,
         strchr(selector, '/') != nullptr ||
         (strlen(selector) >= 4 &&
          _stricmp(selector + strlen(selector) - 4, ".dll") == 0)) {
-        if (strlen(selector) >= QTTUNE_J2534_DLL_PATH_LEN) {
-            return QTTUNE_ERR_NO_TRANSPORT;
+        if (strlen(selector) >= ECUIO_J2534_DLL_PATH_LEN) {
+            return ECUIO_ERR_NO_TRANSPORT;
         }
         memcpy(dev->dll_path, selector, strlen(selector) + 1);
-        return QTTUNE_OK;
+        return ECUIO_OK;
     }
 
     /* Otherwise: vendor-name match against discovery, case-insensitive. */
-    qttune_status_t st = qttune_j2534_discover_devices(&devices, &count);
-    if (st != QTTUNE_OK) {
+    ecuio_status_t st = ecuio_j2534_discover_devices(&devices, &count);
+    if (st != ECUIO_OK) {
         return st;
     }
     bool matched = false;
@@ -749,20 +749,20 @@ qttune_status_t resolve_uri(const char* uri, qttune_j2534_device_t* dev,
             break;
         }
     }
-    qttune_j2534_free_devices(devices);
+    ecuio_j2534_free_devices(devices);
     if (!matched) {
-        return QTTUNE_ERR_NO_TRANSPORT;
+        return ECUIO_ERR_NO_TRANSPORT;
     }
-    return QTTUNE_OK;
+    return ECUIO_OK;
 }
 
-qttune_status_t j2534_start(qttune_session_t* session, void* impl)
+ecuio_status_t j2534_start(ecuio_session_t* session, void* impl)
 {
     (void)session;
-    auto* t = static_cast<qttune_j2534_transport*>(impl);
+    auto* t = static_cast<ecuio_j2534_transport*>(impl);
     if (t->worker.joinable()) {
-        return QTTUNE_OK;   /* internal.h: second start on a live
-                         * transport returns QTTUNE_OK */
+        return ECUIO_OK;    /* internal.h: second start on a live
+                         * transport returns ECUIO_OK */
     }
 
     for (uint32_t i = 0; i < t->chan_count; ++i) {
@@ -772,20 +772,20 @@ qttune_status_t j2534_start(qttune_session_t* session, void* impl)
         pack_be32(mask, 0xFFFFFFFFu);   /* exact-ID match, all 4 bytes */
         pack_be32(pattern, t->chans[i].rx_id);
         pack_be32(fc, t->chans[i].tx_id);
-        qttune_status_t st = qttune_j2534_start_msg_filter(
+        ecuio_status_t st = ecuio_j2534_start_msg_filter(
             t->handle, t->channel,
-            QTTUNE_PT_FLOW_CONTROL_FILTER,
+            ECUIO_PT_FLOW_CONTROL_FILTER,
             mask, J2534_FILTER_MSG_LEN,
             pattern, J2534_FILTER_MSG_LEN,
             fc, J2534_FILTER_MSG_LEN,
-            t->chans[i].addr_flags | QTTUNE_PT_TX_ISO15765_FRAME_PAD,
+            t->chans[i].addr_flags | ECUIO_PT_TX_ISO15765_FRAME_PAD,
             &t->chans[i].filter_id);
-        if (st != QTTUNE_OK) {
+        if (st != ECUIO_OK) {
             /* Unwind the ones already registered — no partial
              * filter state survives a failed start. */
             for (uint32_t j = 0; j < i; ++j) {
                 if (t->chans[j].filter_active) {
-                    (void)qttune_j2534_stop_msg_filter(
+                    (void)ecuio_j2534_stop_msg_filter(
                         t->handle, t->channel, t->chans[j].filter_id);
                     t->chans[j].filter_active = false;
                 }
@@ -801,72 +801,72 @@ qttune_status_t j2534_start(qttune_session_t* session, void* impl)
     } catch (...) {
         for (uint32_t i = 0; i < t->chan_count; ++i) {
             if (t->chans[i].filter_active) {
-                (void)qttune_j2534_stop_msg_filter(t->handle, t->channel,
-                                                   t->chans[i].filter_id);
+                (void)ecuio_j2534_stop_msg_filter(t->handle, t->channel,
+                                                  t->chans[i].filter_id);
                 t->chans[i].filter_active = false;
             }
         }
-        return QTTUNE_ERR_OUT_OF_MEMORY;
+        return ECUIO_ERR_OUT_OF_MEMORY;
     }
-    return QTTUNE_OK;
+    return ECUIO_OK;
 }
 
 /* detach(session, impl) — void per internal.h, called exactly once from
- * qttune_session_close AFTER the closed flag is set. Worker joined
+ * ecuio_session_close AFTER the closed flag is set. Worker joined
  * FIRST (never alive while vendor code could be unmapped), filter
  * stop best-effort before disconnect, then free impl AND the wrapper. */
-void j2534_detach(qttune_session_t* session, void* impl)
+void j2534_detach(ecuio_session_t* session, void* impl)
 {
     (void)session;
-    auto* t = static_cast<qttune_j2534_transport*>(impl);
+    auto* t = static_cast<ecuio_j2534_transport*>(impl);
     if (t->worker.joinable()) {
         t->stop_requested.store(true);
         t->worker.join();
     }
     for (uint32_t i = 0; i < t->chan_count; ++i) {
         if (t->chans[i].filter_active) {
-            (void)qttune_j2534_stop_msg_filter(t->handle, t->channel,
-                                               t->chans[i].filter_id);
+            (void)ecuio_j2534_stop_msg_filter(t->handle, t->channel,
+                                              t->chans[i].filter_id);
             t->chans[i].filter_active = false;
         }
     }
-    (void)qttune_j2534_disconnect_channel(t->handle, t->channel);
-    (void)qttune_j2534_close(t->handle);
+    (void)ecuio_j2534_disconnect_channel(t->handle, t->channel);
+    (void)ecuio_j2534_close(t->handle);
 
-    qttune_transport_t* wrap = t->self;
+    ecuio_transport_t* wrap = t->self;
     delete t;      /* impl first */
     delete wrap;   /* then the envelope — internal.h contract */
 }
 
 /* Ops table: static storage owned by this TU (internal.h contract),
  * defined before attach references it. */
-const qttune_transport_ops_t kJ2534Ops = {
+const ecuio_transport_ops_t kJ2534Ops = {
     j2534_start,
     j2534_detach
 };
 
-qttune_status_t j2534_attach(qttune_session_t* session, const char* uri)
+ecuio_status_t j2534_attach(ecuio_session_t* session, const char* uri)
 {
     /* Idempotence (internal.h contract, mock parity): checked FIRST,
      * before any device open, so the early-out leaks nothing. */
     if (session->transport != nullptr) {
-        return QTTUNE_OK;
+        return ECUIO_OK;
     }
 
-    qttune_j2534_device_t dev = {};
+    ecuio_j2534_device_t dev = {};
     j2534_uri_params params = {};
-    qttune_status_t st = resolve_uri(uri, &dev, &params);
-    if (st != QTTUNE_OK) {
+    ecuio_status_t st = resolve_uri(uri, &dev, &params);
+    if (st != ECUIO_OK) {
         return st;
     }
 
     /* Channels and scheduler are resolved before the device opens.
      * core.cpp installs the profile's set before calling attach. */
-    const QttuneSignalSet* set = qttune_session_signal_set(session);
+    const ecuio_signal_set_t* set = ecuio_session_signal_set(session);
 
-    auto* t = new (std::nothrow) qttune_j2534_transport();
+    auto* t = new (std::nothrow) ecuio_j2534_transport();
     if (t == nullptr) {
-        return QTTUNE_ERR_OUT_OF_MEMORY;
+        return ECUIO_ERR_OUT_OF_MEMORY;
     }
     t->set = set;
     resolve_channels(t, set, params);
@@ -880,7 +880,7 @@ qttune_status_t j2534_attach(qttune_session_t* session, const char* uri)
      * would make the worker's scheduler branch win and silently drop
      * the ?poll= PID. */
     const bool sched_mode = !params.has_poll
-                            && qttune_sched_from_set(&t->sched, set);
+                            && ecuio_sched_from_set(&t->sched, set);
 
     /* Coupling check: a request loop needs at least one channel to
      * receive on, or it writes against guaranteed silence forever (an
@@ -891,7 +891,7 @@ qttune_status_t j2534_attach(qttune_session_t* session, const char* uri)
      * omitting them. Fires before any hardware is touched. */
     if ((sched_mode || params.has_poll) && t->chan_count == 0) {
         delete t;
-        return QTTUNE_ERR_NO_TRANSPORT;
+        return ECUIO_ERR_NO_TRANSPORT;
     }
 
     /* Connect flags: ?flags= as given, plus CAN_29BIT_ID when the
@@ -902,40 +902,40 @@ qttune_status_t j2534_attach(qttune_session_t* session, const char* uri)
      * that mix is rejected here, before any DLL loads. */
     uint32_t wide_chans = 0;
     for (uint32_t i = 0; i < t->chan_count; ++i) {
-        if ((t->chans[i].addr_flags & QTTUNE_PT_CAN_29BIT_ID) != 0) {
+        if ((t->chans[i].addr_flags & ECUIO_PT_CAN_29BIT_ID) != 0) {
             ++wide_chans;
         }
     }
     if (wide_chans != 0 && wide_chans != t->chan_count) {
         delete t;
-        return QTTUNE_ERR_NO_TRANSPORT;
+        return ECUIO_ERR_NO_TRANSPORT;
     }
     const unsigned long connect_flags =
-        params.flags | ((wide_chans != 0) ? QTTUNE_PT_CAN_29BIT_ID : 0UL);
+        params.flags | ((wide_chans != 0) ? ECUIO_PT_CAN_29BIT_ID : 0UL);
 
-    qttune_j2534_handle_t* handle = nullptr;
-    st = qttune_j2534_open(&dev, &handle);
-    if (st != QTTUNE_OK) {
+    ecuio_j2534_handle_t* handle = nullptr;
+    st = ecuio_j2534_open(&dev, &handle);
+    if (st != ECUIO_OK) {
         delete t;
         return st;
     }
 
     unsigned long channel = 0;
-    st = qttune_j2534_connect_channel(handle, params.baud, connect_flags,
-                                      &channel);
-    if (st != QTTUNE_OK) {
-        qttune_j2534_close(handle);
+    st = ecuio_j2534_connect_channel(handle, params.baud, connect_flags,
+                                     &channel);
+    if (st != ECUIO_OK) {
+        ecuio_j2534_close(handle);
         delete t;
         return st;
     }
 
     /* The envelope: session owns it polymorphically; detach frees both. */
-    auto* wrap = new (std::nothrow) qttune_transport_t();
+    auto* wrap = new (std::nothrow) ecuio_transport_t();
     if (wrap == nullptr) {
-        qttune_j2534_disconnect_channel(handle, channel);
-        qttune_j2534_close(handle);
+        ecuio_j2534_disconnect_channel(handle, channel);
+        ecuio_j2534_close(handle);
         delete t;
-        return QTTUNE_ERR_OUT_OF_MEMORY;
+        return ECUIO_ERR_OUT_OF_MEMORY;
     }
     wrap->ops = &kJ2534Ops;
     wrap->impl = t;
@@ -950,13 +950,13 @@ qttune_status_t j2534_attach(qttune_session_t* session, const char* uri)
     t->poll_pid = static_cast<uint32_t>(params.poll_pid);
 
     session->transport = wrap;   /* session.h member — direct install */
-    return QTTUNE_OK;
+    return ECUIO_OK;
 }
 
 } // namespace
 
-extern "C" qttune_status_t qttune_j2534_transport_attach(
-    qttune_session_t* session, const char* uri)
+extern "C" ecuio_status_t ecuio_j2534_transport_attach(
+    ecuio_session_t* session, const char* uri)
 {
     return j2534_attach(session, uri);
 }
@@ -966,12 +966,12 @@ extern "C" qttune_status_t qttune_j2534_transport_attach(
 /* Linking stub — core.cpp routes j2534:// only on _WIN32, but the
  * symbol must exist for the headless-Unix CI build (core links
  * without Win32 J2534). */
-extern "C" qttune_status_t qttune_j2534_transport_attach(
-    qttune_session_t* session, const char* uri)
+extern "C" ecuio_status_t ecuio_j2534_transport_attach(
+    ecuio_session_t* session, const char* uri)
 {
     (void)session;
     (void)uri;
-    return QTTUNE_ERR_NO_TRANSPORT;
+    return ECUIO_ERR_NO_TRANSPORT;
 }
 
 #endif /* _WIN32 */

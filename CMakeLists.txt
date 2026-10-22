@@ -13,8 +13,8 @@ set(CMAKE_C_STANDARD 11)
 
 # QtTune version is the single source of truth; propagate to core + app
 configure_file(
-    ${CMAKE_CURRENT_SOURCE_DIR}/core/include/qttune/version.h.in
-    ${CMAKE_CURRENT_BINARY_DIR}/generated/qttune/version.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/core/include/ecuio/version.h.in
+    ${CMAKE_CURRENT_BINARY_DIR}/generated/ecuio/version.h
     @ONLY
 )
 
@@ -49,9 +49,9 @@ endif()
 # Qt's imported targets are scoped to the directory that found them and a
 # TARGET Qt6::Core test can't see them from here.
 foreach(_qttune_prop LINK_LIBRARIES INTERFACE_LINK_LIBRARIES)
-    get_target_property(_qttune_libs qttune-core ${_qttune_prop})
+    get_target_property(_qttune_libs ecuio-core ${_qttune_prop})
     if(_qttune_libs AND _qttune_libs MATCHES "Qt[0-9]*::")
         message(FATAL_ERROR
-            "qttune-core must not link Qt (${_qttune_prop}: ${_qttune_libs})")
+            "ecuio-core must not link Qt (${_qttune_prop}: ${_qttune_libs})")
     endif()
 endforeach()

@@ -15,8 +15,8 @@ kits, so the app itself is x64 for good.
 ## Decision
 
 Load 32-bit vendor DLLs in a separate Win32 executable,
-`qttune-j2534-surrogate`, driven by an app-side client
-(`core/src/j2534_surrogate_client.cpp`, the `qttune_j2534_sur_*`
+`ecuio-j2534-surrogate`, driven by an app-side client
+(`core/src/j2534_surrogate_client.cpp`, the `ecuio_j2534_sur_*`
 functions).
 
 - **Lifecycle.** The client creates every named object (pipe, file

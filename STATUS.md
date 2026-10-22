@@ -61,7 +61,7 @@ next.
     ok/quiet/fault/disconnected states were observed 2026-10-20,
     including a fault on the VX itself (quiet bus, no vehicle). That
     VX fault was under the rules before `946bdf5`; the same no-ACK
-    setup now latches `QTTUNE_ERR_REQUEST_FAILED`, which the UI shows as
+    setup now latches `ECUIO_ERR_REQUEST_FAILED`, which the UI shows as
     "Requests failing" in amber.
   - Dashboard: analog, ring, digital and bar gauges plus shift lights,
     fed by name through `SignalHub` so one layout serves both the mock
@@ -70,7 +70,7 @@ next.
   - Surrogate diagnostics: client and child write one session log,
     both stamped `HH:MM:SS.mmm`, so a GUI launch keeps the whole story
     without a stderr redirect; a second concurrent session gets its own
-    log (`995519b`, PR #11). With `QTTUNE_SUR_LOG_FRAMES=1` at launch,
+    log (`995519b`, PR #11). With `ECUIO_SUR_LOG_FRAMES=1` at launch,
     the child also logs every request and reply verbatim, so a bench or
     vehicle session records its payloads without screenshots.
 - **Not yet:**
@@ -116,7 +116,7 @@ next.
 +---------------+----------------+
                 | QtTuneBridge: worker -> GUI marshaling, 100 ms coalescing
 +---------------v----------------+
-| qttune-core (C++17, C ABI)     |  no Qt (CI-enforced)
+| ecuio-core (C++17, C ABI)      |  no Qt (CI-enforced)
 |  sessions + frame callbacks    |
 |  signal decode                 |
 |  transports: mock | j2534      |  selected by URI
@@ -125,7 +125,7 @@ next.
                 | named pipe (control + batched reads, ADR-0014)
                 | + kill-on-close job object
 +---------------v----------------+
-| qttune-j2534-surrogate (x86)   |  hosts 32-bit vendor DLLs
+| ecuio-j2534-surrogate (x86)    |  hosts 32-bit vendor DLLs
 +--------------------------------+
 ```
 
@@ -135,14 +135,14 @@ Three rules ([ADR-0001](docs/adr/0001-qt-free-core-c-abi.md)):
 2. **UI layers receive final display values, never raw frames.**
 3. **The C ABI is the FFI boundary.** That means opaque handles, flat
    functions, POD structs and append-only enums, every name carrying
-   the project prefix (`qttune_`, `Qttune`, `QTTUNE_`).
+   the core's prefix (`ecuio_`, `ECUIO_`).
 
 ## Data path
 
 ```
 mock worker (50 ms tick)  -or-  J2534 worker (ReadMsgs poll; in-proc,
       |                         or batched over the surrogate's pipe)
-      | qttune_frame_t
+      | ecuio_frame_t
       v
 core: snapshot dispatch to registered callbacks ............ ADR-0002
       | QtTuneBridge::onFrame (worker thread): copy, in-flight gate, post
@@ -312,7 +312,7 @@ an issue is resolved it is removed, and its number is not reused.
 11. **J2534 link health: real-bus coverage remains.**
     The worker's health machine is done and HARNESS-tested in-proc:
     hard read failures, a quiet debounce, a write latch with
-    `QTTUNE_ERR_REQUEST_FAILED`, unmatched frames read as quiet, and a
+    `ECUIO_ERR_REQUEST_FAILED`, unmatched frames read as quiet, and a
     growing backoff ([j2534.md](docs/j2534.md#session-lifecycle)). The
     bridge publishes it as `linkState` (`ok`, `quiet`, `requests`,
     `fault`, `disconnected`) and logs transitions, and the header
@@ -416,12 +416,12 @@ week or more or a design that needs an ADR first.
 These make a failed field session explainable, so they come first
 after the first vehicle session.
 
-- **Say why a connect failed (M).** `qttune_session_create` folds
+- **Say why a connect failed (M).** `ecuio_session_create` folds
   distinct causes into two codes. A refused `PassThruOpen` (a vendor
   status) and a DLL that won't load both read "failed to load
-  transport library" (`QTTUNE_ERR_LOAD_FAILED`); a malformed URI and an
+  transport library" (`ECUIO_ERR_LOAD_FAILED`); a malformed URI and an
   unknown profile both read "no transport available"
-  (`QTTUNE_ERR_NO_TRANSPORT`). Add status codes (the enum is append-only)
+  (`ECUIO_ERR_NO_TRANSPORT`). Add status codes (the enum is append-only)
   or a last-error string on the session API, and show the specific
   cause and vendor status in the Settings error line.
 - **Vendor error text (S).** After a failed vendor call, fetch

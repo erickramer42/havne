@@ -1,23 +1,23 @@
-#ifndef QTTUNE_SESSION_H
-#define QTTUNE_SESSION_H
+#ifndef ECUIO_SESSION_H
+#define ECUIO_SESSION_H
 
-#include "qttune/core.h"
-#include "qttune/internal.h"
-#include "qttune/signals.h"
+#include "ecuio/core.h"
+#include "ecuio/internal.h"
+#include "ecuio/signals.h"
 
 #include <atomic>
 #include <mutex>
 #include <utility>
 #include <vector>
 
-struct qttune_session {
+struct ecuio_session {
     std::atomic<bool> closed{false};
     std::mutex callback_mutex;
-    std::vector<std::pair<qttune_frame_callback_t, void*>> callbacks;
-    qttune_transport_t* transport = nullptr;
-    const QttuneSignalSet* active_signal_set = nullptr;
-    std::atomic<int32_t> last_error{QTTUNE_OK};
+    std::vector<std::pair<ecuio_frame_callback_t, void*>> callbacks;
+    ecuio_transport_t* transport = nullptr;
+    const ecuio_signal_set_t* active_signal_set = nullptr;
+    std::atomic<int32_t> last_error{ECUIO_OK};
     std::atomic<uint32_t> error_count{0};
 };
 
-#endif /* QTTUNE_SESSION_H */
+#endif /* ECUIO_SESSION_H */

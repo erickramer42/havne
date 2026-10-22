@@ -16,13 +16,13 @@ implemented.
 - A registration is identified by its `(callback, user_data)` pair.
   Registering a duplicate pair succeeds and is deduplicated.
   Unregistering is idempotent.
-- `qttune_session_dispatch_callbacks` (internal) copies the callback
+- `ecuio_session_dispatch_callbacks` (internal) copies the callback
   list under the mutex, then invokes the copy with the mutex
   released.
 - Callback contract:
   - Callbacks run on the worker thread and must not block.
-  - They must never call `qttune_session_close` or
-    `qttune_session_destroy`, because both join that worker.
+  - They must never call `ecuio_session_close` or
+    `ecuio_session_destroy`, because both join that worker.
 - Close discipline: an atomic closed flag is set before teardown
   starts, and detaching the transport joins the worker.
 
@@ -42,6 +42,6 @@ implemented.
   taken before it was removed.
 - A callback that needs to refer to itself must be a named free
   function. A lambda gives it no identity it can reliably name.
-- Thread-identity tests must go through `qttune_session_start` (the
+- Thread-identity tests must go through `ecuio_session_start` (the
   real worker). Calling dispatch by hand proves nothing about which
   thread a callback runs on.

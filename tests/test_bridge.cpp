@@ -301,12 +301,12 @@ TEST(BridgeTest, DispatchedShortFrameHonorsDataLength)
     ASSERT_TRUE(bridge.connectSession("mock://short").isEmpty());
 
     // Unique timestamp so we can find OUR row among mock frames
-    qttune_frame_t f{};
+    ecuio_frame_t f{};
     f.timestamp_us = 777777;   // steady-clock µs from the mock won't collide
     f.arbitration_id = 0x0C0;  // telemetry ID — decodes (gate-consistent)
     f.channel_id = 0;
     f.data_length = 4;          // the whole point: NOT 8
-    f.flags = QTTUNE_FRAME_FLAG_EXTENDED;   // was: f.is_extended = 1
+    f.flags = ECUIO_FRAME_FLAG_EXTENDED;    // was: f.is_extended = 1
     f.data[0] = 0x34;           // arbitrary RPM-looking bytes
     f.data[1] = 0x12;
     f.data[2] = 0xAA;
@@ -416,7 +416,7 @@ TEST(BridgeTest, BackpressureDropsAreCountedAndReported)
     QObject::connect(&bridge, &QtTuneBridge::droppedFramesChanged,
                      [&](int dropped) { ++notifyCount; lastReported = dropped; });
 
-    qttune_frame_t f{};
+    ecuio_frame_t f{};
     f.data_length = 8;
 
     const int inject = QtTuneBridge::maxInFlightForTesting() + 500;
@@ -463,20 +463,20 @@ namespace {
 /* Minimal two-signal set, built test-side. Plain assignments only —
    designated initializers are C++20, and MSVC accepts them where GCC
    rejects them. */
-void buildTestSignalSet(QttuneSignalDef (&defs)[2], QttuneSignalSet& set)
+void buildTestSignalSet(ecuio_signal_def_t (&defs)[2], ecuio_signal_set_t& set)
 {
-    QttuneSignalDef& rpm = defs[0];
+    ecuio_signal_def_t& rpm = defs[0];
     rpm = {};
     rpm.id = 1001;
     strncpy(rpm.name, "Engine_RPM", sizeof(rpm.name) - 1);
-    rpm.type = QTTUNE_SIGNAL_TYPE_UINT16;
+    rpm.type = ECUIO_SIGNAL_TYPE_UINT16;
     strncpy(rpm.unit, "RPM", sizeof(rpm.unit) - 1);
 
-    QttuneSignalDef& temp = defs[1];
+    ecuio_signal_def_t& temp = defs[1];
     temp = {};
     temp.id = 2001;
     strncpy(temp.name, "Coolant_Temp", sizeof(temp.name) - 1);
-    temp.type = QTTUNE_SIGNAL_TYPE_INT8;
+    temp.type = ECUIO_SIGNAL_TYPE_INT8;
     strncpy(temp.unit, "degC", sizeof(temp.unit) - 1);
 
     set.version = 1;
@@ -491,8 +491,8 @@ TEST(BridgeTest, HistoryRingEvictsOldestAtCapacity)
     /* Deterministic: injected timestamps + values equal to the timestamp,
        so retention/ordering asserts are exact arithmetic, not timing. */
     SignalListModel model;
-    QttuneSignalDef defs[2];
-    QttuneSignalSet set;
+    ecuio_signal_def_t defs[2];
+    ecuio_signal_set_t set;
     buildTestSignalSet(defs, set);
     model.setSignalSet(&set);
 
@@ -537,8 +537,8 @@ TEST(BridgeTest, HistoryRingEvictsOldestAtCapacity)
 TEST(BridgeTest, ChartDataFiltersUnsubscribedAndEmptyBatchesDoNotEmit)
 {
     SignalListModel model;
-    QttuneSignalDef defs[2];
-    QttuneSignalSet set;
+    ecuio_signal_def_t defs[2];
+    ecuio_signal_set_t set;
     buildTestSignalSet(defs, set);
     model.setSignalSet(&set);
 
@@ -590,8 +590,8 @@ TEST(BridgeTest, UnsubscribedSignalKeepsUpdating)
      * and its history keeps growing, so the trace is whole when it's
      * plotted again. */
     SignalListModel model;
-    QttuneSignalDef defs[2];
-    QttuneSignalSet set;
+    ecuio_signal_def_t defs[2];
+    ecuio_signal_set_t set;
     buildTestSignalSet(defs, set);
     model.setSignalSet(&set);
     model.toggleSubscribed(0);   // row 0 is id 1001
@@ -652,8 +652,8 @@ TEST(BridgeTest, DecimalsComeFromTheDefAndReachTheChart)
      * LiveView and the Dashboard format with DecimalsRole, the strip
      * chart's value labels with chartData's "decimals". */
     SignalListModel model;
-    QttuneSignalDef defs[2];
-    QttuneSignalSet set;
+    ecuio_signal_def_t defs[2];
+    ecuio_signal_set_t set;
     buildTestSignalSet(defs, set);
     defs[0].decimal_places = 0;
     defs[1].decimal_places = 2;
@@ -801,7 +801,7 @@ TEST(BridgeTest, AsyncConnectCompletesOffGuiThread)
 }
 
 namespace {
-void countFramesCb(const qttune_frame_t*, void* user_data)
+void countFramesCb(const ecuio_frame_t*, void* user_data)
 {
     static_cast<std::atomic<int>*>(user_data)->fetch_add(1);
 }
@@ -818,7 +818,7 @@ TEST(BridgeTest, DestroyedMidConnectLeavesNoRunningSession)
     auto bridge = std::make_unique<QtTuneBridge>();
     bridge->connectSessionAsync(QStringLiteral("mock://demo"));
 
-    qttune_session_t* pending = nullptr;
+    ecuio_session_t* pending = nullptr;
     for (int i = 0; i < 500 && pending == nullptr; ++i) {
         std::this_thread::sleep_for(std::chrono::milliseconds(10));
         pending = bridge->pendingSessionForTesting();
@@ -826,10 +826,10 @@ TEST(BridgeTest, DestroyedMidConnectLeavesNoRunningSession)
     ASSERT_NE(pending, nullptr) << "the connect thread produced no session";
 
     std::atomic<int> frames{0};
-    ASSERT_EQ(qttune_register_frame_callback(pending, countFramesCb, &frames), QTTUNE_OK);
+    ASSERT_EQ(ecuio_register_frame_callback(pending, countFramesCb, &frames), ECUIO_OK);
     std::this_thread::sleep_for(std::chrono::milliseconds(300));
     EXPECT_EQ(frames.load(), 0) << "the session started before the GUI thread took it";
-    ASSERT_EQ(qttune_unregister_frame_callback(pending, countFramesCb, &frames), QTTUNE_OK);
+    ASSERT_EQ(ecuio_unregister_frame_callback(pending, countFramesCb, &frames), ECUIO_OK);
 
     bridge.reset();   // the queued completion is dropped; the destructor destroys `pending`
     spinLoop(50);     // nothing queued may run against the freed bridge
@@ -913,7 +913,7 @@ TEST(BridgeTest, AsyncConnectOpensOffGuiThread)
 {
     FakeHooks hooks;
     ASSERT_TRUE(hooks.load());
-    FakeEnvArm delay("QTTUNE_FAKE_OPEN_DELAY_MS", "600");
+    FakeEnvArm delay("ECUIO_FAKE_OPEN_DELAY_MS", "600");
 
     QtTuneBridge bridge;
     std::atomic<bool> done{false};
@@ -958,7 +958,7 @@ TEST(BridgeTest, DisconnectTearsDownOffGuiThread)
     ASSERT_TRUE(bridge.connectSession(fakeUri()).isEmpty());
     const unsigned long disconnects_before = hooks.disconnect_count();
 
-    FakeEnvArm delay("QTTUNE_FAKE_DISCONNECT_DELAY_MS", "800");
+    FakeEnvArm delay("ECUIO_FAKE_DISCONNECT_DELAY_MS", "800");
     QElapsedTimer clock;
     clock.start();
     bridge.disconnectSession();
@@ -1003,7 +1003,7 @@ TEST(BridgeTest, DestroyedMidDisconnectWaitsForTeardown)
     ASSERT_TRUE(bridge->connectSession(fakeUri()).isEmpty());
     const unsigned long disconnects_before = hooks.disconnect_count();
 
-    FakeEnvArm delay("QTTUNE_FAKE_DISCONNECT_DELAY_MS", "500");
+    FakeEnvArm delay("ECUIO_FAKE_DISCONNECT_DELAY_MS", "500");
     bridge->disconnectSession();
     ASSERT_TRUE(bridge->disconnecting());
 
@@ -1056,8 +1056,8 @@ TEST(BridgeTest, AgeMsRoleEmittedAndRefreshesWhileStalled)
      * basis is nondeterministic by nature, so assert ranges, not
      * exact values. */
     SignalListModel model;
-    QttuneSignalDef defs[2];
-    QttuneSignalSet set;
+    ecuio_signal_def_t defs[2];
+    ecuio_signal_set_t set;
     buildTestSignalSet(defs, set);
     model.setSignalSet(&set);
 
@@ -1096,9 +1096,9 @@ TEST(BridgeTest, LinkStateMapsEveryPublishedCode)
      * helper. Covers all four link-health codes plus the forward-
      * compatible fallback; QML's Theme keys colors and labels on
      * these strings. */
-    EXPECT_EQ(QtTuneBridge::linkStateForError(QTTUNE_OK), QStringLiteral("ok"));
-    EXPECT_EQ(QtTuneBridge::linkStateForError(QTTUNE_ERR_VEHICLE_TIMEOUT), QStringLiteral("quiet"));
-    EXPECT_EQ(QtTuneBridge::linkStateForError(QTTUNE_ERR_REQUEST_FAILED), QStringLiteral("requests"));
-    EXPECT_EQ(QtTuneBridge::linkStateForError(QTTUNE_ERR_TRANSPORT_HARD_FAILURE), QStringLiteral("fault"));
-    EXPECT_EQ(QtTuneBridge::linkStateForError(static_cast<qttune_status_t>(999)), QStringLiteral("degraded"));
+    EXPECT_EQ(QtTuneBridge::linkStateForError(ECUIO_OK), QStringLiteral("ok"));
+    EXPECT_EQ(QtTuneBridge::linkStateForError(ECUIO_ERR_VEHICLE_TIMEOUT), QStringLiteral("quiet"));
+    EXPECT_EQ(QtTuneBridge::linkStateForError(ECUIO_ERR_REQUEST_FAILED), QStringLiteral("requests"));
+    EXPECT_EQ(QtTuneBridge::linkStateForError(ECUIO_ERR_TRANSPORT_HARD_FAILURE), QStringLiteral("fault"));
+    EXPECT_EQ(QtTuneBridge::linkStateForError(static_cast<ecuio_status_t>(999)), QStringLiteral("degraded"));
 }

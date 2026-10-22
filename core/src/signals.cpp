@@ -1,9 +1,9 @@
 // File/layer: core/src/signals.cpp | C++17, Qt-free
 // Testing: UNIT — BE vs LE round-trip, mux acceptance/rejection, validator rules
 
-#include <qttune/signals.h>
-#include <qttune/internal.h>
-#include <qttune/signal_sets.h>
+#include <ecuio/signals.h>
+#include <ecuio/internal.h>
+#include <ecuio/signal_sets.h>
 #include <string.h>
 #include <math.h>
 
@@ -45,7 +45,7 @@ static uint32_t extract_bytes_be(const uint8_t* data,
  * False when the key region ends past payload_len. The caller has
  * checked mux_length (1 or 2). Shared by decode and the frame gate, so
  * the two can't disagree on which payloads carry the key. */
-static bool read_mux_key(const QttuneSignalDef* signal,
+static bool read_mux_key(const ecuio_signal_def_t* signal,
                          const uint8_t* payload, uint32_t payload_len,
                          uint32_t* out_key)
 {
@@ -61,38 +61,38 @@ static bool read_mux_key(const QttuneSignalDef* signal,
     return true;
 }
 
-/* The types qttune_decode_signal decodes. */
-static bool is_decodable_type(QttuneSignalType type)
+/* The types ecuio_decode_signal decodes. */
+static bool is_decodable_type(ecuio_signal_type_t type)
 {
     /* Through int: a C caller can store any value in the enum. */
     const int t = (int)type;
-    return t >= QTTUNE_SIGNAL_TYPE_UINT8 && t <= QTTUNE_SIGNAL_TYPE_FLOAT32;
+    return t >= ECUIO_SIGNAL_TYPE_UINT8 && t <= ECUIO_SIGNAL_TYPE_FLOAT32;
 }
 
-int qttune_decode_signal(const QttuneSignalDef* signal,
-                         const uint8_t* frame_payload,
-                         uint8_t payload_len,
-                         float* out_value)
+int ecuio_decode_signal(const ecuio_signal_def_t* signal,
+                        const uint8_t* frame_payload,
+                        uint8_t payload_len,
+                        float* out_value)
 {
     if (!signal || !frame_payload || !out_value) {
-        return QTTUNE_DECODE_ERR_NULL;
+        return ECUIO_DECODE_ERR_NULL;
     }
 
     /* Check for unsupported types FIRST — before bit validation */
     if (!is_decodable_type(signal->type)) {
-        return QTTUNE_DECODE_ERR_UNSUPPORTED;
+        return ECUIO_DECODE_ERR_UNSUPPORTED;
     }
 
     /* Now safe to validate bit parameters for supported numeric types */
     if (signal->bit_length == 0 || signal->bit_length > 32) {
-        return QTTUNE_DECODE_ERR_BAD_PARAMS;
+        return ECUIO_DECODE_ERR_BAD_PARAMS;
     }
     if (signal->bit_offset > 7) {
-        return QTTUNE_DECODE_ERR_BAD_PARAMS;
+        return ECUIO_DECODE_ERR_BAD_PARAMS;
     }
     if ((uint32_t)signal->bit_offset + signal->bit_length
             > 8u * signal->num_bytes) {
-        return QTTUNE_DECODE_ERR_BAD_PARAMS;
+        return ECUIO_DECODE_ERR_BAD_PARAMS;
     }
 
     /* Highest bit consumed lies in this byte index — single uniform
@@ -100,29 +100,29 @@ int qttune_decode_signal(const QttuneSignalDef* signal,
     uint32_t last_bit = (uint32_t)signal->start_byte * 8u
                         + signal->bit_offset + signal->bit_length - 1u;
     if ((last_bit >> 3) >= payload_len) {
-        return QTTUNE_DECODE_ERR_PAST_PAYLOAD;
+        return ECUIO_DECODE_ERR_PAST_PAYLOAD;
     }
 
     /* MUX check (if enabled) */
     if (signal->mux_length > 0) {
         if (signal->mux_length > 2) {
-            return QTTUNE_DECODE_ERR_BAD_PARAMS;
+            return ECUIO_DECODE_ERR_BAD_PARAMS;
         }
         uint32_t key = 0;
         if (!read_mux_key(signal, frame_payload, payload_len, &key)) {
-            return QTTUNE_DECODE_ERR_PAST_PAYLOAD;
+            return ECUIO_DECODE_ERR_PAST_PAYLOAD;
         }
         if (key != signal->mux_key) {
-            return QTTUNE_DECODE_ERR_MUX_MISMATCH;
+            return ECUIO_DECODE_ERR_MUX_MISMATCH;
         }
     }
 
     switch (signal->type) {
-    case QTTUNE_SIGNAL_TYPE_UINT8:
-    case QTTUNE_SIGNAL_TYPE_UINT16:
-    case QTTUNE_SIGNAL_TYPE_UINT32: {
+    case ECUIO_SIGNAL_TYPE_UINT8:
+    case ECUIO_SIGNAL_TYPE_UINT16:
+    case ECUIO_SIGNAL_TYPE_UINT32: {
         uint32_t raw;
-        if (signal->flags & QTTUNE_SIGNAL_FLAG_BIG_ENDIAN) {
+        if (signal->flags & ECUIO_SIGNAL_FLAG_BIG_ENDIAN) {
             raw = extract_bytes_be(frame_payload, signal->start_byte,
                                       signal->bit_length);
         } else {
@@ -130,14 +130,14 @@ int qttune_decode_signal(const QttuneSignalDef* signal,
                                       signal->bit_offset, signal->bit_length);
         }
         *out_value = (float)raw * signal->scale + signal->offset;
-        return QTTUNE_DECODE_OK;
+        return ECUIO_DECODE_OK;
     }
 
-    case QTTUNE_SIGNAL_TYPE_INT8:
-    case QTTUNE_SIGNAL_TYPE_INT16:
-    case QTTUNE_SIGNAL_TYPE_INT32: {
+    case ECUIO_SIGNAL_TYPE_INT8:
+    case ECUIO_SIGNAL_TYPE_INT16:
+    case ECUIO_SIGNAL_TYPE_INT32: {
         uint32_t raw;
-        if (signal->flags & QTTUNE_SIGNAL_FLAG_BIG_ENDIAN) {
+        if (signal->flags & ECUIO_SIGNAL_FLAG_BIG_ENDIAN) {
             raw = extract_bytes_be(frame_payload, signal->start_byte,
                                       signal->bit_length);
         } else {
@@ -151,27 +151,27 @@ int qttune_decode_signal(const QttuneSignalDef* signal,
         int32_t signed_raw;
         memcpy(&signed_raw, &raw, sizeof signed_raw);
         *out_value = (float)signed_raw * signal->scale + signal->offset;
-        return QTTUNE_DECODE_OK;
+        return ECUIO_DECODE_OK;
     }
 
-    case QTTUNE_SIGNAL_TYPE_FLOAT32: {
+    case ECUIO_SIGNAL_TYPE_FLOAT32: {
         if (signal->bit_offset != 0 || signal->bit_length != 32) {
-            return QTTUNE_DECODE_ERR_UNSUPPORTED;  /* float must be byte-aligned, 32-bit */
+            return ECUIO_DECODE_ERR_UNSUPPORTED;   /* float must be byte-aligned, 32-bit */
         }
         float raw_float;
         memcpy(&raw_float, frame_payload + signal->start_byte,
                sizeof raw_float);
         *out_value = raw_float * signal->scale + signal->offset;
-        return QTTUNE_DECODE_OK;
+        return ECUIO_DECODE_OK;
     }
 
     default:
-        return QTTUNE_DECODE_ERR_UNSUPPORTED;
+        return ECUIO_DECODE_ERR_UNSUPPORTED;
     }
 }
 
-int qttune_def_applies_to_frame(const QttuneSignalDef* signal,
-                                const qttune_frame_t* frame)
+int ecuio_def_applies_to_frame(const ecuio_signal_def_t* signal,
+                               const ecuio_frame_t* frame)
 {
     if (!signal || !frame) {
         return 0;
@@ -202,79 +202,79 @@ int qttune_def_applies_to_frame(const QttuneSignalDef* signal,
     return 1;
 }
 
-int qttune_validate_signal(const QttuneSignalDef* signal)
+int ecuio_validate_signal(const ecuio_signal_def_t* signal)
 {
     if (!signal) {
-        return QTTUNE_VALIDATE_ERR_NULL;
+        return ECUIO_VALIDATE_ERR_NULL;
     }
 
     /* The decoder rejects every other type, so a def of one could
      * register and then never decode. */
     if (!is_decodable_type(signal->type)) {
-        return QTTUNE_VALIDATE_ERR_TYPE;
+        return ECUIO_VALIDATE_ERR_TYPE;
     }
 
     if (signal->num_bytes < 1 || signal->num_bytes > 4) {
-        return QTTUNE_VALIDATE_ERR_NUM_BYTES;
+        return ECUIO_VALIDATE_ERR_NUM_BYTES;
     }
     if (signal->bit_length == 0 ||
         signal->bit_length > 8u * signal->num_bytes) {
-        return QTTUNE_VALIDATE_ERR_BIT_LENGTH;
+        return ECUIO_VALIDATE_ERR_BIT_LENGTH;
     }
     if (signal->bit_offset > 7) {
-        return QTTUNE_VALIDATE_ERR_BIT_OFFSET;
+        return ECUIO_VALIDATE_ERR_BIT_OFFSET;
     }
     if ((uint32_t)signal->bit_offset + signal->bit_length
             > 8u * signal->num_bytes) {
-        return QTTUNE_VALIDATE_ERR_BIT_SPAN;
+        return ECUIO_VALIDATE_ERR_BIT_SPAN;
     }
 
     /* MUX validation — the key region lives in the FRAME payload,
      * not the signal field, so it bounds against the 64-byte frame ABI
      * cap. decode-time checks enforce the actual payload_len. */
     if (signal->mux_length > 2) {
-        return QTTUNE_VALIDATE_ERR_MUX_LENGTH;
+        return ECUIO_VALIDATE_ERR_MUX_LENGTH;
     }
     if (signal->mux_length > 0) {
         if ((uint32_t)signal->mux_offset + signal->mux_length > 64u) {
-            return QTTUNE_VALIDATE_ERR_MUX_RANGE;
+            return ECUIO_VALIDATE_ERR_MUX_RANGE;
         }
         const uint32_t mux_max =
             (signal->mux_length == 1) ? 0xFFu : 0xFFFFu;
         if (signal->mux_key > mux_max) {
-            return QTTUNE_VALIDATE_ERR_MUX_KEY;
+            return ECUIO_VALIDATE_ERR_MUX_KEY;
         }
     }
 
     /* big-endian fields are byte-aligned only — the extractor
      * reads whole bytes MSB-first, so non-aligned shapes are rejected
      * at registration instead of misread at decode. */
-    if (signal->flags & QTTUNE_SIGNAL_FLAG_BIG_ENDIAN) {
+    if (signal->flags & ECUIO_SIGNAL_FLAG_BIG_ENDIAN) {
         if (signal->bit_offset != 0 || (signal->bit_length % 8) != 0) {
-            return QTTUNE_VALIDATE_ERR_BIG_ENDIAN;
+            return ECUIO_VALIDATE_ERR_BIG_ENDIAN;
         }
     }
 
     /* The decoder reads a FLOAT32 as four native (little-endian) bytes
      * at bit 0 and ignores the big-endian flag, so any other shape
      * would fail to decode or read as the wrong number. */
-    if (signal->type == QTTUNE_SIGNAL_TYPE_FLOAT32 &&
+    if (signal->type == ECUIO_SIGNAL_TYPE_FLOAT32 &&
         (signal->bit_length != 32 || signal->bit_offset != 0 ||
-         (signal->flags & QTTUNE_SIGNAL_FLAG_BIG_ENDIAN))) {
-        return QTTUNE_VALIDATE_ERR_FLOAT32;
+         (signal->flags & ECUIO_SIGNAL_FLAG_BIG_ENDIAN))) {
+        return ECUIO_VALIDATE_ERR_FLOAT32;
     }
 
     /* Last byte MUST be null — guarantees C-string fits in fixed buffer */
     if (signal->name[sizeof(signal->name) - 1] != '\0') {
-        return QTTUNE_VALIDATE_ERR_NAME;
+        return ECUIO_VALIDATE_ERR_NAME;
     }
     if (signal->unit[sizeof(signal->unit) - 1] != '\0') {
-        return QTTUNE_VALIDATE_ERR_UNIT;
+        return ECUIO_VALIDATE_ERR_UNIT;
     }
 
     if (signal->decimal_places > 3) {
-        return QTTUNE_VALIDATE_ERR_DECIMALS;
+        return ECUIO_VALIDATE_ERR_DECIMALS;
     }
 
-    return QTTUNE_VALIDATE_OK;
+    return ECUIO_VALIDATE_OK;
 }

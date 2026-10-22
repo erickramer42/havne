@@ -4,8 +4,8 @@
 // Testing: UNIT — the step and its cap (test_j2534_stream); the worker's
 //     use of it is HARNESS (BackoffGrowsUnderSustainedHardFailure).
 
-#ifndef QTTUNE_J2534_BACKOFF_H
-#define QTTUNE_J2534_BACKOFF_H
+#ifndef ECUIO_J2534_BACKOFF_H
+#define ECUIO_J2534_BACKOFF_H
 
 #include <stdint.h>
 
@@ -13,7 +13,7 @@
  * 100 ms base, doubling to a 5 s cap (about 0.2 retries/s against a
  * dead adapter). It ends when the adapter shows it is answering: a
  * matched frame, an unmatched one, a debounced quiet run, or (for
- * QTTUNE_ERR_REQUEST_FAILED) a successful write. */
+ * ECUIO_ERR_REQUEST_FAILED) a successful write. */
 constexpr uint32_t J2534_BACKOFF_BASE_MS = 100;
 constexpr uint32_t J2534_BACKOFF_CAP_MS  = 5000;
 
@@ -25,4 +25,4 @@ constexpr uint32_t j2534_backoff_next(uint32_t ms)
     return (ms >= J2534_BACKOFF_CAP_MS / 2) ? J2534_BACKOFF_CAP_MS : ms * 2;
 }
 
-#endif /* QTTUNE_J2534_BACKOFF_H */
+#endif /* ECUIO_J2534_BACKOFF_H */

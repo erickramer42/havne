@@ -28,12 +28,12 @@ simulated vehicle lets it run with no hardware at all.
  QtTuneBridge (app/)          the only caller of the core
    │  worker → GUI marshaling, 100 ms coalescing, link-health polling
    ▼  C ABI: core.h · signals.h · profile.h · j2534.h
- qttune-core (core/)          no Qt, ever
+ ecuio-core (core/)           no Qt, ever
    │  sessions + callbacks · profiles + decode · transports
    ├── mock://    worker thread, scripted drive cycle
    └── j2534://   worker thread → loader, which picks a backend:
           ├── in-proc:   vendor DLL loaded into the app (x64 DLLs)
-          └── surrogate: client ══ named pipe ══ qttune-j2534-surrogate.exe
+          └── surrogate: client ══ named pipe ══ ecuio-j2534-surrogate.exe
                          (x86 process hosting x86 vendor DLLs)
 ```
 
@@ -41,7 +41,7 @@ Three rules shape it
 ([ADR-0001](docs/adr/0001-qt-free-core-c-abi.md)):
 
 1. **The core never links Qt.** A CI job builds and tests the core on
-   a machine with no Qt, and every configure fails if `qttune-core`
+   a machine with no Qt, and every configure fails if `ecuio-core`
    links a Qt target.
 2. **The UI receives final display values.** Decoding, scaling and
    units live in the core, so QML never parses a frame and there is
@@ -50,7 +50,8 @@ Three rules shape it
    functions and POD structs with reserved room; enum values are
    append-only. It exists so other front ends (mobile, scripting) can
    drive the same core, and a strict-C compile of every public header
-   pins it.
+   pins it. Its names carry the core's own prefix, `ecuio_` (ECU I/O),
+   so they don't change with the product's name.
 
 The full walkthrough, including a frame's path from transport to
 screen, is [docs/architecture.md](docs/architecture.md).
@@ -162,7 +163,7 @@ configure step finds it in `build-win32/` and copies it next to
 
 ```sh
 cmake -B build-win32 -A Win32 -DQTTUNE_BUILD_CORE_ONLY=ON
-cmake --build build-win32 --config Release --target qttune-j2534-surrogate fake_j2534 fake_j2534_legacy
+cmake --build build-win32 --config Release --target ecuio-j2534-surrogate fake_j2534 fake_j2534_legacy
 ```
 
 **Mobile.** The Android and iOS builds compile in CI but haven't run on

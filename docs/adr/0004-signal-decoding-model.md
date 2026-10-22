@@ -16,7 +16,7 @@ corrupts it.
 
 ## Decision
 
-- **`QttuneSignalDef` is a POD struct** holding the byte and bit
+- **`ecuio_signal_def_t` is a POD struct** holding the byte and bit
   position, type, scale and offset, unit string, `message_id`,
   display hints and reserved fields. Its size is pinned at 88 bytes by
   an ABI test in `test_signals.cpp`.
@@ -26,18 +26,18 @@ corrupts it.
   deliberate non-goal until a bit in `flags` selects it, and byte
   order is the intended first use of a reserved flags bit (DBC files
   mix the two).
-- **Error codes are a tested contract.** `qttune_decode_signal`
+- **Error codes are a tested contract.** `ecuio_decode_signal`
   returns 1 for null, 2 for past the payload length, 3 for bad bit
   params and 4 for an unsupported type. The type is checked before
-  the bit params. `qttune_validate_signal` does the structural checks
+  the bit params. `ecuio_validate_signal` does the structural checks
   and has its own numbering. Its fixed-width strings must terminate
   within the buffer.
-- **`QttuneSignalSet`** is a swappable collection, and the decoder
+- **`ecuio_signal_set_t`** is a swappable collection, and the decoder
   never sees where it came from. The mock ships
-  `qttune_mock_signal_set()`.
+  `ecuio_mock_signal_set()`.
 - **Message-ID gate:** each definition declares the CAN arbitration ID
   it rides on, and the bridge decodes a signal only from frames whose
-  ID matches. The mock set uses `QTTUNE_MOCK_TELEMETRY_ARB_ID = 0x0C0`.
+  ID matches. The mock set uses `ECUIO_MOCK_TELEMETRY_ARB_ID = 0x0C0`.
 - **The mock encoder is the hand-written inverse of the definitions.**
   `encode_payload()` in `mock_transport.cpp` mirrors `kMockDefs`.
   `CoreTest.MockFramesDecodeAgainstMockSignalSet` decodes real worker

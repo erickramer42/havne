@@ -4,14 +4,14 @@
 
 #include "bridgesingleton.h"
 #include "qttunebridge.h"
-#include "qttune/version.h"
+#include "ecuio/version.h"
 
 int main(int argc, char *argv[])
 {
     QGuiApplication app(argc, argv);
     app.setOrganizationName("QtTune");
     app.setApplicationName("QtTune");
-    app.setApplicationVersion(QStringLiteral(QTTUNE_VERSION_STRING));
+    app.setApplicationVersion(QStringLiteral(ECUIO_VERSION_STRING));
 
     QQuickStyle::setStyle("Basic");
 

@@ -7,8 +7,8 @@
 // through the W APIs. The A APIs would read the same bytes in the ANSI
 // code page and mangle any non-ASCII character.
 
-#ifndef QTTUNE_WIN_UTF8_H
-#define QTTUNE_WIN_UTF8_H
+#ifndef ECUIO_WIN_UTF8_H
+#define ECUIO_WIN_UTF8_H
 
 #ifdef _WIN32
 
@@ -18,7 +18,7 @@
 
 /* UTF-8 to UTF-16, terminator included. False, with out empty, when the
  * input isn't valid UTF-8 or doesn't fit in cap wide characters. */
-inline bool qttune_utf8_to_wide(const char* in, wchar_t* out, size_t cap)
+inline bool ecuio_utf8_to_wide(const char* in, wchar_t* out, size_t cap)
 {
     const int n = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, in, -1,
                                       out, static_cast<int>(cap));
@@ -31,7 +31,7 @@ inline bool qttune_utf8_to_wide(const char* in, wchar_t* out, size_t cap)
 
 /* UTF-16 to UTF-8, terminator included. False, with out empty, when the
  * input has an unpaired surrogate or doesn't fit in cap bytes. */
-inline bool qttune_wide_to_utf8(const wchar_t* in, char* out, size_t cap)
+inline bool ecuio_wide_to_utf8(const wchar_t* in, char* out, size_t cap)
 {
     const int n = WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, in, -1,
                                       out, static_cast<int>(cap),
@@ -45,4 +45,4 @@ inline bool qttune_wide_to_utf8(const wchar_t* in, char* out, size_t cap)
 
 #endif /* _WIN32 */
 
-#endif /* QTTUNE_WIN_UTF8_H */
+#endif /* ECUIO_WIN_UTF8_H */

@@ -42,11 +42,12 @@ to three rules:
 - The bridge is exposed to QML as the `Bridge` singleton of the
   `QtTune` module, registered from C++ (`app/bridgesingleton.h`), so
   qmllint and the QML compiler see its properties.
-- Every public identifier carries the project prefix: `qttune_`
-  functions and types, `Qttune` structs, `QTTUNE_` macros and enum
-  values. A bare `QT_` would sit in Qt's own macro namespace, and
-  unprefixed names (`MOCK_`, `OBD2_`) collide in any consumer that
-  has its own.
+- Every public identifier carries the core's prefix: `ecuio_`
+  functions and `_t` types, and `ECUIO_` macros and enum values. The
+  prefix names the domain (ECU I/O), not the product, so renaming the
+  product leaves the ABI alone. A bare `QT_` would sit in Qt's own
+  macro namespace, and unprefixed names (`MOCK_`, `OBD2_`) collide in
+  any consumer that has its own.
 
 ## Appendix — naming (2026-10-21)
 
@@ -56,4 +57,31 @@ Status codes were renamed from `QT_OK` / `QT_ERR_*` to `QTTUNE_OK` /
 unchanged, so the binary ABI is too; it is a source break. The bridge's
 QML name changed from the context property `QtTune` to the `Bridge`
 singleton. The engineering log, filled-in bench sheets and earlier ADR
+appendices keep the old names as written.
+
+## Appendix — the core's own name (2026-10-22)
+
+The core's public names moved from the product's prefix to a
+brand-neutral one, `ecuio` ("ECU I/O"), so a product rename can't
+break the ABI again. Each scope has its own name:
+
+| Scope | Name | Covers |
+|---|---|---|
+| Core | `ecuio` | Every public C identifier (functions, types, macros, enum values); the `ecuio/` include directory; the `ecuio-core` library; `ecuio-j2534-surrogate.exe` with its pipe and session-log names; the `ECUIO_SURROGATE_EXE`, `ECUIO_SUR_*` and `ECUIO_FAKE_*` environment variables |
+| App | The product's name | `qttune.exe`, the `QtTune` QML module, `QtTuneBridge`, the window title, the repository and its build options (`QTTUNE_BUILD_CORE_ONLY`), and the docs |
+
+- **C style throughout:** `ecuio_session_create`, `ecuio_frame_t`,
+  `ECUIO_OK`. The four CamelCase signal types became
+  `ecuio_signal_def_t`, `ecuio_signal_set_t`, `ecuio_channel_decl_t`
+  and `ecuio_signal_type_t`; their struct tags drop the `_t`.
+- **Why not `ecu_`:** Embedded C Utilities, a C99 library, prefixes
+  every public symbol with `ecu_` and keeps its headers under `ecu/`.
+  A common domain word is also the likeliest clash with an embedder's
+  own automotive code. `ecuio` had no hits in the repository or in a
+  web search.
+- No value, size or layout changed. Everything that names the core
+  did: sources, link symbols, the library and executable names, the
+  pipe and log names, and the environment variables.
+
+The engineering log, filled-in bench sheets and earlier ADR
 appendices keep the old names as written.

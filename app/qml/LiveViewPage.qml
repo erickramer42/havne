@@ -1,8 +1,8 @@
 // File/layer: app/qml/LiveViewPage.qml | Qt6 Quick, UI layer
 // Testing: model contract covered by test_bridge; render verified manually.
 // Banner states need a j2534 fake with a knob armed before launch:
-// QTTUNE_FAKE_READ_STATUS (0x09 quiet, 0x07 fault) or
-// QTTUNE_FAKE_WRITE_STATUS=7 (requests) — see docs/testing.md smoke recipe.
+// ECUIO_FAKE_READ_STATUS (0x09 quiet, 0x07 fault) or
+// ECUIO_FAKE_WRITE_STATUS=7 (requests) — see docs/testing.md smoke recipe.
 
 import QtQuick
 import QtQuick.Controls

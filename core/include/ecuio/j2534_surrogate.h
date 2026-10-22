@@ -1,0 +1,117 @@
+// File/layer: core/include/ecuio/j2534_surrogate.h | C ABI, x86-surrogate client
+// Testing: HARNESS — test_j2534_surrogate spawns the real surrogate
+//          hosting the fake DLL, end to end over the pipe.
+//          Non-Windows: stubs only.
+
+#ifndef ECUIO_J2534_SURROGATE_H
+#define ECUIO_J2534_SURROGATE_H
+
+#include "ecuio/core.h"
+
+#include <stdbool.h>
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+typedef struct ecuio_j2534_sur_handle ecuio_j2534_sur_handle_t;
+
+/* Spawn the surrogate hosting dll_path under a kill-on-close job and
+ * handshake with OP_OPEN. Blocking. Every startup failure (exe
+ * missing, spawn failed, DLL load failed, handshake timeout,
+ * PassThruOpen refused) returns ECUIO_ERR_LOAD_FAILED. */
+ecuio_status_t ecuio_j2534_sur_open(const char* dll_path,
+                                    ecuio_j2534_sur_handle_t** out_handle);
+
+/* Channel lifecycle. baud==0 resolves to the ISO 15765 500k default,
+ * mirroring the in-proc loader contract. */
+ecuio_status_t ecuio_j2534_sur_connect_channel(ecuio_j2534_sur_handle_t* handle,
+                                               unsigned long baud,
+                                               unsigned long flags,
+                                               unsigned long* out_channel);
+ecuio_status_t ecuio_j2534_sur_disconnect_channel(ecuio_j2534_sur_handle_t* handle,
+                                                  unsigned long channel);
+
+/* ---- Write / ioctl / filter relay ---- */
+
+/* One PassThruWriteMsgs call. data_len must be <= 64 (the wire limit).
+ * out_num_written is optional (NULL ok) and receives the vendor's
+ * actual-written count — callers should treat <1 as a failed send. */
+ecuio_status_t ecuio_j2534_sur_write_frame(ecuio_j2534_sur_handle_t* handle,
+                                              unsigned long channel,
+                                              const uint8_t* data,
+                                              uint32_t len,
+                                              uint32_t tx_flags,
+                                              uint32_t timeout_ms,
+                                              uint32_t* out_num_written);
+
+/* Generic ioctl relay. input is a FLATTENED SCONFIG array (u32
+ * Parameter/Value pairs, little-endian) for GET_CONFIG/SET_CONFIG;
+ * input_len==0 for ioctls taking NULL input. output receives the
+ * response payload (GET_CONFIG write-back or READ_VBATT's ULONG), and
+ * out_len its length. There is no capacity parameter: size output for
+ * the wire limit, ECUIO_SUR_IOCTL_DATA_MAX (64) bytes. A reply that
+ * claims more is rejected as a protocol skew (ECUIO_ERR_NO_TRANSPORT). */
+ecuio_status_t ecuio_j2534_sur_ioctl(ecuio_j2534_sur_handle_t* handle,
+                                     unsigned long channel,
+                                     uint32_t ioctl_id,
+                                     const uint8_t* input,
+                                     uint32_t input_len,
+                                     uint8_t* output,
+                                     uint32_t* out_len);
+
+/* PassThruStartMsgFilter relay. mask/pattern(/flow_control) are flat
+ * byte arrays (1..12 bytes each, spec max); fc may be NULL when
+ * fc_len==0 (PASS/BLOCK filters). tx_flags carries the filter
+ * messages' TxFlags (CAN_29BIT_ID for 29-bit matching). */
+ecuio_status_t ecuio_j2534_sur_start_msg_filter(ecuio_j2534_sur_handle_t* handle,
+                                                unsigned long channel,
+                                                uint32_t filter_type,
+                                                const uint8_t* mask,
+                                                uint32_t mask_len,
+                                                const uint8_t* pattern,
+                                                uint32_t pattern_len,
+                                                const uint8_t* flow_control,
+                                                uint32_t fc_len,
+                                                uint32_t tx_flags,
+                                                unsigned long* out_filter_id);
+
+ecuio_status_t ecuio_j2534_sur_stop_msg_filter(ecuio_j2534_sur_handle_t* handle,
+                                                  unsigned long channel,
+                                                  unsigned long filter_id);
+
+/* Return one frame: from the cached batch if one is pending, otherwise
+ * via one OP_READ (up to 16 frames). Same contract as the in-proc read
+ * path: ERR_TIMEOUT -> ECUIO_ERR_VEHICLE_TIMEOUT, ERR_BUFFER_EMPTY -> no
+ * frame, other statuses or a pipe failure -> ECUIO_ERR_TRANSPORT_HARD_FAILURE;
+ * arb id and channel id 0, EXTENDED from RxStatus, vendor timestamp
+ * passed through, payload clamped to 64 bytes. */
+ecuio_status_t ecuio_j2534_sur_read_frame(ecuio_j2534_sur_handle_t* handle,
+                                          unsigned long channel,
+                                          ecuio_frame_t* out_frame,
+                                          uint32_t timeout_ms,
+                                          bool* got_frame);
+
+/* TEST-ONLY: forward an injected frame through the surrogate into the
+ * loaded module's InjectFrame export (fake DLL). UNIT/HARNESS use. */
+ecuio_status_t ecuio_j2534_sur_inject_test_frame(ecuio_j2534_sur_handle_t* handle,
+                                                 const uint8_t* data,
+                                                 uint32_t len,
+                                                 uint32_t timestamp,
+                                                 uint32_t rx_flags);
+
+/* Polite SHUTDOWN, bounded wait, then job-object kill. NULL-safe. */
+ecuio_status_t ecuio_j2534_sur_close(ecuio_j2534_sur_handle_t* handle);
+
+/* Path of this session's log, which holds the child's lines and the
+ * client's. Usually %TEMP%\ecuio-surrogate.log; a session opened while
+ * another holds that file gets %TEMP%\ecuio-surrogate-<pid>-<n>.log.
+ * "" when the session has no log (or handle is NULL, or not Windows).
+ * Valid until ecuio_j2534_sur_close. */
+const char* ecuio_j2534_sur_log_path(const ecuio_j2534_sur_handle_t* handle);
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif /* ECUIO_J2534_SURROGATE_H */

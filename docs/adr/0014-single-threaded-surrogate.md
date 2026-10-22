@@ -36,18 +36,18 @@ the worker has been joined.
 - **`OP_READ` (opcode 5) carries the data plane.** It was reserved
   under ADR-0008. The request carries the caller's read timeout. The
   child calls `PassThruReadMsgs` for up to
-  `QTTUNE_SUR_MAX_FRAMES_PER_READ` (16) messages, drops TX indications
+  `ECUIO_SUR_MAX_FRAMES_PER_READ` (16) messages, drops TX indications
   and loopback echoes (`TX_INDICATION`, `TX_MSG_TYPE`), clamps each
   payload to 64 bytes, and returns the frames together with the
   vendor status, verbatim.
-- **The client caches the batch.** `qttune_j2534_sur_read_frame`
+- **The client caches the batch.** `ecuio_j2534_sur_read_frame`
   dispenses one cached frame per call and sends a new `OP_READ` only
   when the cache is empty. The transaction timeout is the read
   timeout plus 500 ms, so a timeout means the child is hung, not busy.
 - **Vendor status is data, never control flow.** A refused ioctl, a
   failed filter stop or an empty read is answered and the loop
   continues. Only `OP_SHUTDOWN` or a broken pipe ends it.
-- **Command line:** `qttune-j2534-surrogate.exe <dll_path> <pipe_name>`.
+- **Command line:** `ecuio-j2534-surrogate.exe <dll_path> <pipe_name>`.
   The file mapping and event are gone. Exit codes 2 and 3, which
   covered attaching to them, are retired and are not reused.
 - **The child re-checks lengths** on `WRITE`, `IOCTL` and
@@ -81,7 +81,7 @@ the worker has been joined.
   (≤100 reads/s) that cost is negligible, and receive latency is now
   bounded by the vendor's own `ReadMsgs` timeout instead of the old
   pump's sleep granularity.
-- `qttune_sur_response_t` grows to 1368 bytes to carry the batch.
+- `ecuio_sur_response_t` grows to 1368 bytes to carry the batch.
   Both build trees must be rebuilt together (Known Issue #19). A
   skewed tree fails loudly as a short read.
 - Open at the time of writing:

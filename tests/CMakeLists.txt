@@ -27,7 +27,7 @@ target_include_directories(test_core PRIVATE
 )
 
 target_link_libraries(test_core PRIVATE
-    qttune-core
+    ecuio-core
     GTest::gtest_main
 )
 
@@ -38,7 +38,7 @@ gtest_discover_tests(test_core)
 add_executable(test_signals test_signals.cpp)
 
 target_link_libraries(test_signals PRIVATE
-    qttune-core
+    ecuio-core
     GTest::gtest_main
 )
 
@@ -50,7 +50,7 @@ gtest_discover_tests(test_signals)
 # agnostic), and pid_scheduler.h is header-only, so this suite builds
 # and runs in the headless Ubuntu job alongside test_core/test_signals.
 # The explicit core/src include is required because pid_scheduler.h is
-# INTERNAL — qttune-core's PUBLIC include dirs cover only core/include,
+# INTERNAL — ecuio-core's PUBLIC include dirs cover only core/include,
 # and the scheduler is deliberately not part of the public tree.
 add_executable(test_obd2 test_obd2.cpp)
 
@@ -59,7 +59,7 @@ target_include_directories(test_obd2 PRIVATE
 )
 
 target_link_libraries(test_obd2 PRIVATE
-    qttune-core
+    ecuio-core
     GTest::gtest_main
 )
 
@@ -84,7 +84,7 @@ target_include_directories(test_c_abi PRIVATE
 )
 
 target_link_libraries(test_c_abi PRIVATE
-    qttune-core
+    ecuio-core
 )
 
 add_test(NAME c_abi COMMAND test_c_abi)
@@ -108,7 +108,7 @@ if(NOT QTTUNE_BUILD_CORE_ONLY)
     )
 
     target_link_libraries(test_bridge PRIVATE
-        qttune-core
+        ecuio-core
         Qt6::Core
         GTest::gtest
     )
@@ -146,7 +146,7 @@ if(WIN32)
         ../tests/test_j2534_discovery.cpp
     )
     target_link_libraries(test_j2534_discovery PRIVATE
-        qttune-core
+        ecuio-core
         GTest::gtest_main
     )
     set_target_properties(test_j2534_discovery PROPERTIES
@@ -223,7 +223,7 @@ if(WIN32)
         ../tests/test_j2534_load.cpp
     )
     target_link_libraries(test_j2534_load PRIVATE
-        qttune-core
+        ecuio-core
         GTest::gtest_main
     )
     target_compile_definitions(test_j2534_load PRIVATE
@@ -248,7 +248,7 @@ if(WIN32)
         ${CMAKE_SOURCE_DIR}/core/src
     )
     target_link_libraries(test_j2534_stream PRIVATE
-        qttune-core
+        ecuio-core
         GTest::gtest_main
     )
     target_compile_definitions(test_j2534_stream PRIVATE
@@ -265,28 +265,28 @@ endif()
 # spawn: named pipe + shared ring + kill-on-close job, end to end)
 # Arch note: in this tree's configure this is the all-same-arch IPC test
 # (CI-valid); the true cross-arch case (x64 test -> x86 surrogate -> x86
-# fake) runs on a dev machine with QTTUNE_SURROGATE_EXE pointing at
+# fake) runs on a dev machine with ECUIO_SURROGATE_EXE pointing at
 # artifacts from a second, Win32 (-A Win32) configure of the same tree.
 if(WIN32)
     add_executable(test_j2534_surrogate
         test_j2534_surrogate.cpp
     )
     target_link_libraries(test_j2534_surrogate PRIVATE
-        qttune-core
+        ecuio-core
         GTest::gtest_main
     )
     target_compile_definitions(test_j2534_surrogate PRIVATE
         FAKE_J2534_DLL_PATH="$<TARGET_FILE:fake_j2534>"
     )
     add_dependencies(test_j2534_surrogate fake_j2534)
-    add_dependencies(test_j2534_surrogate qttune-j2534-surrogate)
+    add_dependencies(test_j2534_surrogate ecuio-j2534-surrogate)
 
     # Deploy the surrogate exe next to the test exe: the client's
     # build_exe_path() resolves it by walking its own image directory
     # (same discipline as the baked fake-DLL path — no PATH games).
     add_custom_command(TARGET test_j2534_surrogate POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            $<TARGET_FILE:qttune-j2534-surrogate>
+            $<TARGET_FILE:ecuio-j2534-surrogate>
             $<TARGET_FILE_DIR:test_j2534_surrogate>
         COMMENT "Deploying surrogate exe next to test_j2534_surrogate"
     )
@@ -299,13 +299,13 @@ endif()
 
 # J2534 routing tests (Win32-only, HARNESS tier — backend selection by
 # PE architecture: in-proc for x64 (CI), surrogate for x86 (dev-machine,
-# env-gated via QTTUNE_FAKE_DLL/QTTUNE_SURROGATE_EXE))
+# env-gated via ECUIO_FAKE_DLL/ECUIO_SURROGATE_EXE))
 if(WIN32)
     add_executable(test_j2534_routing
         test_j2534_routing.cpp
     )
     target_link_libraries(test_j2534_routing PRIVATE
-        qttune-core
+        ecuio-core
         GTest::gtest_main
     )
     target_compile_definitions(test_j2534_routing PRIVATE

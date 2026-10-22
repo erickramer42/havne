@@ -14,17 +14,17 @@ one, rather than after streaming has supposedly started.
 ## Decision
 
 - The session reaches its transport only through an ops table,
-  `qttune_transport_ops_t` (`start`, `detach`). The mock moved onto
+  `ecuio_transport_ops_t` (`start`, `detach`). The mock moved onto
   this table with no test changes.
-- `qttune_session_create` routes on the URI prefix: `mock://` on every
+- `ecuio_session_create` routes on the URI prefix: `mock://` on every
   platform, `j2534://` on Windows. Anything else returns
-  `QTTUNE_ERR_NO_TRANSPORT`.
+  `ECUIO_ERR_NO_TRANSPORT`.
 - **Work is split between create and start.**
   - *Create (attach)* resolves the URI and loads and opens the vendor
     DLL, so load failures surface at create.
   - *Start* connects the channel and launches the worker.
 - **URI parsing is strict.** A malformed URI is rejected with
-  `QTTUNE_ERR_NO_TRANSPORT` at create, before any DLL is loaded. The query
+  `ECUIO_ERR_NO_TRANSPORT` at create, before any DLL is loaded. The query
   string is split off before the selector is resolved. That ordering
   also fixed two bugs: a query glued onto a vendor name broke the
   discovery match, and a query on a path form reached `LoadLibraryEx`

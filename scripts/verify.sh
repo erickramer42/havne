@@ -82,7 +82,7 @@ ctest_failed() {
 if [ "$tests_only" = 0 ]; then
     if [ "$have_win32" = 1 ]; then
         run win32 cmake --build build-win32 --config Release \
-            --target qttune-j2534-surrogate fake_j2534 fake_j2534_legacy
+            --target ecuio-j2534-surrogate fake_j2534 fake_j2534_legacy
         [ "$rc" = 0 ] || build_failed win32
         line win32 ok "$dur" "$(warnings win32) warnings"
     fi
@@ -100,9 +100,9 @@ fi
 line ctest ok "$dur" "$(ctest_summary "$LOGDIR/ctest.log")"
 
 if [ "$cross" = 1 ] && [ "$have_win32" = 1 ] && [ -z "$regex" ]; then
-    QTTUNE_SURROGATE_EXE="$(cygpath -m "$PWD")/build-win32/surrogate/Release/qttune-j2534-surrogate.exe"
-    QTTUNE_FAKE_DLL="$(cygpath -m "$PWD")/build-win32/tests/Release/fake_j2534.dll"
-    export QTTUNE_SURROGATE_EXE QTTUNE_FAKE_DLL
+    ECUIO_SURROGATE_EXE="$(cygpath -m "$PWD")/build-win32/surrogate/Release/ecuio-j2534-surrogate.exe"
+    ECUIO_FAKE_DLL="$(cygpath -m "$PWD")/build-win32/tests/Release/fake_j2534.dll"
+    export ECUIO_SURROGATE_EXE ECUIO_FAKE_DLL
     run cross-arch ctest --test-dir build -C Release --output-on-failure \
         --no-tests=error -R "J2534Routing|J2534Surrogate"
     [ "$rc" = 0 ] || ctest_failed cross-arch
