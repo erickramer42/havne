@@ -114,7 +114,7 @@ GaugeBase {
 
     // Range ends under the arc tips
     Text {
-        text: gauge.format(gauge.from)
+        text: gauge.formatScale(gauge.from)
         x: gauge.px(gauge.startAngle, gauge.rr) - width / 2
         y: gauge.py(gauge.startAngle, gauge.rr) + gauge.ringWidth * 0.75
         font.pixelSize: Math.max(9, gauge.rr * 0.14)
@@ -122,7 +122,7 @@ GaugeBase {
         color: Theme.textDim
     }
     Text {
-        text: gauge.format(gauge.to)
+        text: gauge.formatScale(gauge.to)
         x: gauge.px(gauge.endAngle, gauge.rr) - width / 2
         y: gauge.py(gauge.endAngle, gauge.rr) + gauge.ringWidth * 0.75
         font.pixelSize: Math.max(9, gauge.rr * 0.14)

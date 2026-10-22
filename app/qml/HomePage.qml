@@ -1,14 +1,21 @@
 // File/layer: app/qml/HomePage.qml | Qt6 Quick, UI layer
 // Testing: manual smoke — logo renders centered at 96px, bars animate
-//          inside it, status card centered (the hint line below is the
-//          column's widest item), status dot reflects link state, button
-//          lands on LiveView after connect
+//          inside it only while Home is on screen, status card centered
+//          (the hint line below is the column's widest item), status dot
+//          reflects link state, the button opens Settings when
+//          disconnected and ends the session when connected
 
 import QtQuick
 import QtQuick.Layouts
 
+pragma ComponentBehavior: Bound
+
 Rectangle {
+    id: home
     color: Theme.bg
+
+    // Settings owns connecting; Main opens it
+    signal connectRequested()
 
     ColumnLayout {
         anchors.centerIn: parent
@@ -22,64 +29,33 @@ Rectangle {
             Layout.alignment: Qt.AlignHCenter
 
             // Bars anchored bottom: animated height extends the TOP upward
-            Rectangle {
-                anchors.bottom: parent.bottom
-                anchors.bottomMargin: 20
-                x: 26
-                width: 8; radius: 4
-                gradient: Gradient {
-                    GradientStop { position: 0.0; color: "#f87171" }
-                    GradientStop { position: 0.6; color: "#facc15" }
-                    GradientStop { position: 1.0; color: "#4ade80" }
-                }
-                NumberAnimation on height {
-                    from: 16; to: 44; duration: 800
-                    loops: Animation.Infinite; easing.type: Easing.InOutQuad
-                }
-            }
-            Rectangle {
-                anchors.bottom: parent.bottom
-                anchors.bottomMargin: 20
-                x: 38
-                width: 8; radius: 4
-                gradient: Gradient {
-                    GradientStop { position: 0.0; color: "#f87171" }
-                    GradientStop { position: 0.6; color: "#facc15" }
-                    GradientStop { position: 1.0; color: "#4ade80" }
-                }
-                NumberAnimation on height {
-                    from: 28; to: 60; duration: 1100
-                    loops: Animation.Infinite; easing.type: Easing.InOutQuad
-                }
-            }
-            Rectangle {
-                anchors.bottom: parent.bottom
-                anchors.bottomMargin: 20
-                x: 50
-                width: 8; radius: 4
-                gradient: Gradient {
-                    GradientStop { position: 0.0; color: "#f87171" }
-                    GradientStop { position: 0.6; color: "#facc15" }
-                    GradientStop { position: 1.0; color: "#4ade80" }
-                }
-                NumberAnimation on height {
-                    from: 20; to: 52; duration: 950
-                    loops: Animation.Infinite; easing.type: Easing.InOutQuad
-                }
-            }
-            Rectangle {
-                anchors.bottom: parent.bottom
-                anchors.bottomMargin: 20
-                x: 62
-                width: 8; radius: 4
-                gradient: Gradient {
-                    GradientStop { position: 0.0; color: "#f87171" }
-                    GradientStop { position: 0.6; color: "#facc15" }
-                    GradientStop { position: 1.0; color: "#4ade80" }
-                }
-                NumberAnimation on height {
-                    from: 32; to: 48; duration: 1000
-                    loops: Animation.Infinite; easing.type: Easing.InOutQuad
+            Repeater {
+                model: [
+                    { x: 26, low: 16, high: 44, ms: 800 },
+                    { x: 38, low: 28, high: 60, ms: 1100 },
+                    { x: 50, low: 20, high: 52, ms: 950 },
+                    { x: 62, low: 32, high: 48, ms: 1000 }
+                ]
+                delegate: Rectangle {
+                    id: bar
+                    required property var modelData
+                    anchors.bottom: parent.bottom
+                    anchors.bottomMargin: 20
+                    x: bar.modelData.x
+                    width: 8; radius: 4
+                    gradient: Gradient {
+                        GradientStop { position: 0.0; color: "#f87171" }
+                        GradientStop { position: 0.6; color: "#facc15" }
+                        GradientStop { position: 1.0; color: "#4ade80" }
+                    }
+                    // Hidden pages stay alive in the StackLayout, so the
+                    // animation stops while Home isn't on screen
+                    NumberAnimation on height {
+                        running: home.visible
+                        from: bar.modelData.low; to: bar.modelData.high
+                        duration: bar.modelData.ms
+                        loops: Animation.Infinite; easing.type: Easing.InOutQuad
+                    }
                 }
             }
         }
@@ -133,30 +109,22 @@ Rectangle {
         }
 
         ThemedButton {
-            text: QtTune.connected ? qsTr("End session") : qsTr("Start session")
+            text: QtTune.connected ? qsTr("End session")
+                : QtTune.connecting ? qsTr("Connecting…")
+                : qsTr("Connect…")
+            highlighted: !QtTune.connected
+            enabled: QtTune.coreInitialized && !QtTune.connecting
             Layout.alignment: Qt.AlignHCenter
             Layout.topMargin: 8
-            onClicked: {
-                if (QtTune.connected) {
-                    QtTune.disconnectSession()
-                } else {
-                    const err = QtTune.connectSession("mock://demo")
-                    if (err !== "") {
-                        console.error("connect failed:", err)
-                        return
-                    }
-                    gotoPage(2) // land on LiveView — subscribed values + strip chart
-                }
-            }
+            onClicked: QtTune.connected ? QtTune.disconnectSession()
+                                        : home.connectRequested()
         }
 
         Text {
-            // Points J2534 users at the Settings picker; this page's
-            // button connects mock only
-            text: qsTr("Connect a J2534 device from Settings for live vehicle data")
+            visible: !QtTune.connected
+            text: qsTr("Choose a J2534 device, or the mock://demo preset, in Settings")
             font.pixelSize: 12
             color: Theme.textDim
-            opacity: 0.7
             Layout.alignment: Qt.AlignHCenter
         }
     }

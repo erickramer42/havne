@@ -95,10 +95,13 @@ public:
                          * show "—" instead of a fake 0 for an
                          * unsupported PID. Notified per batch;
                          * LiveView binds it. */
-        AgeMsRole       /* -1 = never arrived; else ms since the last
+        AgeMsRole,      /* -1 = never arrived; else ms since the last
                          * sample, for dimming stale values. Notified
                          * per batch and on every coalesce tick via
                          * refreshAges(); LiveView binds it. */
+        DecimalsRole    /* the def's decimal_places: the one source of
+                         * display precision for LiveView and the
+                         * Dashboard. Fixed per signal set. */
     };
 
     int rowCount(const QModelIndex& parent = {}) const override;
@@ -110,6 +113,8 @@ public:
     // timestampMs >= 0  => use as-is (tests inject deterministic values; this
     // is also the seam for per-sample frame timestamps once decode moves to
     // the worker side under J2534).
+    // Every row updates, subscribed or not: a subscription only chooses
+    // what chartData() plots, and the Dashboard reads every signal.
     void updateValues(const std::vector<std::pair<uint16_t, float>>& values,
                       qint64 timestampMs = -1);
     int subscribedCount() const { return static_cast<int>(m_subscribedCount); }
@@ -117,7 +122,8 @@ public:
     Q_INVOKABLE void toggleSubscribed(int row);
 
     // Strip-chart pull API: one map per SUBSCRIBED signal with non-empty
-    // history: { id, row, name, unit, value, samples: [ts, val, ts, val, ...] }
+    // history: { id, row, name, unit, decimals, value,
+    // samples: [ts, val, ts, val, ...] }
     // `row` is the signal's model row, so the trace colour can match the
     // list row's swatch and stays put when other signals are unsubscribed.
     // Samples are flattened doubles, oldest-first. Called by the QML
@@ -148,6 +154,7 @@ private:
         uint16_t id;
         char name[32];
         char unit[16];
+        uint8_t decimals = 0;
         float value = 0.0f;
         // Whether the strip chart plots this signal. Values and history
         // update regardless: the Dashboard reads every row, and a signal
@@ -183,6 +190,9 @@ class QtTuneBridge : public QObject
     Q_PROPERTY(QString linkState READ linkState NOTIFY linkStateChanged)
     Q_PROPERTY(int linkErrorCode READ linkErrorCode NOTIFY linkStateChanged)
     Q_PROPERTY(int errorEpisodes READ errorEpisodes NOTIFY linkStateChanged)
+    // Log page Pause: frames still count and decode, but none are added
+    // to the frame log. Every session starts unpaused.
+    Q_PROPERTY(bool logPaused READ logPaused WRITE setLogPaused NOTIFY logPausedChanged)
 
 public:
     explicit QtTuneBridge(QObject* parent = nullptr);
@@ -219,6 +229,8 @@ public:
     Q_INVOKABLE QVariantList discoverJ2534Devices() const;
     int linkErrorCode() const { return m_linkErrorCode; }
     int errorEpisodes() const { return m_errorEpisodes; }
+    bool logPaused() const { return m_logPaused; }
+    void setLogPaused(bool paused);
 
 public slots:
     Q_INVOKABLE QString connectSession(const QString& uri);
@@ -244,6 +256,7 @@ signals:
     void connectResult(const QString& uri, const QString& error);
     void logMessage(const QString& line);
     void linkStateChanged();
+    void logPausedChanged();
 
 private:
     static void onFrame(const qttune_frame_t* frame, void* user_data);
@@ -259,6 +272,7 @@ private:
     std::atomic<int> m_droppedFrames{0};
     int m_currentFrameCount = 0;      // GUI-thread-only (queued invocations)
     int m_lastReportedDropped = 0;     // GUI-thread-only companion to m_droppedFrames
+    bool m_logPaused = false;          // GUI-thread-only
 
     FrameListModel* m_sourceModel = nullptr;
     FrameSortProxy* m_sortProxy = nullptr;

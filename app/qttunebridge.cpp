@@ -139,6 +139,7 @@ QVariant SignalListModel::data(const QModelIndex& index, int role) const
                 return static_cast<int>(m_clock.elapsed()
                                          - e.history[last].timestampMs);
             }
+        case DecimalsRole: return static_cast<int>(e.decimals);
         default: return QVariant();
     }
 }
@@ -152,7 +153,8 @@ QHash<int, QByteArray> SignalListModel::roleNames() const
         {ValueRole, "value"},
         {SubscribedRole, "subscribed"},
         {HasValueRole, "hasValue"},
-        {AgeMsRole, "ageMs"}
+        {AgeMsRole, "ageMs"},
+        {DecimalsRole, "decimals"}
     };
 }
 
@@ -178,6 +180,7 @@ void SignalListModel::setSignalSet(const QttuneSignalSet* set)
         e.id = set->defs[i].id;
         strncpy(e.name, set->defs[i].name, sizeof(e.name) - 1);
         strncpy(e.unit, set->defs[i].unit, sizeof(e.unit) - 1);
+        e.decimals = set->defs[i].decimal_places;
         e.subscribed = true;
         ++m_subscribedCount;
         m_entries.push_back(e);
@@ -207,12 +210,16 @@ void SignalListModel::updateValues(const std::vector<std::pair<uint16_t, float>>
     // when decode moves worker-side under J2534).
     const qint64 stamp = (timestampMs >= 0) ? timestampMs : m_clock.elapsed();
 
+    // Every row, subscribed or not: `subscribed` filters chartData()
+    // only. Skipping unsubscribed rows here would freeze the Dashboard's
+    // gauges for a signal unticked on Live, and dim them as stale while
+    // its frames still arrive.
     int firstRow = -1;
     int lastRow = -1;
     for (const auto& pair : values) {
         for (size_t i = 0; i < m_entries.size(); ++i) {
             Entry& e = m_entries[i];
-            if (e.id == pair.first) {   // subscribed or not: see Entry::subscribed
+            if (e.id == pair.first) {
                 e.value = pair.second;
 
                 // Evict-oldest ring push — bounded memory, stream never
@@ -252,6 +259,7 @@ QVariantList SignalListModel::chartData() const
         m["row"] = static_cast<int>(row);
         m["name"] = QString::fromUtf8(e.name);
         m["unit"] = QString::fromUtf8(e.unit);
+        m["decimals"] = static_cast<int>(e.decimals);
         m["value"] = e.value;
 
         // Flattened [ts, val, ts, val, ...], oldest first.
@@ -448,6 +456,7 @@ void QtTuneBridge::applyConnectedState(qttune_session_t* session, const QString&
     m_linkErrorCode = QT_OK;
     m_errorEpisodes = 0;
     emit linkStateChanged();
+    setLogPaused(false);       // a new session always logs
     m_coalesceTimer->start(100);
     emit connectedChanged(true);
     emit framesReset();
@@ -537,6 +546,14 @@ void QtTuneBridge::disconnectSession()
     m_linkErrorCode = QT_OK;          // the properties must not
     m_errorEpisodes = 0;              // outlive the session
     emit linkStateChanged();          // "fault"/"quiet" -> "disconnected"
+    setLogPaused(false);
+}
+
+void QtTuneBridge::setLogPaused(bool paused)
+{
+    if (m_logPaused == paused) return;
+    m_logPaused = paused;
+    emit logPausedChanged();
 }
 
 void QtTuneBridge::clearFrames()
@@ -596,16 +613,19 @@ void QtTuneBridge::handleFrameInternal(const qttune_frame_t* frame)
                          ? frame->data_length
                          : static_cast<uint16_t>(sizeof(frame->data));
 
-    QVariantMap vm;
-    vm["timestampUs"] = QVariant::fromValue<quint64>(frame->timestamp_us);
-    vm["arbId"] = QVariant::fromValue<quint32>(frame->arbitration_id);
-    vm["dlc"] = static_cast<uint32_t>(len);
-    vm["extended"] = (frame->flags & QTTUNE_FRAME_FLAG_EXTENDED) != 0;
-    vm["payloadHex"] = QByteArray(
-        reinterpret_cast<const char*>(frame->data),
-        static_cast<qsizetype>(len)).toHex();
-
-    m_sourceModel->appendFrame(vm);
+    // Paused: counted and decoded below, but kept out of the frame log
+    if (!m_logPaused) {
+        QVariantMap vm;
+        vm["timestampUs"] = QVariant::fromValue<quint64>(frame->timestamp_us);
+        vm["arbId"] = QVariant::fromValue<quint32>(frame->arbitration_id);
+        vm["dlc"] = static_cast<uint32_t>(len);
+        vm["extended"] = (frame->flags & QTTUNE_FRAME_FLAG_EXTENDED) != 0;
+        // Spaced uppercase bytes ("41 0C 1F 40"), matching the ID column
+        vm["payloadHex"] = QByteArray(
+            reinterpret_cast<const char*>(frame->data),
+            static_cast<qsizetype>(len)).toHex(' ').toUpper();
+        m_sourceModel->appendFrame(vm);
+    }
     ++m_currentFrameCount;
 
     // ADR-0013: decode against the SESSION's profile set. NULL means

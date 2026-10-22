@@ -2,33 +2,92 @@
 // Testing: render verified manually; the arbId column by the smoke
 //          recipe's "Frames + arbId column" row (docs/testing.md). The
 //          role names this delegate binds are pinned by
-//          BridgeTest.FrameRoleNamesMatchLogPageBindings. Oldest-first
-//          follow: manual smoke — while mock:// streams, scroll up by
-//          drag, wheel and scroll bar (the view holds), then "Latest"
-//          or scrolling to the end resumes following.
+//          BridgeTest.FrameRoleNamesMatchLogPageBindings, and Pause's
+//          bridge side by BridgeTest.LogPauseStopsFrameLogNotDecode.
+//          Oldest-first follow: manual smoke — while mock:// streams,
+//          scroll up by drag, wheel and scroll bar (the view holds), then
+//          "Latest" or scrolling to the end resumes following.
 
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 
 Pane {
-    padding: 12
+    id: page
+    padding: Theme.pageMargin
     background: Rectangle { color: Theme.bg }
+
+    // One option of a two-option toggle. Both options stay visible and
+    // the current one is filled, so it doesn't read as a dropdown.
+    component SegmentButton: AbstractButton {
+        id: seg
+        property bool selected: false
+
+        implicitWidth: segLabel.implicitWidth + 24
+        implicitHeight: 30
+        hoverEnabled: true
+        Accessible.checkable: true
+        Accessible.checked: seg.selected
+
+        background: Rectangle {
+            radius: Theme.radius - 2
+            color: seg.selected ? Theme.elevatedLight
+                 : seg.hovered ? Qt.alpha(Theme.text, 0.05)
+                 : "transparent"
+            border.width: seg.visualFocus ? 2 : 0
+            border.color: Theme.text
+        }
+        contentItem: Text {
+            id: segLabel
+            text: seg.text
+            font.pixelSize: 13
+            color: seg.selected ? Theme.text : Theme.textDim
+            horizontalAlignment: Text.AlignHCenter
+            verticalAlignment: Text.AlignVCenter
+        }
+    }
 
     ColumnLayout {
         anchors.fill: parent
         spacing: Theme.spacing
 
-        // ---- Toolbar: stats + actions ----
+        PageHeader {
+            title: qsTr("Frame log")
+
+            Item { Layout.fillWidth: true }
+
+            // Holds the table still so rows can be read. Frames that
+            // arrive while paused are counted but not logged; decoding,
+            // Live and the Dashboard carry on.
+            ThemedButton {
+                text: QtTune.logPaused ? qsTr("Resume") : qsTr("Pause")
+                highlighted: QtTune.logPaused
+                enabled: QtTune.connected
+                onClicked: QtTune.logPaused = !QtTune.logPaused
+            }
+            ThemedButton {
+                text: qsTr("Clear")
+                enabled: QtTune.frameCount > 0
+                onClicked: QtTune.clearFrames()
+            }
+        }
+
+        // ---- Status, bridge counters and row order ----
         RowLayout {
             Layout.fillWidth: true
             spacing: Theme.spacing
 
             Label {
-                text: QtTune.connected
-                      ? qsTr("Logging — %1 frames").arg(QtTune.frameCount)
-                      : qsTr("Idle")
-                color: QtTune.connected ? Theme.success : Theme.textDim
+                Layout.fillWidth: true
+                elide: Text.ElideRight
+                text: !QtTune.connected ? qsTr("Idle")
+                    : QtTune.logPaused
+                      ? qsTr("Paused — %1 frames received; new frames aren't logged")
+                            .arg(QtTune.frameCount)
+                    : qsTr("Logging — %1 frames").arg(QtTune.frameCount)
+                color: !QtTune.connected ? Theme.textDim
+                     : QtTune.logPaused ? Theme.warning
+                     : Theme.success
                 font.pixelSize: 13
             }
 
@@ -39,19 +98,39 @@ Pane {
                 visible: QtTune.droppedFrames > 0
             }
 
-            Item { Layout.fillWidth: true }
-
-            ThemedButton {
-                text: QtTune.model.newestFirst
-                    ? qsTr("Newest first ▾")
-                    : qsTr("Oldest first ▴")
-                onClicked: QtTune.model.newestFirst = !QtTune.model.newestFirst
+            // Bridge diagnostics: GUI-thread frame notifications and
+            // coalesced signal batches. Left out at phone width.
+            Label {
+                text: qsTr("notify %1 · batch %2")
+                    .arg(QtTune.guiNotifyCount)
+                    .arg(QtTune.signalBatchCount)
+                color: Theme.textDim
+                font.pixelSize: 13
+                visible: QtTune.frameCount > 0 && page.width >= 600
             }
 
-            ThemedButton {
-                text: qsTr("Clear")
-                enabled: QtTune.frameCount > 0
-                onClicked: QtTune.clearFrames()
+            Rectangle {
+                implicitWidth: order.implicitWidth + 4
+                implicitHeight: order.implicitHeight + 4
+                radius: Theme.radius
+                color: Theme.surface
+
+                Row {
+                    id: order
+                    anchors.centerIn: parent
+                    spacing: 2
+
+                    SegmentButton {
+                        text: qsTr("Newest first")
+                        selected: QtTune.model.newestFirst
+                        onClicked: QtTune.model.newestFirst = true
+                    }
+                    SegmentButton {
+                        text: qsTr("Oldest first")
+                        selected: !QtTune.model.newestFirst
+                        onClicked: QtTune.model.newestFirst = false
+                    }
+                }
             }
         }
 
@@ -78,14 +157,15 @@ Pane {
                     spacing: 8
 
                     // Widths MUST match delegate columns below
-                    Label { text: qsTr("Time (µs)"); color: Theme.textDim; font.pixelSize: 12;
-                            Layout.preferredWidth: 130 }
+                    Label { text: qsTr("Time (s)"); color: Theme.textDim; font.pixelSize: 12;
+                            Layout.preferredWidth: 96 }
                     Label { text: qsTr("DLC"); color: Theme.textDim; font.pixelSize: 12;
                             Layout.preferredWidth: 36 }
                     Label { text: qsTr("Ext"); color: Theme.textDim; font.pixelSize: 12;
                             Layout.preferredWidth: 36 }
+                    // Fits a 29-bit ID ("0x18FF0C00") in the mono face
                     Label { text: qsTr("ID"); color: Theme.textDim; font.pixelSize: 12;
-                            Layout.preferredWidth: 64 }
+                            Layout.preferredWidth: 96 }
                     Label { text: qsTr("Payload"); color: Theme.textDim; font.pixelSize: 12;
                             Layout.fillWidth: true }
                 }
@@ -156,21 +236,23 @@ Pane {
                     // build error: the column would render empty and
                     // throw per delegate.
                     Label {
-                        text: model.timestampUs
+                        // Session-relative µs, shown as s.mmm
+                        text: (model.timestampUs / 1e6).toFixed(3)
                         color: Theme.textDim
-                        font.family: "monospace"; font.pixelSize: 12
-                        Layout.preferredWidth: 130
+                        font.family: Theme.monoFamily; font.pixelSize: 12
+                        Layout.preferredWidth: 96
                         elide: Text.ElideRight
                     }
                     Label {
                         text: model.dlc
                         color: Theme.text
-                        font.family: "monospace"; font.pixelSize: 12
+                        font.family: Theme.monoFamily; font.pixelSize: 12
                         Layout.preferredWidth: 36
                     }
                     Label {
                         text: model.extended ? "E" : "-"
                         color: model.extended ? Theme.success : Theme.textDim
+                        font.family: Theme.monoFamily; font.pixelSize: 12
                         Layout.preferredWidth: 36
                     }
                     Label {
@@ -178,14 +260,14 @@ Pane {
                         // hex-format it for display.
                         text: "0x" + model.arbId.toString(16).toUpperCase()
                         color: Theme.textDim
-                        font.family: "monospace"; font.pixelSize: 12
-                        Layout.preferredWidth: 64
+                        font.family: Theme.monoFamily; font.pixelSize: 12
+                        Layout.preferredWidth: 96
                         elide: Text.ElideRight
                     }
                     Label {
-                        text: model.payloadHex
+                        text: model.payloadHex   // spaced uppercase bytes, from the bridge
                         color: Theme.text
-                        font.family: "monospace"; font.pixelSize: 12
+                        font.family: Theme.monoFamily; font.pixelSize: 12
                         Layout.fillWidth: true
                         elide: Text.ElideRight
                     }
@@ -195,9 +277,9 @@ Pane {
                 Label {
                     anchors.centerIn: parent
                     visible: frameList.count === 0
-                    text: QtTune.connected
-                          ? qsTr("Waiting for frames…")
-                          : qsTr("No session — start one from Home")
+                    text: !QtTune.connected ? qsTr("No session — connect one from Settings")
+                        : QtTune.logPaused ? qsTr("Paused")
+                        : qsTr("Waiting for frames…")
                     color: Theme.textDim
                 }
             }

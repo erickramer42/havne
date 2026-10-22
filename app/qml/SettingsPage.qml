@@ -1,9 +1,10 @@
 // File/layer: app/qml/SettingsPage.qml | Qt6 Quick, UI layer
 // Testing: manual smoke — discovery list renders (Windows: real registry;
-//          macOS/Linux: empty-state hint), picker row fills URI field only,
-//          Connect button drives connectSessionAsync (UI stays responsive
-//          while a vendor blocks ~8 s), activity log shows connect lifecycle,
-//          error label on bad URI, status label colored by link state
+//          macOS/Linux: empty-state hint) sized to its rows, picker row
+//          fills URI field only, Connect button drives connectSessionAsync
+//          (UI stays responsive while a vendor blocks ~8 s), activity log
+//          shows connect lifecycle and takes the remaining height, error
+//          label on bad URI, status label colored by link state
 //          (Theme.linkColor)
 
 import QtQuick
@@ -14,14 +15,24 @@ pragma ComponentBehavior: Bound
 
 Pane {
     id: page
+    padding: Theme.pageMargin
     background: Rectangle { color: Theme.bg }
 
     readonly property int maxLogLines: 200
+    readonly property int deviceRowHeight: 56
+    readonly property int deviceRowsShown: 4   // the list scrolls past this
 
     // Discovered Pass-Thru interfaces: [{ vendorName, dllPath,
     // architecture }, ...] with architecture "x86", "x64" or "unknown".
     // Empty on non-Windows or when no drivers are installed.
     property var j2534Devices: []
+
+    component Heading: Label {
+        color: Theme.text
+        font.pixelSize: 16
+        font.weight: Font.DemiBold
+        Layout.topMargin: Theme.spacing
+    }
 
     function refreshDevices() {
         j2534Devices = QtTune.discoverJ2534Devices()
@@ -76,15 +87,12 @@ Pane {
 
     ColumnLayout {
         anchors.fill: parent
-        anchors.margins: Theme.spacing * 2
         spacing: Theme.spacing * 2
 
+        PageHeader { title: qsTr("Settings") }
+
         // ---- Connection ----
-        Label {
-            text: qsTr("Connection")
-            color: Theme.text
-            font.bold: true
-        }
+        Heading { text: qsTr("Connection") }
 
         Label {
             text: QtTune.connected
@@ -112,10 +120,11 @@ Pane {
                 onAccepted: page.requestConnect(text)
             }
 
-            Button {
+            ThemedButton {
                 text: QtTune.connected
                       ? qsTr("Disconnect")
                       : (QtTune.connecting ? qsTr("Connecting…") : qsTr("Connect"))
+                highlighted: !QtTune.connected
                 // Disabled while an attempt is in flight — the bridge
                 // guards double-starts anyway, but the UI must not
                 // offer them during a multi-second vendor block.
@@ -124,10 +133,6 @@ Pane {
                          : (!QtTune.connecting
                             && QtTune.coreInitialized
                             && uriField.text !== "")
-                background: Rectangle {
-                    radius: Theme.radius
-                    color: QtTune.connected ? Theme.elevated : Theme.primary
-                }
                 onClicked: {
                     if (QtTune.connected) {
                         QtTune.disconnectSession()
@@ -154,27 +159,20 @@ Pane {
             Label { text: qsTr("Presets:"); color: Theme.textDim }
             Repeater {
                 model: ["mock://demo", "j2534://"]
-                Button {
+                ThemedButton {
                     required property string modelData
-                    text: modelData === ""
+                    // A bare j2534:// opens the first discovered device
+                    text: modelData === "j2534://"
                           ? qsTr("j2534:// (first device)")
                           : modelData
                     enabled: !QtTune.connected && !QtTune.connecting
                     onClicked: page.fillUri(modelData)
-                    background: Rectangle {
-                        radius: Theme.radius
-                        color: parent.enabled ? Theme.elevatedLight : Qt.darker(Theme.elevatedLight, 1.2)
-                    }
                 }
             }
         }
 
         // ---- J2534 interfaces ----
-        Label {
-            text: qsTr("J2534 Pass-Thru Interfaces")
-            color: Theme.text
-            font.bold: true
-        }
+        Heading { text: qsTr("J2534 Pass-Thru Interfaces") }
 
         RowLayout {
             spacing: Theme.spacing
@@ -182,29 +180,38 @@ Pane {
                 text: page.j2534Devices.length === 0
                       ? qsTr("None discovered — install a Pass-Thru driver "
                              + "(Windows) or enter a direct path above")
-                      : qsTr("%1 found").arg(page.j2534Devices.length)
+                      : qsTr("%1 found — select one to put its URI in the field above, "
+                             + "then Connect").arg(page.j2534Devices.length)
                 color: page.j2534Devices.length === 0 ? Theme.textDim : Theme.text
+                wrapMode: Text.WordWrap
                 Layout.fillWidth: true
             }
-            Button {
+            ThemedButton {
                 text: qsTr("Refresh")
                 onClicked: page.refreshDevices()
             }
         }
 
+        // Sized to its rows up to deviceRowsShown, then it scrolls; the
+        // activity log takes the rest of the page
         ListView {
             id: deviceList
             Layout.fillWidth: true
-            Layout.fillHeight: true
+            Layout.preferredHeight: contentHeight
+            Layout.maximumHeight: page.deviceRowsShown * (page.deviceRowHeight + spacing) - spacing
+            visible: count > 0
             clip: true
             spacing: 2
+            boundsBehavior: Flickable.StopAtBounds
             model: page.j2534Devices
+
+            ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
 
             delegate: Rectangle {
                 id: row
                 required property var modelData
                 width: deviceList.width
-                height: 56
+                height: page.deviceRowHeight
                 radius: Theme.radius
                 color: mouse.containsMouse ? Theme.elevatedLight : Theme.elevated
 
@@ -241,15 +248,12 @@ Pane {
         }
 
         // ---- Activity log ----
-        Label {
-            text: qsTr("Activity")
-            color: Theme.text
-            font.bold: true
-        }
+        Heading { text: qsTr("Activity") }
 
         ScrollView {
             Layout.fillWidth: true
-            Layout.preferredHeight: 140
+            Layout.fillHeight: true
+            Layout.minimumHeight: 120
 
             TextArea {
                 id: activityLog

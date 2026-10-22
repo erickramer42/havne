@@ -25,7 +25,9 @@ namespace {
  *   - no PCI byte: the adapter does the ISO-TP framing
  *   - temperatures are UINT8 (J1979: A - 40, so -40..215 degC)
  * Scaling follows SAE J1979 Mode 01. Only the PIDs listed here are
- * requested and decoded. Single-frame responses only. */
+ * requested and decoded. Single-frame responses only.
+ * Names, units and decimal places are display strings: the UI shows
+ * them as they are (UTF-8). */
 QttuneSignalDef obd2_def(uint16_t id, const char* name,
                          QttuneSignalType type, uint8_t num_bytes,
                          float scale, float offset_val, const char* unit,
@@ -53,13 +55,15 @@ QttuneSignalDef obd2_def(uint16_t id, const char* name,
     return d;
 }
 
+#define DEG_C "\xC2\xB0" "C"   /* UTF-8 degree sign, whatever the source encoding */
+
 const QttuneSignalDef kObd2Defs[] = {
     obd2_def(OBD2_SIG_ENGINE_LOAD_ID,  "Engine Load",
              QTTUNE_SIGNAL_TYPE_UINT8, 1, 100.0f / 255.0f, 0.0f,
              "%",    1, 0x04, false),
     obd2_def(OBD2_SIG_COOLANT_TEMP_ID, "Coolant Temp",
              QTTUNE_SIGNAL_TYPE_UINT8, 1, 1.0f, -40.0f,
-             "degC", 0, 0x05, false),
+             DEG_C,  0, 0x05, false),
     obd2_def(OBD2_SIG_RPM_ID,          "RPM",
              QTTUNE_SIGNAL_TYPE_UINT16, 2, 0.25f, 0.0f,
              "RPM",  0, 0x0C, true),
@@ -68,7 +72,7 @@ const QttuneSignalDef kObd2Defs[] = {
              "km/h", 0, 0x0D, false),
     obd2_def(OBD2_SIG_IAT_ID,          "Intake Air Temp",
              QTTUNE_SIGNAL_TYPE_UINT8, 1, 1.0f, -40.0f,
-             "degC", 0, 0x0F, false),
+             DEG_C,  0, 0x0F, false),
     obd2_def(OBD2_SIG_THROTTLE_ID,     "Throttle Position",
              QTTUNE_SIGNAL_TYPE_UINT8, 1, 100.0f / 255.0f, 0.0f,
              "%",    1, 0x11, false),
@@ -80,10 +84,10 @@ const QttuneSignalDef kObd2Defs[] = {
              "V",    2, 0x42, true),
     /* SAE J1979 PID 0x10: air flow rate, (256·A + B)/100 g/s. Two-byte
      * big-endian like RPM/0x42; the 0.01 scale needs no decoder
-     * extension (generic raw·scale + offset). */
+     * extension (generic raw·scale + offset). Shown to one decimal. */
     obd2_def(OBD2_SIG_MAF_ID,            "MAF",
              QTTUNE_SIGNAL_TYPE_UINT16, 2, 0.01f, 0.0f,
-             "g/s",  2, 0x10, true),
+             "g/s",  1, 0x10, true),
     /* SAE J1979 PID 0x5C: engine oil temperature, A - 40 degC, the same
      * def shape as coolant and IAT. Transmission fluid temperature isn't
      * a standard Mode-01 PID (it's manufacturer-specific, usually
@@ -91,8 +95,10 @@ const QttuneSignalDef kObd2Defs[] = {
      * byte, not a temperature. */
     obd2_def(OBD2_SIG_OIL_TEMP_ID,         "Engine Oil Temp",
              QTTUNE_SIGNAL_TYPE_UINT8, 1, 1.0f, -40.0f,
-             "degC", 0, 0x5C, false),
+             DEG_C,  0, 0x5C, false),
 };
+
+#undef DEG_C
 
 /* ADR-0013 §4: the obd2 profile declares the standard physical pair,
  * 0x7E8 (ECU response) / 0x7E0 (tester request). The transport

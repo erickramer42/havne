@@ -29,6 +29,7 @@ qt_add_qml_module(qttune
         qml/Main.qml
         qml/HomePage.qml
         qml/ThemedButton.qml
+        qml/PageHeader.qml
         qml/DashboardPage.qml
         qml/LogPage.qml
         qml/SettingsPage.qml

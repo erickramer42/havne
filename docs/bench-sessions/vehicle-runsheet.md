@@ -65,8 +65,9 @@ that runs to the end undocumented.
         ignition": writes fail while reads are clean, the no-ECU or
         ignition-off case;
       - red "Adapter fault": reads fail.
-      The Settings activity log records each transition; Home and the
-      Dashboard header show the same state in short form.
+      The Settings activity log records each transition; the header
+      pill, Home and the Dashboard header show the same state in short
+      form.
 - [ ] Settings picker lists the VX as "x86"
 - [ ] Camera or notebook ready
 
@@ -122,17 +123,17 @@ and payloads verbatim (the session log's `OP_READ frame` lines).
 is requested)
 
 **Expected:**
-- [ ] Log page: frames with ID `0x7E8`, DLC 4, payload `410c` + two
+- [ ] Log page: frames with ID `0x7E8`, DLC 4, payload `41 0C` + two
       data bytes; engine off, RPM reads 0 or close to it. On the wire
       the reply is an 8-byte CAN frame with a PCI byte and padding, but
       the adapter reassembles ISO 15765 and hands over only the data,
       so DLC 4 is what to expect. Record the DLC either way (in the
       session log's `OP_READ frame` lines, `len` includes the 4-byte
       CAN ID, so DLC 4 is `len 8`):
-      - DLC 8 starting `410c`: this adapter passes the padding through.
+      - DLC 8 starting `41 0C`: this adapter passes the padding through.
         Decoding still works; note the pad bytes;
       - a payload that doesn't start with `41` (for example
-        `04 41 0c …`): a PCI byte left in-band (see "If it fails")
+        `04 41 0C …`): a PCI byte left in-band (see "If it fails")
 - [ ] LiveView: RPM populated; every other signal shows "—"
 - [ ] No banner (link ok)
 - [ ] Optional, same ignition state: connect
@@ -143,7 +144,8 @@ is requested)
 
 **Evidence:** the session log: its `OP_WRITE frame` and
 `OP_READ frame` lines carry the request and reply bytes, statuses,
-RxStatus and vendor timestamps.
+RxStatus and vendor timestamps. To compare a few payloads against the
+Log page, Pause holds its rows still.
 
 ## Phase 3 — full scheduler
 
@@ -176,8 +178,8 @@ RxStatus and vendor timestamps.
 
 **Evidence:** a screenshot of LiveView; the refresh you observe per
 signal (expect about one rotation; replies a cycle late are a known item, not a
-failure); the Log page's `timestamp_us` deltas against the wall clock
-over a minute (BENCH prep #5).
+failure); the Log page's time column (seconds, from `timestamp_us`)
+against the wall clock over a minute (BENCH prep #5).
 
 ## Phase 4 — engine idling (optional)
 

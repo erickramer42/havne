@@ -1,6 +1,8 @@
 import QtQuick
 import QtQuick.Controls
 
+// Sidebar item. Transparent on the sidebar panel: only the active item
+// and a hovered one draw a background.
 AbstractButton {
     id: control
     property string label: ""
@@ -8,11 +10,15 @@ AbstractButton {
 
     implicitHeight: 44
     hoverEnabled: true
+    Accessible.name: control.label
 
     background: Rectangle {
         color: control.active ? Theme.elevated
              : control.hovered ? Qt.alpha(Theme.primary, 0.08)
-             : Theme.surface
+             : "transparent"
+        // Keyboard focus ring; visualFocus stays false for mouse clicks
+        border.width: control.visualFocus ? 2 : 0
+        border.color: Theme.text
         Rectangle { // left accent bar when active
             visible: control.active
             width: 3; height: parent.height

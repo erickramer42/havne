@@ -42,6 +42,8 @@ Item {
 
     function fractionOf(v) { return Math.max(0, Math.min(1, (v - from) / (to - from))) }
     function format(v) { return Number(v).toLocaleString(Qt.locale(), 'f', decimals) }
+    // Scale labels are whole numbers, whatever the readout's decimals
+    function formatScale(v) { return Number(v).toLocaleString(Qt.locale(), 'f', 0) }
     function zoneColor(v, normal) {
         if (!isNaN(dangerFrom) && v >= dangerFrom) return Theme.danger
         if (!isNaN(warnFrom) && v >= warnFrom) return Theme.warning

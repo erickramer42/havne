@@ -87,7 +87,7 @@ next.
     channel derivation are HARNESS-verified against the fake; a
     live-vehicle session (real ECU responses, talking-bus items in
     the BENCH prep list) is still ahead.
-  - **Tests:** 167 ctest cases (Windows/MSVC 2022, both trees
+  - **Tests:** 171 ctest cases (Windows/MSVC 2022, both trees
     rebuilt, 2026-10-21), plus the cross-arch subset (21/21). All
     passed except the env-gated cross-arch skip. CI was green on all
     eight jobs on PR #15 (merged as `0956784`), including the
@@ -167,7 +167,7 @@ Contracts along this path:
 | Signal decode | Linear scaling; Intel byte order by default, big-endian for byte-aligned fields; gated on message ID plus mux key. Two signal sets, `mock` and `obd2`, chosen by profile. | [ADR-0004](docs/adr/0004-signal-decoding-model.md), [ADR-0013](docs/adr/0013-protocol-profiles.md) |
 | Mock transport | A scripted ~2-minute drive cycle on a small vehicle model (`core/src/mock_drive_cycle.h`): cold-start warm-up, a 2nd-gear WOT pull from ~1550 rpm to the 7000 rpm limiter with a 5 s hold, a longer and hotter 3rd-gear pull with the same hold, then a quarter-mile run from a standstill (~13.4 s, ~176 km/h trap). Every tick of the cycle round-trips through the mock set in `CoreTest.MockDriveCycle*`. | — |
 | Bridge and models | Frame log with sort toggle; coalesced signal model with a 120-sample history per signal; device discovery for the picker; link-health polling (#11) | [ADR-0003](docs/adr/0003-backpressure-bounds-in-flight-frames.md), [ADR-0005](docs/adr/0005-coalesced-signal-updates.md) |
-| QML pages | Home, Dashboard (gauges and shift lights through `SignalHub`), Live (table and strip chart), Log, Settings (device picker plus manual URI). `Theme` holds the palette and the link-state color and label functions. | [docs/architecture.md](docs/architecture.md#the-ui-layer) |
+| QML pages | Home, Dashboard (gauges and shift lights through `SignalHub`), Live (table, and a strip chart with each trace's value at its end), Log (with Pause), Settings (device picker plus manual URI, and the one place a session is connected). Names, units and decimal places come from core. `Theme` holds the palette, fonts, page margin and the link-state color and label functions; `PageHeader` gives the pages one title row. | [docs/architecture.md](docs/architecture.md#the-ui-layer) |
 | J2534 | HARNESS-verified, same-arch and cross-arch, including transport adoption (ADR-0012) and profile-derived channels (ADR-0013). BENCH: one adapter, quiet bus. | [docs/j2534.md](docs/j2534.md) |
 
 ## v0.3.0 checklist
@@ -290,10 +290,10 @@ an issue is resolved it is removed, and its number is not reused.
    (cross builds set `BUILD_TESTING=OFF`). Off Windows the only
    transport is `mock://`, so a mobile session can't reach a vehicle
    yet.
-4. **Every signal is decoded for every frame.** A Live subscription
-   only chooses what the chart plots, because the Dashboard reads every
-   row. Filtering at decode time, once signal counts grow, needs its
-   own notion of "wanted": what any page currently shows.
+4. **Every def is matched against every frame on the GUI thread.** A
+   subscription can't trim that work: it is the chart's filter only,
+   because the Dashboard reads every signal. Once signal counts grow,
+   move decoding to the worker (Performance, in the backlog).
 6. **The session API is single-caller by contract.** The bridge is the
    only caller.
 8. **`CoreTest.SessionStartWithoutTransportFails` is a `SUCCEED()`
@@ -307,9 +307,9 @@ an issue is resolved it is removed, and its number is not reused.
     `QT_ERR_REQUEST_FAILED`, unmatched frames read as quiet, and a
     growing backoff ([j2534.md](docs/j2534.md#session-lifecycle)). The
     bridge publishes it as `linkState` (`ok`, `quiet`, `requests`,
-    `fault`, `disconnected`) and logs transitions, and LiveView, Home,
-    Settings and the Dashboard header show it; stale values dim from
-    the model's `ageMs`.
+    `fault`, `disconnected`) and logs transitions, and the header
+    pill, LiveView, Home, Settings and the Dashboard header show it;
+    stale values dim from the model's `ageMs`.
     A request failure (no ECU awake, adapter fine) reads "Requests
     failing — check the vehicle connection and ignition" in amber;
     `BridgeTest.LinkStateMapsEveryPublishedCode` pins the mapping. The
@@ -461,10 +461,9 @@ after the first vehicle session.
 - **Developer mode (S).** A persisted Settings toggle, off by default.
   With it off the app offers only real devices. With it on, the app
   also shows:
-  - the mock transport (the header's "Connect Mock", the `mock://demo`
-    preset, and Home's "Start session", which connects mock);
+  - the mock transport (the `mock://demo` preset in Settings);
   - the raw frame log;
-  - the header's frame, notify, batch and drop counters.
+  - the Log page's notify and batch counters.
 - **Log page as the application log (S).** Show the application's
   event log on the Log page (it sits at the bottom of Settings) and
   move the raw frame table into developer mode. Pairs with
@@ -472,14 +471,10 @@ after the first vehicle session.
 - **Units of measure (M).** Metric or imperial globally, with
   per-signal overrides (°C or °F, km/h or mph, kPa or psi, g/s or
   lb/min). The conversion belongs in core, because the UI receives
-  final display values (rule 2 above). Display names and decimal
-  places are core's to own for the same reason: `degC` and raw def
-  names such as `Engine_RPM` reach the screen. Today the formatting is
-  split three ways: the Dashboard's `SignalHub.prettyUnit` shows
-  `degC` as `°C` while Live shows `degC`; the MAF tile hard-codes one
-  decimal and Live uses `toFixed(1)`; and nothing reads the defs'
-  `decimal_places`. One model role for decimals, used by both pages,
-  ends the split.
+  final display values (rule 2 above). Core already owns each
+  signal's display name, unit and decimal places, and Live and the
+  Dashboard show them as they are, so a converted signal carries its
+  converted unit and precision with it.
 - **Low-glare and night themes (M).** Amber and red-on-black schemes
   for driving at night.
   - `Theme` already centralizes the palette, but the gauges hard-code
@@ -556,8 +551,8 @@ after the first vehicle session.
     reply arrives, bounded by the ISO 15765-4 response timeout (P2,
     50 ms);
   - decoding on the worker thread, which also brings per-sample
-    timestamps (Known Issue #10) and decode-time subscription filtering
-    (#4);
+    timestamps (Known Issue #10) and takes the per-frame def matching
+    off the GUI thread (#4);
   - a fixed ring of plain frame structs for the log, replacing
     `QVariantMap` rows, whose eviction costs an O(n) erase per frame
     at the 10k cap.
