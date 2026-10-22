@@ -78,7 +78,7 @@ every app build (`copy_if_different`). Keep the order on every
 rebuild too: Win32 tree, then app. Building the app first deploys the
 previous surrogate.
 
-**Cache caveat (hit for real, 2026-10-19).** The cache variable
+**Cache caveat.** The cache variable
 persists across reconfigures. A tree previously configured with an
 explicit `-DQTTUNE_SURROGATE_SOURCE=...` keeps that value and
 disables auto-detection until it is cleared:
@@ -296,8 +296,8 @@ ctest --test-dir build -C Release -R "J2534Routing|J2534Surrogate" --output-on-f
 
 Use Windows-style paths in these variables (forward slashes are
 fine). MSYS translates paths in command arguments but not in
-environment-variable values, so `/e/...` reaches `CreateProcessA`
-verbatim and fails. Without these variables,
+environment-variable values, so `/e/...` reaches Windows verbatim and
+the open fails. Without these variables,
 `J2534RoutingTest.X86FakeSelectsSurrogateBackendAndRoundTrips`
 skips.
 
@@ -320,7 +320,7 @@ skips.
 | Test discovery fails at build time with `0xc0000135` | A DLL is missing. Discovery runs the test binary during the build, so Qt-linked test targets must copy `$<TARGET_RUNTIME_DLLS>` POST_BUILD, ordered before `gtest_discover_tests`. |
 | Surrogate test fails with child exit code 5 | An export can't be found by name, usually because of x86 `__stdcall` decoration. Check the `.def` file. Other exit codes are listed in [j2534.md](j2534.md#surrogate). |
 | Cross-arch test fails with odd values, but same-arch passes | The `build-win32` tree is stale. Rebuild both trees. |
-| In the app, an x86 adapter (for example the OBDX Pro VX) fails with "failed to load transport library", and `%TEMP%\ecuio-surrogate.log` holds only an `open: CreateProcess failed (err=2) exe='...'` line (before 2026-10-20 it was empty) | No surrogate next to `qttune.exe`, so the child never launched. The x64 tree was configured before `build-win32` had a surrogate. Build the Win32 tree, re-run `cmake -B build`, check for `Deploying Win32 J2534 surrogate` in the output, and rebuild. Setting `ECUIO_SURROGATE_EXE` also works. |
+| In the app, an x86 adapter (for example the OBDX Pro VX) fails with "failed to load transport library", and `%TEMP%\ecuio-surrogate.log` holds only an `open: CreateProcess failed (err=2) exe='...'` line | No surrogate next to `qttune.exe`, so the child never launched. The x64 tree was configured before `build-win32` had a surrogate. Build the Win32 tree, re-run `cmake -B build`, check for `Deploying Win32 J2534 surrogate` in the output, and rebuild. Setting `ECUIO_SURROGATE_EXE` also works. |
 | Cross-arch test fails expecting backend "surrogate", got "inproc" | `ECUIO_FAKE_DLL` points at an x64 fake (or the wrong tree). Check the value, not the code — unset skips, wrong-value fails. |
 | J2534 test fails as `Failed (Timeout)` | A genuine hang, bounded by the 30 s ceiling. Attach to the surviving test and surrogate processes and check thread wait states before killing; the child log in `%TEMP%\ecuio-surrogate.log` is rewritten per spawn — copy before respawning. |
 | Linker warning LNK4070 on a fake DLL | The `.def` file's `LIBRARY` directive disagrees with the output filename. Make them match. |
@@ -393,10 +393,10 @@ on a runner with no Qt installed. And every configure, local or CI,
 ends with a check in the root `CMakeLists.txt` that fails if
 `ecuio-core`'s link lists name any `Qt*::` target. That check catches
 a stray link in a full build, where Qt is present and the build would
-otherwise succeed. The check it replaced, `if(TARGET Qt6::Core)` inside
-`core/`, could never fire. It ran before any `find_package(Qt6)`, and
-Qt's imported targets are only visible in the directory that found
-them.
+otherwise succeed. It runs after every subdirectory, so it sees a link
+added from anywhere, and it reads the link lists by name rather than
+testing `if(TARGET Qt6::Core)`, because Qt's imported targets are
+visible only in the directory that found them.
 
 **Kit names that moved:** since Qt 6.7 the Linux desktop arch is
 `linux_gcc_64`, and `gcc_64` no longer resolves for 6.12.0. Android

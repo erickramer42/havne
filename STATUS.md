@@ -28,27 +28,25 @@ next.
     request loop, and frame identity via `?filter=`/`?txid=`/`?poll=`
     (ADR-0012).
   - The surrogate child is single-threaded and reads travel over the
-    pipe ([ADR-0014](docs/adr/0014-single-threaded-surrogate.md),
-    2026-10-19): vendor calls are serialized by construction, the
-    shared-memory ring is gone, and the vendor's read status now
-    reaches the transport on both backends (timeout, empty and hard
-    failure are told apart; see #11 for what remains).
-  - Profile selection (ADR-0013, slices 1–3, 2026-10-17 → 2026-10-19):
-    a string-keyed registry selects the session's signal set —
-    `mock://` defaults to the mock set, `j2534://` defaults to
+    pipe ([ADR-0014](docs/adr/0014-single-threaded-surrogate.md)):
+    vendor calls are serialized by construction, and the vendor's
+    read status reaches the transport on both backends (timeout, empty
+    and hard failure are told apart; see #11 for what remains).
+  - Profile selection ([ADR-0013](docs/adr/0013-protocol-profiles.md),
+    slices 1–3): a string-keyed registry selects the session's signal
+    set. `mock://` defaults to the mock set, `j2534://` defaults to
     `obd2`, and `?profile=<name>` overrides either. Unknown names are
     rejected at session_create, before any transport attach or DLL
-    load. The bridge decodes the session's active set instead of the
-    hard-wired mock set (#21 closed). The `obd2` set carries the
-    multi-PID round-robin scheduler and declares its CAN channel
-    (7E0/7E8), so the transport derives the receive filter and request
-    target from the profile: a bare `j2534://` URI starts and streams
-    with no `?filter=` required (`?filter=`/`?txid=` remain overrides,
-    and since `90020bd` `?poll=` swaps the rotation for one PID under
-    any profile instead of being ignored).
+    load. The bridge decodes the session's active set. The `obd2` set
+    carries the multi-PID round-robin scheduler and declares its CAN
+    channel (7E0/7E8), so the transport derives the receive filter and
+    request target from the profile: a bare `j2534://` URI starts and
+    streams with no `?filter=` required. `?filter=` and `?txid=`
+    override the derived channel, and `?poll=` swaps the rotation for
+    one PID under any profile.
   - Signal definitions
-    ([ADR-0016](docs/adr/0016-signal-definition-layout.md),
-    2026-10-22): each def states its value kind (unsigned, signed or
+    ([ADR-0016](docs/adr/0016-signal-definition-layout.md)): each def
+    states its value kind (unsigned, signed or
     binary32 float) and its byte order, and decodes in `double` with
     16-bit lengths; mux keys run to 3 bytes. A set carries a layout
     version and zeroed reserved room, and a refused registration
@@ -64,12 +62,11 @@ next.
     adapter and failing requests apart, the bridge logs transitions to
     the Settings activity log, and the header pill, LiveView, the Home
     status card, the Dashboard header and the Settings connection label
-    all show the state. The
-    ok/quiet/fault/disconnected states were observed 2026-10-20,
-    including a fault on the VX itself (quiet bus, no vehicle). That
-    VX fault was under the rules before `946bdf5`; the same no-ACK
-    setup now latches `ECUIO_ERR_REQUEST_FAILED`, which the UI shows as
-    "Requests failing" in amber.
+    all show the state. The ok/quiet/fault/disconnected states were
+    observed 2026-10-20, including a fault on the VX itself (quiet
+    bus, no vehicle). That observation predates the write latch: the
+    same no-ACK setup latches `ECUIO_ERR_REQUEST_FAILED`, shown as
+    "Requests failing" in amber, which hasn't been seen on hardware.
   - Dashboard: analog, ring, digital and bar gauges plus shift lights,
     fed by name through `SignalHub` so one layout serves both the mock
     and `obd2` profiles. Gauges show peak hold, dim stale values, and
@@ -212,20 +209,19 @@ Contracts along this path:
   - [x] **Single-threaded surrogate, reads over the pipe**
         ([ADR-0014](docs/adr/0014-single-threaded-surrogate.md),
         2026-10-19). Read batches that arrive with `ERR_TIMEOUT` are
-        delivered (formerly #26, fixed the same day).
+        delivered.
   - work through [BENCH prep](#bench-prep) — quiet-bus subset walked
-    2026-10-16 (#9 resolved) and 2026-10-20 (#6 observed for empty
-    reads); #1 resolved for both shapes (8-byte behaviorally
-    2026-10-16, 4-byte with logged vendor status 0 2026-10-20); the
-    talking-bus items (#2, #3, #4, #5, #7) still open
+    2026-10-16 (prep item 9 resolved) and 2026-10-20 (item 6 observed
+    for empty reads); item 1 resolved for both shapes (8-byte
+    behaviorally 2026-10-16, 4-byte with logged vendor status 0
+    2026-10-20); the talking-bus items (2, 3, 4, 5, 7) still open
   - first live, read-only vehicle session
 - [ ] **Protocol profiles** (ADR-0013):
   - [x] slice 1: profile registry, `raw` profile, `?profile=`
         override, bridge reads the session's active signal set
-        instead of the hard-wired mock set (#21 closed 2026-10-17)
   - [x] slice 2: the `obd2` signal set and the multi-PID scheduler
-        replacing the single-poll loop (paired with #25, the
-        read-rate cap — one workstream per ADR-0013)
+        replacing the single-poll loop (paired with the read-rate
+        cap — one workstream per ADR-0013)
   - [x] slice 3: channel declarations (§4) — profiles declare rx/tx
         CAN channel pairs; the transport registers one flow-control
         filter per channel and routes scheduler requests per PID; a
@@ -262,10 +258,9 @@ it a genuine connect candidate.
      ([session note](docs/bench-sessions/2026-10-20.md)).
 2. **Request framing.** The transport writes the LOGICAL message —
    `[4-byte tx ID][01][PID]`, 6 bytes — with ISO15765_FRAME_PAD, so the
-   adapter adds the ISO-TP PCI byte and zero-pads the CAN frame. The
-   shape used before 2026-10-18 supplied both in-band (12 bytes). Some drivers expect
-   the in-band form; if the VX transmits nothing, this is the first
-   suspect.
+   adapter adds the ISO-TP PCI byte and zero-pads the CAN frame. Some
+   drivers expect both in-band instead (a 12-byte message); if the VX
+   transmits nothing, this is the first suspect.
 3. **No checksum byte.** This is ISO 15765-4 over CAN, so the K-line
    checksum convention doesn't apply.
 4. **29-bit addressing** is assumed whenever either ID is above
@@ -273,7 +268,7 @@ it a genuine connect candidate.
    it.
 5. **Timestamps** are passed through as microseconds, as the spec
    says (#12).
-6. **ReadMsgs statuses.** Split in both backends since 2026-10-19:
+6. **ReadMsgs statuses.** Split in both backends:
    `ERR_TIMEOUT` is a vehicle timeout, `ERR_BUFFER_EMPTY` is "no
    frame", and anything else is a hard failure (#11). Frames that
    arrive with `STATUS_NOERROR` or `ERR_TIMEOUT` are delivered, so a
@@ -294,8 +289,8 @@ it a genuine connect candidate.
    expectations: the OBDX Pro VX exports the SPEC spelling
    (`PassThruIoctl`, J2534-1_0500 §7.3.19; all v04.04-era references
    agree) — this project's `PassThruIoCtl` string was the divergence.
-   Both backends now try spec-first with the legacy spelling as
-   fallback, pinned in both directions by the two fakes.
+   Both backends try the spec spelling first, with the legacy spelling
+   as fallback, pinned in both directions by the two fakes.
 
 ## Known issues and technical debt
 
@@ -318,7 +313,11 @@ an issue is resolved it is removed, and its number is not reused.
 6. **The session API is single-caller by contract.** The bridge is the
    only caller.
 8. **`CoreTest.SessionStartWithoutTransportFails` is a `SUCCEED()`
-   stub.** Implement it or delete it.
+   stub.** Its case can't be reached through the public API: only
+   close clears a session's transport, and `ecuio_session_start`
+   checks `closed` first, which
+   `CoreTest.CloseIsIdempotentAndDestroyIsSafe` already pins. Delete
+   it.
 10. **Strip-chart x-axis resolution is one coalesce window, about
     100 ms.** Per-sample timestamps need decoding to move onto the
     worker.
@@ -354,8 +353,8 @@ an issue is resolved it is removed, and its number is not reused.
     microseconds, but vendor conformance is unverified.
 13. **The picker treats one registry entry as one device.** Multiple
     adapters behind one vendor DLL can't be told apart. They would be
-    selected through `PassThruOpen`'s `pName` argument, which is
-    currently `nullptr`, meaning the default device.
+    selected through `PassThruOpen`'s `pName` argument, which the
+    loader passes as `nullptr`, meaning the default device.
 14. **Discovery tests only check shape,** so they pass vacuously on a
     machine with no vendors installed. Candidate fixes are a
     seeded-registry fixture behind an admin-elevation guard, or
@@ -382,7 +381,7 @@ an issue is resolved it is removed, and its number is not reused.
     write the vendor's TX-done indication therefore ends the drain,
     and the ECU's reply is read on the next cycle. The surrogate drops
     indications inside the child, so its drain continues: the two
-    backends now drain differently. `START_OF_MESSAGE` (first-frame)
+    backends drain differently. `START_OF_MESSAGE` (first-frame)
     indications are not handled by either backend.
 29. **The iOS simulator smoke depends on Intel macOS runners.** Qt
     6.12's iOS simulator libraries are x86_64 only, so
@@ -504,9 +503,9 @@ after the first vehicle session.
   converted unit and precision with it.
 - **Low-glare and night themes (M).** Amber and red-on-black schemes
   for driving at night.
-  - `Theme` already centralizes the palette, but the gauges hard-code
-    their face, bezel and needle colours, which need Theme roles
-    first.
+  - `Theme` already centralizes the palette, but the analog gauge
+    hard-codes its face, bezel and needle colours, and Home its logo
+    gradient; they need Theme roles first.
   - A near-monochrome scheme must keep warning and danger
     distinguishable by more than hue, for example with a label or
     icon.
@@ -549,13 +548,16 @@ after the first vehicle session.
   (Service 09) at connect, for the activity log and session
   recordings. These responses are multi-frame and textual: the adapter
   reassembles ISO-TP, but the signal model decodes numbers only
-  (`STRING` is rejected), so this needs a string path.
+  (`ECUIO_VALUE_TEXT` is reserved and refused), so this needs a string
+  path. Long replies are also cut at 60 payload bytes (#36).
 - **A first manufacturer signal set (L).** One make's enhanced
   Service 22 data, such as transmission temperature, which the
   standard set doesn't include. Choose the make from the target
-  vehicles. Needs Service 22 requests (the scheduler builds Service 01
-  only) and the profile API from ADR-0013, and serves as the pilot
-  for the v0.5.0 plugin modules.
+  vehicles. A def can already carry a 3-byte `62 <DID>` key and
+  decode the reply (ADR-0016). What's missing is the request, since
+  the scheduler builds Service 01 only (ADR-0015), and the profile
+  API from ADR-0013. It serves as the pilot for the v0.5.0 plugin
+  modules.
 - **Computed signals (M).** Values derived from other signals, such
   as boost pressure: intake manifold absolute pressure (PID 0x0B)
   minus barometric pressure (PID 0x33). Neither PID is in the `obd2`
@@ -567,10 +569,11 @@ after the first vehicle session.
   above: a user-facing expression per channel (differences, unit
   conversions, smoothing). Stays in core per rule 2, and is the same
   data-describing-arithmetic shape ADR-0015 uses for requests.
-- **Surface which ECU answered (S).** The probe walks the
-  supported-PID chain per channel, but the UI nowhere shows which
-  module replied on which channel. Matters the day a probe returns
-  three modules talking; the channel model already holds the answer.
+- **Surface which ECU answered (S).** The PID-support probe (v0.3.0
+  checklist) is to walk the supported-PID chain per channel, but
+  nothing in the UI shows which module replied on which channel.
+  Matters the day a probe finds three modules talking; the channel
+  model already holds the answer.
 
 ### Editing and write path (v0.4+; nothing below is scheduled)
 

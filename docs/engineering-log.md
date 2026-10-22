@@ -60,6 +60,10 @@ Dates are commit dates.
 | 2026-10-21 | `?poll=0x00` reads the supported-PIDs bitmap; 29-bit channels connect 29-bit (#34 closed); a wedged surrogate child fails fast | `9c3ef16` |
 | 2026-10-21 | Sessions start on the GUI thread, so closing mid-connect leaves nothing running (#32 closed); unsubscribed rows keep updating (#31 closed) | `4a86231` |
 | 2026-10-21 | UI/UX review pass: Settings is the only connect flow; Theme palette, mono family and page margin; chart value labels, seconds axis and flat-trace lanes; Log `s.mmm` times, Pause and order toggle; display names, units and decimals from core; merged via PR #16 | `8a5e2b5` |
+| 2026-10-21 | `scripts/verify.sh`: both trees, the suite and the cross-arch subset in four lines; a `smoke_only` manual CI run | `3a187c4`, `90e57c6` |
+| 2026-10-21 | Request engine design ([ADR-0015](adr/0015-request-engine.md), Proposed) | `ea6e4c9` |
+| 2026-10-21 | Disconnect tears down off the GUI thread, with "Disconnecting…" on every connection surface (#33 closed) | `ebfa918` |
+| 2026-10-21 | Hygiene pass: a private surrogate pipe passing one inherited handle; UTF-8 paths, UTF-16 at every Windows call; a validator that accepts exactly what the decoder decodes; registry validation and unregister; one URI query grammar; warnings on for every target; prefixed status and ID names; the `Bridge` QML singleton | `cd7ef50` |
 | 2026-10-22 | The core's C ABI takes the `ecuio_` prefix; the app keeps the product's name ([ADR-0001](adr/0001-qt-free-core-c-abi.md), appendix of 2026-10-22) | `f07c013` |
 | 2026-10-22 | Signal definition layout ([ADR-0016](adr/0016-signal-definition-layout.md)): value kinds and explicit byte order, `double` decode with 16-bit lengths, 3-byte mux keys, a set layout version, zero-checked reserved room, and validation that names the failing element; one Mode-01 key test for enrolment and request routing | `0ae8024`, `6337b6f`, `d809cb7`, `5735dd6` |
 

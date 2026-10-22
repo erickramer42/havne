@@ -192,8 +192,8 @@ rows against the current Home, Settings and Dashboard header.
     surrogate, with the session log as the record;
   - how the UI renders `ECUIO_ERR_REQUEST_FAILED`: the bridge's mapping
     to `requests` is unit-tested, but the QML banner, Home card,
-    Settings label and log line are covered only by the smoke recipe's
-    requests-banner row, which hasn't been run yet;
+    Dashboard header, Settings label and log line are covered only by
+    the smoke recipe's requests-banner row (passed 2026-10-21);
   - the real-vendor flavors on a talking bus: the VX quiet bus was
     observed once (2026-10-20: empty reads return `NOERROR` with zero
     messages; writes fail `ERR_FAILED` after ~8 cycles on a no-ACK
@@ -209,10 +209,11 @@ rows against the current Home, Settings and Dashboard header.
   timeout-0 read with `ERR_BUFFER_EMPTY`. Spec mode still returns at
   once instead of waiting out the timeout, and it skips filter gating.
   The worker never reads with timeout 0, so the `ERR_BUFFER_EMPTY`
-  mapping is reachable only through `ECUIO_FAKE_READ_STATUS=0x10`.
+  mapping is reachable only through `ECUIO_FAKE_READ_STATUS=0x10`,
+  and no test sets it: the mapping is untested on both backends.
   A vendor that leaves its outputs untouched on error is modelled
-  since 2026-10-20 (`ECUIO_FAKE_UNTOUCHED_COUNT_STATUS`).
-- **ID 0 handling is untested.** The child now tracks open device and
+  (`ECUIO_FAKE_UNTOUCHED_COUNT_STATUS`).
+- **ID 0 handling is untested.** The child tracks the open device and
   channel with flags instead of treating ID 0 as "none", but the fake
   always returns device 1 and channel 0x55.
 - **The fake emits no ISO 15765 indications.** TX-done and
