@@ -155,6 +155,14 @@ up empty and the worker runs `?poll=` or passive.
 > validator still allows other mux shapes, so `qttune_sched_from_set`
 > keeps its own check for the enrolment shape.
 
+> **Amended 2026-10-22 ([ADR-0016](0016-signal-definition-layout.md)
+> §4):** one helper, `ecuio_mode01_pid` in `pid_scheduler.h`, holds
+> the enrolment test: a 2-byte key at offset 0 whose first byte is
+> `0x41`, with the PID in the low byte. `ecuio_sched_from_set` had
+> checked the length and offset but not the `0x41`, so another
+> service's 2-byte echo would have enrolled. Request routing
+> (`rx_for_pid`, slice 3 below) uses the same helper.
+
 ### Scheduler constants and cadence
 
 - Fixed capacity: 16 PIDs (`QTTUNE_SCHED_MAX_PIDS`). No heap
@@ -285,6 +293,13 @@ are 2-byte big-endian; all others are single-byte.
 > replaced by `qttune_def_applies_to_frame`, which returns 1 when the
 > def applies. It shares the mux-key read with `qttune_decode_signal`.
 
+> **Amended 2026-10-22 ([ADR-0016](0016-signal-definition-layout.md)):**
+> the big-endian flags bit is retired, and no flag is defined. Each
+> def carries a `byte_order` field, `ECUIO_BYTE_ORDER_LE` or
+> `ECUIO_BYTE_ORDER_BE`; a big-endian field is still whole bytes, and
+> validation still refuses any other shape (code 12). Mux keys run to
+> 3 bytes.
+
 ### Fake vendor enhancements
 
 The fake DLL recognizes Mode-01 request shapes (`[02][01][PID]`) and
@@ -367,6 +382,14 @@ channel index (`rx_for_pid`), keeping `pid_scheduler.h` profile-
 agnostic; `pump_one` matches the 4-byte header against every
 channel's rx, stripping and stamping on hit. Non-matching frames
 are dropped but still consume drain budget (bounds loop time).
+
+> **Amended 2026-10-22:** `rx_for_pid` matches a def only through
+> `ecuio_mode01_pid`, the scheduler's enrolment test (see the
+> mux-key grammar note above). It had matched any muxed def whose key
+> ended in the PID, so a def for another service on another ECU,
+> listed first, would have taken that PID's requests to its own
+> channel. `J2534AdoptionTest.Mode01RequestRoutesPastOtherServiceKeys`
+> pins it.
 
 The worker's error/backoff state moved from struct members to
 worker-local variables as part of the rework.

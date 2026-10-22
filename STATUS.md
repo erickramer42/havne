@@ -1,6 +1,6 @@
 # QtTune — Project Status
 
-**Updated:** 2026-10-21 · **Version:** v0.3.0-dev (last tag v0.2.0) ·
+**Updated:** 2026-10-22 · **Version:** v0.3.0-dev (last tag v0.2.0) ·
 [![CI](https://github.com/erickramer42/qttune/actions/workflows/ci.yml/badge.svg)](https://github.com/erickramer42/qttune/actions/workflows/ci.yml)
 
 This file covers the project as it stands: what works, what comes
@@ -46,6 +46,13 @@ next.
     with no `?filter=` required (`?filter=`/`?txid=` remain overrides,
     and since `90020bd` `?poll=` swaps the rotation for one PID under
     any profile instead of being ignored).
+  - Signal definitions
+    ([ADR-0016](docs/adr/0016-signal-definition-layout.md),
+    2026-10-22): each def states its value kind (unsigned, signed or
+    binary32 float) and its byte order, and decodes in `double` with
+    16-bit lengths; mux keys run to 3 bytes. A set carries a layout
+    version and zeroed reserved room, and a refused registration
+    names the failing check and the def or channel it failed on.
   - Discovery finds the real installed drivers, and the Settings page
     can pick one and connect.
   - Connect and disconnect keep the slow vendor calls off the GUI
@@ -173,7 +180,7 @@ Contracts along this path:
 | Component | State | Reference |
 |---|---|---|
 | Core sessions and callbacks | Stable. The frame ABI and close/destroy split changed in v0.3.0-dev. | [ADR-0002](docs/adr/0002-callback-pair-identity-snapshot-dispatch.md), [ADR-0006](docs/adr/0006-frame-abi-v0.3.md) |
-| Signal decode | Linear scaling; Intel byte order by default, big-endian for byte-aligned fields; gated on message ID plus mux key. Two signal sets, `mock` and `obd2`, chosen by profile. The validator accepts exactly the defs the decoder decodes, with named return codes, and the profile registry runs it at registration. | [ADR-0004](docs/adr/0004-signal-decoding-model.md), [ADR-0013](docs/adr/0013-protocol-profiles.md) |
+| Signal decode | Linear scaling in `double`. Each def states its value kind (unsigned, signed, binary32 float) and byte order (Intel at any bit offset, big-endian in whole bytes), and is gated on message ID plus a mux key of up to 3 bytes. Two signal sets, `mock` and `obd2`, chosen by profile. The validator accepts exactly the defs the decoder decodes, with named return codes; the profile registry runs it at registration and reports the failing check and element. | [ADR-0004](docs/adr/0004-signal-decoding-model.md), [ADR-0013](docs/adr/0013-protocol-profiles.md), [ADR-0016](docs/adr/0016-signal-definition-layout.md) |
 | Mock transport | A scripted ~2-minute drive cycle on a small vehicle model (`core/src/mock_drive_cycle.h`): cold-start warm-up, a 2nd-gear WOT pull from ~1550 rpm to the 7000 rpm limiter with a 5 s hold, a longer and hotter 3rd-gear pull with the same hold, then a quarter-mile run from a standstill (~13.4 s, ~176 km/h trap). Every tick of the cycle round-trips through the mock set in `CoreTest.MockDriveCycle*`. | — |
 | Bridge and models | Frame log with sort toggle; coalesced signal model with a 120-sample history per signal; device discovery for the picker; link-health polling (#11). QML reaches it as the `Bridge` singleton. | [ADR-0003](docs/adr/0003-backpressure-bounds-in-flight-frames.md), [ADR-0005](docs/adr/0005-coalesced-signal-updates.md) |
 | QML pages | Home, Dashboard (gauges and shift lights through `SignalHub`), Live (table, and a strip chart with each trace's value at its end), Log (with Pause), Settings (device picker plus manual URI, and the one place a session is connected). Names, units and decimal places come from core. `Theme` holds the palette, fonts, page margin and the link-state color and label functions; `PageHeader` gives the pages one title row. | [docs/architecture.md](docs/architecture.md#the-ui-layer) |
@@ -224,6 +231,11 @@ Contracts along this path:
         filter per channel and routes scheduler requests per PID; a
         bare `j2534://` URI under `obd2` starts with no `?filter=`
   - [ ] `obd2` PID probe phase and `uds-generic`
+- [x] **Signal definition layout**
+      ([ADR-0016](docs/adr/0016-signal-definition-layout.md)): value
+      kinds and explicit byte order, `double` decode, 3-byte mux keys,
+      a set layout version, zero-checked reserved room, and validation
+      that names the failing element
 - [ ] **Phase 4, record-replay transport:** capture fixtures, then play
       them back deterministically through the same frame API
 - [ ] **Tag v0.3.0** and bump the version string (#16)
@@ -381,6 +393,16 @@ an issue is resolved it is removed, and its number is not reused.
     run), or Qt's arm64 simulator libraries if Qt ships them. Apple is
     also winding down Rosetta, so the first option has its own end
     date.
+36. **J2534 messages are cut to 64 bytes.** Both read paths copy at
+    most 64 bytes of a message's `Data`, the 4-byte CAN ID included,
+    into the frame's inline `data[64]`. A reassembled ISO 15765 reply
+    therefore keeps at most 60 payload bytes, and nothing marks it as
+    cut. Service 01 replies fit, but Service 0x22 and Service 09
+    replies can be longer. The decoder already takes 16-bit lengths
+    and start bytes ([ADR-0016](docs/adr/0016-signal-definition-layout.md)),
+    so the fix is the frame's storage and both read paths (the
+    surrogate's `ECUIO_SUR_MSG_MAX` too), not the def. Writes over 64
+    bytes are refused; no request needs more yet.
 
 ## Roadmap
 

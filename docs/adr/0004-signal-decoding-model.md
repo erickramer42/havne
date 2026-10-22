@@ -1,6 +1,10 @@
 # ADR-0004: Signal decoding: POD definitions, linear scaling, Intel byte order, message-ID gate
 
-- **Status:** Accepted
+- **Status:** Accepted. The field model (the type enum, `num_bytes`,
+  Intel-only byte order with a flags bit held for Motorola, and the
+  88-byte size) is superseded by
+  [ADR-0016](0016-signal-definition-layout.md), 2026-10-22. Linear
+  scaling, the message-ID gate and the mock-encoder rule stand.
 - **Date:** 2026-10-06 (Phase 1, `bb8eb4b`). The message-ID gate was
   added 2026-10-14 (`d0fb07e`).
 

@@ -83,10 +83,12 @@ Both schemes share one strict query grammar (`core/src/uri_query.h`),
 and each rejects keys it doesn't take; `mock://` takes only `profile`.
 
 A **profile** is a named signal set ([ADR-0013](adr/0013-protocol-profiles.md)).
-- **Signal defs:** each def says where its value sits in a frame (bytes,
-  bit length, byte order, scale, offset) and which frames it belongs
-  to (message ID plus an optional mux key). The decoder checks the
-  def's type before its bit parameters.
+- **Signal defs:** each def says where its value sits in a frame
+  (start byte, bit offset and length, value kind, byte order, scale,
+  offset) and which frames it belongs to (message ID plus an optional
+  mux key of up to 3 bytes). The decoder checks the def's kind and
+  byte order before its bit parameters, and computes in `double`
+  ([ADR-0016](adr/0016-signal-definition-layout.md)).
 - **The `obd2` set** also declares its CAN channel (requests to
   `0x7E0`, replies on `0x7E8`). Its defs carry Mode-01 mux keys, so
   the J2534 transport derives both its receive filter and a
@@ -95,8 +97,11 @@ A **profile** is a named signal set ([ADR-0013](adr/0013-protocol-profiles.md)).
 - **Unknown or malformed profile names** fail at session create,
   before any DLL loads.
 - **Registration validates.** `ecuio_profile_register` runs the set
-  validator, which accepts exactly the defs the decoder can decode and
-  rejects duplicate def IDs. The built-ins (`mock`, `raw`, `obd2`)
+  validator, which reads the set's layout version first, accepts
+  exactly the defs the decoder can decode, requires reserved bytes to
+  be zero, and rejects duplicate def IDs. A refusal can say which
+  check failed and on which def or channel (`ecuio_validation_t`).
+  The built-ins (`mock`, `raw`, `obd2`)
   can't be replaced or unregistered, and the registry keeps the
   caller's pointer, so a registered set must outlive its sessions
   (`profile.h`).

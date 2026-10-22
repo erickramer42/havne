@@ -60,6 +60,8 @@ Dates are commit dates.
 | 2026-10-21 | `?poll=0x00` reads the supported-PIDs bitmap; 29-bit channels connect 29-bit (#34 closed); a wedged surrogate child fails fast | `9c3ef16` |
 | 2026-10-21 | Sessions start on the GUI thread, so closing mid-connect leaves nothing running (#32 closed); unsubscribed rows keep updating (#31 closed) | `4a86231` |
 | 2026-10-21 | UI/UX review pass: Settings is the only connect flow; Theme palette, mono family and page margin; chart value labels, seconds axis and flat-trace lanes; Log `s.mmm` times, Pause and order toggle; display names, units and decimals from core; merged via PR #16 | `8a5e2b5` |
+| 2026-10-22 | The core's C ABI takes the `ecuio_` prefix; the app keeps the product's name ([ADR-0001](adr/0001-qt-free-core-c-abi.md), appendix of 2026-10-22) | `f07c013` |
+| 2026-10-22 | Signal definition layout ([ADR-0016](adr/0016-signal-definition-layout.md)): value kinds and explicit byte order, `double` decode with 16-bit lengths, 3-byte mux keys, a set layout version, zero-checked reserved room, and validation that names the failing element; one Mode-01 key test for enrolment and request routing | `0ae8024`, `6337b6f`, `d809cb7`, `5735dd6` |
 
 ## Lessons learned
 
@@ -572,3 +574,21 @@ an old caller fail to link instead. (4) **A cast outside an enum's range is
 undefined in C++**, and the sanitizer job would flag it: the
 validator's type test stays inside the enum's range rather than
 probing with −1.
+
+**2026-10-22 — signal definition layout
+([ADR-0016](adr/0016-signal-definition-layout.md)):** two lessons.
+(1) **One rule, one predicate.** "This def is a Mode-01 PID" was
+written twice. The scheduler took a 2-byte key at offset 0 without
+checking its `0x41`, and request routing (`rx_for_pid`) took any
+muxed def whose key ended in the PID. Nothing failed while every
+muxed def was Mode-01, and the first 3-byte `62 <DID>` def, on a
+second ECU and listed first, would have pulled a PID's requests to
+that ECU. `ecuio_mode01_pid` answers for both now, and the routing
+test was run against the old routing first, where it failed with the
+requests going to 0x7E1. (2) **A version nobody reads isn't a
+version.** The set's `version` was set to 1 or 2 but never checked,
+and neither were the def's reserved bytes, so neither could carry a
+later change: an old set could hold anything there. `layout_version`
+is the set's first member and is checked before anything else, with
+3 chosen so neither old value passes, and validation refuses nonzero
+reserved bytes, so that room stays usable.

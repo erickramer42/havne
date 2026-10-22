@@ -140,6 +140,18 @@ derived from it, so the def alone says what to request.
   enforced on everything a plugin asks for. If a protocol ever needs
   logic that data can't express, a new record revisits this.
 
+> **Amended 2026-10-22 ([ADR-0016](0016-signal-definition-layout.md)):**
+> the 3-byte mux keys shipped with the new signal-definition layout,
+> so the "No struct change" bullet no longer holds. The decoder, the
+> frame gate and the validator take key lengths 1 to 3, and the set's
+> first member is a `layout_version` that core checks before anything
+> else. That also settles two remarks below: the Consequences line
+> calling the layout unchanged, and the version check that the
+> set-wide request service alternative says core has never made.
+> Until the engine lands, the scheduler and request routing take only
+> a 2-byte `41 <PID>` key at offset 0 (`ecuio_mode01_pid`), so a
+> `62 <DID>` def decodes a reply but sends no request.
+
 ### 3. Read-only by construction
 
 The engine sends services 0x01 (current data), 0x09 (vehicle

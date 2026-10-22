@@ -1,17 +1,17 @@
 # ADR-0016: Signal definition layout — value kind, byte order, layout version
 
-- **Status:** Proposed. The structures and rules below are decided.
-  The record moves to Accepted when the layout lands with its tests,
-  before the v0.3.0 tag. The list of changes that ride with it freezes
-  then; anything proposed later waits for the next layout version.
-- **Date:** 2026-10-22
-- **Supersedes, on acceptance:** [ADR-0004](0004-signal-decoding-model.md)'s
-  field model: the type enum, `num_bytes`, Intel-only byte order with
-  a flags bit held for Motorola, and the 88-byte size. Its linear
+- **Status:** Accepted. The layout shipped with its tests before the
+  v0.3.0 tag, and the list of changes that ride with it is frozen;
+  anything proposed later waits for the next layout version.
+- **Date:** 2026-10-22. Implemented in `0ae8024`, `6337b6f`,
+  `d809cb7` and `5735dd6`.
+- **Supersedes:** [ADR-0004](0004-signal-decoding-model.md)'s field
+  model: the type enum, `num_bytes`, Intel-only byte order with a
+  flags bit held for Motorola, and the 88-byte size. Its linear
   scaling, message-ID gate and mock-encoder rule stand.
-- **Amends, on acceptance:** [ADR-0015](0015-request-engine.md) §2.
-  Its 3-byte mux keys land here, and its "No struct change" reasoning
-  no longer holds, because core reads a layout version.
+- **Amends:** [ADR-0015](0015-request-engine.md) §2. Its 3-byte mux
+  keys land here, and its "No struct change" reasoning no longer
+  holds, because core reads a layout version.
 
 Names are the core's `ecuio_` names
 ([ADR-0001](0001-qt-free-core-c-abi.md), naming appendix of

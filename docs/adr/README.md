@@ -10,7 +10,7 @@ old one, and the old record's status is updated to point at it.
 | [0001](0001-qt-free-core-c-abi.md) | Qt-free core behind a stable C ABI | Accepted |
 | [0002](0002-callback-pair-identity-snapshot-dispatch.md) | Callback identity by `(callback, user_data)` pair, snapshot dispatch | Accepted |
 | [0003](0003-backpressure-bounds-in-flight-frames.md) | Backpressure bounds in-flight frames, not cumulative count | Accepted |
-| [0004](0004-signal-decoding-model.md) | Signal decoding: POD definitions, linear scaling, Intel byte order, message-ID gate | Accepted |
+| [0004](0004-signal-decoding-model.md) | Signal decoding: POD definitions, linear scaling, Intel byte order, message-ID gate | Accepted; field model superseded by 0016 |
 | [0005](0005-coalesced-signal-updates.md) | Coalesce signal updates to 10 Hz; pull API for the strip chart | Accepted |
 | [0006](0006-frame-abi-v0.3.md) | Frame ABI v0.3 and the session close/destroy split | Accepted |
 | [0007](0007-uri-selected-transports.md) | Transports selected by URI; failures surface at create | Accepted |
@@ -22,7 +22,7 @@ old one, and the old record's status is updated to point at it.
 | [0013](0013-protocol-profiles.md) | Protocol profiles: URI selection, profile-owned probe and request loop, declared CAN channels | Accepted |
 | [0014](0014-single-threaded-surrogate.md) | Single-threaded surrogate child; reads travel over the pipe | Accepted |
 | [0015](0015-request-engine.md) | Request engine: correlated, response-paced requests derived from signal definitions; read-only by construction | Proposed |
-| [0016](0016-signal-definition-layout.md) | Signal definition layout: value kind, explicit byte order, layout version, zero-checked reserved room | Proposed |
+| [0016](0016-signal-definition-layout.md) | Signal definition layout: value kind, explicit byte order, layout version, zero-checked reserved room | Accepted |
 
 ## Adding a record
 
