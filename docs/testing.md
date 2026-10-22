@@ -178,6 +178,10 @@ rows against the current Home, Settings and Dashboard header.
   builds with warnings on, and the local MSVC count is 0, but no GCC
   or Clang build runs on the dev machine and warnings don't fail CI.
 
+- **The in-proc backend has no real-hardware coverage.** The one
+  J2534 adapter on hand, the OBDX Pro VX, ships an x86 DLL, so real
+  vendor code has run only through the surrogate. In-proc, every
+  vendor call has met only the x64 fake.
 - **BENCH coverage stops at the quiet bus.** The formal session
   (2026-10-16) verified load, open, and acceptance of the since-replaced
   8-byte filter shape; an informal 2026-10-20 observation additionally

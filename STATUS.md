@@ -213,10 +213,11 @@ Contracts along this path:
       `?filter=`/`?txid=`/`?poll=`, header strip and ID stamping, and
       filter teardown ([ADR-0012](docs/adr/0012-j2534-transport-adoption.md)).
 - [ ] **Phase 3 close, BENCH tier:**
-  - [ ] first real vendor DLL load and connect: the OBDX Pro VX through
-    the surrogate — done, formal session 2026-10-16
-    ([session sheet](docs/bench-sessions/2026-10-16.md)); the OBDLink
-    MX+ in-proc if its DLL is x64 — pending
+  - [x] first real vendor DLL load and connect: the OBDX Pro VX through
+    the surrogate, formal session 2026-10-16
+    ([session sheet](docs/bench-sessions/2026-10-16.md)). No x64
+    J2534 adapter is on hand, so the in-proc backend has run only
+    against the fake ([testing.md](docs/testing.md#gaps-not-verified))
   - [x] **Resolved surrogate serialization bug (#24):** serializes vendor DLL calls, clears `g_channel` on OP_DISCONNECT, prevents double disconnect and unsafe teardown; BENCH gate cleared.
   - [x] **Single-threaded surrogate, reads over the pipe**
         ([ADR-0014](docs/adr/0014-single-threaded-surrogate.md),
