@@ -37,7 +37,7 @@ corrupts it.
   `qttune_mock_signal_set()`.
 - **Message-ID gate:** each definition declares the CAN arbitration ID
   it rides on, and the bridge decodes a signal only from frames whose
-  ID matches. The mock set uses `MOCK_TELEMETRY_ARB_ID = 0x0C0`.
+  ID matches. The mock set uses `QTTUNE_MOCK_TELEMETRY_ARB_ID = 0x0C0`.
 - **The mock encoder is the hand-written inverse of the definitions.**
   `encode_payload()` in `mock_transport.cpp` mirrors `kMockDefs`.
   `CoreTest.MockFramesDecodeAgainstMockSignalSet` decodes real worker

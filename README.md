@@ -86,6 +86,22 @@ Runtime requirements:
 - **J2534 vendor driver (Windows):** optional. It is only needed for
   real adapters. Tests use a bundled fake driver.
 
+## Installing Qt with aqtinstall (Qt 6.11+)
+
+Released aqtinstall (3.3.x) can't install Qt 6.11+: download.qt.io
+changed its repository layout, and aqt requests a stale
+`Updates.xml` path
+(miurahr/aqtinstall#959). Fix (miurahr/aqtinstall#1000) is not in a
+release yet, so install aqtinstall from git:
+
+    python -m pip install --force-reinstall --no-cache-dir \
+        "git+https://github.com/miurahr/aqtinstall.git"
+
+    python -m aqt install-qt windows desktop 6.12.0 win64_msvc2022_64 -O <your-install-path>
+
+Once a release carries the fix, pin it from PyPI instead — here and
+in CI — and drop this section.
+
 ## Build
 
 ```sh

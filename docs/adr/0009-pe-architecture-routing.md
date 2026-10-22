@@ -20,7 +20,7 @@ routing, every future capability would be implemented twice.
   | Unknown (missing, corrupt or unreadable file) | In-proc |
 
   Unknown stays in-proc so that such a path still fails honestly with
-  `QT_ERR_LOAD_FAILED`, instead of spawning a surrogate process for
+  `QTTUNE_ERR_LOAD_FAILED`, instead of spawning a surrogate process for
   garbage.
 - The loader handle records which backend it uses. Every vendor-call
   helper forwards on `is_surrogate` in a single line.

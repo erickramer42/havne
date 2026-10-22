@@ -71,7 +71,7 @@ observation, any error text verbatim.
 
 | Symptom | Suspect |
 |---|---|
-| QT_ERR_LOAD_FAILED, fast | PE sniff or export resolution; exit codes 4/5 from j2534.md §Surrogate |
+| QTTUNE_ERR_LOAD_FAILED, fast | PE sniff or export resolution; exit codes 4/5 from j2534.md §Surrogate |
 | Handshake timeout (8 s) then fail | Pipe/spawn path — check for AV interference or blocked ports |
 | Crash of the app process | Capture crash address; do not guess, bisect |
 

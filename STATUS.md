@@ -61,7 +61,7 @@ next.
     ok/quiet/fault/disconnected states were observed 2026-10-20,
     including a fault on the VX itself (quiet bus, no vehicle). That
     VX fault was under the rules before `946bdf5`; the same no-ACK
-    setup now latches `QT_ERR_REQUEST_FAILED`, which the UI shows as
+    setup now latches `QTTUNE_ERR_REQUEST_FAILED`, which the UI shows as
     "Requests failing" in amber.
   - Dashboard: analog, ring, digital and bar gauges plus shift lights,
     fed by name through `SignalHub` so one layout serves both the mock
@@ -93,9 +93,10 @@ next.
     channel derivation are HARNESS-verified against the fake; a
     live-vehicle session (real ECU responses, talking-bus items in
     the BENCH prep list) is still ahead.
-  - **Tests:** 174 ctest cases (Windows/MSVC 2022, both trees
-    rebuilt, 2026-10-21), plus the cross-arch subset (21/21). All
-    passed except the env-gated cross-arch skip. CI was green on all
+  - **Tests:** 188 ctest cases (Windows/MSVC 2022, both trees
+    rebuilt, 2026-10-21), plus the cross-arch subset (23/23). All
+    passed except the env-gated cross-arch skip. Every first-party
+    target builds with compiler warnings on, at 0 on MSVC. CI was green on all
     eight jobs on PR #16 (merged as `9125b5e`), including the
     simulator smoke. That covers ctest on Windows, macOS and Linux,
     core under ASan and UBSan, the Android and iOS device
@@ -133,7 +134,8 @@ Three rules ([ADR-0001](docs/adr/0001-qt-free-core-c-abi.md)):
 1. **Core never links Qt.**
 2. **UI layers receive final display values, never raw frames.**
 3. **The C ABI is the FFI boundary.** That means opaque handles, flat
-   functions, POD structs and append-only enums.
+   functions, POD structs and append-only enums, every name carrying
+   the project prefix (`qttune_`, `Qttune`, `QTTUNE_`).
 
 ## Data path
 
@@ -170,9 +172,9 @@ Contracts along this path:
 | Component | State | Reference |
 |---|---|---|
 | Core sessions and callbacks | Stable. The frame ABI and close/destroy split changed in v0.3.0-dev. | [ADR-0002](docs/adr/0002-callback-pair-identity-snapshot-dispatch.md), [ADR-0006](docs/adr/0006-frame-abi-v0.3.md) |
-| Signal decode | Linear scaling; Intel byte order by default, big-endian for byte-aligned fields; gated on message ID plus mux key. Two signal sets, `mock` and `obd2`, chosen by profile. | [ADR-0004](docs/adr/0004-signal-decoding-model.md), [ADR-0013](docs/adr/0013-protocol-profiles.md) |
+| Signal decode | Linear scaling; Intel byte order by default, big-endian for byte-aligned fields; gated on message ID plus mux key. Two signal sets, `mock` and `obd2`, chosen by profile. The validator accepts exactly the defs the decoder decodes, with named return codes, and the profile registry runs it at registration. | [ADR-0004](docs/adr/0004-signal-decoding-model.md), [ADR-0013](docs/adr/0013-protocol-profiles.md) |
 | Mock transport | A scripted ~2-minute drive cycle on a small vehicle model (`core/src/mock_drive_cycle.h`): cold-start warm-up, a 2nd-gear WOT pull from ~1550 rpm to the 7000 rpm limiter with a 5 s hold, a longer and hotter 3rd-gear pull with the same hold, then a quarter-mile run from a standstill (~13.4 s, ~176 km/h trap). Every tick of the cycle round-trips through the mock set in `CoreTest.MockDriveCycle*`. | — |
-| Bridge and models | Frame log with sort toggle; coalesced signal model with a 120-sample history per signal; device discovery for the picker; link-health polling (#11) | [ADR-0003](docs/adr/0003-backpressure-bounds-in-flight-frames.md), [ADR-0005](docs/adr/0005-coalesced-signal-updates.md) |
+| Bridge and models | Frame log with sort toggle; coalesced signal model with a 120-sample history per signal; device discovery for the picker; link-health polling (#11). QML reaches it as the `Bridge` singleton. | [ADR-0003](docs/adr/0003-backpressure-bounds-in-flight-frames.md), [ADR-0005](docs/adr/0005-coalesced-signal-updates.md) |
 | QML pages | Home, Dashboard (gauges and shift lights through `SignalHub`), Live (table, and a strip chart with each trace's value at its end), Log (with Pause), Settings (device picker plus manual URI, and the one place a session is connected). Names, units and decimal places come from core. `Theme` holds the palette, fonts, page margin and the link-state color and label functions; `PageHeader` gives the pages one title row. | [docs/architecture.md](docs/architecture.md#the-ui-layer) |
 | J2534 | HARNESS-verified, same-arch and cross-arch, including transport adoption (ADR-0012) and profile-derived channels (ADR-0013). BENCH: one adapter, quiet bus. | [docs/j2534.md](docs/j2534.md) |
 
@@ -310,7 +312,7 @@ an issue is resolved it is removed, and its number is not reused.
 11. **J2534 link health: real-bus coverage remains.**
     The worker's health machine is done and HARNESS-tested in-proc:
     hard read failures, a quiet debounce, a write latch with
-    `QT_ERR_REQUEST_FAILED`, unmatched frames read as quiet, and a
+    `QTTUNE_ERR_REQUEST_FAILED`, unmatched frames read as quiet, and a
     growing backoff ([j2534.md](docs/j2534.md#session-lifecycle)). The
     bridge publishes it as `linkState` (`ok`, `quiet`, `requests`,
     `fault`, `disconnected`) and logs transitions, and the header
@@ -417,9 +419,9 @@ after the first vehicle session.
 - **Say why a connect failed (M).** `qttune_session_create` folds
   distinct causes into two codes. A refused `PassThruOpen` (a vendor
   status) and a DLL that won't load both read "failed to load
-  transport library" (`QT_ERR_LOAD_FAILED`); a malformed URI and an
+  transport library" (`QTTUNE_ERR_LOAD_FAILED`); a malformed URI and an
   unknown profile both read "no transport available"
-  (`QT_ERR_NO_TRANSPORT`). Add status codes (the enum is append-only)
+  (`QTTUNE_ERR_NO_TRANSPORT`). Add status codes (the enum is append-only)
   or a last-error string on the session API, and show the specific
   cause and vendor status in the Settings error line.
 - **Vendor error text (S).** After a failed vendor call, fetch

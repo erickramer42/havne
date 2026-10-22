@@ -39,6 +39,21 @@ to three rules:
 - ABI growth has to be planned through reserved fields and
   append-only enums. When a break is unavoidable it is made
   explicitly and called out ([ADR-0006](0006-frame-abi-v0.3.md)).
-- The bridge is exposed to QML as a context property, which qmllint
-  cannot see, so `[unqualified]` warnings on `QtTune.*` are expected
-  noise.
+- The bridge is exposed to QML as the `Bridge` singleton of the
+  `QtTune` module, registered from C++ (`app/bridgesingleton.h`), so
+  qmllint and the QML compiler see its properties.
+- Every public identifier carries the project prefix: `qttune_`
+  functions and types, `Qttune` structs, `QTTUNE_` macros and enum
+  values. A bare `QT_` would sit in Qt's own macro namespace, and
+  unprefixed names (`MOCK_`, `OBD2_`) collide in any consumer that
+  has its own.
+
+## Appendix — naming (2026-10-21)
+
+Status codes were renamed from `QT_OK` / `QT_ERR_*` to `QTTUNE_OK` /
+`QTTUNE_ERR_*`, and the mock and OBD-II ID macros gained the
+`QTTUNE_` prefix (`QTTUNE_MOCK_*`, `QTTUNE_OBD2_*`). The values are
+unchanged, so the binary ABI is too; it is a source break. The bridge's
+QML name changed from the context property `QtTune` to the `Bridge`
+singleton. The engineering log, filled-in bench sheets and earlier ADR
+appendices keep the old names as written.

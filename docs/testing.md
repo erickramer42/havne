@@ -31,7 +31,7 @@ and the next run's screenshots confirmed the fixes the same day.
 |---|---|---|
 | `test_core` | `CoreTest` | Nothing (Qt-free) |
 | `test_signals` | `SignalDecodeTest`, `SignalsTest` | Nothing (Qt-free) |
-| `test_c_abi` (ctest name `c_abi`) | Public headers compile as strict C; layout asserts | A C compiler |
+| `test_c_abi` (ctest name `c_abi`) | Every public header compiles as ISO C11 with extensions off (`-pedantic` on GCC and Clang) and links unmangled; layout asserts | A C compiler |
 | `test_bridge` | `BridgeTest` | Qt Core. Compiles `app/qttunebridge.cpp` directly, so the bridge must stay QtCore-only. |
 | `test_j2534_discovery` | `J2534DiscoveryTest` | Windows |
 | `test_j2534_load` | `FakeFixture` | Windows and the fake DLL |
@@ -49,11 +49,13 @@ and the next run's screenshots confirmed the fixes the same day.
 |---|---|
 | Core builds with zero Qt dependencies | CI `core-and-tests` job (Ubuntu, no Qt installed), plus the configure-time link check in the root `CMakeLists.txt`. That check was verified 2026-10-20 to fire on an injected `Qt6::Core` link, in core-only and in full configures. |
 | Core and the Qt-free tests run clean under ASan, UBSan and LeakSanitizer | CI `core-sanitizers` (Linux, blocking). Its first run, 2026-10-20 (`8dcba3a`), found no memory errors or UB, but 5 tests closed their session without destroying it. With those fixed, run #85 (`6991bdd`) passed 74/74. |
-| Public C ABI headers are valid strict C | `c_abi` |
+| Every public C ABI header (`core.h`, `signals.h`, `signal_sets.h`, `profile.h`, `j2534.h`, `j2534_surrogate.h`) is valid strict C, each included on its own first | `c_abi` |
 | Callback registration: dedup, idempotent unregister, reentrant register/unregister during dispatch | `CoreTest` |
 | Callbacks run on the worker thread | `CoreTest`, through `qttune_session_start` |
 | Session lifecycle: idempotent close, close/destroy split | `CoreTest` |
 | Signal decode: bit extraction, sign extension, error-code order, validator | `SignalDecodeTest`, `SignalsTest` |
+| The validator accepts exactly what the decoder decodes: STRING, unknown and manufacturer-range types are refused; FLOAT32 must be 4 little-endian bytes at bit 0; big-endian fields must be byte-aligned; a set can't repeat a def ID; an empty set (no defs, maybe channels) is valid | `SignalsTest.ValidatorAcceptsExactlyWhatTheDecoderDecodes`, `.ValidatorRejectsTypesWithNoDecoder`, `.ValidatorRequiresFloat32AsFourLittleEndianBytes`, `.ValidatorRequiresByteAlignedBigEndian`, `.SetValidationRejectsDuplicateIds`, `.SetValidationAcceptsAnEmptySet` |
+| The frame gate `qttune_def_applies_to_frame` is a true predicate: 1 on a match, 0 for another ID, a missing or different mux key, or NULL | `SignalsTest.ApplyGateIsTruePredicate`, `Obd2MuxTest` |
 | Display strings: every quantity the mock and `obd2` sets both carry has one name, unit and decimal places in both (the names the Dashboard's `Tap`s look up); temperatures are a UTF-8 degree sign, never `degC` | `SignalsTest.MockAndObd2ShareDisplayNamesAndUnits` |
 | Mock frames decode to physically plausible values | `CoreTest.MockFramesDecodeAgainstMockSignalSet` |
 | Mock drive cycle, stepped deterministically: every phase in order; 2nd- and 3rd-gear pulls hold the limiter exactly 5 s; the 3rd-gear pull is longer, faster and hotter; the drag run crosses 402 m in 11–15 s at 150–200 km/h through 4th; every tick of two loops round-trips through the mock set without clamping | `CoreTest.MockDriveCycle*` |
@@ -80,6 +82,8 @@ and the next run's screenshots confirmed the fixes the same day.
 | Surrogate: spawn under the job object, pipe handshake, batched `OP_READ` delivery, dead DLL fails fast, clean teardown | `J2534SurrogateTest` |
 | Write, ioctl and filter relay on both backends, including whitelist refusal and malformed filter shapes | `J2534SurrogateTest`, `J2534RoutingTest.InprocWriteIoctlFilterRoundTrips` |
 | PE routing: x64 goes in-proc; a missing DLL gives an honest load failure with no spawn | `J2534RoutingTest` |
+| Paths are UTF-8 to UTF-16: a DLL in a directory named in Greek and CJK (outside every ANSI code page) loads in-proc and in the surrogate child, same-arch and cross-arch. With `LoadLibraryExA` the in-proc case fails (checked by hand, 2026-10-21, on code page 1252) | `FakeFixture.NonAsciiDllPathLoadsInProc`, `J2534SurrogateTest.NonAsciiDllPathLoadsInTheChild` |
+| `QTTUNE_SURROGATE_EXE` only relocates the surrogate: a relative path, another exe's name or a missing file fails the open; the spawn line names the exe used | `J2534SurrogateTest.SurrogateExeOverrideIsRestricted`, `.ClientAndChildLinesShareTheSessionLog` |
 | Cross-arch: x64 test → x86 surrogate → x86 fake, loader round trip plus full session lifecycle | `J2534RoutingTest.X86FakeSelectsSurrogateBackendAndRoundTrips` (dev machine) |
 | Settings picker: device list, refresh, manual URI connect and disconnect, error surfacing | Manual smoke (Windows, live registry) |
 | Full app builds, and ctest passes, on Windows (MSVC 2022), macOS (AppleClang) and Linux (GCC), Qt 6.12.0 | CI `win-build`, `macos-build`, `linux-build` |
@@ -99,27 +103,29 @@ and the next run's screenshots confirmed the fixes the same day.
 | The 8-byte FLOW_CONTROL filter shape (prep #1, `fc_len == mask_len` workaround) is accepted by a real vendor — behaviorally, since the child didn't yet log filter ops. The 4-byte shape that replaced it was accepted on 2026-10-20 (row below). Quiet-bus read loop at <1% CPU, zero spurious frames | BENCH session 2026-10-16, phase 2 |
 | Single-threaded surrogate child ([ADR-0014](adr/0014-single-threaded-surrogate.md)): the whole surrogate and routing suite on the redesigned child, same-arch and cross-arch (x64 test → x86 surrogate → x86 fake) | `J2534SurrogateTest`, `J2534RoutingTest` (2026-10-19, both trees rebuilt: full suite 136/136, cross-arch subset 15/15) |
 | A transaction that times out doesn't put later replies out of step | `J2534SurrogateTest.TimedOutOpDoesNotDesyncNextRequest` |
-| Profile registry: string-keyed lookup, null-set-is-success ("raw"), unknown names fail, last-registration wins | `CoreTest.Profile*` |
+| Profile registry: string-keyed lookup, null-set-is-success ("raw"), unknown names fail, last-registration wins; registration refuses an invalid set or a malformed name; the built-ins can't be replaced or unregistered; unregister is idempotent and leaves existing sessions on their set | `CoreTest.Profile*` |
+| `mock://` shares the query grammar: only `profile`, and every malformed form (a bare `?`, an empty segment, a missing `=`, an uppercase key) fails at create | `CoreTest.MockUriQueryIsStrict` |
 | Profile selection: `mock://`→mock set, `j2534://`→obd2, `?profile=` override honored, unknown names rejected at session_create before any DLL load | `CoreTest.MockSessionSelectsMockSet` et al., `J2534StreamTest.ProfileOverrideMockSelectsMockSet`, `BridgeTest.RawProfileLeavesSignalModelEmpty` |
 | `obd2` signal set: mux grammar, decoder round-trips against canned wire bytes, validator including channel-decl rejection (duplicates, zero/illegal IDs, over-capacity) | `Obd2SetTest`, `Obd2DecodeTest` |
 | Mode-01 scheduler: rotation order in set order, wrap; drain delivers a backlog beyond one cycle's budget | `J2534AdoptionTest` |
 | Channel derivation: a bare `j2534://` URI under `obd2` registers the 7E8 filter with exact mask/pattern shape, sends to 7E0, and starts; a lone `?txid=` keeps the derived 7E8 filter but rewrites the request target | `J2534AdoptionTest.BareJ2534UriDerivesObd2ChannelAndStarts`, `.TxidOverrideRewritesDerivedTransmitTarget` |
-| Link health (in-proc): a hard read failure records `QT_ERR_TRANSPORT_HARD_FAILURE` with one episode per outage and recovers through the probe write; a quiet bus debounces to `QT_ERR_VEHICLE_TIMEOUT` with no episode | `J2534AdoptionTest.HardFailureSetsCanonicalErrorAndRecovers`, `.QuietBusDebouncesToVehicleTimeoutWithoutEpisode` |
-| Write failures (in-proc): a failed write latches `QT_ERR_REQUEST_FAILED` with one episode; empty reads past the quiet debounce don't move it; a successful write alone clears it, with reads held quiet | `J2534AdoptionTest.WriteFailureLatchesRequestFailedAndClears` (`QTTUNE_FAKE_WRITE_STATUS`) |
+| Link health (in-proc): a hard read failure records `QTTUNE_ERR_TRANSPORT_HARD_FAILURE` with one episode per outage and recovers through the probe write; a quiet bus debounces to `QTTUNE_ERR_VEHICLE_TIMEOUT` with no episode | `J2534AdoptionTest.HardFailureSetsCanonicalErrorAndRecovers`, `.QuietBusDebouncesToVehicleTimeoutWithoutEpisode` |
+| Write failures (in-proc): a failed write latches `QTTUNE_ERR_REQUEST_FAILED` with one episode; empty reads past the quiet debounce don't move it; a successful write alone clears it, with reads held quiet | `J2534AdoptionTest.WriteFailureLatchesRequestFailedAndClears` (`QTTUNE_FAKE_WRITE_STATUS`) |
 | A hard read failure outranks a failing write: exactly two episodes (write, then read), and continued failing writes don't downgrade the state | `J2534AdoptionTest.HardReadFailureOutranksRequestFailed` |
-| A delivered frame that matches no channel ends a hard failure but reads as `QT_ERR_VEHICLE_TIMEOUT`, not `QT_OK`, with no episode, inside the quiet debounce window | `J2534AdoptionTest.UnmatchedDeliveredFrameGoesQuietNotHealthy` |
+| A delivered frame that matches no channel ends a hard failure but reads as `QTTUNE_ERR_VEHICLE_TIMEOUT`, not `QTTUNE_OK`, with no episode, inside the quiet debounce window | `J2534AdoptionTest.UnmatchedDeliveredFrameGoesQuietNotHealthy` |
 | The backoff grows under a sustained hard failure: at most 8 probe writes in 1.5 s, against ~15 with the old reset-to-base | `J2534AdoptionTest.BackoffGrowsUnderSustainedHardFailure` |
 | The backoff step (`j2534_backoff_next`, shared by all three worker modes) doubles from the base, never exceeds the 5 s cap, including the step that lands on it, holds at the cap, and doesn't wrap | `J2534StreamTest.BackoffStepDoublesToCapWithoutOvershoot` (session-free) |
-| `QT_ERR_REQUEST_FAILED` has its own status string | `J2534StreamTest.RequestFailedStatusHasDistinctString` |
+| `QTTUNE_ERR_REQUEST_FAILED` has its own status string | `J2534StreamTest.RequestFailedStatusHasDistinctString` |
 | A batch the vendor returns with `ERR_TIMEOUT` is delivered through the surrogate; an empty one maps to a vehicle timeout | `J2534SurrogateTest.SpecTimeoutReadDeliversPartialBatch` (spec-mode fake) |
 | A vendor that returns a hard error with the message count untouched delivers no frames: in-proc, the session reports a hard failure, dispatches nothing and recovers once reads are honest; through the surrogate, the read maps to a hard failure and the next request still correlates | `J2534AdoptionTest.UntouchedCountUnderHardErrorReportsUnhealthy`, `J2534SurrogateTest.HardErrorUntouchedCountDeliversNoFrames` (`QTTUNE_FAKE_UNTOUCHED_COUNT_STATUS`) |
 | Signal freshness: `ageMs` is -1 before the first sample and a sane clock delta after; `updateValues` notifies `AgeMsRole`; `refreshAges()` notifies `AgeMsRole` alone, over every row, so a stalled row re-evaluates | `BridgeTest.AgeMsRoleEmittedAndRefreshesWhileStalled` |
-| Link-state mapping: `QT_OK` → `ok`, vehicle timeout → `quiet`, `QT_ERR_REQUEST_FAILED` → `requests`, hard failure → `fault`, any other code → `degraded` | `BridgeTest.LinkStateMapsEveryPublishedCode` (session-free, through `QtTuneBridge::linkStateForError`) |
+| Link-state mapping: `QTTUNE_OK` → `ok`, vehicle timeout → `quiet`, `QTTUNE_ERR_REQUEST_FAILED` → `requests`, hard failure → `fault`, any other code → `degraded` | `BridgeTest.LinkStateMapsEveryPublishedCode` (session-free, through `QtTuneBridge::linkStateForError`) |
 | Dashboard: every gauge the mock set feeds sweeps under `mock://demo`; a gauge whose signal the profile lacks reads "not in profile" (the mock set feeds every gauge, so `?profile=raw` is what shows it); the grid collapses from 4 to 2 columns across 760 px and tightens its gaps at 600 px; fault and quiet states tint correctly; the temperature rings start at 0 °C, so a cold engine reads on the scale; unticking a row on Live leaves its gauge live | Manual smoke, 2026-10-20 (`40e51ce`; quiet and fault through the knob recipe below). The header, which takes its dot and label from `Theme`, was re-run 2026-10-21 (`55373f4` plus the reordered series palette): ok ("Live · mock://demo", green), quiet, requests, fault and disconnected, plus "not in profile" on every gauge under `?profile=raw`. Re-run later on 2026-10-21 for the rings and the untick (working tree on `d1c20c0`): coolant 53 °C and oil 24 °C on 0–130 and 0–160 scales under mock; with RPM unticked the tach kept moving and recorded a 7,000 peak; every gauge found its signal under `obd2` through the x64 fake. No automated coverage: `SignalHub`'s name lookup and the gauges are QML only |
 | Live: the list sizes to its rows up to a cap, then scrolls with the bar pinned on; each row's swatch matches its trace; rows past `Theme.seriesColors` reuse its colours with a dashed trace (under `obd2`, the last two rows); values at each def's decimal places; the chart prints each trace's value at its right-hand end, nudged apart, with a sample of its stroke, has a seconds axis, and gives each flat trace its own lane in list order; disconnected, a dim message and a Connect button | Manual smoke, 2026-10-21 (`55373f4` plus the reordered series palette): all eight mock rows fit and each swatch matches its trace; under `obd2` through the x64 fake, ten rows with the scroll bar pinned on, and MAF drawn dashed in row 1's colour. Re-run later on 2026-10-21 (working tree on `d1c20c0`): `745 RPM`, `49 °C`, `0.0 %`, `7.0 g/s` under mock, with the three flat mock traces in separate lanes; under the fake, all ten flat traces in their own lanes, top down in list order, Battery Voltage at `13.87 V`, and the two dashed rows' labels showing the dash. No automated coverage: the swatches, palette, dashes and chart labels are QML only; `BridgeTest` pins the `row` and `decimals` they key on |
 | App chrome: the header holds the name, a link pill (state and URI, eliding first) and one button (Connect… opens Settings; Disconnect); the sidebar is one full-height panel; below 720 px the tab bar underlines the selected tab; Settings sizes the device list to its rows and gives the activity log the rest; Log shows `s.mmm` times, spaced uppercase payloads and a full 29-bit ID, and Pause holds the table while the count keeps rising | Manual smoke, 2026-10-21 (working tree on `d1c20c0`, `mock://demo` and the x64 fake, the run-qttune driver), at 1280 and 400 px. Not checked: keyboard focus rings (the driver sends no keys) and an OS light colour scheme |
+| QML reaches the bridge as the `Bridge` singleton (`app/bridgesingleton.h`), not a context property: every page binds through it, and qmllint resolves its properties | Manual smoke, 2026-10-21: `mock://demo` streaming on Home, Dashboard, Live and Log, and the x86 fake through the app's own deployed surrogate (2000 RPM decoded, the spawn line naming the exe). `all_qmllint` went from 103 `[unqualified]` warnings to 7, all on LogPage's delegate roles |
 | Link-health UI: quiet/fault/degraded banner, activity-log transitions, "—" cells, stale dimming, the arbId column | Manual smoke, 2026-10-20 (fake quiet/fault via `QTTUNE_FAKE_READ_STATUS`; mock; recipe below). The first run recorded dimming and the arbId column as working when the code couldn't produce either (dimming keyed on value changes; the ID column bound a misspelled role). Both rows were re-run and passed after the fixes, the arbId row through the x86 surrogate. |
-| Fault state on real hardware, clean teardown; 4-byte filter shape accepted with logged vendor status 0 | Informal bench observation 2026-10-20 ([sheet](bench-sessions/2026-10-20.md)), under the rules before `946bdf5`. The same no-ACK setup now latches `QT_ERR_REQUEST_FAILED` instead, which hasn't been seen on hardware. |
+| Fault state on real hardware, clean teardown; 4-byte filter shape accepted with logged vendor status 0 | Informal bench observation 2026-10-20 ([sheet](bench-sessions/2026-10-20.md)), under the rules before `946bdf5`. The same no-ACK setup now latches `QTTUNE_ERR_REQUEST_FAILED` instead, which hasn't been seen on hardware. |
 
 ## Manual smoke — link-health UI
 
@@ -150,6 +156,20 @@ rows against the current Home, Settings and Dashboard header.
 
 ## Gaps (not verified)
 
+- **The surrogate pipe's protections have no direct test.** Its
+  current-user DACL, `FILE_FLAG_FIRST_PIPE_INSTANCE`,
+  `PIPE_REJECT_REMOTE_CLIENTS` and the one-handle inheritance list are
+  exercised by every surrogate test (they'd fail to connect if the
+  child were shut out) and by the app's x86 path in a manual smoke
+  (2026-10-21), but nothing tries to connect as another user, squat
+  the name, or look for a leaked handle in the child.
+- **Discovery's UTF-16 registry read is untested.** The non-ASCII
+  tests start from a path; reading one from `FUNCTIONLIBRARY` would
+  need an HKLM entry, which needs elevation.
+- **GCC and Clang warnings are seen only in CI logs.** Every target
+  builds with warnings on, and the local MSVC count is 0, but no GCC
+  or Clang build runs on the dev machine and warnings don't fail CI.
+
 - **BENCH coverage stops at the quiet bus.** The formal session
   (2026-10-16) verified load, open, and acceptance of the since-replaced
   8-byte filter shape; an informal 2026-10-20 observation additionally
@@ -166,7 +186,7 @@ rows against the current Home, Settings and Dashboard header.
     end (the surrogate test stops at `read_frame`'s status). Accepted
     until the first vehicle session, which drives it live through the
     surrogate, with the session log as the record;
-  - how the UI renders `QT_ERR_REQUEST_FAILED`: the bridge's mapping
+  - how the UI renders `QTTUNE_ERR_REQUEST_FAILED`: the bridge's mapping
     to `requests` is unit-tested, but the QML banner, Home card,
     Settings label and log line are covered only by the smoke recipe's
     requests-banner row, which hasn't been run yet;
@@ -196,7 +216,7 @@ rows against the current Home, Settings and Dashboard header.
   is untested.
 - **Child survival after a refused op isn't asserted.** The surrogate
   child must stay alive after a vendor refusal (ADR-0014). Tests check
-  the refusal's status, but `sur_close` returns `QT_OK` whether or not
+  the refusal's status, but `sur_close` returns `QTTUNE_OK` whether or not
   the child is still alive, so an early exit would go unnoticed.
 - **The client's skew and late-reply paths aren't exercised.** No test
   child sends a `num_frames` or ioctl `data_len` past the wire limit,

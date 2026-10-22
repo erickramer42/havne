@@ -22,7 +22,7 @@ Additionally, the request loop's placement is wrong: it lives in the J2534 trans
    - `mock://` → profile `mock` (the existing mock signal set).
    - `j2534://` → profile `obd2` by default.
    - `?profile=<name>` overrides the default. `?profile=raw` selects the null profile (no requests, no signal set; Log page only) and is today's behavior promoted to a named thing.
-   - Selection rules join the existing strict grammar: lowercase, unknown names rejected at `qttune_session_create` before any DLL loads (`QT_ERR_NO_TRANSPORT`), last occurrence wins. The URI must fully determine session behavior — every bench sheet records a URI, and it must be complete provenance.
+   - Selection rules join the existing strict grammar: lowercase, unknown names rejected at `qttune_session_create` before any DLL loads (`QTTUNE_ERR_NO_TRANSPORT`), last occurrence wins. The URI must fully determine session behavior — every bench sheet records a URI, and it must be complete provenance.
    - Profiles are string-keyed in a registry, not an ABI enum, so v0.5.0 out-of-tree manufacturer plugins register names without ABI churn.
 
 3. **Probing is a phase inside a profile, never a selection mechanism.** The `obd2` profile gains (in its v2) a post-connect probe: the PID 0x00→0x20→0x40… bitmask chain, driven through the profile's own request/response callbacks. Probe failure degrades to the static signal set; it never fails the session. Selection is never inferred from what the vehicle says, because the things this project ultimately wants to select (Mazda/Honda UDS) cannot be announced. **What you connect to is a decision; what it supports is a discovery.**
@@ -147,6 +147,13 @@ response echo. Nothing enforces the shape at registration
 
 Non-mux definitions (raw/mock sets) never enroll; the scheduler comes
 up empty and the worker runs `?poll=` or passive.
+
+> **Amended 2026-10-21:** `qttune_profile_register` now runs
+> `qttune_validate_signal_set` and refuses an invalid set, a malformed
+> name and a built-in's name (`QTTUNE_ERR_INVALID_ARGUMENT`), as the
+> Consequences above require; `qttune_profile_unregister` exists. The
+> validator still allows other mux shapes, so `qttune_sched_from_set`
+> keeps its own check for the enrolment shape.
 
 ### Scheduler constants and cadence
 
@@ -273,6 +280,10 @@ are 2-byte big-endian; all others are single-byte.
   declaration would clash with core.h's typedef. This surfaced as a
   latent defect when `obd2_signal_sets.cpp` became the first TU to
   include `signals.h` with no `core.h` in scope.
+
+> **Amended 2026-10-21:** `qttune_def_matches_frame` (0 on a match) was
+> replaced by `qttune_def_applies_to_frame`, which returns 1 when the
+> def applies. It shares the mux-key read with `qttune_decode_signal`.
 
 ### Fake vendor enhancements
 

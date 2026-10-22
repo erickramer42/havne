@@ -553,3 +553,22 @@ in the commit message couldn't have come from the committed tree. Run
 pop, and smoke what is being committed. The conflict's two sides were
 two answers to the same Live problem; the resolution keeps the
 row-keyed colours with `Theme`'s palette and dashes rows past it.
+
+**2026-10-21 — hygiene pass (review items H1–H8):** four lessons.
+(1) **An ASCII path can't catch an ANSI bug.** Every `*A` call works
+for an ASCII path, so the encoding bug survived a suite whose paths
+were all ASCII. A non-ASCII test has to use characters outside the
+machine's code page: 1252 has `ü`, so a `ü` path proves nothing there.
+The new tests use Greek and CJK, and the in-proc one was run once with
+`LoadLibraryExA` swapped back in to see it fail. (2) **Accepted lint
+noise hides the signal.** The bridge as a context property named like
+the module made 103 `[unqualified]` warnings "expected", so nobody read
+them. Registered as the `Bridge` singleton, qmllint checks every
+binding, and 7 warnings are left to read. (3) **Flip a predicate's
+polarity under a new name.** `qttune_def_matches_frame` returned 0 on
+a match. Inverting it in place would have compiled in every caller and
+quietly reversed each one's check; `qttune_def_applies_to_frame` makes
+an old caller fail to link instead. (4) **A cast outside an enum's range is
+undefined in C++**, and the sanitizer job would flag it: the
+validator's type test stays inside the enum's range rather than
+probing with −1.

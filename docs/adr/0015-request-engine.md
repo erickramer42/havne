@@ -90,7 +90,7 @@ Passive mode is unchanged.
   way, not an outcome. Positive replies are dispatched and decoded as
   today. The class feeds the probe (§4) and link health:
   - a positive or negative reply, or a pending one, is the ECU
-    answering, which sets `QT_OK`;
+    answering, which sets `QTTUNE_OK`;
   - consecutive timeouts count toward the quiet debounce, which keeps
     its role;
   - write failures, hard read failures and the backoff behave as they
@@ -175,7 +175,7 @@ rotation starts.
   | Negative 0x22 (conditions not correct) | Stays: the condition is transient |
   | Timeout | Stays: silence isn't an answer |
 
-- **Re-probe on recovery.** When link health returns to `QT_OK` from
+- **Re-probe on recovery.** When link health returns to `QTTUNE_OK` from
   quiet or requests-failing, the probe runs again. A connect made with
   the ignition off answers nothing, and without a re-probe the session
   would never learn what the ECU supports.

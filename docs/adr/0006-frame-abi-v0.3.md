@@ -33,7 +33,7 @@ with no hidden padding. `static_assert`s pin its size and offsets.
 
 - `create` allocates and attaches the transport.
 - `close` stops the session and detaches. It is safe to call twice:
-  the second call returns `QT_ERR_SESSION_CLOSED`.
+  the second call returns `QTTUNE_ERR_SESSION_CLOSED`.
 - `destroy` frees the session, closing it first if needed.
 
 ## Consequences

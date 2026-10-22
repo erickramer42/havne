@@ -287,7 +287,7 @@ skips.
 - A var set to the **wrong value** points the test at the wrong
   arch or a nonexistent path — the failure looks like a routing
   regression (`inproc` instead of `surrogate`) or a fast
-  `QT_ERR_LOAD_FAILED`. Echo the variable before diagnosing code.
+  `QTTUNE_ERR_LOAD_FAILED`. Echo the variable before diagnosing code.
 - The surrogate child log is rewritten on every spawn. Copy it
   before the next spawn if it's evidence; a log you didn't capture
   immediately may be describing an older run.
@@ -311,10 +311,21 @@ skips.
 | `ios-simulator-smoke` fails with "No available iPhone simulator on iOS 18 or later" | The runner image dropped its iOS 18+ runtimes, or the job moved to a runner without them. The step prints the available devices. |
 
 **QML lint:** run `cmake --build build --config Release --target all_qmllint`.
-Warnings don't fail the build, and the baseline is noisy. The
-`[unqualified]` warnings on `QtTune.*` are expected, because the
-bridge is a context property qmllint can't see. Check only for new
-warnings in the files you touched.
+Warnings don't fail the build. The bridge is the registered `Bridge`
+singleton, so qmllint checks every `Bridge.*` binding; the baseline is
+a few `[unqualified]` warnings on `model.*` roles in LogPage's
+delegate. Check for new warnings in the files you touched.
+
+**Compiler warnings:** every first-party target builds with `/W4`
+(MSVC) or `-Wall -Wextra` (GCC, Clang) through
+`qttune_enable_warnings()` in the root `CMakeLists.txt`; `test_c_abi`
+adds `-pedantic` with compiler extensions off. Warnings don't fail the
+build. `scripts/verify.sh` prints the count per build step; keep it at
+0 on MSVC.
+
+**Formatting:** `.clang-format` (clang-format 13 or later) describes
+the house style. The tree wasn't reformatted when it was added, so
+format only the lines you change: `git clang-format` after staging.
 
 ## Portability traps
 

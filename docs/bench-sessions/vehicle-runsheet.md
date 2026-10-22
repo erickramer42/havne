@@ -95,7 +95,7 @@ deployed. Stop and fix it at the desk; the vehicle adds nothing.
       `OP_START_FILTER … status 0`)
 - [ ] The first few writes succeed, then writes fail (`OP_WRITE: status 7`)
       once nothing ACKs them. At the first failed write the link latches
-      `QT_ERR_REQUEST_FAILED`, one episode, and stays there: amber
+      `QTTUNE_ERR_REQUEST_FAILED`, one episode, and stays there: amber
       "Requests failing" banner, and "Link: requests failing
       (1 episode(s))" in the activity log
 - [ ] Disconnect cleanly

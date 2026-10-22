@@ -40,7 +40,9 @@ threads onto the GUI thread.
    `extern "C"` functions and POD structs with `flags`/`reserved`
    room, and status codes, enum values and wire opcodes are
    append-only. That keeps foreign-language callers working across
-   versions. A strict-C compile of the public headers pins it.
+   versions. Every public name carries the project prefix (`qttune_`,
+   `Qttune`, `QTTUNE_`). A strict-C compile of every public header
+   pins it.
 
 ## A frame's journey
 
@@ -72,9 +74,12 @@ decode.
 
 | URI | Transport | Default profile |
 |---|---|---|
-| `mock://…` | Mock, on every platform | `mock` |
+| `mock://[label][?profile=…]` | Mock, on every platform | `mock` |
 | `j2534://[vendor or DLL path][?query]` | J2534, Windows only | `obd2` |
 | any URI with `?profile=raw` | as above | `raw` (log only, no decode) |
+
+Both schemes share one strict query grammar (`core/src/uri_query.h`),
+and each rejects keys it doesn't take; `mock://` takes only `profile`.
 
 A **profile** is a named signal set ([ADR-0013](adr/0013-protocol-profiles.md)).
 - **Signal defs:** each def says where its value sits in a frame (bytes,
@@ -88,6 +93,12 @@ A **profile** is a named signal set ([ADR-0013](adr/0013-protocol-profiles.md)).
   no parameters.
 - **Unknown or malformed profile names** fail at session create,
   before any DLL loads.
+- **Registration validates.** `qttune_profile_register` runs the set
+  validator, which accepts exactly the defs the decoder can decode and
+  rejects duplicate def IDs. The built-ins (`mock`, `raw`, `obd2`)
+  can't be replaced or unregistered, and the registry keeps the
+  caller's pointer, so a registered set must outlive its sessions
+  (`profile.h`).
 
 **Lifecycle:**
 - `create` resolves the URI and profile and attaches the transport,
@@ -127,6 +138,11 @@ The full reference is [j2534.md](j2534.md).
 - **One session log** (`%TEMP%\qttune-surrogate.log`) holds both the
   client's and the child's lines, stamped on one clock. A GUI launch
   loses nothing.
+- **The pipe is private:** an unguessable name, a first-instance-only
+  create, no remote clients, and a DACL for the current user alone.
+  The child inherits the session log and no other handle.
+- **Paths are UTF-8** across the ABI and UTF-16 at every Windows call,
+  so a non-ASCII install path loads.
 - **Worker modes:**
   - a scheduler (one Mode-01 request per 100 ms cycle, then a bounded
     drain of replies);
@@ -147,10 +163,10 @@ The bridge polls it on its 100 ms tick and maps it for the UI
 
 | Core code | `linkState` | Means |
 |---|---|---|
-| `QT_OK` | `ok` | Replies are arriving |
-| `QT_ERR_VEHICLE_TIMEOUT` | `quiet` | The adapter answers, but nothing arrives (debounced over ~1 s) |
-| `QT_ERR_REQUEST_FAILED` | `requests` | Writes fail while reads stay clean: nothing on the bus ACKs (ignition off, ECU asleep) |
-| `QT_ERR_TRANSPORT_HARD_FAILURE` | `fault` | Reads fail: the adapter isn't answering |
+| `QTTUNE_OK` | `ok` | Replies are arriving |
+| `QTTUNE_ERR_VEHICLE_TIMEOUT` | `quiet` | The adapter answers, but nothing arrives (debounced over ~1 s) |
+| `QTTUNE_ERR_REQUEST_FAILED` | `requests` | Writes fail while reads stay clean: nothing on the bus ACKs (ignition off, ECU asleep) |
+| `QTTUNE_ERR_TRANSPORT_HARD_FAILURE` | `fault` | Reads fail: the adapter isn't answering |
 | no session | `disconnected` | |
 
 - **Why writes are judged apart from reads:** a quiet bus fails every
@@ -165,6 +181,10 @@ The bridge polls it on its 100 ms tick and maps it for the UI
 - **Bridge threading:** `QtTuneBridge` touches only atomics on the
   worker thread; everything else runs on the GUI thread. It links
   only QtCore, so `test_bridge` can exercise it headless.
+- **Bridge in QML:** pages reach it as the `Bridge` singleton of the
+  `QtTune` module (`Bridge.connected`, `Bridge.signalModel`). The
+  registration lives in `app/bridgesingleton.h`, so the bridge itself
+  stays QtCore-only, and qmllint checks every binding against it.
 - **Bridge outputs:** it exposes a frame model (behind a sort proxy,
   with a pause for the Log page), a signal model (value, `hasValue`,
   `ageMs`, `decimals`, a 120-sample history per signal), device
