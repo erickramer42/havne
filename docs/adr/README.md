@@ -22,6 +22,7 @@ old one, and the old record's status is updated to point at it.
 | [0013](0013-protocol-profiles.md) | Protocol profiles: URI selection, profile-owned probe and request loop, declared CAN channels | Accepted |
 | [0014](0014-single-threaded-surrogate.md) | Single-threaded surrogate child; reads travel over the pipe | Accepted |
 | [0015](0015-request-engine.md) | Request engine: correlated, response-paced requests derived from signal definitions; read-only by construction | Proposed |
+| [0016](0016-signal-definition-layout.md) | Signal definition layout: value kind, explicit byte order, layout version, zero-checked reserved room | Proposed |
 
 ## Adding a record
 
