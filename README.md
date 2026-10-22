@@ -82,14 +82,14 @@ screen, is [docs/architecture.md](docs/architecture.md).
   and the bridge (headless). A harness tier drives the whole J2534
   stack against an in-tree fake vendor DLL, both in-proc and through
   the surrogate. CI builds and tests on Windows, Linux and macOS, runs
-  the core under ASan/UBSan, compiles Android and iOS, and launches
-  the iOS app in the Simulator
+  the core under ASan/UBSan, compiles Android and iOS, and, on pull
+  requests, launches the iOS app in the Simulator
   ([docs/testing.md](docs/testing.md)).
 - **Decisions and evidence on record.** Design decisions are
   [ADRs](docs/adr/README.md), lessons go in a dated
   [engineering log](docs/engineering-log.md), and every real-adapter
-  session has a filled-in
-  [bench sheet](docs/bench-sessions/).
+  session is written up in
+  [docs/bench-sessions/](docs/bench-sessions/).
 
 ## Features
 
@@ -98,7 +98,7 @@ screen, is [docs/architecture.md](docs/architecture.md).
   active profile doesn't provide says so instead of showing zero.
 - **Live view.** Decoded values with units, refreshed at 10 Hz, plus
   a rolling strip chart.
-- **Frame log.** Raw frames, newest-first or oldest-first.
+- **Frame log.** Raw frames, newest-first or oldest-first, with Pause.
 - **J2534 Pass-Thru (Windows).** Finds installed vendor drivers; pick
   one in Settings or enter a `j2534://` URI. The `obd2` profile
   polls standard Mode-01 PIDs, so a bare `j2534://` streams decoded
@@ -130,7 +130,7 @@ The phase checklist and known issues are in [STATUS.md](STATUS.md).
 |---|---|---|
 | CMake | 3.21+ | |
 | Qt | 6.12+ (LGPL) | Core, Gui and Quick modules |
-| C++ compiler | C++17 | MSVC 2019+, GCC 11+ or Clang 14+ |
+| C++ compiler | C++17 | MSVC 2022+, GCC 10+ or Xcode 16+ (Qt 6.12's minimums; a core-only build needs just C++17) |
 
 Installing Qt 6.11+ with aqtinstall needs a workaround; see
 [docs/development.md](docs/development.md#installing-qt-with-aqtinstall).
@@ -146,7 +146,8 @@ build/app/Release/qttune.exe
 cmake -B build -DCMAKE_PREFIX_PATH=/path/to/qt
 cmake --build build
 ctest --test-dir build --output-on-failure
-build/app/qttune
+build/app/qttune                              # Linux
+build/app/qttune.app/Contents/MacOS/qttune    # macOS (an app bundle)
 ```
 
 To try it without hardware, open **Settings**, pick the `mock://demo`
@@ -172,8 +173,10 @@ a device yet. Their command lines are in
 ways to deploy the surrogate, the cross-architecture tests and
 troubleshooting.
 
-**Runtime:** Windows needs the VC++ 2019 Redistributable (installed
-with the MSVC workload); Linux and macOS need the Qt runtime libraries.
+**Runtime:** Windows needs a current Microsoft Visual C++
+Redistributable (x64), at least as new as the MSVC that built the app
+and Qt; Visual Studio installs one, and the post-build deploy step
+doesn't copy it. Linux and macOS need the Qt runtime libraries.
 A J2534 vendor driver is only needed for a real adapter; the tests use
 a bundled fake.
 

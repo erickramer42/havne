@@ -9,7 +9,7 @@ instructions, see the [README](../README.md#build).
 |---|---|---|
 | CMake | 3.21+ | Required for `qt_standard_project_setup()` |
 | Qt | 6.12+ (LGPL) | Core, Gui and Quick. Not needed for core-only builds. |
-| C++ compiler | C++17 | MSVC 19.x (2019+), GCC 11+, Clang 14+ |
+| C++ compiler | C++17 | MSVC 2022+, GCC 10+, Xcode 16+: Qt 6.12's minimums. A core-only build needs just C++17. |
 | GoogleTest | 1.14.0 | Fetched automatically on the first configure if it isn't installed |
 | Android NDK, JDK | NDK r27, JDK 21 | Android builds only. Qt 6.12's Android kit expects these versions. |
 | Xcode | 16+ (iOS 18 SDK) | iOS builds only, on a macOS host |
@@ -91,12 +91,13 @@ Blowing away `CMakeCache.txt` is the blunt equivalent and equally
 safe — regeneration is cheap.
 
 **Full app, Linux and macOS.** Single-config generators drop the
-`Release/` path segment:
+`Release/` path segment. On macOS the app is a bundle:
 
 ```sh
 cmake -B build -DCMAKE_PREFIX_PATH=/path/to/qt
 cmake --build build
-build/app/qttune
+build/app/qttune                              # Linux
+build/app/qttune.app/Contents/MacOS/qttune    # macOS
 ```
 
 On Debian or Ubuntu, Qt's desktop kit needs `libgl1-mesa-dev` and

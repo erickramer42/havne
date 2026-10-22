@@ -1,6 +1,6 @@
 # VEHICLE run sheet — first read-only vehicle session
 
-**Date:** <date>  **Operator:** <initials>  **Second person or posted procedure:** <initials / where posted>
+**Date:** <date>  **Second person present, or procedure posted:** <yes, or where posted>
 **Adapter:** OBDX Pro VX (USB)  **Vehicle:** <year make model>; CAN-era OBD-II, expected 11-bit IDs at 500 kbit/s
 **QtTune build:** <commit hash>  **Trees:** build, build-win32 both fresh
 
@@ -258,7 +258,7 @@ ignition off, wait 10 s, then turn it back on.
    the session logs alongside (the 2026-10-16 session's
    `surrogate-phase*.log` files are the precedent). Before committing,
    scrub the sheet, the logs and any screenshots: no VIN or
-   calibration IDs, initials rather than names, and no local paths
+   calibration IDs, no names or initials, and no local paths
    (`%TEMP%` and `C:\Users\…` paths carry the account name)
 2. Walk the [BENCH prep list](../../STATUS.md#bench-prep): mark each
    item CONFIRMED / REFUTED (with evidence) / STILL UNKNOWN

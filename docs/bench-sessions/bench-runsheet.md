@@ -1,6 +1,6 @@
 # BENCH run sheet — first real adapter session
 
-**Date:** <date>  **Operator:** <initials>  **Adapter:** OBDX Pro VX (USB)
+**Date:** <date>  **Adapter:** OBDX Pro VX (USB)
 **QtTune build:** <commit hash>  **Trees:** build, build-win32 both fresh
 **Vehicle connected:** No (phases 1–3) — this sheet's no-vehicle portion is
 the BENCH tier; the vehicle session is a separate sheet
