@@ -16,7 +16,7 @@ Safety, regulatory and warranty caveats are in
 **Current phase: v0.3.0 Phase 3 (J2534).** The HARNESS tier is complete,
 including transport adoption (ADR-0012). The BENCH tier has covered a real
 adapter on a quiet bus (no vehicle attached). The first real vehicle comes
-next.
+next, and v0.3.0 is tagged when that session succeeds.
 
 - **Works:**
   - The mock transport drives the live frame log, LiveView and the
@@ -85,8 +85,8 @@ next.
     a folder under `Documents/QtTune/recordings` holding every frame
     the bridge receives (`frames.csv`, host and vendor time side by
     side), every decoded value (`signals.csv`) and the activity lines
-    (`events.log`). `frames.csv` is the format the Phase 4 replay
-    transport will read.
+    (`events.log`). `frames.csv` is the format the record-replay
+    transport will read ([After v0.3.0](#after-v030)).
 - **Not yet:**
   - BENCH coverage beyond the quiet-bus tier. The formal first BENCH
     session (2026-10-16, [docs/bench-sessions/2026-10-16.md](docs/bench-sessions/2026-10-16.md))
@@ -229,7 +229,8 @@ Contracts along this path:
     behaviorally 2026-10-16, 4-byte with logged vendor status 0
     2026-10-20); the talking-bus items (2, 3, 4, 5, 7) still open
   - first live, read-only vehicle session
-- [ ] **Protocol profiles** (ADR-0013):
+- [x] **Protocol profiles** (ADR-0013), slices 1–3. The PID-support
+      probe and `uds-generic` are [after v0.3.0](#after-v030):
   - [x] slice 1: profile registry, `raw` profile, `?profile=`
         override, bridge reads the session's active signal set
   - [x] slice 2: the `obd2` signal set and the multi-PID scheduler
@@ -239,18 +240,35 @@ Contracts along this path:
         CAN channel pairs; the transport registers one flow-control
         filter per channel and routes scheduler requests per PID; a
         bare `j2534://` URI under `obd2` starts with no `?filter=`
-  - [ ] `obd2` PID probe phase and `uds-generic`
 - [x] **Signal definition layout**
       ([ADR-0016](docs/adr/0016-signal-definition-layout.md)): value
       kinds and explicit byte order, `double` decode, 3-byte mux keys,
       a set layout version, zero-checked reserved room, and validation
       that names the failing element
-- [ ] **Phase 4, record-replay transport:** play captured frames
-      back deterministically through the same frame API. The capture
-      side is the recorder's `frames.csv`
-      ([ADR-0017](docs/adr/0017-session-recording.md)); the replay
-      work includes a round-trip test against a recorded mock session
-- [ ] **Tag v0.3.0** and bump the version string (#16)
+- [ ] **Tag v0.3.0** when the first vehicle session succeeds: an ECU
+      answers the Mode-01 requests and the replies decode to plausible
+      values (the [vehicle run sheet](docs/bench-sessions/vehicle-runsheet.md)'s
+      first two goals). Bump the version string with it (#16)
+
+## After v0.3.0
+
+Scheduled for v0.3.x, in this order. The vehicle session's
+measurements feed the first item.
+
+1. **Request engine** ([ADR-0015](docs/adr/0015-request-engine.md),
+   Proposed): correlated, response-paced requests derived from the
+   signal definitions. Its open values wait on the session's
+   request-to-reply times and supported-PID bitmaps.
+2. **The `obd2` PID-support probe,** on the request engine: walk the
+   supported-PID bitmaps per channel and drop what the ECU says it
+   doesn't support.
+3. **`uds-generic`** (ADR-0013): Mode-22 DID reads with user-entered
+   DIDs, the tool for researching a manufacturer set on the car.
+4. **Phase 4, record-replay transport,** independent of the others:
+   play captured frames back deterministically through the same frame
+   API. The capture side is the recorder's `frames.csv`
+   ([ADR-0017](docs/adr/0017-session-recording.md)); the replay work
+   includes a round-trip test against a recorded mock session.
 
 ## BENCH prep
 
@@ -418,7 +436,8 @@ an issue is resolved it is removed, and its number is not reused.
 |---|---|---|
 | v0.1.0 | Skeleton: core ABI, Qt shell, responsive layout | ✅ Released |
 | v0.2.0 | Callback API, mock transport, live frame log, CI | ✅ Released (tagged) |
-| v0.3.0 | Signal decoding, LiveView, J2534 transport, live vehicle read and logging | 🚧 [Checklist above](#v030-checklist) |
+| v0.3.0 | Signal decoding, LiveView, J2534 transport, live vehicle read and logging | 🚧 [Checklist above](#v030-checklist); tagged when the first vehicle session succeeds |
+| v0.3.x | Request engine, PID-support probe, `uds-generic`, record-replay transport | Planned: [after v0.3.0](#after-v030) |
 | v0.4.0 | Security access discovery, flash capability | Planned |
 | v0.5.0+ | Manufacturer plugin modules (ADR-0013's profile API) | Planned |
 
@@ -435,8 +454,8 @@ matter most — CAN-era targets need none of it.
 ## Backlog
 
 Unscheduled work, grouped by theme. Nothing here is committed to a
-release: an item moves into the [v0.3.0 checklist](#v030-checklist) or
-the roadmap above when it is scheduled. Defects and debt live under
+release: an item moves into [After v0.3.0](#after-v030) or the
+roadmap above when it is scheduled. Defects and debt live under
 [Known issues](#known-issues-and-technical-debt), not here.
 
 Sizes are rough: **S** is a day or less, **M** a few days, **L** a
@@ -541,7 +560,7 @@ after the first vehicle session.
   the whole SAE J1979 Service 01 table, including PIDs that carry two
   values (oxygen sensors with fuel trims), which need two defs on one
   PID.
-  - Depends on the PID-support probe (v0.3.0 checklist): until the
+  - Depends on the PID-support probe ([after v0.3.0](#after-v030)): until the
     ECU's support bitmaps prune the rotation, every PID in a set costs
     a 100 ms request slot whether the ECU answers or not.
   - Depends on faster request pacing (Performance, below).
@@ -573,8 +592,8 @@ after the first vehicle session.
   above: a user-facing expression per channel (differences, unit
   conversions, smoothing). Stays in core per rule 2, and is the same
   data-describing-arithmetic shape ADR-0015 uses for requests.
-- **Surface which ECU answered (S).** The PID-support probe (v0.3.0
-  checklist) is to walk the supported-PID chain per channel, but
+- **Surface which ECU answered (S).** The PID-support probe
+  ([after v0.3.0](#after-v030)) is to walk the supported-PID chain per channel, but
   nothing in the UI shows which module replied on which channel.
   Matters the day a probe finds three modules talking; the channel
   model already holds the answer.

@@ -4,8 +4,8 @@
 - **Date:** 2026-10-22. Implemented with this record.
 - **Related:** [ADR-0003](0003-backpressure-bounds-in-flight-frames.md)
   (what the bridge drops), [ADR-0013](0013-protocol-profiles.md)
-  (signal sets), and the v0.3.0 checklist's Phase 4 record-replay
-  transport in [STATUS.md](../../STATUS.md).
+  (signal sets), and the Phase 4 record-replay transport in
+  [STATUS.md](../../STATUS.md#after-v030).
 
 ## Context
 

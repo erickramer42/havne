@@ -122,7 +122,8 @@ screen, is [docs/architecture.md](docs/architecture.md).
 |---|---|---|
 | v0.1.0 | Skeleton: core ABI, Qt shell, responsive layout | ✅ Released |
 | v0.2.0 | Callback API, mock transport, live frame log | ✅ Released |
-| v0.3.0 | Signal decoding, live view, J2534 transport, live vehicle read and logging (simulator/bench verified only) | 🚧 In progress |
+| v0.3.0 | Signal decoding, live view, J2534 transport, live vehicle read and logging (simulator/bench verified only) | 🚧 In progress; tagged when the first vehicle session succeeds |
+| v0.3.x | Request engine, PID-support probe, generic UDS reads, record-replay transport | Planned |
 | v0.4.0 | Security access discovery, flash capability | Planned |
 | v0.5.0+ | Manufacturer plugin modules | Planned |
 
