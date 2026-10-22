@@ -19,6 +19,10 @@ First session against a talking bus. Goals, in order:
 4. Validate or invalidate the talking-bus items in the
    [BENCH prep list](../../STATUS.md#bench-prep) (#2, #3, #4, #5, #6,
    #7, #8)
+5. Record each phase: the recordings are the first real-bus replay
+   fixtures ([ADR-0017](../adr/0017-session-recording.md)), and the
+   bitmaps and reply timings are what
+   [ADR-0015](../adr/0015-request-engine.md)'s open questions wait on
 
 Record everything, including every connect's session log. A session
 that stops at phase 2 with evidence is worth more than one that runs
@@ -87,6 +91,34 @@ to the end undocumented.
       URI into the URI field (the VX row fills the bare one), then
       Connect
 - [ ] Camera or notebook ready
+- [ ] A reference for the values: the cluster's gauges (tachometer,
+      coolant, fuel), and a second scan tool if you have one. Use the
+      scan tool between phases, with QtTune disconnected, **never on
+      the bus at the same time**: its replies also arrive on 0x7E8, so
+      QtTune would decode and record them as its own, which skews the
+      refresh and timing numbers, and both adapters may answer a
+      multi-frame reply with flow control
+- [ ] Rehearse at the desk with the x86 fake in place of the VX, with
+      recording on, so the evidence pipeline has run once before it
+      matters. Its URI is `j2534://` plus the full path to
+      `build-win32\tests\Release\fake_j2534.dll`, then each phase's
+      query:
+      - Phase 0: launch with `ECUIO_FAKE_WRITE_STATUS=7` in the
+        environment, then the bare URI: "Requests failing";
+      - Phase 1: relaunch without it, then `?profile=raw&filter=0x7E8`:
+        "Vehicle not responding";
+      - Phase 2: `?poll=0x0C`, then the 0x00 bitmap read: the fake's
+        bitmap is all zeros, so its last bit says to skip the other
+        two;
+      - Phase 3: the bare URI: every `obd2` signal shows the fake's
+        canned value.
+
+      Then do the teardown and the post-session scrub on what it
+      produced: the recordings and the kept session logs. Phase 5's
+      recovery can't be rehearsed this way, because the surrogate
+      reads the fake's settings once, at spawn. The knob recipes are
+      in [testing.md](../testing.md)'s "Manual smoke — link-health UI"
+      table
 
 Abort condition: the suite isn't green, or the surrogate isn't
 deployed. Stop and fix it at the desk; the vehicle adds nothing.
@@ -153,11 +185,23 @@ is requested)
         `04 41 0C …`): a PCI byte left in-band (see "If it fails")
 - [ ] LiveView: RPM populated; every other signal shows "—"
 - [ ] No banner (link ok)
-- [ ] Optional, same ignition state: connect
-      `j2534://OBDX Pro - VX?profile=raw&filter=0x7E8&poll=0x00` and
-      record one reply: `41 00` plus four bitmap bytes naming the
-      supported PIDs 0x01–0x20 (the first byte's top bit is PID 0x01).
-      It predicts which Phase 3 signals stay "—"
+- [ ] The supported-PID bitmaps, same ignition state, one connect
+      each:
+
+          j2534://OBDX Pro - VX?profile=raw&filter=0x7E8&poll=0x00
+          j2534://OBDX Pro - VX?profile=raw&filter=0x7E8&poll=0x20
+          j2534://OBDX Pro - VX?profile=raw&filter=0x7E8&poll=0x40
+
+      Each reply is `41 <PID>` plus four bitmap bytes, one bit per
+      PID, most significant bit first: 0x00's bits name PIDs
+      0x01–0x20, 0x20's name 0x21–0x40, and 0x40's 0x41–0x60 (SAE J1979
+      Service 01; checked against Wikipedia's "OBD-II PIDs" table).
+      Each bitmap's last bit says whether the next bitmap PID is
+      supported, so if it's clear, skip the reads after it. A request
+      with no reply, or a reply starting `7F`, is recorded as it is.
+      Together they cover PIDs 0x01–0x60, which predicts the Phase 3
+      signals that stay "—"; if the `obd2` set gains a PID past 0x60,
+      add the next bitmap
 
 **Evidence:** the recording's `frames.csv` (reply bytes, vendor
 timestamps) and `signals.csv` (what they decoded to), and the session
@@ -201,17 +245,28 @@ in `signals.csv` (expect about one rotation; replies a cycle late are
 a known item, not a failure), and `frames.csv`'s `timestamp_us`
 against `host_us` gives the vendor timestamp's unit (BENCH prep #5).
 
-## Phase 4 — engine idling (optional)
+## Phase 4 — engine idling (the decode check)
 
 Only if phases 0–3 were clean, and with the second person present.
+With the engine off, most values are 0 or ambient, which a wrong scale
+or byte order can still produce; Fuel Level and Battery Voltage are the
+exceptions. Idle is where RPM's two-byte value and the charging
+voltage move, so this phase is the strongest check of the decode.
 
 **Action:** start the engine with the app connected on the bare URI.
 The connection may drop during cranking; if so, reconnect once the
 engine is idling.
 
 **Expected:**
-- [ ] RPM ~600–900, Battery Voltage ~13.5–14.5 V, coolant rising over
-      minutes
+- [ ] RPM ~600–900, matching the tachometer to within its needle;
+      Battery Voltage ~13.5–14.5 V; Coolant Temp rising over minutes,
+      moving with the cluster's gauge if it has one; Fuel Level
+      roughly matching the gauge
+
+**Evidence:** a photo of the cluster and LiveView together, and the
+recording. If a second scan tool is on hand, disconnect QtTune, read
+RPM, coolant and voltage with it at idle, and note them beside
+QtTune's.
 
 ## Phase 5 — ignition cycle (optional)
 
@@ -283,6 +338,5 @@ ignition off, wait 10 s, then turn it back on.
    [ADR-0015](../adr/0015-request-engine.md)'s open questions:
    request-to-reply times per PID (from the `OP_WRITE frame` /
    `OP_READ frame` stamps), whether any reply was "response pending"
-   (`7F 01 78`), and the supported-PID bitmap if Phase 2's optional
-   step ran
+   (`7F 01 78`), and Phase 2's supported-PID bitmaps
 5. Engineering-log entry if a lesson emerged

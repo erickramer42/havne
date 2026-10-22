@@ -66,6 +66,9 @@ Dates are commit dates.
 | 2026-10-21 | Hygiene pass: a private surrogate pipe passing one inherited handle; UTF-8 paths, UTF-16 at every Windows call; a validator that accepts exactly what the decoder decodes; registry validation and unregister; one URI query grammar; warnings on for every target; prefixed status and ID names; the `Bridge` QML singleton | `cd7ef50` |
 | 2026-10-22 | The core's C ABI takes the `ecuio_` prefix; the app keeps the product's name ([ADR-0001](adr/0001-qt-free-core-c-abi.md), appendix of 2026-10-22) | `f07c013` |
 | 2026-10-22 | Signal definition layout ([ADR-0016](adr/0016-signal-definition-layout.md)): value kinds and explicit byte order, `double` decode with 16-bit lengths, 3-byte mux keys, a set layout version, zero-checked reserved room, and validation that names the failing element; one Mode-01 key test for enrolment and request routing | `0ae8024`, `6337b6f`, `d809cb7`, `5735dd6` |
+| 2026-10-22 | A surrogate built from other shared headers is refused at `OP_OPEN`: a configure-time fingerprint of the two headers (#19 closed) | `c029caa` |
+| 2026-10-22 | Vehicle-session prep: each spawn keeps the session log it replaces (the newest 50); the Log table sorts by arrival and starts empty on connect; activity-log lines carry times | `6f84571`, `839b176` |
+| 2026-10-22 | Session recording ([ADR-0017](adr/0017-session-recording.md)): every frame, decoded value and activity line per connect; `frames.csv` is the replay format | `f590613` |
 
 ## Lessons learned
 
@@ -596,3 +599,20 @@ later change: an old set could hold anything there. `layout_version`
 is the set's first member and is checked before anything else, with
 3 chosen so neither old value passes, and validation refuses nonzero
 reserved bytes, so that room stays usable.
+
+**2026-10-22 — vehicle-session prep
+([ADR-0017](adr/0017-session-recording.md)):** two lessons.
+(1) **Walk the evidence before the scarce event.** Reading the vehicle
+run sheet step by step, asking where each piece of evidence would come
+from, found three gaps no test covered. Every connect rewrote the
+session log the sheet depended on, across about eight connects. The
+Log table sorted on the vendor's timestamp, whose unit nobody knew, so
+a new phase's rows could sort below the last phase's. And the sheet
+timed disconnects from activity-log lines that carried no time. Each
+cost minutes at the desk; at the car each would have cost evidence
+that takes a second visit to recover. (2) **Hash what must match;
+don't number it.** The two build trees needed to agree on their
+shared headers. A hand-kept protocol version works only if every
+header edit remembers to bump it. A hash of the headers' bytes changes
+by itself, and its one cost, that a comment edit also forces both
+trees to be rebuilt, is a rule the build already had.
