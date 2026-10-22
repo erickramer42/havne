@@ -3,27 +3,21 @@
 [![CI](https://github.com/erickramer42/qttune/actions/workflows/ci.yml/badge.svg)](https://github.com/erickramer42/qttune/actions/workflows/ci.yml)
 [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/erickramer42/qttune/badge)](https://scorecard.dev/viewer/?uri=github.com/erickramer42/qttune)
 
-QtTune is a cross-platform OBD-II reader and logger, in early
-development. A Qt-free C++17 core does the vehicle I/O and decoding
-behind a stable C ABI. A Qt 6 / QML front end shows the results as
-gauges, a live strip chart and a raw CAN frame log. It talks to J2534
-Pass-Thru adapters on Windows, and a built-in simulated vehicle lets
-it run with no hardware at all.
+QtTune is a cross-platform OBD-II reader and logger. A Qt-free C++17
+core does the vehicle I/O and decoding behind a stable C ABI. A Qt 6 / QML
+front end shows the results as gauges, a live strip chart and a raw CAN
+frame log. It talks to J2534 Pass-Thru adapters on Windows, and a built-in
+simulated vehicle lets it run with no hardware at all.
+
+> [!WARNING]
+> **Experimental software.** Not yet validated on a real vehicle — see [DISCLAIMER.md](DISCLAIMER.md).
+>
+> QtTune runs end-to-end against the simulator and a fake J2534 vendor driver, and has connected to a real adapter on the bench with no vehicle attached. It has **not yet communicated with a real vehicle**; [STATUS.md](STATUS.md) tracks what is and isn't verified.
 
 ![The QtTune Dashboard at full throttle on the simulated vehicle: 6,325 rpm, 103 km/h, shift lights lit](docs/images/dashboard.png)
 
 *The Dashboard mid-pull on the built-in simulated vehicle
 (`mock://demo`), with no hardware attached.*
-
-> [!WARNING]
-> **This software may permanently damage your vehicle.** Read
-> [DISCLAIMER.md](DISCLAIMER.md) before connecting it to one.
->
-> QtTune runs end to end against the simulator and a fake J2534 vendor
-> driver, and has connected to a real adapter on the bench with no
-> vehicle attached. It has **not yet communicated with a real
-> vehicle**, so don't connect it to one expecting it to work.
-> [STATUS.md](STATUS.md) tracks what is and isn't verified.
 
 ## Architecture
 
@@ -123,7 +117,7 @@ screen, is [docs/architecture.md](docs/architecture.md).
 |---|---|---|
 | v0.1.0 | Skeleton: core ABI, Qt shell, responsive layout | ✅ Released |
 | v0.2.0 | Callback API, mock transport, live frame log | ✅ Released |
-| v0.3.0 | Signal decoding, live view, J2534 transport, live vehicle read and logging | 🚧 In progress |
+| v0.3.0 | Signal decoding, live view, J2534 transport, live vehicle read and logging (simulator/bench verified only) | 🚧 In progress |
 | v0.4.0 | Security access discovery, flash capability | Planned |
 | v0.5.0+ | Manufacturer plugin modules | Planned |
 
