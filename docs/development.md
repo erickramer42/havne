@@ -15,6 +15,26 @@ instructions, see the [README](../README.md#build).
 | Xcode | 16+ (iOS 18 SDK) | iOS builds only, on a macOS host |
 | Python (optional) | 3.13+, 64-bit | Reserved for future trace-analysis tooling |
 
+## Installing Qt with aqtinstall
+
+Released aqtinstall (3.3.x) can't install Qt 6.11+: download.qt.io
+changed its repository layout, and aqt requests a stale
+`Updates.xml` path
+([aqtinstall #959](https://github.com/miurahr/aqtinstall/issues/959)).
+The fix ([aqtinstall #1000](https://github.com/miurahr/aqtinstall/pull/1000))
+is not in a release yet, so install aqtinstall from git:
+
+    python -m pip install --force-reinstall --no-cache-dir \
+        "git+https://github.com/miurahr/aqtinstall.git"
+
+    python -m aqt install-qt windows desktop 6.12.0 win64_msvc2022_64 -O <your-install-path>
+
+The Qt online installer isn't affected.
+
+Once a release carries the fix, pin it from PyPI instead, here and in
+CI (see "Temporary workarounds" under CI below), and drop this
+section.
+
 ## Build configurations
 
 **Full app, Windows.** The Visual Studio generator is multi-config,

@@ -1,60 +1,121 @@
 # QtTune
 
-> ⚠️ **WARNING:** This software may permanently damage your vehicle.  
-> See [DISCLAIMER.md](DISCLAIMER.md) for full terms before use.
-
 [![CI](https://github.com/erickramer42/qttune/actions/workflows/ci.yml/badge.svg)](https://github.com/erickramer42/qttune/actions/workflows/ci.yml)
-
 [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/erickramer42/qttune/badge)](https://scorecard.dev/viewer/?uri=github.com/erickramer42/qttune)
 
-QtTune is a cross-platform ECU reader and logger. A Qt-free C++ core,
-behind a stable C ABI, handles vehicle I/O and decoding. The Qt/QML
-front end is a replaceable skin on top of it. One codebase targets
-desktop (Windows, Linux, macOS) and mobile (Android, iOS). CI builds
-and tests the desktop app on all three platforms. The Android and iOS
-builds compile in CI, but neither has run on a device yet.
+QtTune is a cross-platform OBD-II reader and logger, in early
+development. A Qt-free C++17 core does the vehicle I/O and decoding
+behind a stable C ABI. A Qt 6 / QML front end shows the results as
+gauges, a live strip chart and a raw CAN frame log. It talks to J2534
+Pass-Thru adapters on Windows, and a built-in simulated vehicle lets
+it run with no hardware at all.
 
-**Early development.** The full pipeline runs end to end against a
-simulated transport and against a fake J2534 vendor driver, and has
-connected to a real adapter on the bench (no vehicle attached). It
-has **not yet communicated with a real vehicle** — do not connect
-it to one expecting it to work. See [STATUS.md](STATUS.md) for
-details.
+![The QtTune Dashboard at full throttle on the simulated vehicle: 6,325 rpm, 103 km/h, shift lights lit](docs/images/dashboard.png)
+
+*The Dashboard mid-pull on the built-in simulated vehicle
+(`mock://demo`), with no hardware attached.*
+
+> [!WARNING]
+> **This software may permanently damage your vehicle.** Read
+> [DISCLAIMER.md](DISCLAIMER.md) before connecting it to one.
+>
+> QtTune runs end to end against the simulator and a fake J2534 vendor
+> driver, and has connected to a real adapter on the bench with no
+> vehicle attached. It has **not yet communicated with a real
+> vehicle**, so don't connect it to one expecting it to work.
+> [STATUS.md](STATUS.md) tracks what is and isn't verified.
+
+## Architecture
+
+```
+ QML pages: Home · Dashboard · Live · Log · Settings
+   │  Theme (colors, link-state labels) · SignalHub (signals by name)
+   ▼  properties and list models, GUI thread only
+ QtTuneBridge (app/)          the only caller of the core
+   │  worker → GUI marshaling, 100 ms coalescing, link-health polling
+   ▼  C ABI: core.h · signals.h · profile.h · j2534.h
+ qttune-core (core/)          no Qt, ever
+   │  sessions + callbacks · profiles + decode · transports
+   ├── mock://    worker thread, scripted drive cycle
+   └── j2534://   worker thread → loader, which picks a backend:
+          ├── in-proc:   vendor DLL loaded into the app (x64 DLLs)
+          └── surrogate: client ══ named pipe ══ qttune-j2534-surrogate.exe
+                         (x86 process hosting x86 vendor DLLs)
+```
+
+Three rules shape it
+([ADR-0001](docs/adr/0001-qt-free-core-c-abi.md)):
+
+1. **The core never links Qt.** A CI job builds and tests the core on
+   a machine with no Qt, and every configure fails if `qttune-core`
+   links a Qt target.
+2. **The UI receives final display values.** Decoding, scaling and
+   units live in the core, so QML never parses a frame and there is
+   one decode path.
+3. **The C ABI is the boundary.** Opaque handles, flat `extern "C"`
+   functions and POD structs with reserved room; enum values are
+   append-only. It exists so other front ends (mobile, scripting) can
+   drive the same core, and a strict-C compile of every public header
+   pins it.
+
+The full walkthrough, including a frame's path from transport to
+screen, is [docs/architecture.md](docs/architecture.md).
+
+## Engineering highlights
+
+- **32-bit vendor drivers in a 64-bit app.** The loader reads each
+  driver DLL's PE header. x86 drivers run in a separate,
+  single-threaded surrogate process over a private named pipe; the
+  transport above can't tell which backend it's on
+  ([ADR-0008](docs/adr/0008-x86-surrogate-host.md),
+  [ADR-0009](docs/adr/0009-pe-architecture-routing.md),
+  [ADR-0014](docs/adr/0014-single-threaded-surrogate.md)).
+- **Link health that names the right problem.** Reads and writes are
+  judged separately, so a quiet bus (ignition off, nothing ACKs) isn't
+  reported as an adapter fault. While a failure lasts, probing backs
+  off from 10 Hz to one try every 5 s.
+- **A bounded data path across threads.** Callbacks dispatch from a
+  snapshot, so they can unregister without deadlocking. Backpressure
+  bounds frames in flight, and values reach QML at 10 Hz whatever the
+  bus rate
+  ([ADR-0002](docs/adr/0002-callback-pair-identity-snapshot-dispatch.md),
+  [ADR-0003](docs/adr/0003-backpressure-bounds-in-flight-frames.md),
+  [ADR-0005](docs/adr/0005-coalesced-signal-updates.md)).
+- **No fabricated readings.** A value never received shows "—", never
+  0, and a value older than 3 s dims.
+- **Tested in tiers.** Unit tests cover the core, decoding, the C ABI
+  and the bridge (headless). A harness tier drives the whole J2534
+  stack against an in-tree fake vendor DLL, both in-proc and through
+  the surrogate. CI builds and tests on Windows, Linux and macOS, runs
+  the core under ASan/UBSan, compiles Android and iOS, and launches
+  the iOS app in the Simulator
+  ([docs/testing.md](docs/testing.md)).
+- **Decisions and evidence on record.** Design decisions are
+  [ADRs](docs/adr/README.md), lessons go in a dated
+  [engineering log](docs/engineering-log.md), and every real-adapter
+  session has a filled-in
+  [bench sheet](docs/bench-sessions/).
 
 ## Features
 
-- **Live frame log.** A streaming log with newest-first or
-  oldest-first ordering.
-- **Live signal view.** Decoded values with units, refreshed at 10 Hz,
-  plus a rolling strip chart.
-- **Dashboard.** Analog, ring, digital and bar gauges with shift lights,
-  peak hold, and stale-value dimming. A gauge whose signal the active
-  profile doesn't provide says so instead of showing zero.
-- **J2534 Pass-Thru support (Windows).**
-  - Finds installed vendor drivers.
-  - Pick a device on the Settings page or enter a `j2534://` URI.
-  - 32-bit-only vendor drivers run in a separate helper process
-    (the surrogate). When a sibling `build-win32/` tree exists, the
-    surrogate is deployed next to the app automatically at build
-    time; otherwise it is resolved via the `QTTUNE_SURROGATE_EXE`
-    environment variable (see [docs/development.md](docs/development.md)).
-  - The `obd2` profile supplies the standard CAN IDs itself
-    (requests to `0x7E0`, receive filter on `0x7E8`) and runs a
-    Mode-01 multi-PID request loop — a bare `j2534://` URI starts
-    streaming decoded signals. The `?filter=` and `?txid=` URI
-    parameters override the profile-declared channel, and `?poll=`
-    swaps the PID rotation for a single PID; received frames are
-    header-stripped and carry their arbitration ID.
-- **Protocol profiles.** Sessions select their signal-decoding
-  profile from the URI: `mock://` defaults to the mock set,
-  `j2534://` defaults to `obd2` (standard Mode-01 PIDs decoded to
-  LiveView), `?profile=raw` selects log-only mode with nothing
-  decoded, and `?profile=<name>` overrides either
+- **Dashboard.** Analog, ring, digital and bar gauges with shift
+  lights, peak hold and stale-value dimming. A gauge whose signal the
+  active profile doesn't provide says so instead of showing zero.
+- **Live view.** Decoded values with units, refreshed at 10 Hz, plus
+  a rolling strip chart.
+- **Frame log.** Raw frames, newest-first or oldest-first.
+- **J2534 Pass-Thru (Windows).** Finds installed vendor drivers; pick
+  one in Settings or enter a `j2534://` URI. The `obd2` profile
+  polls standard Mode-01 PIDs, so a bare `j2534://` streams decoded
+  signals ([docs/j2534.md](docs/j2534.md)).
+- **Protocol profiles.** The URI picks how frames decode: `mock`
+  (the default for `mock://`), `obd2` (the default for `j2534://`) or
+  `raw` (log only), with `?profile=` to override
   ([ADR-0013](docs/adr/0013-protocol-profiles.md)).
-- **Mock transport.** Simulated engine data, so the app runs with no
-  hardware.
-- **Stable C ABI.** Other front ends (native mobile, Flutter,
-  scripting) can drive the core unchanged.
+- **Simulated vehicle.** A modelled drivetrain (gear ratios, torque
+  curve, heat soak) runs a scripted drive: warm-up, two full-throttle
+  pulls into the limiter, then a quarter-mile run. Every page works
+  with no hardware.
 
 ## Roadmap
 
@@ -66,10 +127,9 @@ details.
 | v0.4.0 | Security access discovery, flash capability | Planned |
 | v0.5.0+ | Manufacturer plugin modules | Planned |
 
-The detailed phase checklist and known issues are in
-[STATUS.md](STATUS.md).
+The phase checklist and known issues are in [STATUS.md](STATUS.md).
 
-## Requirements
+## Build
 
 | Component | Version | Notes |
 |---|---|---|
@@ -77,32 +137,8 @@ The detailed phase checklist and known issues are in
 | Qt | 6.12+ (LGPL) | Core, Gui and Quick modules |
 | C++ compiler | C++17 | MSVC 2019+, GCC 11+ or Clang 14+ |
 
-Runtime requirements:
-
-- **Windows:** the VC++ 2019 Redistributable (installed with the MSVC
-  workload).
-- **Linux and macOS:** the Qt runtime libraries, from your package
-  manager or the Qt installer.
-- **J2534 vendor driver (Windows):** optional. It is only needed for
-  real adapters. Tests use a bundled fake driver.
-
-## Installing Qt with aqtinstall (Qt 6.11+)
-
-Released aqtinstall (3.3.x) can't install Qt 6.11+: download.qt.io
-changed its repository layout, and aqt requests a stale
-`Updates.xml` path
-(miurahr/aqtinstall#959). Fix (miurahr/aqtinstall#1000) is not in a
-release yet, so install aqtinstall from git:
-
-    python -m pip install --force-reinstall --no-cache-dir \
-        "git+https://github.com/miurahr/aqtinstall.git"
-
-    python -m aqt install-qt windows desktop 6.12.0 win64_msvc2022_64 -O <your-install-path>
-
-Once a release carries the fix, pin it from PyPI instead — here and
-in CI — and drop this section.
-
-## Build
+Installing Qt 6.11+ with aqtinstall needs a workaround; see
+[docs/development.md](docs/development.md#installing-qt-with-aqtinstall).
 
 ```sh
 # Windows (adjust the path to your Qt installation)
@@ -118,34 +154,33 @@ ctest --test-dir build --output-on-failure
 build/app/qttune
 ```
 
+To try it without hardware, open **Settings**, pick the `mock://demo`
+preset and connect.
+
 Add `-DQTTUNE_BUILD_CORE_ONLY=ON` to build only the core library and
 its tests, without Qt.
 
-**32-bit vendor drivers (optional):** x86-only J2534 drivers, such as
-the OBDX Pro VX's, need the Win32 surrogate from a second build tree.
-Build it **before** configuring `build`: the app's configure step
-looks for `build-win32/` and, when it finds the surrogate, copies it
-next to `qttune.exe` on every app build — no flags needed. Run these
-before the Windows commands above:
+**32-bit vendor drivers (Windows, optional).** x86-only J2534 drivers,
+such as the OBDX Pro VX's, need the Win32 surrogate from a second
+build tree. Build it **before** configuring `build`: the app's
+configure step finds it in `build-win32/` and copies it next to
+`qttune.exe` on every app build.
 
 ```sh
 cmake -B build-win32 -A Win32 -DQTTUNE_BUILD_CORE_ONLY=ON
 cmake --build build-win32 --config Release --target qttune-j2534-surrogate fake_j2534 fake_j2534_legacy
 ```
 
-If `build` was already configured, re-run `cmake -B build` afterwards
-and check that its output includes `Deploying Win32 J2534 surrogate`.
-Otherwise, deploy the surrogate explicitly with
-`-DQTTUNE_SURROGATE_SOURCE=...` or export `QTTUNE_SURROGATE_EXE` at
-runtime ([docs/development.md](docs/development.md)).
+**Mobile.** The Android and iOS builds compile in CI but haven't run on
+a device yet. Their command lines are in
+[docs/development.md](docs/development.md), which also covers other
+ways to deploy the surrogate, the cross-architecture tests and
+troubleshooting.
 
-**Mobile (builds in CI, not yet run on a device):** the Android and
-iOS command lines, including an iOS Simulator build, are in
-[docs/development.md](docs/development.md). Alternatively, open the
-project in Qt Creator with an Android or iOS kit.
-
-The cross-architecture test setup, test fixtures and troubleshooting
-notes are in [docs/development.md](docs/development.md).
+**Runtime:** Windows needs the VC++ 2019 Redistributable (installed
+with the MSVC workload); Linux and macOS need the Qt runtime libraries.
+A J2534 vendor driver is only needed for a real adapter; the tests use
+a bundled fake.
 
 ## Documentation
 
@@ -159,15 +194,11 @@ notes are in [docs/development.md](docs/development.md).
 | [docs/adr/](docs/adr/README.md) | Architecture decision records |
 | [docs/engineering-log.md](docs/engineering-log.md) | Milestone history and lessons learned |
 
-## Plugins
-
-Reserved for manufacturer modules that implement protocol and
-security layers.
-
 ## License
 
 MIT. See the [LICENSE](LICENSE) file.
 
 QtTune uses [Qt](https://www.qt.io), licensed under LGPL-3.0. Qt is
 not bundled in this repository; see qt.io for sources and the license
-text.
+text. QtTune is an independent project, not affiliated with or
+endorsed by The Qt Company.
