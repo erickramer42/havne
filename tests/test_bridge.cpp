@@ -167,6 +167,65 @@ TEST(BridgeTest, ClearFramesResets)
     bridge.disconnectSession();
 }
 
+/* The frame log belongs to a session: rows stay readable after a
+ * disconnect, and the next connect starts an empty table. Checked as
+ * the synchronous connect returns, before any queued frame can land. */
+TEST(BridgeTest, ConnectStartsAnEmptyFrameLog)
+{
+    QtTuneBridge bridge;
+    ASSERT_TRUE(bridge.connectSession("mock://first").isEmpty());
+    FrameSortProxy* proxy = bridge.model();
+    ASSERT_TRUE(spinUntil([proxy]() { return proxy->rowCount() > 0; }, 5000));
+
+    ASSERT_TRUE(disconnectAndWait(bridge));
+    EXPECT_GT(proxy->rowCount(), 0) << "disconnect cleared the log";
+
+    ASSERT_TRUE(bridge.connectSession("mock://second").isEmpty());
+    EXPECT_EQ(proxy->rowCount(), 0);
+    EXPECT_EQ(bridge.frameCount(), 0);
+
+    bridge.disconnectSession();
+}
+
+/* Rows sort by arrival, not by frame timestamp: a J2534 timestamp is the
+ * vendor's raw 32-bit stamp, which can wrap. A frame stamped earlier but
+ * arriving later is still the newest row. */
+TEST(BridgeTest, FrameLogOrdersByArrivalNotTimestamp)
+{
+    QtTuneBridge bridge;
+    ASSERT_TRUE(bridge.connectSession("mock://arrival").isEmpty());
+
+    ecuio_frame_t first{};
+    first.timestamp_us = 900000;
+    first.arbitration_id = 0x123;   // not the mock's 0x0C0
+    first.data_length = 1;
+    ecuio_frame_t second = first;
+    second.timestamp_us = 100;      // a wrapped stamp, say
+    second.arbitration_id = 0x124;
+    bridge.dispatchFrameForTesting(first);
+    bridge.dispatchFrameForTesting(second);
+
+    FrameSortProxy* proxy = bridge.model();
+    auto row_of = [proxy](quint32 id) {
+        for (int r = 0; r < proxy->rowCount(); ++r) {
+            if (proxy->data(proxy->index(r, 0),
+                            FrameListModel::ArbitrationIdRole).toUInt() == id) {
+                return r;
+            }
+        }
+        return -1;
+    };
+    ASSERT_TRUE(spinUntil([&row_of]() {
+        return row_of(0x123) >= 0 && row_of(0x124) >= 0;
+    }, 5000));
+
+    EXPECT_LT(row_of(0x124), row_of(0x123)) << "newest first";
+    proxy->setNewestFirst(false);
+    EXPECT_LT(row_of(0x123), row_of(0x124)) << "oldest first";
+
+    bridge.disconnectSession();
+}
+
 TEST(BridgeTest, SortProxyOrdersNewestFirstByDefault)
 {
     QtTuneBridge bridge;

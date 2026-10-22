@@ -51,8 +51,11 @@ Pane {
         // Connecting/Connected/failed lines arrive via logMessage.
     }
 
+    // Each line is stamped with local time in the surrogate session
+    // log's format (HH:MM:SS.mmm), so the two line up, and a disconnect
+    // or a recovery can be timed from here.
     function appendLog(message) {
-        activityLog.append(message)
+        activityLog.append(Qt.formatTime(new Date(), "hh:mm:ss.zzz") + "  " + message)
         // Bound the log: QML TextArea.append keeps growing otherwise.
         // Removes whole oldest LINES (split on "\n") — NOT visual
         // rows. lineCount counts wrapped rows, so a single long

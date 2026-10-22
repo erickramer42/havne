@@ -78,17 +78,18 @@ void FrameListModel::clear()
 }
 
 // ---------------- FrameSortProxy ----------------
+// Arrival order, which is the source model's row order. Not the frame
+// timestamp: on J2534 it's the vendor's raw 32-bit stamp, whose unit is
+// unconfirmed and which wraps (Known Issue #12), so sorting on it could
+// put new frames below old ones.
 bool FrameSortProxy::lessThan(const QModelIndex& left, const QModelIndex& right) const
 {
-    const quint64 lhs = sourceModel()->data(left, FrameListModel::TimestampRole).toULongLong();
-    const quint64 rhs = sourceModel()->data(right, FrameListModel::TimestampRole).toULongLong();
-    return lhs < rhs;
+    return left.row() < right.row();
 }
 
 FrameSortProxy::FrameSortProxy(QObject* parent)
     : QSortFilterProxyModel(parent)
 {
-    setSortRole(FrameListModel::TimestampRole);
     setDynamicSortFilter(true);
     sort(0, Qt::DescendingOrder);
 }
@@ -454,6 +455,9 @@ void QtTuneBridge::applyConnectedState(ecuio_session_t* session, const QString& 
     m_currentUri = uri;
     emit currentUriChanged();
     m_connected.store(true, std::memory_order_release);
+    // The frame log belongs to a session, like its count: rows from two
+    // connects would otherwise run together with nothing between them.
+    m_sourceModel->clear();
     m_currentFrameCount = 0;
     m_droppedFrames.store(0, std::memory_order_relaxed);
     m_lastReportedDropped = 0;

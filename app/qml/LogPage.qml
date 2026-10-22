@@ -2,8 +2,11 @@
 // Testing: render verified manually; the arbId column by the smoke
 //          recipe's "Frames + arbId column" row (docs/testing.md). The
 //          role names this delegate binds are pinned by
-//          BridgeTest.FrameRoleNamesMatchLogPageBindings, and Pause's
-//          bridge side by BridgeTest.LogPauseStopsFrameLogNotDecode.
+//          BridgeTest.FrameRoleNamesMatchLogPageBindings, Pause's
+//          bridge side by BridgeTest.LogPauseStopsFrameLogNotDecode, and
+//          the row order (arrival; a connect empties the table) by
+//          BridgeTest.FrameLogOrdersByArrivalNotTimestamp and
+//          .ConnectStartsAnEmptyFrameLog.
 //          Oldest-first follow: manual smoke — while mock:// streams,
 //          scroll up by drag, wheel and scroll bar (the view holds), then
 //          "Latest" or scrolling to the end resumes following.
