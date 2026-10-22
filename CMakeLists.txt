@@ -20,6 +20,18 @@ configure_file(
 
 option(QTTUNE_BUILD_CORE_ONLY "Build core library and tests; skip Qt app" OFF)
 
+# Compiler warnings for every first-party target: core, the surrogate,
+# the app, the tests and the fake DLLs. They don't fail the build (no /WX
+# or -Werror): CI compiles with GCC, MSVC and AppleClang, and one
+# compiler's new warning shouldn't break the others' builds.
+function(qttune_enable_warnings target)
+    if(MSVC)
+        target_compile_options(${target} PRIVATE /W4)
+    else()
+        target_compile_options(${target} PRIVATE -Wall -Wextra)
+    endif()
+endfunction()
+
 add_subdirectory(core)
 add_subdirectory(surrogate)
 

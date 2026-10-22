@@ -8,6 +8,8 @@
 
 #include "qttune/core.h"
 
+#include <stdbool.h>
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -17,7 +19,7 @@ typedef struct qttune_j2534_sur_handle qttune_j2534_sur_handle_t;
 /* Spawn the surrogate hosting dll_path under a kill-on-close job and
  * handshake with OP_OPEN. Blocking. Every startup failure (exe
  * missing, spawn failed, DLL load failed, handshake timeout,
- * PassThruOpen refused) returns QT_ERR_LOAD_FAILED. */
+ * PassThruOpen refused) returns QTTUNE_ERR_LOAD_FAILED. */
 qttune_status_t qttune_j2534_sur_open(const char* dll_path,
                                       qttune_j2534_sur_handle_t** out_handle);
 
@@ -49,7 +51,7 @@ qttune_status_t qttune_j2534_sur_write_frame(qttune_j2534_sur_handle_t* handle,
  * response payload (GET_CONFIG write-back or READ_VBATT's ULONG), and
  * out_len its length. There is no capacity parameter: size output for
  * the wire limit, QTTUNE_SUR_IOCTL_DATA_MAX (64) bytes. A reply that
- * claims more is rejected as a protocol skew (QT_ERR_NO_TRANSPORT). */
+ * claims more is rejected as a protocol skew (QTTUNE_ERR_NO_TRANSPORT). */
 qttune_status_t qttune_j2534_sur_ioctl(qttune_j2534_sur_handle_t* handle,
                                        unsigned long channel,
                                        uint32_t ioctl_id,
@@ -80,8 +82,8 @@ qttune_status_t qttune_j2534_sur_stop_msg_filter(qttune_j2534_sur_handle_t* hand
 
 /* Return one frame: from the cached batch if one is pending, otherwise
  * via one OP_READ (up to 16 frames). Same contract as the in-proc read
- * path: ERR_TIMEOUT -> QT_ERR_VEHICLE_TIMEOUT, ERR_BUFFER_EMPTY -> no
- * frame, other statuses or a pipe failure -> QT_ERR_TRANSPORT_HARD_FAILURE;
+ * path: ERR_TIMEOUT -> QTTUNE_ERR_VEHICLE_TIMEOUT, ERR_BUFFER_EMPTY -> no
+ * frame, other statuses or a pipe failure -> QTTUNE_ERR_TRANSPORT_HARD_FAILURE;
  * arb id and channel id 0, EXTENDED from RxStatus, vendor timestamp
  * passed through, payload clamped to 64 bytes. */
 qttune_status_t qttune_j2534_sur_read_frame(qttune_j2534_sur_handle_t* handle,

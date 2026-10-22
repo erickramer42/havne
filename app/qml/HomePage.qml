@@ -92,16 +92,16 @@ Rectangle {
                 Rectangle {
                     implicitWidth: 10; implicitHeight: 10   // layout-managed
                     radius: 5
-                    color: Theme.linkColor(QtTune.linkState)
+                    color: Theme.linkColor(Bridge.linkState)
                 }
                 Text {
-                    text: Theme.linkLabel(QtTune.linkState)
+                    text: Theme.linkLabel(Bridge.linkState)
                     color: Theme.textDim
                     font.pixelSize: 13
                 }
                 Item { Layout.fillWidth: true }
                 Text {
-                    text: qsTr("core %1").arg(QtTune.coreVersion)
+                    text: qsTr("core %1").arg(Bridge.coreVersion)
                     color: Theme.textDim
                     font.pixelSize: 13
                 }
@@ -109,20 +109,20 @@ Rectangle {
         }
 
         ThemedButton {
-            text: QtTune.connected ? qsTr("End session")
-                : QtTune.connecting ? qsTr("Connecting…")
-                : QtTune.disconnecting ? qsTr("Disconnecting…")
+            text: Bridge.connected ? qsTr("End session")
+                : Bridge.connecting ? qsTr("Connecting…")
+                : Bridge.disconnecting ? qsTr("Disconnecting…")
                 : qsTr("Connect…")
-            highlighted: !QtTune.connected
-            enabled: QtTune.coreInitialized && !QtTune.connecting && !QtTune.disconnecting
+            highlighted: !Bridge.connected
+            enabled: Bridge.coreInitialized && !Bridge.connecting && !Bridge.disconnecting
             Layout.alignment: Qt.AlignHCenter
             Layout.topMargin: 8
-            onClicked: QtTune.connected ? QtTune.disconnectSession()
+            onClicked: Bridge.connected ? Bridge.disconnectSession()
                                         : home.connectRequested()
         }
 
         Text {
-            visible: !QtTune.connected
+            visible: !Bridge.connected
             text: qsTr("Choose a J2534 device, or the mock://demo preset, in Settings")
             font.pixelSize: 12
             color: Theme.textDim

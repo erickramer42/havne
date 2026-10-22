@@ -35,7 +35,7 @@ Pane {
     }
 
     function refreshDevices() {
-        j2534Devices = QtTune.discoverJ2534Devices()
+        j2534Devices = Bridge.discoverJ2534Devices()
     }
 
     // Row click / preset click: selection is INTENT, never action. A row
@@ -47,7 +47,7 @@ Pane {
     function requestConnect(uri) {
         if (uri === "")
             return
-        QtTune.connectSessionAsync(uri)
+        Bridge.connectSessionAsync(uri)
         // Connecting/Connected/failed lines arrive via logMessage.
     }
 
@@ -73,7 +73,7 @@ Pane {
     Component.onCompleted: refreshDevices()
 
     Connections {
-        target: QtTune
+        target: Bridge
 
         function onLogMessage(message) {
             page.appendLog(message)
@@ -95,12 +95,12 @@ Pane {
         Heading { text: qsTr("Connection") }
 
         Label {
-            text: QtTune.connected
-                  ? qsTr("Connected: %1").arg(QtTune.currentUri)
-                  : QtTune.connecting ? qsTr("Connecting…")
-                  : QtTune.disconnecting ? qsTr("Disconnecting…")
+            text: Bridge.connected
+                  ? qsTr("Connected: %1").arg(Bridge.currentUri)
+                  : Bridge.connecting ? qsTr("Connecting…")
+                  : Bridge.disconnecting ? qsTr("Disconnecting…")
                   : qsTr("Not connected")
-            color: Theme.linkColor(QtTune.linkState)
+            color: Theme.linkColor(Bridge.linkState)
         }
 
         RowLayout {
@@ -115,30 +115,30 @@ Pane {
                 // example adds ?filter=; under the obd2 default ?poll=
                 // alone works and still decodes.
                 placeholderText: qsTr("URI — e.g. mock://demo or j2534://Vendor?profile=raw&filter=0x7E8&poll=0x0C")
-                enabled: !QtTune.connected && !QtTune.connecting && !QtTune.disconnecting
-                         && QtTune.coreInitialized
+                enabled: !Bridge.connected && !Bridge.connecting && !Bridge.disconnecting
+                         && Bridge.coreInitialized
                 color: Theme.text
                 onAccepted: page.requestConnect(text)
             }
 
             ThemedButton {
-                text: QtTune.connected ? qsTr("Disconnect")
-                    : QtTune.connecting ? qsTr("Connecting…")
-                    : QtTune.disconnecting ? qsTr("Disconnecting…")
+                text: Bridge.connected ? qsTr("Disconnect")
+                    : Bridge.connecting ? qsTr("Connecting…")
+                    : Bridge.disconnecting ? qsTr("Disconnecting…")
                     : qsTr("Connect")
-                highlighted: !QtTune.connected
+                highlighted: !Bridge.connected
                 // Disabled while a connect or a teardown is in flight —
                 // the bridge refuses both anyway, but the UI must not
                 // offer them during a multi-second vendor block.
-                enabled: QtTune.connected
+                enabled: Bridge.connected
                          ? true
-                         : (!QtTune.connecting
-                            && !QtTune.disconnecting
-                            && QtTune.coreInitialized
+                         : (!Bridge.connecting
+                            && !Bridge.disconnecting
+                            && Bridge.coreInitialized
                             && uriField.text !== "")
                 onClicked: {
-                    if (QtTune.connected) {
-                        QtTune.disconnectSession()
+                    if (Bridge.connected) {
+                        Bridge.disconnectSession()
                         errorLabel.visible = false
                     } else {
                         page.requestConnect(uriField.text)
@@ -168,7 +168,7 @@ Pane {
                     text: modelData === "j2534://"
                           ? qsTr("j2534:// (first device)")
                           : modelData
-                    enabled: !QtTune.connected && !QtTune.connecting && !QtTune.disconnecting
+                    enabled: !Bridge.connected && !Bridge.connecting && !Bridge.disconnecting
                     onClicked: page.fillUri(modelData)
                 }
             }
@@ -223,7 +223,7 @@ Pane {
                     anchors.fill: parent
                     hoverEnabled: true
                     cursorShape: Qt.PointingHandCursor
-                    enabled: !QtTune.connected
+                    enabled: !Bridge.connected
                     onClicked: page.fillUri("j2534://" + row.modelData.vendorName)
                 }
 
@@ -237,7 +237,7 @@ Pane {
                               + (row.modelData.architecture
                                    ? "  (" + row.modelData.architecture + ")"
                                    : "")
-                        color: QtTune.connected ? Theme.textDim : Theme.text
+                        color: Bridge.connected ? Theme.textDim : Theme.text
                     }
                     Label {
                         text: row.modelData.dllPath

@@ -178,8 +178,8 @@ void SignalListModel::setSignalSet(const QttuneSignalSet* set)
     for (uint32_t i = 0; i < set->count; ++i) {
         Entry e = {};   // value-init zeroes the history ring, head, and count
         e.id = set->defs[i].id;
-        strncpy(e.name, set->defs[i].name, sizeof(e.name) - 1);
-        strncpy(e.unit, set->defs[i].unit, sizeof(e.unit) - 1);
+        qstrncpy(e.name, set->defs[i].name, sizeof(e.name));   // always terminates
+        qstrncpy(e.unit, set->defs[i].unit, sizeof(e.unit));
         e.decimals = set->defs[i].decimal_places;
         e.subscribed = true;
         ++m_subscribedCount;
@@ -297,7 +297,7 @@ QtTuneBridge::QtTuneBridge(QObject* parent)
     , m_coalesceTimer(new QTimer(this))
     , m_signalModel(new SignalListModel(this))
 {
-    m_initialized = (qttune_init() == QT_OK);
+    m_initialized = (qttune_init() == QTTUNE_OK);
     m_sortProxy->setSourceModel(m_sourceModel);
 
     connect(m_coalesceTimer, &QTimer::timeout, this, [this]() {
@@ -382,7 +382,7 @@ QVariantList QtTuneBridge::discoverJ2534Devices() const
 
     qttune_j2534_device_t* devices = nullptr;
     uint32_t count = 0;
-    if (qttune_j2534_discover_devices(&devices, &count) != QT_OK) {
+    if (qttune_j2534_discover_devices(&devices, &count) != QTTUNE_OK) {
         return out;   // includes non-Windows NOT_IMPLEMENTED -> empty list
     }
     for (uint32_t i = 0; i < count; ++i) {
@@ -417,12 +417,12 @@ QString QtTuneBridge::connectCoreOnly(const QString& uri,
     const QByteArray uri8 = uri.toUtf8();
     qttune_session_t* session = nullptr;
     qttune_status_t rc = qttune_session_create(uri8.constData(), &session);
-    if (rc != QT_OK || session == nullptr) {
+    if (rc != QTTUNE_OK || session == nullptr) {
         return QString::fromUtf8(qttune_status_string(rc));
     }
 
     rc = qttune_register_frame_callback(session, &QtTuneBridge::onFrame, this);
-    if (rc != QT_OK) {
+    if (rc != QTTUNE_OK) {
         qttune_session_destroy(session);
         return QString::fromUtf8(qttune_status_string(rc));
     }
@@ -437,7 +437,7 @@ QString QtTuneBridge::connectCoreOnly(const QString& uri,
 QString QtTuneBridge::startSession(qttune_session_t* session)
 {
     const qttune_status_t rc = qttune_session_start(session);
-    if (rc != QT_OK) {
+    if (rc != QTTUNE_OK) {
         qttune_unregister_frame_callback(session, &QtTuneBridge::onFrame, this);
         qttune_session_destroy(session);
         return QString::fromUtf8(qttune_status_string(rc));
@@ -460,7 +460,7 @@ void QtTuneBridge::applyConnectedState(qttune_session_t* session, const QString&
     m_signalModel->setSignalSet(qttune_session_signal_set(session));
     m_stagingBuffer.clear();   // previous session's staged values must
                                // never bleed into this one's first batch
-    m_linkErrorCode = QT_OK;
+    m_linkErrorCode = QTTUNE_OK;
     m_errorEpisodes = 0;
     emit linkStateChanged();
     setLogPaused(false);       // a new session always logs
@@ -558,7 +558,7 @@ void QtTuneBridge::disconnectSession()
     m_coalesceTimer->stop();
     m_stagingBuffer.clear();
     m_currentUri.clear();
-    m_linkErrorCode = QT_OK;          // the properties must not
+    m_linkErrorCode = QTTUNE_OK;          // the properties must not
     m_errorEpisodes = 0;              // outlive the session
 
     emit disconnectingChanged();
@@ -675,11 +675,11 @@ void QtTuneBridge::handleFrameInternal(const qttune_frame_t* frame)
             const QttuneSignalDef& def = set->defs[i];
             // Core-side gate: arbitration ID, plus the mux key when the
             // def has one.
-            if (qttune_def_matches_frame(&def, frame) != 0) {
+            if (!qttune_def_applies_to_frame(&def, frame)) {
                 continue;
             }
             float val = 0.0f;
-            if (qttune_decode_signal(&def, frame->data, len, &val) == 0) {
+            if (qttune_decode_signal(&def, frame->data, len, &val) == QTTUNE_DECODE_OK) {
                 bool merged = false;
                 for (auto& staged : m_stagingBuffer) {
                     if (staged.first == def.id) {
@@ -728,7 +728,7 @@ void QtTuneBridge::pollLinkHealth()
     if (!m_connected.load(std::memory_order_acquire) || m_session == nullptr) {
         return;
     }
-    int32_t last_error = QT_OK;
+    int32_t last_error = QTTUNE_OK;
     uint32_t episodes = 0;
     (void)qttune_session_get_error_state(m_session, &last_error, &episodes);
     if (last_error == m_linkErrorCode && episodes == m_errorEpisodes) {
@@ -742,14 +742,14 @@ void QtTuneBridge::pollLinkHealth()
     /* Transitions land in the activity log with ZERO QML work — this
      * alone turns "connected with frozen values" into a named fault
      * in the existing log surface. */
-    if (prev != QT_OK && last_error == QT_OK) {
+    if (prev != QTTUNE_OK && last_error == QTTUNE_OK) {
         emit logMessage(QStringLiteral("Link: recovered"));
-    } else if (last_error == QT_ERR_VEHICLE_TIMEOUT) {
+    } else if (last_error == QTTUNE_ERR_VEHICLE_TIMEOUT) {
         emit logMessage(QStringLiteral("Link: vehicle not responding"));
-    } else if (last_error == QT_ERR_REQUEST_FAILED) {
+    } else if (last_error == QTTUNE_ERR_REQUEST_FAILED) {
         emit logMessage(QStringLiteral("Link: requests failing (%1 episode(s))")
                             .arg(m_errorEpisodes));
-    } else if (last_error == QT_ERR_TRANSPORT_HARD_FAILURE) {
+    } else if (last_error == QTTUNE_ERR_TRANSPORT_HARD_FAILURE) {
         emit logMessage(QStringLiteral("Link: adapter fault (%1 episode(s))")
                             .arg(m_errorEpisodes));
     }
@@ -763,10 +763,10 @@ void QtTuneBridge::pollLinkHealth()
 QString QtTuneBridge::linkStateForError(int32_t errorCode)
 {
     switch (errorCode) {
-        case QT_OK:                        return QStringLiteral("ok");
-        case QT_ERR_VEHICLE_TIMEOUT:       return QStringLiteral("quiet");
-        case QT_ERR_REQUEST_FAILED:        return QStringLiteral("requests");
-        case QT_ERR_TRANSPORT_HARD_FAILURE: return QStringLiteral("fault");
+        case QTTUNE_OK:                        return QStringLiteral("ok");
+        case QTTUNE_ERR_VEHICLE_TIMEOUT:       return QStringLiteral("quiet");
+        case QTTUNE_ERR_REQUEST_FAILED:        return QStringLiteral("requests");
+        case QTTUNE_ERR_TRANSPORT_HARD_FAILURE: return QStringLiteral("fault");
         default: return QStringLiteral("degraded"); /* forward-compatible */
     }
 }

@@ -63,26 +63,32 @@ typedef void (*qttune_frame_callback_t)(
 
 /* Status codes - append-only evolution for ABI stability */
 typedef enum {
-    QT_OK = 0,
-    QT_ERR_NULL_ARGUMENT = 1,
-    QT_ERR_NOT_IMPLEMENTED = 2,
-    QT_ERR_NO_TRANSPORT = 3,
-    QT_ERR_OUT_OF_MEMORY = 4,
-    QT_ERR_SESSION_CLOSED = 5,
-    QT_ERR_ALREADY_REGISTERED = 6,  /* Not returned: a duplicate callback
-                                       registration succeeds (pair identity,
-                                       ADR-0002). Reserved, since codes are
-                                       append-only */
-    QT_ERR_LOAD_FAILED = 7,
+    QTTUNE_OK = 0,
+    QTTUNE_ERR_NULL_ARGUMENT = 1,
+    QTTUNE_ERR_NOT_IMPLEMENTED = 2,
+    QTTUNE_ERR_NO_TRANSPORT = 3,
+    QTTUNE_ERR_OUT_OF_MEMORY = 4,
+    QTTUNE_ERR_SESSION_CLOSED = 5,
+    QTTUNE_ERR_ALREADY_REGISTERED = 6,  /* Not returned: a duplicate callback
+                                           registration succeeds (pair
+                                           identity, ADR-0002). Reserved,
+                                           since codes are append-only */
+    QTTUNE_ERR_LOAD_FAILED = 7,
     /* Link-health codes: published by the J2534 worker through
      * qttune_session_get_error_state while the session keeps running. */
-    QT_ERR_VEHICLE_TIMEOUT = 8,         /* reads answer, but nothing arrives */
-    QT_ERR_TRANSPORT_HARD_FAILURE = 9,  /* reads fail: the adapter isn't
-                                           answering */
-    QT_ERR_REQUEST_FAILED = 10,  /* writes fail while reads stay clean: no
-                                    node ACKs the requests (ignition off,
-                                    ECU asleep, no vehicle). The adapter is
-                                    fine, so this isn't a hard failure */
+    QTTUNE_ERR_VEHICLE_TIMEOUT = 8,         /* reads answer, but nothing
+                                               arrives */
+    QTTUNE_ERR_TRANSPORT_HARD_FAILURE = 9,  /* reads fail: the adapter isn't
+                                               answering */
+    QTTUNE_ERR_REQUEST_FAILED = 10,  /* writes fail while reads stay clean:
+                                        no node ACKs the requests (ignition
+                                        off, ECU asleep, no vehicle). The
+                                        adapter is fine, so this isn't a
+                                        hard failure */
+    QTTUNE_ERR_INVALID_ARGUMENT = 11,  /* an argument is present but not
+                                          acceptable: a signal set that fails
+                                          validation, a malformed or built-in
+                                          profile name (profile.h) */
 
     /* Append-only rule: new codes go HERE, never renumber */
 } qttune_status_t;
@@ -99,7 +105,7 @@ const char* qttune_status_string(qttune_status_t status);
  * - create()  — allocates and attaches a transport (fopen)
  * - close()   — stops streaming, detaches the transport, releases worker
  *               and callback state. A second close returns
- *               QT_ERR_SESSION_CLOSED; the session stays valid until
+ *               QTTUNE_ERR_SESSION_CLOSED; the session stays valid until
  *               destroy().
  * - destroy() — frees the session (free). The handle is INVALID afterward;
  *               calling any API with it is undefined behavior, exactly as
@@ -160,7 +166,7 @@ qttune_status_t qttune_unregister_frame_callback(
 );
 
 /* Link health, written by the transport worker while the session keeps
- * running. last_error is QT_OK, QT_ERR_VEHICLE_TIMEOUT (no frame for
+ * running. last_error is QTTUNE_OK, QTTUNE_ERR_VEHICLE_TIMEOUT (no frame for
  * about 1 s) or the status of the latest hard failure; error_count
  * counts hard-failure episodes. Callable from any thread. The mock
  * transport never sets them. */

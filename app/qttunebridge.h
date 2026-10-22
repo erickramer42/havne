@@ -318,6 +318,6 @@ private:
     std::thread m_disconnectThread;
     bool m_disconnecting = false;
     void pollLinkHealth();
-    int m_linkErrorCode = QT_OK;
+    int m_linkErrorCode = QTTUNE_OK;
     uint32_t m_errorEpisodes = 0;
 };

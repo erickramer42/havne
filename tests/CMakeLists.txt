@@ -11,6 +11,13 @@ if(NOT GTest_FOUND)
     FetchContent_MakeAvailable(googletest)
 endif()
 
+# The tests fill fixed buffers with strncpy/strcpy (one deliberately
+# leaves a name unterminated) and read the fake's knobs with getenv.
+# MSVC's CRT deprecation warning (C4996) on those is noise here.
+if(MSVC)
+    add_compile_definitions(_CRT_SECURE_NO_WARNINGS)
+endif()
+
 # --- Core tests: MUST stay Qt-free (Ubuntu CI job has no Qt installed) ---
 add_executable(test_core test_core.cpp)
 
@@ -24,7 +31,8 @@ target_link_libraries(test_core PRIVATE
     GTest::gtest_main
 )
 
-gtest_discover_tests(test_core) 
+qttune_enable_warnings(test_core)
+gtest_discover_tests(test_core)
 
 # --- Signals tests: MUST stay Qt-free (Ubuntu CI job has no Qt installed) ---
 add_executable(test_signals test_signals.cpp)
@@ -34,6 +42,7 @@ target_link_libraries(test_signals PRIVATE
     GTest::gtest_main
 )
 
+qttune_enable_warnings(test_signals)
 gtest_discover_tests(test_signals)
 
 # --- OBD-II set + scheduler tests: MUST stay Qt-free (UNIT tier) ---
@@ -54,13 +63,21 @@ target_link_libraries(test_obd2 PRIVATE
     GTest::gtest_main
 )
 
+qttune_enable_warnings(test_obd2)
 gtest_discover_tests(test_obd2)
 
 # --- C ABI compilation check: MUST stay Qt-free, builds everywhere ---
 # Compiles the public headers as strict C and links exported symbols
 # from a C TU — catches C++-isms and name-mangling regressions an FFI
-# consumer would hit. It is the only target that compiles headers as C.
+# consumer would hit. It is the only target that compiles headers as C:
+# ISO C11 without compiler extensions, and -pedantic where the compiler
+# has it, so a GNU-only construct in a header warns.
 add_executable(test_c_abi test_c_abi.c)
+set_target_properties(test_c_abi PROPERTIES C_EXTENSIONS OFF)
+qttune_enable_warnings(test_c_abi)
+if(NOT MSVC)
+    target_compile_options(test_c_abi PRIVATE -pedantic)
+endif()
 
 target_include_directories(test_c_abi PRIVATE
     ${CMAKE_SOURCE_DIR}/core/include
@@ -84,6 +101,7 @@ if(NOT QTTUNE_BUILD_CORE_ONLY)
     )
 
     set_target_properties(test_bridge PROPERTIES AUTOMOC ON)
+    qttune_enable_warnings(test_bridge)
 
     target_include_directories(test_bridge PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/../app
@@ -134,6 +152,7 @@ if(WIN32)
     set_target_properties(test_j2534_discovery PROPERTIES
         VS_DEBUGGER_WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
     )
+    qttune_enable_warnings(test_j2534_discovery)
     gtest_discover_tests(test_j2534_discovery
         PROPERTIES TIMEOUT ${J2534_TEST_TIMEOUT_SECONDS}
     )
@@ -159,6 +178,7 @@ if(WIN32)
         OUTPUT_NAME "fake_j2534"
         RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/$<CONFIG>"
     )
+    qttune_enable_warnings(fake_j2534)
 
     # LEGACY-spelling fixture: the fallback-vendor case — exports the
     # legacy 'PassThruIoCtl' spelling via def alias while the shared
@@ -184,6 +204,7 @@ if(WIN32)
         OUTPUT_NAME "fake_j2534_legacy"
         RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/$<CONFIG>"
     )
+    qttune_enable_warnings(fake_j2534_legacy)
 endif()
 
 # test_bridge's connect and disconnect thread tests run a fake J2534
@@ -211,6 +232,7 @@ if(WIN32)
     )
     add_dependencies(test_j2534_load fake_j2534)
     add_dependencies(test_j2534_load fake_j2534_legacy)
+    qttune_enable_warnings(test_j2534_load)
     gtest_discover_tests(test_j2534_load
         PROPERTIES TIMEOUT ${J2534_TEST_TIMEOUT_SECONDS}
     )
@@ -233,6 +255,7 @@ if(WIN32)
         FAKE_J2534_DLL_PATH="$<TARGET_FILE:fake_j2534>"
     )
     add_dependencies(test_j2534_stream fake_j2534)
+    qttune_enable_warnings(test_j2534_stream)
     gtest_discover_tests(test_j2534_stream
         PROPERTIES TIMEOUT ${J2534_TEST_TIMEOUT_SECONDS}
     )
@@ -268,6 +291,7 @@ if(WIN32)
         COMMENT "Deploying surrogate exe next to test_j2534_surrogate"
     )
 
+    qttune_enable_warnings(test_j2534_surrogate)
     gtest_discover_tests(test_j2534_surrogate
         PROPERTIES TIMEOUT ${J2534_TEST_TIMEOUT_SECONDS}
     )
@@ -288,6 +312,7 @@ if(WIN32)
         FAKE_J2534_DLL_PATH="$<TARGET_FILE:fake_j2534>"
     )
     add_dependencies(test_j2534_routing fake_j2534)
+    qttune_enable_warnings(test_j2534_routing)
     gtest_discover_tests(test_j2534_routing
         PROPERTIES TIMEOUT ${J2534_TEST_TIMEOUT_SECONDS}
     )

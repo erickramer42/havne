@@ -115,7 +115,7 @@ protected:
     {
         qttune_session_t* session = nullptr;
         qttune_status_t rc = qttune_session_create(uri, &session);
-        if (rc != QT_OK) {
+        if (rc != QTTUNE_OK) {
             return rc;
         }
         rc = qttune_session_start(session);
@@ -144,7 +144,7 @@ TEST_F(J2534QueryParamTest, DefaultConnectUsesIso15765At500k)
     snprintf(uri, sizeof(uri), "j2534://%s?profile=raw",
              FAKE_J2534_DLL_PATH);
 
-    ASSERT_EQ(start_session_with_uri(uri), QT_OK);
+    ASSERT_EQ(start_session_with_uri(uri), QTTUNE_OK);
     /* Unset baud (sentinel 0) resolves to the ISO 15765 500k default;
      * flags default 0. */
     EXPECT_EQ(last_protocol, QTTUNE_PT_PROTOCOL_ISO15765);
@@ -158,7 +158,7 @@ TEST_F(J2534QueryParamTest, BaudParameterReachesPassThruConnect)
     snprintf(uri, sizeof(uri),
              "j2534://%s?baud=250000&profile=raw", FAKE_J2534_DLL_PATH);
 
-    ASSERT_EQ(start_session_with_uri(uri), QT_OK);
+    ASSERT_EQ(start_session_with_uri(uri), QTTUNE_OK);
     EXPECT_EQ(last_baud, 250000u);
     EXPECT_EQ(last_flags, 0u);
 }
@@ -170,7 +170,7 @@ TEST_F(J2534QueryParamTest, FlagsAcceptHexAndDecimalAndCombineWithBaud)
     snprintf(uri, sizeof(uri),
              "j2534://%s?baud=125000&flags=0x20&profile=raw",
              FAKE_J2534_DLL_PATH);
-    ASSERT_EQ(start_session_with_uri(uri), QT_OK);
+    ASSERT_EQ(start_session_with_uri(uri), QTTUNE_OK);
     EXPECT_EQ(last_baud, 125000u);
     EXPECT_EQ(last_flags, 0x20u);
 
@@ -178,7 +178,7 @@ TEST_F(J2534QueryParamTest, FlagsAcceptHexAndDecimalAndCombineWithBaud)
     snprintf(uri, sizeof(uri),
              "j2534://%s?flags=10&baud=500000&baud=250000&profile=raw",
              FAKE_J2534_DLL_PATH);
-    ASSERT_EQ(start_session_with_uri(uri), QT_OK);
+    ASSERT_EQ(start_session_with_uri(uri), QTTUNE_OK);
     EXPECT_EQ(last_baud, 250000u);
     EXPECT_EQ(last_flags, 10u);
 }
@@ -192,19 +192,19 @@ TEST_F(J2534QueryParamTest, Wide29BitChannelSetsConnectFlag)
     snprintf(uri, sizeof(uri),
              "j2534://%s?profile=raw&filter=0x18DAF110&txid=0x18DA10F1",
              FAKE_J2534_DLL_PATH);
-    ASSERT_EQ(start_session_with_uri(uri), QT_OK);
+    ASSERT_EQ(start_session_with_uri(uri), QTTUNE_OK);
     EXPECT_EQ(last_flags, QTTUNE_PT_CAN_29BIT_ID);
 
     snprintf(uri, sizeof(uri),
              "j2534://%s?profile=raw&filter=0x18DAF110&txid=0x18DA10F1&flags=0x20",
              FAKE_J2534_DLL_PATH);
-    ASSERT_EQ(start_session_with_uri(uri), QT_OK);
+    ASSERT_EQ(start_session_with_uri(uri), QTTUNE_OK);
     EXPECT_EQ(last_flags, QTTUNE_PT_CAN_29BIT_ID | 0x20u);
 
     /* 11-bit: the flags stay exactly as given */
     snprintf(uri, sizeof(uri), "j2534://%s?profile=raw&filter=0x7E8",
              FAKE_J2534_DLL_PATH);
-    ASSERT_EQ(start_session_with_uri(uri), QT_OK);
+    ASSERT_EQ(start_session_with_uri(uri), QTTUNE_OK);
     EXPECT_EQ(last_flags, 0u);
 }
 
@@ -223,19 +223,19 @@ TEST_F(J2534QueryParamTest, ProfileChannelWidthDecidesConnectFlag)
     static QttuneSignalSet mixed = {};
     mixed.channel_count = 2;
     mixed.channels = kMixed;
-    ASSERT_EQ(qttune_profile_register("test-29bit", &wide), QT_OK);
-    ASSERT_EQ(qttune_profile_register("test-mixed-width", &mixed), QT_OK);
+    ASSERT_EQ(qttune_profile_register("test-29bit", &wide), QTTUNE_OK);
+    ASSERT_EQ(qttune_profile_register("test-mixed-width", &mixed), QTTUNE_OK);
 
     char uri[700];
     snprintf(uri, sizeof(uri), "j2534://%s?profile=test-29bit",
              FAKE_J2534_DLL_PATH);
-    ASSERT_EQ(start_session_with_uri(uri), QT_OK);
+    ASSERT_EQ(start_session_with_uri(uri), QTTUNE_OK);
     EXPECT_EQ(last_flags, QTTUNE_PT_CAN_29BIT_ID);
 
     snprintf(uri, sizeof(uri), "j2534://%s?profile=test-mixed-width",
              FAKE_J2534_DLL_PATH);
     qttune_session_t* session = nullptr;
-    EXPECT_EQ(qttune_session_create(uri, &session), QT_ERR_NO_TRANSPORT);
+    EXPECT_EQ(qttune_session_create(uri, &session), QTTUNE_ERR_NO_TRANSPORT);
     EXPECT_EQ(session, nullptr);
 }
 
@@ -246,14 +246,14 @@ TEST_F(J2534QueryParamTest, MalformedQueriesRejectedAtSessionCreate)
     /* Selector-miss still wins over a good query */
     EXPECT_EQ(qttune_session_create("j2534://nonexistent-vendor?baud=250000",
                                     &session),
-              QT_ERR_NO_TRANSPORT);
+              QTTUNE_ERR_NO_TRANSPORT);
     EXPECT_EQ(session, nullptr);
 
     /* Query splits from path; a nonexistent path fails AT LOAD —
      * proves the filename never got '?baud=...' glued onto it. */
     EXPECT_EQ(qttune_session_create("j2534://C:\\does\\not\\exist.dll?baud=250000",
                                     &session),
-              QT_ERR_LOAD_FAILED);
+              QTTUNE_ERR_LOAD_FAILED);
     EXPECT_EQ(session, nullptr);
 
     /* Malformed queries must reject AT PARSE, before any DLL load —
@@ -273,13 +273,13 @@ TEST_F(J2534QueryParamTest, MalformedQueriesRejectedAtSessionCreate)
     };
     for (const char* q : bad_queries) {
         snprintf(uri, sizeof(uri), "j2534://%s%s", FAKE_J2534_DLL_PATH, q);
-        EXPECT_EQ(qttune_session_create(uri, &session), QT_ERR_NO_TRANSPORT)
+        EXPECT_EQ(qttune_session_create(uri, &session), QTTUNE_ERR_NO_TRANSPORT)
             << "query: " << q;
         EXPECT_EQ(session, nullptr) << "query: " << q;
     }
 
     EXPECT_EQ(qttune_session_create("j2534://junk", &session),
-              QT_ERR_NO_TRANSPORT);
+              QTTUNE_ERR_NO_TRANSPORT);
     EXPECT_EQ(session, nullptr);
 }
 
@@ -292,13 +292,13 @@ TEST(J2534StreamTest, DirectLoadUriDeliversInjectedFramesExactly)
              FAKE_J2534_DLL_PATH);
 
     qttune_session_t* session = nullptr;
-    ASSERT_EQ(qttune_session_create(uri, &session), QT_OK);
+    ASSERT_EQ(qttune_session_create(uri, &session), QTTUNE_OK);
 
     StreamCapture cap;
     EXPECT_EQ(qttune_register_frame_callback(session, capture_cb, &cap),
-              QT_OK);
+              QTTUNE_OK);
 
-    ASSERT_EQ(qttune_session_start(session), QT_OK);
+    ASSERT_EQ(qttune_session_start(session), QTTUNE_OK);
 
     /* Map our own reference for the hook — same module instance
      * core loaded, so the queue state is shared. */
@@ -348,7 +348,7 @@ TEST(J2534StreamTest, DirectLoadUriDeliversInjectedFramesExactly)
     EXPECT_EQ(cap.timestamps[1], uint64_t{2000});
     EXPECT_EQ(cap.timestamps[2], uint64_t{3000});
 
-    EXPECT_EQ(qttune_session_close(session), QT_OK);   /* joins worker */
+    EXPECT_EQ(qttune_session_close(session), QTTUNE_OK);   /* joins worker */
     qttune_session_destroy(session);
     FreeLibrary(mod);
 }
@@ -360,12 +360,12 @@ TEST(J2534StreamTest, StartIsIdempotent)
              FAKE_J2534_DLL_PATH);
 
     qttune_session_t* session = nullptr;
-    ASSERT_EQ(qttune_session_create(uri, &session), QT_OK);
+    ASSERT_EQ(qttune_session_create(uri, &session), QTTUNE_OK);
 
-    EXPECT_EQ(qttune_session_start(session), QT_OK);
-    EXPECT_EQ(qttune_session_start(session), QT_OK);
+    EXPECT_EQ(qttune_session_start(session), QTTUNE_OK);
+    EXPECT_EQ(qttune_session_start(session), QTTUNE_OK);
 
-    EXPECT_EQ(qttune_session_close(session), QT_OK);
+    EXPECT_EQ(qttune_session_close(session), QTTUNE_OK);
     qttune_session_destroy(session);
 }
 
@@ -374,7 +374,7 @@ TEST(J2534StreamTest, UnknownVendorNameRejected)
     qttune_session_t* session = nullptr;
     EXPECT_EQ(qttune_session_create("j2534://no-such-vendor-xyz",
                                     &session),
-              QT_ERR_NO_TRANSPORT);
+              QTTUNE_ERR_NO_TRANSPORT);
     EXPECT_EQ(session, nullptr);
 }
 
@@ -461,12 +461,12 @@ TEST_F(J2534AdoptionTest, RequestLoopWritesMode01AndReceivesStrippedEcho)
              FAKE_J2534_DLL_PATH);
 
     qttune_session_t* session = nullptr;
-    ASSERT_EQ(qttune_session_create(uri, &session), QT_OK);
+    ASSERT_EQ(qttune_session_create(uri, &session), QTTUNE_OK);
 
     StreamCapture cap;
     ASSERT_EQ(qttune_register_frame_callback(session, capture_cb, &cap),
-              QT_OK);
-    ASSERT_EQ(qttune_session_start(session), QT_OK);
+              QTTUNE_OK);
+    ASSERT_EQ(qttune_session_start(session), QTTUNE_OK);
 
     wait_for_count(cap, 3, 100);   /* ~1 s budget for 3 x 100 ms cycles */
 
@@ -505,7 +505,7 @@ TEST_F(J2534AdoptionTest, RequestLoopWritesMode01AndReceivesStrippedEcho)
     EXPECT_EQ(cap.payloads[0][3], 0x40u);
     EXPECT_EQ(static_cast<unsigned>(cap.payload_lens[0]), 4u);
 
-    EXPECT_EQ(qttune_session_close(session), QT_OK);
+    EXPECT_EQ(qttune_session_close(session), QTTUNE_OK);
     qttune_session_destroy(session);
 }
 
@@ -520,12 +520,12 @@ TEST_F(J2534AdoptionTest, PollZeroRequestsSupportedPidBitmap)
              FAKE_J2534_DLL_PATH);
 
     qttune_session_t* session = nullptr;
-    ASSERT_EQ(qttune_session_create(uri, &session), QT_OK);
+    ASSERT_EQ(qttune_session_create(uri, &session), QTTUNE_OK);
 
     StreamCapture cap;
     ASSERT_EQ(qttune_register_frame_callback(session, capture_cb, &cap),
-              QT_OK);
-    ASSERT_EQ(qttune_session_start(session), QT_OK);
+              QTTUNE_OK);
+    ASSERT_EQ(qttune_session_start(session), QTTUNE_OK);
 
     wait_for_count(cap, 1, 100);
     ASSERT_GE(cap.count.load(), 1) << "no reply to the PID 0x00 request";
@@ -542,7 +542,7 @@ TEST_F(J2534AdoptionTest, PollZeroRequestsSupportedPidBitmap)
     EXPECT_EQ(cap.payloads[0][1], 0x00u);
     EXPECT_EQ(static_cast<unsigned>(cap.payload_lens[0]), 6u);
 
-    EXPECT_EQ(qttune_session_close(session), QT_OK);
+    EXPECT_EQ(qttune_session_close(session), QTTUNE_OK);
     qttune_session_destroy(session);
 }
 
@@ -554,9 +554,9 @@ TEST_F(J2534AdoptionTest, FilterRegisteredOnSessionStart)
              FAKE_J2534_DLL_PATH);
 
     qttune_session_t* session = nullptr;
-    ASSERT_EQ(qttune_session_create(uri, &session), QT_OK);
+    ASSERT_EQ(qttune_session_create(uri, &session), QTTUNE_OK);
 
-    ASSERT_EQ(qttune_session_start(session), QT_OK);
+    ASSERT_EQ(qttune_session_start(session), QTTUNE_OK);
 
     unsigned long fid = 0, ftype = 0, len = 0;
     unsigned char mask[12] = {}, pattern[12] = {};
@@ -572,7 +572,7 @@ TEST_F(J2534AdoptionTest, FilterRegisteredOnSessionStart)
     /* FC is the bare tester ID, same 4-byte shape — not exposed by
      * GetLastFilterStart; equal-length passing is the seam under test. */
 
-    EXPECT_EQ(qttune_session_close(session), QT_OK);
+    EXPECT_EQ(qttune_session_close(session), QTTUNE_OK);
     qttune_session_destroy(session);
 }
 
@@ -586,9 +586,9 @@ TEST_F(J2534AdoptionTest, DetachStopsFilterBeforeDisconnect)
              FAKE_J2534_DLL_PATH);
 
     qttune_session_t* session = nullptr;
-    ASSERT_EQ(qttune_session_create(uri, &session), QT_OK);
+    ASSERT_EQ(qttune_session_create(uri, &session), QTTUNE_OK);
 
-    ASSERT_EQ(qttune_session_start(session), QT_OK);
+    ASSERT_EQ(qttune_session_start(session), QTTUNE_OK);
 
     unsigned long registered_fid = 0, dummy_ftype = 0, dummy_len = 0;
     unsigned char dummy_mask[12], dummy_pattern[12];
@@ -601,7 +601,7 @@ TEST_F(J2534AdoptionTest, DetachStopsFilterBeforeDisconnect)
     EXPECT_EQ(stop_fid, 0u);
 
     /* Close invokes detach, which should stop the filter */
-    EXPECT_EQ(qttune_session_close(session), QT_OK);
+    EXPECT_EQ(qttune_session_close(session), QTTUNE_OK);
 
     get_last_stop(&stop_fid);
     EXPECT_EQ(stop_fid, registered_fid);
@@ -620,7 +620,7 @@ TEST_F(J2534AdoptionTest, PollWithoutChannelRejectedBeforeDllLoad)
 
     snprintf(uri, sizeof(uri),
              "j2534://%s?profile=raw&poll=0x0C", FAKE_J2534_DLL_PATH);
-    EXPECT_EQ(qttune_session_create(uri, &session), QT_ERR_NO_TRANSPORT);
+    EXPECT_EQ(qttune_session_create(uri, &session), QTTUNE_ERR_NO_TRANSPORT);
     EXPECT_EQ(session, nullptr);
 }
 
@@ -633,13 +633,13 @@ TEST_F(J2534AdoptionTest, PassiveReceiveWithFilterNoPoll)
              "j2534://%s?profile=raw&filter=0x7E8", FAKE_J2534_DLL_PATH);
 
     qttune_session_t* session = nullptr;
-    ASSERT_EQ(qttune_session_create(uri, &session), QT_OK);
+    ASSERT_EQ(qttune_session_create(uri, &session), QTTUNE_OK);
 
     StreamCapture cap;
     EXPECT_EQ(qttune_register_frame_callback(session, capture_cb, &cap),
-              QT_OK);
+              QTTUNE_OK);
 
-    ASSERT_EQ(qttune_session_start(session), QT_OK);
+    ASSERT_EQ(qttune_session_start(session), QTTUNE_OK);
 
     /* Write count should remain zero */
     unsigned long wc = 0;
@@ -665,7 +665,7 @@ TEST_F(J2534AdoptionTest, PassiveReceiveWithFilterNoPoll)
     EXPECT_EQ(static_cast<unsigned>(cap.payload_lens[0]), 8u);
     EXPECT_EQ(cap.arbitration_ids[0], 0x7E8u);
 
-    EXPECT_EQ(qttune_session_close(session), QT_OK);
+    EXPECT_EQ(qttune_session_close(session), QTTUNE_OK);
     qttune_session_destroy(session);
 }
 
@@ -678,12 +678,12 @@ TEST_F(J2534AdoptionTest, FilterGatingDropsNonMatchingFrames)
              "j2534://%s?profile=raw&filter=0x7E8", FAKE_J2534_DLL_PATH);
 
     qttune_session_t* session = nullptr;
-    ASSERT_EQ(qttune_session_create(uri, &session), QT_OK);
+    ASSERT_EQ(qttune_session_create(uri, &session), QTTUNE_OK);
 
     StreamCapture cap;
     ASSERT_EQ(qttune_register_frame_callback(session, capture_cb, &cap),
-              QT_OK);
-    ASSERT_EQ(qttune_session_start(session), QT_OK);
+              QTTUNE_OK);
+    ASSERT_EQ(qttune_session_start(session), QTTUNE_OK);
 
     /* Arm gating on the fake (module-global; TearDown disarms) */
     set_gating(1);
@@ -709,7 +709,7 @@ TEST_F(J2534AdoptionTest, FilterGatingDropsNonMatchingFrames)
     EXPECT_EQ(cap.arbitration_ids[1], 0x7E8u);
     EXPECT_EQ(static_cast<unsigned>(cap.payload_lens[0]), 8u);
 
-    EXPECT_EQ(qttune_session_close(session), QT_OK);
+    EXPECT_EQ(qttune_session_close(session), QTTUNE_OK);
     qttune_session_destroy(session);
 }
 
@@ -722,12 +722,12 @@ TEST_F(J2534AdoptionTest, TxidOverrideChangesRequestTarget)
              FAKE_J2534_DLL_PATH);
 
     qttune_session_t* session = nullptr;
-    ASSERT_EQ(qttune_session_create(uri, &session), QT_OK);
+    ASSERT_EQ(qttune_session_create(uri, &session), QTTUNE_OK);
 
     StreamCapture cap;
     ASSERT_EQ(qttune_register_frame_callback(session, capture_cb, &cap),
-              QT_OK);
-    ASSERT_EQ(qttune_session_start(session), QT_OK);
+              QTTUNE_OK);
+    ASSERT_EQ(qttune_session_start(session), QTTUNE_OK);
 
     wait_for_count(cap, 3, 100);
 
@@ -740,7 +740,7 @@ TEST_F(J2534AdoptionTest, TxidOverrideChangesRequestTarget)
     EXPECT_EQ(wbuf[2], 0x07u); EXPECT_EQ(wbuf[3], 0xDFu);
     EXPECT_EQ(wbuf[4], 0x01u);
 
-    EXPECT_EQ(qttune_session_close(session), QT_OK);
+    EXPECT_EQ(qttune_session_close(session), QTTUNE_OK);
     qttune_session_destroy(session);
 }
 
@@ -757,7 +757,7 @@ TEST(J2534StreamTest, DefaultProfileIsObd2)
      * coupling fires (coupling lives in session_start). */
     const std::string uri = std::string("j2534://") + FAKE_J2534_DLL_PATH;
     qttune_session_t* session = nullptr;
-    ASSERT_EQ(qttune_session_create(uri.c_str(), &session), QT_OK);
+    ASSERT_EQ(qttune_session_create(uri.c_str(), &session), QTTUNE_OK);
     EXPECT_EQ(qttune_session_signal_set(session), qttune_obd2_signal_set());
     qttune_session_destroy(session);
 }
@@ -768,7 +768,7 @@ TEST(J2534StreamTest, RawProfileRemainsSelectableOnJ2534)
     const std::string uri = std::string("j2534://") + FAKE_J2534_DLL_PATH
                           + "?profile=raw";
     qttune_session_t* session = nullptr;
-    ASSERT_EQ(qttune_session_create(uri.c_str(), &session), QT_OK);
+    ASSERT_EQ(qttune_session_create(uri.c_str(), &session), QTTUNE_OK);
     EXPECT_EQ(qttune_session_signal_set(session), nullptr);
     qttune_session_destroy(session);
 }
@@ -781,7 +781,7 @@ TEST(J2534StreamTest, ProfileOverrideMockSelectsMockSet)
     const std::string uri = std::string("j2534://") + FAKE_J2534_DLL_PATH
                           + "?profile=mock";
     qttune_session_t* session = nullptr;
-    ASSERT_EQ(qttune_session_create(uri.c_str(), &session), QT_OK);
+    ASSERT_EQ(qttune_session_create(uri.c_str(), &session), QTTUNE_OK);
     EXPECT_EQ(qttune_session_signal_set(session), qttune_mock_signal_set());
     qttune_session_destroy(session);
 }
@@ -792,7 +792,7 @@ TEST(J2534StreamTest, UnknownProfileRejectedAtCreate)
                           + "?profile=bogus";
     qttune_session_t* session = nullptr;
     EXPECT_EQ(qttune_session_create(uri.c_str(), &session),
-              QT_ERR_NO_TRANSPORT);
+              QTTUNE_ERR_NO_TRANSPORT);
     EXPECT_EQ(session, nullptr);
 }
 
@@ -811,12 +811,12 @@ TEST_F(J2534AdoptionTest, Obd2SchedulerRotatesPidsInSetOrder)
              "j2534://%s?profile=obd2&filter=0x7E8", FAKE_J2534_DLL_PATH);
 
     qttune_session_t* session = nullptr;
-    ASSERT_EQ(qttune_session_create(uri, &session), QT_OK);
+    ASSERT_EQ(qttune_session_create(uri, &session), QTTUNE_OK);
 
     StreamCapture cap;
     ASSERT_EQ(qttune_register_frame_callback(session, capture_cb, &cap),
-              QT_OK);
-    ASSERT_EQ(qttune_session_start(session), QT_OK);
+              QTTUNE_OK);
+    ASSERT_EQ(qttune_session_start(session), QTTUNE_OK);
 
     /* 3 cycles = 300 ms minimum; budget 2 s for CI variance. */
     wait_for_writes(get_write_count, 3, 200);
@@ -862,7 +862,7 @@ TEST_F(J2534AdoptionTest, Obd2SchedulerRotatesPidsInSetOrder)
     EXPECT_EQ(cap.payloads[2][1], 0x0Cu);
     EXPECT_EQ(cap.payloads[2][2], 0x1Fu);
     EXPECT_EQ(cap.payloads[2][3], 0x40u);
-    EXPECT_EQ(qttune_session_close(session), QT_OK);
+    EXPECT_EQ(qttune_session_close(session), QTTUNE_OK);
     qttune_session_destroy(session);
 }
 
@@ -875,9 +875,9 @@ TEST_F(J2534AdoptionTest, BareJ2534UriDerivesObd2ChannelAndStarts)
     snprintf(uri, sizeof(uri), "j2534://%s", FAKE_J2534_DLL_PATH);
 
     qttune_session_t* session = nullptr;
-    ASSERT_EQ(qttune_session_create(uri, &session), QT_OK);
+    ASSERT_EQ(qttune_session_create(uri, &session), QTTUNE_OK);
     EXPECT_EQ(qttune_session_signal_set(session), qttune_obd2_signal_set());
-    ASSERT_EQ(qttune_session_start(session), QT_OK);
+    ASSERT_EQ(qttune_session_start(session), QTTUNE_OK);
 
     /* Derived filter: exact-match mask, pattern 00 00 07 E8 */
     unsigned long fid = 0, ftype = 0, len = 0;
@@ -901,7 +901,7 @@ TEST_F(J2534AdoptionTest, BareJ2534UriDerivesObd2ChannelAndStarts)
     EXPECT_EQ(wbuf[4], 0x01u);
     EXPECT_EQ(wbuf[5], 0x04u);
 
-    EXPECT_EQ(qttune_session_close(session), QT_OK);
+    EXPECT_EQ(qttune_session_close(session), QTTUNE_OK);
     qttune_session_destroy(session);
 }
 
@@ -916,8 +916,8 @@ TEST_F(J2534AdoptionTest, TxidOverrideRewritesDerivedTransmitTarget)
              "j2534://%s?txid=0x7DF", FAKE_J2534_DLL_PATH);
 
     qttune_session_t* session = nullptr;
-    ASSERT_EQ(qttune_session_create(uri, &session), QT_OK);
-    ASSERT_EQ(qttune_session_start(session), QT_OK);
+    ASSERT_EQ(qttune_session_create(uri, &session), QTTUNE_OK);
+    ASSERT_EQ(qttune_session_start(session), QTTUNE_OK);
 
     unsigned long fid = 0, ftype = 0, len = 0;
     unsigned char mask[12] = {}, pattern[12] = {};
@@ -933,7 +933,7 @@ TEST_F(J2534AdoptionTest, TxidOverrideRewritesDerivedTransmitTarget)
     ASSERT_EQ(wlen, 6u);
     EXPECT_EQ(wbuf[2], 0x07u); EXPECT_EQ(wbuf[3], 0xDFu);   /* tx 7DF */
 
-    EXPECT_EQ(qttune_session_close(session), QT_OK);
+    EXPECT_EQ(qttune_session_close(session), QTTUNE_OK);
     qttune_session_destroy(session);
 }
 
@@ -950,7 +950,7 @@ TEST_F(J2534AdoptionTest, SchedulerDrainsBacklogBeyondPerCycleBudget)
              "j2534://%s?profile=obd2&filter=0x7E8", FAKE_J2534_DLL_PATH);
 
     qttune_session_t* session = nullptr;
-    ASSERT_EQ(qttune_session_create(uri, &session), QT_OK);
+    ASSERT_EQ(qttune_session_create(uri, &session), QTTUNE_OK);
 
     struct DrainCapture {
         std::atomic<int> count{0};
@@ -968,8 +968,8 @@ TEST_F(J2534AdoptionTest, SchedulerDrainsBacklogBeyondPerCycleBudget)
         }
     };
     ASSERT_EQ(qttune_register_frame_callback(session, drain_cb, &dcap),
-              QT_OK);
-    ASSERT_EQ(qttune_session_start(session), QT_OK);
+              QTTUNE_OK);
+    ASSERT_EQ(qttune_session_start(session), QTTUNE_OK);
 
     for (int i = 0; i < 12; ++i) {
         unsigned char frame[12] = {};
@@ -1002,7 +1002,7 @@ TEST_F(J2534AdoptionTest, SchedulerDrainsBacklogBeyondPerCycleBudget)
     }
     EXPECT_TRUE(seen_all_markers());
 
-    EXPECT_EQ(qttune_session_close(session), QT_OK);
+    EXPECT_EQ(qttune_session_close(session), QTTUNE_OK);
     qttune_session_destroy(session);
 }
 
@@ -1034,8 +1034,8 @@ TEST_F(J2534AdoptionTest, HardFailureSetsCanonicalErrorAndRecovers)
     snprintf(uri, sizeof(uri), "j2534://%s", FAKE_J2534_DLL_PATH);
 
     qttune_session_t* session = nullptr;
-    ASSERT_EQ(qttune_session_create(uri, &session), QT_OK);
-    ASSERT_EQ(qttune_session_start(session), QT_OK);
+    ASSERT_EQ(qttune_session_create(uri, &session), QTTUNE_OK);
+    ASSERT_EQ(qttune_session_start(session), QTTUNE_OK);
 
     /* Dead adapter: STATUS_FAILED (0x07) on every read */
     SetEnvironmentVariableA("QTTUNE_FAKE_READ_STATUS", "7");
@@ -1045,7 +1045,7 @@ TEST_F(J2534AdoptionTest, HardFailureSetsCanonicalErrorAndRecovers)
     bool reached = false;
     for (int i = 0; i < 500 && !reached; ++i) {   /* 5 s budget */
         (void)qttune_session_get_error_state(session, &le, &ec);
-        reached = (le == QT_ERR_TRANSPORT_HARD_FAILURE);
+        reached = (le == QTTUNE_ERR_TRANSPORT_HARD_FAILURE);
         if (!reached) {
             std::this_thread::sleep_for(std::chrono::milliseconds(10));
         }
@@ -1067,7 +1067,7 @@ TEST_F(J2534AdoptionTest, HardFailureSetsCanonicalErrorAndRecovers)
     reached = false;
     for (int i = 0; i < 1000 && !reached; ++i) {   /* 10 s budget */
         (void)qttune_session_get_error_state(session, &le, &ec);
-        reached = (le == QT_OK);
+        reached = (le == QTTUNE_OK);
         if (!reached) {
             std::this_thread::sleep_for(std::chrono::milliseconds(10));
         }
@@ -1075,7 +1075,7 @@ TEST_F(J2534AdoptionTest, HardFailureSetsCanonicalErrorAndRecovers)
     EXPECT_TRUE(reached) << "recovery never reported (was " << le << ")";
     EXPECT_EQ(ec, 1u);   /* recovery adds no episode */
 
-    EXPECT_EQ(qttune_session_close(session), QT_OK);
+    EXPECT_EQ(qttune_session_close(session), QTTUNE_OK);
     qttune_session_destroy(session);
 }
 
@@ -1086,8 +1086,8 @@ TEST_F(J2534AdoptionTest, QuietBusDebouncesToVehicleTimeoutWithoutEpisode)
     snprintf(uri, sizeof(uri), "j2534://%s", FAKE_J2534_DLL_PATH);
 
     qttune_session_t* session = nullptr;
-    ASSERT_EQ(qttune_session_create(uri, &session), QT_OK);
-    ASSERT_EQ(qttune_session_start(session), QT_OK);
+    ASSERT_EQ(qttune_session_create(uri, &session), QTTUNE_OK);
+    ASSERT_EQ(qttune_session_start(session), QTTUNE_OK);
 
     /* Quiet vehicle: ERR_TIMEOUT (0x09) on every read, nothing else */
     SetEnvironmentVariableA("QTTUNE_FAKE_READ_STATUS", "9");
@@ -1097,7 +1097,7 @@ TEST_F(J2534AdoptionTest, QuietBusDebouncesToVehicleTimeoutWithoutEpisode)
     bool reached = false;
     for (int i = 0; i < 800 && !reached; ++i) {   /* 8 s: debounce ~1 s + CI */
         (void)qttune_session_get_error_state(session, &le, &ec);
-        reached = (le == QT_ERR_VEHICLE_TIMEOUT);
+        reached = (le == QTTUNE_ERR_VEHICLE_TIMEOUT);
         if (!reached) {
             std::this_thread::sleep_for(std::chrono::milliseconds(10));
         }
@@ -1109,14 +1109,14 @@ TEST_F(J2534AdoptionTest, QuietBusDebouncesToVehicleTimeoutWithoutEpisode)
     reached = false;
     for (int i = 0; i < 500 && !reached; ++i) {   /* 5 s budget */
         (void)qttune_session_get_error_state(session, &le, &ec);
-        reached = (le == QT_OK);
+        reached = (le == QTTUNE_OK);
         if (!reached) {
             std::this_thread::sleep_for(std::chrono::milliseconds(10));
         }
     }
     EXPECT_TRUE(reached);
 
-    EXPECT_EQ(qttune_session_close(session), QT_OK);
+    EXPECT_EQ(qttune_session_close(session), QTTUNE_OK);
     qttune_session_destroy(session);
 }
 
@@ -1140,11 +1140,11 @@ TEST_F(J2534AdoptionTest, UntouchedCountUnderHardErrorReportsUnhealthy)
     snprintf(uri, sizeof(uri), "j2534://%s", FAKE_J2534_DLL_PATH);
 
     qttune_session_t* session = nullptr;
-    ASSERT_EQ(qttune_session_create(uri, &session), QT_OK);
+    ASSERT_EQ(qttune_session_create(uri, &session), QTTUNE_OK);
     StreamCapture cap;
     ASSERT_EQ(qttune_register_frame_callback(session, capture_cb, &cap),
-              QT_OK);
-    ASSERT_EQ(qttune_session_start(session), QT_OK);
+              QTTUNE_OK);
+    ASSERT_EQ(qttune_session_start(session), QTTUNE_OK);
 
     SetEnvironmentVariableA("QTTUNE_FAKE_UNTOUCHED_COUNT_STATUS", "7");
 
@@ -1153,7 +1153,7 @@ TEST_F(J2534AdoptionTest, UntouchedCountUnderHardErrorReportsUnhealthy)
     bool reached = false;
     for (int i = 0; i < 500 && !reached; ++i) {   /* 5 s budget */
         (void)qttune_session_get_error_state(session, &le, &ec);
-        reached = (le == QT_ERR_TRANSPORT_HARD_FAILURE);
+        reached = (le == QTTUNE_ERR_TRANSPORT_HARD_FAILURE);
         if (!reached) {
             std::this_thread::sleep_for(std::chrono::milliseconds(10));
         }
@@ -1172,14 +1172,14 @@ TEST_F(J2534AdoptionTest, UntouchedCountUnderHardErrorReportsUnhealthy)
     reached = false;
     for (int i = 0; i < 1000 && !reached; ++i) {   /* 10 s budget */
         (void)qttune_session_get_error_state(session, &le, &ec);
-        reached = (le == QT_OK);
+        reached = (le == QTTUNE_OK);
         if (!reached) {
             std::this_thread::sleep_for(std::chrono::milliseconds(10));
         }
     }
     EXPECT_TRUE(reached) << "recovery never reported (was " << le << ")";
 
-    EXPECT_EQ(qttune_session_close(session), QT_OK);
+    EXPECT_EQ(qttune_session_close(session), QTTUNE_OK);
     qttune_session_destroy(session);
 }
 
@@ -1195,13 +1195,13 @@ TEST_F(J2534AdoptionTest, PollOverridesSchedulerRotation)
              "j2534://%s?profile=obd2&poll=0x0C", FAKE_J2534_DLL_PATH);
 
     qttune_session_t* session = nullptr;
-    ASSERT_EQ(qttune_session_create(uri, &session), QT_OK);
+    ASSERT_EQ(qttune_session_create(uri, &session), QTTUNE_OK);
     EXPECT_EQ(qttune_session_signal_set(session), qttune_obd2_signal_set());
 
     StreamCapture cap;
     ASSERT_EQ(qttune_register_frame_callback(session, capture_cb, &cap),
-              QT_OK);
-    ASSERT_EQ(qttune_session_start(session), QT_OK);
+              QTTUNE_OK);
+    ASSERT_EQ(qttune_session_start(session), QTTUNE_OK);
 
     wait_for_writes(get_write_count, 5, 200);   /* ~550 ms of 100 ms cycles */
 
@@ -1233,7 +1233,7 @@ TEST_F(J2534AdoptionTest, PollOverridesSchedulerRotation)
     EXPECT_EQ(cap.payloads[0][2], 0x1Fu);   /* canned RPM 2000 */
     EXPECT_EQ(cap.payloads[0][3], 0x40u);
 
-    EXPECT_EQ(qttune_session_close(session), QT_OK);
+    EXPECT_EQ(qttune_session_close(session), QTTUNE_OK);
     qttune_session_destroy(session);
 }
 
@@ -1257,8 +1257,8 @@ TEST_F(J2534AdoptionTest, WriteFailureLatchesRequestFailedAndClears)
     snprintf(uri, sizeof(uri), "j2534://%s", FAKE_J2534_DLL_PATH);
 
     qttune_session_t* session = nullptr;
-    ASSERT_EQ(qttune_session_create(uri, &session), QT_OK);
-    ASSERT_EQ(qttune_session_start(session), QT_OK);
+    ASSERT_EQ(qttune_session_create(uri, &session), QTTUNE_OK);
+    ASSERT_EQ(qttune_session_start(session), QTTUNE_OK);
 
     SetEnvironmentVariableA("QTTUNE_FAKE_WRITE_STATUS", "7");   /* reads clean */
 
@@ -1267,7 +1267,7 @@ TEST_F(J2534AdoptionTest, WriteFailureLatchesRequestFailedAndClears)
     bool reached = false;
     for (int i = 0; i < 500 && !reached; ++i) {   /* 5 s budget */
         (void)qttune_session_get_error_state(session, &le, &ec);
-        reached = (le == QT_ERR_REQUEST_FAILED);
+        reached = (le == QTTUNE_ERR_REQUEST_FAILED);
         if (!reached) {
             std::this_thread::sleep_for(std::chrono::milliseconds(10));
         }
@@ -1280,7 +1280,7 @@ TEST_F(J2534AdoptionTest, WriteFailureLatchesRequestFailedAndClears)
      * VEHICLE_TIMEOUT — only a write result moves it. */
     std::this_thread::sleep_for(std::chrono::milliseconds(1500));
     (void)qttune_session_get_error_state(session, &le, &ec);
-    EXPECT_EQ(le, QT_ERR_REQUEST_FAILED)
+    EXPECT_EQ(le, QTTUNE_ERR_REQUEST_FAILED)
         << "quiet reads overrode the latched write failure";
     EXPECT_EQ(ec, 1u);
 
@@ -1293,7 +1293,7 @@ TEST_F(J2534AdoptionTest, WriteFailureLatchesRequestFailedAndClears)
     reached = false;
     for (int i = 0; i < 1200 && !reached; ++i) {
         (void)qttune_session_get_error_state(session, &le, &ec);
-        reached = (le == QT_OK);
+        reached = (le == QTTUNE_OK);
         if (!reached) {
             std::this_thread::sleep_for(std::chrono::milliseconds(10));
         }
@@ -1301,7 +1301,7 @@ TEST_F(J2534AdoptionTest, WriteFailureLatchesRequestFailedAndClears)
     EXPECT_TRUE(reached) << "successful write never cleared (was " << le << ")";
     EXPECT_EQ(ec, 1u) << "recovery added an episode";
 
-    EXPECT_EQ(qttune_session_close(session), QT_OK);
+    EXPECT_EQ(qttune_session_close(session), QTTUNE_OK);
     qttune_session_destroy(session);
 }
 
@@ -1317,8 +1317,8 @@ TEST_F(J2534AdoptionTest, HardReadFailureOutranksRequestFailed)
     snprintf(uri, sizeof(uri), "j2534://%s", FAKE_J2534_DLL_PATH);
 
     qttune_session_t* session = nullptr;
-    ASSERT_EQ(qttune_session_create(uri, &session), QT_OK);
-    ASSERT_EQ(qttune_session_start(session), QT_OK);
+    ASSERT_EQ(qttune_session_create(uri, &session), QTTUNE_OK);
+    ASSERT_EQ(qttune_session_start(session), QTTUNE_OK);
 
     SetEnvironmentVariableA("QTTUNE_FAKE_WRITE_STATUS", "7");
     SetEnvironmentVariableA("QTTUNE_FAKE_READ_STATUS", "7");
@@ -1328,7 +1328,7 @@ TEST_F(J2534AdoptionTest, HardReadFailureOutranksRequestFailed)
     bool reached = false;
     for (int i = 0; i < 500 && !reached; ++i) {
         (void)qttune_session_get_error_state(session, &le, &ec);
-        reached = (le == QT_ERR_TRANSPORT_HARD_FAILURE);
+        reached = (le == QTTUNE_ERR_TRANSPORT_HARD_FAILURE);
         if (!reached) {
             std::this_thread::sleep_for(std::chrono::milliseconds(10));
         }
@@ -1340,11 +1340,11 @@ TEST_F(J2534AdoptionTest, HardReadFailureOutranksRequestFailed)
      * hard-failure state or add episodes. */
     std::this_thread::sleep_for(std::chrono::milliseconds(600));
     (void)qttune_session_get_error_state(session, &le, &ec);
-    EXPECT_EQ(le, QT_ERR_TRANSPORT_HARD_FAILURE)
+    EXPECT_EQ(le, QTTUNE_ERR_TRANSPORT_HARD_FAILURE)
         << "write path downgraded a hard read failure";
     EXPECT_EQ(ec, 2u);
 
-    EXPECT_EQ(qttune_session_close(session), QT_OK);
+    EXPECT_EQ(qttune_session_close(session), QTTUNE_OK);
     qttune_session_destroy(session);
 }
 
@@ -1364,8 +1364,8 @@ TEST_F(J2534AdoptionTest, UnmatchedDeliveredFrameGoesQuietNotHealthy)
              FAKE_J2534_DLL_PATH);
 
     qttune_session_t* session = nullptr;
-    ASSERT_EQ(qttune_session_create(uri, &session), QT_OK);
-    ASSERT_EQ(qttune_session_start(session), QT_OK);
+    ASSERT_EQ(qttune_session_create(uri, &session), QTTUNE_OK);
+    ASSERT_EQ(qttune_session_start(session), QTTUNE_OK);
 
     /* Force hard failure, then deliver something the adapter DID read */
     SetEnvironmentVariableA("QTTUNE_FAKE_READ_STATUS", "7");
@@ -1375,7 +1375,7 @@ TEST_F(J2534AdoptionTest, UnmatchedDeliveredFrameGoesQuietNotHealthy)
     bool reached = false;
     for (int i = 0; i < 500 && !reached; ++i) {
         (void)qttune_session_get_error_state(session, &le, &ec);
-        reached = (le == QT_ERR_TRANSPORT_HARD_FAILURE);
+        reached = (le == QTTUNE_ERR_TRANSPORT_HARD_FAILURE);
         if (!reached) {
             std::this_thread::sleep_for(std::chrono::milliseconds(10));
         }
@@ -1395,7 +1395,7 @@ TEST_F(J2534AdoptionTest, UnmatchedDeliveredFrameGoesQuietNotHealthy)
     reached = false;
     for (int i = 0; i < 90 && !reached; ++i) {   /* 900 ms: < debounce */
         (void)qttune_session_get_error_state(session, &le, &ec);
-        reached = (le == QT_ERR_VEHICLE_TIMEOUT);
+        reached = (le == QTTUNE_ERR_VEHICLE_TIMEOUT);
         if (!reached) {
             std::this_thread::sleep_for(std::chrono::milliseconds(10));
         }
@@ -1404,7 +1404,7 @@ TEST_F(J2534AdoptionTest, UnmatchedDeliveredFrameGoesQuietNotHealthy)
                         << le << ")";
     EXPECT_EQ(ec, 1u) << "unmatched frame added an episode";
 
-    EXPECT_EQ(qttune_session_close(session), QT_OK);
+    EXPECT_EQ(qttune_session_close(session), QTTUNE_OK);
     qttune_session_destroy(session);
 }
 
@@ -1420,8 +1420,8 @@ TEST_F(J2534AdoptionTest, BackoffGrowsUnderSustainedHardFailure)
     snprintf(uri, sizeof(uri), "j2534://%s", FAKE_J2534_DLL_PATH);
 
     qttune_session_t* session = nullptr;
-    ASSERT_EQ(qttune_session_create(uri, &session), QT_OK);
-    ASSERT_EQ(qttune_session_start(session), QT_OK);
+    ASSERT_EQ(qttune_session_create(uri, &session), QTTUNE_OK);
+    ASSERT_EQ(qttune_session_start(session), QTTUNE_OK);
 
     SetEnvironmentVariableA("QTTUNE_FAKE_READ_STATUS", "7");   /* writes clean */
 
@@ -1430,7 +1430,7 @@ TEST_F(J2534AdoptionTest, BackoffGrowsUnderSustainedHardFailure)
     bool reached = false;
     for (int i = 0; i < 500 && !reached; ++i) {
         (void)qttune_session_get_error_state(session, &le, &ec);
-        reached = (le == QT_ERR_TRANSPORT_HARD_FAILURE);
+        reached = (le == QTTUNE_ERR_TRANSPORT_HARD_FAILURE);
         if (!reached) {
             std::this_thread::sleep_for(std::chrono::milliseconds(10));
         }
@@ -1446,7 +1446,7 @@ TEST_F(J2534AdoptionTest, BackoffGrowsUnderSustainedHardFailure)
     EXPECT_GE(wc1 - wc0, 1u) << "probe writes stopped entirely";
     EXPECT_LE(wc1 - wc0, 8u) << "backoff never grew (reset-to-base shape)";
 
-    EXPECT_EQ(qttune_session_close(session), QT_OK);
+    EXPECT_EQ(qttune_session_close(session), QTTUNE_OK);
     qttune_session_destroy(session);
 }
 
@@ -1472,13 +1472,13 @@ TEST(J2534StreamTest, BackoffStepDoublesToCapWithoutOvershoot)
         << "doubling must not wrap";
 }
 
-/* QT_ERR_REQUEST_FAILED has a distinct, mapped string. */
+/* QTTUNE_ERR_REQUEST_FAILED has a distinct, mapped string. */
 TEST(J2534StreamTest, RequestFailedStatusHasDistinctString)
 {
-    const char* s = qttune_status_string(QT_ERR_REQUEST_FAILED);
+    const char* s = qttune_status_string(QTTUNE_ERR_REQUEST_FAILED);
     ASSERT_NE(s, nullptr);
     EXPECT_STRNE(s, "unknown status");
-    EXPECT_STRNE(s, qttune_status_string(QT_ERR_TRANSPORT_HARD_FAILURE));
+    EXPECT_STRNE(s, qttune_status_string(QTTUNE_ERR_TRANSPORT_HARD_FAILURE));
 }
 
 } // namespace

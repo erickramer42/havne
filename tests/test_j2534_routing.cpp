@@ -3,7 +3,7 @@
 //          sniff the DLL's PE architecture and pick the backend:
 //          x64 fake -> "inproc" (CI-verifiable), x86 fake -> "surrogate"
 //          (dev-machine cross-arch, env-gated), unknown/missing -> honest
-//          QT_ERR_LOAD_FAILED at in-proc LoadLibraryEx, no spawn.
+//          QTTUNE_ERR_LOAD_FAILED at in-proc LoadLibraryEx, no spawn.
 //          Round trips go through the FULL loader API surface
 //          (open/connect/inject/read/write/ioctl/filter/close) — the
 //          same functions j2534_transport.cpp consumes — so routing
@@ -47,7 +47,7 @@ bool read_until(qttune_j2534_handle_t* h, unsigned long channel,
     while (std::chrono::steady_clock::now() < deadline) {
         bool got = false;
         if (qttune_j2534_read_frame(h, channel, out_frame, 50, &got)
-                == QT_OK && got) {
+                == QTTUNE_OK && got) {
             return true;
         }
         std::this_thread::sleep_for(std::chrono::milliseconds(10));
@@ -83,16 +83,16 @@ TEST(J2534RoutingTest, X64FakeSelectsInprocBackendAndRoundTrips)
     make_device(&dev, FAKE_J2534_DLL_PATH);
 
     qttune_j2534_handle_t* h = nullptr;
-    ASSERT_EQ(qttune_j2534_open(&dev, &h), QT_OK);
+    ASSERT_EQ(qttune_j2534_open(&dev, &h), QTTUNE_OK);
     EXPECT_STREQ(qttune_j2534_backend_name(h), "inproc");
 
     unsigned long channel = 0;
-    ASSERT_EQ(qttune_j2534_connect_channel(h, 500000, 0, &channel), QT_OK);
+    ASSERT_EQ(qttune_j2534_connect_channel(h, 500000, 0, &channel), QTTUNE_OK);
 
     /* The in-proc inject hook: first-ever exercise of lazy InjectFrame
      * resolution through the loader boundary. */
     ASSERT_EQ(qttune_j2534_inject_test_frame(h, kPayload, 8, 7000, 0),
-              QT_OK);
+              QTTUNE_OK);
 
     qttune_frame_t frame = {};
     ASSERT_TRUE(read_until(h, channel, &frame, 5000));
@@ -100,8 +100,8 @@ TEST(J2534RoutingTest, X64FakeSelectsInprocBackendAndRoundTrips)
     EXPECT_EQ(memcmp(frame.data, kPayload, 8), 0);
     EXPECT_EQ(frame.timestamp_us, uint64_t{7000});
 
-    EXPECT_EQ(qttune_j2534_disconnect_channel(h, channel), QT_OK);
-    EXPECT_EQ(qttune_j2534_close(h), QT_OK);
+    EXPECT_EQ(qttune_j2534_disconnect_channel(h, channel), QTTUNE_OK);
+    EXPECT_EQ(qttune_j2534_close(h), QTTUNE_OK);
 }
 
 TEST(J2534RoutingTest, MissingDllFailsAtOpenThroughInproc)
@@ -114,7 +114,7 @@ TEST(J2534RoutingTest, MissingDllFailsAtOpenThroughInproc)
     make_device(&dev, "C:\\does\\not\\exist.dll");
 
     qttune_j2534_handle_t* h = nullptr;
-    EXPECT_EQ(qttune_j2534_open(&dev, &h), QT_ERR_LOAD_FAILED);
+    EXPECT_EQ(qttune_j2534_open(&dev, &h), QTTUNE_ERR_LOAD_FAILED);
     EXPECT_EQ(h, nullptr);
 }
 
@@ -127,11 +127,11 @@ TEST(J2534RoutingTest, InprocWriteIoctlFilterRoundTrips)
     make_device(&dev, FAKE_J2534_DLL_PATH);
 
     qttune_j2534_handle_t* h = nullptr;
-    ASSERT_EQ(qttune_j2534_open(&dev, &h), QT_OK);
+    ASSERT_EQ(qttune_j2534_open(&dev, &h), QTTUNE_OK);
     EXPECT_STREQ(qttune_j2534_backend_name(h), "inproc");
 
     unsigned long channel = 0;
-    ASSERT_EQ(qttune_j2534_connect_channel(h, 500000, 0, &channel), QT_OK);
+    ASSERT_EQ(qttune_j2534_connect_channel(h, 500000, 0, &channel), QTTUNE_OK);
 
     /* WRITE through the loader seam (in-proc leg). */
     const unsigned char req[3] = {0x01, 0x0C, 0x00};
@@ -139,7 +139,7 @@ TEST(J2534RoutingTest, InprocWriteIoctlFilterRoundTrips)
     uint32_t num_written = 0;
     ASSERT_EQ(qttune_j2534_write_frame(h, channel, req, 3, 0, 1000,
                                        &num_written),
-              QT_OK);
+              QTTUNE_OK);
     EXPECT_EQ(num_written, 1u);
 
     qttune_frame_t frame = {};
@@ -154,13 +154,13 @@ TEST(J2534RoutingTest, InprocWriteIoctlFilterRoundTrips)
     put_pair(in, kParam, kValue);
     ASSERT_EQ(qttune_j2534_ioctl(h, channel, QTTUNE_PT_IOCTL_SET_CONFIG,
                                   in, 8, nullptr, 0, nullptr),
-              QT_OK);
+              QTTUNE_OK);
     unsigned char out[64];
     uint32_t out_len = 0;
     put_pair(in, kParam, 0);
     ASSERT_EQ(qttune_j2534_ioctl(h, channel, QTTUNE_PT_IOCTL_GET_CONFIG,
                                  in, 8, out, sizeof(out), &out_len),
-              QT_OK);
+              QTTUNE_OK);
     ASSERT_EQ(out_len, 8u);
     EXPECT_EQ(get_u32(out), kParam);
     EXPECT_EQ(get_u32(out + 4), kValue);
@@ -168,7 +168,7 @@ TEST(J2534RoutingTest, InprocWriteIoctlFilterRoundTrips)
     /* Out-of-contract ioctl refused AT THE SEAM (in-proc leg). */
     EXPECT_EQ(qttune_j2534_ioctl(h, channel, 0x05,
                                  nullptr, 0, nullptr, 0, nullptr),
-              QT_ERR_NOT_IMPLEMENTED);
+              QTTUNE_ERR_NOT_IMPLEMENTED);
 
     /* FILTER: start, stop, stop-twice strict-vendor refusal. */
     const unsigned char mask[4]   = {0x00, 0x00, 0x07, 0xFF};
@@ -177,14 +177,14 @@ TEST(J2534RoutingTest, InprocWriteIoctlFilterRoundTrips)
     ASSERT_EQ(qttune_j2534_start_msg_filter(
                   h, channel, QTTUNE_PT_PASS_FILTER,
                   mask, 4, pattern, 4, nullptr, 0, 0, &filter_id),
-              QT_OK);
+              QTTUNE_OK);
     EXPECT_GE(filter_id, 1ul);
-    EXPECT_EQ(qttune_j2534_stop_msg_filter(h, channel, filter_id), QT_OK);
+    EXPECT_EQ(qttune_j2534_stop_msg_filter(h, channel, filter_id), QTTUNE_OK);
     EXPECT_EQ(qttune_j2534_stop_msg_filter(h, channel, filter_id),
-              QT_ERR_NO_TRANSPORT);
+              QTTUNE_ERR_NO_TRANSPORT);
 
-    EXPECT_EQ(qttune_j2534_disconnect_channel(h, channel), QT_OK);
-    EXPECT_EQ(qttune_j2534_close(h), QT_OK);
+    EXPECT_EQ(qttune_j2534_disconnect_channel(h, channel), QTTUNE_OK);
+    EXPECT_EQ(qttune_j2534_close(h), QTTUNE_OK);
 }
 
 TEST(J2534RoutingTest, X86FakeSelectsSurrogateBackendAndRoundTrips)
@@ -206,14 +206,14 @@ TEST(J2534RoutingTest, X86FakeSelectsSurrogateBackendAndRoundTrips)
     make_device(&dev, dll);
 
     qttune_j2534_handle_t* h = nullptr;
-    ASSERT_EQ(qttune_j2534_open(&dev, &h), QT_OK);
+    ASSERT_EQ(qttune_j2534_open(&dev, &h), QTTUNE_OK);
     EXPECT_STREQ(qttune_j2534_backend_name(h), "surrogate");
 
     unsigned long channel = 0;
-    ASSERT_EQ(qttune_j2534_connect_channel(h, 500000, 0, &channel), QT_OK);
+    ASSERT_EQ(qttune_j2534_connect_channel(h, 500000, 0, &channel), QTTUNE_OK);
 
     ASSERT_EQ(qttune_j2534_inject_test_frame(h, kPayload, 8, 7000, 0),
-              QT_OK);
+              QTTUNE_OK);
 
     qttune_frame_t frame = {};
     ASSERT_TRUE(read_until(h, channel, &frame, 10000));
@@ -228,7 +228,7 @@ TEST(J2534RoutingTest, X86FakeSelectsSurrogateBackendAndRoundTrips)
     uint32_t num_written = 0;
     ASSERT_EQ(qttune_j2534_write_frame(h, channel, req, 3, 0, 1000,
                                        &num_written),
-              QT_OK);
+              QTTUNE_OK);
     EXPECT_EQ(num_written, 1u);
     ASSERT_TRUE(read_until(h, channel, &frame, 10000));
     EXPECT_EQ(frame.data_length, 3);
@@ -241,12 +241,12 @@ TEST(J2534RoutingTest, X86FakeSelectsSurrogateBackendAndRoundTrips)
     ASSERT_EQ(qttune_j2534_start_msg_filter(
                   h, channel, QTTUNE_PT_PASS_FILTER,
                   mask, 4, pattern, 4, nullptr, 0, 0, &filter_id),
-              QT_OK);
+              QTTUNE_OK);
     EXPECT_GE(filter_id, 1ul);
-    EXPECT_EQ(qttune_j2534_stop_msg_filter(h, channel, filter_id), QT_OK);
+    EXPECT_EQ(qttune_j2534_stop_msg_filter(h, channel, filter_id), QTTUNE_OK);
 
-    EXPECT_EQ(qttune_j2534_disconnect_channel(h, channel), QT_OK);
-    EXPECT_EQ(qttune_j2534_close(h), QT_OK);
+    EXPECT_EQ(qttune_j2534_disconnect_channel(h, channel), QTTUNE_OK);
+    EXPECT_EQ(qttune_j2534_close(h), QTTUNE_OK);
 
     /* SESSION-level smoke: the transport layer's function diet is
      * identical for both backends, so the full session lifecycle
@@ -256,9 +256,9 @@ TEST(J2534RoutingTest, X86FakeSelectsSurrogateBackendAndRoundTrips)
     char uri[600];
     snprintf(uri, sizeof(uri), "j2534://%s?baud=500000&profile=raw", dll);
     qttune_session_t* session = nullptr;
-    ASSERT_EQ(qttune_session_create(uri, &session), QT_OK);
-    EXPECT_EQ(qttune_session_start(session), QT_OK);
-    EXPECT_EQ(qttune_session_close(session), QT_OK);
+    ASSERT_EQ(qttune_session_create(uri, &session), QTTUNE_OK);
+    EXPECT_EQ(qttune_session_start(session), QTTUNE_OK);
+    EXPECT_EQ(qttune_session_close(session), QTTUNE_OK);
     qttune_session_destroy(session);
 }
 

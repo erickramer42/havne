@@ -33,6 +33,8 @@
 #include <cstdlib>
 #include <windows.h>
 
+#include "non_ascii_copy.h"
+
 /* Env override for the cross-arch case: an x86 surrogate can't load
  * the x64 fake baked at generate time, so the Win32 tree's fake DLL
  * takes precedence when QTTUNE_FAKE_DLL is set. Mirrors the client's
@@ -84,7 +86,7 @@ void drain_sur_frames(qttune_j2534_sur_handle_t* h, SurCapture* cap)
         qttune_frame_t f = {};
         bool got = false;
         qttune_status_t st = qttune_j2534_sur_read_frame(h, 0, &f, 50, &got);
-        if (st != QT_OK) return;
+        if (st != QTTUNE_OK) return;
         if (!got) return;
         sur_capture_cb(&f, cap);
     }
@@ -115,14 +117,14 @@ TEST(J2534SurrogateTest, OpenConnectInjectReadCloseCycle)
 
     /* Spawn: creates mapping/event/pipe, spawns under the kill-on-close
      * job, surrogate loads the fake DLL, calls PassThruOpen, handshakes. */
-    ASSERT_EQ(qttune_j2534_sur_open(fake_dll_path(), &h), QT_OK);
+    ASSERT_EQ(qttune_j2534_sur_open(fake_dll_path(), &h), QTTUNE_OK);
     ASSERT_NE(h, nullptr);
 
     /* Connect with default sentinel baud — resolves to ISO 15765 500k
      * client-side per the loader contract; the surrogate relays the
      * resolved values verbatim to the fake's PassThruConnect. */
     unsigned long channel = 0;
-    ASSERT_EQ(qttune_j2534_sur_connect_channel(h, 0, 0, &channel), QT_OK);
+    ASSERT_EQ(qttune_j2534_sur_connect_channel(h, 0, 0, &channel), QTTUNE_OK);
 
     /* Inject THROUGH the surrogate (control pipe -> InjectFrame in the
      * surrogate's module instance -> fake FIFO). Varied flags exercise
@@ -132,11 +134,11 @@ TEST(J2534SurrogateTest, OpenConnectInjectReadCloseCycle)
     const unsigned char f1[8] = {0x62, 0xF1, 0x90, 0x2A, 0, 0, 0, 0};
     const unsigned char f2[8] = {0xDE, 0xAD, 0xBE, 0xEF, 1, 2, 3, 4};
     ASSERT_EQ(qttune_j2534_sur_inject_test_frame(
-                  h, f0, 8, 1000, 0), QT_OK);
+                  h, f0, 8, 1000, 0), QTTUNE_OK);
     ASSERT_EQ(qttune_j2534_sur_inject_test_frame(
-                  h, f1, 8, 2000, QTTUNE_PT_CAN_29BIT_ID), QT_OK);
+                  h, f1, 8, 2000, QTTUNE_PT_CAN_29BIT_ID), QTTUNE_OK);
     ASSERT_EQ(qttune_j2534_sur_inject_test_frame(
-                  h, f2, 8, 3000, 0), QT_OK);
+                  h, f2, 8, 3000, 0), QTTUNE_OK);
 
     SurCapture cap;
     /* The predicate MUST drain — cap only grows when reads are
@@ -168,7 +170,7 @@ TEST(J2534SurrogateTest, OpenConnectInjectReadCloseCycle)
     EXPECT_EQ(cap.timestamps[2], uint64_t{3000});
 
     /* Teardown: SHUTDOWN, bounded wait, job-object kill. */
-    EXPECT_EQ(qttune_j2534_sur_close(h), QT_OK);
+    EXPECT_EQ(qttune_j2534_sur_close(h), QTTUNE_OK);
 }
 
 TEST(J2534SurrogateTest, ReadPumpIsGatedOnConnect)
@@ -178,11 +180,11 @@ TEST(J2534SurrogateTest, ReadPumpIsGatedOnConnect)
      * CONNECT — the fake's InjectFrame and ReadMsgs share one queue,
      * so parking is real, not an artifact of separate containers. */
     qttune_j2534_sur_handle_t* h = nullptr;
-    ASSERT_EQ(qttune_j2534_sur_open(fake_dll_path(), &h), QT_OK);
+    ASSERT_EQ(qttune_j2534_sur_open(fake_dll_path(), &h), QTTUNE_OK);
 
     SurCapture cap;
     const unsigned char f0[8] = {1, 2, 3, 4, 5, 6, 7, 8};
-    ASSERT_EQ(qttune_j2534_sur_inject_test_frame(h, f0, 8, 500, 0), QT_OK);
+    ASSERT_EQ(qttune_j2534_sur_inject_test_frame(h, f0, 8, 500, 0), QTTUNE_OK);
 
     /* Pre-connect: nothing may arrive. Predicate drains as it waits. */
     const bool early = wait_until(
@@ -192,7 +194,7 @@ TEST(J2534SurrogateTest, ReadPumpIsGatedOnConnect)
     EXPECT_EQ(cap.count.load(), 0);
 
     unsigned long channel = 0;
-    ASSERT_EQ(qttune_j2534_sur_connect_channel(h, 0, 0, &channel), QT_OK);
+    ASSERT_EQ(qttune_j2534_sur_connect_channel(h, 0, 0, &channel), QTTUNE_OK);
 
     /* Post-connect: the parked frame arrives. */
     const bool delivered = wait_until(
@@ -203,19 +205,19 @@ TEST(J2534SurrogateTest, ReadPumpIsGatedOnConnect)
     EXPECT_EQ(memcmp(cap.payloads[0], f0, 8), 0);
     EXPECT_EQ(cap.timestamps[0], uint64_t{500});
 
-    EXPECT_EQ(qttune_j2534_sur_close(h), QT_OK);
+    EXPECT_EQ(qttune_j2534_sur_close(h), QTTUNE_OK);
 }
 
 TEST(J2534SurrogateTest, DeadDllFailsFastAtOpen)
 {
     /* A surrogate spawned with an unloadable DLL must die before (or
      * during) the handshake; the client must notice via the process
-     * handle wait, not by burning the 8s deadline. QT_ERR_LOAD_FAILED
+     * handle wait, not by burning the 8s deadline. QTTUNE_ERR_LOAD_FAILED
      * is the contract. Wall-clock guard: 5s budget proves fail-fast. */
     const auto t0 = std::chrono::steady_clock::now();
     qttune_j2534_sur_handle_t* h = nullptr;
     EXPECT_EQ(qttune_j2534_sur_open("C:\\does\\not\\exist.dll", &h),
-              QT_ERR_LOAD_FAILED);
+              QTTUNE_ERR_LOAD_FAILED);
     EXPECT_EQ(h, nullptr);
     const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
         std::chrono::steady_clock::now() - t0).count();
@@ -225,10 +227,10 @@ TEST(J2534SurrogateTest, DeadDllFailsFastAtOpen)
 TEST(J2534SurrogateTest, NullArgumentsRejected)
 {
     qttune_j2534_sur_handle_t* h = nullptr;
-    EXPECT_EQ(qttune_j2534_sur_open(nullptr, &h), QT_ERR_NULL_ARGUMENT);
+    EXPECT_EQ(qttune_j2534_sur_open(nullptr, &h), QTTUNE_ERR_NULL_ARGUMENT);
     EXPECT_EQ(qttune_j2534_sur_open(FAKE_J2534_DLL_PATH, nullptr),
-              QT_ERR_NULL_ARGUMENT);
-    EXPECT_EQ(qttune_j2534_sur_close(nullptr), QT_OK);   /* free(nullptr) */
+              QTTUNE_ERR_NULL_ARGUMENT);
+    EXPECT_EQ(qttune_j2534_sur_close(nullptr), QTTUNE_OK);   /* free(nullptr) */
 }
 
 /* ================= WRITE / IOCTL / FILTER relay ================= */
@@ -242,9 +244,9 @@ TEST(J2534SurrogateTest, WriteRoundTripProducesEchoResponse)
      * it back over the pipe. Observable from EITHER architecture — no
      * fake-instance hooks involved. */
     qttune_j2534_sur_handle_t* h = nullptr;
-    ASSERT_EQ(qttune_j2534_sur_open(fake_dll_path(), &h), QT_OK);
+    ASSERT_EQ(qttune_j2534_sur_open(fake_dll_path(), &h), QTTUNE_OK);
     unsigned long channel = 0;
-    ASSERT_EQ(qttune_j2534_sur_connect_channel(h, 0, 0, &channel), QT_OK);
+    ASSERT_EQ(qttune_j2534_sur_connect_channel(h, 0, 0, &channel), QTTUNE_OK);
 
     /* A realistic Mode-01 request shape (service 0x01, PID 0x0C RPM). */
     const unsigned char req[3] = {0x01, 0x0C, 0x00};
@@ -252,7 +254,7 @@ TEST(J2534SurrogateTest, WriteRoundTripProducesEchoResponse)
     uint32_t num_written = 0;
     ASSERT_EQ(qttune_j2534_sur_write_frame(h, channel, req, 3, 0, 1000,
                                             &num_written),
-              QT_OK);
+              QTTUNE_OK);
     EXPECT_EQ(num_written, 1u);
 
     SurCapture cap;
@@ -264,7 +266,7 @@ TEST(J2534SurrogateTest, WriteRoundTripProducesEchoResponse)
     EXPECT_EQ(cap.payloads[0][0], expect[0]);
     EXPECT_EQ(memcmp(cap.payloads[0], expect, 3), 0);
 
-    EXPECT_EQ(qttune_j2534_sur_close(h), QT_OK);
+    EXPECT_EQ(qttune_j2534_sur_close(h), QTTUNE_OK);
 }
 
 TEST(J2534SurrogateTest, IoctlSetGetConfigRoundTrip)
@@ -274,9 +276,9 @@ TEST(J2534SurrogateTest, IoctlSetGetConfigRoundTrip)
      * in ITS address space), stores, then GET must report the stored
      * value back through the re-flattened response payload. */
     qttune_j2534_sur_handle_t* h = nullptr;
-    ASSERT_EQ(qttune_j2534_sur_open(fake_dll_path(), &h), QT_OK);
+    ASSERT_EQ(qttune_j2534_sur_open(fake_dll_path(), &h), QTTUNE_OK);
     unsigned long channel = 0;
-    ASSERT_EQ(qttune_j2534_sur_connect_channel(h, 0, 0, &channel), QT_OK);
+    ASSERT_EQ(qttune_j2534_sur_connect_channel(h, 0, 0, &channel), QTTUNE_OK);
 
     constexpr uint32_t kParam = 0x10;        /* arbitrary parameter id */
     constexpr uint32_t kValue = 0xBEEF;
@@ -285,37 +287,37 @@ TEST(J2534SurrogateTest, IoctlSetGetConfigRoundTrip)
     put_pair(in, kParam, kValue);
     ASSERT_EQ(qttune_j2534_sur_ioctl(h, channel, QTTUNE_PT_IOCTL_SET_CONFIG,
                                      in, 8, nullptr, nullptr),
-              QT_OK);
+              QTTUNE_OK);
 
     unsigned char q[8], out[64];
     put_pair(q, kParam, 0);
     uint32_t out_len = 0;
     ASSERT_EQ(qttune_j2534_sur_ioctl(h, channel, QTTUNE_PT_IOCTL_GET_CONFIG,
                                      q, 8, out, &out_len),
-              QT_OK);
+              QTTUNE_OK);
     ASSERT_EQ(out_len, 8u);
     EXPECT_EQ(get_u32(out), kParam);
     EXPECT_EQ(get_u32(out + 4), kValue);
 
-    EXPECT_EQ(qttune_j2534_sur_close(h), QT_OK);
+    EXPECT_EQ(qttune_j2534_sur_close(h), QTTUNE_OK);
 }
 
 TEST(J2534SurrogateTest, IoctlReadVbattReturnsFixedVoltage)
 {
     qttune_j2534_sur_handle_t* h = nullptr;
-    ASSERT_EQ(qttune_j2534_sur_open(fake_dll_path(), &h), QT_OK);
+    ASSERT_EQ(qttune_j2534_sur_open(fake_dll_path(), &h), QTTUNE_OK);
     unsigned long channel = 0;
-    ASSERT_EQ(qttune_j2534_sur_connect_channel(h, 0, 0, &channel), QT_OK);
+    ASSERT_EQ(qttune_j2534_sur_connect_channel(h, 0, 0, &channel), QTTUNE_OK);
 
     unsigned char out[8] = {};
     uint32_t out_len = 0;
     ASSERT_EQ(qttune_j2534_sur_ioctl(h, channel, QTTUNE_PT_IOCTL_READ_VBATT,
                                      nullptr, 0, out, &out_len),
-              QT_OK);
+              QTTUNE_OK);
     ASSERT_EQ(out_len, 4u);
     EXPECT_EQ(get_u32(out), 13800u);   /* 13.8 V in mV, per the fake */
 
-    EXPECT_EQ(qttune_j2534_sur_close(h), QT_OK);
+    EXPECT_EQ(qttune_j2534_sur_close(h), QTTUNE_OK);
 }
 
 TEST(J2534SurrogateTest, IoctlWhitelistRefusesUnsupportedIds)
@@ -324,19 +326,19 @@ TEST(J2534SurrogateTest, IoctlWhitelistRefusesUnsupportedIds)
      * returns NOT_IMPLEMENTED before the pipe; the CHILD whitelist
      * (patched into the OP_IOCTL handler) must independently fail it
      * if a request somehow arrives — vendor FAILED status crosses the
-     * pipe as QT_ERR_NO_TRANSPORT. Driving the client directly (this
+     * pipe as QTTUNE_ERR_NO_TRANSPORT. Driving the client directly (this
      * suite) exercises the child side. */
     qttune_j2534_sur_handle_t* h = nullptr;
-    ASSERT_EQ(qttune_j2534_sur_open(fake_dll_path(), &h), QT_OK);
+    ASSERT_EQ(qttune_j2534_sur_open(fake_dll_path(), &h), QTTUNE_OK);
     unsigned long channel = 0;
-    ASSERT_EQ(qttune_j2534_sur_connect_channel(h, 0, 0, &channel), QT_OK);
+    ASSERT_EQ(qttune_j2534_sur_connect_channel(h, 0, 0, &channel), QTTUNE_OK);
 
     /* 0x05 = FIVE_BAUD_INIT — pointer-bearing, never shapable. */
     EXPECT_EQ(qttune_j2534_sur_ioctl(h, channel, 0x05,
                                      nullptr, 0, nullptr, nullptr),
-              QT_ERR_NO_TRANSPORT);
+              QTTUNE_ERR_NO_TRANSPORT);
 
-    EXPECT_EQ(qttune_j2534_sur_close(h), QT_OK);
+    EXPECT_EQ(qttune_j2534_sur_close(h), QTTUNE_OK);
 }
 
 TEST(J2534SurrogateTest, FilterStartStopLifecycle)
@@ -346,9 +348,9 @@ TEST(J2534SurrogateTest, FilterStartStopLifecycle)
      * must surface as an error, proving vendor status isn't being
      * flattened into silent success anywhere on the relay. */
     qttune_j2534_sur_handle_t* h = nullptr;
-    ASSERT_EQ(qttune_j2534_sur_open(fake_dll_path(), &h), QT_OK);
+    ASSERT_EQ(qttune_j2534_sur_open(fake_dll_path(), &h), QTTUNE_OK);
     unsigned long channel = 0;
-    ASSERT_EQ(qttune_j2534_sur_connect_channel(h, 0, 0, &channel), QT_OK);
+    ASSERT_EQ(qttune_j2534_sur_connect_channel(h, 0, 0, &channel), QTTUNE_OK);
 
     const unsigned char mask[4]    = {0x00, 0x00, 0x07, 0xFF};
     const unsigned char pattern[4]  = {0x00, 0x00, 0x07, 0xE8};
@@ -358,7 +360,7 @@ TEST(J2534SurrogateTest, FilterStartStopLifecycle)
                   h, channel, QTTUNE_PT_PASS_FILTER,
                   mask, 4, pattern, 4,
                   nullptr, 0, 0, &filter_id),
-              QT_OK);
+              QTTUNE_OK);
     EXPECT_GE(filter_id, 1ul);
 
     /* Malformed shapes are refused client-side before the pipe. */
@@ -367,19 +369,19 @@ TEST(J2534SurrogateTest, FilterStartStopLifecycle)
                   h, channel, QTTUNE_PT_PASS_FILTER,
                   mask, 4, pattern, 3,     /* length mismatch */
                   nullptr, 0, 0, &junk),
-              QT_ERR_NULL_ARGUMENT);
+              QTTUNE_ERR_NULL_ARGUMENT);
     /* Flow control on a non-FC filter is also refused. */
     EXPECT_EQ(qttune_j2534_sur_start_msg_filter(
                   h, channel, QTTUNE_PT_PASS_FILTER,
                   mask, 4, pattern, 4,
                   pattern, 4, 0, &junk),
-              QT_ERR_NULL_ARGUMENT);
+              QTTUNE_ERR_NULL_ARGUMENT);
 
-    EXPECT_EQ(qttune_j2534_sur_stop_msg_filter(h, channel, filter_id), QT_OK);
+    EXPECT_EQ(qttune_j2534_sur_stop_msg_filter(h, channel, filter_id), QTTUNE_OK);
     EXPECT_EQ(qttune_j2534_sur_stop_msg_filter(h, channel, filter_id),
-              QT_ERR_NO_TRANSPORT);   /* already stopped — strict vendor */
+              QTTUNE_ERR_NO_TRANSPORT);   /* already stopped — strict vendor */
 
-    EXPECT_EQ(qttune_j2534_sur_close(h), QT_OK);
+    EXPECT_EQ(qttune_j2534_sur_close(h), QTTUNE_OK);
 }
 
 /* A mid-session vendor call that outlives the client's 3s transact
@@ -393,11 +395,11 @@ TEST(J2534SurrogateTest, TimedOutOpDoesNotDesyncNextRequest)
 {
     SetEnvironmentVariableA("QTTUNE_FAKE_IOCTL_DELAY_MS", "3500");
     qttune_j2534_sur_handle_t* h = nullptr;
-    ASSERT_EQ(qttune_j2534_sur_open(fake_dll_path(), &h), QT_OK);
+    ASSERT_EQ(qttune_j2534_sur_open(fake_dll_path(), &h), QTTUNE_OK);
     SetEnvironmentVariableA("QTTUNE_FAKE_IOCTL_DELAY_MS", nullptr);
 
     unsigned long channel = 0;
-    ASSERT_EQ(qttune_j2534_sur_connect_channel(h, 0, 0, &channel), QT_OK);
+    ASSERT_EQ(qttune_j2534_sur_connect_channel(h, 0, 0, &channel), QTTUNE_OK);
 
     /* Vendor ioctl sleeps 3.5s — 0.5s past the 3s transact timeout:
      * parent gives up at ~3s, response lands at ~3.5s. */
@@ -405,18 +407,18 @@ TEST(J2534SurrogateTest, TimedOutOpDoesNotDesyncNextRequest)
     uint32_t out_len = 0;
     EXPECT_EQ(qttune_j2534_sur_ioctl(h, channel, QTTUNE_PT_IOCTL_READ_VBATT,
                                      nullptr, 0, out, &out_len),
-              QT_ERR_NO_TRANSPORT);
+              QTTUNE_ERR_NO_TRANSPORT);
 
     /* The differentiator: with the desync present this FAILS (reads
      * the stale response, ID mismatch); with recovery it succeeds. */
     out_len = 0;
     EXPECT_EQ(qttune_j2534_sur_ioctl(h, channel, QTTUNE_PT_IOCTL_READ_VBATT,
                                      nullptr, 0, out, &out_len),
-              QT_OK);
+              QTTUNE_OK);
     EXPECT_EQ(out_len, 4u);
     EXPECT_EQ(get_u32(out), 13800u);
 
-    EXPECT_EQ(qttune_j2534_sur_close(h), QT_OK);
+    EXPECT_EQ(qttune_j2534_sur_close(h), QTTUNE_OK);
 }
 
 /* A vendor PassThruOpen that blocks (adapter absent) must
@@ -441,18 +443,24 @@ TEST(J2534SurrogateTest, BlockedVendorOpenFailsAtHandshakeTimeout)
     SetEnvironmentVariableA("QTTUNE_FAKE_OPEN_DELAY_MS", nullptr);
     SetEnvironmentVariableA("QTTUNE_SUR_HANDSHAKE_MS", nullptr);
 
-    EXPECT_EQ(rc, QT_ERR_LOAD_FAILED);
+    EXPECT_EQ(rc, QTTUNE_ERR_LOAD_FAILED);
     EXPECT_EQ(h, nullptr);
     /* Failed at the SHRUNK window (~0.5s), nowhere near the 8s default —
      * if this approaches 8s, an env knob stopped being honored. */
     EXPECT_LT(elapsed, 3000);
 }
 
-/* Shares read access with the session's writers. "" if it can't open. */
+/* Shares read access with the session's writers. "" if it can't open.
+ * The path is UTF-8 (qttune_j2534_sur_log_path). */
 static std::string read_session_log(const std::string& path)
 {
     std::string out;
-    HANDLE f = CreateFileA(path.c_str(), GENERIC_READ,
+    wchar_t wpath[MAX_PATH + 64] = {};
+    if (MultiByteToWideChar(CP_UTF8, 0, path.c_str(), -1, wpath,
+                            static_cast<int>(MAX_PATH + 64)) <= 0) {
+        return out;
+    }
+    HANDLE f = CreateFileW(wpath, GENERIC_READ,
                            FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
                            nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
     if (f == INVALID_HANDLE_VALUE) return out;
@@ -472,15 +480,17 @@ static std::string read_session_log(const std::string& path)
 TEST(J2534SurrogateTest, ClientAndChildLinesShareTheSessionLog)
 {
     qttune_j2534_sur_handle_t* h = nullptr;
-    ASSERT_EQ(qttune_j2534_sur_open(fake_dll_path(), &h), QT_OK);
+    ASSERT_EQ(qttune_j2534_sur_open(fake_dll_path(), &h), QTTUNE_OK);
     const std::string path = qttune_j2534_sur_log_path(h);
     /* Close first: the child exits, so the file is complete. */
-    ASSERT_EQ(qttune_j2534_sur_close(h), QT_OK);
+    ASSERT_EQ(qttune_j2534_sur_close(h), QTTUNE_OK);
     ASSERT_FALSE(path.empty()) << "the session ran without a log";
 
     const std::string log = read_session_log(path);
     EXPECT_NE(log.find("[sur "), std::string::npos) << log;
     EXPECT_NE(log.find("open: child pid"), std::string::npos) << log;
+    EXPECT_NE(log.find("surrogate '"), std::string::npos)
+        << "the log must name the surrogate exe it spawned:\n" << log;
     EXPECT_NE(log.find("[surrogate "), std::string::npos) << log;
     EXPECT_NE(log.find("pipe connected"), std::string::npos) << log;
 
@@ -511,7 +521,54 @@ struct EnvArm {
     EnvArm(const EnvArm&) = delete;
     EnvArm& operator=(const EnvArm&) = delete;
 };
+
+/* Replaces a variable for one scope and puts the previous value back:
+ * the cross-arch run sets QTTUNE_SURROGATE_EXE itself. */
+struct EnvSwap {
+    const char* name;
+    bool had = false;
+    char old[1024] = {};
+    EnvSwap(const char* n, const char* v) : name(n)
+    {
+        const DWORD k = GetEnvironmentVariableA(n, old, sizeof(old));
+        had = k > 0 && k < sizeof(old);
+        SetEnvironmentVariableA(n, v);
+    }
+    ~EnvSwap() { SetEnvironmentVariableA(name, had ? old : nullptr); }
+    EnvSwap(const EnvSwap&) = delete;
+    EnvSwap& operator=(const EnvSwap&) = delete;
+};
 }  // namespace
+
+/* QTTUNE_SURROGATE_EXE relocates the surrogate and nothing more: a
+ * relative path, another program, or a missing file is refused before
+ * anything spawns. */
+TEST(J2534SurrogateTest, SurrogateExeOverrideIsRestricted)
+{
+    char self[MAX_PATH] = {};
+    ASSERT_GT(GetModuleFileNameA(nullptr, self, MAX_PATH), 0u);
+    for (const char* exe : {"qttune-j2534-surrogate.exe",
+                            static_cast<const char*>(self),
+                            "C:/qttune-definitely-missing/qttune-j2534-surrogate.exe"}) {
+        EnvSwap swap("QTTUNE_SURROGATE_EXE", exe);
+        qttune_j2534_sur_handle_t* h = nullptr;
+        EXPECT_EQ(qttune_j2534_sur_open(fake_dll_path(), &h), QTTUNE_ERR_LOAD_FAILED) << exe;
+        EXPECT_EQ(h, nullptr) << exe;
+    }
+}
+
+/* The DLL path reaches the child as UTF-16 (wmain), so a path no ANSI
+ * code page can spell loads there too. */
+TEST(J2534SurrogateTest, NonAsciiDllPathLoadsInTheChild)
+{
+    NonAsciiCopy copy(fake_dll_path());
+    ASSERT_TRUE(copy.ok) << "couldn't stage the fake under a non-ASCII path";
+    qttune_j2534_sur_handle_t* h = nullptr;
+    ASSERT_EQ(qttune_j2534_sur_open(copy.utf8, &h), QTTUNE_OK);
+    unsigned long channel = 0;
+    EXPECT_EQ(qttune_j2534_sur_connect_channel(h, 0, 0, &channel), QTTUNE_OK);
+    EXPECT_EQ(qttune_j2534_sur_close(h), QTTUNE_OK);   /* the child exits, so the copy can go */
+}
 
 /* QTTUNE_SUR_LOG_FRAMES=1 puts every message written and read into the
  * session log verbatim: status, flags, the vendor timestamp and the
@@ -525,16 +582,16 @@ TEST(J2534SurrogateTest, FrameLoggingRecordsPayloadsVerbatimWhenEnabled)
     for (int enabled = 1; enabled >= 0; --enabled) {
         EnvArm arm("QTTUNE_SUR_LOG_FRAMES", enabled ? "1" : nullptr);
         qttune_j2534_sur_handle_t* h = nullptr;
-        ASSERT_EQ(qttune_j2534_sur_open(fake_dll_path(), &h), QT_OK);
+        ASSERT_EQ(qttune_j2534_sur_open(fake_dll_path(), &h), QTTUNE_OK);
         unsigned long channel = 0;
-        ASSERT_EQ(qttune_j2534_sur_connect_channel(h, 0, 0, &channel), QT_OK);
+        ASSERT_EQ(qttune_j2534_sur_connect_channel(h, 0, 0, &channel), QTTUNE_OK);
 
         uint32_t written = 0;
         ASSERT_EQ(qttune_j2534_sur_write_frame(h, channel, req, sizeof(req),
                                                QTTUNE_PT_TX_ISO15765_FRAME_PAD,
-                                               0, &written), QT_OK);
+                                               0, &written), QTTUNE_OK);
         ASSERT_EQ(qttune_j2534_sur_inject_test_frame(h, rsp, sizeof(rsp),
-                                                     4242, 0), QT_OK);
+                                                     4242, 0), QTTUNE_OK);
         /* The fake returns one message per read: the write's echo, then
          * the injected frame. Extra reads come back empty. */
         for (int i = 0; i < 4; ++i) {
@@ -544,7 +601,7 @@ TEST(J2534SurrogateTest, FrameLoggingRecordsPayloadsVerbatimWhenEnabled)
         }
 
         const std::string path = qttune_j2534_sur_log_path(h);
-        ASSERT_EQ(qttune_j2534_sur_close(h), QT_OK);   /* child exits: log complete */
+        ASSERT_EQ(qttune_j2534_sur_close(h), QTTUNE_OK);   /* child exits: log complete */
         ASSERT_FALSE(path.empty());
         logs[enabled] = read_session_log(path);
     }
@@ -574,10 +631,10 @@ TEST(J2534SurrogateTest, UnresponsiveChildFailsFastAfterTwoMissedDeadlines)
     qttune_j2534_sur_handle_t* h = nullptr;
     {
         EnvArm arm("QTTUNE_FAKE_IOCTL_DELAY_MS", "20000");
-        ASSERT_EQ(qttune_j2534_sur_open(fake_dll_path(), &h), QT_OK);
+        ASSERT_EQ(qttune_j2534_sur_open(fake_dll_path(), &h), QTTUNE_OK);
     }
     unsigned long channel = 0;
-    ASSERT_EQ(qttune_j2534_sur_connect_channel(h, 0, 0, &channel), QT_OK);
+    ASSERT_EQ(qttune_j2534_sur_connect_channel(h, 0, 0, &channel), QTTUNE_OK);
     const std::string path = qttune_j2534_sur_log_path(h);
 
     /* First deadline: the ioctl outlives the 3 s transaction timeout. */
@@ -585,19 +642,19 @@ TEST(J2534SurrogateTest, UnresponsiveChildFailsFastAfterTwoMissedDeadlines)
     uint32_t out_len = 0;
     EXPECT_EQ(qttune_j2534_sur_ioctl(h, channel, QTTUNE_PT_IOCTL_READ_VBATT,
                                      nullptr, 0, out, &out_len),
-              QT_ERR_NO_TRANSPORT);
+              QTTUNE_ERR_NO_TRANSPORT);
 
     /* Second: its late reply doesn't come within another timeout. */
-    EXPECT_EQ(qttune_j2534_sur_disconnect_channel(h, channel), QT_ERR_NO_TRANSPORT);
+    EXPECT_EQ(qttune_j2534_sur_disconnect_channel(h, channel), QTTUNE_ERR_NO_TRANSPORT);
 
     /* From here, every transaction fails at once. */
     auto t0 = clock::now();
-    EXPECT_EQ(qttune_j2534_sur_stop_msg_filter(h, channel, 1), QT_ERR_NO_TRANSPORT);
+    EXPECT_EQ(qttune_j2534_sur_stop_msg_filter(h, channel, 1), QTTUNE_ERR_NO_TRANSPORT);
     EXPECT_LT(clock::now() - t0, std::chrono::milliseconds(500));
 
     /* Close kills the child instead of waiting 1.5 s twice. */
     t0 = clock::now();
-    EXPECT_EQ(qttune_j2534_sur_close(h), QT_OK);
+    EXPECT_EQ(qttune_j2534_sur_close(h), QTTUNE_OK);
     EXPECT_LT(clock::now() - t0, std::chrono::milliseconds(1000));
 
     const std::string log = read_session_log(path);
@@ -614,14 +671,14 @@ TEST(J2534SurrogateTest, SecondConcurrentSessionGetsItsOwnLog)
 {
     qttune_j2534_sur_handle_t* a = nullptr;
     qttune_j2534_sur_handle_t* b = nullptr;
-    ASSERT_EQ(qttune_j2534_sur_open(fake_dll_path(), &a), QT_OK);
+    ASSERT_EQ(qttune_j2534_sur_open(fake_dll_path(), &a), QTTUNE_OK);
     const qttune_status_t rb = qttune_j2534_sur_open(fake_dll_path(), &b);
     const std::string path_a = qttune_j2534_sur_log_path(a);
     const std::string path_b = qttune_j2534_sur_log_path(b);
     qttune_j2534_sur_close(b);
     qttune_j2534_sur_close(a);
 
-    ASSERT_EQ(rb, QT_OK);
+    ASSERT_EQ(rb, QTTUNE_OK);
     EXPECT_FALSE(path_a.empty());
     EXPECT_FALSE(path_b.empty()) << "the second session ran without a log";
     EXPECT_NE(path_a, path_b);
@@ -648,13 +705,13 @@ TEST(J2534SurrogateTest, SpecTimeoutReadDeliversPartialBatch)
 {
     SetEnvironmentVariableA("QTTUNE_FAKE_SPEC_READ_SEMANTICS", "1");
     qttune_j2534_sur_handle_t* h = nullptr;
-    ASSERT_EQ(qttune_j2534_sur_open(fake_dll_path(), &h), QT_OK);
+    ASSERT_EQ(qttune_j2534_sur_open(fake_dll_path(), &h), QTTUNE_OK);
     unsigned long channel = 0;
-    ASSERT_EQ(qttune_j2534_sur_connect_channel(h, 0, 0, &channel), QT_OK);
+    ASSERT_EQ(qttune_j2534_sur_connect_channel(h, 0, 0, &channel), QTTUNE_OK);
 
     const unsigned char f0[8] = {0x41, 0x0C, 0x1F, 0x40, 0, 0, 0, 0};
     ASSERT_EQ(qttune_j2534_sur_inject_test_frame(h, f0, 8, 4242, 0),
-              QT_OK);
+              QTTUNE_OK);
 
     qttune_frame_t f1 = {};
     bool got1 = false;
@@ -671,17 +728,17 @@ TEST(J2534SurrogateTest, SpecTimeoutReadDeliversPartialBatch)
 
     /* Child asks for 16 with a 50 ms timeout; one queued -> spec mode
      * returns 1 message WITH ERR_TIMEOUT. The client must deliver it. */
-    EXPECT_EQ(st1, QT_OK);
+    EXPECT_EQ(st1, QTTUNE_OK);
     EXPECT_TRUE(got1);
     EXPECT_EQ(memcmp(f1.data, f0, 8), 0);
     EXPECT_EQ(f1.data_length, 8u);
     EXPECT_EQ(f1.timestamp_us, uint64_t{4242});
 
     /* Empty queue, nonzero timeout: quiet, not delivered, not hard. */
-    EXPECT_EQ(st2, QT_ERR_VEHICLE_TIMEOUT);
+    EXPECT_EQ(st2, QTTUNE_ERR_VEHICLE_TIMEOUT);
     EXPECT_FALSE(got2);
 
-    EXPECT_EQ(qttune_j2534_sur_close(h), QT_OK);
+    EXPECT_EQ(qttune_j2534_sur_close(h), QTTUNE_OK);
 }
 
 /* Count-trust rule, surrogate half: a vendor returning a hard error
@@ -696,17 +753,17 @@ TEST(J2534SurrogateTest, HardErrorUntouchedCountDeliversNoFrames)
 {
     SetEnvironmentVariableA("QTTUNE_FAKE_UNTOUCHED_COUNT_STATUS", "7");
     qttune_j2534_sur_handle_t* h = nullptr;
-    ASSERT_EQ(qttune_j2534_sur_open(fake_dll_path(), &h), QT_OK);
+    ASSERT_EQ(qttune_j2534_sur_open(fake_dll_path(), &h), QTTUNE_OK);
     SetEnvironmentVariableA("QTTUNE_FAKE_UNTOUCHED_COUNT_STATUS", nullptr);
     unsigned long channel = 0;
-    ASSERT_EQ(qttune_j2534_sur_connect_channel(h, 0, 0, &channel), QT_OK);
+    ASSERT_EQ(qttune_j2534_sur_connect_channel(h, 0, 0, &channel), QTTUNE_OK);
 
     qttune_frame_t f = {};
     bool got = false;
     const qttune_status_t st =
         qttune_j2534_sur_read_frame(h, 0, &f, 50, &got);
 
-    EXPECT_EQ(st, QT_ERR_TRANSPORT_HARD_FAILURE);
+    EXPECT_EQ(st, QTTUNE_ERR_TRANSPORT_HARD_FAILURE);
     EXPECT_FALSE(got);
 
     /* No desync and a live channel after the poisoned request. */
@@ -714,11 +771,11 @@ TEST(J2534SurrogateTest, HardErrorUntouchedCountDeliversNoFrames)
     uint32_t out_len = 0;
     EXPECT_EQ(qttune_j2534_sur_ioctl(h, channel, QTTUNE_PT_IOCTL_READ_VBATT,
                                      nullptr, 0, out, &out_len),
-              QT_OK);
+              QTTUNE_OK);
     EXPECT_EQ(out_len, 4u);
     EXPECT_EQ(get_u32(out), 13800u);
 
-    EXPECT_EQ(qttune_j2534_sur_close(h), QT_OK);
+    EXPECT_EQ(qttune_j2534_sur_close(h), QTTUNE_OK);
 }
 
 #endif /* _WIN32 */

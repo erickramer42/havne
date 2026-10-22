@@ -25,10 +25,15 @@ extern "C" {
 #define QTTUNE_J2534_VENDOR_NAME_LEN 64
 #define QTTUNE_J2534_DLL_PATH_LEN 256
 
+/* Text is UTF-8 throughout: vendor_name, dll_path, and the path forms
+ * of a j2534:// URI. Core passes paths to Windows as UTF-16. */
 typedef struct qttune_j2534_device {
     uint32_t vendor_id;           /* Index in discovery order (0-based) */
-    char vendor_name[QTTUNE_J2534_VENDOR_NAME_LEN];
-    char dll_path[QTTUNE_J2534_DLL_PATH_LEN];
+    char vendor_name[QTTUNE_J2534_VENDOR_NAME_LEN];  /* registry key name */
+    char dll_path[QTTUNE_J2534_DLL_PATH_LEN];        /* FUNCTIONLIBRARY,
+                                                        expanded; a path
+                                                        too long for this
+                                                        isn't listed */
     uint32_t supported_protocols; /* 0 — reserved for PROTOCOLS bitmask parse */
     uint32_t reserved[8];         /* ABI-stable expansion room
                                    * [0]: architecture (1=x86, 2=x64, 0=unknown) */
@@ -38,11 +43,11 @@ typedef struct qttune_j2534_device {
  * Discover J2534 vendor function libraries.
  *
  * CONTRACTS:
- * - Returns QT_OK with count=0 when no vendors are installed (not an error)
+ * - Returns QTTUNE_OK with count=0 when no vendors are installed (not an error)
  * - On error: *devices_out = NULL, *device_count = 0
  * - Caller must qttune_j2534_free_devices() the array (even for count=0
  *   it is safe to call with NULL)
- * - Non-Windows: returns QT_ERR_NOT_IMPLEMENTED
+ * - Non-Windows: returns QTTUNE_ERR_NOT_IMPLEMENTED
  */
 qttune_status_t qttune_j2534_discover_devices(qttune_j2534_device_t** devices_out,
                                               uint32_t* device_count);
@@ -61,10 +66,10 @@ typedef struct qttune_j2534_handle qttune_j2534_handle_t;
  *   surrogate process, ADR-0009), resolves all nine mandatory
  *   PassThru exports, and calls the vendor's PassThruOpen
  * - Any failure (missing DLL, missing export, PassThruOpen refused)
- *   returns QT_ERR_LOAD_FAILED with NO module left loaded
+ *   returns QTTUNE_ERR_LOAD_FAILED with NO module left loaded
  * - On error: *out_handle = NULL
  * - Caller owns the handle; release with qttune_j2534_close()
- * - Non-Windows: QT_ERR_NOT_IMPLEMENTED
+ * - Non-Windows: QTTUNE_ERR_NOT_IMPLEMENTED
  */
 qttune_status_t qttune_j2534_open(const qttune_j2534_device_t* device,
                                   qttune_j2534_handle_t** out_handle);

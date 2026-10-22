@@ -4,6 +4,8 @@
 #include "qttune/core.h"
 #include "qttune/j2534.h"
 
+#include <stdbool.h>
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -20,7 +22,7 @@ void qttune_session_dispatch_callbacks(qttune_session_t* session,
  *
  * Contract:
  * - start(): called from qttune_session_start. Must be idempotent
- *   (second call on a running transport returns QT_OK).
+ *   (second call on a running transport returns QTTUNE_OK).
  * - detach(): called exactly once from qttune_session_close, AFTER the
  *   closed flag is set. Must stop any worker threads and free impl +
  *   the qttune_transport wrapper itself. May not touch session afterwards.
@@ -52,7 +54,7 @@ qttune_status_t qttune_mock_transport_attach(qttune_session_t* session,
  *            containing \ or />)
  *
  * Query parameters (strict — malformed URIs fail at session_create
- * with QT_ERR_NO_TRANSPORT, before any DLL load):
+ * with QTTUNE_ERR_NO_TRANSPORT, before any DLL load):
  *   baud    decimal, nonzero; default resolved by connect_channel to
  *           the ISO 15765 500k default
  *   flags   0x-prefixed hex or decimal, passed to PassThruConnect
@@ -67,8 +69,10 @@ qttune_status_t qttune_mock_transport_attach(qttune_session_t* session,
  *           replaces the profile's PID rotation. Needs a channel, from
  *           filter or the profile's declarations; rejected at attach
  *           (still before any DLL load) when neither supplies one
- *   profile name — validated by qttune_session_create, shape-only here
- *   lowercase keys only, unknown keys rejected, duplicate keys last-wins
+ *   profile name — validated by qttune_session_create before attach
+ *   lowercase keys only, unknown keys rejected, duplicate keys
+ *   last-wins; the query grammar is the one every scheme shares
+ *   (core/src/uri_query.h)
  *
  * Attaches a transport to the session (idempotent like mock).
  */
@@ -105,7 +109,7 @@ qttune_status_t qttune_j2534_read_frame(qttune_j2534_handle_t* handle,
  * cap). tx_flags carries J2534 TxFlags verbatim (bit 8 =
  * CAN_29BIT_ID for 29-bit targets). timeout_ms passes through to the
  * vendor unchanged; 0 = non-blocking. out_num_written may be NULL;
- * *out_num_written < 1 after QT_OK means the vendor reported
+ * *out_num_written < 1 after QTTUNE_OK means the vendor reported
  * success-but-wrote-nothing — callers treat that as a failed send. */
 qttune_status_t qttune_j2534_write_frame(qttune_j2534_handle_t* handle,
                                          unsigned long channel,

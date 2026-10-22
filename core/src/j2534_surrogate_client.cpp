@@ -3,6 +3,7 @@
 
 #include "qttune/j2534_surrogate.h"
 #include "qttune/core.h"
+#include "qttune/j2534.h"
 #include "qttune/j2534_ptypes.h"
 #include "qttune/surrogate_protocol.h"
 
@@ -14,8 +15,12 @@
 #ifdef _WIN32
 
 #include <windows.h>
+#include <bcrypt.h>
 #include <cstdarg>
 #include <cstdio>
+#include <cwchar>
+
+#include "win_utf8.h"
 
 struct qttune_j2534_sur_handle {
     bool    pipe_connected = false;
@@ -23,9 +28,10 @@ struct qttune_j2534_sur_handle {
     HANDLE job = nullptr;
     HANDLE process = nullptr;
     /* The session log: the child's stdout/stderr, and the client's own
-     * lines for this session. log_path is "" when there is none. */
+     * lines for this session. log_path is UTF-8 (up to three bytes per
+     * path character), "" when there is none. */
     HANDLE log = INVALID_HANDLE_VALUE;
-    char log_path[MAX_PATH] = {};
+    char log_path[3 * (MAX_PATH + 64)] = {};
     uint32_t next_request_id = 1;
     uint32_t pending_response_id = 0;   /* response in flight from a
                                            timed-out transaction */
@@ -47,7 +53,7 @@ struct qttune_j2534_sur_handle {
 
 namespace {
 
-constexpr const char* kSurrogateExeName = "qttune-j2534-surrogate.exe";
+constexpr const wchar_t* kSurrogateExeName = L"qttune-j2534-surrogate.exe";
 constexpr DWORD kTransactTimeoutMs   = 3000;
 constexpr DWORD kHandshakeTimeoutMs_default = 8000;
 
@@ -101,42 +107,151 @@ void sur_log(const qttune_j2534_sur_handle_t* h, const char* fmt, ...)
 /* The session log's path. The fixed name keeps the documented path for
  * the usual single session. A second concurrent session finds it held
  * (a sharing violation) and gets a per-spawn name, so its child never
- * runs without a log. Returns
- * INVALID_HANDLE_VALUE, with path empty, if neither name opens. */
+ * runs without a log. path receives the name as UTF-8 (TEMP can hold a
+ * non-ASCII user name). Returns INVALID_HANDLE_VALUE, with path empty,
+ * if neither name opens. */
 HANDLE open_session_log(LONG seq, SECURITY_ATTRIBUTES* sa,
                         char* path, size_t cap)
 {
-    char dir[MAX_PATH] = {};
-    const DWORD tn = GetTempPathA(sizeof(dir), dir);
+    wchar_t dir[MAX_PATH] = {};
+    const DWORD tn = GetTempPathW(MAX_PATH, dir);
     /* No usable TEMP: a dotfile in the current directory. */
-    const char* prefix = (tn == 0 || tn >= sizeof(dir)) ? "." : dir;
+    const wchar_t* prefix = (tn == 0 || tn >= MAX_PATH) ? L"." : dir;
 
-    snprintf(path, cap, "%sqttune-surrogate.log", prefix);
-    HANDLE f = CreateFileA(path, GENERIC_WRITE, FILE_SHARE_READ, sa,
+    wchar_t wpath[MAX_PATH + 64];
+    swprintf(wpath, _countof(wpath), L"%lsqttune-surrogate.log", prefix);
+    HANDLE f = CreateFileW(wpath, GENERIC_WRITE, FILE_SHARE_READ, sa,
                            CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
     if (f == INVALID_HANDLE_VALUE && GetLastError() == ERROR_SHARING_VIOLATION) {
-        snprintf(path, cap, "%sqttune-surrogate-%lu-%ld.log", prefix,
-                 GetCurrentProcessId(), seq);
-        f = CreateFileA(path, GENERIC_WRITE, FILE_SHARE_READ, sa,
+        swprintf(wpath, _countof(wpath), L"%lsqttune-surrogate-%lu-%ld.log",
+                 prefix, GetCurrentProcessId(), seq);
+        f = CreateFileW(wpath, GENERIC_WRITE, FILE_SHARE_READ, sa,
                         CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
     }
-    if (f == INVALID_HANDLE_VALUE) path[0] = '\0';
+    if (f == INVALID_HANDLE_VALUE || !qttune_wide_to_utf8(wpath, path, cap)) {
+        path[0] = '\0';
+    }
     return f;
 }
 
-bool build_exe_path(char* out, size_t cap)
+/* True for a drive-absolute ("C:\", "C:/") or UNC ("\\") path. */
+bool is_absolute_path(const wchar_t* p)
 {
-    const DWORD n = GetEnvironmentVariableA("QTTUNE_SURROGATE_EXE",
+    const bool drive = ((p[0] >= L'A' && p[0] <= L'Z') || (p[0] >= L'a' && p[0] <= L'z')) &&
+                       p[1] == L':' && (p[2] == L'\\' || p[2] == L'/');
+    const bool unc = (p[0] == L'\\' && p[1] == L'\\');
+    return drive || unc;
+}
+
+/* The surrogate exe: QTTUNE_SURROGATE_EXE when set, else the one next
+ * to the running exe. The variable relocates the surrogate and nothing
+ * more: it must be an absolute path to an existing file named
+ * qttune-j2534-surrogate.exe, so it can't start some other program, and
+ * the path is always logged. On failure, *why says what was wrong. */
+bool resolve_exe_path(wchar_t* out, size_t cap, bool* from_env, const char** why)
+{
+    *from_env = false;
+    const DWORD n = GetEnvironmentVariableW(L"QTTUNE_SURROGATE_EXE",
                                              out, static_cast<DWORD>(cap));
-    if (n > 0 && n < cap) return true;
-    char self[MAX_PATH] = {};
-    if (GetModuleFileNameA(nullptr, self, MAX_PATH) == 0) return false;
-    const char* slash = strrchr(self, '\\');
-    if (slash == nullptr) return false;
+    if (n > 0) {
+        *from_env = true;
+        if (n >= cap) {
+            *why = "QTTUNE_SURROGATE_EXE is too long";
+            return false;
+        }
+        if (!is_absolute_path(out)) {
+            *why = "QTTUNE_SURROGATE_EXE is not an absolute path";
+            return false;
+        }
+        /* An absolute path has a separator; the last one starts the
+         * file name. */
+        const wchar_t* sep = wcsrchr(out, L'\\');
+        const wchar_t* fwd = wcsrchr(out, L'/');
+        if (fwd != nullptr && (sep == nullptr || fwd > sep)) sep = fwd;
+        if (_wcsicmp(sep + 1, kSurrogateExeName) != 0) {
+            *why = "QTTUNE_SURROGATE_EXE does not name qttune-j2534-surrogate.exe";
+            return false;
+        }
+        const DWORD attr = GetFileAttributesW(out);
+        if (attr == INVALID_FILE_ATTRIBUTES || (attr & FILE_ATTRIBUTE_DIRECTORY) != 0) {
+            *why = "QTTUNE_SURROGATE_EXE names no file";
+            return false;
+        }
+        return true;
+    }
+    wchar_t self[MAX_PATH] = {};
+    const DWORD sn = GetModuleFileNameW(nullptr, self, MAX_PATH);
+    const wchar_t* slash = wcsrchr(self, L'\\');
+    if (sn == 0 || sn >= MAX_PATH || slash == nullptr) {
+        *why = "the app's own path is unavailable";
+        return false;
+    }
     const size_t dir = static_cast<size_t>(slash - self) + 1;
-    if (dir + strlen(kSurrogateExeName) + 1 > cap) return false;
-    memcpy(out, self, dir);
-    strcpy_s(out + dir, cap - dir, kSurrogateExeName);
+    if (dir + wcslen(kSurrogateExeName) + 1 > cap) {
+        *why = "the app's path is too long";
+        return false;
+    }
+    wmemcpy(out, self, dir);
+    wcscpy_s(out + dir, cap - dir, kSurrogateExeName);
+    return true;
+}
+
+/* A pipe name no other process can predict. The pipe is created with
+ * FILE_FLAG_FIRST_PIPE_INSTANCE, so a process that created a guessed
+ * name first would make the spawn fail; the random part rules that out.
+ * The pid and sequence stay in the name for whoever reads a log. */
+bool make_pipe_name(LONG seq, char* out, size_t cap)
+{
+    uint8_t rnd[16];
+    if (!BCRYPT_SUCCESS(BCryptGenRandom(nullptr, rnd, sizeof(rnd),
+                                        BCRYPT_USE_SYSTEM_PREFERRED_RNG))) {
+        return false;
+    }
+    int n = snprintf(out, cap, "\\\\.\\pipe\\qttune-j2534-%lu-%ld-",
+                     GetCurrentProcessId(), seq);
+    for (uint8_t b : rnd) {
+        if (n < 0 || static_cast<size_t>(n) + 3 > cap) return false;
+        n += snprintf(out + n, cap - static_cast<size_t>(n), "%02x", b);
+    }
+    return n > 0;
+}
+
+/* The pipe's security: full access for this process's user, no one
+ * else. The default DACL also lets Everyone open a pipe for reading,
+ * which is enough to connect before the child and take the only
+ * instance. The child runs under the same token, so it still connects.
+ * Lives on the caller's stack until CreateNamedPipe returns. */
+struct user_only_security {
+    SECURITY_ATTRIBUTES sa;
+    SECURITY_DESCRIPTOR sd;
+    alignas(DWORD) BYTE acl[sizeof(ACL) + sizeof(ACCESS_ALLOWED_ACE) + SECURITY_MAX_SID_SIZE];
+    alignas(void*) BYTE user[sizeof(TOKEN_USER) + SECURITY_MAX_SID_SIZE];
+};
+
+bool init_user_only(user_only_security* s)
+{
+    HANDLE token = nullptr;
+    if (!OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &token)) {
+        return false;
+    }
+    DWORD len = 0;
+    const BOOL got = GetTokenInformation(token, TokenUser, s->user,
+                                         sizeof(s->user), &len);
+    CloseHandle(token);
+    if (!got) {
+        return false;
+    }
+    PSID sid = reinterpret_cast<TOKEN_USER*>(s->user)->User.Sid;
+    ACL* acl = reinterpret_cast<ACL*>(s->acl);
+    if (!InitializeAcl(acl, sizeof(s->acl), ACL_REVISION) ||
+        !AddAccessAllowedAce(acl, ACL_REVISION, GENERIC_ALL, sid) ||
+        !InitializeSecurityDescriptor(&s->sd, SECURITY_DESCRIPTOR_REVISION) ||
+        !SetSecurityDescriptorDacl(&s->sd, TRUE, acl, FALSE)) {
+        return false;
+    }
+    s->sa.nLength = sizeof(s->sa);
+    s->sa.lpSecurityDescriptor = &s->sd;
+    s->sa.bInheritHandle = FALSE;
     return true;
 }
 
@@ -309,32 +424,65 @@ qttune_status_t qttune_j2534_sur_open(const char* dll_path,
                                       qttune_j2534_sur_handle_t** out_handle)
 {
     if (dll_path == nullptr || out_handle == nullptr || dll_path[0] == '\0') {
-        return QT_ERR_NULL_ARGUMENT;
+        return QTTUNE_ERR_NULL_ARGUMENT;
     }
     *out_handle = nullptr;
 
-    char exe[MAX_PATH] = {};
-    if (!build_exe_path(exe, sizeof(exe))) {
-        return QT_ERR_LOAD_FAILED;
+    /* The DLL path reaches the child as UTF-16 on its command line. */
+    wchar_t wdll[QTTUNE_J2534_DLL_PATH_LEN];
+    if (!qttune_utf8_to_wide(dll_path, wdll, _countof(wdll))) {
+        SUR_LOG(nullptr, "open: dll path is not UTF-8 or too long\n");
+        return QTTUNE_ERR_LOAD_FAILED;
     }
 
     static volatile LONG counter = 0;
     const LONG seq = InterlockedIncrement(&counter);
-    char pipe_name[96];
-    snprintf(pipe_name, sizeof(pipe_name), "\\\\.\\pipe\\qttune-j2534-%lu-%ld",
-             GetCurrentProcessId(), seq);
 
     qttune_j2534_sur_handle_t* h = new (std::nothrow) qttune_j2534_sur_handle_t();
-    if (h == nullptr) return QT_ERR_OUT_OF_MEMORY;
+    if (h == nullptr) return QTTUNE_ERR_OUT_OF_MEMORY;
 
-    h->pipe = CreateNamedPipeA(pipe_name,
-                               PIPE_ACCESS_DUPLEX | FILE_FLAG_OVERLAPPED,
-                               PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT,
+    /* The log opens first, so every startup failure below lands in it.
+     * Inheritable only until the spawn: the child gets it as its
+     * stdout/stderr, and the client keeps its own copy for SUR_LOG. */
+    SECURITY_ATTRIBUTES inherit_sa = { sizeof(inherit_sa), nullptr, TRUE };
+    h->log = open_session_log(seq, &inherit_sa, h->log_path, sizeof(h->log_path));
+    const DWORD log_err = (h->log == INVALID_HANDLE_VALUE) ? GetLastError() : 0;
+
+    wchar_t exe[MAX_PATH] = {};
+    bool exe_from_env = false;
+    const char* exe_why = "";
+    const bool exe_ok = resolve_exe_path(exe, _countof(exe), &exe_from_env, &exe_why);
+    char exe8[3 * MAX_PATH];
+    (void)qttune_wide_to_utf8(exe, exe8, sizeof(exe8));
+    if (!exe_ok) {
+        SUR_LOG(h, "open: no surrogate exe: %s ('%s')\n", exe_why, exe8);
+        qttune_j2534_sur_close(h);
+        return QTTUNE_ERR_LOAD_FAILED;
+    }
+
+    /* Local, user-only, unguessable, and refused if the name already
+     * exists, so no other process can sit on the child's end. */
+    char pipe_name[128];
+    wchar_t wpipe[128];
+    user_only_security sec = {};
+    if (!make_pipe_name(seq, pipe_name, sizeof(pipe_name)) ||
+        !qttune_utf8_to_wide(pipe_name, wpipe, _countof(wpipe)) ||
+        !init_user_only(&sec)) {
+        SUR_LOG(h, "open: pipe setup failed (err=%lu)\n", GetLastError());
+        qttune_j2534_sur_close(h);
+        return QTTUNE_ERR_LOAD_FAILED;
+    }
+    h->pipe = CreateNamedPipeW(wpipe,
+                               PIPE_ACCESS_DUPLEX | FILE_FLAG_OVERLAPPED |
+                                   FILE_FLAG_FIRST_PIPE_INSTANCE,
+                               PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT |
+                                   PIPE_REJECT_REMOTE_CLIENTS,
                                1, sizeof(qttune_sur_request_t),
-                               sizeof(qttune_sur_response_t), 0, nullptr);
+                               sizeof(qttune_sur_response_t), 0, &sec.sa);
     if (h->pipe == INVALID_HANDLE_VALUE) {
-        delete h;
-        return QT_ERR_OUT_OF_MEMORY;
+        SUR_LOG(h, "open: CreateNamedPipe failed (err=%lu)\n", GetLastError());
+        qttune_j2534_sur_close(h);
+        return QTTUNE_ERR_LOAD_FAILED;
     }
 
     h->job = CreateJobObjectA(nullptr, nullptr);
@@ -343,47 +491,79 @@ qttune_status_t qttune_j2534_sur_open(const char* dll_path,
     if (h->job == nullptr ||
         !SetInformationJobObject(h->job, JobObjectExtendedLimitInformation,
                                  &ji, sizeof(ji))) {
+        SUR_LOG(h, "open: job object setup failed (err=%lu)\n", GetLastError());
         qttune_j2534_sur_close(h);
-        return QT_ERR_OUT_OF_MEMORY;
+        return QTTUNE_ERR_LOAD_FAILED;
     }
 
-    char cmdline[MAX_PATH * 3 + 256];
-    snprintf(cmdline, sizeof(cmdline), "\"%s\" \"%s\" \"%s\"",
-             exe, dll_path, pipe_name);
+    wchar_t cmdline[MAX_PATH * 3 + 256];
+    if (swprintf(cmdline, _countof(cmdline), L"\"%ls\" \"%ls\" \"%ls\"",
+                 exe, wdll, wpipe) < 0) {
+        qttune_j2534_sur_close(h);
+        return QTTUNE_ERR_LOAD_FAILED;
+    }
 
-    /* Inheritable only until the spawn: the child gets it as its
-     * stdout/stderr, and the client keeps its own copy for SUR_LOG. */
-    SECURITY_ATTRIBUTES inherit_sa = { sizeof(inherit_sa), nullptr, TRUE };
-    h->log = open_session_log(seq, &inherit_sa, h->log_path, sizeof(h->log_path));
-    const DWORD log_err = (h->log == INVALID_HANDLE_VALUE) ? GetLastError() : 0;
-
-    STARTUPINFOA si = { sizeof(si) };
+    /* Only the log reaches the child. Inheritance on its own would hand
+     * it every inheritable handle in the app; the handle list narrows it
+     * to the one named. */
+    STARTUPINFOEXW si = {};
+    si.StartupInfo.cb = sizeof(si);
+    alignas(void*) BYTE attr_buf[128];
+    LPPROC_THREAD_ATTRIBUTE_LIST attrs = nullptr;
     if (h->log != INVALID_HANDLE_VALUE) {
-        si.dwFlags |= STARTF_USESTDHANDLES;
-        si.hStdOutput = h->log;
-        si.hStdError  = h->log;
+        SIZE_T attr_size = 0;
+        (void)InitializeProcThreadAttributeList(nullptr, 1, 0, &attr_size);
+        attrs = reinterpret_cast<LPPROC_THREAD_ATTRIBUTE_LIST>(attr_buf);
+        if (attr_size > sizeof(attr_buf) ||
+            !InitializeProcThreadAttributeList(attrs, 1, 0, &attr_size)) {
+            SUR_LOG(h, "open: attribute list failed (size %zu)\n",
+                    static_cast<size_t>(attr_size));
+            qttune_j2534_sur_close(h);
+            return QTTUNE_ERR_LOAD_FAILED;
+        }
+        if (!UpdateProcThreadAttribute(attrs, 0, PROC_THREAD_ATTRIBUTE_HANDLE_LIST,
+                                       &h->log, sizeof(h->log), nullptr, nullptr)) {
+            DeleteProcThreadAttributeList(attrs);
+            SUR_LOG(h, "open: handle list failed (err=%lu)\n", GetLastError());
+            qttune_j2534_sur_close(h);
+            return QTTUNE_ERR_LOAD_FAILED;
+        }
+        si.lpAttributeList = attrs;
+        si.StartupInfo.dwFlags |= STARTF_USESTDHANDLES;
+        si.StartupInfo.hStdOutput = h->log;
+        si.StartupInfo.hStdError  = h->log;
     }
     PROCESS_INFORMATION pi = {};
-    if (!CreateProcessA(nullptr, cmdline, nullptr, nullptr,
-                        (h->log != INVALID_HANDLE_VALUE),
-                        CREATE_SUSPENDED | CREATE_NO_WINDOW,
-                        nullptr, nullptr, &si, &pi)) {
-        SUR_LOG(h, "open: CreateProcess failed (err=%lu) exe='%s'\n", GetLastError(), exe);
+    /* The exe is named twice, as the application and in the command
+     * line, so CreateProcess never searches for it. */
+    const BOOL spawned = CreateProcessW(
+        exe, cmdline, nullptr, nullptr, attrs != nullptr,
+        CREATE_SUSPENDED | CREATE_NO_WINDOW |
+            (attrs != nullptr ? EXTENDED_STARTUPINFO_PRESENT : 0),
+        nullptr, nullptr, &si.StartupInfo, &pi);
+    const DWORD spawn_err = GetLastError();
+    if (attrs != nullptr) {
+        DeleteProcThreadAttributeList(attrs);
+    }
+    if (!spawned) {
+        SUR_LOG(h, "open: CreateProcess failed (err=%lu) exe='%s'\n", spawn_err, exe8);
         qttune_j2534_sur_close(h);
-        return QT_ERR_LOAD_FAILED;
+        return QTTUNE_ERR_LOAD_FAILED;
     }
     if (h->log != INVALID_HANDLE_VALUE) {
-        /* The next session's child must not inherit this session's log. */
+        /* No later spawn, by this client or anyone in the app, inherits
+         * this session's log. */
         SetHandleInformation(h->log, HANDLE_FLAG_INHERIT, 0);
     }
     /* Logged while the child is still suspended, so it heads the
      * session log instead of racing the child's first line. */
+    SUR_LOG(h, "open: child pid %lu, surrogate '%s'%s, dll '%s'\n",
+            pi.dwProcessId, exe8,
+            exe_from_env ? " (QTTUNE_SURROGATE_EXE)" : "", dll_path);
     if (h->log_path[0] != '\0') {
-        SUR_LOG(h, "open: child pid %lu, dll '%s', log '%s'\n",
-                pi.dwProcessId, dll_path, h->log_path);
+        SUR_LOG(h, "open: log '%s'\n", h->log_path);
     } else {
-        SUR_LOG(h, "open: child pid %lu, dll '%s', no log (err=%lu)\n",
-                pi.dwProcessId, dll_path, log_err);
+        SUR_LOG(h, "open: no log (err=%lu)\n", log_err);
     }
 
     h->process = pi.hProcess;
@@ -398,7 +578,7 @@ qttune_status_t qttune_j2534_sur_open(const char* dll_path,
         TerminateProcess(pi.hProcess, 1);
         CloseHandle(pi.hThread);
         qttune_j2534_sur_close(h);
-        return QT_ERR_LOAD_FAILED;
+        return QTTUNE_ERR_LOAD_FAILED;
     }
     ResumeThread(pi.hThread);
     CloseHandle(pi.hThread);
@@ -407,7 +587,7 @@ qttune_status_t qttune_j2534_sur_open(const char* dll_path,
     ov.hEvent = CreateEventA(nullptr, TRUE, FALSE, nullptr);
     if (ov.hEvent == nullptr) {
         qttune_j2534_sur_close(h);
-        return QT_ERR_LOAD_FAILED;
+        return QTTUNE_ERR_LOAD_FAILED;
     }
     BOOL conn = ConnectNamedPipe(h->pipe, &ov);
     DWORD cerr = GetLastError();
@@ -443,7 +623,7 @@ qttune_status_t qttune_j2534_sur_open(const char* dll_path,
     if (!connected) {
         SUR_LOG(h, "open: handshake failed — child never connected\n");
         qttune_j2534_sur_close(h);
-        return QT_ERR_LOAD_FAILED;
+        return QTTUNE_ERR_LOAD_FAILED;
     }
 
     h->pipe_connected = true;
@@ -482,15 +662,15 @@ qttune_status_t qttune_j2534_sur_open(const char* dll_path,
         TerminateProcess(h->process, 1);
         WaitForSingleObject(h->process, 1000);
         qttune_j2534_sur_close(h);
-        return QT_ERR_LOAD_FAILED;
+        return QTTUNE_ERR_LOAD_FAILED;
     }
     if (resp.status != static_cast<int32_t>(QTTUNE_PT_STATUS_NOERROR)) {
         SUR_LOG(h, "open: PassThruOpen refused (vendor status %d)\n", resp.status);
         qttune_j2534_sur_close(h);
-        return QT_ERR_LOAD_FAILED;
+        return QTTUNE_ERR_LOAD_FAILED;
     }
     *out_handle = h;
-    return QT_OK;
+    return QTTUNE_OK;
 }
 
 qttune_status_t qttune_j2534_sur_connect_channel(qttune_j2534_sur_handle_t* h,
@@ -498,7 +678,7 @@ qttune_status_t qttune_j2534_sur_connect_channel(qttune_j2534_sur_handle_t* h,
                                                  unsigned long flags,
                                                  unsigned long* out_channel)
 {
-    if (h == nullptr || out_channel == nullptr) return QT_ERR_NULL_ARGUMENT;
+    if (h == nullptr || out_channel == nullptr) return QTTUNE_ERR_NULL_ARGUMENT;
     if (baud == 0) baud = QTTUNE_PT_BAUD_ISO15765_500K;
 
     qttune_sur_request_t req = {};
@@ -510,28 +690,28 @@ qttune_status_t qttune_j2534_sur_connect_channel(qttune_j2534_sur_handle_t* h,
 
     qttune_sur_response_t resp = {};
     if (!transact(h, req, &resp, kTransactTimeoutMs)) {
-        return QT_ERR_NO_TRANSPORT;
+        return QTTUNE_ERR_NO_TRANSPORT;
     }
     if (resp.status != static_cast<int32_t>(QTTUNE_PT_STATUS_NOERROR)) {
         SUR_LOG(h, "connect: PassThruConnect refused (vendor status %d)\n",
                 resp.status);
-        return QT_ERR_NO_TRANSPORT;
+        return QTTUNE_ERR_NO_TRANSPORT;
     }
     *out_channel = resp.handle_or_channel;
-    return QT_OK;
+    return QTTUNE_OK;
 }
 
 qttune_status_t qttune_j2534_sur_disconnect_channel(qttune_j2534_sur_handle_t* h,
                                                     unsigned long channel)
 {
-    if (h == nullptr) return QT_ERR_NULL_ARGUMENT;
+    if (h == nullptr) return QTTUNE_ERR_NULL_ARGUMENT;
     qttune_sur_request_t req = {};
     req.request_id = h->next_request_id++;
     req.opcode = QTTUNE_SUR_OP_DISCONNECT;
     req.u.disconnect.channel_id = channel;
     qttune_sur_response_t resp = {};
-    if (!transact(h, req, &resp, kTransactTimeoutMs)) return QT_ERR_NO_TRANSPORT;
-    return QT_OK;
+    if (!transact(h, req, &resp, kTransactTimeoutMs)) return QTTUNE_ERR_NO_TRANSPORT;
+    return QTTUNE_OK;
 }
 
 qttune_status_t qttune_j2534_sur_write_frame(qttune_j2534_sur_handle_t* h,
@@ -544,7 +724,7 @@ qttune_status_t qttune_j2534_sur_write_frame(qttune_j2534_sur_handle_t* h,
 {
     if (h == nullptr || data == nullptr || len == 0 ||
         len > QTTUNE_SUR_MSG_MAX) {
-        return QT_ERR_NULL_ARGUMENT;
+        return QTTUNE_ERR_NULL_ARGUMENT;
     }
     if (out_num_written != nullptr) *out_num_written = 0;
 
@@ -559,13 +739,13 @@ qttune_status_t qttune_j2534_sur_write_frame(qttune_j2534_sur_handle_t* h,
 
     qttune_sur_response_t resp = {};
     if (!transact(h, req, &resp, kTransactTimeoutMs)) {
-        return QT_ERR_NO_TRANSPORT;
+        return QTTUNE_ERR_NO_TRANSPORT;
     }
     if (resp.status != static_cast<int32_t>(QTTUNE_PT_STATUS_NOERROR)) {
-        return QT_ERR_NO_TRANSPORT;
+        return QTTUNE_ERR_NO_TRANSPORT;
     }
     if (out_num_written != nullptr) *out_num_written = resp.aux;
-    return QT_OK;
+    return QTTUNE_OK;
 }
 
 qttune_status_t qttune_j2534_sur_ioctl(qttune_j2534_sur_handle_t* h,
@@ -577,10 +757,10 @@ qttune_status_t qttune_j2534_sur_ioctl(qttune_j2534_sur_handle_t* h,
                                        uint32_t* out_len)
 {
     if (h == nullptr || input_len > QTTUNE_SUR_IOCTL_DATA_MAX) {
-        return QT_ERR_NULL_ARGUMENT;
+        return QTTUNE_ERR_NULL_ARGUMENT;
     }
     if (input == nullptr && input_len != 0) {
-        return QT_ERR_NULL_ARGUMENT;
+        return QTTUNE_ERR_NULL_ARGUMENT;
     }
     if (out_len != nullptr) *out_len = 0;
 
@@ -595,7 +775,7 @@ qttune_status_t qttune_j2534_sur_ioctl(qttune_j2534_sur_handle_t* h,
     qttune_sur_response_t resp = {};
     if (!transact(h, req, &resp, kTransactTimeoutMs) ||
         resp.status != static_cast<int32_t>(QTTUNE_PT_STATUS_NOERROR)) {
-        return QT_ERR_NO_TRANSPORT;
+        return QTTUNE_ERR_NO_TRANSPORT;
     }
     /* Trust boundary, as for read's num_frames: a mismatched child (a
      * stale build-win32 tree, #19) could claim more than the wire
@@ -604,13 +784,13 @@ qttune_status_t qttune_j2534_sur_ioctl(qttune_j2534_sur_handle_t* h,
     if (resp.data_len > QTTUNE_SUR_IOCTL_DATA_MAX) {
         SUR_LOG(h, "ioctl: data_len=%u exceeds the wire limit (skew?)\n",
                 resp.data_len);
-        return QT_ERR_NO_TRANSPORT;
+        return QTTUNE_ERR_NO_TRANSPORT;
     }
     if (output != nullptr && resp.data_len > 0) {
         memcpy(output, resp.data, resp.data_len);
     }
     if (out_len != nullptr) *out_len = resp.data_len;
-    return QT_OK;
+    return QTTUNE_OK;
 }
 
 qttune_status_t qttune_j2534_sur_start_msg_filter(qttune_j2534_sur_handle_t* h,
@@ -627,23 +807,23 @@ qttune_status_t qttune_j2534_sur_start_msg_filter(qttune_j2534_sur_handle_t* h,
 {
     if (h == nullptr || mask == nullptr || pattern == nullptr ||
         out_filter_id == nullptr) {
-        return QT_ERR_NULL_ARGUMENT;
+        return QTTUNE_ERR_NULL_ARGUMENT;
     }
     if (mask_len < 1 || mask_len > QTTUNE_SUR_FILTER_PATTERN_MAX ||
         mask_len != pattern_len) {
-        return QT_ERR_NULL_ARGUMENT;
+        return QTTUNE_ERR_NULL_ARGUMENT;
     }
     if (fc_len > QTTUNE_SUR_FILTER_PATTERN_MAX) {
-        return QT_ERR_NULL_ARGUMENT;
+        return QTTUNE_ERR_NULL_ARGUMENT;
     }
     if (filter_type == QTTUNE_PT_FLOW_CONTROL_FILTER && fc_len != mask_len) {
-        return QT_ERR_NULL_ARGUMENT;
+        return QTTUNE_ERR_NULL_ARGUMENT;
     }
     if (filter_type != QTTUNE_PT_FLOW_CONTROL_FILTER && fc_len != 0) {
-        return QT_ERR_NULL_ARGUMENT;
+        return QTTUNE_ERR_NULL_ARGUMENT;
     }
     if (fc_len > 0 && flow_control == nullptr) {
-        return QT_ERR_NULL_ARGUMENT;
+        return QTTUNE_ERR_NULL_ARGUMENT;
     }
     *out_filter_id = 0;
 
@@ -665,17 +845,17 @@ qttune_status_t qttune_j2534_sur_start_msg_filter(qttune_j2534_sur_handle_t* h,
     qttune_sur_response_t resp = {};
     if (!transact(h, req, &resp, kTransactTimeoutMs) ||
         resp.status != static_cast<int32_t>(QTTUNE_PT_STATUS_NOERROR)) {
-        return QT_ERR_NO_TRANSPORT;
+        return QTTUNE_ERR_NO_TRANSPORT;
     }
     *out_filter_id = resp.handle_or_channel;
-    return QT_OK;
+    return QTTUNE_OK;
 }
 
 qttune_status_t qttune_j2534_sur_stop_msg_filter(qttune_j2534_sur_handle_t* h,
                                                   unsigned long channel,
                                                   unsigned long filter_id)
 {
-    if (h == nullptr) return QT_ERR_NULL_ARGUMENT;
+    if (h == nullptr) return QTTUNE_ERR_NULL_ARGUMENT;
     qttune_sur_request_t req = {};
     req.request_id = h->next_request_id++;
     req.opcode = QTTUNE_SUR_OP_STOP_FILTER;
@@ -685,9 +865,9 @@ qttune_status_t qttune_j2534_sur_stop_msg_filter(qttune_j2534_sur_handle_t* h,
     qttune_sur_response_t resp = {};
     if (!transact(h, req, &resp, kTransactTimeoutMs) ||
         resp.status != static_cast<int32_t>(QTTUNE_PT_STATUS_NOERROR)) {
-        return QT_ERR_NO_TRANSPORT;
+        return QTTUNE_ERR_NO_TRANSPORT;
     }
-    return QT_OK;
+    return QTTUNE_OK;
 }
 
 qttune_status_t qttune_j2534_sur_read_frame(qttune_j2534_sur_handle_t* h,
@@ -697,7 +877,7 @@ qttune_status_t qttune_j2534_sur_read_frame(qttune_j2534_sur_handle_t* h,
                                             bool* got_frame)
 {
     if (h == nullptr || out_frame == nullptr || got_frame == nullptr) {
-        return QT_ERR_NULL_ARGUMENT;
+        return QTTUNE_ERR_NULL_ARGUMENT;
     }
     *got_frame = false;
 
@@ -717,7 +897,7 @@ qttune_status_t qttune_j2534_sur_read_frame(qttune_j2534_sur_handle_t* h,
         out_frame->data_length = static_cast<uint16_t>(n);
         memcpy(out_frame->data, s.data, n);
         *got_frame = true;
-        return QT_OK;
+        return QTTUNE_OK;
     }
 
     qttune_sur_request_t req = {};
@@ -731,13 +911,13 @@ qttune_status_t qttune_j2534_sur_read_frame(qttune_j2534_sur_handle_t* h,
      * out before the child does means the child is hung, not busy. */
     const DWORD tmo = timeout_ms + 500;
     if (!transact(h, req, &resp, tmo)) {
-        return QT_ERR_TRANSPORT_HARD_FAILURE;   /* child dead/wedged/skewed */
+        return QTTUNE_ERR_TRANSPORT_HARD_FAILURE;   /* child dead/wedged/skewed */
     }
     /* Trust boundary: a skewed stale child can send garbage. */
     if (resp.num_frames > QTTUNE_SUR_MAX_FRAMES_PER_READ) {
         SUR_LOG(h, "read: num_frames=%u exceeds capacity (skew?)\n",
                 resp.num_frames);
-        return QT_ERR_TRANSPORT_HARD_FAILURE;
+        return QTTUNE_ERR_TRANSPORT_HARD_FAILURE;
     }
 
     /* Deliver first, judge the status second. Per J2534-1 a read
@@ -760,15 +940,15 @@ qttune_status_t qttune_j2534_sur_read_frame(qttune_j2534_sur_handle_t* h,
 
     /* Empty batch: the status decides. */
     if (resp.status == static_cast<int32_t>(QTTUNE_PT_STATUS_TIMEOUT)) {
-        return QT_ERR_VEHICLE_TIMEOUT;
+        return QTTUNE_ERR_VEHICLE_TIMEOUT;
     }
     if (resp.status != static_cast<int32_t>(QTTUNE_PT_STATUS_NOERROR)) {
         if (resp.status == static_cast<int32_t>(QTTUNE_PT_STATUS_BUFFER_EMPTY)) {
-            return QT_OK;   /* queue drained — quiet, not failed */
+            return QTTUNE_OK;   /* queue drained — quiet, not failed */
         }
-        return QT_ERR_TRANSPORT_HARD_FAILURE;
+        return QTTUNE_ERR_TRANSPORT_HARD_FAILURE;
     }
-    return QT_OK;   /* NOERROR, nothing available */
+    return QTTUNE_OK;   /* NOERROR, nothing available */
 }
 
 qttune_status_t qttune_j2534_sur_inject_test_frame(qttune_j2534_sur_handle_t* h,
@@ -778,7 +958,7 @@ qttune_status_t qttune_j2534_sur_inject_test_frame(qttune_j2534_sur_handle_t* h,
                                                    uint32_t rx_flags)
 {
     if (h == nullptr || data == nullptr || len == 0 || len > 64) {
-        return QT_ERR_NULL_ARGUMENT;
+        return QTTUNE_ERR_NULL_ARGUMENT;
     }
     qttune_sur_request_t req = {};
     req.request_id = h->next_request_id++;
@@ -791,14 +971,14 @@ qttune_status_t qttune_j2534_sur_inject_test_frame(qttune_j2534_sur_handle_t* h,
     qttune_sur_response_t resp = {};
     if (!transact(h, req, &resp, kTransactTimeoutMs) ||
         resp.status != static_cast<int32_t>(QTTUNE_PT_STATUS_NOERROR)) {
-        return QT_ERR_NO_TRANSPORT;
+        return QTTUNE_ERR_NO_TRANSPORT;
     }
-    return QT_OK;
+    return QTTUNE_OK;
 }
 
 qttune_status_t qttune_j2534_sur_close(qttune_j2534_sur_handle_t* h)
 {
-    if (h == nullptr) return QT_OK;
+    if (h == nullptr) return QTTUNE_OK;
     if (h->pipe_connected && h->pipe != INVALID_HANDLE_VALUE &&
         h->process != nullptr &&
         WaitForSingleObject(h->process, 0) != WAIT_OBJECT_0) {
@@ -818,7 +998,7 @@ qttune_status_t qttune_j2534_sur_close(qttune_j2534_sur_handle_t* h)
     if (h->job != nullptr) CloseHandle(h->job);
     if (h->log != INVALID_HANDLE_VALUE) CloseHandle(h->log);
     delete h;
-    return QT_OK;
+    return QTTUNE_OK;
 }
 
 const char* qttune_j2534_sur_log_path(const qttune_j2534_sur_handle_t* h)
@@ -833,38 +1013,38 @@ const char* qttune_j2534_sur_log_path(const qttune_j2534_sur_handle_t* h)
 extern "C" {
 
 qttune_status_t qttune_j2534_sur_open(const char*, qttune_j2534_sur_handle_t**)
-{ return QT_ERR_NOT_IMPLEMENTED; }
+{ return QTTUNE_ERR_NOT_IMPLEMENTED; }
 qttune_status_t qttune_j2534_sur_connect_channel(qttune_j2534_sur_handle_t*,
                                                  unsigned long, unsigned long,
                                                  unsigned long*)
-{ return QT_ERR_NOT_IMPLEMENTED; }
+{ return QTTUNE_ERR_NOT_IMPLEMENTED; }
 qttune_status_t qttune_j2534_sur_disconnect_channel(qttune_j2534_sur_handle_t*, unsigned long)
-{ return QT_ERR_NOT_IMPLEMENTED; }
+{ return QTTUNE_ERR_NOT_IMPLEMENTED; }
 qttune_status_t qttune_j2534_sur_write_frame(qttune_j2534_sur_handle_t*, unsigned long,
                                              const uint8_t*, uint32_t, uint32_t,
                                              uint32_t, uint32_t*)
-{ return QT_ERR_NOT_IMPLEMENTED; }
+{ return QTTUNE_ERR_NOT_IMPLEMENTED; }
 qttune_status_t qttune_j2534_sur_ioctl(qttune_j2534_sur_handle_t*, unsigned long,
                                        uint32_t, const uint8_t*, uint32_t,
                                        uint8_t*, uint32_t*)
-{ return QT_ERR_NOT_IMPLEMENTED; }
+{ return QTTUNE_ERR_NOT_IMPLEMENTED; }
 qttune_status_t qttune_j2534_sur_start_msg_filter(qttune_j2534_sur_handle_t*, unsigned long,
                                                   uint32_t, const uint8_t*, uint32_t,
                                                   const uint8_t*, uint32_t,
                                                   const uint8_t*, uint32_t, uint32_t,
                                                   unsigned long*)
-{ return QT_ERR_NOT_IMPLEMENTED; }
+{ return QTTUNE_ERR_NOT_IMPLEMENTED; }
 qttune_status_t qttune_j2534_sur_stop_msg_filter(qttune_j2534_sur_handle_t*, unsigned long,
                                                   unsigned long)
-{ return QT_ERR_NOT_IMPLEMENTED; }
+{ return QTTUNE_ERR_NOT_IMPLEMENTED; }
 qttune_status_t qttune_j2534_sur_read_frame(qttune_j2534_sur_handle_t*, unsigned long,
                                             qttune_frame_t*, uint32_t, bool*)
-{ return QT_ERR_NOT_IMPLEMENTED; }
+{ return QTTUNE_ERR_NOT_IMPLEMENTED; }
 qttune_status_t qttune_j2534_sur_inject_test_frame(qttune_j2534_sur_handle_t*, const uint8_t*,
                                                   uint32_t, uint32_t, uint32_t)
-{ return QT_ERR_NOT_IMPLEMENTED; }
+{ return QTTUNE_ERR_NOT_IMPLEMENTED; }
 qttune_status_t qttune_j2534_sur_close(qttune_j2534_sur_handle_t*)
-{ return QT_ERR_NOT_IMPLEMENTED; }
+{ return QTTUNE_ERR_NOT_IMPLEMENTED; }
 const char* qttune_j2534_sur_log_path(const qttune_j2534_sur_handle_t*)
 { return ""; }
 

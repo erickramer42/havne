@@ -9,6 +9,7 @@
 #include "qttune/signals.h"
 #include "qttune/signal_sets.h"
 #include "mock_drive_cycle.h"
+#include "uri_query.h"
 
 #include <atomic>
 #include <chrono>
@@ -49,7 +50,7 @@ void mock_worker(qttune_mock_transport* t)
         frame.timestamp_us = static_cast<uint64_t>(
             std::chrono::duration_cast<std::chrono::microseconds>(
                 std::chrono::steady_clock::now() - t->epoch).count());
-        frame.data_length = MOCK_TELEMETRY_PAYLOAD_LEN;
+        frame.data_length = QTTUNE_MOCK_TELEMETRY_PAYLOAD_LEN;
 
         /* Every 16th frame is a 29-bit "diagnostic" frame carrying the
          * same payload. It exercises FLAG_EXTENDED, and because decode
@@ -59,7 +60,7 @@ void mock_worker(qttune_mock_transport* t)
             frame.arbitration_id = MOCK_DIAG_ID;
         } else {
             frame.flags = QTTUNE_FRAME_FLAG_FD;
-            frame.arbitration_id = MOCK_TELEMETRY_ARB_ID;
+            frame.arbitration_id = QTTUNE_MOCK_TELEMETRY_ARB_ID;
         }
 
         t->sim.step();
@@ -78,16 +79,16 @@ qttune_status_t mock_start(qttune_session_t* session, void* impl)
     (void)session;   /* impl carries everything; fixes CI warning C4100 */
     qttune_mock_transport* t = static_cast<qttune_mock_transport*>(impl);
     if (t == nullptr) {
-        return QT_ERR_NO_TRANSPORT;
+        return QTTUNE_ERR_NO_TRANSPORT;
     }
     if (t->worker.joinable()) {
-        return QT_OK; /* already running — idempotent */
+        return QTTUNE_OK; /* already running — idempotent */
     }
     try {
         t->worker = std::thread(mock_worker, t);
-        return QT_OK;
+        return QTTUNE_OK;
     } catch (...) {
-        return QT_ERR_OUT_OF_MEMORY;
+        return QTTUNE_ERR_OUT_OF_MEMORY;
     }
 }
 
@@ -121,11 +122,18 @@ const qttune_transport_ops_t kMockTransportOps = {
 extern "C" {
 
 qttune_status_t qttune_mock_transport_attach(qttune_session_t* session,
-                                             const char* /*uri*/)
+                                             const char* uri)
 {
-    /* uri params (?interval=...) are a later addition */
     if (session->transport != nullptr) {
-        return QT_OK; /* idempotent */
+        return QTTUNE_OK; /* idempotent */
+    }
+    /* The mock has no parameters of its own: profile is core's, and any
+     * other key is rejected, as on j2534://. The text before the query
+     * is a free label (mock://demo). core.cpp verified the prefix. */
+    if (!qttune_uri::for_each_param(
+            qttune_uri::query_of(uri + 7),
+            [](const qttune_uri::param& p) { return p.is("profile"); })) {
+        return QTTUNE_ERR_NO_TRANSPORT;
     }
     try {
         qttune_mock_transport* impl = new qttune_mock_transport();
@@ -133,16 +141,16 @@ qttune_status_t qttune_mock_transport_attach(qttune_session_t* session,
             session->transport = new qttune_transport_t{&kMockTransportOps, impl};
         } catch (...) {
             delete impl;   /* wrapper alloc failed — no leak */
-            return QT_ERR_OUT_OF_MEMORY;
+            return QTTUNE_ERR_OUT_OF_MEMORY;
         }
         impl->session = session;  /* for callback dispatch */
         impl->epoch = std::chrono::steady_clock::now();  /* session start */
     } catch (...) {
-        return QT_ERR_OUT_OF_MEMORY;
+        return QTTUNE_ERR_OUT_OF_MEMORY;
     }
     /* NOTE: worker thread NOT started here — explicit start required.
      * Keeps registration-only sessions single-threaded for tests. */
-    return QT_OK;
+    return QTTUNE_OK;
 }
 
 } // extern "C"

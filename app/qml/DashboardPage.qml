@@ -27,13 +27,13 @@ Page {
     component Tap: QtObject {
         required property var names
         readonly property SignalHub.Entry entry: hub.lookup(names)
-        readonly property bool live: QtTune.connected && entry !== null && entry.hasValue
+        readonly property bool live: Bridge.connected && entry !== null && entry.hasValue
         readonly property real value: entry ? entry.value : 0
         // Same 3 s staleness rule as LiveView
         readonly property bool stale: live && entry.ageMs > 3000
         readonly property string unit: entry ? entry.unit : ""
         readonly property int decimals: entry ? entry.decimals : 0
-        readonly property string note: !QtTune.connected ? qsTr("no session")
+        readonly property string note: !Bridge.connected ? qsTr("no session")
                                      : entry === null ? qsTr("not in profile")
                                      : !entry.hasValue ? qsTr("waiting for data")
                                      : ""
@@ -52,7 +52,7 @@ Page {
     // is on screen while connected
     property bool sweptThisSession: false
     function maybeSweep() {
-        if (!QtTune.connected) {
+        if (!Bridge.connected) {
             sweptThisSession = false
             return
         }
@@ -68,9 +68,9 @@ Page {
     onVisibleChanged: maybeSweep()
     Component.onCompleted: maybeSweep()
     Connections {
-        target: QtTune
+        target: Bridge
         function onConnectedChanged() {
-            if (QtTune.connected) root.resetPeaks()
+            if (Bridge.connected) root.resetPeaks()
             root.maybeSweep()
         }
     }
@@ -97,7 +97,7 @@ Page {
                 Rectangle {
                     implicitWidth: 8; implicitHeight: 8   // layout-managed
                     radius: 4
-                    color: Theme.linkColor(QtTune.linkState)
+                    color: Theme.linkColor(Bridge.linkState)
                 }
                 Label {
                     Layout.fillWidth: true
@@ -105,11 +105,11 @@ Page {
                     // Short statuses come from Theme.linkLabel; "ok" keeps
                     // the richer URI text. Long-form detail (episode
                     // counts, error codes) stays in LiveView's banner.
-                    text: QtTune.linkState === "ok"
-                          ? qsTr("Live · %1").arg(QtTune.currentUri)
-                          : Theme.linkLabel(QtTune.linkState)
+                    text: Bridge.linkState === "ok"
+                          ? qsTr("Live · %1").arg(Bridge.currentUri)
+                          : Theme.linkLabel(Bridge.linkState)
                     font.pixelSize: 13
-                    color: Theme.linkColor(QtTune.linkState)
+                    color: Theme.linkColor(Bridge.linkState)
                 }
                 ThemedButton {
                     text: qsTr("Reset peaks")

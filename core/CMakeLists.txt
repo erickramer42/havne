@@ -5,7 +5,7 @@ add_library(qttune-core STATIC
     src/mock_transport.cpp
     src/j2534_loader.cpp
     src/j2534_transport.cpp
-    src/signals.cpp  
+    src/signals.cpp
     src/signal_sets.cpp
     src/obd2_signal_sets.cpp
     src/j2534_surrogate_client.cpp
@@ -17,10 +17,13 @@ target_include_directories(qttune-core
         ${CMAKE_BINARY_DIR}/generated   # generated version.h
 )
 
-target_compile_options(qttune-core PRIVATE
-    $<$<CXX_COMPILER_ID:MSVC>:/W4>
-    $<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-Wall -Wextra>
-)
+qttune_enable_warnings(qttune-core)
+
+# bcrypt: BCryptGenRandom names the surrogate's pipe. A static library's
+# private link still reaches whatever links core.
+if(WIN32)
+    target_link_libraries(qttune-core PRIVATE bcrypt)
+endif()
 
 # Critical invariant: core never links Qt (ADR-0001). The check lives at
 # the end of the root CMakeLists.txt, after every subdirectory has

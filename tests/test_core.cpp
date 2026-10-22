@@ -38,7 +38,7 @@ void counting_callback(const qttune_frame_t* frame, void* user_data)
 qttune_session_t* make_test_session(void)
 {
     qttune_session_t* session = nullptr;
-    EXPECT_EQ(qttune_session_create("mock://test", &session), QT_OK);
+    EXPECT_EQ(qttune_session_create("mock://test", &session), QTTUNE_OK);
     return session;
 }
 
@@ -67,15 +67,16 @@ bool wait_for(Predicate pred, int timeout_ms, int poll_ms = 10)
 } // anonymous namespace
 
 TEST(CoreTest, StatusStringValidValues) {
-    EXPECT_STREQ(qttune_status_string(QT_OK), "success");
-    EXPECT_STREQ(qttune_status_string(QT_ERR_NULL_ARGUMENT), "null argument");
-    EXPECT_STREQ(qttune_status_string(QT_ERR_NOT_IMPLEMENTED), "not implemented yet");
-    EXPECT_STREQ(qttune_status_string(QT_ERR_NO_TRANSPORT), "no transport available");
-    EXPECT_STREQ(qttune_status_string(QT_ERR_OUT_OF_MEMORY), "out of memory");
-    EXPECT_STREQ(qttune_status_string(QT_ERR_SESSION_CLOSED), "session already closed");
-    EXPECT_STREQ(qttune_status_string(QT_ERR_ALREADY_REGISTERED), "already registered");
-    EXPECT_STREQ(qttune_status_string(QT_ERR_LOAD_FAILED), "failed to load transport library");
-    
+    EXPECT_STREQ(qttune_status_string(QTTUNE_OK), "success");
+    EXPECT_STREQ(qttune_status_string(QTTUNE_ERR_NULL_ARGUMENT), "null argument");
+    EXPECT_STREQ(qttune_status_string(QTTUNE_ERR_NOT_IMPLEMENTED), "not implemented yet");
+    EXPECT_STREQ(qttune_status_string(QTTUNE_ERR_NO_TRANSPORT), "no transport available");
+    EXPECT_STREQ(qttune_status_string(QTTUNE_ERR_OUT_OF_MEMORY), "out of memory");
+    EXPECT_STREQ(qttune_status_string(QTTUNE_ERR_SESSION_CLOSED), "session already closed");
+    EXPECT_STREQ(qttune_status_string(QTTUNE_ERR_ALREADY_REGISTERED), "already registered");
+    EXPECT_STREQ(qttune_status_string(QTTUNE_ERR_LOAD_FAILED), "failed to load transport library");
+    EXPECT_STREQ(qttune_status_string(QTTUNE_ERR_INVALID_ARGUMENT), "invalid argument");
+
     /* Explicit cast required by MSVC for enum conversion */
     EXPECT_STRNE(qttune_status_string(static_cast<qttune_status_t>(999)), nullptr);
 }
@@ -88,20 +89,20 @@ TEST(CoreTest, VersionStringContainsNumbers) {
 }
 
 TEST(CoreTest, InitShutdownIdempotent) {
-    EXPECT_EQ(qttune_init(), QT_OK);
-    EXPECT_EQ(qttune_init(), QT_OK);
+    EXPECT_EQ(qttune_init(), QTTUNE_OK);
+    EXPECT_EQ(qttune_init(), QTTUNE_OK);
     
     qttune_shutdown();
     
-    EXPECT_EQ(qttune_init(), QT_OK);
+    EXPECT_EQ(qttune_init(), QTTUNE_OK);
     qttune_shutdown();
 }
 
 TEST(CoreTest, SessionCreateRequiresNonNullPointer) {
     qttune_session_t* session = nullptr;
-    EXPECT_EQ(qttune_session_create("mock://test", &session), QT_OK);
+    EXPECT_EQ(qttune_session_create("mock://test", &session), QTTUNE_OK);
     
-    EXPECT_EQ(qttune_session_create("mock://test", nullptr), QT_ERR_NULL_ARGUMENT);
+    EXPECT_EQ(qttune_session_create("mock://test", nullptr), QTTUNE_ERR_NULL_ARGUMENT);
     
     if (session) {
         qttune_session_close(session);
@@ -117,7 +118,7 @@ TEST(CoreTest, RegisterCallbackSuccess) {
         session, counting_callback, &counter
     );
     
-    EXPECT_EQ(status, QT_OK);
+    EXPECT_EQ(status, QTTUNE_OK);
     
     qttune_session_close(session);
     qttune_session_destroy(session);
@@ -134,8 +135,8 @@ TEST(CoreTest, RegisterDuplicateCallbackIdempotent) {
         session, counting_callback, &counter
     );
     
-    EXPECT_EQ(status1, QT_OK);
-    EXPECT_EQ(status2, QT_OK);  /* Silently deduplicated, not an error */
+    EXPECT_EQ(status1, QTTUNE_OK);
+    EXPECT_EQ(status2, QTTUNE_OK);  /* Silently deduplicated, not an error */
     
     qttune_session_close(session);
     qttune_session_destroy(session);
@@ -148,9 +149,9 @@ TEST(CoreTest, SameCallbackDifferentUserdataAllowed) {
     
     /* Same function, different user_data = distinct registrations */
     EXPECT_EQ(qttune_register_frame_callback(
-        session, counting_callback, &counter1), QT_OK);
+        session, counting_callback, &counter1), QTTUNE_OK);
     EXPECT_EQ(qttune_register_frame_callback(
-        session, counting_callback, &counter2), QT_OK);
+        session, counting_callback, &counter2), QTTUNE_OK);
     
     qttune_session_close(session);
     qttune_session_destroy(session);
@@ -161,14 +162,14 @@ TEST(CoreTest, UnregisterCallback) {
     int counter = 0;
     
     EXPECT_EQ(qttune_register_frame_callback(
-        session, counting_callback, &counter), QT_OK);
+        session, counting_callback, &counter), QTTUNE_OK);
     
     EXPECT_EQ(qttune_unregister_frame_callback(
-        session, counting_callback, &counter), QT_OK);
+        session, counting_callback, &counter), QTTUNE_OK);
     
     /* Second unregister is also success (idempotent) */
     EXPECT_EQ(qttune_unregister_frame_callback(
-        session, counting_callback, &counter), QT_OK);
+        session, counting_callback, &counter), QTTUNE_OK);
 
     qttune_session_close(session);
     qttune_session_destroy(session);
@@ -179,7 +180,7 @@ TEST(CoreTest, UnregisterNonexistentCallbackDoesntFail) {
     
     /* Never registered, but should not crash */
     EXPECT_EQ(qttune_unregister_frame_callback(
-        session, counting_callback, nullptr), QT_OK);
+        session, counting_callback, nullptr), QTTUNE_OK);
     
     qttune_session_close(session);
     qttune_session_destroy(session);
@@ -187,11 +188,11 @@ TEST(CoreTest, UnregisterNonexistentCallbackDoesntFail) {
 
 TEST(CoreTest, NullPointerHandling) {
     EXPECT_EQ(qttune_register_frame_callback(
-        nullptr, counting_callback, nullptr), QT_ERR_NULL_ARGUMENT);
+        nullptr, counting_callback, nullptr), QTTUNE_ERR_NULL_ARGUMENT);
     
     qttune_session_t* session = make_test_session();
     EXPECT_EQ(qttune_register_frame_callback(
-        session, nullptr, nullptr), QT_ERR_NULL_ARGUMENT);
+        session, nullptr, nullptr), QTTUNE_ERR_NULL_ARGUMENT);
     
     qttune_session_close(session);
     qttune_session_destroy(session);
@@ -212,7 +213,7 @@ TEST(CoreTest, CallbackSnapshotPatternCompiles) {
     int counter = 0;
     
     EXPECT_EQ(qttune_register_frame_callback(
-        session, counting_callback, &counter), QT_OK);
+        session, counting_callback, &counter), QTTUNE_OK);
     
     /* Null frame is a documented no-op — proves precondition guard */
     qttune_session_dispatch_callbacks(session, nullptr);
@@ -228,14 +229,14 @@ TEST(CoreTest, CallbackDispatchInvokesRegisteredCallback) {
     frame.data_length = 8;
 
     EXPECT_EQ(qttune_register_frame_callback(
-        session, counting_callback, &counter), QT_OK);
+        session, counting_callback, &counter), QTTUNE_OK);
 
     qttune_session_dispatch_callbacks(session, &frame);
     EXPECT_EQ(counter, 1);
 
     /* Duplicate registration is deduplicated — one invocation per dispatch */
     EXPECT_EQ(qttune_register_frame_callback(
-        session, counting_callback, &counter), QT_OK);
+        session, counting_callback, &counter), QTTUNE_OK);
     qttune_session_dispatch_callbacks(session, &frame);
     EXPECT_EQ(counter, 2);  // Still 1 per dispatch, dedup worked
 
@@ -245,7 +246,7 @@ TEST(CoreTest, CallbackDispatchInvokesRegisteredCallback) {
 
 TEST(CoreTest, MockTransportDeliversFrames) {
     qttune_session_t* session = nullptr;
-    ASSERT_EQ(qttune_session_create("mock://test", &session), QT_OK);
+    ASSERT_EQ(qttune_session_create("mock://test", &session), QTTUNE_OK);
 
     std::atomic<int> frame_count{0};
     /* plain function to keep extern "C" signature compatibility */
@@ -253,9 +254,9 @@ TEST(CoreTest, MockTransportDeliversFrames) {
     EXPECT_EQ(qttune_register_frame_callback(
         session,
         [](const qttune_frame_t*, void*) { (*counter_ptr)++; },
-        nullptr), QT_OK);
+        nullptr), QTTUNE_OK);
 
-    EXPECT_EQ(qttune_session_start(session), QT_OK);
+    EXPECT_EQ(qttune_session_start(session), QTTUNE_OK);
 
     /* CONTRACT: at least 3 frames eventually arrive. The 50ms tick
      * implies ~4 in 200ms LOCALLY, but CI runners under load deliver
@@ -269,16 +270,16 @@ TEST(CoreTest, MockTransportDeliversFrames) {
     EXPECT_GE(frame_count.load(), 3);
 
     /* Close must join the worker without hanging */
-    EXPECT_EQ(qttune_session_close(session), QT_OK);
+    EXPECT_EQ(qttune_session_close(session), QTTUNE_OK);
     qttune_session_destroy(session);
 }
 
 TEST(CoreTest, UnknownTransportUriRejected) {
     qttune_session_t* session = nullptr;
     EXPECT_EQ(qttune_session_create("j2534://dev0", &session),
-              QT_ERR_NO_TRANSPORT);
+              QTTUNE_ERR_NO_TRANSPORT);
     EXPECT_EQ(qttune_session_create(nullptr, &session),
-              QT_ERR_NULL_ARGUMENT);
+              QTTUNE_ERR_NULL_ARGUMENT);
 }
 
 TEST(CoreTest, SessionStartWithoutTransportFails) {
@@ -289,7 +290,7 @@ TEST(CoreTest, SessionStartWithoutTransportFails) {
 
 TEST(CoreTest, CallbackExecutesOnTransportWorkerThread) {
     qttune_session_t* session = nullptr;
-    ASSERT_EQ(qttune_session_create("mock://thread-test", &session), QT_OK);
+    ASSERT_EQ(qttune_session_create("mock://thread-test", &session), QTTUNE_OK);
 
     /* std::atomic<std::thread::id> is lock-free on all 3 CI platforms;
      * mutex alternative also fine. */
@@ -302,10 +303,10 @@ TEST(CoreTest, CallbackExecutesOnTransportWorkerThread) {
         [](const qttune_frame_t*, void* ud) {
             static_cast<Ctx*>(ud)->out->store(std::this_thread::get_id());
         },
-        &ctx), QT_OK);
+        &ctx), QTTUNE_OK);
 
     const auto main_id = std::this_thread::get_id();
-    EXPECT_EQ(qttune_session_start(session), QT_OK);
+    EXPECT_EQ(qttune_session_start(session), QTTUNE_OK);
 
     /* Already a poll loop — widened deadline only (400ms -> 2s) to
      * cover starved runners; the shape was right. */
@@ -317,7 +318,7 @@ TEST(CoreTest, CallbackExecutesOnTransportWorkerThread) {
     EXPECT_NE(seen_id.load(), std::thread::id{});
     EXPECT_NE(seen_id.load(), main_id);  /* Marshaling in bridge is MANDATORY */
 
-    EXPECT_EQ(qttune_session_close(session), QT_OK);
+    EXPECT_EQ(qttune_session_close(session), QTTUNE_OK);
     qttune_session_destroy(session);
 }
 
@@ -351,17 +352,17 @@ void sibling_counter_cb(const qttune_frame_t*, void* user_data)
 
 TEST(CoreTest, SelfUnregisterDuringLiveDispatch) {
     qttune_session_t* session = nullptr;
-    ASSERT_EQ(qttune_session_create("mock://reentry", &session), QT_OK);
+    ASSERT_EQ(qttune_session_create("mock://reentry", &session), QTTUNE_OK);
 
     ReentryCtx ctx;   // stack-local is safe: session_close joins the worker
     ctx.session = session;
 
     EXPECT_EQ(qttune_register_frame_callback(
-        session, &self_unregistering_cb, &ctx), QT_OK);
+        session, &self_unregistering_cb, &ctx), QTTUNE_OK);
     EXPECT_EQ(qttune_register_frame_callback(
-        session, &sibling_counter_cb, &ctx), QT_OK);
+        session, &sibling_counter_cb, &ctx), QTTUNE_OK);
 
-    EXPECT_EQ(qttune_session_start(session), QT_OK);
+    EXPECT_EQ(qttune_session_start(session), QTTUNE_OK);
     /* Poll until the sibling has seen >= 3 frames — that implies the
      * self-callback fired (it dispatched first) and the stream is
      * flowing. Polls to the CONDITION instead of a fixed 250ms. */
@@ -374,7 +375,7 @@ TEST(CoreTest, SelfUnregisterDuringLiveDispatch) {
     EXPECT_GE(ctx.other_count.load(), 3);
 
     /* Quiesce: close joins worker; must not hang under reentry. */
-    EXPECT_EQ(qttune_session_close(session), QT_OK);
+    EXPECT_EQ(qttune_session_close(session), QTTUNE_OK);
     qttune_session_destroy(session);
 }
 
@@ -396,7 +397,7 @@ constexpr float kMockOilMax = 140.0f;
 
 struct MockCapture {
     static constexpr size_t kMaxFrames = 20;
-    uint8_t payloads[kMaxFrames][MOCK_TELEMETRY_PAYLOAD_LEN]{};
+    uint8_t payloads[kMaxFrames][QTTUNE_MOCK_TELEMETRY_PAYLOAD_LEN]{};
     size_t count = 0;
 };
 
@@ -407,7 +408,7 @@ void capture_payload_cb(const qttune_frame_t* frame, void* user_data)
 {
     MockCapture* cap = static_cast<MockCapture*>(user_data);
     if (cap->count < MockCapture::kMaxFrames) {
-        std::memcpy(cap->payloads[cap->count], frame->data, MOCK_TELEMETRY_PAYLOAD_LEN);
+        std::memcpy(cap->payloads[cap->count], frame->data, QTTUNE_MOCK_TELEMETRY_PAYLOAD_LEN);
         ++cap->count;
     }
 }
@@ -416,13 +417,13 @@ void capture_payload_cb(const qttune_frame_t* frame, void* user_data)
 
 TEST(CoreTest, MockFramesDecodeAgainstMockSignalSet) {
     qttune_session_t* session = nullptr;
-    ASSERT_EQ(qttune_session_create("mock://signals", &session), QT_OK);
+    ASSERT_EQ(qttune_session_create("mock://signals", &session), QTTUNE_OK);
 
     MockCapture cap;
     EXPECT_EQ(qttune_register_frame_callback(
-        session, &capture_payload_cb, &cap), QT_OK);
+        session, &capture_payload_cb, &cap), QTTUNE_OK);
 
-    EXPECT_EQ(qttune_session_start(session), QT_OK);
+    EXPECT_EQ(qttune_session_start(session), QTTUNE_OK);
 
     /* Collect up to kMaxFrames, polling to the condition. Was a fixed
      * 1400ms sleep; under starvation fewer than the nominal 28 frames
@@ -433,7 +434,7 @@ TEST(CoreTest, MockFramesDecodeAgainstMockSignalSet) {
 
     /* Close joins the worker; capture struct outlives dispatch safely.
      * Destroy here, before the ASSERTs below can return early. */
-    EXPECT_EQ(qttune_session_close(session), QT_OK);
+    EXPECT_EQ(qttune_session_close(session), QTTUNE_OK);
     qttune_session_destroy(session);
 
     ASSERT_GE(cap.count, size_t{5}) << "expected several frames from mock";
@@ -449,25 +450,25 @@ TEST(CoreTest, MockFramesDecodeAgainstMockSignalSet) {
         for (uint32_t i = 0; i < set->count; ++i) {
             const QttuneSignalDef& def = set->defs[i];
             float val = 0.0f;
-            ASSERT_EQ(qttune_decode_signal(&def, cap.payloads[f], MOCK_TELEMETRY_PAYLOAD_LEN, &val), 0)
+            ASSERT_EQ(qttune_decode_signal(&def, cap.payloads[f], QTTUNE_MOCK_TELEMETRY_PAYLOAD_LEN, &val), 0)
                 << "frame " << f << ", signal " << def.name;
 
             switch (def.id) {
-            case MOCK_SIG_RPM_ID:
+            case QTTUNE_MOCK_SIG_RPM_ID:
                 EXPECT_GE(val, kMockRpmMin);  EXPECT_LE(val, kMockRpmMax); break;
-            case MOCK_SIG_COOLANT_ID:
+            case QTTUNE_MOCK_SIG_COOLANT_ID:
                 EXPECT_GE(val, kMockCoolantMin);
                 EXPECT_LE(val, kMockCoolantMax); break;
-            case MOCK_SIG_SPEED_ID:
+            case QTTUNE_MOCK_SIG_SPEED_ID:
                 EXPECT_GE(val, 0.0f);   EXPECT_LE(val, kMockSpeedMax); break;
-            case MOCK_SIG_THROTTLE_ID:
-            case MOCK_SIG_LOAD_ID:
+            case QTTUNE_MOCK_SIG_THROTTLE_ID:
+            case QTTUNE_MOCK_SIG_LOAD_ID:
                 EXPECT_GE(val, 0.0f);   EXPECT_LE(val, 100.0f); break;
-            case MOCK_SIG_IAT_ID:
+            case QTTUNE_MOCK_SIG_IAT_ID:
                 EXPECT_GE(val, kMockIatMin);  EXPECT_LE(val, kMockIatMax); break;
-            case MOCK_SIG_MAF_ID:
+            case QTTUNE_MOCK_SIG_MAF_ID:
                 EXPECT_GE(val, 0.0f);          EXPECT_LE(val, kMockMafMax); break;
-            case MOCK_SIG_OIL_ID:
+            case QTTUNE_MOCK_SIG_OIL_ID:
                 EXPECT_GE(val, kMockOilMin);    EXPECT_LE(val, kMockOilMax); break;
             default:
                 FAIL() << "unknown signal id in mock set: " << def.id;
@@ -651,24 +652,24 @@ TEST(CoreTest, MockDriveCycleEveryTickRoundTripsThroughTheMockSet)
     while (dc.loops < 2 && steps < qttune_mock::ticks_for(1200.0f)) {
         dc.step();
         ++steps;
-        uint8_t payload[MOCK_TELEMETRY_PAYLOAD_LEN];
+        uint8_t payload[QTTUNE_MOCK_TELEMETRY_PAYLOAD_LEN];
         qttune_mock::encode_payload(dc, payload);
 
         for (uint32_t i = 0; i < set->count; ++i) {
             const QttuneSignalDef& def = set->defs[i];
             float val = 0.0f;
-            ASSERT_EQ(qttune_decode_signal(&def, payload, MOCK_TELEMETRY_PAYLOAD_LEN, &val), 0)
+            ASSERT_EQ(qttune_decode_signal(&def, payload, QTTUNE_MOCK_TELEMETRY_PAYLOAD_LEN, &val), 0)
                 << def.name << " at tick " << steps;
             float phys = 0.0f;
             switch (def.id) {
-            case MOCK_SIG_RPM_ID:      phys = dc.rpm; break;
-            case MOCK_SIG_COOLANT_ID:  phys = dc.coolant_c; break;
-            case MOCK_SIG_SPEED_ID:    phys = dc.speed_kmh; break;
-            case MOCK_SIG_THROTTLE_ID: phys = dc.throttle_pct; break;
-            case MOCK_SIG_IAT_ID:      phys = dc.iat_c; break;
-            case MOCK_SIG_LOAD_ID:     phys = dc.load_pct; break;
-            case MOCK_SIG_MAF_ID:      phys = dc.maf_gs; break;
-            case MOCK_SIG_OIL_ID:      phys = dc.oil_c; break;
+            case QTTUNE_MOCK_SIG_RPM_ID:      phys = dc.rpm; break;
+            case QTTUNE_MOCK_SIG_COOLANT_ID:  phys = dc.coolant_c; break;
+            case QTTUNE_MOCK_SIG_SPEED_ID:    phys = dc.speed_kmh; break;
+            case QTTUNE_MOCK_SIG_THROTTLE_ID: phys = dc.throttle_pct; break;
+            case QTTUNE_MOCK_SIG_IAT_ID:      phys = dc.iat_c; break;
+            case QTTUNE_MOCK_SIG_LOAD_ID:     phys = dc.load_pct; break;
+            case QTTUNE_MOCK_SIG_MAF_ID:      phys = dc.maf_gs; break;
+            case QTTUNE_MOCK_SIG_OIL_ID:      phys = dc.oil_c; break;
             default: FAIL() << "unknown signal id in mock set: " << def.id;
             }
             worst_err[i] = std::fmax(worst_err[i], std::fabs(val - phys));
@@ -685,17 +686,17 @@ TEST(CoreTest, MockDriveCycleEveryTickRoundTripsThroughTheMockSet)
         EXPECT_LE(worst_err[i], tol) << def.name << " lost precision or clamped";
 
         switch (def.id) {
-        case MOCK_SIG_RPM_ID:
+        case QTTUNE_MOCK_SIG_RPM_ID:
             EXPECT_GE(lo[i], kMockRpmMin);     EXPECT_LE(hi[i], kMockRpmMax); break;
-        case MOCK_SIG_COOLANT_ID:
+        case QTTUNE_MOCK_SIG_COOLANT_ID:
             EXPECT_GE(lo[i], kMockCoolantMin); EXPECT_LE(hi[i], kMockCoolantMax); break;
-        case MOCK_SIG_SPEED_ID:
+        case QTTUNE_MOCK_SIG_SPEED_ID:
             EXPECT_GE(lo[i], 0.0f);            EXPECT_LE(hi[i], kMockSpeedMax); break;
-        case MOCK_SIG_IAT_ID:
+        case QTTUNE_MOCK_SIG_IAT_ID:
             EXPECT_GE(lo[i], kMockIatMin);     EXPECT_LE(hi[i], kMockIatMax); break;
-        case MOCK_SIG_MAF_ID:
+        case QTTUNE_MOCK_SIG_MAF_ID:
             EXPECT_GE(lo[i], 0.0f);    EXPECT_LE(hi[i], kMockMafMax); break;
-        case MOCK_SIG_OIL_ID:
+        case QTTUNE_MOCK_SIG_OIL_ID:
             EXPECT_GE(lo[i], kMockOilMin); EXPECT_LE(hi[i], kMockOilMax); break;
         default:
             EXPECT_GE(lo[i], 0.0f);            EXPECT_LE(hi[i], 100.0f); break;
@@ -755,12 +756,12 @@ void arb_capture_cb(const qttune_frame_t* frame, void* user_data)
 TEST(CoreTest, MockEmitsKnownArbitrationIds)
 {
     qttune_session_t* session = nullptr;
-    ASSERT_EQ(qttune_session_create("mock://arb", &session), QT_OK);
+    ASSERT_EQ(qttune_session_create("mock://arb", &session), QTTUNE_OK);
 
     ArbIdCapture cap;
     ASSERT_EQ(qttune_register_frame_callback(session, &arb_capture_cb, &cap),
-              QT_OK);
-    ASSERT_EQ(qttune_session_start(session), QT_OK);
+              QTTUNE_OK);
+    ASSERT_EQ(qttune_session_start(session), QTTUNE_OK);
 
     /* Enough ticks for several 16-frame cycles incl. diag frames */
     wait_for([&cap]() {
@@ -785,24 +786,24 @@ TEST(CoreTest, MockEmitsKnownArbitrationIds)
 TEST(CoreTest, CloseIsIdempotentAndDestroyIsSafe)
 {
     qttune_session_t* session = nullptr;
-    ASSERT_EQ(qttune_session_create("mock://lifecycle", &session), QT_OK);
+    ASSERT_EQ(qttune_session_create("mock://lifecycle", &session), QTTUNE_OK);
 
     /* Double close: second returns the error code WITHOUT UB. close()
      * must not free the session (destroy does), or this second call is
      * a use-after-free that only survives on allocator luck */
-    EXPECT_EQ(qttune_session_close(session), QT_OK);
-    EXPECT_EQ(qttune_session_close(session), QT_ERR_SESSION_CLOSED);
+    EXPECT_EQ(qttune_session_close(session), QTTUNE_OK);
+    EXPECT_EQ(qttune_session_close(session), QTTUNE_ERR_SESSION_CLOSED);
 
     /* Post-close API calls fail cleanly, not UB */
-    EXPECT_EQ(qttune_session_start(session), QT_ERR_SESSION_CLOSED);
+    EXPECT_EQ(qttune_session_start(session), QTTUNE_ERR_SESSION_CLOSED);
     EXPECT_EQ(qttune_register_frame_callback(
-        session, counting_callback, nullptr), QT_ERR_SESSION_CLOSED);
+        session, counting_callback, nullptr), QTTUNE_ERR_SESSION_CLOSED);
 
     /* destroy() is the freeing call; handle invalid after (free()). */
-    EXPECT_EQ(qttune_session_destroy(session), QT_OK);
+    EXPECT_EQ(qttune_session_destroy(session), QTTUNE_OK);
 
     /* free(nullptr) semantics */
-    EXPECT_EQ(qttune_session_destroy(nullptr), QT_OK);
+    EXPECT_EQ(qttune_session_destroy(nullptr), QTTUNE_OK);
 }
 
 TEST(CoreTest, DestroyAutoClosesActiveSession)
@@ -810,14 +811,14 @@ TEST(CoreTest, DestroyAutoClosesActiveSession)
     /* The fclose/free split's convenience path: destroy on an open,
      * RUNNING session must join the worker and free — no hang, no leak. */
     qttune_session_t* session = nullptr;
-    ASSERT_EQ(qttune_session_create("mock://autodestroy", &session), QT_OK);
-    ASSERT_EQ(qttune_session_start(session), QT_OK);
+    ASSERT_EQ(qttune_session_create("mock://autodestroy", &session), QTTUNE_OK);
+    ASSERT_EQ(qttune_session_start(session), QTTUNE_OK);
     std::atomic<int> frames{0};
     static std::atomic<int>* p = &frames;
     EXPECT_EQ(qttune_register_frame_callback(
-        session, [](const qttune_frame_t*, void*) { (*p)++; }, nullptr), QT_OK);
+        session, [](const qttune_frame_t*, void*) { (*p)++; }, nullptr), QTTUNE_OK);
     wait_for([&frames]() { return frames.load() >= 1; }, 5000);
-    EXPECT_EQ(qttune_session_destroy(session), QT_OK);
+    EXPECT_EQ(qttune_session_destroy(session), QTTUNE_OK);
 }
 
 // ---------------------------------------------------------------------------
@@ -830,13 +831,13 @@ TEST(CoreTest, ProfileLookupRawReturnsOkWithNullSet) {
      * from lookup failure — presence and content are separate axes,
      * and the first sketch of this feature collapsed them. */
     const QttuneSignalSet* set = nullptr;
-    EXPECT_EQ(qttune_profile_lookup("raw", &set), QT_OK);
+    EXPECT_EQ(qttune_profile_lookup("raw", &set), QTTUNE_OK);
     EXPECT_EQ(set, nullptr);
 }
 
 TEST(CoreTest, ProfileLookupMockReturnsMockSet) {
     const QttuneSignalSet* set = nullptr;
-    EXPECT_EQ(qttune_profile_lookup("mock", &set), QT_OK);
+    EXPECT_EQ(qttune_profile_lookup("mock", &set), QTTUNE_OK);
     EXPECT_EQ(set, qttune_mock_signal_set());
 }
 
@@ -844,16 +845,16 @@ TEST(CoreTest, ProfileLookupUnknownNameFailsWithoutTouchingOut) {
     QttuneSignalSet sentinel = {};
     const QttuneSignalSet* set = &sentinel;
     EXPECT_EQ(qttune_profile_lookup("no-such-profile", &set),
-              QT_ERR_NO_TRANSPORT);
+              QTTUNE_ERR_NO_TRANSPORT);
     EXPECT_EQ(set, &sentinel);   /* untouched on failure — caller may
                                     rely on its own initialization */
 }
 
 TEST(CoreTest, ProfileLookupRejectsNullArguments) {
     const QttuneSignalSet* set = nullptr;
-    EXPECT_EQ(qttune_profile_lookup(nullptr, &set), QT_ERR_NULL_ARGUMENT);
-    EXPECT_EQ(qttune_profile_lookup("raw", nullptr), QT_ERR_NULL_ARGUMENT);
-    EXPECT_EQ(qttune_profile_register(nullptr, nullptr), QT_ERR_NULL_ARGUMENT);
+    EXPECT_EQ(qttune_profile_lookup(nullptr, &set), QTTUNE_ERR_NULL_ARGUMENT);
+    EXPECT_EQ(qttune_profile_lookup("raw", nullptr), QTTUNE_ERR_NULL_ARGUMENT);
+    EXPECT_EQ(qttune_profile_register(nullptr, nullptr), QTTUNE_ERR_NULL_ARGUMENT);
 }
 
 TEST(CoreTest, ProfileRegisterOverwritesLastWins) {
@@ -861,22 +862,83 @@ TEST(CoreTest, ProfileRegisterOverwritesLastWins) {
      * grammar's duplicate-key rule. Registered under a throwaway name
      * so no built-in is disturbed. */
     QttuneSignalSet mine = {};
-    EXPECT_EQ(qttune_profile_register("test-profile-tmp", &mine), QT_OK);
+    EXPECT_EQ(qttune_profile_register("test-profile-tmp", &mine), QTTUNE_OK);
     const QttuneSignalSet* got = nullptr;
-    EXPECT_EQ(qttune_profile_lookup("test-profile-tmp", &got), QT_OK);
+    EXPECT_EQ(qttune_profile_lookup("test-profile-tmp", &got), QTTUNE_OK);
     EXPECT_EQ(got, &mine);
 
-    EXPECT_EQ(qttune_profile_register("test-profile-tmp", nullptr), QT_OK);
+    EXPECT_EQ(qttune_profile_register("test-profile-tmp", nullptr), QTTUNE_OK);
     got = &mine;
-    EXPECT_EQ(qttune_profile_lookup("test-profile-tmp", &got), QT_OK);
+    EXPECT_EQ(qttune_profile_lookup("test-profile-tmp", &got), QTTUNE_OK);
     EXPECT_EQ(got, nullptr);
+    EXPECT_EQ(qttune_profile_unregister("test-profile-tmp"), QTTUNE_OK);
+}
+
+TEST(CoreTest, ProfileRegisterValidatesNameAndSet) {
+    /* The registry is the plugin surface (ADR-0013), so it checks what
+     * it's handed: a set that fails validation, or a name no URI could
+     * select, is refused and leaves nothing registered. */
+    QttuneSignalDef bad_def = {};   /* num_bytes 0 */
+    bad_def.type = QTTUNE_SIGNAL_TYPE_UINT8;
+    QttuneSignalSet bad = {};
+    bad.count = 1;
+    bad.defs = &bad_def;
+    const QttuneSignalSet* got = nullptr;
+    EXPECT_EQ(qttune_profile_register("test-bad-set", &bad),
+              QTTUNE_ERR_INVALID_ARGUMENT);
+    EXPECT_EQ(qttune_profile_lookup("test-bad-set", &got), QTTUNE_ERR_NO_TRANSPORT);
+
+    for (const char* name : {"", "Upper", "has space", "a&b", "a=b", "q?x"}) {
+        EXPECT_EQ(qttune_profile_register(name, nullptr),
+                  QTTUNE_ERR_INVALID_ARGUMENT) << "'" << name << "'";
+    }
+    const std::string name64(QTTUNE_PROFILE_NAME_MAX + 1, 'q');
+    EXPECT_EQ(qttune_profile_register(name64.c_str(), nullptr),
+              QTTUNE_ERR_INVALID_ARGUMENT);
+    EXPECT_EQ(qttune_profile_register("ok-name_1.2", nullptr), QTTUNE_OK);
+    EXPECT_EQ(qttune_profile_unregister("ok-name_1.2"), QTTUNE_OK);
+}
+
+TEST(CoreTest, ProfileBuiltInsCannotBeReplacedOrRemoved) {
+    /* A URI naming a built-in always means the same set. */
+    for (const char* name : {"mock", "raw", "obd2"}) {
+        EXPECT_EQ(qttune_profile_register(name, qttune_mock_signal_set()),
+                  QTTUNE_ERR_INVALID_ARGUMENT) << name;
+        EXPECT_EQ(qttune_profile_unregister(name), QTTUNE_ERR_INVALID_ARGUMENT) << name;
+    }
+    const QttuneSignalSet* set = nullptr;
+    ASSERT_EQ(qttune_profile_lookup("obd2", &set), QTTUNE_OK);
+    EXPECT_EQ(set, qttune_obd2_signal_set());
+    ASSERT_EQ(qttune_profile_lookup("raw", &set), QTTUNE_OK);
+    EXPECT_EQ(set, nullptr);
+}
+
+TEST(CoreTest, ProfileUnregisterKeepsExistingSessionsOnTheirSet) {
+    /* Unregister removes the name for new sessions only: a session
+     * keeps the set it was created with (the profile.h lifetime rule). */
+    static const QttuneSignalSet mine = *qttune_mock_signal_set();
+    ASSERT_EQ(qttune_profile_register("test-unregister", &mine), QTTUNE_OK);
+    qttune_session_t* session = nullptr;
+    ASSERT_EQ(qttune_session_create("mock://x?profile=test-unregister", &session),
+              QTTUNE_OK);
+
+    EXPECT_EQ(qttune_profile_unregister("test-unregister"), QTTUNE_OK);
+    EXPECT_EQ(qttune_profile_unregister("test-unregister"), QTTUNE_OK);   /* idempotent */
+    EXPECT_EQ(qttune_profile_unregister(nullptr), QTTUNE_ERR_NULL_ARGUMENT);
+    EXPECT_EQ(qttune_session_signal_set(session), &mine);
+
+    qttune_session_t* second = nullptr;
+    EXPECT_EQ(qttune_session_create("mock://x?profile=test-unregister", &second),
+              QTTUNE_ERR_NO_TRANSPORT);
+    EXPECT_EQ(second, nullptr);
+    qttune_session_destroy(session);
 }
 
 TEST(CoreTest, MockSessionSelectsMockSet) {
     /* Scheme default: mock:// → the mock profile's set. */
     qttune_session_t* session = nullptr;
     ASSERT_EQ(qttune_session_create("mock://profile-default", &session),
-              QT_OK);
+              QTTUNE_OK);
     EXPECT_EQ(qttune_session_signal_set(session), qttune_mock_signal_set());
     qttune_session_destroy(session);
 }
@@ -888,17 +950,37 @@ TEST(CoreTest, ProfileOverrideRawYieldsNullSet) {
      * choking on the query, and the fix belongs THERE, not here. */
     qttune_session_t* session = nullptr;
     ASSERT_EQ(qttune_session_create("mock://x?profile=raw", &session),
-              QT_OK);
+              QTTUNE_OK);
     EXPECT_EQ(qttune_session_signal_set(session), nullptr);
     qttune_session_destroy(session);
 }
 
+TEST(CoreTest, MockUriQueryIsStrict) {
+    /* mock:// shares j2534://'s query grammar (uri_query.h): profile is
+     * its only key, and malformed queries fail at create. The text
+     * before the '?' stays a free label. */
+    for (const char* uri : {"mock://x?interval=10", "mock://x?",
+                            "mock://x?profile=mock&", "mock://x?&profile=mock",
+                            "mock://x?profile", "mock://x?PROFILE=mock",
+                            "mock://x?profile=mock&&profile=raw"}) {
+        qttune_session_t* session = nullptr;
+        EXPECT_EQ(qttune_session_create(uri, &session), QTTUNE_ERR_NO_TRANSPORT) << uri;
+        EXPECT_EQ(session, nullptr) << uri;
+    }
+    for (const char* uri : {"mock://", "mock://any-label", "mock://x?profile=raw",
+                            "mock://x?profile=raw&profile=mock"}) {
+        qttune_session_t* session = nullptr;
+        EXPECT_EQ(qttune_session_create(uri, &session), QTTUNE_OK) << uri;
+        qttune_session_destroy(session);
+    }
+}
+
 TEST(CoreTest, UnknownProfileRejectedAtCreate) {
-    /* Strict grammar: an unknown name is QT_ERR_NO_TRANSPORT at
+    /* Strict grammar: an unknown name is QTTUNE_ERR_NO_TRANSPORT at
      * session_create — cross-platform, scheme-independent. */
     qttune_session_t* session = nullptr;
     EXPECT_EQ(qttune_session_create("mock://x?profile=bogus", &session),
-              QT_ERR_NO_TRANSPORT);
+              QTTUNE_ERR_NO_TRANSPORT);
     EXPECT_EQ(session, nullptr);
 }
 
@@ -906,13 +988,13 @@ TEST(CoreTest, UnknownProfileRejectedAtCreate) {
 TEST(CoreTest, UnknownProfileRejectedBeforeDllLoad) {
     /* Ordering discriminator, Windows-only: bogus profile on a
      * NONEXISTENT DLL path. Profile validation must run BEFORE
-     * transport attach — so this yields QT_ERR_NO_TRANSPORT (3), not
-     * QT_ERR_LOAD_FAILED (7). If it ever returns 7, the profile check
+     * transport attach — so this yields QTTUNE_ERR_NO_TRANSPORT (3), not
+     * QTTUNE_ERR_LOAD_FAILED (7). If it ever returns 7, the profile check
      * moved after the attach and the fail-fast contract broke. */
     qttune_session_t* session = nullptr;
     EXPECT_EQ(qttune_session_create(
         "j2534://C:/qttune-definitely-not-a-real-dll.dll?profile=bogus",
-        &session), QT_ERR_NO_TRANSPORT);
+        &session), QTTUNE_ERR_NO_TRANSPORT);
     EXPECT_EQ(session, nullptr);
 }
 #endif
@@ -930,7 +1012,7 @@ TEST(CoreTest, ProfileQueryEmptyValueRejected) {
      * which could hand a typo'd ?profile=raw a decoding session. */
     qttune_session_t* session = nullptr;
     EXPECT_EQ(qttune_session_create("mock://x?profile=", &session),
-              QT_ERR_NO_TRANSPORT);
+              QTTUNE_ERR_NO_TRANSPORT);
     EXPECT_EQ(session, nullptr);
 }
 
@@ -941,7 +1023,7 @@ TEST(CoreTest, ProfileQueryTooLongValueRejected) {
     uri.append(80, 'a');
     qttune_session_t* session = nullptr;
     EXPECT_EQ(qttune_session_create(uri.c_str(), &session),
-              QT_ERR_NO_TRANSPORT);
+              QTTUNE_ERR_NO_TRANSPORT);
     EXPECT_EQ(session, nullptr);
 }
 
@@ -951,11 +1033,11 @@ TEST(CoreTest, ProfileQueryBoundaryLengthAcceptedAt63) {
      * the boundary — the 64 case above pins the rejecting side. */
     const std::string name63(63, 'q');
     const QttuneSignalSet* mock_set = qttune_mock_signal_set();
-    ASSERT_EQ(qttune_profile_register(name63.c_str(), mock_set), QT_OK);
+    ASSERT_EQ(qttune_profile_register(name63.c_str(), mock_set), QTTUNE_OK);
 
     std::string uri = "mock://boundary?profile=" + name63;
     qttune_session_t* session = nullptr;
-    ASSERT_EQ(qttune_session_create(uri.c_str(), &session), QT_OK);
+    ASSERT_EQ(qttune_session_create(uri.c_str(), &session), QTTUNE_OK);
     EXPECT_EQ(qttune_session_signal_set(session), mock_set);
     qttune_session_destroy(session);
 }
@@ -967,7 +1049,7 @@ TEST(CoreTest, ProfileQueryMalformedFailsEvenWhenLaterValidExists) {
     qttune_session_t* session = nullptr;
     EXPECT_EQ(qttune_session_create("mock://x?profile=&profile=mock",
                                     &session),
-              QT_ERR_NO_TRANSPORT);
+              QTTUNE_ERR_NO_TRANSPORT);
     EXPECT_EQ(session, nullptr);
 
     /* Reverse order: valid first, malformed LAST — a later malformed
@@ -975,7 +1057,7 @@ TEST(CoreTest, ProfileQueryMalformedFailsEvenWhenLaterValidExists) {
      * keep scanning" grammar — it is strict). */
     EXPECT_EQ(qttune_session_create("mock://x?profile=mock&profile=",
                                     &session),
-              QT_ERR_NO_TRANSPORT);
+              QTTUNE_ERR_NO_TRANSPORT);
     EXPECT_EQ(session, nullptr);
 }
 
@@ -988,18 +1070,18 @@ TEST(CoreTest, ProfileQueryLastValidWinsAcrossDuplicates) {
                                             test above — but tests
                                             shouldn't depend on order. */
     ASSERT_EQ(qttune_profile_register(name63.c_str(),
-                                      qttune_mock_signal_set()), QT_OK);
+                                      qttune_mock_signal_set()), QTTUNE_OK);
 
     std::string uri1 = "mock://x?profile=raw&profile=" + name63;
     qttune_session_t* session = nullptr;
-    ASSERT_EQ(qttune_session_create(uri1.c_str(), &session), QT_OK);
+    ASSERT_EQ(qttune_session_create(uri1.c_str(), &session), QTTUNE_OK);
     EXPECT_EQ(qttune_session_signal_set(session),
               qttune_mock_signal_set());   /* last (name63) won */
     qttune_session_destroy(session);
 
     /* And the inverse order: raw last → null set */
     std::string uri2 = "mock://x?profile=" + name63 + "&profile=raw";
-    ASSERT_EQ(qttune_session_create(uri2.c_str(), &session), QT_OK);
+    ASSERT_EQ(qttune_session_create(uri2.c_str(), &session), QTTUNE_OK);
     EXPECT_EQ(qttune_session_signal_set(session), nullptr);
     qttune_session_destroy(session);
 }
@@ -1008,12 +1090,12 @@ TEST(CoreTest, ProfileQueryLastValidWinsAcrossDuplicates) {
 TEST(CoreTest, MalformedProfileRejectedBeforeDllLoad) {
     /* Ordering discriminator, matching UnknownProfileRejectedBeforeDllLoad:
      * a MALFORMED profile value on a nonexistent DLL path must yield
-     * NO_TRANSPORT (profile-parse failure), not QT_ERR_LOAD_FAILED.
+     * NO_TRANSPORT (profile-parse failure), not QTTUNE_ERR_LOAD_FAILED.
      * If it returns 7, the tri-state check moved after attach. */
     qttune_session_t* session = nullptr;
     EXPECT_EQ(qttune_session_create(
         "j2534://C:/qttune-definitely-not-a-real-dll.dll?profile=",
-        &session), QT_ERR_NO_TRANSPORT);
+        &session), QTTUNE_ERR_NO_TRANSPORT);
     EXPECT_EQ(session, nullptr);
 }
 #endif

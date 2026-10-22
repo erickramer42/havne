@@ -110,7 +110,7 @@ TEST_F(SignalDecodeTest, ValidateSignal_Success) {
     strncpy(signal.unit, "units", sizeof(signal.unit));
     signal.decimal_places = 2;
     
-    EXPECT_EQ(qttune_validate_signal(&signal), 0);
+    EXPECT_EQ(qttune_validate_signal(&signal), QTTUNE_VALIDATE_OK);
 }
 
 TEST_F(SignalDecodeTest, ValidateSignal_InvalidNumBytes) {
@@ -118,7 +118,7 @@ TEST_F(SignalDecodeTest, ValidateSignal_InvalidNumBytes) {
     signal.type = QTTUNE_SIGNAL_TYPE_UINT16;
     signal.num_bytes = 0; /* Invalid */
     
-    EXPECT_EQ(qttune_validate_signal(&signal), 2);
+    EXPECT_EQ(qttune_validate_signal(&signal), QTTUNE_VALIDATE_ERR_NUM_BYTES);
 }
 
 TEST_F(SignalDecodeTest, ValidateSignal_UnterminatedName) {
@@ -131,7 +131,7 @@ TEST_F(SignalDecodeTest, ValidateSignal_UnterminatedName) {
     /* Code scanning may flag, do not fix */
     memset(signal.name, 'A', sizeof(signal.name));
     
-    EXPECT_EQ(qttune_validate_signal(&signal), 6);
+    EXPECT_EQ(qttune_validate_signal(&signal), QTTUNE_VALIDATE_ERR_NAME);
 }
 
 TEST_F(SignalDecodeTest, ScaleOffsetCalculation) {
@@ -154,7 +154,7 @@ TEST_F(SignalDecodeTest, ScaleOffsetCalculation) {
 }
 
 TEST(SignalsTest, MockSignalSetPassesValidation) {
-    EXPECT_EQ(qttune_validate_signal_set(qttune_mock_signal_set()), 0);
+    EXPECT_EQ(qttune_validate_signal_set(qttune_mock_signal_set()), QTTUNE_VALIDATE_OK);
 }
 
 TEST(SignalsTest, MockSetIdsAreUnique) {
@@ -171,7 +171,7 @@ TEST(SignalsTest, MockSetDecodesReasonably) {
      * to exact values, so a layout slip fails instead of landing in a
      * wide range. */
     const QttuneSignalSet* set = qttune_mock_signal_set();
-    uint8_t frame[MOCK_TELEMETRY_PAYLOAD_LEN] = {
+    uint8_t frame[QTTUNE_MOCK_TELEMETRY_PAYLOAD_LEN] = {
                          0xE8, 0x03, // RPM raw 1000
                          0x64,       // Coolant raw 100 → 60°C
                          0x3C,       // Speed raw 60 → 60 km/h
@@ -184,33 +184,33 @@ TEST(SignalsTest, MockSetDecodesReasonably) {
 
     for (uint32_t i = 0; i < set->count; ++i) {
         float val = 0.0f;
-        int rc = qttune_decode_signal(&set->defs[i], frame, MOCK_TELEMETRY_PAYLOAD_LEN, &val);
+        int rc = qttune_decode_signal(&set->defs[i], frame, QTTUNE_MOCK_TELEMETRY_PAYLOAD_LEN, &val);
         EXPECT_EQ(rc, 0) << "decode failed for " << set->defs[i].name << " at index " << i;
 
         /* Plausibility checks per signal */
         switch (set->defs[i].id) {
-        case MOCK_SIG_RPM_ID:
+        case QTTUNE_MOCK_SIG_RPM_ID:
             EXPECT_GE(val, 0.0f);
             EXPECT_LE(val, 8000.0f);
             break;
-        case MOCK_SIG_COOLANT_ID:
-        case MOCK_SIG_IAT_ID:
+        case QTTUNE_MOCK_SIG_COOLANT_ID:
+        case QTTUNE_MOCK_SIG_IAT_ID:
             EXPECT_GE(val, -40.0f);
             EXPECT_LE(val, 215.0f);
             break;
-        case MOCK_SIG_SPEED_ID:
+        case QTTUNE_MOCK_SIG_SPEED_ID:
             EXPECT_GE(val, 0.0f);
             EXPECT_LE(val, 255.0f);
             break;
-        case MOCK_SIG_THROTTLE_ID:
-        case MOCK_SIG_LOAD_ID:
+        case QTTUNE_MOCK_SIG_THROTTLE_ID:
+        case QTTUNE_MOCK_SIG_LOAD_ID:
             EXPECT_GE(val, 0.0f);
             EXPECT_LE(val, 100.0f);
             break;
-        case MOCK_SIG_MAF_ID:
+        case QTTUNE_MOCK_SIG_MAF_ID:
             EXPECT_NEAR(val, 75.56f, 0.01f);
             break;
-        case MOCK_SIG_OIL_ID:
+        case QTTUNE_MOCK_SIG_OIL_ID:
             EXPECT_FLOAT_EQ(val, 80.0f);
             break;
         }
@@ -338,4 +338,160 @@ TEST(SignalsTest, MockSignalsDeclareTelemetryMessageId)
         EXPECT_EQ(set->defs[i].message_id, 0x0C0u)
             << "signal '" << set->defs[i].name << "' not on telemetry ID";
     }
+}
+
+namespace {
+
+/* A def that fits the validator's numeric rules at 4 bytes: only the
+ * type and the field shape vary in the tests below. */
+QttuneSignalDef four_byte_def(QttuneSignalType type)
+{
+    QttuneSignalDef d = {};
+    d.id = 1;
+    d.type = type;
+    d.start_byte = 0;
+    d.num_bytes = 4;
+    d.bit_offset = 0;
+    d.bit_length = 32;
+    d.scale = 1.0f;
+    return d;
+}
+
+} // namespace
+
+TEST(SignalsTest, ValidatorRejectsTypesWithNoDecoder)
+{
+    /* STRING, values past FLOAT32 and the manufacturer range have no
+     * decoder, so a def of one would register and never decode. */
+    /* Values stay inside the enum's range: a cast outside it is
+     * undefined in C++, and the sanitizer job would flag it. */
+    for (int t : {static_cast<int>(QTTUNE_SIGNAL_TYPE_STRING), 8, 255,
+                  static_cast<int>(QTTUNE_SIGNAL_TYPE_MANUF_START), 300}) {
+        QttuneSignalDef d = four_byte_def(static_cast<QttuneSignalType>(t));
+        EXPECT_EQ(qttune_validate_signal(&d), QTTUNE_VALIDATE_ERR_TYPE) << "type " << t;
+    }
+    /* The type is checked first, as in the decoder: a bad type with bad
+     * bit parameters reports the type. */
+    QttuneSignalDef d = four_byte_def(QTTUNE_SIGNAL_TYPE_MANUF_START);
+    d.num_bytes = 0;
+    EXPECT_EQ(qttune_validate_signal(&d), QTTUNE_VALIDATE_ERR_TYPE);
+}
+
+TEST(SignalsTest, ValidatorRequiresFloat32AsFourLittleEndianBytes)
+{
+    QttuneSignalDef d = four_byte_def(QTTUNE_SIGNAL_TYPE_FLOAT32);
+    EXPECT_EQ(qttune_validate_signal(&d), QTTUNE_VALIDATE_OK);
+
+    d = four_byte_def(QTTUNE_SIGNAL_TYPE_FLOAT32);
+    d.num_bytes = 2;
+    d.bit_length = 16;
+    EXPECT_EQ(qttune_validate_signal(&d), QTTUNE_VALIDATE_ERR_FLOAT32);
+
+    /* Byte-aligned, so the big-endian rule passes; the decoder would
+     * still read it little-endian. */
+    d = four_byte_def(QTTUNE_SIGNAL_TYPE_FLOAT32);
+    d.flags = QTTUNE_SIGNAL_FLAG_BIG_ENDIAN;
+    EXPECT_EQ(qttune_validate_signal(&d), QTTUNE_VALIDATE_ERR_FLOAT32);
+}
+
+TEST(SignalsTest, ValidatorRequiresByteAlignedBigEndian)
+{
+    /* The big-endian extractor reads whole bytes, so it would misread
+     * these shapes rather than refuse them. */
+    QttuneSignalDef d = four_byte_def(QTTUNE_SIGNAL_TYPE_UINT16);
+    d.flags = QTTUNE_SIGNAL_FLAG_BIG_ENDIAN;
+    d.bit_length = 16;
+    EXPECT_EQ(qttune_validate_signal(&d), QTTUNE_VALIDATE_OK);
+    d.bit_length = 12;
+    EXPECT_EQ(qttune_validate_signal(&d), QTTUNE_VALIDATE_ERR_BIG_ENDIAN);
+    d.bit_length = 16;
+    d.bit_offset = 1;
+    EXPECT_EQ(qttune_validate_signal(&d), QTTUNE_VALIDATE_ERR_BIG_ENDIAN);
+}
+
+TEST(SignalsTest, ValidatorAcceptsExactlyWhatTheDecoderDecodes)
+{
+    /* The contract the validator exists for: over every type and a
+     * spread of little-endian field shapes, a def validates if and only
+     * if it decodes an in-bounds payload. Big-endian shapes the decoder
+     * would misread rather than refuse (misaligned fields, FLOAT32) are
+     * the validator's alone, pinned by the two tests above. */
+    const uint8_t payload[8] = {0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08};
+    const int types[] = {0, 1, 2, 3, 4, 5, 6, 7, 8, 256};
+    const uint8_t lengths[] = {1, 7, 8, 16, 24, 32};
+    for (int t : types) {
+        for (uint8_t len : lengths) {
+            for (int off : {0, 1}) {
+                if (off + len > 32) {
+                    continue;   /* past the 4-byte field either way */
+                }
+                QttuneSignalDef d = four_byte_def(static_cast<QttuneSignalType>(t));
+                d.bit_length = len;
+                d.bit_offset = static_cast<uint8_t>(off);
+                const bool valid = qttune_validate_signal(&d) == QTTUNE_VALIDATE_OK;
+                float v = 0.0f;
+                const bool decodes =
+                    qttune_decode_signal(&d, payload, sizeof payload, &v) == QTTUNE_DECODE_OK;
+                EXPECT_EQ(valid, decodes) << "type " << t << " len " << int(len)
+                                          << " off " << int(off);
+            }
+        }
+    }
+}
+
+TEST(SignalsTest, SetValidationRejectsDuplicateIds)
+{
+    QttuneSignalDef defs[2] = {four_byte_def(QTTUNE_SIGNAL_TYPE_UINT32),
+                               four_byte_def(QTTUNE_SIGNAL_TYPE_INT32)};
+    QttuneSignalSet set = {};
+    set.version = 1;
+    set.count = 2;
+    set.defs = defs;
+    EXPECT_EQ(qttune_validate_signal_set(&set), QTTUNE_VALIDATE_ERR_DUPLICATE_ID);
+    defs[1].id = 2;
+    EXPECT_EQ(qttune_validate_signal_set(&set), QTTUNE_VALIDATE_OK);
+}
+
+TEST(SignalsTest, SetValidationAcceptsAnEmptySet)
+{
+    /* No defs: decodes nothing, may still declare channels (a filtered
+     * log-only profile). count > 0 with no defs stays an error. */
+    static const QttuneChannelDecl kChan[] = {{0x7E8u, 0x7E0u}};
+    QttuneSignalSet set = {};
+    EXPECT_EQ(qttune_validate_signal_set(&set), QTTUNE_VALIDATE_OK);
+    set.channel_count = 1;
+    set.channels = kChan;
+    EXPECT_EQ(qttune_validate_signal_set(&set), QTTUNE_VALIDATE_OK);
+    set.count = 1;
+    EXPECT_EQ(qttune_validate_signal_set(&set), QTTUNE_VALIDATE_ERR_NULL);
+    EXPECT_EQ(qttune_validate_signal_set(nullptr), QTTUNE_VALIDATE_ERR_NULL);
+}
+
+TEST(SignalsTest, ApplyGateIsTruePredicate)
+{
+    /* 1 when the def applies, 0 otherwise, including NULL arguments:
+     * callers write if (qttune_def_applies_to_frame(...)). */
+    QttuneSignalDef d = four_byte_def(QTTUNE_SIGNAL_TYPE_UINT8);
+    d.message_id = 0x123u;
+    qttune_frame_t f = {};
+    f.arbitration_id = 0x123u;
+    f.data_length = 8;
+    EXPECT_EQ(qttune_def_applies_to_frame(&d, &f), 1);
+    f.arbitration_id = 0x124u;
+    EXPECT_EQ(qttune_def_applies_to_frame(&d, &f), 0);
+    EXPECT_EQ(qttune_def_applies_to_frame(nullptr, &f), 0);
+    EXPECT_EQ(qttune_def_applies_to_frame(&d, nullptr), 0);
+
+    /* Mux: the key must be inside data_length and equal. */
+    f.arbitration_id = 0x123u;
+    d.mux_offset = 1;
+    d.mux_length = 1;
+    d.mux_key = 0xAAu;
+    f.data[1] = 0xAA;
+    EXPECT_EQ(qttune_def_applies_to_frame(&d, &f), 1);
+    f.data_length = 1;
+    EXPECT_EQ(qttune_def_applies_to_frame(&d, &f), 0);
+    f.data_length = 8;
+    f.data[1] = 0xAB;
+    EXPECT_EQ(qttune_def_applies_to_frame(&d, &f), 0);
 }

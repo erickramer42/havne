@@ -13,7 +13,7 @@
  * 100 ms base, doubling to a 5 s cap (about 0.2 retries/s against a
  * dead adapter). It ends when the adapter shows it is answering: a
  * matched frame, an unmatched one, a debounced quiet run, or (for
- * QT_ERR_REQUEST_FAILED) a successful write. */
+ * QTTUNE_ERR_REQUEST_FAILED) a successful write. */
 constexpr uint32_t J2534_BACKOFF_BASE_MS = 100;
 constexpr uint32_t J2534_BACKOFF_CAP_MS  = 5000;
 

@@ -1,0 +1,46 @@
+# Style for C and C++ in core/, surrogate/, app/ and tests/. The tree
+# wasn't reformatted when this file was added, so format the lines you
+# change (git clang-format), not whole files.
+#
+# Matches the existing code: 4-space indent; a function's brace on its
+# own line, a control statement's on the same line; "char* p"; includes
+# left in the order written, because some order matters (windows.h
+# before its satellites). Comments aren't reflowed, so hand-aligned
+# comment blocks and tables keep their shape. Needs clang-format 13 or
+# later.
+Language: Cpp
+BasedOnStyle: LLVM
+Standard: c++17
+IndentWidth: 4
+ContinuationIndentWidth: 4
+ColumnLimit: 80
+AccessModifierOffset: -4
+BreakBeforeBraces: Custom
+BraceWrapping:
+  AfterCaseLabel: false
+  AfterClass: true
+  AfterControlStatement: Never
+  AfterEnum: false
+  AfterExternBlock: false
+  AfterFunction: true
+  AfterNamespace: false
+  AfterStruct: false
+  AfterUnion: false
+  BeforeCatch: false
+  BeforeElse: false
+  IndentBraces: false
+  SplitEmptyFunction: false
+  SplitEmptyRecord: false
+IndentExternBlock: NoIndent
+NamespaceIndentation: None
+IndentCaseLabels: false
+PointerAlignment: Left
+DerivePointerAlignment: false
+AllowShortFunctionsOnASingleLine: Inline
+AllowShortIfStatementsOnASingleLine: Never
+AllowShortLoopsOnASingleLine: false
+AllowShortBlocksOnASingleLine: Never
+AlignConsecutiveMacros: Consecutive
+AlignTrailingComments: true
+ReflowComments: false
+SortIncludes: Never

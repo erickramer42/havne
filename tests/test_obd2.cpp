@@ -22,10 +22,17 @@ namespace {
 qttune_frame_t make_obd2_frame(const uint8_t* payload, uint8_t len)
 {
     qttune_frame_t f{};
-    f.arbitration_id = OBD2_ECU_ARB_ID;
+    f.arbitration_id = QTTUNE_OBD2_ECU_ARB_ID;
     memcpy(f.data, payload, len);
     f.data_length = len;
     return f;
+}
+
+/* Decode a frame's payload, as the bridge does: the decoder takes an
+ * 8-bit payload length, and frames carry at most 64 bytes. */
+int decode(const QttuneSignalDef* d, const qttune_frame_t& f, float* v)
+{
+    return qttune_decode_signal(d, f.data, static_cast<uint8_t>(f.data_length), v);
 }
 
 const QttuneSignalDef* find_def(const QttuneSignalSet* set, uint16_t id)
@@ -43,7 +50,7 @@ const QttuneSignalDef* find_def(const QttuneSignalSet* set, uint16_t id)
 TEST(Obd2SetTest, SetIsValidAndComplete) {
     const QttuneSignalSet* set = qttune_obd2_signal_set();
     ASSERT_NE(set, nullptr);
-    EXPECT_EQ(qttune_validate_signal_set(set), 0);
+    EXPECT_EQ(qttune_validate_signal_set(set), QTTUNE_VALIDATE_OK);
     EXPECT_EQ(set->count, 10u);
 }
 
@@ -63,8 +70,8 @@ TEST(Obd2SetTest, DeclaresSingleCanChannel) {
     ASSERT_NE(set, nullptr);
     EXPECT_EQ(set->channel_count, 1u);
     ASSERT_NE(set->channels, nullptr);
-    EXPECT_EQ(set->channels[0].rx_id, OBD2_ECU_ARB_ID);
-    EXPECT_EQ(set->channels[0].tx_id, OBD2_TESTER_ARB_ID);
+    EXPECT_EQ(set->channels[0].rx_id, QTTUNE_OBD2_ECU_ARB_ID);
+    EXPECT_EQ(set->channels[0].tx_id, QTTUNE_OBD2_TESTER_ARB_ID);
 }
 
 TEST(Obd2SetTest, RejectsDuplicateAndIllegalChannelDecls) {
@@ -81,45 +88,45 @@ TEST(Obd2SetTest, RejectsDuplicateAndIllegalChannelDecls) {
 
     const QttuneChannelDecl dup[] = { {0x7E8u, 0x7E0u}, {0x7E8u, 0x7E2u} };
     const QttuneSignalSet s_dup = { 2u, 1u, defs, 2u, dup };
-    EXPECT_NE(qttune_validate_signal_set(&s_dup), 0);
+    EXPECT_EQ(qttune_validate_signal_set(&s_dup), QTTUNE_VALIDATE_ERR_DUPLICATE_RX);
 
     const QttuneChannelDecl zero_rx[] = { {0u, 0x7E0u} };
     const QttuneSignalSet s_zero = { 2u, 1u, defs, 1u, zero_rx };
-    EXPECT_NE(qttune_validate_signal_set(&s_zero), 0);
+    EXPECT_EQ(qttune_validate_signal_set(&s_zero), QTTUNE_VALIDATE_ERR_CHANNEL_ID);
 
     const QttuneChannelDecl legal[] = { {0x7E8u, 0x7E0u} };
     const QttuneSignalSet s_ok = { 2u, 1u, defs, 1u, legal };
-    EXPECT_EQ(qttune_validate_signal_set(&s_ok), 0);
+    EXPECT_EQ(qttune_validate_signal_set(&s_ok), QTTUNE_VALIDATE_OK);
 }
 
 /* ---------- decode round-trips (canned wire bytes) ---------- */
 
 TEST(Obd2DecodeTest, RpmBigEndianScaled) {
     const QttuneSignalSet* set = qttune_obd2_signal_set();
-    const QttuneSignalDef* d = find_def(set, OBD2_SIG_RPM_ID);
+    const QttuneSignalDef* d = find_def(set, QTTUNE_OBD2_SIG_RPM_ID);
     ASSERT_NE(d, nullptr);
     const uint8_t wire[] = {0x41, 0x0C, 0x1F, 0x40};
     qttune_frame_t f = make_obd2_frame(wire, sizeof wire);
-    ASSERT_EQ(qttune_def_matches_frame(d, &f), 0);
+    ASSERT_TRUE(qttune_def_applies_to_frame(d, &f));
     float v = 0.0f;
-    ASSERT_EQ(qttune_decode_signal(d, f.data, f.data_length, &v), 0);
+    ASSERT_EQ(decode(d, f, &v), QTTUNE_DECODE_OK);
     EXPECT_FLOAT_EQ(v, 2000.0f);   /* 0x1F40 * 0.25 */
 }
 
 TEST(Obd2DecodeTest, CoolantOffsetApplied) {
     const QttuneSignalSet* set = qttune_obd2_signal_set();
-    const QttuneSignalDef* d = find_def(set, OBD2_SIG_COOLANT_TEMP_ID);
+    const QttuneSignalDef* d = find_def(set, QTTUNE_OBD2_SIG_COOLANT_TEMP_ID);
     ASSERT_NE(d, nullptr);
     const uint8_t wire[] = {0x41, 0x05, 0x3C};
     qttune_frame_t f = make_obd2_frame(wire, sizeof wire);
     float v = 0.0f;
-    ASSERT_EQ(qttune_decode_signal(d, f.data, f.data_length, &v), 0);
+    ASSERT_EQ(decode(d, f, &v), QTTUNE_DECODE_OK);
     EXPECT_FLOAT_EQ(v, 20.0f);    /* 60 - 40 */
 }
 
 TEST(Obd2DecodeTest, BatteryVoltageMillivoltScale) {
     const QttuneSignalSet* set = qttune_obd2_signal_set();
-    const QttuneSignalDef* d = find_def(set, OBD2_SIG_BATTERY_V_ID);
+    const QttuneSignalDef* d = find_def(set, QTTUNE_OBD2_SIG_BATTERY_V_ID);
     ASSERT_NE(d, nullptr);
     /* 0x3630 = 13872 raw -> 13.872 V at 0.001 scale. Realistic
      * running-system voltage, and the byte pair is chosen so the
@@ -127,18 +134,18 @@ TEST(Obd2DecodeTest, BatteryVoltageMillivoltScale) {
     const uint8_t wire[] = {0x41, 0x42, 0x36, 0x30};
     qttune_frame_t f = make_obd2_frame(wire, sizeof wire);
     float v = 0.0f;
-    ASSERT_EQ(qttune_decode_signal(d, f.data, f.data_length, &v), 0);
+    ASSERT_EQ(decode(d, f, &v), QTTUNE_DECODE_OK);
     EXPECT_NEAR(v, 13.872f, 0.001f);   /* 0x3630 * 0.001 */
 }
 
 TEST(Obd2DecodeTest, EngineLoadPercentScale) {
     const QttuneSignalSet* set = qttune_obd2_signal_set();
-    const QttuneSignalDef* d = find_def(set, OBD2_SIG_ENGINE_LOAD_ID);
+    const QttuneSignalDef* d = find_def(set, QTTUNE_OBD2_SIG_ENGINE_LOAD_ID);
     ASSERT_NE(d, nullptr);
     const uint8_t wire[] = {0x41, 0x04, 25};
     qttune_frame_t f = make_obd2_frame(wire, sizeof wire);
     float v = 0.0f;
-    ASSERT_EQ(qttune_decode_signal(d, f.data, f.data_length, &v), 0);
+    ASSERT_EQ(decode(d, f, &v), QTTUNE_DECODE_OK);
     EXPECT_NEAR(v, 25.0f * 100.0f / 255.0f, 0.01f);
 }
 
@@ -148,44 +155,44 @@ TEST(Obd2DecodeTest, TemperatureIsUnsignedMinusFortyOffset)
      * -56 C; correct is 240 - 40 = +200 C, and 0x00 is the -40 C
      * sentinel. Both ends pinned. */
     const QttuneSignalSet* set = qttune_obd2_signal_set();
-    const QttuneSignalDef* d = find_def(set, OBD2_SIG_IAT_ID);
+    const QttuneSignalDef* d = find_def(set, QTTUNE_OBD2_SIG_IAT_ID);
     ASSERT_NE(d, nullptr);
     const uint8_t lo[] = {0x41, 0x0F, 0x00};
     qttune_frame_t f = make_obd2_frame(lo, sizeof lo);
     float v = 0.0f;
-    ASSERT_EQ(qttune_decode_signal(d, f.data, f.data_length, &v), 0);
+    ASSERT_EQ(decode(d, f, &v), QTTUNE_DECODE_OK);
     EXPECT_FLOAT_EQ(v, -40.0f);
     const uint8_t hi[] = {0x41, 0x0F, 0xF0};
     f = make_obd2_frame(hi, sizeof hi);
-    ASSERT_EQ(qttune_decode_signal(d, f.data, f.data_length, &v), 0);
+    ASSERT_EQ(decode(d, f, &v), QTTUNE_DECODE_OK);
     EXPECT_FLOAT_EQ(v, 200.0f);
 }
 
 TEST(Obd2DecodeTest, MafCentigramScale) {
     const QttuneSignalSet* set = qttune_obd2_signal_set();
-    const QttuneSignalDef* d = find_def(set, OBD2_SIG_MAF_ID);
+    const QttuneSignalDef* d = find_def(set, QTTUNE_OBD2_SIG_MAF_ID);
     ASSERT_NE(d, nullptr);
     /* 0x0064 = 100 raw * 0.01 = 1.00 g/s — pins the /100 (centi-grams/s)
      * scale through the generic scale+offset path, with no decoder
      * special case. */
     const uint8_t wire[] = {0x41, 0x10, 0x00, 0x64};
     qttune_frame_t f = make_obd2_frame(wire, sizeof wire);
-    ASSERT_EQ(qttune_def_matches_frame(d, &f), 0);
+    ASSERT_TRUE(qttune_def_applies_to_frame(d, &f));
     float v = 0.0f;
-    ASSERT_EQ(qttune_decode_signal(d, f.data, f.data_length, &v), 0);
+    ASSERT_EQ(decode(d, f, &v), QTTUNE_DECODE_OK);
     EXPECT_NEAR(v, 1.00f, 0.0001f);
 }
 
 TEST(Obd2DecodeTest, OilTempMatchesCoolantShape) {
     const QttuneSignalSet* set = qttune_obd2_signal_set();
-    const QttuneSignalDef* d = find_def(set, OBD2_SIG_OIL_TEMP_ID);
+    const QttuneSignalDef* d = find_def(set, QTTUNE_OBD2_SIG_OIL_TEMP_ID);
     ASSERT_NE(d, nullptr);
     /* 0x78 = 120 raw - 40 = 80 degC, the fake's canned default. */
     const uint8_t wire[] = {0x41, 0x5C, 0x78};
     qttune_frame_t f = make_obd2_frame(wire, sizeof wire);
-    ASSERT_EQ(qttune_def_matches_frame(d, &f), 0);
+    ASSERT_TRUE(qttune_def_applies_to_frame(d, &f));
     float v = 0.0f;
-    ASSERT_EQ(qttune_decode_signal(d, f.data, f.data_length, &v), 0);
+    ASSERT_EQ(decode(d, f, &v), QTTUNE_DECODE_OK);
     EXPECT_FLOAT_EQ(v, 80.0f);
 }
 
@@ -193,36 +200,38 @@ TEST(Obd2DecodeTest, OilTempMatchesCoolantShape) {
 
 TEST(Obd2MuxTest, WrongPidRejectedByMatchAndDecode) {
     const QttuneSignalSet* set = qttune_obd2_signal_set();
-    const QttuneSignalDef* rpm = find_def(set, OBD2_SIG_RPM_ID);
+    const QttuneSignalDef* rpm = find_def(set, QTTUNE_OBD2_SIG_RPM_ID);
     ASSERT_NE(rpm, nullptr);
     /* A PID 0x0D response whose data bytes would vacuously decode as
      * RPM if the mux gate were absent — the Blocker-1 scenario. */
     const uint8_t wire[] = {0x41, 0x0D, 0x1F, 0x40};
     qttune_frame_t f = make_obd2_frame(wire, sizeof wire);
-    EXPECT_NE(qttune_def_matches_frame(rpm, &f), 0);
+    EXPECT_FALSE(qttune_def_applies_to_frame(rpm, &f));
     float v = 0.0f;
-    EXPECT_NE(qttune_decode_signal(rpm, f.data, f.data_length, &v), 0);
+    EXPECT_EQ(decode(rpm, f, &v),
+              QTTUNE_DECODE_ERR_MUX_MISMATCH);
 }
 
 TEST(Obd2MuxTest, WrongArbIdRejected) {
     const QttuneSignalSet* set = qttune_obd2_signal_set();
-    const QttuneSignalDef* rpm = find_def(set, OBD2_SIG_RPM_ID);
+    const QttuneSignalDef* rpm = find_def(set, QTTUNE_OBD2_SIG_RPM_ID);
     ASSERT_NE(rpm, nullptr);
     const uint8_t wire[] = {0x41, 0x0C, 0x1F, 0x40};
     qttune_frame_t f = make_obd2_frame(wire, sizeof wire);
     f.arbitration_id = 0x0C0;   /* mock telemetry channel */
-    EXPECT_NE(qttune_def_matches_frame(rpm, &f), 0);
+    EXPECT_FALSE(qttune_def_applies_to_frame(rpm, &f));
 }
 
 TEST(Obd2MuxTest, ShortFrameRejectedWithoutOverread) {
     const QttuneSignalSet* set = qttune_obd2_signal_set();
-    const QttuneSignalDef* rpm = find_def(set, OBD2_SIG_RPM_ID);
+    const QttuneSignalDef* rpm = find_def(set, QTTUNE_OBD2_SIG_RPM_ID);
     ASSERT_NE(rpm, nullptr);
     const uint8_t wire[] = {0x41};   /* truncated before PID */
     qttune_frame_t f = make_obd2_frame(wire, sizeof wire);
-    EXPECT_NE(qttune_def_matches_frame(rpm, &f), 0);
+    EXPECT_FALSE(qttune_def_applies_to_frame(rpm, &f));
     float v = 0.0f;
-    EXPECT_NE(qttune_decode_signal(rpm, f.data, f.data_length, &v), 0);
+    EXPECT_EQ(decode(rpm, f, &v),
+              QTTUNE_DECODE_ERR_PAST_PAYLOAD);
 }
 
 /* ---------- scheduler ---------- */
@@ -284,7 +293,7 @@ TEST(PidSchedulerTest, DedupesSharedPidAndCapsCapacity) {
         defs[i].mux_length = 2;
         defs[i].mux_key = 0x4100u |
             ((i == 1) ? 0x0Cu : static_cast<uint32_t>(i + 1));
-        defs[i].message_id = OBD2_ECU_ARB_ID;
+        defs[i].message_id = QTTUNE_OBD2_ECU_ARB_ID;
     }
     const QttuneSignalSet set = {1u, 18u, defs};
     qttune_pid_scheduler s;

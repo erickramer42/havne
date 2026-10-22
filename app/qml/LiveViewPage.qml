@@ -41,19 +41,19 @@ Page {
     }
 
     function statusText() {
-        if (QtTune.connecting) return qsTr("Connecting…")
-        if (QtTune.disconnecting) return qsTr("Disconnecting…")
-        if (!QtTune.connected) return qsTr("Connect a session to stream decoded values")
+        if (Bridge.connecting) return qsTr("Connecting…")
+        if (Bridge.disconnecting) return qsTr("Disconnecting…")
+        if (!Bridge.connected) return qsTr("Connect a session to stream decoded values")
         if (signalList.count === 0)
             return qsTr("This profile decodes no signals; its frames are on the Log page")
         return qsTr("Plotting %1 of %2 signals · values update at 10 Hz")
-                   .arg(QtTune.signalModel.subscribedCount).arg(signalList.count)
+                   .arg(Bridge.signalModel.subscribedCount).arg(signalList.count)
     }
 
     function chartEmptyText() {
-        if (!QtTune.connected) return qsTr("No session")
+        if (!Bridge.connected) return qsTr("No session")
         if (signalList.count === 0) return qsTr("No decoded signals")
-        if (QtTune.signalModel.subscribedCount === 0)
+        if (Bridge.signalModel.subscribedCount === 0)
             return qsTr("No signals plotted; tick a row to plot it")
         return qsTr("Waiting for data…")
     }
@@ -67,27 +67,27 @@ Page {
         PageHeader { title: qsTr("Live signals") }
 
         // Link-health banner: shown for every state but ok (quiet,
-        // requests, fault, degraded) from QtTune.linkState, colored by
+        // requests, fault, degraded) from Bridge.linkState, colored by
         // Theme.linkColor. Transitions are mirrored in the Settings
         // activity log.
         Rectangle {
-            visible: QtTune.connected && QtTune.linkState !== "ok"
+            visible: Bridge.connected && Bridge.linkState !== "ok"
             Layout.fillWidth: true
             implicitHeight: 40
             radius: Theme.radius
-            color: Qt.alpha(Theme.linkColor(QtTune.linkState), 0.15)
+            color: Qt.alpha(Theme.linkColor(Bridge.linkState), 0.15)
 
             Label {
                 anchors.centerIn: parent
-                text: QtTune.linkState === "fault"
+                text: Bridge.linkState === "fault"
                       ? qsTr("Adapter fault — %1 episode(s), retrying with backoff")
-                            .arg(QtTune.errorEpisodes)
-                      : QtTune.linkState === "requests"
+                            .arg(Bridge.errorEpisodes)
+                      : Bridge.linkState === "requests"
                         ? qsTr("Requests failing — check the vehicle connection and ignition")
-                      : QtTune.linkState === "degraded"
-                        ? qsTr("Link degraded (error %1)").arg(QtTune.linkErrorCode)
+                      : Bridge.linkState === "degraded"
+                        ? qsTr("Link degraded (error %1)").arg(Bridge.linkErrorCode)
                         : qsTr("Vehicle not responding — quiet bus")
-                color: Theme.linkColor(QtTune.linkState)
+                color: Theme.linkColor(Bridge.linkState)
                 font.pixelSize: 13
             }
         }
@@ -104,8 +104,8 @@ Page {
                 color: Theme.textDim
             }
             ThemedButton {
-                visible: !QtTune.connected && !QtTune.connecting && !QtTune.disconnecting
-                enabled: QtTune.coreInitialized
+                visible: !Bridge.connected && !Bridge.connecting && !Bridge.disconnecting
+                enabled: Bridge.coreInitialized
                 highlighted: true
                 text: qsTr("Connect…")
                 onClicked: root.connectRequested()
@@ -125,7 +125,7 @@ Page {
             Layout.minimumHeight: Math.min(count, 3) * root.rowHeight
             clip: true
             boundsBehavior: Flickable.StopAtBounds
-            model: QtTune.signalModel
+            model: Bridge.signalModel
 
             ScrollBar.vertical: ScrollBar {
                 id: listBar
@@ -166,7 +166,7 @@ Page {
                     // updating either way, here and on the Dashboard
                     CheckBox {
                         checked: signalDelegate.subscribed
-                        onToggled: QtTune.signalModel.toggleSubscribed(signalDelegate.index)
+                        onToggled: Bridge.signalModel.toggleSubscribed(signalDelegate.index)
                         Accessible.name: qsTr("Plot %1").arg(signalDelegate.name)
                     }
                     // The chart's legend: this row's trace colour, hollow
@@ -190,7 +190,7 @@ Page {
                     Label {
                         // Never-arrived signals render "—", not a
                         // fabricated 0 (unsupported PIDs under obd2).
-                        text: (QtTune.connected && signalDelegate.hasValue)
+                        text: (Bridge.connected && signalDelegate.hasValue)
                               ? root.valueText(signalDelegate.value, signalDelegate.decimals,
                                                signalDelegate.unit)
                               : qsTr("—")
@@ -226,12 +226,12 @@ Page {
                 anchors.margins: 4
 
                 Connections {
-                    target: QtTune.signalModel
+                    target: Bridge.signalModel
                     function onValuesUpdated() { chart.requestPaint() }
                     function onSubscribedCountChanged() { chart.requestPaint() }
                 }
                 Connections {
-                    target: QtTune
+                    target: Bridge
                     function onConnectedChanged() { chart.requestPaint() }
                 }
 
@@ -241,7 +241,7 @@ Page {
                     ctx.fillStyle = Theme.surface
                     ctx.fillRect(0, 0, width, height)
 
-                    const series = QtTune.signalModel.chartData()
+                    const series = Bridge.signalModel.chartData()
                     if (!series || series.length === 0) {
                         ctx.fillStyle = Theme.textDim
                         ctx.font = "12px sans-serif"

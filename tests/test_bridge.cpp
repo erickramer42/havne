@@ -354,7 +354,7 @@ TEST(BridgeTest, DispatchedShortFrameHonorsDataLength)
 
 /* LogPage binds frame columns by role NAME. A name missing here isn't a
  * build error: the column renders empty and every delegate throws. Read
- * through the proxy, which is what QML gets as QtTune.model. */
+ * through the proxy, which is what QML gets as Bridge.model. */
 TEST(BridgeTest, FrameRoleNamesMatchLogPageBindings)
 {
     QtTuneBridge bridge;
@@ -826,10 +826,10 @@ TEST(BridgeTest, DestroyedMidConnectLeavesNoRunningSession)
     ASSERT_NE(pending, nullptr) << "the connect thread produced no session";
 
     std::atomic<int> frames{0};
-    ASSERT_EQ(qttune_register_frame_callback(pending, countFramesCb, &frames), QT_OK);
+    ASSERT_EQ(qttune_register_frame_callback(pending, countFramesCb, &frames), QTTUNE_OK);
     std::this_thread::sleep_for(std::chrono::milliseconds(300));
     EXPECT_EQ(frames.load(), 0) << "the session started before the GUI thread took it";
-    ASSERT_EQ(qttune_unregister_frame_callback(pending, countFramesCb, &frames), QT_OK);
+    ASSERT_EQ(qttune_unregister_frame_callback(pending, countFramesCb, &frames), QTTUNE_OK);
 
     bridge.reset();   // the queued completion is dropped; the destructor destroys `pending`
     spinLoop(50);     // nothing queued may run against the freed bridge
@@ -1096,9 +1096,9 @@ TEST(BridgeTest, LinkStateMapsEveryPublishedCode)
      * helper. Covers all four link-health codes plus the forward-
      * compatible fallback; QML's Theme keys colors and labels on
      * these strings. */
-    EXPECT_EQ(QtTuneBridge::linkStateForError(QT_OK), QStringLiteral("ok"));
-    EXPECT_EQ(QtTuneBridge::linkStateForError(QT_ERR_VEHICLE_TIMEOUT), QStringLiteral("quiet"));
-    EXPECT_EQ(QtTuneBridge::linkStateForError(QT_ERR_REQUEST_FAILED), QStringLiteral("requests"));
-    EXPECT_EQ(QtTuneBridge::linkStateForError(QT_ERR_TRANSPORT_HARD_FAILURE), QStringLiteral("fault"));
+    EXPECT_EQ(QtTuneBridge::linkStateForError(QTTUNE_OK), QStringLiteral("ok"));
+    EXPECT_EQ(QtTuneBridge::linkStateForError(QTTUNE_ERR_VEHICLE_TIMEOUT), QStringLiteral("quiet"));
+    EXPECT_EQ(QtTuneBridge::linkStateForError(QTTUNE_ERR_REQUEST_FAILED), QStringLiteral("requests"));
+    EXPECT_EQ(QtTuneBridge::linkStateForError(QTTUNE_ERR_TRANSPORT_HARD_FAILURE), QStringLiteral("fault"));
     EXPECT_EQ(QtTuneBridge::linkStateForError(static_cast<qttune_status_t>(999)), QStringLiteral("degraded"));
 }

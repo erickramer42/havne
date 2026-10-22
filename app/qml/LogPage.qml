@@ -60,15 +60,15 @@ Pane {
             // arrive while paused are counted but not logged; decoding,
             // Live and the Dashboard carry on.
             ThemedButton {
-                text: QtTune.logPaused ? qsTr("Resume") : qsTr("Pause")
-                highlighted: QtTune.logPaused
-                enabled: QtTune.connected
-                onClicked: QtTune.logPaused = !QtTune.logPaused
+                text: Bridge.logPaused ? qsTr("Resume") : qsTr("Pause")
+                highlighted: Bridge.logPaused
+                enabled: Bridge.connected
+                onClicked: Bridge.logPaused = !Bridge.logPaused
             }
             ThemedButton {
                 text: qsTr("Clear")
-                enabled: QtTune.frameCount > 0
-                onClicked: QtTune.clearFrames()
+                enabled: Bridge.frameCount > 0
+                onClicked: Bridge.clearFrames()
             }
         }
 
@@ -80,33 +80,33 @@ Pane {
             Label {
                 Layout.fillWidth: true
                 elide: Text.ElideRight
-                text: !QtTune.connected ? qsTr("Idle")
-                    : QtTune.logPaused
+                text: !Bridge.connected ? qsTr("Idle")
+                    : Bridge.logPaused
                       ? qsTr("Paused — %1 frames received; new frames aren't logged")
-                            .arg(QtTune.frameCount)
-                    : qsTr("Logging — %1 frames").arg(QtTune.frameCount)
-                color: !QtTune.connected ? Theme.textDim
-                     : QtTune.logPaused ? Theme.warning
+                            .arg(Bridge.frameCount)
+                    : qsTr("Logging — %1 frames").arg(Bridge.frameCount)
+                color: !Bridge.connected ? Theme.textDim
+                     : Bridge.logPaused ? Theme.warning
                      : Theme.success
                 font.pixelSize: 13
             }
 
             Label {
-                text: qsTr("%1 dropped").arg(QtTune.droppedFrames)
+                text: qsTr("%1 dropped").arg(Bridge.droppedFrames)
                 color: Theme.danger
                 font.pixelSize: 13
-                visible: QtTune.droppedFrames > 0
+                visible: Bridge.droppedFrames > 0
             }
 
             // Bridge diagnostics: GUI-thread frame notifications and
             // coalesced signal batches. Left out at phone width.
             Label {
                 text: qsTr("notify %1 · batch %2")
-                    .arg(QtTune.guiNotifyCount)
-                    .arg(QtTune.signalBatchCount)
+                    .arg(Bridge.guiNotifyCount)
+                    .arg(Bridge.signalBatchCount)
                 color: Theme.textDim
                 font.pixelSize: 13
-                visible: QtTune.frameCount > 0 && page.width >= 600
+                visible: Bridge.frameCount > 0 && page.width >= 600
             }
 
             Rectangle {
@@ -122,13 +122,13 @@ Pane {
 
                     SegmentButton {
                         text: qsTr("Newest first")
-                        selected: QtTune.model.newestFirst
-                        onClicked: QtTune.model.newestFirst = true
+                        selected: Bridge.model.newestFirst
+                        onClicked: Bridge.model.newestFirst = true
                     }
                     SegmentButton {
                         text: qsTr("Oldest first")
-                        selected: !QtTune.model.newestFirst
-                        onClicked: QtTune.model.newestFirst = false
+                        selected: !Bridge.model.newestFirst
+                        onClicked: Bridge.model.newestFirst = false
                     }
                 }
             }
@@ -177,7 +177,7 @@ Pane {
                           right: parent.right; bottom: parent.bottom }
                 anchors.margins: 4
                 clip: true
-                model: QtTune.model          // FrameSortProxy over the bridge's FrameListModel
+                model: Bridge.model          // FrameSortProxy over the bridge's FrameListModel
 
                 // Oldest-first reads as a tail: new rows land at the
                 // bottom, and the view follows them while it's at the
@@ -185,7 +185,7 @@ Pane {
                 // the end, or "Latest", resumes it. Newest-first needs no
                 // follow, since new rows land at the top.
                 property bool follow: true
-                readonly property bool tailing: !QtTune.model.newestFirst
+                readonly property bool tailing: !Bridge.model.newestFirst
 
                 // Position first, then follow: positioning cancels a flick
                 // still coasting, and that flick's movementEnded would
@@ -211,7 +211,7 @@ Pane {
                 onMovementEnded: follow = atYEnd
 
                 Connections {
-                    target: QtTune.model
+                    target: Bridge.model
                     function onNewestFirstChanged() {
                         if (frameList.tailing) Qt.callLater(frameList.jumpToLatest)
                     }
@@ -277,8 +277,8 @@ Pane {
                 Label {
                     anchors.centerIn: parent
                     visible: frameList.count === 0
-                    text: !QtTune.connected ? qsTr("No session — connect one from Settings")
-                        : QtTune.logPaused ? qsTr("Paused")
+                    text: !Bridge.connected ? qsTr("No session — connect one from Settings")
+                        : Bridge.logPaused ? qsTr("Paused")
                         : qsTr("Waiting for frames…")
                     color: Theme.textDim
                 }

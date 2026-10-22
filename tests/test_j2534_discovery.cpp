@@ -19,9 +19,9 @@ TEST(J2534DiscoveryTest, NullArgumentsRejected) {
     uint32_t count = 0;
 
     EXPECT_EQ(qttune_j2534_discover_devices(nullptr, &count),
-              QT_ERR_NULL_ARGUMENT);
+              QTTUNE_ERR_NULL_ARGUMENT);
     EXPECT_EQ(qttune_j2534_discover_devices(&devices, nullptr),
-              QT_ERR_NULL_ARGUMENT);
+              QTTUNE_ERR_NULL_ARGUMENT);
 }
 
 TEST(J2534DiscoveryTest, FreeDevicesHandlesNull) {
@@ -34,7 +34,7 @@ TEST(J2534DiscoveryTest, DiscoverySucceedsWithConsistentResultOnAnyMachine) {
     qttune_j2534_device_t* devices = nullptr;
     uint32_t count = 0;
 
-    EXPECT_EQ(qttune_j2534_discover_devices(&devices, &count), QT_OK);
+    EXPECT_EQ(qttune_j2534_discover_devices(&devices, &count), QTTUNE_OK);
 
     /* Array/count consistency: pair or nothing, never one-sided */
     EXPECT_TRUE((devices != nullptr) == (count > 0));
@@ -60,7 +60,7 @@ TEST(J2534DiscoveryTest, DiscoveryReturnsValidVendorNames) {
     qttune_j2534_device_t* devices = nullptr;
     uint32_t count = 0;
 
-    EXPECT_EQ(qttune_j2534_discover_devices(&devices, &count), QT_OK);
+    EXPECT_EQ(qttune_j2534_discover_devices(&devices, &count), QTTUNE_OK);
 
     if (count > 0 && devices != nullptr) {
         for (uint32_t i = 0; i < count; ++i) {

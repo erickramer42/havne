@@ -15,6 +15,7 @@
 #include "qttune/j2534.h"
 #include "pid_scheduler.h"
 #include "j2534_backoff.h"
+#include "uri_query.h"
 #include "qttune/profile.h"
 #include "qttune/signal_sets.h"
 
@@ -58,7 +59,7 @@ constexpr uint32_t J2534_DRAIN_READ_TIMEOUT_MS  = 20;
  * docs. */
 constexpr uint32_t J2534_ADDR_LEN       = 4;
 constexpr uint32_t J2534_FILTER_MSG_LEN = 4;
-constexpr uint32_t J2534_TX_ID_DEFAULT = OBD2_TESTER_ARB_ID;  /* shared
+constexpr uint32_t J2534_TX_ID_DEFAULT = QTTUNE_OBD2_TESTER_ARB_ID;  /* shared
                                        * macro — cannot drift from the
                                        * obd2 set's own declaration */
 constexpr uint32_t J2534_CAN_ID_MAX     = 0x1FFFFFFFu;   /* 29-bit */
@@ -251,7 +252,7 @@ read_outcome pump_one(qttune_j2534_transport* t, uint32_t timeout_ms)
     qttune_status_t st = qttune_j2534_read_frame(t->handle, t->channel,
                                                  &frame, timeout_ms,
                                                  &got);
-    if (st != QT_OK || !got) {
+    if (st != QTTUNE_OK || !got) {
         return {st, false, false};   /* no match if no frame */
     }
 
@@ -259,7 +260,7 @@ read_outcome pump_one(qttune_j2534_transport* t, uint32_t timeout_ms)
         qttune_session_dispatch_callbacks(t->session, &frame);
         /* no channels — verbatim, id 0 (raw passive) counts as matched
          * since we explicitly requested verbatim delivery. */
-        return {QT_OK, true, true};
+        return {QTTUNE_OK, true, true};
     }
 
     if (frame.data_length >= J2534_ADDR_LEN) {
@@ -276,14 +277,14 @@ read_outcome pump_one(qttune_j2534_transport* t, uint32_t timeout_ms)
                 memmove(frame.data, frame.data + J2534_ADDR_LEN, n);
                 frame.data_length = n;
                 qttune_session_dispatch_callbacks(t->session, &frame);
-                return {QT_OK, true, true};   /* matched */
+                return {QTTUNE_OK, true, true};   /* matched */
             }
         }
         /* no match: a frame for another ID got past the adapter's
          * filter. Dropped, but it still proves the adapter is reading */
-        return {QT_OK, true, false};
+        return {QTTUNE_OK, true, false};
     }
-    return {QT_OK, true, false};
+    return {QTTUNE_OK, true, false};
 }
 
 /* Read-side link health (Known Issue #11; full table in docs/j2534.md).
@@ -302,12 +303,12 @@ void update_health(qttune_j2534_transport* t, int32_t& health,
 {
     /* Ordering: a hard READ failure outranks everything, including a
      * latched write failure, so it's evaluated FIRST. pump_one
-     * guarantees got implies st == QT_OK, so any status other than
-     * QT_OK and the vehicle-timeout translation is hard. */
-    if (st != QT_OK && st != QT_ERR_VEHICLE_TIMEOUT) {
-        if (health != QT_ERR_TRANSPORT_HARD_FAILURE) {
-            t->session->last_error.store(QT_ERR_TRANSPORT_HARD_FAILURE);
-            health = QT_ERR_TRANSPORT_HARD_FAILURE;
+     * guarantees got implies st == QTTUNE_OK, so any status other than
+     * QTTUNE_OK and the vehicle-timeout translation is hard. */
+    if (st != QTTUNE_OK && st != QTTUNE_ERR_VEHICLE_TIMEOUT) {
+        if (health != QTTUNE_ERR_TRANSPORT_HARD_FAILURE) {
+            t->session->last_error.store(QTTUNE_ERR_TRANSPORT_HARD_FAILURE);
+            health = QTTUNE_ERR_TRANSPORT_HARD_FAILURE;
             t->session->error_count.fetch_add(1);
             backoff_ms = J2534_BACKOFF_BASE_MS;
         }
@@ -323,14 +324,14 @@ void update_health(qttune_j2534_transport* t, int32_t& health,
         return;
     }
 
-    /* Remaining statuses are QT_OK with/without a frame, or
-     * QT_ERR_VEHICLE_TIMEOUT (never with a frame, per pump_one). */
+    /* Remaining statuses are QTTUNE_OK with/without a frame, or
+     * QTTUNE_ERR_VEHICLE_TIMEOUT (never with a frame, per pump_one). */
     if (got) {
         if (matched) {
             /* Matched response: full recovery */
-            if (health != QT_OK) {
-                t->session->last_error.store(QT_OK);
-                health = QT_OK;
+            if (health != QTTUNE_OK) {
+                t->session->last_error.store(QTTUNE_OK);
+                health = QTTUNE_OK;
             }
             backoff_ms = 0;
             quiet_runs = 0;
@@ -339,9 +340,9 @@ void update_health(qttune_j2534_transport* t, int32_t& health,
              * hard failure and backoff clear — but this
              * is not a response to us: transition to quiet at once
              * (no debounce), quiet_runs left as it is, no episode. */
-            if (health != QT_ERR_VEHICLE_TIMEOUT) {
-                t->session->last_error.store(QT_ERR_VEHICLE_TIMEOUT);
-                health = QT_ERR_VEHICLE_TIMEOUT;
+            if (health != QTTUNE_ERR_VEHICLE_TIMEOUT) {
+                t->session->last_error.store(QTTUNE_ERR_VEHICLE_TIMEOUT);
+                health = QTTUNE_ERR_VEHICLE_TIMEOUT;
             }
             backoff_ms = 0;
         }
@@ -356,9 +357,9 @@ void update_health(qttune_j2534_transport* t, int32_t& health,
     if (quiet_runs < J2534_HEALTH_QUIET_CYCLES) {
         return;
     }
-    if (health != QT_ERR_VEHICLE_TIMEOUT) {
-        t->session->last_error.store(QT_ERR_VEHICLE_TIMEOUT);
-        health = QT_ERR_VEHICLE_TIMEOUT;
+    if (health != QTTUNE_ERR_VEHICLE_TIMEOUT) {
+        t->session->last_error.store(QTTUNE_ERR_VEHICLE_TIMEOUT);
+        health = QTTUNE_ERR_VEHICLE_TIMEOUT;
     }
     backoff_ms = 0;
 }
@@ -374,12 +375,12 @@ void handle_write_result(qttune_j2534_transport* t,
                          int32_t& health, uint32_t& backoff_ms,
                          bool& write_failed, qttune_status_t wst)
 {
-    if (wst == QT_OK) {
+    if (wst == QTTUNE_OK) {
         if (write_failed) {
             write_failed = false;
-            if (health == QT_ERR_REQUEST_FAILED) {
-                t->session->last_error.store(QT_OK);
-                health = QT_OK;
+            if (health == QTTUNE_ERR_REQUEST_FAILED) {
+                t->session->last_error.store(QTTUNE_OK);
+                health = QTTUNE_OK;
                 backoff_ms = 0;
             }
         }
@@ -387,13 +388,13 @@ void handle_write_result(qttune_j2534_transport* t,
     }
 
     write_failed = true;
-    if (health == QT_ERR_TRANSPORT_HARD_FAILURE) {
+    if (health == QTTUNE_ERR_TRANSPORT_HARD_FAILURE) {
         return;  /* hard read failure outranks, don't change state */
     }
-    if (health != QT_ERR_REQUEST_FAILED) {
+    if (health != QTTUNE_ERR_REQUEST_FAILED) {
         /* Transition INTO requests-failing: ONE episode, backoff at base */
-        t->session->last_error.store(QT_ERR_REQUEST_FAILED);
-        health = QT_ERR_REQUEST_FAILED;
+        t->session->last_error.store(QTTUNE_ERR_REQUEST_FAILED);
+        health = QTTUNE_ERR_REQUEST_FAILED;
         t->session->error_count.fetch_add(1);
         backoff_ms = J2534_BACKOFF_BASE_MS;
     }
@@ -444,7 +445,7 @@ void j2534_worker(qttune_j2534_transport* t)
 {
     const bool sched_mode = !t->has_poll && (t->sched.count > 0);
 
-    int32_t health = QT_OK;
+    int32_t health = QTTUNE_OK;
     bool write_failed = false;   /* latched and cleared only by
                                   * handle_write_result */
     uint32_t backoff_ms = 0;   /* 0 = healthy cadence */
@@ -457,7 +458,7 @@ void j2534_worker(qttune_j2534_transport* t)
             /* The request doubles as the recovery probe, so it is sent
              * even while hard-failed: replies only follow writes.
              * Backoff stretches the cycle, which slows the probing. A
-             * failed write latches QT_ERR_REQUEST_FAILED through
+             * failed write latches QTTUNE_ERR_REQUEST_FAILED through
              * handle_write_result; it is never a hard failure. */
             uint8_t pid = 0;
             (void)qttune_sched_next(&t->sched, &pid);
@@ -610,9 +611,11 @@ bool parse_number(const char* s, size_t len, unsigned long* out_val)
  *              profile's tx, else 0x7E0
  *       poll   PID 1..0xFF — single-PID Mode-01 loop; overrides the
  *              profile's rotation
- *       profile name, 1..63 chars (validated in session_create)
- *   - unknown keys, missing '=', empty segments, trailing '&', and a
- *     bare trailing '?' on the URI are all rejected
+ *       profile core's key: qttune_session_create has validated it
+ *              before attach
+ *   - unknown keys, and the shared grammar's malformed forms (missing
+ *     '=', empty segments, a trailing '&', a bare trailing '?';
+ *     uri_query.h), are all rejected
  *   - duplicate keys: last occurrence wins
  *   - poll needs a channel to receive on, but the channel may come
  *     from the profile: ?filter= supplies one directly, otherwise the
@@ -620,74 +623,49 @@ bool parse_number(const char* s, size_t len, unsigned long* out_val)
  *     both are known. */
 qttune_status_t parse_query(const char* query, j2534_uri_params* p)
 {
-    const char* cur = query;
-    for (;;) {
-        const char* amp = strchr(cur, '&');
-        const char* end = (amp != nullptr) ? amp : cur + strlen(cur);
-
-        const char* eq = static_cast<const char*>(
-            memchr(cur, '=', static_cast<size_t>(end - cur)));
-        if (eq == nullptr) {
-            return QT_ERR_NO_TRANSPORT;   /* no '=' in segment */
-        }
-
-        const size_t key_len = static_cast<size_t>(eq - cur);
-        const char* val = eq + 1;
-        const size_t val_len = static_cast<size_t>(end - val);
-
-        if (key_len == 4 && strncmp(cur, "baud", 4) == 0) {
-            unsigned long v = 0;
-            if (!parse_number(val, val_len, &v) || v == 0) {
-                return QT_ERR_NO_TRANSPORT;
+    const bool ok = qttune_uri::for_each_param(query, [p](const qttune_uri::param& q) {
+        unsigned long v = 0;
+        if (q.is("baud")) {
+            if (!parse_number(q.val, q.val_len, &v) || v == 0) {
+                return false;
             }
             p->baud = v;
-        } else if (key_len == 4 && strncmp(cur, "txid", 4) == 0) {
-            unsigned long v = 0;
-            if (!parse_number(val, val_len, &v) ||
+        } else if (q.is("txid")) {
+            if (!parse_number(q.val, q.val_len, &v) ||
                 v == 0 || v > J2534_CAN_ID_MAX) {
-                return QT_ERR_NO_TRANSPORT;
+                return false;
             }
             p->tx_id = v;
-        } else if (key_len == 7 && strncmp(cur, "profile", 7) == 0) {
+        } else if (q.is("profile")) {
             /* ADR-0013: the profile NAME rides in the URI, but
              * selection/validation is core's — it runs in
              * qttune_session_create BEFORE this parser and before any
-             * DLL load. Accept any nonempty value (<= 63 chars);
-             * unknown names have already failed session_create. */
-            if (val_len == 0 || val_len > 63) {
-                return QT_ERR_NO_TRANSPORT;
-            }
-        } else if (key_len == 4 && strncmp(cur, "poll", 4) == 0) {
-            unsigned long v = 0;
-            if (!parse_number(val, val_len, &v) || v > J2534_PID_MAX) {
-                return QT_ERR_NO_TRANSPORT;
+             * DLL load, so an unknown or malformed name never gets
+             * here. */
+        } else if (q.is("poll")) {
+            if (!parse_number(q.val, q.val_len, &v) || v > J2534_PID_MAX) {
+                return false;
             }
             p->poll_pid = v;
             p->has_poll = true;
-        } else if (key_len == 5 && strncmp(cur, "flags", 5) == 0) {
-            unsigned long v = 0;
-            if (!parse_number(val, val_len, &v)) {
-                return QT_ERR_NO_TRANSPORT;
+        } else if (q.is("flags")) {
+            if (!parse_number(q.val, q.val_len, &v)) {
+                return false;
             }
             p->flags = v;
-        } else if (key_len == 6 && strncmp(cur, "filter", 6) == 0) {
-            unsigned long v = 0;
-            if (!parse_number(val, val_len, &v) ||
+        } else if (q.is("filter")) {
+            if (!parse_number(q.val, q.val_len, &v) ||
                 v == 0 || v > J2534_CAN_ID_MAX) {
-                return QT_ERR_NO_TRANSPORT;
+                return false;
             }
             p->rx_id = v;
         } else {
-            return QT_ERR_NO_TRANSPORT;   /* unknown parameter */
+            return false;   /* unknown parameter */
         }
-
-        if (*end == '\0') {
-            break;   /* end of query — fall through to the coupling rule */
-        }
-        cur = end + 1;
-        if (*cur == '\0') {
-            return QT_ERR_NO_TRANSPORT;   /* trailing '&' */
-        }
+        return true;
+    });
+    if (!ok) {
+        return QTTUNE_ERR_NO_TRANSPORT;
     }
 
     /* The poll-needs-a-channel rule lives in j2534_attach, not here:
@@ -696,7 +674,7 @@ qttune_status_t parse_query(const char* query, j2534_uri_params* p)
      * that declares its own (?profile=obd2&poll=0x0C). Syntax is this
      * function's job; coupling is attach's — and attach still fires
      * before any DLL load, so malformed URIs stay fail-fast. */
-    return QT_OK;
+    return QTTUNE_OK;
 }
 
 /* Resolve a j2534:// URI to a concrete dll_path + connect/adoption
@@ -704,30 +682,27 @@ qttune_status_t parse_query(const char* query, j2534_uri_params* p)
  * split off and parsed before the selector is resolved, so it never
  * reaches LoadLibraryEx or the vendor-name match. Selector: empty =
  * first device; path-like = direct load; else vendor-name match. All
- * misses are QT_ERR_NO_TRANSPORT. */
+ * misses are QTTUNE_ERR_NO_TRANSPORT. */
 qttune_status_t resolve_uri(const char* uri, qttune_j2534_device_t* dev,
                             j2534_uri_params* params)
 {
     const char* rest = uri + 8;   /* core.cpp verified the prefix */
 
     const char* q = strchr(rest, '?');
-    if (q != nullptr && *(q + 1) == '\0') {
-        return QT_ERR_NO_TRANSPORT;   /* bare trailing '?' */
-    }
 
     char selector[QTTUNE_J2534_DLL_PATH_LEN];
     const size_t n = (q != nullptr)
                      ? static_cast<size_t>(q - rest)
                      : strlen(rest);
     if (n >= sizeof(selector)) {
-        return QT_ERR_NO_TRANSPORT;   /* longer than any legal selector */
+        return QTTUNE_ERR_NO_TRANSPORT;   /* longer than any legal selector */
     }
     memcpy(selector, rest, n);
     selector[n] = '\0';
 
     if (q != nullptr) {
         qttune_status_t st = parse_query(q + 1, params);
-        if (st != QT_OK) {
+        if (st != QTTUNE_OK) {
             return st;   /* fail fast — no DLL load on malformed URIs */
         }
     }
@@ -737,15 +712,15 @@ qttune_status_t resolve_uri(const char* uri, qttune_j2534_device_t* dev,
 
     if (selector[0] == '\0') {
         qttune_status_t st = qttune_j2534_discover_devices(&devices, &count);
-        if (st != QT_OK) {
+        if (st != QTTUNE_OK) {
             return st;
         }
         if (count == 0) {
-            return QT_ERR_NO_TRANSPORT;   /* no vendors installed */
+            return QTTUNE_ERR_NO_TRANSPORT;   /* no vendors installed */
         }
         *dev = devices[0];   /* first device — documented default */
         qttune_j2534_free_devices(devices);
-        return QT_OK;
+        return QTTUNE_OK;
     }
 
     /* Path-like selector: contains a separator or a .dll suffix.
@@ -755,15 +730,15 @@ qttune_status_t resolve_uri(const char* uri, qttune_j2534_device_t* dev,
         (strlen(selector) >= 4 &&
          _stricmp(selector + strlen(selector) - 4, ".dll") == 0)) {
         if (strlen(selector) >= QTTUNE_J2534_DLL_PATH_LEN) {
-            return QT_ERR_NO_TRANSPORT;
+            return QTTUNE_ERR_NO_TRANSPORT;
         }
         memcpy(dev->dll_path, selector, strlen(selector) + 1);
-        return QT_OK;
+        return QTTUNE_OK;
     }
 
     /* Otherwise: vendor-name match against discovery, case-insensitive. */
     qttune_status_t st = qttune_j2534_discover_devices(&devices, &count);
-    if (st != QT_OK) {
+    if (st != QTTUNE_OK) {
         return st;
     }
     bool matched = false;
@@ -776,9 +751,9 @@ qttune_status_t resolve_uri(const char* uri, qttune_j2534_device_t* dev,
     }
     qttune_j2534_free_devices(devices);
     if (!matched) {
-        return QT_ERR_NO_TRANSPORT;
+        return QTTUNE_ERR_NO_TRANSPORT;
     }
-    return QT_OK;
+    return QTTUNE_OK;
 }
 
 qttune_status_t j2534_start(qttune_session_t* session, void* impl)
@@ -786,8 +761,8 @@ qttune_status_t j2534_start(qttune_session_t* session, void* impl)
     (void)session;
     auto* t = static_cast<qttune_j2534_transport*>(impl);
     if (t->worker.joinable()) {
-        return QT_OK;   /* internal.h: second start on a live
-                         * transport returns QT_OK */
+        return QTTUNE_OK;   /* internal.h: second start on a live
+                         * transport returns QTTUNE_OK */
     }
 
     for (uint32_t i = 0; i < t->chan_count; ++i) {
@@ -805,7 +780,7 @@ qttune_status_t j2534_start(qttune_session_t* session, void* impl)
             fc, J2534_FILTER_MSG_LEN,
             t->chans[i].addr_flags | QTTUNE_PT_TX_ISO15765_FRAME_PAD,
             &t->chans[i].filter_id);
-        if (st != QT_OK) {
+        if (st != QTTUNE_OK) {
             /* Unwind the ones already registered — no partial
              * filter state survives a failed start. */
             for (uint32_t j = 0; j < i; ++j) {
@@ -831,9 +806,9 @@ qttune_status_t j2534_start(qttune_session_t* session, void* impl)
                 t->chans[i].filter_active = false;
             }
         }
-        return QT_ERR_OUT_OF_MEMORY;
+        return QTTUNE_ERR_OUT_OF_MEMORY;
     }
-    return QT_OK;
+    return QTTUNE_OK;
 }
 
 /* detach(session, impl) — void per internal.h, called exactly once from
@@ -875,13 +850,13 @@ qttune_status_t j2534_attach(qttune_session_t* session, const char* uri)
     /* Idempotence (internal.h contract, mock parity): checked FIRST,
      * before any device open, so the early-out leaks nothing. */
     if (session->transport != nullptr) {
-        return QT_OK;
+        return QTTUNE_OK;
     }
 
     qttune_j2534_device_t dev = {};
     j2534_uri_params params = {};
     qttune_status_t st = resolve_uri(uri, &dev, &params);
-    if (st != QT_OK) {
+    if (st != QTTUNE_OK) {
         return st;
     }
 
@@ -891,7 +866,7 @@ qttune_status_t j2534_attach(qttune_session_t* session, const char* uri)
 
     auto* t = new (std::nothrow) qttune_j2534_transport();
     if (t == nullptr) {
-        return QT_ERR_OUT_OF_MEMORY;
+        return QTTUNE_ERR_OUT_OF_MEMORY;
     }
     t->set = set;
     resolve_channels(t, set, params);
@@ -916,7 +891,7 @@ qttune_status_t j2534_attach(qttune_session_t* session, const char* uri)
      * omitting them. Fires before any hardware is touched. */
     if ((sched_mode || params.has_poll) && t->chan_count == 0) {
         delete t;
-        return QT_ERR_NO_TRANSPORT;
+        return QTTUNE_ERR_NO_TRANSPORT;
     }
 
     /* Connect flags: ?flags= as given, plus CAN_29BIT_ID when the
@@ -933,14 +908,14 @@ qttune_status_t j2534_attach(qttune_session_t* session, const char* uri)
     }
     if (wide_chans != 0 && wide_chans != t->chan_count) {
         delete t;
-        return QT_ERR_NO_TRANSPORT;
+        return QTTUNE_ERR_NO_TRANSPORT;
     }
     const unsigned long connect_flags =
         params.flags | ((wide_chans != 0) ? QTTUNE_PT_CAN_29BIT_ID : 0UL);
 
     qttune_j2534_handle_t* handle = nullptr;
     st = qttune_j2534_open(&dev, &handle);
-    if (st != QT_OK) {
+    if (st != QTTUNE_OK) {
         delete t;
         return st;
     }
@@ -948,7 +923,7 @@ qttune_status_t j2534_attach(qttune_session_t* session, const char* uri)
     unsigned long channel = 0;
     st = qttune_j2534_connect_channel(handle, params.baud, connect_flags,
                                       &channel);
-    if (st != QT_OK) {
+    if (st != QTTUNE_OK) {
         qttune_j2534_close(handle);
         delete t;
         return st;
@@ -960,7 +935,7 @@ qttune_status_t j2534_attach(qttune_session_t* session, const char* uri)
         qttune_j2534_disconnect_channel(handle, channel);
         qttune_j2534_close(handle);
         delete t;
-        return QT_ERR_OUT_OF_MEMORY;
+        return QTTUNE_ERR_OUT_OF_MEMORY;
     }
     wrap->ops = &kJ2534Ops;
     wrap->impl = t;
@@ -975,7 +950,7 @@ qttune_status_t j2534_attach(qttune_session_t* session, const char* uri)
     t->poll_pid = static_cast<uint32_t>(params.poll_pid);
 
     session->transport = wrap;   /* session.h member — direct install */
-    return QT_OK;
+    return QTTUNE_OK;
 }
 
 } // namespace
@@ -996,7 +971,7 @@ extern "C" qttune_status_t qttune_j2534_transport_attach(
 {
     (void)session;
     (void)uri;
-    return QT_ERR_NO_TRANSPORT;
+    return QTTUNE_ERR_NO_TRANSPORT;
 }
 
 #endif /* _WIN32 */

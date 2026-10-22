@@ -77,9 +77,9 @@ ApplicationWindow {
             // moves, so the header fits a phone.
             Rectangle {
                 id: pill
-                readonly property color tone: !QtTune.coreInitialized ? Theme.danger
-                                            : (QtTune.connecting || QtTune.disconnecting) ? Theme.textDim
-                                            : Theme.linkColor(QtTune.linkState)
+                readonly property color tone: !Bridge.coreInitialized ? Theme.danger
+                                            : (Bridge.connecting || Bridge.disconnecting) ? Theme.textDim
+                                            : Theme.linkColor(Bridge.linkState)
                 Layout.fillWidth: true
                 Layout.preferredWidth: pillRow.implicitWidth + 24
                 Layout.maximumWidth: pillRow.implicitWidth + 24
@@ -105,13 +105,13 @@ ApplicationWindow {
                         elide: Text.ElideRight
                         font.pixelSize: 13
                         color: pill.tone
-                        text: !QtTune.coreInitialized ? qsTr("Core init failed")
-                            : QtTune.connecting ? qsTr("Connecting…")
-                            : QtTune.disconnecting ? qsTr("Disconnecting…")
-                            : QtTune.connected
-                              ? qsTr("%1 · %2").arg(Theme.linkLabel(QtTune.linkState))
-                                                .arg(QtTune.currentUri)
-                              : Theme.linkLabel(QtTune.linkState)
+                        text: !Bridge.coreInitialized ? qsTr("Core init failed")
+                            : Bridge.connecting ? qsTr("Connecting…")
+                            : Bridge.disconnecting ? qsTr("Disconnecting…")
+                            : Bridge.connected
+                              ? qsTr("%1 · %2").arg(Theme.linkLabel(Bridge.linkState))
+                                                .arg(Bridge.currentUri)
+                              : Theme.linkLabel(Bridge.linkState)
                     }
                 }
             }
@@ -122,14 +122,14 @@ ApplicationWindow {
             // session from any page. On Settings itself, its Connect
             // button is the one to use.
             ThemedButton {
-                visible: QtTune.connected || root.currentPage !== root.settingsPage
+                visible: Bridge.connected || root.currentPage !== root.settingsPage
                 // A teardown can take seconds with a wedged adapter; no
                 // connect starts until it ends
-                enabled: QtTune.coreInitialized && !QtTune.connecting && !QtTune.disconnecting
-                text: QtTune.connected ? qsTr("Disconnect")
-                    : QtTune.disconnecting ? qsTr("Disconnecting…")
+                enabled: Bridge.coreInitialized && !Bridge.connecting && !Bridge.disconnecting
+                text: Bridge.connected ? qsTr("Disconnect")
+                    : Bridge.disconnecting ? qsTr("Disconnecting…")
                     : qsTr("Connect…")
-                onClicked: QtTune.connected ? QtTune.disconnectSession()
+                onClicked: Bridge.connected ? Bridge.disconnectSession()
                                             : root.gotoPage(root.settingsPage)
             }
         }

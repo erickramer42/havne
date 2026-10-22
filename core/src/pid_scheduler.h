@@ -10,12 +10,7 @@
 
 #include "qttune/signals.h"
 
-#include <stdbool.h>
-#include <stdint.h>
-
-#ifdef __cplusplus
-extern "C" {
-#endif
+#include <cstdint>
 
 #define QTTUNE_SCHED_MAX_PIDS 16u
 
@@ -28,15 +23,15 @@ extern "C" {
  * response once the transport strips the address header. The PID to
  * request is the key's low byte. Sets without such defs (raw, mock)
  * enroll nothing, and the worker falls back to ?poll= or passive
- * receive. Nothing validates this shape at registration, so
- * from_set() checks it itself. */
+ * receive. Registration validates each def but not this shape (other
+ * mux keys are legal), so from_set() checks it itself. */
 typedef struct qttune_pid_scheduler {
     uint8_t pids[QTTUNE_SCHED_MAX_PIDS];
     uint32_t count;
     uint32_t cursor;
 } qttune_pid_scheduler;
 
-static inline void qttune_sched_init(qttune_pid_scheduler* s)
+inline void qttune_sched_init(qttune_pid_scheduler* s)
 {
     s->count = 0;
     s->cursor = 0;
@@ -48,11 +43,11 @@ static inline void qttune_sched_init(qttune_pid_scheduler* s)
  * worker then runs ?poll= or passive). Silently stops at capacity:
  * exceeding 16 distinct PIDs in one v1 profile is a design error
  * caught by the set's own unit tests, not a runtime condition. */
-static inline bool qttune_sched_from_set(qttune_pid_scheduler* s,
+inline bool qttune_sched_from_set(qttune_pid_scheduler* s,
                                          const QttuneSignalSet* set)
 {
     qttune_sched_init(s);
-    if (set == NULL || set->defs == NULL || set->count == 0) {
+    if (set == nullptr || set->defs == nullptr || set->count == 0) {
         return false;
     }
     for (uint32_t i = 0; i < set->count; ++i) {
@@ -82,19 +77,15 @@ static inline bool qttune_sched_from_set(qttune_pid_scheduler* s,
  * request. Returns false only for an empty scheduler (callers in
  * scheduler mode never see this — they entered on count > 0 and
  * nothing removes PIDs at runtime). */
-static inline bool qttune_sched_next(qttune_pid_scheduler* s,
+inline bool qttune_sched_next(qttune_pid_scheduler* s,
                                      uint8_t* out_pid)
 {
-    if (s->count == 0 || out_pid == NULL) {
+    if (s->count == 0 || out_pid == nullptr) {
         return false;
     }
     *out_pid = s->pids[s->cursor % s->count];
     s->cursor = (s->cursor + 1u) % s->count;
     return true;
 }
-
-#ifdef __cplusplus
-}
-#endif
 
 #endif /* QTTUNE_PID_SCHEDULER_H */

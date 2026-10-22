@@ -14,6 +14,7 @@ qt_policy(SET QTP0004 NEW)
 qt_add_executable(qttune
     MANUAL_FINALIZATION
     main.cpp
+    bridgesingleton.h
     qttunebridge.cpp
     qttunebridge.h
 )
@@ -52,6 +53,13 @@ target_link_libraries(qttune PRIVATE
     Qt6::QuickControls2
     qttune-core
 )
+qttune_enable_warnings(qttune)
+# MSVC's C4702 (unreachable code) fires inside Qt's inline headers, as
+# the generated QML registration code instantiates them; none of it is
+# this project's code.
+if(MSVC)
+    target_compile_options(qttune PRIVATE /wd4702)
+endif()
 
 if(WIN32)
     set_target_properties(qttune PROPERTIES WIN32_EXECUTABLE TRUE)

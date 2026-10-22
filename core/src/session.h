@@ -16,7 +16,7 @@ struct qttune_session {
     std::vector<std::pair<qttune_frame_callback_t, void*>> callbacks;
     qttune_transport_t* transport = nullptr;
     const QttuneSignalSet* active_signal_set = nullptr;
-    std::atomic<int32_t> last_error{QT_OK};
+    std::atomic<int32_t> last_error{QTTUNE_OK};
     std::atomic<uint32_t> error_count{0};
 };
 

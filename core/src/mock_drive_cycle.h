@@ -491,10 +491,10 @@ inline uint16_t clamp_u16(float v)
  *   [6]    load     uint8, scale 100/255
  *   [7..8] MAF      LE uint16, scale 0.01 g/s
  *   [9]    oil      uint8, offset -40
- *   [10..11] pad, up to the CAN FD length (MOCK_TELEMETRY_PAYLOAD_LEN)
+ *   [10..11] pad, up to the CAN FD length (QTTUNE_MOCK_TELEMETRY_PAYLOAD_LEN)
  * The transport never decodes (rule 2); the tests round-trip every
  * tick of the cycle through qttune_mock_signal_set(). */
-inline void encode_payload(const DriveCycle& s, uint8_t out[MOCK_TELEMETRY_PAYLOAD_LEN])
+inline void encode_payload(const DriveCycle& s, uint8_t out[QTTUNE_MOCK_TELEMETRY_PAYLOAD_LEN])
 {
     const uint16_t rpm_raw = clamp_u16(s.rpm / 0.25f);
     out[0] = static_cast<uint8_t>(rpm_raw & 0xFF);

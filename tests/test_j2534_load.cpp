@@ -14,6 +14,7 @@
 
 #ifdef _WIN32
 #include <windows.h>
+#include "non_ascii_copy.h"
 #endif
 
 #include <cstring>
@@ -66,11 +67,11 @@ TEST_F(FakeFixture, NullArgumentsRejected) {
     qttune_j2534_handle_t* h = nullptr;
     qttune_j2534_device_t dev{};
 
-    EXPECT_EQ(qttune_j2534_open(nullptr, &h), QT_ERR_NULL_ARGUMENT);
-    EXPECT_EQ(qttune_j2534_open(&dev, nullptr), QT_ERR_NULL_ARGUMENT);
+    EXPECT_EQ(qttune_j2534_open(nullptr, &h), QTTUNE_ERR_NULL_ARGUMENT);
+    EXPECT_EQ(qttune_j2534_open(&dev, nullptr), QTTUNE_ERR_NULL_ARGUMENT);
 
     dev.dll_path[0] = '\0';
-    EXPECT_EQ(qttune_j2534_open(&dev, &h), QT_ERR_NULL_ARGUMENT);
+    EXPECT_EQ(qttune_j2534_open(&dev, &h), QTTUNE_ERR_NULL_ARGUMENT);
     EXPECT_EQ(h, nullptr);
 }
 
@@ -80,7 +81,7 @@ TEST_F(FakeFixture, MissingDllFailsClean) {
     strcpy(bogus.dll_path, "C:\\definitely\\not\\a\\real\\vendor.dll");
 
     qttune_j2534_handle_t* h = nullptr;
-    EXPECT_EQ(qttune_j2534_open(&bogus, &h), QT_ERR_LOAD_FAILED);
+    EXPECT_EQ(qttune_j2534_open(&bogus, &h), QTTUNE_ERR_LOAD_FAILED);
     EXPECT_EQ(h, nullptr);
 
     /* Prove the failed load left nothing mapped behind */
@@ -89,7 +90,7 @@ TEST_F(FakeFixture, MissingDllFailsClean) {
 
 TEST_F(FakeFixture, OpenCloseCycleHitsVendorApi) {
     qttune_j2534_handle_t* h = nullptr;
-    ASSERT_EQ(qttune_j2534_open(&device, &h), QT_OK);
+    ASSERT_EQ(qttune_j2534_open(&device, &h), QTTUNE_OK);
     ASSERT_NE(h, nullptr);
 
     auto hook = hook_handle();
@@ -97,7 +98,7 @@ TEST_F(FakeFixture, OpenCloseCycleHitsVendorApi) {
 
     EXPECT_EQ(hook(), 1);   /* PassThruOpen ran */
 
-    EXPECT_EQ(qttune_j2534_close(h), QT_OK);
+    EXPECT_EQ(qttune_j2534_close(h), QTTUNE_OK);
 
     /* Fixture holds its own ref, so the DLL survives the close and
      * we can prove PassThruClose ran BEFORE FreeLibrary. */
@@ -105,13 +106,13 @@ TEST_F(FakeFixture, OpenCloseCycleHitsVendorApi) {
 
     /* Reopen: same DLL, fresh cycle — proves FreeLibrary released it */
     qttune_j2534_handle_t* h2 = nullptr;
-    ASSERT_EQ(qttune_j2534_open(&device, &h2), QT_OK);
+    ASSERT_EQ(qttune_j2534_open(&device, &h2), QTTUNE_OK);
     EXPECT_EQ(hook(), 1);
-    EXPECT_EQ(qttune_j2534_close(h2), QT_OK);
+    EXPECT_EQ(qttune_j2534_close(h2), QTTUNE_OK);
 }
 
 TEST_F(FakeFixture, CloseNullIsSafeNoOp) {
-    EXPECT_EQ(qttune_j2534_close(nullptr), QT_OK);
+    EXPECT_EQ(qttune_j2534_close(nullptr), QTTUNE_OK);
 }
 
 /* Spec-spelling PRIMARY resolution (the conformant-vendor case —
@@ -124,7 +125,7 @@ TEST_F(FakeFixture, CloseNullIsSafeNoOp) {
  * fallback. */
 TEST_F(FakeFixture, SpecSpellingPassThruIoctlResolvesAndWorks) {
     qttune_j2534_handle_t* h = nullptr;
-    ASSERT_EQ(qttune_j2534_open(&device, &h), QT_OK);
+    ASSERT_EQ(qttune_j2534_open(&device, &h), QTTUNE_OK);
     ASSERT_NE(h, nullptr);
 
     /* Negative assertion: the everyday fake must not export the
@@ -143,13 +144,13 @@ TEST_F(FakeFixture, SpecSpellingPassThruIoctlResolvesAndWorks) {
      * so a loader that passed the channel arg would fail this. */
     EXPECT_EQ(qttune_j2534_ioctl(h, 0, QTTUNE_PT_IOCTL_READ_VBATT,
                                  nullptr, 0, out, sizeof(out), &out_len),
-              QT_OK);
+              QTTUNE_OK);
     EXPECT_EQ(out_len, 4u);
     unsigned long vbatt = 0;
     memcpy(&vbatt, out, 4);
     EXPECT_EQ(vbatt, 13800ul);   /* the fake's fixed VBATT — right function */
 
-    EXPECT_EQ(qttune_j2534_close(h), QT_OK);
+    EXPECT_EQ(qttune_j2534_close(h), QTTUNE_OK);
 }
 
 /* Legacy-spelling FALLBACK: the legacy fixture exports
@@ -164,20 +165,35 @@ TEST_F(FakeFixture, LegacySpellingPassThruIoCtlFallsBackAndWorks) {
     /* The legacy fixture is x64 in this tree — in-proc path, the same
      * seam the surrogate child's resolve helper mirrors. */
     qttune_j2534_handle_t* h = nullptr;
-    ASSERT_EQ(qttune_j2534_open(&dev, &h), QT_OK);
+    ASSERT_EQ(qttune_j2534_open(&dev, &h), QTTUNE_OK);
     ASSERT_NE(h, nullptr);
 
     uint8_t out[4] = {};
     uint32_t out_len = 0;
     EXPECT_EQ(qttune_j2534_ioctl(h, 0, QTTUNE_PT_IOCTL_READ_VBATT,
                                  nullptr, 0, out, sizeof(out), &out_len),
-              QT_OK);
+              QTTUNE_OK);
     EXPECT_EQ(out_len, 4u);
     unsigned long vbatt = 0;
     memcpy(&vbatt, out, 4);
     EXPECT_EQ(vbatt, 13800ul);
 
-    EXPECT_EQ(qttune_j2534_close(h), QT_OK);
+    EXPECT_EQ(qttune_j2534_close(h), QTTUNE_OK);
+}
+
+/* dll_path is UTF-8 (j2534.h): a path no ANSI code page can spell
+ * still loads, in-proc. Through the A APIs it would fail to load. */
+TEST_F(FakeFixture, NonAsciiDllPathLoadsInProc) {
+    NonAsciiCopy copy(FAKE_J2534_DLL_PATH);
+    ASSERT_TRUE(copy.ok) << "couldn't stage the fake under a non-ASCII path";
+
+    qttune_j2534_device_t dev{};
+    ASSERT_LT(strlen(copy.utf8), sizeof(dev.dll_path));
+    memcpy(dev.dll_path, copy.utf8, strlen(copy.utf8) + 1);
+    qttune_j2534_handle_t* h = nullptr;
+    ASSERT_EQ(qttune_j2534_open(&dev, &h), QTTUNE_OK);
+    EXPECT_STREQ(qttune_j2534_backend_name(h), "inproc");
+    EXPECT_EQ(qttune_j2534_close(h), QTTUNE_OK);   /* unloads, so the copy can go */
 }
 
 #endif /* _WIN32 */

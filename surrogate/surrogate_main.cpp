@@ -400,17 +400,25 @@ static int handle_op_stop_filter(unsigned long channel_id, unsigned long filter_
     return static_cast<int>(rc);
 }
 
-int main(int argc, char* argv[])
+/* Wide entry point: the client passes the DLL path as UTF-16, so a
+ * non-ASCII path survives (an ANSI argv would mangle it). */
+int wmain(int argc, wchar_t* argv[])
 {
     /* CLI: surrogate.exe <dll_path> <pipe_name>. Exit 1 = bad args. */
     if (argc < 3) return 1;
-    const char* dll_path = argv[1];
-    const char* pipe_name = argv[2];
+    const wchar_t* dll_path = argv[1];
+    const wchar_t* pipe_name = argv[2];
+    /* UTF-8, for the log; "?" if it won't convert. */
+    char dll_path8[3 * 260] = "?";
+    if (WideCharToMultiByte(CP_UTF8, 0, dll_path, -1, dll_path8,
+                            sizeof(dll_path8), nullptr, nullptr) <= 0) {
+        strcpy_s(dll_path8, sizeof(dll_path8), "?");
+    }
 
     for (int i = 0; i < 200; ++i) {
-        if (WaitNamedPipeA(pipe_name, 50)) break;
+        if (WaitNamedPipeW(pipe_name, 50)) break;
     }
-    g_pipe = CreateFileA(pipe_name, GENERIC_READ | GENERIC_WRITE,
+    g_pipe = CreateFileW(pipe_name, GENERIC_READ | GENERIC_WRITE,
                          0, nullptr, OPEN_EXISTING, 0, nullptr);
     if (g_pipe == INVALID_HANDLE_VALUE) return 7;
     stage("pipe connected");
@@ -423,9 +431,9 @@ int main(int argc, char* argv[])
         stage("frame logging on (QTTUNE_SUR_LOG_FRAMES=1)");
     }
 
-    g_module = LoadLibraryExA(dll_path, nullptr, LOAD_WITH_ALTERED_SEARCH_PATH);
+    g_module = LoadLibraryExW(dll_path, nullptr, LOAD_WITH_ALTERED_SEARCH_PATH);
     if (g_module == nullptr) {
-        stage("LoadLibraryExA failed for '%s' (err=%lu)", dll_path,
+        stage("LoadLibraryExW failed for '%s' (err=%lu)", dll_path8,
               GetLastError());
         return 4;
     }

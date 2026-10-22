@@ -13,6 +13,7 @@
 
 #include <windows.h>
 #include "qttune/j2534_ptypes.h"
+#include "win_utf8.h"
 
 #include <vector>
 #include <algorithm>
@@ -113,36 +114,43 @@ constexpr const wchar_t* kPassThruRoots[] = {
     L"SOFTWARE\\PassThruSupport.04.04",
 };
 
+/* FUNCTIONLIBRARY as a UTF-8 path (the j2534.h contract). Read as
+ * UTF-16: the A variant would hand back the ANSI code page's bytes,
+ * which the bridge and the loader read as UTF-8, so a non-ASCII install
+ * path would mangle. */
 bool read_function_library(HKEY hvendor, char* out, size_t out_size)
 {
+    wchar_t raw[QTTUNE_J2534_DLL_PATH_LEN] = {};
     DWORD type = 0;
-    DWORD size = static_cast<DWORD>(out_size);
-    LONG rc = RegQueryValueExA(hvendor, "FUNCTIONLIBRARY", nullptr,
-                               &type, reinterpret_cast<LPBYTE>(out), &size);
+    DWORD size = static_cast<DWORD>(sizeof(raw) - sizeof(wchar_t));   /* room
+                                                    for a terminator */
+    LONG rc = RegQueryValueExW(hvendor, L"FUNCTIONLIBRARY", nullptr,
+                               &type, reinterpret_cast<LPBYTE>(raw), &size);
     if (rc != ERROR_SUCCESS || (type != REG_SZ && type != REG_EXPAND_SZ)) {
         return false;
     }
-    out[out_size - 1] = '\0';
-    if (size > 0 && out[size - 1] != '\0' && size < out_size) {
-        out[size] = '\0';
-    }
-    if (out[0] == '\0') {
+    /* The stored string need not be terminated. size is in bytes. */
+    raw[size / sizeof(wchar_t)] = L'\0';
+    if (raw[0] == L'\0') {
         return false;
     }
-    /* RegQueryValueExA returns REG_EXPAND_SZ unexpanded, so a path
+    /* RegQueryValueExW returns REG_EXPAND_SZ unexpanded, so a path
      * like "%ProgramFiles(x86)%\\..." would pass discovery and then
-     * fail to load. Expand it in place through a bounded buffer.
-     * ExpandEnvironmentStringsA's return includes the terminator. */
+     * fail to load. ExpandEnvironmentStringsW's return counts the
+     * terminator. */
+    const wchar_t* path = raw;
+    wchar_t expanded[1024];
     if (type == REG_EXPAND_SZ) {
-        char expanded[1024];
-        const DWORD n = ExpandEnvironmentStringsA(out, expanded,
-                                                   sizeof(expanded));
-        if (n == 0 || n > out_size) {
+        const DWORD n = ExpandEnvironmentStringsW(raw, expanded,
+                                                   static_cast<DWORD>(_countof(expanded)));
+        if (n == 0 || n > _countof(expanded)) {
             return false;   /* expansion failed or result won't fit */
         }
-        memcpy(out, expanded, n);
+        path = expanded;
     }
-    return out[0] != '\0';
+    /* A path whose UTF-8 form won't fit the device struct is skipped,
+     * not truncated: a truncated path loads the wrong file or none. */
+    return qttune_wide_to_utf8(path, out, out_size) && out[0] != '\0';
 }
 
 /* Sniff the PE architecture of a DLL: 1 = x86, 2 = x64, 0 = unknown
@@ -150,12 +158,16 @@ bool read_function_library(HKEY hvendor, char* out, size_t out_size)
  *
  * qttune_j2534_open sends x86 to the surrogate and everything else
  * in-proc, so an unreadable or invalid file fails honestly at
- * LoadLibraryEx (QT_ERR_LOAD_FAILED) without spawning a surrogate.
+ * LoadLibraryEx (QTTUNE_ERR_LOAD_FAILED) without spawning a surrogate.
  * The discovery annotation is only a UI label; the sniff in open() is
  * authoritative and also covers direct-path selectors. */
 static uint32_t sniff_pe_architecture(const char* dll_path)
 {
-    HANDLE hFile = CreateFileA(dll_path, GENERIC_READ, FILE_SHARE_READ,
+    wchar_t wpath[QTTUNE_J2534_DLL_PATH_LEN];
+    if (!qttune_utf8_to_wide(dll_path, wpath, _countof(wpath))) {
+        return 0; // not UTF-8 — open() fails it at the in-proc load
+    }
+    HANDLE hFile = CreateFileW(wpath, GENERIC_READ, FILE_SHARE_READ,
                                NULL, OPEN_EXISTING,
                                FILE_ATTRIBUTE_NORMAL, NULL);
     if (hFile == INVALID_HANDLE_VALUE) {
@@ -227,9 +239,10 @@ void enumerate_view(const wchar_t* root_path,
         qttune_j2534_device_t dev = {};
         dev.vendor_id = static_cast<uint32_t>(out_devices.size());
 
-        WideCharToMultiByte(CP_UTF8, 0, subkey_name, -1,
-                            dev.vendor_name, QTTUNE_J2534_VENDOR_NAME_LEN,
-                            nullptr, nullptr);
+        /* A name too long for the struct stays empty rather than
+         * unterminated; the device is still listed by its path. */
+        (void)qttune_wide_to_utf8(subkey_name, dev.vendor_name,
+                                  sizeof(dev.vendor_name));
 
         if (read_function_library(hvendor, dev.dll_path,
                                   sizeof(dev.dll_path))) {
@@ -296,7 +309,7 @@ qttune_status_t qttune_j2534_discover_devices(qttune_j2534_device_t** devices_ou
                                               uint32_t* device_count)
 {
     if (devices_out == nullptr || device_count == nullptr) {
-        return QT_ERR_NULL_ARGUMENT;
+        return QTTUNE_ERR_NULL_ARGUMENT;
     }
 
     *devices_out = nullptr;
@@ -334,7 +347,7 @@ qttune_status_t qttune_j2534_discover_devices(qttune_j2534_device_t** devices_ou
     }
 
     if (unique.empty()) {
-        return QT_OK;
+        return QTTUNE_OK;
     }
 
     try {
@@ -342,9 +355,9 @@ qttune_status_t qttune_j2534_discover_devices(qttune_j2534_device_t** devices_ou
         std::copy(unique.begin(), unique.end(), copy);
         *devices_out = copy;
         *device_count = static_cast<uint32_t>(unique.size());
-        return QT_OK;
+        return QTTUNE_OK;
     } catch (...) {
-        return QT_ERR_OUT_OF_MEMORY;
+        return QTTUNE_ERR_OUT_OF_MEMORY;
     }
 }
 
@@ -358,7 +371,7 @@ qttune_status_t qttune_j2534_open(const qttune_j2534_device_t* device,
 {
     if (device == nullptr || out_handle == nullptr ||
         device->dll_path[0] == '\0') {
-        return QT_ERR_NULL_ARGUMENT;
+        return QTTUNE_ERR_NULL_ARGUMENT;
     }
     *out_handle = nullptr;
 
@@ -369,31 +382,35 @@ qttune_status_t qttune_j2534_open(const qttune_j2534_device_t* device,
     if (sniff_pe_architecture(device->dll_path) == 1) {
         qttune_j2534_sur_handle_t* sur = nullptr;
         qttune_status_t st = qttune_j2534_sur_open(device->dll_path, &sur);
-        if (st != QT_OK) {
+        if (st != QTTUNE_OK) {
             return st;   /* spawn/DLL-load/PassThruOpen failure — already
-                            mapped to QT_ERR_LOAD_FAILED client-side */
+                            mapped to QTTUNE_ERR_LOAD_FAILED client-side */
         }
         qttune_j2534_handle_t* h = new (std::nothrow) qttune_j2534_handle_t();
         if (h == nullptr) {
             qttune_j2534_sur_close(sur);
-            return QT_ERR_OUT_OF_MEMORY;
+            return QTTUNE_ERR_OUT_OF_MEMORY;
         }
         h->is_surrogate = true;
         h->sur = sur;
         *out_handle = h;
-        return QT_OK;
+        return QTTUNE_OK;
     }
 
-    HMODULE module = LoadLibraryExA(device->dll_path, nullptr,
+    wchar_t wpath[QTTUNE_J2534_DLL_PATH_LEN];
+    if (!qttune_utf8_to_wide(device->dll_path, wpath, _countof(wpath))) {
+        return QTTUNE_ERR_LOAD_FAILED;   /* not UTF-8 */
+    }
+    HMODULE module = LoadLibraryExW(wpath, nullptr,
                                     LOAD_WITH_ALTERED_SEARCH_PATH);
     if (module == nullptr) {
-        return QT_ERR_LOAD_FAILED;
+        return QTTUNE_ERR_LOAD_FAILED;
     }
 
     qttune_j2534_handle_t* h = new (std::nothrow) qttune_j2534_handle_t();
     if (h == nullptr) {
         FreeLibrary(module);
-        return QT_ERR_OUT_OF_MEMORY;
+        return QTTUNE_ERR_OUT_OF_MEMORY;
     }
     h->module = module;
 
@@ -416,25 +433,25 @@ qttune_status_t qttune_j2534_open(const qttune_j2534_device_t* device,
     if (!all_resolved) {
         FreeLibrary(module);
         delete h;
-        return QT_ERR_LOAD_FAILED;
+        return QTTUNE_ERR_LOAD_FAILED;
     }
 
     unsigned long device_id = 0;
     if (h->open(nullptr, &device_id) != kPtStatusNoError) {
         FreeLibrary(module);
         delete h;
-        return QT_ERR_LOAD_FAILED;
+        return QTTUNE_ERR_LOAD_FAILED;
     }
     h->device_id = device_id;
 
     *out_handle = h;
-    return QT_OK;
+    return QTTUNE_OK;
 }
 
 qttune_status_t qttune_j2534_close(qttune_j2534_handle_t* handle)
 {
     if (handle == nullptr) {
-        return QT_OK;
+        return QTTUNE_OK;
     }
     if (handle->is_surrogate) {
         /* Polite SHUTDOWN, bounded wait, job-object kill — all inside
@@ -451,7 +468,7 @@ qttune_status_t qttune_j2534_close(qttune_j2534_handle_t* handle)
         FreeLibrary(handle->module);
     }
     delete handle;
-    return QT_OK;
+    return QTTUNE_OK;
 }
 
 /* ---- Vendor-call helpers used by j2534_transport.cpp ---- */
@@ -462,7 +479,7 @@ qttune_status_t qttune_j2534_connect_channel(qttune_j2534_handle_t* handle,
                                              unsigned long* out_channel)
 {
     if (handle == nullptr || out_channel == nullptr) {
-        return QT_ERR_NULL_ARGUMENT;
+        return QTTUNE_ERR_NULL_ARGUMENT;
     }
     if (handle->is_surrogate) {
         return qttune_j2534_sur_connect_channel(handle->sur, baud,
@@ -480,14 +497,14 @@ qttune_status_t qttune_j2534_connect_channel(qttune_j2534_handle_t* handle,
                               flags,
                               baud,
                               out_channel);
-    return (rc == kPtStatusNoError) ? QT_OK : QT_ERR_NO_TRANSPORT;
+    return (rc == kPtStatusNoError) ? QTTUNE_OK : QTTUNE_ERR_NO_TRANSPORT;
 }
 
 qttune_status_t qttune_j2534_disconnect_channel(qttune_j2534_handle_t* handle,
                                                 unsigned long channel)
 {
     if (handle == nullptr) {
-        return QT_ERR_NULL_ARGUMENT;
+        return QTTUNE_ERR_NULL_ARGUMENT;
     }
     if (handle->is_surrogate) {
         return qttune_j2534_sur_disconnect_channel(handle->sur, channel);
@@ -496,15 +513,15 @@ qttune_status_t qttune_j2534_disconnect_channel(qttune_j2534_handle_t* handle,
      * not block the detach path. The status is deliberately
      * discarded. */
     (void)handle->disconnect(channel);
-    return QT_OK;
+    return QTTUNE_OK;
 }
 
 /* ---- Read frame: timeout vs empty vs hard-error distinction ----
  *
- *   NOERROR, no message            -> QT_OK, no frame (idle)
- *   ERR_BUFFER_EMPTY (0x10)        -> QT_OK, no frame (queue drained)
- *   ERR_TIMEOUT (0x09)             -> QT_ERR_VEHICLE_TIMEOUT (quiet bus)
- *   any other nonzero             -> QT_ERR_TRANSPORT_HARD_FAILURE
+ *   NOERROR, no message            -> QTTUNE_OK, no frame (idle)
+ *   ERR_BUFFER_EMPTY (0x10)        -> QTTUNE_OK, no frame (queue drained)
+ *   ERR_TIMEOUT (0x09)             -> QTTUNE_ERR_VEHICLE_TIMEOUT (quiet bus)
+ *   any other nonzero             -> QTTUNE_ERR_TRANSPORT_HARD_FAILURE
  *   num > 0 under NOERROR or      -> deliver the frame (J2534-1 pairs
  *     ERR_TIMEOUT                     ERR_TIMEOUT with data), except TX
  *                                     indications and loopback echoes,
@@ -524,13 +541,13 @@ qttune_status_t qttune_j2534_read_frame(qttune_j2534_handle_t* handle,
                                         bool* got_frame)
 {
     if (handle == nullptr || out_frame == nullptr || got_frame == nullptr) {
-        return QT_ERR_NULL_ARGUMENT;
+        return QTTUNE_ERR_NULL_ARGUMENT;
     }
     *got_frame = false;
 
     if (handle->is_surrogate) {
         /* Surrogate path: the client maps pipe failure to
-         * QT_ERR_TRANSPORT_HARD_FAILURE and performs the same
+         * QTTUNE_ERR_TRANSPORT_HARD_FAILURE and performs the same
          * timeout/empty/hard-error split on the batched OP_READ
          * status (#11). */
         return qttune_j2534_sur_read_frame(handle->sur, channel,
@@ -548,15 +565,15 @@ qttune_status_t qttune_j2534_read_frame(qttune_j2534_handle_t* handle,
     if (num == 0) {
         *got_frame = false;
         if (rc == kPtStatusNoError) {
-            return QT_OK;   /* idle */
+            return QTTUNE_OK;   /* idle */
         }
         if (rc == QTTUNE_PT_STATUS_TIMEOUT) {
-            return QT_ERR_VEHICLE_TIMEOUT;
+            return QTTUNE_ERR_VEHICLE_TIMEOUT;
         }
         if (rc == QTTUNE_PT_STATUS_BUFFER_EMPTY) {
-            return QT_OK;   /* queue empty — quiet, not failed */
+            return QTTUNE_OK;   /* queue empty — quiet, not failed */
         }
-        return QT_ERR_TRANSPORT_HARD_FAILURE;
+        return QTTUNE_ERR_TRANSPORT_HARD_FAILURE;
     }
 
     /* num > 0: deliver even under ERR_TIMEOUT — the trust rule above
@@ -569,7 +586,7 @@ qttune_status_t qttune_j2534_read_frame(qttune_j2534_handle_t* handle,
          * surrogate child. Reporting "no frame" ends the worker's
          * drain early (Known Issue #28). */
         *got_frame = false;
-        return QT_OK;
+        return QTTUNE_OK;
     }
     out_frame->arbitration_id = 0;
     out_frame->channel_id = 0;
@@ -581,7 +598,7 @@ qttune_status_t qttune_j2534_read_frame(qttune_j2534_handle_t* handle,
     out_frame->data_length = static_cast<uint16_t>(n);
     memcpy(out_frame->data, msg.Data, n);
     *got_frame = true;
-    return QT_OK;
+    return QTTUNE_OK;
 }
 
 /* ---- Write / ioctl / filter vendor-call helpers ---- */
@@ -596,7 +613,7 @@ qttune_status_t qttune_j2534_write_frame(qttune_j2534_handle_t* handle,
 {
     if (handle == nullptr || data == nullptr || len == 0 ||
         len > sizeof(((qttune_frame_t*)0)->data)) {
-        return QT_ERR_NULL_ARGUMENT;
+        return QTTUNE_ERR_NULL_ARGUMENT;
     }
     if (out_num_written != nullptr) {
         *out_num_written = 0;
@@ -613,7 +630,7 @@ qttune_status_t qttune_j2534_write_frame(qttune_j2534_handle_t* handle,
     unsigned long num = 1;
     long rc = handle->write_msgs(channel, &msg, &num, timeout_ms);
     if (rc != kPtStatusNoError) {
-        return QT_ERR_NO_TRANSPORT;
+        return QTTUNE_ERR_NO_TRANSPORT;
     }
     /* Success-but-wrote-nothing is the caller's problem to catch via
      * out_num_written; we do not fabricate an error for a partial or
@@ -622,7 +639,7 @@ qttune_status_t qttune_j2534_write_frame(qttune_j2534_handle_t* handle,
     if (out_num_written != nullptr) {
         *out_num_written = num;
     }
-    return QT_OK;
+    return QTTUNE_OK;
 }
 
 qttune_status_t qttune_j2534_ioctl(qttune_j2534_handle_t* handle,
@@ -635,10 +652,10 @@ qttune_status_t qttune_j2534_ioctl(qttune_j2534_handle_t* handle,
                                   uint32_t* out_len)
 {
     if (handle == nullptr || input_len > 64) {
-        return QT_ERR_NULL_ARGUMENT;
+        return QTTUNE_ERR_NULL_ARGUMENT;
     }
     if (input == nullptr && input_len != 0) {
-        return QT_ERR_NULL_ARGUMENT;
+        return QTTUNE_ERR_NULL_ARGUMENT;
     }
     if (out_len != nullptr) {
         *out_len = 0;
@@ -656,7 +673,7 @@ qttune_status_t qttune_j2534_ioctl(qttune_j2534_handle_t* handle,
                                ioctl_id == QTTUNE_PT_IOCTL_CLEAR_RX_BUFFER ||
                                ioctl_id == QTTUNE_PT_IOCTL_CLEAR_MSG_FILTERS);
     if (!is_sconfig && !is_null_form) {
-        return QT_ERR_NOT_IMPLEMENTED;
+        return QTTUNE_ERR_NOT_IMPLEMENTED;
     }
 
     if (handle->is_surrogate) {
@@ -672,7 +689,7 @@ qttune_status_t qttune_j2534_ioctl(qttune_j2534_handle_t* handle,
                                                     ioctl_id, input,
                                                     input_len, staged,
                                                     &staged_len);
-        if (st != QT_OK) {
+        if (st != QTTUNE_OK) {
             return st;
         }
         if (output != nullptr && staged_len > 0) {
@@ -683,7 +700,7 @@ qttune_status_t qttune_j2534_ioctl(qttune_j2534_handle_t* handle,
         if (out_len != nullptr) {
             *out_len = staged_len;
         }
-        return QT_OK;
+        return QTTUNE_OK;
     }
 
     if (is_sconfig) {
@@ -691,7 +708,7 @@ qttune_status_t qttune_j2534_ioctl(qttune_j2534_handle_t* handle,
         const uint32_t n = unflatten_sconfig(input, input_len, cfg,
                                              QTTUNE_PT_SCONFIG_MAX_PARAMS);
         if (n == 0) {
-            return QT_ERR_NULL_ARGUMENT;   /* malformed flattened array */
+            return QTTUNE_ERR_NULL_ARGUMENT;   /* malformed flattened array */
         }
         SCONFIG_LIST list;
         list.NumOfParams = n;
@@ -699,7 +716,7 @@ qttune_status_t qttune_j2534_ioctl(qttune_j2534_handle_t* handle,
         long rc = handle->ioctl(channel, static_cast<long>(ioctl_id),
                                 &list, nullptr);
         if (rc != kPtStatusNoError) {
-            return QT_ERR_NO_TRANSPORT;
+            return QTTUNE_ERR_NO_TRANSPORT;
         }
         if (ioctl_id == QTTUNE_PT_IOCTL_GET_CONFIG) {
             /* Re-flatten the vendor-updated pairs. *out_len reports
@@ -716,7 +733,7 @@ qttune_status_t qttune_j2534_ioctl(qttune_j2534_handle_t* handle,
                 *out_len = full;
             }
         }
-        return QT_OK;
+        return QTTUNE_OK;
     }
 
     if (ioctl_id == QTTUNE_PT_IOCTL_READ_VBATT) {
@@ -727,7 +744,7 @@ qttune_status_t qttune_j2534_ioctl(qttune_j2534_handle_t* handle,
                                 static_cast<long>(ioctl_id),
                                 nullptr, &vbatt);
         if (rc != kPtStatusNoError) {
-            return QT_ERR_NO_TRANSPORT;
+            return QTTUNE_ERR_NO_TRANSPORT;
         }
         if (output != nullptr && output_cap >= 4) {
             memcpy(output, &vbatt, 4);
@@ -735,13 +752,13 @@ qttune_status_t qttune_j2534_ioctl(qttune_j2534_handle_t* handle,
         if (out_len != nullptr) {
             *out_len = 4;
         }
-        return QT_OK;
+        return QTTUNE_OK;
     }
 
     /* Remaining NULL/NULL forms: CLEAR_TX/RX_BUFFER, CLEAR_MSG_FILTERS */
     long rc = handle->ioctl(channel, static_cast<long>(ioctl_id),
                             nullptr, nullptr);
-    return (rc == kPtStatusNoError) ? QT_OK : QT_ERR_NO_TRANSPORT;
+    return (rc == kPtStatusNoError) ? QTTUNE_OK : QTTUNE_ERR_NO_TRANSPORT;
 }
 
 qttune_status_t qttune_j2534_start_msg_filter(qttune_j2534_handle_t* handle,
@@ -758,7 +775,7 @@ qttune_status_t qttune_j2534_start_msg_filter(qttune_j2534_handle_t* handle,
 {
     if (handle == nullptr || mask == nullptr || pattern == nullptr ||
         out_filter_id == nullptr) {
-        return QT_ERR_NULL_ARGUMENT;
+        return QTTUNE_ERR_NULL_ARGUMENT;
     }
     /* Spec: pattern 1..12 bytes, mask/pattern lengths equal, flow
      * control only with FLOW_CONTROL_FILTER and then also matching
@@ -767,14 +784,14 @@ qttune_status_t qttune_j2534_start_msg_filter(qttune_j2534_handle_t* handle,
     if (mask_len < 1 || mask_len > QTTUNE_PT_FILTER_PATTERN_MAX ||
         mask_len != pattern_len ||
         fc_len > QTTUNE_PT_FILTER_PATTERN_MAX) {
-        return QT_ERR_NULL_ARGUMENT;
+        return QTTUNE_ERR_NULL_ARGUMENT;
     }
     if (filter_type == QTTUNE_PT_FLOW_CONTROL_FILTER) {
         if (fc_len != mask_len || flow_control == nullptr) {
-            return QT_ERR_NULL_ARGUMENT;
+            return QTTUNE_ERR_NULL_ARGUMENT;
         }
     } else if (fc_len != 0) {
-        return QT_ERR_NULL_ARGUMENT;
+        return QTTUNE_ERR_NULL_ARGUMENT;
     }
     *out_filter_id = 0;
 
@@ -799,10 +816,10 @@ qttune_status_t qttune_j2534_start_msg_filter(qttune_j2534_handle_t* handle,
     long rc = handle->start_filter(channel, filter_type, &mask_msg,
                                    &pattern_msg, fc_ptr, &filter_id);
     if (rc != kPtStatusNoError) {
-        return QT_ERR_NO_TRANSPORT;
+        return QTTUNE_ERR_NO_TRANSPORT;
     }
     *out_filter_id = filter_id;
-    return QT_OK;
+    return QTTUNE_OK;
 }
 
 qttune_status_t qttune_j2534_stop_msg_filter(qttune_j2534_handle_t* handle,
@@ -810,18 +827,18 @@ qttune_status_t qttune_j2534_stop_msg_filter(qttune_j2534_handle_t* handle,
                                              unsigned long filter_id)
 {
     if (handle == nullptr) {
-        return QT_ERR_NULL_ARGUMENT;
+        return QTTUNE_ERR_NULL_ARGUMENT;
     }
     if (handle->is_surrogate) {
         return qttune_j2534_sur_stop_msg_filter(handle->sur, channel,
                                                 filter_id);
     }
     /* Vendor status verbatim: stopping a stopped filter is the
-     * vendor's ERR_FAILED, surfaced as QT_ERR_NO_TRANSPORT — the
+     * vendor's ERR_FAILED, surfaced as QTTUNE_ERR_NO_TRANSPORT — the
      * caller learns the truth rather than our guess about
      * idempotence. */
     long rc = handle->stop_filter(channel, filter_id);
-    return (rc == kPtStatusNoError) ? QT_OK : QT_ERR_NO_TRANSPORT;
+    return (rc == kPtStatusNoError) ? QTTUNE_OK : QTTUNE_ERR_NO_TRANSPORT;
 }
 
 const char* qttune_j2534_backend_name(const qttune_j2534_handle_t* handle)
@@ -837,7 +854,7 @@ const char* qttune_j2534_backend_name(const qttune_j2534_handle_t* handle)
  * else: surrogate mode crosses the control pipe into the child's
  * module instance; in-proc mode resolves InjectFrame lazily — it is
  * a test hook, not a J2534 mandatory export, so a DLL without it
- * yields QT_ERR_NOT_IMPLEMENTED rather than an open-time failure. */
+ * yields QTTUNE_ERR_NOT_IMPLEMENTED rather than an open-time failure. */
 qttune_status_t qttune_j2534_inject_test_frame(qttune_j2534_handle_t* handle,
                                                const uint8_t* data,
                                                uint32_t len,
@@ -845,24 +862,24 @@ qttune_status_t qttune_j2534_inject_test_frame(qttune_j2534_handle_t* handle,
                                                uint32_t rx_flags)
 {
     if (handle == nullptr || data == nullptr || len == 0 || len > 64) {
-        return QT_ERR_NULL_ARGUMENT;
+        return QTTUNE_ERR_NULL_ARGUMENT;
     }
     if (handle->is_surrogate) {
         return qttune_j2534_sur_inject_test_frame(handle->sur, data, len,
                                                   timestamp, rx_flags);
     }
     if (handle->module == nullptr) {
-        return QT_ERR_NO_TRANSPORT;
+        return QTTUNE_ERR_NO_TRANSPORT;
     }
     typedef void (*fn_inject)(const unsigned char*, unsigned long,
                               unsigned long, unsigned long, unsigned long);
     fn_inject inject = reinterpret_cast<fn_inject>(
         GetProcAddress(handle->module, "InjectFrame"));
     if (inject == nullptr) {
-        return QT_ERR_NOT_IMPLEMENTED;
+        return QTTUNE_ERR_NOT_IMPLEMENTED;
     }
     inject(data, len, timestamp, rx_flags, 0);
-    return QT_OK;
+    return QTTUNE_OK;
 }
 
 } // extern "C"
@@ -875,11 +892,11 @@ qttune_status_t qttune_j2534_discover_devices(qttune_j2534_device_t** devices_ou
                                               uint32_t* device_count)
 {
     if (devices_out == nullptr || device_count == nullptr) {
-        return QT_ERR_NULL_ARGUMENT;
+        return QTTUNE_ERR_NULL_ARGUMENT;
     }
     *devices_out = nullptr;
     *device_count = 0;
-    return QT_ERR_NOT_IMPLEMENTED;
+    return QTTUNE_ERR_NOT_IMPLEMENTED;
 }
 
 void qttune_j2534_free_devices(qttune_j2534_device_t* /*devices*/)
@@ -892,12 +909,12 @@ qttune_status_t qttune_j2534_open(const qttune_j2534_device_t* /*device*/,
     if (out_handle != nullptr) {
         *out_handle = nullptr;
     }
-    return QT_ERR_NOT_IMPLEMENTED;
+    return QTTUNE_ERR_NOT_IMPLEMENTED;
 }
 
 qttune_status_t qttune_j2534_close(qttune_j2534_handle_t* /*handle*/)
 {
-    return QT_ERR_NOT_IMPLEMENTED;
+    return QTTUNE_ERR_NOT_IMPLEMENTED;
 }
 
 qttune_status_t qttune_j2534_connect_channel(qttune_j2534_handle_t* /*h*/,
@@ -905,13 +922,13 @@ qttune_status_t qttune_j2534_connect_channel(qttune_j2534_handle_t* /*h*/,
                                              unsigned long /*flags*/,
                                              unsigned long* /*ch*/)
 {
-    return QT_ERR_NOT_IMPLEMENTED;
+    return QTTUNE_ERR_NOT_IMPLEMENTED;
 }
 
 qttune_status_t qttune_j2534_disconnect_channel(qttune_j2534_handle_t* /*h*/,
                                                 unsigned long /*ch*/)
 {
-    return QT_ERR_NOT_IMPLEMENTED;
+    return QTTUNE_ERR_NOT_IMPLEMENTED;
 }
 
 qttune_status_t qttune_j2534_read_frame(qttune_j2534_handle_t* /*h*/,
@@ -923,7 +940,7 @@ qttune_status_t qttune_j2534_read_frame(qttune_j2534_handle_t* /*h*/,
     if (got_frame != nullptr) {
         *got_frame = false;
     }
-    return QT_ERR_NOT_IMPLEMENTED;
+    return QTTUNE_ERR_NOT_IMPLEMENTED;
 }
 
 qttune_status_t qttune_j2534_write_frame(qttune_j2534_handle_t* /*h*/,
@@ -937,7 +954,7 @@ qttune_status_t qttune_j2534_write_frame(qttune_j2534_handle_t* /*h*/,
     if (out_num_written != nullptr) {
         *out_num_written = 0;
     }
-    return QT_ERR_NOT_IMPLEMENTED;
+    return QTTUNE_ERR_NOT_IMPLEMENTED;
 }
 
 qttune_status_t qttune_j2534_ioctl(qttune_j2534_handle_t* /*h*/,
@@ -952,7 +969,7 @@ qttune_status_t qttune_j2534_ioctl(qttune_j2534_handle_t* /*h*/,
     if (out_len != nullptr) {
         *out_len = 0;
     }
-    return QT_ERR_NOT_IMPLEMENTED;
+    return QTTUNE_ERR_NOT_IMPLEMENTED;
 }
 
 qttune_status_t qttune_j2534_start_msg_filter(qttune_j2534_handle_t* /*h*/,
@@ -970,14 +987,14 @@ qttune_status_t qttune_j2534_start_msg_filter(qttune_j2534_handle_t* /*h*/,
     if (out_filter_id != nullptr) {
         *out_filter_id = 0;
     }
-    return QT_ERR_NOT_IMPLEMENTED;
+    return QTTUNE_ERR_NOT_IMPLEMENTED;
 }
 
 qttune_status_t qttune_j2534_stop_msg_filter(qttune_j2534_handle_t* /*h*/,
                                              unsigned long /*ch*/,
                                              unsigned long /*fid*/)
 {
-    return QT_ERR_NOT_IMPLEMENTED;
+    return QTTUNE_ERR_NOT_IMPLEMENTED;
 }
 
 const char* qttune_j2534_backend_name(const qttune_j2534_handle_t* /*handle*/)
@@ -991,7 +1008,7 @@ qttune_status_t qttune_j2534_inject_test_frame(qttune_j2534_handle_t* /*h*/,
                                               uint32_t /*ts*/,
                                               uint32_t /*flags*/)
 {
-    return QT_ERR_NOT_IMPLEMENTED;
+    return QTTUNE_ERR_NOT_IMPLEMENTED;
 }
 
 } // extern "C"

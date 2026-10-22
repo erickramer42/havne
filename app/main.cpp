@@ -1,10 +1,10 @@
 #include <QGuiApplication>
 #include <QQmlApplicationEngine>
-#include <QQmlContext>
-#include <QQuickStyle> 
+#include <QQuickStyle>
 
+#include "bridgesingleton.h"
 #include "qttunebridge.h"
-#include "qttune/version.h" 
+#include "qttune/version.h"
 
 int main(int argc, char *argv[])
 {
@@ -15,10 +15,11 @@ int main(int argc, char *argv[])
 
     QQuickStyle::setStyle("Basic");
 
+    // Declared before the engine, so it outlives everything QML holds.
     QtTuneBridge bridge;
+    BridgeSingleton::instance = &bridge;
 
     QQmlApplicationEngine engine;
-    engine.rootContext()->setContextProperty("QtTune", &bridge);
     engine.loadFromModule("QtTune", "Main");
 
     if (engine.rootObjects().isEmpty()) {

@@ -41,31 +41,58 @@ static uint32_t extract_bytes_be(const uint8_t* data,
     return result;
 }
 
+/* Read the def's mux key from a payload, big-endian, into *out_key.
+ * False when the key region ends past payload_len. The caller has
+ * checked mux_length (1 or 2). Shared by decode and the frame gate, so
+ * the two can't disagree on which payloads carry the key. */
+static bool read_mux_key(const QttuneSignalDef* signal,
+                         const uint8_t* payload, uint32_t payload_len,
+                         uint32_t* out_key)
+{
+    const uint32_t key_end = (uint32_t)signal->mux_offset + signal->mux_length;
+    if (key_end > payload_len) {
+        return false;
+    }
+    uint32_t key = 0;
+    for (uint8_t i = 0; i < signal->mux_length; ++i) {
+        key = (key << 8) | payload[signal->mux_offset + i];
+    }
+    *out_key = key;
+    return true;
+}
+
+/* The types qttune_decode_signal decodes. */
+static bool is_decodable_type(QttuneSignalType type)
+{
+    /* Through int: a C caller can store any value in the enum. */
+    const int t = (int)type;
+    return t >= QTTUNE_SIGNAL_TYPE_UINT8 && t <= QTTUNE_SIGNAL_TYPE_FLOAT32;
+}
+
 int qttune_decode_signal(const QttuneSignalDef* signal,
                          const uint8_t* frame_payload,
                          uint8_t payload_len,
                          float* out_value)
 {
     if (!signal || !frame_payload || !out_value) {
-        return 1;
+        return QTTUNE_DECODE_ERR_NULL;
     }
 
     /* Check for unsupported types FIRST — before bit validation */
-    if (signal->type == QTTUNE_SIGNAL_TYPE_STRING ||
-        signal->type > QTTUNE_SIGNAL_TYPE_FLOAT32) {
-        return 4; /* unsupported type */
+    if (!is_decodable_type(signal->type)) {
+        return QTTUNE_DECODE_ERR_UNSUPPORTED;
     }
 
     /* Now safe to validate bit parameters for supported numeric types */
     if (signal->bit_length == 0 || signal->bit_length > 32) {
-        return 3;
+        return QTTUNE_DECODE_ERR_BAD_PARAMS;
     }
     if (signal->bit_offset > 7) {
-        return 3;
+        return QTTUNE_DECODE_ERR_BAD_PARAMS;
     }
     if ((uint32_t)signal->bit_offset + signal->bit_length
             > 8u * signal->num_bytes) {
-        return 3;
+        return QTTUNE_DECODE_ERR_BAD_PARAMS;
     }
 
     /* Highest bit consumed lies in this byte index — single uniform
@@ -73,25 +100,20 @@ int qttune_decode_signal(const QttuneSignalDef* signal,
     uint32_t last_bit = (uint32_t)signal->start_byte * 8u
                         + signal->bit_offset + signal->bit_length - 1u;
     if ((last_bit >> 3) >= payload_len) {
-        return 2;
+        return QTTUNE_DECODE_ERR_PAST_PAYLOAD;
     }
 
     /* MUX check (if enabled) */
     if (signal->mux_length > 0) {
         if (signal->mux_length > 2) {
-            return 3;  /* invalid mux_length */
+            return QTTUNE_DECODE_ERR_BAD_PARAMS;
         }
-        uint32_t key_end = (uint32_t)signal->mux_offset + signal->mux_length;
-        if (key_end > payload_len) {
-            return 2;  /* key would overflow payload */
+        uint32_t key = 0;
+        if (!read_mux_key(signal, frame_payload, payload_len, &key)) {
+            return QTTUNE_DECODE_ERR_PAST_PAYLOAD;
         }
-        
-        uint32_t mux_match = 0;
-        for (uint8_t i = 0; i < signal->mux_length; ++i) {
-            mux_match = (mux_match << 8) | frame_payload[signal->mux_offset + i];
-        }
-        if (mux_match != signal->mux_key) {
-            return 5;  /* mux key mismatch */
+        if (key != signal->mux_key) {
+            return QTTUNE_DECODE_ERR_MUX_MISMATCH;
         }
     }
 
@@ -108,7 +130,7 @@ int qttune_decode_signal(const QttuneSignalDef* signal,
                                       signal->bit_offset, signal->bit_length);
         }
         *out_value = (float)raw * signal->scale + signal->offset;
-        return 0;
+        return QTTUNE_DECODE_OK;
     }
 
     case QTTUNE_SIGNAL_TYPE_INT8:
@@ -129,114 +151,130 @@ int qttune_decode_signal(const QttuneSignalDef* signal,
         int32_t signed_raw;
         memcpy(&signed_raw, &raw, sizeof signed_raw);
         *out_value = (float)signed_raw * signal->scale + signal->offset;
-        return 0;
+        return QTTUNE_DECODE_OK;
     }
 
     case QTTUNE_SIGNAL_TYPE_FLOAT32: {
         if (signal->bit_offset != 0 || signal->bit_length != 32) {
-            return 4; /* float must be byte-aligned, 32-bit */
+            return QTTUNE_DECODE_ERR_UNSUPPORTED;  /* float must be byte-aligned, 32-bit */
         }
         float raw_float;
         memcpy(&raw_float, frame_payload + signal->start_byte,
                sizeof raw_float);
         *out_value = raw_float * signal->scale + signal->offset;
-        return 0;
+        return QTTUNE_DECODE_OK;
     }
 
     default:
-        return 4;
+        return QTTUNE_DECODE_ERR_UNSUPPORTED;
     }
 }
 
-int qttune_def_matches_frame(const QttuneSignalDef* signal,
-                             const qttune_frame_t* frame)
+int qttune_def_applies_to_frame(const QttuneSignalDef* signal,
+                                const qttune_frame_t* frame)
 {
     if (!signal || !frame) {
-        return 1;
+        return 0;
     }
 
     /* Arb ID gate */
     if (frame->arbitration_id != signal->message_id) {
-        return 1;
+        return 0;
     }
 
-    /* Mux gate (if enabled) */
+    /* Mux gate (if enabled). A key length decode would reject doesn't
+     * apply either. */
     if (signal->mux_length > 0) {
-        if (frame->data_length < (signal->mux_offset + signal->mux_length)) {
-            return 1;  /* payload too short for mux key */
+        if (signal->mux_length > 2) {
+            return 0;
         }
-        uint32_t mux_match = 0;
-        for (uint8_t i = 0; i < signal->mux_length; ++i) {
-            mux_match = (mux_match << 8) | frame->data[signal->mux_offset + i];
+        uint32_t len = frame->data_length;
+        if (len > sizeof(frame->data)) {
+            len = sizeof(frame->data);
         }
-        if (mux_match != signal->mux_key) {
-            return 1;
+        uint32_t key = 0;
+        if (!read_mux_key(signal, frame->data, len, &key) ||
+            key != signal->mux_key) {
+            return 0;
         }
     }
 
-    return 0;  /* match success */
+    return 1;
 }
 
 int qttune_validate_signal(const QttuneSignalDef* signal)
 {
     if (!signal) {
-        return 1;
+        return QTTUNE_VALIDATE_ERR_NULL;
     }
 
-    if (signal->type < QTTUNE_SIGNAL_TYPE_MANUF_START) {
-        if (signal->num_bytes < 1 || signal->num_bytes > 4) {
-            return 2;
-        }
-        if (signal->bit_length == 0 ||
-            signal->bit_length > 8u * signal->num_bytes) {
-            return 3;
-        }
-        if (signal->bit_offset > 7) {
-            return 4;
-        }
-        if ((uint32_t)signal->bit_offset + signal->bit_length
-                > 8u * signal->num_bytes) {
-            return 5;
-        }
-        
-        /* MUX validation — the key region lives in the FRAME payload,
-        * not the signal field, so it bounds against the 64-byte frame ABI
-        * cap. decode-time checks enforce the actual payload_len. */
-        if (signal->mux_length > 2) {
-            return 9;   /* invalid mux_length */
-        }
-        if (signal->mux_length > 0) {
-            if ((uint32_t)signal->mux_offset + signal->mux_length > 64u) {
-                return 10;   /* key region exceeds frame payload cap */
-            }
-            const uint32_t mux_max =
-                (signal->mux_length == 1) ? 0xFFu : 0xFFFFu;
-            if (signal->mux_key > mux_max) {
-                return 11;   /* key doesn't fit its own length */
-            }
-        }
+    /* The decoder rejects every other type, so a def of one could
+     * register and then never decode. */
+    if (!is_decodable_type(signal->type)) {
+        return QTTUNE_VALIDATE_ERR_TYPE;
+    }
 
-        /* big-endian fields are byte-aligned only — the extractor
-        * reads whole bytes MSB-first, so non-aligned shapes are rejected
-        * at registration instead of misread at decode. */
-        if (signal->flags & QTTUNE_SIGNAL_FLAG_BIG_ENDIAN) {
-            if (signal->bit_offset != 0 || (signal->bit_length % 8) != 0) {
-                return 12;
-            }
+    if (signal->num_bytes < 1 || signal->num_bytes > 4) {
+        return QTTUNE_VALIDATE_ERR_NUM_BYTES;
+    }
+    if (signal->bit_length == 0 ||
+        signal->bit_length > 8u * signal->num_bytes) {
+        return QTTUNE_VALIDATE_ERR_BIT_LENGTH;
+    }
+    if (signal->bit_offset > 7) {
+        return QTTUNE_VALIDATE_ERR_BIT_OFFSET;
+    }
+    if ((uint32_t)signal->bit_offset + signal->bit_length
+            > 8u * signal->num_bytes) {
+        return QTTUNE_VALIDATE_ERR_BIT_SPAN;
+    }
+
+    /* MUX validation — the key region lives in the FRAME payload,
+     * not the signal field, so it bounds against the 64-byte frame ABI
+     * cap. decode-time checks enforce the actual payload_len. */
+    if (signal->mux_length > 2) {
+        return QTTUNE_VALIDATE_ERR_MUX_LENGTH;
+    }
+    if (signal->mux_length > 0) {
+        if ((uint32_t)signal->mux_offset + signal->mux_length > 64u) {
+            return QTTUNE_VALIDATE_ERR_MUX_RANGE;
         }
+        const uint32_t mux_max =
+            (signal->mux_length == 1) ? 0xFFu : 0xFFFFu;
+        if (signal->mux_key > mux_max) {
+            return QTTUNE_VALIDATE_ERR_MUX_KEY;
+        }
+    }
+
+    /* big-endian fields are byte-aligned only — the extractor
+     * reads whole bytes MSB-first, so non-aligned shapes are rejected
+     * at registration instead of misread at decode. */
+    if (signal->flags & QTTUNE_SIGNAL_FLAG_BIG_ENDIAN) {
+        if (signal->bit_offset != 0 || (signal->bit_length % 8) != 0) {
+            return QTTUNE_VALIDATE_ERR_BIG_ENDIAN;
+        }
+    }
+
+    /* The decoder reads a FLOAT32 as four native (little-endian) bytes
+     * at bit 0 and ignores the big-endian flag, so any other shape
+     * would fail to decode or read as the wrong number. */
+    if (signal->type == QTTUNE_SIGNAL_TYPE_FLOAT32 &&
+        (signal->bit_length != 32 || signal->bit_offset != 0 ||
+         (signal->flags & QTTUNE_SIGNAL_FLAG_BIG_ENDIAN))) {
+        return QTTUNE_VALIDATE_ERR_FLOAT32;
     }
 
     /* Last byte MUST be null — guarantees C-string fits in fixed buffer */
     if (signal->name[sizeof(signal->name) - 1] != '\0') {
-        return 6; /* name not null-terminated within buffer */
+        return QTTUNE_VALIDATE_ERR_NAME;
     }
     if (signal->unit[sizeof(signal->unit) - 1] != '\0') {
-        return 7; /* unit not null-terminated within buffer */
+        return QTTUNE_VALIDATE_ERR_UNIT;
     }
 
     if (signal->decimal_places > 3) {
-        return 8;
+        return QTTUNE_VALIDATE_ERR_DECIMALS;
     }
 
-    return 0;
+    return QTTUNE_VALIDATE_OK;
 }

@@ -23,12 +23,12 @@ target_include_directories(qttune-j2534-surrogate PRIVATE
     ${CMAKE_SOURCE_DIR}/core/include
 )
 
-# Linker entry point is main(); subsystem defaults to console, which is
-# what we want (a flash of a console window on spawn is acceptable for
-# v0.3; switch to WIN32_EXECUTABLE + detached only if it annoys in use).
+# Entry point is wmain() (the DLL path arrives as UTF-16); subsystem
+# defaults to console, and the client spawns it with CREATE_NO_WINDOW.
 set_target_properties(qttune-j2534-surrogate PROPERTIES
     OUTPUT_NAME "qttune-j2534-surrogate"
 )
+qttune_enable_warnings(qttune-j2534-surrogate)
 
 # No qttune-core link needed: the surrogate resolves the vendor DLL's
 # exports through GetProcAddress and speaks the POD protocol types from

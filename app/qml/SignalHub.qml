@@ -4,7 +4,7 @@
 
 import QtQuick
 
-// Name-keyed view of QtTune.signalModel. The model is keyed by row;
+// Name-keyed view of Bridge.signalModel. The model is keyed by row;
 // a gauge wants "the RPM signal", whichever profile named it. Each row
 // is mirrored into an Entry whose required properties re-bind on the
 // model's dataChanged, the same path LiveView's delegates use.
@@ -24,7 +24,7 @@ Instantiator {
 
     property var byName: ({})
 
-    model: QtTune.signalModel
+    model: Bridge.signalModel
     delegate: Entry {}
 
     onObjectAdded: (index, object) => {

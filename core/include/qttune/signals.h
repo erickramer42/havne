@@ -4,9 +4,9 @@
 #ifndef QTTUNE_SIGNALS_H
 #define QTTUNE_SIGNALS_H
 
-/* qttune_def_matches_frame needs the complete qttune_frame_t, so include
- * core.h (which never includes this header — no cycle). A forward
- * declaration would clash with core.h's typedef (C2371). */
+/* qttune_def_applies_to_frame needs the complete qttune_frame_t, so
+ * include core.h (which never includes this header — no cycle). A
+ * forward declaration would clash with core.h's typedef (C2371). */
 #include "qttune/core.h"
 
 #ifdef __cplusplus
@@ -21,8 +21,9 @@ typedef enum {
     QTTUNE_SIGNAL_TYPE_INT16   = 4,
     QTTUNE_SIGNAL_TYPE_INT32   = 5,
     QTTUNE_SIGNAL_TYPE_FLOAT32 = 6,
-    QTTUNE_SIGNAL_TYPE_STRING  = 7,  /* Reserved */
-    QTTUNE_SIGNAL_TYPE_MANUF_START = 256
+    QTTUNE_SIGNAL_TYPE_STRING  = 7,  /* Reserved: no decoder yet */
+    QTTUNE_SIGNAL_TYPE_MANUF_START = 256  /* Reserved range: no decoder
+                                             yet */
 } QttuneSignalType;
 
 /* Signal definition flags */
@@ -85,23 +86,83 @@ typedef struct QttuneSignalSet {
     const QttuneChannelDecl* channels;
 } QttuneSignalSet;
 
+/* qttune_decode_signal return codes. Values are append-only. */
+#define QTTUNE_DECODE_OK                0
+#define QTTUNE_DECODE_ERR_NULL          1  /* a NULL argument */
+#define QTTUNE_DECODE_ERR_PAST_PAYLOAD  2  /* the field or the mux key
+                                              ends past payload_len */
+#define QTTUNE_DECODE_ERR_BAD_PARAMS    3  /* bit parameters or mux
+                                              length out of range */
+#define QTTUNE_DECODE_ERR_UNSUPPORTED   4  /* a type with no decoder, or a
+                                              FLOAT32 not 32 bits at bit 0 */
+#define QTTUNE_DECODE_ERR_MUX_MISMATCH  5  /* the payload's mux key differs */
+
+/* Extract one signal from a payload, scale and offset applied. Checks
+ * the type before the bit parameters, then the bounds, then the mux
+ * key. *out_value is written only on QTTUNE_DECODE_OK. */
 int qttune_decode_signal(const QttuneSignalDef* signal,
                          const uint8_t* frame_payload,
                          uint8_t payload_len,
                          float* out_value);
 
+/* qttune_validate_signal and qttune_validate_signal_set return codes.
+ * Values are append-only. Per-def codes are positive; the set-level
+ * codes are negative, so a set's result says which kind failed. */
+#define QTTUNE_VALIDATE_OK                    0
+#define QTTUNE_VALIDATE_ERR_NULL              1  /* a NULL def or set, or
+                                                    count > 0 with NULL
+                                                    defs */
+#define QTTUNE_VALIDATE_ERR_NUM_BYTES         2  /* num_bytes not 1..4 */
+#define QTTUNE_VALIDATE_ERR_BIT_LENGTH        3  /* 0, or over 8 * num_bytes */
+#define QTTUNE_VALIDATE_ERR_BIT_OFFSET        4  /* over 7 */
+#define QTTUNE_VALIDATE_ERR_BIT_SPAN          5  /* offset + length over
+                                                    8 * num_bytes */
+#define QTTUNE_VALIDATE_ERR_NAME              6  /* name not terminated
+                                                    inside its buffer */
+#define QTTUNE_VALIDATE_ERR_UNIT              7  /* unit not terminated */
+#define QTTUNE_VALIDATE_ERR_DECIMALS          8  /* decimal_places over 3 */
+#define QTTUNE_VALIDATE_ERR_MUX_LENGTH        9  /* mux_length over 2 */
+#define QTTUNE_VALIDATE_ERR_MUX_RANGE        10  /* key region past the
+                                                    64-byte frame payload */
+#define QTTUNE_VALIDATE_ERR_MUX_KEY          11  /* key wider than its
+                                                    length */
+#define QTTUNE_VALIDATE_ERR_BIG_ENDIAN       12  /* big-endian field not
+                                                    byte-aligned */
+#define QTTUNE_VALIDATE_ERR_TYPE             13  /* a type the decoder
+                                                    can't decode: STRING,
+                                                    an unknown value, or
+                                                    the MANUF range */
+#define QTTUNE_VALIDATE_ERR_FLOAT32          14  /* FLOAT32 not 4 bytes,
+                                                    32 bits at bit 0,
+                                                    little-endian */
+#define QTTUNE_VALIDATE_ERR_CHANNELS_NULL   (-10)  /* channel_count > 0 with
+                                                      NULL channels */
+#define QTTUNE_VALIDATE_ERR_CHANNEL_COUNT   (-11)  /* over QTTUNE_MAX_CHANNELS */
+#define QTTUNE_VALIDATE_ERR_CHANNEL_ID      (-12)  /* rx or tx 0, or past
+                                                      0x1FFFFFFF */
+#define QTTUNE_VALIDATE_ERR_DUPLICATE_RX    (-13)  /* two channels share an rx */
+#define QTTUNE_VALIDATE_ERR_DUPLICATE_ID    (-14)  /* two defs share an id */
+
+/* Structural check of one def: accepts exactly the defs
+ * qttune_decode_signal can decode. The type is checked first. */
 int qttune_validate_signal(const QttuneSignalDef* signal);
 
-/* Match helper: arb ID + mux check. Returns 0 if signal applies to
- * frame, non-zero otherwise. Called BEFORE decode_signal in the
- * bridge loop; avoids unnecessary extraction work. Requires the
- * complete qttune_frame_t type, hence signals.h includes core.h. */
-int qttune_def_matches_frame(const QttuneSignalDef* signal,
-                             const qttune_frame_t* frame);
+/* Frame gate, called BEFORE qttune_decode_signal (the bridge's decode
+ * loop): returns 1 when the def applies to the frame (its message_id
+ * is the frame's arbitration ID and, with mux on, the frame carries
+ * its mux key), and 0 otherwise or for a NULL argument. Saves the
+ * extraction for frames the def can't read. */
+int qttune_def_applies_to_frame(const QttuneSignalDef* signal,
+                                const qttune_frame_t* frame);
 
 /* Set-level APIs */
 const QttuneSignalSet* qttune_mock_signal_set(void);
 const QttuneSignalSet* qttune_obd2_signal_set(void);  /* ADR-0013 obd2 profile */
+
+/* Every def (qttune_validate_signal; the first failing def's code),
+ * then the set: unique def ids, then the channel declarations. A set
+ * with count 0 may leave defs NULL. Returns QTTUNE_VALIDATE_OK or a
+ * QTTUNE_VALIDATE_ERR_* code. */
 int qttune_validate_signal_set(const QttuneSignalSet* set);
 
 #ifdef __cplusplus
