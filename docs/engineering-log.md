@@ -69,6 +69,7 @@ Dates are commit dates.
 | 2026-10-22 | A surrogate built from other shared headers is refused at `OP_OPEN`: a configure-time fingerprint of the two headers (#19 closed) | `c029caa` |
 | 2026-10-22 | Vehicle-session prep: each spawn keeps the session log it replaces (the newest 50); the Log table sorts by arrival and starts empty on connect; activity-log lines carry times | `6f84571`, `839b176` |
 | 2026-10-22 | Session recording ([ADR-0017](adr/0017-session-recording.md)): every frame, decoded value and activity line per connect; `frames.csv` is the replay format | `f590613` |
+| 2026-10-22 | Quiet-bus BENCH run of the vehicle session's URIs with recording on: requests failing and quiet on the VX; its timestamps are microseconds and its empty read is `ERR_BUFFER_EMPTY` ([session sheet](bench-sessions/2026-10-22.md)) | build `0a8beae` |
 
 ## Lessons learned
 
@@ -616,3 +617,17 @@ shared headers. A hand-kept protocol version works only if every
 header edit remembers to bump it. A hash of the headers' bytes changes
 by itself, and its one cost, that a comment edit also forces both
 trees to be rebuilt, is a rule the build already had.
+
+**2026-10-22 — quiet-bus BENCH run with frame logging
+([session sheet](bench-sessions/2026-10-22.md)):** **a count the code
+computed isn't what the vendor returned.** On 2026-10-20 the
+surrogate's read summary said "status 0, frames 0", and the session
+note took it as the VX's empty-read status, a "third flavor" that
+STATUS, testing.md and j2534.md then repeated for two days. The count
+was taken after TX indications were dropped. With each message logged
+before the filter, every one of those reads held an indication, and
+the VX's truly empty read is `ERR_BUFFER_EMPTY`. The same change-only
+summary hid two successful writes, so "writes fail after roughly
+eight cycles" was really three writes, then one blocked for half a
+second. Characterize a vendor from its raw output; a summary shows
+only what the code already decided to keep.

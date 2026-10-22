@@ -57,7 +57,9 @@ to the end undocumented.
       through the surrogate, opens, the filter is accepted, requests
       fail on the no-ACK bus, and teardown is clean. There's no ECU
       simulator, so the vehicle is the first talking bus; this is the
-      risk that can be retired at the desk
+      risk that can be retired at the desk. The 2026-10-22 run did
+      this for `0a8beae` ([2026-10-22](2026-10-22.md)); a later build
+      needs its own
 - [ ] Launch the app and tick **Record sessions** in Settings before
       the first connect (it can't change during a session). Each
       connect then writes a folder under `Documents\QtTune\recordings`
@@ -129,14 +131,15 @@ deployed. Stop and fix it at the desk; the vehicle adds nothing.
 
     j2534://OBDX Pro - VX
 
-**Expected** (the no-ACK bus seen on the 2026-10-20 bench):
+**Expected** (the no-ACK bus seen on the 2026-10-22 bench):
 - [ ] Connect succeeds, the filter is accepted (session log
       `OP_START_FILTER … status 0`)
-- [ ] The first few writes succeed, then writes fail (`OP_WRITE: status 7`)
-      once nothing ACKs them. At the first failed write the link latches
-      `ECUIO_ERR_REQUEST_FAILED`, one episode, and stays there: amber
-      "Requests failing" banner, and "Link: requests failing
-      (1 episode(s))" in the activity log
+- [ ] Three writes succeed, then the fourth blocks about 0.5 s and
+      fails (`OP_WRITE: status 7`): the VX accepts three frames that
+      nothing acknowledges, then refuses. At the first failed write the
+      link latches `ECUIO_ERR_REQUEST_FAILED`, one episode, and stays
+      there: amber "Requests failing" banner, and "Link: requests
+      failing (1 episode(s))" in the activity log
 - [ ] Disconnect cleanly
 
 This state is correct with nothing awake on the bus. Don't debug it.
@@ -156,7 +159,8 @@ before the first failure.
 - [ ] Connect succeeds on a powered bus
 - [ ] No writes in the session log (passive mode)
 - [ ] Usually no frames: ECUs don't send on 0x7E8 unasked. The link
-      goes quiet ("Vehicle not responding") after about 1.2 s, which is
+      goes quiet ("Vehicle not responding") after about 1.4 s (on the
+      VX each empty read waits out its 100 ms timeout), which is
       correct here
 
 **Evidence:** quiet or unsolicited frames, and if frames, their IDs
@@ -169,7 +173,8 @@ and payloads verbatim (the session log's `OP_READ frame` lines).
     j2534://OBDX Pro - VX?poll=0x0C
 
 (the `obd2` profile stays in force, so the reply decodes; only PID 0x0C
-is requested)
+is requested, about every 220 ms on the VX, because the read after
+each request runs its full 100 ms timeout)
 
 **Expected:**
 - [ ] Log page: frames with ID `0x7E8`, DLC 4, payload `41 0C` + two
@@ -206,7 +211,10 @@ is requested)
 **Evidence:** the recording's `frames.csv` (reply bytes, vendor
 timestamps) and `signals.csv` (what they decoded to), and the session
 log's `OP_WRITE frame` and `OP_READ frame` lines (request and reply
-bytes, statuses, RxStatus). To compare a few payloads on screen,
+bytes, statuses, RxStatus). The `rx 0x00000009` line after each write
+doesn't show the request reached an ECU: the VX returns one for frames
+nothing acknowledged ([2026-10-22](2026-10-22.md)). Only a reply does.
+To compare a few payloads on screen,
 Pause holds the Log page's rows still; the recording keeps every
 frame either way.
 
@@ -304,8 +312,8 @@ ignition off, wait 10 s, then turn it back on.
 | #2 Request framing | Phase 2 replies arrive |
 | #3 No checksum byte | Replies decode without a trailing byte |
 | #4 29-bit addressing | 11-bit IDs expected; any 29-bit traffic is news |
-| #5 Timestamp units | Phase 3: in `frames.csv`, `timestamp_us` deltas against `host_us` deltas (µs if they match) |
-| #6 ReadMsgs statuses | Session log: does any `OP_READ frame: status 9` line appear (`ERR_TIMEOUT` with data)? |
+| #5 Timestamp units | Microseconds on the VX's TX indications ([2026-10-22](2026-10-22.md)). Phase 3 checks replies: in `frames.csv`, `timestamp_us` deltas against `host_us` deltas. The clock doesn't reset at connect, and wraps 71.6 min after it starts |
+| #6 ReadMsgs statuses | Session log: does any `OP_READ frame: status 9` line appear (`ERR_TIMEOUT` with data)? On the bench, short batches came back with status 0 and empty reads with 16 |
 | #7 Struct layout | A correct decode in phases 2–3 implies the layout is right |
 | #8 Vendor timeouts | Read timing visible in the session log stamps |
 

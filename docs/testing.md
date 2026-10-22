@@ -14,7 +14,7 @@ where the gaps are. For build and run commands, see
 | **Cross-arch** | HARNESS with an x64 test process driving an x86 surrogate and an x86 fake | Dev machine only; needs environment variables ([development.md](development.md#running-tests)) |
 | **Simulator smoke** | The iOS app installs and launches on the iOS Simulator, QML loads, and the app is still running 45 s later. Nothing drives the UI. A pass doesn't prove the app drew anything, so look at the screenshots. | CI on pull requests, and on request: a manual run (Actions → CI → Run workflow; `smoke_only` skips the other platform jobs), or `[ios-smoke]` in the commit message (`ios-simulator-smoke`, Intel macOS runner) |
 | **Manual smoke** | Running the app: layout, Dashboard gauges, LiveView, strip chart, Settings picker against the live registry | Dev machine |
-| **BENCH** | A real vendor DLL and adapter, no vehicle | First formal session complete, 2026-10-16, quiet bus ([session sheet](bench-sessions/2026-10-16.md)); informal quiet-bus follow-up 2026-10-20 ([note](bench-sessions/2026-10-20.md)); talking-bus behaviors pending |
+| **BENCH** | A real vendor DLL and adapter, no vehicle | First formal session complete, 2026-10-16, quiet bus ([session sheet](bench-sessions/2026-10-16.md)); informal quiet-bus follow-up 2026-10-20 ([note](bench-sessions/2026-10-20.md)); quiet-bus run of the vehicle session's URIs with recording, 2026-10-22 ([sheet](bench-sessions/2026-10-22.md)); talking-bus behaviors pending |
 | **Vehicle** | A live, read-only vehicle session | **Not yet reached**; run sheet ready ([vehicle-runsheet.md](bench-sessions/vehicle-runsheet.md)) |
 
 The manual smoke tier earns its place. The 2026-10-10 strip-chart
@@ -129,11 +129,12 @@ and the next run's screenshots confirmed the fixes the same day.
 | Dashboard: every gauge the mock set feeds sweeps under `mock://demo`; a gauge whose signal the profile lacks reads "not in profile" (the mock set feeds every gauge, so `?profile=raw` is what shows it); the grid collapses from 4 to 2 columns across 760 px and tightens its gaps at 600 px; fault and quiet states tint correctly; the temperature rings start at 0 °C, so a cold engine reads on the scale; unticking a row on Live leaves its gauge live | Manual smoke, 2026-10-20 (`40e51ce`; quiet and fault through the knob recipe below). The header, which takes its dot and label from `Theme`, was re-run 2026-10-21 (`55373f4` plus the reordered series palette): ok ("Live · mock://demo", green), quiet, requests, fault and disconnected, plus "not in profile" on every gauge under `?profile=raw`. Re-run later on 2026-10-21 for the rings and the untick (working tree on `d1c20c0`): coolant 53 °C and oil 24 °C on 0–130 and 0–160 scales under mock; with RPM unticked the tach kept moving and recorded a 7,000 peak; every gauge found its signal under `obd2` through the x64 fake. No automated coverage: `SignalHub`'s name lookup and the gauges are QML only |
 | Live: the list sizes to its rows up to a cap, then scrolls with the bar pinned on; each row's swatch matches its trace; rows past `Theme.seriesColors` reuse its colours with a dashed trace (under `obd2`, the last two rows); values at each def's decimal places; the chart prints each trace's value at its right-hand end, nudged apart, with a sample of its stroke, has a seconds axis, and gives each flat trace its own lane in list order; disconnected, a dim message and a Connect button | Manual smoke, 2026-10-21 (`55373f4` plus the reordered series palette): all eight mock rows fit and each swatch matches its trace; under `obd2` through the x64 fake, ten rows with the scroll bar pinned on, and MAF drawn dashed in row 1's colour. Re-run later on 2026-10-21 (working tree on `d1c20c0`): `745 RPM`, `49 °C`, `0.0 %`, `7.0 g/s` under mock, with the three flat mock traces in separate lanes; under the fake, all ten flat traces in their own lanes, top down in list order, Battery Voltage at `13.87 V`, and the two dashed rows' labels showing the dash. No automated coverage: the swatches, palette, dashes and chart labels are QML only; `BridgeTest` pins the `row` and `decimals` they key on |
 | Settings activity-log lines carry local `HH:MM:SS.mmm` stamps; after Disconnect and a new connect, the Log page holds only the new session's frames | Manual run, 2026-10-22 (working tree on `c029caa`, `mock://demo`, the run-qttune driver) |
-| Recording end to end through the x86 surrogate: Settings shows "Recording to Documents\QtTune\recordings\…" with no account name, and the switch is disabled while connected; the folder held 55 frames and 55 values from the fake; that spawn's session log read "frame logging on" and carried its frame lines | Manual run, 2026-10-22 (working tree on `839b176`, the x86 fake through the app's deployed surrogate, the run-qttune driver; the test recording deleted afterwards) |
+| Recording end to end through the x86 surrogate: Settings shows "Recording to Documents\QtTune\recordings\…" with no account name, and the switch is disabled while connected; the folder held 55 frames and 55 values from the fake; that spawn's session log read "frame logging on" and carried its frame lines | Manual run, 2026-10-22 (working tree on `839b176`, the x86 fake through the app's deployed surrogate, the run-qttune driver; the test recording deleted afterwards). On the OBDX Pro VX, 2026-10-22 (`0a8beae`): one recording per connect across six connects, and frame logging on in each spawn's session log ([sheet](bench-sessions/2026-10-22.md)) |
 | App chrome: the header holds the name, a link pill (state and URI, eliding first) and one button (Connect… opens Settings; Disconnect); the sidebar is one full-height panel; below 720 px the tab bar underlines the selected tab; Settings sizes the device list to its rows and gives the activity log the rest; Log shows `s.mmm` times, spaced uppercase payloads and a full 29-bit ID, and Pause holds the table while the count keeps rising | Manual smoke, 2026-10-21 (working tree on `d1c20c0`, `mock://demo` and the x64 fake, the run-qttune driver), at 1280 and 400 px. Not checked: keyboard focus rings (the driver sends no keys) and an OS light colour scheme |
 | QML reaches the bridge as the `Bridge` singleton (`app/bridgesingleton.h`), not a context property: every page binds through it, and qmllint resolves its properties | Manual smoke, 2026-10-21: `mock://demo` streaming on Home, Dashboard, Live and Log, and the x86 fake through the app's own deployed surrogate (2000 RPM decoded, the spawn line naming the exe). `all_qmllint` went from 103 `[unqualified]` warnings to 7, all on LogPage's delegate roles |
 | Link-health UI: quiet/fault/degraded banner, activity-log transitions, "—" cells, stale dimming, the arbId column | Manual smoke, 2026-10-20 (fake quiet/fault via `ECUIO_FAKE_READ_STATUS`; mock; recipe below). The first run recorded dimming and the arbId column as working when the code couldn't produce either (dimming keyed on value changes; the ID column bound a misspelled role). Both rows were re-run and passed after the fixes, the arbId row through the x86 surrogate. |
-| Fault state on real hardware, clean teardown; 4-byte filter shape accepted with logged vendor status 0 | Informal bench observation 2026-10-20 ([sheet](bench-sessions/2026-10-20.md)), under the rules before `946bdf5`. The same no-ACK setup now latches `ECUIO_ERR_REQUEST_FAILED` instead, which hasn't been seen on hardware. |
+| Fault state on real hardware, clean teardown; 4-byte filter shape accepted with logged vendor status 0 | Informal bench observation 2026-10-20 ([sheet](bench-sessions/2026-10-20.md)), under the rules before `946bdf5`. The same no-ACK setup now latches `ECUIO_ERR_REQUEST_FAILED` instead (next row). |
+| Requests-failing and quiet states on real hardware through the x86 surrogate: the banner at the first failed write, one episode, the backoff to its 5 s cap; quiet after ten empty reads (`ERR_BUFFER_EMPTY`) under `?profile=raw`; clean teardown on every connect | BENCH run on the OBDX Pro VX, 2026-10-22 (`0a8beae`, [sheet](bench-sessions/2026-10-22.md)) |
 
 ## Manual smoke — link-health UI
 
@@ -155,7 +156,9 @@ mid-session only works in-proc):
 
 All four states (ok/quiet/fault/disconnected) were verified 2026-10-20,
 plus the fault state on the OBDX Pro VX quiet bus (BENCH,
-[bench-sessions/2026-10-20.md](bench-sessions/2026-10-20.md)). The
+[bench-sessions/2026-10-20.md](bench-sessions/2026-10-20.md)), and the
+requests and quiet states on it on 2026-10-22
+([bench-sessions/2026-10-22.md](bench-sessions/2026-10-22.md)). The
 first run's dimming and arbId results couldn't have been real. Both
 rows were re-run after the fixes the same day and passed. The
 requests-banner row, which covers the `requests` state, passed on
@@ -187,25 +190,30 @@ rows against the current Home, Settings and Dashboard header.
   8-byte filter shape; an informal 2026-10-20 observation additionally
   confirmed the current 4-byte shape (logged vendor status 0), the
   first accepted Mode-01 request, and the fault-banner path on the VX.
-  Still unverified against real hardware: talking-bus behavior
-  (replies to requests, checksum expectations, timestamp units),
-  VBATT, and whether a vendor ever pairs `ERR_TIMEOUT` with data
-  (#11).
+  A 2026-10-22 run added the requests-failing and quiet states, the
+  VX's read and write statuses with nothing on the bus, and its
+  timestamp unit (microseconds, from its TX indications). Still
+  unverified against real hardware: talking-bus behavior (replies to
+  requests, checksum expectations), VBATT, and whether a vendor ever
+  pairs `ERR_TIMEOUT` with data (#11).
 - **Link-health coverage is in-proc only.** The tests above drive
   `ECUIO_FAKE_READ_STATUS`, `ECUIO_FAKE_UNTOUCHED_COUNT_STATUS` and
   `ECUIO_FAKE_WRITE_STATUS` through the worker. Not covered:
   - the surrogate path's health mapping through the worker, end to
-    end (the surrogate test stops at `read_frame`'s status). Accepted
-    until the first vehicle session, which drives it live through the
-    surrogate, with the session log as the record;
+    end (the surrogate test stops at `read_frame`'s status). The
+    2026-10-22 bench run drove the requests-failing and quiet states
+    live through the surrogate on the VX; ok waits for the first
+    vehicle session, and hard failure for a vendor read error, with
+    the session log as the record;
   - how the UI renders `ECUIO_ERR_REQUEST_FAILED`: the bridge's mapping
     to `requests` is unit-tested, but the QML banner, Home card,
     Dashboard header, Settings label and log line are covered only by
     the smoke recipe's requests-banner row (passed 2026-10-21);
-  - the real-vendor flavors on a talking bus: the VX quiet bus was
-    observed once (2026-10-20: empty reads return `NOERROR` with zero
-    messages; writes fail `ERR_FAILED` after ~8 cycles on a no-ACK
-    bus — [bench-sessions/2026-10-20.md](bench-sessions/2026-10-20.md)),
+  - the real-vendor flavors on a talking bus: on the VX's quiet bus
+    (2026-10-22), an empty read returns `ERR_BUFFER_EMPTY` and a short
+    batch `NOERROR`, and with nothing acknowledging, three writes are
+    accepted and the fourth fails `ERR_FAILED`
+    ([bench-sessions/2026-10-22.md](bench-sessions/2026-10-22.md)),
     but `ERR_TIMEOUT`-with-data and ECU-present write behavior are
     still unknown.
 - **The fake's default read model is simpler than J2534's.** By

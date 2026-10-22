@@ -97,7 +97,12 @@ next, and v0.3.0 is tagged when that session succeeds.
     soak at <1% CPU with clean teardown. The 4-byte shape that replaced
     it was accepted with logged vendor status 0 on 2026-10-20
     ([bench-sessions/2026-10-20.md](docs/bench-sessions/2026-10-20.md)).
-    Talking-bus behaviors, VBATT, and timestamp units remain untested.
+    A quiet-bus run on 2026-10-22 took the current build through every
+    URI the vehicle session uses, with recording on: "requests
+    failing" and quiet both showed on the VX, and its timestamps are
+    microseconds
+    ([bench-sessions/2026-10-22.md](docs/bench-sessions/2026-10-22.md)).
+    Talking-bus behaviors and VBATT remain untested.
     The OBDX Pro VT still refuses open (status 34) with its adapter
     absent. The run sheet template is
     [docs/bench-sessions/bench-runsheet.md](docs/bench-sessions/bench-runsheet.md).
@@ -224,10 +229,11 @@ Contracts along this path:
         2026-10-19). Read batches that arrive with `ERR_TIMEOUT` are
         delivered.
   - work through [BENCH prep](#bench-prep) — quiet-bus subset walked
-    2026-10-16 (prep item 9 resolved) and 2026-10-20 (item 6 observed
-    for empty reads); item 1 resolved for both shapes (8-byte
-    behaviorally 2026-10-16, 4-byte with logged vendor status 0
-    2026-10-20); the talking-bus items (2, 3, 4, 5, 7) still open
+    2026-10-16 (prep item 9 resolved), 2026-10-20 and 2026-10-22
+    (items 5, 6 and 8 observed on the VX); item 1 resolved for both
+    shapes (8-byte behaviorally 2026-10-16, 4-byte with logged vendor
+    status 0 2026-10-20); the talking-bus items (2, 3, 4, 7) still
+    open, and 5 and 6 still to see on replies
   - first live, read-only vehicle session
 - [x] **Protocol profiles** (ADR-0013), slices 1–3. The PID-support
       probe and `uds-generic` are [after v0.3.0](#after-v030):
@@ -301,24 +307,36 @@ it a genuine connect candidate.
    `0x7FF`: writes carry `CAN_29BIT_ID`, and the channel connects with
    it.
 5. **Timestamps** are passed through as microseconds, as the spec
-   says (#12).
+   says (#12). The VX's are: 75 of its TX indications over 391 s fit
+   the host clock with a slope of 1.0000003, from one clock that
+   doesn't reset at open or connect and wraps 71.6 min after zero
+   ([session note](docs/bench-sessions/2026-10-22.md), no vehicle).
+   Still to see on replies.
 6. **ReadMsgs statuses.** Split in both backends:
    `ERR_TIMEOUT` is a vehicle timeout, `ERR_BUFFER_EMPTY` is "no
    frame", and anything else is a hard failure (#11). Frames that
    arrive with `STATUS_NOERROR` or `ERR_TIMEOUT` are delivered, so a
    vendor that pairs `ERR_TIMEOUT` with a partial batch loses nothing.
    Under any other status the count is ignored, because a vendor may
-   leave it untouched on error (`6420f09`). Observed 2026-10-20
-   (no vehicle): the VX returns `STATUS_NOERROR` with zero messages
-   for an empty read — a third flavor, neither of the two the split
-   names; it behaves as "no frame", and the session's fault state came
-   from the writes, not the reads
-   ([session note](docs/bench-sessions/2026-10-20.md)). Still to
-   observe on a talking bus: whether it pairs `ERR_TIMEOUT` with data
-   at all.
+   leave it untouched on error (`6420f09`). Observed on the VX
+   (2026-10-22, no vehicle): an empty read returns `ERR_BUFFER_EMPTY`
+   and a short batch `STATUS_NOERROR`, both after the read's full
+   timeout. Its TX indications arrive in those batches and are dropped
+   before counting
+   ([session note](docs/bench-sessions/2026-10-22.md)). Still to
+   observe on a talking bus: whether a reply batch ever carries
+   `ERR_TIMEOUT`.
 7. **Struct-layout conformance to v04.04** cannot be confirmed without
    a device ([ADR-0010](docs/adr/0010-j2534-v0404-shared-types.md)).
 8. **Vendor ioctl and filter behavior** and timeout semantics.
+   Observed on the VX (2026-10-22, no vehicle): reads run their full
+   timeout unless the batch fills. Writes sent with timeout 0 are
+   accepted three deep with nothing on the bus to acknowledge them,
+   each with a `TX_INDICATION`; the fourth and every later write
+   blocks about 0.5 s and returns `ERR_FAILED`, until a new connect.
+   Filter start and stop and disconnect return status 0 at once.
+   Ioctls are unexercised: the transport issues none
+   ([session note](docs/bench-sessions/2026-10-22.md)).
 9. **Export-name conformance.** RESOLVED 2026-10-16, contrary to
    expectations: the OBDX Pro VX exports the SPEC spelling
    (`PassThruIoctl`, J2534-1_0500 §7.3.19; all v04.04-era references
@@ -373,18 +391,25 @@ an issue is resolved it is removed, and its number is not reused.
     Still open:
     - No surrogate session drives the health machine in the suite.
       Accepted until the first vehicle session, which runs through the
-      surrogate and records it in the session log.
+      surrogate and records it in the session log. A 2026-10-22 bench
+      run showed the requests-failing and quiet states through the
+      surrogate on the VX.
     - If reads recover while writes keep failing, the state stays
       "adapter fault" instead of stepping down to request failure.
       Accepted for now: it needs a transient read error on a no-ACK
       bus, and the session log tells the two apart (clean `OP_READ`
       lines next to failing `OP_WRITE` lines).
-    - Real-vendor coverage is one quiet-bus observation (2026-10-20:
-      empty reads are `NOERROR` with zero messages; writes fail after
-      ~8 cycles with no ACK); talking-bus flavors remain unknown
-      (prep item 6).
-12. **J2534 timestamps pass through untranslated.** The spec says
-    microseconds, but vendor conformance is unverified.
+    - Real-vendor coverage is the VX's quiet bus (2026-10-22: an
+      empty read is `ERR_BUFFER_EMPTY`, a short batch `NOERROR`, and
+      with nothing acknowledging, the fourth write fails); talking-bus
+      flavors remain unknown (prep item 6).
+12. **J2534 timestamps pass through untranslated.** A frame's
+    `timestamp_us` is the vendor's 32-bit stamp, not time since the
+    session started. The spec says microseconds; the VX conforms, from
+    a clock that keeps running across connects and wraps 71.6 min
+    after zero
+    ([bench-sessions/2026-10-22.md](docs/bench-sessions/2026-10-22.md)).
+    Other vendors are unverified.
 13. **The picker treats one registry entry as one device.** Multiple
     adapters behind one vendor DLL can't be told apart. They would be
     selected through `PassThruOpen`'s `pName` argument, which the
@@ -489,6 +514,8 @@ after the first vehicle session.
     both backends but never requested);
   - its firmware and DLL versions (`PassThruReadVersion`, not yet
     wrapped).
+- Record and display driver information and firmware version of adapters in log
+  and interface list if possible
 
 ### Data capture
 
