@@ -218,9 +218,11 @@ TEST_F(J2534QueryParamTest, ProfileChannelWidthDecidesConnectFlag)
     static const ecuio_channel_decl_t kMixed[] = {{0x7E8u, 0x7E0u},
                                                {0x18DAF110u, 0x18DA10F1u}};
     static ecuio_signal_set_t wide = {};
+    wide.layout_version = ECUIO_SIGNAL_SET_LAYOUT;
     wide.channel_count = 1;
     wide.channels = kWide;
     static ecuio_signal_set_t mixed = {};
+    mixed.layout_version = ECUIO_SIGNAL_SET_LAYOUT;
     mixed.channel_count = 2;
     mixed.channels = kMixed;
     ASSERT_EQ(ecuio_profile_register("test-29bit", &wide), ECUIO_OK);

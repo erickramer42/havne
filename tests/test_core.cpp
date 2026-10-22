@@ -862,6 +862,7 @@ TEST(CoreTest, ProfileRegisterOverwritesLastWins) {
      * grammar's duplicate-key rule. Registered under a throwaway name
      * so no built-in is disturbed. */
     ecuio_signal_set_t mine = {};
+    mine.layout_version = ECUIO_SIGNAL_SET_LAYOUT;
     EXPECT_EQ(ecuio_profile_register("test-profile-tmp", &mine), ECUIO_OK);
     const ecuio_signal_set_t* got = nullptr;
     EXPECT_EQ(ecuio_profile_lookup("test-profile-tmp", &got), ECUIO_OK);
@@ -878,15 +879,23 @@ TEST(CoreTest, ProfileRegisterValidatesNameAndSet) {
     /* The registry is the plugin surface (ADR-0013), so it checks what
      * it's handed: a set that fails validation, or a name no URI could
      * select, is refused and leaves nothing registered. */
-    ecuio_signal_def_t bad_def = {}; /* num_bytes 0 */
-    bad_def.type = ECUIO_SIGNAL_TYPE_UINT8;
+    ecuio_signal_def_t bad_def = {}; /* bit_length 0 */
     ecuio_signal_set_t bad = {};
+    bad.layout_version = ECUIO_SIGNAL_SET_LAYOUT;
     bad.count = 1;
     bad.defs = &bad_def;
     const ecuio_signal_set_t* got = nullptr;
     EXPECT_EQ(ecuio_profile_register("test-bad-set", &bad),
               ECUIO_ERR_INVALID_ARGUMENT);
     EXPECT_EQ(ecuio_profile_lookup("test-bad-set", &got), ECUIO_ERR_NO_TRANSPORT);
+
+    /* A set written for an earlier layout carries 1 or 2 where
+     * layout_version sits, so it's refused instead of decoding garbage. */
+    ecuio_signal_set_t old_layout = *ecuio_mock_signal_set();
+    old_layout.layout_version = 2;
+    EXPECT_EQ(ecuio_profile_register("test-old-layout", &old_layout),
+              ECUIO_ERR_INVALID_ARGUMENT);
+    EXPECT_EQ(ecuio_profile_lookup("test-old-layout", &got), ECUIO_ERR_NO_TRANSPORT);
 
     for (const char* name : {"", "Upper", "has space", "a&b", "a=b", "q?x"}) {
         EXPECT_EQ(ecuio_profile_register(name, nullptr),

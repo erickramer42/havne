@@ -15,16 +15,15 @@ static void copy_str(char* dst, size_t dst_size, const char* src)
 }
 
 static ecuio_signal_def_t mk(uint16_t id, const char* name,
-                             ecuio_signal_type_t type,
-                             uint8_t sb, uint8_t nb, uint8_t bo, uint8_t bl,
+                             ecuio_value_kind_t kind,
+                             uint16_t sb, uint8_t bo, uint8_t bl,
                              double scale, double offset,
                              const char* unit, uint8_t dp)
 {
-    ecuio_signal_def_t d = {};
+    ecuio_signal_def_t d = {};   /* reserved bytes and flags zero */
     d.id = id;
-    d.type = type;
+    d.kind = static_cast<uint8_t>(kind);
     d.start_byte = sb;
-    d.num_bytes = nb;
     d.bit_offset = bo;
     d.bit_length = bl;
     d.scale = scale;
@@ -35,11 +34,9 @@ static ecuio_signal_def_t mk(uint16_t id, const char* name,
      * the plain LE payloads mock_transport.cpp encodes. d = {} already
      * zeroes these; stating them keeps a future default from silently
      * turning on mux or big-endian decode here. */
-    d.flags = 0;               /* ECUIO_SIGNAL_FLAG_BIG_ENDIAN unset */
+    d.byte_order = ECUIO_BYTE_ORDER_LE;
     d.mux_offset = 0;
     d.mux_length = 0;           /* mux disabled */
-    d.mux_reserved[0] = 0;
-    d.mux_reserved[1] = 0;
     d.mux_key = 0;
     copy_str(d.name, sizeof(d.name), name);
     copy_str(d.unit, sizeof(d.unit), unit);
@@ -52,28 +49,28 @@ static ecuio_signal_def_t mk(uint16_t id, const char* name,
 #define DEG_C "\xC2\xB0" "C"   /* UTF-8 degree sign, whatever the source encoding */
 
 static const ecuio_signal_def_t kMockDefs[] = {
-    mk(ECUIO_MOCK_SIG_RPM_ID,       "RPM",               ECUIO_SIGNAL_TYPE_UINT16,   0, 2, 0, 16, 0.25,  0.0,  "RPM",    0),
-    /* Coolant and IAT are UINT8 with a -40 offset (J1979: A - 40, so
-     * -40..215 degC). As INT8, anything from 88 degC up would read as
-     * about -160 degC. */
-    mk(ECUIO_MOCK_SIG_COOLANT_ID,   "Coolant Temp",      ECUIO_SIGNAL_TYPE_UINT8,     2, 1, 0, 8,   1.0, -40.0, DEG_C,    0),
-    mk(ECUIO_MOCK_SIG_SPEED_ID,     "Vehicle Speed",     ECUIO_SIGNAL_TYPE_UINT8,     3, 1, 0, 8,   1.0,   0.0, "km/h",   0),
-    mk(ECUIO_MOCK_SIG_THROTTLE_ID, "Throttle Position", ECUIO_SIGNAL_TYPE_UINT8,      4, 1, 0, 8,   100.0/255.0, 0.0, "%", 1),
-    mk(ECUIO_MOCK_SIG_IAT_ID,       "Intake Air Temp",   ECUIO_SIGNAL_TYPE_UINT8,     5, 1, 0, 8,   1.0, -40.0, DEG_C,    0),
-    mk(ECUIO_MOCK_SIG_LOAD_ID,      "Engine Load",       ECUIO_SIGNAL_TYPE_UINT8,     6, 1, 0, 8,   100.0/255.0, 0.0, "%", 1),
+    mk(ECUIO_MOCK_SIG_RPM_ID,       "RPM",               ECUIO_VALUE_UINT, 0, 0, 16, 0.25,  0.0,  "RPM",    0),
+    /* Coolant and IAT are 8-bit UINT with a -40 offset (J1979: A - 40,
+     * so -40..215 degC). As INT, anything from 88 degC up would read
+     * as about -160 degC. */
+    mk(ECUIO_MOCK_SIG_COOLANT_ID,   "Coolant Temp",      ECUIO_VALUE_UINT, 2, 0, 8,   1.0, -40.0, DEG_C,    0),
+    mk(ECUIO_MOCK_SIG_SPEED_ID,     "Vehicle Speed",     ECUIO_VALUE_UINT, 3, 0, 8,   1.0,   0.0, "km/h",   0),
+    mk(ECUIO_MOCK_SIG_THROTTLE_ID, "Throttle Position", ECUIO_VALUE_UINT,  4, 0, 8,   100.0/255.0, 0.0, "%", 1),
+    mk(ECUIO_MOCK_SIG_IAT_ID,       "Intake Air Temp",   ECUIO_VALUE_UINT, 5, 0, 8,   1.0, -40.0, DEG_C,    0),
+    mk(ECUIO_MOCK_SIG_LOAD_ID,      "Engine Load",       ECUIO_VALUE_UINT, 6, 0, 8,   100.0/255.0, 0.0, "%", 1),
     /* Layout mirrors encode_payload's tail: MAF at bytes 7-8 (LE,
      * like RPM), oil temp at byte 9. Centi-grams/s scale is the
      * same J1979 0x10 formula the obd2 set uses; oil is A - 40. The
      * 0.01 g/s resolution is shown to one decimal. */
-    mk(ECUIO_MOCK_SIG_MAF_ID,       "MAF",               ECUIO_SIGNAL_TYPE_UINT16,   7, 2, 0, 16, 0.01,  0.0, "g/s",  1),
-    mk(ECUIO_MOCK_SIG_OIL_ID,       "Engine Oil Temp",   ECUIO_SIGNAL_TYPE_UINT8,     9, 1, 0, 8,   1.0, -40.0, DEG_C, 0),
+    mk(ECUIO_MOCK_SIG_MAF_ID,       "MAF",               ECUIO_VALUE_UINT, 7, 0, 16, 0.01,  0.0, "g/s",  1),
+    mk(ECUIO_MOCK_SIG_OIL_ID,       "Engine Oil Temp",   ECUIO_VALUE_UINT, 9, 0, 8,   1.0, -40.0, DEG_C, 0),
 };
 
 #undef DEG_C
 
 static const ecuio_signal_set_t kMockSet = [] {
     ecuio_signal_set_t s = {};
-    s.version = 1;
+    s.layout_version = ECUIO_SIGNAL_SET_LAYOUT;
     s.count = static_cast<uint32_t>(sizeof(kMockDefs) / sizeof(kMockDefs[0]));
     s.defs = kMockDefs;
     return s;
@@ -86,9 +83,17 @@ const ecuio_signal_set_t* ecuio_mock_signal_set(void)
 
 int ecuio_validate_signal_set(const ecuio_signal_set_t* set)
 {
+    if (!set) return ECUIO_VALIDATE_ERR_NULL;
+    /* Before any other member: a set built for another layout has its
+     * fields elsewhere. */
+    if (set->layout_version != ECUIO_SIGNAL_SET_LAYOUT) return ECUIO_VALIDATE_ERR_LAYOUT;
+    if (set->reserved0 != 0) return ECUIO_VALIDATE_ERR_SET_RESERVED;
+    for (uint32_t i = 0; i < sizeof(set->reserved) / sizeof(set->reserved[0]); ++i) {
+        if (set->reserved[i] != 0) return ECUIO_VALIDATE_ERR_SET_RESERVED;
+    }
     /* An empty set (no defs) is legal: it decodes nothing, and may
      * still declare channels. */
-    if (!set || (set->count > 0 && !set->defs)) return ECUIO_VALIDATE_ERR_NULL;
+    if (set->count > 0 && !set->defs) return ECUIO_VALIDATE_ERR_NULL;
     for (uint32_t i = 0; i < set->count; ++i) {
         int rc = ecuio_validate_signal(&set->defs[i]);
         if (rc != ECUIO_VALIDATE_OK) return rc;

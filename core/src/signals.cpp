@@ -10,9 +10,9 @@
 /* Internal helper: extract bitfield from byte array (little-endian)
  * Intel (little-endian) bit numbering: the field's LSB sits at bit
  * `bit_offset` inside byte `start_byte`, running upward through
- * consecutive bytes. */
+ * consecutive bytes, so a 32-bit field at bit 7 spans five. */
 static uint32_t extract_bitfield_le(const uint8_t* data,
-                                     uint8_t start_byte,
+                                     uint16_t start_byte,
                                      uint8_t bit_offset,
                                      uint8_t bit_length)
 {
@@ -26,25 +26,27 @@ static uint32_t extract_bitfield_le(const uint8_t* data,
     return result;
 }
 
-/* Big-endian extraction: byte-aligned fields only (bit_offset 0,
- * bit_length a multiple of 8 — the validator enforces both). Reads
- * whole bytes MSB-first: first byte is most significant. The
- * existing last_bit bounds check already covers start_byte + n. */
+/* Big-endian extraction: whole bytes only (bit_offset 0, bit_length a
+ * multiple of 8; the caller checks both). Reads MSB-first: the first
+ * byte is most significant. The last_bit bounds check already covers
+ * start_byte + n. */
 static uint32_t extract_bytes_be(const uint8_t* data,
-                                  uint8_t start_byte, uint8_t bit_length)
+                                  uint16_t start_byte, uint8_t bit_length)
 {
     uint32_t result = 0;
     const uint8_t n = bit_length / 8;
     for (uint8_t i = 0; i < n; ++i) {
-        result = (result << 8) | data[start_byte + i];
+        result = (result << 8) | data[(uint32_t)start_byte + i];
     }
     return result;
 }
 
-/* Read the def's mux key from a payload, big-endian, into *out_key.
- * False when the key region ends past payload_len. The caller has
- * checked mux_length (1 or 2). Shared by decode and the frame gate, so
- * the two can't disagree on which payloads carry the key. */
+/* Read the def's mux key from a payload into *out_key, first byte most
+ * significant whatever the field's byte_order: the key is a byte
+ * sequence, not a number. False when the key region ends past
+ * payload_len. The caller has checked mux_length (1 or 2). Shared by
+ * decode and the frame gate, so the two can't disagree on which
+ * payloads carry the key. */
 static bool read_mux_key(const ecuio_signal_def_t* signal,
                          const uint8_t* payload, uint32_t payload_len,
                          uint32_t* out_key)
@@ -61,12 +63,34 @@ static bool read_mux_key(const ecuio_signal_def_t* signal,
     return true;
 }
 
-/* The types ecuio_decode_signal decodes. */
-static bool is_decodable_type(ecuio_signal_type_t type)
+/* The kinds ecuio_decode_signal decodes. TEXT has no decoder yet. */
+static bool is_decodable_kind(uint8_t kind)
 {
-    /* Through int: a C caller can store any value in the enum. */
-    const int t = (int)type;
-    return t >= ECUIO_SIGNAL_TYPE_UINT8 && t <= ECUIO_SIGNAL_TYPE_FLOAT32;
+    return kind == ECUIO_VALUE_UINT || kind == ECUIO_VALUE_INT ||
+           kind == ECUIO_VALUE_FLOAT;
+}
+
+static bool is_known_byte_order(uint8_t byte_order)
+{
+    return byte_order == ECUIO_BYTE_ORDER_LE ||
+           byte_order == ECUIO_BYTE_ORDER_BE;
+}
+
+/* A big-endian field is whole bytes; the extractor can't read less. */
+static bool is_whole_bytes(const ecuio_signal_def_t* signal)
+{
+    return signal->bit_offset == 0 && (signal->bit_length % 8) == 0;
+}
+
+static bool all_zero(const void* bytes, size_t n)
+{
+    const unsigned char* p = (const unsigned char*)bytes;
+    for (size_t i = 0; i < n; ++i) {
+        if (p[i] != 0) {
+            return false;
+        }
+    }
+    return true;
 }
 
 int ecuio_decode_signal(const ecuio_signal_def_t* signal,
@@ -78,25 +102,29 @@ int ecuio_decode_signal(const ecuio_signal_def_t* signal,
         return ECUIO_DECODE_ERR_NULL;
     }
 
-    /* Check for unsupported types FIRST — before bit validation */
-    if (!is_decodable_type(signal->type)) {
+    /* Kind and byte order FIRST, before the bit parameters */
+    if (!is_decodable_kind(signal->kind) ||
+        !is_known_byte_order(signal->byte_order)) {
         return ECUIO_DECODE_ERR_UNSUPPORTED;
     }
 
-    /* Now safe to validate bit parameters for supported numeric types */
+    const bool big_endian = signal->byte_order == ECUIO_BYTE_ORDER_BE;
     if (signal->bit_length == 0 || signal->bit_length > 32) {
         return ECUIO_DECODE_ERR_BAD_PARAMS;
     }
     if (signal->bit_offset > 7) {
         return ECUIO_DECODE_ERR_BAD_PARAMS;
     }
-    if ((uint32_t)signal->bit_offset + signal->bit_length
-            > 8u * signal->num_bytes) {
+    if (big_endian && !is_whole_bytes(signal)) {
         return ECUIO_DECODE_ERR_BAD_PARAMS;
+    }
+    if (signal->kind == ECUIO_VALUE_FLOAT &&
+        (signal->bit_offset != 0 || signal->bit_length != 32)) {
+        return ECUIO_DECODE_ERR_UNSUPPORTED;   /* binary32 only */
     }
 
     /* Highest bit consumed lies in this byte index — single uniform
-       bounds check for every type, including FLOAT32. */
+       bounds check for every kind and byte order. */
     uint32_t last_bit = (uint32_t)signal->start_byte * 8u
                         + signal->bit_offset + signal->bit_length - 1u;
     if ((last_bit >> 3) >= payload_len) {
@@ -117,33 +145,21 @@ int ecuio_decode_signal(const ecuio_signal_def_t* signal,
         }
     }
 
-    switch (signal->type) {
-    case ECUIO_SIGNAL_TYPE_UINT8:
-    case ECUIO_SIGNAL_TYPE_UINT16:
-    case ECUIO_SIGNAL_TYPE_UINT32: {
-        uint32_t raw;
-        if (signal->flags & ECUIO_SIGNAL_FLAG_BIG_ENDIAN) {
-            raw = extract_bytes_be(frame_payload, signal->start_byte,
-                                      signal->bit_length);
-        } else {
-            raw = extract_bitfield_le(frame_payload, signal->start_byte,
-                                      signal->bit_offset, signal->bit_length);
-        }
-        *out_value = (double)raw * signal->scale + signal->offset;
-        return ECUIO_DECODE_OK;
+    uint32_t raw;
+    if (big_endian) {
+        raw = extract_bytes_be(frame_payload, signal->start_byte,
+                                  signal->bit_length);
+    } else {
+        raw = extract_bitfield_le(frame_payload, signal->start_byte,
+                                  signal->bit_offset, signal->bit_length);
     }
 
-    case ECUIO_SIGNAL_TYPE_INT8:
-    case ECUIO_SIGNAL_TYPE_INT16:
-    case ECUIO_SIGNAL_TYPE_INT32: {
-        uint32_t raw;
-        if (signal->flags & ECUIO_SIGNAL_FLAG_BIG_ENDIAN) {
-            raw = extract_bytes_be(frame_payload, signal->start_byte,
-                                      signal->bit_length);
-        } else {
-            raw = extract_bitfield_le(frame_payload, signal->start_byte,
-                                      signal->bit_offset, signal->bit_length);
-        }
+    switch (signal->kind) {
+    case ECUIO_VALUE_UINT:
+        *out_value = (double)raw * signal->scale + signal->offset;
+        return ECUIO_DECODE_OK;
+
+    case ECUIO_VALUE_INT: {
         if (signal->bit_length < 32 &&
             (raw & (1u << (signal->bit_length - 1)))) {
             raw |= (0xFFFFFFFFu << signal->bit_length); /* sign-extend */
@@ -154,13 +170,11 @@ int ecuio_decode_signal(const ecuio_signal_def_t* signal,
         return ECUIO_DECODE_OK;
     }
 
-    case ECUIO_SIGNAL_TYPE_FLOAT32: {
-        if (signal->bit_offset != 0 || signal->bit_length != 32) {
-            return ECUIO_DECODE_ERR_UNSUPPORTED;   /* float must be byte-aligned, 32-bit */
-        }
+    case ECUIO_VALUE_FLOAT: {
+        /* raw holds the binary32 bit pattern in host order, whichever
+         * byte order the payload used. */
         float raw_float;
-        memcpy(&raw_float, frame_payload + signal->start_byte,
-               sizeof raw_float);
+        memcpy(&raw_float, &raw, sizeof raw_float);
         *out_value = (double)raw_float * signal->scale + signal->offset;
         return ECUIO_DECODE_OK;
     }
@@ -208,25 +222,20 @@ int ecuio_validate_signal(const ecuio_signal_def_t* signal)
         return ECUIO_VALIDATE_ERR_NULL;
     }
 
-    /* The decoder rejects every other type, so a def of one could
-     * register and then never decode. */
-    if (!is_decodable_type(signal->type)) {
-        return ECUIO_VALIDATE_ERR_TYPE;
+    /* The decoder rejects every other kind and byte order, so a def of
+     * one could register and then never decode. */
+    if (!is_decodable_kind(signal->kind)) {
+        return ECUIO_VALIDATE_ERR_KIND;
+    }
+    if (!is_known_byte_order(signal->byte_order)) {
+        return ECUIO_VALIDATE_ERR_BYTE_ORDER;
     }
 
-    if (signal->num_bytes < 1 || signal->num_bytes > 4) {
-        return ECUIO_VALIDATE_ERR_NUM_BYTES;
-    }
-    if (signal->bit_length == 0 ||
-        signal->bit_length > 8u * signal->num_bytes) {
+    if (signal->bit_length == 0 || signal->bit_length > 32) {
         return ECUIO_VALIDATE_ERR_BIT_LENGTH;
     }
     if (signal->bit_offset > 7) {
         return ECUIO_VALIDATE_ERR_BIT_OFFSET;
-    }
-    if ((uint32_t)signal->bit_offset + signal->bit_length
-            > 8u * signal->num_bytes) {
-        return ECUIO_VALIDATE_ERR_BIT_SPAN;
     }
 
     /* MUX validation — the key region lives in the FRAME payload,
@@ -246,21 +255,15 @@ int ecuio_validate_signal(const ecuio_signal_def_t* signal)
         }
     }
 
-    /* big-endian fields are byte-aligned only — the extractor
-     * reads whole bytes MSB-first, so non-aligned shapes are rejected
-     * at registration instead of misread at decode. */
-    if (signal->flags & ECUIO_SIGNAL_FLAG_BIG_ENDIAN) {
-        if (signal->bit_offset != 0 || (signal->bit_length % 8) != 0) {
-            return ECUIO_VALIDATE_ERR_BIG_ENDIAN;
-        }
+    /* The big-endian extractor reads whole bytes MSB-first, and the
+     * decoder refuses any other shape. */
+    if (signal->byte_order == ECUIO_BYTE_ORDER_BE && !is_whole_bytes(signal)) {
+        return ECUIO_VALIDATE_ERR_BIG_ENDIAN;
     }
 
-    /* The decoder reads a FLOAT32 as four native (little-endian) bytes
-     * at bit 0 and ignores the big-endian flag, so any other shape
-     * would fail to decode or read as the wrong number. */
-    if (signal->type == ECUIO_SIGNAL_TYPE_FLOAT32 &&
-        (signal->bit_length != 32 || signal->bit_offset != 0 ||
-         (signal->flags & ECUIO_SIGNAL_FLAG_BIG_ENDIAN))) {
+    /* A FLOAT is binary32: 32 bits at bit 0, in either byte order. */
+    if (signal->kind == ECUIO_VALUE_FLOAT &&
+        (signal->bit_length != 32 || signal->bit_offset != 0)) {
         return ECUIO_VALIDATE_ERR_FLOAT32;
     }
 
@@ -274,6 +277,17 @@ int ecuio_validate_signal(const ecuio_signal_def_t* signal)
 
     if (signal->decimal_places > 3) {
         return ECUIO_VALIDATE_ERR_DECIMALS;
+    }
+
+    /* Zero, so a later field can take this room and existing sets
+     * still load. No flag is defined. */
+    if (signal->reserved0 != 0 ||
+        !all_zero(signal->mux_reserved, sizeof signal->mux_reserved) ||
+        !all_zero(signal->decode_reserved, sizeof signal->decode_reserved) ||
+        !all_zero(signal->display_reserved, sizeof signal->display_reserved) ||
+        signal->flags != 0 ||
+        !all_zero(signal->reserved, sizeof signal->reserved)) {
+        return ECUIO_VALIDATE_ERR_RESERVED;
     }
 
     return ECUIO_VALIDATE_OK;

@@ -469,17 +469,18 @@ void buildTestSignalSet(ecuio_signal_def_t (&defs)[2], ecuio_signal_set_t& set)
     rpm = {};
     rpm.id = 1001;
     strncpy(rpm.name, "Engine_RPM", sizeof(rpm.name) - 1);
-    rpm.type = ECUIO_SIGNAL_TYPE_UINT16;
+    rpm.kind = ECUIO_VALUE_UINT;
     strncpy(rpm.unit, "RPM", sizeof(rpm.unit) - 1);
 
     ecuio_signal_def_t& temp = defs[1];
     temp = {};
     temp.id = 2001;
     strncpy(temp.name, "Coolant_Temp", sizeof(temp.name) - 1);
-    temp.type = ECUIO_SIGNAL_TYPE_INT8;
+    temp.kind = ECUIO_VALUE_INT;
     strncpy(temp.unit, "degC", sizeof(temp.unit) - 1);
 
-    set.version = 1;
+    set = {};
+    set.layout_version = ECUIO_SIGNAL_SET_LAYOUT;
     set.count = 2;
     set.defs = defs;
 }

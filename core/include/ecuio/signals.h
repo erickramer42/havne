@@ -13,53 +13,77 @@
 extern "C" {
 #endif
 
+/* What a field's bits hold. Values are append-only. */
 typedef enum {
-    ECUIO_SIGNAL_TYPE_UINT8    = 0,
-    ECUIO_SIGNAL_TYPE_UINT16   = 1,
-    ECUIO_SIGNAL_TYPE_UINT32   = 2,
-    ECUIO_SIGNAL_TYPE_INT8     = 3,
-    ECUIO_SIGNAL_TYPE_INT16    = 4,
-    ECUIO_SIGNAL_TYPE_INT32    = 5,
-    ECUIO_SIGNAL_TYPE_FLOAT32  = 6,
-    ECUIO_SIGNAL_TYPE_STRING   = 7,  /* Reserved: no decoder yet */
-    ECUIO_SIGNAL_TYPE_MANUF_START = 256   /* Reserved range: no decoder
-                                             yet */
-} ecuio_signal_type_t;
+    ECUIO_VALUE_UINT  = 0,
+    ECUIO_VALUE_INT   = 1,   /* two's complement, sign-extended from bit_length */
+    ECUIO_VALUE_FLOAT = 2,   /* IEEE-754 binary32 */
+    ECUIO_VALUE_TEXT  = 3    /* reserved: no decoder yet */
+} ecuio_value_kind_t;
 
-/* Signal definition flags */
-#define ECUIO_SIGNAL_FLAG_BIG_ENDIAN   (1u << 0)
+/* A field's byte order. Values are append-only. */
+#define ECUIO_BYTE_ORDER_LE 0u   /* Intel: LSB first, bit fields at any offset */
+#define ECUIO_BYTE_ORDER_BE 1u   /* Motorola: MSB first, whole bytes only */
 
+/* One signal, in three blocks: which frames carry it, how its bytes
+ * become a value, and how the value is shown. Every byte is a named
+ * field, so the compiler adds no padding. Reserved bytes and flags
+ * must be zero, so a later field can take that room and existing sets
+ * still load (ADR-0016). kind and byte_order are fixed-width fields
+ * because an enum's size is up to the compiler. */
 typedef struct ecuio_signal_def {
     uint16_t id;
-    char name[32];            /* display name, UTF-8; UIs show it as is */
-    ecuio_signal_type_t type;
-    uint8_t start_byte;
-    uint8_t num_bytes;
-    uint8_t bit_offset;
-    uint8_t bit_length;
-    double scale;
-    double offset;            /* value = raw * scale + offset, in double */
-    char unit[16];            /* display unit, UTF-8 (a degree sign, "km/h") */
-    uint8_t decimal_places;   /* display precision of the decoded value */
-    uint32_t flags;
-    
-    /* CAN arbitration ID this signal rides on. Consumers gate decode
-     * on frame->arbitration_id == message_id BEFORE extraction;
-     * ecuio_decode_signal itself remains payload-only. */
-    uint32_t message_id;
-    
-    /* MUX descriptor: packed [offset:8][length:8][reserved:16]
-     * - offset: byte offset in payload where mux key sits (0..payload_len-1)
-     * - length: 0 = mux disabled; 1 or 2 = key size in bytes
-     * - reserved: must be zero
-     * When mux is enabled (length > 0), decode proceeds ONLY if
-     * the payload's key bytes match mux_key exactly. This enables
-     * OBD-II response discrimination (e.g., 0x41 <PID> echo). */
-    uint8_t mux_offset;
-    uint8_t mux_length;
-    uint8_t mux_reserved[2];
-    uint32_t mux_key;  /* The byte pattern to match at mux_offset */
+    uint16_t reserved0;           /* zero */
+
+    /* Match. ecuio_def_applies_to_frame checks both before decode, and
+     * ecuio_decode_signal checks the key again. */
+    uint32_t message_id;          /* the frame's arbitration_id must equal it */
+    uint8_t  mux_offset;          /* payload byte where the key starts */
+    uint8_t  mux_length;          /* 0 = no mux; 1 or 2 = key bytes */
+    uint8_t  mux_reserved[2];     /* zero */
+    uint32_t mux_key;             /* key bytes, first byte most significant,
+                                     whatever byte_order says */
+
+    /* Decode */
+    uint8_t  kind;                /* ecuio_value_kind_t */
+    uint8_t  byte_order;          /* ECUIO_BYTE_ORDER_* */
+    uint16_t start_byte;
+    uint8_t  bit_offset;          /* 0..7; 0 for BE and FLOAT */
+    uint8_t  bit_length;          /* 1..32; 32 for FLOAT; whole bytes for BE */
+    uint8_t  decode_reserved[2];  /* zero */
+    double   scale;
+    double   offset;              /* value = raw * scale + offset, in double */
+
+    /* Display. UIs show the strings as they are. */
+    char     name[32];            /* UTF-8, terminated inside the buffer */
+    char     unit[16];            /* UTF-8 (a degree sign, "km/h"), terminated */
+    uint8_t  decimal_places;      /* 0..3 */
+    uint8_t  display_reserved[3]; /* zero */
+
+    uint32_t flags;               /* none defined; zero */
+    uint32_t reserved[6];         /* zero; ADR-0016 earmarks this room */
 } ecuio_signal_def_t;
+
+/* Compile-time ABI pinning, as for ecuio_frame_t in core.h; C99 falls
+ * back to tests/test_c_abi.c. A layout change bumps
+ * ECUIO_SIGNAL_SET_LAYOUT. */
+#if defined(__cplusplus)
+static_assert(sizeof(ecuio_signal_def_t) == 120, "ecuio_signal_def_t size is ABI");
+static_assert(offsetof(ecuio_signal_def_t, kind) == 16, "def kind offset is ABI");
+static_assert(offsetof(ecuio_signal_def_t, start_byte) == 18, "def start_byte offset is ABI");
+static_assert(offsetof(ecuio_signal_def_t, scale) == 24, "def scale offset is ABI");
+static_assert(offsetof(ecuio_signal_def_t, name) == 40, "def name offset is ABI");
+static_assert(offsetof(ecuio_signal_def_t, flags) == 92, "def flags offset is ABI");
+static_assert(offsetof(ecuio_signal_def_t, reserved) == 96, "def reserved offset is ABI");
+#elif defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
+_Static_assert(sizeof(ecuio_signal_def_t) == 120, "ecuio_signal_def_t size is ABI");
+_Static_assert(offsetof(ecuio_signal_def_t, kind) == 16, "def kind offset is ABI");
+_Static_assert(offsetof(ecuio_signal_def_t, start_byte) == 18, "def start_byte offset is ABI");
+_Static_assert(offsetof(ecuio_signal_def_t, scale) == 24, "def scale offset is ABI");
+_Static_assert(offsetof(ecuio_signal_def_t, name) == 40, "def name offset is ABI");
+_Static_assert(offsetof(ecuio_signal_def_t, flags) == 92, "def flags offset is ABI");
+_Static_assert(offsetof(ecuio_signal_def_t, reserved) == 96, "def reserved offset is ABI");
+#endif
 
 /* ADR-0013 §4: profile-declared channels. rx_id is the
  * flow-control filter target (receive); tx_id is the request
@@ -74,16 +98,20 @@ typedef struct ecuio_channel_decl {
     uint32_t tx_id;   /* request destination */
 } ecuio_channel_decl_t;
 
+/* The set layout this core reads. ecuio_validate_signal_set refuses
+ * any other layout_version; the next incompatible layout bumps it. */
+#define ECUIO_SIGNAL_SET_LAYOUT 3u
+
+/* Fill a set member by member from a zeroed struct, never
+ * positionally: reserved0 sits between channel_count and channels. */
 typedef struct ecuio_signal_set {
-    uint32_t version;
+    uint32_t layout_version;      /* ECUIO_SIGNAL_SET_LAYOUT; the first member, always */
     uint32_t count;
     const ecuio_signal_def_t* defs;
-    /* Bounded channel list. 0/null = none declared. Aggregate
-     * initializers with three members still compile (remaining
-     * members value-initialize), but update them explicitly when
-     * touched — see test_obd2.cpp. */
-    uint32_t channel_count;
+    uint32_t channel_count;       /* 0 with NULL channels: none declared */
+    uint32_t reserved0;           /* zero */
     const ecuio_channel_decl_t* channels;
+    uint32_t reserved[4];         /* zero */
 } ecuio_signal_set_t;
 
 /* ecuio_decode_signal return codes. Values are append-only. */
@@ -91,15 +119,17 @@ typedef struct ecuio_signal_set {
 #define ECUIO_DECODE_ERR_NULL           1  /* a NULL argument */
 #define ECUIO_DECODE_ERR_PAST_PAYLOAD   2  /* the field or the mux key
                                               ends past payload_len */
-#define ECUIO_DECODE_ERR_BAD_PARAMS     3  /* bit parameters or mux
-                                              length out of range */
-#define ECUIO_DECODE_ERR_UNSUPPORTED    4  /* a type with no decoder, or a
-                                              FLOAT32 not 32 bits at bit 0 */
+#define ECUIO_DECODE_ERR_BAD_PARAMS     3  /* bit parameters (a big-endian
+                                              field not whole bytes, too)
+                                              or mux length out of range */
+#define ECUIO_DECODE_ERR_UNSUPPORTED    4  /* a kind or byte order with no
+                                              decoder, or a FLOAT not 32
+                                              bits at bit 0 */
 #define ECUIO_DECODE_ERR_MUX_MISMATCH   5  /* the payload's mux key differs */
 
 /* Extract one signal from a payload, scale and offset applied. Checks
- * the type before the bit parameters, then the bounds, then the mux
- * key. *out_value is written only on ECUIO_DECODE_OK. */
+ * the kind and byte order before the bit parameters, then the bounds,
+ * then the mux key. *out_value is written only on ECUIO_DECODE_OK. */
 int ecuio_decode_signal(const ecuio_signal_def_t* signal,
                         const uint8_t* frame_payload,
                         uint16_t payload_len,
@@ -112,11 +142,9 @@ int ecuio_decode_signal(const ecuio_signal_def_t* signal,
 #define ECUIO_VALIDATE_ERR_NULL               1  /* a NULL def or set, or
                                                     count > 0 with NULL
                                                     defs */
-#define ECUIO_VALIDATE_ERR_NUM_BYTES          2  /* num_bytes not 1..4 */
-#define ECUIO_VALIDATE_ERR_BIT_LENGTH         3  /* 0, or over 8 * num_bytes */
+/* 2 and 5 are retired, and never reused. */
+#define ECUIO_VALIDATE_ERR_BIT_LENGTH         3  /* 0, or over 32 */
 #define ECUIO_VALIDATE_ERR_BIT_OFFSET         4  /* over 7 */
-#define ECUIO_VALIDATE_ERR_BIT_SPAN           5  /* offset + length over
-                                                    8 * num_bytes */
 #define ECUIO_VALIDATE_ERR_NAME               6  /* name not terminated
                                                     inside its buffer */
 #define ECUIO_VALIDATE_ERR_UNIT               7  /* unit not terminated */
@@ -127,14 +155,14 @@ int ecuio_decode_signal(const ecuio_signal_def_t* signal,
 #define ECUIO_VALIDATE_ERR_MUX_KEY           11  /* key wider than its
                                                     length */
 #define ECUIO_VALIDATE_ERR_BIG_ENDIAN        12  /* big-endian field not
-                                                    byte-aligned */
-#define ECUIO_VALIDATE_ERR_TYPE              13  /* a type the decoder
-                                                    can't decode: STRING,
-                                                    an unknown value, or
-                                                    the MANUF range */
-#define ECUIO_VALIDATE_ERR_FLOAT32           14  /* FLOAT32 not 4 bytes,
-                                                    32 bits at bit 0,
-                                                    little-endian */
+                                                    whole bytes */
+#define ECUIO_VALIDATE_ERR_KIND              13  /* TEXT or an unknown
+                                                    kind */
+#define ECUIO_VALIDATE_ERR_FLOAT32           14  /* a FLOAT not 32 bits
+                                                    at bit 0 */
+#define ECUIO_VALIDATE_ERR_RESERVED          15  /* a reserved byte, or
+                                                    flags, not zero */
+#define ECUIO_VALIDATE_ERR_BYTE_ORDER        16  /* an unknown byte_order */
 #define ECUIO_VALIDATE_ERR_CHANNELS_NULL    (-10)  /* channel_count > 0 with
                                                       NULL channels */
 #define ECUIO_VALIDATE_ERR_CHANNEL_COUNT    (-11)  /* over ECUIO_MAX_CHANNELS */
@@ -142,9 +170,14 @@ int ecuio_decode_signal(const ecuio_signal_def_t* signal,
                                                       0x1FFFFFFF */
 #define ECUIO_VALIDATE_ERR_DUPLICATE_RX     (-13)  /* two channels share an rx */
 #define ECUIO_VALIDATE_ERR_DUPLICATE_ID     (-14)  /* two defs share an id */
+#define ECUIO_VALIDATE_ERR_LAYOUT           (-15)  /* layout_version isn't
+                                                      ECUIO_SIGNAL_SET_LAYOUT */
+#define ECUIO_VALIDATE_ERR_SET_RESERVED     (-16)  /* a reserved field of
+                                                      the set not zero */
 
 /* Structural check of one def: accepts exactly the defs
- * ecuio_decode_signal can decode. The type is checked first. */
+ * ecuio_decode_signal can decode, with every reserved byte and flags
+ * zero. The kind is checked first, then the byte order. */
 int ecuio_validate_signal(const ecuio_signal_def_t* signal);
 
 /* Frame gate, called BEFORE ecuio_decode_signal (the bridge's decode
@@ -159,8 +192,9 @@ int ecuio_def_applies_to_frame(const ecuio_signal_def_t* signal,
 const ecuio_signal_set_t* ecuio_mock_signal_set(void);
 const ecuio_signal_set_t* ecuio_obd2_signal_set(void); /* ADR-0013 obd2 profile */
 
-/* Every def (ecuio_validate_signal; the first failing def's code),
- * then the set: unique def ids, then the channel declarations. A set
+/* The layout version, before any other member is read; the set's
+ * reserved fields; every def (ecuio_validate_signal; the first failing
+ * def's code); unique def ids; then the channel declarations. A set
  * with count 0 may leave defs NULL. Returns ECUIO_VALIDATE_OK or a
  * ECUIO_VALIDATE_ERR_* code. */
 int ecuio_validate_signal_set(const ecuio_signal_set_t* set);

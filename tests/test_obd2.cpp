@@ -76,25 +76,33 @@ TEST(Obd2SetTest, DeclaresSingleCanChannel) {
 TEST(Obd2SetTest, RejectsDuplicateAndIllegalChannelDecls) {
     ecuio_signal_def_t defs[1] = {};
     defs[0].id = 1;
-    defs[0].type = ECUIO_SIGNAL_TYPE_UINT8;
+    defs[0].kind = ECUIO_VALUE_UINT;
     defs[0].start_byte = 2;
-    defs[0].num_bytes = 1;
     defs[0].bit_length = 8;
     defs[0].mux_offset = 0;
     defs[0].mux_length = 2;
     defs[0].mux_key = 0x4104u;
     defs[0].message_id = 0x7E8u;
+    auto set_with = [&defs](const ecuio_channel_decl_t* channels, uint32_t n) {
+        ecuio_signal_set_t s = {};
+        s.layout_version = ECUIO_SIGNAL_SET_LAYOUT;
+        s.count = 1u;
+        s.defs = defs;
+        s.channel_count = n;
+        s.channels = channels;
+        return s;
+    };
 
     const ecuio_channel_decl_t dup[] = { {0x7E8u, 0x7E0u}, {0x7E8u, 0x7E2u} };
-    const ecuio_signal_set_t s_dup = { 2u, 1u, defs, 2u, dup };
+    const ecuio_signal_set_t s_dup = set_with(dup, 2u);
     EXPECT_EQ(ecuio_validate_signal_set(&s_dup), ECUIO_VALIDATE_ERR_DUPLICATE_RX);
 
     const ecuio_channel_decl_t zero_rx[] = { {0u, 0x7E0u} };
-    const ecuio_signal_set_t s_zero = { 2u, 1u, defs, 1u, zero_rx };
+    const ecuio_signal_set_t s_zero = set_with(zero_rx, 1u);
     EXPECT_EQ(ecuio_validate_signal_set(&s_zero), ECUIO_VALIDATE_ERR_CHANNEL_ID);
 
     const ecuio_channel_decl_t legal[] = { {0x7E8u, 0x7E0u} };
-    const ecuio_signal_set_t s_ok = { 2u, 1u, defs, 1u, legal };
+    const ecuio_signal_set_t s_ok = set_with(legal, 1u);
     EXPECT_EQ(ecuio_validate_signal_set(&s_ok), ECUIO_VALIDATE_OK);
 }
 
@@ -284,9 +292,8 @@ TEST(PidSchedulerTest, DedupesSharedPidAndCapsCapacity) {
     ecuio_signal_def_t defs[18] = {};
     for (int i = 0; i < 18; ++i) {
         defs[i].id = static_cast<uint16_t>(100 + i);
-        defs[i].type = ECUIO_SIGNAL_TYPE_UINT8;
+        defs[i].kind = ECUIO_VALUE_UINT;
         defs[i].start_byte = 3;
-        defs[i].num_bytes = 1;
         defs[i].bit_length = 8;
         defs[i].mux_offset = 0;
         defs[i].mux_length = 2;
@@ -294,7 +301,10 @@ TEST(PidSchedulerTest, DedupesSharedPidAndCapsCapacity) {
             ((i == 1) ? 0x0Cu : static_cast<uint32_t>(i + 1));
         defs[i].message_id = ECUIO_OBD2_ECU_ARB_ID;
     }
-    const ecuio_signal_set_t set = {1u, 18u, defs};
+    ecuio_signal_set_t set = {};
+    set.layout_version = ECUIO_SIGNAL_SET_LAYOUT;
+    set.count = 18u;
+    set.defs = defs;
     ecuio_pid_scheduler s;
     ASSERT_TRUE(ecuio_sched_from_set(&s, &set));
     EXPECT_EQ(s.count, ECUIO_SCHED_MAX_PIDS);    /* 18 defs -> 16 PIDs */

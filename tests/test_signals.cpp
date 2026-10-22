@@ -1,8 +1,10 @@
 #include <gtest/gtest.h>
 #include <ecuio/signals.h>
 #include <ecuio/signal_sets.h>
+#include <cstddef>
 #include <cstring>
 #include <cmath>
+#include <utility>
 
 class SignalDecodeTest : public ::testing::Test {
 protected:
@@ -14,9 +16,8 @@ TEST_F(SignalDecodeTest, ValidUint8Decode) {
     ecuio_signal_def_t signal = {};
     signal.id = 1001;
     strncpy(signal.name, "Engine_RPM", sizeof(signal.name));
-    signal.type = ECUIO_SIGNAL_TYPE_UINT16;
+    signal.kind = ECUIO_VALUE_UINT;
     signal.start_byte = 0;
-    signal.num_bytes = 2;
     signal.bit_offset = 0;
     signal.bit_length = 16;
     signal.scale = 0.1;
@@ -37,9 +38,8 @@ TEST_F(SignalDecodeTest, ValidInt8WithSignExtension) {
     ecuio_signal_def_t signal = {};
     signal.id = 2001;
     strncpy(signal.name, "Coolant_Temp", sizeof(signal.name));
-    signal.type = ECUIO_SIGNAL_TYPE_INT8;
+    signal.kind = ECUIO_VALUE_INT;
     signal.start_byte = 1;
-    signal.num_bytes = 1;
     signal.bit_offset = 0;
     signal.bit_length = 8;
     signal.scale = 1.0;
@@ -69,7 +69,6 @@ TEST_F(SignalDecodeTest, NullPointerReturnsError) {
 TEST_F(SignalDecodeTest, BoundsViolationReturnsError) {
     ecuio_signal_def_t signal = {};
     signal.start_byte = 10; /* Beyond frame length */
-    signal.num_bytes = 2;
     signal.bit_offset = 0;
     signal.bit_length = 16;
     
@@ -81,29 +80,35 @@ TEST_F(SignalDecodeTest, BoundsViolationReturnsError) {
 
 TEST_F(SignalDecodeTest, InvalidBitLengthReturnsError) {
     ecuio_signal_def_t signal = {};
-    signal.type = ECUIO_SIGNAL_TYPE_UINT8;
+    signal.kind = ECUIO_VALUE_UINT;
     signal.bit_length = 0; /* Invalid */
-    
+
     uint8_t frame[8] = {0x00};
     double value = 0.0;
-    
+
     EXPECT_EQ(ecuio_decode_signal(&signal, frame, 8, &value), 3);
 }
 
-TEST_F(SignalDecodeTest, UnsupportedTypeReturnsError) {
-    ecuio_signal_def_t signal = {};
-    signal.type = ECUIO_SIGNAL_TYPE_STRING; /* Not implemented yet */
-    
+TEST_F(SignalDecodeTest, UnsupportedKindOrByteOrderReturnsError) {
+    /* Both are checked before the bit parameters: bit_length 0 here
+     * would otherwise report 3. */
     uint8_t frame[8] = {0x00};
     double value = 0.0;
-    
-    EXPECT_EQ(ecuio_decode_signal(&signal, frame, 8, &value), 4);
+    for (int kind : {static_cast<int>(ECUIO_VALUE_TEXT), 4, 255}) {
+        ecuio_signal_def_t signal = {};
+        signal.kind = static_cast<uint8_t>(kind);
+        EXPECT_EQ(ecuio_decode_signal(&signal, frame, 8, &value), 4) << "kind " << kind;
+    }
+    for (int order : {2, 255}) {
+        ecuio_signal_def_t signal = {};
+        signal.byte_order = static_cast<uint8_t>(order);
+        EXPECT_EQ(ecuio_decode_signal(&signal, frame, 8, &value), 4) << "order " << order;
+    }
 }
 
 TEST_F(SignalDecodeTest, ValidateSignal_Success) {
     ecuio_signal_def_t signal = {};
-    signal.type = ECUIO_SIGNAL_TYPE_UINT16;
-    signal.num_bytes = 2;
+    signal.kind = ECUIO_VALUE_UINT;
     signal.bit_length = 16;
     signal.bit_offset = 0;
     strncpy(signal.name, "Test_Signal", sizeof(signal.name));
@@ -113,18 +118,21 @@ TEST_F(SignalDecodeTest, ValidateSignal_Success) {
     EXPECT_EQ(ecuio_validate_signal(&signal), ECUIO_VALIDATE_OK);
 }
 
-TEST_F(SignalDecodeTest, ValidateSignal_InvalidNumBytes) {
+TEST_F(SignalDecodeTest, ValidateSignal_InvalidBitLength) {
+    /* Width lives in bit_length alone: 1..32. */
     ecuio_signal_def_t signal = {};
-    signal.type = ECUIO_SIGNAL_TYPE_UINT16;
-    signal.num_bytes = 0; /* Invalid */
-    
-    EXPECT_EQ(ecuio_validate_signal(&signal), ECUIO_VALIDATE_ERR_NUM_BYTES);
+    signal.kind = ECUIO_VALUE_UINT;
+    signal.bit_length = 0;
+    EXPECT_EQ(ecuio_validate_signal(&signal), ECUIO_VALIDATE_ERR_BIT_LENGTH);
+    signal.bit_length = 33;
+    EXPECT_EQ(ecuio_validate_signal(&signal), ECUIO_VALIDATE_ERR_BIT_LENGTH);
+    signal.bit_length = 32;
+    EXPECT_EQ(ecuio_validate_signal(&signal), ECUIO_VALIDATE_OK);
 }
 
 TEST_F(SignalDecodeTest, ValidateSignal_UnterminatedName) {
     ecuio_signal_def_t signal = {};
-    signal.type = ECUIO_SIGNAL_TYPE_UINT8;
-    signal.num_bytes = 1;
+    signal.kind = ECUIO_VALUE_UINT;
     signal.bit_length = 8;
     /* Fill ALL 32 bytes with non-null chars — no room for terminator */
     /* Intentional: tests validator's handling of unterminated strings */
@@ -136,9 +144,8 @@ TEST_F(SignalDecodeTest, ValidateSignal_UnterminatedName) {
 
 TEST_F(SignalDecodeTest, ScaleOffsetCalculation) {
     ecuio_signal_def_t signal = {};
-    signal.type = ECUIO_SIGNAL_TYPE_UINT16;
+    signal.kind = ECUIO_VALUE_UINT;
     signal.start_byte = 0;
-    signal.num_bytes = 2;
     signal.bit_offset = 0;
     signal.bit_length = 16;
     signal.scale = 0.01;
@@ -235,7 +242,9 @@ TEST_F(SignalDecodeTest, DecodeHonorsActualPayloadLength) {
     for (uint32_t i = 0; i < set->count; ++i) {
         const ecuio_signal_def_t& def = set->defs[i];
         double val = -999.0;
-        const bool inRange = (def.start_byte + def.num_bytes <= 4);
+        const uint32_t end_bit =
+            def.start_byte * 8u + def.bit_offset + def.bit_length;
+        const bool inRange = end_bit <= 4u * 8u;
 
         if (inRange) {
             EXPECT_EQ(ecuio_decode_signal(&def, buf, 4, &val), 0)
@@ -259,9 +268,8 @@ TEST_F(SignalDecodeTest, DecodeRejectsNonMultipleOfEightLengths) {
     ecuio_signal_def_t signal = {};
     signal.id = 3001;
     strncpy(signal.name, "Boundary", sizeof(signal.name));
-    signal.type = ECUIO_SIGNAL_TYPE_UINT8;
+    signal.kind = ECUIO_VALUE_UINT;
     signal.start_byte = 4;
-    signal.num_bytes = 1;
     signal.bit_offset = 0;
     signal.bit_length = 8;
     signal.scale = 1.0;
@@ -281,8 +289,7 @@ TEST_F(SignalDecodeTest, Uint32DecodesExactly)
     /* 2^24 + 1 is the first integer a float can't hold: a float result
      * reads it as 16,777,216. */
     ecuio_signal_def_t signal = {};
-    signal.type = ECUIO_SIGNAL_TYPE_UINT32;
-    signal.num_bytes = 4;
+    signal.kind = ECUIO_VALUE_UINT;
     signal.bit_length = 32;
     signal.scale = 1.0;
 
@@ -297,9 +304,8 @@ TEST_F(SignalDecodeTest, PayloadLengthPastByte255IsNotNarrowed)
     /* 300 narrowed to 8 bits is 44, which would put byte 250 past the
      * payload. */
     ecuio_signal_def_t signal = {};
-    signal.type = ECUIO_SIGNAL_TYPE_UINT8;
+    signal.kind = ECUIO_VALUE_UINT;
     signal.start_byte = 250;
-    signal.num_bytes = 1;
     signal.bit_length = 8;
     signal.scale = 1.0;
 
@@ -310,22 +316,138 @@ TEST_F(SignalDecodeTest, PayloadLengthPastByte255IsNotNarrowed)
     EXPECT_EQ(value, 42.0);
 }
 
+TEST_F(SignalDecodeTest, StartBytePastByte255Reaches)
+{
+    /* A reassembled message can run past byte 255, and start_byte is
+     * 16 bits. 300 in 8 bits is 44, which holds 0xEE here. */
+    uint8_t payload[320] = {};
+    payload[44] = 0xEE;
+    payload[45] = 0xEE;
+    payload[300] = 0x12;
+    payload[301] = 0x34;
+    ecuio_signal_def_t signal = {};
+    signal.kind = ECUIO_VALUE_UINT;
+    signal.start_byte = 300;
+    signal.bit_length = 16;
+    signal.scale = 1.0;
+    double value = 0.0;
+
+    ASSERT_EQ(ecuio_decode_signal(&signal, payload, 320, &value), 0);
+    EXPECT_EQ(value, 13330.0);   /* 0x3412 */
+    signal.byte_order = ECUIO_BYTE_ORDER_BE;
+    ASSERT_EQ(ecuio_decode_signal(&signal, payload, 320, &value), 0);
+    EXPECT_EQ(value, 4660.0);    /* 0x1234 */
+    EXPECT_EQ(ecuio_decode_signal(&signal, payload, 301, &value), 2);
+}
+
+TEST_F(SignalDecodeTest, FloatDecodesInBothByteOrders)
+{
+    /* pi as binary32 is 0x40490FDB. */
+    const uint32_t bits = 0x40490FDBu;
+    float pi = 0.0f;
+    std::memcpy(&pi, &bits, sizeof pi);
+
+    ecuio_signal_def_t signal = {};
+    signal.kind = ECUIO_VALUE_FLOAT;
+    signal.bit_length = 32;
+    signal.scale = 1.0;
+    double value = 0.0;
+
+    const uint8_t le[4] = {0xDB, 0x0F, 0x49, 0x40};
+    ASSERT_EQ(ecuio_decode_signal(&signal, le, 4, &value), 0);
+    EXPECT_EQ(value, static_cast<double>(pi));
+    EXPECT_NEAR(value, 3.14159274, 1e-8);
+
+    const uint8_t be[4] = {0x40, 0x49, 0x0F, 0xDB};
+    signal.byte_order = ECUIO_BYTE_ORDER_BE;
+    value = 0.0;
+    ASSERT_EQ(ecuio_decode_signal(&signal, be, 4, &value), 0);
+    EXPECT_EQ(value, static_cast<double>(pi));
+}
+
+TEST_F(SignalDecodeTest, BigEndianIntSignExtends)
+{
+    ecuio_signal_def_t signal = {};
+    signal.kind = ECUIO_VALUE_INT;
+    signal.byte_order = ECUIO_BYTE_ORDER_BE;
+    signal.start_byte = 1;
+    signal.bit_length = 16;
+    signal.scale = 0.5;
+
+    const uint8_t frame[3] = {0x00, 0xFF, 0x38};   /* 0xFF38 = -200 */
+    double value = 0.0;
+    ASSERT_EQ(ecuio_decode_signal(&signal, frame, 3, &value), 0);
+    EXPECT_EQ(value, -100.0);
+}
+
+TEST_F(SignalDecodeTest, MuxKeyReadsFirstByteMostSignificantInEitherOrder)
+{
+    /* The key is a byte sequence, so byte_order doesn't apply to it:
+     * 0x4105 matches payload bytes 41 05 for a little-endian field too. */
+    ecuio_signal_def_t signal = {};
+    signal.kind = ECUIO_VALUE_UINT;
+    signal.start_byte = 2;
+    signal.bit_length = 8;
+    signal.scale = 1.0;
+    signal.message_id = 0x7E8u;
+    signal.mux_offset = 0;
+    signal.mux_length = 2;
+    signal.mux_key = 0x4105u;
+
+    ecuio_frame_t f = {};
+    f.arbitration_id = 0x7E8u;
+    f.data_length = 3;
+    f.data[0] = 0x41;
+    f.data[1] = 0x05;
+    f.data[2] = 0x7B;
+    for (uint8_t order : {static_cast<uint8_t>(ECUIO_BYTE_ORDER_LE),
+                          static_cast<uint8_t>(ECUIO_BYTE_ORDER_BE)}) {
+        signal.byte_order = order;
+        double value = 0.0;
+        EXPECT_EQ(ecuio_def_applies_to_frame(&signal, &f), 1) << int(order);
+        EXPECT_EQ(ecuio_decode_signal(&signal, f.data, f.data_length, &value), 0) << int(order);
+        EXPECT_EQ(value, 123.0) << int(order);
+    }
+    std::swap(f.data[0], f.data[1]);
+    double value = 0.0;
+    EXPECT_EQ(ecuio_def_applies_to_frame(&signal, &f), 0);
+    EXPECT_EQ(ecuio_decode_signal(&signal, f.data, f.data_length, &value), 5);
+}
+
 TEST(SignalsTest, SignalDefLayoutIsPinned)
 {
-    /* ABI pin. Hand-computed for the documented layout:
-     *   id(2)=0, name[32]=2..33, pad(2), type(enum,4)=36..39,
-     *   start_byte/num_bytes/bit_offset/bit_length=40..43, pad(4),
-     *   scale(8)=48, offset(8)=56, unit[16]=64..79,
-     *   decimal_places=80+pad(3), flags(4)=84, message_id(4)=88,
-     *   mux_offset/mux_length/mux_reserved[2]=92..95, mux_key(4)=96,
-     *   pad(4)  =>  sizeof == 104.
-     * If this fires, a field was added/removed/resized — bump version.
-     * Trust the compiler over hand arithmetic here: the enum's width
-     * is easy to miscount. */
-    ASSERT_EQ(sizeof(ecuio_signal_def_t), 104u);
-    ASSERT_EQ(offsetof(ecuio_signal_def_t, scale), 48u);
-    ASSERT_EQ(offsetof(ecuio_signal_def_t, flags), 84u);
-    ASSERT_EQ(offsetof(ecuio_signal_def_t, message_id), 88u);
+    /* ABI pin, matching the static asserts in signals.h. No padding:
+     *   id=0, reserved0=2, message_id=4, mux_offset=8, mux_length=9,
+     *   mux_reserved=10, mux_key=12, kind=16, byte_order=17,
+     *   start_byte=18, bit_offset=20, bit_length=21,
+     *   decode_reserved=22, scale=24, offset=32, name=40, unit=72,
+     *   decimal_places=88, display_reserved=89, flags=92,
+     *   reserved=96  =>  sizeof == 120.
+     * If this fires, a field moved: bump ECUIO_SIGNAL_SET_LAYOUT. */
+    EXPECT_EQ(sizeof(ecuio_signal_def_t), 120u);
+    EXPECT_EQ(offsetof(ecuio_signal_def_t, reserved0), 2u);
+    EXPECT_EQ(offsetof(ecuio_signal_def_t, message_id), 4u);
+    EXPECT_EQ(offsetof(ecuio_signal_def_t, mux_offset), 8u);
+    EXPECT_EQ(offsetof(ecuio_signal_def_t, mux_key), 12u);
+    EXPECT_EQ(offsetof(ecuio_signal_def_t, kind), 16u);
+    EXPECT_EQ(offsetof(ecuio_signal_def_t, byte_order), 17u);
+    EXPECT_EQ(offsetof(ecuio_signal_def_t, start_byte), 18u);
+    EXPECT_EQ(offsetof(ecuio_signal_def_t, bit_offset), 20u);
+    EXPECT_EQ(offsetof(ecuio_signal_def_t, decode_reserved), 22u);
+    EXPECT_EQ(offsetof(ecuio_signal_def_t, scale), 24u);
+    EXPECT_EQ(offsetof(ecuio_signal_def_t, offset), 32u);
+    EXPECT_EQ(offsetof(ecuio_signal_def_t, name), 40u);
+    EXPECT_EQ(offsetof(ecuio_signal_def_t, unit), 72u);
+    EXPECT_EQ(offsetof(ecuio_signal_def_t, decimal_places), 88u);
+    EXPECT_EQ(offsetof(ecuio_signal_def_t, display_reserved), 89u);
+    EXPECT_EQ(offsetof(ecuio_signal_def_t, flags), 92u);
+    EXPECT_EQ(offsetof(ecuio_signal_def_t, reserved), 96u);
+
+    /* Core reads layout_version before it knows anything else about a
+     * set. 3, so a set that carries an earlier layout's 1 or 2 there
+     * is refused. */
+    EXPECT_EQ(offsetof(ecuio_signal_set_t, layout_version), 0u);
+    EXPECT_EQ(ECUIO_SIGNAL_SET_LAYOUT, 3u);
 }
 
 TEST(SignalsTest, MockAndObd2ShareDisplayNamesAndUnits)
@@ -378,15 +500,16 @@ TEST(SignalsTest, MockSignalsDeclareTelemetryMessageId)
 
 namespace {
 
-/* A def that fits the validator's numeric rules at 4 bytes: only the
- * type and the field shape vary in the tests below. */
-ecuio_signal_def_t four_byte_def(ecuio_signal_type_t type)
+/* A valid 32-bit field at byte 0: only the kind, the byte order and
+ * the field shape vary in the tests below. Takes ints so a test can
+ * pass values no enum names. */
+ecuio_signal_def_t four_byte_def(int kind, int byte_order = ECUIO_BYTE_ORDER_LE)
 {
     ecuio_signal_def_t d = {};
     d.id = 1;
-    d.type = type;
+    d.kind = static_cast<uint8_t>(kind);
+    d.byte_order = static_cast<uint8_t>(byte_order);
     d.start_byte = 0;
-    d.num_bytes = 4;
     d.bit_offset = 0;
     d.bit_length = 32;
     d.scale = 1.0;
@@ -395,47 +518,50 @@ ecuio_signal_def_t four_byte_def(ecuio_signal_type_t type)
 
 } // namespace
 
-TEST(SignalsTest, ValidatorRejectsTypesWithNoDecoder)
+TEST(SignalsTest, ValidatorRejectsKindsWithNoDecoder)
 {
-    /* STRING, values past FLOAT32 and the manufacturer range have no
-     * decoder, so a def of one would register and never decode. */
-    /* Values stay inside the enum's range: a cast outside it is
-     * undefined in C++, and the sanitizer job would flag it. */
-    for (int t : {static_cast<int>(ECUIO_SIGNAL_TYPE_STRING), 8, 255,
-                  static_cast<int>(ECUIO_SIGNAL_TYPE_MANUF_START), 300}) {
-        ecuio_signal_def_t d = four_byte_def(static_cast<ecuio_signal_type_t>(t));
-        EXPECT_EQ(ecuio_validate_signal(&d), ECUIO_VALIDATE_ERR_TYPE) << "type " << t;
+    /* TEXT and unknown kinds have no decoder, so a def of one would
+     * register and never decode. */
+    for (int k : {static_cast<int>(ECUIO_VALUE_TEXT), 4, 255}) {
+        ecuio_signal_def_t d = four_byte_def(k);
+        EXPECT_EQ(ecuio_validate_signal(&d), ECUIO_VALIDATE_ERR_KIND) << "kind " << k;
     }
-    /* The type is checked first, as in the decoder: a bad type with bad
-     * bit parameters reports the type. */
-    ecuio_signal_def_t d = four_byte_def(ECUIO_SIGNAL_TYPE_MANUF_START);
-    d.num_bytes = 0;
-    EXPECT_EQ(ecuio_validate_signal(&d), ECUIO_VALIDATE_ERR_TYPE);
+    /* The kind is checked first, as in the decoder: a bad kind with a
+     * bad byte order and bad bit parameters reports the kind. */
+    ecuio_signal_def_t d = four_byte_def(ECUIO_VALUE_TEXT, 2);
+    d.bit_length = 0;
+    EXPECT_EQ(ecuio_validate_signal(&d), ECUIO_VALIDATE_ERR_KIND);
 }
 
-TEST(SignalsTest, ValidatorRequiresFloat32AsFourLittleEndianBytes)
+TEST(SignalsTest, ValidatorRejectsUnknownByteOrder)
 {
-    ecuio_signal_def_t d = four_byte_def(ECUIO_SIGNAL_TYPE_FLOAT32);
-    EXPECT_EQ(ecuio_validate_signal(&d), ECUIO_VALIDATE_OK);
+    for (int order : {2, 255}) {
+        ecuio_signal_def_t d = four_byte_def(ECUIO_VALUE_UINT, order);
+        EXPECT_EQ(ecuio_validate_signal(&d), ECUIO_VALIDATE_ERR_BYTE_ORDER) << "order " << order;
+        /* Before the bit parameters, as in the decoder. */
+        d.bit_length = 0;
+        EXPECT_EQ(ecuio_validate_signal(&d), ECUIO_VALIDATE_ERR_BYTE_ORDER) << "order " << order;
+    }
+}
 
-    d = four_byte_def(ECUIO_SIGNAL_TYPE_FLOAT32);
-    d.num_bytes = 2;
-    d.bit_length = 16;
-    EXPECT_EQ(ecuio_validate_signal(&d), ECUIO_VALIDATE_ERR_FLOAT32);
-
-    /* Byte-aligned, so the big-endian rule passes; the decoder would
-     * still read it little-endian. */
-    d = four_byte_def(ECUIO_SIGNAL_TYPE_FLOAT32);
-    d.flags = ECUIO_SIGNAL_FLAG_BIG_ENDIAN;
+TEST(SignalsTest, ValidatorRequiresFloatAs32BitsAtBitZero)
+{
+    for (int order : {static_cast<int>(ECUIO_BYTE_ORDER_LE),
+                      static_cast<int>(ECUIO_BYTE_ORDER_BE)}) {
+        ecuio_signal_def_t d = four_byte_def(ECUIO_VALUE_FLOAT, order);
+        EXPECT_EQ(ecuio_validate_signal(&d), ECUIO_VALIDATE_OK) << "order " << order;
+        d.bit_length = 16;
+        EXPECT_EQ(ecuio_validate_signal(&d), ECUIO_VALIDATE_ERR_FLOAT32) << "order " << order;
+    }
+    ecuio_signal_def_t d = four_byte_def(ECUIO_VALUE_FLOAT);
+    d.bit_offset = 1;
     EXPECT_EQ(ecuio_validate_signal(&d), ECUIO_VALIDATE_ERR_FLOAT32);
 }
 
 TEST(SignalsTest, ValidatorRequiresByteAlignedBigEndian)
 {
-    /* The big-endian extractor reads whole bytes, so it would misread
-     * these shapes rather than refuse them. */
-    ecuio_signal_def_t d = four_byte_def(ECUIO_SIGNAL_TYPE_UINT16);
-    d.flags = ECUIO_SIGNAL_FLAG_BIG_ENDIAN;
+    /* The big-endian extractor reads whole bytes. */
+    ecuio_signal_def_t d = four_byte_def(ECUIO_VALUE_UINT, ECUIO_BYTE_ORDER_BE);
     d.bit_length = 16;
     EXPECT_EQ(ecuio_validate_signal(&d), ECUIO_VALIDATE_OK);
     d.bit_length = 12;
@@ -445,42 +571,100 @@ TEST(SignalsTest, ValidatorRequiresByteAlignedBigEndian)
     EXPECT_EQ(ecuio_validate_signal(&d), ECUIO_VALIDATE_ERR_BIG_ENDIAN);
 }
 
+TEST(SignalsTest, ValidatorRefusesEveryNonzeroReservedByte)
+{
+    /* Each reserved byte, and flags, must be zero, so a later field
+     * can take the room and existing sets still load. */
+    struct Room { size_t offset; size_t size; const char* name; };
+#define ROOM(field) {offsetof(ecuio_signal_def_t, field), sizeof(ecuio_signal_def_t::field), #field}
+    const Room rooms[] = {
+        ROOM(reserved0), ROOM(mux_reserved), ROOM(decode_reserved),
+        ROOM(display_reserved), ROOM(flags), ROOM(reserved),
+    };
+#undef ROOM
+    const ecuio_signal_def_t good = four_byte_def(ECUIO_VALUE_UINT);
+    ASSERT_EQ(ecuio_validate_signal(&good), ECUIO_VALIDATE_OK);
+    size_t checked = 0;
+    for (const Room& room : rooms) {
+        for (size_t i = 0; i < room.size; ++i) {
+            ecuio_signal_def_t d = good;
+            reinterpret_cast<unsigned char*>(&d)[room.offset + i] = 0x01;
+            EXPECT_EQ(ecuio_validate_signal(&d), ECUIO_VALIDATE_ERR_RESERVED)
+                << room.name << " byte " << i << " (offset " << room.offset + i << ")";
+            ++checked;
+        }
+    }
+    /* Every byte that isn't a named value: 2 + 2 + 2 + 3 + 4 + 24. */
+    EXPECT_EQ(checked, 37u);
+}
+
 TEST(SignalsTest, ValidatorAcceptsExactlyWhatTheDecoderDecodes)
 {
-    /* The contract the validator exists for: over every type and a
-     * spread of little-endian field shapes, a def validates if and only
-     * if it decodes an in-bounds payload. Big-endian shapes the decoder
-     * would misread rather than refuse (misaligned fields, FLOAT32) are
-     * the validator's alone, pinned by the two tests above. */
+    /* The contract the validator exists for: over every kind, both byte
+     * orders and an unknown one, and a spread of field shapes, a def
+     * validates if and only if it decodes an in-bounds payload. */
     const uint8_t payload[8] = {0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08};
-    const int types[] = {0, 1, 2, 3, 4, 5, 6, 7, 8, 256};
-    const uint8_t lengths[] = {1, 7, 8, 16, 24, 32};
-    for (int t : types) {
-        for (uint8_t len : lengths) {
-            for (int off : {0, 1}) {
-                if (off + len > 32) {
-                    continue;   /* past the 4-byte field either way */
+    const int kinds[] = {0, 1, 2, 3, 4, 255};
+    const int orders[] = {0, 1, 2};
+    const uint8_t lengths[] = {0, 1, 7, 8, 12, 16, 24, 32, 33};
+    for (int k : kinds) {
+        for (int order : orders) {
+            for (uint8_t len : lengths) {
+                for (int off : {0, 1, 7, 8}) {
+                    ecuio_signal_def_t d = four_byte_def(k, order);
+                    d.bit_length = len;
+                    d.bit_offset = static_cast<uint8_t>(off);
+                    const bool valid = ecuio_validate_signal(&d) == ECUIO_VALIDATE_OK;
+                    double v = 0.0;
+                    const bool decodes =
+                        ecuio_decode_signal(&d, payload, sizeof payload, &v) == ECUIO_DECODE_OK;
+                    EXPECT_EQ(valid, decodes) << "kind " << k << " order " << order
+                                              << " len " << int(len) << " off " << off;
                 }
-                ecuio_signal_def_t d = four_byte_def(static_cast<ecuio_signal_type_t>(t));
-                d.bit_length = len;
-                d.bit_offset = static_cast<uint8_t>(off);
-                const bool valid = ecuio_validate_signal(&d) == ECUIO_VALIDATE_OK;
-                double v = 0.0;
-                const bool decodes =
-                    ecuio_decode_signal(&d, payload, sizeof payload, &v) == ECUIO_DECODE_OK;
-                EXPECT_EQ(valid, decodes) << "type " << t << " len " << int(len)
-                                          << " off " << int(off);
             }
         }
     }
 }
 
+TEST(SignalsTest, SetValidationChecksLayoutVersionFirst)
+{
+    /* A set built for another layout has its members elsewhere, so the
+     * version is read before anything else, even NULL defs or a bad
+     * def. */
+    ecuio_signal_def_t bad_def = four_byte_def(ECUIO_VALUE_UINT);
+    bad_def.bit_length = 0;
+    for (uint32_t version : {0u, 1u, 2u, 4u}) {
+        ecuio_signal_set_t set = {};
+        set.layout_version = version;
+        EXPECT_EQ(ecuio_validate_signal_set(&set), ECUIO_VALIDATE_ERR_LAYOUT) << version;
+        set.count = 1;
+        EXPECT_EQ(ecuio_validate_signal_set(&set), ECUIO_VALIDATE_ERR_LAYOUT) << version;
+        set.defs = &bad_def;
+        EXPECT_EQ(ecuio_validate_signal_set(&set), ECUIO_VALIDATE_ERR_LAYOUT) << version;
+    }
+}
+
+TEST(SignalsTest, SetValidationRefusesNonzeroReservedFields)
+{
+    ecuio_signal_set_t set = {};
+    set.layout_version = ECUIO_SIGNAL_SET_LAYOUT;
+    ASSERT_EQ(ecuio_validate_signal_set(&set), ECUIO_VALIDATE_OK);
+    set.reserved0 = 1;
+    EXPECT_EQ(ecuio_validate_signal_set(&set), ECUIO_VALIDATE_ERR_SET_RESERVED);
+    set.reserved0 = 0;
+    for (size_t i = 0; i < sizeof(set.reserved) / sizeof(set.reserved[0]); ++i) {
+        set.reserved[i] = 0x80000000u;
+        EXPECT_EQ(ecuio_validate_signal_set(&set), ECUIO_VALIDATE_ERR_SET_RESERVED) << i;
+        set.reserved[i] = 0;
+    }
+}
+
 TEST(SignalsTest, SetValidationRejectsDuplicateIds)
 {
-    ecuio_signal_def_t defs[2] = {four_byte_def(ECUIO_SIGNAL_TYPE_UINT32),
-                               four_byte_def(ECUIO_SIGNAL_TYPE_INT32)};
+    ecuio_signal_def_t defs[2] = {four_byte_def(ECUIO_VALUE_UINT),
+                               four_byte_def(ECUIO_VALUE_INT)};
     ecuio_signal_set_t set = {};
-    set.version = 1;
+    set.layout_version = ECUIO_SIGNAL_SET_LAYOUT;
     set.count = 2;
     set.defs = defs;
     EXPECT_EQ(ecuio_validate_signal_set(&set), ECUIO_VALIDATE_ERR_DUPLICATE_ID);
@@ -494,6 +678,7 @@ TEST(SignalsTest, SetValidationAcceptsAnEmptySet)
      * log-only profile). count > 0 with no defs stays an error. */
     static const ecuio_channel_decl_t kChan[] = {{0x7E8u, 0x7E0u}};
     ecuio_signal_set_t set = {};
+    set.layout_version = ECUIO_SIGNAL_SET_LAYOUT;
     EXPECT_EQ(ecuio_validate_signal_set(&set), ECUIO_VALIDATE_OK);
     set.channel_count = 1;
     set.channels = kChan;
@@ -507,7 +692,7 @@ TEST(SignalsTest, ApplyGateIsTruePredicate)
 {
     /* 1 when the def applies, 0 otherwise, including NULL arguments:
      * callers write if (ecuio_def_applies_to_frame(...)). */
-    ecuio_signal_def_t d = four_byte_def(ECUIO_SIGNAL_TYPE_UINT8);
+    ecuio_signal_def_t d = four_byte_def(ECUIO_VALUE_UINT);
     d.message_id = 0x123u;
     ecuio_frame_t f = {};
     f.arbitration_id = 0x123u;
