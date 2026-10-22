@@ -715,6 +715,68 @@ TEST(J2534SurrogateTest, SecondConcurrentSessionGetsItsOwnLog)
     }
 }
 
+namespace {
+std::wstring to_wide(const std::string& utf8)
+{
+    wchar_t buf[MAX_PATH + 64] = {};
+    MultiByteToWideChar(CP_UTF8, 0, utf8.c_str(), -1, buf, MAX_PATH + 64);
+    return buf;
+}
+
+std::string to_utf8(const std::wstring& wide)
+{
+    char buf[3 * (MAX_PATH + 64)] = {};
+    WideCharToMultiByte(CP_UTF8, 0, wide.c_str(), -1, buf, sizeof(buf),
+                        nullptr, nullptr);
+    return buf;
+}
+}  // namespace
+
+/* Each session takes the fixed log name, and the log it replaces is
+ * kept as ecuio-surrogate.<last write>.log, so a run of connects keeps
+ * every session's log. Skips when something else (a running app, a
+ * parallel test) holds the fixed name: sessions then get per-spawn
+ * names and nothing is replaced. */
+TEST(J2534SurrogateTest, EarlierSessionLogIsKept)
+{
+    const std::string fixed_name = "ecuio-surrogate.log";
+    ecuio_j2534_sur_handle_t* a = nullptr;
+    ASSERT_EQ(ecuio_j2534_sur_open(fake_dll_path(), &a), ECUIO_OK);
+    const std::string path_a = ecuio_j2534_sur_log_path(a);
+    ASSERT_EQ(ecuio_j2534_sur_close(a), ECUIO_OK);
+    if (path_a.size() < fixed_name.size() ||
+        path_a.compare(path_a.size() - fixed_name.size(), fixed_name.size(),
+                       fixed_name) != 0) {
+        DeleteFileW(to_wide(path_a).c_str());   /* a per-spawn name: litter */
+        GTEST_SKIP() << "the fixed log name is held elsewhere";
+    }
+    const std::string log_a = read_session_log(path_a);
+    ASSERT_NE(log_a.find("open: child pid"), std::string::npos) << log_a;
+
+    ecuio_j2534_sur_handle_t* b = nullptr;
+    ASSERT_EQ(ecuio_j2534_sur_open(fake_dll_path(), &b), ECUIO_OK);
+    const std::string path_b = ecuio_j2534_sur_log_path(b);
+    ASSERT_EQ(ecuio_j2534_sur_close(b), ECUIO_OK);
+    EXPECT_EQ(path_b, path_a) << "the second session should take the fixed name";
+    EXPECT_NE(read_session_log(path_b), log_a);
+
+    /* The first session's log, byte for byte, under a kept name. */
+    const std::wstring dir = to_wide(path_a.substr(0, path_a.size() - fixed_name.size()));
+    WIN32_FIND_DATAW fd;
+    HANDLE find = FindFirstFileW((dir + L"ecuio-surrogate.*.log").c_str(), &fd);
+    ASSERT_NE(find, INVALID_HANDLE_VALUE) << "no kept log";
+    std::wstring kept;
+    do {
+        if (read_session_log(to_utf8(dir + fd.cFileName)) == log_a) {
+            kept = fd.cFileName;
+        }
+    } while (kept.empty() && FindNextFileW(find, &fd));
+    FindClose(find);
+    ASSERT_FALSE(kept.empty()) << "the first session's log wasn't kept";
+    /* "ecuio-surrogate." + "YYYYMMDD-HHMMSS-mmm" + ".log" */
+    EXPECT_EQ(kept.size(), 16u + 19u + 4u) << to_utf8(kept);
+}
+
 /* Per J2534-1, a read asking for more messages than arrived, with a
  * nonzero timeout, returns ERR_TIMEOUT TOGETHER WITH those messages.
  * The spec-mode fake emulates exactly that; the client must deliver

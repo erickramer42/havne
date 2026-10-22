@@ -105,9 +105,83 @@ void sur_log(const ecuio_j2534_sur_handle_t* h, const char* fmt, ...)
 
 #define SUR_LOG(h, ...) sur_log((h), __VA_ARGS__)
 
+/* Earlier sessions' logs kept beside the current one. A suite run
+ * spawns dozens of sessions, so this bounds TEMP, not history. */
+constexpr int kKeptSessionLogs = 50;
+
+/* "ecuio-surrogate.YYYYMMDD-HHMMSS-mmm.log", the name a log is kept
+ * under. Checked exactly, so pruning deletes nothing else. */
+bool is_kept_log_name(const wchar_t* name)
+{
+    static const wchar_t kShape[] = L"ecuio-surrogate.########-######-###.log";
+    size_t i = 0;
+    for (; kShape[i] != L'\0'; ++i) {
+        const wchar_t c = name[i];
+        if (kShape[i] == L'#' ? (c < L'0' || c > L'9') : (c != kShape[i])) {
+            return false;
+        }
+    }
+    return name[i] == L'\0';
+}
+
+/* Deletes the oldest kept logs past kKeptSessionLogs. The stamp sorts
+ * by time, so the oldest is the smallest name. */
+void prune_kept_logs(const wchar_t* prefix)
+{
+    wchar_t pattern[MAX_PATH + 64];
+    swprintf(pattern, _countof(pattern), L"%lsecuio-surrogate.*.log", prefix);
+    for (;;) {
+        WIN32_FIND_DATAW fd;
+        HANDLE find = FindFirstFileW(pattern, &fd);
+        if (find == INVALID_HANDLE_VALUE) return;
+        int count = 0;
+        wchar_t oldest[MAX_PATH] = {};
+        do {
+            if (!is_kept_log_name(fd.cFileName)) continue;
+            ++count;
+            if (oldest[0] == L'\0' || wcscmp(fd.cFileName, oldest) < 0) {
+                wcscpy_s(oldest, fd.cFileName);
+            }
+        } while (FindNextFileW(find, &fd));
+        FindClose(find);
+        if (count <= kKeptSessionLogs) return;
+        wchar_t victim[MAX_PATH + 64];
+        swprintf(victim, _countof(victim), L"%ls%ls", prefix, oldest);
+        if (!DeleteFileW(victim)) return;   /* held open: try again next spawn */
+    }
+}
+
+/* Keeps the previous session's log: before this session takes the
+ * fixed name, the file there is renamed after its last write (local
+ * time). A log another session still holds can't be renamed; the open
+ * that follows fails the same way and takes a per-spawn name. */
+void keep_previous_log(const wchar_t* prefix)
+{
+    wchar_t fixed[MAX_PATH + 64];
+    swprintf(fixed, _countof(fixed), L"%lsecuio-surrogate.log", prefix);
+    WIN32_FILE_ATTRIBUTE_DATA fa;
+    SYSTEMTIME utc, t;
+    if (!GetFileAttributesExW(fixed, GetFileExInfoStandard, &fa) ||
+        !FileTimeToSystemTime(&fa.ftLastWriteTime, &utc) ||
+        !SystemTimeToTzSpecificLocalTime(nullptr, &utc, &t)) {
+        return;
+    }
+    wchar_t kept[MAX_PATH + 64];
+    swprintf(kept, _countof(kept),
+             L"%lsecuio-surrogate.%04u%02u%02u-%02u%02u%02u-%03u.log", prefix,
+             static_cast<unsigned>(t.wYear), static_cast<unsigned>(t.wMonth),
+             static_cast<unsigned>(t.wDay), static_cast<unsigned>(t.wHour),
+             static_cast<unsigned>(t.wMinute), static_cast<unsigned>(t.wSecond),
+             static_cast<unsigned>(t.wMilliseconds));
+    if (MoveFileExW(fixed, kept, 0)) {
+        prune_kept_logs(prefix);
+    }
+}
+
 /* The session log's path. The fixed name keeps the documented path for
- * the usual single session. A second concurrent session finds it held
- * (a sharing violation) and gets a per-spawn name, so its child never
+ * the usual single session, and the log it replaces is kept
+ * (keep_previous_log). A second concurrent session finds it held (a
+ * sharing violation) and gets a per-spawn name, so its child never
  * runs without a log. path receives the name as UTF-8 (TEMP can hold a
  * non-ASCII user name). Returns INVALID_HANDLE_VALUE, with path empty,
  * if neither name opens. */
@@ -119,6 +193,7 @@ HANDLE open_session_log(LONG seq, SECURITY_ATTRIBUTES* sa,
     /* No usable TEMP: a dotfile in the current directory. */
     const wchar_t* prefix = (tn == 0 || tn >= MAX_PATH) ? L"." : dir;
 
+    keep_previous_log(prefix);
     wchar_t wpath[MAX_PATH + 64];
     swprintf(wpath, _countof(wpath), L"%lsecuio-surrogate.log", prefix);
     HANDLE f = CreateFileW(wpath, GENERIC_WRITE, FILE_SHARE_READ, sa,

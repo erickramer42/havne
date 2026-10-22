@@ -247,8 +247,9 @@ client/transport — in this order:
    must *skip*, visibly, never silently fall back).
 3. **Cross-arch run** with the variables exported (below).
 4. **Session-log check** when tracing changed. The log is
-   `%TEMP%\ecuio-surrogate.log`. Copy it before the next spawn,
-   because each spawn rewrites it. It holds the child's lines
+   `%TEMP%\ecuio-surrogate.log`; each spawn keeps the one it replaces
+   as `ecuio-surrogate.<YYYYMMDD-HHMMSS-mmm>.log`, the newest 50 of
+   them, so a suite run pushes out older ones. It holds the child's lines
    (`[surrogate HH:MM:SS.mmm]`) and the client's (`[sur ...]`) in time
    order. A session started while another holds that file logs to
    `ecuio-surrogate-<pid>-<n>.log` instead ([j2534.md](j2534.md#surrogate)).
@@ -310,9 +311,11 @@ skips.
   arch or a nonexistent path — the failure looks like a routing
   regression (`inproc` instead of `surrogate`) or a fast
   `ECUIO_ERR_LOAD_FAILED`. Echo the variable before diagnosing code.
-- The surrogate child log is rewritten on every spawn. Copy it
-  before the next spawn if it's evidence; a log you didn't capture
-  immediately may be describing an older run.
+- Each spawn takes `%TEMP%\ecuio-surrogate.log` and keeps the log it
+  replaces under a dated name, the newest 50 of them. A suite run
+  spawns dozens, so copy a log that's evidence before running the
+  tests, and check its stamps: the fixed name always holds the latest
+  spawn, which may not be the run you mean.
 
 ## Troubleshooting
 
@@ -325,7 +328,7 @@ skips.
 | Cross-arch test fails with odd values, but same-arch passes | A stale `build-win32` fake: the fakes carry no build fingerprint. Rebuild both trees. |
 | In the app, an x86 adapter (for example the OBDX Pro VX) fails with "failed to load transport library", and `%TEMP%\ecuio-surrogate.log` holds only an `open: CreateProcess failed (err=2) exe='...'` line | No surrogate next to `qttune.exe`, so the child never launched. The x64 tree was configured before `build-win32` had a surrogate. Build the Win32 tree, re-run `cmake -B build`, check for `Deploying Win32 J2534 surrogate` in the output, and rebuild. Setting `ECUIO_SURROGATE_EXE` also works. |
 | Cross-arch test fails expecting backend "surrogate", got "inproc" | `ECUIO_FAKE_DLL` points at an x64 fake (or the wrong tree). Check the value, not the code — unset skips, wrong-value fails. |
-| J2534 test fails as `Failed (Timeout)` | A genuine hang, bounded by the 30 s ceiling. Attach to the surviving test and surrogate processes and check thread wait states before killing; the child log in `%TEMP%\ecuio-surrogate.log` is rewritten per spawn — copy before respawning. |
+| J2534 test fails as `Failed (Timeout)` | A genuine hang, bounded by the 30 s ceiling. Attach to the surviving test and surrogate processes and check thread wait states before killing; the child log is `%TEMP%\ecuio-surrogate.log`, and earlier spawns' logs are kept beside it under dated names. |
 | Linker warning LNK4070 on a fake DLL | The `.def` file's `LIBRARY` directive disagrees with the output filename. Make them match. |
 | A mobile build fails during test discovery, or tries to run a test binary | `BUILD_TESTING` is on. Cross builds must pass `-DBUILD_TESTING=OFF` (see Mobile above). |
 | Re-running a skipped `ios-simulator-smoke` skips it again | A re-run replays the original event and commit, so the job's condition comes out the same. Start a manual run instead (Actions → CI → Run workflow, or `gh workflow run ci.yml --ref <branch>`); tick `smoke_only` to skip the other platform jobs. A commit whose message contains `[ios-smoke]` also works. |

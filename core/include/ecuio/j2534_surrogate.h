@@ -104,7 +104,9 @@ ecuio_status_t ecuio_j2534_sur_inject_test_frame(ecuio_j2534_sur_handle_t* handl
 ecuio_status_t ecuio_j2534_sur_close(ecuio_j2534_sur_handle_t* handle);
 
 /* Path of this session's log, which holds the child's lines and the
- * client's. Usually %TEMP%\ecuio-surrogate.log; a session opened while
+ * client's. Usually %TEMP%\ecuio-surrogate.log, and the log it replaces
+ * is kept as %TEMP%\ecuio-surrogate.<YYYYMMDD-HHMMSS-mmm>.log, named
+ * after its last write (the newest 50 are kept). A session opened while
  * another holds that file gets %TEMP%\ecuio-surrogate-<pid>-<n>.log.
  * "" when the session has no log (or handle is NULL, or not Windows).
  * Valid until ecuio_j2534_sur_close. */

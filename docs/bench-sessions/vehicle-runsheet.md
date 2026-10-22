@@ -20,9 +20,9 @@ First session against a talking bus. Goals, in order:
    [BENCH prep list](../../STATUS.md#bench-prep) (#2, #3, #4, #5, #6,
    #7, #8)
 
-Record everything, including the session log after every connect. A
-session that stops at phase 2 with evidence is worth more than one
-that runs to the end undocumented.
+Record everything, including every connect's session log. A session
+that stops at phase 2 with evidence is worth more than one that runs
+to the end undocumented.
 
 ## Safety and scope
 
@@ -62,8 +62,10 @@ that runs to the end undocumented.
       child line reads "frame logging on". Once connected, every request
       and reply appears as an `OP_WRITE frame` / `OP_READ frame` line
       with its bytes ([j2534.md](../j2534.md#surrogate)); the redirect
-      is a backup. **Copy the session log after every connect**: each
-      spawn rewrites it.
+      is a backup. Each connect takes the fixed name and keeps the
+      previous log as `ecuio-surrogate.<YYYYMMDD-HHMMSS-mmm>.log`
+      beside it, the newest 50, so copy them all at teardown and don't
+      run the test suite before you have
 - [ ] Know the four link states before you need them (see
       [j2534.md](../j2534.md#session-lifecycle)):
       - no banner: ok;
@@ -249,7 +251,8 @@ ignition off, wait 10 s, then turn it back on.
 1. Disconnect in the app and wait for `Disconnected:` in the activity
    log (the teardown ends there); the session log shows
    `OP_DISCONNECT: vendor status 0` exactly once
-2. Copy the session log and `sur.log`
+2. Copy `sur.log`, the session log and the earlier ones kept beside
+   it (`%TEMP%\ecuio-surrogate*.log`, this session's by their stamps)
 3. Unplug the adapter, then key off
 
 ## Post-session actions
