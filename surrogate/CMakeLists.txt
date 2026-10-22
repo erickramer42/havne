@@ -21,6 +21,7 @@ add_executable(ecuio-j2534-surrogate surrogate_main.cpp)
 
 target_include_directories(ecuio-j2534-surrogate PRIVATE
     ${CMAKE_SOURCE_DIR}/core/include
+    ${CMAKE_BINARY_DIR}/generated   # sur_fingerprint.h
 )
 
 # Entry point is wmain() (the DLL path arrives as UTF-16); subsystem

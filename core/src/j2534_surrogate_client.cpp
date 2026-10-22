@@ -6,6 +6,7 @@
 #include "ecuio/j2534.h"
 #include "ecuio/j2534_ptypes.h"
 #include "ecuio/surrogate_protocol.h"
+#include "ecuio/sur_fingerprint.h"
 
 #include <cstring>
 #include <cstdint>
@@ -634,10 +635,12 @@ ecuio_status_t ecuio_j2534_sur_open(const char* dll_path,
      * failure exits the child (codes 4/5, decoded below); a refusal is
      * a non-success status; no reply with a live child is a vendor
      * blocked in DllMain or PassThruOpen, typically on absent
-     * hardware. */
+     * hardware. It carries this build's fingerprint of the shared
+     * headers; the child refuses one not its own. */
     ecuio_sur_request_t req = {};
     req.request_id = h->next_request_id++;
     req.opcode = ECUIO_SUR_OP_OPEN;
+    req.u.open.fingerprint = ECUIO_SUR_FINGERPRINT;
     ecuio_sur_response_t resp = {};
     if (!transact(h, req, &resp, handshake_timeout_ms())) {
         /* Classify by why the transaction failed, not by a liveness
@@ -661,6 +664,17 @@ ecuio_status_t ecuio_j2534_sur_open(const char* dll_path,
          * skips the polite OP_SHUTDOWN it could never answer. */
         TerminateProcess(h->process, 1);
         WaitForSingleObject(h->process, 1000);
+        ecuio_j2534_sur_close(h);
+        return ECUIO_ERR_LOAD_FAILED;
+    }
+    /* Checked here too, before the status: a child older than the
+     * check echoes nothing and opens the device anyway, and the close
+     * below shuts that down. */
+    if (resp.aux != ECUIO_SUR_FINGERPRINT) {
+        SUR_LOG(h, "open: the surrogate was built from other shared headers "
+                "(surrogate %08x, client %08x): rebuild build-win32, then build\n",
+                static_cast<unsigned>(resp.aux),
+                static_cast<unsigned>(ECUIO_SUR_FINGERPRINT));
         ecuio_j2534_sur_close(h);
         return ECUIO_ERR_LOAD_FAILED;
     }
@@ -777,10 +791,10 @@ ecuio_status_t ecuio_j2534_sur_ioctl(ecuio_j2534_sur_handle_t* h,
         resp.status != static_cast<int32_t>(ECUIO_PT_STATUS_NOERROR)) {
         return ECUIO_ERR_NO_TRANSPORT;
     }
-    /* Trust boundary, as for read's num_frames: a mismatched child (a
-     * stale build-win32 tree, #19) could claim more than the wire
-     * carries. Callers size output for the wire limit, so copying a
-     * larger claim would overrun both resp.data and their buffer. */
+    /* Trust boundary, as for read's num_frames: the pipe is untrusted,
+     * and a reply could claim more than the wire carries. Callers size
+     * output for the wire limit, so copying a larger claim would overrun
+     * both resp.data and their buffer. */
     if (resp.data_len > ECUIO_SUR_IOCTL_DATA_MAX) {
         SUR_LOG(h, "ioctl: data_len=%u exceeds the wire limit (skew?)\n",
                 resp.data_len);

@@ -2,6 +2,8 @@
 // Testing: structural — compiled by BOTH x64 client and x86 surrogate, so
 //          layout drift is impossible WITHIN a tree. Across trees it fails
 //          loudly: byte-mode pipe reads return the WRITER's struct size.
+//          A changed value in a same-sized struct is caught at OP_OPEN by
+//          the fingerprint (J2534SurrogateTest.MismatchedFingerprintRefusesOpenBeforeVendor).
 
 #ifndef ECUIO_SURROGATE_PROTOCOL_H
 #define ECUIO_SURROGATE_PROTOCOL_H
@@ -23,7 +25,13 @@
  * non-whitelisted ioctl, an unknown opcode). A non-success status never
  * ends the child (ADR-0014); only a broken pipe or OP_SHUTDOWN does.
  *
- *   OPEN          no fields. PassThruOpen. Reply: status only; the
+ *   OPEN          u.open: the client's ECUIO_SUR_FINGERPRINT, a hash of
+ *                 this header and j2534_ptypes.h generated at configure
+ *                 time. The child refuses a fingerprint not its own
+ *                 with STATUS_FAILED before calling the vendor, so two
+ *                 trees built from different headers never talk.
+ *                 Otherwise PassThruOpen. Reply: status, and aux = the
+ *                 child's fingerprint, which the client checks too; the
  *                 device ID stays in the child.
  *   CONNECT       u.connect. PassThruConnect on that device.
  *                 Reply: handle_or_channel = the channel ID.
@@ -66,6 +74,7 @@ typedef struct ecuio_sur_request {
     uint32_t request_id;   /* client-assigned, increasing; echoed back */
     uint32_t opcode;       /* ECUIO_SUR_OP_* */
     union {
+        struct { uint32_t fingerprint; } open;
         struct { uint32_t protocol_id; uint32_t flags; uint32_t baud; } connect;
         struct { uint32_t channel_id; } disconnect;
         /* input: flattened SCONFIG pairs (u32 Parameter, u32 Value, LE)
@@ -108,7 +117,7 @@ typedef struct ecuio_sur_response {
     uint32_t request_id;         /* the request's, for pairing */
     int32_t  status;             /* vendor J2534 status, or STATUS_FAILED */
     uint32_t handle_or_channel;  /* CONNECT: channel ID; START_FILTER: filter ID */
-    uint32_t aux;                /* WRITE: messages written */
+    uint32_t aux;                /* OPEN: the child's fingerprint; WRITE: messages written */
     uint8_t  data[ECUIO_SUR_IOCTL_DATA_MAX];   /* IOCTL reply payload */
     uint32_t data_len;           /* IOCTL; the client rejects > the limit */
     uint32_t num_frames;         /* READ; the client rejects > the limit */

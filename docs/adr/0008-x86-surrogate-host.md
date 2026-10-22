@@ -58,3 +58,17 @@ functions).
 - In-proc and surrogate backends must behave identically. That is
   enforced by routing ([ADR-0009](0009-pe-architecture-routing.md)) and
   by parity tests ([ADR-0011](0011-vendor-call-relay-wire-forms.md)).
+
+## Appendix — build fingerprint (2026-10-22)
+
+A struct-size mismatch between the trees fails at the pipe, but a
+changed constant in a same-sized struct didn't. Each tree's configure
+step now hashes `j2534_ptypes.h` and `surrogate_protocol.h` into
+`ECUIO_SUR_FINGERPRINT`. `OP_OPEN` carries the client's value, and the
+child refuses a different one before calling the vendor and echoes its
+own, which the client also checks. The wire grew a `u.open` member
+inside the existing union, so the request size is unchanged. A hash of
+the headers' bytes was chosen over a hand-kept protocol version, which
+a header edit can forget to bump; the cost is that a comment-only edit
+also forces both trees to be rebuilt, which the build already
+required.

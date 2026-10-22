@@ -8,9 +8,11 @@
 #include "ecuio/j2534.h"
 #include "ecuio/j2534_ptypes.h"
 #include "ecuio/surrogate_protocol.h"
+#include "ecuio/sur_fingerprint.h"
 
 #include <cstdio>
 #include <cstdarg>
+#include <cstdlib>
 #include <cstring>
 
 static HMODULE g_module = nullptr;
@@ -61,6 +63,11 @@ static PASSTHRU_MSG s_read_batch[ECUIO_SUR_MAX_FRAMES_PER_READ];
  * per request and per reply. Read once at startup; the child's
  * environment is fixed at spawn. */
 static bool g_log_frames = false;
+
+/* This build's fingerprint of the shared headers, which OP_OPEN must
+ * carry. ECUIO_SUR_TEST_FINGERPRINT replaces it, so a test can stand in
+ * for a child built from other headers; it can only make opens fail. */
+static uint32_t g_fingerprint = ECUIO_SUR_FINGERPRINT;
 
 static void stage(const char* fmt, ...)
 {
@@ -430,6 +437,13 @@ int wmain(int argc, wchar_t* argv[])
         g_log_frames = true;
         stage("frame logging on (ECUIO_SUR_LOG_FRAMES=1)");
     }
+    char test_fp[16] = {};
+    if (GetEnvironmentVariableA("ECUIO_SUR_TEST_FINGERPRINT", test_fp,
+                                sizeof(test_fp)) > 0) {
+        g_fingerprint = static_cast<uint32_t>(strtoul(test_fp, nullptr, 0));
+        stage("fingerprint %08x (ECUIO_SUR_TEST_FINGERPRINT)",
+              static_cast<unsigned>(g_fingerprint));
+    }
 
     g_module = LoadLibraryExW(dll_path, nullptr, LOAD_WITH_ALTERED_SEARCH_PATH);
     if (g_module == nullptr) {
@@ -484,6 +498,14 @@ int wmain(int argc, wchar_t* argv[])
          * the pipe is an untrusted boundary */
         switch (req.opcode) {
         case ECUIO_SUR_OP_OPEN:
+            resp.aux = g_fingerprint;
+            if (req.u.open.fingerprint != g_fingerprint) {
+                stage("OP_OPEN: refused, built from other shared headers "
+                      "(client fingerprint %08x, surrogate %08x)",
+                      static_cast<unsigned>(req.u.open.fingerprint),
+                      static_cast<unsigned>(g_fingerprint));
+                break;
+            }
             resp.status = handle_op_open();
             break;
         case ECUIO_SUR_OP_CONNECT:

@@ -7,8 +7,9 @@
 //          Also: write->echo round trip, ioctl SET->GET + VBATT,
 //          child-side ioctl whitelist, filter start/stop lifecycle,
 //          recovery after a timed-out request, a blocked vendor open,
-//          an ERR_TIMEOUT partial batch (spec-mode fake), and no
-//          phantom frames from an untouched count under a hard error.
+//          an ERR_TIMEOUT partial batch (spec-mode fake), no
+//          phantom frames from an untouched count under a hard error,
+//          and a child from other shared headers refused at OP_OPEN.
 //
 // ARCH note: in the x64 configure this is all-x64 (CI-valid IPC test);
 // the true cross-arch case (x64 test process -> x86 surrogate -> x86
@@ -555,6 +556,27 @@ TEST(J2534SurrogateTest, SurrogateExeOverrideIsRestricted)
         EXPECT_EQ(ecuio_j2534_sur_open(fake_dll_path(), &h), ECUIO_ERR_LOAD_FAILED) << exe;
         EXPECT_EQ(h, nullptr) << exe;
     }
+}
+
+/* The client and the child each carry a fingerprint of the shared
+ * headers, so trees built from different headers refuse each other at
+ * OP_OPEN. ECUIO_SUR_TEST_FINGERPRINT stands in for a child from
+ * another build. The refusal comes before the vendor is called: the
+ * fake's open is armed to block for 60 s, so a child that called
+ * PassThruOpen would hold the open until the 8 s handshake deadline. */
+TEST(J2534SurrogateTest, MismatchedFingerprintRefusesOpenBeforeVendor)
+{
+    EnvArm fingerprint("ECUIO_SUR_TEST_FINGERPRINT", "1");
+    EnvArm blocked_open("ECUIO_FAKE_OPEN_DELAY_MS", "60000");
+    const auto t0 = std::chrono::steady_clock::now();
+
+    ecuio_j2534_sur_handle_t* h = nullptr;
+    EXPECT_EQ(ecuio_j2534_sur_open(fake_dll_path(), &h), ECUIO_ERR_LOAD_FAILED);
+    EXPECT_EQ(h, nullptr);
+
+    const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now() - t0).count();
+    EXPECT_LT(elapsed, 5000) << "the child called PassThruOpen";
 }
 
 /* The DLL path reaches the child as UTF-16 (wmain), so a path no ANSI

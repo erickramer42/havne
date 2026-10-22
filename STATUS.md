@@ -97,9 +97,9 @@ next.
     channel derivation are HARNESS-verified against the fake; a
     live-vehicle session (real ECU responses, talking-bus items in
     the BENCH prep list) is still ahead.
-  - **Tests:** 205 ctest cases (Windows, Visual Studio 18 build
+  - **Tests:** 206 ctest cases (Windows, Visual Studio 18 build
     tools, both trees rebuilt, 2026-10-22), plus the cross-arch
-    subset (23/23). All
+    subset (24/24). All
     passed except the env-gated cross-arch skip. Every first-party
     target builds with compiler warnings on, at 0 on MSVC. CI was green on all
     eight jobs on PR #16 (merged as `9125b5e`), including the
@@ -363,13 +363,6 @@ an issue is resolved it is removed, and its number is not reused.
     has changed ([ADR-0006](docs/adr/0006-frame-abi-v0.3.md)). It gets
     bumped at the v0.3.0 tag. Bumping mid-cycle only causes rebuild
     churn.
-19. **Shared-header constants are ABI across two build trees.**
-    - `j2534_ptypes.h` and `surrogate_protocol.h` are compiled into
-      both the x64 tree and `build-win32`.
-    - A struct-size mismatch fails loudly at the pipe. A changed
-      constant value inside a same-sized struct is silent.
-    - One possible mitigation is a version or magic hash in the
-      `OP_OPEN` handshake. Until then, rebuild both trees together.
 20. **Pointer-bearing ioctls (`FAST_INIT`, `FIVE_BAUD_INIT`) are out of
     contract** and refused at both ends. That is fine for ISO 15765,
     since those are ISO 9141/KWP init calls. If a BENCH device needs

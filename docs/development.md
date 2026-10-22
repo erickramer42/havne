@@ -125,12 +125,13 @@ cmake --build build-win32 --config Release --target ecuio-j2534-surrogate fake_j
 
 > ⚠️ **Rebuild both trees** after any change to `j2534_ptypes.h` or
 > `surrogate_protocol.h`. Their constants are ABI between binaries
-> built in separate trees. A stale tree with a mismatched struct
-> size fails loudly. A stale tree with a changed constant value
-> produces silently wrong data (Known Issue #19 in
-> [STATUS.md](../STATUS.md)). The same applies to any source that
-> compiles into both trees — the surrogate and the fakes — since
-> the cross-arch run loads artifacts from `build-win32` directly.
+> built in separate trees. Each tree's configure step hashes the two
+> headers into `ECUIO_SUR_FINGERPRINT`, and the surrogate refuses an
+> `OP_OPEN` whose fingerprint isn't its own, so a stale tree fails at
+> connect: the session log says "built from other shared headers".
+> Other sources that compile into both trees, the surrogate's and the
+> fakes', carry no fingerprint, and the cross-arch run loads them
+> from `build-win32` directly, so rebuild both after those too.
 
 **Mobile (builds in CI, not yet run on a device).** The QML, bridge
 and core are shared, and only the kit differs. Use `qt-cmake` from
@@ -320,7 +321,8 @@ skips.
 | `QmlCacheGeneratedCode` unresolved externals after adding a QML file | Stale QML cache. Do a clean reconfigure (`rm -rf build`). |
 | Test discovery fails at build time with `0xc0000135` | A DLL is missing. Discovery runs the test binary during the build, so Qt-linked test targets must copy `$<TARGET_RUNTIME_DLLS>` POST_BUILD, ordered before `gtest_discover_tests`. |
 | Surrogate test fails with child exit code 5 | An export can't be found by name, usually because of x86 `__stdcall` decoration. Check the `.def` file. Other exit codes are listed in [j2534.md](j2534.md#surrogate). |
-| Cross-arch test fails with odd values, but same-arch passes | The `build-win32` tree is stale. Rebuild both trees. |
+| Surrogate opens fail, in tests or the app, and the session log says "built from other shared headers" | One tree was built from older copies of `j2534_ptypes.h` or `surrogate_protocol.h`, usually a stale `build-win32`. Rebuild both trees, Win32 first. |
+| Cross-arch test fails with odd values, but same-arch passes | A stale `build-win32` fake: the fakes carry no build fingerprint. Rebuild both trees. |
 | In the app, an x86 adapter (for example the OBDX Pro VX) fails with "failed to load transport library", and `%TEMP%\ecuio-surrogate.log` holds only an `open: CreateProcess failed (err=2) exe='...'` line | No surrogate next to `qttune.exe`, so the child never launched. The x64 tree was configured before `build-win32` had a surrogate. Build the Win32 tree, re-run `cmake -B build`, check for `Deploying Win32 J2534 surrogate` in the output, and rebuild. Setting `ECUIO_SURROGATE_EXE` also works. |
 | Cross-arch test fails expecting backend "surrogate", got "inproc" | `ECUIO_FAKE_DLL` points at an x64 fake (or the wrong tree). Check the value, not the code — unset skips, wrong-value fails. |
 | J2534 test fails as `Failed (Timeout)` | A genuine hang, bounded by the 30 s ceiling. Attach to the surviving test and surrogate processes and check thread wait states before killing; the child log in `%TEMP%\ecuio-surrogate.log` is rewritten per spawn — copy before respawning. |
