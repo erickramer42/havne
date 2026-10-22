@@ -78,7 +78,7 @@ ApplicationWindow {
             Rectangle {
                 id: pill
                 readonly property color tone: !QtTune.coreInitialized ? Theme.danger
-                                            : QtTune.connecting ? Theme.textDim
+                                            : (QtTune.connecting || QtTune.disconnecting) ? Theme.textDim
                                             : Theme.linkColor(QtTune.linkState)
                 Layout.fillWidth: true
                 Layout.preferredWidth: pillRow.implicitWidth + 24
@@ -107,6 +107,7 @@ ApplicationWindow {
                         color: pill.tone
                         text: !QtTune.coreInitialized ? qsTr("Core init failed")
                             : QtTune.connecting ? qsTr("Connecting…")
+                            : QtTune.disconnecting ? qsTr("Disconnecting…")
                             : QtTune.connected
                               ? qsTr("%1 · %2").arg(Theme.linkLabel(QtTune.linkState))
                                                 .arg(QtTune.currentUri)
@@ -122,8 +123,12 @@ ApplicationWindow {
             // button is the one to use.
             ThemedButton {
                 visible: QtTune.connected || root.currentPage !== root.settingsPage
-                enabled: QtTune.coreInitialized && !QtTune.connecting
-                text: QtTune.connected ? qsTr("Disconnect") : qsTr("Connect…")
+                // A teardown can take seconds with a wedged adapter; no
+                // connect starts until it ends
+                enabled: QtTune.coreInitialized && !QtTune.connecting && !QtTune.disconnecting
+                text: QtTune.connected ? qsTr("Disconnect")
+                    : QtTune.disconnecting ? qsTr("Disconnecting…")
+                    : qsTr("Connect…")
                 onClicked: QtTune.connected ? QtTune.disconnectSession()
                                             : root.gotoPage(root.settingsPage)
             }

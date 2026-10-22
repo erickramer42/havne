@@ -331,6 +331,13 @@ QtTuneBridge::~QtTuneBridge()
     if (m_connectThread.joinable()) {
         m_connectThread.join();
     }
+    // An async disconnect still tearing down: wait for it, so core is
+    // never shut down under it. Its queued completion is dropped with
+    // `this`. Bounded like any teardown: about 6 s with a wedged
+    // surrogate child, which the unresponsive latch caps.
+    if (m_disconnectThread.joinable()) {
+        m_disconnectThread.join();
+    }
     // A connect whose queued completion never ran (it was dropped with
     // `this`) left its session pending. It was never started, so no
     // worker is calling onFrame; destroy it like any other.
@@ -347,7 +354,7 @@ QtTuneBridge::~QtTuneBridge()
 
 void QtTuneBridge::destroySessionLocked()
 {
-    // The one teardown path. destroy() closes the session first if needed.
+    // The destructor's teardown. destroy() closes the session first if needed.
     if (m_session != nullptr) {
         qttune_session_destroy(m_session);
         m_session = nullptr;
@@ -464,6 +471,9 @@ void QtTuneBridge::applyConnectedState(qttune_session_t* session, const QString&
 
 QString QtTuneBridge::connectSession(const QString& uri)
 {
+    if (m_disconnecting) {
+        return QStringLiteral("Disconnect in progress");
+    }
     if (m_connected.load(std::memory_order_acquire) || m_connecting) {
         return {};
     }
@@ -484,8 +494,10 @@ QString QtTuneBridge::connectSession(const QString& uri)
 
 void QtTuneBridge::connectSessionAsync(const QString& uri)
 {
-    if (m_connected.load(std::memory_order_acquire) || m_connecting) {
-        return;   // one attempt at a time; UI already reflects state
+    if (m_connected.load(std::memory_order_acquire) || m_connecting
+        || m_disconnecting) {
+        return;   // one attempt at a time, none during a teardown; the
+                  // UI already reflects state
     }
     m_connecting = true;
     emit connectingChanged();
@@ -530,23 +542,50 @@ void QtTuneBridge::connectSessionAsync(const QString& uri)
 
 void QtTuneBridge::disconnectSession()
 {
-    if (!m_connected.load(std::memory_order_acquire)) return;
+    if (!m_connected.load(std::memory_order_acquire) || m_disconnecting) return;
 
-    emit logMessage(QStringLiteral("Disconnected: %1").arg(m_currentUri));
+    const QString uri = m_currentUri;
+    emit logMessage(QStringLiteral("Disconnecting: %1").arg(uri));
 
+    // Every flag before any emit: a QML handler can run synchronously
+    // inside one, and must already see disconnecting with connected
+    // false, never a moment where Connect looks available. From here
+    // onFrame and handleFrameInternal drop everything, and the GUI
+    // thread never touches the session again.
+    qttune_session_t* session = std::exchange(m_session, nullptr);
     m_connected.store(false, std::memory_order_release);
+    m_disconnecting = true;
     m_coalesceTimer->stop();
-    destroySessionLocked();
     m_stagingBuffer.clear();
-    if (!m_currentUri.isEmpty()) {
-        m_currentUri.clear();
+    m_currentUri.clear();
+    m_linkErrorCode = QT_OK;          // the properties must not
+    m_errorEpisodes = 0;              // outlive the session
+
+    emit disconnectingChanged();
+    if (!uri.isEmpty()) {
         emit currentUriChanged();
     }
     emit connectedChanged(false);
-    m_linkErrorCode = QT_OK;          // the properties must not
-    m_errorEpisodes = 0;              // outlive the session
     emit linkStateChanged();          // "fault"/"quiet" -> "disconnected"
     setLogPaused(false);
+
+    // The teardown thread is the session's one caller from here: the
+    // session API is single-caller by contract.
+    m_disconnectThread = std::thread([this, session, uri]() {
+        qttune_session_destroy(session);   // closes first, joining the worker
+
+        QMetaObject::invokeMethod(this, [this, uri]() {
+            // JOIN FIRST, then clear the flag, then emit, as the
+            // connect completion does: a QML handler inside
+            // disconnectingChanged may start the next connect.
+            if (m_disconnectThread.joinable()) {
+                m_disconnectThread.join();
+            }
+            m_disconnecting = false;
+            emit disconnectingChanged();
+            emit logMessage(QStringLiteral("Disconnected: %1").arg(uri));
+        }, Qt::QueuedConnection);
+    });
 }
 
 void QtTuneBridge::setLogPaused(bool paused)

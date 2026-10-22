@@ -111,9 +111,10 @@ Rectangle {
         ThemedButton {
             text: QtTune.connected ? qsTr("End session")
                 : QtTune.connecting ? qsTr("Connecting…")
+                : QtTune.disconnecting ? qsTr("Disconnecting…")
                 : qsTr("Connect…")
             highlighted: !QtTune.connected
-            enabled: QtTune.coreInitialized && !QtTune.connecting
+            enabled: QtTune.coreInitialized && !QtTune.connecting && !QtTune.disconnecting
             Layout.alignment: Qt.AlignHCenter
             Layout.topMargin: 8
             onClicked: QtTune.connected ? QtTune.disconnectSession()

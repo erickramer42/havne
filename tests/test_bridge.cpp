@@ -2,6 +2,7 @@
 
 #include <QCoreApplication>
 #include <QEventLoop>
+#include <QStringList>
 #include <QTimer>
 #include <QThread>
 #include <QVariant>
@@ -12,6 +13,16 @@
 #include <thread>
 
 #include "qttunebridge.h"   // QtTuneBridge + FrameListModel
+
+#ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <windows.h>
+#endif
 
 namespace {
 
@@ -45,6 +56,15 @@ bool spinUntil(Predicate pred, int timeout_ms, int step_ms = 50)
     return true;
 }
 
+/* Disconnect is async: connected drops at once and the teardown ends on
+ * a worker thread. A test that connects again waits for it, as the UI
+ * does (Connect stays disabled while disconnecting). */
+bool disconnectAndWait(QtTuneBridge& bridge, int timeout_ms = 5000)
+{
+    bridge.disconnectSession();
+    return spinUntil([&bridge]() { return !bridge.disconnecting(); }, timeout_ms, 10);
+}
+
 } // namespace
 
 int main(int argc, char** argv)
@@ -68,11 +88,16 @@ TEST(BridgeTest, LifecycleIsIdempotent)
     EXPECT_TRUE(bridge.connected());
 
     bridge.disconnectSession();
-    EXPECT_FALSE(bridge.connected());
+    EXPECT_FALSE(bridge.connected());     // drops at once; the teardown
+    EXPECT_TRUE(bridge.disconnecting());  // ends on its own thread
 
     bridge.disconnectSession();   // double + triple disconnect: no-op
     bridge.disconnectSession();
     EXPECT_FALSE(bridge.connected());
+
+    // No connect until the teardown ends
+    EXPECT_FALSE(bridge.connectSession("mock://test").isEmpty());
+    ASSERT_TRUE(spinUntil([&bridge]() { return !bridge.disconnecting(); }, 5000, 10));
 
     // Reconnect after disconnect must work (fresh session path)
     EXPECT_TRUE(bridge.connectSession("mock://test").isEmpty());
@@ -371,7 +396,7 @@ TEST(BridgeTest, LogPauseStopsFrameLogNotDecode)
         << "log did not resume";
 
     bridge.setLogPaused(true);
-    bridge.disconnectSession();
+    ASSERT_TRUE(disconnectAndWait(bridge));
     EXPECT_FALSE(bridge.logPaused());
 
     bridge.setLogPaused(true);
@@ -738,7 +763,8 @@ TEST(BridgeTest, CurrentUriTracksConnectState)
     EXPECT_EQ(bridge.currentUri(), QStringLiteral("mock://uri-track"));
 
     bridge.disconnectSession();
-    EXPECT_TRUE(bridge.currentUri().isEmpty());
+    EXPECT_TRUE(bridge.currentUri().isEmpty());   // cleared at once
+    ASSERT_TRUE(spinUntil([&bridge]() { return !bridge.disconnecting(); }, 5000, 10));
 
     // Failed connect leaves no stale URI behind
     EXPECT_FALSE(bridge.connectSession("j2534://definitely-not-a-vendor").isEmpty());
@@ -810,6 +836,186 @@ TEST(BridgeTest, DestroyedMidConnectLeavesNoRunningSession)
     EXPECT_EQ(frames.load(), 0);
 }
 
+#ifdef _WIN32
+// ---------------------------------------------------------------------------
+// Connect and disconnect threads, against the fake J2534 DLL (in-proc):
+// its delay knobs stall the vendor call, and its hooks say which thread
+// made it.
+// ---------------------------------------------------------------------------
+
+namespace {
+
+/* Sets a fake-DLL env knob for one test and clears it on exit, so a
+ * failing ASSERT can't leak it into the next case. The in-proc fake
+ * re-reads the knob on every call. */
+class FakeEnvArm
+{
+public:
+    FakeEnvArm(const char* name, const char* value) : m_name(name)
+    {
+        SetEnvironmentVariableA(name, value);
+    }
+    ~FakeEnvArm() { SetEnvironmentVariableA(m_name, nullptr); }
+    FakeEnvArm(const FakeEnvArm&) = delete;
+    FakeEnvArm& operator=(const FakeEnvArm&) = delete;
+
+private:
+    const char* m_name;
+};
+
+using fn_get_last_call_thread_ids = void (*)(unsigned long*, unsigned long*);
+using fn_get_disconnect_count = unsigned long (*)(void);
+
+/* The fake's hooks. Holding our own module reference also keeps its
+ * counters alive across the session's FreeLibrary. */
+struct FakeHooks
+{
+    HMODULE mod = nullptr;
+    fn_get_last_call_thread_ids thread_ids = nullptr;
+    fn_get_disconnect_count disconnect_count = nullptr;
+
+    bool load()
+    {
+        mod = LoadLibraryExA(FAKE_J2534_DLL_PATH, nullptr,
+                             LOAD_WITH_ALTERED_SEARCH_PATH);
+        if (mod == nullptr) return false;
+        thread_ids = reinterpret_cast<fn_get_last_call_thread_ids>(
+            GetProcAddress(mod, "GetLastCallThreadIds"));
+        disconnect_count = reinterpret_cast<fn_get_disconnect_count>(
+            GetProcAddress(mod, "GetDisconnectCount"));
+        return thread_ids != nullptr && disconnect_count != nullptr;
+    }
+    ~FakeHooks()
+    {
+        if (mod != nullptr) FreeLibrary(mod);
+    }
+};
+
+/* A passive raw session: no requests, so the vendor calls under test
+ * are the open and the teardown. */
+QString fakeUri()
+{
+    return QStringLiteral("j2534://%1?profile=raw")
+        .arg(QString::fromUtf8(FAKE_J2534_DLL_PATH));
+}
+
+unsigned long guiThreadId()
+{
+    return static_cast<unsigned long>(GetCurrentThreadId());
+}
+
+}  // namespace
+
+/* An async connect makes the slow vendor open on its own thread: with
+ * PassThruOpen stalled, connectSessionAsync returns at once, and the
+ * open ran on a thread other than this (GUI) one. */
+TEST(BridgeTest, AsyncConnectOpensOffGuiThread)
+{
+    FakeHooks hooks;
+    ASSERT_TRUE(hooks.load());
+    FakeEnvArm delay("QTTUNE_FAKE_OPEN_DELAY_MS", "600");
+
+    QtTuneBridge bridge;
+    std::atomic<bool> done{false};
+    QString gotErr = "unset";
+    QObject::connect(&bridge, &QtTuneBridge::connectResult,
+                     [&](const QString&, const QString& error) {
+                         gotErr = error;
+                         done.store(true);
+                     });
+
+    QElapsedTimer clock;
+    clock.start();
+    bridge.connectSessionAsync(fakeUri());
+    EXPECT_LT(clock.elapsed(), 300) << "connectSessionAsync blocked on the open";
+    EXPECT_TRUE(bridge.connecting());
+
+    ASSERT_TRUE(spinUntil([&done]() { return done.load(); }, 10000, 10));
+    EXPECT_EQ(gotErr.toStdString(), "");
+    ASSERT_TRUE(bridge.connected());
+
+    unsigned long open_tid = 0;
+    hooks.thread_ids(&open_tid, nullptr);
+    EXPECT_NE(open_tid, 0ul);
+    EXPECT_NE(open_tid, guiThreadId());
+
+    ASSERT_TRUE(disconnectAndWait(bridge));
+}
+
+/* A slow vendor teardown runs off the GUI thread. With PassThruDisconnect
+ * stalled, disconnectSession returns at once with the session already
+ * gone as far as the UI can tell; `disconnecting` holds, and refuses a
+ * connect, until the teardown ends; the log brackets it. */
+TEST(BridgeTest, DisconnectTearsDownOffGuiThread)
+{
+    FakeHooks hooks;
+    ASSERT_TRUE(hooks.load());
+
+    QtTuneBridge bridge;
+    QStringList log;
+    QObject::connect(&bridge, &QtTuneBridge::logMessage,
+                     [&log](const QString& line) { log << line; });
+    ASSERT_TRUE(bridge.connectSession(fakeUri()).isEmpty());
+    const unsigned long disconnects_before = hooks.disconnect_count();
+
+    FakeEnvArm delay("QTTUNE_FAKE_DISCONNECT_DELAY_MS", "800");
+    QElapsedTimer clock;
+    clock.start();
+    bridge.disconnectSession();
+    EXPECT_LT(clock.elapsed(), 300) << "disconnectSession blocked on the teardown";
+    EXPECT_FALSE(bridge.connected());
+    EXPECT_TRUE(bridge.disconnecting());
+    EXPECT_EQ(bridge.linkState(), QStringLiteral("disconnected"));
+    EXPECT_TRUE(bridge.currentUri().isEmpty());
+
+    // No connect while the adapter is still closing
+    EXPECT_FALSE(bridge.connectSession(fakeUri()).isEmpty());
+    bridge.connectSessionAsync(fakeUri());
+    EXPECT_FALSE(bridge.connecting());
+
+    ASSERT_TRUE(spinUntil([&bridge]() { return !bridge.disconnecting(); }, 10000, 10));
+    EXPECT_GE(clock.elapsed(), 700) << "the stall never reached the teardown";
+    EXPECT_EQ(hooks.disconnect_count(), disconnects_before + 1);
+
+    unsigned long disconnect_tid = 0;
+    hooks.thread_ids(nullptr, &disconnect_tid);
+    EXPECT_NE(disconnect_tid, 0ul);
+    EXPECT_NE(disconnect_tid, guiThreadId());
+
+    ASSERT_GE(log.size(), 2);
+    EXPECT_TRUE(log.at(log.size() - 2).startsWith(QStringLiteral("Disconnecting: ")));
+    EXPECT_TRUE(log.last().startsWith(QStringLiteral("Disconnected: ")));
+
+    // The adapter is free again once the teardown has ended
+    ASSERT_TRUE(bridge.connectSession(fakeUri()).isEmpty());
+    ASSERT_TRUE(disconnectAndWait(bridge));
+}
+
+/* A bridge destroyed mid-teardown waits for it: the destructor joins the
+ * teardown thread before shutting core down, and the dropped completion
+ * never runs against the freed bridge. */
+TEST(BridgeTest, DestroyedMidDisconnectWaitsForTeardown)
+{
+    FakeHooks hooks;
+    ASSERT_TRUE(hooks.load());
+
+    auto bridge = std::make_unique<QtTuneBridge>();
+    ASSERT_TRUE(bridge->connectSession(fakeUri()).isEmpty());
+    const unsigned long disconnects_before = hooks.disconnect_count();
+
+    FakeEnvArm delay("QTTUNE_FAKE_DISCONNECT_DELAY_MS", "500");
+    bridge->disconnectSession();
+    ASSERT_TRUE(bridge->disconnecting());
+
+    QElapsedTimer clock;
+    clock.start();
+    bridge.reset();
+    EXPECT_GE(clock.elapsed(), 300) << "the destructor didn't wait for the teardown";
+    EXPECT_EQ(hooks.disconnect_count(), disconnects_before + 1);
+    spinLoop(50);   // the dropped completion must not run
+}
+#endif  // _WIN32
+
 // ---------------------------------------------------------------------------
 // ADR-0013: the bridge renders the SESSION's profile, not a hardcoded
 // set
@@ -828,7 +1034,7 @@ TEST(BridgeTest, RawProfileLeavesSignalModelEmpty)
         [&bridge]() { return bridge.signalModel()->rowCount() > 0; }, 5000));
     EXPECT_GT(bridge.signalModel()->rowCount(), 0);
 
-    bridge.disconnectSession();
+    ASSERT_TRUE(disconnectAndWait(bridge));
 
     ASSERT_TRUE(bridge.connectSession("mock://profile-raw-stage2?profile=raw")
                     .isEmpty());

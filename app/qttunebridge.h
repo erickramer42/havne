@@ -180,6 +180,7 @@ class QtTuneBridge : public QObject
     Q_PROPERTY(bool coreInitialized READ coreInitialized NOTIFY coreInitializedChanged)
     Q_PROPERTY(bool connected READ connected NOTIFY connectedChanged)
     Q_PROPERTY(bool connecting READ connecting NOTIFY connectingChanged)
+    Q_PROPERTY(bool disconnecting READ disconnecting NOTIFY disconnectingChanged)
     Q_PROPERTY(int frameCount READ frameCount NOTIFY frameCountChanged)
     Q_PROPERTY(int droppedFrames READ droppedFrames NOTIFY droppedFramesChanged)
     Q_PROPERTY(FrameSortProxy* model READ model CONSTANT)
@@ -209,6 +210,7 @@ public:
     SignalListModel* signalModel() const { return m_signalModel; }
     QString currentUri() const { return m_currentUri; }
     bool connecting() const { return m_connecting; }
+    bool disconnecting() const { return m_disconnecting; }
     void dispatchFrameForTesting(const qttune_frame_t& frame);
     static constexpr int maxInFlightForTesting() { return MaxInFlightFrames; }
     qttune_session_t* pendingSessionForTesting() const { return m_pendingSession.load(); }
@@ -234,6 +236,12 @@ public:
 
 public slots:
     Q_INVOKABLE QString connectSession(const QString& uri);
+    // Async disconnect: the GUI-facing state (connected, link state,
+    // URI) drops at once, and the teardown (joining the worker, the
+    // vendor's disconnect and close) runs on a worker thread, so a
+    // wedged adapter can't freeze the UI. `disconnecting` stays true
+    // until teardown ends; no connect starts before then, because the
+    // same adapter may refuse a second open until its close returns.
     Q_INVOKABLE void disconnectSession();
     Q_INVOKABLE void clearFrames();
     // Async connect: the slow core work (create and register, the DLL
@@ -253,6 +261,7 @@ signals:
     void signalBatchChanged();
     void currentUriChanged();
     void connectingChanged();
+    void disconnectingChanged();
     void connectResult(const QString& uri, const QString& error);
     void logMessage(const QString& line);
     void linkStateChanged();
@@ -262,7 +271,7 @@ private:
     static void onFrame(const qttune_frame_t* frame, void* user_data);
     void handleFrameInternal(const qttune_frame_t* frame);
     void notifyDropped();   // GUI thread: emit droppedFramesChanged if the count moved
-    void destroySessionLocked();  // the one teardown path (destroy auto-closes)
+    void destroySessionLocked();  // the destructor's teardown; disconnectSession tears down on its own thread
 
     bool m_initialized = false;
     qttune_session_t* m_session = nullptr;
@@ -303,6 +312,11 @@ private:
     // Atomic only for the test seam: both owners read it after joining
     // the connect thread.
     std::atomic<qttune_session_t*> m_pendingSession{nullptr};
+    // Async disconnect support, the same shape as connect: the thread
+    // owns the session it tears down, and m_disconnecting is written
+    // only on the GUI thread (in disconnectSession and its completion).
+    std::thread m_disconnectThread;
+    bool m_disconnecting = false;
     void pollLinkHealth();
     int m_linkErrorCode = QT_OK;
     uint32_t m_errorEpisodes = 0;

@@ -42,6 +42,7 @@ Page {
 
     function statusText() {
         if (QtTune.connecting) return qsTr("Connecting…")
+        if (QtTune.disconnecting) return qsTr("Disconnecting…")
         if (!QtTune.connected) return qsTr("Connect a session to stream decoded values")
         if (signalList.count === 0)
             return qsTr("This profile decodes no signals; its frames are on the Log page")
@@ -103,7 +104,7 @@ Page {
                 color: Theme.textDim
             }
             ThemedButton {
-                visible: !QtTune.connected && !QtTune.connecting
+                visible: !QtTune.connected && !QtTune.connecting && !QtTune.disconnecting
                 enabled: QtTune.coreInitialized
                 highlighted: true
                 text: qsTr("Connect…")

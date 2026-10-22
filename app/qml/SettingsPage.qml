@@ -97,9 +97,9 @@ Pane {
         Label {
             text: QtTune.connected
                   ? qsTr("Connected: %1").arg(QtTune.currentUri)
-                  : (QtTune.connecting
-                       ? qsTr("Connecting…")
-                       : qsTr("Not connected"))
+                  : QtTune.connecting ? qsTr("Connecting…")
+                  : QtTune.disconnecting ? qsTr("Disconnecting…")
+                  : qsTr("Not connected")
             color: Theme.linkColor(QtTune.linkState)
         }
 
@@ -115,22 +115,25 @@ Pane {
                 // example adds ?filter=; under the obd2 default ?poll=
                 // alone works and still decodes.
                 placeholderText: qsTr("URI — e.g. mock://demo or j2534://Vendor?profile=raw&filter=0x7E8&poll=0x0C")
-                enabled: !QtTune.connected && !QtTune.connecting && QtTune.coreInitialized
+                enabled: !QtTune.connected && !QtTune.connecting && !QtTune.disconnecting
+                         && QtTune.coreInitialized
                 color: Theme.text
                 onAccepted: page.requestConnect(text)
             }
 
             ThemedButton {
-                text: QtTune.connected
-                      ? qsTr("Disconnect")
-                      : (QtTune.connecting ? qsTr("Connecting…") : qsTr("Connect"))
+                text: QtTune.connected ? qsTr("Disconnect")
+                    : QtTune.connecting ? qsTr("Connecting…")
+                    : QtTune.disconnecting ? qsTr("Disconnecting…")
+                    : qsTr("Connect")
                 highlighted: !QtTune.connected
-                // Disabled while an attempt is in flight — the bridge
-                // guards double-starts anyway, but the UI must not
+                // Disabled while a connect or a teardown is in flight —
+                // the bridge refuses both anyway, but the UI must not
                 // offer them during a multi-second vendor block.
                 enabled: QtTune.connected
                          ? true
                          : (!QtTune.connecting
+                            && !QtTune.disconnecting
                             && QtTune.coreInitialized
                             && uriField.text !== "")
                 onClicked: {
@@ -165,7 +168,7 @@ Pane {
                     text: modelData === "j2534://"
                           ? qsTr("j2534:// (first device)")
                           : modelData
-                    enabled: !QtTune.connected && !QtTune.connecting
+                    enabled: !QtTune.connected && !QtTune.connecting && !QtTune.disconnecting
                     onClicked: page.fillUri(modelData)
                 }
             }

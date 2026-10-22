@@ -186,6 +186,15 @@ if(WIN32)
     )
 endif()
 
+# test_bridge's connect and disconnect thread tests run a fake J2534
+# session; they're compiled only on Windows
+if(WIN32 AND NOT QTTUNE_BUILD_CORE_ONLY)
+    target_compile_definitions(test_bridge PRIVATE
+        FAKE_J2534_DLL_PATH="$<TARGET_FILE:fake_j2534>"
+    )
+    add_dependencies(test_bridge fake_j2534)
+endif()
+
 # J2534 loader tests (Win32-only, HARNESS tier — real LoadLibraryEx
 # against the fake vendor DLL; path baked in at generation time)
 if(WIN32)

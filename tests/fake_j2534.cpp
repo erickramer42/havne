@@ -23,6 +23,8 @@
 //    recording nothing and echoing nothing.
 //  * IoCtl: config table (SET stores, GET reads back), fixed VBATT,
 //    CLEAR_* accepted. Unknown ids FAIL like a strict vendor.
+//  * Disconnect: counted; QTTUNE_FAKE_DISCONNECT_DELAY_MS sleeps
+//    before each one (a slow vendor teardown).
 //  * Filters: registration bookkeeping + last-invocation recording.
 //    Filter-aware echo prepends the filter pattern (4-byte BE CAN ID).
 //    SetFilterGating controls ONLY ReadMsgs dropping; the echo shape
@@ -123,6 +125,13 @@ unsigned long g_last_stopped_filter_id = 0;
  * child's OP_DISCONNECT lines in the session log
  * (qttune_j2534_sur_log_path) instead. */
 unsigned long g_disconnect_count = 0;
+
+/* The threads that last ran PassThruOpen and PassThruDisconnect (0 =
+ * never), read via GetLastCallThreadIds: the bridge tests check that
+ * neither runs on the GUI thread. In-proc instances only, like the
+ * disconnect count. */
+unsigned long g_open_thread_id = 0;
+unsigned long g_disconnect_thread_id = 0;
 
 /* ---- OBD-II canned response data (HARNESS only, ADR-0013) ----
  * Standard PIDs that express as simple byte-extraction + scale/offset.
@@ -335,6 +344,7 @@ long __stdcall PassThruOpen(void* pName, unsigned long* pDeviceID)
 
     std::lock_guard<std::mutex> lk(fake_j2534::g_lock);
     fake_j2534::g_handle = 1;
+    fake_j2534::g_open_thread_id = GetCurrentThreadId();
     *pDeviceID = 1;
     return STATUS_NOERROR;
 }
@@ -381,11 +391,27 @@ extern "C" __declspec(dllexport)
 long __stdcall PassThruDisconnect(unsigned long ChannelID)
 {
     (void)ChannelID;
+
+    /* Test-only slow teardown: QTTUNE_FAKE_DISCONNECT_DELAY_MS makes
+     * every PassThruDisconnect sleep first, the slow-vendor teardown
+     * an async disconnect must keep off the GUI thread. Re-read per
+     * call and slept outside the lock, like the open delay. */
+    {
+        char buf[32] = {};
+        const DWORD n = GetEnvironmentVariableA("QTTUNE_FAKE_DISCONNECT_DELAY_MS",
+                                                 buf, sizeof(buf));
+        if (n > 0 && n < sizeof(buf)) {
+            const DWORD delay = static_cast<DWORD>(strtoul(buf, nullptr, 10));
+            if (delay > 0 && delay <= 60000) Sleep(delay);
+        }
+    }
+
     /* Tolerant by design: a real vendor's second-disconnect behavior
      * is vendor swamp we don't model — the COUNT is the contract
      * observable, not the return code. */
     std::lock_guard<std::mutex> lk(fake_j2534::g_lock);
     fake_j2534::g_disconnect_count++;
+    fake_j2534::g_disconnect_thread_id = GetCurrentThreadId();
     return STATUS_NOERROR;
 }
 
@@ -957,6 +983,16 @@ unsigned long GetDisconnectCount(void)
 {
     std::lock_guard<std::mutex> lk(fake_j2534::g_lock);
     return fake_j2534::g_disconnect_count;
+}
+
+/* GetLastCallThreadIds: the Win32 thread IDs that last ran
+ * PassThruOpen and PassThruDisconnect, 0 for never. In-proc only. */
+extern "C" __declspec(dllexport)
+void GetLastCallThreadIds(unsigned long* open_tid, unsigned long* disconnect_tid)
+{
+    std::lock_guard<std::mutex> lk(fake_j2534::g_lock);
+    if (open_tid != nullptr) *open_tid = fake_j2534::g_open_thread_id;
+    if (disconnect_tid != nullptr) *disconnect_tid = fake_j2534::g_disconnect_thread_id;
 }
 
 /* SetFilterGating(enable): when armed, ReadMsgs drops frames whose

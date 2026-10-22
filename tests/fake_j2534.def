@@ -19,4 +19,5 @@ EXPORTS
     GetLastFilterStop
     SetFilterGating
     GetDisconnectCount
+    GetLastCallThreadIds
     
