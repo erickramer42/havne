@@ -48,6 +48,11 @@ next.
     any profile instead of being ignored).
   - Discovery finds the real installed drivers, and the Settings page
     can pick one and connect.
+  - Connect and disconnect keep the slow vendor calls off the GUI
+    thread. A teardown runs on its own thread: a wedged adapter's
+    (about 6 s at most) shows "Disconnecting…" on every connection
+    surface, and no connect starts until it ends, because the adapter
+    may refuse a second open until its close returns.
   - Link health (#11): the J2534 worker tells a quiet bus, a dead
     adapter and failing requests apart, the bridge logs transitions to
     the Settings activity log, and the header pill, LiveView, the Home
@@ -88,7 +93,7 @@ next.
     channel derivation are HARNESS-verified against the fake; a
     live-vehicle session (real ECU responses, talking-bus items in
     the BENCH prep list) is still ahead.
-  - **Tests:** 171 ctest cases (Windows/MSVC 2022, both trees
+  - **Tests:** 174 ctest cases (Windows/MSVC 2022, both trees
     rebuilt, 2026-10-21), plus the cross-arch subset (21/21). All
     passed except the env-gated cross-arch skip. CI was green on all
     eight jobs on PR #16 (merged as `9125b5e`), including the
@@ -373,14 +378,6 @@ an issue is resolved it is removed, and its number is not reused.
     run), or Qt's arm64 simulator libraries if Qt ships them. Apple is
     also winding down Rosetta, so the first option has its own end
     date.
-33. **Disconnect blocks the GUI thread.** `disconnectSession` tears the
-    session down synchronously. A dead surrogate child fails fast on
-    the broken pipe. A wedged one costs about 6 s at worst: the
-    transaction in flight, plus the one that marks the child
-    unresponsive, after which the rest of the teardown fails at once
-    and close kills the child ([j2534.md](docs/j2534.md#surrogate)).
-    Making disconnect async removes the freeze; it needs a
-    "disconnecting" state in the UI.
 
 ## Roadmap
 
@@ -452,6 +449,10 @@ after the first vehicle session.
   Start and stop from the UI, one file per session, named by date and
   vehicle. Define the raw format together with Phase 4, so there is
   only one. Most useful once live vehicle data reaches LiveView.
+- **Triggered logging (M).** Record only while a condition holds
+  (RPM over a threshold) or capture a window around a link fault.
+  Needs a trigger model in core, similar in shape to the probe: data
+  describing a condition, not code on the worker thread.
 
 ### User interface
 
@@ -496,6 +497,15 @@ after the first vehicle session.
   Confirm that a live-gauge app qualifies before building anything.
   Out of scope: modifying or replacing a vehicle's own infotainment
   system.
+- **Vehicle profiles (M).** Remember per vehicle, keyed by VIN or a
+  label the user names: profile, channel overrides, dashboard
+  arrangement, last device. Nobody reconfigures the tool each time
+  they plug into the same car. Depends on vehicle identification
+  (Vehicle coverage) for the VIN key, or starts with user-named
+  profiles.
+- **User-configurable dashboards (L).** User-authored pages choosing
+  from the gauge library. The gauges are already modular, but layout
+  persistence is new ground and needs the preferences item first.
 
 ### Vehicle coverage
 
@@ -528,6 +538,41 @@ after the first vehicle session.
   derived-signal stage in core, which keeps the UI on final display
   values (rule 2 above). Verify both PIDs against a public J1979
   table before adding them.
+- **Custom derived channels (M).** Beyond the fixed computed signals
+  above: a user-facing expression per channel (differences, unit
+  conversions, smoothing). Stays in core per rule 2, and is the same
+  data-describing-arithmetic shape ADR-0015 uses for requests.
+- **Surface which ECU answered (S).** The probe walks the
+  supported-PID chain per channel, but the UI nowhere shows which
+  module replied on which channel. Matters the day a probe returns
+  three modules talking; the channel model already holds the answer.
+
+### Editing and write path (v0.4+; nothing below is scheduled)
+
+Every item here needs its own ADR first, and the UDS services it raises
+(0x27, 0x2E, 0x31, 0x34/0x36/0x37, 0x3D) carry emissions-law, warranty and
+ABS/traction/stability exposure that the record has to cover. Design order
+matters: the original-copy file format constrains everything after it.
+
+- **The original copy (L; ADR first).** Read the calibration as it
+  stands, store it as a versioned, checksum-addressed artifact, and
+  keep it immutable. Every edited value shows against this shadow, so
+  a restore path always exists. The recording is of data, not frames:
+  session recordings today are frame logs, not a calibration image.
+- **Table and curve editors (L; ADR first).** Editing ECU data means
+  editing arrays: VE and spark tables (grid cells, 2D curves with
+  draggable points, a 3D heatmap view). The signal model describes a
+  single scalar; core needs a richer def type, the biggest schema
+  change since the signal set, and the QML side needs editors the
+  current page set has no gesture at.
+- **Diff and undo (M).** Changed values highlighted against the
+  original, per-value revert, global rollback. Cheap if the original
+  copy exists; painful to retrofit if it doesn't.
+- **Write-flow safety UX (M).** During any write: battery voltage
+  visible, a do-not-power-off state, and a resumable or recoverable
+  transfer whose recovery story is stated before the write starts.
+  The surrogate's wedged-child latch bounds a hung read; a wedged
+  write is a worse failure class and must never be silent.
 
 ### Transports and platforms
 

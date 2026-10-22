@@ -229,7 +229,7 @@ ignition off, wait 10 s, then turn it back on.
 | Values implausible (−40 °C, huge RPM) | Scaling or byte order: temperatures are UINT8 with a −40 offset; 2-byte PIDs are big-endian |
 | Link flips between ok and quiet while frames arrive | Unmatched frames interleaving with replies: a single unmatched frame reads as quiet with no debounce, by design. Note the frame IDs |
 | Slow refresh, replies a cycle late | Known refresh-rate item (20 ms first read vs up to 50 ms ECU response). Measure; don't fix in the session |
-| UI freezes on Disconnect | Known: disconnect is synchronous (Known Issue #33); against a wedged adapter it can take about 6 s. Wait it out, then note how long and whether the session log says `child unresponsive` |
+| "Disconnecting…" lasts seconds | A wedged adapter. The teardown runs off the GUI thread and gives up after about 6 s; Connect stays disabled until it ends. Note how long (the activity log's `Disconnecting:` and `Disconnected:` lines bracket it) and whether the session log says `child unresponsive`. The window itself shouldn't freeze on Disconnect; if it does, that's a bug: capture the session log |
 | App crashes | Abort. Capture the session log and `sur.log` before relaunching |
 
 ## Evidence against the BENCH prep list
@@ -246,8 +246,9 @@ ignition off, wait 10 s, then turn it back on.
 
 ## Teardown
 
-1. Disconnect in the app; the session log shows `OP_DISCONNECT: vendor
-   status 0` exactly once
+1. Disconnect in the app and wait for `Disconnected:` in the activity
+   log (the teardown ends there); the session log shows
+   `OP_DISCONNECT: vendor status 0` exactly once
 2. Copy the session log and `sur.log`
 3. Unplug the adapter, then key off
 
