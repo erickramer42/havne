@@ -1,8 +1,8 @@
 // File/layer: core/src/j2534_transport.cpp | C++17, Qt-free, Win32-guarded
 // Testing: HARNESS — test_j2534_stream: URI parsing, connect parameters,
-//          filter registration, request framing, header strip and
-//          arbitration_id stamp, scheduler rotation and drain, ?poll=
-//          precedence, and the link-health machine (Known Issue #11):
+//          filter registration, request framing and routing, header
+//          strip and arbitration_id stamp, scheduler rotation and drain,
+//          ?poll= precedence, and the link-health machine (Known Issue #11):
 //          hard and quiet reads, untouched counts, the write latch and
 //          its priority, unmatched frames, backoff growth. In-proc
 //          only; no surrogate session drives the health machine.
@@ -166,10 +166,12 @@ struct j2534_uri_params {
     unsigned long poll_pid = 0;  /* valid when has_poll; 0x00 allowed */
 };
 
-/* PID -> def message_id: the mux defs name their ECU via
- * message_id (= the channel's rx_id). O(set->count) per request —
- * a few dozen defs at most; this deliberately keeps pid_scheduler.h
- * per-PID-rx-free so the scheduler stays profile-agnostic. */
+/* PID -> def message_id: a Mode-01 def names its ECU via message_id
+ * (= the channel's rx_id). ecuio_mode01_pid is the test the scheduler
+ * enrolls by, so a request goes where its PID was enrolled from.
+ * O(set->count) per request — a few dozen defs at most; this
+ * deliberately keeps pid_scheduler.h per-PID-rx-free so the scheduler
+ * stays profile-agnostic. */
 uint32_t rx_for_pid(const ecuio_signal_set_t* set, uint8_t pid)
 {
     if (set == nullptr) {
@@ -177,11 +179,12 @@ uint32_t rx_for_pid(const ecuio_signal_set_t* set, uint8_t pid)
     }
     for (uint32_t i = 0; i < set->count; ++i) {
         const ecuio_signal_def_t* d = &set->defs[i];
-        if (d->mux_length > 0 && (d->mux_key & 0xFFu) == pid) {
+        uint8_t def_pid = 0;
+        if (ecuio_mode01_pid(d, &def_pid) && def_pid == pid) {
             return d->message_id;
         }
     }
-    return 0;   /* no muxed def — raw/poll territory */
+    return 0;   /* no Mode-01 def for this PID — raw/poll territory */
 }
 
 /* Channel serving a receive id; falls back to channel 0 (single-

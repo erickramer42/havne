@@ -939,6 +939,61 @@ TEST_F(J2534AdoptionTest, TxidOverrideRewritesDerivedTransmitTarget)
     ecuio_session_destroy(session);
 }
 
+/* ROUTING: a PID's request goes to the channel of its Mode-01 def. The
+ * set's first def reads a 62 <DID> reply from a second ECU, and its key
+ * also ends in 0x0C, but it isn't Mode-01, so it neither enrolls nor
+ * takes PID 0x0C's request to 0x7E1. Test-only profile, static storage
+ * (the registry keeps the pointer). */
+TEST_F(J2534AdoptionTest, Mode01RequestRoutesPastOtherServiceKeys)
+{
+    static const ecuio_channel_decl_t kChannels[] = {{0x7E8u, 0x7E0u},
+                                                     {0x7E9u, 0x7E1u}};
+    static ecuio_signal_def_t defs[2] = {};
+    defs[0].id = 1;
+    defs[0].kind = ECUIO_VALUE_UINT;
+    defs[0].start_byte = 3;
+    defs[0].bit_length = 8;
+    defs[0].scale = 1.0;
+    defs[0].message_id = 0x7E9u;
+    defs[0].mux_length = 3;
+    defs[0].mux_key = 0x62120Cu;
+    defs[1] = defs[0];
+    defs[1].id = 2;
+    defs[1].start_byte = 2;
+    defs[1].message_id = 0x7E8u;
+    defs[1].mux_length = 2;
+    defs[1].mux_key = 0x410Cu;
+    static ecuio_signal_set_t set = {};
+    set.layout_version = ECUIO_SIGNAL_SET_LAYOUT;
+    set.count = 2;
+    set.defs = defs;
+    set.channel_count = 2;
+    set.channels = kChannels;
+    ASSERT_EQ(ecuio_profile_register("test-mode01-routing", &set), ECUIO_OK);
+
+    char uri[700];
+    snprintf(uri, sizeof(uri), "j2534://%s?profile=test-mode01-routing",
+             FAKE_J2534_DLL_PATH);
+    ecuio_session_t* session = nullptr;
+    ASSERT_EQ(ecuio_session_create(uri, &session), ECUIO_OK);
+    ASSERT_EQ(ecuio_session_start(session), ECUIO_OK);
+
+    wait_for_writes(get_write_count, 2, 200);
+    unsigned char wbuf[64] = {};
+    unsigned long wlen = 0, wflags = 0;
+    for (unsigned long i = 0; i < 2; ++i) {
+        get_recorded_write(i, wbuf, &wlen, &wflags);
+        ASSERT_EQ(wlen, 6u) << "write " << i;
+        EXPECT_EQ(wbuf[2], 0x07u) << "write " << i;
+        EXPECT_EQ(wbuf[3], 0xE0u) << "write " << i;   /* not 0x7E1 */
+        EXPECT_EQ(wbuf[4], 0x01u) << "write " << i;
+        EXPECT_EQ(wbuf[5], 0x0Cu) << "write " << i;   /* the only PID */
+    }
+
+    EXPECT_EQ(ecuio_session_close(session), ECUIO_OK);
+    ecuio_session_destroy(session);
+}
+
 /* DRAIN BUDGET: inject a backlog LARGER than the per-cycle drain
  * budget (10) and assert every frame is eventually delivered —
  * leftover frames survive into the next cycle's drain instead of

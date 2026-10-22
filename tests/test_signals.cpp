@@ -414,6 +414,48 @@ TEST_F(SignalDecodeTest, MuxKeyReadsFirstByteMostSignificantInEitherOrder)
     EXPECT_EQ(ecuio_decode_signal(&signal, f.data, f.data_length, &value), 5);
 }
 
+TEST_F(SignalDecodeTest, ThreeByteMuxKeyGatesAndDecodes)
+{
+    /* A 62 <DID> response: the service echo and a 2-byte identifier,
+     * one key, first byte most significant. Every key byte counts. */
+    ecuio_signal_def_t signal = {};
+    signal.kind = ECUIO_VALUE_UINT;
+    signal.byte_order = ECUIO_BYTE_ORDER_BE;
+    signal.start_byte = 3;
+    signal.bit_length = 16;
+    signal.scale = 1.0;
+    signal.message_id = 0x7E8u;
+    signal.mux_offset = 0;
+    signal.mux_length = 3;
+    signal.mux_key = 0x621234u;
+    ASSERT_EQ(ecuio_validate_signal(&signal), ECUIO_VALIDATE_OK);
+
+    ecuio_frame_t f = {};
+    f.arbitration_id = 0x7E8u;
+    f.data_length = 5;
+    const uint8_t wire[5] = {0x62, 0x12, 0x34, 0x01, 0x02};
+    std::memcpy(f.data, wire, sizeof wire);
+    double value = 0.0;
+    EXPECT_EQ(ecuio_def_applies_to_frame(&signal, &f), 1);
+    ASSERT_EQ(ecuio_decode_signal(&signal, f.data, f.data_length, &value), 0);
+    EXPECT_EQ(value, 258.0);
+
+    for (int i = 0; i < 3; ++i) {
+        ecuio_frame_t g = f;
+        g.data[i] ^= 0x01;
+        EXPECT_EQ(ecuio_def_applies_to_frame(&signal, &g), 0) << "key byte " << i;
+        EXPECT_EQ(ecuio_decode_signal(&signal, g.data, g.data_length, &value), 5)
+            << "key byte " << i;
+    }
+
+    /* A fourth key byte is past the limit: the gate never applies the
+     * def and decode refuses it as a bad parameter. */
+    signal.mux_length = 4;
+    signal.mux_key = 0x62123401u;
+    EXPECT_EQ(ecuio_def_applies_to_frame(&signal, &f), 0);
+    EXPECT_EQ(ecuio_decode_signal(&signal, f.data, f.data_length, &value), 3);
+}
+
 TEST(SignalsTest, SignalDefLayoutIsPinned)
 {
     /* ABI pin, matching the static asserts in signals.h. No padding:
@@ -569,6 +611,49 @@ TEST(SignalsTest, ValidatorRequiresByteAlignedBigEndian)
     d.bit_length = 16;
     d.bit_offset = 1;
     EXPECT_EQ(ecuio_validate_signal(&d), ECUIO_VALIDATE_ERR_BIG_ENDIAN);
+}
+
+TEST(SignalsTest, ValidatorBoundsMuxKeysToThreeBytes)
+{
+    /* 1 to 3 key bytes, the key region inside the 64-byte frame payload,
+     * and a key no wider than its length. */
+    const struct { uint8_t length; uint32_t widest; } kLengths[] = {
+        {1, 0xFFu}, {2, 0xFFFFu}, {3, 0xFFFFFFu}};
+    for (const auto& l : kLengths) {
+        ecuio_signal_def_t d = four_byte_def(ECUIO_VALUE_UINT);
+        d.mux_length = l.length;
+        d.mux_key = l.widest;
+        EXPECT_EQ(ecuio_validate_signal(&d), ECUIO_VALIDATE_OK) << int(l.length);
+        d.mux_key = l.widest + 1u;
+        EXPECT_EQ(ecuio_validate_signal(&d), ECUIO_VALIDATE_ERR_MUX_KEY) << int(l.length);
+        d.mux_key = 0;
+        d.mux_offset = static_cast<uint8_t>(64 - l.length);
+        EXPECT_EQ(ecuio_validate_signal(&d), ECUIO_VALIDATE_OK) << int(l.length);
+        d.mux_offset = static_cast<uint8_t>(65 - l.length);
+        EXPECT_EQ(ecuio_validate_signal(&d), ECUIO_VALIDATE_ERR_MUX_RANGE) << int(l.length);
+    }
+    for (int length : {4, 5, 255}) {
+        ecuio_signal_def_t d = four_byte_def(ECUIO_VALUE_UINT);
+        d.mux_length = static_cast<uint8_t>(length);
+        EXPECT_EQ(ecuio_validate_signal(&d), ECUIO_VALIDATE_ERR_MUX_LENGTH) << length;
+    }
+
+    /* The decoder draws the same line, with the key present in the
+     * payload at every length. */
+    const uint8_t payload[4] = {0x62, 0x12, 0x34, 0x56};
+    for (uint8_t length = 0; length <= 4; ++length) {
+        ecuio_signal_def_t d = four_byte_def(ECUIO_VALUE_UINT);
+        d.mux_length = length;
+        for (uint8_t i = 0; i < length; ++i) {
+            d.mux_key = (d.mux_key << 8) | payload[i];
+        }
+        double v = 0.0;
+        const bool valid = ecuio_validate_signal(&d) == ECUIO_VALIDATE_OK;
+        const bool decodes =
+            ecuio_decode_signal(&d, payload, sizeof payload, &v) == ECUIO_DECODE_OK;
+        EXPECT_EQ(valid, decodes) << int(length);
+        EXPECT_EQ(valid, length <= 3) << int(length);
+    }
 }
 
 TEST(SignalsTest, ValidatorRefusesEveryNonzeroReservedByte)

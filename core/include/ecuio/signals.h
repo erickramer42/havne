@@ -39,7 +39,7 @@ typedef struct ecuio_signal_def {
      * ecuio_decode_signal checks the key again. */
     uint32_t message_id;          /* the frame's arbitration_id must equal it */
     uint8_t  mux_offset;          /* payload byte where the key starts */
-    uint8_t  mux_length;          /* 0 = no mux; 1 or 2 = key bytes */
+    uint8_t  mux_length;          /* 0 = no mux; 1 to 3 = key bytes */
     uint8_t  mux_reserved[2];     /* zero */
     uint32_t mux_key;             /* key bytes, first byte most significant,
                                      whatever byte_order says */
@@ -149,7 +149,7 @@ int ecuio_decode_signal(const ecuio_signal_def_t* signal,
                                                     inside its buffer */
 #define ECUIO_VALIDATE_ERR_UNIT               7  /* unit not terminated */
 #define ECUIO_VALIDATE_ERR_DECIMALS           8  /* decimal_places over 3 */
-#define ECUIO_VALIDATE_ERR_MUX_LENGTH         9  /* mux_length over 2 */
+#define ECUIO_VALIDATE_ERR_MUX_LENGTH         9  /* mux_length over 3 */
 #define ECUIO_VALIDATE_ERR_MUX_RANGE         10  /* key region past the
                                                     64-byte frame payload */
 #define ECUIO_VALIDATE_ERR_MUX_KEY           11  /* key wider than its

@@ -243,6 +243,56 @@ TEST(Obd2MuxTest, ShortFrameRejectedWithoutOverread) {
 
 /* ---------- scheduler ---------- */
 
+TEST(PidSchedulerTest, Mode01KeyIsTwoBytes41AtOffsetZero) {
+    ecuio_signal_def_t d = {};
+    d.mux_offset = 0;
+    d.mux_length = 2;
+    d.mux_key = 0x410Cu;
+    uint8_t pid = 0;
+    ASSERT_TRUE(ecuio_mode01_pid(&d, &pid));
+    EXPECT_EQ(pid, 0x0Cu);
+
+    /* Every key below ends in the same byte, and none is Mode-01. */
+    const struct { uint8_t offset, length; uint32_t key; } kNot[] = {
+        {0, 3, 0x62120Cu},   /* 62 <DID> */
+        {0, 2, 0x620Cu},     /* another service's echo */
+        {1, 2, 0x410Cu},     /* 41 <PID>, but not at offset 0 */
+        {0, 1, 0x0Cu},       /* a 1-byte key */
+        {0, 0, 0x410Cu},     /* no mux */
+    };
+    for (const auto& k : kNot) {
+        d.mux_offset = k.offset;
+        d.mux_length = k.length;
+        d.mux_key = k.key;
+        uint8_t untouched = 0xEE;
+        EXPECT_FALSE(ecuio_mode01_pid(&d, &untouched)) << std::hex << k.key;
+        EXPECT_EQ(untouched, 0xEEu) << std::hex << k.key;
+    }
+}
+
+TEST(PidSchedulerTest, EnrollsOnlyMode01Keys) {
+    /* Three keys ending in a PID byte that aren't Mode-01, then one that
+     * is: only 0x05 enrolls. */
+    ecuio_signal_def_t defs[4] = {};
+    defs[0].mux_length = 3;
+    defs[0].mux_key = 0x62120Cu;
+    defs[1].mux_length = 2;
+    defs[1].mux_key = 0x620Du;
+    defs[2].mux_offset = 1;
+    defs[2].mux_length = 2;
+    defs[2].mux_key = 0x410Fu;
+    defs[3].mux_length = 2;
+    defs[3].mux_key = 0x4105u;
+    ecuio_signal_set_t set = {};
+    set.layout_version = ECUIO_SIGNAL_SET_LAYOUT;
+    set.count = 4u;
+    set.defs = defs;
+    ecuio_pid_scheduler s;
+    ASSERT_TRUE(ecuio_sched_from_set(&s, &set));
+    ASSERT_EQ(s.count, 1u);
+    EXPECT_EQ(s.pids[0], 0x05u);
+}
+
 TEST(PidSchedulerTest, EnrollsFromObd2SetInDefOrder) {
     ecuio_pid_scheduler s;
     ASSERT_TRUE(ecuio_sched_from_set(&s, ecuio_obd2_signal_set()));

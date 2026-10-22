@@ -41,12 +41,16 @@ static uint32_t extract_bytes_be(const uint8_t* data,
     return result;
 }
 
+/* The longest mux key: a service echo and a 2-byte identifier, as in
+ * 62 <DID>. The validator, the decoder and the gate all stop here. */
+static const uint8_t kMuxMaxBytes = 3;
+
 /* Read the def's mux key from a payload into *out_key, first byte most
  * significant whatever the field's byte_order: the key is a byte
  * sequence, not a number. False when the key region ends past
- * payload_len. The caller has checked mux_length (1 or 2). Shared by
- * decode and the frame gate, so the two can't disagree on which
- * payloads carry the key. */
+ * payload_len. The caller has checked mux_length (1 to kMuxMaxBytes).
+ * Shared by decode and the frame gate, so the two can't disagree on
+ * which payloads carry the key. */
 static bool read_mux_key(const ecuio_signal_def_t* signal,
                          const uint8_t* payload, uint32_t payload_len,
                          uint32_t* out_key)
@@ -133,7 +137,7 @@ int ecuio_decode_signal(const ecuio_signal_def_t* signal,
 
     /* MUX check (if enabled) */
     if (signal->mux_length > 0) {
-        if (signal->mux_length > 2) {
+        if (signal->mux_length > kMuxMaxBytes) {
             return ECUIO_DECODE_ERR_BAD_PARAMS;
         }
         uint32_t key = 0;
@@ -199,7 +203,7 @@ int ecuio_def_applies_to_frame(const ecuio_signal_def_t* signal,
     /* Mux gate (if enabled). A key length decode would reject doesn't
      * apply either. */
     if (signal->mux_length > 0) {
-        if (signal->mux_length > 2) {
+        if (signal->mux_length > kMuxMaxBytes) {
             return 0;
         }
         uint32_t len = frame->data_length;
@@ -241,15 +245,15 @@ int ecuio_validate_signal(const ecuio_signal_def_t* signal)
     /* MUX validation — the key region lives in the FRAME payload,
      * not the signal field, so it bounds against the 64-byte frame ABI
      * cap. decode-time checks enforce the actual payload_len. */
-    if (signal->mux_length > 2) {
+    if (signal->mux_length > kMuxMaxBytes) {
         return ECUIO_VALIDATE_ERR_MUX_LENGTH;
     }
     if (signal->mux_length > 0) {
         if ((uint32_t)signal->mux_offset + signal->mux_length > 64u) {
             return ECUIO_VALIDATE_ERR_MUX_RANGE;
         }
-        const uint32_t mux_max =
-            (signal->mux_length == 1) ? 0xFFu : 0xFFFFu;
+        /* 0xFF, 0xFFFF or 0xFFFFFF: the shift is at most 24 bits */
+        const uint32_t mux_max = (1u << (8u * signal->mux_length)) - 1u;
         if (signal->mux_key > mux_max) {
             return ECUIO_VALIDATE_ERR_MUX_KEY;
         }
