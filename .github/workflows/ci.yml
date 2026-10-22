@@ -5,7 +5,18 @@ on:
     branches: [main, dev]
   pull_request:
     branches: [main]
+  # Actions > CI > Run workflow, or: gh workflow run ci.yml --ref <branch>
+  # [-f smoke_only=true]. A manual run is the way to get the iOS simulator
+  # smoke outside a pull request; re-running a push run replays the push
+  # and skips the smoke again.
   workflow_dispatch:
+    inputs:
+      smoke_only:
+        description: >-
+          Run only core-and-tests and the iOS simulator smoke, skipping the
+          other platform jobs
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -34,6 +45,7 @@ jobs:
   # a session a test forgets to destroy fails here. The J2534 suites are
   # Windows-only, so this covers core, signals, obd2 and the C ABI check.
   core-sanitizers:
+    if: ${{ !inputs.smoke_only }}
     runs-on: ubuntu-latest
     needs: core-and-tests
     timeout-minutes: 20
@@ -54,6 +66,7 @@ jobs:
         run: ctest --test-dir build --output-on-failure --no-tests=error
 
   win-build:
+    if: ${{ !inputs.smoke_only }}
     runs-on: windows-latest
     needs: core-and-tests
     timeout-minutes: 20
@@ -91,6 +104,7 @@ jobs:
         run: ctest --test-dir build -C Release --output-on-failure --no-tests=error
 
   macos-build:
+    if: ${{ !inputs.smoke_only }}
     runs-on: macos-latest
     needs: core-and-tests
     timeout-minutes: 15
@@ -113,6 +127,7 @@ jobs:
         run: ctest --test-dir build --output-on-failure --no-tests=error
 
   linux-build:
+    if: ${{ !inputs.smoke_only }}
     runs-on: ubuntu-latest
     needs: core-and-tests
     timeout-minutes: 15
@@ -141,6 +156,7 @@ jobs:
   # gtest_discover_tests runs each test binary at build time, which can't
   # work for a target the runner can't execute.
   android-build:
+    if: ${{ !inputs.smoke_only }}
     runs-on: ubuntu-latest
     needs: core-and-tests
     timeout-minutes: 20
@@ -193,6 +209,7 @@ jobs:
           cmake --build build --target apk
 
   ios-build:
+    if: ${{ !inputs.smoke_only }}
     runs-on: macos-latest
     needs: core-and-tests
     timeout-minutes: 25
@@ -226,10 +243,10 @@ jobs:
   # arm64 simulator libraries from Qt.
   #
   # Runs on pull requests and on request, not on every push: it takes
-  # ~20 min against ~11 min for the rest of CI. Request it with
-  # "[ios-smoke]" in the pushed commit's message, or with Actions > CI >
-  # Run workflow (that button appears only once main's copy of this file
-  # has workflow_dispatch). A re-run replays the original event, so
+  # 20-30 min against a few minutes for the rest of CI. Request it with a
+  # manual run (Actions > CI > Run workflow, on any branch; tick
+  # smoke_only to skip the other platform jobs), or with "[ios-smoke]" in
+  # the pushed commit's message. A re-run replays the original event, so
   # re-running a skipped smoke skips it again.
   ios-simulator-smoke:
     if: >-
