@@ -54,16 +54,21 @@ to the end undocumented.
       fail on the no-ACK bus, and teardown is clean. There's no ECU
       simulator, so the vehicle is the first talking bus; this is the
       risk that can be retired at the desk
-- [ ] Launch from a cmd shell in `build\app\Release` with payload
-      logging on: `set ECUIO_SUR_LOG_FRAMES=1`, then
-      `qttune.exe 2> sur.log`. The
-      session log at `%TEMP%\ecuio-surrogate.log` should hold both
-      `[surrogate HH:MM:SS.mmm]` and `[sur …]` lines, and its second
-      child line reads "frame logging on". Once connected, every request
-      and reply appears as an `OP_WRITE frame` / `OP_READ frame` line
-      with its bytes ([j2534.md](../j2534.md#surrogate)); the redirect
-      is a backup. Each connect takes the fixed name and keeps the
-      previous log as `ecuio-surrogate.<YYYYMMDD-HHMMSS-mmm>.log`
+- [ ] Launch the app and tick **Record sessions** in Settings before
+      the first connect (it can't change during a session). Each
+      connect then writes a folder under `Documents\QtTune\recordings`
+      with every frame (`frames.csv`, host and vendor time side by
+      side), every decoded value (`signals.csv`) and the activity lines
+      (`events.log`) ([ADR-0017](../adr/0017-session-recording.md)).
+      The Activity log names the folder at each connect
+- [ ] Recording also turns on the surrogate's payload logging. After
+      the first connect, the session log at `%TEMP%\ecuio-surrogate.log`
+      holds both `[surrogate HH:MM:SS.mmm]` and `[sur …]` lines, and a
+      child line reads "frame logging on". Every request and reply
+      appears as an `OP_WRITE frame` / `OP_READ frame` line with its
+      bytes and statuses ([j2534.md](../j2534.md#surrogate)), which the
+      recording can't see. Each connect takes the fixed name and keeps
+      the previous log as `ecuio-surrogate.<YYYYMMDD-HHMMSS-mmm>.log`
       beside it, the newest 50, so copy them all at teardown and don't
       run the test suite before you have
 - [ ] Know the four link states before you need them (see
@@ -154,10 +159,12 @@ is requested)
       supported PIDs 0x01–0x20 (the first byte's top bit is PID 0x01).
       It predicts which Phase 3 signals stay "—"
 
-**Evidence:** the session log: its `OP_WRITE frame` and
-`OP_READ frame` lines carry the request and reply bytes, statuses,
-RxStatus and vendor timestamps. To compare a few payloads against the
-Log page, Pause holds its rows still.
+**Evidence:** the recording's `frames.csv` (reply bytes, vendor
+timestamps) and `signals.csv` (what they decoded to), and the session
+log's `OP_WRITE frame` and `OP_READ frame` lines (request and reply
+bytes, statuses, RxStatus). To compare a few payloads on screen,
+Pause holds the Log page's rows still; the recording keeps every
+frame either way.
 
 ## Phase 3 — full scheduler
 
@@ -188,10 +195,11 @@ Log page, Pause holds its rows still.
       its share of the page); rows past `Theme.seriesColors` reuse
       its colours, with dashed chart traces
 
-**Evidence:** a screenshot of LiveView; the refresh you observe per
-signal (expect about one rotation; replies a cycle late are a known item, not a
-failure); the Log page's time column (seconds, from `timestamp_us`)
-against the wall clock over a minute (BENCH prep #5).
+**Evidence:** a screenshot of LiveView, and a minute or more of
+recording: each signal's refresh interval comes from its `host_us`
+in `signals.csv` (expect about one rotation; replies a cycle late are
+a known item, not a failure), and `frames.csv`'s `timestamp_us`
+against `host_us` gives the vendor timestamp's unit (BENCH prep #5).
 
 ## Phase 4 — engine idling (optional)
 
@@ -241,7 +249,7 @@ ignition off, wait 10 s, then turn it back on.
 | #2 Request framing | Phase 2 replies arrive |
 | #3 No checksum byte | Replies decode without a trailing byte |
 | #4 29-bit addressing | 11-bit IDs expected; any 29-bit traffic is news |
-| #5 Timestamp units | Phase 3: the `ts` deltas in `OP_READ frame` lines match their wall-clock stamps (µs) |
+| #5 Timestamp units | Phase 3: in `frames.csv`, `timestamp_us` deltas against `host_us` deltas (µs if they match) |
 | #6 ReadMsgs statuses | Session log: does any `OP_READ frame: status 9` line appear (`ERR_TIMEOUT` with data)? |
 | #7 Struct layout | A correct decode in phases 2–3 implies the layout is right |
 | #8 Vendor timeouts | Read timing visible in the session log stamps |
@@ -251,18 +259,20 @@ ignition off, wait 10 s, then turn it back on.
 1. Disconnect in the app and wait for `Disconnected:` in the activity
    log (the teardown ends there); the session log shows
    `OP_DISCONNECT: vendor status 0` exactly once
-2. Copy `sur.log`, the session log and the earlier ones kept beside
-   it (`%TEMP%\ecuio-surrogate*.log`, this session's by their stamps)
+2. Copy this session's recording folders (the Activity log named
+   each) and its session logs: `%TEMP%\ecuio-surrogate.log` and the
+   earlier ones kept beside it, this session's by their stamps
 3. Unplug the adapter, then key off
 
 ## Post-session actions
 
 1. Copy this sheet, filled in, to `docs/bench-sessions/<date>.md`, with
-   the session logs alongside (the 2026-10-16 session's
+   the session logs and recordings alongside (the 2026-10-16 session's
    `surrogate-phase*.log` files are the precedent). Before committing,
-   scrub the sheet, the logs and any screenshots: no VIN or
-   calibration IDs, no names or initials, and no local paths
-   (`%TEMP%` and `C:\Users\…` paths carry the account name)
+   scrub the sheet, the logs, the recordings' `events.log` (it holds
+   the URI) and any screenshots: no VIN or calibration IDs, no names
+   or initials, and no local paths (`%TEMP%` and `C:\Users\…` paths
+   carry the account name)
 2. Walk the [BENCH prep list](../../STATUS.md#bench-prep): mark each
    item CONFIRMED / REFUTED (with evidence) / STILL UNKNOWN
 3. Update STATUS.md (phase checklist: "first live, read-only vehicle

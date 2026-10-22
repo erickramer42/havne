@@ -1,7 +1,8 @@
 // File/layer: app/qttunebridge.cpp | Qt6 Core, app layer, C++17
 // Testing: test_bridge (QtCore only): worker→GUI marshaling, coalescing,
 //          in-flight backpressure, the signal model's roles and age
-//          refresh, link-state mapping. QML rendering: manual smoke.
+//          refresh, link-state mapping, session recording
+//          (BridgeTest.Recording*). QML rendering: manual smoke.
 
 #include "qttunebridge.h"
 #include "ecuio/version.h"
@@ -11,8 +12,13 @@
 
 #include <QMetaObject>
 #include <QByteArray>
+#include <QDateTime>
+#include <QDir>
+#include <QStandardPaths>
+#include <QtGlobal>
 
 #include <algorithm>
+#include <chrono>
 
 // ---------------- FrameListModel ----------------
 FrameListModel::FrameListModel(QObject* parent)
@@ -317,6 +323,19 @@ QtTuneBridge::QtTuneBridge(QObject* parent)
             ++m_signalBatchCount;
             emit signalBatchChanged();
         }
+        // On disk within a tick, so a crash loses at most 100 ms
+        m_recorder.flush();
+        if (m_recorder.active() && !m_recorder.ok()) {
+            const QString folder = recordingFolder();
+            stopRecording(QStringLiteral("a write failed"));
+            emit logMessage(QStringLiteral("Recording stopped: can't write to %1").arg(folder));
+        }
+    });
+
+    // The activity lines, link transitions included, go into the
+    // recording's events.log too
+    connect(this, &QtTuneBridge::logMessage, this, [this](const QString& line) {
+        m_recorder.event(line);
     });
 }
 
@@ -347,6 +366,10 @@ QtTuneBridge::~QtTuneBridge()
     }
     if (m_session != nullptr) {
         destroySessionLocked();
+    }
+    // Closed without stopRecording's signal: QML may already be gone
+    if (m_recorder.active()) {
+        m_recorder.stop(recordingSummary(QStringLiteral("the app closed")));
     }
     if (m_initialized) {
         ecuio_shutdown();
@@ -451,6 +474,8 @@ QString QtTuneBridge::startSession(ecuio_session_t* session)
 // IDENTICAL state (parity by construction, not by care).
 void QtTuneBridge::applyConnectedState(ecuio_session_t* session, const QString& uri)
 {
+    // Before frames are accepted, so the recording holds every one
+    startRecording(uri, ecuio_session_signal_set(session));
     m_session = session;
     m_currentUri = uri;
     emit currentUriChanged();
@@ -482,6 +507,7 @@ QString QtTuneBridge::connectSession(const QString& uri)
         return {};
     }
 
+    applyFrameLoggingEnv();
     ecuio_session_t* session = nullptr;
     QString err = connectCoreOnly(uri, &session);
     if (err.isEmpty()) {
@@ -506,6 +532,7 @@ void QtTuneBridge::connectSessionAsync(const QString& uri)
     m_connecting = true;
     emit connectingChanged();
     emit logMessage(QStringLiteral("Connecting: %1").arg(uri));
+    applyFrameLoggingEnv();   // before the connect thread spawns any surrogate
 
     m_connectThread = std::thread([this, uri]() {
         ecuio_session_t* session = nullptr;
@@ -588,8 +615,124 @@ void QtTuneBridge::disconnectSession()
             m_disconnecting = false;
             emit disconnectingChanged();
             emit logMessage(QStringLiteral("Disconnected: %1").arg(uri));
+            // Kept open until here, so it brackets the whole teardown
+            stopRecording(QStringLiteral("disconnected"));
         }, Qt::QueuedConnection);
     });
+}
+
+void QtTuneBridge::setRecording(bool on)
+{
+    if (m_connected.load(std::memory_order_acquire) || m_connecting || m_disconnecting) {
+        emit recordingChanged();   // refused: puts the switch back
+        return;
+    }
+    if (m_recording == on) return;
+    m_recording = on;
+    emit recordingChanged();
+}
+
+QString QtTuneBridge::recordingFolder() const
+{
+    const QString folder = m_recorder.folder();
+    if (folder.isEmpty()) return {};
+    const QString docs = QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation);
+    if (!docs.isEmpty()) {
+        const QString rel = QDir(docs).relativeFilePath(folder);
+        if (QDir::isRelativePath(rel) && !rel.startsWith(QLatin1String(".."))) {
+            return QDir::toNativeSeparators(QStringLiteral("Documents/") + rel);
+        }
+    }
+    return QDir::toNativeSeparators(folder);
+}
+
+QUrl QtTuneBridge::recordingFolderUrl() const
+{
+    const QString folder = m_recorder.folder();
+    return folder.isEmpty() ? QUrl() : QUrl::fromLocalFile(folder);
+}
+
+// Recording turns on the surrogate's payload logging for the spawns it
+// records, so the session log holds the requests and write statuses the
+// recording can't see. A value set at launch is left alone; one the
+// bridge set comes off again at the next connect without recording.
+// Called on the GUI thread before the connect spawns anything; the child
+// inherits the environment at spawn.
+void QtTuneBridge::applyFrameLoggingEnv()
+{
+    static const char kVar[] = "ECUIO_SUR_LOG_FRAMES";
+    if (m_recording) {
+        if (!m_setFrameLogging && !qEnvironmentVariableIsSet(kVar)) {
+            qputenv(kVar, "1");
+            m_setFrameLogging = true;
+        }
+    } else if (m_setFrameLogging) {
+        qunsetenv(kVar);
+        m_setFrameLogging = false;
+    }
+}
+
+void QtTuneBridge::startRecording(const QString& uri, const ecuio_signal_set_t* set)
+{
+    if (!m_recording) return;
+
+    QString root = m_recordingsRoot;
+    if (root.isEmpty()) {
+        const QString docs = QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation);
+        if (docs.isEmpty()) {
+            emit logMessage(QStringLiteral("Recording failed: no Documents folder"));
+            return;
+        }
+        root = docs + QStringLiteral("/QtTune/recordings");
+    }
+
+    QStringList names;
+    for (uint32_t i = 0; set != nullptr && i < set->count; ++i) {
+        names << QString::fromUtf8(set->defs[i].name,
+                                   static_cast<qsizetype>(qstrnlen(set->defs[i].name,
+                                                                   sizeof set->defs[i].name)));
+    }
+    const QByteArray frameLogging = qgetenv("ECUIO_SUR_LOG_FRAMES");
+    const QStringList header = {
+        QStringLiteral("QtTune session recording (ADR-0017)"),
+        QStringLiteral("started  %1 (local time)")
+            .arg(QDateTime::currentDateTime().toString(QStringLiteral("yyyy-MM-dd HH:mm:ss.zzz"))),
+        QStringLiteral("core     %1").arg(coreVersion()),
+        QStringLiteral("uri      %1").arg(uri),
+        set == nullptr
+            ? QStringLiteral("signals  none: the raw profile, frames only")
+            : QStringLiteral("signals  %1: %2").arg(names.size()).arg(names.join(QStringLiteral(", "))),
+        m_setFrameLogging
+            ? QStringLiteral("surrogate frame logging  on, set by this recording")
+            : frameLogging.isNull()
+                ? QStringLiteral("surrogate frame logging  off")
+                : QStringLiteral("surrogate frame logging  ECUIO_SUR_LOG_FRAMES=%1, set at launch")
+                      .arg(QString::fromUtf8(frameLogging)),
+    };
+
+    QString error;
+    if (!m_recorder.start(root, header, &error)) {
+        emit logMessage(QStringLiteral("Recording failed: %1").arg(error));
+        return;
+    }
+    emit recordingStateChanged();
+    emit logMessage(QStringLiteral("Recording: %1").arg(recordingFolder()));
+}
+
+QString QtTuneBridge::recordingSummary(const QString& why) const
+{
+    return QStringLiteral("end      %1: %2 frames, %3 values, %4 frames dropped by the bridge")
+        .arg(why)
+        .arg(m_recorder.frameRows())
+        .arg(m_recorder.sampleRows())
+        .arg(m_droppedFrames.load(std::memory_order_relaxed));
+}
+
+void QtTuneBridge::stopRecording(const QString& why)
+{
+    if (!m_recorder.active()) return;
+    m_recorder.stop(recordingSummary(why));
+    emit recordingStateChanged();
 }
 
 void QtTuneBridge::setLogPaused(bool paused)
@@ -634,19 +777,23 @@ void QtTuneBridge::onFrame(const ecuio_frame_t* frame, void* user_data)
     // ecuio_frame_t holds its payload INLINE (uint8_t data[64]) — this struct
     // copy is a deep copy of the payload; no dangling pointer is possible.
     const ecuio_frame_t copy = *frame;
+    // Stamped here, as it arrives, not when the GUI thread gets to it:
+    // the recording's host clock
+    const auto arrived = SessionRecorder::Clock::now();
     self->m_inFlightFrames.fetch_add(1, std::memory_order_relaxed);
 
     // Lifetime contract: invoking with `self` as context object means the
     // queued lambda is dropped if the bridge is destroyed before it runs.
     // DO NOT change to a context-free postEvent pattern without revisiting
     // destruction ordering.
-    QMetaObject::invokeMethod(self, [self, copy]() {
+    QMetaObject::invokeMethod(self, [self, copy, arrived]() {
         self->m_inFlightFrames.fetch_sub(1, std::memory_order_relaxed);
-        self->handleFrameInternal(&copy);
+        self->handleFrameInternal(&copy, arrived);
     }, Qt::QueuedConnection);
 }
 
-void QtTuneBridge::handleFrameInternal(const ecuio_frame_t* frame)
+void QtTuneBridge::handleFrameInternal(const ecuio_frame_t* frame,
+                                       SessionRecorder::Clock::time_point arrived)
 {
     if (!m_connected.load(std::memory_order_acquire)) return;
 
@@ -655,6 +802,9 @@ void QtTuneBridge::handleFrameInternal(const ecuio_frame_t* frame)
     const uint16_t len = (frame->data_length <= sizeof(frame->data))
                          ? frame->data_length
                          : static_cast<uint16_t>(sizeof(frame->data));
+
+    // Recorded whether or not the log is paused
+    m_recorder.frame(arrived, *frame, len);
 
     // Paused: counted and decoded below, but kept out of the frame log
     if (!m_logPaused) {
@@ -684,6 +834,7 @@ void QtTuneBridge::handleFrameInternal(const ecuio_frame_t* frame)
             }
             double val = 0.0;
             if (ecuio_decode_signal(&def, frame->data, len, &val) == ECUIO_DECODE_OK) {
+                m_recorder.sample(arrived, def, val);
                 bool merged = false;
                 for (auto& staged : m_stagingBuffer) {
                     if (staged.first == def.id) {

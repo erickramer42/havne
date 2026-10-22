@@ -143,7 +143,11 @@ The full reference is [j2534.md](j2534.md).
   unanswered open means a vendor stuck in its own code.
 - **One session log** (`%TEMP%\ecuio-surrogate.log`) holds both the
   client's and the child's lines, stamped on one clock. A GUI launch
-  loses nothing.
+  loses nothing, and each spawn keeps the log it replaces.
+- **The two build trees must match:** a fingerprint of the shared
+  headers, generated at configure time, is checked at `OP_OPEN`, so a
+  stale `build-win32` fails at connect instead of misreading
+  constants.
 - **The pipe is private:** an unguessable name, a first-instance-only
   create, no remote clients, and a DACL for the current user alone.
   The child inherits the session log and no other handle.
@@ -195,6 +199,11 @@ The bridge polls it on its 100 ms tick and maps it for the UI
   with a pause for the Log page), a signal model (value, `hasValue`,
   `ageMs`, `decimals`, a 120-sample history per signal), device
   discovery, and the link state.
+- **Recording is the bridge's too**
+  ([ADR-0017](adr/0017-session-recording.md)): with it on, the
+  bridge writes every frame it accepts, each decoded value and the
+  activity lines to one folder per connect. It sits where those three
+  already meet, on the GUI thread, so core is unchanged.
 - **Display strings come from core:** each def's name, unit and
   `decimal_places` reach the screen as they are, on Live and the
   Dashboard alike, so neither page formats a unit or picks a precision

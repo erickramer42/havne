@@ -1,8 +1,11 @@
 #include <gtest/gtest.h>
 
 #include <QCoreApplication>
+#include <QDir>
 #include <QEventLoop>
+#include <QFile>
 #include <QStringList>
+#include <QTemporaryDir>
 #include <QTimer>
 #include <QThread>
 #include <QVariant>
@@ -63,6 +66,54 @@ bool disconnectAndWait(QtTuneBridge& bridge, int timeout_ms = 5000)
 {
     bridge.disconnectSession();
     return spinUntil([&bridge]() { return !bridge.disconnecting(); }, timeout_ms, 10);
+}
+
+QByteArray readFile(const QString& path)
+{
+    QFile f(path);
+    return f.open(QIODevice::ReadOnly) ? f.readAll() : QByteArray();
+}
+
+/* Lines without their line ends (the recorder writes text mode, CRLF
+ * on Windows). */
+QList<QByteArray> fileLines(const QString& path)
+{
+    QList<QByteArray> lines;
+    for (QByteArray line : readFile(path).split('\n')) {
+        if (line.endsWith('\r')) line.chop(1);
+        if (!line.isEmpty()) lines << line;
+    }
+    return lines;
+}
+
+QStringList recordingFolders(const QString& root)
+{
+    return QDir(root).entryList(QDir::Dirs | QDir::NoDotAndDotDot, QDir::Name);
+}
+
+/* Restores an environment variable as it was, set or not. */
+struct EnvRestore {
+    const char* name;
+    bool had;
+    QByteArray value;
+    explicit EnvRestore(const char* n)
+        : name(n), had(qEnvironmentVariableIsSet(n)), value(qgetenv(n)) {}
+    ~EnvRestore() { had ? qputenv(name, value) : qunsetenv(name); }
+    EnvRestore(const EnvRestore&) = delete;
+    EnvRestore& operator=(const EnvRestore&) = delete;
+};
+
+/* What the surrogate child would inherit: the OS environment block, not
+ * just the C runtime's copy. */
+QByteArray osEnv(const char* name)
+{
+#ifdef _WIN32
+    char buf[64] = {};
+    const DWORD n = GetEnvironmentVariableA(name, buf, sizeof(buf));
+    return (n > 0 && n < sizeof(buf)) ? QByteArray(buf, static_cast<qsizetype>(n)) : QByteArray();
+#else
+    return qgetenv(name);
+#endif
 }
 
 } // namespace
@@ -165,6 +216,148 @@ TEST(BridgeTest, ClearFramesResets)
     EXPECT_EQ(bridge.model()->rowCount(), 0);
 
     bridge.disconnectSession();
+}
+
+/* Recording is off by default: a session writes nothing. */
+TEST(BridgeTest, RecordingIsOffByDefault)
+{
+    QTemporaryDir root;
+    ASSERT_TRUE(root.isValid());
+    QtTuneBridge bridge;
+    bridge.setRecordingsRootForTesting(root.path());
+    EXPECT_FALSE(bridge.recording());
+
+    ASSERT_TRUE(bridge.connectSession("mock://off").isEmpty());
+    ASSERT_TRUE(spinUntil([&bridge]() { return bridge.frameCount() > 2; }, 5000));
+    EXPECT_FALSE(bridge.recordingActive());
+    ASSERT_TRUE(disconnectAndWait(bridge));
+
+    EXPECT_TRUE(recordingFolders(root.path()).isEmpty());
+    EXPECT_TRUE(bridge.recordingFolder().isEmpty());
+}
+
+/* One folder per connect: every frame the bridge received, the log's
+ * Pause notwithstanding, each decoded value, and the session's activity
+ * lines from Connected through Disconnected. */
+TEST(BridgeTest, RecordingWritesFramesValuesAndEvents)
+{
+    QTemporaryDir root;
+    ASSERT_TRUE(root.isValid());
+    QtTuneBridge bridge;
+    bridge.setRecordingsRootForTesting(root.path());
+    bridge.setRecording(true);
+    ASSERT_TRUE(bridge.recording());
+
+    ASSERT_TRUE(bridge.connectSession("mock://rec").isEmpty());
+    EXPECT_TRUE(bridge.recordingActive());
+    ASSERT_TRUE(spinUntil([&bridge]() {
+        return bridge.frameCount() > 3 && bridge.signalBatchCount() > 0;
+    }, 5000));
+    bridge.setLogPaused(true);
+    const int before = bridge.frameCount();
+    ASSERT_TRUE(spinUntil([&bridge, before]() { return bridge.frameCount() > before + 2; }, 5000));
+    ASSERT_TRUE(disconnectAndWait(bridge));
+    EXPECT_FALSE(bridge.recordingActive());
+    const int frames = bridge.frameCount();
+
+    const QStringList folders = recordingFolders(root.path());
+    ASSERT_EQ(folders.size(), 1);
+    const QString dir = root.path() + QStringLiteral("/") + folders.first();
+    EXPECT_TRUE(bridge.recordingFolder().endsWith(folders.first())) << bridge.recordingFolder().toStdString();
+    EXPECT_EQ(bridge.recordingFolderUrl(), QUrl::fromLocalFile(dir));
+
+    // frames.csv: the header row, then one row per frame, host time
+    // never going backwards
+    const QList<QByteArray> frameRows = fileLines(dir + QStringLiteral("/frames.csv"));
+    ASSERT_FALSE(frameRows.isEmpty());
+    EXPECT_EQ(frameRows.first(), QByteArray("host_us,timestamp_us,id,flags,data"));
+    EXPECT_EQ(frameRows.size() - 1, frames) << "every frame, paused or not";
+    qint64 lastHost = -1;
+    bool sawTelemetry = false;
+    for (qsizetype i = 1; i < frameRows.size(); ++i) {
+        const QList<QByteArray> cols = frameRows[i].split(',');
+        ASSERT_EQ(cols.size(), 5) << frameRows[i].toStdString();
+        const qint64 host = cols[0].toLongLong();
+        EXPECT_GE(host, lastHost) << frameRows[i].toStdString();
+        lastHost = host;
+        sawTelemetry = sawTelemetry || cols[2] == "0xC0";
+    }
+    EXPECT_TRUE(sawTelemetry) << "no 0x0C0 telemetry frame recorded";
+
+    // signals.csv: a byte-order mark, the header row, decoded values
+    const QByteArray signalsCsv = readFile(dir + QStringLiteral("/signals.csv"));
+    EXPECT_TRUE(signalsCsv.startsWith("\xEF\xBB\xBFhost_us,signal,value,unit"));
+    EXPECT_TRUE(signalsCsv.contains(",RPM,")) << "no RPM value recorded";
+
+    const QByteArray events = readFile(dir + QStringLiteral("/events.log"));
+    for (const char* expected : { "uri      mock://rec", "signals  ", "Connected: mock://rec",
+                                  "Disconnecting: mock://rec", "Disconnected: mock://rec",
+                                  "end      disconnected: " }) {
+        EXPECT_TRUE(events.contains(expected)) << expected << "\n" << events.toStdString();
+    }
+}
+
+/* The switch holds while a session is up, so a recording covers a whole
+ * session; each connect gets its own folder. */
+TEST(BridgeTest, RecordingSwitchHoldsDuringASession)
+{
+    QTemporaryDir root;
+    ASSERT_TRUE(root.isValid());
+    QtTuneBridge bridge;
+    bridge.setRecordingsRootForTesting(root.path());
+
+    ASSERT_TRUE(bridge.connectSession("mock://late").isEmpty());
+    bridge.setRecording(true);
+    EXPECT_FALSE(bridge.recording());
+    ASSERT_TRUE(disconnectAndWait(bridge));
+    EXPECT_TRUE(recordingFolders(root.path()).isEmpty());
+
+    bridge.setRecording(true);
+    ASSERT_TRUE(bridge.recording());
+    for (int i = 0; i < 2; ++i) {
+        ASSERT_TRUE(bridge.connectSession("mock://twice").isEmpty());
+        bridge.setRecording(false);
+        EXPECT_TRUE(bridge.recording());
+        ASSERT_TRUE(disconnectAndWait(bridge));
+    }
+    EXPECT_EQ(recordingFolders(root.path()).size(), 2);
+}
+
+/* Recording turns on the surrogate's frame logging for the spawns it
+ * records, in the OS environment the child inherits, and takes it off
+ * again at the next connect without recording. A value set at launch
+ * stays. */
+TEST(BridgeTest, RecordingTurnsOnSurrogateFrameLogging)
+{
+    const EnvRestore restore("ECUIO_SUR_LOG_FRAMES");
+    qunsetenv("ECUIO_SUR_LOG_FRAMES");
+    QTemporaryDir root;
+    ASSERT_TRUE(root.isValid());
+    QtTuneBridge bridge;
+    bridge.setRecordingsRootForTesting(root.path());
+
+    bridge.setRecording(true);
+    ASSERT_TRUE(bridge.connectSession("mock://env").isEmpty());
+    EXPECT_EQ(osEnv("ECUIO_SUR_LOG_FRAMES"), QByteArray("1"));
+    ASSERT_TRUE(disconnectAndWait(bridge));
+    const QStringList folders = recordingFolders(root.path());
+    ASSERT_EQ(folders.size(), 1);
+    EXPECT_TRUE(readFile(root.path() + QStringLiteral("/") + folders.first() + QStringLiteral("/events.log"))
+                    .contains("surrogate frame logging  on, set by this recording"));
+
+    bridge.setRecording(false);
+    ASSERT_TRUE(bridge.connectSession("mock://env").isEmpty());
+    EXPECT_TRUE(osEnv("ECUIO_SUR_LOG_FRAMES").isEmpty());
+    ASSERT_TRUE(disconnectAndWait(bridge));
+
+    qputenv("ECUIO_SUR_LOG_FRAMES", "1");   // set at launch
+    bridge.setRecording(true);
+    ASSERT_TRUE(bridge.connectSession("mock://env").isEmpty());
+    ASSERT_TRUE(disconnectAndWait(bridge));
+    bridge.setRecording(false);
+    ASSERT_TRUE(bridge.connectSession("mock://env").isEmpty());
+    EXPECT_EQ(osEnv("ECUIO_SUR_LOG_FRAMES"), QByteArray("1"));
+    ASSERT_TRUE(disconnectAndWait(bridge));
 }
 
 /* The frame log belongs to a session: rows stay readable after a

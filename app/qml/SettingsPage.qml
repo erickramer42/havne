@@ -5,7 +5,9 @@
 //          (UI stays responsive while a vendor blocks ~8 s), activity log
 //          shows connect lifecycle and takes the remaining height, error
 //          label on bad URI, status label colored by link state
-//          (Theme.linkColor)
+//          (Theme.linkColor), Record sessions fixed during a session and
+//          its folder shown relative to Documents. The recording's
+//          bridge side: BridgeTest.Recording*.
 
 import QtQuick
 import QtQuick.Controls
@@ -174,6 +176,50 @@ Pane {
                     enabled: !Bridge.connected && !Bridge.connecting && !Bridge.disconnecting
                     onClicked: page.fillUri(modelData)
                 }
+            }
+        }
+
+        // ---- Recording (ADR-0017) ----
+        // Off by default. It takes effect at the next connect, so it's
+        // fixed while a session is up and each recording covers a whole
+        // session.
+        RowLayout {
+            Layout.fillWidth: true
+            spacing: Theme.spacing
+
+            CheckBox {
+                id: recordBox
+                text: qsTr("Record sessions")
+                checked: Bridge.recording
+                enabled: !Bridge.connected && !Bridge.connecting && !Bridge.disconnecting
+                // The bridge decides; the binding comes back either way
+                onToggled: {
+                    Bridge.recording = checked
+                    checked = Qt.binding(() => Bridge.recording)
+                }
+                contentItem: Label {
+                    text: recordBox.text
+                    color: recordBox.enabled ? Theme.text : Theme.textDim
+                    leftPadding: recordBox.indicator.width + recordBox.spacing
+                    verticalAlignment: Text.AlignVCenter
+                }
+            }
+            Label {
+                Layout.fillWidth: true
+                elide: Text.ElideMiddle
+                color: Bridge.recordingActive ? Theme.success : Theme.textDim
+                text: Bridge.recordingActive
+                      ? qsTr("Recording to %1").arg(Bridge.recordingFolder)
+                      : Bridge.recordingFolder !== ""
+                        ? qsTr("Last: %1").arg(Bridge.recordingFolder)
+                      : Bridge.recording
+                        ? qsTr("Frames, values and events, from the next connect")
+                      : ""
+            }
+            ThemedButton {
+                text: qsTr("Open folder")
+                visible: Bridge.recordingFolder !== ""
+                onClicked: Qt.openUrlExternally(Bridge.recordingFolderUrl)
             }
         }
 

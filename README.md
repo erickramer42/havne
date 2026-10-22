@@ -99,6 +99,10 @@ screen, is [docs/architecture.md](docs/architecture.md).
 - **Live view.** Decoded values with units, refreshed at 10 Hz, plus
   a rolling strip chart.
 - **Frame log.** Raw frames, newest-first or oldest-first, with Pause.
+- **Session recording.** Opt-in: each connect writes every frame,
+  every decoded value and the session's events to CSV and text files,
+  with host and adapter time side by side
+  ([ADR-0017](docs/adr/0017-session-recording.md)).
 - **J2534 Pass-Thru (Windows).** Finds installed vendor drivers; pick
   one in Settings or enter a `j2534://` URI. The `obd2` profile
   polls standard Mode-01 PIDs, so a bare `j2534://` streams decoded

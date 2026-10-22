@@ -74,9 +74,19 @@ next.
   - Surrogate diagnostics: client and child write one session log,
     both stamped `HH:MM:SS.mmm`, so a GUI launch keeps the whole story
     without a stderr redirect; a second concurrent session gets its own
-    log (`995519b`, PR #11). With `ECUIO_SUR_LOG_FRAMES=1` at launch,
-    the child also logs every request and reply verbatim, so a bench or
-    vehicle session records its payloads without screenshots.
+    log (`995519b`, PR #11), and each spawn keeps the log it replaces,
+    the newest 50. With `ECUIO_SUR_LOG_FRAMES=1`, set at launch or by
+    recording, the child also logs every request and reply verbatim,
+    so a bench or vehicle session records its payloads without
+    screenshots.
+  - Session recording
+    ([ADR-0017](docs/adr/0017-session-recording.md)): with Record
+    sessions ticked in Settings (off by default), each connect writes
+    a folder under `Documents/QtTune/recordings` holding every frame
+    the bridge receives (`frames.csv`, host and vendor time side by
+    side), every decoded value (`signals.csv`) and the activity lines
+    (`events.log`). `frames.csv` is the format the Phase 4 replay
+    transport will read.
 - **Not yet:**
   - BENCH coverage beyond the quiet-bus tier. The formal first BENCH
     session (2026-10-16, [docs/bench-sessions/2026-10-16.md](docs/bench-sessions/2026-10-16.md))
@@ -97,7 +107,7 @@ next.
     channel derivation are HARNESS-verified against the fake; a
     live-vehicle session (real ECU responses, talking-bus items in
     the BENCH prep list) is still ahead.
-  - **Tests:** 209 ctest cases (Windows, Visual Studio 18 build
+  - **Tests:** 213 ctest cases (Windows, Visual Studio 18 build
     tools, both trees rebuilt, 2026-10-22), plus the cross-arch
     subset (25/25). All
     passed except the env-gated cross-arch skip. Every first-party
@@ -153,6 +163,8 @@ core: snapshot dispatch to registered callbacks ............ ADR-0002
       | QtTuneBridge::onFrame (worker thread): copy, in-flight gate, post
       v
 GUI thread: handleFrameInternal ............................ ADR-0003
+      |- SessionRecorder (opt-in): frames.csv, signals.csv,
+      |    events.log .......................................... ADR-0017
       |- FrameListModel (10k ring) -> FrameSortProxy -> LogPage
       '- decode, gated on ID + mux key -> staging buffer ... ADR-0004
              | 100 ms timer
@@ -232,8 +244,11 @@ Contracts along this path:
       kinds and explicit byte order, `double` decode, 3-byte mux keys,
       a set layout version, zero-checked reserved room, and validation
       that names the failing element
-- [ ] **Phase 4, record-replay transport:** capture fixtures, then play
-      them back deterministically through the same frame API
+- [ ] **Phase 4, record-replay transport:** play captured frames
+      back deterministically through the same frame API. The capture
+      side is the recorder's `frames.csv`
+      ([ADR-0017](docs/adr/0017-session-recording.md)); the replay
+      work includes a round-trip test against a recorded mock session
 - [ ] **Tag v0.3.0** and bump the version string (#16)
 
 ## BENCH prep
@@ -457,15 +472,10 @@ after the first vehicle session.
 
 ### Data capture
 
-- **Record a session to disk (M).** Two outputs from one recording:
-  - decoded signals as CSV (time, signal, value, unit) for
-    spreadsheets and plotting;
-  - raw frames in the format the Phase 4 replay transport reads, so
-    a capture from the road doubles as a regression fixture.
-
-  Start and stop from the UI, one file per session, named by date and
-  vehicle. Define the raw format together with Phase 4, so there is
-  only one. Most useful once live vehicle data reaches LiveView.
+- **Recording, what's left (S).** ADR-0017's recorder writes a whole
+  session per connect. Still to do: name the folder by vehicle as
+  well as date, keep the Record sessions switch across restarts (with
+  persisted preferences), and copy selected Log rows for quick notes.
 - **Triggered logging (M).** Record only while a condition holds
   (RPM over a threshold) or capture a window around a link fault.
   Needs a trigger model in core, similar in shape to the probe: data

@@ -12,6 +12,7 @@
 #include <QVariantMap>
 #include <QTimer>
 #include <QElapsedTimer>
+#include <QUrl>
 
 #include <atomic>
 #include <thread>
@@ -20,6 +21,7 @@
 
 #include "ecuio/core.h"
 #include "ecuio/signals.h"
+#include "sessionrecorder.h"
 
 class FrameListModel : public QAbstractListModel
 {
@@ -194,6 +196,16 @@ class QtTuneBridge : public QObject
     // Log page Pause: frames still count and decode, but none are added
     // to the frame log. Every session starts unpaused.
     Q_PROPERTY(bool logPaused READ logPaused WRITE setLogPaused NOTIFY logPausedChanged)
+    // Session recording (ADR-0017), off by default: the Settings switch.
+    // It takes effect at the next connect and can't change while a
+    // session is up or in flight, so a recording always covers a whole
+    // session.
+    Q_PROPERTY(bool recording READ recording WRITE setRecording NOTIFY recordingChanged)
+    // The current or last recording, for display: relative to Documents
+    // when it's there, so no account name shows. Empty before the first.
+    Q_PROPERTY(QString recordingFolder READ recordingFolder NOTIFY recordingStateChanged)
+    Q_PROPERTY(QUrl recordingFolderUrl READ recordingFolderUrl NOTIFY recordingStateChanged)
+    Q_PROPERTY(bool recordingActive READ recordingActive NOTIFY recordingStateChanged)
 
 public:
     explicit QtTuneBridge(QObject* parent = nullptr);
@@ -233,6 +245,13 @@ public:
     int errorEpisodes() const { return m_errorEpisodes; }
     bool logPaused() const { return m_logPaused; }
     void setLogPaused(bool paused);
+    bool recording() const { return m_recording; }
+    void setRecording(bool on);
+    QString recordingFolder() const;
+    QUrl recordingFolderUrl() const;
+    bool recordingActive() const { return m_recorder.active(); }
+    // Test seam: where recordings go instead of Documents/QtTune/recordings
+    void setRecordingsRootForTesting(const QString& root) { m_recordingsRoot = root; }
 
 public slots:
     Q_INVOKABLE QString connectSession(const QString& uri);
@@ -266,10 +285,16 @@ signals:
     void logMessage(const QString& line);
     void linkStateChanged();
     void logPausedChanged();
+    void recordingChanged();
+    void recordingStateChanged();
 
 private:
     static void onFrame(const ecuio_frame_t* frame, void* user_data);
-    void handleFrameInternal(const ecuio_frame_t* frame);
+    void handleFrameInternal(const ecuio_frame_t* frame, SessionRecorder::Clock::time_point arrived);
+    void applyFrameLoggingEnv();
+    void startRecording(const QString& uri, const ecuio_signal_set_t* set);
+    void stopRecording(const QString& why);
+    QString recordingSummary(const QString& why) const;
     void notifyDropped();   // GUI thread: emit droppedFramesChanged if the count moved
     void destroySessionLocked();  // the destructor's teardown; disconnectSession tears down on its own thread
 
@@ -320,4 +345,9 @@ private:
     void pollLinkHealth();
     int m_linkErrorCode = ECUIO_OK;
     uint32_t m_errorEpisodes = 0;
+
+    bool m_recording = false;
+    SessionRecorder m_recorder;
+    QString m_recordingsRoot;          // empty: Documents/QtTune/recordings
+    bool m_setFrameLogging = false;    // the bridge, not the launch, set ECUIO_SUR_LOG_FRAMES
 };

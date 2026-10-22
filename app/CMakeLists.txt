@@ -17,6 +17,8 @@ qt_add_executable(qttune
     bridgesingleton.h
     qttunebridge.cpp
     qttunebridge.h
+    sessionrecorder.cpp
+    sessionrecorder.h
 )
 
 set_source_files_properties(qml/Theme.qml PROPERTIES
