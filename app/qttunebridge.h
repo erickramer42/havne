@@ -115,7 +115,7 @@ public:
     // the worker side under J2534).
     // Every row updates, subscribed or not: a subscription only chooses
     // what chartData() plots, and the Dashboard reads every signal.
-    void updateValues(const std::vector<std::pair<uint16_t, float>>& values,
+    void updateValues(const std::vector<std::pair<uint16_t, double>>& values,
                       qint64 timestampMs = -1);
     int subscribedCount() const { return static_cast<int>(m_subscribedCount); }
 
@@ -147,7 +147,7 @@ signals:
 private:
     struct Sample {
         qint64 timestampMs;
-        float value;
+        double value;
     };
 
     struct Entry {
@@ -155,7 +155,7 @@ private:
         char name[32];
         char unit[16];
         uint8_t decimals = 0;
-        float value = 0.0f;
+        double value = 0.0;
         // Whether the strip chart plots this signal. Values and history
         // update regardless: the Dashboard reads every row, and a signal
         // plotted again shows the history it kept meanwhile.
@@ -288,7 +288,7 @@ private:
 
     QTimer* m_coalesceTimer = nullptr;
     // Latest value per signal ID, flushed by the 100 ms coalesce timer
-    std::vector<std::pair<uint16_t, float>> m_stagingBuffer;
+    std::vector<std::pair<uint16_t, double>> m_stagingBuffer;
     int m_signalBatchCount = 0;
 
     SignalListModel* m_signalModel = nullptr;

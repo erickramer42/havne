@@ -71,8 +71,8 @@ static bool is_decodable_type(ecuio_signal_type_t type)
 
 int ecuio_decode_signal(const ecuio_signal_def_t* signal,
                         const uint8_t* frame_payload,
-                        uint8_t payload_len,
-                        float* out_value)
+                        uint16_t payload_len,
+                        double* out_value)
 {
     if (!signal || !frame_payload || !out_value) {
         return ECUIO_DECODE_ERR_NULL;
@@ -129,7 +129,7 @@ int ecuio_decode_signal(const ecuio_signal_def_t* signal,
             raw = extract_bitfield_le(frame_payload, signal->start_byte,
                                       signal->bit_offset, signal->bit_length);
         }
-        *out_value = (float)raw * signal->scale + signal->offset;
+        *out_value = (double)raw * signal->scale + signal->offset;
         return ECUIO_DECODE_OK;
     }
 
@@ -150,7 +150,7 @@ int ecuio_decode_signal(const ecuio_signal_def_t* signal,
         }
         int32_t signed_raw;
         memcpy(&signed_raw, &raw, sizeof signed_raw);
-        *out_value = (float)signed_raw * signal->scale + signal->offset;
+        *out_value = (double)signed_raw * signal->scale + signal->offset;
         return ECUIO_DECODE_OK;
     }
 
@@ -161,7 +161,7 @@ int ecuio_decode_signal(const ecuio_signal_def_t* signal,
         float raw_float;
         memcpy(&raw_float, frame_payload + signal->start_byte,
                sizeof raw_float);
-        *out_value = raw_float * signal->scale + signal->offset;
+        *out_value = (double)raw_float * signal->scale + signal->offset;
         return ECUIO_DECODE_OK;
     }
 

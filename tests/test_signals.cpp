@@ -19,18 +19,18 @@ TEST_F(SignalDecodeTest, ValidUint8Decode) {
     signal.num_bytes = 2;
     signal.bit_offset = 0;
     signal.bit_length = 16;
-    signal.scale = 0.1f;
-    signal.offset = 0.0f;
+    signal.scale = 0.1;
+    signal.offset = 0.0;
     strncpy(signal.unit, "RPM", sizeof(signal.unit));
     signal.decimal_places = 1;
     
     uint8_t frame[8] = {0xE8, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}; /* 1000 RPM */
-    float value = 0.0f;
+    double value = 0.0;
     
     int result = ecuio_decode_signal(&signal, frame, 8, &value);
     
     EXPECT_EQ(result, 0);
-    EXPECT_NEAR(value, 100.0f, 0.01f);
+    EXPECT_NEAR(value, 100.0, 0.01);
 }
 
 TEST_F(SignalDecodeTest, ValidInt8WithSignExtension) {
@@ -42,24 +42,24 @@ TEST_F(SignalDecodeTest, ValidInt8WithSignExtension) {
     signal.num_bytes = 1;
     signal.bit_offset = 0;
     signal.bit_length = 8;
-    signal.scale = 1.0f;
-    signal.offset = -40.0f;
+    signal.scale = 1.0;
+    signal.offset = -40.0;
     strncpy(signal.unit, "°C", sizeof(signal.unit));
     signal.decimal_places = 0;
     
     uint8_t frame[8] = {0x00, 0xFF, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}; /* -1 °C after offset */
-    float value = 0.0f;
+    double value = 0.0;
     
     int result = ecuio_decode_signal(&signal, frame, 8, &value);
     
     EXPECT_EQ(result, 0);
-    EXPECT_NEAR(value, -41.0f, 0.01f); /* -1 + (-40) = -41 */
+    EXPECT_NEAR(value, -41.0, 0.01); /* -1 + (-40) = -41 */
 }
 
 TEST_F(SignalDecodeTest, NullPointerReturnsError) {
     ecuio_signal_def_t signal = {};
     uint8_t frame[8] = {0x00};
-    float value = 0.0f;
+    double value = 0.0;
     
     EXPECT_EQ(ecuio_decode_signal(nullptr, frame, 8, &value), 1);
     EXPECT_EQ(ecuio_decode_signal(&signal, nullptr, 8, &value), 1);
@@ -74,7 +74,7 @@ TEST_F(SignalDecodeTest, BoundsViolationReturnsError) {
     signal.bit_length = 16;
     
     uint8_t frame[8] = {0x00};
-    float value = 0.0f;
+    double value = 0.0;
     
     EXPECT_EQ(ecuio_decode_signal(&signal, frame, 8, &value), 2);
 }
@@ -85,7 +85,7 @@ TEST_F(SignalDecodeTest, InvalidBitLengthReturnsError) {
     signal.bit_length = 0; /* Invalid */
     
     uint8_t frame[8] = {0x00};
-    float value = 0.0f;
+    double value = 0.0;
     
     EXPECT_EQ(ecuio_decode_signal(&signal, frame, 8, &value), 3);
 }
@@ -95,7 +95,7 @@ TEST_F(SignalDecodeTest, UnsupportedTypeReturnsError) {
     signal.type = ECUIO_SIGNAL_TYPE_STRING; /* Not implemented yet */
     
     uint8_t frame[8] = {0x00};
-    float value = 0.0f;
+    double value = 0.0;
     
     EXPECT_EQ(ecuio_decode_signal(&signal, frame, 8, &value), 4);
 }
@@ -141,16 +141,16 @@ TEST_F(SignalDecodeTest, ScaleOffsetCalculation) {
     signal.num_bytes = 2;
     signal.bit_offset = 0;
     signal.bit_length = 16;
-    signal.scale = 0.01f;
-    signal.offset = 100.0f;
+    signal.scale = 0.01;
+    signal.offset = 100.0;
     
     uint8_t frame[8] = {0xD0, 0x07, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}; /* 2000 raw */
-    float value = 0.0f;
+    double value = 0.0;
     
     int result = ecuio_decode_signal(&signal, frame, 8, &value);
     
     EXPECT_EQ(result, 0);
-    EXPECT_NEAR(value, 120.0f, 0.01f); /* 2000 * 0.01 + 100 = 120 */
+    EXPECT_NEAR(value, 120.0, 0.01); /* 2000 * 0.01 + 100 = 120 */
 }
 
 TEST(SignalsTest, MockSignalSetPassesValidation) {
@@ -183,35 +183,35 @@ TEST(SignalsTest, MockSetDecodesReasonably) {
                          0x00, 0x00};// bytes 10-11, pad
 
     for (uint32_t i = 0; i < set->count; ++i) {
-        float val = 0.0f;
+        double val = 0.0;
         int rc = ecuio_decode_signal(&set->defs[i], frame, ECUIO_MOCK_TELEMETRY_PAYLOAD_LEN, &val);
         EXPECT_EQ(rc, 0) << "decode failed for " << set->defs[i].name << " at index " << i;
 
         /* Plausibility checks per signal */
         switch (set->defs[i].id) {
         case ECUIO_MOCK_SIG_RPM_ID:
-            EXPECT_GE(val, 0.0f);
-            EXPECT_LE(val, 8000.0f);
+            EXPECT_GE(val, 0.0);
+            EXPECT_LE(val, 8000.0);
             break;
         case ECUIO_MOCK_SIG_COOLANT_ID:
         case ECUIO_MOCK_SIG_IAT_ID:
-            EXPECT_GE(val, -40.0f);
-            EXPECT_LE(val, 215.0f);
+            EXPECT_GE(val, -40.0);
+            EXPECT_LE(val, 215.0);
             break;
         case ECUIO_MOCK_SIG_SPEED_ID:
-            EXPECT_GE(val, 0.0f);
-            EXPECT_LE(val, 255.0f);
+            EXPECT_GE(val, 0.0);
+            EXPECT_LE(val, 255.0);
             break;
         case ECUIO_MOCK_SIG_THROTTLE_ID:
         case ECUIO_MOCK_SIG_LOAD_ID:
-            EXPECT_GE(val, 0.0f);
-            EXPECT_LE(val, 100.0f);
+            EXPECT_GE(val, 0.0);
+            EXPECT_LE(val, 100.0);
             break;
         case ECUIO_MOCK_SIG_MAF_ID:
-            EXPECT_NEAR(val, 75.56f, 0.01f);
+            EXPECT_NEAR(val, 75.56, 0.01);
             break;
         case ECUIO_MOCK_SIG_OIL_ID:
-            EXPECT_FLOAT_EQ(val, 80.0f);
+            EXPECT_DOUBLE_EQ(val, 80.0);
             break;
         }
     }
@@ -234,7 +234,7 @@ TEST_F(SignalDecodeTest, DecodeHonorsActualPayloadLength) {
 
     for (uint32_t i = 0; i < set->count; ++i) {
         const ecuio_signal_def_t& def = set->defs[i];
-        float val = -999.0f;
+        double val = -999.0;
         const bool inRange = (def.start_byte + def.num_bytes <= 4);
 
         if (inRange) {
@@ -245,7 +245,7 @@ TEST_F(SignalDecodeTest, DecodeHonorsActualPayloadLength) {
                0xEE instead of failing, so out_value is also asserted */
             EXPECT_EQ(ecuio_decode_signal(&def, buf, 4, &val), 2)
                 << "signal '" << def.name << "' decoded beyond payload length";
-            EXPECT_EQ(val, -999.0f)
+            EXPECT_EQ(val, -999.0)
                 << "out_value written on failure for '" << def.name << "'";
         }
     }
@@ -264,32 +264,68 @@ TEST_F(SignalDecodeTest, DecodeRejectsNonMultipleOfEightLengths) {
     signal.num_bytes = 1;
     signal.bit_offset = 0;
     signal.bit_length = 8;
-    signal.scale = 1.0f;
-    signal.offset = 0.0f;
+    signal.scale = 1.0;
+    signal.offset = 0.0;
     strncpy(signal.unit, "u", sizeof(signal.unit));
 
     uint8_t frame[8] = {0x00, 0x00, 0x00, 0x00, 0xFF, 0x00, 0x00, 0x00};
-    float value = 0.0f;
+    double value = 0.0;
 
     EXPECT_EQ(ecuio_decode_signal(&signal, frame, 4, &value), 2);
     EXPECT_EQ(ecuio_decode_signal(&signal, frame, 5, &value), 0);
-    EXPECT_NEAR(value, 255.0f, 0.01f);
+    EXPECT_NEAR(value, 255.0, 0.01);
+}
+
+TEST_F(SignalDecodeTest, Uint32DecodesExactly)
+{
+    /* 2^24 + 1 is the first integer a float can't hold: a float result
+     * reads it as 16,777,216. */
+    ecuio_signal_def_t signal = {};
+    signal.type = ECUIO_SIGNAL_TYPE_UINT32;
+    signal.num_bytes = 4;
+    signal.bit_length = 32;
+    signal.scale = 1.0;
+
+    const uint8_t frame[4] = {0x01, 0x00, 0x00, 0x01};   /* LE 0x01000001 */
+    double value = 0.0;
+    ASSERT_EQ(ecuio_decode_signal(&signal, frame, 4, &value), 0);
+    EXPECT_EQ(value, 16777217.0);
+}
+
+TEST_F(SignalDecodeTest, PayloadLengthPastByte255IsNotNarrowed)
+{
+    /* 300 narrowed to 8 bits is 44, which would put byte 250 past the
+     * payload. */
+    ecuio_signal_def_t signal = {};
+    signal.type = ECUIO_SIGNAL_TYPE_UINT8;
+    signal.start_byte = 250;
+    signal.num_bytes = 1;
+    signal.bit_length = 8;
+    signal.scale = 1.0;
+
+    uint8_t payload[300] = {};
+    payload[250] = 0x2A;
+    double value = 0.0;
+    ASSERT_EQ(ecuio_decode_signal(&signal, payload, 300, &value), 0);
+    EXPECT_EQ(value, 42.0);
 }
 
 TEST(SignalsTest, SignalDefLayoutIsPinned)
 {
     /* ABI pin. Hand-computed for the documented layout:
-     *   id(2)+pad(2), name[32]=2..33, type(enum,4)=36..39,
-     *   start_byte/num_bytes/bit_offset/bit_length=40..43,
-     *   scale(4)=44, offset(4)=48, unit[16]=52..67,
-     *   decimal_places=68+pad(3), flags(4)=72, message_id(4)=76,
-     *   reserved[2](8)=80..87  =>  sizeof == 88.
+     *   id(2)=0, name[32]=2..33, pad(2), type(enum,4)=36..39,
+     *   start_byte/num_bytes/bit_offset/bit_length=40..43, pad(4),
+     *   scale(8)=48, offset(8)=56, unit[16]=64..79,
+     *   decimal_places=80+pad(3), flags(4)=84, message_id(4)=88,
+     *   mux_offset/mux_length/mux_reserved[2]=92..95, mux_key(4)=96,
+     *   pad(4)  =>  sizeof == 104.
      * If this fires, a field was added/removed/resized — bump version.
      * Trust the compiler over hand arithmetic here: the enum's width
      * is easy to miscount. */
-    ASSERT_EQ(sizeof(ecuio_signal_def_t), 88u);
-    ASSERT_EQ(offsetof(ecuio_signal_def_t, flags), 72u);
-    ASSERT_EQ(offsetof(ecuio_signal_def_t, message_id), 76u);
+    ASSERT_EQ(sizeof(ecuio_signal_def_t), 104u);
+    ASSERT_EQ(offsetof(ecuio_signal_def_t, scale), 48u);
+    ASSERT_EQ(offsetof(ecuio_signal_def_t, flags), 84u);
+    ASSERT_EQ(offsetof(ecuio_signal_def_t, message_id), 88u);
 }
 
 TEST(SignalsTest, MockAndObd2ShareDisplayNamesAndUnits)
@@ -353,7 +389,7 @@ ecuio_signal_def_t four_byte_def(ecuio_signal_type_t type)
     d.num_bytes = 4;
     d.bit_offset = 0;
     d.bit_length = 32;
-    d.scale = 1.0f;
+    d.scale = 1.0;
     return d;
 }
 
@@ -429,7 +465,7 @@ TEST(SignalsTest, ValidatorAcceptsExactlyWhatTheDecoderDecodes)
                 d.bit_length = len;
                 d.bit_offset = static_cast<uint8_t>(off);
                 const bool valid = ecuio_validate_signal(&d) == ECUIO_VALIDATE_OK;
-                float v = 0.0f;
+                double v = 0.0;
                 const bool decodes =
                     ecuio_decode_signal(&d, payload, sizeof payload, &v) == ECUIO_DECODE_OK;
                 EXPECT_EQ(valid, decodes) << "type " << t << " len " << int(len)

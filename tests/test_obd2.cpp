@@ -28,11 +28,10 @@ ecuio_frame_t make_obd2_frame(const uint8_t* payload, uint8_t len)
     return f;
 }
 
-/* Decode a frame's payload, as the bridge does: the decoder takes an
- * 8-bit payload length, and frames carry at most 64 bytes. */
-int decode(const ecuio_signal_def_t* d, const ecuio_frame_t& f, float* v)
+/* Decode a frame's payload, as the bridge does. */
+int decode(const ecuio_signal_def_t* d, const ecuio_frame_t& f, double* v)
 {
-    return ecuio_decode_signal(d, f.data, static_cast<uint8_t>(f.data_length), v);
+    return ecuio_decode_signal(d, f.data, f.data_length, v);
 }
 
 const ecuio_signal_def_t* find_def(const ecuio_signal_set_t* set, uint16_t id)
@@ -108,9 +107,9 @@ TEST(Obd2DecodeTest, RpmBigEndianScaled) {
     const uint8_t wire[] = {0x41, 0x0C, 0x1F, 0x40};
     ecuio_frame_t f = make_obd2_frame(wire, sizeof wire);
     ASSERT_TRUE(ecuio_def_applies_to_frame(d, &f));
-    float v = 0.0f;
+    double v = 0.0;
     ASSERT_EQ(decode(d, f, &v), ECUIO_DECODE_OK);
-    EXPECT_FLOAT_EQ(v, 2000.0f);   /* 0x1F40 * 0.25 */
+    EXPECT_DOUBLE_EQ(v, 2000.0);   /* 0x1F40 * 0.25 */
 }
 
 TEST(Obd2DecodeTest, CoolantOffsetApplied) {
@@ -119,9 +118,9 @@ TEST(Obd2DecodeTest, CoolantOffsetApplied) {
     ASSERT_NE(d, nullptr);
     const uint8_t wire[] = {0x41, 0x05, 0x3C};
     ecuio_frame_t f = make_obd2_frame(wire, sizeof wire);
-    float v = 0.0f;
+    double v = 0.0;
     ASSERT_EQ(decode(d, f, &v), ECUIO_DECODE_OK);
-    EXPECT_FLOAT_EQ(v, 20.0f);    /* 60 - 40 */
+    EXPECT_DOUBLE_EQ(v, 20.0);    /* 60 - 40 */
 }
 
 TEST(Obd2DecodeTest, BatteryVoltageMillivoltScale) {
@@ -133,9 +132,9 @@ TEST(Obd2DecodeTest, BatteryVoltageMillivoltScale) {
      * expected value is DERIVED from it, not asserted from memory. */
     const uint8_t wire[] = {0x41, 0x42, 0x36, 0x30};
     ecuio_frame_t f = make_obd2_frame(wire, sizeof wire);
-    float v = 0.0f;
+    double v = 0.0;
     ASSERT_EQ(decode(d, f, &v), ECUIO_DECODE_OK);
-    EXPECT_NEAR(v, 13.872f, 0.001f);   /* 0x3630 * 0.001 */
+    EXPECT_NEAR(v, 13.872, 0.001);   /* 0x3630 * 0.001 */
 }
 
 TEST(Obd2DecodeTest, EngineLoadPercentScale) {
@@ -144,9 +143,9 @@ TEST(Obd2DecodeTest, EngineLoadPercentScale) {
     ASSERT_NE(d, nullptr);
     const uint8_t wire[] = {0x41, 0x04, 25};
     ecuio_frame_t f = make_obd2_frame(wire, sizeof wire);
-    float v = 0.0f;
+    double v = 0.0;
     ASSERT_EQ(decode(d, f, &v), ECUIO_DECODE_OK);
-    EXPECT_NEAR(v, 25.0f * 100.0f / 255.0f, 0.01f);
+    EXPECT_NEAR(v, 25.0 * 100.0 / 255.0, 0.01);
 }
 
 TEST(Obd2DecodeTest, TemperatureIsUnsignedMinusFortyOffset)
@@ -159,13 +158,13 @@ TEST(Obd2DecodeTest, TemperatureIsUnsignedMinusFortyOffset)
     ASSERT_NE(d, nullptr);
     const uint8_t lo[] = {0x41, 0x0F, 0x00};
     ecuio_frame_t f = make_obd2_frame(lo, sizeof lo);
-    float v = 0.0f;
+    double v = 0.0;
     ASSERT_EQ(decode(d, f, &v), ECUIO_DECODE_OK);
-    EXPECT_FLOAT_EQ(v, -40.0f);
+    EXPECT_DOUBLE_EQ(v, -40.0);
     const uint8_t hi[] = {0x41, 0x0F, 0xF0};
     f = make_obd2_frame(hi, sizeof hi);
     ASSERT_EQ(decode(d, f, &v), ECUIO_DECODE_OK);
-    EXPECT_FLOAT_EQ(v, 200.0f);
+    EXPECT_DOUBLE_EQ(v, 200.0);
 }
 
 TEST(Obd2DecodeTest, MafCentigramScale) {
@@ -178,9 +177,9 @@ TEST(Obd2DecodeTest, MafCentigramScale) {
     const uint8_t wire[] = {0x41, 0x10, 0x00, 0x64};
     ecuio_frame_t f = make_obd2_frame(wire, sizeof wire);
     ASSERT_TRUE(ecuio_def_applies_to_frame(d, &f));
-    float v = 0.0f;
+    double v = 0.0;
     ASSERT_EQ(decode(d, f, &v), ECUIO_DECODE_OK);
-    EXPECT_NEAR(v, 1.00f, 0.0001f);
+    EXPECT_NEAR(v, 1.00, 0.0001);
 }
 
 TEST(Obd2DecodeTest, OilTempMatchesCoolantShape) {
@@ -191,9 +190,9 @@ TEST(Obd2DecodeTest, OilTempMatchesCoolantShape) {
     const uint8_t wire[] = {0x41, 0x5C, 0x78};
     ecuio_frame_t f = make_obd2_frame(wire, sizeof wire);
     ASSERT_TRUE(ecuio_def_applies_to_frame(d, &f));
-    float v = 0.0f;
+    double v = 0.0;
     ASSERT_EQ(decode(d, f, &v), ECUIO_DECODE_OK);
-    EXPECT_FLOAT_EQ(v, 80.0f);
+    EXPECT_DOUBLE_EQ(v, 80.0);
 }
 
 /* ---------- mux gate ---------- */
@@ -207,7 +206,7 @@ TEST(Obd2MuxTest, WrongPidRejectedByMatchAndDecode) {
     const uint8_t wire[] = {0x41, 0x0D, 0x1F, 0x40};
     ecuio_frame_t f = make_obd2_frame(wire, sizeof wire);
     EXPECT_FALSE(ecuio_def_applies_to_frame(rpm, &f));
-    float v = 0.0f;
+    double v = 0.0;
     EXPECT_EQ(decode(rpm, f, &v),
               ECUIO_DECODE_ERR_MUX_MISMATCH);
 }
@@ -229,7 +228,7 @@ TEST(Obd2MuxTest, ShortFrameRejectedWithoutOverread) {
     const uint8_t wire[] = {0x41};   /* truncated before PID */
     ecuio_frame_t f = make_obd2_frame(wire, sizeof wire);
     EXPECT_FALSE(ecuio_def_applies_to_frame(rpm, &f));
-    float v = 0.0f;
+    double v = 0.0;
     EXPECT_EQ(decode(rpm, f, &v),
               ECUIO_DECODE_ERR_PAST_PAYLOAD);
 }

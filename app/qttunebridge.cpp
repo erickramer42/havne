@@ -198,7 +198,7 @@ void SignalListModel::refreshAges()
                      {AgeMsRole});
 }
 
-void SignalListModel::updateValues(const std::vector<std::pair<uint16_t, float>>& values,
+void SignalListModel::updateValues(const std::vector<std::pair<uint16_t, double>>& values,
                                    qint64 timestampMs)
 {
     if (m_entries.empty() || values.empty()) return;
@@ -271,7 +271,7 @@ QVariantList SignalListModel::chartData() const
         for (uint32_t i = 0; i < e.histCount; ++i) {
             const Sample& s = e.history[(start + i) % HistoryCapacity];
             samples.append(static_cast<double>(s.timestampMs));
-            samples.append(static_cast<double>(s.value));
+            samples.append(s.value);
         }
         m["samples"] = samples;
         out.append(m);
@@ -678,7 +678,7 @@ void QtTuneBridge::handleFrameInternal(const ecuio_frame_t* frame)
             if (!ecuio_def_applies_to_frame(&def, frame)) {
                 continue;
             }
-            float val = 0.0f;
+            double val = 0.0;
             if (ecuio_decode_signal(&def, frame->data, len, &val) == ECUIO_DECODE_OK) {
                 bool merged = false;
                 for (auto& staged : m_stagingBuffer) {

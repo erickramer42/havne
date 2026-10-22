@@ -37,8 +37,8 @@ typedef struct ecuio_signal_def {
     uint8_t num_bytes;
     uint8_t bit_offset;
     uint8_t bit_length;
-    float scale;
-    float offset;
+    double scale;
+    double offset;            /* value = raw * scale + offset, in double */
     char unit[16];            /* display unit, UTF-8 (a degree sign, "km/h") */
     uint8_t decimal_places;   /* display precision of the decoded value */
     uint32_t flags;
@@ -102,8 +102,8 @@ typedef struct ecuio_signal_set {
  * key. *out_value is written only on ECUIO_DECODE_OK. */
 int ecuio_decode_signal(const ecuio_signal_def_t* signal,
                         const uint8_t* frame_payload,
-                        uint8_t payload_len,
-                        float* out_value);
+                        uint16_t payload_len,
+                        double* out_value);
 
 /* ecuio_validate_signal and ecuio_validate_signal_set return codes.
  * Values are append-only. Per-def codes are positive; the set-level

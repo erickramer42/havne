@@ -497,11 +497,11 @@ TEST(BridgeTest, HistoryRingEvictsOldestAtCapacity)
     model.setSignalSet(&set);
 
     // Push 10 MORE batches than capacity: 0..129 into a 120-slot ring.
-    std::vector<std::pair<uint16_t, float>> batch;
+    std::vector<std::pair<uint16_t, double>> batch;
     for (qint64 t = 0; t < SignalListModel::HistoryCapacity + 10; ++t) {
         batch.clear();
-        batch.emplace_back(uint16_t(1001), float(t));
-        batch.emplace_back(uint16_t(2001), float(t) - 40.0f);
+        batch.emplace_back(uint16_t(1001), double(t));
+        batch.emplace_back(uint16_t(2001), double(t) - 40.0);
         model.updateValues(batch, t);
     }
 
@@ -521,9 +521,9 @@ TEST(BridgeTest, HistoryRingEvictsOldestAtCapacity)
         EXPECT_EQ(samples.at(samples.size() - 2).toDouble(), 129.0);
 
         // Values track their timestamps (order preserved through the wrap)
-        const float offset = (m.value("id").toInt() == 1001) ? 0.0f : -40.0f;
-        EXPECT_NEAR(samples.at(1).toFloat(), 10.0f + offset, 0.01f);
-        EXPECT_NEAR(samples.at(samples.size() - 1).toFloat(), 129.0f + offset, 0.01f);
+        const double offset = (m.value("id").toInt() == 1001) ? 0.0 : -40.0;
+        EXPECT_NEAR(samples.at(1).toDouble(), 10.0 + offset, 0.01);
+        EXPECT_NEAR(samples.at(samples.size() - 1).toDouble(), 129.0 + offset, 0.01);
 
         // Monotonic timestamps oldest->newest (wrap-around correctness)
         double prev = -1.0;
@@ -546,11 +546,11 @@ TEST(BridgeTest, ChartDataFiltersUnsubscribedAndEmptyBatchesDoNotEmit)
     QObject::connect(&model, &SignalListModel::valuesUpdated,
                      [&emissions]() { ++emissions; });
 
-    std::vector<std::pair<uint16_t, float>> batch;
+    std::vector<std::pair<uint16_t, double>> batch;
     for (int t = 0; t < 5; ++t) {
         batch.clear();
-        batch.emplace_back(uint16_t(1001), float(t));
-        batch.emplace_back(uint16_t(2001), float(t));
+        batch.emplace_back(uint16_t(1001), double(t));
+        batch.emplace_back(uint16_t(2001), double(t));
         model.updateValues(batch, t);
     }
     ASSERT_EQ(emissions, 5);   // one per non-empty batch, per contract
@@ -561,7 +561,7 @@ TEST(BridgeTest, ChartDataFiltersUnsubscribedAndEmptyBatchesDoNotEmit)
 
     // Unknown IDs = silent too (defensive: staging should never send them)
     batch.clear();
-    batch.emplace_back(uint16_t(9999), 1.0f);
+    batch.emplace_back(uint16_t(9999), 1.0);
     model.updateValues(batch, 1000);
     EXPECT_EQ(emissions, 5);
     EXPECT_EQ(model.chartData().size(), 2);
@@ -606,15 +606,15 @@ TEST(BridgeTest, UnsubscribedSignalKeepsUpdating)
             }
         });
 
-    std::vector<std::pair<uint16_t, float>> batch;
-    batch.emplace_back(uint16_t(1001), 3000.0f);
-    batch.emplace_back(uint16_t(2001), 7.0f);
+    std::vector<std::pair<uint16_t, double>> batch;
+    batch.emplace_back(uint16_t(1001), 3000.0);
+    batch.emplace_back(uint16_t(2001), 7.0);
     model.updateValues(batch, 10);
 
     const QModelIndex row0 = model.index(0, 0);
     EXPECT_TRUE(row0Notified);
     EXPECT_FALSE(model.data(row0, SignalListModel::SubscribedRole).toBool());
-    EXPECT_FLOAT_EQ(model.data(row0, SignalListModel::ValueRole).toFloat(), 3000.0f);
+    EXPECT_DOUBLE_EQ(model.data(row0, SignalListModel::ValueRole).toDouble(), 3000.0);
     EXPECT_TRUE(model.data(row0, SignalListModel::HasValueRole).toBool());
 
     // Only the subscribed row is plotted
@@ -663,8 +663,8 @@ TEST(BridgeTest, DecimalsComeFromTheDefAndReachTheChart)
     EXPECT_EQ(model.data(model.index(1, 0), SignalListModel::DecimalsRole).toInt(), 2);
     EXPECT_FALSE(model.data(model.index(1, 0), SignalListModel::HasValueRole).toBool());
 
-    std::vector<std::pair<uint16_t, float>> batch;
-    batch.emplace_back(uint16_t(2001), 21.5f);
+    std::vector<std::pair<uint16_t, double>> batch;
+    batch.emplace_back(uint16_t(2001), 21.5);
     model.updateValues(batch, 0);
     EXPECT_TRUE(model.data(model.index(1, 0), SignalListModel::HasValueRole).toBool());
 
@@ -1072,8 +1072,8 @@ TEST(BridgeTest, AgeMsRoleEmittedAndRefreshesWhileStalled)
             if (roles.contains(SignalListModel::AgeMsRole)) ++ageEmissions;
         });
 
-    std::vector<std::pair<uint16_t, float>> batch;
-    batch.emplace_back(uint16_t(1001), 1500.0f);
+    std::vector<std::pair<uint16_t, double>> batch;
+    batch.emplace_back(uint16_t(1001), 1500.0);
     model.updateValues(batch, 0);   // deterministic stamp of 0
     EXPECT_GE(ageEmissions, 1);
 

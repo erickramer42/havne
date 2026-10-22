@@ -93,8 +93,9 @@ next.
     channel derivation are HARNESS-verified against the fake; a
     live-vehicle session (real ECU responses, talking-bus items in
     the BENCH prep list) is still ahead.
-  - **Tests:** 188 ctest cases (Windows/MSVC 2022, both trees
-    rebuilt, 2026-10-21), plus the cross-arch subset (23/23). All
+  - **Tests:** 190 ctest cases (Windows, Visual Studio 18 build
+    tools, both trees rebuilt, 2026-10-22), plus the cross-arch
+    subset (23/23). All
     passed except the env-gated cross-arch skip. Every first-party
     target builds with compiler warnings on, at 0 on MSVC. CI was green on all
     eight jobs on PR #16 (merged as `9125b5e`), including the

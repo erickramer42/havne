@@ -449,7 +449,7 @@ TEST(CoreTest, MockFramesDecodeAgainstMockSignalSet) {
     for (size_t f = 0; f < cap.count; ++f) {
         for (uint32_t i = 0; i < set->count; ++i) {
             const ecuio_signal_def_t& def = set->defs[i];
-            float val = 0.0f;
+            double val = 0.0;
             ASSERT_EQ(ecuio_decode_signal(&def, cap.payloads[f], ECUIO_MOCK_TELEMETRY_PAYLOAD_LEN, &val), 0)
                 << "frame " << f << ", signal " << def.name;
 
@@ -639,12 +639,12 @@ TEST(CoreTest, MockDriveCycleEveryTickRoundTripsThroughTheMockSet)
     /* Per-signal accumulators, indexed like set->defs. */
     constexpr uint32_t kMaxDefs = 16;
     ASSERT_LE(set->count, kMaxDefs);
-    float worst_err[kMaxDefs] = {};
-    float lo[kMaxDefs];
-    float hi[kMaxDefs];
+    double worst_err[kMaxDefs] = {};
+    double lo[kMaxDefs];
+    double hi[kMaxDefs];
     for (uint32_t i = 0; i < kMaxDefs; ++i) {
-        lo[i] = 1e9f;
-        hi[i] = -1e9f;
+        lo[i] = 1e9;
+        hi[i] = -1e9;
     }
 
     DriveCycle dc;
@@ -657,10 +657,10 @@ TEST(CoreTest, MockDriveCycleEveryTickRoundTripsThroughTheMockSet)
 
         for (uint32_t i = 0; i < set->count; ++i) {
             const ecuio_signal_def_t& def = set->defs[i];
-            float val = 0.0f;
+            double val = 0.0;
             ASSERT_EQ(ecuio_decode_signal(&def, payload, ECUIO_MOCK_TELEMETRY_PAYLOAD_LEN, &val), 0)
                 << def.name << " at tick " << steps;
-            float phys = 0.0f;
+            double phys = 0.0;
             switch (def.id) {
             case ECUIO_MOCK_SIG_RPM_ID:       phys = dc.rpm; break;
             case ECUIO_MOCK_SIG_COOLANT_ID:   phys = dc.coolant_c; break;
@@ -682,7 +682,7 @@ TEST(CoreTest, MockDriveCycleEveryTickRoundTripsThroughTheMockSet)
     for (uint32_t i = 0; i < set->count; ++i) {
         const ecuio_signal_def_t& def = set->defs[i];
         /* Half an LSB of each signal's scale, plus float slack */
-        const float tol = 0.5f * std::fabs(def.scale) + 0.01f;
+        const double tol = 0.5 * std::fabs(def.scale) + 0.01;
         EXPECT_LE(worst_err[i], tol) << def.name << " lost precision or clamped";
 
         switch (def.id) {

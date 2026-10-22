@@ -30,7 +30,7 @@ namespace {
  * them as they are (UTF-8). */
 ecuio_signal_def_t obd2_def(uint16_t id, const char* name,
                             ecuio_signal_type_t type, uint8_t num_bytes,
-                            float scale, float offset_val, const char* unit,
+                            double scale, double offset_val, const char* unit,
                             uint8_t decimals, uint32_t pid, bool big_endian)
 {
     ecuio_signal_def_t d = {}; /* zero-fill: mux off, BE off by default */
@@ -59,34 +59,34 @@ ecuio_signal_def_t obd2_def(uint16_t id, const char* name,
 
 const ecuio_signal_def_t kObd2Defs[] = {
     obd2_def(ECUIO_OBD2_SIG_ENGINE_LOAD_ID,   "Engine Load",
-             ECUIO_SIGNAL_TYPE_UINT8, 1, 100.0f / 255.0f, 0.0f,
+             ECUIO_SIGNAL_TYPE_UINT8, 1, 100.0 / 255.0, 0.0,
              "%",    1, 0x04, false),
     obd2_def(ECUIO_OBD2_SIG_COOLANT_TEMP_ID, "Coolant Temp",
-             ECUIO_SIGNAL_TYPE_UINT8, 1, 1.0f, -40.0f,
+             ECUIO_SIGNAL_TYPE_UINT8, 1, 1.0, -40.0,
              DEG_C,  0, 0x05, false),
     obd2_def(ECUIO_OBD2_SIG_RPM_ID,           "RPM",
-             ECUIO_SIGNAL_TYPE_UINT16, 2, 0.25f, 0.0f,
+             ECUIO_SIGNAL_TYPE_UINT16, 2, 0.25, 0.0,
              "RPM",  0, 0x0C, true),
     obd2_def(ECUIO_OBD2_SIG_SPEED_ID,         "Vehicle Speed",
-             ECUIO_SIGNAL_TYPE_UINT8, 1, 1.0f, 0.0f,
+             ECUIO_SIGNAL_TYPE_UINT8, 1, 1.0, 0.0,
              "km/h", 0, 0x0D, false),
     obd2_def(ECUIO_OBD2_SIG_IAT_ID,           "Intake Air Temp",
-             ECUIO_SIGNAL_TYPE_UINT8, 1, 1.0f, -40.0f,
+             ECUIO_SIGNAL_TYPE_UINT8, 1, 1.0, -40.0,
              DEG_C,  0, 0x0F, false),
     obd2_def(ECUIO_OBD2_SIG_THROTTLE_ID,      "Throttle Position",
-             ECUIO_SIGNAL_TYPE_UINT8, 1, 100.0f / 255.0f, 0.0f,
+             ECUIO_SIGNAL_TYPE_UINT8, 1, 100.0 / 255.0, 0.0,
              "%",    1, 0x11, false),
     obd2_def(ECUIO_OBD2_SIG_FUEL_LEVEL_ID,    "Fuel Level",
-             ECUIO_SIGNAL_TYPE_UINT8, 1, 100.0f / 255.0f, 0.0f,
+             ECUIO_SIGNAL_TYPE_UINT8, 1, 100.0 / 255.0, 0.0,
              "%",    1, 0x2F, false),
     obd2_def(ECUIO_OBD2_SIG_BATTERY_V_ID,     "Battery Voltage",
-             ECUIO_SIGNAL_TYPE_UINT16, 2, 0.001f, 0.0f,
+             ECUIO_SIGNAL_TYPE_UINT16, 2, 0.001, 0.0,
              "V",    2, 0x42, true),
     /* SAE J1979 PID 0x10: air flow rate, (256·A + B)/100 g/s. Two-byte
      * big-endian like RPM/0x42; the 0.01 scale needs no decoder
      * extension (generic raw·scale + offset). Shown to one decimal. */
     obd2_def(ECUIO_OBD2_SIG_MAF_ID,             "MAF",
-             ECUIO_SIGNAL_TYPE_UINT16, 2, 0.01f, 0.0f,
+             ECUIO_SIGNAL_TYPE_UINT16, 2, 0.01, 0.0,
              "g/s",  1, 0x10, true),
     /* SAE J1979 PID 0x5C: engine oil temperature, A - 40 degC, the same
      * def shape as coolant and IAT. Transmission fluid temperature isn't
@@ -94,7 +94,7 @@ const ecuio_signal_def_t kObd2Defs[] = {
      * Mode 22), and PID 0x5F is the bit-encoded emission-requirements
      * byte, not a temperature. */
     obd2_def(ECUIO_OBD2_SIG_OIL_TEMP_ID,          "Engine Oil Temp",
-             ECUIO_SIGNAL_TYPE_UINT8, 1, 1.0f, -40.0f,
+             ECUIO_SIGNAL_TYPE_UINT8, 1, 1.0, -40.0,
              DEG_C,  0, 0x5C, false),
 };
 
