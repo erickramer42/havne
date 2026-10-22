@@ -54,6 +54,12 @@ Dates are commit dates.
 | 2026-10-21 | Windows Qt install: aqtinstall pinned to a master commit, 7-Zip extraction, install root created first (#1 closed) | `51f1b0d`, `94e16a1` |
 | 2026-10-21 | Oldest-first log follows the tail; drop reports move to the coalesce tick (#5 and #7 closed) | `523cf28` |
 | 2026-10-21 | Dashboard header shows link state through `Theme`; tach red zone from 6800 rpm; chart series palette in `Theme` | `6807e93` |
+| 2026-10-21 | The stash conflict committed in `6807e93` resolved (every app build had failed); series palette reordered so red comes last | `55373f4`, `105d3cd` |
+| 2026-10-21 | The failure backoff clamped at its 5 s cap (#35 closed) | `d1c20c0` |
+| 2026-10-21 | Opt-in per-message payload logging in the surrogate session log | `ac6452d` |
+| 2026-10-21 | `?poll=0x00` reads the supported-PIDs bitmap; 29-bit channels connect 29-bit (#34 closed); a wedged surrogate child fails fast | `9c3ef16` |
+| 2026-10-21 | Sessions start on the GUI thread, so closing mid-connect leaves nothing running (#32 closed); unsubscribed rows keep updating (#31 closed) | `4a86231` |
+| 2026-10-21 | UI/UX review pass: Settings is the only connect flow; Theme palette, mono family and page margin; chart value labels, seconds axis and flat-trace lanes; Log `s.mmm` times, Pause and order toggle; display names, units and decimals from core; merged via PR #16 | `8a5e2b5` |
 
 ## Lessons learned
 

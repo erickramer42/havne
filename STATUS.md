@@ -50,8 +50,9 @@ next.
     can pick one and connect.
   - Link health (#11): the J2534 worker tells a quiet bus, a dead
     adapter and failing requests apart, the bridge logs transitions to
-    the Settings activity log, and LiveView, the Home status card and
-    the Settings connection label all show the state. The
+    the Settings activity log, and the header pill, LiveView, the Home
+    status card, the Dashboard header and the Settings connection label
+    all show the state. The
     ok/quiet/fault/disconnected states were observed 2026-10-20,
     including a fault on the VX itself (quiet bus, no vehicle). That
     VX fault was under the rules before `946bdf5`; the same no-ACK
@@ -90,7 +91,7 @@ next.
   - **Tests:** 171 ctest cases (Windows/MSVC 2022, both trees
     rebuilt, 2026-10-21), plus the cross-arch subset (21/21). All
     passed except the env-gated cross-arch skip. CI was green on all
-    eight jobs on PR #15 (merged as `0956784`), including the
+    eight jobs on PR #16 (merged as `9125b5e`), including the
     simulator smoke. That covers ctest on Windows, macOS and Linux,
     core under ASan and UBSan, the Android and iOS device
     cross-builds, and the simulator smoke. The smoke runs on pull
@@ -549,7 +550,9 @@ after the first vehicle session.
   slot, with no per-frame GUI-thread cost. The parts:
   - response-driven request pacing: send the next request when the
     reply arrives, bounded by the ISO 15765-4 response timeout (P2,
-    50 ms);
+    50 ms). Its design, shared with the probe and Service 0x22 reads,
+    is [ADR-0015](docs/adr/0015-request-engine.md) (proposed; its open
+    values wait for the first vehicle session);
   - decoding on the worker thread, which also brings per-sample
     timestamps (Known Issue #10) and takes the per-frame def matching
     off the GUI thread (#4);

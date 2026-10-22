@@ -48,8 +48,15 @@ that runs to the end undocumented.
 - [ ] Full suite green: every case passes except the env-gated skip
       (current count in [STATUS.md](../../STATUS.md)), plus the
       cross-arch subset
-- [ ] Launch from a cmd shell with payload logging on:
-      `set QTTUNE_SUR_LOG_FRAMES=1`, then `qttune.exe 2> sur.log`. The
+- [ ] The same build passes the quiet-bus BENCH run with the VX
+      ([bench-runsheet.md](bench-runsheet.md) Phases 1–3): it loads
+      through the surrogate, opens, the filter is accepted, requests
+      fail on the no-ACK bus, and teardown is clean. There's no ECU
+      simulator, so the vehicle is the first talking bus; this is the
+      risk that can be retired at the desk
+- [ ] Launch from a cmd shell in `build\app\Release` with payload
+      logging on: `set QTTUNE_SUR_LOG_FRAMES=1`, then
+      `qttune.exe 2> sur.log`. The
       session log at `%TEMP%\qttune-surrogate.log` should hold both
       `[surrogate HH:MM:SS.mmm]` and `[sur …]` lines, and its second
       child line reads "frame logging on". Once connected, every request
@@ -68,7 +75,10 @@ that runs to the end undocumented.
       The Settings activity log records each transition; the header
       pill, Home and the Dashboard header show the same state in short
       form.
-- [ ] Settings picker lists the VX as "x86"
+- [ ] Settings picker lists the VX as "x86". Every connect below goes
+      through Settings, the only page that connects: type the phase's
+      URI into the URI field (the VX row fills the bare one), then
+      Connect
 - [ ] Camera or notebook ready
 
 Abort condition: the suite isn't green, or the surrogate isn't
@@ -212,6 +222,7 @@ ignition off, wait 10 s, then turn it back on.
 
 | Symptom | Suspect |
 |---|---|
+| Connect fails at once, before any write ("failed to load transport library") | The session log's `open:` lines name the stage: the surrogate missing next to `qttune.exe` (pre-flight), the DLL not loading, or the vendor refusing `PassThruOpen` with its status (the VT refuses with status 34 when its adapter is absent). Check the URI names the VX |
 | Writes fail with the ignition on (`OP_WRITE: status` nonzero) | BENCH prep #2, request framing (6-byte logical message with `ISO15765_FRAME_PAD`); then baud (500 k assumed) or a 29-bit vehicle (prep #4). The bare URI is 11-bit only. 29-bit IDs given with `?filter=`/`?txid=` connect with `CAN_29BIT_ID` automatically, but no 29-bit OBD IDs are prepared: record and stop rather than improvise |
 | Writes succeed but no frames arrive | The ECU doesn't answer physical 0x7E0: retry Phase 2 with `?poll=0x0C&txid=0x7DF` (functional request, replies still on 0x7E8); then the flow-control filter (prep #1) |
 | `0x7E8` frames on the Log page, but LiveView shows "—" everywhere | Payload shape: stamping already proves the channel matched, so suspect a PCI byte left in-band shifting `[41][PID]`. The `OP_READ frame` lines show the bytes as the vendor returned them |
@@ -254,4 +265,10 @@ ignition off, wait 10 s, then turn it back on.
    session"), the testing.md tiers and gaps, and the open items the
    session settles: the surrogate health path, unmatched-frame
    flapping, and the refresh rate
-4. Engineering-log entry if a lesson emerged
+4. Record what the request engine's design waits on, in
+   [ADR-0015](../adr/0015-request-engine.md)'s open questions:
+   request-to-reply times per PID (from the `OP_WRITE frame` /
+   `OP_READ frame` stamps), whether any reply was "response pending"
+   (`7F 01 78`), and the supported-PID bitmap if Phase 2's optional
+   step ran
+5. Engineering-log entry if a lesson emerged
