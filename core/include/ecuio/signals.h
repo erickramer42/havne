@@ -175,6 +175,29 @@ int ecuio_decode_signal(const ecuio_signal_def_t* signal,
 #define ECUIO_VALIDATE_ERR_SET_RESERVED     (-16)  /* a reserved field of
                                                       the set not zero */
 
+/* Why a set failed validation, and where. index names the element the
+ * code is about: the failing def; for a duplicate id, the second def
+ * of the pair; for a bad channel id, the channel; for a duplicate rx,
+ * the second channel of the pair. It is UINT32_MAX for
+ * ECUIO_VALIDATE_OK and for a code that names no single element: a
+ * NULL, the layout version, the set's reserved fields, the channel
+ * count. */
+typedef struct ecuio_validation {
+    int32_t  code;                /* ECUIO_VALIDATE_*; 0 = OK */
+    uint32_t index;               /* the def or channel, or UINT32_MAX */
+    uint32_t reserved[2];         /* written as zero */
+} ecuio_validation_t;
+
+#if defined(__cplusplus)
+static_assert(sizeof(ecuio_validation_t) == 16, "ecuio_validation_t size is ABI");
+static_assert(offsetof(ecuio_validation_t, index) == 4, "validation index offset is ABI");
+static_assert(offsetof(ecuio_validation_t, reserved) == 8, "validation reserved offset is ABI");
+#elif defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
+_Static_assert(sizeof(ecuio_validation_t) == 16, "ecuio_validation_t size is ABI");
+_Static_assert(offsetof(ecuio_validation_t, index) == 4, "validation index offset is ABI");
+_Static_assert(offsetof(ecuio_validation_t, reserved) == 8, "validation reserved offset is ABI");
+#endif
+
 /* Structural check of one def: accepts exactly the defs
  * ecuio_decode_signal can decode, with every reserved byte and flags
  * zero. The kind is checked first, then the byte order. */
@@ -196,8 +219,11 @@ const ecuio_signal_set_t* ecuio_obd2_signal_set(void); /* ADR-0013 obd2 profile 
  * reserved fields; every def (ecuio_validate_signal; the first failing
  * def's code); unique def ids; then the channel declarations. A set
  * with count 0 may leave defs NULL. Returns ECUIO_VALIDATE_OK or a
- * ECUIO_VALIDATE_ERR_* code. */
-int ecuio_validate_signal_set(const ecuio_signal_set_t* set);
+ * ECUIO_VALIDATE_ERR_* code. When out isn't NULL, it receives the same
+ * code and the index of the element at fault; a caller that only needs
+ * pass or fail passes NULL. */
+int ecuio_validate_signal_set(const ecuio_signal_set_t* set,
+                              ecuio_validation_t* out);
 
 #ifdef __cplusplus
 }

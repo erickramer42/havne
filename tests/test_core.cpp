@@ -854,7 +854,7 @@ TEST(CoreTest, ProfileLookupRejectsNullArguments) {
     const ecuio_signal_set_t* set = nullptr;
     EXPECT_EQ(ecuio_profile_lookup(nullptr, &set), ECUIO_ERR_NULL_ARGUMENT);
     EXPECT_EQ(ecuio_profile_lookup("raw", nullptr), ECUIO_ERR_NULL_ARGUMENT);
-    EXPECT_EQ(ecuio_profile_register(nullptr, nullptr), ECUIO_ERR_NULL_ARGUMENT);
+    EXPECT_EQ(ecuio_profile_register(nullptr, nullptr, nullptr), ECUIO_ERR_NULL_ARGUMENT);
 }
 
 TEST(CoreTest, ProfileRegisterOverwritesLastWins) {
@@ -863,12 +863,12 @@ TEST(CoreTest, ProfileRegisterOverwritesLastWins) {
      * so no built-in is disturbed. */
     ecuio_signal_set_t mine = {};
     mine.layout_version = ECUIO_SIGNAL_SET_LAYOUT;
-    EXPECT_EQ(ecuio_profile_register("test-profile-tmp", &mine), ECUIO_OK);
+    EXPECT_EQ(ecuio_profile_register("test-profile-tmp", &mine, nullptr), ECUIO_OK);
     const ecuio_signal_set_t* got = nullptr;
     EXPECT_EQ(ecuio_profile_lookup("test-profile-tmp", &got), ECUIO_OK);
     EXPECT_EQ(got, &mine);
 
-    EXPECT_EQ(ecuio_profile_register("test-profile-tmp", nullptr), ECUIO_OK);
+    EXPECT_EQ(ecuio_profile_register("test-profile-tmp", nullptr, nullptr), ECUIO_OK);
     got = &mine;
     EXPECT_EQ(ecuio_profile_lookup("test-profile-tmp", &got), ECUIO_OK);
     EXPECT_EQ(got, nullptr);
@@ -885,7 +885,7 @@ TEST(CoreTest, ProfileRegisterValidatesNameAndSet) {
     bad.count = 1;
     bad.defs = &bad_def;
     const ecuio_signal_set_t* got = nullptr;
-    EXPECT_EQ(ecuio_profile_register("test-bad-set", &bad),
+    EXPECT_EQ(ecuio_profile_register("test-bad-set", &bad, nullptr),
               ECUIO_ERR_INVALID_ARGUMENT);
     EXPECT_EQ(ecuio_profile_lookup("test-bad-set", &got), ECUIO_ERR_NO_TRANSPORT);
 
@@ -893,25 +893,73 @@ TEST(CoreTest, ProfileRegisterValidatesNameAndSet) {
      * layout_version sits, so it's refused instead of decoding garbage. */
     ecuio_signal_set_t old_layout = *ecuio_mock_signal_set();
     old_layout.layout_version = 2;
-    EXPECT_EQ(ecuio_profile_register("test-old-layout", &old_layout),
+    EXPECT_EQ(ecuio_profile_register("test-old-layout", &old_layout, nullptr),
               ECUIO_ERR_INVALID_ARGUMENT);
     EXPECT_EQ(ecuio_profile_lookup("test-old-layout", &got), ECUIO_ERR_NO_TRANSPORT);
 
     for (const char* name : {"", "Upper", "has space", "a&b", "a=b", "q?x"}) {
-        EXPECT_EQ(ecuio_profile_register(name, nullptr),
+        EXPECT_EQ(ecuio_profile_register(name, nullptr, nullptr),
                   ECUIO_ERR_INVALID_ARGUMENT) << "'" << name << "'";
     }
     const std::string name64(ECUIO_PROFILE_NAME_MAX + 1, 'q');
-    EXPECT_EQ(ecuio_profile_register(name64.c_str(), nullptr),
+    EXPECT_EQ(ecuio_profile_register(name64.c_str(), nullptr, nullptr),
               ECUIO_ERR_INVALID_ARGUMENT);
-    EXPECT_EQ(ecuio_profile_register("ok-name_1.2", nullptr), ECUIO_OK);
+    EXPECT_EQ(ecuio_profile_register("ok-name_1.2", nullptr, nullptr), ECUIO_OK);
     EXPECT_EQ(ecuio_profile_unregister("ok-name_1.2"), ECUIO_OK);
+}
+
+TEST(CoreTest, ProfileRegisterReportsTheValidatorResult) {
+    /* A refused set says which check failed and on which def, so a
+     * plugin author doesn't have to search for it. */
+    const ecuio_signal_set_t* mock = ecuio_mock_signal_set();
+    ecuio_signal_def_t defs[2] = {mock->defs[0], mock->defs[1]};
+    defs[1].bit_length = 0;
+    ecuio_signal_set_t bad = {};
+    bad.layout_version = ECUIO_SIGNAL_SET_LAYOUT;
+    bad.count = 2;
+    bad.defs = defs;
+
+    ecuio_validation_t v;
+    std::memset(&v, 0xAB, sizeof v);
+    EXPECT_EQ(ecuio_profile_register("test-why", &bad, &v), ECUIO_ERR_INVALID_ARGUMENT);
+    EXPECT_EQ(v.code, ECUIO_VALIDATE_ERR_BIT_LENGTH);
+    EXPECT_EQ(v.index, 1u);
+    EXPECT_EQ(v.reserved[0], 0u);
+    EXPECT_EQ(v.reserved[1], 0u);
+
+    /* A name refused before the set is checked, or a NULL set, which
+     * isn't checked at all: code 0 and no index. */
+    const struct {
+        const char* name;
+        const ecuio_signal_set_t* set;
+        ecuio_status_t status;
+    } kUnchecked[] = {
+        {nullptr, &bad, ECUIO_ERR_NULL_ARGUMENT},
+        {"Upper", &bad, ECUIO_ERR_INVALID_ARGUMENT},
+        {"obd2", &bad, ECUIO_ERR_INVALID_ARGUMENT},
+        {"test-why", nullptr, ECUIO_OK},
+    };
+    for (const auto& c : kUnchecked) {
+        const char* label = c.name != nullptr ? c.name : "NULL name";
+        std::memset(&v, 0xAB, sizeof v);
+        EXPECT_EQ(ecuio_profile_register(c.name, c.set, &v), c.status) << label;
+        EXPECT_EQ(v.code, 0) << label;
+        EXPECT_EQ(v.index, UINT32_MAX) << label;
+        EXPECT_EQ(v.reserved[0], 0u) << label;
+        EXPECT_EQ(v.reserved[1], 0u) << label;
+    }
+
+    std::memset(&v, 0xAB, sizeof v);
+    EXPECT_EQ(ecuio_profile_register("test-why", mock, &v), ECUIO_OK);
+    EXPECT_EQ(v.code, ECUIO_VALIDATE_OK);
+    EXPECT_EQ(v.index, UINT32_MAX);
+    EXPECT_EQ(ecuio_profile_unregister("test-why"), ECUIO_OK);
 }
 
 TEST(CoreTest, ProfileBuiltInsCannotBeReplacedOrRemoved) {
     /* A URI naming a built-in always means the same set. */
     for (const char* name : {"mock", "raw", "obd2"}) {
-        EXPECT_EQ(ecuio_profile_register(name, ecuio_mock_signal_set()),
+        EXPECT_EQ(ecuio_profile_register(name, ecuio_mock_signal_set(), nullptr),
                   ECUIO_ERR_INVALID_ARGUMENT) << name;
         EXPECT_EQ(ecuio_profile_unregister(name), ECUIO_ERR_INVALID_ARGUMENT) << name;
     }
@@ -926,7 +974,7 @@ TEST(CoreTest, ProfileUnregisterKeepsExistingSessionsOnTheirSet) {
     /* Unregister removes the name for new sessions only: a session
      * keeps the set it was created with (the profile.h lifetime rule). */
     static const ecuio_signal_set_t mine = *ecuio_mock_signal_set();
-    ASSERT_EQ(ecuio_profile_register("test-unregister", &mine), ECUIO_OK);
+    ASSERT_EQ(ecuio_profile_register("test-unregister", &mine, nullptr), ECUIO_OK);
     ecuio_session_t* session = nullptr;
     ASSERT_EQ(ecuio_session_create("mock://x?profile=test-unregister", &session),
               ECUIO_OK);
@@ -1042,7 +1090,7 @@ TEST(CoreTest, ProfileQueryBoundaryLengthAcceptedAt63) {
      * the boundary — the 64 case above pins the rejecting side. */
     const std::string name63(63, 'q');
     const ecuio_signal_set_t* mock_set = ecuio_mock_signal_set();
-    ASSERT_EQ(ecuio_profile_register(name63.c_str(), mock_set), ECUIO_OK);
+    ASSERT_EQ(ecuio_profile_register(name63.c_str(), mock_set, nullptr), ECUIO_OK);
 
     std::string uri = "mock://boundary?profile=" + name63;
     ecuio_session_t* session = nullptr;
@@ -1079,7 +1127,7 @@ TEST(CoreTest, ProfileQueryLastValidWinsAcrossDuplicates) {
                                             test above — but tests
                                             shouldn't depend on order. */
     ASSERT_EQ(ecuio_profile_register(name63.c_str(),
-                                     ecuio_mock_signal_set()), ECUIO_OK);
+                                     ecuio_mock_signal_set(), nullptr), ECUIO_OK);
 
     std::string uri1 = "mock://x?profile=raw&profile=" + name63;
     ecuio_session_t* session = nullptr;

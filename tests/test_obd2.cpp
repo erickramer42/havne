@@ -49,7 +49,7 @@ const ecuio_signal_def_t* find_def(const ecuio_signal_set_t* set, uint16_t id)
 TEST(Obd2SetTest, SetIsValidAndComplete) {
     const ecuio_signal_set_t* set = ecuio_obd2_signal_set();
     ASSERT_NE(set, nullptr);
-    EXPECT_EQ(ecuio_validate_signal_set(set), ECUIO_VALIDATE_OK);
+    EXPECT_EQ(ecuio_validate_signal_set(set, nullptr), ECUIO_VALIDATE_OK);
     EXPECT_EQ(set->count, 10u);
 }
 
@@ -95,15 +95,15 @@ TEST(Obd2SetTest, RejectsDuplicateAndIllegalChannelDecls) {
 
     const ecuio_channel_decl_t dup[] = { {0x7E8u, 0x7E0u}, {0x7E8u, 0x7E2u} };
     const ecuio_signal_set_t s_dup = set_with(dup, 2u);
-    EXPECT_EQ(ecuio_validate_signal_set(&s_dup), ECUIO_VALIDATE_ERR_DUPLICATE_RX);
+    EXPECT_EQ(ecuio_validate_signal_set(&s_dup, nullptr), ECUIO_VALIDATE_ERR_DUPLICATE_RX);
 
     const ecuio_channel_decl_t zero_rx[] = { {0u, 0x7E0u} };
     const ecuio_signal_set_t s_zero = set_with(zero_rx, 1u);
-    EXPECT_EQ(ecuio_validate_signal_set(&s_zero), ECUIO_VALIDATE_ERR_CHANNEL_ID);
+    EXPECT_EQ(ecuio_validate_signal_set(&s_zero, nullptr), ECUIO_VALIDATE_ERR_CHANNEL_ID);
 
     const ecuio_channel_decl_t legal[] = { {0x7E8u, 0x7E0u} };
     const ecuio_signal_set_t s_ok = set_with(legal, 1u);
-    EXPECT_EQ(ecuio_validate_signal_set(&s_ok), ECUIO_VALIDATE_OK);
+    EXPECT_EQ(ecuio_validate_signal_set(&s_ok, nullptr), ECUIO_VALIDATE_OK);
 }
 
 /* ---------- decode round-trips (canned wire bytes) ---------- */

@@ -225,8 +225,8 @@ TEST_F(J2534QueryParamTest, ProfileChannelWidthDecidesConnectFlag)
     mixed.layout_version = ECUIO_SIGNAL_SET_LAYOUT;
     mixed.channel_count = 2;
     mixed.channels = kMixed;
-    ASSERT_EQ(ecuio_profile_register("test-29bit", &wide), ECUIO_OK);
-    ASSERT_EQ(ecuio_profile_register("test-mixed-width", &mixed), ECUIO_OK);
+    ASSERT_EQ(ecuio_profile_register("test-29bit", &wide, nullptr), ECUIO_OK);
+    ASSERT_EQ(ecuio_profile_register("test-mixed-width", &mixed, nullptr), ECUIO_OK);
 
     char uri[700];
     snprintf(uri, sizeof(uri), "j2534://%s?profile=test-29bit",
@@ -969,7 +969,7 @@ TEST_F(J2534AdoptionTest, Mode01RequestRoutesPastOtherServiceKeys)
     set.defs = defs;
     set.channel_count = 2;
     set.channels = kChannels;
-    ASSERT_EQ(ecuio_profile_register("test-mode01-routing", &set), ECUIO_OK);
+    ASSERT_EQ(ecuio_profile_register("test-mode01-routing", &set, nullptr), ECUIO_OK);
 
     char uri[700];
     snprintf(uri, sizeof(uri), "j2534://%s?profile=test-mode01-routing",

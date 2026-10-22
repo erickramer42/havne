@@ -45,9 +45,16 @@ extern "C" {
  * must pass ecuio_validate_signal_set; NULL registers a log-only
  * profile, like "raw". Returns ECUIO_OK; ECUIO_ERR_NULL_ARGUMENT for
  * a NULL name; ECUIO_ERR_INVALID_ARGUMENT for a malformed or built-in
- * name or an invalid set, leaving the registry unchanged. */
+ * name or an invalid set, leaving the registry unchanged.
+ *
+ * out may be NULL. Otherwise it receives the validator's result when
+ * the set was checked: which check failed, and on which def or
+ * channel. When it wasn't (a NULL set, or a name refused first) out
+ * holds code 0 and index UINT32_MAX, so a refusal with code 0 is the
+ * name's. */
 ecuio_status_t ecuio_profile_register(const char* name,
-                                      const ecuio_signal_set_t* signal_set);
+                                      const ecuio_signal_set_t* signal_set,
+                                      ecuio_validation_t* out);
 
 /* Remove a registered profile. Idempotent: an unknown name returns
  * ECUIO_OK. ECUIO_ERR_NULL_ARGUMENT for a NULL name;

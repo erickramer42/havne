@@ -93,7 +93,7 @@ next.
     channel derivation are HARNESS-verified against the fake; a
     live-vehicle session (real ECU responses, talking-bus items in
     the BENCH prep list) is still ahead.
-  - **Tests:** 203 ctest cases (Windows, Visual Studio 18 build
+  - **Tests:** 205 ctest cases (Windows, Visual Studio 18 build
     tools, both trees rebuilt, 2026-10-22), plus the cross-arch
     subset (23/23). All
     passed except the env-gated cross-arch skip. Every first-party

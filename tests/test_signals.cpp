@@ -161,7 +161,7 @@ TEST_F(SignalDecodeTest, ScaleOffsetCalculation) {
 }
 
 TEST(SignalsTest, MockSignalSetPassesValidation) {
-    EXPECT_EQ(ecuio_validate_signal_set(ecuio_mock_signal_set()), ECUIO_VALIDATE_OK);
+    EXPECT_EQ(ecuio_validate_signal_set(ecuio_mock_signal_set(), nullptr), ECUIO_VALIDATE_OK);
 }
 
 TEST(SignalsTest, MockSetIdsAreUnique) {
@@ -721,11 +721,11 @@ TEST(SignalsTest, SetValidationChecksLayoutVersionFirst)
     for (uint32_t version : {0u, 1u, 2u, 4u}) {
         ecuio_signal_set_t set = {};
         set.layout_version = version;
-        EXPECT_EQ(ecuio_validate_signal_set(&set), ECUIO_VALIDATE_ERR_LAYOUT) << version;
+        EXPECT_EQ(ecuio_validate_signal_set(&set, nullptr), ECUIO_VALIDATE_ERR_LAYOUT) << version;
         set.count = 1;
-        EXPECT_EQ(ecuio_validate_signal_set(&set), ECUIO_VALIDATE_ERR_LAYOUT) << version;
+        EXPECT_EQ(ecuio_validate_signal_set(&set, nullptr), ECUIO_VALIDATE_ERR_LAYOUT) << version;
         set.defs = &bad_def;
-        EXPECT_EQ(ecuio_validate_signal_set(&set), ECUIO_VALIDATE_ERR_LAYOUT) << version;
+        EXPECT_EQ(ecuio_validate_signal_set(&set, nullptr), ECUIO_VALIDATE_ERR_LAYOUT) << version;
     }
 }
 
@@ -733,13 +733,13 @@ TEST(SignalsTest, SetValidationRefusesNonzeroReservedFields)
 {
     ecuio_signal_set_t set = {};
     set.layout_version = ECUIO_SIGNAL_SET_LAYOUT;
-    ASSERT_EQ(ecuio_validate_signal_set(&set), ECUIO_VALIDATE_OK);
+    ASSERT_EQ(ecuio_validate_signal_set(&set, nullptr), ECUIO_VALIDATE_OK);
     set.reserved0 = 1;
-    EXPECT_EQ(ecuio_validate_signal_set(&set), ECUIO_VALIDATE_ERR_SET_RESERVED);
+    EXPECT_EQ(ecuio_validate_signal_set(&set, nullptr), ECUIO_VALIDATE_ERR_SET_RESERVED);
     set.reserved0 = 0;
     for (size_t i = 0; i < sizeof(set.reserved) / sizeof(set.reserved[0]); ++i) {
         set.reserved[i] = 0x80000000u;
-        EXPECT_EQ(ecuio_validate_signal_set(&set), ECUIO_VALIDATE_ERR_SET_RESERVED) << i;
+        EXPECT_EQ(ecuio_validate_signal_set(&set, nullptr), ECUIO_VALIDATE_ERR_SET_RESERVED) << i;
         set.reserved[i] = 0;
     }
 }
@@ -752,9 +752,9 @@ TEST(SignalsTest, SetValidationRejectsDuplicateIds)
     set.layout_version = ECUIO_SIGNAL_SET_LAYOUT;
     set.count = 2;
     set.defs = defs;
-    EXPECT_EQ(ecuio_validate_signal_set(&set), ECUIO_VALIDATE_ERR_DUPLICATE_ID);
+    EXPECT_EQ(ecuio_validate_signal_set(&set, nullptr), ECUIO_VALIDATE_ERR_DUPLICATE_ID);
     defs[1].id = 2;
-    EXPECT_EQ(ecuio_validate_signal_set(&set), ECUIO_VALIDATE_OK);
+    EXPECT_EQ(ecuio_validate_signal_set(&set, nullptr), ECUIO_VALIDATE_OK);
 }
 
 TEST(SignalsTest, SetValidationAcceptsAnEmptySet)
@@ -764,13 +764,78 @@ TEST(SignalsTest, SetValidationAcceptsAnEmptySet)
     static const ecuio_channel_decl_t kChan[] = {{0x7E8u, 0x7E0u}};
     ecuio_signal_set_t set = {};
     set.layout_version = ECUIO_SIGNAL_SET_LAYOUT;
-    EXPECT_EQ(ecuio_validate_signal_set(&set), ECUIO_VALIDATE_OK);
+    EXPECT_EQ(ecuio_validate_signal_set(&set, nullptr), ECUIO_VALIDATE_OK);
     set.channel_count = 1;
     set.channels = kChan;
-    EXPECT_EQ(ecuio_validate_signal_set(&set), ECUIO_VALIDATE_OK);
+    EXPECT_EQ(ecuio_validate_signal_set(&set, nullptr), ECUIO_VALIDATE_OK);
     set.count = 1;
-    EXPECT_EQ(ecuio_validate_signal_set(&set), ECUIO_VALIDATE_ERR_NULL);
-    EXPECT_EQ(ecuio_validate_signal_set(nullptr), ECUIO_VALIDATE_ERR_NULL);
+    EXPECT_EQ(ecuio_validate_signal_set(&set, nullptr), ECUIO_VALIDATE_ERR_NULL);
+    EXPECT_EQ(ecuio_validate_signal_set(nullptr, nullptr), ECUIO_VALIDATE_ERR_NULL);
+}
+
+TEST(SignalsTest, SetValidationNamesTheFailingElement)
+{
+    /* out carries the returned code and the def or channel at fault,
+     * the second of a duplicate pair. A pass, and a code about the set
+     * as a whole, carry UINT32_MAX. The reserved words come back zero
+     * whatever out held before. */
+    auto expect = [](const char* what, const ecuio_signal_set_t* set,
+                     int code, uint32_t index) {
+        SCOPED_TRACE(what);
+        ecuio_validation_t v;
+        std::memset(&v, 0xAB, sizeof v);
+        EXPECT_EQ(ecuio_validate_signal_set(set, &v), code);
+        EXPECT_EQ(v.code, code);
+        EXPECT_EQ(v.index, index);
+        EXPECT_EQ(v.reserved[0], 0u);
+        EXPECT_EQ(v.reserved[1], 0u);
+    };
+    ecuio_signal_def_t defs[3] = {four_byte_def(ECUIO_VALUE_UINT),
+                                  four_byte_def(ECUIO_VALUE_UINT),
+                                  four_byte_def(ECUIO_VALUE_UINT)};
+    defs[1].id = 2;
+    defs[2].id = 3;
+    ecuio_channel_decl_t channels[3] = {{0x7E8u, 0x7E0u},
+                                        {0x7E9u, 0x7E1u},
+                                        {0x7EAu, 0x7E2u}};
+    ecuio_signal_set_t set = {};
+    set.layout_version = ECUIO_SIGNAL_SET_LAYOUT;
+    set.count = 3;
+    set.defs = defs;
+    set.channel_count = 3;
+    set.channels = channels;
+    expect("valid", &set, ECUIO_VALIDATE_OK, UINT32_MAX);
+
+    defs[2].bit_length = 0;
+    expect("bad def", &set, ECUIO_VALIDATE_ERR_BIT_LENGTH, 2u);
+    defs[2].bit_length = 32;
+    defs[2].id = defs[0].id;
+    expect("duplicate id", &set, ECUIO_VALIDATE_ERR_DUPLICATE_ID, 2u);
+    defs[2].id = 3;
+    channels[1].tx_id = 0;
+    expect("bad channel id", &set, ECUIO_VALIDATE_ERR_CHANNEL_ID, 1u);
+    channels[1].tx_id = 0x7E1u;
+    channels[2].rx_id = channels[1].rx_id;
+    expect("duplicate rx", &set, ECUIO_VALIDATE_ERR_DUPLICATE_RX, 2u);
+    channels[2].rx_id = 0x7EAu;
+    expect("valid again", &set, ECUIO_VALIDATE_OK, UINT32_MAX);
+
+    expect("NULL set", nullptr, ECUIO_VALIDATE_ERR_NULL, UINT32_MAX);
+    ecuio_signal_set_t whole = set;
+    whole.layout_version = 2;
+    expect("layout", &whole, ECUIO_VALIDATE_ERR_LAYOUT, UINT32_MAX);
+    whole = set;
+    whole.reserved[3] = 1;
+    expect("set reserved", &whole, ECUIO_VALIDATE_ERR_SET_RESERVED, UINT32_MAX);
+    whole = set;
+    whole.defs = nullptr;
+    expect("NULL defs", &whole, ECUIO_VALIDATE_ERR_NULL, UINT32_MAX);
+    whole = set;
+    whole.channels = nullptr;
+    expect("NULL channels", &whole, ECUIO_VALIDATE_ERR_CHANNELS_NULL, UINT32_MAX);
+    whole = set;
+    whole.channel_count = ECUIO_MAX_CHANNELS + 1;
+    expect("channel count", &whole, ECUIO_VALIDATE_ERR_CHANNEL_COUNT, UINT32_MAX);
 }
 
 TEST(SignalsTest, ApplyGateIsTruePredicate)

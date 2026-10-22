@@ -81,7 +81,9 @@ const ecuio_signal_set_t* ecuio_mock_signal_set(void)
     return &kMockSet;
 }
 
-int ecuio_validate_signal_set(const ecuio_signal_set_t* set)
+/* The set checks, in order. A code that names one def or channel sets
+ * *index to it; the others leave it as the caller set it. */
+static int check_set(const ecuio_signal_set_t* set, uint32_t* index)
 {
     if (!set) return ECUIO_VALIDATE_ERR_NULL;
     /* Before any other member: a set built for another layout has its
@@ -96,13 +98,17 @@ int ecuio_validate_signal_set(const ecuio_signal_set_t* set)
     if (set->count > 0 && !set->defs) return ECUIO_VALIDATE_ERR_NULL;
     for (uint32_t i = 0; i < set->count; ++i) {
         int rc = ecuio_validate_signal(&set->defs[i]);
-        if (rc != ECUIO_VALIDATE_OK) return rc;
+        if (rc != ECUIO_VALIDATE_OK) {
+            *index = i;
+            return rc;
+        }
     }
     /* The bridge keys its staging buffer and model rows by def id, so
      * two defs with one id would overwrite each other's values. */
     for (uint32_t i = 0; i < set->count; ++i) {
         for (uint32_t j = 0; j < i; ++j) {
             if (set->defs[j].id == set->defs[i].id) {
+                *index = i;   /* the second of the pair */
                 return ECUIO_VALIDATE_ERR_DUPLICATE_ID;
             }
         }
@@ -118,12 +124,30 @@ int ecuio_validate_signal_set(const ecuio_signal_set_t* set)
             const uint32_t tx = set->channels[i].tx_id;
             if (rx == 0 || rx > 0x1FFFFFFFu ||
                 tx == 0 || tx > 0x1FFFFFFFu) {
+                *index = i;
                 return ECUIO_VALIDATE_ERR_CHANNEL_ID;
             }
             for (uint32_t j = 0; j < i; ++j) {
-                if (set->channels[j].rx_id == rx) return ECUIO_VALIDATE_ERR_DUPLICATE_RX;
+                if (set->channels[j].rx_id == rx) {
+                    *index = i;   /* the second of the pair */
+                    return ECUIO_VALIDATE_ERR_DUPLICATE_RX;
+                }
             }
         }
     }
     return ECUIO_VALIDATE_OK;
+}
+
+int ecuio_validate_signal_set(const ecuio_signal_set_t* set,
+                              ecuio_validation_t* out)
+{
+    uint32_t index = UINT32_MAX;
+    const int code = check_set(set, &index);
+    if (out) {
+        ecuio_validation_t result = {};   /* reserved zero */
+        result.code = code;
+        result.index = index;
+        *out = result;
+    }
+    return code;
 }

@@ -1,7 +1,8 @@
 // File/layer: core/src/profile_registry.cpp | C++17, Qt-free
 // Testing: UNIT — lookup semantics (null set is a success), unknown
-//          names fail, register overwrites, registration validates and
-//          protects the built-ins, unregister
+//          names fail, register overwrites, registration validates,
+//          reports the validator's result and protects the built-ins,
+//          unregister
 
 #include "ecuio/profile.h"
 #include "session.h"
@@ -73,8 +74,16 @@ bool is_valid_name(const char* name)
 extern "C" {
 
 ecuio_status_t ecuio_profile_register(const char* name,
-                                      const ecuio_signal_set_t* signal_set)
+                                      const ecuio_signal_set_t* signal_set,
+                                      ecuio_validation_t* out)
 {
+    /* Code 0 and no index unless the validator runs below, so a
+     * refusal with code 0 is the name's (profile.h). */
+    if (out != nullptr) {
+        ecuio_validation_t none = {};
+        none.index = UINT32_MAX;
+        *out = none;
+    }
     if (name == nullptr) {
         return ECUIO_ERR_NULL_ARGUMENT;
     }
@@ -84,7 +93,7 @@ ecuio_status_t ecuio_profile_register(const char* name,
     /* Validated here, once, so the transport and the bridge can trust
      * every set they're handed (ADR-0013's plugin surface). */
     if (signal_set != nullptr &&
-        ecuio_validate_signal_set(signal_set) != ECUIO_VALIDATE_OK) {
+        ecuio_validate_signal_set(signal_set, out) != ECUIO_VALIDATE_OK) {
         return ECUIO_ERR_INVALID_ARGUMENT;
     }
     try {
