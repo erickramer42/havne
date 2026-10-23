@@ -4,7 +4,9 @@
   listed under "Open until the first vehicle session" are set from
   that session's measurements and recorded in a dated appendix; the
   appendix moves this record to Accepted. On acceptance, ADR-0013's
-  status line points here for the parts this record supersedes.
+  status line points here for the parts this record supersedes. The
+  first vehicle session's measurements are in the appendix of
+  2026-10-22; the values are chosen with the engine work.
 - **Date:** 2026-10-21
 - **Supersedes, on acceptance:** [ADR-0013](0013-protocol-profiles.md)
   §1's placement of request correlation in the profile, and §5's
@@ -263,3 +265,29 @@ appendix, before and after the engine.
   `uds-generic` to research DIDs on a vehicle, then curated sets.
   Curated sets are scoped to a platform (for example `mazda-kf`),
   because DIDs and formulas vary by platform and model year.
+
+## Appendix — first vehicle session measurements (2026-10-22)
+
+From the first read-only vehicle session
+([session sheet](../bench-sessions/2026-10-22-vehicle.md)): one car,
+its engine ECU on `0x7E8`, through the OBDX Pro VX and the x86
+surrogate, engine off and idling. The open values are still to be
+chosen; these are the measurements they wait on.
+
+- **Reply time.** From each request's `TX_INDICATION` to its reply,
+  in the vendor's clock: median about 4 ms, 95th percentile 9–10 ms in
+  every connect, longest 83 ms, over 4,809 replies; far inside P2
+  (50 ms). The indication marks the vendor's write call returning,
+  not the frame leaving: 12–22 % of replies are stamped before their
+  own request's indication, by up to 43 ms. So the indication can't
+  serve as the send time, and a wait timed from the write's return is
+  conservative.
+- **Response pending:** none. The only negative reply was `7F 01 12`
+  for an unsupported PID (`0x5C`), on every request for it.
+- **Supported PIDs:** 44 in `0x01`–`0x60`, and the `0x60` bit is set,
+  so the bitmap chain continues past `0x60`.
+- **Late replies under the fixed slot:** 9 of 3,657 scheduler replies
+  arrived after the next request was written.
+- **Refresh at ten PIDs under the fixed slot:** about 1.1 s per signal
+  (requests every 100–123 ms on that laptop, 109–112 ms on average);
+  `?poll=` ran at about 229 ms per request.

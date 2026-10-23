@@ -1,4 +1,4 @@
-# VEHICLE run sheet — first read-only vehicle session
+# VEHICLE run sheet — read-only vehicle session
 
 **Date:** <date>  **Second person present, or procedure posted:** <yes, or where posted>
 **Adapter:** OBDX Pro VX (USB)  **Vehicle:** <year make model>; CAN-era OBD-II, expected 11-bit IDs at 500 kbit/s
@@ -6,23 +6,25 @@
 
 Fill in a copy of this sheet as `docs/bench-sessions/<date>.md`. The
 no-vehicle BENCH tier is [bench-runsheet.md](bench-runsheet.md); this
-sheet picks up at its Phase 4 stop point.
+sheet picks up at its stop point. The first vehicle session,
+[2026-10-22](2026-10-22-vehicle.md), ran this sheet; where an expectation
+below depends on the vehicle, it's that one's.
 
 ## Purpose
 
-First session against a talking bus. Goals, in order:
+A read-only session on a vehicle's bus. Goals, in order:
 
 1. Requests leave the adapter and an ECU answers them (BENCH prep #2,
    request framing)
 2. Replies decode to plausible values through the `obd2` profile
 3. Link health behaves as designed on a real bus, ignition off and on
-4. Validate or invalidate the talking-bus items in the
-   [BENCH prep list](../../STATUS.md#bench-prep) (#2, #3, #4, #5, #6,
-   #7, #8)
-5. Record each phase: the recordings are the first real-bus replay
-   fixtures ([ADR-0017](../adr/0017-session-recording.md)), and the
-   bitmaps and reply timings are what
-   [ADR-0015](../adr/0015-request-engine.md)'s open questions wait on
+4. Check the talking-bus items in the
+   [BENCH prep list](../../STATUS.md#bench-prep) (#2–#8) on this
+   vehicle and adapter
+5. Record each phase: the recordings are real-bus replay fixtures
+   ([ADR-0017](../adr/0017-session-recording.md)), and the bitmaps and
+   reply timings feed [ADR-0015](../adr/0015-request-engine.md)'s
+   open values
 
 Record everything, including every connect's session log. A session
 that stops at phase 2 with evidence is worth more than one that runs
@@ -46,20 +48,37 @@ to the end undocumented.
 
 ## Pre-flight (before going to the vehicle)
 
+Run every item on the laptop that goes to the car, even when it isn't
+the machine the code was developed on.
+
+- [ ] The VX driver is installed on that laptop: the picker lists only
+      adapters whose drivers are installed
 - [ ] Fresh build of both trees, **Win32 first**, and the app build
       prints "Deploying Win32 J2534 surrogate next to qttune.exe"
       (see [bench-runsheet.md](bench-runsheet.md) pre-flight)
 - [ ] Full suite green: every case passes except the env-gated skip
       (current count in [STATUS.md](../../STATUS.md)), plus the
-      cross-arch subset
+      cross-arch subset. `scripts/verify.sh` runs both and prints four
+      `ok` lines, the last reading `0 skipped`. Run by hand, the
+      cross-arch subset needs `ECUIO_SURROGATE_EXE` and
+      `ECUIO_FAKE_DLL`; under any other names its routing case skips
+      while everything else passes
+      ([development.md](../development.md#running-tests))
 - [ ] The same build passes the quiet-bus BENCH run with the VX
       ([bench-runsheet.md](bench-runsheet.md) Phases 1–3): it loads
       through the surrogate, opens, the filter is accepted, requests
       fail on the no-ACK bus, and teardown is clean. There's no ECU
-      simulator, so the vehicle is the first talking bus; this is the
-      risk that can be retired at the desk. The 2026-10-22 run did
+      simulator, so this is the part of the risk the desk can retire.
+      The 2026-10-22 run did
       this for `0a8beae` ([2026-10-22](2026-10-22.md)); a later build
-      needs its own
+      needs its own. On a laptop that hasn't met the VX, connect the
+      bare URI once with the VX on USB and see "Requests failing", so
+      its driver install, surrogate copy and security software meet
+      the adapter at the desk, not at the car
+- [ ] The laptop's settings for the day: on battery (see Safety), sleep
+      set to never, closing the lid set to do nothing, USB selective
+      suspend off (Power Options, advanced settings), and Windows
+      Update paused
 - [ ] Launch the app and tick **Record sessions** in Settings before
       the first connect (it can't change during a session). Each
       connect then writes a folder under `Documents\QtTune\recordings`
@@ -82,8 +101,9 @@ to the end undocumented.
       - no banner: ok;
       - amber "Vehicle not responding": quiet;
       - amber "Requests failing — check the vehicle connection and
-        ignition": writes fail while reads are clean, the no-ECU or
-        ignition-off case;
+        ignition": writes fail while reads are clean, because nothing
+        on the bus acknowledges (on the first vehicle, ignition off
+        still acknowledged and read as quiet);
       - red "Adapter fault": reads fail.
       The Settings activity log records each transition; the header
       pill, Home and the Dashboard header show the same state in short
@@ -94,7 +114,8 @@ to the end undocumented.
       Connect
 - [ ] Camera or notebook ready
 - [ ] A reference for the values: the cluster's gauges (tachometer,
-      coolant, fuel), and a second scan tool if you have one. Use the
+      coolant, fuel), and a second scan tool if you have one (a phone
+      app with a Bluetooth ELM327 adapter will do). Use the
       scan tool between phases, with QtTune disconnected, **never on
       the bus at the same time**: its replies also arrive on 0x7E8, so
       QtTune would decode and record them as its own, which skews the
@@ -131,23 +152,25 @@ deployed. Stop and fix it at the desk; the vehicle adds nothing.
 
     j2534://OBDX Pro - VX
 
-**Expected** (the no-ACK bus seen on the 2026-10-22 bench):
+**Expected** (as on the first vehicle,
+[2026-10-22](2026-10-22-vehicle.md)):
 - [ ] Connect succeeds, the filter is accepted (session log
       `OP_START_FILTER … status 0`)
-- [ ] Three writes succeed, then the fourth blocks about 0.5 s and
-      fails (`OP_WRITE: status 7`): the VX accepts three frames that
-      nothing acknowledges, then refuses. At the first failed write the
-      link latches `ECUIO_ERR_REQUEST_FAILED`, one episode, and stays
-      there: amber "Requests failing" banner, and "Link: requests
-      failing (1 episode(s))" in the activity log
+- [ ] Writes succeed (`OP_WRITE frame: status 0`) but nothing answers,
+      because the bus still acknowledges frames with the ignition off.
+      The link goes quiet ("Vehicle not responding") after about 1 s.
+      On a bus that's fully asleep, writes fail instead: three succeed,
+      the fourth blocks about 0.5 s and fails (`status 7`), and the
+      link latches "Requests failing", as on the no-vehicle bench
+      ([2026-10-22](2026-10-22.md)). Record which
 - [ ] Disconnect cleanly
 
-This state is correct with nothing awake on the bus. Don't debug it.
-If an ECU does answer with the ignition off (some stay awake briefly
-after key-off), record that instead.
+Either state is correct with no ECU awake. Don't debug it. If an ECU
+does answer with the ignition off (some stay awake briefly after
+key-off), record that instead.
 
-**Evidence:** the session log; the UI state; how many writes succeeded
-before the first failure.
+**Evidence:** the session log; the UI state; whether writes failed,
+and after how many.
 
 ## Phase 1 — ignition on, engine off, listen only
 
@@ -282,14 +305,16 @@ QtTune's.
 ignition off, wait 10 s, then turn it back on.
 
 **Expected:**
-- [ ] Ignition off: the "Requests failing" banner at the first failed
-      write (writes may succeed for a few cycles first, as in Phase 0)
-- [ ] Ignition on: values resume within about 7 s, and the activity
-      log shows "Link: recovered". While requests fail, the worker
-      waits between probes, doubling from 100 ms to a 5 s cap, so
-      after a 10 s outage the next probe can be up to 5 s away, and
-      the ECU needs a moment to wake. Record the time from ignition-on
-      to the first value; longer than ~10 s is a finding
+- [ ] Ignition off: values dim after 3 s and the link goes quiet, as
+      in Phase 0; on a bus that sleeps, "Requests failing" at the first
+      failed write instead
+- [ ] Ignition on: values resume and the activity log shows the link
+      recovering. From quiet, the next request is at most a cycle away.
+      While requests fail, the worker waits between probes, doubling
+      from 100 ms to a 5 s cap, so after a 10 s outage the next probe
+      can be up to 5 s away, and the ECU needs a moment to wake. Record
+      the time from ignition-on to the first value; longer than ~10 s
+      is a finding
 
 ## If it fails, suspect
 
@@ -324,26 +349,27 @@ ignition off, wait 10 s, then turn it back on.
    `OP_DISCONNECT: vendor status 0` exactly once
 2. Copy this session's recording folders (the Activity log named
    each) and its session logs: `%TEMP%\ecuio-surrogate.log` and the
-   earlier ones kept beside it, this session's by their stamps
+   earlier ones kept beside it, this session's by their stamps. Copy
+   them before the test suite or `scripts/verify.sh` runs on that
+   laptop: a run spawns dozens of surrogates, and the newest-50 cap
+   would delete this session's logs
 3. Unplug the adapter, then key off
 
 ## Post-session actions
 
 1. Copy this sheet, filled in, to `docs/bench-sessions/<date>.md`, with
-   the session logs and recordings alongside (the 2026-10-16 session's
-   `surrogate-phase*.log` files are the precedent). Before committing,
+   the session logs and recordings in a folder beside it, as
+   [2026-10-22-vehicle](2026-10-22-vehicle.md) has them. Before committing,
    scrub the sheet, the logs, the recordings' `events.log` (it holds
    the URI) and any screenshots: no VIN or calibration IDs, no names
    or initials, and no local paths (`%TEMP%` and `C:\Users\…` paths
    carry the account name)
 2. Walk the [BENCH prep list](../../STATUS.md#bench-prep): mark each
    item CONFIRMED / REFUTED (with evidence) / STILL UNKNOWN
-3. Update STATUS.md (phase checklist: "first live, read-only vehicle
-   session"), the testing.md tiers and gaps, and the open items the
-   session settles: the surrogate health path, unmatched-frame
-   flapping, and the refresh rate
-4. Record what the request engine's design waits on, in
-   [ADR-0015](../adr/0015-request-engine.md)'s open questions:
+3. Update STATUS.md, the testing.md Vehicle tier and gaps, and any
+   open item the session settles
+4. While [ADR-0015](../adr/0015-request-engine.md)'s values are open,
+   add the session's measurements to it as a dated appendix:
    request-to-reply times per PID (from the `OP_WRITE frame` /
    `OP_READ frame` stamps), whether any reply was "response pending"
    (`7F 01 78`), and Phase 2's supported-PID bitmaps

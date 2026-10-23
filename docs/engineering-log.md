@@ -70,6 +70,7 @@ Dates are commit dates.
 | 2026-10-22 | Vehicle-session prep: each spawn keeps the session log it replaces (the newest 50); the Log table sorts by arrival and starts empty on connect; activity-log lines carry times | `6f84571`, `839b176` |
 | 2026-10-22 | Session recording ([ADR-0017](adr/0017-session-recording.md)): every frame, decoded value and activity line per connect; `frames.csv` is the replay format | `f590613` |
 | 2026-10-22 | Quiet-bus BENCH run of the vehicle session's URIs with recording on: requests failing and quiet on the VX; its timestamps are microseconds and its empty read is `ERR_BUFFER_EMPTY` ([session sheet](bench-sessions/2026-10-22.md)) | build `0a8beae` |
+| 2026-10-22 | First read-only vehicle session: the engine ECU answers the `obd2` scheduler, `?poll=` and the PID bitmaps through the VX; values decode and track the cluster, meeting v0.3.0's tag conditions ([session sheet](bench-sessions/2026-10-22-vehicle.md)) | — |
 
 ## Lessons learned
 
@@ -631,3 +632,17 @@ summary hid two successful writes, so "writes fail after roughly
 eight cycles" was really three writes, then one blocked for half a
 second. Characterize a vendor from its raw output; a summary shows
 only what the code already decided to keep.
+
+**2026-10-22 — first vehicle session
+([session sheet](bench-sessions/2026-10-22-vehicle.md)):** **a bench
+with nothing else on the bus predicts the adapter, not the car.** The
+morning's bench run showed what the VX does when nothing acknowledges
+its frames, and the run sheet carried that over as the ignition-off
+expectation: three writes, then "Requests failing". On the car, the
+bus acknowledged every frame with the key off, so writes kept
+succeeding and the link went quiet, as designed. The difference
+surfaced only because the notes recorded what the screen said beside
+the ticked box. An expectation taken from a bench needs the condition it
+rests on written beside it ("with nothing on the bus to
+acknowledge"), so a different result reads as information, not as a
+failure or a pass.

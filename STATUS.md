@@ -15,8 +15,11 @@ Safety, regulatory and warranty caveats are in
 
 **Current phase: v0.3.0 Phase 3 (J2534).** The HARNESS tier is complete,
 including transport adoption (ADR-0012). The BENCH tier has covered a real
-adapter on a quiet bus (no vehicle attached). The first real vehicle comes
-next, and v0.3.0 is tagged when that session succeeds.
+adapter on a quiet bus, and the first read-only vehicle session
+(2026-10-22, [session sheet](docs/bench-sessions/2026-10-22-vehicle.md))
+met v0.3.0's tag conditions: the engine ECU answered the Mode-01
+requests, and the replies decode to plausible values. Tagging v0.3.0
+is next.
 
 - **Works:**
   - The mock transport drives the live frame log, LiveView and the
@@ -27,6 +30,12 @@ next, and v0.3.0 is tagged when that session succeeds.
     relay on both backends and transport adoption: filters, the Mode-01
     request loop, and frame identity via `?filter=`/`?txid=`/`?poll=`
     (ADR-0012).
+  - A live vehicle, read-only, through the OBDX Pro VX and the x86
+    surrogate (2026-10-22,
+    [session sheet](docs/bench-sessions/2026-10-22-vehicle.md)): the `obd2`
+    scheduler, `?poll=` and the supported-PID bitmaps were answered by
+    the engine ECU on `0x7E8`, and the decoded values tracked the
+    cluster through a cold start and at idle.
   - The surrogate child is single-threaded and reads travel over the
     pipe ([ADR-0014](docs/adr/0014-single-threaded-surrogate.md)):
     vendor calls are serialized by construction, and the vendor's
@@ -62,11 +71,11 @@ next, and v0.3.0 is tagged when that session succeeds.
     adapter and failing requests apart, the bridge logs transitions to
     the Settings activity log, and the header pill, LiveView, the Home
     status card, the Dashboard header and the Settings connection label
-    all show the state. The ok/quiet/fault/disconnected states were
-    observed 2026-10-20, including a fault on the VX itself (quiet
-    bus, no vehicle). That observation predates the write latch: the
-    same no-ACK setup latches `ECUIO_ERR_REQUEST_FAILED`, shown as
-    "Requests failing" in amber, which hasn't been seen on hardware.
+    all show the state. On hardware, ok and quiet showed on the
+    vehicle, quiet through an ignition cycle and back, and "Requests
+    failing" on the VX with no vehicle (all 2026-10-22). The red fault
+    state hasn't been seen under the current rules: no vendor read has
+    failed.
   - Dashboard: analog, ring, digital and bar gauges plus shift lights,
     fed by name through `SignalHub` so one layout serves both the mock
     and `obd2` profiles. Gauges show peak hold, dim stale values, and
@@ -88,30 +97,19 @@ next, and v0.3.0 is tagged when that session succeeds.
     (`events.log`). `frames.csv` is the format the record-replay
     transport will read ([After v0.3.0](#after-v030)).
 - **Not yet:**
-  - BENCH coverage beyond the quiet-bus tier. The formal first BENCH
-    session (2026-10-16, [docs/bench-sessions/2026-10-16.md](docs/bench-sessions/2026-10-16.md))
-    succeeded: the OBDX Pro VX loaded through the surrogate, opened with
-    USB power (vendor status 0), accepted the 8-byte flow-control filter
-    shape (behaviorally, since the child didn't yet log filter ops),
-    and survived a 2-minute quiet-bus
-    soak at <1% CPU with clean teardown. The 4-byte shape that replaced
-    it was accepted with logged vendor status 0 on 2026-10-20
-    ([bench-sessions/2026-10-20.md](docs/bench-sessions/2026-10-20.md)).
-    A quiet-bus run on 2026-10-22 took the current build through every
-    URI the vehicle session uses, with recording on: "requests
-    failing" and quiet both showed on the VX, and its timestamps are
-    microseconds
-    ([bench-sessions/2026-10-22.md](docs/bench-sessions/2026-10-22.md)).
-    Talking-bus behaviors and VBATT remain untested.
-    The OBDX Pro VT still refuses open (status 34) with its adapter
-    absent. The run sheet template is
-    [docs/bench-sessions/bench-runsheet.md](docs/bench-sessions/bench-runsheet.md).
-  - Any live vehicle. The session's run sheet is
-    [docs/bench-sessions/vehicle-runsheet.md](docs/bench-sessions/vehicle-runsheet.md).
-  - J2534 decode on real hardware: the `obd2` set, scheduler and
-    channel derivation are HARNESS-verified against the fake; a
-    live-vehicle session (real ECU responses, talking-bus items in
-    the BENCH prep list) is still ahead.
+  - Real-hardware coverage beyond one adapter and one vehicle. Every
+    hardware session so far ran the OBDX Pro VX through the surrogate:
+    quiet-bus BENCH sessions on 2026-10-16, 2026-10-20 and 2026-10-22
+    ([2026-10-16](docs/bench-sessions/2026-10-16.md),
+    [2026-10-20](docs/bench-sessions/2026-10-20.md),
+    [2026-10-22](docs/bench-sessions/2026-10-22.md)), and the first
+    vehicle session. Untested on hardware: VBATT, a vendor read
+    failure, 29-bit addressing, more than one ECU answering,
+    multi-frame replies, and the in-proc backend. The VT, and the VX,
+    refuse to open with status 34 when their adapter is absent. The
+    run sheets are
+    [bench-runsheet.md](docs/bench-sessions/bench-runsheet.md) and
+    [vehicle-runsheet.md](docs/bench-sessions/vehicle-runsheet.md).
   - **Tests:** 213 ctest cases (Windows, Visual Studio 18 build
     tools, both trees rebuilt, 2026-10-22), plus the cross-arch
     subset (25/25). All
@@ -217,7 +215,7 @@ Contracts along this path:
 - [x] **Phase 3 Part 5, transport adoption:**
       `?filter=`/`?txid=`/`?poll=`, header strip and ID stamping, and
       filter teardown ([ADR-0012](docs/adr/0012-j2534-transport-adoption.md)).
-- [ ] **Phase 3 close, BENCH tier:**
+- [x] **Phase 3 close, BENCH tier and the first vehicle:**
   - [x] first real vendor DLL load and connect: the OBDX Pro VX through
     the surrogate, formal session 2026-10-16
     ([session sheet](docs/bench-sessions/2026-10-16.md)). No x64
@@ -228,13 +226,12 @@ Contracts along this path:
         ([ADR-0014](docs/adr/0014-single-threaded-surrogate.md),
         2026-10-19). Read batches that arrive with `ERR_TIMEOUT` are
         delivered.
-  - work through [BENCH prep](#bench-prep) — quiet-bus subset walked
-    2026-10-16 (prep item 9 resolved), 2026-10-20 and 2026-10-22
-    (items 5, 6 and 8 observed on the VX); item 1 resolved for both
-    shapes (8-byte behaviorally 2026-10-16, 4-byte with logged vendor
-    status 0 2026-10-20); the talking-bus items (2, 3, 4, 7) still
-    open, and 5 and 6 still to see on replies
-  - first live, read-only vehicle session
+  - [x] work through [BENCH prep](#bench-prep): the quiet-bus items
+    on the VX (2026-10-16, 2026-10-20, 2026-10-22) and the talking-bus
+    items on the first vehicle (2026-10-22); items 1–3 and 5–9
+    settled for the VX, item 4 unexercised (the vehicle is 11-bit)
+  - [x] first live, read-only vehicle session, 2026-10-22
+    ([session sheet](docs/bench-sessions/2026-10-22-vehicle.md))
 - [x] **Protocol profiles** (ADR-0013), slices 1–3. The PID-support
       probe and `uds-generic` are [after v0.3.0](#after-v030):
   - [x] slice 1: profile registry, `raw` profile, `?profile=`
@@ -254,7 +251,9 @@ Contracts along this path:
 - [ ] **Tag v0.3.0** when the first vehicle session succeeds: an ECU
       answers the Mode-01 requests and the replies decode to plausible
       values (the [vehicle run sheet](docs/bench-sessions/vehicle-runsheet.md)'s
-      first two goals). Bump the version string with it (#16)
+      first two goals). Bump the version string with it (#16). The
+      2026-10-22 session met both
+      ([session sheet](docs/bench-sessions/2026-10-22-vehicle.md))
 
 ## After v0.3.0
 
@@ -263,8 +262,8 @@ measurements feed the first item.
 
 1. **Request engine** ([ADR-0015](docs/adr/0015-request-engine.md),
    Proposed): correlated, response-paced requests derived from the
-   signal definitions. Its open values wait on the session's
-   request-to-reply times and supported-PID bitmaps.
+   signal definitions. The vehicle session's request-to-reply times
+   and supported-PID bitmaps are in its appendix of 2026-10-22.
 2. **The `obd2` PID-support probe,** on the request engine: walk the
    supported-PID bitmaps per channel and drop what the ECU says it
    doesn't support.
@@ -295,23 +294,28 @@ it a genuine connect candidate.
    - CONFIRMED 2026-10-20 (no vehicle): the VX accepted the 4-byte
      shape through a bare `j2534://` URI (obd2-derived channel),
      `OP_START_FILTER` vendor status 0, filter_id 1
-     ([session note](docs/bench-sessions/2026-10-20.md)).
+     ([session note](docs/bench-sessions/2026-10-20.md)), and carried
+     every reply on the first vehicle (2026-10-22).
 2. **Request framing.** The transport writes the LOGICAL message —
    `[4-byte tx ID][01][PID]`, 6 bytes — with ISO15765_FRAME_PAD, so the
    adapter adds the ISO-TP PCI byte and zero-pads the CAN frame. Some
    drivers expect both in-band instead (a 12-byte message); if the VX
-   transmits nothing, this is the first suspect.
+   transmits nothing, this is the first suspect. CONFIRMED 2026-10-22:
+   the first vehicle's engine ECU answered the 6-byte request
+   ([session sheet](docs/bench-sessions/2026-10-22-vehicle.md)).
 3. **No checksum byte.** This is ISO 15765-4 over CAN, so the K-line
-   checksum convention doesn't apply.
+   checksum convention doesn't apply. CONFIRMED 2026-10-22: the VX
+   hands over each reply as the CAN ID and the service data, with no
+   PCI byte, padding or checksum.
 4. **29-bit addressing** is assumed whenever either ID is above
    `0x7FF`: writes carry `CAN_29BIT_ID`, and the channel connects with
-   it.
+   it. Unexercised: the first vehicle uses 11-bit IDs.
 5. **Timestamps** are passed through as microseconds, as the spec
-   says (#12). The VX's are: 75 of its TX indications over 391 s fit
-   the host clock with a slope of 1.0000003, from one clock that
-   doesn't reset at open or connect and wraps 71.6 min after zero
-   ([session note](docs/bench-sessions/2026-10-22.md), no vehicle).
-   Still to see on replies.
+   says (#12). CONFIRMED for the VX: on the vehicle, 5,539 stamps
+   over 932 s fit the host clock with a slope of 0.9999993, as its
+   indications did at the bench. The clock doesn't reset at open or
+   connect, wraps 71.6 min after zero, and what sets its zero is
+   unknown ([session sheet](docs/bench-sessions/2026-10-22-vehicle.md)).
 6. **ReadMsgs statuses.** Split in both backends:
    `ERR_TIMEOUT` is a vehicle timeout, `ERR_BUFFER_EMPTY` is "no
    frame", and anything else is a hard failure (#11). Frames that
@@ -323,11 +327,13 @@ it a genuine connect candidate.
    and a short batch `STATUS_NOERROR`, both after the read's full
    timeout. Its TX indications arrive in those batches and are dropped
    before counting
-   ([session note](docs/bench-sessions/2026-10-22.md)). Still to
-   observe on a talking bus: whether a reply batch ever carries
-   `ERR_TIMEOUT`.
-7. **Struct-layout conformance to v04.04** cannot be confirmed without
-   a device ([ADR-0010](docs/adr/0010-j2534-v0404-shared-types.md)).
+   ([session note](docs/bench-sessions/2026-10-22.md)). On the
+   vehicle every reply came with `STATUS_NOERROR`, and no read
+   returned `ERR_TIMEOUT`
+   ([session sheet](docs/bench-sessions/2026-10-22-vehicle.md)).
+7. **Struct-layout conformance to v04.04**
+   ([ADR-0010](docs/adr/0010-j2534-v0404-shared-types.md)). CONFIRMED
+   2026-10-22 for the VX: replies decode correctly on a vehicle.
 8. **Vendor ioctl and filter behavior** and timeout semantics.
    Observed on the VX (2026-10-22, no vehicle): reads run their full
    timeout unless the batch fills. Writes sent with timeout 0 are
@@ -336,7 +342,8 @@ it a genuine connect candidate.
    blocks about 0.5 s and returns `ERR_FAILED`, until a new connect.
    Filter start and stop and disconnect return status 0 at once.
    Ioctls are unexercised: the transport issues none
-   ([session note](docs/bench-sessions/2026-10-22.md)).
+   ([session note](docs/bench-sessions/2026-10-22.md)). On the vehicle
+   every write returned status 0, with the ignition off too.
 9. **Export-name conformance.** RESOLVED 2026-10-16, contrary to
    expectations: the OBDX Pro VX exports the SPEC spelling
    (`PassThruIoctl`, J2534-1_0500 §7.3.19; all v04.04-era references
@@ -373,7 +380,7 @@ an issue is resolved it is removed, and its number is not reused.
 10. **Strip-chart x-axis resolution is one coalesce window, about
     100 ms.** Per-sample timestamps need decoding to move onto the
     worker.
-11. **J2534 link health: real-bus coverage remains.**
+11. **J2534 link health: two gaps remain.**
     The worker's health machine is done and HARNESS-tested in-proc:
     hard read failures, a quiet debounce, a write latch with
     `ECUIO_ERR_REQUEST_FAILED`, unmatched frames read as quiet, and a
@@ -390,25 +397,25 @@ an issue is resolved it is removed, and its number is not reused.
     ([testing.md](docs/testing.md#manual-smoke--link-health-ui)).
     Still open:
     - No surrogate session drives the health machine in the suite.
-      Accepted until the first vehicle session, which runs through the
-      surrogate and records it in the session log. A 2026-10-22 bench
-      run showed the requests-failing and quiet states through the
-      surrogate on the VX.
+      Live runs on 2026-10-22 drove it through the surrogate on the
+      VX: requests failing at the bench, and ok, quiet and recovery on
+      the vehicle. A hard read failure through the surrogate hasn't
+      been seen live.
     - If reads recover while writes keep failing, the state stays
       "adapter fault" instead of stepping down to request failure.
       Accepted for now: it needs a transient read error on a no-ACK
       bus, and the session log tells the two apart (clean `OP_READ`
       lines next to failing `OP_WRITE` lines).
-    - Real-vendor coverage is the VX's quiet bus (2026-10-22: an
-      empty read is `ERR_BUFFER_EMPTY`, a short batch `NOERROR`, and
-      with nothing acknowledging, the fourth write fails); talking-bus
-      flavors remain unknown (prep item 6).
 12. **J2534 timestamps pass through untranslated.** A frame's
     `timestamp_us` is the vendor's 32-bit stamp, not time since the
     session started. The spec says microseconds; the VX conforms, from
     a clock that keeps running across connects and wraps 71.6 min
     after zero
     ([bench-sessions/2026-10-22.md](docs/bench-sessions/2026-10-22.md)).
+    What sets its zero is unknown: on the vehicle laptop it fell
+    before the VX was attached, so a session's first stamps can sit
+    anywhere in the 71.6 min
+    ([session sheet](docs/bench-sessions/2026-10-22-vehicle.md)).
     Other vendors are unverified.
 13. **The picker treats one registry entry as one device.** Multiple
     adapters behind one vendor DLL can't be told apart. They would be
@@ -461,7 +468,7 @@ an issue is resolved it is removed, and its number is not reused.
 |---|---|---|
 | v0.1.0 | Skeleton: core ABI, Qt shell, responsive layout | ✅ Released |
 | v0.2.0 | Callback API, mock transport, live frame log, CI | ✅ Released (tagged) |
-| v0.3.0 | Signal decoding, LiveView, J2534 transport, live vehicle read and logging | 🚧 [Checklist above](#v030-checklist); tagged when the first vehicle session succeeds |
+| v0.3.0 | Signal decoding, LiveView, J2534 transport, live vehicle read and logging | 🚧 [Checklist above](#v030-checklist); the first vehicle session (2026-10-22) met its tag conditions, and the tag is next |
 | v0.3.x | Request engine, PID-support probe, `uds-generic`, record-replay transport | Planned: [after v0.3.0](#after-v030) |
 | v0.4.0 | Security access discovery, flash capability | Planned |
 | v0.5.0+ | Manufacturer plugin modules (ADR-0013's profile API) | Planned |
@@ -489,7 +496,7 @@ week or more or a design that needs an ADR first.
 ### Diagnostics and error reporting
 
 These make a failed field session explainable, so they come first
-after the first vehicle session.
+in the backlog.
 
 - **Say why a connect failed (M).** `ecuio_session_create` folds
   distinct causes into two codes. A refused `PassThruOpen` (a vendor
@@ -530,6 +537,18 @@ after the first vehicle session.
 
 ### User interface
 
+- **Strip chart across gaps (S).** A trace joins its last sample
+  before an outage to its first after with a straight line, so the
+  first vehicle's 31 s ignition cycle drew as ramps. Break the trace
+  once a gap passes the stale threshold.
+- **Strip-chart scaling (S).** Each trace is scaled to its own range,
+  so a one-count step fills the plot: fuel level moving between 71 %
+  and 73 % on the first vehicle drew as a full-height square wave. A
+  minimum span per trace would keep small steps small.
+- **Ignition hint on the quiet banner (S).** On the first vehicle,
+  ignition off reads as quiet, whose banner says "Vehicle not
+  responding — quiet bus"; only the requests-failing banner mentions
+  the ignition.
 - **Persisted preferences (S).** Nothing survives a restart: there is
   no `QSettings` or QML `Settings` use yet. Developer mode, units,
   theme and the last-used device all need it, so it comes before
@@ -674,8 +693,8 @@ matters: the original-copy file format constrains everything after it.
   - response-driven request pacing: send the next request when the
     reply arrives, bounded by the ISO 15765-4 response timeout (P2,
     50 ms). Its design, shared with the probe and Service 0x22 reads,
-    is [ADR-0015](docs/adr/0015-request-engine.md) (proposed; its open
-    values wait for the first vehicle session);
+    is [ADR-0015](docs/adr/0015-request-engine.md) (proposed; the first
+    vehicle session's measurements are in its appendix of 2026-10-22);
   - decoding on the worker thread, which also brings per-sample
     timestamps (Known Issue #10) and takes the per-frame def matching
     off the GUI thread (#4);

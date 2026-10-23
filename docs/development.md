@@ -304,6 +304,15 @@ the open fails. Without these variables,
 `J2534RoutingTest.X86FakeSelectsSurrogateBackendAndRoundTrips`
 skips.
 
+Every runtime variable carries the core's prefix, `ECUIO_`: these two,
+the fake's knobs and the surrogate's. The one `QTTUNE_` name is
+`QTTUNE_SURROGATE_SOURCE`, the app build's CMake cache setting above,
+which is read at configure time, never at runtime. A variable under
+any other name is ignored without a word: the routing case skips, the
+other surrogate cases run against the x64 tree's surrogate and pass,
+and the run looks green. Read the skip count, or use
+`scripts/verify.sh`, whose cross-arch step fails on a skip.
+
 **Two ways an env-gated test lies to you** (both hit during the
 2026-10-16 bench pre-flight, both operator error):
 
@@ -327,6 +336,7 @@ skips.
 | Surrogate opens fail, in tests or the app, and the session log says "built from other shared headers" | One tree was built from older copies of `j2534_ptypes.h` or `surrogate_protocol.h`, usually a stale `build-win32`. Rebuild both trees, Win32 first. |
 | Cross-arch test fails with odd values, but same-arch passes | A stale `build-win32` fake: the fakes carry no build fingerprint. Rebuild both trees. |
 | In the app, an x86 adapter (for example the OBDX Pro VX) fails with "failed to load transport library", and `%TEMP%\ecuio-surrogate.log` holds only an `open: CreateProcess failed (err=2) exe='...'` line | No surrogate next to `qttune.exe`, so the child never launched. The x64 tree was configured before `build-win32` had a surrogate. Build the Win32 tree, re-run `cmake -B build`, check for `Deploying Win32 J2534 surrogate` in the output, and rebuild. Setting `ECUIO_SURROGATE_EXE` also works. |
+| The cross-arch routing case skips although the variables were exported | They're named something else, for example `QTTUNE_SURROGATE_EXE`: nothing reads that. The names are `ECUIO_SURROGATE_EXE` and `ECUIO_FAKE_DLL` (Cross-arch run, above). The rest of the run passes on the x64 surrogate, so the skip is the only sign. |
 | Cross-arch test fails expecting backend "surrogate", got "inproc" | `ECUIO_FAKE_DLL` points at an x64 fake (or the wrong tree). Check the value, not the code — unset skips, wrong-value fails. |
 | J2534 test fails as `Failed (Timeout)` | A genuine hang, bounded by the 30 s ceiling. Attach to the surviving test and surrogate processes and check thread wait states before killing; the child log is `%TEMP%\ecuio-surrogate.log`, and earlier spawns' logs are kept beside it under dated names. |
 | Linker warning LNK4070 on a fake DLL | The `.def` file's `LIBRARY` directive disagrees with the output filename. Make them match. |

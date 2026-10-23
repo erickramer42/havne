@@ -174,8 +174,8 @@ The bridge polls it on its 100 ms tick and maps it for the UI
 | Core code | `linkState` | Means |
 |---|---|---|
 | `ECUIO_OK` | `ok` | Replies are arriving |
-| `ECUIO_ERR_VEHICLE_TIMEOUT` | `quiet` | The adapter answers, but nothing arrives (debounced over ~1 s) |
-| `ECUIO_ERR_REQUEST_FAILED` | `requests` | Writes fail while reads stay clean: nothing on the bus ACKs (ignition off, ECU asleep) |
+| `ECUIO_ERR_VEHICLE_TIMEOUT` | `quiet` | The adapter answers, but nothing arrives (debounced over ~1 s): no ECU awake on a bus that still acknowledges, as with the first vehicle's ignition off |
+| `ECUIO_ERR_REQUEST_FAILED` | `requests` | Writes fail while reads stay clean: nothing on the bus ACKs (the adapter on no live bus, or a bus fully asleep) |
 | `ECUIO_ERR_TRANSPORT_HARD_FAILURE` | `fault` | Reads fail: the adapter isn't answering |
 | no session | `disconnected` | |
 

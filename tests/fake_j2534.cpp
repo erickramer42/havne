@@ -474,9 +474,10 @@ long __stdcall PassThruReadMsgs(unsigned long ChannelID,
 
     /* SPEC-CONFORMANT READ MODE: when
      * ECUIO_FAKE_SPEC_READ_SEMANTICS is 1, model the J2534-1 rule
-     * a real vehicle will exercise: a read asking for N messages with
-     * a nonzero timeout returns min(N, available), and if fewer than
-     * requested, ERR_TIMEOUT TOGETHER WITH those messages. Timeout 0
+     * for a conforming vendor: a read asking for N messages with a
+     * nonzero timeout returns min(N, available), and if fewer than
+     * requested, ERR_TIMEOUT TOGETHER WITH those messages. (The VX
+     * departs from it: it returns STATUS_NOERROR with a short batch.) Timeout 0
      * on an empty queue returns ERR_BUFFER_EMPTY. The call returns at
      * once; the timeout isn't waited out. Filter gating is not
      * modeled here (the knobs are never combined in tests).

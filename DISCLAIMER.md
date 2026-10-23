@@ -19,10 +19,11 @@ possible. Never flash a vehicle with an unstable power supply.**
 This project is in early development. Through a J2534 Pass-Thru
 adapter (Windows only), it can send standard, read-only OBD-II Mode-01
 requests ("show current data") and display the replies. That path has
-been tested only on the bench, against a simulated adapter and a real
-adapter with no vehicle attached. It has **not** been validated on any
-vehicle. QtTune has **no** capability to write, clear codes or flash
-any ECU. Do not connect it to a vehicle expecting reliable results.
+been tested on the bench, against a simulated adapter and a real
+adapter with no vehicle attached, and in one read-only session on one
+vehicle with one adapter. It has **not** been validated beyond that.
+QtTune has **no** capability to write, clear codes or flash any ECU.
+Do not connect it to a vehicle expecting reliable results.
 
 ## Intended Purpose
 

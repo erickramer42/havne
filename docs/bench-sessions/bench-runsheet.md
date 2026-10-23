@@ -1,141 +1,140 @@
-# BENCH run sheet — first real adapter session
+# BENCH run sheet — real adapter, no vehicle
 
 **Date:** <date>  **Adapter:** OBDX Pro VX (USB)
+**Machine:** <the dev machine, or the laptop that goes to the car>
 **QtTune build:** <commit hash>  **Trees:** build, build-win32 both fresh
-**Vehicle connected:** No (phases 1–3) — this sheet's no-vehicle portion is
-the BENCH tier; the vehicle session is a separate sheet
+**Vehicle connected:** No. This is the BENCH tier; a vehicle session
+has its own sheet, [vehicle-runsheet.md](vehicle-runsheet.md).
+
+Fill in a copy as `docs/bench-sessions/<date>.md`. The sessions so far
+are [2026-10-16](2026-10-16.md), [2026-10-20](2026-10-20.md) and
+[2026-10-22](2026-10-22.md); the last ran this procedure, and its
+results are the expectations below.
 
 ## Purpose
 
-First session against a real vendor DLL. Goals, in order:
+A real vendor DLL and adapter with nothing else on the bus. Goals, in
+order:
 
-1. The VX driver loads and routes through the surrogate (x86)
-2. It connects an ISO 15765 channel and accepts our filter shape
-3. Observable real-device behavior (VBATT, timeout semantics, timestamps)
-4. Valid or invalidate every assumption in the BENCH prep list
+1. The driver loads and routes through the surrogate (x86)
+2. It connects an ISO 15765 channel and accepts the filter shape
+3. Every URI shape a vehicle session uses connects on this build and
+   machine, and the evidence pipeline (recording, payload logging,
+   kept session logs) runs once
+4. The adapter's behaviour with nothing to acknowledge its frames is
+   as recorded; a difference is a finding
 
-Record EVERYTHING. A session that fails at phase 2 with captured
-evidence is worth more than one that passes undocumented.
-
-## Preliminary results (informal, 2026-10-16)
-
-Ahead of the formal session: the VX completed an unsheeted connect /
-disconnect cycle through the surrogate (USB powered, no vehicle) —
-phase 1 evidence. Vendor behavior recorded: VX exports all 14
-functions, undecorated, spec `Ioctl` spelling; opens with USB power.
-The VT (driver installed, adapter absent) refuses `PassThruOpen`
-with vendor status 34 in seconds. The formal session below still
-owns phases 2–3 (filter shape, VBATT, quiet-bus ReadMsgs).
+There's no ECU simulator, so this is all the desk can check before a
+vehicle. A session that stops at phase 1 with its evidence is worth
+more than one that runs to the end undocumented.
 
 ## Pre-flight (before touching the adapter)
 
-- [ ] Fresh build of both trees, **Win32 first** (the app build copies
-      whatever surrogate `build-win32` holds at that moment):
-      cmake --build build-win32 --config Release --target ecuio-j2534-surrogate
-      cmake --build build --config Release
-- [ ] The build output shows "Deploying Win32 J2534 surrogate next to
-      qttune.exe". If it doesn't, re-run `cmake -B build` and rebuild:
-      without the copy, an x86 adapter fails to connect with "failed
-      to load transport library"
-- [ ] Full suite green: every case passes except the 1 env-gated skip
-      (current count in STATUS.md)
-- [ ] `qttune.exe` runs and the Settings picker lists the VX with
-      architecture label "x86" (discovery smoke — already verified once;
-      re-confirm on today's build)
-- [ ] Camera or notebook ready for evidence capture
-- [ ] Adapter firmware/driver version noted (from Device Manager or the
-      vendor app, if installed)
+- [ ] Fresh build of both trees, **Win32 first**, and the app build
+      prints "Deploying Win32 J2534 surrogate next to qttune.exe". If
+      it doesn't, re-run `cmake -B build` and rebuild: without the copy,
+      an x86 adapter fails to connect with "failed to load transport
+      library"
+- [ ] `scripts/verify.sh` prints four `ok` lines, the cross-arch one
+      reading `0 skipped` ([development.md](../development.md#running-tests))
+- [ ] The VX driver is installed, and Settings' picker lists the VX as
+      "x86". Close the vendor app and any other J2534 tool: one process
+      at a time can hold the device
+- [ ] Tick **Record sessions** before the first connect, so each
+      connect writes a recording and the surrogate logs every request
+      and reply ([ADR-0017](../adr/0017-session-recording.md))
+- [ ] Note the adapter's driver and firmware versions if anything shows
+      them
 
-Abort condition: picker doesn't list the VX → discovery regression,
-stop and file it; nothing below is meaningful.
+Abort condition: the picker doesn't list the VX. Stop and file it as a
+discovery problem; nothing below is meaningful.
 
-## Phase 1 — load and open, no vehicle
+## Phase 1 — load, open, requests on a bus with no other node
 
-**Action:** connect the VX by USB. Enter the URI manually:
+**Action:** connect the VX by USB, pick its row, and Connect the bare
+URI. Leave it about two minutes:
 
-    j2534://OBDX Pro VX
+    j2534://OBDX Pro - VX
 
-(do NOT append ?filter= or ?poll= yet — isolate load from connect
-from filter, in that order)
-
-**Expected:**
-- [ ] Connection succeeds, no error dialog
-- [ ] A surrogate process (ecuio-j2534-surrogate.exe, x86) appears in
-      Task Manager and dies when you disconnect
-- [ ] Disconnect cleanly from the Settings page; process exits with it
-
-**Evidence to record:** success/fail, surrogate process lifetime
-observation, any error text verbatim.
-
-**If it fails, suspect (in order):**
-
-| Symptom | Suspect |
-|---|---|
-| ECUIO_ERR_LOAD_FAILED, fast | PE sniff or export resolution; exit codes 4/5 from j2534.md §Surrogate |
-| Handshake timeout (8 s) then fail | Pipe/spawn path — check for AV interference or blocked ports |
-| Crash of the app process | Capture crash address; do not guess, bisect |
-
-## Phase 2 — connect and quiet-bus observations, no vehicle
-
-**Action:** same URI, now with the filter parameters but no poll:
-
-    j2534://OBDX Pro VX?filter=0x7E8
-
-**Expected:**
-- [ ] Connect succeeds
-- [ ] The FLOW_CONTROL filter registration is ACCEPTED — this is
-      BENCH prep assumption #1 (8-byte mask/pattern/FC shape) getting
-      its first real-world test
-- [ ] No frames arrive (nothing on the bus)
-- [ ] The read loop spins quietly without errors or callback storms
-
-**Evidence:** how long it ran (aim for ≥2 min), CPU load of the app
-(worker spin rate), any error surfaced.
+**Expected** ([2026-10-22](2026-10-22.md)):
+- [ ] Connect succeeds; the session log shows `OP_OPEN: vendor status
+      0`, `OP_CONNECT` 0 and `OP_START_FILTER: type 3, status 0`
+- [ ] Three writes succeed, then the fourth blocks about 0.5 s and
+      fails (`OP_WRITE: status 7`), as does every later one: nothing
+      acknowledges the frames. Amber "Requests failing" within about a
+      second, and "Link: requests failing (1 episode(s))" in the
+      activity log
+- [ ] The probe interval grows to about 5.5 s as the backoff reaches
+      its cap
+- [ ] Task Manager: `qttune.exe` and the 32-bit
+      `ecuio-j2534-surrogate.exe` both under 1 % CPU
+- [ ] Disconnect: `Disconnected:` within about 0.5 s, one
+      `OP_DISCONNECT: vendor status 0`, and the surrogate process gone
 
 **If it fails, suspect:**
 
 | Symptom | Suspect |
 |---|---|
-| Filter registration rejected | Prep #1 — the fc_len==mask_len workaround shape. Capture the exact vendor status code |
-| Connect itself fails | Prep #8/#2 — baud or protocolID conformance |
-| App crashes on quiet bus | ReadMsgs status path (Issue #11). Statuses are split since 2026-10-19 (`ERR_TIMEOUT` → vehicle timeout, `ERR_BUFFER_EMPTY` → no frame, anything else → hard failure); record which status the vendor returns for an empty read, from `%TEMP%\ecuio-surrogate.log` or the debugger |
+| `PassThruOpen refused (vendor status 34)` in the session log | The adapter isn't attached (the VX and the VT both answer 34 then) |
+| "built from other shared headers" | A stale `build-win32`: rebuild both trees |
+| `ECUIO_ERR_LOAD_FAILED`, fast | The surrogate missing next to `qttune.exe`, or export resolution: the exit codes in [j2534.md](../j2534.md#surrogate) |
+| A handshake timeout (8 s) | The child never started: security software holding a newly built exe, or a blocked spawn |
+| Filter registration rejected | BENCH prep #1, the 4-byte filter shape. Record the vendor status |
+| The app crashes | Capture the session log; don't guess, bisect |
 
-## Phase 3 — VBATT (first real data)
+## Phase 2 — listen only
 
-**Action:** same session; if the Settings UI has no VBATT surface,
-note "surface absent" and defer to a follow-up. If you add a quick
-manual probe via the loader test binary, do it in a scratch branch,
-not this session.
+**Action:** about 30 s:
 
-**Expected:** READ_VBATT returns something in the 0–15000 mV range
-(USB-powered, no OBD connector — possibly 0 or ~5000 depending on
-the device's supply arrangement; an unexpected-but-plausible value is
-NOT a failure, it's a data point).
+    j2534://OBDX Pro - VX?profile=raw&filter=0x7E8
 
-**Evidence:** value, and whether the IOCtl succeeded at all (a
-strict vendor refusing READ_VBATT unplugged would be notable).
+**Expected:**
+- [ ] No writes in the session log
+- [ ] Every read returns `ERR_BUFFER_EMPTY` (status 16) after waiting
+      out its 100 ms timeout; amber "Vehicle not responding" after
+      about 1.4 s
 
-## Phase 4 — STOP POINT (no vehicle)
+## Phase 3 — the vehicle session's other URIs
 
-Everything above is the BENCH tier as scoped. Do NOT plug into a
-vehicle on this sheet — that session (parked, ignition ON, engine OFF,
-read-only URIs in this order: `?profile=raw&filter=0x7E8` to listen
-with no requests, then `?profile=raw&filter=0x7E8&poll=0x0C` for one
-PID (or `?poll=0x0C` alone, which keeps the `obd2` decode for that
-PID), then a bare `j2534://` for the `obd2` scheduler with decode) is a
-separate sheet with its own abort conditions and a second operator
-or at minimum a posted procedure:
-[vehicle-runsheet.md](vehicle-runsheet.md).
+**Action:** connect each for 15–30 s:
+
+    j2534://OBDX Pro - VX?poll=0x0C
+    j2534://OBDX Pro - VX?profile=raw&filter=0x7E8&poll=0x00
+    j2534://OBDX Pro - VX?profile=raw&filter=0x7E8&poll=0x20
+    j2534://OBDX Pro - VX?profile=raw&filter=0x7E8&poll=0x40
+
+**Expected:**
+- [ ] Each connects and goes to "Requests failing" as in phase 1; with
+      `?poll=` a request goes out about every 220 ms, because its
+      100 ms read waits out its timeout
+- [ ] One recording folder per connect: `events.log` holding the URI,
+      "surrogate frame logging on" and the link transition;
+      `frames.csv` its header row only (no frame reaches the bridge);
+      `signals.csv` its byte-order mark and header
+- [ ] Each connect's session log kept as
+      `ecuio-surrogate.<YYYYMMDD-HHMMSS-mmm>.log`, stamped with its
+      last line
+
+## Phase 4 — VBATT
+
+The app has no VBATT surface: the transport issues no ioctls. Record
+"surface absent" unless that has changed.
+
+## Stop point
+
+Nothing above connects to a vehicle. A vehicle session follows
+[vehicle-runsheet.md](vehicle-runsheet.md), with its own safety rules
+and abort conditions.
 
 ## Post-session actions
 
-1. Copy this sheet, filled in, to docs/bench-sessions/<date>.md
-2. Walk the BENCH prep list in STATUS.md and mark each assumption:
-   CONFIRMED / REFUTED (with evidence) / STILL UNKNOWN
-3. Refuted items become new known issues or immediate fixes, per
-   severity — the fc_len rule relaxation (prep #1) is the most likely
-   candidate
-4. Update docs/testing.md "Gaps": "No real vendor DLL has been
-   loaded" flips the moment phase 1 passes
-5. Engineering-log entry only if a lesson emerged (the bar: would
+1. Copy the session logs and this sheet, filled in, to
+   `docs/bench-sessions/<date>.md` and a log file beside it. Scrub
+   them first: no names or account names, and no local paths
+   (`%TEMP%` and `C:\Users\…` paths carry the account name)
+2. Walk the [BENCH prep list](../../STATUS.md#bench-prep) and mark what
+   the session confirms or contradicts, with evidence
+3. A contradicted item becomes a known issue or a fix, by severity
+4. Update the testing.md BENCH tier and gaps, and STATUS.md
+5. An engineering-log entry only if a lesson emerged (the bar: would
    past-you have avoided a real cost by reading it?)

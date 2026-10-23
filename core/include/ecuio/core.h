@@ -77,14 +77,17 @@ typedef enum {
     /* Link-health codes: published by the J2534 worker through
      * ecuio_session_get_error_state while the session keeps running. */
     ECUIO_ERR_VEHICLE_TIMEOUT = 8,          /* reads answer, but nothing
-                                               arrives */
+                                               arrives: no ECU awake on a
+                                               bus that still ACKs, as a
+                                               vehicle with the ignition
+                                               off can be */
     ECUIO_ERR_TRANSPORT_HARD_FAILURE = 9,   /* reads fail: the adapter isn't
                                                answering */
     ECUIO_ERR_REQUEST_FAILED = 10,   /* writes fail while reads stay clean:
-                                        no node ACKs the requests (ignition
-                                        off, ECU asleep, no vehicle). The
-                                        adapter is fine, so this isn't a
-                                        hard failure */
+                                        no node ACKs the requests (no
+                                        vehicle, or a bus fully asleep).
+                                        The adapter is fine, so this isn't
+                                        a hard failure */
     ECUIO_ERR_INVALID_ARGUMENT = 11,   /* an argument is present but not
                                           acceptable: a signal set that fails
                                           validation, a malformed or built-in

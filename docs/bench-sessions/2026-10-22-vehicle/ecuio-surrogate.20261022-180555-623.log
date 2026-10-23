@@ -1,0 +1,13 @@
+[sur 18:05:21.810] open: child pid 2392, surrogate '<repo>\build\app\Release\ecuio-j2534-surrogate.exe', dll '%ProgramFiles(x86)%\OBDX Pro\J2534\OBDX Pro VX\OBDXVX_J2534.dll'
+[sur 18:05:21.810] open: log '%TEMP%\ecuio-surrogate.log'
+[surrogate 18:05:21.887] pipe connected
+[surrogate 18:05:21.887] frame logging on (ECUIO_SUR_LOG_FRAMES=1)
+[surrogate 18:05:21.903] dll loaded
+[surrogate 18:05:21.903] exports resolved
+[surrogate 18:05:21.903] OP_OPEN: calling PassThruOpen
+[surrogate 18:05:22.010] OP_OPEN: vendor status 0, device_id=1
+[surrogate 18:05:22.035] OP_CONNECT: vendor status 0, channel=1 (device=1)
+[surrogate 18:05:22.037] OP_START_FILTER: type 3, status 0, filter_id 1
+[surrogate 18:05:22.153] OP_READ: status 16, frames 0
+[surrogate 18:05:55.623] OP_STOP_FILTER: fid 1, status 0
+[surrogate 18:05:55.623] OP_DISCONNECT: vendor status 0, channel=1

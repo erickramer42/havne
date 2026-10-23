@@ -14,8 +14,8 @@ where the gaps are. For build and run commands, see
 | **Cross-arch** | HARNESS with an x64 test process driving an x86 surrogate and an x86 fake | Dev machine only; needs environment variables ([development.md](development.md#running-tests)) |
 | **Simulator smoke** | The iOS app installs and launches on the iOS Simulator, QML loads, and the app is still running 45 s later. Nothing drives the UI. A pass doesn't prove the app drew anything, so look at the screenshots. | CI on pull requests, and on request: a manual run (Actions → CI → Run workflow; `smoke_only` skips the other platform jobs), or `[ios-smoke]` in the commit message (`ios-simulator-smoke`, Intel macOS runner) |
 | **Manual smoke** | Running the app: layout, Dashboard gauges, LiveView, strip chart, Settings picker against the live registry | Dev machine |
-| **BENCH** | A real vendor DLL and adapter, no vehicle | First formal session complete, 2026-10-16, quiet bus ([session sheet](bench-sessions/2026-10-16.md)); informal quiet-bus follow-up 2026-10-20 ([note](bench-sessions/2026-10-20.md)); quiet-bus run of the vehicle session's URIs with recording, 2026-10-22 ([sheet](bench-sessions/2026-10-22.md)); talking-bus behaviors pending |
-| **Vehicle** | A live, read-only vehicle session | **Not yet reached**; run sheet ready ([vehicle-runsheet.md](bench-sessions/vehicle-runsheet.md)) |
+| **BENCH** | A real vendor DLL and adapter, no vehicle | First formal session complete, 2026-10-16, quiet bus ([session sheet](bench-sessions/2026-10-16.md)); informal quiet-bus follow-up 2026-10-20 ([note](bench-sessions/2026-10-20.md)); quiet-bus run of the vehicle session's URIs with recording, 2026-10-22 ([sheet](bench-sessions/2026-10-22.md)) |
+| **Vehicle** | A live, read-only vehicle session | First session 2026-10-22: one car, its engine ECU on `0x7E8`, ignition off, engine off and idling ([session sheet](bench-sessions/2026-10-22-vehicle.md)); run sheet [vehicle-runsheet.md](bench-sessions/vehicle-runsheet.md) |
 
 The manual smoke tier earns its place. The 2026-10-10 strip-chart
 indexing bug lived in QML paint code, and every C++ test was blind to
@@ -135,6 +135,7 @@ and the next run's screenshots confirmed the fixes the same day.
 | Link-health UI: quiet/fault/degraded banner, activity-log transitions, "—" cells, stale dimming, the arbId column | Manual smoke, 2026-10-20 (fake quiet/fault via `ECUIO_FAKE_READ_STATUS`; mock; recipe below). The first run recorded dimming and the arbId column as working when the code couldn't produce either (dimming keyed on value changes; the ID column bound a misspelled role). Both rows were re-run and passed after the fixes, the arbId row through the x86 surrogate. |
 | Fault state on real hardware, clean teardown; 4-byte filter shape accepted with logged vendor status 0 | Informal bench observation 2026-10-20 ([sheet](bench-sessions/2026-10-20.md)), under the rules before `946bdf5`. The same no-ACK setup now latches `ECUIO_ERR_REQUEST_FAILED` instead (next row). |
 | Requests-failing and quiet states on real hardware through the x86 surrogate: the banner at the first failed write, one episode, the backoff to its 5 s cap; quiet after ten empty reads (`ERR_BUFFER_EMPTY`) under `?profile=raw`; clean teardown on every connect | BENCH run on the OBDX Pro VX, 2026-10-22 (`0a8beae`, [sheet](bench-sessions/2026-10-22.md)) |
+| The `obd2` set on a live vehicle through the x86 surrogate: the scheduler, `?poll=` and the three supported-PID bitmaps answered by the engine ECU; the values, decoded a second time from the logged bytes with the J1979 formulas, match the display, and RPM matched the tachometer; ok, quiet and recovery through an ignition cycle | Vehicle session, 2026-10-22 ([sheet](bench-sessions/2026-10-22-vehicle.md)) |
 
 ## Manual smoke — link-health UI
 
@@ -185,37 +186,35 @@ rows against the current Home, Settings and Dashboard header.
   J2534 adapter on hand, the OBDX Pro VX, ships an x86 DLL, so real
   vendor code has run only through the surrogate. In-proc, every
   vendor call has met only the x64 fake.
-- **BENCH coverage stops at the quiet bus.** The formal session
-  (2026-10-16) verified load, open, and acceptance of the since-replaced
-  8-byte filter shape; an informal 2026-10-20 observation additionally
-  confirmed the current 4-byte shape (logged vendor status 0), the
-  first accepted Mode-01 request, and the fault-banner path on the VX.
-  A 2026-10-22 run added the requests-failing and quiet states, the
-  VX's read and write statuses with nothing on the bus, and its
-  timestamp unit (microseconds, from its TX indications). Still
-  unverified against real hardware: talking-bus behavior (replies to
-  requests, checksum expectations), VBATT, and whether a vendor ever
-  pairs `ERR_TIMEOUT` with data (#11).
+- **Real-hardware coverage is one adapter and one vehicle.** The
+  quiet-bus BENCH sessions (2026-10-16, 2026-10-20, 2026-10-22) and
+  the first vehicle session (2026-10-22,
+  [session sheet](bench-sessions/2026-10-22-vehicle.md)) all ran the
+  OBDX Pro VX through the surrogate, and the vehicle's engine ECU
+  answered on 11-bit `0x7E8`. Still unverified against real hardware:
+  VBATT, 29-bit addressing, more than one ECU answering, multi-frame
+  (segmented ISO-TP) replies, a vendor read failure, and any other
+  vendor's statuses (the VX never returned `ERR_TIMEOUT`, #11).
 - **Link-health coverage is in-proc only.** The tests above drive
   `ECUIO_FAKE_READ_STATUS`, `ECUIO_FAKE_UNTOUCHED_COUNT_STATUS` and
   `ECUIO_FAKE_WRITE_STATUS` through the worker. Not covered:
   - the surrogate path's health mapping through the worker, end to
-    end (the surrogate test stops at `read_frame`'s status). The
-    2026-10-22 bench run drove the requests-failing and quiet states
-    live through the surrogate on the VX; ok waits for the first
-    vehicle session, and hard failure for a vendor read error, with
-    the session log as the record;
+    end (the surrogate test stops at `read_frame`'s status). Live
+    runs on 2026-10-22 drove it through the surrogate on the VX:
+    requests failing at the bench, and ok, quiet and recovery on the
+    vehicle. Hard failure waits for a vendor read error, with the
+    session log as the record;
   - how the UI renders `ECUIO_ERR_REQUEST_FAILED`: the bridge's mapping
     to `requests` is unit-tested, but the QML banner, Home card,
     Dashboard header, Settings label and log line are covered only by
     the smoke recipe's requests-banner row (passed 2026-10-21);
-  - the real-vendor flavors on a talking bus: on the VX's quiet bus
-    (2026-10-22), an empty read returns `ERR_BUFFER_EMPTY` and a short
-    batch `NOERROR`, and with nothing acknowledging, three writes are
-    accepted and the fourth fails `ERR_FAILED`
-    ([bench-sessions/2026-10-22.md](bench-sessions/2026-10-22.md)),
-    but `ERR_TIMEOUT`-with-data and ECU-present write behavior are
-    still unknown.
+  - other vendors' read and write statuses. The VX's are known: an
+    empty read returns `ERR_BUFFER_EMPTY` and data comes with
+    `NOERROR`, never `ERR_TIMEOUT`; with nothing acknowledging, three
+    writes are accepted and the fourth fails `ERR_FAILED`, and on a
+    vehicle every write succeeded
+    ([bench](bench-sessions/2026-10-22.md),
+    [vehicle](bench-sessions/2026-10-22-vehicle.md)).
 - **The fake's default read model is simpler than J2534's.** By
   default its `ReadMsgs` returns one message per call whatever
   `NumMsgs` and the timeout ask for, and `STATUS_NOERROR` with zero
@@ -244,15 +243,12 @@ rows against the current Home, Settings and Dashboard header.
   and none answers an `OP_READ` late enough for `drain_pending` to
   drop frames. Reaching either needs a misbehaving child, such as a
   fault-injection knob in the surrogate.
-- **Profile-derived channels against a real vendor.** The
-  derived-filter shape and per-PID request routing are
-  fake-verified. On 2026-10-20 a bare `j2534://` URI got the derived
-  filter and its first request accepted by the VX, but no ECU
-  answered, so the receive side is unverified.
-- **No live vehicle has been connected.**
-- **Vendor conformance to J2534-1 v04.04 is unknown.** The shared
-  types header is verified against public references, but only a real
-  device can catch a vendor that departs from the spec
+- **Vendor conformance to J2534-1 v04.04 is known for one vendor.**
+  The shared types header is verified against public references, and
+  the VX's replies decode, so its struct layout matches. It departs
+  from the read rule, though: a short batch comes back with
+  `STATUS_NOERROR`, not `ERR_TIMEOUT`. Another vendor can depart
+  elsewhere, and only its own device can show it
   ([ADR-0010](adr/0010-j2534-v0404-shared-types.md)).
 - **Discovery tests check shape only.** They pass vacuously on a
   machine with no vendors installed (Known Issue #14).

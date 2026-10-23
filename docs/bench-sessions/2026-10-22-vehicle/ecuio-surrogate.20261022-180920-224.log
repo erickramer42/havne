@@ -1,0 +1,1313 @@
+[sur 18:08:05.387] open: child pid 9660, surrogate '<repo>\build\app\Release\ecuio-j2534-surrogate.exe', dll '%ProgramFiles(x86)%\OBDX Pro\J2534\OBDX Pro VX\OBDXVX_J2534.dll'
+[sur 18:08:05.387] open: log '%TEMP%\ecuio-surrogate.log'
+[surrogate 18:08:05.447] pipe connected
+[surrogate 18:08:05.447] frame logging on (ECUIO_SUR_LOG_FRAMES=1)
+[surrogate 18:08:05.466] dll loaded
+[surrogate 18:08:05.466] exports resolved
+[surrogate 18:08:05.466] OP_OPEN: calling PassThruOpen
+[surrogate 18:08:05.579] OP_OPEN: vendor status 0, device_id=1
+[surrogate 18:08:05.597] OP_CONNECT: vendor status 0, channel=1 (device=1)
+[surrogate 18:08:05.613] OP_START_FILTER: type 3, status 0, filter_id 1
+[surrogate 18:08:05.620] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:05.620] OP_WRITE: status 0, written 1
+[surrogate 18:08:05.740] OP_READ frame: status 0, rx 0x00000009, ts 2440645079, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:05.740] OP_READ frame: status 0, rx 0x00000000, ts 2440650558, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:05.740] OP_READ: status 0, frames 1
+[surrogate 18:08:05.843] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:05.958] OP_READ frame: status 0, rx 0x00000009, ts 2440857070, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:05.958] OP_READ frame: status 0, rx 0x00000000, ts 2440861917, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:05.958] OP_READ: status 0, frames 1
+[surrogate 18:08:06.062] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:06.168] OP_READ frame: status 0, rx 0x00000009, ts 2441075963, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:06.168] OP_READ frame: status 0, rx 0x00000000, ts 2441082452, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:06.168] OP_READ: status 0, frames 1
+[surrogate 18:08:06.273] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:06.393] OP_READ frame: status 0, rx 0x00000009, ts 2441290762, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:06.393] OP_READ frame: status 0, rx 0x00000000, ts 2441296704, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:06.393] OP_READ: status 0, frames 1
+[surrogate 18:08:06.513] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:06.634] OP_READ frame: status 0, rx 0x00000009, ts 2441529070, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:06.634] OP_READ frame: status 0, rx 0x00000000, ts 2441532918, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:06.634] OP_READ: status 0, frames 1
+[surrogate 18:08:06.781] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:06.887] OP_READ frame: status 0, rx 0x00000000, ts 2441777045, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:06.887] OP_READ frame: status 0, rx 0x00000009, ts 2441794875, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:06.887] OP_READ: status 0, frames 1
+[surrogate 18:08:06.990] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:07.113] OP_READ frame: status 0, rx 0x00000009, ts 2442006862, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:07.113] OP_READ frame: status 0, rx 0x00000000, ts 2442012327, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:07.113] OP_READ: status 0, frames 1
+[surrogate 18:08:07.236] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:07.336] OP_READ frame: status 0, rx 0x00000009, ts 2442250056, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:07.336] OP_READ frame: status 0, rx 0x00000000, ts 2442255681, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:07.336] OP_READ: status 0, frames 1
+[surrogate 18:08:07.460] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:07.582] OP_READ frame: status 0, rx 0x00000009, ts 2442475592, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:07.582] OP_READ frame: status 0, rx 0x00000000, ts 2442482699, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:07.582] OP_READ: status 0, frames 1
+[surrogate 18:08:07.704] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:07.821] OP_READ frame: status 0, rx 0x00000009, ts 2442718769, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:07.821] OP_READ frame: status 0, rx 0x00000000, ts 2442721411, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:07.821] OP_READ: status 0, frames 1
+[surrogate 18:08:07.931] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:08.037] OP_READ frame: status 0, rx 0x00000009, ts 2442946984, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:08.037] OP_READ frame: status 0, rx 0x00000000, ts 2442951590, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:08.037] OP_READ: status 0, frames 1
+[surrogate 18:08:08.153] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:08.275] OP_READ frame: status 0, rx 0x00000009, ts 2443168356, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:08.275] OP_READ frame: status 0, rx 0x00000000, ts 2443171266, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:08.275] OP_READ: status 0, frames 1
+[surrogate 18:08:08.397] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:08.520] OP_READ frame: status 0, rx 0x00000009, ts 2443414111, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:08.520] OP_READ frame: status 0, rx 0x00000000, ts 2443427545, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:08.520] OP_READ: status 0, frames 1
+[surrogate 18:08:08.642] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:08.764] OP_READ frame: status 0, rx 0x00000009, ts 2443657542, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:08.764] OP_READ frame: status 0, rx 0x00000000, ts 2443661677, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:08.764] OP_READ: status 0, frames 1
+[surrogate 18:08:08.886] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:09.009] OP_READ frame: status 0, rx 0x00000009, ts 2443902049, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:09.009] OP_READ frame: status 0, rx 0x00000000, ts 2443907628, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:09.009] OP_READ: status 0, frames 1
+[surrogate 18:08:09.124] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:09.240] OP_READ frame: status 0, rx 0x00000009, ts 2444140172, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:09.240] OP_READ frame: status 0, rx 0x00000000, ts 2444148484, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:09.240] OP_READ: status 0, frames 1
+[surrogate 18:08:09.356] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:09.461] OP_READ frame: status 0, rx 0x00000009, ts 2444371883, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:09.461] OP_READ frame: status 0, rx 0x00000000, ts 2444376636, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:09.461] OP_READ: status 0, frames 1
+[surrogate 18:08:09.569] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:09.693] OP_READ frame: status 0, rx 0x00000009, ts 2444583448, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:09.693] OP_READ frame: status 0, rx 0x00000000, ts 2444586139, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:09.693] OP_READ: status 0, frames 1
+[surrogate 18:08:09.813] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:09.917] OP_READ frame: status 0, rx 0x00000009, ts 2444828888, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:09.917] OP_READ frame: status 0, rx 0x00000000, ts 2444833030, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:09.917] OP_READ: status 0, frames 1
+[surrogate 18:08:10.053] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:10.173] OP_READ frame: status 0, rx 0x00000000, ts 2445042059, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:10.173] OP_READ frame: status 0, rx 0x00000009, ts 2445067054, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:10.173] OP_READ: status 0, frames 1
+[surrogate 18:08:10.282] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:10.387] OP_READ frame: status 0, rx 0x00000009, ts 2445296297, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:10.387] OP_READ frame: status 0, rx 0x00000000, ts 2445303773, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:10.387] OP_READ: status 0, frames 1
+[surrogate 18:08:10.492] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:10.609] OP_READ frame: status 0, rx 0x00000009, ts 2445508044, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:10.609] OP_READ frame: status 0, rx 0x00000000, ts 2445514519, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:10.609] OP_READ: status 0, frames 1
+[surrogate 18:08:10.714] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:10.828] OP_READ frame: status 0, rx 0x00000009, ts 2445730310, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:10.828] OP_READ frame: status 0, rx 0x00000000, ts 2445732810, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:10.828] OP_READ: status 0, frames 1
+[surrogate 18:08:10.953] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:11.073] OP_READ frame: status 0, rx 0x00000009, ts 2445970062, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:11.073] OP_READ frame: status 0, rx 0x00000000, ts 2445976232, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:11.073] OP_READ: status 0, frames 1
+[surrogate 18:08:11.187] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:11.313] OP_READ frame: status 0, rx 0x00000009, ts 2446202890, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:11.313] OP_READ frame: status 0, rx 0x00000000, ts 2446207003, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:11.313] OP_READ: status 0, frames 1
+[surrogate 18:08:11.444] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:11.562] OP_READ frame: status 0, rx 0x00000000, ts 2446441796, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:11.562] OP_READ frame: status 0, rx 0x00000009, ts 2446458011, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:11.562] OP_READ: status 0, frames 1
+[surrogate 18:08:11.668] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:11.792] OP_READ frame: status 0, rx 0x00000009, ts 2446682539, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:11.792] OP_READ frame: status 0, rx 0x00000000, ts 2446689346, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:11.792] OP_READ: status 0, frames 1
+[surrogate 18:08:11.894] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:12.003] OP_READ frame: status 0, rx 0x00000009, ts 2446909986, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:12.003] OP_READ frame: status 0, rx 0x00000000, ts 2446916542, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:12.003] OP_READ: status 0, frames 1
+[surrogate 18:08:12.105] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:12.212] OP_READ frame: status 0, rx 0x00000009, ts 2447120389, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:12.212] OP_READ frame: status 0, rx 0x00000000, ts 2447128157, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:12.212] OP_READ: status 0, frames 1
+[surrogate 18:08:12.326] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:12.446] OP_READ frame: status 0, rx 0x00000009, ts 2447341788, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:12.446] OP_READ frame: status 0, rx 0x00000000, ts 2447348112, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:12.446] OP_READ: status 0, frames 1
+[surrogate 18:08:12.558] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:12.662] OP_READ frame: status 0, rx 0x00000009, ts 2447573245, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:12.662] OP_READ frame: status 0, rx 0x00000000, ts 2447576890, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:12.662] OP_READ: status 0, frames 1
+[surrogate 18:08:12.777] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:12.884] OP_READ frame: status 0, rx 0x00000009, ts 2447792546, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:12.884] OP_READ frame: status 0, rx 0x00000000, ts 2447796769, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:12.884] OP_READ: status 0, frames 1
+[surrogate 18:08:13.006] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:13.128] OP_READ frame: status 0, rx 0x00000009, ts 2448021730, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:13.128] OP_READ frame: status 0, rx 0x00000000, ts 2448028547, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:13.128] OP_READ: status 0, frames 1
+[surrogate 18:08:13.250] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:13.373] OP_READ frame: status 0, rx 0x00000009, ts 2448267449, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:13.373] OP_READ frame: status 0, rx 0x00000000, ts 2448273659, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:13.373] OP_READ: status 0, frames 1
+[surrogate 18:08:13.487] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:13.593] OP_READ frame: status 0, rx 0x00000009, ts 2448501036, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:13.593] OP_READ frame: status 0, rx 0x00000000, ts 2448508248, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:13.593] OP_READ: status 0, frames 1
+[surrogate 18:08:13.698] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:13.820] OP_READ frame: status 0, rx 0x00000009, ts 2448714055, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:13.820] OP_READ frame: status 0, rx 0x00000000, ts 2448720342, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:13.820] OP_READ: status 0, frames 1
+[surrogate 18:08:13.934] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:14.049] OP_READ frame: status 0, rx 0x00000009, ts 2448949826, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:14.049] OP_READ frame: status 0, rx 0x00000000, ts 2448953618, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:14.049] OP_READ: status 0, frames 1
+[surrogate 18:08:14.166] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:14.283] OP_READ frame: status 0, rx 0x00000000, ts 2449173456, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:14.283] OP_READ frame: status 0, rx 0x00000009, ts 2449179737, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:14.283] OP_READ: status 0, frames 1
+[surrogate 18:08:14.403] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:14.523] OP_READ frame: status 0, rx 0x00000009, ts 2449421665, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:14.523] OP_READ frame: status 0, rx 0x00000000, ts 2449428066, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:14.523] OP_READ: status 0, frames 1
+[surrogate 18:08:14.629] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:14.733] OP_READ frame: status 0, rx 0x00000009, ts 2449644130, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:14.733] OP_READ frame: status 0, rx 0x00000000, ts 2449649430, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:14.733] OP_READ: status 0, frames 1
+[surrogate 18:08:14.839] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:14.953] OP_READ frame: status 0, rx 0x00000009, ts 2449856694, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:14.953] OP_READ frame: status 0, rx 0x00000000, ts 2449861541, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:14.953] OP_READ: status 0, frames 1
+[surrogate 18:08:15.063] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:15.187] OP_READ frame: status 0, rx 0x00000009, ts 2450079023, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:15.187] OP_READ frame: status 0, rx 0x00000000, ts 2450083618, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:15.187] OP_READ: status 0, frames 1
+[surrogate 18:08:15.296] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:15.420] OP_READ frame: status 0, rx 0x00000009, ts 2450311973, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:15.420] OP_READ frame: status 0, rx 0x00000000, ts 2450318101, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:15.420] OP_READ: status 0, frames 1
+[surrogate 18:08:15.539] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:15.648] OP_READ frame: status 0, rx 0x00000009, ts 2450554607, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:15.648] OP_READ frame: status 0, rx 0x00000000, ts 2450556605, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:15.648] OP_READ: status 0, frames 1
+[surrogate 18:08:15.756] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:15.874] OP_READ frame: status 0, rx 0x00000009, ts 2450769701, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:15.874] OP_READ frame: status 0, rx 0x00000000, ts 2450773608, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:15.874] OP_READ: status 0, frames 1
+[surrogate 18:08:15.994] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:16.113] OP_READ frame: status 0, rx 0x00000009, ts 2451011318, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:16.113] OP_READ frame: status 0, rx 0x00000000, ts 2451020018, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:16.113] OP_READ: status 0, frames 1
+[surrogate 18:08:16.226] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:16.341] OP_READ frame: status 0, rx 0x00000009, ts 2451241189, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:16.341] OP_READ frame: status 0, rx 0x00000000, ts 2451246820, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:16.341] OP_READ: status 0, frames 1
+[surrogate 18:08:16.456] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:16.564] OP_READ frame: status 0, rx 0x00000009, ts 2451471996, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:16.564] OP_READ frame: status 0, rx 0x00000000, ts 2451476853, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:16.564] OP_READ: status 0, frames 1
+[surrogate 18:08:16.683] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:16.804] OP_READ frame: status 0, rx 0x00000009, ts 2451698680, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:16.804] OP_READ frame: status 0, rx 0x00000000, ts 2451703294, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:16.804] OP_READ: status 0, frames 1
+[surrogate 18:08:16.911] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:17.014] OP_READ frame: status 0, rx 0x00000009, ts 2451927102, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:17.014] OP_READ frame: status 0, rx 0x00000000, ts 2451933169, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:17.014] OP_READ: status 0, frames 1
+[surrogate 18:08:17.133] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:17.260] OP_READ frame: status 0, rx 0x00000009, ts 2452148564, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:17.260] OP_READ frame: status 0, rx 0x00000000, ts 2452154516, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:17.260] OP_READ: status 0, frames 1
+[surrogate 18:08:17.379] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:17.501] OP_READ frame: status 0, rx 0x00000009, ts 2452394133, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:17.501] OP_READ frame: status 0, rx 0x00000000, ts 2452396544, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:17.501] OP_READ: status 0, frames 1
+[surrogate 18:08:17.622] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:17.745] OP_READ frame: status 0, rx 0x00000009, ts 2452638010, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:17.745] OP_READ frame: status 0, rx 0x00000000, ts 2452642825, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:17.745] OP_READ: status 0, frames 1
+[surrogate 18:08:17.868] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:17.989] OP_READ frame: status 0, rx 0x00000009, ts 2452882478, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:17.989] OP_READ frame: status 0, rx 0x00000000, ts 2452887175, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:17.989] OP_READ: status 0, frames 1
+[surrogate 18:08:18.111] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:18.233] OP_READ frame: status 0, rx 0x00000009, ts 2453126685, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:18.233] OP_READ frame: status 0, rx 0x00000000, ts 2453134050, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:18.233] OP_READ: status 0, frames 1
+[surrogate 18:08:18.346] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:18.462] OP_READ frame: status 0, rx 0x00000009, ts 2453362288, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:18.462] OP_READ frame: status 0, rx 0x00000000, ts 2453368007, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:18.462] OP_READ: status 0, frames 1
+[surrogate 18:08:18.578] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:18.681] OP_READ frame: status 0, rx 0x00000009, ts 2453593407, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:18.681] OP_READ frame: status 0, rx 0x00000000, ts 2453596804, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:18.681] OP_READ: status 0, frames 1
+[surrogate 18:08:18.804] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:18.927] OP_READ frame: status 0, rx 0x00000009, ts 2453821957, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:18.927] OP_READ frame: status 0, rx 0x00000000, ts 2453827104, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:18.927] OP_READ: status 0, frames 1
+[surrogate 18:08:19.048] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:19.173] OP_READ frame: status 0, rx 0x00000009, ts 2454063172, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:19.173] OP_READ frame: status 0, rx 0x00000000, ts 2454067051, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:19.173] OP_READ: status 0, frames 1
+[surrogate 18:08:19.280] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:19.383] OP_READ frame: status 0, rx 0x00000009, ts 2454295276, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:19.383] OP_READ frame: status 0, rx 0x00000000, ts 2454296505, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:19.383] OP_READ: status 0, frames 1
+[surrogate 18:08:19.489] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:19.595] OP_READ frame: status 0, rx 0x00000009, ts 2454505237, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:19.595] OP_READ frame: status 0, rx 0x00000000, ts 2454506290, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:19.595] OP_READ: status 0, frames 1
+[surrogate 18:08:19.712] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:19.833] OP_READ frame: status 0, rx 0x00000009, ts 2454726109, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:19.833] OP_READ frame: status 0, rx 0x00000000, ts 2454732016, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:19.833] OP_READ: status 0, frames 1
+[surrogate 18:08:19.965] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:20.073] OP_READ frame: status 0, rx 0x00000000, ts 2454966721, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:20.073] OP_READ frame: status 0, rx 0x00000009, ts 2454978594, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:20.073] OP_READ: status 0, frames 1
+[surrogate 18:08:20.194] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:20.314] OP_READ frame: status 0, rx 0x00000009, ts 2455210175, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:20.314] OP_READ frame: status 0, rx 0x00000000, ts 2455221621, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:20.314] OP_READ: status 0, frames 1
+[surrogate 18:08:20.457] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:20.568] OP_READ frame: status 0, rx 0x00000000, ts 2455459625, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:20.568] OP_READ frame: status 0, rx 0x00000009, ts 2455470592, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:20.568] OP_READ: status 0, frames 1
+[surrogate 18:08:20.675] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:20.789] OP_READ frame: status 0, rx 0x00000009, ts 2455689212, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:20.789] OP_READ frame: status 0, rx 0x00000000, ts 2455692726, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:20.789] OP_READ: status 0, frames 1
+[surrogate 18:08:20.942] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:21.051] OP_READ frame: status 0, rx 0x00000000, ts 2455929617, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:21.051] OP_READ frame: status 0, rx 0x00000009, ts 2455956322, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:21.051] OP_READ: status 0, frames 1
+[surrogate 18:08:21.153] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:21.274] OP_READ frame: status 0, rx 0x00000009, ts 2456169306, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:21.274] OP_READ frame: status 0, rx 0x00000000, ts 2456173013, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:21.274] OP_READ: status 0, frames 1
+[surrogate 18:08:21.405] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:21.507] OP_READ frame: status 0, rx 0x00000000, ts 2456402551, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:21.507] OP_READ frame: status 0, rx 0x00000009, ts 2456419624, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:21.507] OP_READ: status 0, frames 1
+[surrogate 18:08:21.629] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:21.753] OP_READ frame: status 0, rx 0x00000009, ts 2456644357, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:21.753] OP_READ frame: status 0, rx 0x00000000, ts 2456646596, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:21.753] OP_READ: status 0, frames 1
+[surrogate 18:08:21.891] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:22.011] OP_READ frame: status 0, rx 0x00000000, ts 2456882745, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:22.011] OP_READ frame: status 0, rx 0x00000009, ts 2456905133, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:22.011] OP_READ: status 0, frames 1
+[surrogate 18:08:22.140] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:22.255] OP_READ frame: status 0, rx 0x00000000, ts 2457142098, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:22.255] OP_READ frame: status 0, rx 0x00000009, ts 2457154061, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:22.255] OP_READ: status 0, frames 1
+[surrogate 18:08:22.370] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:22.476] OP_READ frame: status 0, rx 0x00000009, ts 2457385678, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:22.476] OP_READ frame: status 0, rx 0x00000000, ts 2457392658, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:22.476] OP_READ: status 0, frames 1
+[surrogate 18:08:22.585] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:22.692] OP_READ frame: status 0, rx 0x00000009, ts 2457599965, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:22.692] OP_READ frame: status 0, rx 0x00000000, ts 2457605934, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:22.692] OP_READ: status 0, frames 1
+[surrogate 18:08:22.808] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:22.909] OP_READ frame: status 0, rx 0x00000009, ts 2457822046, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:22.909] OP_READ frame: status 0, rx 0x00000000, ts 2457827030, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:22.909] OP_READ: status 0, frames 1
+[surrogate 18:08:23.015] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:23.131] OP_READ frame: status 0, rx 0x00000009, ts 2458031291, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:23.131] OP_READ frame: status 0, rx 0x00000000, ts 2458036824, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:23.131] OP_READ: status 0, frames 1
+[surrogate 18:08:23.242] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:23.365] OP_READ frame: status 0, rx 0x00000009, ts 2458257383, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:23.365] OP_READ frame: status 0, rx 0x00000000, ts 2458262099, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:23.365] OP_READ: status 0, frames 1
+[surrogate 18:08:23.489] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:23.610] OP_READ frame: status 0, rx 0x00000009, ts 2458503028, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:23.610] OP_READ frame: status 0, rx 0x00000000, ts 2458507271, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:23.610] OP_READ: status 0, frames 1
+[surrogate 18:08:23.716] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:23.830] OP_READ frame: status 0, rx 0x00000009, ts 2458731658, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:23.830] OP_READ frame: status 0, rx 0x00000000, ts 2458736849, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:23.830] OP_READ: status 0, frames 1
+[surrogate 18:08:23.937] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:24.056] OP_READ frame: status 0, rx 0x00000009, ts 2458952923, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:24.056] OP_READ frame: status 0, rx 0x00000000, ts 2458956845, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:24.056] OP_READ: status 0, frames 1
+[surrogate 18:08:24.185] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:24.289] OP_READ frame: status 0, rx 0x00000009, ts 2459199225, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:24.289] OP_READ frame: status 0, rx 0x00000000, ts 2459207361, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:24.289] OP_READ: status 0, frames 1
+[surrogate 18:08:24.391] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:24.513] OP_READ frame: status 0, rx 0x00000009, ts 2459406602, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:24.513] OP_READ frame: status 0, rx 0x00000000, ts 2459412609, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:24.513] OP_READ: status 0, frames 1
+[surrogate 18:08:24.661] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:24.763] OP_READ frame: status 0, rx 0x00000000, ts 2459656686, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:24.763] OP_READ frame: status 0, rx 0x00000009, ts 2459674761, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:24.763] OP_READ: status 0, frames 1
+[surrogate 18:08:24.870] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:24.993] OP_READ frame: status 0, rx 0x00000009, ts 2459886381, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:24.993] OP_READ frame: status 0, rx 0x00000000, ts 2459892543, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:24.993] OP_READ: status 0, frames 1
+[surrogate 18:08:25.109] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:25.217] OP_READ frame: status 0, rx 0x00000009, ts 2460122894, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:25.217] OP_READ frame: status 0, rx 0x00000000, ts 2460127184, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:25.217] OP_READ: status 0, frames 1
+[surrogate 18:08:25.342] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:25.443] OP_READ frame: status 0, rx 0x00000000, ts 2460352148, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:25.443] OP_READ frame: status 0, rx 0x00000009, ts 2460355984, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:25.443] OP_READ: status 0, frames 1
+[surrogate 18:08:25.563] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:25.684] OP_READ frame: status 0, rx 0x00000009, ts 2460581414, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:25.684] OP_READ frame: status 0, rx 0x00000000, ts 2460582190, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:25.684] OP_READ: status 0, frames 1
+[surrogate 18:08:25.792] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:25.898] OP_READ frame: status 0, rx 0x00000009, ts 2460806828, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:25.898] OP_READ frame: status 0, rx 0x00000000, ts 2460811203, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:25.898] OP_READ: status 0, frames 1
+[surrogate 18:08:26.000] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:26.109] OP_READ frame: status 0, rx 0x00000009, ts 2461015915, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:26.109] OP_READ frame: status 0, rx 0x00000000, ts 2461027132, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:26.109] OP_READ: status 0, frames 1
+[surrogate 18:08:26.227] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:26.343] OP_READ frame: status 0, rx 0x00000009, ts 2461242347, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:26.343] OP_READ frame: status 0, rx 0x00000000, ts 2461246210, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:26.343] OP_READ: status 0, frames 1
+[surrogate 18:08:26.464] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:26.583] OP_READ frame: status 0, rx 0x00000009, ts 2461479097, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:26.583] OP_READ frame: status 0, rx 0x00000000, ts 2461482552, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:26.583] OP_READ: status 0, frames 1
+[surrogate 18:08:26.716] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:26.825] OP_READ frame: status 0, rx 0x00000000, ts 2461726173, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:26.825] OP_READ frame: status 0, rx 0x00000009, ts 2461730050, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:26.825] OP_READ: status 0, frames 1
+[surrogate 18:08:26.934] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:27.050] OP_READ frame: status 0, rx 0x00000009, ts 2461949563, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:27.050] OP_READ frame: status 0, rx 0x00000000, ts 2461952616, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:27.050] OP_READ: status 0, frames 1
+[surrogate 18:08:27.184] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:27.296] OP_READ frame: status 0, rx 0x00000009, ts 2462201142, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:27.296] OP_READ frame: status 0, rx 0x00000000, ts 2462201430, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:27.296] OP_READ: status 0, frames 1
+[surrogate 18:08:27.428] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:27.539] OP_READ frame: status 0, rx 0x00000000, ts 2462435848, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:27.539] OP_READ frame: status 0, rx 0x00000009, ts 2462441728, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:27.539] OP_READ: status 0, frames 1
+[surrogate 18:08:27.667] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:27.774] OP_READ frame: status 0, rx 0x00000000, ts 2462667758, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:27.774] OP_READ frame: status 0, rx 0x00000009, ts 2462680593, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:27.774] OP_READ: status 0, frames 1
+[surrogate 18:08:27.876] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:27.984] OP_READ frame: status 0, rx 0x00000009, ts 2462892266, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:27.984] OP_READ frame: status 0, rx 0x00000000, ts 2462895700, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:27.984] OP_READ: status 0, frames 1
+[surrogate 18:08:28.100] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:28.226] OP_READ frame: status 0, rx 0x00000009, ts 2463115986, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:28.226] OP_READ frame: status 0, rx 0x00000000, ts 2463123824, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:28.226] OP_READ: status 0, frames 1
+[surrogate 18:08:28.344] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:28.450] OP_READ frame: status 0, rx 0x00000000, ts 2463347171, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:28.450] OP_READ frame: status 0, rx 0x00000009, ts 2463358094, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:28.450] OP_READ: status 0, frames 1
+[surrogate 18:08:28.564] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:28.669] OP_READ frame: status 0, rx 0x00000009, ts 2463579545, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:28.669] OP_READ frame: status 0, rx 0x00000000, ts 2463582364, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:28.669] OP_READ: status 0, frames 1
+[surrogate 18:08:28.775] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:28.892] OP_READ frame: status 0, rx 0x00000009, ts 2463790832, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:28.892] OP_READ frame: status 0, rx 0x00000000, ts 2463795769, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:28.892] OP_READ: status 0, frames 1
+[surrogate 18:08:29.009] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:29.133] OP_READ frame: status 0, rx 0x00000009, ts 2464024855, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:29.133] OP_READ frame: status 0, rx 0x00000000, ts 2464027502, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:29.133] OP_READ: status 0, frames 1
+[surrogate 18:08:29.253] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:29.360] OP_READ frame: status 0, rx 0x00000009, ts 2464268746, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:29.360] OP_READ frame: status 0, rx 0x00000000, ts 2464272412, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:29.361] OP_READ: status 0, frames 1
+[surrogate 18:08:29.477] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:29.590] OP_READ frame: status 0, rx 0x00000009, ts 2464491170, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:29.590] OP_READ frame: status 0, rx 0x00000000, ts 2464497102, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:29.590] OP_READ: status 0, frames 1
+[surrogate 18:08:29.699] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:29.824] OP_READ frame: status 0, rx 0x00000009, ts 2464714187, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:29.824] OP_READ frame: status 0, rx 0x00000000, ts 2464723977, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:29.824] OP_READ: status 0, frames 1
+[surrogate 18:08:29.945] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:30.060] OP_READ frame: status 0, rx 0x00000000, ts 2464953521, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:30.060] OP_READ frame: status 0, rx 0x00000009, ts 2464958855, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:30.060] OP_READ: status 0, frames 1
+[surrogate 18:08:30.168] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:30.274] OP_READ frame: status 0, rx 0x00000009, ts 2465184625, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:30.274] OP_READ frame: status 0, rx 0x00000000, ts 2465187221, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:30.274] OP_READ: status 0, frames 1
+[surrogate 18:08:30.395] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:30.510] OP_READ frame: status 0, rx 0x00000000, ts 2465396661, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:30.510] OP_READ frame: status 0, rx 0x00000009, ts 2465408789, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:30.510] OP_READ: status 0, frames 1
+[surrogate 18:08:30.627] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:30.738] OP_READ frame: status 0, rx 0x00000009, ts 2465644343, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:30.738] OP_READ frame: status 0, rx 0x00000000, ts 2465645415, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:30.738] OP_READ: status 0, frames 1
+[surrogate 18:08:30.885] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:30.993] OP_READ frame: status 0, rx 0x00000000, ts 2465878333, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:30.993] OP_READ frame: status 0, rx 0x00000009, ts 2465899090, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:30.993] OP_READ: status 0, frames 1
+[surrogate 18:08:31.126] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:31.235] OP_READ frame: status 0, rx 0x00000000, ts 2466126587, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:31.235] OP_READ frame: status 0, rx 0x00000009, ts 2466139560, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:31.235] OP_READ: status 0, frames 1
+[surrogate 18:08:31.353] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:31.459] OP_READ frame: status 0, rx 0x00000009, ts 2466368555, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:31.459] OP_READ frame: status 0, rx 0x00000000, ts 2466372175, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:31.459] OP_READ: status 0, frames 1
+[surrogate 18:08:31.585] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:31.697] OP_READ frame: status 0, rx 0x00000000, ts 2466586310, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:31.697] OP_READ frame: status 0, rx 0x00000009, ts 2466599184, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:31.697] OP_READ: status 0, frames 1
+[surrogate 18:08:31.815] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:31.931] OP_READ frame: status 0, rx 0x00000009, ts 2466830801, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:31.931] OP_READ frame: status 0, rx 0x00000000, ts 2466837260, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:31.931] OP_READ: status 0, frames 1
+[surrogate 18:08:32.036] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:32.144] OP_READ frame: status 0, rx 0x00000009, ts 2467052090, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:32.144] OP_READ frame: status 0, rx 0x00000000, ts 2467057056, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:32.144] OP_READ: status 0, frames 1
+[surrogate 18:08:32.253] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:32.367] OP_READ frame: status 0, rx 0x00000009, ts 2467269068, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:32.367] OP_READ frame: status 0, rx 0x00000000, ts 2467272518, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:32.367] OP_READ: status 0, frames 1
+[surrogate 18:08:32.474] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:32.577] OP_READ frame: status 0, rx 0x00000009, ts 2467489270, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:32.577] OP_READ frame: status 0, rx 0x00000000, ts 2467492795, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:32.577] OP_READ: status 0, frames 1
+[surrogate 18:08:32.684] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:32.804] OP_READ frame: status 0, rx 0x00000009, ts 2467698520, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:32.804] OP_READ frame: status 0, rx 0x00000000, ts 2467706873, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:32.804] OP_READ: status 0, frames 1
+[surrogate 18:08:32.912] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:33.017] OP_READ frame: status 0, rx 0x00000009, ts 2467927275, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:33.017] OP_READ frame: status 0, rx 0x00000000, ts 2467931874, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:33.017] OP_READ: status 0, frames 1
+[surrogate 18:08:33.120] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:33.234] OP_READ frame: status 0, rx 0x00000009, ts 2468134686, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:33.234] OP_READ frame: status 0, rx 0x00000000, ts 2468136352, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:33.234] OP_READ: status 0, frames 1
+[surrogate 18:08:33.371] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:33.498] OP_READ frame: status 0, rx 0x00000000, ts 2468372823, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:33.498] OP_READ frame: status 0, rx 0x00000009, ts 2468384292, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:33.498] OP_READ: status 0, frames 1
+[surrogate 18:08:33.609] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:33.721] OP_READ frame: status 0, rx 0x00000009, ts 2468623066, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:33.721] OP_READ frame: status 0, rx 0x00000000, ts 2468626138, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:33.721] OP_READ: status 0, frames 1
+[surrogate 18:08:33.836] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:33.947] OP_READ frame: status 0, rx 0x00000009, ts 2468851356, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:33.947] OP_READ frame: status 0, rx 0x00000000, ts 2468856733, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:33.947] OP_READ: status 0, frames 1
+[surrogate 18:08:34.055] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:34.159] OP_READ frame: status 0, rx 0x00000009, ts 2469069205, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:34.159] OP_READ frame: status 0, rx 0x00000000, ts 2469075779, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:34.159] OP_READ: status 0, frames 1
+[surrogate 18:08:34.277] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:34.378] OP_READ frame: status 0, rx 0x00000000, ts 2469286931, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:34.378] OP_READ frame: status 0, rx 0x00000009, ts 2469291127, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:34.378] OP_READ: status 0, frames 1
+[surrogate 18:08:34.495] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:34.611] OP_READ frame: status 0, rx 0x00000009, ts 2469508967, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:34.611] OP_READ frame: status 0, rx 0x00000000, ts 2469513313, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:34.611] OP_READ: status 0, frames 1
+[surrogate 18:08:34.727] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:34.862] OP_READ frame: status 0, rx 0x00000009, ts 2469746679, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:34.862] OP_READ frame: status 0, rx 0x00000000, ts 2469753010, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:34.862] OP_READ: status 0, frames 1
+[surrogate 18:08:34.984] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:35.090] OP_READ frame: status 0, rx 0x00000009, ts 2469999820, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:35.090] OP_READ frame: status 0, rx 0x00000000, ts 2470007247, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:35.090] OP_READ: status 0, frames 1
+[surrogate 18:08:35.192] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:35.294] OP_READ frame: status 0, rx 0x00000009, ts 2470207040, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:35.294] OP_READ frame: status 0, rx 0x00000000, ts 2470211649, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:35.294] OP_READ: status 0, frames 1
+[surrogate 18:08:35.411] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:35.512] OP_READ frame: status 0, rx 0x00000000, ts 2470421723, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:35.512] OP_READ frame: status 0, rx 0x00000009, ts 2470424920, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:35.512] OP_READ: status 0, frames 1
+[surrogate 18:08:35.614] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:35.719] OP_READ frame: status 0, rx 0x00000009, ts 2470629356, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:35.719] OP_READ frame: status 0, rx 0x00000000, ts 2470632439, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:35.719] OP_READ: status 0, frames 1
+[surrogate 18:08:35.834] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:35.943] OP_READ frame: status 0, rx 0x00000009, ts 2470849887, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:35.943] OP_READ frame: status 0, rx 0x00000000, ts 2470857332, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:35.943] OP_READ: status 0, frames 1
+[surrogate 18:08:36.049] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:36.159] OP_READ frame: status 0, rx 0x00000009, ts 2471063242, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:36.159] OP_READ frame: status 0, rx 0x00000000, ts 2471066975, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:36.159] OP_READ: status 0, frames 1
+[surrogate 18:08:36.273] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:36.393] OP_READ frame: status 0, rx 0x00000009, ts 2471288697, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:36.393] OP_READ frame: status 0, rx 0x00000000, ts 2471292425, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:36.393] OP_READ: status 0, frames 1
+[surrogate 18:08:36.513] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:36.628] OP_READ frame: status 0, rx 0x00000009, ts 2471528988, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:36.628] OP_READ frame: status 0, rx 0x00000000, ts 2471531652, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:36.628] OP_READ: status 0, frames 1
+[surrogate 18:08:36.748] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:36.873] OP_READ frame: status 0, rx 0x00000009, ts 2471764754, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:36.873] OP_READ frame: status 0, rx 0x00000000, ts 2471770208, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:36.873] OP_READ: status 0, frames 1
+[surrogate 18:08:36.980] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:37.097] OP_READ frame: status 0, rx 0x00000009, ts 2471995281, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:37.097] OP_READ frame: status 0, rx 0x00000000, ts 2471996899, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:37.097] OP_READ: status 0, frames 1
+[surrogate 18:08:37.202] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:37.325] OP_READ frame: status 0, rx 0x00000009, ts 2472217936, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:37.325] OP_READ frame: status 0, rx 0x00000000, ts 2472222306, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:37.325] OP_READ: status 0, frames 1
+[surrogate 18:08:37.447] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:37.569] OP_READ frame: status 0, rx 0x00000009, ts 2472462220, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:37.569] OP_READ frame: status 0, rx 0x00000000, ts 2472468483, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:37.569] OP_READ: status 0, frames 1
+[surrogate 18:08:37.692] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:37.814] OP_READ frame: status 0, rx 0x00000009, ts 2472707054, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:37.814] OP_READ frame: status 0, rx 0x00000000, ts 2472715164, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:37.814] OP_READ: status 0, frames 1
+[surrogate 18:08:37.936] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:38.052] OP_READ frame: status 0, rx 0x00000009, ts 2472951601, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:38.052] OP_READ frame: status 0, rx 0x00000000, ts 2472957602, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:38.052] OP_READ: status 0, frames 1
+[surrogate 18:08:38.165] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:38.268] OP_READ frame: status 0, rx 0x00000009, ts 2473180852, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:38.268] OP_READ frame: status 0, rx 0x00000000, ts 2473188249, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:38.268] OP_READ: status 0, frames 1
+[surrogate 18:08:38.388] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:38.509] OP_READ frame: status 0, rx 0x00000009, ts 2473402471, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:38.509] OP_READ frame: status 0, rx 0x00000000, ts 2473408199, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:38.509] OP_READ: status 0, frames 1
+[surrogate 18:08:38.615] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:38.733] OP_READ frame: status 0, rx 0x00000009, ts 2473629136, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:38.733] OP_READ frame: status 0, rx 0x00000000, ts 2473633108, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:38.733] OP_READ: status 0, frames 1
+[surrogate 18:08:38.837] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:38.943] OP_READ frame: status 0, rx 0x00000009, ts 2473852512, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:38.943] OP_READ frame: status 0, rx 0x00000000, ts 2473857251, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:38.943] OP_READ: status 0, frames 1
+[surrogate 18:08:39.068] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:39.183] OP_READ frame: status 0, rx 0x00000009, ts 2474083585, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:39.183] OP_READ frame: status 0, rx 0x00000000, ts 2474090890, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:39.183] OP_READ: status 0, frames 1
+[surrogate 18:08:39.303] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:39.423] OP_READ frame: status 0, rx 0x00000009, ts 2474319067, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:39.423] OP_READ frame: status 0, rx 0x00000000, ts 2474322739, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:39.423] OP_READ: status 0, frames 1
+[surrogate 18:08:39.543] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:39.649] OP_READ frame: status 0, rx 0x00000009, ts 2474561186, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:39.649] OP_READ frame: status 0, rx 0x00000000, ts 2474562125, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:39.649] OP_READ: status 0, frames 1
+[surrogate 18:08:39.756] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:39.873] OP_READ frame: status 0, rx 0x00000009, ts 2474769068, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:39.873] OP_READ frame: status 0, rx 0x00000000, ts 2474772355, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:39.873] OP_READ: status 0, frames 1
+[surrogate 18:08:39.997] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:40.100] OP_READ frame: status 0, rx 0x00000009, ts 2475012693, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:40.100] OP_READ frame: status 0, rx 0x00000000, ts 2475022369, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:40.100] OP_READ: status 0, frames 1
+[surrogate 18:08:40.203] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:40.309] OP_READ frame: status 0, rx 0x00000009, ts 2475218817, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:40.309] OP_READ frame: status 0, rx 0x00000000, ts 2475227225, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:40.309] OP_READ: status 0, frames 1
+[surrogate 18:08:40.414] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:40.533] OP_READ frame: status 0, rx 0x00000009, ts 2475429442, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:40.533] OP_READ frame: status 0, rx 0x00000000, ts 2475432299, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:40.533] OP_READ: status 0, frames 1
+[surrogate 18:08:40.640] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:40.744] OP_READ frame: status 0, rx 0x00000009, ts 2475654921, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:40.744] OP_READ frame: status 0, rx 0x00000000, ts 2475656978, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:40.744] OP_READ: status 0, frames 1
+[surrogate 18:08:40.858] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:40.969] OP_READ frame: status 0, rx 0x00000009, ts 2475873923, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:40.969] OP_READ frame: status 0, rx 0x00000000, ts 2475879264, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:40.969] OP_READ: status 0, frames 1
+[surrogate 18:08:41.075] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:41.195] OP_READ frame: status 0, rx 0x00000009, ts 2476090377, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:41.195] OP_READ frame: status 0, rx 0x00000000, ts 2476098497, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:41.195] OP_READ: status 0, frames 1
+[surrogate 18:08:41.304] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:41.419] OP_READ frame: status 0, rx 0x00000009, ts 2476320136, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:41.419] OP_READ frame: status 0, rx 0x00000000, ts 2476327254, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:41.419] OP_READ: status 0, frames 1
+[surrogate 18:08:41.527] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:41.649] OP_READ frame: status 0, rx 0x00000009, ts 2476542729, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:41.649] OP_READ frame: status 0, rx 0x00000000, ts 2476547173, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:41.649] OP_READ: status 0, frames 1
+[surrogate 18:08:41.776] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:41.894] OP_READ frame: status 0, rx 0x00000009, ts 2476792040, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:41.894] OP_READ frame: status 0, rx 0x00000000, ts 2476797431, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:41.894] OP_READ: status 0, frames 1
+[surrogate 18:08:42.031] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:42.139] OP_READ frame: status 0, rx 0x00000000, ts 2477037255, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:42.139] OP_READ frame: status 0, rx 0x00000009, ts 2477045276, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:42.139] OP_READ: status 0, frames 1
+[surrogate 18:08:42.260] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:42.384] OP_READ frame: status 0, rx 0x00000000, ts 2477262064, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:42.384] OP_READ frame: status 0, rx 0x00000009, ts 2477274292, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:42.384] OP_READ: status 0, frames 1
+[surrogate 18:08:42.507] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:42.629] OP_READ frame: status 0, rx 0x00000009, ts 2477522240, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:42.629] OP_READ frame: status 0, rx 0x00000000, ts 2477528269, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:42.629] OP_READ: status 0, frames 1
+[surrogate 18:08:42.752] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:42.880] OP_READ frame: status 0, rx 0x00000009, ts 2477768021, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:42.880] OP_READ frame: status 0, rx 0x00000000, ts 2477772367, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:42.880] OP_READ: status 0, frames 1
+[surrogate 18:08:42.996] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:43.120] OP_READ frame: status 0, rx 0x00000009, ts 2478011694, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:43.120] OP_READ frame: status 0, rx 0x00000000, ts 2478021894, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:43.120] OP_READ: status 0, frames 1
+[surrogate 18:08:43.235] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:43.339] OP_READ frame: status 0, rx 0x00000009, ts 2478250239, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:43.339] OP_READ frame: status 0, rx 0x00000000, ts 2478257317, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:43.339] OP_READ: status 0, frames 1
+[surrogate 18:08:43.446] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:43.553] OP_READ frame: status 0, rx 0x00000009, ts 2478461725, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:43.553] OP_READ frame: status 0, rx 0x00000000, ts 2478469268, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:43.553] OP_READ: status 0, frames 1
+[surrogate 18:08:43.669] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:43.787] OP_READ frame: status 0, rx 0x00000009, ts 2478684835, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:43.787] OP_READ frame: status 0, rx 0x00000000, ts 2478687240, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:43.787] OP_READ: status 0, frames 1
+[surrogate 18:08:43.896] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:44.005] OP_READ frame: status 0, rx 0x00000009, ts 2478912205, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:44.005] OP_READ frame: status 0, rx 0x00000000, ts 2478922017, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:44.005] OP_READ: status 0, frames 1
+[surrogate 18:08:44.129] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:44.253] OP_READ frame: status 0, rx 0x00000009, ts 2479144627, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:44.253] OP_READ frame: status 0, rx 0x00000000, ts 2479147775, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:44.253] OP_READ: status 0, frames 1
+[surrogate 18:08:44.368] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:44.493] OP_READ frame: status 0, rx 0x00000009, ts 2479383817, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:44.493] OP_READ frame: status 0, rx 0x00000000, ts 2479388640, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:44.493] OP_READ: status 0, frames 1
+[surrogate 18:08:44.597] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:44.703] OP_READ frame: status 0, rx 0x00000009, ts 2479612383, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:44.703] OP_READ frame: status 0, rx 0x00000000, ts 2479623891, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:44.703] OP_READ: status 0, frames 1
+[surrogate 18:08:44.807] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:44.913] OP_READ frame: status 0, rx 0x00000009, ts 2479823232, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:44.913] OP_READ frame: status 0, rx 0x00000000, ts 2479828562, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:44.913] OP_READ: status 0, frames 1
+[surrogate 18:08:45.065] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:45.182] OP_READ frame: status 0, rx 0x00000000, ts 2480068231, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:45.182] OP_READ frame: status 0, rx 0x00000009, ts 2480079149, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:45.182] OP_READ: status 0, frames 1
+[surrogate 18:08:45.290] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:45.392] OP_READ frame: status 0, rx 0x00000009, ts 2480303621, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:45.392] OP_READ frame: status 0, rx 0x00000000, ts 2480308307, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:45.392] OP_READ: status 0, frames 1
+[surrogate 18:08:45.497] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:45.617] OP_READ frame: status 0, rx 0x00000009, ts 2480514297, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:45.617] OP_READ frame: status 0, rx 0x00000000, ts 2480518227, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:45.617] OP_READ: status 0, frames 1
+[surrogate 18:08:45.739] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:45.854] OP_READ frame: status 0, rx 0x00000000, ts 2480741567, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:45.854] OP_READ frame: status 0, rx 0x00000009, ts 2480752575, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:45.854] OP_READ: status 0, frames 1
+[surrogate 18:08:45.959] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:46.083] OP_READ frame: status 0, rx 0x00000009, ts 2480987284, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:46.083] OP_READ frame: status 0, rx 0x00000000, ts 2480987549, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:46.083] OP_READ: status 0, frames 1
+[surrogate 18:08:46.195] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:46.311] OP_READ frame: status 0, rx 0x00000009, ts 2481210033, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:46.311] OP_READ frame: status 0, rx 0x00000000, ts 2481218084, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:46.311] OP_READ: status 0, frames 1
+[surrogate 18:08:46.427] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:46.532] OP_READ frame: status 0, rx 0x00000009, ts 2481442523, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:46.532] OP_READ frame: status 0, rx 0x00000000, ts 2481447378, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:46.532] OP_READ: status 0, frames 1
+[surrogate 18:08:46.654] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:46.776] OP_READ frame: status 0, rx 0x00000009, ts 2481669763, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:46.776] OP_READ frame: status 0, rx 0x00000000, ts 2481672500, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:46.776] OP_READ: status 0, frames 1
+[surrogate 18:08:46.898] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:47.013] OP_READ frame: status 0, rx 0x00000009, ts 2481913587, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:47.013] OP_READ frame: status 0, rx 0x00000000, ts 2481918618, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:47.013] OP_READ: status 0, frames 1
+[surrogate 18:08:47.119] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:47.228] OP_READ frame: status 0, rx 0x00000009, ts 2482133543, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:47.228] OP_READ frame: status 0, rx 0x00000000, ts 2482137100, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:47.228] OP_READ: status 0, frames 1
+[surrogate 18:08:47.345] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:47.468] OP_READ frame: status 0, rx 0x00000009, ts 2482360994, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:47.468] OP_READ frame: status 0, rx 0x00000000, ts 2482367295, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:47.468] OP_READ: status 0, frames 1
+[surrogate 18:08:47.592] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:47.712] OP_READ frame: status 0, rx 0x00000009, ts 2482606071, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:47.712] OP_READ frame: status 0, rx 0x00000000, ts 2482613989, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:47.712] OP_READ: status 0, frames 1
+[surrogate 18:08:47.835] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:47.957] OP_READ frame: status 0, rx 0x00000009, ts 2482850124, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:47.957] OP_READ frame: status 0, rx 0x00000000, ts 2482857317, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:47.957] OP_READ: status 0, frames 1
+[surrogate 18:08:48.078] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:48.200] OP_READ frame: status 0, rx 0x00000009, ts 2483092690, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:48.200] OP_READ frame: status 0, rx 0x00000000, ts 2483096784, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:48.200] OP_READ: status 0, frames 1
+[surrogate 18:08:48.303] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:48.416] OP_READ frame: status 0, rx 0x00000009, ts 2483319123, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:48.416] OP_READ frame: status 0, rx 0x00000000, ts 2483327544, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:48.416] OP_READ: status 0, frames 1
+[surrogate 18:08:48.543] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:48.662] OP_READ frame: status 0, rx 0x00000009, ts 2483559205, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:48.662] OP_READ frame: status 0, rx 0x00000000, ts 2483561889, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:48.662] OP_READ: status 0, frames 1
+[surrogate 18:08:48.771] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:48.873] OP_READ frame: status 0, rx 0x00000009, ts 2483784946, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:48.873] OP_READ frame: status 0, rx 0x00000000, ts 2483787622, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:48.873] OP_READ: status 0, frames 1
+[surrogate 18:08:48.993] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:49.099] OP_READ frame: status 0, rx 0x00000009, ts 2484008950, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:49.099] OP_READ frame: status 0, rx 0x00000000, ts 2484018476, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:49.099] OP_READ: status 0, frames 1
+[surrogate 18:08:49.204] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:49.318] OP_READ frame: status 0, rx 0x00000009, ts 2484219138, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:49.318] OP_READ frame: status 0, rx 0x00000000, ts 2484222143, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:49.318] OP_READ: status 0, frames 1
+[surrogate 18:08:49.444] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:49.553] OP_READ frame: status 0, rx 0x00000009, ts 2484459484, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:49.553] OP_READ frame: status 0, rx 0x00000000, ts 2484462100, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:49.553] OP_READ: status 0, frames 1
+[surrogate 18:08:49.676] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:49.801] OP_READ frame: status 0, rx 0x00000009, ts 2484692132, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:49.801] OP_READ frame: status 0, rx 0x00000000, ts 2484705327, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:49.801] OP_READ: status 0, frames 1
+[surrogate 18:08:49.919] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:50.043] OP_READ frame: status 0, rx 0x00000009, ts 2484934987, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:50.043] OP_READ frame: status 0, rx 0x00000000, ts 2484938342, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:50.043] OP_READ: status 0, frames 1
+[surrogate 18:08:50.148] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:50.253] OP_READ frame: status 0, rx 0x00000009, ts 2485162779, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:50.253] OP_READ frame: status 0, rx 0x00000000, ts 2485167239, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:50.253] OP_READ: status 0, frames 1
+[surrogate 18:08:50.373] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:50.493] OP_READ frame: status 0, rx 0x00000009, ts 2485388809, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:50.493] OP_READ frame: status 0, rx 0x00000000, ts 2485392405, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:50.493] OP_READ: status 0, frames 1
+[surrogate 18:08:50.597] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:50.703] OP_READ frame: status 0, rx 0x00000009, ts 2485613175, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:50.703] OP_READ frame: status 0, rx 0x00000000, ts 2485618406, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:50.703] OP_READ: status 0, frames 1
+[surrogate 18:08:50.811] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:50.913] OP_READ frame: status 0, rx 0x00000009, ts 2485825085, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:50.913] OP_READ frame: status 0, rx 0x00000000, ts 2485828084, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:50.913] OP_READ: status 0, frames 1
+[surrogate 18:08:51.018] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:51.142] OP_READ frame: status 0, rx 0x00000009, ts 2486033402, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:51.142] OP_READ frame: status 0, rx 0x00000000, ts 2486038317, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:51.142] OP_READ: status 0, frames 1
+[surrogate 18:08:51.264] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:51.390] OP_READ frame: status 0, rx 0x00000009, ts 2486279330, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:51.390] OP_READ frame: status 0, rx 0x00000000, ts 2486282565, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:51.390] OP_READ: status 0, frames 1
+[surrogate 18:08:51.512] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:51.640] OP_READ frame: status 0, rx 0x00000009, ts 2486528061, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:51.640] OP_READ frame: status 0, rx 0x00000000, ts 2486532770, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:51.640] OP_READ: status 0, frames 1
+[surrogate 18:08:51.760] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:51.882] OP_READ frame: status 0, rx 0x00000009, ts 2486775659, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:51.882] OP_READ frame: status 0, rx 0x00000000, ts 2486778874, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:51.882] OP_READ: status 0, frames 1
+[surrogate 18:08:52.005] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:52.120] OP_READ frame: status 0, rx 0x00000009, ts 2487019796, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:52.120] OP_READ frame: status 0, rx 0x00000000, ts 2487021894, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:52.120] OP_READ: status 0, frames 1
+[surrogate 18:08:52.225] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:52.325] OP_READ frame: status 0, rx 0x00000009, ts 2487239086, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:52.325] OP_READ frame: status 0, rx 0x00000000, ts 2487242020, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:52.325] OP_READ: status 0, frames 1
+[surrogate 18:08:52.442] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:52.562] OP_READ frame: status 0, rx 0x00000009, ts 2487456476, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:52.562] OP_READ frame: status 0, rx 0x00000000, ts 2487461217, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:52.562] OP_READ: status 0, frames 1
+[surrogate 18:08:52.685] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:52.806] OP_READ frame: status 0, rx 0x00000009, ts 2487700216, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:52.806] OP_READ frame: status 0, rx 0x00000000, ts 2487707870, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:52.806] OP_READ: status 0, frames 1
+[surrogate 18:08:52.927] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:53.036] OP_READ frame: status 0, rx 0x00000009, ts 2487942294, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:53.036] OP_READ frame: status 0, rx 0x00000000, ts 2487948897, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:53.036] OP_READ: status 0, frames 1
+[surrogate 18:08:53.143] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:53.253] OP_READ frame: status 0, rx 0x00000009, ts 2488157353, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:53.253] OP_READ frame: status 0, rx 0x00000000, ts 2488161003, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:53.253] OP_READ: status 0, frames 1
+[surrogate 18:08:53.360] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:53.476] OP_READ frame: status 0, rx 0x00000009, ts 2488373591, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:53.476] OP_READ frame: status 0, rx 0x00000000, ts 2488377741, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:53.476] OP_READ: status 0, frames 1
+[surrogate 18:08:53.594] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:53.710] OP_READ frame: status 0, rx 0x00000009, ts 2488608789, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:53.710] OP_READ frame: status 0, rx 0x00000000, ts 2488612803, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:53.710] OP_READ: status 0, frames 1
+[surrogate 18:08:53.824] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:53.929] OP_READ frame: status 0, rx 0x00000009, ts 2488839026, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:53.929] OP_READ frame: status 0, rx 0x00000000, ts 2488842256, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:53.929] OP_READ: status 0, frames 1
+[surrogate 18:08:54.047] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:54.153] OP_READ frame: status 0, rx 0x00000009, ts 2489061125, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:54.153] OP_READ frame: status 0, rx 0x00000000, ts 2489067383, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:54.153] OP_READ: status 0, frames 1
+[surrogate 18:08:54.273] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:54.393] OP_READ frame: status 0, rx 0x00000009, ts 2489288739, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:54.393] OP_READ frame: status 0, rx 0x00000000, ts 2489291821, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:54.393] OP_READ: status 0, frames 1
+[surrogate 18:08:54.513] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:54.619] OP_READ frame: status 0, rx 0x00000009, ts 2489529046, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:54.619] OP_READ frame: status 0, rx 0x00000000, ts 2489538616, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:54.619] OP_READ: status 0, frames 1
+[surrogate 18:08:54.816] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:54.933] OP_READ frame: status 0, rx 0x00000000, ts 2489820507, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:54.933] OP_READ frame: status 0, rx 0x00000009, ts 2489829826, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:54.933] OP_READ: status 0, frames 1
+[surrogate 18:08:55.049] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:55.158] OP_READ frame: status 0, rx 0x00000009, ts 2490064335, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:55.158] OP_READ frame: status 0, rx 0x00000000, ts 2490066322, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:55.158] OP_READ: status 0, frames 1
+[surrogate 18:08:55.262] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:55.368] OP_READ frame: status 0, rx 0x00000009, ts 2490277279, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:55.368] OP_READ frame: status 0, rx 0x00000000, ts 2490283368, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:55.368] OP_READ: status 0, frames 1
+[surrogate 18:08:55.483] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:55.593] OP_READ frame: status 0, rx 0x00000009, ts 2490497392, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:55.593] OP_READ frame: status 0, rx 0x00000000, ts 2490501490, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:55.593] OP_READ: status 0, frames 1
+[surrogate 18:08:55.697] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:55.801] OP_READ frame: status 0, rx 0x00000009, ts 2490711937, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:55.801] OP_READ frame: status 0, rx 0x00000000, ts 2490717937, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:55.801] OP_READ: status 0, frames 1
+[surrogate 18:08:55.917] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:56.026] OP_READ frame: status 0, rx 0x00000009, ts 2490933986, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:56.026] OP_READ frame: status 0, rx 0x00000000, ts 2490937789, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:56.026] OP_READ: status 0, frames 1
+[surrogate 18:08:56.128] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:56.235] OP_READ frame: status 0, rx 0x00000009, ts 2491143104, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:56.235] OP_READ frame: status 0, rx 0x00000000, ts 2491148231, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:56.235] OP_READ: status 0, frames 1
+[surrogate 18:08:56.342] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:56.464] OP_READ frame: status 0, rx 0x00000009, ts 2491357641, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:56.464] OP_READ frame: status 0, rx 0x00000000, ts 2491362051, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:56.464] OP_READ: status 0, frames 1
+[surrogate 18:08:56.586] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:56.700] OP_READ frame: status 0, rx 0x00000009, ts 2491601953, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:56.700] OP_READ frame: status 0, rx 0x00000000, ts 2491607453, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:56.700] OP_READ: status 0, frames 1
+[surrogate 18:08:56.832] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:56.952] OP_READ frame: status 0, rx 0x00000000, ts 2491838083, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:56.952] OP_READ frame: status 0, rx 0x00000009, ts 2491845748, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:56.952] OP_READ: status 0, frames 1
+[surrogate 18:08:57.067] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:57.175] OP_READ frame: status 0, rx 0x00000009, ts 2492080934, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:57.175] OP_READ frame: status 0, rx 0x00000000, ts 2492096238, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:57.175] OP_READ: status 0, frames 1
+[surrogate 18:08:57.293] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:57.402] OP_READ frame: status 0, rx 0x00000009, ts 2492307484, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:57.402] OP_READ frame: status 0, rx 0x00000000, ts 2492312858, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:57.402] OP_READ: status 0, frames 1
+[surrogate 18:08:57.517] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:57.622] OP_READ frame: status 0, rx 0x00000009, ts 2492532773, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:57.622] OP_READ frame: status 0, rx 0x00000000, ts 2492537401, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:57.622] OP_READ: status 0, frames 1
+[surrogate 18:08:57.725] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:57.842] OP_READ frame: status 0, rx 0x00000009, ts 2492739444, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:57.842] OP_READ frame: status 0, rx 0x00000000, ts 2492741964, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:57.842] OP_READ: status 0, frames 1
+[surrogate 18:08:57.950] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:58.060] OP_READ frame: status 0, rx 0x00000009, ts 2492965376, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:58.060] OP_READ frame: status 0, rx 0x00000000, ts 2492966188, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:58.060] OP_READ: status 0, frames 1
+[surrogate 18:08:58.173] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:58.276] OP_READ frame: status 0, rx 0x00000009, ts 2493187922, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:58.276] OP_READ frame: status 0, rx 0x00000000, ts 2493191799, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:58.276] OP_READ: status 0, frames 1
+[surrogate 18:08:58.407] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:58.533] OP_READ frame: status 0, rx 0x00000009, ts 2493430633, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:58.533] OP_READ frame: status 0, rx 0x00000000, ts 2493430961, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:58.533] OP_READ: status 0, frames 1
+[surrogate 18:08:58.642] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:58.774] OP_READ frame: status 0, rx 0x00000009, ts 2493656931, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:58.774] OP_READ frame: status 0, rx 0x00000000, ts 2493657158, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:58.782] OP_READ: status 0, frames 1
+[surrogate 18:08:58.907] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:59.017] OP_READ frame: status 0, rx 0x00000000, ts 2493908148, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:59.017] OP_READ frame: status 0, rx 0x00000009, ts 2493921073, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:59.017] OP_READ: status 0, frames 1
+[surrogate 18:08:59.120] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:59.221] OP_READ frame: status 0, rx 0x00000009, ts 2494134227, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:59.221] OP_READ frame: status 0, rx 0x00000000, ts 2494136461, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:59.221] OP_READ: status 0, frames 1
+[surrogate 18:08:59.335] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:59.446] OP_READ frame: status 0, rx 0x00000009, ts 2494350364, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:59.446] OP_READ frame: status 0, rx 0x00000000, ts 2494357654, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:59.446] OP_READ: status 0, frames 1
+[surrogate 18:08:59.551] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:59.667] OP_READ frame: status 0, rx 0x00000009, ts 2494565261, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:59.667] OP_READ frame: status 0, rx 0x00000000, ts 2494572498, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:59.667] OP_READ: status 0, frames 1
+[surrogate 18:08:59.775] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:08:59.883] OP_READ frame: status 0, rx 0x00000009, ts 2494790801, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:08:59.883] OP_READ frame: status 0, rx 0x00000000, ts 2494797529, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:08:59.883] OP_READ: status 0, frames 1
+[surrogate 18:08:59.990] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:09:00.101] OP_READ frame: status 0, rx 0x00000009, ts 2495006716, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:09:00.101] OP_READ frame: status 0, rx 0x00000000, ts 2495013180, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:09:00.101] OP_READ: status 0, frames 1
+[surrogate 18:09:00.237] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:09:00.357] OP_READ frame: status 0, rx 0x00000009, ts 2495257080, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:09:00.357] OP_READ frame: status 0, rx 0x00000000, ts 2495259555, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:09:00.357] OP_READ: status 0, frames 1
+[surrogate 18:09:00.485] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:09:00.595] OP_READ frame: status 0, rx 0x00000009, ts 2495501770, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:09:00.595] OP_READ frame: status 0, rx 0x00000000, ts 2495503182, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:09:00.595] OP_READ: status 0, frames 1
+[surrogate 18:09:00.709] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:09:00.837] OP_READ frame: status 0, rx 0x00000009, ts 2495724179, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:09:00.837] OP_READ frame: status 0, rx 0x00000000, ts 2495728317, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:09:00.837] OP_READ: status 0, frames 1
+[surrogate 18:09:00.940] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:09:01.051] OP_READ frame: status 0, rx 0x00000009, ts 2495954073, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:09:01.052] OP_READ frame: status 0, rx 0x00000000, ts 2495956311, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:09:01.052] OP_READ: status 0, frames 1
+[surrogate 18:09:01.167] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:09:01.273] OP_READ frame: status 0, rx 0x00000009, ts 2496182560, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:09:01.273] OP_READ frame: status 0, rx 0x00000000, ts 2496187610, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:09:01.273] OP_READ: status 0, frames 1
+[surrogate 18:09:01.376] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:09:01.481] OP_READ frame: status 0, rx 0x00000009, ts 2496390038, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:09:01.481] OP_READ frame: status 0, rx 0x00000000, ts 2496397599, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:09:01.481] OP_READ: status 0, frames 1
+[surrogate 18:09:01.593] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:09:01.702] OP_READ frame: status 0, rx 0x00000009, ts 2496607324, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:09:01.702] OP_READ frame: status 0, rx 0x00000000, ts 2496613704, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:09:01.702] OP_READ: status 0, frames 1
+[surrogate 18:09:01.820] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:09:01.931] OP_READ frame: status 0, rx 0x00000009, ts 2496835691, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:09:01.931] OP_READ frame: status 0, rx 0x00000000, ts 2496838543, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:09:01.931] OP_READ: status 0, frames 1
+[surrogate 18:09:02.047] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:09:02.149] OP_READ frame: status 0, rx 0x00000000, ts 2497057254, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:09:02.149] OP_READ frame: status 0, rx 0x00000009, ts 2497061225, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:09:02.149] OP_READ: status 0, frames 1
+[surrogate 18:09:02.263] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:09:02.368] OP_READ frame: status 0, rx 0x00000009, ts 2497278274, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:09:02.368] OP_READ frame: status 0, rx 0x00000000, ts 2497282565, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:09:02.368] OP_READ: status 0, frames 1
+[surrogate 18:09:02.503] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:09:02.621] OP_READ frame: status 0, rx 0x00000000, ts 2497496855, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:09:02.621] OP_READ frame: status 0, rx 0x00000009, ts 2497516856, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:09:02.621] OP_READ: status 0, frames 1
+[surrogate 18:09:02.730] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:09:02.837] OP_READ frame: status 0, rx 0x00000009, ts 2497745109, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:09:02.837] OP_READ frame: status 0, rx 0x00000000, ts 2497747241, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:09:02.837] OP_READ: status 0, frames 1
+[surrogate 18:09:02.945] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:09:03.044] OP_READ frame: status 0, rx 0x00000009, ts 2497958953, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:09:03.044] OP_READ frame: status 0, rx 0x00000000, ts 2497962666, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:09:03.044] OP_READ: status 0, frames 1
+[surrogate 18:09:03.153] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:09:03.270] OP_READ frame: status 0, rx 0x00000009, ts 2498167561, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:09:03.270] OP_READ frame: status 0, rx 0x00000000, ts 2498171293, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:09:03.270] OP_READ: status 0, frames 1
+[surrogate 18:09:03.377] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:09:03.490] OP_READ frame: status 0, rx 0x00000009, ts 2498392412, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:09:03.490] OP_READ frame: status 0, rx 0x00000000, ts 2498398017, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:09:03.490] OP_READ: status 0, frames 1
+[surrogate 18:09:03.613] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:09:03.724] OP_READ frame: status 0, rx 0x00000000, ts 2498617589, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:09:03.724] OP_READ frame: status 0, rx 0x00000009, ts 2498627341, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:09:03.724] OP_READ: status 0, frames 1
+[surrogate 18:09:03.827] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:09:03.947] OP_READ frame: status 0, rx 0x00000009, ts 2498843158, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:09:03.947] OP_READ frame: status 0, rx 0x00000000, ts 2498850341, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:09:03.947] OP_READ: status 0, frames 1
+[surrogate 18:09:04.083] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:09:04.204] OP_READ frame: status 0, rx 0x00000000, ts 2499074000, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:09:04.204] OP_READ frame: status 0, rx 0x00000009, ts 2499097147, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:09:04.204] OP_READ: status 0, frames 1
+[surrogate 18:09:04.312] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:09:04.413] OP_READ frame: status 0, rx 0x00000009, ts 2499325991, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:09:04.413] OP_READ frame: status 0, rx 0x00000000, ts 2499333030, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:09:04.413] OP_READ: status 0, frames 1
+[surrogate 18:09:04.547] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:09:04.667] OP_READ frame: status 0, rx 0x00000000, ts 2499550287, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:09:04.667] OP_READ frame: status 0, rx 0x00000009, ts 2499561026, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:09:04.667] OP_READ: status 0, frames 1
+[surrogate 18:09:04.776] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:09:04.890] OP_READ frame: status 0, rx 0x00000009, ts 2499790072, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:09:04.890] OP_READ frame: status 0, rx 0x00000000, ts 2499796345, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:09:04.890] OP_READ: status 0, frames 1
+[surrogate 18:09:04.999] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:09:05.103] OP_READ frame: status 0, rx 0x00000009, ts 2500013319, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:09:05.103] OP_READ frame: status 0, rx 0x00000000, ts 2500017336, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:09:05.103] OP_READ: status 0, frames 1
+[surrogate 18:09:05.221] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:09:05.329] OP_READ frame: status 0, rx 0x00000009, ts 2500236732, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:09:05.329] OP_READ frame: status 0, rx 0x00000000, ts 2500242360, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:09:05.329] OP_READ: status 0, frames 1
+[surrogate 18:09:05.448] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:09:05.553] OP_READ frame: status 0, rx 0x00000009, ts 2500461907, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:09:05.553] OP_READ frame: status 0, rx 0x00000000, ts 2500469739, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:09:05.553] OP_READ: status 0, frames 1
+[surrogate 18:09:05.676] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:09:05.798] OP_READ frame: status 0, rx 0x00000009, ts 2500691416, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:09:05.798] OP_READ frame: status 0, rx 0x00000000, ts 2500697314, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:09:05.798] OP_READ: status 0, frames 1
+[surrogate 18:09:05.920] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:09:06.043] OP_READ frame: status 0, rx 0x00000009, ts 2500935862, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:09:06.043] OP_READ frame: status 0, rx 0x00000000, ts 2500942611, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:09:06.043] OP_READ: status 0, frames 1
+[surrogate 18:09:06.165] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:09:06.288] OP_READ frame: status 0, rx 0x00000009, ts 2501180681, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:09:06.288] OP_READ frame: status 0, rx 0x00000000, ts 2501187499, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:09:06.288] OP_READ: status 0, frames 1
+[surrogate 18:09:06.409] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:09:06.529] OP_READ frame: status 0, rx 0x00000009, ts 2501425154, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:09:06.529] OP_READ frame: status 0, rx 0x00000000, ts 2501427431, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:09:06.529] OP_READ: status 0, frames 1
+[surrogate 18:09:06.649] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:09:06.764] OP_READ frame: status 0, rx 0x00000000, ts 2501656872, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:09:06.764] OP_READ frame: status 0, rx 0x00000009, ts 2501662992, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:09:06.764] OP_READ: status 0, frames 1
+[surrogate 18:09:06.869] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:09:06.989] OP_READ frame: status 0, rx 0x00000009, ts 2501885449, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:09:06.989] OP_READ frame: status 0, rx 0x00000000, ts 2501888102, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:09:06.989] OP_READ: status 0, frames 1
+[surrogate 18:09:07.104] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:09:07.224] OP_READ frame: status 0, rx 0x00000009, ts 2502119020, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:09:07.224] OP_READ frame: status 0, rx 0x00000000, ts 2502127982, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:09:07.224] OP_READ: status 0, frames 1
+[surrogate 18:09:07.337] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:09:07.463] OP_READ frame: status 0, rx 0x00000009, ts 2502353862, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:09:07.463] OP_READ frame: status 0, rx 0x00000000, ts 2502357607, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:09:07.463] OP_READ: status 0, frames 1
+[surrogate 18:09:07.572] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:09:07.689] OP_READ frame: status 0, rx 0x00000009, ts 2502586851, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:09:07.689] OP_READ frame: status 0, rx 0x00000000, ts 2502592517, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:09:07.689] OP_READ: status 0, frames 1
+[surrogate 18:09:07.803] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:09:07.910] OP_READ frame: status 0, rx 0x00000009, ts 2502818909, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:09:07.910] OP_READ frame: status 0, rx 0x00000000, ts 2502822291, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:09:07.910] OP_READ: status 0, frames 1
+[surrogate 18:09:08.026] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:09:08.134] OP_READ frame: status 0, rx 0x00000009, ts 2503041483, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:09:08.134] OP_READ frame: status 0, rx 0x00000000, ts 2503047475, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:09:08.134] OP_READ: status 0, frames 1
+[surrogate 18:09:08.253] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:09:08.373] OP_READ frame: status 0, rx 0x00000009, ts 2503268866, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:09:08.373] OP_READ frame: status 0, rx 0x00000000, ts 2503272552, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:09:08.373] OP_READ: status 0, frames 1
+[surrogate 18:09:08.480] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:09:08.587] OP_READ frame: status 0, rx 0x00000009, ts 2503494500, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:09:08.587] OP_READ frame: status 0, rx 0x00000000, ts 2503497544, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:09:08.587] OP_READ: status 0, frames 1
+[surrogate 18:09:08.720] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:09:08.829] OP_READ frame: status 0, rx 0x00000009, ts 2503733926, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:09:08.829] OP_READ frame: status 0, rx 0x00000000, ts 2503734209, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:09:08.829] OP_READ: status 0, frames 1
+[surrogate 18:09:08.937] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:09:09.064] OP_READ frame: status 0, rx 0x00000009, ts 2503952202, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:09:09.064] OP_READ frame: status 0, rx 0x00000000, ts 2503956494, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:09:09.064] OP_READ: status 0, frames 1
+[surrogate 18:09:09.187] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:09:09.287] OP_READ frame: status 0, rx 0x00000000, ts 2504193011, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:09:09.287] OP_READ frame: status 0, rx 0x00000009, ts 2504200348, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:09:09.287] OP_READ: status 0, frames 1
+[surrogate 18:09:09.399] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:09:09.526] OP_READ frame: status 0, rx 0x00000009, ts 2504413579, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:09:09.526] OP_READ frame: status 0, rx 0x00000000, ts 2504422680, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:09:09.526] OP_READ: status 0, frames 1
+[surrogate 18:09:09.628] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:09:09.739] OP_READ frame: status 0, rx 0x00000009, ts 2504642088, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:09:09.739] OP_READ frame: status 0, rx 0x00000000, ts 2504648393, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:09:09.739] OP_READ: status 0, frames 1
+[surrogate 18:09:09.873] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:09:09.992] OP_READ frame: status 0, rx 0x00000000, ts 2504875985, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:09:09.992] OP_READ frame: status 0, rx 0x00000009, ts 2504890384, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:09:09.992] OP_READ: status 0, frames 1
+[surrogate 18:09:10.104] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:09:10.208] OP_READ frame: status 0, rx 0x00000009, ts 2505119636, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:09:10.208] OP_READ frame: status 0, rx 0x00000000, ts 2505121905, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:09:10.208] OP_READ: status 0, frames 1
+[surrogate 18:09:10.314] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:09:10.427] OP_READ frame: status 0, rx 0x00000009, ts 2505327950, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:09:10.427] OP_READ frame: status 0, rx 0x00000000, ts 2505332042, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:09:10.427] OP_READ: status 0, frames 1
+[surrogate 18:09:10.551] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:09:10.657] OP_READ frame: status 0, rx 0x00000000, ts 2505557359, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:09:10.657] OP_READ frame: status 0, rx 0x00000009, ts 2505564248, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:09:10.657] OP_READ: status 0, frames 1
+[surrogate 18:09:10.763] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:09:10.867] OP_READ frame: status 0, rx 0x00000009, ts 2505777410, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:09:10.871] OP_READ frame: status 0, rx 0x00000000, ts 2505782019, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:09:10.871] OP_READ: status 0, frames 1
+[surrogate 18:09:10.983] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:09:11.089] OP_READ frame: status 0, rx 0x00000009, ts 2505997015, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:09:11.089] OP_READ frame: status 0, rx 0x00000000, ts 2506006648, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:09:11.089] OP_READ: status 0, frames 1
+[surrogate 18:09:11.197] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:09:11.309] OP_READ frame: status 0, rx 0x00000009, ts 2506211522, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:09:11.309] OP_READ frame: status 0, rx 0x00000000, ts 2506216611, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:09:11.309] OP_READ: status 0, frames 1
+[surrogate 18:09:11.442] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:09:11.555] OP_READ frame: status 0, rx 0x00000000, ts 2506447089, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:09:11.555] OP_READ frame: status 0, rx 0x00000009, ts 2506456006, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:09:11.555] OP_READ: status 0, frames 1
+[surrogate 18:09:11.679] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:09:11.786] OP_READ frame: status 0, rx 0x00000000, ts 2506686642, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:09:11.786] OP_READ frame: status 0, rx 0x00000009, ts 2506692312, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:09:11.786] OP_READ: status 0, frames 1
+[surrogate 18:09:11.888] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:09:11.994] OP_READ frame: status 0, rx 0x00000009, ts 2506902717, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:09:11.994] OP_READ frame: status 0, rx 0x00000000, ts 2506906828, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:09:11.994] OP_READ: status 0, frames 1
+[surrogate 18:09:12.118] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:09:12.240] OP_READ frame: status 0, rx 0x00000009, ts 2507133280, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:09:12.240] OP_READ frame: status 0, rx 0x00000000, ts 2507141261, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:09:12.240] OP_READ: status 0, frames 1
+[surrogate 18:09:12.379] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:09:12.483] OP_READ frame: status 0, rx 0x00000000, ts 2507382799, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:09:12.483] OP_READ frame: status 0, rx 0x00000009, ts 2507393084, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:09:12.483] OP_READ: status 0, frames 1
+[surrogate 18:09:12.591] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:09:12.693] OP_READ frame: status 0, rx 0x00000009, ts 2507606391, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:09:12.693] OP_READ frame: status 0, rx 0x00000000, ts 2507607292, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:09:12.693] OP_READ: status 0, frames 1
+[surrogate 18:09:12.809] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:09:12.922] OP_READ frame: status 0, rx 0x00000009, ts 2507822711, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:09:12.922] OP_READ frame: status 0, rx 0x00000000, ts 2507823584, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:09:12.922] OP_READ: status 0, frames 1
+[surrogate 18:09:13.031] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:09:13.143] OP_READ frame: status 0, rx 0x00000009, ts 2508045676, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:09:13.143] OP_READ frame: status 0, rx 0x00000000, ts 2508051921, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:09:13.143] OP_READ: status 0, frames 1
+[surrogate 18:09:13.256] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:09:13.372] OP_READ frame: status 0, rx 0x00000009, ts 2508270326, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:09:13.372] OP_READ frame: status 0, rx 0x00000000, ts 2508276773, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:09:13.372] OP_READ: status 0, frames 1
+[surrogate 18:09:13.487] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:09:13.604] OP_READ frame: status 0, rx 0x00000009, ts 2508505611, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:09:13.604] OP_READ frame: status 0, rx 0x00000000, ts 2508507680, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:09:13.604] OP_READ: status 0, frames 1
+[surrogate 18:09:13.722] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:09:13.831] OP_READ frame: status 0, rx 0x00000009, ts 2508738906, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:09:13.831] OP_READ frame: status 0, rx 0x00000000, ts 2508742456, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:09:13.831] OP_READ: status 0, frames 1
+[surrogate 18:09:13.939] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:09:14.054] OP_READ frame: status 0, rx 0x00000009, ts 2508954091, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:09:14.054] OP_READ frame: status 0, rx 0x00000000, ts 2508957862, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:09:14.054] OP_READ: status 0, frames 1
+[surrogate 18:09:14.163] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:09:14.283] OP_READ frame: status 0, rx 0x00000009, ts 2509178259, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:09:14.283] OP_READ frame: status 0, rx 0x00000000, ts 2509182749, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:09:14.283] OP_READ: status 0, frames 1
+[surrogate 18:09:14.389] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:09:14.504] OP_READ frame: status 0, rx 0x00000009, ts 2509404270, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:09:14.504] OP_READ frame: status 0, rx 0x00000000, ts 2509408137, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:09:14.504] OP_READ: status 0, frames 1
+[surrogate 18:09:14.614] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:09:14.734] OP_READ frame: status 0, rx 0x00000009, ts 2509629101, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:09:14.734] OP_READ frame: status 0, rx 0x00000000, ts 2509633116, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:09:14.734] OP_READ: status 0, frames 1
+[surrogate 18:09:14.842] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:09:14.949] OP_READ frame: status 0, rx 0x00000009, ts 2509855960, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:09:14.949] OP_READ frame: status 0, rx 0x00000000, ts 2509857767, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:09:14.949] OP_READ: status 0, frames 1
+[surrogate 18:09:15.072] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:09:15.177] OP_READ frame: status 0, rx 0x00000000, ts 2510077603, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:09:15.177] OP_READ frame: status 0, rx 0x00000009, ts 2510085479, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:09:15.177] OP_READ: status 0, frames 1
+[surrogate 18:09:15.287] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:09:15.398] OP_READ frame: status 0, rx 0x00000009, ts 2510303165, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:09:15.398] OP_READ frame: status 0, rx 0x00000000, ts 2510307545, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:09:15.398] OP_READ: status 0, frames 1
+[surrogate 18:09:15.502] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:09:15.608] OP_READ frame: status 0, rx 0x00000009, ts 2510518078, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:09:15.608] OP_READ frame: status 0, rx 0x00000000, ts 2510527735, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:09:15.608] OP_READ: status 0, frames 1
+[surrogate 18:09:15.724] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:09:15.833] OP_READ frame: status 0, rx 0x00000009, ts 2510739596, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:09:15.833] OP_READ frame: status 0, rx 0x00000000, ts 2510742554, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:09:15.833] OP_READ: status 0, frames 1
+[surrogate 18:09:15.956] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:09:16.079] OP_READ frame: status 0, rx 0x00000009, ts 2510971622, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:09:16.079] OP_READ frame: status 0, rx 0x00000000, ts 2510977898, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:09:16.079] OP_READ: status 0, frames 1
+[surrogate 18:09:16.189] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:09:16.305] OP_READ frame: status 0, rx 0x00000009, ts 2511203391, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:09:16.305] OP_READ frame: status 0, rx 0x00000000, ts 2511207867, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:09:16.305] OP_READ: status 0, frames 1
+[surrogate 18:09:16.410] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:09:16.524] OP_READ frame: status 0, rx 0x00000009, ts 2511424064, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:09:16.524] OP_READ frame: status 0, rx 0x00000000, ts 2511427148, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:09:16.524] OP_READ: status 0, frames 1
+[surrogate 18:09:16.647] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:09:16.755] OP_READ frame: status 0, rx 0x00000009, ts 2511662236, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:09:16.755] OP_READ frame: status 0, rx 0x00000000, ts 2511667857, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:09:16.755] OP_READ: status 0, frames 1
+[surrogate 18:09:16.873] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:09:16.985] OP_READ frame: status 0, rx 0x00000009, ts 2511890189, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:09:16.985] OP_READ frame: status 0, rx 0x00000000, ts 2511891895, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:09:16.985] OP_READ: status 0, frames 1
+[surrogate 18:09:17.090] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:09:17.198] OP_READ frame: status 0, rx 0x00000009, ts 2512107259, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:09:17.198] OP_READ frame: status 0, rx 0x00000000, ts 2512108018, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:09:17.198] OP_READ: status 0, frames 1
+[surrogate 18:09:17.303] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:09:17.406] OP_READ frame: status 0, rx 0x00000009, ts 2512317307, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:09:17.406] OP_READ frame: status 0, rx 0x00000000, ts 2512327043, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:09:17.406] OP_READ: status 0, frames 1
+[surrogate 18:09:17.534] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:09:17.640] OP_READ frame: status 0, rx 0x00000009, ts 2512548985, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:09:17.640] OP_READ frame: status 0, rx 0x00000000, ts 2512552113, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:09:17.640] OP_READ: status 0, frames 1
+[surrogate 18:09:17.756] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:09:17.865] OP_READ frame: status 0, rx 0x00000009, ts 2512771656, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:09:17.865] OP_READ frame: status 0, rx 0x00000000, ts 2512777710, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:09:17.865] OP_READ: status 0, frames 1
+[surrogate 18:09:17.975] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:09:18.093] OP_READ frame: status 0, rx 0x00000009, ts 2512988925, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:09:18.093] OP_READ frame: status 0, rx 0x00000000, ts 2512992817, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:09:18.093] OP_READ: status 0, frames 1
+[surrogate 18:09:18.197] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:09:18.303] OP_READ frame: status 0, rx 0x00000009, ts 2513211341, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:09:18.303] OP_READ frame: status 0, rx 0x00000000, ts 2513224110, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:09:18.303] OP_READ: status 0, frames 1
+[surrogate 18:09:18.432] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:09:18.543] OP_READ frame: status 0, rx 0x00000009, ts 2513448865, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:09:18.543] OP_READ frame: status 0, rx 0x00000000, ts 2513452820, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:09:18.543] OP_READ: status 0, frames 1
+[surrogate 18:09:18.659] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:09:18.783] OP_READ frame: status 0, rx 0x00000009, ts 2513675028, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:09:18.783] OP_READ frame: status 0, rx 0x00000000, ts 2513681929, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:09:18.783] OP_READ: status 0, frames 1
+[surrogate 18:09:18.892] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:09:19.016] OP_READ frame: status 0, rx 0x00000009, ts 2513907595, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:09:19.016] OP_READ frame: status 0, rx 0x00000000, ts 2513912748, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:09:19.016] OP_READ: status 0, frames 1
+[surrogate 18:09:19.157] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:09:19.263] OP_READ frame: status 0, rx 0x00000000, ts 2514162563, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:09:19.263] OP_READ frame: status 0, rx 0x00000009, ts 2514170965, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:09:19.263] OP_READ: status 0, frames 1
+[surrogate 18:09:19.383] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:09:19.503] OP_READ frame: status 0, rx 0x00000009, ts 2514400584, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:09:19.503] OP_READ frame: status 0, rx 0x00000000, ts 2514404302, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:09:19.503] OP_READ: status 0, frames 1
+[surrogate 18:09:19.620] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:09:19.743] OP_READ frame: status 0, rx 0x00000009, ts 2514636268, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:09:19.743] OP_READ frame: status 0, rx 0x00000000, ts 2514642367, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:09:19.743] OP_READ: status 0, frames 1
+[surrogate 18:09:19.864] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:09:19.974] OP_READ frame: status 0, rx 0x00000009, ts 2514879686, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:09:19.974] OP_READ frame: status 0, rx 0x00000000, ts 2514884454, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:09:19.974] OP_READ: status 0, frames 1
+[surrogate 18:09:20.098] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 18:09:20.222] OP_READ frame: status 0, rx 0x00000009, ts 2515113435, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 18:09:20.222] OP_READ frame: status 0, rx 0x00000000, ts 2515122177, len 10: 00 00 07 E8 41 00 FE 7F A8 13
+[surrogate 18:09:20.222] OP_READ: status 0, frames 1
+[surrogate 18:09:20.224] OP_STOP_FILTER: fid 1, status 0
+[surrogate 18:09:20.224] OP_DISCONNECT: vendor status 0, channel=1
