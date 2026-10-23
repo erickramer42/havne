@@ -1,15 +1,15 @@
-# File/layer: app/CMakeLists.txt | CMake 3.21+, Qt 6.5+/Quick
+# File/layer: app/CMakeLists.txt | CMake 3.21+, Qt 6.12+/Quick
 # Testing: HARNESS — build-time behavior; verify by launching the app with
 #     NO env vars and connecting the fake direct-load URI; the surrogate
 #     must spawn from the exe dir. Verify the no-variable case still builds
 #     clean (contributors without a win32 tree). Check CI invariant: this
 #     file is app-side only, core stays Qt-free/untouched.
 
-find_package(Qt6 6.5 REQUIRED COMPONENTS Quick QuickControls2)
+# 6.12 is the version CI and local builds use (macOS needs it), and
+# REQUIRES sets every Qt policy up to it to NEW, QTP0004 among them.
+find_package(Qt6 6.12 REQUIRED COMPONENTS Quick QuickControls2)
 
-qt_standard_project_setup(REQUIRES 6.5)
-
-qt_policy(SET QTP0004 NEW)
+qt_standard_project_setup(REQUIRES 6.12)
 
 # The QtTune QML module and the bridge it binds live in a static library
 # of their own, so test_qml (tests/CMakeLists.txt) loads the same module
@@ -121,8 +121,9 @@ endif()
 # The surrogate that matters for real vendor DLLs is the x86 one from the
 # build-win32 tree. The x64 tree also builds a surrogate (for the
 # same-arch test suites), so this MUST NOT use $<TARGET_FILE:...> — copying
-# the x64 one next to the app would make build_exe_path() spawn it for an
-# x86 vendor DLL and die at LoadLibrary with no env var to blame.
+# the x64 one next to the app would make the client's resolve_exe_path()
+# pick it for an x86 vendor DLL, which then dies at LoadLibrary with no
+# env var to blame.
 #
 # Resolution order:
 #   1. QTTUNE_SURROGATE_SOURCE cache variable (explicit override)
@@ -130,11 +131,6 @@ endif()
 #      (development.md two-tree layout), any config, Release preferred
 #   3. Neither -> STATUS message, no copy; runtime ECUIO_SURROGATE_EXE
 #      env override still works (checked first by the client).
-# --- Deploy the Win32 J2534 surrogate next to the exe (Windows only) ---
-# The x86 surrogate from build-win32 hosts x86 vendor DLLs; this tree's
-# own surrogate is x64 and MUST NOT be copied here. Resolution: explicit
-# QTTUNE_SURROGATE_SOURCE, else auto-detect in sibling build-win32, else
-# no copy (runtime ECUIO_SURROGATE_EXE env override still works).
 set(QTTUNE_SURROGATE_SOURCE "" CACHE PATH "Win32-tree ecuio-j2534-surrogate.exe to deploy; empty = auto-detect")
 
 if(WIN32 AND QTTUNE_SURROGATE_SOURCE STREQUAL "")

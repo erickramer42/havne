@@ -20,13 +20,17 @@
 //      - Everything else: the legacy deterministic echo (byte 0
 //        +0x40), preserving existing framing tests.
 //    ECUIO_FAKE_WRITE_STATUS fails every write with the given status,
-//    recording nothing and echoing nothing. ECUIO_FAKE_REPLY_DELAY_MS
+//    recording nothing and echoing nothing; ECUIO_FAKE_WRITE_ZERO_COUNT=1
+//    answers every write STATUS_NOERROR with a count of 0, the same
+//    way. ECUIO_FAKE_REPLY_DELAY_MS
 //    holds each response back that long after the write (default 0).
 //  * IoCtl: config table (SET stores, GET reads back), fixed VBATT
 //    (13800 mV), CLEAR_* accepted. Unknown ids FAIL like a strict vendor.
 //  * ReadVersion: fixed firmware, DLL and API strings (kFirmwareVersion
-//    and friends) for device 1, the one PassThruOpen hands out. The
-//    legacy fixture (fake_j2534_legacy.def) doesn't export it.
+//    and friends) for the device PassThruOpen handed out. The legacy
+//    fixture (fake_j2534_legacy.def) doesn't export it.
+//  * IDs: device 1 and channel 0x55, or 0 for both under
+//    ECUIO_FAKE_ZERO_IDS=1 (J2534 doesn't reserve 0).
 //  * Refusals: ECUIO_FAKE_OPEN_STATUS, ECUIO_FAKE_CONNECT_STATUS,
 //    ECUIO_FAKE_FILTER_STATUS, ECUIO_FAKE_VBATT_STATUS and
 //    ECUIO_FAKE_VERSION_STATUS make PassThruOpen, PassThruConnect,
@@ -43,7 +47,8 @@
 //    environment. The page reaches the surrogate child's instance
 //    mid-session, which the child's spawn-time environment can't. It
 //    also carries messages a test queues for ReadMsgs, and the fake
-//    publishes its successful writes and the process that opened it.
+//    publishes its successful writes, the process that opened it, and
+//    its disconnects and closes by the IDs it handed out.
 //  * ReadMsgs, by default, returns at most one message per call,
 //    whatever NumMsgs and Timeout ask for, and STATUS_NOERROR with zero
 //    messages on an empty queue. ECUIO_FAKE_READ_STATUS forces a
@@ -51,6 +56,7 @@
 //    forces a status with the caller's count and buffer left as
 //    passed (a sloppy vendor; see ecuio_trusted_count);
 //    ECUIO_FAKE_SPEC_READ_SEMANTICS=1 switches to J2534-1 batches.
+//    ECUIO_FAKE_READ_DELAY_MS stalls the first read after load, once.
 //  * ECUIO_FAKE_VX=1 models the OBDX Pro VX as measured
 //    (docs/bench-sessions/2026-10-22.md and its vehicle sheet): batch
 //    reads held for their timeout, a short batch with STATUS_NOERROR
@@ -159,6 +165,9 @@ bool g_filter_gating_enabled = false;    /* SetFilterGating toggle — controls
  * client's 3s transact timeout, while every later op answers
  * instantly, isolating the recovery path under test. */
 bool g_ioctl_delay_fired = false;
+/* The same for the FIRST PassThruReadMsgs: a read answered past the
+ * client's deadline for it, with whatever the queue then holds. */
+bool g_read_delay_fired = false;
 
 /* Last PassThruConnect invocation, recorded BEFORE the validity
  * check — even a refused connect shows what was asked, which is
@@ -185,6 +194,15 @@ unsigned long g_disconnect_count = 0;
  * disconnect count. */
 unsigned long g_open_thread_id = 0;
 unsigned long g_disconnect_thread_id = 0;
+
+/* The IDs PassThruOpen and PassThruConnect hand out: device 1 and
+ * channel 0x55, or 0 for both under ECUIO_FAKE_ZERO_IDS=1, since J2534
+ * doesn't reserve 0. The device-scoped calls (READ_VBATT,
+ * PassThruReadVersion) answer only the device ID. */
+constexpr unsigned long kDeviceId = 1;
+constexpr unsigned long kChannelId = 0x55;
+unsigned long g_device_id = kDeviceId;
+unsigned long g_channel_id = kChannelId;
 
 /* ---- OBD-II canned response data (HARNESS only, ADR-0013) ----
  * Standard PIDs that express as simple byte-extraction + scale/offset.
@@ -509,19 +527,26 @@ long __stdcall PassThruOpen(void* pName, unsigned long* pDeviceID)
         return rc;
     }
 
+    const bool zero_ids = fake_j2534::knob_on("ECUIO_FAKE_ZERO_IDS");
     std::lock_guard<std::mutex> lk(fake_j2534::g_lock);
     fake_j2534::g_handle = 1;
     fake_j2534::g_open_thread_id = GetCurrentThreadId();
-    *pDeviceID = 1;
+    fake_j2534::g_device_id = zero_ids ? 0 : fake_j2534::kDeviceId;
+    fake_j2534::g_channel_id = zero_ids ? 0 : fake_j2534::kChannelId;
+    *pDeviceID = fake_j2534::g_device_id;
     return STATUS_NOERROR;
 }
 
 extern "C" __declspec(dllexport)
 long __stdcall PassThruClose(unsigned long DeviceID)
 {
-    (void)DeviceID;
     std::lock_guard<std::mutex> lk(fake_j2534::g_lock);
     fake_j2534::g_handle = 0;
+    if (DeviceID == fake_j2534::g_device_id) {
+        if (fake_control::Page* page = fake_control::attach()) {
+            InterlockedIncrement(&page->closes);
+        }
+    }
     return STATUS_NOERROR;
 }
 
@@ -555,14 +580,13 @@ long __stdcall PassThruConnect(unsigned long DeviceID,
      * were both 1, a caller passing the channel where J2534 wants the
      * device (READ_VBATT) would still pass. 0x55 is arbitrary, nonzero,
      * and unrelated to any protocol constant. */
-    *pChannelID = 0x55;
+    *pChannelID = fake_j2534::g_channel_id;
     return STATUS_NOERROR;
 }
 
 extern "C" __declspec(dllexport)
 long __stdcall PassThruDisconnect(unsigned long ChannelID)
 {
-    (void)ChannelID;
 
     /* Test-only slow teardown: ECUIO_FAKE_DISCONNECT_DELAY_MS makes
      * every PassThruDisconnect sleep first, the slow-vendor teardown
@@ -583,6 +607,11 @@ long __stdcall PassThruDisconnect(unsigned long ChannelID)
     std::lock_guard<std::mutex> lk(fake_j2534::g_lock);
     fake_j2534::g_disconnect_count++;
     fake_j2534::g_disconnect_thread_id = GetCurrentThreadId();
+    if (ChannelID == fake_j2534::g_channel_id) {
+        if (fake_control::Page* page = fake_control::attach()) {
+            InterlockedIncrement(&page->disconnects);
+        }
+    }
     return STATUS_NOERROR;
 }
 
@@ -595,6 +624,26 @@ long __stdcall PassThruReadMsgs(unsigned long ChannelID,
     (void)ChannelID; (void)Timeout;
     if (pMsg == nullptr || pNumMsgs == nullptr) {
         return STATUS_FAILED;
+    }
+
+    /* ECUIO_FAKE_READ_DELAY_MS: the first ReadMsgs after load sleeps
+     * that long (max 60000) before reading, once, like the ioctl
+     * stall. */
+    {
+        char buf[32] = {};
+        bool stall = false;
+        if (fake_j2534::read_knob("ECUIO_FAKE_READ_DELAY_MS",
+                                  buf, sizeof(buf))) {
+            std::lock_guard<std::mutex> lk(fake_j2534::g_lock);
+            if (!fake_j2534::g_read_delay_fired) {
+                fake_j2534::g_read_delay_fired = true;
+                stall = true;
+            }
+        }
+        if (stall) {
+            const DWORD delay = static_cast<DWORD>(strtoul(buf, nullptr, 10));
+            if (delay > 0 && delay <= 60000) Sleep(delay);
+        }
     }
 
     /* #11 test knob (HARNESS): ECUIO_FAKE_READ_STATUS forces this
@@ -797,6 +846,15 @@ long __stdcall PassThruWriteMsgs(unsigned long ChannelID,
         }
     }
 
+    /* ECUIO_FAKE_WRITE_ZERO_COUNT=1: STATUS_NOERROR with *pNumMsgs set
+     * to 0, a vendor reporting success for a message it never sent.
+     * Not recorded, nothing answered. Re-read per call, like the knob
+     * above. */
+    if (fake_j2534::knob_on("ECUIO_FAKE_WRITE_ZERO_COUNT")) {
+        *pNumMsgs = 0;
+        return STATUS_NOERROR;
+    }
+
     if (*pNumMsgs != 1) {
         return STATUS_FAILED;   /* the relay sends one at a time — strict */
     }
@@ -990,7 +1048,7 @@ long __stdcall PassThruIoctl(unsigned long ChannelID,
          * to READ_VBATT. This fake's PassThruOpen returns device 1 and
          * PassThruConnect returns channel 0x55 — a caller passing the
          * channel FAILS here instead of passing by coincidence. */
-        if (ChannelID != 1) {
+        if (ChannelID != fake_j2534::g_device_id) {
             return STATUS_FAILED;
         }
         if (pOutput != nullptr) {
@@ -1095,7 +1153,7 @@ long __stdcall PassThruReadVersion(unsigned long DeviceID,
         pApiVersion == nullptr) {
         return 0x04;   /* ERR_NULL_PARAMETER */
     }
-    if (DeviceID != 1) {
+    if (DeviceID != fake_j2534::g_device_id) {
         return 0x1A;   /* ERR_INVALID_DEVICE_ID */
     }
     if (const long rc = fake_j2534::refusal("ECUIO_FAKE_VERSION_STATUS",

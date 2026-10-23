@@ -124,9 +124,9 @@ the plan in [After v0.3.0](#after-v030).
     run sheets are
     [bench-runsheet.md](docs/bench-sessions/bench-runsheet.md) and
     [vehicle-runsheet.md](docs/bench-sessions/vehicle-runsheet.md).
-  - **Tests:** 271 ctest cases (Windows, Visual Studio 18 build
-    tools, both trees rebuilt, 2026-10-23 at `c093185`), the QML suites
-    among them, plus the cross-arch subset (52/52). All passed except
+  - **Tests:** 278 ctest cases (Windows, Visual Studio 18 build
+    tools, both trees rebuilt, 2026-10-23), the QML suites
+    among them, plus the cross-arch subset (57/57). All passed except
     the env-gated cross-arch skip. Every first-party target builds with
     compiler warnings on, at 0 on MSVC. CI was green on all nine jobs on
     PR #17 (`ce8284f`, merged as `1145d11`), the simulator smoke
@@ -397,12 +397,6 @@ an issue is resolved it is removed, and its number is not reused.
    move decoding to the worker (Performance, in the backlog).
 6. **The session API is single-caller by contract.** The bridge is the
    only caller.
-8. **`CoreTest.SessionStartWithoutTransportFails` is a `SUCCEED()`
-   stub.** Its case can't be reached through the public API: only
-   close clears a session's transport, and `ecuio_session_start`
-   checks `closed` first, which
-   `CoreTest.CloseIsIdempotentAndDestroyIsSafe` already pins. Delete
-   it.
 10. **Strip-chart x-axis resolution is one coalesce window, about
     100 ms.** Per-sample timestamps need decoding to move onto the
     worker.

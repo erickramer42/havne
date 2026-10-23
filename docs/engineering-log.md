@@ -82,6 +82,7 @@ Dates are commit dates.
 | 2026-10-22 | J2534 frames carry session time: the host's at the first frame, then the adapter's deltas across its 32-bit wrap (#12 closed) | `b3b1487` |
 | 2026-10-22 | QML tests: `test_qml` (Qt Quick Test) runs the pages and the app's window against a real bridge, offscreen, the link-health surfaces through the fake; the `QtTune` module builds as a static library that the app and the tests both link; merged via PR #17 | `7ce28e4`, `1145d11` |
 | 2026-10-23 | A contributing guide, the README's feedback section, and the OpenSSF Best Practices badge | `6068885`, `9f8f425`, `c093185` |
+| 2026-10-23 | Small fixes: link health counts a write the vendor reports as unsent as failed, and its backoff ends at the first clean read (a silent bus after a hard failure read "Adapter fault" for 26 s); the surrogate child checks `OP_INJECT`'s length and refuses device and channel ops before open and connect; tests for ID 0 and a late `OP_READ` reply; Qt 6.12 required; Known Issue #8 closed | — |
 
 ## Lessons learned
 
@@ -683,3 +684,18 @@ with no console Qt on Windows sends its warnings and the test log to
 the debugger; a failure would have shown as an empty log. The harness
 forces stderr logging. A new kind of test needs one run that's made to
 fail, to show its failures are seen.
+
+**2026-10-23 — small fixes:** **a debounce that counts events is
+stretched by whatever spaces the events.** Link health reads a bus as
+quiet after ten empty reads in a row, and only that debounce cleared
+the backoff a hard failure starts. But while the backoff ran, it
+spaced the reads too: one per cycle, 100 ms, 200 ms and so on up to
+5 s apart. An adapter that came back on a silent bus read "Adapter
+fault" for 26.4 s on both backends before it read quiet. Nothing had
+timed it, because every recovery test recovered through a reply; it
+showed when a test for the silent case was given a 5 s budget and
+couldn't pass. Now any read that isn't a hard failure ends the
+backoff, since the adapter answered, and a hard read starts it again,
+so a dead adapter still isn't probed at the request cadence. A
+count-based debounce needs its count checked against the slowest rate
+its events can arrive at.

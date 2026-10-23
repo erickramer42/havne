@@ -197,10 +197,16 @@ ecuio_status_t ecuio_unregister_frame_callback(
 );
 
 /* Link health, written by the transport worker while the session keeps
- * running. last_error is ECUIO_OK, ECUIO_ERR_VEHICLE_TIMEOUT (no frame for
- * about 1 s) or the status of the latest hard failure; error_count
- * counts hard-failure episodes. Callable from any thread. The mock
- * transport never sets them. */
+ * running. last_error is one of:
+ *   ECUIO_OK                          replies arrive
+ *   ECUIO_ERR_VEHICLE_TIMEOUT         the adapter answers, but no reply
+ *                                     for about 1 s
+ *   ECUIO_ERR_REQUEST_FAILED          writes fail while reads stay clean
+ *   ECUIO_ERR_TRANSPORT_HARD_FAILURE  reads fail
+ * Treat any other value as degraded: later cores may append codes.
+ * error_count counts episodes, each entry into a request failure or a
+ * hard failure. Callable from any thread. The mock transport never sets
+ * them. */
 ecuio_status_t ecuio_session_get_error_state(
     ecuio_session_t* session,
     int32_t* out_last_error,

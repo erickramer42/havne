@@ -11,8 +11,9 @@
 //   - sets and clears knobs mid-session; a knob on the page shadows the
 //     environment variable of the same name,
 //   - queues received messages with any RxStatus, and
-//   - reads what the fake publishes: the process that opened it, and
-//     its count of successful writes.
+//   - reads what the fake publishes: the process that opened it, its
+//     count of successful writes, and how often it was disconnected and
+//     closed by the IDs it handed out.
 // Fixed-size fields and no pointers, so an x64 test process and an x86
 // child map the same bytes.
 
@@ -56,8 +57,11 @@ struct Page {
     uint32_t inbox_len;
     volatile LONG writes;    /* PassThruWriteMsgs calls that succeeded */
     volatile LONG opener_pid; /* the process whose PassThruOpen ran last */
+    volatile LONG disconnects; /* PassThruDisconnect calls naming the
+                                * channel the fake handed out */
+    volatile LONG closes;    /* PassThruClose calls naming its device */
 };
-static_assert(sizeof(Page) == 8 + kMaxKnobs * 80 + kInboxDepth * 76 + 12,
+static_assert(sizeof(Page) == 8 + kMaxKnobs * 80 + kInboxDepth * 76 + 20,
               "the page's layout must match in x86 and x64 builds");
 
 class Guard {
@@ -216,6 +220,8 @@ inline void reset(Page* p)
     p->inbox_len = 0;
     InterlockedExchange(&p->writes, 0);
     InterlockedExchange(&p->opener_pid, 0);
+    InterlockedExchange(&p->disconnects, 0);
+    InterlockedExchange(&p->closes, 0);
 }
 
 /* Queues a message for the fake's receive queue; it moves there on the
@@ -263,6 +269,17 @@ inline unsigned long opener_pid(Page* p)
 {
     return static_cast<unsigned long>(
         InterlockedCompareExchange(&p->opener_pid, 0, 0));
+}
+
+inline uint32_t disconnects(Page* p)
+{
+    return static_cast<uint32_t>(
+        InterlockedCompareExchange(&p->disconnects, 0, 0));
+}
+
+inline uint32_t closes(Page* p)
+{
+    return static_cast<uint32_t>(InterlockedCompareExchange(&p->closes, 0, 0));
 }
 
 } // namespace fake_control

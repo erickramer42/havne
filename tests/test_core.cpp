@@ -373,12 +373,6 @@ TEST(CoreTest, UnknownTransportUriRejected) {
               ECUIO_ERR_NULL_ARGUMENT);
 }
 
-TEST(CoreTest, SessionStartWithoutTransportFails) {
-    /* Valid mock session, but force no-transport via closed early?
-     * Not reachable via public API in v0.2 — skip rather than assert UB. */
-    SUCCEED();
-}
-
 TEST(CoreTest, CallbackExecutesOnTransportWorkerThread) {
     ecuio_session_t* session = nullptr;
     ASSERT_EQ(ecuio_session_create("mock://thread-test", &session), ECUIO_OK);

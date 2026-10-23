@@ -6,10 +6,12 @@
 //          clean job-object teardown, and fast failure on a dead DLL.
 //          Also: write->echo round trip, ioctl SET->GET + VBATT,
 //          child-side ioctl whitelist, filter start/stop lifecycle,
-//          recovery after a timed-out request, a blocked vendor open,
+//          recovery after a timed-out request, a late read reply
+//          dropped and logged, a blocked vendor open,
 //          an ERR_TIMEOUT partial batch (spec-mode fake), no
 //          phantom frames from an untouched count under a hard error,
-//          and a child from other shared headers refused at OP_OPEN.
+//          a child from other shared headers refused at OP_OPEN, and
+//          device and channel ID 0 handled as real IDs.
 //
 // ARCH note: in the x64 configure this is all-x64 (CI-valid IPC test);
 // the true cross-arch case (x64 test process -> x86 surrogate -> x86
@@ -35,6 +37,7 @@
 #include <cstdlib>
 #include <windows.h>
 
+#include "fake_control.h"
 #include "non_ascii_copy.h"
 
 /* Env override for the cross-arch case: an x86 surrogate can't load
@@ -178,9 +181,10 @@ TEST(J2534SurrogateTest, OpenConnectInjectReadCloseCycle)
 
 TEST(J2534SurrogateTest, ReadPumpIsGatedOnConnect)
 {
-    /* Frame injected PRE-connect parks in the fake's FIFO; the pump
-     * gate (g_channel == 0) must hold it there. It arrives only after
-     * CONNECT — the fake's InjectFrame and ReadMsgs share one queue,
+    /* Frame injected PRE-connect parks in the fake's FIFO; the child's
+     * read gate (no channel connected yet) must hold it there. It
+     * arrives only after CONNECT — the fake's InjectFrame and ReadMsgs
+     * share one queue,
      * so parking is real, not an artifact of separate containers. */
     ecuio_j2534_sur_handle_t* h = nullptr;
     ASSERT_EQ(ecuio_j2534_sur_open(fake_dll_path(), &h), ECUIO_OK);
@@ -209,6 +213,41 @@ TEST(J2534SurrogateTest, ReadPumpIsGatedOnConnect)
     EXPECT_EQ(cap.timestamps[0], uint64_t{500});
 
     EXPECT_EQ(ecuio_j2534_sur_close(h), ECUIO_OK);
+}
+
+/* J2534 doesn't reserve 0 as a device or channel ID, so the child
+ * tracks both with presence flags. With a fake that hands out 0 for
+ * each, a frame still flows once connected, and a close with no
+ * disconnect first still has the child disconnect channel 0 and close
+ * device 0 as it shuts down. */
+TEST(J2534SurrogateTest, DeviceAndChannelIdZeroAreRealIds)
+{
+    fake_control::Page* page = fake_control::create_for_this_process();
+    ASSERT_NE(page, nullptr);
+    fake_control::reset(page);
+    struct PageReset {
+        fake_control::Page* p;
+        ~PageReset() { fake_control::reset(p); }
+    } page_reset{page};
+    ASSERT_TRUE(fake_control::set(page, "ECUIO_FAKE_ZERO_IDS", "1"));
+
+    ecuio_j2534_sur_handle_t* h = nullptr;
+    ASSERT_EQ(ecuio_j2534_sur_open(fake_dll_path(), &h), ECUIO_OK);
+    unsigned long channel = 0x55;
+    ASSERT_EQ(ecuio_j2534_sur_connect_channel(h, 0, 0, &channel), ECUIO_OK);
+    EXPECT_EQ(channel, 0ul);
+
+    const unsigned char f0[8] = {0, 0, 0x07, 0xE8, 0x41, 0x0C, 0x1F, 0x40};
+    ASSERT_EQ(ecuio_j2534_sur_inject_test_frame(h, f0, 8, 700, 0), ECUIO_OK);
+    SurCapture cap;
+    ASSERT_TRUE(wait_until(
+        [&]() { drain_sur_frames(h, &cap); return cap.count.load() >= 1; },
+        10000, 50)) << "channel 0 read as no channel";
+    EXPECT_EQ(memcmp(cap.payloads[0], f0, 8), 0);
+
+    EXPECT_EQ(ecuio_j2534_sur_close(h), ECUIO_OK);
+    EXPECT_EQ(fake_control::disconnects(page), 1u) << "channel 0 left connected";
+    EXPECT_EQ(fake_control::closes(page), 1u) << "device 0 left open";
 }
 
 TEST(J2534SurrogateTest, DeadDllFailsFastAtOpen)
@@ -747,6 +786,48 @@ TEST(J2534SurrogateTest, UnresponsiveChildFailsFastAfterTwoMissedDeadlines)
 
     const std::string log = read_session_log(path);
     EXPECT_NE(log.find("child unresponsive"), std::string::npos) << log;
+}
+
+/* A read the child answers past its deadline: the late reply, which
+ * carries a frame, is drained and dropped before the next request, the
+ * drop is logged with its count, and the next read is paired with its
+ * own reply. The fake's one-shot read stall holds the first ReadMsgs
+ * 1.5 s, past the 50 ms read's 550 ms deadline and well inside the
+ * next transaction's 3 s. */
+TEST(J2534SurrogateTest, LateReadReplyIsDroppedAndLogged)
+{
+    ecuio_j2534_sur_handle_t* h = nullptr;
+    {
+        EnvArm arm("ECUIO_FAKE_READ_DELAY_MS", "1500");
+        ASSERT_EQ(ecuio_j2534_sur_open(fake_dll_path(), &h), ECUIO_OK);
+    }
+    unsigned long channel = 0;
+    ASSERT_EQ(ecuio_j2534_sur_connect_channel(h, 0, 0, &channel), ECUIO_OK);
+    const std::string path = ecuio_j2534_sur_log_path(h);
+
+    const unsigned char late[8] = {0xA1, 1, 2, 3, 4, 5, 6, 7};
+    ASSERT_EQ(ecuio_j2534_sur_inject_test_frame(h, late, 8, 100, 0), ECUIO_OK);
+    ecuio_frame_t f = {};
+    bool got = false;
+    EXPECT_EQ(ecuio_j2534_sur_read_frame(h, 0, &f, 50, &got),
+              ECUIO_ERR_TRANSPORT_HARD_FAILURE);
+    EXPECT_FALSE(got);
+
+    /* This transaction drains the late reply first. */
+    const unsigned char next[8] = {0xB2, 1, 2, 3, 4, 5, 6, 7};
+    ASSERT_EQ(ecuio_j2534_sur_inject_test_frame(h, next, 8, 200, 0), ECUIO_OK);
+    SurCapture cap;
+    ASSERT_TRUE(wait_until(
+        [&]() { drain_sur_frames(h, &cap); return cap.count.load() >= 1; },
+        5000, 50));
+    EXPECT_EQ(cap.count.load(), 1);
+    EXPECT_EQ(memcmp(cap.payloads[0], next, 8), 0)
+        << "the late reply's frame was delivered";
+
+    EXPECT_EQ(ecuio_j2534_sur_close(h), ECUIO_OK);
+    const std::string log = read_session_log(path);
+    EXPECT_NE(log.find("drain_pending: dropped 1 frame(s) from the late reply"),
+              std::string::npos) << log;
 }
 
 /* The session log is opened CREATE_ALWAYS with FILE_SHARE_READ only,

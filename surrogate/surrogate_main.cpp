@@ -144,6 +144,25 @@ static FARPROC resolve_export(HMODULE mod, const char* primary,
     return p;
 }
 
+/* Order check at the trust boundary: an op that passes the device ID
+ * needs a successful OP_OPEN, and one that passes a channel ID a
+ * successful OP_CONNECT, because until then the ID means nothing to the
+ * vendor. The client always opens and connects first, so a refusal here
+ * is a broken or hostile client; it's logged and answered STATUS_FAILED,
+ * like the length checks. */
+static bool refuse_before_open(const char* op, bool needs_channel)
+{
+    if (!g_have_device) {
+        stage("%s: refused, no device open", op);
+        return true;
+    }
+    if (needs_channel && !g_have_channel) {
+        stage("%s: refused, no channel connected", op);
+        return true;
+    }
+    return false;
+}
+
 static int handle_op_open(void)
 {
     stage("OP_OPEN: calling PassThruOpen");
@@ -558,12 +577,18 @@ int wmain(int argc, wchar_t* argv[])
             resp.status = handle_op_open();
             break;
         case ECUIO_SUR_OP_CONNECT:
+            if (refuse_before_open("OP_CONNECT", false)) {
+                break;
+            }
             resp.status = handle_op_connect(req.u.connect.protocol_id,
                                             req.u.connect.flags,
                                             req.u.connect.baud,
                                             &resp.handle_or_channel);
             break;
         case ECUIO_SUR_OP_DISCONNECT:
+            if (refuse_before_open("OP_DISCONNECT", true)) {
+                break;
+            }
             resp.status = handle_op_disconnect(req.u.disconnect.channel_id);
             break;
         case ECUIO_SUR_OP_READ:
@@ -573,7 +598,8 @@ int wmain(int argc, wchar_t* argv[])
             break;
         case ECUIO_SUR_OP_WRITE:
             /* Trust boundary: validate length before memcpy */
-            if (req.u.write.data_len > ECUIO_SUR_MSG_MAX) {
+            if (req.u.write.data_len > ECUIO_SUR_MSG_MAX ||
+                refuse_before_open("OP_WRITE", true)) {
                 resp.status = ECUIO_PT_STATUS_FAILED;
                 break;
             }
@@ -585,8 +611,11 @@ int wmain(int argc, wchar_t* argv[])
                                           &resp.aux);
             break;
         case ECUIO_SUR_OP_IOCTL:
-            /* Trust boundary: validate input length */
-            if (req.u.ioctl.input_len > ECUIO_SUR_IOCTL_DATA_MAX) {
+            /* Trust boundary: validate input length. READ_VBATT is
+             * device-scoped; every other ioctl names a channel. */
+            if (req.u.ioctl.input_len > ECUIO_SUR_IOCTL_DATA_MAX ||
+                refuse_before_open("OP_IOCTL", req.u.ioctl.ioctl_id !=
+                                                   ECUIO_PT_IOCTL_READ_VBATT)) {
                 resp.status = ECUIO_PT_STATUS_FAILED;
                 break;
             }
@@ -600,7 +629,8 @@ int wmain(int argc, wchar_t* argv[])
             /* Trust boundary: validate filter pattern lengths */
             if (req.u.start_filter.mask_len > ECUIO_SUR_FILTER_PATTERN_MAX ||
                 req.u.start_filter.pattern_len > ECUIO_SUR_FILTER_PATTERN_MAX ||
-                req.u.start_filter.fc_len > ECUIO_SUR_FILTER_PATTERN_MAX) {
+                req.u.start_filter.fc_len > ECUIO_SUR_FILTER_PATTERN_MAX ||
+                refuse_before_open("OP_START_FILTER", true)) {
                 resp.status = ECUIO_PT_STATUS_FAILED;
                 break;
             }
@@ -617,6 +647,9 @@ int wmain(int argc, wchar_t* argv[])
                 &resp.handle_or_channel);
             break;
         case ECUIO_SUR_OP_STOP_FILTER:
+            if (refuse_before_open("OP_STOP_FILTER", true)) {
+                break;
+            }
             resp.status = handle_op_stop_filter(
                 req.u.stop_filter.channel_id,
                 req.u.stop_filter.filter_id);
@@ -639,6 +672,9 @@ int wmain(int argc, wchar_t* argv[])
                 resp.status = ECUIO_PT_STATUS_NOT_SUPPORTED;
                 break;
             }
+            if (refuse_before_open("OP_READ_VERSION", false)) {
+                break;
+            }
             char text[ECUIO_SUR_TEXT_FIELDS][256] = {};
             const long rc = g_read_version(g_device_id, text[0], text[1],
                                            text[2]);
@@ -658,7 +694,11 @@ int wmain(int argc, wchar_t* argv[])
             fn_inject inject = reinterpret_cast<fn_inject>(
                 GetProcAddress(g_module, "InjectFrame"));
             if (inject != nullptr) {
-                inject(req.u.inject.data, req.u.inject.len,
+                /* The DLL reads len bytes of data: never more than the
+                 * request carries. */
+                const uint32_t len = (req.u.inject.len > ECUIO_SUR_MSG_MAX)
+                                     ? ECUIO_SUR_MSG_MAX : req.u.inject.len;
+                inject(req.u.inject.data, len,
                        req.u.inject.timestamp, req.u.inject.rx_flags, 0);
                 resp.status = ECUIO_PT_STATUS_NOERROR;
             }

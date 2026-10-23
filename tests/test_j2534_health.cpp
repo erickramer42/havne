@@ -4,7 +4,9 @@
 //          surrogate child. Every case runs on both. Hard and quiet
 //          reads, episode counting, recovery through the continued
 //          request probe, untouched vendor counts, the write latch and
-//          its priority, unmatched frames, backoff growth; and the same
+//          its priority, a write reported with nothing written,
+//          unmatched frames, backoff growth, its end at a clean read
+//          and its restart; and the same
 //          machine against the fake's VX mode (ECUIO_FAKE_VX): a quiet
 //          bus whose empty reads are ERR_BUFFER_EMPTY after their
 //          timeout, answered requests, and the no-ACK bus. TX and
@@ -281,6 +283,39 @@ TEST_P(J2534HealthTest, WriteFailureLatchesRequestFailedAndClears)
     EXPECT_EQ(ec, 1u) << "recovery added an episode";
 }
 
+/* A write the vendor calls a success but reports no message written for
+ * sent nothing, so it's a failed write: one "requests failing" episode,
+ * held while the knob holds, and cleared by the first write that really
+ * goes out. Nothing answers the unsent writes, so without the count the
+ * session would read as a quiet bus instead. */
+TEST_P(J2534HealthTest, ZeroWrittenCountIsAFailedWrite)
+{
+    ASSERT_NO_FATAL_FAILURE(start_session(""));
+
+    ASSERT_NO_FATAL_FAILURE(knob("ECUIO_FAKE_WRITE_ZERO_COUNT", "1"));
+
+    int32_t le = 0;
+    uint32_t ec = 0;
+    EXPECT_TRUE(wait_for_state(session, ECUIO_ERR_REQUEST_FAILED, 5000,
+                               le, ec))
+        << "an unsent write passed as sent (was " << le << ")";
+    EXPECT_EQ(ec, 1u);
+
+    /* Past the ~1.2 s quiet debounce, still failing, no new episode,
+     * and none of those writes reached the bus. */
+    const uint32_t wc0 = fake_control::writes(page);
+    std::this_thread::sleep_for(std::chrono::milliseconds(1500));
+    (void)ecuio_session_get_error_state(session, &le, &ec);
+    EXPECT_EQ(le, ECUIO_ERR_REQUEST_FAILED);
+    EXPECT_EQ(ec, 1u);
+    EXPECT_EQ(fake_control::writes(page), wc0);
+
+    ASSERT_NO_FATAL_FAILURE(knob("ECUIO_FAKE_WRITE_ZERO_COUNT", nullptr));
+    EXPECT_TRUE(wait_for_state(session, ECUIO_OK, 12000, le, ec))
+        << "a sent write never cleared it (was " << le << ")";
+    EXPECT_EQ(ec, 1u) << "recovery added an episode";
+}
+
 /* With writes AND reads failing, the hard read failure outranks
  * requests-failing. Both transitions happen in the first cycle (write,
  * then drain read), so exactly two episodes: one REQUEST_FAILED, one
@@ -368,6 +403,79 @@ TEST_P(J2534HealthTest, BackoffGrowsUnderSustainedHardFailure)
 
     EXPECT_GE(wc1 - wc0, 1u) << "probe writes stopped entirely";
     EXPECT_LE(wc1 - wc0, 8u) << "backoff never grew (reset-to-base shape)";
+}
+
+/* A hard failure that ends on a silent bus: the adapter answers again,
+ * but nothing replies. Its first clean read ends the backoff, so the
+ * quiet debounce counts reads at the request cadence and fires in about
+ * a second, with no new episode, and the probe runs at about 10 writes
+ * a second. Counted one read per backoff interval, the debounce would
+ * take about 26 s. */
+TEST_P(J2534HealthTest, HardFailureEndingInSilenceGoesQuietAtFullCadence)
+{
+    ASSERT_NO_FATAL_FAILURE(start_session(""));
+
+    ASSERT_NO_FATAL_FAILURE(knob("ECUIO_FAKE_READ_STATUS", "7"));
+    int32_t le = 0;
+    uint32_t ec = 0;
+    ASSERT_TRUE(wait_for_state(session, ECUIO_ERR_TRANSPORT_HARD_FAILURE,
+                               5000, le, ec))
+        << "hard failure never reported";
+    ASSERT_EQ(ec, 1u);
+
+    ASSERT_NO_FATAL_FAILURE(knob("ECUIO_FAKE_READ_STATUS", "9"));
+    EXPECT_TRUE(wait_for_state(session, ECUIO_ERR_VEHICLE_TIMEOUT, 5000,
+                               le, ec))
+        << "silence after a hard failure never read as quiet (was " << le
+        << ")";
+    EXPECT_EQ(ec, 1u) << "going quiet added an episode";
+
+    const uint32_t wc0 = fake_control::writes(page);
+    std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+    const uint32_t wc1 = fake_control::writes(page);
+    EXPECT_GE(wc1 - wc0, 6u) << "the probe stayed backed off";
+}
+
+/* A clean read in the middle of a hard failure ends the backoff, but
+ * when the hard reads resume the backoff starts again: about 5 probes in
+ * 1.5 s, against about 15 if a dead adapter were probed at the request
+ * cadence. */
+TEST_P(J2534HealthTest, BackoffRestartsWhenHardReadsResume)
+{
+    ASSERT_NO_FATAL_FAILURE(start_session(""));
+
+    ASSERT_NO_FATAL_FAILURE(knob("ECUIO_FAKE_READ_STATUS", "7"));
+    int32_t le = 0;
+    uint32_t ec = 0;
+    ASSERT_TRUE(wait_for_state(session, ECUIO_ERR_TRANSPORT_HARD_FAILURE,
+                               5000, le, ec))
+        << "hard failure never reported";
+    std::this_thread::sleep_for(std::chrono::milliseconds(800));
+
+    /* A few clean reads, short of the quiet debounce, then dead again.
+     * Each cycle writes, then reads, so three writes after the switch
+     * mean at least two clean reads have run. */
+    ASSERT_NO_FATAL_FAILURE(knob("ECUIO_FAKE_READ_STATUS", "9"));
+    const uint32_t at_switch = fake_control::writes(page);
+    const auto deadline = std::chrono::steady_clock::now() +
+                          std::chrono::seconds(6);
+    while (fake_control::writes(page) < at_switch + 3 &&
+           std::chrono::steady_clock::now() < deadline) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    ASSERT_GE(fake_control::writes(page), at_switch + 3)
+        << "no cycle ran with clean reads";
+    ASSERT_NO_FATAL_FAILURE(knob("ECUIO_FAKE_READ_STATUS", "7"));
+    std::this_thread::sleep_for(std::chrono::milliseconds(200));
+
+    const uint32_t wc0 = fake_control::writes(page);
+    std::this_thread::sleep_for(std::chrono::milliseconds(1500));
+    const uint32_t wc1 = fake_control::writes(page);
+    (void)ecuio_session_get_error_state(session, &le, &ec);
+    EXPECT_EQ(le, ECUIO_ERR_TRANSPORT_HARD_FAILURE);
+    EXPECT_EQ(ec, 1u) << "one outage, one episode";
+    EXPECT_GE(wc1 - wc0, 1u) << "probe writes stopped entirely";
+    EXPECT_LE(wc1 - wc0, 8u) << "a dead adapter was probed at full cadence";
 }
 
 /* ====================================================================

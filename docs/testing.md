@@ -115,6 +115,8 @@ and the next run's screenshots confirmed the fixes the same day.
 | The 8-byte FLOW_CONTROL filter shape (prep #1, `fc_len == mask_len` workaround) is accepted by a real vendor — behaviorally, since the child didn't yet log filter ops. The 4-byte shape that replaced it was accepted on 2026-10-20 (row below). Quiet-bus read loop at <1% CPU, zero spurious frames | BENCH session 2026-10-16, phase 2 |
 | Single-threaded surrogate child ([ADR-0014](adr/0014-single-threaded-surrogate.md)): the whole surrogate and routing suite on the redesigned child, same-arch and cross-arch (x64 test → x86 surrogate → x86 fake) | `J2534SurrogateTest`, `J2534RoutingTest` (2026-10-19, both trees rebuilt: full suite 136/136, cross-arch subset 15/15) |
 | A transaction that times out doesn't put later replies out of step | `J2534SurrogateTest.TimedOutOpDoesNotDesyncNextRequest` |
+| An `OP_READ` answered past its deadline: the next transaction drains the late reply and drops its frame, logged with the count ("drain_pending: dropped 1 frame(s)"), and the next read gets its own reply's frame | `J2534SurrogateTest.LateReadReplyIsDroppedAndLogged` (`ECUIO_FAKE_READ_DELAY_MS`). With the log line removed (checked by hand, 2026-10-23), it failed |
+| Device and channel ID 0 are real IDs in the child: with a fake that hands out 0 for both, a frame reads once connected, and a close with no disconnect first still disconnects channel 0 and closes device 0 | `J2534SurrogateTest.DeviceAndChannelIdZeroAreRealIds` (`ECUIO_FAKE_ZERO_IDS`). With the child's flags replaced by `ID != 0` (checked by hand, 2026-10-23): in the read gate, no frame arrived; at shutdown, neither call was made |
 | Profile registry: string-keyed lookup, null-set-is-success ("raw"), unknown names fail, last-registration wins; registration refuses an invalid set or a malformed name, and reports the validator's result; the built-ins can't be replaced or unregistered; unregister is idempotent and leaves existing sessions on their set | `CoreTest.Profile*` |
 | `mock://` shares the query grammar: only `profile`, and every malformed form (a bare `?`, an empty segment, a missing `=`, an uppercase key) fails at create | `CoreTest.MockUriQueryIsStrict` |
 | Profile selection: `mock://`→mock set, `j2534://`→obd2, `?profile=` override honored, unknown names rejected at session_create before any DLL load | `CoreTest.MockSessionSelectsMockSet` et al., `J2534StreamTest.ProfileOverrideMockSelectsMockSet`, `BridgeTest.RawProfileLeavesSignalModelEmpty` |
@@ -125,9 +127,11 @@ and the next run's screenshots confirmed the fixes the same day.
 | The link-health cases run twice, once in-proc and once through the surrogate (the x64 surrogate with the loader's routing forced; the x86 one in the cross-arch run), driven through the fake's control page; each checks which process opened the fake | `J2534HealthTest`, every case `/InProc` and `/Surrogate`; the surrogate half also cross-arch (2026-10-22) |
 | Link health: a hard read failure records `ECUIO_ERR_TRANSPORT_HARD_FAILURE` with one episode per outage and recovers through the probe write; a quiet bus debounces to `ECUIO_ERR_VEHICLE_TIMEOUT` with no episode | `J2534HealthTest.HardFailureSetsCanonicalErrorAndRecovers`, `.QuietBusDebouncesToVehicleTimeoutWithoutEpisode` |
 | Write failures: a failed write latches `ECUIO_ERR_REQUEST_FAILED` with one episode; empty reads past the quiet debounce don't move it; a successful write alone clears it, with reads held quiet | `J2534HealthTest.WriteFailureLatchesRequestFailedAndClears` (`ECUIO_FAKE_WRITE_STATUS`) |
+| A write the vendor answers `STATUS_NOERROR` with no message written is a failed write: one "requests failing" episode, held past the quiet debounce, cleared by the first write sent | `J2534HealthTest.ZeroWrittenCountIsAFailedWrite` (`ECUIO_FAKE_WRITE_ZERO_COUNT`). With the count ignored (checked by hand, 2026-10-23), both backends failed: the session went quiet instead |
 | A hard read failure outranks a failing write: exactly two episodes (write, then read), and continued failing writes don't downgrade the state | `J2534HealthTest.HardReadFailureOutranksRequestFailed` |
 | A delivered frame that matches no channel ends a hard failure but reads as `ECUIO_ERR_VEHICLE_TIMEOUT`, not `ECUIO_OK`, with no episode, inside the quiet debounce window | `J2534HealthTest.UnmatchedDeliveredFrameGoesQuietNotHealthy` |
 | The backoff grows under a sustained hard failure: at most 8 probe writes in 1.5 s, against ~15 with the old reset-to-base | `J2534HealthTest.BackoffGrowsUnderSustainedHardFailure` |
+| A hard failure that ends on a silent bus reads as quiet within 5 s, with no new episode, and the probe returns to at least 6 writes a second; a few clean reads inside a hard failure end the backoff, and it starts again when the hard reads resume (at most 8 probes in 1.5 s), still one episode | `J2534HealthTest.HardFailureEndingInSilenceGoesQuietAtFullCadence`, `.BackoffRestartsWhenHardReadsResume`. Before the backoff cleared on a quiet read (checked by hand, 2026-10-23), the first failed on both backends: quiet took 26.4 s. Without the restart, the second saw 14 probes |
 | Against the fake's VX mode, on both backends: empty reads that hold their 100 ms and return `ERR_BUFFER_EMPTY` take a passive session quiet in no less than 950 ms (1.42 s measured, as on the bench), with no episode; answered requests keep the link ok with every write's indication dropped; on a no-ACK bus, three writes are accepted, the fourth fails into one "requests failing" episode, no later write is accepted, and close returns within 2 s of a 500 ms blocked write | `J2534HealthTest.VxQuietBusDebouncesOnBufferEmptyReads`, `.VxAnsweredRequestsKeepTheLinkOk`, `.VxNoAckBusAcceptsThreeWritesThenRequestsFail`. With the fake's read hold removed, the quiet case reached quiet in 275–315 ms and failed (checked by hand, 2026-10-22) |
 | Indications are skipped without ending a read, on both backends: on the VX each reply arrives in its own request's cycle, before the next write; a TX indication and a `START_OF_MESSAGE` indication queued ahead of a reply leave exactly one frame, the reply's | `J2534HealthTest.VxReplyArrivesInItsOwnRequestsCycle`, `.IndicationsAheadOfAReplyAreSkipped`. Against the read paths without the skip (checked by hand, 2026-10-22): in-proc, all 10 replies landed after the next request; on both backends the first-frame indication arrived as a second, empty frame |
 | J2534 frame time: the first frame takes the host's time since attach, not the vendor's stamp; later frames the vendor's deltas, across the 32-bit wrap and across a gap of several wraps, which the host's clock counts; a vendor clock that steps back or far ahead falls back to the host's delta and never decreases | `J2534StreamTest.VendorClockAnchorsAtTheHostAndKeepsVendorDeltas`, `.VendorClockCarriesAcrossTheWrap`, `.VendorClockThatStepsFallsBackToTheHost` (session-free); `J2534HealthTest.VendorStampsBecomeSessionTime` (`/InProc`, `/Surrogate`, the surrogate half also cross-arch) and `J2534StreamTest.DirectLoadUriDeliversInjectedFramesExactly` through the worker. With the vendor's stamp passed through (checked by hand, 2026-10-22), all three worker cases failed. In the app under the fake's VX mode, 2026-10-22: Log times from 0 s in about 109 ms steps, against raw stamps near 2679 s |
@@ -221,8 +225,9 @@ rows against the current Home, Settings and Dashboard header.
   (segmented ISO-TP) replies, a vendor read failure, and any other
   vendor's statuses (the VX never returned `ERR_TIMEOUT`, #11).
 - **Link health is covered against the fake.** The tests above drive
-  `ECUIO_FAKE_READ_STATUS`, `ECUIO_FAKE_UNTOUCHED_COUNT_STATUS` and
-  `ECUIO_FAKE_WRITE_STATUS` through the worker on both backends. Not
+  `ECUIO_FAKE_READ_STATUS`, `ECUIO_FAKE_UNTOUCHED_COUNT_STATUS`,
+  `ECUIO_FAKE_WRITE_STATUS` and `ECUIO_FAKE_WRITE_ZERO_COUNT` through
+  the worker on both backends. Not
   covered:
   - a hard read failure from real hardware. Live runs on 2026-10-22
     drove the other states through the surrogate on the VX: requests
@@ -246,9 +251,6 @@ rows against the current Home, Settings and Dashboard header.
   a worker read. Neither models filter gating. A vendor that leaves
   its outputs untouched on error is modelled
   (`ECUIO_FAKE_UNTOUCHED_COUNT_STATUS`).
-- **ID 0 handling is untested.** The child tracks the open device and
-  channel with flags instead of treating ID 0 as "none", but the fake
-  always returns device 1 and channel 0x55.
 - **The fake never segments a reply.** Every reply is one message,
   so a `START_OF_MESSAGE` indication appears only where a test queues
   one by hand (`IndicationsAheadOfAReplyAreSkipped`).
@@ -256,11 +258,10 @@ rows against the current Home, Settings and Dashboard header.
   child must stay alive after a vendor refusal (ADR-0014). Tests check
   the refusal's status, but `sur_close` returns `ECUIO_OK` whether or not
   the child is still alive, so an early exit would go unnoticed.
-- **The client's skew and late-reply paths aren't exercised.** No test
-  child sends a `num_frames` or ioctl `data_len` past the wire limit,
-  and none answers an `OP_READ` late enough for `drain_pending` to
-  drop frames. Reaching either needs a misbehaving child, such as a
-  fault-injection knob in the surrogate.
+- **The client's skew paths aren't exercised.** No test child sends a
+  `num_frames` or ioctl `data_len` past the wire limit. Reaching
+  either needs a misbehaving child, such as a fault-injection knob in
+  the surrogate.
 - **Vendor conformance to J2534-1 v04.04 is known for one vendor.**
   The shared types header is verified against public references, and
   the VX's replies decode, so its struct layout matches. It departs

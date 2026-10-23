@@ -93,7 +93,7 @@ set_tests_properties(c_abi PROPERTIES LABELS "abi")
 # --- Bridge tests: only when the full app (and Qt) is available ---
 if(NOT QTTUNE_BUILD_CORE_ONLY)
 
-    find_package(Qt6 COMPONENTS Core REQUIRED)
+    find_package(Qt6 6.12 COMPONENTS Core REQUIRED)   # app/CMakeLists.txt's minimum
 
     add_executable(test_bridge
         test_bridge.cpp
@@ -136,7 +136,7 @@ if(NOT QTTUNE_BUILD_CORE_ONLY)
     # real bridge. Each qml/tst_*.qml file is a ctest case of its own,
     # QmlTest.<name>, in its own process; offscreen and on the software
     # renderer, so no display or GPU is needed.
-    find_package(Qt6 COMPONENTS QuickTest REQUIRED)
+    find_package(Qt6 6.12 COMPONENTS QuickTest REQUIRED)
 
     add_executable(test_qml test_qml.cpp)
     set_target_properties(test_qml PROPERTIES AUTOMOC ON)
@@ -346,7 +346,7 @@ if(WIN32)
     add_dependencies(test_j2534_surrogate ecuio-j2534-surrogate)
 
     # Deploy the surrogate exe next to the test exe: the client's
-    # build_exe_path() resolves it by walking its own image directory
+    # resolve_exe_path() finds it in its own image directory
     # (same discipline as the baked fake-DLL path — no PATH games).
     add_custom_command(TARGET test_j2534_surrogate POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
