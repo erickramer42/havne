@@ -3,12 +3,14 @@
 //          session info, on both backends. test_j2534_stream: URI parsing,
 //          the vendor clock's unit cases, connect parameters,
 //          filter registration, request framing and routing, header
-//          strip and arbitration_id stamp, scheduler rotation and drain,
-//          ?poll= precedence. test_j2534_health: the link-health
-//          machine (Known Issue #11) on both backends: hard and quiet
-//          reads, untouched counts, the write latch and its priority,
-//          a zero written count, unmatched frames, backoff growth,
-//          its end at a clean read and its restart.
+//          strip and arbitration_id stamp, rotation, ?poll= precedence.
+//          test_j2534_health, on both backends: the request engine's
+//          pacing (the floor, the wait, negative and pending replies,
+//          two channels at once), the drain in passive mode, and the
+//          link-health machine: hard and quiet reads, untouched counts,
+//          the write latch, its priority and its step-down, a zero
+//          written count, unmatched frames, backoff growth, its end at
+//          a clean read and its restart.
 // CI: non-Windows builds a linking stub; core.cpp routes j2534://
 //     only on _WIN32, so the stub is unreachable there
 
@@ -16,7 +18,7 @@
 #include "ecuio/internal.h"
 #include "session.h"
 #include "ecuio/j2534.h"
-#include "pid_scheduler.h"
+#include "request_engine.h"
 #include "j2534_backoff.h"
 #include "j2534_clock.h"
 #include "uri_query.h"
@@ -37,25 +39,21 @@
 
 namespace {
 
-constexpr uint32_t J2534_PASSIVE_SLEEP_MS   = 20;    /* passive mode's
-                                                       * sleep after a read */
-constexpr uint32_t J2534_READ_TIMEOUT_MS    = 100;
-constexpr uint32_t J2534_REQUEST_CYCLE_MS   = 100;   /* request cadence:
-                                                       * scheduler and ?poll= */
+/* Passive mode reads with this timeout. An empty read waits it out even
+ * from a vendor that returns at once, so a quiet run takes the same
+ * time on every adapter. */
+constexpr uint32_t J2534_IDLE_READ_TIMEOUT_MS = 100;
 
-/* Scheduler mode: one request per 100 ms cycle (rotating PIDs), then
- * a drain of at most DRAIN_BUDGET reads, so the worker never exceeds
- * 100 reads/s whatever the bus load. Dropped frames count against the
- * budget too: it bounds loop time, not delivery. Normally there is one
- * response per request, so each of a set's N PIDs refreshes every
- * N × 100 ms. The drain timeout is short because ReadMsgs blocks for the
- * whole timeout on an empty queue; 20 ms leaves room for a slow ECU
- * without spending the cycle waiting. The first empty read ends the
- * drain. Both values are BENCH candidates. */
-constexpr uint32_t J2534_DRAIN_BUDGET          = 10;
-constexpr uint32_t J2534_DRAIN_READ_TIMEOUT_MS  = 20;
+/* With requests to serve, no read holds longer than this. The VX holds
+ * every read for its whole timeout unless the batch fills, and the
+ * surrogate asks for 16 messages, so a longer read would sit on a reply
+ * that came back in 4 ms until its timeout ended
+ * (docs/bench-sessions/2026-10-22.md). A reply is seen within one slice
+ * of arriving. */
+constexpr uint32_t J2534_READ_SLICE_MS = 10;
 
-/* The failure backoff's constants and step are in j2534_backoff.h. */
+/* The request engine's timing is in request_engine.h, the failure
+ * backoff's in j2534_backoff.h. */
 
 /* On ISO 15765 channels J2534 carries the CAN ID in-band as 4
  * big-endian bytes, and the filter mask, pattern and flow-control
@@ -71,22 +69,25 @@ constexpr uint32_t J2534_TX_ID_DEFAULT = ECUIO_OBD2_TESTER_ARB_ID;   /* shared
                                        * obd2 set's own declaration */
 constexpr uint32_t J2534_CAN_ID_MAX     = 0x1FFFFFFFu;   /* 29-bit */
 constexpr uint32_t J2534_PID_MAX        = 0xFFu;
-/* Every drain ends on an empty read, which a conforming vendor reports
- * as ERR_TIMEOUT, so one timeout means nothing. "Not responding" is
- * this many consecutive empty or timed-out reads (counted per read;
- * about 1 s in scheduler mode). */
-constexpr uint32_t J2534_HEALTH_QUIET_CYCLES = 10;
+/* "Not responding" is this many in a row: requests whose wait ran out,
+ * in the request modes; reads that brought nothing from an ECU we talk
+ * to, in passive mode. About a second either way. One empty read means
+ * nothing: with requests, most reads between two of them are empty. */
+constexpr uint32_t J2534_HEALTH_QUIET_RUN = 10;
 
 /* A read's outcome. "matched" (stripped and dispatched to one of our
  * channels) is kept apart from "delivered but unmatched" (the adapter
- * is reading the bus, but the frame isn't a reply to us), because only
- * a matched frame proves the link works end to end. An unmatched one
- * clears hard failure and the backoff but reads as VEHICLE_TIMEOUT,
- * not OK, and leaves the quiet count as it is. */
+ * is reading the bus, but the frame isn't from an ECU we talk to),
+ * because only a matched frame proves the link works end to end. A
+ * matched frame also carries its channel and the start of its payload,
+ * for the engine to correlate. */
 struct read_outcome {
-    ecuio_status_t status;
-    bool got;
-    bool matched;
+    ecuio_status_t status = ECUIO_OK;
+    bool got = false;
+    bool matched = false;
+    uint32_t chan = 0;      /* the channel it matched */
+    uint16_t len = 0;       /* its payload's length, the CAN ID stripped */
+    uint8_t head[3] = {};   /* the payload's first bytes */
 };
 
 void pack_be32(uint8_t* out, uint32_t v)
@@ -95,19 +96,6 @@ void pack_be32(uint8_t* out, uint32_t v)
     out[1] = static_cast<uint8_t>(v >> 16);
     out[2] = static_cast<uint8_t>(v >> 8);
     out[3] = static_cast<uint8_t>(v);
-}
-
-/* Mode-01 request on an ISO 15765 channel: [4-byte tx ID][01][PID],
- * 6 bytes, sent with ISO15765_FRAME_PAD. The adapter adds the ISO-TP
- * PCI byte and pads the CAN frame; ISO 15765-4 has no data checksum.
- * Verified: Opus IVS (the RPM request is [ID][01][0C], DataSize 6) and
- * Quantex PassThruWriteMsgs docs. Still to confirm on a real adapter:
- * that it honours FRAME_PAD. */
-void build_mode01_request(uint8_t out[6], uint32_t tx_id, uint32_t pid)
-{
-    pack_be32(out, tx_id);
-    out[4] = 0x01;   /* Mode 01 */
-    out[5] = static_cast<uint8_t>(pid);
 }
 
 /* One resolved receive/transmit channel. rx_id doubles as the
@@ -126,27 +114,20 @@ struct ecuio_j2534_transport {
     ecuio_session_t* session = nullptr;
     ecuio_j2534_handle_t* handle = nullptr;
     unsigned long channel = 0;
-    /*   has_poll     a ?poll= URI: a single-PID Mode-01 request loop
-     *                for poll_pid, which may be 0x00 (the supported-
-     *                PIDs bitmap), hence the presence flag. Outranks
-     *                the set's rotation: a ?poll= URI never builds the
-     *                set scheduler, so "just this PID" means what it
-     *                says. Needs a channel to receive on — ?filter=
-     *                or the profile's own (enforced at attach).
-     *   chans        resolved channel table. Derived from the
+    /*   chans        resolved channel table. Derived from the
      *                profile's declared channels at attach, with
      *                ?filter=/?txid= as overrides. ?filter= wins
      *                outright (single-channel shorthand); ?txid=
      *                alone rewrites every derived tx. Bounded by
      *                ECUIO_MAX_CHANNELS; each entry owns its filter
-     *                id and CAN_29BIT flags. Frozen pre-thread. */
-    bool has_poll = false;
-    uint32_t poll_pid = 0;
+     *                id and CAN_29BIT flags. Frozen pre-thread.
+     *   engine       the requests and their pacing (request_engine.h):
+     *                the set's rotation, or the one ?poll= request,
+     *                which outranks it; empty for passive receive.
+     *                Built at attach, the worker's alone after. */
     j2534_channel chans[ECUIO_MAX_CHANNELS] = {};
     uint32_t chan_count = 0;
-    const ecuio_signal_set_t* set = nullptr; /* frozen at attach;
-                                             * worker routes PID->tx */
-    ecuio_pid_scheduler sched;
+    ecuio_request_engine engine;
     /* Frame time (j2534_clock.h): the host's at the first frame, counted
      * from epoch, the end of attach; the vendor's deltas after that.
      * Worker-only, through pump_one. */
@@ -176,34 +157,21 @@ struct j2534_uri_params {
     unsigned long poll_pid = 0;  /* valid when has_poll; 0x00 allowed */
 };
 
-/* PID -> def message_id: a Mode-01 def names its ECU via message_id
- * (= the channel's rx_id). ecuio_mode01_pid is the test the scheduler
- * enrolls by, so a request goes where its PID was enrolled from.
- * O(set->count) per request — a few dozen defs at most; this
- * deliberately keeps pid_scheduler.h per-PID-rx-free so the scheduler
- * stays profile-agnostic. */
-uint32_t rx_for_pid(const ecuio_signal_set_t* set, uint8_t pid)
+/* The channel ?poll='s request goes to, by the rule the set's rotation
+ * follows (request_engine.h): that of a def whose value comes back in
+ * its reply, else channel 0. */
+uint32_t poll_channel(const ecuio_signal_set_t* set, uint8_t pid,
+                      const uint32_t* rx_ids, uint32_t rx_count)
 {
-    if (set == nullptr) {
+    if (set == nullptr || set->defs == nullptr) {
         return 0;
     }
     for (uint32_t i = 0; i < set->count; ++i) {
-        const ecuio_signal_def_t* d = &set->defs[i];
-        uint8_t def_pid = 0;
-        if (ecuio_mode01_pid(d, &def_pid) && def_pid == pid) {
-            return d->message_id;
-        }
-    }
-    return 0;   /* no Mode-01 def for this PID — raw/poll territory */
-}
-
-/* Channel serving a receive id; falls back to channel 0 (single-
- * channel sets always match on the first iteration anyway). */
-uint32_t channel_index_for_rx(const ecuio_j2534_transport* t, uint32_t rx)
-{
-    for (uint32_t i = 0; i < t->chan_count; ++i) {
-        if (t->chans[i].rx_id == rx) {
-            return i;
+        uint8_t req[3] = {};
+        uint8_t len = 0;
+        if (ecuio_engine_request_for_def(&set->defs[i], req, &len) &&
+            len == 2 && req[0] == 0x01 && req[1] == pid) {
+            return ecuio_engine_channel_for(&set->defs[i], rx_ids, rx_count);
         }
     }
     return 0;
@@ -262,14 +230,15 @@ void resolve_channels(ecuio_j2534_transport* t,
  * clock, so the next delta is measured from the latest stamp. */
 read_outcome pump_one(ecuio_j2534_transport* t, uint32_t timeout_ms)
 {
+    read_outcome o;
     bool got = false;
     ecuio_frame_t frame{};
-    ecuio_status_t st = ecuio_j2534_read_frame(t->handle, t->channel,
-                                               &frame, timeout_ms,
-                                               &got);
-    if (st != ECUIO_OK || !got) {
-        return {st, false, false};   /* no match if no frame */
+    o.status = ecuio_j2534_read_frame(t->handle, t->channel, &frame,
+                                      timeout_ms, &got);
+    if (o.status != ECUIO_OK || !got) {
+        return o;   /* no match if no frame */
     }
+    o.got = true;
     /* Both backends deliver the vendor's 32-bit stamp as it came. */
     const uint64_t host_us = static_cast<uint64_t>(
         std::chrono::duration_cast<std::chrono::microseconds>(
@@ -281,7 +250,8 @@ read_outcome pump_one(ecuio_j2534_transport* t, uint32_t timeout_ms)
         ecuio_session_dispatch_callbacks(t->session, &frame);
         /* no channels — verbatim, id 0 (raw passive) counts as matched
          * since we explicitly requested verbatim delivery. */
-        return {ECUIO_OK, true, true};
+        o.matched = true;
+        return o;
     }
 
     if (frame.data_length >= J2534_ADDR_LEN) {
@@ -297,102 +267,114 @@ read_outcome pump_one(ecuio_j2534_transport* t, uint32_t timeout_ms)
                     frame.data_length - J2534_ADDR_LEN);
                 memmove(frame.data, frame.data + J2534_ADDR_LEN, n);
                 frame.data_length = n;
+                o.matched = true;
+                o.chan = i;
+                o.len = n;
+                memcpy(o.head, frame.data, (n < sizeof(o.head)) ? n
+                                                                : sizeof(o.head));
                 ecuio_session_dispatch_callbacks(t->session, &frame);
-                return {ECUIO_OK, true, true};    /* matched */
+                return o;
             }
         }
-        /* no match: a frame for another ID got past the adapter's
-         * filter. Dropped, but it still proves the adapter is reading */
-        return {ECUIO_OK, true, false};
     }
-    return {ECUIO_OK, true, false};
+    /* no match: a frame for another ID got past the adapter's filter.
+     * Dropped, but it still proves the adapter is reading */
+    return o;
 }
 
-/* Read-side link health (Known Issue #11; full table in docs/j2534.md).
- * Session atomics are written only on transitions; health, backoff_ms
- * and quiet_runs are worker-local. First match wins:
+/* Link health (the full table is in docs/j2534.md), worker-local: the
+ * session's atomics change only on transitions. */
+struct link_health {
+    int32_t state = ECUIO_OK;
+    bool write_failed = false;   /* latched by a failed write, cleared
+                                  * only by a sent one */
+    uint32_t backoff_ms = 0;     /* 0 = the normal cadence */
+    uint32_t quiet_runs = 0;
+};
+
+void set_state(ecuio_j2534_transport* t, link_health& h, int32_t state)
+{
+    if (h.state != state) {
+        t->session->last_error.store(state);
+        h.state = state;
+    }
+}
+
+/* One more sign of nothing to hear: after J2534_HEALTH_QUIET_RUN in a
+ * row, VEHICLE_TIMEOUT, with no episode. */
+void count_quiet(ecuio_j2534_transport* t, link_health& h)
+{
+    if (++h.quiet_runs >= J2534_HEALTH_QUIET_RUN) {
+        set_state(t, h, ECUIO_ERR_VEHICLE_TIMEOUT);
+    }
+}
+
+/* Read-side link health. First match wins:
  *   hard read failure  -> TRANSPORT_HARD_FAILURE, one episode, backoff
  *                         (restarted if a clean read had ended it)
- *   write latch set    -> no change (REQUEST_FAILED belongs to writes)
+ *   write latch set    -> a hard failure steps down to REQUEST_FAILED,
+ *                         with no new episode: the adapter reads again,
+ *                         so what fails is the writes. Otherwise no
+ *                         change; the backoff stays the writes'
  *   matched frame      -> OK, backoff and quiet count cleared
- *   unmatched frame    -> VEHICLE_TIMEOUT at once, backoff cleared
- *   quiet read         -> backoff cleared; after
- *                         J2534_HEALTH_QUIET_CYCLES in a row,
- *                         VEHICLE_TIMEOUT
- * Every read past the first two rows means the adapter answered, so it
- * ends the backoff. */
-void update_health(ecuio_j2534_transport* t, int32_t& health,
-                   uint32_t& backoff_ms, uint32_t& quiet_runs,
-                   bool write_latch, ecuio_status_t st,
-                   bool got, bool matched)
+ *   anything else      -> backoff cleared; in passive mode
+ *                         (reads_count), one more quiet read
+ * In the request modes the quiet count is the requests' own
+ * (request_timed_out), and the empty reads between two requests mean
+ * nothing. A frame for no channel of ours answers nothing, so it moves
+ * no state; it only shows the adapter reads, which ends the backoff. */
+void update_health(ecuio_j2534_transport* t, link_health& h,
+                   const read_outcome& o, bool reads_count)
 {
-    /* Ordering: a hard READ failure outranks everything, including a
-     * latched write failure, so it's evaluated FIRST. pump_one
-     * guarantees got implies st == ECUIO_OK, so any status other than
-     * ECUIO_OK and the vehicle-timeout translation is hard. */
-    if (st != ECUIO_OK && st != ECUIO_ERR_VEHICLE_TIMEOUT) {
-        if (health != ECUIO_ERR_TRANSPORT_HARD_FAILURE) {
-            t->session->last_error.store(ECUIO_ERR_TRANSPORT_HARD_FAILURE);
-            health = ECUIO_ERR_TRANSPORT_HARD_FAILURE;
+    /* pump_one guarantees got implies ECUIO_OK, so any status other
+     * than ECUIO_OK and the vehicle-timeout translation is hard. */
+    if (o.status != ECUIO_OK && o.status != ECUIO_ERR_VEHICLE_TIMEOUT) {
+        if (h.state != ECUIO_ERR_TRANSPORT_HARD_FAILURE) {
+            set_state(t, h, ECUIO_ERR_TRANSPORT_HARD_FAILURE);
             t->session->error_count.fetch_add(1);
-            backoff_ms = J2534_BACKOFF_BASE_MS;
-        } else if (backoff_ms == 0) {
+            h.backoff_ms = J2534_BACKOFF_BASE_MS;
+        } else if (h.backoff_ms == 0) {
             /* A clean read ended the backoff, and the adapter is
              * failing again: back off from the base, still one episode. */
-            backoff_ms = J2534_BACKOFF_BASE_MS;
+            h.backoff_ms = J2534_BACKOFF_BASE_MS;
         }
-        quiet_runs = 0;
+        h.quiet_runs = 0;
         return;
     }
 
-    /* Latched write failure: good, quiet and unmatched reads must not
-     * move health, because REQUEST_FAILED clears only on a
-     * successful write (handle_write_result). Hard failures already
-     * returned above, so the latch cannot suppress them. */
-    if (write_latch) {
-        return;
-    }
-
-    /* Remaining statuses are ECUIO_OK with/without a frame, or
-     * ECUIO_ERR_VEHICLE_TIMEOUT (never with a frame, per pump_one). */
-    if (got) {
-        if (matched) {
-            /* Matched response: full recovery */
-            if (health != ECUIO_OK) {
-                t->session->last_error.store(ECUIO_OK);
-                health = ECUIO_OK;
-            }
-            backoff_ms = 0;
-            quiet_runs = 0;
-        } else {
-            /* Delivered but unmatched: the adapter read the bus, so
-             * hard failure and backoff clear — but this
-             * is not a response to us: transition to quiet at once
-             * (no debounce), quiet_runs left as it is, no episode. */
-            if (health != ECUIO_ERR_VEHICLE_TIMEOUT) {
-                t->session->last_error.store(ECUIO_ERR_VEHICLE_TIMEOUT);
-                health = ECUIO_ERR_VEHICLE_TIMEOUT;
-            }
-            backoff_ms = 0;
+    if (h.write_failed) {
+        if (h.state == ECUIO_ERR_TRANSPORT_HARD_FAILURE) {
+            set_state(t, h, ECUIO_ERR_REQUEST_FAILED);
         }
         return;
     }
 
-    /* Quiet: an empty NOERROR read and an ERR_TIMEOUT read mean the
-     * same thing — the adapter answered with nothing. One debounce
-     * covers both. That matters on the VX, which answers every empty
-     * read with NOERROR. The backoff ends at the first one, so after a
-     * hard failure the debounce counts reads at the request cadence;
-     * one read per backoff interval would take about 26 s to reach
-     * quiet. */
-    backoff_ms = 0;
-    ++quiet_runs;
-    if (quiet_runs < J2534_HEALTH_QUIET_CYCLES) {
+    if (o.got && o.matched) {
+        set_state(t, h, ECUIO_OK);
+        h.backoff_ms = 0;
+        h.quiet_runs = 0;
         return;
     }
-    if (health != ECUIO_ERR_VEHICLE_TIMEOUT) {
-        t->session->last_error.store(ECUIO_ERR_VEHICLE_TIMEOUT);
-        health = ECUIO_ERR_VEHICLE_TIMEOUT;
+
+    /* The adapter answered: an empty read, ERR_TIMEOUT (the same thing:
+     * it had nothing; the VX answers every empty read ERR_BUFFER_EMPTY,
+     * which the read paths map to an empty ECUIO_OK), or a frame for
+     * another ID. Ending the backoff here keeps a hard failure that
+     * ends in silence from counting its quiet run one backoff interval
+     * at a time, about 26 s. */
+    h.backoff_ms = 0;
+    if (reads_count) {
+        count_quiet(t, h);
+    }
+}
+
+/* A request's wait ran out with no answer, the request modes' quiet
+ * unit. While the write latch is set the state is the writes', so it
+ * doesn't count. */
+void request_timed_out(ecuio_j2534_transport* t, link_health& h)
+{
+    if (!h.write_failed) {
+        count_quiet(t, h);
     }
 }
 
@@ -403,57 +385,60 @@ void update_health(ecuio_j2534_transport* t, int32_t& health,
  * successful write clears it at once, since an accepted write proves
  * requests flow. A hard READ failure outranks it; quiet reads can't
  * downgrade it. */
-void handle_write_result(ecuio_j2534_transport* t,
-                         int32_t& health, uint32_t& backoff_ms,
-                         bool& write_failed, bool sent)
+void handle_write_result(ecuio_j2534_transport* t, link_health& h,
+                         bool sent)
 {
     if (sent) {
-        if (write_failed) {
-            write_failed = false;
-            if (health == ECUIO_ERR_REQUEST_FAILED) {
-                t->session->last_error.store(ECUIO_OK);
-                health = ECUIO_OK;
-                backoff_ms = 0;
+        if (h.write_failed) {
+            h.write_failed = false;
+            if (h.state == ECUIO_ERR_REQUEST_FAILED) {
+                set_state(t, h, ECUIO_OK);
+                h.backoff_ms = 0;
             }
         }
         return;
     }
 
-    write_failed = true;
-    if (health == ECUIO_ERR_TRANSPORT_HARD_FAILURE) {
+    h.write_failed = true;
+    if (h.state == ECUIO_ERR_TRANSPORT_HARD_FAILURE) {
         return;  /* hard read failure outranks, don't change state */
     }
-    if (health != ECUIO_ERR_REQUEST_FAILED) {
+    if (h.state != ECUIO_ERR_REQUEST_FAILED) {
         /* Transition INTO requests-failing: ONE episode, backoff at base */
-        t->session->last_error.store(ECUIO_ERR_REQUEST_FAILED);
-        health = ECUIO_ERR_REQUEST_FAILED;
+        set_state(t, h, ECUIO_ERR_REQUEST_FAILED);
         t->session->error_count.fetch_add(1);
-        backoff_ms = J2534_BACKOFF_BASE_MS;
+        h.backoff_ms = J2534_BACKOFF_BASE_MS;
     }
     /* Already REQUEST_FAILED: leave backoff alone, it doubles at sleep site */
 }
 
-/* One Mode-01 request for pid, on the channel its def names, then the
- * write side of link health. The vendor's written count is judged with
- * the status: STATUS_NOERROR with nothing written is a vendor reporting
- * success for a message it never sent, so it's a failed write
- * (internal.h's contract for ecuio_j2534_write_frame). */
-void send_request(ecuio_j2534_transport* t, uint8_t pid, int32_t& health,
-                  uint32_t& backoff_ms, bool& write_failed)
+/* Writes request r to its channel's tx ID: [4-byte tx ID][service][key],
+ * sent with ISO15765_FRAME_PAD, so a Service 01 request is 6 bytes and a
+ * Service 0x22 one 7. The adapter adds the ISO-TP PCI byte and pads the
+ * CAN frame; ISO 15765-4 has no data checksum. Verified: Opus IVS (the
+ * RPM request is [ID][01][0C], DataSize 6), Quantex PassThruWriteMsgs
+ * docs, and the first vehicle
+ * (docs/bench-sessions/2026-10-22-vehicle.md). Then the write side of
+ * link health. The vendor's written count is judged with the status:
+ * STATUS_NOERROR with nothing written is a vendor reporting success for
+ * a message it never sent, so it's a failed write (internal.h's
+ * contract for ecuio_j2534_write_frame). */
+bool send_request(ecuio_j2534_transport* t, const ecuio_request& r,
+                  link_health& h)
 {
-    const uint32_t ci = channel_index_for_rx(t, rx_for_pid(t->set, pid));
-    uint8_t req[6];
-    build_mode01_request(req, t->chans[ci].tx_id, pid);
+    const j2534_channel& ch = t->chans[r.channel];
+    uint8_t msg[J2534_ADDR_LEN + sizeof(r.bytes)];
+    pack_be32(msg, ch.tx_id);
+    memcpy(msg + J2534_ADDR_LEN, r.bytes, r.len);
     uint32_t written = 0;
     const ecuio_status_t wst = ecuio_j2534_write_frame(
-        t->handle, t->channel, req, sizeof(req),
-        t->chans[ci].addr_flags |   /* same channel as tx_id, so a
-                                     * 29-bit channel gets its
-                                     * CAN_29BIT_ID flag */
+        t->handle, t->channel, msg, J2534_ADDR_LEN + r.len,
+        ch.addr_flags |   /* a 29-bit channel's CAN_29BIT_ID */
             ECUIO_PT_TX_ISO15765_FRAME_PAD,
         0, &written);
-    handle_write_result(t, health, backoff_ms, write_failed,
-                        wst == ECUIO_OK && written >= 1);
+    const bool sent = (wst == ECUIO_OK && written >= 1);
+    handle_write_result(t, h, sent);
+    return sent;
 }
 
 /* Backoff-aware sleep, abortable within 20 ms of a stop request —
@@ -477,112 +462,89 @@ bool backoff_sleep(ecuio_j2534_transport* t, uint32_t ms)
     return true;
 }
 
+/* The engine's clock: microseconds since attach. */
+int64_t engine_now_us(const ecuio_j2534_transport* t)
+{
+    return static_cast<int64_t>(
+        std::chrono::duration_cast<std::chrono::microseconds>(
+            std::chrono::steady_clock::now() - t->epoch).count());
+}
+
+/* A read's timeout while there are requests to serve: until the
+ * engine's next event, within 1 ms and the slice. Never 0, which asks a
+ * vendor for a read that doesn't wait at all. */
+uint32_t request_read_timeout_ms(const ecuio_j2534_transport* t)
+{
+    const int64_t slice_us = int64_t{J2534_READ_SLICE_MS} * 1000;
+    int64_t us = ecuio_engine_next_event_us(&t->engine, engine_now_us(t));
+    if (us > slice_us) {
+        us = slice_us;
+    }
+    const int64_t ms = (us + 999) / 1000;
+    return (ms < 1) ? 1u : static_cast<uint32_t>(ms);
+}
+
 /* Worker entrypoint — mirrors mock_worker's discipline: impl-owned
  * state, dispatch through the session snapshot path, stop via atom.
  *
- * Three modes, fixed before the thread starts:
- *   SCHEDULER (ADR-0013): sched.count > 0. Per 100 ms cycle: next PID
- *     -> Mode-01 request -> write -> drain up to J2534_DRAIN_BUDGET
- *     frames (short timeout, stop at first empty) -> sleep the cycle
- *     remainder against an absolute deadline, so drain cost does not
- *     drift the cadence.
- *   POLL: has_poll. One request, one read (100 ms timeout), then
- *     a 100 ms sleep; same request shape as the scheduler.
- *   PASSIVE: one read (100 ms timeout) then a 20 ms sleep; no
- *     requests.
- * Both request modes keep writing while hard-failed or request-failed:
- * the request is the recovery probe, and replies only follow writes.
+ * One loop serves every mode (ADR-0015 §1). With requests (the set's
+ * rotation, or ?poll='s one), each pass ends the waits that ran out,
+ * sends each idle channel's next request once its floor has passed,
+ * then reads once, for at most the slice, and gives a matched frame to
+ * the engine, so the next request goes out when the reply is in.
+ * Passive (no requests) only reads. A read that brought a frame is
+ * followed by the next at once, so every mode drains what has arrived;
+ * an empty one waits out its timeout.
  *
- * A write failure latches REQUEST_FAILED; only a successful write
- * clears it — reads cannot, and a hard read failure outranks it
- * (update_health evaluates hard first). */
+ * Requests keep going out while the link is hard-failed or requests are
+ * failing, because each is the recovery probe and replies only follow
+ * writes; the backoff then spaces the passes. Distorting the cadence
+ * while dead is the point: retrying a dead device at full rate is not. */
 void j2534_worker(ecuio_j2534_transport* t)
 {
-    const bool sched_mode = !t->has_poll && (t->sched.count > 0);
-
-    int32_t health = ECUIO_OK;
-    bool write_failed = false;   /* latched and cleared only by
-                                  * handle_write_result */
-    uint32_t backoff_ms = 0;   /* 0 = healthy cadence */
-    uint32_t quiet_runs = 0;
+    ecuio_request_engine& e = t->engine;
+    const bool requests = e.count > 0;
+    link_health h;
 
     while (!t->stop_requested.load()) {
-        const auto cycle_start = std::chrono::steady_clock::now();
-
-        if (sched_mode) {
-            /* The request doubles as the recovery probe, so it is sent
-             * even while hard-failed: replies only follow writes.
-             * Backoff stretches the cycle, which slows the probing. A
-             * failed write latches ECUIO_ERR_REQUEST_FAILED through
-             * handle_write_result; it is never a hard failure. */
-            uint8_t pid = 0;
-            (void)ecuio_sched_next(&t->sched, &pid);
-            send_request(t, pid, health, backoff_ms, write_failed);
-
-            /* Drain: health comes from these reads. The first empty or
-             * failing read ends the drain; the budget bounds the rest. */
-            for (uint32_t i = 0; i < J2534_DRAIN_BUDGET; ++i) {
-                read_outcome o = pump_one(t,
-                                          J2534_DRAIN_READ_TIMEOUT_MS);
-                update_health(t, health, backoff_ms, quiet_runs, write_failed,
-                              o.status, o.got, o.matched);
-                if (!o.got) {
-                    break;
+        if (requests) {
+            const int64_t now = engine_now_us(t);
+            for (uint32_t c = 0; c < e.chan_count; ++c) {
+                if (ecuio_engine_expire(&e, c, now)) {
+                    request_timed_out(t, h);
+                }
+                const int32_t r = ecuio_engine_due(&e, c, now);
+                if (r >= 0) {
+                    const bool sent = send_request(t, e.requests[r], h);
+                    ecuio_engine_sent(&e, c, r, sent, engine_now_us(t));
                 }
             }
+        }
 
-            /* Sleep: normal = cycle remainder vs absolute deadline.
-             * Hard failure = backoff stretch, doubling after each
-             * slept interval, capped. Cadence distortion while dead
-             * is the POINT — retrying a dead device at 10 Hz is not. */
-            if (backoff_sleep(t, backoff_ms) ) {
+        const uint32_t timeout_ms = requests ? request_read_timeout_ms(t)
+                                             : J2534_IDLE_READ_TIMEOUT_MS;
+        const auto read_start = std::chrono::steady_clock::now();
+        const read_outcome o = pump_one(t, timeout_ms);
+        if (requests && o.matched) {
+            (void)ecuio_engine_on_frame(&e, o.chan, o.head, o.len,
+                                        engine_now_us(t), nullptr);
+        }
+        update_health(t, h, o, !requests);
+
+        if (h.backoff_ms > 0) {
+            if (backoff_sleep(t, h.backoff_ms)) {
                 break;
             }
-            if (backoff_ms > 0) {
-                backoff_ms = j2534_backoff_next(backoff_ms);
-            } else {
-                const auto target = cycle_start +
-                    std::chrono::milliseconds(J2534_REQUEST_CYCLE_MS);
-                const auto now = std::chrono::steady_clock::now();
-                if (target > now) {
-                    std::this_thread::sleep_until(target);
-                }
-            }
-        } else if (t->has_poll) {
-            /* POLL: write, then read this request's response. The
-             * write is always sent, as in scheduler mode, and a failed
-             * write feeds the health machine the same way. */
-            send_request(t, static_cast<uint8_t>(t->poll_pid), health,
-                         backoff_ms, write_failed);
-
-            read_outcome o = pump_one(t,
-                                      J2534_READ_TIMEOUT_MS);
-            update_health(t, health, backoff_ms, quiet_runs, write_failed,
-                          o.status, o.got, o.matched);
-
-            if (backoff_sleep(t, backoff_ms)) {
+            h.backoff_ms = j2534_backoff_next(h.backoff_ms);
+        } else if (!o.got) {
+            /* An empty read waits out its timeout, even from a vendor
+             * that returns at once, so the loop never spins. */
+            const auto waited = std::chrono::duration_cast<
+                std::chrono::milliseconds>(
+                    std::chrono::steady_clock::now() - read_start).count();
+            if (waited < timeout_ms &&
+                backoff_sleep(t, timeout_ms - static_cast<uint32_t>(waited))) {
                 break;
-            }
-            if (backoff_ms > 0) {
-                backoff_ms = j2534_backoff_next(backoff_ms);
-            } else {
-                std::this_thread::sleep_for(std::chrono::milliseconds(
-                    J2534_REQUEST_CYCLE_MS));
-            }
-        } else {
-            /* PASSIVE: 100 ms read, then a 20 ms sleep. */
-            read_outcome o = pump_one(t, J2534_READ_TIMEOUT_MS);
-            update_health(t, health, backoff_ms, quiet_runs, write_failed,
-                          o.status, o.got, o.matched);
-
-            if (backoff_sleep(t, backoff_ms)) {
-                break;
-            }
-            if (backoff_ms > 0) {
-                backoff_ms = j2534_backoff_next(backoff_ms);
-            } else {
-                std::this_thread::sleep_for(std::chrono::milliseconds(
-                    J2534_PASSIVE_SLEEP_MS));
             }
         }
     }
@@ -967,7 +929,7 @@ ecuio_status_t j2534_attach(ecuio_session_t* session, const char* uri)
         return st;
     }
 
-    /* Channels and scheduler are resolved before the device opens.
+    /* Channels and requests are resolved before the device opens.
      * core.cpp installs the profile's set before calling attach. */
     const ecuio_signal_set_t* set = ecuio_session_signal_set(session);
 
@@ -975,28 +937,39 @@ ecuio_status_t j2534_attach(ecuio_session_t* session, const char* uri)
     if (t == nullptr) {
         return ECUIO_ERR_OUT_OF_MEMORY;
     }
-    t->set = set;
     resolve_channels(t, set, params);
 
-    /* Request mode, fixed before the thread starts:
-     *   ?poll=    -> single-PID loop; the set's rotation is NOT built,
-     *                so the PID in the URI is the only one requested
-     *   set       -> the set's full rotation
-     *   neither   -> passive receive
-     * The URI outranks the profile: building the scheduler anyway
-     * would make the worker's scheduler branch win and silently drop
-     * the ?poll= PID. */
-    const bool sched_mode = !params.has_poll
-                            && ecuio_sched_from_set(&t->sched, set);
+    /* Requests, fixed before the thread starts:
+     *   ?poll=    -> that one Service 01 request; the set's rotation
+     *                isn't built, so the PID in the URI is the only one
+     *                asked for. It may be 0x00 (the supported-PIDs
+     *                bitmap), hence the presence flag
+     *   set       -> the set's rotation (request_engine.h), which
+     *                registration kept within the table
+     *   neither   -> passive receive */
+    uint32_t rx_ids[ECUIO_MAX_CHANNELS] = {};
+    for (uint32_t i = 0; i < t->chan_count; ++i) {
+        rx_ids[i] = t->chans[i].rx_id;
+    }
+    ecuio_engine_init(&t->engine, t->chan_count);
+    if (params.has_poll) {
+        const uint8_t req[2] = {0x01, static_cast<uint8_t>(params.poll_pid)};
+        (void)ecuio_engine_add(&t->engine,
+                               poll_channel(set, req[1], rx_ids, t->chan_count),
+                               req, sizeof(req));
+    } else {
+        (void)ecuio_engine_derive(&t->engine, set, rx_ids, t->chan_count,
+                                  nullptr);
+    }
 
-    /* Coupling check: a request loop needs at least one channel to
-     * receive on, or it writes against guaranteed silence forever (an
-     * ISO 15765 channel with no filter receives nothing). Scheduled
-     * PIDs get theirs from the set; ?poll= may take ?filter= or the
-     * profile's declared channels. Shipped profiles declare channels,
-     * so the scheduled arm is reachable only by a future set author
-     * omitting them. Fires before any hardware is touched. */
-    if ((sched_mode || params.has_poll) && t->chan_count == 0) {
+    /* Coupling check: requests need at least one channel to receive on,
+     * or they go out against guaranteed silence forever (an ISO 15765
+     * channel with no filter receives nothing). A set's requests get
+     * theirs from the set; ?poll= may take ?filter= or the profile's
+     * declared channels. Shipped profiles declare channels, so the set's
+     * arm is reachable only by a set author omitting them. Fires before
+     * any hardware is touched. */
+    if (t->engine.count > 0 && t->chan_count == 0) {
         delete t;
         if (params.has_poll) {
             ecuio_detail_set("?poll= needs a channel to receive on: add "
@@ -1060,8 +1033,6 @@ ecuio_status_t j2534_attach(ecuio_session_t* session, const char* uri)
     t->handle = handle;
     t->channel = channel;
     t->self = wrap;
-    t->has_poll = params.has_poll;
-    t->poll_pid = static_cast<uint32_t>(params.poll_pid);
     describe_session(t, params.baud, connect_flags, &session->info);
     t->epoch = std::chrono::steady_clock::now();   /* as mock: end of attach */
 

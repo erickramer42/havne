@@ -12,13 +12,14 @@
 //          Adoption tests (ADR-0012): ?filter=/?txid=/?poll= — filter
 //          registration shape, request framing, header strip + ID
 //          stamp, stop-on-detach, gating, passive receive.
-//          ADR-0013: j2534 defaults to the obd2 profile (scheduler +
+//          ADR-0013: j2534 defaults to the obd2 profile (its requests +
 //          mux decode). Raw-contract tests opt out with ?profile=raw;
-//          the obd2 block covers rotation, coupling, and drain, plus
+//          the obd2 block covers rotation, routing to each def's
+//          channel, Service 0x22 and a backlog beside the replies, plus
 //          ?poll= precedence over the profile's rotation. The backoff's
 //          capped step and the vendor clock's cases are here; the
-//          link-health machine itself runs through both backends in
-//          test_j2534_health.cpp.
+//          request engine's pacing and the link-health machine run
+//          through both backends in test_j2534_health.cpp.
 
 #include <gtest/gtest.h>
 
@@ -476,7 +477,7 @@ TEST_F(J2534AdoptionTest, RequestLoopWritesMode01AndReceivesStrippedEcho)
               ECUIO_OK);
     ASSERT_EQ(ecuio_session_start(session), ECUIO_OK);
 
-    wait_for_count(cap, 3, 100);   /* ~1 s budget for 3 x 100 ms cycles */
+    wait_for_count(cap, 3, 100);   /* ~1 s budget for 3 requests */
 
     const int received = cap.count.load();
     unsigned long wc = 0;
@@ -485,9 +486,9 @@ TEST_F(J2534AdoptionTest, RequestLoopWritesMode01AndReceivesStrippedEcho)
     /* Time-driven producer: assert the floor, not an exact count. */
     EXPECT_GE(received, 3);
     EXPECT_GE(wc, 3u);
-    /* Every echo is CAUSED by a write and the worker reads at most one
-     * frame per cycle, so writes >= received with at most a couple in
-     * flight. A runaway write loop blows this delta up. */
+    /* Every echo is CAUSED by a write, and the next request waits for
+     * the reply, so writes >= received with at most a couple in flight.
+     * A runaway write loop blows this delta up. */
     if (wc >= static_cast<unsigned long>(received)) {
         EXPECT_LE(wc - static_cast<unsigned long>(received), 2u);
     } else {
@@ -808,10 +809,10 @@ TEST(J2534StreamTest, UnknownProfileRejectedAtCreate)
 // ADR-0013: obd2 scheduler mode — rotation, coupling, drain
 // ---------------------------------------------------------------------------
 
-/* SCHEDULER ROTATION: ?profile=obd2&filter=0x7E8 — the worker
- * requests PIDs round-robin in set order. Rotation order is asserted
- * from the fake's recorded WRITES (deterministic, one per cycle),
- * not from received frames. */
+/* ROTATION: ?profile=obd2&filter=0x7E8 — the worker requests PIDs
+ * round-robin in set order. Rotation order is asserted from the fake's
+ * recorded WRITES (deterministic, one per reply), not from received
+ * frames. */
 TEST_F(J2534AdoptionTest, Obd2SchedulerRotatesPidsInSetOrder)
 {
     char uri[700];
@@ -826,7 +827,7 @@ TEST_F(J2534AdoptionTest, Obd2SchedulerRotatesPidsInSetOrder)
               ECUIO_OK);
     ASSERT_EQ(ecuio_session_start(session), ECUIO_OK);
 
-    /* 3 cycles = 300 ms minimum; budget 2 s for CI variance. */
+    /* 3 requests, at least the floor apart; budget 2 s for CI variance. */
     wait_for_writes(get_write_count, 3, 200);
 
     unsigned char wbuf[64] = {};
@@ -856,9 +857,9 @@ TEST_F(J2534AdoptionTest, Obd2SchedulerRotatesPidsInSetOrder)
     ASSERT_EQ(wlen, 6u);
     EXPECT_EQ(wbuf[5], 0x04u);              /* wrapped — round-robin */
 
-    /* RX: each cycle writes one request then drains its response in
-     * the same cycle, so the first three received frames answer the
-     * first three requests in order. */
+    /* RX: the next request waits for the reply to the last, so the
+     * first three received frames answer the first three requests in
+     * order. */
     wait_for_count(cap, 3, 100);
     ASSERT_GE(cap.count.load(), 3);
     for (int i = 0; i < 3; ++i) {
@@ -945,12 +946,14 @@ TEST_F(J2534AdoptionTest, TxidOverrideRewritesDerivedTransmitTarget)
     ecuio_session_destroy(session);
 }
 
-/* ROUTING: a PID's request goes to the channel of its Mode-01 def. The
- * set's first def reads a 62 <DID> reply from a second ECU, and its key
- * also ends in 0x0C, but it isn't Mode-01, so it neither enrolls nor
- * takes PID 0x0C's request to 0x7E1. Test-only profile, static storage
- * (the registry keeps the pointer). */
-TEST_F(J2534AdoptionTest, Mode01RequestRoutesPastOtherServiceKeys)
+/* ROUTING: each request goes to the channel of the def it was derived
+ * from. The set's first def reads a 62 <DID> reply from a second ECU, so
+ * it asks 0x7E1 for 22 12 0C; the second reads 41 0C from the first, so
+ * PID 0x0C's request goes to 0x7E0, though the DID's key also ends in
+ * 0x0C. The channels are served side by side, the first channel's
+ * request first. Test-only profile, static storage (the registry keeps
+ * the pointer). */
+TEST_F(J2534AdoptionTest, RequestsGoToTheirDefsChannel)
 {
     static const ecuio_channel_decl_t kChannels[] = {{0x7E8u, 0x7E0u},
                                                      {0x7E9u, 0x7E1u}};
@@ -984,29 +987,95 @@ TEST_F(J2534AdoptionTest, Mode01RequestRoutesPastOtherServiceKeys)
     ASSERT_EQ(ecuio_session_create(uri, &session), ECUIO_OK);
     ASSERT_EQ(ecuio_session_start(session), ECUIO_OK);
 
-    wait_for_writes(get_write_count, 2, 200);
+    wait_for_writes(get_write_count, 4, 200);
     unsigned char wbuf[64] = {};
     unsigned long wlen = 0, wflags = 0;
-    for (unsigned long i = 0; i < 2; ++i) {
+    for (unsigned long i = 0; i < 4; i += 2) {
         get_recorded_write(i, wbuf, &wlen, &wflags);
         ASSERT_EQ(wlen, 6u) << "write " << i;
         EXPECT_EQ(wbuf[2], 0x07u) << "write " << i;
-        EXPECT_EQ(wbuf[3], 0xE0u) << "write " << i;   /* not 0x7E1 */
+        EXPECT_EQ(wbuf[3], 0xE0u) << "write " << i;
         EXPECT_EQ(wbuf[4], 0x01u) << "write " << i;
-        EXPECT_EQ(wbuf[5], 0x0Cu) << "write " << i;   /* the only PID */
+        EXPECT_EQ(wbuf[5], 0x0Cu) << "write " << i;
+        get_recorded_write(i + 1, wbuf, &wlen, &wflags);
+        ASSERT_EQ(wlen, 7u) << "write " << i + 1;
+        EXPECT_EQ(wbuf[2], 0x07u) << "write " << i + 1;
+        EXPECT_EQ(wbuf[3], 0xE1u) << "write " << i + 1;
+        EXPECT_EQ(wbuf[4], 0x22u) << "write " << i + 1;
+        EXPECT_EQ(wbuf[5], 0x12u) << "write " << i + 1;
+        EXPECT_EQ(wbuf[6], 0x0Cu) << "write " << i + 1;
     }
 
     EXPECT_EQ(ecuio_session_close(session), ECUIO_OK);
     ecuio_session_destroy(session);
 }
 
-/* DRAIN BUDGET: inject a backlog LARGER than the per-cycle drain
- * budget (10) and assert every frame is eventually delivered —
- * leftover frames survive into the next cycle's drain instead of
- * being dropped or head-of-line-blocking the scheduler responses.
- * Uses a local 32-slot capture: the shared StreamCapture's 8 slots
- * would truncate under scheduler traffic + backlog combined. */
-TEST_F(J2534AdoptionTest, SchedulerDrainsBacklogBeyondPerCycleBudget)
+/* SERVICE 0x22 (ADR-0015 §2): a def keyed 62 <DID> enrols the request
+ * 22 <DID>, 7 bytes on the wire, and decodes the reply. The fake's ECU
+ * knows DID 0x1E1C and answers 62 1E 1C 12 34, so the value is 0x1234,
+ * worked out here from the reply's bytes, not from the def. */
+TEST_F(J2534AdoptionTest, DidDefRequestsItsDidAndDecodesTheReply)
+{
+    static ecuio_signal_def_t def = {};
+    def.id = 1;
+    def.kind = ECUIO_VALUE_UINT;
+    def.byte_order = ECUIO_BYTE_ORDER_BE;
+    def.start_byte = 3;
+    def.bit_length = 16;
+    def.scale = 1.0;
+    def.message_id = ECUIO_OBD2_ECU_ARB_ID;
+    def.mux_length = 3;
+    def.mux_key = 0x621E1Cu;
+    static ecuio_signal_set_t set = {};
+    set.layout_version = ECUIO_SIGNAL_SET_LAYOUT;
+    set.count = 1;
+    set.defs = &def;
+    set.channel_count = ecuio_obd2_signal_set()->channel_count;
+    set.channels = ecuio_obd2_signal_set()->channels;
+    ASSERT_EQ(ecuio_profile_register("test-did", &set, nullptr), ECUIO_OK);
+
+    char uri[700];
+    snprintf(uri, sizeof(uri), "j2534://%s?profile=test-did",
+             FAKE_J2534_DLL_PATH);
+    ecuio_session_t* session = nullptr;
+    ASSERT_EQ(ecuio_session_create(uri, &session), ECUIO_OK);
+    StreamCapture cap;
+    ASSERT_EQ(ecuio_register_frame_callback(session, capture_cb, &cap),
+              ECUIO_OK);
+    ASSERT_EQ(ecuio_session_start(session), ECUIO_OK);
+    wait_for_count(cap, 1, 100);
+    EXPECT_EQ(ecuio_session_close(session), ECUIO_OK);   /* then read */
+    ecuio_session_destroy(session);
+
+    unsigned char wbuf[64] = {};
+    unsigned long wlen = 0, wflags = 0;
+    get_recorded_write(0, wbuf, &wlen, &wflags);
+    ASSERT_EQ(wlen, 7u);
+    const unsigned char want_req[7] = {0x00, 0x00, 0x07, 0xE0,
+                                       0x22, 0x1E, 0x1C};
+    EXPECT_EQ(memcmp(wbuf, want_req, sizeof(want_req)), 0);
+
+    ASSERT_GE(cap.count.load(), 1);
+    ASSERT_EQ(static_cast<unsigned>(cap.payload_lens[0]), 5u);
+    const unsigned char want_reply[5] = {0x62, 0x1E, 0x1C, 0x12, 0x34};
+    EXPECT_EQ(memcmp(cap.payloads[0], want_reply, sizeof(want_reply)), 0);
+    ecuio_frame_t f = {};
+    f.arbitration_id = cap.arbitration_ids[0];
+    memcpy(f.data, cap.payloads[0], 5);
+    f.data_length = 5;
+    ASSERT_EQ(ecuio_def_applies_to_frame(&def, &f), 1);
+    double v = 0.0;
+    ASSERT_EQ(ecuio_decode_signal(&def, f.data, f.data_length, &v),
+              ECUIO_DECODE_OK);
+    EXPECT_EQ(v, double{(0x12 << 8) | 0x34});
+}
+
+/* BACKLOG: inject more frames than the replies the requests bring and
+ * assert every one is delivered beside them, none dropped and none
+ * head-of-line-blocking the replies. Uses a local 32-slot capture: the
+ * shared StreamCapture's 8 slots would truncate under request traffic
+ * + backlog combined. */
+TEST_F(J2534AdoptionTest, RequestModeDeliversABacklogBesideItsReplies)
 {
     char uri[700];
     snprintf(uri, sizeof(uri),
@@ -1058,8 +1127,7 @@ TEST_F(J2534AdoptionTest, SchedulerDrainsBacklogBeyondPerCycleBudget)
         return true;
     };
 
-    /* 12 frames / ~10 per cycle -> ~2 cycles = 200 ms min; budget
-     * 4 s for CI variance (responses consume drain slots too). */
+    /* Read back to back with the replies; budget 4 s for CI variance. */
     for (int i = 0; i < 400 && !seen_all_markers(); ++i) {
         std::this_thread::sleep_for(std::chrono::milliseconds(10));
     }
@@ -1069,11 +1137,11 @@ TEST_F(J2534AdoptionTest, SchedulerDrainsBacklogBeyondPerCycleBudget)
     ecuio_session_destroy(session);
 }
 
-/* ?poll= under a scheduler profile overrides the rotation. The worker
- * checks sched.count before poll_pid, so if attach built the set
- * scheduler anyway, ?poll=0x0C under obd2 would rotate the whole set and
- * silently drop the URI's PID. Five consecutive writes pin it:
- * rotation would give 0x04, 0x05, 0x0C, 0x0D, 0x0F. */
+/* ?poll= under a profile with requests overrides the rotation. If attach
+ * enrolled the set's requests too, ?poll=0x0C under obd2 would rotate
+ * the whole set and the URI's PID would be one among ten. Five
+ * consecutive writes pin it: rotation would give 0x04, 0x05, 0x0C,
+ * 0x0D, 0x0F. */
 TEST_F(J2534AdoptionTest, PollOverridesSchedulerRotation)
 {
     char uri[700];
@@ -1089,7 +1157,7 @@ TEST_F(J2534AdoptionTest, PollOverridesSchedulerRotation)
               ECUIO_OK);
     ASSERT_EQ(ecuio_session_start(session), ECUIO_OK);
 
-    wait_for_writes(get_write_count, 5, 200);   /* ~550 ms of 100 ms cycles */
+    wait_for_writes(get_write_count, 5, 200);   /* 5 requests, 2 s budget */
 
     unsigned long wc = 0;
     get_write_count(&wc);

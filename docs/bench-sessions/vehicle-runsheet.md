@@ -22,9 +22,11 @@ A read-only session on a vehicle's bus. Goals, in order:
    [BENCH prep list](../../STATUS.md#bench-prep) (#2–#8) on this
    vehicle and adapter
 5. Record each phase: the recordings are real-bus replay fixtures
-   ([ADR-0017](../adr/0017-session-recording.md)), and the bitmaps and
-   reply timings feed [ADR-0015](../adr/0015-request-engine.md)'s
-   open values
+   ([ADR-0017](../adr/0017-session-recording.md)), and the request
+   rate and reply timings set the request engine's floor, chosen
+   without a vehicle run
+   ([ADR-0015](../adr/0015-request-engine.md), appendix of
+   2026-10-23)
 
 Record everything, including every connect's session log. A session
 that stops at phase 2 with evidence is worth more than one that runs
@@ -200,8 +202,8 @@ and payloads verbatim (the session log's `OP_READ frame` lines).
     j2534://OBDX Pro - VX?poll=0x0C
 
 (the `obd2` profile stays in force, so the reply decodes; only PID 0x0C
-is requested, about every 220 ms on the VX, because the read after
-each request runs its full 100 ms timeout)
+is requested, the next as soon as the reply is in and no sooner than
+20 ms after the last, so up to about 50 a second)
 
 **Expected:**
 - [ ] Log page: frames with ID `0x7E8`, DLC 4, payload `41 0C` + two
@@ -245,16 +247,18 @@ To compare a few payloads on screen,
 Pause holds the Log page's rows still; the recording keeps every
 frame either way.
 
-## Phase 3 — full scheduler
+## Phase 3 — the full rotation
 
 **Action:** same ignition state. Connect with the bare URI:
 
     j2534://OBDX Pro - VX
 
 **Expected:**
-- [ ] Every `obd2` signal populates within about one rotation (one
-      request per 100 ms, so N PIDs take about N × 100 ms; about 1 s
-      for the current set); a PID the ECU doesn't support stays "—"
+- [ ] Every `obd2` signal populates within about one rotation (a
+      request every 20 ms or so while the ECU answers within that, so N
+      PIDs take about N × 20 ms; well under a second for the current
+      set); a PID the ECU doesn't support draws `7F 01` and a code, and
+      stays "—"
 - [ ] Plausible engine-off values:
 
 | Signal | Expect (engine off) |
@@ -275,10 +279,15 @@ frame either way.
       its colours, with dashed chart traces
 
 **Evidence:** a screenshot of LiveView, and a minute or more of
-recording: each signal's refresh interval comes from its `host_us`
-in `signals.csv` (expect about one rotation; replies a cycle late are
-a known item, not a failure), and `frames.csv`'s `timestamp_us`
-against `host_us` gives the vendor timestamp's unit (BENCH prep #5).
+recording with `ECUIO_SUR_LOG_FRAMES=1`: each signal's refresh interval
+comes from its `host_us` in `signals.csv` (expect about one rotation),
+and `frames.csv`'s `timestamp_us` against `host_us` gives the vendor
+timestamp's unit (BENCH prep #5). This is the request engine's first
+run on a vehicle, so the session log's `OP_WRITE frame` and
+`OP_READ frame` lines are the measurement: requests a second, each
+reply's time after its request, and whether every reply comes back
+before the next request (a reply after it means the 100 ms wait ran
+out first).
 
 ## Phase 4 — engine idling (the decode check)
 
@@ -313,7 +322,8 @@ ignition off, wait 10 s, then turn it back on.
       in Phase 0; on a bus that sleeps, "Requests failing" at the first
       failed write instead
 - [ ] Ignition on: values resume and the activity log shows the link
-      recovering. From quiet, the next request is at most a cycle away.
+      recovering. From quiet, the next request is at most the 100 ms
+      wait away.
       While requests fail, the worker waits between probes, doubling
       from 100 ms to a 5 s cap, so after a 10 s outage the next probe
       can be up to 5 s away, and the ECU needs a moment to wake. Record

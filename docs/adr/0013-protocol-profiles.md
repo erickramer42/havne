@@ -1,6 +1,8 @@
 # ADR-0013: Protocol profiles — selection by URI, capability by probe
 
-- **Status:** Accepted.
+- **Status:** Accepted. [ADR-0015](0015-request-engine.md) supersedes
+  §1's placement of request correlation in the profile and §5's
+  callback table as the plugin seam, and amends §3's probe semantics.
 - **Date:** 2026-10-17
 - **Supersedes:** none. Extends [ADR-0012](0012-j2534-transport-adoption.md) (moves the request loop out of the transport) and begins closing Known Issues #15/#21 in STATUS.md.
 

@@ -209,9 +209,9 @@ Page {
                         color: Theme.text
                         font.pixelSize: 16
                         font.family: Theme.monoFamily   // fixed-width digits, no jitter
-                        // Staleness dimming: 3 s is generous against the
-                        // scheduler's full PID rotation (100 ms per PID, so
-                        // about 1 s for the obd2 set).
+                        // Staleness dimming: 3 s is generous against a full
+                        // rotation of the requests, at most the engine's
+                        // 100 ms wait each, so about 1 s for the obd2 set.
                         opacity: signalDelegate.hasValue
                                  && signalDelegate.ageMs > 3000
                                      ? 0.45 : 1.0

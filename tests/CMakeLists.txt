@@ -45,13 +45,13 @@ target_link_libraries(test_signals PRIVATE
 qttune_enable_warnings(test_signals)
 gtest_discover_tests(test_signals)
 
-# --- OBD-II set + scheduler tests: MUST stay Qt-free (UNIT tier) ---
+# --- OBD-II set + request engine tests: MUST stay Qt-free (UNIT tier) ---
 # obd2_signal_sets.cpp is ALL-platform (signal data is transport-
-# agnostic), and pid_scheduler.h is header-only, so this suite builds
+# agnostic), and request_engine.h is header-only, so this suite builds
 # and runs in the headless Ubuntu job alongside test_core/test_signals.
-# The explicit core/src include is required because pid_scheduler.h is
+# The explicit core/src include is required because request_engine.h is
 # INTERNAL — ecuio-core's PUBLIC include dirs cover only core/include,
-# and the scheduler is deliberately not part of the public tree.
+# and the engine is deliberately not part of the public tree.
 add_executable(test_obd2 test_obd2.cpp)
 
 target_include_directories(test_obd2 PRIVATE

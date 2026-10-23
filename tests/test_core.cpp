@@ -1063,6 +1063,44 @@ TEST(CoreTest, ProfileRegisterReportsTheValidatorResult) {
     EXPECT_EQ(ecuio_profile_unregister("test-why"), ECUIO_OK);
 }
 
+TEST(CoreTest, ProfileRegisterRefusesMoreRequestsThanTheEngineHolds) {
+    /* A set may derive at most ECUIO_PROFILE_MAX_REQUESTS requests
+     * (ADR-0015 §2), so a session never leaves one unasked with nothing
+     * to say why. Defs read from one reply count once: def 1 reads PID
+     * 0x00's reply, as def 0 does. One past the limit is refused, naming
+     * the first def that didn't fit, and leaves nothing registered. */
+    const ecuio_signal_set_t* obd2 = ecuio_obd2_signal_set();
+    static ecuio_signal_def_t defs[ECUIO_PROFILE_MAX_REQUESTS + 2];
+    for (uint32_t i = 0; i < ECUIO_PROFILE_MAX_REQUESTS + 2; ++i) {
+        defs[i] = obd2->defs[0];
+        defs[i].id = static_cast<uint16_t>(100 + i);
+        defs[i].mux_key = 0x4100u | ((i == 1) ? 0u : i);
+    }
+    static ecuio_signal_set_t fits = {};
+    fits.layout_version = ECUIO_SIGNAL_SET_LAYOUT;
+    fits.count = ECUIO_PROFILE_MAX_REQUESTS + 1;
+    fits.defs = defs;
+    fits.channel_count = obd2->channel_count;
+    fits.channels = obd2->channels;
+    ecuio_signal_set_t over = fits;
+    over.count = ECUIO_PROFILE_MAX_REQUESTS + 2;
+
+    ecuio_validation_t v;
+    EXPECT_EQ(ecuio_profile_register("test-requests", &fits, &v), ECUIO_OK);
+    EXPECT_EQ(v.code, ECUIO_VALIDATE_OK);
+    EXPECT_EQ(ecuio_profile_unregister("test-requests"), ECUIO_OK);
+
+    std::memset(&v, 0xAB, sizeof v);
+    EXPECT_EQ(ecuio_profile_register("test-requests", &over, &v),
+              ECUIO_ERR_INVALID_ARGUMENT);
+    EXPECT_EQ(v.code, ECUIO_VALIDATE_ERR_REQUEST_COUNT);
+    EXPECT_EQ(v.index, ECUIO_PROFILE_MAX_REQUESTS + 1);
+    EXPECT_EQ(v.reserved[0], 0u);
+    EXPECT_EQ(v.reserved[1], 0u);
+    const ecuio_signal_set_t* got = nullptr;
+    EXPECT_EQ(ecuio_profile_lookup("test-requests", &got), ECUIO_ERR_NO_TRANSPORT);
+}
+
 TEST(CoreTest, ProfileBuiltInsCannotBeReplacedOrRemoved) {
     /* A URI naming a built-in always means the same set. */
     for (const char* name : {"mock", "raw", "obd2"}) {

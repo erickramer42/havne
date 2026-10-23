@@ -90,10 +90,9 @@ A **profile** is a named signal set ([ADR-0013](adr/0013-protocol-profiles.md)).
   byte order before its bit parameters, and computes in `double`
   ([ADR-0016](adr/0016-signal-definition-layout.md)).
 - **The `obd2` set** also declares its CAN channel (requests to
-  `0x7E0`, replies on `0x7E8`). Its defs carry Mode-01 mux keys, so
-  the J2534 transport derives both its receive filter and a
-  round-robin PID scheduler from the profile; a bare `j2534://` needs
-  no parameters.
+  `0x7E0`, replies on `0x7E8`). Its defs carry Service 01 mux keys,
+  so the J2534 transport derives both its receive filter and its
+  requests from the profile; a bare `j2534://` needs no parameters.
 - **Unknown or malformed profile names** fail at session create,
   before any DLL loads.
 - **Registration validates.** `ecuio_profile_register` runs the set
@@ -153,11 +152,13 @@ The full reference is [j2534.md](j2534.md).
   The child inherits the session log and no other handle.
 - **Paths are UTF-8** across the ABI and UTF-16 at every Windows call,
   so a non-ASCII install path loads.
-- **Worker modes:**
-  - a scheduler (one Mode-01 request per 100 ms cycle, then a bounded
-    drain of replies);
-  - a single-PID `?poll=` loop, which outranks the profile's rotation;
-  - passive listening.
+- **One worker loop** serves the profile's requests, a single
+  `?poll=` PID (which outranks them), or passive listening. The
+  request engine ([ADR-0015](adr/0015-request-engine.md)) derives the
+  requests from the defs (`41 <PID>` asks for `01 <PID>`, `62 <DID>`
+  for `22 <DID>`), sends only reads, keeps one request out per
+  channel and sends the next when the reply is in, after a 100 ms wait
+  at most and no sooner than 20 ms after the last.
 - **Teardown order is a hard contract:** join the worker → stop the
   filters → disconnect → close → unload. The worker calls vendor code
   through pointers that dangle once the DLL unmaps.
@@ -182,9 +183,12 @@ The bridge polls it on its 100 ms tick and maps it for the UI
 - **Why writes are judged apart from reads:** a quiet bus fails every
   write while the adapter is fine. Calling that an adapter fault would
   send the user after the wrong problem.
-- **Backoff:** while a failure lasts, probing slows from 10 Hz to one
-  try per 5 s. Each write is also the recovery probe, so writing never
-  stops.
+- **Backoff:** while a failure lasts, probing slows from the request
+  pace to one try per 5 s. Each write is also the recovery probe, so
+  writing never stops.
+- **When reads recover but writes don't,** the state steps down from
+  `fault` to `requests`: the adapter answers again, so what fails is
+  the requests.
 
 ## The UI layer
 

@@ -10,20 +10,29 @@
 // BEHAVIOR:
 //  * WriteMsgs: records the message (hook-observable). Response
 //    generation is two-mode:
-//      - Mode-01 request [4-byte ID BE][01][PID] (exactly 6 bytes, the
-//        adapter-framed logical message): response
-//        [rx_id BE][41][PID][canned], values from g_obd2_canned
-//        (SetFakeObd2CannedValueExternal overrides per-test). NO PCI
-//        byte in either direction — the fake models the adapter side
-//        of ISO-TP, and the transport's 4-byte header strip lands the
-//        bridge on the obd2 set's mux-at-offset-0 grammar.
+//      - A request, with a filter registered: Service 01
+//        [4-byte ID BE][01][PID] (exactly 6 bytes, the adapter-framed
+//        logical message) or Service 0x22 [ID][22][DID] (7 bytes). The
+//        ECU the request is addressed to answers: [reply ID BE][41][PID]
+//        [canned] from g_obd2_canned (SetFakeObd2CannedValueExternal
+//        overrides per-test), or [ID][62][DID][value] for the one DID
+//        it knows, 0x1E1C; any other PID or DID gets a negative reply,
+//        7F 01 12 (what the first vehicle answered for PID 0x5C) or
+//        7F 22 31. The reply ID is the request's plus 8 (0x7E0 ->
+//        0x7E8; the functional 0x7DF is answered from 0x7E8) or, 29-bit,
+//        18DA<tester><ecu> for 18DA<ecu><tester>. NO PCI byte in either
+//        direction — the fake models the adapter side of ISO-TP, and
+//        the transport's 4-byte header strip lands the bridge on the
+//        obd2 set's mux-at-offset-0 grammar.
 //      - Everything else: the legacy deterministic echo (byte 0
 //        +0x40), preserving existing framing tests.
 //    ECUIO_FAKE_WRITE_STATUS fails every write with the given status,
 //    recording nothing and echoing nothing; ECUIO_FAKE_WRITE_ZERO_COUNT=1
 //    answers every write STATUS_NOERROR with a count of 0, the same
 //    way. ECUIO_FAKE_REPLY_DELAY_MS
-//    holds each response back that long after the write (default 0).
+//    holds each response back that long after the write (default 0);
+//    ECUIO_FAKE_PENDING=1 answers each request with "response pending"
+//    (7F <service> 78) at once, ahead of that reply.
 //  * IoCtl: config table (SET stores, GET reads back), fixed VBATT
 //    (13800 mV), CLEAR_* accepted. Unknown ids FAIL like a strict vendor.
 //  * ReadVersion: fixed firmware, DLL and API strings (kFirmwareVersion
@@ -391,25 +400,79 @@ bool filter_matches(const unsigned char* frame_data, unsigned long frame_size,
     return true;
 }
 
-/* Build an OBD-II Mode-01 response.
- * Caller (WriteMsgs, mutex HELD) has verified: exactly 6 bytes
- * [tx_id BE][0x01][PID] and an active filter. Output:
- * [rx_id BE from the filter pattern][0x41][PID][canned data] — NO
- * PCI BYTE in either direction. The fake models the ADAPTER side of
- * ISO-TP: this queue content is what a conforming adapter delivers
- * from ReadMsgs, and the transport's header strip lands the bridge
- * on [41][PID][A][B]... — the obd2 set's mux-at-offset-0 grammar.
- * Response length varies per PID. */
+/* The ID an ECU answers a request on, into out (4 bytes, big-endian):
+ * 11-bit physical requests 0x7E0 to 0x7E7 get theirs 8 above, the
+ * functional 0x7DF is answered by the engine ECU (0x7E8), and a 29-bit
+ * 18DA<ecu><tester> request by 18DA<tester><ecu> (ISO 15765-4). Any
+ * other ID falls back to the last filter's pattern. */
+void reply_header(const unsigned char* req, unsigned char* out)
+{
+    const uint32_t tx = (uint32_t{req[0]} << 24) | (uint32_t{req[1]} << 16) |
+                        (uint32_t{req[2]} << 8) | uint32_t{req[3]};
+    uint32_t rx = 0;
+    if (tx == 0x7DFu) {
+        rx = 0x7E8u;
+    } else if (tx >= 0x7E0u && tx <= 0x7E7u) {
+        rx = tx + 8;
+    } else if ((tx & 0xFFFF0000u) == 0x18DA0000u) {
+        rx = 0x18DA0000u | ((tx & 0xFFu) << 8) | ((tx >> 8) & 0xFFu);
+    } else {
+        memcpy(out, g_last_filter.pattern, 4);
+        return;
+    }
+    out[0] = static_cast<unsigned char>(rx >> 24);
+    out[1] = static_cast<unsigned char>(rx >> 16);
+    out[2] = static_cast<unsigned char>(rx >> 8);
+    out[3] = static_cast<unsigned char>(rx);
+}
+
+/* The one Service 0x22 DID the fake's ECU knows, ADR-0015's example. */
+constexpr uint16_t kFakeDid = 0x1E1C;
+constexpr unsigned char kFakeDidValue[2] = {0x12, 0x34};
+
+/* A request's negative reply: [reply ID][7F][service][code]. */
+void build_negative(const unsigned char* req, unsigned char code,
+                    unsigned char* resp, unsigned long* resp_len)
+{
+    reply_header(req, resp);
+    resp[4] = 0x7F;
+    resp[5] = req[4];
+    resp[6] = code;
+    *resp_len = 7;
+}
+
+/* Build an OBD-II Service 01 or 0x22 response.
+ * Caller (WriteMsgs, mutex HELD) has verified: [tx_id BE][0x01][PID]
+ * (6 bytes) or [tx_id BE][0x22][DID] (7 bytes), and an active filter.
+ * Output: [reply ID BE][0x41][PID][canned data] or
+ * [reply ID BE][0x62][DID][value], or the negative reply for a PID or
+ * DID the fake doesn't support — NO PCI BYTE in either direction. The
+ * fake models the ADAPTER side of ISO-TP: this queue content is what a
+ * conforming adapter delivers from ReadMsgs, and the transport's header
+ * strip lands the bridge on [41][PID][A][B]... — the obd2 set's
+ * mux-at-offset-0 grammar. Response length varies per PID. */
 void build_obd2_response(const unsigned char* req, unsigned long req_len,
                          unsigned char* resp, unsigned long* resp_len)
 {
     (void)req_len;   /* shape pre-validated by the caller */
+    if (req[4] == 0x22) {
+        const uint16_t did = static_cast<uint16_t>((req[5] << 8) | req[6]);
+        if (did != kFakeDid) {
+            build_negative(req, 0x31, resp, resp_len);   /* out of range */
+            return;
+        }
+        reply_header(req, resp);
+        resp[4] = 0x62;
+        resp[5] = req[5];
+        resp[6] = req[6];
+        resp[7] = kFakeDidValue[0];
+        resp[8] = kFakeDidValue[1];
+        *resp_len = 9;
+        return;
+    }
     const uint8_t pid = req[5];
 
-    resp[0] = g_last_filter.pattern[0];
-    resp[1] = g_last_filter.pattern[1];
-    resp[2] = g_last_filter.pattern[2];
-    resp[3] = g_last_filter.pattern[3];
+    reply_header(req, resp);
     resp[4] = 0x41;   /* Mode 01 + 0x40 response */
     resp[5] = pid;    /* PID echo */
 
@@ -431,8 +494,8 @@ void build_obd2_response(const unsigned char* req, unsigned long req_len,
         case 0x10: resp[6] = g_obd2_canned.pid_10_maf_high;
                    resp[7] = g_obd2_canned.pid_10_maf_low;      *resp_len = 8;  break;
         case 0x5C: resp[6] = g_obd2_canned.pid_5C_oil_temp;     *resp_len = 7;  break;
-        default:    /* Unsupported PID — bare grammatical echo */
-            *resp_len = 6;
+        default:    /* not supported */
+            build_negative(req, 0x12, resp, resp_len);
             break;
     }
 }
@@ -646,7 +709,7 @@ long __stdcall PassThruReadMsgs(unsigned long ChannelID,
         }
     }
 
-    /* #11 test knob (HARNESS): ECUIO_FAKE_READ_STATUS forces this
+    /* Link-health knob (HARNESS): ECUIO_FAKE_READ_STATUS forces this
      * call to return the given vendor status with zero messages —
      * 0x09 (ERR_TIMEOUT) for quiet-bus, a hard code (e.g. 0x07) for
      * the dead-adapter path. Persistent while set and re-read per
@@ -868,6 +931,7 @@ long __stdcall PassThruWriteMsgs(unsigned long ChannelID,
     const bool no_ack = vx && fake_j2534::knob_on("ECUIO_FAKE_NO_ACK");
     const unsigned long reply_delay_ms = fake_j2534::knob_ms(
         "ECUIO_FAKE_REPLY_DELAY_MS", vx ? fake_j2534::kVxReplyDelayMs : 0);
+    const bool pending_first = fake_j2534::knob_on("ECUIO_FAKE_PENDING");
 
     std::unique_lock<std::mutex> lk(fake_j2534::g_lock);
 
@@ -913,11 +977,11 @@ long __stdcall PassThruWriteMsgs(unsigned long ChannelID,
     }
 
     /* RESPONSE GENERATION.
-     * Mode-01 request: EXACTLY 6 bytes, req[4]==0x01 — the
-     * adapter-framed logical message. With an active filter, emit
-     * [rx_id BE][41][PID][canned]; without one there is no rx_id to
-     * address a response to, so the legacy echo applies. Everything
-     * else keeps the deterministic echo semantics. */
+     * A request: Service 01, EXACTLY 6 bytes with req[4]==0x01, or
+     * Service 0x22, 7 bytes — the adapter-framed logical message. With
+     * an active filter the ECU it's addressed to answers; without one an
+     * ISO 15765 channel receives nothing, so the legacy echo applies.
+     * Everything else keeps the deterministic echo semantics. */
     if (n > 0) {
         const unsigned char* req = pMsg->Data;
         unsigned char echo[64];
@@ -925,9 +989,19 @@ long __stdcall PassThruWriteMsgs(unsigned long ChannelID,
 
         const bool has_filter = (fake_j2534::g_last_filter.filter_id != 0)
                                  && (n >= 4);
+        const bool request = has_filter &&
+            ((n == 6 && req[4] == 0x01) || (n == 7 && req[4] == 0x22));
 
-        if (n == 6 && req[4] == 0x01 && has_filter) {
+        if (request) {
             fake_j2534::build_obd2_response(req, n, echo, &echo_len);
+            if (pending_first) {
+                unsigned char pending[7];
+                unsigned long pending_len = 0;
+                fake_j2534::build_negative(req, 0x78, pending, &pending_len);
+                fake_j2534::enqueue_rx_locked(
+                    pending, pending_len,
+                    fake_j2534::vendor_stamp(written_us), 0, written_us);
+            }
         } else if (has_filter) {
             memcpy(echo, fake_j2534::g_last_filter.pattern, 4);
             memcpy(echo + 4, req + 4, n - 4);

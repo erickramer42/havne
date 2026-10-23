@@ -1,10 +1,12 @@
 // File/layer: core/src/profile_registry.cpp | C++17, Qt-free
 // Testing: UNIT — lookup semantics (null set is a success), unknown
 //          names fail, register overwrites, registration validates,
-//          reports the validator's result and protects the built-ins,
-//          unregister
+//          reports the validator's result, refuses a set with more
+//          requests than the engine's table holds, protects the
+//          built-ins, unregister
 
 #include "ecuio/profile.h"
+#include "request_engine.h"
 #include "session.h"
 
 #include <cstring>
@@ -30,8 +32,8 @@ Registry& registry()
         {"mock", ecuio_mock_signal_set()},
         {"raw",  nullptr},   /* null profile — Log page only */
         /* ADR-0013: the OBD-II v1 set — mux-gated decode, plus the
-         * multi-PID scheduler and channels the j2534 transport takes
-         * from it at attach. */
+         * requests and channels the j2534 transport takes from it at
+         * attach. */
         {"obd2", ecuio_obd2_signal_set()},
     };
     return r;
@@ -69,6 +71,28 @@ bool is_valid_name(const char* name)
     return n > 0;
 }
 
+/* Whether a validated set's requests fit the engine's table; out, when
+ * not NULL, gets ECUIO_VALIDATE_ERR_REQUEST_COUNT and the first def
+ * that didn't. */
+bool fits_request_table(const ecuio_signal_set_t* set, ecuio_validation_t* out)
+{
+    uint32_t rx_ids[ECUIO_MAX_CHANNELS] = {};
+    for (uint32_t i = 0; i < set->channel_count; ++i) {
+        rx_ids[i] = set->channels[i].rx_id;
+    }
+    ecuio_request_engine e;
+    ecuio_engine_init(&e, set->channel_count);
+    uint32_t overflow = UINT32_MAX;
+    if (ecuio_engine_derive(&e, set, rx_ids, set->channel_count, &overflow)) {
+        return true;
+    }
+    if (out != nullptr) {
+        out->code = ECUIO_VALIDATE_ERR_REQUEST_COUNT;
+        out->index = overflow;
+    }
+    return false;
+}
+
 } // namespace
 
 extern "C" {
@@ -94,6 +118,13 @@ ecuio_status_t ecuio_profile_register(const char* name,
      * every set they're handed (ADR-0013's plugin surface). */
     if (signal_set != nullptr &&
         ecuio_validate_signal_set(signal_set, out) != ECUIO_VALIDATE_OK) {
+        return ECUIO_ERR_INVALID_ARGUMENT;
+    }
+    /* Every request the set derives must fit the engine's table, or a
+     * session would never ask for the rest and nothing would say why.
+     * Counted on the set's own channels: a session's ?filter= override
+     * merges them into one, which can only dedupe more. */
+    if (signal_set != nullptr && !fits_request_table(signal_set, out)) {
         return ECUIO_ERR_INVALID_ARGUMENT;
     }
     try {

@@ -19,9 +19,9 @@ old one, and the old record's status is updated to point at it.
 | [0010](0010-j2534-v0404-shared-types.md) | SAE J2534-1 v04.04 is the contract; one shared types header | Accepted |
 | [0011](0011-vendor-call-relay-wire-forms.md) | Vendor-call relay: flat wire forms, identical ioctl whitelist at both ends | Accepted |
 | [0012](0012-j2534-transport-adoption.md) | J2534 transport adoption: caller-chosen IDs, transport-driven request loop | Accepted |
-| [0013](0013-protocol-profiles.md) | Protocol profiles: URI selection, profile-owned probe and request loop, declared CAN channels | Accepted |
+| [0013](0013-protocol-profiles.md) | Protocol profiles: URI selection, profile-owned probe and request loop, declared CAN channels | Accepted; request correlation and the callback table superseded by 0015 |
 | [0014](0014-single-threaded-surrogate.md) | Single-threaded surrogate child; reads travel over the pipe | Accepted |
-| [0015](0015-request-engine.md) | Request engine: correlated, response-paced requests derived from signal definitions; read-only by construction | Proposed |
+| [0015](0015-request-engine.md) | Request engine: correlated, response-paced requests derived from signal definitions; read-only by construction | Accepted |
 | [0016](0016-signal-definition-layout.md) | Signal definition layout: value kind, explicit byte order, layout version, zero-checked reserved room | Accepted |
 | [0017](0017-session-recording.md) | Session recording: one folder per connect, `frames.csv` as the replay format | Accepted |
 | [0018](0018-connect-failure-reporting.md) | Connect failures say why: four status codes and a thread-local detail with the vendor's text | Accepted |

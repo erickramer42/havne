@@ -65,9 +65,9 @@ ecuio_status_t ecuio_mock_transport_attach(ecuio_session_t* session,
  *           address header stripped and arbitration_id stamped)
  *   txid    CAN id 1..0x1FFFFFFF — transmit ID; default is the
  *           profile's declared tx, else 0x7E0
- *   poll    PID 0x00..0xFF — single-PID Mode-01 loop (100 ms cadence;
- *           0x00 reads the supported-PIDs bitmap); replaces the
- *           profile's PID rotation. Needs a channel, from
+ *   poll    PID 0x00..0xFF — one Service 01 request, repeated as the
+ *           whole rotation (0x00 reads the supported-PIDs bitmap);
+ *           replaces the profile's requests. Needs a channel, from
  *           filter or the profile's declarations; rejected at attach
  *           (still before any DLL load) when neither supplies one
  *   profile name — validated by ecuio_session_create before attach

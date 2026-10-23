@@ -174,11 +174,17 @@ int ecuio_decode_signal(const ecuio_signal_def_t* signal,
                                                       ECUIO_SIGNAL_SET_LAYOUT */
 #define ECUIO_VALIDATE_ERR_SET_RESERVED     (-16)  /* a reserved field of
                                                       the set not zero */
+#define ECUIO_VALIDATE_ERR_REQUEST_COUNT    (-17)  /* the defs derive more
+                                                      requests than
+                                                      ECUIO_PROFILE_MAX_REQUESTS
+                                                      (profile.h); reported
+                                                      by ecuio_profile_register */
 
 /* Why a set failed validation, and where. index names the element the
  * code is about: the failing def; for a duplicate id, the second def
  * of the pair; for a bad channel id, the channel; for a duplicate rx,
- * the second channel of the pair. It is UINT32_MAX for
+ * the second channel of the pair; for too many requests, the first def
+ * whose request didn't fit. It is UINT32_MAX for
  * ECUIO_VALIDATE_OK and for a code that names no single element: a
  * NULL, the layout version, the set's reserved fields, the channel
  * count. */

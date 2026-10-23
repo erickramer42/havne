@@ -278,8 +278,9 @@ static int handle_op_read(unsigned long channel, uint32_t timeout_ms,
     }
     resp->num_frames = n;
 
-    /* Trace frames and status changes only: an idle drain reads ~10x/s
-     * and would bury everything else. */
+    /* Trace frames and status changes only: between requests the
+     * worker reads up to 100 times a second, and every empty read
+     * logged would bury everything else. */
     static long last_read_rc = -1;
     if (n > 0 || rc != last_read_rc) {
         stage("OP_READ: status %ld, frames %u", rc, n);
@@ -310,9 +311,9 @@ static int handle_op_write(unsigned long channel, const uint8_t* data,
               rc, msg.TxFlags, msg.DataSize, hex);
     }
 
-    /* Status-change logging: a healthy scheduler writes ~10/s, and a
-     * per-call line would bury the interesting ones. The first write
-     * and every change of (status, count) still log. */
+    /* Status-change logging: the request engine writes up to 50/s per
+     * channel, and a per-call line would bury the interesting ones. The
+     * first write and every change of (status, count) still log. */
     static long last_write_rc = -1;
     static unsigned long last_write_num = 0;
     if (rc != last_write_rc || num != last_write_num) {

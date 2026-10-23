@@ -247,7 +247,7 @@ ecuio_status_t ecuio_session_create(
         case ProfileQuery::Absent:
         default:
             /* Scheme defaults: mock:// -> mock; j2534:// -> obd2
-             * (decode, the multi-PID scheduler and the declared
+             * (decode, the Service 01 requests and the declared
              * 7E0/7E8 channel). ?profile=raw gives a log-only session. */
             chosen = is_mock ? "mock" : "obd2";
             break;
@@ -261,8 +261,8 @@ ecuio_status_t ecuio_session_create(
         return ECUIO_ERR_UNKNOWN_PROFILE;
     }
 
-    /* Set before attach: the j2534 transport derives its scheduler
-     * PIDs and channels from it during attach. Single writer — attach
+    /* Set before attach: the j2534 transport derives its requests
+     * and channels from it during attach. Single writer — attach
      * and the worker both run after this store. */
     (*out_session)->active_signal_set = profile_set;
 

@@ -1,18 +1,21 @@
 // File/layer: tests/test_j2534_health.cpp | GTest, HARNESS tier
-// Testing: the J2534 worker's link-health machine through each backend:
-//          the fake loaded in-proc, and the same fake inside the
-//          surrogate child. Every case runs on both. Hard and quiet
+// Testing: the J2534 worker through each backend: the fake loaded
+//          in-proc, and the same fake inside the surrogate child. Every
+//          case runs on both. The link-health machine: hard and quiet
 //          reads, episode counting, recovery through the continued
-//          request probe, untouched vendor counts, the write latch and
-//          its priority, a write reported with nothing written,
-//          unmatched frames, backoff growth, its end at a clean read
-//          and its restart; and the same
-//          machine against the fake's VX mode (ECUIO_FAKE_VX): a quiet
-//          bus whose empty reads are ERR_BUFFER_EMPTY after their
+//          request probe, untouched vendor counts, the write latch, its
+//          priority and its step-down when reads recover, a write
+//          reported with nothing written, unmatched frames, backoff
+//          growth, its end at a clean read and its restart; and the
+//          same machine against the fake's VX mode (ECUIO_FAKE_VX): a
+//          quiet bus whose empty reads are ERR_BUFFER_EMPTY after their
 //          timeout, answered requests, and the no-ACK bus. TX and
 //          first-frame indications are skipped without ending a read,
-//          so a reply comes back in its own request's cycle. Frames
-//          carry session time, not the vendor's stamps.
+//          so a reply comes back before the next request. The request
+//          engine's pacing (ADR-0015): the floor, the wait, negative
+//          and pending replies, two channels at once; and the drain in
+//          passive mode. Frames carry session time, not the vendor's
+//          stamps.
 //          The backend setup and the fake's control page are in
 //          j2534_backend_fixture.h.
 
@@ -20,6 +23,7 @@
 
 #include "ecuio/core.h"
 #include "ecuio/j2534_ptypes.h"
+#include "ecuio/profile.h"
 
 #ifdef _WIN32
 #include <atomic>
@@ -38,11 +42,12 @@ void count_cb(const ecuio_frame_t* /*frame*/, void* user_data)
     static_cast<std::atomic<int>*>(user_data)->fetch_add(1);
 }
 
-/* What the session delivered: each frame's payload, and how many came
- * after the fake's next write. In a request mode where every write is
+/* What the session delivered: each frame's payload and ID, how many
+ * writes the fake had taken when it arrived, and how many came after
+ * the fake's next write. In a request mode where every write is
  * answered, frame k belongs while the fake has taken exactly k writes;
- * one that arrives later landed a cycle late. Read the payloads only
- * after the session is closed. */
+ * one that arrives later came back after the next request. Read the
+ * payloads only after the session is closed. */
 struct Delivery {
     fake_control::Page* page = nullptr;
     std::atomic<int> count{0};
@@ -50,20 +55,33 @@ struct Delivery {
     uint16_t lengths[16] = {};
     uint8_t payloads[16][8] = {};
     uint64_t stamps[16] = {};
+    uint32_t ids[16] = {};
+    uint32_t writes_at[16] = {};
 };
 
 void delivery_cb(const ecuio_frame_t* frame, void* user_data)
 {
     auto* d = static_cast<Delivery*>(user_data);
     const int i = d->count.fetch_add(1);
-    if (fake_control::writes(d->page) > static_cast<uint32_t>(i + 1)) {
+    const uint32_t writes = fake_control::writes(d->page);
+    if (writes > static_cast<uint32_t>(i + 1)) {
         d->after_next_write.fetch_add(1);
     }
     if (i < 16) {
         d->lengths[i] = frame->data_length;
         memcpy(d->payloads[i], frame->data, sizeof(d->payloads[i]));
         d->stamps[i] = frame->timestamp_us;
+        d->ids[i] = frame->arbitration_id;
+        d->writes_at[i] = writes;
     }
+}
+
+/* The fake's writes over the next ms milliseconds. */
+uint32_t writes_during(fake_control::Page* page, int ms)
+{
+    const uint32_t before = fake_control::writes(page);
+    std::this_thread::sleep_for(std::chrono::milliseconds(ms));
+    return fake_control::writes(page) - before;
 }
 
 /* The session and its frame count are members, and TearDown closes the
@@ -104,6 +122,26 @@ protected:
                                                 &delivered),
                   ECUIO_OK);
         ASSERT_EQ(ecuio_session_start(session), ECUIO_OK);
+    }
+
+    /* Waits up to budget_ms for at least n frames. */
+    bool wait_for_frames(int n, int budget_ms)
+    {
+        const auto deadline = std::chrono::steady_clock::now() +
+                              std::chrono::milliseconds(budget_ms);
+        while (frames.load() < n &&
+               std::chrono::steady_clock::now() < deadline) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        }
+        return frames.load() >= n;
+    }
+
+    /* Closes the session, so what it delivered can be read. */
+    void close_session()
+    {
+        EXPECT_EQ(ecuio_session_close(session), ECUIO_OK);
+        ecuio_session_destroy(session);
+        session = nullptr;
     }
 };
 
@@ -343,41 +381,71 @@ TEST_P(J2534HealthTest, HardReadFailureOutranksRequestFailed)
     EXPECT_EQ(ec, 2u);
 }
 
-/* A delivered-but-unmatched frame (header matches no channel) clears
- * hard failure and the backoff, since the adapter answered, but moves
- * to VEHICLE_TIMEOUT, not OK, and adds no episode.
- *
- * The 900 ms budget is the discriminator, so it is NOT generous by
- * accident: code that fully clears reaches OK (never TIMEOUT, fails);
- * code that treats the frame as plain quiet needs the ~1.2 s debounce
- * and misses the window. The passive URI keeps writes out of it. */
-TEST_P(J2534HealthTest, UnmatchedDeliveredFrameGoesQuietNotHealthy)
+/* With writes AND reads failing, then reads recovering while writes
+ * still fail: the state steps down from adapter fault to requests
+ * failing, with no new episode, because the adapter reads cleanly again
+ * and what fails is the requests. The write that goes out at last
+ * returns it to ok. */
+TEST_P(J2534HealthTest, CleanReadsWhileWritesFailStepDownToRequestsFailing)
+{
+    ASSERT_NO_FATAL_FAILURE(start_session(""));
+
+    ASSERT_NO_FATAL_FAILURE(knob("ECUIO_FAKE_WRITE_STATUS", "7"));
+    ASSERT_NO_FATAL_FAILURE(knob("ECUIO_FAKE_READ_STATUS", "7"));
+    int32_t le = 0;
+    uint32_t ec = 0;
+    ASSERT_TRUE(wait_for_state(session, ECUIO_ERR_TRANSPORT_HARD_FAILURE,
+                               5000, le, ec))
+        << "hard read failure never reported (was " << le << ")";
+    ASSERT_EQ(ec, 2u);
+
+    /* The backoff may be sleeping toward its 5 s cap; budget 10 s. */
+    ASSERT_NO_FATAL_FAILURE(knob("ECUIO_FAKE_READ_STATUS", nullptr));
+    EXPECT_TRUE(wait_for_state(session, ECUIO_ERR_REQUEST_FAILED, 10000,
+                               le, ec))
+        << "adapter fault stuck while reads were clean (was " << le << ")";
+    EXPECT_EQ(ec, 2u) << "the step down added an episode";
+
+    ASSERT_NO_FATAL_FAILURE(knob("ECUIO_FAKE_WRITE_STATUS", nullptr));
+    EXPECT_TRUE(wait_for_state(session, ECUIO_OK, 12000, le, ec))
+        << "a sent write never cleared it (was " << le << ")";
+    EXPECT_EQ(ec, 2u);
+}
+
+/* A frame for no channel of ours is one more quiet read, not quiet at
+ * once: on a talking bus with strays among the replies, health would
+ * otherwise flip between ok and quiet frame by frame. A reply sets ok,
+ * then a stray follows (header 0x7D0; the filter registered 0x7E8), and
+ * 300 ms on the link still reads ok, since the stray and the empty reads
+ * after it are a few of the ten the debounce needs. It goes quiet when
+ * they run out, with no episode. The passive URI keeps requests out of
+ * it. */
+TEST_P(J2534HealthTest, UnmatchedFrameCountsAsAQuietRead)
 {
     ASSERT_NO_FATAL_FAILURE(start_session("?profile=raw&filter=0x7E8"));
 
-    /* Force hard failure, then deliver something the adapter DID read */
-    ASSERT_NO_FATAL_FAILURE(knob("ECUIO_FAKE_READ_STATUS", "7"));
-
+    const uint8_t reply[8] = {0x00, 0x00, 0x07, 0xE8, 0x41, 0x0C, 0x1F, 0x40};
+    ASSERT_TRUE(fake_control::post(page, reply, sizeof(reply), 1000, 0));
+    ASSERT_TRUE(wait_for_frames(1, 2000)) << "the reply never arrived";
     int32_t le = 0;
     uint32_t ec = 0;
-    EXPECT_TRUE(wait_for_state(session, ECUIO_ERR_TRANSPORT_HARD_FAILURE,
-                               5000, le, ec));
-    EXPECT_EQ(ec, 1u);
+    (void)ecuio_session_get_error_state(session, &le, &ec);
+    ASSERT_EQ(le, ECUIO_OK);
 
-    /* Header 0x7D0: no channel's rx ID (the filter registered 0x7E8).
-     * Gating is off, so the fake delivers it; the transport decides. */
-    const uint8_t unmatched[12] = {
+    const uint8_t stray[12] = {
         0x00, 0x00, 0x07, 0xD0,
-        0x62, 0xF1, 0x90, 0x2A, 0, 0, 0, 0
+        0x62, 0x1E, 0x1C, 0x2A, 0, 0, 0, 0
     };
-    ASSERT_TRUE(fake_control::post(page, unmatched, sizeof(unmatched),
-                                   1000, 0));
-    ASSERT_NO_FATAL_FAILURE(knob("ECUIO_FAKE_READ_STATUS", nullptr));
+    ASSERT_TRUE(fake_control::post(page, stray, sizeof(stray), 1100, 0));
+    std::this_thread::sleep_for(std::chrono::milliseconds(300));
+    (void)ecuio_session_get_error_state(session, &le, &ec);
+    EXPECT_EQ(le, ECUIO_OK) << "one stray frame read as a quiet bus";
+    EXPECT_EQ(frames.load(), 1) << "the stray was dispatched";
 
-    EXPECT_TRUE(wait_for_state(session, ECUIO_ERR_VEHICLE_TIMEOUT, 900,
-                               le, ec))   /* < the debounce */
-        << "unmatched frame did not degrade to quiet (was " << le << ")";
-    EXPECT_EQ(ec, 1u) << "unmatched frame added an episode";
+    EXPECT_TRUE(wait_for_state(session, ECUIO_ERR_VEHICLE_TIMEOUT, 5000,
+                               le, ec))
+        << "the quiet run never ended (was " << le << ")";
+    EXPECT_EQ(ec, 0u) << "going quiet added an episode";
 }
 
 /* The backoff GROWS under sustained hard failure. Writes continue as
@@ -572,11 +640,10 @@ TEST_P(J2534HealthTest, VxNoAckBusAcceptsThreeWritesThenRequestsFail)
  * ==================================================================== */
 
 /* On the VX each write's indication is queued ahead of its reply, and
- * the reply, 4 ms behind, comes back in the same cycle's drain, before
- * the next write. In-proc the loader reads a message at a time; had the
- * skipped indication ended the read, the drain would stop there and
- * every reply would land a cycle late. */
-TEST_P(J2534HealthTest, VxReplyArrivesInItsOwnRequestsCycle)
+ * the reply, 4 ms behind, comes back before the next request: the
+ * indication is no answer, so the request stays outstanding until the
+ * reply completes it. */
+TEST_P(J2534HealthTest, VxReplyArrivesBeforeTheNextRequest)
 {
     ASSERT_NO_FATAL_FAILURE(knob("ECUIO_FAKE_VX", "1"));
     ASSERT_NO_FATAL_FAILURE(start_session(""));
@@ -626,6 +693,223 @@ TEST_P(J2534HealthTest, IndicationsAheadOfAReplyAreSkipped)
     EXPECT_EQ(delivered.lengths[0], 4u);
     const uint8_t want[4] = {0x41, 0x0C, 0x1F, 0x40};
     EXPECT_EQ(memcmp(delivered.payloads[0], want, sizeof(want)), 0);
+}
+
+/* Beneath the worker, at the loader seam: a read that meets an
+ * indication reads on, so the reply queued behind it comes back from the
+ * same call, on both backends (in-proc the loader reads a message at a
+ * time, and the child a batch at a time). A read that stopped at the
+ * indication would cost the reply a read slice, which no session-level
+ * case can see. */
+TEST_P(J2534HealthTest, ReadPastAnIndicationReturnsTheReplyBehindIt)
+{
+    struct HandleGuard {
+        ecuio_j2534_handle_t* h = nullptr;
+        ~HandleGuard() { (void)ecuio_j2534_close(h); }
+    } guard;
+    ecuio_j2534_device_t dev = {};
+    strncpy_s(dev.dll_path, sizeof(dev.dll_path), dll.c_str(), _TRUNCATE);
+    ASSERT_EQ(ecuio_j2534_open(&dev, &guard.h), ECUIO_OK);
+    ASSERT_NO_FATAL_FAILURE(expect_opened_on_backend());
+    unsigned long ch = 0;
+    ASSERT_EQ(ecuio_j2534_connect_channel(guard.h, 0, 0, &ch), ECUIO_OK);
+
+    const uint8_t tx_done[4] = {0x00, 0x00, 0x07, 0xE0};
+    const uint8_t reply[8] = {0x00, 0x00, 0x07, 0xE8, 0x41, 0x0C, 0x1F, 0x40};
+    ASSERT_TRUE(fake_control::post(page, tx_done, sizeof(tx_done), 100,
+                                   ECUIO_PT_TX_MSG_TYPE |
+                                       ECUIO_PT_TX_INDICATION));
+    ASSERT_TRUE(fake_control::post(page, reply, sizeof(reply), 101, 0));
+
+    ecuio_frame_t f = {};
+    bool got = false;
+    EXPECT_EQ(ecuio_j2534_read_frame(guard.h, ch, &f, 500, &got), ECUIO_OK);
+    ASSERT_TRUE(got) << "the read stopped at the indication";
+    ASSERT_EQ(f.data_length, sizeof(reply));
+    EXPECT_EQ(memcmp(f.data, reply, sizeof(reply)), 0);
+    EXPECT_EQ(ecuio_j2534_disconnect_channel(guard.h, ch), ECUIO_OK);
+}
+
+/* ====================================================================
+ * The request engine (ADR-0015): one request outstanding per channel,
+ * the next sent when the reply is in, or when the 100 ms wait runs out,
+ * and never sooner than the 20 ms floor after the last. The passive
+ * drain is here too.
+ * ==================================================================== */
+
+/* The fake answers at once, so a second of obd2 brings about 50
+ * requests, one per floor, against the 10 a fixed 100 ms slot sent. The
+ * floor caps it: without one, an instant answer would bring the next
+ * request at once. */
+TEST_P(J2534HealthTest, RequestsFollowRepliesDownToTheFloor)
+{
+    ASSERT_NO_FATAL_FAILURE(start_session(""));
+    ASSERT_TRUE(wait_for_frames(3, 2000)) << "replies didn't arrive";
+
+    const uint32_t n = writes_during(page, 1000);
+    EXPECT_GE(n, 20u) << "requests didn't follow their replies";
+    EXPECT_LE(n, 55u) << "requests came faster than the floor";
+    int32_t le = 0;
+    uint32_t ec = 0;
+    (void)ecuio_session_get_error_state(session, &le, &ec);
+    EXPECT_EQ(le, ECUIO_OK);
+    EXPECT_EQ(ec, 0u);
+}
+
+/* On the VX a read holds its whole timeout unless the batch fills, and
+ * the surrogate asks for 16 messages, so a reply 4 ms after its request
+ * is seen only when the read ends. Reads capped at the 10 ms slice keep
+ * requests near the floor's pace on both backends; a read held for the
+ * 100 ms wait would leave about ten a second through the surrogate. */
+TEST_P(J2534HealthTest, VxRepliesAreSeenWithinASlice)
+{
+    ASSERT_NO_FATAL_FAILURE(knob("ECUIO_FAKE_VX", "1"));
+    ASSERT_NO_FATAL_FAILURE(start_session(""));
+    ASSERT_TRUE(wait_for_frames(3, 2000)) << "replies didn't arrive";
+
+    EXPECT_GE(writes_during(page, 1000), 20u)
+        << "replies waited for the read to end";
+    EXPECT_EQ(delivered.after_next_write.load(), 0)
+        << "replies landed after the next request";
+}
+
+/* PID 0x5D is one the fake's ECU doesn't support, and it answers
+ * 7F 01 12, as the first vehicle did for 0x5C. The negative reply ends
+ * the request like a positive one, so requests keep the floor's pace
+ * instead of waiting out 100 ms each, and the ECU answering keeps the
+ * link ok. */
+TEST_P(J2534HealthTest, NegativeReplyCompletesItsRequest)
+{
+    ASSERT_NO_FATAL_FAILURE(start_session("?profile=raw&filter=0x7E8&poll=0x5D"));
+    ASSERT_TRUE(wait_for_frames(3, 2000)) << "replies didn't arrive";
+
+    EXPECT_GE(writes_during(page, 1000), 20u)
+        << "each request waited out its wait";
+    int32_t le = 0;
+    uint32_t ec = 0;
+    (void)ecuio_session_get_error_state(session, &le, &ec);
+    EXPECT_EQ(le, ECUIO_OK);
+    EXPECT_EQ(ec, 0u);
+
+    ASSERT_NO_FATAL_FAILURE(close_session());
+    ASSERT_EQ(delivered.lengths[0], 3u);
+    const uint8_t want[3] = {0x7F, 0x01, 0x12};
+    EXPECT_EQ(memcmp(delivered.payloads[0], want, sizeof(want)), 0);
+}
+
+/* Replies 400 ms late: each request waits its 100 ms and times out, so
+ * about ten go out a second, and each late reply is still delivered,
+ * which keeps the link ok. Waiting for the replies instead would send
+ * about two and a half. */
+TEST_P(J2534HealthTest, UnansweredRequestWaitsOutItsWait)
+{
+    ASSERT_NO_FATAL_FAILURE(knob("ECUIO_FAKE_REPLY_DELAY_MS", "400"));
+    ASSERT_NO_FATAL_FAILURE(start_session(""));
+    ASSERT_TRUE(wait_for_frames(3, 3000)) << "late replies weren't delivered";
+
+    const uint32_t n = writes_during(page, 1000);
+    EXPECT_GE(n, 6u) << "requests waited for their late replies";
+    EXPECT_LE(n, 12u) << "requests didn't wait their 100 ms";
+    int32_t le = 0;
+    uint32_t ec = 0;
+    (void)ecuio_session_get_error_state(session, &le, &ec);
+    EXPECT_EQ(le, ECUIO_OK);
+}
+
+/* The fake's ECU answers each request "response pending" (7F 01 78) at
+ * once and the reply 300 ms later. Pending extends the request's wait,
+ * so the next request follows the reply, about one every 300 ms, and
+ * each reply arrives while its own request is the latest. Ending the
+ * wait at 100 ms instead would send three times as many, each reply
+ * landing after the next request. */
+TEST_P(J2534HealthTest, PendingReplyHoldsTheRequestForItsAnswer)
+{
+    ASSERT_NO_FATAL_FAILURE(knob("ECUIO_FAKE_PENDING", "1"));
+    ASSERT_NO_FATAL_FAILURE(knob("ECUIO_FAKE_REPLY_DELAY_MS", "300"));
+    ASSERT_NO_FATAL_FAILURE(start_session("?profile=raw&filter=0x7E8&poll=0x0C"));
+    ASSERT_TRUE(wait_for_frames(2, 3000)) << "nothing arrived";
+
+    const uint32_t n = writes_during(page, 1500);
+    EXPECT_GE(n, 2u) << "requests stopped";
+    EXPECT_LE(n, 7u) << "pending didn't extend the wait";
+    ASSERT_NO_FATAL_FAILURE(close_session());
+
+    const int got = (delivered.count.load() < 16) ? delivered.count.load() : 16;
+    uint32_t replies = 0;
+    for (int i = 0; i < got; ++i) {
+        if (delivered.payloads[i][0] == 0x7F) {
+            EXPECT_EQ(delivered.payloads[i][2], 0x78u) << "frame " << i;
+            continue;
+        }
+        ASSERT_EQ(delivered.payloads[i][0], 0x41u) << "frame " << i;
+        ++replies;
+        EXPECT_EQ(delivered.writes_at[i], replies)
+            << "reply " << replies << " came after the next request";
+    }
+    EXPECT_GE(replies, 2u);
+}
+
+/* Two ECUs, each on its channel, answer 60 ms after a request. Each
+ * channel waits only for its own reply, so both requests are out before
+ * either reply arrives, and both ECUs' replies come back. Test-only
+ * profile, static storage (the registry keeps the pointer). */
+TEST_P(J2534HealthTest, ChannelsWaitOnlyForTheirOwnReplies)
+{
+    static const ecuio_channel_decl_t kChannels[] = {{0x7E8u, 0x7E0u},
+                                                     {0x7E9u, 0x7E1u}};
+    static ecuio_signal_def_t defs[2] = {};
+    for (int i = 0; i < 2; ++i) {
+        defs[i].id = static_cast<uint16_t>(1 + i);
+        defs[i].kind = ECUIO_VALUE_UINT;
+        defs[i].start_byte = 2;
+        defs[i].bit_length = 8;
+        defs[i].scale = 1.0;
+        defs[i].message_id = kChannels[i].rx_id;
+        defs[i].mux_length = 2;
+    }
+    defs[0].mux_key = 0x410Cu;
+    defs[1].mux_key = 0x410Du;
+    static ecuio_signal_set_t set = {};
+    set.layout_version = ECUIO_SIGNAL_SET_LAYOUT;
+    set.count = 2;
+    set.defs = defs;
+    set.channel_count = 2;
+    set.channels = kChannels;
+    ASSERT_EQ(ecuio_profile_register("test-two-ecus", &set, nullptr), ECUIO_OK);
+
+    ASSERT_NO_FATAL_FAILURE(knob("ECUIO_FAKE_REPLY_DELAY_MS", "60"));
+    ASSERT_NO_FATAL_FAILURE(start_session("?profile=test-two-ecus"));
+    ASSERT_TRUE(wait_for_frames(4, 3000)) << "replies didn't arrive";
+    ASSERT_NO_FATAL_FAILURE(close_session());
+
+    EXPECT_EQ(delivered.writes_at[0], 2u)
+        << "the second channel waited for the first channel's reply";
+    bool from[2] = {};
+    for (int i = 0; i < 4; ++i) {
+        from[0] = from[0] || delivered.ids[i] == 0x7E8u;
+        from[1] = from[1] || delivered.ids[i] == 0x7E9u;
+    }
+    EXPECT_TRUE(from[0]) << "no reply from 0x7E8";
+    EXPECT_TRUE(from[1]) << "no reply from 0x7E9";
+}
+
+/* Passive mode reads again at once after a frame, so a burst of 16 is
+ * delivered together rather than one per pass with a wait between. */
+TEST_P(J2534HealthTest, PassiveModeDrainsABurstWithoutWaiting)
+{
+    ASSERT_NO_FATAL_FAILURE(start_session("?profile=raw&filter=0x7E8"));
+
+    const auto t0 = std::chrono::steady_clock::now();
+    for (uint8_t i = 0; i < 16; ++i) {
+        const uint8_t msg[6] = {0x00, 0x00, 0x07, 0xE8, 0x41, i};
+        ASSERT_TRUE(fake_control::post(page, msg, sizeof(msg), 1000u + i, 0))
+            << "message " << int{i};
+    }
+    ASSERT_TRUE(wait_for_frames(16, 3000));
+    const auto took = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now() - t0).count();
+    EXPECT_LT(took, 250) << "the burst was read one frame per pass";
+    EXPECT_EQ(frames.load(), 16);
 }
 
 INSTANTIATE_TEST_SUITE_P(Backend, J2534HealthTest,

@@ -84,7 +84,8 @@ Dates are commit dates.
 | 2026-10-23 | A contributing guide, the README's feedback section, and the OpenSSF Best Practices badge | `6068885`, `9f8f425`, `c093185` |
 | 2026-10-23 | Small fixes: link health counts a write the vendor reports as unsent as failed, and its backoff ends at the first clean read (a silent bus after a hard failure read "Adapter fault" for 26 s); the surrogate child checks `OP_INJECT`'s length and refuses device and channel ops before open and connect; tests for ID 0 and a late `OP_READ` reply; Qt 6.12 required; Known Issue #8 closed | `7eb7af0` |
 | 2026-10-23 | The J2534 helpers below the connect path take ADR-0018's codes on both backends: a vendor's refusal, a surrogate that stopped answering and a bad shape no longer read alike ([ADR-0018](adr/0018-connect-failure-reporting.md), appendix) | `76189e7` |
-| 2026-10-23 | `ecuio_init` and `ecuio_shutdown` are documented as the optional no-ops they are, and the UI's init-failure paths, which could never run, are gone | — |
+| 2026-10-23 | `ecuio_init` and `ecuio_shutdown` are documented as the optional no-ops they are, and the UI's init-failure paths, which could never run, are gone | `cf03331` |
+| 2026-10-23 | The request engine ([ADR-0015](adr/0015-request-engine.md), accepted): requests derive from the defs, Service 01 and 0x22, and follow the replies, one out per channel, with a 100 ms wait and a 20 ms floor; one worker loop for the rotation, `?poll=` and passive receive, each draining what has arrived; registration caps a set at 128 requests; a frame for no channel counts as a quiet read, and a hard failure steps down to requests failing when reads recover (Known Issue #11 closed) | — |
 
 ## Lessons learned
 
@@ -701,3 +702,16 @@ backoff, since the adapter answered, and a hard read starts it again,
 so a dead adapter still isn't probed at the request cadence. A
 count-based debounce needs its count checked against the slowest rate
 its events can arrive at.
+
+**2026-10-23 — the request engine:** **a rewrite can leave a test
+passing for the wrong reason.** `VxReplyArrivesInItsOwnRequestsCycle`
+was written to catch an in-proc read that stopped at a TX indication:
+under the fixed slot, the drain ended at that read and every reply
+landed a cycle late. Under the request engine the same broken read
+still got each reply in before the next request, because the engine
+waits for the reply whatever one read returns. The test passed with
+the read-on removed, and each reply would have cost a read slice that
+nothing measured. Rerunning the old mutation after the rewrite found
+it, and a test at the loader seam now pins the read itself. When the
+code around a test changes how a failure shows, rerun the test's
+mutation, not only the test.

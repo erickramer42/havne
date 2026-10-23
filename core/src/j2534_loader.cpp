@@ -628,7 +628,7 @@ ecuio_status_t ecuio_j2534_disconnect_channel(ecuio_j2534_handle_t* handle,
  *                                     on error)
  *
  * The worker turns these codes into link health, which callers read
- * through ecuio_session_get_error_state (#11). */
+ * through ecuio_session_get_error_state. */
 ecuio_status_t ecuio_j2534_read_frame(ecuio_j2534_handle_t* handle,
                                       unsigned long channel,
                                       ecuio_frame_t* out_frame,
@@ -644,7 +644,7 @@ ecuio_status_t ecuio_j2534_read_frame(ecuio_j2534_handle_t* handle,
         /* Surrogate path: the client maps pipe failure to
          * ECUIO_ERR_TRANSPORT_HARD_FAILURE and performs the same
          * timeout/empty/hard-error split on the batched OP_READ
-         * status (#11). */
+         * status. */
         return ecuio_j2534_sur_read_frame(handle->sur, channel,
                                           out_frame, timeout_ms,
                                           got_frame);

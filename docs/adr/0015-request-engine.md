@@ -1,14 +1,11 @@
 # ADR-0015: Request engine — correlated, response-paced requests derived from signal definitions
 
-- **Status:** Proposed. The structure below is decided. The values
-  listed under "Open until the first vehicle session" are set from
-  that session's measurements and recorded in a dated appendix; the
-  appendix moves this record to Accepted. On acceptance, ADR-0013's
-  status line points here for the parts this record supersedes. The
-  first vehicle session's measurements are in the appendix of
-  2026-10-22; the values are chosen with the engine work.
+- **Status:** Accepted. The values left open under "Open until the
+  first vehicle session" are chosen in the appendix of 2026-10-23,
+  from the measurements in the appendix of 2026-10-22. §1 to §3 are
+  built; §4, the probe, isn't yet.
 - **Date:** 2026-10-21
-- **Supersedes, on acceptance:** [ADR-0013](0013-protocol-profiles.md)
+- **Supersedes:** [ADR-0013](0013-protocol-profiles.md)
   §1's placement of request correlation in the profile, and §5's
   callback table as the plugin seam. Amends §3's probe semantics.
   Leaves §2 (static selection by URI), §4 (declared channels) and §6
@@ -291,3 +288,57 @@ chosen; these are the measurements they wait on.
 - **Refresh at ten PIDs under the fixed slot:** about 1.1 s per signal
   (requests every 100–123 ms on that laptop, 109–112 ms on average);
   `?poll=` ran at about 229 ms per request.
+
+## Appendix — the values, and the engine as built (2026-10-23)
+
+§1 to §3 are built: `core/src/request_engine.h` holds the engine, and
+the J2534 worker drives it in one loop for the rotation, `?poll=` and
+passive receive. The engine does no I/O and reads no clock; the
+worker passes the time in, writes the requests it hands out and gives
+it the frames it reads. So its rules are unit-tested with the time
+passed in (`RequestEngineTest`), and another transport could drive
+it. §4, the probe, isn't built yet. The values left open are these:
+
+| Value | Chosen | From |
+|---|---|---|
+| Wait | 100 ms | P2 (50 ms) plus 50 ms for the adapter. On the first vehicle the 95th percentile was 9–10 ms and the longest reply 83 ms (appendix of 2026-10-22), both timed from the write call's return, as the wait is |
+| Pending wait | 5.05 s | P2* (5 s), the same margin. The first vehicle sent no "response pending" |
+| Floor | 20 ms per channel | No vehicle has run the engine. At most 50 requests a second per channel, five times the fixed slot's rate the car handled; set again from the second vehicle session |
+| Read slice | 10 ms | The VX holds a read for its whole timeout unless the batch fills, and the surrogate asks for 16 messages; a read held for the wait would see a 4 ms reply only when it ended |
+| Requests per set | 128 | `ECUIO_PROFILE_MAX_REQUESTS`. More than the 44 PIDs the first vehicle supports in `0x01`–`0x60`, with room for DIDs |
+
+P2 and P2* are ISO 14229-2's defaults for the server's response time
+and the time after a pending reply, with the client adding its own
+latency on top (ΔP2): checked against a public summary of those timing
+parameters ([UDS time parameters](https://uds.readthedocs.io/en/latest/pages/knowledge_base/time_parameters.html)),
+not the ISO 15765-4 text.
+
+**What the engine does to the cadence.** A request goes out when the
+last one on its channel completes or its wait runs out, and never
+sooner than the floor after the last. A channel whose ECU answers
+within the floor gets a request every 20 ms, and a set of N PIDs on
+it refreshes each about every N × 20 ms, against N × 100 ms with the fixed slot
+(about 1.1 s per signal for `obd2`'s ten on the first vehicle).
+Against the fake, which answers at once and returns empty reads at
+once, it ran at 32 requests a second: the worker's own sleeps, in
+Windows' 15.6 ms steps, set the pace there. The vehicle figure is for
+the second session.
+
+**Link health with the engine.** §1 keeps the quiet debounce, counted
+in the requests' own unit: ten requests in a row whose wait ran out.
+In passive mode the unit stays the read, ten that brought nothing from
+an ECU we talk to. Two rules changed with it, both decided once
+replies correlated with requests:
+
+- A frame for no channel of ours is no longer quiet at once. It never
+  answers a request, so it can't move the state with requests; in
+  passive mode it counts as one quiet read. A stray among the replies
+  could otherwise flip the state frame by frame.
+- A clean read while the adapter is hard-failed and the write latch is
+  set steps down to `ECUIO_ERR_REQUEST_FAILED`, with no new episode:
+  the adapter reads again, so what fails is the requests. Before, the
+  state stayed "adapter fault" until a write went through.
+
+**Still open:** the floor's value; the refresh policy once a set grows
+(rate classes, or a curated set beside a full one); several PIDs per
+Service 01 request; decoding on the worker thread.
