@@ -1,8 +1,9 @@
 // File/layer: app/qttunebridge.cpp | Qt6 Core, app layer, C++17
 // Testing: test_bridge (QtCore only): worker→GUI marshaling, coalescing,
 //          in-flight backpressure, the signal model's roles and age
-//          refresh, link-state mapping, session recording
-//          (BridgeTest.Recording*). QML rendering: manual smoke.
+//          refresh, link-state mapping, the activity log's session and
+//          ECU lines, session recording (BridgeTest.Recording*). QML
+//          rendering: manual smoke.
 
 #include "qttunebridge.h"
 #include "ecuio/version.h"
@@ -327,6 +328,7 @@ QtTuneBridge::QtTuneBridge(QObject* parent)
 
     connect(m_coalesceTimer, &QTimer::timeout, this, [this]() {
         pollLinkHealth();   // every tick while connected — transitions only
+        pollChannelSupport();
         // Must fire even when nothing arrived this window: dimming exists
         // for rows that STOPPED updating. 100 ms is well
         // inside the 3 s dim threshold and the span emission is one
@@ -512,8 +514,14 @@ void QtTuneBridge::applyConnectedState(ecuio_session_t* session, const QString& 
 
     emit logMessage(QStringLiteral("Connected: %1").arg(uri));
     ecuio_session_info_t info{};
+    m_channelCount = 0;
     if (ecuio_session_get_info(session, &info) == ECUIO_OK) {
         emit logMessage(sessionInfoText(info));
+        m_channelCount = std::min<uint32_t>(info.channel_count,
+                                            ECUIO_SESSION_INFO_MAX_CHANNELS);
+    }
+    for (uint32_t& g : m_supportGeneration) {
+        g = 0;
     }
 }
 
@@ -926,6 +934,110 @@ void QtTuneBridge::pollLinkHealth()
                             .arg(m_errorEpisodes));
     }
     emit linkStateChanged();
+}
+
+/* What each channel's ECU said it supports (ADR-0015 §4), in the
+ * activity log once per update: the probe's walk ending, and each
+ * request it drops. Generation 0 is nothing learned yet. */
+void QtTuneBridge::pollChannelSupport()
+{
+    if (!m_connected.load(std::memory_order_acquire) || m_session == nullptr) {
+        return;
+    }
+    for (uint32_t c = 0; c < m_channelCount; ++c) {
+        ecuio_channel_support_t s{};
+        if (ecuio_session_get_channel_support(m_session, c, &s) != ECUIO_OK ||
+            s.generation == m_supportGeneration[c]) {
+            continue;
+        }
+        m_supportGeneration[c] = s.generation;
+        emit logMessage(channelSupportText(s));
+    }
+}
+
+/* One channel's "ECU 0x…:" line: what its supported-PID bitmaps list,
+ * and which requests left the rotation, and why. Static, like
+ * sessionInfoText, so test_bridge pins the wording without an adapter. */
+QString QtTuneBridge::channelSupportText(const ecuio_channel_support_t& s)
+{
+    const auto hex = [](uint32_t v) {
+        return QStringLiteral("0x") + QString::number(v, 16).toUpper();
+    };
+    const auto byte = [](uint8_t b) {
+        return QStringLiteral("%1").arg(static_cast<uint>(b), 2, 16,
+                                        QLatin1Char('0')).toUpper();
+    };
+
+    QStringList parts;
+    if ((s.flags & ECUIO_SUPPORT_PROBED) != 0) {
+        /* Data PIDs: the chain's own (0x20, 0x40, ...) don't count, as
+         * the first vehicle's sheet counts them */
+        int pids = 0;
+        for (uint32_t pid = 1; pid <= 0xFF; ++pid) {
+            if (pid % 0x20 != 0 &&
+                (s.pid_bitmap[(pid - 1) / 8] & (0x80u >> ((pid - 1) % 8))) != 0) {
+                ++pids;
+            }
+        }
+        uint32_t top = 0;
+        for (uint32_t i = 0; i < 8; ++i) {
+            if ((s.ranges & (1u << i)) != 0) {
+                top = 0x20u * (i + 1);
+            }
+        }
+        if ((s.flags & ECUIO_SUPPORT_COMPLETE) != 0) {
+            parts << QStringLiteral("supports %1 PIDs").arg(pids);
+        } else if (s.ranges != 0) {
+            parts << QStringLiteral("supports %1 PIDs up to %2, no answer past that")
+                         .arg(pids).arg(hex(top));
+        } else {
+            parts << QStringLiteral("no answer to the supported-PID query");
+        }
+    }
+
+    QString requests = QStringLiteral("%1 request%2").arg(s.requests)
+                           .arg(s.requests == 1 ? QString() : QStringLiteral("s"));
+    if (s.dropped == 0) {
+        requests += QStringLiteral(", none dropped");
+    } else {
+        QStringList gone;
+        const uint32_t listed = std::min<uint32_t>(s.dropped, ECUIO_SUPPORT_MAX_DROPPED);
+        for (uint32_t i = 0; i < listed; ++i) {
+            const ecuio_dropped_request_t& d = s.dropped_list[i];
+            QStringList key;
+            for (uint8_t k = 0; k < d.length && k < sizeof(d.request); ++k) {
+                key << byte(d.request[k]);
+            }
+            const QString nrc = QStringLiteral("7F %1 %2").arg(byte(d.request[0]),
+                                                               byte(d.nrc));
+            QString why;
+            switch (d.reason) {
+                case ECUIO_DROP_BITMAP:
+                    why = QStringLiteral("not in its supported PIDs");
+                    break;
+                case ECUIO_DROP_NOT_SUPPORTED:
+                    why = QStringLiteral("not supported: ") + nrc;
+                    break;
+                case ECUIO_DROP_SERVICE:
+                    why = QStringLiteral("service not supported: ") + nrc;
+                    break;
+                case ECUIO_DROP_ACCESS:
+                    why = QStringLiteral("needs security access or another session: ") + nrc;
+                    break;
+                default:
+                    why = QStringLiteral("reason %1").arg(static_cast<uint>(d.reason));
+                    break;
+            }
+            gone << key.join(QLatin1Char(' ')) + QStringLiteral(" (") + why + QLatin1Char(')');
+        }
+        if (s.dropped > listed) {
+            gone << QStringLiteral("and %1 more").arg(s.dropped - listed);
+        }
+        requests += QStringLiteral(", %1 dropped: ").arg(s.dropped) +
+                    gone.join(QStringLiteral(", "));
+    }
+    parts << requests;
+    return QStringLiteral("ECU %1: ").arg(hex(s.rx_id)) + parts.join(QStringLiteral("; "));
 }
 
 /* The published state strings, in one place; QML's Theme.linkColor and

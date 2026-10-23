@@ -24,9 +24,10 @@ backends against a fake modelled on the VX, a failed connect says why
 ([ADR-0018](docs/adr/0018-connect-failure-reporting.md)), a session
 says what it runs on ([ADR-0019](docs/adr/0019-session-info.md)),
 J2534 frames carry session time, the QML pages and the signal decoder
-have tests of their own (Qt Quick Test, libFuzzer), and requests follow
+have tests of their own (Qt Quick Test, libFuzzer), requests follow
 the ECU's replies instead of a fixed slot
-([ADR-0015](docs/adr/0015-request-engine.md)). Next is the plan in
+([ADR-0015](docs/adr/0015-request-engine.md)), and the probe drops
+what each ECU says it doesn't support. Next is the plan in
 [After v0.3.0](#after-v030).
 
 - **Works:**
@@ -71,6 +72,15 @@ the ECU's replies instead of a fixed slot
     than 20 ms after the last; every mode drains what has arrived.
     Against the fake that's about 30 requests a second, where the fixed
     slot sent 10. No vehicle has run it yet.
+  - The PID-support probe (ADR-0015 §4): before its rotation, each
+    ECU's supported-PID bitmaps are read, and a request leaves the
+    rotation only when the ECU says it isn't supported (a clear bit, or
+    a negative reply that can't change in the session), never on
+    silence. A connect made with the ignition off reads them once the
+    ECU answers. The activity log names each ECU, what it supports and
+    what was dropped. `?probe=0` sends the set as written. On the first
+    vehicle's recorded bitmaps it drops `0x5C` alone; no vehicle has
+    run it yet.
   - Signal definitions
     ([ADR-0016](docs/adr/0016-signal-definition-layout.md)): each def
     states its value kind (unsigned, signed or
@@ -138,7 +148,7 @@ the ECU's replies instead of a fixed slot
     run sheets are
     [bench-runsheet.md](docs/bench-sessions/bench-runsheet.md) and
     [vehicle-runsheet.md](docs/bench-sessions/vehicle-runsheet.md).
-  - **Tests:** 306 ctest cases (Windows, Visual Studio 18 build
+  - **Tests:** 326 ctest cases (Windows, Visual Studio 18 build
     tools, both trees rebuilt, 2026-10-23), the QML suites
     among them, plus the cross-arch subset (67/67). All passed except
     the env-gated cross-arch skip. Every first-party target builds with
@@ -265,7 +275,8 @@ Contracts along this path:
   - [x] first live, read-only vehicle session, 2026-10-22
     ([session sheet](docs/bench-sessions/2026-10-22-vehicle.md))
 - [x] **Protocol profiles** (ADR-0013), slices 1–3. The PID-support
-      probe and `uds-generic` are [after v0.3.0](#after-v030):
+      probe came after the tag, and `uds-generic` is next
+      ([after v0.3.0](#after-v030)):
   - [x] slice 1: profile registry, `raw` profile, `?profile=`
         override, bridge reads the session's active signal set
   - [x] slice 2: the `obd2` signal set and the multi-PID scheduler
@@ -295,9 +306,9 @@ measurements feed the first item.
    built, HARNESS-tested on both backends. Its floor between requests
    is chosen without a vehicle run; the second vehicle session
    measures it on the car.
-2. **The `obd2` PID-support probe,** on the request engine: walk the
-   supported-PID bitmaps per channel and drop what the ECU says it
-   doesn't support.
+2. **The `obd2` PID-support probe** (ADR-0015 §4, and its appendix
+   of 2026-10-23 on the probe as built): built, HARNESS-tested; the
+   second vehicle session checks it on the car.
 3. **`uds-generic`** (ADR-0013): Mode-22 DID reads with user-entered
    DIDs, the tool for researching a manufacturer set on the car.
 4. **Phase 4, record-replay transport,** independent of the others:
@@ -573,9 +584,11 @@ in the backlog.
   the whole SAE J1979 Service 01 table, including PIDs that carry two
   values (oxygen sensors with fuel trims), which need two defs on one
   PID.
-  - Depends on the PID-support probe ([after v0.3.0](#after-v030)): until the
-    ECU's support bitmaps prune the rotation, every PID in a set costs
-    a request, and one the ECU never answers costs its 100 ms wait.
+  - The probe drops the PIDs a car's bitmaps mark unsupported, so a
+    bigger set costs only the ones the car has. Each kept PID still
+    costs a request per pass, so the refresh policy ADR-0015 leaves
+    open (rate classes, or a curated set beside a full one) comes with
+    it.
   - Verify each PID's meaning and formula against a public J1979
     table. The fake's canned replies share the def's assumptions, so
     the tests can't catch a wrong PID.
@@ -603,11 +616,6 @@ in the backlog.
   above: a user-facing expression per channel (differences, unit
   conversions, smoothing). Stays in core per rule 2, and is the same
   data-describing-arithmetic shape ADR-0015 uses for requests.
-- **Surface which ECU answered (S).** The PID-support probe
-  ([after v0.3.0](#after-v030)) is to walk the supported-PID chain per channel, but
-  nothing in the UI shows which module replied on which channel.
-  Matters the day a probe finds three modules talking; the channel
-  model already holds the answer.
 
 ### Editing and write path (v0.4+; nothing below is scheduled)
 

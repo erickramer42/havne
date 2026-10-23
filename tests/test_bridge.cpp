@@ -1298,6 +1298,30 @@ TEST(BridgeTest, ConnectLogsTheAdaptersSession)
               "firmware fake-fw 1.0, DLL fake_j2534 0.3, API 04.04");
     ASSERT_TRUE(disconnectAndWait(bridge));
 }
+
+/* The probe's answer reaches the activity log once: the fake's ECU lists
+ * the obd2 set's ten PIDs across its three bitmaps, so nothing is
+ * dropped. */
+TEST(BridgeTest, ConnectLogsWhatTheEcuSupports)
+{
+    QtTuneBridge bridge;
+    QStringList log;
+    QObject::connect(&bridge, &QtTuneBridge::logMessage,
+                     [&log](const QString& line) { log << line; });
+    const QString uri = QStringLiteral("j2534://%1")
+                            .arg(QString::fromUtf8(FAKE_J2534_DLL_PATH));
+    ASSERT_TRUE(bridge.connectSession(uri).isEmpty());
+    const auto ecu_lines = [&log]() {
+        return log.filter(QStringLiteral("ECU 0x7E8:"));
+    };
+    ASSERT_TRUE(spinUntil([&]() { return !ecu_lines().isEmpty(); }, 5000))
+        << "no ECU line in the log";
+    spinLoop(300);
+    ASSERT_EQ(ecu_lines().size(), 1) << ecu_lines().join('\n').toStdString();
+    EXPECT_EQ(ecu_lines().first().toStdString(),
+              "ECU 0x7E8: supports 10 PIDs; 10 requests, none dropped");
+    ASSERT_TRUE(disconnectAndWait(bridge));
+}
 #endif  // _WIN32
 
 // ---------------------------------------------------------------------------
@@ -1419,6 +1443,66 @@ TEST(BridgeTest, SessionInfoTextNamesTheAdapter)
               "Session: x64 DLL, in-proc; ISO 15765 at 250000 baud, flags 0x100; "
               "profile raw, channel 0x18DAF110/0x18DA10F1 (rx/tx); "
               "no battery reading; no version reading");
+}
+
+/* The "ECU 0x…:" line's wording, from hand-built reports: the first
+ * vehicle's three bitmaps (docs/bench-sessions/2026-10-22-vehicle.md:
+ * 44 data PIDs to 0x60, whose bit says a fourth exists), a chain
+ * answered to its end, one unanswered, and requests dropped for each
+ * reason, past the eight a report lists. */
+TEST(BridgeTest, ChannelSupportTextNamesTheEcuAndWhatItDropped)
+{
+    ecuio_channel_support_t car{};
+    car.flags = ECUIO_SUPPORT_PROBED;
+    car.rx_id = 0x7E8;
+    car.requests = 10;
+    car.ranges = 0x7;
+    const uint8_t bitmaps[12] = {0xFE, 0x7F, 0xA8, 0x13, 0xA0, 0x17,
+                                 0xF0, 0x11, 0xFE, 0xD0, 0x8C, 0x81};
+    memcpy(car.pid_bitmap, bitmaps, sizeof(bitmaps));
+    car.dropped = 1;
+    car.dropped_list[0] = {{0x01, 0x5C, 0x00}, 2, ECUIO_DROP_BITMAP, 0, {0, 0}};
+    EXPECT_EQ(QtTuneBridge::channelSupportText(car).toStdString(),
+              "ECU 0x7E8: supports 44 PIDs up to 0x60, no answer past that; "
+              "10 requests, 1 dropped: 01 5C (not in its supported PIDs)");
+
+    ecuio_channel_support_t all{};
+    all.flags = ECUIO_SUPPORT_PROBED | ECUIO_SUPPORT_COMPLETE;
+    all.rx_id = 0x18DAF110;
+    all.requests = 1;
+    all.ranges = 0x1;
+    all.pid_bitmap[0] = 0x81;   /* PIDs 01 and 08 */
+    EXPECT_EQ(QtTuneBridge::channelSupportText(all).toStdString(),
+              "ECU 0x18DAF110: supports 2 PIDs; 1 request, none dropped");
+
+    ecuio_channel_support_t part = all;
+    part.flags = ECUIO_SUPPORT_PROBED;
+    part.ranges = 0;
+    part.pid_bitmap[0] = 0;
+    EXPECT_EQ(QtTuneBridge::channelSupportText(part).toStdString(),
+              "ECU 0x18DAF110: no answer to the supported-PID query; "
+              "1 request, none dropped");
+
+    ecuio_channel_support_t dids{};
+    dids.rx_id = 0x7E9;
+    dids.requests = 12;
+    dids.dropped = 10;
+    dids.dropped_list[0] = {{0x22, 0x1E, 0x1D}, 3, ECUIO_DROP_NOT_SUPPORTED, 0x31, {0, 0}};
+    dids.dropped_list[1] = {{0x22, 0x1E, 0x1E}, 3, ECUIO_DROP_ACCESS, 0x33, {0, 0}};
+    for (int i = 2; i < ECUIO_SUPPORT_MAX_DROPPED; ++i) {
+        dids.dropped_list[i] = {{0x22, 0x40, static_cast<uint8_t>(i)}, 3,
+                                ECUIO_DROP_SERVICE, 0x11, {0, 0}};
+    }
+    EXPECT_EQ(QtTuneBridge::channelSupportText(dids).toStdString(),
+              "ECU 0x7E9: 12 requests, 10 dropped: "
+              "22 1E 1D (not supported: 7F 22 31), "
+              "22 1E 1E (needs security access or another session: 7F 22 33), "
+              "22 40 02 (service not supported: 7F 22 11), "
+              "22 40 03 (service not supported: 7F 22 11), "
+              "22 40 04 (service not supported: 7F 22 11), "
+              "22 40 05 (service not supported: 7F 22 11), "
+              "22 40 06 (service not supported: 7F 22 11), "
+              "22 40 07 (service not supported: 7F 22 11), and 2 more");
 }
 
 TEST(BridgeTest, ConnectLogsTheMockSession)

@@ -79,8 +79,10 @@ decode.
 | `j2534://[vendor or DLL path][?query]` | J2534, Windows only | `obd2` |
 | any URI with `?profile=raw` | as above | `raw` (log only, no decode) |
 
-Both schemes share one strict query grammar (`core/src/uri_query.h`),
-and each rejects keys it doesn't take; `mock://` takes only `profile`.
+Both schemes share one strict query grammar (`core/src/uri_query.h`).
+`ecuio_session_create` splits the query once and refuses any key the
+scheme's transport doesn't take, before anything attaches; `mock://`
+takes only `profile`.
 
 A **profile** is a named signal set ([ADR-0013](adr/0013-protocol-profiles.md)).
 - **Signal defs:** each def says where its value sits in a frame
@@ -158,7 +160,10 @@ The full reference is [j2534.md](j2534.md).
   requests from the defs (`41 <PID>` asks for `01 <PID>`, `62 <DID>`
   for `22 <DID>`), sends only reads, keeps one request out per
   channel and sends the next when the reply is in, after a 100 ms wait
-  at most and no sooner than 20 ms after the last.
+  at most and no sooner than 20 ms after the last. Before a channel's
+  rotation, its probe reads the ECU's supported-PID bitmaps, and a
+  request leaves only when the ECU says it isn't supported, never on
+  silence.
 - **Teardown order is a hard contract:** join the worker → stop the
   filters → disconnect → close → unload. The worker calls vendor code
   through pointers that dangle once the DLL unmaps.

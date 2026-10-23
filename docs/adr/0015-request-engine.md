@@ -2,8 +2,9 @@
 
 - **Status:** Accepted. The values left open under "Open until the
   first vehicle session" are chosen in the appendix of 2026-10-23,
-  from the measurements in the appendix of 2026-10-22. §1 to §3 are
-  built; §4, the probe, isn't yet.
+  from the measurements in the appendix of 2026-10-22. §1 to §4 are
+  built; the probe's details as built are in the second appendix of
+  2026-10-23.
 - **Date:** 2026-10-21
 - **Supersedes:** [ADR-0013](0013-protocol-profiles.md)
   §1's placement of request correlation in the profile, and §5's
@@ -342,3 +343,59 @@ replies correlated with requests:
 **Still open:** the floor's value; the refresh policy once a set grows
 (rate classes, or a curated set beside a full one); several PIDs per
 Service 01 request; decoding on the worker thread.
+
+## Appendix — the probe as built (2026-10-23)
+
+§4 is built in `core/src/request_engine.h` and driven by the J2534
+worker. These are the choices it makes where §4 left room:
+
+- **The walk.** Each channel with Service 01 requests asks `01 00`
+  before its rotation starts, then each next bitmap while the last bit
+  of the one before is set, up to `01 E0`, one request at a time
+  through the channel's one-shot slot. A bitmap reply is `41 <PID>` and
+  four bytes, and PID base + k is bit `0x80 >> ((k - 1) % 8)` of byte
+  `(k - 1) / 8`: the first byte's top bit is PID base + 1. Checked
+  against Wikipedia's "OBD-II PIDs" (its worked example, `BE 1F A8 13`,
+  is a unit test) and the python-OBD library, which reads a bitmap only
+  when the one before marks it and takes the PIDs past an unmarked one
+  as unsupported. The engine follows that convention: a clear last bit
+  ends the chain and marks every later PID unsupported. The J1979 text
+  itself wasn't consulted.
+- **What drops.** §4's table, with one code added: negative 0x12
+  (sub-function not supported) drops its request, as 0x31 does. It's
+  what the first vehicle answered for PID 0x5C. While the probe is on,
+  the table applies to every reply, not only the walk's: a DID's first
+  request in the rotation is its probe, so Service 0x22 gets no pass of
+  its own, and a PID the walk didn't reach still leaves when the ECU
+  refuses it.
+- **Late negative replies.** A negative reply carries the service but
+  not the PID or DID, so one that arrives after its request timed out
+  would read as the answer to the request out now. A channel is out of
+  step from a timeout until its next positive reply, which does carry
+  the key, and a negative reply drops nothing while it is. An ECU
+  answers in order, so after a positive reply the late ones are past.
+- **Resuming.** The walk resumes whenever the link returns to
+  `ECUIO_OK` from any other state, not only from quiet and
+  requests-failing. It starts again at the first bitmap that wasn't
+  answered; a channel whose chain was answered to its end isn't walked
+  again, since its answers can't change, and a dropped request stays
+  dropped.
+- **The budget.** 1 s per run (`ECUIO_ENGINE_PROBE_BUDGET_US`), room
+  for all eight bitmaps at a full 100 ms wait each. No bitmap request
+  goes out after it; one already out is waited for like any other. On
+  the first vehicle the walk asks at least four bitmaps, about 100 ms at
+  the floor.
+- **`?probe=0`** turns off the walk and the drops, so the rotation is
+  the set as written: for research, where every refusal should keep
+  showing. `?poll=` implies it, since it sends its one request as asked.
+- **What's reported.** `ecuio_session_get_channel_support` (`core.h`)
+  gives each channel's answers: the bitmaps and which ranges came back,
+  whether the chain was answered to its end, and the dropped requests
+  with the reason and the code. The bridge logs a line per update, such
+  as "ECU 0x7E8: supports 44 PIDs up to 0x60, no answer past that; 10
+  requests, 1 dropped: 01 5C (not in its supported PIDs)", which also
+  says which module answered on which channel.
+- **The first vehicle.** With its bitmaps (appendix of 2026-10-22;
+  `RequestEngineTest.TheFirstVehiclesBitmapsDropOnly0x5C`), the walk
+  drops 0x5C and nothing else. The second vehicle session checks it on
+  the car.

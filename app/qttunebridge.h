@@ -227,6 +227,7 @@ public:
     QString linkState() const;
     static QString linkStateForError(int32_t errorCode);  /* code → state string; static so tests need no session */
     static QString sessionInfoText(const ecuio_session_info_t& info);  /* the activity log's "Session:" line */
+    static QString channelSupportText(const ecuio_channel_support_t& support);  /* its "ECU 0x…:" lines */
 
     Q_INVOKABLE QString statusString(int statusCode) const;
     Q_INVOKABLE int maxFrameCount() const { return FrameListModel::MaxFrames; }
@@ -342,6 +343,10 @@ private:
     void pollLinkHealth();
     int m_linkErrorCode = ECUIO_OK;
     uint32_t m_errorEpisodes = 0;
+    // What each channel's ECU said it supports, logged once per update
+    void pollChannelSupport();
+    uint32_t m_channelCount = 0;
+    uint32_t m_supportGeneration[ECUIO_SESSION_INFO_MAX_CHANNELS] = {};
 
     bool m_recording = false;
     SessionRecorder m_recorder;

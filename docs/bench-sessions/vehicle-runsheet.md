@@ -254,11 +254,18 @@ frame either way.
     j2534://OBDX Pro - VX
 
 **Expected:**
+- [ ] The probe first: the first writes are the bitmap requests
+      (`01 00`, `01 20`, `01 40`, and on while each bitmap's last bit
+      is set), then the rotation. The activity log gets one line for
+      the engine ECU, `ECU 0x7E8: supports N PIDs; 10 requests, …`,
+      naming each PID dropped. Against the first vehicle's bitmaps
+      that's `1 dropped: 01 5C (not in its supported PIDs)`, and N is
+      the data PIDs of every bitmap read, 44 for the three Phase 2
+      reads plus those of the next ones
 - [ ] Every `obd2` signal populates within about one rotation (a
       request every 20 ms or so while the ECU answers within that, so N
       PIDs take about N × 20 ms; well under a second for the current
-      set); a PID the ECU doesn't support draws `7F 01` and a code, and
-      stays "—"
+      set); a PID the probe dropped is never asked and stays "—"
 - [ ] Plausible engine-off values:
 
 | Signal | Expect (engine off) |
@@ -287,7 +294,8 @@ run on a vehicle, so the session log's `OP_WRITE frame` and
 `OP_READ frame` lines are the measurement: requests a second, each
 reply's time after its request, and whether every reply comes back
 before the next request (a reply after it means the 100 ms wait ran
-out first).
+out first). The probe's bitmap replies are in the same lines: they
+should match Phase 2's, byte for byte.
 
 ## Phase 4 — engine idling (the decode check)
 
@@ -329,6 +337,12 @@ ignition off, wait 10 s, then turn it back on.
       can be up to 5 s away, and the ECU needs a moment to wake. Record
       the time from ignition-on to the first value; longer than ~10 s
       is a finding
+- [ ] Optional, the probe on a cold connect: disconnect, connect with
+      the ignition off, then turn it on. The ECU line shows "no answer
+      to the supported-PID query" at first; once the link is ok the
+      walk resumes and a second line names what the ECU supports, as
+      in Phase 3. Silence must drop nothing: before ignition-on, the
+      first line says no request was dropped
 
 ## If it fails, suspect
 
