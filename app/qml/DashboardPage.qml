@@ -1,7 +1,8 @@
 // File/layer: app/qml/DashboardPage.qml | Qt6 Quick, UI layer
 // Testing: manual smoke — mock://demo drives every gauge; resize across
 //          760 px content width (4 ↔ 2 grid columns) and 600 px (compact
-//          gaps); gauges sweep once per session
+//          gaps), and to 1280 × 650 (the wide arrangement fits without
+//          scrolling); gauges sweep once per session
 
 import QtQuick
 import QtQuick.Controls
@@ -48,6 +49,38 @@ Page {
     Tap { id: throttle; names: ["Throttle Position"] }
     Tap { id: load;     names: ["Engine Load"] }
 
+    // Sizes for the gauge arrangements below
+    QtObject {
+        id: fit
+        readonly property real w: column.width
+        readonly property real g: root.gap
+        readonly property bool narrow: w < 760
+        readonly property real shiftHeight: root.compact ? 40 : 48
+        readonly property real barHeight: 96
+        // Everything but the dials and tiles: the page margins, the
+        // header, the shift lights, the bars and the column's three gaps
+        readonly property real fixedHeight: 2 * root.margin + header.implicitHeight
+                                            + 3 * g + shiftHeight + barHeight
+        // The stacked arrangement at full size decides whether the page
+        // needs the wide one
+        readonly property real stackedHeight: fixedHeight
+                                              + Math.min((w - g) / 2 * 0.88, 380) + g
+                                              + Math.min((w - 3 * g) / 4 * 1.05, 220)
+        readonly property bool wide: w >= 900 && stackedHeight > flick.height
+
+        readonly property int tileColumns: wide || narrow ? 2 : 4
+        readonly property real tileCell: ((wide ? (w - 2 * g) / 3 : w) - (tileColumns - 1) * g)
+                                         / tileColumns
+        // Wide: the two tile rows share what the page has left, down to a
+        // floor below which the page scrolls instead
+        readonly property real tileHeight: wide
+            ? Math.max(120, Math.min(tileCell * 1.05, 220, (flick.height - fixedHeight - g) / 2))
+            : Math.min(tileCell * 1.05, 220)
+        readonly property real dialWidth: wide ? (w - 2 * g) / 3 : narrow ? w : (w - g) / 2
+        readonly property real dialHeight: wide ? 2 * tileHeight + g
+                                                : Math.min(dialWidth * 0.88, 380)
+    }
+
     // Ignition-style sweep, once per session, the first time the page
     // is on screen while connected
     property bool sweptThisSession: false
@@ -81,7 +114,11 @@ Page {
         contentWidth: width
         contentHeight: column.implicitHeight + 2 * root.margin
         clip: true
-        ScrollBar.vertical: ScrollBar {}
+        // Shown whenever there's more below, not only while scrolling, so
+        // a short window says it scrolls
+        ScrollBar.vertical: ScrollBar {
+            policy: flick.contentHeight > flick.height ? ScrollBar.AlwaysOn : ScrollBar.AsNeeded
+        }
 
         ColumnLayout {
             id: column
@@ -92,6 +129,7 @@ Page {
 
             // ---- Header: title, link state, peak reset
             PageHeader {
+                id: header
                 title: qsTr("Dashboard")
 
                 Rectangle {
@@ -117,41 +155,43 @@ Page {
                 }
             }
 
-            // ---- Gauges. Four columns when there's room, else two:
-            // dials span two columns (so stack on a phone), rings and
-            // tiles take one, bars two.
-            GridLayout {
-                id: grid
+            // ---- Gauges, in one of three arrangements:
+            // - stacked: the two dials side by side, the four tiles in a
+            //   row below them, then the two bars;
+            // - narrow (a phone): one dial per row, the tiles 2 × 2, one
+            //   bar per row;
+            // - wide, when the stacked arrangement would overflow a short,
+            //   wide page (a 1080p laptop at 150 % scaling): the two dials
+            //   and the tiles, 2 × 2, side by side in one row sized to the
+            //   page's height.
+            // Each grid holds only single-cell items, so uniformCellWidths
+            // keeps its columns equal.
+            GaugeCard {
                 Layout.fillWidth: true
-                columns: column.width >= 760 ? 4 : 2
+                Layout.preferredHeight: fit.shiftHeight
+                padding: 8
+                ShiftLightBar {
+                    id: shiftLights
+                    anchors.fill: parent
+                    count: root.compact ? 11 : 15
+                    ledSpacing: root.compact ? 6 : 10
+                    label: qsTr("Shift lights")
+                    value: rpm.value; hasValue: rpm.live; stale: rpm.stale
+                    from: 4500; to: 6500
+                }
+            }
+
+            GridLayout {
+                id: dials
+                Layout.fillWidth: true
+                columns: fit.wide ? 3 : fit.narrow ? 1 : 2
                 columnSpacing: root.gap
                 rowSpacing: root.gap
                 uniformCellWidths: true
 
-                readonly property real cellWidth: (column.width - (columns - 1) * columnSpacing) / columns
-                readonly property real dialHeight: Math.min((2 * cellWidth + columnSpacing) * 0.88, 380)
-                readonly property real tileHeight: Math.min(cellWidth * 1.05, 220)
-
                 GaugeCard {
-                    Layout.columnSpan: grid.columns
                     Layout.fillWidth: true
-                    Layout.preferredHeight: root.compact ? 40 : 48
-                    padding: 8
-                    ShiftLightBar {
-                        id: shiftLights
-                        anchors.fill: parent
-                        count: root.compact ? 11 : 15
-                        ledSpacing: root.compact ? 6 : 10
-                        label: qsTr("Shift lights")
-                        value: rpm.value; hasValue: rpm.live; stale: rpm.stale
-                        from: 4500; to: 6500
-                    }
-                }
-
-                GaugeCard {
-                    Layout.columnSpan: 2
-                    Layout.fillWidth: true
-                    Layout.preferredHeight: grid.dialHeight
+                    Layout.preferredHeight: fit.dialHeight
                     AnalogGauge {
                         id: tach
                         anchors.fill: parent
@@ -170,9 +210,8 @@ Page {
                     }
                 }
                 GaugeCard {
-                    Layout.columnSpan: 2
                     Layout.fillWidth: true
-                    Layout.preferredHeight: grid.dialHeight
+                    Layout.preferredHeight: fit.dialHeight
                     AnalogGauge {
                         id: speedo
                         anchors.fill: parent
@@ -188,73 +227,90 @@ Page {
                     }
                 }
 
-                GaugeCard {
+                // The tiles: four in a row below the dials, or 2 × 2
+                GridLayout {
+                    Layout.columnSpan: fit.wide ? 1 : dials.columns
                     Layout.fillWidth: true
-                    Layout.preferredHeight: grid.tileHeight
-                    RingGauge {
-                        id: coolantRing
-                        anchors.fill: parent
-                        label: qsTr("Coolant")
-                        unit: coolant.unit || "°C"
-                        decimals: coolant.decimals
-                        value: coolant.value; hasValue: coolant.live; stale: coolant.stale
-                        note: coolant.note
-                        // From 0 °C, so a cold engine at ambient reads on
-                        // the scale instead of pinning at its start
-                        from: 0; to: 130
-                        coldBelow: 60; warnFrom: 105; dangerFrom: 115
+                    columns: fit.tileColumns
+                    columnSpacing: root.gap
+                    rowSpacing: root.gap
+                    uniformCellWidths: true
+
+                    GaugeCard {
+                        Layout.fillWidth: true
+                        Layout.preferredHeight: fit.tileHeight
+                        RingGauge {
+                            id: coolantRing
+                            anchors.fill: parent
+                            label: qsTr("Coolant")
+                            unit: coolant.unit || "°C"
+                            decimals: coolant.decimals
+                            value: coolant.value; hasValue: coolant.live; stale: coolant.stale
+                            note: coolant.note
+                            // From 0 °C, so a cold engine at ambient reads on
+                            // the scale instead of pinning at its start
+                            from: 0; to: 130
+                            coldBelow: 60; warnFrom: 105; dangerFrom: 115
+                        }
+                    }
+                    GaugeCard {
+                        Layout.fillWidth: true
+                        Layout.preferredHeight: fit.tileHeight
+                        RingGauge {
+                            id: oilRing
+                            anchors.fill: parent
+                            label: qsTr("Oil temp")
+                            unit: oil.unit || "°C"
+                            decimals: oil.decimals
+                            value: oil.value; hasValue: oil.live; stale: oil.stale
+                            note: oil.note
+                            from: 0; to: 160   // from 0 °C, like coolant
+                            coldBelow: 70; warnFrom: 125; dangerFrom: 140
+                        }
+                    }
+                    GaugeCard {
+                        Layout.fillWidth: true
+                        Layout.preferredHeight: fit.tileHeight
+                        DigitalGauge {
+                            id: iatTile
+                            anchors.fill: parent
+                            label: qsTr("IAT")
+                            description: qsTr("Intake air temperature")
+                            unit: iat.unit || "°C"
+                            decimals: iat.decimals
+                            value: iat.value; hasValue: iat.live; stale: iat.stale; note: iat.note
+                            from: 0; to: 120
+                            warnFrom: 55; dangerFrom: 70
+                        }
+                    }
+                    GaugeCard {
+                        Layout.fillWidth: true
+                        Layout.preferredHeight: fit.tileHeight
+                        DigitalGauge {
+                            id: mafTile
+                            anchors.fill: parent
+                            label: qsTr("MAF")
+                            description: qsTr("Mass air flow")
+                            unit: maf.unit || "g/s"
+                            decimals: maf.decimals
+                            value: maf.value; hasValue: maf.live; stale: maf.stale; note: maf.note
+                            from: 0; to: 300
+                            accent: Theme.info
+                        }
                     }
                 }
-                GaugeCard {
-                    Layout.fillWidth: true
-                    Layout.preferredHeight: grid.tileHeight
-                    RingGauge {
-                        id: oilRing
-                        anchors.fill: parent
-                        label: qsTr("Oil temp")
-                        unit: oil.unit || "°C"
-                        decimals: oil.decimals
-                        value: oil.value; hasValue: oil.live; stale: oil.stale
-                        note: oil.note
-                        from: 0; to: 160   // from 0 °C, like coolant
-                        coldBelow: 70; warnFrom: 125; dangerFrom: 140
-                    }
-                }
-                GaugeCard {
-                    Layout.fillWidth: true
-                    Layout.preferredHeight: grid.tileHeight
-                    DigitalGauge {
-                        id: iatTile
-                        anchors.fill: parent
-                        label: qsTr("IAT")
-                        description: qsTr("Intake air temperature")
-                        unit: iat.unit || "°C"
-                        decimals: iat.decimals
-                        value: iat.value; hasValue: iat.live; stale: iat.stale; note: iat.note
-                        from: 0; to: 120
-                        warnFrom: 55; dangerFrom: 70
-                    }
-                }
-                GaugeCard {
-                    Layout.fillWidth: true
-                    Layout.preferredHeight: grid.tileHeight
-                    DigitalGauge {
-                        id: mafTile
-                        anchors.fill: parent
-                        label: qsTr("MAF")
-                        description: qsTr("Mass air flow")
-                        unit: maf.unit || "g/s"
-                        decimals: maf.decimals
-                        value: maf.value; hasValue: maf.live; stale: maf.stale; note: maf.note
-                        from: 0; to: 300
-                        accent: Theme.info
-                    }
-                }
+            }
+
+            GridLayout {
+                Layout.fillWidth: true
+                columns: fit.narrow ? 1 : 2
+                columnSpacing: root.gap
+                rowSpacing: root.gap
+                uniformCellWidths: true
 
                 GaugeCard {
-                    Layout.columnSpan: 2
                     Layout.fillWidth: true
-                    Layout.preferredHeight: 96
+                    Layout.preferredHeight: fit.barHeight
                     padding: 14
                     BarGauge {
                         id: throttleBar
@@ -268,9 +324,8 @@ Page {
                     }
                 }
                 GaugeCard {
-                    Layout.columnSpan: 2
                     Layout.fillWidth: true
-                    Layout.preferredHeight: 96
+                    Layout.preferredHeight: fit.barHeight
                     padding: 14
                     BarGauge {
                         id: loadBar

@@ -21,6 +21,28 @@ QtObject {
     readonly property int spacing:          8
     readonly property int pageMargin:       16
 
+    // The whole UI's zoom, set with Ctrl + / Ctrl − / Ctrl 0 or from
+    // Settings. Main.qml lays the UI out at the window's size divided by
+    // it and scales the result, so every page reflows as if the window
+    // were that size, and stores it between runs.
+    property real zoom: 1.0
+    readonly property var zoomSteps: [0.5, 0.67, 0.75, 0.8, 0.9, 1.0, 1.1, 1.25, 1.5, 1.75, 2.0]
+    function clampZoom(z) {
+        const v = Number(z)
+        return isFinite(v) && v > 0 ? Math.max(zoomSteps[0], Math.min(zoomSteps[zoomSteps.length - 1], v))
+                                    : 1.0
+    }
+    // To the next step up (direction > 0) or down from the current zoom
+    function stepZoom(direction) {
+        if (direction > 0) {
+            for (const s of zoomSteps)
+                if (s > zoom + 0.001) { zoom = s; return }
+        } else {
+            for (let i = zoomSteps.length - 1; i >= 0; --i)
+                if (zoomSteps[i] < zoom - 0.001) { zoom = zoomSteps[i]; return }
+        }
+    }
+
     // Fixed-pitch family, so hex columns and digits keep their width row
     // to row. "monospace" is a fontconfig and Android alias; Windows and
     // the Apple platforms don't resolve it.
