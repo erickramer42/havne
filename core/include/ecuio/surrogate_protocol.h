@@ -121,7 +121,8 @@ typedef struct ecuio_sur_request {
 typedef struct ecuio_sur_frame {
     uint32_t arbitration_id;  /* always 0: the CAN ID is data[0..3], which
                                  the transport strips (ADR-0012) */
-    uint32_t timestamp;       /* the vendor's Timestamp, untranslated (#12) */
+    uint32_t timestamp;       /* the vendor's Timestamp, untranslated: the
+                                 transport makes it session time */
     uint32_t rx_flags;        /* the vendor's RxStatus */
     uint8_t  data[ECUIO_SUR_MSG_MAX];
     uint8_t  data_len;        /* the child clamps to ECUIO_SUR_MSG_MAX */

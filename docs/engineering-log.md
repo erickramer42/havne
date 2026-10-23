@@ -78,7 +78,8 @@ Dates are commit dates.
 | 2026-10-22 | Request-engine groundwork: indications no longer end a read on either backend, and `START_OF_MESSAGE` is skipped (Known Issue #28 closed) | `1f2570b` |
 | 2026-10-22 | libFuzzer harnesses for the signal decoder and validators (`fuzz/`), built with MSVC locally or Clang in a CI job that runs each for 60 s | `14a43be` |
 | 2026-10-22 | A failed connect says why: four status codes and `ecuio_last_error_detail`, with the vendor's `PassThruGetLastError` text on both backends ([ADR-0018](adr/0018-connect-failure-reporting.md)) | `65bae6d` |
-| 2026-10-22 | A session says what it runs on: `ecuio_session_get_info` and the activity log's "Session:" line, with the adapter's battery and versions; the ioctl relay takes a capacity on both backends ([ADR-0019](adr/0019-session-info.md)) | — |
+| 2026-10-22 | A session says what it runs on: `ecuio_session_get_info` and the activity log's "Session:" line, with the adapter's battery and versions; the ioctl relay takes a capacity on both backends ([ADR-0019](adr/0019-session-info.md)) | `7263224` |
+| 2026-10-22 | J2534 frames carry session time: the host's at the first frame, then the adapter's deltas across its 32-bit wrap (#12 closed) | — |
 
 ## Lessons learned
 

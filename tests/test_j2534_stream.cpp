@@ -16,8 +16,9 @@
 //          mux decode). Raw-contract tests opt out with ?profile=raw;
 //          the obd2 block covers rotation, coupling, and drain, plus
 //          ?poll= precedence over the profile's rotation. The backoff's
-//          capped step is here; the link-health machine itself runs
-//          through both backends in test_j2534_health.cpp.
+//          capped step and the vendor clock's cases are here; the
+//          link-health machine itself runs through both backends in
+//          test_j2534_health.cpp.
 
 #include <gtest/gtest.h>
 
@@ -27,6 +28,7 @@
 #include "ecuio/profile.h"
 #include "ecuio/signal_sets.h"
 #include "j2534_backoff.h"   /* core/src: the worker's backoff step */
+#include "j2534_clock.h"     /* core/src: vendor stamps to session time */
 
 #ifdef _WIN32
 #include <windows.h>
@@ -291,6 +293,7 @@ TEST(J2534StreamTest, DirectLoadUriDeliversInjectedFramesExactly)
     snprintf(uri, sizeof(uri), "j2534://%s?profile=raw",
              FAKE_J2534_DLL_PATH);
 
+    const auto before_create = std::chrono::steady_clock::now();
     ecuio_session_t* session = nullptr;
     ASSERT_EQ(ecuio_session_create(uri, &session), ECUIO_OK);
 
@@ -313,9 +316,11 @@ TEST(J2534StreamTest, DirectLoadUriDeliversInjectedFramesExactly)
     const unsigned char f1[8] = {0x62, 0xF1, 0x90, 0x2A, 0, 0, 0, 0};
     const unsigned char f2[8] = {0xDE, 0xAD, 0xBE, 0xEF, 1, 2, 3, 4};
 
-    inject(f0, 8, 1000, 0, 1);   /* standard */
-    inject(f1, 8, 2000, 1, 1);   /* EXTENDED — exercises the 29-bit path */
-    inject(f2, 8, 3000, 0, 1);   /* standard */
+    /* Vendor stamps an hour into the adapter's clock, as a real one's
+     * can be at connect. */
+    inject(f0, 8, 4000000000ul, 0, 1);   /* standard */
+    inject(f1, 8, 4000001000ul, 1, 1);   /* EXTENDED — exercises the 29-bit path */
+    inject(f2, 8, 4000002000ul, 0, 1);   /* standard */
 
     /* Worker polls at 20ms; budget generously, assert EXACTLY 3 —
      * a fourth would mean the fake fabricated traffic. */
@@ -342,11 +347,14 @@ TEST(J2534StreamTest, DirectLoadUriDeliversInjectedFramesExactly)
     EXPECT_EQ(cap.arbitration_ids[2], 0u);
     EXPECT_EQ(static_cast<unsigned>(cap.payload_lens[0]), 8u);
 
-    /* Timestamps pass through UNTRANSLATED — documented v0.3.0
-     * decision (vendor-defined units, see j2534_ptypes.h). */
-    EXPECT_EQ(cap.timestamps[0], uint64_t{1000});
-    EXPECT_EQ(cap.timestamps[1], uint64_t{2000});
-    EXPECT_EQ(cap.timestamps[2], uint64_t{3000});
+    /* Session time (j2534_clock.h): the first frame the host's since
+     * attach, not the vendor's hour; then the vendor's 1000 µs steps. */
+    const uint64_t since_create = static_cast<uint64_t>(
+        std::chrono::duration_cast<std::chrono::microseconds>(
+            std::chrono::steady_clock::now() - before_create).count());
+    EXPECT_LE(cap.timestamps[0], since_create);
+    EXPECT_EQ(cap.timestamps[1] - cap.timestamps[0], uint64_t{1000});
+    EXPECT_EQ(cap.timestamps[2] - cap.timestamps[1], uint64_t{1000});
 
     EXPECT_EQ(ecuio_session_close(session), ECUIO_OK);     /* joins worker */
     ecuio_session_destroy(session);
@@ -1135,6 +1143,45 @@ TEST(J2534StreamTest, BackoffStepDoublesToCapWithoutOvershoot)
     EXPECT_EQ(j2534_backoff_next(J2534_BACKOFF_CAP_MS - 1), J2534_BACKOFF_CAP_MS);
     EXPECT_EQ(j2534_backoff_next(UINT32_MAX), J2534_BACKOFF_CAP_MS)
         << "doubling must not wrap";
+}
+
+/* The vendor clock (j2534_clock.h): the first frame takes the host's
+ * time; later ones the vendor's delta, even when the host saw them
+ * arrive together or further apart. */
+TEST(J2534StreamTest, VendorClockAnchorsAtTheHostAndKeepsVendorDeltas)
+{
+    j2534_clock c;
+    EXPECT_EQ(j2534_clock_step(c, 3000000000u, 1500), 1500u);
+    EXPECT_EQ(j2534_clock_step(c, 3000004000u, 1500), 5500u) << "one batch";
+    EXPECT_EQ(j2534_clock_step(c, 3000010000u, 20000), 11500u)
+        << "the vendor's 6 ms, not the host's 18.5";
+}
+
+/* Across the 32-bit wrap, and across a gap of several wraps, which only
+ * the host's clock can count. */
+TEST(J2534StreamTest, VendorClockCarriesAcrossTheWrap)
+{
+    j2534_clock c;
+    (void)j2534_clock_step(c, 0xFFFFFFF0u, 1000);
+    EXPECT_EQ(j2534_clock_step(c, 0x10u, 1100), uint64_t{1000 + 0x20});
+    const uint64_t gap = 3 * J2534_CLOCK_WRAP_US + 5000000;
+    EXPECT_EQ(j2534_clock_step(c, 0x10u + 5000000u, 1100 + gap),
+              uint64_t{1000 + 0x20} + gap);
+}
+
+/* A vendor clock that steps, back or far ahead, doesn't take the
+ * session's time with it: the host's delta stands in, and the vendor's
+ * deltas resume from the new stamp. */
+TEST(J2534StreamTest, VendorClockThatStepsFallsBackToTheHost)
+{
+    j2534_clock c;
+    (void)j2534_clock_step(c, 50000000u, 0);
+    EXPECT_EQ(j2534_clock_step(c, 10000000u, 2000), 2000u) << "back 40 s";
+    EXPECT_EQ(j2534_clock_step(c, 10001000u, 2500), 3000u);
+    EXPECT_EQ(j2534_clock_step(c, 10001000u + 120000000u, 3500), 4000u)
+        << "two minutes ahead of the host";
+    EXPECT_EQ(j2534_clock_step(c, 10001000u + 120000000u, 3400), 4000u)
+        << "never decreases";
 }
 
 /* ECUIO_ERR_REQUEST_FAILED has a distinct, mapped string. */

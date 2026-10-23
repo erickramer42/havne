@@ -29,10 +29,11 @@ typedef struct ecuio_session ecuio_session_t;
  * platform (ADR-0006).
  */
 typedef struct ecuio_frame {
-    uint64_t timestamp_us;    /* Microseconds since session start (producer's
-                                 steady clock, monotonic per channel). The
-                                 J2534 transport passes the vendor's 32-bit
-                                 timestamp through instead (Known Issue #12) */
+    uint64_t timestamp_us;    /* Microseconds since the session's transport
+                                 attached, monotonic per channel. Mock: the
+                                 host's steady clock. J2534: the host's at the
+                                 first frame, then the adapter's own deltas,
+                                 carried across its 32-bit wrap */
     uint32_t arbitration_id;  /* CAN identifier: <= 0x7FF standard, up to
                                  0x1FFFFFFF when FLAG_EXTENDED set */
     uint16_t channel_id;      /* Bus/channel index only — never multiplexes

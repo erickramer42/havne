@@ -119,9 +119,9 @@ to plausible values. Next is the plan in
     run sheets are
     [bench-runsheet.md](docs/bench-sessions/bench-runsheet.md) and
     [vehicle-runsheet.md](docs/bench-sessions/vehicle-runsheet.md).
-  - **Tests:** 262 ctest cases (Windows, Visual Studio 18 build
+  - **Tests:** 267 ctest cases (Windows, Visual Studio 18 build
     tools, both trees rebuilt, 2026-10-22), plus the cross-arch
-    subset (51/51). All
+    subset (52/52). All
     passed except the env-gated cross-arch skip. Every first-party
     target builds with compiler warnings on, at 0 on MSVC. CI was green on all
     eight jobs on PR #16 (merged as `9125b5e`), including the
@@ -318,8 +318,10 @@ it a genuine connect candidate.
 4. **29-bit addressing** is assumed whenever either ID is above
    `0x7FF`: writes carry `CAN_29BIT_ID`, and the channel connects with
    it. Unexercised: the first vehicle uses 11-bit IDs.
-5. **Timestamps** are passed through as microseconds, as the spec
-   says (#12). CONFIRMED for the VX: on the vehicle, 5,539 stamps
+5. **Timestamps** are microseconds, as the spec says, and the
+   transport turns them into session time, counting the 32-bit wrap
+   with the host's clock ([j2534.md](docs/j2534.md#session-lifecycle),
+   "Frame time"). CONFIRMED for the VX: on the vehicle, 5,539 stamps
    over 932 s fit the host clock with a slope of 0.9999993, as its
    indications did at the bench. The clock doesn't reset at open or
    connect, wraps 71.6 min after zero, and what sets its zero is
@@ -416,17 +418,6 @@ an issue is resolved it is removed, and its number is not reused.
     failure. Accepted for now: it needs a transient read error on a
     no-ACK bus, and the session log tells the two apart (clean
     `OP_READ` lines next to failing `OP_WRITE` lines).
-12. **J2534 timestamps pass through untranslated.** A frame's
-    `timestamp_us` is the vendor's 32-bit stamp, not time since the
-    session started. The spec says microseconds; the VX conforms, from
-    a clock that keeps running across connects and wraps 71.6 min
-    after zero
-    ([bench-sessions/2026-10-22.md](docs/bench-sessions/2026-10-22.md)).
-    What sets its zero is unknown: on the vehicle laptop it fell
-    before the VX was attached, so a session's first stamps can sit
-    anywhere in the 71.6 min
-    ([session sheet](docs/bench-sessions/2026-10-22-vehicle.md)).
-    Other vendors are unverified.
 13. **The picker treats one registry entry as one device.** Multiple
     adapters behind one vendor DLL can't be told apart. They would be
     selected through `PassThruOpen`'s `pName` argument, which the

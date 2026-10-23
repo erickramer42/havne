@@ -1,7 +1,7 @@
 // File/layer: core/src/j2534_transport.cpp | C++17, Qt-free, Win32-guarded
 // Testing: HARNESS — test_j2534_connect: connect failures and the
 //          session info, on both backends. test_j2534_stream: URI parsing,
-//          connect parameters,
+//          the vendor clock's unit cases, connect parameters,
 //          filter registration, request framing and routing, header
 //          strip and arbitration_id stamp, scheduler rotation and drain,
 //          ?poll= precedence. test_j2534_health: the link-health
@@ -17,6 +17,7 @@
 #include "ecuio/j2534.h"
 #include "pid_scheduler.h"
 #include "j2534_backoff.h"
+#include "j2534_clock.h"
 #include "uri_query.h"
 #include "error_detail.h"
 #include "ecuio/profile.h"
@@ -150,6 +151,11 @@ struct ecuio_j2534_transport {
     const ecuio_signal_set_t* set = nullptr; /* frozen at attach;
                                              * worker routes PID->tx */
     ecuio_pid_scheduler sched;
+    /* Frame time (j2534_clock.h): the host's at the first frame, counted
+     * from epoch, the end of attach; the vendor's deltas after that.
+     * Worker-only, through pump_one. */
+    std::chrono::steady_clock::time_point epoch{};
+    j2534_clock clock;
     std::atomic<bool> stop_requested{false};
     std::thread worker;
     ecuio_transport_t* self = nullptr;
@@ -250,7 +256,9 @@ void resolve_channels(ecuio_j2534_transport* t,
 
 /* Read one frame and dispatch it if it matches a channel. Returns the
  * outcome: status, whether a frame arrived, and whether it matched. An
- * unmatched delivery is kept distinct from silence (see read_outcome). */
+ * unmatched delivery is kept distinct from silence (see read_outcome).
+ * Every delivered frame, dispatched or dropped, advances the vendor
+ * clock, so the next delta is measured from the latest stamp. */
 read_outcome pump_one(ecuio_j2534_transport* t, uint32_t timeout_ms)
 {
     bool got = false;
@@ -261,6 +269,12 @@ read_outcome pump_one(ecuio_j2534_transport* t, uint32_t timeout_ms)
     if (st != ECUIO_OK || !got) {
         return {st, false, false};   /* no match if no frame */
     }
+    /* Both backends deliver the vendor's 32-bit stamp as it came. */
+    const uint64_t host_us = static_cast<uint64_t>(
+        std::chrono::duration_cast<std::chrono::microseconds>(
+            std::chrono::steady_clock::now() - t->epoch).count());
+    frame.timestamp_us = j2534_clock_step(
+        t->clock, static_cast<uint32_t>(frame.timestamp_us), host_us);
 
     if (t->chan_count == 0) {
         ecuio_session_dispatch_callbacks(t->session, &frame);
@@ -1036,6 +1050,7 @@ ecuio_status_t j2534_attach(ecuio_session_t* session, const char* uri)
     t->has_poll = params.has_poll;
     t->poll_pid = static_cast<uint32_t>(params.poll_pid);
     describe_session(t, params.baud, connect_flags, &session->info);
+    t->epoch = std::chrono::steady_clock::now();   /* as mock: end of attach */
 
     session->transport = wrap;   /* session.h member — direct install */
     return ECUIO_OK;

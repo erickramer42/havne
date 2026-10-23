@@ -102,10 +102,10 @@ void FrameListModel::clear()
 }
 
 // ---------------- FrameSortProxy ----------------
-// Arrival order, which is the source model's row order. Not the frame
-// timestamp: on J2534 it's the vendor's raw 32-bit stamp, whose unit is
-// unconfirmed and which wraps (Known Issue #12), so sorting on it could
-// put new frames below old ones.
+// Arrival order, which is the source model's row order: the order the
+// frames reached the app. Not the frame timestamp, which comes from the
+// producer's clock (on J2534, the adapter's deltas after the first
+// frame), so it needn't follow arrival exactly.
 bool FrameSortProxy::lessThan(const QModelIndex& left, const QModelIndex& right) const
 {
     return left.row() < right.row();

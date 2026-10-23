@@ -166,7 +166,8 @@ TEST(J2534SurrogateTest, OpenConnectInjectReadCloseCycle)
     EXPECT_EQ(cap.frame_flags[1], ECUIO_FRAME_FLAG_EXTENDED);
     EXPECT_EQ(cap.frame_flags[2], 0u);
 
-    /* Vendor timestamp passthrough (documented v0.3.0 contract) */
+    /* The client passes the vendor's stamp through; the transport
+     * makes it session time (j2534_clock.h). */
     EXPECT_EQ(cap.timestamps[0], uint64_t{1000});
     EXPECT_EQ(cap.timestamps[1], uint64_t{2000});
     EXPECT_EQ(cap.timestamps[2], uint64_t{3000});
