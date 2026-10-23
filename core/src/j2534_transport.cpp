@@ -3,7 +3,9 @@
 //          session info, on both backends. test_j2534_stream: URI parsing,
 //          the vendor clock's unit cases, connect parameters,
 //          filter registration, request framing and routing, header
-//          strip and arbitration_id stamp, rotation, ?poll= precedence.
+//          strip and arbitration_id stamp, rotation, ?poll= precedence,
+//          the probe's walk, its drops, ?probe=0 and its resumption on
+//          recovery, and the support report it publishes.
 //          test_j2534_health, on both backends: the request engine's
 //          pacing (the floor, the wait, negative and pending replies,
 //          two channels at once), the drain in passive mode, and the
@@ -31,6 +33,11 @@
 #include <cstring>
 #include <limits>
 #include <thread>
+
+/* The query keys parse_query reads, for create's check (internal.h);
+ * every platform's, so create links where the transport is a stub. */
+extern "C" const char* const ecuio_j2534_query_keys[] = {
+    "baud", "flags", "filter", "txid", "poll", "probe", "profile", nullptr};
 
 #ifdef _WIN32
 
@@ -87,7 +94,8 @@ struct read_outcome {
     bool matched = false;
     uint32_t chan = 0;      /* the channel it matched */
     uint16_t len = 0;       /* its payload's length, the CAN ID stripped */
-    uint8_t head[3] = {};   /* the payload's first bytes */
+    uint8_t head[ECUIO_BITMAP_REPLY_LEN] = {};   /* the payload's first
+                                                  * bytes, a bitmap's all */
 };
 
 void pack_be32(uint8_t* out, uint32_t v)
@@ -124,10 +132,13 @@ struct ecuio_j2534_transport {
      *   engine       the requests and their pacing (request_engine.h):
      *                the set's rotation, or the one ?poll= request,
      *                which outranks it; empty for passive receive.
-     *                Built at attach, the worker's alone after. */
+     *                Built at attach, the worker's alone after.
+     *   probe        ADR-0015 §4 for the set's rotation: on unless
+     *                ?probe=0 or ?poll=. Frozen pre-thread. */
     j2534_channel chans[ECUIO_MAX_CHANNELS] = {};
     uint32_t chan_count = 0;
     ecuio_request_engine engine;
+    bool probe = false;
     /* Frame time (j2534_clock.h): the host's at the first frame, counted
      * from epoch, the end of attach; the vendor's deltas after that.
      * Worker-only, through pump_one. */
@@ -155,6 +166,7 @@ struct j2534_uri_params {
     bool has_poll = false;       /* false = no ?poll= (passive or the
                                   * set's rotation) */
     unsigned long poll_pid = 0;  /* valid when has_poll; 0x00 allowed */
+    bool probe = true;           /* ?probe=0 turns it off */
 };
 
 /* The channel ?poll='s request goes to, by the rule the set's rotation
@@ -290,12 +302,15 @@ struct link_health {
                                   * only by a sent one */
     uint32_t backoff_ms = 0;     /* 0 = the normal cadence */
     uint32_t quiet_runs = 0;
+    bool recovered = false;      /* back to OK since the worker last
+                                  * looked: the probe resumes */
 };
 
 void set_state(ecuio_j2534_transport* t, link_health& h, int32_t state)
 {
     if (h.state != state) {
         t->session->last_error.store(state);
+        h.recovered = h.recovered || state == ECUIO_OK;
         h.state = state;
     }
 }
@@ -412,7 +427,7 @@ void handle_write_result(ecuio_j2534_transport* t, link_health& h,
     /* Already REQUEST_FAILED: leave backoff alone, it doubles at sleep site */
 }
 
-/* Writes request r to its channel's tx ID: [4-byte tx ID][service][key],
+/* Writes a request to its channel's tx ID: [4-byte tx ID][service][key],
  * sent with ISO15765_FRAME_PAD, so a Service 01 request is 6 bytes and a
  * Service 0x22 one 7. The adapter adds the ISO-TP PCI byte and pads the
  * CAN frame; ISO 15765-4 has no data checksum. Verified: Opus IVS (the
@@ -484,6 +499,24 @@ uint32_t request_read_timeout_ms(const ecuio_j2534_transport* t)
     return (ms < 1) ? 1u : static_cast<uint32_t>(ms);
 }
 
+/* Hands what channel c's ECU has said it supports to the session, for
+ * ecuio_session_get_channel_support, when the engine has learned
+ * something new. */
+void publish_support(ecuio_j2534_transport* t, uint32_t c,
+                     uint32_t& published)
+{
+    const ecuio_request_engine& e = t->engine;
+    if (e.chans[c].generation == published) {
+        return;
+    }
+    published = e.chans[c].generation;
+    ecuio_channel_support_t s;
+    ecuio_engine_support(&e, c, &s);
+    s.rx_id = t->chans[c].rx_id;
+    std::lock_guard<std::mutex> lock(t->session->support_mutex);
+    t->session->support[c] = s;
+}
+
 /* Worker entrypoint — mirrors mock_worker's discipline: impl-owned
  * state, dispatch through the session snapshot path, stop via atom.
  *
@@ -496,6 +529,11 @@ uint32_t request_read_timeout_ms(const ecuio_j2534_transport* t)
  * followed by the next at once, so every mode drains what has arrived;
  * an empty one waits out its timeout.
  *
+ * With the probe on (§4) the engine walks each channel's supported-PID
+ * chain before its rotation, and the walk resumes, where it stopped,
+ * whenever the link returns to OK: a connect with the ignition off
+ * answers nothing, and the ECU's answers come once it wakes.
+ *
  * Requests keep going out while the link is hard-failed or requests are
  * failing, because each is the recovery probe and replies only follow
  * writes; the backoff then spaces the passes. Distorting the cadence
@@ -505,6 +543,10 @@ void j2534_worker(ecuio_j2534_transport* t)
     ecuio_request_engine& e = t->engine;
     const bool requests = e.count > 0;
     link_health h;
+    uint32_t published[ECUIO_MAX_CHANNELS] = {};
+    if (requests && t->probe) {
+        ecuio_engine_probe(&e, engine_now_us(t));
+    }
 
     while (!t->stop_requested.load()) {
         if (requests) {
@@ -514,8 +556,9 @@ void j2534_worker(ecuio_j2534_transport* t)
                     request_timed_out(t, h);
                 }
                 const int32_t r = ecuio_engine_due(&e, c, now);
-                if (r >= 0) {
-                    const bool sent = send_request(t, e.requests[r], h);
+                if (r != ECUIO_ENGINE_NONE) {
+                    const bool sent = send_request(
+                        t, ecuio_engine_request_of(&e, c, r), h);
                     ecuio_engine_sent(&e, c, r, sent, engine_now_us(t));
                 }
             }
@@ -530,6 +573,15 @@ void j2534_worker(ecuio_j2534_transport* t)
                                         engine_now_us(t), nullptr);
         }
         update_health(t, h, o, !requests);
+        if (h.recovered) {
+            h.recovered = false;
+            if (requests && t->probe) {
+                ecuio_engine_probe(&e, engine_now_us(t));
+            }
+        }
+        for (uint32_t c = 0; requests && c < t->chan_count; ++c) {
+            publish_support(t, c, published[c]);
+        }
 
         if (h.backoff_ms > 0) {
             if (backoff_sleep(t, h.backoff_ms)) {
@@ -596,8 +648,9 @@ bool parse_number(const char* s, size_t len, unsigned long* out_val)
     return true;
 }
 
-/* URI query parser. Contract (strict — malformed means BAD_URI,
- * surfaces at session_create before any DLL load):
+/* The query's values (ecuio_j2534_query_keys). Contract (strict — a bad
+ * value means BAD_URI, surfacing at session_create before any DLL
+ * load):
  *   - lowercase keys only:
  *       baud   decimal, nonzero
  *       flags  0x-hex or decimal; 0 legal
@@ -608,87 +661,71 @@ bool parse_number(const char* s, size_t len, unsigned long* out_val)
  *       poll   PID 0x00..0xFF — single-PID Mode-01 loop (0x00 reads
  *              the supported-PIDs bitmap); overrides the profile's
  *              rotation
- *       profile core's key: ecuio_session_create has validated it
- *              before attach
- *   - unknown keys, and the shared grammar's malformed forms (missing
- *     '=', empty segments, a trailing '&', a bare trailing '?';
- *     uri_query.h), are all rejected
- *   - duplicate keys: last occurrence wins
+ *       probe  0 or 1 — the supported-PID probe (ADR-0015 §4), on by
+ *              default
+ *       profile core's key, read by ecuio_session_create
+ *   - every occurrence is judged, and of good ones the last wins
+ *   - create has split the query by the shared grammar and refused
+ *     any other key (uri_query.h), so neither reaches here
  *   - poll needs a channel to receive on, but the channel may come
  *     from the profile: ?filter= supplies one directly, otherwise the
  *     profile's declared channels do. Enforced in j2534_attach, where
  *     both are known. */
-ecuio_status_t parse_query(const char* query, j2534_uri_params* p)
+ecuio_status_t parse_query(const ecuio_uri_query* query, j2534_uri_params* p)
 {
-    /* What a refused key should have held; nullptr for an unknown key. */
-    const char* wanted = nullptr;
-    const ecuio_uri::param* refused = nullptr;
-    ecuio_uri::param last = {};
-    const bool ok = ecuio_uri::for_each_param(query, [&](const ecuio_uri::param& q) {
+    for (size_t i = 0; i < query->count; ++i) {
+        const ecuio_uri::param& q = query->params[i];
         unsigned long v = 0;
-        last = q;
-        refused = &last;
+        /* What a refused value should have been. */
+        const char* wanted = nullptr;
         if (q.is("baud")) {
-            wanted = "a nonzero decimal";
             if (!parse_number(q.val, q.val_len, &v) || v == 0) {
-                return false;
+                wanted = "a nonzero decimal";
+            } else {
+                p->baud = v;
             }
-            p->baud = v;
         } else if (q.is("txid")) {
-            wanted = "a CAN ID from 1 to 0x1FFFFFFF";
             if (!parse_number(q.val, q.val_len, &v) ||
                 v == 0 || v > J2534_CAN_ID_MAX) {
-                return false;
+                wanted = "a CAN ID from 1 to 0x1FFFFFFF";
+            } else {
+                p->tx_id = v;
             }
-            p->tx_id = v;
-        } else if (q.is("profile")) {
-            /* ADR-0013: the profile NAME rides in the URI, but
-             * selection/validation is core's — it runs in
-             * ecuio_session_create BEFORE this parser and before any
-             * DLL load, so an unknown or malformed name never gets
-             * here. */
         } else if (q.is("poll")) {
-            wanted = "a PID from 0x00 to 0xFF";
             if (!parse_number(q.val, q.val_len, &v) || v > J2534_PID_MAX) {
-                return false;
+                wanted = "a PID from 0x00 to 0xFF";
+            } else {
+                p->poll_pid = v;
+                p->has_poll = true;
             }
-            p->poll_pid = v;
-            p->has_poll = true;
         } else if (q.is("flags")) {
-            wanted = "a decimal or 0x-hex number";
             if (!parse_number(q.val, q.val_len, &v)) {
-                return false;
+                wanted = "a decimal or 0x-hex number";
+            } else {
+                p->flags = v;
             }
-            p->flags = v;
         } else if (q.is("filter")) {
-            wanted = "a CAN ID from 1 to 0x1FFFFFFF";
             if (!parse_number(q.val, q.val_len, &v) ||
                 v == 0 || v > J2534_CAN_ID_MAX) {
-                return false;
+                wanted = "a CAN ID from 1 to 0x1FFFFFFF";
+            } else {
+                p->rx_id = v;
             }
-            p->rx_id = v;
-        } else {
-            wanted = nullptr;
-            return false;   /* unknown parameter */
-        }
-        refused = nullptr;
-        return true;
-    });
-    if (!ok) {
-        if (refused == nullptr) {
-            ecuio_detail_set("malformed query: expected key=value pairs "
-                             "joined by '&'");
-        } else if (wanted == nullptr) {
-            ecuio_detail_set("j2534:// takes no query key '%.*s'",
-                             static_cast<int>(refused->key_len), refused->key);
-        } else {
+        } else if (q.is("probe")) {
+            if (q.val_len != 1 || (q.val[0] != '0' && q.val[0] != '1')) {
+                wanted = "0 or 1";
+            } else {
+                p->probe = q.val[0] == '1';
+            }
+        }   /* else profile: core's, read and validated by create */
+        if (wanted != nullptr) {
             const int shown = static_cast<int>(
-                (refused->val_len < 32) ? refused->val_len : 32);
+                (q.val_len < 32) ? q.val_len : 32);
             ecuio_detail_set("?%.*s= needs %s, not '%.*s'",
-                             static_cast<int>(refused->key_len), refused->key,
-                             wanted, shown, refused->val);
+                             static_cast<int>(q.key_len), q.key,
+                             wanted, shown, q.val);
+            return ECUIO_ERR_BAD_URI;
         }
-        return ECUIO_ERR_BAD_URI;
     }
 
     /* The poll-needs-a-channel rule lives in j2534_attach, not here:
@@ -700,14 +737,13 @@ ecuio_status_t parse_query(const char* query, j2534_uri_params* p)
     return ECUIO_OK;
 }
 
-/* Resolve a j2534:// URI to a concrete dll_path + connect/adoption
- * params. Grammar (see internal.h): [selector][?query]. The query is
- * split off and parsed before the selector is resolved, so it never
- * reaches LoadLibraryEx or the vendor-name match. Selector: empty =
- * first device; path-like = direct load; else vendor-name match. All
- * misses are ECUIO_ERR_NO_TRANSPORT. */
-ecuio_status_t resolve_uri(const char* uri, ecuio_j2534_device_t* dev,
-                           j2534_uri_params* params)
+/* Resolve a j2534:// URI's selector to a concrete dll_path. Grammar (see
+ * internal.h): [selector][?query]. The query is cut off here, and
+ * attach has read its values before this runs, so it never reaches
+ * LoadLibraryEx or the vendor-name match. Selector: empty = first
+ * device; path-like = direct load; else vendor-name match. All misses
+ * are ECUIO_ERR_NO_TRANSPORT. */
+ecuio_status_t resolve_uri(const char* uri, ecuio_j2534_device_t* dev)
 {
     const char* rest = uri + 8;   /* core.cpp verified the prefix */
 
@@ -723,13 +759,6 @@ ecuio_status_t resolve_uri(const char* uri, ecuio_j2534_device_t* dev,
     }
     memcpy(selector, rest, n);
     selector[n] = '\0';
-
-    if (q != nullptr) {
-        ecuio_status_t st = parse_query(q + 1, params);
-        if (st != ECUIO_OK) {
-            return st;   /* fail fast — no DLL load on malformed URIs */
-        }
-    }
 
     ecuio_j2534_device_t* devices = nullptr;
     uint32_t count = 0;
@@ -914,7 +943,8 @@ const ecuio_transport_ops_t kJ2534Ops = {
     j2534_detach
 };
 
-ecuio_status_t j2534_attach(ecuio_session_t* session, const char* uri)
+ecuio_status_t j2534_attach(ecuio_session_t* session, const char* uri,
+                            const ecuio_uri_query* query)
 {
     /* Idempotence (internal.h contract, mock parity): checked FIRST,
      * before any device open, so the early-out leaks nothing. */
@@ -922,9 +952,15 @@ ecuio_status_t j2534_attach(ecuio_session_t* session, const char* uri)
         return ECUIO_OK;
     }
 
-    ecuio_j2534_device_t dev = {};
+    /* The values before the selector: a bad one fails fast, with no
+     * discovery and no DLL load. */
     j2534_uri_params params = {};
-    ecuio_status_t st = resolve_uri(uri, &dev, &params);
+    ecuio_status_t st = parse_query(query, &params);
+    if (st != ECUIO_OK) {
+        return st;
+    }
+    ecuio_j2534_device_t dev = {};
+    st = resolve_uri(uri, &dev);
     if (st != ECUIO_OK) {
         return st;
     }
@@ -961,6 +997,8 @@ ecuio_status_t j2534_attach(ecuio_session_t* session, const char* uri)
         (void)ecuio_engine_derive(&t->engine, set, rx_ids, t->chan_count,
                                   nullptr);
     }
+    /* ?poll= sends its one request as asked, whatever the ECU says. */
+    t->probe = params.probe && !params.has_poll;
 
     /* Coupling check: requests need at least one channel to receive on,
      * or they go out against guaranteed silence forever (an ISO 15765
@@ -1034,6 +1072,15 @@ ecuio_status_t j2534_attach(ecuio_session_t* session, const char* uri)
     t->channel = channel;
     t->self = wrap;
     describe_session(t, params.baud, connect_flags, &session->info);
+    {
+        /* Each channel's ECU and its requests, nothing learned yet. */
+        std::lock_guard<std::mutex> lock(session->support_mutex);
+        session->support_count = t->chan_count;
+        for (uint32_t c = 0; c < t->chan_count; ++c) {
+            ecuio_engine_support(&t->engine, c, &session->support[c]);
+            session->support[c].rx_id = t->chans[c].rx_id;
+        }
+    }
     t->epoch = std::chrono::steady_clock::now();   /* as mock: end of attach */
 
     session->transport = wrap;   /* session.h member — direct install */
@@ -1043,9 +1090,9 @@ ecuio_status_t j2534_attach(ecuio_session_t* session, const char* uri)
 } // namespace
 
 extern "C" ecuio_status_t ecuio_j2534_transport_attach(
-    ecuio_session_t* session, const char* uri)
+    ecuio_session_t* session, const char* uri, const ecuio_uri_query* query)
 {
-    return j2534_attach(session, uri);
+    return j2534_attach(session, uri, query);
 }
 
 #else /* !_WIN32 */
@@ -1054,10 +1101,11 @@ extern "C" ecuio_status_t ecuio_j2534_transport_attach(
  * symbol must exist for the headless-Unix CI build (core links
  * without Win32 J2534). */
 extern "C" ecuio_status_t ecuio_j2534_transport_attach(
-    ecuio_session_t* session, const char* uri)
+    ecuio_session_t* session, const char* uri, const ecuio_uri_query* query)
 {
     (void)session;
     (void)uri;
+    (void)query;
     return ECUIO_ERR_NO_TRANSPORT;
 }
 

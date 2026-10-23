@@ -43,6 +43,11 @@ typedef char abi_info_rx_check[(offsetof(ecuio_session_info_t, rx_ids) == 32) ? 
 typedef char abi_info_text_check[(offsetof(ecuio_session_info_t, firmware_version) == 64) ? 1 : -1];
 typedef char abi_info_profile_check[(offsetof(ecuio_session_info_t, profile) == 304) ? 1 : -1];
 typedef char abi_info_reserved_check[(offsetof(ecuio_session_info_t, reserved) == 368) ? 1 : -1];
+typedef char abi_dropped_size_check[(sizeof(ecuio_dropped_request_t) == 8) ? 1 : -1];
+typedef char abi_support_size_check[(sizeof(ecuio_channel_support_t) == 152) ? 1 : -1];
+typedef char abi_support_bitmap_check[(offsetof(ecuio_channel_support_t, pid_bitmap) == 24) ? 1 : -1];
+typedef char abi_support_list_check[(offsetof(ecuio_channel_support_t, dropped_list) == 56) ? 1 : -1];
+typedef char abi_support_reserved_check[(offsetof(ecuio_channel_support_t, reserved) == 120) ? 1 : -1];
 
 int main(void)
 {
@@ -51,6 +56,7 @@ int main(void)
     const ecuio_signal_set_t* set = NULL;
     ecuio_validation_t validation;
     ecuio_session_info_t info;
+    ecuio_channel_support_t support;
     frame.arbitration_id = 0x7FF;
     frame.channel_id = 0;
     frame.data_length = 8;
@@ -75,6 +81,10 @@ int main(void)
         return 1;
     }
     if (ecuio_session_get_info(NULL, &info) != ECUIO_ERR_NULL_ARGUMENT) {
+        return 1;
+    }
+    if (ecuio_session_get_channel_support(NULL, 0, &support) !=
+        ECUIO_ERR_NULL_ARGUMENT) {
         return 1;
     }
     ecuio_j2534_free_devices(NULL);

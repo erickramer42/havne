@@ -16,7 +16,12 @@
 //          mux decode). Raw-contract tests opt out with ?profile=raw;
 //          the obd2 block covers rotation, routing to each def's
 //          channel, Service 0x22 and a backlog beside the replies, plus
-//          ?poll= precedence over the profile's rotation. The backoff's
+//          ?poll= precedence over the profile's rotation. The probe
+//          (ADR-0015 §4): the bitmap walk before the rotation, what the
+//          bitmaps and a negative reply drop, ?probe=0, the walk resumed
+//          after a quiet bus, and each channel's support report. The
+//          query's split in create: unknown keys named with the ones
+//          j2534:// takes, and ?probe='s malformed forms. The backoff's
 //          capped step and the vendor clock's cases are here; the
 //          request engine's pacing and the link-health machine run
 //          through both backends in test_j2534_health.cpp.
@@ -37,6 +42,7 @@
 #include <chrono>
 #include <cstdio>
 #include <cstring>
+#include <memory>
 #include <string>
 #include <thread>
 #endif
@@ -273,6 +279,17 @@ TEST_F(J2534QueryParamTest, MalformedQueriesRejectedAtSessionCreate)
         "?poll=",
         "?poll=0x100",
         "?poll=-1",
+        "?probe=",
+        "?probe=2",
+        "?probe=00",
+        "?probe=no",
+        "?probe=0x0",
+        "?probe=1&probe=",
+        "?Probe=0",
+        /* 17 pairs, one past the most a query holds */
+        "?probe=1&probe=1&probe=1&probe=1&probe=1&probe=1&probe=1&probe=1"
+        "&probe=1&probe=1&probe=1&probe=1&probe=1&probe=1&probe=1&probe=1"
+        "&probe=1",
     };
     for (const char* q : bad_queries) {
         snprintf(uri, sizeof(uri), "j2534://%s%s", FAKE_J2534_DLL_PATH, q);
@@ -284,6 +301,30 @@ TEST_F(J2534QueryParamTest, MalformedQueriesRejectedAtSessionCreate)
     EXPECT_EQ(ecuio_session_create("j2534://junk", &session),
               ECUIO_ERR_NO_TRANSPORT);
     EXPECT_EQ(session, nullptr);
+}
+
+/* create splits the query once and judges its keys against the ones the
+ * transport reads, so an unknown key is named with them, before the
+ * values are read; then a bad value is named with what it should be. */
+TEST_F(J2534QueryParamTest, RefusedQueriesNameTheirCause)
+{
+    char uri[700];
+    ecuio_session_t* session = nullptr;
+    snprintf(uri, sizeof(uri), "j2534://%s?baud=abc&band=250000",
+             FAKE_J2534_DLL_PATH);
+    EXPECT_EQ(ecuio_session_create(uri, &session), ECUIO_ERR_BAD_URI);
+    EXPECT_STREQ(ecuio_last_error_detail(),
+                 "j2534:// takes no query key 'band', only baud, flags, "
+                 "filter, txid, poll, probe and profile");
+    snprintf(uri, sizeof(uri), "j2534://%s?probe=yes", FAKE_J2534_DLL_PATH);
+    EXPECT_EQ(ecuio_session_create(uri, &session), ECUIO_ERR_BAD_URI);
+    EXPECT_STREQ(ecuio_last_error_detail(), "?probe= needs 0 or 1, not 'yes'");
+
+    /* Both values are taken, with any profile. */
+    for (const char* q : {"?profile=raw&probe=0", "?probe=1", "?probe=0&probe=1"}) {
+        snprintf(uri, sizeof(uri), "j2534://%s%s", FAKE_J2534_DLL_PATH, q);
+        EXPECT_EQ(start_session_with_uri(uri), ECUIO_OK) << "query: " << q;
+    }
 }
 
 TEST(J2534StreamTest, DirectLoadUriDeliversInjectedFramesExactly)
@@ -460,6 +501,79 @@ protected:
             std::this_thread::sleep_for(std::chrono::milliseconds(10));
         }
     }
+
+    /* Write i (the fake records the first 16) asked service for key. */
+    void expect_write(unsigned long i, uint8_t service, uint8_t key)
+    {
+        unsigned char wbuf[64] = {};
+        unsigned long wlen = 0, wflags = 0;
+        get_recorded_write(i, wbuf, &wlen, &wflags);
+        ASSERT_GE(wlen, 6u) << "write " << i;
+        EXPECT_EQ(wbuf[4], service) << "write " << i;
+        EXPECT_EQ(wbuf[5], key) << "write " << i;
+    }
+
+    /* Polls channel 0's support report until done(report) holds or
+     * budget_ms passes; out keeps the last reading. */
+    template <typename Done>
+    static bool wait_for_support(ecuio_session_t* s,
+                                 ecuio_channel_support_t& out, Done done,
+                                 int budget_ms)
+    {
+        const auto deadline = std::chrono::steady_clock::now() +
+                              std::chrono::milliseconds(budget_ms);
+        for (;;) {
+            if (ecuio_session_get_channel_support(s, 0, &out) == ECUIO_OK &&
+                done(out)) {
+                return true;
+            }
+            if (std::chrono::steady_clock::now() >= deadline) {
+                return false;
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
+    }
+
+    /* A test-only profile asking the obd2 channel (0x7E8, requests to
+     * 0x7E0) for each PID in pids, one def each. defs and set must be
+     * static: the registry keeps the pointer. */
+    static void register_pid_profile(const char* name, const uint8_t* pids,
+                                     uint32_t n, ecuio_signal_def_t* defs,
+                                     ecuio_signal_set_t* set)
+    {
+        for (uint32_t i = 0; i < n; ++i) {
+            defs[i] = ecuio_signal_def_t{};
+            defs[i].id = static_cast<uint16_t>(1 + i);
+            defs[i].kind = ECUIO_VALUE_UINT;
+            defs[i].start_byte = 2;
+            defs[i].bit_length = 8;
+            defs[i].scale = 1.0;
+            defs[i].message_id = ECUIO_OBD2_ECU_ARB_ID;
+            defs[i].mux_length = 2;
+            defs[i].mux_key = 0x4100u | pids[i];
+        }
+        *set = ecuio_signal_set_t{};
+        set->layout_version = ECUIO_SIGNAL_SET_LAYOUT;
+        set->count = n;
+        set->defs = defs;
+        set->channel_count = ecuio_obd2_signal_set()->channel_count;
+        set->channels = ecuio_obd2_signal_set()->channels;
+        ASSERT_EQ(ecuio_profile_register(name, set, nullptr), ECUIO_OK);
+    }
+};
+
+/* Sets one of the fake's knobs for a scope. In-proc the fake reads its
+ * environment on every call; the destructor clears it, so a failed
+ * ASSERT can't leak it into the next case. */
+struct KnobGuard {
+    const char* name;
+    KnobGuard(const char* n, const char* v) : name(n)
+    {
+        SetEnvironmentVariableA(n, v);
+    }
+    ~KnobGuard() { SetEnvironmentVariableA(name, nullptr); }
+    KnobGuard(const KnobGuard&) = delete;
+    KnobGuard& operator=(const KnobGuard&) = delete;
 };
 
 TEST_F(J2534AdoptionTest, RequestLoopWritesMode01AndReceivesStrippedEcho)
@@ -812,12 +926,14 @@ TEST(J2534StreamTest, UnknownProfileRejectedAtCreate)
 /* ROTATION: ?profile=obd2&filter=0x7E8 — the worker requests PIDs
  * round-robin in set order. Rotation order is asserted from the fake's
  * recorded WRITES (deterministic, one per reply), not from received
- * frames. */
+ * frames. ?probe=0 leaves out the bitmaps the probe asks first
+ * (ProbeWalksTheChainBeforeTheRotation). */
 TEST_F(J2534AdoptionTest, Obd2SchedulerRotatesPidsInSetOrder)
 {
     char uri[700];
     snprintf(uri, sizeof(uri),
-             "j2534://%s?profile=obd2&filter=0x7E8", FAKE_J2534_DLL_PATH);
+             "j2534://%s?profile=obd2&filter=0x7E8&probe=0",
+             FAKE_J2534_DLL_PATH);
 
     ecuio_session_t* session = nullptr;
     ASSERT_EQ(ecuio_session_create(uri, &session), ECUIO_OK);
@@ -900,7 +1016,7 @@ TEST_F(J2534AdoptionTest, BareJ2534UriDerivesObd2ChannelAndStarts)
     EXPECT_EQ(pattern[0], 0x00u); EXPECT_EQ(pattern[1], 0x00u);
     EXPECT_EQ(pattern[2], 0x07u); EXPECT_EQ(pattern[3], 0xE8u);
 
-    /* Derived tx: requests go to 7E0, rotation starts at PID 0x04 */
+    /* Derived tx: requests go to 7E0, the probe's first bitmap first */
     wait_for_writes(get_write_count, 3, 200);
     unsigned char wbuf[64] = {};
     unsigned long wlen = 0, wflags = 0;
@@ -908,7 +1024,7 @@ TEST_F(J2534AdoptionTest, BareJ2534UriDerivesObd2ChannelAndStarts)
     ASSERT_EQ(wlen, 6u);
     EXPECT_EQ(wbuf[2], 0x07u); EXPECT_EQ(wbuf[3], 0xE0u);
     EXPECT_EQ(wbuf[4], 0x01u);
-    EXPECT_EQ(wbuf[5], 0x04u);
+    EXPECT_EQ(wbuf[5], 0x00u);
 
     EXPECT_EQ(ecuio_session_close(session), ECUIO_OK);
     ecuio_session_destroy(session);
@@ -951,8 +1067,10 @@ TEST_F(J2534AdoptionTest, TxidOverrideRewritesDerivedTransmitTarget)
  * it asks 0x7E1 for 22 12 0C; the second reads 41 0C from the first, so
  * PID 0x0C's request goes to 0x7E0, though the DID's key also ends in
  * 0x0C. The channels are served side by side, the first channel's
- * request first. Test-only profile, static storage (the registry keeps
- * the pointer). */
+ * request first. ?probe=0: the fake doesn't know DID 0x120C, and the
+ * probe would drop it at its first refusal, and walk 0x7E0's bitmaps
+ * first. Test-only profile, static storage (the registry keeps the
+ * pointer). */
 TEST_F(J2534AdoptionTest, RequestsGoToTheirDefsChannel)
 {
     static const ecuio_channel_decl_t kChannels[] = {{0x7E8u, 0x7E0u},
@@ -981,7 +1099,7 @@ TEST_F(J2534AdoptionTest, RequestsGoToTheirDefsChannel)
     ASSERT_EQ(ecuio_profile_register("test-mode01-routing", &set, nullptr), ECUIO_OK);
 
     char uri[700];
-    snprintf(uri, sizeof(uri), "j2534://%s?profile=test-mode01-routing",
+    snprintf(uri, sizeof(uri), "j2534://%s?profile=test-mode01-routing&probe=0",
              FAKE_J2534_DLL_PATH);
     ecuio_session_t* session = nullptr;
     ASSERT_EQ(ecuio_session_create(uri, &session), ECUIO_OK);
@@ -1186,6 +1304,227 @@ TEST_F(J2534AdoptionTest, PollOverridesSchedulerRotation)
     EXPECT_EQ(cap.payloads[0][1], 0x0Cu);
     EXPECT_EQ(cap.payloads[0][2], 0x1Fu);   /* canned RPM 2000 */
     EXPECT_EQ(cap.payloads[0][3], 0x40u);
+
+    EXPECT_EQ(ecuio_session_close(session), ECUIO_OK);
+    ecuio_session_destroy(session);
+}
+
+/* ====================================================================
+ * The probe (ADR-0015 §4): the supported-PID walk before the rotation,
+ * and dropping only on explicit answers.
+ * ==================================================================== */
+
+/* The fake's ECU supports the obd2 set's PIDs, and its bitmaps say so,
+ * so the walk asks 0x00, 0x20 and 0x40 (whose last bit is clear) and
+ * drops nothing. The expected bitmaps are worked out here from the PIDs
+ * by SAE J1979's layout (PID base + k is bit 0x80 >> ((k - 1) % 8) of
+ * byte (k - 1) / 8), not taken from the fake:
+ *   0x00: 04 05 | 0C 0D 0F 10 | 11 | 20  ->  18 1B 80 01
+ *   0x20: 2F, 40                         ->  00 02 00 01
+ *   0x40: 42, 5C                         ->  40 00 00 10 */
+TEST_F(J2534AdoptionTest, ProbeWalksTheChainBeforeTheRotation)
+{
+    char uri[512];
+    snprintf(uri, sizeof(uri), "j2534://%s", FAKE_J2534_DLL_PATH);
+    ecuio_session_t* session = nullptr;
+    ASSERT_EQ(ecuio_session_create(uri, &session), ECUIO_OK);
+    ASSERT_EQ(ecuio_session_start(session), ECUIO_OK);
+
+    wait_for_writes(get_write_count, 5, 200);
+    expect_write(0, 0x01, 0x00);
+    expect_write(1, 0x01, 0x20);
+    expect_write(2, 0x01, 0x40);
+    expect_write(3, 0x01, 0x04);   /* the rotation, in set order */
+    expect_write(4, 0x01, 0x05);
+
+    ecuio_channel_support_t s = {};
+    EXPECT_TRUE(wait_for_support(session, s, [](const ecuio_channel_support_t& r) {
+        return (r.flags & ECUIO_SUPPORT_COMPLETE) != 0;
+    }, 2000)) << "flags " << s.flags;
+    EXPECT_EQ(s.flags, ECUIO_SUPPORT_PROBED | ECUIO_SUPPORT_COMPLETE);
+    EXPECT_EQ(s.rx_id, 0x7E8u);
+    EXPECT_EQ(s.ranges, 0x7u);
+    const uint8_t want[32] = {0x18, 0x1B, 0x80, 0x01, 0x00, 0x02, 0x00, 0x01,
+                              0x40, 0x00, 0x00, 0x10};
+    EXPECT_EQ(memcmp(s.pid_bitmap, want, sizeof(want)), 0);
+    EXPECT_EQ(s.requests, 10u);
+    EXPECT_EQ(s.dropped, 0u);
+
+    EXPECT_EQ(ecuio_session_close(session), ECUIO_OK);
+    ecuio_session_destroy(session);
+}
+
+/* The bitmaps alone drop what they mark unsupported: 0x0B is clear in
+ * 0x00's, 0x5D in 0x40's, and 0x61 lies past the chain's end. The ECU
+ * answers nothing for an unsupported PID here (as J1979 lets it), so
+ * without the walk those three would each wait out 100 ms every pass. */
+TEST_F(J2534AdoptionTest, ProbeDropsWhatTheBitmapsMarkUnsupported)
+{
+    static const uint8_t kPids[] = {0x0B, 0x0C, 0x5D, 0x61};
+    static ecuio_signal_def_t defs[4];
+    static ecuio_signal_set_t set;
+    ASSERT_NO_FATAL_FAILURE(register_pid_profile("test-probe-bitmaps", kPids, 4,
+                                                 defs, &set));
+    KnobGuard silent("ECUIO_FAKE_UNSUPPORTED_NRC", "0");
+
+    char uri[700];
+    snprintf(uri, sizeof(uri), "j2534://%s?profile=test-probe-bitmaps",
+             FAKE_J2534_DLL_PATH);
+    ecuio_session_t* session = nullptr;
+    ASSERT_EQ(ecuio_session_create(uri, &session), ECUIO_OK);
+    ASSERT_EQ(ecuio_session_start(session), ECUIO_OK);
+
+    wait_for_writes(get_write_count, 8, 300);
+    for (unsigned long i = 3; i < 8; ++i) {
+        expect_write(i, 0x01, 0x0C);
+    }
+    ecuio_channel_support_t s = {};
+    ASSERT_EQ(ecuio_session_get_channel_support(session, 0, &s), ECUIO_OK);
+    EXPECT_EQ(s.requests, 4u);
+    ASSERT_EQ(s.dropped, 3u);
+    const uint8_t gone[3] = {0x0B, 0x5D, 0x61};
+    for (int i = 0; i < 3; ++i) {
+        EXPECT_EQ(s.dropped_list[i].request[0], 0x01u) << i;
+        EXPECT_EQ(s.dropped_list[i].request[1], gone[i]) << i;
+        EXPECT_EQ(s.dropped_list[i].reason, ECUIO_DROP_BITMAP) << i;
+    }
+
+    EXPECT_EQ(ecuio_session_close(session), ECUIO_OK);
+    ecuio_session_destroy(session);
+}
+
+/* ?probe=0 sends the set as written: no walk, and the PIDs the ECU
+ * refuses (7F 01 12 for 0x0B, 0x5D and 0x61) stay in the rotation. */
+TEST_F(J2534AdoptionTest, ProbeOffSendsTheSetAsWritten)
+{
+    static const uint8_t kPids[] = {0x0B, 0x0C, 0x5D, 0x61};
+    static ecuio_signal_def_t defs[4];
+    static ecuio_signal_set_t set;
+    ASSERT_NO_FATAL_FAILURE(register_pid_profile("test-probe-off", kPids, 4,
+                                                 defs, &set));
+    char uri[700];
+    snprintf(uri, sizeof(uri), "j2534://%s?profile=test-probe-off&probe=0",
+             FAKE_J2534_DLL_PATH);
+    ecuio_session_t* session = nullptr;
+    ASSERT_EQ(ecuio_session_create(uri, &session), ECUIO_OK);
+    ASSERT_EQ(ecuio_session_start(session), ECUIO_OK);
+
+    wait_for_writes(get_write_count, 8, 300);
+    for (unsigned long i = 0; i < 8; ++i) {
+        expect_write(i, 0x01, kPids[i % 4]);
+    }
+    ecuio_channel_support_t s = {};
+    ASSERT_EQ(ecuio_session_get_channel_support(session, 0, &s), ECUIO_OK);
+    EXPECT_EQ(s.flags, 0u);
+    EXPECT_EQ(s.generation, 0u);
+    EXPECT_EQ(s.requests, 4u);
+    EXPECT_EQ(s.dropped, 0u);
+
+    EXPECT_EQ(ecuio_session_close(session), ECUIO_OK);
+    ecuio_session_destroy(session);
+}
+
+/* A DID the ECU refuses with 7F 22 31 (request out of range) leaves after
+ * its first answer; the one it answers stays. No Service 01, so no walk. */
+TEST_F(J2534AdoptionTest, NegativeReplyDropsTheDidTheEcuRefuses)
+{
+    static ecuio_signal_def_t defs[2] = {};
+    for (int i = 0; i < 2; ++i) {
+        defs[i].id = static_cast<uint16_t>(1 + i);
+        defs[i].kind = ECUIO_VALUE_UINT;
+        defs[i].start_byte = 3;
+        defs[i].bit_length = 8;
+        defs[i].scale = 1.0;
+        defs[i].message_id = ECUIO_OBD2_ECU_ARB_ID;
+        defs[i].mux_length = 3;
+    }
+    defs[0].mux_key = 0x621E1Du;   /* the fake's ECU doesn't know it */
+    defs[1].mux_key = 0x621E1Cu;
+    static ecuio_signal_set_t set = {};
+    set.layout_version = ECUIO_SIGNAL_SET_LAYOUT;
+    set.count = 2;
+    set.defs = defs;
+    set.channel_count = ecuio_obd2_signal_set()->channel_count;
+    set.channels = ecuio_obd2_signal_set()->channels;
+    ASSERT_EQ(ecuio_profile_register("test-probe-did", &set, nullptr), ECUIO_OK);
+
+    char uri[700];
+    snprintf(uri, sizeof(uri), "j2534://%s?profile=test-probe-did",
+             FAKE_J2534_DLL_PATH);
+    ecuio_session_t* session = nullptr;
+    ASSERT_EQ(ecuio_session_create(uri, &session), ECUIO_OK);
+    ASSERT_EQ(ecuio_session_start(session), ECUIO_OK);
+
+    wait_for_writes(get_write_count, 6, 300);
+    expect_write(0, 0x22, 0x1E);
+    unsigned char wbuf[64] = {};
+    unsigned long wlen = 0, wflags = 0;
+    for (unsigned long i = 0; i < 6; ++i) {
+        get_recorded_write(i, wbuf, &wlen, &wflags);
+        ASSERT_EQ(wlen, 7u) << "write " << i;
+        EXPECT_EQ(wbuf[6], (i == 0) ? 0x1Du : 0x1Cu) << "write " << i;
+    }
+    ecuio_channel_support_t s = {};
+    ASSERT_EQ(ecuio_session_get_channel_support(session, 0, &s), ECUIO_OK);
+    EXPECT_EQ(s.flags, 0u) << "no walk";
+    ASSERT_EQ(s.dropped, 1u);
+    EXPECT_EQ(s.dropped_list[0].length, 3u);
+    EXPECT_EQ(s.dropped_list[0].request[2], 0x1Du);
+    EXPECT_EQ(s.dropped_list[0].reason, ECUIO_DROP_NOT_SUPPORTED);
+    EXPECT_EQ(s.dropped_list[0].nrc, 0x31u);
+
+    EXPECT_EQ(ecuio_session_close(session), ECUIO_OK);
+    ecuio_session_destroy(session);
+}
+
+/* A connect while the ECU answers nothing (reads bring no frame): the
+ * walk's first bitmap times out, nothing is judged, and every PID stays
+ * while the bus is quiet. Once replies flow the link is ok again, and
+ * the walk resumes and drops what the bitmaps mark unsupported. The ECU
+ * stays silent for an unsupported PID, so only the walk can drop 0x0B. */
+TEST_F(J2534AdoptionTest, ProbeResumesWhenTheLinkRecovers)
+{
+    static const uint8_t kPids[] = {0x0B, 0x0C};
+    static ecuio_signal_def_t defs[2];
+    static ecuio_signal_set_t set;
+    ASSERT_NO_FATAL_FAILURE(register_pid_profile("test-probe-recovery", kPids,
+                                                 2, defs, &set));
+    KnobGuard silent("ECUIO_FAKE_UNSUPPORTED_NRC", "0");
+    std::unique_ptr<KnobGuard> quiet =
+        std::make_unique<KnobGuard>("ECUIO_FAKE_READ_STATUS", "9");
+
+    char uri[700];
+    snprintf(uri, sizeof(uri), "j2534://%s?profile=test-probe-recovery",
+             FAKE_J2534_DLL_PATH);
+    ecuio_session_t* session = nullptr;
+    ASSERT_EQ(ecuio_session_create(uri, &session), ECUIO_OK);
+    ASSERT_EQ(ecuio_session_start(session), ECUIO_OK);
+
+    int32_t le = 0;
+    uint32_t ec = 0;
+    for (int i = 0; i < 500 && le != ECUIO_ERR_VEHICLE_TIMEOUT; ++i) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        (void)ecuio_session_get_error_state(session, &le, &ec);
+    }
+    ASSERT_EQ(le, ECUIO_ERR_VEHICLE_TIMEOUT) << "the bus never read as quiet";
+    expect_write(0, 0x01, 0x00);
+    for (unsigned long i = 1; i < 5; ++i) {
+        expect_write(i, 0x01, kPids[(i - 1) % 2]);
+    }
+    ecuio_channel_support_t s = {};
+    ASSERT_EQ(ecuio_session_get_channel_support(session, 0, &s), ECUIO_OK);
+    EXPECT_EQ(s.flags, ECUIO_SUPPORT_PROBED);
+    EXPECT_EQ(s.ranges, 0u);
+    EXPECT_EQ(s.dropped, 0u) << "silence dropped a request";
+
+    quiet.reset();
+    EXPECT_TRUE(wait_for_support(session, s, [](const ecuio_channel_support_t& r) {
+        return (r.flags & ECUIO_SUPPORT_COMPLETE) != 0;
+    }, 3000)) << "the walk didn't resume (flags " << s.flags << ")";
+    EXPECT_EQ(s.ranges, 0x7u);
+    ASSERT_EQ(s.dropped, 1u);
+    EXPECT_EQ(s.dropped_list[0].request[1], 0x0Bu);
+    EXPECT_EQ(s.dropped_list[0].reason, ECUIO_DROP_BITMAP);
 
     EXPECT_EQ(ecuio_session_close(session), ECUIO_OK);
     ecuio_session_destroy(session);

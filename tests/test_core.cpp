@@ -84,6 +84,13 @@ TEST(CoreTest, CreateFailuresNameTheirCause) {
     EXPECT_EQ(ecuio_session_create("mock://x?profile=", &s), ECUIO_ERR_BAD_URI);
     EXPECT_STREQ(ecuio_last_error_detail(),
                  "?profile= needs a profile name of 1 to 63 characters");
+    std::string long_query = "mock://x?profile=mock";
+    for (int i = 0; i < 16; ++i) {
+        long_query += "&profile=mock";
+    }
+    EXPECT_EQ(ecuio_session_create(long_query.c_str(), &s), ECUIO_ERR_BAD_URI);
+    EXPECT_STREQ(ecuio_last_error_detail(),
+                 "the query has more than 16 key=value pairs");
     EXPECT_EQ(ecuio_session_create("mock://x?profile=bogus", &s),
               ECUIO_ERR_UNKNOWN_PROFILE);
     EXPECT_STREQ(ecuio_last_error_detail(), "no profile is named 'bogus'");
@@ -150,6 +157,23 @@ TEST(CoreTest, MockSessionInfoNamesTheBackend) {
     ASSERT_EQ(ecuio_session_create("mock://demo?profile=raw", &s), ECUIO_OK);
     ASSERT_EQ(ecuio_session_get_info(s, &info), ECUIO_OK);
     EXPECT_STREQ(info.profile, "raw");
+    ecuio_session_destroy(s);
+}
+
+/* A mock session has no channels, so no ECU to report on: every index
+ * is out of range, and the report is left as it was. */
+TEST(CoreTest, MockSessionHasNoChannelSupport) {
+    ecuio_session_t* s = nullptr;
+    ASSERT_EQ(ecuio_session_create("mock://demo", &s), ECUIO_OK);
+    ecuio_channel_support_t support;
+    memset(&support, 0xEE, sizeof(support));
+    EXPECT_EQ(ecuio_session_get_channel_support(s, 0, &support),
+              ECUIO_ERR_INVALID_ARGUMENT);
+    EXPECT_EQ(support.flags, 0xEEEEEEEEu);
+    EXPECT_EQ(ecuio_session_get_channel_support(s, 0, nullptr),
+              ECUIO_ERR_NULL_ARGUMENT);
+    EXPECT_EQ(ecuio_session_get_channel_support(nullptr, 0, &support),
+              ECUIO_ERR_NULL_ARGUMENT);
     ecuio_session_destroy(s);
 }
 

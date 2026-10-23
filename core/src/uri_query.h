@@ -2,15 +2,21 @@
 // Testing: UNIT — CoreTest's profile-query and mock-query cases;
 //          HARNESS — J2534QueryParamTest's malformed-query cases
 //
-// The one URI query grammar. core.cpp reads ?profile= with it before any
-// transport attaches, and each transport reads its own keys with it, so
-// every scheme splits and rejects queries the same way.
+// The one URI query grammar. ecuio_session_create splits the query once,
+// refuses any key its scheme's transport doesn't read and reads ?profile=,
+// all before any transport attaches; the transport then reads its values
+// from the split query. So every scheme splits and rejects queries the
+// same way, in one place.
 
 #ifndef ECUIO_URI_QUERY_H
 #define ECUIO_URI_QUERY_H
 
 #include <cstddef>
 #include <cstring>
+
+/* The most segments a query may have, more than twice the keys of the
+ * scheme with the most (j2534://, seven), so duplicates fit. */
+constexpr size_t ECUIO_URI_MAX_PARAMS = 16;
 
 namespace ecuio_uri {
 
@@ -73,6 +79,56 @@ bool for_each_param(const char* query, Visit&& visit)
         }
         cur = amp + 1;
     }
+}
+
+enum class split_result { ok, malformed, too_long };
+
+} // namespace ecuio_uri
+
+/* A query split once, its segments in order: views into the URI, valid
+ * while the URI is. Declared in internal.h, where the transports' attach
+ * functions take it. */
+struct ecuio_uri_query {
+    ecuio_uri::param params[ECUIO_URI_MAX_PARAMS];
+    size_t count;
+};
+
+namespace ecuio_uri {
+
+/* Splits query (nullptr: no '?', no segments) into *out, by
+ * for_each_param's grammar; too_long past ECUIO_URI_MAX_PARAMS. */
+inline split_result split(const char* query, ecuio_uri_query* out)
+{
+    out->count = 0;
+    bool too_long = false;
+    const bool ok = for_each_param(query, [&](const param& p) {
+        if (out->count == ECUIO_URI_MAX_PARAMS) {
+            too_long = true;
+            return false;
+        }
+        out->params[out->count++] = p;
+        return true;
+    });
+    return too_long ? split_result::too_long
+         : ok       ? split_result::ok
+                    : split_result::malformed;
+}
+
+/* The first segment whose key isn't in keys (a nullptr-terminated
+ * list), or nullptr when every key is. */
+inline const param* first_unknown(const ecuio_uri_query& q,
+                                  const char* const* keys)
+{
+    for (size_t i = 0; i < q.count; ++i) {
+        bool known = false;
+        for (const char* const* k = keys; *k != nullptr && !known; ++k) {
+            known = q.params[i].is(*k);
+        }
+        if (!known) {
+            return &q.params[i];
+        }
+    }
+    return nullptr;
 }
 
 } // namespace ecuio_uri

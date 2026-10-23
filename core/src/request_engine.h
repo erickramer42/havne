@@ -4,13 +4,15 @@
 // C++17, Qt-free, no platform headers.
 // Testing: UNIT — derivation, deduplication and the limit, the
 //     read-only rule, rotation per channel, correlation, the wait, the
-//     pending wait and the floor (RequestEngineTest, test_obd2); the
-//     worker that drives it is HARNESS (J2534AdoptionTest,
-//     J2534HealthTest), its timing on a vehicle BENCH.
+//     pending wait and the floor; the supported-PID walk, its budget and
+//     its resumption, and what each answer drops (RequestEngineTest,
+//     test_obd2); the worker that drives it is HARNESS
+//     (J2534AdoptionTest, J2534HealthTest), its timing on a vehicle BENCH.
 
 #ifndef ECUIO_REQUEST_ENGINE_H
 #define ECUIO_REQUEST_ENGINE_H
 
+#include "ecuio/core.h"
 #include "ecuio/profile.h"
 #include "ecuio/signals.h"
 
@@ -26,34 +28,72 @@
  * Each belongs to one channel, an index into the driver's channel
  * table. A channel has at most one request outstanding, as ISO 15765
  * physical addressing expects, and walks its own rotation, so channels
- * progress independently. */
+ * progress independently.
+ *
+ * The probe (§4) runs on the same pacing. Each channel with Service 01
+ * requests first walks the supported-PID chain (01 00, then 01 20 while
+ * each bitmap's last bit says the next exists, up to 01 E0), one request
+ * at a time through the channel's one-shot slot, and its rotation starts
+ * when the walk ends. While the probe is on, a request leaves the
+ * rotation only on an explicit answer: its PID's bit clear in an answered
+ * bitmap, or a negative reply that won't change within the session. */
 
 /* Timing (ADR-0015, appendix of 2026-10-23). The wait is the server's
  * response time P2 (50 ms) plus 50 ms for the adapter: the longest reply
  * on the first vehicle took 83 ms. A "response pending" reply extends it
  * to P2* (5 s) plus the same margin. The floor is the least time between
  * two requests on one channel, set before any vehicle has run the
- * engine. */
+ * engine. The walk's budget fits the whole chain, eight bitmaps, at a
+ * full wait each; no bitmap request goes out after it. */
 constexpr int64_t ECUIO_ENGINE_WAIT_US = 100000;
 constexpr int64_t ECUIO_ENGINE_PENDING_WAIT_US = 5050000;
 constexpr int64_t ECUIO_ENGINE_GAP_US = 20000;
+constexpr int64_t ECUIO_ENGINE_PROBE_BUDGET_US = 1000000;
 
 /* Negative responses: 7F <service> <code> (ISO 14229-1). */
 constexpr uint8_t ECUIO_NEGATIVE_RESPONSE = 0x7F;
+constexpr uint8_t ECUIO_NRC_SERVICE_NOT_SUPPORTED = 0x11;
+constexpr uint8_t ECUIO_NRC_SUBFUNCTION_NOT_SUPPORTED = 0x12;
+constexpr uint8_t ECUIO_NRC_REQUEST_OUT_OF_RANGE = 0x31;
+constexpr uint8_t ECUIO_NRC_SECURITY_ACCESS_DENIED = 0x33;
 constexpr uint8_t ECUIO_NRC_RESPONSE_PENDING = 0x78;
+constexpr uint8_t ECUIO_NRC_NOT_IN_ACTIVE_SESSION = 0x7F;
+
+/* ecuio_engine_due's answers besides a table index. */
+constexpr int32_t ECUIO_ENGINE_NONE = -1;   /* nothing to send */
+constexpr int32_t ECUIO_ENGINE_ONCE = -2;   /* the channel's one-shot */
+
+/* A bitmap reply: 41 <PID> and four bytes, one bit per PID. */
+constexpr uint8_t ECUIO_BITMAP_REPLY_LEN = 6;
 
 struct ecuio_request {
     uint8_t bytes[3];   /* the service ID, then the key */
     uint8_t len;        /* 2 or 3 */
     uint8_t channel;
+    uint8_t dropped;    /* 0 in the rotation, else why not (ECUIO_DROP_*) */
+    uint8_t nrc;        /* the negative reply's code that dropped it */
 };
 
 struct ecuio_engine_channel {
-    int32_t outstanding = -1;   /* the request awaiting its reply, or -1 */
+    int32_t outstanding = ECUIO_ENGINE_NONE;   /* a table index, the
+                                                * one-shot, or none */
     int64_t deadline_us = 0;    /* when that request's wait ends */
     int64_t next_send_us = 0;   /* the floor: no request before this */
     uint32_t cursor = 0;        /* where the rotation resumes */
-    uint32_t requests = 0;      /* how many requests are this channel's */
+    uint32_t requests = 0;      /* this channel's requests in the rotation */
+    bool in_step = true;        /* no request has timed out since the last
+                                 * positive reply: see ecuio_engine_on_frame */
+    ecuio_request once = {};    /* the one-shot: the walk's next bitmap */
+    /* The supported-PID walk. Bits for PID p sit as the bitmaps carry
+     * them: bit 0x80 >> ((p - 1) % 8) of byte (p - 1) / 8. */
+    bool walking = false;       /* the one-shot is due or out */
+    bool probed = false;        /* a walk has started */
+    bool walked = false;        /* the chain was answered to its end */
+    uint8_t ranges = 0;         /* bit i: the bitmap at 0x20 * i answered */
+    uint8_t known[32] = {};     /* PIDs whose support the ECU stated */
+    uint8_t supported[32] = {}; /* of those, the ones it supports */
+    uint32_t generation = 0;    /* bumped whenever the above, or a
+                                 * request's dropped, changes */
 };
 
 struct ecuio_request_engine {
@@ -61,6 +101,8 @@ struct ecuio_request_engine {
     uint32_t count = 0;
     ecuio_engine_channel chans[ECUIO_MAX_CHANNELS] = {};
     uint32_t chan_count = 0;
+    bool probe = false;         /* §4 on: walks run, explicit answers drop */
+    int64_t walk_until_us = 0;  /* the walk's budget ends */
 };
 
 /* How a frame on a channel relates to its outstanding request. */
@@ -81,6 +123,27 @@ enum class ecuio_engine_add_result { added, duplicate, refused, full };
 inline bool ecuio_engine_service_allowed(uint8_t sid)
 {
     return sid == 0x01 || sid == 0x09 || sid == 0x22;
+}
+
+/* §4: what a negative reply's code says of its request, as
+ * ECUIO_DROP_*: NOT_SUPPORTED for 0x12 (the first vehicle's answer to an
+ * unsupported PID) and 0x31; SERVICE for 0x11; ACCESS for 0x33 and 0x7F,
+ * since the engine never unlocks or changes the session; 0 for any code
+ * that can pass, like 0x22 (conditions not correct) or 0x21 (busy). */
+inline uint8_t ecuio_engine_drop_reason(uint8_t nrc)
+{
+    switch (nrc) {
+    case ECUIO_NRC_SUBFUNCTION_NOT_SUPPORTED:
+    case ECUIO_NRC_REQUEST_OUT_OF_RANGE:
+        return ECUIO_DROP_NOT_SUPPORTED;
+    case ECUIO_NRC_SERVICE_NOT_SUPPORTED:
+        return ECUIO_DROP_SERVICE;
+    case ECUIO_NRC_SECURITY_ACCESS_DENIED:
+    case ECUIO_NRC_NOT_IN_ACTIVE_SESSION:
+        return ECUIO_DROP_ACCESS;
+    default:
+        return 0;
+    }
 }
 
 /* §2: the request whose positive reply carries a def's value. The def's
@@ -112,7 +175,8 @@ inline bool ecuio_engine_request_for_def(const ecuio_signal_def_t* d,
 }
 
 /* An empty table over chan_count channels, at least one: a set that
- * declares none still counts its requests on channel 0. */
+ * declares none still counts its requests on channel 0. The probe is
+ * off until ecuio_engine_probe. */
 inline void ecuio_engine_init(ecuio_request_engine* e, uint32_t chan_count)
 {
     *e = ecuio_request_engine{};
@@ -203,107 +267,310 @@ inline bool ecuio_engine_derive(ecuio_request_engine* e,
     return true;
 }
 
-/* The request channel c sends next, or -1: while one is outstanding,
- * before the floor, or when the channel has none. Moves the rotation
- * past the one it returns; ecuio_engine_sent records what became of
- * it. */
+/* The request r names on channel c: a table index, or the one-shot. */
+inline const ecuio_request& ecuio_engine_request_of(
+    const ecuio_request_engine* e, uint32_t c, int32_t r)
+{
+    return (r == ECUIO_ENGINE_ONCE) ? e->chans[c].once : e->requests[r];
+}
+
+/* Takes table entry i out of the rotation, for reason (ECUIO_DROP_*). */
+inline void ecuio_engine_drop(ecuio_request_engine* e, uint32_t i,
+                              uint8_t reason, uint8_t nrc)
+{
+    ecuio_request& r = e->requests[i];
+    if (r.dropped != 0) {
+        return;
+    }
+    r.dropped = reason;
+    r.nrc = nrc;
+    ecuio_engine_channel& ch = e->chans[r.channel];
+    --ch.requests;
+    ++ch.generation;
+}
+
+inline bool ecuio_engine_pid_bit(const uint8_t* bits, uint8_t pid)
+{
+    return (bits[(pid - 1) / 8] & (0x80u >> ((pid - 1) % 8))) != 0;
+}
+
+/* Ends channel c's walk where it stands, answered or not, and drops each
+ * of its Service 01 requests whose PID the answers mark unsupported.
+ * PIDs it didn't reach stay: silence isn't an answer. */
+inline void ecuio_engine_end_walk(ecuio_request_engine* e, uint32_t c)
+{
+    ecuio_engine_channel& ch = e->chans[c];
+    ch.walking = false;
+    ++ch.generation;
+    for (uint32_t i = 0; i < e->count; ++i) {
+        const ecuio_request& r = e->requests[i];
+        if (r.channel == c && r.dropped == 0 && r.bytes[0] == 0x01 &&
+            r.bytes[1] != 0 && ecuio_engine_pid_bit(ch.known, r.bytes[1]) &&
+            !ecuio_engine_pid_bit(ch.supported, r.bytes[1])) {
+            ecuio_engine_drop(e, i, ECUIO_DROP_BITMAP, 0);
+        }
+    }
+}
+
+/* A bitmap reply to the walk on channel c: 41 <PID> b0 b1 b2 b3, PID
+ * 0x20 * i covering PIDs 0x20 * i + 1 to 0x20 * i + 0x20, the last of
+ * them the next bitmap. A clear last bit ends the chain, and with it
+ * says every later PID is unsupported. */
+inline void ecuio_engine_take_bitmap(ecuio_request_engine* e, uint32_t c,
+                                     const uint8_t* data, int64_t now_us)
+{
+    ecuio_engine_channel& ch = e->chans[c];
+    const uint32_t range = ch.once.bytes[1] / 0x20u;
+    for (uint32_t b = 0; b < 4; ++b) {
+        ch.known[range * 4 + b] = 0xFF;
+        ch.supported[range * 4 + b] = data[2 + b];
+    }
+    ch.ranges = static_cast<uint8_t>(ch.ranges | (1u << range));
+    const bool next = (data[5] & 0x01u) != 0;
+    if (!next) {
+        for (uint32_t b = (range + 1) * 4; b < sizeof(ch.known); ++b) {
+            ch.known[b] = 0xFF;
+        }
+    }
+    if (!next || range == 7) {
+        ch.walked = true;
+        ecuio_engine_end_walk(e, c);
+        return;
+    }
+    ch.once.bytes[1] = static_cast<uint8_t>((range + 1) * 0x20u);
+    if (now_us >= e->walk_until_us) {
+        ecuio_engine_end_walk(e, c);
+    }
+}
+
+/* §4: turns the probe on and starts the walk on every channel that has
+ * Service 01 requests in its rotation and whose chain isn't answered to
+ * its end yet. A walk resumes at the first bitmap it hasn't had, so the
+ * one at connect and each after a recovery (the driver's call) together
+ * ask each bitmap until it's answered. The budget starts now. */
+inline void ecuio_engine_probe(ecuio_request_engine* e, int64_t now_us)
+{
+    e->probe = true;
+    e->walk_until_us = now_us + ECUIO_ENGINE_PROBE_BUDGET_US;
+    for (uint32_t c = 0; c < e->chan_count; ++c) {
+        ecuio_engine_channel& ch = e->chans[c];
+        if (ch.walked || ch.walking) {
+            continue;
+        }
+        bool asks_pids = false;
+        for (uint32_t i = 0; i < e->count && !asks_pids; ++i) {
+            const ecuio_request& r = e->requests[i];
+            asks_pids = r.channel == c && r.dropped == 0 && r.bytes[0] == 0x01;
+        }
+        if (!asks_pids) {
+            continue;
+        }
+        uint32_t range = 0;
+        while (range < 8 && (ch.ranges & (1u << range)) != 0) {
+            ++range;
+        }
+        if (range == 8) {
+            continue;   /* every bitmap answered, so walked is set */
+        }
+        ch.once = ecuio_request{};
+        ch.once.bytes[0] = 0x01;
+        ch.once.bytes[1] = static_cast<uint8_t>(range * 0x20u);
+        ch.once.len = 2;
+        ch.once.channel = static_cast<uint8_t>(c);
+        ch.walking = true;
+        ch.probed = true;
+    }
+}
+
+/* What channel c sends next: ECUIO_ENGINE_ONCE while its walk has a
+ * bitmap to ask, else the next request of its rotation, or
+ * ECUIO_ENGINE_NONE while one is outstanding, before the floor, or when
+ * there is nothing to send. A walk out of budget ends here. Moves the
+ * rotation past the request it returns; ecuio_engine_sent records what
+ * became of it. */
 inline int32_t ecuio_engine_due(ecuio_request_engine* e, uint32_t c,
                                 int64_t now_us)
 {
     ecuio_engine_channel& ch = e->chans[c];
-    if (ch.outstanding >= 0 || now_us < ch.next_send_us ||
-        ch.requests == 0) {
-        return -1;
+    if (ch.outstanding != ECUIO_ENGINE_NONE || now_us < ch.next_send_us) {
+        return ECUIO_ENGINE_NONE;
+    }
+    if (ch.walking) {
+        if (now_us < e->walk_until_us) {
+            return ECUIO_ENGINE_ONCE;
+        }
+        ecuio_engine_end_walk(e, c);
+    }
+    if (ch.requests == 0) {
+        return ECUIO_ENGINE_NONE;
     }
     for (uint32_t k = 0; k < e->count; ++k) {
         const uint32_t i = (ch.cursor + k) % e->count;
-        if (e->requests[i].channel == c) {
+        if (e->requests[i].channel == c && e->requests[i].dropped == 0) {
             ch.cursor = (i + 1) % e->count;
             return static_cast<int32_t>(i);
         }
     }
-    return -1;
+    return ECUIO_ENGINE_NONE;
 }
 
 /* After the driver's write of request r on channel c, at now_us: a sent
  * request waits for its reply until the wait ends; one that wasn't sent
- * leaves nothing outstanding. The floor runs from now either way. */
+ * leaves nothing outstanding, and a one-shot stays due. The floor runs
+ * from now either way. */
 inline void ecuio_engine_sent(ecuio_request_engine* e, uint32_t c,
                               int32_t r, bool sent, int64_t now_us)
 {
     ecuio_engine_channel& ch = e->chans[c];
-    ch.outstanding = sent ? r : -1;
+    ch.outstanding = sent ? r : ECUIO_ENGINE_NONE;
     ch.deadline_us = now_us + ECUIO_ENGINE_WAIT_US;
     ch.next_send_us = now_us + ECUIO_ENGINE_GAP_US;
 }
 
 /* Ends channel c's request once its wait has run out: true when one
- * timed out, which is that request's outcome. */
+ * timed out, which is that request's outcome. Its reply may still come,
+ * so the channel is out of step until a positive reply. A bitmap that
+ * times out ends the walk. */
 inline bool ecuio_engine_expire(ecuio_request_engine* e, uint32_t c,
                                 int64_t now_us)
 {
     ecuio_engine_channel& ch = e->chans[c];
-    if (ch.outstanding < 0 || now_us < ch.deadline_us) {
+    if (ch.outstanding == ECUIO_ENGINE_NONE || now_us < ch.deadline_us) {
         return false;
     }
-    ch.outstanding = -1;
+    const bool once = ch.outstanding == ECUIO_ENGINE_ONCE;
+    ch.outstanding = ECUIO_ENGINE_NONE;
+    ch.in_step = false;
+    if (once) {
+        ecuio_engine_end_walk(e, c);
+    }
     return true;
 }
 
-/* A frame received on channel c, its payload after the CAN ID (only the
- * first three bytes are read). A positive or negative reply completes
+/* A frame received on channel c, its payload after the CAN ID (at most
+ * the first six bytes are read). A positive or negative reply completes
  * the outstanding request; a pending one keeps it outstanding and
- * extends its wait to the pending wait from now. *out_nrc (when not
- * NULL) gets the code of a negative or pending reply. */
+ * extends its wait to the pending wait from now. A bitmap carries on the
+ * walk; while the probe is on, a negative reply drops what its code says
+ * (ecuio_engine_drop_reason): its request, or for 0x11 every request of
+ * its service on the channel. A negative reply names the service but not
+ * the key, so one that came late, after its request timed out, would
+ * name the request now outstanding: it drops only while the channel is
+ * in step. An ECU answers in order, so a positive reply, which carries
+ * the key, puts the channel back in step. *out_nrc (when not NULL) gets
+ * the code of a negative or pending reply. */
 inline ecuio_reply ecuio_engine_on_frame(ecuio_request_engine* e, uint32_t c,
                                          const uint8_t* data, uint16_t len,
                                          int64_t now_us, uint8_t* out_nrc)
 {
     ecuio_engine_channel& ch = e->chans[c];
-    if (ch.outstanding < 0 || len == 0) {
+    if (ch.outstanding == ECUIO_ENGINE_NONE || len == 0) {
         return ecuio_reply::none;
     }
-    const ecuio_request& r = e->requests[ch.outstanding];
+    const int32_t out = ch.outstanding;
+    const ecuio_request& r = ecuio_engine_request_of(e, c, out);
     if (len >= r.len && data[0] == static_cast<uint8_t>(r.bytes[0] + 0x40) &&
         data[1] == r.bytes[1] && (r.len < 3 || data[2] == r.bytes[2])) {
-        ch.outstanding = -1;
+        ch.outstanding = ECUIO_ENGINE_NONE;
+        ch.in_step = true;
+        if (out == ECUIO_ENGINE_ONCE) {
+            if (len >= ECUIO_BITMAP_REPLY_LEN) {
+                ecuio_engine_take_bitmap(e, c, data, now_us);
+            } else {
+                ecuio_engine_end_walk(e, c);
+            }
+        }
         return ecuio_reply::positive;
     }
-    if (len >= 3 && data[0] == ECUIO_NEGATIVE_RESPONSE &&
-        data[1] == r.bytes[0]) {
-        if (out_nrc != nullptr) {
-            *out_nrc = data[2];
-        }
-        if (data[2] == ECUIO_NRC_RESPONSE_PENDING) {
-            ch.deadline_us = now_us + ECUIO_ENGINE_PENDING_WAIT_US;
-            return ecuio_reply::pending;
-        }
-        ch.outstanding = -1;
-        return ecuio_reply::negative;
+    if (len < 3 || data[0] != ECUIO_NEGATIVE_RESPONSE ||
+        data[1] != r.bytes[0]) {
+        return ecuio_reply::none;
     }
-    return ecuio_reply::none;
+    const uint8_t code = data[2];
+    if (out_nrc != nullptr) {
+        *out_nrc = code;
+    }
+    if (code == ECUIO_NRC_RESPONSE_PENDING) {
+        ch.deadline_us = now_us + ECUIO_ENGINE_PENDING_WAIT_US;
+        return ecuio_reply::pending;
+    }
+    ch.outstanding = ECUIO_ENGINE_NONE;
+    const uint8_t service = r.bytes[0];
+    const uint8_t reason = (e->probe && ch.in_step)
+                               ? ecuio_engine_drop_reason(code) : 0;
+    if (reason == ECUIO_DROP_SERVICE) {
+        for (uint32_t i = 0; i < e->count; ++i) {
+            if (e->requests[i].channel == c &&
+                e->requests[i].bytes[0] == service) {
+                ecuio_engine_drop(e, i, reason, code);
+            }
+        }
+    } else if (reason != 0 && out != ECUIO_ENGINE_ONCE) {
+        ecuio_engine_drop(e, static_cast<uint32_t>(out), reason, code);
+    }
+    if (out == ECUIO_ENGINE_ONCE) {
+        ecuio_engine_end_walk(e, c);
+    }
+    return ecuio_reply::negative;
 }
 
 /* Microseconds until the engine next has something to do: a wait
- * ending, or an idle channel's floor passing; 0 when something is due
- * now, INT64_MAX when no channel has a request. */
+ * ending, or a channel's floor passing while it has something to send;
+ * 0 when something is due now, INT64_MAX when nothing is. */
 inline int64_t ecuio_engine_next_event_us(const ecuio_request_engine* e,
                                           int64_t now_us)
 {
     int64_t next = INT64_MAX;
     for (uint32_t c = 0; c < e->chan_count; ++c) {
         const ecuio_engine_channel& ch = e->chans[c];
-        if (ch.requests == 0) {
+        if (ch.outstanding == ECUIO_ENGINE_NONE && ch.requests == 0 &&
+            !ch.walking) {
             continue;
         }
-        const int64_t at = (ch.outstanding >= 0) ? ch.deadline_us
-                                                 : ch.next_send_us;
+        const int64_t at = (ch.outstanding != ECUIO_ENGINE_NONE)
+                               ? ch.deadline_us : ch.next_send_us;
         const int64_t in = (at > now_us) ? at - now_us : 0;
         if (in < next) {
             next = in;
         }
     }
     return next;
+}
+
+/* What channel c has learned, for ecuio_session_get_channel_support;
+ * the driver adds the channel's rx_id. */
+inline void ecuio_engine_support(const ecuio_request_engine* e, uint32_t c,
+                                 ecuio_channel_support_t* out)
+{
+    const ecuio_engine_channel& ch = e->chans[c];
+    *out = ecuio_channel_support_t{};
+    out->flags = (ch.probed ? ECUIO_SUPPORT_PROBED : 0u) |
+                 (ch.walked ? ECUIO_SUPPORT_COMPLETE : 0u);
+    out->generation = ch.generation;
+    out->ranges = ch.ranges;
+    for (uint32_t b = 0; b < sizeof(out->pid_bitmap); ++b) {
+        out->pid_bitmap[b] = ch.supported[b];
+    }
+    for (uint32_t i = 0; i < e->count; ++i) {
+        const ecuio_request& r = e->requests[i];
+        if (r.channel != c) {
+            continue;
+        }
+        ++out->requests;
+        if (r.dropped == 0) {
+            continue;
+        }
+        if (out->dropped < ECUIO_SUPPORT_MAX_DROPPED) {
+            ecuio_dropped_request_t& d = out->dropped_list[out->dropped];
+            for (uint8_t k = 0; k < r.len; ++k) {
+                d.request[k] = r.bytes[k];
+            }
+            d.length = r.len;
+            d.reason = r.dropped;
+            d.nrc = r.nrc;
+        }
+        ++out->dropped;
+    }
 }
 
 #endif /* ECUIO_REQUEST_ENGINE_H */

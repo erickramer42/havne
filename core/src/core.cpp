@@ -22,41 +22,50 @@ namespace {
     /* ecuio_last_error_detail's text (error_detail.h), per thread. */
     thread_local char t_detail[512] = "";
 
-    /* Malformed: the query breaks the shared grammar. BadValue: a
-     * ?profile= value that can't be a name. */
-    enum class ProfileQuery { Absent, Valid, Malformed, BadValue };
+    enum class ProfileQuery { Absent, Valid, BadValue };
 
-    /* Extract the LAST `profile` value from the query of a URI body,
-    * through the shared grammar (uri_query.h), so a structurally
-    * malformed query fails here for every scheme. Other keys are the
-    * transport's to judge. Tri-state: a present-but-malformed value
-    * (empty or over-length) is INVALID and fails session_create — it
-    * must NEVER silently downgrade to the scheme default, which would
-    * hand a typo'd ?profile=raw a decoding session or vice versa. The
-    * FIRST malformed occurrence fails; last-wins applies only across
-    * valid values. out_val holds ECUIO_PROFILE_NAME_MAX + 1 bytes. */
-    ProfileQuery query_profile(const char* rest, char* out_val)
+    /* The LAST `profile` value of a split query. Tri-state: a
+     * present-but-malformed value (empty or over-length) is INVALID and
+     * fails session_create — it must NEVER silently downgrade to the
+     * scheme default, which would hand a typo'd ?profile=raw a decoding
+     * session or vice versa. Any malformed occurrence fails; last-wins
+     * applies only across valid values. out_val holds
+     * ECUIO_PROFILE_NAME_MAX + 1 bytes. */
+    ProfileQuery query_profile(const ecuio_uri_query& q, char* out_val)
     {
         bool found = false;
-        bool bad_value = false;
-        const bool ok = ecuio_uri::for_each_param(
-            ecuio_uri::query_of(rest), [&](const ecuio_uri::param& p) {
-                if (!p.is("profile")) {
-                    return true;
-                }
-                if (p.val_len == 0 || p.val_len > ECUIO_PROFILE_NAME_MAX) {
-                    bad_value = true;
-                    return false;
-                }
-                memcpy(out_val, p.val, p.val_len);
-                out_val[p.val_len] = '\0';
-                found = true;
-                return true;
-            });
-        if (!ok) {
-            return bad_value ? ProfileQuery::BadValue : ProfileQuery::Malformed;
+        for (size_t i = 0; i < q.count; ++i) {
+            const ecuio_uri::param& p = q.params[i];
+            if (!p.is("profile")) {
+                continue;
+            }
+            if (p.val_len == 0 || p.val_len > ECUIO_PROFILE_NAME_MAX) {
+                return ProfileQuery::BadValue;
+            }
+            memcpy(out_val, p.val, p.val_len);
+            out_val[p.val_len] = '\0';
+            found = true;
         }
         return found ? ProfileQuery::Valid : ProfileQuery::Absent;
+    }
+
+    /* "a", "a and b", "a, b and c": a key list for a detail line. */
+    void join_keys(const char* const* keys, char* out, size_t cap)
+    {
+        size_t n = 0;
+        while (keys[n] != nullptr) {
+            ++n;
+        }
+        size_t used = 0;
+        out[0] = '\0';
+        for (size_t i = 0; i < n && used < cap; ++i) {
+            const char* sep = (i == 0) ? "" : (i + 1 == n) ? " and " : ", ";
+            const int w = snprintf(out + used, cap - used, "%s%s", sep, keys[i]);
+            if (w < 0) {
+                break;
+            }
+            used += static_cast<size_t>(w);
+        }
     }
 } // namespace
 
@@ -145,6 +154,22 @@ ecuio_status_t ecuio_session_get_info(
     return ECUIO_OK;
 }
 
+ecuio_status_t ecuio_session_get_channel_support(
+    const ecuio_session_t* session,
+    uint32_t channel,
+    ecuio_channel_support_t* out_support)
+{
+    if (session == nullptr || out_support == nullptr) {
+        return ECUIO_ERR_NULL_ARGUMENT;
+    }
+    std::lock_guard<std::mutex> lock(session->support_mutex);
+    if (channel >= session->support_count) {
+        return ECUIO_ERR_INVALID_ARGUMENT;
+    }
+    *out_support = session->support[channel];
+    return ECUIO_OK;
+}
+
 /* Optional no-ops (core.h): core holds no global state that needs
  * them. */
 ecuio_status_t ecuio_init(void)
@@ -221,23 +246,52 @@ ecuio_status_t ecuio_session_create(
         return ECUIO_ERR_NO_TRANSPORT;
     }
 
-    /* ADR-0013 profile selection: default per scheme, ?profile=
-     * override. Resolved and validated BEFORE any transport attach so
-     * an unknown or MALFORMED profile fails fast with no DLL load and
-     * no discovery. */
-    const char* rest = transport_uri + (is_mock ? 7 : 8);
-    char profile_name[ECUIO_PROFILE_NAME_MAX + 1];
-    const char* chosen = nullptr;
-    switch (query_profile(rest, profile_name)) {
-        case ProfileQuery::Valid:
-            chosen = profile_name;
-            break;
-        case ProfileQuery::Malformed:
+    /* The query, split once (uri_query.h) and checked against the keys
+     * the scheme's transport reads, before anything attaches: a
+     * malformed query or an unknown key fails with no DLL load and no
+     * discovery, the same way on every scheme. */
+    const char* scheme = is_mock ? "mock://" : "j2534://";
+    const char* const* keys = is_mock ? ecuio_mock_query_keys
+                                      : ecuio_j2534_query_keys;
+    const char* rest = transport_uri + strlen(scheme);
+    ecuio_uri_query query;
+    switch (ecuio_uri::split(ecuio_uri::query_of(rest), &query)) {
+        case ecuio_uri::split_result::malformed:
             delete *out_session;
             *out_session = nullptr;
             ecuio_detail_set("malformed query: expected key=value pairs "
                              "joined by '&'");
             return ECUIO_ERR_BAD_URI;
+        case ecuio_uri::split_result::too_long:
+            delete *out_session;
+            *out_session = nullptr;
+            ecuio_detail_set("the query has more than %d key=value pairs",
+                             static_cast<int>(ECUIO_URI_MAX_PARAMS));
+            return ECUIO_ERR_BAD_URI;
+        case ecuio_uri::split_result::ok:
+        default:
+            break;
+    }
+    if (const ecuio_uri::param* bad = ecuio_uri::first_unknown(query, keys)) {
+        char known[128];
+        join_keys(keys, known, sizeof(known));
+        delete *out_session;
+        *out_session = nullptr;
+        ecuio_detail_set("%s takes no query key '%.*s', only %s", scheme,
+                         static_cast<int>(bad->key_len), bad->key, known);
+        return ECUIO_ERR_BAD_URI;
+    }
+
+    /* ADR-0013 profile selection: default per scheme, ?profile=
+     * override. Resolved and validated BEFORE any transport attach so
+     * an unknown or MALFORMED profile fails fast with no DLL load and
+     * no discovery. */
+    char profile_name[ECUIO_PROFILE_NAME_MAX + 1];
+    const char* chosen = nullptr;
+    switch (query_profile(query, profile_name)) {
+        case ProfileQuery::Valid:
+            chosen = profile_name;
+            break;
         case ProfileQuery::BadValue:
             delete *out_session;
             *out_session = nullptr;
@@ -269,11 +323,13 @@ ecuio_status_t ecuio_session_create(
     ecuio_status_t status = ECUIO_ERR_NO_TRANSPORT;
 #ifdef _WIN32
     if (is_j2534) {
-        status = ecuio_j2534_transport_attach(*out_session, transport_uri);
+        status = ecuio_j2534_transport_attach(*out_session, transport_uri,
+                                              &query);
     } else
 #endif
     if (is_mock) {
-        status = ecuio_mock_transport_attach(*out_session, transport_uri);
+        status = ecuio_mock_transport_attach(*out_session, transport_uri,
+                                             &query);
     }
 
     if (status != ECUIO_OK) {

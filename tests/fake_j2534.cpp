@@ -15,10 +15,11 @@
 //        logical message) or Service 0x22 [ID][22][DID] (7 bytes). The
 //        ECU the request is addressed to answers: [reply ID BE][41][PID]
 //        [canned] from g_obd2_canned (SetFakeObd2CannedValueExternal
-//        overrides per-test), or [ID][62][DID][value] for the one DID
-//        it knows, 0x1E1C; any other PID or DID gets a negative reply,
-//        7F 01 12 (what the first vehicle answered for PID 0x5C) or
-//        7F 22 31. The reply ID is the request's plus 8 (0x7E0 ->
+//        overrides per-test) or its supported-PID bitmap, or
+//        [ID][62][DID][value] for the one DID it knows, 0x1E1C; any
+//        other PID or DID gets a negative reply, 7F 01 12 (what the
+//        first vehicle answered for PID 0x5C) or 7F 22 31. The reply ID
+//        is the request's plus 8 (0x7E0 ->
 //        0x7E8; the functional 0x7DF is answered from 0x7E8) or, 29-bit,
 //        18DA<tester><ecu> for 18DA<ecu><tester>. NO PCI byte in either
 //        direction — the fake models the adapter side of ISO-TP, and
@@ -33,6 +34,10 @@
 //    holds each response back that long after the write (default 0);
 //    ECUIO_FAKE_PENDING=1 answers each request with "response pending"
 //    (7F <service> 78) at once, ahead of that reply.
+//    ECUIO_FAKE_UNSUPPORTED_NRC sets the code of the negative reply to
+//    an unsupported PID or DID (hex or decimal), or 0 for no reply at
+//    all. The supported-PID bitmaps (PIDs 0x00, 0x20, 0x40) mark the
+//    canned PIDs, so the chain ends at 0x40.
 //  * IoCtl: config table (SET stores, GET reads back), fixed VBATT
 //    (13800 mV), CLEAR_* accepted. Unknown ids FAIL like a strict vendor.
 //  * ReadVersion: fixed firmware, DLL and API strings (kFirmwareVersion
@@ -430,6 +435,34 @@ void reply_header(const unsigned char* req, unsigned char* out)
 constexpr uint16_t kFakeDid = 0x1E1C;
 constexpr unsigned char kFakeDidValue[2] = {0x12, 0x34};
 
+/* The Service 01 PIDs the fake's ECU supports: its canned ones, and the
+ * bitmaps that lead to them. */
+bool supports_pid(unsigned pid)
+{
+    switch (pid) {
+        case 0x00: case 0x04: case 0x05: case 0x0C: case 0x0D: case 0x0F:
+        case 0x10: case 0x11: case 0x20: case 0x2F: case 0x40: case 0x42:
+        case 0x5C:
+            return true;
+        default:
+            return false;
+    }
+}
+
+/* The supported-PID bitmap at PID base (0x00, 0x20, 0x40), into out[4]:
+ * PID base + k (k from 1 to 32) is bit 0x80 >> ((k - 1) % 8) of byte
+ * (k - 1) / 8 (SAE J1979), the last bit the next bitmap. */
+void pid_bitmap(unsigned base, unsigned char* out)
+{
+    for (unsigned k = 1; k <= 32; ++k) {
+        const unsigned char bit = static_cast<unsigned char>(
+            0x80u >> ((k - 1) % 8));
+        if (supports_pid(base + k)) {
+            out[(k - 1) / 8] = static_cast<unsigned char>(out[(k - 1) / 8] | bit);
+        }
+    }
+}
+
 /* A request's negative reply: [reply ID][7F][service][code]. */
 void build_negative(const unsigned char* req, unsigned char code,
                     unsigned char* resp, unsigned long* resp_len)
@@ -450,16 +483,30 @@ void build_negative(const unsigned char* req, unsigned char code,
  * fake models the ADAPTER side of ISO-TP: this queue content is what a
  * conforming adapter delivers from ReadMsgs, and the transport's header
  * strip lands the bridge on [41][PID][A][B]... — the obd2 set's
- * mux-at-offset-0 grammar. Response length varies per PID. */
-void build_obd2_response(const unsigned char* req, unsigned long req_len,
+ * mux-at-offset-0 grammar. Response length varies per PID.
+ * unsupported_nrc is ECUIO_FAKE_UNSUPPORTED_NRC: -1 (unset) answers an
+ * unsupported PID 0x12 and an unknown DID 0x31, 0 answers neither (an
+ * ECU that stays silent), any other value is the code for both. False
+ * when nothing answers. */
+bool build_obd2_response(const unsigned char* req, unsigned long req_len,
+                         long unsupported_nrc,
                          unsigned char* resp, unsigned long* resp_len)
 {
     (void)req_len;   /* shape pre-validated by the caller */
+    const auto refuse = [&](unsigned char fallback) {
+        if (unsupported_nrc == 0) {
+            return false;
+        }
+        build_negative(req, (unsupported_nrc < 0)
+                                ? fallback
+                                : static_cast<unsigned char>(unsupported_nrc),
+                       resp, resp_len);
+        return true;
+    };
     if (req[4] == 0x22) {
         const uint16_t did = static_cast<uint16_t>((req[5] << 8) | req[6]);
         if (did != kFakeDid) {
-            build_negative(req, 0x31, resp, resp_len);   /* out of range */
-            return;
+            return refuse(0x31);   /* request out of range */
         }
         reply_header(req, resp);
         resp[4] = 0x62;
@@ -468,17 +515,23 @@ void build_obd2_response(const unsigned char* req, unsigned long req_len,
         resp[7] = kFakeDidValue[0];
         resp[8] = kFakeDidValue[1];
         *resp_len = 9;
-        return;
+        return true;
     }
     const uint8_t pid = req[5];
+    if (!supports_pid(pid)) {
+        return refuse(0x12);   /* the first vehicle's answer for 0x5C */
+    }
 
     reply_header(req, resp);
     resp[4] = 0x41;   /* Mode 01 + 0x40 response */
     resp[5] = pid;    /* PID echo */
 
     switch (pid) {
-        case 0x00:  /* Supported PIDs bitmask (all zero for v1) */
+        case 0x00:
+        case 0x20:
+        case 0x40:
             resp[6] = resp[7] = resp[8] = resp[9] = 0;
+            pid_bitmap(pid, resp + 6);
             *resp_len = 10;
             break;
         case 0x04: resp[6] = g_obd2_canned.pid_04_engine_load;  *resp_len = 7;  break;
@@ -494,10 +547,8 @@ void build_obd2_response(const unsigned char* req, unsigned long req_len,
         case 0x10: resp[6] = g_obd2_canned.pid_10_maf_high;
                    resp[7] = g_obd2_canned.pid_10_maf_low;      *resp_len = 8;  break;
         case 0x5C: resp[6] = g_obd2_canned.pid_5C_oil_temp;     *resp_len = 7;  break;
-        default:    /* not supported */
-            build_negative(req, 0x12, resp, resp_len);
-            break;
     }
+    return true;
 }
 
 /* Override canned response values for a specific PID. */
@@ -932,6 +983,13 @@ long __stdcall PassThruWriteMsgs(unsigned long ChannelID,
     const unsigned long reply_delay_ms = fake_j2534::knob_ms(
         "ECUIO_FAKE_REPLY_DELAY_MS", vx ? fake_j2534::kVxReplyDelayMs : 0);
     const bool pending_first = fake_j2534::knob_on("ECUIO_FAKE_PENDING");
+    long unsupported_nrc = -1;
+    {
+        char nb[32] = {};
+        if (fake_j2534::read_knob("ECUIO_FAKE_UNSUPPORTED_NRC", nb, sizeof(nb))) {
+            unsupported_nrc = strtol(nb, nullptr, 0);
+        }
+    }
 
     std::unique_lock<std::mutex> lk(fake_j2534::g_lock);
 
@@ -993,7 +1051,10 @@ long __stdcall PassThruWriteMsgs(unsigned long ChannelID,
             ((n == 6 && req[4] == 0x01) || (n == 7 && req[4] == 0x22));
 
         if (request) {
-            fake_j2534::build_obd2_response(req, n, echo, &echo_len);
+            if (!fake_j2534::build_obd2_response(req, n, unsupported_nrc,
+                                                 echo, &echo_len)) {
+                return STATUS_NOERROR;   /* the ECU stays silent */
+            }
             if (pending_first) {
                 unsigned char pending[7];
                 unsigned long pending_len = 0;

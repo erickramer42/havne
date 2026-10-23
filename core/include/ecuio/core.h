@@ -294,6 +294,77 @@ ecuio_status_t ecuio_session_get_info(
     ecuio_session_info_t* out_info
 );
 
+/* What each channel's ECU has said it supports (ADR-0015 §4): its answers
+ * to the supported-PID chain, and the requests left out of the rotation
+ * because it refused them. The J2534 worker updates it as the answers
+ * arrive. The values below are append-only. */
+#define ECUIO_SUPPORT_MAX_DROPPED        8
+
+/* flags */
+#define ECUIO_SUPPORT_PROBED             0x00000001u   /* the chain was asked */
+#define ECUIO_SUPPORT_COMPLETE           0x00000002u   /* answered to its end,
+                                                          so every PID is judged */
+
+/* reason: why a request left the rotation */
+#define ECUIO_DROP_BITMAP                1u   /* its PID's bit is clear */
+#define ECUIO_DROP_NOT_SUPPORTED         2u   /* 7F <service> 12 or 31 */
+#define ECUIO_DROP_SERVICE               3u   /* 7F <service> 11: not the
+                                                 request, its whole service */
+#define ECUIO_DROP_ACCESS                4u   /* 7F <service> 33 or 7F: it
+                                                 needs security access or
+                                                 another diagnostic session,
+                                                 which core never asks for */
+
+/* POD, 8 bytes */
+typedef struct ecuio_dropped_request {
+    uint8_t request[3];       /* the service ID, then the key */
+    uint8_t length;           /* 2 or 3 */
+    uint8_t reason;           /* ECUIO_DROP_* */
+    uint8_t nrc;              /* the negative response code; 0 for a bitmap */
+    uint8_t reserved[2];      /* zero */
+} ecuio_dropped_request_t;
+
+/* POD, 152 bytes, no hidden padding on any supported platform; pinned by
+ * the assertions below. New fields take the reserved room. */
+typedef struct ecuio_channel_support {
+    uint32_t flags;           /* ECUIO_SUPPORT_* */
+    uint32_t rx_id;           /* the channel's receive ID: its ECU */
+    uint32_t generation;      /* changes with every update; 0 until the
+                                 channel has learned something */
+    uint32_t requests;        /* the channel's requests, kept or dropped */
+    uint32_t dropped;         /* how many of them were dropped */
+    uint32_t ranges;          /* bit i: the ECU answered the bitmap at PID
+                                 0x20 * i */
+    /* The bitmaps as the replies carry them: PID p is bit
+     * 0x80 >> ((p - 1) % 8) of byte (p - 1) / 8, set when supported. */
+    uint8_t pid_bitmap[32];
+    ecuio_dropped_request_t dropped_list[ECUIO_SUPPORT_MAX_DROPPED];   /* the
+                                 first ones dropped, in set order */
+    uint32_t reserved[8];     /* zero; ABI growth space */
+} ecuio_channel_support_t;
+
+#if defined(__cplusplus)
+static_assert(sizeof(ecuio_dropped_request_t) == 8, "ecuio_dropped_request_t size is ABI");
+static_assert(sizeof(ecuio_channel_support_t) == 152, "ecuio_channel_support_t size is ABI");
+static_assert(offsetof(ecuio_channel_support_t, pid_bitmap) == 24, "support bitmap offset is ABI");
+static_assert(offsetof(ecuio_channel_support_t, reserved) == 120, "support reserved offset is ABI");
+#elif defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
+_Static_assert(sizeof(ecuio_dropped_request_t) == 8, "ecuio_dropped_request_t size is ABI");
+_Static_assert(sizeof(ecuio_channel_support_t) == 152, "ecuio_channel_support_t size is ABI");
+_Static_assert(offsetof(ecuio_channel_support_t, pid_bitmap) == 24, "support bitmap offset is ABI");
+_Static_assert(offsetof(ecuio_channel_support_t, reserved) == 120, "support reserved offset is ABI");
+#endif
+
+/* Copies what channel `channel` has learned into *out_support: an index
+ * into the session info's channels, below its channel_count, so a mock
+ * or passive session has none (ECUIO_ERR_INVALID_ARGUMENT). Callable from
+ * any thread until destroy; after close it keeps the last update. */
+ecuio_status_t ecuio_session_get_channel_support(
+    const ecuio_session_t* session,
+    uint32_t channel,
+    ecuio_channel_support_t* out_support
+);
+
 #ifdef __cplusplus
 }
 #endif

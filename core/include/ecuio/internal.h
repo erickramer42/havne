@@ -37,14 +37,28 @@ typedef struct ecuio_transport {
     void* impl;
 } ecuio_transport_t;
 
-/* Mock transport factory — attaches a transport to a session (idempotent) */
+/* A URI's query, split once by ecuio_session_create (core/src/uri_query.h,
+ * where it's defined). Each transport's attach reads its values from it;
+ * create has already refused any key not in the transport's list below,
+ * so attach judges values only. */
+struct ecuio_uri_query;
+
+/* The keys each transport's query takes, NULL-terminated. profile is
+ * core's, read by create. */
+extern const char* const ecuio_mock_query_keys[];
+extern const char* const ecuio_j2534_query_keys[];
+
+/* Mock transport factory — attaches a transport to a session
+ * (idempotent). Its only key is profile, so it reads nothing from the
+ * query. */
 ecuio_status_t ecuio_mock_transport_attach(ecuio_session_t* session,
-                                            const char* uri);
+                                            const char* uri,
+                                            const struct ecuio_uri_query* query);
 
 /*
  * J2534 transport factory (Win32). URI grammar:
  *   j2534://[<selector>][?<key>=<value>[&<key>=<value>...]]
- *   keys: baud, flags, filter, txid, poll, profile (any order)
+ *   keys: baud, flags, filter, txid, poll, probe, profile (any order)
  *
  * Selector:
  *   j2534://                        first discovered device
@@ -67,18 +81,23 @@ ecuio_status_t ecuio_mock_transport_attach(ecuio_session_t* session,
  *           profile's declared tx, else 0x7E0
  *   poll    PID 0x00..0xFF — one Service 01 request, repeated as the
  *           whole rotation (0x00 reads the supported-PIDs bitmap);
- *           replaces the profile's requests. Needs a channel, from
- *           filter or the profile's declarations; rejected at attach
- *           (still before any DLL load) when neither supplies one
+ *           replaces the profile's requests, sent as asked: no probe,
+ *           nothing dropped. Needs a channel, from filter or the
+ *           profile's declarations; rejected at attach (still before any
+ *           DLL load) when neither supplies one
+ *   probe   0 or 1 (default 1) — ADR-0015 §4: walk each ECU's
+ *           supported-PID chain before the rotation and drop the
+ *           requests it explicitly refuses; 0 sends the set as written
  *   profile name — validated by ecuio_session_create before attach
- *   lowercase keys only, unknown keys rejected, duplicate keys
- *   last-wins; the query grammar is the one every scheme shares
+ *   lowercase keys only, unknown keys rejected (by create), duplicate
+ *   keys last-wins; the query grammar is the one every scheme shares
  *   (core/src/uri_query.h)
  *
  * Attaches a transport to the session (idempotent like mock).
  */
 ecuio_status_t ecuio_j2534_transport_attach(ecuio_session_t* session,
-                                            const char* uri);
+                                            const char* uri,
+                                            const struct ecuio_uri_query* query);
 
 /* Vendor-call helpers implemented in j2534_loader.cpp —
  * j2534_transport.cpp policy layer goes through these so the vendor
