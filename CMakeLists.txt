@@ -61,9 +61,19 @@ option(ECUIO_BUILD_FUZZERS "Build libFuzzer harnesses (Clang or MSVC)" OFF)
 # compiler's new warning shouldn't break the others' builds.
 function(qttune_enable_warnings target)
     if(MSVC)
-        target_compile_options(${target} PRIVATE /W4)
+        target_compile_options(${target} PRIVATE /W4 /guard:cf)
+        # /GS is on by default in MSVC
     else()
-        target_compile_options(${target} PRIVATE -Wall -Wextra)
+        target_compile_options(${target} PRIVATE
+            -Wall -Wextra -fstack-protector-strong)
+        # _FORTIFY_SOURCE only works with optimization; ASan builds
+        # skip it (redundant with the sanitizer and warns at -O0)
+        get_target_property(_qttune_san ${target} CXX_COMPILE_OPTIONS)
+        if(NOT (_qttune_san MATCHES "sanitize"))
+            target_compile_options(${target} PRIVATE -D_FORTIFY_SOURCE=2)
+        endif()
+        target_link_options(${target} PRIVATE
+            -Wl,-z,relro -Wl,-z,now)
     endif()
 endfunction()
 

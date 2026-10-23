@@ -107,10 +107,36 @@ contributions:
   before the code. Look at the existing ones first; your change may already
   have one.
 
-Coding style: match the surrounding file. Comments are present tense and cite
-open Known Issues by number. Warnings don't fail the build, but treat them as
-errors: every first-party target builds with `/W4` or `-Wall -Wextra`, at zero
-warnings on MSVC.
+## Coding standards
+
+Each primary language has a named guide. Contributions must generally comply
+with the guide for the language they touch.
+
+- **C and C++** (`core/`, `surrogate/`, `app/`, `tests/`): the LLVM style as
+  configured in [.clang-format](.clang-format), which records the project's
+  deviations from LLVM (4-space indent, a function's brace on its own line,
+  pointer-left, includes left in written order, comments not reflowed).
+  Format the lines you change with `git clang-format`; the tree predates the
+  file and is not being reformatted wholesale.
+- **C ABI headers** (`core/include/ecuio/`): the [SEI CERT C Coding
+  Standard](https://wiki.sei.cmu.edu/confluence/display/c/) as the reference
+  for the strict-C headers — fixed-width types, no dynamic allocation, no
+  undefined behaviour.
+- **QML and JavaScript** (`app/qml/`): [Qt's QML Coding
+  Conventions](https://doc.qt.io/qt-6/qml-codingconventions.html).
+- **CMake**: the conventions already in the tree — lower-case commands,
+  target-scoped properties, comments explaining why rather than what.
+
+Beyond formatting: every first-party target builds with `/W4` or
+`-Wall -Wextra` at zero warnings on MSVC, and comments are present tense and
+cite open Known Issues by number.
+
+## Input validation
+
+- **URI schemes**: `mock://`, `j2534://` only; all others rejected immediately.
+- **Frame buffers**: ≤64 bytes (CAN FD max); shorter frames accepted, >64 rejected.
+- **Numeric fields**: parsed within documented OBD-II parameter ranges; out-of-range values rejected.
+- **Signal identifiers**: checked against enumerated list defined in obd2/defs; unknown IDs rejected.
 
 ## Testing
 
