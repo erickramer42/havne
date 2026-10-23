@@ -150,6 +150,8 @@ Page {
                 required property string unit
                 required property double value
                 required property int decimals
+                required property string text          // a text row's value
+                required property bool isText
                 required property bool subscribed
                 required property bool hasValue
                 // The model notifies AgeMsRole per batch and on every
@@ -173,6 +175,7 @@ Page {
                     // updating either way, here and on the Dashboard
                     CheckBox {
                         checked: signalDelegate.subscribed
+                        enabled: !signalDelegate.isText   // nothing to plot
                         onToggled: Bridge.signalModel.toggleSubscribed(signalDelegate.index)
                         Accessible.name: qsTr("Plot %1").arg(signalDelegate.name)
                     }
@@ -202,10 +205,14 @@ Page {
                     Label {
                         // Never-arrived signals render "—", not a
                         // fabricated 0 (unsupported PIDs under obd2).
-                        text: (Bridge.connected && signalDelegate.hasValue)
-                              ? root.valueText(signalDelegate.value, signalDelegate.decimals,
+                        text: !(Bridge.connected && signalDelegate.hasValue) ? qsTr("—")
+                              : signalDelegate.isText ? signalDelegate.text
+                              : root.valueText(signalDelegate.value, signalDelegate.decimals,
                                                signalDelegate.unit)
-                              : qsTr("—")
+                        // A text value can run to kilobytes: the name
+                        // keeps its room
+                        Layout.maximumWidth: Math.round(signalDelegate.width * 0.6)
+                        elide: Text.ElideRight
                         color: Theme.text
                         font.pixelSize: 16
                         font.family: Theme.monoFamily   // fixed-width digits, no jitter

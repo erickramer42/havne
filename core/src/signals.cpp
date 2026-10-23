@@ -67,11 +67,17 @@ static bool read_mux_key(const ecuio_signal_def_t* signal,
     return true;
 }
 
-/* The kinds ecuio_decode_signal decodes. TEXT has no decoder yet. */
+/* The kinds ecuio_decode_signal decodes: numbers. */
 static bool is_decodable_kind(uint8_t kind)
 {
     return kind == ECUIO_VALUE_UINT || kind == ECUIO_VALUE_INT ||
            kind == ECUIO_VALUE_FLOAT;
+}
+
+/* The kinds ecuio_decode_text decodes: byte fields shown as text. */
+static bool is_text_kind(uint8_t kind)
+{
+    return kind == ECUIO_VALUE_TEXT || kind == ECUIO_VALUE_HEX;
 }
 
 static bool is_known_byte_order(uint8_t byte_order)
@@ -188,6 +194,80 @@ int ecuio_decode_signal(const ecuio_signal_def_t* signal,
     }
 }
 
+int ecuio_decode_text(const ecuio_signal_def_t* signal,
+                      const uint8_t* frame_payload,
+                      uint16_t payload_len,
+                      char* out,
+                      uint32_t out_cap)
+{
+    if (!signal || !frame_payload || !out || out_cap == 0) {
+        return ECUIO_DECODE_ERR_NULL;
+    }
+
+    /* Kind and byte order first, as in ecuio_decode_signal; the order
+     * means nothing to bytes, but an unknown one is still a def the
+     * validator refuses. */
+    if (!is_text_kind(signal->kind) ||
+        !is_known_byte_order(signal->byte_order)) {
+        return ECUIO_DECODE_ERR_UNSUPPORTED;
+    }
+    if (signal->bit_length != 0 || signal->bit_offset != 0 ||
+        signal->byte_length > ECUIO_FRAME_DATA_MAX) {
+        return ECUIO_DECODE_ERR_BAD_PARAMS;
+    }
+
+    /* The field: byte_length bytes from start_byte, or the rest of the
+     * payload. An empty field has nothing to show. */
+    if (signal->start_byte >= payload_len) {
+        return ECUIO_DECODE_ERR_PAST_PAYLOAD;
+    }
+    uint32_t n = signal->byte_length;
+    if (n == 0) {
+        n = (uint32_t)payload_len - signal->start_byte;
+    } else if ((uint32_t)signal->start_byte + n > payload_len) {
+        return ECUIO_DECODE_ERR_PAST_PAYLOAD;
+    }
+
+    if (signal->mux_length > 0) {
+        if (signal->mux_length > kMuxMaxBytes) {
+            return ECUIO_DECODE_ERR_BAD_PARAMS;
+        }
+        uint32_t key = 0;
+        if (!read_mux_key(signal, frame_payload, payload_len, &key)) {
+            return ECUIO_DECODE_ERR_PAST_PAYLOAD;
+        }
+        if (key != signal->mux_key) {
+            return ECUIO_DECODE_ERR_MUX_MISMATCH;
+        }
+    }
+
+    const uint8_t* field = frame_payload + signal->start_byte;
+    uint32_t pos = 0;
+    if (signal->kind == ECUIO_VALUE_HEX) {
+        static const char digits[] = "0123456789ABCDEF";
+        for (uint32_t i = 0; i < n; ++i) {
+            /* A pair, its separator and the NUL must all fit, so a cut
+             * text ends on a whole pair. */
+            const uint32_t need = (i > 0) ? 3u : 2u;
+            if (pos + need + 1u > out_cap) {
+                break;
+            }
+            if (i > 0) {
+                out[pos++] = ' ';
+            }
+            out[pos++] = digits[field[i] >> 4];
+            out[pos++] = digits[field[i] & 0x0Fu];
+        }
+    } else {
+        for (uint32_t i = 0; i < n && pos + 1u < out_cap; ++i) {
+            const uint8_t c = field[i];
+            out[pos++] = (c >= 0x20u && c <= 0x7Eu) ? (char)c : '.';
+        }
+    }
+    out[pos] = '\0';
+    return ECUIO_DECODE_OK;
+}
+
 int ecuio_def_applies_to_frame(const ecuio_signal_def_t* signal,
                                const ecuio_frame_t* frame)
 {
@@ -226,20 +306,39 @@ int ecuio_validate_signal(const ecuio_signal_def_t* signal)
         return ECUIO_VALIDATE_ERR_NULL;
     }
 
-    /* The decoder rejects every other kind and byte order, so a def of
+    /* The decoders reject every other kind and byte order, so a def of
      * one could register and then never decode. */
-    if (!is_decodable_kind(signal->kind)) {
+    if (!is_decodable_kind(signal->kind) && !is_text_kind(signal->kind)) {
         return ECUIO_VALIDATE_ERR_KIND;
     }
     if (!is_known_byte_order(signal->byte_order)) {
         return ECUIO_VALIDATE_ERR_BYTE_ORDER;
     }
 
-    if (signal->bit_length == 0 || signal->bit_length > 32) {
-        return ECUIO_VALIDATE_ERR_BIT_LENGTH;
-    }
-    if (signal->bit_offset > 7) {
-        return ECUIO_VALIDATE_ERR_BIT_OFFSET;
+    /* A text kind is a byte field: no bit parameters, and byte_length
+     * within a frame. A numeric kind is bits, and byte_length is the
+     * text kinds' alone. The shapes ecuio_decode_text and
+     * ecuio_decode_signal take. */
+    if (is_text_kind(signal->kind)) {
+        if (signal->bit_length != 0) {
+            return ECUIO_VALIDATE_ERR_BIT_LENGTH;
+        }
+        if (signal->bit_offset != 0) {
+            return ECUIO_VALIDATE_ERR_BIT_OFFSET;
+        }
+        if (signal->byte_length > ECUIO_FRAME_DATA_MAX) {
+            return ECUIO_VALIDATE_ERR_BYTE_LENGTH;
+        }
+    } else {
+        if (signal->bit_length == 0 || signal->bit_length > 32) {
+            return ECUIO_VALIDATE_ERR_BIT_LENGTH;
+        }
+        if (signal->bit_offset > 7) {
+            return ECUIO_VALIDATE_ERR_BIT_OFFSET;
+        }
+        if (signal->byte_length != 0) {
+            return ECUIO_VALIDATE_ERR_BYTE_LENGTH;
+        }
     }
 
     /* MUX validation. The key lives in the frame's payload, and any
@@ -284,7 +383,6 @@ int ecuio_validate_signal(const ecuio_signal_def_t* signal)
      * still load. No flag is defined. */
     if (signal->reserved0 != 0 ||
         !all_zero(signal->mux_reserved, sizeof signal->mux_reserved) ||
-        !all_zero(signal->decode_reserved, sizeof signal->decode_reserved) ||
         !all_zero(signal->display_reserved, sizeof signal->display_reserved) ||
         signal->flags != 0 ||
         !all_zero(signal->reserved, sizeof signal->reserved)) {

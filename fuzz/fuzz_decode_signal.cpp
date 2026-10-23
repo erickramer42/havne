@@ -38,10 +38,11 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size)
     ecuio_signal_def_t def;
     memset(&def, 0, sizeof def);
     def.scale      = 1.0;
-    def.kind       = data[0] % 5;                       /* 0..4, incl. unknown */
+    def.kind       = data[0] % 6;                       /* 0..5, incl. unknown */
     def.byte_order = data[1] & 3u;                      /* 0..3, incl. unknown */
     def.start_byte = (uint16_t)(data[2] | ((uint16_t)data[3] << 8));
     def.bit_offset = data[4] & 0x0Fu;                  /* 0..15, incl. >7 */
+    def.byte_length = (uint16_t)((data[4] >> 4) * 400u); /* 0..6000, past the frame */
     def.bit_length = data[5];                          /* 0..255 */
     def.mux_length = data[6] % 5;                      /* 0..4, incl. >3 */
     def.mux_offset = data[7];
@@ -90,14 +91,48 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size)
     /* Nothing written unless the decode succeeded */
     if (rc1 != ECUIO_DECODE_OK && out1 != sentinel) abort();
 
-    /* A def the validator accepts fails only on the payload: bounds
-     * or the mux key (the ValidatorAcceptsExactlyWhatTheDecoderDecodes
-     * contract, over a space no hand-written grid covers) */
-    if (vrc == ECUIO_VALIDATE_OK &&
-        rc1 != ECUIO_DECODE_OK &&
-        rc1 != ECUIO_DECODE_ERR_PAST_PAYLOAD &&
-        rc1 != ECUIO_DECODE_ERR_MUX_MISMATCH) {
+    /* The text decoder: the same six codes, deterministic, the text
+     * terminated inside its buffer, and nothing written on failure. */
+    char t1[48], t2[48];
+    memset(t1, 0x5A, sizeof t1);
+    memset(t2, 0x5A, sizeof t2);
+    const int tr1 = ecuio_decode_text(&def, payload.get(), (uint16_t)plen,
+                                      t1, sizeof t1);
+    const int tr2 = ecuio_decode_text(&def, payload.get(), (uint16_t)plen,
+                                      t2, sizeof t2);
+    switch (tr1) {
+    case ECUIO_DECODE_OK:
+    case ECUIO_DECODE_ERR_NULL:
+    case ECUIO_DECODE_ERR_PAST_PAYLOAD:
+    case ECUIO_DECODE_ERR_BAD_PARAMS:
+    case ECUIO_DECODE_ERR_UNSUPPORTED:
+    case ECUIO_DECODE_ERR_MUX_MISMATCH:
+        break;
+    default:
         abort();
+    }
+    if (tr1 != tr2 || memcmp(t1, t2, sizeof t1) != 0) abort();
+    if (tr1 == ECUIO_DECODE_OK) {
+        if (memchr(t1, '\0', sizeof t1) == NULL) abort();
+    } else if (memchr(t1, '\0', sizeof t1) != NULL) {
+        abort();   /* untouched: the fill has no NUL */
+    }
+
+    /* A def the validator accepts fails only on the payload, bounds or
+     * the mux key, in the decoder for its kind, and the other decoder
+     * refuses it (the ValidatorAcceptsExactlyWhatTheDecoderDecodes
+     * contract, over a space no hand-written grid covers) */
+    if (vrc == ECUIO_VALIDATE_OK) {
+        const bool text = def.kind == ECUIO_VALUE_TEXT ||
+                          def.kind == ECUIO_VALUE_HEX;
+        const int mine = text ? tr1 : rc1;
+        const int other = text ? rc1 : tr1;
+        if (mine != ECUIO_DECODE_OK &&
+            mine != ECUIO_DECODE_ERR_PAST_PAYLOAD &&
+            mine != ECUIO_DECODE_ERR_MUX_MISMATCH) {
+            abort();
+        }
+        if (other != ECUIO_DECODE_ERR_UNSUPPORTED) abort();
     }
 
     return 0;

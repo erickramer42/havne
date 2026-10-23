@@ -18,7 +18,11 @@ typedef enum {
     ECUIO_VALUE_UINT  = 0,
     ECUIO_VALUE_INT   = 1,   /* two's complement, sign-extended from bit_length */
     ECUIO_VALUE_FLOAT = 2,   /* IEEE-754 binary32 */
-    ECUIO_VALUE_TEXT  = 3    /* reserved: no decoder yet */
+    /* The text kinds, which ecuio_decode_text reads from a byte field
+     * (start_byte and byte_length; bit_offset and bit_length 0): */
+    ECUIO_VALUE_TEXT  = 3,   /* the bytes as text: printable ASCII as it
+                                is, any other byte as '.' */
+    ECUIO_VALUE_HEX   = 4    /* the bytes as hex pairs: "41 0C 1F 40" */
 } ecuio_value_kind_t;
 
 /* A field's byte order. Values are append-only. */
@@ -49,8 +53,11 @@ typedef struct ecuio_signal_def {
     uint8_t  byte_order;          /* ECUIO_BYTE_ORDER_* */
     uint16_t start_byte;
     uint8_t  bit_offset;          /* 0..7; 0 for BE and FLOAT */
-    uint8_t  bit_length;          /* 1..32; 32 for FLOAT; whole bytes for BE */
-    uint8_t  decode_reserved[2];  /* zero */
+    uint8_t  bit_length;          /* 1..32; 32 for FLOAT; whole bytes for BE;
+                                     0 for a text kind */
+    uint16_t byte_length;         /* text kinds: the field's bytes from
+                                     start_byte, 0 = to the end of the
+                                     payload; 0 for every other kind */
     double   scale;
     double   offset;              /* value = raw * scale + offset, in double */
 
@@ -71,6 +78,7 @@ typedef struct ecuio_signal_def {
 static_assert(sizeof(ecuio_signal_def_t) == 120, "ecuio_signal_def_t size is ABI");
 static_assert(offsetof(ecuio_signal_def_t, kind) == 16, "def kind offset is ABI");
 static_assert(offsetof(ecuio_signal_def_t, start_byte) == 18, "def start_byte offset is ABI");
+static_assert(offsetof(ecuio_signal_def_t, byte_length) == 22, "def byte_length offset is ABI");
 static_assert(offsetof(ecuio_signal_def_t, scale) == 24, "def scale offset is ABI");
 static_assert(offsetof(ecuio_signal_def_t, name) == 40, "def name offset is ABI");
 static_assert(offsetof(ecuio_signal_def_t, flags) == 92, "def flags offset is ABI");
@@ -79,6 +87,7 @@ static_assert(offsetof(ecuio_signal_def_t, reserved) == 96, "def reserved offset
 _Static_assert(sizeof(ecuio_signal_def_t) == 120, "ecuio_signal_def_t size is ABI");
 _Static_assert(offsetof(ecuio_signal_def_t, kind) == 16, "def kind offset is ABI");
 _Static_assert(offsetof(ecuio_signal_def_t, start_byte) == 18, "def start_byte offset is ABI");
+_Static_assert(offsetof(ecuio_signal_def_t, byte_length) == 22, "def byte_length offset is ABI");
 _Static_assert(offsetof(ecuio_signal_def_t, scale) == 24, "def scale offset is ABI");
 _Static_assert(offsetof(ecuio_signal_def_t, name) == 40, "def name offset is ABI");
 _Static_assert(offsetof(ecuio_signal_def_t, flags) == 92, "def flags offset is ABI");
@@ -123,8 +132,11 @@ typedef struct ecuio_signal_set {
                                               field not whole bytes, too)
                                               or mux length out of range */
 #define ECUIO_DECODE_ERR_UNSUPPORTED    4  /* a kind or byte order with no
-                                              decoder, or a FLOAT not 32
-                                              bits at bit 0 */
+                                              decoder, a FLOAT not 32 bits
+                                              at bit 0, a text kind given
+                                              to ecuio_decode_signal or a
+                                              numeric one to
+                                              ecuio_decode_text */
 #define ECUIO_DECODE_ERR_MUX_MISMATCH   5  /* the payload's mux key differs */
 
 /* Extract one signal from a payload, scale and offset applied. Checks
@@ -135,6 +147,26 @@ int ecuio_decode_signal(const ecuio_signal_def_t* signal,
                         uint16_t payload_len,
                         double* out_value);
 
+/* A buffer this long holds any text a frame can decode to: the hex of
+ * a whole payload, three characters a byte, the last pair's separator
+ * giving way to the NUL. */
+#define ECUIO_DECODE_TEXT_MAX (3u * ECUIO_FRAME_DATA_MAX)
+
+/* Extract one text signal (ECUIO_VALUE_TEXT or ECUIO_VALUE_HEX): the
+ * field's bytes from start_byte, byte_length of them or to the end of
+ * the payload, as that kind's text, NUL-terminated in out. Checks the
+ * kind and byte order, then bit_offset, bit_length and byte_length,
+ * then the bounds, then the mux key, like ecuio_decode_signal. A field
+ * that starts at or past the end of the payload, or runs past it, is
+ * ECUIO_DECODE_ERR_PAST_PAYLOAD. Text longer than out_cap - 1 is cut
+ * to fit, at a whole hex pair; out is written only on
+ * ECUIO_DECODE_OK. */
+int ecuio_decode_text(const ecuio_signal_def_t* signal,
+                      const uint8_t* frame_payload,
+                      uint16_t payload_len,
+                      char* out,
+                      uint32_t out_cap);
+
 /* ecuio_validate_signal and ecuio_validate_signal_set return codes.
  * Values are append-only. Per-def codes are positive; the set-level
  * codes are negative, so a set's result says which kind failed. */
@@ -144,8 +176,10 @@ int ecuio_decode_signal(const ecuio_signal_def_t* signal,
                                                     defs */
 /* 2, 5 and 10 are retired, and never reused. 10 was a mux key past a
  * 64-byte payload; every key a mux_offset can place fits the frame. */
-#define ECUIO_VALIDATE_ERR_BIT_LENGTH         3  /* 0, or over 32 */
-#define ECUIO_VALIDATE_ERR_BIT_OFFSET         4  /* over 7 */
+#define ECUIO_VALIDATE_ERR_BIT_LENGTH         3  /* 0, or over 32; a text
+                                                    kind's not 0 */
+#define ECUIO_VALIDATE_ERR_BIT_OFFSET         4  /* over 7; a text kind's
+                                                    not 0 */
 #define ECUIO_VALIDATE_ERR_NAME               6  /* name not terminated
                                                     inside its buffer */
 #define ECUIO_VALIDATE_ERR_UNIT               7  /* unit not terminated */
@@ -155,13 +189,15 @@ int ecuio_decode_signal(const ecuio_signal_def_t* signal,
                                                     length */
 #define ECUIO_VALIDATE_ERR_BIG_ENDIAN        12  /* big-endian field not
                                                     whole bytes */
-#define ECUIO_VALIDATE_ERR_KIND              13  /* TEXT or an unknown
-                                                    kind */
+#define ECUIO_VALIDATE_ERR_KIND              13  /* an unknown kind */
 #define ECUIO_VALIDATE_ERR_FLOAT32           14  /* a FLOAT not 32 bits
                                                     at bit 0 */
 #define ECUIO_VALIDATE_ERR_RESERVED          15  /* a reserved byte, or
                                                     flags, not zero */
 #define ECUIO_VALIDATE_ERR_BYTE_ORDER        16  /* an unknown byte_order */
+#define ECUIO_VALIDATE_ERR_BYTE_LENGTH       17  /* byte_length on a numeric
+                                                    kind, or over
+                                                    ECUIO_FRAME_DATA_MAX */
 #define ECUIO_VALIDATE_ERR_CHANNELS_NULL    (-10)  /* channel_count > 0 with
                                                       NULL channels */
 #define ECUIO_VALIDATE_ERR_CHANNEL_COUNT    (-11)  /* over ECUIO_MAX_CHANNELS */
@@ -204,8 +240,9 @@ _Static_assert(offsetof(ecuio_validation_t, reserved) == 8, "validation reserved
 #endif
 
 /* Structural check of one def: accepts exactly the defs
- * ecuio_decode_signal can decode, with every reserved byte and flags
- * zero. The kind is checked first, then the byte order. */
+ * ecuio_decode_signal (numeric kinds) or ecuio_decode_text (text
+ * kinds) can decode, with every reserved byte and flags zero. The kind
+ * is checked first, then the byte order. */
 int ecuio_validate_signal(const ecuio_signal_def_t* signal);
 
 /* Frame gate, called BEFORE ecuio_decode_signal (the bridge's decode

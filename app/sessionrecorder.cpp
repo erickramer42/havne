@@ -17,14 +17,18 @@ constexpr char kSignalsHeader[] = "host_us,signal,value,unit\n";
 
 /* A CSV field, quoted only when it has to be. Names and units come from
  * signal sets, which may hold anything printable. */
-QByteArray csvField(const char* text, size_t cap)
+QByteArray csvQuoted(QByteArray f)
 {
-    QByteArray f(text, static_cast<qsizetype>(qstrnlen(text, cap)));
     if (f.contains(',') || f.contains('"') || f.contains('\n')) {
         f.replace("\"", "\"\"");
         f = '"' + f + '"';
     }
     return f;
+}
+
+QByteArray csvField(const char* text, size_t cap)
+{
+    return csvQuoted(QByteArray(text, static_cast<qsizetype>(qstrnlen(text, cap))));
 }
 
 QByteArray hex(quint32 v)
@@ -111,6 +115,19 @@ void SessionRecorder::sample(Clock::time_point arrived, const ecuio_signal_def_t
     QByteArray row = QByteArray::number(hostUs(arrived)) + ','
                    + csvField(def.name, sizeof def.name) + ','
                    + QByteArray::number(value, 'g', 12) + ','
+                   + csvField(def.unit, sizeof def.unit)
+                   + '\n';
+    write(m_signals, row);
+    ++m_sampleRows;
+}
+
+void SessionRecorder::sample(Clock::time_point arrived, const ecuio_signal_def_t& def,
+                             const QString& text)
+{
+    if (!m_active) return;
+    QByteArray row = QByteArray::number(hostUs(arrived)) + ','
+                   + csvField(def.name, sizeof def.name) + ','
+                   + csvQuoted(text.toUtf8()) + ','
                    + csvField(def.unit, sizeof def.unit)
                    + '\n';
     write(m_signals, row);

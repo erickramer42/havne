@@ -133,3 +133,11 @@ consequences above describe, from the session log instead: its
 `OP_READ frame` lines keep the raw stamp, indications included, next
 to their wall-clock times. That is how the vehicle session showed the
 VX counts microseconds (STATUS.md, BENCH prep item 5).
+
+## Appendix — text values (2026-10-23)
+
+A text signal ([ADR-0016](0016-signal-definition-layout.md), appendix)
+goes into `signals.csv` like a number: one row per decoded value, the
+text in the `value` column, CSV-quoted when it holds a comma, a quote
+or a newline (a HEX value never does; a TEXT value shows such bytes as
+`.`). The columns and the header row are unchanged.

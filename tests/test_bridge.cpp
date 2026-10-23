@@ -16,6 +16,7 @@
 #include <thread>
 
 #include "qttunebridge.h"   // QtTuneBridge + FrameListModel
+#include <ecuio/profile.h>
 
 #ifdef _WIN32
 #ifndef NOMINMAX
@@ -896,6 +897,123 @@ TEST(BridgeTest, UnsubscribedSignalKeepsUpdating)
     EXPECT_EQ(both.at(0).toMap().value("samples").toList().size(), 2);   // one [ts, val]
 }
 
+/* A text row (a TEXT or HEX def) carries its latest text, counts as
+ * having a value once one arrived, and is never plotted: not
+ * subscribed, not toggled, not in chartData. */
+TEST(BridgeTest, TextRowsShowTheirTextAndNeverPlot)
+{
+    SignalListModel model;
+    ecuio_signal_def_t defs[2];
+    ecuio_signal_set_t set;
+    buildTestSignalSet(defs, set);
+    defs[1].kind = ECUIO_VALUE_HEX;   /* row 1, id 2001, a text row */
+    model.setSignalSet(&set);
+
+    const QModelIndex row0 = model.index(0, 0);
+    const QModelIndex row1 = model.index(1, 0);
+    EXPECT_FALSE(model.data(row0, SignalListModel::IsTextRole).toBool());
+    EXPECT_TRUE(model.data(row1, SignalListModel::IsTextRole).toBool());
+    EXPECT_TRUE(model.data(row0, SignalListModel::SubscribedRole).toBool());
+    EXPECT_FALSE(model.data(row1, SignalListModel::SubscribedRole).toBool());
+    EXPECT_EQ(model.subscribedCount(), 1);
+    model.toggleSubscribed(1);   /* nothing to plot: a no-op */
+    EXPECT_FALSE(model.data(row1, SignalListModel::SubscribedRole).toBool());
+    EXPECT_EQ(model.subscribedCount(), 1);
+    EXPECT_FALSE(model.data(row1, SignalListModel::HasValueRole).toBool());
+    EXPECT_EQ(model.data(row1, SignalListModel::TextRole).toString(), QString());
+
+    QList<int> notified;
+    QObject::connect(&model, &QAbstractItemModel::dataChanged,
+        [&notified](const QModelIndex& topLeft, const QModelIndex&, const QList<int>& roles) {
+            if (topLeft.row() == 1) notified = roles;
+        });
+    model.updateTexts({{uint16_t(2001), QStringLiteral("62 F1 90")}}, 10);
+    EXPECT_EQ(model.data(row1, SignalListModel::TextRole).toString(), QStringLiteral("62 F1 90"));
+    EXPECT_TRUE(model.data(row1, SignalListModel::HasValueRole).toBool());
+    EXPECT_NE(model.data(row1, SignalListModel::AgeMsRole).toInt(), -1);   /* arrived */
+    EXPECT_TRUE(notified.contains(SignalListModel::TextRole));
+    EXPECT_TRUE(notified.contains(SignalListModel::HasValueRole));
+    EXPECT_TRUE(notified.contains(SignalListModel::AgeMsRole));
+    EXPECT_TRUE(model.chartData().isEmpty()) << "a text row was plotted";
+
+    /* A numeric row ignores a text batch */
+    model.updateTexts({{uint16_t(1001), QStringLiteral("no")}}, 11);
+    EXPECT_FALSE(model.data(row0, SignalListModel::HasValueRole).toBool());
+    EXPECT_EQ(model.data(row0, SignalListModel::TextRole).toString(), QString());
+}
+
+/* A text def takes the bridge's whole path like a number: decoded
+ * from the frame (here two bytes of the mock's telemetry as hex),
+ * staged, shown on its row, and written to signals.csv. */
+TEST(BridgeTest, TextSignalsReachTheRowAndTheRecording)
+{
+    static ecuio_signal_def_t defs[2] = {};
+    defs[0] = {};
+    defs[0].id = 1;
+    defs[0].kind = ECUIO_VALUE_HEX;
+    defs[0].message_id = 0x0C0u;   /* the mock's telemetry frame */
+    defs[0].byte_length = 2;
+    defs[0].scale = 1.0;
+    strncpy(defs[0].name, "Raw bytes", sizeof(defs[0].name) - 1);
+    defs[1] = {};
+    defs[1].id = 2;
+    defs[1].kind = ECUIO_VALUE_UINT;
+    defs[1].message_id = 0x0C0u;
+    defs[1].bit_length = 8;
+    defs[1].scale = 1.0;
+    strncpy(defs[1].name, "First byte", sizeof(defs[1].name) - 1);
+    static ecuio_signal_set_t set = {};
+    set.layout_version = ECUIO_SIGNAL_SET_LAYOUT;
+    set.count = 2;
+    set.defs = defs;
+    ASSERT_EQ(ecuio_profile_register("test-text", &set, nullptr), ECUIO_OK);
+
+    QTemporaryDir root;
+    ASSERT_TRUE(root.isValid());
+    QtTuneBridge bridge;
+    bridge.setRecordingsRootForTesting(root.path());
+    bridge.setRecording(true);
+    ASSERT_TRUE(bridge.connectSession("mock://text?profile=test-text").isEmpty());
+    ASSERT_TRUE(spinUntil([&bridge]() { return bridge.signalBatchCount() > 1; }, 5000));
+
+    SignalListModel* model = bridge.signalModel();
+    ASSERT_EQ(model->rowCount(), 2);
+    const QModelIndex raw = model->index(0, 0);
+    const QModelIndex first = model->index(1, 0);
+    EXPECT_TRUE(model->data(raw, SignalListModel::IsTextRole).toBool());
+    EXPECT_TRUE(model->data(raw, SignalListModel::HasValueRole).toBool());
+    const QString text = model->data(raw, SignalListModel::TextRole).toString();
+    const auto hexPair = [](const QString& s) {
+        if (s.size() != 5 || s[2] != QLatin1Char(' ')) return false;
+        for (int i : {0, 1, 3, 4}) {
+            const QChar c = s[i];
+            if (!((c >= QLatin1Char('0') && c <= QLatin1Char('9')) ||
+                  (c >= QLatin1Char('A') && c <= QLatin1Char('F')))) return false;
+        }
+        return true;
+    };
+    EXPECT_TRUE(hexPair(text)) << text.toStdString();
+    EXPECT_TRUE(model->data(first, SignalListModel::HasValueRole).toBool());
+    EXPECT_FALSE(model->data(first, SignalListModel::IsTextRole).toBool());
+    EXPECT_EQ(model->subscribedCount(), 1);
+    ASSERT_TRUE(disconnectAndWait(bridge));
+
+    const QStringList folders = recordingFolders(root.path());
+    ASSERT_EQ(folders.size(), 1);
+    const QByteArray signalsCsv =
+        readFile(root.path() + QStringLiteral("/") + folders.first() + QStringLiteral("/signals.csv"));
+    bool recorded = false;
+    for (const QByteArray& line : signalsCsv.split('\n')) {
+        const QList<QByteArray> cols = line.split(',');
+        if (cols.size() == 4 && cols[1] == "Raw bytes" && hexPair(QString::fromUtf8(cols[2]))) {
+            recorded = true;
+            break;
+        }
+    }
+    EXPECT_TRUE(recorded) << "no hex text row in signals.csv:\n" << signalsCsv.toStdString();
+    EXPECT_EQ(ecuio_profile_unregister("test-text"), ECUIO_OK);
+}
+
 /* LiveView's delegate and SignalHub's Entry take these roles as
  * required properties, by NAME. A missing name isn't a build error: the
  * delegate fails at creation and its row never shows. */
@@ -910,6 +1028,8 @@ TEST(BridgeTest, SignalRoleNamesMatchQmlBindings)
     EXPECT_EQ(roles.value(SignalListModel::HasValueRole), QByteArray("hasValue"));
     EXPECT_EQ(roles.value(SignalListModel::AgeMsRole), QByteArray("ageMs"));
     EXPECT_EQ(roles.value(SignalListModel::DecimalsRole), QByteArray("decimals"));
+    EXPECT_EQ(roles.value(SignalListModel::TextRole), QByteArray("text"));
+    EXPECT_EQ(roles.value(SignalListModel::IsTextRole), QByteArray("isText"));
 }
 
 TEST(BridgeTest, DecimalsComeFromTheDefAndReachTheChart)

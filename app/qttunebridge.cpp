@@ -166,6 +166,8 @@ QVariant SignalListModel::data(const QModelIndex& index, int role) const
                                          - e.history[last].timestampMs);
             }
         case DecimalsRole: return static_cast<int>(e.decimals);
+        case TextRole: return e.text;
+        case IsTextRole: return e.isText;
         default: return QVariant();
     }
 }
@@ -180,7 +182,9 @@ QHash<int, QByteArray> SignalListModel::roleNames() const
         {SubscribedRole, "subscribed"},
         {HasValueRole, "hasValue"},
         {AgeMsRole, "ageMs"},
-        {DecimalsRole, "decimals"}
+        {DecimalsRole, "decimals"},
+        {TextRole, "text"},
+        {IsTextRole, "isText"}
     };
 }
 
@@ -207,8 +211,11 @@ void SignalListModel::setSignalSet(const ecuio_signal_set_t* set)
         qstrncpy(e.name, set->defs[i].name, sizeof(e.name));   // always terminates
         qstrncpy(e.unit, set->defs[i].unit, sizeof(e.unit));
         e.decimals = set->defs[i].decimal_places;
-        e.subscribed = true;
-        ++m_subscribedCount;
+        e.isText = set->defs[i].kind == ECUIO_VALUE_TEXT ||
+                   set->defs[i].kind == ECUIO_VALUE_HEX;
+        // A text row has nothing to plot, so it's never subscribed
+        e.subscribed = !e.isText;
+        if (e.subscribed) ++m_subscribedCount;
         m_entries.push_back(e);
     }
     endResetModel();
@@ -273,6 +280,36 @@ void SignalListModel::updateValues(const std::vector<std::pair<uint16_t, double>
     }
 }
 
+void SignalListModel::updateTexts(const std::vector<std::pair<uint16_t, QString>>& texts,
+                                  qint64 timestampMs)
+{
+    if (m_entries.empty() || texts.empty()) return;
+    const qint64 stamp = (timestampMs >= 0) ? timestampMs : m_clock.elapsed();
+    int firstRow = -1;
+    int lastRow = -1;
+    for (const auto& pair : texts) {
+        for (size_t i = 0; i < m_entries.size(); ++i) {
+            Entry& e = m_entries[i];
+            if (e.id != pair.first || !e.isText) continue;
+            e.text = pair.second;
+            // The ring keeps the sample's time, for hasValue and ageMs;
+            // the value is never plotted
+            e.history[e.histHead].timestampMs = stamp;
+            e.history[e.histHead].value = 0.0;
+            e.histHead = (e.histHead + 1) % HistoryCapacity;
+            if (e.histCount < HistoryCapacity) {
+                ++e.histCount;
+            }
+            if (firstRow < 0 || static_cast<int>(i) < firstRow) firstRow = static_cast<int>(i);
+            if (static_cast<int>(i) > lastRow) lastRow = static_cast<int>(i);
+        }
+    }
+    if (firstRow >= 0) {
+        emit dataChanged(index(firstRow), index(lastRow),
+                         {TextRole, HasValueRole, AgeMsRole});
+    }
+}
+
 QVariantList SignalListModel::chartData() const
 {
     QVariantList out;
@@ -309,6 +346,7 @@ void SignalListModel::toggleSubscribed(int row)
 {
     if (row < 0 || row >= static_cast<int>(m_entries.size())) return;
     Entry& e = m_entries[static_cast<size_t>(row)];
+    if (e.isText) return;   // nothing to plot
     e.subscribed = !e.subscribed;
     if (e.subscribed) ++m_subscribedCount; else --m_subscribedCount;
     emit dataChanged(index(row), index(row), {SubscribedRole});
@@ -325,6 +363,7 @@ QtTuneBridge::QtTuneBridge(QObject* parent)
 {
     (void)ecuio_init();   // optional and always ECUIO_OK (core.h), paired below
     m_sortProxy->setSourceModel(m_sourceModel);
+    m_textScratch.resize(ECUIO_DECODE_TEXT_MAX);
 
     connect(m_coalesceTimer, &QTimer::timeout, this, [this]() {
         pollLinkHealth();   // every tick while connected — transitions only
@@ -337,9 +376,15 @@ QtTuneBridge::QtTuneBridge(QObject* parent)
         // Drop count at tick rate rather than per frame; onFrame also
         // queues a report as it drops (at most one pending).
         notifyDropped();
-        if (!m_stagingBuffer.empty()) {
-            m_signalModel->updateValues(m_stagingBuffer);
-            m_stagingBuffer.clear();
+        if (!m_stagingBuffer.empty() || !m_stagingTexts.empty()) {
+            if (!m_stagingBuffer.empty()) {
+                m_signalModel->updateValues(m_stagingBuffer);
+                m_stagingBuffer.clear();
+            }
+            if (!m_stagingTexts.empty()) {
+                m_signalModel->updateTexts(m_stagingTexts);
+                m_stagingTexts.clear();
+            }
             ++m_signalBatchCount;
             emit signalBatchChanged();
         }
@@ -503,7 +548,7 @@ void QtTuneBridge::applyConnectedState(ecuio_session_t* session, const QString& 
     m_lastReportedDropped = 0;
     m_signalModel->setSignalSet(ecuio_session_signal_set(session));
     m_stagingBuffer.clear();   // previous session's staged values must
-                               // never bleed into this one's first batch
+    m_stagingTexts.clear();    // never bleed into this one's first batch
     m_linkErrorCode = ECUIO_OK;
     m_errorEpisodes = 0;
     emit linkStateChanged();
@@ -613,6 +658,7 @@ void QtTuneBridge::disconnectSession()
     m_disconnecting = true;
     m_coalesceTimer->stop();
     m_stagingBuffer.clear();
+    m_stagingTexts.clear();
     m_currentUri.clear();
     m_linkErrorCode = ECUIO_OK;           // the properties must not
     m_errorEpisodes = 0;              // outlive the session
@@ -818,6 +864,25 @@ void QtTuneBridge::onFrame(const ecuio_frame_t* frame, void* user_data)
     }, Qt::QueuedConnection);
 }
 
+namespace {
+
+// The staging buffers keep the latest sample per signal id across the
+// coalescing window
+template <typename T>
+void stageLatest(std::vector<std::pair<uint16_t, T>>& staging, uint16_t id,
+                 const T& sample)
+{
+    for (auto& staged : staging) {
+        if (staged.first == id) {
+            staged.second = sample;   // overwrite with newest sample
+            return;
+        }
+    }
+    staging.emplace_back(id, sample);
+}
+
+} // namespace
+
 void QtTuneBridge::handleFrameInternal(const ecuio_frame_t* frame,
                                        SessionRecorder::Clock::time_point arrived)
 {
@@ -858,20 +923,20 @@ void QtTuneBridge::handleFrameInternal(const ecuio_frame_t* frame,
             if (!ecuio_def_applies_to_frame(&def, frame)) {
                 continue;
             }
+            if (def.kind == ECUIO_VALUE_TEXT || def.kind == ECUIO_VALUE_HEX) {
+                if (ecuio_decode_text(&def, frame->data, len, m_textScratch.data(),
+                                      static_cast<uint32_t>(m_textScratch.size()))
+                        == ECUIO_DECODE_OK) {
+                    const QString text = QString::fromLatin1(m_textScratch.data());
+                    m_recorder.sample(arrived, def, text);
+                    stageLatest(m_stagingTexts, def.id, text);
+                }
+                continue;
+            }
             double val = 0.0;
             if (ecuio_decode_signal(&def, frame->data, len, &val) == ECUIO_DECODE_OK) {
                 m_recorder.sample(arrived, def, val);
-                bool merged = false;
-                for (auto& staged : m_stagingBuffer) {
-                    if (staged.first == def.id) {
-                        staged.second = val;   // overwrite with newest sample
-                        merged = true;
-                        break;
-                    }
-                }
-                if (!merged) {
-                    m_stagingBuffer.emplace_back(def.id, val);
-                }
+                stageLatest(m_stagingBuffer, def.id, val);
             }
         }
     }

@@ -149,7 +149,7 @@ ISO 15765 message. Next is the plan in
     run sheets are
     [bench-runsheet.md](docs/bench-sessions/bench-runsheet.md) and
     [vehicle-runsheet.md](docs/bench-sessions/vehicle-runsheet.md).
-  - **Tests:** 331 ctest cases (Windows, Visual Studio 18 build
+  - **Tests:** 337 ctest cases (Windows, Visual Studio 18 build
     tools, both trees rebuilt, 2026-10-23), the QML suites
     among them, plus the cross-arch subset (69/69). All passed except
     the env-gated cross-arch skip. Every first-party target builds with
@@ -585,10 +585,10 @@ in the backlog.
     the tests can't catch a wrong PID.
 - **Vehicle identification (M).** Read the VIN and calibration IDs
   (Service 09) at connect, for the activity log and session
-  recordings. These responses are multi-frame and textual: the adapter
-  reassembles ISO-TP, but the signal model decodes numbers only
-  (`ECUIO_VALUE_TEXT` is reserved and refused), so this needs a string
-  path.
+  recordings. These responses are multi-frame and textual; the adapter
+  reassembles ISO-TP, a frame carries the whole reply, and a `TEXT`
+  def shows it as a string (ADR-0016, appendix), so what's left is the
+  requests (Service 09 doesn't enrol one) and the defs.
 - **A first manufacturer signal set (L).** One make's enhanced
   Service 22 data, such as transmission temperature, which the
   standard set doesn't include. Choose the make from the target

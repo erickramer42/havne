@@ -94,7 +94,8 @@ TEST_F(SignalDecodeTest, UnsupportedKindOrByteOrderReturnsError) {
      * would otherwise report 3. */
     uint8_t frame[8] = {0x00};
     double value = 0.0;
-    for (int kind : {static_cast<int>(ECUIO_VALUE_TEXT), 4, 255}) {
+    for (int kind : {static_cast<int>(ECUIO_VALUE_TEXT),
+                     static_cast<int>(ECUIO_VALUE_HEX), 5, 255}) {
         ecuio_signal_def_t signal = {};
         signal.kind = static_cast<uint8_t>(kind);
         EXPECT_EQ(ecuio_decode_signal(&signal, frame, 8, &value), 4) << "kind " << kind;
@@ -463,7 +464,7 @@ TEST(SignalsTest, SignalDefLayoutIsPinned)
      *   id=0, reserved0=2, message_id=4, mux_offset=8, mux_length=9,
      *   mux_reserved=10, mux_key=12, kind=16, byte_order=17,
      *   start_byte=18, bit_offset=20, bit_length=21,
-     *   decode_reserved=22, scale=24, offset=32, name=40, unit=72,
+     *   byte_length=22, scale=24, offset=32, name=40, unit=72,
      *   decimal_places=88, display_reserved=89, flags=92,
      *   reserved=96  =>  sizeof == 120.
      * If this fires, a field moved: bump ECUIO_SIGNAL_SET_LAYOUT. */
@@ -476,7 +477,7 @@ TEST(SignalsTest, SignalDefLayoutIsPinned)
     EXPECT_EQ(offsetof(ecuio_signal_def_t, byte_order), 17u);
     EXPECT_EQ(offsetof(ecuio_signal_def_t, start_byte), 18u);
     EXPECT_EQ(offsetof(ecuio_signal_def_t, bit_offset), 20u);
-    EXPECT_EQ(offsetof(ecuio_signal_def_t, decode_reserved), 22u);
+    EXPECT_EQ(offsetof(ecuio_signal_def_t, byte_length), 22u);
     EXPECT_EQ(offsetof(ecuio_signal_def_t, scale), 24u);
     EXPECT_EQ(offsetof(ecuio_signal_def_t, offset), 32u);
     EXPECT_EQ(offsetof(ecuio_signal_def_t, name), 40u);
@@ -563,15 +564,15 @@ ecuio_signal_def_t four_byte_def(int kind, int byte_order = ECUIO_BYTE_ORDER_LE)
 
 TEST(SignalsTest, ValidatorRejectsKindsWithNoDecoder)
 {
-    /* TEXT and unknown kinds have no decoder, so a def of one would
-     * register and never decode. */
-    for (int k : {static_cast<int>(ECUIO_VALUE_TEXT), 4, 255}) {
+    /* Unknown kinds have no decoder, so a def of one would register
+     * and never decode. */
+    for (int k : {5, 6, 255}) {
         ecuio_signal_def_t d = four_byte_def(k);
         EXPECT_EQ(ecuio_validate_signal(&d), ECUIO_VALIDATE_ERR_KIND) << "kind " << k;
     }
     /* The kind is checked first, as in the decoder: a bad kind with a
      * bad byte order and bad bit parameters reports the kind. */
-    ecuio_signal_def_t d = four_byte_def(ECUIO_VALUE_TEXT, 2);
+    ecuio_signal_def_t d = four_byte_def(5, 2);
     d.bit_length = 0;
     EXPECT_EQ(ecuio_validate_signal(&d), ECUIO_VALIDATE_ERR_KIND);
 }
@@ -663,7 +664,7 @@ TEST(SignalsTest, ValidatorRefusesEveryNonzeroReservedByte)
     struct Room { size_t offset; size_t size; const char* name; };
 #define ROOM(field) {offsetof(ecuio_signal_def_t, field), sizeof(ecuio_signal_def_t::field), #field}
     const Room rooms[] = {
-        ROOM(reserved0), ROOM(mux_reserved), ROOM(decode_reserved),
+        ROOM(reserved0), ROOM(mux_reserved),
         ROOM(display_reserved), ROOM(flags), ROOM(reserved),
     };
 #undef ROOM
@@ -679,17 +680,18 @@ TEST(SignalsTest, ValidatorRefusesEveryNonzeroReservedByte)
             ++checked;
         }
     }
-    /* Every byte that isn't a named value: 2 + 2 + 2 + 3 + 4 + 24. */
-    EXPECT_EQ(checked, 37u);
+    /* Every byte that isn't a named value: 2 + 2 + 3 + 4 + 24. */
+    EXPECT_EQ(checked, 35u);
 }
 
 TEST(SignalsTest, ValidatorAcceptsExactlyWhatTheDecoderDecodes)
 {
     /* The contract the validator exists for: over every kind, both byte
      * orders and an unknown one, and a spread of field shapes, a def
-     * validates if and only if it decodes an in-bounds payload. */
+     * validates if and only if one of the decoders (numbers, or text)
+     * decodes an in-bounds payload. */
     const uint8_t payload[8] = {0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08};
-    const int kinds[] = {0, 1, 2, 3, 4, 255};
+    const int kinds[] = {0, 1, 2, 3, 4, 5, 255};
     const int orders[] = {0, 1, 2};
     const uint8_t lengths[] = {0, 1, 7, 8, 12, 16, 24, 32, 33};
     for (int k : kinds) {
@@ -701,14 +703,188 @@ TEST(SignalsTest, ValidatorAcceptsExactlyWhatTheDecoderDecodes)
                     d.bit_offset = static_cast<uint8_t>(off);
                     const bool valid = ecuio_validate_signal(&d) == ECUIO_VALIDATE_OK;
                     double v = 0.0;
+                    char t[64];
                     const bool decodes =
-                        ecuio_decode_signal(&d, payload, sizeof payload, &v) == ECUIO_DECODE_OK;
+                        ecuio_decode_signal(&d, payload, sizeof payload, &v) == ECUIO_DECODE_OK ||
+                        ecuio_decode_text(&d, payload, sizeof payload, t, sizeof t) == ECUIO_DECODE_OK;
                     EXPECT_EQ(valid, decodes) << "kind " << k << " order " << order
                                               << " len " << int(len) << " off " << off;
                 }
             }
         }
     }
+}
+
+namespace {
+
+/* A text def: a byte field from start_byte, byte_length bytes (0 = to
+ * the end of the payload), no bit parameters. */
+ecuio_signal_def_t text_def(int kind, uint16_t start_byte, uint16_t byte_length)
+{
+    ecuio_signal_def_t d = {};
+    d.id = 1;
+    d.kind = static_cast<uint8_t>(kind);
+    d.start_byte = start_byte;
+    d.byte_length = byte_length;
+    d.scale = 1.0;
+    return d;
+}
+
+/* A Service 0x22 reply for DID 0xF190, the VIN's: the echo, then
+ * bytes with a NUL and a DEL among the letters. */
+const uint8_t kVinReply[9] = {0x62, 0xF1, 0x90, 'W', 'V', 'W', 0x00, 0x7F, 'A'};
+
+} // namespace
+
+TEST(SignalsTest, TextKindsDecodeToHexAndAscii)
+{
+    char out[64];
+    ecuio_signal_def_t d = text_def(ECUIO_VALUE_HEX, 0, 0);
+    ASSERT_EQ(ecuio_decode_text(&d, kVinReply, sizeof kVinReply, out, sizeof out),
+              ECUIO_DECODE_OK);
+    EXPECT_STREQ(out, "62 F1 90 57 56 57 00 7F 41");
+
+    d = text_def(ECUIO_VALUE_HEX, 3, 2);
+    ASSERT_EQ(ecuio_decode_text(&d, kVinReply, sizeof kVinReply, out, sizeof out),
+              ECUIO_DECODE_OK);
+    EXPECT_STREQ(out, "57 56");
+
+    /* A NUL and 0x7F read as '.', so a value is always one line. */
+    d = text_def(ECUIO_VALUE_TEXT, 3, 0);
+    ASSERT_EQ(ecuio_decode_text(&d, kVinReply, sizeof kVinReply, out, sizeof out),
+              ECUIO_DECODE_OK);
+    EXPECT_STREQ(out, "WVW..A");
+
+    d = text_def(ECUIO_VALUE_TEXT, 3, 3);
+    ASSERT_EQ(ecuio_decode_text(&d, kVinReply, sizeof kVinReply, out, sizeof out),
+              ECUIO_DECODE_OK);
+    EXPECT_STREQ(out, "WVW");
+
+    /* Byte order means nothing to bytes, and either known one passes. */
+    d = text_def(ECUIO_VALUE_HEX, 0, 1);
+    d.byte_order = ECUIO_BYTE_ORDER_BE;
+    ASSERT_EQ(ecuio_decode_text(&d, kVinReply, sizeof kVinReply, out, sizeof out),
+              ECUIO_DECODE_OK);
+    EXPECT_STREQ(out, "62");
+}
+
+TEST(SignalsTest, TextDecodeChecksTheFieldAndTheMuxKey)
+{
+    char out[64];
+    double v = 0.0;
+    const uint16_t len = sizeof kVinReply;
+
+    /* The field must start inside the payload and end within it. */
+    ecuio_signal_def_t d = text_def(ECUIO_VALUE_TEXT, 9, 0);
+    EXPECT_EQ(ecuio_decode_text(&d, kVinReply, len, out, sizeof out), ECUIO_DECODE_ERR_PAST_PAYLOAD);
+    d = text_def(ECUIO_VALUE_TEXT, 3, 7);
+    EXPECT_EQ(ecuio_decode_text(&d, kVinReply, len, out, sizeof out), ECUIO_DECODE_ERR_PAST_PAYLOAD);
+    d = text_def(ECUIO_VALUE_TEXT, 3, 6);
+    ASSERT_EQ(ecuio_decode_text(&d, kVinReply, len, out, sizeof out), ECUIO_DECODE_OK);
+    EXPECT_STREQ(out, "WVW..A");
+
+    /* The mux key gates text as it gates numbers. */
+    d = text_def(ECUIO_VALUE_HEX, 3, 0);
+    d.mux_length = 3;
+    d.mux_key = 0x62F190u;
+    ASSERT_EQ(ecuio_decode_text(&d, kVinReply, len, out, sizeof out), ECUIO_DECODE_OK);
+    EXPECT_STREQ(out, "57 56 57 00 7F 41");
+    d.mux_key = 0x62F191u;
+    EXPECT_EQ(ecuio_decode_text(&d, kVinReply, len, out, sizeof out), ECUIO_DECODE_ERR_MUX_MISMATCH);
+    d.mux_length = 4;
+    EXPECT_EQ(ecuio_decode_text(&d, kVinReply, len, out, sizeof out), ECUIO_DECODE_ERR_BAD_PARAMS);
+
+    /* Each decoder refuses the other's kinds, and the shapes it can't
+     * take, in the validator's order: kind and byte order first. */
+    d = four_byte_def(ECUIO_VALUE_UINT);
+    EXPECT_EQ(ecuio_decode_text(&d, kVinReply, len, out, sizeof out), ECUIO_DECODE_ERR_UNSUPPORTED);
+    d = text_def(ECUIO_VALUE_TEXT, 0, 0);
+    EXPECT_EQ(ecuio_decode_signal(&d, kVinReply, len, &v), ECUIO_DECODE_ERR_UNSUPPORTED);
+    d.bit_length = 8;
+    EXPECT_EQ(ecuio_decode_text(&d, kVinReply, len, out, sizeof out), ECUIO_DECODE_ERR_BAD_PARAMS);
+    d.bit_length = 0;
+    d.bit_offset = 1;
+    EXPECT_EQ(ecuio_decode_text(&d, kVinReply, len, out, sizeof out), ECUIO_DECODE_ERR_BAD_PARAMS);
+    d.bit_offset = 0;
+    d.byte_length = static_cast<uint16_t>(ECUIO_FRAME_DATA_MAX + 1u);
+    EXPECT_EQ(ecuio_decode_text(&d, kVinReply, len, out, sizeof out), ECUIO_DECODE_ERR_BAD_PARAMS);
+    d.byte_length = 0;
+    d.byte_order = 2;
+    EXPECT_EQ(ecuio_decode_text(&d, kVinReply, len, out, sizeof out), ECUIO_DECODE_ERR_UNSUPPORTED);
+
+    d = text_def(ECUIO_VALUE_TEXT, 0, 0);
+    EXPECT_EQ(ecuio_decode_text(nullptr, kVinReply, len, out, sizeof out), ECUIO_DECODE_ERR_NULL);
+    EXPECT_EQ(ecuio_decode_text(&d, nullptr, len, out, sizeof out), ECUIO_DECODE_ERR_NULL);
+    EXPECT_EQ(ecuio_decode_text(&d, kVinReply, len, nullptr, sizeof out), ECUIO_DECODE_ERR_NULL);
+    EXPECT_EQ(ecuio_decode_text(&d, kVinReply, len, out, 0), ECUIO_DECODE_ERR_NULL);
+
+    /* Nothing is written on failure. */
+    strcpy(out, "kept");
+    d = text_def(ECUIO_VALUE_TEXT, 9, 0);
+    EXPECT_EQ(ecuio_decode_text(&d, kVinReply, len, out, sizeof out), ECUIO_DECODE_ERR_PAST_PAYLOAD);
+    EXPECT_STREQ(out, "kept");
+}
+
+TEST(SignalsTest, TextDecodeCutsToItsBuffer)
+{
+    char out[8];
+    memset(out, 'x', sizeof out);   /* guard bytes past each cap */
+    ecuio_signal_def_t d = text_def(ECUIO_VALUE_HEX, 0, 3);   /* "62 F1 90" needs 9 */
+    ASSERT_EQ(ecuio_decode_text(&d, kVinReply, sizeof kVinReply, out, 6), ECUIO_DECODE_OK);
+    EXPECT_STREQ(out, "62 F1");   /* whole pairs, no trailing space */
+    EXPECT_EQ(out[6], 'x');
+    /* A pair, its separator and the NUL must all fit: five bytes hold
+     * one pair, not a pair and a space. */
+    memset(out, 'x', sizeof out);
+    ASSERT_EQ(ecuio_decode_text(&d, kVinReply, sizeof kVinReply, out, 5), ECUIO_DECODE_OK);
+    EXPECT_STREQ(out, "62");
+    EXPECT_EQ(out[5], 'x');
+    ASSERT_EQ(ecuio_decode_text(&d, kVinReply, sizeof kVinReply, out, 1), ECUIO_DECODE_OK);
+    EXPECT_STREQ(out, "");
+    d = text_def(ECUIO_VALUE_TEXT, 3, 0);
+    ASSERT_EQ(ecuio_decode_text(&d, kVinReply, sizeof kVinReply, out, 3), ECUIO_DECODE_OK);
+    EXPECT_STREQ(out, "WV");
+
+    /* ECUIO_DECODE_TEXT_MAX holds the hex of a whole frame. */
+    static const uint8_t full[ECUIO_FRAME_DATA_MAX] = {};
+    static char big[ECUIO_DECODE_TEXT_MAX];
+    d = text_def(ECUIO_VALUE_HEX, 0, 0);
+    ASSERT_EQ(ecuio_decode_text(&d, full, sizeof full, big, sizeof big), ECUIO_DECODE_OK);
+    EXPECT_EQ(strlen(big), 3u * ECUIO_FRAME_DATA_MAX - 1u);
+}
+
+TEST(SignalsTest, ValidatorChecksTextKinds)
+{
+    ecuio_signal_def_t d = text_def(ECUIO_VALUE_TEXT, 0, 0);
+    EXPECT_EQ(ecuio_validate_signal(&d), ECUIO_VALIDATE_OK);
+    d = text_def(ECUIO_VALUE_HEX, 3, static_cast<uint16_t>(ECUIO_FRAME_DATA_MAX));
+    EXPECT_EQ(ecuio_validate_signal(&d), ECUIO_VALIDATE_OK);
+    d.byte_length = static_cast<uint16_t>(ECUIO_FRAME_DATA_MAX + 1u);
+    EXPECT_EQ(ecuio_validate_signal(&d), ECUIO_VALIDATE_ERR_BYTE_LENGTH);
+
+    /* A text kind is a byte field: no bit parameters. */
+    d = text_def(ECUIO_VALUE_TEXT, 0, 0);
+    d.bit_length = 8;
+    EXPECT_EQ(ecuio_validate_signal(&d), ECUIO_VALIDATE_ERR_BIT_LENGTH);
+    d = text_def(ECUIO_VALUE_TEXT, 0, 0);
+    d.bit_offset = 1;
+    EXPECT_EQ(ecuio_validate_signal(&d), ECUIO_VALIDATE_ERR_BIT_OFFSET);
+
+    d = text_def(ECUIO_VALUE_HEX, 0, 0);
+    d.byte_order = ECUIO_BYTE_ORDER_BE;
+    EXPECT_EQ(ecuio_validate_signal(&d), ECUIO_VALIDATE_OK);
+    d.byte_order = 2;
+    EXPECT_EQ(ecuio_validate_signal(&d), ECUIO_VALIDATE_ERR_BYTE_ORDER);
+
+    /* byte_length is the text kinds' alone. */
+    d = four_byte_def(ECUIO_VALUE_UINT);
+    d.byte_length = 1;
+    EXPECT_EQ(ecuio_validate_signal(&d), ECUIO_VALIDATE_ERR_BYTE_LENGTH);
+
+    /* The kind is checked before the shape. */
+    d = text_def(5, 0, 0);
+    d.bit_length = 8;
+    EXPECT_EQ(ecuio_validate_signal(&d), ECUIO_VALIDATE_ERR_KIND);
 }
 
 TEST(SignalsTest, SetValidationChecksLayoutVersionFirst)

@@ -314,3 +314,28 @@ so the 16-bit lengths above now read whole replies. Validator code 10,
 a mux key past a 64-byte payload, is retired and never reused: every
 key a one-byte `mux_offset` can place fits the frame, and decode still
 refuses one past the payload it's given.
+
+## Appendix — text kinds (2026-10-23)
+
+`ECUIO_VALUE_TEXT` (3), reserved above, has its decoder, and
+`ECUIO_VALUE_HEX` (4) is appended beside it: both read a byte field
+and give text, TEXT the bytes as ASCII (printable ones as they are,
+any other as `.`), HEX as pairs (`41 0C 1F 40`). The field is
+`start_byte` and `byte_length`, a `uint16_t` that takes the two
+decode-reserved bytes at offset 22 (0 = to the end of the payload;
+0 for every other kind, which the validator checks, code 17), so the
+layout, its size and `ECUIO_SIGNAL_SET_LAYOUT` are unchanged. A text
+def has no bit parameters (`bit_length` and `bit_offset` 0; the
+validator's codes 3 and 4 say so), and either known byte order, which
+means nothing to bytes. `ecuio_decode_text` writes the text,
+NUL-terminated, cut to the caller's buffer at a whole hex pair;
+`ECUIO_DECODE_TEXT_MAX` (three characters a byte of a whole frame) is
+a buffer that never cuts. `ecuio_decode_signal` still refuses the text
+kinds and `ecuio_decode_text` the numeric ones, so the validator's
+contract reads: a def validates if and only if one of the two decodes
+it. The mux key gates text as it gates numbers, and a text def whose
+key is a `62 <DID>` enrols its request like any other (ADR-0015 §2).
+The bridge stages text beside numbers and the signal model carries it
+as `text` and `isText`; LiveView shows a text row's text in place of a
+number and never plots it, and the recorder writes it to
+`signals.csv` ([ADR-0017](0017-session-recording.md), appendix).

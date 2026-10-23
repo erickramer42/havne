@@ -101,9 +101,15 @@ public:
                          * sample, for dimming stale values. Notified
                          * per batch and on every coalesce tick via
                          * refreshAges(); LiveView binds it. */
-        DecimalsRole    /* the def's decimal_places: the one source of
+        DecimalsRole,   /* the def's decimal_places: the one source of
                          * display precision for LiveView and the
                          * Dashboard. Fixed per signal set. */
+        TextRole,       /* a text signal's latest value: TEXT shows the
+                         * bytes as ASCII, HEX as hex pairs. "" for a
+                         * numeric signal. Notified per batch. */
+        IsTextRole      /* the def's kind is a text kind: LiveView shows
+                         * TextRole and never plots the row. Fixed per
+                         * signal set. */
     };
 
     int rowCount(const QModelIndex& parent = {}) const override;
@@ -119,6 +125,11 @@ public:
     // what chartData() plots, and the Dashboard reads every signal.
     void updateValues(const std::vector<std::pair<uint16_t, double>>& values,
                       qint64 timestampMs = -1);
+    // The text rows' counterpart: each id's latest text. The sample's
+    // time goes into the row's history for hasValue and ageMs; the
+    // chart never plots a text row.
+    void updateTexts(const std::vector<std::pair<uint16_t, QString>>& texts,
+                     qint64 timestampMs = -1);
     int subscribedCount() const { return static_cast<int>(m_subscribedCount); }
 
     Q_INVOKABLE void toggleSubscribed(int row);
@@ -158,6 +169,8 @@ private:
         char unit[16];
         uint8_t decimals = 0;
         double value = 0.0;
+        QString text;             // a text row's latest value
+        bool isText = false;      // the def's kind is TEXT or HEX
         // Whether the strip chart plots this signal. Values and history
         // update regardless: the Dashboard reads every row, and a signal
         // plotted again shows the history it kept meanwhile.
@@ -312,6 +325,8 @@ private:
     QTimer* m_coalesceTimer = nullptr;
     // Latest value per signal ID, flushed by the 100 ms coalesce timer
     std::vector<std::pair<uint16_t, double>> m_stagingBuffer;
+    std::vector<std::pair<uint16_t, QString>> m_stagingTexts;   // the text rows'
+    std::vector<char> m_textScratch;   // ECUIO_DECODE_TEXT_MAX, for ecuio_decode_text
     int m_signalBatchCount = 0;
 
     SignalListModel* m_signalModel = nullptr;

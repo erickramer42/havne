@@ -34,6 +34,8 @@ public:
 
     void frame(Clock::time_point arrived, const ecuio_frame_t& frame, uint16_t len);
     void sample(Clock::time_point arrived, const ecuio_signal_def_t& def, double value);
+    // A text signal's value, in the same column, CSV-quoted when it needs it
+    void sample(Clock::time_point arrived, const ecuio_signal_def_t& def, const QString& text);
     void event(const QString& line);
     void flush();
     /* Writes the summary to events.log and closes the files. */
