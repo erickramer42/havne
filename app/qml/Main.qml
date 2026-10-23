@@ -127,8 +127,8 @@ ApplicationWindow {
                     Rectangle {
                         id: pill
                         objectName: "linkPill"
-                        readonly property color tone: !Bridge.coreInitialized ? Theme.danger
-                                                    : (Bridge.connecting || Bridge.disconnecting) ? Theme.textDim
+                        readonly property color tone: (Bridge.connecting || Bridge.disconnecting)
+                                                    ? Theme.textDim
                                                     : Theme.linkColor(Bridge.linkState)
                         Layout.fillWidth: true
                         Layout.preferredWidth: pillRow.implicitWidth + 24
@@ -156,8 +156,7 @@ ApplicationWindow {
                                 elide: Text.ElideRight
                                 font.pixelSize: 13
                                 color: pill.tone
-                                text: !Bridge.coreInitialized ? qsTr("Core init failed")
-                                    : Bridge.connecting ? qsTr("Connecting…")
+                                text: Bridge.connecting ? qsTr("Connecting…")
                                     : Bridge.disconnecting ? qsTr("Disconnecting…")
                                     : Bridge.connected
                                       ? qsTr("%1 · %2").arg(Theme.linkLabel(Bridge.linkState))
@@ -176,7 +175,7 @@ ApplicationWindow {
                         visible: Bridge.connected || root.currentPage !== root.settingsPage
                         // A teardown can take seconds with a wedged adapter; no
                         // connect starts until it ends
-                        enabled: Bridge.coreInitialized && !Bridge.connecting && !Bridge.disconnecting
+                        enabled: !Bridge.connecting && !Bridge.disconnecting
                         text: Bridge.connected ? qsTr("Disconnect")
                             : Bridge.disconnecting ? qsTr("Disconnecting…")
                             : qsTr("Connect…")

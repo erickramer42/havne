@@ -322,7 +322,7 @@ QtTuneBridge::QtTuneBridge(QObject* parent)
     , m_coalesceTimer(new QTimer(this))
     , m_signalModel(new SignalListModel(this))
 {
-    m_initialized = (ecuio_init() == ECUIO_OK);
+    (void)ecuio_init();   // optional and always ECUIO_OK (core.h), paired below
     m_sortProxy->setSourceModel(m_sourceModel);
 
     connect(m_coalesceTimer, &QTimer::timeout, this, [this]() {
@@ -389,9 +389,7 @@ QtTuneBridge::~QtTuneBridge()
     if (m_recorder.active()) {
         m_recorder.stop(recordingSummary(QStringLiteral("the app closed")));
     }
-    if (m_initialized) {
-        ecuio_shutdown();
-    }
+    ecuio_shutdown();
 }
 
 void QtTuneBridge::destroySessionLocked()
@@ -406,11 +404,6 @@ void QtTuneBridge::destroySessionLocked()
 QString QtTuneBridge::coreVersion() const
 {
     return QString::fromUtf8(ecuio_version_string());
-}
-
-bool QtTuneBridge::coreInitialized() const
-{
-    return m_initialized;
 }
 
 QString QtTuneBridge::statusString(int statusCode) const

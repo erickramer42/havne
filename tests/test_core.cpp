@@ -189,6 +189,28 @@ TEST(CoreTest, InitShutdownIdempotent) {
     ecuio_shutdown();
 }
 
+/* core.h's promise: init and shutdown are optional. A session needs
+ * neither, and one that is open when shutdown runs keeps delivering. */
+TEST(CoreTest, ShutdownLeavesAnOpenSessionWorking) {
+    ecuio_shutdown();   /* with no init before it */
+    ecuio_session_t* session = nullptr;
+    ASSERT_EQ(ecuio_session_create("mock://no-init", &session), ECUIO_OK);
+    std::atomic<int> frames{0};
+    ASSERT_EQ(ecuio_register_frame_callback(
+                  session,
+                  [](const ecuio_frame_t*, void* user_data) {
+                      static_cast<std::atomic<int>*>(user_data)->fetch_add(1);
+                  },
+                  &frames),
+              ECUIO_OK);
+    ecuio_shutdown();
+    ASSERT_EQ(ecuio_session_start(session), ECUIO_OK);
+    EXPECT_TRUE(wait_for([&frames]() { return frames.load() >= 2; }, 5000))
+        << "only " << frames.load() << " frames after shutdown";
+    EXPECT_EQ(ecuio_session_close(session), ECUIO_OK);
+    ecuio_session_destroy(session);
+}
+
 TEST(CoreTest, SessionCreateRequiresNonNullPointer) {
     ecuio_session_t* session = nullptr;
     EXPECT_EQ(ecuio_session_create("mock://test", &session), ECUIO_OK);

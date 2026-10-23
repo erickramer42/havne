@@ -22,9 +22,8 @@ extern "C" {
  * Names are the registry key; the set pointer is data, NOT evidence of
  * registration. Use ecuio_profile_lookup's status, never a NULL check.
  *
- * Built-ins are always present (initialized on first registry access,
- * independent of ecuio_init so sessions created without init behave
- * as they always have) and can't be replaced or removed.
+ * Built-ins are always present (initialized on first registry access;
+ * core needs no ecuio_init, core.h) and can't be replaced or removed.
  *
  * Lifetime: the registry keeps the pointer, not a copy, and each
  * session keeps the set it was created with. The set, its defs and

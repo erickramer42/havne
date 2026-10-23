@@ -19,8 +19,6 @@
 #include <utility>
 
 namespace {
-    std::atomic<bool> g_initialized{false};
-
     /* ecuio_last_error_detail's text (error_detail.h), per thread. */
     thread_local char t_detail[512] = "";
 
@@ -147,16 +145,15 @@ ecuio_status_t ecuio_session_get_info(
     return ECUIO_OK;
 }
 
+/* Optional no-ops (core.h): core holds no global state that needs
+ * them. */
 ecuio_status_t ecuio_init(void)
 {
-    bool expected = false;
-    g_initialized.compare_exchange_strong(expected, true);
     return ECUIO_OK;
 }
 
 void ecuio_shutdown(void)
 {
-    g_initialized.store(false);
 }
 
 const char* ecuio_version_string(void)

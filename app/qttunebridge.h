@@ -179,7 +179,6 @@ class QtTuneBridge : public QObject
 {
     Q_OBJECT
     Q_PROPERTY(QString coreVersion READ coreVersion CONSTANT)
-    Q_PROPERTY(bool coreInitialized READ coreInitialized NOTIFY coreInitializedChanged)
     Q_PROPERTY(bool connected READ connected NOTIFY connectedChanged)
     Q_PROPERTY(bool connecting READ connecting NOTIFY connectingChanged)
     Q_PROPERTY(bool disconnecting READ disconnecting NOTIFY disconnectingChanged)
@@ -212,7 +211,6 @@ public:
     ~QtTuneBridge() override;
 
     QString coreVersion() const;
-    bool coreInitialized() const;
     bool connected() const { return m_connected.load(std::memory_order_acquire); }
     int frameCount() const { return m_currentFrameCount; }
     int droppedFrames() const { return m_droppedFrames.load(std::memory_order_relaxed); }
@@ -272,7 +270,6 @@ public slots:
     Q_INVOKABLE void connectSessionAsync(const QString& uri);
 
 signals:
-    void coreInitializedChanged();
     void connectedChanged(bool);
     void frameCountChanged();
     void framesReset();
@@ -299,7 +296,6 @@ private:
     void notifyDropped();   // GUI thread: emit droppedFramesChanged if the count moved
     void destroySessionLocked();  // the destructor's teardown; disconnectSession tears down on its own thread
 
-    bool m_initialized = false;
     ecuio_session_t* m_session = nullptr;
     QString m_currentUri;
 

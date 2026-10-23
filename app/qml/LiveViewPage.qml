@@ -112,7 +112,6 @@ Page {
             }
             ThemedButton {
                 visible: !Bridge.connected && !Bridge.connecting && !Bridge.disconnecting
-                enabled: Bridge.coreInitialized
                 highlighted: true
                 text: qsTr("Connect…")
                 onClicked: root.connectRequested()

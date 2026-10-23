@@ -144,7 +144,6 @@ Pane {
                     // alone works and still decodes.
                     placeholderText: qsTr("URI — e.g. mock://demo or j2534://Vendor?profile=raw&filter=0x7E8&poll=0x0C")
                     enabled: !Bridge.connected && !Bridge.connecting && !Bridge.disconnecting
-                             && Bridge.coreInitialized
                     color: Theme.text
                     onAccepted: page.requestConnect(text)
                 }
@@ -162,7 +161,6 @@ Pane {
                              ? true
                              : (!Bridge.connecting
                                 && !Bridge.disconnecting
-                                && Bridge.coreInitialized
                                 && uriField.text !== "")
                     onClicked: {
                         if (Bridge.connected) {

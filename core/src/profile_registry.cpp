@@ -22,8 +22,8 @@ const char* const kBuiltIns[] = {"mock", "raw", "obd2"};
 
 /* Function-local static: initialized on FIRST ACCESS, thread-safe
  * (C++11 magic statics), immune to translation-unit init-order
- * problems, and available whether or not ecuio_init ever ran —
- * session_create must keep working without init, as it always has. */
+ * problems, and available with no ecuio_init, which core doesn't
+ * need (core.h). */
 Registry& registry()
 {
     static Registry r = {

@@ -117,7 +117,7 @@ Rectangle {
                 : Bridge.disconnecting ? qsTr("Disconnecting…")
                 : qsTr("Connect…")
             highlighted: !Bridge.connected
-            enabled: Bridge.coreInitialized && !Bridge.connecting && !Bridge.disconnecting
+            enabled: !Bridge.connecting && !Bridge.disconnecting
             Layout.alignment: Qt.AlignHCenter
             Layout.topMargin: 8
             onClicked: Bridge.connected ? Bridge.disconnectSession()
