@@ -72,8 +72,13 @@ function(qttune_enable_warnings target)
         if(NOT (_qttune_san MATCHES "sanitize"))
             target_compile_options(${target} PRIVATE -D_FORTIFY_SOURCE=2)
         endif()
-        target_link_options(${target} PRIVATE
-            -Wl,-z,relro -Wl,-z,now)
+        # Full RELRO is an ELF linker option. Apple's ld has no -z (the
+        # link fails with "unknown options: -z"), and Mach-O already
+        # makes __DATA_CONST read-only after fixups.
+        if(NOT APPLE)
+            target_link_options(${target} PRIVATE
+                -Wl,-z,relro -Wl,-z,now)
+        endif()
     endif()
 endfunction()
 
