@@ -4,7 +4,10 @@
 //          surrogate child. Every case runs on both. Hard and quiet
 //          reads, episode counting, recovery through the continued
 //          request probe, untouched vendor counts, the write latch and
-//          its priority, unmatched frames, backoff growth.
+//          its priority, unmatched frames, backoff growth; and the same
+//          machine against the fake's VX mode (ECUIO_FAKE_VX): a quiet
+//          bus whose empty reads are ERR_BUFFER_EMPTY after their
+//          timeout, answered requests, and the no-ACK bus.
 //          The fake is driven through its control page
 //          (fake_control.h), the one channel that reaches the child's
 //          instance mid-session; the page also shows which process
@@ -366,6 +369,94 @@ TEST_P(J2534HealthTest, BackoffGrowsUnderSustainedHardFailure)
 
     EXPECT_GE(wc1 - wc0, 1u) << "probe writes stopped entirely";
     EXPECT_LE(wc1 - wc0, 8u) << "backoff never grew (reset-to-base shape)";
+}
+
+/* ====================================================================
+ * The fake's VX mode (ECUIO_FAKE_VX): reads held for their timeout, a
+ * short batch with STATUS_NOERROR, an empty read with ERR_BUFFER_EMPTY,
+ * a TX indication after each write and the reply 4 ms later, as the
+ * OBDX Pro VX measured (docs/bench-sessions/2026-10-22.md and the
+ * vehicle sheet).
+ * ==================================================================== */
+
+/* A quiet bus on the VX: every passive read waits out its 100 ms and
+ * comes back ERR_BUFFER_EMPTY, which is "no frame", so the debounce
+ * takes ten of them. The lower bound pins the hold: reads that
+ * returned at once would reach quiet in about 200 ms (ten 20 ms
+ * sleeps). The bench saw 1.42 s. */
+TEST_P(J2534HealthTest, VxQuietBusDebouncesOnBufferEmptyReads)
+{
+    ASSERT_NO_FATAL_FAILURE(knob("ECUIO_FAKE_VX", "1"));
+    const auto t0 = std::chrono::steady_clock::now();
+    ASSERT_NO_FATAL_FAILURE(start_session("?profile=raw&filter=0x7E8"));
+
+    int32_t le = 0;
+    uint32_t ec = 0;
+    ASSERT_TRUE(wait_for_state(session, ECUIO_ERR_VEHICLE_TIMEOUT, 8000,
+                               le, ec))
+        << "quiet debounce never fired (was " << le << ")";
+    const auto took = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now() - t0).count();
+    EXPECT_GE(took, 950) << "ten empty reads didn't each hold 100 ms";
+    EXPECT_EQ(ec, 0u);
+    EXPECT_EQ(frames.load(), 0);
+}
+
+/* Requests on the VX: each write's indication is dropped, its reply
+ * decodes, and the link is ok with no episode. */
+TEST_P(J2534HealthTest, VxAnsweredRequestsKeepTheLinkOk)
+{
+    ASSERT_NO_FATAL_FAILURE(knob("ECUIO_FAKE_VX", "1"));
+    ASSERT_NO_FATAL_FAILURE(start_session(""));
+
+    const auto deadline = std::chrono::steady_clock::now() +
+                          std::chrono::seconds(5);
+    while (frames.load() < 5 && std::chrono::steady_clock::now() < deadline) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    EXPECT_GE(frames.load(), 5) << "replies didn't arrive";
+    int32_t le = 0;
+    uint32_t ec = 0;
+    (void)ecuio_session_get_error_state(session, &le, &ec);
+    EXPECT_EQ(le, ECUIO_OK);
+    EXPECT_EQ(ec, 0u);
+    /* Every frame is a reply: no indication reached the session. */
+    EXPECT_LE(static_cast<uint32_t>(frames.load()), fake_control::writes(page));
+}
+
+/* The VX on a bus with no other node: three writes accepted, each with
+ * an indication and no reply, then every write blocks about 500 ms and
+ * fails. One "requests failing" episode, no frames, and no further
+ * write accepted. Closing waits for at most the write in flight. */
+TEST_P(J2534HealthTest, VxNoAckBusAcceptsThreeWritesThenRequestsFail)
+{
+    ASSERT_NO_FATAL_FAILURE(knob("ECUIO_FAKE_VX", "1"));
+    ASSERT_NO_FATAL_FAILURE(knob("ECUIO_FAKE_NO_ACK", "1"));
+    ASSERT_NO_FATAL_FAILURE(start_session(""));
+
+    int32_t le = 0;
+    uint32_t ec = 0;
+    ASSERT_TRUE(wait_for_state(session, ECUIO_ERR_REQUEST_FAILED, 5000,
+                               le, ec))
+        << "requests never failed (was " << le << ")";
+    EXPECT_EQ(ec, 1u);
+    EXPECT_EQ(fake_control::writes(page), 3u);
+
+    /* Refused writes keep failing; none is accepted, nothing arrives. */
+    std::this_thread::sleep_for(std::chrono::milliseconds(1200));
+    (void)ecuio_session_get_error_state(session, &le, &ec);
+    EXPECT_EQ(le, ECUIO_ERR_REQUEST_FAILED);
+    EXPECT_EQ(ec, 1u);
+    EXPECT_EQ(fake_control::writes(page), 3u);
+    EXPECT_EQ(frames.load(), 0);
+
+    const auto t0 = std::chrono::steady_clock::now();
+    EXPECT_EQ(ecuio_session_close(session), ECUIO_OK);
+    const auto took = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now() - t0).count();
+    EXPECT_LT(took, 2000) << "close waited past the blocked write";
+    ecuio_session_destroy(session);
+    session = nullptr;
 }
 
 INSTANTIATE_TEST_SUITE_P(Backend, J2534HealthTest,

@@ -136,9 +136,10 @@ TEST_F(SignalDecodeTest, ValidateSignal_UnterminatedName) {
     signal.bit_length = 8;
     /* Fill ALL 32 bytes with non-null chars — no room for terminator */
     /* Intentional: tests validator's handling of unterminated strings */
-    /* Code scanning may flag, do not fix */
-    memset(signal.name, 'A', sizeof(signal.name));
-    
+    for (size_t i = 0; i < sizeof(signal.name); ++i) {
+        signal.name[i] = 'A';
+    }
+
     EXPECT_EQ(ecuio_validate_signal(&signal), ECUIO_VALIDATE_ERR_NAME);
 }
 

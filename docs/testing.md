@@ -122,9 +122,10 @@ and the next run's screenshots confirmed the fixes the same day.
 | A hard read failure outranks a failing write: exactly two episodes (write, then read), and continued failing writes don't downgrade the state | `J2534HealthTest.HardReadFailureOutranksRequestFailed` |
 | A delivered frame that matches no channel ends a hard failure but reads as `ECUIO_ERR_VEHICLE_TIMEOUT`, not `ECUIO_OK`, with no episode, inside the quiet debounce window | `J2534HealthTest.UnmatchedDeliveredFrameGoesQuietNotHealthy` |
 | The backoff grows under a sustained hard failure: at most 8 probe writes in 1.5 s, against ~15 with the old reset-to-base | `J2534HealthTest.BackoffGrowsUnderSustainedHardFailure` |
+| Against the fake's VX mode, on both backends: empty reads that hold their 100 ms and return `ERR_BUFFER_EMPTY` take a passive session quiet in no less than 950 ms (1.42 s measured, as on the bench), with no episode; answered requests keep the link ok with every write's indication dropped; on a no-ACK bus, three writes are accepted, the fourth fails into one "requests failing" episode, no later write is accepted, and close returns within 2 s of a 500 ms blocked write | `J2534HealthTest.VxQuietBusDebouncesOnBufferEmptyReads`, `.VxAnsweredRequestsKeepTheLinkOk`, `.VxNoAckBusAcceptsThreeWritesThenRequestsFail`. With the fake's read hold removed, the quiet case reached quiet in 275–315 ms and failed (checked by hand, 2026-10-22) |
 | The backoff step (`j2534_backoff_next`, shared by all three worker modes) doubles from the base, never exceeds the 5 s cap, including the step that lands on it, holds at the cap, and doesn't wrap | `J2534StreamTest.BackoffStepDoublesToCapWithoutOvershoot` (session-free) |
 | `ECUIO_ERR_REQUEST_FAILED` has its own status string | `J2534StreamTest.RequestFailedStatusHasDistinctString` |
-| A batch the vendor returns with `ERR_TIMEOUT` is delivered through the surrogate; an empty one maps to a vehicle timeout | `J2534SurrogateTest.SpecTimeoutReadDeliversPartialBatch` (spec-mode fake) |
+| A batch the vendor returns with `ERR_TIMEOUT` is delivered through the surrogate; an empty one maps to a vehicle timeout; both reads hold for their 50 ms timeout | `J2534SurrogateTest.SpecTimeoutReadDeliversPartialBatch` (spec-mode fake) |
 | A vendor that returns a hard error with the message count untouched delivers no frames: on both backends the session reports a hard failure, dispatches nothing and recovers once reads are honest; through the surrogate, the next request after the poisoned read still correlates | `J2534HealthTest.UntouchedCountUnderHardErrorReportsUnhealthy`, `J2534SurrogateTest.HardErrorUntouchedCountDeliversNoFrames` (`ECUIO_FAKE_UNTOUCHED_COUNT_STATUS`) |
 | Signal freshness: `ageMs` is -1 before the first sample and a sane clock delta after; `updateValues` notifies `AgeMsRole`; `refreshAges()` notifies `AgeMsRole` alone, over every row, so a stalled row re-evaluates | `BridgeTest.AgeMsRoleEmittedAndRefreshesWhileStalled` |
 | Link-state mapping: `ECUIO_OK` → `ok`, vehicle timeout → `quiet`, `ECUIO_ERR_REQUEST_FAILED` → `requests`, hard failure → `fault`, any other code → `degraded` | `BridgeTest.LinkStateMapsEveryPublishedCode` (session-free, through `QtTuneBridge::linkStateForError`) |
@@ -222,21 +223,19 @@ rows against the current Home, Settings and Dashboard header.
   default its `ReadMsgs` returns one message per call whatever
   `NumMsgs` and the timeout ask for, and `STATUS_NOERROR` with zero
   messages on an empty queue. The exact-count stream tests are pinned
-  to that. `ECUIO_FAKE_SPEC_READ_SEMANTICS=1` switches to J2534-1
-  behavior: a short batch comes back with `ERR_TIMEOUT`, and an empty
-  timeout-0 read with `ERR_BUFFER_EMPTY`. Spec mode still returns at
-  once instead of waiting out the timeout, and it skips filter gating.
-  The worker never reads with timeout 0, so the `ERR_BUFFER_EMPTY`
-  mapping is reachable only through `ECUIO_FAKE_READ_STATUS=0x10`,
-  and no test sets it: the mapping is untested on both backends.
-  A vendor that leaves its outputs untouched on error is modelled
+  to that. Two opt-in modes hold a read until its batch fills or its
+  timeout passes: J2534-1's (`ECUIO_FAKE_SPEC_READ_SEMANTICS`) and the
+  VX's (`ECUIO_FAKE_VX`), which is the one with `ERR_BUFFER_EMPTY` on
+  a worker read. Neither models filter gating. A vendor that leaves
+  its outputs untouched on error is modelled
   (`ECUIO_FAKE_UNTOUCHED_COUNT_STATUS`).
 - **ID 0 handling is untested.** The child tracks the open device and
   channel with flags instead of treating ID 0 as "none", but the fake
   always returns device 1 and channel 0x55.
-- **The fake emits no ISO 15765 indications.** TX-done and
-  first-frame indications never appear, so indication handling (#28)
-  is untested.
+- **First-frame indications never appear.** The fake's VX mode
+  queues a TX indication after each write, but nothing queues a
+  `START_OF_MESSAGE` indication, and no test pins how either backend's
+  drain handles indications (#28).
 - **Child survival after a refused op isn't asserted.** The surrogate
   child must stay alive after a vendor refusal (ADR-0014). Tests check
   the refusal's status, but `sur_close` returns `ECUIO_OK` whether or not

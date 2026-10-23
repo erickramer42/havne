@@ -111,9 +111,9 @@ to plausible values. Next is the plan in
     run sheets are
     [bench-runsheet.md](docs/bench-sessions/bench-runsheet.md) and
     [vehicle-runsheet.md](docs/bench-sessions/vehicle-runsheet.md).
-  - **Tests:** 220 ctest cases (Windows, Visual Studio 18 build
+  - **Tests:** 226 ctest cases (Windows, Visual Studio 18 build
     tools, both trees rebuilt, 2026-10-22), plus the cross-arch
-    subset (32/32). All
+    subset (35/35). All
     passed except the env-gated cross-arch skip. Every first-party
     target builds with compiler warnings on, at 0 on MSVC. CI was green on all
     eight jobs on PR #16 (merged as `9125b5e`), including the

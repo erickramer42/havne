@@ -20,7 +20,8 @@
 //      - Everything else: the legacy deterministic echo (byte 0
 //        +0x40), preserving existing framing tests.
 //    ECUIO_FAKE_WRITE_STATUS fails every write with the given status,
-//    recording nothing and echoing nothing.
+//    recording nothing and echoing nothing. ECUIO_FAKE_REPLY_DELAY_MS
+//    holds each response back that long after the write (default 0).
 //  * IoCtl: config table (SET stores, GET reads back), fixed VBATT,
 //    CLEAR_* accepted. Unknown ids FAIL like a strict vendor.
 //  * Disconnect: counted; ECUIO_FAKE_DISCONNECT_DELAY_MS sleeps
@@ -41,8 +42,17 @@
 //    status with no messages; ECUIO_FAKE_UNTOUCHED_COUNT_STATUS
 //    forces a status with the caller's count and buffer left as
 //    passed (a sloppy vendor; see ecuio_trusted_count);
-//    ECUIO_FAKE_SPEC_READ_SEMANTICS=1 switches to J2534-1 batch and
-//    empty statuses.
+//    ECUIO_FAKE_SPEC_READ_SEMANTICS=1 switches to J2534-1 batches.
+//  * ECUIO_FAKE_VX=1 models the OBDX Pro VX as measured
+//    (docs/bench-sessions/2026-10-22.md and its vehicle sheet): batch
+//    reads held for their timeout, a short batch with STATUS_NOERROR
+//    and an empty read with ERR_BUFFER_EMPTY; after each accepted
+//    write a TX indication (RxStatus 0x09, the 4-byte CAN ID), and the
+//    reply 4 ms later. ECUIO_FAKE_NO_ACK=1 adds the bus with no other
+//    node: three writes accepted per connect, then each blocks about
+//    500 ms and fails ERR_FAILED, echoed with RxStatus 0x201.
+//  * A queued message has an arrival time; reads see only those that
+//    have arrived, in arrival order.
 //  * ExtraDataIndex = DataSize (v4.04 no-extra-data convention).
 
 #define WIN32_LEAN_AND_MEAN
@@ -51,6 +61,8 @@
 #include "ecuio/j2534_ptypes.h"
 #include "fake_control.h"
 
+#include <chrono>
+#include <condition_variable>
 #include <cstdint>
 #include <cstring>
 #include <mutex>
@@ -70,6 +82,7 @@ struct FrameSlot {
     unsigned long size;
     unsigned long timestamp_us;
     unsigned long rx_status;   /* replayed verbatim into PASSTHRU_MSG.RxStatus */
+    long long arrives_us;      /* steady clock; reads skip it until then */
 };
 
 struct WriteRecord {
@@ -88,9 +101,25 @@ struct FilterRecord {
 };
 
 std::mutex g_lock;
+std::condition_variable g_arrived;      /* a message was queued */
 int g_handle = 0;                       /* 1 between Open and Close */
-FrameSlot g_queue[FAKE_QUEUE_DEPTH];
+FrameSlot g_queue[FAKE_QUEUE_DEPTH];    /* in arrival order */
 unsigned long g_queue_len = 0;
+
+/* The VX as measured on 2026-10-22: its reply latency is the engine
+ * ECU's median from indication to reply; with nothing on the bus to
+ * acknowledge, it accepted three writes per connect, then blocked
+ * each later one 500-515 ms and failed it. */
+constexpr unsigned long kVxReplyDelayMs = 4;
+constexpr unsigned long kVxUnackedDepth = 3;
+constexpr DWORD kVxRefusedWriteMs = 500;
+constexpr unsigned long kVxIndication = ECUIO_PT_TX_MSG_TYPE |
+                                        ECUIO_PT_TX_INDICATION;
+/* What the VX queued after each refused write: the request echoed with
+ * RxStatus 0x201. Bit 0x200 isn't a v04.04 RxStatus bit; its meaning is
+ * unknown. */
+constexpr unsigned long kVxRefusedEcho = 0x201;
+unsigned long g_unacked = 0;            /* writes accepted since connect */
 
 /* Write recording + response generation */
 WriteRecord g_writes[FAKE_WRITE_DEPTH];
@@ -179,19 +208,79 @@ bool read_knob(const char* name, char* buf, DWORD cap)
     return n > 0 && n < cap;
 }
 
-/* Enqueue into the shared RX FIFO (mutex held by caller). Drops on
- * full exactly like InjectFrame — documented, keeps counts honest. */
+bool knob_on(const char* name)
+{
+    char buf[8] = {};
+    return read_knob(name, buf, sizeof(buf)) && buf[0] == '1';
+}
+
+unsigned long knob_ms(const char* name, unsigned long fallback)
+{
+    char buf[32] = {};
+    if (!read_knob(name, buf, sizeof(buf))) {
+        return fallback;
+    }
+    const unsigned long ms = strtoul(buf, nullptr, 10);
+    return (ms <= 60000) ? ms : fallback;
+}
+
+long long now_us()
+{
+    return std::chrono::duration_cast<std::chrono::microseconds>(
+        std::chrono::steady_clock::now().time_since_epoch()).count();
+}
+
+/* The VX's clock: microseconds, 32 bits, wrapping. */
+unsigned long vendor_stamp(long long steady_us)
+{
+    return static_cast<unsigned long>(steady_us & 0xFFFFFFFFLL);
+}
+
+/* Enqueue into the shared RX FIFO (mutex held by caller), arriving at
+ * arrives_us (0: now). The queue stays in arrival order, so a message
+ * injected now goes ahead of a reply still on its way. Drops on full
+ * exactly like InjectFrame: documented, keeps counts honest. */
 void enqueue_rx_locked(const unsigned char* data, unsigned long size,
-                       unsigned long timestamp_us, unsigned long rx_status)
+                       unsigned long timestamp_us, unsigned long rx_status,
+                       long long arrives_us = 0)
 {
     if (g_queue_len >= FAKE_QUEUE_DEPTH) {
         return;
     }
-    FrameSlot& slot = g_queue[g_queue_len++];
+    if (arrives_us == 0) {
+        arrives_us = now_us();
+    }
+    unsigned long i = g_queue_len;
+    while (i > 0 && g_queue[i - 1].arrives_us > arrives_us) {
+        g_queue[i] = g_queue[i - 1];
+        --i;
+    }
+    FrameSlot& slot = g_queue[i];
     memcpy(slot.data, data, size);
     slot.size = size;
     slot.timestamp_us = timestamp_us;
     slot.rx_status = rx_status;
+    slot.arrives_us = arrives_us;
+    ++g_queue_len;
+    g_arrived.notify_all();
+}
+
+/* How many queued messages have arrived by now: a prefix of the queue. */
+unsigned long arrived_locked(long long now)
+{
+    unsigned long n = 0;
+    while (n < g_queue_len && g_queue[n].arrives_us <= now) {
+        ++n;
+    }
+    return n;
+}
+
+void pop_front_locked(unsigned long n)
+{
+    for (unsigned long i = n; i < g_queue_len; ++i) {
+        g_queue[i - n] = g_queue[i];
+    }
+    g_queue_len -= n;
 }
 
 /* Moves the messages a test queued on the control page into the RX
@@ -419,6 +508,7 @@ long __stdcall PassThruConnect(unsigned long DeviceID,
     if (fake_j2534::g_handle != 1) {
         return STATUS_FAILED;
     }
+    fake_j2534::g_unacked = 0;   /* each VX connect accepted three again */
     /* Distinct from the device id (1) ON PURPOSE: if device and channel
      * were both 1, a caller passing the channel where J2534 wants the
      * device (READ_VBATT) would still pass. 0x55 is arbitrary, nonzero,
@@ -507,49 +597,68 @@ long __stdcall PassThruReadMsgs(unsigned long ChannelID,
         }
     }
 
-    std::lock_guard<std::mutex> lk(fake_j2534::g_lock);
+    std::unique_lock<std::mutex> lk(fake_j2534::g_lock);
     fake_j2534::take_posted_locked();
 
-    /* SPEC-CONFORMANT READ MODE: when
-     * ECUIO_FAKE_SPEC_READ_SEMANTICS is 1, model the J2534-1 rule
-     * for a conforming vendor: a read asking for N messages with a
-     * nonzero timeout returns min(N, available), and if fewer than
-     * requested, ERR_TIMEOUT TOGETHER WITH those messages. (The VX
-     * departs from it: it returns STATUS_NOERROR with a short batch.) Timeout 0
-     * on an empty queue returns ERR_BUFFER_EMPTY. The call returns at
-     * once; the timeout isn't waited out. Filter gating is not
-     * modeled here (the knobs are never combined in tests).
-     * Off by default: the exact-count stream tests pin the legacy
-     * single-message delivery. */
-    {
-        char spec[32] = {};
-        if (fake_j2534::read_knob("ECUIO_FAKE_SPEC_READ_SEMANTICS",
-                                  spec, sizeof(spec)) && spec[0] == '1') {
-            const unsigned long requested = *pNumMsgs;
-            unsigned long avail = fake_j2534::g_queue_len;
-            if (avail > requested) avail = requested;
-            for (unsigned long i = 0; i < avail; ++i) {
-                const fake_j2534::FrameSlot& slot = fake_j2534::g_queue[i];
-                memcpy(pMsg[i].Data, slot.data, slot.size);
-                pMsg[i].DataSize       = slot.size;
-                pMsg[i].ProtocolID     = ECUIO_PT_PROTOCOL_ISO15765;
-                pMsg[i].RxStatus       = slot.rx_status;
-                pMsg[i].Timestamp      = slot.timestamp_us;
-                pMsg[i].ExtraDataIndex  = slot.size;
+    /* BATCH READS, J2534-1 (ECUIO_FAKE_SPEC_READ_SEMANTICS=1) or the
+     * VX (ECUIO_FAKE_VX=1): up to NumMsgs messages, and the call holds
+     * until that many have arrived or Timeout passes. They differ only
+     * in statuses. J2534-1 pairs a short batch with ERR_TIMEOUT when
+     * Timeout is nonzero, and answers an empty timeout-0 read with
+     * ERR_BUFFER_EMPTY. The VX returns a short batch with
+     * STATUS_NOERROR and any empty read with ERR_BUFFER_EMPTY. Filter
+     * gating isn't modelled here. Off by default: the exact-count
+     * stream tests pin the single-message delivery below. */
+    const bool vx = fake_j2534::knob_on("ECUIO_FAKE_VX");
+    if (vx || fake_j2534::knob_on("ECUIO_FAKE_SPEC_READ_SEMANTICS")) {
+        const unsigned long requested = *pNumMsgs;
+        const long long deadline = fake_j2534::now_us() +
+                                   1000LL * static_cast<long long>(Timeout);
+        unsigned long avail = 0;
+        for (;;) {
+            const long long now = fake_j2534::now_us();
+            avail = fake_j2534::arrived_locked(now);
+            if (avail >= requested || now >= deadline) {
+                break;
             }
-            for (unsigned long i = avail; i < fake_j2534::g_queue_len; ++i) {
-                fake_j2534::g_queue[i - avail] = fake_j2534::g_queue[i];
+            /* Wake for the next arrival or the deadline, and at least
+             * every 2 ms for messages queued on the control page,
+             * which signal nothing. */
+            long long wake = deadline;
+            if (avail < fake_j2534::g_queue_len &&
+                fake_j2534::g_queue[avail].arrives_us < wake) {
+                wake = fake_j2534::g_queue[avail].arrives_us;
             }
-            fake_j2534::g_queue_len -= avail;
-            *pNumMsgs = avail;
-            if (avail < requested && Timeout > 0) {
-                return ECUIO_PT_STATUS_TIMEOUT;
+            if (wake > now + 2000) {
+                wake = now + 2000;
             }
-            if (avail == 0 && Timeout == 0) {
-                return ECUIO_PT_STATUS_BUFFER_EMPTY;
-            }
-            return STATUS_NOERROR;
+            fake_j2534::g_arrived.wait_for(
+                lk, std::chrono::microseconds(wake - now));
+            fake_j2534::take_posted_locked();
         }
+        if (avail > requested) avail = requested;
+        for (unsigned long i = 0; i < avail; ++i) {
+            const fake_j2534::FrameSlot& slot = fake_j2534::g_queue[i];
+            memcpy(pMsg[i].Data, slot.data, slot.size);
+            pMsg[i].DataSize       = slot.size;
+            pMsg[i].ProtocolID     = ECUIO_PT_PROTOCOL_ISO15765;
+            pMsg[i].RxStatus       = slot.rx_status;
+            pMsg[i].Timestamp      = slot.timestamp_us;
+            pMsg[i].ExtraDataIndex  = slot.size;
+        }
+        fake_j2534::pop_front_locked(avail);
+        *pNumMsgs = avail;
+        if (vx) {
+            return (avail == 0) ? ECUIO_PT_STATUS_BUFFER_EMPTY
+                                : STATUS_NOERROR;
+        }
+        if (avail < requested && Timeout > 0) {
+            return ECUIO_PT_STATUS_TIMEOUT;
+        }
+        if (avail == 0 && Timeout == 0) {
+            return ECUIO_PT_STATUS_BUFFER_EMPTY;
+        }
+        return STATUS_NOERROR;
     }
 
     /* FILTER GATING (SetFilterGating-controlled): model the device's
@@ -562,10 +671,14 @@ long __stdcall PassThruReadMsgs(unsigned long ChannelID,
      * arrived before it. FilterGatingDropsNonMatchingFrames exists to
      * catch exactly this. Gating enabled with NO active filters
      * drains everything (spec: an unfiltered ISO 15765 channel
-     * receives nothing). */
+     * receives nothing). Only messages that have arrived are
+     * judged. */
+    const unsigned long arrived =
+        fake_j2534::arrived_locked(fake_j2534::now_us());
     if (fake_j2534::g_filter_gating_enabled) {
         bool have_match_at_head = false;
-        while (fake_j2534::g_queue_len > 0) {
+        unsigned long judged = 0;
+        while (judged < arrived && fake_j2534::g_queue_len > 0) {
             bool match = false;
             for (unsigned long i = 0; i < fake_j2534::g_filter_seq &&
                                       i < FAKE_FILTER_DEPTH; ++i) {
@@ -584,16 +697,14 @@ long __stdcall PassThruReadMsgs(unsigned long ChannelID,
                 break;
             }
             /* Discard the non-matching head (FIFO shift) */
-            for (unsigned long i = 1; i < fake_j2534::g_queue_len; ++i) {
-                fake_j2534::g_queue[i - 1] = fake_j2534::g_queue[i];
-            }
-            fake_j2534::g_queue_len--;
+            fake_j2534::pop_front_locked(1);
+            ++judged;
         }
         if (!have_match_at_head) {
             *pNumMsgs = 0;
             return STATUS_NOERROR;
         }
-    } else if (fake_j2534::g_queue_len == 0) {
+    } else if (arrived == 0) {
         *pNumMsgs = 0;   /* quiet bus — idle, not an error */
         return STATUS_NOERROR;
     }
@@ -606,11 +717,7 @@ long __stdcall PassThruReadMsgs(unsigned long ChannelID,
     pMsg->RxStatus      = slot.rx_status;
     pMsg->Timestamp     = slot.timestamp_us;
     pMsg->ExtraDataIndex = slot.size;   /* v4.04: == DataSize when none */
-
-    for (unsigned long i = 1; i < fake_j2534::g_queue_len; ++i) {
-        fake_j2534::g_queue[i - 1] = fake_j2534::g_queue[i];
-    }
-    fake_j2534::g_queue_len--;
+    fake_j2534::pop_front_locked(1);
 
     *pNumMsgs = 1;
     return STATUS_NOERROR;
@@ -657,7 +764,25 @@ long __stdcall PassThruWriteMsgs(unsigned long ChannelID,
         return STATUS_FAILED;   /* beyond the frame ABI cap — not shaped */
     }
 
-    std::lock_guard<std::mutex> lk(fake_j2534::g_lock);
+    const bool vx = fake_j2534::knob_on("ECUIO_FAKE_VX");
+    const bool no_ack = vx && fake_j2534::knob_on("ECUIO_FAKE_NO_ACK");
+    const unsigned long reply_delay_ms = fake_j2534::knob_ms(
+        "ECUIO_FAKE_REPLY_DELAY_MS", vx ? fake_j2534::kVxReplyDelayMs : 0);
+
+    std::unique_lock<std::mutex> lk(fake_j2534::g_lock);
+
+    /* The VX with nothing on the bus to acknowledge: past the third
+     * unacknowledged write, each one blocks, fails and is echoed back.
+     * The count is left at 1, "written 1". Not recorded. */
+    if (no_ack && fake_j2534::g_unacked >= fake_j2534::kVxUnackedDepth) {
+        lk.unlock();
+        Sleep(fake_j2534::kVxRefusedWriteMs);
+        lk.lock();
+        fake_j2534::enqueue_rx_locked(
+            pMsg->Data, n, fake_j2534::vendor_stamp(fake_j2534::now_us()),
+            fake_j2534::kVxRefusedEcho);
+        return STATUS_FAILED;
+    }
 
     /* Record (bounded — the count stays monotonic so overflow-during-
      * test is detectable via GetWriteCount > depth with index clamped). */
@@ -671,6 +796,20 @@ long __stdcall PassThruWriteMsgs(unsigned long ChannelID,
     fake_j2534::g_write_count++;
     if (fake_control::Page* page = fake_control::attach()) {
         InterlockedIncrement(&page->writes);
+    }
+
+    /* The VX's TX indication for an accepted write: the CAN ID alone,
+     * stamped as the write returns. With no node on the bus, nothing
+     * answers. */
+    const long long written_us = fake_j2534::now_us();
+    if (vx && n > 0) {
+        fake_j2534::enqueue_rx_locked(pMsg->Data, (n < 4) ? n : 4,
+                                      fake_j2534::vendor_stamp(written_us),
+                                      fake_j2534::kVxIndication);
+    }
+    if (no_ack) {
+        fake_j2534::g_unacked++;
+        return STATUS_NOERROR;
     }
 
     /* RESPONSE GENERATION.
@@ -700,9 +839,14 @@ long __stdcall PassThruWriteMsgs(unsigned long ChannelID,
             echo_len = n;
         }
 
+        const long long arrives_us =
+            written_us + 1000LL * static_cast<long long>(reply_delay_ms);
         static unsigned long resp_ts = 0x1000;
         resp_ts += 1;
-        fake_j2534::enqueue_rx_locked(echo, echo_len, resp_ts, 0);
+        fake_j2534::enqueue_rx_locked(
+            echo, echo_len,
+            vx ? fake_j2534::vendor_stamp(arrives_us) : resp_ts, 0,
+            arrives_us);
     }
 
     return STATUS_NOERROR;   /* *pNumMsgs stays 1 — fully written */

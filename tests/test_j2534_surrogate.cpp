@@ -797,15 +797,24 @@ TEST(J2534SurrogateTest, SpecTimeoutReadDeliversPartialBatch)
     ASSERT_EQ(ecuio_j2534_sur_inject_test_frame(h, f0, 8, 4242, 0),
               ECUIO_OK);
 
+    /* A conforming vendor holds a short read for its timeout. */
+    const auto ms_since = [](std::chrono::steady_clock::time_point t) {
+        return std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now() - t).count();
+    };
     ecuio_frame_t f1 = {};
     bool got1 = false;
+    auto t = std::chrono::steady_clock::now();
     const ecuio_status_t st1 =
         ecuio_j2534_sur_read_frame(h, 0, &f1, 50, &got1);
+    const auto held1 = ms_since(t);
 
     ecuio_frame_t f2 = {};
     bool got2 = false;
+    t = std::chrono::steady_clock::now();
     const ecuio_status_t st2 =
         ecuio_j2534_sur_read_frame(h, 0, &f2, 50, &got2);
+    const auto held2 = ms_since(t);
 
     /* Restore BEFORE assertions (knob-leak discipline) */
     SetEnvironmentVariableA("ECUIO_FAKE_SPEC_READ_SEMANTICS", nullptr);
@@ -817,10 +826,12 @@ TEST(J2534SurrogateTest, SpecTimeoutReadDeliversPartialBatch)
     EXPECT_EQ(memcmp(f1.data, f0, 8), 0);
     EXPECT_EQ(f1.data_length, 8u);
     EXPECT_EQ(f1.timestamp_us, uint64_t{4242});
+    EXPECT_GE(held1, 45) << "the short batch came back before its timeout";
 
     /* Empty queue, nonzero timeout: quiet, not delivered, not hard. */
     EXPECT_EQ(st2, ECUIO_ERR_VEHICLE_TIMEOUT);
     EXPECT_FALSE(got2);
+    EXPECT_GE(held2, 45) << "the empty read came back before its timeout";
 
     EXPECT_EQ(ecuio_j2534_sur_close(h), ECUIO_OK);
 }
