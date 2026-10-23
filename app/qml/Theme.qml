@@ -1,5 +1,7 @@
 // File/layer: app/qml/Theme.qml | Qt6 Quick singleton, UI layer
-// Testing: manual smoke — palette is visual only; no unit test reads it.
+// Testing: test_qml (tests/qml/tst_theme.qml) pins linkColor and
+//          linkLabel for every state and the trace palette's rules;
+//          how the palette looks is manual smoke.
 pragma Singleton
 import QtQuick
 

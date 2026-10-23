@@ -4,12 +4,13 @@
 //          fills URI field only, Connect button drives connectSessionAsync
 //          (UI stays responsive while a vendor blocks ~8 s), activity log
 //          shows connect lifecycle and takes the remaining height, error
-//          label on bad URI, status label colored by link state
-//          (Theme.linkColor), Record sessions fixed during a session and
+//          label on bad URI, Record sessions fixed during a session and
 //          its folder shown relative to Documents; at 1280 × 650 the page
 //          scrolls and the activity log keeps its minimum height;
 //          the Display row steps Theme.zoom. The recording's
-//          bridge side: BridgeTest.Recording*.
+//          bridge side: BridgeTest.Recording*. The status label and the
+//          activity log's link lines in each link state: test_qml
+//          (tests/qml/tst_linkhealth.qml), by objectName.
 
 import QtQuick
 import QtQuick.Controls
@@ -121,6 +122,7 @@ Pane {
             Heading { text: qsTr("Connection") }
 
             Label {
+                objectName: "sessionStatus"
                 text: Bridge.connected
                       ? qsTr("Connected: %1").arg(Bridge.currentUri)
                       : Bridge.connecting ? qsTr("Connecting…")
@@ -368,6 +370,7 @@ Pane {
 
                 TextArea {
                     id: activityLog
+                    objectName: "activityLog"
                     readOnly: true
                     wrapMode: TextArea.WrapAnywhere
                     font.pointSize: 8

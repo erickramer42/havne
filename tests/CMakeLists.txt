@@ -130,6 +130,64 @@ if(NOT QTTUNE_BUILD_CORE_ONLY)
 
     # Tell ctest/gtest_discover where Qt DLLs live at runtime
     get_filename_component(QT_BIN_DIR "${Qt6Core_DIR}/../../bin" REALPATH)
+
+    # --- QML tests (Qt Quick Test): the app's QtTune module, linked
+    # from app/ (which the root adds after this directory), against a
+    # real bridge. Each qml/tst_*.qml file is a ctest case of its own,
+    # QmlTest.<name>, in its own process; offscreen and on the software
+    # renderer, so no display or GPU is needed.
+    find_package(Qt6 COMPONENTS QuickTest REQUIRED)
+
+    add_executable(test_qml test_qml.cpp)
+    set_target_properties(test_qml PROPERTIES AUTOMOC ON)
+    qttune_enable_warnings(test_qml)
+    target_link_libraries(test_qml PRIVATE
+        qttune_ui
+        qttune_uiplugin
+        Qt6::QuickTest
+    )
+    # Run with no -input, it runs every file in this directory
+    target_compile_definitions(test_qml PRIVATE
+        QUICK_TEST_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/qml"
+    )
+
+    # Windows: deployed like the app, into a directory of its own (the
+    # other tests' copied Qt DLLs would otherwise point Qt at plugins
+    # and QML imports that aren't there), with the offscreen platform
+    # plugin, so it runs from a shell as it does under ctest
+    if(WIN32)
+        set_target_properties(test_qml PROPERTIES
+            RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/qmltest"
+        )
+        add_custom_command(TARGET test_qml POST_BUILD
+            COMMAND Qt6::windeployqt
+                    --no-compiler-runtime
+                    --include-plugins qoffscreen
+                    --qmldir ${CMAKE_SOURCE_DIR}/app/qml
+                    --qmldir ${CMAKE_CURRENT_SOURCE_DIR}/qml
+                    $<TARGET_FILE:test_qml>
+            COMMENT "Deploying Qt runtime next to test_qml"
+            VERBATIM
+        )
+    endif()
+
+    set(_qml_test_env QT_QPA_PLATFORM=offscreen QT_QUICK_BACKEND=software)
+    if(WIN32)
+        # The offscreen platform reads fonts from a directory, not the
+        # system's font list
+        file(TO_CMAKE_PATH "$ENV{SystemRoot}/Fonts" _qml_fonts)
+        list(APPEND _qml_test_env "QT_QPA_FONTDIR=${_qml_fonts}")
+    endif()
+    file(GLOB _qml_tests CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/qml/tst_*.qml)
+    foreach(_qml_test IN LISTS _qml_tests)
+        get_filename_component(_qml_name ${_qml_test} NAME_WE)
+        string(REGEX REPLACE "^tst_" "" _qml_name ${_qml_name})
+        add_test(NAME QmlTest.${_qml_name} COMMAND test_qml -input ${_qml_test})
+        set_tests_properties(QmlTest.${_qml_name} PROPERTIES
+            ENVIRONMENT "${_qml_test_env}"
+            TIMEOUT 60
+        )
+    endforeach()
 endif()
 
 # TIMEOUT POLICY: every J2534 suite carries a per-test 30s ceiling.
@@ -209,12 +267,17 @@ if(WIN32)
 endif()
 
 # test_bridge's connect and disconnect thread tests run a fake J2534
-# session; they're compiled only on Windows
+# session, and test_qml's link-health cases drive the UI through one;
+# they're compiled only on Windows
 if(WIN32 AND NOT QTTUNE_BUILD_CORE_ONLY)
     target_compile_definitions(test_bridge PRIVATE
         FAKE_J2534_DLL_PATH="$<TARGET_FILE:fake_j2534>"
     )
     add_dependencies(test_bridge fake_j2534)
+    target_compile_definitions(test_qml PRIVATE
+        FAKE_J2534_DLL_PATH="$<TARGET_FILE:fake_j2534>"
+    )
+    add_dependencies(test_qml fake_j2534)
 endif()
 
 # J2534 loader tests (Win32-only, HARNESS tier — real LoadLibraryEx

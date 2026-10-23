@@ -11,9 +11,12 @@ qt_standard_project_setup(REQUIRES 6.5)
 
 qt_policy(SET QTP0004 NEW)
 
-qt_add_executable(qttune
-    MANUAL_FINALIZATION
-    main.cpp
+# The QtTune QML module and the bridge it binds live in a static library
+# of their own, so test_qml (tests/CMakeLists.txt) loads the same module
+# the app does. Whatever links it also links qttune_uiplugin and imports
+# the plugin with Q_IMPORT_QML_PLUGIN(QtTunePlugin), or the module's
+# types are never registered.
+qt_add_library(qttune_ui STATIC
     bridgesingleton.h
     qttunebridge.cpp
     qttunebridge.h
@@ -25,9 +28,11 @@ set_source_files_properties(qml/Theme.qml PROPERTIES
     QT_QML_SINGLETON_TYPE TRUE
 )
 
-qt_add_qml_module(qttune
+qt_add_qml_module(qttune_ui
     URI QtTune
     VERSION 1.0
+    # Ends in the URI, as qmllint expects of a library's module
+    OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/QtTune
     QML_FILES
         qml/Main.qml
         qml/HomePage.qml
@@ -50,18 +55,30 @@ qt_add_qml_module(qttune
         qml/ShiftLightBar.qml
 )
 
-target_link_libraries(qttune PRIVATE
+target_include_directories(qttune_ui PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+target_link_libraries(qttune_ui PUBLIC
     Qt6::Quick
     Qt6::QuickControls2
     ecuio-core
 )
-qttune_enable_warnings(qttune)
+qttune_enable_warnings(qttune_ui)
 # MSVC's C4702 (unreachable code) fires inside Qt's inline headers, as
 # the generated QML registration code instantiates them; none of it is
 # this project's code.
 if(MSVC)
-    target_compile_options(qttune PRIVATE /wd4702)
+    target_compile_options(qttune_ui PRIVATE /wd4702)
 endif()
+
+qt_add_executable(qttune
+    MANUAL_FINALIZATION
+    main.cpp
+)
+
+target_link_libraries(qttune PRIVATE
+    qttune_ui
+    qttune_uiplugin
+)
+qttune_enable_warnings(qttune)
 
 if(WIN32)
     set_target_properties(qttune PROPERTIES WIN32_EXECUTABLE TRUE)
