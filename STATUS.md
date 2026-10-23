@@ -1,6 +1,6 @@
 # QtTune — Project Status
 
-**Updated:** 2026-10-22 · **Version:** v0.3.0 ·
+**Updated:** 2026-10-23 · **Version:** v0.3.0 ·
 [![CI](https://github.com/erickramer42/qttune/actions/workflows/ci.yml/badge.svg)](https://github.com/erickramer42/qttune/actions/workflows/ci.yml)
 
 This file covers the project as it stands: what works, what comes
@@ -19,8 +19,13 @@ the BENCH tier has covered a real adapter on a quiet bus; and in the
 first read-only vehicle session
 (2026-10-22, [session sheet](docs/bench-sessions/2026-10-22-vehicle.md))
 the engine ECU answered the Mode-01 requests with replies that decode
-to plausible values. Next is the plan in
-[After v0.3.0](#after-v030).
+to plausible values. Since the tag: the link-health tests run on both
+backends against a fake modelled on the VX, a failed connect says why
+([ADR-0018](docs/adr/0018-connect-failure-reporting.md)), a session
+says what it runs on ([ADR-0019](docs/adr/0019-session-info.md)),
+J2534 frames carry session time, and the QML pages and the signal
+decoder have tests of their own (Qt Quick Test, libFuzzer). Next is
+the plan in [After v0.3.0](#after-v030).
 
 - **Works:**
   - The mock transport drives the live frame log, LiveView and the
@@ -120,18 +125,21 @@ to plausible values. Next is the plan in
     [bench-runsheet.md](docs/bench-sessions/bench-runsheet.md) and
     [vehicle-runsheet.md](docs/bench-sessions/vehicle-runsheet.md).
   - **Tests:** 271 ctest cases (Windows, Visual Studio 18 build
-    tools, both trees rebuilt, 2026-10-22), the QML suites among them,
-    plus the cross-arch subset (52/52). All passed except the env-gated
-    cross-arch skip. Every first-party target builds with compiler warnings on,
-    at 0 on MSVC. CI was green on all eight jobs on PR #16 
-    (merged as `9125b5e`), including the simulator smoke. That covers ctest on
-    Windows, macOS and Linux, core under ASan and UBSan, the Android and iOS 
-    device cross-builds, and the simulator smoke. The smoke runs on pull
-    requests and on request, not on every push, because it roughly
-    doubles CI time. The cross-arch routing case skips unless its
-    environment variables are set. J2534 suites carry a 30 s per-test
-    timeout, so a hang fails bounded instead of wedging the runner.
-    Tiers, suites and gaps are in [docs/testing.md](docs/testing.md).
+    tools, both trees rebuilt, 2026-10-23 at `c093185`), the QML suites
+    among them, plus the cross-arch subset (52/52). All passed except
+    the env-gated cross-arch skip. Every first-party target builds with
+    compiler warnings on, at 0 on MSVC. CI was green on all nine jobs on
+    PR #17 (`ce8284f`, merged as `1145d11`), the simulator smoke
+    included, and on the push runs at `c093185`. That covers ctest on
+    Windows, macOS and Linux, core under ASan and UBSan, 60 s of each
+    libFuzzer harness ([fuzz/README.md](fuzz/README.md)), the Android
+    and iOS device cross-builds, and the simulator smoke. The smoke runs
+    on pull requests and on request, not on every push, because it
+    roughly doubles CI time. The cross-arch routing case skips unless
+    its environment variables are set. J2534 suites carry a 30 s
+    per-test timeout, so a hang fails bounded instead of wedging the
+    runner. Tiers, suites and gaps are in
+    [docs/testing.md](docs/testing.md).
 
 ## Architecture
 
@@ -176,7 +184,7 @@ core: snapshot dispatch to registered callbacks ............ ADR-0002
 GUI thread: handleFrameInternal ............................ ADR-0003
       |- SessionRecorder (opt-in): frames.csv, signals.csv,
       |    events.log .......................................... ADR-0017
-      |- FrameListModel (10k ring) -> FrameSortProxy -> LogPage
+      |- FrameListModel (10k cap, evicts oldest) -> FrameSortProxy -> LogPage
       '- decode, gated on ID + mux key -> staging buffer ... ADR-0004
              | 100 ms timer
              v
@@ -229,7 +237,9 @@ Contracts along this path:
     ([session sheet](docs/bench-sessions/2026-10-16.md)). No x64
     J2534 adapter is on hand, so the in-proc backend has run only
     against the fake ([testing.md](docs/testing.md#gaps-not-verified))
-  - [x] **Resolved surrogate serialization bug (#24):** serializes vendor DLL calls, clears `g_channel` on OP_DISCONNECT, prevents double disconnect and unsafe teardown; BENCH gate cleared.
+  - [x] **Surrogate vendor-call serialization:** one vendor call at a
+        time, one disconnect per channel, and no unload under a running
+        call; this cleared the BENCH gate (2026-10-17)
   - [x] **Single-threaded surrogate, reads over the pipe**
         ([ADR-0014](docs/adr/0014-single-threaded-surrogate.md),
         2026-10-19). Read batches that arrive with `ERR_TIMEOUT` are

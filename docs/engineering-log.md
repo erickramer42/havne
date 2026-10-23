@@ -79,8 +79,9 @@ Dates are commit dates.
 | 2026-10-22 | libFuzzer harnesses for the signal decoder and validators (`fuzz/`), built with MSVC locally or Clang in a CI job that runs each for 60 s | `14a43be` |
 | 2026-10-22 | A failed connect says why: four status codes and `ecuio_last_error_detail`, with the vendor's `PassThruGetLastError` text on both backends ([ADR-0018](adr/0018-connect-failure-reporting.md)) | `65bae6d` |
 | 2026-10-22 | A session says what it runs on: `ecuio_session_get_info` and the activity log's "Session:" line, with the adapter's battery and versions; the ioctl relay takes a capacity on both backends ([ADR-0019](adr/0019-session-info.md)) | `7263224` |
-| 2026-10-22 | J2534 frames carry session time: the host's at the first frame, then the adapter's deltas across its 32-bit wrap (#12 closed) | — |
-| 2026-10-22 | QML tests: `test_qml` (Qt Quick Test) runs the pages and the app's window against a real bridge, offscreen, the link-health surfaces through the fake; the `QtTune` module builds as a static library that the app and the tests both link | — |
+| 2026-10-22 | J2534 frames carry session time: the host's at the first frame, then the adapter's deltas across its 32-bit wrap (#12 closed) | `b3b1487` |
+| 2026-10-22 | QML tests: `test_qml` (Qt Quick Test) runs the pages and the app's window against a real bridge, offscreen, the link-health surfaces through the fake; the `QtTune` module builds as a static library that the app and the tests both link; merged via PR #17 | `7ce28e4`, `1145d11` |
+| 2026-10-23 | A contributing guide, the README's feedback section, and the OpenSSF Best Practices badge | `6068885`, `9f8f425`, `c093185` |
 
 ## Lessons learned
 

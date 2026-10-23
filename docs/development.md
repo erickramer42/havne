@@ -357,6 +357,13 @@ and the run looks green. Read the skip count, or use
   tests, and check its stamps: the fixed name always holds the latest
   spawn, which may not be the run you mean.
 
+**Fuzzing** isn't part of ctest. The two libFuzzer harnesses need a
+tree of their own (`-DECUIO_BUILD_FUZZERS=ON` with
+`QTTUNE_BUILD_CORE_ONLY=ON` and `BUILD_TESTING=OFF`; `build-fuzz-msvc`
+on Windows), because nothing else can link the instrumented core.
+[fuzz/README.md](../fuzz/README.md) has the MSVC and Clang recipes and
+how to replay a crash.
+
 ## Troubleshooting
 
 | Symptom | Cause and fix |
@@ -423,6 +430,7 @@ every job has a `timeout-minutes` of roughly 3-5x its usual duration:
 |---|---|---|
 | `core-and-tests` | Ubuntu, GCC, no Qt | Builds core and the Qt-free tests, then runs ctest. This enforces "core never links Qt." Gates every other job. |
 | `core-sanitizers` | Ubuntu, GCC, no Qt | The same build and tests in Debug under AddressSanitizer and UndefinedBehaviorSanitizer. LeakSanitizer runs too, so a test that closes a session without destroying it fails here. Blocking since its first green run (2026-10-20). |
+| `fuzz` | Ubuntu, Clang, no Qt | Installs the image's clang with its `libclang-rt` runtimes, checks that `-fsanitize=fuzzer` links, builds `fuzz/` (`-DECUIO_BUILD_FUZZERS=ON`, RelWithDebInfo), runs each harness for 60 s, and uploads any crashing input ([fuzz/README.md](../fuzz/README.md)) |
 | `win-build` | Windows, MSVC 2022 | Builds the full app, then runs ctest (the bridge, J2534 and QML suites included) |
 | `macos-build` | macOS (arm64), AppleClang | Builds the full app, then runs ctest. The QML suites' link-state cases skip without the fake. |
 | `linux-build` | Ubuntu, GCC | Builds the full app, then runs ctest, as on macOS. Installs QtGui's EGL and OpenGL runtime libraries, which `test_qml` loads. |

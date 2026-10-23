@@ -238,10 +238,13 @@ The bridge polls it on its 100 ms tick and maps it for the UI
 
 | Tier | What it proves |
 |---|---|
-| Unit | Core logic, decode, the C ABI, the bridge (headless) |
+| Unit | Core logic, decode, the C ABI |
+| Bridge | The bridge and its models, headless, against the real mock worker |
+| QML | The app's own QML module against a real bridge, offscreen: properties, not pixels |
 | HARNESS | The whole J2534 stack against an in-tree fake vendor DLL, in-proc and through the surrogate |
 | Cross-arch | x64 tests driving the x86 surrogate and fake. Local only; CI never runs it |
 | Sanitizers | Core under ASan/UBSan in CI |
+| Fuzzing | The signal decoder and validators under libFuzzer, 60 s each in CI ([fuzz/README.md](../fuzz/README.md)) |
 | Simulator smoke | The iOS app launches and draws |
 | Manual smoke | The real app, page by page |
 | BENCH / Vehicle | A real adapter with no vehicle; then a real car, read-only |

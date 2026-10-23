@@ -79,12 +79,14 @@ screen, is [docs/architecture.md](docs/architecture.md).
 - **No fabricated readings.** A value never received shows "—", never
   0, and a value older than 3 s dims.
 - **Tested in tiers.** Unit tests cover the core, decoding, the C ABI
-  and the bridge (headless). A harness tier drives the whole J2534
-  stack against an in-tree fake vendor DLL, both in-proc and through
-  the surrogate. CI builds and tests on Windows, Linux and macOS, runs
-  the core under ASan/UBSan, compiles Android and iOS, and, on pull
-  requests, launches the iOS app in the Simulator
-  ([docs/testing.md](docs/testing.md)).
+  and the bridge (headless). Qt Quick tests run the app's own pages
+  against a real bridge, offscreen. A harness tier drives the whole
+  J2534 stack against an in-tree fake vendor DLL, both in-proc and
+  through the surrogate. CI builds and tests on Windows, Linux and
+  macOS, runs the core under ASan/UBSan, fuzzes the signal decoder and
+  validators with libFuzzer ([fuzz/README.md](fuzz/README.md)),
+  compiles Android and iOS, and, on pull requests, launches the iOS app
+  in the Simulator ([docs/testing.md](docs/testing.md)).
 - **Decisions and evidence on record.** Design decisions are
   [ADRs](docs/adr/README.md), lessons go in a dated
   [engineering log](docs/engineering-log.md), and every real-adapter
@@ -211,6 +213,7 @@ build and test a change.
 | [docs/j2534.md](docs/j2534.md) | How the J2534 transport works |
 | [docs/adr/](docs/adr/README.md) | Architecture decision records |
 | [docs/engineering-log.md](docs/engineering-log.md) | Milestone history and lessons learned |
+| [CONTRIBUTING.md](CONTRIBUTING.md) | Reporting bugs, the rules a change must respect, testing and pull requests |
 
 ## License
 
