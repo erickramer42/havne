@@ -2,12 +2,12 @@
 
 ## Supported Versions
 
-QtTune is in active pre-release development (v0.1.0–v0.2.0). There are no supported production versions at this time.
+QtTune is in active pre-release development (v0.1.0–v0.3.0). There are no supported production versions at this time.
 
 | Version | Supported          |
 | ------- | ------------------ |
-| v0.2.x  | :white_check_mark: (development) |
-| < v0.2  | :x:                |
+| v0.3.x  | :white_check_mark: (development) |
+| < v0.3  | :x:                |
 
 Once v1.0.0 is released, this table will document long-term support windows for each release line.
 

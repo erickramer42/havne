@@ -47,3 +47,8 @@ with no hidden padding. `static_assert`s pin its size and offsets.
 - The version string still reads 0.2.0 until the v0.3.0 tag (Known
   Issue #16). The ABI break is documented, but the version number
   doesn't show it yet.
+
+## Appendix — the version (2026-10-22)
+
+The version string became 0.3.0 with the v0.3.0 tag, so the number
+now shows this record's ABI break.

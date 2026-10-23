@@ -99,6 +99,9 @@ screen, is [docs/architecture.md](docs/architecture.md).
 - **Live view.** Decoded values with units, refreshed at 10 Hz, plus
   a rolling strip chart.
 - **Frame log.** Raw frames, newest-first or oldest-first, with Pause.
+- **Fits the screen.** The Dashboard rearranges for a short, wide
+  window, pages that run long scroll, and Ctrl + / Ctrl − zooms the
+  whole UI (or Settings' Display row), kept between runs.
 - **Session recording.** Opt-in: each connect writes every frame,
   every decoded value and the session's events to CSV and text files,
   with host and adapter time side by side
@@ -122,8 +125,8 @@ screen, is [docs/architecture.md](docs/architecture.md).
 |---|---|---|
 | v0.1.0 | Skeleton: core ABI, Qt shell, responsive layout | ✅ Released |
 | v0.2.0 | Callback API, mock transport, live frame log | ✅ Released |
-| v0.3.0 | Signal decoding, live view, J2534 transport, live vehicle read and logging (verified on one vehicle, 2026-10-22) | 🚧 Tag pending: the first vehicle session met its conditions |
-| v0.3.x | Request engine, PID-support probe, generic UDS reads, record-replay transport | Planned |
+| v0.3.0 | Signal decoding, live view, J2534 transport, live vehicle read and logging (tested on one vehicle) | ✅ Released |
+| v0.3.x | Request engine, PID-support probe, generic UDS reads, record-replay transport | Next |
 | v0.4.0 | Security access discovery, flash capability | Planned |
 | v0.5.0+ | Manufacturer plugin modules | Planned |
 

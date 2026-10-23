@@ -70,7 +70,9 @@ Dates are commit dates.
 | 2026-10-22 | Vehicle-session prep: each spawn keeps the session log it replaces (the newest 50); the Log table sorts by arrival and starts empty on connect; activity-log lines carry times | `6f84571`, `839b176` |
 | 2026-10-22 | Session recording ([ADR-0017](adr/0017-session-recording.md)): every frame, decoded value and activity line per connect; `frames.csv` is the replay format | `f590613` |
 | 2026-10-22 | Quiet-bus BENCH run of the vehicle session's URIs with recording on: requests failing and quiet on the VX; its timestamps are microseconds and its empty read is `ERR_BUFFER_EMPTY` ([session sheet](bench-sessions/2026-10-22.md)) | build `0a8beae` |
-| 2026-10-22 | First read-only vehicle session: the engine ECU answers the `obd2` scheduler, `?poll=` and the PID bitmaps through the VX; values decode and track the cluster, meeting v0.3.0's tag conditions ([session sheet](bench-sessions/2026-10-22-vehicle.md)) | — |
+| 2026-10-22 | First read-only vehicle session: the engine ECU answers the `obd2` scheduler, `?poll=` and the PID bitmaps through the VX; values decode and track the cluster, meeting v0.3.0's tag conditions ([session sheet](bench-sessions/2026-10-22-vehicle.md)) | `9a2c2ee` |
+| 2026-10-22 | The Dashboard fits a short, wide window (a wide arrangement), Settings scrolls, and the whole UI zooms (Ctrl + / Ctrl − / Ctrl 0), kept between runs | `0a94049` |
+| 2026-10-22 | v0.3.0 released: the version string reads 0.3.0 | tag `v0.3.0` |
 
 ## Lessons learned
 

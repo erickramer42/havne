@@ -1,6 +1,6 @@
 # QtTune — Project Status
 
-**Updated:** 2026-10-22 · **Version:** v0.3.0-dev (last tag v0.2.0) ·
+**Updated:** 2026-10-22 · **Version:** v0.3.0 ·
 [![CI](https://github.com/erickramer42/qttune/actions/workflows/ci.yml/badge.svg)](https://github.com/erickramer42/qttune/actions/workflows/ci.yml)
 
 This file covers the project as it stands: what works, what comes
@@ -13,13 +13,14 @@ Safety, regulatory and warranty caveats are in
 
 ## Where things stand
 
-**Current phase: v0.3.0 Phase 3 (J2534).** The HARNESS tier is complete,
-including transport adoption (ADR-0012). The BENCH tier has covered a real
-adapter on a quiet bus, and the first read-only vehicle session
+**Current phase: v0.3.x.** v0.3.0 is released (tagged 2026-10-22).
+The HARNESS tier is complete, including transport adoption (ADR-0012);
+the BENCH tier has covered a real adapter on a quiet bus; and in the
+first read-only vehicle session
 (2026-10-22, [session sheet](docs/bench-sessions/2026-10-22-vehicle.md))
-met v0.3.0's tag conditions: the engine ECU answered the Mode-01
-requests, and the replies decode to plausible values. Tagging v0.3.0
-is next.
+the engine ECU answered the Mode-01 requests with replies that decode
+to plausible values. Next is the plan in
+[After v0.3.0](#after-v030).
 
 - **Works:**
   - The mock transport drives the live frame log, LiveView and the
@@ -191,12 +192,12 @@ Contracts along this path:
 
 | Component | State | Reference |
 |---|---|---|
-| Core sessions and callbacks | Stable. The frame ABI and close/destroy split changed in v0.3.0-dev. | [ADR-0002](docs/adr/0002-callback-pair-identity-snapshot-dispatch.md), [ADR-0006](docs/adr/0006-frame-abi-v0.3.md) |
+| Core sessions and callbacks | Stable. The frame ABI and close/destroy split changed in v0.3.0. | [ADR-0002](docs/adr/0002-callback-pair-identity-snapshot-dispatch.md), [ADR-0006](docs/adr/0006-frame-abi-v0.3.md) |
 | Signal decode | Linear scaling in `double`. Each def states its value kind (unsigned, signed, binary32 float) and byte order (Intel at any bit offset, big-endian in whole bytes), and is gated on message ID plus a mux key of up to 3 bytes. Two signal sets, `mock` and `obd2`, chosen by profile. The validator accepts exactly the defs the decoder decodes, with named return codes; the profile registry runs it at registration and reports the failing check and element. | [ADR-0004](docs/adr/0004-signal-decoding-model.md), [ADR-0013](docs/adr/0013-protocol-profiles.md), [ADR-0016](docs/adr/0016-signal-definition-layout.md) |
 | Mock transport | A scripted ~2-minute drive cycle on a small vehicle model (`core/src/mock_drive_cycle.h`): cold-start warm-up, a 2nd-gear WOT pull from ~1550 rpm to the 7000 rpm limiter with a 5 s hold, a longer and hotter 3rd-gear pull with the same hold, then a quarter-mile run from a standstill (~13.4 s, ~176 km/h trap). Every tick of the cycle round-trips through the mock set in `CoreTest.MockDriveCycle*`. | — |
 | Bridge and models | Frame log with sort toggle; coalesced signal model with a 120-sample history per signal; device discovery for the picker; link-health polling (#11). QML reaches it as the `Bridge` singleton. | [ADR-0003](docs/adr/0003-backpressure-bounds-in-flight-frames.md), [ADR-0005](docs/adr/0005-coalesced-signal-updates.md) |
-| QML pages | Home, Dashboard (gauges and shift lights through `SignalHub`), Live (table, and a strip chart with each trace's value at its end), Log (with Pause), Settings (device picker plus manual URI, and the one place a session is connected). Names, units and decimal places come from core. `Theme` holds the palette, fonts, page margin and the link-state color and label functions; `PageHeader` gives the pages one title row. | [docs/architecture.md](docs/architecture.md#the-ui-layer) |
-| J2534 | HARNESS-verified, same-arch and cross-arch, including transport adoption (ADR-0012) and profile-derived channels (ADR-0013). BENCH: one adapter, quiet bus. | [docs/j2534.md](docs/j2534.md) |
+| QML pages | Home, Dashboard (gauges and shift lights through `SignalHub`), Live (table, and a strip chart with each trace's value at its end), Log (with Pause), Settings (device picker plus manual URI, and the one place a session is connected). The Dashboard rearranges to fit a short, wide window, short pages scroll with their scroll bar shown, and the whole UI zooms (Ctrl + / Ctrl − / Ctrl 0, or Settings' Display row), kept between runs. Names, units and decimal places come from core. `Theme` holds the palette, fonts, page margin and the link-state color and label functions; `PageHeader` gives the pages one title row. | [docs/architecture.md](docs/architecture.md#the-ui-layer) |
+| J2534 | HARNESS-verified, same-arch and cross-arch, including transport adoption (ADR-0012) and profile-derived channels (ADR-0013). BENCH: one adapter, quiet bus. Vehicle: one car, read-only, through the surrogate. | [docs/j2534.md](docs/j2534.md) |
 
 ## v0.3.0 checklist
 
@@ -248,12 +249,11 @@ Contracts along this path:
       kinds and explicit byte order, `double` decode, 3-byte mux keys,
       a set layout version, zero-checked reserved room, and validation
       that names the failing element
-- [ ] **Tag v0.3.0** when the first vehicle session succeeds: an ECU
-      answers the Mode-01 requests and the replies decode to plausible
-      values (the [vehicle run sheet](docs/bench-sessions/vehicle-runsheet.md)'s
-      first two goals). Bump the version string with it (#16). The
-      2026-10-22 session met both
-      ([session sheet](docs/bench-sessions/2026-10-22-vehicle.md))
+- [x] **Tagged v0.3.0** (2026-10-22), with the version string at
+      0.3.0, once the first vehicle session succeeded: an ECU answered
+      the Mode-01 requests and the replies decoded to plausible values
+      (the [vehicle run sheet](docs/bench-sessions/vehicle-runsheet.md)'s
+      first two goals; [session sheet](docs/bench-sessions/2026-10-22-vehicle.md))
 
 ## After v0.3.0
 
@@ -425,10 +425,6 @@ an issue is resolved it is removed, and its number is not reused.
     machine with no vendors installed. Candidate fixes are a
     seeded-registry fixture behind an admin-elevation guard, or
     count-positive assertions on the known dev machine.
-16. **The version string still says 0.2.0** even though the frame ABI
-    has changed ([ADR-0006](docs/adr/0006-frame-abi-v0.3.md)). It gets
-    bumped at the v0.3.0 tag. Bumping mid-cycle only causes rebuild
-    churn.
 20. **Pointer-bearing ioctls (`FAST_INIT`, `FIVE_BAUD_INIT`) are out of
     contract** and refused at both ends. That is fine for ISO 15765,
     since those are ISO 9141/KWP init calls. If a BENCH device needs
@@ -468,8 +464,8 @@ an issue is resolved it is removed, and its number is not reused.
 |---|---|---|
 | v0.1.0 | Skeleton: core ABI, Qt shell, responsive layout | ✅ Released |
 | v0.2.0 | Callback API, mock transport, live frame log, CI | ✅ Released (tagged) |
-| v0.3.0 | Signal decoding, LiveView, J2534 transport, live vehicle read and logging | 🚧 [Checklist above](#v030-checklist); the first vehicle session (2026-10-22) met its tag conditions, and the tag is next |
-| v0.3.x | Request engine, PID-support probe, `uds-generic`, record-replay transport | Planned: [after v0.3.0](#after-v030) |
+| v0.3.0 | Signal decoding, LiveView, J2534 transport, live vehicle read and logging | ✅ Released (tagged) |
+| v0.3.x | Request engine, PID-support probe, `uds-generic`, record-replay transport | Next: [after v0.3.0](#after-v030) |
 | v0.4.0 | Security access discovery, flash capability | Planned |
 | v0.5.0+ | Manufacturer plugin modules (ADR-0013's profile API) | Planned |
 
@@ -549,10 +545,11 @@ in the backlog.
   ignition off reads as quiet, whose banner says "Vehicle not
   responding — quiet bus"; only the requests-failing banner mentions
   the ignition.
-- **Persisted preferences (S).** Nothing survives a restart: there is
-  no `QSettings` or QML `Settings` use yet. Developer mode, units,
-  theme and the last-used device all need it, so it comes before
-  them. It belongs in the app layer, not core.
+- **Persisted preferences (S).** Only the UI zoom survives a
+  restart, through QML `Settings` in `Main.qml` (category `ui`).
+  Developer mode, units, theme and the last-used device all need the
+  same, so it comes before them. It belongs in the app layer, not
+  core.
 - **Developer mode (S).** A persisted Settings toggle, off by default.
   With it off the app offers only real devices. With it on, the app
   also shows:
