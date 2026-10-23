@@ -123,6 +123,7 @@ and the next run's screenshots confirmed the fixes the same day.
 | A delivered frame that matches no channel ends a hard failure but reads as `ECUIO_ERR_VEHICLE_TIMEOUT`, not `ECUIO_OK`, with no episode, inside the quiet debounce window | `J2534HealthTest.UnmatchedDeliveredFrameGoesQuietNotHealthy` |
 | The backoff grows under a sustained hard failure: at most 8 probe writes in 1.5 s, against ~15 with the old reset-to-base | `J2534HealthTest.BackoffGrowsUnderSustainedHardFailure` |
 | Against the fake's VX mode, on both backends: empty reads that hold their 100 ms and return `ERR_BUFFER_EMPTY` take a passive session quiet in no less than 950 ms (1.42 s measured, as on the bench), with no episode; answered requests keep the link ok with every write's indication dropped; on a no-ACK bus, three writes are accepted, the fourth fails into one "requests failing" episode, no later write is accepted, and close returns within 2 s of a 500 ms blocked write | `J2534HealthTest.VxQuietBusDebouncesOnBufferEmptyReads`, `.VxAnsweredRequestsKeepTheLinkOk`, `.VxNoAckBusAcceptsThreeWritesThenRequestsFail`. With the fake's read hold removed, the quiet case reached quiet in 275–315 ms and failed (checked by hand, 2026-10-22) |
+| Indications are skipped without ending a read, on both backends: on the VX each reply arrives in its own request's cycle, before the next write; a TX indication and a `START_OF_MESSAGE` indication queued ahead of a reply leave exactly one frame, the reply's | `J2534HealthTest.VxReplyArrivesInItsOwnRequestsCycle`, `.IndicationsAheadOfAReplyAreSkipped`. Against the read paths without the skip (checked by hand, 2026-10-22): in-proc, all 10 replies landed after the next request; on both backends the first-frame indication arrived as a second, empty frame |
 | The backoff step (`j2534_backoff_next`, shared by all three worker modes) doubles from the base, never exceeds the 5 s cap, including the step that lands on it, holds at the cap, and doesn't wrap | `J2534StreamTest.BackoffStepDoublesToCapWithoutOvershoot` (session-free) |
 | `ECUIO_ERR_REQUEST_FAILED` has its own status string | `J2534StreamTest.RequestFailedStatusHasDistinctString` |
 | A batch the vendor returns with `ERR_TIMEOUT` is delivered through the surrogate; an empty one maps to a vehicle timeout; both reads hold for their 50 ms timeout | `J2534SurrogateTest.SpecTimeoutReadDeliversPartialBatch` (spec-mode fake) |
@@ -232,10 +233,9 @@ rows against the current Home, Settings and Dashboard header.
 - **ID 0 handling is untested.** The child tracks the open device and
   channel with flags instead of treating ID 0 as "none", but the fake
   always returns device 1 and channel 0x55.
-- **First-frame indications never appear.** The fake's VX mode
-  queues a TX indication after each write, but nothing queues a
-  `START_OF_MESSAGE` indication, and no test pins how either backend's
-  drain handles indications (#28).
+- **The fake never segments a reply.** Every reply is one message,
+  so a `START_OF_MESSAGE` indication appears only where a test queues
+  one by hand (`IndicationsAheadOfAReplyAreSkipped`).
 - **Child survival after a refused op isn't asserted.** The surrogate
   child must stay alive after a vendor refusal (ADR-0014). Tests check
   the refusal's status, but `sur_close` returns `ECUIO_OK` whether or not

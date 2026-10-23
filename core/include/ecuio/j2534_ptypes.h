@@ -77,6 +77,22 @@ static inline unsigned long ecuio_trusted_count(unsigned long status,
 #define ECUIO_PT_ISO15765_ADDR_TYPE     0x0080UL
 #define ECUIO_PT_CAN_29BIT_ID           0x0100UL
 
+/* Messages a read skips, because none is a received frame: a TX
+ * indication or loopback echo (TX_MSG_TYPE or TX_INDICATION; the OBDX
+ * Pro VX queues 0x09 after each accepted write and 0x201 after a
+ * refused one), and the START_OF_MESSAGE indication a vendor queues
+ * when a segmented ISO 15765 reply starts arriving, ahead of the whole
+ * message (Quantex's PassThruReadMsgs reference). Skipping one doesn't
+ * end a read: both read paths read again with what's left of the
+ * timeout, skipping at most ECUIO_PT_MAX_SKIPPED_PER_READ. */
+#define ECUIO_PT_MAX_SKIPPED_PER_READ 16
+
+static inline int ecuio_pt_is_indication(unsigned long rx_status)
+{
+    return (rx_status & (ECUIO_PT_TX_MSG_TYPE | ECUIO_PT_TX_INDICATION |
+                         ECUIO_PT_START_OF_MESSAGE)) != 0;
+}
+
 /* TxFlags (J2534-1 v04.04, VERIFIED). On ISO 15765 channels the
  * adapter does the ISO-TP framing; FRAME_PAD asks it to zero-pad each
  * CAN frame to 8 bytes. */

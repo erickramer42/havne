@@ -111,9 +111,9 @@ to plausible values. Next is the plan in
     run sheets are
     [bench-runsheet.md](docs/bench-sessions/bench-runsheet.md) and
     [vehicle-runsheet.md](docs/bench-sessions/vehicle-runsheet.md).
-  - **Tests:** 226 ctest cases (Windows, Visual Studio 18 build
+  - **Tests:** 230 ctest cases (Windows, Visual Studio 18 build
     tools, both trees rebuilt, 2026-10-22), plus the cross-arch
-    subset (35/35). All
+    subset (37/37). All
     passed except the env-gated cross-arch skip. Every first-party
     target builds with compiler warnings on, at 0 on MSVC. CI was green on all
     eight jobs on PR #16 (merged as `9125b5e`), including the
@@ -425,14 +425,6 @@ an issue is resolved it is removed, and its number is not reused.
     since those are ISO 9141/KWP init calls. If a BENCH device needs
     them, give them a dedicated wire form rather than relaxing the
     whitelist.
-28. **In-proc, a dropped indication ends the drain early.** The loader
-    drops `TX_INDICATION`/`TX_MSG_TYPE` messages by reporting "no
-    frame", and the drain stops at the first "no frame". After each
-    write the vendor's TX-done indication therefore ends the drain,
-    and the ECU's reply is read on the next cycle. The surrogate drops
-    indications inside the child, so its drain continues: the two
-    backends drain differently. `START_OF_MESSAGE` (first-frame)
-    indications are not handled by either backend.
 29. **The iOS simulator smoke depends on Intel macOS runners.** Qt
     6.12's iOS simulator libraries are x86_64 only, so
     `ios-simulator-smoke` runs on `macos-15-intel`, where the simulator

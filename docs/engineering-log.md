@@ -73,6 +73,9 @@ Dates are commit dates.
 | 2026-10-22 | First read-only vehicle session: the engine ECU answers the `obd2` scheduler, `?poll=` and the PID bitmaps through the VX; values decode and track the cluster, meeting v0.3.0's tag conditions ([session sheet](bench-sessions/2026-10-22-vehicle.md)) | `9a2c2ee` |
 | 2026-10-22 | The Dashboard fits a short, wide window (a wide arrangement), Settings scrolls, and the whole UI zooms (Ctrl + / Ctrl − / Ctrl 0), kept between runs | `0a94049` |
 | 2026-10-22 | v0.3.0 released: the version string reads 0.3.0 | tag `v0.3.0` |
+| 2026-10-22 | Request-engine groundwork: link health runs through both backends, the fake's control page reaching the surrogate child mid-session | `5961027` |
+| 2026-10-22 | Request-engine groundwork: the fake models the OBDX Pro VX (`ECUIO_FAKE_VX`): held reads, `ERR_BUFFER_EMPTY`, TX indications, 4 ms replies, the no-ACK bus | `81798f3` |
+| 2026-10-22 | Request-engine groundwork: indications no longer end a read on either backend, and `START_OF_MESSAGE` is skipped (Known Issue #28 closed) | — |
 
 ## Lessons learned
 
@@ -648,3 +651,17 @@ the ticked box. An expectation taken from a bench needs the condition it
 rests on written beside it ("with nothing on the bus to
 acknowledge"), so a different result reads as information, not as a
 failure or a pass.
+
+**2026-10-22 — request-engine groundwork:** **a fake that never sends
+what the device sends can't test the code that handles it.** Known
+Issue #28, an in-proc TX indication ending the drain, was found by
+reading the loader and stayed open with no test: the fake queued no
+indications, so nothing could fail. Once the fake was modelled on the
+VX's logged output, with an indication after every write, a test
+written against the old loader failed at once: in-proc, all ten
+replies landed after the next request. A second test showed what the
+unhandled `START_OF_MESSAGE` indication, listed in the same issue,
+actually did: it reached the session as an empty frame on both
+backends. A fake earns its place
+by reproducing a device's recorded behaviour; one written from the
+spec alone tests the code against the author's assumptions.

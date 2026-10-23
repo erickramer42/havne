@@ -46,9 +46,11 @@
  *                 num_frames/frames, the messages the vendor returned
  *                 under NOERROR or ERR_TIMEOUT (the count-trust rule in
  *                 j2534_ptypes.h; a conforming vendor pairs ERR_TIMEOUT
- *                 with a short batch), with TX indications already
- *                 dropped, plus the vendor status verbatim. No open
- *                 channel: NOERROR with no frames.
+ *                 with a short batch), with indications already
+ *                 skipped (ecuio_pt_is_indication; a batch of nothing
+ *                 else is read again with what's left of the timeout),
+ *                 plus the vendor status verbatim. No open channel:
+ *                 NOERROR with no frames.
  *   SHUTDOWN      no fields. Reply NOERROR, then the child disconnects,
  *                 closes the device, unloads the DLL and exits 0.
  *   DISCONNECT    u.disconnect. PassThruDisconnect. Reply: status only.

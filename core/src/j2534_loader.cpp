@@ -17,6 +17,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <chrono>
 #include <vector>
 
 /* ================================================================
@@ -85,6 +86,18 @@ constexpr long kPtStatusNoError = ECUIO_PT_STATUS_NOERROR;
 
 /* ecuio_j2534_force_surrogate_for_testing's switch. */
 std::atomic<bool> g_force_surrogate{false};
+
+/* Milliseconds from now to deadline, 0 once it has passed. */
+uint32_t ms_left(std::chrono::steady_clock::time_point deadline)
+{
+    const auto now = std::chrono::steady_clock::now();
+    if (now >= deadline) {
+        return 0;
+    }
+    return static_cast<uint32_t>(
+        std::chrono::duration_cast<std::chrono::milliseconds>(
+            deadline - now).count());
+}
 
 /* Resolve by export name, with an optional alternate spelling.
  * GetProcAddress is case-sensitive: the spec spells it
@@ -529,9 +542,11 @@ ecuio_status_t ecuio_j2534_disconnect_channel(ecuio_j2534_handle_t* handle,
  *   ERR_TIMEOUT (0x09)             -> ECUIO_ERR_VEHICLE_TIMEOUT (quiet bus)
  *   any other nonzero             -> ECUIO_ERR_TRANSPORT_HARD_FAILURE
  *   num > 0 under NOERROR or      -> deliver the frame (J2534-1 pairs
- *     ERR_TIMEOUT                     ERR_TIMEOUT with data), except TX
- *                                     indications and loopback echoes,
- *                                     which are dropped
+ *     ERR_TIMEOUT                     ERR_TIMEOUT with data)
+ *   an indication                 -> skipped, and the read goes on with
+ *                                     what's left of its timeout
+ *                                     (ecuio_pt_is_indication); the
+ *                                     next message decides
  *   num > 0 under any other       -> count ignored, mapped as "no
  *     status                          message" above
  *                                     (ecuio_trusted_count: a vendor
@@ -561,12 +576,32 @@ ecuio_status_t ecuio_j2534_read_frame(ecuio_j2534_handle_t* handle,
                                           got_frame);
     }
 
+    /* An indication doesn't end the read: read again with what's
+     * left of the timeout, and at least once more, so a reply queued
+     * behind it comes back from this call instead of the caller's
+     * next one. The surrogate child does the same with its batches,
+     * so both backends drain alike. */
+    const auto deadline = std::chrono::steady_clock::now() +
+                          std::chrono::milliseconds(timeout_ms);
     PASSTHRU_MSG msg = {};
-    unsigned long num = 1;
-    long rc = handle->read_msgs(channel, &msg, &num, timeout_ms);
-    num = ecuio_trusted_count(rc, num);    /* a count under a hard
-                                               error may be the vendor
-                                               leaving our 1 untouched */
+    unsigned long num = 0;
+    long rc = kPtStatusNoError;
+    uint32_t wait_ms = timeout_ms;
+    for (uint32_t skipped = 0;;) {
+        num = 1;
+        rc = handle->read_msgs(channel, &msg, &num, wait_ms);
+        num = ecuio_trusted_count(rc, num);    /* a count under a hard
+                                                   error may be the vendor
+                                                   leaving our 1 untouched */
+        if (num == 0 || !ecuio_pt_is_indication(msg.RxStatus)) {
+            break;
+        }
+        if (++skipped >= ECUIO_PT_MAX_SKIPPED_PER_READ) {
+            num = 0;    /* indications only: judged like an empty read */
+            break;
+        }
+        wait_ms = ms_left(deadline);
+    }
 
     if (num == 0) {
         *got_frame = false;
@@ -586,14 +621,6 @@ ecuio_status_t ecuio_j2534_read_frame(ecuio_j2534_handle_t* handle,
      * let the count through, and a conforming vendor returns data and
      * that status together. */
     *out_frame = ecuio_frame_t{};
-    if (msg.RxStatus & (ECUIO_PT_TX_INDICATION |
-                        ECUIO_PT_TX_MSG_TYPE)) {
-        /* TX indications and loopback echoes are dropped, as in the
-         * surrogate child. Reporting "no frame" ends the worker's
-         * drain early (Known Issue #28). */
-        *got_frame = false;
-        return ECUIO_OK;
-    }
     out_frame->arbitration_id = 0;
     out_frame->channel_id = 0;
     out_frame->flags = (msg.RxStatus & ECUIO_PT_CAN_29BIT_ID)

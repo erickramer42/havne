@@ -10,6 +10,7 @@
 #include "ecuio/surrogate_protocol.h"
 #include "ecuio/sur_fingerprint.h"
 
+#include <chrono>
 #include <cstdio>
 #include <cstdarg>
 #include <cstdlib>
@@ -176,49 +177,70 @@ static int handle_op_read(unsigned long channel, uint32_t timeout_ms,
         return static_cast<int>(ECUIO_PT_STATUS_NOERROR);
     }
 
-    unsigned long num = ECUIO_SUR_MAX_FRAMES_PER_READ;
-    const long rc = g_read_msgs(g_channel, s_read_batch, &num, timeout_ms);
-
-    /* Trust the count only under the status allowlist
-       (ecuio_trusted_count). A vendor may leave pNumMsgs untouched on
-       error; the VX reports "status 7, written 1" on a failed write
-       (docs/bench-sessions/2026-10-20.md). A dirty count is doubly
-       dangerous here: s_read_batch is static and never cleared, so it
-       would replay the PREVIOUS read's frames as phantoms. */
-    num = ecuio_trusted_count(rc, num);
-
-    /* Frames are collected under either trusted status, ERR_TIMEOUT
-     * included: per J2534-1 a read that asks for N messages with a
-     * nonzero timeout returns ERR_TIMEOUT together with however many
-     * arrived, so on a conforming vendor the ECU's answer usually
-     * arrives with a nonzero status. The status still rides home
-     * verbatim in resp->status. */
+    /* A batch that held only indications (ecuio_pt_is_indication) is
+     * read again with what's left of the timeout, and at least once
+     * more, so an indication never ends a read: a reply queued behind
+     * it comes back in this response. The in-proc loader reads the
+     * same way, a message at a time. */
+    const auto deadline = std::chrono::steady_clock::now() +
+                          std::chrono::milliseconds(timeout_ms);
+    uint32_t wait_ms = timeout_ms;
+    uint32_t skipped = 0;
     uint32_t n = 0;
-    const unsigned long lim = (num < ECUIO_SUR_MAX_FRAMES_PER_READ)
-                              ? num : ECUIO_SUR_MAX_FRAMES_PER_READ;
-    for (unsigned long i = 0; i < lim; ++i) {
-        const PASSTHRU_MSG& m = s_read_batch[i];
-        const bool indication = (m.RxStatus & (ECUIO_PT_TX_INDICATION |
-                                               ECUIO_PT_TX_MSG_TYPE)) != 0;
-        if (g_log_frames) {
-            char hex[3 * ECUIO_SUR_MSG_MAX + 16];
-            format_hex(hex, sizeof(hex), m.Data, m.DataSize);
-            stage("OP_READ frame: status %ld, rx 0x%08lX, ts %lu, len %lu: %s%s",
-                  rc, m.RxStatus, m.Timestamp, m.DataSize, hex,
-                  indication ? " (indication, not delivered)" : "");
+    long rc = ECUIO_PT_STATUS_NOERROR;
+    for (;;) {
+        unsigned long num = ECUIO_SUR_MAX_FRAMES_PER_READ;
+        rc = g_read_msgs(g_channel, s_read_batch, &num, wait_ms);
+
+        /* Trust the count only under the status allowlist
+           (ecuio_trusted_count). A vendor may leave pNumMsgs untouched
+           on error; the VX reports "status 7, written 1" on a failed
+           write (docs/bench-sessions/2026-10-20.md). A dirty count is
+           doubly dangerous here: s_read_batch is static and never
+           cleared, so it would replay the PREVIOUS read's frames as
+           phantoms. */
+        num = ecuio_trusted_count(rc, num);
+
+        /* Frames are collected under either trusted status,
+         * ERR_TIMEOUT included: per J2534-1 a read that asks for N
+         * messages with a nonzero timeout returns ERR_TIMEOUT together
+         * with however many arrived, so on a conforming vendor the
+         * ECU's answer usually arrives with a nonzero status. The
+         * status still rides home verbatim in resp->status. */
+        const unsigned long lim = (num < ECUIO_SUR_MAX_FRAMES_PER_READ)
+                                  ? num : ECUIO_SUR_MAX_FRAMES_PER_READ;
+        for (unsigned long i = 0; i < lim; ++i) {
+            const PASSTHRU_MSG& m = s_read_batch[i];
+            const bool indication = ecuio_pt_is_indication(m.RxStatus) != 0;
+            if (g_log_frames) {
+                char hex[3 * ECUIO_SUR_MSG_MAX + 16];
+                format_hex(hex, sizeof(hex), m.Data, m.DataSize);
+                stage("OP_READ frame: status %ld, rx 0x%08lX, ts %lu, len %lu: %s%s",
+                      rc, m.RxStatus, m.Timestamp, m.DataSize, hex,
+                      indication ? " (indication, not delivered)" : "");
+            }
+            if (indication) {
+                ++skipped;
+                continue;
+            }
+            uint32_t dsz = m.DataSize;
+            if (dsz > ECUIO_SUR_MSG_MAX) dsz = ECUIO_SUR_MSG_MAX;
+            resp->frames[n].arbitration_id = 0;
+            resp->frames[n].timestamp = m.Timestamp;
+            resp->frames[n].rx_flags = m.RxStatus;
+            resp->frames[n].data_len = static_cast<uint8_t>(dsz);
+            memcpy(resp->frames[n].data, m.Data, dsz);
+            ++n;
         }
-        /* Drop TX indications/echoes — they are transport bookkeeping */
-        if (indication) {
-            continue;
+        if (n > 0 || num == 0 || skipped >= ECUIO_PT_MAX_SKIPPED_PER_READ) {
+            break;
         }
-        uint32_t dsz = m.DataSize;
-        if (dsz > ECUIO_SUR_MSG_MAX) dsz = ECUIO_SUR_MSG_MAX;
-        resp->frames[n].arbitration_id = 0;
-        resp->frames[n].timestamp = m.Timestamp;
-        resp->frames[n].rx_flags = m.RxStatus;
-        resp->frames[n].data_len = static_cast<uint8_t>(dsz);
-        memcpy(resp->frames[n].data, m.Data, dsz);
-        ++n;
+        const auto now = std::chrono::steady_clock::now();
+        wait_ms = (now < deadline)
+            ? static_cast<uint32_t>(
+                  std::chrono::duration_cast<std::chrono::milliseconds>(
+                      deadline - now).count())
+            : 0;
     }
     resp->num_frames = n;
 

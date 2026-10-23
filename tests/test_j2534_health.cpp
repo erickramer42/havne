@@ -7,7 +7,9 @@
 //          its priority, unmatched frames, backoff growth; and the same
 //          machine against the fake's VX mode (ECUIO_FAKE_VX): a quiet
 //          bus whose empty reads are ERR_BUFFER_EMPTY after their
-//          timeout, answered requests, and the no-ACK bus.
+//          timeout, answered requests, and the no-ACK bus. TX and
+//          first-frame indications are skipped without ending a read,
+//          so a reply comes back in its own request's cycle.
 //          The fake is driven through its control page
 //          (fake_control.h), the one channel that reaches the child's
 //          instance mid-session; the page also shows which process
@@ -32,6 +34,7 @@
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <memory>
 #include <string>
 #include <thread>
@@ -69,6 +72,32 @@ void count_cb(const ecuio_frame_t* /*frame*/, void* user_data)
     static_cast<std::atomic<int>*>(user_data)->fetch_add(1);
 }
 
+/* What the session delivered: each frame's payload, and how many came
+ * after the fake's next write. In a request mode where every write is
+ * answered, frame k belongs while the fake has taken exactly k writes;
+ * one that arrives later landed a cycle late. Read the payloads only
+ * after the session is closed. */
+struct Delivery {
+    fake_control::Page* page = nullptr;
+    std::atomic<int> count{0};
+    std::atomic<int> after_next_write{0};
+    uint16_t lengths[16] = {};
+    uint8_t payloads[16][8] = {};
+};
+
+void delivery_cb(const ecuio_frame_t* frame, void* user_data)
+{
+    auto* d = static_cast<Delivery*>(user_data);
+    const int i = d->count.fetch_add(1);
+    if (fake_control::writes(d->page) > static_cast<uint32_t>(i + 1)) {
+        d->after_next_write.fetch_add(1);
+    }
+    if (i < 16) {
+        d->lengths[i] = frame->data_length;
+        memcpy(d->payloads[i], frame->data, sizeof(d->payloads[i]));
+    }
+}
+
 /* The session and its frame count are members, and TearDown closes the
  * session first, so a failed ASSERT can't leave the worker counting
  * into a destroyed local. */
@@ -79,12 +108,14 @@ protected:
     std::unique_ptr<EnvSwap> exe_swap;
     ecuio_session_t* session = nullptr;
     std::atomic<int> frames{0};
+    Delivery delivered;
 
     void SetUp() override
     {
         page = fake_control::create_for_this_process();
         ASSERT_NE(page, nullptr);
         fake_control::reset(page);
+        delivered.page = page;
 
         if (GetParam() == Backend::InProc) {
             dll = FAKE_J2534_DLL_PATH;
@@ -138,6 +169,9 @@ protected:
                 << "the fake opened in-proc, not in the surrogate";
         }
         ASSERT_EQ(ecuio_register_frame_callback(session, count_cb, &frames),
+                  ECUIO_OK);
+        ASSERT_EQ(ecuio_register_frame_callback(session, delivery_cb,
+                                                &delivered),
                   ECUIO_OK);
         ASSERT_EQ(ecuio_session_start(session), ECUIO_OK);
     }
@@ -457,6 +491,68 @@ TEST_P(J2534HealthTest, VxNoAckBusAcceptsThreeWritesThenRequestsFail)
     EXPECT_LT(took, 2000) << "close waited past the blocked write";
     ecuio_session_destroy(session);
     session = nullptr;
+}
+
+/* ====================================================================
+ * Indications: TX done and START_OF_MESSAGE are skipped, and skipping
+ * one doesn't end the read.
+ * ==================================================================== */
+
+/* On the VX each write's indication is queued ahead of its reply, and
+ * the reply, 4 ms behind, comes back in the same cycle's drain, before
+ * the next write. In-proc the loader reads a message at a time; had the
+ * skipped indication ended the read, the drain would stop there and
+ * every reply would land a cycle late. */
+TEST_P(J2534HealthTest, VxReplyArrivesInItsOwnRequestsCycle)
+{
+    ASSERT_NO_FATAL_FAILURE(knob("ECUIO_FAKE_VX", "1"));
+    ASSERT_NO_FATAL_FAILURE(start_session(""));
+
+    const auto deadline = std::chrono::steady_clock::now() +
+                          std::chrono::seconds(5);
+    while (delivered.count.load() < 10 &&
+           std::chrono::steady_clock::now() < deadline) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    ASSERT_GE(delivered.count.load(), 10) << "replies didn't arrive";
+    EXPECT_EQ(delivered.after_next_write.load(), 0)
+        << "replies landed after the next request";
+}
+
+/* A TX indication, then the START_OF_MESSAGE indication a vendor queues
+ * as a segmented reply starts arriving (the CAN ID alone), then the
+ * reply: exactly one frame reaches the session, the reply's. Delivered,
+ * the first-frame indication would arrive as an empty payload on the
+ * reply's ID. */
+TEST_P(J2534HealthTest, IndicationsAheadOfAReplyAreSkipped)
+{
+    ASSERT_NO_FATAL_FAILURE(start_session("?profile=raw&filter=0x7E8"));
+
+    const uint8_t tx_done[4] = {0x00, 0x00, 0x07, 0xE0};
+    const uint8_t first_frame[4] = {0x00, 0x00, 0x07, 0xE8};
+    const uint8_t reply[8] = {0x00, 0x00, 0x07, 0xE8, 0x41, 0x0C, 0x1F, 0x40};
+    ASSERT_TRUE(fake_control::post(page, tx_done, sizeof(tx_done), 100,
+                                   ECUIO_PT_TX_MSG_TYPE |
+                                       ECUIO_PT_TX_INDICATION));
+    ASSERT_TRUE(fake_control::post(page, first_frame, sizeof(first_frame),
+                                   101, ECUIO_PT_START_OF_MESSAGE));
+    ASSERT_TRUE(fake_control::post(page, reply, sizeof(reply), 102, 0));
+
+    const auto deadline = std::chrono::steady_clock::now() +
+                          std::chrono::seconds(2);
+    while (delivered.count.load() < 1 &&
+           std::chrono::steady_clock::now() < deadline) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(300));
+    EXPECT_EQ(ecuio_session_close(session), ECUIO_OK);
+    ecuio_session_destroy(session);
+    session = nullptr;
+
+    ASSERT_EQ(delivered.count.load(), 1);
+    EXPECT_EQ(delivered.lengths[0], 4u);
+    const uint8_t want[4] = {0x41, 0x0C, 0x1F, 0x40};
+    EXPECT_EQ(memcmp(delivered.payloads[0], want, sizeof(want)), 0);
 }
 
 INSTANTIATE_TEST_SUITE_P(Backend, J2534HealthTest,
