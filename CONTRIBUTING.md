@@ -35,14 +35,20 @@ designed for, not bolted on.
 
 ## Building
 
-Requires a C++17 compiler, CMake, and Qt 6.5+ (Qt 6.12 recommended; compiler
-minimums follow Qt's — MSVC 2022+, GCC 10+, Xcode 16+).
+Requires a C++17 compiler, CMake 3.21+, and Qt 6.12, the version CI and the
+maintainer build (compiler minimums follow Qt's — MSVC 2022+, GCC 10+,
+Xcode 16+).
 
 ```sh
 cmake -B build -DCMAKE_PREFIX_PATH=<your Qt>
 cmake --build build
 ctest --test-dir build
 ```
+
+On Windows the Visual Studio generator is multi-config, so add
+`--config Release` to the build and `-C Release` to ctest. x86 vendor drivers
+also need the Win32 surrogate from a second build tree; the README's Build
+section and [docs/development.md](docs/development.md) cover both.
 
 The build validates that the core never links Qt; the CI matrix runs ctest on
 Windows, macOS and Linux, core under ASan/UBSan, Android/iOS cross-builds, and
@@ -53,18 +59,24 @@ assuming either.
 ## Conventions your change must respect
 
 The project's architecture is enforced, not aspirational. The full rules live
-in CLAUDE.md and docs/architecture.md; the ones that reject most outside
+in [docs/architecture.md](docs/architecture.md), with the J2534 specifics in
+[docs/j2534.md](docs/j2534.md) and the build and test workflow in
+[docs/development.md](docs/development.md); the ones that reject most outside
 contributions:
 
 - **The C ABI is the only boundary.** Public headers in `core/include/ecuio/`
   compile as strict C. Enum values, status codes and opcodes are append-only —
-  never renumber, reuse, or remove one. Breaking changes need `feat!:` and a
-  layout-version bump.
+  never renumber, reuse, or remove one. Breaking changes need `feat!:`; a
+  change to the signal-definition layout also bumps `ECUIO_SIGNAL_SET_LAYOUT`
+  ([ADR-0016](docs/adr/0016-signal-definition-layout.md)).
 - **Core never includes or links Qt.** Decoding, scaling and units live in
   core; the UI receives final display values. A Qt include in `core/` fails CI.
-- **Know your thread.** Bridge code on the GUI thread blocks nothing; code on
-  a transport worker thread touches only atomics. Frame callbacks must not
-  block or close the session.
+- **Know your thread.** Frame callbacks run on the transport's worker thread:
+  they must not block, and must never close or destroy their session (both
+  join that thread). The bridge's callback touches only atomics and posts the
+  frame to the GUI thread, where the rest of the bridge runs; slow vendor
+  calls (connect, disconnect) run on threads of their own, so the GUI never
+  waits on them.
 - **Transports encode, never decode.** The URI selects the transport
   (`mock://`, `j2534://` on Windows); everything else is rejected.
 - **ABI-breaking or architectural changes need an ADR** under `docs/adr/`
@@ -72,8 +84,9 @@ contributions:
   have one.
 
 Coding style: match the surrounding file. Comments are present tense and cite
-open Known Issues by number. Warnings are treated as errors in practice —
-first-party code builds clean at warning level 0 on MSVC.
+open Known Issues by number. Warnings don't fail the build, but treat them as
+errors: every first-party target builds with `/W4` or `-Wall -Wextra`, at zero
+warnings on MSVC.
 
 ## Testing
 
@@ -84,11 +97,14 @@ right tier:
 |---|---|
 | Unit | Core, signal and ABI logic, no I/O |
 | Bridge | The Qt bridge and models, headless |
-| HARNESS | The J2534 stack against the in-tree fake vendor DLL |
+| QML | The app's QML pages against a real bridge, offscreen (Qt Quick Test) |
+| HARNESS | The J2534 stack against the in-tree fake vendor DLL (Windows) |
+| Fuzzing | The signal decoder and validators under libFuzzer, in CI ([fuzz/README.md](fuzz/README.md)) |
 | Simulator/Manual smoke | The running app's layout and paint |
 | BENCH / Vehicle | Real hardware — **maintainer-run only** |
 
-You can run Unit, Bridge and HARNESS tiers yourself; smoke is a recipe in
+You can run the Unit, Bridge, QML and HARNESS tiers yourself (all through
+ctest), and the fuzzers by following fuzz/README.md; smoke is a recipe in
 docs/testing.md; BENCH and Vehicle sessions need real adapters and a car, so
 don't attempt them in a PR — describe what needs hardware verification instead.
 
@@ -99,7 +115,8 @@ the logic, not the timing.
 ## Commit messages
 
 Conventional Commits, with a scope. In use: `core`, `bridge`, `j2534`,
-`j2534-surrogate`, `obd2`, `ui`, `windows`, `ci`. Examples:
+`j2534-surrogate`, `obd2`, `ui`, `app`, `fuzz`, `windows`; `ci:` and `docs:`
+usually go without one. Examples:
 
 ```
 feat(core): mux keys up to 3 bytes
@@ -120,7 +137,8 @@ Keep commits terse — subject line says what, a short body says why, and
    tier.
 4. Update what the change touches: STATUS.md test counts, docs/testing.md,
    and an engineering-log row if the change taught a lesson. Files that must
-   move together are listed in CLAUDE.md.
+   change together are named in docs/architecture.md (the mock encoder and
+   its signal defs; the `obd2` defs and the fake DLL's canned replies).
 5. Rebase onto the target branch before requesting review; merge commits are
    squashed unless the history itself is the point.
 
