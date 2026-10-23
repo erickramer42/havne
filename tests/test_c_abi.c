@@ -24,9 +24,10 @@
 
 /* Negative-array-size idiom — valid in ALL C standards including
  * pedantic C89, complementing the header's _Static_assert (C11+). */
-typedef char abi_frame_size_check[(sizeof(ecuio_frame_t) == 88) ? 1 : -1];
+typedef char abi_frame_size_check[(sizeof(ecuio_frame_t) == 4120) ? 1 : -1];
 typedef char abi_data_offset_check[(offsetof(ecuio_frame_t, data) == 16) ? 1 : -1];
-typedef char abi_flags_offset_check[(offsetof(ecuio_frame_t, flags) == 80) ? 1 : -1];
+typedef char abi_data_size_check[(sizeof(((ecuio_frame_t*)0)->data) == ECUIO_FRAME_DATA_MAX) ? 1 : -1];
+typedef char abi_flags_offset_check[(offsetof(ecuio_frame_t, flags) == 4112) ? 1 : -1];
 typedef char abi_def_size_check[(sizeof(ecuio_signal_def_t) == 120) ? 1 : -1];
 typedef char abi_def_kind_check[(offsetof(ecuio_signal_def_t, kind) == 16) ? 1 : -1];
 typedef char abi_def_start_byte_check[(offsetof(ecuio_signal_def_t, start_byte) == 18) ? 1 : -1];

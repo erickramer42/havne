@@ -63,3 +63,19 @@ with the host's clock counting wraps across long gaps and standing in
 when the vendor clock steps (`core/src/j2534_clock.h`,
 [j2534.md](../j2534.md#session-lifecycle), "Frame time"). The layout
 is unchanged.
+
+## Appendix — whole ISO 15765 messages (2026-10-23)
+
+The 64-byte payload kept at most 60 bytes of a reassembled ISO 15765
+reply, the CAN ID taking the rest, and nothing marked the cut. Service
+01 replies fit; Service 09 and longer Service 0x22 replies didn't.
+`data` now holds `ECUIO_FRAME_DATA_MAX` (4096) bytes, room for the
+longest message ISO 15765-2 carries on classic CAN (4095 bytes, its
+12-bit length), so the struct is 4120 bytes with `flags` at 4112; the
+asserts in `core.h` and `test_c_abi.c` pin it. A message longer than
+that is cut at the frame's end and carries
+`ECUIO_FRAME_FLAG_TRUNCATED` (0x40, appended). Copying a frame still
+copies the payload, now 4 KB of it. Both J2534 read paths hand the
+transport the vendor's message whole (`ecuio_pt_rx_t`,
+`j2534_ptypes.h`), and the transport builds the frame in one place
+(`frame_from_msg` in `j2534_transport.cpp`).

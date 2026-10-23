@@ -163,7 +163,7 @@ ecuio_status_t ecuio_profile_lookup(const char* name,
         std::lock_guard<std::mutex> lock(registry_mutex());
         auto it = registry().find(std::string(name));
         if (it == registry().end()) {
-            return ECUIO_ERR_NO_TRANSPORT;
+            return ECUIO_ERR_UNKNOWN_PROFILE;
         }
         *out_set = it->second;   /* may be NULL — that IS "raw" */
         return ECUIO_OK;

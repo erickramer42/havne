@@ -142,7 +142,8 @@ int ecuio_decode_signal(const ecuio_signal_def_t* signal,
 #define ECUIO_VALIDATE_ERR_NULL               1  /* a NULL def or set, or
                                                     count > 0 with NULL
                                                     defs */
-/* 2 and 5 are retired, and never reused. */
+/* 2, 5 and 10 are retired, and never reused. 10 was a mux key past a
+ * 64-byte payload; every key a mux_offset can place fits the frame. */
 #define ECUIO_VALIDATE_ERR_BIT_LENGTH         3  /* 0, or over 32 */
 #define ECUIO_VALIDATE_ERR_BIT_OFFSET         4  /* over 7 */
 #define ECUIO_VALIDATE_ERR_NAME               6  /* name not terminated
@@ -150,8 +151,6 @@ int ecuio_decode_signal(const ecuio_signal_def_t* signal,
 #define ECUIO_VALIDATE_ERR_UNIT               7  /* unit not terminated */
 #define ECUIO_VALIDATE_ERR_DECIMALS           8  /* decimal_places over 3 */
 #define ECUIO_VALIDATE_ERR_MUX_LENGTH         9  /* mux_length over 3 */
-#define ECUIO_VALIDATE_ERR_MUX_RANGE         10  /* key region past the
-                                                    64-byte frame payload */
 #define ECUIO_VALIDATE_ERR_MUX_KEY           11  /* key wider than its
                                                     length */
 #define ECUIO_VALIDATE_ERR_BIG_ENDIAN        12  /* big-endian field not

@@ -10,8 +10,12 @@
 
 #include <stdint.h>
 
+#include "ecuio/j2534_ptypes.h"
+
 /* ---- Wire limits ---- */
-#define ECUIO_SUR_MSG_MAX 64               /* bytes of one CAN message's Data */
+#define ECUIO_SUR_MSG_MAX ECUIO_PT_WRITE_MAX  /* bytes of one written or injected
+                                                 message's Data; a read's frames
+                                                 are whole ecuio_pt_rx_t */
 #define ECUIO_SUR_IOCTL_DATA_MAX 64        /* ioctl input, and reply payload */
 #define ECUIO_SUR_FILTER_PATTERN_MAX 12    /* mask/pattern/flow-control bytes */
 #define ECUIO_SUR_MAX_FRAMES_PER_READ 16   /* frames in one OP_READ reply */
@@ -46,7 +50,8 @@
  *                 Reply: aux = messages the vendor reports written.
  *   READ          u.read. PassThruReadMsgs for up to 16 messages on
  *                 the child's open channel (no channel field). Reply:
- *                 num_frames/frames, the messages the vendor returned
+ *                 num_frames, then that many ecuio_pt_rx_t after the
+ *                 response (see below): the messages the vendor returned
  *                 under NOERROR or ERR_TIMEOUT (the count-trust rule in
  *                 j2534_ptypes.h; a conforming vendor pairs ERR_TIMEOUT
  *                 with a short batch), with indications already
@@ -117,19 +122,11 @@ typedef struct ecuio_sur_request {
     } u;
 } ecuio_sur_request_t;
 
-/* Single frame for batch read responses. */
-typedef struct ecuio_sur_frame {
-    uint32_t arbitration_id;  /* always 0: the CAN ID is data[0..3], which
-                                 the transport strips (ADR-0012) */
-    uint32_t timestamp;       /* the vendor's Timestamp, untranslated: the
-                                 transport makes it session time */
-    uint32_t rx_flags;        /* the vendor's RxStatus */
-    uint8_t  data[ECUIO_SUR_MSG_MAX];
-    uint8_t  data_len;        /* the child clamps to ECUIO_SUR_MSG_MAX */
-} ecuio_sur_frame_t;
-
-/* Response with embedded frame array. Fields an opcode doesn't use are
- * zero. */
+/* Every reply is one ecuio_sur_response_t followed by num_frames
+ * ecuio_pt_rx_t (j2534_ptypes.h): the vendor's messages whole, CAN ID
+ * in front, stamp untranslated. Only a READ's reply carries frames, so
+ * a reply costs the frames it holds, not ECUIO_SUR_MAX_FRAMES_PER_READ
+ * of them. Fields an opcode doesn't use are zero. */
 typedef struct ecuio_sur_response {
     uint32_t request_id;         /* the request's, for pairing */
     int32_t  status;             /* vendor J2534 status, or STATUS_FAILED */
@@ -140,8 +137,9 @@ typedef struct ecuio_sur_response {
     char     text[ECUIO_SUR_TEXT_FIELDS][ECUIO_SUR_TEXT_MAX];
     uint8_t  data[ECUIO_SUR_IOCTL_DATA_MAX];   /* IOCTL reply payload */
     uint32_t data_len;           /* IOCTL; the client rejects > the limit */
-    uint32_t num_frames;         /* READ; the client rejects > the limit */
-    ecuio_sur_frame_t frames[ECUIO_SUR_MAX_FRAMES_PER_READ];
+    uint32_t num_frames;         /* READ: the ecuio_pt_rx_t that follow; the
+                                    client rejects > the limit, and any on
+                                    another opcode's reply */
 } ecuio_sur_response_t;
 
 #endif /* ECUIO_SURROGATE_PROTOCOL_H */

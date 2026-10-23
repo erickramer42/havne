@@ -61,6 +61,10 @@ static HANDLE g_pipe = INVALID_HANDLE_VALUE;
  * 67 KB. Safe because the child is single-threaded. */
 static PASSTHRU_MSG s_read_batch[ECUIO_SUR_MAX_FRAMES_PER_READ];
 
+/* The messages a READ's reply carries after the response, as the wire
+ * sends them (surrogate_protocol.h). Static for the same reason. */
+static ecuio_pt_rx_t s_read_frames[ECUIO_SUR_MAX_FRAMES_PER_READ];
+
 /* ECUIO_SUR_LOG_FRAMES=1 logs every message the vendor returns and
  * every one written, bytes verbatim, with RxStatus or TxFlags and the
  * vendor timestamp: the payload evidence a BENCH or vehicle session
@@ -257,13 +261,7 @@ static int handle_op_read(unsigned long channel, uint32_t timeout_ms,
                 ++skipped;
                 continue;
             }
-            uint32_t dsz = m.DataSize;
-            if (dsz > ECUIO_SUR_MSG_MAX) dsz = ECUIO_SUR_MSG_MAX;
-            resp->frames[n].arbitration_id = 0;
-            resp->frames[n].timestamp = m.Timestamp;
-            resp->frames[n].rx_flags = m.RxStatus;
-            resp->frames[n].data_len = static_cast<uint8_t>(dsz);
-            memcpy(resp->frames[n].data, m.Data, dsz);
+            ecuio_pt_rx_from_msg(&m, &s_read_frames[n]);
             ++n;
         }
         if (n > 0 || num == 0 || skipped >= ECUIO_PT_MAX_SKIPPED_PER_READ) {
@@ -723,10 +721,17 @@ int wmain(int argc, wchar_t* argv[])
          * the child stays alive across ERR_TIMEOUT, ERR_BUFFER_EMPTY,
          * refused ioctls, failed writes and unknown opcodes, and the
          * client maps each status. Only a broken pipe or OP_SHUTDOWN
-         * ends the loop. */
+         * ends the loop. A READ's frames follow its response. */
         DWORD wr = 0;
         if (!WriteFile(g_pipe, &resp, sizeof(resp), &wr, nullptr) ||
             wr != sizeof(resp)) {
+            break;
+        }
+        const DWORD frame_bytes =
+            static_cast<DWORD>(resp.num_frames * sizeof(ecuio_pt_rx_t));
+        if (frame_bytes > 0 &&
+            (!WriteFile(g_pipe, s_read_frames, frame_bytes, &wr, nullptr) ||
+             wr != frame_bytes)) {
             break;
         }
     }

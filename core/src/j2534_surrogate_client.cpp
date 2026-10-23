@@ -27,6 +27,12 @@
 struct ecuio_j2534_sur_handle {
     bool    pipe_connected = false;
     HANDLE pipe = INVALID_HANDLE_VALUE;
+    /* The manual-reset event every overlapped operation on the pipe
+     * waits on. One per handle is enough: a handle is used by one
+     * thread at a time (the connect thread, then the worker, then the
+     * teardown thread), and each operation completes, or is cancelled
+     * and drained, before the next begins. */
+    HANDLE io_event = nullptr;
     HANDLE job = nullptr;
     HANDLE process = nullptr;
     /* The session log: the child's stdout/stderr, and the client's own
@@ -45,10 +51,10 @@ struct ecuio_j2534_sur_handle {
      * the close), and close kills the child without the polite
      * shutdown. */
     bool unresponsive = false;
-    /* Batch cache: one OP_READ returns up to 16 frames; dispensed one
-     * per read_frame call. Worker-thread-only by construction (the
+    /* Batch cache: one OP_READ returns up to 16 messages; dispensed one
+     * per read_msg call. Worker-thread-only by construction (the
      * transport serializes all reads through its worker). */
-    ecuio_sur_frame_t pending[ECUIO_SUR_MAX_FRAMES_PER_READ];
+    ecuio_pt_rx_t pending[ECUIO_SUR_MAX_FRAMES_PER_READ];
     uint32_t pending_count = 0;
     uint32_t pending_next = 0;
 };
@@ -339,11 +345,11 @@ bool init_user_only(user_only_security* s)
     return true;
 }
 
-bool ov_write(HANDLE pipe, const void* buf, DWORD len, DWORD timeout_ms)
+bool ov_write(HANDLE pipe, HANDLE event, const void* buf, DWORD len,
+              DWORD timeout_ms)
 {
     OVERLAPPED ov = {};
-    ov.hEvent = CreateEventA(nullptr, TRUE, FALSE, nullptr);
-    if (ov.hEvent == nullptr) return false;
+    ov.hEvent = event;
     DWORD written = 0;
     const BOOL ok = WriteFile(pipe, buf, len, &written, &ov);
     bool res = false;
@@ -361,23 +367,20 @@ bool ov_write(HANDLE pipe, const void* buf, DWORD len, DWORD timeout_ms)
             GetOverlappedResult(pipe, &ov, &done, TRUE);
         }
     }
-    CloseHandle(ov.hEvent);
     return res;
 }
 
 enum read_result { RD_OK, RD_SHORT_READ, RD_TIMEOUT, RD_OS_ERROR };
 
-read_result ov_read(HANDLE pipe, void* buf, DWORD len, DWORD timeout_ms,
-                    DWORD* out_got, DWORD* out_err)
+/* One overlapped ReadFile of up to len bytes. *out_got is what it
+ * read, a cancelled read's included. */
+read_result ov_read(HANDLE pipe, HANDLE event, void* buf, DWORD len,
+                    DWORD timeout_ms, DWORD* out_got, DWORD* out_err)
 {
     *out_got = 0;
     *out_err = 0;
     OVERLAPPED ov = {};
-    ov.hEvent = CreateEventA(nullptr, TRUE, FALSE, nullptr);
-    if (ov.hEvent == nullptr) {
-        *out_err = GetLastError();
-        return RD_OS_ERROR;
-    }
+    ov.hEvent = event;
     DWORD nread = 0;
     const BOOL ok = ReadFile(pipe, buf, len, &nread, &ov);
     read_result res = RD_OK;
@@ -399,6 +402,7 @@ read_result ov_read(HANDLE pipe, void* buf, DWORD len, DWORD timeout_ms,
             CancelIoEx(pipe, &ov);
             DWORD done = 0;
             GetOverlappedResult(pipe, &ov, &done, TRUE);
+            *out_got = done;
             res = RD_TIMEOUT;
         } else {
             *out_err = GetLastError();
@@ -408,8 +412,56 @@ read_result ov_read(HANDLE pipe, void* buf, DWORD len, DWORD timeout_ms,
         *out_err = GetLastError();
         res = RD_OS_ERROR;
     }
-    CloseHandle(ov.hEvent);
     return res;
+}
+
+/* Read exactly len bytes within timeout_ms. A byte-mode pipe may hand
+ * a long reply over in pieces, so a short read reads on with what's
+ * left of the time. RD_TIMEOUT means nothing arrived, so the reply may
+ * still come whole later; a reply cut off part way is RD_SHORT_READ,
+ * and the pipe is out of step after it. */
+read_result read_exact(ecuio_j2534_sur_handle_t* h, void* buf, DWORD len,
+                       DWORD timeout_ms, DWORD* out_got, DWORD* out_err)
+{
+    const ULONGLONG deadline = GetTickCount64() + timeout_ms;
+    DWORD total = 0;
+    *out_got = 0;
+    for (;;) {
+        const ULONGLONG now = GetTickCount64();
+        const DWORD left = (now < deadline)
+                           ? static_cast<DWORD>(deadline - now) : 0;
+        DWORD got = 0;
+        const read_result rr = ov_read(h->pipe, h->io_event,
+                                       static_cast<char*>(buf) + total,
+                                       len - total, left, &got, out_err);
+        total += got;
+        *out_got = total;
+        if (rr == RD_OK || rr == RD_OS_ERROR) {
+            return rr;
+        }
+        if (total == 0 && rr == RD_TIMEOUT) {
+            return RD_TIMEOUT;
+        }
+        if (got == 0 || left == 0) {
+            return RD_SHORT_READ;
+        }
+    }
+}
+
+/* Read and drop the count messages after a reply nobody will use: a
+ * late reply's. One at a time, so no batch-sized buffer is needed. */
+bool discard_frames(ecuio_j2534_sur_handle_t* h, uint32_t count,
+                    DWORD timeout_ms)
+{
+    ecuio_pt_rx_t scratch;
+    for (uint32_t i = 0; i < count; ++i) {
+        DWORD got = 0, rerr = 0;
+        if (read_exact(h, &scratch, sizeof(scratch), timeout_ms, &got,
+                       &rerr) != RD_OK) {
+            return false;
+        }
+    }
+    return true;
 }
 
 /* Read and discard the late reply to a previous timed-out request, so
@@ -424,12 +476,19 @@ bool drain_pending(ecuio_j2534_sur_handle_t* h, DWORD timeout_ms)
 {
     ecuio_sur_response_t stale = {};
     DWORD got = 0, rerr = 0;
-    const read_result rr = ov_read(h->pipe, &stale, sizeof(stale),
-                                   timeout_ms, &got, &rerr);
+    const read_result rr = read_exact(h, &stale, sizeof(stale), timeout_ms,
+                                      &got, &rerr);
     if (rr != RD_OK) {
         SUR_LOG(h, "drain_pending: stale response id=%u never arrived; "
                 "child unresponsive, later requests fail at once\n",
                 h->pending_response_id);
+        h->unresponsive = true;
+        return false;
+    }
+    if (stale.num_frames > ECUIO_SUR_MAX_FRAMES_PER_READ ||
+        !discard_frames(h, stale.num_frames, timeout_ms)) {
+        SUR_LOG(h, "drain_pending: the late reply's %u frame(s) didn't "
+                "arrive whole; child unresponsive\n", stale.num_frames);
         h->unresponsive = true;
         return false;
     }
@@ -445,8 +504,14 @@ bool drain_pending(ecuio_j2534_sur_handle_t* h, DWORD timeout_ms)
     return true;
 }
 
+/* One request and its reply. frames receives a READ's messages and
+ * has room for ECUIO_SUR_MAX_FRAMES_PER_READ; every other opcode
+ * passes none, so frames on its reply mean a skewed child. A reply
+ * that arrives only in part, or claims more frames than fit, leaves
+ * the pipe out of step, so the handle turns unresponsive. */
 bool transact(ecuio_j2534_sur_handle_t* h, const ecuio_sur_request_t& req,
-              ecuio_sur_response_t* out_resp, DWORD timeout_ms)
+              ecuio_sur_response_t* out_resp, DWORD timeout_ms,
+              ecuio_pt_rx_t* frames = nullptr)
 {
     if (h->unresponsive) {
         return false;
@@ -457,15 +522,16 @@ bool transact(ecuio_j2534_sur_handle_t* h, const ecuio_sur_request_t& req,
         }
         h->pending_response_id = 0;
     }
-    if (!ov_write(h->pipe, &req, sizeof(req), timeout_ms)) {
+    if (!ov_write(h->pipe, h->io_event, &req, sizeof(req), timeout_ms)) {
         SUR_LOG(h, "transact: ov_write failed (req_id=%u op=%u err=%lu)\n",
                 req.request_id, req.opcode, GetLastError());
         return false;
     }
     DWORD got = 0, rerr = 0;
-    const read_result rr = ov_read(h->pipe, out_resp, sizeof(*out_resp),
-                                   timeout_ms, &got, &rerr);
+    const read_result rr = read_exact(h, out_resp, sizeof(*out_resp),
+                                      timeout_ms, &got, &rerr);
     if (rr == RD_TIMEOUT) h->pending_response_id = req.request_id;
+    if (rr == RD_SHORT_READ) h->unresponsive = true;
     if (rr != RD_OK) {
         const char* kind =
             (rr == RD_SHORT_READ) ? "SHORT-READ"
@@ -474,6 +540,26 @@ bool transact(ecuio_j2534_sur_handle_t* h, const ecuio_sur_request_t& req,
         SUR_LOG(h, "transact: ov_read failed (req_id=%u op=%u %s got=%lu/%zu err=%lu)\n",
                 req.request_id, req.opcode, kind, got, sizeof(*out_resp), rerr);
         return false;
+    }
+    if (out_resp->num_frames > 0) {
+        /* Trust boundary: a skewed stale child can send garbage. */
+        if (frames == nullptr ||
+            out_resp->num_frames > ECUIO_SUR_MAX_FRAMES_PER_READ) {
+            SUR_LOG(h, "transact: %u frame(s) on the reply to op=%u "
+                    "(skew?); child unresponsive\n",
+                    out_resp->num_frames, req.opcode);
+            h->unresponsive = true;
+            return false;
+        }
+        const DWORD want = static_cast<DWORD>(
+            out_resp->num_frames * sizeof(ecuio_pt_rx_t));
+        if (read_exact(h, frames, want, timeout_ms, &got, &rerr) != RD_OK) {
+            SUR_LOG(h, "transact: the reply's frames didn't arrive whole "
+                    "(req_id=%u got=%lu/%lu err=%lu); child unresponsive\n",
+                    req.request_id, got, want, rerr);
+            h->unresponsive = true;
+            return false;
+        }
     }
     if (out_resp->request_id != req.request_id) {
         SUR_LOG(h, "transact: DESYNC — got req_id=%u want=%u\n",
@@ -624,12 +710,21 @@ ecuio_status_t ecuio_j2534_sur_open(const char* dll_path,
                                PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT |
                                    PIPE_REJECT_REMOTE_CLIENTS,
                                1, sizeof(ecuio_sur_request_t),
-                               sizeof(ecuio_sur_response_t), 0, &sec.sa);
+                               sizeof(ecuio_sur_response_t) +
+                                   ECUIO_SUR_MAX_FRAMES_PER_READ *
+                                       sizeof(ecuio_pt_rx_t),
+                               0, &sec.sa);
     if (h->pipe == INVALID_HANDLE_VALUE) {
         const DWORD err = GetLastError();
         SUR_LOG(h, "open: CreateNamedPipe failed (err=%lu)\n", err);
         ecuio_j2534_sur_close(h);
         return spawn_failed("CreateNamedPipe", err);
+    }
+    h->io_event = CreateEventA(nullptr, TRUE, FALSE, nullptr);
+    if (h->io_event == nullptr) {
+        const DWORD err = GetLastError();
+        ecuio_j2534_sur_close(h);
+        return spawn_failed("CreateEvent", err);
     }
 
     h->job = CreateJobObjectA(nullptr, nullptr);
@@ -733,12 +828,7 @@ ecuio_status_t ecuio_j2534_sur_open(const char* dll_path,
     CloseHandle(pi.hThread);
 
     OVERLAPPED ov = {};
-    ov.hEvent = CreateEventA(nullptr, TRUE, FALSE, nullptr);
-    if (ov.hEvent == nullptr) {
-        const DWORD err = GetLastError();
-        ecuio_j2534_sur_close(h);
-        return spawn_failed("CreateEvent", err);
-    }
+    ov.hEvent = h->io_event;
     BOOL conn = ConnectNamedPipe(h->pipe, &ov);
     DWORD cerr = GetLastError();
     bool connected = false;
@@ -772,7 +862,6 @@ ecuio_status_t ecuio_j2534_sur_open(const char* dll_path,
         DWORD drained = 0;
         (void)GetOverlappedResult(h->pipe, &ov, &drained, TRUE);
     }
-    CloseHandle(ov.hEvent);
     if (!connected) {
         SUR_LOG(h, "open: handshake failed — child never connected\n");
         ecuio_j2534_sur_close(h);
@@ -1123,33 +1212,22 @@ ecuio_status_t ecuio_j2534_sur_stop_msg_filter(ecuio_j2534_sur_handle_t* h,
     return ECUIO_OK;
 }
 
-ecuio_status_t ecuio_j2534_sur_read_frame(ecuio_j2534_sur_handle_t* h,
-                                          unsigned long channel,
-                                          ecuio_frame_t* out_frame,
-                                          uint32_t timeout_ms,
-                                          bool* got_frame)
+ecuio_status_t ecuio_j2534_sur_read_msg(ecuio_j2534_sur_handle_t* h,
+                                        unsigned long channel,
+                                        ecuio_pt_rx_t* out_msg,
+                                        uint32_t timeout_ms,
+                                        bool* got_msg)
 {
-    if (h == nullptr || out_frame == nullptr || got_frame == nullptr) {
+    if (h == nullptr || out_msg == nullptr || got_msg == nullptr) {
         return ECUIO_ERR_NULL_ARGUMENT;
     }
-    *got_frame = false;
+    *got_msg = false;
 
     /* Dispense from the cache first — no pipe traffic while a batch
      * is partially consumed. */
     if (h->pending_next < h->pending_count) {
-        const ecuio_sur_frame_t& s = h->pending[h->pending_next++];
-        *out_frame = ecuio_frame_t{};
-        /* channel_id is the frame ABI's bus index (core.h), not the
-         * vendor's J2534 ChannelID handle — 0, matching in-proc. */
-        out_frame->channel_id = 0;
-        out_frame->flags = (s.rx_flags & ECUIO_PT_CAN_29BIT_ID)
-                            ? ECUIO_FRAME_FLAG_EXTENDED : 0u;
-        out_frame->timestamp_us = s.timestamp;
-        uint32_t n = s.data_len;
-        if (n > sizeof(out_frame->data)) n = sizeof(out_frame->data);
-        out_frame->data_length = static_cast<uint16_t>(n);
-        memcpy(out_frame->data, s.data, n);
-        *got_frame = true;
+        *out_msg = h->pending[h->pending_next++];
+        *got_msg = true;
         return ECUIO_OK;
     }
 
@@ -1163,14 +1241,8 @@ ecuio_status_t ecuio_j2534_sur_read_frame(ecuio_j2534_sur_handle_t* h,
      * timeout_ms inside ReadMsgs before answering. Transact timing
      * out before the child does means the child is hung, not busy. */
     const DWORD tmo = timeout_ms + 500;
-    if (!transact(h, req, &resp, tmo)) {
+    if (!transact(h, req, &resp, tmo, h->pending)) {
         return ECUIO_ERR_TRANSPORT_HARD_FAILURE;    /* child dead/wedged/skewed */
-    }
-    /* Trust boundary: a skewed stale child can send garbage. */
-    if (resp.num_frames > ECUIO_SUR_MAX_FRAMES_PER_READ) {
-        SUR_LOG(h, "read: num_frames=%u exceeds capacity (skew?)\n",
-                resp.num_frames);
-        return ECUIO_ERR_TRANSPORT_HARD_FAILURE;
     }
 
     /* Deliver first, judge the status second. Per J2534-1 a read
@@ -1182,13 +1254,11 @@ ecuio_status_t ecuio_j2534_sur_read_frame(ecuio_j2534_sur_handle_t* h,
      * applied the count-trust rule (ecuio_trusted_count), so a
      * non-empty batch only arrives under NOERROR or ERR_TIMEOUT. */
     if (resp.num_frames > 0) {
-        memcpy(h->pending, resp.frames,
-               sizeof(ecuio_sur_frame_t) * resp.num_frames);
         h->pending_count = resp.num_frames;
         h->pending_next = 0;
         /* Recurse once into the cache-dispense path above. */
-        return ecuio_j2534_sur_read_frame(h, channel, out_frame,
-                                          timeout_ms, got_frame);
+        return ecuio_j2534_sur_read_msg(h, channel, out_msg, timeout_ms,
+                                        got_msg);
     }
 
     /* Empty batch: the status decides. */
@@ -1252,6 +1322,7 @@ ecuio_status_t ecuio_j2534_sur_close(ecuio_j2534_sur_handle_t* h)
         WaitForSingleObject(h->process, 1500);
     }
     if (h->pipe != INVALID_HANDLE_VALUE) CloseHandle(h->pipe);
+    if (h->io_event != nullptr) CloseHandle(h->io_event);
     if (h->process != nullptr) CloseHandle(h->process);
     if (h->job != nullptr) CloseHandle(h->job);
     if (h->log != INVALID_HANDLE_VALUE) CloseHandle(h->log);
@@ -1298,8 +1369,8 @@ ecuio_status_t ecuio_j2534_sur_start_msg_filter(ecuio_j2534_sur_handle_t*, unsig
 ecuio_status_t ecuio_j2534_sur_stop_msg_filter(ecuio_j2534_sur_handle_t*, unsigned long,
                                                   unsigned long)
 { return ECUIO_ERR_NOT_IMPLEMENTED; }
-ecuio_status_t ecuio_j2534_sur_read_frame(ecuio_j2534_sur_handle_t*, unsigned long,
-                                          ecuio_frame_t*, uint32_t, bool*)
+ecuio_status_t ecuio_j2534_sur_read_msg(ecuio_j2534_sur_handle_t*, unsigned long,
+                                        ecuio_pt_rx_t*, uint32_t, bool*)
 { return ECUIO_ERR_NOT_IMPLEMENTED; }
 ecuio_status_t ecuio_j2534_sur_inject_test_frame(ecuio_j2534_sur_handle_t*, const uint8_t*,
                                                   uint32_t, uint32_t, uint32_t)

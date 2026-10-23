@@ -15,7 +15,8 @@
 //          engine's pacing (ADR-0015): the floor, the wait, negative
 //          and pending replies, two channels at once; and the drain in
 //          passive mode. Frames carry session time, not the vendor's
-//          stamps.
+//          stamps. Replies longer than a CAN-FD frame arrive whole, up
+//          to ISO 15765-2's longest; a longer one is cut and marked.
 //          The backend setup and the fake's control page are in
 //          j2534_backend_fixture.h.
 
@@ -74,6 +75,36 @@ void delivery_cb(const ecuio_frame_t* frame, void* user_data)
         d->ids[i] = frame->arbitration_id;
         d->writes_at[i] = writes;
     }
+}
+
+/* The fake's long DID replies (0xF1A0, 0xF1A1, 0xF1A2) as the session
+ * delivered them: each one's length and flags, and whether every byte
+ * after the 62 <DID> echo holds its index (& 0xFF), the fake's fill.
+ * Read them only after the session is closed. */
+struct LongReplies {
+    std::atomic<int> count{0};
+    uint16_t length[3] = {};
+    uint32_t flags[3] = {};
+    bool filled[3] = {};
+};
+
+void long_reply_cb(const ecuio_frame_t* frame, void* user_data)
+{
+    auto* r = static_cast<LongReplies*>(user_data);
+    if (frame->data_length < 3 || frame->data[0] != 0x62 ||
+        frame->data[1] != 0xF1 || frame->data[2] < 0xA0 ||
+        frame->data[2] > 0xA2) {
+        return;
+    }
+    const int k = frame->data[2] - 0xA0;
+    bool filled = true;
+    for (uint32_t i = 3; i < frame->data_length; ++i) {
+        filled = filled && frame->data[i] == static_cast<uint8_t>(i - 3);
+    }
+    r->length[k] = frame->data_length;
+    r->flags[k] = frame->flags;
+    r->filled[k] = filled;
+    r->count.fetch_add(1);
 }
 
 /* The fake's writes over the next ms milliseconds. */
@@ -721,11 +752,11 @@ TEST_P(J2534HealthTest, ReadPastAnIndicationReturnsTheReplyBehindIt)
                                        ECUIO_PT_TX_INDICATION));
     ASSERT_TRUE(fake_control::post(page, reply, sizeof(reply), 101, 0));
 
-    ecuio_frame_t f = {};
+    ecuio_pt_rx_t f = {};
     bool got = false;
-    EXPECT_EQ(ecuio_j2534_read_frame(guard.h, ch, &f, 500, &got), ECUIO_OK);
+    EXPECT_EQ(ecuio_j2534_read_msg(guard.h, ch, &f, 500, &got), ECUIO_OK);
     ASSERT_TRUE(got) << "the read stopped at the indication";
-    ASSERT_EQ(f.data_length, sizeof(reply));
+    ASSERT_EQ(f.data_size, sizeof(reply));
     EXPECT_EQ(memcmp(f.data, reply, sizeof(reply)), 0);
     EXPECT_EQ(ecuio_j2534_disconnect_channel(guard.h, ch), ECUIO_OK);
 }
@@ -910,6 +941,60 @@ TEST_P(J2534HealthTest, PassiveModeDrainsABurstWithoutWaiting)
         std::chrono::steady_clock::now() - t0).count();
     EXPECT_LT(took, 250) << "the burst was read one frame per pass";
     EXPECT_EQ(frames.load(), 16);
+}
+
+/* A reply longer than a CAN-FD frame arrives whole on both backends:
+ * 203 bytes, past the 64 a frame once held; ISO 15765-2's longest on
+ * classic CAN, 4095; and one that fills PASSTHRU_MSG.Data, which a
+ * frame holds only the first ECUIO_FRAME_DATA_MAX bytes of, marked
+ * TRUNCATED. Through the surrogate each crosses the pipe whole. */
+TEST_P(J2534HealthTest, LongRepliesArriveWhole)
+{
+    static const ecuio_channel_decl_t kChannel[] = {{0x7E8u, 0x7E0u}};
+    static ecuio_signal_def_t defs[3] = {};
+    for (int i = 0; i < 3; ++i) {
+        defs[i].id = static_cast<uint16_t>(1 + i);
+        defs[i].kind = ECUIO_VALUE_UINT;
+        defs[i].start_byte = 3;
+        defs[i].bit_length = 8;
+        defs[i].scale = 1.0;
+        defs[i].message_id = 0x7E8u;
+        defs[i].mux_length = 3;
+        defs[i].mux_key = 0x62F1A0u + static_cast<uint32_t>(i);
+    }
+    static ecuio_signal_set_t set = {};
+    set.layout_version = ECUIO_SIGNAL_SET_LAYOUT;
+    set.count = 3;
+    set.defs = defs;
+    set.channel_count = 1;
+    set.channels = kChannel;
+    ASSERT_EQ(ecuio_profile_register("test-long-dids", &set, nullptr),
+              ECUIO_OK);
+
+    LongReplies replies;
+    ASSERT_NO_FATAL_FAILURE(start_session("?profile=test-long-dids"));
+    /* Nothing between here and close_session returns early, so the
+     * worker never writes into replies after it's gone. */
+    EXPECT_EQ(ecuio_register_frame_callback(session, long_reply_cb, &replies),
+              ECUIO_OK);
+    const auto deadline = std::chrono::steady_clock::now() +
+                          std::chrono::seconds(5);
+    while (replies.count.load() < 6 &&
+           std::chrono::steady_clock::now() < deadline) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    ASSERT_NO_FATAL_FAILURE(close_session());
+
+    ASSERT_GE(replies.count.load(), 6) << "the long replies didn't arrive";
+    EXPECT_EQ(replies.length[0], 203u);
+    EXPECT_EQ(replies.flags[0], 0u);
+    EXPECT_TRUE(replies.filled[0]);
+    EXPECT_EQ(replies.length[1], 4095u);
+    EXPECT_EQ(replies.flags[1], 0u);
+    EXPECT_TRUE(replies.filled[1]);
+    EXPECT_EQ(replies.length[2], ECUIO_FRAME_DATA_MAX);
+    EXPECT_EQ(replies.flags[2], ECUIO_FRAME_FLAG_TRUNCATED);
+    EXPECT_TRUE(replies.filled[2]);
 }
 
 INSTANTIATE_TEST_SUITE_P(Backend, J2534HealthTest,

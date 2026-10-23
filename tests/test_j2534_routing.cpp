@@ -37,16 +37,16 @@ void make_device(ecuio_j2534_device_t* dev, const char* dll_path)
               "routing-test", _TRUNCATE);
 }
 
-/* Poll until a frame arrives or the deadline passes. A single read can
- * come back empty, so don't rely on the first one. */
+/* Poll until a message arrives or the deadline passes. A single read
+ * can come back empty, so don't rely on the first one. */
 bool read_until(ecuio_j2534_handle_t* h, unsigned long channel,
-                ecuio_frame_t* out_frame, int timeout_ms)
+                ecuio_pt_rx_t* out_msg, int timeout_ms)
 {
     const auto deadline = std::chrono::steady_clock::now()
                           + std::chrono::milliseconds(timeout_ms);
     while (std::chrono::steady_clock::now() < deadline) {
         bool got = false;
-        if (ecuio_j2534_read_frame(h, channel, out_frame, 50, &got)
+        if (ecuio_j2534_read_msg(h, channel, out_msg, 50, &got)
                 == ECUIO_OK && got) {
             return true;
         }
@@ -94,11 +94,11 @@ TEST(J2534RoutingTest, X64FakeSelectsInprocBackendAndRoundTrips)
     ASSERT_EQ(ecuio_j2534_inject_test_frame(h, kPayload, 8, 7000, 0),
               ECUIO_OK);
 
-    ecuio_frame_t frame = {};
+    ecuio_pt_rx_t frame = {};
     ASSERT_TRUE(read_until(h, channel, &frame, 5000));
-    EXPECT_EQ(frame.data_length, 8);
+    EXPECT_EQ(frame.data_size, 8);
     EXPECT_EQ(memcmp(frame.data, kPayload, 8), 0);
-    EXPECT_EQ(frame.timestamp_us, uint64_t{7000});
+    EXPECT_EQ(frame.timestamp, 7000u);
 
     EXPECT_EQ(ecuio_j2534_disconnect_channel(h, channel), ECUIO_OK);
     EXPECT_EQ(ecuio_j2534_close(h), ECUIO_OK);
@@ -142,9 +142,9 @@ TEST(J2534RoutingTest, InprocWriteIoctlFilterRoundTrips)
               ECUIO_OK);
     EXPECT_EQ(num_written, 1u);
 
-    ecuio_frame_t frame = {};
+    ecuio_pt_rx_t frame = {};
     ASSERT_TRUE(read_until(h, channel, &frame, 5000));
-    EXPECT_EQ(frame.data_length, 3);
+    EXPECT_EQ(frame.data_size, 3);
     EXPECT_EQ(memcmp(frame.data, expect, 3), 0);
 
     /* IOCTL: SET then GET a config pair through the flattened form. */
@@ -215,11 +215,11 @@ TEST(J2534RoutingTest, X86FakeSelectsSurrogateBackendAndRoundTrips)
     ASSERT_EQ(ecuio_j2534_inject_test_frame(h, kPayload, 8, 7000, 0),
               ECUIO_OK);
 
-    ecuio_frame_t frame = {};
+    ecuio_pt_rx_t frame = {};
     ASSERT_TRUE(read_until(h, channel, &frame, 10000));
-    EXPECT_EQ(frame.data_length, 8);
+    EXPECT_EQ(frame.data_size, 8);
     EXPECT_EQ(memcmp(frame.data, kPayload, 8), 0);
-    EXPECT_EQ(frame.timestamp_us, uint64_t{7000});
+    EXPECT_EQ(frame.timestamp, 7000u);
 
     /* WRITE through the loader seam routes to the surrogate with no
      * caller change — backend parity in one assertion. */
@@ -231,7 +231,7 @@ TEST(J2534RoutingTest, X86FakeSelectsSurrogateBackendAndRoundTrips)
               ECUIO_OK);
     EXPECT_EQ(num_written, 1u);
     ASSERT_TRUE(read_until(h, channel, &frame, 10000));
-    EXPECT_EQ(frame.data_length, 3);
+    EXPECT_EQ(frame.data_size, 3);
     EXPECT_EQ(memcmp(frame.data, expect, 3), 0);
 
     /* And the filter pair over the surrogate too. */

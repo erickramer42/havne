@@ -609,13 +609,13 @@ ecuio_status_t ecuio_j2534_disconnect_channel(ecuio_j2534_handle_t* handle,
     return ECUIO_OK;
 }
 
-/* ---- Read frame: timeout vs empty vs hard-error distinction ----
+/* ---- Read a message: timeout vs empty vs hard-error distinction ----
  *
  *   NOERROR, no message            -> ECUIO_OK, no frame (idle)
  *   ERR_BUFFER_EMPTY (0x10)        -> ECUIO_OK, no frame (queue drained)
  *   ERR_TIMEOUT (0x09)             -> ECUIO_ERR_VEHICLE_TIMEOUT (quiet bus)
  *   any other nonzero             -> ECUIO_ERR_TRANSPORT_HARD_FAILURE
- *   num > 0 under NOERROR or      -> deliver the frame (J2534-1 pairs
+ *   num > 0 under NOERROR or      -> deliver the message (J2534-1 pairs
  *     ERR_TIMEOUT                     ERR_TIMEOUT with data)
  *   an indication                 -> skipped, and the read goes on with
  *                                     what's left of its timeout
@@ -629,25 +629,24 @@ ecuio_status_t ecuio_j2534_disconnect_channel(ecuio_j2534_handle_t* handle,
  *
  * The worker turns these codes into link health, which callers read
  * through ecuio_session_get_error_state. */
-ecuio_status_t ecuio_j2534_read_frame(ecuio_j2534_handle_t* handle,
-                                      unsigned long channel,
-                                      ecuio_frame_t* out_frame,
-                                      uint32_t timeout_ms,
-                                      bool* got_frame)
+ecuio_status_t ecuio_j2534_read_msg(ecuio_j2534_handle_t* handle,
+                                    unsigned long channel,
+                                    ecuio_pt_rx_t* out_msg,
+                                    uint32_t timeout_ms,
+                                    bool* got_msg)
 {
-    if (handle == nullptr || out_frame == nullptr || got_frame == nullptr) {
+    if (handle == nullptr || out_msg == nullptr || got_msg == nullptr) {
         return ECUIO_ERR_NULL_ARGUMENT;
     }
-    *got_frame = false;
+    *got_msg = false;
 
     if (handle->is_surrogate) {
         /* Surrogate path: the client maps pipe failure to
          * ECUIO_ERR_TRANSPORT_HARD_FAILURE and performs the same
          * timeout/empty/hard-error split on the batched OP_READ
          * status. */
-        return ecuio_j2534_sur_read_frame(handle->sur, channel,
-                                          out_frame, timeout_ms,
-                                          got_frame);
+        return ecuio_j2534_sur_read_msg(handle->sur, channel, out_msg,
+                                        timeout_ms, got_msg);
     }
 
     /* An indication doesn't end the read: read again with what's
@@ -678,7 +677,7 @@ ecuio_status_t ecuio_j2534_read_frame(ecuio_j2534_handle_t* handle,
     }
 
     if (num == 0) {
-        *got_frame = false;
+        *got_msg = false;
         if (rc == kPtStatusNoError) {
             return ECUIO_OK;    /* idle */
         }
@@ -694,17 +693,8 @@ ecuio_status_t ecuio_j2534_read_frame(ecuio_j2534_handle_t* handle,
     /* num > 0: deliver even under ERR_TIMEOUT — the trust rule above
      * let the count through, and a conforming vendor returns data and
      * that status together. */
-    *out_frame = ecuio_frame_t{};
-    out_frame->arbitration_id = 0;
-    out_frame->channel_id = 0;
-    out_frame->flags = (msg.RxStatus & ECUIO_PT_CAN_29BIT_ID)
-                        ? ECUIO_FRAME_FLAG_EXTENDED : 0u;
-    out_frame->timestamp_us = msg.Timestamp;
-    unsigned long n = msg.DataSize;
-    if (n > sizeof(out_frame->data)) n = sizeof(out_frame->data);
-    out_frame->data_length = static_cast<uint16_t>(n);
-    memcpy(out_frame->data, msg.Data, n);
-    *got_frame = true;
+    ecuio_pt_rx_from_msg(&msg, out_msg);
+    *got_msg = true;
     return ECUIO_OK;
 }
 
@@ -721,7 +711,7 @@ ecuio_status_t ecuio_j2534_write_frame(ecuio_j2534_handle_t* handle,
     if (handle == nullptr || data == nullptr) {
         return ECUIO_ERR_NULL_ARGUMENT;
     }
-    if (len == 0 || len > sizeof(((ecuio_frame_t*)0)->data)) {
+    if (len == 0 || len > ECUIO_PT_WRITE_MAX) {
         return ECUIO_ERR_INVALID_ARGUMENT;
     }
     if (out_num_written != nullptr) {
@@ -1024,7 +1014,7 @@ ecuio_status_t ecuio_j2534_inject_test_frame(ecuio_j2534_handle_t* handle,
     if (handle == nullptr || data == nullptr) {
         return ECUIO_ERR_NULL_ARGUMENT;
     }
-    if (len == 0 || len > 64) {
+    if (len == 0 || len > ECUIO_PT_WRITE_MAX) {
         return ECUIO_ERR_INVALID_ARGUMENT;
     }
     if (handle->is_surrogate) {
@@ -1099,14 +1089,14 @@ ecuio_status_t ecuio_j2534_disconnect_channel(ecuio_j2534_handle_t* /*h*/,
     return ECUIO_ERR_NOT_IMPLEMENTED;
 }
 
-ecuio_status_t ecuio_j2534_read_frame(ecuio_j2534_handle_t* /*h*/,
-                                      unsigned long /*ch*/,
-                                      ecuio_frame_t* /*f*/,
-                                      uint32_t /*t*/,
-                                      bool* got_frame)
+ecuio_status_t ecuio_j2534_read_msg(ecuio_j2534_handle_t* /*h*/,
+                                    unsigned long /*ch*/,
+                                    ecuio_pt_rx_t* /*m*/,
+                                    uint32_t /*t*/,
+                                    bool* got_msg)
 {
-    if (got_frame != nullptr) {
-        *got_frame = false;
+    if (got_msg != nullptr) {
+        *got_msg = false;
     }
     return ECUIO_ERR_NOT_IMPLEMENTED;
 }

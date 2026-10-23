@@ -51,7 +51,7 @@ threads onto the GUI thread.
 |---|---|---|
 | 1. The transport produces a frame (the mock's 50 ms tick, or a J2534 read) | `mock_transport.cpp`, `j2534_transport.cpp` | transport worker |
 | 2. The session hands it to every registered callback, from a snapshot of the callback list | `ecuio_session_dispatch_callbacks` | transport worker |
-| 3. The bridge copies the 88-byte frame (its payload is inline) and posts it, unless 1000 frames are already in flight | `QtTuneBridge::onFrame` | transport worker |
+| 3. The bridge copies the frame (4120 bytes; its payload is inline) and posts it, unless 1000 frames are already in flight | `QtTuneBridge::onFrame` | transport worker |
 | 4. The frame log gets a row (newest kept, 10k cap); the profile's signal defs decode it into a staging buffer | `handleFrameInternal` | GUI |
 | 5. Every 100 ms the staging buffer flushes into the signal model, and link health is polled | coalesce timer | GUI |
 | 6. Pages bind to the models: Log to frames, Live and Dashboard to signals | QML | GUI |

@@ -24,6 +24,7 @@
 #include <gtest/gtest.h>
 
 #include "ecuio/j2534_surrogate.h"
+#include "ecuio/surrogate_protocol.h"
 #include "ecuio/core.h"
 #include "ecuio/j2534_ptypes.h"
 
@@ -55,18 +56,18 @@ namespace {
 struct SurCapture {
     std::atomic<int> count{0};
     unsigned char payloads[8][64]{};
-    unsigned int frame_flags[8]{};
-    uint64_t timestamps[8]{};
+    uint32_t rx_status[8]{};
+    uint32_t timestamps[8]{};
 };
 
-void sur_capture_cb(const ecuio_frame_t* frame, void* user_data)
+void sur_capture(const ecuio_pt_rx_t* msg, SurCapture* cap)
 {
-    SurCapture* cap = static_cast<SurCapture*>(user_data);
     const int i = cap->count.fetch_add(1);
     if (i < 8) {
-        memcpy(cap->payloads[i], frame->data, 64);
-        cap->frame_flags[i] = static_cast<unsigned int>(frame->flags);
-        cap->timestamps[i] = frame->timestamp_us;
+        memcpy(cap->payloads[i], msg->data,
+               (msg->data_size < 64) ? msg->data_size : 64);
+        cap->rx_status[i] = msg->rx_status;
+        cap->timestamps[i] = msg->timestamp;
     }
 }
 
@@ -88,12 +89,12 @@ bool wait_until(Pred pred, int timeout_ms, int step_ms = 10)
 void drain_sur_frames(ecuio_j2534_sur_handle_t* h, SurCapture* cap)
 {
     for (;;) {
-        ecuio_frame_t f = {};
+        ecuio_pt_rx_t f = {};
         bool got = false;
-        ecuio_status_t st = ecuio_j2534_sur_read_frame(h, 0, &f, 50, &got);
+        ecuio_status_t st = ecuio_j2534_sur_read_msg(h, 0, &f, 50, &got);
         if (st != ECUIO_OK) return;
         if (!got) return;
-        sur_capture_cb(&f, cap);
+        sur_capture(&f, cap);
     }
 }
 
@@ -132,9 +133,9 @@ TEST(J2534SurrogateTest, OpenConnectInjectReadCloseCycle)
     ASSERT_EQ(ecuio_j2534_sur_connect_channel(h, 0, 0, &channel), ECUIO_OK);
 
     /* Inject THROUGH the surrogate (control pipe -> InjectFrame in the
-     * surrogate's module instance -> fake FIFO). Varied flags exercise
-     * the RxStatus -> ECUIO_FRAME_FLAG_EXTENDED translation both ways;
-     * timestamps are ours and must pass through untranslated. */
+     * surrogate's module instance -> fake FIFO). RxStatus and the
+     * timestamps are ours and must pass through untranslated; the
+     * transport maps CAN_29BIT_ID to ECUIO_FRAME_FLAG_EXTENDED. */
     const unsigned char f0[8] = {0x02, 0x01, 0x00, 0, 0, 0, 0, 0};
     const unsigned char f1[8] = {0x62, 0xF1, 0x90, 0x2A, 0, 0, 0, 0};
     const unsigned char f2[8] = {0xDE, 0xAD, 0xBE, 0xEF, 1, 2, 3, 4};
@@ -164,16 +165,16 @@ TEST(J2534SurrogateTest, OpenConnectInjectReadCloseCycle)
     ASSERT_EQ(memcmp(cap.payloads[1], f1, 8), 0);
     ASSERT_EQ(memcmp(cap.payloads[2], f2, 8), 0);
 
-    /* Flag translation through the whole IPC hop */
-    EXPECT_EQ(cap.frame_flags[0], 0u);
-    EXPECT_EQ(cap.frame_flags[1], ECUIO_FRAME_FLAG_EXTENDED);
-    EXPECT_EQ(cap.frame_flags[2], 0u);
+    /* RxStatus through the whole IPC hop */
+    EXPECT_EQ(cap.rx_status[0], 0u);
+    EXPECT_EQ(cap.rx_status[1], ECUIO_PT_CAN_29BIT_ID);
+    EXPECT_EQ(cap.rx_status[2], 0u);
 
     /* The client passes the vendor's stamp through; the transport
      * makes it session time (j2534_clock.h). */
-    EXPECT_EQ(cap.timestamps[0], uint64_t{1000});
-    EXPECT_EQ(cap.timestamps[1], uint64_t{2000});
-    EXPECT_EQ(cap.timestamps[2], uint64_t{3000});
+    EXPECT_EQ(cap.timestamps[0], 1000u);
+    EXPECT_EQ(cap.timestamps[1], 2000u);
+    EXPECT_EQ(cap.timestamps[2], 3000u);
 
     /* Teardown: SHUTDOWN, bounded wait, job-object kill. */
     EXPECT_EQ(ecuio_j2534_sur_close(h), ECUIO_OK);
@@ -210,7 +211,7 @@ TEST(J2534SurrogateTest, ReadPumpIsGatedOnConnect)
     ASSERT_TRUE(delivered);
     EXPECT_EQ(cap.count.load(), 1);
     EXPECT_EQ(memcmp(cap.payloads[0], f0, 8), 0);
-    EXPECT_EQ(cap.timestamps[0], uint64_t{500});
+    EXPECT_EQ(cap.timestamps[0], 500u);
 
     EXPECT_EQ(ecuio_j2534_sur_close(h), ECUIO_OK);
 }
@@ -723,9 +724,9 @@ TEST(J2534SurrogateTest, FrameLoggingRecordsPayloadsVerbatimWhenEnabled)
         /* The fake returns one message per read: the write's echo, then
          * the injected frame. Extra reads come back empty. */
         for (int i = 0; i < 4; ++i) {
-            ecuio_frame_t f = {};
+            ecuio_pt_rx_t f = {};
             bool got = false;
-            (void)ecuio_j2534_sur_read_frame(h, channel, &f, 20, &got);
+            (void)ecuio_j2534_sur_read_msg(h, channel, &f, 20, &got);
         }
 
         const std::string path = ecuio_j2534_sur_log_path(h);
@@ -810,9 +811,9 @@ TEST(J2534SurrogateTest, LateReadReplyIsDroppedAndLogged)
 
     const unsigned char late[8] = {0xA1, 1, 2, 3, 4, 5, 6, 7};
     ASSERT_EQ(ecuio_j2534_sur_inject_test_frame(h, late, 8, 100, 0), ECUIO_OK);
-    ecuio_frame_t f = {};
+    ecuio_pt_rx_t f = {};
     bool got = false;
-    EXPECT_EQ(ecuio_j2534_sur_read_frame(h, 0, &f, 50, &got),
+    EXPECT_EQ(ecuio_j2534_sur_read_msg(h, 0, &f, 50, &got),
               ECUIO_ERR_TRANSPORT_HARD_FAILURE);
     EXPECT_FALSE(got);
 
@@ -952,18 +953,18 @@ TEST(J2534SurrogateTest, SpecTimeoutReadDeliversPartialBatch)
         return std::chrono::duration_cast<std::chrono::milliseconds>(
             std::chrono::steady_clock::now() - t).count();
     };
-    ecuio_frame_t f1 = {};
+    ecuio_pt_rx_t f1 = {};
     bool got1 = false;
     auto t = std::chrono::steady_clock::now();
     const ecuio_status_t st1 =
-        ecuio_j2534_sur_read_frame(h, 0, &f1, 50, &got1);
+        ecuio_j2534_sur_read_msg(h, 0, &f1, 50, &got1);
     const auto held1 = ms_since(t);
 
-    ecuio_frame_t f2 = {};
+    ecuio_pt_rx_t f2 = {};
     bool got2 = false;
     t = std::chrono::steady_clock::now();
     const ecuio_status_t st2 =
-        ecuio_j2534_sur_read_frame(h, 0, &f2, 50, &got2);
+        ecuio_j2534_sur_read_msg(h, 0, &f2, 50, &got2);
     const auto held2 = ms_since(t);
 
     /* Restore BEFORE assertions (knob-leak discipline) */
@@ -974,8 +975,8 @@ TEST(J2534SurrogateTest, SpecTimeoutReadDeliversPartialBatch)
     EXPECT_EQ(st1, ECUIO_OK);
     EXPECT_TRUE(got1);
     EXPECT_EQ(memcmp(f1.data, f0, 8), 0);
-    EXPECT_EQ(f1.data_length, 8u);
-    EXPECT_EQ(f1.timestamp_us, uint64_t{4242});
+    EXPECT_EQ(f1.data_size, 8u);
+    EXPECT_EQ(f1.timestamp, 4242u);
     EXPECT_GE(held1, 45) << "the short batch came back before its timeout";
 
     /* Empty queue, nonzero timeout: quiet, not delivered, not hard. */
@@ -984,6 +985,55 @@ TEST(J2534SurrogateTest, SpecTimeoutReadDeliversPartialBatch)
     EXPECT_GE(held2, 45) << "the empty read came back before its timeout";
 
     EXPECT_EQ(ecuio_j2534_sur_close(h), ECUIO_OK);
+}
+
+/* A read's reply carries its messages whole, however long: sixteen of
+ * the fake's 0xF1A1 replies, each ISO 15765-2's longest message with
+ * its CAN ID in front (4099 bytes), come back from one OP_READ (the
+ * fake's spec mode batches; by default it returns one per read), about
+ * 66 KB across the pipe, every byte as the vendor gave it. */
+TEST(J2534SurrogateTest, ABatchOfLongMessagesCrossesThePipeWhole)
+{
+    EnvArm spec("ECUIO_FAKE_SPEC_READ_SEMANTICS", "1");
+    ecuio_j2534_sur_handle_t* h = nullptr;
+    ASSERT_EQ(ecuio_j2534_sur_open(fake_dll_path(), &h), ECUIO_OK);
+    unsigned long channel = 0;
+    ASSERT_EQ(ecuio_j2534_sur_connect_channel(h, 0, 0, &channel), ECUIO_OK);
+    const unsigned char mask[4] = {0xFF, 0xFF, 0xFF, 0xFF};
+    const unsigned char pattern[4] = {0x00, 0x00, 0x07, 0xE8};
+    unsigned long filter_id = 0;
+    ASSERT_EQ(ecuio_j2534_sur_start_msg_filter(
+                  h, channel, ECUIO_PT_PASS_FILTER, mask, 4, pattern, 4,
+                  nullptr, 0, 0, &filter_id),
+              ECUIO_OK);
+    const std::string path = ecuio_j2534_sur_log_path(h);
+
+    const unsigned char req[7] = {0x00, 0x00, 0x07, 0xE0, 0x22, 0xF1, 0xA1};
+    for (int i = 0; i < ECUIO_SUR_MAX_FRAMES_PER_READ; ++i) {
+        uint32_t written = 0;
+        ASSERT_EQ(ecuio_j2534_sur_write_frame(h, channel, req, sizeof(req),
+                                              ECUIO_PT_TX_ISO15765_FRAME_PAD,
+                                              0, &written), ECUIO_OK) << i;
+    }
+    int whole = 0;
+    for (int i = 0; i < ECUIO_SUR_MAX_FRAMES_PER_READ; ++i) {
+        ecuio_pt_rx_t m = {};
+        bool got = false;
+        ASSERT_EQ(ecuio_j2534_sur_read_msg(h, channel, &m, 50, &got),
+                  ECUIO_OK) << i;
+        ASSERT_TRUE(got) << i;
+        bool same = m.data_size == 4099u && m.data[3] == 0xE8 &&
+                    m.data[4] == 0x62 && m.data[6] == 0xA1;
+        for (uint32_t b = 7; same && b < m.data_size; ++b) {
+            same = m.data[b] == static_cast<uint8_t>(b - 7);
+        }
+        whole += same ? 1 : 0;
+    }
+    EXPECT_EQ(whole, ECUIO_SUR_MAX_FRAMES_PER_READ);
+    ASSERT_EQ(ecuio_j2534_sur_close(h), ECUIO_OK);   /* child exits: log complete */
+    const std::string log = read_session_log(path);
+    EXPECT_NE(log.find("OP_READ: status 0, frames 16"), std::string::npos)
+        << "the sixteen didn't come back in one read:\n" << log;
 }
 
 /* Count-trust rule, surrogate half: a vendor returning a hard error
@@ -1003,10 +1053,10 @@ TEST(J2534SurrogateTest, HardErrorUntouchedCountDeliversNoFrames)
     unsigned long channel = 0;
     ASSERT_EQ(ecuio_j2534_sur_connect_channel(h, 0, 0, &channel), ECUIO_OK);
 
-    ecuio_frame_t f = {};
+    ecuio_pt_rx_t f = {};
     bool got = false;
     const ecuio_status_t st =
-        ecuio_j2534_sur_read_frame(h, 0, &f, 50, &got);
+        ecuio_j2534_sur_read_msg(h, 0, &f, 50, &got);
 
     EXPECT_EQ(st, ECUIO_ERR_TRANSPORT_HARD_FAILURE);
     EXPECT_FALSE(got);

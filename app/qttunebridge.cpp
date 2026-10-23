@@ -799,8 +799,9 @@ void QtTuneBridge::onFrame(const ecuio_frame_t* frame, void* user_data)
         return;
     }
 
-    // ecuio_frame_t holds its payload INLINE (uint8_t data[64]) — this struct
-    // copy is a deep copy of the payload; no dangling pointer is possible.
+    // ecuio_frame_t holds its payload INLINE (data[ECUIO_FRAME_DATA_MAX]) —
+    // this struct copy is a deep copy of the payload; no dangling pointer
+    // is possible.
     const ecuio_frame_t copy = *frame;
     // Stamped here, as it arrives, not when the GUI thread gets to it:
     // the recording's host clock
@@ -823,7 +824,7 @@ void QtTuneBridge::handleFrameInternal(const ecuio_frame_t* frame,
     if (!m_connected.load(std::memory_order_acquire)) return;
 
     // Defensive clamp: a misbehaving transport must never make us read past
-    // the inline buffer, even if data_length exceeds the documented 0-64.
+    // the inline buffer, even if data_length exceeds ECUIO_FRAME_DATA_MAX.
     const uint16_t len = (frame->data_length <= sizeof(frame->data))
                          ? frame->data_length
                          : static_cast<uint16_t>(sizeof(frame->data));

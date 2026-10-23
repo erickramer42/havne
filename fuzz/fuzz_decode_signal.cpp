@@ -17,9 +17,9 @@ namespace {
  * def with bit_length 16 is structurally valid, so the mutations below
  * bend each dimension both ways, valid and invalid alike. */
 constexpr size_t kConfigBytes = 14;
-/* start_byte is uint16_t, so payloads past the 64-byte CAN FD frame
- * are reachable — the reassembled-message case layout 3 widened for.
- * payload_len is uint16_t too. */
+/* start_byte is uint16_t, so payloads past a CAN FD frame's 64 bytes,
+ * and past the ECUIO_FRAME_DATA_MAX a frame holds, are reachable; so
+ * is every mux_offset. payload_len is uint16_t too. */
 constexpr size_t kMaxPayload = 65535;
 
 bool same_double_bits(double a, double b)

@@ -3,6 +3,7 @@
 
 #include "ecuio/core.h"
 #include "ecuio/j2534.h"
+#include "ecuio/j2534_ptypes.h"
 
 #include <stdbool.h>
 
@@ -108,11 +109,15 @@ ecuio_status_t ecuio_j2534_connect_channel(ecuio_j2534_handle_t* handle,
                                            unsigned long* out_channel);
 ecuio_status_t ecuio_j2534_disconnect_channel(ecuio_j2534_handle_t* handle,
                                               unsigned long channel);
-ecuio_status_t ecuio_j2534_read_frame(ecuio_j2534_handle_t* handle,
-                                       unsigned long channel,
-                                       ecuio_frame_t* out_frame,
-                                       uint32_t timeout_ms,
-                                       bool* got_frame);
+/* One received message, as the vendor gave it (ecuio_pt_rx_t,
+ * j2534_ptypes.h): RxStatus, the raw 32-bit stamp, and Data whole with
+ * the 4-byte CAN ID in front. Indications are skipped on both backends;
+ * the transport makes the message a frame (pump_one). */
+ecuio_status_t ecuio_j2534_read_msg(ecuio_j2534_handle_t* handle,
+                                    unsigned long channel,
+                                    ecuio_pt_rx_t* out_msg,
+                                    uint32_t timeout_ms,
+                                    bool* got_msg);
 
 /* ---- Write / ioctl / filter vendor-call helpers ----
  *
@@ -139,7 +144,7 @@ ecuio_status_t ecuio_j2534_read_frame(ecuio_j2534_handle_t* handle,
  *                               answered past the wire's limits
  * Disconnect is best-effort and ignores the vendor's status, so it
  * returns only the first and the last. The read path keeps its own
- * mapping into link health (read_frame, above).
+ * mapping into link health (read_msg, above).
  */
 
 /* Single-message PassThruWriteMsgs relay. data_len <= 64 (frame ABI
@@ -226,7 +231,7 @@ uint32_t ecuio_j2534_dll_arch(const ecuio_j2534_handle_t* handle);
 
 /* TEST-ONLY: inject a frame into the loaded module's InjectFrame hook
  * (fake DLL), routed by backend. UNIT/HARNESS use — never in product
- * paths; real frames arrive via ecuio_j2534_read_frame. */
+ * paths; real messages arrive via ecuio_j2534_read_msg. */
 ecuio_status_t ecuio_j2534_inject_test_frame(ecuio_j2534_handle_t* handle,
                                              const uint8_t* data,
                                              uint32_t len,

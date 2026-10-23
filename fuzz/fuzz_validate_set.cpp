@@ -117,7 +117,6 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size)
     case ECUIO_VALIDATE_ERR_UNIT:
     case ECUIO_VALIDATE_ERR_DECIMALS:
     case ECUIO_VALIDATE_ERR_MUX_LENGTH:
-    case ECUIO_VALIDATE_ERR_MUX_RANGE:
     case ECUIO_VALIDATE_ERR_MUX_KEY:
     case ECUIO_VALIDATE_ERR_BIG_ENDIAN:
     case ECUIO_VALIDATE_ERR_KIND:

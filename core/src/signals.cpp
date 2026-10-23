@@ -242,16 +242,13 @@ int ecuio_validate_signal(const ecuio_signal_def_t* signal)
         return ECUIO_VALIDATE_ERR_BIT_OFFSET;
     }
 
-    /* MUX validation — the key region lives in the FRAME payload,
-     * not the signal field, so it bounds against the 64-byte frame ABI
-     * cap. decode-time checks enforce the actual payload_len. */
+    /* MUX validation. The key lives in the frame's payload, and any
+     * region a one-byte mux_offset can name fits ECUIO_FRAME_DATA_MAX,
+     * so only decode can find it past the end (payload_len). */
     if (signal->mux_length > kMuxMaxBytes) {
         return ECUIO_VALIDATE_ERR_MUX_LENGTH;
     }
     if (signal->mux_length > 0) {
-        if ((uint32_t)signal->mux_offset + signal->mux_length > 64u) {
-            return ECUIO_VALIDATE_ERR_MUX_RANGE;
-        }
         /* 0xFF, 0xFFFF or 0xFFFFFF: the shift is at most 24 bits */
         const uint32_t mux_max = (1u << (8u * signal->mux_length)) - 1u;
         if (signal->mux_key > mux_max) {

@@ -94,3 +94,15 @@ the worker has been joined.
     surrogate close waits out the client's 1.5 s polite-shutdown
     timeout (Known Issue #27).
   - The child still treats channel and device ID 0 as "none".
+
+## Appendix — whole messages and one event per handle (2026-10-23)
+
+`OP_READ`'s batch no longer clamps a message to 64 bytes: the child
+copies each vendor message whole into an `ecuio_pt_rx_t` and writes
+the batch after the response
+([ADR-0011](0011-vendor-call-relay-wire-forms.md), appendix). The
+client's read helper is `ecuio_j2534_sur_read_msg`, which returns the
+message as the vendor gave it; the transport makes it a frame. The
+client keeps one manual-reset event per handle for its overlapped
+pipe operations, created with the pipe and closed with it, in place of
+one created and closed per operation.

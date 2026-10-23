@@ -82,3 +82,18 @@ result's; the loader no longer stages surrogate replies in a buffer of
 its own. `OP_READ_VERSION` (12) relays `PassThruReadVersion`, an
 optional export like `PassThruGetLastError`
 ([ADR-0019](0019-session-info.md)).
+
+## Appendix — reads carry whole messages (2026-10-23)
+
+An `OP_READ` reply is the response followed by `num_frames` messages,
+each an `ecuio_pt_rx_t` (`j2534_ptypes.h`): the vendor's `RxStatus`,
+its stamp and its `Data` whole, the CAN ID in front, up to
+`PASSTHRU_MSG`'s 4128 bytes. The response struct itself holds no
+frames, so a reply costs the messages it carries, and every other
+opcode's reply is the bare struct. The client reads a reply exactly,
+in as many pieces as the byte-mode pipe hands over, and treats one cut
+off part way, or one carrying frames to an opcode that takes none, as
+a child out of step (the handle turns unresponsive). The write cap is
+its own constant, `ECUIO_PT_WRITE_MAX` (64), no longer the frame's
+size. The child and the in-proc loader copy a vendor's message through
+the same function, `ecuio_pt_rx_from_msg`.

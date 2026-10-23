@@ -235,18 +235,42 @@ void resolve_channels(ecuio_j2534_transport* t,
     t->chan_count = n;
 }
 
-/* Read one frame and dispatch it if it matches a channel. Returns the
- * outcome: status, whether a frame arrived, and whether it matched. An
- * unmatched delivery is kept distinct from silence (see read_outcome).
- * Every delivered frame, dispatched or dropped, advances the vendor
- * clock, so the next delta is measured from the latest stamp. */
+/* A received message as the frame the session delivers: skip bytes
+ * dropped from the front (the CAN ID, once it matched a channel), the
+ * rest cut at ECUIO_FRAME_DATA_MAX. EXTENDED comes from RxStatus, and
+ * TRUNCATED says the frame holds less than the message. */
+void frame_from_msg(const ecuio_pt_rx_t& m, uint32_t skip,
+                    uint32_t arbitration_id, uint64_t timestamp_us,
+                    ecuio_frame_t* f)
+{
+    *f = ecuio_frame_t{};
+    f->timestamp_us = timestamp_us;
+    f->arbitration_id = arbitration_id;
+    const uint32_t have = m.data_size - skip;
+    const uint32_t n = (have < ECUIO_FRAME_DATA_MAX) ? have
+                                                     : ECUIO_FRAME_DATA_MAX;
+    memcpy(f->data, m.data + skip, n);
+    f->data_length = static_cast<uint16_t>(n);
+    f->flags = (m.rx_status & ECUIO_PT_CAN_29BIT_ID)
+               ? ECUIO_FRAME_FLAG_EXTENDED : 0u;
+    if (n < have) {
+        f->flags |= ECUIO_FRAME_FLAG_TRUNCATED;
+    }
+}
+
+/* Read one message and dispatch it as a frame if it matches a channel.
+ * Returns the outcome: status, whether a message arrived, and whether
+ * it matched. An unmatched delivery is kept distinct from silence (see
+ * read_outcome). Every delivered message, dispatched or dropped,
+ * advances the vendor clock, so the next delta is measured from the
+ * latest stamp. */
 read_outcome pump_one(ecuio_j2534_transport* t, uint32_t timeout_ms)
 {
     read_outcome o;
     bool got = false;
-    ecuio_frame_t frame{};
-    o.status = ecuio_j2534_read_frame(t->handle, t->channel, &frame,
-                                      timeout_ms, &got);
+    ecuio_pt_rx_t msg;
+    o.status = ecuio_j2534_read_msg(t->handle, t->channel, &msg,
+                                    timeout_ms, &got);
     if (o.status != ECUIO_OK || !got) {
         return o;   /* no match if no frame */
     }
@@ -255,35 +279,34 @@ read_outcome pump_one(ecuio_j2534_transport* t, uint32_t timeout_ms)
     const uint64_t host_us = static_cast<uint64_t>(
         std::chrono::duration_cast<std::chrono::microseconds>(
             std::chrono::steady_clock::now() - t->epoch).count());
-    frame.timestamp_us = j2534_clock_step(
-        t->clock, static_cast<uint32_t>(frame.timestamp_us), host_us);
+    const uint64_t at_us = j2534_clock_step(t->clock, msg.timestamp,
+                                            host_us);
+    ecuio_frame_t frame;
 
     if (t->chan_count == 0) {
-        ecuio_session_dispatch_callbacks(t->session, &frame);
         /* no channels — verbatim, id 0 (raw passive) counts as matched
          * since we explicitly requested verbatim delivery. */
+        frame_from_msg(msg, 0, 0, at_us, &frame);
+        ecuio_session_dispatch_callbacks(t->session, &frame);
         o.matched = true;
         return o;
     }
 
-    if (frame.data_length >= J2534_ADDR_LEN) {
+    if (msg.data_size >= J2534_ADDR_LEN) {
         const uint32_t hdr =
-            (static_cast<uint32_t>(frame.data[0]) << 24) |
-            (static_cast<uint32_t>(frame.data[1]) << 16) |
-            (static_cast<uint32_t>(frame.data[2]) << 8) |
-             static_cast<uint32_t>(frame.data[3]);
+            (static_cast<uint32_t>(msg.data[0]) << 24) |
+            (static_cast<uint32_t>(msg.data[1]) << 16) |
+            (static_cast<uint32_t>(msg.data[2]) << 8) |
+             static_cast<uint32_t>(msg.data[3]);
         for (uint32_t i = 0; i < t->chan_count; ++i) {
             if ((hdr & J2534_CAN_ID_MAX) == t->chans[i].rx_id) {
-                frame.arbitration_id = t->chans[i].rx_id;
-                const uint16_t n = static_cast<uint16_t>(
-                    frame.data_length - J2534_ADDR_LEN);
-                memmove(frame.data, frame.data + J2534_ADDR_LEN, n);
-                frame.data_length = n;
+                frame_from_msg(msg, J2534_ADDR_LEN, t->chans[i].rx_id, at_us,
+                               &frame);
                 o.matched = true;
                 o.chan = i;
-                o.len = n;
-                memcpy(o.head, frame.data, (n < sizeof(o.head)) ? n
-                                                                : sizeof(o.head));
+                o.len = frame.data_length;
+                memcpy(o.head, frame.data,
+                       (o.len < sizeof(o.head)) ? o.len : sizeof(o.head));
                 ecuio_session_dispatch_callbacks(t->session, &frame);
                 return o;
             }

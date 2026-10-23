@@ -11,9 +11,17 @@
 #ifndef ECUIO_J2534_PTYPES_H
 #define ECUIO_J2534_PTYPES_H
 
+#include <stdint.h>
+#include <string.h>
+
 /* Largest single-protocol-message payload (ISO 15765 multiframe
  * reassembly buffer) per J2534-1 v4.04. VERIFIED. */
 #define ECUIO_PT_MSG_DATA_SIZE 4128
+
+/* The longest message either backend writes (and the tests inject),
+ * CAN ID included: ours, not J2534's. A request is 6 or 7 bytes, so
+ * this is room to spare; reads take whole messages. */
+#define ECUIO_PT_WRITE_MAX 64
 
 /* ---- Status codes (J2534-1 v04.04, VERIFIED) ----
  * The subset the core uses. TIMEOUT and BUFFER_EMPTY are not errors on
@@ -193,5 +201,32 @@ typedef struct ecuio_pt_passthru_msg {
                                     * == DataSize when none */
     unsigned char  Data[ECUIO_PT_MSG_DATA_SIZE];
 } PASSTHRU_MSG;
+
+/* One received message as both read paths hand it to the transport:
+ * the vendor's RxStatus and Timestamp untranslated, and its Data with
+ * the 4-byte CAN ID still in front, which the transport strips. It is
+ * also the wire form of OP_READ's frames (surrogate_protocol.h).
+ * data_size is the vendor's DataSize, cut at the end of
+ * PASSTHRU_MSG.Data: a longer one is already more than a frame holds,
+ * and the transport marks that frame truncated. */
+typedef struct ecuio_pt_rx {
+    uint32_t rx_status;
+    uint32_t timestamp;
+    uint32_t data_size;
+    uint8_t  data[ECUIO_PT_MSG_DATA_SIZE];
+} ecuio_pt_rx_t;
+
+/* The one copy of a vendor's message into an ecuio_pt_rx_t, for the
+ * in-proc loader and the surrogate child alike. */
+static inline void ecuio_pt_rx_from_msg(const PASSTHRU_MSG* m,
+                                        ecuio_pt_rx_t* out)
+{
+    const unsigned long n = (m->DataSize < ECUIO_PT_MSG_DATA_SIZE)
+                            ? m->DataSize : ECUIO_PT_MSG_DATA_SIZE;
+    out->rx_status = (uint32_t)m->RxStatus;
+    out->timestamp = (uint32_t)m->Timestamp;
+    out->data_size = (uint32_t)n;
+    memcpy(out->data, m->Data, n);
+}
 
 #endif /* ECUIO_J2534_PTYPES_H */

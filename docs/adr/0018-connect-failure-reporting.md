@@ -141,3 +141,14 @@ failed. These calls set no `ecuio_last_error_detail`, which stays the
 connect path's. The surrogate client's functions are in a public
 header, so a direct caller of them sees the new codes; the loader and
 the tests are the only ones.
+
+## Appendix — the two public functions (2026-10-23)
+
+`ecuio_profile_lookup` answers an unknown name with
+`ECUIO_ERR_UNKNOWN_PROFILE`, the code `ecuio_session_create` gives
+that `?profile=`, in place of `ECUIO_ERR_NO_TRANSPORT`; create passes
+lookup's code through. `ecuio_session_send` answers a `data_length`
+past the frame's `data` with `ECUIO_ERR_INVALID_ARGUMENT` in place of
+`ECUIO_ERR_NULL_ARGUMENT`; any frame that fits still gets
+`ECUIO_ERR_NOT_IMPLEMENTED`, since send isn't built. The bridge
+reaches neither.

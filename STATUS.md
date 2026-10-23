@@ -26,8 +26,9 @@ says what it runs on ([ADR-0019](docs/adr/0019-session-info.md)),
 J2534 frames carry session time, the QML pages and the signal decoder
 have tests of their own (Qt Quick Test, libFuzzer), requests follow
 the ECU's replies instead of a fixed slot
-([ADR-0015](docs/adr/0015-request-engine.md)), and the probe drops
-what each ECU says it doesn't support. Next is the plan in
+([ADR-0015](docs/adr/0015-request-engine.md)), the probe drops
+what each ECU says it doesn't support, and a frame carries a whole
+ISO 15765 message. Next is the plan in
 [After v0.3.0](#after-v030).
 
 - **Works:**
@@ -148,9 +149,9 @@ what each ECU says it doesn't support. Next is the plan in
     run sheets are
     [bench-runsheet.md](docs/bench-sessions/bench-runsheet.md) and
     [vehicle-runsheet.md](docs/bench-sessions/vehicle-runsheet.md).
-  - **Tests:** 326 ctest cases (Windows, Visual Studio 18 build
+  - **Tests:** 331 ctest cases (Windows, Visual Studio 18 build
     tools, both trees rebuilt, 2026-10-23), the QML suites
-    among them, plus the cross-arch subset (67/67). All passed except
+    among them, plus the cross-arch subset (69/69). All passed except
     the env-gated cross-arch skip. Every first-party target builds with
     compiler warnings on, at 0 on MSVC. CI was green on all nine jobs on
     PR #17 (`ce8284f`, merged as `1145d11`), the simulator smoke
@@ -447,16 +448,6 @@ an issue is resolved it is removed, and its number is not reused.
     run), or Qt's arm64 simulator libraries if Qt ships them. Apple is
     also winding down Rosetta, so the first option has its own end
     date.
-36. **J2534 messages are cut to 64 bytes.** Both read paths copy at
-    most 64 bytes of a message's `Data`, the 4-byte CAN ID included,
-    into the frame's inline `data[64]`. A reassembled ISO 15765 reply
-    therefore keeps at most 60 payload bytes, and nothing marks it as
-    cut. Service 01 replies fit, but Service 0x22 and Service 09
-    replies can be longer. The decoder already takes 16-bit lengths
-    and start bytes ([ADR-0016](docs/adr/0016-signal-definition-layout.md)),
-    so the fix is the frame's storage and both read paths (the
-    surrogate's `ECUIO_SUR_MSG_MAX` too), not the def. Writes over 64
-    bytes are refused; no request needs more yet.
 
 ## Roadmap
 
@@ -597,7 +588,7 @@ in the backlog.
   recordings. These responses are multi-frame and textual: the adapter
   reassembles ISO-TP, but the signal model decodes numbers only
   (`ECUIO_VALUE_TEXT` is reserved and refused), so this needs a string
-  path. Long replies are also cut at 60 payload bytes (#36).
+  path.
 - **A first manufacturer signal set (L).** One make's enhanced
   Service 22 data, such as transmission temperature, which the
   standard set doesn't include. Choose the make from the target

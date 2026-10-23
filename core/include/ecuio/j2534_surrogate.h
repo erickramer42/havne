@@ -7,6 +7,7 @@
 #define ECUIO_J2534_SURROGATE_H
 
 #include "ecuio/core.h"
+#include "ecuio/j2534_ptypes.h"
 
 #include <stdbool.h>
 
@@ -103,17 +104,18 @@ ecuio_status_t ecuio_j2534_sur_stop_msg_filter(ecuio_j2534_sur_handle_t* handle,
                                                   unsigned long channel,
                                                   unsigned long filter_id);
 
-/* Return one frame: from the cached batch if one is pending, otherwise
- * via one OP_READ (up to 16 frames). Same contract as the in-proc read
- * path: ERR_TIMEOUT -> ECUIO_ERR_VEHICLE_TIMEOUT, ERR_BUFFER_EMPTY -> no
- * frame, other statuses or a pipe failure -> ECUIO_ERR_TRANSPORT_HARD_FAILURE;
- * arb id and channel id 0, EXTENDED from RxStatus, vendor timestamp
- * passed through, payload clamped to 64 bytes. */
-ecuio_status_t ecuio_j2534_sur_read_frame(ecuio_j2534_sur_handle_t* handle,
-                                          unsigned long channel,
-                                          ecuio_frame_t* out_frame,
-                                          uint32_t timeout_ms,
-                                          bool* got_frame);
+/* Return one received message: from the cached batch if one is
+ * pending, otherwise via one OP_READ (up to 16 messages). Same contract
+ * as the in-proc read path: ERR_TIMEOUT -> ECUIO_ERR_VEHICLE_TIMEOUT,
+ * ERR_BUFFER_EMPTY -> no message, other statuses or a pipe failure ->
+ * ECUIO_ERR_TRANSPORT_HARD_FAILURE; the message as the vendor gave it
+ * (ecuio_pt_rx_t, j2534_ptypes.h): RxStatus, the raw timestamp, and
+ * Data whole with the CAN ID in front. */
+ecuio_status_t ecuio_j2534_sur_read_msg(ecuio_j2534_sur_handle_t* handle,
+                                        unsigned long channel,
+                                        ecuio_pt_rx_t* out_msg,
+                                        uint32_t timeout_ms,
+                                        bool* got_msg);
 
 /* TEST-ONLY: forward an injected frame through the surrogate into the
  * loaded module's InjectFrame export (fake DLL). UNIT/HARNESS use. */

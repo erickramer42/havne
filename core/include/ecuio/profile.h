@@ -69,8 +69,10 @@ ecuio_status_t ecuio_profile_register(const char* name,
 ecuio_status_t ecuio_profile_unregister(const char* name);
 
 /* Lookup. Returns ECUIO_OK and stores the set (POSSIBLY NULL for "raw")
- * when the name is registered; ECUIO_ERR_NO_TRANSPORT when it isn't.
- * *out_set is untouched on failure. */
+ * when the name is registered; ECUIO_ERR_UNKNOWN_PROFILE when it isn't,
+ * the code ecuio_session_create returns for that ?profile=;
+ * ECUIO_ERR_NULL_ARGUMENT for a NULL argument. *out_set is untouched on
+ * failure. */
 ecuio_status_t ecuio_profile_lookup(const char* name,
                                     const ecuio_signal_set_t** out_set);
 

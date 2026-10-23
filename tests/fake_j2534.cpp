@@ -16,8 +16,11 @@
 //        ECU the request is addressed to answers: [reply ID BE][41][PID]
 //        [canned] from g_obd2_canned (SetFakeObd2CannedValueExternal
 //        overrides per-test) or its supported-PID bitmap, or
-//        [ID][62][DID][value] for the one DID it knows, 0x1E1C; any
-//        other PID or DID gets a negative reply, 7F 01 12 (what the
+//        [ID][62][DID][value] for the DIDs it knows: 0x1E1C (2 bytes),
+//        and three long replies, 0xF1A0 (200 bytes), 0xF1A1 (4092, so
+//        the reply is ISO 15765-2's longest, 4095 bytes) and 0xF1A2
+//        (4121, filling PASSTHRU_MSG.Data: longer than a frame holds).
+//        Any other PID or DID gets a negative reply, 7F 01 12 (what the
 //        first vehicle answered for PID 0x5C) or 7F 22 31. The reply ID
 //        is the request's plus 8 (0x7E0 ->
 //        0x7E8; the functional 0x7DF is answered from 0x7E8) or, 29-bit,
@@ -107,7 +110,7 @@
 namespace fake_j2534 {
 
 struct FrameSlot {
-    unsigned char data[64];
+    unsigned char data[ECUIO_PT_MSG_DATA_SIZE];
     unsigned long size;
     unsigned long timestamp_us;
     unsigned long rx_status;   /* replayed verbatim into PASSTHRU_MSG.RxStatus */
@@ -431,9 +434,31 @@ void reply_header(const unsigned char* req, unsigned char* out)
     out[3] = static_cast<unsigned char>(rx);
 }
 
-/* The one Service 0x22 DID the fake's ECU knows, ADR-0015's example. */
+/* The Service 0x22 DIDs the fake's ECU knows: ADR-0015's example, and
+ * three whose replies are long, filled with their byte index (& 0xFF).
+ * A reply is [ID][62][DID][data], so 0xF1A1's 4092 bytes make the
+ * longest ISO 15765-2 message on classic CAN, 4095, and 0xF1A2's fill
+ * PASSTHRU_MSG.Data, past what a frame holds. */
 constexpr uint16_t kFakeDid = 0x1E1C;
 constexpr unsigned char kFakeDidValue[2] = {0x12, 0x34};
+constexpr uint16_t kFakeLongDid = 0xF1A0;
+constexpr unsigned long kFakeLongDidLen = 200;
+constexpr uint16_t kFakeMaxDid = 0xF1A1;
+constexpr unsigned long kFakeMaxDidLen = 4092;
+constexpr uint16_t kFakeOverlongDid = 0xF1A2;
+constexpr unsigned long kFakeOverlongDidLen = ECUIO_PT_MSG_DATA_SIZE - 7;
+
+/* A DID's data length, or 0 for one the fake doesn't know. */
+unsigned long did_length(uint16_t did)
+{
+    switch (did) {
+        case kFakeDid:         return sizeof(kFakeDidValue);
+        case kFakeLongDid:     return kFakeLongDidLen;
+        case kFakeMaxDid:      return kFakeMaxDidLen;
+        case kFakeOverlongDid: return kFakeOverlongDidLen;
+        default:               return 0;
+    }
+}
 
 /* The Service 01 PIDs the fake's ECU supports: its canned ones, and the
  * bitmaps that lead to them. */
@@ -474,7 +499,8 @@ void build_negative(const unsigned char* req, unsigned char code,
     *resp_len = 7;
 }
 
-/* Build an OBD-II Service 01 or 0x22 response.
+/* Build an OBD-II Service 01 or 0x22 response into resp, which holds
+ * ECUIO_PT_MSG_DATA_SIZE bytes.
  * Caller (WriteMsgs, mutex HELD) has verified: [tx_id BE][0x01][PID]
  * (6 bytes) or [tx_id BE][0x22][DID] (7 bytes), and an active filter.
  * Output: [reply ID BE][0x41][PID][canned data] or
@@ -505,16 +531,20 @@ bool build_obd2_response(const unsigned char* req, unsigned long req_len,
     };
     if (req[4] == 0x22) {
         const uint16_t did = static_cast<uint16_t>((req[5] << 8) | req[6]);
-        if (did != kFakeDid) {
+        const unsigned long n = did_length(did);
+        if (n == 0) {
             return refuse(0x31);   /* request out of range */
         }
         reply_header(req, resp);
         resp[4] = 0x62;
         resp[5] = req[5];
         resp[6] = req[6];
-        resp[7] = kFakeDidValue[0];
-        resp[8] = kFakeDidValue[1];
-        *resp_len = 9;
+        for (unsigned long i = 0; i < n; ++i) {
+            resp[7 + i] = (did == kFakeDid)
+                          ? kFakeDidValue[i]
+                          : static_cast<unsigned char>(i & 0xFF);
+        }
+        *resp_len = 7 + n;
         return true;
     }
     const uint8_t pid = req[5];
@@ -974,8 +1004,8 @@ long __stdcall PassThruWriteMsgs(unsigned long ChannelID,
     }
 
     unsigned long n = pMsg->DataSize;
-    if (n > 64) {
-        return STATUS_FAILED;   /* beyond the frame ABI cap — not shaped */
+    if (n > ECUIO_PT_WRITE_MAX) {
+        return STATUS_FAILED;   /* beyond the transport's write limit */
     }
 
     const bool vx = fake_j2534::knob_on("ECUIO_FAKE_VX");
@@ -1042,7 +1072,7 @@ long __stdcall PassThruWriteMsgs(unsigned long ChannelID,
      * Everything else keeps the deterministic echo semantics. */
     if (n > 0) {
         const unsigned char* req = pMsg->Data;
-        unsigned char echo[64];
+        unsigned char echo[ECUIO_PT_MSG_DATA_SIZE];
         unsigned long echo_len;
 
         const bool has_filter = (fake_j2534::g_last_filter.filter_id != 0)

@@ -1555,6 +1555,32 @@ TEST(J2534StreamTest, BackoffStepDoublesToCapWithoutOvershoot)
 /* The vendor clock (j2534_clock.h): the first frame takes the host's
  * time; later ones the vendor's delta, even when the host saw them
  * arrive together or further apart. */
+/* Both read paths copy a vendor's message through ecuio_pt_rx_from_msg:
+ * RxStatus and the stamp as they came, and Data up to its DataSize,
+ * never past the end of PASSTHRU_MSG.Data however large a size a
+ * vendor reports. */
+TEST(J2534StreamTest, ReceivedMessageCopyStopsAtTheEndOfData)
+{
+    static PASSTHRU_MSG m = {};
+    static ecuio_pt_rx_t rx = {};
+    for (unsigned long i = 0; i < ECUIO_PT_MSG_DATA_SIZE; ++i) {
+        m.Data[i] = static_cast<unsigned char>(i * 7);
+    }
+    m.RxStatus = ECUIO_PT_CAN_29BIT_ID;
+    m.Timestamp = 0xFFFFFFF0ul;
+    m.DataSize = 7;
+    ecuio_pt_rx_from_msg(&m, &rx);
+    EXPECT_EQ(rx.rx_status, ECUIO_PT_CAN_29BIT_ID);
+    EXPECT_EQ(rx.timestamp, 0xFFFFFFF0u);
+    EXPECT_EQ(rx.data_size, 7u);
+    EXPECT_EQ(memcmp(rx.data, m.Data, 7), 0);
+
+    m.DataSize = ECUIO_PT_MSG_DATA_SIZE + 1000;
+    ecuio_pt_rx_from_msg(&m, &rx);
+    EXPECT_EQ(rx.data_size, static_cast<uint32_t>(ECUIO_PT_MSG_DATA_SIZE));
+    EXPECT_EQ(memcmp(rx.data, m.Data, ECUIO_PT_MSG_DATA_SIZE), 0);
+}
+
 TEST(J2534StreamTest, VendorClockAnchorsAtTheHostAndKeepsVendorDeltas)
 {
     j2534_clock c;

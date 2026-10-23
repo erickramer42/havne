@@ -411,6 +411,21 @@ TEST(CoreTest, MockTransportDeliversFrames) {
     ecuio_session_destroy(session);
 }
 
+/* Send isn't built yet. A frame whose data_length claims more than
+ * data[] holds is the caller's error, INVALID_ARGUMENT; any frame that
+ * fits says the call isn't implemented. */
+TEST(CoreTest, SessionSendRefusesALengthPastTheFramesData) {
+    ecuio_session_t* session = nullptr;
+    ASSERT_EQ(ecuio_session_create("mock://demo", &session), ECUIO_OK);
+    ecuio_frame_t frame = {};
+    frame.data_length = static_cast<uint16_t>(ECUIO_FRAME_DATA_MAX + 1);
+    EXPECT_EQ(ecuio_session_send(session, &frame), ECUIO_ERR_INVALID_ARGUMENT);
+    frame.data_length = static_cast<uint16_t>(ECUIO_FRAME_DATA_MAX);
+    EXPECT_EQ(ecuio_session_send(session, &frame), ECUIO_ERR_NOT_IMPLEMENTED);
+    EXPECT_EQ(ecuio_session_send(session, nullptr), ECUIO_ERR_NULL_ARGUMENT);
+    ecuio_session_destroy(session);
+}
+
 TEST(CoreTest, UnknownTransportUriRejected) {
     ecuio_session_t* session = nullptr;
     EXPECT_EQ(ecuio_session_create("j2534://dev0", &session),
@@ -976,7 +991,7 @@ TEST(CoreTest, ProfileLookupUnknownNameFailsWithoutTouchingOut) {
     ecuio_signal_set_t sentinel = {};
     const ecuio_signal_set_t* set = &sentinel;
     EXPECT_EQ(ecuio_profile_lookup("no-such-profile", &set),
-              ECUIO_ERR_NO_TRANSPORT);
+              ECUIO_ERR_UNKNOWN_PROFILE);
     EXPECT_EQ(set, &sentinel);   /* untouched on failure — caller may
                                     rely on its own initialization */
 }
@@ -1018,7 +1033,7 @@ TEST(CoreTest, ProfileRegisterValidatesNameAndSet) {
     const ecuio_signal_set_t* got = nullptr;
     EXPECT_EQ(ecuio_profile_register("test-bad-set", &bad, nullptr),
               ECUIO_ERR_INVALID_ARGUMENT);
-    EXPECT_EQ(ecuio_profile_lookup("test-bad-set", &got), ECUIO_ERR_NO_TRANSPORT);
+    EXPECT_EQ(ecuio_profile_lookup("test-bad-set", &got), ECUIO_ERR_UNKNOWN_PROFILE);
 
     /* A set written for an earlier layout carries 1 or 2 where
      * layout_version sits, so it's refused instead of decoding garbage. */
@@ -1026,7 +1041,7 @@ TEST(CoreTest, ProfileRegisterValidatesNameAndSet) {
     old_layout.layout_version = 2;
     EXPECT_EQ(ecuio_profile_register("test-old-layout", &old_layout, nullptr),
               ECUIO_ERR_INVALID_ARGUMENT);
-    EXPECT_EQ(ecuio_profile_lookup("test-old-layout", &got), ECUIO_ERR_NO_TRANSPORT);
+    EXPECT_EQ(ecuio_profile_lookup("test-old-layout", &got), ECUIO_ERR_UNKNOWN_PROFILE);
 
     for (const char* name : {"", "Upper", "has space", "a&b", "a=b", "q?x"}) {
         EXPECT_EQ(ecuio_profile_register(name, nullptr, nullptr),
@@ -1122,7 +1137,7 @@ TEST(CoreTest, ProfileRegisterRefusesMoreRequestsThanTheEngineHolds) {
     EXPECT_EQ(v.reserved[0], 0u);
     EXPECT_EQ(v.reserved[1], 0u);
     const ecuio_signal_set_t* got = nullptr;
-    EXPECT_EQ(ecuio_profile_lookup("test-requests", &got), ECUIO_ERR_NO_TRANSPORT);
+    EXPECT_EQ(ecuio_profile_lookup("test-requests", &got), ECUIO_ERR_UNKNOWN_PROFILE);
 }
 
 TEST(CoreTest, ProfileBuiltInsCannotBeReplacedOrRemoved) {

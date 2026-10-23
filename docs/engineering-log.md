@@ -86,7 +86,8 @@ Dates are commit dates.
 | 2026-10-23 | The J2534 helpers below the connect path take ADR-0018's codes on both backends: a vendor's refusal, a surrogate that stopped answering and a bad shape no longer read alike ([ADR-0018](adr/0018-connect-failure-reporting.md), appendix) | `76189e7` |
 | 2026-10-23 | `ecuio_init` and `ecuio_shutdown` are documented as the optional no-ops they are, and the UI's init-failure paths, which could never run, are gone | `cf03331` |
 | 2026-10-23 | The request engine ([ADR-0015](adr/0015-request-engine.md), accepted): requests derive from the defs, Service 01 and 0x22, and follow the replies, one out per channel, with a 100 ms wait and a 20 ms floor; one worker loop for the rotation, `?poll=` and passive receive, each draining what has arrived; registration caps a set at 128 requests; a frame for no channel counts as a quiet read, and a hard failure steps down to requests failing when reads recover (Known Issue #11 closed) | `91e2daa` |
-| 2026-10-23 | The PID-support probe ([ADR-0015](adr/0015-request-engine.md) §4, appendix): each ECU's supported-PID bitmaps before its rotation, requests dropped only on an explicit answer, the walk resumed when the link recovers, `?probe=0`; the activity log names each ECU and what it supports (`ecuio_session_get_channel_support`); create splits the URI query once and refuses unknown keys for every scheme | — |
+| 2026-10-23 | The PID-support probe ([ADR-0015](adr/0015-request-engine.md) §4, appendix): each ECU's supported-PID bitmaps before its rotation, requests dropped only on an explicit answer, the walk resumed when the link recovers, `?probe=0`; the activity log names each ECU and what it supports (`ecuio_session_get_channel_support`); create splits the URI query once and refuses unknown keys for every scheme | `fdb12e1`, `7d297b4` |
+| 2026-10-23 | A frame carries a whole ISO 15765 message: `ecuio_frame_t` holds 4 KB, both J2534 read paths hand the transport the vendor's message untouched through one copy, a read's reply crosses the surrogate pipe at the length it needs, and `ecuio_profile_lookup` and `ecuio_session_send` take ADR-0018's codes ([ADR-0006](adr/0006-frame-abi-v0.3.md), appendix) | — |
 
 ## Lessons learned
 
@@ -737,3 +738,14 @@ shape. Under the probe that bitmap says the fake's ECU supports no PIDs
 at all, and every request in every `obd2` test would have been
 dropped. The fake's bitmaps now list its canned PIDs, worked out by the
 J1979 layout, and a test compares them with bytes written out by hand.
+
+**2026-10-23 — whole messages:** **a limit written in three places is
+three limits.** The 64-byte write cap lived in the in-proc loader as
+the frame's payload size, in the surrogate client as a wire constant,
+and in the fake as a literal. Growing the frame moved the first, and
+the first full run caught it only because
+`HelperFailuresHaveOneCodePerCause` makes the same refusal on both
+backends: in-proc took a 65-byte write that the surrogate refused. The
+cap is now one named constant, `ECUIO_PT_WRITE_MAX`, read by all
+three. A parity test earns its keep on exactly this drift, which each
+path's own tests can't see.

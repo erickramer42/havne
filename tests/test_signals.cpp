@@ -616,8 +616,9 @@ TEST(SignalsTest, ValidatorRequiresByteAlignedBigEndian)
 
 TEST(SignalsTest, ValidatorBoundsMuxKeysToThreeBytes)
 {
-    /* 1 to 3 key bytes, the key region inside the 64-byte frame payload,
-     * and a key no wider than its length. */
+    /* 1 to 3 key bytes, and a key no wider than its length. The key
+     * may start at any byte a mux_offset names: each fits the frame's
+     * payload, and decode finds a key past a shorter one. */
     const struct { uint8_t length; uint32_t widest; } kLengths[] = {
         {1, 0xFFu}, {2, 0xFFFFu}, {3, 0xFFFFFFu}};
     for (const auto& l : kLengths) {
@@ -628,10 +629,8 @@ TEST(SignalsTest, ValidatorBoundsMuxKeysToThreeBytes)
         d.mux_key = l.widest + 1u;
         EXPECT_EQ(ecuio_validate_signal(&d), ECUIO_VALIDATE_ERR_MUX_KEY) << int(l.length);
         d.mux_key = 0;
-        d.mux_offset = static_cast<uint8_t>(64 - l.length);
+        d.mux_offset = 255;
         EXPECT_EQ(ecuio_validate_signal(&d), ECUIO_VALIDATE_OK) << int(l.length);
-        d.mux_offset = static_cast<uint8_t>(65 - l.length);
-        EXPECT_EQ(ecuio_validate_signal(&d), ECUIO_VALIDATE_ERR_MUX_RANGE) << int(l.length);
     }
     for (int length : {4, 5, 255}) {
         ecuio_signal_def_t d = four_byte_def(ECUIO_VALUE_UINT);

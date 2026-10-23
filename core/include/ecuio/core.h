@@ -23,10 +23,19 @@ typedef struct ecuio_session ecuio_session_t;
 #define ECUIO_FRAME_FLAG_BITRATE_SWITCH   0x00000008u /* FD bitrate switch (BRS) */
 #define ECUIO_FRAME_FLAG_ERROR            0x00000010u /* bus/controller error report */
 #define ECUIO_FRAME_FLAG_TX_ECHO          0x00000020u /* echo of our own transmit */
+#define ECUIO_FRAME_FLAG_TRUNCATED        0x00000040u /* the message was longer than
+                                                         data[] holds; data_length
+                                                         bytes of it are here */
+
+/* The most payload a frame carries: room for a whole ISO 15765-2 message
+ * on classic CAN (4095 bytes, its 12-bit length), so a reassembled
+ * reply arrives whole. */
+#define ECUIO_FRAME_DATA_MAX 4096u
 
 /* Frame structure — POD only, no pointers. Layout is pinned by the
- * assertions below: 88 bytes, no hidden padding on any supported
- * platform (ADR-0006).
+ * assertions below: 4120 bytes, no hidden padding on any supported
+ * platform (ADR-0006, appendix of 2026-10-23). The payload is inline,
+ * so copying a frame copies all of it.
  */
 typedef struct ecuio_frame {
     uint64_t timestamp_us;    /* Microseconds since the session's transport
@@ -38,8 +47,10 @@ typedef struct ecuio_frame {
                                  0x1FFFFFFF when FLAG_EXTENDED set */
     uint16_t channel_id;      /* Bus/channel index only — never multiplexes
                                  an arbitration ID */
-    uint16_t data_length;     /* Bytes used in data[]: 0..64 */
-    uint8_t  data[64];        /* Classic CAN (8) .. CAN-FD (64) payload */
+    uint16_t data_length;     /* Bytes used in data[]: 0..ECUIO_FRAME_DATA_MAX */
+    uint8_t  data[ECUIO_FRAME_DATA_MAX];   /* a CAN frame's 8 or CAN-FD's 64
+                                              bytes, or a whole ISO 15765
+                                              message, CAN ID stripped */
     uint32_t flags;           /* ECUIO_FRAME_FLAG_* bitmask */
     uint32_t reserved;        /* Producers MUST leave zero; ABI growth space */
 } ecuio_frame_t;
@@ -47,13 +58,13 @@ typedef struct ecuio_frame {
 /* Compile-time ABI pinning. C++ and C11 paths; C99 falls back to the
  * negative-array-size idiom in tests/test_c_abi.c. */
 #if defined(__cplusplus)
-static_assert(sizeof(ecuio_frame_t) == 88, "ecuio_frame_t size is ABI — bump version if this moves");
+static_assert(sizeof(ecuio_frame_t) == 4120, "ecuio_frame_t size is ABI — bump version if this moves");
 static_assert(offsetof(ecuio_frame_t, data) == 16, "frame data offset is ABI");
-static_assert(offsetof(ecuio_frame_t, flags) == 80, "frame flags offset is ABI");
+static_assert(offsetof(ecuio_frame_t, flags) == 4112, "frame flags offset is ABI");
 #elif defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
-_Static_assert(sizeof(ecuio_frame_t) == 88, "ecuio_frame_t size is ABI");
+_Static_assert(sizeof(ecuio_frame_t) == 4120, "ecuio_frame_t size is ABI");
 _Static_assert(offsetof(ecuio_frame_t, data) == 16, "frame data offset is ABI");
-_Static_assert(offsetof(ecuio_frame_t, flags) == 80, "frame flags offset is ABI");
+_Static_assert(offsetof(ecuio_frame_t, flags) == 4112, "frame flags offset is ABI");
 #endif
 
 /* Callback function signature - called from transport thread */
@@ -161,7 +172,10 @@ ecuio_status_t ecuio_session_start(ecuio_session_t* session);
  * next create or start on the same thread. Never NULL. */
 const char* ecuio_last_error_detail(void);
 
-/* Send/receive - synchronous API */
+/* Send/receive - synchronous API. Neither is built yet: send returns
+ * ECUIO_ERR_INVALID_ARGUMENT for a data_length past
+ * ECUIO_FRAME_DATA_MAX and ECUIO_ERR_NOT_IMPLEMENTED for any frame that
+ * fits; receive returns ECUIO_ERR_NOT_IMPLEMENTED. */
 ecuio_status_t ecuio_session_send(
     ecuio_session_t* session,
     const ecuio_frame_t* frame

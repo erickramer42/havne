@@ -305,3 +305,12 @@ table catches that.
   limit belongs to the frame and the read path, not the def, and its
   fix is additive. The 16-bit lengths let the decoder read a longer
   buffer once one is delivered.
+
+## Appendix — the read path keeps whole messages (2026-10-23)
+
+The J2534 read paths deliver a message whole, up to the frame's
+`ECUIO_FRAME_DATA_MAX` ([ADR-0006](0006-frame-abi-v0.3.md), appendix),
+so the 16-bit lengths above now read whole replies. Validator code 10,
+a mux key past a 64-byte payload, is retired and never reused: every
+key a one-byte `mux_offset` can place fits the frame, and decode still
+refuses one past the payload it's given.

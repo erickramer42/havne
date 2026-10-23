@@ -308,11 +308,14 @@ ecuio_status_t ecuio_session_create(
     }
 
     const ecuio_signal_set_t* profile_set = nullptr;
-    if (ecuio_profile_lookup(chosen, &profile_set) != ECUIO_OK) {
+    const ecuio_status_t found = ecuio_profile_lookup(chosen, &profile_set);
+    if (found != ECUIO_OK) {
         delete *out_session;
         *out_session = nullptr;
-        ecuio_detail_set("no profile is named '%s'", chosen);
-        return ECUIO_ERR_UNKNOWN_PROFILE;
+        if (found == ECUIO_ERR_UNKNOWN_PROFILE) {
+            ecuio_detail_set("no profile is named '%s'", chosen);
+        }
+        return found;
     }
 
     /* Set before attach: the j2534 transport derives its requests
@@ -410,7 +413,7 @@ ecuio_status_t ecuio_session_send(
         return ECUIO_ERR_SESSION_CLOSED;
     }
     if (frame->data_length > sizeof(frame->data)) {
-        return ECUIO_ERR_NULL_ARGUMENT;
+        return ECUIO_ERR_INVALID_ARGUMENT;
     }
     return ECUIO_ERR_NOT_IMPLEMENTED;
 }
