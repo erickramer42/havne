@@ -10,10 +10,11 @@
 #               the Win32 surrogate next to qttune.exe.
 #   build       the build tree
 #   ctest       the suite, or the -R subset (an -R matching nothing fails)
-#   cross-arch  J2534Routing|J2534Surrogate against the x86 surrogate and
-#               fake (Windows, needs build-win32; skipped with -R). Fails
-#               if the env-gated routing case skips, since that means the
-#               paths were wrong.
+#   cross-arch  J2534Routing, J2534Surrogate and J2534HealthTest's
+#               surrogate cases against the x86 surrogate and fake
+#               (Windows, needs build-win32; skipped with -R). Fails if the
+#               env-gated routing case skips, since that means the paths
+#               were wrong.
 #
 # The trees must already be configured (docs/development.md).
 set -u
@@ -104,7 +105,7 @@ if [ "$cross" = 1 ] && [ "$have_win32" = 1 ] && [ -z "$regex" ]; then
     ECUIO_FAKE_DLL="$(cygpath -m "$PWD")/build-win32/tests/Release/fake_j2534.dll"
     export ECUIO_SURROGATE_EXE ECUIO_FAKE_DLL
     run cross-arch ctest --test-dir build -C Release --output-on-failure \
-        --no-tests=error -R "J2534Routing|J2534Surrogate"
+        --no-tests=error -R "J2534Routing|J2534Surrogate|J2534HealthTest\..*/Surrogate"
     [ "$rc" = 0 ] || ctest_failed cross-arch
     summary=$(ctest_summary "$LOGDIR/cross-arch.log")
     case "$summary" in

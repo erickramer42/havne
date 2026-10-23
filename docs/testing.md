@@ -36,6 +36,7 @@ and the next run's screenshots confirmed the fixes the same day.
 | `test_j2534_discovery` | `J2534DiscoveryTest` | Windows |
 | `test_j2534_load` | `FakeFixture` | Windows and the fake DLL |
 | `test_j2534_stream` | `J2534StreamTest`, `J2534QueryParamTest`, `J2534AdoptionTest` | Windows and the fake DLL |
+| `test_j2534_health` | `J2534HealthTest`, every case run twice: `/InProc` and `/Surrogate` | Windows, the fake DLL and the surrogate exe |
 | `test_j2534_surrogate` | `J2534SurrogateTest` | Windows, the fake DLL and the surrogate exe |
 | `test_j2534_routing` | `J2534RoutingTest` | Windows. The cross-arch case skips unless `ECUIO_FAKE_DLL` is set. |
 | `test_obd2` | `Obd2SetTest`, `Obd2DecodeTest`, `Obd2MuxTest`, `PidSchedulerTest` | Nothing (Qt-free) |
@@ -115,15 +116,16 @@ and the next run's screenshots confirmed the fixes the same day.
 | Mode-01 scheduler: rotation order in set order, wrap; drain delivers a backlog beyond one cycle's budget | `J2534AdoptionTest` |
 | One Mode-01 key test for enrolment and request routing: only a 2-byte `41 <PID>` key at offset 0 enrols a PID or routes its request. A `62 <DID>` key ending in the same byte, another service's 2-byte echo, a key at offset 1 or a 1-byte key does neither; a `62 <DID>` def on a second ECU, listed first, doesn't draw the PID's requests to that ECU | `PidSchedulerTest.Mode01KeyIsTwoBytes41AtOffsetZero`, `.EnrollsOnlyMode01Keys`, `J2534AdoptionTest.Mode01RequestRoutesPastOtherServiceKeys`. With routing that matches any key's last byte, the routing case fails, sending the requests to 0x7E1 (checked by hand, 2026-10-22) |
 | Channel derivation: a bare `j2534://` URI under `obd2` registers the 7E8 filter with exact mask/pattern shape, sends to 7E0, and starts; a lone `?txid=` keeps the derived 7E8 filter but rewrites the request target | `J2534AdoptionTest.BareJ2534UriDerivesObd2ChannelAndStarts`, `.TxidOverrideRewritesDerivedTransmitTarget` |
-| Link health (in-proc): a hard read failure records `ECUIO_ERR_TRANSPORT_HARD_FAILURE` with one episode per outage and recovers through the probe write; a quiet bus debounces to `ECUIO_ERR_VEHICLE_TIMEOUT` with no episode | `J2534AdoptionTest.HardFailureSetsCanonicalErrorAndRecovers`, `.QuietBusDebouncesToVehicleTimeoutWithoutEpisode` |
-| Write failures (in-proc): a failed write latches `ECUIO_ERR_REQUEST_FAILED` with one episode; empty reads past the quiet debounce don't move it; a successful write alone clears it, with reads held quiet | `J2534AdoptionTest.WriteFailureLatchesRequestFailedAndClears` (`ECUIO_FAKE_WRITE_STATUS`) |
-| A hard read failure outranks a failing write: exactly two episodes (write, then read), and continued failing writes don't downgrade the state | `J2534AdoptionTest.HardReadFailureOutranksRequestFailed` |
-| A delivered frame that matches no channel ends a hard failure but reads as `ECUIO_ERR_VEHICLE_TIMEOUT`, not `ECUIO_OK`, with no episode, inside the quiet debounce window | `J2534AdoptionTest.UnmatchedDeliveredFrameGoesQuietNotHealthy` |
-| The backoff grows under a sustained hard failure: at most 8 probe writes in 1.5 s, against ~15 with the old reset-to-base | `J2534AdoptionTest.BackoffGrowsUnderSustainedHardFailure` |
+| The link-health cases run twice, once in-proc and once through the surrogate (the x64 surrogate with the loader's routing forced; the x86 one in the cross-arch run), driven through the fake's control page; each checks which process opened the fake | `J2534HealthTest`, every case `/InProc` and `/Surrogate`; the surrogate half also cross-arch (2026-10-22) |
+| Link health: a hard read failure records `ECUIO_ERR_TRANSPORT_HARD_FAILURE` with one episode per outage and recovers through the probe write; a quiet bus debounces to `ECUIO_ERR_VEHICLE_TIMEOUT` with no episode | `J2534HealthTest.HardFailureSetsCanonicalErrorAndRecovers`, `.QuietBusDebouncesToVehicleTimeoutWithoutEpisode` |
+| Write failures: a failed write latches `ECUIO_ERR_REQUEST_FAILED` with one episode; empty reads past the quiet debounce don't move it; a successful write alone clears it, with reads held quiet | `J2534HealthTest.WriteFailureLatchesRequestFailedAndClears` (`ECUIO_FAKE_WRITE_STATUS`) |
+| A hard read failure outranks a failing write: exactly two episodes (write, then read), and continued failing writes don't downgrade the state | `J2534HealthTest.HardReadFailureOutranksRequestFailed` |
+| A delivered frame that matches no channel ends a hard failure but reads as `ECUIO_ERR_VEHICLE_TIMEOUT`, not `ECUIO_OK`, with no episode, inside the quiet debounce window | `J2534HealthTest.UnmatchedDeliveredFrameGoesQuietNotHealthy` |
+| The backoff grows under a sustained hard failure: at most 8 probe writes in 1.5 s, against ~15 with the old reset-to-base | `J2534HealthTest.BackoffGrowsUnderSustainedHardFailure` |
 | The backoff step (`j2534_backoff_next`, shared by all three worker modes) doubles from the base, never exceeds the 5 s cap, including the step that lands on it, holds at the cap, and doesn't wrap | `J2534StreamTest.BackoffStepDoublesToCapWithoutOvershoot` (session-free) |
 | `ECUIO_ERR_REQUEST_FAILED` has its own status string | `J2534StreamTest.RequestFailedStatusHasDistinctString` |
 | A batch the vendor returns with `ERR_TIMEOUT` is delivered through the surrogate; an empty one maps to a vehicle timeout | `J2534SurrogateTest.SpecTimeoutReadDeliversPartialBatch` (spec-mode fake) |
-| A vendor that returns a hard error with the message count untouched delivers no frames: in-proc, the session reports a hard failure, dispatches nothing and recovers once reads are honest; through the surrogate, the read maps to a hard failure and the next request still correlates | `J2534AdoptionTest.UntouchedCountUnderHardErrorReportsUnhealthy`, `J2534SurrogateTest.HardErrorUntouchedCountDeliversNoFrames` (`ECUIO_FAKE_UNTOUCHED_COUNT_STATUS`) |
+| A vendor that returns a hard error with the message count untouched delivers no frames: on both backends the session reports a hard failure, dispatches nothing and recovers once reads are honest; through the surrogate, the next request after the poisoned read still correlates | `J2534HealthTest.UntouchedCountUnderHardErrorReportsUnhealthy`, `J2534SurrogateTest.HardErrorUntouchedCountDeliversNoFrames` (`ECUIO_FAKE_UNTOUCHED_COUNT_STATUS`) |
 | Signal freshness: `ageMs` is -1 before the first sample and a sane clock delta after; `updateValues` notifies `AgeMsRole`; `refreshAges()` notifies `AgeMsRole` alone, over every row, so a stalled row re-evaluates | `BridgeTest.AgeMsRoleEmittedAndRefreshesWhileStalled` |
 | Link-state mapping: `ECUIO_OK` → `ok`, vehicle timeout → `quiet`, `ECUIO_ERR_REQUEST_FAILED` → `requests`, hard failure → `fault`, any other code → `degraded` | `BridgeTest.LinkStateMapsEveryPublishedCode` (session-free, through `QtTuneBridge::linkStateForError`) |
 | Dashboard: every gauge the mock set feeds sweeps under `mock://demo`; a gauge whose signal the profile lacks reads "not in profile" (the mock set feeds every gauge, so `?profile=raw` is what shows it); the grid collapses from 4 to 2 columns across 760 px and tightens its gaps at 600 px; fault and quiet states tint correctly; the temperature rings start at 0 °C, so a cold engine reads on the scale; unticking a row on Live leaves its gauge live; when the stacked arrangement would overflow a short, wide page it switches to the wide one (dials and a 2 × 2 tile block in one row, sized to the height), and the scroll bar shows while the page overflows | Manual smoke, 2026-10-20 (`40e51ce`; quiet and fault through the knob recipe below). The header, which takes its dot and label from `Theme`, was re-run 2026-10-21 (`55373f4` plus the reordered series palette): ok ("Live · mock://demo", green), quiet, requests, fault and disconnected, plus "not in profile" on every gauge under `?profile=raw`. Re-run later on 2026-10-21 for the rings and the untick (working tree on `d1c20c0`): coolant 53 °C and oil 24 °C on 0–130 and 0–160 scales under mock; with RPM unticked the tach kept moving and recorded a 7,000 peak; every gauge found its signal under `obd2` through the x64 fake. Re-run 2026-10-22 for the arrangements (`0a94049`, the run-qttune driver's `resize`): the wide one at 1280 × 650 (a 1080p laptop at 150 %) and 1280 × 800 with every gauge on screen, stacked at 1700 × 980 as before, narrow at 860 × 640 and 600 × 700 with the scroll bar shown. No automated coverage: `SignalHub`'s name lookup and the gauges are QML only |
@@ -196,15 +198,15 @@ rows against the current Home, Settings and Dashboard header.
   VBATT, 29-bit addressing, more than one ECU answering, multi-frame
   (segmented ISO-TP) replies, a vendor read failure, and any other
   vendor's statuses (the VX never returned `ERR_TIMEOUT`, #11).
-- **Link-health coverage is in-proc only.** The tests above drive
+- **Link health is covered against the fake.** The tests above drive
   `ECUIO_FAKE_READ_STATUS`, `ECUIO_FAKE_UNTOUCHED_COUNT_STATUS` and
-  `ECUIO_FAKE_WRITE_STATUS` through the worker. Not covered:
-  - the surrogate path's health mapping through the worker, end to
-    end (the surrogate test stops at `read_frame`'s status). Live
-    runs on 2026-10-22 drove it through the surrogate on the VX:
-    requests failing at the bench, and ok, quiet and recovery on the
-    vehicle. Hard failure waits for a vendor read error, with the
-    session log as the record;
+  `ECUIO_FAKE_WRITE_STATUS` through the worker on both backends. Not
+  covered:
+  - a hard read failure from real hardware. Live runs on 2026-10-22
+    drove the other states through the surrogate on the VX: requests
+    failing at the bench, and ok, quiet and recovery on the vehicle.
+    No vendor read error has been seen yet; the session log is the
+    record when one is;
   - how the UI renders `ECUIO_ERR_REQUEST_FAILED`: the bridge's mapping
     to `requests` is unit-tested, but the QML banner, Home card,
     Dashboard header, Settings label and log line are covered only by
@@ -275,7 +277,8 @@ rows against the current Home, Settings and Dashboard header.
   the predicate can never become true.
 - **Test-only seams** (`dispatchFrameForTesting`,
   `forceFrameCountForTesting`, `maxInFlightForTesting`, the fake's
-  hooks, `ecuio_j2534_inject_test_frame`) are never called by app
+  hooks and its control page, `ecuio_j2534_inject_test_frame`,
+  `ecuio_j2534_force_surrogate_for_testing`) are never called by app
   code.
 - **When you change shared plumbing, pin the contract you changed, at
   the point you changed it.** For example,

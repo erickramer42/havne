@@ -2,10 +2,10 @@
 // Testing: HARNESS — test_j2534_stream: URI parsing, connect parameters,
 //          filter registration, request framing and routing, header
 //          strip and arbitration_id stamp, scheduler rotation and drain,
-//          ?poll= precedence, and the link-health machine (Known Issue #11):
-//          hard and quiet reads, untouched counts, the write latch and
-//          its priority, unmatched frames, backoff growth. In-proc
-//          only; no surrogate session drives the health machine.
+//          ?poll= precedence. test_j2534_health: the link-health
+//          machine (Known Issue #11) on both backends: hard and quiet
+//          reads, untouched counts, the write latch and its priority,
+//          unmatched frames, backoff growth.
 // CI: non-Windows builds a linking stub; core.cpp routes j2534://
 //     only on _WIN32, so the stub is unreachable there
 

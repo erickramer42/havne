@@ -175,6 +175,14 @@ ecuio_status_t ecuio_j2534_inject_test_frame(ecuio_j2534_handle_t* handle,
                                              uint32_t timestamp,
                                              uint32_t rx_flags);
 
+/* TEST-ONLY: while on, ecuio_j2534_open sends every DLL to the
+ * surrogate, x64 ones included, so one HARNESS test can run a session
+ * through both backends against the x64 fake. The surrogate exe must
+ * match the DLL's architecture (ECUIO_SURROGATE_EXE names the x64
+ * tree's). Process-wide and off by default; product code never calls
+ * it. */
+void ecuio_j2534_force_surrogate_for_testing(bool on);
+
 #ifdef __cplusplus
 }
 #endif

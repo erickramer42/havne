@@ -15,8 +15,9 @@
 #include "ecuio/j2534_ptypes.h"
 #include "win_utf8.h"
 
-#include <vector>
 #include <algorithm>
+#include <atomic>
+#include <vector>
 
 /* ================================================================
  * GLOBAL SCOPE — completes types the header forward-declares.
@@ -81,6 +82,9 @@ struct ecuio_j2534_handle {
 namespace {
 
 constexpr long kPtStatusNoError = ECUIO_PT_STATUS_NOERROR;
+
+/* ecuio_j2534_force_surrogate_for_testing's switch. */
+std::atomic<bool> g_force_surrogate{false};
 
 /* Resolve by export name, with an optional alternate spelling.
  * GetProcAddress is case-sensitive: the spec spells it
@@ -378,8 +382,10 @@ ecuio_status_t ecuio_j2534_open(const ecuio_j2534_device_t* device,
     /* ROUTING DECISION — made here, once. x86 DLLs go to the
      * surrogate (exe next to the app, or ECUIO_SURROGATE_EXE);
      * everything else, including unknown (sniff 0), loads in-proc, so
-     * unreadable paths fail at LoadLibraryEx. */
-    if (sniff_pe_architecture(device->dll_path) == 1) {
+     * unreadable paths fail at LoadLibraryEx. A test can send every
+     * DLL to the surrogate (ecuio_j2534_force_surrogate_for_testing). */
+    if (g_force_surrogate.load() ||
+        sniff_pe_architecture(device->dll_path) == 1) {
         ecuio_j2534_sur_handle_t* sur = nullptr;
         ecuio_status_t st = ecuio_j2534_sur_open(device->dll_path, &sur);
         if (st != ECUIO_OK) {
@@ -882,6 +888,11 @@ ecuio_status_t ecuio_j2534_inject_test_frame(ecuio_j2534_handle_t* handle,
     return ECUIO_OK;
 }
 
+void ecuio_j2534_force_surrogate_for_testing(bool on)
+{
+    g_force_surrogate.store(on);
+}
+
 } // extern "C"
 
 #else
@@ -1009,6 +1020,10 @@ ecuio_status_t ecuio_j2534_inject_test_frame(ecuio_j2534_handle_t* /*h*/,
                                               uint32_t /*flags*/)
 {
     return ECUIO_ERR_NOT_IMPLEMENTED;
+}
+
+void ecuio_j2534_force_surrogate_for_testing(bool /*on*/)
+{
 }
 
 } // extern "C"

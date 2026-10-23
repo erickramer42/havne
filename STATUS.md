@@ -111,9 +111,9 @@ to plausible values. Next is the plan in
     run sheets are
     [bench-runsheet.md](docs/bench-sessions/bench-runsheet.md) and
     [vehicle-runsheet.md](docs/bench-sessions/vehicle-runsheet.md).
-  - **Tests:** 213 ctest cases (Windows, Visual Studio 18 build
+  - **Tests:** 220 ctest cases (Windows, Visual Studio 18 build
     tools, both trees rebuilt, 2026-10-22), plus the cross-arch
-    subset (25/25). All
+    subset (32/32). All
     passed except the env-gated cross-arch skip. Every first-party
     target builds with compiler warnings on, at 0 on MSVC. CI was green on all
     eight jobs on PR #16 (merged as `9125b5e`), including the
@@ -380,9 +380,10 @@ an issue is resolved it is removed, and its number is not reused.
 10. **Strip-chart x-axis resolution is one coalesce window, about
     100 ms.** Per-sample timestamps need decoding to move onto the
     worker.
-11. **J2534 link health: two gaps remain.**
-    The worker's health machine is done and HARNESS-tested in-proc:
-    hard read failures, a quiet debounce, a write latch with
+11. **J2534 link health: one gap remains.**
+    The worker's health machine is done and HARNESS-tested on both
+    backends, each case run in-proc and through the surrogate: hard
+    read failures, a quiet debounce, a write latch with
     `ECUIO_ERR_REQUEST_FAILED`, unmatched frames read as quiet, and a
     growing backoff ([j2534.md](docs/j2534.md#session-lifecycle)). The
     bridge publishes it as `linkState` (`ok`, `quiet`, `requests`,
@@ -395,17 +396,11 @@ an issue is resolved it is removed, and its number is not reused.
     smoke recipe passed on 2026-10-20, and its request-failure row on
     2026-10-21
     ([testing.md](docs/testing.md#manual-smoke--link-health-ui)).
-    Still open:
-    - No surrogate session drives the health machine in the suite.
-      Live runs on 2026-10-22 drove it through the surrogate on the
-      VX: requests failing at the bench, and ok, quiet and recovery on
-      the vehicle. A hard read failure through the surrogate hasn't
-      been seen live.
-    - If reads recover while writes keep failing, the state stays
-      "adapter fault" instead of stepping down to request failure.
-      Accepted for now: it needs a transient read error on a no-ACK
-      bus, and the session log tells the two apart (clean `OP_READ`
-      lines next to failing `OP_WRITE` lines).
+    Still open: if reads recover while writes keep failing, the
+    state stays "adapter fault" instead of stepping down to request
+    failure. Accepted for now: it needs a transient read error on a
+    no-ACK bus, and the session log tells the two apart (clean
+    `OP_READ` lines next to failing `OP_WRITE` lines).
 12. **J2534 timestamps pass through untranslated.** A frame's
     `timestamp_us` is the vendor's 32-bit stamp, not time since the
     session started. The spec says microseconds; the VX conforms, from

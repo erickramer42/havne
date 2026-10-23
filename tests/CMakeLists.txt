@@ -298,6 +298,31 @@ if(WIN32)
     )
 endif()
 
+# J2534 link-health tests (Win32-only, HARNESS tier): every case runs
+# one session in-proc and one through the surrogate. In this tree the
+# surrogate case uses the x64 surrogate by path (ECUIO_SURROGATE_EXE,
+# set per case), so no second copy lands next to the test exe; the
+# cross-arch run points it at the Win32 tree's instead.
+if(WIN32)
+    add_executable(test_j2534_health
+        test_j2534_health.cpp
+    )
+    target_link_libraries(test_j2534_health PRIVATE
+        ecuio-core
+        GTest::gtest_main
+    )
+    target_compile_definitions(test_j2534_health PRIVATE
+        FAKE_J2534_DLL_PATH="$<TARGET_FILE:fake_j2534>"
+        SURROGATE_EXE_PATH="$<TARGET_FILE:ecuio-j2534-surrogate>"
+    )
+    add_dependencies(test_j2534_health fake_j2534)
+    add_dependencies(test_j2534_health ecuio-j2534-surrogate)
+    qttune_enable_warnings(test_j2534_health)
+    gtest_discover_tests(test_j2534_health
+        PROPERTIES TIMEOUT ${J2534_TEST_TIMEOUT_SECONDS}
+    )
+endif()
+
 # J2534 routing tests (Win32-only, HARNESS tier — backend selection by
 # PE architecture: in-proc for x64 (CI), surrogate for x86 (dev-machine,
 # env-gated via ECUIO_FAKE_DLL/ECUIO_SURROGATE_EXE))

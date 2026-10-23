@@ -274,7 +274,7 @@ ctest --test-dir build -C Release --output-on-failure
 ctest --test-dir build -C Release -R '^BridgeTest\.'
 build/tests/Release/test_core.exe --gtest_filter='CoreTest.SelfUnregister*'
 # specific suites
-ctest --test-dir build -C Release -R "J2534Routing|J2534Surrogate|J2534Adoption" --output-on-failure
+ctest --test-dir build -C Release -R "J2534Routing|J2534Surrogate|J2534Adoption|J2534HealthTest" --output-on-failure
 ```
 
 `gtest_discover_tests` registers each case with ctest as
@@ -294,7 +294,7 @@ hang (the IPC deadlock class caught 2026-10-17) fails bounded as
 ```sh
 export ECUIO_SURROGATE_EXE='<repo>/build-win32/surrogate/Release/ecuio-j2534-surrogate.exe'
 export ECUIO_FAKE_DLL='<repo>/build-win32/tests/Release/fake_j2534.dll'
-ctest --test-dir build -C Release -R "J2534Routing|J2534Surrogate" --output-on-failure
+ctest --test-dir build -C Release -R "J2534Routing|J2534Surrogate|J2534HealthTest\..*/Surrogate" --output-on-failure
 ```
 
 Use Windows-style paths in these variables (forward slashes are

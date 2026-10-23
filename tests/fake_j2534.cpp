@@ -29,6 +29,12 @@
 //    Filter-aware echo prepends the filter pattern (4-byte BE CAN ID).
 //    SetFilterGating controls ONLY ReadMsgs dropping; the echo shape
 //    is unconditional once a filter lands.
+//  * Knobs (ECUIO_FAKE_*) are read on every call: from the control
+//    page (fake_control.h) when it holds the name, else from the
+//    environment. The page reaches the surrogate child's instance
+//    mid-session, which the child's spawn-time environment can't. It
+//    also carries messages a test queues for ReadMsgs, and the fake
+//    publishes its successful writes and the process that opened it.
 //  * ReadMsgs, by default, returns at most one message per call,
 //    whatever NumMsgs and Timeout ask for, and STATUS_NOERROR with zero
 //    messages on an empty queue. ECUIO_FAKE_READ_STATUS forces a
@@ -43,6 +49,7 @@
 #include <windows.h>
 
 #include "ecuio/j2534_ptypes.h"
+#include "fake_control.h"
 
 #include <cstdint>
 #include <cstring>
@@ -160,6 +167,18 @@ struct Obd2CannedValues {
 
 Obd2CannedValues g_obd2_canned;
 
+/* A knob's value: the control page's when it holds the name, else the
+ * environment's. False when neither sets it, or it doesn't fit buf. */
+bool read_knob(const char* name, char* buf, DWORD cap)
+{
+    fake_control::Page* page = fake_control::attach();
+    if (page != nullptr && fake_control::get(page, name, buf, cap)) {
+        return buf[0] != '\0';
+    }
+    const DWORD n = GetEnvironmentVariableA(name, buf, cap);
+    return n > 0 && n < cap;
+}
+
 /* Enqueue into the shared RX FIFO (mutex held by caller). Drops on
  * full exactly like InjectFrame — documented, keeps counts honest. */
 void enqueue_rx_locked(const unsigned char* data, unsigned long size,
@@ -173,6 +192,23 @@ void enqueue_rx_locked(const unsigned char* data, unsigned long size,
     slot.size = size;
     slot.timestamp_us = timestamp_us;
     slot.rx_status = rx_status;
+}
+
+/* Moves the messages a test queued on the control page into the RX
+ * FIFO (mutex held by caller), RxStatus verbatim. */
+void take_posted_locked()
+{
+    fake_control::Page* page = fake_control::attach();
+    if (page == nullptr) {
+        return;
+    }
+    fake_control::Message posted[fake_control::kInboxDepth];
+    const uint32_t n = fake_control::take(page, posted,
+                                          fake_control::kInboxDepth);
+    for (uint32_t i = 0; i < n; ++i) {
+        enqueue_rx_locked(posted[i].data, posted[i].size,
+                          posted[i].timestamp, posted[i].rx_status);
+    }
 }
 
 /* Reset canned OBD-II values to the cold-idle defaults. Called once
@@ -334,12 +370,16 @@ long __stdcall PassThruOpen(void* pName, unsigned long* pDeviceID)
      * child's fake with zero protocol surface. */
     {
         char buf[32] = {};
-        const DWORD n = GetEnvironmentVariableA("ECUIO_FAKE_OPEN_DELAY_MS",
-                                                 buf, sizeof(buf));
-        if (n > 0 && n < sizeof(buf)) {
+        if (fake_j2534::read_knob("ECUIO_FAKE_OPEN_DELAY_MS",
+                                  buf, sizeof(buf))) {
             const DWORD delay = static_cast<DWORD>(strtoul(buf, nullptr, 10));
             if (delay > 0 && delay <= 60000) Sleep(delay);
         }
+    }
+
+    if (fake_control::Page* page = fake_control::attach()) {
+        InterlockedExchange(&page->opener_pid,
+                            static_cast<LONG>(GetCurrentProcessId()));
     }
 
     std::lock_guard<std::mutex> lk(fake_j2534::g_lock);
@@ -398,9 +438,8 @@ long __stdcall PassThruDisconnect(unsigned long ChannelID)
      * call and slept outside the lock, like the open delay. */
     {
         char buf[32] = {};
-        const DWORD n = GetEnvironmentVariableA("ECUIO_FAKE_DISCONNECT_DELAY_MS",
-                                                 buf, sizeof(buf));
-        if (n > 0 && n < sizeof(buf)) {
+        if (fake_j2534::read_knob("ECUIO_FAKE_DISCONNECT_DELAY_MS",
+                                  buf, sizeof(buf))) {
             const DWORD delay = static_cast<DWORD>(strtoul(buf, nullptr, 10));
             if (delay > 0 && delay <= 60000) Sleep(delay);
         }
@@ -431,16 +470,15 @@ long __stdcall PassThruReadMsgs(unsigned long ChannelID,
      * 0x09 (ERR_TIMEOUT) for quiet-bus, a hard code (e.g. 0x07) for
      * the dead-adapter path. Persistent while set and re-read per
      * call, so in-proc tests toggle it with SetEnvironmentVariableA
-     * between phases; the surrogate child only sees the value it
-     * inherited at spawn (same as ECUIO_FAKE_OPEN_DELAY_MS). Checked
+     * between phases; the surrogate child sees only the value it
+     * inherited at spawn, unless the control page sets it. Checked
      * before the queue, so a simulated dead adapter delivers nothing.
      * It always zeroes the count. Timeout WITH delivered messages is
      * spec mode's job, below. */
     {
         char buf[32] = {};
-        const DWORD n = GetEnvironmentVariableA("ECUIO_FAKE_READ_STATUS",
-                                                 buf, sizeof(buf));
-        if (n > 0 && n < sizeof(buf)) {
+        if (fake_j2534::read_knob("ECUIO_FAKE_READ_STATUS",
+                                  buf, sizeof(buf))) {
             const long code = strtol(buf, nullptr, 0);
             if (code != 0) {
                 *pNumMsgs = 0;
@@ -456,13 +494,12 @@ long __stdcall PassThruReadMsgs(unsigned long ChannelID,
      * surrogate child's previous batch contents). Mirrors the VX,
      * which reports "status 7, written 1" on a failed write
      * (docs/bench-sessions/2026-10-20.md). Re-read per call:
-     * in-proc tests toggle live, the surrogate child only sees the
-     * spawn-time value. */
+     * in-proc tests toggle live, the surrogate child sees the
+     * spawn-time value unless the control page sets it. */
     {
         char uc[32] = {};
-        const DWORD un = GetEnvironmentVariableA(
-            "ECUIO_FAKE_UNTOUCHED_COUNT_STATUS", uc, sizeof(uc));
-        if (un > 0 && un < sizeof(uc)) {
+        if (fake_j2534::read_knob("ECUIO_FAKE_UNTOUCHED_COUNT_STATUS",
+                                  uc, sizeof(uc))) {
             const long code = strtol(uc, nullptr, 0);
             if (code != 0) {
                 return code;   /* *pNumMsgs and buffer left untouched */
@@ -471,6 +508,7 @@ long __stdcall PassThruReadMsgs(unsigned long ChannelID,
     }
 
     std::lock_guard<std::mutex> lk(fake_j2534::g_lock);
+    fake_j2534::take_posted_locked();
 
     /* SPEC-CONFORMANT READ MODE: when
      * ECUIO_FAKE_SPEC_READ_SEMANTICS is 1, model the J2534-1 rule
@@ -485,9 +523,8 @@ long __stdcall PassThruReadMsgs(unsigned long ChannelID,
      * single-message delivery. */
     {
         char spec[32] = {};
-        const DWORD sn = GetEnvironmentVariableA(
-            "ECUIO_FAKE_SPEC_READ_SEMANTICS", spec, sizeof(spec));
-        if (sn > 0 && sn < sizeof(spec) && spec[0] == '1') {
+        if (fake_j2534::read_knob("ECUIO_FAKE_SPEC_READ_SEMANTICS",
+                                  spec, sizeof(spec)) && spec[0] == '1') {
             const unsigned long requested = *pNumMsgs;
             unsigned long avail = fake_j2534::g_queue_len;
             if (avail > requested) avail = requested;
@@ -598,13 +635,12 @@ long __stdcall PassThruWriteMsgs(unsigned long ChannelID,
      * *pNumMsgs is left as passed (1), the VX's "status 7, written 1",
      * so a write path that read the count before the status would be
      * caught. Unrecorded writes don't move GetWriteCount. Re-read per
-     * call: in-proc tests toggle live; the child sees only the
-     * spawn-time value. */
+     * call: in-proc tests toggle live; the child sees the spawn-time
+     * value unless the control page sets it. */
     {
         char wb[32] = {};
-        const DWORD wn = GetEnvironmentVariableA("ECUIO_FAKE_WRITE_STATUS",
-                                                 wb, sizeof(wb));
-        if (wn > 0 && wn < sizeof(wb)) {
+        if (fake_j2534::read_knob("ECUIO_FAKE_WRITE_STATUS",
+                                  wb, sizeof(wb))) {
             const long code = strtol(wb, nullptr, 0);
             if (code != 0) {
                 return code;   /* not recorded, no echo enqueued */
@@ -633,6 +669,9 @@ long __stdcall PassThruWriteMsgs(unsigned long ChannelID,
         w.tx_flags = pMsg->TxFlags;
     }
     fake_j2534::g_write_count++;
+    if (fake_control::Page* page = fake_control::attach()) {
+        InterlockedIncrement(&page->writes);
+    }
 
     /* RESPONSE GENERATION.
      * Mode-01 request: EXACTLY 6 bytes, req[4]==0x01 — the
@@ -683,9 +722,8 @@ long __stdcall PassThruIoctl(unsigned long ChannelID,
     bool do_stall = false;
     char stall_buf[32] = {};
     {
-        const DWORD n = GetEnvironmentVariableA("ECUIO_FAKE_IOCTL_DELAY_MS",
-                                                stall_buf, sizeof(stall_buf));
-        if (n > 0 && n < sizeof(stall_buf)) {
+        if (fake_j2534::read_knob("ECUIO_FAKE_IOCTL_DELAY_MS",
+                                  stall_buf, sizeof(stall_buf))) {
             std::lock_guard<std::mutex> lk(fake_j2534::g_lock);
             if (!fake_j2534::g_ioctl_delay_fired) {
                 fake_j2534::g_ioctl_delay_fired = true;
