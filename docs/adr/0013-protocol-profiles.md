@@ -402,3 +402,11 @@ that pinned the rejection at start were replaced:
 `BareJ2534UriDerivesObd2ChannelAndStarts` (filter shape, tx target,
 rotation) and `TxidOverrideRewritesDerivedTransmitTarget` (derived
 rx kept, tx rewritten to the broadcast pattern).
+
+## Appendix — failure codes (2026-10-22)
+
+An unknown profile name returns `ECUIO_ERR_UNKNOWN_PROFILE`, and a
+malformed `?profile=` value `ECUIO_ERR_BAD_URI`, where both returned
+`ECUIO_ERR_NO_TRANSPORT` ([ADR-0018](0018-connect-failure-reporting.md)).
+Both still fail before any DLL loads. `ecuio_profile_lookup` keeps
+returning `ECUIO_ERR_NO_TRANSPORT` for an unknown name.

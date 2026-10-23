@@ -65,8 +65,11 @@ typedef struct ecuio_j2534_handle ecuio_j2534_handle_t;
  * - Loads the DLL named by device->dll_path (an x86 DLL loads in the
  *   surrogate process, ADR-0009), resolves all nine mandatory
  *   PassThru exports, and calls the vendor's PassThruOpen
- * - Any failure (missing DLL, missing export, PassThruOpen refused)
- *   returns ECUIO_ERR_LOAD_FAILED with NO module left loaded
+ * - A missing or unloadable DLL, or a missing export, returns
+ *   ECUIO_ERR_LOAD_FAILED; a refused PassThruOpen
+ *   ECUIO_ERR_VENDOR_REFUSED; a surrogate that won't start
+ *   ECUIO_ERR_SURROGATE_FAILED. No module is left loaded, and
+ *   ecuio_last_error_detail says why (ADR-0018)
  * - On error: *out_handle = NULL
  * - Caller owns the handle; release with ecuio_j2534_close()
  * - Non-Windows: ECUIO_ERR_NOT_IMPLEMENTED

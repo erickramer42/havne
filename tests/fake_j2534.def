@@ -9,6 +9,7 @@ EXPORTS
     PassThruIoctl
     PassThruStartMsgFilter
     PassThruStopMsgFilter
+    PassThruGetLastError
     InjectFrame
     GetBufferState
     GetCurrentHandle

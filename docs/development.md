@@ -274,7 +274,7 @@ ctest --test-dir build -C Release --output-on-failure
 ctest --test-dir build -C Release -R '^BridgeTest\.'
 build/tests/Release/test_core.exe --gtest_filter='CoreTest.SelfUnregister*'
 # specific suites
-ctest --test-dir build -C Release -R "J2534Routing|J2534Surrogate|J2534Adoption|J2534HealthTest" --output-on-failure
+ctest --test-dir build -C Release -R "J2534Routing|J2534Surrogate|J2534Adoption|J2534HealthTest|J2534ConnectTest" --output-on-failure
 ```
 
 `gtest_discover_tests` registers each case with ctest as
@@ -294,7 +294,7 @@ hang (the IPC deadlock class caught 2026-10-17) fails bounded as
 ```sh
 export ECUIO_SURROGATE_EXE='<repo>/build-win32/surrogate/Release/ecuio-j2534-surrogate.exe'
 export ECUIO_FAKE_DLL='<repo>/build-win32/tests/Release/fake_j2534.dll'
-ctest --test-dir build -C Release -R "J2534Routing|J2534Surrogate|J2534HealthTest\..*/Surrogate" --output-on-failure
+ctest --test-dir build -C Release -R "J2534Routing|J2534Surrogate|J2534(Health|Connect)Test\..*/Surrogate" --output-on-failure
 ```
 
 Use Windows-style paths in these variables (forward slashes are
@@ -319,7 +319,8 @@ and the run looks green. Read the skip count, or use
 - A var set to the **wrong value** points the test at the wrong
   arch or a nonexistent path — the failure looks like a routing
   regression (`inproc` instead of `surrogate`) or a fast
-  `ECUIO_ERR_LOAD_FAILED`. Echo the variable before diagnosing code.
+  `ECUIO_ERR_LOAD_FAILED` or `ECUIO_ERR_SURROGATE_FAILED`. Echo the
+  variable before diagnosing code.
 - Each spawn takes `%TEMP%\ecuio-surrogate.log` and keeps the log it
   replaces under a dated name, the newest 50 of them. A suite run
   spawns dozens, so copy a log that's evidence before running the
@@ -335,7 +336,7 @@ and the run looks green. Read the skip count, or use
 | Surrogate test fails with child exit code 5 | An export can't be found by name, usually because of x86 `__stdcall` decoration. Check the `.def` file. Other exit codes are listed in [j2534.md](j2534.md#surrogate). |
 | Surrogate opens fail, in tests or the app, and the session log says "built from other shared headers" | One tree was built from older copies of `j2534_ptypes.h` or `surrogate_protocol.h`, usually a stale `build-win32`. Rebuild both trees, Win32 first. |
 | Cross-arch test fails with odd values, but same-arch passes | A stale `build-win32` fake: the fakes carry no build fingerprint. Rebuild both trees. |
-| In the app, an x86 adapter (for example the OBDX Pro VX) fails with "failed to load transport library", and `%TEMP%\ecuio-surrogate.log` holds only an `open: CreateProcess failed (err=2) exe='...'` line | No surrogate next to `qttune.exe`, so the child never launched. The x64 tree was configured before `build-win32` had a surrogate. Build the Win32 tree, re-run `cmake -B build`, check for `Deploying Win32 J2534 surrogate` in the output, and rebuild. Setting `ECUIO_SURROGATE_EXE` also works. |
+| In the app, an x86 adapter (for example the OBDX Pro VX) fails with "surrogate process failed: no surrogate (ecuio-j2534-surrogate.exe)", and `%TEMP%\ecuio-surrogate.log` holds an `open: no surrogate exe` line | No surrogate next to `qttune.exe`, so the child never launched. The x64 tree was configured before `build-win32` had a surrogate. Build the Win32 tree, re-run `cmake -B build`, check for `Deploying Win32 J2534 surrogate` in the output, and rebuild. Setting `ECUIO_SURROGATE_EXE` also works. |
 | The cross-arch routing case skips although the variables were exported | They're named something else, for example `QTTUNE_SURROGATE_EXE`: nothing reads that. The names are `ECUIO_SURROGATE_EXE` and `ECUIO_FAKE_DLL` (Cross-arch run, above). The rest of the run passes on the x64 surrogate, so the skip is the only sign. |
 | Cross-arch test fails expecting backend "surrogate", got "inproc" | `ECUIO_FAKE_DLL` points at an x64 fake (or the wrong tree). Check the value, not the code — unset skips, wrong-value fails. |
 | J2534 test fails as `Failed (Timeout)` | A genuine hang, bounded by the 30 s ceiling. Attach to the surviving test and surrogate processes and check thread wait states before killing; the child log is `%TEMP%\ecuio-surrogate.log`, and earlier spawns' logs are kept beside it under dated names. |

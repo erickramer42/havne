@@ -39,6 +39,7 @@ typedef long (__stdcall *fn_pt_start_filter)(unsigned long, unsigned long,
                                               PASSTHRU_MSG*, PASSTHRU_MSG*,
                                               PASSTHRU_MSG*, unsigned long*);
 typedef long (__stdcall *fn_pt_stop_filter)(unsigned long, unsigned long);
+typedef long (__stdcall *fn_pt_get_last_error)(char*);
 
 static fn_pt_open         g_open;
 static fn_pt_close        g_close;
@@ -49,6 +50,7 @@ static fn_pt_write_msgs   g_write_msgs;
 static fn_pt_ioctl        g_ioctl;
 static fn_pt_start_filter g_start_filter;
 static fn_pt_stop_filter  g_stop_filter;
+static fn_pt_get_last_error g_get_last_error;   /* optional: may be null */
 
 static HANDLE g_pipe = INVALID_HANDLE_VALUE;
 
@@ -505,6 +507,13 @@ int wmain(int argc, wchar_t* argv[])
         return 5;
     }
     stage("exports resolved");
+    /* Optional: only for the text behind a refused call. The in-proc
+     * loader resolves it the same way. */
+    g_get_last_error = reinterpret_cast<fn_pt_get_last_error>(
+        GetProcAddress(g_module, "PassThruGetLastError"));
+    if (g_get_last_error == nullptr) {
+        stage("no PassThruGetLastError export: refusals carry no vendor text");
+    }
 
     while (true) {
         ecuio_sur_request_t req = {};
@@ -594,6 +603,22 @@ int wmain(int argc, wchar_t* argv[])
                 req.u.stop_filter.channel_id,
                 req.u.stop_filter.filter_id);
             break;
+        case ECUIO_SUR_OP_GET_LAST_ERROR: {
+            if (g_get_last_error == nullptr) {
+                resp.status = ECUIO_PT_STATUS_NOT_SUPPORTED;
+                break;
+            }
+            /* Room past the spec's 80 for a vendor that overruns it. */
+            char text[256] = {};
+            const long rc = g_get_last_error(text);
+            text[sizeof(text) - 1] = '\0';
+            size_t n = strlen(text);
+            if (n > sizeof(resp.text) - 1) n = sizeof(resp.text) - 1;
+            memcpy(resp.text, text, n);   /* resp is zeroed: terminated */
+            resp.status = static_cast<int32_t>(rc);
+            stage("OP_GET_LAST_ERROR: vendor status %ld: %s", rc, resp.text);
+            break;
+        }
         case ECUIO_SUR_OP_INJECT: {
             typedef void (*fn_inject)(const unsigned char*, unsigned long,
                                       unsigned long, unsigned long, unsigned long);

@@ -66,14 +66,17 @@ typedef enum {
     ECUIO_OK = 0,
     ECUIO_ERR_NULL_ARGUMENT = 1,
     ECUIO_ERR_NOT_IMPLEMENTED = 2,
-    ECUIO_ERR_NO_TRANSPORT = 3,
+    ECUIO_ERR_NO_TRANSPORT = 3,   /* nothing handles the URI: an unknown
+                                     scheme, or no installed adapter
+                                     matches its selector */
     ECUIO_ERR_OUT_OF_MEMORY = 4,
     ECUIO_ERR_SESSION_CLOSED = 5,
     ECUIO_ERR_ALREADY_REGISTERED = 6,   /* Not returned: a duplicate callback
                                            registration succeeds (pair
                                            identity, ADR-0002). Reserved,
                                            since codes are append-only */
-    ECUIO_ERR_LOAD_FAILED = 7,
+    ECUIO_ERR_LOAD_FAILED = 7,    /* the adapter DLL wouldn't load, or
+                                     lacks a mandatory J2534 export */
     /* Link-health codes: published by the J2534 worker through
      * ecuio_session_get_error_state while the session keeps running. */
     ECUIO_ERR_VEHICLE_TIMEOUT = 8,          /* reads answer, but nothing
@@ -92,6 +95,22 @@ typedef enum {
                                           acceptable: a signal set that fails
                                           validation, a malformed or built-in
                                           profile name (profile.h) */
+    /* Why a connect failed, from ecuio_session_create or
+     * ecuio_session_start; ecuio_last_error_detail says more. */
+    ECUIO_ERR_BAD_URI = 12,           /* the transport URI is malformed: a
+                                         query that breaks the grammar, a
+                                         key the transport doesn't take, a
+                                         bad value, or keys that don't fit
+                                         together (?poll= with no channel) */
+    ECUIO_ERR_UNKNOWN_PROFILE = 13,   /* ?profile= names no registered
+                                         profile */
+    ECUIO_ERR_VENDOR_REFUSED = 14,    /* the adapter's driver refused a call
+                                         (PassThruOpen, PassThruConnect, a
+                                         filter), or PassThruOpen never
+                                         returned */
+    ECUIO_ERR_SURROGATE_FAILED = 15,  /* the surrogate process that hosts an
+                                         x86 adapter DLL couldn't start, or
+                                         stopped answering */
 
     /* Append-only rule: new codes go HERE, never renumber */
 } ecuio_status_t;
@@ -128,6 +147,14 @@ ecuio_status_t ecuio_session_close(ecuio_session_t* session);
 ecuio_status_t ecuio_session_destroy(ecuio_session_t* session);
 
 ecuio_status_t ecuio_session_start(ecuio_session_t* session);
+
+/* Why the last ecuio_session_create or ecuio_session_start on the
+ * calling thread failed, in words: which URI key, which vendor call and
+ * its status, and the vendor's own description of the error. "" when
+ * the last one succeeded, or when nothing more than the status is
+ * known. Thread-local, like dlerror(): the text stays valid until the
+ * next create or start on the same thread. Never NULL. */
+const char* ecuio_last_error_detail(void);
 
 /* Send/receive - synchronous API */
 ecuio_status_t ecuio_session_send(

@@ -20,6 +20,23 @@
 #include <algorithm>
 #include <chrono>
 
+namespace {
+
+// A failed create or start, in words: the status, then core's detail
+// (which URI key, which vendor call, the vendor's text) when it has one.
+// Call it on the thread that made the call: the detail is thread-local.
+QString failureText(ecuio_status_t rc)
+{
+    const QString status = QString::fromUtf8(ecuio_status_string(rc));
+    const char* detail = ecuio_last_error_detail();
+    if (detail == nullptr || detail[0] == '\0') {
+        return status;
+    }
+    return status + QStringLiteral(": ") + QString::fromUtf8(detail);
+}
+
+} // namespace
+
 // ---------------- FrameListModel ----------------
 FrameListModel::FrameListModel(QObject* parent)
     : QAbstractListModel(parent)
@@ -442,7 +459,7 @@ QString QtTuneBridge::connectCoreOnly(const QString& uri,
     ecuio_session_t* session = nullptr;
     ecuio_status_t rc = ecuio_session_create(uri8.constData(), &session);
     if (rc != ECUIO_OK || session == nullptr) {
-        return QString::fromUtf8(ecuio_status_string(rc));
+        return failureText(rc);
     }
 
     rc = ecuio_register_frame_callback(session, &QtTuneBridge::onFrame, this);
@@ -462,9 +479,10 @@ QString QtTuneBridge::startSession(ecuio_session_t* session)
 {
     const ecuio_status_t rc = ecuio_session_start(session);
     if (rc != ECUIO_OK) {
+        const QString err = failureText(rc);
         ecuio_unregister_frame_callback(session, &QtTuneBridge::onFrame, this);
         ecuio_session_destroy(session);
-        return QString::fromUtf8(ecuio_status_string(rc));
+        return err;
     }
     return {};
 }

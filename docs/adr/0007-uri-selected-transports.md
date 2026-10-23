@@ -44,3 +44,11 @@ The full grammar is in [docs/j2534.md](../j2534.md#uri-grammar).
   malformed forms.
 - Adding a transport means adding a prefix in `core.cpp` and an ops
   table. The bridge and QML do not change.
+
+## Appendix — failure codes (2026-10-22)
+
+A malformed query returns `ECUIO_ERR_BAD_URI` instead of
+`ECUIO_ERR_NO_TRANSPORT`, and `ecuio_last_error_detail` names the key
+and what it should hold ([ADR-0018](0018-connect-failure-reporting.md)).
+An unknown scheme, and a selector that matches no installed adapter,
+still return `ECUIO_ERR_NO_TRANSPORT`.

@@ -6,8 +6,12 @@
 #include "ecuio/profile.h"
 #include "session.h"
 #include "uri_query.h"
+#include "error_detail.h"
+#include "ecuio/j2534_ptypes.h"   /* ecuio_pt_status_name; plain C, any OS */
 
 #include <atomic>
+#include <cstdarg>
+#include <cstdio>
 #include <cstring>
 #include <mutex>
 #include <vector>
@@ -17,7 +21,12 @@
 namespace {
     std::atomic<bool> g_initialized{false};
 
-    enum class ProfileQuery { Absent, Valid, Invalid };
+    /* ecuio_last_error_detail's text (error_detail.h), per thread. */
+    thread_local char t_detail[512] = "";
+
+    /* Malformed: the query breaks the shared grammar. BadValue: a
+     * ?profile= value that can't be a name. */
+    enum class ProfileQuery { Absent, Valid, Malformed, BadValue };
 
     /* Extract the LAST `profile` value from the query of a URI body,
     * through the shared grammar (uri_query.h), so a structurally
@@ -31,12 +40,14 @@ namespace {
     ProfileQuery query_profile(const char* rest, char* out_val)
     {
         bool found = false;
+        bool bad_value = false;
         const bool ok = ecuio_uri::for_each_param(
             ecuio_uri::query_of(rest), [&](const ecuio_uri::param& p) {
                 if (!p.is("profile")) {
                     return true;
                 }
                 if (p.val_len == 0 || p.val_len > ECUIO_PROFILE_NAME_MAX) {
+                    bad_value = true;
                     return false;
                 }
                 memcpy(out_val, p.val, p.val_len);
@@ -45,13 +56,60 @@ namespace {
                 return true;
             });
         if (!ok) {
-            return ProfileQuery::Invalid;
+            return bad_value ? ProfileQuery::BadValue : ProfileQuery::Malformed;
         }
         return found ? ProfileQuery::Valid : ProfileQuery::Absent;
     }
 } // namespace
 
+void ecuio_detail_clear()
+{
+    t_detail[0] = '\0';
+}
+
+void ecuio_detail_set(const char* fmt, ...)
+{
+    va_list ap;
+    va_start(ap, fmt);
+    vsnprintf(t_detail, sizeof(t_detail), fmt, ap);
+    va_end(ap);
+}
+
+void ecuio_detail_set_vendor(const char* call, long status,
+                             const char* vendor_text)
+{
+    /* The vendor's text, on one line and without trailing blanks: it
+     * lands in a single UI line and a log line. */
+    char text[2 * ECUIO_PT_TEXT_LEN] = "";
+    if (vendor_text != nullptr) {
+        size_t n = 0;
+        for (; vendor_text[n] != '\0' && n + 1 < sizeof(text); ++n) {
+            const unsigned char c = static_cast<unsigned char>(vendor_text[n]);
+            text[n] = (c < 0x20) ? ' ' : static_cast<char>(c);
+        }
+        while (n > 0 && text[n - 1] == ' ') {
+            --n;
+        }
+        text[n] = '\0';
+    }
+    const char* name = ecuio_pt_status_name(status);
+    if (name == nullptr) {
+        name = "vendor-specific";
+    }
+    if (text[0] != '\0') {
+        ecuio_detail_set("%s returned status %ld (%s): %s", call, status,
+                         name, text);
+    } else {
+        ecuio_detail_set("%s returned status %ld (%s)", call, status, name);
+    }
+}
+
 extern "C" {
+
+const char* ecuio_last_error_detail(void)
+{
+    return t_detail;
+}
 
 ecuio_status_t ecuio_session_get_error_state(
     ecuio_session_t* session,
@@ -99,6 +157,10 @@ const char* ecuio_status_string(ecuio_status_t status)
         case ECUIO_ERR_TRANSPORT_HARD_FAILURE: return "transport hard failure";
         case ECUIO_ERR_REQUEST_FAILED:          return "request failed (vehicle not accepting requests)";
         case ECUIO_ERR_INVALID_ARGUMENT:        return "invalid argument";
+        case ECUIO_ERR_BAD_URI:                 return "malformed transport URI";
+        case ECUIO_ERR_UNKNOWN_PROFILE:         return "unknown profile";
+        case ECUIO_ERR_VENDOR_REFUSED:          return "the adapter's driver refused";
+        case ECUIO_ERR_SURROGATE_FAILED:        return "surrogate process failed";
         default:                                return "unknown status";
     }
 }
@@ -107,6 +169,7 @@ ecuio_status_t ecuio_session_create(
     const char* transport_uri,
     ecuio_session_t** out_session)
 {
+    ecuio_detail_clear();
     if (out_session == nullptr || transport_uri == nullptr) {
         return ECUIO_ERR_NULL_ARGUMENT;
     }
@@ -127,6 +190,15 @@ ecuio_status_t ecuio_session_create(
     if (!is_mock && !is_j2534) {
         delete *out_session;
         *out_session = nullptr;
+#ifndef _WIN32
+        if (strncmp(transport_uri, "j2534://", 8) == 0) {
+            ecuio_detail_set("j2534:// needs Windows, where J2534 adapters "
+                             "have their drivers");
+            return ECUIO_ERR_NO_TRANSPORT;
+        }
+#endif
+        ecuio_detail_set("unsupported URI scheme: expected mock:// or "
+                         "j2534://");
         return ECUIO_ERR_NO_TRANSPORT;
     }
 
@@ -141,10 +213,18 @@ ecuio_status_t ecuio_session_create(
         case ProfileQuery::Valid:
             chosen = profile_name;
             break;
-        case ProfileQuery::Invalid:
+        case ProfileQuery::Malformed:
             delete *out_session;
             *out_session = nullptr;
-            return ECUIO_ERR_NO_TRANSPORT;   /* malformed query or ?profile= — strict */
+            ecuio_detail_set("malformed query: expected key=value pairs "
+                             "joined by '&'");
+            return ECUIO_ERR_BAD_URI;
+        case ProfileQuery::BadValue:
+            delete *out_session;
+            *out_session = nullptr;
+            ecuio_detail_set("?profile= needs a profile name of 1 to %d "
+                             "characters", ECUIO_PROFILE_NAME_MAX);
+            return ECUIO_ERR_BAD_URI;
         case ProfileQuery::Absent:
         default:
             /* Scheme defaults: mock:// -> mock; j2534:// -> obd2
@@ -158,7 +238,8 @@ ecuio_status_t ecuio_session_create(
     if (ecuio_profile_lookup(chosen, &profile_set) != ECUIO_OK) {
         delete *out_session;
         *out_session = nullptr;
-        return ECUIO_ERR_NO_TRANSPORT;    /* unknown profile name — strict */
+        ecuio_detail_set("no profile is named '%s'", chosen);
+        return ECUIO_ERR_UNKNOWN_PROFILE;
     }
 
     /* Set before attach: the j2534 transport derives its scheduler
@@ -186,6 +267,7 @@ ecuio_status_t ecuio_session_create(
 
 ecuio_status_t ecuio_session_start(ecuio_session_t* session)
 {
+    ecuio_detail_clear();
     if (session == nullptr) {
         return ECUIO_ERR_NULL_ARGUMENT;
     }

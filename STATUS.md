@@ -111,9 +111,9 @@ to plausible values. Next is the plan in
     run sheets are
     [bench-runsheet.md](docs/bench-sessions/bench-runsheet.md) and
     [vehicle-runsheet.md](docs/bench-sessions/vehicle-runsheet.md).
-  - **Tests:** 230 ctest cases (Windows, Visual Studio 18 build
+  - **Tests:** 247 ctest cases (Windows, Visual Studio 18 build
     tools, both trees rebuilt, 2026-10-22), plus the cross-arch
-    subset (37/37). All
+    subset (45/45). All
     passed except the env-gated cross-arch skip. Every first-party
     target builds with compiler warnings on, at 0 on MSVC. CI was green on all
     eight jobs on PR #16 (merged as `9125b5e`), including the
@@ -481,19 +481,6 @@ week or more or a design that needs an ADR first.
 These make a failed field session explainable, so they come first
 in the backlog.
 
-- **Say why a connect failed (M).** `ecuio_session_create` folds
-  distinct causes into two codes. A refused `PassThruOpen` (a vendor
-  status) and a DLL that won't load both read "failed to load
-  transport library" (`ECUIO_ERR_LOAD_FAILED`); a malformed URI and an
-  unknown profile both read "no transport available"
-  (`ECUIO_ERR_NO_TRANSPORT`). Add status codes (the enum is append-only)
-  or a last-error string on the session API, and show the specific
-  cause and vendor status in the Settings error line.
-- **Vendor error text (S).** After a failed vendor call, fetch
-  `PassThruGetLastError` and put its text in the session log and the
-  error line; the OBDX Pro VT's status 34 has no label without it.
-  Needs a loader helper and a matching surrogate op, tested on both
-  backends.
 - **Session details in the activity log (S).** Connects,
   disconnects, failed connects and link-health transitions are
   logged. Add what a support question needs:

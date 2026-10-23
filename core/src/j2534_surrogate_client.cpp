@@ -22,6 +22,7 @@
 #include <cwchar>
 
 #include "win_utf8.h"
+#include "error_detail.h"
 
 struct ecuio_j2534_sur_handle {
     bool    pipe_connected = false;
@@ -476,13 +477,15 @@ bool transact(ecuio_j2534_sur_handle_t* h, const ecuio_sur_request_t& req,
 }
 
 /* Decode the child's exit code (j2534.md "Child exit codes") so a spawn
- * failure names its stage instead of surfacing as a bare LOAD_FAILED.
- * Safe to call when the child is still running — it then does nothing. */
-void log_child_exit(const ecuio_j2534_sur_handle_t* h)
+ * failure names its stage in the session log. Returns the code, or
+ * STILL_ACTIVE while the child runs (it then logs nothing). */
+DWORD log_child_exit(const ecuio_j2534_sur_handle_t* h)
 {
-    DWORD code = 0;
-    if (h->process == nullptr || !GetExitCodeProcess(h->process, &code)) return;
-    if (code == STILL_ACTIVE) return;
+    DWORD code = STILL_ACTIVE;
+    if (h->process == nullptr || !GetExitCodeProcess(h->process, &code)) {
+        return STILL_ACTIVE;
+    }
+    if (code == STILL_ACTIVE) return code;
     const char* stage =
         (code == 1) ? "bad argument count"
       : (code == 4) ? "LoadLibraryEx of the vendor DLL failed"
@@ -490,6 +493,62 @@ void log_child_exit(const ecuio_j2534_sur_handle_t* h)
       : (code == 7) ? "could not connect to the app's pipe"
       :               "unknown";
     SUR_LOG(h, "open: child exited with code %lu (%s)\n", code, stage);
+    return code;
+}
+
+/* A child that exited during startup: a DLL that won't load is the
+ * DLL's fault, as in-proc; anything else is the surrogate's. */
+ecuio_status_t child_exit_failed(DWORD code)
+{
+    switch (code) {
+    case 4:
+        ecuio_detail_set("the surrogate couldn't load the DLL (the Windows "
+                         "error is in its session log, in %%TEMP%%)");
+        return ECUIO_ERR_LOAD_FAILED;
+    case 5:
+        ecuio_detail_set("the DLL lacks a mandatory J2534 export (the "
+                         "surrogate's session log, in %%TEMP%%, names it)");
+        return ECUIO_ERR_LOAD_FAILED;
+    case 7:
+        ecuio_detail_set("the surrogate couldn't connect to the app's pipe");
+        return ECUIO_ERR_SURROGATE_FAILED;
+    default:
+        ecuio_detail_set("the surrogate exited during startup with code %lu",
+                         code);
+        return ECUIO_ERR_SURROGATE_FAILED;
+    }
+}
+
+/* A surrogate that couldn't be started; the session log has the same
+ * stage and error. */
+ecuio_status_t spawn_failed(const char* stage, DWORD err)
+{
+    if (err != 0) {
+        ecuio_detail_set("couldn't start the surrogate: %s (Windows error %lu)",
+                         stage, err);
+    } else {
+        ecuio_detail_set("couldn't start the surrogate: %s", stage);
+    }
+    return ECUIO_ERR_SURROGATE_FAILED;
+}
+
+/* The vendor's description of its last failed call, through
+ * OP_GET_LAST_ERROR, into out (ECUIO_PT_TEXT_LEN + 1 bytes); "" when
+ * the DLL exports no PassThruGetLastError or the child can't answer. */
+void fetch_vendor_text(ecuio_j2534_sur_handle_t* h, char* out)
+{
+    out[0] = '\0';
+    ecuio_sur_request_t req = {};
+    req.request_id = h->next_request_id++;
+    req.opcode = ECUIO_SUR_OP_GET_LAST_ERROR;
+    ecuio_sur_response_t resp = {};
+    if (!transact(h, req, &resp, kTransactTimeoutMs) ||
+        resp.status != static_cast<int32_t>(ECUIO_PT_STATUS_NOERROR)) {
+        return;
+    }
+    resp.text[sizeof(resp.text) - 1] = '\0';   /* untrusted pipe */
+    memcpy(out, resp.text, sizeof(resp.text));
+    out[ECUIO_PT_TEXT_LEN] = '\0';
 }
 
 } // namespace
@@ -508,6 +567,7 @@ ecuio_status_t ecuio_j2534_sur_open(const char* dll_path,
     wchar_t wdll[ECUIO_J2534_DLL_PATH_LEN];
     if (!ecuio_utf8_to_wide(dll_path, wdll, _countof(wdll))) {
         SUR_LOG(nullptr, "open: dll path is not UTF-8 or too long\n");
+        ecuio_detail_set("the DLL path isn't valid UTF-8, or is too long");
         return ECUIO_ERR_LOAD_FAILED;
     }
 
@@ -533,7 +593,9 @@ ecuio_status_t ecuio_j2534_sur_open(const char* dll_path,
     if (!exe_ok) {
         SUR_LOG(h, "open: no surrogate exe: %s ('%s')\n", exe_why, exe8);
         ecuio_j2534_sur_close(h);
-        return ECUIO_ERR_LOAD_FAILED;
+        ecuio_detail_set("no surrogate (ecuio-j2534-surrogate.exe): %s",
+                         exe_why);
+        return ECUIO_ERR_SURROGATE_FAILED;
     }
 
     /* Local, user-only, unguessable, and refused if the name already
@@ -544,9 +606,10 @@ ecuio_status_t ecuio_j2534_sur_open(const char* dll_path,
     if (!make_pipe_name(seq, pipe_name, sizeof(pipe_name)) ||
         !ecuio_utf8_to_wide(pipe_name, wpipe, _countof(wpipe)) ||
         !init_user_only(&sec)) {
-        SUR_LOG(h, "open: pipe setup failed (err=%lu)\n", GetLastError());
+        const DWORD err = GetLastError();
+        SUR_LOG(h, "open: pipe setup failed (err=%lu)\n", err);
         ecuio_j2534_sur_close(h);
-        return ECUIO_ERR_LOAD_FAILED;
+        return spawn_failed("pipe setup", err);
     }
     h->pipe = CreateNamedPipeW(wpipe,
                                PIPE_ACCESS_DUPLEX | FILE_FLAG_OVERLAPPED |
@@ -556,9 +619,10 @@ ecuio_status_t ecuio_j2534_sur_open(const char* dll_path,
                                1, sizeof(ecuio_sur_request_t),
                                sizeof(ecuio_sur_response_t), 0, &sec.sa);
     if (h->pipe == INVALID_HANDLE_VALUE) {
-        SUR_LOG(h, "open: CreateNamedPipe failed (err=%lu)\n", GetLastError());
+        const DWORD err = GetLastError();
+        SUR_LOG(h, "open: CreateNamedPipe failed (err=%lu)\n", err);
         ecuio_j2534_sur_close(h);
-        return ECUIO_ERR_LOAD_FAILED;
+        return spawn_failed("CreateNamedPipe", err);
     }
 
     h->job = CreateJobObjectA(nullptr, nullptr);
@@ -567,16 +631,17 @@ ecuio_status_t ecuio_j2534_sur_open(const char* dll_path,
     if (h->job == nullptr ||
         !SetInformationJobObject(h->job, JobObjectExtendedLimitInformation,
                                  &ji, sizeof(ji))) {
-        SUR_LOG(h, "open: job object setup failed (err=%lu)\n", GetLastError());
+        const DWORD err = GetLastError();
+        SUR_LOG(h, "open: job object setup failed (err=%lu)\n", err);
         ecuio_j2534_sur_close(h);
-        return ECUIO_ERR_LOAD_FAILED;
+        return spawn_failed("job object setup", err);
     }
 
     wchar_t cmdline[MAX_PATH * 3 + 256];
     if (swprintf(cmdline, _countof(cmdline), L"\"%ls\" \"%ls\" \"%ls\"",
                  exe, wdll, wpipe) < 0) {
         ecuio_j2534_sur_close(h);
-        return ECUIO_ERR_LOAD_FAILED;
+        return spawn_failed("the command line is too long", 0);
     }
 
     /* Only the log reaches the child. Inheritance on its own would hand
@@ -595,14 +660,15 @@ ecuio_status_t ecuio_j2534_sur_open(const char* dll_path,
             SUR_LOG(h, "open: attribute list failed (size %zu)\n",
                     static_cast<size_t>(attr_size));
             ecuio_j2534_sur_close(h);
-            return ECUIO_ERR_LOAD_FAILED;
+            return spawn_failed("attribute list", 0);
         }
         if (!UpdateProcThreadAttribute(attrs, 0, PROC_THREAD_ATTRIBUTE_HANDLE_LIST,
                                        &h->log, sizeof(h->log), nullptr, nullptr)) {
+            const DWORD err = GetLastError();
             DeleteProcThreadAttributeList(attrs);
-            SUR_LOG(h, "open: handle list failed (err=%lu)\n", GetLastError());
+            SUR_LOG(h, "open: handle list failed (err=%lu)\n", err);
             ecuio_j2534_sur_close(h);
-            return ECUIO_ERR_LOAD_FAILED;
+            return spawn_failed("handle list", err);
         }
         si.lpAttributeList = attrs;
         si.StartupInfo.dwFlags |= STARTF_USESTDHANDLES;
@@ -624,7 +690,7 @@ ecuio_status_t ecuio_j2534_sur_open(const char* dll_path,
     if (!spawned) {
         SUR_LOG(h, "open: CreateProcess failed (err=%lu) exe='%s'\n", spawn_err, exe8);
         ecuio_j2534_sur_close(h);
-        return ECUIO_ERR_LOAD_FAILED;
+        return spawn_failed("CreateProcess", spawn_err);
     }
     if (h->log != INVALID_HANDLE_VALUE) {
         /* No later spawn, by this client or anyone in the app, inherits
@@ -649,12 +715,12 @@ ecuio_status_t ecuio_j2534_sur_open(const char* dll_path,
      * still CREATE_SUSPENDED and no vendor call has run, so a hard
      * termination here is clean. */
     if (!AssignProcessToJobObject(h->job, pi.hProcess)) {
-        SUR_LOG(h, "open: AssignProcessToJobObject failed (err=%lu)\n",
-                GetLastError());
+        const DWORD err = GetLastError();
+        SUR_LOG(h, "open: AssignProcessToJobObject failed (err=%lu)\n", err);
         TerminateProcess(pi.hProcess, 1);
         CloseHandle(pi.hThread);
         ecuio_j2534_sur_close(h);
-        return ECUIO_ERR_LOAD_FAILED;
+        return spawn_failed("AssignProcessToJobObject", err);
     }
     ResumeThread(pi.hThread);
     CloseHandle(pi.hThread);
@@ -662,12 +728,15 @@ ecuio_status_t ecuio_j2534_sur_open(const char* dll_path,
     OVERLAPPED ov = {};
     ov.hEvent = CreateEventA(nullptr, TRUE, FALSE, nullptr);
     if (ov.hEvent == nullptr) {
+        const DWORD err = GetLastError();
         ecuio_j2534_sur_close(h);
-        return ECUIO_ERR_LOAD_FAILED;
+        return spawn_failed("CreateEvent", err);
     }
     BOOL conn = ConnectNamedPipe(h->pipe, &ov);
     DWORD cerr = GetLastError();
     bool connected = false;
+    DWORD exit_code = STILL_ACTIVE;
+    bool handshake_timed_out = false;
     if (conn || cerr == ERROR_PIPE_CONNECTED) {
         connected = true;
     } else if (cerr == ERROR_IO_PENDING) {
@@ -678,8 +747,9 @@ ecuio_status_t ecuio_j2534_sur_open(const char* dll_path,
             DWORD xfer = 0;
             connected = GetOverlappedResult(h->pipe, &ov, &xfer, FALSE);
         } else if (wr == WAIT_OBJECT_0 + 1) {
-            log_child_exit(h);                   /* replaces the inline decode */
+            exit_code = log_child_exit(h);
         } else {
+            handshake_timed_out = true;
             SUR_LOG(h, "open: handshake timeout after %lu ms — child alive but "
                     "never opened the pipe (process startup stalled)\n",
                     handshake_timeout_ms());
@@ -699,7 +769,15 @@ ecuio_status_t ecuio_j2534_sur_open(const char* dll_path,
     if (!connected) {
         SUR_LOG(h, "open: handshake failed — child never connected\n");
         ecuio_j2534_sur_close(h);
-        return ECUIO_ERR_LOAD_FAILED;
+        if (exit_code != STILL_ACTIVE) {
+            return child_exit_failed(exit_code);
+        }
+        if (handshake_timed_out) {
+            ecuio_detail_set("the surrogate didn't start within %lu ms",
+                             handshake_timeout_ms());
+            return ECUIO_ERR_SURROGATE_FAILED;
+        }
+        return spawn_failed("the pipe handshake", cerr);
     }
 
     h->pipe_connected = true;
@@ -727,20 +805,32 @@ ecuio_status_t ecuio_j2534_sur_open(const char* dll_path,
          * "blocked". Wait for that exit and let log_child_exit name
          * the stage instead. */
         const bool timed_out = (h->pending_response_id == req.request_id);
+        bool vendor_blocked = false;
         if (timed_out && WaitForSingleObject(h->process, 0) != WAIT_OBJECT_0) {
             SUR_LOG(h, "open: no reply to OP_OPEN after %lu ms, child alive "
                     "(vendor blocked in DllMain or PassThruOpen)\n",
                     handshake_timeout_ms());
+            vendor_blocked = true;
         } else {
             WaitForSingleObject(h->process, 1000);
         }
-        log_child_exit(h);
+        const DWORD code = log_child_exit(h);
         /* Wait out the kill as well, so close sees a dead child and
          * skips the polite OP_SHUTDOWN it could never answer. */
         TerminateProcess(h->process, 1);
         WaitForSingleObject(h->process, 1000);
         ecuio_j2534_sur_close(h);
-        return ECUIO_ERR_LOAD_FAILED;
+        if (vendor_blocked) {
+            ecuio_detail_set("PassThruOpen didn't return within %lu ms; the "
+                             "driver may be waiting for its adapter",
+                             handshake_timeout_ms());
+            return ECUIO_ERR_VENDOR_REFUSED;
+        }
+        if (code != STILL_ACTIVE) {
+            return child_exit_failed(code);
+        }
+        ecuio_detail_set("the surrogate stopped answering during PassThruOpen");
+        return ECUIO_ERR_SURROGATE_FAILED;
     }
     /* Checked here too, before the status: a child older than the
      * check echoes nothing and opens the device anyway, and the close
@@ -751,12 +841,18 @@ ecuio_status_t ecuio_j2534_sur_open(const char* dll_path,
                 static_cast<unsigned>(resp.aux),
                 static_cast<unsigned>(ECUIO_SUR_FINGERPRINT));
         ecuio_j2534_sur_close(h);
-        return ECUIO_ERR_LOAD_FAILED;
+        ecuio_detail_set("the surrogate was built from other shared headers: "
+                         "rebuild build-win32, then build");
+        return ECUIO_ERR_SURROGATE_FAILED;
     }
     if (resp.status != static_cast<int32_t>(ECUIO_PT_STATUS_NOERROR)) {
-        SUR_LOG(h, "open: PassThruOpen refused (vendor status %d)\n", resp.status);
+        char text[ECUIO_PT_TEXT_LEN + 1];
+        fetch_vendor_text(h, text);
+        SUR_LOG(h, "open: PassThruOpen refused (vendor status %d)%s%s\n",
+                resp.status, text[0] != '\0' ? ": " : "", text);
+        ecuio_detail_set_vendor("PassThruOpen", resp.status, text);
         ecuio_j2534_sur_close(h);
-        return ECUIO_ERR_LOAD_FAILED;
+        return ECUIO_ERR_VENDOR_REFUSED;
     }
     *out_handle = h;
     return ECUIO_OK;
@@ -779,12 +875,20 @@ ecuio_status_t ecuio_j2534_sur_connect_channel(ecuio_j2534_sur_handle_t* h,
 
     ecuio_sur_response_t resp = {};
     if (!transact(h, req, &resp, kTransactTimeoutMs)) {
-        return ECUIO_ERR_NO_TRANSPORT;
+        ecuio_detail_set("the surrogate stopped answering during "
+                         "PassThruConnect");
+        return ECUIO_ERR_SURROGATE_FAILED;
     }
     if (resp.status != static_cast<int32_t>(ECUIO_PT_STATUS_NOERROR)) {
-        SUR_LOG(h, "connect: PassThruConnect refused (vendor status %d)\n",
-                resp.status);
-        return ECUIO_ERR_NO_TRANSPORT;
+        char text[ECUIO_PT_TEXT_LEN + 1];
+        fetch_vendor_text(h, text);
+        SUR_LOG(h, "connect: PassThruConnect refused (vendor status %d)%s%s\n",
+                resp.status, text[0] != '\0' ? ": " : "", text);
+        char call[64];
+        snprintf(call, sizeof(call), "PassThruConnect (ISO 15765 at %lu baud)",
+                 baud);
+        ecuio_detail_set_vendor(call, resp.status, text);
+        return ECUIO_ERR_VENDOR_REFUSED;
     }
     *out_channel = resp.handle_or_channel;
     return ECUIO_OK;
@@ -932,9 +1036,19 @@ ecuio_status_t ecuio_j2534_sur_start_msg_filter(ecuio_j2534_sur_handle_t* h,
     req.u.start_filter.fc_len = fc_len;
 
     ecuio_sur_response_t resp = {};
-    if (!transact(h, req, &resp, kTransactTimeoutMs) ||
-        resp.status != static_cast<int32_t>(ECUIO_PT_STATUS_NOERROR)) {
-        return ECUIO_ERR_NO_TRANSPORT;
+    if (!transact(h, req, &resp, kTransactTimeoutMs)) {
+        ecuio_detail_set("the surrogate stopped answering during "
+                         "PassThruStartMsgFilter");
+        return ECUIO_ERR_SURROGATE_FAILED;
+    }
+    if (resp.status != static_cast<int32_t>(ECUIO_PT_STATUS_NOERROR)) {
+        char text[ECUIO_PT_TEXT_LEN + 1];
+        fetch_vendor_text(h, text);
+        SUR_LOG(h, "start_filter: PassThruStartMsgFilter refused (vendor "
+                "status %d)%s%s\n", resp.status,
+                text[0] != '\0' ? ": " : "", text);
+        ecuio_detail_set_vendor("PassThruStartMsgFilter", resp.status, text);
+        return ECUIO_ERR_VENDOR_REFUSED;
     }
     *out_filter_id = resp.handle_or_channel;
     return ECUIO_OK;

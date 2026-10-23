@@ -55,6 +55,7 @@ int main(void)
      * regressions at link time. */
     printf("%s %s\n", ecuio_version_string(),
            ecuio_status_string(ECUIO_ERR_SESSION_CLOSED));
+    printf("detail '%s'\n", ecuio_last_error_detail());
     if (ecuio_validate_signal_set(ecuio_mock_signal_set(), &validation) != ECUIO_VALIDATE_OK ||
         validation.code != ECUIO_VALIDATE_OK || validation.index != UINT32_MAX ||
         ecuio_mock_signal_set()->layout_version != ECUIO_SIGNAL_SET_LAYOUT) {

@@ -16,6 +16,7 @@
 #include "pid_scheduler.h"
 #include "j2534_backoff.h"
 #include "uri_query.h"
+#include "error_detail.h"
 #include "ecuio/profile.h"
 #include "ecuio/signal_sets.h"
 
@@ -626,14 +627,22 @@ bool parse_number(const char* s, size_t len, unsigned long* out_val)
  *     both are known. */
 ecuio_status_t parse_query(const char* query, j2534_uri_params* p)
 {
-    const bool ok = ecuio_uri::for_each_param(query, [p](const ecuio_uri::param& q) {
+    /* What a refused key should have held; nullptr for an unknown key. */
+    const char* wanted = nullptr;
+    const ecuio_uri::param* refused = nullptr;
+    ecuio_uri::param last = {};
+    const bool ok = ecuio_uri::for_each_param(query, [&](const ecuio_uri::param& q) {
         unsigned long v = 0;
+        last = q;
+        refused = &last;
         if (q.is("baud")) {
+            wanted = "a nonzero decimal";
             if (!parse_number(q.val, q.val_len, &v) || v == 0) {
                 return false;
             }
             p->baud = v;
         } else if (q.is("txid")) {
+            wanted = "a CAN ID from 1 to 0x1FFFFFFF";
             if (!parse_number(q.val, q.val_len, &v) ||
                 v == 0 || v > J2534_CAN_ID_MAX) {
                 return false;
@@ -646,29 +655,47 @@ ecuio_status_t parse_query(const char* query, j2534_uri_params* p)
              * DLL load, so an unknown or malformed name never gets
              * here. */
         } else if (q.is("poll")) {
+            wanted = "a PID from 0x00 to 0xFF";
             if (!parse_number(q.val, q.val_len, &v) || v > J2534_PID_MAX) {
                 return false;
             }
             p->poll_pid = v;
             p->has_poll = true;
         } else if (q.is("flags")) {
+            wanted = "a decimal or 0x-hex number";
             if (!parse_number(q.val, q.val_len, &v)) {
                 return false;
             }
             p->flags = v;
         } else if (q.is("filter")) {
+            wanted = "a CAN ID from 1 to 0x1FFFFFFF";
             if (!parse_number(q.val, q.val_len, &v) ||
                 v == 0 || v > J2534_CAN_ID_MAX) {
                 return false;
             }
             p->rx_id = v;
         } else {
+            wanted = nullptr;
             return false;   /* unknown parameter */
         }
+        refused = nullptr;
         return true;
     });
     if (!ok) {
-        return ECUIO_ERR_NO_TRANSPORT;
+        if (refused == nullptr) {
+            ecuio_detail_set("malformed query: expected key=value pairs "
+                             "joined by '&'");
+        } else if (wanted == nullptr) {
+            ecuio_detail_set("j2534:// takes no query key '%.*s'",
+                             static_cast<int>(refused->key_len), refused->key);
+        } else {
+            const int shown = static_cast<int>(
+                (refused->val_len < 32) ? refused->val_len : 32);
+            ecuio_detail_set("?%.*s= needs %s, not '%.*s'",
+                             static_cast<int>(refused->key_len), refused->key,
+                             wanted, shown, refused->val);
+        }
+        return ECUIO_ERR_BAD_URI;
     }
 
     /* The poll-needs-a-channel rule lives in j2534_attach, not here:
@@ -698,7 +725,8 @@ ecuio_status_t resolve_uri(const char* uri, ecuio_j2534_device_t* dev,
                      ? static_cast<size_t>(q - rest)
                      : strlen(rest);
     if (n >= sizeof(selector)) {
-        return ECUIO_ERR_NO_TRANSPORT;    /* longer than any legal selector */
+        ecuio_detail_set("the adapter selector is longer than any DLL path");
+        return ECUIO_ERR_BAD_URI;
     }
     memcpy(selector, rest, n);
     selector[n] = '\0';
@@ -716,10 +744,12 @@ ecuio_status_t resolve_uri(const char* uri, ecuio_j2534_device_t* dev,
     if (selector[0] == '\0') {
         ecuio_status_t st = ecuio_j2534_discover_devices(&devices, &count);
         if (st != ECUIO_OK) {
+            ecuio_detail_set("couldn't list the installed J2534 adapters");
             return st;
         }
         if (count == 0) {
-            return ECUIO_ERR_NO_TRANSPORT;    /* no vendors installed */
+            ecuio_detail_set("no J2534 adapter is installed");
+            return ECUIO_ERR_NO_TRANSPORT;
         }
         *dev = devices[0];   /* first device — documented default */
         ecuio_j2534_free_devices(devices);
@@ -733,7 +763,8 @@ ecuio_status_t resolve_uri(const char* uri, ecuio_j2534_device_t* dev,
         (strlen(selector) >= 4 &&
          _stricmp(selector + strlen(selector) - 4, ".dll") == 0)) {
         if (strlen(selector) >= ECUIO_J2534_DLL_PATH_LEN) {
-            return ECUIO_ERR_NO_TRANSPORT;
+            ecuio_detail_set("the DLL path is too long");
+            return ECUIO_ERR_BAD_URI;
         }
         memcpy(dev->dll_path, selector, strlen(selector) + 1);
         return ECUIO_OK;
@@ -742,6 +773,7 @@ ecuio_status_t resolve_uri(const char* uri, ecuio_j2534_device_t* dev,
     /* Otherwise: vendor-name match against discovery, case-insensitive. */
     ecuio_status_t st = ecuio_j2534_discover_devices(&devices, &count);
     if (st != ECUIO_OK) {
+        ecuio_detail_set("couldn't list the installed J2534 adapters");
         return st;
     }
     bool matched = false;
@@ -754,6 +786,7 @@ ecuio_status_t resolve_uri(const char* uri, ecuio_j2534_device_t* dev,
     }
     ecuio_j2534_free_devices(devices);
     if (!matched) {
+        ecuio_detail_set("no installed J2534 adapter is named '%s'", selector);
         return ECUIO_ERR_NO_TRANSPORT;
     }
     return ECUIO_OK;
@@ -894,7 +927,14 @@ ecuio_status_t j2534_attach(ecuio_session_t* session, const char* uri)
      * omitting them. Fires before any hardware is touched. */
     if ((sched_mode || params.has_poll) && t->chan_count == 0) {
         delete t;
-        return ECUIO_ERR_NO_TRANSPORT;
+        if (params.has_poll) {
+            ecuio_detail_set("?poll= needs a channel to receive on: add "
+                             "?filter=, or use a profile that declares one");
+        } else {
+            ecuio_detail_set("the profile requests PIDs but declares no "
+                             "channel to receive on");
+        }
+        return ECUIO_ERR_BAD_URI;
     }
 
     /* Connect flags: ?flags= as given, plus CAN_29BIT_ID when the
@@ -911,7 +951,9 @@ ecuio_status_t j2534_attach(ecuio_session_t* session, const char* uri)
     }
     if (wide_chans != 0 && wide_chans != t->chan_count) {
         delete t;
-        return ECUIO_ERR_NO_TRANSPORT;
+        ecuio_detail_set("the channels mix 11-bit and 29-bit IDs, which "
+                         "one connection can't carry");
+        return ECUIO_ERR_BAD_URI;
     }
     const unsigned long connect_flags =
         params.flags | ((wide_chans != 0) ? ECUIO_PT_CAN_29BIT_ID : 0UL);

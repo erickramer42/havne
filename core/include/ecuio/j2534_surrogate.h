@@ -17,9 +17,11 @@ extern "C" {
 typedef struct ecuio_j2534_sur_handle ecuio_j2534_sur_handle_t;
 
 /* Spawn the surrogate hosting dll_path under a kill-on-close job and
- * handshake with OP_OPEN. Blocking. Every startup failure (exe
- * missing, spawn failed, DLL load failed, handshake timeout,
- * PassThruOpen refused) returns ECUIO_ERR_LOAD_FAILED. */
+ * handshake with OP_OPEN. Blocking. A DLL the child couldn't load or
+ * resolve (exit 4 or 5) returns ECUIO_ERR_LOAD_FAILED; a refused or
+ * never-returning PassThruOpen ECUIO_ERR_VENDOR_REFUSED; a missing exe,
+ * a failed spawn or handshake, or a child from other shared headers
+ * ECUIO_ERR_SURROGATE_FAILED. ecuio_last_error_detail says which. */
 ecuio_status_t ecuio_j2534_sur_open(const char* dll_path,
                                     ecuio_j2534_sur_handle_t** out_handle);
 

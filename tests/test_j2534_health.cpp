@@ -10,62 +10,25 @@
 //          timeout, answered requests, and the no-ACK bus. TX and
 //          first-frame indications are skipped without ending a read,
 //          so a reply comes back in its own request's cycle.
-//          The fake is driven through its control page
-//          (fake_control.h), the one channel that reaches the child's
-//          instance mid-session; the page also shows which process
-//          opened the fake, so each case checks its backend.
-//
-// ARCH note: in this tree the surrogate case runs the x64 surrogate
-// hosting the x64 fake, with the loader's routing forced
-// (ecuio_j2534_force_surrogate_for_testing). With ECUIO_FAKE_DLL set
-// (the cross-arch run), it runs the Win32 tree's fake in the x86
-// surrogate that ECUIO_SURROGATE_EXE names.
+//          The backend setup and the fake's control page are in
+//          j2534_backend_fixture.h.
 
 #include <gtest/gtest.h>
 
 #include "ecuio/core.h"
-#include "ecuio/internal.h"
 #include "ecuio/j2534_ptypes.h"
 
 #ifdef _WIN32
-#include <windows.h>
-
 #include <atomic>
 #include <chrono>
-#include <cstdio>
-#include <cstdlib>
 #include <cstring>
-#include <memory>
-#include <string>
 #include <thread>
 
-#include "fake_control.h"
+#include "j2534_backend_fixture.h"
 
 namespace {
 
-enum class Backend { InProc, Surrogate };
-
-std::string backend_label(const ::testing::TestParamInfo<Backend>& info)
-{
-    return info.param == Backend::InProc ? "InProc" : "Surrogate";
-}
-
-/* Replaces a variable for one scope and puts the previous value back:
- * the cross-arch run sets ECUIO_SURROGATE_EXE itself. */
-struct EnvSwap {
-    const char* name;
-    bool had = false;
-    char old[1024] = {};
-    EnvSwap(const char* n, const char* v) : name(n)
-    {
-        const DWORD k = GetEnvironmentVariableA(n, old, sizeof(old));
-        had = k > 0 && k < sizeof(old);
-        SetEnvironmentVariableA(n, v);
-    }
-    ~EnvSwap() { SetEnvironmentVariableA(name, had ? old : nullptr); }
-    EnvSwap(const EnvSwap&) = delete;
-    EnvSwap& operator=(const EnvSwap&) = delete;
-};
+using j2534_backends::Backend;
 
 void count_cb(const ecuio_frame_t* /*frame*/, void* user_data)
 {
@@ -101,35 +64,16 @@ void delivery_cb(const ecuio_frame_t* frame, void* user_data)
 /* The session and its frame count are members, and TearDown closes the
  * session first, so a failed ASSERT can't leave the worker counting
  * into a destroyed local. */
-class J2534HealthTest : public ::testing::TestWithParam<Backend> {
+class J2534HealthTest : public j2534_backends::BackendTest {
 protected:
-    fake_control::Page* page = nullptr;
-    std::string dll;
-    std::unique_ptr<EnvSwap> exe_swap;
     ecuio_session_t* session = nullptr;
     std::atomic<int> frames{0};
     Delivery delivered;
 
     void SetUp() override
     {
-        page = fake_control::create_for_this_process();
-        ASSERT_NE(page, nullptr);
-        fake_control::reset(page);
+        ASSERT_NO_FATAL_FAILURE(BackendTest::SetUp());
         delivered.page = page;
-
-        if (GetParam() == Backend::InProc) {
-            dll = FAKE_J2534_DLL_PATH;
-            return;
-        }
-        const char* cross = std::getenv("ECUIO_FAKE_DLL");
-        if (cross != nullptr && cross[0] != '\0') {
-            dll = cross;   /* x86: its surrogate is already named */
-        } else {
-            dll = FAKE_J2534_DLL_PATH;
-            exe_swap = std::make_unique<EnvSwap>("ECUIO_SURROGATE_EXE",
-                                                 SURROGATE_EXE_PATH);
-        }
-        ecuio_j2534_force_surrogate_for_testing(true);
     }
 
     void TearDown() override
@@ -139,35 +83,16 @@ protected:
             ecuio_session_destroy(session);
             session = nullptr;
         }
-        ecuio_j2534_force_surrogate_for_testing(false);
-        exe_swap.reset();
-        if (page != nullptr) {
-            fake_control::reset(page);   /* no knob reaches the next case */
-        }
-    }
-
-    void knob(const char* name, const char* value)
-    {
-        ASSERT_TRUE(fake_control::set(page, name, value)) << name;
+        BackendTest::TearDown();
     }
 
     /* Creates and starts the session on the fake with the given
-     * query, counting its frames, and checks the backend it runs on:
-     * the fake publishes the process that opened it. */
+     * query, counting its frames, and checks the backend it runs on. */
     void start_session(const char* query)
     {
-        char uri[1200];
-        snprintf(uri, sizeof(uri), "j2534://%s%s", dll.c_str(), query);
-        ASSERT_EQ(ecuio_session_create(uri, &session), ECUIO_OK) << uri;
-        const unsigned long opener = fake_control::opener_pid(page);
-        if (GetParam() == Backend::InProc) {
-            ASSERT_EQ(opener, GetCurrentProcessId())
-                << "the fake didn't open in this process";
-        } else {
-            ASSERT_NE(opener, 0ul) << "the fake never opened";
-            ASSERT_NE(opener, GetCurrentProcessId())
-                << "the fake opened in-proc, not in the surrogate";
-        }
+        const std::string u = uri(query);
+        ASSERT_EQ(ecuio_session_create(u.c_str(), &session), ECUIO_OK) << u;
+        ASSERT_NO_FATAL_FAILURE(expect_opened_on_backend());
         ASSERT_EQ(ecuio_register_frame_callback(session, count_cb, &frames),
                   ECUIO_OK);
         ASSERT_EQ(ecuio_register_frame_callback(session, delivery_cb,
@@ -558,7 +483,7 @@ TEST_P(J2534HealthTest, IndicationsAheadOfAReplyAreSkipped)
 INSTANTIATE_TEST_SUITE_P(Backend, J2534HealthTest,
                          ::testing::Values(Backend::InProc,
                                            Backend::Surrogate),
-                         backend_label);
+                         j2534_backends::label);
 
 } // namespace
 

@@ -166,6 +166,19 @@ TEST(BridgeTest, InvalidUriReturnsError)
     EXPECT_FALSE(bridge.connected());
 }
 
+// The error a failed connect returns, and logs, names the cause: the
+// status, then core's detail.
+TEST(BridgeTest, FailedConnectNamesItsCause)
+{
+    QtTuneBridge bridge;
+    EXPECT_EQ(bridge.connectSession("mock://demo?interval=10"),
+              QStringLiteral("malformed transport URI: mock:// takes no query "
+                             "key 'interval', only profile"));
+    EXPECT_EQ(bridge.connectSession("mock://demo?profile=bogus"),
+              QStringLiteral("unknown profile: no profile is named 'bogus'"));
+    EXPECT_FALSE(bridge.connected());
+}
+
 TEST(BridgeTest, FramesMarshalFromWorkerToGuiThread)
 {
     QtTuneBridge bridge;

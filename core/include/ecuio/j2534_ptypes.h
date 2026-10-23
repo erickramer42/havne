@@ -22,9 +22,52 @@
  * returned as one. Verified against FreeSSM J2534.h and diamondman
  * J2534_v0404.h. */
 #define ECUIO_PT_STATUS_NOERROR     0L
+#define ECUIO_PT_STATUS_NOT_SUPPORTED 0x01L
 #define ECUIO_PT_STATUS_FAILED      0x07L
 #define ECUIO_PT_STATUS_TIMEOUT     0x09L
 #define ECUIO_PT_STATUS_BUFFER_EMPTY 0x10L
+
+/* J2534-1 v04.04's name for a status, or NULL for one it doesn't
+ * define: a vendor's own (the OBDX Pro VT and VX refuse to open with 34
+ * when no adapter is attached). The values match the j2534-rs binding's
+ * table (github.com/jcmnn/j2534-rs, src/lib.rs) and the four codes above. */
+static inline const char* ecuio_pt_status_name(long status)
+{
+    switch (status) {
+    case 0x00: return "STATUS_NOERROR";
+    case 0x01: return "ERR_NOT_SUPPORTED";
+    case 0x02: return "ERR_INVALID_CHANNEL_ID";
+    case 0x03: return "ERR_INVALID_PROTOCOL_ID";
+    case 0x04: return "ERR_NULL_PARAMETER";
+    case 0x05: return "ERR_INVALID_IOCTL_VALUE";
+    case 0x06: return "ERR_INVALID_FLAGS";
+    case 0x07: return "ERR_FAILED";
+    case 0x08: return "ERR_DEVICE_NOT_CONNECTED";
+    case 0x09: return "ERR_TIMEOUT";
+    case 0x0A: return "ERR_INVALID_MSG";
+    case 0x0B: return "ERR_INVALID_TIME_INTERVAL";
+    case 0x0C: return "ERR_EXCEEDED_LIMIT";
+    case 0x0D: return "ERR_INVALID_MSG_ID";
+    case 0x0E: return "ERR_DEVICE_IN_USE";
+    case 0x0F: return "ERR_INVALID_IOCTL_ID";
+    case 0x10: return "ERR_BUFFER_EMPTY";
+    case 0x11: return "ERR_BUFFER_FULL";
+    case 0x12: return "ERR_BUFFER_OVERFLOW";
+    case 0x13: return "ERR_PIN_INVALID";
+    case 0x14: return "ERR_CHANNEL_IN_USE";
+    case 0x15: return "ERR_MSG_PROTOCOL_ID";
+    case 0x16: return "ERR_INVALID_FILTER_ID";
+    case 0x17: return "ERR_NO_FLOW_CONTROL";
+    case 0x18: return "ERR_NOT_UNIQUE";
+    case 0x19: return "ERR_INVALID_BAUDRATE";
+    case 0x1A: return "ERR_INVALID_DEVICE_ID";
+    default:   return 0;
+    }
+}
+
+/* PassThruGetLastError fills a buffer of at least this many characters
+ * (J2534-1 v04.04; the j2534-rs binding allocates the same). */
+#define ECUIO_PT_TEXT_LEN 80
 
 /* Trust rule for vendor-reported message counts.
  *

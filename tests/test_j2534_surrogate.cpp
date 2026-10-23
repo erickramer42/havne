@@ -30,6 +30,7 @@
 #include <atomic>
 #include <chrono>
 #include <cstring>
+#include <string>
 #include <thread>
 #include <cstdlib>
 #include <windows.h>
@@ -219,6 +220,9 @@ TEST(J2534SurrogateTest, DeadDllFailsFastAtOpen)
     ecuio_j2534_sur_handle_t* h = nullptr;
     EXPECT_EQ(ecuio_j2534_sur_open("C:\\does\\not\\exist.dll", &h),
               ECUIO_ERR_LOAD_FAILED);
+    EXPECT_STREQ(ecuio_last_error_detail(),
+                 "the surrogate couldn't load the DLL (the Windows error is "
+                 "in its session log, in %TEMP%)");
     EXPECT_EQ(h, nullptr);
     const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
         std::chrono::steady_clock::now() - t0).count();
@@ -435,6 +439,7 @@ TEST(J2534SurrogateTest, BlockedVendorOpenFailsAtHandshakeTimeout)
 
     ecuio_j2534_sur_handle_t* h = nullptr;
     const ecuio_status_t rc = ecuio_j2534_sur_open(fake_dll_path(), &h);
+    const std::string detail = ecuio_last_error_detail();
 
     const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
         std::chrono::steady_clock::now() - t0).count();
@@ -444,7 +449,11 @@ TEST(J2534SurrogateTest, BlockedVendorOpenFailsAtHandshakeTimeout)
     SetEnvironmentVariableA("ECUIO_FAKE_OPEN_DELAY_MS", nullptr);
     SetEnvironmentVariableA("ECUIO_SUR_HANDSHAKE_MS", nullptr);
 
-    EXPECT_EQ(rc, ECUIO_ERR_LOAD_FAILED);
+    /* The vendor's call never returned: the driver's doing, not the
+     * surrogate's. */
+    EXPECT_EQ(rc, ECUIO_ERR_VENDOR_REFUSED);
+    EXPECT_EQ(detail, "PassThruOpen didn't return within 500 ms; the "
+                      "driver may be waiting for its adapter");
     EXPECT_EQ(h, nullptr);
     /* Failed at the SHRUNK window (~0.5s), nowhere near the 8s default —
      * if this approaches 8s, an env knob stopped being honored. */
@@ -553,7 +562,7 @@ TEST(J2534SurrogateTest, SurrogateExeOverrideIsRestricted)
                             "C:/ecuio-definitely-missing/ecuio-j2534-surrogate.exe"}) {
         EnvSwap swap("ECUIO_SURROGATE_EXE", exe);
         ecuio_j2534_sur_handle_t* h = nullptr;
-        EXPECT_EQ(ecuio_j2534_sur_open(fake_dll_path(), &h), ECUIO_ERR_LOAD_FAILED) << exe;
+        EXPECT_EQ(ecuio_j2534_sur_open(fake_dll_path(), &h), ECUIO_ERR_SURROGATE_FAILED) << exe;
         EXPECT_EQ(h, nullptr) << exe;
     }
 }
@@ -571,7 +580,8 @@ TEST(J2534SurrogateTest, MismatchedFingerprintRefusesOpenBeforeVendor)
     const auto t0 = std::chrono::steady_clock::now();
 
     ecuio_j2534_sur_handle_t* h = nullptr;
-    EXPECT_EQ(ecuio_j2534_sur_open(fake_dll_path(), &h), ECUIO_ERR_LOAD_FAILED);
+    EXPECT_EQ(ecuio_j2534_sur_open(fake_dll_path(), &h),
+              ECUIO_ERR_SURROGATE_FAILED);
     EXPECT_EQ(h, nullptr);
 
     const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(

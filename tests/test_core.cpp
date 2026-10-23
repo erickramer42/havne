@@ -5,6 +5,7 @@
 #include <cstring>
 #include <atomic>
 #include <chrono>
+#include <string>
 #include <thread>
 #include <vector>
 
@@ -66,6 +67,57 @@ bool wait_for(Predicate pred, int timeout_ms, int poll_ms = 10)
 
 } // anonymous namespace
 
+/* Each create failure says why: a status, and words in
+ * ecuio_last_error_detail. A success, or a null argument, leaves "". */
+TEST(CoreTest, CreateFailuresNameTheirCause) {
+    ecuio_session_t* s = nullptr;
+    EXPECT_EQ(ecuio_session_create("can://bus0", &s), ECUIO_ERR_NO_TRANSPORT);
+    EXPECT_STREQ(ecuio_last_error_detail(),
+                 "unsupported URI scheme: expected mock:// or j2534://");
+    EXPECT_EQ(ecuio_session_create("mock://x?interval=10", &s), ECUIO_ERR_BAD_URI);
+    EXPECT_STREQ(ecuio_last_error_detail(),
+                 "mock:// takes no query key 'interval', only profile");
+    EXPECT_EQ(ecuio_session_create("mock://x?profile=mock&&profile=raw", &s),
+              ECUIO_ERR_BAD_URI);
+    EXPECT_STREQ(ecuio_last_error_detail(),
+                 "malformed query: expected key=value pairs joined by '&'");
+    EXPECT_EQ(ecuio_session_create("mock://x?profile=", &s), ECUIO_ERR_BAD_URI);
+    EXPECT_STREQ(ecuio_last_error_detail(),
+                 "?profile= needs a profile name of 1 to 63 characters");
+    EXPECT_EQ(ecuio_session_create("mock://x?profile=bogus", &s),
+              ECUIO_ERR_UNKNOWN_PROFILE);
+    EXPECT_STREQ(ecuio_last_error_detail(), "no profile is named 'bogus'");
+
+    ASSERT_EQ(ecuio_session_create("mock://demo", &s), ECUIO_OK);
+    EXPECT_STREQ(ecuio_last_error_detail(), "");
+    EXPECT_EQ(ecuio_session_start(s), ECUIO_OK);
+    EXPECT_STREQ(ecuio_last_error_detail(), "");
+    EXPECT_EQ(ecuio_session_close(s), ECUIO_OK);
+    ecuio_session_destroy(s);
+
+    EXPECT_EQ(ecuio_session_create("mock://x?profile=bogus", &s),
+              ECUIO_ERR_UNKNOWN_PROFILE);
+    EXPECT_EQ(ecuio_session_create(nullptr, &s), ECUIO_ERR_NULL_ARGUMENT);
+    EXPECT_STREQ(ecuio_last_error_detail(), "");
+}
+
+/* Per thread, like dlerror(): a failure on one thread leaves another
+ * thread's detail as it was. */
+TEST(CoreTest, LastErrorDetailIsPerThread) {
+    ecuio_session_t* s = nullptr;
+    ASSERT_EQ(ecuio_session_create("mock://x?profile=bogus", &s),
+              ECUIO_ERR_UNKNOWN_PROFILE);
+    std::string other;
+    std::thread t([&other]() {
+        ecuio_session_t* s2 = nullptr;
+        (void)ecuio_session_create("mock://x?interval=1", &s2);
+        other = ecuio_last_error_detail();
+    });
+    t.join();
+    EXPECT_STREQ(ecuio_last_error_detail(), "no profile is named 'bogus'");
+    EXPECT_EQ(other, "mock:// takes no query key 'interval', only profile");
+}
+
 TEST(CoreTest, StatusStringValidValues) {
     EXPECT_STREQ(ecuio_status_string(ECUIO_OK), "success");
     EXPECT_STREQ(ecuio_status_string(ECUIO_ERR_NULL_ARGUMENT), "null argument");
@@ -76,6 +128,10 @@ TEST(CoreTest, StatusStringValidValues) {
     EXPECT_STREQ(ecuio_status_string(ECUIO_ERR_ALREADY_REGISTERED), "already registered");
     EXPECT_STREQ(ecuio_status_string(ECUIO_ERR_LOAD_FAILED), "failed to load transport library");
     EXPECT_STREQ(ecuio_status_string(ECUIO_ERR_INVALID_ARGUMENT), "invalid argument");
+    EXPECT_STREQ(ecuio_status_string(ECUIO_ERR_BAD_URI), "malformed transport URI");
+    EXPECT_STREQ(ecuio_status_string(ECUIO_ERR_UNKNOWN_PROFILE), "unknown profile");
+    EXPECT_STREQ(ecuio_status_string(ECUIO_ERR_VENDOR_REFUSED), "the adapter's driver refused");
+    EXPECT_STREQ(ecuio_status_string(ECUIO_ERR_SURROGATE_FAILED), "surrogate process failed");
 
     /* Explicit cast required by MSVC for enum conversion */
     EXPECT_STRNE(ecuio_status_string(static_cast<ecuio_status_t>(999)), nullptr);
@@ -986,7 +1042,7 @@ TEST(CoreTest, ProfileUnregisterKeepsExistingSessionsOnTheirSet) {
 
     ecuio_session_t* second = nullptr;
     EXPECT_EQ(ecuio_session_create("mock://x?profile=test-unregister", &second),
-              ECUIO_ERR_NO_TRANSPORT);
+              ECUIO_ERR_UNKNOWN_PROFILE);
     EXPECT_EQ(second, nullptr);
     ecuio_session_destroy(session);
 }
@@ -1021,7 +1077,7 @@ TEST(CoreTest, MockUriQueryIsStrict) {
                             "mock://x?profile", "mock://x?PROFILE=mock",
                             "mock://x?profile=mock&&profile=raw"}) {
         ecuio_session_t* session = nullptr;
-        EXPECT_EQ(ecuio_session_create(uri, &session), ECUIO_ERR_NO_TRANSPORT) << uri;
+        EXPECT_EQ(ecuio_session_create(uri, &session), ECUIO_ERR_BAD_URI) << uri;
         EXPECT_EQ(session, nullptr) << uri;
     }
     for (const char* uri : {"mock://", "mock://any-label", "mock://x?profile=raw",
@@ -1033,11 +1089,11 @@ TEST(CoreTest, MockUriQueryIsStrict) {
 }
 
 TEST(CoreTest, UnknownProfileRejectedAtCreate) {
-    /* Strict grammar: an unknown name is ECUIO_ERR_NO_TRANSPORT at
+    /* Strict grammar: an unknown name is ECUIO_ERR_UNKNOWN_PROFILE at
      * session_create — cross-platform, scheme-independent. */
     ecuio_session_t* session = nullptr;
     EXPECT_EQ(ecuio_session_create("mock://x?profile=bogus", &session),
-              ECUIO_ERR_NO_TRANSPORT);
+              ECUIO_ERR_UNKNOWN_PROFILE);
     EXPECT_EQ(session, nullptr);
 }
 
@@ -1045,13 +1101,13 @@ TEST(CoreTest, UnknownProfileRejectedAtCreate) {
 TEST(CoreTest, UnknownProfileRejectedBeforeDllLoad) {
     /* Ordering discriminator, Windows-only: bogus profile on a
      * NONEXISTENT DLL path. Profile validation must run BEFORE
-     * transport attach — so this yields ECUIO_ERR_NO_TRANSPORT (3), not
-     * ECUIO_ERR_LOAD_FAILED (7). If it ever returns 7, the profile check
+     * transport attach — so this yields ECUIO_ERR_UNKNOWN_PROFILE, not
+     * ECUIO_ERR_LOAD_FAILED. If it ever returns LOAD_FAILED, the profile check
      * moved after the attach and the fail-fast contract broke. */
     ecuio_session_t* session = nullptr;
     EXPECT_EQ(ecuio_session_create(
         "j2534://C:/ecuio-definitely-not-a-real-dll.dll?profile=bogus",
-        &session), ECUIO_ERR_NO_TRANSPORT);
+        &session), ECUIO_ERR_UNKNOWN_PROFILE);
     EXPECT_EQ(session, nullptr);
 }
 #endif
@@ -1069,7 +1125,7 @@ TEST(CoreTest, ProfileQueryEmptyValueRejected) {
      * which could hand a typo'd ?profile=raw a decoding session. */
     ecuio_session_t* session = nullptr;
     EXPECT_EQ(ecuio_session_create("mock://x?profile=", &session),
-              ECUIO_ERR_NO_TRANSPORT);
+              ECUIO_ERR_BAD_URI);
     EXPECT_EQ(session, nullptr);
 }
 
@@ -1080,7 +1136,7 @@ TEST(CoreTest, ProfileQueryTooLongValueRejected) {
     uri.append(80, 'a');
     ecuio_session_t* session = nullptr;
     EXPECT_EQ(ecuio_session_create(uri.c_str(), &session),
-              ECUIO_ERR_NO_TRANSPORT);
+              ECUIO_ERR_BAD_URI);
     EXPECT_EQ(session, nullptr);
 }
 
@@ -1106,7 +1162,7 @@ TEST(CoreTest, ProfileQueryMalformedFailsEvenWhenLaterValidExists) {
     ecuio_session_t* session = nullptr;
     EXPECT_EQ(ecuio_session_create("mock://x?profile=&profile=mock",
                                    &session),
-              ECUIO_ERR_NO_TRANSPORT);
+              ECUIO_ERR_BAD_URI);
     EXPECT_EQ(session, nullptr);
 
     /* Reverse order: valid first, malformed LAST — a later malformed
@@ -1114,7 +1170,7 @@ TEST(CoreTest, ProfileQueryMalformedFailsEvenWhenLaterValidExists) {
      * keep scanning" grammar — it is strict). */
     EXPECT_EQ(ecuio_session_create("mock://x?profile=mock&profile=",
                                    &session),
-              ECUIO_ERR_NO_TRANSPORT);
+              ECUIO_ERR_BAD_URI);
     EXPECT_EQ(session, nullptr);
 }
 
@@ -1147,12 +1203,12 @@ TEST(CoreTest, ProfileQueryLastValidWinsAcrossDuplicates) {
 TEST(CoreTest, MalformedProfileRejectedBeforeDllLoad) {
     /* Ordering discriminator, matching UnknownProfileRejectedBeforeDllLoad:
      * a MALFORMED profile value on a nonexistent DLL path must yield
-     * NO_TRANSPORT (profile-parse failure), not ECUIO_ERR_LOAD_FAILED.
+     * BAD_URI (profile-parse failure), not ECUIO_ERR_LOAD_FAILED.
      * If it returns 7, the tri-state check moved after attach. */
     ecuio_session_t* session = nullptr;
     EXPECT_EQ(ecuio_session_create(
         "j2534://C:/ecuio-definitely-not-a-real-dll.dll?profile=",
-        &session), ECUIO_ERR_NO_TRANSPORT);
+        &session), ECUIO_ERR_BAD_URI);
     EXPECT_EQ(session, nullptr);
 }
 #endif

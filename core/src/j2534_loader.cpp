@@ -13,6 +13,7 @@
 
 #include <windows.h>
 #include "ecuio/j2534_ptypes.h"
+#include "error_detail.h"
 #include "win_utf8.h"
 
 #include <algorithm>
@@ -55,6 +56,7 @@ typedef long (__stdcall *fn_pt_start_filter)(unsigned long ChannelID,
                                              unsigned long* pFilterID);
 typedef long (__stdcall *fn_pt_stop_filter)(unsigned long ChannelID,
                                              unsigned long FilterID);
+typedef long (__stdcall *fn_pt_get_last_error)(char* pErrorDescription);
 
 /* Backing type for the header's opaque ecuio_j2534_handle_t.
  *
@@ -78,6 +80,7 @@ struct ecuio_j2534_handle {
     fn_pt_ioctl        ioctl;
     fn_pt_start_filter start_filter;   /* mandatory in v04.04, like the rest */
     fn_pt_stop_filter  stop_filter;
+    fn_pt_get_last_error get_last_error;   /* optional: may be null */
 };
 
 namespace {
@@ -86,6 +89,24 @@ constexpr long kPtStatusNoError = ECUIO_PT_STATUS_NOERROR;
 
 /* ecuio_j2534_force_surrogate_for_testing's switch. */
 std::atomic<bool> g_force_surrogate{false};
+
+/* The vendor's description of its last failed call
+ * (PassThruGetLastError) into out, ECUIO_PT_TEXT_LEN + 1 bytes; "" when
+ * it exports none or the call fails. The surrogate child relays the same
+ * call (OP_GET_LAST_ERROR). */
+void vendor_text(const ecuio_j2534_handle* h, char* out)
+{
+    out[0] = '\0';
+    if (h->get_last_error == nullptr) {
+        return;
+    }
+    char text[256] = {};   /* room past the spec's 80 for an overrun */
+    if (h->get_last_error(text) != kPtStatusNoError) {
+        return;
+    }
+    text[ECUIO_PT_TEXT_LEN] = '\0';
+    memcpy(out, text, ECUIO_PT_TEXT_LEN + 1);
+}
 
 /* Milliseconds from now to deadline, 0 once it has passed. */
 uint32_t ms_left(std::chrono::steady_clock::time_point deadline)
@@ -418,11 +439,14 @@ ecuio_status_t ecuio_j2534_open(const ecuio_j2534_device_t* device,
 
     wchar_t wpath[ECUIO_J2534_DLL_PATH_LEN];
     if (!ecuio_utf8_to_wide(device->dll_path, wpath, _countof(wpath))) {
-        return ECUIO_ERR_LOAD_FAILED;    /* not UTF-8 */
+        ecuio_detail_set("the DLL path isn't valid UTF-8, or is too long");
+        return ECUIO_ERR_LOAD_FAILED;
     }
     HMODULE module = LoadLibraryExW(wpath, nullptr,
                                     LOAD_WITH_ALTERED_SEARCH_PATH);
     if (module == nullptr) {
+        ecuio_detail_set("couldn't load the DLL (Windows error %lu)",
+                         GetLastError());
         return ECUIO_ERR_LOAD_FAILED;
     }
 
@@ -450,16 +474,33 @@ ecuio_status_t ecuio_j2534_open(const ecuio_j2534_device_t* device,
     h->stop_filter   = resolve_export<fn_pt_stop_filter>(module, "PassThruStopMsgFilter", all_resolved);
 
     if (!all_resolved) {
+        const char* missing =
+            !h->open         ? "PassThruOpen"
+          : !h->close        ? "PassThruClose"
+          : !h->connect      ? "PassThruConnect"
+          : !h->disconnect   ? "PassThruDisconnect"
+          : !h->read_msgs    ? "PassThruReadMsgs"
+          : !h->write_msgs   ? "PassThruWriteMsgs"
+          : !h->ioctl        ? "PassThruIoctl"
+          : !h->start_filter ? "PassThruStartMsgFilter"
+          :                    "PassThruStopMsgFilter";
+        ecuio_detail_set("the DLL doesn't export %s", missing);
         FreeLibrary(module);
         delete h;
         return ECUIO_ERR_LOAD_FAILED;
     }
+    h->get_last_error = reinterpret_cast<fn_pt_get_last_error>(
+        GetProcAddress(module, "PassThruGetLastError"));
 
     unsigned long device_id = 0;
-    if (h->open(nullptr, &device_id) != kPtStatusNoError) {
+    const long open_rc = h->open(nullptr, &device_id);
+    if (open_rc != kPtStatusNoError) {
+        char text[ECUIO_PT_TEXT_LEN + 1];
+        vendor_text(h, text);
+        ecuio_detail_set_vendor("PassThruOpen", open_rc, text);
         FreeLibrary(module);
         delete h;
-        return ECUIO_ERR_LOAD_FAILED;
+        return ECUIO_ERR_VENDOR_REFUSED;
     }
     h->device_id = device_id;
 
@@ -516,7 +557,16 @@ ecuio_status_t ecuio_j2534_connect_channel(ecuio_j2534_handle_t* handle,
                               flags,
                               baud,
                               out_channel);
-    return (rc == kPtStatusNoError) ? ECUIO_OK : ECUIO_ERR_NO_TRANSPORT;
+    if (rc != kPtStatusNoError) {
+        char text[ECUIO_PT_TEXT_LEN + 1];
+        vendor_text(handle, text);
+        char call[64];
+        snprintf(call, sizeof(call), "PassThruConnect (ISO 15765 at %lu baud)",
+                 baud);
+        ecuio_detail_set_vendor(call, rc, text);
+        return ECUIO_ERR_VENDOR_REFUSED;
+    }
+    return ECUIO_OK;
 }
 
 ecuio_status_t ecuio_j2534_disconnect_channel(ecuio_j2534_handle_t* handle,
@@ -849,7 +899,10 @@ ecuio_status_t ecuio_j2534_start_msg_filter(ecuio_j2534_handle_t* handle,
     long rc = handle->start_filter(channel, filter_type, &mask_msg,
                                    &pattern_msg, fc_ptr, &filter_id);
     if (rc != kPtStatusNoError) {
-        return ECUIO_ERR_NO_TRANSPORT;
+        char text[ECUIO_PT_TEXT_LEN + 1];
+        vendor_text(handle, text);
+        ecuio_detail_set_vendor("PassThruStartMsgFilter", rc, text);
+        return ECUIO_ERR_VENDOR_REFUSED;
     }
     *out_filter_id = filter_id;
     return ECUIO_OK;

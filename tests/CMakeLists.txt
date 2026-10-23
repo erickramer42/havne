@@ -323,6 +323,29 @@ if(WIN32)
     )
 endif()
 
+# J2534 connect-failure tests (Win32-only, HARNESS tier): why a connect
+# failed, each case in-proc and through the surrogate, set up as for
+# test_j2534_health.
+if(WIN32)
+    add_executable(test_j2534_connect
+        test_j2534_connect.cpp
+    )
+    target_link_libraries(test_j2534_connect PRIVATE
+        ecuio-core
+        GTest::gtest_main
+    )
+    target_compile_definitions(test_j2534_connect PRIVATE
+        FAKE_J2534_DLL_PATH="$<TARGET_FILE:fake_j2534>"
+        SURROGATE_EXE_PATH="$<TARGET_FILE:ecuio-j2534-surrogate>"
+    )
+    add_dependencies(test_j2534_connect fake_j2534)
+    add_dependencies(test_j2534_connect ecuio-j2534-surrogate)
+    qttune_enable_warnings(test_j2534_connect)
+    gtest_discover_tests(test_j2534_connect
+        PROPERTIES TIMEOUT ${J2534_TEST_TIMEOUT_SECONDS}
+    )
+endif()
+
 # J2534 routing tests (Win32-only, HARNESS tier — backend selection by
 # PE architecture: in-proc for x64 (CI), surrogate for x86 (dev-machine,
 # env-gated via ECUIO_FAKE_DLL/ECUIO_SURROGATE_EXE))

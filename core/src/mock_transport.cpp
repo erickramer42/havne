@@ -10,6 +10,7 @@
 #include "ecuio/signal_sets.h"
 #include "mock_drive_cycle.h"
 #include "uri_query.h"
+#include "error_detail.h"
 
 #include <atomic>
 #include <chrono>
@@ -130,10 +131,27 @@ ecuio_status_t ecuio_mock_transport_attach(ecuio_session_t* session,
     /* The mock has no parameters of its own: profile is core's, and any
      * other key is rejected, as on j2534://. The text before the query
      * is a free label (mock://demo). core.cpp verified the prefix. */
+    const char* bad_key = nullptr;
+    size_t bad_key_len = 0;
     if (!ecuio_uri::for_each_param(
             ecuio_uri::query_of(uri + 7),
-            [](const ecuio_uri::param& p) { return p.is("profile"); })) {
-        return ECUIO_ERR_NO_TRANSPORT;
+            [&](const ecuio_uri::param& p) {
+                if (p.is("profile")) {
+                    return true;
+                }
+                bad_key = p.key;
+                bad_key_len = p.key_len;
+                return false;
+            })) {
+        if (bad_key != nullptr) {
+            ecuio_detail_set("mock:// takes no query key '%.*s', only "
+                             "profile", static_cast<int>(bad_key_len),
+                             bad_key);
+        } else {
+            ecuio_detail_set("malformed query: expected key=value pairs "
+                             "joined by '&'");
+        }
+        return ECUIO_ERR_BAD_URI;
     }
     try {
         ecuio_mock_transport* impl = new ecuio_mock_transport();

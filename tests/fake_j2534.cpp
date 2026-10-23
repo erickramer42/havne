@@ -24,6 +24,10 @@
 //    holds each response back that long after the write (default 0).
 //  * IoCtl: config table (SET stores, GET reads back), fixed VBATT,
 //    CLEAR_* accepted. Unknown ids FAIL like a strict vendor.
+//  * Refusals: ECUIO_FAKE_OPEN_STATUS, ECUIO_FAKE_CONNECT_STATUS and
+//    ECUIO_FAKE_FILTER_STATUS make PassThruOpen, PassThruConnect and
+//    PassThruStartMsgFilter return that status, and PassThruGetLastError
+//    then describes the refusal.
 //  * Disconnect: counted; ECUIO_FAKE_DISCONNECT_DELAY_MS sleeps
 //    before each one (a slow vendor teardown).
 //  * Filters: registration bookkeeping + last-invocation recording.
@@ -64,6 +68,7 @@
 #include <chrono>
 #include <condition_variable>
 #include <cstdint>
+#include <cstdio>
 #include <cstring>
 #include <mutex>
 #include <cstdlib>
@@ -120,6 +125,9 @@ constexpr unsigned long kVxIndication = ECUIO_PT_TX_MSG_TYPE |
  * unknown. */
 constexpr unsigned long kVxRefusedEcho = 0x201;
 unsigned long g_unacked = 0;            /* writes accepted since connect */
+
+/* PassThruGetLastError's text: the last refusal a knob forced. */
+char g_last_error[ECUIO_PT_TEXT_LEN] = "fake_j2534: no error";
 
 /* Write recording + response generation */
 WriteRecord g_writes[FAKE_WRITE_DEPTH];
@@ -206,6 +214,23 @@ bool read_knob(const char* name, char* buf, DWORD cap)
     }
     const DWORD n = GetEnvironmentVariableA(name, buf, cap);
     return n > 0 && n < cap;
+}
+
+/* The status a refusal knob forces on call, 0 when unset. A refusal
+ * also sets the text PassThruGetLastError returns. */
+long refusal(const char* knob, const char* call)
+{
+    char buf[32] = {};
+    if (!read_knob(knob, buf, sizeof(buf))) {
+        return 0;
+    }
+    const long code = strtol(buf, nullptr, 0);
+    if (code != 0) {
+        std::lock_guard<std::mutex> lk(g_lock);
+        snprintf(g_last_error, sizeof(g_last_error),
+                 "fake_j2534: %s refused (%s)", call, knob);
+    }
+    return code;
 }
 
 bool knob_on(const char* name)
@@ -470,6 +495,10 @@ long __stdcall PassThruOpen(void* pName, unsigned long* pDeviceID)
         InterlockedExchange(&page->opener_pid,
                             static_cast<LONG>(GetCurrentProcessId()));
     }
+    if (const long rc = fake_j2534::refusal("ECUIO_FAKE_OPEN_STATUS",
+                                            "PassThruOpen")) {
+        return rc;
+    }
 
     std::lock_guard<std::mutex> lk(fake_j2534::g_lock);
     fake_j2534::g_handle = 1;
@@ -503,6 +532,10 @@ long __stdcall PassThruConnect(unsigned long DeviceID,
     }
     if (pChannelID == nullptr) {
         return STATUS_FAILED;
+    }
+    if (const long rc = fake_j2534::refusal("ECUIO_FAKE_CONNECT_STATUS",
+                                            "PassThruConnect")) {
+        return rc;
     }
     std::lock_guard<std::mutex> lk(fake_j2534::g_lock);
     if (fake_j2534::g_handle != 1) {
@@ -984,6 +1017,10 @@ long __stdcall PassThruStartMsgFilter(unsigned long ChannelID,
         pMaskMsg->DataSize > 12) {
         return STATUS_FAILED;
     }
+    if (const long rc = fake_j2534::refusal("ECUIO_FAKE_FILTER_STATUS",
+                                            "PassThruStartMsgFilter")) {
+        return rc;
+    }
 
     std::lock_guard<std::mutex> lk(fake_j2534::g_lock);
 
@@ -1026,6 +1063,18 @@ long __stdcall PassThruStopMsgFilter(unsigned long ChannelID,
         }
     }
     return STATUS_FAILED;   /* unknown/already-stopped — strict vendor */
+}
+
+extern "C" __declspec(dllexport)
+long __stdcall PassThruGetLastError(char* pErrorDescription)
+{
+    if (pErrorDescription == nullptr) {
+        return 0x04;   /* ERR_NULL_PARAMETER */
+    }
+    std::lock_guard<std::mutex> lk(fake_j2534::g_lock);
+    memcpy(pErrorDescription, fake_j2534::g_last_error,
+           sizeof(fake_j2534::g_last_error));
+    return STATUS_NOERROR;
 }
 
 /* ================= Test hooks (TEST_HOOKS_ENABLED only) ============== */

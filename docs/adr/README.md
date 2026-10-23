@@ -24,6 +24,7 @@ old one, and the old record's status is updated to point at it.
 | [0015](0015-request-engine.md) | Request engine: correlated, response-paced requests derived from signal definitions; read-only by construction | Proposed |
 | [0016](0016-signal-definition-layout.md) | Signal definition layout: value kind, explicit byte order, layout version, zero-checked reserved room | Accepted |
 | [0017](0017-session-recording.md) | Session recording: one folder per connect, `frames.csv` as the replay format | Accepted |
+| [0018](0018-connect-failure-reporting.md) | Connect failures say why: four status codes and a thread-local detail with the vendor's text | Accepted |
 
 ## Adding a record
 

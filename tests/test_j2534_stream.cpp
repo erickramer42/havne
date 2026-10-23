@@ -235,7 +235,7 @@ TEST_F(J2534QueryParamTest, ProfileChannelWidthDecidesConnectFlag)
     snprintf(uri, sizeof(uri), "j2534://%s?profile=test-mixed-width",
              FAKE_J2534_DLL_PATH);
     ecuio_session_t* session = nullptr;
-    EXPECT_EQ(ecuio_session_create(uri, &session), ECUIO_ERR_NO_TRANSPORT);
+    EXPECT_EQ(ecuio_session_create(uri, &session), ECUIO_ERR_BAD_URI);
     EXPECT_EQ(session, nullptr);
 }
 
@@ -273,7 +273,7 @@ TEST_F(J2534QueryParamTest, MalformedQueriesRejectedAtSessionCreate)
     };
     for (const char* q : bad_queries) {
         snprintf(uri, sizeof(uri), "j2534://%s%s", FAKE_J2534_DLL_PATH, q);
-        EXPECT_EQ(ecuio_session_create(uri, &session), ECUIO_ERR_NO_TRANSPORT)
+        EXPECT_EQ(ecuio_session_create(uri, &session), ECUIO_ERR_BAD_URI)
             << "query: " << q;
         EXPECT_EQ(session, nullptr) << "query: " << q;
     }
@@ -620,7 +620,7 @@ TEST_F(J2534AdoptionTest, PollWithoutChannelRejectedBeforeDllLoad)
 
     snprintf(uri, sizeof(uri),
              "j2534://%s?profile=raw&poll=0x0C", FAKE_J2534_DLL_PATH);
-    EXPECT_EQ(ecuio_session_create(uri, &session), ECUIO_ERR_NO_TRANSPORT);
+    EXPECT_EQ(ecuio_session_create(uri, &session), ECUIO_ERR_BAD_URI);
     EXPECT_EQ(session, nullptr);
 }
 
@@ -792,7 +792,7 @@ TEST(J2534StreamTest, UnknownProfileRejectedAtCreate)
                           + "?profile=bogus";
     ecuio_session_t* session = nullptr;
     EXPECT_EQ(ecuio_session_create(uri.c_str(), &session),
-              ECUIO_ERR_NO_TRANSPORT);
+              ECUIO_ERR_UNKNOWN_PROFILE);
     EXPECT_EQ(session, nullptr);
 }
 
