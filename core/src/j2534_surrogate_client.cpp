@@ -910,7 +910,7 @@ ecuio_status_t ecuio_j2534_sur_disconnect_channel(ecuio_j2534_sur_handle_t* h,
     req.opcode = ECUIO_SUR_OP_DISCONNECT;
     req.u.disconnect.channel_id = channel;
     ecuio_sur_response_t resp = {};
-    if (!transact(h, req, &resp, kTransactTimeoutMs)) return ECUIO_ERR_NO_TRANSPORT;
+    if (!transact(h, req, &resp, kTransactTimeoutMs)) return ECUIO_ERR_SURROGATE_FAILED;
     return ECUIO_OK;
 }
 
@@ -922,9 +922,11 @@ ecuio_status_t ecuio_j2534_sur_write_frame(ecuio_j2534_sur_handle_t* h,
                                            uint32_t timeout_ms,
                                            uint32_t* out_num_written)
 {
-    if (h == nullptr || data == nullptr || len == 0 ||
-        len > ECUIO_SUR_MSG_MAX) {
+    if (h == nullptr || data == nullptr) {
         return ECUIO_ERR_NULL_ARGUMENT;
+    }
+    if (len == 0 || len > ECUIO_SUR_MSG_MAX) {
+        return ECUIO_ERR_INVALID_ARGUMENT;
     }
     if (out_num_written != nullptr) *out_num_written = 0;
 
@@ -939,10 +941,10 @@ ecuio_status_t ecuio_j2534_sur_write_frame(ecuio_j2534_sur_handle_t* h,
 
     ecuio_sur_response_t resp = {};
     if (!transact(h, req, &resp, kTransactTimeoutMs)) {
-        return ECUIO_ERR_NO_TRANSPORT;
+        return ECUIO_ERR_SURROGATE_FAILED;
     }
     if (resp.status != static_cast<int32_t>(ECUIO_PT_STATUS_NOERROR)) {
-        return ECUIO_ERR_NO_TRANSPORT;
+        return ECUIO_ERR_VENDOR_REFUSED;
     }
     if (out_num_written != nullptr) *out_num_written = resp.aux;
     return ECUIO_OK;
@@ -957,8 +959,11 @@ ecuio_status_t ecuio_j2534_sur_ioctl(ecuio_j2534_sur_handle_t* h,
                                      uint32_t output_cap,
                                      uint32_t* out_len)
 {
-    if (h == nullptr || input_len > ECUIO_SUR_IOCTL_DATA_MAX) {
+    if (h == nullptr) {
         return ECUIO_ERR_NULL_ARGUMENT;
+    }
+    if (input_len > ECUIO_SUR_IOCTL_DATA_MAX) {
+        return ECUIO_ERR_INVALID_ARGUMENT;
     }
     if (input == nullptr && input_len != 0) {
         return ECUIO_ERR_NULL_ARGUMENT;
@@ -974,16 +979,18 @@ ecuio_status_t ecuio_j2534_sur_ioctl(ecuio_j2534_sur_handle_t* h,
     req.u.ioctl.input_len = input_len;
 
     ecuio_sur_response_t resp = {};
-    if (!transact(h, req, &resp, kTransactTimeoutMs) ||
-        resp.status != static_cast<int32_t>(ECUIO_PT_STATUS_NOERROR)) {
-        return ECUIO_ERR_NO_TRANSPORT;
+    if (!transact(h, req, &resp, kTransactTimeoutMs)) {
+        return ECUIO_ERR_SURROGATE_FAILED;
+    }
+    if (resp.status != static_cast<int32_t>(ECUIO_PT_STATUS_NOERROR)) {
+        return ECUIO_ERR_VENDOR_REFUSED;
     }
     /* Trust boundary, as for read's num_frames: the pipe is untrusted,
      * and a reply could claim more than resp.data holds. */
     if (resp.data_len > ECUIO_SUR_IOCTL_DATA_MAX) {
         SUR_LOG(h, "ioctl: data_len=%u exceeds the wire limit (skew?)\n",
                 resp.data_len);
-        return ECUIO_ERR_NO_TRANSPORT;
+        return ECUIO_ERR_SURROGATE_FAILED;
     }
     /* The caller's capacity bounds the copy; out_len keeps the full
      * length, as in-proc. */
@@ -1012,13 +1019,13 @@ ecuio_status_t ecuio_j2534_sur_read_version(ecuio_j2534_sur_handle_t* h,
     req.opcode = ECUIO_SUR_OP_READ_VERSION;
     ecuio_sur_response_t resp = {};
     if (!transact(h, req, &resp, kTransactTimeoutMs)) {
-        return ECUIO_ERR_NO_TRANSPORT;
+        return ECUIO_ERR_SURROGATE_FAILED;
     }
     if (resp.status == static_cast<int32_t>(ECUIO_PT_STATUS_NOT_SUPPORTED)) {
         return ECUIO_ERR_NOT_IMPLEMENTED;
     }
     if (resp.status != static_cast<int32_t>(ECUIO_PT_STATUS_NOERROR)) {
-        return ECUIO_ERR_NO_TRANSPORT;
+        return ECUIO_ERR_VENDOR_REFUSED;
     }
     for (int i = 0; i < ECUIO_SUR_TEXT_FIELDS; ++i) {
         resp.text[i][ECUIO_SUR_TEXT_MAX - 1] = '\0';   /* untrusted pipe */
@@ -1043,21 +1050,21 @@ ecuio_status_t ecuio_j2534_sur_start_msg_filter(ecuio_j2534_sur_handle_t* h,
         out_filter_id == nullptr) {
         return ECUIO_ERR_NULL_ARGUMENT;
     }
+    if (filter_type == ECUIO_PT_FLOW_CONTROL_FILTER && flow_control == nullptr) {
+        return ECUIO_ERR_NULL_ARGUMENT;
+    }
     if (mask_len < 1 || mask_len > ECUIO_SUR_FILTER_PATTERN_MAX ||
         mask_len != pattern_len) {
-        return ECUIO_ERR_NULL_ARGUMENT;
+        return ECUIO_ERR_INVALID_ARGUMENT;
     }
     if (fc_len > ECUIO_SUR_FILTER_PATTERN_MAX) {
-        return ECUIO_ERR_NULL_ARGUMENT;
+        return ECUIO_ERR_INVALID_ARGUMENT;
     }
     if (filter_type == ECUIO_PT_FLOW_CONTROL_FILTER && fc_len != mask_len) {
-        return ECUIO_ERR_NULL_ARGUMENT;
+        return ECUIO_ERR_INVALID_ARGUMENT;
     }
     if (filter_type != ECUIO_PT_FLOW_CONTROL_FILTER && fc_len != 0) {
-        return ECUIO_ERR_NULL_ARGUMENT;
-    }
-    if (fc_len > 0 && flow_control == nullptr) {
-        return ECUIO_ERR_NULL_ARGUMENT;
+        return ECUIO_ERR_INVALID_ARGUMENT;
     }
     *out_filter_id = 0;
 
@@ -1107,9 +1114,11 @@ ecuio_status_t ecuio_j2534_sur_stop_msg_filter(ecuio_j2534_sur_handle_t* h,
     req.u.stop_filter.filter_id = filter_id;
 
     ecuio_sur_response_t resp = {};
-    if (!transact(h, req, &resp, kTransactTimeoutMs) ||
-        resp.status != static_cast<int32_t>(ECUIO_PT_STATUS_NOERROR)) {
-        return ECUIO_ERR_NO_TRANSPORT;
+    if (!transact(h, req, &resp, kTransactTimeoutMs)) {
+        return ECUIO_ERR_SURROGATE_FAILED;
+    }
+    if (resp.status != static_cast<int32_t>(ECUIO_PT_STATUS_NOERROR)) {
+        return ECUIO_ERR_VENDOR_REFUSED;
     }
     return ECUIO_OK;
 }
@@ -1201,8 +1210,11 @@ ecuio_status_t ecuio_j2534_sur_inject_test_frame(ecuio_j2534_sur_handle_t* h,
                                                  uint32_t timestamp,
                                                  uint32_t rx_flags)
 {
-    if (h == nullptr || data == nullptr || len == 0 || len > 64) {
+    if (h == nullptr || data == nullptr) {
         return ECUIO_ERR_NULL_ARGUMENT;
+    }
+    if (len == 0 || len > 64) {
+        return ECUIO_ERR_INVALID_ARGUMENT;
     }
     ecuio_sur_request_t req = {};
     req.request_id = h->next_request_id++;
@@ -1213,9 +1225,11 @@ ecuio_status_t ecuio_j2534_sur_inject_test_frame(ecuio_j2534_sur_handle_t* h,
     req.u.inject.rx_flags = rx_flags;
 
     ecuio_sur_response_t resp = {};
-    if (!transact(h, req, &resp, kTransactTimeoutMs) ||
-        resp.status != static_cast<int32_t>(ECUIO_PT_STATUS_NOERROR)) {
-        return ECUIO_ERR_NO_TRANSPORT;
+    if (!transact(h, req, &resp, kTransactTimeoutMs)) {
+        return ECUIO_ERR_SURROGATE_FAILED;
+    }
+    if (resp.status != static_cast<int32_t>(ECUIO_PT_STATUS_NOERROR)) {
+        return ECUIO_ERR_VENDOR_REFUSED;
     }
     return ECUIO_OK;
 }

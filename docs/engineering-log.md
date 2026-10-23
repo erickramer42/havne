@@ -82,7 +82,8 @@ Dates are commit dates.
 | 2026-10-22 | J2534 frames carry session time: the host's at the first frame, then the adapter's deltas across its 32-bit wrap (#12 closed) | `b3b1487` |
 | 2026-10-22 | QML tests: `test_qml` (Qt Quick Test) runs the pages and the app's window against a real bridge, offscreen, the link-health surfaces through the fake; the `QtTune` module builds as a static library that the app and the tests both link; merged via PR #17 | `7ce28e4`, `1145d11` |
 | 2026-10-23 | A contributing guide, the README's feedback section, and the OpenSSF Best Practices badge | `6068885`, `9f8f425`, `c093185` |
-| 2026-10-23 | Small fixes: link health counts a write the vendor reports as unsent as failed, and its backoff ends at the first clean read (a silent bus after a hard failure read "Adapter fault" for 26 s); the surrogate child checks `OP_INJECT`'s length and refuses device and channel ops before open and connect; tests for ID 0 and a late `OP_READ` reply; Qt 6.12 required; Known Issue #8 closed | — |
+| 2026-10-23 | Small fixes: link health counts a write the vendor reports as unsent as failed, and its backoff ends at the first clean read (a silent bus after a hard failure read "Adapter fault" for 26 s); the surrogate child checks `OP_INJECT`'s length and refuses device and channel ops before open and connect; tests for ID 0 and a late `OP_READ` reply; Qt 6.12 required; Known Issue #8 closed | `7eb7af0` |
+| 2026-10-23 | The J2534 helpers below the connect path take ADR-0018's codes on both backends: a vendor's refusal, a surrogate that stopped answering and a bad shape no longer read alike ([ADR-0018](adr/0018-connect-failure-reporting.md), appendix) | — |
 
 ## Lessons learned
 

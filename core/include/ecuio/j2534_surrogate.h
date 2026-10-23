@@ -34,7 +34,16 @@ ecuio_status_t ecuio_j2534_sur_connect_channel(ecuio_j2534_sur_handle_t* handle,
 ecuio_status_t ecuio_j2534_sur_disconnect_channel(ecuio_j2534_sur_handle_t* handle,
                                                   unsigned long channel);
 
-/* ---- Write / ioctl / filter relay ---- */
+/* ---- Write / ioctl / filter relay ----
+ *
+ * These return the loader seam's codes (internal.h, ADR-0018 appendix
+ * of 2026-10-23): ECUIO_ERR_NULL_ARGUMENT for a NULL pointer,
+ * ECUIO_ERR_INVALID_ARGUMENT for a length or shape refused before the
+ * pipe, ECUIO_ERR_VENDOR_REFUSED for a status other than
+ * STATUS_NOERROR (the vendor's, or the child's own refusal, given as a
+ * strict vendor would), and ECUIO_ERR_SURROGATE_FAILED when the child
+ * doesn't answer or answers past the wire's limits. Disconnect ignores
+ * the vendor's status; only a failed transaction fails it. */
 
 /* One PassThruWriteMsgs call. data_len must be <= 64 (the wire limit).
  * out_num_written is optional (NULL ok) and receives the vendor's
@@ -53,7 +62,7 @@ ecuio_status_t ecuio_j2534_sur_write_frame(ecuio_j2534_sur_handle_t* handle,
  * output_cap bytes of the response payload (GET_CONFIG write-back or
  * READ_VBATT's ULONG), and out_len its full length, so a caller spots a
  * cut by comparing. A reply that claims more than the wire carries (64
- * bytes) is rejected as a protocol skew (ECUIO_ERR_NO_TRANSPORT). */
+ * bytes) is rejected as a protocol skew (ECUIO_ERR_SURROGATE_FAILED). */
 ecuio_status_t ecuio_j2534_sur_ioctl(ecuio_j2534_sur_handle_t* handle,
                                      unsigned long channel,
                                      uint32_t ioctl_id,
@@ -66,8 +75,9 @@ ecuio_status_t ecuio_j2534_sur_ioctl(ecuio_j2534_sur_handle_t* handle,
 /* PassThruReadVersion relay: the firmware, DLL and API versions into
  * three 80-byte buffers, each NUL-terminated as the vendor wrote it.
  * ECUIO_ERR_NOT_IMPLEMENTED when the DLL doesn't export the call,
- * ECUIO_ERR_NO_TRANSPORT when the vendor refuses it or the child doesn't
- * answer; the buffers then hold "". */
+ * ECUIO_ERR_VENDOR_REFUSED when the vendor refuses it,
+ * ECUIO_ERR_SURROGATE_FAILED when the child doesn't answer; the buffers
+ * then hold "". */
 ecuio_status_t ecuio_j2534_sur_read_version(ecuio_j2534_sur_handle_t* handle,
                                             char* firmware,
                                             char* dll,

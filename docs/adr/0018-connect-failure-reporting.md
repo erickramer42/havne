@@ -111,3 +111,33 @@ Settings error line and the activity log's "Connect failed:" line.
 - The fake vendor DLL exports `PassThruGetLastError` and refuses open,
   connect or a filter on request (`ECUIO_FAKE_OPEN_STATUS`,
   `ECUIO_FAKE_CONNECT_STATUS`, `ECUIO_FAKE_FILTER_STATUS`).
+
+## Appendix — the helpers below the connect path (2026-10-23)
+
+The same codes now cover the J2534 helpers the connect path doesn't
+reach, on both backends (`internal.h`, and the surrogate client in
+`j2534_surrogate.h`): writes, ioctls, filter stops, disconnect and
+`PassThruReadVersion`. Until then a vendor's refusal of any of them
+and a surrogate that stopped answering both read
+`ECUIO_ERR_NO_TRANSPORT`, and a bad length or filter shape read
+`ECUIO_ERR_NULL_ARGUMENT`:
+
+| Code | Cause |
+|---|---|
+| `ECUIO_ERR_NULL_ARGUMENT` | A required pointer is NULL |
+| `ECUIO_ERR_INVALID_ARGUMENT` | A length or shape the call can't take, refused before any vendor call |
+| `ECUIO_ERR_VENDOR_REFUSED` | A status other than `STATUS_NOERROR`, including the surrogate child's own refusals, which answer as a strict vendor would |
+| `ECUIO_ERR_SURROGATE_FAILED` | The child didn't answer, or answered past the wire's limits |
+
+`ECUIO_ERR_NOT_IMPLEMENTED` keeps "an ioctl outside the whitelist, or
+a DLL without an optional export". The read path keeps its own link
+health mapping. A malformed `GET_CONFIG` or `SET_CONFIG` array is now
+judged at the loader seam, before the backend; before, in-proc refused
+it as a NULL argument and the surrogate as a refusal.
+
+Nothing above the seam changes: the worker compares a write's status
+only with `ECUIO_OK`, and the session info's readings ignore why they
+failed. These calls set no `ecuio_last_error_detail`, which stays the
+connect path's. The surrogate client's functions are in a public
+header, so a direct caller of them sees the new codes; the loader and
+the tests are the only ones.

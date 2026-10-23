@@ -11,12 +11,16 @@
 //          (ecuio_session_get_info): backend, DLL architecture, the
 //          channel as connected, and the adapter's battery and version
 //          readings, which may be refused without failing the connect.
+//          Below the connect path, the loader seam's helpers give each
+//          cause of a failure its own code, alike on both backends.
 //          J2534SurrogateConnectTest: the surrogate's own failures (no
 //          surrogate exe, one built from other shared headers).
 
 #include <gtest/gtest.h>
 
 #include "ecuio/core.h"
+#include "ecuio/j2534.h"
+#include "ecuio/j2534_ptypes.h"
 
 #ifdef _WIN32
 #include <cstdlib>
@@ -203,6 +207,90 @@ TEST_P(J2534ConnectTest, RefusedReadingsLeaveTheirFlagsClear)
     EXPECT_STREQ(info.api_version, "");
     EXPECT_EQ(info.channel_count, 1u);
     EXPECT_EQ(ecuio_session_start(session), ECUIO_OK);
+}
+
+/* Below the connect path, the loader seam's helpers (ADR-0018, appendix
+ * of 2026-10-23), called directly: a NULL pointer, a length or shape
+ * refused before any vendor call, an ioctl outside the whitelist and a
+ * vendor's refusal each have their own code, the same on both
+ * backends. */
+TEST_P(J2534ConnectTest, HelperFailuresHaveOneCodePerCause)
+{
+    struct HandleGuard {
+        ecuio_j2534_handle_t* h = nullptr;
+        ~HandleGuard() { (void)ecuio_j2534_close(h); }
+    } guard;
+    ecuio_j2534_device_t dev = {};
+    strncpy_s(dev.dll_path, sizeof(dev.dll_path), dll.c_str(), _TRUNCATE);
+    ASSERT_EQ(ecuio_j2534_open(&dev, &guard.h), ECUIO_OK);
+    ecuio_j2534_handle_t* h = guard.h;
+    ASSERT_NO_FATAL_FAILURE(expect_opened_on_backend());
+    unsigned long ch = 0;
+    ASSERT_EQ(ecuio_j2534_connect_channel(h, 0, 0, &ch), ECUIO_OK);
+
+    /* Refused before the vendor: no write reaches the fake. */
+    const uint8_t req[6] = {0x00, 0x00, 0x07, 0xE0, 0x01, 0x0C};
+    const uint8_t big[65] = {};
+    uint32_t written = 0;
+    const uint32_t writes0 = fake_control::writes(page);
+    EXPECT_EQ(ecuio_j2534_write_frame(h, ch, nullptr, 6, 0, 0, &written),
+              ECUIO_ERR_NULL_ARGUMENT);
+    EXPECT_EQ(ecuio_j2534_write_frame(h, ch, req, 0, 0, 0, &written),
+              ECUIO_ERR_INVALID_ARGUMENT);
+    EXPECT_EQ(ecuio_j2534_write_frame(h, ch, big, 65, 0, 0, &written),
+              ECUIO_ERR_INVALID_ARGUMENT);
+    EXPECT_EQ(fake_control::writes(page), writes0);
+
+    EXPECT_EQ(ecuio_j2534_ioctl(h, ch, ECUIO_PT_IOCTL_SET_CONFIG, big, 7,
+                                nullptr, 0, nullptr),
+              ECUIO_ERR_INVALID_ARGUMENT) << "not whole pairs";
+    EXPECT_EQ(ecuio_j2534_ioctl(h, ch, ECUIO_PT_IOCTL_SET_CONFIG, nullptr, 0,
+                                nullptr, 0, nullptr),
+              ECUIO_ERR_INVALID_ARGUMENT) << "no pairs";
+    EXPECT_EQ(ecuio_j2534_ioctl(h, ch, ECUIO_PT_IOCTL_SET_CONFIG, big, 65,
+                                nullptr, 0, nullptr),
+              ECUIO_ERR_INVALID_ARGUMENT) << "past the wire's 64 bytes";
+    EXPECT_EQ(ecuio_j2534_ioctl(h, ch, 0x05 /* FIVE_BAUD_INIT */, nullptr, 0,
+                                nullptr, 0, nullptr),
+              ECUIO_ERR_NOT_IMPLEMENTED);
+
+    const uint8_t mask[4] = {0xFF, 0xFF, 0xFF, 0xFF};
+    const uint8_t id[4] = {0x00, 0x00, 0x07, 0xE8};
+    unsigned long fid = 0;
+    EXPECT_EQ(ecuio_j2534_start_msg_filter(h, ch, ECUIO_PT_PASS_FILTER, mask,
+                                           4, id, 3, nullptr, 0, 0, &fid),
+              ECUIO_ERR_INVALID_ARGUMENT) << "mask and pattern differ";
+    EXPECT_EQ(ecuio_j2534_start_msg_filter(h, ch, ECUIO_PT_PASS_FILTER, mask,
+                                           4, id, 4, id, 4, 0, &fid),
+              ECUIO_ERR_INVALID_ARGUMENT) << "flow control on a pass filter";
+    EXPECT_EQ(ecuio_j2534_start_msg_filter(h, ch, ECUIO_PT_FLOW_CONTROL_FILTER,
+                                           mask, 4, id, 4, nullptr, 4, 0,
+                                           &fid),
+              ECUIO_ERR_NULL_ARGUMENT);
+
+    /* The vendor's refusals. */
+    ASSERT_NO_FATAL_FAILURE(knob("ECUIO_FAKE_WRITE_STATUS", "7"));
+    EXPECT_EQ(ecuio_j2534_write_frame(h, ch, req, 6, 0, 0, &written),
+              ECUIO_ERR_VENDOR_REFUSED);
+    ASSERT_NO_FATAL_FAILURE(knob("ECUIO_FAKE_VBATT_STATUS", "7"));
+    uint8_t mv[4] = {};
+    uint32_t mv_len = 0;
+    EXPECT_EQ(ecuio_j2534_ioctl(h, ch, ECUIO_PT_IOCTL_READ_VBATT, nullptr, 0,
+                                mv, sizeof(mv), &mv_len),
+              ECUIO_ERR_VENDOR_REFUSED);
+    ASSERT_NO_FATAL_FAILURE(knob("ECUIO_FAKE_VERSION_STATUS", "7"));
+    char fw[ECUIO_SESSION_INFO_TEXT_LEN], dl[ECUIO_SESSION_INFO_TEXT_LEN],
+        api[ECUIO_SESSION_INFO_TEXT_LEN];
+    EXPECT_EQ(ecuio_j2534_read_version(h, fw, dl, api),
+              ECUIO_ERR_VENDOR_REFUSED);
+    ASSERT_EQ(ecuio_j2534_start_msg_filter(h, ch, ECUIO_PT_PASS_FILTER, mask,
+                                           4, id, 4, nullptr, 0, 0, &fid),
+              ECUIO_OK);
+    EXPECT_EQ(ecuio_j2534_stop_msg_filter(h, ch, fid), ECUIO_OK);
+    EXPECT_EQ(ecuio_j2534_stop_msg_filter(h, ch, fid),
+              ECUIO_ERR_VENDOR_REFUSED) << "a strict vendor's second stop";
+
+    EXPECT_EQ(ecuio_j2534_disconnect_channel(h, ch), ECUIO_OK);
 }
 
 /* PassThruReadVersion is optional, as PassThruGetLastError is: the

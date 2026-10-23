@@ -181,7 +181,7 @@ TEST(J2534RoutingTest, InprocWriteIoctlFilterRoundTrips)
     EXPECT_GE(filter_id, 1ul);
     EXPECT_EQ(ecuio_j2534_stop_msg_filter(h, channel, filter_id), ECUIO_OK);
     EXPECT_EQ(ecuio_j2534_stop_msg_filter(h, channel, filter_id),
-              ECUIO_ERR_NO_TRANSPORT);
+              ECUIO_ERR_VENDOR_REFUSED);
 
     EXPECT_EQ(ecuio_j2534_disconnect_channel(h, channel), ECUIO_OK);
     EXPECT_EQ(ecuio_j2534_close(h), ECUIO_OK);

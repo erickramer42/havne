@@ -425,8 +425,9 @@ TEST(J2534SurrogateTest, IoctlWhitelistRefusesUnsupportedIds)
     /* Both ends must refuse an out-of-contract ioctl: the loader seam
      * returns NOT_IMPLEMENTED before the pipe; the CHILD whitelist
      * (patched into the OP_IOCTL handler) must independently fail it
-     * if a request somehow arrives — vendor FAILED status crosses the
-     * pipe as ECUIO_ERR_NO_TRANSPORT. Driving the client directly (this
+     * if a request somehow arrives — it answers STATUS_FAILED, as a
+     * strict vendor would, which crosses the pipe as
+     * ECUIO_ERR_VENDOR_REFUSED. Driving the client directly (this
      * suite) exercises the child side. */
     ecuio_j2534_sur_handle_t* h = nullptr;
     ASSERT_EQ(ecuio_j2534_sur_open(fake_dll_path(), &h), ECUIO_OK);
@@ -436,7 +437,7 @@ TEST(J2534SurrogateTest, IoctlWhitelistRefusesUnsupportedIds)
     /* 0x05 = FIVE_BAUD_INIT — pointer-bearing, never shapable. */
     EXPECT_EQ(ecuio_j2534_sur_ioctl(h, channel, 0x05,
                                     nullptr, 0, nullptr, 0, nullptr),
-              ECUIO_ERR_NO_TRANSPORT);
+              ECUIO_ERR_VENDOR_REFUSED);
 
     EXPECT_EQ(ecuio_j2534_sur_close(h), ECUIO_OK);
 }
@@ -469,17 +470,17 @@ TEST(J2534SurrogateTest, FilterStartStopLifecycle)
                   h, channel, ECUIO_PT_PASS_FILTER,
                   mask, 4, pattern, 3,     /* length mismatch */
                   nullptr, 0, 0, &junk),
-              ECUIO_ERR_NULL_ARGUMENT);
+              ECUIO_ERR_INVALID_ARGUMENT);
     /* Flow control on a non-FC filter is also refused. */
     EXPECT_EQ(ecuio_j2534_sur_start_msg_filter(
                   h, channel, ECUIO_PT_PASS_FILTER,
                   mask, 4, pattern, 4,
                   pattern, 4, 0, &junk),
-              ECUIO_ERR_NULL_ARGUMENT);
+              ECUIO_ERR_INVALID_ARGUMENT);
 
     EXPECT_EQ(ecuio_j2534_sur_stop_msg_filter(h, channel, filter_id), ECUIO_OK);
     EXPECT_EQ(ecuio_j2534_sur_stop_msg_filter(h, channel, filter_id),
-              ECUIO_ERR_NO_TRANSPORT);    /* already stopped — strict vendor */
+              ECUIO_ERR_VENDOR_REFUSED);    /* already stopped — strict vendor */
 
     EXPECT_EQ(ecuio_j2534_sur_close(h), ECUIO_OK);
 }
@@ -507,7 +508,7 @@ TEST(J2534SurrogateTest, TimedOutOpDoesNotDesyncNextRequest)
     uint32_t out_len = 0;
     EXPECT_EQ(ecuio_j2534_sur_ioctl(h, channel, ECUIO_PT_IOCTL_READ_VBATT,
                                     nullptr, 0, out, sizeof(out), &out_len),
-              ECUIO_ERR_NO_TRANSPORT);
+              ECUIO_ERR_SURROGATE_FAILED);
 
     /* The differentiator: with the desync present this FAILS (reads
      * the stale response, ID mismatch); with recovery it succeeds. */
@@ -769,14 +770,16 @@ TEST(J2534SurrogateTest, UnresponsiveChildFailsFastAfterTwoMissedDeadlines)
     uint32_t out_len = 0;
     EXPECT_EQ(ecuio_j2534_sur_ioctl(h, channel, ECUIO_PT_IOCTL_READ_VBATT,
                                     nullptr, 0, out, sizeof(out), &out_len),
-              ECUIO_ERR_NO_TRANSPORT);
+              ECUIO_ERR_SURROGATE_FAILED);
 
     /* Second: its late reply doesn't come within another timeout. */
-    EXPECT_EQ(ecuio_j2534_sur_disconnect_channel(h, channel), ECUIO_ERR_NO_TRANSPORT);
+    EXPECT_EQ(ecuio_j2534_sur_disconnect_channel(h, channel),
+              ECUIO_ERR_SURROGATE_FAILED);
 
     /* From here, every transaction fails at once. */
     auto t0 = clock::now();
-    EXPECT_EQ(ecuio_j2534_sur_stop_msg_filter(h, channel, 1), ECUIO_ERR_NO_TRANSPORT);
+    EXPECT_EQ(ecuio_j2534_sur_stop_msg_filter(h, channel, 1),
+              ECUIO_ERR_SURROGATE_FAILED);
     EXPECT_LT(clock::now() - t0, std::chrono::milliseconds(500));
 
     /* Close kills the child instead of waiting 1.5 s twice. */

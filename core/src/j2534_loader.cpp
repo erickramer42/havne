@@ -718,9 +718,11 @@ ecuio_status_t ecuio_j2534_write_frame(ecuio_j2534_handle_t* handle,
                                        uint32_t timeout_ms,
                                        uint32_t* out_num_written)
 {
-    if (handle == nullptr || data == nullptr || len == 0 ||
-        len > sizeof(((ecuio_frame_t*)0)->data)) {
+    if (handle == nullptr || data == nullptr) {
         return ECUIO_ERR_NULL_ARGUMENT;
+    }
+    if (len == 0 || len > sizeof(((ecuio_frame_t*)0)->data)) {
+        return ECUIO_ERR_INVALID_ARGUMENT;
     }
     if (out_num_written != nullptr) {
         *out_num_written = 0;
@@ -737,7 +739,7 @@ ecuio_status_t ecuio_j2534_write_frame(ecuio_j2534_handle_t* handle,
     unsigned long num = 1;
     long rc = handle->write_msgs(channel, &msg, &num, timeout_ms);
     if (rc != kPtStatusNoError) {
-        return ECUIO_ERR_NO_TRANSPORT;
+        return ECUIO_ERR_VENDOR_REFUSED;
     }
     /* Success-but-wrote-nothing is the caller's problem to catch via
      * out_num_written; we do not fabricate an error for a partial or
@@ -758,8 +760,11 @@ ecuio_status_t ecuio_j2534_ioctl(ecuio_j2534_handle_t* handle,
                                   uint32_t output_cap,
                                   uint32_t* out_len)
 {
-    if (handle == nullptr || input_len > 64) {
+    if (handle == nullptr) {
         return ECUIO_ERR_NULL_ARGUMENT;
+    }
+    if (input_len > 64) {
+        return ECUIO_ERR_INVALID_ARGUMENT;
     }
     if (input == nullptr && input_len != 0) {
         return ECUIO_ERR_NULL_ARGUMENT;
@@ -782,6 +787,14 @@ ecuio_status_t ecuio_j2534_ioctl(ecuio_j2534_handle_t* handle,
     if (!is_sconfig && !is_null_form) {
         return ECUIO_ERR_NOT_IMPLEMENTED;
     }
+    /* A flattened SCONFIG array is whole pairs, 1 to
+     * ECUIO_PT_SCONFIG_MAX_PARAMS of them. Judged here, before the
+     * backend, so both refuse a malformed one alike; the child checks
+     * again at its trust boundary. */
+    if (is_sconfig && (input_len == 0 || (input_len % 8) != 0 ||
+                       input_len / 8 > ECUIO_PT_SCONFIG_MAX_PARAMS)) {
+        return ECUIO_ERR_INVALID_ARGUMENT;
+    }
 
     if (handle->is_surrogate) {
         return ecuio_j2534_sur_ioctl(handle->sur, channel, ioctl_id, input,
@@ -793,7 +806,7 @@ ecuio_status_t ecuio_j2534_ioctl(ecuio_j2534_handle_t* handle,
         const uint32_t n = unflatten_sconfig(input, input_len, cfg,
                                              ECUIO_PT_SCONFIG_MAX_PARAMS);
         if (n == 0) {
-            return ECUIO_ERR_NULL_ARGUMENT;    /* malformed flattened array */
+            return ECUIO_ERR_INVALID_ARGUMENT;    /* checked above already */
         }
         SCONFIG_LIST list;
         list.NumOfParams = n;
@@ -801,7 +814,7 @@ ecuio_status_t ecuio_j2534_ioctl(ecuio_j2534_handle_t* handle,
         long rc = handle->ioctl(channel, static_cast<long>(ioctl_id),
                                 &list, nullptr);
         if (rc != kPtStatusNoError) {
-            return ECUIO_ERR_NO_TRANSPORT;
+            return ECUIO_ERR_VENDOR_REFUSED;
         }
         if (ioctl_id == ECUIO_PT_IOCTL_GET_CONFIG) {
             /* Re-flatten the vendor-updated pairs, as the child does. */
@@ -828,7 +841,7 @@ ecuio_status_t ecuio_j2534_ioctl(ecuio_j2534_handle_t* handle,
                                 static_cast<long>(ioctl_id),
                                 nullptr, &vbatt);
         if (rc != kPtStatusNoError) {
-            return ECUIO_ERR_NO_TRANSPORT;
+            return ECUIO_ERR_VENDOR_REFUSED;
         }
         const uint32_t mv = static_cast<uint32_t>(vbatt);
         copy_out(output, output_cap, &mv, 4);
@@ -841,7 +854,7 @@ ecuio_status_t ecuio_j2534_ioctl(ecuio_j2534_handle_t* handle,
     /* Remaining NULL/NULL forms: CLEAR_TX/RX_BUFFER, CLEAR_MSG_FILTERS */
     long rc = handle->ioctl(channel, static_cast<long>(ioctl_id),
                             nullptr, nullptr);
-    return (rc == kPtStatusNoError) ? ECUIO_OK : ECUIO_ERR_NO_TRANSPORT;
+    return (rc == kPtStatusNoError) ? ECUIO_OK : ECUIO_ERR_VENDOR_REFUSED;
 }
 
 ecuio_status_t ecuio_j2534_start_msg_filter(ecuio_j2534_handle_t* handle,
@@ -867,14 +880,17 @@ ecuio_status_t ecuio_j2534_start_msg_filter(ecuio_j2534_handle_t* handle,
     if (mask_len < 1 || mask_len > ECUIO_PT_FILTER_PATTERN_MAX ||
         mask_len != pattern_len ||
         fc_len > ECUIO_PT_FILTER_PATTERN_MAX) {
-        return ECUIO_ERR_NULL_ARGUMENT;
+        return ECUIO_ERR_INVALID_ARGUMENT;
     }
     if (filter_type == ECUIO_PT_FLOW_CONTROL_FILTER) {
-        if (fc_len != mask_len || flow_control == nullptr) {
+        if (flow_control == nullptr) {
             return ECUIO_ERR_NULL_ARGUMENT;
         }
+        if (fc_len != mask_len) {
+            return ECUIO_ERR_INVALID_ARGUMENT;
+        }
     } else if (fc_len != 0) {
-        return ECUIO_ERR_NULL_ARGUMENT;
+        return ECUIO_ERR_INVALID_ARGUMENT;
     }
     *out_filter_id = 0;
 
@@ -919,12 +935,12 @@ ecuio_status_t ecuio_j2534_stop_msg_filter(ecuio_j2534_handle_t* handle,
         return ecuio_j2534_sur_stop_msg_filter(handle->sur, channel,
                                                filter_id);
     }
-    /* Vendor status verbatim: stopping a stopped filter is the
-     * vendor's ERR_FAILED, surfaced as ECUIO_ERR_NO_TRANSPORT — the
+    /* Not idempotent here: stopping a stopped filter is a strict
+     * vendor's ERR_FAILED, surfaced as ECUIO_ERR_VENDOR_REFUSED — the
      * caller learns the truth rather than our guess about
      * idempotence. */
     long rc = handle->stop_filter(channel, filter_id);
-    return (rc == kPtStatusNoError) ? ECUIO_OK : ECUIO_ERR_NO_TRANSPORT;
+    return (rc == kPtStatusNoError) ? ECUIO_OK : ECUIO_ERR_VENDOR_REFUSED;
 }
 
 ecuio_status_t ecuio_j2534_read_version(ecuio_j2534_handle_t* handle,
@@ -951,7 +967,7 @@ ecuio_status_t ecuio_j2534_read_version(ecuio_j2534_handle_t* handle,
         char text[3][256] = {};
         if (handle->read_version(handle->device_id, text[0], text[1],
                                  text[2]) != kPtStatusNoError) {
-            st = ECUIO_ERR_NO_TRANSPORT;
+            st = ECUIO_ERR_VENDOR_REFUSED;
         } else {
             for (int i = 0; i < 3; ++i) {
                 text[i][ECUIO_SESSION_INFO_TEXT_LEN - 1] = '\0';
@@ -1005,8 +1021,11 @@ ecuio_status_t ecuio_j2534_inject_test_frame(ecuio_j2534_handle_t* handle,
                                              uint32_t timestamp,
                                              uint32_t rx_flags)
 {
-    if (handle == nullptr || data == nullptr || len == 0 || len > 64) {
+    if (handle == nullptr || data == nullptr) {
         return ECUIO_ERR_NULL_ARGUMENT;
+    }
+    if (len == 0 || len > 64) {
+        return ECUIO_ERR_INVALID_ARGUMENT;
     }
     if (handle->is_surrogate) {
         return ecuio_j2534_sur_inject_test_frame(handle->sur, data, len,

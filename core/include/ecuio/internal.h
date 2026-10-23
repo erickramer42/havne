@@ -104,6 +104,23 @@ ecuio_status_t ecuio_j2534_read_frame(ecuio_j2534_handle_t* handle,
  * ECUIO_PT_SCONFIG_MAX_PARAMS pairs — pointer-bearing structs
  * (SCONFIG_LIST, raw PASSTHRU_MSG*) never cross the internal seam so
  * the in-proc and surrogate signatures are identical by construction.
+ *
+ * Status codes, the same on both backends (ADR-0018, appendix of
+ * 2026-10-23):
+ *   ECUIO_ERR_NULL_ARGUMENT     a required pointer is NULL
+ *   ECUIO_ERR_INVALID_ARGUMENT  a length or shape the call can't take,
+ *                               refused before any vendor call
+ *   ECUIO_ERR_NOT_IMPLEMENTED   an ioctl outside the whitelist, or a
+ *                               DLL without an optional export
+ *   ECUIO_ERR_VENDOR_REFUSED    the vendor's status wasn't
+ *                               STATUS_NOERROR (through the surrogate,
+ *                               also the child's own refusals, which
+ *                               answer as a strict vendor would)
+ *   ECUIO_ERR_SURROGATE_FAILED  the surrogate child didn't answer, or
+ *                               answered past the wire's limits
+ * Disconnect is best-effort and ignores the vendor's status, so it
+ * returns only the first and the last. The read path keeps its own
+ * mapping into link health (read_frame, above).
  */
 
 /* Single-message PassThruWriteMsgs relay. data_len <= 64 (frame ABI
@@ -159,8 +176,9 @@ ecuio_status_t ecuio_j2534_start_msg_filter(ecuio_j2534_handle_t* handle,
                                             unsigned long* out_filter_id);
 
 /* PassThruStopMsgFilter relay. Idempotence is the VENDOR'S contract
- * (stopping a stopped filter returns ERR_FAILED) — we surface the
- * vendor status verbatim rather than second-guessing it. */
+ * (a strict one answers a second stop with ERR_FAILED, so
+ * ECUIO_ERR_VENDOR_REFUSED) — we pass the refusal on rather than
+ * second-guessing it. */
 ecuio_status_t ecuio_j2534_stop_msg_filter(ecuio_j2534_handle_t* handle,
                                            unsigned long channel,
                                            unsigned long filter_id);
@@ -169,8 +187,8 @@ ecuio_status_t ecuio_j2534_stop_msg_filter(ecuio_j2534_handle_t* handle,
  * J2534 API versions into three buffers of ECUIO_SESSION_INFO_TEXT_LEN
  * bytes, each NUL-terminated on one line (control characters become
  * spaces). The export is optional, as PassThruGetLastError's is:
- * ECUIO_ERR_NOT_IMPLEMENTED without it, ECUIO_ERR_NO_TRANSPORT when the
- * vendor refuses; the buffers then hold "". */
+ * ECUIO_ERR_NOT_IMPLEMENTED without it; on any failure the buffers
+ * hold "". */
 ecuio_status_t ecuio_j2534_read_version(ecuio_j2534_handle_t* handle,
                                         char* firmware,
                                         char* dll,
