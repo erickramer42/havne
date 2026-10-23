@@ -54,7 +54,7 @@ ecuio_status_t ecuio_mock_transport_attach(ecuio_session_t* session,
  *            containing \ or />)
  *
  * Query parameters (strict — malformed URIs fail at session_create
- * with ECUIO_ERR_NO_TRANSPORT, before any DLL load):
+ * with ECUIO_ERR_BAD_URI, before any DLL load):
  *   baud    decimal, nonzero; default resolved by connect_channel to
  *           the ISO 15765 500k default
  *   flags   0x-prefixed hex or decimal, passed to PassThruConnect
@@ -125,7 +125,9 @@ ecuio_status_t ecuio_j2534_write_frame(ecuio_j2534_handle_t* handle,
  * output. For READ_VBATT: input_len 0, 4-byte result in output.
  * Pointer-bearing ioctls (FAST_INIT etc.) are out of contract — the
  * relay refuses them at this seam rather than guessing layouts.
- * output_cap bounds the copy; *out_len receives the actual length. */
+ * output receives the first output_cap bytes of the result on either
+ * backend, and *out_len its full length, so a caller spots a cut by
+ * comparing. */
 ecuio_status_t ecuio_j2534_ioctl(ecuio_j2534_handle_t* handle,
                                   unsigned long channel,
                                   uint32_t ioctl_id,
@@ -162,9 +164,27 @@ ecuio_status_t ecuio_j2534_stop_msg_filter(ecuio_j2534_handle_t* handle,
                                            unsigned long channel,
                                            unsigned long filter_id);
 
+/* PassThruReadVersion relay: the adapter's firmware, its DLL and the
+ * J2534 API versions into three buffers of ECUIO_SESSION_INFO_TEXT_LEN
+ * bytes, each NUL-terminated on one line (control characters become
+ * spaces). The export is optional, as PassThruGetLastError's is:
+ * ECUIO_ERR_NOT_IMPLEMENTED without it, ECUIO_ERR_NO_TRANSPORT when the
+ * vendor refuses; the buffers then hold "". */
+ecuio_status_t ecuio_j2534_read_version(ecuio_j2534_handle_t* handle,
+                                        char* firmware,
+                                        char* dll,
+                                        char* api);
+
 /* Backend introspection (routing diagnostics + tests): "inproc" or
  * "surrogate". NULL for a NULL handle. */
 const char* ecuio_j2534_backend_name(const ecuio_j2534_handle_t* handle);
+
+/* The same choice as ECUIO_BACKEND_J2534_INPROC or _SURROGATE, and the
+ * DLL's PE machine as ECUIO_DLL_ARCH_* (core.h), for
+ * ecuio_session_info_t. A forced surrogate (below) reports the x64 fake
+ * as x64. 0 for a NULL handle. */
+uint32_t ecuio_j2534_backend(const ecuio_j2534_handle_t* handle);
+uint32_t ecuio_j2534_dll_arch(const ecuio_j2534_handle_t* handle);
 
 /* TEST-ONLY: inject a frame into the loaded module's InjectFrame hook
  * (fake DLL), routed by backend. UNIT/HARNESS use — never in product

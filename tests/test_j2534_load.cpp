@@ -181,6 +181,43 @@ TEST_F(FakeFixture, LegacySpellingPassThruIoCtlFallsBackAndWorks) {
     EXPECT_EQ(ecuio_j2534_close(h), ECUIO_OK);
 }
 
+/* The caller's capacity bounds the copy, and out_len still reports
+ * the whole result, so a cut shows. J2534SurrogateTest has the twin. */
+TEST_F(FakeFixture, IoctlCopiesAtMostItsCapacity) {
+    ecuio_j2534_handle_t* h = nullptr;
+    ASSERT_EQ(ecuio_j2534_open(&device, &h), ECUIO_OK);
+    unsigned long channel = 0;
+    ASSERT_EQ(ecuio_j2534_connect_channel(h, 0, 0, &channel), ECUIO_OK);
+
+    uint8_t out[24];
+    memset(out, 0xAA, sizeof(out));
+    uint32_t out_len = 0;
+    ASSERT_EQ(ecuio_j2534_ioctl(h, channel, ECUIO_PT_IOCTL_READ_VBATT,
+                                nullptr, 0, out, 2, &out_len),
+              ECUIO_OK);
+    EXPECT_EQ(out_len, 4u);
+    const uint32_t mv = 13800;
+    EXPECT_EQ(memcmp(out, &mv, 2), 0);
+    EXPECT_EQ(out[2], 0xAA) << "wrote past the capacity";
+
+    uint8_t q[16];
+    const uint32_t params[2] = {0x10, 0x11};
+    memset(q, 0, sizeof(q));
+    memcpy(q, &params[0], 4);
+    memcpy(q + 8, &params[1], 4);
+    memset(out, 0xAA, sizeof(out));
+    ASSERT_EQ(ecuio_j2534_ioctl(h, channel, ECUIO_PT_IOCTL_GET_CONFIG,
+                                q, 16, out, 12, &out_len),
+              ECUIO_OK);
+    EXPECT_EQ(out_len, 16u);
+    EXPECT_EQ(memcmp(out, &params[0], 4), 0);
+    EXPECT_EQ(memcmp(out + 8, &params[1], 4), 0);
+    EXPECT_EQ(out[12], 0xAA) << "wrote past the capacity";
+
+    EXPECT_EQ(ecuio_j2534_disconnect_channel(h, channel), ECUIO_OK);
+    EXPECT_EQ(ecuio_j2534_close(h), ECUIO_OK);
+}
+
 /* dll_path is UTF-8 (j2534.h): a path no ANSI code page can spell
  * still loads, in-proc. Through the A APIs it would fail to load. */
 TEST_F(FakeFixture, NonAsciiDllPathLoadsInProc) {

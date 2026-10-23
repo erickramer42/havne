@@ -117,3 +117,19 @@ once.
   committed.
 - The files are written in text mode, so lines end in CRLF on Windows;
   a reader accepts either ending.
+
+## Appendix — J2534 `timestamp_us` is session time (2026-10-22)
+
+A J2534 frame's `timestamp_us` became session time: the host's at the
+first frame, then the adapter's own deltas, carried across its 32-bit
+wrap ([ADR-0006](0006-frame-abi-v0.3.md)'s appendix of the same date).
+So in `frames.csv` it now means what it means for `mock://`, and the
+columns are unchanged. J2534 recordings made before then (the bench
+and vehicle sessions of 2026-10-22) hold the vendor's raw stamp in
+that column.
+
+The vendor's clock can still be fitted against the host's, as the
+consequences above describe, from the session log instead: its
+`OP_READ frame` lines keep the raw stamp, indications included, next
+to their wall-clock times. That is how the vehicle session showed the
+VX counts microseconds (STATUS.md, BENCH prep item 5).

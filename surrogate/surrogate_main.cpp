@@ -40,6 +40,7 @@ typedef long (__stdcall *fn_pt_start_filter)(unsigned long, unsigned long,
                                               PASSTHRU_MSG*, unsigned long*);
 typedef long (__stdcall *fn_pt_stop_filter)(unsigned long, unsigned long);
 typedef long (__stdcall *fn_pt_get_last_error)(char*);
+typedef long (__stdcall *fn_pt_read_version)(unsigned long, char*, char*, char*);
 
 static fn_pt_open         g_open;
 static fn_pt_close        g_close;
@@ -51,6 +52,7 @@ static fn_pt_ioctl        g_ioctl;
 static fn_pt_start_filter g_start_filter;
 static fn_pt_stop_filter  g_stop_filter;
 static fn_pt_get_last_error g_get_last_error;   /* optional: may be null */
+static fn_pt_read_version g_read_version;       /* optional: may be null */
 
 static HANDLE g_pipe = INVALID_HANDLE_VALUE;
 
@@ -119,6 +121,17 @@ static void format_hex(char* out, size_t cap, const unsigned char* data,
     if (size > shown && pos < cap) {
         (void)snprintf(out + pos, cap - pos, " +%lu", size - shown);
     }
+}
+
+/* A vendor's text into one reply field: at most its first
+ * ECUIO_SUR_TEXT_MAX - 1 bytes, terminated. src may lack a terminator
+ * within cap. */
+static void copy_text(char* dst, const char* src, size_t cap)
+{
+    size_t n = 0;
+    while (n < cap && n < ECUIO_SUR_TEXT_MAX - 1 && src[n] != '\0') ++n;
+    memcpy(dst, src, n);
+    dst[n] = '\0';
 }
 
 static FARPROC resolve_export(HMODULE mod, const char* primary,
@@ -507,12 +520,17 @@ int wmain(int argc, wchar_t* argv[])
         return 5;
     }
     stage("exports resolved");
-    /* Optional: only for the text behind a refused call. The in-proc
-     * loader resolves it the same way. */
+    /* Optional: the text behind a refused call, and the versions in
+     * the session info. The in-proc loader resolves them the same way. */
     g_get_last_error = reinterpret_cast<fn_pt_get_last_error>(
         GetProcAddress(g_module, "PassThruGetLastError"));
     if (g_get_last_error == nullptr) {
         stage("no PassThruGetLastError export: refusals carry no vendor text");
+    }
+    g_read_version = reinterpret_cast<fn_pt_read_version>(
+        GetProcAddress(g_module, "PassThruReadVersion"));
+    if (g_read_version == nullptr) {
+        stage("no PassThruReadVersion export: the session reports no versions");
     }
 
     while (true) {
@@ -611,12 +629,27 @@ int wmain(int argc, wchar_t* argv[])
             /* Room past the spec's 80 for a vendor that overruns it. */
             char text[256] = {};
             const long rc = g_get_last_error(text);
-            text[sizeof(text) - 1] = '\0';
-            size_t n = strlen(text);
-            if (n > sizeof(resp.text) - 1) n = sizeof(resp.text) - 1;
-            memcpy(resp.text, text, n);   /* resp is zeroed: terminated */
+            copy_text(resp.text[0], text, sizeof(text));
             resp.status = static_cast<int32_t>(rc);
-            stage("OP_GET_LAST_ERROR: vendor status %ld: %s", rc, resp.text);
+            stage("OP_GET_LAST_ERROR: vendor status %ld: %s", rc, resp.text[0]);
+            break;
+        }
+        case ECUIO_SUR_OP_READ_VERSION: {
+            if (g_read_version == nullptr) {
+                resp.status = ECUIO_PT_STATUS_NOT_SUPPORTED;
+                break;
+            }
+            char text[ECUIO_SUR_TEXT_FIELDS][256] = {};
+            const long rc = g_read_version(g_device_id, text[0], text[1],
+                                           text[2]);
+            if (rc == ECUIO_PT_STATUS_NOERROR) {
+                for (int i = 0; i < ECUIO_SUR_TEXT_FIELDS; ++i) {
+                    copy_text(resp.text[i], text[i], sizeof(text[i]));
+                }
+            }
+            resp.status = static_cast<int32_t>(rc);
+            stage("OP_READ_VERSION: vendor status %ld: firmware '%s', DLL '%s', "
+                  "API '%s'", rc, resp.text[0], resp.text[1], resp.text[2]);
             break;
         }
         case ECUIO_SUR_OP_INJECT: {

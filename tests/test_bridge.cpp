@@ -1280,6 +1280,24 @@ TEST(BridgeTest, DestroyedMidDisconnectWaitsForTeardown)
     EXPECT_EQ(hooks.disconnect_count(), disconnects_before + 1);
     spinLoop(50);   // the dropped completion must not run
 }
+
+/* The adapter's session in the activity log, right after "Connected:",
+ * from the fake's own readings. */
+TEST(BridgeTest, ConnectLogsTheAdaptersSession)
+{
+    QtTuneBridge bridge;
+    QStringList log;
+    QObject::connect(&bridge, &QtTuneBridge::logMessage,
+                     [&log](const QString& line) { log << line; });
+    ASSERT_TRUE(bridge.connectSession(fakeUri()).isEmpty());
+    ASSERT_GE(log.size(), 2);
+    EXPECT_TRUE(log.at(log.size() - 2).startsWith(QStringLiteral("Connected: ")));
+    EXPECT_EQ(log.last().toStdString(),
+              "Session: x64 DLL, in-proc; ISO 15765 at 500000 baud; "
+              "profile raw, no channels (passive); battery 13.8 V; "
+              "firmware fake-fw 1.0, DLL fake_j2534 0.3, API 04.04");
+    ASSERT_TRUE(disconnectAndWait(bridge));
+}
 #endif  // _WIN32
 
 // ---------------------------------------------------------------------------
@@ -1354,6 +1372,66 @@ TEST(BridgeTest, AgeMsRoleEmittedAndRefreshesWhileStalled)
 
     SignalListModel empty;
     empty.refreshAges();   // no rows — silent, no crash
+}
+
+/* The "Session:" line's wording, from hand-built infos: every field
+ * it names, and what it says when a reading is missing. */
+TEST(BridgeTest, SessionInfoTextNamesTheAdapter)
+{
+    ecuio_session_info_t mock{};
+    mock.backend = ECUIO_BACKEND_MOCK;
+    qstrncpy(mock.profile, "mock", sizeof(mock.profile));
+    EXPECT_EQ(QtTuneBridge::sessionInfoText(mock).toStdString(),
+              "Session: mock transport; profile mock");
+
+    ecuio_session_info_t vx{};
+    vx.backend = ECUIO_BACKEND_J2534_SURROGATE;
+    vx.dll_arch = ECUIO_DLL_ARCH_X86;
+    vx.protocol_id = 6;
+    vx.baud = 500000;
+    vx.channel_count = 2;
+    vx.rx_ids[0] = 0x7E8;
+    vx.tx_ids[0] = 0x7E0;
+    vx.rx_ids[1] = 0x7E9;
+    vx.tx_ids[1] = 0x7E1;
+    vx.flags = ECUIO_SESSION_INFO_VBATT | ECUIO_SESSION_INFO_VERSIONS;
+    vx.vbatt_mv = 12640;
+    qstrncpy(vx.firmware_version, "1.2.3", sizeof(vx.firmware_version));
+    qstrncpy(vx.dll_version, "4.5", sizeof(vx.dll_version));
+    qstrncpy(vx.api_version, "04.04", sizeof(vx.api_version));
+    qstrncpy(vx.profile, "obd2", sizeof(vx.profile));
+    EXPECT_EQ(QtTuneBridge::sessionInfoText(vx).toStdString(),
+              "Session: x86 DLL, through the surrogate; ISO 15765 at 500000 "
+              "baud; profile obd2, channels 0x7E8/0x7E0, 0x7E9/0x7E1 (rx/tx); "
+              "battery 12.6 V; firmware 1.2.3, DLL 4.5, API 04.04");
+
+    ecuio_session_info_t bare{};
+    bare.backend = ECUIO_BACKEND_J2534_INPROC;
+    bare.dll_arch = ECUIO_DLL_ARCH_X64;
+    bare.protocol_id = 6;
+    bare.baud = 250000;
+    bare.connect_flags = 0x100;
+    bare.channel_count = 1;
+    bare.rx_ids[0] = 0x18DAF110;
+    bare.tx_ids[0] = 0x18DA10F1;
+    qstrncpy(bare.profile, "raw", sizeof(bare.profile));
+    EXPECT_EQ(QtTuneBridge::sessionInfoText(bare).toStdString(),
+              "Session: x64 DLL, in-proc; ISO 15765 at 250000 baud, flags 0x100; "
+              "profile raw, channel 0x18DAF110/0x18DA10F1 (rx/tx); "
+              "no battery reading; no version reading");
+}
+
+TEST(BridgeTest, ConnectLogsTheMockSession)
+{
+    QtTuneBridge bridge;
+    QStringList log;
+    QObject::connect(&bridge, &QtTuneBridge::logMessage,
+                     [&log](const QString& line) { log << line; });
+    ASSERT_TRUE(bridge.connectSession(QStringLiteral("mock://demo")).isEmpty());
+    ASSERT_GE(log.size(), 2);
+    EXPECT_EQ(log.at(log.size() - 2), QStringLiteral("Connected: mock://demo"));
+    EXPECT_EQ(log.last(), QStringLiteral("Session: mock transport; profile mock"));
+    ASSERT_TRUE(disconnectAndWait(bridge));
 }
 
 TEST(BridgeTest, LinkStateMapsEveryPublishedCode)

@@ -49,18 +49,29 @@ ecuio_status_t ecuio_j2534_sur_write_frame(ecuio_j2534_sur_handle_t* handle,
 
 /* Generic ioctl relay. input is a FLATTENED SCONFIG array (u32
  * Parameter/Value pairs, little-endian) for GET_CONFIG/SET_CONFIG;
- * input_len==0 for ioctls taking NULL input. output receives the
- * response payload (GET_CONFIG write-back or READ_VBATT's ULONG), and
- * out_len its length. There is no capacity parameter: size output for
- * the wire limit, ECUIO_SUR_IOCTL_DATA_MAX (64) bytes. A reply that
- * claims more is rejected as a protocol skew (ECUIO_ERR_NO_TRANSPORT). */
+ * input_len==0 for ioctls taking NULL input. output receives the first
+ * output_cap bytes of the response payload (GET_CONFIG write-back or
+ * READ_VBATT's ULONG), and out_len its full length, so a caller spots a
+ * cut by comparing. A reply that claims more than the wire carries (64
+ * bytes) is rejected as a protocol skew (ECUIO_ERR_NO_TRANSPORT). */
 ecuio_status_t ecuio_j2534_sur_ioctl(ecuio_j2534_sur_handle_t* handle,
                                      unsigned long channel,
                                      uint32_t ioctl_id,
                                      const uint8_t* input,
                                      uint32_t input_len,
                                      uint8_t* output,
+                                     uint32_t output_cap,
                                      uint32_t* out_len);
+
+/* PassThruReadVersion relay: the firmware, DLL and API versions into
+ * three 80-byte buffers, each NUL-terminated as the vendor wrote it.
+ * ECUIO_ERR_NOT_IMPLEMENTED when the DLL doesn't export the call,
+ * ECUIO_ERR_NO_TRANSPORT when the vendor refuses it or the child doesn't
+ * answer; the buffers then hold "". */
+ecuio_status_t ecuio_j2534_sur_read_version(ecuio_j2534_sur_handle_t* handle,
+                                            char* firmware,
+                                            char* dll,
+                                            char* api);
 
 /* PassThruStartMsgFilter relay. mask/pattern(/flow_control) are flat
  * byte arrays (1..12 bytes each, spec max); fc may be NULL when

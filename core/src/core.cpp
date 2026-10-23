@@ -75,22 +75,33 @@ void ecuio_detail_set(const char* fmt, ...)
     va_end(ap);
 }
 
+void ecuio_text_one_line(char* text)
+{
+    size_t n = 0;
+    for (; text[n] != '\0'; ++n) {
+        if (static_cast<unsigned char>(text[n]) < 0x20) {
+            text[n] = ' ';
+        }
+    }
+    while (n > 0 && text[n - 1] == ' ') {
+        --n;
+    }
+    text[n] = '\0';
+}
+
 void ecuio_detail_set_vendor(const char* call, long status,
                              const char* vendor_text)
 {
-    /* The vendor's text, on one line and without trailing blanks: it
-     * lands in a single UI line and a log line. */
+    /* The vendor's text on one line: it lands in a single UI line and a
+     * log line. */
     char text[2 * ECUIO_PT_TEXT_LEN] = "";
     if (vendor_text != nullptr) {
         size_t n = 0;
         for (; vendor_text[n] != '\0' && n + 1 < sizeof(text); ++n) {
-            const unsigned char c = static_cast<unsigned char>(vendor_text[n]);
-            text[n] = (c < 0x20) ? ' ' : static_cast<char>(c);
-        }
-        while (n > 0 && text[n - 1] == ' ') {
-            --n;
+            text[n] = vendor_text[n];
         }
         text[n] = '\0';
+        ecuio_text_one_line(text);
     }
     const char* name = ecuio_pt_status_name(status);
     if (name == nullptr) {
@@ -122,6 +133,17 @@ ecuio_status_t ecuio_session_get_error_state(
     }
     *out_last_error = session->last_error.load();
     *out_error_count = session->error_count.load();
+    return ECUIO_OK;
+}
+
+ecuio_status_t ecuio_session_get_info(
+    const ecuio_session_t* session,
+    ecuio_session_info_t* out_info)
+{
+    if (session == nullptr || out_info == nullptr) {
+        return ECUIO_ERR_NULL_ARGUMENT;
+    }
+    *out_info = session->info;
     return ECUIO_OK;
 }
 
@@ -262,6 +284,13 @@ ecuio_status_t ecuio_session_create(
         *out_session = nullptr;
         return status;
     }
+    /* After attach, which fills the rest of the info. */
+    static_assert(ECUIO_PROFILE_NAME_MAX < ECUIO_SESSION_INFO_PROFILE_LEN,
+                  "the session info holds any profile name");
+    char* profile = (*out_session)->info.profile;
+    const size_t n = strlen(chosen);
+    memcpy(profile, chosen, n);
+    profile[n] = '\0';
     return ECUIO_OK;
 }
 

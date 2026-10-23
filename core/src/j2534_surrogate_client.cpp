@@ -224,7 +224,9 @@ bool is_absolute_path(const wchar_t* p)
  * to the running exe. The variable relocates the surrogate and nothing
  * more: it must be an absolute path to an existing file named
  * ecuio-j2534-surrogate.exe, so it can't start some other program, and
- * the path is always logged. On failure, *why says what was wrong. */
+ * the path is always logged. Either way the file must exist, so a
+ * missing copy says so instead of failing CreateProcess. On failure,
+ * *why says what was wrong. */
 bool resolve_exe_path(wchar_t* out, size_t cap, bool* from_env, const char** why)
 {
     *from_env = false;
@@ -270,6 +272,11 @@ bool resolve_exe_path(wchar_t* out, size_t cap, bool* from_env, const char** why
     }
     wmemcpy(out, self, dir);
     wcscpy_s(out + dir, cap - dir, kSurrogateExeName);
+    const DWORD attr = GetFileAttributesW(out);
+    if (attr == INVALID_FILE_ATTRIBUTES || (attr & FILE_ATTRIBUTE_DIRECTORY) != 0) {
+        *why = "none next to the app";
+        return false;
+    }
     return true;
 }
 
@@ -546,8 +553,8 @@ void fetch_vendor_text(ecuio_j2534_sur_handle_t* h, char* out)
         resp.status != static_cast<int32_t>(ECUIO_PT_STATUS_NOERROR)) {
         return;
     }
-    resp.text[sizeof(resp.text) - 1] = '\0';   /* untrusted pipe */
-    memcpy(out, resp.text, sizeof(resp.text));
+    resp.text[0][ECUIO_SUR_TEXT_MAX - 1] = '\0';   /* untrusted pipe */
+    memcpy(out, resp.text[0], ECUIO_SUR_TEXT_MAX);
     out[ECUIO_PT_TEXT_LEN] = '\0';
 }
 
@@ -947,6 +954,7 @@ ecuio_status_t ecuio_j2534_sur_ioctl(ecuio_j2534_sur_handle_t* h,
                                      const uint8_t* input,
                                      uint32_t input_len,
                                      uint8_t* output,
+                                     uint32_t output_cap,
                                      uint32_t* out_len)
 {
     if (h == nullptr || input_len > ECUIO_SUR_IOCTL_DATA_MAX) {
@@ -971,18 +979,51 @@ ecuio_status_t ecuio_j2534_sur_ioctl(ecuio_j2534_sur_handle_t* h,
         return ECUIO_ERR_NO_TRANSPORT;
     }
     /* Trust boundary, as for read's num_frames: the pipe is untrusted,
-     * and a reply could claim more than the wire carries. Callers size
-     * output for the wire limit, so copying a larger claim would overrun
-     * both resp.data and their buffer. */
+     * and a reply could claim more than resp.data holds. */
     if (resp.data_len > ECUIO_SUR_IOCTL_DATA_MAX) {
         SUR_LOG(h, "ioctl: data_len=%u exceeds the wire limit (skew?)\n",
                 resp.data_len);
         return ECUIO_ERR_NO_TRANSPORT;
     }
+    /* The caller's capacity bounds the copy; out_len keeps the full
+     * length, as in-proc. */
     if (output != nullptr && resp.data_len > 0) {
-        memcpy(output, resp.data, resp.data_len);
+        memcpy(output, resp.data,
+               (resp.data_len < output_cap) ? resp.data_len : output_cap);
     }
     if (out_len != nullptr) *out_len = resp.data_len;
+    return ECUIO_OK;
+}
+
+ecuio_status_t ecuio_j2534_sur_read_version(ecuio_j2534_sur_handle_t* h,
+                                            char* firmware,
+                                            char* dll,
+                                            char* api)
+{
+    if (h == nullptr || firmware == nullptr || dll == nullptr ||
+        api == nullptr) {
+        return ECUIO_ERR_NULL_ARGUMENT;
+    }
+    char* const out[ECUIO_SUR_TEXT_FIELDS] = {firmware, dll, api};
+    for (char* o : out) o[0] = '\0';
+
+    ecuio_sur_request_t req = {};
+    req.request_id = h->next_request_id++;
+    req.opcode = ECUIO_SUR_OP_READ_VERSION;
+    ecuio_sur_response_t resp = {};
+    if (!transact(h, req, &resp, kTransactTimeoutMs)) {
+        return ECUIO_ERR_NO_TRANSPORT;
+    }
+    if (resp.status == static_cast<int32_t>(ECUIO_PT_STATUS_NOT_SUPPORTED)) {
+        return ECUIO_ERR_NOT_IMPLEMENTED;
+    }
+    if (resp.status != static_cast<int32_t>(ECUIO_PT_STATUS_NOERROR)) {
+        return ECUIO_ERR_NO_TRANSPORT;
+    }
+    for (int i = 0; i < ECUIO_SUR_TEXT_FIELDS; ++i) {
+        resp.text[i][ECUIO_SUR_TEXT_MAX - 1] = '\0';   /* untrusted pipe */
+        memcpy(out[i], resp.text[i], ECUIO_SUR_TEXT_MAX);
+    }
     return ECUIO_OK;
 }
 
@@ -1229,7 +1270,10 @@ ecuio_status_t ecuio_j2534_sur_write_frame(ecuio_j2534_sur_handle_t*, unsigned l
 { return ECUIO_ERR_NOT_IMPLEMENTED; }
 ecuio_status_t ecuio_j2534_sur_ioctl(ecuio_j2534_sur_handle_t*, unsigned long,
                                      uint32_t, const uint8_t*, uint32_t,
-                                     uint8_t*, uint32_t*)
+                                     uint8_t*, uint32_t, uint32_t*)
+{ return ECUIO_ERR_NOT_IMPLEMENTED; }
+ecuio_status_t ecuio_j2534_sur_read_version(ecuio_j2534_sur_handle_t*,
+                                            char*, char*, char*)
 { return ECUIO_ERR_NOT_IMPLEMENTED; }
 ecuio_status_t ecuio_j2534_sur_start_msg_filter(ecuio_j2534_sur_handle_t*, unsigned long,
                                                 uint32_t, const uint8_t*, uint32_t,

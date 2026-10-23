@@ -156,6 +156,10 @@ deployed. Stop and fix it at the desk; the vehicle adds nothing.
 [2026-10-22](2026-10-22-vehicle.md)):
 - [ ] Connect succeeds, the filter is accepted (session log
       `OP_START_FILTER … status 0`)
+- [ ] Copy the activity log's "Session:" line into the sheet: the
+      battery reading with the ignition off, and the adapter's versions.
+      A reading near the battery's (about 12 V to 13 V with the engine
+      off) confirms `READ_VBATT` in millivolts (BENCH prep item 10)
 - [ ] Writes succeed (`OP_WRITE frame: status 0`) but nothing answers,
       because the bus still acknowledges frames with the ignition off.
       The link goes quiet ("Vehicle not responding") after about 1 s.

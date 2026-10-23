@@ -166,7 +166,8 @@ TEST(J2534SurrogateTest, OpenConnectInjectReadCloseCycle)
     EXPECT_EQ(cap.frame_flags[1], ECUIO_FRAME_FLAG_EXTENDED);
     EXPECT_EQ(cap.frame_flags[2], 0u);
 
-    /* Vendor timestamp passthrough (documented v0.3.0 contract) */
+    /* The client passes the vendor's stamp through; the transport
+     * makes it session time (j2534_clock.h). */
     EXPECT_EQ(cap.timestamps[0], uint64_t{1000});
     EXPECT_EQ(cap.timestamps[1], uint64_t{2000});
     EXPECT_EQ(cap.timestamps[2], uint64_t{3000});
@@ -291,14 +292,14 @@ TEST(J2534SurrogateTest, IoctlSetGetConfigRoundTrip)
     unsigned char in[8];
     put_pair(in, kParam, kValue);
     ASSERT_EQ(ecuio_j2534_sur_ioctl(h, channel, ECUIO_PT_IOCTL_SET_CONFIG,
-                                    in, 8, nullptr, nullptr),
+                                    in, 8, nullptr, 0, nullptr),
               ECUIO_OK);
 
     unsigned char q[8], out[64];
     put_pair(q, kParam, 0);
     uint32_t out_len = 0;
     ASSERT_EQ(ecuio_j2534_sur_ioctl(h, channel, ECUIO_PT_IOCTL_GET_CONFIG,
-                                    q, 8, out, &out_len),
+                                    q, 8, out, sizeof(out), &out_len),
               ECUIO_OK);
     ASSERT_EQ(out_len, 8u);
     EXPECT_EQ(get_u32(out), kParam);
@@ -317,10 +318,65 @@ TEST(J2534SurrogateTest, IoctlReadVbattReturnsFixedVoltage)
     unsigned char out[8] = {};
     uint32_t out_len = 0;
     ASSERT_EQ(ecuio_j2534_sur_ioctl(h, channel, ECUIO_PT_IOCTL_READ_VBATT,
-                                    nullptr, 0, out, &out_len),
+                                    nullptr, 0, out, sizeof(out), &out_len),
               ECUIO_OK);
     ASSERT_EQ(out_len, 4u);
     EXPECT_EQ(get_u32(out), 13800u);   /* 13.8 V in mV, per the fake */
+
+    EXPECT_EQ(ecuio_j2534_sur_close(h), ECUIO_OK);
+}
+
+/* The caller's capacity bounds the copy, and out_len still reports
+ * the whole result, so a cut shows: the loader passes callers' buffers
+ * straight through, as it does in-proc (FakeFixture's twin). */
+TEST(J2534SurrogateTest, IoctlCopiesAtMostItsCapacity)
+{
+    ecuio_j2534_sur_handle_t* h = nullptr;
+    ASSERT_EQ(ecuio_j2534_sur_open(fake_dll_path(), &h), ECUIO_OK);
+    unsigned long channel = 0;
+    ASSERT_EQ(ecuio_j2534_sur_connect_channel(h, 0, 0, &channel), ECUIO_OK);
+
+    unsigned char out[24];
+    memset(out, 0xAA, sizeof(out));
+    uint32_t out_len = 0;
+    ASSERT_EQ(ecuio_j2534_sur_ioctl(h, channel, ECUIO_PT_IOCTL_READ_VBATT,
+                                    nullptr, 0, out, 2, &out_len),
+              ECUIO_OK);
+    EXPECT_EQ(out_len, 4u);
+    const uint32_t mv = 13800;
+    EXPECT_EQ(memcmp(out, &mv, 2), 0);
+    EXPECT_EQ(out[2], 0xAA) << "wrote past the capacity";
+
+    unsigned char q[16];
+    put_pair(q, 0x10, 0);
+    put_pair(q + 8, 0x11, 0);
+    memset(out, 0xAA, sizeof(out));
+    ASSERT_EQ(ecuio_j2534_sur_ioctl(h, channel, ECUIO_PT_IOCTL_GET_CONFIG,
+                                    q, 16, out, 12, &out_len),
+              ECUIO_OK);
+    EXPECT_EQ(out_len, 16u);
+    EXPECT_EQ(get_u32(out), 0x10u);
+    EXPECT_EQ(get_u32(out + 8), 0x11u);
+    EXPECT_EQ(out[12], 0xAA) << "wrote past the capacity";
+
+    EXPECT_EQ(ecuio_j2534_sur_close(h), ECUIO_OK);
+}
+
+/* PassThruReadVersion through the child (OP_READ_VERSION): the three
+ * strings in their own reply fields. The fake answers only for the
+ * device it opened, so the child must pass that, not the channel. */
+TEST(J2534SurrogateTest, ReadVersionRelaysTheThreeStrings)
+{
+    ecuio_j2534_sur_handle_t* h = nullptr;
+    ASSERT_EQ(ecuio_j2534_sur_open(fake_dll_path(), &h), ECUIO_OK);
+    unsigned long channel = 0;
+    ASSERT_EQ(ecuio_j2534_sur_connect_channel(h, 0, 0, &channel), ECUIO_OK);
+
+    char fw[80], dll[80], api[80];
+    ASSERT_EQ(ecuio_j2534_sur_read_version(h, fw, dll, api), ECUIO_OK);
+    EXPECT_STREQ(fw, "fake-fw 1.0");
+    EXPECT_STREQ(dll, "fake_j2534 0.3");
+    EXPECT_STREQ(api, "04.04");
 
     EXPECT_EQ(ecuio_j2534_sur_close(h), ECUIO_OK);
 }
@@ -340,7 +396,7 @@ TEST(J2534SurrogateTest, IoctlWhitelistRefusesUnsupportedIds)
 
     /* 0x05 = FIVE_BAUD_INIT — pointer-bearing, never shapable. */
     EXPECT_EQ(ecuio_j2534_sur_ioctl(h, channel, 0x05,
-                                    nullptr, 0, nullptr, nullptr),
+                                    nullptr, 0, nullptr, 0, nullptr),
               ECUIO_ERR_NO_TRANSPORT);
 
     EXPECT_EQ(ecuio_j2534_sur_close(h), ECUIO_OK);
@@ -411,14 +467,14 @@ TEST(J2534SurrogateTest, TimedOutOpDoesNotDesyncNextRequest)
     unsigned char out[8] = {};
     uint32_t out_len = 0;
     EXPECT_EQ(ecuio_j2534_sur_ioctl(h, channel, ECUIO_PT_IOCTL_READ_VBATT,
-                                    nullptr, 0, out, &out_len),
+                                    nullptr, 0, out, sizeof(out), &out_len),
               ECUIO_ERR_NO_TRANSPORT);
 
     /* The differentiator: with the desync present this FAILS (reads
      * the stale response, ID mismatch); with recovery it succeeds. */
     out_len = 0;
     EXPECT_EQ(ecuio_j2534_sur_ioctl(h, channel, ECUIO_PT_IOCTL_READ_VBATT,
-                                    nullptr, 0, out, &out_len),
+                                    nullptr, 0, out, sizeof(out), &out_len),
               ECUIO_OK);
     EXPECT_EQ(out_len, 4u);
     EXPECT_EQ(get_u32(out), 13800u);
@@ -673,7 +729,7 @@ TEST(J2534SurrogateTest, UnresponsiveChildFailsFastAfterTwoMissedDeadlines)
     unsigned char out[8] = {};
     uint32_t out_len = 0;
     EXPECT_EQ(ecuio_j2534_sur_ioctl(h, channel, ECUIO_PT_IOCTL_READ_VBATT,
-                                    nullptr, 0, out, &out_len),
+                                    nullptr, 0, out, sizeof(out), &out_len),
               ECUIO_ERR_NO_TRANSPORT);
 
     /* Second: its late reply doesn't come within another timeout. */
@@ -875,7 +931,7 @@ TEST(J2534SurrogateTest, HardErrorUntouchedCountDeliversNoFrames)
     unsigned char out[8] = {};
     uint32_t out_len = 0;
     EXPECT_EQ(ecuio_j2534_sur_ioctl(h, channel, ECUIO_PT_IOCTL_READ_VBATT,
-                                    nullptr, 0, out, &out_len),
+                                    nullptr, 0, out, sizeof(out), &out_len),
               ECUIO_OK);
     EXPECT_EQ(out_len, 4u);
     EXPECT_EQ(get_u32(out), 13800u);

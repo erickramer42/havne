@@ -28,4 +28,9 @@ void ecuio_detail_set(const char* fmt, ...)
 void ecuio_detail_set_vendor(const char* call, long status,
                              const char* vendor_text);
 
+/* A vendor's text as one line, in place: control characters become
+ * spaces and trailing spaces go. The detail above and the session
+ * info's version strings both pass through it. */
+void ecuio_text_one_line(char* text);
+
 #endif /* ECUIO_ERROR_DETAIL_H */

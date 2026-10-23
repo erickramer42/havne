@@ -9,7 +9,8 @@
 //          bus whose empty reads are ERR_BUFFER_EMPTY after their
 //          timeout, answered requests, and the no-ACK bus. TX and
 //          first-frame indications are skipped without ending a read,
-//          so a reply comes back in its own request's cycle.
+//          so a reply comes back in its own request's cycle. Frames
+//          carry session time, not the vendor's stamps.
 //          The backend setup and the fake's control page are in
 //          j2534_backend_fixture.h.
 
@@ -46,6 +47,7 @@ struct Delivery {
     std::atomic<int> after_next_write{0};
     uint16_t lengths[16] = {};
     uint8_t payloads[16][8] = {};
+    uint64_t stamps[16] = {};
 };
 
 void delivery_cb(const ecuio_frame_t* frame, void* user_data)
@@ -58,6 +60,7 @@ void delivery_cb(const ecuio_frame_t* frame, void* user_data)
     if (i < 16) {
         d->lengths[i] = frame->data_length;
         memcpy(d->payloads[i], frame->data, sizeof(d->payloads[i]));
+        d->stamps[i] = frame->timestamp_us;
     }
 }
 
@@ -101,6 +104,43 @@ protected:
         ASSERT_EQ(ecuio_session_start(session), ECUIO_OK);
     }
 };
+
+/* A frame's time is the session's: the first takes the host's time
+ * since connect, not the vendor's stamp; the next the vendor's delta,
+ * across the 32-bit wrap; and a vendor clock that steps back doesn't
+ * take the session's time with it. */
+TEST_P(J2534HealthTest, VendorStampsBecomeSessionTime)
+{
+    const auto before = std::chrono::steady_clock::now();
+    ASSERT_NO_FATAL_FAILURE(start_session("?profile=raw"));
+    const uint8_t a[4] = {0xA1}, b[4] = {0xB2}, c[4] = {0xC3};
+    ASSERT_TRUE(fake_control::post(page, a, sizeof(a), 0xFFFFFF00u, 0));
+    ASSERT_TRUE(fake_control::post(page, b, sizeof(b), 0x00000100u, 0));
+    ASSERT_TRUE(fake_control::post(page, c, sizeof(c), 0x00000080u, 0));
+
+    const auto deadline = std::chrono::steady_clock::now() +
+                          std::chrono::seconds(5);
+    while (delivered.count.load() < 3 &&
+           std::chrono::steady_clock::now() < deadline) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    const uint64_t since_create = static_cast<uint64_t>(
+        std::chrono::duration_cast<std::chrono::microseconds>(
+            std::chrono::steady_clock::now() - before).count());
+    EXPECT_EQ(ecuio_session_close(session), ECUIO_OK);   /* then read */
+    ecuio_session_destroy(session);
+    session = nullptr;
+
+    ASSERT_EQ(delivered.count.load(), 3);
+    ASSERT_EQ(delivered.payloads[0][0], 0xA1);   /* in posting order */
+    ASSERT_EQ(delivered.payloads[2][0], 0xC3);
+    EXPECT_LE(delivered.stamps[0], since_create) << "the vendor's stamp";
+    EXPECT_EQ(delivered.stamps[1] - delivered.stamps[0], uint64_t{0x200})
+        << "across the wrap";
+    EXPECT_GE(delivered.stamps[2], delivered.stamps[1]);
+    EXPECT_LT(delivered.stamps[2] - delivered.stamps[1], uint64_t{1000000})
+        << "a step back counts as the host's time between the reads";
+}
 
 /* Polls the error state until it reads want or budget_ms passes; le and
  * ec keep the last reading. */

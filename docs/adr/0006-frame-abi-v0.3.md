@@ -52,3 +52,14 @@ with no hidden padding. `static_assert`s pin its size and offsets.
 
 The version string became 0.3.0 with the v0.3.0 tag, so the number
 now shows this record's ABI break.
+
+## Appendix — J2534 frame time (2026-10-22)
+
+The J2534 transport passed the vendor's 32-bit stamp through as
+`timestamp_us`, which is neither session-relative nor free of the
+wrap at 71.6 min. It now meets the definition above: the first frame
+takes the host's time since attach, later frames the vendor's deltas,
+with the host's clock counting wraps across long gaps and standing in
+when the vendor clock steps (`core/src/j2534_clock.h`,
+[j2534.md](../j2534.md#session-lifecycle), "Frame time"). The layout
+is unchanged.

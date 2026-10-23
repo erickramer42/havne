@@ -118,6 +118,41 @@ TEST(CoreTest, LastErrorDetailIsPerThread) {
     EXPECT_EQ(other, "mock:// takes no query key 'interval', only profile");
 }
 
+/* A mock session says it's one, and names its profile, and reports
+ * nothing else; the info outlives close. */
+TEST(CoreTest, MockSessionInfoNamesTheBackend) {
+    ecuio_session_t* s = nullptr;
+    ASSERT_EQ(ecuio_session_create("mock://demo", &s), ECUIO_OK);
+    ecuio_session_info_t info;
+    memset(&info, 0xEE, sizeof(info));
+    ASSERT_EQ(ecuio_session_get_info(s, &info), ECUIO_OK);
+    EXPECT_EQ(info.backend, ECUIO_BACKEND_MOCK);
+    EXPECT_EQ(info.dll_arch, ECUIO_DLL_ARCH_UNKNOWN);
+    EXPECT_EQ(info.flags, 0u);
+    EXPECT_EQ(info.protocol_id, 0u);
+    EXPECT_EQ(info.baud, 0u);
+    EXPECT_EQ(info.channel_count, 0u);
+    EXPECT_STREQ(info.firmware_version, "");
+    EXPECT_STREQ(info.profile, "mock");
+    for (uint32_t r : info.reserved) {
+        EXPECT_EQ(r, 0u);
+    }
+
+    EXPECT_EQ(ecuio_session_close(s), ECUIO_OK);
+    memset(&info, 0, sizeof(info));
+    ASSERT_EQ(ecuio_session_get_info(s, &info), ECUIO_OK);
+    EXPECT_EQ(info.backend, ECUIO_BACKEND_MOCK);
+
+    EXPECT_EQ(ecuio_session_get_info(s, nullptr), ECUIO_ERR_NULL_ARGUMENT);
+    EXPECT_EQ(ecuio_session_get_info(nullptr, &info), ECUIO_ERR_NULL_ARGUMENT);
+    ecuio_session_destroy(s);
+
+    ASSERT_EQ(ecuio_session_create("mock://demo?profile=raw", &s), ECUIO_OK);
+    ASSERT_EQ(ecuio_session_get_info(s, &info), ECUIO_OK);
+    EXPECT_STREQ(info.profile, "raw");
+    ecuio_session_destroy(s);
+}
+
 TEST(CoreTest, StatusStringValidValues) {
     EXPECT_STREQ(ecuio_status_string(ECUIO_OK), "success");
     EXPECT_STREQ(ecuio_status_string(ECUIO_ERR_NULL_ARGUMENT), "null argument");

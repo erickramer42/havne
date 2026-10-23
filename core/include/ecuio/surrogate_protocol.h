@@ -15,7 +15,9 @@
 #define ECUIO_SUR_IOCTL_DATA_MAX 64        /* ioctl input, and reply payload */
 #define ECUIO_SUR_FILTER_PATTERN_MAX 12    /* mask/pattern/flow-control bytes */
 #define ECUIO_SUR_MAX_FRAMES_PER_READ 16   /* frames in one OP_READ reply */
-#define ECUIO_SUR_TEXT_MAX 80              /* vendor text: PassThruGetLastError */
+#define ECUIO_SUR_TEXT_MAX 80              /* one vendor text: PassThruGetLastError's,
+                                              or one PassThruReadVersion string */
+#define ECUIO_SUR_TEXT_FIELDS 3            /* texts in one reply */
 
 /* Request opcodes — append-only, never renumber.
  *
@@ -62,10 +64,15 @@
  *                 Reply: handle_or_channel = the filter ID.
  *   STOP_FILTER   u.stop_filter. PassThruStopMsgFilter. Reply: status
  *                 only.
- *   GET_LAST_ERROR no fields. PassThruGetLastError. Reply: text, the
+ *   GET_LAST_ERROR no fields. PassThruGetLastError. Reply: text[0], the
  *                 vendor's description of its last failed call,
  *                 NUL-terminated; status the vendor's, or
- *                 ERR_NOT_SUPPORTED when the DLL doesn't export it. */
+ *                 ERR_NOT_SUPPORTED when the DLL doesn't export it.
+ *   READ_VERSION  no fields. PassThruReadVersion on the open device.
+ *                 Reply: text[0], [1] and [2], the firmware, DLL and
+ *                 API versions, each NUL-terminated; status the
+ *                 vendor's, or ERR_NOT_SUPPORTED when the DLL doesn't
+ *                 export it. */
 #define ECUIO_SUR_OP_OPEN        1
 #define ECUIO_SUR_OP_CONNECT     2
 #define ECUIO_SUR_OP_IOCTL       3
@@ -77,6 +84,7 @@
 #define ECUIO_SUR_OP_START_FILTER 9
 #define ECUIO_SUR_OP_STOP_FILTER   10
 #define ECUIO_SUR_OP_GET_LAST_ERROR 11
+#define ECUIO_SUR_OP_READ_VERSION  12
 
 typedef struct ecuio_sur_request {
     uint32_t request_id;   /* client-assigned, increasing; echoed back */
@@ -113,7 +121,8 @@ typedef struct ecuio_sur_request {
 typedef struct ecuio_sur_frame {
     uint32_t arbitration_id;  /* always 0: the CAN ID is data[0..3], which
                                  the transport strips (ADR-0012) */
-    uint32_t timestamp;       /* the vendor's Timestamp, untranslated (#12) */
+    uint32_t timestamp;       /* the vendor's Timestamp, untranslated: the
+                                 transport makes it session time */
     uint32_t rx_flags;        /* the vendor's RxStatus */
     uint8_t  data[ECUIO_SUR_MSG_MAX];
     uint8_t  data_len;        /* the child clamps to ECUIO_SUR_MSG_MAX */
@@ -126,8 +135,9 @@ typedef struct ecuio_sur_response {
     int32_t  status;             /* vendor J2534 status, or STATUS_FAILED */
     uint32_t handle_or_channel;  /* CONNECT: channel ID; START_FILTER: filter ID */
     uint32_t aux;                /* OPEN: the child's fingerprint; WRITE: messages written */
-    char     text[ECUIO_SUR_TEXT_MAX];   /* GET_LAST_ERROR; the client
-                                            terminates it */
+    /* GET_LAST_ERROR: [0]; READ_VERSION: all three. The client
+     * terminates each. */
+    char     text[ECUIO_SUR_TEXT_FIELDS][ECUIO_SUR_TEXT_MAX];
     uint8_t  data[ECUIO_SUR_IOCTL_DATA_MAX];   /* IOCTL reply payload */
     uint32_t data_len;           /* IOCTL; the client rejects > the limit */
     uint32_t num_frames;         /* READ; the client rejects > the limit */

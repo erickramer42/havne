@@ -402,6 +402,7 @@ if(WIN32)
         SURROGATE_EXE_PATH="$<TARGET_FILE:ecuio-j2534-surrogate>"
     )
     add_dependencies(test_j2534_connect fake_j2534)
+    add_dependencies(test_j2534_connect fake_j2534_legacy)   # beside the fake
     add_dependencies(test_j2534_connect ecuio-j2534-surrogate)
     qttune_enable_warnings(test_j2534_connect)
     gtest_discover_tests(test_j2534_connect

@@ -10,6 +10,7 @@ EXPORTS
     PassThruStartMsgFilter
     PassThruStopMsgFilter
     PassThruGetLastError
+    PassThruReadVersion
     InjectFrame
     GetBufferState
     GetCurrentHandle

@@ -38,6 +38,11 @@ typedef char abi_set_layout_check[(offsetof(ecuio_signal_set_t, layout_version) 
 typedef char abi_validation_size_check[(sizeof(ecuio_validation_t) == 16) ? 1 : -1];
 typedef char abi_validation_index_check[(offsetof(ecuio_validation_t, index) == 4) ? 1 : -1];
 typedef char abi_validation_reserved_check[(offsetof(ecuio_validation_t, reserved) == 8) ? 1 : -1];
+typedef char abi_info_size_check[(sizeof(ecuio_session_info_t) == 432) ? 1 : -1];
+typedef char abi_info_rx_check[(offsetof(ecuio_session_info_t, rx_ids) == 32) ? 1 : -1];
+typedef char abi_info_text_check[(offsetof(ecuio_session_info_t, firmware_version) == 64) ? 1 : -1];
+typedef char abi_info_profile_check[(offsetof(ecuio_session_info_t, profile) == 304) ? 1 : -1];
+typedef char abi_info_reserved_check[(offsetof(ecuio_session_info_t, reserved) == 368) ? 1 : -1];
 
 int main(void)
 {
@@ -45,6 +50,7 @@ int main(void)
     ecuio_frame_t frame;
     const ecuio_signal_set_t* set = NULL;
     ecuio_validation_t validation;
+    ecuio_session_info_t info;
     frame.arbitration_id = 0x7FF;
     frame.channel_id = 0;
     frame.data_length = 8;
@@ -66,6 +72,9 @@ int main(void)
     }
     if (ecuio_profile_register(NULL, NULL, &validation) != ECUIO_ERR_NULL_ARGUMENT ||
         validation.code != 0 || validation.index != UINT32_MAX) {
+        return 1;
+    }
+    if (ecuio_session_get_info(NULL, &info) != ECUIO_ERR_NULL_ARGUMENT) {
         return 1;
     }
     ecuio_j2534_free_devices(NULL);
