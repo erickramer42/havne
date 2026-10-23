@@ -50,6 +50,11 @@ file(CONFIGURE
 
 option(QTTUNE_BUILD_CORE_ONLY "Build core library and tests; skip Qt app" OFF)
 
+# libFuzzer harnesses (fuzz/): Clang or MSVC, off by default, in a tree
+# of their own, never in ctest. The CI 'fuzz' job builds and runs them;
+# fuzz/README.md has the local recipe.
+option(ECUIO_BUILD_FUZZERS "Build libFuzzer harnesses (Clang or MSVC)" OFF)
+
 # Compiler warnings for every first-party target: core, the surrogate,
 # the app, the tests and the fake DLLs. They don't fail the build (no /WX
 # or -Werror): CI compiles with GCC, MSVC and AppleClang, and one
@@ -68,6 +73,10 @@ add_subdirectory(surrogate)
 include(CTest)
 if(BUILD_TESTING)
     add_subdirectory(tests)
+endif()
+
+if(ECUIO_BUILD_FUZZERS)
+    add_subdirectory(fuzz)
 endif()
 
 if(NOT QTTUNE_BUILD_CORE_ONLY)
