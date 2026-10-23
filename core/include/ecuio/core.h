@@ -318,6 +318,9 @@ ecuio_status_t ecuio_session_get_info(
 #define ECUIO_SUPPORT_PROBED             0x00000001u   /* the chain was asked */
 #define ECUIO_SUPPORT_COMPLETE           0x00000002u   /* answered to its end,
                                                           so every PID is judged */
+#define ECUIO_SUPPORT_SCAN_COMPLETE      0x00000004u   /* every scanned DID was
+                                                          answered, found or
+                                                          refused (ADR-0020) */
 
 /* reason: why a request left the rotation */
 #define ECUIO_DROP_BITMAP                1u   /* its PID's bit is clear */
@@ -354,19 +357,32 @@ typedef struct ecuio_channel_support {
     uint8_t pid_bitmap[32];
     ecuio_dropped_request_t dropped_list[ECUIO_SUPPORT_MAX_DROPPED];   /* the
                                  first ones dropped, in set order */
-    uint32_t reserved[8];     /* zero; ABI growth space */
+    /* The DID scan (ADR-0020), when the session's URI asked for one on
+     * this channel: each DID of a range is asked once. Found ones joined
+     * the rotation when its table had room (polled); refused ones were
+     * answered negative; the rest, asked but unanswered, are asked again
+     * when the link recovers. done = found + refused. */
+    uint16_t scan_total;      /* DIDs to scan on this channel; 0 = no scan */
+    uint16_t scan_done;       /* answered, found or refused */
+    uint16_t scan_found;      /* answered positive */
+    uint16_t scan_refused;    /* answered negative */
+    uint16_t scan_polled;     /* found ones now in the rotation */
+    uint16_t scan_reserved;   /* zero */
+    uint32_t reserved[5];     /* zero; ABI growth space */
 } ecuio_channel_support_t;
 
 #if defined(__cplusplus)
 static_assert(sizeof(ecuio_dropped_request_t) == 8, "ecuio_dropped_request_t size is ABI");
 static_assert(sizeof(ecuio_channel_support_t) == 152, "ecuio_channel_support_t size is ABI");
 static_assert(offsetof(ecuio_channel_support_t, pid_bitmap) == 24, "support bitmap offset is ABI");
-static_assert(offsetof(ecuio_channel_support_t, reserved) == 120, "support reserved offset is ABI");
+static_assert(offsetof(ecuio_channel_support_t, scan_total) == 120, "support scan offset is ABI");
+static_assert(offsetof(ecuio_channel_support_t, reserved) == 132, "support reserved offset is ABI");
 #elif defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
 _Static_assert(sizeof(ecuio_dropped_request_t) == 8, "ecuio_dropped_request_t size is ABI");
 _Static_assert(sizeof(ecuio_channel_support_t) == 152, "ecuio_channel_support_t size is ABI");
 _Static_assert(offsetof(ecuio_channel_support_t, pid_bitmap) == 24, "support bitmap offset is ABI");
-_Static_assert(offsetof(ecuio_channel_support_t, reserved) == 120, "support reserved offset is ABI");
+_Static_assert(offsetof(ecuio_channel_support_t, scan_total) == 120, "support scan offset is ABI");
+_Static_assert(offsetof(ecuio_channel_support_t, reserved) == 132, "support reserved offset is ABI");
 #endif
 
 /* Copies what channel `channel` has learned into *out_support: an index

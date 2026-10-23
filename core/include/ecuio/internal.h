@@ -44,14 +44,15 @@ typedef struct ecuio_transport {
  * so attach judges values only. */
 struct ecuio_uri_query;
 
-/* The keys each transport's query takes, NULL-terminated. profile is
- * core's, read by create. */
+/* The keys each transport's query takes, NULL-terminated. profile and
+ * did are core's, read by create (did under uds-generic, ADR-0020). */
 extern const char* const ecuio_mock_query_keys[];
 extern const char* const ecuio_j2534_query_keys[];
 
 /* Mock transport factory — attaches a transport to a session
- * (idempotent). Its only key is profile, so it reads nothing from the
- * query. */
+ * (idempotent). Its keys, profile and did, are core's, so it reads
+ * nothing from the query; under uds-generic its worker answers the
+ * session's DIDs with synthetic values. */
 ecuio_status_t ecuio_mock_transport_attach(ecuio_session_t* session,
                                             const char* uri,
                                             const struct ecuio_uri_query* query);
@@ -59,7 +60,7 @@ ecuio_status_t ecuio_mock_transport_attach(ecuio_session_t* session,
 /*
  * J2534 transport factory (Win32). URI grammar:
  *   j2534://[<selector>][?<key>=<value>[&<key>=<value>...]]
- *   keys: baud, flags, filter, txid, poll, probe, profile (any order)
+ *   keys: baud, flags, filter, txid, poll, probe, profile, did (any order)
  *
  * Selector:
  *   j2534://                        first discovered device
@@ -90,9 +91,12 @@ ecuio_status_t ecuio_mock_transport_attach(ecuio_session_t* session,
  *           supported-PID chain before the rotation and drop the
  *           requests it explicitly refuses; 0 sends the set as written
  *   profile name — validated by ecuio_session_create before attach
+ *   did     the uds-generic profile's DIDs (core/src/uds_generic.h,
+ *           ADR-0020), read by create: single DIDs join the rotation,
+ *           ranges are scanned once; every did= key adds up
  *   lowercase keys only, unknown keys rejected (by create), duplicate
- *   keys last-wins; the query grammar is the one every scheme shares
- *   (core/src/uri_query.h)
+ *   keys last-wins (did excepted); the query grammar is the one every
+ *   scheme shares (core/src/uri_query.h)
  *
  * Attaches a transport to the session (idempotent like mock).
  */

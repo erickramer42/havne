@@ -1,14 +1,15 @@
 # Fuzzing
 
-Two [libFuzzer](https://llvm.org/docs/LibFuzzer.html) harnesses
-exercise the parts of core that take arbitrary bytes and arbitrary
-signal definitions, under AddressSanitizer (and UndefinedBehaviorSanitizer
-with Clang):
+Three [libFuzzer](https://llvm.org/docs/LibFuzzer.html) harnesses
+exercise the parts of core that take arbitrary bytes, arbitrary signal
+definitions and typed URI text, under AddressSanitizer (and
+UndefinedBehaviorSanitizer with Clang):
 
 | Harness | What it checks |
 |---|---|
 | `fuzz_decode_signal` | Arbitrary def geometry and payloads against `ecuio_decode_signal` and `ecuio_validate_signal`. Every return code is one of the six defined; two identical calls agree, NaN bits included; nothing is written unless the decode succeeds; and a def the validator accepts fails only on the payload's bounds or its mux key. The payload is a heap copy of exactly `payload_len` bytes, so ASan reports any read past it. |
 | `fuzz_validate_set` | Arbitrary sets (defs, channels, NULL arrays, reserved fields, the layout version) against `ecuio_validate_signal_set`. The code is one this core defines; the `ecuio_validation_t` out matches the return, names the element its code says it names, and zeroes its reserved bytes; two calls agree. |
+| `fuzz_uds_query` | Arbitrary text as a `?did=` query (more keys when it holds `&`) through the query split and the `uds-generic` builder (`core/src/uds_generic.h`, ADR-0020). The status is `ECUIO_OK` or `ECUIO_ERR_BAD_URI`, a refusal leaves a terminated detail line, and a success builds a set the validator accepts, within every limit, whose polled head derives one request per def and whose scanned DIDs all fit the engine's scan; two calls agree. |
 
 They aren't ctest tests: a time-bounded fuzzer in the default pass
 would make a green suite stop meaning green. The CI `fuzz` job runs
@@ -26,7 +27,7 @@ libFuzzer, Visual Studio 2022 17.0 or later; nothing else to install):
 
 ```sh
 cmake -B build-fuzz-msvc -A x64 -DQTTUNE_BUILD_CORE_ONLY=ON -DBUILD_TESTING=OFF -DECUIO_BUILD_FUZZERS=ON
-cmake --build build-fuzz-msvc --config RelWithDebInfo --target fuzz_decode_signal fuzz_validate_set
+cmake --build build-fuzz-msvc --config RelWithDebInfo --target fuzz_decode_signal fuzz_validate_set fuzz_uds_query
 build-fuzz-msvc/fuzz/RelWithDebInfo/fuzz_decode_signal.exe -max_total_time=60
 ```
 
@@ -40,7 +41,7 @@ runtimes are in `libclang-rt-<major>-dev` on Ubuntu):
 ```sh
 cmake -B build-fuzz -DCMAKE_BUILD_TYPE=RelWithDebInfo -DQTTUNE_BUILD_CORE_ONLY=ON \
   -DBUILD_TESTING=OFF -DECUIO_BUILD_FUZZERS=ON -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++
-cmake --build build-fuzz --target fuzz_decode_signal fuzz_validate_set
+cmake --build build-fuzz --target fuzz_decode_signal fuzz_validate_set fuzz_uds_query
 ./build-fuzz/fuzz/fuzz_decode_signal -max_total_time=60
 ```
 

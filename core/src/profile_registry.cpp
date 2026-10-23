@@ -8,6 +8,7 @@
 #include "ecuio/profile.h"
 #include "request_engine.h"
 #include "session.h"
+#include "uds_generic.h"
 
 #include <cstring>
 #include <mutex>
@@ -20,7 +21,7 @@ using Registry = std::unordered_map<std::string, const ecuio_signal_set_t*>;
 
 /* The profiles core ships. Registration can't replace or remove them,
  * so a URI that names one always means the same thing. */
-const char* const kBuiltIns[] = {"mock", "raw", "obd2"};
+const char* const kBuiltIns[] = {"mock", "raw", "obd2", ECUIO_UDS_GENERIC_NAME};
 
 /* Function-local static: initialized on FIRST ACCESS, thread-safe
  * (C++11 magic statics), immune to translation-unit init-order
@@ -35,6 +36,9 @@ Registry& registry()
          * requests and channels the j2534 transport takes from it at
          * attach. */
         {"obd2", ecuio_obd2_signal_set()},
+        /* ADR-0020: an empty set stands for the name; each session gets
+         * its own, built by create from the URI's ?did= entries. */
+        {ECUIO_UDS_GENERIC_NAME, ecuio_uds_generic_template_set()},
     };
     return r;
 }

@@ -41,6 +41,14 @@ extern "C" {
 #define ECUIO_OBD2_SIG_BATTERY_V_ID    7008
 #define ECUIO_OBD2_SIG_MAF_ID          7009
 #define ECUIO_OBD2_SIG_OIL_TEMP_ID     7010
+/* ---- uds-generic (ADR-0020) ----
+ * Its set is built per session from the URI's ?did= entries, one def
+ * per DID in the order listed, with ids from this band: the first def is
+ * the base, so the band holds every single DID a session can poll
+ * (ECUIO_PROFILE_MAX_REQUESTS) plus every DID it can scan. Distinct from
+ * the mock and obd2 bands above. */
+#define ECUIO_UDS_GENERIC_SIG_ID_BASE  20000u
+
 /* OBD-II ECU #1 physical response ID, paired with the tester request
  * ID 0x7E0. Shared by obd2_signal_sets.cpp (defs), test fixtures, and
  * the fake's canned response header so all three agree on the channel. */

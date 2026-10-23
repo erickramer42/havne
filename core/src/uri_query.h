@@ -14,8 +14,8 @@
 #include <cstddef>
 #include <cstring>
 
-/* The most segments a query may have, more than twice the keys of the
- * scheme with the most (j2534://, seven), so duplicates fit. */
+/* The most segments a query may have, twice the keys of the scheme with
+ * the most (j2534://, eight), so duplicates fit. */
 constexpr size_t ECUIO_URI_MAX_PARAMS = 16;
 
 namespace ecuio_uri {

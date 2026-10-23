@@ -5,6 +5,7 @@
 #include "ecuio/internal.h"
 #include "ecuio/profile.h"
 #include "session.h"
+#include "uds_generic.h"
 #include "uri_query.h"
 #include "error_detail.h"
 #include "ecuio/j2534_ptypes.h"   /* ecuio_pt_status_name; plain C, any OS */
@@ -316,6 +317,40 @@ ecuio_status_t ecuio_session_create(
             ecuio_detail_set("no profile is named '%s'", chosen);
         }
         return found;
+    }
+
+    /* uds-generic (ADR-0020) reads its DIDs from the query and gets a set
+     * of its own, owned by the session; no other profile takes ?did=.
+     * Both refusals come before attach, like a bad ?profile=. */
+    if (strcmp(chosen, ECUIO_UDS_GENERIC_NAME) == 0) {
+        if (!ecuio_uds_query_has_did(query)) {
+            delete *out_session;
+            *out_session = nullptr;
+            ecuio_detail_set("?profile=uds-generic needs ?did= to say which "
+                             "DIDs to read");
+            return ECUIO_ERR_BAD_URI;
+        }
+        try {
+            (*out_session)->uds = std::make_unique<ecuio_uds_session>();
+        } catch (...) {
+            delete *out_session;
+            *out_session = nullptr;
+            return ECUIO_ERR_OUT_OF_MEMORY;
+        }
+        const ecuio_status_t built =
+            ecuio_uds_build(query, (*out_session)->uds.get());
+        if (built != ECUIO_OK) {
+            delete *out_session;
+            *out_session = nullptr;
+            return built;
+        }
+        profile_set = &(*out_session)->uds->set;
+    } else if (ecuio_uds_query_has_did(query)) {
+        delete *out_session;
+        *out_session = nullptr;
+        ecuio_detail_set("?did= belongs to the uds-generic profile: add "
+                         "?profile=uds-generic");
+        return ECUIO_ERR_BAD_URI;
     }
 
     /* Set before attach: the j2534 transport derives its requests

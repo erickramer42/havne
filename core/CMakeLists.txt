@@ -8,6 +8,7 @@ add_library(ecuio-core STATIC
     src/signals.cpp
     src/signal_sets.cpp
     src/obd2_signal_sets.cpp
+    src/uds_generic.cpp
     src/j2534_surrogate_client.cpp
 )
 

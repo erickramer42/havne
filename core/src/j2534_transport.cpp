@@ -5,7 +5,8 @@
 //          filter registration, request framing and routing, header
 //          strip and arbitration_id stamp, rotation, ?poll= precedence,
 //          the probe's walk, its drops, ?probe=0 and its resumption on
-//          recovery, and the support report it publishes.
+//          recovery, the support report it publishes, and uds-generic's
+//          requests, ECU prefix and DID scan.
 //          test_j2534_health, on both backends: the request engine's
 //          pacing (the floor, the wait, negative and pending replies,
 //          two channels at once), the drain in passive mode, and the
@@ -37,7 +38,8 @@
 /* The query keys parse_query reads, for create's check (internal.h);
  * every platform's, so create links where the transport is a stub. */
 extern "C" const char* const ecuio_j2534_query_keys[] = {
-    "baud", "flags", "filter", "txid", "poll", "probe", "profile", nullptr};
+    "baud", "flags", "filter", "txid", "poll", "probe", "profile", "did",
+    nullptr};
 
 #ifdef _WIN32
 
@@ -130,9 +132,10 @@ struct ecuio_j2534_transport {
      *                ECUIO_MAX_CHANNELS; each entry owns its filter
      *                id and CAN_29BIT flags. Frozen pre-thread.
      *   engine       the requests and their pacing (request_engine.h):
-     *                the set's rotation, or the one ?poll= request,
-     *                which outranks it; empty for passive receive.
-     *                Built at attach, the worker's alone after.
+     *                the set's rotation and uds-generic's DID scan, or
+     *                the one ?poll= request, which outranks both; empty
+     *                for passive receive. Built at attach, the worker's
+     *                alone after.
      *   probe        ADR-0015 §4 for the set's rotation: on unless
      *                ?probe=0 or ?poll=. Frozen pre-thread. */
     j2534_channel chans[ECUIO_MAX_CHANNELS] = {};
@@ -564,7 +567,7 @@ void publish_support(ecuio_j2534_transport* t, uint32_t c,
 void j2534_worker(ecuio_j2534_transport* t)
 {
     ecuio_request_engine& e = t->engine;
-    const bool requests = e.count > 0;
+    const bool requests = e.count > 0 || e.scan_count > 0;
     link_health h;
     uint32_t published[ECUIO_MAX_CHANNELS] = {};
     if (requests && t->probe) {
@@ -600,6 +603,9 @@ void j2534_worker(ecuio_j2534_transport* t)
             h.recovered = false;
             if (requests && t->probe) {
                 ecuio_engine_probe(&e, engine_now_us(t));
+            }
+            if (requests) {
+                ecuio_engine_rescan(&e);   /* the scan's unanswered DIDs */
             }
         }
         for (uint32_t c = 0; requests && c < t->chan_count; ++c) {
@@ -1016,9 +1022,29 @@ ecuio_status_t j2534_attach(ecuio_session_t* session, const char* uri,
         (void)ecuio_engine_add(&t->engine,
                                poll_channel(set, req[1], rx_ids, t->chan_count),
                                req, sizeof(req));
-    } else {
+    } else if (session->uds == nullptr) {
         (void)ecuio_engine_derive(&t->engine, set, rx_ids, t->chan_count,
                                   nullptr);
+    } else {
+        /* uds-generic (ADR-0020): the rotation from the set's polled
+         * head, then each scanned DID once, on the channel of its ECU by
+         * the rule the rotation's requests follow (ecuio_engine_channel_for:
+         * channel 0 under a ?filter= override). Create's limits keep both
+         * within the engine's tables. */
+        const ecuio_signal_set_t head = ecuio_uds_polled_set(*session->uds);
+        (void)ecuio_engine_derive(&t->engine, &head, rx_ids, t->chan_count,
+                                  nullptr);
+        {
+            for (const ecuio_uds_scan_target& s : session->uds->scan) {
+                uint32_t c = 0;
+                for (uint32_t i = 0; i < t->chan_count; ++i) {
+                    if (rx_ids[i] == s.rx_id) {
+                        c = i;
+                    }
+                }
+                (void)ecuio_engine_scan_add(&t->engine, c, s.did);
+            }
+        }
     }
     /* ?poll= sends its one request as asked, whatever the ECU says. */
     t->probe = params.probe && !params.has_poll;
@@ -1030,7 +1056,8 @@ ecuio_status_t j2534_attach(ecuio_session_t* session, const char* uri,
      * declared channels. Shipped profiles declare channels, so the set's
      * arm is reachable only by a set author omitting them. Fires before
      * any hardware is touched. */
-    if (t->engine.count > 0 && t->chan_count == 0) {
+    if ((t->engine.count > 0 || t->engine.scan_count > 0) &&
+        t->chan_count == 0) {
         delete t;
         if (params.has_poll) {
             ecuio_detail_set("?poll= needs a channel to receive on: add "

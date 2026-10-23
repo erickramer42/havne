@@ -310,8 +310,13 @@ measurements feed the first item.
 2. **The `obd2` PID-support probe** (ADR-0015 §4, and its appendix
    of 2026-10-23 on the probe as built): built, HARNESS-tested; the
    second vehicle session checks it on the car.
-3. **`uds-generic`** (ADR-0013): Mode-22 DID reads with user-entered
-   DIDs, the tool for researching a manufacturer set on the car.
+3. **`uds-generic`** ([ADR-0020](docs/adr/0020-uds-generic.md)):
+   built, HARNESS-tested. `?profile=uds-generic&did=…` names the DIDs
+   (`[<ecu>:]<DID>[-<DID>][:<type>]`, several in a list); single DIDs
+   are polled, a range is scanned once beside the rotation and the
+   DIDs the ECU answers join it; the mock answers them too, so the app
+   shows the profile with no hardware. Its first DIDs on a car are the
+   second vehicle session's.
 4. **Phase 4, record-replay transport,** independent of the others:
    play captured frames back deterministically through the same frame
    API. The capture side is the recorder's `frames.csv`
@@ -548,9 +553,10 @@ in the backlog.
     distinguishable by more than hue, for example with a label or
     icon.
 - **Picker presets with profiles (S).** Channel derivation already
-  makes the plain flow produce a working `obd2` session. What's left
-  is picker rows for `?profile=raw` (log only) and explicit ID
-  overrides for vehicles that don't use the standard 7E0/7E8 pair.
+  makes the plain flow produce a working `obd2` session, and
+  `uds-generic`'s `<ecu>:` prefix addresses an ECU off the 7E0/7E8
+  pair. What's left is picker rows for `?profile=raw` (log only) and
+  `uds-generic`, with a field for its DIDs, so the URI needn't be typed.
 - **In-vehicle displays: Android Auto and CarPlay (L, research
   first).** A second front end over the same C ABI, which is what
   replaceable UI layers are for. Both platforms admit third-party apps
@@ -594,8 +600,9 @@ in the backlog.
   standard set doesn't include. Choose the make from the target
   vehicles. A def keyed `62 <DID>` already enrols its request and
   decodes the reply (ADR-0015, ADR-0016), so what's missing is the
-  data: the DIDs and their formulas, which `uds-generic` is for. It
-  serves as the pilot for the v0.5.0 plugin modules.
+  data: the DIDs and their formulas, which `uds-generic`'s `?did=`
+  polling and range scan are for ([ADR-0020](docs/adr/0020-uds-generic.md)).
+  It serves as the pilot for the v0.5.0 plugin modules.
 - **Computed signals (M).** Values derived from other signals, such
   as boost pressure: intake manifold absolute pressure (PID 0x0B)
   minus barometric pressure (PID 0x33). Neither PID is in the `obd2`

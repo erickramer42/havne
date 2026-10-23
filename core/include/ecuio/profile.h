@@ -17,7 +17,10 @@ extern "C" {
  * A profile binds a string name to the signal set its sessions use.
  * "raw" is the null profile: registered with a NULL signal set — no
  * decode, Log page only. "mock" binds the mock set, "obd2" the OBD-II
- * set.
+ * set. "uds-generic" (ADR-0020) binds an empty set: each of its
+ * sessions gets a set of its own, built by ecuio_session_create from
+ * the URI's ?did= entries and owned by the session, which
+ * ecuio_session_signal_set returns like any other.
  *
  * Names are the registry key; the set pointer is data, NOT evidence of
  * registration. Use ecuio_profile_lookup's status, never a NULL check.

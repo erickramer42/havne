@@ -89,6 +89,7 @@ Dates are commit dates.
 | 2026-10-23 | The PID-support probe ([ADR-0015](adr/0015-request-engine.md) §4, appendix): each ECU's supported-PID bitmaps before its rotation, requests dropped only on an explicit answer, the walk resumed when the link recovers, `?probe=0`; the activity log names each ECU and what it supports (`ecuio_session_get_channel_support`); create splits the URI query once and refuses unknown keys for every scheme | `fdb12e1`, `7d297b4` |
 | 2026-10-23 | A frame carries a whole ISO 15765 message: `ecuio_frame_t` holds 4 KB, both J2534 read paths hand the transport the vendor's message untouched through one copy, a read's reply crosses the surrogate pipe at the length it needs, and `ecuio_profile_lookup` and `ecuio_session_send` take ADR-0018's codes ([ADR-0006](adr/0006-frame-abi-v0.3.md), appendix) | `4d4e13c` |
 | 2026-10-23 | Text values: `TEXT` and `HEX` defs read a byte field as ASCII or hex pairs (`ecuio_decode_text`, `byte_length` in the def's reserved room), the signal model carries text rows, LiveView shows them unplotted, and the recorder writes them ([ADR-0016](adr/0016-signal-definition-layout.md) and [ADR-0017](adr/0017-session-recording.md), appendices) | `882b1a3` |
+| 2026-10-23 | The `uds-generic` profile ([ADR-0020](adr/0020-uds-generic.md)): `?did=` names the DIDs (an ECU prefix, a type, a range), create builds a set the session owns, single DIDs are polled and ranges scanned once beside the rotation by the request engine, the found ones joining it; the support report and the ECU line carry the scan's counts; the mock answers the DIDs, so a QML test shows a text row; `fuzz_uds_query` | — |
 
 ## Lessons learned
 
@@ -750,3 +751,14 @@ backends: in-proc took a 65-byte write that the surrogate refused. The
 cap is now one named constant, `ECUIO_PT_WRITE_MAX`, read by all
 three. A parity test earns its keep on exactly this drift, which each
 path's own tests can't see.
+
+**2026-10-23 — `uds-generic`:** **fuzz the typed text on the day it is
+written.** `fuzz_uds_query` went in with the `?did=` parser and found two
+bugs in its first two minutes, before any commit. A range of `0000-FFFF`
+expanded all 65536 DIDs through a quadratic duplicate check before the
+1024-DID limit was applied, so one URI cost seconds (the harness ran at
+134 inputs a second; 19,000 after the limit moved ahead of the
+expansion). And an ECU prefix of `8` mapped to a request ID of 0, which
+the set validator refuses, so a URI the parser accepted built a set the
+session could never use. Neither was in the hand-written cases, because
+both inputs are ones nobody would type on purpose.

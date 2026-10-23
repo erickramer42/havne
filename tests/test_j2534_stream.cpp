@@ -286,6 +286,17 @@ TEST_F(J2534QueryParamTest, MalformedQueriesRejectedAtSessionCreate)
         "?probe=0x0",
         "?probe=1&probe=",
         "?Probe=0",
+        /* uds-generic (ADR-0020): its DIDs come from ?did=, which no
+         * other profile takes */
+        "?did=1E1C",
+        "?profile=uds-generic",
+        "?profile=uds-generic&did=",
+        "?profile=uds-generic&did=1E1C,",
+        "?profile=uds-generic&did=0x1E1C",
+        "?profile=uds-generic&did=1EFF-1E00",
+        "?profile=uds-generic&did=1E1C:u12",
+        "?profile=uds-generic&did=7:1E1C",
+        "?profile=uds-generic&did=7E8:7E9:1E1C",
         /* 17 pairs, one past the most a query holds */
         "?probe=1&probe=1&probe=1&probe=1&probe=1&probe=1&probe=1&probe=1"
         "&probe=1&probe=1&probe=1&probe=1&probe=1&probe=1&probe=1&probe=1"
@@ -315,7 +326,7 @@ TEST_F(J2534QueryParamTest, RefusedQueriesNameTheirCause)
     EXPECT_EQ(ecuio_session_create(uri, &session), ECUIO_ERR_BAD_URI);
     EXPECT_STREQ(ecuio_last_error_detail(),
                  "j2534:// takes no query key 'band', only baud, flags, "
-                 "filter, txid, poll, probe and profile");
+                 "filter, txid, poll, probe, profile and did");
     snprintf(uri, sizeof(uri), "j2534://%s?probe=yes", FAKE_J2534_DLL_PATH);
     EXPECT_EQ(ecuio_session_create(uri, &session), ECUIO_ERR_BAD_URI);
     EXPECT_STREQ(ecuio_last_error_detail(), "?probe= needs 0 or 1, not 'yes'");
@@ -1472,6 +1483,127 @@ TEST_F(J2534AdoptionTest, NegativeReplyDropsTheDidTheEcuRefuses)
     EXPECT_EQ(s.dropped_list[0].request[2], 0x1Du);
     EXPECT_EQ(s.dropped_list[0].reason, ECUIO_DROP_NOT_SUPPORTED);
     EXPECT_EQ(s.dropped_list[0].nrc, 0x31u);
+
+    EXPECT_EQ(ecuio_session_close(session), ECUIO_OK);
+    ecuio_session_destroy(session);
+}
+
+/* uds-generic (ADR-0020): ?did= builds the session's set, so a listed
+ * DID is asked for, 22 <DID> to the default ECU's 0x7E0, and its reply
+ * decodes through the def the URI made, as 0x1234 from the fake's bytes. */
+TEST_F(J2534AdoptionTest, UdsGenericPollsItsDidsAndDecodesTheReply)
+{
+    char uri[700];
+    snprintf(uri, sizeof(uri), "j2534://%s?profile=uds-generic&did=1E1C:u16",
+             FAKE_J2534_DLL_PATH);
+    ecuio_session_t* session = nullptr;
+    ASSERT_EQ(ecuio_session_create(uri, &session), ECUIO_OK);
+    const ecuio_signal_set_t* set = ecuio_session_signal_set(session);
+    ASSERT_NE(set, nullptr);
+    ASSERT_EQ(set->count, 1u);
+    EXPECT_STREQ(set->defs[0].name, "DID 1E1C");
+    StreamCapture cap;
+    ASSERT_EQ(ecuio_register_frame_callback(session, capture_cb, &cap),
+              ECUIO_OK);
+    ASSERT_EQ(ecuio_session_start(session), ECUIO_OK);
+    wait_for_count(cap, 1, 100);
+
+    unsigned char wbuf[64] = {};
+    unsigned long wlen = 0, wflags = 0;
+    get_recorded_write(0, wbuf, &wlen, &wflags);
+    ASSERT_EQ(wlen, 7u);
+    const unsigned char want_req[7] = {0x00, 0x00, 0x07, 0xE0, 0x22, 0x1E, 0x1C};
+    EXPECT_EQ(memcmp(wbuf, want_req, sizeof(want_req)), 0);
+
+    ASSERT_GE(cap.count.load(), 1);
+    ecuio_frame_t f = {};
+    f.arbitration_id = cap.arbitration_ids[0];
+    memcpy(f.data, cap.payloads[0], cap.payload_lens[0]);
+    f.data_length = cap.payload_lens[0];
+    ASSERT_EQ(ecuio_def_applies_to_frame(&set->defs[0], &f), 1);
+    double v = 0.0;
+    ASSERT_EQ(ecuio_decode_signal(&set->defs[0], f.data, f.data_length, &v),
+              ECUIO_DECODE_OK);
+    EXPECT_EQ(v, double{(0x12 << 8) | 0x34});
+
+    EXPECT_EQ(ecuio_session_close(session), ECUIO_OK);
+    ecuio_session_destroy(session);
+}
+
+/* An <ecu>: prefix names the ECU by its response ID and asks it 8
+ * below: 7E9:1E1C writes to 0x7E1, and the fake answers from 0x7E9. */
+TEST_F(J2534AdoptionTest, UdsGenericEcuPrefixAsksThatEcu)
+{
+    char uri[700];
+    snprintf(uri, sizeof(uri), "j2534://%s?profile=uds-generic&did=7E9:1E1C",
+             FAKE_J2534_DLL_PATH);
+    ecuio_session_t* session = nullptr;
+    ASSERT_EQ(ecuio_session_create(uri, &session), ECUIO_OK);
+    EXPECT_STREQ(ecuio_session_signal_set(session)->defs[0].name, "0x7E9 DID 1E1C");
+    StreamCapture cap;
+    ASSERT_EQ(ecuio_register_frame_callback(session, capture_cb, &cap),
+              ECUIO_OK);
+    ASSERT_EQ(ecuio_session_start(session), ECUIO_OK);
+    wait_for_count(cap, 1, 100);
+
+    unsigned char wbuf[64] = {};
+    unsigned long wlen = 0, wflags = 0;
+    get_recorded_write(0, wbuf, &wlen, &wflags);
+    ASSERT_EQ(wlen, 7u);
+    const unsigned char want_req[7] = {0x00, 0x00, 0x07, 0xE1, 0x22, 0x1E, 0x1C};
+    EXPECT_EQ(memcmp(wbuf, want_req, sizeof(want_req)), 0);
+    ASSERT_GE(cap.count.load(), 1);
+    EXPECT_EQ(cap.arbitration_ids[0], 0x7E9u);
+    const unsigned char want_reply[5] = {0x62, 0x1E, 0x1C, 0x12, 0x34};
+    ASSERT_EQ(static_cast<unsigned>(cap.payload_lens[0]), 5u);
+    EXPECT_EQ(memcmp(cap.payloads[0], want_reply, sizeof(want_reply)), 0);
+
+    EXPECT_EQ(ecuio_session_close(session), ECUIO_OK);
+    ecuio_session_destroy(session);
+}
+
+/* A range is scanned once, in order: of 1E18 to 1E20 the fake's ECU
+ * knows only 1E1C, which the scan finds and then polls, taking turns
+ * with the rest of the scan, while the eight it refuses (7F 22 31) are
+ * counted and never asked again. */
+TEST_F(J2534AdoptionTest, UdsGenericScanFindsWhatTheEcuAnswers)
+{
+    char uri[700];
+    snprintf(uri, sizeof(uri), "j2534://%s?profile=uds-generic&did=1E18-1E20",
+             FAKE_J2534_DLL_PATH);
+    ecuio_session_t* session = nullptr;
+    ASSERT_EQ(ecuio_session_create(uri, &session), ECUIO_OK);
+    EXPECT_EQ(ecuio_session_signal_set(session)->count, 9u);
+    ASSERT_EQ(ecuio_session_start(session), ECUIO_OK);
+
+    ecuio_channel_support_t s = {};
+    EXPECT_TRUE(wait_for_support(session, s, [](const ecuio_channel_support_t& r) {
+        return (r.flags & ECUIO_SUPPORT_SCAN_COMPLETE) != 0;
+    }, 3000)) << "the scan didn't end (done " << s.scan_done << ")";
+    EXPECT_EQ(s.flags, ECUIO_SUPPORT_SCAN_COMPLETE) << "no walk: no Service 01";
+    EXPECT_EQ(s.scan_total, 9u);
+    EXPECT_EQ(s.scan_found, 1u);
+    EXPECT_EQ(s.scan_refused, 8u);
+    EXPECT_EQ(s.scan_polled, 1u);
+    EXPECT_EQ(s.requests, 1u) << "the found DID, and nothing else, rotates";
+    EXPECT_EQ(s.dropped, 0u);
+
+    wait_for_writes(get_write_count, 14, 300);
+    unsigned char wbuf[64] = {};
+    unsigned long wlen = 0, wflags = 0;
+    /* The scan alone until 1E1C is found at write 4; from then on the
+     * rotation (1E1C) and the scan's remaining DIDs take turns, and once
+     * the scan is over only 1E1C is asked. */
+    const uint8_t want[14] = {0x18, 0x19, 0x1A, 0x1B, 0x1C,
+                              0x1C, 0x1D, 0x1C, 0x1E, 0x1C, 0x1F, 0x1C, 0x20,
+                              0x1C};
+    for (unsigned long i = 0; i < 14; ++i) {
+        get_recorded_write(i, wbuf, &wlen, &wflags);
+        ASSERT_EQ(wlen, 7u) << "write " << i;
+        EXPECT_EQ(wbuf[4], 0x22u) << "write " << i;
+        EXPECT_EQ(wbuf[5], 0x1Eu) << "write " << i;
+        EXPECT_EQ(wbuf[6], want[i]) << "write " << i;
+    }
 
     EXPECT_EQ(ecuio_session_close(session), ECUIO_OK);
     ecuio_session_destroy(session);

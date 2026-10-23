@@ -78,11 +78,12 @@ decode.
 | `mock://[label][?profile=…]` | Mock, on every platform | `mock` |
 | `j2534://[vendor or DLL path][?query]` | J2534, Windows only | `obd2` |
 | any URI with `?profile=raw` | as above | `raw` (log only, no decode) |
+| any URI with `?profile=uds-generic&did=…` | as above | `uds-generic`: the DIDs the URI names, polled or scanned ([ADR-0020](adr/0020-uds-generic.md)) |
 
 Both schemes share one strict query grammar (`core/src/uri_query.h`).
 `ecuio_session_create` splits the query once and refuses any key the
 scheme's transport doesn't take, before anything attaches; `mock://`
-takes only `profile`.
+takes only `profile` and `did`, both core's.
 
 A **profile** is a named signal set ([ADR-0013](adr/0013-protocol-profiles.md)).
 - **Signal defs:** each def says where its value sits in a frame
@@ -95,6 +96,14 @@ A **profile** is a named signal set ([ADR-0013](adr/0013-protocol-profiles.md)).
   `0x7E0`, replies on `0x7E8`). Its defs carry Service 01 mux keys,
   so the J2534 transport derives both its receive filter and its
   requests from the profile; a bare `j2534://` needs no parameters.
+- **The `uds-generic` set** is built per session from the URI's
+  `?did=` entries (`core/src/uds_generic.h`) and owned by the session:
+  one `HEX`, `TEXT` or big-endian numeric def per DID, keyed
+  `62 <DID>`, and one channel per ECU named. The registry holds only an
+  empty set for the name. Single DIDs are polled; a range is scanned
+  once by the request engine beside the rotation, and the DIDs the ECU
+  answers join it. The mock answers them, so the profile runs with no
+  hardware.
 - **Unknown or malformed profile names** fail at session create,
   before any DLL loads.
 - **Registration validates.** `ecuio_profile_register` runs the set
@@ -102,7 +111,7 @@ A **profile** is a named signal set ([ADR-0013](adr/0013-protocol-profiles.md)).
   exactly the defs the decoder can decode, requires reserved bytes to
   be zero, and rejects duplicate def IDs. A refusal can say which
   check failed and on which def or channel (`ecuio_validation_t`).
-  The built-ins (`mock`, `raw`, `obd2`)
+  The built-ins (`mock`, `raw`, `obd2`, `uds-generic`)
   can't be replaced or unregistered, and the registry keeps the
   caller's pointer, so a registered set must outlive its sessions
   (`profile.h`).

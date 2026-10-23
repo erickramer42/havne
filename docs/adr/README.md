@@ -26,6 +26,7 @@ old one, and the old record's status is updated to point at it.
 | [0017](0017-session-recording.md) | Session recording: one folder per connect, `frames.csv` as the replay format | Accepted |
 | [0018](0018-connect-failure-reporting.md) | Connect failures say why: four status codes and a thread-local detail with the vendor's text | Accepted |
 | [0019](0019-session-info.md) | Sessions say what they run on: an info struct (backend, channel, profile, battery, versions) and the activity log's "Session:" line | Accepted |
+| [0020](0020-uds-generic.md) | `uds-generic`: DIDs named in the URI (`?did=`), a set built per session, ranges scanned once beside the rotation | Accepted |
 
 ## Adding a record
 

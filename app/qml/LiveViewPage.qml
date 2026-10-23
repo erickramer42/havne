@@ -174,6 +174,7 @@ Page {
                     // Plots the row on the chart; the value keeps
                     // updating either way, here and on the Dashboard
                     CheckBox {
+                        objectName: "plotCheck"
                         checked: signalDelegate.subscribed
                         enabled: !signalDelegate.isText   // nothing to plot
                         onToggled: Bridge.signalModel.toggleSubscribed(signalDelegate.index)
@@ -203,6 +204,7 @@ Page {
                         elide: Text.ElideRight
                     }
                     Label {
+                        objectName: "valueLabel"
                         // Never-arrived signals render "—", not a
                         // fabricated 0 (unsupported PIDs under obd2).
                         text: !(Bridge.connected && signalDelegate.hasValue) ? qsTr("—")

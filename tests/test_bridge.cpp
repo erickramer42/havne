@@ -174,7 +174,7 @@ TEST(BridgeTest, FailedConnectNamesItsCause)
     QtTuneBridge bridge;
     EXPECT_EQ(bridge.connectSession("mock://demo?interval=10"),
               QStringLiteral("malformed transport URI: mock:// takes no query "
-                             "key 'interval', only profile"));
+                             "key 'interval', only profile and did"));
     EXPECT_EQ(bridge.connectSession("mock://demo?profile=bogus"),
               QStringLiteral("unknown profile: no profile is named 'bogus'"));
     EXPECT_FALSE(bridge.connected());
@@ -1623,6 +1623,33 @@ TEST(BridgeTest, ChannelSupportTextNamesTheEcuAndWhatItDropped)
               "22 40 05 (service not supported: 7F 22 11), "
               "22 40 06 (service not supported: 7F 22 11), "
               "22 40 07 (service not supported: 7F 22 11), and 2 more");
+
+    /* A DID scan (ADR-0020): the fake's 1E18-1E20 range, answered to its
+     * end; then one still running whose table filled before every found
+     * DID could join the rotation. */
+    ecuio_channel_support_t scan{};
+    scan.flags = ECUIO_SUPPORT_SCAN_COMPLETE;
+    scan.rx_id = 0x7E8;
+    scan.requests = 1;
+    scan.scan_total = 9;
+    scan.scan_done = 9;
+    scan.scan_found = 1;
+    scan.scan_refused = 8;
+    scan.scan_polled = 1;
+    EXPECT_EQ(QtTuneBridge::channelSupportText(scan).toStdString(),
+              "ECU 0x7E8: 1 request, none dropped; scan: 9 DIDs, 1 found, 8 refused");
+
+    ecuio_channel_support_t running{};
+    running.rx_id = 0x7E9;
+    running.requests = 128;
+    running.scan_total = 256;
+    running.scan_done = 250;
+    running.scan_found = 130;
+    running.scan_refused = 120;
+    running.scan_polled = 128;
+    EXPECT_EQ(QtTuneBridge::channelSupportText(running).toStdString(),
+              "ECU 0x7E9: 128 requests, none dropped; "
+              "scan: 256 DIDs, 130 found (128 polled), 120 refused, 6 unanswered");
 }
 
 TEST(BridgeTest, ConnectLogsTheMockSession)

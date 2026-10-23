@@ -1,7 +1,9 @@
 // File/layer: core/src/mock_transport.cpp | C++17, Qt-free, CI-validated headless build
 // Testing: UNIT — CoreTest.MockFramesDecodeAgainstMockSignalSet decodes
 //          real worker frames against the mock set; the drive cycle
-//          itself is tested deterministically (CoreTest.MockDriveCycle*)
+//          itself is tested deterministically (CoreTest.MockDriveCycle*);
+//          CoreTest.MockAnswersTheSessionsDids decodes its DID replies
+//          under uds-generic
 
 #include "ecuio/core.h"
 #include "ecuio/internal.h"
@@ -12,6 +14,7 @@
 
 #include <atomic>
 #include <chrono>
+#include <cstdio>
 #include <thread>
 
 namespace {
@@ -37,6 +40,8 @@ struct ecuio_mock_transport {
 };
 
 namespace {
+
+void answer_dids(ecuio_mock_transport* t, uint64_t timestamp_us);
 
 /* Worker thread entrypoint */
 void mock_worker(ecuio_mock_transport* t)
@@ -67,7 +72,64 @@ void mock_worker(ecuio_mock_transport* t)
         t->frame_counter++;
 
         ecuio_session_dispatch_callbacks(t->session, &frame);
+        answer_dids(t, frame.timestamp_us);
         std::this_thread::sleep_for(interval);
+    }
+}
+
+/* Under uds-generic (ADR-0020) the mock stands in for the ECUs the URI
+ * named: each tick it answers every DID of the session's set once, as
+ * the J2534 transport would deliver the reply, 62 <DID> and a value
+ * that moves with the tick: the tick count in a number's width (big-
+ * endian, as the defs read), four bytes of it for a hex def, and a
+ * line naming the DID and the tick for a text def. The set is written
+ * once before the worker starts (core.cpp), so reading it needs no
+ * lock. The mock set has no such def, so mock:// is unchanged. */
+void answer_dids(ecuio_mock_transport* t, uint64_t timestamp_us)
+{
+    const ecuio_signal_set_t* set = t->session->active_signal_set;
+    if (set == nullptr || set->defs == nullptr) {
+        return;
+    }
+    for (uint32_t i = 0; i < set->count; ++i) {
+        const ecuio_signal_def_t& d = set->defs[i];
+        if (d.mux_offset != 0 || d.mux_length != 3 || (d.mux_key >> 16) != 0x62u) {
+            continue;
+        }
+        bool answered = false;   /* two defs of one reply: one frame */
+        for (uint32_t j = 0; j < i && !answered; ++j) {
+            answered = set->defs[j].message_id == d.message_id &&
+                       set->defs[j].mux_length == 3 &&
+                       set->defs[j].mux_key == d.mux_key;
+        }
+        if (answered) {
+            continue;
+        }
+        ecuio_frame_t frame{};
+        frame.timestamp_us = timestamp_us;
+        frame.arbitration_id = d.message_id;
+        frame.flags = (d.message_id > 0x7FFu) ? ECUIO_FRAME_FLAG_EXTENDED : 0u;
+        frame.data[0] = 0x62;
+        frame.data[1] = static_cast<uint8_t>(d.mux_key >> 8);
+        frame.data[2] = static_cast<uint8_t>(d.mux_key);
+        const uint64_t tick = t->frame_counter;
+        uint16_t n = 3;
+        if (d.kind == ECUIO_VALUE_TEXT) {
+            n = static_cast<uint16_t>(n + std::snprintf(
+                reinterpret_cast<char*>(frame.data + n),
+                sizeof(frame.data) - n, "MOCK %04X #%llu",
+                static_cast<unsigned>(d.mux_key & 0xFFFFu),
+                static_cast<unsigned long long>(tick)));
+        } else {
+            const uint32_t bytes = (d.kind == ECUIO_VALUE_HEX) ? 4u
+                                 : (d.bit_length + 7u) / 8u;
+            for (uint32_t b = 0; b < bytes; ++b) {
+                frame.data[n++] = static_cast<uint8_t>(
+                    tick >> (8 * (bytes - 1 - b)));
+            }
+        }
+        frame.data_length = n;
+        ecuio_session_dispatch_callbacks(t->session, &frame);
     }
 }
 
@@ -120,9 +182,9 @@ const ecuio_transport_ops_t kMockTransportOps = {
 
 extern "C" {
 
-/* The mock has no parameters of its own: profile is core's, so create
- * refuses every other key, as on j2534://. */
-const char* const ecuio_mock_query_keys[] = {"profile", nullptr};
+/* The mock has no parameters of its own: profile and did are core's, so
+ * create refuses every other key, as on j2534://. */
+const char* const ecuio_mock_query_keys[] = {"profile", "did", nullptr};
 
 ecuio_status_t ecuio_mock_transport_attach(ecuio_session_t* session,
                                            const char* uri,

@@ -5,9 +5,10 @@
 // Testing: UNIT — derivation, deduplication and the limit, the
 //     read-only rule, rotation per channel, correlation, the wait, the
 //     pending wait and the floor; the supported-PID walk, its budget and
-//     its resumption, and what each answer drops (RequestEngineTest,
-//     test_obd2); the worker that drives it is HARNESS
-//     (J2534AdoptionTest, J2534HealthTest), its timing on a vehicle BENCH.
+//     its resumption, and what each answer drops; the DID scan's turns,
+//     outcomes and rescan (RequestEngineTest, test_obd2); the worker that
+//     drives it is HARNESS (J2534AdoptionTest, J2534HealthTest), its
+//     timing on a vehicle BENCH.
 
 #ifndef ECUIO_REQUEST_ENGINE_H
 #define ECUIO_REQUEST_ENGINE_H
@@ -36,7 +37,15 @@
  * at a time through the channel's one-shot slot, and its rotation starts
  * when the walk ends. While the probe is on, a request leaves the
  * rotation only on an explicit answer: its PID's bit clear in an answered
- * bitmap, or a negative reply that won't change within the session. */
+ * bitmap, or a negative reply that won't change within the session.
+ *
+ * The DID scan (ADR-0020) runs on the same slot after the walk: each
+ * scanned DID is asked once, 22 <DID>, taking turns with the channel's
+ * rotation so the listed DIDs keep refreshing while a range is scanned.
+ * A positive reply puts the DID in the rotation (while the table has
+ * room); a negative one counts it refused; one that times out is asked
+ * again when the driver calls ecuio_engine_rescan, as the link recovers.
+ * The scan runs whether or not the probe is on. */
 
 /* Timing (ADR-0015, appendix of 2026-10-23). The wait is the server's
  * response time P2 (50 ms) plus 50 ms for the adapter: the longest reply
@@ -66,12 +75,31 @@ constexpr int32_t ECUIO_ENGINE_ONCE = -2;   /* the channel's one-shot */
 /* A bitmap reply: 41 <PID> and four bytes, one bit per PID. */
 constexpr uint8_t ECUIO_BITMAP_REPLY_LEN = 6;
 
+/* The most DIDs a session scans, over every channel (ADR-0020): a
+ * 0x100-wide block four times over, at six bytes an entry. */
+constexpr uint32_t ECUIO_ENGINE_SCAN_MAX = 1024;
+
+/* What became of a scanned DID. */
+constexpr uint8_t ECUIO_SCAN_UNASKED = 0;      /* not asked yet, or asked
+                                                * again after a recovery */
+constexpr uint8_t ECUIO_SCAN_FOUND = 1;        /* answered positive */
+constexpr uint8_t ECUIO_SCAN_REFUSED = 2;      /* answered negative */
+constexpr uint8_t ECUIO_SCAN_UNANSWERED = 3;   /* its wait ran out */
+
 struct ecuio_request {
     uint8_t bytes[3];   /* the service ID, then the key */
     uint8_t len;        /* 2 or 3 */
     uint8_t channel;
     uint8_t dropped;    /* 0 in the rotation, else why not (ECUIO_DROP_*) */
     uint8_t nrc;        /* the negative reply's code that dropped it */
+};
+
+struct ecuio_scan_entry {
+    uint16_t did;
+    uint8_t channel;
+    uint8_t outcome;    /* ECUIO_SCAN_* */
+    uint8_t nrc;        /* the negative reply's code, when refused */
+    uint8_t polled;     /* 1 once found and in the rotation */
 };
 
 struct ecuio_engine_channel {
@@ -92,6 +120,12 @@ struct ecuio_engine_channel {
     uint8_t ranges = 0;         /* bit i: the bitmap at 0x20 * i answered */
     uint8_t known[32] = {};     /* PIDs whose support the ECU stated */
     uint8_t supported[32] = {}; /* of those, the ones it supports */
+    /* The DID scan: the one-shot carries a scan entry while scanning. */
+    bool scanning = false;      /* the one-shot is a scanned DID */
+    bool scan_turn = false;     /* the scan sends next, not the rotation */
+    uint32_t scan_cursor = 0;   /* where the scan looks for its next entry */
+    uint32_t scan_index = 0;    /* the entry out, while scanning */
+    uint32_t scan_pending = 0;  /* this channel's unasked entries */
     uint32_t generation = 0;    /* bumped whenever the above, or a
                                  * request's dropped, changes */
 };
@@ -103,6 +137,8 @@ struct ecuio_request_engine {
     uint32_t chan_count = 0;
     bool probe = false;         /* §4 on: walks run, explicit answers drop */
     int64_t walk_until_us = 0;  /* the walk's budget ends */
+    ecuio_scan_entry scan[ECUIO_ENGINE_SCAN_MAX] = {};
+    uint32_t scan_count = 0;
 };
 
 /* How a frame on a channel relates to its outstanding request. */
@@ -274,6 +310,82 @@ inline const ecuio_request& ecuio_engine_request_of(
     return (r == ECUIO_ENGINE_ONCE) ? e->chans[c].once : e->requests[r];
 }
 
+/* Adds did to channel's scan (ADR-0020): asked once, 22 <DID>, outside
+ * the rotation. The same DID on the same channel is kept once. False
+ * when the scan is full or the channel is past the table. */
+inline bool ecuio_engine_scan_add(ecuio_request_engine* e, uint32_t channel,
+                                  uint16_t did)
+{
+    if (channel >= e->chan_count) {
+        return false;
+    }
+    for (uint32_t i = 0; i < e->scan_count; ++i) {
+        if (e->scan[i].channel == channel && e->scan[i].did == did) {
+            return true;
+        }
+    }
+    if (e->scan_count >= ECUIO_ENGINE_SCAN_MAX) {
+        return false;
+    }
+    ecuio_scan_entry& s = e->scan[e->scan_count++];
+    s = ecuio_scan_entry{};
+    s.did = did;
+    s.channel = static_cast<uint8_t>(channel);
+    ++e->chans[channel].scan_pending;
+    return true;
+}
+
+/* The next unasked scan entry of channel c, from its cursor round the
+ * list; -1 when there is none. */
+inline int32_t ecuio_engine_scan_next(ecuio_request_engine* e, uint32_t c)
+{
+    ecuio_engine_channel& ch = e->chans[c];
+    for (uint32_t k = 0; k < e->scan_count; ++k) {
+        const uint32_t i = (ch.scan_cursor + k) % e->scan_count;
+        if (e->scan[i].channel == c && e->scan[i].outcome == ECUIO_SCAN_UNASKED) {
+            ch.scan_cursor = (i + 1) % e->scan_count;
+            return static_cast<int32_t>(i);
+        }
+    }
+    return -1;
+}
+
+/* Settles the scan entry channel c has out: found (and in the rotation
+ * while the table has room), refused with its code, or unanswered. */
+inline void ecuio_engine_scan_settle(ecuio_request_engine* e, uint32_t c,
+                                     uint8_t outcome, uint8_t nrc)
+{
+    ecuio_engine_channel& ch = e->chans[c];
+    ecuio_scan_entry& s = e->scan[ch.scan_index];
+    ch.scanning = false;
+    s.outcome = outcome;
+    s.nrc = nrc;
+    if (outcome == ECUIO_SCAN_FOUND) {
+        const uint8_t req[3] = {0x22, static_cast<uint8_t>(s.did >> 8),
+                                static_cast<uint8_t>(s.did)};
+        const ecuio_engine_add_result r = ecuio_engine_add(e, c, req, 3);
+        s.polled = (r == ecuio_engine_add_result::added ||
+                    r == ecuio_engine_add_result::duplicate) ? 1 : 0;
+    }
+    if (ch.scan_pending > 0) {
+        --ch.scan_pending;
+    }
+    ++ch.generation;
+}
+
+/* Asks every unanswered scan entry again: the driver's call when the
+ * link returns to ok, as the walk resumes. Silence wasn't an answer. */
+inline void ecuio_engine_rescan(ecuio_request_engine* e)
+{
+    for (uint32_t i = 0; i < e->scan_count; ++i) {
+        ecuio_scan_entry& s = e->scan[i];
+        if (s.outcome == ECUIO_SCAN_UNANSWERED) {
+            s.outcome = ECUIO_SCAN_UNASKED;
+            ++e->chans[s.channel].scan_pending;
+        }
+    }
+}
+
 /* Takes table entry i out of the rotation, for reason (ECUIO_DROP_*). */
 inline void ecuio_engine_drop(ecuio_request_engine* e, uint32_t i,
                               uint8_t reason, uint8_t nrc)
@@ -383,7 +495,8 @@ inline void ecuio_engine_probe(ecuio_request_engine* e, int64_t now_us)
 }
 
 /* What channel c sends next: ECUIO_ENGINE_ONCE while its walk has a
- * bitmap to ask, else the next request of its rotation, or
+ * bitmap to ask, then, taking turns with the rotation, ECUIO_ENGINE_ONCE
+ * for the next scanned DID, else the next request of its rotation, or
  * ECUIO_ENGINE_NONE while one is outstanding, before the floor, or when
  * there is nothing to send. A walk out of budget ends here. Moves the
  * rotation past the request it returns; ecuio_engine_sent records what
@@ -401,6 +514,27 @@ inline int32_t ecuio_engine_due(ecuio_request_engine* e, uint32_t c,
         }
         ecuio_engine_end_walk(e, c);
     }
+    if (ch.scanning) {
+        return ECUIO_ENGINE_ONCE;   /* a scanned DID the driver didn't send */
+    }
+    if (ch.scan_pending > 0 && (ch.requests == 0 || ch.scan_turn)) {
+        const int32_t i = ecuio_engine_scan_next(e, c);
+        if (i >= 0) {
+            const ecuio_scan_entry& s = e->scan[i];
+            ch.once = ecuio_request{};
+            ch.once.bytes[0] = 0x22;
+            ch.once.bytes[1] = static_cast<uint8_t>(s.did >> 8);
+            ch.once.bytes[2] = static_cast<uint8_t>(s.did);
+            ch.once.len = 3;
+            ch.once.channel = static_cast<uint8_t>(c);
+            ch.scanning = true;
+            ch.scan_index = static_cast<uint32_t>(i);
+            ch.scan_turn = false;
+            return ECUIO_ENGINE_ONCE;
+        }
+        ch.scan_pending = 0;   /* the count had drifted; nothing is unasked */
+    }
+    ch.scan_turn = true;
     if (ch.requests == 0) {
         return ECUIO_ENGINE_NONE;
     }
@@ -430,7 +564,7 @@ inline void ecuio_engine_sent(ecuio_request_engine* e, uint32_t c,
 /* Ends channel c's request once its wait has run out: true when one
  * timed out, which is that request's outcome. Its reply may still come,
  * so the channel is out of step until a positive reply. A bitmap that
- * times out ends the walk. */
+ * times out ends the walk; a scanned DID that does is unanswered. */
 inline bool ecuio_engine_expire(ecuio_request_engine* e, uint32_t c,
                                 int64_t now_us)
 {
@@ -441,7 +575,9 @@ inline bool ecuio_engine_expire(ecuio_request_engine* e, uint32_t c,
     const bool once = ch.outstanding == ECUIO_ENGINE_ONCE;
     ch.outstanding = ECUIO_ENGINE_NONE;
     ch.in_step = false;
-    if (once) {
+    if (once && ch.scanning) {
+        ecuio_engine_scan_settle(e, c, ECUIO_SCAN_UNANSWERED, 0);
+    } else if (once) {
         ecuio_engine_end_walk(e, c);
     }
     return true;
@@ -457,8 +593,12 @@ inline bool ecuio_engine_expire(ecuio_request_engine* e, uint32_t c,
  * the key, so one that came late, after its request timed out, would
  * name the request now outstanding: it drops only while the channel is
  * in step. An ECU answers in order, so a positive reply, which carries
- * the key, puts the channel back in step. *out_nrc (when not NULL) gets
- * the code of a negative or pending reply. */
+ * the key, puts the channel back in step. A scanned DID is settled by
+ * either reply, in step or not: its answer counts once, and a late
+ * negative reply can at worst count the DID out now as refused, while
+ * the reply that was really its own still decodes through its def.
+ * *out_nrc (when not NULL) gets the code of a negative or pending
+ * reply. */
 inline ecuio_reply ecuio_engine_on_frame(ecuio_request_engine* e, uint32_t c,
                                          const uint8_t* data, uint16_t len,
                                          int64_t now_us, uint8_t* out_nrc)
@@ -473,7 +613,9 @@ inline ecuio_reply ecuio_engine_on_frame(ecuio_request_engine* e, uint32_t c,
         data[1] == r.bytes[1] && (r.len < 3 || data[2] == r.bytes[2])) {
         ch.outstanding = ECUIO_ENGINE_NONE;
         ch.in_step = true;
-        if (out == ECUIO_ENGINE_ONCE) {
+        if (out == ECUIO_ENGINE_ONCE && ch.scanning) {
+            ecuio_engine_scan_settle(e, c, ECUIO_SCAN_FOUND, 0);
+        } else if (out == ECUIO_ENGINE_ONCE) {
             if (len >= ECUIO_BITMAP_REPLY_LEN) {
                 ecuio_engine_take_bitmap(e, c, data, now_us);
             } else {
@@ -508,7 +650,9 @@ inline ecuio_reply ecuio_engine_on_frame(ecuio_request_engine* e, uint32_t c,
     } else if (reason != 0 && out != ECUIO_ENGINE_ONCE) {
         ecuio_engine_drop(e, static_cast<uint32_t>(out), reason, code);
     }
-    if (out == ECUIO_ENGINE_ONCE) {
+    if (out == ECUIO_ENGINE_ONCE && ch.scanning) {
+        ecuio_engine_scan_settle(e, c, ECUIO_SCAN_REFUSED, code);
+    } else if (out == ECUIO_ENGINE_ONCE) {
         ecuio_engine_end_walk(e, c);
     }
     return ecuio_reply::negative;
@@ -524,7 +668,7 @@ inline int64_t ecuio_engine_next_event_us(const ecuio_request_engine* e,
     for (uint32_t c = 0; c < e->chan_count; ++c) {
         const ecuio_engine_channel& ch = e->chans[c];
         if (ch.outstanding == ECUIO_ENGINE_NONE && ch.requests == 0 &&
-            !ch.walking) {
+            !ch.walking && ch.scan_pending == 0) {
             continue;
         }
         const int64_t at = (ch.outstanding != ECUIO_ENGINE_NONE)
@@ -570,6 +714,24 @@ inline void ecuio_engine_support(const ecuio_request_engine* e, uint32_t c,
             d.nrc = r.nrc;
         }
         ++out->dropped;
+    }
+    for (uint32_t i = 0; i < e->scan_count; ++i) {
+        const ecuio_scan_entry& s = e->scan[i];
+        if (s.channel != c) {
+            continue;
+        }
+        ++out->scan_total;
+        if (s.outcome == ECUIO_SCAN_FOUND) {
+            ++out->scan_done;
+            ++out->scan_found;
+            out->scan_polled = static_cast<uint16_t>(out->scan_polled + s.polled);
+        } else if (s.outcome == ECUIO_SCAN_REFUSED) {
+            ++out->scan_done;
+            ++out->scan_refused;
+        }
+    }
+    if (out->scan_total > 0 && out->scan_done == out->scan_total) {
+        out->flags |= ECUIO_SUPPORT_SCAN_COMPLETE;
     }
 }
 

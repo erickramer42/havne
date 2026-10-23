@@ -17,9 +17,10 @@ extern "C" {
 #include "ecuio/profile.h"
 }
 
-/* C++ header (namespaced classes and inline functions): must stay
+/* C++ headers (namespaced classes and inline functions): must stay
  * outside the extern "C" block above. */
 #include "mock_drive_cycle.h"
+#include "uds_generic.h"   /* core/src: the template set's identity */
 
 namespace {
 
@@ -76,7 +77,7 @@ TEST(CoreTest, CreateFailuresNameTheirCause) {
                  "unsupported URI scheme: expected mock:// or j2534://");
     EXPECT_EQ(ecuio_session_create("mock://x?interval=10", &s), ECUIO_ERR_BAD_URI);
     EXPECT_STREQ(ecuio_last_error_detail(),
-                 "mock:// takes no query key 'interval', only profile");
+                 "mock:// takes no query key 'interval', only profile and did");
     EXPECT_EQ(ecuio_session_create("mock://x?profile=mock&&profile=raw", &s),
               ECUIO_ERR_BAD_URI);
     EXPECT_STREQ(ecuio_last_error_detail(),
@@ -122,7 +123,7 @@ TEST(CoreTest, LastErrorDetailIsPerThread) {
     });
     t.join();
     EXPECT_STREQ(ecuio_last_error_detail(), "no profile is named 'bogus'");
-    EXPECT_EQ(other, "mock:// takes no query key 'interval', only profile");
+    EXPECT_EQ(other, "mock:// takes no query key 'interval', only profile and did");
 }
 
 /* A mock session says it's one, and names its profile, and reports
@@ -1340,3 +1341,147 @@ TEST(CoreTest, MalformedProfileRejectedBeforeDllLoad) {
     EXPECT_EQ(session, nullptr);
 }
 #endif
+
+// ---------------------------------------------------------------------------
+// ADR-0020: uds-generic builds its set from the URI's ?did= entries, a set
+// of the session's own; no other profile takes the key.
+// ---------------------------------------------------------------------------
+
+TEST(CoreTest, UdsGenericBuildsItsSetFromTheUri) {
+    ecuio_session_t* session = nullptr;
+    ASSERT_EQ(ecuio_session_create(
+        "mock://x?profile=uds-generic&did=1E1C:u16,F190:text", &session), ECUIO_OK);
+    const ecuio_signal_set_t* set = ecuio_session_signal_set(session);
+    ASSERT_NE(set, nullptr);
+    EXPECT_NE(set, ecuio_uds_generic_template_set()) << "the session's own";
+    ASSERT_EQ(set->count, 2u);
+    EXPECT_STREQ(set->defs[0].name, "DID 1E1C");
+    EXPECT_EQ(set->defs[0].kind, ECUIO_VALUE_UINT);
+    EXPECT_STREQ(set->defs[1].name, "DID F190");
+    EXPECT_EQ(set->defs[1].kind, ECUIO_VALUE_TEXT);
+    ASSERT_EQ(set->channel_count, 1u);
+    EXPECT_EQ(set->channels[0].rx_id, ECUIO_OBD2_ECU_ARB_ID);
+    ecuio_session_info_t info{};
+    ASSERT_EQ(ecuio_session_get_info(session, &info), ECUIO_OK);
+    EXPECT_STREQ(info.profile, "uds-generic");
+
+    /* A second session gets a set of its own */
+    ecuio_session_t* other = nullptr;
+    ASSERT_EQ(ecuio_session_create("mock://y?profile=uds-generic&did=1E1C",
+                                   &other), ECUIO_OK);
+    EXPECT_NE(ecuio_session_signal_set(other), set);
+    EXPECT_EQ(ecuio_session_signal_set(other)->count, 1u);
+    ecuio_session_destroy(other);
+    EXPECT_EQ(set->count, 2u) << "destroying one leaves the other's set";
+    ecuio_session_destroy(session);
+}
+
+TEST(CoreTest, DidKeyBelongsToUdsGeneric) {
+    const struct {
+        const char* uri;
+        const char* detail;
+    } kCases[] = {
+        {"mock://x?did=1E1C",
+         "?did= belongs to the uds-generic profile: add ?profile=uds-generic"},
+        {"mock://x?profile=raw&did=1E1C",
+         "?did= belongs to the uds-generic profile: add ?profile=uds-generic"},
+        {"mock://x?profile=uds-generic",
+         "?profile=uds-generic needs ?did= to say which DIDs to read"},
+        {"mock://x?profile=uds-generic&did=1EFF-1E00",
+         "?did= needs a range whose end isn't before its start, not '1EFF-1E00'"},
+        {"mock://x?profile=uds-generic&did=",
+         "?did= needs at least one DID"},
+    };
+    for (const auto& c : kCases) {
+        ecuio_session_t* session = nullptr;
+        EXPECT_EQ(ecuio_session_create(c.uri, &session), ECUIO_ERR_BAD_URI) << c.uri;
+        EXPECT_EQ(session, nullptr) << c.uri;
+        EXPECT_STREQ(ecuio_last_error_detail(), c.detail) << c.uri;
+    }
+    /* The profile's name is judged first */
+    ecuio_session_t* session = nullptr;
+    EXPECT_EQ(ecuio_session_create("mock://x?profile=bogus&did=1E1C", &session),
+              ECUIO_ERR_UNKNOWN_PROFILE);
+    EXPECT_EQ(session, nullptr);
+}
+
+namespace {
+
+/* The DID replies the mock answers with, kept whole: at most kMax, each
+ * one a frame (4 KB) on the heap. */
+struct DidCapture {
+    static constexpr size_t kMax = 24;
+    std::vector<ecuio_frame_t> frames;
+    std::atomic<size_t> count{0};
+};
+
+void capture_did_cb(const ecuio_frame_t* frame, void* user_data)
+{
+    DidCapture* cap = static_cast<DidCapture*>(user_data);
+    if (frame->data_length >= 3 && frame->data[0] == 0x62 &&
+        cap->count.load() < DidCapture::kMax) {
+        cap->frames[cap->count.load()] = *frame;
+        cap->count.fetch_add(1);
+    }
+}
+
+} // namespace
+
+/* Under uds-generic the mock answers each of the session's DIDs every
+ * tick, from the ECU the def names, so the app shows the profile with no
+ * hardware: a number that counts the ticks and a text naming the DID. */
+TEST(CoreTest, MockAnswersTheSessionsDids) {
+    ecuio_session_t* session = nullptr;
+    ASSERT_EQ(ecuio_session_create(
+        "mock://dids?profile=uds-generic&did=1E1C:u16,F190:text,7E9:1E1C:u8",
+        &session), ECUIO_OK);
+    const ecuio_signal_set_t* set = ecuio_session_signal_set(session);
+    ASSERT_EQ(set->count, 3u);
+    DidCapture cap;
+    cap.frames.resize(DidCapture::kMax);
+    ASSERT_EQ(ecuio_register_frame_callback(session, &capture_did_cb, &cap),
+              ECUIO_OK);
+    ASSERT_EQ(ecuio_session_start(session), ECUIO_OK);
+    wait_for([&cap]() { return cap.count.load() >= 9; }, 5000);
+    EXPECT_EQ(ecuio_session_close(session), ECUIO_OK);   /* joins the worker */
+
+    ASSERT_GE(cap.count.load(), size_t{9}) << "three DIDs over three ticks";
+    size_t seen[3] = {0, 0, 0};
+    double last_word = -1.0;
+    for (size_t f = 0; f < cap.count.load(); ++f) {
+        const ecuio_frame_t& frame = cap.frames[f];
+        EXPECT_EQ(frame.flags, 0u) << "a classic-CAN reply, as J2534 delivers";
+        bool applied = false;
+        for (uint32_t i = 0; i < set->count; ++i) {
+            const ecuio_signal_def_t& d = set->defs[i];
+            if (!ecuio_def_applies_to_frame(&d, &frame)) {
+                continue;
+            }
+            applied = true;
+            ++seen[i];
+            if (d.kind == ECUIO_VALUE_TEXT) {
+                char text[64] = "";
+                ASSERT_EQ(ecuio_decode_text(&d, frame.data, frame.data_length,
+                                            text, sizeof(text)), ECUIO_DECODE_OK);
+                EXPECT_EQ(std::string(text).rfind("MOCK F190 #", 0), size_t{0}) << text;
+            } else {
+                double v = 0.0;
+                ASSERT_EQ(ecuio_decode_signal(&d, frame.data, frame.data_length, &v),
+                          ECUIO_DECODE_OK);
+                if (i == 0) {
+                    EXPECT_GT(v, last_word) << "the tick count grows";
+                    last_word = v;
+                    EXPECT_EQ(frame.arbitration_id, 0x7E8u);
+                } else {
+                    EXPECT_EQ(frame.arbitration_id, 0x7E9u) << "the ECU the prefix named";
+                    EXPECT_EQ(frame.data_length, 4u) << "u8: one value byte";
+                }
+            }
+        }
+        EXPECT_TRUE(applied) << "frame " << f << " answers no def";
+    }
+    for (size_t i = 0; i < 3; ++i) {
+        EXPECT_GE(seen[i], size_t{3}) << set->defs[i].name;
+    }
+    ecuio_session_destroy(session);
+}

@@ -49,7 +49,8 @@ typedef char abi_dropped_size_check[(sizeof(ecuio_dropped_request_t) == 8) ? 1 :
 typedef char abi_support_size_check[(sizeof(ecuio_channel_support_t) == 152) ? 1 : -1];
 typedef char abi_support_bitmap_check[(offsetof(ecuio_channel_support_t, pid_bitmap) == 24) ? 1 : -1];
 typedef char abi_support_list_check[(offsetof(ecuio_channel_support_t, dropped_list) == 56) ? 1 : -1];
-typedef char abi_support_reserved_check[(offsetof(ecuio_channel_support_t, reserved) == 120) ? 1 : -1];
+typedef char abi_support_scan_check[(offsetof(ecuio_channel_support_t, scan_total) == 120) ? 1 : -1];
+typedef char abi_support_reserved_check[(offsetof(ecuio_channel_support_t, reserved) == 132) ? 1 : -1];
 
 int main(void)
 {

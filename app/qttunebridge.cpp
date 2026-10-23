@@ -1103,6 +1103,23 @@ QString QtTuneBridge::channelSupportText(const ecuio_channel_support_t& s)
                     gone.join(QStringLiteral(", "));
     }
     parts << requests;
+
+    /* The DID scan (ADR-0020): how many DIDs it covers and what each
+     * answer was; found ones are polled unless the table was full. */
+    if (s.scan_total > 0) {
+        QString scan = QStringLiteral("scan: %1 DID%2, %3 found")
+                           .arg(s.scan_total)
+                           .arg(s.scan_total == 1 ? QString() : QStringLiteral("s"))
+                           .arg(s.scan_found);
+        if (s.scan_polled < s.scan_found) {
+            scan += QStringLiteral(" (%1 polled)").arg(s.scan_polled);
+        }
+        scan += QStringLiteral(", %1 refused").arg(s.scan_refused);
+        if (s.scan_done < s.scan_total) {
+            scan += QStringLiteral(", %1 unanswered").arg(s.scan_total - s.scan_done);
+        }
+        parts << scan;
+    }
     return QStringLiteral("ECU %1: ").arg(hex(s.rx_id)) + parts.join(QStringLiteral("; "));
 }
 
