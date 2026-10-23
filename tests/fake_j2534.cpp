@@ -22,12 +22,16 @@
 //    ECUIO_FAKE_WRITE_STATUS fails every write with the given status,
 //    recording nothing and echoing nothing. ECUIO_FAKE_REPLY_DELAY_MS
 //    holds each response back that long after the write (default 0).
-//  * IoCtl: config table (SET stores, GET reads back), fixed VBATT,
-//    CLEAR_* accepted. Unknown ids FAIL like a strict vendor.
-//  * Refusals: ECUIO_FAKE_OPEN_STATUS, ECUIO_FAKE_CONNECT_STATUS and
-//    ECUIO_FAKE_FILTER_STATUS make PassThruOpen, PassThruConnect and
-//    PassThruStartMsgFilter return that status, and PassThruGetLastError
-//    then describes the refusal.
+//  * IoCtl: config table (SET stores, GET reads back), fixed VBATT
+//    (13800 mV), CLEAR_* accepted. Unknown ids FAIL like a strict vendor.
+//  * ReadVersion: fixed firmware, DLL and API strings (kFirmwareVersion
+//    and friends) for device 1, the one PassThruOpen hands out. The
+//    legacy fixture (fake_j2534_legacy.def) doesn't export it.
+//  * Refusals: ECUIO_FAKE_OPEN_STATUS, ECUIO_FAKE_CONNECT_STATUS,
+//    ECUIO_FAKE_FILTER_STATUS, ECUIO_FAKE_VBATT_STATUS and
+//    ECUIO_FAKE_VERSION_STATUS make PassThruOpen, PassThruConnect,
+//    PassThruStartMsgFilter, READ_VBATT and PassThruReadVersion return
+//    that status, and PassThruGetLastError then describes the refusal.
 //  * Disconnect: counted; ECUIO_FAKE_DISCONNECT_DELAY_MS sleeps
 //    before each one (a slow vendor teardown).
 //  * Filters: registration bookkeeping + last-invocation recording.
@@ -128,6 +132,11 @@ unsigned long g_unacked = 0;            /* writes accepted since connect */
 
 /* PassThruGetLastError's text: the last refusal a knob forced. */
 char g_last_error[ECUIO_PT_TEXT_LEN] = "fake_j2534: no error";
+
+/* PassThruReadVersion's answers. */
+constexpr char kFirmwareVersion[] = "fake-fw 1.0";
+constexpr char kDllVersion[] = "fake_j2534 0.3";
+constexpr char kApiVersion[] = "04.04";
 
 /* Write recording + response generation */
 WriteRecord g_writes[FAKE_WRITE_DEPTH];
@@ -913,6 +922,12 @@ long __stdcall PassThruIoctl(unsigned long ChannelID,
             static_cast<DWORD>(strtoul(stall_buf, nullptr, 10));
         if (delay > 0 && delay <= 60000) Sleep(delay);
     }
+    if (IoControlID == static_cast<long>(ECUIO_PT_IOCTL_READ_VBATT)) {
+        if (const long rc = fake_j2534::refusal("ECUIO_FAKE_VBATT_STATUS",
+                                                "READ_VBATT")) {
+            return rc;
+        }
+    }
 
     std::lock_guard<std::mutex> lk(fake_j2534::g_lock);
 
@@ -1063,6 +1078,37 @@ long __stdcall PassThruStopMsgFilter(unsigned long ChannelID,
         }
     }
     return STATUS_FAILED;   /* unknown/already-stopped — strict vendor */
+}
+
+/* v04.04's form (DeviceID first). Like READ_VBATT, it fails for any
+ * device but the one PassThruOpen returned, so a caller passing the
+ * channel can't pass by coincidence. Exported by fake_j2534.def alone,
+ * like PassThruIoctl, so the legacy fixture has no such export: a
+ * dllexport here would export it from both. */
+extern "C"
+long __stdcall PassThruReadVersion(unsigned long DeviceID,
+                                   char* pFirmwareVersion,
+                                   char* pDllVersion,
+                                   char* pApiVersion)
+{
+    if (pFirmwareVersion == nullptr || pDllVersion == nullptr ||
+        pApiVersion == nullptr) {
+        return 0x04;   /* ERR_NULL_PARAMETER */
+    }
+    if (DeviceID != 1) {
+        return 0x1A;   /* ERR_INVALID_DEVICE_ID */
+    }
+    if (const long rc = fake_j2534::refusal("ECUIO_FAKE_VERSION_STATUS",
+                                            "PassThruReadVersion")) {
+        return rc;
+    }
+    memcpy(pFirmwareVersion, fake_j2534::kFirmwareVersion,
+           sizeof(fake_j2534::kFirmwareVersion));
+    memcpy(pDllVersion, fake_j2534::kDllVersion,
+           sizeof(fake_j2534::kDllVersion));
+    memcpy(pApiVersion, fake_j2534::kApiVersion,
+           sizeof(fake_j2534::kApiVersion));
+    return STATUS_NOERROR;
 }
 
 extern "C" __declspec(dllexport)

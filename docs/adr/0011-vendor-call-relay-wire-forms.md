@@ -72,3 +72,13 @@ through the ring, from either architecture.
 - The response struct grew a payload region, and the pipe's length
   checks now catch layout skew between the two build trees, loudly.
   Skew in constant values remains silent (Known Issue #19).
+
+## Appendix — output capacity and a version relay (2026-10-22)
+
+The surrogate client's ioctl takes the caller's output capacity, as
+the loader's helper does. On both backends the output gets the first
+`output_cap` bytes of the result and the reported length is the whole
+result's; the loader no longer stages surrogate replies in a buffer of
+its own. `OP_READ_VERSION` (12) relays `PassThruReadVersion`, an
+optional export like `PassThruGetLastError`
+([ADR-0019](0019-session-info.md)).

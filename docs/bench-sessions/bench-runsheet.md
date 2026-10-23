@@ -33,8 +33,8 @@ more than one that runs to the end undocumented.
 - [ ] Fresh build of both trees, **Win32 first**, and the app build
       prints "Deploying Win32 J2534 surrogate next to qttune.exe". If
       it doesn't, re-run `cmake -B build` and rebuild: without the copy,
-      an x86 adapter fails to connect with "failed to load transport
-      library"
+      an x86 adapter fails to connect with "surrogate process failed: no
+      surrogate (ecuio-j2534-surrogate.exe): none next to the app"
 - [ ] `scripts/verify.sh` prints four `ok` lines, the cross-arch one
       reading `0 skipped` ([development.md](../development.md#running-tests))
 - [ ] The VX driver is installed, and Settings' picker lists the VX as
@@ -43,8 +43,8 @@ more than one that runs to the end undocumented.
 - [ ] Tick **Record sessions** before the first connect, so each
       connect writes a recording and the surrogate logs every request
       and reply ([ADR-0017](../adr/0017-session-recording.md))
-- [ ] Note the adapter's driver and firmware versions if anything shows
-      them
+- [ ] Note the driver's version from its installer or the vendor app;
+      the adapter's own versions come from the first connect (phase 1)
 
 Abort condition: the picker doesn't list the VX. Stop and file it as a
 discovery problem; nothing below is meaningful.
@@ -59,6 +59,10 @@ URI. Leave it about two minutes:
 **Expected** ([2026-10-22](2026-10-22.md)):
 - [ ] Connect succeeds; the session log shows `OP_OPEN: vendor status
       0`, `OP_CONNECT` 0 and `OP_START_FILTER: type 3, status 0`
+- [ ] The activity log's "Session:" line follows "Connected:". Copy it
+      into the sheet: "x86 DLL, through the surrogate", the battery,
+      and the adapter's firmware, DLL and API versions, or "no version
+      reading" ([ADR-0019](../adr/0019-session-info.md))
 - [ ] Three writes succeed, then the fourth blocks about 0.5 s and
       fails (`OP_WRITE: status 7`), as does every later one: nothing
       acknowledges the frames. Amber "Requests failing" within about a
@@ -118,8 +122,14 @@ URI. Leave it about two minutes:
 
 ## Phase 4 — VBATT
 
-The app has no VBATT surface: the transport issues no ioctls. Record
-"surface absent" unless that has changed.
+Each connect reads the battery once (`READ_VBATT`), and the activity
+log's "Session:" line shows it.
+
+- [ ] Record the battery part of phase 1's "Session:" line: a
+      reading, or "no battery reading". On USB power alone there is no
+      vehicle battery to measure, so either is an observation, not a
+      failure; the vehicle run sheet compares it with a powered
+      connector
 
 ## Stop point
 

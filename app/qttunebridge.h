@@ -228,6 +228,7 @@ public:
     ecuio_session_t* pendingSessionForTesting() const { return m_pendingSession.load(); }
     QString linkState() const;
     static QString linkStateForError(int32_t errorCode);  /* code → state string; static so tests need no session */
+    static QString sessionInfoText(const ecuio_session_info_t& info);  /* the activity log's "Session:" line */
 
     Q_INVOKABLE QString statusString(int statusCode) const;
     Q_INVOKABLE int maxFrameCount() const { return FrameListModel::MaxFrames; }

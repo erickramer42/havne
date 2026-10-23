@@ -57,6 +57,12 @@ typedef long (__stdcall *fn_pt_start_filter)(unsigned long ChannelID,
 typedef long (__stdcall *fn_pt_stop_filter)(unsigned long ChannelID,
                                              unsigned long FilterID);
 typedef long (__stdcall *fn_pt_get_last_error)(char* pErrorDescription);
+/* J2534-1 v04.04 (Quantex's PassThruReadVersion reference; the j2534-rs
+ * binding): three caller buffers of at least 80 characters. */
+typedef long (__stdcall *fn_pt_read_version)(unsigned long DeviceID,
+                                             char* pFirmwareVersion,
+                                             char* pDllVersion,
+                                             char* pApiVersion);
 
 /* Backing type for the header's opaque ecuio_j2534_handle_t.
  *
@@ -68,6 +74,7 @@ typedef long (__stdcall *fn_pt_get_last_error)(char* pErrorDescription);
  * single-path and unaware of which backend serves any given session. */
 struct ecuio_j2534_handle {
     bool is_surrogate = false;
+    uint32_t dll_arch = ECUIO_DLL_ARCH_UNKNOWN;   /* the PE sniff at open */
     ecuio_j2534_sur_handle_t* sur = nullptr;   /* owned iff is_surrogate */
     HMODULE module = nullptr;                  /* owned iff !is_surrogate */
     unsigned long device_id;
@@ -81,6 +88,7 @@ struct ecuio_j2534_handle {
     fn_pt_start_filter start_filter;   /* mandatory in v04.04, like the rest */
     fn_pt_stop_filter  stop_filter;
     fn_pt_get_last_error get_last_error;   /* optional: may be null */
+    fn_pt_read_version read_version;        /* optional: may be null */
 };
 
 namespace {
@@ -106,6 +114,15 @@ void vendor_text(const ecuio_j2534_handle* h, char* out)
     }
     text[ECUIO_PT_TEXT_LEN] = '\0';
     memcpy(out, text, ECUIO_PT_TEXT_LEN + 1);
+}
+
+/* The first cap bytes of an ioctl result into output: the same cut on
+ * both backends (the surrogate client applies it too). */
+void copy_out(uint8_t* output, uint32_t cap, const void* src, uint32_t len)
+{
+    if (output != nullptr && len > 0) {
+        memcpy(output, src, (len < cap) ? len : cap);
+    }
 }
 
 /* Milliseconds from now to deadline, 0 once it has passed. */
@@ -418,13 +435,13 @@ ecuio_status_t ecuio_j2534_open(const ecuio_j2534_device_t* device,
      * everything else, including unknown (sniff 0), loads in-proc, so
      * unreadable paths fail at LoadLibraryEx. A test can send every
      * DLL to the surrogate (ecuio_j2534_force_surrogate_for_testing). */
-    if (g_force_surrogate.load() ||
-        sniff_pe_architecture(device->dll_path) == 1) {
+    const uint32_t arch = sniff_pe_architecture(device->dll_path);
+    if (g_force_surrogate.load() || arch == ECUIO_DLL_ARCH_X86) {
         ecuio_j2534_sur_handle_t* sur = nullptr;
         ecuio_status_t st = ecuio_j2534_sur_open(device->dll_path, &sur);
         if (st != ECUIO_OK) {
-            return st;   /* spawn/DLL-load/PassThruOpen failure — already
-                            mapped to ECUIO_ERR_LOAD_FAILED client-side */
+            return st;   /* spawn/DLL-load/PassThruOpen failure — its
+                            code and detail are set client-side */
         }
         ecuio_j2534_handle_t* h = new (std::nothrow) ecuio_j2534_handle_t();
         if (h == nullptr) {
@@ -432,6 +449,7 @@ ecuio_status_t ecuio_j2534_open(const ecuio_j2534_device_t* device,
             return ECUIO_ERR_OUT_OF_MEMORY;
         }
         h->is_surrogate = true;
+        h->dll_arch = arch;
         h->sur = sur;
         *out_handle = h;
         return ECUIO_OK;
@@ -456,6 +474,7 @@ ecuio_status_t ecuio_j2534_open(const ecuio_j2534_device_t* device,
         return ECUIO_ERR_OUT_OF_MEMORY;
     }
     h->module = module;
+    h->dll_arch = arch;
 
     /* The nine v04.04 mandatory exports — the same set the surrogate
      * child requires, so both backends accept the same DLLs. */
@@ -489,8 +508,13 @@ ecuio_status_t ecuio_j2534_open(const ecuio_j2534_device_t* device,
         delete h;
         return ECUIO_ERR_LOAD_FAILED;
     }
+    /* Optional, unlike the nine: a DLL without them loses only the
+     * vendor's text and the session info's versions. The surrogate
+     * child resolves them the same way. */
     h->get_last_error = reinterpret_cast<fn_pt_get_last_error>(
         GetProcAddress(module, "PassThruGetLastError"));
+    h->read_version = reinterpret_cast<fn_pt_read_version>(
+        GetProcAddress(module, "PassThruReadVersion"));
 
     unsigned long device_id = 0;
     const long open_rc = h->open(nullptr, &device_id);
@@ -760,30 +784,8 @@ ecuio_status_t ecuio_j2534_ioctl(ecuio_j2534_handle_t* handle,
     }
 
     if (handle->is_surrogate) {
-        /* Relay through a LOCAL staging buffer: the wire form is capped
-         * at 64 bytes and the sur client has no cap parameter — copying
-         * directly into a caller buffer smaller than 64 would overflow
-         * (e.g. a 4-byte VBATT buffer receiving a 16-byte GET_CONFIG
-         * write-back). out_len reports the FULL produced length; the
-         * copy clamps to cap — truncation detected by comparison. */
-        uint8_t staged[64];
-        uint32_t staged_len = 0;
-        ecuio_status_t st = ecuio_j2534_sur_ioctl(handle->sur, channel,
-                                                  ioctl_id, input,
-                                                  input_len, staged,
-                                                  &staged_len);
-        if (st != ECUIO_OK) {
-            return st;
-        }
-        if (output != nullptr && staged_len > 0) {
-            const uint32_t cp = (staged_len < output_cap)
-                                 ? staged_len : output_cap;
-            memcpy(output, staged, cp);
-        }
-        if (out_len != nullptr) {
-            *out_len = staged_len;
-        }
-        return ECUIO_OK;
+        return ecuio_j2534_sur_ioctl(handle->sur, channel, ioctl_id, input,
+                                     input_len, output, output_cap, out_len);
     }
 
     if (is_sconfig) {
@@ -802,18 +804,17 @@ ecuio_status_t ecuio_j2534_ioctl(ecuio_j2534_handle_t* handle,
             return ECUIO_ERR_NO_TRANSPORT;
         }
         if (ioctl_id == ECUIO_PT_IOCTL_GET_CONFIG) {
-            /* Re-flatten the vendor-updated pairs. *out_len reports
-             * the FULL produced length; the copy clamps to cap. */
-            const uint32_t full = n * 8;
-            if (output != nullptr) {
-                const uint32_t cp = (full < output_cap) ? full : output_cap;
-                for (uint32_t i = 0; i < cp / 8; ++i) {
-                    memcpy(output + i * 8, &cfg[i].Parameter, 4);
-                    memcpy(output + i * 8 + 4, &cfg[i].Value, 4);
-                }
+            /* Re-flatten the vendor-updated pairs, as the child does. */
+            uint8_t flat[ECUIO_PT_SCONFIG_MAX_PARAMS * 8];
+            for (uint32_t i = 0; i < n; ++i) {
+                const uint32_t param = static_cast<uint32_t>(cfg[i].Parameter);
+                const uint32_t value = static_cast<uint32_t>(cfg[i].Value);
+                memcpy(flat + i * 8, &param, 4);
+                memcpy(flat + i * 8 + 4, &value, 4);
             }
+            copy_out(output, output_cap, flat, n * 8);
             if (out_len != nullptr) {
-                *out_len = full;
+                *out_len = n * 8;
             }
         }
         return ECUIO_OK;
@@ -829,9 +830,8 @@ ecuio_status_t ecuio_j2534_ioctl(ecuio_j2534_handle_t* handle,
         if (rc != kPtStatusNoError) {
             return ECUIO_ERR_NO_TRANSPORT;
         }
-        if (output != nullptr && output_cap >= 4) {
-            memcpy(output, &vbatt, 4);
-        }
+        const uint32_t mv = static_cast<uint32_t>(vbatt);
+        copy_out(output, output_cap, &mv, 4);
         if (out_len != nullptr) {
             *out_len = 4;
         }
@@ -927,12 +927,70 @@ ecuio_status_t ecuio_j2534_stop_msg_filter(ecuio_j2534_handle_t* handle,
     return (rc == kPtStatusNoError) ? ECUIO_OK : ECUIO_ERR_NO_TRANSPORT;
 }
 
+ecuio_status_t ecuio_j2534_read_version(ecuio_j2534_handle_t* handle,
+                                        char* firmware,
+                                        char* dll,
+                                        char* api)
+{
+    if (handle == nullptr || firmware == nullptr || dll == nullptr ||
+        api == nullptr) {
+        return ECUIO_ERR_NULL_ARGUMENT;
+    }
+    char* const out[3] = {firmware, dll, api};
+    for (char* o : out) {
+        o[0] = '\0';
+    }
+    ecuio_status_t st = ECUIO_OK;
+    if (handle->is_surrogate) {
+        st = ecuio_j2534_sur_read_version(handle->sur, firmware, dll, api);
+    } else if (handle->read_version == nullptr) {
+        st = ECUIO_ERR_NOT_IMPLEMENTED;
+    } else {
+        /* Room past the spec's 80 for a vendor that overruns it, as for
+         * PassThruGetLastError. */
+        char text[3][256] = {};
+        if (handle->read_version(handle->device_id, text[0], text[1],
+                                 text[2]) != kPtStatusNoError) {
+            st = ECUIO_ERR_NO_TRANSPORT;
+        } else {
+            for (int i = 0; i < 3; ++i) {
+                text[i][ECUIO_SESSION_INFO_TEXT_LEN - 1] = '\0';
+                memcpy(out[i], text[i], ECUIO_SESSION_INFO_TEXT_LEN);
+            }
+        }
+    }
+    if (st != ECUIO_OK) {
+        for (char* o : out) {
+            o[0] = '\0';
+        }
+        return st;
+    }
+    for (char* o : out) {
+        ecuio_text_one_line(o);
+    }
+    return ECUIO_OK;
+}
+
 const char* ecuio_j2534_backend_name(const ecuio_j2534_handle_t* handle)
 {
     if (handle == nullptr) {
         return nullptr;
     }
     return handle->is_surrogate ? "surrogate" : "inproc";
+}
+
+uint32_t ecuio_j2534_backend(const ecuio_j2534_handle_t* handle)
+{
+    if (handle == nullptr) {
+        return 0;
+    }
+    return handle->is_surrogate ? ECUIO_BACKEND_J2534_SURROGATE
+                                : ECUIO_BACKEND_J2534_INPROC;
+}
+
+uint32_t ecuio_j2534_dll_arch(const ecuio_j2534_handle_t* handle)
+{
+    return (handle != nullptr) ? handle->dll_arch : ECUIO_DLL_ARCH_UNKNOWN;
 }
 
 /* TEST-ONLY: forward an injected frame into the loaded module's
@@ -1088,9 +1146,30 @@ ecuio_status_t ecuio_j2534_stop_msg_filter(ecuio_j2534_handle_t* /*h*/,
     return ECUIO_ERR_NOT_IMPLEMENTED;
 }
 
+ecuio_status_t ecuio_j2534_read_version(ecuio_j2534_handle_t* /*h*/,
+                                        char* firmware,
+                                        char* dll,
+                                        char* api)
+{
+    if (firmware != nullptr) firmware[0] = '\0';
+    if (dll != nullptr) dll[0] = '\0';
+    if (api != nullptr) api[0] = '\0';
+    return ECUIO_ERR_NOT_IMPLEMENTED;
+}
+
 const char* ecuio_j2534_backend_name(const ecuio_j2534_handle_t* /*handle*/)
 {
     return nullptr;
+}
+
+uint32_t ecuio_j2534_backend(const ecuio_j2534_handle_t* /*handle*/)
+{
+    return 0;
+}
+
+uint32_t ecuio_j2534_dll_arch(const ecuio_j2534_handle_t* /*handle*/)
+{
+    return ECUIO_DLL_ARCH_UNKNOWN;
 }
 
 ecuio_status_t ecuio_j2534_inject_test_frame(ecuio_j2534_handle_t* /*h*/,

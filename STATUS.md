@@ -68,6 +68,14 @@ to plausible values. Next is the plan in
     (about 6 s at most) shows "Disconnecting…" on every connection
     surface, and no connect starts until it ends, because the adapter
     may refuse a second open until its close returns.
+  - A connect explains itself. A failed one returns a code for its
+    cause and says why in words, with the vendor's
+    `PassThruGetLastError` text
+    ([ADR-0018](docs/adr/0018-connect-failure-reporting.md)). A
+    successful one logs a "Session:" line: the backend and the DLL's
+    architecture, protocol and baud, the profile and its channels, and
+    the adapter's battery voltage and firmware, DLL and API versions
+    ([ADR-0019](docs/adr/0019-session-info.md)).
   - Link health (#11): the J2534 worker tells a quiet bus, a dead
     adapter and failing requests apart, the bridge logs transitions to
     the Settings activity log, and the header pill, LiveView, the Home
@@ -104,16 +112,16 @@ to plausible values. Next is the plan in
     ([2026-10-16](docs/bench-sessions/2026-10-16.md),
     [2026-10-20](docs/bench-sessions/2026-10-20.md),
     [2026-10-22](docs/bench-sessions/2026-10-22.md)), and the first
-    vehicle session. Untested on hardware: VBATT, a vendor read
-    failure, 29-bit addressing, more than one ECU answering,
+    vehicle session. Untested on hardware: VBATT and
+    `PassThruReadVersion`, a vendor read failure, 29-bit addressing, more than one ECU answering,
     multi-frame replies, and the in-proc backend. The VT, and the VX,
     refuse to open with status 34 when their adapter is absent. The
     run sheets are
     [bench-runsheet.md](docs/bench-sessions/bench-runsheet.md) and
     [vehicle-runsheet.md](docs/bench-sessions/vehicle-runsheet.md).
-  - **Tests:** 247 ctest cases (Windows, Visual Studio 18 build
+  - **Tests:** 262 ctest cases (Windows, Visual Studio 18 build
     tools, both trees rebuilt, 2026-10-22), plus the cross-arch
-    subset (45/45). All
+    subset (51/51). All
     passed except the env-gated cross-arch skip. Every first-party
     target builds with compiler warnings on, at 0 on MSVC. CI was green on all
     eight jobs on PR #16 (merged as `9125b5e`), including the
@@ -340,16 +348,23 @@ it a genuine connect candidate.
    accepted three deep with nothing on the bus to acknowledge them,
    each with a `TX_INDICATION`; the fourth and every later write
    blocks about 0.5 s and returns `ERR_FAILED`, until a new connect.
-   Filter start and stop and disconnect return status 0 at once.
-   Ioctls are unexercised: the transport issues none
+   Filter start and stop and disconnect return status 0 at once
    ([session note](docs/bench-sessions/2026-10-22.md)). On the vehicle
-   every write returned status 0, with the ignition off too.
+   every write returned status 0, with the ignition off too. The one
+   ioctl the transport issues, `READ_VBATT` at connect, is item 10.
 9. **Export-name conformance.** RESOLVED 2026-10-16, contrary to
    expectations: the OBDX Pro VX exports the SPEC spelling
    (`PassThruIoctl`, J2534-1_0500 §7.3.19; all v04.04-era references
    agree) — this project's `PassThruIoCtl` string was the divergence.
    Both backends try the spec spelling first, with the legacy spelling
    as fallback, pinned in both directions by the two fakes.
+10. **The session info's readings**
+    ([ADR-0019](docs/adr/0019-session-info.md)). Each connect asks the
+    device for `READ_VBATT` and `PassThruReadVersion`, and the
+    activity log's "Session:" line shows the answers. Unverified on the
+    VX: whether it answers either, whether the voltage is in
+    millivolts and close to a meter's reading at the connector, and
+    what its version strings say.
 
 ## Known issues and technical debt
 
@@ -481,18 +496,12 @@ week or more or a design that needs an ADR first.
 These make a failed field session explainable, so they come first
 in the backlog.
 
-- **Session details in the activity log (S).** Connects,
-  disconnects, failed connects and link-health transitions are
-  logged. Add what a support question needs:
-  - the backend (in-proc or surrogate) and the DLL's architecture;
-  - protocol and baud;
-  - the profile and its derived channel IDs;
-  - the adapter's battery voltage (`READ_VBATT`, already relayed on
-    both backends but never requested);
-  - its firmware and DLL versions (`PassThruReadVersion`, not yet
-    wrapped).
-- Record and display driver information and firmware version of adapters in log
-  and interface list if possible
+- **Adapter versions in the interface list (S).** The activity log's
+  "Session:" line names a connected adapter's firmware, DLL and API
+  versions ([ADR-0019](docs/adr/0019-session-info.md)). The interface
+  list can't ask for them without opening each adapter, which the VX
+  and VT refuse while unattached; showing the versions last seen for
+  each one would need persisted preferences.
 
 ### Data capture
 

@@ -18,6 +18,10 @@ struct ecuio_session {
     const ecuio_signal_set_t* active_signal_set = nullptr;
     std::atomic<int32_t> last_error{ECUIO_OK};
     std::atomic<uint32_t> error_count{0};
+    /* Written once by the transport's attach, then the profile by
+     * create, before create returns; read-only afterwards, so
+     * ecuio_session_get_info needs no lock. */
+    ecuio_session_info_t info{};
 };
 
 #endif /* ECUIO_SESSION_H */

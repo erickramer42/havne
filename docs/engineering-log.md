@@ -76,7 +76,9 @@ Dates are commit dates.
 | 2026-10-22 | Request-engine groundwork: link health runs through both backends, the fake's control page reaching the surrogate child mid-session | `5961027` |
 | 2026-10-22 | Request-engine groundwork: the fake models the OBDX Pro VX (`ECUIO_FAKE_VX`): held reads, `ERR_BUFFER_EMPTY`, TX indications, 4 ms replies, the no-ACK bus | `81798f3` |
 | 2026-10-22 | Request-engine groundwork: indications no longer end a read on either backend, and `START_OF_MESSAGE` is skipped (Known Issue #28 closed) | `1f2570b` |
-| 2026-10-22 | A failed connect says why: four status codes and `ecuio_last_error_detail`, with the vendor's `PassThruGetLastError` text on both backends ([ADR-0018](adr/0018-connect-failure-reporting.md)) | — |
+| 2026-10-22 | libFuzzer harnesses for the signal decoder and validators (`fuzz/`), built with MSVC locally or Clang in a CI job that runs each for 60 s | `14a43be` |
+| 2026-10-22 | A failed connect says why: four status codes and `ecuio_last_error_detail`, with the vendor's `PassThruGetLastError` text on both backends ([ADR-0018](adr/0018-connect-failure-reporting.md)) | `65bae6d` |
+| 2026-10-22 | A session says what it runs on: `ecuio_session_get_info` and the activity log's "Session:" line, with the adapter's battery and versions; the ioctl relay takes a capacity on both backends ([ADR-0019](adr/0019-session-info.md)) | — |
 
 ## Lessons learned
 

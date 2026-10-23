@@ -1,5 +1,7 @@
 // File/layer: core/src/j2534_transport.cpp | C++17, Qt-free, Win32-guarded
-// Testing: HARNESS — test_j2534_stream: URI parsing, connect parameters,
+// Testing: HARNESS — test_j2534_connect: connect failures and the
+//          session info, on both backends. test_j2534_stream: URI parsing,
+//          connect parameters,
 //          filter registration, request framing and routing, header
 //          strip and arbitration_id stamp, scheduler rotation and drain,
 //          ?poll= precedence. test_j2534_health: the link-health
@@ -604,7 +606,7 @@ bool parse_number(const char* s, size_t len, unsigned long* out_val)
     return true;
 }
 
-/* URI query parser. Contract (strict — malformed means NO_TRANSPORT,
+/* URI query parser. Contract (strict — malformed means BAD_URI,
  * surfaces at session_create before any DLL load):
  *   - lowercase keys only:
  *       baud   decimal, nonzero
@@ -874,6 +876,46 @@ void j2534_detach(ecuio_session_t* session, void* impl)
     delete wrap;   /* then the envelope — internal.h contract */
 }
 
+/* The session info (ADR-0019): what the channel connected with, then
+ * the two readings the adapter may give. Either reading can fail without
+ * failing the connect: its flag stays clear, and the session log (on
+ * the surrogate) has the vendor's status. Both are device calls, made
+ * once here; nothing reads the battery again while the session runs. */
+static_assert(ECUIO_MAX_CHANNELS <= ECUIO_SESSION_INFO_MAX_CHANNELS,
+              "the session info lists every channel");
+
+void describe_session(const ecuio_j2534_transport* t, unsigned long baud,
+                      unsigned long connect_flags, ecuio_session_info_t* info)
+{
+    *info = ecuio_session_info_t{};
+    info->backend = ecuio_j2534_backend(t->handle);
+    info->dll_arch = ecuio_j2534_dll_arch(t->handle);
+    info->protocol_id = static_cast<uint32_t>(ECUIO_PT_PROTOCOL_ISO15765);
+    /* 0 is unset: connect_channel connected at the ISO 15765 default. */
+    info->baud = static_cast<uint32_t>(
+        (baud != 0) ? baud : ECUIO_PT_BAUD_ISO15765_500K);
+    info->connect_flags = static_cast<uint32_t>(connect_flags);
+    info->channel_count = t->chan_count;
+    for (uint32_t i = 0; i < t->chan_count; ++i) {
+        info->rx_ids[i] = t->chans[i].rx_id;
+        info->tx_ids[i] = t->chans[i].tx_id;
+    }
+
+    uint8_t mv[4] = {};
+    uint32_t mv_len = 0;
+    if (ecuio_j2534_ioctl(t->handle, t->channel, ECUIO_PT_IOCTL_READ_VBATT,
+                          nullptr, 0, mv, sizeof(mv), &mv_len) == ECUIO_OK &&
+        mv_len == sizeof(mv)) {
+        memcpy(&info->vbatt_mv, mv, sizeof(mv));
+        info->flags |= ECUIO_SESSION_INFO_VBATT;
+    }
+    if (ecuio_j2534_read_version(t->handle, info->firmware_version,
+                                 info->dll_version,
+                                 info->api_version) == ECUIO_OK) {
+        info->flags |= ECUIO_SESSION_INFO_VERSIONS;
+    }
+}
+
 /* Ops table: static storage owned by this TU (internal.h contract),
  * defined before attach references it. */
 const ecuio_transport_ops_t kJ2534Ops = {
@@ -993,6 +1035,7 @@ ecuio_status_t j2534_attach(ecuio_session_t* session, const char* uri)
     t->flags = connect_flags;
     t->has_poll = params.has_poll;
     t->poll_pid = static_cast<uint32_t>(params.poll_pid);
+    describe_session(t, params.baud, connect_flags, &session->info);
 
     session->transport = wrap;   /* session.h member — direct install */
     return ECUIO_OK;

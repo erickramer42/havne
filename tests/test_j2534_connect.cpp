@@ -6,7 +6,11 @@
 //          status (by its J2534-1 v04.04 name, or as vendor-specific)
 //          and the vendor's own text from PassThruGetLastError, word for
 //          word alike on both backends. A DLL that won't load is
-//          LOAD_FAILED on both; a success clears the detail.
+//          LOAD_FAILED on both; a success clears the detail. A session
+//          that connects describes what it runs on
+//          (ecuio_session_get_info): backend, DLL architecture, the
+//          channel as connected, and the adapter's battery and version
+//          readings, which may be refused without failing the connect.
 //          J2534SurrogateConnectTest: the surrogate's own failures (no
 //          surrogate exe, one built from other shared headers).
 
@@ -30,6 +34,24 @@ using j2534_backends::EnvSwap;
 class J2534ConnectTest : public j2534_backends::BackendTest {
 protected:
     ecuio_session_t* session = nullptr;
+
+    /* The cross-arch run's surrogate hosts the Win32 tree's fake; every
+     * other case loads this tree's. */
+    uint32_t fake_arch() const
+    {
+        const char* cross = std::getenv("ECUIO_FAKE_DLL");
+        return (GetParam() == Backend::Surrogate && cross != nullptr &&
+                cross[0] != '\0')
+                   ? ECUIO_DLL_ARCH_X86 : ECUIO_DLL_ARCH_X64;
+    }
+
+    ecuio_session_info_t info_of_session() const
+    {
+        ecuio_session_info_t info;
+        memset(&info, 0xEE, sizeof(info));   /* every byte must be written */
+        EXPECT_EQ(ecuio_session_get_info(session, &info), ECUIO_OK);
+        return info;
+    }
 
     void TearDown() override
     {
@@ -115,6 +137,87 @@ TEST_P(J2534ConnectTest, SuccessClearsTheDetail)
     EXPECT_STREQ(ecuio_last_error_detail(), "");
     EXPECT_EQ(ecuio_session_start(session), ECUIO_OK);
     EXPECT_STREQ(ecuio_last_error_detail(), "");
+}
+
+/* What a default session runs on: the obd2 profile's channel at the
+ * ISO 15765 default, and the fake's battery and version readings. */
+TEST_P(J2534ConnectTest, InfoDescribesTheAdapter)
+{
+    ASSERT_EQ(ecuio_session_create(uri("").c_str(), &session), ECUIO_OK);
+    ASSERT_NO_FATAL_FAILURE(expect_opened_on_backend());
+    const ecuio_session_info_t info = info_of_session();
+    EXPECT_EQ(info.backend, GetParam() == Backend::InProc
+                                ? ECUIO_BACKEND_J2534_INPROC
+                                : ECUIO_BACKEND_J2534_SURROGATE);
+    EXPECT_EQ(info.dll_arch, fake_arch());
+    EXPECT_EQ(info.protocol_id, 6u);   /* ISO 15765 */
+    EXPECT_EQ(info.baud, 500000u);
+    EXPECT_EQ(info.connect_flags, 0u);
+    ASSERT_EQ(info.channel_count, 1u);
+    EXPECT_EQ(info.rx_ids[0], 0x7E8u);
+    EXPECT_EQ(info.tx_ids[0], 0x7E0u);
+    for (uint32_t i = 1; i < ECUIO_SESSION_INFO_MAX_CHANNELS; ++i) {
+        EXPECT_EQ(info.rx_ids[i], 0u);
+        EXPECT_EQ(info.tx_ids[i], 0u);
+    }
+    EXPECT_EQ(info.flags, ECUIO_SESSION_INFO_VBATT | ECUIO_SESSION_INFO_VERSIONS);
+    EXPECT_EQ(info.vbatt_mv, 13800u);
+    EXPECT_STREQ(info.firmware_version, "fake-fw 1.0");
+    EXPECT_STREQ(info.dll_version, "fake_j2534 0.3");
+    EXPECT_STREQ(info.api_version, "04.04");
+    EXPECT_STREQ(info.profile, "obd2");   /* j2534://'s default */
+    for (uint32_t r : info.reserved) {
+        EXPECT_EQ(r, 0u);
+    }
+}
+
+/* The URI's baud and channel, and the 29-bit flag its IDs need. */
+TEST_P(J2534ConnectTest, InfoCarriesTheUrisBaudAndChannel)
+{
+    ASSERT_EQ(ecuio_session_create(
+                  uri("?profile=raw&baud=250000&filter=0x18DAF110"
+                      "&txid=0x18DA10F1").c_str(), &session),
+              ECUIO_OK);
+    const ecuio_session_info_t info = info_of_session();
+    EXPECT_EQ(info.baud, 250000u);
+    EXPECT_EQ(info.connect_flags, 0x100u);   /* CAN_29BIT_ID */
+    ASSERT_EQ(info.channel_count, 1u);
+    EXPECT_EQ(info.rx_ids[0], 0x18DAF110u);
+    EXPECT_EQ(info.tx_ids[0], 0x18DA10F1u);
+    EXPECT_STREQ(info.profile, "raw");
+}
+
+/* Neither reading is needed to stream: a refused one leaves its flag
+ * clear, and the connect succeeds without a detail. */
+TEST_P(J2534ConnectTest, RefusedReadingsLeaveTheirFlagsClear)
+{
+    ASSERT_NO_FATAL_FAILURE(knob("ECUIO_FAKE_VBATT_STATUS", "7"));
+    ASSERT_NO_FATAL_FAILURE(knob("ECUIO_FAKE_VERSION_STATUS", "7"));
+    ASSERT_EQ(ecuio_session_create(uri("").c_str(), &session), ECUIO_OK);
+    EXPECT_STREQ(ecuio_last_error_detail(), "");
+    const ecuio_session_info_t info = info_of_session();
+    EXPECT_EQ(info.flags, 0u);
+    EXPECT_EQ(info.vbatt_mv, 0u);
+    EXPECT_STREQ(info.firmware_version, "");
+    EXPECT_STREQ(info.dll_version, "");
+    EXPECT_STREQ(info.api_version, "");
+    EXPECT_EQ(info.channel_count, 1u);
+    EXPECT_EQ(ecuio_session_start(session), ECUIO_OK);
+}
+
+/* PassThruReadVersion is optional, as PassThruGetLastError is: the
+ * legacy fixture, beside the fake in each tree, doesn't export it. */
+TEST_P(J2534ConnectTest, ADllWithoutReadVersionReportsNoVersions)
+{
+    const std::string legacy =
+        dll.substr(0, dll.find_last_of("\\/") + 1) + "fake_j2534_legacy.dll";
+    ASSERT_EQ(ecuio_session_create(("j2534://" + legacy).c_str(), &session),
+              ECUIO_OK);
+    ASSERT_NO_FATAL_FAILURE(expect_opened_on_backend());
+    const ecuio_session_info_t info = info_of_session();
+    EXPECT_EQ(info.flags, ECUIO_SESSION_INFO_VBATT);
+    EXPECT_STREQ(info.firmware_version, "");
+    EXPECT_STREQ(info.api_version, "");
 }
 
 INSTANTIATE_TEST_SUITE_P(Backend, J2534ConnectTest,

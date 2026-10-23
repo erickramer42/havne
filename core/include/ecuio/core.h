@@ -206,6 +206,83 @@ ecuio_status_t ecuio_session_get_error_state(
     uint32_t* out_error_count
 );
 
+/* What a session runs on, as its connect found it (ADR-0019). The
+ * values below are append-only, like the status codes. */
+#define ECUIO_SESSION_INFO_TEXT_LEN      80   /* PassThruReadVersion's
+                                                 buffers (J2534-1 v04.04) */
+#define ECUIO_SESSION_INFO_MAX_CHANNELS  4    /* signals.h's
+                                                 ECUIO_MAX_CHANNELS */
+#define ECUIO_SESSION_INFO_PROFILE_LEN   64   /* profile.h's
+                                                 ECUIO_PROFILE_NAME_MAX + 1 */
+
+/* backend */
+#define ECUIO_BACKEND_MOCK               1u
+#define ECUIO_BACKEND_J2534_INPROC       2u   /* the adapter's DLL loaded
+                                                 in this process */
+#define ECUIO_BACKEND_J2534_SURROGATE    3u   /* in the surrogate process
+                                                 (ADR-0008) */
+
+/* dll_arch: the adapter DLL's PE machine, as discovery's reserved[0]
+ * reports it (j2534.h) */
+#define ECUIO_DLL_ARCH_UNKNOWN           0u
+#define ECUIO_DLL_ARCH_X86               1u
+#define ECUIO_DLL_ARCH_X64               2u
+
+/* flags: which of the optional readings the adapter gave */
+#define ECUIO_SESSION_INFO_VBATT         0x00000001u   /* vbatt_mv */
+#define ECUIO_SESSION_INFO_VERSIONS      0x00000002u   /* the three
+                                                          version strings */
+
+/* POD, 432 bytes, no hidden padding on any supported platform; pinned
+ * by the assertions below. New fields take the reserved room. */
+typedef struct ecuio_session_info {
+    uint32_t flags;           /* ECUIO_SESSION_INFO_* */
+    uint32_t backend;         /* ECUIO_BACKEND_* */
+    uint32_t dll_arch;        /* ECUIO_DLL_ARCH_*; UNKNOWN for mock */
+    uint32_t protocol_id;     /* the J2534 ProtocolID the channel connected
+                                 with (6 = ISO 15765); 0 for mock */
+    uint32_t baud;            /* bit/s it connected at; 0 for mock */
+    uint32_t connect_flags;   /* PassThruConnect's Flags: ?flags=, plus
+                                 CAN_29BIT_ID (0x100) for 29-bit channels */
+    uint32_t vbatt_mv;        /* battery voltage at connect, millivolts
+                                 (READ_VBATT); with ECUIO_SESSION_INFO_VBATT */
+    uint32_t channel_count;   /* CAN channels the session filters and
+                                 requests on; 0 for a passive session */
+    uint32_t rx_ids[ECUIO_SESSION_INFO_MAX_CHANNELS];   /* each one's
+                                                           receive ID */
+    uint32_t tx_ids[ECUIO_SESSION_INFO_MAX_CHANNELS];   /* and transmit ID */
+    /* The adapter's firmware, its DLL and the J2534 API version it
+     * implements (PassThruReadVersion), each NUL-terminated on one line;
+     * "" without ECUIO_SESSION_INFO_VERSIONS. */
+    char firmware_version[ECUIO_SESSION_INFO_TEXT_LEN];
+    char dll_version[ECUIO_SESSION_INFO_TEXT_LEN];
+    char api_version[ECUIO_SESSION_INFO_TEXT_LEN];
+    /* The profile the session decodes through (ADR-0013): ?profile=, or
+     * the scheme's default. NUL-terminated. */
+    char profile[ECUIO_SESSION_INFO_PROFILE_LEN];
+    uint32_t reserved[16];    /* zero; ABI growth space */
+} ecuio_session_info_t;
+
+#if defined(__cplusplus)
+static_assert(sizeof(ecuio_session_info_t) == 432, "ecuio_session_info_t size is ABI");
+static_assert(offsetof(ecuio_session_info_t, firmware_version) == 64, "session info text offset is ABI");
+static_assert(offsetof(ecuio_session_info_t, reserved) == 368, "session info reserved offset is ABI");
+#elif defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
+_Static_assert(sizeof(ecuio_session_info_t) == 432, "ecuio_session_info_t size is ABI");
+_Static_assert(offsetof(ecuio_session_info_t, firmware_version) == 64, "session info text offset is ABI");
+_Static_assert(offsetof(ecuio_session_info_t, reserved) == 368, "session info reserved offset is ABI");
+#endif
+
+/* Copies what the session runs on into *out_info. Filled once, while
+ * ecuio_session_create connects; nothing changes it afterwards, so it's
+ * callable from any thread until destroy, close included. A battery or
+ * version reading the adapter refuses leaves its flag clear and doesn't
+ * fail the connect. */
+ecuio_status_t ecuio_session_get_info(
+    const ecuio_session_t* session,
+    ecuio_session_info_t* out_info
+);
+
 #ifdef __cplusplus
 }
 #endif

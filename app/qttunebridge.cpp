@@ -15,6 +15,7 @@
 #include <QDateTime>
 #include <QDir>
 #include <QStandardPaths>
+#include <QStringList>
 #include <QtGlobal>
 
 #include <algorithm>
@@ -487,9 +488,10 @@ QString QtTuneBridge::startSession(ecuio_session_t* session)
     return {};
 }
 
-// GUI-thread half: state application after a successful connect.
-// Factored out of connectSession so the sync and async paths apply
-// IDENTICAL state (parity by construction, not by care).
+// GUI-thread half: state application after a successful connect,
+// ending with the "Connected:" and "Session:" log lines. Factored out of
+// connectSession so the sync and async paths apply IDENTICAL state
+// (parity by construction, not by care).
 void QtTuneBridge::applyConnectedState(ecuio_session_t* session, const QString& uri)
 {
     // Before frames are accepted, so the recording holds every one
@@ -514,6 +516,12 @@ void QtTuneBridge::applyConnectedState(ecuio_session_t* session, const QString& 
     m_coalesceTimer->start(100);
     emit connectedChanged(true);
     emit framesReset();
+
+    emit logMessage(QStringLiteral("Connected: %1").arg(uri));
+    ecuio_session_info_t info{};
+    if (ecuio_session_get_info(session, &info) == ECUIO_OK) {
+        emit logMessage(sessionInfoText(info));
+    }
 }
 
 QString QtTuneBridge::connectSession(const QString& uri)
@@ -536,7 +544,6 @@ QString QtTuneBridge::connectSession(const QString& uri)
         return err;
     }
     applyConnectedState(session, uri);
-    emit logMessage(QStringLiteral("Connected: %1").arg(uri));
     return {};
 }
 
@@ -578,7 +585,6 @@ void QtTuneBridge::connectSessionAsync(const QString& uri)
 
             if (err.isEmpty()) {
                 applyConnectedState(session, uri);
-                emit logMessage(QStringLiteral("Connected: %1").arg(uri));
                 emit connectResult(uri, {});
             } else {
                 emit logMessage(QStringLiteral("Connect failed: %1 (%2)")
@@ -942,6 +948,74 @@ QString QtTuneBridge::linkStateForError(int32_t errorCode)
         case ECUIO_ERR_TRANSPORT_HARD_FAILURE: return QStringLiteral("fault");
         default: return QStringLiteral("degraded"); /* forward-compatible */
     }
+}
+
+/* What the session runs on, for the activity log (and so the
+ * recording's events.log). Static, like linkStateForError, so
+ * test_bridge pins the wording without an adapter. */
+QString QtTuneBridge::sessionInfoText(const ecuio_session_info_t& info)
+{
+    const QString profile = QStringLiteral("profile ") + QString::fromUtf8(
+        info.profile, static_cast<qsizetype>(
+            qstrnlen(info.profile, ECUIO_SESSION_INFO_PROFILE_LEN)));
+    if (info.backend == ECUIO_BACKEND_MOCK) {
+        return QStringLiteral("Session: mock transport; ") + profile;
+    }
+    if (info.backend != ECUIO_BACKEND_J2534_INPROC &&
+        info.backend != ECUIO_BACKEND_J2534_SURROGATE) {
+        return QStringLiteral("Session: backend %1").arg(info.backend);
+    }
+    const auto hex = [](uint32_t v) {
+        return QStringLiteral("0x") + QString::number(v, 16).toUpper();
+    };
+    const auto text = [](const char* s) {
+        const QString t = QString::fromUtf8(s, static_cast<qsizetype>(
+            qstrnlen(s, ECUIO_SESSION_INFO_TEXT_LEN)));
+        return t.isEmpty() ? QStringLiteral("(none)") : t;
+    };
+
+    QStringList parts;
+    const QString arch = (info.dll_arch == ECUIO_DLL_ARCH_X86) ? QStringLiteral("x86 DLL")
+                       : (info.dll_arch == ECUIO_DLL_ARCH_X64) ? QStringLiteral("x64 DLL")
+                       : QStringLiteral("DLL of unknown architecture");
+    parts << arch + ((info.backend == ECUIO_BACKEND_J2534_SURROGATE)
+                         ? QStringLiteral(", through the surrogate")
+                         : QStringLiteral(", in-proc"));
+
+    QString link = (info.protocol_id == 6) ? QStringLiteral("ISO 15765")
+                 : (info.protocol_id == 5) ? QStringLiteral("CAN")
+                 : QStringLiteral("protocol %1").arg(info.protocol_id);
+    link += QStringLiteral(" at %1 baud").arg(info.baud);
+    if (info.connect_flags != 0) {
+        link += QStringLiteral(", flags ") + hex(info.connect_flags);
+    }
+    parts << link;
+
+    const uint32_t channels = std::min<uint32_t>(info.channel_count,
+                                                 ECUIO_SESSION_INFO_MAX_CHANNELS);
+    if (channels == 0) {
+        parts << profile + QStringLiteral(", no channels (passive)");
+    } else {
+        QStringList pairs;
+        for (uint32_t i = 0; i < channels; ++i) {
+            pairs << hex(info.rx_ids[i]) + QLatin1Char('/') + hex(info.tx_ids[i]);
+        }
+        parts << QStringLiteral("%1, %2 %3 (rx/tx)")
+                     .arg(profile,
+                          channels == 1 ? QStringLiteral("channel")
+                                        : QStringLiteral("channels"),
+                          pairs.join(QStringLiteral(", ")));
+    }
+
+    parts << ((info.flags & ECUIO_SESSION_INFO_VBATT)
+                  ? QStringLiteral("battery %1 V").arg(info.vbatt_mv / 1000.0, 0, 'f', 1)
+                  : QStringLiteral("no battery reading"));
+    parts << ((info.flags & ECUIO_SESSION_INFO_VERSIONS)
+                  ? QStringLiteral("firmware %1, DLL %2, API %3")
+                        .arg(text(info.firmware_version), text(info.dll_version),
+                             text(info.api_version))
+                  : QStringLiteral("no version reading"));
+    return QStringLiteral("Session: ") + parts.join(QStringLiteral("; "));
 }
 
 QString QtTuneBridge::linkState() const

@@ -166,6 +166,7 @@ ecuio_status_t ecuio_mock_transport_attach(ecuio_session_t* session,
     } catch (...) {
         return ECUIO_ERR_OUT_OF_MEMORY;
     }
+    session->info.backend = ECUIO_BACKEND_MOCK;
     /* NOTE: worker thread NOT started here — explicit start required.
      * Keeps registration-only sessions single-threaded for tests. */
     return ECUIO_OK;
