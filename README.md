@@ -188,6 +188,18 @@ doesn't copy it. Linux and macOS need the Qt runtime libraries.
 A J2534 vendor driver is only needed for a real adapter; the tests use
 a bundled fake.
 
+## Feedback and contributing
+
+Found a bug, or have a feature in mind?
+[Open an issue](https://github.com/erickramer42/qttune/issues) — include
+the version, your OS and how you connected, and scrub any logs of
+vehicle data (VINs, adapter serials) before attaching them.
+
+Pull requests are welcome; read
+[CONTRIBUTING.md](CONTRIBUTING.md) first — it covers the project's
+rules (append-only C ABI, Qt-free core, tiered testing) and how to
+build and test a change.
+
 ## Documentation
 
 | Document | What's in it |
