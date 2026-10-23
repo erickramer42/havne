@@ -111,8 +111,8 @@ to plausible values. Next is the plan in
     run sheets are
     [bench-runsheet.md](docs/bench-sessions/bench-runsheet.md) and
     [vehicle-runsheet.md](docs/bench-sessions/vehicle-runsheet.md).
-  - **Tests:** 247 ctest cases (Windows, Visual Studio 18 build
-    tools, both trees rebuilt, 2026-10-22), plus the cross-arch
+  - **Tests:** 251 ctest cases (Windows, Visual Studio 18 build
+    tools, 2026-10-22), the QML suites among them, plus the cross-arch
     subset (45/45). All
     passed except the env-gated cross-arch skip. Every first-party
     target builds with compiler warnings on, at 0 on MSVC. CI was green on all
@@ -196,7 +196,7 @@ Contracts along this path:
 | Signal decode | Linear scaling in `double`. Each def states its value kind (unsigned, signed, binary32 float) and byte order (Intel at any bit offset, big-endian in whole bytes), and is gated on message ID plus a mux key of up to 3 bytes. Two signal sets, `mock` and `obd2`, chosen by profile. The validator accepts exactly the defs the decoder decodes, with named return codes; the profile registry runs it at registration and reports the failing check and element. | [ADR-0004](docs/adr/0004-signal-decoding-model.md), [ADR-0013](docs/adr/0013-protocol-profiles.md), [ADR-0016](docs/adr/0016-signal-definition-layout.md) |
 | Mock transport | A scripted ~2-minute drive cycle on a small vehicle model (`core/src/mock_drive_cycle.h`): cold-start warm-up, a 2nd-gear WOT pull from ~1550 rpm to the 7000 rpm limiter with a 5 s hold, a longer and hotter 3rd-gear pull with the same hold, then a quarter-mile run from a standstill (~13.4 s, ~176 km/h trap). Every tick of the cycle round-trips through the mock set in `CoreTest.MockDriveCycle*`. | — |
 | Bridge and models | Frame log with sort toggle; coalesced signal model with a 120-sample history per signal; device discovery for the picker; link-health polling (#11). QML reaches it as the `Bridge` singleton. | [ADR-0003](docs/adr/0003-backpressure-bounds-in-flight-frames.md), [ADR-0005](docs/adr/0005-coalesced-signal-updates.md) |
-| QML pages | Home, Dashboard (gauges and shift lights through `SignalHub`), Live (table, and a strip chart with each trace's value at its end), Log (with Pause), Settings (device picker plus manual URI, and the one place a session is connected). The Dashboard rearranges to fit a short, wide window, short pages scroll with their scroll bar shown, and the whole UI zooms (Ctrl + / Ctrl − / Ctrl 0, or Settings' Display row), kept between runs. Names, units and decimal places come from core. `Theme` holds the palette, fonts, page margin and the link-state color and label functions; `PageHeader` gives the pages one title row. | [docs/architecture.md](docs/architecture.md#the-ui-layer) |
+| QML pages | Home, Dashboard (gauges and shift lights through `SignalHub`), Live (table, and a strip chart with each trace's value at its end), Log (with Pause), Settings (device picker plus manual URI, and the one place a session is connected). The Dashboard rearranges to fit a short, wide window, short pages scroll with their scroll bar shown, and the whole UI zooms (Ctrl + / Ctrl − / Ctrl 0, or Settings' Display row), kept between runs. Names, units and decimal places come from core. `Theme` holds the palette, fonts, page margin and the link-state color and label functions; `PageHeader` gives the pages one title row. `test_qml` runs the pages and the app's window against a real bridge, offscreen: the link-health surfaces, Live's swatches and dashes, `SignalHub` and the gauges' notes. | [docs/architecture.md](docs/architecture.md#the-ui-layer) |
 | J2534 | HARNESS-verified, same-arch and cross-arch, including transport adoption (ADR-0012) and profile-derived channels (ADR-0013). BENCH: one adapter, quiet bus. Vehicle: one car, read-only, through the surrogate. | [docs/j2534.md](docs/j2534.md) |
 
 ## v0.3.0 checklist
@@ -392,9 +392,10 @@ an issue is resolved it is removed, and its number is not reused.
     stale values dim from the model's `ageMs`.
     A request failure (no ECU awake, adapter fine) reads "Requests
     failing — check the vehicle connection and ignition" in amber;
-    `BridgeTest.LinkStateMapsEveryPublishedCode` pins the mapping. The
-    smoke recipe passed on 2026-10-20, and its request-failure row on
-    2026-10-21
+    `BridgeTest.LinkStateMapsEveryPublishedCode` pins the mapping, and
+    `QmlTest.linkhealth` every surface in each state, through the fake
+    in-proc. The smoke recipe passed on 2026-10-20, and its
+    request-failure row on 2026-10-21
     ([testing.md](docs/testing.md#manual-smoke--link-health-ui)).
     Still open: if reads recover while writes keep failing, the
     state stays "adapter fault" instead of stepping down to request

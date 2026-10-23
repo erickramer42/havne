@@ -191,6 +191,10 @@ The bridge polls it on its 100 ms tick and maps it for the UI
 - **Bridge threading:** `QtTuneBridge` touches only atomics on the
   worker thread; everything else runs on the GUI thread. It links
   only QtCore, so `test_bridge` can exercise it headless.
+- **The QML module is a library:** the `QtTune` module (the pages,
+  `Theme`, the bridge and its `Bridge` registration) builds as the
+  static library `qttune_ui`. The app and `test_qml` both link it and
+  its plugin, so the QML tests load the module the app runs.
 - **Bridge in QML:** pages reach it as the `Bridge` singleton of the
   `QtTune` module (`Bridge.connected`, `Bridge.signalModel`). The
   registration lives in `app/bridgesingleton.h`, so the bridge itself

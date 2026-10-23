@@ -2,7 +2,10 @@
 // Testing: manual smoke — mock://demo drives every gauge; resize across
 //          760 px content width (4 ↔ 2 grid columns) and 600 px (compact
 //          gaps), and to 1280 × 650 (the wide arrangement fits without
-//          scrolling); gauges sweep once per session
+//          scrolling); gauges sweep once per session. test_qml
+//          (tests/qml/tst_dashboard.qml) covers each Tap's lookup and
+//          note, and tst_linkhealth.qml the header's link state, found
+//          by objectName
 
 import QtQuick
 import QtQuick.Controls
@@ -133,11 +136,13 @@ Page {
                 title: qsTr("Dashboard")
 
                 Rectangle {
+                    objectName: "linkDot"
                     implicitWidth: 8; implicitHeight: 8   // layout-managed
                     radius: 4
                     color: Theme.linkColor(Bridge.linkState)
                 }
                 Label {
+                    objectName: "linkLabel"
                     Layout.fillWidth: true
                     elide: Text.ElideMiddle
                     // Short statuses come from Theme.linkLabel; "ok" keeps

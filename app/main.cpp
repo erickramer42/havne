@@ -1,10 +1,15 @@
 #include <QGuiApplication>
 #include <QQmlApplicationEngine>
+#include <QQmlExtensionPlugin>
 #include <QQuickStyle>
 
 #include "bridgesingleton.h"
 #include "qttunebridge.h"
 #include "ecuio/version.h"
+
+// The QtTune module is a static library (app/CMakeLists.txt); this pulls
+// in its plugin, which registers the module's types
+Q_IMPORT_QML_PLUGIN(QtTunePlugin)
 
 int main(int argc, char *argv[])
 {

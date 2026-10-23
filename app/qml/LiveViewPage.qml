@@ -1,8 +1,9 @@
 // File/layer: app/qml/LiveViewPage.qml | Qt6 Quick, UI layer
-// Testing: model contract covered by test_bridge; render verified manually.
-// Banner states need a j2534 fake with a knob armed before launch:
-// ECUIO_FAKE_READ_STATUS (0x09 quiet, 0x07 fault) or
-// ECUIO_FAKE_WRITE_STATUS=7 (requests) — see docs/testing.md smoke recipe.
+// Testing: model contract covered by test_bridge; swatch colours, dashes
+//          and banner text by test_qml (tests/qml/tst_liveview.qml, and
+//          tst_linkhealth.qml for the banner in each link state), which
+//          finds items by objectName; the strip chart's drawing is
+//          verified manually (docs/testing.md).
 
 import QtQuick
 import QtQuick.Controls
@@ -50,6 +51,17 @@ Page {
                    .arg(Bridge.signalModel.subscribedCount).arg(signalList.count)
     }
 
+    // The link-health banner's message. Unknown states read as degraded,
+    // as Theme.linkColor and Theme.linkLabel treat them.
+    function bannerText(state, episodes, errorCode) {
+        switch (state) {
+        case "quiet":    return qsTr("Vehicle not responding — quiet bus")
+        case "requests": return qsTr("Requests failing — check the vehicle connection and ignition")
+        case "fault":    return qsTr("Adapter fault — %1 episode(s), retrying with backoff").arg(episodes)
+        default:         return qsTr("Link degraded (error %1)").arg(errorCode)
+        }
+    }
+
     function chartEmptyText() {
         if (!Bridge.connected) return qsTr("No session")
         if (signalList.count === 0) return qsTr("No decoded signals")
@@ -71,6 +83,7 @@ Page {
         // Theme.linkColor. Transitions are mirrored in the Settings
         // activity log.
         Rectangle {
+            objectName: "linkBanner"
             visible: Bridge.connected && Bridge.linkState !== "ok"
             Layout.fillWidth: true
             implicitHeight: 40
@@ -78,15 +91,9 @@ Page {
             color: Qt.alpha(Theme.linkColor(Bridge.linkState), 0.15)
 
             Label {
+                objectName: "linkBannerText"
                 anchors.centerIn: parent
-                text: Bridge.linkState === "fault"
-                      ? qsTr("Adapter fault — %1 episode(s), retrying with backoff")
-                            .arg(Bridge.errorEpisodes)
-                      : Bridge.linkState === "requests"
-                        ? qsTr("Requests failing — check the vehicle connection and ignition")
-                      : Bridge.linkState === "degraded"
-                        ? qsTr("Link degraded (error %1)").arg(Bridge.linkErrorCode)
-                        : qsTr("Vehicle not responding — quiet bus")
+                text: root.bannerText(Bridge.linkState, Bridge.errorEpisodes, Bridge.linkErrorCode)
                 color: Theme.linkColor(Bridge.linkState)
                 font.pixelSize: 13
             }
@@ -117,6 +124,7 @@ Page {
         // hidden rows are visible as such.
         ListView {
             id: signalList
+            objectName: "signalList"
             readonly property bool overflows: contentHeight > height
 
             Layout.fillWidth: true
@@ -173,7 +181,12 @@ Page {
                     // while the signal isn't plotted
                     Rectangle {
                         id: swatch
-                        readonly property color trace: root.seriesColor(signalDelegate.index)
+                        objectName: "swatch"
+                        // index is -1 while a model reset (a connect)
+                        // removes the delegate
+                        readonly property color trace: signalDelegate.index >= 0
+                                                       ? root.seriesColor(signalDelegate.index)
+                                                       : "transparent"
                         implicitWidth: 10; implicitHeight: 10   // layout-managed
                         radius: 2
                         color: signalDelegate.subscribed ? swatch.trace : "transparent"

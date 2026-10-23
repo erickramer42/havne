@@ -77,6 +77,7 @@ Dates are commit dates.
 | 2026-10-22 | Request-engine groundwork: the fake models the OBDX Pro VX (`ECUIO_FAKE_VX`): held reads, `ERR_BUFFER_EMPTY`, TX indications, 4 ms replies, the no-ACK bus | `81798f3` |
 | 2026-10-22 | Request-engine groundwork: indications no longer end a read on either backend, and `START_OF_MESSAGE` is skipped (Known Issue #28 closed) | `1f2570b` |
 | 2026-10-22 | A failed connect says why: four status codes and `ecuio_last_error_detail`, with the vendor's `PassThruGetLastError` text on both backends ([ADR-0018](adr/0018-connect-failure-reporting.md)) | — |
+| 2026-10-22 | QML tests: `test_qml` (Qt Quick Test) runs the pages and the app's window against a real bridge, offscreen, the link-health surfaces through the fake; the `QtTune` module builds as a static library that the app and the tests both link | — |
 
 ## Lessons learned
 
@@ -666,3 +667,15 @@ actually did: it reached the session as an empty frame on both
 backends. A fake earns its place
 by reproducing a device's recorded behaviour; one written from the
 spec alone tests the code against the author's assumptions.
+
+**2026-10-22 — QML tests:** **a Qt Quick test passes through
+warnings, and on Windows it prints nothing without a console.** The
+first run of `test_qml` passed every case while LiveView logged
+`Unable to assign [undefined] to QColor` on every profile switch: a
+delegate being removed read the palette at index -1. Qt Quick Test
+doesn't fail on a warning, so the page tests call `failOnWarning` for
+the app's QML. The same run had printed nothing under ctest, because
+with no console Qt on Windows sends its warnings and the test log to
+the debugger; a failure would have shown as an empty log. The harness
+forces stderr logging. A new kind of test needs one run that's made to
+fail, to show its failures are seen.

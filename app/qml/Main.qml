@@ -2,7 +2,10 @@
 // Testing: manual smoke — navigation, sidebar↔TabBar at 720px, header
 //          pill elides at 400 px, keyboard focus rings, the window opens
 //          within a 1280 × 720 screen, zoom steps with Ctrl + / Ctrl − /
-//          Ctrl 0 and Settings' Display row and survives a restart
+//          Ctrl 0 and Settings' Display row and survives a restart.
+//          test_qml (tests/qml/tst_linkhealth.qml) checks the pill and
+//          each page's link surfaces in every link state, finding the
+//          pages and the pill by objectName
 
 import QtCore
 import QtQuick
@@ -123,6 +126,7 @@ ApplicationWindow {
                     // moves, so the header fits a phone.
                     Rectangle {
                         id: pill
+                        objectName: "linkPill"
                         readonly property color tone: !Bridge.coreInitialized ? Theme.danger
                                                     : (Bridge.connecting || Bridge.disconnecting) ? Theme.textDim
                                                     : Theme.linkColor(Bridge.linkState)
@@ -147,6 +151,7 @@ ApplicationWindow {
                                 color: pill.tone
                             }
                             Label {
+                                objectName: "linkPillText"
                                 Layout.fillWidth: true
                                 elide: Text.ElideRight
                                 font.pixelSize: 13
@@ -231,11 +236,17 @@ ApplicationWindow {
                     Layout.fillWidth: true
                     Layout.fillHeight: true
                     clip: true
-                    HomePage { onConnectRequested: root.gotoPage(root.settingsPage) }
-                    DashboardPage {}
-                    LiveViewPage { onConnectRequested: root.gotoPage(root.settingsPage) }
-                    LogPage {}
-                    SettingsPage {}
+                    HomePage {
+                        objectName: "homePage"
+                        onConnectRequested: root.gotoPage(root.settingsPage)
+                    }
+                    DashboardPage { objectName: "dashboardPage" }
+                    LiveViewPage {
+                        objectName: "livePage"
+                        onConnectRequested: root.gotoPage(root.settingsPage)
+                    }
+                    LogPage { objectName: "logPage" }
+                    SettingsPage { objectName: "settingsPage" }
                 }
             }
 

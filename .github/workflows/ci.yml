@@ -207,9 +207,11 @@ jobs:
           target: 'desktop'
           arch: 'linux_gcc_64'
 
+      # libegl1 and libopengl0: QtGui's runtime libraries, which test_qml
+      # loads (offscreen, so nothing for X11 or a GPU)
       - name: Build full app
         run: |
-          sudo apt-get update && sudo apt-get install -y libgl1-mesa-dev libxkbcommon-dev
+          sudo apt-get update && sudo apt-get install -y libgl1-mesa-dev libxkbcommon-dev libegl1 libopengl0
           cmake -B build -DCMAKE_PREFIX_PATH="$QT_ROOT_DIR"
           cmake --build build
       - name: Run tests

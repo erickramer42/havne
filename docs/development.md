@@ -282,6 +282,36 @@ ctest --test-dir build -C Release -R "J2534Routing|J2534Surrogate|J2534Adoption|
 matches `BridgeTest.SignalBatchesAreCoalesced`. The suites and what
 each one covers are listed in [testing.md](testing.md).
 
+**QML tests** (`test_qml`, Qt Quick Test) load the app's QML module,
+the `qttune_ui` library, against a real bridge. Each
+`tests/qml/tst_*.qml` file is one ctest case, `QmlTest.<name>`, in a
+process of its own; a new file is picked up at the next configure.
+
+```sh
+ctest --test-dir build -C Release -R '^QmlTest\.' --output-on-failure
+# one file, or one function in it, by hand (from the repo root)
+build/tests/qmltest/Release/test_qml.exe -input tests/qml/tst_linkhealth.qml
+build/tests/qmltest/Release/test_qml.exe -input tests/qml/tst_linkhealth.qml LinkHealth::test_requests
+```
+
+- ctest runs them offscreen on the software renderer
+  (`QT_QPA_PLATFORM=offscreen`, `QT_QUICK_BACKEND=software`, and on
+  Windows `QT_QPA_FONTDIR` pointing at the system fonts, which the
+  offscreen platform can't otherwise find), so no window opens. Run by
+  hand without those variables, the windows show.
+- On Windows, `test_qml` builds into a directory of its own and is
+  `windeployqt`ed there with the offscreen platform plugin, so it runs
+  from a shell. The other test binaries' directory holds a copied
+  `Qt6Core.dll`, which would point Qt at plugin and QML directories
+  that aren't there.
+- The harness sets `QT_FORCE_STDERR_LOGGING=1` unless it's already set.
+  Without a console (ctest, a pipe, Git Bash), Qt on Windows sends its
+  warnings and the test log to the debugger, and a run prints nothing.
+- The link-state cases drive the fake in-proc, arming its knobs
+  through the harness's `Harness.armFakeKnob`; they skip off Windows.
+- The page tests fail on any warning from the app's own QML
+  (`qrc:/qt/qml/QtTune/…`), but not on Qt's.
+
 **J2534 suites carry a 30 s per-test timeout.** The slowest
 legitimate case (the cross-arch timeout-recovery test, ~3.5 s) has
 near-10x headroom, so a slow CI machine cannot false-alarm — but a
@@ -332,6 +362,8 @@ and the run looks green. Read the skip count, or use
 | Symptom | Cause and fix |
 |---|---|
 | `QmlCacheGeneratedCode` unresolved externals after adding a QML file | Stale QML cache. Do a clean reconfigure (`rm -rf build`). |
+| A `QmlTest` case fails with "Received a warning that resulted in a failure" | A binding in the app's QML raised a warning: the message names the file and line under `qrc:/qt/qml/QtTune/`. Fix the binding; a common cause is a delegate reading its `index` (-1) while the model resets. |
+| `test_qml` exits at once and prints that a QML type isn't available, or `module "QtTune" is not installed` | The module's plugin isn't linked or imported. Whatever links `qttune_ui` also links `qttune_uiplugin` and has `Q_IMPORT_QML_PLUGIN(QtTunePlugin)` in one source file, as `app/main.cpp` and `tests/test_qml.cpp` do. |
 | Test discovery fails at build time with `0xc0000135` | A DLL is missing. Discovery runs the test binary during the build, so Qt-linked test targets must copy `$<TARGET_RUNTIME_DLLS>` POST_BUILD, ordered before `gtest_discover_tests`. |
 | Surrogate test fails with child exit code 5 | An export can't be found by name, usually because of x86 `__stdcall` decoration. Check the `.def` file. Other exit codes are listed in [j2534.md](j2534.md#surrogate). |
 | Surrogate opens fail, in tests or the app, and the session log says "built from other shared headers" | One tree was built from older copies of `j2534_ptypes.h` or `surrogate_protocol.h`, usually a stale `build-win32`. Rebuild both trees, Win32 first. |
@@ -391,9 +423,9 @@ every job has a `timeout-minutes` of roughly 3-5x its usual duration:
 |---|---|---|
 | `core-and-tests` | Ubuntu, GCC, no Qt | Builds core and the Qt-free tests, then runs ctest. This enforces "core never links Qt." Gates every other job. |
 | `core-sanitizers` | Ubuntu, GCC, no Qt | The same build and tests in Debug under AddressSanitizer and UndefinedBehaviorSanitizer. LeakSanitizer runs too, so a test that closes a session without destroying it fails here. Blocking since its first green run (2026-10-20). |
-| `win-build` | Windows, MSVC 2022 | Builds the full app, then runs ctest (bridge and J2534 suites included) |
-| `macos-build` | macOS (arm64), AppleClang | Builds the full app, then runs ctest |
-| `linux-build` | Ubuntu, GCC | Builds the full app, then runs ctest |
+| `win-build` | Windows, MSVC 2022 | Builds the full app, then runs ctest (the bridge, J2534 and QML suites included) |
+| `macos-build` | macOS (arm64), AppleClang | Builds the full app, then runs ctest. The QML suites' link-state cases skip without the fake. |
+| `linux-build` | Ubuntu, GCC | Builds the full app, then runs ctest, as on macOS. Installs QtGui's EGL and OpenGL runtime libraries, which `test_qml` loads. |
 | `android-build` | Ubuntu → Android arm64-v8a | Selects NDK r27 and JDK 21 by version, failing with a clear error if the image lacks either. Then cross-builds and packages the APK. Build only, no tests. |
 | `ios-build` | macOS (arm64) → iOS device (arm64) | Unsigned device build with the Xcode generator. Build only, no tests. |
 | `ios-simulator-smoke` | macOS 15 Intel → iOS Simulator (x86_64) | Runs on pull requests, on a manual run (with or without `smoke_only`), or when the pushed commit's message contains `[ios-smoke]`. Skipped on other pushes. Boots the newest iOS 18+ iPhone while the app builds, then installs and launches the app. Passes if QML loaded and the app is still running 45 s later. Uploads the `ios-simulator-smoke` artifact: a home-screen control shot, app shots at 15 s and 45 s, the app's stdout/stderr (with `QSG_INFO`), plus crash reports on failure. The job log also prints the stderr. |

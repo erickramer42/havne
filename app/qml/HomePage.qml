@@ -1,9 +1,10 @@
 // File/layer: app/qml/HomePage.qml | Qt6 Quick, UI layer
 // Testing: manual smoke — logo renders centered at 96px, bars animate
 //          inside it only while Home is on screen, status card centered
-//          (the hint line below is the column's widest item), status dot
-//          reflects link state, the button opens Settings when
-//          disconnected and ends the session when connected
+//          (the hint line below is the column's widest item), the
+//          button opens Settings when disconnected and ends the session
+//          when connected. The status card's dot and label in each link
+//          state: test_qml (tests/qml/tst_linkhealth.qml), by objectName
 
 import QtQuick
 import QtQuick.Layouts
@@ -90,11 +91,13 @@ Rectangle {
                 anchors.margins: 12
 
                 Rectangle {
+                    objectName: "linkDot"
                     implicitWidth: 10; implicitHeight: 10   // layout-managed
                     radius: 5
                     color: Theme.linkColor(Bridge.linkState)
                 }
                 Text {
+                    objectName: "linkLabel"
                     text: Theme.linkLabel(Bridge.linkState)
                     color: Theme.textDim
                     font.pixelSize: 13

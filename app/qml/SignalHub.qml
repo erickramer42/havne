@@ -1,6 +1,7 @@
 // File/layer: app/qml/SignalHub.qml | Qt6 Quick, UI layer
-// Testing: manual smoke — dashboard gauges follow mock://demo, and
-//          reconnecting under another profile rebinds them
+// Testing: test_qml (tests/qml/tst_dashboard.qml): lookup by name,
+//          values following the model, and a profile switch, alone and
+//          under the Dashboard's gauges
 
 import QtQuick
 
