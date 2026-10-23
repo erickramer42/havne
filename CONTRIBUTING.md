@@ -31,6 +31,22 @@ architecture and merges. Proposed changes are discussed in GitHub issues,
 reviewed through pull requests, and decided by the maintainer. Architectural
 decisions are recorded as ADRs in docs/adr/.
 
+## Roles and Responsibilities
+
+QtTune currently has one maintainer. The roles below describe the functions
+that exist in the project and who performs them.
+
+| Role | Holder | Responsibilities |
+|------|--------|------------------|
+| Project owner / Lead developer | Eric Kramer (@erickramer42) | Sets scope, approves architectural decisions, final merge authority |
+| Release manager | Eric Kramer (@erickramer42) | Tags releases, publishes release notes, maintains version compatibility |
+| Security contact | Eric Kramer (@erickramer42) | Receives vulnerability reports per SECURITY.md, coordinates remediation |
+| CI/infrastructure owner | Eric Kramer (@erickramer42) | Maintains GitHub Actions workflows, branch protection, and repository settings |
+
+Architectural decisions are recorded as ADRs in `docs/adr/`. Changes follow the
+convention outlined in this document; all pull requests are reviewed by the
+maintainer before merging.
+
 ## Scope
 
 QtTune is **read-only today**: it sends OBD-II Mode-01 requests and nothing
