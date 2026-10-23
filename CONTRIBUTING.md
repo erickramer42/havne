@@ -23,6 +23,14 @@ describe the contents instead.
 
 Feature requests are welcome too — but see *Scope* first.
 
+## Governance
+
+QtTune uses a single-maintainer model (benevolent dictator). Eric Kramer is
+the project owner and lead developer; he makes all final decisions on scope,
+architecture and merges. Proposed changes are discussed in GitHub issues,
+reviewed through pull requests, and decided by the maintainer. Architectural
+decisions are recorded as ADRs in docs/adr/.
+
 ## Scope
 
 QtTune is **read-only today**: it sends OBD-II Mode-01 requests and nothing
