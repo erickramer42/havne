@@ -1,3 +1,11 @@
+// File/layer: core/include/ecuio/internal.h | internal, not ABI-exported;
+//             C declarations, Qt-free; included by core sources,
+//             test_core, test_j2534_load and test_j2534_routing
+// Testing: HARNESS — test_j2534_load and test_j2534_routing call the
+//          loader helpers directly, the other J2534 suites reach them
+//          through the transport ops; UNIT — CoreTest through the mock
+//          transport
+
 #ifndef ECUIO_INTERNAL_H
 #define ECUIO_INTERNAL_H
 
@@ -25,8 +33,10 @@ void ecuio_session_dispatch_callbacks(ecuio_session_t* session,
  * - start(): called from ecuio_session_start. Must be idempotent
  *   (second call on a running transport returns ECUIO_OK).
  * - detach(): called exactly once from ecuio_session_close, AFTER the
- *   closed flag is set. Must stop any worker threads and free impl +
- *   the ecuio_transport wrapper itself. May not touch session afterwards.
+ *   closed flag is set. Must stop any worker threads and free impl. The
+ *   ecuio_transport wrapper is the session's: attach allocates it with
+ *   new, and close deletes it after detach. May not touch session
+ *   afterwards.
  */
 typedef struct ecuio_transport_ops {
     ecuio_status_t (*start)(ecuio_session_t* session, void* impl);
@@ -60,7 +70,8 @@ ecuio_status_t ecuio_mock_transport_attach(ecuio_session_t* session,
 /*
  * J2534 transport factory (Win32). URI grammar:
  *   j2534://[<selector>][?<key>=<value>[&<key>=<value>...]]
- *   keys: baud, flags, filter, txid, poll, probe, profile, did (any order)
+ *   keys: baud, flags, filter, txid, poll, probe, identify, profile, did
+ *         (any order; ecuio_j2534_query_keys is the list)
  *
  * Selector:
  *   j2534://                        first discovered device
@@ -151,8 +162,8 @@ ecuio_status_t ecuio_j2534_read_msg(ecuio_j2534_handle_t* handle,
  * mapping into link health (read_msg, above).
  */
 
-/* Single-message PassThruWriteMsgs relay. data_len <= 64 (frame ABI
- * cap). tx_flags carries J2534 TxFlags verbatim (bit 8 =
+/* Single-message PassThruWriteMsgs relay. data_len <= ECUIO_PT_WRITE_MAX
+ * (a write's own cap, the CAN ID included). tx_flags carries J2534 TxFlags verbatim (bit 8 =
  * CAN_29BIT_ID for 29-bit targets). timeout_ms passes through to the
  * vendor unchanged; 0 = non-blocking. out_num_written may be NULL;
  * *out_num_written < 1 after ECUIO_OK means the vendor reported

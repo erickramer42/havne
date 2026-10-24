@@ -61,6 +61,9 @@ threads onto the GUI thread.
   callbacks without deadlocking. A callback must never close or
   destroy its session, because both join the worker it's running on
   ([ADR-0002](adr/0002-callback-pair-identity-snapshot-dispatch.md)).
+  The other side of the snapshot: a dispatch already under way can
+  call a callback once more after its unregister returns, so its
+  `user_data` stays valid until close returns (`core.h`).
 - **Backpressure:** it bounds frames *in flight*, never a lifetime
   count, so a fast bus drops frames rather than freezing the stream
   ([ADR-0003](adr/0003-backpressure-bounds-in-flight-frames.md)).

@@ -14,8 +14,8 @@
 #include <cstddef>
 #include <cstring>
 
-/* The most segments a query may have: every key of the scheme with the
- * most (j2534://, nine) and a repeat of most of them. */
+/* The most segments a query may have: every key of the busiest scheme,
+ * and a repeat of most of them. */
 constexpr size_t ECUIO_URI_MAX_PARAMS = 16;
 
 namespace ecuio_uri {

@@ -35,6 +35,7 @@
 #include <chrono>
 #include <cstring>
 #include <limits>
+#include <memory>
 #include <thread>
 
 /* The query keys parse_query reads, for create's check (internal.h);
@@ -161,7 +162,6 @@ struct ecuio_j2534_transport {
     ecuio_frame_t rx_frame{};
     std::atomic<bool> stop_requested{false};
     std::thread worker;
-    ecuio_transport_t* self = nullptr;
 };
 
 /* Collected URI query parameters — parse_query fills, resolve_uri
@@ -964,7 +964,8 @@ ecuio_status_t j2534_start(ecuio_session_t* session, void* impl)
 /* detach(session, impl) — void per internal.h, called exactly once from
  * ecuio_session_close AFTER the closed flag is set. Worker joined
  * FIRST (never alive while vendor code could be unmapped), filter
- * stop best-effort before disconnect, then free impl AND the wrapper. */
+ * stop best-effort before disconnect, then free impl (the session
+ * frees the wrapper). */
 void j2534_detach(ecuio_session_t* session, void* impl)
 {
     (void)session;
@@ -982,10 +983,7 @@ void j2534_detach(ecuio_session_t* session, void* impl)
     }
     (void)ecuio_j2534_disconnect_channel(t->handle, t->channel);
     (void)ecuio_j2534_close(t->handle);
-
-    ecuio_transport_t* wrap = t->self;
-    delete t;      /* impl first */
-    delete wrap;   /* then the envelope — internal.h contract */
+    delete t;
 }
 
 /* The session info (ADR-0019): what the channel connected with, then
@@ -1061,20 +1059,25 @@ ecuio_status_t j2534_attach(ecuio_session_t* session, const char* uri,
      * core.cpp installs the profile's set before calling attach. */
     const ecuio_signal_set_t* set = ecuio_session_signal_set(session);
 
-    auto* t = new (std::nothrow) ecuio_j2534_transport();
+    /* Held here until attach succeeds: every refusal below just
+     * returns. */
+    std::unique_ptr<ecuio_j2534_transport> t(
+        new (std::nothrow) ecuio_j2534_transport());
     if (t == nullptr) {
         return ECUIO_ERR_OUT_OF_MEMORY;
     }
-    resolve_channels(t, set, params);
+    resolve_channels(t.get(), set, params);
 
     /* Requests, fixed before the thread starts:
-     *   ?poll=    -> that one Service 01 request; the set's rotation
-     *                isn't built, so the PID in the URI is the only one
-     *                asked for. It may be 0x00 (the supported-PIDs
-     *                bitmap), hence the presence flag
-     *   set       -> the set's rotation (request_engine.h), which
-     *                registration kept within the table
-     *   neither   -> passive receive */
+     *   ?poll=        -> that one Service 01 request; the set's rotation
+     *                    isn't built, so the PID in the URI is the only
+     *                    one asked for. It may be 0x00 (the
+     *                    supported-PIDs bitmap), hence the presence flag
+     *   uds-generic   -> the rotation from the set's polled head, and
+     *                    the scan of its ranges (ADR-0020)
+     *   any other set -> the set's rotation (request_engine.h), which
+     *                    registration kept within the table
+     *   no requests   -> passive receive */
     uint32_t rx_ids[ECUIO_MAX_CHANNELS] = {};
     for (uint32_t i = 0; i < t->chan_count; ++i) {
         rx_ids[i] = t->chans[i].rx_id;
@@ -1129,7 +1132,6 @@ ecuio_status_t j2534_attach(ecuio_session_t* session, const char* uri,
      * any hardware is touched. */
     if ((t->engine.count > 0 || t->engine.scan_count > 0) &&
         t->chan_count == 0) {
-        delete t;
         if (params.has_poll) {
             ecuio_detail_set("?poll= needs a channel to receive on: add "
                              "?filter=, or use a profile that declares one");
@@ -1153,7 +1155,6 @@ ecuio_status_t j2534_attach(ecuio_session_t* session, const char* uri,
         }
     }
     if (wide_chans != 0 && wide_chans != t->chan_count) {
-        delete t;
         ecuio_detail_set("the channels mix 11-bit and 29-bit IDs, which "
                          "one connection can't carry");
         return ECUIO_ERR_BAD_URI;
@@ -1164,7 +1165,6 @@ ecuio_status_t j2534_attach(ecuio_session_t* session, const char* uri,
     ecuio_j2534_handle_t* handle = nullptr;
     st = ecuio_j2534_open(&dev, &handle);
     if (st != ECUIO_OK) {
-        delete t;
         return st;
     }
 
@@ -1173,26 +1173,22 @@ ecuio_status_t j2534_attach(ecuio_session_t* session, const char* uri,
                                      &channel);
     if (st != ECUIO_OK) {
         ecuio_j2534_close(handle);
-        delete t;
         return st;
     }
 
-    /* The envelope: session owns it polymorphically; detach frees both. */
+    /* The envelope, which the session owns and frees (internal.h). */
     auto* wrap = new (std::nothrow) ecuio_transport_t();
     if (wrap == nullptr) {
         ecuio_j2534_disconnect_channel(handle, channel);
         ecuio_j2534_close(handle);
-        delete t;
         return ECUIO_ERR_OUT_OF_MEMORY;
     }
     wrap->ops = &kJ2534Ops;
-    wrap->impl = t;
 
     t->session = session;
     t->handle = handle;
     t->channel = channel;
-    t->self = wrap;
-    describe_session(t, params.baud, connect_flags, &session->info);
+    describe_session(t.get(), params.baud, connect_flags, &session->info);
     {
         /* Each channel's ECU, its requests and its identification
          * items, nothing learned yet. */
@@ -1207,6 +1203,7 @@ ecuio_status_t j2534_attach(ecuio_session_t* session, const char* uri,
     }
     t->epoch = std::chrono::steady_clock::now();   /* as mock: end of attach */
 
+    wrap->impl = t.release();
     session->transport = wrap;   /* session.h member — direct install */
     return ECUIO_OK;
 }

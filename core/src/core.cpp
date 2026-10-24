@@ -1,4 +1,9 @@
 // File/layer: core/src/core.cpp | C++17, Qt-free, CI-validated headless build
+// Testing: UNIT — CoreTest: session create (routing, the query split,
+//          profiles and every refusal), start, close and destroy,
+//          callbacks and their snapshot dispatch, the error strings;
+//          HARNESS — the J2534 suites through create; test_c_abi links
+//          the public functions
 
 #include "ecuio/version.h"
 #include "ecuio/core.h"
@@ -251,8 +256,12 @@ ecuio_status_t ecuio_session_create(
         return ECUIO_ERR_NULL_ARGUMENT;
     }
 
+    /* Held here until it's whole: every refusal below just returns,
+     * and the caller's pointer is set only on success. */
+    *out_session = nullptr;
+    std::unique_ptr<ecuio_session> s;
     try {
-        *out_session = new ecuio_session();
+        s = std::make_unique<ecuio_session>();
     } catch (...) {
         return ECUIO_ERR_OUT_OF_MEMORY;
     }
@@ -265,8 +274,6 @@ ecuio_status_t ecuio_session_create(
 #endif
     const bool is_mock = strncmp(transport_uri, "mock://", 7) == 0;
     if (!is_mock && !is_j2534) {
-        delete *out_session;
-        *out_session = nullptr;
 #ifndef _WIN32
         if (strncmp(transport_uri, "j2534://", 8) == 0) {
             ecuio_detail_set("j2534:// needs Windows, where J2534 adapters "
@@ -290,14 +297,10 @@ ecuio_status_t ecuio_session_create(
     ecuio_uri_query query;
     switch (ecuio_uri::split(ecuio_uri::query_of(rest), &query)) {
         case ecuio_uri::split_result::malformed:
-            delete *out_session;
-            *out_session = nullptr;
             ecuio_detail_set("malformed query: expected key=value pairs "
                              "joined by '&'");
             return ECUIO_ERR_BAD_URI;
         case ecuio_uri::split_result::too_long:
-            delete *out_session;
-            *out_session = nullptr;
             ecuio_detail_set("the query has more than %d key=value pairs",
                              static_cast<int>(ECUIO_URI_MAX_PARAMS));
             return ECUIO_ERR_BAD_URI;
@@ -308,8 +311,6 @@ ecuio_status_t ecuio_session_create(
     if (const ecuio_uri::param* bad = ecuio_uri::first_unknown(query, keys)) {
         char known[128];
         join_keys(keys, known, sizeof(known));
-        delete *out_session;
-        *out_session = nullptr;
         ecuio_detail_set("%s takes no query key '%.*s', only %s", scheme,
                          static_cast<int>(bad->key_len), bad->key, known);
         return ECUIO_ERR_BAD_URI;
@@ -326,8 +327,6 @@ ecuio_status_t ecuio_session_create(
             chosen = profile_name;
             break;
         case ProfileQuery::BadValue:
-            delete *out_session;
-            *out_session = nullptr;
             ecuio_detail_set("?profile= needs a profile name of 1 to %d "
                              "characters", ECUIO_PROFILE_NAME_MAX);
             return ECUIO_ERR_BAD_URI;
@@ -343,8 +342,6 @@ ecuio_status_t ecuio_session_create(
     const ecuio_signal_set_t* profile_set = nullptr;
     const ecuio_status_t found = ecuio_profile_lookup(chosen, &profile_set);
     if (found != ECUIO_OK) {
-        delete *out_session;
-        *out_session = nullptr;
         if (found == ECUIO_ERR_UNKNOWN_PROFILE) {
             ecuio_detail_set("no profile is named '%s'", chosen);
         }
@@ -356,30 +353,22 @@ ecuio_status_t ecuio_session_create(
      * Both refusals come before attach, like a bad ?profile=. */
     if (strcmp(chosen, ECUIO_UDS_GENERIC_NAME) == 0) {
         if (!ecuio_uds_query_has_did(query)) {
-            delete *out_session;
-            *out_session = nullptr;
             ecuio_detail_set("?profile=uds-generic needs ?did= to say which "
                              "DIDs to read");
             return ECUIO_ERR_BAD_URI;
         }
         try {
-            (*out_session)->uds = std::make_unique<ecuio_uds_session>();
+            s->uds = std::make_unique<ecuio_uds_session>();
         } catch (...) {
-            delete *out_session;
-            *out_session = nullptr;
             return ECUIO_ERR_OUT_OF_MEMORY;
         }
         const ecuio_status_t built =
-            ecuio_uds_build(query, (*out_session)->uds.get());
+            ecuio_uds_build(query, s->uds.get());
         if (built != ECUIO_OK) {
-            delete *out_session;
-            *out_session = nullptr;
             return built;
         }
-        profile_set = &(*out_session)->uds->set;
+        profile_set = &s->uds->set;
     } else if (ecuio_uds_query_has_did(query)) {
-        delete *out_session;
-        *out_session = nullptr;
         ecuio_detail_set("?did= belongs to the uds-generic profile: add "
                          "?profile=uds-generic");
         return ECUIO_ERR_BAD_URI;
@@ -388,32 +377,31 @@ ecuio_status_t ecuio_session_create(
     /* Set before attach: the j2534 transport derives its requests
      * and channels from it during attach. Single writer — attach
      * and the worker both run after this store. */
-    (*out_session)->active_signal_set = profile_set;
+    s->active_signal_set = profile_set;
 
     ecuio_status_t status = ECUIO_ERR_NO_TRANSPORT;
 #ifdef _WIN32
     if (is_j2534) {
-        status = ecuio_j2534_transport_attach(*out_session, transport_uri,
+        status = ecuio_j2534_transport_attach(s.get(), transport_uri,
                                               &query);
     } else
 #endif
     if (is_mock) {
-        status = ecuio_mock_transport_attach(*out_session, transport_uri,
+        status = ecuio_mock_transport_attach(s.get(), transport_uri,
                                              &query);
     }
 
     if (status != ECUIO_OK) {
-        delete *out_session;
-        *out_session = nullptr;
         return status;
     }
     /* After attach, which fills the rest of the info. */
     static_assert(ECUIO_PROFILE_NAME_MAX < ECUIO_SESSION_INFO_PROFILE_LEN,
                   "the session info holds any profile name");
-    char* profile = (*out_session)->info.profile;
+    char* profile = s->info.profile;
     const size_t n = strlen(chosen);
     memcpy(profile, chosen, n);
     profile[n] = '\0';
+    *out_session = s.release();
     return ECUIO_OK;
 }
 
@@ -445,8 +433,10 @@ ecuio_status_t ecuio_session_close(ecuio_session_t* session)
         return ECUIO_ERR_SESSION_CLOSED;
     }
 
+    /* The transport frees its impl; the wrapper is the session's. */
     if (session->transport != nullptr) {
         session->transport->ops->detach(session, session->transport->impl);
+        delete session->transport;
         session->transport = nullptr;
     }
 

@@ -201,6 +201,10 @@ ecuio_status_t ecuio_session_receive(
  *   SelfUnregisterDuringLiveDispatch)
  * - Duplicate (callback, user_data) pairs are silently deduplicated
  * - unregister is idempotent—calling it twice is safe
+ * - The other side of the snapshot: after unregister returns, a
+ *   dispatch already under way may call the callback once more, with
+ *   its user_data. Keep user_data valid until ecuio_session_close
+ *   returns, which joins the worker
  */
 ecuio_status_t ecuio_register_frame_callback(
     ecuio_session_t* session,

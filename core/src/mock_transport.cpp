@@ -155,21 +155,16 @@ ecuio_status_t mock_start(ecuio_session_t* session, void* impl)
 
 void mock_detach(ecuio_session_t* session, void* impl)
 {
+    (void)session;
     ecuio_mock_transport* t = static_cast<ecuio_mock_transport*>(impl);
     if (t == nullptr) {
         return;
     }
-
-    /* The transport wrapper holds `impl`; we must free both. */
-    ecuio_transport_t* wrapper = session->transport;
-    session->transport = nullptr;
-
     t->stop_requested.store(true);
     if (t->worker.joinable()) {
         t->worker.join();
     }
     delete t;
-    delete wrapper;
 }
 
 /* Static ops table — one per transport implementation, immutable. */

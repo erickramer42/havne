@@ -1,3 +1,9 @@
+// File/layer: core/src/signal_sets.cpp | C++17, Qt-free, every platform
+// Testing: UNIT — Obd2SetTest, Obd2DecodeTest and Obd2MuxTest (test_obd2)
+//          for the obd2 set; CoreTest.MockFramesDecodeAgainstMockSignalSet
+//          and SignalsTest for the mock set; every set passes the
+//          validator at registration
+
 #include <ecuio/signals.h>
 #include <ecuio/signal_sets.h>
 #include <string.h>
