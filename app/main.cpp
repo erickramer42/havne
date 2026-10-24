@@ -1,3 +1,7 @@
+// File/layer: app/main.cpp | Qt6 Gui/Qml/Quick, app entry point, C++17
+// Testing: manual smoke (the built app launched); QmlTest drives the
+//          same QML module and Bridge singleton without this file
+
 #include <QGuiApplication>
 #include <QQmlApplicationEngine>
 #include <QQmlExtensionPlugin>

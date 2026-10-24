@@ -37,6 +37,25 @@ QString failureText(ecuio_status_t rc)
     return status + QStringLiteral(": ") + QString::fromUtf8(detail);
 }
 
+// The activity log's numbers: an ID or count as 0x7E8, a byte as 0C.
+QString hexId(uint32_t v)
+{
+    return QStringLiteral("0x") + QString::number(v, 16).toUpper();
+}
+
+QString hexByte(uint8_t b)
+{
+    return QStringLiteral("%1").arg(static_cast<uint>(b), 2, 16,
+                                    QLatin1Char('0')).toUpper();
+}
+
+// Widens [first, last] to take row; first < 0 is an empty range.
+void widenRows(int row, int& first, int& last)
+{
+    if (first < 0 || row < first) first = row;
+    if (row > last) last = row;
+}
+
 } // namespace
 
 // ---------------- FrameListModel ----------------
@@ -254,18 +273,8 @@ void SignalListModel::updateValues(const std::vector<std::pair<uint16_t, double>
             Entry& e = m_entries[i];
             if (e.id == pair.first) {
                 e.value = pair.second;
-
-                // Evict-oldest ring push — bounded memory, stream never
-                // freezes; mirrors the FrameListModel ring philosophy.
-                e.history[e.histHead].timestampMs = stamp;
-                e.history[e.histHead].value = pair.second;
-                e.histHead = (e.histHead + 1) % HistoryCapacity;
-                if (e.histCount < HistoryCapacity) {
-                    ++e.histCount;
-                }
-
-                if (firstRow < 0 || static_cast<int>(i) < firstRow) firstRow = static_cast<int>(i);
-                if (static_cast<int>(i) > lastRow) lastRow = static_cast<int>(i);
+                pushSample(e, stamp, pair.second);
+                widenRows(static_cast<int>(i), firstRow, lastRow);
             }
         }
     }
@@ -294,19 +303,24 @@ void SignalListModel::updateTexts(const std::vector<std::pair<uint16_t, QString>
             e.text = pair.second;
             // The ring keeps the sample's time, for hasValue and ageMs;
             // the value is never plotted
-            e.history[e.histHead].timestampMs = stamp;
-            e.history[e.histHead].value = 0.0;
-            e.histHead = (e.histHead + 1) % HistoryCapacity;
-            if (e.histCount < HistoryCapacity) {
-                ++e.histCount;
-            }
-            if (firstRow < 0 || static_cast<int>(i) < firstRow) firstRow = static_cast<int>(i);
-            if (static_cast<int>(i) > lastRow) lastRow = static_cast<int>(i);
+            pushSample(e, stamp, 0.0);
+            widenRows(static_cast<int>(i), firstRow, lastRow);
         }
     }
     if (firstRow >= 0) {
         emit dataChanged(index(firstRow), index(lastRow),
                          {TextRole, HasValueRole, AgeMsRole});
+    }
+}
+
+// Evict-oldest ring push: bounded memory, and the stream never freezes.
+void SignalListModel::pushSample(Entry& e, qint64 stamp, double value)
+{
+    e.history[e.histHead].timestampMs = stamp;
+    e.history[e.histHead].value = value;
+    e.histHead = (e.histHead + 1) % HistoryCapacity;
+    if (e.histCount < HistoryCapacity) {
+        ++e.histCount;
     }
 }
 
@@ -1030,13 +1044,6 @@ void QtTuneBridge::pollChannelSupport()
  * sessionInfoText, so test_bridge pins the wording without an adapter. */
 QString QtTuneBridge::channelSupportText(const ecuio_channel_support_t& s)
 {
-    const auto hex = [](uint32_t v) {
-        return QStringLiteral("0x") + QString::number(v, 16).toUpper();
-    };
-    const auto byte = [](uint8_t b) {
-        return QStringLiteral("%1").arg(static_cast<uint>(b), 2, 16,
-                                        QLatin1Char('0')).toUpper();
-    };
 
     QStringList parts;
     if ((s.flags & ECUIO_SUPPORT_PROBED) != 0) {
@@ -1059,7 +1066,7 @@ QString QtTuneBridge::channelSupportText(const ecuio_channel_support_t& s)
             parts << QStringLiteral("supports %1 PIDs").arg(pids);
         } else if (s.ranges != 0) {
             parts << QStringLiteral("supports %1 PIDs up to %2, no answer past that")
-                         .arg(pids).arg(hex(top));
+                         .arg(pids).arg(hexId(top));
         } else {
             parts << QStringLiteral("no answer to the supported-PID query");
         }
@@ -1076,10 +1083,10 @@ QString QtTuneBridge::channelSupportText(const ecuio_channel_support_t& s)
             const ecuio_dropped_request_t& d = s.dropped_list[i];
             QStringList key;
             for (uint8_t k = 0; k < d.length && k < sizeof(d.request); ++k) {
-                key << byte(d.request[k]);
+                key << hexByte(d.request[k]);
             }
-            const QString nrc = QStringLiteral("7F %1 %2").arg(byte(d.request[0]),
-                                                               byte(d.nrc));
+            const QString nrc = QStringLiteral("7F %1 %2").arg(hexByte(d.request[0]),
+                                                               hexByte(d.nrc));
             QString why;
             switch (d.reason) {
                 case ECUIO_DROP_BITMAP:
@@ -1124,7 +1131,7 @@ QString QtTuneBridge::channelSupportText(const ecuio_channel_support_t& s)
         }
         parts << scan;
     }
-    return QStringLiteral("ECU %1: ").arg(hex(s.rx_id)) + parts.join(QStringLiteral("; "));
+    return QStringLiteral("ECU %1: ").arg(hexId(s.rx_id)) + parts.join(QStringLiteral("; "));
 }
 
 /* What each channel's ECU said it is (ADR-0021), in the activity log
@@ -1155,13 +1162,6 @@ void QtTuneBridge::pollChannelIdentity()
  * pins the wording without an adapter. */
 QString QtTuneBridge::channelIdentityText(const ecuio_channel_identity_t& s)
 {
-    const auto hex = [](uint32_t v) {
-        return QStringLiteral("0x") + QString::number(v, 16).toUpper();
-    };
-    const auto byte = [](uint8_t b) {
-        return QStringLiteral("%1").arg(static_cast<uint>(b), 2, 16,
-                                        QLatin1Char('0')).toUpper();
-    };
 
     QStringList parts;
     QStringList refused;
@@ -1171,7 +1171,7 @@ QString QtTuneBridge::channelIdentityText(const ecuio_channel_identity_t& s)
         const ecuio_identity_item_t& it = s.list[i];
         QStringList key;
         for (uint8_t k = 0; k < it.length && k < sizeof(it.request); ++k) {
-            key << byte(it.request[k]);
+            key << hexByte(it.request[k]);
         }
         const char* name = ecuio_identity_request_name(it.request, it.length);
         const QString label = (*name != '\0') ? QString::fromLatin1(name)
@@ -1187,8 +1187,8 @@ QString QtTuneBridge::channelIdentityText(const ecuio_channel_identity_t& s)
             }
             case ECUIO_IDENTITY_REFUSED:
                 refused << key.join(QLatin1Char(' ')) +
-                               QStringLiteral(" (7F %1 %2)").arg(byte(it.request[0]),
-                                                                 byte(it.nrc));
+                               QStringLiteral(" (7F %1 %2)").arg(hexByte(it.request[0]),
+                                                                 hexByte(it.nrc));
                 break;
             case ECUIO_IDENTITY_UNANSWERED:
                 ++unanswered;
@@ -1207,7 +1207,7 @@ QString QtTuneBridge::channelIdentityText(const ecuio_channel_identity_t& s)
     if (parts.isEmpty()) {
         parts << QStringLiteral("nothing asked");
     }
-    return QStringLiteral("ECU %1 identity: ").arg(hex(s.rx_id)) +
+    return QStringLiteral("ECU %1 identity: ").arg(hexId(s.rx_id)) +
            parts.join(QStringLiteral("; "));
 }
 
@@ -1241,9 +1241,6 @@ QString QtTuneBridge::sessionInfoText(const ecuio_session_info_t& info)
         info.backend != ECUIO_BACKEND_J2534_SURROGATE) {
         return QStringLiteral("Session: backend %1").arg(info.backend);
     }
-    const auto hex = [](uint32_t v) {
-        return QStringLiteral("0x") + QString::number(v, 16).toUpper();
-    };
     const auto text = [](const char* s) {
         const QString t = QString::fromUtf8(s, static_cast<qsizetype>(
             qstrnlen(s, ECUIO_SESSION_INFO_TEXT_LEN)));
@@ -1263,7 +1260,7 @@ QString QtTuneBridge::sessionInfoText(const ecuio_session_info_t& info)
                  : QStringLiteral("protocol %1").arg(info.protocol_id);
     link += QStringLiteral(" at %1 baud").arg(info.baud);
     if (info.connect_flags != 0) {
-        link += QStringLiteral(", flags ") + hex(info.connect_flags);
+        link += QStringLiteral(", flags ") + hexId(info.connect_flags);
     }
     parts << link;
 
@@ -1274,7 +1271,7 @@ QString QtTuneBridge::sessionInfoText(const ecuio_session_info_t& info)
     } else {
         QStringList pairs;
         for (uint32_t i = 0; i < channels; ++i) {
-            pairs << hex(info.rx_ids[i]) + QLatin1Char('/') + hex(info.tx_ids[i]);
+            pairs << hexId(info.rx_ids[i]) + QLatin1Char('/') + hexId(info.tx_ids[i]);
         }
         parts << QStringLiteral("%1, %2 %3 (rx/tx)")
                      .arg(profile,

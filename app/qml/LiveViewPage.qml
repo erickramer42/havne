@@ -24,11 +24,9 @@ Page {
 
     readonly property int rowHeight: 44
 
-    // A value this old is stale: its row dims, and the chart breaks its
-    // trace across the gap instead of drawing a ramp. 3 s is generous
-    // against a full rotation of the requests, at most the engine's
-    // 100 ms wait each, so about 1 s for the obd2 set.
-    readonly property int staleMs: 3000
+    // Theme.staleMs: a row that old dims, and the chart breaks its trace
+    // across the gap instead of drawing a ramp
+    readonly property int staleMs: Theme.staleMs
 
     // A trace's range is at least this many displayed digits, so a step
     // of one or two (fuel level between 71 % and 73 %, the charging

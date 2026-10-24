@@ -33,8 +33,7 @@ Page {
         readonly property SignalHub.Entry entry: hub.lookup(names)
         readonly property bool live: Bridge.connected && entry !== null && entry.hasValue
         readonly property real value: entry ? entry.value : 0
-        // Same 3 s staleness rule as LiveView
-        readonly property bool stale: live && entry.ageMs > 3000
+        readonly property bool stale: live && entry.ageMs > Theme.staleMs
         readonly property string unit: entry ? entry.unit : ""
         readonly property int decimals: entry ? entry.decimals : 0
         readonly property string note: !Bridge.connected ? qsTr("no session")

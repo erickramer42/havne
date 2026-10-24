@@ -175,13 +175,15 @@ private:
         // update regardless: the Dashboard reads every row, and a signal
         // plotted again shows the history it kept meanwhile.
         bool subscribed = true;
-        // GUI-thread-only rolling ring (written exclusively by updateValues).
-        // Fixed capacity, evict-oldest — mirrors the FrameListModel ring
-        // philosophy: bounded memory, stream never freezes.
+        // GUI-thread-only rolling ring, written only by pushSample (from
+        // updateValues and updateTexts). Fixed capacity, evict-oldest:
+        // bounded memory, and the stream never freezes.
         Sample history[HistoryCapacity];
         uint32_t histHead = 0;   // next write slot
         uint32_t histCount = 0; // valid samples, saturates at HistoryCapacity
     };
+
+    static void pushSample(Entry& e, qint64 stamp, double value);
 
     std::vector<Entry> m_entries;
     int m_subscribedCount = 0;

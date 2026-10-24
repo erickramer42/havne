@@ -23,6 +23,12 @@ QtObject {
     readonly property int spacing:          8
     readonly property int pageMargin:       16
 
+    // A value this old is stale: Live dims its row and the chart breaks
+    // its trace across the gap, and the Dashboard dims its gauge. 3 s is
+    // generous against a full rotation of the requests, at most the
+    // engine's 100 ms wait each, so about 1 s for the obd2 set.
+    readonly property int staleMs:          3000
+
     // The whole UI's zoom, set with Ctrl + / Ctrl − / Ctrl 0 or from
     // Settings. Main.qml lays the UI out at the window's size divided by
     // it and scales the result, so every page reflows as if the window
