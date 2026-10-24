@@ -1,13 +1,13 @@
 // File/layer: app/qttunebridge.h | Qt6 Core, app layer, C++17
-// Testing: SignalListModel history ring covered by test_bridge (Qt-linked target);
-//          discoverJ2534Devices marshaling shape covered by test_bridge
+// Testing: test_bridge (Qt-linked target): the frame log's ring and
+//          order, SignalListModel's history ring, discoverJ2534Devices'
+//          marshaling shape
 
 #pragma once
 
 #include <QObject>
 #include <QString>
 #include <QAbstractListModel>
-#include <QSortFilterProxyModel>
 #include <QVariantList>
 #include <QVariantMap>
 #include <QTimer>
@@ -23,10 +23,17 @@
 #include "ecuio/signals.h"
 #include "sessionrecorder.h"
 
+// The Log page's frames, newest first by default. The last MaxFrames
+// in a fixed ring of plain rows: each frame overwrites the oldest once
+// it's full, so a frame costs the same at the cap as below it, and the
+// hex is formatted only for the rows a view asks for. Row order is
+// arrival, never the frame's timestamp, which comes from the producer's
+// clock (on J2534, the adapter's deltas after the first frame).
 class FrameListModel : public QAbstractListModel
 {
     Q_OBJECT
     Q_PROPERTY(int count READ count NOTIFY countChanged)
+    Q_PROPERTY(bool newestFirst READ newestFirst WRITE setNewestFirst NOTIFY newestFirstChanged)
 
 public:
     explicit FrameListModel(QObject* parent = nullptr);
@@ -43,34 +50,32 @@ public:
     int rowCount(const QModelIndex& parent = {}) const override;
     QVariant data(const QModelIndex& index, int role = Qt::DisplayRole) const override;
     QHash<int, QByteArray> roleNames() const override;
-    void appendFrame(const QVariantMap& frame);
+    // len is the frame's data_length, already clamped to its buffer
+    void appendFrame(const ecuio_frame_t& frame, uint16_t len);
     void clear();
-    int count() const { return static_cast<int>(m_frames.size()); }
+    int count() const { return m_count; }
+    bool newestFirst() const { return m_newestFirst; }
+    void setNewestFirst(bool newestFirst);
 
 signals:
     void countChanged(int newCount);
-
-private:
-    std::vector<QVariantMap> m_frames;
-};
-
-class FrameSortProxy : public QSortFilterProxyModel
-{
-    Q_OBJECT
-    Q_PROPERTY(bool newestFirst READ newestFirst WRITE setNewestFirst NOTIFY newestFirstChanged)
-
-public:
-    explicit FrameSortProxy(QObject* parent = nullptr);
-    bool newestFirst() const;
-    void setNewestFirst(bool newestFirst);
-
-protected:
-    bool lessThan(const QModelIndex& left, const QModelIndex& right) const override;
-
-signals:
     void newestFirstChanged();
 
 private:
+    struct Row {
+        quint64 timestampUs = 0;
+        quint32 arbId = 0;
+        bool extended = false;
+        // At the frame's length; a reused slot keeps its capacity, so
+        // the ring stops allocating once it has gone round
+        std::vector<uint8_t> payload;
+    };
+
+    const Row& rowAt(int row) const;
+
+    std::vector<Row> m_ring;   // grows to MaxFrames, then stays that size
+    size_t m_oldest = 0;       // the oldest row's slot
+    int m_count = 0;           // rows shown; m_ring.size() but mid-append
     bool m_newestFirst = true;
 };
 
@@ -199,7 +204,7 @@ class QtTuneBridge : public QObject
     Q_PROPERTY(bool disconnecting READ disconnecting NOTIFY disconnectingChanged)
     Q_PROPERTY(int frameCount READ frameCount NOTIFY frameCountChanged)
     Q_PROPERTY(int droppedFrames READ droppedFrames NOTIFY droppedFramesChanged)
-    Q_PROPERTY(FrameSortProxy* model READ model CONSTANT)
+    Q_PROPERTY(FrameListModel* model READ model CONSTANT)
     Q_PROPERTY(int guiNotifyCount READ guiNotifyCount NOTIFY notifyCountChanged)
     Q_PROPERTY(int signalBatchCount READ signalBatchCount NOTIFY signalBatchChanged)
     Q_PROPERTY(SignalListModel* signalModel READ signalModel CONSTANT)
@@ -229,7 +234,7 @@ public:
     bool connected() const { return m_connected.load(std::memory_order_acquire); }
     int frameCount() const { return m_currentFrameCount; }
     int droppedFrames() const { return m_droppedFrames.load(std::memory_order_relaxed); }
-    FrameSortProxy* model() const { return m_sortProxy; }
+    FrameListModel* model() const { return m_frameLog; }
     int guiNotifyCount() const { return m_guiNotifyCount; }
     int signalBatchCount() const { return m_signalBatchCount; }
     SignalListModel* signalModel() const { return m_signalModel; }
@@ -311,6 +316,7 @@ private:
     void stopRecording(const QString& why);
     QString recordingSummary(const QString& why) const;
     void notifyDropped();   // GUI thread: emit droppedFramesChanged if the count moved
+    void notifyFrameCounts();   // GUI thread: frameCount and guiNotifyCount, if they moved
     void destroySessionLocked();  // the destructor's teardown; disconnectSession tears down on its own thread
 
     ecuio_session_t* m_session = nullptr;
@@ -319,11 +325,12 @@ private:
     std::atomic<bool> m_connected{false};
     std::atomic<int> m_droppedFrames{0};
     int m_currentFrameCount = 0;      // GUI-thread-only (queued invocations)
+    int m_reportedFrameCount = 0;      // what QML was last told, and below
+    int m_reportedNotifyCount = 0;
     int m_lastReportedDropped = 0;     // GUI-thread-only companion to m_droppedFrames
     bool m_logPaused = false;          // GUI-thread-only
 
-    FrameListModel* m_sourceModel = nullptr;
-    FrameSortProxy* m_sortProxy = nullptr;
+    FrameListModel* m_frameLog = nullptr;
 
     QTimer* m_coalesceTimer = nullptr;
     // Latest value per signal ID, flushed by the 100 ms coalesce timer

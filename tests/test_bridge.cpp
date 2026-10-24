@@ -1,3 +1,10 @@
+// File/layer: tests/test_bridge.cpp | GTest + QtCore, app-layer tests
+// Testing: UNIT/HARNESS — the bridge and its models against the real mock
+//          worker (and, on Windows, the fake J2534 DLL): marshaling,
+//          coalescing, backpressure, the frame log's ring and order, the
+//          signal model's roles and freshness, link states, the activity
+//          log's lines, connect and disconnect threads, recording
+
 #include <gtest/gtest.h>
 
 #include <QCoreApplication>
@@ -16,6 +23,7 @@
 #include <initializer_list>
 #include <memory>
 #include <thread>
+#include <vector>
 
 #include "qttunebridge.h"   // QtTuneBridge + FrameListModel
 #include <ecuio/profile.h>
@@ -186,10 +194,10 @@ TEST(BridgeTest, FramesMarshalFromWorkerToGuiThread)
 {
     QtTuneBridge bridge;
 
-    // Connect to SOURCE MODEL's countChanged — proxy forwards changes automatically
+    // The frame log's countChanged fires on the thread that appends
     std::atomic<Qt::HANDLE> append_thread{nullptr};
     QObject::connect(
-        static_cast<FrameListModel*>(bridge.model()->sourceModel()),
+        bridge.model(),
         &FrameListModel::countChanged,
         [&append_thread](int) {
             Qt::HANDLE current = QThread::currentThreadId();
@@ -383,7 +391,7 @@ TEST(BridgeTest, ConnectStartsAnEmptyFrameLog)
 {
     QtTuneBridge bridge;
     ASSERT_TRUE(bridge.connectSession("mock://first").isEmpty());
-    FrameSortProxy* proxy = bridge.model();
+    FrameListModel* proxy = bridge.model();
     ASSERT_TRUE(spinUntil([proxy]() { return proxy->rowCount() > 0; }, 5000));
 
     ASSERT_TRUE(disconnectAndWait(bridge));
@@ -414,7 +422,7 @@ TEST(BridgeTest, FrameLogOrdersByArrivalNotTimestamp)
     bridge.dispatchFrameForTesting(first);
     bridge.dispatchFrameForTesting(second);
 
-    FrameSortProxy* proxy = bridge.model();
+    FrameListModel* proxy = bridge.model();
     auto row_of = [proxy](quint32 id) {
         for (int r = 0; r < proxy->rowCount(); ++r) {
             if (proxy->data(proxy->index(r, 0),
@@ -435,12 +443,12 @@ TEST(BridgeTest, FrameLogOrdersByArrivalNotTimestamp)
     bridge.disconnectSession();
 }
 
-TEST(BridgeTest, SortProxyOrdersNewestFirstByDefault)
+TEST(BridgeTest, FrameLogOrdersNewestFirstByDefault)
 {
     QtTuneBridge bridge;
     ASSERT_TRUE(bridge.connectSession("mock://sort-default").isEmpty());
 
-    FrameSortProxy* proxy = bridge.model();
+    FrameListModel* proxy = bridge.model();
     // CONTRACT: more than two frames arrive sorted. Polled, not a fixed
     // sleep: starved CI runners can deliver only 2 in 300 ms.
     ASSERT_TRUE(spinUntil(
@@ -457,12 +465,12 @@ TEST(BridgeTest, SortProxyOrdersNewestFirstByDefault)
     bridge.disconnectSession();
 }
 
-TEST(BridgeTest, SortProxyTogglesToOldestFirst)
+TEST(BridgeTest, FrameLogTogglesToOldestFirst)
 {
     QtTuneBridge bridge;
     ASSERT_TRUE(bridge.connectSession("mock://sort-toggle").isEmpty());
 
-    FrameSortProxy* proxy = bridge.model();
+    FrameListModel* proxy = bridge.model();
     ASSERT_TRUE(spinUntil(
         [proxy]() { return proxy->rowCount() > 2; }, 5000));
 
@@ -532,6 +540,138 @@ TEST(BridgeTest, SignalBatchesAreCoalesced)
     bridge.disconnectSession();
 }
 
+namespace {
+
+/* Dispatches n frames with ID 0x123 and stamps first, first + 1, …,
+ * letting each burst drain so none is dropped at the in-flight gate. */
+void dispatchNumbered(QtTuneBridge& bridge, int first, int n)
+{
+    ecuio_frame_t f{};
+    f.arbitration_id = 0x123;   // not the mock's 0x0C0
+    f.data_length = 2;
+    const int burst = QtTuneBridge::maxInFlightForTesting() / 2;
+    for (int i = 0; i < n; ++i) {
+        f.timestamp_us = static_cast<uint64_t>(first + i);
+        f.data[0] = static_cast<uint8_t>((first + i) >> 8);
+        f.data[1] = static_cast<uint8_t>(first + i);
+        bridge.dispatchFrameForTesting(f);
+        if ((i + 1) % burst == 0) {
+            spinLoop(5);
+        }
+    }
+    spinLoop(50);
+}
+
+/* The 0x123 rows' stamps, top to bottom; mock frames between them are
+ * counted in others. */
+std::vector<quint64> numberedRows(const FrameListModel* model, int* others)
+{
+    std::vector<quint64> out;
+    *others = 0;
+    for (int r = 0; r < model->rowCount(); ++r) {
+        const QModelIndex idx = model->index(r, 0);
+        if (model->data(idx, FrameListModel::ArbitrationIdRole).toUInt() == 0x123u) {
+            out.push_back(model->data(idx, FrameListModel::TimestampRole).toULongLong());
+        } else {
+            ++*others;
+        }
+    }
+    return out;
+}
+
+} // namespace
+
+/* Past the cap the log keeps the newest MaxFrames in arrival order, in
+ * either direction, each row still showing its own frame: the ring's
+ * slot arithmetic, through the overwrite of the oldest and a toggle.
+ * A view sees the oldest row leave from its end and the new one arrive
+ * at the other, which is what keeps a ListView's rows right. */
+TEST(BridgeTest, FullFrameLogKeepsTheNewestInOrder)
+{
+    QtTuneBridge bridge;
+    ASSERT_TRUE(bridge.connectSession("mock://ring").isEmpty());
+    FrameListModel* model = bridge.model();
+    int wrongRemovals = 0;
+    int wrongInserts = 0;
+    QObject::connect(model, &QAbstractItemModel::rowsAboutToBeRemoved,
+                     [model, &wrongRemovals](const QModelIndex&, int first, int last) {
+        const int oldest = model->newestFirst() ? model->rowCount() - 1 : 0;
+        if (first != oldest || last != oldest) ++wrongRemovals;
+    });
+    QObject::connect(model, &QAbstractItemModel::rowsInserted,
+                     [model, &wrongInserts](const QModelIndex&, int first, int last) {
+        const int newest = model->newestFirst() ? 0 : model->rowCount() - 1;
+        if (first != newest || last != newest) ++wrongInserts;
+    });
+    const int total = FrameListModel::MaxFrames + 250;
+    dispatchNumbered(bridge, 1, total);
+    ASSERT_EQ(bridge.droppedFrames(), 0);
+
+    ASSERT_EQ(model->rowCount(), FrameListModel::MaxFrames);
+    int others = 0;
+    std::vector<quint64> rows = numberedRows(model, &others);
+    ASSERT_EQ(static_cast<int>(rows.size()) + others, FrameListModel::MaxFrames);
+    ASSERT_FALSE(rows.empty());
+    EXPECT_EQ(rows.front(), static_cast<quint64>(total)) << "the newest on top";
+    for (size_t i = 1; i < rows.size(); ++i) {
+        ASSERT_EQ(rows[i], rows[i - 1] - 1) << "row " << i << " out of order";
+    }
+    // Each row's payload is its own frame's, not a stale slot's
+    const QModelIndex top = model->index(0, 0);
+    if (model->data(top, FrameListModel::ArbitrationIdRole).toUInt() == 0x123u) {
+        const quint64 n = model->data(top, FrameListModel::TimestampRole).toULongLong();
+        EXPECT_EQ(model->data(top, FrameListModel::PayloadRole).toString(),
+                  QStringLiteral("%1 %2")
+                      .arg((n >> 8) & 0xFF, 2, 16, QLatin1Char('0'))
+                      .arg(n & 0xFF, 2, 16, QLatin1Char('0')).toUpper());
+        EXPECT_EQ(model->data(top, FrameListModel::DlcRole).toUInt(), 2u);
+    }
+
+    model->setNewestFirst(false);
+    rows = numberedRows(model, &others);
+    ASSERT_FALSE(rows.empty());
+    EXPECT_EQ(rows.back(), static_cast<quint64>(total)) << "the newest at the bottom";
+    for (size_t i = 1; i < rows.size(); ++i) {
+        ASSERT_EQ(rows[i], rows[i - 1] + 1) << "row " << i << " out of order";
+    }
+
+    // And it keeps going round while oldest-first
+    dispatchNumbered(bridge, total + 1, 300);
+    ASSERT_EQ(model->rowCount(), FrameListModel::MaxFrames);
+    rows = numberedRows(model, &others);
+    EXPECT_EQ(rows.back(), static_cast<quint64>(total + 300));
+    for (size_t i = 1; i < rows.size(); ++i) {
+        ASSERT_EQ(rows[i], rows[i - 1] + 1) << "row " << i << " out of order";
+    }
+    EXPECT_EQ(wrongRemovals, 0) << "a row other than the oldest left";
+    EXPECT_EQ(wrongInserts, 0) << "a frame arrived at the wrong end";
+    bridge.disconnectSession();
+}
+
+/* frameCount and guiNotifyCount reach QML on the 100 ms tick, not once
+ * per frame: a burst of 400 frames changes each a handful of times, and
+ * the counts still end exact. */
+TEST(BridgeTest, FrameCountsAreReportedOnTheTick)
+{
+    QtTuneBridge bridge;
+    ASSERT_TRUE(bridge.connectSession("mock://counts").isEmpty());
+    int countSignals = 0;
+    int notifySignals = 0;
+    QObject::connect(&bridge, &QtTuneBridge::frameCountChanged,
+                     [&countSignals]() { ++countSignals; });
+    QObject::connect(&bridge, &QtTuneBridge::notifyCountChanged,
+                     [&notifySignals](int) { ++notifySignals; });
+
+    const int before = bridge.frameCount();
+    dispatchNumbered(bridge, 1, 400);
+    spinLoop(250);   // two ticks past the burst
+    EXPECT_GE(bridge.frameCount(), before + 400);
+    EXPECT_GT(countSignals, 0) << "the count never reached QML";
+    EXPECT_LT(countSignals, 40) << "reported per frame, not per tick";
+    EXPECT_LT(notifySignals, 40);
+    bridge.disconnectSession();
+}
+
 TEST(BridgeTest, StreamingContinuesPastTenThousandFrames)
 {
     QtTuneBridge bridge;
@@ -585,7 +725,7 @@ TEST(BridgeTest, DispatchedShortFrameHonorsDataLength)
     // CONTRACT: our dispatched frame reaches the model. Poll on the
     // finding condition instead of a fixed 200ms settle — the row must
     // appear through the queued-invocation path regardless of runner speed.
-    FrameSortProxy* proxy = bridge.model();
+    FrameListModel* proxy = bridge.model();
     auto row_finder = [proxy]() {
         for (int r = 0; r < proxy->rowCount(); ++r) {
             if (proxy->data(proxy->index(r, 0),
@@ -622,7 +762,7 @@ TEST(BridgeTest, DispatchedShortFrameHonorsDataLength)
 
 /* LogPage binds frame columns by role NAME. A name missing here isn't a
  * build error: the column renders empty and every delegate throws. Read
- * through the proxy, which is what QML gets as Bridge.model. */
+ * through Bridge.model, what QML gets. */
 TEST(BridgeTest, FrameRoleNamesMatchLogPageBindings)
 {
     QtTuneBridge bridge;
@@ -642,7 +782,7 @@ TEST(BridgeTest, LogPauseStopsFrameLogNotDecode)
      * session: disconnect clears it and a new session starts unpaused. */
     QtTuneBridge bridge;
     ASSERT_TRUE(bridge.connectSession("mock://pause").isEmpty());
-    FrameSortProxy* proxy = bridge.model();
+    FrameListModel* proxy = bridge.model();
     ASSERT_TRUE(spinUntil([proxy]() { return proxy->rowCount() > 0; }, 5000));
 
     bridge.setLogPaused(true);

@@ -153,7 +153,7 @@ is the plan in [After v0.3.0](#after-v030).
     run sheets are
     [bench-runsheet.md](docs/bench-sessions/bench-runsheet.md) and
     [vehicle-runsheet.md](docs/bench-sessions/vehicle-runsheet.md).
-  - **Tests:** 370 ctest cases (Windows, Visual Studio 18 build
+  - **Tests:** 372 ctest cases (Windows, Visual Studio 18 build
     tools, both trees rebuilt, 2026-10-24), the QML suites
     among them, plus the cross-arch subset (71/71). All passed except
     the env-gated cross-arch skip. Every first-party target builds with
@@ -214,7 +214,7 @@ core: snapshot dispatch to registered callbacks ............ ADR-0002
 GUI thread: handleFrameInternal ............................ ADR-0003
       |- SessionRecorder (opt-in): frames.csv, signals.csv,
       |    events.log .......................................... ADR-0017
-      |- FrameListModel (10k cap, evicts oldest) -> FrameSortProxy -> LogPage
+      |- FrameListModel (a 10k ring, newest or oldest first) -> LogPage
       '- decode, gated on ID + mux key -> staging buffer ... ADR-0004
              | 100 ms timer
              v
@@ -653,13 +653,11 @@ matters: the original-copy file format constrains everything after it.
 - **Full signal sets at full rate (L).** The goal is a per-PID refresh
   limited by the ECU's response time, with no per-frame GUI-thread
   cost. Requests already follow the replies
-  ([ADR-0015](docs/adr/0015-request-engine.md)). The parts left:
-  - decoding on the worker thread, which also brings per-sample
-    timestamps (Known Issue #10) and takes the per-frame def matching
-    off the GUI thread (#4);
-  - a fixed ring of plain frame structs for the log, replacing
-    `QVariantMap` rows, whose eviction costs an O(n) erase per frame
-    at the 10k cap.
+  ([ADR-0015](docs/adr/0015-request-engine.md)), and the frame log is
+  a fixed ring of plain rows, about 2 µs a frame at its cap. The part
+  left is decoding on the worker thread, which also brings per-sample
+  timestamps (Known Issue #10) and takes the per-frame def matching
+  off the GUI thread (#4).
 
   Set a measured target before starting: sustained frames per second,
   and per-PID refresh at N PIDs, recorded in

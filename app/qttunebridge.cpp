@@ -1,6 +1,7 @@
 // File/layer: app/qttunebridge.cpp | Qt6 Core, app layer, C++17
 // Testing: test_bridge (QtCore only): worker→GUI marshaling, coalescing,
-//          in-flight backpressure, the signal model's roles and age
+//          in-flight backpressure, the frame log's ring and order and
+//          the counters on the tick, the signal model's roles and age
 //          refresh, link-state mapping, the activity log's session and
 //          ECU lines, session recording (BridgeTest.Recording*). QML
 //          rendering: manual smoke.
@@ -62,27 +63,40 @@ void widenRows(int row, int& first, int& last)
 FrameListModel::FrameListModel(QObject* parent)
     : QAbstractListModel(parent)
 {
-    m_frames.reserve(MaxFrames);
+    m_ring.reserve(MaxFrames);
 }
 
 int FrameListModel::rowCount(const QModelIndex&) const
 {
-    return static_cast<int>(m_frames.size());
+    return m_count;
+}
+
+// A view row's frame: row 0 is the newest, or the oldest
+const FrameListModel::Row& FrameListModel::rowAt(int row) const
+{
+    const size_t age = m_newestFirst ? static_cast<size_t>(m_count - 1 - row)
+                                     : static_cast<size_t>(row);   // 0 = oldest
+    return m_ring[(m_oldest + age) % m_ring.size()];
 }
 
 QVariant FrameListModel::data(const QModelIndex& index, int role) const
 {
-    if (!index.isValid() || index.row() >= static_cast<int>(m_frames.size())) {
+    if (!index.isValid() || index.row() < 0 || index.row() >= m_count) {
         return QVariant();
     }
-    const QVariantMap& frame = m_frames[static_cast<size_t>(index.row())];
+    const Row& r = rowAt(index.row());
     switch (role) {
-        case TimestampRole:    return frame.value("timestampUs");
-        case DlcRole:         return frame.value("dlc");
-        case ExtendedRole:     return frame.value("extended");
-        case PayloadRole:      return frame.value("payloadHex");
-        case ArbitrationIdRole: return frame.value("arbId");
-        default:              return QVariant();
+        case TimestampRole:     return QVariant::fromValue<quint64>(r.timestampUs);
+        case DlcRole:           return static_cast<uint>(r.payload.size());
+        case ExtendedRole:      return r.extended;
+        case PayloadRole:
+            // Spaced uppercase bytes ("41 0C 1F 40"), matching the ID column
+            return QString::fromLatin1(
+                QByteArray::fromRawData(reinterpret_cast<const char*>(r.payload.data()),
+                                        static_cast<qsizetype>(r.payload.size()))
+                    .toHex(' ').toUpper());
+        case ArbitrationIdRole: return QVariant::fromValue<quint32>(r.arbId);
+        default:                return QVariant();
     }
 }
 
@@ -97,57 +111,50 @@ QHash<int, QByteArray> FrameListModel::roleNames() const
     };
 }
 
-void FrameListModel::appendFrame(const QVariantMap& frame)
+void FrameListModel::appendFrame(const ecuio_frame_t& frame, uint16_t len)
 {
-    const int row = rowCount();
-    beginInsertRows(QModelIndex(), row, row);
-    m_frames.push_back(frame);
-    endInsertRows();
-
-    while (static_cast<int>(m_frames.size()) > MaxFrames) {
-        beginRemoveRows(QModelIndex(), 0, 0);
-        m_frames.erase(m_frames.begin());
+    if (m_count == MaxFrames) {
+        // Full: the oldest row leaves first, from the end that shows it,
+        // and its slot takes the new frame
+        const int row = m_newestFirst ? m_count - 1 : 0;
+        beginRemoveRows(QModelIndex(), row, row);
+        m_oldest = (m_oldest + 1) % m_ring.size();
+        --m_count;
         endRemoveRows();
     }
-    emit countChanged(static_cast<int>(m_frames.size()));
+    const int row = m_newestFirst ? 0 : m_count;
+    beginInsertRows(QModelIndex(), row, row);
+    if (m_ring.size() < static_cast<size_t>(MaxFrames)) {
+        m_ring.emplace_back();
+    }
+    Row& r = m_ring[(m_oldest + static_cast<size_t>(m_count)) % m_ring.size()];
+    r.timestampUs = frame.timestamp_us;
+    r.arbId = frame.arbitration_id;
+    r.extended = (frame.flags & ECUIO_FRAME_FLAG_EXTENDED) != 0;
+    r.payload.assign(frame.data, frame.data + len);
+    ++m_count;
+    endInsertRows();
+    emit countChanged(m_count);
 }
 
 void FrameListModel::clear()
 {
-    if (m_frames.empty()) return;
+    if (m_count == 0) return;
     beginResetModel();
-    m_frames.clear();
+    m_ring.clear();
+    m_oldest = 0;
+    m_count = 0;
     endResetModel();
     emit countChanged(0);
 }
 
-// ---------------- FrameSortProxy ----------------
-// Arrival order, which is the source model's row order: the order the
-// frames reached the app. Not the frame timestamp, which comes from the
-// producer's clock (on J2534, the adapter's deltas after the first
-// frame), so it needn't follow arrival exactly.
-bool FrameSortProxy::lessThan(const QModelIndex& left, const QModelIndex& right) const
-{
-    return left.row() < right.row();
-}
-
-FrameSortProxy::FrameSortProxy(QObject* parent)
-    : QSortFilterProxyModel(parent)
-{
-    setDynamicSortFilter(true);
-    sort(0, Qt::DescendingOrder);
-}
-
-bool FrameSortProxy::newestFirst() const
-{
-    return m_newestFirst;
-}
-
-void FrameSortProxy::setNewestFirst(bool newestFirst)
+void FrameListModel::setNewestFirst(bool newestFirst)
 {
     if (m_newestFirst == newestFirst) return;
+    // Every row moves, so the views start over
+    beginResetModel();
     m_newestFirst = newestFirst;
-    sort(0, newestFirst ? Qt::DescendingOrder : Qt::AscendingOrder);
+    endResetModel();
     emit newestFirstChanged();
 }
 
@@ -370,16 +377,15 @@ void SignalListModel::toggleSubscribed(int row)
 // ---------------- QtTuneBridge ----------------
 QtTuneBridge::QtTuneBridge(QObject* parent)
     : QObject(parent)
-    , m_sourceModel(new FrameListModel(this))
-    , m_sortProxy(new FrameSortProxy(this))
+    , m_frameLog(new FrameListModel(this))
     , m_coalesceTimer(new QTimer(this))
     , m_signalModel(new SignalListModel(this))
 {
     (void)ecuio_init();   // optional and always ECUIO_OK (core.h), paired below
-    m_sortProxy->setSourceModel(m_sourceModel);
     m_textScratch.resize(ECUIO_DECODE_TEXT_MAX);
 
     connect(m_coalesceTimer, &QTimer::timeout, this, [this]() {
+        notifyFrameCounts();
         pollLinkHealth();   // every tick while connected — transitions only
         pollChannelSupport();
         pollChannelIdentity();
@@ -557,8 +563,9 @@ void QtTuneBridge::applyConnectedState(ecuio_session_t* session, const QString& 
     m_connected.store(true, std::memory_order_release);
     // The frame log belongs to a session, like its count: rows from two
     // connects would otherwise run together with nothing between them.
-    m_sourceModel->clear();
+    m_frameLog->clear();
     m_currentFrameCount = 0;
+    notifyFrameCounts();
     m_droppedFrames.store(0, std::memory_order_relaxed);
     m_lastReportedDropped = 0;
     m_signalModel->setSignalSet(ecuio_session_signal_set(session));
@@ -675,6 +682,7 @@ void QtTuneBridge::disconnectSession()
     m_connected.store(false, std::memory_order_release);
     m_disconnecting = true;
     m_coalesceTimer->stop();
+    notifyFrameCounts();   // the last tick's worth
     m_stagingBuffer.clear();
     m_stagingTexts.clear();
     m_currentUri.clear();
@@ -833,8 +841,9 @@ void QtTuneBridge::setLogPaused(bool paused)
 
 void QtTuneBridge::clearFrames()
 {
-    if (m_sourceModel) m_sourceModel->clear();
+    m_frameLog->clear();
     m_currentFrameCount = 0;
+    notifyFrameCounts();
     emit framesReset();
 }
 
@@ -917,16 +926,7 @@ void QtTuneBridge::handleFrameInternal(const ecuio_frame_t* frame,
 
     // Paused: counted and decoded below, but kept out of the frame log
     if (!m_logPaused) {
-        QVariantMap vm;
-        vm["timestampUs"] = QVariant::fromValue<quint64>(frame->timestamp_us);
-        vm["arbId"] = QVariant::fromValue<quint32>(frame->arbitration_id);
-        vm["dlc"] = static_cast<uint32_t>(len);
-        vm["extended"] = (frame->flags & ECUIO_FRAME_FLAG_EXTENDED) != 0;
-        // Spaced uppercase bytes ("41 0C 1F 40"), matching the ID column
-        vm["payloadHex"] = QByteArray(
-            reinterpret_cast<const char*>(frame->data),
-            static_cast<qsizetype>(len)).toHex(' ').toUpper();
-        m_sourceModel->appendFrame(vm);
+        m_frameLog->appendFrame(*frame, len);
     }
     ++m_currentFrameCount;
 
@@ -959,9 +959,23 @@ void QtTuneBridge::handleFrameInternal(const ecuio_frame_t* frame,
         }
     }
 
+    // Counted here, reported on the tick (notifyFrameCounts): a signal
+    // per frame would re-evaluate every binding on them per frame
     ++m_guiNotifyCount;
-    emit frameCountChanged();
-    emit notifyCountChanged(m_guiNotifyCount);
+}
+
+// The frame counters reach QML at the coalesce tick's rate, and at
+// connect, disconnect and clear, never per frame.
+void QtTuneBridge::notifyFrameCounts()
+{
+    if (m_currentFrameCount != m_reportedFrameCount) {
+        m_reportedFrameCount = m_currentFrameCount;
+        emit frameCountChanged();
+    }
+    if (m_guiNotifyCount != m_reportedNotifyCount) {
+        m_reportedNotifyCount = m_guiNotifyCount;
+        emit notifyCountChanged(m_guiNotifyCount);
+    }
 }
 
 void QtTuneBridge::notifyDropped()
@@ -979,7 +993,7 @@ void QtTuneBridge::forceFrameCountForTesting(int count)
         return;
     }
     m_currentFrameCount = count;
-    emit frameCountChanged();   // keep the QML binding in sync
+    notifyFrameCounts();   // keep the QML binding in sync
 }
 
 void QtTuneBridge::dispatchFrameForTesting(const ecuio_frame_t& frame)

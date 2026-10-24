@@ -782,3 +782,13 @@ sees the whole payload and no copy is made. The lesson is the order of
 work: a seam that truncates needs its limit in the type (a length the
 reader checks), not in a comment, or the test that uses the seam end to
 end has to run before the one that stubs it is trusted.
+
+**2026-10-24 — the frame log's ring:** **a model's rows can read right
+while its signals say otherwise.** The frame log became a fixed ring of
+plain rows, which took a frame at the 10k cap from 45 µs to 2 µs (no
+view attached). The first ring test read every row back and checked the
+order both ways, and a mutation that announced the removal at the
+newest end instead of the oldest passed it: `data()` was right, only a
+`ListView` would have shown the wrong rows. The test now checks where
+each removal and insertion lands. For a hand-written model, the row
+signals are part of the contract, and a data-only test can't see them.

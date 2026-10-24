@@ -180,7 +180,7 @@ Pane {
                           right: parent.right; bottom: parent.bottom }
                 anchors.margins: 4
                 clip: true
-                model: Bridge.model          // FrameSortProxy over the bridge's FrameListModel
+                model: Bridge.model          // the bridge's FrameListModel
 
                 // Oldest-first reads as a tail: new rows land at the
                 // bottom, and the view follows them while it's at the
@@ -259,8 +259,8 @@ Pane {
                         Layout.preferredWidth: 36
                     }
                     Label {
-                        // Role name is "arbId" (quint32 via QVariantMap) —
-                        // hex-format it for display.
+                        // Role name is "arbId" (a quint32): hex-format
+                        // it for display.
                         text: "0x" + model.arbId.toString(16).toUpperCase()
                         color: Theme.textDim
                         font.family: Theme.monoFamily; font.pixelSize: 12

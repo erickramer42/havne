@@ -39,10 +39,10 @@ public:
 
 // The bridge's model properties, typed for qmllint. Not creatable or
 // nameable from QML.
-struct FrameSortProxyForeign
+struct FrameListModelForeign
 {
     Q_GADGET
-    QML_FOREIGN(FrameSortProxy)
+    QML_FOREIGN(FrameListModel)
     QML_ANONYMOUS
 };
 
