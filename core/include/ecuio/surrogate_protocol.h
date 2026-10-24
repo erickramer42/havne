@@ -16,7 +16,9 @@
 #define ECUIO_SUR_MSG_MAX ECUIO_PT_WRITE_MAX  /* bytes of one written or injected
                                                  message's Data; a read's frames
                                                  are whole ecuio_pt_rx_t */
-#define ECUIO_SUR_IOCTL_DATA_MAX 64        /* ioctl input, and reply payload */
+#define ECUIO_SUR_IOCTL_DATA_MAX (ECUIO_PT_SCONFIG_MAX_PARAMS * 8)  /* ioctl input
+                                           (whole SCONFIG pairs), and reply
+                                           payload */
 #define ECUIO_SUR_FILTER_PATTERN_MAX 12    /* mask/pattern/flow-control bytes */
 #define ECUIO_SUR_MAX_FRAMES_PER_READ 16   /* frames in one OP_READ reply */
 #define ECUIO_SUR_TEXT_MAX 80              /* one vendor text: PassThruGetLastError's,

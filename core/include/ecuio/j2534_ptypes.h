@@ -229,4 +229,51 @@ static inline void ecuio_pt_rx_from_msg(const PASSTHRU_MSG* m,
     memcpy(out->data, m->Data, n);
 }
 
+/* The one way either backend builds a message for a vendor: a write,
+ * or a filter's mask, pattern or flow-control message. Zeroed first, so
+ * no stale field or padding byte reaches a vendor comparing struct
+ * contents; ExtraDataIndex = DataSize (the v04.04 no-extra-data
+ * convention). The caller has checked len against what it sends. */
+static inline void ecuio_pt_fill_msg(PASSTHRU_MSG* msg, const uint8_t* bytes,
+                                     uint32_t len, uint32_t tx_flags)
+{
+    memset(msg, 0, sizeof(*msg));
+    msg->ProtocolID = ECUIO_PT_PROTOCOL_ISO15765;
+    msg->TxFlags = tx_flags;
+    msg->DataSize = len;
+    if (len > 0 && bytes != NULL) {
+        memcpy(msg->Data, bytes, len);
+    }
+    msg->ExtraDataIndex = len;
+}
+
+/* SCONFIG pairs flattened, as the loader seam and the pipe carry them:
+ * 8 bytes a pair, Parameter then Value, each a u32 in host order
+ * (little-endian on every Windows target). The callers check the
+ * count, 1 to ECUIO_PT_SCONFIG_MAX_PARAMS, before either runs. */
+static inline void ecuio_pt_sconfig_unflatten(const uint8_t* flat, uint32_t n,
+                                              SCONFIG* cfg)
+{
+    uint32_t i;
+    for (i = 0; i < n; ++i) {
+        uint32_t param = 0, value = 0;
+        memcpy(&param, flat + i * 8, 4);
+        memcpy(&value, flat + i * 8 + 4, 4);
+        cfg[i].Parameter = param;
+        cfg[i].Value = value;
+    }
+}
+
+static inline void ecuio_pt_sconfig_flatten(const SCONFIG* cfg, uint32_t n,
+                                            uint8_t* flat)
+{
+    uint32_t i;
+    for (i = 0; i < n; ++i) {
+        const uint32_t param = (uint32_t)cfg[i].Parameter;
+        const uint32_t value = (uint32_t)cfg[i].Value;
+        memcpy(flat + i * 8, &param, 4);
+        memcpy(flat + i * 8 + 4, &value, 4);
+    }
+}
+
 #endif /* ECUIO_J2534_PTYPES_H */

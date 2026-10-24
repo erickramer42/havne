@@ -78,6 +78,12 @@ static bool g_log_frames = false;
  * for a child built from other headers; it can only make opens fail. */
 static uint32_t g_fingerprint = ECUIO_SUR_FINGERPRINT;
 
+/* ECUIO_SUR_TEST_REPLY_TWICE=<opcode> sends the first reply to that
+ * opcode twice, standing in for a request the client thinks it never
+ * sent, so a test can put the pipe out of step. Never OP_READ, whose
+ * reply carries frames. 0 (the default) is off. */
+static uint32_t g_reply_twice = 0;
+
 static void stage(const char* fmt, ...)
 {
     /* Local wall-clock time, the same stamp the client puts on its
@@ -291,12 +297,8 @@ static int handle_op_write(unsigned long channel, const uint8_t* data,
                            uint32_t len, uint32_t tx_flags,
                            uint32_t timeout_ms, uint32_t* out_num)
 {
-    PASSTHRU_MSG msg = {};
-    msg.ProtocolID = ECUIO_PT_PROTOCOL_ISO15765;
-    msg.TxFlags = tx_flags;
-    msg.DataSize = len;
-    if (len > 0) memcpy(msg.Data, data, len);
-    msg.ExtraDataIndex = len;
+    PASSTHRU_MSG msg;
+    ecuio_pt_fill_msg(&msg, data, len, tx_flags);
 
     unsigned long num = 1;
     long rc = g_write_msgs(channel, &msg, &num, timeout_ms);
@@ -323,9 +325,9 @@ static int handle_op_write(unsigned long channel, const uint8_t* data,
     return static_cast<int>(rc);
 }
 
-/* SCONFIG wire format (internal seam — identical to the in-proc
- * loader's unflatten_sconfig): a flat array of (Parameter, Value)
- * u32 LE pairs, 8 bytes each. The child reconstructs a real
+/* SCONFIG wire format (the loader seam's, ecuio_pt_sconfig_unflatten
+ * in j2534_ptypes.h): a flat array of (Parameter, Value) u32 pairs,
+ * 8 bytes each. The child reconstructs a real
  * SCONFIG_LIST because ConfigPtr must point into THIS process's
  * address space; the flattened form cannot be handed to a vendor
  * directly. On GET, the vendor-updated values are re-flattened into
@@ -375,13 +377,7 @@ static int handle_op_ioctl(uint32_t channel_id, uint32_t ioctl_id,
 
         /* Unflatten the wire pairs into a vendor-shaped array. */
         SCONFIG cfg[ECUIO_PT_SCONFIG_MAX_PARAMS] = {};
-        for (uint32_t i = 0; i < num_params; ++i) {
-            uint32_t param = 0, value = 0;
-            memcpy(&param, input + i * 8, 4);
-            memcpy(&value, input + i * 8 + 4, 4);
-            cfg[i].Parameter = param;
-            cfg[i].Value = value;
-        }
+        ecuio_pt_sconfig_unflatten(input, num_params, cfg);
 
         /* Reconstruct the descriptor the vendor expects. */
         SCONFIG_LIST list;
@@ -397,12 +393,7 @@ static int handle_op_ioctl(uint32_t channel_id, uint32_t ioctl_id,
             /* Re-flatten the vendor-updated values. Length is exactly
              * input_len (same pair count), so it always fits the
              * payload the client allocated for this request. */
-            for (uint32_t i = 0; i < num_params; ++i) {
-                const uint32_t param = static_cast<uint32_t>(cfg[i].Parameter);
-                const uint32_t value = static_cast<uint32_t>(cfg[i].Value);
-                memcpy(output + i * 8, &param, 4);
-                memcpy(output + i * 8 + 4, &value, 4);
-            }
+            ecuio_pt_sconfig_flatten(cfg, num_params, output);
             if (out_len != nullptr) *out_len = num_params * 8;
         }
         stage("OP_IOCTL: id 0x%X (SCONFIG %u params), status %ld",
@@ -422,29 +413,14 @@ static int handle_op_start_filter(unsigned long channel_id, uint32_t filter_type
                                   const uint8_t* fc, uint32_t fc_len,
                                   uint32_t tx_flags, uint32_t* out_fid)
 {
-    /* ExtraDataIndex = DataSize on every message (the v4.04
-     * no-extra-data convention), matching the in-proc loader's
-     * fill_vendor_msg so both backends send identical filter messages. */
-    PASSTHRU_MSG mask_msg = {}, pattern_msg = {}, fc_msg = {};
-    mask_msg.ProtocolID = ECUIO_PT_PROTOCOL_ISO15765;
-    mask_msg.TxFlags = tx_flags;
-    mask_msg.DataSize = mask_len;
-    if (mask_len > 0) memcpy(mask_msg.Data, mask, mask_len);
-    mask_msg.ExtraDataIndex = mask_len;
-
-    pattern_msg.ProtocolID = ECUIO_PT_PROTOCOL_ISO15765;
-    pattern_msg.TxFlags = tx_flags;
-    pattern_msg.DataSize = pattern_len;
-    if (pattern_len > 0) memcpy(pattern_msg.Data, pattern, pattern_len);
-    pattern_msg.ExtraDataIndex = pattern_len;
-
+    /* Built as the in-proc loader builds them (ecuio_pt_fill_msg), so
+     * both backends send identical filter messages. */
+    PASSTHRU_MSG mask_msg, pattern_msg, fc_msg;
+    ecuio_pt_fill_msg(&mask_msg, mask, mask_len, tx_flags);
+    ecuio_pt_fill_msg(&pattern_msg, pattern, pattern_len, tx_flags);
     PASSTHRU_MSG* fc_ptr = nullptr;
     if (fc_len > 0) {
-        fc_msg.ProtocolID = ECUIO_PT_PROTOCOL_ISO15765;
-        fc_msg.TxFlags = tx_flags;
-        fc_msg.DataSize = fc_len;
-        memcpy(fc_msg.Data, fc, fc_len);
-        fc_msg.ExtraDataIndex = fc_len;
+        ecuio_pt_fill_msg(&fc_msg, fc, fc_len, tx_flags);
         fc_ptr = &fc_msg;
     }
     unsigned long filter_id = 0;
@@ -498,6 +474,14 @@ int wmain(int argc, wchar_t* argv[])
         g_fingerprint = static_cast<uint32_t>(strtoul(test_fp, nullptr, 0));
         stage("fingerprint %08x (ECUIO_SUR_TEST_FINGERPRINT)",
               static_cast<unsigned>(g_fingerprint));
+    }
+    char test_twice[16] = {};
+    if (GetEnvironmentVariableA("ECUIO_SUR_TEST_REPLY_TWICE", test_twice,
+                                sizeof(test_twice)) > 0) {
+        g_reply_twice = static_cast<uint32_t>(strtoul(test_twice, nullptr, 0));
+        if (g_reply_twice == ECUIO_SUR_OP_READ) g_reply_twice = 0;
+        stage("the first reply to opcode %u goes twice "
+              "(ECUIO_SUR_TEST_REPLY_TWICE)", static_cast<unsigned>(g_reply_twice));
     }
 
     g_module = LoadLibraryExW(dll_path, nullptr, LOAD_WITH_ALTERED_SEARCH_PATH);
@@ -726,6 +710,13 @@ int wmain(int argc, wchar_t* argv[])
         if (!WriteFile(g_pipe, &resp, sizeof(resp), &wr, nullptr) ||
             wr != sizeof(resp)) {
             break;
+        }
+        if (g_reply_twice != 0 && req.opcode == g_reply_twice) {
+            g_reply_twice = 0;
+            if (!WriteFile(g_pipe, &resp, sizeof(resp), &wr, nullptr) ||
+                wr != sizeof(resp)) {
+                break;
+            }
         }
         const DWORD frame_bytes =
             static_cast<DWORD>(resp.num_frames * sizeof(ecuio_pt_rx_t));

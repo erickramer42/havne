@@ -153,9 +153,9 @@ is the plan in [After v0.3.0](#after-v030).
     run sheets are
     [bench-runsheet.md](docs/bench-sessions/bench-runsheet.md) and
     [vehicle-runsheet.md](docs/bench-sessions/vehicle-runsheet.md).
-  - **Tests:** 368 ctest cases (Windows, Visual Studio 18 build
+  - **Tests:** 370 ctest cases (Windows, Visual Studio 18 build
     tools, both trees rebuilt, 2026-10-24), the QML suites
-    among them, plus the cross-arch subset (70/70). All passed except
+    among them, plus the cross-arch subset (71/71). All passed except
     the env-gated cross-arch skip. Every first-party target builds with
     compiler warnings on, at 0 on MSVC. CI was green on all nine jobs on
     PR #17 (`ce8284f`, merged as `1145d11`), the simulator smoke

@@ -8,7 +8,8 @@
 //          so an exact count would encode a race, not a contract.
 //          Query-param tests: ?baud=/?flags= values observed at
 //          PassThruConnect via the fake's GetLastConnectParams hook;
-//          malformed queries rejected at session_create (no DLL load).
+//          malformed queries and relative DLL paths rejected at
+//          session_create (no DLL load).
 //          Adoption tests (ADR-0012): ?filter=/?txid=/?poll= — filter
 //          registration shape, request framing, header strip + ID
 //          stamp, stop-on-detach, gating, passive receive.
@@ -344,6 +345,32 @@ TEST_F(J2534QueryParamTest, RefusedQueriesNameTheirCause)
                           "?profile=raw&identify=0", "?identify=1&probe=0"}) {
         snprintf(uri, sizeof(uri), "j2534://%s%s", FAKE_J2534_DLL_PATH, q);
         EXPECT_EQ(start_session_with_uri(uri), ECUIO_OK) << "query: " << q;
+    }
+}
+
+/* A path-like selector must be absolute: a relative one would follow
+ * the DLL search order, the current directory included, and could load
+ * another DLL of that name. Refused at create, before any load, so even
+ * the fake's own file name, which the test's directory holds, is
+ * refused. */
+TEST_F(J2534QueryParamTest, RelativeDllPathsAreRefused)
+{
+    ecuio_session_t* session = nullptr;
+    for (const char* u : {"j2534://fake_j2534.dll", "j2534://Release/fake_j2534.dll",
+                          "j2534://.\\fake_j2534.dll", "j2534://\\fake_j2534.dll",
+                          "j2534://C:fake_j2534.dll?profile=raw"}) {
+        EXPECT_EQ(ecuio_session_create(u, &session), ECUIO_ERR_BAD_URI) << u;
+        EXPECT_EQ(session, nullptr) << u;
+        EXPECT_STREQ(ecuio_last_error_detail(),
+                     "the DLL path must be absolute, like "
+                     "C:\\path\\to\\vendor.dll") << u;
+    }
+    /* Drive paths with either separator still reach the loader. (A UNC
+     * path would too; a miss there costs a network lookup.) */
+    for (const char* u : {"j2534://C:/ecuio-not-a-real-dir/x.dll",
+                          "j2534://C:\\ecuio-not-a-real-dir\\x.dll"}) {
+        EXPECT_EQ(ecuio_session_create(u, &session), ECUIO_ERR_LOAD_FAILED) << u;
+        EXPECT_EQ(session, nullptr) << u;
     }
 }
 

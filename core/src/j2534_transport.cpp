@@ -47,6 +47,7 @@ extern "C" const char* const ecuio_j2534_query_keys[] = {
 
 #include "ecuio/j2534_ptypes.h"    /* FLOW_CONTROL_FILTER, CAN_29BIT_ID,
                                       TX_ISO15765_FRAME_PAD */
+#include "win_utf8.h"              /* ecuio_is_absolute_path */
 
 namespace {
 
@@ -697,7 +698,7 @@ bool parse_number(const char* s, size_t len, unsigned long* out_val)
     }
 
     const unsigned long max =
-        std::numeric_limits<unsigned long>::max();
+        (std::numeric_limits<unsigned long>::max)();   /* windows.h's max */
     const unsigned long base = hex ? 16ul : 10ul;
     unsigned long value = 0;
     for (; i < len; ++i) {
@@ -823,8 +824,9 @@ ecuio_status_t parse_query(const ecuio_uri_query* query, j2534_uri_params* p)
  * internal.h): [selector][?query]. The query is cut off here, and
  * attach has read its values before this runs, so it never reaches
  * LoadLibraryEx or the vendor-name match. Selector: empty = first
- * device; path-like = direct load; else vendor-name match. All misses
- * are ECUIO_ERR_NO_TRANSPORT. */
+ * device; path-like = direct load, absolute only; else vendor-name
+ * match. A relative or too-long path is ECUIO_ERR_BAD_URI; every miss
+ * ECUIO_ERR_NO_TRANSPORT. */
 ecuio_status_t resolve_uri(const char* uri, ecuio_j2534_device_t* dev)
 {
     const char* rest = uri + 8;   /* core.cpp verified the prefix */
@@ -861,11 +863,19 @@ ecuio_status_t resolve_uri(const char* uri, ecuio_j2534_device_t* dev)
     }
 
     /* Path-like selector: contains a separator or a .dll suffix.
-     * Reaches LoadLibraryEx verbatim (discover-not-involved). */
+     * Reaches LoadLibraryEx verbatim (discover-not-involved), so it must
+     * be absolute: with LOAD_WITH_ALTERED_SEARCH_PATH a relative path
+     * follows the standard search order, the current directory included,
+     * and could load another DLL of that name. */
     if (strchr(selector, '\\') != nullptr ||
         strchr(selector, '/') != nullptr ||
         (strlen(selector) >= 4 &&
          _stricmp(selector + strlen(selector) - 4, ".dll") == 0)) {
+        if (!ecuio_is_absolute_path(selector)) {
+            ecuio_detail_set("the DLL path must be absolute, like "
+                             "C:\\path\\to\\vendor.dll");
+            return ECUIO_ERR_BAD_URI;
+        }
         if (strlen(selector) >= ECUIO_J2534_DLL_PATH_LEN) {
             ecuio_detail_set("the DLL path is too long");
             return ECUIO_ERR_BAD_URI;

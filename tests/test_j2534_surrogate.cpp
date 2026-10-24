@@ -7,7 +7,8 @@
 //          Also: write->echo round trip, ioctl SET->GET + VBATT,
 //          child-side ioctl whitelist, filter start/stop lifecycle,
 //          recovery after a timed-out request, a late read reply
-//          dropped and logged, a blocked vendor open,
+//          dropped and logged, a request-ID mismatch ending the
+//          handle, a blocked vendor open,
 //          an ERR_TIMEOUT partial batch (spec-mode fake), no
 //          phantom frames from an untouched count under a hard error,
 //          a child from other shared headers refused at OP_OPEN, and
@@ -790,6 +791,50 @@ TEST(J2534SurrogateTest, UnresponsiveChildFailsFastAfterTwoMissedDeadlines)
 
     const std::string log = read_session_log(path);
     EXPECT_NE(log.find("child unresponsive"), std::string::npos) << log;
+}
+
+/* A reply the client never asked for (the child answers OP_CONNECT
+ * twice, ECUIO_SUR_TEST_REPLY_TWICE) leaves the pipe one reply behind:
+ * the next transaction reads the reply before its own. That's the pipe
+ * out of step for good, so the handle turns unresponsive: later calls
+ * fail at once without reaching the child, and close kills it. Treated
+ * as a one-off, every later call would still be sent and fail on the
+ * reply before its own. */
+TEST(J2534SurrogateTest, RequestIdMismatchMakesTheChildUnresponsive)
+{
+    using clock = std::chrono::steady_clock;
+    ecuio_j2534_sur_handle_t* h = nullptr;
+    {
+        char twice[8];
+        snprintf(twice, sizeof(twice), "%u",
+                 static_cast<unsigned>(ECUIO_SUR_OP_CONNECT));
+        EnvArm arm("ECUIO_SUR_TEST_REPLY_TWICE", twice);
+        ASSERT_EQ(ecuio_j2534_sur_open(fake_dll_path(), &h), ECUIO_OK);
+    }
+    unsigned long channel = 0;
+    ASSERT_EQ(ecuio_j2534_sur_connect_channel(h, 0, 0, &channel), ECUIO_OK);
+    const std::string path = ecuio_j2534_sur_log_path(h);
+
+    unsigned char out[8] = {};
+    uint32_t out_len = 0;
+    EXPECT_EQ(ecuio_j2534_sur_ioctl(h, channel, ECUIO_PT_IOCTL_READ_VBATT,
+                                    nullptr, 0, out, sizeof(out), &out_len),
+              ECUIO_ERR_SURROGATE_FAILED) << "read the connect's second reply";
+
+    const auto t0 = clock::now();
+    const uint8_t msg[6] = {0x00, 0x00, 0x07, 0xE0, 0x01, 0x0C};
+    uint32_t written = 0;
+    EXPECT_EQ(ecuio_j2534_sur_write_frame(h, channel, msg, sizeof(msg), 0, 0,
+                                          &written),
+              ECUIO_ERR_SURROGATE_FAILED);
+    EXPECT_LT(clock::now() - t0, std::chrono::milliseconds(500));
+    EXPECT_EQ(ecuio_j2534_sur_close(h), ECUIO_OK);
+
+    const std::string log = read_session_log(path);
+    EXPECT_NE(log.find("DESYNC"), std::string::npos) << log;
+    EXPECT_NE(log.find("child unresponsive"), std::string::npos) << log;
+    EXPECT_EQ(log.find("OP_WRITE:"), std::string::npos)
+        << "a write reached the child after the mismatch\n" << log;
 }
 
 /* A read the child answers past its deadline: the late reply, which

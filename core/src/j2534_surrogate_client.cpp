@@ -217,15 +217,6 @@ HANDLE open_session_log(LONG seq, SECURITY_ATTRIBUTES* sa,
     return f;
 }
 
-/* True for a drive-absolute ("C:\", "C:/") or UNC ("\\") path. */
-bool is_absolute_path(const wchar_t* p)
-{
-    const bool drive = ((p[0] >= L'A' && p[0] <= L'Z') || (p[0] >= L'a' && p[0] <= L'z')) &&
-                       p[1] == L':' && (p[2] == L'\\' || p[2] == L'/');
-    const bool unc = (p[0] == L'\\' && p[1] == L'\\');
-    return drive || unc;
-}
-
 /* The surrogate exe: ECUIO_SURROGATE_EXE when set, else the one next
  * to the running exe. The variable relocates the surrogate and nothing
  * more: it must be an absolute path to an existing file named
@@ -244,7 +235,7 @@ bool resolve_exe_path(wchar_t* out, size_t cap, bool* from_env, const char** why
             *why = "ECUIO_SURROGATE_EXE is too long";
             return false;
         }
-        if (!is_absolute_path(out)) {
+        if (!ecuio_is_absolute_path(out)) {
             *why = "ECUIO_SURROGATE_EXE is not an absolute path";
             return false;
         }
@@ -493,8 +484,10 @@ bool drain_pending(ecuio_j2534_sur_handle_t* h, DWORD timeout_ms)
         return false;
     }
     if (stale.request_id != h->pending_response_id) {
-        SUR_LOG(h, "drain_pending: unexpected id=%u want=%u\n",
+        SUR_LOG(h, "drain_pending: unexpected id=%u want=%u; the pipe is "
+                "out of step, child unresponsive\n",
                 stale.request_id, h->pending_response_id);
+        h->unresponsive = true;
         return false;
     }
     if (stale.num_frames > 0) {
@@ -562,8 +555,12 @@ bool transact(ecuio_j2534_sur_handle_t* h, const ecuio_sur_request_t& req,
         }
     }
     if (out_resp->request_id != req.request_id) {
-        SUR_LOG(h, "transact: DESYNC — got req_id=%u want=%u\n",
-                out_resp->request_id, req.request_id);
+        /* The child answers one reply per request, so this request's is
+         * still in the pipe and every later one would read the reply
+         * before its own: out of step for good, like a short read. */
+        SUR_LOG(h, "transact: DESYNC — got req_id=%u want=%u; child "
+                "unresponsive\n", out_resp->request_id, req.request_id);
+        h->unresponsive = true;
         return false;
     }
     return true;
@@ -1283,7 +1280,7 @@ ecuio_status_t ecuio_j2534_sur_inject_test_frame(ecuio_j2534_sur_handle_t* h,
     if (h == nullptr || data == nullptr) {
         return ECUIO_ERR_NULL_ARGUMENT;
     }
-    if (len == 0 || len > 64) {
+    if (len == 0 || len > ECUIO_SUR_MSG_MAX) {
         return ECUIO_ERR_INVALID_ARGUMENT;
     }
     ecuio_sur_request_t req = {};

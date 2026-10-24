@@ -313,49 +313,6 @@ void enumerate_view(const wchar_t* root_path,
     RegCloseKey(hroot);
 }
 
-/* Build a PASSTHRU_MSG from flat bytes for the write and filter
- * relays. Zeroed first, so no stale field or padding byte reaches a
- * vendor comparing struct contents. ExtraDataIndex = DataSize (the
- * v4.04 no-extra-data convention); the surrogate child builds its
- * messages the same way. */
-static void fill_vendor_msg(PASSTHRU_MSG* msg, const uint8_t* bytes,
-                            uint32_t len, uint32_t tx_flags)
-{
-    *msg = PASSTHRU_MSG{};
-    msg->ProtocolID = ECUIO_PT_PROTOCOL_ISO15765;
-    msg->TxFlags = tx_flags;
-    msg->DataSize = len;
-    if (len > 0 && bytes != nullptr) {
-        memcpy(msg->Data, bytes, len);
-    }
-    msg->ExtraDataIndex = len;
-}
-
-/* Unflatten (Parameter, Value) u32 LE pairs from the internal-seam
- * representation into a caller-supplied SCONFIG array. Shared by the
- * in-proc GET/SET_CONFIG path. Returns param count, or 0 on a
- * malformed length. */
-static uint32_t unflatten_sconfig(const uint8_t* input, uint32_t input_len,
-                                  SCONFIG* cfg, uint32_t max_params)
-{
-    if (input == nullptr || input_len == 0 ||
-        (input_len % 8) != 0) {
-        return 0;
-    }
-    const uint32_t n = input_len / 8;
-    if (n > max_params) {
-        return 0;
-    }
-    for (uint32_t i = 0; i < n; ++i) {
-        uint32_t param = 0, value = 0;
-        memcpy(&param, input + i * 8, 4);
-        memcpy(&value, input + i * 8 + 4, 4);
-        cfg[i].Parameter = param;
-        cfg[i].Value = value;
-    }
-    return n;
-}
-
 } // namespace
 
 extern "C" {
@@ -725,7 +682,7 @@ ecuio_status_t ecuio_j2534_write_frame(ecuio_j2534_handle_t* handle,
     }
 
     PASSTHRU_MSG msg;
-    fill_vendor_msg(&msg, data, len, tx_flags);
+    ecuio_pt_fill_msg(&msg, data, len, tx_flags);
     unsigned long num = 1;
     long rc = handle->write_msgs(channel, &msg, &num, timeout_ms);
     if (rc != kPtStatusNoError) {
@@ -753,7 +710,7 @@ ecuio_status_t ecuio_j2534_ioctl(ecuio_j2534_handle_t* handle,
     if (handle == nullptr) {
         return ECUIO_ERR_NULL_ARGUMENT;
     }
-    if (input_len > 64) {
+    if (input_len > ECUIO_PT_SCONFIG_MAX_PARAMS * 8) {
         return ECUIO_ERR_INVALID_ARGUMENT;
     }
     if (input == nullptr && input_len != 0) {
@@ -793,11 +750,8 @@ ecuio_status_t ecuio_j2534_ioctl(ecuio_j2534_handle_t* handle,
 
     if (is_sconfig) {
         SCONFIG cfg[ECUIO_PT_SCONFIG_MAX_PARAMS];
-        const uint32_t n = unflatten_sconfig(input, input_len, cfg,
-                                             ECUIO_PT_SCONFIG_MAX_PARAMS);
-        if (n == 0) {
-            return ECUIO_ERR_INVALID_ARGUMENT;    /* checked above already */
-        }
+        const uint32_t n = input_len / 8;   /* whole pairs, checked above */
+        ecuio_pt_sconfig_unflatten(input, n, cfg);
         SCONFIG_LIST list;
         list.NumOfParams = n;
         list.ConfigPtr = cfg;
@@ -807,14 +761,9 @@ ecuio_status_t ecuio_j2534_ioctl(ecuio_j2534_handle_t* handle,
             return ECUIO_ERR_VENDOR_REFUSED;
         }
         if (ioctl_id == ECUIO_PT_IOCTL_GET_CONFIG) {
-            /* Re-flatten the vendor-updated pairs, as the child does. */
+            /* The vendor-updated pairs, flattened back. */
             uint8_t flat[ECUIO_PT_SCONFIG_MAX_PARAMS * 8];
-            for (uint32_t i = 0; i < n; ++i) {
-                const uint32_t param = static_cast<uint32_t>(cfg[i].Parameter);
-                const uint32_t value = static_cast<uint32_t>(cfg[i].Value);
-                memcpy(flat + i * 8, &param, 4);
-                memcpy(flat + i * 8 + 4, &value, 4);
-            }
+            ecuio_pt_sconfig_flatten(cfg, n, flat);
             copy_out(output, output_cap, flat, n * 8);
             if (out_len != nullptr) {
                 *out_len = n * 8;
@@ -894,11 +843,11 @@ ecuio_status_t ecuio_j2534_start_msg_filter(ecuio_j2534_handle_t* handle,
     }
 
     PASSTHRU_MSG mask_msg, pattern_msg, fc_msg;
-    fill_vendor_msg(&mask_msg, mask, mask_len, tx_flags);
-    fill_vendor_msg(&pattern_msg, pattern, pattern_len, tx_flags);
+    ecuio_pt_fill_msg(&mask_msg, mask, mask_len, tx_flags);
+    ecuio_pt_fill_msg(&pattern_msg, pattern, pattern_len, tx_flags);
     PASSTHRU_MSG* fc_ptr = nullptr;
     if (fc_len > 0) {
-        fill_vendor_msg(&fc_msg, flow_control, fc_len, tx_flags);
+        ecuio_pt_fill_msg(&fc_msg, flow_control, fc_len, tx_flags);
         fc_ptr = &fc_msg;
     }
     unsigned long filter_id = 0;
