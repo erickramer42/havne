@@ -616,16 +616,27 @@ TEST(BridgeTest, FullFrameLogKeepsTheNewestInOrder)
     for (size_t i = 1; i < rows.size(); ++i) {
         ASSERT_EQ(rows[i], rows[i - 1] - 1) << "row " << i << " out of order";
     }
-    // Each row's payload is its own frame's, not a stale slot's
-    const QModelIndex top = model->index(0, 0);
-    if (model->data(top, FrameListModel::ArbitrationIdRole).toUInt() == 0x123u) {
-        const quint64 n = model->data(top, FrameListModel::TimestampRole).toULongLong();
-        EXPECT_EQ(model->data(top, FrameListModel::PayloadRole).toString(),
+    // Each row's payload is its own frame's, not a stale slot's: every
+    // numbered row carries its stamp in its two bytes, and the mock's
+    // rows between them keep their own length
+    int checked = 0;
+    for (int r = 0; r < model->rowCount(); ++r) {
+        const QModelIndex idx = model->index(r, 0);
+        if (model->data(idx, FrameListModel::ArbitrationIdRole).toUInt() != 0x123u) {
+            EXPECT_NE(model->data(idx, FrameListModel::DlcRole).toUInt(), 2u)
+                << "row " << r << " has a numbered frame's length";
+            continue;
+        }
+        const quint64 n = model->data(idx, FrameListModel::TimestampRole).toULongLong();
+        ASSERT_EQ(model->data(idx, FrameListModel::PayloadRole).toString(),
                   QStringLiteral("%1 %2")
                       .arg((n >> 8) & 0xFF, 2, 16, QLatin1Char('0'))
-                      .arg(n & 0xFF, 2, 16, QLatin1Char('0')).toUpper());
-        EXPECT_EQ(model->data(top, FrameListModel::DlcRole).toUInt(), 2u);
+                      .arg(n & 0xFF, 2, 16, QLatin1Char('0')).toUpper())
+            << "row " << r;
+        ASSERT_EQ(model->data(idx, FrameListModel::DlcRole).toUInt(), 2u) << "row " << r;
+        ++checked;
     }
+    EXPECT_EQ(checked, static_cast<int>(rows.size()));
 
     model->setNewestFirst(false);
     rows = numberedRows(model, &others);
@@ -649,27 +660,35 @@ TEST(BridgeTest, FullFrameLogKeepsTheNewestInOrder)
 }
 
 /* frameCount and guiNotifyCount reach QML on the 100 ms tick, not once
- * per frame: a burst of 400 frames changes each a handful of times, and
- * the counts still end exact. */
+ * per frame: a burst of 400 frames changes each a handful of times. The
+ * disconnect reports the last of them, so what QML last saw is exact. */
 TEST(BridgeTest, FrameCountsAreReportedOnTheTick)
 {
     QtTuneBridge bridge;
     ASSERT_TRUE(bridge.connectSession("mock://counts").isEmpty());
     int countSignals = 0;
     int notifySignals = 0;
+    int seenFrames = -1;
+    int seenNotify = -1;
     QObject::connect(&bridge, &QtTuneBridge::frameCountChanged,
-                     [&countSignals]() { ++countSignals; });
+                     [&]() { ++countSignals; seenFrames = bridge.frameCount(); });
     QObject::connect(&bridge, &QtTuneBridge::notifyCountChanged,
-                     [&notifySignals](int) { ++notifySignals; });
+                     [&](int n) { ++notifySignals; seenNotify = n; });
 
     const int before = bridge.frameCount();
     dispatchNumbered(bridge, 1, 400);
     spinLoop(250);   // two ticks past the burst
     EXPECT_GE(bridge.frameCount(), before + 400);
-    EXPECT_GT(countSignals, 0) << "the count never reached QML";
+    EXPECT_GT(countSignals, 0) << "the frame count never reached QML";
+    EXPECT_GT(notifySignals, 0) << "the notify count never reached QML";
     EXPECT_LT(countSignals, 40) << "reported per frame, not per tick";
-    EXPECT_LT(notifySignals, 40);
-    bridge.disconnectSession();
+    EXPECT_LT(notifySignals, 40) << "reported per frame, not per tick";
+
+    bridge.disconnectSession();   // no frame is counted after this
+    EXPECT_EQ(seenFrames, bridge.frameCount());
+    EXPECT_EQ(seenNotify, bridge.guiNotifyCount());
+    EXPECT_EQ(bridge.guiNotifyCount(), bridge.frameCount())
+        << "one GUI-thread delivery per frame";
 }
 
 TEST(BridgeTest, StreamingContinuesPastTenThousandFrames)

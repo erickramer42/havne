@@ -223,8 +223,9 @@ The bridge polls it on its 100 ms tick and maps it for the UI
   `QtTune` module (`Bridge.connected`, `Bridge.signalModel`). The
   registration lives in `app/bridgesingleton.h`, so the bridge itself
   stays QtCore-only, and qmllint checks every binding against it.
-- **Bridge outputs:** it exposes a frame model (behind a sort proxy,
-  with a pause for the Log page), a signal model (value, `hasValue`,
+- **Bridge outputs:** it exposes a frame model (a ring of the newest
+  10k frames, newest or oldest first, with a pause for the Log page), a
+  signal model (value, `hasValue`,
   `ageMs`, `decimals`, a 120-sample history per signal), device
   discovery, and the link state.
 - **Recording is the bridge's too**

@@ -113,7 +113,8 @@ QHash<int, QByteArray> FrameListModel::roleNames() const
 
 void FrameListModel::appendFrame(const ecuio_frame_t& frame, uint16_t len)
 {
-    if (m_count == MaxFrames) {
+    const bool full = (m_count == MaxFrames);
+    if (full) {
         // Full: the oldest row leaves first, from the end that shows it,
         // and its slot takes the new frame
         const int row = m_newestFirst ? m_count - 1 : 0;
@@ -134,7 +135,9 @@ void FrameListModel::appendFrame(const ecuio_frame_t& frame, uint16_t len)
     r.payload.assign(frame.data, frame.data + len);
     ++m_count;
     endInsertRows();
-    emit countChanged(m_count);
+    if (!full) {
+        emit countChanged(m_count);   // at the cap one row left as one came
+    }
 }
 
 void FrameListModel::clear()

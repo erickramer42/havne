@@ -101,7 +101,8 @@ Pane {
                 visible: Bridge.droppedFrames > 0
             }
 
-            // Bridge diagnostics: GUI-thread frame notifications and
+            // Bridge diagnostics: frames delivered to the GUI thread (one
+            // queued call each, ADR-0005's per-frame baseline) and the
             // coalesced signal batches. Left out at phone width.
             Label {
                 text: qsTr("notify %1 · batch %2")
