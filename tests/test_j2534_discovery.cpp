@@ -1,5 +1,10 @@
-// File/layer: tests/test_j2534_discovery.cpp | GTest, HARNESS tier (registry injection)
-// Testing: Win32-only; skipped on Linux/macOS via compile guard
+// File/layer: tests/test_j2534_discovery.cpp | GTest, HARNESS tier (the live registry)
+// Testing: Win32-only; skipped on Linux/macOS via compile guard. Against
+//          the machine's own registry: the shape of the result anywhere,
+//          and at least ECUIO_EXPECT_J2534_DEVICES devices where that
+//          variable is set (scripts/verify.sh sets it to 1 on the dev
+//          machine, where a Pass-Thru driver is installed), so the test
+//          can't pass vacuously there.
 
 #include <gtest/gtest.h>
 
@@ -10,9 +15,19 @@
 #include <windows.h>
 #endif
 
+#include <cstdlib>
 #include <cstring>
 
 namespace {
+
+/* The devices the machine is declared to have, from
+ * ECUIO_EXPECT_J2534_DEVICES; 0 when unset or not a positive number */
+uint32_t expected_devices() {
+    const char* value = std::getenv("ECUIO_EXPECT_J2534_DEVICES");
+    if (value == nullptr) return 0;
+    const long n = std::strtol(value, nullptr, 10);
+    return n > 0 ? static_cast<uint32_t>(n) : 0;
+}
 
 TEST(J2534DiscoveryTest, NullArgumentsRejected) {
     ecuio_j2534_device_t* devices = nullptr;
@@ -38,6 +53,12 @@ TEST(J2534DiscoveryTest, DiscoverySucceedsWithConsistentResultOnAnyMachine) {
 
     /* Array/count consistency: pair or nothing, never one-sided */
     EXPECT_TRUE((devices != nullptr) == (count > 0));
+
+    /* Where the machine is declared to have drivers, the shape checks
+     * below must run on real entries: an empty result would be a
+     * discovery bug, not a quiet pass */
+    EXPECT_GE(count, expected_devices())
+        << "ECUIO_EXPECT_J2534_DEVICES says this machine has Pass-Thru drivers";
 
     if (count > 0 && devices != nullptr) {
         EXPECT_LE(count, ECUIO_J2534_MAX_VENDORS);

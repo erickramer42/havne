@@ -445,10 +445,6 @@ an issue is resolved it is removed, and its number is not reused.
     adapters behind one vendor DLL can't be told apart. They would be
     selected through `PassThruOpen`'s `pName` argument, which the
     loader passes as `nullptr`, meaning the default device.
-14. **Discovery tests only check shape,** so they pass vacuously on a
-    machine with no vendors installed. Candidate fixes are a
-    seeded-registry fixture behind an admin-elevation guard, or
-    count-positive assertions on the known dev machine.
 20. **Pointer-bearing ioctls (`FAST_INIT`, `FIVE_BAUD_INIT`) are out of
     contract** and refused at both ends. That is fine for ISO 15765,
     since those are ISO 9141/KWP init calls. If a BENCH device needs

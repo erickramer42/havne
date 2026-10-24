@@ -318,6 +318,14 @@ near-10x headroom, so a slow CI machine cannot false-alarm — but a
 hang (the IPC deadlock class caught 2026-10-17) fails bounded as
 `Failed (Timeout)` instead of wedging the runner.
 
+**Discovery against the machine's drivers.** The discovery test reads
+the live registry. With `ECUIO_EXPECT_J2534_DEVICES=<n>` set it fails
+unless at least that many devices are found; `scripts/verify.sh` sets
+it to 1 on Windows, because the dev machine has a Pass-Thru driver
+installed, and takes `--no-devices` on a machine without one. CI's
+Windows job has no vendors and leaves it unset, so there the test
+checks only the shape of an empty result.
+
 **Cross-arch run.** Run this from the x64 tree, after building
 `build-win32`:
 

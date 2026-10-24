@@ -88,7 +88,7 @@ and the next run's screenshots confirmed the fixes the same day.
 | The frame role names the Log page binds (`timestampUs`, `dlc`, `extended`, `payloadHex`, `arbId`), read through the sort proxy | `BridgeTest.FrameRoleNamesMatchLogPageBindings` |
 | Log payloads are the frame's own length as spaced uppercase hex (`34 12 AA 55`) | `BridgeTest.DispatchedShortFrameHonorsDataLength` |
 | Log Pause: nothing is appended while paused, while frames still count and decode; disconnect clears it and a new session starts unpaused | `BridgeTest.LogPauseStopsFrameLogNotDecode` |
-| Discovery: dual-root, dual-WOW64 sweep, dedup, PE architecture annotation | `J2534DiscoveryTest`, plus manual smoke against real installed drivers (OBDX Pro VT and VX) |
+| Discovery: dual-root, dual-WOW64 sweep, dedup, PE architecture annotation; where `ECUIO_EXPECT_J2534_DEVICES` says the machine has drivers, at least that many are found (`scripts/verify.sh` sets 1 on Windows, so the dev machine's installed driver has to turn up) | `J2534DiscoveryTest`, plus manual smoke against real installed drivers (OBDX Pro VT and VX) |
 | Bridge discovery marshaling, including the architecture field | `BridgeTest.DiscoveredDevicesHaveWellFormedEntries` |
 | Loader: `LoadLibraryEx`, nine-export resolution, `PassThruOpen`, clean unwind on a missing DLL | `FakeFixture` |
 | Teardown call order against the vendor API | `FakeFixture.OpenCloseCycleHitsVendorApi`, plus surrogate teardown |
@@ -321,8 +321,12 @@ rows against the current Home, Settings and Dashboard header.
   `STATUS_NOERROR`, not `ERR_TIMEOUT`. Another vendor can depart
   elsewhere, and only its own device can show it
   ([ADR-0010](adr/0010-j2534-v0404-shared-types.md)).
-- **Discovery tests check shape only.** They pass vacuously on a
-  machine with no vendors installed (Known Issue #14).
+- **Discovery against a seeded registry is untested.** On a machine
+  with no vendors installed the discovery test checks only the shape
+  of an empty result; `scripts/verify.sh` sets
+  `ECUIO_EXPECT_J2534_DEVICES=1` on Windows so the dev machine's
+  installed driver has to be found, but CI has no vendors and never
+  sees a non-empty result.
 - **The mobile apps have never run on a device or emulator** (Known
   Issue #2). CI compiles both kits. The simulator smoke shows the iOS
   app starts and draws, but nothing taps through its UI, and it skips

@@ -3,13 +3,18 @@
 # per step. Full output goes to Testing/verify/<step>.log; on a failure
 # the relevant lines are printed and the script stops.
 #
-# Usage: scripts/verify.sh [--tests-only] [--no-cross] [-R <ctest regex>]
+# Usage: scripts/verify.sh [--tests-only] [--no-cross] [--no-devices]
+#                          [-R <ctest regex>]
 #
 #   win32       build-win32's surrogate and fake DLLs (Windows, when
 #               build-win32 exists). First, because the app build copies
 #               the Win32 surrogate next to qttune.exe.
 #   build       the build tree
-#   ctest       the suite, or the -R subset (an -R matching nothing fails)
+#   ctest       the suite, or the -R subset (an -R matching nothing fails).
+#               On Windows, ECUIO_EXPECT_J2534_DEVICES=1 makes the
+#               discovery test demand a device from the registry, since
+#               the dev machine has a Pass-Thru driver installed;
+#               --no-devices for a machine without one
 #   cross-arch  J2534Routing, J2534Surrogate, and the surrogate cases of
 #               J2534HealthTest and J2534ConnectTest, against the x86
 #               surrogate and fake
@@ -25,13 +30,15 @@ mkdir -p "$LOGDIR"
 
 tests_only=0
 cross=1
+devices=1
 regex=""
 while [ $# -gt 0 ]; do
     case "$1" in
         --tests-only) tests_only=1 ;;
         --no-cross) cross=0 ;;
+        --no-devices) devices=0 ;;
         -R) regex="${2:-}"; shift ;;
-        -h|--help) sed -n '2,19p' "$0"; exit 0 ;;
+        -h|--help) sed -n '2,24p' "$0"; exit 0 ;;
         *) echo "unknown argument: $1 (see --help)" >&2; exit 2 ;;
     esac
     shift
@@ -93,6 +100,9 @@ if [ "$tests_only" = 0 ]; then
     line build ok "$dur" "$(warnings build) warnings"
 fi
 
+if [ "$windows" = 1 ] && [ "$devices" = 1 ]; then
+    export ECUIO_EXPECT_J2534_DEVICES=1
+fi
 if [ -n "$regex" ]; then
     run ctest ctest --test-dir build -C Release --output-on-failure --no-tests=error -R "$regex"
 else
