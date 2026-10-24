@@ -27,6 +27,13 @@ A read-only session on a vehicle's bus. Goals, in order:
    without a vehicle run
    ([ADR-0015](../adr/0015-request-engine.md), appendix of
    2026-10-23)
+6. The ECU's identity (Phase 3) and its first DIDs through
+   `uds-generic` (Phase 3b): which identification items and DIDs it
+   answers in its default session, how it refuses the rest, how long
+   a range scan takes, and whether its longer replies arrive whole
+   ([ADR-0020](../adr/0020-uds-generic.md),
+   [ADR-0021](../adr/0021-vehicle-identification.md)). Nothing in
+   those two has run on a car
 
 Record everything, including every connect's session log. A session
 that stops at phase 2 with evidence is worth more than one that runs
@@ -34,9 +41,11 @@ to the end undocumented.
 
 ## Safety and scope
 
-- **Read-only.** QtTune sends only Mode-01 ("show current data")
-  requests, the same read-only service a generic OBD-II scanner uses.
-  It has no code path that writes, clears codes or flashes. Read
+- **Read-only.** QtTune sends only read requests: Service 01 ("show
+  current data"), Service 09 (vehicle information: VIN, calibration
+  IDs) and Service 0x22 (ReadDataByIdentifier), the same read-only
+  services a generic scanner uses. It has no code path that writes,
+  clears codes, changes a diagnostic session or flashes. Read
   [DISCLAIMER.md](../../DISCLAIMER.md) before starting.
 - **Parked:** transmission in Park (or neutral), parking brake set.
   Run any engine-on phase outdoors or with ventilation.
@@ -61,8 +70,10 @@ the machine the code was developed on.
 - [ ] Full suite green: every case passes except the env-gated skip
       (current count in [STATUS.md](../../STATUS.md)), plus the
       cross-arch subset. `scripts/verify.sh` runs both and prints four
-      `ok` lines, the last reading `0 skipped`. Run by hand, the
-      cross-arch subset needs `ECUIO_SURROGATE_EXE` and
+      `ok` lines, the last reading `0 skipped`. On Windows it also
+      demands that discovery finds a device, which the VX's driver
+      provides (`--no-devices` on a laptop without one). Run by hand,
+      the cross-arch subset needs `ECUIO_SURROGATE_EXE` and
       `ECUIO_FAKE_DLL`; under any other names its routing case skips
       while everything else passes
       ([development.md](../development.md#running-tests))
@@ -111,9 +122,11 @@ the machine the code was developed on.
       pill, Home and the Dashboard header show the same state in short
       form.
 - [ ] Settings picker lists the VX as "x86". Every connect below goes
-      through Settings, the only page that connects: type the phase's
-      URI into the URI field (the VX row fills the bare one), then
-      Connect
+      through Settings, the only page that connects. The VX row fills
+      the bare URI, the Profile row adds the phase's profile (`raw`
+      adds `filter=0x7E8` on an adapter) and the DIDs field its
+      `did=`; `poll=` is typed. A URI typed or pasted whole works the
+      same, and the row and the field follow it. Then Connect
 - [ ] Camera or notebook ready
 - [ ] A reference for the values: the cluster's gauges (tachometer,
       coolant, fuel), and a second scan tool if you have one (a phone
@@ -136,7 +149,13 @@ the machine the code was developed on.
         bitmap is all zeros, so its last bit says to skip the other
         two;
       - Phase 3: the bare URI: every `obd2` signal shows the fake's
-        canned value.
+        canned value, and the activity log gets the fake's identity
+        line (`VIN FAKEJ2534VIN00001; CALID FAKECAL-01; …; 2 refused`);
+      - Phase 3b: `?profile=uds-generic&did=1E18-1E20,F190:text`:
+        the ECU line reads `2 requests, none dropped; scan: 9 DIDs,
+        1 found, 8 refused` (the polled F190 and the found 1E1C),
+        Live shows a text row for F190 (the fake's VIN) and a hex
+        row `DID 1E1C` reading `12 34`.
 
       Then do the teardown and the post-session scrub on what it
       produced: the recordings and the kept session logs. Phase 5's
@@ -302,6 +321,78 @@ before the next request (a reply after it means the 100 ms wait ran
 out first). The probe's bitmap replies are in the same lines: they
 should match Phase 2's, byte for byte.
 
+## Phase 3b — the first DIDs through `uds-generic`
+
+Only if Phase 3 was clean. Same ignition state, engine off. Two
+connects: a scan of the standard identification block, then one DID
+it found, read as text. Service 0x22 is read-only, and every request
+goes to the engine ECU alone (0x7E0, replies on 0x7E8).
+
+**Action, the scan.** Connect (the VX row, the `uds-generic (DIDs)`
+button, then `F180-F1FF` in the DIDs field):
+
+    j2534://OBDX Pro - VX?profile=uds-generic&did=F180-F1FF
+
+That's 128 DIDs in ISO 14229's identification range, asked once each,
+nothing polled until one answers. Identification (the thirteen
+items) runs first, taking turns with the scan, so the first requests
+are `09 02`, `22 F1 80`, `09 04`, `22 F1 81`, and so on.
+
+**Expected:**
+- [ ] Connect succeeds; no bitmap requests (there are no Service 01
+      requests to probe for), no banner
+- [ ] The activity log gets ECU lines as the counts move (up to one
+      per 100 ms), the last with no "unanswered":
+      `ECU 0x7E8: k requests, none dropped; scan: 128 DIDs, k found,
+      r refused` (k and r add up to 128; the k found DIDs are now the
+      polled requests), and the identity line as in Phase 3. Time the scan from `Connected:` to that last line: at
+      about one request every 20–50 ms, under about 7 s. Longer means
+      the ECU answers slowly or left DIDs unanswered (each costs the
+      100 ms wait); note which
+- [ ] Each found DID joins the polling and gets a Live row named
+      `DID F1xx`, showing its bytes as hex pairs, bright and
+      refreshing. The rows past the first few are personal data (VIN,
+      serials): don't photograph Live in this phase
+- [ ] The Log page shows the replies as they arrive: `62 F1 xx` plus
+      the data. A reply longer than 7 data bytes (the VIN's 17, the
+      calibration ID's 16) is the first segmented ISO 15765 message a
+      vehicle has sent this project: the VX reassembles it, so the
+      frame's DLC is the whole length (`len` in the session log's
+      `OP_READ frame` line, minus the 4-byte CAN ID). Record the
+      longest reply's DLC and whether any frame carries the truncated
+      flag (it shouldn't: the frame holds 4 KB)
+- [ ] How the ECU refuses: the session log's `OP_READ frame` lines
+      with `7F 22 <NRC>`. Expected for DIDs it doesn't have:
+      `7F 22 31` (request out of range), counted as refused. Record
+      any other code verbatim. `7F 22 78` (response pending) is
+      waited out, up to 5 s per request. `7F 22 11` (service not
+      supported) would end every Service 0x22 request on this ECU by
+      design, found DIDs included; `7F 22 33` (security access
+      denied) refuses that one DID. Either of those is a finding, not
+      a fault
+
+**Action, one DID as text.** Disconnect. Pick a found DID whose bytes
+read as ASCII in the Log page and isn't a serial or the VIN (F191,
+the hardware number, or F195, the software version, if the ECU
+answered them; the identity line already shows which). Connect with
+it polled as text, for example:
+
+    j2534://OBDX Pro - VX?profile=uds-generic&did=F191:text
+
+**Expected:**
+- [ ] One Live row, `DID F191`, showing the text, refreshing on every
+      reply (a text row has no plot box); `signals.csv` carries the
+      text, quoted
+- [ ] No banner, the link ok, the value never dims
+
+**Evidence:** the recording (`frames.csv` for the reply lengths and
+timings, `signals.csv` for the hex and text values, `events.log` for
+the ECU and identity lines), and the session log's `OP_WRITE frame`
+and `OP_READ frame` lines: the request order, each reply's time after
+its request, the NRC of every refusal, and the longest reply. All of
+it carries the VIN and the ECU's serial, so it's scrubbed before any
+of it is committed (see Post-session actions).
+
 ## Phase 4 — engine idling (the decode check)
 
 Only if phases 0–3 were clean, and with the second person present.
@@ -360,6 +451,9 @@ ignition off, wait 10 s, then turn it back on.
 | Values implausible (−40 °C, huge RPM) | Scaling or byte order: temperatures are unsigned 8-bit with a −40 offset; 2-byte PIDs are big-endian |
 | Link flips between ok and quiet while frames arrive | Unmatched frames interleaving with replies: a single unmatched frame reads as quiet with no debounce, by design. Note the frame IDs |
 | Slow refresh, replies a cycle late | Known refresh-rate item (20 ms first read vs up to 50 ms ECU response). Measure; don't fix in the session |
+| Phase 3b finds nothing: every DID `7F 22 31` | The ECU keeps its identification DIDs for another diagnostic session, or uses another range. The identity line says which `F18x` items answered in Phase 3; if those answered there, the scan should find them too, so compare. Record and move on: QtTune never changes the session |
+| Phase 3b: `7F 22 11` on the first DID, then no more Service 0x22 requests | By design: the ECU said it doesn't serve Service 0x22 here, and every Service 0x22 request on that channel was dropped. The identity line's `22 F1 xx` items will show the same. Record it; identification by Service 09 still works |
+| The identity line never arrives | An item left unanswered holds the line until the link recovers and the re-ask settles. Check the session log for a `22 F1 xx` or `09 xx` request with no reply, note which, and move on: the ECU and support lines don't wait for it |
 | "Disconnecting…" lasts seconds | A wedged adapter. The teardown runs off the GUI thread and gives up after about 6 s; Connect stays disabled until it ends. Note how long (the activity log's `Disconnecting:` and `Disconnected:` lines bracket it) and whether the session log says `child unresponsive`. The window itself shouldn't freeze on Disconnect; if it does, that's a bug: capture the session log |
 | App crashes | Abort. Capture the session log and `sur.log` before relaunching |
 
@@ -374,6 +468,12 @@ ignition off, wait 10 s, then turn it back on.
 | #6 ReadMsgs statuses | Session log: does any `OP_READ frame: status 9` line appear (`ERR_TIMEOUT` with data)? On the bench, short batches came back with status 0 and empty reads with 16 |
 | #7 Struct layout | A correct decode in phases 2–3 implies the layout is right |
 | #8 Vendor timeouts | Read timing visible in the session log stamps |
+
+Beyond the prep list, this session is the first vehicle run for the
+request engine's pacing (Phase 3), the probe (Phase 3),
+identification (Phase 3), `uds-generic`'s polling and scan (Phase 3b)
+and a segmented reply (Phase 3b), each a gap in
+[testing.md](../testing.md#gaps-not-verified).
 
 ## Teardown
 
@@ -394,10 +494,12 @@ ignition off, wait 10 s, then turn it back on.
    the session logs and recordings in a folder beside it, as
    [2026-10-22-vehicle](2026-10-22-vehicle.md) has them. Before committing,
    scrub the sheet, the logs, the recordings' `events.log` (it holds
-   the URI and the identity line) and any screenshots of the activity
-   log: no VIN, calibration IDs or ECU serial, no names or initials,
-   and no local paths (`%TEMP%` and `C:\Users\…` paths carry the
-   account name)
+   the URI and the identity line), Phase 3b's `signals.csv` and
+   `frames.csv` (the DIDs' bytes and text: VIN, calibration IDs, the
+   ECU's serial) and any screenshots of the activity log or of Live
+   in Phase 3b: no VIN, calibration IDs or ECU serial, no names or
+   initials, and no local paths (`%TEMP%` and `C:\Users\…` paths
+   carry the account name)
 2. Walk the [BENCH prep list](../../STATUS.md#bench-prep): mark each
    item CONFIRMED / REFUTED (with evidence) / STILL UNKNOWN
 3. Update STATUS.md, the testing.md Vehicle tier and gaps, and any
@@ -407,4 +509,10 @@ ignition off, wait 10 s, then turn it back on.
    request-to-reply times per PID (from the `OP_WRITE frame` /
    `OP_READ frame` stamps), whether any reply was "response pending"
    (`7F 01 78`), and Phase 2's supported-PID bitmaps
-5. Engineering-log entry if a lesson emerged
+5. Add a dated appendix to [ADR-0020](../adr/0020-uds-generic.md)
+   with Phase 3b's measurements (the scan's duration and pace, the
+   refusal codes seen, the longest reply) and one to
+   [ADR-0021](../adr/0021-vehicle-identification.md) saying which
+   items this ECU answered, refused or left unanswered in its default
+   session (the items by name, never their values)
+6. Engineering-log entry if a lesson emerged
