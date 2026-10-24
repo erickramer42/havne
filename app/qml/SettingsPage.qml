@@ -1,16 +1,20 @@
 // File/layer: app/qml/SettingsPage.qml | Qt6 Quick, UI layer
-// Testing: manual smoke — discovery list renders (Windows: real registry;
-//          macOS/Linux: empty-state hint) sized to its rows, picker row
-//          fills URI field only, Connect button drives connectSessionAsync
-//          (UI stays responsive while a vendor blocks ~8 s), activity log
-//          shows connect lifecycle and takes the remaining height, error
-//          label on bad URI, Record sessions fixed during a session and
-//          its folder shown relative to Documents; at 1280 × 650 the page
-//          scrolls and the activity log keeps its minimum height;
-//          the Display row steps Theme.zoom. The recording's
-//          bridge side: BridgeTest.Recording*. The status label and the
-//          activity log's link lines in each link state: test_qml
+// Testing: test_qml (tests/qml/tst_settings.qml): the URI composed from a
+//          preset, the profile row and the DID field, the field left
+//          editable, core's refusal in the error line, a composed
+//          uds-generic URI connecting through the mock; the status label
+//          and the activity log's link lines in each link state
 //          (tests/qml/tst_linkhealth.qml), by objectName.
+//          Manual smoke — discovery list renders (Windows: real registry;
+//          macOS/Linux: empty-state hint) sized to its rows, a device row
+//          fills the URI field only, Connect button drives
+//          connectSessionAsync (UI stays responsive while a vendor blocks
+//          ~8 s), activity log shows connect lifecycle and takes the
+//          remaining height, Record sessions fixed during a session and
+//          its folder shown relative to Documents; at 1280 × 650 the page
+//          scrolls and the activity log keeps its minimum height; the
+//          Display row steps Theme.zoom. The recording's bridge side:
+//          BridgeTest.Recording*.
 
 import QtQuick
 import QtQuick.Controls
@@ -43,10 +47,51 @@ Pane {
         j2534Devices = Bridge.discoverJ2534Devices()
     }
 
+    // The URI is composed from three choices, so none of it needs typing:
+    // a base (a preset or a discovered device), a profile, and
+    // uds-generic's DIDs. The field stays editable: a hand-written URI
+    // connects as written, and the next preset, device or profile click
+    // composes it again from that URI's base. The choices live only
+    // while the app runs.
+    property string profileChoice: "default"   // "default", "raw" or "uds-generic"
+
+    // The field's text before its query
+    function uriBase() {
+        const text = uriField.text
+        const q = text.indexOf("?")
+        return q < 0 ? text : text.substring(0, q)
+    }
+
+    // base plus the chosen profile's query. raw on an adapter adds a
+    // filter on the engine ECU's reply ID: an ISO 15765 channel with no
+    // filter receives nothing (docs/j2534.md), and mock:// takes no
+    // filter key. uds-generic's DIDs go in as typed, minus whitespace;
+    // core judges them (ADR-0020) and the error line shows its words.
+    function composeUri(base) {
+        if (base === "")
+            return ""
+        switch (profileChoice) {
+        case "raw":
+            return base + "?profile=raw"
+                   + (base.startsWith("mock://") ? "" : "&filter=0x7E8")
+        case "uds-generic": {
+            const dids = didField.text.replace(/\s+/g, "")
+            return base + "?profile=uds-generic" + (dids === "" ? "" : "&did=" + dids)
+        }
+        default:
+            return base
+        }
+    }
+
     // Row click / preset click: selection is INTENT, never action. A row
     // that only fills the URI field can never accidentally cost 8 seconds.
-    function fillUri(uri) {
-        uriField.text = uri
+    function fillUri(base) {
+        uriField.text = composeUri(base)
+    }
+
+    function chooseProfile(name) {
+        profileChoice = name
+        uriField.text = composeUri(uriBase())
     }
 
     function requestConnect(uri) {
@@ -137,6 +182,7 @@ Pane {
 
                 TextField {
                     id: uriField
+                    objectName: "uriField"
                     Layout.fillWidth: true
                     // ?poll= replaces the profile's PID rotation and needs
                     // a channel. The raw profile declares none, so the
@@ -149,6 +195,7 @@ Pane {
                 }
 
                 ThemedButton {
+                    objectName: "connectButton"
                     text: Bridge.connected ? qsTr("Disconnect")
                         : Bridge.connecting ? qsTr("Connecting…")
                         : Bridge.disconnecting ? qsTr("Disconnecting…")
@@ -175,6 +222,7 @@ Pane {
 
             Label {
                 id: errorLabel
+                objectName: "errorLabel"
                 visible: false
                 color: Theme.danger
                 wrapMode: Text.WrapAnywhere
@@ -182,21 +230,83 @@ Pane {
                 text: ""
             }
 
-            // ---- Presets ----
+            // ---- Presets: the URI's base ----
             RowLayout {
                 spacing: Theme.spacing
                 Label { text: qsTr("Presets:"); color: Theme.textDim }
                 Repeater {
-                    model: ["mock://demo", "j2534://"]
-                    ThemedButton {
-                        required property string modelData
+                    model: [
+                        { name: "mock", uri: "mock://demo", label: "mock://demo" },
                         // A bare j2534:// opens the first discovered device
-                        text: modelData === "j2534://"
-                              ? qsTr("j2534:// (first device)")
-                              : modelData
+                        { name: "j2534", uri: "j2534://", label: qsTr("j2534:// (first device)") }
+                    ]
+                    ThemedButton {
+                        required property var modelData
+                        objectName: "preset_" + modelData.name
+                        text: modelData.label
                         enabled: !Bridge.connected && !Bridge.connecting && !Bridge.disconnecting
-                        onClicked: page.fillUri(modelData)
+                        onClicked: page.fillUri(modelData.uri)
                     }
+                }
+            }
+
+            // ---- Profile: the URI's query (ADR-0013, ADR-0020) ----
+            // The chosen button is drawn as the primary colour. "Default"
+            // is the scheme's own profile, so the query stays empty.
+            RowLayout {
+                spacing: Theme.spacing
+                Label { text: qsTr("Profile:"); color: Theme.textDim }
+                Repeater {
+                    model: [
+                        { name: "default", label: qsTr("Default") },
+                        { name: "raw", label: qsTr("raw (log only)") },
+                        { name: "uds-generic", label: qsTr("uds-generic (DIDs)") }
+                    ]
+                    ThemedButton {
+                        required property var modelData
+                        objectName: "profile_" + modelData.name
+                        text: modelData.label
+                        highlighted: page.profileChoice === modelData.name
+                        enabled: !Bridge.connected && !Bridge.connecting && !Bridge.disconnecting
+                        onClicked: page.chooseProfile(modelData.name)
+                    }
+                }
+            }
+
+            Label {
+                objectName: "profileHint"
+                Layout.fillWidth: true
+                wrapMode: Text.WordWrap
+                color: Theme.textDim
+                text: page.profileChoice === "raw"
+                      ? qsTr("No decode: frames reach the Log page only. On an adapter the "
+                             + "URI filters on the engine ECU's replies (0x7E8); edit it for "
+                             + "another ID")
+                      : page.profileChoice === "uds-generic"
+                      ? qsTr("Service 0x22 reads of the DIDs below, polled; a range is scanned "
+                             + "once and the DIDs the ECU answers join the polling")
+                      : qsTr("The scheme's own profile: obd2 on an adapter, the demo set on mock://")
+            }
+
+            RowLayout {
+                objectName: "didRow"
+                Layout.fillWidth: true
+                spacing: Theme.spacing
+                visible: page.profileChoice === "uds-generic"
+                Label { text: qsTr("DIDs:"); color: Theme.textDim }
+                TextField {
+                    id: didField
+                    objectName: "didField"
+                    Layout.fillWidth: true
+                    // The ?did= grammar as core reads it (ADR-0020); the
+                    // text goes into the URI as typed, so core's words
+                    // name any mistake
+                    placeholderText: qsTr("1E1C:u16, F190:text, 7E9:1E1C, 1E00-1EFF — "
+                                          + "[ecu:]DID[-DID][:hex|text|u8…u32|i8…i32]")
+                    enabled: !Bridge.connected && !Bridge.connecting && !Bridge.disconnecting
+                    color: Theme.text
+                    onTextChanged: uriField.text = page.composeUri(page.uriBase())
+                    onAccepted: page.requestConnect(uriField.text)
                 }
             }
 

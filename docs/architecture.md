@@ -237,6 +237,10 @@ The bridge polls it on its 100 ms tick and maps it for the UI
   lights), **Live** (value table and strip chart), **Log** (raw
   frames), **Settings** (device picker, URI, activity log). Settings is
   the one place a session is connected; the header and Home open it.
+  It composes the URI from a preset or a device, a profile row
+  (default, `raw`, `uds-generic`) and a DID field, and leaves the
+  field editable; core judges the result at connect and Settings shows
+  its words.
   Navigation is a sidebar at 720 px and wider, a tab bar below that.
 - **`Theme`** holds the palette, the chart's series colours, the
   monospace family and page margin, and the link-state color and

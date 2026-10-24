@@ -315,8 +315,11 @@ measurements feed the first item.
    (`[<ecu>:]<DID>[-<DID>][:<type>]`, several in a list); single DIDs
    are polled, a range is scanned once beside the rotation and the
    DIDs the ECU answers join it; the mock answers them too, so the app
-   shows the profile with no hardware. Its first DIDs on a car are the
-   second vehicle session's.
+   shows the profile with no hardware. Settings composes the URI from a
+   preset or a device, a profile row (default, `raw`, `uds-generic`)
+   and a DID field, so none of it needs typing; the choices last while
+   the app runs (persisted preferences, below, will keep them). Its
+   first DIDs on a car are the second vehicle session's.
 4. **Vehicle identification** ([ADR-0021](docs/adr/0021-vehicle-identification.md)):
    built, HARNESS-tested. Every requesting channel asks its ECU the
    VIN, calibration IDs and identification DIDs once at connect,
@@ -534,8 +537,9 @@ in the backlog.
   the ignition.
 - **Persisted preferences (S).** Only the UI zoom survives a
   restart, through QML `Settings` in `Main.qml` (category `ui`).
-  Developer mode, units, theme and the last-used device all need the
-  same, so it comes before them. It belongs in the app layer, not
+  Developer mode, units, theme, the last-used device, the Record
+  sessions switch and Settings' profile choice and DID list all need
+  the same, so it comes before them. It belongs in the app layer, not
   core.
 - **Developer mode (S).** A persisted Settings toggle, off by default.
   With it off the app offers only real devices. With it on, the app
@@ -562,11 +566,6 @@ in the backlog.
   - A near-monochrome scheme must keep warning and danger
     distinguishable by more than hue, for example with a label or
     icon.
-- **Picker presets with profiles (S).** Channel derivation already
-  makes the plain flow produce a working `obd2` session, and
-  `uds-generic`'s `<ecu>:` prefix addresses an ECU off the 7E0/7E8
-  pair. What's left is picker rows for `?profile=raw` (log only) and
-  `uds-generic`, with a field for its DIDs, so the URI needn't be typed.
 - **In-vehicle displays: Android Auto and CarPlay (L, research
   first).** A second front end over the same C ABI, which is what
   replaceable UI layers are for. Both platforms admit third-party apps
