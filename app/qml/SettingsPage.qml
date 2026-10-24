@@ -2,7 +2,8 @@
 // Testing: test_qml (tests/qml/tst_settings.qml): the URI composed from a
 //          preset, the profile row and the DID field, the field left
 //          editable, core's refusal in the error line, a composed
-//          uds-generic URI connecting through the mock; the status label
+//          uds-generic URI connecting through the mock, every control
+//          locked while a connect is in flight; the status label
 //          and the activity log's link lines in each link state
 //          (tests/qml/tst_linkhealth.qml), by objectName.
 //          Manual smoke — discovery list renders (Windows: real registry;
@@ -35,6 +36,13 @@ Pane {
     // architecture }, ...] with architecture "x86", "x64" or "unknown".
     // Empty on non-Windows or when no drivers are installed.
     property var j2534Devices: []
+
+    // No session, and none starting or ending. Every control that chooses
+    // or starts a session is enabled by this one value, so none can be
+    // used during a multi-second vendor block: the bridge refuses a
+    // connect then anyway, but a device row or a preset would otherwise
+    // rewrite the greyed field under the connect in flight.
+    readonly property bool idle: !Bridge.connected && !Bridge.connecting && !Bridge.disconnecting
 
     component Heading: Label {
         color: Theme.text
@@ -189,7 +197,7 @@ Pane {
                     // example adds ?filter=; under the obd2 default ?poll=
                     // alone works and still decodes.
                     placeholderText: qsTr("URI — e.g. mock://demo or j2534://Vendor?profile=raw&filter=0x7E8&poll=0x0C")
-                    enabled: !Bridge.connected && !Bridge.connecting && !Bridge.disconnecting
+                    enabled: page.idle
                     color: Theme.text
                     onAccepted: page.requestConnect(text)
                 }
@@ -201,14 +209,9 @@ Pane {
                         : Bridge.disconnecting ? qsTr("Disconnecting…")
                         : qsTr("Connect")
                     highlighted: !Bridge.connected
-                    // Disabled while a connect or a teardown is in flight —
-                    // the bridge refuses both anyway, but the UI must not
-                    // offer them during a multi-second vendor block.
-                    enabled: Bridge.connected
-                             ? true
-                             : (!Bridge.connecting
-                                && !Bridge.disconnecting
-                                && uriField.text !== "")
+                    // Disconnect is always offered; Connect only while idle
+                    // with a URI to connect
+                    enabled: Bridge.connected || (page.idle && uriField.text !== "")
                     onClicked: {
                         if (Bridge.connected) {
                             Bridge.disconnectSession()
@@ -244,7 +247,7 @@ Pane {
                         required property var modelData
                         objectName: "preset_" + modelData.name
                         text: modelData.label
-                        enabled: !Bridge.connected && !Bridge.connecting && !Bridge.disconnecting
+                        enabled: page.idle
                         onClicked: page.fillUri(modelData.uri)
                     }
                 }
@@ -267,7 +270,7 @@ Pane {
                         objectName: "profile_" + modelData.name
                         text: modelData.label
                         highlighted: page.profileChoice === modelData.name
-                        enabled: !Bridge.connected && !Bridge.connecting && !Bridge.disconnecting
+                        enabled: page.idle
                         onClicked: page.chooseProfile(modelData.name)
                     }
                 }
@@ -303,7 +306,7 @@ Pane {
                     // name any mistake
                     placeholderText: qsTr("1E1C:u16, F190:text, 7E9:1E1C, 1E00-1EFF — "
                                           + "[ecu:]DID[-DID][:hex|text|u8…u32|i8…i32]")
-                    enabled: !Bridge.connected && !Bridge.connecting && !Bridge.disconnecting
+                    enabled: page.idle
                     color: Theme.text
                     onTextChanged: uriField.text = page.composeUri(page.uriBase())
                     onAccepted: page.requestConnect(uriField.text)
@@ -322,7 +325,7 @@ Pane {
                     id: recordBox
                     text: qsTr("Record sessions")
                     checked: Bridge.recording
-                    enabled: !Bridge.connected && !Bridge.connecting && !Bridge.disconnecting
+                    enabled: page.idle
                     // The bridge decides; the binding comes back either way
                     onToggled: {
                         Bridge.recording = checked
@@ -413,6 +416,7 @@ Pane {
             // activity log takes the rest of the page
             ListView {
                 id: deviceList
+                objectName: "deviceList"
                 Layout.fillWidth: true
                 Layout.preferredHeight: contentHeight
                 Layout.maximumHeight: page.deviceRowsShown * (page.deviceRowHeight + spacing) - spacing
@@ -434,10 +438,11 @@ Pane {
 
                     MouseArea {
                         id: mouse
+                        objectName: "deviceRowArea"
                         anchors.fill: parent
                         hoverEnabled: true
                         cursorShape: Qt.PointingHandCursor
-                        enabled: !Bridge.connected
+                        enabled: page.idle
                         onClicked: page.fillUri("j2534://" + row.modelData.vendorName)
                     }
 
@@ -451,7 +456,7 @@ Pane {
                                   + (row.modelData.architecture
                                        ? "  (" + row.modelData.architecture + ")"
                                        : "")
-                            color: Bridge.connected ? Theme.textDim : Theme.text
+                            color: page.idle ? Theme.text : Theme.textDim
                         }
                         Label {
                             text: row.modelData.dllPath
