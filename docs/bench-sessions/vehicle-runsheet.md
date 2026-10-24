@@ -154,8 +154,9 @@ the machine the code was developed on.
       - Phase 3b: `?profile=uds-generic&did=1E18-1E20,F190:text`:
         the ECU line reads `2 requests, none dropped; scan: 9 DIDs,
         1 found, 8 refused` (the polled F190 and the found 1E1C),
-        Live shows a text row for F190 (the fake's VIN) and a hex
-        row `DID 1E1C` reading `12 34`.
+        Live shows a text row for F190 (the fake's VIN), a hex row
+        `DID 1E1C` reading `12 34`, and a "—" row for each of the
+        eight refused DIDs.
 
       Then do the teardown and the post-session scrub on what it
       produced: the recordings and the kept session logs. Phase 5's
@@ -283,9 +284,17 @@ frame either way.
       reads plus those of the next ones
 - [ ] Within a few seconds the activity log gets the identity line,
       `ECU 0x7E8 identity: VIN …; CALID …; …`, with the car's VIN and
-      calibration IDs and whichever `F18x` DIDs the ECU answers; note
+      calibration IDs and whichever `F1xx` DIDs the ECU answers; note
       which it refused (`7F 22 31`) or left unanswered. The line is
       personal data: it is scrubbed before this sheet is committed
+- [ ] Identification's replies are the first segmented ISO 15765
+      messages a vehicle has sent this project: the VIN (`49 02 01`
+      plus 17 bytes, and `62 F1 90`) and the calibration ID (16
+      bytes) are longer than 7 data bytes. The VX reassembles them, so
+      the frame's DLC is the whole length (`len` in the session log's
+      `OP_READ frame` line, minus the 4-byte CAN ID). Record the
+      longest reply's DLC and whether any frame carries the truncated
+      flag (it shouldn't: the frame holds 4 KB)
 - [ ] Every `obd2` signal populates within about one rotation (a
       request every 20 ms or so while the ECU answers within that, so N
       PIDs take about N × 20 ms; well under a second for the current
@@ -334,9 +343,11 @@ button, then `F180-F1FF` in the DIDs field):
     j2534://OBDX Pro - VX?profile=uds-generic&did=F180-F1FF
 
 That's 128 DIDs in ISO 14229's identification range, asked once each,
-nothing polled until one answers. Identification (the thirteen
-items) runs first, taking turns with the scan, so the first requests
-are `09 02`, `22 F1 80`, `09 04`, `22 F1 81`, and so on.
+nothing polled until one answers. With nothing polled, identification
+goes first, every item in list order (`09 02`, `09 04`, … then its
+`22 F1 xx` items), and only then the scan, from `22 F1 80` up. Once a
+DID is found it joins the polling, and from then on each scanned DID
+takes turns with one polled request.
 
 **Expected:**
 - [ ] Connect succeeds; no bitmap requests (there are no Service 01
@@ -345,43 +356,46 @@ are `09 02`, `22 F1 80`, `09 04`, `22 F1 81`, and so on.
       per 100 ms), the last with no "unanswered":
       `ECU 0x7E8: k requests, none dropped; scan: 128 DIDs, k found,
       r refused` (k and r add up to 128; the k found DIDs are now the
-      polled requests), and the identity line as in Phase 3. Time the scan from `Connected:` to that last line: at
-      about one request every 20–50 ms, under about 7 s. Longer means
-      the ECU answers slowly or left DIDs unanswered (each costs the
-      100 ms wait); note which
-- [ ] Each found DID joins the polling and gets a Live row named
-      `DID F1xx`, showing its bytes as hex pairs, bright and
-      refreshing. The rows past the first few are personal data (VIN,
-      serials): don't photograph Live in this phase
+      polled requests), and the identity line as in Phase 3. Time the
+      scan from `Connected:` to that last line. The requests number the
+      identification items plus the 128 DIDs, and up to 128 more polled
+      requests once an early DID is found, so the run takes at most
+      about (items + 256) requests. At about one request every 20–50 ms
+      that's under about 15 s, even with the list's room for 16 items
+      filled. Longer means the ECU answers slowly or left DIDs
+      unanswered (each costs the 100 ms wait); note which
+- [ ] Live lists a row for every DID in the range from connect,
+      `DID F180` to `DID F1FF`, each "—" until it answers. A found
+      DID's row shows its bytes as hex pairs, bright and refreshing
+      once it joins the polling; a refused DID's row stays "—". The
+      found rows are personal data (VIN, serials): don't photograph
+      Live in this phase
 - [ ] The Log page shows the replies as they arrive: `62 F1 xx` plus
-      the data. A reply longer than 7 data bytes (the VIN's 17, the
-      calibration ID's 16) is the first segmented ISO 15765 message a
-      vehicle has sent this project: the VX reassembles it, so the
-      frame's DLC is the whole length (`len` in the session log's
-      `OP_READ frame` line, minus the 4-byte CAN ID). Record the
-      longest reply's DLC and whether any frame carries the truncated
-      flag (it shouldn't: the frame holds 4 KB)
+      the data. Record the longest reply's DLC and whether any frame
+      carries the truncated flag, as in Phase 3
 - [ ] How the ECU refuses: the session log's `OP_READ frame` lines
       with `7F 22 <NRC>`. Expected for DIDs it doesn't have:
       `7F 22 31` (request out of range), counted as refused. Record
       any other code verbatim. `7F 22 78` (response pending) is
       waited out, up to 5 s per request. `7F 22 11` (service not
-      supported) would end every Service 0x22 request on this ECU by
-      design, found DIDs included; `7F 22 33` (security access
-      denied) refuses that one DID. Either of those is a finding, not
-      a fault
+      supported) to a polled DID drops every polled Service 0x22
+      request on this ECU by design; the scan and identification
+      still ask each of theirs once, and each is refused. `7F 22 33`
+      (security access denied) refuses that one DID. Either of those
+      is a finding, not a fault
 
 **Action, one DID as text.** Disconnect. Pick a found DID whose bytes
 read as ASCII in the Log page and isn't a serial or the VIN (F191,
-the hardware number, or F195, the software version, if the ECU
-answered them; the identity line already shows which). Connect with
+the hardware number, F189, the software version, or F195, the
+supplier software version, if the ECU answered them; the identity
+line already shows which). Connect with
 it polled as text, for example:
 
     j2534://OBDX Pro - VX?profile=uds-generic&did=F191:text
 
 **Expected:**
 - [ ] One Live row, `DID F191`, showing the text, refreshing on every
-      reply (a text row has no plot box); `signals.csv` carries the
+      reply (a text row's plot box is greyed out); `signals.csv` carries the
       text, quoted
 - [ ] No banner, the link ok, the value never dims
 
@@ -451,8 +465,8 @@ ignition off, wait 10 s, then turn it back on.
 | Values implausible (−40 °C, huge RPM) | Scaling or byte order: temperatures are unsigned 8-bit with a −40 offset; 2-byte PIDs are big-endian |
 | Link flips between ok and quiet while frames arrive | Unmatched frames interleaving with replies: a single unmatched frame reads as quiet with no debounce, by design. Note the frame IDs |
 | Slow refresh, replies a cycle late | Known refresh-rate item (20 ms first read vs up to 50 ms ECU response). Measure; don't fix in the session |
-| Phase 3b finds nothing: every DID `7F 22 31` | The ECU keeps its identification DIDs for another diagnostic session, or uses another range. The identity line says which `F18x` items answered in Phase 3; if those answered there, the scan should find them too, so compare. Record and move on: QtTune never changes the session |
-| Phase 3b: `7F 22 11` on the first DID, then no more Service 0x22 requests | By design: the ECU said it doesn't serve Service 0x22 here, and every Service 0x22 request on that channel was dropped. The identity line's `22 F1 xx` items will show the same. Record it; identification by Service 09 still works |
+| Phase 3b finds nothing: every DID `7F 22 31` | The ECU keeps its identification DIDs for another diagnostic session, or uses another range. The identity line says which of its `22 F1 xx` items answered in Phase 3, and every one is inside the scanned range; if those answered there, the scan should find them too, so compare. Record and move on: QtTune never changes the session |
+| Phase 3b: every Service 0x22 reply is `7F 22 11` | The ECU says it doesn't serve Service 0x22 here. Each identification item and scanned DID is still asked once and refused, so the ECU line ends `scan: 128 DIDs, 0 found, 128 refused` and the identity line lists every `22 F1 xx` item as refused; a polled DID would leave the rotation, with every other polled Service 0x22 request on that channel. Record it; identification by Service 09 still works |
 | The identity line never arrives | An item left unanswered holds the line until the link recovers and the re-ask settles. Check the session log for a `22 F1 xx` or `09 xx` request with no reply, note which, and move on: the ECU and support lines don't wait for it |
 | "Disconnecting…" lasts seconds | A wedged adapter. The teardown runs off the GUI thread and gives up after about 6 s; Connect stays disabled until it ends. Note how long (the activity log's `Disconnecting:` and `Disconnected:` lines bracket it) and whether the session log says `child unresponsive`. The window itself shouldn't freeze on Disconnect; if it does, that's a bug: capture the session log |
 | App crashes | Abort. Capture the session log and `sur.log` before relaunching |
@@ -471,8 +485,8 @@ ignition off, wait 10 s, then turn it back on.
 
 Beyond the prep list, this session is the first vehicle run for the
 request engine's pacing (Phase 3), the probe (Phase 3),
-identification (Phase 3), `uds-generic`'s polling and scan (Phase 3b)
-and a segmented reply (Phase 3b), each a gap in
+identification (Phase 3), a segmented reply (Phase 3's identification)
+and `uds-generic`'s polling and scan (Phase 3b), each a gap in
 [testing.md](../testing.md#gaps-not-verified).
 
 ## Teardown
@@ -494,10 +508,12 @@ and a segmented reply (Phase 3b), each a gap in
    the session logs and recordings in a folder beside it, as
    [2026-10-22-vehicle](2026-10-22-vehicle.md) has them. Before committing,
    scrub the sheet, the logs, the recordings' `events.log` (it holds
-   the URI and the identity line), Phase 3b's `signals.csv` and
-   `frames.csv` (the DIDs' bytes and text: VIN, calibration IDs, the
-   ECU's serial) and any screenshots of the activity log or of Live
-   in Phase 3b: no VIN, calibration IDs or ECU serial, no names or
+   the URI and the identity line), the `frames.csv` of every connect
+   without `?poll=` (identification runs on each, in Phases 3 to 5,
+   and its `49 02`, `49 04` and `62 F1 xx` replies carry the VIN,
+   calibration IDs and the ECU's serial), Phase 3b's `signals.csv`
+   (the DIDs' bytes and text) and any screenshots of the activity log
+   or of Live in Phase 3b: no VIN, calibration IDs or ECU serial, no names or
    initials, and no local paths (`%TEMP%` and `C:\Users\…` paths
    carry the account name)
 2. Walk the [BENCH prep list](../../STATUS.md#bench-prep): mark each
