@@ -1400,6 +1400,84 @@ TEST(RequestEngineTest, IdentificationAloneRunsEveryTurnAndThenRests) {
     ASSERT_NO_FATAL_FAILURE(send_ident_request(&e, 1, 0, now));
 }
 
+namespace {
+
+/* A connect whose walk and first rotation request went unanswered, and
+ * whose next turn has the VIN item in the one-shot, not yet sent: the
+ * state a recovery's probe can meet. */
+void identify_after_a_silent_walk(ecuio_request_engine* e, int64_t* now)
+{
+    ecuio_engine_init(e, 1);
+    const uint8_t pid_0c[2] = {0x01, 0x0C};
+    ASSERT_EQ(ecuio_engine_add(e, 0, pid_0c, 2), ecuio_engine_add_result::added);
+    ecuio_engine_identify(e);
+    ecuio_engine_probe(e, *now);
+    ASSERT_NO_FATAL_FAILURE(send_bitmap_request(e, 0, 0x00, *now));
+    *now += ECUIO_ENGINE_WAIT_US;
+    ASSERT_TRUE(ecuio_engine_expire(e, 0, *now));   /* the walk ends unjudged */
+    ASSERT_NO_FATAL_FAILURE(send_rotation(e, 0, 0, *now));
+    *now += ECUIO_ENGINE_WAIT_US;
+    ASSERT_TRUE(ecuio_engine_expire(e, 0, *now));
+}
+
+const char kVin[] = "FAKEJ2534VIN00001";
+
+} // namespace
+
+/* A recovery restarts the walk while an identification item is out: the
+ * item keeps the one-shot, its reply settles it, and the walk follows.
+ * The recovery's rescan has already run, so an item lost here would stay
+ * unanswered until the next one. */
+TEST(RequestEngineTest, RecoveryWalkWaitsForTheItemOut) {
+    ecuio_request_engine e;
+    int64_t now = 0;
+    ASSERT_NO_FATAL_FAILURE(identify_after_a_silent_walk(&e, &now));
+    ASSERT_NO_FATAL_FAILURE(send_ident_request(&e, 0, 0, now));   /* 09 02 */
+
+    ecuio_engine_probe(&e, now + kMs);   /* the driver's recovery calls */
+    ecuio_engine_rescan(&e);
+    EXPECT_TRUE(e.chans[0].walking);
+    EXPECT_EQ(answer_ident(&e, 0, 0, reinterpret_cast<const uint8_t*>(kVin), 17,
+                           now + 4 * kMs),
+              ecuio_reply::positive);
+    EXPECT_EQ(e.chans[0].ident[0].outcome, ECUIO_IDENTITY_ANSWERED);
+    EXPECT_STREQ(e.chans[0].ident[0].text, kVin);
+
+    now += ECUIO_ENGINE_GAP_US;
+    ASSERT_NO_FATAL_FAILURE(send_bitmap_request(&e, 0, 0x00, now));
+    EXPECT_EQ(answer_bitmap(&e, 0, 0x00, 1u << (32 - 0x0C), now + 4 * kMs),
+              ecuio_reply::positive);
+    EXPECT_TRUE(e.chans[0].walked);
+    EXPECT_EQ(e.chans[0].requests, 1u) << "0x0C is supported";
+}
+
+/* A recovery restarts the walk while an identification item waits in
+ * the one-shot unsent (its write failed): the item goes out first, so the
+ * walk's bitmap reply can never be taken for the item's answer. */
+TEST(RequestEngineTest, RecoveryWalkWaitsForAnUnsentItem) {
+    ecuio_request_engine e;
+    int64_t now = 0;
+    ASSERT_NO_FATAL_FAILURE(identify_after_a_silent_walk(&e, &now));
+    const int32_t r = ecuio_engine_due(&e, 0, now);
+    ASSERT_EQ(r, ECUIO_ENGINE_ONCE);
+    ASSERT_TRUE(e.chans[0].identifying);
+    ecuio_engine_sent(&e, 0, r, false, now);   /* the write failed */
+
+    ecuio_engine_probe(&e, now + kMs);   /* another channel recovered the link */
+    now += ECUIO_ENGINE_GAP_US;
+    ASSERT_NO_FATAL_FAILURE(send_ident_request(&e, 0, 0, now));
+    EXPECT_EQ(answer_ident(&e, 0, 0, reinterpret_cast<const uint8_t*>(kVin), 17,
+                           now + 4 * kMs),
+              ecuio_reply::positive);
+
+    now += ECUIO_ENGINE_GAP_US;
+    ASSERT_NO_FATAL_FAILURE(send_bitmap_request(&e, 0, 0x00, now));
+    EXPECT_EQ(answer_bitmap(&e, 0, 0x00, 1u << (32 - 0x0C), now + 4 * kMs),
+              ecuio_reply::positive);
+    EXPECT_STREQ(e.chans[0].ident[0].text, kVin) << "the bitmap isn't the VIN";
+    EXPECT_TRUE(e.chans[0].walked);
+}
+
 /* The report's text: ASCII when the bytes are printable or padding, the
  * padded items joined and trailing blanks dropped; hex pairs otherwise;
  * cut to the field at a whole pair. */

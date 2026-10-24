@@ -5,9 +5,10 @@
 // Testing: UNIT — derivation, deduplication and the limit, the
 //     read-only rule, rotation per channel, correlation, the wait, the
 //     pending wait and the floor; the supported-PID walk, its budget and
-//     its resumption, and what each answer drops; the DID scan's turns,
-//     outcomes and rescan; identification's turns, outcomes, text and
-//     report (RequestEngineTest, test_obd2); the worker that drives it is
+//     its resumption (behind a one-shot already taken), and what each
+//     answer drops; the DID scan's turns, outcomes and rescan;
+//     identification's turns, outcomes, text and report
+//     (RequestEngineTest, test_obd2); the worker that drives it is
 //     HARNESS (J2534AdoptionTest, J2534HealthTest), its timing on a
 //     vehicle BENCH.
 
@@ -156,10 +157,16 @@ struct ecuio_engine_channel {
     uint32_t requests = 0;      /* this channel's requests in the rotation */
     bool in_step = true;        /* no request has timed out since the last
                                  * positive reply: see ecuio_engine_on_frame */
-    ecuio_request once = {};    /* the one-shot: the walk's next bitmap */
+    /* The one-shot: what goes out outside the rotation, one at a time,
+     * whoever it's for (the walk's next bitmap, an identification item,
+     * a scanned DID). identifying and scanning say it's taken; the walk
+     * keeps its own next request below, so starting a walk never touches
+     * a slot that's taken. */
+    ecuio_request once = {};
     /* The supported-PID walk. Bits for PID p sit as the bitmaps carry
      * them: bit 0x80 >> ((p - 1) % 8) of byte (p - 1) / 8. */
-    bool walking = false;       /* the one-shot is due or out */
+    bool walking = false;       /* the walk has a bitmap to ask */
+    ecuio_request walk = {};    /* that bitmap; the one-shot copies it */
     bool probed = false;        /* a walk has started */
     bool walked = false;        /* the chain was answered to its end */
     uint8_t ranges = 0;         /* bit i: the bitmap at 0x20 * i answered */
@@ -620,7 +627,7 @@ inline void ecuio_engine_take_bitmap(ecuio_request_engine* e, uint32_t c,
                                      const uint8_t* data, int64_t now_us)
 {
     ecuio_engine_channel& ch = e->chans[c];
-    const uint32_t range = ch.once.bytes[1] / 0x20u;
+    const uint32_t range = ch.walk.bytes[1] / 0x20u;
     for (uint32_t b = 0; b < 4; ++b) {
         ch.known[range * 4 + b] = 0xFF;
         ch.supported[range * 4 + b] = data[2 + b];
@@ -637,7 +644,7 @@ inline void ecuio_engine_take_bitmap(ecuio_request_engine* e, uint32_t c,
         ecuio_engine_end_walk(e, c);
         return;
     }
-    ch.once.bytes[1] = static_cast<uint8_t>((range + 1) * 0x20u);
+    ch.walk.bytes[1] = static_cast<uint8_t>((range + 1) * 0x20u);
     if (now_us >= e->walk_until_us) {
         ecuio_engine_end_walk(e, c);
     }
@@ -647,7 +654,10 @@ inline void ecuio_engine_take_bitmap(ecuio_request_engine* e, uint32_t c,
  * Service 01 requests in its rotation and whose chain isn't answered to
  * its end yet. A walk resumes at the first bitmap it hasn't had, so the
  * one at connect and each after a recovery (the driver's call) together
- * ask each bitmap until it's answered. The budget starts now. */
+ * ask each bitmap until it's answered. The budget starts now. A channel
+ * whose one-shot is taken by an identification item or a scanned DID
+ * keeps it: the walk waits in ch.walk until that one has settled
+ * (ecuio_engine_due). */
 inline void ecuio_engine_probe(ecuio_request_engine* e, int64_t now_us)
 {
     e->probe = true;
@@ -672,23 +682,24 @@ inline void ecuio_engine_probe(ecuio_request_engine* e, int64_t now_us)
         if (range == 8) {
             continue;   /* every bitmap answered, so walked is set */
         }
-        ch.once = ecuio_request{};
-        ch.once.bytes[0] = 0x01;
-        ch.once.bytes[1] = static_cast<uint8_t>(range * 0x20u);
-        ch.once.len = 2;
-        ch.once.channel = static_cast<uint8_t>(c);
+        ch.walk = ecuio_request{};
+        ch.walk.bytes[0] = 0x01;
+        ch.walk.bytes[1] = static_cast<uint8_t>(range * 0x20u);
+        ch.walk.len = 2;
+        ch.walk.channel = static_cast<uint8_t>(c);
         ch.walking = true;
         ch.probed = true;
     }
 }
 
-/* What channel c sends next: ECUIO_ENGINE_ONCE while its walk has a
- * bitmap to ask, then, taking turns with the rotation, ECUIO_ENGINE_ONCE
- * for the next identification item, then for the next scanned DID,
- * else the next request of its rotation, or ECUIO_ENGINE_NONE while one
- * is outstanding, before the floor, or when there is nothing to send. A
- * walk out of budget ends here. Moves the rotation past the request it
- * returns; ecuio_engine_sent records what became of it. */
+/* What channel c sends next: ECUIO_ENGINE_ONCE for an identification
+ * item or a scanned DID already in the one-shot (its write failed), then
+ * while its walk has a bitmap to ask, then, taking turns with the
+ * rotation, for the next identification item, then for the next scanned
+ * DID, else the next request of its rotation, or ECUIO_ENGINE_NONE while
+ * one is outstanding, before the floor, or when there is nothing to
+ * send. A walk out of budget ends here. Moves the rotation past the
+ * request it returns; ecuio_engine_sent records what became of it. */
 inline int32_t ecuio_engine_due(ecuio_request_engine* e, uint32_t c,
                                 int64_t now_us)
 {
@@ -696,14 +707,17 @@ inline int32_t ecuio_engine_due(ecuio_request_engine* e, uint32_t c,
     if (ch.outstanding != ECUIO_ENGINE_NONE || now_us < ch.next_send_us) {
         return ECUIO_ENGINE_NONE;
     }
+    /* Taken before a probe started the walk: it goes first, so its reply
+     * settles it and no other request's reply does. */
+    if (ch.identifying || ch.scanning) {
+        return ECUIO_ENGINE_ONCE;
+    }
     if (ch.walking) {
         if (now_us < e->walk_until_us) {
+            ch.once = ch.walk;
             return ECUIO_ENGINE_ONCE;
         }
         ecuio_engine_end_walk(e, c);
-    }
-    if (ch.identifying || ch.scanning) {
-        return ECUIO_ENGINE_ONCE;   /* a one-shot the driver didn't send */
     }
     const bool once_turn = ch.requests == 0 || ch.scan_turn;
     if (ch.ident_pending > 0 && once_turn) {

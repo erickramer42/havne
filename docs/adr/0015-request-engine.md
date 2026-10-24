@@ -407,3 +407,19 @@ it: [ADR-0021](0021-vehicle-identification.md). Service 09's items and
 the identification DIDs go out as the one-shot requests §1 describes,
 through the slot the probe and the scan use, taking turns with the
 rotation, and their text is formed in core.
+
+## Appendix — a resumed walk and a taken slot (2026-10-24)
+
+A walk that resumes on recovery can meet the one-shot slot taken by an
+identification item or a scanned DID, either waiting for its reply or
+due again after a failed write. As first built, starting the walk wrote
+its bitmap request into the slot. The item's reply then matched nothing
+and the item was left unanswered, after that recovery's rescan had
+already run. Or, with the item unsent, the bitmap's reply was stored as
+the item's text. The walk now keeps its next bitmap apart from the slot,
+and the slot's holder goes first: it's sent, or waited for, and settles,
+then the walk takes the slot. The walk's 1 s budget still runs from the
+recovery, so an item held in "response pending" for longer ends that
+walk unjudged, and the next recovery resumes it.
+`RequestEngineTest.RecoveryWalkWaitsForTheItemOut` and
+`.RecoveryWalkWaitsForAnUnsentItem` pin both.
