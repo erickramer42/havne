@@ -27,9 +27,13 @@ J2534 frames carry session time, the QML pages and the signal decoder
 have tests of their own (Qt Quick Test, libFuzzer), requests follow
 the ECU's replies instead of a fixed slot
 ([ADR-0015](docs/adr/0015-request-engine.md)), the probe drops
-what each ECU says it doesn't support, and a frame carries a whole
-ISO 15765 message. Next is the plan in
-[After v0.3.0](#after-v030).
+what each ECU says it doesn't support, a frame carries a whole
+ISO 15765 message, `uds-generic` reads and scans the DIDs a URI
+names ([ADR-0020](docs/adr/0020-uds-generic.md)), every session
+asks its ECU who it is
+([ADR-0021](docs/adr/0021-vehicle-identification.md)), and Settings
+composes the URI from a preset, a profile row and a DID field. Next
+is the plan in [After v0.3.0](#after-v030).
 
 - **Works:**
   - The mock transport drives the live frame log, LiveView and the
@@ -149,13 +153,14 @@ ISO 15765 message. Next is the plan in
     run sheets are
     [bench-runsheet.md](docs/bench-sessions/bench-runsheet.md) and
     [vehicle-runsheet.md](docs/bench-sessions/vehicle-runsheet.md).
-  - **Tests:** 337 ctest cases (Windows, Visual Studio 18 build
+  - **Tests:** 363 ctest cases (Windows, Visual Studio 18 build
     tools, both trees rebuilt, 2026-10-23), the QML suites
     among them, plus the cross-arch subset (69/69). All passed except
     the env-gated cross-arch skip. Every first-party target builds with
     compiler warnings on, at 0 on MSVC. CI was green on all nine jobs on
     PR #17 (`ce8284f`, merged as `1145d11`), the simulator smoke
-    included, and on the push runs at `c093185`. That covers ctest on
+    included, and on every push run since, the latest at `1ab2dd1`
+    (read from the GitHub API on 2026-10-23). That covers ctest on
     Windows, macOS and Linux, core under ASan and UBSan, 60 s of each
     libFuzzer harness ([fuzz/README.md](fuzz/README.md)), the Android
     and iOS device cross-builds, and the simulator smoke. The smoke runs
@@ -236,7 +241,7 @@ Contracts along this path:
 | Signal decode | Linear scaling in `double`. Each def states its value kind (unsigned, signed, binary32 float) and byte order (Intel at any bit offset, big-endian in whole bytes), and is gated on message ID plus a mux key of up to 3 bytes. Two signal sets, `mock` and `obd2`, chosen by profile. The validator accepts exactly the defs the decoder decodes, with named return codes; the profile registry runs it at registration and reports the failing check and element. | [ADR-0004](docs/adr/0004-signal-decoding-model.md), [ADR-0013](docs/adr/0013-protocol-profiles.md), [ADR-0016](docs/adr/0016-signal-definition-layout.md) |
 | Mock transport | A scripted ~2-minute drive cycle on a small vehicle model (`core/src/mock_drive_cycle.h`): cold-start warm-up, a 2nd-gear WOT pull from ~1550 rpm to the 7000 rpm limiter with a 5 s hold, a longer and hotter 3rd-gear pull with the same hold, then a quarter-mile run from a standstill (~13.4 s, ~176 km/h trap). Every tick of the cycle round-trips through the mock set in `CoreTest.MockDriveCycle*`. | — |
 | Bridge and models | Frame log with sort toggle; coalesced signal model with a 120-sample history per signal; device discovery for the picker; link-health polling. QML reaches it as the `Bridge` singleton. | [ADR-0003](docs/adr/0003-backpressure-bounds-in-flight-frames.md), [ADR-0005](docs/adr/0005-coalesced-signal-updates.md) |
-| QML pages | Home, Dashboard (gauges and shift lights through `SignalHub`), Live (table, and a strip chart with each trace's value at its end), Log (with Pause), Settings (device picker plus manual URI, and the one place a session is connected). The Dashboard rearranges to fit a short, wide window, short pages scroll with their scroll bar shown, and the whole UI zooms (Ctrl + / Ctrl − / Ctrl 0, or Settings' Display row), kept between runs. Names, units and decimal places come from core. `Theme` holds the palette, fonts, page margin and the link-state color and label functions; `PageHeader` gives the pages one title row. `test_qml` runs the pages and the app's window against a real bridge, offscreen: the link-health surfaces, Live's swatches and dashes, `SignalHub` and the gauges' notes. | [docs/architecture.md](docs/architecture.md#the-ui-layer) |
+| QML pages | Home, Dashboard (gauges and shift lights through `SignalHub`), Live (table, and a strip chart with each trace's value at its end), Log (with Pause), Settings (presets, the device picker, a profile row and a DID field composing an editable URI, and the one place a session is connected). The Dashboard rearranges to fit a short, wide window, short pages scroll with their scroll bar shown, and the whole UI zooms (Ctrl + / Ctrl − / Ctrl 0, or Settings' Display row), kept between runs. Names, units and decimal places come from core. `Theme` holds the palette, fonts, page margin and the link-state color and label functions; `PageHeader` gives the pages one title row. `test_qml` runs the pages and the app's window against a real bridge, offscreen: the link-health surfaces, Live's swatches and dashes, `SignalHub` and the gauges' notes. | [docs/architecture.md](docs/architecture.md#the-ui-layer) |
 | J2534 | HARNESS-verified, same-arch and cross-arch, including transport adoption (ADR-0012), profile-derived channels (ADR-0013) and the request engine (ADR-0015). BENCH: one adapter, quiet bus. Vehicle: one car, read-only, through the surrogate, before the request engine. | [docs/j2534.md](docs/j2534.md) |
 
 ## v0.3.0 checklist
@@ -467,7 +472,7 @@ an issue is resolved it is removed, and its number is not reused.
 | v0.1.0 | Skeleton: core ABI, Qt shell, responsive layout | ✅ Released |
 | v0.2.0 | Callback API, mock transport, live frame log, CI | ✅ Released (tagged) |
 | v0.3.0 | Signal decoding, LiveView, J2534 transport, live vehicle read and logging | ✅ Released (tagged) |
-| v0.3.x | Request engine, PID-support probe, `uds-generic`, record-replay transport | Next: [after v0.3.0](#after-v030) |
+| v0.3.x | Request engine, PID-support probe, `uds-generic`, vehicle identification, record-replay transport | Under way: [after v0.3.0](#after-v030) |
 | v0.4.0 | Security access discovery, flash capability | Planned |
 | v0.5.0+ | Manufacturer plugin modules (ADR-0013's profile API) | Planned |
 
