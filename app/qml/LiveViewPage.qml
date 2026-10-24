@@ -2,8 +2,10 @@
 // Testing: model contract covered by test_bridge; swatch colours, dashes
 //          and banner text by test_qml (tests/qml/tst_liveview.qml, and
 //          tst_linkhealth.qml for the banner in each link state), which
-//          finds items by objectName; the strip chart's drawing is
-//          verified manually (docs/testing.md).
+//          finds items by objectName; the strip chart's layout (ranges,
+//          lanes, gaps, ticks, labels) by tst_chartlayout.qml through
+//          ChartLayout; the drawing itself is verified manually
+//          (docs/testing.md).
 
 import QtQuick
 import QtQuick.Controls
@@ -21,6 +23,17 @@ Page {
     signal connectRequested()
 
     readonly property int rowHeight: 44
+
+    // A value this old is stale: its row dims, and the chart breaks its
+    // trace across the gap instead of drawing a ramp. 3 s is generous
+    // against a full rotation of the requests, at most the engine's
+    // 100 ms wait each, so about 1 s for the obd2 set.
+    readonly property int staleMs: 3000
+
+    // A trace's range is at least this many displayed digits, so a step
+    // of one or two (fuel level between 71 % and 73 %, the charging
+    // voltage within 0.4 V) doesn't fill the plot's height
+    readonly property int minSpanUnits: 20
 
     // Trace styles, keyed by model row (chartData's `row`), so a row's
     // swatch matches its trace and styles hold when another signal is
@@ -220,11 +233,8 @@ Page {
                         color: Theme.text
                         font.pixelSize: 16
                         font.family: Theme.monoFamily   // fixed-width digits, no jitter
-                        // Staleness dimming: 3 s is generous against a full
-                        // rotation of the requests, at most the engine's
-                        // 100 ms wait each, so about 1 s for the obd2 set.
                         opacity: signalDelegate.hasValue
-                                 && signalDelegate.ageMs > 3000
+                                 && signalDelegate.ageMs > root.staleMs
                                      ? 0.45 : 1.0
                     }
                 }
@@ -233,7 +243,8 @@ Page {
 
         // ---- Strip chart: per-signal rolling history, one repaint per
         // coalesced batch. Each trace takes its list row's colour
-        // (root.seriesColor), so the list is the legend.
+        // (root.seriesColor), so the list is the legend. ChartLayout
+        // works out where everything goes; the Canvas strokes it.
         Rectangle {
             Layout.fillWidth: true
             Layout.fillHeight: true
@@ -258,6 +269,8 @@ Page {
                     function onConnectedChanged() { chart.requestPaint() }
                 }
 
+                // The layout is ChartLayout's (tested); this only strokes
+                // what it returns
                 onPaint: {
                     const ctx = getContext("2d")
                     ctx.reset()
@@ -273,135 +286,67 @@ Page {
                         return
                     }
 
-                    // Shared TIME axis across series (actual timestamps)
-                    let tMin = Infinity, tMax = -Infinity
-                    for (let s = 0; s < series.length; ++s) {
-                        const sp = series[s].samples
-                        if (sp.length >= 2) {
-                            if (sp[0] < tMin) tMin = sp[0]
-                            // flattened pairs end with a VALUE, not a
-                            // timestamp — the last timestamp is at length-2
-                            if (sp[sp.length - 2] > tMax) tMax = sp[sp.length - 2]
-                        }
-                    }
-                    if (!isFinite(tMin) || tMax <= tMin) return
-
-                    // Per-series VALUE scaling (kept independent
-                    // deliberately), so the numbers come from the labels
-                    // in the right gutter: one per trace, at its newest
-                    // sample's height. A trace that doesn't change by a
-                    // displayed digit is flat.
-                    ctx.font = "11px " + Theme.monoFamily
-                    const lineH = 14, swatchW = 12
-                    const traces = []
-                    let labelW = 0
-                    for (let s = 0; s < series.length; ++s) {
-                        const sp = series[s].samples
-                        if (sp.length < 2) continue
-                        let vMin = sp[1], vMax = sp[1]
-                        for (let i = 1; i < sp.length; i += 2) {
-                            if (sp[i] < vMin) vMin = sp[i]
-                            if (sp[i] > vMax) vMax = sp[i]
-                        }
-                        const label = root.valueText(sp[sp.length - 1], series[s].decimals,
-                                                     series[s].unit)
-                        labelW = Math.max(labelW, ctx.measureText(label).width)
-                        traces.push({ sp: sp, row: series[s].row, vMin: vMin, vMax: vMax,
-                                      flat: vMax - vMin < 0.5 * Math.pow(10, -series[s].decimals),
-                                      label: label })
-                    }
-
-                    const axisH = 16, top = 6
-                    const plotH = Math.max(1, height - axisH - top - 4)
-                    const plotW = Math.max(1, width - Math.min(Math.ceil(labelW) + swatchW + 14,
-                                                               width * 0.4))
-                    const xOf = t => (t - tMin) / (tMax - tMin) * (plotW - 1)
-                    const yOf = norm => top + (1 - norm) * plotH
-
-                    // Flat traces each get a lane of their own instead of
-                    // stacking on one line, top down in list order; the
-                    // label carries the value
-                    const flatCount = traces.filter(tr => tr.flat).length
-                    let lane = 0
-                    for (const tr of traces) {
-                        if (tr.flat) tr.lane = 1 - (++lane) / (flatCount + 1)
-                    }
-                    function traceY(tr, v) {
-                        return tr.flat ? yOf(tr.lane) : yOf((v - tr.vMin) / (tr.vMax - tr.vMin))
-                    }
+                    ctx.font = "11px " + Theme.monoFamily   // measured and drawn in
+                    const l = ChartLayout.layout(series, width, height, {
+                        gapMs: root.staleMs, minSpanUnits: root.minSpanUnits,
+                        measure: text => ctx.measureText(text).width,
+                        format: root.valueText })
+                    if (!l) return
 
                     // Grid: quarter lines, and one vertical per time tick
-                    // (seconds before the newest sample)
-                    const spanS = (tMax - tMin) / 1000
-                    const stepS = spanS > 12 ? 5 : spanS > 6 ? 2 : 1
                     ctx.strokeStyle = Theme.bg
                     ctx.lineWidth = 1
                     ctx.beginPath()
-                    for (let g = 1; g < 4; ++g) {
-                        const gy = top + plotH * g / 4
+                    for (const gy of l.hGrid) {
                         ctx.moveTo(0, gy)
-                        ctx.lineTo(plotW, gy)
+                        ctx.lineTo(l.plotW, gy)
                     }
-                    for (let k = 0; k * stepS <= spanS; ++k) {
-                        const gx = xOf(tMax - k * stepS * 1000)
-                        ctx.moveTo(gx, top)
-                        ctx.lineTo(gx, top + plotH)
+                    for (const tick of l.ticks) {
+                        ctx.moveTo(tick.x, l.top)
+                        ctx.lineTo(tick.x, l.top + l.plotH)
                     }
                     ctx.stroke()
 
+                    // Captions: seconds before the newest sample
                     ctx.fillStyle = Theme.textDim
                     ctx.textBaseline = "top"
-                    for (let k = 0; k * stepS <= spanS; ++k) {
-                        const gx = xOf(tMax - k * stepS * 1000)
-                        if (k > 0 && gx < 24) break   // no room left of the tick
-                        ctx.textAlign = k === 0 ? "right" : "center"
-                        ctx.fillText(k === 0 ? qsTr("now") : qsTr("−%1 s").arg(k * stepS),
-                                     gx, top + plotH + 3)
+                    for (const tick of l.ticks) {
+                        if (!tick.captioned) continue
+                        ctx.textAlign = tick.seconds === 0 ? "right" : "center"
+                        ctx.fillText(tick.seconds === 0 ? qsTr("now") : qsTr("−%1 s").arg(tick.seconds),
+                                     tick.x, l.top + l.plotH + 3)
                     }
 
-                    for (const tr of traces) {
-                        const sp = tr.sp
+                    // Traces, each segment its own stroke (a gap is a break)
+                    ctx.lineWidth = 2
+                    for (const tr of l.traces) {
                         ctx.strokeStyle = root.seriesColor(tr.row)
                         ctx.setLineDash(root.seriesDash(tr.row))
-                        ctx.lineWidth = 2
-                        ctx.beginPath()
-                        for (let i = 0; i < sp.length; i += 2) {
-                            const x = xOf(sp[i])
-                            const y = traceY(tr, sp[i + 1])
-                            if (i === 0) ctx.moveTo(x, y)
-                            else ctx.lineTo(x, y)
+                        for (const seg of tr.segments) {
+                            ctx.beginPath()
+                            for (let i = 0; i < seg.length; ++i) {
+                                if (i === 0) ctx.moveTo(seg[i].x, seg[i].y)
+                                else ctx.lineTo(seg[i].x, seg[i].y)
+                            }
+                            ctx.stroke()
                         }
-                        ctx.stroke()
-                        tr.y = traceY(tr, sp[sp.length - 1])
                     }
 
-                    // Value labels, nudged apart where traces end close
-                    // together and kept inside the plot's height. Each
-                    // starts with a sample of its trace's stroke, so
-                    // dashed rows read apart from solid ones.
-                    const byY = traces.slice().sort((a, b) => a.y - b.y)
-                    for (let i = 0; i < byY.length; ++i) {
-                        byY[i].ly = Math.max(byY[i].y,
-                                             i > 0 ? byY[i - 1].ly + lineH : top + lineH / 2)
-                    }
-                    for (let i = byY.length - 1; i >= 0; --i) {
-                        byY[i].ly = Math.min(byY[i].ly, i < byY.length - 1
-                                                        ? byY[i + 1].ly - lineH
-                                                        : top + plotH - lineH / 2)
-                    }
-                    const lx = plotW + 6
+                    // Value labels, each starting with a sample of its
+                    // trace's stroke, so dashed rows read apart from solid
+                    ctx.lineWidth = 1
                     ctx.textAlign = "left"
                     ctx.textBaseline = "middle"
-                    for (const tr of byY) {
+                    for (const tr of l.traces) {
                         const c = root.seriesColor(tr.row)
                         ctx.strokeStyle = c
                         ctx.setLineDash(root.seriesDash(tr.row))
                         ctx.beginPath()
-                        ctx.moveTo(lx, tr.ly)
-                        ctx.lineTo(lx + swatchW, tr.ly)
+                        ctx.moveTo(l.labelX, tr.labelY)
+                        ctx.lineTo(l.labelX + ChartLayout.swatchW, tr.labelY)
                         ctx.stroke()
                         ctx.fillStyle = c
-                        ctx.fillText(tr.label, lx + swatchW + 4, tr.ly)
+                        ctx.fillText(tr.label, l.labelX + ChartLayout.swatchW + 4, tr.labelY)
                     }
                     ctx.setLineDash([])
                 }

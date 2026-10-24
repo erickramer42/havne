@@ -35,7 +35,7 @@ and the next run's screenshots confirmed the fixes the same day.
 | `test_signals` | `SignalDecodeTest`, `SignalsTest` | Nothing (Qt-free) |
 | `test_c_abi` (ctest name `c_abi`) | Every public header compiles as ISO C11 with extensions off (`-pedantic` on GCC and Clang) and links unmangled; layout asserts | A C compiler |
 | `test_bridge` | `BridgeTest` | Qt Core. Compiles `app/qttunebridge.cpp` directly, so the bridge must stay QtCore-only. |
-| `test_qml` | One ctest case per `tests/qml/tst_*.qml` file, `QmlTest.<name>`: `theme`, `liveview`, `dashboard`, `linkhealth`, `settings` | Qt Quick. Links the app's QML module (`qttune_ui`). The quiet, fault and requests cases need the fake DLL (Windows) and skip elsewhere. |
+| `test_qml` | One ctest case per `tests/qml/tst_*.qml` file, `QmlTest.<name>`: `theme`, `chartlayout`, `liveview`, `dashboard`, `linkhealth`, `settings` | Qt Quick. Links the app's QML module (`qttune_ui`). The quiet, fault and requests cases need the fake DLL (Windows) and skip elsewhere. |
 | `test_j2534_discovery` | `J2534DiscoveryTest` | Windows |
 | `test_j2534_load` | `FakeFixture` | Windows and the fake DLL |
 | `test_j2534_stream` | `J2534StreamTest`, `J2534QueryParamTest`, `J2534AdoptionTest` | Windows and the fake DLL |
@@ -179,6 +179,7 @@ and the next run's screenshots confirmed the fixes the same day.
 | Link-state mapping: `ECUIO_OK` → `ok`, vehicle timeout → `quiet`, `ECUIO_ERR_REQUEST_FAILED` → `requests`, hard failure → `fault`, any other code → `degraded` | `BridgeTest.LinkStateMapsEveryPublishedCode` (session-free, through `QtTuneBridge::linkStateForError`) |
 | Theme's link-state colour and label for every state the bridge publishes, with an unknown state shown as degraded; the chart trace colours are distinct, and none is a saturated hue within 20° of the danger colour | `QmlTest.theme` |
 | Live's trace styles are keyed by model row: colours from `Theme.seriesColors`, solid within the palette, and past it no two rows that share a colour share a dash. Under `mock://demo` each row's swatch shows its row's trace colour, filled while plotted and hollow while not, the other rows unchanged. The banner's message for each link state, an unknown one as degraded | `QmlTest.liveview` |
+| The strip chart's layout, on synthetic series: nothing to draw without a time span; the plot leaves room for the widest label, capped at 40 % of the width; each trace scales to its own range, widened to a minimum span of displayed digits (two units over a twenty-unit span take a tenth of the height, 0.4 V of 2.0 V a fifth), while a trace that never moves by half a digit takes a lane of its own; a gap past the threshold breaks a trace into segments and a shorter pause doesn't; the time ticks step 1, 2 or 5 s back from the newest sample, with no caption where there's no room; value labels are nudged a line apart and kept inside the plot | `QmlTest.chartlayout` (`ChartLayout`, no bridge) |
 | `SignalHub` finds a signal by the first of a `Tap`'s names the set provides, else null, mirrors the model's values, and follows a profile switch. Each Dashboard gauge reads its signal by the name the mock and `obd2` sets share. It says "no session", then "waiting for data" until the first 100 ms batch, then nothing, with the value at the signal's decimal places in its unit; after a switch to `?profile=raw`, "not in profile" | `QmlTest.dashboard` |
 | Every link-health surface in the app's window (`Main`), in colour and words: the header pill, Home's status card, the Dashboard header, Live's banner, Settings' status label and the activity log's link line. Disconnected and ok (`mock://demo`) everywhere; quiet, fault and requests through the fake in-proc with its knob armed; a disconnect after a fault shows plain disconnected again | `QmlTest.linkhealth` (the fake's cases on Windows) |
 | A binding error in the app's QML fails the page tests: they treat any warning from `qrc:/qt/qml/QtTune/` as a failure. That catches a removed delegate's binding, such as a Live row's swatch reading the palette at index -1 while a connect resets the model | `QmlTest.liveview`, `.dashboard`, `.linkhealth`, `.settings` (`failOnWarning`) |
@@ -335,7 +336,8 @@ rows against the current Home, Settings and Dashboard header.
   dev machine.
 - **QML tests read properties, not pixels.** They run offscreen on the
   software renderer and check what each item shows: its colour, text
-  and visibility. The strip chart's drawing, the gauges, layout at each
+  and visibility. The strip chart's layout is arithmetic the tests run
+  (`ChartLayout`), but its drawing, the gauges, layout at each
   width, focus rings and the GPU backends are manual smoke only. Off
   Windows there's no fake vendor DLL, so only the disconnected and ok
   link states run there.

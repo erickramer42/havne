@@ -523,14 +523,6 @@ in the backlog.
 
 ### User interface
 
-- **Strip chart across gaps (S).** A trace joins its last sample
-  before an outage to its first after with a straight line, so the
-  first vehicle's 31 s ignition cycle drew as ramps. Break the trace
-  once a gap passes the stale threshold.
-- **Strip-chart scaling (S).** Each trace is scaled to its own range,
-  so a one-count step fills the plot: fuel level moving between 71 %
-  and 73 % on the first vehicle drew as a full-height square wave. A
-  minimum span per trace would keep small steps small.
 - **Persisted preferences (S).** Only the UI zoom survives a
   restart, through QML `Settings` in `Main.qml` (category `ui`).
   Developer mode, units, theme, the last-used device, the Record

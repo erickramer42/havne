@@ -252,7 +252,11 @@ The bridge polls it on its 100 ms tick and maps it for the UI
   row's swatch is the legend and a trace keeps its colour when
   another signal is unsubscribed. The ticks choose what's plotted and
   nothing else. Each trace scales on its own, so its value is printed
-  at its right-hand end.
+  at its right-hand end; its range is at least a few displayed digits,
+  so a one-count step stays small, and a gap longer than the stale
+  threshold breaks the trace instead of drawing a ramp. The layout is
+  arithmetic in the `ChartLayout` singleton, which the tests run with
+  synthetic series; the Canvas only strokes what it returns.
 - **`SignalHub`** gives the Dashboard signals by *name*, because gauges
   want "RPM" whichever profile provides it. The mock and `obd2` sets
   share names; a profile that names a signal differently adds the
