@@ -92,7 +92,8 @@ Dates are commit dates.
 | 2026-10-23 | The `uds-generic` profile ([ADR-0020](adr/0020-uds-generic.md)): `?did=` names the DIDs (an ECU prefix, a type, a range), create builds a set the session owns, single DIDs are polled and ranges scanned once beside the rotation by the request engine, the found ones joining it; the support report and the ECU line carry the scan's counts; the mock answers the DIDs, so a QML test shows a text row; `fuzz_uds_query` | `9107312` |
 | 2026-10-23 | Vehicle identification ([ADR-0021](adr/0021-vehicle-identification.md)): every requesting channel asks its ECU the VIN, calibration IDs and identification DIDs once, taking turns with the rotation; the text is formed in core, a report per channel crosses the C ABI, and the bridge logs one line per ECU once complete; `?identify=0`; the fake answers the list with FAKE values | `6107e98` |
 | 2026-10-23 | Settings composes the URI: presets and device rows set the base, a profile row (default, `raw`, `uds-generic`) its query and a DID field `did=`, the field left editable and core's refusal shown in the error line; `QmlTest.settings` | `1ab2dd1` |
-| 2026-10-23 | Settings' controls share one `idle` state, the device rows among them, so a row click can't rewrite the field under a connect in flight; the QML suite's cleanup waits for such a connect | — |
+| 2026-10-23 | Settings' controls share one `idle` state, the device rows among them, so a row click can't rewrite the field under a connect in flight; the QML suite's cleanup waits for such a connect | `e4bb5c8` |
+| 2026-10-23 | Settings reads a typed URI back into its choices (`profile=` sets the row, `did=` the DID field, the text left as typed) and composes by merging, so a click keeps every other query key and typed DIDs survive a trip through another profile; one profile list feeds the row, the hint and the composition; the DID field's validator admits the grammar's characters only | — |
 
 ## Lessons learned
 

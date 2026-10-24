@@ -1,6 +1,8 @@
 // File/layer: app/qml/SettingsPage.qml | Qt6 Quick, UI layer
 // Testing: test_qml (tests/qml/tst_settings.qml): the URI composed from a
-//          preset, the profile row and the DID field, the field left
+//          preset, the profile row and the DID field, a typed URI read
+//          back into the row and the field with its other keys kept,
+//          the DID field refusing query characters, the field left
 //          editable, core's refusal in the error line, a composed
 //          uds-generic URI connecting through the mock, every control
 //          locked while a connect is in flight; the status label
@@ -57,49 +59,164 @@ Pane {
 
     // The URI is composed from three choices, so none of it needs typing:
     // a base (a preset or a discovered device), a profile, and
-    // uds-generic's DIDs. The field stays editable: a hand-written URI
-    // connects as written, and the next preset, device or profile click
-    // composes it again from that URI's base. The choices live only
-    // while the app runs.
-    property string profileChoice: "default"   // "default", "raw" or "uds-generic"
+    // uds-generic's DIDs. The field stays editable both ways: a
+    // hand-written URI connects as written and its profile= and did= set
+    // the row and the DID field, and the next preset, device or profile
+    // click recomposes it, keeping every other query key where it was.
+    // The choices live only while the app runs.
+    property string profileChoice: "default"
+
+    // The profiles the row offers (ADR-0013, ADR-0020). "default" is the
+    // scheme's own profile, so it adds no profile= key. A typed name
+    // outside the list highlights no button; core judges it at connect.
+    readonly property var profiles: [
+        { name: "default", label: qsTr("Default"),
+          hint: qsTr("The scheme's own profile: obd2 on an adapter, the demo set on mock://") },
+        { name: "raw", label: qsTr("raw (log only)"),
+          hint: qsTr("No decode: frames reach the Log page only. On an adapter the URI "
+                     + "filters on the engine ECU's replies (0x7E8); edit it for another ID") },
+        { name: "uds-generic", label: qsTr("uds-generic (DIDs)"),
+          hint: qsTr("Service 0x22 reads of the DIDs below, polled; a range is scanned "
+                     + "once and the DIDs the ECU answers join the polling") }
+    ]
+
+    // The raw row's filter: an ISO 15765 channel with no filter receives
+    // nothing (docs/j2534.md), so raw on an adapter listens to the engine
+    // ECU's reply ID. mock:// takes no filter key.
+    readonly property string engineFilter: "0x7E8"
+
+    // True while a typed URI is being read into the choices, so the DID
+    // field's change doesn't recompose the URI that set it; and true
+    // while the page writes the field from the choices, so that text
+    // isn't read back into them
+    property bool syncing: false
+    property bool composing: false
+
+    function setUri(text) {
+        composing = true
+        uriField.text = text
+        composing = false
+    }
+
+    function profileHint() {
+        for (const p of profiles) {
+            if (p.name === profileChoice)
+                return p.hint
+        }
+        return qsTr("The URI names profile '%1'; core judges it at connect").arg(profileChoice)
+    }
+
+    // A URI as its base and its query's [key, value] pairs, in order
+    // (a key with no "=" keeps null; core will name it)
+    function splitUri(text) {
+        const q = text.indexOf("?")
+        const pairs = []
+        if (q >= 0) {
+            for (const part of text.substring(q + 1).split("&")) {
+                if (part === "")
+                    continue
+                const eq = part.indexOf("=")
+                pairs.push(eq < 0 ? [part, null] : [part.substring(0, eq), part.substring(eq + 1)])
+            }
+        }
+        return { base: q < 0 ? text : text.substring(0, q), pairs: pairs }
+    }
+
+    function joinUri(base, pairs) {
+        if (pairs.length === 0)
+            return base
+        return base + "?" + pairs.map(p => p[1] === null ? p[0] : p[0] + "=" + p[1]).join("&")
+    }
+
+    // The first value of key, or undefined
+    function queryValue(pairs, key) {
+        for (const p of pairs) {
+            if (p[0] === key)
+                return p[1]
+        }
+        return undefined
+    }
+
+    // Sets key in place, appends it, or with null removes it
+    function setQuery(pairs, key, value) {
+        for (let i = 0; i < pairs.length; ++i) {
+            if (pairs[i][0] !== key)
+                continue
+            if (value === null)
+                pairs.splice(i, 1)
+            else
+                pairs[i] = [key, value]
+            return
+        }
+        if (value !== null)
+            pairs.push([key, value])
+    }
 
     // The field's text before its query
     function uriBase() {
-        const text = uriField.text
-        const q = text.indexOf("?")
-        return q < 0 ? text : text.substring(0, q)
+        return splitUri(uriField.text).base
     }
 
-    // base plus the chosen profile's query. raw on an adapter adds a
-    // filter on the engine ECU's reply ID: an ISO 15765 channel with no
-    // filter receives nothing (docs/j2534.md), and mock:// takes no
-    // filter key. uds-generic's DIDs go in as typed, minus whitespace;
-    // core judges them (ADR-0020) and the error line shows its words.
-    function composeUri(base) {
+    // base plus the query, with profile= and did= following the choices
+    // and every other key kept in place. uds-generic's DIDs go in as
+    // typed, minus whitespace; core judges them (ADR-0020) and the error
+    // line shows its words.
+    function composeUri(base, pairs) {
         if (base === "")
             return ""
-        switch (profileChoice) {
-        case "raw":
-            return base + "?profile=raw"
-                   + (base.startsWith("mock://") ? "" : "&filter=0x7E8")
-        case "uds-generic": {
-            const dids = didField.text.replace(/\s+/g, "")
-            return base + "?profile=uds-generic" + (dids === "" ? "" : "&did=" + dids)
+        const out = pairs.slice()
+        setQuery(out, "profile", profileChoice === "default" ? null : profileChoice)
+        const dids = profileChoice === "uds-generic" ? didField.text.replace(/\s+/g, "") : ""
+        setQuery(out, "did", dids === "" ? null : dids)
+        const filter = queryValue(out, "filter")
+        if (base.startsWith("mock://")) {
+            if (filter === engineFilter)
+                setQuery(out, "filter", null)
+        } else if (profileChoice === "raw" && filter === undefined) {
+            setQuery(out, "filter", engineFilter)
         }
-        default:
-            return base
-        }
+        return joinUri(base, out)
     }
 
     // Row click / preset click: selection is INTENT, never action. A row
     // that only fills the URI field can never accidentally cost 8 seconds.
+    // The query the field holds comes along.
     function fillUri(base) {
-        uriField.text = composeUri(base)
+        setUri(composeUri(base, splitUri(uriField.text).pairs))
     }
 
     function chooseProfile(name) {
+        const uri = splitUri(uriField.text)
+        // The raw row's own filter leaves with it; any other stays
+        if (profileChoice === "raw" && name !== "raw"
+                && queryValue(uri.pairs, "filter") === engineFilter)
+            setQuery(uri.pairs, "filter", null)
         profileChoice = name
-        uriField.text = composeUri(uriBase())
+        setUri(composeUri(uri.base, uri.pairs))
+    }
+
+    function recompose() {
+        const uri = splitUri(uriField.text)
+        setUri(composeUri(uri.base, uri.pairs))
+    }
+
+    // A URI the page didn't compose (typed, pasted, or set through UI
+    // Automation) sets the choices, never the other way round: the
+    // field's text is left as it is. The DID field follows did= whenever
+    // it's shown (uds-generic), so it never shows DIDs the URI lacks;
+    // under another profile it keeps what was typed for later.
+    function readChoices() {
+        const pairs = splitUri(uriField.text).pairs
+        const profile = queryValue(pairs, "profile")
+        const did = queryValue(pairs, "did")
+        syncing = true
+        profileChoice = (profile === undefined || profile === null || profile === "")
+                        ? "default" : profile
+        if (profileChoice === "uds-generic")
+            didField.text = did === undefined || did === null ? "" : did
+        else if (did !== undefined && did !== null)
+            didField.text = did
+        syncing = false
     }
 
     function requestConnect(uri) {
@@ -199,6 +316,11 @@ Pane {
                     placeholderText: qsTr("URI — e.g. mock://demo or j2534://Vendor?profile=raw&filter=0x7E8&poll=0x0C")
                     enabled: page.idle
                     color: Theme.text
+                    // Any text the page didn't compose is read back
+                    onTextChanged: {
+                        if (!page.composing)
+                            page.readChoices()
+                    }
                     onAccepted: page.requestConnect(text)
                 }
 
@@ -254,17 +376,12 @@ Pane {
             }
 
             // ---- Profile: the URI's query (ADR-0013, ADR-0020) ----
-            // The chosen button is drawn as the primary colour. "Default"
-            // is the scheme's own profile, so the query stays empty.
+            // The chosen button is drawn as the primary colour
             RowLayout {
                 spacing: Theme.spacing
                 Label { text: qsTr("Profile:"); color: Theme.textDim }
                 Repeater {
-                    model: [
-                        { name: "default", label: qsTr("Default") },
-                        { name: "raw", label: qsTr("raw (log only)") },
-                        { name: "uds-generic", label: qsTr("uds-generic (DIDs)") }
-                    ]
+                    model: page.profiles
                     ThemedButton {
                         required property var modelData
                         objectName: "profile_" + modelData.name
@@ -281,14 +398,7 @@ Pane {
                 Layout.fillWidth: true
                 wrapMode: Text.WordWrap
                 color: Theme.textDim
-                text: page.profileChoice === "raw"
-                      ? qsTr("No decode: frames reach the Log page only. On an adapter the "
-                             + "URI filters on the engine ECU's replies (0x7E8); edit it for "
-                             + "another ID")
-                      : page.profileChoice === "uds-generic"
-                      ? qsTr("Service 0x22 reads of the DIDs below, polled; a range is scanned "
-                             + "once and the DIDs the ECU answers join the polling")
-                      : qsTr("The scheme's own profile: obd2 on an adapter, the demo set on mock://")
+                text: page.profileHint()
             }
 
             RowLayout {
@@ -303,12 +413,18 @@ Pane {
                     Layout.fillWidth: true
                     // The ?did= grammar as core reads it (ADR-0020); the
                     // text goes into the URI as typed, so core's words
-                    // name any mistake
+                    // name any mistake. The validator admits only the
+                    // grammar's characters, so a query metacharacter (&,
+                    // =, ?, #) can't split the URI into other keys.
                     placeholderText: qsTr("1E1C:u16, F190:text, 7E9:1E1C, 1E00-1EFF — "
                                           + "[ecu:]DID[-DID][:hex|text|u8…u32|i8…i32]")
+                    validator: RegularExpressionValidator { regularExpression: /[0-9A-Za-z:,\-\s]*/ }
                     enabled: page.idle
                     color: Theme.text
-                    onTextChanged: uriField.text = page.composeUri(page.uriBase())
+                    onTextChanged: {
+                        if (!page.syncing && page.profileChoice === "uds-generic")
+                            page.recompose()
+                    }
                     onAccepted: page.requestConnect(uriField.text)
                 }
             }

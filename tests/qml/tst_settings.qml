@@ -1,8 +1,11 @@
 // File/layer: tests/qml/tst_settings.qml | Qt Quick Test, QML tier
 // Testing: Settings composes the URI from a preset (the base), the
-//          profile row and uds-generic's DID field, keeps a hand-written
-//          URI's base, shows core's refusal of a DID list in the error
-//          line, connects a composed uds-generic URI through the mock, and
+//          profile row and uds-generic's DID field, reads a typed URI
+//          back into the row and the field and keeps its other keys (the
+//          vehicle run sheet's URIs pass through untouched), refuses
+//          query characters in the DID field, shows core's refusal of a
+//          DID list in the error line, connects a composed uds-generic
+//          URI through the mock, and
 //          locks every control, the device rows among them, while a
 //          connect is in flight (Windows: the fake's open stalled by a
 //          knob). The live registry is manual smoke.
@@ -88,11 +91,130 @@ TestCase {
         compare(uri.text, "j2534://", "the default profile needs no query")
 
         // A hand-written URI connects as written; the next choice composes
-        // again from its base
+        // again from it, keeping its other keys in place
         uri.text = "j2534://Vendor?poll=0x0C"
         press(page, "profile_uds-generic")
-        compare(uri.text, "j2534://Vendor?profile=uds-generic&did=1E1C:u16,F190:text")
+        compare(uri.text, "j2534://Vendor?poll=0x0C&profile=uds-generic&did=1E1C:u16,F190:text")
         compare(did.text, " 1E1C:u16, F190:text ", "the field keeps what was typed")
+    }
+
+    // A URI the page didn't compose: typed, pasted or set from outside
+    // (UI Automation's SetValue is a plain set, as this is)
+    function type(uri, text) {
+        uri.text = text
+    }
+
+    // A typed URI sets the row, the hint and the DID field, and is left as
+    // typed; the next click composes from those choices, so typed DIDs
+    // survive a trip through another profile
+    function test_aTypedUriSetsTheRow() {
+        const page = createPage()
+        const uri = find(page, "uriField")
+        const did = find(page, "didField")
+        const didRow = find(page, "didRow")
+        const hint = find(page, "profileHint")
+
+        type(uri, "mock://demo?profile=uds-generic&did=1E1C:u16")
+        compare(uri.text, "mock://demo?profile=uds-generic&did=1E1C:u16", "left as typed")
+        compare(page.profileChoice, "uds-generic")
+        verify(find(page, "profile_uds-generic").highlighted)
+        verify(!find(page, "profile_default").highlighted)
+        verify(didRow.visible)
+        compare(did.text, "1E1C:u16")
+        verify(hint.text.indexOf("Service 0x22") >= 0, "the hint is uds-generic's: " + hint.text)
+
+        press(page, "profile_default")
+        compare(uri.text, "mock://demo")
+        press(page, "profile_uds-generic")
+        compare(uri.text, "mock://demo?profile=uds-generic&did=1E1C:u16", "the DIDs are back")
+
+        type(uri, "j2534://Vendor?profile=raw&filter=0x7E9")
+        compare(page.profileChoice, "raw")
+        verify(find(page, "profile_raw").highlighted)
+        verify(!didRow.visible)
+        compare(uri.text, "j2534://Vendor?profile=raw&filter=0x7E9", "left as typed")
+        press(page, "profile_default")
+        compare(uri.text, "j2534://Vendor?filter=0x7E9", "a typed filter isn't the raw row's")
+
+        // A profile the row doesn't offer: no button lit, the hint says so
+        type(uri, "j2534://Vendor?profile=obd2")
+        compare(page.profileChoice, "obd2")
+        verify(!find(page, "profile_default").highlighted)
+        verify(!find(page, "profile_raw").highlighted)
+        verify(hint.text.indexOf("obd2") >= 0, "the hint names it: " + hint.text)
+        type(uri, "j2534://Vendor")
+        compare(page.profileChoice, "default")
+        verify(find(page, "profile_default").highlighted)
+    }
+
+    // A DID edit changes did= only; keys typed by hand stay where they were
+    function test_didEditsKeepTheOtherKeys() {
+        const page = createPage()
+        const uri = find(page, "uriField")
+        const did = find(page, "didField")
+        type(uri, "j2534://V?identify=0&profile=uds-generic&did=1E1C")
+        compare(did.text, "1E1C")
+        did.text = "1E1C, F190:text"
+        compare(uri.text, "j2534://V?identify=0&profile=uds-generic&did=1E1C,F190:text")
+        did.text = ""
+        compare(uri.text, "j2534://V?identify=0&profile=uds-generic", "no DIDs, no did= key")
+        press(page, "preset_mock")
+        compare(uri.text, "mock://demo?identify=0&profile=uds-generic", "a new base keeps the query")
+    }
+
+    // The vehicle run sheet's URIs, typed, pass through untouched
+    function test_runSheetUrisPassThroughUntouched_data() {
+        return [
+            { tag: "bare", uri: "j2534://OBDX Pro - VX", profile: "default" },
+            { tag: "raw", uri: "j2534://OBDX Pro - VX?profile=raw&filter=0x7E8", profile: "raw" },
+            { tag: "poll", uri: "j2534://OBDX Pro - VX?poll=0x0C", profile: "default" },
+            { tag: "bitmap", uri: "j2534://OBDX Pro - VX?profile=raw&filter=0x7E8&poll=0x00",
+              profile: "raw" },
+        ]
+    }
+    function test_runSheetUrisPassThroughUntouched(data) {
+        const page = createPage()
+        const uri = find(page, "uriField")
+        type(uri, data.uri)
+        compare(uri.text, data.uri, "left as typed")
+        compare(page.profileChoice, data.profile)
+        // The same row clicked again changes nothing
+        press(page, "profile_" + data.profile)
+        compare(uri.text, data.uri, "the row's own click keeps it")
+    }
+
+    // Leaving raw takes the raw row's filter (0x7E8) with it and keeps
+    // every other key
+    function test_leavingRawDropsItsOwnFilter() {
+        const page = createPage()
+        const uri = find(page, "uriField")
+        type(uri, "j2534://OBDX Pro - VX?profile=raw&filter=0x7E8&poll=0x00")
+        press(page, "profile_default")
+        compare(uri.text, "j2534://OBDX Pro - VX?poll=0x00")
+        press(page, "profile_raw")
+        compare(uri.text, "j2534://OBDX Pro - VX?poll=0x00&profile=raw&filter=0x7E8")
+        press(page, "preset_mock")
+        compare(uri.text, "mock://demo?poll=0x00&profile=raw", "mock takes no filter key")
+    }
+
+    // Query metacharacters can't be typed into the DID field, so a DID
+    // list can never split the URI into other keys; core judges the rest
+    function test_didFieldRefusesQueryCharacters() {
+        const page = createPage()
+        const did = find(page, "didField")
+        press(page, "preset_mock")
+        press(page, "profile_uds-generic")
+        did.forceActiveFocus()
+        tryVerify(() => did.activeFocus, 1000, "the DID field has focus")
+        keyClick("1"); keyClick("E"); keyClick("1"); keyClick("C")
+        compare(did.text, "1E1C")
+        keyClick("&"); keyClick("="); keyClick("?"); keyClick("#")
+        compare(did.text, "1E1C", "the query characters are refused")
+        keyClick(":"); keyClick("u"); keyClick("1"); keyClick("6")
+        keyClick(","); keyClick(" "); keyClick("F"); keyClick("1"); keyClick("9"); keyClick("0")
+        keyClick("-"); keyClick("F"); keyClick("1"); keyClick("9"); keyClick("1")
+        compare(did.text, "1E1C:u16, F190-F191", "the grammar's characters all pass")
+        compare(find(page, "uriField").text, "mock://demo?profile=uds-generic&did=1E1C:u16,F190-F191")
     }
 
     // The error line shows core's words for a DID list it refuses, and
