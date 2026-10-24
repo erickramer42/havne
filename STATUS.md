@@ -317,7 +317,14 @@ measurements feed the first item.
    DIDs the ECU answers join it; the mock answers them too, so the app
    shows the profile with no hardware. Its first DIDs on a car are the
    second vehicle session's.
-4. **Phase 4, record-replay transport,** independent of the others:
+4. **Vehicle identification** ([ADR-0021](docs/adr/0021-vehicle-identification.md)):
+   built, HARNESS-tested. Every requesting channel asks its ECU the
+   VIN, calibration IDs and identification DIDs once at connect,
+   taking turns with the rotation, and the activity log (so a
+   recording's `events.log`) gets one line per ECU. `?identify=0`
+   turns it off. Its first run on a car is the second vehicle
+   session's.
+5. **Phase 4, record-replay transport,** independent of the others:
    play captured frames back deterministically through the same frame
    API. The capture side is the recorder's `frames.csv`
    ([ADR-0017](docs/adr/0017-session-recording.md)); the replay work
@@ -500,9 +507,12 @@ in the backlog.
 ### Data capture
 
 - **Recording, what's left (S).** ADR-0017's recorder writes a whole
-  session per connect. Still to do: name the folder by vehicle as
-  well as date, keep the Record sessions switch across restarts (with
-  persisted preferences), and copy selected Log rows for quick notes.
+  session per connect, and its `events.log` names the vehicle through
+  the identity line ([ADR-0021](docs/adr/0021-vehicle-identification.md)).
+  Still to do: name the folder by vehicle as well as date (the folder
+  opens before the VIN arrives, so this waits for persisted
+  preferences), keep the Record sessions switch across restarts (with
+  the same preferences), and copy selected Log rows for quick notes.
 - **Triggered logging (M).** Record only while a condition holds
   (RPM over a threshold) or capture a window around a link fault.
   Needs a trigger model in core, similar in shape to the probe: data
@@ -568,9 +578,9 @@ in the backlog.
 - **Vehicle profiles (M).** Remember per vehicle, keyed by VIN or a
   label the user names: profile, channel overrides, dashboard
   arrangement, last device. Nobody reconfigures the tool each time
-  they plug into the same car. Depends on vehicle identification
-  (Vehicle coverage) for the VIN key, or starts with user-named
-  profiles.
+  they plug into the same car. The VIN key exists
+  ([ADR-0021](docs/adr/0021-vehicle-identification.md)); the rest
+  needs persisted preferences.
 - **User-configurable dashboards (L).** User-authored pages choosing
   from the gauge library. The gauges are already modular, but layout
   persistence is new ground and needs the preferences item first.
@@ -589,12 +599,6 @@ in the backlog.
   - Verify each PID's meaning and formula against a public J1979
     table. The fake's canned replies share the def's assumptions, so
     the tests can't catch a wrong PID.
-- **Vehicle identification (M).** Read the VIN and calibration IDs
-  (Service 09) at connect, for the activity log and session
-  recordings. These responses are multi-frame and textual; the adapter
-  reassembles ISO-TP, a frame carries the whole reply, and a `TEXT`
-  def shows it as a string (ADR-0016, appendix), so what's left is the
-  requests (Service 09 doesn't enrol one) and the defs.
 - **A first manufacturer signal set (L).** One make's enhanced
   Service 22 data, such as transmission temperature, which the
   standard set doesn't include. Choose the make from the target

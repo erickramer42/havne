@@ -395,6 +395,85 @@ ecuio_status_t ecuio_session_get_channel_support(
     ecuio_channel_support_t* out_support
 );
 
+/* What each channel's ECU says it is (ADR-0021): the VIN, the
+ * calibration identifiers and the part, software and hardware numbers
+ * the standard services carry (Service 09 items 02, 04, 06 and 0A;
+ * Service 0x22 DIDs F187 to F195), each asked once after connect and
+ * again, when unanswered, as the link recovers. The J2534 worker fills
+ * it as the answers arrive. The values below are append-only. */
+#define ECUIO_IDENTITY_MAX_ITEMS         16
+#define ECUIO_IDENTITY_TEXT_LEN          64
+
+/* flags */
+#define ECUIO_IDENTITY_COMPLETE          0x00000001u   /* every item answered,
+                                                          refused or timed out */
+
+/* outcome: what became of an item's request */
+#define ECUIO_IDENTITY_UNASKED           0u   /* not asked yet, or asked again
+                                                 after a recovery */
+#define ECUIO_IDENTITY_ANSWERED          1u   /* a positive reply: text holds it */
+#define ECUIO_IDENTITY_REFUSED           2u   /* a negative reply: nrc holds the code */
+#define ECUIO_IDENTITY_UNANSWERED        3u   /* its wait ran out */
+
+/* POD, 72 bytes. text is the reply's data after the service's header
+ * (the item count for Service 09, the DID for 0x22), NUL-terminated:
+ * as ASCII when every byte is printable or padding (NUL, 0xFF), the
+ * printable runs joined by ", " (two calibration IDs read "A, B"); else
+ * as hex pairs ("DE AD BE EF"). Cut to the field, at a whole pair. */
+typedef struct ecuio_identity_item {
+    uint8_t request[3];       /* the service ID, then the key */
+    uint8_t length;           /* 2 or 3 */
+    uint8_t outcome;          /* ECUIO_IDENTITY_* */
+    uint8_t nrc;              /* the negative reply's code, when refused */
+    uint8_t text_length;      /* strlen(text) */
+    uint8_t reserved;         /* zero */
+    char text[ECUIO_IDENTITY_TEXT_LEN];
+} ecuio_identity_item_t;
+
+/* POD, 1184 bytes, no hidden padding on any supported platform; pinned
+ * by the assertions below. New fields take the reserved room. */
+typedef struct ecuio_channel_identity {
+    uint32_t flags;           /* ECUIO_IDENTITY_* */
+    uint32_t rx_id;           /* the channel's receive ID: its ECU */
+    uint32_t generation;      /* changes with every item settled; 0 until
+                                 one has been */
+    uint32_t items;           /* entries of list in use; 0 when the session
+                                 identifies nothing (?identify=0, ?poll=,
+                                 a passive session) */
+    uint32_t reserved[4];     /* zero; ABI growth space */
+    ecuio_identity_item_t list[ECUIO_IDENTITY_MAX_ITEMS];   /* in the order
+                                 asked */
+} ecuio_channel_identity_t;
+
+#if defined(__cplusplus)
+static_assert(sizeof(ecuio_identity_item_t) == 72, "ecuio_identity_item_t size is ABI");
+static_assert(sizeof(ecuio_channel_identity_t) == 1184, "ecuio_channel_identity_t size is ABI");
+static_assert(offsetof(ecuio_channel_identity_t, list) == 32, "identity list offset is ABI");
+#elif defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
+_Static_assert(sizeof(ecuio_identity_item_t) == 72, "ecuio_identity_item_t size is ABI");
+_Static_assert(sizeof(ecuio_channel_identity_t) == 1184, "ecuio_channel_identity_t size is ABI");
+_Static_assert(offsetof(ecuio_channel_identity_t, list) == 32, "identity list offset is ABI");
+#endif
+
+/* Copies what channel `channel` has learned of its ECU into
+ * *out_identity, under the same rules as the support report: the channel
+ * is an index below the session info's channel_count
+ * (ECUIO_ERR_INVALID_ARGUMENT otherwise), callable from any thread until
+ * destroy, and after close it keeps the last update. */
+ecuio_status_t ecuio_session_get_channel_identity(
+    const ecuio_session_t* session,
+    uint32_t channel,
+    ecuio_channel_identity_t* out_identity
+);
+
+/* The name of an identification request, for display: "VIN" for
+ * 09 02, "CALID" for 09 04, and so on through the list the worker asks.
+ * "" for a request that isn't one of them. Static, never NULL. */
+const char* ecuio_identity_request_name(
+    const uint8_t* request,
+    uint8_t length
+);
+
 #ifdef __cplusplus
 }
 #endif

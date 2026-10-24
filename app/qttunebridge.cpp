@@ -368,6 +368,7 @@ QtTuneBridge::QtTuneBridge(QObject* parent)
     connect(m_coalesceTimer, &QTimer::timeout, this, [this]() {
         pollLinkHealth();   // every tick while connected — transitions only
         pollChannelSupport();
+        pollChannelIdentity();
         // Must fire even when nothing arrived this window: dimming exists
         // for rows that STOPPED updating. 100 ms is well
         // inside the 3 s dim threshold and the span emission is one
@@ -566,6 +567,9 @@ void QtTuneBridge::applyConnectedState(ecuio_session_t* session, const QString& 
                                             ECUIO_SESSION_INFO_MAX_CHANNELS);
     }
     for (uint32_t& g : m_supportGeneration) {
+        g = 0;
+    }
+    for (uint32_t& g : m_identityGeneration) {
         g = 0;
     }
 }
@@ -1121,6 +1125,90 @@ QString QtTuneBridge::channelSupportText(const ecuio_channel_support_t& s)
         parts << scan;
     }
     return QStringLiteral("ECU %1: ").arg(hex(s.rx_id)) + parts.join(QStringLiteral("; "));
+}
+
+/* What each channel's ECU said it is (ADR-0021), in the activity log
+ * once the whole list has an outcome, and again when a recovery re-asks
+ * the unanswered items and they settle. One line per ECU, so the VIN
+ * and the calibration IDs land in the log and in a recording's
+ * events.log together. */
+void QtTuneBridge::pollChannelIdentity()
+{
+    if (!m_connected.load(std::memory_order_acquire) || m_session == nullptr) {
+        return;
+    }
+    for (uint32_t c = 0; c < m_channelCount; ++c) {
+        ecuio_channel_identity_t s{};
+        if (ecuio_session_get_channel_identity(m_session, c, &s) != ECUIO_OK ||
+            (s.flags & ECUIO_IDENTITY_COMPLETE) == 0 ||
+            s.generation == m_identityGeneration[c]) {
+            continue;
+        }
+        m_identityGeneration[c] = s.generation;
+        emit logMessage(channelIdentityText(s));
+    }
+}
+
+/* One channel's "ECU 0x… identity:" line: each answered item by its
+ * name and text, then the refused requests with their codes, then how
+ * many went unanswered. Static, like channelSupportText, so test_bridge
+ * pins the wording without an adapter. */
+QString QtTuneBridge::channelIdentityText(const ecuio_channel_identity_t& s)
+{
+    const auto hex = [](uint32_t v) {
+        return QStringLiteral("0x") + QString::number(v, 16).toUpper();
+    };
+    const auto byte = [](uint8_t b) {
+        return QStringLiteral("%1").arg(static_cast<uint>(b), 2, 16,
+                                        QLatin1Char('0')).toUpper();
+    };
+
+    QStringList parts;
+    QStringList refused;
+    uint32_t unanswered = 0;
+    const uint32_t items = std::min<uint32_t>(s.items, ECUIO_IDENTITY_MAX_ITEMS);
+    for (uint32_t i = 0; i < items; ++i) {
+        const ecuio_identity_item_t& it = s.list[i];
+        QStringList key;
+        for (uint8_t k = 0; k < it.length && k < sizeof(it.request); ++k) {
+            key << byte(it.request[k]);
+        }
+        const char* name = ecuio_identity_request_name(it.request, it.length);
+        const QString label = (*name != '\0') ? QString::fromLatin1(name)
+                                              : key.join(QLatin1Char(' '));
+        switch (it.outcome) {
+            case ECUIO_IDENTITY_ANSWERED: {
+                const uint8_t n = std::min<uint8_t>(it.text_length,
+                                                    ECUIO_IDENTITY_TEXT_LEN - 1);
+                parts << label + QLatin1Char(' ') +
+                             (n > 0 ? QString::fromLatin1(it.text, n)
+                                    : QStringLiteral("(empty)"));
+                break;
+            }
+            case ECUIO_IDENTITY_REFUSED:
+                refused << key.join(QLatin1Char(' ')) +
+                               QStringLiteral(" (7F %1 %2)").arg(byte(it.request[0]),
+                                                                 byte(it.nrc));
+                break;
+            case ECUIO_IDENTITY_UNANSWERED:
+                ++unanswered;
+                break;
+            default:
+                break;
+        }
+    }
+    if (!refused.isEmpty()) {
+        parts << QStringLiteral("%1 refused: ").arg(refused.size()) +
+                     refused.join(QStringLiteral(", "));
+    }
+    if (unanswered > 0) {
+        parts << QStringLiteral("%1 unanswered").arg(unanswered);
+    }
+    if (parts.isEmpty()) {
+        parts << QStringLiteral("nothing asked");
+    }
+    return QStringLiteral("ECU %1 identity: ").arg(hex(s.rx_id)) +
+           parts.join(QStringLiteral("; "));
 }
 
 /* The published state strings, in one place; QML's Theme.linkColor and

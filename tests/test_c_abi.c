@@ -21,6 +21,7 @@
 
 #include <stddef.h>
 #include <stdio.h>
+#include <string.h>
 
 /* Negative-array-size idiom — valid in ALL C standards including
  * pedantic C89, complementing the header's _Static_assert (C11+). */
@@ -51,6 +52,9 @@ typedef char abi_support_bitmap_check[(offsetof(ecuio_channel_support_t, pid_bit
 typedef char abi_support_list_check[(offsetof(ecuio_channel_support_t, dropped_list) == 56) ? 1 : -1];
 typedef char abi_support_scan_check[(offsetof(ecuio_channel_support_t, scan_total) == 120) ? 1 : -1];
 typedef char abi_support_reserved_check[(offsetof(ecuio_channel_support_t, reserved) == 132) ? 1 : -1];
+typedef char abi_identity_item_check[(sizeof(ecuio_identity_item_t) == 72) ? 1 : -1];
+typedef char abi_identity_size_check[(sizeof(ecuio_channel_identity_t) == 1184) ? 1 : -1];
+typedef char abi_identity_list_check[(offsetof(ecuio_channel_identity_t, list) == 32) ? 1 : -1];
 
 int main(void)
 {
@@ -60,6 +64,8 @@ int main(void)
     ecuio_validation_t validation;
     ecuio_session_info_t info;
     ecuio_channel_support_t support;
+    ecuio_channel_identity_t identity;
+    const uint8_t vin_request[2] = {0x09, 0x02};
     frame.arbitration_id = 0x7FF;
     frame.channel_id = 0;
     frame.data_length = 8;
@@ -91,6 +97,12 @@ int main(void)
     }
     if (ecuio_session_get_channel_support(NULL, 0, &support) !=
         ECUIO_ERR_NULL_ARGUMENT) {
+        return 1;
+    }
+    if (ecuio_session_get_channel_identity(NULL, 0, &identity) !=
+        ECUIO_ERR_NULL_ARGUMENT ||
+        strcmp(ecuio_identity_request_name(vin_request, 2), "VIN") != 0 ||
+        ecuio_identity_request_name(vin_request, 1)[0] != '\0') {
         return 1;
     }
     ecuio_j2534_free_devices(NULL);

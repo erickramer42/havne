@@ -5,8 +5,9 @@
 //          filter registration, request framing and routing, header
 //          strip and arbitration_id stamp, rotation, ?poll= precedence,
 //          the probe's walk, its drops, ?probe=0 and its resumption on
-//          recovery, the support report it publishes, and uds-generic's
-//          requests, ECU prefix and DID scan.
+//          recovery, the support report it publishes, uds-generic's
+//          requests, ECU prefix and DID scan, and identification's
+//          requests, ?identify=0 and the report it publishes.
 //          test_j2534_health, on both backends: the request engine's
 //          pacing (the floor, the wait, negative and pending replies,
 //          two channels at once), the drain in passive mode, and the
@@ -38,8 +39,8 @@
 /* The query keys parse_query reads, for create's check (internal.h);
  * every platform's, so create links where the transport is a stub. */
 extern "C" const char* const ecuio_j2534_query_keys[] = {
-    "baud", "flags", "filter", "txid", "poll", "probe", "profile", "did",
-    nullptr};
+    "baud", "flags", "filter", "txid", "poll", "probe", "identify", "profile",
+    "did", nullptr};
 
 #ifdef _WIN32
 
@@ -96,8 +97,8 @@ struct read_outcome {
     bool matched = false;
     uint32_t chan = 0;      /* the channel it matched */
     uint16_t len = 0;       /* its payload's length, the CAN ID stripped */
-    uint8_t head[ECUIO_BITMAP_REPLY_LEN] = {};   /* the payload's first
-                                                  * bytes, a bitmap's all */
+    const uint8_t* payload = nullptr;   /* the payload, in the transport's
+                                         * rx_frame until the next read */
 };
 
 void pack_be32(uint8_t* out, uint32_t v)
@@ -132,21 +133,29 @@ struct ecuio_j2534_transport {
      *                ECUIO_MAX_CHANNELS; each entry owns its filter
      *                id and CAN_29BIT flags. Frozen pre-thread.
      *   engine       the requests and their pacing (request_engine.h):
-     *                the set's rotation and uds-generic's DID scan, or
-     *                the one ?poll= request, which outranks both; empty
-     *                for passive receive. Built at attach, the worker's
-     *                alone after.
+     *                the set's rotation, uds-generic's DID scan and the
+     *                identification items, or the one ?poll= request,
+     *                which outranks them all; empty for passive receive.
+     *                Built at attach, the worker's alone after.
      *   probe        ADR-0015 §4 for the set's rotation: on unless
-     *                ?probe=0 or ?poll=. Frozen pre-thread. */
+     *                ?probe=0 or ?poll=. Frozen pre-thread.
+     *   identify     ADR-0021: each channel asks its ECU's identity
+     *                once; on with the set's requests unless ?identify=0
+     *                or ?poll=. Frozen pre-thread. */
     j2534_channel chans[ECUIO_MAX_CHANNELS] = {};
     uint32_t chan_count = 0;
     ecuio_request_engine engine;
     bool probe = false;
+    bool identify = false;
     /* Frame time (j2534_clock.h): the host's at the first frame, counted
      * from epoch, the end of attach; the vendor's deltas after that.
      * Worker-only, through pump_one. */
     std::chrono::steady_clock::time_point epoch{};
     j2534_clock clock;
+    /* The frame pump_one builds from each read, dispatched from here;
+     * worker-only, and 4 KB, so it lives with the transport rather than
+     * on the worker's stack. read_outcome::payload points into it. */
+    ecuio_frame_t rx_frame{};
     std::atomic<bool> stop_requested{false};
     std::thread worker;
     ecuio_transport_t* self = nullptr;
@@ -170,6 +179,7 @@ struct j2534_uri_params {
                                   * set's rotation) */
     unsigned long poll_pid = 0;  /* valid when has_poll; 0x00 allowed */
     bool probe = true;           /* ?probe=0 turns it off */
+    bool identify = true;        /* ?identify=0 turns it off */
 };
 
 /* The channel ?poll='s request goes to, by the rule the set's rotation
@@ -284,7 +294,7 @@ read_outcome pump_one(ecuio_j2534_transport* t, uint32_t timeout_ms)
             std::chrono::steady_clock::now() - t->epoch).count());
     const uint64_t at_us = j2534_clock_step(t->clock, msg.timestamp,
                                             host_us);
-    ecuio_frame_t frame;
+    ecuio_frame_t& frame = t->rx_frame;
 
     if (t->chan_count == 0) {
         /* no channels — verbatim, id 0 (raw passive) counts as matched
@@ -308,8 +318,7 @@ read_outcome pump_one(ecuio_j2534_transport* t, uint32_t timeout_ms)
                 o.matched = true;
                 o.chan = i;
                 o.len = frame.data_length;
-                memcpy(o.head, frame.data,
-                       (o.len < sizeof(o.head)) ? o.len : sizeof(o.head));
+                o.payload = frame.data;
                 ecuio_session_dispatch_callbacks(t->session, &frame);
                 return o;
             }
@@ -543,6 +552,23 @@ void publish_support(ecuio_j2534_transport* t, uint32_t c,
     t->session->support[c] = s;
 }
 
+/* Hands what channel c's ECU has said it is to the session, for
+ * ecuio_session_get_channel_identity, when an item has settled. */
+void publish_identity(ecuio_j2534_transport* t, uint32_t c,
+                      uint32_t& published)
+{
+    const ecuio_request_engine& e = t->engine;
+    if (e.chans[c].ident_generation == published) {
+        return;
+    }
+    published = e.chans[c].ident_generation;
+    ecuio_channel_identity_t s;
+    ecuio_engine_identity(&e, c, &s);
+    s.rx_id = t->chans[c].rx_id;
+    std::lock_guard<std::mutex> lock(t->session->support_mutex);
+    t->session->identity[c] = s;
+}
+
 /* Worker entrypoint — mirrors mock_worker's discipline: impl-owned
  * state, dispatch through the session snapshot path, stop via atom.
  *
@@ -570,6 +596,7 @@ void j2534_worker(ecuio_j2534_transport* t)
     const bool requests = e.count > 0 || e.scan_count > 0;
     link_health h;
     uint32_t published[ECUIO_MAX_CHANNELS] = {};
+    uint32_t published_identity[ECUIO_MAX_CHANNELS] = {};
     if (requests && t->probe) {
         ecuio_engine_probe(&e, engine_now_us(t));
     }
@@ -595,7 +622,7 @@ void j2534_worker(ecuio_j2534_transport* t)
         const auto read_start = std::chrono::steady_clock::now();
         const read_outcome o = pump_one(t, timeout_ms);
         if (requests && o.matched) {
-            (void)ecuio_engine_on_frame(&e, o.chan, o.head, o.len,
+            (void)ecuio_engine_on_frame(&e, o.chan, o.payload, o.len,
                                         engine_now_us(t), nullptr);
         }
         update_health(t, h, o, !requests);
@@ -605,11 +632,13 @@ void j2534_worker(ecuio_j2534_transport* t)
                 ecuio_engine_probe(&e, engine_now_us(t));
             }
             if (requests) {
-                ecuio_engine_rescan(&e);   /* the scan's unanswered DIDs */
+                /* the scan's and identification's unanswered requests */
+                ecuio_engine_rescan(&e);
             }
         }
         for (uint32_t c = 0; requests && c < t->chan_count; ++c) {
             publish_support(t, c, published[c]);
+            publish_identity(t, c, published_identity[c]);
         }
 
         if (h.backoff_ms > 0) {
@@ -692,6 +721,8 @@ bool parse_number(const char* s, size_t len, unsigned long* out_val)
  *              rotation
  *       probe  0 or 1 — the supported-PID probe (ADR-0015 §4), on by
  *              default
+ *       identify 0 or 1 — vehicle identification (ADR-0021), on by
+ *              default with a set's requests
  *       profile core's key, read by ecuio_session_create
  *   - every occurrence is judged, and of good ones the last wins
  *   - create has split the query by the shared grammar and refused
@@ -746,7 +777,13 @@ ecuio_status_t parse_query(const ecuio_uri_query* query, j2534_uri_params* p)
             } else {
                 p->probe = q.val[0] == '1';
             }
-        }   /* else profile: core's, read and validated by create */
+        } else if (q.is("identify")) {
+            if (q.val_len != 1 || (q.val[0] != '0' && q.val[0] != '1')) {
+                wanted = "0 or 1";
+            } else {
+                p->identify = q.val[0] == '1';
+            }
+        }   /* else profile or did: core's, read and validated by create */
         if (wanted != nullptr) {
             const int shown = static_cast<int>(
                 (q.val_len < 32) ? q.val_len : 32);
@@ -1048,6 +1085,14 @@ ecuio_status_t j2534_attach(ecuio_session_t* session, const char* uri,
     }
     /* ?poll= sends its one request as asked, whatever the ECU says. */
     t->probe = params.probe && !params.has_poll;
+    /* Identification (ADR-0021) rides on a session that already
+     * requests: a passive session sends nothing, and ?poll= asks its one
+     * PID alone. Every channel asks the list once. */
+    t->identify = params.identify && !params.has_poll &&
+                  (t->engine.count > 0 || t->engine.scan_count > 0);
+    if (t->identify) {
+        ecuio_engine_identify(&t->engine);
+    }
 
     /* Coupling check: requests need at least one channel to receive on,
      * or they go out against guaranteed silence forever (an ISO 15765
@@ -1123,12 +1168,15 @@ ecuio_status_t j2534_attach(ecuio_session_t* session, const char* uri,
     t->self = wrap;
     describe_session(t, params.baud, connect_flags, &session->info);
     {
-        /* Each channel's ECU and its requests, nothing learned yet. */
+        /* Each channel's ECU, its requests and its identification
+         * items, nothing learned yet. */
         std::lock_guard<std::mutex> lock(session->support_mutex);
         session->support_count = t->chan_count;
         for (uint32_t c = 0; c < t->chan_count; ++c) {
             ecuio_engine_support(&t->engine, c, &session->support[c]);
             session->support[c].rx_id = t->chans[c].rx_id;
+            ecuio_engine_identity(&t->engine, c, &session->identity[c]);
+            session->identity[c].rx_id = t->chans[c].rx_id;
         }
     }
     t->epoch = std::chrono::steady_clock::now();   /* as mock: end of attach */

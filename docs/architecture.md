@@ -172,7 +172,10 @@ The full reference is [j2534.md](j2534.md).
   at most and no sooner than 20 ms after the last. Before a channel's
   rotation, its probe reads the ECU's supported-PID bitmaps, and a
   request leaves only when the ECU says it isn't supported, never on
-  silence.
+  silence. Beside the rotation, taking turns with it, each channel asks
+  its ECU once what it is, the VIN and its identifiers
+  ([ADR-0021](adr/0021-vehicle-identification.md)), for the activity
+  log and the recording.
 - **Teardown order is a hard contract:** join the worker → stop the
   filters → disconnect → close → unload. The worker calls vendor code
   through pointers that dangle once the DLL unmaps.

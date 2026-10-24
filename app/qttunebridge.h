@@ -241,6 +241,7 @@ public:
     static QString linkStateForError(int32_t errorCode);  /* code → state string; static so tests need no session */
     static QString sessionInfoText(const ecuio_session_info_t& info);  /* the activity log's "Session:" line */
     static QString channelSupportText(const ecuio_channel_support_t& support);  /* its "ECU 0x…:" lines */
+    static QString channelIdentityText(const ecuio_channel_identity_t& identity);  /* its "ECU 0x… identity:" lines */
 
     Q_INVOKABLE QString statusString(int statusCode) const;
     Q_INVOKABLE int maxFrameCount() const { return FrameListModel::MaxFrames; }
@@ -362,6 +363,9 @@ private:
     void pollChannelSupport();
     uint32_t m_channelCount = 0;
     uint32_t m_supportGeneration[ECUIO_SESSION_INFO_MAX_CHANNELS] = {};
+    // What each channel's ECU said it is (ADR-0021), logged once complete
+    void pollChannelIdentity();
+    uint32_t m_identityGeneration[ECUIO_SESSION_INFO_MAX_CHANNELS] = {};
 
     bool m_recording = false;
     SessionRecorder m_recorder;

@@ -31,11 +31,13 @@ struct ecuio_session {
      * create, before create returns; read-only afterwards, so
      * ecuio_session_get_info needs no lock. */
     ecuio_session_info_t info{};
-    /* What each channel's ECU said it supports: the count and each
-     * rx_id set by attach, the rest updated by the worker, all under
-     * the mutex (ecuio_session_get_channel_support). */
+    /* What each channel's ECU said it supports, and what it said it is
+     * (ADR-0021): the count and each rx_id set by attach, the rest
+     * updated by the worker, all under the mutex
+     * (ecuio_session_get_channel_support, _identity). */
     mutable std::mutex support_mutex;
     ecuio_channel_support_t support[ECUIO_SESSION_INFO_MAX_CHANNELS]{};
+    ecuio_channel_identity_t identity[ECUIO_SESSION_INFO_MAX_CHANNELS]{};
     uint32_t support_count = 0;
 };
 

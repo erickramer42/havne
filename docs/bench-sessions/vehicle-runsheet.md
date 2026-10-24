@@ -262,6 +262,11 @@ frame either way.
       that's `1 dropped: 01 5C (not in its supported PIDs)`, and N is
       the data PIDs of every bitmap read, 44 for the three Phase 2
       reads plus those of the next ones
+- [ ] Within a few seconds the activity log gets the identity line,
+      `ECU 0x7E8 identity: VIN …; CALID …; …`, with the car's VIN and
+      calibration IDs and whichever `F18x` DIDs the ECU answers; note
+      which it refused (`7F 22 31`) or left unanswered. The line is
+      personal data: it is scrubbed before this sheet is committed
 - [ ] Every `obd2` signal populates within about one rotation (a
       request every 20 ms or so while the ECU answers within that, so N
       PIDs take about N × 20 ms; well under a second for the current
@@ -389,9 +394,10 @@ ignition off, wait 10 s, then turn it back on.
    the session logs and recordings in a folder beside it, as
    [2026-10-22-vehicle](2026-10-22-vehicle.md) has them. Before committing,
    scrub the sheet, the logs, the recordings' `events.log` (it holds
-   the URI) and any screenshots: no VIN or calibration IDs, no names
-   or initials, and no local paths (`%TEMP%` and `C:\Users\…` paths
-   carry the account name)
+   the URI and the identity line) and any screenshots of the activity
+   log: no VIN, calibration IDs or ECU serial, no names or initials,
+   and no local paths (`%TEMP%` and `C:\Users\…` paths carry the
+   account name)
 2. Walk the [BENCH prep list](../../STATUS.md#bench-prep): mark each
    item CONFIRMED / REFUTED (with evidence) / STILL UNKNOWN
 3. Update STATUS.md, the testing.md Vehicle tier and gaps, and any

@@ -12,6 +12,8 @@
 
 #include <atomic>
 #include <chrono>
+#include <cstring>
+#include <initializer_list>
 #include <memory>
 #include <thread>
 
@@ -1440,6 +1442,23 @@ TEST(BridgeTest, ConnectLogsWhatTheEcuSupports)
     ASSERT_EQ(ecu_lines().size(), 1) << ecu_lines().join('\n').toStdString();
     EXPECT_EQ(ecu_lines().first().toStdString(),
               "ECU 0x7E8: supports 10 PIDs; 10 requests, none dropped");
+
+    /* Identification (ADR-0021) logs one line once every item has an
+     * outcome: the fake's FAKE values, and the two DIDs it refuses. */
+    const auto identity_lines = [&log]() {
+        return log.filter(QStringLiteral("ECU 0x7E8 identity:"));
+    };
+    ASSERT_TRUE(spinUntil([&]() { return !identity_lines().isEmpty(); }, 5000))
+        << "no identity line in the log";
+    spinLoop(300);
+    ASSERT_EQ(identity_lines().size(), 1) << identity_lines().join('\n').toStdString();
+    EXPECT_EQ(identity_lines().first().toStdString(),
+              "ECU 0x7E8 identity: VIN FAKEJ2534VIN00001; CALID FAKECAL-01; "
+              "CVN DE AD BE EF; ECU name FAKE-ECM; part number FAKE-PART-0001; "
+              "software number FAKE-SW-0001; software version FAKE 1.0; "
+              "supplier FAKE SUPPLIER; ECU serial FAKE-SERIAL-000001; "
+              "VIN (F190) FAKEJ2534VIN00001; hardware number FAKE-HW-01; "
+              "2 refused: 22 F1 94 (7F 22 31), 22 F1 95 (7F 22 31)");
     ASSERT_TRUE(disconnectAndWait(bridge));
 }
 #endif  // _WIN32
@@ -1650,6 +1669,62 @@ TEST(BridgeTest, ChannelSupportTextNamesTheEcuAndWhatItDropped)
     EXPECT_EQ(QtTuneBridge::channelSupportText(running).toStdString(),
               "ECU 0x7E9: 128 requests, none dropped; "
               "scan: 256 DIDs, 130 found (128 polled), 120 refused, 6 unanswered");
+}
+
+/* The identity line (ADR-0021): each answered item by name, the refused
+ * requests with their codes, the unanswered count; a request outside the
+ * list is named by its bytes, an empty answer says so. */
+TEST(BridgeTest, ChannelIdentityTextNamesWhatTheEcuSaid)
+{
+    const auto item = [](std::initializer_list<uint8_t> request, uint8_t outcome,
+                         uint8_t nrc, const char* text) {
+        ecuio_identity_item_t it{};
+        uint8_t k = 0;
+        for (uint8_t b : request) {
+            it.request[k++] = b;
+        }
+        it.length = k;
+        it.outcome = outcome;
+        it.nrc = nrc;
+        it.text_length = static_cast<uint8_t>(strlen(text));
+        memcpy(it.text, text, it.text_length);
+        return it;
+    };
+
+    ecuio_channel_identity_t car{};
+    car.flags = ECUIO_IDENTITY_COMPLETE;
+    car.rx_id = 0x7E8;
+    car.items = 5;
+    car.list[0] = item({0x09, 0x02}, ECUIO_IDENTITY_ANSWERED, 0, "FAKEJ2534VIN00001");
+    car.list[1] = item({0x09, 0x04}, ECUIO_IDENTITY_ANSWERED, 0, "CAL-A, CAL-B");
+    car.list[2] = item({0x22, 0xF1, 0x94}, ECUIO_IDENTITY_REFUSED, 0x31, "");
+    car.list[3] = item({0x09, 0x0A}, ECUIO_IDENTITY_UNANSWERED, 0, "");
+    car.list[4] = item({0x22, 0xF1, 0x8C}, ECUIO_IDENTITY_REFUSED, 0x33, "");
+    EXPECT_EQ(QtTuneBridge::channelIdentityText(car).toStdString(),
+              "ECU 0x7E8 identity: VIN FAKEJ2534VIN00001; CALID CAL-A, CAL-B; "
+              "2 refused: 22 F1 94 (7F 22 31), 22 F1 8C (7F 22 33); 1 unanswered");
+
+    ecuio_channel_identity_t silent{};
+    silent.flags = ECUIO_IDENTITY_COMPLETE;
+    silent.rx_id = 0x18DAF110;
+    silent.items = 2;
+    silent.list[0] = item({0x09, 0x02}, ECUIO_IDENTITY_UNANSWERED, 0, "");
+    silent.list[1] = item({0x22, 0xF1, 0x90}, ECUIO_IDENTITY_UNANSWERED, 0, "");
+    EXPECT_EQ(QtTuneBridge::channelIdentityText(silent).toStdString(),
+              "ECU 0x18DAF110 identity: 2 unanswered");
+
+    ecuio_channel_identity_t odd{};
+    odd.rx_id = 0x7E9;
+    odd.items = 2;
+    odd.list[0] = item({0x22, 0x12, 0x34}, ECUIO_IDENTITY_ANSWERED, 0, "");
+    odd.list[1] = item({0x22, 0xF1, 0x91}, ECUIO_IDENTITY_UNASKED, 0, "");
+    EXPECT_EQ(QtTuneBridge::channelIdentityText(odd).toStdString(),
+              "ECU 0x7E9 identity: 22 12 34 (empty)");
+
+    ecuio_channel_identity_t none{};
+    none.rx_id = 0x7E8;
+    EXPECT_EQ(QtTuneBridge::channelIdentityText(none).toStdString(),
+              "ECU 0x7E8 identity: nothing asked");
 }
 
 TEST(BridgeTest, ConnectLogsTheMockSession)

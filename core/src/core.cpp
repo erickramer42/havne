@@ -6,6 +6,7 @@
 #include "ecuio/profile.h"
 #include "session.h"
 #include "uds_generic.h"
+#include "request_engine.h"   /* ECUIO_IDENT_REQUESTS, for the names */
 #include "uri_query.h"
 #include "error_detail.h"
 #include "ecuio/j2534_ptypes.h"   /* ecuio_pt_status_name; plain C, any OS */
@@ -169,6 +170,37 @@ ecuio_status_t ecuio_session_get_channel_support(
     }
     *out_support = session->support[channel];
     return ECUIO_OK;
+}
+
+ecuio_status_t ecuio_session_get_channel_identity(
+    const ecuio_session_t* session,
+    uint32_t channel,
+    ecuio_channel_identity_t* out_identity)
+{
+    if (session == nullptr || out_identity == nullptr) {
+        return ECUIO_ERR_NULL_ARGUMENT;
+    }
+    std::lock_guard<std::mutex> lock(session->support_mutex);
+    if (channel >= session->support_count) {
+        return ECUIO_ERR_INVALID_ARGUMENT;
+    }
+    *out_identity = session->identity[channel];
+    return ECUIO_OK;
+}
+
+const char* ecuio_identity_request_name(const uint8_t* request, uint8_t length)
+{
+    if (request == nullptr) {
+        return "";
+    }
+    for (const ecuio_ident_request& q : ECUIO_IDENT_REQUESTS) {
+        if (q.len == length && q.bytes[0] == request[0] &&
+            q.bytes[1] == request[1] &&
+            (length < 3 || q.bytes[2] == request[2])) {
+            return q.name;
+        }
+    }
+    return "";
 }
 
 /* Optional no-ops (core.h): core holds no global state that needs

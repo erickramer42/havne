@@ -6,9 +6,10 @@
 //     read-only rule, rotation per channel, correlation, the wait, the
 //     pending wait and the floor; the supported-PID walk, its budget and
 //     its resumption, and what each answer drops; the DID scan's turns,
-//     outcomes and rescan (RequestEngineTest, test_obd2); the worker that
-//     drives it is HARNESS (J2534AdoptionTest, J2534HealthTest), its
-//     timing on a vehicle BENCH.
+//     outcomes and rescan; identification's turns, outcomes, text and
+//     report (RequestEngineTest, test_obd2); the worker that drives it is
+//     HARNESS (J2534AdoptionTest, J2534HealthTest), its timing on a
+//     vehicle BENCH.
 
 #ifndef ECUIO_REQUEST_ENGINE_H
 #define ECUIO_REQUEST_ENGINE_H
@@ -45,7 +46,15 @@
  * A positive reply puts the DID in the rotation (while the table has
  * room); a negative one counts it refused; one that times out is asked
  * again when the driver calls ecuio_engine_rescan, as the link recovers.
- * The scan runs whether or not the probe is on. */
+ * The scan runs whether or not the probe is on.
+ *
+ * Identification (ADR-0021) runs on the same slot, ahead of the scan:
+ * when the driver asks for it (ecuio_engine_identify), every channel
+ * asks ECUIO_IDENT_REQUESTS once each, Service 09's vehicle information
+ * and the 0x22 identification DIDs, taking turns with the rotation like
+ * the scan. A positive reply's data is kept as text, a negative one as
+ * its code, a timeout as unanswered, asked again on ecuio_engine_rescan.
+ * Nothing it learns enters the rotation. */
 
 /* Timing (ADR-0015, appendix of 2026-10-23). The wait is the server's
  * response time P2 (50 ms) plus 50 ms for the adapter: the longest reply
@@ -85,6 +94,42 @@ constexpr uint8_t ECUIO_SCAN_UNASKED = 0;      /* not asked yet, or asked
 constexpr uint8_t ECUIO_SCAN_FOUND = 1;        /* answered positive */
 constexpr uint8_t ECUIO_SCAN_REFUSED = 2;      /* answered negative */
 constexpr uint8_t ECUIO_SCAN_UNANSWERED = 3;   /* its wait ran out */
+
+/* What identification asks each channel's ECU (ADR-0021), in this
+ * order: SAE J1979 Service 09's vehicle information (the VIN, the
+ * calibration IDs and their verification numbers, the ECU's name), then
+ * ISO 14229-1's identification DIDs (Annex C: part, software and
+ * hardware numbers, the supplier, the serial, the VIN again as F190).
+ * The name is what the activity log shows beside the value. */
+struct ecuio_ident_request {
+    uint8_t bytes[3];
+    uint8_t len;
+    const char* name;
+};
+
+constexpr ecuio_ident_request ECUIO_IDENT_REQUESTS[] = {
+    {{0x09, 0x02, 0x00}, 2, "VIN"},
+    {{0x09, 0x04, 0x00}, 2, "CALID"},
+    {{0x09, 0x06, 0x00}, 2, "CVN"},
+    {{0x09, 0x0A, 0x00}, 2, "ECU name"},
+    {{0x22, 0xF1, 0x87}, 3, "part number"},
+    {{0x22, 0xF1, 0x88}, 3, "software number"},
+    {{0x22, 0xF1, 0x89}, 3, "software version"},
+    {{0x22, 0xF1, 0x8A}, 3, "supplier"},
+    {{0x22, 0xF1, 0x8C}, 3, "ECU serial"},
+    {{0x22, 0xF1, 0x90}, 3, "VIN (F190)"},
+    {{0x22, 0xF1, 0x91}, 3, "hardware number"},
+    {{0x22, 0xF1, 0x94}, 3, "supplier software number"},
+    {{0x22, 0xF1, 0x95}, 3, "supplier software version"},
+};
+constexpr uint32_t ECUIO_IDENT_COUNT =
+    sizeof(ECUIO_IDENT_REQUESTS) / sizeof(ECUIO_IDENT_REQUESTS[0]);
+static_assert(ECUIO_IDENT_COUNT <= ECUIO_IDENTITY_MAX_ITEMS,
+              "the identification list must fit the report");
+
+/* The reply's data starts here for both services: after 49 <item> and
+ * the item count, or after 62 <DID high> <DID low>. */
+constexpr uint16_t ECUIO_IDENT_DATA_OFFSET = 3;
 
 struct ecuio_request {
     uint8_t bytes[3];   /* the service ID, then the key */
@@ -128,6 +173,13 @@ struct ecuio_engine_channel {
     uint32_t scan_pending = 0;  /* this channel's unasked entries */
     uint32_t generation = 0;    /* bumped whenever the above, or a
                                  * request's dropped, changes */
+    /* Identification: the one-shot carries an item while identifying. */
+    ecuio_identity_item_t ident[ECUIO_IDENTITY_MAX_ITEMS] = {};
+    uint32_t ident_count = 0;   /* items in ident; 0 = not identifying */
+    uint32_t ident_pending = 0; /* unasked items */
+    bool identifying = false;   /* the one-shot is an item */
+    uint32_t ident_index = 0;   /* the item out, while identifying */
+    uint32_t ident_generation = 0;   /* bumped as each item settles */
 };
 
 struct ecuio_request_engine {
@@ -373,8 +425,9 @@ inline void ecuio_engine_scan_settle(ecuio_request_engine* e, uint32_t c,
     ++ch.generation;
 }
 
-/* Asks every unanswered scan entry again: the driver's call when the
- * link returns to ok, as the walk resumes. Silence wasn't an answer. */
+/* Asks every unanswered scan entry and identification item again: the
+ * driver's call when the link returns to ok, as the walk resumes.
+ * Silence wasn't an answer. */
 inline void ecuio_engine_rescan(ecuio_request_engine* e)
 {
     for (uint32_t i = 0; i < e->scan_count; ++i) {
@@ -384,6 +437,141 @@ inline void ecuio_engine_rescan(ecuio_request_engine* e)
             ++e->chans[s.channel].scan_pending;
         }
     }
+    for (uint32_t c = 0; c < e->chan_count; ++c) {
+        ecuio_engine_channel& ch = e->chans[c];
+        for (uint32_t i = 0; i < ch.ident_count; ++i) {
+            if (ch.ident[i].outcome == ECUIO_IDENTITY_UNANSWERED) {
+                ch.ident[i].outcome = ECUIO_IDENTITY_UNASKED;
+                ++ch.ident_pending;
+            }
+        }
+    }
+}
+
+/* Identification (ADR-0021): gives every channel the list to ask, each
+ * item once, through the one-shot slot ahead of the scan. Idempotent:
+ * a channel already holding the list keeps its answers. */
+inline void ecuio_engine_identify(ecuio_request_engine* e)
+{
+    for (uint32_t c = 0; c < e->chan_count; ++c) {
+        ecuio_engine_channel& ch = e->chans[c];
+        if (ch.ident_count > 0) {
+            continue;
+        }
+        for (uint32_t i = 0; i < ECUIO_IDENT_COUNT; ++i) {
+            ecuio_identity_item_t& it = ch.ident[i];
+            it = ecuio_identity_item_t{};
+            const ecuio_ident_request& q = ECUIO_IDENT_REQUESTS[i];
+            for (uint8_t k = 0; k < q.len; ++k) {
+                it.request[k] = q.bytes[k];
+            }
+            it.length = q.len;
+        }
+        ch.ident_count = ECUIO_IDENT_COUNT;
+        ch.ident_pending = ECUIO_IDENT_COUNT;
+    }
+}
+
+/* The next unasked item of channel c, in list order; -1 when none. */
+inline int32_t ecuio_engine_ident_next(const ecuio_request_engine* e,
+                                       uint32_t c)
+{
+    const ecuio_engine_channel& ch = e->chans[c];
+    for (uint32_t i = 0; i < ch.ident_count; ++i) {
+        if (ch.ident[i].outcome == ECUIO_IDENTITY_UNASKED) {
+            return static_cast<int32_t>(i);
+        }
+    }
+    return -1;
+}
+
+/* An identification reply's data as the report shows it
+ * (ecuio_identity_item_t::text): ASCII when every byte is printable or
+ * padding, the printable runs joined by ", " and trailing blanks
+ * dropped; else hex pairs. Writes at most cap bytes, NUL included, cut
+ * at a whole pair; cap is at least 1. Returns the text's length. */
+inline uint8_t ecuio_identity_format(const uint8_t* data, uint32_t len,
+                                     char* out, uint32_t cap)
+{
+    bool printable = false;
+    bool ascii = true;
+    for (uint32_t i = 0; i < len; ++i) {
+        if (data[i] >= 0x20 && data[i] <= 0x7E) {
+            printable = true;
+        } else if (data[i] != 0x00 && data[i] != 0xFF) {
+            ascii = false;
+        }
+    }
+    uint32_t w = 0;
+    const uint32_t room = cap - 1;
+    if (ascii && printable) {
+        bool started = false;
+        bool gap = false;
+        for (uint32_t i = 0; i < len; ++i) {
+            const uint8_t b = data[i];
+            if (b < 0x20 || b > 0x7E) {
+                gap = true;
+                continue;
+            }
+            if (started && gap) {
+                if (w + 2 > room) {
+                    break;
+                }
+                out[w++] = ',';
+                out[w++] = ' ';
+            }
+            if (w + 1 > room) {
+                break;
+            }
+            out[w++] = static_cast<char>(b);
+            started = true;
+            gap = false;
+        }
+        while (w > 0 && (out[w - 1] == ' ' || out[w - 1] == ',')) {
+            --w;
+        }
+    } else {
+        static const char kHex[] = "0123456789ABCDEF";
+        for (uint32_t i = 0; i < len; ++i) {
+            const uint32_t need = (w == 0) ? 2u : 3u;
+            if (w + need > room) {
+                break;
+            }
+            if (w > 0) {
+                out[w++] = ' ';
+            }
+            out[w++] = kHex[data[i] >> 4];
+            out[w++] = kHex[data[i] & 0x0F];
+        }
+    }
+    out[w] = '\0';
+    return static_cast<uint8_t>(w);
+}
+
+/* Settles the item channel c has out: answered, with the reply's data
+ * (the whole frame, from which the text is taken past the header),
+ * refused with its code, or unanswered. */
+inline void ecuio_engine_ident_settle(ecuio_request_engine* e, uint32_t c,
+                                      uint8_t outcome, uint8_t nrc,
+                                      const uint8_t* data, uint16_t len)
+{
+    ecuio_engine_channel& ch = e->chans[c];
+    ecuio_identity_item_t& it = ch.ident[ch.ident_index];
+    ch.identifying = false;
+    it.outcome = outcome;
+    it.nrc = nrc;
+    it.text[0] = '\0';
+    it.text_length = 0;
+    if (outcome == ECUIO_IDENTITY_ANSWERED && len > ECUIO_IDENT_DATA_OFFSET) {
+        it.text_length = ecuio_identity_format(
+            data + ECUIO_IDENT_DATA_OFFSET,
+            static_cast<uint32_t>(len - ECUIO_IDENT_DATA_OFFSET),
+            it.text, sizeof(it.text));
+    }
+    if (ch.ident_pending > 0) {
+        --ch.ident_pending;
+    }
+    ++ch.ident_generation;
 }
 
 /* Takes table entry i out of the rotation, for reason (ECUIO_DROP_*). */
@@ -496,11 +684,11 @@ inline void ecuio_engine_probe(ecuio_request_engine* e, int64_t now_us)
 
 /* What channel c sends next: ECUIO_ENGINE_ONCE while its walk has a
  * bitmap to ask, then, taking turns with the rotation, ECUIO_ENGINE_ONCE
- * for the next scanned DID, else the next request of its rotation, or
- * ECUIO_ENGINE_NONE while one is outstanding, before the floor, or when
- * there is nothing to send. A walk out of budget ends here. Moves the
- * rotation past the request it returns; ecuio_engine_sent records what
- * became of it. */
+ * for the next identification item, then for the next scanned DID,
+ * else the next request of its rotation, or ECUIO_ENGINE_NONE while one
+ * is outstanding, before the floor, or when there is nothing to send. A
+ * walk out of budget ends here. Moves the rotation past the request it
+ * returns; ecuio_engine_sent records what became of it. */
 inline int32_t ecuio_engine_due(ecuio_request_engine* e, uint32_t c,
                                 int64_t now_us)
 {
@@ -514,10 +702,28 @@ inline int32_t ecuio_engine_due(ecuio_request_engine* e, uint32_t c,
         }
         ecuio_engine_end_walk(e, c);
     }
-    if (ch.scanning) {
-        return ECUIO_ENGINE_ONCE;   /* a scanned DID the driver didn't send */
+    if (ch.identifying || ch.scanning) {
+        return ECUIO_ENGINE_ONCE;   /* a one-shot the driver didn't send */
     }
-    if (ch.scan_pending > 0 && (ch.requests == 0 || ch.scan_turn)) {
+    const bool once_turn = ch.requests == 0 || ch.scan_turn;
+    if (ch.ident_pending > 0 && once_turn) {
+        const int32_t i = ecuio_engine_ident_next(e, c);
+        if (i >= 0) {
+            const ecuio_identity_item_t& it = ch.ident[i];
+            ch.once = ecuio_request{};
+            for (uint8_t k = 0; k < it.length; ++k) {
+                ch.once.bytes[k] = it.request[k];
+            }
+            ch.once.len = it.length;
+            ch.once.channel = static_cast<uint8_t>(c);
+            ch.identifying = true;
+            ch.ident_index = static_cast<uint32_t>(i);
+            ch.scan_turn = false;
+            return ECUIO_ENGINE_ONCE;
+        }
+        ch.ident_pending = 0;   /* the count had drifted; nothing is unasked */
+    }
+    if (ch.scan_pending > 0 && once_turn) {
         const int32_t i = ecuio_engine_scan_next(e, c);
         if (i >= 0) {
             const ecuio_scan_entry& s = e->scan[i];
@@ -564,7 +770,8 @@ inline void ecuio_engine_sent(ecuio_request_engine* e, uint32_t c,
 /* Ends channel c's request once its wait has run out: true when one
  * timed out, which is that request's outcome. Its reply may still come,
  * so the channel is out of step until a positive reply. A bitmap that
- * times out ends the walk; a scanned DID that does is unanswered. */
+ * times out ends the walk; a scanned DID or an identification item that
+ * does is unanswered. */
 inline bool ecuio_engine_expire(ecuio_request_engine* e, uint32_t c,
                                 int64_t now_us)
 {
@@ -575,7 +782,10 @@ inline bool ecuio_engine_expire(ecuio_request_engine* e, uint32_t c,
     const bool once = ch.outstanding == ECUIO_ENGINE_ONCE;
     ch.outstanding = ECUIO_ENGINE_NONE;
     ch.in_step = false;
-    if (once && ch.scanning) {
+    if (once && ch.identifying) {
+        ecuio_engine_ident_settle(e, c, ECUIO_IDENTITY_UNANSWERED, 0,
+                                  nullptr, 0);
+    } else if (once && ch.scanning) {
         ecuio_engine_scan_settle(e, c, ECUIO_SCAN_UNANSWERED, 0);
     } else if (once) {
         ecuio_engine_end_walk(e, c);
@@ -584,7 +794,8 @@ inline bool ecuio_engine_expire(ecuio_request_engine* e, uint32_t c,
 }
 
 /* A frame received on channel c, its payload after the CAN ID (at most
- * the first six bytes are read). A positive or negative reply completes
+ * the first six bytes are read, except that an identification reply's
+ * data becomes the item's text). A positive or negative reply completes
  * the outstanding request; a pending one keeps it outstanding and
  * extends its wait to the pending wait from now. A bitmap carries on the
  * walk; while the probe is on, a negative reply drops what its code says
@@ -596,9 +807,9 @@ inline bool ecuio_engine_expire(ecuio_request_engine* e, uint32_t c,
  * the key, puts the channel back in step. A scanned DID is settled by
  * either reply, in step or not: its answer counts once, and a late
  * negative reply can at worst count the DID out now as refused, while
- * the reply that was really its own still decodes through its def.
- * *out_nrc (when not NULL) gets the code of a negative or pending
- * reply. */
+ * the reply that was really its own still decodes through its def. An
+ * identification item is settled the same way. *out_nrc (when not NULL)
+ * gets the code of a negative or pending reply. */
 inline ecuio_reply ecuio_engine_on_frame(ecuio_request_engine* e, uint32_t c,
                                          const uint8_t* data, uint16_t len,
                                          int64_t now_us, uint8_t* out_nrc)
@@ -613,7 +824,10 @@ inline ecuio_reply ecuio_engine_on_frame(ecuio_request_engine* e, uint32_t c,
         data[1] == r.bytes[1] && (r.len < 3 || data[2] == r.bytes[2])) {
         ch.outstanding = ECUIO_ENGINE_NONE;
         ch.in_step = true;
-        if (out == ECUIO_ENGINE_ONCE && ch.scanning) {
+        if (out == ECUIO_ENGINE_ONCE && ch.identifying) {
+            ecuio_engine_ident_settle(e, c, ECUIO_IDENTITY_ANSWERED, 0,
+                                      data, len);
+        } else if (out == ECUIO_ENGINE_ONCE && ch.scanning) {
             ecuio_engine_scan_settle(e, c, ECUIO_SCAN_FOUND, 0);
         } else if (out == ECUIO_ENGINE_ONCE) {
             if (len >= ECUIO_BITMAP_REPLY_LEN) {
@@ -650,7 +864,10 @@ inline ecuio_reply ecuio_engine_on_frame(ecuio_request_engine* e, uint32_t c,
     } else if (reason != 0 && out != ECUIO_ENGINE_ONCE) {
         ecuio_engine_drop(e, static_cast<uint32_t>(out), reason, code);
     }
-    if (out == ECUIO_ENGINE_ONCE && ch.scanning) {
+    if (out == ECUIO_ENGINE_ONCE && ch.identifying) {
+        ecuio_engine_ident_settle(e, c, ECUIO_IDENTITY_REFUSED, code,
+                                  nullptr, 0);
+    } else if (out == ECUIO_ENGINE_ONCE && ch.scanning) {
         ecuio_engine_scan_settle(e, c, ECUIO_SCAN_REFUSED, code);
     } else if (out == ECUIO_ENGINE_ONCE) {
         ecuio_engine_end_walk(e, c);
@@ -668,7 +885,7 @@ inline int64_t ecuio_engine_next_event_us(const ecuio_request_engine* e,
     for (uint32_t c = 0; c < e->chan_count; ++c) {
         const ecuio_engine_channel& ch = e->chans[c];
         if (ch.outstanding == ECUIO_ENGINE_NONE && ch.requests == 0 &&
-            !ch.walking && ch.scan_pending == 0) {
+            !ch.walking && ch.scan_pending == 0 && ch.ident_pending == 0) {
             continue;
         }
         const int64_t at = (ch.outstanding != ECUIO_ENGINE_NONE)
@@ -732,6 +949,26 @@ inline void ecuio_engine_support(const ecuio_request_engine* e, uint32_t c,
     }
     if (out->scan_total > 0 && out->scan_done == out->scan_total) {
         out->flags |= ECUIO_SUPPORT_SCAN_COMPLETE;
+    }
+}
+
+/* What channel c's ECU has said it is, for
+ * ecuio_session_get_channel_identity; the driver adds the channel's
+ * rx_id. Complete once every item has an outcome. */
+inline void ecuio_engine_identity(const ecuio_request_engine* e, uint32_t c,
+                                  ecuio_channel_identity_t* out)
+{
+    const ecuio_engine_channel& ch = e->chans[c];
+    *out = ecuio_channel_identity_t{};
+    out->generation = ch.ident_generation;
+    out->items = ch.ident_count;
+    bool complete = ch.ident_count > 0;
+    for (uint32_t i = 0; i < ch.ident_count; ++i) {
+        out->list[i] = ch.ident[i];
+        complete = complete && ch.ident[i].outcome != ECUIO_IDENTITY_UNASKED;
+    }
+    if (complete) {
+        out->flags |= ECUIO_IDENTITY_COMPLETE;
     }
 }
 

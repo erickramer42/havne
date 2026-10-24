@@ -90,6 +90,7 @@ Dates are commit dates.
 | 2026-10-23 | A frame carries a whole ISO 15765 message: `ecuio_frame_t` holds 4 KB, both J2534 read paths hand the transport the vendor's message untouched through one copy, a read's reply crosses the surrogate pipe at the length it needs, and `ecuio_profile_lookup` and `ecuio_session_send` take ADR-0018's codes ([ADR-0006](adr/0006-frame-abi-v0.3.md), appendix) | `4d4e13c` |
 | 2026-10-23 | Text values: `TEXT` and `HEX` defs read a byte field as ASCII or hex pairs (`ecuio_decode_text`, `byte_length` in the def's reserved room), the signal model carries text rows, LiveView shows them unplotted, and the recorder writes them ([ADR-0016](adr/0016-signal-definition-layout.md) and [ADR-0017](adr/0017-session-recording.md), appendices) | `882b1a3` |
 | 2026-10-23 | The `uds-generic` profile ([ADR-0020](adr/0020-uds-generic.md)): `?did=` names the DIDs (an ECU prefix, a type, a range), create builds a set the session owns, single DIDs are polled and ranges scanned once beside the rotation by the request engine, the found ones joining it; the support report and the ECU line carry the scan's counts; the mock answers the DIDs, so a QML test shows a text row; `fuzz_uds_query` | `9107312` |
+| 2026-10-23 | Vehicle identification ([ADR-0021](adr/0021-vehicle-identification.md)): every requesting channel asks its ECU the VIN, calibration IDs and identification DIDs once, taking turns with the rotation; the text is formed in core, a report per channel crosses the C ABI, and the bridge logs one line per ECU once complete; `?identify=0`; the fake answers the list with FAKE values | — |
 
 ## Lessons learned
 
@@ -762,3 +763,16 @@ expansion). And an ECU prefix of `8` mapped to a request ID of 0, which
 the set validator refuses, so a URI the parser accepted built a set the
 session could never use. Neither was in the hand-written cases, because
 both inputs are ones nobody would type on purpose.
+
+**2026-10-23 — identification:** **a buffer documented as "the first bytes" is a
+contract its next reader breaks.** The worker handed the request engine a
+six-byte copy of each reply's head, enough for a bitmap and for
+correlating any reply, and the engine's comment said as much. Identification
+made the engine read a reply's data, so the first HARNESS run showed a VIN
+of three right bytes and fourteen of stack garbage, in the unit tests'
+blind spot: they call the engine with whole replies. The fix keeps the frame
+in the transport and hands the engine a pointer into it, so every consumer
+sees the whole payload and no copy is made. The lesson is the order of
+work: a seam that truncates needs its limit in the type (a length the
+reader checks), not in a comment, or the test that uses the seam end to
+end has to run before the one that stubs it is trusted.

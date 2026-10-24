@@ -399,3 +399,11 @@ worker. These are the choices it makes where §4 left room:
   `RequestEngineTest.TheFirstVehiclesBitmapsDropOnly0x5C`), the walk
   drops 0x5C and nothing else. The second vehicle session checks it on
   the car.
+
+## Appendix — the Service 09 record (2026-10-23)
+
+The text values this record's scope left to a record of their own have
+it: [ADR-0021](0021-vehicle-identification.md). Service 09's items and
+the identification DIDs go out as the one-shot requests §1 describes,
+through the slot the probe and the scan use, taking turns with the
+rotation, and their text is formed in core.

@@ -10,18 +10,22 @@
 // BEHAVIOR:
 //  * WriteMsgs: records the message (hook-observable). Response
 //    generation is two-mode:
-//      - A request, with a filter registered: Service 01
-//        [4-byte ID BE][01][PID] (exactly 6 bytes, the adapter-framed
+//      - A request, with a filter registered: Service 01 or 09
+//        [4-byte ID BE][01|09][PID] (exactly 6 bytes, the adapter-framed
 //        logical message) or Service 0x22 [ID][22][DID] (7 bytes). The
 //        ECU the request is addressed to answers: [reply ID BE][41][PID]
 //        [canned] from g_obd2_canned (SetFakeObd2CannedValueExternal
-//        overrides per-test) or its supported-PID bitmap, or
-//        [ID][62][DID][value] for the DIDs it knows: 0x1E1C (2 bytes),
-//        and three long replies, 0xF1A0 (200 bytes), 0xF1A1 (4092, so
+//        overrides per-test) or its supported-PID bitmap;
+//        [ID][49][item][01][data] for Service 09's VIN (02), CALID
+//        (04), CVN (06) and ECU name (0A), synthetic values marked FAKE;
+//        or [ID][62][DID][value] for the DIDs it knows: 0x1E1C (2 bytes),
+//        the identification DIDs 0xF187 to 0xF191 as FAKE text, and
+//        three long replies, 0xF1A0 (200 bytes), 0xF1A1 (4092, so
 //        the reply is ISO 15765-2's longest, 4095 bytes) and 0xF1A2
 //        (4121, filling PASSTHRU_MSG.Data: longer than a frame holds).
-//        Any other PID or DID gets a negative reply, 7F 01 12 (what the
-//        first vehicle answered for PID 0x5C) or 7F 22 31. The reply ID
+//        Any other PID, item or DID gets a negative reply, 7F 01 12
+//        (what the first vehicle answered for PID 0x5C), 7F 09 12 or
+//        7F 22 31 (so 0xF194 and 0xF195 are refused). The reply ID
 //        is the request's plus 8 (0x7E0 ->
 //        0x7E8; the functional 0x7DF is answered from 0x7E8) or, 29-bit,
 //        18DA<tester><ecu> for 18DA<ecu><tester>. NO PCI byte in either
@@ -448,9 +452,38 @@ constexpr unsigned long kFakeMaxDidLen = 4092;
 constexpr uint16_t kFakeOverlongDid = 0xF1A2;
 constexpr unsigned long kFakeOverlongDidLen = ECUIO_PT_MSG_DATA_SIZE - 7;
 
+/* What the fake's ECU says it is (ADR-0021), every value marked FAKE so
+ * none can pass for a vehicle's. The VIN has a VIN's 17 characters; the
+ * CALID and the ECU name are NUL-padded to J1979's 16 and 20 bytes; the
+ * CVN is four binary bytes. */
+constexpr char kFakeVin[] = "FAKEJ2534VIN00001";
+constexpr char kFakeCalid[16] = "FAKECAL-01";
+constexpr unsigned char kFakeCvn[4] = {0xDE, 0xAD, 0xBE, 0xEF};
+constexpr char kFakeEcuName[20] = "FAKE-ECM";
+
+/* The identification DIDs the fake's ECU answers, as text; nullptr for
+ * any other DID. 0xF194 and 0xF195 are left out, so identification
+ * meets a refusal. */
+const char* did_text(uint16_t did)
+{
+    switch (did) {
+        case 0xF187: return "FAKE-PART-0001";
+        case 0xF188: return "FAKE-SW-0001";
+        case 0xF189: return "FAKE 1.0";
+        case 0xF18A: return "FAKE SUPPLIER";
+        case 0xF18C: return "FAKE-SERIAL-000001";
+        case 0xF190: return kFakeVin;
+        case 0xF191: return "FAKE-HW-01";
+        default:     return nullptr;
+    }
+}
+
 /* A DID's data length, or 0 for one the fake doesn't know. */
 unsigned long did_length(uint16_t did)
 {
+    if (const char* text = did_text(did)) {
+        return static_cast<unsigned long>(strlen(text));
+    }
     switch (did) {
         case kFakeDid:         return sizeof(kFakeDidValue);
         case kFakeLongDid:     return kFakeLongDidLen;
@@ -499,13 +532,15 @@ void build_negative(const unsigned char* req, unsigned char code,
     *resp_len = 7;
 }
 
-/* Build an OBD-II Service 01 or 0x22 response into resp, which holds
- * ECUIO_PT_MSG_DATA_SIZE bytes.
- * Caller (WriteMsgs, mutex HELD) has verified: [tx_id BE][0x01][PID]
- * (6 bytes) or [tx_id BE][0x22][DID] (7 bytes), and an active filter.
- * Output: [reply ID BE][0x41][PID][canned data] or
- * [reply ID BE][0x62][DID][value], or the negative reply for a PID or
- * DID the fake doesn't support — NO PCI BYTE in either direction. The
+/* Build an OBD-II Service 01, 09 or 0x22 response into resp, which
+ * holds ECUIO_PT_MSG_DATA_SIZE bytes.
+ * Caller (WriteMsgs, mutex HELD) has verified: [tx_id BE][0x01][PID] or
+ * [tx_id BE][0x09][item] (6 bytes) or [tx_id BE][0x22][DID] (7 bytes),
+ * and an active filter.
+ * Output: [reply ID BE][0x41][PID][canned data],
+ * [reply ID BE][0x49][item][01][data] or
+ * [reply ID BE][0x62][DID][value], or the negative reply for a PID, item
+ * or DID the fake doesn't support — NO PCI BYTE in either direction. The
  * fake models the ADAPTER side of ISO-TP: this queue content is what a
  * conforming adapter delivers from ReadMsgs, and the transport's header
  * strip lands the bridge on [41][PID][A][B]... — the obd2 set's
@@ -539,11 +574,44 @@ bool build_obd2_response(const unsigned char* req, unsigned long req_len,
         resp[4] = 0x62;
         resp[5] = req[5];
         resp[6] = req[6];
+        const char* text = did_text(did);
         for (unsigned long i = 0; i < n; ++i) {
-            resp[7 + i] = (did == kFakeDid)
-                          ? kFakeDidValue[i]
-                          : static_cast<unsigned char>(i & 0xFF);
+            resp[7 + i] = (text != nullptr) ? static_cast<unsigned char>(text[i])
+                        : (did == kFakeDid) ? kFakeDidValue[i]
+                        : static_cast<unsigned char>(i & 0xFF);
         }
+        *resp_len = 7 + n;
+        return true;
+    }
+    if (req[4] == 0x09) {
+        /* Vehicle information: [ID][49][item][count 01][data]. */
+        const unsigned char* data = nullptr;
+        unsigned long n = 0;
+        switch (req[5]) {
+            case 0x02:
+                data = reinterpret_cast<const unsigned char*>(kFakeVin);
+                n = sizeof(kFakeVin) - 1;
+                break;
+            case 0x04:
+                data = reinterpret_cast<const unsigned char*>(kFakeCalid);
+                n = sizeof(kFakeCalid);
+                break;
+            case 0x06:
+                data = kFakeCvn;
+                n = sizeof(kFakeCvn);
+                break;
+            case 0x0A:
+                data = reinterpret_cast<const unsigned char*>(kFakeEcuName);
+                n = sizeof(kFakeEcuName);
+                break;
+            default:
+                return refuse(0x12);
+        }
+        reply_header(req, resp);
+        resp[4] = 0x49;
+        resp[5] = req[5];
+        resp[6] = 0x01;
+        memcpy(resp + 7, data, n);
         *resp_len = 7 + n;
         return true;
     }
@@ -1065,8 +1133,9 @@ long __stdcall PassThruWriteMsgs(unsigned long ChannelID,
     }
 
     /* RESPONSE GENERATION.
-     * A request: Service 01, EXACTLY 6 bytes with req[4]==0x01, or
-     * Service 0x22, 7 bytes — the adapter-framed logical message. With
+     * A request: Service 01 or 09, EXACTLY 6 bytes with req[4] 0x01 or
+     * 0x09, or Service 0x22, 7 bytes — the adapter-framed logical
+     * message. With
      * an active filter the ECU it's addressed to answers; without one an
      * ISO 15765 channel receives nothing, so the legacy echo applies.
      * Everything else keeps the deterministic echo semantics. */
@@ -1078,7 +1147,8 @@ long __stdcall PassThruWriteMsgs(unsigned long ChannelID,
         const bool has_filter = (fake_j2534::g_last_filter.filter_id != 0)
                                  && (n >= 4);
         const bool request = has_filter &&
-            ((n == 6 && req[4] == 0x01) || (n == 7 && req[4] == 0x22));
+            ((n == 6 && (req[4] == 0x01 || req[4] == 0x09)) ||
+             (n == 7 && req[4] == 0x22));
 
         if (request) {
             if (!fake_j2534::build_obd2_response(req, n, unsupported_nrc,
