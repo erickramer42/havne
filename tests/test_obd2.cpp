@@ -1680,6 +1680,27 @@ TEST(UdsGenericTest, EcuPrefixNamesTheRespondingEcu) {
     }
 }
 
+/* An ECU prefix takes a range as it takes a DID, with or without a type:
+ * the range's last token holds a '-', which no type name does. */
+TEST(UdsGenericTest, EcuPrefixTakesARange) {
+    ecuio_uds_session u;
+    ASSERT_EQ(build_uds("did=7E9:1E00-1E01,18DAF110:F190-F190:text", &u),
+              ECUIO_OK);
+    EXPECT_EQ(u.polled, 0u);
+    ASSERT_EQ(u.scan.size(), 3u);
+    EXPECT_EQ(u.scan[0].did, 0x1E00u);
+    EXPECT_EQ(u.scan[0].rx_id, 0x7E9u);
+    EXPECT_EQ(u.scan[1].did, 0x1E01u);
+    EXPECT_EQ(u.scan[1].rx_id, 0x7E9u);
+    EXPECT_EQ(u.scan[2].did, 0xF190u);
+    EXPECT_EQ(u.scan[2].rx_id, 0x18DAF110u);
+    ASSERT_EQ(u.set.count, 3u);
+    EXPECT_STREQ(u.set.defs[0].name, "0x7E9 DID 1E00");
+    EXPECT_EQ(u.set.defs[0].kind, ECUIO_VALUE_HEX) << "a range's default type";
+    EXPECT_EQ(u.set.defs[2].kind, ECUIO_VALUE_TEXT);
+    EXPECT_EQ(ecuio_validate_signal_set(&u.set, nullptr), ECUIO_VALIDATE_OK);
+}
+
 /* A range is scanned, a lone DID polled, and a DID listed both ways is
  * polled. Polled defs come first, each group in the order its DIDs first
  * appeared, so the transport can derive the rotation from the head of
@@ -1733,9 +1754,12 @@ TEST(UdsGenericTest, RefusalsNameTheirCause) {
         {"did=1E1C:U8", std::string(types) + "U8'"},
         {"did=7E8:1E1C:7E9", std::string(types) + "7E9'"},
         {"did=7E8:7E9:1E1C", std::string(types) + "1E1C'"},
+        {"did=7E9:1E1C-", std::string(shape) + "7E9:1E1C-'"},
+        {"did=7E9:1E1C-1E1G", std::string(shape) + "7E9:1E1C-1E1G'"},
         {"did=1EFF-1E00",
          "?did= needs a range whose end isn't before its start, not '1EFF-1E00'"},
         {"did=7:1E1C", std::string(ecu) + "7'"},
+        {"did=7:1E00-1E01", std::string(ecu) + "7'"},
         {"did=8:1E1C", std::string(ecu) + "8'"},
         {"did=:1E1C", std::string(ecu) + "'"},
         {"did=18DB1234:1E1C", std::string(ecu) + "18DB1234'"},

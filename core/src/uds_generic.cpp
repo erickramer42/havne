@@ -26,8 +26,9 @@ struct type_spec {
     uint8_t bits;   /* 0 for the text kinds */
 };
 
-/* Every name holds a letter past 'f', so none reads as a DID or an ECU
- * and a two-token entry is told apart by its last token. */
+/* Every name holds a letter past 'f' and no '-', so none reads as a DID,
+ * a range or an ECU, and a two-token entry is told apart by its last
+ * token. */
 const type_spec kTypes[] = {
     {"hex", ECUIO_VALUE_HEX, 0},    {"text", ECUIO_VALUE_TEXT, 0},
     {"u8", ECUIO_VALUE_UINT, 8},    {"u16", ECUIO_VALUE_UINT, 16},
@@ -158,13 +159,14 @@ bool parse_entry(view v, entry* out, refusal* why)
             return false;
         }
     } else if (n == 2) {
-        /* DID:type, or ECU:DID when the last token reads as a DID; a last
-         * token that is neither is a misspelt type. */
+        /* DID:type, or ECU:DID when the last token reads as a DID or holds
+         * a range's '-'; a last token that is neither is a misspelt type. */
         const type_spec* t = type_named(tok[1]);
         uint32_t as_did = 0;
         if (t != nullptr) {
             out->type = t;
-        } else if (parse_hex(tok[1], 4, &as_did)) {
+        } else if (parse_hex(tok[1], 4, &as_did) ||
+                   memchr(tok[1].s, '-', tok[1].n) != nullptr) {
             ecu = tok[0];
             did = tok[1];
         } else {
