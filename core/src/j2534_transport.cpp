@@ -14,7 +14,8 @@
 //          link-health machine: hard and quiet reads, untouched counts,
 //          the write latch, its priority and its step-down, a zero
 //          written count, unmatched frames, backoff growth, its end at
-//          a clean read and its restart.
+//          a clean read and its restart, and quiet reads once nothing
+//          is left to ask.
 // CI: non-Windows builds a linking stub; core.cpp routes j2534://
 //     only on _WIN32, so the stub is unreachable there
 
@@ -80,9 +81,10 @@ constexpr uint32_t J2534_TX_ID_DEFAULT = ECUIO_OBD2_TESTER_ARB_ID;   /* shared
 constexpr uint32_t J2534_CAN_ID_MAX     = 0x1FFFFFFFu;   /* 29-bit */
 constexpr uint32_t J2534_PID_MAX        = 0xFFu;
 /* "Not responding" is this many in a row: requests whose wait ran out,
- * in the request modes; reads that brought nothing from an ECU we talk
- * to, in passive mode. About a second either way. One empty read means
- * nothing: with requests, most reads between two of them are empty. */
+ * while there is something to ask; reads that brought nothing from an
+ * ECU we talk to, in passive mode and once nothing is left to ask. About
+ * a second either way. One empty read means nothing: with requests, most
+ * reads between two of them are empty. */
 constexpr uint32_t J2534_HEALTH_QUIET_RUN = 10;
 
 /* A read's outcome. "matched" (stripped and dispatched to one of our
@@ -367,9 +369,10 @@ void count_quiet(ecuio_j2534_transport* t, link_health& h)
  *                         so what fails is the writes. Otherwise no
  *                         change; the backoff stays the writes'
  *   matched frame      -> OK, backoff and quiet count cleared
- *   anything else      -> backoff cleared; in passive mode
- *                         (reads_count), one more quiet read
- * In the request modes the quiet count is the requests' own
+ *   anything else      -> backoff cleared; when reads count (passive
+ *                         mode, or nothing left to ask), one more quiet
+ *                         read
+ * While there is something to ask the quiet count is the requests' own
  * (request_timed_out), and the empty reads between two requests mean
  * nothing. A frame for no channel of ours answers nothing, so it moves
  * no state; it only shows the adapter reads, which ends the backoff. */
@@ -520,13 +523,17 @@ int64_t engine_now_us(const ecuio_j2534_transport* t)
             std::chrono::steady_clock::now() - t->epoch).count());
 }
 
-/* A read's timeout while there are requests to serve: until the
- * engine's next event, within 1 ms and the slice. Never 0, which asks a
- * vendor for a read that doesn't wait at all. */
-uint32_t request_read_timeout_ms(const ecuio_j2534_transport* t)
+/* A read's timeout from the engine's next event (INT64_MAX: nothing to
+ * ask). With something to ask, until that event, within 1 ms and the
+ * slice; never 0, which asks a vendor for a read that doesn't wait at
+ * all. With nothing, passive mode's. */
+uint32_t read_timeout_ms(int64_t next_us)
 {
+    if (next_us == INT64_MAX) {
+        return J2534_IDLE_READ_TIMEOUT_MS;
+    }
     const int64_t slice_us = int64_t{J2534_READ_SLICE_MS} * 1000;
-    int64_t us = ecuio_engine_next_event_us(&t->engine, engine_now_us(t));
+    int64_t us = next_us;
     if (us > slice_us) {
         us = slice_us;
     }
@@ -577,9 +584,10 @@ void publish_identity(ecuio_j2534_transport* t, uint32_t c,
  * sends each idle channel's next request once its floor has passed,
  * then reads once, for at most the slice, and gives a matched frame to
  * the engine, so the next request goes out when the reply is in.
- * Passive (no requests) only reads. A read that brought a frame is
- * followed by the next at once, so every mode drains what has arrived;
- * an empty one waits out its timeout.
+ * Passive (no requests) only reads, and so does a session with nothing
+ * left to ask. A read that brought a frame is followed by the next at
+ * once, so every mode drains what has arrived; an empty one waits out
+ * its timeout.
  *
  * With the probe on (§4) the engine walks each channel's supported-PID
  * chain before its rotation, and the walk resumes, where it stopped,
@@ -617,15 +625,23 @@ void j2534_worker(ecuio_j2534_transport* t)
             }
         }
 
-        const uint32_t timeout_ms = requests ? request_read_timeout_ms(t)
-                                             : J2534_IDLE_READ_TIMEOUT_MS;
+        /* With nothing due on any channel (a scan that found nothing
+         * and polls nothing, a probe that dropped every request) no
+         * request can time out, so the session reads as a passive one
+         * does: empty reads count toward quiet, which can't tell an
+         * ECU that went away from one with nothing left to answer. */
+        const int64_t next_us = requests
+            ? ecuio_engine_next_event_us(&e, engine_now_us(t))
+            : INT64_MAX;
+        const bool asking = next_us != INT64_MAX;
+        const uint32_t timeout_ms = read_timeout_ms(next_us);
         const auto read_start = std::chrono::steady_clock::now();
         const read_outcome o = pump_one(t, timeout_ms);
         if (requests && o.matched) {
             (void)ecuio_engine_on_frame(&e, o.chan, o.payload, o.len,
                                         engine_now_us(t), nullptr);
         }
-        update_health(t, h, o, !requests);
+        update_health(t, h, o, !asking);
         if (h.recovered) {
             h.recovered = false;
             if (requests && t->probe) {

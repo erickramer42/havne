@@ -15,8 +15,10 @@
 //          engine's pacing (ADR-0015): the floor, the wait, negative
 //          and pending replies, two channels at once; and the drain in
 //          passive mode. Frames carry session time, not the vendor's
-//          stamps. Replies longer than a CAN-FD frame arrive whole, up
-//          to ISO 15765-2's longest; a longer one is cut and marked.
+//          stamps. With nothing left to ask, empty reads go quiet as
+//          in passive mode. Replies longer than a CAN-FD frame arrive
+//          whole, up to ISO 15765-2's longest; a longer one is cut and
+//          marked.
 //          The backend setup and the fake's control page are in
 //          j2534_backend_fixture.h.
 
@@ -280,6 +282,32 @@ TEST_P(J2534HealthTest, QuietBusDebouncesToVehicleTimeoutWithoutEpisode)
 
     ASSERT_NO_FATAL_FAILURE(knob("ECUIO_FAKE_READ_STATUS", nullptr));
     EXPECT_TRUE(wait_for_state(session, ECUIO_OK, 5000, le, ec));
+}
+
+/* A uds-generic scan of two DIDs the fake's ECU refuses (7F 22 31),
+ * with identification off, leaves nothing to ask: no request can time
+ * out, so the session reads as a passive one does, and its empty reads
+ * go quiet about a second after the scan ends, with no episode. A frame
+ * from the ECU then shows it's there again. Counting only timed-out
+ * requests would keep the link ok for good. */
+TEST_P(J2534HealthTest, NothingLeftToAskGoesQuiet)
+{
+    ASSERT_NO_FATAL_FAILURE(
+        start_session("?profile=uds-generic&did=1E00-1E01&identify=0"));
+    ASSERT_TRUE(wait_for_frames(2, 2000)) << "the scan's refusals didn't arrive";
+
+    int32_t le = 0;
+    uint32_t ec = 0;
+    EXPECT_TRUE(wait_for_state(session, ECUIO_ERR_VEHICLE_TIMEOUT, 5000,
+                               le, ec))
+        << "the link never went quiet (was " << le << ")";
+    EXPECT_EQ(ec, 0u);
+    EXPECT_EQ(writes_during(page, 300), 0u) << "something was still asked";
+
+    const uint8_t msg[7] = {0x00, 0x00, 0x07, 0xE8, 0x7F, 0x22, 0x31};
+    ASSERT_TRUE(fake_control::post(page, msg, sizeof(msg), 1000u, 0));
+    EXPECT_TRUE(wait_for_state(session, ECUIO_OK, 2000, le, ec))
+        << "the ECU's frame didn't end the quiet (was " << le << ")";
 }
 
 /* Count-trust rule: a dirty count under a hard error must NOT read as

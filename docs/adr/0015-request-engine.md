@@ -423,3 +423,20 @@ recovery, so an item held in "response pending" for longer ends that
 walk unjudged, and the next recovery resumes it.
 `RequestEngineTest.RecoveryWalkWaitsForTheItemOut` and
 `.RecoveryWalkWaitsForAnUnsentItem` pin both.
+
+## Appendix — nothing left to ask (2026-10-24)
+
+A session with requests can run out of things to ask while it runs: a
+`uds-generic` scan that found nothing and polls nothing, once
+identification has settled, or an `obd2` session whose probe dropped
+every PID. Counted in the requests' unit, such a session could never go
+quiet, since no request times out, and its worker read with a 10 ms
+timeout forever. With nothing due on any channel the worker now reads as
+passive mode does: the 100 ms timeout, and empty reads counting toward
+quiet. The cost is that such a session turns quiet about a second after
+its last reply, though the ECU answered everything, because a link that
+asks nothing can't tell an ECU that went away from one with nothing to
+say. The alternatives were stopping the 100 Hz reads but keeping the
+state, which can't see an ECU go away, and a heartbeat request the
+engine would send with no def asking for it, which §1 doesn't allow.
+`J2534HealthTest.NothingLeftToAskGoesQuiet` pins it on both backends.
