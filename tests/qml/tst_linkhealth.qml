@@ -127,7 +127,7 @@ TestCase {
         const main = createMain()
         connect(fakeUri("?profile=raw&filter=0x7E8"))
         tryCompare(Bridge, "linkState", "quiet", 5000)
-        checkSurfaces(main, "quiet", "Vehicle not responding — quiet bus")
+        checkSurfaces(main, "quiet", "Vehicle not responding — quiet bus; check the ignition")
         verify(activityLog(main).includes("Link: vehicle not responding"), "quiet log line")
     }
 

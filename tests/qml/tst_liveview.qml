@@ -131,7 +131,7 @@ TestCase {
     function test_bannerText_data() {
         return [
             { tag: "quiet", state: "quiet", episodes: 0, code: 0,
-              text: "Vehicle not responding — quiet bus" },
+              text: "Vehicle not responding — quiet bus; check the ignition" },
             { tag: "requests", state: "requests", episodes: 1, code: 10,
               text: "Requests failing — check the vehicle connection and ignition" },
             { tag: "fault", state: "fault", episodes: 3, code: 0,

@@ -531,10 +531,6 @@ in the backlog.
   so a one-count step fills the plot: fuel level moving between 71 %
   and 73 % on the first vehicle drew as a full-height square wave. A
   minimum span per trace would keep small steps small.
-- **Ignition hint on the quiet banner (S).** On the first vehicle,
-  ignition off reads as quiet, whose banner says "Vehicle not
-  responding — quiet bus"; only the requests-failing banner mentions
-  the ignition.
 - **Persisted preferences (S).** Only the UI zoom survives a
   restart, through QML `Settings` in `Main.qml` (category `ui`).
   Developer mode, units, theme, the last-used device, the Record

@@ -55,7 +55,9 @@ Page {
     // as Theme.linkColor and Theme.linkLabel treat them.
     function bannerText(state, episodes, errorCode) {
         switch (state) {
-        case "quiet":    return qsTr("Vehicle not responding — quiet bus")
+        // Ignition off reads as quiet on a bus that still acknowledges
+        // (the first vehicle's did), so the hint goes here too
+        case "quiet":    return qsTr("Vehicle not responding — quiet bus; check the ignition")
         case "requests": return qsTr("Requests failing — check the vehicle connection and ignition")
         case "fault":    return qsTr("Adapter fault — %1 episode(s), retrying with backoff").arg(episodes)
         default:         return qsTr("Link degraded (error %1)").arg(errorCode)
