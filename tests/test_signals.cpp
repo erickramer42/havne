@@ -469,6 +469,19 @@ TEST_F(SignalDecodeTest, ThreeByteMuxKeyGatesAndDecodes)
     signal.mux_key = 0x62123401u;
     EXPECT_EQ(ecuio_def_applies_to_frame(&signal, &f), 0);
     EXPECT_EQ(ecuio_decode_signal(&signal, f.data, f.data_length, &value), 3);
+
+    /* A key running past the payload is past the payload, as a value
+     * would be, even when the value fits. */
+    signal.mux_length = 3;
+    signal.mux_key = 0x621234u;
+    signal.mux_offset = 3;
+    EXPECT_EQ(ecuio_decode_signal(&signal, f.data, f.data_length, &value),
+              ECUIO_DECODE_ERR_PAST_PAYLOAD);
+
+    /* The gate reads a data_length past data[] as the whole of it. */
+    signal.mux_offset = 0;
+    f.data_length = static_cast<uint16_t>(ECUIO_FRAME_DATA_MAX + 1u);
+    EXPECT_EQ(ecuio_def_applies_to_frame(&signal, &f), 1);
 }
 
 TEST(SignalsTest, SignalDefLayoutIsPinned)
@@ -806,6 +819,11 @@ TEST(SignalsTest, TextDecodeChecksTheFieldAndTheMuxKey)
     EXPECT_EQ(ecuio_decode_text(&d, kVinReply, len, out, sizeof out), ECUIO_DECODE_ERR_MUX_MISMATCH);
     d.mux_length = 4;
     EXPECT_EQ(ecuio_decode_text(&d, kVinReply, len, out, sizeof out), ECUIO_DECODE_ERR_BAD_PARAMS);
+    d.mux_length = 3;
+    d.mux_offset = static_cast<decltype(d.mux_offset)>(len - 1);
+    EXPECT_EQ(ecuio_decode_text(&d, kVinReply, len, out, sizeof out),
+              ECUIO_DECODE_ERR_PAST_PAYLOAD)
+        << "a key running past the payload";
 
     /* Each decoder refuses the other's kinds, and the shapes it can't
      * take, in the validator's order: kind and byte order first. */

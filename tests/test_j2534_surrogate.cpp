@@ -337,6 +337,8 @@ TEST(J2534SurrogateTest, MalformedRequestsAreRefusedAtBothEnds)
               ECUIO_ERR_VENDOR_REFUSED);
     EXPECT_EQ(ecuio_j2534_sur_stop_msg_filter(h, 0, 0),
               ECUIO_ERR_VENDOR_REFUSED);
+    EXPECT_EQ(ecuio_j2534_sur_disconnect_channel(h, 0), ECUIO_OK)
+        << "the child refuses it too, but a disconnect's status is ignored";
 
     /* The client's: nothing crosses the pipe. */
     EXPECT_EQ(ecuio_j2534_sur_write_frame(h, 0, req, 0, 0, 0, nullptr),

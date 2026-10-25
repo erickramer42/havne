@@ -349,6 +349,36 @@ TEST(BridgeTest, DestroyedWhileRecordingClosesSessionAndRecording)
     EXPECT_FALSE(events.contains("Disconnecting:")) << events.toStdString();
 }
 
+/* A recording that can't start (the root is a file, so no folder can
+ * be made under it) says why in the activity log and leaves the
+ * session running unrecorded. */
+TEST(BridgeTest, RecordingThatCantStartIsLoggedAndTheSessionRuns)
+{
+    QTemporaryDir root;
+    ASSERT_TRUE(root.isValid());
+    const QString file = root.path() + QStringLiteral("/not-a-folder");
+    {
+        QFile f(file);
+        ASSERT_TRUE(f.open(QIODevice::WriteOnly));
+    }
+    QtTuneBridge bridge;
+    bridge.setRecordingsRootForTesting(file);
+    bridge.setRecording(true);
+    QStringList log;
+    QObject::connect(&bridge, &QtTuneBridge::logMessage,
+                     [&log](const QString& line) { log << line; });
+
+    ASSERT_TRUE(bridge.connectSession("mock://unrecorded").isEmpty());
+    EXPECT_FALSE(bridge.recordingActive());
+    EXPECT_TRUE(
+        log.filter(QStringLiteral("Recording failed: can't create ")).size() ==
+        1)
+        << log.join('\n').toStdString();
+    ASSERT_TRUE(
+        spinUntil([&bridge]() { return bridge.frameCount() > 2; }, 5000));
+    ASSERT_TRUE(disconnectAndWait(bridge));
+}
+
 /* The switch holds while a session is up, so a recording covers a whole
  * session; each connect gets its own folder. */
 TEST(BridgeTest, RecordingSwitchHoldsDuringASession)
@@ -467,6 +497,15 @@ TEST(BridgeTest, FrameLogOrdersByArrivalNotTimestamp)
     EXPECT_LT(row_of(0x124), row_of(0x123)) << "newest first";
     proxy->setNewestFirst(false);
     EXPECT_LT(row_of(0x123), row_of(0x124)) << "oldest first";
+
+    // A row answers only its roles, and only rows that exist answer
+    EXPECT_FALSE(proxy->data(proxy->index(0, 0), Qt::DisplayRole).isValid());
+    EXPECT_FALSE(proxy
+                     ->data(proxy->index(proxy->rowCount(), 0),
+                            FrameListModel::ArbitrationIdRole)
+                     .isValid());
+    EXPECT_EQ(proxy->count(), proxy->rowCount());
+    EXPECT_EQ(bridge.maxFrameCount(), FrameListModel::MaxFrames);
 
     bridge.disconnectSession();
 }
@@ -1219,6 +1258,17 @@ TEST(BridgeTest, SignalRoleNamesMatchQmlBindings)
     EXPECT_EQ(roles.value(SignalListModel::DecimalsRole), QByteArray("decimals"));
     EXPECT_EQ(roles.value(SignalListModel::TextRole), QByteArray("text"));
     EXPECT_EQ(roles.value(SignalListModel::IsTextRole), QByteArray("isText"));
+
+    // A row answers only its roles, and only rows that exist answer
+    ecuio_signal_def_t defs[2];
+    ecuio_signal_set_t set;
+    buildTestSignalSet(defs, set);
+    model.setSignalSet(&set);
+    EXPECT_EQ(model.data(model.index(1, 0), SignalListModel::IdRole).toInt(),
+              2001);
+    EXPECT_FALSE(model.data(model.index(0, 0), Qt::DisplayRole).isValid());
+    EXPECT_FALSE(
+        model.data(model.index(2, 0), SignalListModel::NameRole).isValid());
 }
 
 TEST(BridgeTest, DecimalsComeFromTheDefAndReachTheChart)
@@ -1769,6 +1819,11 @@ TEST(BridgeTest, SessionInfoTextNamesTheAdapter)
               "Session: x64 DLL, in-proc; ISO 15765 at 250000 baud, flags 0x100; "
               "profile raw, channel 0x18DAF110/0x18DA10F1 (rx/tx); "
               "no battery reading; no version reading");
+
+    ecuio_session_info_t later{};
+    later.backend = 7; // a backend this build doesn't know
+    EXPECT_EQ(QtTuneBridge::sessionInfoText(later).toStdString(),
+              "Session: backend 7");
 }
 
 /* The "ECU 0x…:" line's wording, from hand-built reports: the first
@@ -1791,6 +1846,12 @@ TEST(BridgeTest, ChannelSupportTextNamesTheEcuAndWhatItDropped)
     EXPECT_EQ(QtTuneBridge::channelSupportText(car).toStdString(),
               "ECU 0x7E8: supports 44 PIDs up to 0x60, no answer past that; "
               "10 requests, 1 dropped: 01 5C (not in its supported PIDs)");
+
+    ecuio_channel_support_t later = car; // a reason this build doesn't know
+    later.dropped_list[0].reason = 99;
+    EXPECT_EQ(QtTuneBridge::channelSupportText(later).toStdString(),
+              "ECU 0x7E8: supports 44 PIDs up to 0x60, no answer past that; "
+              "10 requests, 1 dropped: 01 5C (reason 99)");
 
     ecuio_channel_support_t all{};
     all.flags = ECUIO_SUPPORT_PROBED | ECUIO_SUPPORT_COMPLETE;

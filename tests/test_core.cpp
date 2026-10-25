@@ -19,6 +19,7 @@ extern "C" {
 
 /* C++ headers (namespaced classes and inline functions): must stay
  * outside the extern "C" block above. */
+#include "error_detail.h" /* core/src: a refused vendor call's words */
 #include "mock_drive_cycle.h"
 #include "uds_generic.h"   /* core/src: the template set's identity */
 
@@ -107,6 +108,24 @@ TEST(CoreTest, CreateFailuresNameTheirCause) {
               ECUIO_ERR_UNKNOWN_PROFILE);
     EXPECT_EQ(ecuio_session_create(nullptr, &s), ECUIO_ERR_NULL_ARGUMENT);
     EXPECT_STREQ(ecuio_last_error_detail(), "");
+}
+
+/* A refused vendor call's detail is one line: the vendor's text loses
+ * its line breaks and trailing blanks, and text that's only blanks is
+ * left out, as is no text at all. */
+TEST(CoreTest, VendorDetailIsOneLine)
+{
+    ecuio_detail_set_vendor("PassThruOpen", 8, "no adapter\r\nattached  \n");
+    EXPECT_STREQ(ecuio_last_error_detail(),
+                 "PassThruOpen returned status 8 (ERR_DEVICE_NOT_CONNECTED): "
+                 "no adapter  attached");
+    ecuio_detail_set_vendor("PassThruOpen", 8, " \r\n");
+    EXPECT_STREQ(ecuio_last_error_detail(),
+                 "PassThruOpen returned status 8 (ERR_DEVICE_NOT_CONNECTED)");
+    ecuio_detail_set_vendor("PassThruConnect", 34, nullptr);
+    EXPECT_STREQ(ecuio_last_error_detail(),
+                 "PassThruConnect returned status 34 (vendor-specific)");
+    ecuio_detail_clear();
 }
 
 /* Per thread, like dlerror(): a failure on one thread leaves another
@@ -728,6 +747,11 @@ TEST(CoreTest, MockDriveCycleSecondGearPullHoldsTheLimiter)
     EXPECT_GE(lim.min_rpm, ecuio_mock::kRevLimitRpm - 200.0f);
     EXPECT_LE(lim.peak_rpm, ecuio_mock::kRevLimitRpm);
     EXPECT_NEAR(lim.peak_kmh, 113.0f, 5.0f);
+
+    /* Past either end of its table the torque curve holds that end */
+    EXPECT_EQ(ecuio_mock::torque_nm(ecuio_mock::kRevLimitRpm + 500.0f),
+              ecuio_mock::torque_nm(ecuio_mock::kRevLimitRpm));
+    EXPECT_EQ(ecuio_mock::torque_nm(-100.0f), 0.0f);
 }
 
 TEST(CoreTest, MockDriveCycleThirdGearPullIsLongerFasterAndHotter)

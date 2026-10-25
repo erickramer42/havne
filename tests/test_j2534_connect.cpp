@@ -5,8 +5,9 @@
 //          PassThruOpen, PassThruConnect or filter names the call, its
 //          status (by its J2534-1 v04.04 name, or as vendor-specific)
 //          and the vendor's own text from PassThruGetLastError, word for
-//          word alike on both backends. A DLL that won't load, or loads
-//          without the J2534 exports, is LOAD_FAILED on both; a success
+//          word alike on both backends. A DLL that won't load (missing,
+//          not a PE file, a path that isn't UTF-8), or loads without the
+//          J2534 exports, is LOAD_FAILED on both; a success
 //          clears the detail. A session
 //          that connects describes what it runs on
 //          (ecuio_session_get_info): backend, DLL architecture, the
@@ -117,8 +118,9 @@ TEST_P(J2534ConnectTest, RefusedFilterFailsTheStartWithTheVendorText)
                  "(ECUIO_FAKE_FILTER_STATUS)");
 }
 
-/* A DLL that isn't there: in-proc LoadLibrary fails; through the
- * surrogate the child's does, and it exits with code 4. */
+/* A DLL that isn't there, or a file that isn't a DLL: in-proc
+ * LoadLibrary fails; through the surrogate the child's does, and it
+ * exits with code 4. A path that isn't UTF-8 never reaches a load. */
 TEST_P(J2534ConnectTest, MissingDllFailsToLoad)
 {
     EXPECT_EQ(ecuio_session_create(
@@ -127,6 +129,29 @@ TEST_P(J2534ConnectTest, MissingDllFailsToLoad)
               ECUIO_ERR_LOAD_FAILED);
     EXPECT_NE(strstr(ecuio_last_error_detail(), "load the DLL"), nullptr)
         << ecuio_last_error_detail();
+
+    char tmp[MAX_PATH] = {};
+    ASSERT_GT(GetTempPathA(MAX_PATH, tmp), 0u);
+    const std::string text = std::string(tmp) + "ecuio-not-a-dll-" +
+                             std::to_string(GetCurrentProcessId()) + ".dll";
+    struct Remove {
+        std::string path;
+        ~Remove() { DeleteFileA(path.c_str()); }
+    } remove{text};
+    FILE* f = fopen(text.c_str(), "wb");
+    ASSERT_NE(f, nullptr);
+    fputs("not a DLL", f);
+    fclose(f);
+    EXPECT_EQ(ecuio_session_create(("j2534://" + text).c_str(), &session),
+              ECUIO_ERR_LOAD_FAILED);
+    EXPECT_NE(strstr(ecuio_last_error_detail(), "load the DLL"), nullptr)
+        << ecuio_last_error_detail();
+
+    EXPECT_EQ(ecuio_session_create("j2534://C:/ecuio-\xFF.dll", &session),
+              ECUIO_ERR_LOAD_FAILED);
+    EXPECT_STREQ(ecuio_last_error_detail(),
+                 "the DLL path isn't valid UTF-8, or is too long");
+    EXPECT_EQ(session, nullptr);
 }
 
 /* A DLL that loads but isn't a J2534 driver: kernel32 exports none of
@@ -270,6 +295,8 @@ TEST_P(J2534ConnectTest, HelperFailuresHaveOneCodePerCause)
               ECUIO_ERR_NULL_ARGUMENT);
     EXPECT_EQ(ecuio_j2534_inject_test_frame(h, req, 0, 0, 0),
               ECUIO_ERR_INVALID_ARGUMENT);
+    EXPECT_EQ(ecuio_j2534_inject_test_frame(h, req, 6, 0, 0), ECUIO_OK)
+        << "the test seam reaches the fake on either backend";
     EXPECT_EQ(ecuio_j2534_backend_name(nullptr), nullptr);
     EXPECT_EQ(ecuio_j2534_backend(nullptr), 0u);
     const uint8_t big[65] = {};

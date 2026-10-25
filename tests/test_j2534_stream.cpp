@@ -308,6 +308,7 @@ TEST_F(J2534QueryParamTest, MalformedQueriesRejectedAtSessionCreate)
         "?profile=uds-generic&did=1E1C:u12",
         "?profile=uds-generic&did=7:1E1C",
         "?profile=uds-generic&did=7E8:7E9:1E1C",
+        "?profile=uds-generic&did=7E8:1E1C:u8:x:y",
         /* 17 pairs, one past the most a query holds */
         "?probe=1&probe=1&probe=1&probe=1&probe=1&probe=1&probe=1&probe=1"
         "&probe=1&probe=1&probe=1&probe=1&probe=1&probe=1&probe=1&probe=1"
@@ -825,6 +826,24 @@ TEST_F(J2534AdoptionTest, PollWithoutChannelRejectedBeforeDllLoad)
     snprintf(uri, sizeof(uri),
              "j2534://%s?profile=raw&poll=0x0C", FAKE_J2534_DLL_PATH);
     EXPECT_EQ(ecuio_session_create(uri, &session), ECUIO_ERR_BAD_URI);
+    EXPECT_EQ(session, nullptr);
+
+    /* The same rule for a profile whose own requests have no channel. */
+    static const uint8_t kPids[] = {0x0C};
+    static ecuio_signal_def_t defs[1];
+    static ecuio_signal_set_t set;
+    ASSERT_NO_FATAL_FAILURE(
+        register_pid_profile("test-no-channel", kPids, 1, defs, &set));
+    set.channel_count = 0;
+    set.channels = nullptr;
+    ASSERT_EQ(ecuio_profile_register("test-no-channel", &set, nullptr),
+              ECUIO_OK);
+    snprintf(uri, sizeof(uri), "j2534://%s?profile=test-no-channel",
+             FAKE_J2534_DLL_PATH);
+    EXPECT_EQ(ecuio_session_create(uri, &session), ECUIO_ERR_BAD_URI);
+    EXPECT_STREQ(ecuio_last_error_detail(),
+                 "the profile requests PIDs but declares no channel to "
+                 "receive on");
     EXPECT_EQ(session, nullptr);
 }
 
