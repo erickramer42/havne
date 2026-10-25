@@ -347,12 +347,14 @@ rows against the current Home, Settings and Dashboard header.
   `STATUS_NOERROR`, not `ERR_TIMEOUT`. Another vendor can depart
   elsewhere, and only its own device can show it
   ([ADR-0010](adr/0010-j2534-v0404-shared-types.md)).
-- **Discovery against a seeded registry is untested.** On a machine
-  with no vendors installed the discovery test checks only the shape
-  of an empty result; `scripts/verify.sh` sets
+- **Discovery sees a seeded registry only in CI's coverage job.** On a
+  machine with no vendors installed the discovery test checks only the
+  shape of an empty result; `scripts/verify.sh` sets
   `ECUIO_EXPECT_J2534_DEVICES=1` on Windows so the dev machine's
-  installed driver has to be found, but CI has no vendors and never
-  sees a non-empty result.
+  installed driver has to be found. `win-coverage` registers the fake
+  DLL in both registry views (`REG_EXPAND_SZ`, an environment-variable
+  path) and demands it; `win-build` has no vendors and never sees a
+  non-empty result.
 - **The mobile apps have never run on a device or emulator** (Known
   Issue #2). CI compiles both kits. The simulator smoke shows the iOS
   app starts and draws, but nothing taps through its UI, and it skips

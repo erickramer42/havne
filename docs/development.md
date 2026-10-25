@@ -323,8 +323,9 @@ the live registry. With `ECUIO_EXPECT_J2534_DEVICES=<n>` set it fails
 unless at least that many devices are found; `scripts/verify.sh` sets
 it to 1 on Windows, because the dev machine has a Pass-Thru driver
 installed, and takes `--no-devices` on a machine without one. CI's
-Windows job has no vendors and leaves it unset, so there the test
-checks only the shape of an empty result.
+`win-build` job has no vendors and leaves it unset, so there the test
+checks only the shape of an empty result; `win-coverage` registers the
+fake DLL as a device first, and `scripts/coverage.sh` demands it.
 
 **Cross-arch run.** Run this from the x64 tree, after building
 `build-win32`:
