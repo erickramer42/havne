@@ -8,7 +8,9 @@
 //          URI through the mock, and
 //          locks every control, the device rows among them, while a
 //          connect is in flight (Windows: the fake's open stalled by a
-//          knob). The live registry is manual smoke.
+//          knob); the Units row sets the bridge's unit system, connected
+//          or not. The live registry, and the units kept across a
+//          restart (Main.qml's Settings), are manual smoke.
 
 import QtQuick
 import QtTest
@@ -35,6 +37,7 @@ TestCase {
     // land before the disconnect, or the next case meets a connected
     // bridge and fails for the wrong reason
     function cleanup() {
+        Bridge.unitSystem = 0
         tryVerify(() => !Bridge.connecting, 10000, "a connect in flight ends")
         Bridge.disconnectSession()
         tryVerify(() => !Bridge.disconnecting, 5000, "disconnect ends")
@@ -59,6 +62,25 @@ TestCase {
     // A button's click, through its own handler
     function press(page, name) {
         find(page, name).clicked()
+    }
+
+    // The Units row sets the bridge's unit system, connected or not, and
+    // shows the one in force
+    function test_unitsRowSetsTheBridge() {
+        const page = createPage()
+        const metric = find(page, "units_metric")
+        const imperial = find(page, "units_imperial")
+        compare(Bridge.unitSystem, 0)
+        verify(metric.highlighted && !imperial.highlighted)
+        press(page, "units_imperial")
+        compare(Bridge.unitSystem, 1)
+        verify(imperial.highlighted && !metric.highlighted)
+
+        compare(Bridge.connectSession("mock://demo"), "", "connects")
+        verify(metric.enabled, "units change while connected")
+        press(page, "units_metric")
+        compare(Bridge.unitSystem, 0)
+        verify(metric.highlighted)
     }
 
     function test_presetsProfilesAndDidsComposeTheUri() {

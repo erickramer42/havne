@@ -267,6 +267,53 @@ const ecuio_signal_set_t* ecuio_obd2_signal_set(void); /* ADR-0013 obd2 profile 
 int ecuio_validate_signal_set(const ecuio_signal_set_t* set,
                               ecuio_validation_t* out);
 
+/* ---- Display units (ADR-0022) ----
+ * A decoded value is in its def's unit. The UI shows it in the user's
+ * unit system, converted here so the UI never does arithmetic on a
+ * value (rule 2). Recordings keep the decoded value and unit. */
+
+/* Unit systems. Values are append-only. */
+#define ECUIO_UNITS_METRIC    0u   /* as decoded */
+#define ECUIO_UNITS_IMPERIAL  1u   /* mph, degF, psi, lb/min, mi */
+
+/* ecuio_display_convert return codes. Values are append-only. */
+#define ECUIO_DISPLAY_OK              0
+#define ECUIO_DISPLAY_ERR_NULL        1  /* a NULL unit or out */
+#define ECUIO_DISPLAY_ERR_UNITS       2  /* an unknown unit system */
+
+/* A value as displayed: the value, its unit (UTF-8, terminated) and
+ * its decimal places, which a conversion can raise (kPa to psi needs
+ * one more). converted is 1 when the unit changed. */
+typedef struct ecuio_display_value {
+    double   value;
+    char     unit[16];
+    uint8_t  decimal_places;      /* 0..3 */
+    uint8_t  converted;           /* 0 or 1 */
+    uint8_t  reserved[6];         /* written as zero */
+} ecuio_display_value_t;
+
+#if defined(__cplusplus)
+static_assert(sizeof(ecuio_display_value_t) == 32, "ecuio_display_value_t size is ABI");
+static_assert(offsetof(ecuio_display_value_t, unit) == 8, "display unit offset is ABI");
+static_assert(offsetof(ecuio_display_value_t, decimal_places) == 24, "display decimals offset is ABI");
+#elif defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
+_Static_assert(sizeof(ecuio_display_value_t) == 32, "ecuio_display_value_t size is ABI");
+_Static_assert(offsetof(ecuio_display_value_t, unit) == 8, "display unit offset is ABI");
+_Static_assert(offsetof(ecuio_display_value_t, decimal_places) == 24, "display decimals offset is ABI");
+#endif
+
+/* Converts a value in `unit` (a def's unit string) with that def's
+ * decimal_places to the unit system `units`. The conversion is chosen
+ * by the unit string: under ECUIO_UNITS_IMPERIAL "km/h", degrees C
+ * ("\xC2\xB0" "C", UTF-8), "kPa", "g/s" and "km" become "mph",
+ * degrees F, "psi" (one more decimal place), "lb/min" (one more) and
+ * "mi"; any other unit, and every unit under ECUIO_UNITS_METRIC,
+ * passes through unchanged with converted 0. *out is written only on
+ * ECUIO_DISPLAY_OK. */
+int ecuio_display_convert(const char* unit, uint8_t decimal_places,
+                          double value, uint32_t units,
+                          ecuio_display_value_t* out);
+
 #ifdef __cplusplus
 }
 #endif

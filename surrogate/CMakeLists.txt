@@ -1,6 +1,9 @@
 # File/layer: surrogate/CMakeLists.txt | Win32, Qt-free, links core headers only
 # Testing: HARNESS — surrogate exe is spawned by ecuio_j2534_sur_open and by
-#          test_j2534_surrogate; verified end-to-end over pipe+ring+job objects.
+#          test_j2534_surrogate; verified end-to-end over pipe+ring+job objects,
+#          in the x64 tree and cross-arch (the x86 build, static CRT, through
+#          scripts/verify.sh). The release workflow checks its imports name
+#          no CRT DLL.
 #
 # ARCHITECTURE STORY (the "both targets" design):
 # - Whatever architecture THIS tree is configured as, the surrogate and the
@@ -35,3 +38,10 @@ qttune_enable_warnings(ecuio-j2534-surrogate)
 # exports through GetProcAddress and speaks the POD protocol types from
 # the shared headers. Keeping it dependency-light is deliberate — this
 # binary must be deployable standalone next to the app exe.
+#
+# The C runtime is linked in statically (/MT) for the same reason. The
+# x86 surrogate ships in the x64 app's folder, where the app-local CRT
+# DLLs are x64; an x86 vcruntime140.dll can't sit beside them. Nothing
+# here links ecuio-core (/MD), so the two runtimes never meet (LNK2038).
+set_property(TARGET ecuio-j2534-surrogate PROPERTY
+    MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")

@@ -5,8 +5,10 @@
 //          PassThruOpen, PassThruConnect or filter names the call, its
 //          status (by its J2534-1 v04.04 name, or as vendor-specific)
 //          and the vendor's own text from PassThruGetLastError, word for
-//          word alike on both backends. A DLL that won't load is
-//          LOAD_FAILED on both; a success clears the detail. A session
+//          word alike on both backends. A DLL that won't load (missing,
+//          not a PE file, a path that isn't UTF-8), or loads without the
+//          J2534 exports, is LOAD_FAILED on both; a success
+//          clears the detail. A session
 //          that connects describes what it runs on
 //          (ecuio_session_get_info): backend, DLL architecture, the
 //          channel as connected, and the adapter's battery and version
@@ -116,8 +118,9 @@ TEST_P(J2534ConnectTest, RefusedFilterFailsTheStartWithTheVendorText)
                  "(ECUIO_FAKE_FILTER_STATUS)");
 }
 
-/* A DLL that isn't there: in-proc LoadLibrary fails; through the
- * surrogate the child's does, and it exits with code 4. */
+/* A DLL that isn't there, or a file that isn't a DLL: in-proc
+ * LoadLibrary fails; through the surrogate the child's does, and it
+ * exits with code 4. A path that isn't UTF-8 never reaches a load. */
 TEST_P(J2534ConnectTest, MissingDllFailsToLoad)
 {
     EXPECT_EQ(ecuio_session_create(
@@ -126,6 +129,62 @@ TEST_P(J2534ConnectTest, MissingDllFailsToLoad)
               ECUIO_ERR_LOAD_FAILED);
     EXPECT_NE(strstr(ecuio_last_error_detail(), "load the DLL"), nullptr)
         << ecuio_last_error_detail();
+
+    /* Text; an MS-DOS header with no PE header behind it; a PE header
+     * for an ARM64 image. The architecture sniff calls each unknown,
+     * and the load refuses each. */
+    std::string text = "not a DLL";
+    std::string mz_only(64, '\0');
+    mz_only[0] = 'M';
+    mz_only[1] = 'Z';
+    std::string arm64 = mz_only;
+    arm64[0x3C] = 0x40; /* e_lfanew: the PE header follows at 64 */
+    arm64 += std::string("PE\0\0", 4) + "\x64\xAA" + std::string(260, '\0');
+    char tmp[MAX_PATH] = {};
+    ASSERT_GT(GetTempPathA(MAX_PATH, tmp), 0u);
+    const std::string path = std::string(tmp) + "ecuio-not-a-dll-" +
+                             std::to_string(GetCurrentProcessId()) + ".dll";
+    struct Remove {
+        std::string path;
+        ~Remove() { DeleteFileA(path.c_str()); }
+    } remove{path};
+    for (const std::string* bytes : {&text, &mz_only, &arm64}) {
+        FILE* f = fopen(path.c_str(), "wb");
+        ASSERT_NE(f, nullptr);
+        fwrite(bytes->data(), 1, bytes->size(), f);
+        fclose(f);
+        EXPECT_EQ(ecuio_session_create(("j2534://" + path).c_str(), &session),
+                  ECUIO_ERR_LOAD_FAILED);
+        EXPECT_NE(strstr(ecuio_last_error_detail(), "load the DLL"), nullptr)
+            << ecuio_last_error_detail();
+    }
+
+    EXPECT_EQ(ecuio_session_create("j2534://C:/ecuio-\xFF.dll", &session),
+              ECUIO_ERR_LOAD_FAILED);
+    EXPECT_STREQ(ecuio_last_error_detail(),
+                 "the DLL path isn't valid UTF-8, or is too long");
+    EXPECT_EQ(session, nullptr);
+}
+
+/* A DLL that loads but isn't a J2534 driver: kernel32 exports none of
+ * the nine mandatory calls. In-proc the loader names the first one it
+ * missed; through the surrogate the child exits with code 5 and its
+ * session log names them all. (An x86 child reads System32 as
+ * SysWOW64, so the cross-arch run loads a kernel32 too.) */
+TEST_P(J2534ConnectTest, ADllWithoutTheJ2534ExportsFailsToLoad)
+{
+    char sys[MAX_PATH] = {};
+    const UINT n = GetSystemDirectoryA(sys, MAX_PATH);
+    ASSERT_GT(n, 0u);
+    ASSERT_LT(n, static_cast<UINT>(MAX_PATH));
+    const std::string u = std::string("j2534://") + sys + "\\kernel32.dll";
+    EXPECT_EQ(ecuio_session_create(u.c_str(), &session), ECUIO_ERR_LOAD_FAILED);
+    EXPECT_EQ(session, nullptr);
+    EXPECT_STREQ(ecuio_last_error_detail(),
+                 GetParam() == Backend::InProc
+                     ? "the DLL doesn't export PassThruOpen"
+                     : "the DLL lacks a mandatory J2534 export (the "
+                       "surrogate's session log, in %TEMP%, names it)");
 }
 
 /* A connect that works leaves nothing behind from the failure before. */
@@ -230,6 +289,28 @@ TEST_P(J2534ConnectTest, HelperFailuresHaveOneCodePerCause)
 
     /* Refused before the vendor: no write reaches the fake. */
     const uint8_t req[6] = {0x00, 0x00, 0x07, 0xE0, 0x01, 0x0C};
+    bool got = false;
+    EXPECT_EQ(ecuio_j2534_connect_channel(h, 0, 0, nullptr),
+              ECUIO_ERR_NULL_ARGUMENT);
+    EXPECT_EQ(ecuio_j2534_disconnect_channel(nullptr, ch),
+              ECUIO_ERR_NULL_ARGUMENT);
+    EXPECT_EQ(ecuio_j2534_read_msg(h, ch, nullptr, 0, &got),
+              ECUIO_ERR_NULL_ARGUMENT);
+    EXPECT_EQ(ecuio_j2534_ioctl(nullptr, ch, ECUIO_PT_IOCTL_CLEAR_RX_BUFFER,
+                                nullptr, 0, nullptr, 0, nullptr),
+              ECUIO_ERR_NULL_ARGUMENT);
+    EXPECT_EQ(ecuio_j2534_stop_msg_filter(nullptr, ch, 0),
+              ECUIO_ERR_NULL_ARGUMENT);
+    EXPECT_EQ(ecuio_j2534_read_version(h, nullptr, nullptr, nullptr),
+              ECUIO_ERR_NULL_ARGUMENT);
+    EXPECT_EQ(ecuio_j2534_inject_test_frame(h, nullptr, 6, 0, 0),
+              ECUIO_ERR_NULL_ARGUMENT);
+    EXPECT_EQ(ecuio_j2534_inject_test_frame(h, req, 0, 0, 0),
+              ECUIO_ERR_INVALID_ARGUMENT);
+    EXPECT_EQ(ecuio_j2534_inject_test_frame(h, req, 6, 0, 0), ECUIO_OK)
+        << "the test seam reaches the fake on either backend";
+    EXPECT_EQ(ecuio_j2534_backend_name(nullptr), nullptr);
+    EXPECT_EQ(ecuio_j2534_backend(nullptr), 0u);
     const uint8_t big[65] = {};
     uint32_t written = 0;
     const uint32_t writes0 = fake_control::writes(page);
@@ -250,9 +331,17 @@ TEST_P(J2534ConnectTest, HelperFailuresHaveOneCodePerCause)
     EXPECT_EQ(ecuio_j2534_ioctl(h, ch, ECUIO_PT_IOCTL_SET_CONFIG, big, 65,
                                 nullptr, 0, nullptr),
               ECUIO_ERR_INVALID_ARGUMENT) << "past the wire's 64 bytes";
+    EXPECT_EQ(ecuio_j2534_ioctl(h, ch, ECUIO_PT_IOCTL_SET_CONFIG, nullptr, 8,
+                                nullptr, 0, nullptr),
+              ECUIO_ERR_NULL_ARGUMENT)
+        << "a pair promised, none given";
     EXPECT_EQ(ecuio_j2534_ioctl(h, ch, 0x05 /* FIVE_BAUD_INIT */, nullptr, 0,
                                 nullptr, 0, nullptr),
               ECUIO_ERR_NOT_IMPLEMENTED);
+    EXPECT_EQ(ecuio_j2534_ioctl(h, ch, ECUIO_PT_IOCTL_CLEAR_RX_BUFFER, nullptr,
+                                0, nullptr, 0, nullptr),
+              ECUIO_OK)
+        << "on the whitelist, so it reaches the vendor";
 
     const uint8_t mask[4] = {0xFF, 0xFF, 0xFF, 0xFF};
     const uint8_t id[4] = {0x00, 0x00, 0x07, 0xE8};
@@ -266,6 +355,13 @@ TEST_P(J2534ConnectTest, HelperFailuresHaveOneCodePerCause)
     EXPECT_EQ(ecuio_j2534_start_msg_filter(h, ch, ECUIO_PT_FLOW_CONTROL_FILTER,
                                            mask, 4, id, 4, nullptr, 4, 0,
                                            &fid),
+              ECUIO_ERR_NULL_ARGUMENT);
+    EXPECT_EQ(ecuio_j2534_start_msg_filter(h, ch, ECUIO_PT_FLOW_CONTROL_FILTER,
+                                           mask, 4, id, 4, id, 3, 0, &fid),
+              ECUIO_ERR_INVALID_ARGUMENT)
+        << "flow control a byte short";
+    EXPECT_EQ(ecuio_j2534_start_msg_filter(h, ch, ECUIO_PT_PASS_FILTER, nullptr,
+                                           4, id, 4, nullptr, 0, 0, &fid),
               ECUIO_ERR_NULL_ARGUMENT);
 
     /* The vendor's refusals. */

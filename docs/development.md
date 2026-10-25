@@ -323,8 +323,9 @@ the live registry. With `ECUIO_EXPECT_J2534_DEVICES=<n>` set it fails
 unless at least that many devices are found; `scripts/verify.sh` sets
 it to 1 on Windows, because the dev machine has a Pass-Thru driver
 installed, and takes `--no-devices` on a machine without one. CI's
-Windows job has no vendors and leaves it unset, so there the test
-checks only the shape of an empty result.
+`win-build` job has no vendors and leaves it unset, so there the test
+checks only the shape of an empty result; `win-coverage` registers the
+fake DLL as a device first, and `scripts/coverage.sh` demands it.
 
 **Cross-arch run.** Run this from the x64 tree, after building
 `build-win32`:
@@ -513,3 +514,63 @@ weekly.
 **Ignorable CI noise:** `Qt6TaskTree` and `QmlAssetDownloaderPrivate`
 not-found warnings, and missing Vulkan headers. These come from
 optional Quick plugins this app never uses.
+
+## Releases
+
+A version tag publishes a Windows x64 download through
+`.github/workflows/release.yml`. The zip runs on a PC with neither Qt
+nor Visual Studio: it carries the app, the x86 J2534 surrogate, the Qt
+runtime that windeployqt deploys, and the app-local Visual C++
+runtime.
+
+**To release:**
+
+1. In one commit, set `project(QtTune VERSION X.Y.Z)` in the root
+   `CMakeLists.txt` and add `docs/releases/vX.Y.Z.md`, the release
+   notes. Say what's new, and what's verified at which tier
+   ([testing.md](testing.md)), including what hasn't run on hardware.
+2. For a dry run, tag that commit `vX.Y.Z-rc1` and push the tag. The
+   workflow publishes a pre-release. Download its zip, run it on a PC
+   without Visual Studio if one is available, and check the
+   provenance with
+   `gh attestation verify <zip> -R erickramer42/qttune`. Then delete
+   the pre-release and its tag.
+3. Tag `vX.Y.Z` and push it.
+
+**What the job does,** in order:
+
+- **Version gate.** The tag must be `vX.Y.Z` or `vX.Y.Z-rcN`, its
+  `X.Y.Z` must equal the CMake project version, and
+  `docs/releases/vX.Y.Z.md` must exist, or the job fails before
+  anything builds. An `-rcN` tag publishes as a pre-release with the
+  same notes.
+- **Build.** Qt 6.12.0 is installed as `win-build` does it, then
+  `build-win32` (the surrogate only) and `build` (the app only), both
+  with `BUILD_TESTING=OFF`, in the usual order so the app's build
+  copies the x86 surrogate beside `qttune.exe`. CI has already run the
+  suite on the commit; the cross-arch suite is `scripts/verify.sh`'s.
+- **Stage, check and zip:** `packaging/windows/stage.ps1`, which also
+  runs locally against a built tree
+  (`pwsh packaging/windows/stage.ps1 -Version X.Y.Z-local -OutDir Testing/dist`).
+  It copies the deployed app without its `.pdb`, `.lib` and `.exp`
+  files, adds the x64 CRT from Visual Studio's redistributable folder
+  (found with `vswhere`; windeployqt runs with `--no-compiler-runtime`),
+  `LICENSE`, `DISCLAIMER.md` and `packaging/windows/`'s README,
+  third-party notices and licence texts. It then fails the release if
+  the surrogate imports a CRT DLL (it links the CRT statically, `/MT`,
+  because an x86 `vcruntime140.dll` can't sit beside the app's x64
+  one), if `qttune.exe` imports a DLL that is neither in the folder nor
+  part of Windows, or if the staged `qttune.exe` isn't still running
+  10 s after it starts (QML that fails to load exits at once; the
+  check was confirmed against a package with `qml/QtQuick/Controls`
+  removed, 2026-10-25). It writes the zip and `SHA256SUMS.txt` to
+  `dist/` (git-ignored).
+- **Provenance:** `actions/attest-build-provenance` signs a SLSA build
+  provenance for the zip, tied to this repository's workflow.
+- **Publish:** `gh release create` with the zip, `SHA256SUMS.txt` and
+  the notes file. A manual run for an existing tag
+  (`gh workflow run release.yml -f tag=vX.Y.Z`) rebuilds it and
+  replaces the release's files.
+
+The exe isn't code-signed, so SmartScreen warns on first run; the
+zip's `README.txt` and the release notes say how to get past it.

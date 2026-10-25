@@ -3,8 +3,9 @@
 //          in-flight backpressure, the frame log's ring and order and
 //          the counters on the tick, the signal model's roles and age
 //          refresh, link-state mapping, the activity log's session and
-//          ECU lines, session recording (BridgeTest.Recording*). QML
-//          rendering: manual smoke.
+//          ECU lines, session recording (BridgeTest.Recording*), display
+//          units on the rows, the chart and not the recording
+//          (BridgeTest.UnitSystem*). QML rendering: manual smoke.
 
 #include "qttunebridge.h"
 #include "ecuio/version.h"
@@ -181,8 +182,8 @@ QVariant SignalListModel::data(const QModelIndex& index, int role) const
     switch (role) {
         case IdRole: return e.id;
         case NameRole: return QString::fromUtf8(e.name);
-        case UnitRole: return QString::fromUtf8(e.unit);
-        case ValueRole: return e.value;
+        case UnitRole: return QString::fromUtf8(shown(e, e.value).unit);
+        case ValueRole: return shown(e, e.value).value;
         case SubscribedRole: return e.subscribed;
         case HasValueRole: return e.histCount > 0;
         case AgeMsRole:
@@ -194,7 +195,7 @@ QVariant SignalListModel::data(const QModelIndex& index, int role) const
                 return static_cast<int>(m_clock.elapsed()
                                          - e.history[last].timestampMs);
             }
-        case DecimalsRole: return static_cast<int>(e.decimals);
+        case DecimalsRole: return static_cast<int>(shown(e, e.value).decimal_places);
         case TextRole: return e.text;
         case IsTextRole: return e.isText;
         default: return QVariant();
@@ -323,6 +324,30 @@ void SignalListModel::updateTexts(const std::vector<std::pair<uint16_t, QString>
     }
 }
 
+ecuio_display_value_t SignalListModel::shown(const Entry& e, double value) const
+{
+    ecuio_display_value_t out;
+    if (ecuio_display_convert(e.unit, e.decimals, value, m_units, &out) != ECUIO_DISPLAY_OK) {
+        // m_units is only ever metric or imperial, so this is unreachable;
+        // show the decoded value rather than nothing
+        out = {};
+        out.value = value;
+        qstrncpy(out.unit, e.unit, sizeof(out.unit));
+        out.decimal_places = e.decimals;
+    }
+    return out;
+}
+
+void SignalListModel::setUnitSystem(uint32_t units)
+{
+    if (units == m_units) return;
+    m_units = units;
+    if (m_entries.empty()) return;
+    emit dataChanged(index(0), index(static_cast<int>(m_entries.size()) - 1),
+                     {ValueRole, UnitRole, DecimalsRole});
+    emit valuesUpdated();   // the chart redraws its history in the new units
+}
+
 // Evict-oldest ring push: bounded memory, and the stream never freezes.
 void SignalListModel::pushSample(Entry& e, qint64 stamp, double value)
 {
@@ -341,13 +366,14 @@ QVariantList SignalListModel::chartData() const
         const Entry& e = m_entries[row];
         if (!e.subscribed || e.histCount == 0) continue;
 
+        const ecuio_display_value_t now = shown(e, e.value);
         QVariantMap m;
         m["id"] = e.id;
         m["row"] = static_cast<int>(row);
         m["name"] = QString::fromUtf8(e.name);
-        m["unit"] = QString::fromUtf8(e.unit);
-        m["decimals"] = static_cast<int>(e.decimals);
-        m["value"] = e.value;
+        m["unit"] = QString::fromUtf8(now.unit);
+        m["decimals"] = static_cast<int>(now.decimal_places);
+        m["value"] = now.value;
 
         // Flattened [ts, val, ts, val, ...], oldest first.
         // When full, the oldest surviving sample sits at histHead (the
@@ -358,7 +384,7 @@ QVariantList SignalListModel::chartData() const
         for (uint32_t i = 0; i < e.histCount; ++i) {
             const Sample& s = e.history[(start + i) % HistoryCapacity];
             samples.append(static_cast<double>(s.timestampMs));
-            samples.append(s.value);
+            samples.append(now.converted ? shown(e, s.value).value : s.value);
         }
         m["samples"] = samples;
         out.append(m);
@@ -730,6 +756,39 @@ void QtTuneBridge::setRecording(bool on)
     if (m_recording == on) return;
     m_recording = on;
     emit recordingChanged();
+}
+
+void QtTuneBridge::setUnitSystem(int units)
+{
+    if (units != static_cast<int>(ECUIO_UNITS_METRIC) &&
+        units != static_cast<int>(ECUIO_UNITS_IMPERIAL)) {
+        return;
+    }
+    if (units == unitSystem()) return;
+    m_signalModel->setUnitSystem(static_cast<uint32_t>(units));
+    emit unitSystemChanged();
+}
+
+double QtTuneBridge::displayValue(const QString& unit, double value) const
+{
+    ecuio_display_value_t out;
+    const QByteArray u = unit.toUtf8();
+    if (ecuio_display_convert(u.constData(), 0, value, m_signalModel->unitSystem(), &out) !=
+        ECUIO_DISPLAY_OK) {
+        return value;
+    }
+    return out.value;
+}
+
+QString QtTuneBridge::displayUnit(const QString& unit) const
+{
+    ecuio_display_value_t out;
+    const QByteArray u = unit.toUtf8();
+    if (ecuio_display_convert(u.constData(), 0, 0.0, m_signalModel->unitSystem(), &out) !=
+        ECUIO_DISPLAY_OK) {
+        return unit;
+    }
+    return QString::fromUtf8(out.unit);
 }
 
 QString QtTuneBridge::recordingFolder() const

@@ -131,7 +131,8 @@ TEST_F(SignalDecodeTest, ValidateSignal_InvalidBitLength) {
     EXPECT_EQ(ecuio_validate_signal(&signal), ECUIO_VALIDATE_OK);
 }
 
-TEST_F(SignalDecodeTest, ValidateSignal_UnterminatedName) {
+TEST_F(SignalDecodeTest, ValidateSignal_NameUnitDecimals)
+{
     ecuio_signal_def_t signal = {};
     signal.kind = ECUIO_VALUE_UINT;
     signal.bit_length = 8;
@@ -142,6 +143,18 @@ TEST_F(SignalDecodeTest, ValidateSignal_UnterminatedName) {
     }
 
     EXPECT_EQ(ecuio_validate_signal(&signal), ECUIO_VALIDATE_ERR_NAME);
+
+    /* The unit the same way, and at most 3 decimal places */
+    signal.name[sizeof(signal.name) - 1] = '\0';
+    memset(signal.unit, 'u', sizeof(signal.unit));
+    EXPECT_EQ(ecuio_validate_signal(&signal), ECUIO_VALIDATE_ERR_UNIT);
+    signal.unit[sizeof(signal.unit) - 1] = '\0';
+    signal.decimal_places = 4;
+    EXPECT_EQ(ecuio_validate_signal(&signal), ECUIO_VALIDATE_ERR_DECIMALS);
+    signal.decimal_places = 3;
+    EXPECT_EQ(ecuio_validate_signal(&signal), ECUIO_VALIDATE_OK);
+
+    EXPECT_EQ(ecuio_validate_signal(nullptr), ECUIO_VALIDATE_ERR_NULL);
 }
 
 TEST_F(SignalDecodeTest, ScaleOffsetCalculation) {
@@ -176,9 +189,9 @@ TEST(SignalsTest, MockSetIdsAreUnique) {
 
 TEST(SignalsTest, MockSetDecodesReasonably) {
     /* Integration test: verify mock set definitions decode to plausible
-     * ranges. The frame is the full mock payload; MAF and oil are pinned
-     * to exact values, so a layout slip fails instead of landing in a
-     * wide range. */
+     * ranges. The frame is the full mock payload; MAF, oil and lambda
+     * are pinned to exact values, so a layout slip fails instead of
+     * landing in a wide range. */
     const ecuio_signal_set_t* set = ecuio_mock_signal_set();
     uint8_t frame[ECUIO_MOCK_TELEMETRY_PAYLOAD_LEN] = {
                          0xE8, 0x03, // RPM raw 1000
@@ -189,7 +202,7 @@ TEST(SignalsTest, MockSetDecodesReasonably) {
                          0xCD,       // Load raw 0xCD → 80.4%
                          0x84, 0x1D, // MAF raw 0x1D84 = 7556 → 75.56 g/s
                          0x78,       // Oil raw 120 → 80°C
-                         0x00, 0x00};// bytes 10-11, pad
+                         0x14, 0x6E};// Lambda raw 0x6E14 = 28180 → 0.86
 
     for (uint32_t i = 0; i < set->count; ++i) {
         double val = 0.0;
@@ -221,6 +234,9 @@ TEST(SignalsTest, MockSetDecodesReasonably) {
             break;
         case ECUIO_MOCK_SIG_OIL_ID:
             EXPECT_DOUBLE_EQ(val, 80.0);
+            break;
+        case ECUIO_MOCK_SIG_LAMBDA_ID:
+            EXPECT_NEAR(val, 0.86, 0.0001);
             break;
         }
     }
@@ -456,6 +472,19 @@ TEST_F(SignalDecodeTest, ThreeByteMuxKeyGatesAndDecodes)
     signal.mux_key = 0x62123401u;
     EXPECT_EQ(ecuio_def_applies_to_frame(&signal, &f), 0);
     EXPECT_EQ(ecuio_decode_signal(&signal, f.data, f.data_length, &value), 3);
+
+    /* A key running past the payload is past the payload, as a value
+     * would be, even when the value fits. */
+    signal.mux_length = 3;
+    signal.mux_key = 0x621234u;
+    signal.mux_offset = 3;
+    EXPECT_EQ(ecuio_decode_signal(&signal, f.data, f.data_length, &value),
+              ECUIO_DECODE_ERR_PAST_PAYLOAD);
+
+    /* The gate reads a data_length past data[] as the whole of it. */
+    signal.mux_offset = 0;
+    f.data_length = static_cast<uint16_t>(ECUIO_FRAME_DATA_MAX + 1u);
+    EXPECT_EQ(ecuio_def_applies_to_frame(&signal, &f), 1);
 }
 
 TEST(SignalsTest, SignalDefLayoutIsPinned)
@@ -492,6 +521,91 @@ TEST(SignalsTest, SignalDefLayoutIsPinned)
      * is refused. */
     EXPECT_EQ(offsetof(ecuio_signal_set_t, layout_version), 0u);
     EXPECT_EQ(ECUIO_SIGNAL_SET_LAYOUT, 3u);
+}
+
+TEST(SignalsTest, DisplayValueLayoutIsPinned)
+{
+    EXPECT_EQ(sizeof(ecuio_display_value_t), 32u);
+    EXPECT_EQ(offsetof(ecuio_display_value_t, unit), 8u);
+    EXPECT_EQ(offsetof(ecuio_display_value_t, decimal_places), 24u);
+    EXPECT_EQ(offsetof(ecuio_display_value_t, reserved), 26u);
+}
+
+TEST(SignalsTest, DisplayConvertMapsEachMetricUnitToImperial)
+{
+    /* Every conversion's factor and offset, exact, with its unit and its
+     * decimal places: a coarser unit gains one. */
+    struct Case {
+        const char* from;
+        uint8_t dp;
+        double in;
+        const char* to;
+        double out;
+        uint8_t out_dp;
+    };
+    const Case kCases[] = {
+        {"km/h", 0, 100.0, "mph", 62.1371192237334, 0},
+        {"\xC2\xB0" "C", 0, 100.0, "\xC2\xB0" "F", 212.0, 0},
+        {"\xC2\xB0" "C", 0, -40.0, "\xC2\xB0" "F", -40.0, 0},
+        {"kPa", 0, 101.325, "psi", 14.6959487755134, 1},
+        {"g/s", 1, 100.0, "lb/min", 13.2277357312033, 2},
+        {"g/s", 3, 1.0, "lb/min", 0.132277357312033, 3},   /* capped at 3 */
+        {"km", 1, 402.336 / 1000.0, "mi", 0.25, 1},
+    };
+    for (const Case& c : kCases) {
+        ecuio_display_value_t out;
+        std::memset(&out, 0xAB, sizeof out);
+        ASSERT_EQ(ecuio_display_convert(c.from, c.dp, c.in, ECUIO_UNITS_IMPERIAL, &out),
+                  ECUIO_DISPLAY_OK) << c.from;
+        EXPECT_NEAR(out.value, c.out, 1e-9) << c.from;
+        EXPECT_STREQ(out.unit, c.to) << c.from;
+        EXPECT_EQ(out.decimal_places, c.out_dp) << c.from;
+        EXPECT_EQ(out.converted, 1) << c.from;
+        for (uint8_t r : out.reserved) {
+            EXPECT_EQ(r, 0) << c.from;
+        }
+    }
+}
+
+TEST(SignalsTest, DisplayConvertPassesOtherUnitsAndMetricThrough)
+{
+    /* Units with no imperial form, an empty unit, and every unit under
+     * metric come back as they went in. A unit is matched whole, so a
+     * longer string that starts with "km" is not "km". */
+    const char* const kOthers[] = {"RPM", "%", "V", "\xCE\xBB", "", "km/l", "degC"};
+    for (const char* unit : kOthers) {
+        ecuio_display_value_t out;
+        ASSERT_EQ(ecuio_display_convert(unit, 2, 12.5, ECUIO_UNITS_IMPERIAL, &out),
+                  ECUIO_DISPLAY_OK) << unit;
+        EXPECT_EQ(out.value, 12.5) << unit;
+        EXPECT_STREQ(out.unit, unit);
+        EXPECT_EQ(out.decimal_places, 2) << unit;
+        EXPECT_EQ(out.converted, 0) << unit;
+    }
+    ecuio_display_value_t out;
+    ASSERT_EQ(ecuio_display_convert("km/h", 0, 100.0, ECUIO_UNITS_METRIC, &out),
+              ECUIO_DISPLAY_OK);
+    EXPECT_EQ(out.value, 100.0);
+    EXPECT_STREQ(out.unit, "km/h");
+    EXPECT_EQ(out.converted, 0);
+
+    /* A unit longer than the field is cut, still terminated */
+    ASSERT_EQ(ecuio_display_convert("a-unit-far-too-long", 0, 1.0, ECUIO_UNITS_METRIC, &out),
+              ECUIO_DISPLAY_OK);
+    EXPECT_EQ(std::strlen(out.unit), sizeof out.unit - 1);
+}
+
+TEST(SignalsTest, DisplayConvertRefusesNullAndUnknownSystems)
+{
+    ecuio_display_value_t out;
+    std::memset(&out, 0x5A, sizeof out);
+    const ecuio_display_value_t before = out;
+    EXPECT_EQ(ecuio_display_convert(nullptr, 0, 1.0, ECUIO_UNITS_IMPERIAL, &out),
+              ECUIO_DISPLAY_ERR_NULL);
+    EXPECT_EQ(ecuio_display_convert("km/h", 0, 1.0, ECUIO_UNITS_IMPERIAL, nullptr),
+              ECUIO_DISPLAY_ERR_NULL);
+    EXPECT_EQ(ecuio_display_convert("km/h", 0, 1.0, 2u, &out), ECUIO_DISPLAY_ERR_UNITS);
+    EXPECT_EQ(std::memcmp(&out, &before, sizeof out), 0) << "out written on failure";
 }
 
 TEST(SignalsTest, MockAndObd2ShareDisplayNamesAndUnits)
@@ -793,6 +907,11 @@ TEST(SignalsTest, TextDecodeChecksTheFieldAndTheMuxKey)
     EXPECT_EQ(ecuio_decode_text(&d, kVinReply, len, out, sizeof out), ECUIO_DECODE_ERR_MUX_MISMATCH);
     d.mux_length = 4;
     EXPECT_EQ(ecuio_decode_text(&d, kVinReply, len, out, sizeof out), ECUIO_DECODE_ERR_BAD_PARAMS);
+    d.mux_length = 3;
+    d.mux_offset = static_cast<decltype(d.mux_offset)>(len - 1);
+    EXPECT_EQ(ecuio_decode_text(&d, kVinReply, len, out, sizeof out),
+              ECUIO_DECODE_ERR_PAST_PAYLOAD)
+        << "a key running past the payload";
 
     /* Each decoder refuses the other's kinds, and the shapes it can't
      * take, in the validator's order: kind and byte order first. */

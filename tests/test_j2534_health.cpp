@@ -786,6 +786,21 @@ TEST_P(J2534HealthTest, ReadPastAnIndicationReturnsTheReplyBehindIt)
     ASSERT_TRUE(got) << "the read stopped at the indication";
     ASSERT_EQ(f.data_size, sizeof(reply));
     EXPECT_EQ(memcmp(f.data, reply, sizeof(reply)), 0);
+
+    /* A read skips at most ECUIO_PT_MAX_SKIPPED_PER_READ, then is
+     * judged like an empty one; the reply behind them waits for the
+     * next read. */
+    for (uint32_t i = 0; i < ECUIO_PT_MAX_SKIPPED_PER_READ; ++i) {
+        ASSERT_TRUE(fake_control::post(page, tx_done, sizeof(tx_done), 200 + i,
+                                       ECUIO_PT_TX_INDICATION));
+    }
+    ASSERT_TRUE(fake_control::post(page, reply, sizeof(reply), 300, 0));
+    got = true;
+    EXPECT_EQ(ecuio_j2534_read_msg(guard.h, ch, &f, 500, &got), ECUIO_OK);
+    EXPECT_FALSE(got) << "read past the cap";
+    EXPECT_EQ(ecuio_j2534_read_msg(guard.h, ch, &f, 500, &got), ECUIO_OK);
+    ASSERT_TRUE(got) << "the reply behind the indications was lost";
+    EXPECT_EQ(memcmp(f.data, reply, sizeof(reply)), 0);
     EXPECT_EQ(ecuio_j2534_disconnect_channel(guard.h, ch), ECUIO_OK);
 }
 

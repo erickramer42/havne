@@ -188,6 +188,8 @@ TEST(BridgeTest, FailedConnectNamesItsCause)
     EXPECT_EQ(bridge.connectSession("mock://demo?profile=bogus"),
               QStringLiteral("unknown profile: no profile is named 'bogus'"));
     EXPECT_FALSE(bridge.connected());
+    EXPECT_EQ(bridge.statusString(ECUIO_ERR_BAD_URI),
+              QStringLiteral("malformed transport URI"));
 }
 
 TEST(BridgeTest, FramesMarshalFromWorkerToGuiThread)
@@ -321,6 +323,62 @@ TEST(BridgeTest, RecordingWritesFramesValuesAndEvents)
     }
 }
 
+/* An app closed while connected: the bridge's destructor destroys the
+ * session itself and ends the recording, with no disconnect first. */
+TEST(BridgeTest, DestroyedWhileRecordingClosesSessionAndRecording)
+{
+    QTemporaryDir root;
+    ASSERT_TRUE(root.isValid());
+    {
+        QtTuneBridge bridge;
+        bridge.setRecordingsRootForTesting(root.path());
+        bridge.setRecording(true);
+        ASSERT_TRUE(bridge.connectSession("mock://closing").isEmpty());
+        ASSERT_TRUE(
+            spinUntil([&bridge]() { return bridge.frameCount() > 2; }, 5000));
+        ASSERT_TRUE(bridge.recordingActive());
+    }
+
+    const QStringList folders = recordingFolders(root.path());
+    ASSERT_EQ(folders.size(), 1);
+    const QByteArray events =
+        readFile(root.path() + QStringLiteral("/") + folders.first() +
+                 QStringLiteral("/events.log"));
+    EXPECT_TRUE(events.contains("end      the app closed: "))
+        << events.toStdString();
+    EXPECT_FALSE(events.contains("Disconnecting:")) << events.toStdString();
+}
+
+/* A recording that can't start (the root is a file, so no folder can
+ * be made under it) says why in the activity log and leaves the
+ * session running unrecorded. */
+TEST(BridgeTest, RecordingThatCantStartIsLoggedAndTheSessionRuns)
+{
+    QTemporaryDir root;
+    ASSERT_TRUE(root.isValid());
+    const QString file = root.path() + QStringLiteral("/not-a-folder");
+    {
+        QFile f(file);
+        ASSERT_TRUE(f.open(QIODevice::WriteOnly));
+    }
+    QtTuneBridge bridge;
+    bridge.setRecordingsRootForTesting(file);
+    bridge.setRecording(true);
+    QStringList log;
+    QObject::connect(&bridge, &QtTuneBridge::logMessage,
+                     [&log](const QString& line) { log << line; });
+
+    ASSERT_TRUE(bridge.connectSession("mock://unrecorded").isEmpty());
+    EXPECT_FALSE(bridge.recordingActive());
+    EXPECT_TRUE(
+        log.filter(QStringLiteral("Recording failed: can't create ")).size() ==
+        1)
+        << log.join('\n').toStdString();
+    ASSERT_TRUE(
+        spinUntil([&bridge]() { return bridge.frameCount() > 2; }, 5000));
+    ASSERT_TRUE(disconnectAndWait(bridge));
+}
+
 /* The switch holds while a session is up, so a recording covers a whole
  * session; each connect gets its own folder. */
 TEST(BridgeTest, RecordingSwitchHoldsDuringASession)
@@ -439,6 +497,15 @@ TEST(BridgeTest, FrameLogOrdersByArrivalNotTimestamp)
     EXPECT_LT(row_of(0x124), row_of(0x123)) << "newest first";
     proxy->setNewestFirst(false);
     EXPECT_LT(row_of(0x123), row_of(0x124)) << "oldest first";
+
+    // A row answers only its roles, and only rows that exist answer
+    EXPECT_FALSE(proxy->data(proxy->index(0, 0), Qt::DisplayRole).isValid());
+    EXPECT_FALSE(proxy
+                     ->data(proxy->index(proxy->rowCount(), 0),
+                            FrameListModel::ArbitrationIdRole)
+                     .isValid());
+    EXPECT_EQ(proxy->count(), proxy->rowCount());
+    EXPECT_EQ(bridge.maxFrameCount(), FrameListModel::MaxFrames);
 
     bridge.disconnectSession();
 }
@@ -1191,6 +1258,17 @@ TEST(BridgeTest, SignalRoleNamesMatchQmlBindings)
     EXPECT_EQ(roles.value(SignalListModel::DecimalsRole), QByteArray("decimals"));
     EXPECT_EQ(roles.value(SignalListModel::TextRole), QByteArray("text"));
     EXPECT_EQ(roles.value(SignalListModel::IsTextRole), QByteArray("isText"));
+
+    // A row answers only its roles, and only rows that exist answer
+    ecuio_signal_def_t defs[2];
+    ecuio_signal_set_t set;
+    buildTestSignalSet(defs, set);
+    model.setSignalSet(&set);
+    EXPECT_EQ(model.data(model.index(1, 0), SignalListModel::IdRole).toInt(),
+              2001);
+    EXPECT_FALSE(model.data(model.index(0, 0), Qt::DisplayRole).isValid());
+    EXPECT_FALSE(
+        model.data(model.index(2, 0), SignalListModel::NameRole).isValid());
 }
 
 TEST(BridgeTest, DecimalsComeFromTheDefAndReachTheChart)
@@ -1218,6 +1296,106 @@ TEST(BridgeTest, DecimalsComeFromTheDefAndReachTheChart)
     const QVariantList data = model.chartData();
     ASSERT_EQ(data.size(), 1);
     EXPECT_EQ(data.at(0).toMap().value("decimals").toInt(), 2);
+}
+
+TEST(BridgeTest, UnitSystemConvertsRowsAndChartAndKeepsHistory)
+{
+    /* The model keeps decoded values; imperial converts value, unit,
+     * decimals and the chart's whole history on the way out, and metric
+     * gives back exactly what was decoded. A unit with no imperial form
+     * passes through. */
+    SignalListModel model;
+    ecuio_signal_def_t defs[2];
+    ecuio_signal_set_t set;
+    buildTestSignalSet(defs, set);
+    std::memset(defs[0].unit, 0, sizeof defs[0].unit);
+    std::memcpy(defs[0].unit, "km/h", 4);
+    std::memset(defs[1].unit, 0, sizeof defs[1].unit);
+    std::memcpy(defs[1].unit, "\xC2\xB0" "C", 3);
+    defs[1].decimal_places = 1;
+    model.setSignalSet(&set);
+    int redraws = 0;
+    QObject::connect(&model, &SignalListModel::valuesUpdated, [&redraws]() { ++redraws; });
+
+    for (int i = 0; i < 3; ++i) {
+        std::vector<std::pair<uint16_t, double>> batch;
+        batch.emplace_back(uint16_t(1001), 100.0 + i);
+        batch.emplace_back(uint16_t(2001), 90.0 + i);
+        model.updateValues(batch, i * 100);
+    }
+    const int before = redraws;
+    const QModelIndex speed = model.index(0, 0);
+    const QModelIndex temp = model.index(1, 0);
+
+    model.setUnitSystem(ECUIO_UNITS_IMPERIAL);
+    EXPECT_EQ(redraws, before + 1) << "the chart must redraw in the new units";
+    EXPECT_NEAR(model.data(speed, SignalListModel::ValueRole).toDouble(), 102.0 * 0.621371192237334, 1e-9);
+    EXPECT_EQ(model.data(speed, SignalListModel::UnitRole).toString(), QStringLiteral("mph"));
+    EXPECT_NEAR(model.data(temp, SignalListModel::ValueRole).toDouble(), 92.0 * 1.8 + 32.0, 1e-9);
+    EXPECT_EQ(model.data(temp, SignalListModel::UnitRole).toString(), QString::fromUtf8("\xC2\xB0" "F"));
+    EXPECT_EQ(model.data(temp, SignalListModel::DecimalsRole).toInt(), 1);
+
+    const QVariantList chart = model.chartData();
+    ASSERT_EQ(chart.size(), 2);
+    for (const QVariant& v : chart) {
+        const QVariantMap m = v.toMap();
+        const QVariantList samples = m.value("samples").toList();
+        ASSERT_EQ(samples.size(), 6) << "history lost on a unit change";
+        if (m.value("id").toInt() == 1001) {
+            EXPECT_EQ(m.value("unit").toString(), QStringLiteral("mph"));
+            EXPECT_NEAR(samples.at(1).toDouble(), 100.0 * 0.621371192237334, 1e-9);
+        } else {
+            EXPECT_NEAR(samples.at(5).toDouble(), 92.0 * 1.8 + 32.0, 1e-9);
+        }
+    }
+
+    model.setUnitSystem(ECUIO_UNITS_METRIC);
+    EXPECT_EQ(model.data(speed, SignalListModel::ValueRole).toDouble(), 102.0);
+    EXPECT_EQ(model.data(speed, SignalListModel::UnitRole).toString(), QStringLiteral("km/h"));
+    EXPECT_EQ(model.chartData().at(1).toMap().value("samples").toList().at(1).toDouble(), 90.0);
+}
+
+TEST(BridgeTest, UnitSystemShowsImperialAndRecordsDecodedUnits)
+{
+    /* The property takes metric or imperial only. The Dashboard's
+     * helpers convert through core. A recording keeps what the ECU sent,
+     * whatever the screen shows. */
+    QTemporaryDir root;
+    ASSERT_TRUE(root.isValid());
+    QtTuneBridge bridge;
+    bridge.setRecordingsRootForTesting(root.path());
+    EXPECT_EQ(bridge.unitSystem(), 0);
+    int changes = 0;
+    QObject::connect(&bridge, &QtTuneBridge::unitSystemChanged, [&changes]() { ++changes; });
+    bridge.setUnitSystem(7);
+    EXPECT_EQ(bridge.unitSystem(), 0);
+    bridge.setUnitSystem(1);
+    bridge.setUnitSystem(1);
+    EXPECT_EQ(bridge.unitSystem(), 1);
+    EXPECT_EQ(changes, 1);
+    EXPECT_NEAR(bridge.displayValue(QStringLiteral("km/h"), 160.0), 99.4193907579734, 1e-9);
+    EXPECT_EQ(bridge.displayUnit(QStringLiteral("km/h")), QStringLiteral("mph"));
+    EXPECT_EQ(bridge.displayValue(QStringLiteral("%"), 42.0), 42.0);
+
+    bridge.setRecording(true);
+    ASSERT_TRUE(bridge.connectSession("mock://units").isEmpty());
+    ASSERT_TRUE(spinUntil([&bridge]() { return bridge.signalBatchCount() > 2; }, 5000));
+    SignalListModel* model = bridge.signalModel();
+    bool sawMph = false;
+    for (int r = 0; r < model->rowCount(); ++r) {
+        sawMph = sawMph || model->data(model->index(r, 0), SignalListModel::UnitRole).toString() ==
+                                QStringLiteral("mph");
+    }
+    EXPECT_TRUE(sawMph) << "no row shows mph under imperial";
+    ASSERT_TRUE(disconnectAndWait(bridge));
+
+    const QStringList folders = recordingFolders(root.path());
+    ASSERT_EQ(folders.size(), 1);
+    const QByteArray signalsCsv =
+        readFile(root.path() + QStringLiteral("/") + folders.first() + QStringLiteral("/signals.csv"));
+    EXPECT_TRUE(signalsCsv.contains(",Vehicle Speed,")) << signalsCsv.left(400).toStdString();
+    EXPECT_TRUE(signalsCsv.contains(",km/h")) << "the recording should keep km/h";
+    EXPECT_FALSE(signalsCsv.contains("mph")) << "the recording followed the display";
 }
 
 TEST(BridgeTest, StripChartDataPopulatedByLiveStream)
@@ -1620,6 +1798,27 @@ TEST(BridgeTest, ConnectLogsWhatTheEcuSupports)
               "2 refused: 22 F1 94 (7F 22 31), 22 F1 95 (7F 22 31)");
     ASSERT_TRUE(disconnectAndWait(bridge));
 }
+
+/* A session that opens but won't start (the adapter refuses the obd2
+ * channel's filter) fails the connect with the cause, and the bridge
+ * keeps no session: a second connect works once the refusal is gone. */
+TEST(BridgeTest, RefusedStartNamesItsCauseAndLeavesNoSession)
+{
+    QtTuneBridge bridge;
+    const QString uri = QStringLiteral("j2534://%1")
+                            .arg(QString::fromUtf8(FAKE_J2534_DLL_PATH));
+    {
+        FakeEnvArm refuse("ECUIO_FAKE_FILTER_STATUS", "7");
+        EXPECT_EQ(bridge.connectSession(uri).toStdString(),
+                  "the adapter's driver refused: PassThruStartMsgFilter "
+                  "returned status 7 (ERR_FAILED): fake_j2534: "
+                  "PassThruStartMsgFilter refused (ECUIO_FAKE_FILTER_STATUS)");
+        EXPECT_FALSE(bridge.connected());
+    }
+    ASSERT_TRUE(bridge.connectSession(uri).isEmpty());
+    EXPECT_TRUE(bridge.connected());
+    ASSERT_TRUE(disconnectAndWait(bridge));
+}
 #endif  // _WIN32
 
 // ---------------------------------------------------------------------------
@@ -1741,6 +1940,11 @@ TEST(BridgeTest, SessionInfoTextNamesTheAdapter)
               "Session: x64 DLL, in-proc; ISO 15765 at 250000 baud, flags 0x100; "
               "profile raw, channel 0x18DAF110/0x18DA10F1 (rx/tx); "
               "no battery reading; no version reading");
+
+    ecuio_session_info_t later{};
+    later.backend = 7; // a backend this build doesn't know
+    EXPECT_EQ(QtTuneBridge::sessionInfoText(later).toStdString(),
+              "Session: backend 7");
 }
 
 /* The "ECU 0x…:" line's wording, from hand-built reports: the first
@@ -1763,6 +1967,12 @@ TEST(BridgeTest, ChannelSupportTextNamesTheEcuAndWhatItDropped)
     EXPECT_EQ(QtTuneBridge::channelSupportText(car).toStdString(),
               "ECU 0x7E8: supports 44 PIDs up to 0x60, no answer past that; "
               "10 requests, 1 dropped: 01 5C (not in its supported PIDs)");
+
+    ecuio_channel_support_t later = car; // a reason this build doesn't know
+    later.dropped_list[0].reason = 99;
+    EXPECT_EQ(QtTuneBridge::channelSupportText(later).toStdString(),
+              "ECU 0x7E8: supports 44 PIDs up to 0x60, no answer past that; "
+              "10 requests, 1 dropped: 01 5C (reason 99)");
 
     ecuio_channel_support_t all{};
     all.flags = ECUIO_SUPPORT_PROBED | ECUIO_SUPPORT_COMPLETE;

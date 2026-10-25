@@ -3,7 +3,8 @@
 //          real worker frames against the mock set; the drive cycle
 //          itself is tested deterministically (CoreTest.MockDriveCycle*);
 //          CoreTest.MockAnswersTheSessionsDids decodes its DID replies
-//          under uds-generic
+//          under uds-generic; CoreTest.MockFramesKeepTheTickInterval
+//          bounds the worker's cadence against its timestamps
 
 #include "ecuio/core.h"
 #include "ecuio/internal.h"
@@ -47,6 +48,13 @@ void answer_dids(ecuio_mock_transport* t, uint64_t timestamp_us);
 void mock_worker(ecuio_mock_transport* t)
 {
     const auto interval = std::chrono::milliseconds(t->interval_ms);
+    /* Each tick is due one interval after the last one was due, not after
+     * it ended: Windows rounds a sleep up to its 15.6 ms timer step, so a
+     * plain 50 ms sleep ticks every ~62 ms and the drive cycle, whose
+     * physics advance kTickS per frame, plays at 80 % against the frames'
+     * own timestamps. A worker a whole interval behind (a stall, a
+     * debugger) restarts the schedule rather than bursting to catch up. */
+    auto due = std::chrono::steady_clock::now();
 
     while (!t->stop_requested.load()) {
         ecuio_frame_t frame{};
@@ -73,7 +81,12 @@ void mock_worker(ecuio_mock_transport* t)
 
         ecuio_session_dispatch_callbacks(t->session, &frame);
         answer_dids(t, frame.timestamp_us);
-        std::this_thread::sleep_for(interval);
+        due += interval;
+        const auto now = std::chrono::steady_clock::now();
+        if (due < now) {
+            due = now;
+        }
+        std::this_thread::sleep_until(due);
     }
 }
 

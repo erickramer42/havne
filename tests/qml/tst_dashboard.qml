@@ -3,7 +3,9 @@
 //          including a profile switch, and the Dashboard's Taps: which
 //          signal each gauge reads and the note it shows with no
 //          session, before the first value, with a value, and when the
-//          profile lacks the signal (?profile=raw).
+//          profile lacks the signal (?profile=raw); imperial units on the
+//          gauges, their scales and zones, and the peaks cleared on a
+//          change of units.
 
 import QtQuick
 import QtTest
@@ -36,6 +38,7 @@ TestCase {
     }
 
     function cleanup() {
+        Bridge.unitSystem = 0
         Bridge.disconnectSession()
         tryVerify(() => !Bridge.disconnecting, 5000, "disconnect ends")
     }
@@ -144,6 +147,40 @@ TestCase {
                     Number(entry.value).toLocaleString(Qt.locale(), 'f', entry.decimals),
                     label + " readout")
         }
+    }
+
+    // Imperial: the gauges read mph and degrees F, their scales and zones
+    // follow (written in decoded units, converted through core), and a
+    // change of units clears the held peaks
+    function test_imperialConvertsTheGaugesAndTheirScales() {
+        const page = createTemporaryObject(pageComponent, testCase)
+        const all = gauges(page)
+        connect("mock://demo")
+        tryVerify(() => Object.keys(gaugeSignals).every(label => all[label].hasValue),
+                  3000, "every gauge gets a value")
+        const speedo = all["Vehicle speed"]
+        const coolant = all["Coolant"]
+        compare(speedo.unit, "km/h")
+        compare(speedo.to, 260)
+        compare(coolant.to, 130)
+        tryVerify(() => !isNaN(speedo.peakValue), 3000, "the speedo holds a peak")
+
+        Bridge.unitSystem = 1
+        compare(speedo.unit, "mph")
+        compare(speedo.to, 160)
+        verify(isNaN(speedo.peakValue), "the old units' peak is cleared")
+        compare(coolant.unit, "°F")
+        fuzzyCompare(coolant.from, 32, 1e-9)
+        fuzzyCompare(coolant.to, 266, 1e-9)
+        fuzzyCompare(coolant.dangerFrom, 239, 1e-9)
+        compare(all["MAF"].unit, "lb/min")
+        fuzzyCompare(all["MAF"].to, 300 * 0.132277357312033, 1e-9)
+        compare(all["Engine speed"].unit, "RPM", "a unit with no imperial form stays")
+        compare(all["Throttle"].unit, "%")
+
+        Bridge.unitSystem = 0
+        compare(speedo.unit, "km/h")
+        compare(coolant.to, 130)
     }
 
     // From a session that fed every gauge to one whose profile has none

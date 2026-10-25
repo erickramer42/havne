@@ -17,7 +17,9 @@
 //          its folder shown relative to Documents; at 1280 × 650 the page
 //          scrolls and the activity log keeps its minimum height; the
 //          Display row steps Theme.zoom. The recording's bridge side:
-//          BridgeTest.Recording*.
+//          BridgeTest.Recording*. The Units row sets Bridge.unitSystem
+//          (tst_settings.qml); its conversions: SignalsTest.DisplayConvert*,
+//          BridgeTest.UnitSystem*.
 
 import QtQuick
 import QtQuick.Controls
@@ -504,6 +506,27 @@ Pane {
                 Label {
                     text: qsTr("or Ctrl + / Ctrl − / Ctrl 0")
                     color: Theme.textDim
+                }
+            }
+
+            // Units: what the pages show, converted in core (ADR-0022);
+            // recordings keep the decoded values. Main.qml stores it.
+            // Takes effect at once, connected or not.
+            RowLayout {
+                spacing: Theme.spacing
+                Label { text: qsTr("Units:"); color: Theme.textDim }
+                Repeater {
+                    model: [
+                        { system: 0, name: "metric", label: qsTr("Metric (km/h, °C)") },
+                        { system: 1, name: "imperial", label: qsTr("Imperial (mph, °F)") }
+                    ]
+                    ThemedButton {
+                        required property var modelData
+                        objectName: "units_" + modelData.name
+                        text: modelData.label
+                        highlighted: Bridge.unitSystem === modelData.system
+                        onClicked: Bridge.unitSystem = modelData.system
+                    }
                 }
             }
 

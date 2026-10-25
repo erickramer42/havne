@@ -1,6 +1,7 @@
 // File/layer: tests/test_core.cpp | GTest, UNIT tier, headless CI job
 
 #include <gtest/gtest.h>
+#include <algorithm>
 #include <cmath>
 #include <cstring>
 #include <atomic>
@@ -19,6 +20,7 @@ extern "C" {
 
 /* C++ headers (namespaced classes and inline functions): must stay
  * outside the extern "C" block above. */
+#include "error_detail.h" /* core/src: a refused vendor call's words */
 #include "mock_drive_cycle.h"
 #include "uds_generic.h"   /* core/src: the template set's identity */
 
@@ -109,6 +111,24 @@ TEST(CoreTest, CreateFailuresNameTheirCause) {
     EXPECT_STREQ(ecuio_last_error_detail(), "");
 }
 
+/* A refused vendor call's detail is one line: the vendor's text loses
+ * its line breaks and trailing blanks, and text that's only blanks is
+ * left out, as is no text at all. */
+TEST(CoreTest, VendorDetailIsOneLine)
+{
+    ecuio_detail_set_vendor("PassThruOpen", 8, "no adapter\r\nattached  \n");
+    EXPECT_STREQ(ecuio_last_error_detail(),
+                 "PassThruOpen returned status 8 (ERR_DEVICE_NOT_CONNECTED): "
+                 "no adapter  attached");
+    ecuio_detail_set_vendor("PassThruOpen", 8, " \r\n");
+    EXPECT_STREQ(ecuio_last_error_detail(),
+                 "PassThruOpen returned status 8 (ERR_DEVICE_NOT_CONNECTED)");
+    ecuio_detail_set_vendor("PassThruConnect", 34, nullptr);
+    EXPECT_STREQ(ecuio_last_error_detail(),
+                 "PassThruConnect returned status 34 (vendor-specific)");
+    ecuio_detail_clear();
+}
+
 /* Per thread, like dlerror(): a failure on one thread leaves another
  * thread's detail as it was. */
 TEST(CoreTest, LastErrorDetailIsPerThread) {
@@ -192,6 +212,8 @@ TEST(CoreTest, StatusStringValidValues) {
     EXPECT_STREQ(ecuio_status_string(ECUIO_ERR_UNKNOWN_PROFILE), "unknown profile");
     EXPECT_STREQ(ecuio_status_string(ECUIO_ERR_VENDOR_REFUSED), "the adapter's driver refused");
     EXPECT_STREQ(ecuio_status_string(ECUIO_ERR_SURROGATE_FAILED), "surrogate process failed");
+    EXPECT_STREQ(ecuio_status_string(ECUIO_ERR_VEHICLE_TIMEOUT),
+                 "vehicle not responding (timeout)");
 
     /* Explicit cast required by MSVC for enum conversion */
     EXPECT_STRNE(ecuio_status_string(static_cast<ecuio_status_t>(999)), nullptr);
@@ -290,7 +312,16 @@ TEST(CoreTest, SameCallbackDifferentUserdataAllowed) {
         session, counting_callback, &counter1), ECUIO_OK);
     EXPECT_EQ(ecuio_register_frame_callback(
         session, counting_callback, &counter2), ECUIO_OK);
-    
+
+    /* ...so unregistering one pair leaves the other */
+    EXPECT_EQ(
+        ecuio_unregister_frame_callback(session, counting_callback, &counter2),
+        ECUIO_OK);
+    ecuio_frame_t frame{};
+    ecuio_session_dispatch_callbacks(session, &frame);
+    EXPECT_EQ(counter1, 1);
+    EXPECT_EQ(counter2, 0);
+
     ecuio_session_close(session);
     ecuio_session_destroy(session);
 }
@@ -465,6 +496,9 @@ TEST(CoreTest, CallbackExecutesOnTransportWorkerThread) {
     EXPECT_NE(seen_id.load(), std::thread::id{});
     EXPECT_NE(seen_id.load(), main_id);  /* Marshaling in bridge is MANDATORY */
 
+    /* A second start leaves the one worker running. */
+    EXPECT_EQ(ecuio_session_start(session), ECUIO_OK);
+
     EXPECT_EQ(ecuio_session_close(session), ECUIO_OK);
     ecuio_session_destroy(session);
 }
@@ -541,6 +575,8 @@ constexpr float kMockIatMax = 80.0f;
 constexpr float kMockMafMax = 300.0f;   /* WOT near the limiter peaks ~255 */
 constexpr float kMockOilMin = 15.0f;    /* cold start reads 20 */
 constexpr float kMockOilMax = 140.0f;
+constexpr float kMockLambdaMin = 0.8f;  /* WOT enrichment reads ~0.86 */
+constexpr float kMockLambdaMax = 2.0f;  /* fuel cut pegs the sensor lean */
 
 struct MockCapture {
     static constexpr size_t kMaxFrames = 20;
@@ -617,6 +653,8 @@ TEST(CoreTest, MockFramesDecodeAgainstMockSignalSet) {
                 EXPECT_GE(val, 0.0f);          EXPECT_LE(val, kMockMafMax); break;
             case ECUIO_MOCK_SIG_OIL_ID:
                 EXPECT_GE(val, kMockOilMin);    EXPECT_LE(val, kMockOilMax); break;
+            case ECUIO_MOCK_SIG_LAMBDA_ID:
+                EXPECT_GE(val, kMockLambdaMin); EXPECT_LE(val, kMockLambdaMax); break;
             default:
                 FAIL() << "unknown signal id in mock set: " << def.id;
             }
@@ -644,6 +682,7 @@ struct PhaseStats {
     float peak_kmh = 0.0f;
     float peak_coolant = -100.0f;
     float peak_iat = -100.0f;
+    float peak_oil = -100.0f;
     int max_gear = 0;
 };
 
@@ -684,6 +723,7 @@ LoopRun run_one_loop()
         s->peak_kmh = std::fmax(s->peak_kmh, dc.speed_kmh);
         s->peak_coolant = std::fmax(s->peak_coolant, dc.coolant_c);
         s->peak_iat = std::fmax(s->peak_iat, dc.iat_c);
+        s->peak_oil = std::fmax(s->peak_oil, dc.oil_c);
         if (dc.gear > s->max_gear) {
             s->max_gear = dc.gear;
         }
@@ -718,11 +758,18 @@ TEST(CoreTest, MockDriveCycleSecondGearPullHoldsTheLimiter)
     EXPECT_LT(pull.entry_kmh, 35.0f);
     EXPECT_LE(pull.peak_rpm, ecuio_mock::kRevLimitRpm);
 
-    /* Exactly 5 s on the limiter, bouncing just under it */
+    /* Exactly 5 s on the limiter: past it on first contact, before the
+     * first cut lands, then sawing just under it */
     EXPECT_EQ(lim.ticks, ecuio_mock::ticks_for(5.0f));
     EXPECT_GE(lim.min_rpm, ecuio_mock::kRevLimitRpm - 200.0f);
-    EXPECT_LE(lim.peak_rpm, ecuio_mock::kRevLimitRpm);
+    EXPECT_GT(lim.peak_rpm, ecuio_mock::kRevLimitRpm);
+    EXPECT_LE(lim.peak_rpm, ecuio_mock::kRevLimitRpm + 100.0f);
     EXPECT_NEAR(lim.peak_kmh, 113.0f, 5.0f);
+
+    /* Past either end of its table the torque curve holds that end */
+    EXPECT_EQ(ecuio_mock::torque_nm(ecuio_mock::kRevLimitRpm + 500.0f),
+              ecuio_mock::torque_nm(ecuio_mock::kRevLimitRpm));
+    EXPECT_EQ(ecuio_mock::torque_nm(-100.0f), 0.0f);
 }
 
 TEST(CoreTest, MockDriveCycleThirdGearPullIsLongerFasterAndHotter)
@@ -744,11 +791,15 @@ TEST(CoreTest, MockDriveCycleThirdGearPullIsLongerFasterAndHotter)
 
     const float coolant2 = std::fmax(pull2.peak_coolant, lim2.peak_coolant);
     const float coolant3 = std::fmax(pull3.peak_coolant, lim3.peak_coolant);
-    const float iat2 = std::fmax(pull2.peak_iat, lim2.peak_iat);
+    const float oil2 = std::fmax(pull2.peak_oil, lim2.peak_oil);
+    const float oil3 = std::fmax(pull3.peak_oil, lim3.peak_oil);
     const float iat3 = std::fmax(pull3.peak_iat, lim3.peak_iat);
-    /* "Obviously hotter": the longer pull heat-soaks the engine */
+    /* The longer pull puts more heat into the cold engine. The intake
+     * air doesn't follow: with no turbo, and ram air at speed, it stays
+     * near ambient. */
     EXPECT_GT(coolant3, coolant2 + 4.0f);
-    EXPECT_GT(iat3, iat2 + 6.0f);
+    EXPECT_GT(oil3, oil2 + 4.0f);
+    EXPECT_LE(iat3, ecuio_mock::kAmbientC + 10.0f);
 }
 
 TEST(CoreTest, MockDriveCycleDragRunCoversAQuarterMile)
@@ -817,6 +868,7 @@ TEST(CoreTest, MockDriveCycleEveryTickRoundTripsThroughTheMockSet)
             case ECUIO_MOCK_SIG_LOAD_ID:      phys = dc.load_pct; break;
             case ECUIO_MOCK_SIG_MAF_ID:       phys = dc.maf_gs; break;
             case ECUIO_MOCK_SIG_OIL_ID:       phys = dc.oil_c; break;
+            case ECUIO_MOCK_SIG_LAMBDA_ID:    phys = dc.lambda; break;
             default: FAIL() << "unknown signal id in mock set: " << def.id;
             }
             worst_err[i] = std::fmax(worst_err[i], std::fabs(val - phys));
@@ -845,10 +897,264 @@ TEST(CoreTest, MockDriveCycleEveryTickRoundTripsThroughTheMockSet)
             EXPECT_GE(lo[i], 0.0f);    EXPECT_LE(hi[i], kMockMafMax); break;
         case ECUIO_MOCK_SIG_OIL_ID:
             EXPECT_GE(lo[i], kMockOilMin); EXPECT_LE(hi[i], kMockOilMax); break;
+        case ECUIO_MOCK_SIG_LAMBDA_ID:
+            EXPECT_GE(lo[i], kMockLambdaMin); EXPECT_LE(hi[i], kMockLambdaMax); break;
         default:
             EXPECT_GE(lo[i], 0.0f);            EXPECT_LE(hi[i], 100.0f); break;
         }
     }
+}
+
+namespace {
+
+/* Steps a fresh cycle until `phase` starts (in the first loop), then
+ * calls `visit` on each of its ticks. */
+template <typename F>
+void for_each_tick_of(Phase phase, F visit)
+{
+    DriveCycle dc;
+    bool in = false;
+    for (uint32_t i = 0; i < ecuio_mock::ticks_for(600.0f) && dc.loops == 0; ++i) {
+        dc.step();
+        if (dc.phase == phase) {
+            in = true;
+            visit(dc);
+        } else if (in) {
+            return;
+        }
+    }
+}
+
+} // namespace
+
+TEST(CoreTest, MockDriveCycleSignalsStayPhysical)
+{
+    /* Two loops, every tick, against the rules a real ECU's log keeps:
+     * rpm locked to wheel speed in gear, no speed at idle rpm with the
+     * clutch in, airflow consistent with rpm and load, lambda lean
+     * exactly when fuel is cut, and temperatures that move like masses
+     * of metal and coolant. */
+    DriveCycle dc;
+    DriveCycle prev = dc;
+    uint32_t cut_run = 0;
+    uint32_t fueled_run = 0;
+    uint32_t fueled_at_limit = 0;
+    int checked_locked = 0;
+    while (dc.loops < 2 && dc.tick < ecuio_mock::ticks_for(1200.0f)) {
+        dc.step();
+        const float k = dc.gear > 0 ? ecuio_mock::rpm_per_mps(dc.gear) : 0.0f;
+        const bool limiter = dc.phase == Phase::Limiter2nd || dc.phase == Phase::Limiter3rd;
+        const bool locked = dc.gear > 0 && !dc.clutch_slip && !dc.shifting() && !dc.spinning;
+
+        if (locked && !limiter) {
+            /* Within the crank reading's firing-pulse jitter */
+            EXPECT_NEAR(dc.rpm, dc.wheel_mps * k, 10.0f) << "tick " << dc.tick;
+            ++checked_locked;
+        } else if (locked) {
+            /* The saw is crank speed against the driveline's compliance */
+            EXPECT_NEAR(dc.rpm, dc.wheel_mps * k, 200.0f) << "tick " << dc.tick;
+        }
+        if (dc.gear == 0 && !dc.shifting()) {
+            EXPECT_LE(dc.speed_kmh, 50.0f) << "clutch in at speed, tick " << dc.tick;
+        }
+        if (dc.gear > 0 && !dc.clutch_slip && !dc.shifting()) {
+            EXPECT_GE(dc.rpm, 1000.0f) << "lugging in gear " << dc.gear
+                                       << ", tick " << dc.tick;
+        }
+        if (dc.spinning) {
+            EXPECT_GE(dc.wheel_mps, dc.v_mps) << "tick " << dc.tick;
+            EXPECT_LE(dc.slip(), 0.5f) << "tick " << dc.tick;
+        }
+
+        const float estimate = ecuio_mock::maf_wot_gs(dc.rpm) * dc.load_pct / 100.0f;
+        EXPECT_NEAR(dc.maf_gs, estimate, 0.1f * estimate + 0.5f) << "tick " << dc.tick;
+        EXPECT_GT(dc.maf_gs, 5.0f) << "engine running, tick " << dc.tick;
+        EXPECT_GE(dc.throttle_pct, ecuio_mock::kTpClosedPct - 0.01f);
+        EXPECT_LE(dc.throttle_pct, ecuio_mock::kTpWotPct + 0.01f);
+
+        cut_run = dc.fuel_cut ? cut_run + 1 : 0;
+        fueled_run = dc.fuel_cut ? 0 : fueled_run + 1;
+        /* The rev limit cuts fuel the tick after rpm meets it, whatever
+         * the phase: a lift off the limiter doesn't sit there fueled */
+        fueled_at_limit = (!limiter && !dc.fuel_cut && dc.rpm >= ecuio_mock::kLimiterOnRpm)
+            ? fueled_at_limit + 1 : 0;
+        EXPECT_LE(fueled_at_limit, 1u) << "fueled at the rev limit, tick " << dc.tick;
+        if (cut_run >= 2) {
+            EXPECT_GT(dc.lambda, 1.3f) << "fuel cut, tick " << dc.tick;
+        }
+        if (fueled_run >= 3) {
+            EXPECT_GE(dc.lambda, 0.8f) << "tick " << dc.tick;
+            EXPECT_LE(dc.lambda, 1.1f) << "tick " << dc.tick;
+        }
+
+        EXPECT_LE(std::fabs(dc.coolant_c - prev.coolant_c), 0.5f) << "tick " << dc.tick;
+        EXPECT_LE(std::fabs(dc.oil_c - prev.oil_c), 0.5f) << "tick " << dc.tick;
+        EXPECT_LE(std::fabs(dc.iat_c - prev.iat_c), 0.5f) << "tick " << dc.tick;
+        prev = dc;
+    }
+    ASSERT_EQ(dc.loops, 2u) << "two loops never completed";
+    EXPECT_GT(checked_locked, 1000) << "too few in-gear ticks checked";
+}
+
+TEST(CoreTest, MockDriveCycleReadingsNeverHoldDeadStill)
+{
+    /* A running engine's rpm, as the wire carries it, never holds one
+     * value for long: the idle hunts, the driver's speed wanders, the
+     * crank reading jitters. And away from the moments that are quick
+     * on a real car (a shift, the limiter, the launch and the drag run),
+     * rpm never steps between ticks by more than an engine can change,
+     * phase changes included. */
+    DriveCycle dc;
+    uint8_t payload[ECUIO_MOCK_TELEMETRY_PAYLOAD_LEN] = {};
+    uint16_t last_raw = 0;
+    uint32_t same = 0, longest = 0;
+    float prev_rpm = dc.rpm;
+    float worst_step = 0.0f;
+    uint64_t worst_tick = 0;
+    while (dc.loops < 2 && dc.tick < ecuio_mock::ticks_for(1200.0f)) {
+        dc.step();
+        ecuio_mock::encode_payload(dc, payload);
+        const uint16_t raw = static_cast<uint16_t>(payload[0] | (payload[1] << 8));
+        same = (dc.tick > 1 && raw == last_raw) ? same + 1 : 0;
+        longest = std::max(longest, same);
+        last_raw = raw;
+
+        const bool quick = dc.shifting() || dc.phase == Phase::Limiter2nd ||
+                           dc.phase == Phase::Limiter3rd || dc.phase == Phase::Launch ||
+                           dc.phase == Phase::DragRun;
+        if (!quick && std::fabs(dc.rpm - prev_rpm) > worst_step) {
+            worst_step = std::fabs(dc.rpm - prev_rpm);
+            worst_tick = dc.tick;
+        }
+        prev_rpm = dc.rpm;
+    }
+    ASSERT_EQ(dc.loops, 2u) << "two loops never completed";
+    EXPECT_LE(longest, 10u) << "rpm read the same for over half a second";
+    EXPECT_LE(worst_step, 150.0f) << "rpm stepped at tick " << worst_tick;
+}
+
+TEST(CoreTest, MockDriveCycleLimiterCutsFuelNotAir)
+{
+    /* On the limiter the blade stays open, airflow stays near WOT and the
+     * fuel is cut most of each cycle: lambda reads lean, load pegged.
+     * Road speed holds while rpm saws. */
+    float pull_maf = 0.0f;
+    for_each_tick_of(Phase::Pull2nd, [&](const DriveCycle& dc) {
+        pull_maf = std::fmax(pull_maf, dc.maf_gs);
+    });
+    float min_load = 100.0f, min_maf = 1e9f, max_lambda = 0.0f;
+    float min_kmh = 1e9f, max_kmh = 0.0f;
+    uint32_t cut = 0, ticks = 0;
+    for_each_tick_of(Phase::Limiter2nd, [&](const DriveCycle& dc) {
+        EXPECT_FLOAT_EQ(dc.throttle_pct, ecuio_mock::kTpWotPct);
+        min_load = std::fmin(min_load, dc.load_pct);
+        min_maf = std::fmin(min_maf, dc.maf_gs);
+        max_lambda = std::fmax(max_lambda, dc.lambda);
+        if (dc.phase_ticks >= ecuio_mock::ticks_for(1.0f)) {
+            min_kmh = std::fmin(min_kmh, dc.speed_kmh);
+            max_kmh = std::fmax(max_kmh, dc.speed_kmh);
+        }
+        cut += dc.fuel_cut ? 1u : 0u;
+        ++ticks;
+    });
+    ASSERT_EQ(ticks, ecuio_mock::ticks_for(5.0f));
+    EXPECT_GE(min_load, 95.0f);
+    EXPECT_GE(min_maf, 0.9f * pull_maf);
+    EXPECT_GT(max_lambda, 1.6f);
+    EXPECT_GT(cut, ticks / 2) << "the limiter should spend most of its time in cut";
+    EXPECT_LE(max_kmh - min_kmh, 1.0f) << "speed should hold on the limiter";
+}
+
+TEST(CoreTest, MockDriveCycleHighwayCruiseHoldsSpeed)
+{
+    /* A light, steady cruise in top gear: closed-loop fueling, the low
+     * load and airflow of road-load power. */
+    float lo_kmh = 1e9f, hi_kmh = 0.0f, lo_rpm = 1e9f, hi_rpm = 0.0f;
+    float hi_load = 0.0f, hi_maf = 0.0f, lo_lambda = 9.0f, hi_lambda = 0.0f;
+    uint32_t ticks = 0;
+    for_each_tick_of(Phase::Cruise4th, [&](const DriveCycle& dc) {
+        EXPECT_EQ(dc.gear, ecuio_mock::kTopGear);
+        if (dc.phase_ticks < ecuio_mock::ticks_for(5.0f)) {
+            return;   /* settling from the lift */
+        }
+        lo_kmh = std::fmin(lo_kmh, dc.speed_kmh);
+        hi_kmh = std::fmax(hi_kmh, dc.speed_kmh);
+        lo_rpm = std::fmin(lo_rpm, dc.rpm);
+        hi_rpm = std::fmax(hi_rpm, dc.rpm);
+        hi_load = std::fmax(hi_load, dc.load_pct);
+        hi_maf = std::fmax(hi_maf, dc.maf_gs);
+        lo_lambda = std::fmin(lo_lambda, dc.lambda);
+        hi_lambda = std::fmax(hi_lambda, dc.lambda);
+        ++ticks;
+    });
+    ASSERT_GE(ticks, ecuio_mock::ticks_for(9.0f));
+    EXPECT_GE(lo_kmh, 98.0f);
+    EXPECT_LE(hi_kmh, 102.0f);
+    EXPECT_GE(lo_rpm, 2850.0f);
+    EXPECT_LE(hi_rpm, 3100.0f);
+    EXPECT_LE(hi_load, 35.0f);
+    EXPECT_LE(hi_maf, 35.0f);
+    EXPECT_GE(lo_lambda, 0.97f);
+    EXPECT_LE(hi_lambda, 1.03f);
+}
+
+TEST(CoreTest, MockDriveCycleColdStartIdlesFastThenSettles)
+{
+    /* The cold-start strategy as the first vehicle showed it: a fast
+     * idle near 1430 rpm on extra air for ~20 s, open-loop fueling, then
+     * an 850-900 rpm warm-up idle. */
+    float early_lo = 1e9f, early_hi = 0.0f, late_rpm = 0.0f, fast_load = 0.0f;
+    float fast_tp = 0.0f, lambda_lo = 9.0f, lambda_hi = 0.0f;
+    for_each_tick_of(Phase::WarmUp, [&](const DriveCycle& dc) {
+        if (dc.phase_ticks < ecuio_mock::ticks_for(15.0f)) {
+            early_lo = std::fmin(early_lo, dc.rpm);
+            early_hi = std::fmax(early_hi, dc.rpm);
+            fast_load = std::fmax(fast_load, dc.load_pct);
+            fast_tp = std::fmax(fast_tp, dc.throttle_pct);
+        }
+        late_rpm = dc.rpm;
+        lambda_lo = std::fmin(lambda_lo, dc.lambda);
+        lambda_hi = std::fmax(lambda_hi, dc.lambda);
+    });
+    EXPECT_GE(early_lo, 1400.0f);
+    EXPECT_LE(early_hi, 1460.0f);
+    EXPECT_GE(fast_load, 40.0f) << "catalyst heating runs on extra air";
+    EXPECT_GT(fast_tp, 30.0f);
+    EXPECT_GE(late_rpm, 850.0f);
+    EXPECT_LE(late_rpm, 900.0f);
+    EXPECT_NEAR(lambda_lo, ecuio_mock::kLambdaColdOpenLoop, 0.01f);
+    EXPECT_NEAR(lambda_hi, ecuio_mock::kLambdaColdOpenLoop, 0.01f);
+}
+
+TEST(CoreTest, MockDriveCycleLaunchSpinsTheTyresAndHooksUp)
+{
+    /* Off the line the clutch slips while the tyres sit near peak slip;
+     * once it locks in 1st the driver feathers the throttle with the
+     * tyres spinning a few hundred rpm above road speed. From 2nd the
+     * drive is below the grip and the tyres hook up. */
+    float flare_hi = 0.0f;
+    float slip_hi = 0.0f;
+    float clutch_rpm_lo = 1e9f;
+    bool spun_in_second = false;
+    for_each_tick_of(Phase::DragRun, [&](const DriveCycle& dc) {
+        if (dc.clutch_slip) {
+            clutch_rpm_lo = std::fmin(clutch_rpm_lo, dc.rpm);
+        }
+        if (dc.gear == 1 && !dc.clutch_slip && !dc.shifting()) {
+            const float ground_rpm = dc.v_mps * ecuio_mock::rpm_per_mps(1);
+            flare_hi = std::fmax(flare_hi, dc.rpm - ground_rpm);
+            slip_hi = std::fmax(slip_hi, dc.slip());
+        }
+        if (dc.gear >= 2 && dc.spinning) {
+            spun_in_second = true;
+        }
+    });
+    EXPECT_GE(clutch_rpm_lo, 3000.0f) << "the engine bogged off the line";
+    EXPECT_GE(flare_hi, 300.0f);
+    EXPECT_LE(flare_hi, 800.0f);
+    EXPECT_GT(slip_hi, 0.05f);
+    EXPECT_LT(slip_hi, 0.3f);
+    EXPECT_FALSE(spun_in_second);
 }
 
 namespace {
@@ -930,6 +1236,86 @@ TEST(CoreTest, MockEmitsKnownArbitrationIds)
     EXPECT_EQ(cap.fd_mismatch.load(), 0) << "FD flag missing on one or more frames";
 }
 
+namespace {
+
+struct TickCapture {
+    std::atomic<int> count{0};
+    uint64_t ts[64] = {}; /* read after close, which joins the worker */
+};
+
+void tick_capture_cb(const ecuio_frame_t* frame, void* user_data)
+{
+    TickCapture* c = static_cast<TickCapture*>(user_data);
+    const int i = c->count.fetch_add(1);
+    if (i < 64) {
+        c->ts[i] = frame->timestamp_us;
+    }
+}
+
+} // namespace
+
+/* Contract: one frame per kTickS of wall time. The drive cycle advances
+ * kTickS per frame, so a slower worker plays the car in slow motion
+ * against the frames' timestamps (a 0-100 time, the limiter's period).
+ * The bound is the mean gap over 2 s, leaving out stalls (gaps over two
+ * intervals, as a loaded CI VM gives for a second at a time). A deadline
+ * schedule holds that mean whatever the OS's sleep step, but not any
+ * single gap: on Windows they land on its 15.6 ms step (about 47 or
+ * 62 ms), and a host whose sleeps never end sooner than ~63 ms falls
+ * behind a little each tick until the schedule restarts, which fires the
+ * next tick at once (gaps 63, 63, 63, 63, ~0: a median of 63 at real
+ * time). A stall's long gap is followed by the restart's short one,
+ * which stays in the mean. Sleeping a fixed 50 ms after each tick makes
+ * every gap the long one and fails on every host.
+ *
+ * A host that keeps waking the worker more than an interval late can't
+ * hold the cadence with any schedule, so the test skips there: the
+ * macos-build runner wakes 50 ms sleeps 100-200 ms late, a third of the
+ * gaps at a time. The fixed-sleep regression shows on Windows and
+ * Linux. */
+TEST(CoreTest, MockFramesKeepTheTickInterval)
+{
+    ecuio_session_t* session = nullptr;
+    ASSERT_EQ(ecuio_session_create("mock://cadence", &session), ECUIO_OK);
+
+    TickCapture cap;
+    ASSERT_EQ(ecuio_register_frame_callback(session, &tick_capture_cb, &cap),
+              ECUIO_OK);
+    ASSERT_EQ(ecuio_session_start(session), ECUIO_OK);
+
+    wait_for([&cap]() { return cap.count.load() >= 41; }, 10000);
+
+    ecuio_session_close(session);
+    ecuio_session_destroy(session);
+
+    const int n = std::min(cap.count.load(), 64);
+    ASSERT_GE(n, 41);
+    double sum_ms = 0.0;
+    int counted = 0;
+    int stalls = 0;
+    std::string gaps; /* every gap, for a failure on a host we can't run */
+    for (int i = 1; i < n; ++i) {
+        const double gap_ms =
+            static_cast<double>(cap.ts[i] - cap.ts[i - 1]) / 1000.0;
+        gaps += std::to_string(static_cast<int>(gap_ms)) + " ";
+        if (gap_ms <= 100.0) {
+            sum_ms += gap_ms;
+            ++counted;
+        } else {
+            ++stalls;
+        }
+    }
+    if (stalls > 2) {
+        GTEST_SKIP() << "this host woke the worker more than an interval "
+                        "late " << stalls << " times; gaps (ms): " << gaps;
+    }
+    const double mean_ms = sum_ms / counted;
+    EXPECT_GE(mean_ms, 40.0) << "gaps (ms): " << gaps;
+    EXPECT_LE(mean_ms, 56.0)
+        << "the drive cycle would play slower than real time; gaps (ms): "
+        << gaps;
+}
+
 TEST(CoreTest, CloseIsIdempotentAndDestroyIsSafe)
 {
     ecuio_session_t* session = nullptr;
@@ -945,12 +1331,28 @@ TEST(CoreTest, CloseIsIdempotentAndDestroyIsSafe)
     EXPECT_EQ(ecuio_session_start(session), ECUIO_ERR_SESSION_CLOSED);
     EXPECT_EQ(ecuio_register_frame_callback(
         session, counting_callback, nullptr), ECUIO_ERR_SESSION_CLOSED);
+    ecuio_frame_t frame = {};
+    EXPECT_EQ(ecuio_session_send(session, &frame), ECUIO_ERR_SESSION_CLOSED);
+    EXPECT_EQ(ecuio_session_receive(session, &frame, 0),
+              ECUIO_ERR_NOT_IMPLEMENTED);
 
     /* destroy() is the freeing call; handle invalid after (free()). */
     EXPECT_EQ(ecuio_session_destroy(session), ECUIO_OK);
 
     /* free(nullptr) semantics */
     EXPECT_EQ(ecuio_session_destroy(nullptr), ECUIO_OK);
+
+    /* Every other call refuses a NULL session. */
+    int32_t last_error = 0;
+    uint32_t error_count = 0;
+    EXPECT_EQ(ecuio_session_start(nullptr), ECUIO_ERR_NULL_ARGUMENT);
+    EXPECT_EQ(ecuio_session_close(nullptr), ECUIO_ERR_NULL_ARGUMENT);
+    EXPECT_EQ(
+        ecuio_unregister_frame_callback(nullptr, counting_callback, nullptr),
+        ECUIO_ERR_NULL_ARGUMENT);
+    EXPECT_EQ(ecuio_session_get_error_state(nullptr, &last_error, &error_count),
+              ECUIO_ERR_NULL_ARGUMENT);
+    EXPECT_EQ(ecuio_session_signal_set(nullptr), nullptr);
 }
 
 TEST(CoreTest, DestroyAutoClosesActiveSession)

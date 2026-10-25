@@ -1748,6 +1748,7 @@ TEST(UdsGenericTest, RefusalsNameTheirCause) {
         {"did=12345", std::string(shape) + "12345'"},
         {"did=1E1C-", std::string(shape) + "1E1C-'"},
         {"did=7E8:1E1C:u8:x", std::string(shape) + "7E8:1E1C:u8:x'"},
+        {"did=7E8:1E1C:u8:x:y", std::string(shape) + "7E8:1E1C:u8:x:y'"},
         {"did=7E8:1E1C-:u8", std::string(shape) + "7E8:1E1C-:u8'"},
         {"did=1E1C:", std::string(types) + "'"},
         {"did=1E1C:u12", std::string(types) + "u12'"},

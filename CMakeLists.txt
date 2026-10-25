@@ -2,7 +2,7 @@
 cmake_minimum_required(VERSION 3.21)
 
 project(QtTune
-    VERSION 0.3.0
+    VERSION 0.3.1
     DESCRIPTION "Cross-platform ECU reading, logging, and tuning"
     LANGUAGES C CXX
 )

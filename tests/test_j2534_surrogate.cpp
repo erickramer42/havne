@@ -11,8 +11,11 @@
 //          handle, a blocked vendor open,
 //          an ERR_TIMEOUT partial batch (spec-mode fake), no
 //          phantom frames from an untouched count under a hard error,
-//          a child from other shared headers refused at OP_OPEN, and
-//          device and channel ID 0 handled as real IDs.
+//          a child from other shared headers refused at OP_OPEN,
+//          device and channel ID 0 handled as real IDs, malformed
+//          requests refused by the client before sending and by the
+//          child on arrival, and a surrogate exe that exits before the
+//          handshake.
 //
 // ARCH note: in the x64 configure this is all-x64 (CI-valid IPC test);
 // the true cross-arch case (x64 test process -> x86 surrogate -> x86
@@ -278,6 +281,102 @@ TEST(J2534SurrogateTest, NullArgumentsRejected)
     EXPECT_EQ(ecuio_j2534_sur_open(FAKE_J2534_DLL_PATH, nullptr),
               ECUIO_ERR_NULL_ARGUMENT);
     EXPECT_EQ(ecuio_j2534_sur_close(nullptr), ECUIO_OK);     /* free(nullptr) */
+
+    const unsigned char req[6] = {0x00, 0x00, 0x07, 0xE0, 0x01, 0x0C};
+    const unsigned char id[4] = {0x00, 0x00, 0x07, 0xE8};
+    unsigned long filter = 0;
+    ecuio_pt_rx_t rx = {};
+    bool got = false;
+    char fw[ECUIO_SUR_TEXT_MAX], dll[ECUIO_SUR_TEXT_MAX],
+        api[ECUIO_SUR_TEXT_MAX];
+    EXPECT_EQ(ecuio_j2534_sur_write_frame(nullptr, 0, req, 6, 0, 0, nullptr),
+              ECUIO_ERR_NULL_ARGUMENT);
+    EXPECT_EQ(ecuio_j2534_sur_ioctl(nullptr, 0, ECUIO_PT_IOCTL_CLEAR_RX_BUFFER,
+                                    nullptr, 0, nullptr, 0, nullptr),
+              ECUIO_ERR_NULL_ARGUMENT);
+    EXPECT_EQ(ecuio_j2534_sur_read_version(nullptr, fw, dll, api),
+              ECUIO_ERR_NULL_ARGUMENT);
+    EXPECT_EQ(ecuio_j2534_sur_start_msg_filter(nullptr, 0, ECUIO_PT_PASS_FILTER,
+                                               id, 4, id, 4, nullptr, 0, 0,
+                                               &filter),
+              ECUIO_ERR_NULL_ARGUMENT);
+    EXPECT_EQ(ecuio_j2534_sur_read_msg(nullptr, 0, &rx, 0, &got),
+              ECUIO_ERR_NULL_ARGUMENT);
+    EXPECT_EQ(ecuio_j2534_sur_inject_test_frame(nullptr, req, 6, 0, 0),
+              ECUIO_ERR_NULL_ARGUMENT);
+}
+
+/* The pipe is a trust boundary both ways. The client refuses a request
+ * of the wrong shape before sending it, and the child refuses what a
+ * broken client might still send: a channel op before OP_CONNECT, and
+ * SCONFIG input that isn't whole pairs. Called on the client directly,
+ * past the loader seam's own checks. */
+TEST(J2534SurrogateTest, MalformedRequestsAreRefusedAtBothEnds)
+{
+    ecuio_j2534_sur_handle_t* h = nullptr;
+    ASSERT_EQ(ecuio_j2534_sur_open(fake_dll_path(), &h), ECUIO_OK);
+    struct Closer {
+        ecuio_j2534_sur_handle_t* h;
+        ~Closer() { (void)ecuio_j2534_sur_close(h); }
+    } closer{h};
+
+    const unsigned char req[6] = {0x00, 0x00, 0x07, 0xE0, 0x01, 0x0C};
+    const unsigned char big[65] = {};
+    const unsigned char mask[4] = {0xFF, 0xFF, 0xFF, 0xFF};
+    const unsigned char id[4] = {0x00, 0x00, 0x07, 0xE8};
+    unsigned long filter = 0;
+
+    /* The child's: no channel is connected yet. */
+    EXPECT_EQ(ecuio_j2534_sur_write_frame(h, 0, req, 6, 0, 0, nullptr),
+              ECUIO_ERR_VENDOR_REFUSED);
+    EXPECT_EQ(ecuio_j2534_sur_ioctl(h, 0, ECUIO_PT_IOCTL_CLEAR_RX_BUFFER,
+                                    nullptr, 0, nullptr, 0, nullptr),
+              ECUIO_ERR_VENDOR_REFUSED);
+    EXPECT_EQ(ecuio_j2534_sur_start_msg_filter(h, 0, ECUIO_PT_PASS_FILTER, mask,
+                                               4, id, 4, nullptr, 0, 0,
+                                               &filter),
+              ECUIO_ERR_VENDOR_REFUSED);
+    EXPECT_EQ(ecuio_j2534_sur_stop_msg_filter(h, 0, 0),
+              ECUIO_ERR_VENDOR_REFUSED);
+    EXPECT_EQ(ecuio_j2534_sur_disconnect_channel(h, 0), ECUIO_OK)
+        << "the child refuses it too, but a disconnect's status is ignored";
+
+    /* The client's: nothing crosses the pipe. */
+    EXPECT_EQ(ecuio_j2534_sur_write_frame(h, 0, req, 0, 0, 0, nullptr),
+              ECUIO_ERR_INVALID_ARGUMENT);
+    EXPECT_EQ(ecuio_j2534_sur_write_frame(h, 0, big, 65, 0, 0, nullptr),
+              ECUIO_ERR_INVALID_ARGUMENT);
+    EXPECT_EQ(ecuio_j2534_sur_ioctl(h, 0, ECUIO_PT_IOCTL_SET_CONFIG, big, 65,
+                                    nullptr, 0, nullptr),
+              ECUIO_ERR_INVALID_ARGUMENT);
+    EXPECT_EQ(ecuio_j2534_sur_ioctl(h, 0, ECUIO_PT_IOCTL_SET_CONFIG, nullptr, 8,
+                                    nullptr, 0, nullptr),
+              ECUIO_ERR_NULL_ARGUMENT);
+    EXPECT_EQ(ecuio_j2534_sur_start_msg_filter(
+                  h, 0, ECUIO_PT_FLOW_CONTROL_FILTER, mask, 4, id, 4, nullptr,
+                  4, 0, &filter),
+              ECUIO_ERR_NULL_ARGUMENT);
+    EXPECT_EQ(ecuio_j2534_sur_start_msg_filter(h, 0, ECUIO_PT_PASS_FILTER, mask,
+                                               4, id, 4, big, 13, 0, &filter),
+              ECUIO_ERR_INVALID_ARGUMENT)
+        << "flow control past 12 bytes";
+    EXPECT_EQ(
+        ecuio_j2534_sur_start_msg_filter(h, 0, ECUIO_PT_FLOW_CONTROL_FILTER,
+                                         mask, 4, id, 4, id, 3, 0, &filter),
+        ECUIO_ERR_INVALID_ARGUMENT)
+        << "flow control a byte short";
+    EXPECT_EQ(ecuio_j2534_sur_inject_test_frame(h, req, 0, 0, 0),
+              ECUIO_ERR_INVALID_ARGUMENT);
+
+    /* The child's, connected: 7 bytes are no whole SCONFIG pair. */
+    unsigned long channel = 0;
+    ASSERT_EQ(ecuio_j2534_sur_connect_channel(h, 0, 0, &channel), ECUIO_OK);
+    EXPECT_EQ(ecuio_j2534_sur_ioctl(h, channel, ECUIO_PT_IOCTL_SET_CONFIG, big,
+                                    7, nullptr, 0, nullptr),
+              ECUIO_ERR_VENDOR_REFUSED);
+    EXPECT_EQ(ecuio_j2534_sur_ioctl(h, channel, ECUIO_PT_IOCTL_CLEAR_RX_BUFFER,
+                                    nullptr, 0, nullptr, 0, nullptr),
+              ECUIO_OK);
 }
 
 /* ================= WRITE / IOCTL / FILTER relay ================= */
@@ -655,14 +754,52 @@ TEST(J2534SurrogateTest, SurrogateExeOverrideIsRestricted)
 {
     char self[MAX_PATH] = {};
     ASSERT_GT(GetModuleFileNameA(nullptr, self, MAX_PATH), 0u);
-    for (const char* exe : {"ecuio-j2534-surrogate.exe",
-                            static_cast<const char*>(self),
-                            "C:/ecuio-definitely-missing/ecuio-j2534-surrogate.exe"}) {
+    const std::string too_long =
+        "C:/" + std::string(MAX_PATH, 'a') + "/ecuio-j2534-surrogate.exe";
+    for (const char* exe :
+         {"ecuio-j2534-surrogate.exe", static_cast<const char*>(self),
+          "C:/ecuio-definitely-missing/ecuio-j2534-surrogate.exe",
+          too_long.c_str()}) {
         EnvSwap swap("ECUIO_SURROGATE_EXE", exe);
         ecuio_j2534_sur_handle_t* h = nullptr;
         EXPECT_EQ(ecuio_j2534_sur_open(fake_dll_path(), &h), ECUIO_ERR_SURROGATE_FAILED) << exe;
         EXPECT_EQ(h, nullptr) << exe;
     }
+}
+
+/* A surrogate that exits before it opens the pipe: the client sees the
+ * process end during the handshake and names its exit code. Not ours:
+ * whoami.exe under the surrogate's name, which refuses the surrogate's
+ * two arguments and exits with 1. */
+TEST(J2534SurrogateTest, SurrogateExitingAtStartupNamesItsExitCode)
+{
+    char sys[MAX_PATH] = {};
+    char tmp[MAX_PATH] = {};
+    ASSERT_GT(GetSystemDirectoryA(sys, MAX_PATH), 0u);
+    ASSERT_GT(GetTempPathA(MAX_PATH, tmp), 0u);
+    struct Cleanup {
+        std::string dir, exe;
+        ~Cleanup()
+        {
+            DeleteFileA(exe.c_str());
+            RemoveDirectoryA(dir.c_str());
+        }
+    } cleanup;
+    cleanup.dir = std::string(tmp) + "ecuio-foreign-surrogate-" +
+                  std::to_string(GetCurrentProcessId());
+    cleanup.exe = cleanup.dir + "\\ecuio-j2534-surrogate.exe";
+    ASSERT_TRUE(CreateDirectoryA(cleanup.dir.c_str(), nullptr) ||
+                GetLastError() == ERROR_ALREADY_EXISTS);
+    ASSERT_TRUE(CopyFileA((std::string(sys) + "\\whoami.exe").c_str(),
+                          cleanup.exe.c_str(), FALSE));
+
+    EnvSwap swap("ECUIO_SURROGATE_EXE", cleanup.exe.c_str());
+    ecuio_j2534_sur_handle_t* h = nullptr;
+    EXPECT_EQ(ecuio_j2534_sur_open(fake_dll_path(), &h),
+              ECUIO_ERR_SURROGATE_FAILED);
+    EXPECT_STREQ(ecuio_last_error_detail(),
+                 "the surrogate exited during startup with code 1");
+    EXPECT_EQ(h, nullptr);
 }
 
 /* The client and the child each carry a fingerprint of the shared
@@ -826,6 +963,29 @@ TEST(J2534SurrogateTest, RequestIdMismatchMakesTheChildUnresponsive)
     uint32_t written = 0;
     EXPECT_EQ(ecuio_j2534_sur_write_frame(h, channel, msg, sizeof(msg), 0, 0,
                                           &written),
+              ECUIO_ERR_SURROGATE_FAILED);
+
+    /* So does every other call, the connect-path ones with a detail. */
+    unsigned long again = 0;
+    EXPECT_EQ(ecuio_j2534_sur_connect_channel(h, 0, 0, &again),
+              ECUIO_ERR_SURROGATE_FAILED);
+    EXPECT_STREQ(ecuio_last_error_detail(),
+                 "the surrogate stopped answering during PassThruConnect");
+    const unsigned char mask[4] = {0xFF, 0xFF, 0xFF, 0xFF};
+    const unsigned char id[4] = {0x00, 0x00, 0x07, 0xE8};
+    unsigned long filter = 0;
+    EXPECT_EQ(ecuio_j2534_sur_start_msg_filter(h, channel, ECUIO_PT_PASS_FILTER,
+                                               mask, 4, id, 4, nullptr, 0, 0,
+                                               &filter),
+              ECUIO_ERR_SURROGATE_FAILED);
+    EXPECT_STREQ(ecuio_last_error_detail(),
+                 "the surrogate stopped answering during "
+                 "PassThruStartMsgFilter");
+    char fw[ECUIO_SUR_TEXT_MAX], dll[ECUIO_SUR_TEXT_MAX],
+        api[ECUIO_SUR_TEXT_MAX];
+    EXPECT_EQ(ecuio_j2534_sur_read_version(h, fw, dll, api),
+              ECUIO_ERR_SURROGATE_FAILED);
+    EXPECT_EQ(ecuio_j2534_sur_inject_test_frame(h, msg, sizeof(msg), 0, 0),
               ECUIO_ERR_SURROGATE_FAILED);
     EXPECT_LT(clock::now() - t0, std::chrono::milliseconds(500));
     EXPECT_EQ(ecuio_j2534_sur_close(h), ECUIO_OK);

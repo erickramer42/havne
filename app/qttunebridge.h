@@ -1,7 +1,7 @@
 // File/layer: app/qttunebridge.h | Qt6 Core, app layer, C++17
 // Testing: test_bridge (Qt-linked target): the frame log's ring and
-//          order, SignalListModel's history ring, discoverJ2534Devices'
-//          marshaling shape
+//          order, SignalListModel's history ring and display units,
+//          discoverJ2534Devices' marshaling shape
 
 #pragma once
 
@@ -137,6 +137,13 @@ public:
                      qint64 timestampMs = -1);
     int subscribedCount() const { return static_cast<int>(m_subscribedCount); }
 
+    // Display units (ADR-0022): rows and history keep the decoded value;
+    // value, unit, decimals and chartData() convert on the way out
+    // through ecuio_display_convert, so a change redraws everything at
+    // once and nothing recorded changes. ECUIO_UNITS_METRIC or _IMPERIAL.
+    uint32_t unitSystem() const { return m_units; }
+    void setUnitSystem(uint32_t units);
+
     Q_INVOKABLE void toggleSubscribed(int row);
 
     // Strip-chart pull API: one map per SUBSCRIBED signal with non-empty
@@ -189,9 +196,12 @@ private:
     };
 
     static void pushSample(Entry& e, qint64 stamp, double value);
+    // A row's value as displayed in the current unit system
+    ecuio_display_value_t shown(const Entry& e, double value) const;
 
     std::vector<Entry> m_entries;
     int m_subscribedCount = 0;
+    uint32_t m_units = ECUIO_UNITS_METRIC;
     QElapsedTimer m_clock;   // fallback timestamp source; started in setSignalSet
 };
 
@@ -225,6 +235,10 @@ class QtTuneBridge : public QObject
     Q_PROPERTY(QString recordingFolder READ recordingFolder NOTIFY recordingStateChanged)
     Q_PROPERTY(QUrl recordingFolderUrl READ recordingFolderUrl NOTIFY recordingStateChanged)
     Q_PROPERTY(bool recordingActive READ recordingActive NOTIFY recordingStateChanged)
+    // Display units (ADR-0022): ECUIO_UNITS_METRIC (0) or _IMPERIAL (1).
+    // Applies to what the UI shows at once, connected or not; recordings
+    // keep the decoded values. Main.qml persists it.
+    Q_PROPERTY(int unitSystem READ unitSystem WRITE setUnitSystem NOTIFY unitSystemChanged)
 
 public:
     explicit QtTuneBridge(QObject* parent = nullptr);
@@ -271,6 +285,13 @@ public:
     QString recordingFolder() const;
     QUrl recordingFolderUrl() const;
     bool recordingActive() const { return m_recorder.active(); }
+    int unitSystem() const { return static_cast<int>(m_signalModel->unitSystem()); }
+    void setUnitSystem(int units);   // anything but 0 or 1 is ignored
+    // A quantity in a decoded unit, as the current unit system shows it:
+    // the Dashboard's scale ends and zones are written once, in decoded
+    // units, and converted here rather than in QML (rule 2).
+    Q_INVOKABLE double displayValue(const QString& unit, double value) const;
+    Q_INVOKABLE QString displayUnit(const QString& unit) const;
     // Test seam: where recordings go instead of Documents/QtTune/recordings
     void setRecordingsRootForTesting(const QString& root) { m_recordingsRoot = root; }
 
@@ -307,6 +328,7 @@ signals:
     void logPausedChanged();
     void recordingChanged();
     void recordingStateChanged();
+    void unitSystemChanged();
 
 private:
     static void onFrame(const ecuio_frame_t* frame, void* user_data);

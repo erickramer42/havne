@@ -53,6 +53,7 @@ static ecuio_signal_def_t mk(uint16_t id, const char* name,
  * them as they are (UTF-8). The names match the obd2 set's, so a gauge
  * finds the same signal under either profile. */
 #define DEG_C "\xC2\xB0" "C"   /* UTF-8 degree sign, whatever the source encoding */
+#define LAMBDA "\xCE\xBB"      /* UTF-8 Greek small lambda */
 
 static const ecuio_signal_def_t kMockDefs[] = {
     mk(ECUIO_MOCK_SIG_RPM_ID,       "RPM",               ECUIO_VALUE_UINT, 0, 0, 16, 0.25,  0.0,  "RPM",    0),
@@ -70,9 +71,14 @@ static const ecuio_signal_def_t kMockDefs[] = {
      * 0.01 g/s resolution is shown to one decimal. */
     mk(ECUIO_MOCK_SIG_MAF_ID,       "MAF",               ECUIO_VALUE_UINT, 7, 0, 16, 0.01,  0.0, "g/s",  1),
     mk(ECUIO_MOCK_SIG_OIL_ID,       "Engine Oil Temp",   ECUIO_VALUE_UINT, 9, 0, 8,   1.0, -40.0, DEG_C, 0),
+    /* Wideband lambda at bytes 10-11, LE, scaled like J1979's
+     * equivalence ratio (2/65536, so 0 to just under 2). Only the mock
+     * carries it; the obd2 set doesn't poll an O2 sensor. */
+    mk(ECUIO_MOCK_SIG_LAMBDA_ID,    "Lambda",            ECUIO_VALUE_UINT, 10, 0, 16, 1.0/32768.0, 0.0, LAMBDA, 2),
 };
 
 #undef DEG_C
+#undef LAMBDA
 
 static const ecuio_signal_set_t kMockSet = [] {
     ecuio_signal_set_t s = {};
