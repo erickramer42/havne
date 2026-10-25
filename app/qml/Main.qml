@@ -66,7 +66,9 @@ ApplicationWindow {
         id: uiSettings
         category: "ui"
         property real zoom: 1.0
-        property int unitSystem: 0
+        // Imperial until changed (ADR-0022's appendix of 2026-10-25); the
+        // bridge and recordings stay in core's decoded, metric units
+        property int unitSystem: 1
     }
     property bool zoomRestored: false
     Component.onCompleted: {

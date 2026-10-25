@@ -109,3 +109,13 @@ corrupt stored value leaves the default.
   the model.
 - `ecuio_display_value_t` is ABI: 32 bytes, pinned by static asserts
   and `test_c_abi.c`, with six reserved bytes.
+
+## Appendix — the default system (2026-10-25)
+
+The app starts in imperial until the Units row is used: `Main.qml`'s
+`Settings` default for `unitSystem` is imperial, and a stored choice
+wins over it. Only the display default moved. The bridge still starts
+in metric, which is what core decoded, so a bridge without the app's
+window (`test_bridge`, and any value the window can't read back) shows
+decoded units, and recordings keep the decoded value and unit as §3
+decided.
