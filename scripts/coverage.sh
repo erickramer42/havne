@@ -12,8 +12,9 @@
 #   coverage    ctest under OpenCppCoverage with --cover_children, so every
 #               test process and the x64 surrogate child it spawns count.
 #               Reports: Testing/coverage/html/index.html and
-#               Testing/coverage/cobertura.xml (the format Codecov and
-#               Coveralls take). Failing tests are listed but don't stop
+#               Testing/coverage/cobertura.xml (repo-relative paths, one
+#               entry per file; CI uploads it to Codecov). Failing tests
+#               are listed but don't stop
 #               the report: the build is unoptimised and the tool attaches
 #               to every process, so a timing case can miss its bounds
 #
@@ -92,40 +93,66 @@ fi
 root=$(cygpath -w "$PWD")
 ctest_args=(--test-dir "$TREE" -C RelWithDebInfo --output-on-failure --no-tests=error)
 [ -n "$regex" ] && ctest_args+=(-R "$regex")
-rm -rf "$LOGDIR/html"
+rm -rf "$LOGDIR/html" "$LOGDIR/raw.xml" "$LOGDIR/cobertura.xml"
 run coverage "$tool" --quiet --cover_children \
     --modules "$root\\$TREE" \
     --sources "$root\\core" --sources "$root\\surrogate" --sources "$root\\app" \
     --export_type "html:$root\\Testing\\coverage\\html" \
-    --export_type "cobertura:$root\\Testing\\coverage\\cobertura.xml" \
+    --export_type "cobertura:$root\\Testing\\coverage\\raw.xml" \
     -- "$(cygpath -w "$(command -v ctest)")" "${ctest_args[@]}"
 
+raw=$LOGDIR/raw.xml
 xml=$LOGDIR/cobertura.xml
-if [ ! -f "$xml" ]; then
+if [ ! -f "$raw" ]; then
     line coverage FAIL "$dur" "no report; see $LOGDIR/coverage.log"
     exit 1
 fi
-# The report has a package per test binary, each listing the sources it
-# links, so a line counts as covered when any binary hit it. An area is
-# a file's first two path parts under the repo (core/src, core/include),
-# or its directory for a file one level down (app, surrogate).
-summary=$(awk '
+# The tool's report has a package per test binary, each listing the
+# sources it links, with paths from the drive root. This rewrites it as
+# one package of repo-relative files (what Codecov matches against the
+# repo), each line's hits summed over the binaries, and prints the rate
+# per area: a file's first two path parts (core/src, core/include), or
+# its directory for a file one level down (app, surrogate).
+prefix=$(cygpath -m "$PWD" | sed 's|^[A-Za-z]:/||')/
+summary=$(awk -v prefix="$prefix" -v out="$xml" '
     match($0, /filename="[^"]*"/) {
         f = substr($0, RSTART + 10, RLENGTH - 11); gsub(/\\/, "/", f)
-        sub(/^.*qttune\//, "", f)
-        n = split(f, p, "/"); area = (n > 2) ? p[1] "/" p[2] : p[1]
+        if (tolower(substr(f, 1, length(prefix))) == tolower(prefix))
+            f = substr(f, length(prefix) + 1)
     }
     match($0, /<line number="[0-9]+" hits="[0-9]+"/) {
         split(substr($0, RSTART, RLENGTH), q, "\"")
-        key = f ":" q[2]
-        if (!(key in seen)) { seen[key] = 1; valid[area]++; tv++ }
-        if (q[4] > 0 && !(key in hit)) { hit[key] = 1; cov[area]++; tc++ }
+        hits[f][q[2] + 0] += q[4]
     }
     END {
-        printf "%.1f%% of lines (%d/%d)\n", tv ? 100 * tc / tv : 0, tc, tv
-        for (a in valid)
-            printf "  %-16s %5.1f%%  %5d/%-5d\n", a, 100 * cov[a] / valid[a], cov[a], valid[a] | "sort"
-    }' "$xml")
+        PROCINFO["sorted_in"] = "@ind_str_asc"
+        for (f in hits) {
+            n = split(f, p, "/"); area = (n > 2) ? p[1] "/" p[2] : p[1]
+            for (l in hits[f]) {
+                valid[f]++; avalid[area]++; tv++
+                if (hits[f][l] > 0) { cov[f]++; acov[area]++; tc++ }
+            }
+        }
+        rate = tv ? tc / tv : 0
+        print "<?xml version=\"1.0\" encoding=\"utf-8\"?>" > out
+        printf "<coverage line-rate=\"%.4f\" branch-rate=\"0\" lines-covered=\"%d\" lines-valid=\"%d\" branches-covered=\"0\" branches-valid=\"0\" complexity=\"0\" timestamp=\"%d\" version=\"0\">\n", rate, tc, tv, systime() > out
+        print "  <sources><source>.</source></sources>" > out
+        printf "  <packages><package name=\"qttune\" line-rate=\"%.4f\" branch-rate=\"0\" complexity=\"0\"><classes>\n", rate > out
+        for (f in hits) {
+            n = split(f, p, "/")
+            printf "    <class name=\"%s\" filename=\"%s\" line-rate=\"%.4f\" branch-rate=\"0\" complexity=\"0\"><methods/><lines>\n", p[n], f, cov[f] / valid[f] > out
+            PROCINFO["sorted_in"] = "@ind_num_asc"
+            for (l in hits[f])
+                printf "      <line number=\"%d\" hits=\"%d\"/>\n", l, hits[f][l] > out
+            PROCINFO["sorted_in"] = "@ind_str_asc"
+            print "    </lines></class>" > out
+        }
+        print "  </classes></package></packages>" > out
+        print "</coverage>" > out
+        printf "%.1f%% of lines (%d/%d)\n", 100 * rate, tc, tv
+        for (a in avalid)
+            printf "  %-16s %5.1f%%  %5d/%-5d\n", a, 100 * acov[a] / avalid[a], acov[a], avalid[a]
+    }' "$raw")
 tests=$(grep -oE '[0-9]+% tests passed.* out of [0-9]+' "$LOGDIR/coverage.log" | tail -n 1)
 line coverage ok "$dur" "$(head -n 1 <<<"$summary"); ${tests:-no ctest summary}"
 tail -n +2 <<<"$summary"

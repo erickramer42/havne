@@ -1,0 +1,14 @@
+# Codecov reads this from .github/. The report comes from CI's
+# win-coverage job (scripts/coverage.sh): line coverage of core/,
+# surrogate/ and app/ over the whole suite. The checks are informational:
+# the number is reported on each commit, and no threshold fails one.
+coverage:
+  status:
+    project:
+      default:
+        informational: true
+    patch:
+      default:
+        informational: true
+
+comment: false

@@ -1,6 +1,6 @@
 # QtTune
 
-[![CI](https://github.com/erickramer42/qttune/actions/workflows/ci.yml/badge.svg)](https://github.com/erickramer42/qttune/actions/workflows/ci.yml)
+[![CI](https://github.com/erickramer42/qttune/actions/workflows/ci.yml/badge.svg)](https://github.com/erickramer42/qttune/actions/workflows/ci.yml) [![Coverage](https://codecov.io/gh/erickramer42/qttune/graph/badge.svg)](https://codecov.io/gh/erickramer42/qttune)
 [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/erickramer42/qttune/badge)](https://scorecard.dev/viewer/?uri=github.com/erickramer42/qttune) [![OpenSSF Best Practices](https://www.bestpractices.dev/projects/15816/badge)](https://www.bestpractices.dev/projects/15816)
 
 QtTune is a cross-platform OBD-II reader and logger. A Qt-free C++17
@@ -86,7 +86,10 @@ screen, is [docs/architecture.md](docs/architecture.md).
   macOS, runs the core under ASan/UBSan, fuzzes the signal decoder and
   validators with libFuzzer ([fuzz/README.md](fuzz/README.md)),
   compiles Android and iOS, and, on pull requests, launches the iOS app
-  in the Simulator ([docs/testing.md](docs/testing.md)).
+  in the Simulator ([docs/testing.md](docs/testing.md)). The coverage
+  badge is line coverage of the native code (core, surrogate, bridge)
+  over the whole suite on Windows CI; QML isn't counted
+  ([docs/testing.md](docs/testing.md#coverage)).
 - **Decisions and evidence on record.** Design decisions are
   [ADRs](docs/adr/README.md), lessons go in a dated
   [engineering log](docs/engineering-log.md), and every real-adapter
