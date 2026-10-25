@@ -7,3 +7,6 @@ aqtinstall*
 Testing/
 sur.log
 /diff.log
+
+# Release staging (packaging/windows/stage.ps1)
+dist/
