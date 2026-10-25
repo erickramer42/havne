@@ -130,7 +130,9 @@ screen, is [docs/architecture.md](docs/architecture.md).
   pulls onto a fuel-cut limiter, a highway cruise, then a quarter mile
   off launch control with wheelspin. Its readings stay consistent with
   each other the way a real ECU's log does: rpm with speed and gear,
-  airflow with load and lambda. Every page works with no hardware.
+  airflow with load and lambda. Like a real log they never sit dead
+  still: the idle hunts, the driver can't hold a speed to the km/h,
+  and the road rises and falls. Every page works with no hardware.
 
 ## Screenshots
 

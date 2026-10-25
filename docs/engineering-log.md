@@ -822,3 +822,22 @@ phase script said it would. The worker now sleeps to a deadline that
 advances one interval per tick, and
 `CoreTest.MockFramesKeepTheTickInterval` bounds the mean spacing of the
 frames' timestamps.
+
+**2026-10-24 — the mock's stillness:** **a model that converges exactly
+reads as fake however right its physics.** With every signal consistent
+at every tick, the drive cycle still looked synthetic on the Dashboard:
+the cold fast idle held 1430 rpm for 17 s, the 100 km/h cruise held
+2995 rpm and 100 km/h for 10 s, and staging held 815 rpm for 7.7 s,
+because the idle controller and the driver's speed hold were exact
+loops with nothing to disturb them. The first vehicle's own log showed
+the opposite: its fast idle wandered 1,400–1,460 rpm. The other tells
+were the hand-offs between phases, where the script, not the car,
+moved: the driver pressing the throttle with the clutch in, the blade
+snapping shut as the fast idle ended, a lift off the limiter that sat
+at 7000 rpm fueled because only the limiter phase knew about the rev
+limit. The fixes model what disturbs a real car (a hunting idle, a
+driver's foot and eye, a road that isn't flat, the crank reading's
+jitter) and give the driver human pedal rates and a lift for every
+shift. Every disturbance is deterministic noise, so the tests stay
+exact, and `CoreTest.MockDriveCycleReadingsNeverHoldDeadStill` now
+fails a reading that holds still or steps between phases.

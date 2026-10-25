@@ -1,6 +1,7 @@
 // File/layer: tests/test_core.cpp | GTest, UNIT tier, headless CI job
 
 #include <gtest/gtest.h>
+#include <algorithm>
 #include <cmath>
 #include <cstring>
 #include <atomic>
@@ -899,6 +900,7 @@ TEST(CoreTest, MockDriveCycleSignalsStayPhysical)
     DriveCycle prev = dc;
     uint32_t cut_run = 0;
     uint32_t fueled_run = 0;
+    uint32_t fueled_at_limit = 0;
     int checked_locked = 0;
     while (dc.loops < 2 && dc.tick < ecuio_mock::ticks_for(1200.0f)) {
         dc.step();
@@ -907,7 +909,8 @@ TEST(CoreTest, MockDriveCycleSignalsStayPhysical)
         const bool locked = dc.gear > 0 && !dc.clutch_slip && !dc.shifting() && !dc.spinning;
 
         if (locked && !limiter) {
-            EXPECT_NEAR(dc.rpm, dc.wheel_mps * k, 1.0f) << "tick " << dc.tick;
+            /* Within the crank reading's firing-pulse jitter */
+            EXPECT_NEAR(dc.rpm, dc.wheel_mps * k, 10.0f) << "tick " << dc.tick;
             ++checked_locked;
         } else if (locked) {
             /* The saw is crank speed against the driveline's compliance */
@@ -933,6 +936,11 @@ TEST(CoreTest, MockDriveCycleSignalsStayPhysical)
 
         cut_run = dc.fuel_cut ? cut_run + 1 : 0;
         fueled_run = dc.fuel_cut ? 0 : fueled_run + 1;
+        /* The rev limit cuts fuel the tick after rpm meets it, whatever
+         * the phase: a lift off the limiter doesn't sit there fueled */
+        fueled_at_limit = (!limiter && !dc.fuel_cut && dc.rpm >= ecuio_mock::kLimiterOnRpm)
+            ? fueled_at_limit + 1 : 0;
+        EXPECT_LE(fueled_at_limit, 1u) << "fueled at the rev limit, tick " << dc.tick;
         if (cut_run >= 2) {
             EXPECT_GT(dc.lambda, 1.3f) << "fuel cut, tick " << dc.tick;
         }
@@ -948,6 +956,43 @@ TEST(CoreTest, MockDriveCycleSignalsStayPhysical)
     }
     ASSERT_EQ(dc.loops, 2u) << "two loops never completed";
     EXPECT_GT(checked_locked, 1000) << "too few in-gear ticks checked";
+}
+
+TEST(CoreTest, MockDriveCycleReadingsNeverHoldDeadStill)
+{
+    /* A running engine's rpm, as the wire carries it, never holds one
+     * value for long: the idle hunts, the driver's speed wanders, the
+     * crank reading jitters. And away from the moments that are quick
+     * on a real car (a shift, the limiter, the launch and the drag run),
+     * rpm never steps between ticks by more than an engine can change,
+     * phase changes included. */
+    DriveCycle dc;
+    uint8_t payload[ECUIO_MOCK_TELEMETRY_PAYLOAD_LEN] = {};
+    uint16_t last_raw = 0;
+    uint32_t same = 0, longest = 0;
+    float prev_rpm = dc.rpm;
+    float worst_step = 0.0f;
+    uint64_t worst_tick = 0;
+    while (dc.loops < 2 && dc.tick < ecuio_mock::ticks_for(1200.0f)) {
+        dc.step();
+        ecuio_mock::encode_payload(dc, payload);
+        const uint16_t raw = static_cast<uint16_t>(payload[0] | (payload[1] << 8));
+        same = (dc.tick > 1 && raw == last_raw) ? same + 1 : 0;
+        longest = std::max(longest, same);
+        last_raw = raw;
+
+        const bool quick = dc.shifting() || dc.phase == Phase::Limiter2nd ||
+                           dc.phase == Phase::Limiter3rd || dc.phase == Phase::Launch ||
+                           dc.phase == Phase::DragRun;
+        if (!quick && std::fabs(dc.rpm - prev_rpm) > worst_step) {
+            worst_step = std::fabs(dc.rpm - prev_rpm);
+            worst_tick = dc.tick;
+        }
+        prev_rpm = dc.rpm;
+    }
+    ASSERT_EQ(dc.loops, 2u) << "two loops never completed";
+    EXPECT_LE(longest, 10u) << "rpm read the same for over half a second";
+    EXPECT_LE(worst_step, 150.0f) << "rpm stepped at tick " << worst_tick;
 }
 
 TEST(CoreTest, MockDriveCycleLimiterCutsFuelNotAir)
