@@ -829,77 +829,104 @@ TEST(CoreTest, MockDriveCycleDragRunCoversAQuarterMile)
 TEST(CoreTest, MockDriveCycleLaterLoopsRunAtOperatingTemperature)
 {
     /* Only the first loop starts cold; each later one picks up where the
-     * last ended. The first loop's runs stay on a cold engine, and by the
-     * last loop here the coolant sits on the thermostat, peaking near
-     * 220 F on the pulls, with the oil built up to 230-245 F. */
-    struct Temps {
-        float cool_min = 1e9f, cool_max = -1e9f;
-        float oil_min = 1e9f, oil_max = -1e9f;
-        float cruise_cool_max = -1e9f;
-        float pull2_cool_max = -1e9f;
-        float drag_oil_entry = -1e9f, drag_oil_max = -1e9f;
-        float end_cool = 0.0f, end_oil = 0.0f;
-        bool warm_up = false;
-    };
+     * last ended. The first loop's runs stay on a cold engine. From the
+     * third the coolant holds the thermostat's range, and by the last
+     * loop here it climbs past 210 F at WOT until the fan cuts in, with
+     * the oil built up to 226-243 F. */
     constexpr uint32_t kLoops = 6;
-    Temps t[kLoops];
+    struct Range {
+        float lo = 1e9f, hi = -1e9f;
+        void add(float v)
+        {
+            lo = std::fmin(lo, v);
+            hi = std::fmax(hi, v);
+        }
+    };
+    Range coolant[kLoops];
+    Range oil[kLoops];
+    bool restarted_cold = false;
+
+    /* The cold first loop */
+    float first_pull2_coolant = -1e9f;
+    float first_end_coolant = 0.0f, first_end_oil = 0.0f;
+
+    /* The hot last loop: coolant at cruise and at WOT (the pulls, their
+     * limiters and the quarter mile), the fan, and the oil across the
+     * quarter mile and the stop after it */
+    Range hot_cruise_coolant, hot_wot_coolant, hot_drag_oil;
+    float hot_drag_oil_entry = 0.0f;
+    bool hot_fan = false;
+    float hot_end_coolant = 0.0f, hot_end_oil = 0.0f;
+
     DriveCycle dc;
     while (dc.loops < kLoops && dc.tick < ecuio_mock::ticks_for(1200.0f)) {
         dc.step();
         if (dc.loops >= kLoops) {
             break;
         }
-        Temps& l = t[dc.loops];
-        l.cool_min = std::fmin(l.cool_min, dc.coolant_c);
-        l.cool_max = std::fmax(l.cool_max, dc.coolant_c);
-        l.oil_min = std::fmin(l.oil_min, dc.oil_c);
-        l.oil_max = std::fmax(l.oil_max, dc.oil_c);
-        if (dc.phase == Phase::Cruise4th) {
-            l.cruise_cool_max = std::fmax(l.cruise_cool_max, dc.coolant_c);
-        }
-        if (dc.phase == Phase::Pull2nd) {
-            l.pull2_cool_max = std::fmax(l.pull2_cool_max, dc.coolant_c);
-        }
-        if (dc.phase == Phase::DragRun || dc.phase == Phase::Shutdown) {
-            if (l.drag_oil_entry < -1e8f) {
-                l.drag_oil_entry = dc.oil_c;
+        const uint32_t i = dc.loops;
+        coolant[i].add(dc.coolant_c);
+        oil[i].add(dc.oil_c);
+        restarted_cold = restarted_cold || (i > 0 && dc.phase == Phase::WarmUp);
+        if (i == 0) {
+            if (dc.phase == Phase::Pull2nd) {
+                first_pull2_coolant =
+                    std::fmax(first_pull2_coolant, dc.coolant_c);
             }
-            l.drag_oil_max = std::fmax(l.drag_oil_max, dc.oil_c);
+            first_end_coolant = dc.coolant_c;
+            first_end_oil = dc.oil_c;
+        } else if (i == kLoops - 1) {
+            const Phase p = dc.phase;
+            if (p == Phase::Cruise4th) {
+                hot_cruise_coolant.add(dc.coolant_c);
+            }
+            if (p == Phase::Pull2nd || p == Phase::Limiter2nd ||
+                p == Phase::Pull3rd || p == Phase::Limiter3rd ||
+                p == Phase::DragRun) {
+                hot_wot_coolant.add(dc.coolant_c);
+            }
+            if (p == Phase::DragRun || p == Phase::Shutdown) {
+                if (hot_drag_oil.hi < -1e8f) {
+                    hot_drag_oil_entry = dc.oil_c;
+                }
+                hot_drag_oil.add(dc.oil_c);
+            }
+            hot_fan = hot_fan || dc.fan_on;
+            hot_end_coolant = dc.coolant_c;
+            hot_end_oil = dc.oil_c;
         }
-        l.warm_up = l.warm_up || dc.phase == Phase::WarmUp;
-        l.end_cool = dc.coolant_c;
-        l.end_oil = dc.oil_c;
     }
     ASSERT_EQ(dc.loops, kLoops) << "six loops never completed";
+    EXPECT_FALSE(restarted_cold) << "a later loop ran the cold start";
 
     /* Cold first loop: the thermostat never opens, and the oil trails
      * the coolant as the sump's mass warms */
-    EXPECT_LT(t[0].pull2_cool_max, 40.0f);
-    EXPECT_LT(t[0].cool_max, ecuio_mock::kThermostatOpenC);
-    EXPECT_LT(t[0].end_oil, t[0].end_cool);
-    for (uint32_t i = 1; i < kLoops; ++i) {
-        EXPECT_FALSE(t[i].warm_up) << "loop " << i + 1 << " restarted cold";
-    }
+    EXPECT_LT(first_pull2_coolant, 40.0f);
+    EXPECT_LT(coolant[0].hi, ecuio_mock::kThermostatOpenC);
+    EXPECT_LT(first_end_oil, first_end_coolant);
 
     /* From the third loop on, the coolant never falls below the
      * thermostat's range */
     for (uint32_t i = 2; i < kLoops; ++i) {
-        EXPECT_GE(t[i].cool_min, 85.0f) << "loop " << i + 1;
+        EXPECT_GE(coolant[i].lo, 85.0f) << "loop " << i + 1;
     }
 
-    const Temps& hot = t[kLoops - 1];
-    EXPECT_GE(hot.cruise_cool_max, 85.0f);
-    EXPECT_LE(hot.cruise_cool_max, 97.0f);
-    EXPECT_GE(hot.cool_max, 98.0f) << "the radiator kept up at WOT";
-    EXPECT_LE(hot.cool_max, 106.0f);
-    EXPECT_GE(hot.oil_min, 100.0f);
-    EXPECT_GE(hot.oil_max, 112.0f);
-    EXPECT_LE(hot.oil_max, 125.0f);
-    /* The sump's mass: a quarter mile moves the oil a few degrees, not
+    /* Hot: the thermostat holds the cruise, the radiator can't keep up
+     * at WOT, and the fan cuts in */
+    EXPECT_GE(hot_cruise_coolant.lo, 85.0f);
+    EXPECT_LE(hot_cruise_coolant.hi, 97.0f);
+    EXPECT_GE(hot_wot_coolant.hi, 100.0f) << "the radiator kept up at WOT";
+    EXPECT_LE(hot_wot_coolant.hi, 105.0f);
+    EXPECT_TRUE(hot_fan) << "the fan never cut in";
+    EXPECT_GE(oil[kLoops - 1].lo, 100.0f);
+    EXPECT_GE(oil[kLoops - 1].hi, 112.0f);
+    EXPECT_LE(oil[kLoops - 1].hi, 125.0f);
+    /* The sump's mass: a quarter mile moves the oil several degrees, not
      * the coolant's swing */
-    EXPECT_GE(hot.drag_oil_max - hot.drag_oil_entry, 2.0f);
-    EXPECT_LE(hot.drag_oil_max - hot.drag_oil_entry, 9.0f);
-    EXPECT_GT(hot.end_oil, hot.end_cool) << "the oil cooled below the coolant";
+    EXPECT_GE(hot_drag_oil.hi - hot_drag_oil_entry, 2.0f);
+    EXPECT_LE(hot_drag_oil.hi - hot_drag_oil_entry, 9.0f);
+    EXPECT_GT(hot_end_oil, hot_end_coolant)
+        << "the oil cooled below the coolant";
 }
 
 TEST(CoreTest, MockDriveCycleEveryTickRoundTripsThroughTheMockSet)

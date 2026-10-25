@@ -47,10 +47,11 @@ namespace ecuio_mock {
  *   Cooldown    idle, then loop back to Roll2nd
  *
  * Only the first loop starts cold. Each later one starts from where the
- * last ended, so the first loop's runs are on a cold engine, the second
- * warms it through the thermostat, and from the third on it runs at
- * operating temperature: coolant 90-100 C (195-213 F), oil building to
- * 110-118 C (230-245 F) under the repeated pulls.
+ * last ended, so the first loop's runs are on a cold engine and the
+ * second warms it through the thermostat. From the third on the coolant
+ * runs 88-102 C (190-216 F), the fan taking over at 102 C on the quarter
+ * mile, and the oil builds over the next two loops to 108-117 C
+ * (226-243 F) under the repeated pulls.
  *
  * Where the values come from. The cold start (fast idle hunting around
  * 1430 rpm for about 20 s, then 850-900 rpm), warm idle airflow and
@@ -60,8 +61,9 @@ namespace ecuio_mock {
  * QtTune; those states follow the model's physics and the usual
  * signatures (fuel cut leaves airflow up and lambda lean, a NA engine's
  * intake air stays near ambient at speed). So do the warm temperatures:
- * a thermostat that opens at 84 C, coolant near 220 F on hard runs, and
- * oil at what an NA engine without an oil cooler reaches on a track.
+ * a thermostat that opens at 84 C, coolant climbing past 210 F on a hard
+ * run until the fan cuts in, and oil at what an NA engine without an
+ * oil cooler reaches on a track.
  *
  * Nothing a real car reports holds dead still, so neither does this
  * one. The idle controller hunts, the driver's foot can't hold a speed
@@ -142,6 +144,20 @@ constexpr float kThermostatOpenC = 84.0f;
 constexpr float kThermostatFullC = 96.0f;
 constexpr float kFanOnC = 102.0f;
 constexpr float kFanOffC = 98.0f;
+
+/* Heat paths (update_temperatures): how the fuel's cooling heat splits
+ * between coolant, block and oil (the shares sum to 1), the share of
+ * friction power that heats the oil, the heat masses in kJ/K (the
+ * coolant's grows as the thermostat opens the radiator's loop), and how
+ * the radiator's conductance grows with road speed, kW/K per km/h. */
+constexpr float kCoolantHeatShare = 0.50f;
+constexpr float kBlockHeatShare = 0.34f;
+constexpr float kOilHeatShare = 0.16f;
+constexpr float kOilFrictionShare = 0.5f;
+constexpr float kCoolantKjK = 30.0f;
+constexpr float kCoolantOpenKjK = 15.0f;
+constexpr float kOilKjK = 45.0f;
+constexpr float kRadiatorUaPerKmh = 0.005f;
 
 constexpr float kQuarterMileM = 402.336f;
 
@@ -872,9 +888,10 @@ private:
      * cooling jacket, block and oil. The coolant warms quickly while the
      * thermostat is shut (the small loop) and holds near it once open;
      * at WOT the radiator can't keep up, so it climbs until the driver
-     * lifts. The oil takes heat from the block, the pistons and bearing
-     * friction; with the sump's mass behind it, one pull moves it a few
-     * degrees, and back-to-back hard loops build it to track-day levels.
+     * lifts or the fan cuts in. The oil takes heat from the block, the
+     * pistons and bearing friction; with the sump's mass behind it, one
+     * pull moves it several degrees, and back-to-back hard loops build it
+     * to track-day levels.
      * The block and oil store heat and give it back after a hard run
      * (heat soak); the radiator and block heat the engine bay, which
      * the intake draws from at low speed. */
@@ -882,8 +899,16 @@ private:
     {
         const float heat_kw = 0.24f * fuel_kw;
         const float speed = clampf(v_mps * 3.6f, 0.0f, 160.0f);
-        /* Friction power, a share of which heats the oil directly */
+        /* Friction power, a share of which heats the oil directly. Fueled,
+         * that share is part of the fuel's heat and comes out of the
+         * block's; with the fuel cut, the car's momentum turns the engine
+         * and the friction is heat on top. */
         const float friction_kw = fuel_cut_drag_nm(rpm) * rpm * 2.0f * kPi / 60.0f / 1000.0f;
+        const bool fueled = fuel_kw > 0.0f;
+        const float oil_friction_kw =
+            fueled ? std::fmin(kOilFrictionShare * friction_kw,
+                               kBlockHeatShare * heat_kw)
+                   : kOilFrictionShare * friction_kw;
 
         /* The thermostat's wax element follows the coolant in ~4 s */
         const float open_target = clampf((coolant_c - kThermostatOpenC) /
@@ -895,21 +920,24 @@ private:
         } else if (coolant_c <= kFanOffC) {
             fan_on = false;
         }
-        const float ua = 0.25f + 0.006f * speed + (fan_on ? 0.9f : 0.0f);
+        const float ua =
+            0.25f + kRadiatorUaPerKmh * speed + (fan_on ? 0.9f : 0.0f);
         const float q_rad = open * ua * (coolant_c - kAmbientC);
         const float q_bc = 1.5f * (block_c - coolant_c);
         const float q_bo = 0.3f * (block_c - oil_c);
         const float q_block_loss = 0.03f * (block_c - kAmbientC);
 
-        const float c_coolant = 40.0f + 20.0f * open;
-        coolant_c += (0.45f * heat_kw + q_bc - q_rad -
+        const float c_coolant = kCoolantKjK + kCoolantOpenKjK * open;
+        coolant_c += (kCoolantHeatShare * heat_kw + q_bc - q_rad -
                       0.015f * (coolant_c - kAmbientC)) *
                      kTickS / c_coolant;
         block_c +=
-            (0.45f * heat_kw - q_bc - q_bo - q_block_loss) * kTickS / 60.0f;
-        oil_c += (q_bo + 0.10f * heat_kw + 0.5f * friction_kw -
+            (kBlockHeatShare * heat_kw - (fueled ? oil_friction_kw : 0.0f) -
+             q_bc - q_bo - q_block_loss) *
+            kTickS / 60.0f;
+        oil_c += (q_bo + kOilHeatShare * heat_kw + oil_friction_kw -
                   (0.06f + 0.001f * speed) * (oil_c - kAmbientC)) *
-                 kTickS / 35.0f;
+                 kTickS / kOilKjK;
 
         /* The bay: the block, the exhaust manifold and part of the
          * radiator's air heat it; the car's speed ventilates it. */
