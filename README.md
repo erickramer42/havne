@@ -1,6 +1,6 @@
 # QtTune
 
-[![CI](https://github.com/erickramer42/qttune/actions/workflows/ci.yml/badge.svg)](https://github.com/erickramer42/qttune/actions/workflows/ci.yml) [![Coverage](https://codecov.io/gh/erickramer42/qttune/graph/badge.svg)](https://codecov.io/gh/erickramer42/qttune)
+[![CI](https://github.com/erickramer42/qttune/actions/workflows/ci.yml/badge.svg)](https://github.com/erickramer42/qttune/actions/workflows/ci.yml) [![Coverage](https://codecov.io/gh/erickramer42/qttune/graph/badge.svg)](https://codecov.io/gh/erickramer42/qttune) [![Release](https://img.shields.io/github/v/release/erickramer42/qttune)](https://github.com/erickramer42/qttune/releases/latest)
 [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/erickramer42/qttune/badge)](https://scorecard.dev/viewer/?uri=github.com/erickramer42/qttune) [![OpenSSF Best Practices](https://www.bestpractices.dev/projects/15816/badge)](https://www.bestpractices.dev/projects/15816)
 
 QtTune is a cross-platform OBD-II reader and logger. A Qt-free C++17
@@ -14,11 +14,22 @@ simulated vehicle lets it run with no hardware at all.
 >
 > QtTune runs end-to-end against the simulator and a fake J2534 vendor driver. Through a real adapter it has read live data from one vehicle: in a read-only session on 2026-10-22 the engine ECU answered its Mode-01 requests and the values decoded and tracked the instrument cluster ([session sheet](docs/bench-sessions/2026-10-22-vehicle.md)). Other vehicles and adapters are untested; [STATUS.md](STATUS.md) tracks what is and isn't verified.
 
-![The QtTune Dashboard during a full-throttle 2nd-gear pull on the simulated vehicle: rpm and speed climb together, the shift lights fill, then the tachometer saws just under 7,000 rpm on the fuel-cut limiter while speed holds at 112 km/h, before the driver lifts](docs/images/dashboard.gif)
+![The QtTune Dashboard during a full-throttle 2nd-gear pull on the simulated vehicle: rpm and speed climb together, the shift lights fill, then the tachometer saws just under 7,000 rpm on the fuel-cut limiter while speed holds at 70 mph, before the driver lifts](docs/images/dashboard.gif)
 
 *The Dashboard in real time on the built-in simulated vehicle
 (`mock://demo`), with no hardware attached: a full-throttle pull in
 2nd onto the fuel-cut limiter, then the lift.*
+
+## Try it
+
+On Windows 10 or 11 (x64), download the zip from the
+[latest release](https://github.com/erickramer42/qttune/releases/latest),
+unzip it and run `qttune.exe`. Nothing else is needed: Qt and the
+Visual C++ runtime are in the zip. The program isn't code-signed, so
+SmartScreen may stop it the first time (**More info**, then **Run
+anyway**). In Settings, press the `mock://demo` preset and **Connect**
+to watch the simulated car drive. Other platforms build from source
+([Build](#build)).
 
 ## Architecture
 
@@ -148,7 +159,8 @@ screen, is [docs/architecture.md](docs/architecture.md).
 | v0.1.0 | Skeleton: core ABI, Qt shell, responsive layout | ✅ Released |
 | v0.2.0 | Callback API, mock transport, live frame log | ✅ Released |
 | v0.3.0 | Signal decoding, live view, J2534 transport, live vehicle read and logging (tested on one vehicle) | ✅ Released |
-| v0.3.x | Request engine, PID-support probe, generic UDS reads, record-replay transport | Next |
+| v0.3.1 | Request engine, PID-support probe, vehicle identification, generic UDS reads, imperial units; the first Windows download | ✅ Released |
+| v0.3.x | Record-replay transport; the request engine on a car | Next |
 | v0.4.0 | Security access discovery, flash capability | Planned |
 | v0.5.0+ | Manufacturer plugin modules | Planned |
 

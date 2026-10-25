@@ -1,6 +1,6 @@
 # QtTune — Project Status
 
-**Updated:** 2026-10-23 · **Version:** v0.3.0 ·
+**Updated:** 2026-10-25 · **Version:** v0.3.1 ·
 [![CI](https://github.com/erickramer42/qttune/actions/workflows/ci.yml/badge.svg)](https://github.com/erickramer42/qttune/actions/workflows/ci.yml)
 
 This file covers the project as it stands: what works, what comes
@@ -13,7 +13,8 @@ Safety, regulatory and warranty caveats are in
 
 ## Where things stand
 
-**Current phase: v0.3.x.** v0.3.0 is released (tagged 2026-10-22).
+**Current phase: v0.3.x.** v0.3.1 is released, the first with a
+Windows download; v0.3.0 was tagged 2026-10-22.
 The HARNESS tier is complete, including transport adoption (ADR-0012);
 the BENCH tier has covered a real adapter on a quiet bus; and in the
 first read-only vehicle session
@@ -333,6 +334,11 @@ measurements feed the first item.
    recording's `events.log`) gets one line per ECU. `?identify=0`
    turns it off. Its first run on a car is the second vehicle
    session's.
+   Items 1–4 ship in **v0.3.1**, the first release with a Windows
+   download ([release notes](docs/releases/v0.3.1.md)): a zip built
+   and checked by `.github/workflows/release.yml` that runs without
+   Qt or Visual Studio, with a signed build provenance
+   ([development.md, "Releases"](docs/development.md#releases)).
 5. **Phase 4, record-replay transport,** independent of the others:
    play captured frames back deterministically through the same frame
    API. The capture side is the recorder's `frames.csv`
@@ -526,7 +532,7 @@ in the backlog.
 ### User interface
 
 - **Persisted preferences (S).** The UI zoom and the unit system
-  survive a restart, through QML `Settings` in `Main.qml` (category
+  (imperial until changed) survive a restart, through QML `Settings` in `Main.qml` (category
   `ui`). Developer mode, theme, the last-used device, the Record
   sessions switch and Settings' profile choice and DID list need the
   same. It belongs in the app layer, not core.
