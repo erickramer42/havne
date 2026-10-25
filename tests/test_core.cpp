@@ -1240,27 +1240,31 @@ namespace {
 
 struct TickCapture {
     std::atomic<int> count{0};
-    std::atomic<uint64_t> first_ts{0};
-    std::atomic<uint64_t> last_ts{0};
+    uint64_t ts[64] = {}; /* read after close, which joins the worker */
 };
 
 void tick_capture_cb(const ecuio_frame_t* frame, void* user_data)
 {
     TickCapture* c = static_cast<TickCapture*>(user_data);
-    if (c->count.fetch_add(1) == 0) {
-        c->first_ts.store(frame->timestamp_us);
+    const int i = c->count.fetch_add(1);
+    if (i < 64) {
+        c->ts[i] = frame->timestamp_us;
     }
-    c->last_ts.store(frame->timestamp_us);
 }
 
 } // namespace
 
-/* Contract: one frame per kTickS of wall time, on average. The drive
- * cycle advances kTickS per frame, so a slower worker plays the car in
- * slow motion against the frames' timestamps (a 0-100 time, the
- * limiter's period). The bound is the mean over 2 s, which a deadline
- * schedule holds whatever the OS's sleep step; sleeping a fixed 50 ms
- * after each tick measures ~62 ms on Windows. */
+/* Contract: one frame per kTickS of wall time. The drive cycle advances
+ * kTickS per frame, so a slower worker plays the car in slow motion
+ * against the frames' timestamps (a 0-100 time, the limiter's period).
+ * The bound is the median gap over 2 s, which a deadline schedule holds
+ * whatever the OS's sleep step (on Windows the gaps land on its 15.6 ms
+ * step, about 47 or 62 ms, three short to one long, a median of about
+ * 47); sleeping a fixed 50 ms after each tick makes every gap ~62 ms
+ * there. Not the mean: a runner that stalls the process, as a loaded CI
+ * VM does for a second at a time, costs the schedule that time once (it
+ * restarts rather than bursting to catch up), and the mean would count
+ * it against every gap. */
 TEST(CoreTest, MockFramesKeepTheTickInterval)
 {
     ecuio_session_t* session = nullptr;
@@ -1276,12 +1280,19 @@ TEST(CoreTest, MockFramesKeepTheTickInterval)
     ecuio_session_close(session);
     ecuio_session_destroy(session);
 
-    const int n = cap.count.load();
+    const int n = std::min(cap.count.load(), 64);
     ASSERT_GE(n, 41);
-    const double mean_ms =
-        static_cast<double>(cap.last_ts.load() - cap.first_ts.load()) / 1000.0 / (n - 1);
-    EXPECT_GE(mean_ms, 45.0);
-    EXPECT_LE(mean_ms, 56.0) << "the drive cycle would play slower than real time";
+    std::vector<double> gaps_ms;
+    for (int i = 1; i < n; ++i) {
+        gaps_ms.push_back(static_cast<double>(cap.ts[i] - cap.ts[i - 1]) /
+                          1000.0);
+    }
+    std::nth_element(gaps_ms.begin(), gaps_ms.begin() + gaps_ms.size() / 2,
+                     gaps_ms.end());
+    const double median_ms = gaps_ms[gaps_ms.size() / 2];
+    EXPECT_GE(median_ms, 40.0);
+    EXPECT_LE(median_ms, 56.0)
+        << "the drive cycle would play slower than real time";
 }
 
 TEST(CoreTest, CloseIsIdempotentAndDestroyIsSafe)
