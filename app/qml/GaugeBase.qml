@@ -5,7 +5,7 @@
 import QtQuick
 
 // Value plumbing shared by the dashboard gauges: range clamping,
-// easing between the bridge's 10 Hz batches, zone colours, the
+// easing between the bridge's 10 Hz batches, zone colors, the
 // connect sweep and peak/low hold. Subtypes only draw.
 Item {
     id: base
@@ -24,7 +24,7 @@ Item {
     property real coldBelow: NaN
     property real warnFrom: NaN
     property real dangerFrom: NaN
-    property color accent: Qt.lighter(Theme.primary, 1.3)   // normal-zone colour
+    property color accent: Qt.lighter(Theme.primary, 1.3)   // normal-zone color
 
     // A little over one batch interval, so motion never stalls between
     // samples. Shift lights want less.

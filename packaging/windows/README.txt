@@ -48,8 +48,8 @@ Qt6*.dll, qml\, platforms\  the Qt runtime (see THIRD_PARTY_NOTICES.txt)
 vcruntime140*.dll, msvcp140*.dll
                             the Microsoft Visual C++ runtime, so no
                             separate redistributable is needed
-LICENSE.txt                 QtTune's licence (MIT)
-THIRD_PARTY_NOTICES.txt     the licences of what QtTune ships with
+LICENSE.txt                 QtTune's license (MIT)
+THIRD_PARTY_NOTICES.txt     the licenses of what QtTune ships with
 licenses\                   the full LGPL-3.0 and GPL-3.0 texts
 
 

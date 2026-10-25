@@ -44,7 +44,7 @@ entry := [<ecu>:]<DID>[-<DID>][:<type>]
   number of that width, scale 1, offset 0, no unit, no decimals. Every
   type name holds a letter past `f`, so a two-token entry is told apart
   by its last token: a type, a DID (then the first token is an ECU), or
-  a misspelt type.
+  a misspelled type.
 - `<ecu>` is the ECU's response ID in hex. The request goes 8 below it
   (`7E9` asks on `7E1`; an 11-bit ID is 9 to 7FF, so the request ID is
   never 0), or, for a 29-bit `18DA<a><b>`, on the swapped pair. Any

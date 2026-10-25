@@ -1,5 +1,5 @@
 // File/layer: tests/qml/tst_liveview.qml | Qt Quick Test, QML tier
-// Testing: LiveView's trace styles keyed by model row (colour from
+// Testing: LiveView's trace styles keyed by model row (color from
 //          Theme.seriesColors, dashes past the palette), each row's
 //          swatch under mock://demo, filled while plotted and hollow
 //          while not, a text row under uds-generic (the mock answering
@@ -49,16 +49,16 @@ TestCase {
         return s
     }
 
-    function test_colourComesFromTheRow() {
+    function test_colorComesFromTheRow() {
         const page = createTemporaryObject(pageComponent, testCase)
         const n = Theme.seriesColors.length
         for (let row = 0; row < 3 * n; ++row)
             sameColor(page.seriesColor(row), Theme.seriesColors[row % n], "row " + row)
     }
 
-    // Rows within the palette draw solid; past it, rows reuse its colours,
-    // and no two rows that share a colour share a dash
-    function test_dashesTellSharedColoursApart() {
+    // Rows within the palette draw solid; past it, rows reuse its colors,
+    // and no two rows that share a color share a dash
+    function test_dashesTellSharedColorsApart() {
         const page = createTemporaryObject(pageComponent, testCase)
         const n = Theme.seriesColors.length
         for (let row = 0; row < n; ++row)
@@ -66,7 +66,7 @@ TestCase {
         for (let a = 0; a < 3 * n; ++a) {
             for (let b = a + n; b < 3 * n; b += n)
                 verify(JSON.stringify(page.seriesDash(a)) !== JSON.stringify(page.seriesDash(b)),
-                       "rows " + a + " and " + b + " share a colour and a dash")
+                       "rows " + a + " and " + b + " share a color and a dash")
         }
     }
 
@@ -82,7 +82,7 @@ TestCase {
         }
     }
 
-    // Unplotted, a row's swatch keeps its colour as an outline, and the
+    // Unplotted, a row's swatch keeps its color as an outline, and the
     // other rows keep theirs
     function test_unplottedRowHasAHollowSwatch() {
         const page = createTemporaryObject(pageComponent, testCase)

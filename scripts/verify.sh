@@ -71,7 +71,7 @@ warnings() {
     grep -E 'warning [A-Z]+[0-9]+|warning:' "$LOGDIR/$1.log" | sort -u | wc -l | tr -d ' '
 }
 
-# Summarises a ctest log: "<passed>/<total> passed, <n> skipped".
+# Summarizes a ctest log: "<passed>/<total> passed, <n> skipped".
 ctest_summary() {
     local log=$1 total failed skipped
     total=$(grep -oE 'out of [0-9]+' "$log" | tail -n 1 | grep -oE '[0-9]+')

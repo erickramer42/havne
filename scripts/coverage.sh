@@ -15,7 +15,7 @@
 #               Testing/coverage/cobertura.xml (repo-relative paths, one
 #               entry per file; CI uploads it to Codecov). Failing tests
 #               are listed but don't stop
-#               the report: the build is unoptimised and the tool attaches
+#               the report: the build is unoptimized and the tool attaches
 #               to every process, so a timing case can miss its bounds
 #
 # Not counted: QML/JS (OpenCppCoverage sees only native code), the x86

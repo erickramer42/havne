@@ -135,7 +135,7 @@ screen, is [docs/architecture.md](docs/architecture.md).
   (the default for `mock://`), `obd2` (the default for `j2534://`) or
   `raw` (log only), with `?profile=` to override
   ([ADR-0013](docs/adr/0013-protocol-profiles.md)).
-- **Simulated vehicle.** A modelled car (gear ratios, airflow and
+- **Simulated vehicle.** A modeled car (gear ratios, airflow and
   torque, tires with weight transfer, block, coolant and oil
   temperatures) runs a scripted drive: a cold start, two full-throttle
   pulls onto a fuel-cut limiter, a highway cruise, then a quarter mile

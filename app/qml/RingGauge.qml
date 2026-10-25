@@ -6,16 +6,16 @@ import QtQuick
 import QtQuick.Shapes
 
 // Needle-less arc gauge for slow signals (temperatures): a thick
-// rounded arc coloured by zone, a centred numeric readout, and a thin
-// zone strip outside the arc so the colours read as a scale.
+// rounded arc colored by zone, a centered numeric readout, and a thin
+// zone strip outside the arc so the colors read as a scale.
 GaugeBase {
     id: gauge
 
     property real startAngle: 150   // degrees; 0 = 3 o'clock, clockwise
     property real sweepAngle: 240
 
-    // Ring centreline radius. The drawing reaches ~1.19 rr above the
-    // centre (ring, zone strip) and ~0.83 rr below it (arc ends plus
+    // Ring centerline radius. The drawing reaches ~1.19 rr above the
+    // center (ring, zone strip) and ~0.83 rr below it (arc ends plus
     // the min/max labels), so it fits a box of 2.4 rr by 2.05 rr.
     readonly property real rr: Math.max(1, Math.min(width / 2.4, height / 2.1))
     readonly property real ringWidth: rr * 0.17
@@ -31,7 +31,7 @@ GaugeBase {
     function px(deg, radius) { return cx + radius * Math.cos(deg * Math.PI / 180) }
     function py(deg, radius) { return cy + radius * Math.sin(deg * Math.PI / 180) }
 
-    // Zone boundaries, each collapsing to its neighbour when unset
+    // Zone boundaries, each collapsing to its neighbor when unset
     readonly property real coldEnd: isNaN(coldBelow) ? from : coldBelow
     readonly property real dangerStart: isNaN(dangerFrom) ? to : dangerFrom
     readonly property real warnStart: isNaN(warnFrom) ? dangerStart : warnFrom

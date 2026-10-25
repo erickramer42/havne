@@ -21,7 +21,7 @@ order:
 3. Every URI shape a vehicle session uses connects on this build and
    machine, and the evidence pipeline (recording, payload logging,
    kept session logs) runs once
-4. The adapter's behaviour with nothing to acknowledge its frames is
+4. The adapter's behavior with nothing to acknowledge its frames is
    as recorded; a difference is a finding
 
 There's no ECU simulator, so this is all the desk can check before a
@@ -79,7 +79,7 @@ URI. Leave it about two minutes:
 
 | Symptom | Suspect |
 |---|---|
-| "PassThruOpen returned status 34 (vendor-specific)" | The adapter isn't attached (the VX and the VT both answer 34 then) |
+| "PassThruOpen returned status 34 (0x22, vendor-specific)" | The adapter isn't attached (the VX and the VT both answer 34 then) |
 | "built from other shared headers" | A stale `build-win32`: rebuild both trees |
 | "surrogate process failed: no surrogate" | The surrogate missing next to `qttune.exe` |
 | "failed to load transport library", fast | The DLL didn't load in the surrogate, or lacks an export: the exit codes in [j2534.md](../j2534.md#surrogate) |

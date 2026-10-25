@@ -13,7 +13,7 @@
   (ship order) as they are.
 
 **Scope.** This record covers sending requests and classifying their
-replies. Three neighbouring decisions are made elsewhere:
+replies. Three neighboring decisions are made elsewhere:
 
 - **Decoding on the worker thread**, with per-sample timestamps,
   decode-time filtering and computed signals, belongs to a separate
@@ -208,7 +208,7 @@ chosen values go in the dated appendix.
 | Whether the ECUs send "response pending" at all | The session log |
 | A minimum gap between requests on a channel | Needs the engine on a vehicle: the second vehicle session |
 | The refresh policy once the set grows: rate classes (fast signals every cycle, slow ones rarely) or a curated `obd2` beside an `obd2-full` | Measured reply latency × the supported-PID count from the bitmaps |
-| Whether to send several PIDs per Service 01 request | The standard's text and ECU behaviour on a vehicle. Not part of this record; it needs a splitter for the combined reply, and would build on the engine |
+| Whether to send several PIDs per Service 01 request | The standard's text and ECU behavior on a vehicle. Not part of this record; it needs a splitter for the combined reply, and would build on the engine |
 | Whether decoding moves to the worker thread | Frames per second and GUI-thread cost measured with the engine running. It is the path to per-sample timestamps (Known Issue #10) either way |
 
 The performance target the STATUS backlog asks for, sustained frames

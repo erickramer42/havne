@@ -19,7 +19,7 @@
 namespace ecuio_mock {
 
 /* Scripted drive cycle for the mock transport. A vehicle model (gear
- * ratios, an airflow and torque model, tyres with weight transfer,
+ * ratios, an airflow and torque model, tires with weight transfer,
  * drag, and a block, coolant, oil and under-hood heat model) is driven
  * by a phase script. The aim is readings that look like a real ECU's
  * log of what the car is doing, so the signals stay consistent with
@@ -81,10 +81,10 @@ constexpr float kTickS = 0.05f;
 constexpr float kPi = 3.14159265f;
 constexpr float kG = 9.81f;
 
-/* Vehicle: a ~1500 kg, ~330 hp rear-drive coupe, manual gearbox, on
- * street tyres. */
+/* Vehicle: a ~1500 kg, ~330 hp rear-drive coupe, manual transmission, on
+ * street tires. */
 constexpr float kMassKg = 1500.0f;
-constexpr float kTyreRadiusM = 0.33f;
+constexpr float kTireRadiusM = 0.33f;
 constexpr float kFinalDrive = 3.73f;
 constexpr float kDrivelineEff = 0.88f;
 constexpr float kAeroCoeff = 0.42f;          /* 0.5 * rho * Cd * A */
@@ -92,7 +92,7 @@ constexpr float kRollingN = 177.0f;          /* 0.012 * m * g */
 constexpr float kGearRatio[5] = {0.0f, 3.36f, 2.07f, 1.43f, 1.00f};
 constexpr int kTopGear = 4;
 
-/* Tyres and weight transfer: the rear axle's load grows with
+/* Tires and weight transfer: the rear axle's load grows with
  * acceleration (m * a * h / L), and so does what it can put down. */
 constexpr float kRearStaticFrac = 0.52f;
 constexpr float kCgOverWheelbase = 0.185f;   /* 0.50 m CG height, 2.70 m */
@@ -101,7 +101,7 @@ constexpr float kMuSlide = 0.85f;
 constexpr float kPeakSlip = 0.12f;
 /* Rotating inertia, kg*m^2: crank, flywheel and clutch; both rear
  * wheels with the axle. Reflected to the road it adds mass in the low
- * gears and soaks up the torque that would otherwise spin the tyres. */
+ * gears and soaks up the torque that would otherwise spin the tires. */
 constexpr float kEngineInertia = 0.20f;
 constexpr float kWheelInertia = 3.0f;
 
@@ -271,13 +271,13 @@ inline float fuel_cut_drag_nm(float rpm)
 /* Engine rpm per m/s of driven-wheel speed in a gear (clutch locked). */
 inline float rpm_per_mps(int gear)
 {
-    return kGearRatio[gear] * kFinalDrive * 60.0f / (2.0f * kPi * kTyreRadiusM);
+    return kGearRatio[gear] * kFinalDrive * 60.0f / (2.0f * kPi * kTireRadiusM);
 }
 
 /* Wheel force per N*m at the crank in a gear. */
 inline float wheel_n_per_nm(int gear)
 {
-    return kGearRatio[gear] * kFinalDrive * kDrivelineEff / kTyreRadiusM;
+    return kGearRatio[gear] * kFinalDrive * kDrivelineEff / kTireRadiusM;
 }
 
 /* The engine and wheels' inertia as mass at the road, kg. */
@@ -285,12 +285,12 @@ inline float rotating_mass_kg(int gear)
 {
     const float g = kGearRatio[gear] * kFinalDrive;
     return (kEngineInertia * g * g + kWheelInertia) /
-           (kTyreRadiusM * kTyreRadiusM);
+           (kTireRadiusM * kTireRadiusM);
 }
 
-/* Tyre friction past the traction limit: peak at kPeakSlip, falling to
- * sliding friction as the tyre spins up. */
-inline float tyre_mu(float slip)
+/* Tire friction past the traction limit: peak at kPeakSlip, falling to
+ * sliding friction as the tire spins up. */
+inline float tire_mu(float slip)
 {
     return kMuPeak -
            (kMuPeak - kMuSlide) * clampf((slip - kPeakSlip) / 0.3f, 0.0f, 1.0f);
@@ -308,7 +308,7 @@ inline float tick_noise(uint64_t tick, uint32_t salt)
 }
 
 /* Smooth deterministic wander in [-1, 1]: tick_noise at knots `period`
- * apart (seconds, or metres for the road), eased between them. */
+ * apart (seconds, or meters for the road), eased between them. */
 inline float drift(float t, float period, uint32_t salt)
 {
     const float x = t / period;
@@ -357,7 +357,7 @@ struct DriveCycle {
     bool clutch_slip = false;  /* pulling away: clutch slipping at slip_rpm */
     float slip_rpm = 0.0f;
     uint32_t shift_ticks = 0;  /* > 0 while an upshift is in progress */
-    bool spinning = false;     /* driven tyres past their traction limit */
+    bool spinning = false;     /* driven tires past their traction limit */
     bool fuel_cut = false;     /* no fuel this tick: limiter, two-step, DFCO */
     float v_mps = 0.0f;        /* ground speed */
     float wheel_mps = 0.0f;    /* driven-wheel surface speed */
@@ -589,8 +589,8 @@ private:
             }
             break;
         case Phase::DragRun:
-            /* Full throttle, feathered while the tyres spin: the driver
-             * holds the slip near the tyre's peak. */
+            /* Full throttle, feathered while the tires spin: the driver
+             * holds the slip near the tire's peak. */
             thr = spinning
                 ? clampf(100.0f - 800.0f * (slip() - 0.08f), 25.0f, 100.0f)
                 : 100.0f;
@@ -743,7 +743,7 @@ private:
                        : (airflow > 0.85f ? kLambdaWot : 1.0f);
             /* Rolling with no drive: road load and brakes only, the
              * wheels' inertia but not the engine's */
-            const float m = kMassKg + kWheelInertia / (kTyreRadiusM * kTyreRadiusM);
+            const float m = kMassKg + kWheelInertia / (kTireRadiusM * kTireRadiusM);
             accel_mps2 = -resist / m - brake_mps2_;
             v_mps = std::fmax(v_mps + accel_mps2 * kTickS, 0.0f);
             wheel_mps = v_mps;
@@ -788,7 +788,7 @@ private:
     }
 
     /* Clutch engaged (or slipping), in gear: engine torque through the
-     * driveline to the tyres, wheelspin past the traction limit. */
+     * driveline to the tires, wheelspin past the traction limit. */
     void drive_in_gear()
     {
         const float k = rpm_per_mps(gear);
@@ -825,11 +825,11 @@ private:
         const float grip_n = kMuPeak * rear_n;
         /* A slipping clutch leaves the engine's inertia out of it */
         const float m_rot = clutch_slip
-            ? kWheelInertia / (kTyreRadiusM * kTyreRadiusM)
+            ? kWheelInertia / (kTireRadiusM * kTireRadiusM)
             : rotating_mass_kg(gear);
 
         if (clutch_slip && drive_n >= grip_n) {
-            /* The driver feeds the clutch in, holding the tyres at about
+            /* The driver feeds the clutch in, holding the tires at about
              * their peak slip: the car takes all the grip there is */
             spinning = true;
             accel_mps2 = (grip_n - resist) / kMassKg - brake_mps2_;
@@ -837,9 +837,9 @@ private:
             wheel_mps = v_mps + std::fmax(v_mps, 2.0f) * 0.8f * kPeakSlip;
         } else if (spinning || drive_n > grip_n) {
             spinning = true;
-            const float tyre_n = tyre_mu(slip()) * rear_n;
-            wheel_mps += (drive_n - tyre_n) / m_rot * kTickS;
-            accel_mps2 = (tyre_n - resist) / kMassKg - brake_mps2_;
+            const float tire_n = tire_mu(slip()) * rear_n;
+            wheel_mps += (drive_n - tire_n) / m_rot * kTickS;
+            accel_mps2 = (tire_n - resist) / kMassKg - brake_mps2_;
             v_mps = std::fmax(v_mps + accel_mps2 * kTickS, 0.0f);
             /* Hooked up again once the wheels are back at road speed and
              * the drive no longer exceeds the grip */

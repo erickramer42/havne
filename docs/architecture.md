@@ -226,17 +226,20 @@ The bridge polls it on its 100 ms tick and maps it for the UI
 - **Bridge outputs:** it exposes a frame model (a ring of the newest
   10k frames, newest or oldest first, with a pause for the Log page), a
   signal model (value, `hasValue`,
-  `ageMs`, `decimals`, a 120-sample history per signal), device
-  discovery, and the link state.
+  `ageMs`, `decimals`, a 120-sample history per signal), the unit
+  system, device discovery, and the link state.
 - **Recording is the bridge's too**
   ([ADR-0017](adr/0017-session-recording.md)): with it on, the
   bridge writes every frame it accepts, each decoded value and the
   activity lines to one folder per connect. It sits where those three
   already meet, on the GUI thread, so core is unchanged.
-- **Display strings come from core:** each def's name, unit and
-  `decimal_places` reach the screen as they are, on Live and the
-  Dashboard alike, so neither page formats a unit or picks a precision
-  of its own.
+- **Display strings come from core:** each def's name, and the unit
+  and decimal places `ecuio_display_convert` gives for the chosen unit
+  system, metric or imperial
+  ([ADR-0022](adr/0022-display-units.md)), on Live and the Dashboard
+  alike, so neither page formats a unit, converts a value or picks a
+  precision of its own. The bridge converts on the way out; its
+  history and recordings keep the decoded values.
 - **Pages:** **Home** (status), **Dashboard** (gauges and shift
   lights), **Live** (value table and strip chart), **Log** (raw
   frames), **Settings** (device picker, URI, activity log). Settings is
@@ -248,12 +251,12 @@ The bridge polls it on its 100 ms tick and maps it for the UI
   other key kept. Core judges the result at connect and Settings shows
   its words.
   Navigation is a sidebar at 720 px and wider, a tab bar below that.
-- **`Theme`** holds the palette, the chart's series colours, the
+- **`Theme`** holds the palette, the chart's series colors, the
   monospace family and page margin, and the link-state color and
   label functions, so every page shows a state the same way.
   `PageHeader` gives every page but Home the same title row.
-- **Live** keys each chart trace's colour to its list row, so the
-  row's swatch is the legend and a trace keeps its colour when
+- **Live** keys each chart trace's color to its list row, so the
+  row's swatch is the legend and a trace keeps its color when
   another signal is unsubscribed. The ticks choose what's plotted and
   nothing else. Each trace scales on its own, so its value is printed
   at its right-hand end; its range is at least a few displayed digits,

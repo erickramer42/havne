@@ -152,3 +152,13 @@ past the frame's `data` with `ECUIO_ERR_INVALID_ARGUMENT` in place of
 `ECUIO_ERR_NULL_ARGUMENT`; any frame that fits still gets
 `ECUIO_ERR_NOT_IMPLEMENTED`, since send isn't built. The bridge
 reaches neither.
+
+## Appendix — the status in hex (2026-10-25)
+
+A vendor status is printed in hex as well as decimal, before its name:
+`PassThruOpen returned status 34 (0x22, vendor-specific): <vendor text>`.
+Vendors document their own codes in hex, and the J2534 headers define
+the standard ones that way, so the decimal alone sent a reader to a
+converter (the VX answers 34, 0x22, when no adapter is attached). The
+example in section 2 shows the earlier form. Pinned by
+`CoreTest.VendorDetailIsOneLine` and `J2534ConnectTest`.

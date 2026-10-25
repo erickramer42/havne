@@ -149,7 +149,7 @@ public:
     // Strip-chart pull API: one map per SUBSCRIBED signal with non-empty
     // history: { id, row, name, unit, decimals, value,
     // samples: [ts, val, ts, val, ...] }
-    // `row` is the signal's model row, so the trace colour can match the
+    // `row` is the signal's model row, so the trace color can match the
     // list row's swatch and stays put when other signals are unsubscribed.
     // Samples are flattened doubles, oldest-first. Called by the QML
     // Canvas once per valuesUpdated batch (~10 Hz). One call per repaint

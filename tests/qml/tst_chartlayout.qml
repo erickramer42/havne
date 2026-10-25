@@ -161,7 +161,7 @@ TestCase {
         compare(l.ticks[0].x, l.plotW - 1, "now is at the right edge")
         compare(l.ticks[5].x, 0, "the oldest sample is at the left edge")
         verify(l.ticks[0].captioned)
-        verify(!l.ticks[5].captioned, "no room left of x = 0 for a centred caption")
+        verify(!l.ticks[5].captioned, "no room left of x = 0 for a centered caption")
         verify(l.ticks[4].captioned, "the second tick's x is " + l.ticks[4].x)
         compare(l.hGrid.length, 3)
         near(l.hGrid[1], l.top + l.plotH / 2, 0.01, "quarter lines")

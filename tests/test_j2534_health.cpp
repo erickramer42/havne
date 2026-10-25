@@ -511,7 +511,7 @@ TEST_P(J2534HealthTest, UnmatchedFrameCountsAsAQuietRead)
  * the recovery probe, but the doubling backoff spaces them: about 5
  * probes in 1.5 s (100 + 200 + 400 + 800 ms), against about 15 if it
  * reset to its base on every failure. Wide margins on purpose: the two
- * behaviours differ by 3x, so CI timing noise can't confuse them. */
+ * behaviors differ by 3x, so CI timing noise can't confuse them. */
 TEST_P(J2534HealthTest, BackoffGrowsUnderSustainedHardFailure)
 {
     ASSERT_NO_FATAL_FAILURE(start_session(""));

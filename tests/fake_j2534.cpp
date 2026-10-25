@@ -910,7 +910,7 @@ long __stdcall PassThruReadMsgs(unsigned long ChannelID,
      * Timeout is nonzero, and answers an empty timeout-0 read with
      * ERR_BUFFER_EMPTY. The VX returns a short batch with
      * STATUS_NOERROR and any empty read with ERR_BUFFER_EMPTY. Filter
-     * gating isn't modelled here. Off by default: the exact-count
+     * gating isn't modeled here. Off by default: the exact-count
      * stream tests pin the single-message delivery below. */
     const bool vx = fake_j2534::knob_on("ECUIO_FAKE_VX");
     if (vx || fake_j2534::knob_on("ECUIO_FAKE_SPEC_READ_SEMANTICS")) {

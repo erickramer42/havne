@@ -295,7 +295,7 @@ table catches that.
   without another break.
 - Each def grows from 88 to 120 bytes, and each staged value from 4
   to 8.
-- The `obd2` set moves to named-member initialisation, like the mock
+- The `obd2` set moves to named-member initialization, like the mock
   set, so a new field can't shift its values.
 - The mock encoder and the fake DLL's canned replies don't change,
   because the wire bytes are the same. The existing round-trip tests

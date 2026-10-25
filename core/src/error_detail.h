@@ -20,9 +20,10 @@ void ecuio_detail_set(const char* fmt, ...)
 #endif
     ;
 
-/* A refused vendor call: "<call> returned status 8
- * (ERR_DEVICE_NOT_CONNECTED): <vendor text>". The status is named when
- * J2534-1 v04.04 defines it and called vendor-specific otherwise; the
+/* A refused vendor call: "<call> returned status 8 (0x8,
+ * ERR_DEVICE_NOT_CONNECTED): <vendor text>". The status in decimal and
+ * in hex, as vendors list their own codes, then named when J2534-1
+ * v04.04 defines it and called vendor-specific otherwise; the
  * vendor's own description (PassThruGetLastError) follows when it gave
  * one. */
 void ecuio_detail_set_vendor(const char* call, long status,

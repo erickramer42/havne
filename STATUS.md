@@ -21,7 +21,7 @@ first read-only vehicle session
 (2026-10-22, [session sheet](docs/bench-sessions/2026-10-22-vehicle.md))
 the engine ECU answered the Mode-01 requests with replies that decode
 to plausible values. Since the tag: the link-health tests run on both
-backends against a fake modelled on the VX, a failed connect says why
+backends against a fake modeled on the VX, a failed connect says why
 ([ADR-0018](docs/adr/0018-connect-failure-reporting.md)), a session
 says what it runs on ([ADR-0019](docs/adr/0019-session-info.md)),
 J2534 frames carry session time, the QML pages and the signal decoder
@@ -556,7 +556,7 @@ in the backlog.
 - **Low-glare and night themes (M).** Amber and red-on-black schemes
   for driving at night.
   - `Theme` already centralizes the palette, but the analog gauge
-    hard-codes its face, bezel and needle colours, and Home its logo
+    hard-codes its face, bezel and needle colors, and Home its logo
     gradient; they need Theme roles first.
   - A near-monochrome scheme must keep warning and danger
     distinguishable by more than hue, for example with a label or

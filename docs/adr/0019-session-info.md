@@ -73,7 +73,7 @@ request engine ([ADR-0015](0015-request-engine.md)).
 `OP_READ_VERSION` (12) relays `PassThruReadVersion`. The reply's
 `text` grows from one 80-byte field to three
 (`ECUIO_SUR_TEXT_FIELDS`); `OP_GET_LAST_ERROR` uses the first.
-`READ_VBATT` already travelled as `OP_IOCTL`. Both backends cut each
+`READ_VBATT` already traveled as `OP_IOCTL`. Both backends cut each
 version string at 79 characters and put it on one line, control
 characters becoming spaces, so they report the same words.
 

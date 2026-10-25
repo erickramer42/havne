@@ -26,7 +26,7 @@ ApplicationWindow {
     color: Theme.bg
 
     // Every role the Basic style reads, so stock controls (CheckBox,
-    // TextField, ScrollBar) draw from Theme whatever the OS colour
+    // TextField, ScrollBar) draw from Theme whatever the OS color
     // scheme is
     palette.window: Theme.bg
     palette.windowText: Theme.text
@@ -279,7 +279,7 @@ ApplicationWindow {
                         verticalAlignment: Text.AlignVCenter
                     }
                     // The selected tab is underlined, so selection doesn't rest
-                    // on colour alone
+                    // on color alone
                     background: Rectangle {
                         color: Theme.surface
                         border.width: btn.visualFocus ? 2 : 0

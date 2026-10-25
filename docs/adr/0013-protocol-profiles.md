@@ -39,7 +39,7 @@ Additionally, the request loop's placement is wrong: it lives in the J2534 trans
    } ecuio_channel_decl;
    ```
 
-   `?filter=`/`?txid=` remain the user-facing shorthand for the common single-channel case (ADR-0012 unchanged); internally the session registers one filter per declared channel. `obd2` v1 declares exactly one channel (7E0/7E8); UDS profiles will declare more, because enhanced data lives on multiple ECUs (a Mazda oil-temp DID may answer from a gearbox or body module, not 7E8).
+   `?filter=`/`?txid=` remain the user-facing shorthand for the common single-channel case (ADR-0012 unchanged); internally the session registers one filter per declared channel. `obd2` v1 declares exactly one channel (7E0/7E8); UDS profiles will declare more, because enhanced data lives on multiple ECUs (a Mazda oil-temp DID may answer from a transmission or body module, not 7E8).
 
 5. **Core drives the loop; plugins never see threads, transport, or filters.** The profile is a POD table of callbacks with an opaque context, called only from the session worker:
 

@@ -30,7 +30,7 @@ struct ecuio_j2534_sur_handle {
     /* The manual-reset event every overlapped operation on the pipe
      * waits on. One per handle is enough: a handle is used by one
      * thread at a time (the connect thread, then the worker, then the
-     * teardown thread), and each operation completes, or is cancelled
+     * teardown thread), and each operation completes, or is canceled
      * and drained, before the next begins. */
     HANDLE io_event = nullptr;
     HANDLE job = nullptr;
@@ -364,7 +364,7 @@ bool ov_write(HANDLE pipe, HANDLE event, const void* buf, DWORD len,
 enum read_result { RD_OK, RD_SHORT_READ, RD_TIMEOUT, RD_OS_ERROR };
 
 /* One overlapped ReadFile of up to len bytes. *out_got is what it
- * read, a cancelled read's included. */
+ * read, a canceled read's included. */
 read_result ov_read(HANDLE pipe, HANDLE event, void* buf, DWORD len,
                     DWORD timeout_ms, DWORD* out_got, DWORD* out_err)
 {

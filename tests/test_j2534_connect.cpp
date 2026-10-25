@@ -77,9 +77,10 @@ TEST_P(J2534ConnectTest, RefusedOpenNamesTheCallStatusAndVendorText)
               ECUIO_ERR_VENDOR_REFUSED);
     EXPECT_EQ(session, nullptr);
     ASSERT_NO_FATAL_FAILURE(expect_opened_on_backend());
-    EXPECT_STREQ(ecuio_last_error_detail(),
-                 "PassThruOpen returned status 8 (ERR_DEVICE_NOT_CONNECTED): "
-                 "fake_j2534: PassThruOpen refused (ECUIO_FAKE_OPEN_STATUS)");
+    EXPECT_STREQ(
+        ecuio_last_error_detail(),
+        "PassThruOpen returned status 8 (0x8, ERR_DEVICE_NOT_CONNECTED): "
+        "fake_j2534: PassThruOpen refused (ECUIO_FAKE_OPEN_STATUS)");
 }
 
 /* The OBDX Pro VT and VX refuse to open with 34 when no adapter is
@@ -90,7 +91,7 @@ TEST_P(J2534ConnectTest, AVendorsOwnStatusIsCalledVendorSpecific)
     EXPECT_EQ(ecuio_session_create(uri("").c_str(), &session),
               ECUIO_ERR_VENDOR_REFUSED);
     EXPECT_STREQ(ecuio_last_error_detail(),
-                 "PassThruOpen returned status 34 (vendor-specific): "
+                 "PassThruOpen returned status 34 (0x22, vendor-specific): "
                  "fake_j2534: PassThruOpen refused (ECUIO_FAKE_OPEN_STATUS)");
 }
 
@@ -102,7 +103,7 @@ TEST_P(J2534ConnectTest, RefusedConnectNamesTheBaud)
     EXPECT_EQ(session, nullptr);
     EXPECT_STREQ(ecuio_last_error_detail(),
                  "PassThruConnect (ISO 15765 at 250000 baud) returned status "
-                 "25 (ERR_INVALID_BAUDRATE): fake_j2534: PassThruConnect "
+                 "25 (0x19, ERR_INVALID_BAUDRATE): fake_j2534: PassThruConnect "
                  "refused (ECUIO_FAKE_CONNECT_STATUS)");
 }
 
@@ -113,7 +114,7 @@ TEST_P(J2534ConnectTest, RefusedFilterFailsTheStartWithTheVendorText)
     ASSERT_EQ(ecuio_session_create(uri("").c_str(), &session), ECUIO_OK);
     EXPECT_EQ(ecuio_session_start(session), ECUIO_ERR_VENDOR_REFUSED);
     EXPECT_STREQ(ecuio_last_error_detail(),
-                 "PassThruStartMsgFilter returned status 7 (ERR_FAILED): "
+                 "PassThruStartMsgFilter returned status 7 (0x7, ERR_FAILED): "
                  "fake_j2534: PassThruStartMsgFilter refused "
                  "(ECUIO_FAKE_FILTER_STATUS)");
 }

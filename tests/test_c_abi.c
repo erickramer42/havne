@@ -9,9 +9,14 @@
  * symbols resolve unmangled. Every public header is included, the ones
  * that include others first, so a header missing an include of its own
  * can't hide behind an earlier one. internal.h, j2534_ptypes.h and
- * surrogate_protocol.h aren't public.
+ * surrogate_protocol.h aren't public, but they declare C (core's
+ * transport seam, the vendor types, the surrogate's wire), so they're
+ * compiled here too and can't take a C++-only construct unnoticed;
+ * j2534_ptypes.h comes in through j2534_surrogate.h.
  */
 
+#include "ecuio/internal.h"
+#include "ecuio/surrogate_protocol.h"
 #include "ecuio/j2534_surrogate.h"
 #include "ecuio/j2534.h"
 #include "ecuio/profile.h"
@@ -69,6 +74,8 @@ int main(void)
     ecuio_channel_support_t support;
     ecuio_channel_identity_t identity;
     ecuio_display_value_t shown;
+    ecuio_sur_request_t sur_request;
+    ecuio_transport_ops_t ops;
     const uint8_t vin_request[2] = {0x09, 0x02};
     frame.arbitration_id = 0x7FF;
     frame.channel_id = 0;
@@ -112,6 +119,11 @@ int main(void)
         ECUIO_ERR_NULL_ARGUMENT ||
         strcmp(ecuio_identity_request_name(vin_request, 2), "VIN") != 0 ||
         ecuio_identity_request_name(vin_request, 1)[0] != '\0') {
+        return 1;
+    }
+    memset(&sur_request, 0, sizeof sur_request);
+    memset(&ops, 0, sizeof ops);
+    if (sur_request.opcode != 0 || ops.start != NULL) {
         return 1;
     }
     ecuio_j2534_free_devices(NULL);

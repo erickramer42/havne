@@ -50,7 +50,7 @@ Dates are commit dates.
 | 2026-10-20 | Dashboard: analog, ring, digital and bar gauges with shift lights and peak hold, fed by name through `SignalHub`; merged via PR #12 | `40e51ce` |
 | 2026-10-21 | Present-tense comment sweep; docs/architecture.md | `4fd6633` |
 | 2026-10-21 | `obd2` gains MAF (PID 0x10) and a fourth temperature, first as PID 0x5F, then corrected to engine oil temperature (0x5C); the mock set gains MAF and oil, and its frames become 12-byte CAN FD | `bc1ee8c`, `9b71174` |
-| 2026-10-21 | Live: the list scrolls, trace colours key to model rows, and each row's swatch is the legend; LogPage role names pinned | `e119656`, `10bfea6` |
+| 2026-10-21 | Live: the list scrolls, trace colors key to model rows, and each row's swatch is the legend; LogPage role names pinned | `e119656`, `10bfea6` |
 | 2026-10-21 | Windows Qt install: aqtinstall pinned to a master commit, 7-Zip extraction, install root created first (#1 closed) | `51f1b0d`, `94e16a1` |
 | 2026-10-21 | Oldest-first log follows the tail; drop reports move to the coalesce tick (#5 and #7 closed) | `523cf28` |
 | 2026-10-21 | Dashboard header shows link state through `Theme`; tach red zone from 6800 rpm; chart series palette in `Theme` | `6807e93` |
@@ -499,7 +499,7 @@ was made on-request only rather than left as a green that claims
 more than it proves. The next run carried a home-screen control shot,
 two timed shots and `QSG_INFO`. It drew on Metal by 15 s, so the
 runner's GPU was cleared. Two layout bugs showed up that no desktop
-smoke had caught: the off-centre Home status card, and the compact
+smoke had caught: the off-center Home status card, and the compact
 tab bar's "Setup" for Settings. The blank first frame is put down,
 by inference rather than proof, to launching the app on a simulator
 still settling after a cold boot. The boot now overlaps the build.
@@ -589,7 +589,7 @@ in the commit message couldn't have come from the committed tree. Run
 `git diff --cached --check` before committing after a merge or stash
 pop, and smoke what is being committed. The conflict's two sides were
 two answers to the same Live problem; the resolution keeps the
-row-keyed colours with `Theme`'s palette and dashes rows past it.
+row-keyed colors with `Theme`'s palette and dashes rows past it.
 
 **2026-10-21 — hygiene pass (review items H1–H8):** four lessons.
 (1) **An ASCII path can't catch an ANSI bug.** Every `*A` call works
@@ -677,14 +677,14 @@ failure or a pass.
 what the device sends can't test the code that handles it.** Known
 Issue #28, an in-proc TX indication ending the drain, was found by
 reading the loader and stayed open with no test: the fake queued no
-indications, so nothing could fail. Once the fake was modelled on the
+indications, so nothing could fail. Once the fake was modeled on the
 VX's logged output, with an indication after every write, a test
 written against the old loader failed at once: in-proc, all ten
 replies landed after the next request. A second test showed what the
 unhandled `START_OF_MESSAGE` indication, listed in the same issue,
 actually did: it reached the session as an empty frame on both
 backends. A fake earns its place
-by reproducing a device's recorded behaviour; one written from the
+by reproducing a device's recorded behavior; one written from the
 spec alone tests the code against the author's assumptions.
 
 **2026-10-22 — QML tests:** **a Qt Quick test passes through

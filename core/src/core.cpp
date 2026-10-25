@@ -122,10 +122,11 @@ void ecuio_detail_set_vendor(const char* call, long status,
         name = "vendor-specific";
     }
     if (text[0] != '\0') {
-        ecuio_detail_set("%s returned status %ld (%s): %s", call, status,
-                         name, text);
+        ecuio_detail_set("%s returned status %ld (0x%lX, %s): %s", call, status,
+                         static_cast<unsigned long>(status), name, text);
     } else {
-        ecuio_detail_set("%s returned status %ld (%s)", call, status, name);
+        ecuio_detail_set("%s returned status %ld (0x%lX, %s)", call, status,
+                         static_cast<unsigned long>(status), name);
     }
 }
 

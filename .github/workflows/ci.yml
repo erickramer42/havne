@@ -175,7 +175,7 @@ jobs:
   # Line coverage for the README badge: the whole suite under
   # OpenCppCoverage (scripts/coverage.sh), uploaded to Codecov. Windows,
   # because only here do the J2534 stack and the surrogate run. On pushes
-  # and manual runs, not pull requests: it is a second, unoptimised build.
+  # and manual runs, not pull requests: it is a second, unoptimized build.
   # Pass/fail stays with win-build; a timing case that misses its bounds
   # under the tool lowers the number, it doesn't fail this job.
   win-coverage:

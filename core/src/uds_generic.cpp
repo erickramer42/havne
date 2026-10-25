@@ -160,7 +160,7 @@ bool parse_entry(view v, entry* out, refusal* why)
         }
     } else if (n == 2) {
         /* DID:type, or ECU:DID when the last token reads as a DID or holds
-         * a range's '-'; a last token that is neither is a misspelt type. */
+         * a range's '-'; a last token that is neither is a misspelled type. */
         const type_spec* t = type_named(tok[1]);
         uint32_t as_did = 0;
         if (t != nullptr) {

@@ -45,7 +45,7 @@ Pane {
     // or starts a session is enabled by this one value, so none can be
     // used during a multi-second vendor block: the bridge refuses a
     // connect then anyway, but a device row or a preset would otherwise
-    // rewrite the greyed field under the connect in flight.
+    // rewrite the grayed field under the connect in flight.
     readonly property bool idle: !Bridge.connected && !Bridge.connecting && !Bridge.disconnecting
 
     component Heading: Label {
@@ -378,7 +378,7 @@ Pane {
             }
 
             // ---- Profile: the URI's query (ADR-0013, ADR-0020) ----
-            // The chosen button is drawn as the primary colour
+            // The chosen button is drawn as the primary color
             RowLayout {
                 spacing: Theme.spacing
                 Label { text: qsTr("Profile:"); color: Theme.textDim }

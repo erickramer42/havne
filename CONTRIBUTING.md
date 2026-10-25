@@ -121,7 +121,7 @@ with the guide for the language they touch.
 - **C ABI headers** (`core/include/ecuio/`): the [SEI CERT C Coding
   Standard](https://wiki.sei.cmu.edu/confluence/display/c/) as the reference
   for the strict-C headers — fixed-width types, no dynamic allocation, no
-  undefined behaviour.
+  undefined behavior.
 - **QML and JavaScript** (`app/qml/`): [Qt's QML Coding
   Conventions](https://doc.qt.io/qt-6/qml-codingconventions.html).
 - **CMake**: the conventions already in the tree — lower-case commands,

@@ -167,7 +167,7 @@ GaugeBase {
         }
     }
 
-    // ---- Ticks: full-size items rotated about the dial centre
+    // ---- Ticks: full-size items rotated about the dial center
     Repeater {
         model: gauge.minorCount
         delegate: Item {

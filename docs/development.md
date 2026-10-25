@@ -563,7 +563,7 @@ runtime.
   files, adds the x64 CRT from Visual Studio's redistributable folder
   (found with `vswhere`; windeployqt runs with `--no-compiler-runtime`),
   `LICENSE`, `DISCLAIMER.md` and `packaging/windows/`'s README,
-  third-party notices and licence texts. It then fails the release if
+  third-party notices and license texts. It then fails the release if
   the surrogate imports a CRT DLL (it links the CRT statically, `/MT`,
   because an x86 `vcruntime140.dll` can't sit beside the app's x64
   one), if `qttune.exe` imports a DLL that is neither in the folder nor

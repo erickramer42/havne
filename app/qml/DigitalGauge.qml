@@ -88,7 +88,7 @@ GaugeBase {
         }
     }
 
-    // Live dot: zone colour while fresh, hollow without data
+    // Live dot: zone color while fresh, hollow without data
     Rectangle {
         id: status
         anchors { right: parent.right; top: parent.top; topMargin: 3 }
@@ -120,7 +120,7 @@ GaugeBase {
             color: Theme.textDim
         }
     }
-    // Vertical slot the readout centres in
+    // Vertical slot the readout centers in
     Item {
         id: valueBand
         anchors { left: parent.left; right: parent.right; top: heading.bottom; bottom: trace.top }

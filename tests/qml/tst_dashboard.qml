@@ -61,7 +61,7 @@ TestCase {
         }
         walk(page)
         for (const label in gaugeSignals)
-            verify(found[label], "the Dashboard has a gauge labelled " + label)
+            verify(found[label], "the Dashboard has a gauge labeled " + label)
         return found
     }
 

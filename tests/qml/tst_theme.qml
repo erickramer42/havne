@@ -1,5 +1,5 @@
 // File/layer: tests/qml/tst_theme.qml | Qt Quick Test, QML tier
-// Testing: Theme's link-state colour and label for every state the
+// Testing: Theme's link-state color and label for every state the
 //          bridge publishes and an unknown one, and the chart trace
 //          palette. No session.
 
@@ -50,20 +50,20 @@ TestCase {
         for (let i = 0; i < colors.length; ++i) {
             for (let j = i + 1; j < colors.length; ++j)
                 verify(!Qt.colorEqual(colors[i], colors[j]),
-                       "series colours " + i + " and " + j + " are both " + colors[i])
+                       "series colors " + i + " and " + j + " are both " + colors[i])
         }
     }
 
-    // A trace in the danger colour would read as an alarm, so no series
-    // colour is a saturated hue within 20° of it
+    // A trace in the danger color would read as an alarm, so no series
+    // color is a saturated hue within 20° of it
     function test_seriesColorsLeaveOutTheDangerHue() {
         const danger = Qt.color(Theme.danger).hsvHue
         for (const c of Theme.seriesColors) {
             const color = Qt.color(c)
-            if (color.hsvSaturation < 0.2) continue   // greys and near-white
+            if (color.hsvSaturation < 0.2) continue   // grays and near-white
             const d = Math.abs(color.hsvHue - danger)
             const degrees = Math.min(d, 1 - d) * 360
-            verify(degrees > 20, c + " is " + degrees.toFixed(0) + "° from the danger colour")
+            verify(degrees > 20, c + " is " + degrees.toFixed(0) + "° from the danger color")
         }
     }
 }

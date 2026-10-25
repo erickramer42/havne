@@ -71,7 +71,7 @@ GaugeBase {
             delegate: Rectangle {
                 id: seg
                 required property int index
-                // Zone colour at the segment's midpoint; fill fraction
+                // Zone color at the segment's midpoint; fill fraction
                 // 0..1 so the leading segment fades rather than snaps
                 readonly property color lit: gauge.zoneColor(
                     gauge.from + (index + 0.5) / gauge.segments * (gauge.to - gauge.from),
@@ -105,7 +105,7 @@ GaugeBase {
             delegate: Text {
                 required property real modelData
                 readonly property real f: gauge.fractionOf(modelData)
-                // End labels align to the bar's edges, the rest centre
+                // End labels align to the bar's edges, the rest center
                 x: f <= 0 ? 0 : f >= 1 ? parent.width - width : f * parent.width - width / 2
                 text: gauge.formatScale(modelData)
                 font.pixelSize: 10

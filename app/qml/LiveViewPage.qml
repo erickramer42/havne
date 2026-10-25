@@ -1,5 +1,5 @@
 // File/layer: app/qml/LiveViewPage.qml | Qt6 Quick, UI layer
-// Testing: model contract covered by test_bridge; swatch colours, dashes
+// Testing: model contract covered by test_bridge; swatch colors, dashes
 //          and banner text by test_qml (tests/qml/tst_liveview.qml, and
 //          tst_linkhealth.qml for the banner in each link state), which
 //          finds items by objectName; the strip chart's layout (ranges,
@@ -35,9 +35,9 @@ Page {
 
     // Trace styles, keyed by model row (chartData's `row`), so a row's
     // swatch matches its trace and styles hold when another signal is
-    // unsubscribed. Colours come from Theme.seriesColors; rows past the
-    // palette reuse its colours with a dashed trace, so the chart still
-    // tells them apart (the row swatch shows the colour only).
+    // unsubscribed. Colors come from Theme.seriesColors; rows past the
+    // palette reuse its colors with a dashed trace, so the chart still
+    // tells them apart (the row swatch shows the color only).
     readonly property var traceDashes: [[], [8, 4], [2, 3]]
     function seriesColor(row) { return Theme.seriesColors[row % Theme.seriesColors.length] }
     function seriesDash(row) {
@@ -193,7 +193,7 @@ Page {
                         onToggled: Bridge.signalModel.toggleSubscribed(signalDelegate.index)
                         Accessible.name: qsTr("Plot %1").arg(signalDelegate.name)
                     }
-                    // The chart's legend: this row's trace colour, hollow
+                    // The chart's legend: this row's trace color, hollow
                     // while the signal isn't plotted
                     Rectangle {
                         id: swatch
@@ -240,7 +240,7 @@ Page {
         }
 
         // ---- Strip chart: per-signal rolling history, one repaint per
-        // coalesced batch. Each trace takes its list row's colour
+        // coalesced batch. Each trace takes its list row's color
         // (root.seriesColor), so the list is the legend. ChartLayout
         // works out where everything goes; the Canvas strokes it.
         Rectangle {

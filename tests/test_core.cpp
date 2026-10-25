@@ -117,15 +117,17 @@ TEST(CoreTest, CreateFailuresNameTheirCause) {
 TEST(CoreTest, VendorDetailIsOneLine)
 {
     ecuio_detail_set_vendor("PassThruOpen", 8, "no adapter\r\nattached  \n");
-    EXPECT_STREQ(ecuio_last_error_detail(),
-                 "PassThruOpen returned status 8 (ERR_DEVICE_NOT_CONNECTED): "
-                 "no adapter  attached");
+    EXPECT_STREQ(
+        ecuio_last_error_detail(),
+        "PassThruOpen returned status 8 (0x8, ERR_DEVICE_NOT_CONNECTED): "
+        "no adapter  attached");
     ecuio_detail_set_vendor("PassThruOpen", 8, " \r\n");
-    EXPECT_STREQ(ecuio_last_error_detail(),
-                 "PassThruOpen returned status 8 (ERR_DEVICE_NOT_CONNECTED)");
+    EXPECT_STREQ(
+        ecuio_last_error_detail(),
+        "PassThruOpen returned status 8 (0x8, ERR_DEVICE_NOT_CONNECTED)");
     ecuio_detail_set_vendor("PassThruConnect", 34, nullptr);
     EXPECT_STREQ(ecuio_last_error_detail(),
-                 "PassThruConnect returned status 34 (vendor-specific)");
+                 "PassThruConnect returned status 34 (0x22, vendor-specific)");
     ecuio_detail_clear();
 }
 
@@ -1231,12 +1233,12 @@ TEST(CoreTest, MockDriveCycleColdStartIdlesFastThenSettles)
     EXPECT_NEAR(lambda_hi, ecuio_mock::kLambdaColdOpenLoop, 0.01f);
 }
 
-TEST(CoreTest, MockDriveCycleLaunchSpinsTheTyresAndHooksUp)
+TEST(CoreTest, MockDriveCycleLaunchSpinsTheTiresAndHooksUp)
 {
-    /* Off the line the clutch slips while the tyres sit near peak slip;
+    /* Off the line the clutch slips while the tires sit near peak slip;
      * once it locks in 1st the driver feathers the throttle with the
-     * tyres spinning a few hundred rpm above road speed. From 2nd the
-     * drive is below the grip and the tyres hook up. */
+     * tires spinning a few hundred rpm above road speed. From 2nd the
+     * drive is below the grip and the tires hook up. */
     float flare_hi = 0.0f;
     float slip_hi = 0.0f;
     float clutch_rpm_lo = 1e9f;

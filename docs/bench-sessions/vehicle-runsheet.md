@@ -316,7 +316,7 @@ frame either way.
 - [ ] Values stay bright while they keep arriving; nothing dims
 - [ ] Every row is reachable on Live (the list scrolls once it fills
       its share of the page); rows past `Theme.seriesColors` reuse
-      its colours, with dashed chart traces
+      its colors, with dashed chart traces
 
 **Evidence:** a screenshot of LiveView, and a minute or more of
 recording with `ECUIO_SUR_LOG_FRAMES=1`: each signal's refresh interval
@@ -395,7 +395,7 @@ it polled as text, for example:
 
 **Expected:**
 - [ ] One Live row, `DID F191`, showing the text, refreshing on every
-      reply (a text row's plot box is greyed out); `signals.csv` carries the
+      reply (a text row's plot box is grayed out); `signals.csv` carries the
       text, quoted
 - [ ] No banner, the link ok, the value never dims
 

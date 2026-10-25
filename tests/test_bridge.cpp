@@ -1067,7 +1067,7 @@ TEST(BridgeTest, ChartDataFiltersUnsubscribedAndEmptyBatchesDoNotEmit)
     ASSERT_EQ(data.size(), 1);
     EXPECT_EQ(data.at(0).toMap().value("id").toInt(), 2001);
     // `row` is the model row, not the position in chartData(), so the
-    // trace keeps its colour when a signal before it is unsubscribed
+    // trace keeps its color when a signal before it is unsubscribed
     EXPECT_EQ(data.at(0).toMap().value("row").toInt(), 1);
     EXPECT_EQ(data.at(0).toMap().value("samples").toList().size(), 10); // still 5 samples
 
@@ -1854,7 +1854,7 @@ TEST(BridgeTest, RefusedStartNamesItsCauseAndLeavesNoSession)
         FakeEnvArm refuse("ECUIO_FAKE_FILTER_STATUS", "7");
         EXPECT_EQ(bridge.connectSession(uri).toStdString(),
                   "the adapter's driver refused: PassThruStartMsgFilter "
-                  "returned status 7 (ERR_FAILED): fake_j2534: "
+                  "returned status 7 (0x7, ERR_FAILED): fake_j2534: "
                   "PassThruStartMsgFilter refused (ECUIO_FAKE_FILTER_STATUS)");
         EXPECT_FALSE(bridge.connected());
     }

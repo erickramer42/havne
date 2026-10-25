@@ -59,9 +59,9 @@ QtObject {
                                          ? "Menlo"
                                          : "monospace"
 
-    // Chart trace colours, one per hue family so traces stay distinct on
+    // Chart trace colors, one per hue family so traces stay distinct on
     // the dark surface. LiveView keys them by model row. No red: it is
-    // the danger colour, so a trace drawn in it would read as an alarm.
+    // the danger color, so a trace drawn in it would read as an alarm.
     readonly property var seriesColors: [
         "#4aa3ff",   // blue
         "#31d08c",   // green
