@@ -1153,6 +1153,54 @@ TEST(CoreTest, MockEmitsKnownArbitrationIds)
     EXPECT_EQ(cap.fd_mismatch.load(), 0) << "FD flag missing on one or more frames";
 }
 
+namespace {
+
+struct TickCapture {
+    std::atomic<int> count{0};
+    std::atomic<uint64_t> first_ts{0};
+    std::atomic<uint64_t> last_ts{0};
+};
+
+void tick_capture_cb(const ecuio_frame_t* frame, void* user_data)
+{
+    TickCapture* c = static_cast<TickCapture*>(user_data);
+    if (c->count.fetch_add(1) == 0) {
+        c->first_ts.store(frame->timestamp_us);
+    }
+    c->last_ts.store(frame->timestamp_us);
+}
+
+} // namespace
+
+/* Contract: one frame per kTickS of wall time, on average. The drive
+ * cycle advances kTickS per frame, so a slower worker plays the car in
+ * slow motion against the frames' timestamps (a 0-100 time, the
+ * limiter's period). The bound is the mean over 2 s, which a deadline
+ * schedule holds whatever the OS's sleep step; sleeping a fixed 50 ms
+ * after each tick measures ~62 ms on Windows. */
+TEST(CoreTest, MockFramesKeepTheTickInterval)
+{
+    ecuio_session_t* session = nullptr;
+    ASSERT_EQ(ecuio_session_create("mock://cadence", &session), ECUIO_OK);
+
+    TickCapture cap;
+    ASSERT_EQ(ecuio_register_frame_callback(session, &tick_capture_cb, &cap),
+              ECUIO_OK);
+    ASSERT_EQ(ecuio_session_start(session), ECUIO_OK);
+
+    wait_for([&cap]() { return cap.count.load() >= 41; }, 10000);
+
+    ecuio_session_close(session);
+    ecuio_session_destroy(session);
+
+    const int n = cap.count.load();
+    ASSERT_GE(n, 41);
+    const double mean_ms =
+        static_cast<double>(cap.last_ts.load() - cap.first_ts.load()) / 1000.0 / (n - 1);
+    EXPECT_GE(mean_ms, 45.0);
+    EXPECT_LE(mean_ms, 56.0) << "the drive cycle would play slower than real time";
+}
+
 TEST(CoreTest, CloseIsIdempotentAndDestroyIsSafe)
 {
     ecuio_session_t* session = nullptr;

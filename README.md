@@ -14,10 +14,11 @@ simulated vehicle lets it run with no hardware at all.
 >
 > QtTune runs end-to-end against the simulator and a fake J2534 vendor driver. Through a real adapter it has read live data from one vehicle: in a read-only session on 2026-10-22 the engine ECU answered its Mode-01 requests and the values decoded and tracked the instrument cluster ([session sheet](docs/bench-sessions/2026-10-22-vehicle.md)). Other vehicles and adapters are untested; [STATUS.md](STATUS.md) tracks what is and isn't verified.
 
-![The QtTune Dashboard at full throttle on the simulated vehicle: 6,325 rpm, 103 km/h, shift lights lit](docs/images/dashboard.png)
+![The QtTune Dashboard during a full-throttle 2nd-gear pull on the simulated vehicle: rpm and speed climb together, the shift lights fill, then the tachometer saws just under 7,000 rpm on the fuel-cut limiter while speed holds at 112 km/h, before the driver lifts](docs/images/dashboard.gif)
 
-*The Dashboard mid-pull on the built-in simulated vehicle
-(`mock://demo`), with no hardware attached.*
+*The Dashboard in real time on the built-in simulated vehicle
+(`mock://demo`), with no hardware attached: a full-throttle pull in
+2nd onto the fuel-cut limiter, then the lift.*
 
 ## Architecture
 
@@ -130,6 +131,13 @@ screen, is [docs/architecture.md](docs/architecture.md).
   off launch control with wheelspin. Its readings stay consistent with
   each other the way a real ECU's log does: rpm with speed and gear,
   airflow with load and lambda. Every page works with no hardware.
+
+## Screenshots
+
+| Live view | Frame log | Link health |
+|---|---|---|
+| [![Live view: RPM, speed, MAF and lambda plotted through a 3rd-gear pull onto the limiter](docs/images/live.png)](docs/images/live.png) | [![Frame log: raw mock frames newest-first, about 50 ms apart, with the 29-bit diagnostic frame every 16th](docs/images/log.png)](docs/images/log.png) | [![Live view over J2534 with every request failing: an amber "Requests failing" banner and pill, and each signal waiting for data](docs/images/link-health.png)](docs/images/link-health.png) |
+| A 3rd-gear pull onto the limiter: rpm and speed rise together, then rpm saws while speed holds, MAF stays on its plateau and lambda (dashed) swings lean on each fuel cut | Raw frames as they arrive, with session time, length, the extended-ID flag and payload | Through the in-tree fake J2534 driver with every write refused: the link is judged "requests failing", not idle, and the page says what to check |
 
 ## Roadmap
 

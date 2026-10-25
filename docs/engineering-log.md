@@ -808,3 +808,17 @@ the engine and a shift's last tick with rpm out of step with the
 wheels, that no per-signal bound would have flagged. Where a real log
 existed (the first vehicle's cold start, idle airflow and load), it
 set the numbers; elsewhere the physics does, and the header says which.
+
+**2026-10-24 — the mock's clock:** **a simulation stepped by a sleep
+runs at the sleep's real length, not its nominal one.** The worker
+stepped the drive cycle 50 ms per frame and then slept 50 ms, and
+Windows rounds a sleep up to its 15.6 ms timer step, so frames came
+62.3 ms apart and the car played at 80 % speed against its own
+timestamps: a 5 s limiter hold lasted 6.2 s on the clock, and a drag
+run's 0–100 time read slow. The deterministic cycle tests never saw it,
+because they step with no clock at all; recording the Dashboard for the
+README did, when the 2nd-gear pull arrived seven seconds after the
+phase script said it would. The worker now sleeps to a deadline that
+advances one interval per tick, and
+`CoreTest.MockFramesKeepTheTickInterval` bounds the mean spacing of the
+frames' timestamps.
