@@ -155,7 +155,7 @@ is the plan in [After v0.3.0](#after-v030).
     run sheets are
     [bench-runsheet.md](docs/bench-sessions/bench-runsheet.md) and
     [vehicle-runsheet.md](docs/bench-sessions/vehicle-runsheet.md).
-  - **Tests:** 381 ctest cases (Windows, Visual Studio 18 build
+  - **Tests:** 395 ctest cases (Windows, Visual Studio 18 build
     tools, both trees rebuilt, 2026-10-25), the QML suites
     among them, plus the cross-arch subset (74/74). All passed except
     the env-gated cross-arch skip. Every first-party target builds with
