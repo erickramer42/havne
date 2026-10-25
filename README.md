@@ -107,6 +107,10 @@ screen, is [docs/architecture.md](docs/architecture.md).
 - **Fits the screen.** The Dashboard rearranges for a short, wide
   window, pages that run long scroll, and Ctrl + / Ctrl − zooms the
   whole UI (or Settings' Display row), kept between runs.
+- **Metric or imperial.** Settings switches every page between km/h,
+  °C and g/s and mph, °F and lb/min, chart history included, and
+  remembers the choice. Recordings keep the values as the ECU sent
+  them ([ADR-0022](docs/adr/0022-display-units.md)).
 - **Session recording.** Opt-in: each connect writes every frame,
   every decoded value and the session's events to CSV and text files,
   with host and adapter time side by side

@@ -242,7 +242,7 @@ Contracts along this path:
 | Signal decode | Linear scaling in `double`. Each def states its value kind (unsigned, signed, binary32 float) and byte order (Intel at any bit offset, big-endian in whole bytes), and is gated on message ID plus a mux key of up to 3 bytes. Two signal sets, `mock` and `obd2`, chosen by profile. The validator accepts exactly the defs the decoder decodes, with named return codes; the profile registry runs it at registration and reports the failing check and element. | [ADR-0004](docs/adr/0004-signal-decoding-model.md), [ADR-0013](docs/adr/0013-protocol-profiles.md), [ADR-0016](docs/adr/0016-signal-definition-layout.md) |
 | Mock transport | A scripted ~2-minute drive cycle on a vehicle model (`core/src/mock_drive_cycle.h`): a cold start with the first vehicle's fast idle, a 2nd-gear WOT pull from ~1550 rpm onto the 7000 rpm fuel-cut limiter with a 5 s hold, a longer 3rd-gear pull with the same hold, a 100 km/h cruise in 4th, then a quarter mile off launch control with wheelspin in 1st (~13.7 s, ~172 km/h trap). The set carries lambda beside the eight shared quantities. Every tick keeps the signals consistent with each other (rpm with wheel speed, MAF with load, lambda with fuel cut) and round-trips through the mock set, in `CoreTest.MockDriveCycle*`. | — |
 | Bridge and models | Frame log with sort toggle; coalesced signal model with a 120-sample history per signal; device discovery for the picker; link-health polling. QML reaches it as the `Bridge` singleton. | [ADR-0003](docs/adr/0003-backpressure-bounds-in-flight-frames.md), [ADR-0005](docs/adr/0005-coalesced-signal-updates.md) |
-| QML pages | Home, Dashboard (gauges and shift lights through `SignalHub`), Live (table, and a strip chart with each trace's value at its end), Log (with Pause), Settings (presets, the device picker, a profile row and a DID field composing an editable URI, and the one place a session is connected). The Dashboard rearranges to fit a short, wide window, short pages scroll with their scroll bar shown, and the whole UI zooms (Ctrl + / Ctrl − / Ctrl 0, or Settings' Display row), kept between runs. Names, units and decimal places come from core. `Theme` holds the palette, fonts, page margin and the link-state color and label functions; `PageHeader` gives the pages one title row. `test_qml` runs the pages and the app's window against a real bridge, offscreen: the link-health surfaces, Live's swatches and dashes, `SignalHub` and the gauges' notes. | [docs/architecture.md](docs/architecture.md#the-ui-layer) |
+| QML pages | Home, Dashboard (gauges and shift lights through `SignalHub`), Live (table, and a strip chart with each trace's value at its end), Log (with Pause), Settings (presets, the device picker, a profile row and a DID field composing an editable URI, and the one place a session is connected). The Dashboard rearranges to fit a short, wide window, short pages scroll with their scroll bar shown, and the whole UI zooms (Ctrl + / Ctrl − / Ctrl 0, or Settings' Display row), kept between runs. Names, units and decimal places come from core, and Settings' Units row shows every page in metric or imperial, converted in core and kept between runs ([ADR-0022](docs/adr/0022-display-units.md)). `Theme` holds the palette, fonts, page margin and the link-state color and label functions; `PageHeader` gives the pages one title row. `test_qml` runs the pages and the app's window against a real bridge, offscreen: the link-health surfaces, Live's swatches and dashes, `SignalHub` and the gauges' notes. | [docs/architecture.md](docs/architecture.md#the-ui-layer) |
 | J2534 | HARNESS-verified, same-arch and cross-arch, including transport adoption (ADR-0012), profile-derived channels (ADR-0013) and the request engine (ADR-0015). BENCH: one adapter, quiet bus. Vehicle: one car, read-only, through the surrogate, before the request engine. | [docs/j2534.md](docs/j2534.md) |
 
 ## v0.3.0 checklist
@@ -525,12 +525,11 @@ in the backlog.
 
 ### User interface
 
-- **Persisted preferences (S).** Only the UI zoom survives a
-  restart, through QML `Settings` in `Main.qml` (category `ui`).
-  Developer mode, units, theme, the last-used device, the Record
-  sessions switch and Settings' profile choice and DID list all need
-  the same, so it comes before them. It belongs in the app layer, not
-  core.
+- **Persisted preferences (S).** The UI zoom and the unit system
+  survive a restart, through QML `Settings` in `Main.qml` (category
+  `ui`). Developer mode, theme, the last-used device, the Record
+  sessions switch and Settings' profile choice and DID list need the
+  same. It belongs in the app layer, not core.
 - **Developer mode (S).** A persisted Settings toggle, off by default.
   With it off the app offers only real devices. With it on, the app
   also shows:
@@ -541,13 +540,12 @@ in the backlog.
   event log on the Log page (it sits at the bottom of Settings) and
   move the raw frame table into developer mode. Pairs with
   developer mode.
-- **Units of measure (M).** Metric or imperial globally, with
-  per-signal overrides (°C or °F, km/h or mph, kPa or psi, g/s or
-  lb/min). The conversion belongs in core, because the UI receives
-  final display values (rule 2 above). Core already owns each
-  signal's display name, unit and decimal places, and Live and the
-  Dashboard show them as they are, so a converted signal carries its
-  converted unit and precision with it.
+- **Units of measure, per-signal overrides (S).** Metric or imperial
+  for the whole UI is built ([ADR-0022](docs/adr/0022-display-units.md):
+  converted in core by unit string, chosen on Settings, kept between
+  runs). Still to do: one quantity in the other system (degrees F with
+  km/h), which passes a unit system per row instead of one for the
+  model.
 - **Low-glare and night themes (M).** Amber and red-on-black schemes
   for driving at night.
   - `Theme` already centralizes the palette, but the analog gauge

@@ -2,7 +2,8 @@
 // Testing: manual smoke — navigation, sidebar↔TabBar at 720px, header
 //          pill elides at 400 px, keyboard focus rings, the window opens
 //          within a 1280 × 720 screen, zoom steps with Ctrl + / Ctrl − /
-//          Ctrl 0 and Settings' Display row and survives a restart.
+//          Ctrl 0 and Settings' Display row and survives a restart, as
+//          does the unit system (2026-10-24).
 //          test_qml (tests/qml/tst_linkhealth.qml) checks the pill and
 //          each page's link surfaces in every link state, finding the
 //          pages and the pill by objectName
@@ -60,16 +61,22 @@ ApplicationWindow {
 
     function gotoPage(index) { stack.currentIndex = index }
 
-    // ---- Zoom (Theme.zoom), kept between runs
+    // ---- Zoom (Theme.zoom) and units (Bridge.unitSystem), kept between runs
     Settings {
         id: uiSettings
         category: "ui"
         property real zoom: 1.0
+        property int unitSystem: 0
     }
     property bool zoomRestored: false
     Component.onCompleted: {
         Theme.zoom = Theme.clampZoom(uiSettings.zoom)
         zoomRestored = true
+        Bridge.unitSystem = uiSettings.unitSystem   // anything but 0 or 1 is ignored
+    }
+    Connections {
+        target: Bridge
+        function onUnitSystemChanged() { uiSettings.unitSystem = Bridge.unitSystem }
     }
     Connections {
         target: Theme
