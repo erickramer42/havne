@@ -826,11 +826,88 @@ TEST(CoreTest, MockDriveCycleDragRunCoversAQuarterMile)
     EXPECT_LE(r.end.drag_trap_kmh, 200.0f);
 }
 
+TEST(CoreTest, MockDriveCycleLaterLoopsRunAtOperatingTemperature)
+{
+    /* Only the first loop starts cold; each later one picks up where the
+     * last ended. The first loop's runs stay on a cold engine, and by the
+     * last loop here the coolant sits on the thermostat, peaking near
+     * 220 F on the pulls, with the oil built up to 230-245 F. */
+    struct Temps {
+        float cool_min = 1e9f, cool_max = -1e9f;
+        float oil_min = 1e9f, oil_max = -1e9f;
+        float cruise_cool_max = -1e9f;
+        float pull2_cool_max = -1e9f;
+        float drag_oil_entry = -1e9f, drag_oil_max = -1e9f;
+        float end_cool = 0.0f, end_oil = 0.0f;
+        bool warm_up = false;
+    };
+    constexpr uint32_t kLoops = 6;
+    Temps t[kLoops];
+    DriveCycle dc;
+    while (dc.loops < kLoops && dc.tick < ecuio_mock::ticks_for(1200.0f)) {
+        dc.step();
+        if (dc.loops >= kLoops) {
+            break;
+        }
+        Temps& l = t[dc.loops];
+        l.cool_min = std::fmin(l.cool_min, dc.coolant_c);
+        l.cool_max = std::fmax(l.cool_max, dc.coolant_c);
+        l.oil_min = std::fmin(l.oil_min, dc.oil_c);
+        l.oil_max = std::fmax(l.oil_max, dc.oil_c);
+        if (dc.phase == Phase::Cruise4th) {
+            l.cruise_cool_max = std::fmax(l.cruise_cool_max, dc.coolant_c);
+        }
+        if (dc.phase == Phase::Pull2nd) {
+            l.pull2_cool_max = std::fmax(l.pull2_cool_max, dc.coolant_c);
+        }
+        if (dc.phase == Phase::DragRun || dc.phase == Phase::Shutdown) {
+            if (l.drag_oil_entry < -1e8f) {
+                l.drag_oil_entry = dc.oil_c;
+            }
+            l.drag_oil_max = std::fmax(l.drag_oil_max, dc.oil_c);
+        }
+        l.warm_up = l.warm_up || dc.phase == Phase::WarmUp;
+        l.end_cool = dc.coolant_c;
+        l.end_oil = dc.oil_c;
+    }
+    ASSERT_EQ(dc.loops, kLoops) << "six loops never completed";
+
+    /* Cold first loop: the thermostat never opens, and the oil trails
+     * the coolant as the sump's mass warms */
+    EXPECT_LT(t[0].pull2_cool_max, 40.0f);
+    EXPECT_LT(t[0].cool_max, ecuio_mock::kThermostatOpenC);
+    EXPECT_LT(t[0].end_oil, t[0].end_cool);
+    for (uint32_t i = 1; i < kLoops; ++i) {
+        EXPECT_FALSE(t[i].warm_up) << "loop " << i + 1 << " restarted cold";
+    }
+
+    /* From the third loop on, the coolant never falls below the
+     * thermostat's range */
+    for (uint32_t i = 2; i < kLoops; ++i) {
+        EXPECT_GE(t[i].cool_min, 85.0f) << "loop " << i + 1;
+    }
+
+    const Temps& hot = t[kLoops - 1];
+    EXPECT_GE(hot.cruise_cool_max, 85.0f);
+    EXPECT_LE(hot.cruise_cool_max, 97.0f);
+    EXPECT_GE(hot.cool_max, 98.0f) << "the radiator kept up at WOT";
+    EXPECT_LE(hot.cool_max, 106.0f);
+    EXPECT_GE(hot.oil_min, 100.0f);
+    EXPECT_GE(hot.oil_max, 112.0f);
+    EXPECT_LE(hot.oil_max, 125.0f);
+    /* The sump's mass: a quarter mile moves the oil a few degrees, not
+     * the coolant's swing */
+    EXPECT_GE(hot.drag_oil_max - hot.drag_oil_entry, 2.0f);
+    EXPECT_LE(hot.drag_oil_max - hot.drag_oil_entry, 9.0f);
+    EXPECT_GT(hot.end_oil, hot.end_cool) << "the oil cooled below the coolant";
+}
+
 TEST(CoreTest, MockDriveCycleEveryTickRoundTripsThroughTheMockSet)
 {
-    /* Two loops: the cold first one and a warm one. Every tick goes
-     * through the real encoder and decoder. A value the wire can't
-     * carry would clamp in the encoder and show up as a large error. */
+    /* Three loops: the cold first one, the one that warms through the
+     * thermostat, and a hot one. Every tick goes through the real
+     * encoder and decoder. A value the wire can't carry would clamp in
+     * the encoder and show up as a large error. */
     const ecuio_signal_set_t* set = ecuio_mock_signal_set();
     ASSERT_NE(set, nullptr);
 
@@ -847,7 +924,7 @@ TEST(CoreTest, MockDriveCycleEveryTickRoundTripsThroughTheMockSet)
 
     DriveCycle dc;
     uint32_t steps = 0;
-    while (dc.loops < 2 && steps < ecuio_mock::ticks_for(1200.0f)) {
+    while (dc.loops < 3 && steps < ecuio_mock::ticks_for(1200.0f)) {
         dc.step();
         ++steps;
         uint8_t payload[ECUIO_MOCK_TELEMETRY_PAYLOAD_LEN];
@@ -876,7 +953,7 @@ TEST(CoreTest, MockDriveCycleEveryTickRoundTripsThroughTheMockSet)
             hi[i] = std::fmax(hi[i], val);
         }
     }
-    ASSERT_EQ(dc.loops, 2u) << "two loops never completed";
+    ASSERT_EQ(dc.loops, 3u) << "three loops never completed";
 
     for (uint32_t i = 0; i < set->count; ++i) {
         const ecuio_signal_def_t& def = set->defs[i];
@@ -929,7 +1006,8 @@ void for_each_tick_of(Phase phase, F visit)
 
 TEST(CoreTest, MockDriveCycleSignalsStayPhysical)
 {
-    /* Two loops, every tick, against the rules a real ECU's log keeps:
+    /* Three loops (cold, warming, hot), every tick, against the rules a
+     * real ECU's log keeps:
      * rpm locked to wheel speed in gear, no speed at idle rpm with the
      * clutch in, airflow consistent with rpm and load, lambda lean
      * exactly when fuel is cut, and temperatures that move like masses
@@ -940,7 +1018,7 @@ TEST(CoreTest, MockDriveCycleSignalsStayPhysical)
     uint32_t fueled_run = 0;
     uint32_t fueled_at_limit = 0;
     int checked_locked = 0;
-    while (dc.loops < 2 && dc.tick < ecuio_mock::ticks_for(1200.0f)) {
+    while (dc.loops < 3 && dc.tick < ecuio_mock::ticks_for(1200.0f)) {
         dc.step();
         const float k = dc.gear > 0 ? ecuio_mock::rpm_per_mps(dc.gear) : 0.0f;
         const bool limiter = dc.phase == Phase::Limiter2nd || dc.phase == Phase::Limiter3rd;
@@ -992,7 +1070,7 @@ TEST(CoreTest, MockDriveCycleSignalsStayPhysical)
         EXPECT_LE(std::fabs(dc.iat_c - prev.iat_c), 0.5f) << "tick " << dc.tick;
         prev = dc;
     }
-    ASSERT_EQ(dc.loops, 2u) << "two loops never completed";
+    ASSERT_EQ(dc.loops, 3u) << "three loops never completed";
     EXPECT_GT(checked_locked, 1000) << "too few in-gear ticks checked";
 }
 

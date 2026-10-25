@@ -46,6 +46,12 @@ namespace ecuio_mock {
  *   Shutdown    lift past the line, brake to a stop
  *   Cooldown    idle, then loop back to Roll2nd
  *
+ * Only the first loop starts cold. Each later one starts from where the
+ * last ended, so the first loop's runs are on a cold engine, the second
+ * warms it through the thermostat, and from the third on it runs at
+ * operating temperature: coolant 90-100 C (195-213 F), oil building to
+ * 110-118 C (230-245 F) under the repeated pulls.
+ *
  * Where the values come from. The cold start (fast idle hunting around
  * 1430 rpm for about 20 s, then 850-900 rpm), warm idle airflow and
  * load, and the warm-up rate follow the first vehicle session
@@ -53,7 +59,9 @@ namespace ecuio_mock {
  * 4.5 L. No car has been logged at WOT or on the limiter through
  * QtTune; those states follow the model's physics and the usual
  * signatures (fuel cut leaves airflow up and lambda lean, a NA engine's
- * intake air stays near ambient at speed).
+ * intake air stays near ambient at speed). So do the warm temperatures:
+ * a thermostat that opens at 84 C, coolant near 220 F on hard runs, and
+ * oil at what an NA engine without an oil cooler reaches on a track.
  *
  * Nothing a real car reports holds dead still, so neither does this
  * one. The idle controller hunts, the driver's foot can't hold a speed
@@ -130,8 +138,8 @@ constexpr float kO2ReadyS = 25.0f;           /* closed loop from here */
 /* Temperatures, degC. */
 constexpr float kAmbientC = 24.0f;
 constexpr float kColdStartC = 20.0f;
-constexpr float kThermostatOpenC = 88.0f;
-constexpr float kThermostatFullC = 98.0f;
+constexpr float kThermostatOpenC = 84.0f;
+constexpr float kThermostatFullC = 96.0f;
 constexpr float kFanOnC = 102.0f;
 constexpr float kFanOffC = 98.0f;
 
@@ -861,9 +869,13 @@ private:
     }
 
     /* Heat, kW and kJ/K. A quarter of the fuel's energy goes to the
-     * cooling jacket and block. The coolant warms quickly while the
+     * cooling jacket, block and oil. The coolant warms quickly while the
      * thermostat is shut (the small loop) and holds near it once open;
-     * the block and oil store heat and give it back after a hard run
+     * at WOT the radiator can't keep up, so it climbs until the driver
+     * lifts. The oil takes heat from the block, the pistons and bearing
+     * friction; with the sump's mass behind it, one pull moves it a few
+     * degrees, and back-to-back hard loops build it to track-day levels.
+     * The block and oil store heat and give it back after a hard run
      * (heat soak); the radiator and block heat the engine bay, which
      * the intake draws from at low speed. */
     void update_temperatures(float fuel_kw)
@@ -883,18 +895,21 @@ private:
         } else if (coolant_c <= kFanOffC) {
             fan_on = false;
         }
-        const float ua = 0.25f + 0.022f * speed + (fan_on ? 0.9f : 0.0f);
+        const float ua = 0.25f + 0.006f * speed + (fan_on ? 0.9f : 0.0f);
         const float q_rad = open * ua * (coolant_c - kAmbientC);
         const float q_bc = 1.5f * (block_c - coolant_c);
-        const float q_bo = 0.6f * (block_c - oil_c);
+        const float q_bo = 0.3f * (block_c - oil_c);
         const float q_block_loss = 0.03f * (block_c - kAmbientC);
 
-        const float c_coolant = 40.0f + 40.0f * open;
-        coolant_c += (0.30f * heat_kw + q_bc - q_rad -
-                      0.015f * (coolant_c - kAmbientC)) * kTickS / c_coolant;
-        block_c += (0.70f * heat_kw - q_bc - q_bo - q_block_loss) * kTickS / 60.0f;
-        oil_c += (q_bo + 0.3f * friction_kw -
-                  (0.02f + 0.0015f * speed) * (oil_c - kAmbientC)) * kTickS / 15.0f;
+        const float c_coolant = 40.0f + 20.0f * open;
+        coolant_c += (0.45f * heat_kw + q_bc - q_rad -
+                      0.015f * (coolant_c - kAmbientC)) *
+                     kTickS / c_coolant;
+        block_c +=
+            (0.45f * heat_kw - q_bc - q_bo - q_block_loss) * kTickS / 60.0f;
+        oil_c += (q_bo + 0.10f * heat_kw + 0.5f * friction_kw -
+                  (0.06f + 0.001f * speed) * (oil_c - kAmbientC)) *
+                 kTickS / 35.0f;
 
         /* The bay: the block, the exhaust manifold and part of the
          * radiator's air heat it; the car's speed ventilates it. */
