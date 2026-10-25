@@ -3,7 +3,9 @@
 #     NO env vars and connecting the fake direct-load URI; the surrogate
 #     must spawn from the exe dir. Verify the no-variable case still builds
 #     clean (contributors without a win32 tree). Check CI invariant: this
-#     file is app-side only, core stays Qt-free/untouched.
+#     file is app-side only, core stays Qt-free/untouched. Release builds
+#     carry no QML debugging: stage.ps1 fails a package whose exe imports
+#     QQmlDebuggingEnabler or that holds qmltooling.
 
 # 6.12 is the version CI and local builds use (macOS needs it), and
 # REQUIRES sets every Qt policy up to it to NEW, QTP0004 among them.
@@ -96,8 +98,12 @@ endif()
 
 # Icon helpers later: qt_add_resources, ios/macos asset catalogs, etc.
 
+# QML debugging in Debug builds only. A build with QT_QML_DEBUG opens a
+# debug server when launched with -qmljsdebugger, one that can run
+# script in the app with no authentication, so no release carries it
+# (packaging/windows/stage.ps1 checks the exe's imports).
 if(QT_FEATURE_qml_debug)
-    target_compile_definitions(qttune PRIVATE QT_QML_DEBUG)
+    target_compile_definitions(qttune PRIVATE $<$<CONFIG:Debug>:QT_QML_DEBUG>)
 endif()
 
 # --- Deploy Qt runtime DLLs next to the exe (Windows only) ---
@@ -106,12 +112,16 @@ if(WIN32)
 
     if(QT_WINDEPLOYQT_LOCATION)
         add_custom_command(TARGET qttune POST_BUILD
+            # Outside Debug, no qmltooling plugins: the debug server's
+            # half, which nothing but a QT_QML_DEBUG build loads
             COMMAND ${QT_WINDEPLOYQT_LOCATION}
                     --no-compiler-runtime
+                    "$<$<NOT:$<CONFIG:Debug>>:--skip-plugin-types;qmltooling>"
                     --qmldir ${CMAKE_CURRENT_SOURCE_DIR}/qml
                     $<TARGET_FILE:qttune>
             COMMENT "Deploying Qt runtime DLLs"
             VERBATIM
+            COMMAND_EXPAND_LISTS   # the Debug case expands to no argument
         )
     else()
         message(WARNING "windeployqt not found - manual deployment required")

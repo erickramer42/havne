@@ -4,6 +4,7 @@ name: Release
 # surrogate, the Qt runtime and the Visual C++ runtime in one zip that
 # runs without Qt or Visual Studio, with its SHA-256 and a signed build
 # provenance. A tag with -rcN publishes a pre-release, for a dry run.
+# The tagged commit must already have passed CI (ci.yml's push run).
 #
 #   git tag v0.3.1 && git push origin v0.3.1
 #
@@ -30,6 +31,7 @@ jobs:
       contents: write       # create the release and upload its files
       id-token: write       # sign the build provenance
       attestations: write   # store it
+      actions: read         # read ci.yml's runs on the tagged commit
     env:
       TAG: ${{ inputs.tag || github.ref_name }}
       GH_TOKEN: ${{ github.token }}
@@ -55,6 +57,28 @@ jobs:
           echo "NOTES_TAG=v$tag_version" >> "$GITHUB_ENV"
           if [ -n "${BASH_REMATCH[2]}" ]; then echo "PRERELEASE=--prerelease" >> "$GITHUB_ENV"; fi
           test -f "docs/releases/v$tag_version.md" || { echo "::error::no docs/releases/v$tag_version.md"; exit 1; }
+
+      # This job builds no tests: ci.yml ran them when the commit was
+      # pushed to main or dev (it never runs on tags). So the newest of
+      # those push runs must have finished green, or a tag pushed early,
+      # or on a red commit, would publish an untested build.
+      - name: Check CI passed on the tagged commit
+        shell: bash
+        run: |
+          sha=$(git rev-parse HEAD)
+          run=$(gh run list -R "$GITHUB_REPOSITORY" --workflow ci.yml --event push --commit "$sha" --limit 1 \
+            --json status,conclusion,url \
+            --jq '.[0] // empty | "\(.status) \(if (.conclusion // "") == "" then "none" else .conclusion end) \(.url)"')
+          if [ -z "$run" ]; then
+            echo "::error::ci.yml has no push run on $sha: push the commit to main or dev and let CI finish before tagging"
+            exit 1
+          fi
+          read -r status conclusion url <<< "$run"
+          if [ "$status" != completed ] || [ "$conclusion" != success ]; then
+            echo "::error::CI on $sha is $status, conclusion $conclusion ($url): tag a commit whose CI passed"
+            exit 1
+          fi
+          echo "CI passed on $sha: $url"
 
       # The same Qt install as ci.yml's win-build; see the notes there.
       - name: Install aqtinstall (pinned master commit)

@@ -11,6 +11,8 @@
 #   - the x86 surrogate imports no C runtime DLL (it links it statically;
 #     an x86 vcruntime140.dll can't sit beside the app's x64 one);
 #   - every DLL qttune.exe imports is in the folder or is part of Windows;
+#   - no QML debugging: qttune.exe doesn't import QQmlDebuggingEnabler
+#     (QT_QML_DEBUG, Debug builds only) and no qmltooling plugins ship;
 #   - the staged qttune.exe starts and is still running after -SmokeSeconds,
 #     which a missing Qt plugin or QML module would stop at once.
 #
@@ -88,6 +90,16 @@ foreach ($dll in Imports (Join-Path $stage 'qttune.exe')) {
     Fail "qttune.exe imports $dll, which is neither in the package nor part of Windows"
 }
 Write-Host 'qttune.exe imports: all present'
+
+# ---- Check: no QML debugging. A build with it opens a debug server that
+# can run script in the app when launched with -qmljsdebugger.
+$debugImport = & $dumpbin /nologo /imports (Join-Path $stage 'qttune.exe') |
+    Select-String -SimpleMatch 'QQmlDebuggingEnabler'
+if ($debugImport) { Fail 'qttune.exe was built with QT_QML_DEBUG (app/CMakeLists.txt: Debug builds only)' }
+if (Test-Path (Join-Path $stage 'qmltooling')) {
+    Fail "qmltooling is staged: an older deploy left it in $appDir; delete it and build again"
+}
+Write-Host 'QML debugging: none'
 
 # ---- Check: the staged app starts and stays up
 if ($SmokeSeconds -gt 0) {

@@ -529,7 +529,9 @@ runtime.
    `CMakeLists.txt` and add `docs/releases/vX.Y.Z.md`, the release
    notes. Say what's new, and what's verified at which tier
    ([testing.md](testing.md)), including what hasn't run on hardware.
-2. For a dry run, tag that commit `vX.Y.Z-rc1` and push the tag. The
+2. Push that commit to `main` and wait for its CI run to pass: the
+   release job refuses a commit whose CI hasn't.
+   For a dry run, tag that commit `vX.Y.Z-rc1` and push the tag. The
    workflow publishes a pre-release. Download its zip, run it on a PC
    without Visual Studio if one is available, and check the
    provenance with
@@ -544,6 +546,11 @@ runtime.
   `docs/releases/vX.Y.Z.md` must exist, or the job fails before
   anything builds. An `-rcN` tag publishes as a pre-release with the
   same notes.
+- **CI gate.** ci.yml never runs on tags, so the job reads the newest
+  `push` run of ci.yml on the tagged commit (`gh run list --commit`)
+  and fails unless it has completed with `success`: a tag pushed
+  before CI finished, or on a commit whose CI failed, publishes
+  nothing.
 - **Build.** Qt 6.12.0 is installed as `win-build` does it, then
   `build-win32` (the surrogate only) and `build` (the app only), both
   with `BUILD_TESTING=OFF`, in the usual order so the app's build
@@ -560,7 +567,12 @@ runtime.
   the surrogate imports a CRT DLL (it links the CRT statically, `/MT`,
   because an x86 `vcruntime140.dll` can't sit beside the app's x64
   one), if `qttune.exe` imports a DLL that is neither in the folder nor
-  part of Windows, or if the staged `qttune.exe` isn't still running
+  part of Windows, if it carries QML debugging (an import of
+  `QQmlDebuggingEnabler`, or `qmltooling` plugins in the folder: a
+  build with `QT_QML_DEBUG` opens an unauthenticated debug server when
+  launched with `-qmljsdebugger`, so `app/CMakeLists.txt` defines it
+  and windeployqt deploys the plugins in Debug only), or if the staged
+  `qttune.exe` isn't still running
   10 s after it starts (QML that fails to load exits at once; the
   check was confirmed against a package with `qml/QtQuick/Controls`
   removed, 2026-10-25). It writes the zip and `SHA256SUMS.txt` to
