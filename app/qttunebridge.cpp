@@ -5,7 +5,9 @@
 //          refresh, link-state mapping, the activity log's session and
 //          ECU lines, session recording (BridgeTest.Recording*), display
 //          units on the rows, the chart and not the recording
-//          (BridgeTest.UnitSystem*). QML rendering: manual smoke.
+//          (BridgeTest.UnitSystem*), the URI label
+//          (BridgeTest.UriLabelCutsADirectLoadPathToItsFileName). QML
+//          rendering: manual smoke.
 
 #include "qttunebridge.h"
 #include "ecuio/version.h"
@@ -1285,6 +1287,30 @@ QString QtTuneBridge::channelIdentityText(const ecuio_channel_identity_t& s)
     }
     return QStringLiteral("ECU %1 identity: ").arg(hexId(s.rx_id)) +
            parts.join(QStringLiteral("; "));
+}
+
+/* The URI as the header pill and the Dashboard show it. A direct-load
+ * selector (one holding a separator, as resolve_uri tells a path from a
+ * vendor name) is cut to the DLL's file name, j2534://…/vendor.dll, so
+ * a local folder never reaches the screen or a screenshot, and a long
+ * path can't elide the DLL off the pill's end. The query stays; every
+ * other URI is unchanged. Settings and the activity log keep it whole. */
+QString QtTuneBridge::uriLabelFor(const QString& uri)
+{
+    const QString scheme = QStringLiteral("j2534://");
+    if (!uri.startsWith(scheme)) {
+        return uri;
+    }
+    const qsizetype query = uri.indexOf(QLatin1Char('?'), scheme.size());
+    const qsizetype end = query < 0 ? uri.size() : query;
+    const QString selector = uri.mid(scheme.size(), end - scheme.size());
+    const qsizetype sep = std::max(selector.lastIndexOf(QLatin1Char('/')),
+                                   selector.lastIndexOf(QLatin1Char('\\')));
+    if (sep < 0) {
+        return uri;
+    }
+    return scheme + QChar(0x2026) + QLatin1Char('/') + selector.mid(sep + 1) +
+           uri.mid(end);
 }
 
 /* The published state strings, in one place; QML's Theme.linkColor and

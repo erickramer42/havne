@@ -162,7 +162,7 @@ Page {
                     // the richer URI text. Long-form detail (episode
                     // counts, error codes) stays in LiveView's banner.
                     text: Bridge.linkState === "ok"
-                          ? qsTr("Live · %1").arg(Bridge.currentUri)
+                          ? qsTr("Live · %1").arg(Bridge.uriLabel)
                           : Theme.linkLabel(Bridge.linkState)
                     font.pixelSize: 13
                     color: Theme.linkColor(Bridge.linkState)

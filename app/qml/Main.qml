@@ -169,7 +169,7 @@ ApplicationWindow {
                                     : Bridge.disconnecting ? qsTr("Disconnecting…")
                                     : Bridge.connected
                                       ? qsTr("%1 · %2").arg(Theme.linkLabel(Bridge.linkState))
-                                                        .arg(Bridge.currentUri)
+                                                        .arg(Bridge.uriLabel)
                                       : Theme.linkLabel(Bridge.linkState)
                             }
                         }

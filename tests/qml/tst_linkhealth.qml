@@ -5,7 +5,9 @@
 //          label and its activity log. Disconnected and ok everywhere
 //          (mock://demo); quiet, fault and requests on Windows, through
 //          the fake vendor DLL in-proc with a knob armed, as the manual
-//          smoke recipe in docs/testing.md does.
+//          smoke recipe in docs/testing.md does. The pill and the
+//          Dashboard show the fake's direct-load URI cut to its file
+//          name (Bridge.uriLabel); Settings shows it whole.
 
 import QtQuick
 import QtTest
@@ -78,10 +80,17 @@ TestCase {
         const tone = Theme.linkColor(state)
         const label = Theme.linkLabel(state)
         const uri = Bridge.currentUri
+        // The pill and the Dashboard show the label: the fake's URI is
+        // a direct-load path, which they cut to its file name
+        const shown = Bridge.uriLabel
+        if (uri.startsWith("j2534://") && uri.includes("/"))
+            verify(shown.startsWith("j2534://…/fake_j2534.dll"), "label cuts the path: " + shown)
+        else
+            compare(shown, uri, "label is the URI")
 
         sameColor(find(main.contentItem, "linkPill").tone, tone, "header pill")
         compare(find(main.contentItem, "linkPillText").text,
-                Bridge.connected ? label + " · " + uri : label, "header pill")
+                Bridge.connected ? label + " · " + shown : label, "header pill")
 
         const home = showPage(main, "homePage")
         sameColor(find(home, "linkDot").color, tone, "Home dot")
@@ -90,7 +99,7 @@ TestCase {
         const dashboard = showPage(main, "dashboardPage")
         sameColor(find(dashboard, "linkDot").color, tone, "Dashboard dot")
         const dashboardLabel = find(dashboard, "linkLabel")
-        compare(dashboardLabel.text, state === "ok" ? "Live · " + uri : label, "Dashboard label")
+        compare(dashboardLabel.text, state === "ok" ? "Live · " + shown : label, "Dashboard label")
         sameColor(dashboardLabel.color, tone, "Dashboard label")
 
         const live = showPage(main, "livePage")

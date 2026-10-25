@@ -1497,6 +1497,49 @@ TEST(BridgeTest, CurrentUriTracksConnectState)
     EXPECT_FALSE(bridge.connected());
 }
 
+TEST(BridgeTest, UriLabelCutsADirectLoadPathToItsFileName)
+{
+    const QString dots = QString(QChar(0x2026));
+    // A path selector, either separator, a drive or UNC root, the query kept
+    EXPECT_EQ(QtTuneBridge::uriLabelFor(
+                  QStringLiteral("j2534://E:/dev/build/fake_j2534.dll")),
+              QStringLiteral("j2534://") + dots +
+                  QStringLiteral("/fake_j2534.dll"));
+    EXPECT_EQ(QtTuneBridge::uriLabelFor(QStringLiteral(
+                  "j2534://C:\\Program "
+                  "Files\\Vendor\\vendor32.dll?profile=raw&filter=0x7E8")),
+              QStringLiteral("j2534://") + dots +
+                  QStringLiteral("/vendor32.dll?profile=raw&filter=0x7E8"));
+    EXPECT_EQ(QtTuneBridge::uriLabelFor(
+                  QStringLiteral("j2534://\\\\server\\share\\pt.dll")),
+              QStringLiteral("j2534://") + dots + QStringLiteral("/pt.dll"));
+
+    // A '/' in the query isn't a path
+    EXPECT_EQ(QtTuneBridge::uriLabelFor(
+                  QStringLiteral("j2534://OBDX Pro - VX?did=a/b")),
+              QStringLiteral("j2534://OBDX Pro - VX?did=a/b"));
+    // Vendor names, the first device, the mock and nothing pass unchanged
+    for (const char* uri :
+         {"j2534://OBDX Pro - VX", "j2534://", "j2534://?probe=0",
+          "mock://demo", "mock://a/b", ""}) {
+        EXPECT_EQ(QtTuneBridge::uriLabelFor(QString::fromLatin1(uri)),
+                  QString::fromLatin1(uri));
+    }
+
+    // The property follows currentUri
+    QtTuneBridge bridge;
+    EXPECT_TRUE(bridge.uriLabel().isEmpty());
+    int changed = 0;
+    QObject::connect(&bridge, &QtTuneBridge::currentUriChanged,
+                     [&changed]() { ++changed; });
+    ASSERT_TRUE(bridge.connectSession("mock://label").isEmpty());
+    EXPECT_EQ(bridge.uriLabel(), QStringLiteral("mock://label"));
+    EXPECT_EQ(changed, 1);
+    ASSERT_TRUE(disconnectAndWait(bridge));
+    EXPECT_TRUE(bridge.uriLabel().isEmpty());
+    EXPECT_EQ(changed, 2);
+}
+
 TEST(BridgeTest, AsyncConnectCompletesOffGuiThread)
 {
     QtTuneBridge bridge;

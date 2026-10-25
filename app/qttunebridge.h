@@ -219,6 +219,8 @@ class QtTuneBridge : public QObject
     Q_PROPERTY(int signalBatchCount READ signalBatchCount NOTIFY signalBatchChanged)
     Q_PROPERTY(SignalListModel* signalModel READ signalModel CONSTANT)
     Q_PROPERTY(QString currentUri READ currentUri NOTIFY currentUriChanged)
+    // currentUri as the header pill and the Dashboard show it (uriLabelFor)
+    Q_PROPERTY(QString uriLabel READ uriLabel NOTIFY currentUriChanged)
     Q_PROPERTY(QString linkState READ linkState NOTIFY linkStateChanged)
     Q_PROPERTY(int linkErrorCode READ linkErrorCode NOTIFY linkStateChanged)
     Q_PROPERTY(int errorEpisodes READ errorEpisodes NOTIFY linkStateChanged)
@@ -253,6 +255,7 @@ public:
     int signalBatchCount() const { return m_signalBatchCount; }
     SignalListModel* signalModel() const { return m_signalModel; }
     QString currentUri() const { return m_currentUri; }
+    QString uriLabel() const { return uriLabelFor(m_currentUri); }
     bool connecting() const { return m_connecting; }
     bool disconnecting() const { return m_disconnecting; }
     void dispatchFrameForTesting(const ecuio_frame_t& frame);
@@ -260,6 +263,7 @@ public:
     ecuio_session_t* pendingSessionForTesting() const { return m_pendingSession.load(); }
     QString linkState() const;
     static QString linkStateForError(int32_t errorCode);  /* code → state string; static so tests need no session */
+    static QString uriLabelFor(const QString& uri);  /* a direct-load DLL path cut to its file name */
     static QString sessionInfoText(const ecuio_session_info_t& info);  /* the activity log's "Session:" line */
     static QString channelSupportText(const ecuio_channel_support_t& support);  /* its "ECU 0x…:" lines */
     static QString channelIdentityText(const ecuio_channel_identity_t& identity);  /* its "ECU 0x… identity:" lines */
