@@ -353,8 +353,9 @@ rows against the current Home, Settings and Dashboard header.
   `ECUIO_EXPECT_J2534_DEVICES=1` on Windows so the dev machine's
   installed driver has to be found. `win-coverage` registers the fake
   DLL in both registry views (`REG_EXPAND_SZ`, an environment-variable
-  path) and demands it; `win-build` has no vendors and never sees a
-  non-empty result.
+  path) beside two entries discovery must skip (an empty
+  `FUNCTIONLIBRARY`, a number) and demands it; `win-build` has no
+  vendors and never sees a non-empty result.
 - **The mobile apps have never run on a device or emulator** (Known
   Issue #2). CI compiles both kits. The simulator smoke shows the iOS
   app starts and draws, but nothing taps through its UI, and it skips
