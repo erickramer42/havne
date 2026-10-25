@@ -172,6 +172,47 @@ jobs:
       - name: Run tests
         run: ctest --test-dir build -C Release --output-on-failure --no-tests=error
 
+  # Line coverage for the README badge: the whole suite under
+  # OpenCppCoverage (scripts/coverage.sh), uploaded to Codecov. Windows,
+  # because only here do the J2534 stack and the surrogate run. On pushes
+  # and manual runs, not pull requests: it is a second, unoptimised build.
+  # Pass/fail stays with win-build; a timing case that misses its bounds
+  # under the tool lowers the number, it doesn't fail this job.
+  win-coverage:
+    if: ${{ !inputs.smoke_only && github.event_name != 'pull_request' }}
+    runs-on: windows-latest
+    needs: core-and-tests
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # The same Qt install as win-build; see the notes there.
+      - name: Install aqtinstall (pinned master commit)
+        run: python -m pip install "aqtinstall @ git+https://github.com/miurahr/aqtinstall@076e1659807d0b362a3ed684d54c2e9c775eb9c7"
+
+      - name: Install Qt 6.12.0
+        run: |
+          $prefix = "${env:GITHUB_WORKSPACE}\Qt\6.12.0\msvc2022_64"
+          New-Item -ItemType Directory -Force -Path $prefix | Out-Null
+          python -m aqt install-qt windows desktop 6.12.0 win64_msvc2022_64 --outputdir "${env:GITHUB_WORKSPACE}\Qt" --external 7z
+          "QT_PREFIX=$prefix" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Install OpenCppCoverage
+        run: choco install opencppcoverage --version=0.9.9.0 --no-progress -y
+
+      # No Pass-Thru driver on the runner, so discovery can't demand one.
+      - name: Measure coverage
+        shell: bash
+        run: bash scripts/coverage.sh --no-devices
+
+      - name: Upload to Codecov
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
+        with:
+          files: Testing/coverage/cobertura.xml
+          disable_search: true
+          token: ${{ secrets.CODECOV_TOKEN }}
+          fail_ci_if_error: true
+
   macos-build:
     if: ${{ !inputs.smoke_only }}
     runs-on: macos-latest

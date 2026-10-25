@@ -382,7 +382,9 @@ writes `Testing/coverage/html/index.html` and
 `Testing/coverage/cobertura.xml`. Native code only: QML, the x86
 surrogate, the tests and the fake DLLs aren't counted, and `app/main.cpp`
 isn't linked into any test, so it isn't in the report. `--tests-only`
-and `-R` work as in `verify.sh`.
+and `-R` work as in `verify.sh`. CI's `win-coverage` job runs the same
+script on every push and uploads the Cobertura file to Codecov for the
+README badge ([testing.md](testing.md#coverage)).
 
 ## Troubleshooting
 

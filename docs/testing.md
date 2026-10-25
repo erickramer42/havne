@@ -48,6 +48,28 @@ and the next run's screenshots confirmed the fixes the same day.
 `ctest -N` lists every case. The current total is in
 [STATUS.md](../STATUS.md).
 
+## Coverage
+
+The README's badge is line coverage measured by OpenCppCoverage over the
+whole ctest suite, in CI's `win-coverage` job on every push, published
+to [Codecov](https://codecov.io/gh/erickramer42/qttune) with a per-file
+view. `scripts/coverage.sh` runs the same measurement locally
+([development.md](development.md#running-tests)).
+
+- **Counted:** the native code in `core/`, `surrogate/` (the x64 child,
+  which the surrogate cases spawn) and `app/` (the bridge and the
+  recorder). A line counts as covered when any test binary ran it.
+- **Not counted:** QML and its JavaScript, which `test_qml` exercises
+  but OpenCppCoverage can't see; `app/main.cpp`, which no test links;
+  the x86 surrogate, because CI never runs the cross-arch
+  configuration; and the tests and fake DLLs themselves. There's no
+  branch coverage.
+- **What it doesn't show:** a covered line ran, nothing more. The
+  real-hardware and vehicle gaps below are outside what any coverage
+  number measures. Most uncovered lines are failure branches the fake
+  can't provoke: pipe I/O timeouts, a child's startup exit codes, a
+  thread that fails to start.
+
 ## What is verified
 
 | Capability | Verified by |
