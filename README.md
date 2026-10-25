@@ -14,7 +14,7 @@ simulated vehicle lets it run with no hardware at all.
 >
 > QtTune runs end-to-end against the simulator and a fake J2534 vendor driver. Through a real adapter it has read live data from one vehicle: in a read-only session on 2026-10-22 the engine ECU answered its Mode-01 requests and the values decoded and tracked the instrument cluster ([session sheet](docs/bench-sessions/2026-10-22-vehicle.md)). Other vehicles and adapters are untested; [STATUS.md](STATUS.md) tracks what is and isn't verified.
 
-![The QtTune Dashboard during a full-throttle 2nd-gear pull on the simulated vehicle: rpm and speed climb together, the shift lights fill, then the tachometer saws just under 7,000 rpm on the fuel-cut limiter while speed holds at 70 mph, before the driver lifts](docs/images/dashboard.gif)
+![The QtTune Dashboard through a quarter mile on the warmed-up simulated vehicle: launch control holds the engine near 4,000 rpm at the line, the tires spin off it, three upshifts at 6,800 rpm refill the shift lights, and speed climbs to about 106 mph at the line while coolant rises from 196 to 212 °F with the oil near 237 °F, before the driver lifts](docs/images/dashboard.gif)
 
 *The Dashboard in real time on the built-in simulated vehicle
 (`mock://demo`), with no hardware attached: a full-throttle pull in
@@ -136,10 +136,12 @@ screen, is [docs/architecture.md](docs/architecture.md).
   `raw` (log only), with `?profile=` to override
   ([ADR-0013](docs/adr/0013-protocol-profiles.md)).
 - **Simulated vehicle.** A modelled car (gear ratios, airflow and
-  torque, tyres with weight transfer, block, coolant and oil
+  torque, tires with weight transfer, block, coolant and oil
   temperatures) runs a scripted drive: a cold start, two full-throttle
   pulls onto a fuel-cut limiter, a highway cruise, then a quarter mile
-  off launch control with wheelspin. Its readings stay consistent with
+  off launch control with wheelspin. Only the first loop is cold: each
+  later one picks up the heat the last left, so the temperatures climb
+  to where a hard-driven car's sit. Its readings stay consistent with
   each other the way a real ECU's log does: rpm with speed and gear,
   airflow with load and lambda. Like a real log they never sit dead
   still: the idle hunts, the driver can't hold a speed to the km/h,

@@ -841,3 +841,21 @@ jitter) and give the driver human pedal rates and a lift for every
 shift. Every disturbance is deterministic noise, so the tests stay
 exact, and `CoreTest.MockDriveCycleReadingsNeverHoldDeadStill` now
 fails a reading that holds still or steps between phases.
+
+**2026-10-25 — the mock's cold demo:** **check a model against the
+window it's watched in, not only the tests' window.** The README's
+Dashboard GIF showed coolant and oil under 100 °F through a
+full-throttle pull. The cold start's warm-up rate came from the first
+vehicle and was right, but one loop is about two minutes and the GIF
+was taken 29 s in, so every frame showed a cold engine. Later loops
+already carried the heat over, yet measuring ten of them showed the
+model never looked like a hard-driven car either: the radiator held
+the coolant at 88–95 °C even at WOT, and the oil topped out at 104 °C
+while swinging 14 °C inside one quarter mile, which a 5–6 L sump
+can't do. The fix kept the first loop cold and retuned the heat paths:
+a radiator that can't keep up at WOT, piston and bearing heat into the
+oil, and a sump mass that lets one pull move it only a few degrees. By
+the third loop the coolant runs 90–100 °C and the oil builds to
+110–118 °C. `CoreTest.MockDriveCycleLaterLoopsRunAtOperatingTemperature`
+pins both loops' character, and the GIF is now a quarter mile on a warm
+loop.
