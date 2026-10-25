@@ -854,8 +854,17 @@ the coolant at 88–95 °C even at WOT, and the oil topped out at 104 °C
 while swinging 14 °C inside one quarter mile, which a 5–6 L sump
 can't do. The fix kept the first loop cold and retuned the heat paths:
 a radiator that can't keep up at WOT, piston and bearing heat into the
-oil, and a sump mass that lets one pull move it only a few degrees. By
-the third loop the coolant runs 90–100 °C and the oil builds to
-110–118 °C. `CoreTest.MockDriveCycleLaterLoopsRunAtOperatingTemperature`
+oil, and a sump mass that lets one pull move it only several degrees.
+The second loop warms through the thermostat; from the third the
+coolant runs 88–102 °C, and by the fifth the oil has built to
+108–117 °C. `CoreTest.MockDriveCycleLaterLoopsRunAtOperatingTemperature`
 pins both loops' character, and the GIF is now a quarter mile on a warm
-loop.
+loop. A review of the first retune found three things the tests hadn't
+pinned: the oil's friction heat was added on top of the fuel's heat
+rather than taken from it, the weaker radiator had left the fan
+(102 °C) out of reach, so it never ran, and the docs' "from the third
+loop" figures came from the sixth. The heat shares, masses and
+radiator now sit in named constants, the friction share comes out of
+the block's when fueled, the fan cuts in on the quarter mile, and the
+test checks the WOT peak, the fan and the first and last loops
+separately.

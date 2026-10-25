@@ -14,11 +14,11 @@ simulated vehicle lets it run with no hardware at all.
 >
 > QtTune runs end-to-end against the simulator and a fake J2534 vendor driver. Through a real adapter it has read live data from one vehicle: in a read-only session on 2026-10-22 the engine ECU answered its Mode-01 requests and the values decoded and tracked the instrument cluster ([session sheet](docs/bench-sessions/2026-10-22-vehicle.md)). Other vehicles and adapters are untested; [STATUS.md](STATUS.md) tracks what is and isn't verified.
 
-![The QtTune Dashboard through a quarter mile on the warmed-up simulated vehicle: launch control holds the engine near 4,000 rpm at the line, the tires spin off it, three upshifts at 6,800 rpm refill the shift lights, and speed climbs to about 106 mph at the line while coolant rises from 196 to 212 °F with the oil near 237 °F, before the driver lifts](docs/images/dashboard.gif)
+![The QtTune Dashboard through a quarter mile on the warmed-up simulated vehicle: launch control holds the engine near 4,000 rpm at the line, the tires spin off it, three upshifts at 6,800 rpm refill the shift lights, and speed climbs to about 107 mph at the line while coolant rises from 194 to 216 °F, where the fan cuts in, and the oil from 225 to 239 °F, before the driver lifts](docs/images/dashboard.gif)
 
 *The Dashboard in real time on the built-in simulated vehicle
-(`mock://demo`), with no hardware attached: a full-throttle pull in
-2nd onto the fuel-cut limiter, then the lift.*
+(`mock://demo`), with no hardware attached: a quarter mile off launch
+control on a warm loop, then the lift.*
 
 ## Try it
 
