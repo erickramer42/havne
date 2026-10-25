@@ -55,6 +55,9 @@ typedef char abi_support_reserved_check[(offsetof(ecuio_channel_support_t, reser
 typedef char abi_identity_item_check[(sizeof(ecuio_identity_item_t) == 72) ? 1 : -1];
 typedef char abi_identity_size_check[(sizeof(ecuio_channel_identity_t) == 1184) ? 1 : -1];
 typedef char abi_identity_list_check[(offsetof(ecuio_channel_identity_t, list) == 32) ? 1 : -1];
+typedef char abi_display_size_check[(sizeof(ecuio_display_value_t) == 32) ? 1 : -1];
+typedef char abi_display_unit_check[(offsetof(ecuio_display_value_t, unit) == 8) ? 1 : -1];
+typedef char abi_display_decimals_check[(offsetof(ecuio_display_value_t, decimal_places) == 24) ? 1 : -1];
 
 int main(void)
 {
@@ -65,6 +68,7 @@ int main(void)
     ecuio_session_info_t info;
     ecuio_channel_support_t support;
     ecuio_channel_identity_t identity;
+    ecuio_display_value_t shown;
     const uint8_t vin_request[2] = {0x09, 0x02};
     frame.arbitration_id = 0x7FF;
     frame.channel_id = 0;
@@ -93,6 +97,11 @@ int main(void)
         return 1;
     }
     if (ecuio_decode_text(NULL, NULL, 0, NULL, 0) != ECUIO_DECODE_ERR_NULL) {
+        return 1;
+    }
+    if (ecuio_display_convert("km/h", 0, 100.0, ECUIO_UNITS_IMPERIAL, &shown) !=
+            ECUIO_DISPLAY_OK ||
+        strcmp(shown.unit, "mph") != 0 || shown.converted != 1) {
         return 1;
     }
     if (ecuio_session_get_channel_support(NULL, 0, &support) !=

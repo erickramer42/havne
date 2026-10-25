@@ -16,14 +16,15 @@ extern "C" {
 #define ECUIO_MOCK_SIG_LOAD_ID     6001
 #define ECUIO_MOCK_SIG_MAF_ID      8001
 #define ECUIO_MOCK_SIG_OIL_ID      9001
+#define ECUIO_MOCK_SIG_LAMBDA_ID   10001
 /* CAN arbitration ID carrying the mock telemetry payload. SHARED by
  * mock_transport.cpp (encoder) and signal_sets.cpp (signal defs) so
  * the two halves of the round-trip contract cannot drift apart. */
 #define ECUIO_MOCK_TELEMETRY_ARB_ID  0x0C0u
-/* Mock telemetry payload length. The signals need 10 bytes and classic
+/* Mock telemetry payload length. The signals need 12 bytes and classic
  * CAN carries 8, so mock frames are CAN FD (ECUIO_FRAME_FLAG_FD) at
- * 12 bytes, the next valid FD length; bytes 10-11 are padding. Shared
- * by the encoder, the worker and the tests. */
+ * 12 bytes, a valid FD length. Shared by the encoder, the worker and
+ * the tests. */
 #define ECUIO_MOCK_TELEMETRY_PAYLOAD_LEN  12u
 
 /* ---- OBD-II v1 set (ADR-0013) ----

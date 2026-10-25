@@ -4,8 +4,9 @@
 //          gaps), and to 1280 × 650 (the wide arrangement fits without
 //          scrolling); gauges sweep once per session. test_qml
 //          (tests/qml/tst_dashboard.qml) covers each Tap's lookup and
-//          note, and tst_linkhealth.qml the header's link state, found
-//          by objectName
+//          note, the gauges' imperial units, scales and zones, and the
+//          peaks cleared on a change of units; tst_linkhealth.qml the
+//          header's link state, found by objectName
 
 import QtQuick
 import QtQuick.Controls
@@ -108,6 +109,19 @@ Page {
             if (Bridge.connected) root.resetPeaks()
             root.maybeSweep()
         }
+        // A peak held in the old units would read wrong in the new ones
+        function onUnitSystemChanged() { root.resetPeaks() }
+    }
+
+    // Scale ends and zones are written once, in the decoded units, and
+    // shown in the current unit system through core (ADR-0022). Reading
+    // Bridge.unitSystem here makes each binding follow a change.
+    readonly property string degC: "°C"
+    function shown(unit, v) {
+        return Bridge.unitSystem === 0 ? v : Bridge.displayValue(unit, v)
+    }
+    function shownUnit(unit) {
+        return Bridge.unitSystem === 0 ? unit : Bridge.displayUnit(unit)
     }
 
     Flickable {
@@ -220,11 +234,12 @@ Page {
                         id: speedo
                         anchors.fill: parent
                         label: qsTr("Vehicle speed")
-                        caption: speed.unit || qsTr("km/h")
-                        unit: speed.unit || qsTr("km/h")
+                        caption: speed.unit || root.shownUnit("km/h")
+                        unit: speed.unit || root.shownUnit("km/h")
                         decimals: speed.decimals
                         value: speed.value; hasValue: speed.live; stale: speed.stale; note: speed.note
-                        from: 0; to: 260
+                        // Round ends in either system: 260 km/h, 160 mph
+                        from: 0; to: Bridge.unitSystem === 0 ? 260 : 160
                         majorStep: 20; minorStep: 10
                         showPeak: true
                         peakLabel: qsTr("TOP")
@@ -247,14 +262,16 @@ Page {
                             id: coolantRing
                             anchors.fill: parent
                             label: qsTr("Coolant")
-                            unit: coolant.unit || "°C"
+                            unit: coolant.unit || root.shownUnit(root.degC)
                             decimals: coolant.decimals
                             value: coolant.value; hasValue: coolant.live; stale: coolant.stale
                             note: coolant.note
                             // From 0 °C, so a cold engine at ambient reads on
                             // the scale instead of pinning at its start
-                            from: 0; to: 130
-                            coldBelow: 60; warnFrom: 105; dangerFrom: 115
+                            from: root.shown(root.degC, 0); to: root.shown(root.degC, 130)
+                            coldBelow: root.shown(root.degC, 60)
+                            warnFrom: root.shown(root.degC, 105)
+                            dangerFrom: root.shown(root.degC, 115)
                         }
                     }
                     GaugeCard {
@@ -264,12 +281,15 @@ Page {
                             id: oilRing
                             anchors.fill: parent
                             label: qsTr("Oil temp")
-                            unit: oil.unit || "°C"
+                            unit: oil.unit || root.shownUnit(root.degC)
                             decimals: oil.decimals
                             value: oil.value; hasValue: oil.live; stale: oil.stale
                             note: oil.note
-                            from: 0; to: 160   // from 0 °C, like coolant
-                            coldBelow: 70; warnFrom: 125; dangerFrom: 140
+                            // From 0 °C, like coolant
+                            from: root.shown(root.degC, 0); to: root.shown(root.degC, 160)
+                            coldBelow: root.shown(root.degC, 70)
+                            warnFrom: root.shown(root.degC, 125)
+                            dangerFrom: root.shown(root.degC, 140)
                         }
                     }
                     GaugeCard {
@@ -280,11 +300,12 @@ Page {
                             anchors.fill: parent
                             label: qsTr("IAT")
                             description: qsTr("Intake air temperature")
-                            unit: iat.unit || "°C"
+                            unit: iat.unit || root.shownUnit(root.degC)
                             decimals: iat.decimals
                             value: iat.value; hasValue: iat.live; stale: iat.stale; note: iat.note
-                            from: 0; to: 120
-                            warnFrom: 55; dangerFrom: 70
+                            from: root.shown(root.degC, 0); to: root.shown(root.degC, 120)
+                            warnFrom: root.shown(root.degC, 55)
+                            dangerFrom: root.shown(root.degC, 70)
                         }
                     }
                     GaugeCard {
@@ -295,10 +316,10 @@ Page {
                             anchors.fill: parent
                             label: qsTr("MAF")
                             description: qsTr("Mass air flow")
-                            unit: maf.unit || "g/s"
+                            unit: maf.unit || root.shownUnit("g/s")
                             decimals: maf.decimals
                             value: maf.value; hasValue: maf.live; stale: maf.stale; note: maf.note
-                            from: 0; to: 300
+                            from: 0; to: root.shown("g/s", 300)
                             accent: Theme.info
                         }
                     }

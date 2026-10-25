@@ -1,6 +1,6 @@
 # QtTune
 
-[![CI](https://github.com/erickramer42/qttune/actions/workflows/ci.yml/badge.svg)](https://github.com/erickramer42/qttune/actions/workflows/ci.yml) [![Coverage](https://codecov.io/gh/erickramer42/qttune/graph/badge.svg)](https://codecov.io/gh/erickramer42/qttune)
+[![CI](https://github.com/erickramer42/qttune/actions/workflows/ci.yml/badge.svg)](https://github.com/erickramer42/qttune/actions/workflows/ci.yml) [![Coverage](https://codecov.io/gh/erickramer42/qttune/graph/badge.svg)](https://codecov.io/gh/erickramer42/qttune) [![Release](https://img.shields.io/github/v/release/erickramer42/qttune)](https://github.com/erickramer42/qttune/releases/latest)
 [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/erickramer42/qttune/badge)](https://scorecard.dev/viewer/?uri=github.com/erickramer42/qttune) [![OpenSSF Best Practices](https://www.bestpractices.dev/projects/15816/badge)](https://www.bestpractices.dev/projects/15816)
 
 QtTune is a cross-platform OBD-II reader and logger. A Qt-free C++17
@@ -14,10 +14,22 @@ simulated vehicle lets it run with no hardware at all.
 >
 > QtTune runs end-to-end against the simulator and a fake J2534 vendor driver. Through a real adapter it has read live data from one vehicle: in a read-only session on 2026-10-22 the engine ECU answered its Mode-01 requests and the values decoded and tracked the instrument cluster ([session sheet](docs/bench-sessions/2026-10-22-vehicle.md)). Other vehicles and adapters are untested; [STATUS.md](STATUS.md) tracks what is and isn't verified.
 
-![The QtTune Dashboard at full throttle on the simulated vehicle: 6,325 rpm, 103 km/h, shift lights lit](docs/images/dashboard.png)
+![The QtTune Dashboard during a full-throttle 2nd-gear pull on the simulated vehicle: rpm and speed climb together, the shift lights fill, then the tachometer saws just under 7,000 rpm on the fuel-cut limiter while speed holds at 70 mph, before the driver lifts](docs/images/dashboard.gif)
 
-*The Dashboard mid-pull on the built-in simulated vehicle
-(`mock://demo`), with no hardware attached.*
+*The Dashboard in real time on the built-in simulated vehicle
+(`mock://demo`), with no hardware attached: a full-throttle pull in
+2nd onto the fuel-cut limiter, then the lift.*
+
+## Try it
+
+On Windows 10 or 11 (x64), download the zip from the
+[latest release](https://github.com/erickramer42/qttune/releases/latest),
+unzip it and run `qttune.exe`. Nothing else is needed: Qt and the
+Visual C++ runtime are in the zip. The program isn't code-signed, so
+SmartScreen may stop it the first time (**More info**, then **Run
+anyway**). In Settings, press the `mock://demo` preset and **Connect**
+to watch the simulated car drive. Other platforms build from source
+([Build](#build)).
 
 ## Architecture
 
@@ -107,6 +119,10 @@ screen, is [docs/architecture.md](docs/architecture.md).
 - **Fits the screen.** The Dashboard rearranges for a short, wide
   window, pages that run long scroll, and Ctrl + / Ctrl − zooms the
   whole UI (or Settings' Display row), kept between runs.
+- **Metric or imperial.** Settings switches every page between km/h,
+  °C and g/s and mph, °F and lb/min, chart history included, and
+  remembers the choice. Recordings keep the values as the ECU sent
+  them ([ADR-0022](docs/adr/0022-display-units.md)).
 - **Session recording.** Opt-in: each connect writes every frame,
   every decoded value and the session's events to CSV and text files,
   with host and adapter time side by side
@@ -119,10 +135,22 @@ screen, is [docs/architecture.md](docs/architecture.md).
   (the default for `mock://`), `obd2` (the default for `j2534://`) or
   `raw` (log only), with `?profile=` to override
   ([ADR-0013](docs/adr/0013-protocol-profiles.md)).
-- **Simulated vehicle.** A modelled drivetrain (gear ratios, torque
-  curve, heat soak) runs a scripted drive: warm-up, two full-throttle
-  pulls into the limiter, then a quarter-mile run. Every page works
-  with no hardware.
+- **Simulated vehicle.** A modelled car (gear ratios, airflow and
+  torque, tyres with weight transfer, block, coolant and oil
+  temperatures) runs a scripted drive: a cold start, two full-throttle
+  pulls onto a fuel-cut limiter, a highway cruise, then a quarter mile
+  off launch control with wheelspin. Its readings stay consistent with
+  each other the way a real ECU's log does: rpm with speed and gear,
+  airflow with load and lambda. Like a real log they never sit dead
+  still: the idle hunts, the driver can't hold a speed to the km/h,
+  and the road rises and falls. Every page works with no hardware.
+
+## Screenshots
+
+| Live view | Frame log | Link health |
+|---|---|---|
+| [![Live view: RPM, speed, MAF and lambda plotted through a 3rd-gear pull onto the limiter](docs/images/live.png)](docs/images/live.png) | [![Frame log: raw mock frames newest-first, about 50 ms apart, with the 29-bit diagnostic frame every 16th](docs/images/log.png)](docs/images/log.png) | [![Live view over J2534 with every request failing: an amber "Requests failing" banner and pill, and each signal waiting for data](docs/images/link-health.png)](docs/images/link-health.png) |
+| A 3rd-gear pull onto the limiter: rpm and speed rise together, then rpm saws while speed holds, MAF stays on its plateau and lambda (dashed) swings lean on each fuel cut | Raw frames as they arrive, with session time, length, the extended-ID flag and payload | Through the in-tree fake J2534 driver with every write refused: the link is judged "requests failing", not idle, and the page says what to check |
 
 ## Roadmap
 
@@ -131,7 +159,8 @@ screen, is [docs/architecture.md](docs/architecture.md).
 | v0.1.0 | Skeleton: core ABI, Qt shell, responsive layout | ✅ Released |
 | v0.2.0 | Callback API, mock transport, live frame log | ✅ Released |
 | v0.3.0 | Signal decoding, live view, J2534 transport, live vehicle read and logging (tested on one vehicle) | ✅ Released |
-| v0.3.x | Request engine, PID-support probe, generic UDS reads, record-replay transport | Next |
+| v0.3.1 | Request engine, PID-support probe, vehicle identification, generic UDS reads, imperial units; the first Windows download | ✅ Released |
+| v0.3.x | Record-replay transport; the request engine on a car | Next |
 | v0.4.0 | Security access discovery, flash capability | Planned |
 | v0.5.0+ | Manufacturer plugin modules | Planned |
 

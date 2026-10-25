@@ -1,0 +1,42 @@
+Third-party software in this package
+====================================
+
+QtTune itself is licensed under the MIT licence (LICENSE.txt). This
+package also contains the software below, each under its own terms.
+
+
+Qt 6.12.0
+---------
+
+Copyright (C) The Qt Company Ltd. and other contributors.
+
+QtTune uses Qt under the GNU Lesser General Public License, version 3
+(licenses\LGPL-3.0.txt, which builds on licenses\GPL-3.0.txt). Qt is
+linked dynamically: the Qt6*.dll files and the plugins and QML modules
+under platforms\, qml\ and the other folders here are Qt's unmodified
+binaries, and you may replace them with your own build of the same Qt
+version.
+
+The source code for this Qt version is available from
+https://download.qt.io/official_releases/qt/6.12/6.12.0/ and from
+https://code.qt.io. Qt's own third-party components and their licences
+are listed at https://doc.qt.io/qt-6/licenses-used-in-qt.html.
+
+Qt's Windows deployment also places these graphics runtime files in
+the folder, each redistributed under its own terms as Qt documents
+them: D3Dcompiler_47.dll, dxcompiler.dll and dxil.dll (Microsoft
+DirectX shader compilers) and opengl32sw.dll (a software OpenGL
+renderer built from Mesa).
+
+QtTune is an independent project, not affiliated with or endorsed by
+The Qt Company.
+
+
+Microsoft Visual C++ Runtime
+----------------------------
+
+The vcruntime140*.dll, msvcp140*.dll, concrt140.dll and vccorlib140.dll
+files are the Microsoft Visual C++ redistributable runtime, copied from
+Visual Studio's redistributable folder and distributed with this
+application under the Visual Studio licence terms for redistributable
+code.

@@ -1298,6 +1298,106 @@ TEST(BridgeTest, DecimalsComeFromTheDefAndReachTheChart)
     EXPECT_EQ(data.at(0).toMap().value("decimals").toInt(), 2);
 }
 
+TEST(BridgeTest, UnitSystemConvertsRowsAndChartAndKeepsHistory)
+{
+    /* The model keeps decoded values; imperial converts value, unit,
+     * decimals and the chart's whole history on the way out, and metric
+     * gives back exactly what was decoded. A unit with no imperial form
+     * passes through. */
+    SignalListModel model;
+    ecuio_signal_def_t defs[2];
+    ecuio_signal_set_t set;
+    buildTestSignalSet(defs, set);
+    std::memset(defs[0].unit, 0, sizeof defs[0].unit);
+    std::memcpy(defs[0].unit, "km/h", 4);
+    std::memset(defs[1].unit, 0, sizeof defs[1].unit);
+    std::memcpy(defs[1].unit, "\xC2\xB0" "C", 3);
+    defs[1].decimal_places = 1;
+    model.setSignalSet(&set);
+    int redraws = 0;
+    QObject::connect(&model, &SignalListModel::valuesUpdated, [&redraws]() { ++redraws; });
+
+    for (int i = 0; i < 3; ++i) {
+        std::vector<std::pair<uint16_t, double>> batch;
+        batch.emplace_back(uint16_t(1001), 100.0 + i);
+        batch.emplace_back(uint16_t(2001), 90.0 + i);
+        model.updateValues(batch, i * 100);
+    }
+    const int before = redraws;
+    const QModelIndex speed = model.index(0, 0);
+    const QModelIndex temp = model.index(1, 0);
+
+    model.setUnitSystem(ECUIO_UNITS_IMPERIAL);
+    EXPECT_EQ(redraws, before + 1) << "the chart must redraw in the new units";
+    EXPECT_NEAR(model.data(speed, SignalListModel::ValueRole).toDouble(), 102.0 * 0.621371192237334, 1e-9);
+    EXPECT_EQ(model.data(speed, SignalListModel::UnitRole).toString(), QStringLiteral("mph"));
+    EXPECT_NEAR(model.data(temp, SignalListModel::ValueRole).toDouble(), 92.0 * 1.8 + 32.0, 1e-9);
+    EXPECT_EQ(model.data(temp, SignalListModel::UnitRole).toString(), QString::fromUtf8("\xC2\xB0" "F"));
+    EXPECT_EQ(model.data(temp, SignalListModel::DecimalsRole).toInt(), 1);
+
+    const QVariantList chart = model.chartData();
+    ASSERT_EQ(chart.size(), 2);
+    for (const QVariant& v : chart) {
+        const QVariantMap m = v.toMap();
+        const QVariantList samples = m.value("samples").toList();
+        ASSERT_EQ(samples.size(), 6) << "history lost on a unit change";
+        if (m.value("id").toInt() == 1001) {
+            EXPECT_EQ(m.value("unit").toString(), QStringLiteral("mph"));
+            EXPECT_NEAR(samples.at(1).toDouble(), 100.0 * 0.621371192237334, 1e-9);
+        } else {
+            EXPECT_NEAR(samples.at(5).toDouble(), 92.0 * 1.8 + 32.0, 1e-9);
+        }
+    }
+
+    model.setUnitSystem(ECUIO_UNITS_METRIC);
+    EXPECT_EQ(model.data(speed, SignalListModel::ValueRole).toDouble(), 102.0);
+    EXPECT_EQ(model.data(speed, SignalListModel::UnitRole).toString(), QStringLiteral("km/h"));
+    EXPECT_EQ(model.chartData().at(1).toMap().value("samples").toList().at(1).toDouble(), 90.0);
+}
+
+TEST(BridgeTest, UnitSystemShowsImperialAndRecordsDecodedUnits)
+{
+    /* The property takes metric or imperial only. The Dashboard's
+     * helpers convert through core. A recording keeps what the ECU sent,
+     * whatever the screen shows. */
+    QTemporaryDir root;
+    ASSERT_TRUE(root.isValid());
+    QtTuneBridge bridge;
+    bridge.setRecordingsRootForTesting(root.path());
+    EXPECT_EQ(bridge.unitSystem(), 0);
+    int changes = 0;
+    QObject::connect(&bridge, &QtTuneBridge::unitSystemChanged, [&changes]() { ++changes; });
+    bridge.setUnitSystem(7);
+    EXPECT_EQ(bridge.unitSystem(), 0);
+    bridge.setUnitSystem(1);
+    bridge.setUnitSystem(1);
+    EXPECT_EQ(bridge.unitSystem(), 1);
+    EXPECT_EQ(changes, 1);
+    EXPECT_NEAR(bridge.displayValue(QStringLiteral("km/h"), 160.0), 99.4193907579734, 1e-9);
+    EXPECT_EQ(bridge.displayUnit(QStringLiteral("km/h")), QStringLiteral("mph"));
+    EXPECT_EQ(bridge.displayValue(QStringLiteral("%"), 42.0), 42.0);
+
+    bridge.setRecording(true);
+    ASSERT_TRUE(bridge.connectSession("mock://units").isEmpty());
+    ASSERT_TRUE(spinUntil([&bridge]() { return bridge.signalBatchCount() > 2; }, 5000));
+    SignalListModel* model = bridge.signalModel();
+    bool sawMph = false;
+    for (int r = 0; r < model->rowCount(); ++r) {
+        sawMph = sawMph || model->data(model->index(r, 0), SignalListModel::UnitRole).toString() ==
+                                QStringLiteral("mph");
+    }
+    EXPECT_TRUE(sawMph) << "no row shows mph under imperial";
+    ASSERT_TRUE(disconnectAndWait(bridge));
+
+    const QStringList folders = recordingFolders(root.path());
+    ASSERT_EQ(folders.size(), 1);
+    const QByteArray signalsCsv =
+        readFile(root.path() + QStringLiteral("/") + folders.first() + QStringLiteral("/signals.csv"));
+    EXPECT_TRUE(signalsCsv.contains(",Vehicle Speed,")) << signalsCsv.left(400).toStdString();
+    EXPECT_TRUE(signalsCsv.contains(",km/h")) << "the recording should keep km/h";
+    EXPECT_FALSE(signalsCsv.contains("mph")) << "the recording followed the display";
+}
+
 TEST(BridgeTest, StripChartDataPopulatedByLiveStream)
 {
     /* End-to-end through the coalescer: real mock frames -> decode ->

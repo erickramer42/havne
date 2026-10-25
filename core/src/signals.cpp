@@ -1,5 +1,6 @@
 // File/layer: core/src/signals.cpp | C++17, Qt-free
-// Testing: UNIT — BE vs LE round-trip, mux acceptance/rejection, validator rules
+// Testing: UNIT — BE vs LE round-trip, mux acceptance/rejection, validator
+//          rules, display-unit conversion (SignalsTest.DisplayConvert*)
 
 #include <ecuio/signals.h>
 #include <ecuio/internal.h>
@@ -390,4 +391,62 @@ int ecuio_validate_signal(const ecuio_signal_def_t* signal)
     }
 
     return ECUIO_VALIDATE_OK;
+}
+
+/* Imperial conversions, keyed by the decoded unit: to = from * scale +
+ * offset, with extra decimal places where the new unit is coarser. */
+struct display_conversion {
+    const char* from;
+    const char* to;
+    double scale;
+    double offset;
+    uint8_t extra_decimals;
+};
+
+static const display_conversion kImperial[] = {
+    {"km/h",              "mph",               0.621371192237334, 0.0,  0},
+    {"\xC2\xB0" "C",      "\xC2\xB0" "F",      1.8,               32.0, 0},
+    {"kPa",               "psi",               0.145037737730209, 0.0,  1},
+    {"g/s",               "lb/min",            0.132277357312033, 0.0,  1},
+    {"km",                "mi",                0.621371192237334, 0.0,  0},
+};
+
+int ecuio_display_convert(const char* unit, uint8_t decimal_places,
+                          double value, uint32_t units,
+                          ecuio_display_value_t* out)
+{
+    if (!unit || !out) {
+        return ECUIO_DISPLAY_ERR_NULL;
+    }
+    if (units != ECUIO_UNITS_METRIC && units != ECUIO_UNITS_IMPERIAL) {
+        return ECUIO_DISPLAY_ERR_UNITS;
+    }
+
+    ecuio_display_value_t result;
+    memset(&result, 0, sizeof result);
+    result.value = value;
+    result.decimal_places = decimal_places;
+    /* Bounded copy: a def's unit is at most 15 bytes, but this takes
+     * any string */
+    size_t n = strlen(unit);
+    if (n >= sizeof result.unit) {
+        n = sizeof result.unit - 1;
+    }
+    memcpy(result.unit, unit, n);
+
+    if (units == ECUIO_UNITS_IMPERIAL) {
+        for (const display_conversion& c : kImperial) {
+            if (strcmp(unit, c.from) == 0) {
+                result.value = value * c.scale + c.offset;
+                memset(result.unit, 0, sizeof result.unit);
+                memcpy(result.unit, c.to, strlen(c.to));
+                const unsigned dp = (unsigned)decimal_places + c.extra_decimals;
+                result.decimal_places = (uint8_t)(dp > 3u ? 3u : dp);
+                result.converted = 1;
+                break;
+            }
+        }
+    }
+    *out = result;
+    return ECUIO_DISPLAY_OK;
 }
