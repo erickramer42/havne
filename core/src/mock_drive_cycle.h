@@ -3,7 +3,9 @@
 // C++17, Qt-free, no platform headers.
 // Testing: UNIT — CoreTest.MockDriveCycle* step whole loops tick by tick
 //     and round-trip every tick through the mock signal set (test_core);
-//     CoreTest.MockFramesDecodeAgainstMockSignalSet covers the worker.
+//     CoreTest.MockDriveCycleSignalsStayPhysical checks every tick against
+//     the consistency rules below; CoreTest.MockFramesDecodeAgainstMockSignalSet
+//     covers the worker.
 
 #ifndef ECUIO_MOCK_DRIVE_CYCLE_H
 #define ECUIO_MOCK_DRIVE_CYCLE_H
@@ -15,26 +17,42 @@
 
 namespace ecuio_mock {
 
-/* Scripted drive cycle for the mock transport. A small vehicle model
- * (gear ratios, a torque curve, traction, drag and two heat
- * accumulators) is driven by a phase script, so RPM, speed and
- * distance stay consistent with each other:
+/* Scripted drive cycle for the mock transport. A vehicle model (gear
+ * ratios, an airflow and torque model, tyres with weight transfer,
+ * drag, and a block, coolant, oil and under-hood heat model) is driven
+ * by a phase script. The aim is readings that look like a real ECU's
+ * log of what the car is doing, so the signals stay consistent with
+ * each other: rpm with speed and gear, airflow with load and lambda,
+ * temperatures with the heat that went in.
  *
- *   WarmUp      cold start, neutral idle with two rev blips (first loop only)
+ *   WarmUp      cold start: fast idle, open-loop fueling (first loop only)
  *   Roll2nd     pull away, settle in 2nd at ~25 km/h (~1550 rpm)
  *   Pull2nd     WOT in 2nd to the rev limiter (~113 km/h)
- *   Limiter2nd  5 s on the limiter
- *   Slow2nd     lift and brake to 45 km/h, shift to 3rd
+ *   Limiter2nd  5 s on the fuel-cut limiter
+ *   Slow2nd     lift (decel fuel cut) and brake to 45 km/h, shift to 3rd
  *   Settle3rd   light throttle in 3rd (~1900 rpm)
  *   Pull3rd     WOT in 3rd to the limiter (~163 km/h). Roughly twice as
- *               long as the 2nd-gear pull, so it runs hotter.
+ *               long as the 2nd-gear pull.
  *   Limiter3rd  5 s on the limiter
- *   Stop        brake to a standstill
+ *   Lift3rd     lift in 3rd, engine braking and light brakes, shift to
+ *               4th near 110 km/h
+ *   Cruise4th   steady 100 km/h in 4th, closed-loop fueling
+ *   Stop        brake to a standstill, clutch in near idle
  *   Stage       idle at the line
- *   Launch      launch control: WOT, clutch in, ~4000 rpm
- *   DragRun     standing 1/4 mile, upshifts at 6800 rpm through 4th
+ *   Launch      launch control: WOT, clutch in, ~4000 rpm two-step
+ *   DragRun     standing 1/4 mile: clutch dump, wheelspin the driver
+ *               feathers out, upshifts at 6800 rpm through 4th
  *   Shutdown    lift past the line, brake to a stop
  *   Cooldown    idle, then loop back to Roll2nd
+ *
+ * Where the values come from. The cold start (fast idle near 1430 rpm
+ * for about 20 s, then 850-900 rpm), warm idle airflow and load, and
+ * the warm-up rate follow the first vehicle session
+ * (docs/bench-sessions/2026-10-22-vehicle.md), scaled to this engine's
+ * 4.5 L. No car has been logged at WOT or on the limiter through
+ * QtTune; those states follow the model's physics and the usual
+ * signatures (fuel cut leaves airflow up and lambda lean, a NA engine's
+ * intake air stays near ambient at speed).
  *
  * One step() per mock frame, each worth kTickS of simulated time. The
  * worker's sleep isn't exact, so simulated time runs slightly behind
@@ -42,35 +60,71 @@ namespace ecuio_mock {
 
 constexpr float kTickS = 0.05f;
 constexpr float kPi = 3.14159265f;
+constexpr float kG = 9.81f;
 
-/* Vehicle: a ~1500 kg, ~330 hp rear-drive coupe on street tyres. */
+/* Vehicle: a ~1500 kg, ~330 hp rear-drive coupe, manual gearbox, on
+ * street tyres. */
 constexpr float kMassKg = 1500.0f;
 constexpr float kTyreRadiusM = 0.33f;
 constexpr float kFinalDrive = 3.73f;
 constexpr float kDrivelineEff = 0.88f;
-constexpr float kTractionLimitN = 9500.0f;   /* ~0.65 g */
 constexpr float kAeroCoeff = 0.42f;          /* 0.5 * rho * Cd * A */
 constexpr float kRollingN = 177.0f;          /* 0.012 * m * g */
-constexpr float kEngineBrakeNm = 40.0f;      /* closed-throttle drag */
 constexpr float kGearRatio[5] = {0.0f, 3.36f, 2.07f, 1.43f, 1.00f};
 constexpr int kTopGear = 4;
 
-/* Engine. */
-constexpr float kIdleRpm = 750.0f;
+/* Tyres and weight transfer: the rear axle's load grows with
+ * acceleration (m * a * h / L), and so does what it can put down. */
+constexpr float kRearStaticFrac = 0.52f;
+constexpr float kCgOverWheelbase = 0.185f;   /* 0.50 m CG height, 2.70 m */
+constexpr float kMuPeak = 1.0f;
+constexpr float kMuSlide = 0.85f;
+constexpr float kPeakSlip = 0.12f;
+/* Rotating inertia, kg*m^2: crank, flywheel and clutch; both rear
+ * wheels with the axle. Reflected to the road it adds mass in the low
+ * gears and soaks up the torque that would otherwise spin the tyres. */
+constexpr float kEngineInertia = 0.20f;
+constexpr float kWheelInertia = 3.0f;
+
+/* Engine: 4.5 L NA, 400 N*m at 4500 rpm, ~330 hp at 7000. */
+constexpr float kDisplacementL = 4.5f;
+constexpr float kAirDensityGpl = 1.18f;
+constexpr float kIdleRpm = 780.0f;           /* warm */
+constexpr float kFastIdleRpm = 1430.0f;      /* cold start strategy */
+constexpr float kFastIdleS = 17.0f;
+constexpr float kFastIdleEndS = 1.5f;        /* blend down to the warm-up idle */
 constexpr float kRevLimitRpm = 7000.0f;
 /* Where the limiter engages. A touch under the limit, because rpm
  * pinned at the limit can round to just below it. */
 constexpr float kLimiterOnRpm = kRevLimitRpm - 10.0f;
 constexpr float kShiftRpm = 6800.0f;         /* drag-run upshift point */
 constexpr float kLaunchRpm = 4000.0f;        /* launch-control two-step */
-constexpr float kClutchInRpm = 1100.0f;      /* clutch in below this */
+constexpr float kClutchInRpm = 1300.0f;      /* clutch in below this */
+constexpr float kDfcoOnRpm = 1400.0f;        /* decel fuel cut, closed throttle */
+constexpr float kDfcoOffRpm = 1200.0f;
 constexpr float kPeakTorqueNm = 400.0f;
-constexpr float kPeakPower = 2.32e6f;        /* max torque * rpm on the curve */
+
+/* Absolute throttle position (J1979 PID 0x11) never reads 0 or 100:
+ * the closed blade and the WOT stop sit inside the sensor's range. */
+constexpr float kTpClosedPct = 14.5f;
+constexpr float kTpWotPct = 86.0f;
+
+/* Fueling. Lambda is what a wideband sensor reports: 1.0 in closed
+ * loop, rich under power enrichment, pegged lean when fuel is cut. */
+constexpr float kAfrStoich = 14.7f;
+constexpr float kFuelKjPerG = 44.0f;
+constexpr float kLambdaWot = 0.86f;
+constexpr float kLambdaColdOpenLoop = 0.95f;
+constexpr float kLambdaLean = 1.99f;         /* sensor at the top of its range */
+constexpr float kO2ReadyS = 25.0f;           /* closed loop from here */
 
 /* Temperatures, degC. */
 constexpr float kAmbientC = 24.0f;
-constexpr float kThermostatC = 82.0f;
-constexpr float kFanOnC = 100.0f;
+constexpr float kColdStartC = 20.0f;
+constexpr float kThermostatOpenC = 88.0f;
+constexpr float kThermostatFullC = 98.0f;
+constexpr float kFanOnC = 102.0f;
+constexpr float kFanOffC = 98.0f;
 
 constexpr float kQuarterMileM = 402.336f;
 
@@ -80,6 +134,7 @@ constexpr uint32_t ticks_for(float seconds)
 }
 
 constexpr uint32_t kShiftTicks = ticks_for(0.3f);
+constexpr uint32_t kDfcoDelayTicks = ticks_for(0.5f);
 constexpr uint32_t kLimiterTicks = ticks_for(5.0f);
 
 inline float clampf(float v, float lo, float hi)
@@ -87,27 +142,86 @@ inline float clampf(float v, float lo, float hi)
     return (v < lo) ? lo : ((v > hi) ? hi : v);
 }
 
-/* Full-throttle torque curve, N*m, linear between points. */
+/* Piecewise linear lookup, clamped at both ends. */
+template <int N>
+inline float curve(const float (&x)[N], const float (&y)[N], float v)
+{
+    if (v <= x[0]) {
+        return y[0];
+    }
+    for (int i = 1; i < N; ++i) {
+        if (v <= x[i]) {
+            const float f = (v - x[i - 1]) / (x[i] - x[i - 1]);
+            return y[i - 1] + f * (y[i] - y[i - 1]);
+        }
+    }
+    return y[N - 1];
+}
+
+/* Full-throttle torque curve, N*m. */
 inline float torque_nm(float rpm)
 {
     static const float kRpm[] = {0.0f, 1000.0f, 2000.0f, 3000.0f,
                                  4500.0f, 6000.0f, 7000.0f};
     static const float kNm[] = {0.0f, 220.0f, 300.0f, 360.0f,
                                 400.0f, 380.0f, 330.0f};
-    const int n = static_cast<int>(sizeof(kRpm) / sizeof(kRpm[0]));
-    if (rpm <= kRpm[0]) {
-        return kNm[0];
-    }
-    for (int i = 1; i < n; ++i) {
-        if (rpm <= kRpm[i]) {
-            const float f = (rpm - kRpm[i - 1]) / (kRpm[i] - kRpm[i - 1]);
-            return kNm[i - 1] + f * (kNm[i] - kNm[i - 1]);
-        }
-    }
-    return kNm[n - 1];
+    return curve(kRpm, kNm, rpm);
 }
 
-/* Engine rpm per m/s of road speed in a gear (clutch locked). */
+/* Volumetric efficiency at WOT, which sets the most air the engine can
+ * draw at an rpm. Shaped like the torque curve. */
+inline float ve_wot(float rpm)
+{
+    static const float kRpm[] = {0.0f, 1000.0f, 2000.0f, 3000.0f,
+                                 4500.0f, 6000.0f, 7000.0f};
+    static const float kVe[] = {0.70f, 0.80f, 0.86f, 0.91f,
+                                0.95f, 0.90f, 0.82f};
+    return curve(kRpm, kVe, rpm);
+}
+
+/* Airflow at WOT, g/s: intake strokes per second (rpm / 120) times
+ * displacement times VE times air density. */
+inline float maf_wot_gs(float rpm)
+{
+    return (rpm / 120.0f) * kDisplacementL * ve_wot(rpm) * kAirDensityGpl;
+}
+
+/* The load (airflow over the WOT airflow at that rpm) the engine needs
+ * to make no torque: friction, pumping, accessories, and at idle the
+ * spark retard kept in reserve. Calculated load at a warm idle reads
+ * near 29 %, as on the first vehicle, and a light cruise near 20 %. */
+inline float zero_torque_load(float rpm)
+{
+    static const float kRpm[] = {780.0f, 1500.0f, 2500.0f, 4000.0f, 7000.0f};
+    static const float kLoad[] = {0.27f, 0.16f, 0.08f, 0.07f, 0.10f};
+    return curve(kRpm, kLoad, rpm);
+}
+
+/* Closed-throttle airflow, g/s: the idle air path and leakage. */
+inline float closed_air_gs(float rpm)
+{
+    return 8.0f + 0.6f * rpm / 1000.0f;
+}
+
+/* Airflow as a fraction of WOT for a blade opening (0..1). A small
+ * opening fills the cylinders at low rpm and starves them at high
+ * rpm, so the curve flattens with rpm. */
+inline float airflow_frac(float blade, float rpm)
+{
+    const float r = std::fmax(rpm, 600.0f);
+    const float closed = clampf(closed_air_gs(r) / maf_wot_gs(r), 0.0f, 1.0f);
+    const float n = 1.0f + 6000.0f / r;
+    const float h = 1.0f - std::pow(1.0f - clampf(blade, 0.0f, 1.0f), n);
+    return closed + (1.0f - closed) * h;
+}
+
+/* Torque with fuel cut: friction and pumping, rising with rpm. */
+inline float fuel_cut_drag_nm(float rpm)
+{
+    return 20.0f + 6.0f * rpm / 1000.0f;
+}
+
+/* Engine rpm per m/s of driven-wheel speed in a gear (clutch locked). */
 inline float rpm_per_mps(int gear)
 {
     return kGearRatio[gear] * kFinalDrive * 60.0f / (2.0f * kPi * kTyreRadiusM);
@@ -119,6 +233,33 @@ inline float wheel_n_per_nm(int gear)
     return kGearRatio[gear] * kFinalDrive * kDrivelineEff / kTyreRadiusM;
 }
 
+/* The engine and wheels' inertia as mass at the road, kg. */
+inline float rotating_mass_kg(int gear)
+{
+    const float g = kGearRatio[gear] * kFinalDrive;
+    return (kEngineInertia * g * g + kWheelInertia) /
+           (kTyreRadiusM * kTyreRadiusM);
+}
+
+/* Tyre friction past the traction limit: peak at kPeakSlip, falling to
+ * sliding friction as the tyre spins up. */
+inline float tyre_mu(float slip)
+{
+    return kMuPeak -
+           (kMuPeak - kMuSlide) * clampf((slip - kPeakSlip) / 0.3f, 0.0f, 1.0f);
+}
+
+/* Deterministic noise in [-1, 1] for a tick: the same cycle every run,
+ * so the tests stay exact. */
+inline float tick_noise(uint64_t tick, uint32_t salt)
+{
+    uint32_t x = static_cast<uint32_t>(tick) * 2654435761u ^ (salt * 0x9E3779B9u);
+    x ^= x >> 15;
+    x *= 0x2C1B3C6Du;
+    x ^= x >> 12;
+    return static_cast<float>(x & 0xFFFFu) / 32767.5f - 1.0f;
+}
+
 enum class Phase : uint8_t {
     WarmUp,
     Roll2nd,
@@ -128,6 +269,8 @@ enum class Phase : uint8_t {
     Settle3rd,
     Pull3rd,
     Limiter3rd,
+    Lift3rd,
+    Cruise4th,
     Stop,
     Stage,
     Launch,
@@ -138,14 +281,15 @@ enum class Phase : uint8_t {
 
 struct DriveCycle {
     /* Outputs in physical units; encode_payload() reads these. */
-    float rpm = kIdleRpm;
-    float speed_kmh = 0.0f;
-    float throttle_pct = 0.0f;
-    float load_pct = 18.0f;
-    float coolant_c = 20.0f;   /* cold start */
-    float iat_c = 20.0f;
-    float maf_gs = 6.0f;
-    float oil_c = 20.0f;       /* cold start */
+    float rpm = kFastIdleRpm;  /* the engine has just started */
+    float speed_kmh = 0.0f;    /* driven wheels, as the ECU's VSS reads it */
+    float throttle_pct = kTpClosedPct;   /* absolute TP, PID 0x11 */
+    float load_pct = 0.0f;     /* calculated load, PID 0x04 */
+    float coolant_c = kColdStartC;
+    float iat_c = kColdStartC;
+    float maf_gs = 0.0f;
+    float oil_c = kColdStartC;
+    float lambda = kLambdaColdOpenLoop;
 
     /* Script and drivetrain state. */
     Phase phase = Phase::WarmUp;
@@ -154,10 +298,17 @@ struct DriveCycle {
     bool clutch_slip = false;  /* pulling away: clutch slipping at slip_rpm */
     float slip_rpm = 0.0f;
     uint32_t shift_ticks = 0;  /* > 0 while an upshift is in progress */
-    float v_mps = 0.0f;
-    float hold_mps = 0.0f;     /* speed held on the limiter */
-    float heat = 0.0f;         /* fast heat accumulator (charge air), 0..1 */
-    float heat_soak = 0.0f;    /* slow accumulator (under-hood), 0..1 */
+    bool spinning = false;     /* driven tyres past their traction limit */
+    bool fuel_cut = false;     /* no fuel this tick: limiter, two-step, DFCO */
+    float v_mps = 0.0f;        /* ground speed */
+    float wheel_mps = 0.0f;    /* driven-wheel surface speed */
+    float accel_mps2 = 0.0f;
+    float blade = 0.0f;        /* throttle blade opening, 0..1 */
+    float airflow = 0.0f;      /* airflow fraction of WOT, 0..1 */
+    float block_c = kColdStartC;
+    float underhood_c = kColdStartC;
+    float thermostat_open = 0.0f;   /* 0..1 */
+    bool fan_on = false;
     uint64_t tick = 0;
 
     /* Drag-run bookkeeping. */
@@ -168,6 +319,14 @@ struct DriveCycle {
     uint32_t loops = 0;        /* completed loops back to Roll2nd */
 
     float phase_s() const { return static_cast<float>(phase_ticks) * kTickS; }
+    float run_time_s() const { return static_cast<float>(tick) * kTickS; }
+    bool shifting() const { return shift_ticks > 0; }
+
+    /* Driven-wheel slip over ground speed. */
+    float slip() const
+    {
+        return (wheel_mps - v_mps) / std::fmax(v_mps, 2.0f);
+    }
 
     void step()
     {
@@ -180,6 +339,8 @@ struct DriveCycle {
 private:
     float brake_mps2_ = 0.0f;  /* service-brake request for this tick */
     float rev_cap_ = kRevLimitRpm;
+    bool dfco_ = false;
+    uint32_t lift_ticks_ = 0;  /* consecutive ticks with the pedal released */
 
     void enter(Phase next)
     {
@@ -189,15 +350,13 @@ private:
         case Phase::Roll2nd:
             pull_away(1, 1300.0f);
             break;
-        case Phase::Limiter2nd:
-        case Phase::Limiter3rd:
-            hold_mps = v_mps;
-            break;
         case Phase::Launch:
             gear = 0;           /* 1st selected, clutch in */
             break;
         case Phase::DragRun:
-            pull_away(1, kLaunchRpm);
+            /* Off the two-step: the clutch takes up the drive and pulls
+             * the engine down to ~3500 rpm while it slips */
+            pull_away(1, 3500.0f);
             run_s = 0.0f;
             distance_m = 0.0f;
             break;
@@ -221,26 +380,15 @@ private:
         shift_ticks = kShiftTicks;
     }
 
-    bool shifting() const { return shift_ticks > 0; }
-
-    /* Light-throttle speed hold: a P controller on road speed. */
+    /* Light-throttle speed hold: a P controller on road speed, giving a
+     * blade opening in percent. */
     float cruise(float target_kmh, float cap_pct) const
     {
         return clampf(4.0f + 6.0f * (target_kmh - speed_kmh), 0.0f, cap_pct);
     }
 
-    /* A 1.5 s rev blip in neutral starting at `start_s`. */
-    float blip(float start_s) const
-    {
-        const float t = phase_s() - start_s;
-        if (t < 0.0f || t > 1.5f) {
-            return 0.0f;
-        }
-        return 35.0f * std::sin(kPi * t / 1.5f);
-    }
-
     /* The driver: picks throttle, brake and gear for this tick and
-     * advances the script. Returns the throttle request in percent. */
+     * advances the script. Returns the blade request in percent. */
     float drive_script()
     {
         float thr = 0.0f;
@@ -249,13 +397,12 @@ private:
 
         switch (phase) {
         case Phase::WarmUp:
-            thr = blip(6.0f) + blip(13.0f);
             if (phase_ticks >= ticks_for(20.0f)) {
                 enter(Phase::Roll2nd);
             }
             break;
         case Phase::Roll2nd:
-            thr = cruise(25.0f, 30.0f);
+            thr = cruise(25.0f, 15.0f);
             if (gear == 1 && !clutch_slip && speed_kmh >= 22.0f) {
                 shift_to(2);
             }
@@ -275,11 +422,12 @@ private:
         case Phase::Limiter3rd:
             thr = 100.0f;
             if (phase_ticks >= kLimiterTicks) {
-                enter(phase == Phase::Limiter2nd ? Phase::Slow2nd : Phase::Stop);
+                enter(phase == Phase::Limiter2nd ? Phase::Slow2nd
+                                                 : Phase::Lift3rd);
             }
             break;
         case Phase::Slow2nd:
-            brake_mps2_ = 3.0f;
+            brake_mps2_ = clampf(phase_s() * 4.0f, 0.0f, 3.0f);
             if (speed_kmh <= 45.0f) {
                 shift_to(3);
                 enter(Phase::Settle3rd);
@@ -291,9 +439,23 @@ private:
                 enter(Phase::Pull3rd);
             }
             break;
+        case Phase::Lift3rd:
+            brake_mps2_ = clampf(phase_s() * 2.0f, 0.0f, 1.5f);
+            if (gear == 3 && speed_kmh <= 110.0f) {
+                shift_to(4);
+                enter(Phase::Cruise4th);
+            }
+            break;
+        case Phase::Cruise4th:
+            thr = shifting() ? 0.0f : cruise(100.0f, 40.0f);
+            if (phase_ticks >= ticks_for(15.0f)) {
+                enter(Phase::Stop);
+            }
+            break;
         case Phase::Stop:
         case Phase::Shutdown:
-            brake_mps2_ = (phase == Phase::Stop) ? 5.0f : 4.0f;
+            brake_mps2_ = clampf(phase_s() * 5.0f,
+                                 0.0f, (phase == Phase::Stop) ? 5.0f : 4.0f);
             if (gear > 0 && rpm < kClutchInRpm) {
                 gear = 0;
             }
@@ -308,21 +470,27 @@ private:
             break;
         case Phase::Launch:
             thr = 100.0f;
-            rev_cap_ = kLaunchRpm -
-                       120.0f * std::fabs(std::sin(phase_s() * kPi * 4.0f));
+            rev_cap_ = kLaunchRpm;
             if (phase_ticks >= ticks_for(1.5f)) {
                 enter(Phase::DragRun);
             }
             break;
         case Phase::DragRun:
-            thr = 100.0f;
+            /* Full throttle, feathered while the tyres spin: the driver
+             * holds the slip near the tyre's peak. */
+            thr = spinning
+                ? clampf(100.0f - 800.0f * (slip() - 0.08f), 25.0f, 100.0f)
+                : 100.0f;
+            if (shifting()) {
+                thr = 0.0f;   /* lift for the shift */
+            }
             if (!clutch_slip && !shifting() && gear < kTopGear &&
                 rpm >= kShiftRpm) {
                 shift_to(gear + 1);
             }
             if (distance_m >= kQuarterMileM) {
                 drag_et_s = run_s;
-                drag_trap_kmh = speed_kmh;
+                drag_trap_kmh = v_mps * 3.6f;
                 enter(Phase::Shutdown);
             }
             break;
@@ -336,134 +504,284 @@ private:
         return thr;
     }
 
-    /* Drivetrain, road load and temperatures for one tick. */
+    /* Idle speed target: the cold-start strategy's fast idle for the
+     * first kFastIdleS, then a warm-up idle that falls as the coolant
+     * warms. */
+    float idle_target() const
+    {
+        const float warm = kIdleRpm +
+                           90.0f * clampf((70.0f - coolant_c) / 40.0f, 0.0f, 1.0f);
+        const float t = run_time_s();
+        if (t < kFastIdleS) {
+            return kFastIdleRpm;
+        }
+        return warm + (kFastIdleRpm - warm) *
+                          clampf(1.0f - (t - kFastIdleS) / kFastIdleEndS, 0.0f, 1.0f);
+    }
+
+    bool fast_idle() const { return run_time_s() < kFastIdleS + kFastIdleEndS; }
+
+    /* Drivetrain, airflow, fueling and temperatures for one tick. */
     void update_vehicle(float thr_req)
     {
-        /* Pedal travel: a full sweep takes 0.25 s. */
-        throttle_pct += clampf(thr_req - throttle_pct, -20.0f, 20.0f);
-        const float thr = throttle_pct / 100.0f;
+        /* Blade travel: a full sweep takes 0.25 s. */
+        const float req = clampf(thr_req / 100.0f, 0.0f, 1.0f);
+        blade += clampf(req - blade, -0.2f, 0.2f);
 
-        float power_frac = 0.0f;   /* engine power / peak, drives the heat model */
+        const bool limiter = phase == Phase::Limiter2nd || phase == Phase::Limiter3rd;
+        float fuel_duty = 1.0f;   /* share of the airflow that's fueled */
+        float lambda_cmd = 1.0f;
 
-        if (phase == Phase::Limiter2nd || phase == Phase::Limiter3rd) {
-            /* Fuel-cut bounce: rpm saws just under the limit while the
-             * car holds speed. */
-            const float bounce =
-                90.0f - 90.0f * std::cos(phase_s() * 2.0f * kPi * 3.3f);
-            rpm = kRevLimitRpm - bounce;
-            v_mps = hold_mps;
-            load_pct = 100.0f - bounce * (55.0f / 180.0f);
-            power_frac = (1.0f - bounce / 360.0f) *
-                         torque_nm(kRevLimitRpm) * kRevLimitRpm / kPeakPower;
-        } else {
-            float drive_n = 0.0f;
-            if (gear == 0) {
-                /* Neutral or clutch in: rpm follows the pedal. */
-                const float wobble =
-                    25.0f * std::sin(static_cast<float>(tick) * 0.13f);
-                const float target = clampf(kIdleRpm + wobble +
-                                            throttle_pct * 60.0f,
-                                            0.0f, rev_cap_);
-                rpm += (target - rpm) * 0.35f;
-                load_pct = 18.0f + throttle_pct * 0.25f;
-                power_frac = 0.01f + thr * 0.15f;
-            } else if (shifting()) {
-                /* Clutch in for the shift: rpm drops toward the new gear. */
-                --shift_ticks;
-                rpm += (v_mps * rpm_per_mps(gear) - rpm) * 0.4f;
-                load_pct = 15.0f;
-                power_frac = 0.02f;
-            } else {
-                const float locked = v_mps * rpm_per_mps(gear);
-                if (clutch_slip && locked < slip_rpm) {
-                    rpm += (slip_rpm - rpm) * 0.4f;
-                } else {
-                    clutch_slip = false;
-                    rpm = locked;
-                }
-                if (thr < 0.05f) {
-                    /* Closed throttle: fuel cut and engine braking. */
-                    drive_n = -kEngineBrakeNm * wheel_n_per_nm(gear) /
-                              kDrivelineEff;
-                    load_pct = (rpm > 1200.0f) ? 2.0f : 18.0f;
-                    power_frac = 0.0f;
-                } else if (rpm >= kLimiterOnRpm) {
-                    drive_n = 0.0f;   /* limiter fuel cut */
-                    load_pct = 40.0f;
-                    power_frac = 0.5f;
-                } else {
-                    const float tq = torque_nm(rpm) * thr;
-                    drive_n = clampf(tq * wheel_n_per_nm(gear),
-                                     0.0f, kTractionLimitN);
-                    load_pct = 18.0f + 82.0f * tq / kPeakTorqueNm;
-                    power_frac = tq * rpm / kPeakPower;
-                }
-            }
-
-            const float resist = kAeroCoeff * v_mps * v_mps +
-                                 ((v_mps > 0.0f) ? kRollingN : 0.0f);
-            const float accel = (drive_n - resist) / kMassKg - brake_mps2_;
-            v_mps += accel * kTickS;
-            if (v_mps < 0.0f) {
-                v_mps = 0.0f;
-            }
-            /* In gear the limiter caps road speed, so rpm never
-             * overshoots it. */
-            if (gear > 0 && !shifting()) {
-                v_mps = std::fmin(v_mps, kRevLimitRpm / rpm_per_mps(gear));
-            }
+        /* Decel fuel cut: the pedal released for half a second above
+         * kDfcoOnRpm, with hysteresis, in gear or with the clutch in.
+         * A light throttle, however small, keeps the fuel on. */
+        lift_ticks_ = (req <= 0.0f) ? lift_ticks_ + 1 : 0;
+        if (lift_ticks_ == 0 || rpm < kDfcoOffRpm) {
+            dfco_ = false;
+        } else if (lift_ticks_ >= kDfcoDelayTicks && rpm > kDfcoOnRpm && v_mps > 0.5f) {
+            dfco_ = true;
         }
 
-        speed_kmh = v_mps * 3.6f;
-        load_pct = clampf(load_pct, 0.0f, 100.0f);
+        float resist = kAeroCoeff * v_mps * v_mps +
+                       ((v_mps > 0.0f) ? kRollingN : 0.0f);
+
+        if (limiter) {
+            /* Fuel cut, not throttle: the blade stays open and the engine
+             * keeps pumping air. The engine only needs road-load torque,
+             * so it spends most of each ~150 ms cycle in cut. Crank speed
+             * saws against the driveline's compliance while road speed
+             * holds where the mean rpm puts it. */
+            static const float kSaw[3] = {7000.0f, 6925.0f, 6860.0f};
+            const float k = rpm_per_mps(gear);
+            float target;
+            if (phase_ticks == 0) {
+                target = kRevLimitRpm + 60.0f;   /* first contact, before the cut lands */
+            } else if (phase_ticks == 1) {
+                target = kRevLimitRpm - 180.0f;  /* first bounce, the deepest */
+            } else {
+                target = kSaw[(phase_ticks - 2) % 3];
+            }
+            rpm = target + 8.0f * tick_noise(tick, 1);
+            const float v_mean = (kSaw[0] + kSaw[1] + kSaw[2]) / 3.0f / k;
+            v_mps += (v_mean - v_mps) * 0.1f;
+            wheel_mps = v_mps * (1.0f + 0.0015f * (rpm - 6928.0f) / 70.0f);
+            accel_mps2 = 0.0f;
+            spinning = false;
+            fuel_cut = phase_ticks < 2 || (phase_ticks - 2) % 3 != 0;
+            airflow = clampf(0.985f - 0.015f * (rpm - 6928.0f) / 70.0f, 0.0f, 1.0f);
+            const float road_kw = resist * v_mps / 1000.0f;
+            const float wot_kw = torque_nm(rpm) * rpm * 2.0f * kPi / 60.0f / 1000.0f;
+            fuel_duty = clampf(road_kw / (wot_kw * kDrivelineEff), 0.05f, 1.0f);
+            lambda_cmd = fuel_cut ? kLambdaLean : kLambdaWot;
+        } else if (gear == 0 || shifting()) {
+            /* Neutral, clutch in, or mid-shift: rpm follows the blade and
+             * the idle controller; the car rolls on its own. */
+            if (shifting()) {
+                --shift_ticks;
+                rpm += (wheel_mps * rpm_per_mps(gear) - rpm) * 0.4f;
+            } else {
+                /* The driver's pedal, not the blade: at a cold start the
+                 * ECU opens the blade itself */
+                const float pedal = clampf(thr_req / 100.0f, 0.0f, 1.0f);
+                const float target = clampf(idle_target() + std::fmin(pedal, blade) * 6000.0f,
+                                            0.0f, rev_cap_);
+                rpm += (target - rpm) * 0.35f;
+            }
+            const bool two_step = phase == Phase::Launch && rpm >= rev_cap_ - 40.0f;
+            if (two_step) {
+                /* Launch control cuts fuel at the cap: rpm saws below it */
+                rpm = rev_cap_ - 60.0f - 60.0f * std::fabs(tick_noise(tick, 2));
+            }
+            fuel_cut = two_step || dfco_;
+            if (fast_idle() && gear == 0 && thr_req <= 0.0f) {
+                /* Catalyst heating: the ECU opens the blade and retards
+                 * the spark, so the cold engine idles fast on more air */
+                blade = 0.35f;
+                airflow = 0.50f;
+            } else {
+                airflow = airflow_frac(blade, rpm);
+            }
+            lambda_cmd = fuel_cut ? kLambdaLean
+                       : (airflow > 0.85f ? kLambdaWot : 1.0f);
+            /* Rolling with no drive: road load and brakes only, the
+             * wheels' inertia but not the engine's */
+            const float m = kMassKg + kWheelInertia / (kTyreRadiusM * kTyreRadiusM);
+            accel_mps2 = -resist / m - brake_mps2_;
+            v_mps = std::fmax(v_mps + accel_mps2 * kTickS, 0.0f);
+            wheel_mps = v_mps;
+            spinning = false;
+            if (gear > 0 && !shifting()) {
+                rpm = wheel_mps * rpm_per_mps(gear);   /* the clutch is back in */
+            }
+        } else {
+            drive_in_gear();
+            lambda_cmd = fuel_cut ? kLambdaLean
+                       : (airflow > 0.85f ? kLambdaWot : 1.0f);
+        }
+
+        if (rpm < 0.0f) {
+            rpm = 0.0f;
+        }
+        speed_kmh = wheel_mps * 3.6f;
         if (phase == Phase::DragRun) {
             run_s += kTickS;
             distance_m += v_mps * kTickS;
         }
 
-        /* Mass airflow, g/s, speed-density: intake strokes per second
-         * (rpm / 120) times displacement times load-scaled volumetric
-         * efficiency times air density (1.18 g/L). 4.5 L suits the
-         * vehicle model's 400 N*m peak, and VE reaches 0.95 at full
-         * load. Warm idle reads ~7 g/s; WOT near the limiter ~255 g/s,
-         * about 1.3 hp per g/s against the model's ~330 hp, the usual
-         * rule of thumb. */
-        const float ve = 0.05f + 0.90f * (load_pct / 100.0f);
-        maf_gs = (rpm / 120.0f) * 4.5f * ve * 1.18f;
+        /* Calculated load is the airflow over the WOT airflow at this
+         * rpm (J1979 PID 0x04); MAF has a little sensor noise, more at
+         * high flow. */
+        load_pct = clampf(airflow * 100.0f, 0.0f, 100.0f);
+        maf_gs = maf_wot_gs(rpm) * airflow *
+                 (1.0f + (0.005f + 0.015f * airflow) * tick_noise(tick, 3));
+        throttle_pct = kTpClosedPct + (kTpWotPct - kTpClosedPct) * blade;
 
-        update_temperatures(clampf(power_frac, 0.0f, 1.0f));
+        update_lambda(lambda_cmd);
+
+        /* Fuel burned, kW. On the limiter the refires burn at the WOT
+         * mixture for the share of the time road load needs. */
+        const float fuel_lambda = limiter ? kLambdaWot : lambda_cmd;
+        const float fuel_kw = (fuel_cut && !limiter)
+            ? 0.0f
+            : fuel_duty * maf_gs / (kAfrStoich * fuel_lambda) * kFuelKjPerG;
+        update_temperatures(fuel_kw);
     }
 
-    void update_temperatures(float power_frac)
+    /* Clutch engaged (or slipping), in gear: engine torque through the
+     * driveline to the tyres, wheelspin past the traction limit. */
+    void drive_in_gear()
     {
-        heat += (power_frac - heat) * (kTickS / 6.0f);
-        heat_soak += (power_frac - heat_soak) * (kTickS / 30.0f);
-
-        const float airflow = clampf(speed_kmh / 90.0f, 0.0f, 1.0f);
-
-        if (coolant_c < kThermostatC) {
-            /* Thermostat closed: the small loop warms quickly. */
-            coolant_c += (95.0f - coolant_c) * (kTickS / 8.0f);
+        const float k = rpm_per_mps(gear);
+        const float locked = wheel_mps * k;
+        if (clutch_slip && locked < slip_rpm) {
+            rpm += (slip_rpm - rpm) * 0.4f;
         } else {
-            float target = 88.0f + 40.0f * heat_soak + 8.0f * heat -
-                           4.0f * airflow;
-            if (coolant_c > kFanOnC) {
-                target -= 6.0f;   /* radiator fan */
-            }
-            coolant_c += (target - coolant_c) * (kTickS / 10.0f);
+            clutch_slip = false;
+            rpm = locked;
         }
 
-        /* Intake air: heat soak from the engine bay at low speed, plus
-         * charge heating that builds under sustained load. */
-        const float soak = (coolant_c - kAmbientC) * 0.32f * (1.0f - airflow);
-        const float charge = 45.0f * heat + 25.0f * heat_soak;
-        iat_c += (kAmbientC + soak + charge - iat_c) * (kTickS / 4.0f);
+        airflow = airflow_frac(blade, rpm);
+        fuel_cut = dfco_;
+        float tq;
+        if (fuel_cut) {
+            tq = -fuel_cut_drag_nm(rpm);
+        } else {
+            const float zl = zero_torque_load(rpm);
+            tq = torque_nm(rpm) * (airflow - zl) / (1.0f - zl);
+        }
+        float drive_n = (tq >= 0.0f)
+            ? tq * wheel_n_per_nm(gear)
+            : tq * wheel_n_per_nm(gear) / (kDrivelineEff * kDrivelineEff);
 
-        /* Oil: chases coolant with a slower constant plus a load
-         * bias — oil runs hotter than coolant under sustained power
-         * and lags both warm-up and cool-down. */
-        const float oil_target = coolant_c + 4.0f + 14.0f * heat_soak;
-        oil_c += (oil_target - oil_c) * (kTickS / 25.0f);
+        const float resist = kAeroCoeff * v_mps * v_mps +
+                             ((v_mps > 0.0f) ? kRollingN : 0.0f);
+        const float rear_n = kMassKg * (kG * kRearStaticFrac +
+                                        std::fmax(accel_mps2, 0.0f) * kCgOverWheelbase);
+        const float grip_n = kMuPeak * rear_n;
+        /* A slipping clutch leaves the engine's inertia out of it */
+        const float m_rot = clutch_slip
+            ? kWheelInertia / (kTyreRadiusM * kTyreRadiusM)
+            : rotating_mass_kg(gear);
+
+        if (clutch_slip && drive_n >= grip_n) {
+            /* The driver feeds the clutch in, holding the tyres at about
+             * their peak slip: the car takes all the grip there is */
+            spinning = true;
+            accel_mps2 = (grip_n - resist) / kMassKg - brake_mps2_;
+            v_mps = std::fmax(v_mps + accel_mps2 * kTickS, 0.0f);
+            wheel_mps = v_mps + std::fmax(v_mps, 2.0f) * 0.8f * kPeakSlip;
+        } else if (spinning || drive_n > grip_n) {
+            spinning = true;
+            const float tyre_n = tyre_mu(slip()) * rear_n;
+            wheel_mps += (drive_n - tyre_n) / m_rot * kTickS;
+            accel_mps2 = (tyre_n - resist) / kMassKg - brake_mps2_;
+            v_mps = std::fmax(v_mps + accel_mps2 * kTickS, 0.0f);
+            /* Hooked up again once the wheels are back at road speed and
+             * the drive no longer exceeds the grip */
+            if (wheel_mps <= v_mps + 0.05f) {
+                wheel_mps = v_mps;
+                spinning = drive_n > grip_n;
+            }
+        } else {
+            accel_mps2 = (drive_n - resist) / (kMassKg + m_rot) - brake_mps2_;
+            v_mps = std::fmax(v_mps + accel_mps2 * kTickS, 0.0f);
+            wheel_mps = v_mps;
+        }
+        /* In gear the limiter caps wheel speed, so rpm never overshoots
+         * it before the limiter phase takes over. */
+        if (!clutch_slip) {
+            const float cap = kRevLimitRpm / k;
+            if (wheel_mps > cap) {
+                wheel_mps = cap;
+                v_mps = std::fmin(v_mps, cap);
+            }
+            rpm = wheel_mps * k;
+        }
+    }
+
+    /* Wideband lambda: a command, and a sensor that follows it in about
+     * 70 ms. Closed loop dithers around 1.00; before the sensor is warm
+     * the cold start runs a little rich. */
+    void update_lambda(float cmd)
+    {
+        float target = cmd;
+        if (cmd == 1.0f) {
+            target = (run_time_s() < kO2ReadyS)
+                ? kLambdaColdOpenLoop
+                : 1.0f + 0.015f * std::sin(run_time_s() * 2.0f * kPi * 0.9f);
+        }
+        lambda += (target - lambda) * 0.7f;
+    }
+
+    /* Heat, kW and kJ/K. A quarter of the fuel's energy goes to the
+     * cooling jacket and block. The coolant warms quickly while the
+     * thermostat is shut (the small loop) and holds near it once open;
+     * the block and oil store heat and give it back after a hard run
+     * (heat soak); the radiator and block heat the engine bay, which
+     * the intake draws from at low speed. */
+    void update_temperatures(float fuel_kw)
+    {
+        const float heat_kw = 0.24f * fuel_kw;
+        const float speed = clampf(v_mps * 3.6f, 0.0f, 160.0f);
+        /* Friction power, a share of which heats the oil directly */
+        const float friction_kw = fuel_cut_drag_nm(rpm) * rpm * 2.0f * kPi / 60.0f / 1000.0f;
+
+        /* The thermostat's wax element follows the coolant in ~4 s */
+        const float open_target = clampf((coolant_c - kThermostatOpenC) /
+                                         (kThermostatFullC - kThermostatOpenC), 0.0f, 1.0f);
+        thermostat_open += (open_target - thermostat_open) * (kTickS / 4.0f);
+        const float open = thermostat_open;
+        if (coolant_c >= kFanOnC) {
+            fan_on = true;
+        } else if (coolant_c <= kFanOffC) {
+            fan_on = false;
+        }
+        const float ua = 0.25f + 0.022f * speed + (fan_on ? 0.9f : 0.0f);
+        const float q_rad = open * ua * (coolant_c - kAmbientC);
+        const float q_bc = 1.5f * (block_c - coolant_c);
+        const float q_bo = 0.6f * (block_c - oil_c);
+        const float q_block_loss = 0.03f * (block_c - kAmbientC);
+
+        const float c_coolant = 40.0f + 40.0f * open;
+        coolant_c += (0.30f * heat_kw + q_bc - q_rad -
+                      0.015f * (coolant_c - kAmbientC)) * kTickS / c_coolant;
+        block_c += (0.70f * heat_kw - q_bc - q_bo - q_block_loss) * kTickS / 60.0f;
+        oil_c += (q_bo + 0.3f * friction_kw -
+                  (0.02f + 0.0015f * speed) * (oil_c - kAmbientC)) * kTickS / 15.0f;
+
+        /* The bay: the block, the exhaust manifold and part of the
+         * radiator's air heat it; the car's speed ventilates it. */
+        const float q_bay = q_block_loss + 0.2f * q_rad + 0.03f * fuel_kw;
+        const float vent = 0.2f + 0.015f * speed;
+        underhood_c += (q_bay - vent * (underhood_c - kAmbientC)) * kTickS / 25.0f;
+
+        /* Intake air: drawn partly from the bay (less at speed, when the
+         * intake gets fresh air), plus heat picked up in the manifold,
+         * more when the airflow is slow. The sensor lags ~4 s. */
+        const float mix = 0.8f - 0.45f * clampf(speed / 80.0f, 0.0f, 1.0f);
+        const float pickup = 0.04f * (block_c - kAmbientC) / (1.0f + maf_gs / 30.0f);
+        const float iat_target = kAmbientC + mix * (underhood_c - kAmbientC) + pickup;
+        iat_c += (iat_target - iat_c) * (kTickS / 4.0f);
     }
 };
 
@@ -483,15 +801,15 @@ inline uint16_t clamp_u16(float v)
 
 /* Encode side of the signal contract. Layout MUST mirror kMockDefs in
  * signal_sets.cpp:
- *   [0..1] RPM      LE uint16, scale 0.25
- *   [2]    coolant  uint8, offset -40
- *   [3]    speed    uint8, km/h
- *   [4]    throttle uint8, scale 100/255
- *   [5]    IAT      uint8, offset -40
- *   [6]    load     uint8, scale 100/255
- *   [7..8] MAF      LE uint16, scale 0.01 g/s
- *   [9]    oil      uint8, offset -40
- *   [10..11] pad, up to the CAN FD length (ECUIO_MOCK_TELEMETRY_PAYLOAD_LEN)
+ *   [0..1]   RPM      LE uint16, scale 0.25
+ *   [2]      coolant  uint8, offset -40
+ *   [3]      speed    uint8, km/h
+ *   [4]      throttle uint8, scale 100/255
+ *   [5]      IAT      uint8, offset -40
+ *   [6]      load     uint8, scale 100/255
+ *   [7..8]   MAF      LE uint16, scale 0.01 g/s
+ *   [9]      oil      uint8, offset -40
+ *   [10..11] lambda   LE uint16, scale 1/32768 (J1979's equivalence ratio)
  * The transport never decodes (rule 2); the tests round-trip every
  * tick of the cycle through ecuio_mock_signal_set(). */
 inline void encode_payload(const DriveCycle& s, uint8_t out[ECUIO_MOCK_TELEMETRY_PAYLOAD_LEN])
@@ -511,7 +829,10 @@ inline void encode_payload(const DriveCycle& s, uint8_t out[ECUIO_MOCK_TELEMETRY
     out[7] = static_cast<uint8_t>(maf_raw & 0xFF);
     out[8] = static_cast<uint8_t>((maf_raw >> 8) & 0xFF);
     out[9] = clamp_u8(s.oil_c + 40.0f);
-    out[10] = 0; out[11] = 0;   /* pad */
+
+    const uint16_t lambda_raw = clamp_u16(s.lambda * 32768.0f);
+    out[10] = static_cast<uint8_t>(lambda_raw & 0xFF);
+    out[11] = static_cast<uint8_t>((lambda_raw >> 8) & 0xFF);
 }
 
 } // namespace ecuio_mock

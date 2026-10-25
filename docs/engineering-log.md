@@ -792,3 +792,19 @@ newest end instead of the oldest passed it: `data()` was right, only a
 `ListView` would have shown the wrong rows. The test now checks where
 each removal and insertion lands. For a hand-written model, the row
 signals are part of the contract, and a data-only test can't see them.
+
+**2026-10-24 — the mock's physics:** **a simulator checked one signal
+at a time can contradict itself in every frame.** The drive cycle's
+tests bounded each signal and round-tripped it through the wire, and
+all of them passed while the limiter dropped the load to 45 % on each
+bounce, so MAF sawed between 137 and 294 g/s though fuel cut leaves
+the air flowing, and the warm loop's intake air reached 65 °C at
+163 km/h, 40 °C over ambient, like a turbo car's. Each value was in range;
+together they were no car. The rewrite was driven by checks across
+signals at every tick: rpm against wheel speed in gear, MAF against
+rpm and load, lambda against fuel cut, speed against the clutch. Those
+checks then caught the rewrite's own slips, a clutch dump that stalled
+the engine and a shift's last tick with rpm out of step with the
+wheels, that no per-signal bound would have flagged. Where a real log
+existed (the first vehicle's cold start, idle airflow and load), it
+set the numbers; elsewhere the physics does, and the header says which.

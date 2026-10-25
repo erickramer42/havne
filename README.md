@@ -119,10 +119,13 @@ screen, is [docs/architecture.md](docs/architecture.md).
   (the default for `mock://`), `obd2` (the default for `j2534://`) or
   `raw` (log only), with `?profile=` to override
   ([ADR-0013](docs/adr/0013-protocol-profiles.md)).
-- **Simulated vehicle.** A modelled drivetrain (gear ratios, torque
-  curve, heat soak) runs a scripted drive: warm-up, two full-throttle
-  pulls into the limiter, then a quarter-mile run. Every page works
-  with no hardware.
+- **Simulated vehicle.** A modelled car (gear ratios, airflow and
+  torque, tyres with weight transfer, block, coolant and oil
+  temperatures) runs a scripted drive: a cold start, two full-throttle
+  pulls onto a fuel-cut limiter, a highway cruise, then a quarter mile
+  off launch control with wheelspin. Its readings stay consistent with
+  each other the way a real ECU's log does: rpm with speed and gear,
+  airflow with load and lambda. Every page works with no hardware.
 
 ## Roadmap
 

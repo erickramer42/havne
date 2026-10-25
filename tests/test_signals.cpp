@@ -176,9 +176,9 @@ TEST(SignalsTest, MockSetIdsAreUnique) {
 
 TEST(SignalsTest, MockSetDecodesReasonably) {
     /* Integration test: verify mock set definitions decode to plausible
-     * ranges. The frame is the full mock payload; MAF and oil are pinned
-     * to exact values, so a layout slip fails instead of landing in a
-     * wide range. */
+     * ranges. The frame is the full mock payload; MAF, oil and lambda
+     * are pinned to exact values, so a layout slip fails instead of
+     * landing in a wide range. */
     const ecuio_signal_set_t* set = ecuio_mock_signal_set();
     uint8_t frame[ECUIO_MOCK_TELEMETRY_PAYLOAD_LEN] = {
                          0xE8, 0x03, // RPM raw 1000
@@ -189,7 +189,7 @@ TEST(SignalsTest, MockSetDecodesReasonably) {
                          0xCD,       // Load raw 0xCD → 80.4%
                          0x84, 0x1D, // MAF raw 0x1D84 = 7556 → 75.56 g/s
                          0x78,       // Oil raw 120 → 80°C
-                         0x00, 0x00};// bytes 10-11, pad
+                         0x14, 0x6E};// Lambda raw 0x6E14 = 28180 → 0.86
 
     for (uint32_t i = 0; i < set->count; ++i) {
         double val = 0.0;
@@ -221,6 +221,9 @@ TEST(SignalsTest, MockSetDecodesReasonably) {
             break;
         case ECUIO_MOCK_SIG_OIL_ID:
             EXPECT_DOUBLE_EQ(val, 80.0);
+            break;
+        case ECUIO_MOCK_SIG_LAMBDA_ID:
+            EXPECT_NEAR(val, 0.86, 0.0001);
             break;
         }
     }
