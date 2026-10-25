@@ -192,6 +192,8 @@ TEST(CoreTest, StatusStringValidValues) {
     EXPECT_STREQ(ecuio_status_string(ECUIO_ERR_UNKNOWN_PROFILE), "unknown profile");
     EXPECT_STREQ(ecuio_status_string(ECUIO_ERR_VENDOR_REFUSED), "the adapter's driver refused");
     EXPECT_STREQ(ecuio_status_string(ECUIO_ERR_SURROGATE_FAILED), "surrogate process failed");
+    EXPECT_STREQ(ecuio_status_string(ECUIO_ERR_VEHICLE_TIMEOUT),
+                 "vehicle not responding (timeout)");
 
     /* Explicit cast required by MSVC for enum conversion */
     EXPECT_STRNE(ecuio_status_string(static_cast<ecuio_status_t>(999)), nullptr);
@@ -464,6 +466,9 @@ TEST(CoreTest, CallbackExecutesOnTransportWorkerThread) {
 
     EXPECT_NE(seen_id.load(), std::thread::id{});
     EXPECT_NE(seen_id.load(), main_id);  /* Marshaling in bridge is MANDATORY */
+
+    /* A second start leaves the one worker running. */
+    EXPECT_EQ(ecuio_session_start(session), ECUIO_OK);
 
     EXPECT_EQ(ecuio_session_close(session), ECUIO_OK);
     ecuio_session_destroy(session);
@@ -945,12 +950,28 @@ TEST(CoreTest, CloseIsIdempotentAndDestroyIsSafe)
     EXPECT_EQ(ecuio_session_start(session), ECUIO_ERR_SESSION_CLOSED);
     EXPECT_EQ(ecuio_register_frame_callback(
         session, counting_callback, nullptr), ECUIO_ERR_SESSION_CLOSED);
+    ecuio_frame_t frame = {};
+    EXPECT_EQ(ecuio_session_send(session, &frame), ECUIO_ERR_SESSION_CLOSED);
+    EXPECT_EQ(ecuio_session_receive(session, &frame, 0),
+              ECUIO_ERR_NOT_IMPLEMENTED);
 
     /* destroy() is the freeing call; handle invalid after (free()). */
     EXPECT_EQ(ecuio_session_destroy(session), ECUIO_OK);
 
     /* free(nullptr) semantics */
     EXPECT_EQ(ecuio_session_destroy(nullptr), ECUIO_OK);
+
+    /* Every other call refuses a NULL session. */
+    int32_t last_error = 0;
+    uint32_t error_count = 0;
+    EXPECT_EQ(ecuio_session_start(nullptr), ECUIO_ERR_NULL_ARGUMENT);
+    EXPECT_EQ(ecuio_session_close(nullptr), ECUIO_ERR_NULL_ARGUMENT);
+    EXPECT_EQ(
+        ecuio_unregister_frame_callback(nullptr, counting_callback, nullptr),
+        ECUIO_ERR_NULL_ARGUMENT);
+    EXPECT_EQ(ecuio_session_get_error_state(nullptr, &last_error, &error_count),
+              ECUIO_ERR_NULL_ARGUMENT);
+    EXPECT_EQ(ecuio_session_signal_set(nullptr), nullptr);
 }
 
 TEST(CoreTest, DestroyAutoClosesActiveSession)

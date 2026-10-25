@@ -188,6 +188,8 @@ TEST(BridgeTest, FailedConnectNamesItsCause)
     EXPECT_EQ(bridge.connectSession("mock://demo?profile=bogus"),
               QStringLiteral("unknown profile: no profile is named 'bogus'"));
     EXPECT_FALSE(bridge.connected());
+    EXPECT_EQ(bridge.statusString(ECUIO_ERR_BAD_URI),
+              QStringLiteral("malformed transport URI"));
 }
 
 TEST(BridgeTest, FramesMarshalFromWorkerToGuiThread)
@@ -319,6 +321,32 @@ TEST(BridgeTest, RecordingWritesFramesValuesAndEvents)
                                   "end      disconnected: " }) {
         EXPECT_TRUE(events.contains(expected)) << expected << "\n" << events.toStdString();
     }
+}
+
+/* An app closed while connected: the bridge's destructor destroys the
+ * session itself and ends the recording, with no disconnect first. */
+TEST(BridgeTest, DestroyedWhileRecordingClosesSessionAndRecording)
+{
+    QTemporaryDir root;
+    ASSERT_TRUE(root.isValid());
+    {
+        QtTuneBridge bridge;
+        bridge.setRecordingsRootForTesting(root.path());
+        bridge.setRecording(true);
+        ASSERT_TRUE(bridge.connectSession("mock://closing").isEmpty());
+        ASSERT_TRUE(
+            spinUntil([&bridge]() { return bridge.frameCount() > 2; }, 5000));
+        ASSERT_TRUE(bridge.recordingActive());
+    }
+
+    const QStringList folders = recordingFolders(root.path());
+    ASSERT_EQ(folders.size(), 1);
+    const QByteArray events =
+        readFile(root.path() + QStringLiteral("/") + folders.first() +
+                 QStringLiteral("/events.log"));
+    EXPECT_TRUE(events.contains("end      the app closed: "))
+        << events.toStdString();
+    EXPECT_FALSE(events.contains("Disconnecting:")) << events.toStdString();
 }
 
 /* The switch holds while a session is up, so a recording covers a whole

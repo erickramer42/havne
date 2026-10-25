@@ -23,7 +23,8 @@
 //          after a quiet bus, and each channel's support report. The
 //          query's split in create: unknown keys named with the ones
 //          j2534:// takes, and ?probe='s malformed forms. The backoff's
-//          capped step and the vendor clock's cases are here; the
+//          capped step, the vendor clock's cases and the J2534 status
+//          names are here; the
 //          request engine's pacing and the link-health machine run
 //          through both backends in test_j2534_health.cpp.
 
@@ -274,6 +275,10 @@ TEST_F(J2534QueryParamTest, MalformedQueriesRejectedAtSessionCreate)
     const char* bad_queries[] = {
         "?baud=abc",
         "?baud=0",
+        "?baud=0x",
+        "?flags=0x100000000", /* past a 32-bit unsigned long */
+        "?txid=0x2000000f",   /* past the 29-bit CAN ID range */
+        "?filter=0",
         "?",
         "?band=250000",
         "?baud=250000&",
@@ -317,6 +322,15 @@ TEST_F(J2534QueryParamTest, MalformedQueriesRejectedAtSessionCreate)
 
     EXPECT_EQ(ecuio_session_create("j2534://junk", &session),
               ECUIO_ERR_NO_TRANSPORT);
+    EXPECT_EQ(session, nullptr);
+
+    /* A selector longer than any DLL path can't name an adapter. */
+    const std::string long_selector =
+        "j2534://" + std::string(ECUIO_J2534_DLL_PATH_LEN + 44, 'a');
+    EXPECT_EQ(ecuio_session_create(long_selector.c_str(), &session),
+              ECUIO_ERR_BAD_URI);
+    EXPECT_STREQ(ecuio_last_error_detail(),
+                 "the adapter selector is longer than any DLL path");
     EXPECT_EQ(session, nullptr);
 }
 
@@ -1882,6 +1896,28 @@ TEST(J2534StreamTest, ReceivedMessageCopyStopsAtTheEndOfData)
     ecuio_pt_rx_from_msg(&m, &rx);
     EXPECT_EQ(rx.data_size, static_cast<uint32_t>(ECUIO_PT_MSG_DATA_SIZE));
     EXPECT_EQ(memcmp(rx.data, m.Data, ECUIO_PT_MSG_DATA_SIZE), 0);
+}
+
+/* A refusal's detail names the vendor's status (ecuio_detail_set_vendor):
+ * every status J2534-1 v04.04 defines, 0x00 to 0x1A, has its own name,
+ * and a vendor's own (the VX's 34 with no adapter) has none, so the
+ * detail calls it vendor-specific. */
+TEST(J2534StreamTest, StatusNamesCoverTheSpecRange)
+{
+    const long kLast = 0x1A;
+    for (long s = 0; s <= kLast; ++s) {
+        const char* name = ecuio_pt_status_name(s);
+        ASSERT_NE(name, nullptr) << "status " << s;
+        for (long t = 0; t < s; ++t) {
+            EXPECT_STRNE(name, ecuio_pt_status_name(t))
+                << "statuses " << t << " and " << s;
+        }
+    }
+    EXPECT_STREQ(ecuio_pt_status_name(0x00), "STATUS_NOERROR");
+    EXPECT_STREQ(ecuio_pt_status_name(0x08), "ERR_DEVICE_NOT_CONNECTED");
+    EXPECT_STREQ(ecuio_pt_status_name(0x1A), "ERR_INVALID_DEVICE_ID");
+    EXPECT_EQ(ecuio_pt_status_name(kLast + 1), nullptr);
+    EXPECT_EQ(ecuio_pt_status_name(34), nullptr);
 }
 
 TEST(J2534StreamTest, VendorClockAnchorsAtTheHostAndKeepsVendorDeltas)

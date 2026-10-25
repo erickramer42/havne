@@ -11,8 +11,10 @@
 //          handle, a blocked vendor open,
 //          an ERR_TIMEOUT partial batch (spec-mode fake), no
 //          phantom frames from an untouched count under a hard error,
-//          a child from other shared headers refused at OP_OPEN, and
-//          device and channel ID 0 handled as real IDs.
+//          a child from other shared headers refused at OP_OPEN,
+//          device and channel ID 0 handled as real IDs, and malformed
+//          requests refused by the client before sending and by the
+//          child on arrival.
 //
 // ARCH note: in the x64 configure this is all-x64 (CI-valid IPC test);
 // the true cross-arch case (x64 test process -> x86 surrogate -> x86
@@ -278,6 +280,100 @@ TEST(J2534SurrogateTest, NullArgumentsRejected)
     EXPECT_EQ(ecuio_j2534_sur_open(FAKE_J2534_DLL_PATH, nullptr),
               ECUIO_ERR_NULL_ARGUMENT);
     EXPECT_EQ(ecuio_j2534_sur_close(nullptr), ECUIO_OK);     /* free(nullptr) */
+
+    const unsigned char req[6] = {0x00, 0x00, 0x07, 0xE0, 0x01, 0x0C};
+    const unsigned char id[4] = {0x00, 0x00, 0x07, 0xE8};
+    unsigned long filter = 0;
+    ecuio_pt_rx_t rx = {};
+    bool got = false;
+    char fw[ECUIO_SUR_TEXT_MAX], dll[ECUIO_SUR_TEXT_MAX],
+        api[ECUIO_SUR_TEXT_MAX];
+    EXPECT_EQ(ecuio_j2534_sur_write_frame(nullptr, 0, req, 6, 0, 0, nullptr),
+              ECUIO_ERR_NULL_ARGUMENT);
+    EXPECT_EQ(ecuio_j2534_sur_ioctl(nullptr, 0, ECUIO_PT_IOCTL_CLEAR_RX_BUFFER,
+                                    nullptr, 0, nullptr, 0, nullptr),
+              ECUIO_ERR_NULL_ARGUMENT);
+    EXPECT_EQ(ecuio_j2534_sur_read_version(nullptr, fw, dll, api),
+              ECUIO_ERR_NULL_ARGUMENT);
+    EXPECT_EQ(ecuio_j2534_sur_start_msg_filter(nullptr, 0, ECUIO_PT_PASS_FILTER,
+                                               id, 4, id, 4, nullptr, 0, 0,
+                                               &filter),
+              ECUIO_ERR_NULL_ARGUMENT);
+    EXPECT_EQ(ecuio_j2534_sur_read_msg(nullptr, 0, &rx, 0, &got),
+              ECUIO_ERR_NULL_ARGUMENT);
+    EXPECT_EQ(ecuio_j2534_sur_inject_test_frame(nullptr, req, 6, 0, 0),
+              ECUIO_ERR_NULL_ARGUMENT);
+}
+
+/* The pipe is a trust boundary both ways. The client refuses a request
+ * of the wrong shape before sending it, and the child refuses what a
+ * broken client might still send: a channel op before OP_CONNECT, and
+ * SCONFIG input that isn't whole pairs. Called on the client directly,
+ * past the loader seam's own checks. */
+TEST(J2534SurrogateTest, MalformedRequestsAreRefusedAtBothEnds)
+{
+    ecuio_j2534_sur_handle_t* h = nullptr;
+    ASSERT_EQ(ecuio_j2534_sur_open(fake_dll_path(), &h), ECUIO_OK);
+    struct Closer {
+        ecuio_j2534_sur_handle_t* h;
+        ~Closer() { (void)ecuio_j2534_sur_close(h); }
+    } closer{h};
+
+    const unsigned char req[6] = {0x00, 0x00, 0x07, 0xE0, 0x01, 0x0C};
+    const unsigned char big[65] = {};
+    const unsigned char mask[4] = {0xFF, 0xFF, 0xFF, 0xFF};
+    const unsigned char id[4] = {0x00, 0x00, 0x07, 0xE8};
+    unsigned long filter = 0;
+
+    /* The child's: no channel is connected yet. */
+    EXPECT_EQ(ecuio_j2534_sur_write_frame(h, 0, req, 6, 0, 0, nullptr),
+              ECUIO_ERR_VENDOR_REFUSED);
+    EXPECT_EQ(ecuio_j2534_sur_ioctl(h, 0, ECUIO_PT_IOCTL_CLEAR_RX_BUFFER,
+                                    nullptr, 0, nullptr, 0, nullptr),
+              ECUIO_ERR_VENDOR_REFUSED);
+    EXPECT_EQ(ecuio_j2534_sur_start_msg_filter(h, 0, ECUIO_PT_PASS_FILTER, mask,
+                                               4, id, 4, nullptr, 0, 0,
+                                               &filter),
+              ECUIO_ERR_VENDOR_REFUSED);
+    EXPECT_EQ(ecuio_j2534_sur_stop_msg_filter(h, 0, 0),
+              ECUIO_ERR_VENDOR_REFUSED);
+
+    /* The client's: nothing crosses the pipe. */
+    EXPECT_EQ(ecuio_j2534_sur_write_frame(h, 0, req, 0, 0, 0, nullptr),
+              ECUIO_ERR_INVALID_ARGUMENT);
+    EXPECT_EQ(ecuio_j2534_sur_write_frame(h, 0, big, 65, 0, 0, nullptr),
+              ECUIO_ERR_INVALID_ARGUMENT);
+    EXPECT_EQ(ecuio_j2534_sur_ioctl(h, 0, ECUIO_PT_IOCTL_SET_CONFIG, big, 65,
+                                    nullptr, 0, nullptr),
+              ECUIO_ERR_INVALID_ARGUMENT);
+    EXPECT_EQ(ecuio_j2534_sur_ioctl(h, 0, ECUIO_PT_IOCTL_SET_CONFIG, nullptr, 8,
+                                    nullptr, 0, nullptr),
+              ECUIO_ERR_NULL_ARGUMENT);
+    EXPECT_EQ(ecuio_j2534_sur_start_msg_filter(
+                  h, 0, ECUIO_PT_FLOW_CONTROL_FILTER, mask, 4, id, 4, nullptr,
+                  4, 0, &filter),
+              ECUIO_ERR_NULL_ARGUMENT);
+    EXPECT_EQ(ecuio_j2534_sur_start_msg_filter(h, 0, ECUIO_PT_PASS_FILTER, mask,
+                                               4, id, 4, big, 13, 0, &filter),
+              ECUIO_ERR_INVALID_ARGUMENT)
+        << "flow control past 12 bytes";
+    EXPECT_EQ(
+        ecuio_j2534_sur_start_msg_filter(h, 0, ECUIO_PT_FLOW_CONTROL_FILTER,
+                                         mask, 4, id, 4, id, 3, 0, &filter),
+        ECUIO_ERR_INVALID_ARGUMENT)
+        << "flow control a byte short";
+    EXPECT_EQ(ecuio_j2534_sur_inject_test_frame(h, req, 0, 0, 0),
+              ECUIO_ERR_INVALID_ARGUMENT);
+
+    /* The child's, connected: 7 bytes are no whole SCONFIG pair. */
+    unsigned long channel = 0;
+    ASSERT_EQ(ecuio_j2534_sur_connect_channel(h, 0, 0, &channel), ECUIO_OK);
+    EXPECT_EQ(ecuio_j2534_sur_ioctl(h, channel, ECUIO_PT_IOCTL_SET_CONFIG, big,
+                                    7, nullptr, 0, nullptr),
+              ECUIO_ERR_VENDOR_REFUSED);
+    EXPECT_EQ(ecuio_j2534_sur_ioctl(h, channel, ECUIO_PT_IOCTL_CLEAR_RX_BUFFER,
+                                    nullptr, 0, nullptr, 0, nullptr),
+              ECUIO_OK);
 }
 
 /* ================= WRITE / IOCTL / FILTER relay ================= */

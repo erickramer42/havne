@@ -131,7 +131,8 @@ TEST_F(SignalDecodeTest, ValidateSignal_InvalidBitLength) {
     EXPECT_EQ(ecuio_validate_signal(&signal), ECUIO_VALIDATE_OK);
 }
 
-TEST_F(SignalDecodeTest, ValidateSignal_UnterminatedName) {
+TEST_F(SignalDecodeTest, ValidateSignal_NameUnitDecimals)
+{
     ecuio_signal_def_t signal = {};
     signal.kind = ECUIO_VALUE_UINT;
     signal.bit_length = 8;
@@ -142,6 +143,18 @@ TEST_F(SignalDecodeTest, ValidateSignal_UnterminatedName) {
     }
 
     EXPECT_EQ(ecuio_validate_signal(&signal), ECUIO_VALIDATE_ERR_NAME);
+
+    /* The unit the same way, and at most 3 decimal places */
+    signal.name[sizeof(signal.name) - 1] = '\0';
+    memset(signal.unit, 'u', sizeof(signal.unit));
+    EXPECT_EQ(ecuio_validate_signal(&signal), ECUIO_VALIDATE_ERR_UNIT);
+    signal.unit[sizeof(signal.unit) - 1] = '\0';
+    signal.decimal_places = 4;
+    EXPECT_EQ(ecuio_validate_signal(&signal), ECUIO_VALIDATE_ERR_DECIMALS);
+    signal.decimal_places = 3;
+    EXPECT_EQ(ecuio_validate_signal(&signal), ECUIO_VALIDATE_OK);
+
+    EXPECT_EQ(ecuio_validate_signal(nullptr), ECUIO_VALIDATE_ERR_NULL);
 }
 
 TEST_F(SignalDecodeTest, ScaleOffsetCalculation) {
