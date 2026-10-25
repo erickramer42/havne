@@ -372,6 +372,18 @@ on Windows), because nothing else can link the instrumented core.
 [fuzz/README.md](../fuzz/README.md) has the MSVC and Clang recipes and
 how to replay a crash.
 
+**Coverage** (Windows, [OpenCppCoverage](https://github.com/OpenCppCoverage/OpenCppCoverage)):
+`scripts/coverage.sh` configures `build-coverage` on first use
+(RelWithDebInfo with `/Od /Ob0`: PDBs, no inlining, release Qt), builds
+it, and runs the whole suite under the tool with `--cover_children`,
+so the x64 surrogate child counts too. It prints the line rate for
+`core/`, `surrogate/` and `app/`, merged across the test binaries, and
+writes `Testing/coverage/html/index.html` and
+`Testing/coverage/cobertura.xml`. Native code only: QML, the x86
+surrogate, the tests and the fake DLLs aren't counted, and `app/main.cpp`
+isn't linked into any test, so it isn't in the report. `--tests-only`
+and `-R` work as in `verify.sh`.
+
 ## Troubleshooting
 
 | Symptom | Cause and fix |
