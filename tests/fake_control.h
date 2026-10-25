@@ -34,7 +34,7 @@ constexpr uint32_t kMagic = 0x43464345u;   /* "ECFC" */
 constexpr uint32_t kMaxKnobs = 16;
 constexpr uint32_t kNameLen = 48;
 constexpr uint32_t kValueLen = 32;
-constexpr uint32_t kInboxDepth = 16;
+constexpr uint32_t kInboxDepth = 32;   /* a read's indication cap and more */
 constexpr uint32_t kMsgMax = 64;
 
 struct Knob {

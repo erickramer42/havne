@@ -104,7 +104,7 @@
 #include <mutex>
 #include <cstdlib>
 
-#define FAKE_QUEUE_DEPTH 16
+#define FAKE_QUEUE_DEPTH 32   /* a read's indication cap and more */
 #define FAKE_WRITE_DEPTH 16
 #define FAKE_FILTER_DEPTH 8
 #define FAKE_CONFIG_DEPTH 16

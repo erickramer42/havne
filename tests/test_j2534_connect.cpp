@@ -130,22 +130,34 @@ TEST_P(J2534ConnectTest, MissingDllFailsToLoad)
     EXPECT_NE(strstr(ecuio_last_error_detail(), "load the DLL"), nullptr)
         << ecuio_last_error_detail();
 
+    /* Text; an MS-DOS header with no PE header behind it; a PE header
+     * for an ARM64 image. The architecture sniff calls each unknown,
+     * and the load refuses each. */
+    std::string text = "not a DLL";
+    std::string mz_only(64, '\0');
+    mz_only[0] = 'M';
+    mz_only[1] = 'Z';
+    std::string arm64 = mz_only;
+    arm64[0x3C] = 0x40; /* e_lfanew: the PE header follows at 64 */
+    arm64 += std::string("PE\0\0", 4) + "\x64\xAA" + std::string(260, '\0');
     char tmp[MAX_PATH] = {};
     ASSERT_GT(GetTempPathA(MAX_PATH, tmp), 0u);
-    const std::string text = std::string(tmp) + "ecuio-not-a-dll-" +
+    const std::string path = std::string(tmp) + "ecuio-not-a-dll-" +
                              std::to_string(GetCurrentProcessId()) + ".dll";
     struct Remove {
         std::string path;
         ~Remove() { DeleteFileA(path.c_str()); }
-    } remove{text};
-    FILE* f = fopen(text.c_str(), "wb");
-    ASSERT_NE(f, nullptr);
-    fputs("not a DLL", f);
-    fclose(f);
-    EXPECT_EQ(ecuio_session_create(("j2534://" + text).c_str(), &session),
-              ECUIO_ERR_LOAD_FAILED);
-    EXPECT_NE(strstr(ecuio_last_error_detail(), "load the DLL"), nullptr)
-        << ecuio_last_error_detail();
+    } remove{path};
+    for (const std::string* bytes : {&text, &mz_only, &arm64}) {
+        FILE* f = fopen(path.c_str(), "wb");
+        ASSERT_NE(f, nullptr);
+        fwrite(bytes->data(), 1, bytes->size(), f);
+        fclose(f);
+        EXPECT_EQ(ecuio_session_create(("j2534://" + path).c_str(), &session),
+                  ECUIO_ERR_LOAD_FAILED);
+        EXPECT_NE(strstr(ecuio_last_error_detail(), "load the DLL"), nullptr)
+            << ecuio_last_error_detail();
+    }
 
     EXPECT_EQ(ecuio_session_create("j2534://C:/ecuio-\xFF.dll", &session),
               ECUIO_ERR_LOAD_FAILED);

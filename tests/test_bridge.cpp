@@ -1698,6 +1698,27 @@ TEST(BridgeTest, ConnectLogsWhatTheEcuSupports)
               "2 refused: 22 F1 94 (7F 22 31), 22 F1 95 (7F 22 31)");
     ASSERT_TRUE(disconnectAndWait(bridge));
 }
+
+/* A session that opens but won't start (the adapter refuses the obd2
+ * channel's filter) fails the connect with the cause, and the bridge
+ * keeps no session: a second connect works once the refusal is gone. */
+TEST(BridgeTest, RefusedStartNamesItsCauseAndLeavesNoSession)
+{
+    QtTuneBridge bridge;
+    const QString uri = QStringLiteral("j2534://%1")
+                            .arg(QString::fromUtf8(FAKE_J2534_DLL_PATH));
+    {
+        FakeEnvArm refuse("ECUIO_FAKE_FILTER_STATUS", "7");
+        EXPECT_EQ(bridge.connectSession(uri).toStdString(),
+                  "the adapter's driver refused: PassThruStartMsgFilter "
+                  "returned status 7 (ERR_FAILED): fake_j2534: "
+                  "PassThruStartMsgFilter refused (ECUIO_FAKE_FILTER_STATUS)");
+        EXPECT_FALSE(bridge.connected());
+    }
+    ASSERT_TRUE(bridge.connectSession(uri).isEmpty());
+    EXPECT_TRUE(bridge.connected());
+    ASSERT_TRUE(disconnectAndWait(bridge));
+}
 #endif  // _WIN32
 
 // ---------------------------------------------------------------------------

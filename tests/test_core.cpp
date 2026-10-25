@@ -311,7 +311,16 @@ TEST(CoreTest, SameCallbackDifferentUserdataAllowed) {
         session, counting_callback, &counter1), ECUIO_OK);
     EXPECT_EQ(ecuio_register_frame_callback(
         session, counting_callback, &counter2), ECUIO_OK);
-    
+
+    /* ...so unregistering one pair leaves the other */
+    EXPECT_EQ(
+        ecuio_unregister_frame_callback(session, counting_callback, &counter2),
+        ECUIO_OK);
+    ecuio_frame_t frame{};
+    ecuio_session_dispatch_callbacks(session, &frame);
+    EXPECT_EQ(counter1, 1);
+    EXPECT_EQ(counter2, 0);
+
     ecuio_session_close(session);
     ecuio_session_destroy(session);
 }
