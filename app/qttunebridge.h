@@ -1,6 +1,6 @@
 // File/layer: app/qttunebridge.h | Qt6 Core, app layer, C++17
-// Testing: test_bridge (Qt-linked target): the frame log's ring and
-//          order, SignalListModel's history ring and display units,
+// Testing: test_bridge (Qt-linked target): the frame log's ring, order
+//          and payload storage, SignalListModel's history ring and display units,
 //          discoverJ2534Devices' marshaling shape
 
 #pragma once
@@ -57,6 +57,14 @@ public:
     bool newestFirst() const { return m_newestFirst; }
     void setNewestFirst(bool newestFirst);
 
+    // A payload up to this many bytes lives in its row: every reply the
+    // first vehicle gave (27 bytes at most) and every mock frame
+    static constexpr int InlinePayload = 64;
+
+    // Test seams: the ring's slots, and the heap bytes the rows hold
+    size_t slotsForTesting() const { return m_ring.size(); }
+    size_t spilledBytesForTesting() const;
+
 signals:
     void countChanged(int newCount);
     void newestFirstChanged();
@@ -65,17 +73,25 @@ private:
     struct Row {
         quint64 timestampUs = 0;
         quint32 arbId = 0;
+        quint16 length = 0;
         bool extended = false;
-        // At the frame's length; a reused slot keeps its capacity, so
-        // the ring stops allocating once it has gone round
-        std::vector<uint8_t> payload;
+        uint8_t inlineData[InlinePayload] = {};
+        // Only a payload past InlinePayload; a short frame taking the
+        // slot frees it, so long replies hold memory only while shown
+        std::vector<uint8_t> spill;
+        const uint8_t* data() const
+        {
+            return spill.empty() ? inlineData : spill.data();
+        }
     };
 
     const Row& rowAt(int row) const;
 
-    std::vector<Row> m_ring;   // grows to MaxFrames, then stays that size
+    // Grows to MaxFrames and keeps its slots across clear(), so the ring
+    // stops allocating once it has gone round
+    std::vector<Row> m_ring;
     size_t m_oldest = 0;       // the oldest row's slot
-    int m_count = 0;           // rows shown; m_ring.size() but mid-append
+    int m_count = 0;           // rows shown, at most m_ring.size()
     bool m_newestFirst = true;
 };
 

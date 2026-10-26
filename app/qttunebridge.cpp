@@ -1,7 +1,8 @@
 // File/layer: app/qttunebridge.cpp | Qt6 Core, app layer, C++17
 // Testing: test_bridge (QtCore only): worker→GUI marshaling, coalescing,
-//          in-flight backpressure, the frame log's ring and order and
-//          the counters on the tick, the signal model's roles and age
+//          in-flight backpressure, the frame log's ring and order, its
+//          rows' payload storage (BridgeTest.FrameLogHoldsLongPayloadsOnlyWhileShown)
+//          and the counters on the tick, the signal model's roles and age
 //          refresh, link-state mapping, the activity log's session and
 //          ECU lines, session recording (BridgeTest.Recording*), display
 //          units on the rows, the chart and not the recording
@@ -26,6 +27,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cstring>
 
 namespace {
 
@@ -91,13 +93,13 @@ QVariant FrameListModel::data(const QModelIndex& index, int role) const
     const Row& r = rowAt(index.row());
     switch (role) {
         case TimestampRole:     return QVariant::fromValue<quint64>(r.timestampUs);
-        case DlcRole:           return static_cast<uint>(r.payload.size());
+        case DlcRole:           return static_cast<uint>(r.length);
         case ExtendedRole:      return r.extended;
         case PayloadRole:
             // Spaced uppercase bytes ("41 0C 1F 40"), matching the ID column
             return QString::fromLatin1(
-                QByteArray::fromRawData(reinterpret_cast<const char*>(r.payload.data()),
-                                        static_cast<qsizetype>(r.payload.size()))
+                QByteArray::fromRawData(reinterpret_cast<const char*>(r.data()),
+                                        static_cast<qsizetype>(r.length))
                     .toHex(' ').toUpper());
         case ArbitrationIdRole: return QVariant::fromValue<quint32>(r.arbId);
         default:                return QVariant();
@@ -129,14 +131,20 @@ void FrameListModel::appendFrame(const ecuio_frame_t& frame, uint16_t len)
     }
     const int row = m_newestFirst ? 0 : m_count;
     beginInsertRows(QModelIndex(), row, row);
-    if (m_ring.size() < static_cast<size_t>(MaxFrames)) {
-        m_ring.emplace_back();
+    if (static_cast<size_t>(m_count) == m_ring.size()) {
+        m_ring.emplace_back();   // every slot holds a row: one more, below the cap
     }
     Row& r = m_ring[(m_oldest + static_cast<size_t>(m_count)) % m_ring.size()];
     r.timestampUs = frame.timestamp_us;
     r.arbId = frame.arbitration_id;
     r.extended = (frame.flags & ECUIO_FRAME_FLAG_EXTENDED) != 0;
-    r.payload.assign(frame.data, frame.data + len);
+    r.length = len;
+    if (len <= InlinePayload) {
+        memcpy(r.inlineData, frame.data, len);
+        std::vector<uint8_t>().swap(r.spill);   // frees a long frame's block
+    } else {
+        r.spill.assign(frame.data, frame.data + len);
+    }
     ++m_count;
     endInsertRows();
     if (!full) {
@@ -148,11 +156,22 @@ void FrameListModel::clear()
 {
     if (m_count == 0) return;
     beginResetModel();
-    m_ring.clear();
+    for (Row& r : m_ring) {
+        std::vector<uint8_t>().swap(r.spill);   // the slots stay; their blocks go
+    }
     m_oldest = 0;
     m_count = 0;
     endResetModel();
     emit countChanged(0);
+}
+
+size_t FrameListModel::spilledBytesForTesting() const
+{
+    size_t bytes = 0;
+    for (const Row& r : m_ring) {
+        bytes += r.spill.capacity();
+    }
+    return bytes;
 }
 
 void FrameListModel::setNewestFirst(bool newestFirst)

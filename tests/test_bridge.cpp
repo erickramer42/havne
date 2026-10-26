@@ -726,6 +726,99 @@ TEST(BridgeTest, FullFrameLogKeepsTheNewestInOrder)
     bridge.disconnectSession();
 }
 
+/* A payload up to InlinePayload bytes lives in its row; a longer one
+ * holds a heap block only while its row is shown, so a run of long
+ * replies leaves nothing behind once short frames take the slots. Clear
+ * keeps the slots (no reallocation on the next connect) and frees the
+ * blocks. */
+TEST(BridgeTest, FrameLogHoldsLongPayloadsOnlyWhileShown)
+{
+    FrameListModel model;
+    auto frame = std::make_unique<ecuio_frame_t>();
+    *frame = ecuio_frame_t{};
+    quint64 stamp = 0;
+    auto append = [&](uint16_t len) {
+        frame->timestamp_us = ++stamp;
+        for (uint16_t i = 0; i < len; ++i) {
+            frame->data[i] = static_cast<uint8_t>(stamp + i);
+        }
+        model.appendFrame(*frame, len);
+    };
+    // The newest row's bytes, as the Log page shows them
+    auto newestHex = [&]() {
+        return model.data(model.index(0, 0), FrameListModel::PayloadRole)
+            .toString();
+    };
+    auto expectedHex = [](quint64 s, int len) {
+        QByteArray bytes;
+        for (int i = 0; i < len; ++i)
+            bytes.append(static_cast<char>(s + i));
+        return QString::fromLatin1(bytes.toHex(' ').toUpper());
+    };
+    const int cap = FrameListModel::MaxFrames;
+
+    for (int i = 0; i < cap; ++i)
+        append(200);
+    EXPECT_GE(model.spilledBytesForTesting(), static_cast<size_t>(cap) * 200);
+    EXPECT_EQ(newestHex(), expectedHex(stamp, 200));
+    EXPECT_EQ(model.data(model.index(0, 0), FrameListModel::DlcRole).toUInt(),
+              200u);
+
+    // Short frames round the ring: every long block is gone
+    for (int i = 0; i < cap; ++i)
+        append(27);
+    EXPECT_EQ(model.spilledBytesForTesting(), 0u);
+    EXPECT_EQ(model.slotsForTesting(), static_cast<size_t>(cap));
+    EXPECT_EQ(newestHex(), expectedHex(stamp, 27));
+    EXPECT_EQ(model.data(model.index(0, 0), FrameListModel::DlcRole).toUInt(),
+              27u);
+
+    // InlinePayload itself stays inline; one byte past it spills
+    append(FrameListModel::InlinePayload);
+    EXPECT_EQ(model.spilledBytesForTesting(), 0u);
+    EXPECT_EQ(newestHex(), expectedHex(stamp, FrameListModel::InlinePayload));
+    append(FrameListModel::InlinePayload + 1);
+    EXPECT_GE(model.spilledBytesForTesting(),
+              static_cast<size_t>(FrameListModel::InlinePayload + 1));
+    EXPECT_EQ(newestHex(),
+              expectedHex(stamp, FrameListModel::InlinePayload + 1));
+
+    // Clear keeps the slots and frees the blocks
+    model.clear();
+    EXPECT_EQ(model.rowCount(), 0);
+    EXPECT_EQ(model.slotsForTesting(), static_cast<size_t>(cap));
+    EXPECT_EQ(model.spilledBytesForTesting(), 0u);
+    for (int i = 0; i < 3; ++i)
+        append(8);
+    ASSERT_EQ(model.rowCount(), 3);
+    EXPECT_EQ(model.slotsForTesting(), static_cast<size_t>(cap));
+    for (int r = 0; r < 3; ++r) {
+        EXPECT_EQ(model.data(model.index(r, 0), FrameListModel::TimestampRole)
+                      .toULongLong(),
+                  stamp - static_cast<quint64>(r))
+            << "row " << r;
+    }
+
+    // A ring cleared before it filled grows only as far as it's used
+    FrameListModel partial;
+    for (int i = 0; i < 5; ++i)
+        partial.appendFrame(*frame, 8);
+    partial.clear();
+    for (int i = 0; i < 7; ++i) {
+        frame->timestamp_us = 100 + static_cast<quint64>(i);
+        partial.appendFrame(*frame, 8);
+    }
+    EXPECT_EQ(partial.slotsForTesting(), 7u);
+    ASSERT_EQ(partial.rowCount(), 7);
+    for (int r = 0; r < 7; ++r) {
+        EXPECT_EQ(
+            partial.data(partial.index(r, 0), FrameListModel::TimestampRole)
+                .toULongLong(),
+            106u - static_cast<quint64>(r))
+            << "row " << r;
+    }
+}
+
 /* frameCount and guiNotifyCount reach QML on the 100 ms tick, not once
  * per frame: a burst of 400 frames changes each a handful of times. The
  * disconnect reports the last of them, so what QML last saw is exact. */
