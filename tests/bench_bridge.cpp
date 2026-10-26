@@ -9,7 +9,16 @@
 // is built. Frames are queued as the worker queues them
 // (dispatchFrameForTesting), then the drain is timed: the queued call,
 // the frame log, the match against every def, the decode and staging.
-// Recording is off. A raw session (no defs) is the baseline.
+// Recording is off. A raw session (no defs) is the baseline. Beside
+// it: the worker's side of each frame (onFrame, the frame's copy and
+// the queued call, run here on the bench's thread) and one coalesce
+// tick's SignalListModel::updateValues for a model of N rows.
+//
+// Then the committed engine-start recording replayed under obd2 at
+// speed=max and 10 (the load test ADR-0023 and ADR-0024 name): the
+// time taken, the frames handled and dropped at the cap, and the
+// highest RPM the model held at any tick, against the recording's
+// 1,261 (Known Issue #10).
 //
 // The defs sit four to a CAN ID, 16 bits each, as a passive-bus profile
 // packs them; each frame carries one ID, so it decodes four values and
@@ -19,6 +28,7 @@
 // Run: build/tests/Release/bench_bridge.exe [frames per run, default 20000]
 
 #include <QCoreApplication>
+#include <QFile>
 #include <QString>
 
 #include <algorithm>
@@ -56,18 +66,26 @@ std::vector<ecuio_signal_def_t> makeDefs(int n)
     return defs;
 }
 
-// Microseconds per frame for the GUI thread's drain of `frames` frames
-// cycling over `ids` CAN IDs
-double drainMicrosPerFrame(QtTuneBridge& bridge, int frames, int ids)
+// Microseconds per frame for `frames` frames cycling over `ids` CAN IDs:
+// the GUI thread's drain, and the worker's side (onFrame: the frame's
+// copy and the queued call), here run on this thread
+struct PerFrame {
+    double drain = 0.0;
+    double worker = 0.0;
+};
+
+PerFrame microsPerFrame(QtTuneBridge& bridge, int frames, int ids)
 {
     ecuio_frame_t f{};
     f.data_length = 8;
     const int burst = QtTuneBridge::maxInFlightForTesting() / 2;
     std::chrono::steady_clock::duration drained{};
+    std::chrono::steady_clock::duration posted{};
     int sent = 0;
     while (sent < frames) {
         const int n = std::min(burst, frames - sent);
         const int expected = bridge.frameCount() + n;
+        const auto p0 = std::chrono::steady_clock::now();
         for (int i = 0; i < n; ++i, ++sent) {
             f.arbitration_id =
                 kFirstId + static_cast<uint32_t>(ids > 0 ? sent % ids : 0);
@@ -76,19 +94,25 @@ double drainMicrosPerFrame(QtTuneBridge& bridge, int frames, int ids)
                 f.data[b] = static_cast<uint8_t>(sent + b);
             bridge.dispatchFrameForTesting(f);
         }
+        posted += std::chrono::steady_clock::now() - p0;
         const auto t0 = std::chrono::steady_clock::now();
         while (bridge.frameCount() < expected) {
             QCoreApplication::processEvents(QEventLoop::AllEvents);
         }
         drained += std::chrono::steady_clock::now() - t0;
     }
-    return std::chrono::duration<double, std::micro>(drained).count() / frames;
+    PerFrame out;
+    out.drain =
+        std::chrono::duration<double, std::micro>(drained).count() / frames;
+    out.worker =
+        std::chrono::duration<double, std::micro>(posted).count() / frames;
+    return out;
 }
 
 // The median of kRuns runs, each on a fresh connect
-double measure(const QString& uri, int frames, int ids)
+PerFrame measure(const QString& uri, int frames, int ids)
 {
-    std::vector<double> runs;
+    std::vector<PerFrame> runs;
     for (int r = 0; r < kRuns; ++r) {
         QtTuneBridge bridge;
         const QString err = bridge.connectSession(uri);
@@ -97,7 +121,7 @@ double measure(const QString& uri, int frames, int ids)
                          qPrintable(err));
             std::exit(1);
         }
-        runs.push_back(drainMicrosPerFrame(bridge, frames, ids));
+        runs.push_back(microsPerFrame(bridge, frames, ids));
         if (bridge.droppedFrames() != 0) {
             std::fprintf(stderr, "%s dropped %d frames\n", qPrintable(uri),
                          bridge.droppedFrames());
@@ -107,8 +131,116 @@ double measure(const QString& uri, int frames, int ids)
         while (bridge.disconnecting())
             QCoreApplication::processEvents();
     }
-    std::sort(runs.begin(), runs.end());
-    return runs[runs.size() / 2];
+    std::sort(
+        runs.begin(), runs.end(),
+        [](const PerFrame& a, const PerFrame& b) { return a.drain < b.drain; });
+    PerFrame median = runs[runs.size() / 2];
+    std::vector<double> workers;
+    for (const PerFrame& p : runs)
+        workers.push_back(p.worker);
+    std::sort(workers.begin(), workers.end());
+    median.worker = workers[workers.size() / 2];
+    return median;
+}
+
+// Microseconds for one coalesce tick's update of a model of n rows with
+// a value for every row: SignalListModel::updateValues, as the tick
+// calls it, with no view attached
+double tickMicros(const ecuio_signal_set_t& set)
+{
+    SignalListModel model;
+    model.setSignalSet(&set);
+    std::vector<std::pair<uint16_t, double>> values;
+    for (uint32_t k = 0; k < set.count; ++k)
+        values.emplace_back(set.defs[k].id, static_cast<double>(k));
+    constexpr int kTicks = 200;
+    const auto t0 = std::chrono::steady_clock::now();
+    for (int t = 0; t < kTicks; ++t) {
+        for (auto& v : values)
+            v.second += 1.0;
+        model.updateValues(values, t * 100);
+    }
+    return std::chrono::duration<double, std::micro>(
+               std::chrono::steady_clock::now() - t0)
+               .count() /
+           kTicks;
+}
+
+// The committed engine-start recording replayed through the bridge under
+// obd2: wall time, frames handled and dropped at the cap, and the
+// highest RPM the model held at any tick (what the Dashboard can show;
+// the recording's own peak is 1,261)
+struct ReplayRun {
+    double seconds = 0.0;
+    int handled = 0;
+    int dropped = 0;
+    double peakRpm = 0.0;
+};
+
+ReplayRun replayFixture(const char* speed)
+{
+    const QString uri =
+        QStringLiteral(
+            "replay://%1/2026-10-25-engine-start?profile=obd2&speed=%2")
+            .arg(QStringLiteral(ECUIO_REPLAY_FIXTURES),
+                 QString::fromLatin1(speed));
+    QtTuneBridge bridge;
+    const auto t0 = std::chrono::steady_clock::now();
+    const QString err = bridge.connectSession(uri);
+    if (!err.isEmpty()) {
+        std::fprintf(stderr, "connect %s failed: %s\n", qPrintable(uri),
+                     qPrintable(err));
+        std::exit(1);
+    }
+    // Every row after the header is a frame
+    int total = -1;
+    QFile csv(QStringLiteral(ECUIO_REPLAY_FIXTURES) +
+              QStringLiteral("/2026-10-25-engine-start/frames.csv"));
+    if (csv.open(QIODevice::ReadOnly)) {
+        while (!csv.atEnd()) {
+            csv.readLine();
+            ++total;
+        }
+    }
+    if (total <= 0) {
+        std::fprintf(stderr, "can't read the fixture\n");
+        std::exit(1);
+    }
+
+    SignalListModel* model = bridge.signalModel();
+    int rpmRow = -1;
+    for (int r = 0; r < model->rowCount(); ++r) {
+        if (model->data(model->index(r), SignalListModel::NameRole)
+                .toString() == QStringLiteral("RPM"))
+            rpmRow = r;
+    }
+    ReplayRun run;
+    QObject::connect(model, &SignalListModel::valuesUpdated, model, [&]() {
+        if (rpmRow < 0)
+            return;
+        const QModelIndex at = model->index(rpmRow);
+        if (model->data(at, SignalListModel::HasValueRole).toBool())
+            run.peakRpm = std::max(
+                run.peakRpm,
+                model->data(at, SignalListModel::ValueRole).toDouble());
+    });
+    while (bridge.frameCount() + bridge.droppedFrames() < total) {
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 5);
+    }
+    run.seconds =
+        std::chrono::duration<double>(std::chrono::steady_clock::now() - t0)
+            .count();
+    // Two more ticks, so the last window's values reach the model
+    const auto settle = std::chrono::steady_clock::now();
+    while (std::chrono::steady_clock::now() - settle <
+           std::chrono::milliseconds(250))
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 5);
+    run.handled = bridge.frameCount();
+    run.dropped = bridge.droppedFrames();
+    bridge.disconnectSession();
+    while (bridge.disconnecting())
+        QCoreApplication::processEvents();
+    return run;
 }
 
 } // namespace
@@ -118,13 +250,17 @@ int main(int argc, char** argv)
     QCoreApplication app(argc, argv);
     const int frames = argc > 1 ? std::max(1000, std::atoi(argv[1])) : 20000;
 
-    std::printf("%d frames a run, median of %d runs; GUI-thread drain only\n",
+    std::printf("%d frames a run, median of %d runs; us a frame on the GUI "
+                "thread (drain) and the worker's side (onFrame); us a tick "
+                "for the model's update\n",
                 frames, kRuns);
-    std::printf("%6s  %10s  %12s  %14s\n", "defs", "us/frame", "decode us",
-                "max frames/s");
+    std::printf("%6s  %10s  %12s  %14s  %10s  %10s\n", "defs", "us/frame",
+                "decode us", "max frames/s", "worker us", "tick us");
 
-    const double raw = measure("mock://bench?profile=raw", frames, 0);
-    std::printf("%6s  %10.2f  %12s  %14.0f\n", "raw", raw, "-", 1e6 / raw);
+    const PerFrame rawRun = measure("mock://bench?profile=raw", frames, 0);
+    const double raw = rawRun.drain;
+    std::printf("%6s  %10.2f  %12s  %14.0f  %10.2f  %10s\n", "raw", raw, "-",
+                1e6 / raw, rawRun.worker, "-");
 
     for (int n : {9, 50, 100, 250, 500, 1000}) {
         std::vector<ecuio_signal_def_t> defs = makeDefs(n);
@@ -140,10 +276,22 @@ int main(int argc, char** argv)
             return 1;
         }
         const int ids = (n + kDefsPerId - 1) / kDefsPerId;
-        const double us = measure(
+        const PerFrame run = measure(
             QString("mock://bench?profile=%1").arg(name.c_str()), frames, ids);
-        std::printf("%6d  %10.2f  %12.2f  %14.0f\n", n, us, us - raw, 1e6 / us);
+        const double us = run.drain;
+        std::printf("%6d  %10.2f  %12.2f  %14.0f  %10.2f  %10.1f\n", n, us,
+                    us - raw, 1e6 / us, run.worker, tickMicros(set));
         ecuio_profile_unregister(name.c_str());
+    }
+
+    std::printf("\nThe engine-start fixture under obd2 (7,074 frames, 297 s "
+                "recorded; peak 1,261 rpm)\n");
+    std::printf("%6s  %10s  %8s  %8s  %10s\n", "speed", "seconds", "handled",
+                "dropped", "peak rpm");
+    for (const char* speed : {"max", "10"}) {
+        const ReplayRun r = replayFixture(speed);
+        std::printf("%6s  %10.2f  %8d  %8d  %10.0f\n", speed, r.seconds,
+                    r.handled, r.dropped, r.peakRpm);
     }
     return 0;
 }

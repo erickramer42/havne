@@ -78,7 +78,7 @@ second session ran the request engine, the probe, identification and
   [testing.md](docs/testing.md#gaps-not-verified)). The run sheets are
   [bench-runsheet.md](docs/bench-sessions/bench-runsheet.md) and
   [vehicle-runsheet.md](docs/bench-sessions/vehicle-runsheet.md).
-- **Tests:** 423 ctest cases on Windows (both trees rebuilt,
+- **Tests:** 424 ctest cases on Windows (both trees rebuilt,
   2026-10-26), all passing but the env-gated cross-arch skip, plus the
   cross-arch subset (75/75); 0 MSVC warnings. CI runs ctest on Windows,
   macOS and Linux, core under ASan and UBSan, 60 s of each libFuzzer
@@ -148,8 +148,8 @@ an issue is resolved it is removed, and its number is not reused.
 4. **Every def is matched against every frame on the GUI thread.** A
    subscription can't trim that work: it is the chart's filter only,
    because the Dashboard reads every signal. Measured, it costs about
-   3 ns a def a frame: 1000 defs at a full 500 kbit/s classic CAN bus
-   would take under 2 % of the GUI thread, and about 9 % at a CAN FD
+   1.4 ns a def a frame: 1000 defs at a full 500 kbit/s classic CAN bus
+   would take under 1 % of the GUI thread, and about 3.5 % at a CAN FD
    rate of 25,000 frames a second (worked out, not measured;
    [docs/testing.md](docs/testing.md#performance)). Decoding on the
    worker (Performance, in the backlog) removes it along with #10.
@@ -375,7 +375,7 @@ matters: the original-copy file format constrains everything after it.
 
   The GUI thread's cost per frame by profile size is measured
   (`bench_bridge`, [docs/testing.md](docs/testing.md#performance)): the
-  matching takes under 2 % of the GUI thread at a full classic CAN bus
+  matching takes under 1 % of the GUI thread at a full classic CAN bus
   with 1000 defs. The reasons to move the decode are #10's per-sample
   time on the chart first, then a decode every front end shares and
   values that survive frames dropped under load; not CPU. It gets its

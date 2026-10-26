@@ -144,6 +144,10 @@ if(NOT QTTUNE_BUILD_CORE_ONLY)
     qttune_enable_warnings(bench_bridge)
     target_include_directories(bench_bridge PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../app)
     target_link_libraries(bench_bridge PRIVATE ecuio-core Qt6::Core)
+    # The engine-start fixture, replayed as the load test (ADR-0023)
+    target_compile_definitions(bench_bridge PRIVATE
+        ECUIO_REPLAY_FIXTURES="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/replay"
+    )
     if(WIN32)
         add_custom_command(TARGET bench_bridge POST_BUILD
             COMMAND ${CMAKE_COMMAND} -E copy_if_different

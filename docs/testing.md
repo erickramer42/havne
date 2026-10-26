@@ -115,10 +115,34 @@ connects each; µs a frame, GUI thread):
   rate.** What decoding on the worker would still bring, first, is the
   samples' own time on the chart (Known Issue #10): the staging keeps
   one value per signal per 100 ms window, stamped with the tick's time.
-- **Not measured:** the worker's side (the 4 KB copy into the queued
-  call) and the tick's per-row model updates with many rows, either of
-  which may cost more than the matching at high rates; a QML view
-  attached to the models; text defs; any machine but the dev one.
+- **Rows and staging found without a search** (2026-10-26, one run
+  each in the same session, the bench's later columns): the model looks
+  a signal's row up by id, and the bridge stages a value by its def's
+  index. Before, each value searched the rows and the staging, so one
+  tick's `updateValues` grew with the square of the profile.
+
+  | Defs | match and decode, µs a frame, before | after | one tick's `updateValues`, µs, before | after |
+  |---|---|---|---|---|
+  | 9 | 0.12 | 0.09 | 0.2 | 0.2 |
+  | 100 | 0.35 | 0.23 | 9.1 | 0.9 |
+  | 250 | 0.61 | 0.42 | 48.0 | 2.0 |
+  | 500 | 1.12 | 0.77 | 190.4 | 3.2 |
+  | 1000 | 1.92 | 1.37 | 819.0 | 7.6 |
+
+  So the match and decode cost about 1.4 ns a def a frame: 1000 defs at
+  a full classic CAN bus take under 1 % of the GUI thread, and about
+  3.5 % at 25,000 frames a second (worked out). The worker's side of a
+  frame (`onFrame`: the 4 KB copy and the queued call) costs 1.2 to
+  2.0 µs at any profile size, more than the match and decode
+  ([ADR-0024](adr/0024-decode-on-the-worker.md)).
+- **The engine-start fixture under `obd2`** (7,074 frames, 297 s
+  recorded, peaking at 1,261 rpm): at `speed=10`, 29.75 s, none
+  dropped, and the highest RPM the model held was 1,232; at `max`, none
+  dropped and the highest was 758, the whole recording drained in a
+  tick or two (Known Issue #10).
+- **Not measured:** a QML view attached to the models; text defs; a
+  replay fast enough to reach the in-flight cap; any machine but the
+  dev one.
 
 ## What is verified
 
@@ -149,7 +173,7 @@ connects each; µs a frame, GUI thread):
 | The mock worker keeps real time: its frames' timestamps average one 50 ms tick apart over 2 s, so the drive cycle plays at the speed its physics assume | `CoreTest.MockFramesKeepTheTickInterval`. A fixed 50 ms sleep after each tick measured 62.3 ms on Windows and failed it (checked by hand, 2026-10-24) |
 | Mock drive cycle, stepped deterministically: every phase in order; the 2nd- and 3rd-gear pulls hold the fuel-cut limiter exactly 5 s, rpm past it on first contact and then sawing under it while road speed holds, the blade open, load at 95 % or more, MAF on its WOT plateau and lambda lean, the cycle mostly in cut; the 3rd-gear pull is longer and faster and heats the coolant and oil, while the intake air stays within 10 °C of ambient; a 100 km/h cruise in 4th at 2850–3100 rpm in closed loop; the cold start's fast idle near 1430 rpm on extra air, then 850–900 rpm; the launch slips the clutch above 3000 rpm and spins the tires in 1st only; the drag run crosses 402 m in 11–15 s at 150–200 km/h through 4th; only the first loop runs cold (the thermostat stays shut, the oil trails the coolant), the coolant never falls below 85 °C from the third, and in the sixth it holds 85–97 °C at cruise, peaks at 100–105 °C during the pulls and the quarter mile with the fan cutting in, the oil holds 100–125 °C and ends the loop above the coolant, and a quarter mile moves it 2–9 °C; at every tick of three loops, rpm is locked to wheel speed in gear (within the crank reading's jitter), never below 1000 rpm in gear, no more than 50 km/h with the clutch in, MAF matches rpm and load, lambda is lean exactly when fuel is cut, the rev limit cuts fuel the tick after rpm meets it in any phase, and no temperature moves more than 0.5 °C a tick; the encoded rpm never reads the same for more than half a second, and away from shifts, the limiter and the launch it never steps more than 150 rpm a tick, phase changes included; every tick round-trips through the mock set without clamping | `CoreTest.MockDriveCycle*`. Each new check failed against its mutation (checked by hand, 2026-10-24): the limiter's load dipping with the saw, the clutch going in at 3000 rpm, lambda ignoring fuel cut, a lift off the limiter left fueled at the limit, the idle without its hunting, the crank reading without its jitter, the engine falling to idle unlimited when the clutch goes in. The warm-loop checks failed against a stronger radiator, no piston heat into the oil, a lighter sump, less heat into the coolant, a fan out of reach, a thermostat opening at 70 °C, and the oil's friction heat counted on top of the fuel's (2026-10-25) |
 | Frames marshal from the worker to the GUI thread | `BridgeTest.FramesMarshalFromWorkerToGuiThread` |
-| Signal updates are coalesced to 10 Hz whatever the frame rate | `BridgeTest.SignalBatchesAreCoalesced` |
+| Signal updates are coalesced to 10 Hz whatever the frame rate; within a window the newest sample is the one shown, numeric and text, and the window adds one sample to the chart | `BridgeTest.SignalBatchesAreCoalesced`, `.TheNewestSampleInAWindowIsTheOneShown`. The model finds a row by id and the bridge stages by def index; a wrong row, a text batch reaching a numeric row, a staged sample never overwritten and slots kept past the drain each fail the bridge tests |
 | History ring eviction, `valuesUpdated` semantics; `chartData()` reports each series' model row, which keys its trace color | `BridgeTest` |
 | A subscription only chooses what the chart plots: an unsubscribed row keeps taking values and history, so the Dashboard stays live | `BridgeTest.UnsubscribedSignalKeepsUpdating` |
 | Display precision: `DecimalsRole` and `chartData()`'s `decimals` carry each def's `decimal_places` | `BridgeTest.DecimalsComeFromTheDefAndReachTheChart` |

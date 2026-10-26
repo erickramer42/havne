@@ -2,7 +2,8 @@
 // Testing: test_bridge (QtCore only): worker→GUI marshaling, coalescing,
 //          in-flight backpressure, the frame log's ring and order, its
 //          rows' payload storage (BridgeTest.FrameLogHoldsLongPayloadsOnlyWhileShown)
-//          and the counters on the tick, the signal model's roles and age
+//          and the counters on the tick, the newest sample in a window
+//          (rows by id, staging by def index), the signal model's roles and age
 //          refresh, link-state mapping, the activity log's session and
 //          ECU lines, session recording (BridgeTest.Recording*), display
 //          units on the rows, the chart and not the recording
@@ -247,6 +248,7 @@ void SignalListModel::setSignalSet(const ecuio_signal_set_t* set)
     if (set == nullptr || set->defs == nullptr || set->count == 0) {
         beginResetModel();
         m_entries.clear();
+        m_rowOfId.clear();
         m_subscribedCount = 0;
         endResetModel();
         m_clock.restart();
@@ -255,6 +257,8 @@ void SignalListModel::setSignalSet(const ecuio_signal_set_t* set)
 
     beginResetModel();
     m_entries.clear();
+    m_rowOfId.clear();
+    m_rowOfId.reserve(static_cast<qsizetype>(set->count));
     m_subscribedCount = 0;
 
     for (uint32_t i = 0; i < set->count; ++i) {
@@ -268,6 +272,7 @@ void SignalListModel::setSignalSet(const ecuio_signal_set_t* set)
         // A text row has nothing to plot, so it's never subscribed
         e.subscribed = !e.isText;
         if (e.subscribed) ++m_subscribedCount;
+        m_rowOfId.insert(e.id, static_cast<int>(m_entries.size()));
         m_entries.push_back(e);
     }
     endResetModel();
@@ -302,14 +307,12 @@ void SignalListModel::updateValues(const std::vector<std::pair<uint16_t, double>
     int firstRow = -1;
     int lastRow = -1;
     for (const auto& pair : values) {
-        for (size_t i = 0; i < m_entries.size(); ++i) {
-            Entry& e = m_entries[i];
-            if (e.id == pair.first) {
-                e.value = pair.second;
-                pushSample(e, stamp, pair.second);
-                widenRows(static_cast<int>(i), firstRow, lastRow);
-            }
-        }
+        const int row = m_rowOfId.value(pair.first, -1);
+        if (row < 0) continue;
+        Entry& e = m_entries[static_cast<size_t>(row)];
+        e.value = pair.second;
+        pushSample(e, stamp, pair.second);
+        widenRows(row, firstRow, lastRow);
     }
     if (firstRow >= 0) {
         // AgeMsRole rides along with ValueRole/HasValueRole so delegates
@@ -330,15 +333,15 @@ void SignalListModel::updateTexts(const std::vector<std::pair<uint16_t, QString>
     int firstRow = -1;
     int lastRow = -1;
     for (const auto& pair : texts) {
-        for (size_t i = 0; i < m_entries.size(); ++i) {
-            Entry& e = m_entries[i];
-            if (e.id != pair.first || !e.isText) continue;
-            e.text = pair.second;
-            // The ring keeps the sample's time, for hasValue and ageMs;
-            // the value is never plotted
-            pushSample(e, stamp, 0.0);
-            widenRows(static_cast<int>(i), firstRow, lastRow);
-        }
+        const int row = m_rowOfId.value(pair.first, -1);
+        if (row < 0) continue;
+        Entry& e = m_entries[static_cast<size_t>(row)];
+        if (!e.isText) continue;
+        e.text = pair.second;
+        // The ring keeps the sample's time, for hasValue and ageMs;
+        // the value is never plotted
+        pushSample(e, stamp, 0.0);
+        widenRows(row, firstRow, lastRow);
     }
     if (firstRow >= 0) {
         emit dataChanged(index(firstRow), index(lastRow),
@@ -458,6 +461,7 @@ QtTuneBridge::QtTuneBridge(QObject* parent)
                 m_signalModel->updateTexts(m_stagingTexts);
                 m_stagingTexts.clear();
             }
+            std::fill(m_stagedAt.begin(), m_stagedAt.end(), -1);
             ++m_signalBatchCount;
             emit signalBatchChanged();
         }
@@ -626,9 +630,11 @@ void QtTuneBridge::applyConnectedState(ecuio_session_t* session, const QString& 
     notifyFrameCounts();
     m_droppedFrames.store(0, std::memory_order_relaxed);
     m_lastReportedDropped = 0;
-    m_signalModel->setSignalSet(ecuio_session_signal_set(session));
+    const ecuio_signal_set_t* set = ecuio_session_signal_set(session);
+    m_signalModel->setSignalSet(set);
     m_stagingBuffer.clear();   // previous session's staged values must
     m_stagingTexts.clear();    // never bleed into this one's first batch
+    m_stagedAt.assign(set != nullptr ? set->count : 0, -1);
     m_linkErrorCode = ECUIO_OK;
     m_errorEpisodes = 0;
     emit linkStateChanged();
@@ -755,6 +761,7 @@ void QtTuneBridge::disconnectSession()
     notifyFrameCounts();   // the last tick's worth
     m_stagingBuffer.clear();
     m_stagingTexts.clear();
+    m_stagedAt.clear();
     m_currentUri.clear();
     m_linkErrorCode = ECUIO_OK;           // the properties must not
     m_errorEpisodes = 0;              // outlive the session
@@ -998,17 +1005,17 @@ void QtTuneBridge::onFrame(const ecuio_frame_t* frame, void* user_data)
 namespace {
 
 // The staging buffers keep the latest sample per signal id across the
-// coalescing window
+// coalescing window. slot is the def's entry in m_stagedAt: where its
+// sample sits, so a newer one overwrites it without a search.
 template <typename T>
-void stageLatest(std::vector<std::pair<uint16_t, T>>& staging, uint16_t id,
-                 const T& sample)
+void stageLatest(std::vector<std::pair<uint16_t, T>>& staging, int& slot,
+                 uint16_t id, const T& sample)
 {
-    for (auto& staged : staging) {
-        if (staged.first == id) {
-            staged.second = sample;   // overwrite with newest sample
-            return;
-        }
+    if (slot >= 0) {
+        staging[static_cast<size_t>(slot)].second = sample;   // newest wins
+        return;
     }
+    slot = static_cast<int>(staging.size());
     staging.emplace_back(id, sample);
 }
 
@@ -1037,7 +1044,7 @@ void QtTuneBridge::handleFrameInternal(const ecuio_frame_t* frame,
     // ADR-0013: decode against the SESSION's profile set. NULL means
     // the raw profile — frames stream to the Log page, decode skipped.
     const ecuio_signal_set_t* set = ecuio_session_signal_set(m_session);
-    if (set != nullptr) {
+    if (set != nullptr && m_stagedAt.size() == set->count) {
         for (uint32_t i = 0; i < set->count; ++i) {
             const ecuio_signal_def_t& def = set->defs[i];
             // Core-side gate: arbitration ID, plus the mux key when the
@@ -1051,14 +1058,14 @@ void QtTuneBridge::handleFrameInternal(const ecuio_frame_t* frame,
                         == ECUIO_DECODE_OK) {
                     const QString text = QString::fromLatin1(m_textScratch.data());
                     m_recorder.sample(arrived, def, text);
-                    stageLatest(m_stagingTexts, def.id, text);
+                    stageLatest(m_stagingTexts, m_stagedAt[i], def.id, text);
                 }
                 continue;
             }
             double val = 0.0;
             if (ecuio_decode_signal(&def, frame->data, len, &val) == ECUIO_DECODE_OK) {
                 m_recorder.sample(arrived, def, val);
-                stageLatest(m_stagingBuffer, def.id, val);
+                stageLatest(m_stagingBuffer, m_stagedAt[i], def.id, val);
             }
         }
     }

@@ -12,6 +12,7 @@
 #include <QVariantMap>
 #include <QTimer>
 #include <QElapsedTimer>
+#include <QHash>
 #include <QUrl>
 
 #include <atomic>
@@ -216,6 +217,9 @@ private:
     ecuio_display_value_t shown(const Entry& e, double value) const;
 
     std::vector<Entry> m_entries;
+    // Each signal id's row, so a batch finds its rows without a search.
+    // A set's ids are unique (the validator refuses a duplicate).
+    QHash<uint16_t, int> m_rowOfId;
     int m_subscribedCount = 0;
     uint32_t m_units = ECUIO_UNITS_METRIC;
     QElapsedTimer m_clock;   // fallback timestamp source; started in setSignalSet
@@ -389,6 +393,10 @@ private:
     // Latest value per signal ID, flushed by the 100 ms coalesce timer
     std::vector<std::pair<uint16_t, double>> m_stagingBuffer;
     std::vector<std::pair<uint16_t, QString>> m_stagingTexts;   // the text rows'
+    // For each def of the session's set, by index: its slot in the
+    // staging (m_stagingBuffer, or m_stagingTexts for a text def), or -1
+    // while nothing is staged for it this window
+    std::vector<int> m_stagedAt;
     std::vector<char> m_textScratch;   // ECUIO_DECODE_TEXT_MAX, for ecuio_decode_text
     int m_signalBatchCount = 0;
 

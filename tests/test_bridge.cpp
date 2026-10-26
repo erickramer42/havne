@@ -608,6 +608,58 @@ TEST(BridgeTest, SignalBatchesAreCoalesced)
     bridge.disconnectSession();
 }
 
+TEST(BridgeTest, TheNewestSampleInAWindowIsTheOneShown)
+{
+    /* Three frames inside one coalesce window: the row shows the third,
+     * numeric and text alike, and the window adds one sample to the
+     * chart. The mock's own frames (0x0C0) match neither def. */
+    static ecuio_signal_def_t defs[2] = {};
+    defs[0] = {};
+    defs[0].id = 1;
+    defs[0].kind = ECUIO_VALUE_UINT;
+    defs[0].message_id = 0x123u;
+    defs[0].bit_length = 8;
+    defs[0].scale = 1.0;
+    strncpy(defs[0].name, "Byte", sizeof(defs[0].name) - 1);
+    defs[1] = {};
+    defs[1].id = 2;
+    defs[1].kind = ECUIO_VALUE_HEX;
+    defs[1].message_id = 0x123u;
+    defs[1].byte_length = 1;
+    defs[1].scale = 1.0;
+    strncpy(defs[1].name, "Byte as hex", sizeof(defs[1].name) - 1);
+    static ecuio_signal_set_t set = {};
+    set.layout_version = ECUIO_SIGNAL_SET_LAYOUT;
+    set.count = 2;
+    set.defs = defs;
+    ASSERT_EQ(ecuio_profile_register("test-newest", &set, nullptr), ECUIO_OK);
+
+    QtTuneBridge bridge;
+    ASSERT_TRUE(bridge.connectSession("mock://newest?profile=test-newest").isEmpty());
+    spinLoop(150);   // a tick or more, so the window below starts clean
+    const int batches = bridge.signalBatchCount();
+    ecuio_frame_t f{};
+    f.arbitration_id = 0x123;
+    f.data_length = 1;
+    for (uint8_t v : {10, 20, 30}) {
+        f.data[0] = v;
+        bridge.dispatchFrameForTesting(f);
+    }
+    ASSERT_TRUE(spinUntil([&]() { return bridge.signalBatchCount() > batches; }, 2000));
+
+    SignalListModel* model = bridge.signalModel();
+    ASSERT_EQ(model->rowCount(), 2);
+    EXPECT_EQ(model->data(model->index(0, 0), SignalListModel::ValueRole).toDouble(), 30.0);
+    EXPECT_EQ(model->data(model->index(1, 0), SignalListModel::TextRole).toString(),
+              QStringLiteral("1E"));
+    const QVariantList chart = model->chartData();
+    ASSERT_EQ(chart.size(), 1);
+    EXPECT_EQ(chart.at(0).toMap().value("samples").toList().size(), 2)
+        << "one [time, value] pair for the window";
+    ASSERT_TRUE(disconnectAndWait(bridge));
+    EXPECT_EQ(ecuio_profile_unregister("test-newest"), ECUIO_OK);
+}
+
 namespace {
 
 /* Dispatches n frames with ID 0x123 and stamps first, first + 1, …,
