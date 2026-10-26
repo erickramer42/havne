@@ -58,6 +58,7 @@ struct ecuio_uri_query;
  * did are core's, read by create (did under uds-generic, ADR-0020). */
 extern const char* const ecuio_mock_query_keys[];
 extern const char* const ecuio_j2534_query_keys[];
+extern const char* const ecuio_replay_query_keys[];
 
 /* Mock transport factory — attaches a transport to a session
  * (idempotent). Its keys, profile and did, are core's, so it reads
@@ -66,6 +67,17 @@ extern const char* const ecuio_j2534_query_keys[];
 ecuio_status_t ecuio_mock_transport_attach(ecuio_session_t* session,
                                             const char* uri,
                                             const struct ecuio_uri_query* query);
+
+/* Replay transport factory (ADR-0023), every platform:
+ *   replay://<path>[?profile=…][&did=…][&speed=<0.1..100>|max][&loop=1]
+ * <path> is absolute: a recording's folder, or a path ending in .csv for
+ * its frames.csv. Attach reads the whole file and refuses a bad row with
+ * its line number (LOAD_FAILED); a bad value or path is BAD_URI. Fills
+ * the session info's replay fields; the worker starts with
+ * ecuio_session_start. */
+ecuio_status_t ecuio_replay_transport_attach(ecuio_session_t* session,
+                                              const char* uri,
+                                              const struct ecuio_uri_query* query);
 
 /*
  * J2534 transport factory (Win32). URI grammar:

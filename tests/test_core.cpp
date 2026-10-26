@@ -5,10 +5,21 @@
 #include <cmath>
 #include <cstring>
 #include <atomic>
+#include <cerrno>
 #include <chrono>
+#include <cstdio>
+#include <cstdlib>
+#include <mutex>
 #include <string>
 #include <thread>
 #include <vector>
+
+#ifdef _WIN32
+#include <direct.h> /* _mkdir, _rmdir */
+#else
+#include <sys/stat.h>
+#include <unistd.h>
+#endif
 
 extern "C" {
 #include "ecuio/core.h"
@@ -75,8 +86,9 @@ bool wait_for(Predicate pred, int timeout_ms, int poll_ms = 10)
 TEST(CoreTest, CreateFailuresNameTheirCause) {
     ecuio_session_t* s = nullptr;
     EXPECT_EQ(ecuio_session_create("can://bus0", &s), ECUIO_ERR_NO_TRANSPORT);
-    EXPECT_STREQ(ecuio_last_error_detail(),
-                 "unsupported URI scheme: expected mock:// or j2534://");
+    EXPECT_STREQ(
+        ecuio_last_error_detail(),
+        "unsupported URI scheme: expected mock://, replay:// or j2534://");
     EXPECT_EQ(ecuio_session_create("mock://x?interval=10", &s), ECUIO_ERR_BAD_URI);
     EXPECT_STREQ(ecuio_last_error_detail(),
                  "mock:// takes no query key 'interval', only profile and did");
@@ -1992,5 +2004,532 @@ TEST(CoreTest, MockAnswersTheSessionsDids) {
     for (size_t i = 0; i < 3; ++i) {
         EXPECT_GE(seen[i], size_t{3}) << set->defs[i].name;
     }
+    ecuio_session_destroy(session);
+}
+
+// ---- replay:// (ADR-0023) ----
+
+namespace {
+
+/* A scratch recording in the temp folder, named for the running test and
+ * removed at the end. path is absolute and uses forward slashes, which
+ * the replay path accepts on every platform. */
+struct TempRecording {
+    std::string dir;
+    std::string csv;
+    bool made_dir = false;
+
+    explicit TempRecording(const std::string& text, bool as_folder = false)
+    {
+        const char* tmp = std::getenv("TEMP");
+        if (tmp == nullptr)
+            tmp = std::getenv("TMPDIR");
+        std::string base = tmp != nullptr ? tmp : "/tmp";
+        for (char& c : base) {
+            if (c == '\\')
+                c = '/';
+        }
+        while (base.size() > 1 && base.back() == '/')
+            base.pop_back();
+        const std::string name =
+            std::string("ecuio-replay-") +
+            ::testing::UnitTest::GetInstance()->current_test_info()->name();
+        if (as_folder) {
+            dir = base + "/" + name;
+#ifdef _WIN32
+            made_dir = _mkdir(dir.c_str()) == 0 || errno == EEXIST;
+#else
+            made_dir = mkdir(dir.c_str(), 0700) == 0 || errno == EEXIST;
+#endif
+            csv = dir + "/frames.csv";
+        } else {
+            csv = base + "/" + name + ".csv";
+        }
+        FILE* f = std::fopen(csv.c_str(), "wb");
+        if (f != nullptr) {
+            std::fwrite(text.data(), 1, text.size(), f);
+            std::fclose(f);
+        }
+    }
+    ~TempRecording()
+    {
+        std::remove(csv.c_str());
+        if (made_dir) {
+#ifdef _WIN32
+            _rmdir(dir.c_str());
+#else
+            rmdir(dir.c_str());
+#endif
+        }
+    }
+    std::string uri(const char* query = "") const
+    {
+        return "replay://" + (dir.empty() ? csv : dir) + query;
+    }
+};
+
+const char* const kFramesHeader = "host_us,timestamp_us,id,flags,data\n";
+
+/* Every frame a replay delivers, and when it arrived */
+struct ReplayCapture {
+    std::mutex mutex;
+    std::vector<ecuio_frame_t> frames;
+    std::vector<std::chrono::steady_clock::time_point> arrived;
+    size_t count()
+    {
+        std::lock_guard<std::mutex> lock(mutex);
+        return frames.size();
+    }
+};
+
+void replay_capture_cb(const ecuio_frame_t* frame, void* user_data)
+{
+    auto* c = static_cast<ReplayCapture*>(user_data);
+    std::lock_guard<std::mutex> lock(c->mutex);
+    c->frames.push_back(*frame);
+    c->arrived.push_back(std::chrono::steady_clock::now());
+}
+
+/* Creates, registers and starts a replay session, or fails the test */
+ecuio_session_t* start_replay(const std::string& uri, ReplayCapture* capture)
+{
+    ecuio_session_t* session = nullptr;
+    EXPECT_EQ(ecuio_session_create(uri.c_str(), &session), ECUIO_OK)
+        << ecuio_last_error_detail();
+    if (session == nullptr)
+        return nullptr;
+    EXPECT_EQ(
+        ecuio_register_frame_callback(session, replay_capture_cb, capture),
+        ECUIO_OK);
+    EXPECT_EQ(ecuio_session_start(session), ECUIO_OK);
+    return session;
+}
+
+/* Rows at 100 ms steps of session time, 0x7E8 and 41 0C 1F 40 each */
+std::string paced_rows(int n)
+{
+    std::string text = kFramesHeader;
+    for (int i = 0; i < n; ++i) {
+        const std::string t = std::to_string(5000000 + 100000 * i);
+        text += t + "," + t + ",0x7E8,0x0,41 0C 1F 40\n";
+    }
+    return text;
+}
+
+} // namespace
+
+/* Each row goes out as recorded (ID, flags, bytes, an empty payload
+ * included), stamped with the recording's session time rebased to the
+ * first row; the session info says what's playing */
+TEST(CoreTest, ReplaySendsTheRecordedFramesAtTheirRebasedTimes)
+{
+    TempRecording rec(std::string(kFramesHeader) +
+                      "10,1000000,0x7E8,0x0,41 0C 1F 40\n"
+                      "600,1000500,0x18DAF110,0x1,\n"
+                      "2100,1002000,0x7E8,0x40,62 F1 90 41 42\n");
+    ReplayCapture cap;
+    ecuio_session_t* session = start_replay(rec.uri("?speed=max"), &cap);
+    ASSERT_NE(session, nullptr);
+    ASSERT_TRUE(wait_for([&] { return cap.count() >= 3; }, 2000));
+
+    ecuio_session_info_t info{};
+    ASSERT_EQ(ecuio_session_get_info(session, &info), ECUIO_OK);
+    EXPECT_EQ(info.backend, ECUIO_BACKEND_REPLAY);
+    EXPECT_EQ(info.replay_frames, 3u);
+    EXPECT_EQ(info.replay_span_ms, 2u);
+    EXPECT_EQ(info.replay_speed_milli, 0u) << "max";
+    EXPECT_EQ(info.flags & ECUIO_SESSION_INFO_REPLAY_LOOP, 0u);
+    EXPECT_EQ(info.channel_count, 0u) << "passive";
+    EXPECT_STREQ(info.profile, "raw") << "replay's default";
+    ASSERT_EQ(ecuio_session_close(session), ECUIO_OK);
+
+    ASSERT_EQ(cap.frames.size(), 3u)
+        << "the end of the file sends nothing more";
+    const ecuio_frame_t& a = cap.frames[0];
+    EXPECT_EQ(a.arbitration_id, 0x7E8u);
+    EXPECT_EQ(a.flags, 0u);
+    EXPECT_EQ(a.timestamp_us, 0u);
+    ASSERT_EQ(a.data_length, 4u);
+    EXPECT_EQ(a.data[0], 0x41);
+    EXPECT_EQ(a.data[3], 0x40);
+    const ecuio_frame_t& b = cap.frames[1];
+    EXPECT_EQ(b.arbitration_id, 0x18DAF110u);
+    EXPECT_EQ(b.flags, static_cast<uint32_t>(ECUIO_FRAME_FLAG_EXTENDED));
+    EXPECT_EQ(b.data_length, 0u);
+    EXPECT_EQ(b.timestamp_us, 500u);
+    const ecuio_frame_t& c = cap.frames[2];
+    EXPECT_EQ(c.flags, 0x40u) << "flags as recorded, TRUNCATED among them";
+    EXPECT_EQ(c.data_length, 5u);
+    EXPECT_EQ(c.timestamp_us, 2000u);
+    ecuio_session_destroy(session);
+}
+
+/* A raw adapter clock that wraps steps timestamp_us backwards: that row
+ * is timed by its host_us step instead, so session time never decreases */
+TEST(CoreTest, ReplayTimesABackwardStampByTheHostClock)
+{
+    TempRecording rec(std::string(kFramesHeader) +
+                      "0,4294967000,0x7E8,0x0,41 0D 00\n"
+                      "200,4294967200,0x7E8,0x0,41 0D 01\n"
+                      "600,100,0x7E8,0x0,41 0D 02\n");
+    ReplayCapture cap;
+    ecuio_session_t* session = start_replay(rec.uri("?speed=max"), &cap);
+    ASSERT_NE(session, nullptr);
+    ASSERT_TRUE(wait_for([&] { return cap.count() >= 3; }, 2000));
+    ASSERT_EQ(ecuio_session_close(session), ECUIO_OK);
+    EXPECT_EQ(cap.frames[0].timestamp_us, 0u);
+    EXPECT_EQ(cap.frames[1].timestamp_us, 200u);
+    EXPECT_EQ(cap.frames[2].timestamp_us, 600u) << "the host's 400 us step";
+    ecuio_session_destroy(session);
+}
+
+/* loop=1 plays the file again, its stamps carried on from the last pass */
+TEST(CoreTest, ReplayLoopsWithStampsThatNeverDecrease)
+{
+    TempRecording rec(std::string(kFramesHeader) +
+                      "0,0,0x7E8,0x0,41 0D 00\n"
+                      "1000,1000,0x7E8,0x0,41 0D 01\n");
+    ReplayCapture cap;
+    ecuio_session_t* session = start_replay(rec.uri("?speed=max&loop=1"), &cap);
+    ASSERT_NE(session, nullptr);
+    ASSERT_TRUE(wait_for([&] { return cap.count() >= 6; }, 2000));
+    ecuio_session_info_t info{};
+    ASSERT_EQ(ecuio_session_get_info(session, &info), ECUIO_OK);
+    EXPECT_NE(info.flags & ECUIO_SESSION_INFO_REPLAY_LOOP, 0u);
+    ASSERT_EQ(ecuio_session_close(session), ECUIO_OK);
+    for (size_t i = 1; i < cap.frames.size(); ++i) {
+        ASSERT_GE(cap.frames[i].timestamp_us, cap.frames[i - 1].timestamp_us)
+            << "frame " << i;
+    }
+    EXPECT_EQ(cap.frames[2].timestamp_us, 1000u)
+        << "the second pass starts where the first ended";
+    EXPECT_EQ(cap.frames[3].timestamp_us, 2000u);
+    EXPECT_EQ(cap.frames[2].data[2], 0x00) << "from the top";
+    ecuio_session_destroy(session);
+}
+
+/* One second of recording takes about a second at speed 1 and a tenth of
+ * that at 10; the frames keep the recording's times either way */
+TEST(CoreTest, ReplayPacesByTheRecordingsTimeOverTheSpeed)
+{
+    TempRecording rec(paced_rows(11));
+    for (const char* q : {"", "?speed=10"}) {
+        SCOPED_TRACE(q);
+        ReplayCapture cap;
+        ecuio_session_t* session = start_replay(rec.uri(q), &cap);
+        ASSERT_NE(session, nullptr);
+        ASSERT_TRUE(wait_for([&] { return cap.count() >= 11; }, 5000));
+        ASSERT_EQ(ecuio_session_close(session), ECUIO_OK);
+        const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                            cap.arrived.back() - cap.arrived.front())
+                            .count();
+        if (q[0] == '\0') {
+            EXPECT_GE(ms, 900) << "real time";
+            EXPECT_LE(ms, 1600);
+        } else {
+            EXPECT_GE(ms, 80) << "ten times faster";
+            EXPECT_LE(ms, 400);
+        }
+        EXPECT_EQ(cap.frames.back().timestamp_us, 1000000u)
+            << "the recording's time";
+        ecuio_session_destroy(session);
+    }
+}
+
+/* Attach checked the file, but it can change before the worker reads it
+ * again: playback sends the rows up to the first bad one, then stops, and
+ * the session still closes cleanly */
+TEST(CoreTest, ReplayStopsAtARowThatTurnedBadAfterAttach)
+{
+    TempRecording rec(paced_rows(5));
+    ecuio_session_t* session = nullptr;
+    ASSERT_EQ(ecuio_session_create(rec.uri("?speed=max").c_str(), &session),
+              ECUIO_OK)
+        << ecuio_last_error_detail();
+    {
+        const std::string rows = paced_rows(3);
+        const std::string cut =
+            rows + "5300000,5300000,0x7E8,0x0,41 0"; // cut mid-row
+        FILE* f = std::fopen(rec.csv.c_str(), "wb");
+        ASSERT_NE(f, nullptr);
+        std::fwrite(cut.data(), 1, cut.size(), f);
+        std::fclose(f);
+    }
+    ReplayCapture cap;
+    ASSERT_EQ(ecuio_register_frame_callback(session, replay_capture_cb, &cap),
+              ECUIO_OK);
+    ASSERT_EQ(ecuio_session_start(session), ECUIO_OK);
+    ASSERT_TRUE(wait_for([&] { return cap.count() >= 3; }, 2000));
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    EXPECT_EQ(cap.count(), 3u) << "nothing past the bad row";
+    ASSERT_EQ(ecuio_session_close(session), ECUIO_OK);
+    ecuio_session_destroy(session);
+}
+
+/* A long gap in the recording doesn't hold up a close */
+TEST(CoreTest, ReplayClosesAtOnceDuringAGap)
+{
+    TempRecording rec(std::string(kFramesHeader) +
+                      "0,0,0x7E8,0x0,41 0D 00\n"
+                      "3600000000,3600000000,0x7E8,0x0,41 0D 01\n");
+    ReplayCapture cap;
+    ecuio_session_t* session = start_replay(rec.uri(), &cap);
+    ASSERT_NE(session, nullptr);
+    ASSERT_TRUE(wait_for([&] { return cap.count() >= 1; }, 2000));
+    const auto t0 = std::chrono::steady_clock::now();
+    ASSERT_EQ(ecuio_session_close(session), ECUIO_OK);
+    EXPECT_LT(std::chrono::steady_clock::now() - t0, std::chrono::seconds(1));
+    EXPECT_EQ(cap.count(), 1u) << "the hour-later frame never went out";
+    ecuio_session_destroy(session);
+}
+
+/* Attach reads the whole file: anything but a frames.csv, or a bad row,
+ * fails create with its line number. Either line ending reads, and a
+ * whole-message payload arrives whole. */
+TEST(CoreTest, ReplayRefusesABadRecordingWithItsLineNumber)
+{
+    const std::string ok_row = "1,1,0x7E8,0x0,41 0C 1F 40\n";
+    struct Case {
+        std::string text;
+        const char* detail;
+    };
+    const std::vector<Case> cases = {
+        {"", "the recording's frames.csv is empty"},
+        {"host_us,signal,value,unit\n1,RPM,800,RPM\n",
+         "not a QtTune frames.csv, or a newer format"},
+        {kFramesHeader, "the recording's frames.csv holds no frames"},
+        {std::string(kFramesHeader) + ok_row + "2,2,7E8,0x0,41\n",
+         "frames.csv line 3: id isn't 0x-prefixed hex"},
+        {std::string(kFramesHeader) + "x,1,0x7E8,0x0,41\n",
+         "frames.csv line 2: host_us isn't"},
+        {std::string(kFramesHeader) + "1,-1,0x7E8,0x0,41\n",
+         "frames.csv line 2: timestamp_us isn't"},
+        {std::string(kFramesHeader) + "1,1,0x7E8,1,41\n",
+         "frames.csv line 2: flags isn't"},
+        {std::string(kFramesHeader) + "1,1,0x7E8,0x0,41 0\n",
+         "frames.csv line 2: data isn't"},
+        {std::string(kFramesHeader) + "1,1,0x7E8,0x0,41 \n",
+         "frames.csv line 2: data isn't"},
+        {std::string(kFramesHeader) + "1,1,0x123456789,0x0,41\n",
+         "frames.csv line 2: id isn't"},
+    };
+    for (const Case& c : cases) {
+        SCOPED_TRACE(c.text);
+        TempRecording rec(c.text);
+        ecuio_session_t* session = nullptr;
+        EXPECT_EQ(ecuio_session_create(rec.uri().c_str(), &session),
+                  ECUIO_ERR_LOAD_FAILED);
+        EXPECT_EQ(session, nullptr);
+        EXPECT_EQ(std::string(ecuio_last_error_detail()).rfind(c.detail, 0),
+                  size_t{0})
+            << ecuio_last_error_detail();
+    }
+
+    std::string long_data, too_long;
+    for (int i = 0; i < ECUIO_FRAME_DATA_MAX; ++i)
+        long_data += (i ? " " : "") + std::string("A5");
+    too_long = long_data + " A5";
+    {
+        TempRecording rec(std::string(kFramesHeader) + "1,1,0x7E8,0x0," +
+                          too_long + "\n");
+        ecuio_session_t* session = nullptr;
+        EXPECT_EQ(ecuio_session_create(rec.uri().c_str(), &session),
+                  ECUIO_ERR_LOAD_FAILED);
+        EXPECT_STREQ(ecuio_last_error_detail(),
+                     "frames.csv line 2: data is longer than a frame holds");
+    }
+
+    TempRecording crlf(std::string("host_us,timestamp_us,id,flags,data\r\n") +
+                       "1,1,0x7E8,0x0," + long_data +
+                       "\r\n2,2,0x7E8,0x0,41 0C 1F 40\r\n");
+    ReplayCapture cap;
+    ecuio_session_t* session = start_replay(crlf.uri("?speed=max"), &cap);
+    ASSERT_NE(session, nullptr);
+    ASSERT_TRUE(wait_for([&] { return cap.count() >= 2; }, 2000));
+    ASSERT_EQ(ecuio_session_close(session), ECUIO_OK);
+    EXPECT_EQ(cap.frames[0].data_length,
+              static_cast<uint16_t>(ECUIO_FRAME_DATA_MAX));
+    EXPECT_EQ(cap.frames[0].data[ECUIO_FRAME_DATA_MAX - 1], 0xA5);
+    EXPECT_EQ(cap.frames[1].data_length, 4u)
+        << "CRLF read as an ending, not data";
+    ecuio_session_destroy(session);
+
+    ecuio_session_t* missing = nullptr;
+#ifdef _WIN32
+    const char* gone = "replay://C:/ecuio-definitely-missing/frames.csv";
+#else
+    const char* gone = "replay:///ecuio-definitely-missing/frames.csv";
+#endif
+    EXPECT_EQ(ecuio_session_create(gone, &missing), ECUIO_ERR_LOAD_FAILED);
+    EXPECT_STREQ(ecuio_last_error_detail(),
+                 "couldn't open the recording's frames.csv");
+}
+
+/* The path must be absolute; a folder means its frames.csv; speed, loop
+ * and unknown keys are judged before the file is read */
+TEST(CoreTest, ReplayJudgesItsPathAndQuery)
+{
+    TempRecording folder(paced_rows(2), /*as_folder=*/true);
+    ASSERT_TRUE(folder.made_dir);
+    ecuio_session_t* session = nullptr;
+    ASSERT_EQ(ecuio_session_create(folder.uri().c_str(), &session), ECUIO_OK)
+        << ecuio_last_error_detail();
+    ecuio_session_destroy(session);
+    session = nullptr;
+    ASSERT_EQ(
+        ecuio_session_create((folder.uri() + "/?speed=0.1").c_str(), &session),
+        ECUIO_OK)
+        << "a trailing separator";
+    ecuio_session_info_t info{};
+    ASSERT_EQ(ecuio_session_get_info(session, &info), ECUIO_OK);
+    EXPECT_EQ(info.replay_speed_milli, 100u);
+    ecuio_session_destroy(session);
+
+    for (const char* bad : {"replay://", "replay://?speed=1",
+                            "replay://recordings/x", "replay://frames.csv"}) {
+        session = nullptr;
+        EXPECT_EQ(ecuio_session_create(bad, &session), ECUIO_ERR_BAD_URI)
+            << bad;
+        EXPECT_EQ(session, nullptr);
+    }
+    for (const char* q :
+         {"?speed=0", "?speed=0.05", "?speed=101", "?speed=1.2345", "?speed=1.",
+          "?speed=.5", "?speed=fast", "?speed=", "?loop=2", "?loop=yes"}) {
+        session = nullptr;
+        EXPECT_EQ(ecuio_session_create(folder.uri(q).c_str(), &session),
+                  ECUIO_ERR_BAD_URI)
+            << q;
+        EXPECT_EQ(session, nullptr);
+    }
+    for (const char* q : {"?speed=100", "?speed=2.5", "?speed=max", "?loop=0",
+                          "?loop=1", "?speed=1&speed=3"}) {
+        session = nullptr;
+        EXPECT_EQ(ecuio_session_create(folder.uri(q).c_str(), &session),
+                  ECUIO_OK)
+            << q;
+        ecuio_session_destroy(session);
+    }
+    session = nullptr;
+    EXPECT_EQ(
+        ecuio_session_create(folder.uri("?baud=500000").c_str(), &session),
+        ECUIO_ERR_BAD_URI);
+    EXPECT_STREQ(ecuio_last_error_detail(),
+                 "replay:// takes no query key 'baud', only profile, did, "
+                 "speed and loop");
+
+    TempRecording empty_dir_marker("", /*as_folder=*/true);
+    std::remove(empty_dir_marker.csv.c_str());
+    session = nullptr;
+    EXPECT_EQ(ecuio_session_create(empty_dir_marker.uri().c_str(), &session),
+              ECUIO_ERR_LOAD_FAILED)
+        << "a folder with no frames.csv";
+}
+
+/* Recorded replies decode under the profile the URI names: the defs
+ * match by ID and mux key, with no request behind them */
+TEST(CoreTest, ReplayDecodesUnderTheProfileItNames)
+{
+    TempRecording rec(paced_rows(2));
+    ReplayCapture cap;
+    ecuio_session_t* session =
+        start_replay(rec.uri("?profile=obd2&speed=max"), &cap);
+    ASSERT_NE(session, nullptr);
+    ASSERT_TRUE(wait_for([&] { return cap.count() >= 2; }, 2000));
+    ASSERT_EQ(ecuio_session_close(session), ECUIO_OK);
+    const ecuio_signal_set_t* set = ecuio_session_signal_set(session);
+    ASSERT_NE(set, nullptr);
+    bool decoded = false;
+    for (uint32_t i = 0; i < set->count; ++i) {
+        const ecuio_signal_def_t& d = set->defs[i];
+        if (!ecuio_def_applies_to_frame(&d, &cap.frames[0]))
+            continue;
+        double v = 0.0;
+        ASSERT_EQ(ecuio_decode_signal(&d, cap.frames[0].data,
+                                      cap.frames[0].data_length, &v),
+                  ECUIO_DECODE_OK);
+        EXPECT_DOUBLE_EQ(v, 2000.0) << d.name << ": 0x1F40 / 4";
+        decoded = true;
+    }
+    EXPECT_TRUE(decoded) << "41 0C is obd2's RPM";
+    ecuio_session_destroy(session);
+}
+
+/* The second vehicle session's engine start (docs/bench-sessions/
+ * 2026-10-25-vehicle.md, Phase 4), replayed under obd2: the values the
+ * sheet reports come back out of the recorded replies. The fixture is
+ * the recording scrubbed of its identification replies (ADR-0023), and
+ * this test holds it to that. */
+TEST(CoreTest, ReplayOfTheVehicleFixtureDecodesTheSheetsValues)
+{
+    const std::string dir =
+        std::string(ECUIO_REPLAY_FIXTURES) + "/2026-10-25-engine-start";
+    ReplayCapture cap;
+    ecuio_session_t* session =
+        start_replay("replay://" + dir + "?profile=obd2&speed=max", &cap);
+    ASSERT_NE(session, nullptr);
+    ecuio_session_info_t info{};
+    ASSERT_EQ(ecuio_session_get_info(session, &info), ECUIO_OK);
+    const size_t n = info.replay_frames;
+    EXPECT_EQ(n, 7074u);
+    EXPECT_EQ(info.replay_span_ms, 297446u);
+    ASSERT_TRUE(wait_for([&] { return cap.count() >= n; }, 10000));
+    ASSERT_EQ(ecuio_session_close(session), ECUIO_OK);
+    ASSERT_EQ(cap.frames.size(), n);
+
+    const ecuio_signal_set_t* set = ecuio_session_signal_set(session);
+    ASSERT_NE(set, nullptr);
+    /* The obd2 def reading a Service 01 PID */
+    const auto def_for = [set](uint8_t pid) -> const ecuio_signal_def_t* {
+        for (uint32_t i = 0; i < set->count; ++i) {
+            if (set->defs[i].mux_length == 2 &&
+                set->defs[i].mux_key == (0x4100u | pid)) {
+                return &set->defs[i];
+            }
+        }
+        return nullptr;
+    };
+    const ecuio_signal_def_t* rpm = def_for(0x0C);
+    const ecuio_signal_def_t* coolant = def_for(0x05);
+    const ecuio_signal_def_t* volts = def_for(0x42);
+    ASSERT_TRUE(rpm && coolant && volts);
+
+    double rpm_max = 0, volts_min = 1e9, coolant_min = 1e9, coolant_max = -1e9;
+    double first_rpm_s = -1;
+    size_t identification = 0;
+    for (const ecuio_frame_t& f : cap.frames) {
+        identification +=
+            (f.data_length >= 1 && f.data[0] == 0x49) ||
+            (f.data_length >= 2 && f.data[0] == 0x62 && f.data[1] == 0xF1);
+        double v = 0;
+        if (ecuio_def_applies_to_frame(rpm, &f) &&
+            ecuio_decode_signal(rpm, f.data, f.data_length, &v) ==
+                ECUIO_DECODE_OK) {
+            rpm_max = std::max(rpm_max, v);
+            if (v > 0 && first_rpm_s < 0)
+                first_rpm_s = f.timestamp_us / 1e6;
+        }
+        if (ecuio_def_applies_to_frame(volts, &f) &&
+            ecuio_decode_signal(volts, f.data, f.data_length, &v) ==
+                ECUIO_DECODE_OK) {
+            volts_min = std::min(volts_min, v);
+        }
+        if (ecuio_def_applies_to_frame(coolant, &f) &&
+            ecuio_decode_signal(coolant, f.data, f.data_length, &v) ==
+                ECUIO_DECODE_OK) {
+            coolant_min = std::min(coolant_min, v);
+            coolant_max = std::max(coolant_max, v);
+        }
+    }
+    EXPECT_EQ(identification, 0u)
+        << "the fixture carries no identification reply";
+    EXPECT_NEAR(rpm_max, 1261.25, 0.01) << "the sheet's 1,261 peak";
+    EXPECT_NEAR(volts_min, 9.564, 0.0005)
+        << "the sheet's 9.56 V dip at the starter";
+    EXPECT_EQ(coolant_min, 60.0) << "the sheet's 60 to 86 degrees C";
+    EXPECT_EQ(coolant_max, 86.0);
+    EXPECT_NEAR(first_rpm_s, 3.45, 0.01)
+        << "the start, 3.45 s into the recording";
+    EXPECT_EQ(cap.frames.back().timestamp_us, 297446075u)
+        << "the recording's span, rebased";
     ecuio_session_destroy(session);
 }

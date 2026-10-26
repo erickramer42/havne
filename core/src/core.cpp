@@ -274,7 +274,8 @@ ecuio_status_t ecuio_session_create(
     const bool is_j2534 = false;
 #endif
     const bool is_mock = strncmp(transport_uri, "mock://", 7) == 0;
-    if (!is_mock && !is_j2534) {
+    const bool is_replay = strncmp(transport_uri, "replay://", 9) == 0;
+    if (!is_mock && !is_replay && !is_j2534) {
 #ifndef _WIN32
         if (strncmp(transport_uri, "j2534://", 8) == 0) {
             ecuio_detail_set("j2534:// needs Windows, where J2534 adapters "
@@ -282,8 +283,8 @@ ecuio_status_t ecuio_session_create(
             return ECUIO_ERR_NO_TRANSPORT;
         }
 #endif
-        ecuio_detail_set("unsupported URI scheme: expected mock:// or "
-                         "j2534://");
+        ecuio_detail_set("unsupported URI scheme: expected mock://, "
+                         "replay:// or j2534://");
         return ECUIO_ERR_NO_TRANSPORT;
     }
 
@@ -291,9 +292,12 @@ ecuio_status_t ecuio_session_create(
      * the scheme's transport reads, before anything attaches: a
      * malformed query or an unknown key fails with no DLL load and no
      * discovery, the same way on every scheme. */
-    const char* scheme = is_mock ? "mock://" : "j2534://";
-    const char* const* keys = is_mock ? ecuio_mock_query_keys
-                                      : ecuio_j2534_query_keys;
+    const char* scheme = is_mock     ? "mock://"
+                         : is_replay ? "replay://"
+                                     : "j2534://";
+    const char* const* keys = is_mock     ? ecuio_mock_query_keys
+                              : is_replay ? ecuio_replay_query_keys
+                                          : ecuio_j2534_query_keys;
     const char* rest = transport_uri + strlen(scheme);
     ecuio_uri_query query;
     switch (ecuio_uri::split(ecuio_uri::query_of(rest), &query)) {
@@ -335,8 +339,10 @@ ecuio_status_t ecuio_session_create(
         default:
             /* Scheme defaults: mock:// -> mock; j2534:// -> obd2
              * (decode, the Service 01 requests and the declared
-             * 7E0/7E8 channel). ?profile=raw gives a log-only session. */
-            chosen = is_mock ? "mock" : "obd2";
+             * 7E0/7E8 channel); replay:// -> raw, which can't decode a
+             * recording wrongly (ADR-0023). ?profile=raw gives a
+             * log-only session. */
+            chosen = is_mock ? "mock" : is_replay ? "raw" : "obd2";
             break;
     }
 
@@ -390,6 +396,8 @@ ecuio_status_t ecuio_session_create(
     if (is_mock) {
         status = ecuio_mock_transport_attach(s.get(), transport_uri,
                                              &query);
+    } else if (is_replay) {
+        status = ecuio_replay_transport_attach(s.get(), transport_uri, &query);
     }
 
     if (status != ECUIO_OK) {

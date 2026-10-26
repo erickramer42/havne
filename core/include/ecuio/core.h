@@ -250,6 +250,8 @@ ecuio_status_t ecuio_session_get_error_state(
                                                  in this process */
 #define ECUIO_BACKEND_J2534_SURROGATE    3u   /* in the surrogate process
                                                  (ADR-0008) */
+#define ECUIO_BACKEND_REPLAY             4u   /* a recording's frames.csv
+                                                 (ADR-0023) */
 
 /* dll_arch: the adapter DLL's PE machine, as discovery's reserved[0]
  * reports it (j2534.h) */
@@ -261,6 +263,7 @@ ecuio_status_t ecuio_session_get_error_state(
 #define ECUIO_SESSION_INFO_VBATT         0x00000001u   /* vbatt_mv */
 #define ECUIO_SESSION_INFO_VERSIONS      0x00000002u   /* the three
                                                           version strings */
+#define ECUIO_SESSION_INFO_REPLAY_LOOP   0x00000004u   /* replay://?loop=1 */
 
 /* POD, 432 bytes, no hidden padding on any supported platform; pinned
  * by the assertions below. New fields take the reserved room. */
@@ -289,17 +292,25 @@ typedef struct ecuio_session_info {
     /* The profile the session decodes through (ADR-0013): ?profile=, or
      * the scheme's default. NUL-terminated. */
     char profile[ECUIO_SESSION_INFO_PROFILE_LEN];
-    uint32_t reserved[16];    /* zero; ABI growth space */
+    /* replay:// (ADR-0023): the recording's frames, its span from the
+     * first frame to the last, and the speed in thousandths (1000 = real
+     * time, 0 = max); 0 for every other backend */
+    uint32_t replay_frames;
+    uint32_t replay_span_ms;
+    uint32_t replay_speed_milli;
+    uint32_t reserved[13];    /* zero; ABI growth space */
 } ecuio_session_info_t;
 
 #if defined(__cplusplus)
 static_assert(sizeof(ecuio_session_info_t) == 432, "ecuio_session_info_t size is ABI");
 static_assert(offsetof(ecuio_session_info_t, firmware_version) == 64, "session info text offset is ABI");
-static_assert(offsetof(ecuio_session_info_t, reserved) == 368, "session info reserved offset is ABI");
+static_assert(offsetof(ecuio_session_info_t, replay_frames) == 368, "session info replay offset is ABI");
+static_assert(offsetof(ecuio_session_info_t, reserved) == 380, "session info reserved offset is ABI");
 #elif defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
 _Static_assert(sizeof(ecuio_session_info_t) == 432, "ecuio_session_info_t size is ABI");
 _Static_assert(offsetof(ecuio_session_info_t, firmware_version) == 64, "session info text offset is ABI");
-_Static_assert(offsetof(ecuio_session_info_t, reserved) == 368, "session info reserved offset is ABI");
+_Static_assert(offsetof(ecuio_session_info_t, replay_frames) == 368, "session info replay offset is ABI");
+_Static_assert(offsetof(ecuio_session_info_t, reserved) == 380, "session info reserved offset is ABI");
 #endif
 
 /* Copies what the session runs on into *out_info. Filled once, while

@@ -31,6 +31,11 @@ target_link_libraries(test_core PRIVATE
     GTest::gtest_main
 )
 
+# The scrubbed real-bus recording replay:// plays (ADR-0023)
+target_compile_definitions(test_core PRIVATE
+    ECUIO_REPLAY_FIXTURES="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/replay"
+)
+
 qttune_enable_warnings(test_core)
 gtest_discover_tests(test_core)
 

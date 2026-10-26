@@ -50,7 +50,8 @@ typedef char abi_info_size_check[(sizeof(ecuio_session_info_t) == 432) ? 1 : -1]
 typedef char abi_info_rx_check[(offsetof(ecuio_session_info_t, rx_ids) == 32) ? 1 : -1];
 typedef char abi_info_text_check[(offsetof(ecuio_session_info_t, firmware_version) == 64) ? 1 : -1];
 typedef char abi_info_profile_check[(offsetof(ecuio_session_info_t, profile) == 304) ? 1 : -1];
-typedef char abi_info_reserved_check[(offsetof(ecuio_session_info_t, reserved) == 368) ? 1 : -1];
+typedef char abi_info_replay_check[(offsetof(ecuio_session_info_t, replay_frames) == 368) ? 1 : -1];
+typedef char abi_info_reserved_check[(offsetof(ecuio_session_info_t, reserved) == 380) ? 1 : -1];
 typedef char abi_dropped_size_check[(sizeof(ecuio_dropped_request_t) == 8) ? 1 : -1];
 typedef char abi_support_size_check[(sizeof(ecuio_channel_support_t) == 152) ? 1 : -1];
 typedef char abi_support_bitmap_check[(offsetof(ecuio_channel_support_t, pid_bitmap) == 24) ? 1 : -1];
