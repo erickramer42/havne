@@ -1,7 +1,8 @@
 # ADR-0025: One J2534 backend — every vendor DLL runs in a surrogate process
 
-- **Status:** Proposed.
-- **Date:** 2026-10-26.
+- **Status:** Accepted.
+- **Date:** 2026-10-26. Step 1 (§6, the tests on the control page)
+  built with this record; steps 2 and 3 follow.
 - **Builds on:** [ADR-0008](0008-x86-surrogate-host.md) (the surrogate
   host, its job object and pipe); [ADR-0009](0009-pe-architecture-routing.md)
   (routing by PE machine type, which this record replaces);

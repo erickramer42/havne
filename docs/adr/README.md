@@ -31,7 +31,7 @@ old one, and the old record's status is updated to point at it.
 | [0022](0022-display-units.md) | Display units: metric or imperial, converted in core by unit string at the UI's edge; recordings keep decoded values | Accepted |
 | [0023](0023-replay-transport.md) | Replay transport: `replay://` plays a recording's `frames.csv` back through the frame API, paced by its session time | Accepted |
 | [0024](0024-decode-on-the-worker.md) | Decoding on the worker: a values callback delivers each frame's decoded signals with the frame's time | Accepted |
-| [0025](0025-one-j2534-backend.md) | One J2534 backend: every vendor DLL runs in a surrogate of its own architecture; the in-proc vendor calls are deleted | Proposed |
+| [0025](0025-one-j2534-backend.md) | One J2534 backend: every vendor DLL runs in a surrogate of its own architecture; the in-proc vendor calls are deleted | Accepted |
 
 ## Adding a record
 
