@@ -263,7 +263,9 @@ The bridge polls it on its 100 ms tick and maps it for the UI
   so a one-count step stays small, and a gap longer than the stale
   threshold breaks the trace instead of drawing a ramp. The layout is
   arithmetic in the `ChartLayout` singleton, which the tests run with
-  synthetic series; the Canvas only strokes what it returns.
+  synthetic series; the Canvas only strokes what it returns. A Canvas
+  paints an image at its own size, so this one is sized up by the
+  zoom and scaled back down, which keeps it as sharp as the rest.
 - **`SignalHub`** gives the Dashboard signals by *name*, because gauges
   want "RPM" whichever profile provides it. The mock and `obd2` sets
   share names; a profile that names a signal differently adds the

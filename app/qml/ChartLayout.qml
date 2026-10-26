@@ -4,7 +4,7 @@
 //          own range with a minimum span, flat traces in lanes of their
 //          own, a gap breaking a trace into segments, the time ticks'
 //          step and captions, and the value labels nudged apart and kept
-//          inside the plot. LiveViewPage.qml draws what it returns; the
+//          inside the plot, closed up and then thinned when they don't fit. LiveViewPage.qml draws what it returns; the
 //          drawing itself is manual smoke (docs/testing.md).
 
 pragma Singleton
@@ -16,7 +16,8 @@ import QtQml
 // (how wide a label is, how a value is written) and strokes the result.
 QtObject {
     // Geometry shared with the page, in logical pixels
-    readonly property int lineH: 14      // a value label's height
+    readonly property int labelPx: 11    // the value labels' font size
+    readonly property int lineH: 14      // a value label's row, room permitting
     readonly property int swatchW: 12    // the stroke sample before a label
     readonly property int axisH: 16      // the time axis under the plot
     readonly property int top: 6         // above the plot
@@ -67,18 +68,34 @@ QtObject {
         return out
     }
 
-    // Label rows pushed apart by lineH where traces end close together,
-    // and kept inside the plot's height. traces have endY; each gets labelY.
+    // Label rows pushed apart where traces end close together, and kept
+    // inside the plot's height. traces have endY; each gets labeled, and
+    // a labeled one labelY. Rows are lineH apart while they fit, closer
+    // down to labelPx (the text's own height) when they don't; past
+    // that, only as many as fit at labelPx are labeled, picked evenly
+    // down the stack so each stays near its trace. The rows above the
+    // chart show every value.
     function placeLabels(traces, plotTop, plotH) {
         const byY = traces.slice().sort((a, b) => a.endY - b.endY)
-        for (let i = 0; i < byY.length; ++i) {
-            byY[i].labelY = Math.max(byY[i].endY,
-                                     i > 0 ? byY[i - 1].labelY + lineH : plotTop + lineH / 2)
+        const n = byY.length
+        const keep = Math.min(n, Math.max(1, Math.floor(plotH / labelPx)))
+        const kept = []
+        for (const tr of byY)
+            tr.labeled = false
+        for (let j = 0; j < keep; ++j) {
+            const tr = byY[keep === 1 ? 0 : Math.round(j * (n - 1) / (keep - 1))]
+            tr.labeled = true
+            kept.push(tr)
         }
-        for (let i = byY.length - 1; i >= 0; --i) {
-            byY[i].labelY = Math.min(byY[i].labelY, i < byY.length - 1
-                                                     ? byY[i + 1].labelY - lineH
-                                                     : plotTop + plotH - lineH / 2)
+        const step = Math.min(lineH, plotH / keep)   // at least labelPx, by keep
+        for (let i = 0; i < kept.length; ++i) {
+            kept[i].labelY = Math.max(kept[i].endY,
+                                      i > 0 ? kept[i - 1].labelY + step : plotTop + step / 2)
+        }
+        for (let i = kept.length - 1; i >= 0; --i) {
+            kept[i].labelY = Math.min(kept[i].labelY, i < kept.length - 1
+                                                       ? kept[i + 1].labelY - step
+                                                       : plotTop + plotH - step / 2)
         }
         return byY
     }
@@ -89,7 +106,7 @@ QtObject {
     // Returns null when there is nothing to draw (no series with a
     // sample, or no time span), else:
     // { plotW, plotH, top, hGrid: [y], ticks: [{ x, seconds }] newest first,
-    //   traces: [{ row, segments: [[{x, y}]], endY, label, labelY }]
+    //   traces: [{ row, segments: [[{x, y}]], endY, label, labeled, labelY }]
     //   in label order top down, labelX }
     function layout(series, width, height, opts) {
         if (!series || series.length === 0)

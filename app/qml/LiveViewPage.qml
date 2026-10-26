@@ -4,8 +4,8 @@
 //          tst_linkhealth.qml for the banner in each link state), which
 //          finds items by objectName; the strip chart's layout (ranges,
 //          lanes, gaps, ticks, labels) by tst_chartlayout.qml through
-//          ChartLayout; the drawing itself is verified manually
-//          (docs/testing.md).
+//          ChartLayout; the drawing itself, sharp under zoom, is verified
+//          manually (docs/testing.md).
 
 import QtQuick
 import QtQuick.Controls
@@ -252,10 +252,21 @@ Page {
             border.color: Theme.textDim
             border.width: 1
 
+            // A Canvas paints an image at its own size, which Main.qml's
+            // zoom would stretch: this one is Theme.zoom times the size it
+            // shows at, scaled back by as much, so its pixels meet the
+            // screen's one to one, and onPaint draws in the shown size
             Canvas {
                 id: chart
-                anchors.fill: parent
-                anchors.margins: 4
+                readonly property real zoom: Theme.zoom
+                readonly property real shownW: parent.width - 8
+                readonly property real shownH: parent.height - 8
+                x: 4
+                y: 4
+                width: shownW * zoom
+                height: shownH * zoom
+                scale: 1 / zoom
+                transformOrigin: Item.TopLeft
 
                 Connections {
                     target: Bridge.signalModel
@@ -272,20 +283,21 @@ Page {
                 onPaint: {
                     const ctx = getContext("2d")
                     ctx.reset()
+                    ctx.scale(zoom, zoom)
                     ctx.fillStyle = Theme.surface
-                    ctx.fillRect(0, 0, width, height)
+                    ctx.fillRect(0, 0, shownW, shownH)
 
                     const series = Bridge.signalModel.chartData()
                     if (!series || series.length === 0) {
                         ctx.fillStyle = Theme.textDim
                         ctx.font = "12px sans-serif"
                         ctx.textAlign = "center"
-                        ctx.fillText(root.chartEmptyText(), width / 2, height / 2)
+                        ctx.fillText(root.chartEmptyText(), shownW / 2, shownH / 2)
                         return
                     }
 
-                    ctx.font = "11px " + Theme.monoFamily   // measured and drawn in
-                    const l = ChartLayout.layout(series, width, height, {
+                    ctx.font = ChartLayout.labelPx + "px " + Theme.monoFamily   // measured and drawn in
+                    const l = ChartLayout.layout(series, shownW, shownH, {
                         gapMs: root.staleMs, minSpanUnits: root.minSpanUnits,
                         measure: text => ctx.measureText(text).width,
                         format: root.valueText })
@@ -331,11 +343,13 @@ Page {
                     }
 
                     // Value labels, each starting with a sample of its
-                    // trace's stroke, so dashed rows read apart from solid
+                    // trace's stroke, so dashed rows read apart from solid;
+                    // the layout leaves some out when the plot is short
                     ctx.lineWidth = 1
                     ctx.textAlign = "left"
                     ctx.textBaseline = "middle"
                     for (const tr of l.traces) {
+                        if (!tr.labeled) continue   // no room: its row shows the value
                         const c = root.seriesColor(tr.row)
                         ctx.strokeStyle = c
                         ctx.setLineDash(root.seriesDash(tr.row))

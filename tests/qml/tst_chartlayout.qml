@@ -190,4 +190,52 @@ TestCase {
         near(edges.traces[1].labelY, edges.top + edges.plotH - half, 0.01,
              "the bottom label stays inside")
     }
+
+    // n traces all ending mid-plot, so their labels stack
+    function stacked(n) {
+        const list = []
+        for (let i = 0; i < n; ++i)
+            list.push(series(i, [[0, 0], [1000, 10], [2000, 5]]))
+        return layout(list, { minSpanUnits: 0 })
+    }
+
+    // The labeled rows lie inside the plot, top down, at least labelPx
+    // and at most lineH apart; returns how many
+    function checkLabelRows(l, what) {
+        const ys = l.traces.filter(t => t.labeled).map(t => t.labelY)
+        const step = ys.length > 1 ? ys[1] - ys[0] : ChartLayout.lineH
+        for (let i = 1; i < ys.length; ++i) {
+            verify(ys[i] - ys[i - 1] >= ChartLayout.labelPx - 0.01,
+                   what + ": rows " + (i - 1) + " and " + i + " overlap")
+            verify(ys[i] - ys[i - 1] <= ChartLayout.lineH + 0.01,
+                   what + ": rows " + (i - 1) + " and " + i + " spread past lineH")
+        }
+        verify(ys[0] - step / 2 >= l.top - 0.01, what + ": the top row leaves the plot")
+        verify(ys[ys.length - 1] + step / 2 <= l.top + l.plotH + 0.01,
+               what + ": the bottom row leaves the plot")
+        return ys.length
+    }
+
+    // More labels than fit at lineH close up and all show; more than fit
+    // even at labelPx show as many as fit, the stack's ends among them.
+    // Every trace is still returned, so its line still draws.
+    function test_labelsCloseUpThenThinWhenTheyDontFit() {
+        const fit = stacked(3)
+        compare(checkLabelRows(fit, "three"), 3)
+        near(fit.traces[1].labelY - fit.traces[0].labelY, ChartLayout.lineH, 0.01,
+             "rows that fit keep lineH")
+
+        const closer = Math.floor(stacked(1).plotH / ChartLayout.lineH) + 2
+        const tight = stacked(closer)
+        verify(closer * ChartLayout.labelPx <= tight.plotH, "the case needs tightening only")
+        compare(checkLabelRows(tight, closer + " traces"), closer, "every label shows")
+
+        const many = 2 * Math.floor(stacked(1).plotH / ChartLayout.labelPx)
+        const thin = stacked(many)
+        compare(thin.traces.length, many, "every trace is still drawn")
+        compare(checkLabelRows(thin, many + " traces"),
+                Math.floor(thin.plotH / ChartLayout.labelPx), "as many as fit at labelPx")
+        verify(thin.traces[0].labeled && thin.traces[many - 1].labeled,
+               "the stack's ends keep their labels")
+    }
 }
