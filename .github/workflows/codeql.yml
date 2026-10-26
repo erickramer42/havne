@@ -1,0 +1,55 @@
+name: CodeQL
+
+# CodeQL static analysis, with results on the repository's code-scanning
+# dashboard. It covers the C++ that Windows compiles in a core-only build
+# (core, the J2534 layer and the x86 surrogate's source, no Qt needed)
+# and the workflows themselves. The app and its QML aren't analyzed.
+# OpenSSF Scorecard's SAST check looks for this workflow.
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: '30 2 * * 1'
+
+permissions:
+  contents: read
+
+jobs:
+  analyze:
+    name: Analyze (${{ matrix.language }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      security-events: write   # upload the results to code scanning
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - language: c-cpp
+            os: windows-latest
+            build-mode: manual
+          - language: actions
+            os: ubuntu-latest
+            build-mode: none
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: github/codeql-action/init@6f2ac81f5cd81fe351a197ba0b00d91d03cd2aee # v4.39.0
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: ${{ matrix.build-mode }}
+
+      - name: Build core, the J2534 layer and the surrogate
+        if: matrix.build-mode == 'manual'
+        run: |
+          cmake -B build-core -DQTTUNE_BUILD_CORE_ONLY=ON -DBUILD_TESTING=OFF
+          cmake --build build-core --config Release
+
+      - uses: github/codeql-action/analyze@6f2ac81f5cd81fe351a197ba0b00d91d03cd2aee # v4.39.0
+        with:
+          category: /language:${{ matrix.language }}
