@@ -22,6 +22,9 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
   the file.
 - Connect-failure text names a vendor's status in hex as well as
   decimal ("status 34 (0x22, vendor-specific)").
+- The Windows download's signed build provenance is a release file
+  too (`<zip>.intoto.jsonl`), so the zip can be checked with
+  `gh attestation verify <zip> --bundle <zip>.intoto.jsonl -R erickramer42/qttune`.
 
 ### Changed
 - Every J2534 driver runs in a helper process of its own architecture

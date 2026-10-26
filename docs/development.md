@@ -503,7 +503,13 @@ desktop Qt with `--autodesktop`.
 
 `scorecard.yml` runs the OpenSSF Scorecard. Actions are pinned to
 full commit SHAs with a `# vX.Y.Z` comment, and Dependabot bumps them
-weekly.
+weekly. `codeql.yml` runs CodeQL on pushes to `main` and `dev`, pull
+requests and a weekly schedule: C++ from a Windows core-only build
+(core, the J2534 layer and the surrogate; not the app or QML) and the
+workflows. Results land in the repository's code-scanning dashboard,
+which needs CodeQL's default setup off (Settings → Code security),
+because GitHub refuses advanced-setup uploads while default setup is
+on.
 
 **Temporary workarounds**, to revert once upstream ships tagged fixes:
 
@@ -598,9 +604,15 @@ runtime.
   removed, 2026-10-25). It writes the zip and `SHA256SUMS.txt` to
   `dist/` (git-ignored).
 - **Provenance:** `actions/attest-build-provenance` signs a SLSA build
-  provenance for the zip, tied to this repository's workflow.
-- **Publish:** `gh release create` with the zip, `SHA256SUMS.txt` and
-  the notes file. A manual run for an existing tag
+  provenance for the zip, tied to this repository's workflow, and
+  stores it in GitHub's attestation store. The job also copies that
+  Sigstore bundle into `dist/` as `<zip>.intoto.jsonl`, because
+  OpenSSF Scorecard's Signed-Releases check reads only release files
+  (it counts `*.intoto.jsonl` as provenance and `*.sig`, `*.asc` or
+  `*.sigstore.json` as signatures), and so a download can be checked
+  with `gh attestation verify <zip> --bundle <zip>.intoto.jsonl`.
+- **Publish:** `gh release create` with the zip, its `.intoto.jsonl`,
+  `SHA256SUMS.txt` and the notes file. A manual run for an existing tag
   (`gh workflow run release.yml -f tag=vX.Y.Z`) rebuilds it and
   replaces the release's files.
 

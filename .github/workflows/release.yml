@@ -3,7 +3,7 @@ name: Release
 # A version tag publishes a Windows x64 release: the app, the x86 J2534
 # surrogate, the Qt runtime and the Visual C++ runtime in one zip that
 # runs without Qt or Visual Studio, with its SHA-256 and a signed build
-# provenance. A tag with -rcN publishes a pre-release, for a dry run.
+# provenance (attested, and attached as a .intoto.jsonl). A tag with -rcN publishes a pre-release, for a dry run.
 # The tagged commit must already have passed CI (ci.yml's push run).
 #
 #   git tag v0.3.1 && git push origin v0.3.1
@@ -109,17 +109,28 @@ jobs:
         run: pwsh -NoProfile -File packaging/windows/stage.ps1 -Version $env:VERSION
 
       - name: Attest build provenance
+        id: attest
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
           subject-path: dist/qttune-${{ env.VERSION }}-windows-x64.zip
+
+      # The same signed provenance (a Sigstore bundle) as a release file.
+      # OpenSSF Scorecard's Signed-Releases check reads release files, not
+      # GitHub's attestation store, and counts *.intoto.jsonl as
+      # provenance. A download can also be checked against the file with
+      # gh attestation verify --bundle.
+      - name: Copy the provenance into dist
+        env:
+          BUNDLE: ${{ steps.attest.outputs.bundle-path }}
+        run: Copy-Item -LiteralPath $env:BUNDLE -Destination "dist/qttune-$env:VERSION-windows-x64.zip.intoto.jsonl"
 
       - name: Publish the release
         shell: bash
         run: |
           zip="dist/qttune-$VERSION-windows-x64.zip"
           if gh release view "$TAG" > /dev/null 2>&1; then
-            gh release upload "$TAG" "$zip" dist/SHA256SUMS.txt --clobber
+            gh release upload "$TAG" "$zip" "$zip.intoto.jsonl" dist/SHA256SUMS.txt --clobber
           else
-            gh release create "$TAG" "$zip" dist/SHA256SUMS.txt --verify-tag \
+            gh release create "$TAG" "$zip" "$zip.intoto.jsonl" dist/SHA256SUMS.txt --verify-tag \
               --title "QtTune $TAG" --notes-file "docs/releases/$NOTES_TAG.md" $PRERELEASE
           fi
