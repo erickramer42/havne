@@ -10,7 +10,9 @@ Fill in a copy as `docs/bench-sessions/<date>.md`. The sessions so far
 are [2026-10-16](2026-10-16.md), [2026-10-20](2026-10-20.md),
 [2026-10-22](2026-10-22.md) and [2026-10-25](2026-10-25-bench.md) (a
 laptop); the last two ran this procedure, and their results are the
-expectations below.
+expectations below, except for phase 3's two `uds-generic` URIs,
+which haven't run at the bench: on the no-ACK bus they should fail
+their writes the same way.
 
 ## Purpose
 
@@ -76,8 +78,8 @@ URI. Leave it about two minutes:
       0.3 s (nothing answers the bitmap, and silence drops nothing),
       then amber "Requests failing" and "Link: requests failing
       (1 episode(s))" within about a second
-- [ ] The probe interval grows to about 5.5 s as the backoff reaches
-      its cap
+- [ ] The probe interval grows to about 5.6 s as the backoff reaches
+      its 5 s cap
 - [ ] Task Manager: `qttune.exe` and the 32-bit
       `ecuio-j2534-surrogate.exe` both under 1 % CPU
 - [ ] Disconnect: `Disconnected:` within about 0.5 s, one
@@ -105,24 +107,23 @@ URI. Leave it about two minutes:
 - [ ] No writes in the session log
 - [ ] Every read returns `ERR_BUFFER_EMPTY` (status 16) after waiting
       out its 100 ms timeout; amber "Vehicle not responding" after
-      about 1.4 s
+      about 1.2 s
 
 ## Phase 3 — the vehicle session's other URIs
 
 **Action:** connect each for 15–30 s:
 
     j2534://OBDX Pro - VX?poll=0x0C
-    j2534://OBDX Pro - VX?profile=raw&filter=0x7E8&poll=0x00
-    j2534://OBDX Pro - VX?profile=raw&filter=0x7E8&poll=0x20
-    j2534://OBDX Pro - VX?profile=raw&filter=0x7E8&poll=0x40
+    j2534://OBDX Pro - VX?profile=uds-generic&did=F180-F1FF
+    j2534://OBDX Pro - VX?profile=uds-generic&did=F188:text
 
 **Expected:**
-- [ ] Each connects and goes to "Requests failing" as in phase 1.
-      With `?poll=` the writes fail the same way, so the backoff paces
-      them too: three accepted, then 0.6 s apart growing to the 5.6 s
-      cap. (On a bus that answers, `?poll=` sends the next request as
-      soon as the reply is in.) No probe or identification line:
-      `?poll=` asks only its PID
+- [ ] Each connects and goes to "Requests failing" as in phase 1: three
+      writes accepted, then 0.6 s apart growing to the 5.6 s cap. (On a
+      bus that answers, the next request goes out as soon as the reply
+      is in.) `?poll=` asks only its PID, so no probe or identification
+      line; the `uds-generic` connects have no Service 01 requests, so
+      no bitmap requests either
 - [ ] One recording folder per connect: `events.log` holding the URI,
       "surrogate frame logging on" and the link transition;
       `frames.csv` its header row only (no frame reaches the bridge);
