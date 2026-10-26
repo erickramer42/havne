@@ -1,21 +1,22 @@
 // File/layer: tests/fake_j2534.cpp | Fake J2534 vendor DLL, HARNESS tier;
 //             built in BOTH trees
-// Testing: exercised via LoadLibraryEx by test_j2534_load/_stream and
-//          via the surrogate child (either arch)
-// NOTE: InjectFrame/ReadMsgs share a mutex-guarded FIFO — injections
-//      from the test thread race safely against the polling worker.
-//      Connect params are recorded so tests can assert that URI
-//      parsing reached PassThruConnect.
+// Testing: loaded by the J2534 suites' sessions, in-proc or in the
+//          surrogate child (either arch); tests reach it only through
+//          its control page (fake_control.h)
+// NOTE: ReadMsgs, WriteMsgs' replies and InjectFrame (OP_INJECT's and
+//      the loader's inject hook) share a mutex-guarded FIFO, so
+//      injections race safely against the polling worker. Connect
+//      parameters are published so tests can assert that URI parsing
+//      reached PassThruConnect.
 //
 // BEHAVIOR:
-//  * WriteMsgs: records the message (hook-observable). Response
+//  * WriteMsgs: publishes the message on the page. Response
 //    generation is two-mode:
 //      - A request, with a filter registered: Service 01 or 09
 //        [4-byte ID BE][01|09][PID] (exactly 6 bytes, the adapter-framed
 //        logical message) or Service 0x22 [ID][22][DID] (7 bytes). The
 //        ECU the request is addressed to answers: [reply ID BE][41][PID]
-//        [canned] from g_obd2_canned (SetFakeObd2CannedValueExternal
-//        overrides per-test) or its supported-PID bitmap;
+//        [canned] from g_obd2_canned or its supported-PID bitmap;
 //        [ID][49][item][01][data] for Service 09's VIN (02), CALID
 //        (04), CVN (06) and ECU name (0A), synthetic values marked FAKE;
 //        or [ID][62][DID][value] for the DIDs it knows: 0x1E1C (2 bytes),
@@ -59,17 +60,20 @@
 //    that status, and PassThruGetLastError then describes the refusal.
 //  * Disconnect: counted; ECUIO_FAKE_DISCONNECT_DELAY_MS sleeps
 //    before each one (a slow vendor teardown).
-//  * Filters: registration bookkeeping + last-invocation recording.
-//    Filter-aware echo prepends the filter pattern (4-byte BE CAN ID).
-//    SetFilterGating controls ONLY ReadMsgs dropping; the echo shape
-//    is unconditional once a filter lands.
+//  * Filters: registration bookkeeping; the last started and stopped
+//    are published. Filter-aware echo prepends the filter pattern
+//    (4-byte BE CAN ID). ECUIO_FAKE_FILTER_GATING=1 controls ONLY
+//    ReadMsgs dropping; the echo shape is unconditional once a filter
+//    lands.
 //  * Knobs (ECUIO_FAKE_*) are read on every call: from the control
 //    page (fake_control.h) when it holds the name, else from the
 //    environment. The page reaches the surrogate child's instance
 //    mid-session, which the child's spawn-time environment can't. It
 //    also carries messages a test queues for ReadMsgs, and the fake
-//    publishes its successful writes, the process that opened it, and
-//    its disconnects and closes by the IDs it handed out.
+//    publishes its successful writes (the first 16 whole), the last
+//    connect's parameters, the last filter started and stopped, the
+//    process that opened it, and its disconnects and closes by the IDs
+//    it handed out.
 //  * ReadMsgs, by default, returns at most one message per call,
 //    whatever NumMsgs and Timeout ask for, and STATUS_NOERROR with zero
 //    messages on an empty queue. ECUIO_FAKE_READ_STATUS forces a
@@ -105,7 +109,6 @@
 #include <cstdlib>
 
 #define FAKE_QUEUE_DEPTH 32   /* a read's indication cap and more */
-#define FAKE_WRITE_DEPTH 16
 #define FAKE_FILTER_DEPTH 8
 #define FAKE_CONFIG_DEPTH 16
 #define STATUS_NOERROR ECUIO_PT_STATUS_NOERROR
@@ -119,12 +122,6 @@ struct FrameSlot {
     unsigned long timestamp_us;
     unsigned long rx_status;   /* replayed verbatim into PASSTHRU_MSG.RxStatus */
     long long arrives_us;      /* steady clock; reads skip it until then */
-};
-
-struct WriteRecord {
-    unsigned char data[64];
-    unsigned long size;
-    unsigned long tx_flags;
 };
 
 struct FilterRecord {
@@ -165,10 +162,6 @@ constexpr char kFirmwareVersion[] = "fake-fw 1.0";
 constexpr char kDllVersion[] = "fake_j2534 0.3";
 constexpr char kApiVersion[] = "04.04";
 
-/* Write recording + response generation */
-WriteRecord g_writes[FAKE_WRITE_DEPTH];
-unsigned long g_write_count = 0;         /* total, monotonic */
-
 /* IoCtl config table: SET_CONFIG stores, GET_CONFIG reads back.
  * Unknown parameters GET back as 0xFFFFFFFF ("vendor default"). */
 unsigned long g_cfg_param[FAKE_CONFIG_DEPTH];
@@ -178,9 +171,8 @@ unsigned long g_cfg_len = 0;
 /* Filter bookkeeping */
 FilterRecord g_filters[FAKE_FILTER_DEPTH];
 unsigned long g_filter_seq = 0;
-FilterRecord g_last_filter;              /* raw last StartMsgFilter call */
-bool g_filter_gating_enabled = false;    /* SetFilterGating toggle — controls
-                                          * ReadMsgs dropping ONLY, not echo */
+FilterRecord g_last_filter;              /* the last started: its pattern
+                                          * heads the echo and the replies */
 /* One-shot ioctl stall: env-armed sleep on
  * the FIRST PassThruIoctl only — a vendor op that outlives the
  * client's 3s transact timeout, while every later op answers
@@ -189,32 +181,6 @@ bool g_ioctl_delay_fired = false;
 /* The same for the FIRST PassThruReadMsgs: a read answered past the
  * client's deadline for it, with whatever the queue then holds. */
 bool g_read_delay_fired = false;
-
-/* Last PassThruConnect invocation, recorded BEFORE the validity
- * check — even a refused connect shows what was asked, which is
- * what the query-param tests assert against. */
-unsigned long g_last_connect_baud = 0;
-unsigned long g_last_connect_flags = 0;
-unsigned long g_last_connect_protocol = 0;
-
-/* Last StopMsgFilter invocation, for detach-ordering assertion. */
-unsigned long g_last_stopped_filter_id = 0;
-
-/* Disconnect counter: a successful client disconnect must clear the
- * child's channel so teardown never issues a SECOND vendor disconnect.
- * Monotonic, read via GetDisconnectCount — in-proc instances only. The
- * child's instance is a separate process (see the OP_INJECT note
- * above), so this hook can't see it; a surrogate test would count the
- * child's OP_DISCONNECT lines in the session log
- * (ecuio_j2534_sur_log_path) instead. */
-unsigned long g_disconnect_count = 0;
-
-/* The threads that last ran PassThruOpen and PassThruDisconnect (0 =
- * never), read via GetLastCallThreadIds: the bridge tests check that
- * neither runs on the GUI thread. In-proc instances only, like the
- * disconnect count. */
-unsigned long g_open_thread_id = 0;
-unsigned long g_disconnect_thread_id = 0;
 
 /* The IDs PassThruOpen and PassThruConnect hand out: device 1 and
  * channel 0x55, or 0 for both under ECUIO_FAKE_ZERO_IDS=1, since J2534
@@ -231,9 +197,7 @@ unsigned long g_channel_id = kChannelId;
  * engine state: RPM 2000, speed 0, load ~10%, throttle ~8%, coolant
  * and IAT 20 degC, oil 80 degC, fuel ~25%, voltage ~13.9 V, MAF
  * 1.00 g/s. Oil reads warmer than coolant and IAT so a test can tell
- * the A - 40 temperatures apart. Overridable per-test through
- * SetFakeObd2CannedValueExternal (same mutex discipline as all
- * other module globals). */
+ * the A - 40 temperatures apart. */
 struct Obd2CannedValues {
     uint8_t pid_04_engine_load;
     uint8_t pid_05_coolant_temp;
@@ -375,8 +339,7 @@ void take_posted_locked()
 
 /* Reset canned OBD-II values to the cold-idle defaults. Called once
  * per module load from PassThruOpen (function-local static guards the
- * once-ness); per-test overrides via SetFakeObd2CannedValueExternal
- * survive subsequent opens because the reset never re-runs. */
+ * once-ness). */
 void reset_obd2_canned()
 {
     g_obd2_canned.pid_04_engine_load = 25;   /* 25 * 100/255 ~= 9.8% */
@@ -649,53 +612,6 @@ bool build_obd2_response(const unsigned char* req, unsigned long req_len,
     return true;
 }
 
-/* Override canned response values for a specific PID. */
-void SetFakeObd2CannedValue(unsigned char pid, unsigned char* data,
-                            unsigned long len)
-{
-    if (data == nullptr || len == 0) return;
-    std::lock_guard<std::mutex> lk(g_lock);
-    switch (pid) {
-        case 0x04: if (len >= 1) g_obd2_canned.pid_04_engine_load = data[0]; break;
-        case 0x05: if (len >= 1) g_obd2_canned.pid_05_coolant_temp = data[0]; break;
-        case 0x0C: if (len >= 2) { g_obd2_canned.pid_0C_rpm_high = data[0];
-                                   g_obd2_canned.pid_0C_rpm_low = data[1]; } break;
-        case 0x0D: if (len >= 1) g_obd2_canned.pid_0D_speed = data[0]; break;
-        case 0x0F: if (len >= 1) g_obd2_canned.pid_0F_iat = data[0]; break;
-        case 0x11: if (len >= 1) g_obd2_canned.pid_11_throttle = data[0]; break;
-        case 0x2F: if (len >= 1) g_obd2_canned.pid_2F_fuel_level = data[0]; break;
-        case 0x42: if (len >= 2) { g_obd2_canned.pid_42_volt_high = data[0];
-                                   g_obd2_canned.pid_42_volt_low = data[1]; } break;
-        case 0x10: if (len >= 2) { g_obd2_canned.pid_10_maf_high = data[0];
-                                   g_obd2_canned.pid_10_maf_low = data[1]; } break;
-        case 0x5C: if (len >= 1) g_obd2_canned.pid_5C_oil_temp = data[0]; break;
-    }
-}
-
-/* Get current canned value for a PID (for test assertions). */
-void GetFakeObd2CannedValue(unsigned char pid, unsigned char* out_data,
-                            unsigned long* out_len)
-{
-    if (out_data == nullptr || out_len == nullptr) return;
-    std::lock_guard<std::mutex> lk(g_lock);
-    switch (pid) {
-        case 0x04: *out_len = 1; out_data[0] = g_obd2_canned.pid_04_engine_load; break;
-        case 0x05: *out_len = 1; out_data[0] = g_obd2_canned.pid_05_coolant_temp; break;
-        case 0x0C: *out_len = 2; out_data[0] = g_obd2_canned.pid_0C_rpm_high;
-                                    out_data[1] = g_obd2_canned.pid_0C_rpm_low; break;
-        case 0x0D: *out_len = 1; out_data[0] = g_obd2_canned.pid_0D_speed; break;
-        case 0x0F: *out_len = 1; out_data[0] = g_obd2_canned.pid_0F_iat; break;
-        case 0x11: *out_len = 1; out_data[0] = g_obd2_canned.pid_11_throttle; break;
-        case 0x2F: *out_len = 1; out_data[0] = g_obd2_canned.pid_2F_fuel_level; break;
-        case 0x42: *out_len = 2; out_data[0] = g_obd2_canned.pid_42_volt_high;
-                                    out_data[1] = g_obd2_canned.pid_42_volt_low; break;
-        case 0x10: *out_len = 2; out_data[0] = g_obd2_canned.pid_10_maf_high;
-                                   out_data[1] = g_obd2_canned.pid_10_maf_low; break;
-        case 0x5C: *out_len = 1; out_data[0] = g_obd2_canned.pid_5C_oil_temp; break;
-        default: *out_len = 0; break;
-    }
-}
-
 } // namespace fake_j2534
 
 extern "C" __declspec(dllexport)
@@ -706,10 +622,7 @@ long __stdcall PassThruOpen(void* pName, unsigned long* pDeviceID)
         return STATUS_FAILED;
     }
 
-    /* Initialize canned OBD values ONCE per module load (before the
-     * lock so a test armed on another thread never observes the
-     * half-reset state; once-only means per-test overrides through
-     * SetFakeObd2CannedValueExternal survive later re-opens). */
+    /* Initialize canned OBD values ONCE per module load. */
     static bool canned_initialized = false;
     if (!canned_initialized) {
         fake_j2534::reset_obd2_canned();
@@ -742,7 +655,6 @@ long __stdcall PassThruOpen(void* pName, unsigned long* pDeviceID)
     const bool zero_ids = fake_j2534::knob_on("ECUIO_FAKE_ZERO_IDS");
     std::lock_guard<std::mutex> lk(fake_j2534::g_lock);
     fake_j2534::g_handle = 1;
-    fake_j2534::g_open_thread_id = GetCurrentThreadId();
     fake_j2534::g_device_id = zero_ids ? 0 : fake_j2534::kDeviceId;
     fake_j2534::g_channel_id = zero_ids ? 0 : fake_j2534::kChannelId;
     *pDeviceID = fake_j2534::g_device_id;
@@ -770,11 +682,10 @@ long __stdcall PassThruConnect(unsigned long DeviceID,
                                unsigned long* pChannelID)
 {
     (void)DeviceID;
-    {
-        std::lock_guard<std::mutex> lk(fake_j2534::g_lock);
-        fake_j2534::g_last_connect_protocol = ProtocolID;
-        fake_j2534::g_last_connect_flags = Flags;
-        fake_j2534::g_last_connect_baud = BaudRate;
+    /* Published before the checks: a refused connect still shows what
+     * was asked, which the query-param tests read. */
+    if (fake_control::Page* page = fake_control::attach()) {
+        fake_control::record_connect(page, ProtocolID, Flags, BaudRate);
     }
     if (pChannelID == nullptr) {
         return STATUS_FAILED;
@@ -817,8 +728,6 @@ long __stdcall PassThruDisconnect(unsigned long ChannelID)
      * is vendor swamp we don't model — the COUNT is the contract
      * observable, not the return code. */
     std::lock_guard<std::mutex> lk(fake_j2534::g_lock);
-    fake_j2534::g_disconnect_count++;
-    fake_j2534::g_disconnect_thread_id = GetCurrentThreadId();
     if (ChannelID == fake_j2534::g_channel_id) {
         if (fake_control::Page* page = fake_control::attach()) {
             InterlockedIncrement(&page->disconnects);
@@ -964,7 +873,7 @@ long __stdcall PassThruReadMsgs(unsigned long ChannelID,
         return STATUS_NOERROR;
     }
 
-    /* FILTER GATING (SetFilterGating-controlled): model the device's
+    /* FILTER GATING (ECUIO_FAKE_FILTER_GATING=1): model the device's
      * filter hardware — non-matching frames are DISCARDED, never
      * parked. Drain rejected frames from the queue head until a
      * matching frame is found (deliver it) or the queue empties.
@@ -978,7 +887,7 @@ long __stdcall PassThruReadMsgs(unsigned long ChannelID,
      * judged. */
     const unsigned long arrived =
         fake_j2534::arrived_locked(fake_j2534::now_us());
-    if (fake_j2534::g_filter_gating_enabled) {
+    if (fake_j2534::knob_on("ECUIO_FAKE_FILTER_GATING")) {
         bool have_match_at_head = false;
         unsigned long judged = 0;
         while (judged < arrived && fake_j2534::g_queue_len > 0) {
@@ -1044,7 +953,7 @@ long __stdcall PassThruWriteMsgs(unsigned long ChannelID,
      * clean. Like ECUIO_FAKE_UNTOUCHED_COUNT_STATUS on the read side,
      * *pNumMsgs is left as passed (1), the VX's "status 7, written 1",
      * so a write path that read the count before the status would be
-     * caught. Unrecorded writes don't move GetWriteCount. Re-read per
+     * caught. Unrecorded writes don't move the page's count. Re-read per
      * call: in-proc tests toggle live; the child sees the spawn-time
      * value unless the control page sets it. */
     {
@@ -1104,18 +1013,9 @@ long __stdcall PassThruWriteMsgs(unsigned long ChannelID,
         return STATUS_FAILED;
     }
 
-    /* Record (bounded — the count stays monotonic so overflow-during-
-     * test is detectable via GetWriteCount > depth with index clamped). */
-    if (fake_j2534::g_write_count < FAKE_WRITE_DEPTH) {
-        fake_j2534::WriteRecord& w =
-            fake_j2534::g_writes[fake_j2534::g_write_count];
-        memcpy(w.data, pMsg->Data, n);
-        w.size = n;
-        w.tx_flags = pMsg->TxFlags;
-    }
-    fake_j2534::g_write_count++;
+    /* Counted on the page, the first kWriteDepth kept whole. */
     if (fake_control::Page* page = fake_control::attach()) {
-        InterlockedIncrement(&page->writes);
+        fake_control::record_write(page, pMsg->Data, n, pMsg->TxFlags);
     }
 
     /* The VX's TX indication for an accepted write: the CAN ID alone,
@@ -1347,6 +1247,10 @@ long __stdcall PassThruStartMsgFilter(unsigned long ChannelID,
         fake_j2534::g_filters[fake_j2534::g_filter_seq - 1] = rec;
     }
     fake_j2534::g_last_filter = rec;
+    if (fake_control::Page* page = fake_control::attach()) {
+        fake_control::record_filter(page, rec.filter_id, rec.filter_type,
+                                    rec.mask, rec.pattern, rec.mask_len);
+    }
 
     *pFilterID = rec.filter_id;
     return STATUS_NOERROR;
@@ -1360,9 +1264,11 @@ long __stdcall PassThruStopMsgFilter(unsigned long ChannelID,
     if (FilterID == 0) {
         return STATUS_FAILED;
     }
+    /* Published for the detach-ordering tests */
+    if (fake_control::Page* page = fake_control::attach()) {
+        fake_control::record_filter_stop(page, FilterID);
+    }
     std::lock_guard<std::mutex> lk(fake_j2534::g_lock);
-    /* Record the invocation for detach-ordering tests */
-    fake_j2534::g_last_stopped_filter_id = FilterID;
     for (unsigned long i = 0; i < fake_j2534::g_filter_seq &&
                               i < FAKE_FILTER_DEPTH; ++i) {
         if (fake_j2534::g_filters[i].filter_id == FilterID) {
@@ -1433,170 +1339,6 @@ void InjectFrame(const unsigned char* data, unsigned long size,
     std::lock_guard<std::mutex> lk(fake_j2534::g_lock);
     fake_j2534::enqueue_rx_locked(data, size, timestamp_us,
                                   is_extended ? ECUIO_PT_CAN_29BIT_ID : 0ul);
-}
-
-extern "C" __declspec(dllexport)
-void GetBufferState(unsigned char** out_buffer, unsigned long* out_size)
-{
-    if (out_buffer == nullptr || out_size == nullptr) {
-        return;
-    }
-    std::lock_guard<std::mutex> lk(fake_j2534::g_lock);
-    if (fake_j2534::g_queue_len > 0) {
-        *out_buffer = fake_j2534::g_queue[0].data;
-        *out_size   = fake_j2534::g_queue[0].size;
-    } else {
-        *out_buffer = nullptr;
-        *out_size = 0;
-    }
-}
-
-extern "C" __declspec(dllexport)
-int GetCurrentHandle(void)
-{
-    std::lock_guard<std::mutex> lk(fake_j2534::g_lock);
-    return fake_j2534::g_handle;
-}
-
-extern "C" __declspec(dllexport)
-void GetLastConnectParams(unsigned long* out_baud,
-                          unsigned long* out_flags,
-                          unsigned long* out_protocol)
-{
-    if (out_baud == nullptr || out_flags == nullptr ||
-        out_protocol == nullptr) {
-        return;
-    }
-    std::lock_guard<std::mutex> lk(fake_j2534::g_lock);
-    *out_baud = fake_j2534::g_last_connect_baud;
-    *out_flags = fake_j2534::g_last_connect_flags;
-    *out_protocol = fake_j2534::g_last_connect_protocol;
-}
-
-/* ---- Write, filter and disconnect hooks ---- */
-
-/* Total PassThruWriteMsgs messages accepted (monotonic, exceeds the
- * recording depth on overflow — index clamp in GetRecordedWrite). */
-extern "C" __declspec(dllexport)
-void GetWriteCount(unsigned long* out_count)
-{
-    if (out_count == nullptr) return;
-    std::lock_guard<std::mutex> lk(fake_j2534::g_lock);
-    *out_count = fake_j2534::g_write_count;
-}
-
-/* Recorded write by index (0-based, arrival order). Outputs zeroed
- * when index >= recorded depth (overflow) — count tells the story. */
-extern "C" __declspec(dllexport)
-void GetRecordedWrite(unsigned long index,
-                     unsigned char* out_data,
-                     unsigned long* out_size,
-                     unsigned long* out_tx_flags)
-{
-    if (out_data == nullptr || out_size == nullptr || out_tx_flags == nullptr) {
-        return;
-    }
-    std::lock_guard<std::mutex> lk(fake_j2534::g_lock);
-    *out_size = 0;
-    *out_tx_flags = 0;
-    memset(out_data, 0, 64);
-    if (index < fake_j2534::g_write_count && index < FAKE_WRITE_DEPTH) {
-        const fake_j2534::WriteRecord& w = fake_j2534::g_writes[index];
-        memcpy(out_data, w.data, w.size);
-        *out_size = w.size;
-        *out_tx_flags = w.tx_flags;
-    }
-}
-
-/* Raw last PassThruStartMsgFilter invocation (even a refused one —
- * recorded after validation in this fake, so only well-formed calls
- * land here; refused shapes return before recording, matching the
- * strict-vendor posture). Copies mask_len bytes of mask and pattern
- * into caller buffers (>= 12 bytes each). */
-extern "C" __declspec(dllexport)
-void GetLastFilterStart(unsigned long* out_filter_id,
-                       unsigned long* out_filter_type,
-                       unsigned char* out_mask,
-                       unsigned char* out_pattern,
-                       unsigned long* out_len)
-{
-    if (out_filter_id == nullptr || out_filter_type == nullptr ||
-        out_mask == nullptr || out_pattern == nullptr || out_len == nullptr) {
-        return;
-    }
-    std::lock_guard<std::mutex> lk(fake_j2534::g_lock);
-    *out_filter_id = fake_j2534::g_last_filter.filter_id;
-    *out_filter_type = fake_j2534::g_last_filter.filter_type;
-    memcpy(out_mask, fake_j2534::g_last_filter.mask, 12);
-    memcpy(out_pattern, fake_j2534::g_last_filter.pattern, 12);
-    *out_len = fake_j2534::g_last_filter.mask_len;
-}
-
-/* Record of the last StopMsgFilter invocation (for detach-ordering
- * assertion — StopMsgFilter called exactly once with the registered
- * ID before disconnect). Zero means no stop was ever called. */
-extern "C" __declspec(dllexport)
-void GetLastFilterStop(unsigned long* out_filter_id)
-{
-    if (out_filter_id == nullptr) {
-        return;
-    }
-    std::lock_guard<std::mutex> lk(fake_j2534::g_lock);
-    *out_filter_id = fake_j2534::g_last_stopped_filter_id;
-}
-
-/* Monotonic PassThruDisconnect count: explicit
- * client-disconnect-then-close must total exactly 1. In-proc
- * instances only; for the child, see the session-log note on
- * g_disconnect_count. */
-extern "C" __declspec(dllexport)
-unsigned long GetDisconnectCount(void)
-{
-    std::lock_guard<std::mutex> lk(fake_j2534::g_lock);
-    return fake_j2534::g_disconnect_count;
-}
-
-/* GetLastCallThreadIds: the Win32 thread IDs that last ran
- * PassThruOpen and PassThruDisconnect, 0 for never. In-proc only. */
-extern "C" __declspec(dllexport)
-void GetLastCallThreadIds(unsigned long* open_tid, unsigned long* disconnect_tid)
-{
-    std::lock_guard<std::mutex> lk(fake_j2534::g_lock);
-    if (open_tid != nullptr) *open_tid = fake_j2534::g_open_thread_id;
-    if (disconnect_tid != nullptr) *disconnect_tid = fake_j2534::g_disconnect_thread_id;
-}
-
-/* SetFilterGating(enable): when armed, ReadMsgs drops frames whose
- * first mask_len bytes don't match any active filter (spec receive-
- * requires-filter semantics). Does NOT affect WriteMsgs' echo shape
- * (that's unconditional once a filter is registered). The x64 test
- * process cannot reach into the x86 child's fake instance to arm this
- * (the OP_INJECT gap); filter-aware echo works regardless, making
- * cross-arch parity achievable without arming. */
-extern "C" __declspec(dllexport)
-void SetFilterGating(int enable)
-{
-    std::lock_guard<std::mutex> lk(fake_j2534::g_lock);
-    fake_j2534::g_filter_gating_enabled = (enable != 0);
-}
-
-/* ---- OBD-II canned-value hooks (ADR-0013, HARNESS) ---- */
-
-/* Override canned response values for a specific PID. Test-side
- * configuration so HARNESS tests can assert exact decoded values. */
-extern "C" __declspec(dllexport)
-void SetFakeObd2CannedValueExternal(unsigned char pid, unsigned char* data,
-                                    unsigned long len)
-{
-    fake_j2534::SetFakeObd2CannedValue(pid, data, len);
-}
-
-/* Get current canned value for a PID (for test assertions). */
-extern "C" __declspec(dllexport)
-void GetFakeObd2CannedValueExternal(unsigned char pid, unsigned char* out_data,
-                                    unsigned long* out_len)
-{
-    fake_j2534::GetFakeObd2CannedValue(pid, out_data, out_len);
 }
 
 #endif // TEST_HOOKS_ENABLED || _DEBUG

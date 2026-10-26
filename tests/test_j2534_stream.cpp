@@ -1,13 +1,13 @@
 // File/layer: tests/test_j2534_stream.cpp | GTest, HARNESS tier
 // Testing: End-to-end j2534:// session: URI routing -> attach ->
-//          connect -> worker poll -> InjectFrame -> ReadMsgs ->
-//          callback dispatch. Exact-count assertions for INJECTED
+//          connect -> worker poll -> a message posted on the fake's
+//          control page -> ReadMsgs -> callback dispatch. Exact-count assertions for INJECTED
 //          frames (the fake emits nothing we did not inject).
 //          Request-loop assertions are floors with a bounded budget:
 //          that producer is a TIME-DRIVEN worker, not a test action,
 //          so an exact count would encode a race, not a contract.
 //          Query-param tests: ?baud=/?flags= values observed at
-//          PassThruConnect via the fake's GetLastConnectParams hook;
+//          PassThruConnect, as the fake publishes them on its page;
 //          malformed queries and relative DLL paths rejected at
 //          session_create (no DLL load).
 //          Adoption tests (ADR-0012): ?filter=/?txid=/?poll= — filter
@@ -51,6 +51,7 @@
 #include <string>
 #include <thread>
 
+#include "fake_control.h"  /* tests: the fake's control page */
 #include "new_counter.h"   /* tests: operator new counted per thread */
 #endif
 
@@ -58,12 +59,11 @@
 
 namespace {
 
-/* ---- fake-DLL hook signatures ---------------------------------------
- * EVERY hook a suite resolves needs a typedef HERE, inside the
- * namespace, before first use. Appending tests that skip this step
- * produces a wall of undeclared-identifier errors (C2065/C3646) —
- * which is exactly what happened when the adoption block landed
- * outside this scope with five signatures never declared. */
+/* ---- the fake, through its control page (fake_control.h) -----------
+ * The page reaches the fake whichever backend serves the session, so
+ * these read the same in-proc and through the surrogate. The page must
+ * exist before a session opens (a child takes its name at spawn): a
+ * fixture creates and resets it in SetUp. */
 typedef void (*fn_inject_frame)(const unsigned char*, unsigned long,
                                 unsigned long, unsigned long, unsigned long);
 typedef void (*fn_get_connect_params)(unsigned long*, unsigned long*,
@@ -76,6 +76,75 @@ typedef void (*fn_get_last_filter_start)(unsigned long*, unsigned long*,
                                          unsigned char*, unsigned char*,
                                          unsigned long*);
 typedef void (*fn_get_last_filter_stop)(unsigned long*);
+
+fake_control::Page* fake_page()
+{
+    return fake_control::create_for_this_process();
+}
+
+/* A received message for the fake's next read; the 29-bit flag as the
+ * RxStatus bit. The channel is the fake's one. */
+void page_inject(const unsigned char* data, unsigned long size,
+                 unsigned long timestamp_us, unsigned long is_extended,
+                 unsigned long /*channel*/)
+{
+    if (!fake_control::post(fake_page(), data, static_cast<uint32_t>(size),
+                            static_cast<uint32_t>(timestamp_us),
+                            is_extended ? ECUIO_PT_CAN_29BIT_ID : 0u)) {
+        ADD_FAILURE() << "the fake's inbox is full";
+    }
+}
+
+void page_connect_params(unsigned long* baud, unsigned long* flags,
+                         unsigned long* protocol)
+{
+    uint32_t p = 0, f = 0, b = 0;
+    fake_control::last_connect(fake_page(), &p, &f, &b);
+    *baud = b;
+    *flags = f;
+    *protocol = p;
+}
+
+void page_set_gating(int enable)
+{
+    fake_control::set(fake_page(), "ECUIO_FAKE_FILTER_GATING",
+                      enable ? "1" : nullptr);
+}
+
+void page_write_count(unsigned long* count)
+{
+    *count = fake_control::writes(fake_page());
+}
+
+/* Write i since the page's reset (the first kWriteDepth are kept);
+ * zeroed past those. */
+void page_recorded_write(unsigned long i, unsigned char* data,
+                         unsigned long* size, unsigned long* tx_flags)
+{
+    fake_control::Write w;
+    fake_control::recorded_write(fake_page(), static_cast<uint32_t>(i), &w);
+    memcpy(data, w.data, fake_control::kMsgMax);
+    *size = w.size;
+    *tx_flags = w.tx_flags;
+}
+
+/* The last filter started: mask and pattern into 12-byte buffers. */
+void page_last_filter(unsigned long* id, unsigned long* type,
+                      unsigned char* mask, unsigned char* pattern,
+                      unsigned long* len)
+{
+    const fake_control::Filter f = fake_control::last_filter(fake_page());
+    *id = f.id;
+    *type = f.type;
+    memcpy(mask, f.mask, fake_control::kFilterMax);
+    memcpy(pattern, f.pattern, fake_control::kFilterMax);
+    *len = f.len;
+}
+
+void page_last_stop(unsigned long* id)
+{
+    *id = fake_control::last_stopped(fake_page());
+}
 
 struct StreamCapture {
     std::atomic<int> count{0};
@@ -101,28 +170,21 @@ void capture_cb(const ecuio_frame_t* frame, void* user_data)
     }
 }
 
-/* Shared helper: create + start a session on a URI, resolve the
- * GetLastConnectParams hook from the (already-loaded) fake module. */
+/* Shared helper: create + start a session on a URI and read what
+ * PassThruConnect was asked, from the fake's page. */
 class J2534QueryParamTest : public ::testing::Test {
 protected:
-    HMODULE mod = nullptr;
-    fn_get_connect_params get_params = nullptr;
+    fn_get_connect_params get_params = page_connect_params;
 
     void SetUp() override
     {
-        mod = LoadLibraryExA(FAKE_J2534_DLL_PATH, nullptr,
-                             LOAD_WITH_ALTERED_SEARCH_PATH);
-        ASSERT_NE(mod, nullptr);
-        get_params = reinterpret_cast<fn_get_connect_params>(
-            GetProcAddress(mod, "GetLastConnectParams"));
-        ASSERT_NE(get_params, nullptr);
+        ASSERT_NE(fake_page(), nullptr);
+        fake_control::reset(fake_page());
     }
 
     void TearDown() override
     {
-        if (mod != nullptr) {
-            FreeLibrary(mod);
-        }
+        if (fake_page() != nullptr) fake_control::reset(fake_page());
     }
 
     ecuio_status_t start_session_with_uri(const char* uri)
@@ -416,6 +478,8 @@ TEST(J2534StreamTest, DirectLoadUriDeliversInjectedFramesExactly)
     char uri[512];
     snprintf(uri, sizeof(uri), "j2534://%s?profile=test-passive-verbatim",
              FAKE_J2534_DLL_PATH);
+    ASSERT_NE(fake_page(), nullptr);
+    fake_control::reset(fake_page());
 
     const auto before_create = std::chrono::steady_clock::now();
     ecuio_session_t* session = nullptr;
@@ -427,14 +491,7 @@ TEST(J2534StreamTest, DirectLoadUriDeliversInjectedFramesExactly)
 
     ASSERT_EQ(ecuio_session_start(session), ECUIO_OK);
 
-    /* Map our own reference for the hook — same module instance
-     * core loaded, so the queue state is shared. */
-    HMODULE mod = LoadLibraryExA(FAKE_J2534_DLL_PATH, nullptr,
-                                 LOAD_WITH_ALTERED_SEARCH_PATH);
-    ASSERT_NE(mod, nullptr);
-    auto inject = reinterpret_cast<fn_inject_frame>(
-        GetProcAddress(mod, "InjectFrame"));
-    ASSERT_NE(inject, nullptr);
+    const fn_inject_frame inject = page_inject;
 
     const unsigned char f0[8] = {0x02, 0x01, 0x00, 0, 0, 0, 0, 0};
     const unsigned char f1[8] = {0x62, 0xF1, 0x90, 0x2A, 0, 0, 0, 0};
@@ -481,7 +538,7 @@ TEST(J2534StreamTest, DirectLoadUriDeliversInjectedFramesExactly)
 
     EXPECT_EQ(ecuio_session_close(session), ECUIO_OK);     /* joins worker */
     ecuio_session_destroy(session);
-    FreeLibrary(mod);
+    fake_control::reset(fake_page());
 }
 
 TEST(J2534StreamTest, StartIsIdempotent)
@@ -517,49 +574,25 @@ TEST(J2534StreamTest, UnknownVendorNameRejected)
 
 class J2534AdoptionTest : public ::testing::Test {
 protected:
-    HMODULE mod = nullptr;
-    fn_inject_frame inject = nullptr;
-    fn_set_filter_gating set_gating = nullptr;
-    fn_get_write_count get_write_count = nullptr;
-    fn_get_recorded_write get_recorded_write = nullptr;
-    fn_get_last_filter_start get_last_filter = nullptr;
-    fn_get_last_filter_stop get_last_stop = nullptr;
+    fn_inject_frame inject = page_inject;
+    fn_set_filter_gating set_gating = page_set_gating;
+    fn_get_write_count get_write_count = page_write_count;
+    fn_get_recorded_write get_recorded_write = page_recorded_write;
+    fn_get_last_filter_start get_last_filter = page_last_filter;
+    fn_get_last_filter_stop get_last_stop = page_last_stop;
 
     void SetUp() override
     {
-        mod = LoadLibraryExA(FAKE_J2534_DLL_PATH, nullptr,
-                             LOAD_WITH_ALTERED_SEARCH_PATH);
-        ASSERT_NE(mod, nullptr);
-        inject = reinterpret_cast<fn_inject_frame>(
-            GetProcAddress(mod, "InjectFrame"));
-        ASSERT_NE(inject, nullptr);
-        set_gating = reinterpret_cast<fn_set_filter_gating>(
-            GetProcAddress(mod, "SetFilterGating"));
-        ASSERT_NE(set_gating, nullptr);
-        get_write_count = reinterpret_cast<fn_get_write_count>(
-            GetProcAddress(mod, "GetWriteCount"));
-        ASSERT_NE(get_write_count, nullptr);
-        get_recorded_write = reinterpret_cast<fn_get_recorded_write>(
-            GetProcAddress(mod, "GetRecordedWrite"));
-        ASSERT_NE(get_recorded_write, nullptr);
-        get_last_filter = reinterpret_cast<fn_get_last_filter_start>(
-            GetProcAddress(mod, "GetLastFilterStart"));
-        ASSERT_NE(get_last_filter, nullptr);
-        get_last_stop = reinterpret_cast<fn_get_last_filter_stop>(
-            GetProcAddress(mod, "GetLastFilterStop"));
-        ASSERT_NE(get_last_stop, nullptr);
+        ASSERT_NE(fake_page(), nullptr);
+        fake_control::reset(fake_page());
     }
 
     void TearDown() override
     {
-        /* Gating is module-global state: never leak it into the next
-         * test, even on a failing assertion. */
-        if (set_gating != nullptr) {
-            set_gating(0);
-        }
-        if (mod != nullptr) {
-            FreeLibrary(mod);
-        }
+        /* Knobs (gating among them) and the counts live on the page:
+         * never leak them into the next test, even on a failing
+         * assertion. */
+        if (fake_page() != nullptr) fake_control::reset(fake_page());
     }
 
     static void wait_for_count(StreamCapture& cap, int target, int iters)
@@ -570,8 +603,8 @@ protected:
     }
 
     /* Obd2/scheduler variant: wait for the WORK side instead of the
-     * receive side — rotation order is asserted from GetRecordedWrite
-     * indices, so writes are the primary observable. */
+     * receive side — rotation order is asserted from the recorded
+     * writes' indices, so writes are the primary observable. */
     static void wait_for_writes(fn_get_write_count get_wc,
                                 unsigned long target, int iters)
     {
@@ -583,7 +616,7 @@ protected:
         }
     }
 
-    /* Write i (the fake records the first 16) asked service for key. */
+    /* Write i (the page keeps the first 16) asked service for key. */
     void expect_write(unsigned long i, uint8_t service, uint8_t key)
     {
         unsigned char wbuf[64] = {};
@@ -663,16 +696,16 @@ protected:
     }
 };
 
-/* Sets one of the fake's knobs for a scope. In-proc the fake reads its
- * environment on every call; the destructor clears it, so a failed
- * ASSERT can't leak it into the next case. */
+/* Sets one of the fake's knobs for a scope, on its page, which the fake
+ * reads on every call on either backend; the destructor clears it, so a
+ * failed ASSERT can't leak it into the next case. */
 struct KnobGuard {
     const char* name;
     KnobGuard(const char* n, const char* v) : name(n)
     {
-        SetEnvironmentVariableA(n, v);
+        EXPECT_TRUE(fake_control::set(fake_page(), n, v)) << n;
     }
-    ~KnobGuard() { SetEnvironmentVariableA(name, nullptr); }
+    ~KnobGuard() { fake_control::set(fake_page(), name, nullptr); }
     KnobGuard(const KnobGuard&) = delete;
     KnobGuard& operator=(const KnobGuard&) = delete;
 };
@@ -794,14 +827,14 @@ TEST_F(J2534AdoptionTest, FilterRegisteredOnSessionStart)
     EXPECT_EQ(pattern[0], 0x00u); EXPECT_EQ(pattern[1], 0x00u);
     EXPECT_EQ(pattern[2], 0x07u); EXPECT_EQ(pattern[3], 0xE8u);
     /* FC is the bare tester ID, same 4-byte shape — not exposed by
-     * GetLastFilterStart; equal-length passing is the seam under test. */
+     * the page's last filter; equal-length passing is the seam under test. */
 
     EXPECT_EQ(ecuio_session_close(session), ECUIO_OK);
     ecuio_session_destroy(session);
 }
 
 /* DETACH ORDERING: StopMsgFilter called exactly once with registered ID
- * BEFORE disconnect. The fake's GetLastFilterStop records the invocation. */
+ * BEFORE disconnect. The fake publishes the stop on its page. */
 TEST_F(J2534AdoptionTest, DetachStopsFilterBeforeDisconnect)
 {
     char uri[700];
@@ -982,7 +1015,7 @@ TEST_F(J2534AdoptionTest, PassiveReceiveWithFilterNoPoll)
     ecuio_session_destroy(session);
 }
 
-/* FILTER GATING: SetFilterGating(1) makes ReadMsgs drop non-matching
+/* FILTER GATING: ECUIO_FAKE_FILTER_GATING=1 makes ReadMsgs drop non-matching
  * frames. The fake drains them (not head-of-line blocking). */
 TEST_F(J2534AdoptionTest, FilterGatingDropsNonMatchingFrames)
 {
@@ -998,7 +1031,7 @@ TEST_F(J2534AdoptionTest, FilterGatingDropsNonMatchingFrames)
               ECUIO_OK);
     ASSERT_EQ(ecuio_session_start(session), ECUIO_OK);
 
-    /* Arm gating on the fake (module-global; TearDown disarms) */
+    /* Arm gating on the fake's page (TearDown's reset disarms it) */
     set_gating(1);
 
     /* 12-byte device-shaped frames: [ID BE][data] */

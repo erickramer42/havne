@@ -14,6 +14,7 @@
 
 #ifdef _WIN32
 #include <windows.h>
+#include "fake_control.h"
 #include "non_ascii_copy.h"
 #endif
 
@@ -23,43 +24,26 @@ namespace {
 
 #ifdef _WIN32
 
-/* Test's own module reference: bump the refcount so the DLL stays
- * mapped after core closes it, letting us assert on post-close state
- * (GetCurrentHandle == 0) via the hook. Dropped at teardown. */
-typedef int (*fn_get_current_handle)(void);
-typedef void (*fn_inject_frame)(const unsigned char*, unsigned long,
-                                unsigned long, unsigned long, unsigned long);
-
+/* The fake's control page (fake_control.h) says which calls reached it,
+ * on either backend: the process that ran PassThruOpen, and the closes
+ * of the device it handed out. */
 struct FakeFixture : public ::testing::Test {
     ecuio_j2534_device_t device{};
-    HMODULE self_module = nullptr;
+    fake_control::Page* page = nullptr;
 
     void SetUp() override
     {
         strncpy(device.dll_path, FAKE_J2534_DLL_PATH,
                 sizeof(device.dll_path) - 1);
         strcpy(device.vendor_name, "ecuio-fake");
+        page = fake_control::create_for_this_process();
+        ASSERT_NE(page, nullptr);
+        fake_control::reset(page);
     }
 
     void TearDown() override
     {
-        if (self_module != nullptr) {
-            FreeLibrary(self_module);
-            self_module = nullptr;
-        }
-    }
-
-    fn_get_current_handle hook_handle()
-    {
-        if (self_module == nullptr) {
-            self_module = LoadLibraryExA(FAKE_J2534_DLL_PATH, nullptr,
-                                         LOAD_WITH_ALTERED_SEARCH_PATH);
-        }
-        if (self_module == nullptr) {
-            return nullptr;
-        }
-        return reinterpret_cast<fn_get_current_handle>(
-            GetProcAddress(self_module, "GetCurrentHandle"));
+        if (page != nullptr) fake_control::reset(page);
     }
 };
 
@@ -93,22 +77,21 @@ TEST_F(FakeFixture, OpenCloseCycleHitsVendorApi) {
     ASSERT_EQ(ecuio_j2534_open(&device, &h), ECUIO_OK);
     ASSERT_NE(h, nullptr);
 
-    auto hook = hook_handle();
-    ASSERT_NE(hook, nullptr);
+    EXPECT_NE(fake_control::opener_pid(page), 0ul) << "PassThruOpen ran";
+    EXPECT_EQ(fake_control::closes(page), 0u);
 
-    EXPECT_EQ(hook(), 1);   /* PassThruOpen ran */
-
+    /* The page outlives the module, so it shows PassThruClose ran,
+     * for the device the open handed out, before the unload. */
     EXPECT_EQ(ecuio_j2534_close(h), ECUIO_OK);
+    EXPECT_EQ(fake_control::closes(page), 1u);
 
-    /* Fixture holds its own ref, so the DLL survives the close and
-     * we can prove PassThruClose ran BEFORE FreeLibrary. */
-    EXPECT_EQ(hook(), 0);
-
-    /* Reopen: same DLL, fresh cycle — proves FreeLibrary released it */
+    /* Reopen: same DLL, fresh cycle */
+    fake_control::reset(page);
     ecuio_j2534_handle_t* h2 = nullptr;
     ASSERT_EQ(ecuio_j2534_open(&device, &h2), ECUIO_OK);
-    EXPECT_EQ(hook(), 1);
+    EXPECT_NE(fake_control::opener_pid(page), 0ul);
     EXPECT_EQ(ecuio_j2534_close(h2), ECUIO_OK);
+    EXPECT_EQ(fake_control::closes(page), 1u);
 }
 
 TEST_F(FakeFixture, CloseNullIsSafeNoOp) {

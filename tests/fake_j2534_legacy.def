@@ -10,13 +10,3 @@ EXPORTS
     PassThruStartMsgFilter
     PassThruStopMsgFilter
     InjectFrame
-    GetBufferState
-    GetCurrentHandle
-    GetLastConnectParams
-    GetWriteCount
-    GetRecordedWrite
-    GetLastFilterStart
-    GetLastFilterStop
-    SetFilterGating
-    GetDisconnectCount
-    

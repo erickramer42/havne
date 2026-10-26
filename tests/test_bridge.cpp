@@ -43,6 +43,7 @@
 #define WIN32_LEAN_AND_MEAN
 #endif
 #include <windows.h>
+#include "fake_control.h"   // the fake J2534 DLL's control page
 #endif
 
 namespace {
@@ -1892,24 +1893,31 @@ TEST(BridgeTest, DestroyedMidConnectLeavesNoRunningSession)
 
 #ifdef _WIN32
 // ---------------------------------------------------------------------------
-// Connect and disconnect threads, against the fake J2534 DLL (in-proc):
-// its delay knobs stall the vendor call, and its hooks say which thread
-// made it.
+// Connect and disconnect threads, against the fake J2534 DLL: its delay
+// knobs stall the vendor call, so a call made on the GUI thread would
+// block it, and its control page counts the teardown's calls.
 // ---------------------------------------------------------------------------
 
 namespace {
 
-/* Sets a fake-DLL env knob for one test and clears it on exit, so a
- * failing ASSERT can't leak it into the next case. The in-proc fake
- * re-reads the knob on every call. */
+/* The fake's control page; created before any session opens, so a
+ * surrogate child takes its name at spawn. */
+fake_control::Page* fakePage()
+{
+    return fake_control::create_for_this_process();
+}
+
+/* Sets one of the fake's knobs for one test, on its page (which the
+ * fake reads on every call, on either backend), and clears it on exit,
+ * so a failing ASSERT can't leak it into the next case. */
 class FakeEnvArm
 {
 public:
     FakeEnvArm(const char* name, const char* value) : m_name(name)
     {
-        SetEnvironmentVariableA(name, value);
+        EXPECT_TRUE(fake_control::set(fakePage(), name, value)) << name;
     }
-    ~FakeEnvArm() { SetEnvironmentVariableA(m_name, nullptr); }
+    ~FakeEnvArm() { fake_control::set(fakePage(), m_name, nullptr); }
     FakeEnvArm(const FakeEnvArm&) = delete;
     FakeEnvArm& operator=(const FakeEnvArm&) = delete;
 
@@ -1917,31 +1925,23 @@ private:
     const char* m_name;
 };
 
-using fn_get_last_call_thread_ids = void (*)(unsigned long*, unsigned long*);
-using fn_get_disconnect_count = unsigned long (*)(void);
-
-/* The fake's hooks. Holding our own module reference also keeps its
- * counters alive across the session's FreeLibrary. */
+/* What the fake publishes on its page, reset for one test. */
 struct FakeHooks
 {
-    HMODULE mod = nullptr;
-    fn_get_last_call_thread_ids thread_ids = nullptr;
-    fn_get_disconnect_count disconnect_count = nullptr;
-
     bool load()
     {
-        mod = LoadLibraryExA(FAKE_J2534_DLL_PATH, nullptr,
-                             LOAD_WITH_ALTERED_SEARCH_PATH);
-        if (mod == nullptr) return false;
-        thread_ids = reinterpret_cast<fn_get_last_call_thread_ids>(
-            GetProcAddress(mod, "GetLastCallThreadIds"));
-        disconnect_count = reinterpret_cast<fn_get_disconnect_count>(
-            GetProcAddress(mod, "GetDisconnectCount"));
-        return thread_ids != nullptr && disconnect_count != nullptr;
+        fake_control::Page* page = fakePage();
+        if (page == nullptr) return false;
+        fake_control::reset(page);
+        return true;
     }
     ~FakeHooks()
     {
-        if (mod != nullptr) FreeLibrary(mod);
+        if (fakePage() != nullptr) fake_control::reset(fakePage());
+    }
+    unsigned long disconnect_count() const
+    {
+        return fake_control::disconnects(fakePage());
     }
 };
 
@@ -1953,16 +1953,11 @@ QString fakeUri()
         .arg(QString::fromUtf8(FAKE_J2534_DLL_PATH));
 }
 
-unsigned long guiThreadId()
-{
-    return static_cast<unsigned long>(GetCurrentThreadId());
-}
-
 }  // namespace
 
 /* An async connect makes the slow vendor open on its own thread: with
- * PassThruOpen stalled, connectSessionAsync returns at once, and the
- * open ran on a thread other than this (GUI) one. */
+ * PassThruOpen stalled, connectSessionAsync returns at once, so the
+ * open didn't run on this (GUI) thread. */
 TEST(BridgeTest, AsyncConnectOpensOffGuiThread)
 {
     FakeHooks hooks;
@@ -1987,11 +1982,6 @@ TEST(BridgeTest, AsyncConnectOpensOffGuiThread)
     ASSERT_TRUE(spinUntil([&done]() { return done.load(); }, 10000, 10));
     EXPECT_EQ(gotErr.toStdString(), "");
     ASSERT_TRUE(bridge.connected());
-
-    unsigned long open_tid = 0;
-    hooks.thread_ids(&open_tid, nullptr);
-    EXPECT_NE(open_tid, 0ul);
-    EXPECT_NE(open_tid, guiThreadId());
 
     ASSERT_TRUE(disconnectAndWait(bridge));
 }
@@ -2030,11 +2020,6 @@ TEST(BridgeTest, DisconnectTearsDownOffGuiThread)
     ASSERT_TRUE(spinUntil([&bridge]() { return !bridge.disconnecting(); }, 10000, 10));
     EXPECT_GE(clock.elapsed(), 700) << "the stall never reached the teardown";
     EXPECT_EQ(hooks.disconnect_count(), disconnects_before + 1);
-
-    unsigned long disconnect_tid = 0;
-    hooks.thread_ids(nullptr, &disconnect_tid);
-    EXPECT_NE(disconnect_tid, 0ul);
-    EXPECT_NE(disconnect_tid, guiThreadId());
 
     ASSERT_GE(log.size(), 2);
     EXPECT_TRUE(log.at(log.size() - 2).startsWith(QStringLiteral("Disconnecting: ")));

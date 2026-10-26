@@ -12,14 +12,3 @@ EXPORTS
     PassThruGetLastError
     PassThruReadVersion
     InjectFrame
-    GetBufferState
-    GetCurrentHandle
-    GetLastConnectParams
-    GetWriteCount
-    GetRecordedWrite
-    GetLastFilterStart
-    GetLastFilterStop
-    SetFilterGating
-    GetDisconnectCount
-    GetLastCallThreadIds
-    
