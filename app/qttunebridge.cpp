@@ -587,8 +587,9 @@ QString QtTuneBridge::connectCoreOnly(const QString& uri,
 }
 
 // GUI thread: start the worker of a session connectCoreOnly produced.
-// Frames that arrive before applyConnectedState are dropped by onFrame's
-// connected check. On failure the session is destroyed.
+// onFrame accepts from here (m_accepting), so a frame sent at once, as a
+// replay's first is, queues and reaches handleFrameInternal after
+// applyConnectedState. On failure the session is destroyed.
 QString QtTuneBridge::startSession(ecuio_session_t* session)
 {
     m_framesDelivered.store(0, std::memory_order_relaxed);
@@ -610,12 +611,14 @@ QString QtTuneBridge::startSession(ecuio_session_t* session)
 // (parity by construction, not by care).
 void QtTuneBridge::applyConnectedState(ecuio_session_t* session, const QString& uri)
 {
-    // Before frames are accepted, so the recording holds every one
-    startRecording(uri, ecuio_session_signal_set(session));
+    // Before any emit: each runs handlers synchronously, and a connect one
+    // of them starts must be refused, not replace this session
     m_session = session;
+    m_connected.store(true, std::memory_order_release);
+    // Before the queued frames run, so the recording holds every one
+    startRecording(uri, ecuio_session_signal_set(session));
     m_currentUri = uri;
     emit currentUriChanged();
-    m_connected.store(true, std::memory_order_release);
     // The frame log belongs to a session, like its count: rows from two
     // connects would otherwise run together with nothing between them.
     m_frameLog->clear();
@@ -703,8 +706,10 @@ void QtTuneBridge::connectSessionAsync(const QString& typed)
         QMetaObject::invokeMethod(this, [this, uri, core_err]() {
             // JOIN FIRST, then clear the flag, then emit: assigning to a
             // joinable std::thread terminates the process, and a QML
-            // handler can run SYNCHRONOUSLY inside connectingChanged —
-            // this ordering keeps even that nested re-entry safe.
+            // handler can run SYNCHRONOUSLY inside connectingChanged.
+            // connecting clears only once the session is applied, so a
+            // handler always sees connecting or connected: a connect it
+            // starts is refused, never a second session over this one.
             if (m_connectThread.joinable()) {
                 m_connectThread.join();
             }
@@ -713,11 +718,13 @@ void QtTuneBridge::connectSessionAsync(const QString& typed)
             if (err.isEmpty()) {
                 err = startSession(session);
             }
+            if (err.isEmpty()) {
+                applyConnectedState(session, uri);
+            }
             m_connecting = false;
             emit connectingChanged();
 
             if (err.isEmpty()) {
-                applyConnectedState(session, uri);
                 emit connectResult(uri, {});
             } else {
                 emit logMessage(QStringLiteral("Connect failed: %1 (%2)")

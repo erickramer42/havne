@@ -1681,6 +1681,59 @@ TEST(BridgeTest, AsyncConnectCompletesOffGuiThread)
     EXPECT_FALSE(bridge.connected());
 }
 
+/* Every emit while a connect is applied runs QML handlers synchronously,
+ * after the session's worker has started. A connect a handler starts
+ * there is refused, so the first session stays the bridge's; let through,
+ * it would replace m_session and leave the first worker posting to the
+ * bridge with nothing to close it. Sync connect: currentUriChanged, one
+ * of the apply's emits. */
+TEST(BridgeTest, AConnectFromAHandlerDuringTheApplyIsRefused)
+{
+    QtTuneBridge bridge;
+    QStringList log;
+    QObject::connect(&bridge, &QtTuneBridge::logMessage,
+                     [&log](const QString& line) { log << line; });
+    bool tried = false;
+    QObject::connect(&bridge, &QtTuneBridge::currentUriChanged, [&]() {
+        if (!tried && !bridge.currentUri().isEmpty()) {
+            tried = true;
+            (void)bridge.connectSession(QStringLiteral("mock://second"));
+        }
+    });
+    ASSERT_TRUE(bridge.connectSession(QStringLiteral("mock://first")).isEmpty());
+    ASSERT_TRUE(tried);
+    EXPECT_EQ(bridge.currentUri().toStdString(), "mock://first");
+    EXPECT_EQ(log.filter(QStringLiteral("Connected:")).size(), 1)
+        << log.join('\n').toStdString();
+    ASSERT_TRUE(disconnectAndWait(bridge));
+}
+
+/* The async completion: connectingChanged, as connecting clears, is a
+ * handler's chance too */
+TEST(BridgeTest, AConnectFromConnectingChangedIsRefused)
+{
+    QtTuneBridge bridge;
+    QStringList log;
+    QObject::connect(&bridge, &QtTuneBridge::logMessage,
+                     [&log](const QString& line) { log << line; });
+    bool tried = false;
+    QObject::connect(&bridge, &QtTuneBridge::connectingChanged, [&]() {
+        if (!tried && !bridge.connecting()) {
+            tried = true;
+            bridge.connectSessionAsync(QStringLiteral("mock://second"));
+        }
+    });
+    bridge.connectSessionAsync(QStringLiteral("mock://first"));
+    ASSERT_TRUE(spinUntil([&bridge]() { return bridge.connected(); }, 5000));
+    spinLoop(300); // a second connect let through completes in here
+    ASSERT_TRUE(tried);
+    EXPECT_EQ(bridge.currentUri().toStdString(), "mock://first");
+    EXPECT_TRUE(log.filter(QStringLiteral("mock://second")).isEmpty())
+        << log.join('\n').toStdString();
+    EXPECT_EQ(log.filter(QStringLiteral("Connected:")).size(), 1);
+    ASSERT_TRUE(disconnectAndWait(bridge));
+}
+
 namespace {
 void countFramesCb(const ecuio_frame_t*, void* user_data)
 {
