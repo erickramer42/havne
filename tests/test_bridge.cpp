@@ -1946,7 +1946,7 @@ struct FakeHooks
 };
 
 /* A passive raw session: no requests, so the vendor calls under test
- * are the open and the teardown. */
+ * are the open, the engine ECU's filter and the teardown. */
 QString fakeUri()
 {
     return QStringLiteral("j2534://%1?profile=raw")
@@ -2082,7 +2082,7 @@ TEST(BridgeTest, ConnectLogsTheAdaptersSession)
     EXPECT_TRUE(log.at(log.size() - 2).startsWith(QStringLiteral("Connected: ")));
     EXPECT_EQ(log.last().toStdString(),
               "Session: x64 DLL, in-proc; ISO 15765 at 500000 baud; "
-              "profile raw, no channels (passive); battery 13.8 V; "
+              "profile raw, channel 0x7E8/0x7E0 (rx/tx); battery 13.8 V; "
               "firmware fake-fw 1.0, DLL fake_j2534 0.3, API 04.04");
     ASSERT_TRUE(disconnectAndWait(bridge));
 }

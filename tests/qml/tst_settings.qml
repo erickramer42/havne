@@ -94,7 +94,7 @@ TestCase {
         press(page, "preset_mock")
         compare(uri.text, "mock://demo")
         press(page, "profile_raw")
-        compare(uri.text, "mock://demo?profile=raw", "mock takes no filter key")
+        compare(uri.text, "mock://demo?profile=raw")
         press(page, "profile_uds-generic")
         compare(uri.text, "mock://demo?profile=uds-generic", "no DIDs yet: core will say so")
         verify(didRow.visible)
@@ -106,8 +106,8 @@ TestCase {
         compare(uri.text, "j2534://?profile=uds-generic&did=1E1C:u16,F190:text",
                 "a new base keeps the profile and the DIDs")
         press(page, "profile_raw")
-        compare(uri.text, "j2534://?profile=raw&filter=0x7E8",
-                "raw on an adapter listens to the engine ECU")
+        compare(uri.text, "j2534://?profile=raw",
+                "core gives raw on an adapter the engine ECU's channel")
         verify(!didRow.visible)
         press(page, "profile_default")
         compare(uri.text, "j2534://", "the default profile needs no query")
@@ -156,7 +156,7 @@ TestCase {
         verify(!didRow.visible)
         compare(uri.text, "j2534://Vendor?profile=raw&filter=0x7E9", "left as typed")
         press(page, "profile_default")
-        compare(uri.text, "j2534://Vendor?filter=0x7E9", "a typed filter isn't the raw row's")
+        compare(uri.text, "j2534://Vendor?filter=0x7E9", "a typed filter stays")
 
         // A profile the row doesn't offer: no button lit, the hint says so
         type(uri, "j2534://Vendor?profile=obd2")
@@ -205,18 +205,21 @@ TestCase {
         compare(uri.text, data.uri, "the row's own click keeps it")
     }
 
-    // Leaving raw takes the raw row's filter (0x7E8) with it and keeps
-    // every other key
-    function test_leavingRawDropsItsOwnFilter() {
+    // The page adds and takes no key of any scheme's: raw composes no
+    // filter on any base (a replay takes none), and a typed filter stays
+    // through every choice; core judges the keys a scheme takes
+    function test_noSchemesKeysAddedOrTaken() {
         const page = createPage()
         const uri = find(page, "uriField")
+        type(uri, "replay://C:/recordings/20261025-164746")
+        press(page, "profile_raw")
+        compare(uri.text, "replay://C:/recordings/20261025-164746?profile=raw",
+                "a replay takes no filter")
         type(uri, "j2534://OBDX Pro - VX?profile=raw&filter=0x7E8&poll=0x00")
         press(page, "profile_default")
-        compare(uri.text, "j2534://OBDX Pro - VX?poll=0x00")
+        compare(uri.text, "j2534://OBDX Pro - VX?filter=0x7E8&poll=0x00")
         press(page, "profile_raw")
-        compare(uri.text, "j2534://OBDX Pro - VX?poll=0x00&profile=raw&filter=0x7E8")
-        press(page, "preset_mock")
-        compare(uri.text, "mock://demo?poll=0x00&profile=raw", "mock takes no filter key")
+        compare(uri.text, "j2534://OBDX Pro - VX?filter=0x7E8&poll=0x00&profile=raw")
     }
 
     // Query metacharacters can't be typed into the DID field, so a DID

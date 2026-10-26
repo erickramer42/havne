@@ -186,7 +186,10 @@ TEST_P(J2534HealthTest, VendorStampsBecomeSessionTime)
 {
     const auto before = std::chrono::steady_clock::now();
     ASSERT_NO_FATAL_FAILURE(start_session("?profile=raw"));
-    const uint8_t a[4] = {0xA1}, b[4] = {0xB2}, c[4] = {0xC3};
+    /* Replies on the engine ECU's ID, which raw listens to */
+    const uint8_t a[5] = {0x00, 0x00, 0x07, 0xE8, 0xA1};
+    const uint8_t b[5] = {0x00, 0x00, 0x07, 0xE8, 0xB2};
+    const uint8_t c[5] = {0x00, 0x00, 0x07, 0xE8, 0xC3};
     ASSERT_TRUE(fake_control::post(page, a, sizeof(a), 0xFFFFFF00u, 0));
     ASSERT_TRUE(fake_control::post(page, b, sizeof(b), 0x00000100u, 0));
     ASSERT_TRUE(fake_control::post(page, c, sizeof(c), 0x00000080u, 0));

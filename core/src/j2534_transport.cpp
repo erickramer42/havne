@@ -3,7 +3,8 @@
 //          session info, on both backends. test_j2534_stream: URI parsing,
 //          the vendor clock's unit cases, connect parameters,
 //          filter registration, request framing and routing, header
-//          strip and arbitration_id stamp, rotation, ?poll= precedence,
+//          strip and arbitration_id stamp, raw on the engine ECU's
+//          channel without ?filter=, rotation, ?poll= precedence,
 //          the probe's walk, its drops, ?probe=0 and its resumption on
 //          recovery, the support report it publishes, uds-generic's
 //          requests, ECU prefix and DID scan, and identification's
@@ -207,12 +208,18 @@ uint32_t poll_channel(const ecuio_signal_set_t* set, uint8_t pid,
 
 /* Derive the channel table from the set plus URI overrides. Never
  * fails: bounded by construction, and malformed set entries are
- * skipped. A lone ?txid= on a profile without channels yields no
- * channel — there is no receive ID to register a filter for. */
+ * skipped. A log-only profile (raw: no set) with no ?filter= listens
+ * on the default profile's channels, obd2's engine ECU (ADR-0013's
+ * appendix of 2026-10-26): an ISO 15765 channel with no filter hears
+ * nothing. A set without channels, and a lone ?txid= on one, yields
+ * no channel — there is no receive ID to register a filter for. */
 void resolve_channels(ecuio_j2534_transport* t,
                       const ecuio_signal_set_t* set,
                       const j2534_uri_params& params)
 {
+    if (set == nullptr && params.rx_id == 0) {
+        set = ecuio_obd2_signal_set();
+    }
     uint32_t n = 0;
     if (params.rx_id != 0) {
         uint32_t tx = static_cast<uint32_t>(params.tx_id);

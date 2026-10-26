@@ -395,10 +395,26 @@ TEST_F(J2534QueryParamTest, RelativeDllPathsAreRefused)
 
 TEST(J2534StreamTest, DirectLoadUriDeliversInjectedFramesExactly)
 {
+    /* A passive profile that declares no channel (one plain def, no
+     * requests) and no ?filter=: frames dispatch verbatim, id 0, with no
+     * scheduler writes interfering with exact-count assertions. Raw
+     * listens on the engine ECU instead (RawListensToTheEngineEcu). */
+    static ecuio_signal_def_t defs[1];
+    defs[0] = ecuio_signal_def_t{};
+    defs[0].id = 1;
+    defs[0].kind = ECUIO_VALUE_UINT;
+    defs[0].message_id = 0x123;
+    defs[0].bit_length = 8;
+    defs[0].scale = 1.0;
+    static ecuio_signal_set_t set;
+    set = ecuio_signal_set_t{};
+    set.layout_version = ECUIO_SIGNAL_SET_LAYOUT;
+    set.count = 1;
+    set.defs = defs;
+    ASSERT_EQ(ecuio_profile_register("test-passive-verbatim", &set, nullptr),
+              ECUIO_OK);
     char uri[512];
-    /* ?profile=raw: legacy verbatim passive mode — id-0 dispatch,
-     * no scheduler writes interfering with exact-count assertions. */
-    snprintf(uri, sizeof(uri), "j2534://%s?profile=raw",
+    snprintf(uri, sizeof(uri), "j2534://%s?profile=test-passive-verbatim",
              FAKE_J2534_DLL_PATH);
 
     const auto before_create = std::chrono::steady_clock::now();
@@ -447,9 +463,8 @@ TEST(J2534StreamTest, DirectLoadUriDeliversInjectedFramesExactly)
     EXPECT_EQ(cap.frame_flags[1], ECUIO_FRAME_FLAG_EXTENDED);
     EXPECT_EQ(cap.frame_flags[2], 0u);
 
-    /* No filter on this URI: frames dispatch VERBATIM with id 0 —
-     * the pre-adoption contract, pinned so the adoption path can't
-     * silently change the legacy one. */
+    /* No channel on this session: frames dispatch VERBATIM with id 0,
+     * pinned so the channel path can't silently change this one. */
     EXPECT_EQ(cap.arbitration_ids[0], 0u);
     EXPECT_EQ(cap.arbitration_ids[1], 0u);
     EXPECT_EQ(cap.arbitration_ids[2], 0u);
@@ -827,8 +842,23 @@ TEST_F(J2534AdoptionTest, PollWithoutChannelRejectedBeforeDllLoad)
     ecuio_session_t* session = nullptr;
     char uri[700];
 
-    snprintf(uri, sizeof(uri),
-             "j2534://%s?profile=raw&poll=0x0C", FAKE_J2534_DLL_PATH);
+    /* A passive profile that declares no channel, with ?poll= */
+    static ecuio_signal_def_t plain[1];
+    plain[0] = ecuio_signal_def_t{};
+    plain[0].id = 1;
+    plain[0].kind = ECUIO_VALUE_UINT;
+    plain[0].message_id = 0x123;
+    plain[0].bit_length = 8;
+    plain[0].scale = 1.0;
+    static ecuio_signal_set_t passive;
+    passive = ecuio_signal_set_t{};
+    passive.layout_version = ECUIO_SIGNAL_SET_LAYOUT;
+    passive.count = 1;
+    passive.defs = plain;
+    ASSERT_EQ(ecuio_profile_register("test-passive-poll", &passive, nullptr),
+              ECUIO_OK);
+    snprintf(uri, sizeof(uri), "j2534://%s?profile=test-passive-poll&poll=0x0C",
+             FAKE_J2534_DLL_PATH);
     EXPECT_EQ(ecuio_session_create(uri, &session), ECUIO_ERR_BAD_URI);
     EXPECT_EQ(session, nullptr);
 
@@ -853,6 +883,62 @@ TEST_F(J2534AdoptionTest, PollWithoutChannelRejectedBeforeDllLoad)
 
 /* PASSIVE RECEIVE: ?profile=raw&filter=0x7E8 without ?poll= — filter
  * registers, no writes generated, frames still stripped and stamped. */
+/* Raw with no ?filter= listens on the default profile's channel, the
+ * engine ECU (ADR-0013's appendix of 2026-10-26): its filter is 0x7E8,
+ * a reply on 0x7E8 arrives stripped and stamped, a frame for another ID
+ * doesn't, and ?poll= alone asks the engine ECU, on 0x7E0 */
+TEST_F(J2534AdoptionTest, RawListensToTheEngineEcu)
+{
+    char uri[700];
+    snprintf(uri, sizeof(uri), "j2534://%s?profile=raw", FAKE_J2534_DLL_PATH);
+    ecuio_session_t* session = nullptr;
+    ASSERT_EQ(ecuio_session_create(uri, &session), ECUIO_OK)
+        << ecuio_last_error_detail();
+    ecuio_session_info_t info{};
+    ASSERT_EQ(ecuio_session_get_info(session, &info), ECUIO_OK);
+    ASSERT_EQ(info.channel_count, 1u);
+    EXPECT_EQ(info.rx_ids[0], 0x7E8u);
+    StreamCapture cap;
+    ASSERT_EQ(ecuio_register_frame_callback(session, capture_cb, &cap), ECUIO_OK);
+    ASSERT_EQ(ecuio_session_start(session), ECUIO_OK);
+    unsigned long fid = 0, ftype = 0, len = 0;
+    unsigned char mask[12] = {}, pattern[12] = {};
+    get_last_filter(&fid, &ftype, mask, pattern, &len);
+    EXPECT_NE(fid, 0u) << "a filter, for the engine ECU";
+    EXPECT_EQ(pattern[2], 0x07);
+    EXPECT_EQ(pattern[3], 0xE8);
+    const unsigned char other[7] = {0x00, 0x00, 0x07, 0xE9, 0x41, 0x0C, 0x01};
+    const unsigned char reply[8] = {0x00, 0x00, 0x07, 0xE8, 0x41, 0x0C, 0x1F, 0x40};
+    inject(other, sizeof(other), 1000, 0, 1);
+    inject(reply, sizeof(reply), 2000, 0, 1);
+    wait_for_count(cap, 1, 200);
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    EXPECT_EQ(ecuio_session_close(session), ECUIO_OK);
+    ecuio_session_destroy(session);
+    ASSERT_EQ(cap.count.load(), 1) << "the 0x7E9 frame isn't the engine ECU's";
+    EXPECT_EQ(cap.arbitration_ids[0], 0x7E8u);
+    EXPECT_EQ(cap.payload_lens[0], 4u);
+    EXPECT_EQ(cap.payloads[0][0], 0x41);
+    EXPECT_EQ(cap.payloads[0][3], 0x40);
+
+    snprintf(uri, sizeof(uri), "j2534://%s?profile=raw&poll=0x0C",
+             FAKE_J2534_DLL_PATH);
+    ASSERT_EQ(ecuio_session_create(uri, &session), ECUIO_OK)
+        << ecuio_last_error_detail();
+    ASSERT_EQ(ecuio_session_start(session), ECUIO_OK);
+    wait_for_writes(get_write_count, 1, 300);
+    EXPECT_EQ(ecuio_session_close(session), ECUIO_OK);
+    ecuio_session_destroy(session);
+    unsigned char wbuf[64] = {};
+    unsigned long wlen = 0, wflags = 0;
+    get_recorded_write(0, wbuf, &wlen, &wflags);
+    ASSERT_EQ(wlen, 6u);
+    EXPECT_EQ(wbuf[2], 0x07);
+    EXPECT_EQ(wbuf[3], 0xE0) << "asked on the engine ECU's request ID";
+    EXPECT_EQ(wbuf[4], 0x01);
+    EXPECT_EQ(wbuf[5], 0x0C);
+}
+
 TEST_F(J2534AdoptionTest, PassiveReceiveWithFilterNoPoll)
 {
     char uri[700];

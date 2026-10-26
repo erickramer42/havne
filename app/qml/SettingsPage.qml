@@ -1,7 +1,8 @@
 // File/layer: app/qml/SettingsPage.qml | Qt6 Quick, UI layer
 // Testing: test_qml (tests/qml/tst_settings.qml): the URI composed from a
 //          preset, the profile row and the DID field, a typed URI read
-//          back into the row and the field with its other keys kept,
+//          back into the row and the field with its other keys kept, no
+//          scheme's keys added or taken (a raw replay composes no filter),
 //          the DID field refusing query characters, the field left
 //          editable, core's refusal in the error line, a composed
 //          uds-generic URI connecting through the mock, every control
@@ -75,17 +76,12 @@ Pane {
         { name: "default", label: qsTr("Default"),
           hint: qsTr("The scheme's own profile: obd2 on an adapter, the demo set on mock://") },
         { name: "raw", label: qsTr("raw (log only)"),
-          hint: qsTr("No decode: frames reach the Log page only. On an adapter the URI "
-                     + "filters on the engine ECU's replies (0x7E8); edit it for another ID") },
+          hint: qsTr("No decode: frames reach the Log page only. On an adapter it listens "
+                     + "to the engine ECU (0x7E8); add ?filter= for another ID") },
         { name: "uds-generic", label: qsTr("uds-generic (DIDs)"),
           hint: qsTr("Service 0x22 reads of the DIDs below, polled; a range is scanned "
                      + "once and the DIDs the ECU answers join the polling") }
     ]
-
-    // The raw row's filter: an ISO 15765 channel with no filter receives
-    // nothing (docs/j2534.md), so raw on an adapter listens to the engine
-    // ECU's reply ID. mock:// takes no filter key.
-    readonly property string engineFilter: "0x7E8"
 
     // True while a typed URI is being read into the choices, so the DID
     // field's change doesn't recompose the URI that set it; and true
@@ -170,13 +166,6 @@ Pane {
         setQuery(out, "profile", profileChoice === "default" ? null : profileChoice)
         const dids = profileChoice === "uds-generic" ? didField.text.replace(/\s+/g, "") : ""
         setQuery(out, "did", dids === "" ? null : dids)
-        const filter = queryValue(out, "filter")
-        if (base.startsWith("mock://")) {
-            if (filter === engineFilter)
-                setQuery(out, "filter", null)
-        } else if (profileChoice === "raw" && filter === undefined) {
-            setQuery(out, "filter", engineFilter)
-        }
         return joinUri(base, out)
     }
 
@@ -189,10 +178,6 @@ Pane {
 
     function chooseProfile(name) {
         const uri = splitUri(uriField.text)
-        // The raw row's own filter leaves with it; any other stays
-        if (profileChoice === "raw" && name !== "raw"
-                && queryValue(uri.pairs, "filter") === engineFilter)
-            setQuery(uri.pairs, "filter", null)
         profileChoice = name
         setUri(composeUri(uri.base, uri.pairs))
     }
@@ -311,11 +296,10 @@ Pane {
                     id: uriField
                     objectName: "uriField"
                     Layout.fillWidth: true
-                    // ?poll= replaces the profile's PID rotation and needs
-                    // a channel. The raw profile declares none, so the
-                    // example adds ?filter=; under the obd2 default ?poll=
-                    // alone works and still decodes.
-                    placeholderText: qsTr("URI — e.g. mock://demo or j2534://Vendor?profile=raw&filter=0x7E8&poll=0x0C")
+                    // ?poll= replaces the profile's PID rotation. Raw on an
+                    // adapter listens to the engine ECU, so ?poll= alone
+                    // asks it; under the obd2 default it also decodes.
+                    placeholderText: qsTr("URI — e.g. mock://demo or j2534://Vendor?profile=raw&poll=0x0C")
                     enabled: page.idle
                     color: Theme.text
                     // Any text the page didn't compose is read back
