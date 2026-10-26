@@ -34,6 +34,7 @@ extern "C" {
 #include "error_detail.h" /* core/src: a refused vendor call's words */
 #include "mock_drive_cycle.h"
 #include "uds_generic.h"   /* core/src: the template set's identity */
+#include "new_counter.h"   /* tests: operator new counted per thread */
 
 namespace {
 
@@ -573,6 +574,131 @@ TEST(CoreTest, SelfUnregisterDuringLiveDispatch) {
 
     /* Quiesce: close joins worker; must not hang under reentry. */
     EXPECT_EQ(ecuio_session_close(session), ECUIO_OK);
+    ecuio_session_destroy(session);
+}
+
+namespace {
+
+/* One counter per callback, so a dispatch shows which it reached */
+struct Tally {
+    int hits[8] = {};
+};
+
+void tally_cb(const ecuio_frame_t*, void* user_data)
+{
+    ++*static_cast<int*>(user_data);
+}
+
+/* The first callback unregisters the second and registers a third, on
+ * the first frame only */
+struct SwapCtx {
+    ecuio_session_t* session = nullptr;
+    int removed = 0;
+    int added = 0;
+    bool swapped = false;
+};
+
+void removed_cb(const ecuio_frame_t*, void* user_data)
+{
+    ++static_cast<SwapCtx*>(user_data)->removed;
+}
+
+void added_cb(const ecuio_frame_t*, void* user_data)
+{
+    ++static_cast<SwapCtx*>(user_data)->added;
+}
+
+void swapping_cb(const ecuio_frame_t*, void* user_data)
+{
+    auto* c = static_cast<SwapCtx*>(user_data);
+    if (!c->swapped) {
+        c->swapped = true;
+        ecuio_unregister_frame_callback(c->session, removed_cb, c);
+        ecuio_register_frame_callback(c->session, added_cb, c);
+    }
+}
+
+} // namespace
+
+/* Every callback runs once a frame at any list length, either side of
+ * the snapshot's room on the stack */
+TEST(CoreTest, DispatchReachesEveryCallbackOnceAtAnyListLength)
+{
+    for (int n = 1; n <= 8; ++n) {
+        SCOPED_TRACE(n);
+        ecuio_session_t* session = make_test_session();
+        Tally t;
+        for (int i = 0; i < n; ++i) {
+            EXPECT_EQ(
+                ecuio_register_frame_callback(session, tally_cb, &t.hits[i]),
+                ECUIO_OK);
+        }
+        ecuio_frame_t frame{};
+        ecuio_session_dispatch_callbacks(session, &frame);
+        ecuio_session_dispatch_callbacks(session, &frame);
+        for (int i = 0; i < 8; ++i) {
+            EXPECT_EQ(t.hits[i], i < n ? 2 : 0) << "callback " << i;
+        }
+        ecuio_session_destroy(session);
+    }
+}
+
+/* A callback that unregisters one and registers another mid-dispatch:
+ * that frame still reaches the one removed and not the one added, the
+ * next frame the reverse (ADR-0002), on a list that fits the stack and
+ * one that doesn't */
+TEST(CoreTest, DispatchReachesTheListAsItStoodWhenTheFrameArrived)
+{
+    for (int fillers : {0, 4}) {
+        SCOPED_TRACE(fillers);
+        ecuio_session_t* session = make_test_session();
+        SwapCtx c;
+        c.session = session;
+        Tally t;
+        EXPECT_EQ(ecuio_register_frame_callback(session, swapping_cb, &c),
+                  ECUIO_OK);
+        EXPECT_EQ(ecuio_register_frame_callback(session, removed_cb, &c),
+                  ECUIO_OK);
+        for (int i = 0; i < fillers; ++i) {
+            EXPECT_EQ(
+                ecuio_register_frame_callback(session, tally_cb, &t.hits[i]),
+                ECUIO_OK);
+        }
+        ecuio_frame_t frame{};
+        ecuio_session_dispatch_callbacks(session, &frame);
+        EXPECT_EQ(c.removed, 1) << "in the snapshot";
+        EXPECT_EQ(c.added, 0) << "not in it";
+        ecuio_session_dispatch_callbacks(session, &frame);
+        EXPECT_EQ(c.removed, 1);
+        EXPECT_EQ(c.added, 1);
+        for (int i = 0; i < fillers; ++i) {
+            EXPECT_EQ(t.hits[i], 2) << "filler " << i;
+        }
+        ecuio_session_destroy(session);
+    }
+}
+
+/* A dispatch to up to four callbacks (the app registers one) allocates
+ * nothing; a fifth puts the snapshot on the heap, which also shows the
+ * counter sees core's allocations */
+TEST(CoreTest, DispatchToAShortListAllocatesNothing)
+{
+    ecuio_session_t* session = make_test_session();
+    Tally t;
+    ecuio_frame_t frame{};
+    for (int n = 1; n <= 5; ++n) {
+        EXPECT_EQ(
+            ecuio_register_frame_callback(session, tally_cb, &t.hits[n - 1]),
+            ECUIO_OK);
+        const unsigned long before = new_counter::on_this_thread();
+        ecuio_session_dispatch_callbacks(session, &frame);
+        const unsigned long news = new_counter::on_this_thread() - before;
+        if (n <= 4) {
+            EXPECT_EQ(news, 0u) << n << " callbacks";
+        } else {
+            EXPECT_GT(news, 0u) << "the heap copy past four";
+        }
+    }
     ecuio_session_destroy(session);
 }
 
@@ -2129,7 +2255,59 @@ std::string paced_rows(int n, int step_us = 100000)
     return text;
 }
 
+/* Reads the worker's own operator new count at two frames past its
+ * start-up; the callback itself allocates nothing */
+struct WorkerNews {
+    static constexpr int kFrom = 3;
+    int to = 0;
+    std::atomic<int> frames{0};
+    std::atomic<unsigned long> at_from{0};
+    std::atomic<unsigned long> at_to{0};
+};
+
+void worker_news_cb(const ecuio_frame_t*, void* user_data)
+{
+    auto* w = static_cast<WorkerNews*>(user_data);
+    const int n = w->frames.fetch_add(1) + 1;
+    if (n == WorkerNews::kFrom)
+        w->at_from.store(new_counter::on_this_thread());
+    if (n == w->to)
+        w->at_to.store(new_counter::on_this_thread());
+}
+
 } // namespace
+
+/* Past start-up a worker's frames cost it no allocation, so none can
+ * throw: the mock's ticks, and replay's rows and passes (the file
+ * reopened each time round) */
+TEST(CoreTest, WorkersAllocateNothingPerFrame)
+{
+    TempRecording rec(paced_rows(3));
+    const std::string replay = rec.uri("?speed=max&loop=1");
+    struct Case {
+        const char* uri;
+        int to;
+    };
+    for (const Case& c : {Case{"mock://demo", 12}, Case{replay.c_str(), 200}}) {
+        SCOPED_TRACE(c.uri);
+        WorkerNews w;
+        w.to = c.to;
+        ecuio_session_t* session = nullptr;
+        ASSERT_EQ(ecuio_session_create(c.uri, &session), ECUIO_OK)
+            << ecuio_last_error_detail();
+        EXPECT_EQ(ecuio_register_frame_callback(session, worker_news_cb, &w),
+                  ECUIO_OK);
+        EXPECT_EQ(ecuio_session_start(session), ECUIO_OK);
+        const bool reached =
+            wait_for([&] { return w.frames.load() >= c.to; }, 5000);
+        EXPECT_EQ(ecuio_session_close(session), ECUIO_OK);
+        ecuio_session_destroy(session);
+        ASSERT_TRUE(reached) << w.frames.load() << " frames";
+        EXPECT_EQ(w.at_to.load() - w.at_from.load(), 0u)
+            << "operator new on the worker between frames " << WorkerNews::kFrom
+            << " and " << c.to;
+    }
+}
 
 /* Each row goes out as recorded (ID, flags, bytes, an empty payload
  * included), stamped with the recording's session time rebased to the

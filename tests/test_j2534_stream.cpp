@@ -21,6 +21,8 @@
 //          (ADR-0015 §4): the bitmap walk before the rotation, what the
 //          bitmaps and a negative reply drop, ?probe=0, the walk resumed
 //          after a quiet bus, and each channel's support report. The
+//          worker allocates nothing per frame (tests/new_counter.h).
+//          The
 //          query's split in create: unknown keys named with the ones
 //          j2534:// takes, and ?probe='s malformed forms. The backoff's
 //          capped step, the vendor clock's cases and the J2534 status
@@ -48,6 +50,8 @@
 #include <memory>
 #include <string>
 #include <thread>
+
+#include "new_counter.h"   /* tests: operator new counted per thread */
 #endif
 
 #ifdef _WIN32
@@ -1811,6 +1815,51 @@ TEST_F(J2534AdoptionTest, IdentifyOffSendsNoIdentificationRequest)
     ASSERT_EQ(ecuio_session_get_channel_identity(session, 0, &id), ECUIO_OK);
     EXPECT_EQ(id.items, 0u) << "?poll= asks its one PID alone";
     ecuio_session_destroy(session);
+}
+
+/* The worker's whole engine past start-up (the probe's walk, the
+ * identification one-shots, the rotation) costs it no allocation per
+ * frame, so none can throw. Counts core's operator new only: the fake
+ * DLL's own don't reach the counter */
+TEST_F(J2534AdoptionTest, TheWorkerAllocatesNothingPerFrame)
+{
+    struct News {
+        std::atomic<int> frames{0};
+        std::atomic<unsigned long> at_from{0};
+        std::atomic<unsigned long> at_to{0};
+    };
+    static constexpr int kFrom = 3;
+    static constexpr int kTo = 40;
+    char uri[700];
+    snprintf(uri, sizeof(uri), "j2534://%s", FAKE_J2534_DLL_PATH);
+    ecuio_session_t* session = nullptr;
+    ASSERT_EQ(ecuio_session_create(uri, &session), ECUIO_OK);
+    News news;
+    ASSERT_EQ(ecuio_register_frame_callback(
+                  session,
+                  [](const ecuio_frame_t*, void* user_data) {
+                      auto* n = static_cast<News*>(user_data);
+                      const int i = n->frames.fetch_add(1) + 1;
+                      if (i == kFrom)
+                          n->at_from.store(new_counter::on_this_thread());
+                      if (i == kTo)
+                          n->at_to.store(new_counter::on_this_thread());
+                  },
+                  &news),
+              ECUIO_OK);
+    ASSERT_EQ(ecuio_session_start(session), ECUIO_OK);
+    const auto deadline =
+        std::chrono::steady_clock::now() + std::chrono::seconds(10);
+    while (news.frames.load() < kTo &&
+           std::chrono::steady_clock::now() < deadline) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    EXPECT_EQ(ecuio_session_close(session), ECUIO_OK);
+    ecuio_session_destroy(session);
+    ASSERT_GE(news.frames.load(), kTo);
+    EXPECT_EQ(news.at_to.load() - news.at_from.load(), 0u)
+        << "operator new on the worker between frames " << kFrom << " and "
+        << kTo;
 }
 
 /* A connect while the ECU answers nothing (reads bring no frame): the

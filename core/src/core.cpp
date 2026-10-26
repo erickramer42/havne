@@ -1,7 +1,9 @@
 // File/layer: core/src/core.cpp | C++17, Qt-free, CI-validated headless build
 // Testing: UNIT — CoreTest: session create (routing, the query split,
 //          profiles and every refusal), start, close and destroy,
-//          callbacks and their snapshot dispatch, the error strings;
+//          callbacks and their snapshot dispatch (every callback at any
+//          list length, the list as it stood, no allocation up to
+//          four), the error strings;
 //          HARNESS — the J2534 suites through create; test_c_abi links
 //          the public functions
 
@@ -559,14 +561,36 @@ void ecuio_session_dispatch_callbacks(
         return;
     }
 
-    std::vector<std::pair<ecuio_frame_callback_t, void*>> snapshot;
+    /* The snapshot sits on the stack while the list fits, as the app's
+     * one callback does, so a frame costs the worker no allocation. A
+     * longer list is copied to the heap; if that copy fails the frame
+     * is dropped, since a bad_alloc can't leave an extern "C" call on
+     * the worker. */
+    using entry = std::pair<ecuio_frame_callback_t, void*>;
+    constexpr size_t kInline = 4;
+    entry inline_snapshot[kInline];
+    std::vector<entry> heap_snapshot;
+    const entry* snapshot = inline_snapshot;
+    size_t count = 0;
     {
         std::lock_guard<std::mutex> lock(session->callback_mutex);
-        snapshot = session->callbacks;
+        count = session->callbacks.size();
+        if (count <= kInline) {
+            for (size_t i = 0; i < count; ++i) {
+                inline_snapshot[i] = session->callbacks[i];
+            }
+        } else {
+            try {
+                heap_snapshot = session->callbacks;
+            } catch (...) {
+                return;
+            }
+            snapshot = heap_snapshot.data();
+        }
     }
 
-    for (const auto& [callback, user_data] : snapshot) {
-        callback(frame, user_data);
+    for (size_t i = 0; i < count; ++i) {
+        snapshot[i].first(frame, snapshot[i].second);
     }
 }
 
