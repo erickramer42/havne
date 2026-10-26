@@ -102,7 +102,8 @@ contributions:
   calls (connect, disconnect) run on threads of their own, so the GUI never
   waits on them.
 - **Transports encode, never decode.** The URI selects the transport
-  (`mock://`, `j2534://` on Windows); everything else is rejected.
+  (`mock://`, `replay://`, `j2534://` on Windows); everything else is
+  rejected.
 - **ABI-breaking or architectural changes need an ADR** under `docs/adr/`
   before the code. Look at the existing ones first; your change may already
   have one.
@@ -133,8 +134,8 @@ cite open Known Issues by number.
 
 ## Input validation
 
-- **URI schemes**: `mock://`, `j2534://` only; all others rejected immediately.
-- **Frame buffers**: ≤64 bytes (CAN FD max); shorter frames accepted, >64 rejected.
+- **URI schemes**: `mock://`, `replay://`, `j2534://` only; all others rejected immediately.
+- **Frame buffers**: a frame holds up to 4,096 payload bytes (`ECUIO_FRAME_DATA_MAX`, a whole ISO 15765 message); a longer message is cut there and flagged `ECUIO_FRAME_FLAG_TRUNCATED`, and a replayed row longer than that is refused.
 - **Numeric fields**: parsed within documented OBD-II parameter ranges; out-of-range values rejected.
 - **Signal identifiers**: checked against enumerated list defined in obd2/defs; unknown IDs rejected.
 

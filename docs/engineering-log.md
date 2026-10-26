@@ -97,6 +97,8 @@ Dates are commit dates.
 | 2026-10-23 | The quiet banner says to check the ignition: on the first vehicle, ignition off read as quiet, and only the requests-failing banner mentioned it | `66ba702` |
 | 2026-10-23 | The strip chart's layout moves out of the Canvas paint handler into the `ChartLayout` singleton, tested on synthetic series; with it, a gap past the stale threshold breaks a trace (the first vehicle's ignition cycle drew as ramps) and each trace's range has a minimum span in displayed digits (fuel level's one-count steps filled the plot) | `0cf2870` |
 | 2026-10-23 | The discovery test demands a device where `ECUIO_EXPECT_J2534_DEVICES` says the machine has one; `scripts/verify.sh` sets it on Windows, so the dev machine's installed driver has to be found and the test can't pass vacuously there | `2639b42` |
+| 2026-10-25 | The GUI thread's decode cost per frame, measured (`bench_bridge`): about 3 ns a def a frame, so 1000 defs at a full 500 kbit/s classic CAN bus take under 2 % of it; decoding on the worker is about per-sample time on the chart, not CPU ([testing.md](testing.md#performance)) | `d063939`, `dbd672a` |
+| 2026-10-26 | The replay transport ([ADR-0023](adr/0023-replay-transport.md)): `replay://` plays a recording's `frames.csv` back on every platform, paced and stamped by the recording's own session time, at a speed or `max`, looping on request; the bridge takes frames from the moment a session starts, says what a replay is and when it ends; a recorded mock session round-trips value for value, and the second vehicle session's engine start is a scrubbed fixture whose replay decodes the sheet's values | — |
 
 ## Lessons learned
 
@@ -868,3 +870,29 @@ radiator now sit in named constants, the friction share comes out of
 the block's when fueled, the fan cuts in on the quarter mile, and the
 test checks the WOT peak, the fan and the first and last loops
 separately.
+
+**2026-10-25 — the decode-cost benchmark:** **measure before
+redesigning on a cost.** Known Issue #4 and the backlog's "Full signal
+sets at full rate" assumed the per-frame match against every def on
+the GUI thread would limit QtTune as profiles grew, and decoding on the
+worker was planned on that ground. `bench_bridge` put the match at
+about 3 ns a def a frame: under 2 % of the GUI thread for 1000 defs at a
+full classic CAN bus. The change is still worth making, but for the
+chart's per-sample time (#10), which a user sees, and an ADR justified
+on CPU would have contradicted the number. Two costs stay unmeasured
+and may come first at high rates: the worker's 4 KB copy per frame and
+the tick's per-row update.
+
+**2026-10-26 — the replay transport:** **the first transport that
+sends at time zero found a window the others hid.** Both connects
+started the session before applying the connect, and the bridge's
+callback was gated on the apply, so frames sent in between were
+dropped and never counted. The mock's first frame comes a tick in and
+J2534's after a request's round trip, so neither lost anything a test
+could see. A replay's first frame is due the instant it starts, and at
+full speed the whole file can go in that window; the round-trip test
+lost it every run. The callback's gate now opens just before the
+start. The replay also gave Known Issue #10 its first evidence: the
+engine start replayed at 10× showed a Dashboard RPM peak of 1,195
+against the recording's 1,261, the peak overwritten within its 100 ms
+window.

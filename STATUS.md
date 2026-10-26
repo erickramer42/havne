@@ -160,7 +160,7 @@ is the plan in [After v0.3.0](#after-v030).
     run sheets are
     [bench-runsheet.md](docs/bench-sessions/bench-runsheet.md) and
     [vehicle-runsheet.md](docs/bench-sessions/vehicle-runsheet.md).
-  - **Tests:** 400 ctest cases (Windows, Visual Studio 18 build
+  - **Tests:** 413 ctest cases (Windows, Visual Studio 18 build
     tools, both trees rebuilt, 2026-10-25), the QML suites
     among them, plus the cross-arch subset (75/75). All passed except
     the env-gated cross-arch skip. Every first-party target builds with
@@ -351,11 +351,17 @@ measurements feed the first item.
    and checked by `.github/workflows/release.yml` that runs without
    Qt or Visual Studio, with a signed build provenance
    ([development.md, "Releases"](docs/development.md#releases)).
-5. **Phase 4, record-replay transport,** independent of the others:
-   play captured frames back deterministically through the same frame
-   API. The capture side is the recorder's `frames.csv`
-   ([ADR-0017](docs/adr/0017-session-recording.md)); the replay work
-   includes a round-trip test against a recorded mock session.
+5. **Phase 4, record-replay transport** ([ADR-0023](docs/adr/0023-replay-transport.md)):
+   built and UNIT-tested, against a real-bus fixture too. `replay://<recording>` plays a
+   recording's `frames.csv` ([ADR-0017](docs/adr/0017-session-recording.md))
+   back through the frame API on every platform, paced and stamped
+   by the recording's session time (`?speed=` 0.1 to 100 or `max`,
+   `?loop=1`). A recorded mock session round-trips through the
+   recorder and replay value for value, and the second vehicle
+   session's engine start, scrubbed of its identification replies,
+   is a committed fixture whose replay decodes the sheet's values.
+   The bridge accepts frames from the moment a session starts, so a
+   replay's first frame isn't lost to the connect.
 
 ## BENCH prep
 
@@ -458,9 +464,9 @@ an issue is resolved it is removed, and its number is not reused.
    the iOS app on the Simulator and screenshots it
    (`ios-simulator-smoke`). Neither app has run on a device, the
    Android app has never been launched, and no tests run on either
-   (cross builds set `BUILD_TESTING=OFF`). Off Windows the only
-   transport is `mock://`, so a mobile session can't reach a vehicle
-   yet.
+   (cross builds set `BUILD_TESTING=OFF`). Off Windows the
+   transports are `mock://` and `replay://`, so a mobile session
+   can't reach a vehicle yet.
 4. **Every def is matched against every frame on the GUI thread.** A
    subscription can't trim that work: it is the chart's filter only,
    because the Dashboard reads every signal. Measured, it costs about
@@ -472,7 +478,11 @@ an issue is resolved it is removed, and its number is not reused.
 6. **The session API is single-caller by contract.** The bridge is the
    only caller.
 10. **Strip-chart x-axis resolution is one coalesce window, about
-    100 ms.** Per-sample timestamps need decoding to move onto the
+    100 ms,** and a signal keeps only its latest value per window, so a
+    short peak can miss the screen: the fixture's engine start replayed
+    at 10× showed an RPM peak of 1,195 on the Dashboard against the
+    recording's 1,261 (docs/testing.md). Per-sample timestamps need
+    decoding to move onto the
     worker.
 13. **The picker treats one registry entry as one device.** Multiple
     adapters behind one vendor DLL can't be told apart. They would be
@@ -665,7 +675,7 @@ matters: the original-copy file format constrains everything after it.
 - **ELM327 transport (L).** ELM327-compatible adapters over USB serial,
   Bluetooth and BLE (the OBDLink MX+ and CX among them). This is the
   path to a vehicle on macOS, Linux, iOS and Android, where only
-  `mock://` exists (Known Issue #2).
+  `mock://` and `replay://` exist (Known Issue #2).
   - It's a new transport, not a J2534 shim: ELM327 is a text
     AT-command protocol with its own framing and flow control.
   - Settle in an ADR first: core can't link Qt, so Bluetooth needs

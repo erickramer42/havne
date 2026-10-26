@@ -29,6 +29,7 @@ old one, and the old record's status is updated to point at it.
 | [0020](0020-uds-generic.md) | `uds-generic`: DIDs named in the URI (`?did=`), a set built per session, ranges scanned once beside the rotation | Accepted |
 | [0021](0021-vehicle-identification.md) | Vehicle identification: the VIN and the ECU's identifiers (Service 09, DIDs F187–F195) asked once per channel at connect, a report per channel and one activity-log line | Accepted |
 | [0022](0022-display-units.md) | Display units: metric or imperial, converted in core by unit string at the UI's edge; recordings keep decoded values | Accepted |
+| [0023](0023-replay-transport.md) | Replay transport: `replay://` plays a recording's `frames.csv` back through the frame API, paced by its session time | Accepted |
 
 ## Adding a record
 

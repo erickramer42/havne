@@ -43,6 +43,7 @@ to watch the simulated car drive. Other platforms build from source
  ecuio-core (core/)           no Qt, ever
    │  sessions + callbacks · profiles + decode · transports
    ├── mock://    worker thread, scripted drive cycle
+   ├── replay://  worker thread, a recording's frames.csv at its own pace
    └── j2534://   worker thread → loader, which picks a backend:
           ├── in-proc:   vendor DLL loaded into the app (x64 DLLs)
           └── surrogate: client ══ named pipe ══ ecuio-j2534-surrogate.exe
@@ -135,6 +136,9 @@ screen, is [docs/architecture.md](docs/architecture.md).
   (the default for `mock://`), `obd2` (the default for `j2534://`) or
   `raw` (log only), with `?profile=` to override
   ([ADR-0013](docs/adr/0013-protocol-profiles.md)).
+- **Replay.** A recorded session plays back at its own pace, or
+  faster: `replay://<recording folder>?profile=obd2&speed=10`
+  ([ADR-0023](docs/adr/0023-replay-transport.md)).
 - **Simulated vehicle.** A modeled car (gear ratios, airflow and
   torque, tires with weight transfer, block, coolant and oil
   temperatures) runs a scripted drive: a cold start, two full-throttle

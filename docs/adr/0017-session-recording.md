@@ -141,3 +141,19 @@ goes into `signals.csv` like a number: one row per decoded value, the
 text in the `value` column, CSV-quoted when it holds a comma, a quote
 or a newline (a HEX value never does; a TEXT value shows such bytes as
 `.`). The columns and the header row are unchanged.
+
+## Appendix — the reader exists (2026-10-25)
+
+`replay://` ([ADR-0023](0023-replay-transport.md)) is the reader point
+5 promised. It accepts only the header row above and refuses a bad row
+with its line number, and the round trip it describes is a test:
+`BridgeTest.ReplayOfAMockRecordingDecodesWhatWasRecorded` records a mock
+session, replays it, and compares the two recordings row for row and
+value for value. A change of columns in the recorder now needs the
+reader changed in the same commit.
+
+The bridge's frame callback opens just before the session starts
+rather than when the connect is applied, so frames sent in between
+are recorded too; the consequence above, "not recorded: frames before
+the connect is applied", now covers only frames before the start,
+which a transport doesn't send.

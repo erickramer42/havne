@@ -149,7 +149,7 @@ the mobile kit, which applies Qt's toolchain file and finds the host
 desktop Qt. Mobile builds set `BUILD_TESTING=OFF`:
 `gtest_discover_tests` runs each test binary at build time, and the
 build host can't execute an Android or iOS binary. Off Windows the
-only transport is `mock://` (Known Issue #2). Qt Creator with an
+transports are `mock://` and `replay://` (Known Issue #2). Qt Creator with an
 Android or iOS kit is the interactive alternative.
 
 *Android* (this mirrors the `android-build` CI job). On Windows, add

@@ -19,6 +19,7 @@ threads onto the GUI thread.
  ecuio-core (core/)           no Qt, ever
    │  sessions + callbacks · profiles + decode · transports
    ├── mock://    worker thread, scripted drive cycle
+   ├── replay://  worker thread, a recording's frames.csv at its own pace
    └── j2534://   worker thread → loader, which picks a backend:
           ├── in-proc:   vendor DLL loaded into the app (x64 DLLs)
           └── surrogate: client ══ named pipe ══ ecuio-j2534-surrogate.exe
@@ -79,14 +80,26 @@ decode.
 | URI | Transport | Default profile |
 |---|---|---|
 | `mock://[label][?profile=…]` | Mock, on every platform | `mock` |
+| `replay://<recording folder or frames.csv>[?query]` | Replay, on every platform ([ADR-0023](adr/0023-replay-transport.md)) | `raw` |
 | `j2534://[vendor or DLL path][?query]` | J2534, Windows only | `obd2` |
 | any URI with `?profile=raw` | as above | `raw` (log only, no decode) |
 | any URI with `?profile=uds-generic&did=…` | as above | `uds-generic`: the DIDs the URI names, polled or scanned ([ADR-0020](adr/0020-uds-generic.md)) |
 
-Both schemes share one strict query grammar (`core/src/uri_query.h`).
+Every scheme shares one strict query grammar (`core/src/uri_query.h`).
 `ecuio_session_create` splits the query once and refuses any key the
 scheme's transport doesn't take, before anything attaches; `mock://`
-takes only `profile` and `did`, both core's.
+takes only `profile` and `did`, both core's, and `replay://` adds
+`speed` (0.1 to 100, or `max`) and `loop`.
+
+A **replay** plays a recording's `frames.csv` ([ADR-0017](adr/0017-session-recording.md))
+back through the frame API, each frame when the recording's own
+session time over the speed has passed, and stamped with that time.
+It holds only what the bridge received, never the requests, so it's
+passive: no request engine and no link health. Its default profile is
+`raw`, which can't decode a recording wrongly; a recorded J2534
+session decodes under `?profile=obd2` because its defs match replies,
+not requests. The bridge logs "Replay finished" once at the end of the
+file, and the session stays open.
 
 A **profile** is a named signal set ([ADR-0013](adr/0013-protocol-profiles.md)).
 - **Signal defs:** each def says where its value sits in a frame
