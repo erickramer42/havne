@@ -67,8 +67,8 @@ through the ring, from either architecture.
 - A new ioctl needs its own wire form, not a looser whitelist (Known
   Issue #20).
 - The rule that the flow-control length must equal the mask length
-  may be stricter than J2534-1 requires. See BENCH prep in
-  [STATUS.md](../../STATUS.md#bench-prep).
+  may be stricter than J2534-1 requires. See
+  [BENCH prep](../bench-sessions/bench-prep.md) #1.
 - The response struct grew a payload region, and the pipe's length
   checks now catch layout skew between the two build trees, loudly.
   Skew in constant values remains silent (Known Issue #19).

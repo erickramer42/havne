@@ -536,8 +536,10 @@ runtime.
 **To release:**
 
 1. In one commit, set `project(QtTune VERSION X.Y.Z)` in the root
-   `CMakeLists.txt` and add `docs/releases/vX.Y.Z.md`, the release
-   notes. Say what's new, and what's verified at which tier
+   `CMakeLists.txt`, move CHANGELOG.md's "Unreleased" entries under
+   `## [X.Y.Z] - <date>` (and add its compare link at the foot), and
+   add `docs/releases/vX.Y.Z.md`, the release notes, starting from
+   those entries. Say what's new, and what's verified at which tier
    ([testing.md](testing.md)), including what hasn't run on hardware.
 2. Push that commit to `main` and wait for its CI run to pass: the
    release job refuses a commit whose CI hasn't.

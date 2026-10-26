@@ -373,93 +373,12 @@ measurements feed the first item.
 
 ## BENCH prep
 
-These are assumptions in the code that only a real adapter can
-confirm. Each one is a thing to check on the first session with the
-OBDX Pro VX, whose registry entry declares `ISO15765=1`, which makes
-it a genuine connect candidate.
-
-1. **Flow-control filter shape.**
-   - The loader seam requires the flow-control message length to equal
-     the mask length.
-   - Mask, pattern and flow-control messages are bare 4-byte big-endian
-     CAN IDs: the adapter's ISO-TP stack does the framing, so no PCI
-     byte belongs in the flow-control message. The loader seam's
-     length-equality rule is satisfied trivially at 4 bytes.
-   - This SUPERSEDES the 8-byte shape (`[ID][30 00 00][pad]`) the
-     2026-10-16 session accepted.
-   - CONFIRMED 2026-10-20 (no vehicle): the VX accepted the 4-byte
-     shape through a bare `j2534://` URI (obd2-derived channel),
-     `OP_START_FILTER` vendor status 0, filter_id 1
-     ([session note](docs/bench-sessions/2026-10-20.md)), and carried
-     every reply on the first vehicle (2026-10-22).
-2. **Request framing.** The transport writes the LOGICAL message —
-   `[4-byte tx ID][01][PID]`, 6 bytes — with ISO15765_FRAME_PAD, so the
-   adapter adds the ISO-TP PCI byte and zero-pads the CAN frame. Some
-   drivers expect both in-band instead (a 12-byte message); if the VX
-   transmits nothing, this is the first suspect. CONFIRMED 2026-10-22:
-   the first vehicle's engine ECU answered the 6-byte request
-   ([session sheet](docs/bench-sessions/2026-10-22-vehicle.md)).
-3. **No checksum byte.** This is ISO 15765-4 over CAN, so the K-line
-   checksum convention doesn't apply. CONFIRMED 2026-10-22: the VX
-   hands over each reply as the CAN ID and the service data, with no
-   PCI byte, padding or checksum.
-4. **29-bit addressing** is assumed whenever either ID is above
-   `0x7FF`: writes carry `CAN_29BIT_ID`, and the channel connects with
-   it. Unexercised: the first vehicle uses 11-bit IDs.
-5. **Timestamps** are microseconds, as the spec says, and the
-   transport turns them into session time, counting the 32-bit wrap
-   with the host's clock ([j2534.md](docs/j2534.md#session-lifecycle),
-   "Frame time"). CONFIRMED for the VX: on the vehicle, 5,539 stamps
-   over 932 s fit the host clock with a slope of 0.9999993, as its
-   indications did at the bench. The clock doesn't reset at open or
-   connect, wraps 71.6 min after zero, and what sets its zero is
-   unknown ([session sheet](docs/bench-sessions/2026-10-22-vehicle.md)).
-   The wrap came mid-connect on the second vehicle session, and
-   session time ran straight through it, within 15 ms of the host
-   clock ([session sheet](docs/bench-sessions/2026-10-25-vehicle.md)).
-6. **ReadMsgs statuses.** Split in both backends:
-   `ERR_TIMEOUT` is a vehicle timeout, `ERR_BUFFER_EMPTY` is "no
-   frame", and anything else is a hard failure. Frames that
-   arrive with `STATUS_NOERROR` or `ERR_TIMEOUT` are delivered, so a
-   vendor that pairs `ERR_TIMEOUT` with a partial batch loses nothing.
-   Under any other status the count is ignored, because a vendor may
-   leave it untouched on error (`6420f09`). Observed on the VX
-   (2026-10-22, no vehicle): an empty read returns `ERR_BUFFER_EMPTY`
-   and a short batch `STATUS_NOERROR`, both after the read's full
-   timeout. Its TX indications arrive in those batches and are dropped
-   before counting
-   ([session note](docs/bench-sessions/2026-10-22.md)). On the
-   vehicle every reply came with `STATUS_NOERROR`, and no read
-   returned `ERR_TIMEOUT`
-   ([session sheet](docs/bench-sessions/2026-10-22-vehicle.md)).
-7. **Struct-layout conformance to v04.04**
-   ([ADR-0010](docs/adr/0010-j2534-v0404-shared-types.md)). CONFIRMED
-   2026-10-22 for the VX: replies decode correctly on a vehicle.
-8. **Vendor ioctl and filter behavior** and timeout semantics.
-   Observed on the VX (2026-10-22, no vehicle): reads run their full
-   timeout unless the batch fills. Writes sent with timeout 0 are
-   accepted three deep with nothing on the bus to acknowledge them,
-   each with a `TX_INDICATION`; the fourth and every later write
-   blocks about 0.5 s and returns `ERR_FAILED`, until a new connect.
-   Filter start and stop and disconnect return status 0 at once
-   ([session note](docs/bench-sessions/2026-10-22.md)). On the vehicle
-   every write returned status 0, with the ignition off too. The one
-   ioctl the transport issues, `READ_VBATT` at connect, is item 10.
-9. **Export-name conformance.** RESOLVED 2026-10-16, contrary to
-   expectations: the OBDX Pro VX exports the SPEC spelling
-   (`PassThruIoctl`, J2534-1_0500 §7.3.19; all v04.04-era references
-   agree) — this project's `PassThruIoCtl` string was the divergence.
-   Both backends try the spec spelling first, with the legacy spelling
-   as fallback, pinned in both directions by the two fakes.
-10. **The session info's readings**
-    ([ADR-0019](docs/adr/0019-session-info.md)). Each connect asks the
-    device for `READ_VBATT` and `PassThruReadVersion`, and the
-    activity log's "Session:" line shows the answers. CONFIRMED
-    2026-10-25 for the VX: it answers both; the voltage is in
-    millivolts, 0.0 V on USB power alone and within 0.1 V of the ECU's
-    own reading (PID 0x42) on the car; the versions read
-    `FW:1.0.1.0 HW:1.0.0.0`, DLL `1.8.9586.12845`, API `04.04`
-    ([session sheet](docs/bench-sessions/2026-10-25-vehicle.md)).
+The assumptions in the J2534 code that only real hardware can confirm,
+each with its evidence, are in
+[docs/bench-sessions/bench-prep.md](docs/bench-sessions/bench-prep.md);
+every session walks it. Items 1–3 and 5–10 are settled for the OBDX Pro VX.
+Open: #4 (29-bit addressing, unexercised on the 11-bit car), what
+sets the VX clock's zero (#5), and every item for any other adapter.
 
 ## Known issues and technical debt
 

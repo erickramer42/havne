@@ -315,6 +315,8 @@ Detail and gaps: [testing.md](testing.md).
 | How the J2534 stack works, op by op | [j2534.md](j2534.md) |
 | How to build, run tests, read CI, troubleshoot | [development.md](development.md) |
 | What is verified, by which test, and the known gaps | [testing.md](testing.md) |
+| What changed in each release | [CHANGELOG.md](../CHANGELOG.md) |
 | How it got here, and the lessons along the way | [engineering-log.md](engineering-log.md) |
 | Real-hardware sessions and run sheets | [bench-sessions/](bench-sessions/bench-runsheet.md) |
+| What only real hardware can confirm, and what it has | [bench-sessions/bench-prep.md](bench-sessions/bench-prep.md) |
 | Safety and legal caveats | [DISCLAIMER.md](../DISCLAIMER.md) |

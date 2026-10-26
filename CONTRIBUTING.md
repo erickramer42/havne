@@ -187,7 +187,8 @@ Keep commits terse — subject line says what, a short body says why, and
    rest of the code carries, describing how your change is tested and at what
    tier.
 4. Update what the change touches: STATUS.md test counts, docs/testing.md,
-   and an engineering-log row if the change taught a lesson. Files that must
+   a line under CHANGELOG.md's "Unreleased" if a user would notice the
+   change, and an engineering-log row if the change taught a lesson. Files that must
    change together are named in docs/architecture.md (the mock encoder and
    its signal defs; the `obd2` defs and the fake DLL's canned replies).
 5. Rebase onto the target branch before requesting review; merge commits are

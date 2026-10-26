@@ -61,4 +61,4 @@ After Part 4 the vendor-call relay works through both backends, but
   mock signal set (Known Issue #21), so an OBD-II PID signal set is
   the next step.
 - Several framing choices are assumptions until a real device answers.
-  They are listed in BENCH prep in [STATUS.md](../../STATUS.md#bench-prep).
+  They are listed in [BENCH prep](../bench-sessions/bench-prep.md).

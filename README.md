@@ -250,7 +250,9 @@ build and test a change.
 | [docs/testing.md](docs/testing.md) | Test tiers, suites, what is and isn't verified |
 | [docs/j2534.md](docs/j2534.md) | How the J2534 transport works |
 | [docs/adr/](docs/adr/README.md) | Architecture decision records |
+| [CHANGELOG.md](CHANGELOG.md) | What changed in each release |
 | [docs/engineering-log.md](docs/engineering-log.md) | Milestone history and lessons learned |
+| [docs/bench-sessions/](docs/bench-sessions/bench-prep.md) | Real-hardware sessions, their run sheets, and the assumptions only hardware can confirm |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | Reporting bugs, the rules a change must respect, testing and pull requests |
 
 ## License

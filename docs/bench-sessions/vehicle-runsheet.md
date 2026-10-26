@@ -343,7 +343,7 @@ ignition-on.
 | "Disconnecting…" lasts seconds | A wedged adapter. The teardown runs off the GUI thread and gives up after about 6 s. Note how long (the `Disconnecting:` and `Disconnected:` lines bracket it) and whether the session log says `child unresponsive`. A frozen window is a bug: capture the session log |
 | App crashes | Abort. Copy the session logs (`%TEMP%\ecuio-surrogate*.log`) before relaunching |
 
-## Evidence against the BENCH prep list
+## Evidence against the [BENCH prep list](bench-prep.md)
 
 | Prep item | What settles it |
 |---|---|
@@ -384,7 +384,7 @@ ignition-on.
    account name). A recording that becomes a replay fixture keeps only
    its `frames.csv`, with every row whose data starts `49 ` or `62 F1`
    removed
-2. Walk the [BENCH prep list](../../STATUS.md#bench-prep): mark each
+2. Walk the [BENCH prep list](bench-prep.md): mark each
    item CONFIRMED / REFUTED (with evidence) / STILL UNKNOWN
 3. Update STATUS.md, the testing.md Vehicle tier and gaps, and any open
    item the session settles

@@ -155,7 +155,7 @@ and abort conditions.
    `docs/bench-sessions/<date>.md` and a log file beside it. Scrub
    them first: no names or account names, and no local paths
    (`%TEMP%` and `C:\Users\…` paths carry the account name)
-2. Walk the [BENCH prep list](../../STATUS.md#bench-prep) and mark what
+2. Walk the [BENCH prep list](bench-prep.md) and mark what
    the session confirms or contradicts, with evidence
 3. A contradicted item becomes a known issue or a fix, by severity
 4. Update the testing.md BENCH tier and gaps, and STATUS.md

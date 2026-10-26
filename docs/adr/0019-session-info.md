@@ -130,7 +130,7 @@ version reading".
   (`GET_CONFIG`).
 - Neither reading has been seen on a real adapter. The next BENCH
   session records the VX's answers
-  ([STATUS.md](../../STATUS.md#bench-prep), item 10).
+  ([BENCH prep](../bench-sessions/bench-prep.md) #10).
 - The fake vendor DLL exports `PassThruReadVersion`, through
   `fake_j2534.def` alone, so the legacy fixture lacks it. It refuses
   either reading on request (`ECUIO_FAKE_VBATT_STATUS`,
