@@ -173,6 +173,8 @@ TestCase {
               text: "Requests failing — check the vehicle connection and ignition" },
             { tag: "fault", state: "fault", episodes: 3, code: 0,
               text: "Adapter fault — 3 episode(s), retrying with backoff" },
+            { tag: "stopped", state: "stopped", episodes: 1, code: 16,
+              text: "Replay stopped — the recording changed after it was opened" },
             { tag: "degraded", state: "degraded", episodes: 0, code: 42,
               text: "Link degraded (error 42)" },
             { tag: "unknown", state: "a later state", episodes: 0, code: 43,

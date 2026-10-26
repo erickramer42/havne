@@ -75,6 +75,8 @@ Page {
         case "quiet":    return qsTr("Vehicle not responding — quiet bus; check the ignition")
         case "requests": return qsTr("Requests failing — check the vehicle connection and ignition")
         case "fault":    return qsTr("Adapter fault — %1 episode(s), retrying with backoff").arg(episodes)
+        // A replay's file changed under it (ADR-0023): nothing more will come
+        case "stopped":  return qsTr("Replay stopped — the recording changed after it was opened")
         default:         return qsTr("Link degraded (error %1)").arg(errorCode)
         }
     }

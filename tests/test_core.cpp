@@ -226,6 +226,8 @@ TEST(CoreTest, StatusStringValidValues) {
     EXPECT_STREQ(ecuio_status_string(ECUIO_ERR_UNKNOWN_PROFILE), "unknown profile");
     EXPECT_STREQ(ecuio_status_string(ECUIO_ERR_VENDOR_REFUSED), "the adapter's driver refused");
     EXPECT_STREQ(ecuio_status_string(ECUIO_ERR_SURROGATE_FAILED), "surrogate process failed");
+    EXPECT_STREQ(ecuio_status_string(ECUIO_ERR_RECORDING_CHANGED),
+                 "the recording changed after it was opened");
     EXPECT_STREQ(ecuio_status_string(ECUIO_ERR_VEHICLE_TIMEOUT),
                  "vehicle not responding (timeout)");
 
@@ -2152,6 +2154,13 @@ TEST(CoreTest, ReplaySendsTheRecordedFramesAtTheirRebasedTimes)
     EXPECT_EQ(info.flags & ECUIO_SESSION_INFO_REPLAY_LOOP, 0u);
     EXPECT_EQ(info.channel_count, 0u) << "passive";
     EXPECT_STREQ(info.profile, "raw") << "replay's default";
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    int32_t last = -1;
+    uint32_t episodes = 99;
+    ASSERT_EQ(ecuio_session_get_error_state(session, &last, &episodes),
+              ECUIO_OK);
+    EXPECT_EQ(last, ECUIO_OK) << "the end of the file isn't an error";
+    EXPECT_EQ(episodes, 0u);
     ASSERT_EQ(ecuio_session_close(session), ECUIO_OK);
 
     ASSERT_EQ(cap.frames.size(), 3u)
@@ -2305,8 +2314,47 @@ TEST(CoreTest, ReplayStopsAtARowThatTurnedBadAfterAttach)
               ECUIO_OK);
     ASSERT_EQ(ecuio_session_start(session), ECUIO_OK);
     ASSERT_TRUE(wait_for([&] { return cap.count() >= 3; }, 2000));
+    int32_t last = ECUIO_OK;
+    uint32_t episodes = 0;
+    ASSERT_TRUE(wait_for(
+        [&] {
+            ecuio_session_get_error_state(session, &last, &episodes);
+            return last != ECUIO_OK;
+        },
+        2000));
+    EXPECT_EQ(last, ECUIO_ERR_RECORDING_CHANGED) << "says why it stopped";
+    EXPECT_EQ(episodes, 1u);
     std::this_thread::sleep_for(std::chrono::milliseconds(100));
     EXPECT_EQ(cap.count(), 3u) << "nothing past the bad row";
+    ASSERT_EQ(ecuio_session_close(session), ECUIO_OK);
+    ecuio_session_destroy(session);
+}
+
+/* A recording deleted between attach and start: nothing to play, and the
+ * error state says so */
+TEST(CoreTest, ReplayOfARecordingThatWentAwaySaysSo)
+{
+    TempRecording rec(paced_rows(3));
+    ecuio_session_t* session = nullptr;
+    ASSERT_EQ(ecuio_session_create(rec.uri("?speed=max").c_str(), &session),
+              ECUIO_OK)
+        << ecuio_last_error_detail();
+    ASSERT_EQ(std::remove(rec.csv.c_str()), 0);
+    ReplayCapture cap;
+    ASSERT_EQ(ecuio_register_frame_callback(session, replay_capture_cb, &cap),
+              ECUIO_OK);
+    ASSERT_EQ(ecuio_session_start(session), ECUIO_OK);
+    int32_t last = ECUIO_OK;
+    uint32_t episodes = 0;
+    ASSERT_TRUE(wait_for(
+        [&] {
+            ecuio_session_get_error_state(session, &last, &episodes);
+            return last != ECUIO_OK;
+        },
+        2000));
+    EXPECT_EQ(last, ECUIO_ERR_RECORDING_CHANGED);
+    EXPECT_EQ(episodes, 1u);
+    EXPECT_EQ(cap.count(), 0u);
     ASSERT_EQ(ecuio_session_close(session), ECUIO_OK);
     ecuio_session_destroy(session);
 }

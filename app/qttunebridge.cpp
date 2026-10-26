@@ -1134,6 +1134,13 @@ void QtTuneBridge::pollLinkHealth()
     } else if (last_error == ECUIO_ERR_TRANSPORT_HARD_FAILURE) {
         emit logMessage(QStringLiteral("Link: adapter fault (%1 episode(s))")
                             .arg(m_errorEpisodes));
+    } else if (last_error == ECUIO_ERR_RECORDING_CHANGED) {
+        // Stopped, not finished: pollReplayEnd stays quiet. The worker
+        // counted every frame it sent before it published the code.
+        m_replayEndLogged = true;
+        emit logMessage(QStringLiteral("Replay stopped after %1 frames: the recording "
+                                       "changed after it was opened")
+                            .arg(m_framesDelivered.load(std::memory_order_relaxed)));
     }
     emit linkStateChanged();
 }
@@ -1402,6 +1409,7 @@ QString QtTuneBridge::linkStateForError(int32_t errorCode)
         case ECUIO_ERR_VEHICLE_TIMEOUT:        return QStringLiteral("quiet");
         case ECUIO_ERR_REQUEST_FAILED:         return QStringLiteral("requests");
         case ECUIO_ERR_TRANSPORT_HARD_FAILURE: return QStringLiteral("fault");
+        case ECUIO_ERR_RECORDING_CHANGED:      return QStringLiteral("stopped");
         default: return QStringLiteral("degraded"); /* forward-compatible */
     }
 }

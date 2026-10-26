@@ -244,6 +244,7 @@ const char* ecuio_status_string(ecuio_status_t status)
         case ECUIO_ERR_UNKNOWN_PROFILE:         return "unknown profile";
         case ECUIO_ERR_VENDOR_REFUSED:          return "the adapter's driver refused";
         case ECUIO_ERR_SURROGATE_FAILED:        return "surrogate process failed";
+        case ECUIO_ERR_RECORDING_CHANGED:       return "the recording changed after it was opened";
         default:                                return "unknown status";
     }
 }

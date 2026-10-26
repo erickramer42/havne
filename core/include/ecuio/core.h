@@ -123,6 +123,9 @@ typedef enum {
     ECUIO_ERR_SURROGATE_FAILED = 15,  /* the surrogate process that hosts an
                                          x86 adapter DLL couldn't start, or
                                          stopped answering */
+    ECUIO_ERR_RECORDING_CHANGED = 16, /* a replay stopped early: its
+                                         frames.csv changed or went away
+                                         after the session opened it */
 
     /* Append-only rule: new codes go HERE, never renumber */
 } ecuio_status_t;
@@ -225,10 +228,14 @@ ecuio_status_t ecuio_unregister_frame_callback(
  *                                     for about 1 s
  *   ECUIO_ERR_REQUEST_FAILED          writes fail while reads stay clean
  *   ECUIO_ERR_TRANSPORT_HARD_FAILURE  reads fail
+ *   ECUIO_ERR_RECORDING_CHANGED       a replay stopped before the end of
+ *                                     its file (set once; the session
+ *                                     stays open and sends nothing more)
  * Treat any other value as degraded: later cores may append codes.
- * error_count counts episodes, each entry into a request failure or a
- * hard failure. Callable from any thread. The mock transport never sets
- * them. */
+ * error_count counts episodes, each entry into a request failure, a hard
+ * failure or a replay's early stop. Callable from any thread. The mock
+ * transport never sets them; a replay that reaches the end of its file
+ * leaves them at ECUIO_OK and 0. */
 ecuio_status_t ecuio_session_get_error_state(
     ecuio_session_t* session,
     int32_t* out_last_error,

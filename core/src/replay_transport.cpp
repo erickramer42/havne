@@ -2,17 +2,19 @@
 // Testing: UNIT — CoreTest.Replay* (the reader's refusals with their line
 //          numbers, either line ending, a whole-message payload, pacing at
 //          speed 1 and 10, late frames catching up with no drift, stamps
-//          rebased and never decreasing, the
-//          backward-step fallback, loop and end of file, the query);
+//          rebased and never decreasing, the backward-step fallback, loop
+//          and end of file, an early stop's error state, the query);
 //          BridgeTest.ReplayOfAMockRecordingDecodesWhatWasRecorded (the
-//          round trip through SessionRecorder);
+//          round trip through SessionRecorder), .ReplayThatStopsEarlySaysSo;
 //          CoreTest.ReplayOfTheVehicleFixtureDecodesTheSheetsValues
 //
 // replay:// (ADR-0023): a recording's frames.csv (ADR-0017) played back
 // through the frame API. Attach reads the whole file once and refuses a
 // bad row with its line number; the worker reads it again a row at a time
 // and sends each frame when the recording's own session time, divided by
-// the speed, has passed. Passive: no requests, no link health.
+// the speed, has passed. Passive: no requests and no link health, except
+// that a file changed since attach stops playback with
+// ECUIO_ERR_RECORDING_CHANGED in the error state.
 
 #include "ecuio/core.h"
 #include "ecuio/internal.h"
@@ -22,6 +24,7 @@
 
 #ifdef _WIN32
 #include "win_utf8.h"
+#include <share.h>
 #endif
 
 #include <atomic>
@@ -83,11 +86,13 @@ struct native_path {
         return true;
 #endif
     }
+    /* Shared for reading and writing, as fopen is elsewhere: playing a
+     * recording never locks it against the app or the user (_wfopen_s
+     * would), and a file changed under it is ECUIO_ERR_RECORDING_CHANGED */
     FILE* open() const
     {
 #ifdef _WIN32
-        FILE* f = nullptr;
-        return _wfopen_s(&f, wide.data(), L"rb") == 0 ? f : nullptr;
+        return _wfsopen(wide.data(), L"rb", _SH_DENYNO);
 #else
         return std::fopen(narrow.c_str(), "rb");
 #endif
@@ -331,6 +336,16 @@ struct ecuio_replay_transport {
 
 namespace {
 
+/* The file isn't the one attach checked (a row that no longer parses, or
+ * a file that won't open again): published through the error state, one
+ * episode, so the app can say why playback stopped. The count goes first,
+ * so a reader that sees the code sees its episode. */
+void stop_early(ecuio_replay_transport* t)
+{
+    t->session->error_count.fetch_add(1);
+    t->session->last_error.store(ECUIO_ERR_RECORDING_CHANGED);
+}
+
 /* Sends the file's frames, paced by their session time over the speed;
  * on loop=1 again from the top, its stamps carried on past the last */
 void replay_worker(ecuio_replay_transport* t)
@@ -344,7 +359,8 @@ void replay_worker(ecuio_replay_transport* t)
         if (f == nullptr || !read_header(f, buf)) {
             if (f != nullptr)
                 std::fclose(f);
-            return; /* checked at attach; changed since */
+            stop_early(t);
+            return;
         }
         row prev, cur;
         uint64_t pass_us = 0;
@@ -354,7 +370,8 @@ void replay_worker(ecuio_replay_transport* t)
             *frame = ecuio_frame_t{};
             if (too_long || !parse_row(buf.data(), &cur, frame, &why)) {
                 std::fclose(f);
-                return; /* checked at attach; changed since */
+                stop_early(t);
+                return;
             }
             if (!first)
                 pass_us += step_us(prev, cur);

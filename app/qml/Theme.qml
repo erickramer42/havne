@@ -79,7 +79,8 @@ QtObject {
         switch (state) {
         case "ok":              return success
         case "quiet":
-        case "requests":        return warning
+        case "requests":
+        case "stopped":         return warning
         case "disconnected":    return textDim
         default:                return danger
         }
@@ -95,6 +96,7 @@ QtObject {
         case "fault":           return qsTr("Adapter fault")
         case "requests":        return qsTr("Requests failing")
         case "quiet":           return qsTr("Link quiet")
+        case "stopped":         return qsTr("Replay stopped")
         case "disconnected":    return qsTr("No session")
         default:                return qsTr("Link degraded")
         }

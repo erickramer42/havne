@@ -2328,7 +2328,55 @@ TEST(BridgeTest, LinkStateMapsEveryPublishedCode)
     EXPECT_EQ(QtTuneBridge::linkStateForError(ECUIO_ERR_VEHICLE_TIMEOUT), QStringLiteral("quiet"));
     EXPECT_EQ(QtTuneBridge::linkStateForError(ECUIO_ERR_REQUEST_FAILED), QStringLiteral("requests"));
     EXPECT_EQ(QtTuneBridge::linkStateForError(ECUIO_ERR_TRANSPORT_HARD_FAILURE), QStringLiteral("fault"));
+    EXPECT_EQ(QtTuneBridge::linkStateForError(ECUIO_ERR_RECORDING_CHANGED), QStringLiteral("stopped"));
     EXPECT_EQ(QtTuneBridge::linkStateForError(static_cast<ecuio_status_t>(999)), QStringLiteral("degraded"));
+}
+
+/* A replay whose recording changes under it stops, and the bridge says
+ * why: the "stopped" state and one log line with the frames sent, never
+ * "Replay finished". The file is rewritten while it loops, so the next
+ * pass (or the one under way) meets a row it can't read. */
+TEST(BridgeTest, ReplayThatStopsEarlySaysSo)
+{
+    QTemporaryDir dir;
+    ASSERT_TRUE(dir.isValid());
+    const QString csv = dir.filePath(QStringLiteral("frames.csv"));
+    const auto write = [&csv](const QByteArray& text) {
+        QFile f(csv);
+        return f.open(QIODevice::WriteOnly | QIODevice::Truncate) &&
+               f.write(text) == text.size();
+    };
+    QByteArray rows = "host_us,timestamp_us,id,flags,data\n";
+    for (int i = 0; i < 5; ++i) {
+        rows += QByteArray::number(10000 * i) + ',' + QByteArray::number(10000 * i) +
+                ",0x7E8,0x0,41 0C 1F 40\n";
+    }
+    ASSERT_TRUE(write(rows));
+
+    QtTuneBridge bridge;
+    QStringList log;
+    QObject::connect(&bridge, &QtTuneBridge::logMessage,
+                     [&log](const QString& line) { log << line; });
+    ASSERT_TRUE(bridge.connectSession(QStringLiteral("replay://") + csv +
+                                      QStringLiteral("?loop=1"))
+                    .isEmpty())
+        << log.join('\n').toStdString();
+    EXPECT_EQ(bridge.linkState().toStdString(), "ok");
+    ASSERT_TRUE(write("host_us,timestamp_us,id,flags,data\nnot a row\n"));
+
+    ASSERT_TRUE(spinUntil([&bridge]() { return bridge.linkState() == QStringLiteral("stopped"); },
+                          5000))
+        << log.join('\n').toStdString();
+    EXPECT_EQ(bridge.linkErrorCode(), static_cast<int>(ECUIO_ERR_RECORDING_CHANGED));
+    EXPECT_EQ(bridge.errorEpisodes(), 1);
+    spinLoop(300);
+    const QStringList stopped = log.filter(QStringLiteral("Replay stopped after "));
+    ASSERT_EQ(stopped.size(), 1) << log.join('\n').toStdString();
+    EXPECT_TRUE(stopped.first().endsWith(
+        QStringLiteral(" frames: the recording changed after it was opened")))
+        << stopped.first().toStdString();
+    EXPECT_TRUE(log.filter(QStringLiteral("Replay finished")).isEmpty());
+    ASSERT_TRUE(disconnectAndWait(bridge));
 }
 
 /* ADR-0023's round trip: a recorded mock session, replayed at full speed
