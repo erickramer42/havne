@@ -3,7 +3,8 @@
 //          Theme.seriesColors, dashes past the palette), each row's
 //          swatch under mock://demo, filled while plotted and hollow
 //          while not, a text row under uds-generic (the mock answering
-//          its DIDs), and the link banner's message for every state.
+//          its DIDs), the list giving up rows so the chart stays whole
+//          on a short page, and the link banner's message for every state.
 //          The banner on screen in each state is tst_linkhealth.qml's.
 
 import QtQuick
@@ -47,6 +48,42 @@ TestCase {
         const s = findChild(list.itemAtIndex(row), "swatch")
         verify(s, "row " + row + " has a swatch")
         return s
+    }
+
+    Component {
+        id: sizedPageComponent
+        LiveViewPage {}
+    }
+
+    // On a short page (a small window, a large zoom) the list gives up
+    // rows, down to one, so the chart stays whole on the page at its
+    // minimum height or more; a tall page shows every row
+    function test_chartStaysOnAShortPage_data() {
+        return [{ tag: "330", h: 330 }, { tag: "450", h: 450 },
+                { tag: "600", h: 600 }, { tag: "1000", h: 1000 }]
+    }
+
+    function test_chartStaysOnAShortPage(data) {
+        const page = createTemporaryObject(sizedPageComponent, testCase,
+                                           { width: 800, height: data.h })
+        compare(Bridge.connectSession("mock://demo"), "", "mock://demo connects")
+        const list = findChild(page, "signalList")
+        const chart = findChild(page, "chartFrame")
+        verify(list.count > 3, "the mock set has more rows than a short page holds")
+        // The layout settles after the connect fills the list
+        const bottom = () => chart.mapToItem(page, 0, chart.height).y
+        const settled = () => list.height >= page.rowHeight - 0.5
+                              && chart.height >= page.chartMinHeight - 0.5
+                              && bottom() <= page.height - Theme.pageMargin + 0.5
+        let ok = settled()
+        for (let i = 0; i < 20 && !ok; ++i) {
+            wait(50)
+            ok = settled()
+        }
+        verify(ok, "list " + list.height + " (one row at least), chart " + chart.height
+               + " (its minimum at least), ending at " + bottom() + " of " + page.height)
+        if (data.h === 1000)
+            compare(list.height, list.count * page.rowHeight, "every row shows")
     }
 
     function test_colorComesFromTheRow() {

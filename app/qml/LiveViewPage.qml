@@ -2,7 +2,8 @@
 // Testing: model contract covered by test_bridge; swatch colors, dashes
 //          and banner text by test_qml (tests/qml/tst_liveview.qml, and
 //          tst_linkhealth.qml for the banner in each link state), which
-//          finds items by objectName; the strip chart's layout (ranges,
+//          finds items by objectName, and the list giving up rows so the
+//          chart stays whole on a short page; the strip chart's layout (ranges,
 //          lanes, gaps, ticks, labels) by tst_chartlayout.qml through
 //          ChartLayout; the drawing itself, sharp under zoom, is verified
 //          manually (docs/testing.md).
@@ -23,6 +24,9 @@ Page {
     signal connectRequested()
 
     readonly property int rowHeight: 44
+    // The strip chart's least height; the list gives up rows before the
+    // chart goes below it
+    readonly property int chartMinHeight: 120
 
     // Theme.staleMs: a row that old dims, and the chart breaks its trace
     // across the gap instead of drawing a ramp
@@ -131,18 +135,25 @@ Page {
             }
         }
 
-        // Sized to its rows, capped so the chart keeps the rest of the
-        // page; past the cap it scrolls, with the bar pinned on so the
-        // hidden rows are visible as such.
+        // Sized to its rows, capped at about half the page and at what
+        // the chart's minimum leaves below it, so on a short page (a
+        // small window, a large zoom) the list gives up rows, down to
+        // one, and the chart stays whole on the page; past the cap it
+        // scrolls, with the bar pinned on so the hidden rows are visible
+        // as such. y is the list's top, which only the rows above set.
         ListView {
             id: signalList
             objectName: "signalList"
             readonly property bool overflows: contentHeight > height
+            readonly property real oneRow: Math.min(count, 1) * root.rowHeight
+            readonly property real roomAbove: column.height - y - column.spacing - root.chartMinHeight
 
             Layout.fillWidth: true
             Layout.preferredHeight: count * root.rowHeight
-            Layout.maximumHeight: Math.max(3 * root.rowHeight, column.height * 0.55)
-            Layout.minimumHeight: Math.min(count, 3) * root.rowHeight
+            Layout.maximumHeight: Math.max(oneRow, Math.min(Math.max(3 * root.rowHeight,
+                                                                     column.height * 0.55),
+                                                            roomAbove))
+            Layout.minimumHeight: oneRow
             clip: true
             boundsBehavior: Flickable.StopAtBounds
             model: Bridge.signalModel
@@ -244,9 +255,10 @@ Page {
         // (root.seriesColor), so the list is the legend. ChartLayout
         // works out where everything goes; the Canvas strokes it.
         Rectangle {
+            objectName: "chartFrame"
             Layout.fillWidth: true
             Layout.fillHeight: true
-            Layout.minimumHeight: 120
+            Layout.minimumHeight: root.chartMinHeight
             color: Theme.surface
             radius: 4
             border.color: Theme.textDim
