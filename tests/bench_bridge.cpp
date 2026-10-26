@@ -3,16 +3,17 @@
 //          with ctest. docs/testing.md ("Decode cost per frame") records
 //          its results and how to run it.
 //
-// The GUI thread's cost per frame through the bridge, by the number of
-// defs in the session's profile: what the backlog's decoding-on-the-
-// worker item (STATUS.md, Performance) would remove, measured before it
-// is built. Frames are queued as the worker queues them
-// (dispatchFrameForTesting), then the drain is timed: the queued call,
-// the frame log, the match against every def, the decode and staging.
-// Recording is off. A raw session (no defs) is the baseline. Beside
-// it: the worker's side of each frame (onFrame, the frame's copy and
-// the queued call, run here on the bench's thread) and one coalesce
-// tick's SignalListModel::updateValues for a model of N rows.
+// Each thread's cost per frame through the bridge, by the number of
+// defs in the session's profile (ADR-0024: core decodes on the worker).
+// Frames are queued as the worker queues them (dispatchFrameForTesting),
+// then the GUI thread's drain is timed: the queued call, the frame log
+// and the counters. Recording is off. Beside it, the worker's side,
+// run here on the bench's thread: onFrame (the frame's copy and the
+// queued call); core's match and decode into a batch
+// (ecuio_session_dispatch_callbacks on a session of its own, to a
+// values callback that does nothing); and the bridge's staging of that
+// batch (onValues). Then one coalesce tick's SignalListModel::
+// updateValues for a model of N rows.
 //
 // Then the committed engine-start recording replayed under obd2 at
 // speed=max and 10 (the load test ADR-0023 and ADR-0024 name): the
@@ -39,6 +40,7 @@
 #include <vector>
 
 #include "qttunebridge.h"
+#include "ecuio/internal.h"   /* ecuio_session_dispatch_callbacks */
 #include "ecuio/profile.h"
 #include "ecuio/signals.h"
 
@@ -141,6 +143,77 @@ PerFrame measure(const QString& uri, int frames, int ids)
     std::sort(workers.begin(), workers.end());
     median.worker = workers[workers.size() / 2];
     return median;
+}
+
+// Microseconds per frame on the worker for the values path: core's match
+// and decode into a batch, and the bridge's staging of it (onValues),
+// told apart by dispatching once to a values callback that does nothing
+// and once to one that hands the batch to a connected bridge
+struct ValuesPath {
+    double decode = 0.0;
+    double stage = 0.0;
+};
+
+void ignoreValues(const ecuio_value_batch_t*, void*) {}
+
+void forwardValues(const ecuio_value_batch_t* batch, void* bridge)
+{
+    static_cast<QtTuneBridge*>(bridge)->dispatchValuesForTesting(*batch);
+}
+
+double dispatchMicros(ecuio_session_t* session, int frames, int ids)
+{
+    ecuio_frame_t f{};
+    f.data_length = 8;
+    const auto t0 = std::chrono::steady_clock::now();
+    for (int i = 0; i < frames; ++i) {
+        f.arbitration_id = kFirstId + static_cast<uint32_t>(ids > 0 ? i % ids : 0);
+        f.timestamp_us = static_cast<uint64_t>(i);
+        for (int b = 0; b < 8; ++b)
+            f.data[b] = static_cast<uint8_t>(i + b);
+        ecuio_session_dispatch_callbacks(session, &f);
+    }
+    return std::chrono::duration<double, std::micro>(
+               std::chrono::steady_clock::now() - t0)
+               .count() /
+           frames;
+}
+
+ValuesPath valuesMicros(const QString& uri, int frames, int ids)
+{
+    std::vector<double> decode, both;
+    for (int r = 0; r < kRuns; ++r) {
+        const QByteArray uri8 = uri.toUtf8();
+        ecuio_session_t* session = nullptr;
+        if (ecuio_session_create(uri8.constData(), &session) != ECUIO_OK) {
+            std::fprintf(stderr, "create %s failed\n", qPrintable(uri));
+            std::exit(1);
+        }
+        ecuio_register_values_callback(session, ignoreValues, nullptr);
+        decode.push_back(dispatchMicros(session, frames, ids));
+        ecuio_unregister_values_callback(session, ignoreValues, nullptr);
+
+        // The bridge's own session runs the same profile, so it knows the
+        // ids; its mock frames match none of them
+        QtTuneBridge bridge;
+        bridge.setValueSampleLimitForTesting(frames * kDefsPerId);
+        if (!bridge.connectSession(uri).isEmpty()) {
+            std::fprintf(stderr, "connect %s failed\n", qPrintable(uri));
+            std::exit(1);
+        }
+        ecuio_register_values_callback(session, forwardValues, &bridge);
+        both.push_back(dispatchMicros(session, frames, ids));
+        ecuio_session_destroy(session);
+        bridge.disconnectSession();
+        while (bridge.disconnecting())
+            QCoreApplication::processEvents();
+    }
+    std::sort(decode.begin(), decode.end());
+    std::sort(both.begin(), both.end());
+    ValuesPath out;
+    out.decode = decode[decode.size() / 2];
+    out.stage = both[both.size() / 2] - out.decode;
+    return out;
 }
 
 // Microseconds for one coalesce tick's update of a model of n rows with
@@ -250,17 +323,16 @@ int main(int argc, char** argv)
     QCoreApplication app(argc, argv);
     const int frames = argc > 1 ? std::max(1000, std::atoi(argv[1])) : 20000;
 
-    std::printf("%d frames a run, median of %d runs; us a frame on the GUI "
-                "thread (drain) and the worker's side (onFrame); us a tick "
-                "for the model's update\n",
+    std::printf("%d frames a run, median of %d runs. us a frame: the GUI "
+                "thread's drain; on the worker, onFrame, core's decode and "
+                "the bridge's staging; us a tick for the model's update\n",
                 frames, kRuns);
-    std::printf("%6s  %10s  %12s  %14s  %10s  %10s\n", "defs", "us/frame",
-                "decode us", "max frames/s", "worker us", "tick us");
+    std::printf("%6s  %10s  %10s  %10s  %10s  %10s\n", "defs", "GUI us",
+                "onFrame us", "decode us", "stage us", "tick us");
 
     const PerFrame rawRun = measure("mock://bench?profile=raw", frames, 0);
-    const double raw = rawRun.drain;
-    std::printf("%6s  %10.2f  %12s  %14.0f  %10.2f  %10s\n", "raw", raw, "-",
-                1e6 / raw, rawRun.worker, "-");
+    std::printf("%6s  %10.2f  %10.2f  %10s  %10s  %10s\n", "raw", rawRun.drain,
+                rawRun.worker, "-", "-", "-");
 
     for (int n : {9, 50, 100, 250, 500, 1000}) {
         std::vector<ecuio_signal_def_t> defs = makeDefs(n);
@@ -276,11 +348,12 @@ int main(int argc, char** argv)
             return 1;
         }
         const int ids = (n + kDefsPerId - 1) / kDefsPerId;
-        const PerFrame run = measure(
-            QString("mock://bench?profile=%1").arg(name.c_str()), frames, ids);
-        const double us = run.drain;
-        std::printf("%6d  %10.2f  %12.2f  %14.0f  %10.2f  %10.1f\n", n, us,
-                    us - raw, 1e6 / us, run.worker, tickMicros(set));
+        const QString uri = QString("mock://bench?profile=%1").arg(name.c_str());
+        const PerFrame run = measure(uri, frames, ids);
+        const ValuesPath values = valuesMicros(uri, frames, ids);
+        std::printf("%6d  %10.2f  %10.2f  %10.2f  %10.2f  %10.1f\n", n,
+                    run.drain, run.worker, values.decode, values.stage,
+                    tickMicros(set));
         ecuio_profile_unregister(name.c_str());
     }
 

@@ -16,11 +16,13 @@
 #include <QUrl>
 
 #include <atomic>
+#include <mutex>
 #include <thread>
 #include <utility>
 #include <vector>
 
 #include "ecuio/core.h"
+#include "ecuio/profile.h"
 #include "ecuio/signals.h"
 #include "sessionrecorder.h"
 
@@ -140,9 +142,9 @@ public:
     void setSignalSet(const ecuio_signal_set_t* set);
     // timestampMs < 0  => stamp from the internal clock (production path:
     // coalesce-drain time, ~100 ms resolution).
-    // timestampMs >= 0  => use as-is (tests inject deterministic values; this
-    // is also the seam for per-sample frame timestamps once decode moves to
-    // the worker side under J2534).
+    // timestampMs >= 0  => use as-is (tests inject deterministic values).
+    // Values reach the bridge with their frame's session time (ADR-0024);
+    // the chart doesn't use it yet.
     // Every row updates, subscribed or not: a subscription only chooses
     // what chartData() plots, and the Dashboard reads every signal.
     void updateValues(const std::vector<std::pair<uint16_t, double>>& values,
@@ -244,8 +246,8 @@ class QtTuneBridge : public QObject
     Q_PROPERTY(QString linkState READ linkState NOTIFY linkStateChanged)
     Q_PROPERTY(int linkErrorCode READ linkErrorCode NOTIFY linkStateChanged)
     Q_PROPERTY(int errorEpisodes READ errorEpisodes NOTIFY linkStateChanged)
-    // Log page Pause: frames still count and decode, but none are added
-    // to the frame log. Every session starts unpaused.
+    // Log page Pause: frames still count and their values still arrive,
+    // but none are added to the frame log. Every session starts unpaused.
     Q_PROPERTY(bool logPaused READ logPaused WRITE setLogPaused NOTIFY logPausedChanged)
     // Session recording (ADR-0017), off by default: the Settings switch.
     // It takes effect at the next connect and can't change while a
@@ -279,6 +281,11 @@ public:
     bool connecting() const { return m_connecting; }
     bool disconnecting() const { return m_disconnecting; }
     void dispatchFrameForTesting(const ecuio_frame_t& frame);
+    // onValues on the calling thread, as core's worker calls it
+    void dispatchValuesForTesting(const ecuio_value_batch_t& batch);
+    // The samples one window can hold, from the next connect
+    void setValueSampleLimitForTesting(int samples) { m_valueSampleLimit = samples; }
+    static constexpr int defaultValueSampleLimit() { return DefaultValueSampleLimit; }
     static constexpr int maxInFlightForTesting() { return MaxInFlightFrames; }
     ecuio_session_t* pendingSessionForTesting() const { return m_pendingSession.load(); }
     QString linkState() const;
@@ -358,6 +365,17 @@ signals:
 private:
     static void onFrame(const ecuio_frame_t* frame, void* user_data);
     void handleFrameInternal(const ecuio_frame_t* frame, SessionRecorder::Clock::time_point arrived);
+    // Core's values callback (ADR-0024): WORKER thread, stages a frame's
+    // values under m_valuesMutex
+    static void onValues(const ecuio_value_batch_t* batch, void* user_data);
+    // GUI thread, before the session starts: sizes the staging for set
+    void prepareValueStaging(const ecuio_signal_set_t* set);
+    // GUI thread: swaps the staging out and drains it, every sample to
+    // the recorder and each signal's newest into the model's batch
+    void drainValues();
+    // GUI thread: drainValues, then the batch into the model (the tick,
+    // and once more at disconnect)
+    void flushValues();
     void applyFrameLoggingEnv();
     void startRecording(const QString& uri, const ecuio_signal_set_t* set);
     void stopRecording(const QString& why);
@@ -390,15 +408,49 @@ private:
     FrameListModel* m_frameLog = nullptr;
 
     QTimer* m_coalesceTimer = nullptr;
-    // Latest value per signal ID, flushed by the 100 ms coalesce timer
+    // The model's batch for one tick: each signal's newest value
     std::vector<std::pair<uint16_t, double>> m_stagingBuffer;
     std::vector<std::pair<uint16_t, QString>> m_stagingTexts;   // the text rows'
-    // For each def of the session's set, by index: its slot in the
-    // staging (m_stagingBuffer, or m_stagingTexts for a text def), or -1
-    // while nothing is staged for it this window
-    std::vector<int> m_stagedAt;
-    std::vector<char> m_textScratch;   // ECUIO_DECODE_TEXT_MAX, for ecuio_decode_text
     int m_signalBatchCount = 0;
+
+    // One coalesce window of decoded values, written by onValues on the
+    // worker. Sized at connect and never grown there: a sample past the
+    // limit is counted, and only the recording misses it (a numeric
+    // signal's newest value is kept regardless).
+    struct ValueStaging {
+        struct Sample {
+            SessionRecorder::Clock::time_point arrived;
+            uint32_t def = 0;          // index into the session's set
+            uint32_t textAt = 0;       // a text sample's bytes in text
+            uint32_t textLen = 0;
+            bool isText = false;
+            double value = 0.0;
+        };
+        std::vector<Sample> samples;   // every value, in arrival order
+        std::vector<char> text;        // the text samples' bytes
+        std::vector<double> newest;    // per def: its newest numeric value
+        std::vector<int> newestText;   // per def: its newest text sample, or -1
+        std::vector<uint8_t> has;      // per def: a value this window
+        size_t sampleLimit = 0;
+        size_t textLimit = 0;
+        uint32_t dropped = 0;          // samples past a limit this window
+
+        void prepare(size_t defs, size_t samplesMax, size_t textMax);
+        void stage(uint32_t def, SessionRecorder::Clock::time_point arrived,
+                   const ecuio_value_t& v);
+        void reset();
+    };
+    std::mutex m_valuesMutex;           // guards m_valueStaging and m_activeStaging
+    ValueStaging m_valueStaging[2];
+    int m_activeStaging = 0;            // the one onValues writes
+    // The session's set and each signal id's def index: written before
+    // the session starts, read by onValues on the worker
+    const ecuio_signal_set_t* m_valueSet = nullptr;
+    QHash<uint16_t, int> m_defIndexOfId;
+    static constexpr int DefaultValueSampleLimit = 16384;   // per window
+    static constexpr int ValueTextLimit = 256 * 1024;       // bytes per window
+    int m_valueSampleLimit = DefaultValueSampleLimit;
+    quint64 m_valuesDropped = 0;        // this session's, past the limits
 
     SignalListModel* m_signalModel = nullptr;
     int m_guiNotifyCount = 0;

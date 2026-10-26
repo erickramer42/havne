@@ -2,8 +2,10 @@
 // Testing: test_bridge (QtCore only): worker→GUI marshaling, coalescing,
 //          in-flight backpressure, the frame log's ring and order, its
 //          rows' payload storage (BridgeTest.FrameLogHoldsLongPayloadsOnlyWhileShown)
-//          and the counters on the tick, the newest sample in a window
-//          (rows by id, staging by def index), the signal model's roles and age
+//          and the counters on the tick, core's values staged from the
+//          worker (BridgeTest.Values*, .TheNewestSampleInAWindowIsTheOneShown,
+//          .RecordingHoldsEveryValueCoreDecodes), rows by id, the signal
+//          model's roles and age
 //          refresh, link-state mapping, the activity log's session and
 //          ECU lines, session recording (BridgeTest.Recording*), display
 //          units on the rows, the chart and not the recording
@@ -293,11 +295,9 @@ void SignalListModel::updateValues(const std::vector<std::pair<uint16_t, double>
 {
     if (m_entries.empty() || values.empty()) return;
 
-    // Batch-stamped time: the staging buffer merges latest-per-ID across the
-    // coalescing window, so per-frame timestamps are already gone by here —
-    // one timestamp per batch is the honest resolution. timestampMs >= 0
-    // injects a deterministic value (tests today; per-sample real timestamps
-    // when decode moves worker-side under J2534).
+    // Batch-stamped time: the staging keeps each signal's newest value per
+    // coalescing window, so one timestamp per batch is the resolution the
+    // model has. timestampMs >= 0 injects a deterministic value (tests).
     const qint64 stamp = (timestampMs >= 0) ? timestampMs : m_clock.elapsed();
 
     // Every row, subscribed or not: `subscribed` filters chartData()
@@ -436,7 +436,6 @@ QtTuneBridge::QtTuneBridge(QObject* parent)
     , m_signalModel(new SignalListModel(this))
 {
     (void)ecuio_init();   // optional and always ECUIO_OK (core.h), paired below
-    m_textScratch.resize(ECUIO_DECODE_TEXT_MAX);
 
     connect(m_coalesceTimer, &QTimer::timeout, this, [this]() {
         notifyFrameCounts();
@@ -452,19 +451,7 @@ QtTuneBridge::QtTuneBridge(QObject* parent)
         // Drop count at tick rate rather than per frame; onFrame also
         // queues a report as it drops (at most one pending).
         notifyDropped();
-        if (!m_stagingBuffer.empty() || !m_stagingTexts.empty()) {
-            if (!m_stagingBuffer.empty()) {
-                m_signalModel->updateValues(m_stagingBuffer);
-                m_stagingBuffer.clear();
-            }
-            if (!m_stagingTexts.empty()) {
-                m_signalModel->updateTexts(m_stagingTexts);
-                m_stagingTexts.clear();
-            }
-            std::fill(m_stagedAt.begin(), m_stagedAt.end(), -1);
-            ++m_signalBatchCount;
-            emit signalBatchChanged();
-        }
+        flushValues();
         // On disk within a tick, so a crash loses at most 100 ms
         m_recorder.flush();
         if (m_recorder.active() && !m_recorder.ok()) {
@@ -581,6 +568,11 @@ QString QtTuneBridge::connectCoreOnly(const QString& uri,
     }
 
     rc = ecuio_register_frame_callback(session, &QtTuneBridge::onFrame, this);
+    if (rc == ECUIO_OK) {
+        // ADR-0024: core decodes on the worker and hands each frame's
+        // values to onValues, after onFrame
+        rc = ecuio_register_values_callback(session, &QtTuneBridge::onValues, this);
+    }
     if (rc != ECUIO_OK) {
         ecuio_session_destroy(session);
         return QString::fromUtf8(ecuio_status_string(rc));
@@ -591,18 +583,26 @@ QString QtTuneBridge::connectCoreOnly(const QString& uri,
 }
 
 // GUI thread: start the worker of a session connectCoreOnly produced.
-// onFrame accepts from here (m_accepting), so a frame sent at once, as a
-// replay's first is, queues and reaches handleFrameInternal after
-// applyConnectedState. On failure the session is destroyed.
+// onFrame and onValues accept from here (m_accepting), so a frame sent
+// at once, as a replay's first is, queues and reaches
+// handleFrameInternal after applyConnectedState, and its values wait in
+// the staging, sized here, for the first tick. On failure the session
+// is destroyed.
 QString QtTuneBridge::startSession(ecuio_session_t* session)
 {
+    // Zeroed before the worker starts, not at the apply: a replay at max
+    // can pass the in-flight cap before then, and those drops count
     m_framesDelivered.store(0, std::memory_order_relaxed);
+    m_droppedFrames.store(0, std::memory_order_relaxed);
+    m_lastReportedDropped = 0;
+    prepareValueStaging(ecuio_session_signal_set(session));
     m_accepting.store(true, std::memory_order_release);
     const ecuio_status_t rc = ecuio_session_start(session);
     if (rc != ECUIO_OK) {
         m_accepting.store(false, std::memory_order_release);
         const QString err = failureText(rc);
         ecuio_unregister_frame_callback(session, &QtTuneBridge::onFrame, this);
+        ecuio_unregister_values_callback(session, &QtTuneBridge::onValues, this);
         ecuio_session_destroy(session);
         return err;
     }
@@ -628,13 +628,9 @@ void QtTuneBridge::applyConnectedState(ecuio_session_t* session, const QString& 
     m_frameLog->clear();
     m_currentFrameCount = 0;
     notifyFrameCounts();
-    m_droppedFrames.store(0, std::memory_order_relaxed);
-    m_lastReportedDropped = 0;
-    const ecuio_signal_set_t* set = ecuio_session_signal_set(session);
-    m_signalModel->setSignalSet(set);
-    m_stagingBuffer.clear();   // previous session's staged values must
-    m_stagingTexts.clear();    // never bleed into this one's first batch
-    m_stagedAt.assign(set != nullptr ? set->count : 0, -1);
+    m_signalModel->setSignalSet(ecuio_session_signal_set(session));
+    m_stagingBuffer.clear();   // previous session's batch must never
+    m_stagingTexts.clear();    // bleed into this one's first
     m_linkErrorCode = ECUIO_OK;
     m_errorEpisodes = 0;
     emit linkStateChanged();
@@ -759,9 +755,16 @@ void QtTuneBridge::disconnectSession()
     m_disconnecting = true;
     m_coalesceTimer->stop();
     notifyFrameCounts();   // the last tick's worth
+    flushValues();         // and its values, the recording's among them
+    if (m_valuesDropped > 0) {
+        emit logMessage(QStringLiteral("Values the recording missed: %1, past %2 "
+                                       "in one 100 ms window")
+                            .arg(m_valuesDropped)
+                            .arg(m_valueSampleLimit));
+    }
+    m_valueSet = nullptr;  // the drain's; onValues stops at m_accepting
     m_stagingBuffer.clear();
     m_stagingTexts.clear();
-    m_stagedAt.clear();
     m_currentUri.clear();
     m_linkErrorCode = ECUIO_OK;           // the properties must not
     m_errorEpisodes = 0;              // outlive the session
@@ -1002,25 +1005,6 @@ void QtTuneBridge::onFrame(const ecuio_frame_t* frame, void* user_data)
     }, Qt::QueuedConnection);
 }
 
-namespace {
-
-// The staging buffers keep the latest sample per signal id across the
-// coalescing window. slot is the def's entry in m_stagedAt: where its
-// sample sits, so a newer one overwrites it without a search.
-template <typename T>
-void stageLatest(std::vector<std::pair<uint16_t, T>>& staging, int& slot,
-                 uint16_t id, const T& sample)
-{
-    if (slot >= 0) {
-        staging[static_cast<size_t>(slot)].second = sample;   // newest wins
-        return;
-    }
-    slot = static_cast<int>(staging.size());
-    staging.emplace_back(id, sample);
-}
-
-} // namespace
-
 void QtTuneBridge::handleFrameInternal(const ecuio_frame_t* frame,
                                        SessionRecorder::Clock::time_point arrived)
 {
@@ -1035,40 +1019,12 @@ void QtTuneBridge::handleFrameInternal(const ecuio_frame_t* frame,
     // Recorded whether or not the log is paused
     m_recorder.frame(arrived, *frame, len);
 
-    // Paused: counted and decoded below, but kept out of the frame log
+    // Paused: counted, but kept out of the frame log. Its values come
+    // from core's worker through onValues, paused or not (ADR-0024).
     if (!m_logPaused) {
         m_frameLog->appendFrame(*frame, len);
     }
     ++m_currentFrameCount;
-
-    // ADR-0013: decode against the SESSION's profile set. NULL means
-    // the raw profile — frames stream to the Log page, decode skipped.
-    const ecuio_signal_set_t* set = ecuio_session_signal_set(m_session);
-    if (set != nullptr && m_stagedAt.size() == set->count) {
-        for (uint32_t i = 0; i < set->count; ++i) {
-            const ecuio_signal_def_t& def = set->defs[i];
-            // Core-side gate: arbitration ID, plus the mux key when the
-            // def has one.
-            if (!ecuio_def_applies_to_frame(&def, frame)) {
-                continue;
-            }
-            if (def.kind == ECUIO_VALUE_TEXT || def.kind == ECUIO_VALUE_HEX) {
-                if (ecuio_decode_text(&def, frame->data, len, m_textScratch.data(),
-                                      static_cast<uint32_t>(m_textScratch.size()))
-                        == ECUIO_DECODE_OK) {
-                    const QString text = QString::fromLatin1(m_textScratch.data());
-                    m_recorder.sample(arrived, def, text);
-                    stageLatest(m_stagingTexts, m_stagedAt[i], def.id, text);
-                }
-                continue;
-            }
-            double val = 0.0;
-            if (ecuio_decode_signal(&def, frame->data, len, &val) == ECUIO_DECODE_OK) {
-                m_recorder.sample(arrived, def, val);
-                stageLatest(m_stagingBuffer, m_stagedAt[i], def.id, val);
-            }
-        }
-    }
 
     // Counted here, reported on the tick (notifyFrameCounts): a signal
     // per frame would re-evaluate every binding on them per frame
@@ -1110,6 +1066,168 @@ void QtTuneBridge::forceFrameCountForTesting(int count)
 void QtTuneBridge::dispatchFrameForTesting(const ecuio_frame_t& frame)
 {
     onFrame(&frame, this);
+}
+
+void QtTuneBridge::dispatchValuesForTesting(const ecuio_value_batch_t& batch)
+{
+    onValues(&batch, this);
+}
+
+// ---- Decoded values from core's worker (ADR-0024) ----
+
+void QtTuneBridge::ValueStaging::prepare(size_t defs, size_t samplesMax,
+                                         size_t textMax)
+{
+    samples.clear();
+    samples.reserve(samplesMax);
+    text.clear();
+    text.reserve(textMax);
+    newest.assign(defs, 0.0);
+    newestText.assign(defs, -1);
+    has.assign(defs, 0);
+    sampleLimit = samplesMax;
+    textLimit = textMax;
+    dropped = 0;
+}
+
+// Keeps a numeric signal's newest value whatever the limits; a sample
+// past one is counted, and only the recording misses it. Grows nothing:
+// prepare reserved the limits.
+void QtTuneBridge::ValueStaging::stage(uint32_t def,
+                                       SessionRecorder::Clock::time_point arrived,
+                                       const ecuio_value_t& v)
+{
+    const bool isText = v.text != nullptr;
+    if (!isText) {
+        newest[def] = v.value;
+        has[def] = 1;
+    }
+    if (samples.size() >= sampleLimit ||
+        (isText && text.size() + v.text_len > textLimit)) {
+        ++dropped;
+        return;
+    }
+    Sample s;
+    s.arrived = arrived;
+    s.def = def;
+    s.isText = isText;
+    s.value = v.value;
+    if (isText) {
+        s.textAt = static_cast<uint32_t>(text.size());
+        s.textLen = v.text_len;
+        text.insert(text.end(), v.text, v.text + v.text_len);
+        newestText[def] = static_cast<int>(samples.size());
+        has[def] = 1;
+    }
+    samples.push_back(s);
+}
+
+void QtTuneBridge::ValueStaging::reset()
+{
+    samples.clear();
+    text.clear();
+    std::fill(newestText.begin(), newestText.end(), -1);
+    std::fill(has.begin(), has.end(), 0);
+    dropped = 0;
+}
+
+void QtTuneBridge::prepareValueStaging(const ecuio_signal_set_t* set)
+{
+    const bool decodes = set != nullptr && set->defs != nullptr && set->count > 0;
+    const size_t defs = decodes ? set->count : 0;
+    std::lock_guard<std::mutex> lock(m_valuesMutex);
+    m_valueSet = decodes ? set : nullptr;
+    m_defIndexOfId.clear();
+    for (size_t i = 0; i < defs; ++i) {
+        m_defIndexOfId.insert(set->defs[i].id, static_cast<int>(i));
+    }
+    for (ValueStaging& staging : m_valueStaging) {
+        staging.prepare(defs, decodes ? static_cast<size_t>(m_valueSampleLimit) : 0,
+                        decodes ? static_cast<size_t>(ValueTextLimit) : 0);
+    }
+    m_activeStaging = 0;
+    m_valuesDropped = 0;
+}
+
+void QtTuneBridge::onValues(const ecuio_value_batch_t* batch, void* user_data)
+{
+    QtTuneBridge* self = static_cast<QtTuneBridge*>(user_data);
+    if (!batch || !self) return;
+    if (!self->m_accepting.load(std::memory_order_acquire)) return;
+    const auto arrived = SessionRecorder::Clock::now();
+    std::lock_guard<std::mutex> lock(self->m_valuesMutex);
+    ValueStaging& staging = self->m_valueStaging[self->m_activeStaging];
+    for (uint32_t i = 0; i < batch->count; ++i) {
+        const ecuio_value_t& v = batch->values[i];
+        const int def = self->m_defIndexOfId.value(v.signal_id, -1);
+        if (def < 0 || static_cast<size_t>(def) >= staging.has.size()) {
+            continue;
+        }
+        staging.stage(static_cast<uint32_t>(def), arrived, v);
+    }
+}
+
+void QtTuneBridge::drainValues()
+{
+    if (m_valueSet == nullptr) return;
+    ValueStaging* full = nullptr;
+    {
+        std::lock_guard<std::mutex> lock(m_valuesMutex);
+        full = &m_valueStaging[m_activeStaging];
+        m_activeStaging ^= 1;
+    }
+    // The worker writes the other one now, so this one is the GUI
+    // thread's until the next swap
+    for (const ValueStaging::Sample& s : full->samples) {
+        const ecuio_signal_def_t& def = m_valueSet->defs[s.def];
+        if (s.isText) {
+            m_recorder.sample(s.arrived, def,
+                              QString::fromLatin1(full->text.data() + s.textAt,
+                                                  static_cast<qsizetype>(s.textLen)));
+        } else {
+            m_recorder.sample(s.arrived, def, s.value);
+        }
+    }
+    for (size_t i = 0; i < full->has.size(); ++i) {
+        if (!full->has[i]) continue;
+        const uint16_t id = m_valueSet->defs[i].id;
+        const int at = full->newestText[i];
+        if (at >= 0) {
+            const ValueStaging::Sample& s = full->samples[static_cast<size_t>(at)];
+            m_stagingTexts.emplace_back(
+                id, QString::fromLatin1(full->text.data() + s.textAt,
+                                        static_cast<qsizetype>(s.textLen)));
+        } else {
+            m_stagingBuffer.emplace_back(id, full->newest[i]);
+        }
+    }
+    if (full->dropped > 0) {
+        if (m_valuesDropped == 0) {
+            emit logMessage(QStringLiteral("Values are arriving faster than %1 in "
+                                           "100 ms: the recording misses some")
+                                .arg(m_valueSampleLimit));
+        }
+        m_valuesDropped += full->dropped;
+    }
+    full->reset();
+}
+
+// The tick's half: the window's values into the model, one entry per
+// signal, whatever the frame rate (ADR-0024 §7)
+void QtTuneBridge::flushValues()
+{
+    drainValues();
+    if (m_stagingBuffer.empty() && m_stagingTexts.empty()) return;
+    if (!m_stagingBuffer.empty()) {
+        m_signalModel->updateValues(m_stagingBuffer);
+        m_stagingBuffer.clear();
+    }
+    if (!m_stagingTexts.empty()) {
+        m_signalModel->updateTexts(m_stagingTexts);
+        m_stagingTexts.clear();
+    }
+    ++m_signalBatchCount;
+    emit signalBatchChanged();
 }
 
 void QtTuneBridge::pollLinkHealth()

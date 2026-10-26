@@ -10,8 +10,10 @@
 
 #include <QCoreApplication>
 #include <QDir>
+#include <QDirIterator>
 #include <QEventLoop>
 #include <QFile>
+#include <QFileInfo>
 #include <QHash>
 #include <QStringList>
 #include <QTemporaryDir>
@@ -22,6 +24,8 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <initializer_list>
 #include <memory>
@@ -612,9 +616,10 @@ TEST(BridgeTest, SignalBatchesAreCoalesced)
 
 TEST(BridgeTest, TheNewestSampleInAWindowIsTheOneShown)
 {
-    /* Three frames inside one coalesce window: the row shows the third,
-     * numeric and text alike, and the window adds one sample to the
-     * chart. The mock's own frames (0x0C0) match neither def. */
+    /* Three frames' values inside one coalesce window, as core's worker
+     * hands them to onValues: the row shows the third, numeric and text
+     * alike, and the window adds one sample to the chart. The mock's own
+     * frames (0x0C0) match neither def. */
     static ecuio_signal_def_t defs[2] = {};
     defs[0] = {};
     defs[0].id = 1;
@@ -640,12 +645,20 @@ TEST(BridgeTest, TheNewestSampleInAWindowIsTheOneShown)
     ASSERT_TRUE(bridge.connectSession("mock://newest?profile=test-newest").isEmpty());
     spinLoop(150);   // a tick or more, so the window below starts clean
     const int batches = bridge.signalBatchCount();
-    ecuio_frame_t f{};
-    f.arbitration_id = 0x123;
-    f.data_length = 1;
-    for (uint8_t v : {10, 20, 30}) {
-        f.data[0] = v;
-        bridge.dispatchFrameForTesting(f);
+    for (const char* hex : {"0A", "14", "1E"}) {
+        ecuio_value_t values[2] = {};
+        values[0].signal_id = 1;
+        values[0].kind = ECUIO_VALUE_UINT;
+        values[0].value = static_cast<double>(std::strtol(hex, nullptr, 16));
+        values[1].signal_id = 2;
+        values[1].kind = ECUIO_VALUE_HEX;
+        values[1].text = hex;
+        values[1].text_len = 2;
+        ecuio_value_batch_t batch = {};
+        batch.arbitration_id = 0x123;
+        batch.count = 2;
+        batch.values = values;
+        bridge.dispatchValuesForTesting(batch);
     }
     ASSERT_TRUE(spinUntil([&]() { return bridge.signalBatchCount() > batches; }, 2000));
 
@@ -2548,11 +2561,11 @@ void core_rows_values_cb(const ecuio_value_batch_t* batch, void* user_data)
 
 } // namespace
 
-/* The two decode paths agree over the vehicle fixture under obd2
- * (ADR-0024, step 1): the values the bridge decodes on the GUI thread
- * and records in signals.csv are, row for row, the ones core's values
- * callback delivers from the worker for the same recording */
-TEST(BridgeTest, BothDecodePathsAgreeOverTheFixture)
+/* The recording holds every value core decodes (ADR-0024): over the
+ * vehicle fixture under obd2, the bridge's signals.csv is, row for row,
+ * what core's values callback delivers to a session of its own for the
+ * same recording */
+TEST(BridgeTest, RecordingHoldsEveryValueCoreDecodes)
 {
     const QString uri =
         QStringLiteral("replay://%1/2026-10-25-engine-start?profile=obd2&speed=100")
@@ -2570,7 +2583,7 @@ TEST(BridgeTest, BothDecodePathsAgreeOverTheFixture)
             return bridge.frameCount() + bridge.droppedFrames() >= kFrames;
         },
         20000));
-    ASSERT_EQ(bridge.droppedFrames(), 0) << "a dropped frame loses its values";
+    spinLoop(300);   // the last frames' values staged, a tick or more
     ASSERT_TRUE(disconnectAndWait(bridge));
     const QStringList folders = recordingFolders(root.path());
     ASSERT_EQ(folders.size(), 1);
@@ -2617,6 +2630,315 @@ TEST(BridgeTest, BothDecodePathsAgreeOverTheFixture)
             << recorded[i].first.toStdString() << " "
             << recorded[i].second.toStdString();
     }
+}
+
+namespace {
+
+/* n rows of 0x7E8 RPM replies, 10 ms of session time apart; row i reads
+ * 1000 + i rpm (41 0C, a quarter rpm a count) */
+QString writeRpmRows(const QString& folder, int n)
+{
+    QByteArray text = "host_us,timestamp_us,id,flags,data\n";
+    for (int i = 0; i < n; ++i) {
+        const QByteArray t = QByteArray::number(qint64{10000} * i);
+        const int raw = (1000 + i) * 4;
+        text += t + ',' + t + ",0x7E8,0x0,41 0C " +
+                QByteArray::number(raw >> 8, 16).rightJustified(2, '0').toUpper() + ' ' +
+                QByteArray::number(raw & 0xFF, 16).rightJustified(2, '0').toUpper() + '\n';
+    }
+    QFile f(folder + QStringLiteral("/frames.csv"));
+    if (!f.open(QIODevice::WriteOnly))
+        return {};
+    f.write(text);
+    return QStringLiteral("replay://%1?profile=obd2&speed=max").arg(folder);
+}
+
+/* signals.csv's RPM values, in order */
+std::vector<double> recordedRpm(const QString& root)
+{
+    std::vector<double> out;
+    const QStringList folders = recordingFolders(root);
+    if (folders.size() != 1)
+        return out;
+    const QByteArray csv = readFile(root + QStringLiteral("/") + folders.first() +
+                                    QStringLiteral("/signals.csv"));
+    for (const QByteArray& line : csv.split('\n')) {
+        const QList<QByteArray> cols = line.split(',');
+        if (cols.size() == 4 && cols[1] == "RPM")
+            out.push_back(cols[2].toDouble());
+    }
+    return out;
+}
+
+} // namespace
+
+/* Values come from core's worker, not from the frames the GUI thread
+ * handles, so a frame dropped at the in-flight cap keeps its values
+ * (ADR-0024 §7): with the event loop held while a replay floods in,
+ * thousands of frames drop, yet the recording holds every row's RPM in
+ * order and the row shows the last one */
+TEST(BridgeTest, ValuesSurviveFramesDroppedAtTheCap)
+{
+    constexpr int kRows = 5000;
+    QTemporaryDir recording, root;
+    ASSERT_TRUE(recording.isValid() && root.isValid());
+    const QString uri = writeRpmRows(recording.path(), kRows);
+    ASSERT_FALSE(uri.isEmpty());
+    QtTuneBridge bridge;
+    bridge.setRecordingsRootForTesting(root.path());
+    bridge.setRecording(true);
+    ASSERT_TRUE(bridge.connectSession(uri).isEmpty());
+    // No event processing: the queued frames pile up to the cap
+    std::this_thread::sleep_for(std::chrono::milliseconds(1500));
+    ASSERT_TRUE(spinUntil(
+        [&bridge]() {
+            return bridge.frameCount() + bridge.droppedFrames() >= kRows;
+        },
+        10000));
+    EXPECT_GT(bridge.droppedFrames(), 1000) << "the cap dropped frames";
+    spinLoop(300);
+    SignalListModel* model = bridge.signalModel();
+    int rpmRow = -1;
+    for (int r = 0; r < model->rowCount(); ++r) {
+        if (model->data(model->index(r, 0), SignalListModel::NameRole).toString() ==
+            QStringLiteral("RPM"))
+            rpmRow = r;
+    }
+    ASSERT_GE(rpmRow, 0);
+    EXPECT_EQ(model->data(model->index(rpmRow, 0), SignalListModel::ValueRole).toDouble(),
+              1000.0 + kRows - 1)
+        << "the last row's value, though its frame may have dropped";
+    ASSERT_TRUE(disconnectAndWait(bridge));
+    const std::vector<double> rpm = recordedRpm(root.path());
+    ASSERT_EQ(rpm.size(), static_cast<size_t>(kRows)) << "every row's value recorded";
+    for (int i = 0; i < kRows; ++i) {
+        ASSERT_EQ(rpm[static_cast<size_t>(i)], 1000.0 + i) << "row " << i;
+    }
+}
+
+/* A disconnect drains the window it ends: a value staged just before
+ * it, with no tick between, reaches the recording */
+TEST(BridgeTest, ValuesStagedAtDisconnectAreRecorded)
+{
+    static ecuio_signal_def_t defs[1] = {};
+    defs[0] = {};
+    defs[0].id = 1;
+    defs[0].kind = ECUIO_VALUE_UINT;
+    defs[0].message_id = 0x123u;   /* not the mock's 0x0C0 */
+    defs[0].bit_length = 8;
+    defs[0].scale = 1.0;
+    strncpy(defs[0].name, "Last", sizeof(defs[0].name) - 1);
+    static ecuio_signal_set_t set = {};
+    set.layout_version = ECUIO_SIGNAL_SET_LAYOUT;
+    set.count = 1;
+    set.defs = defs;
+    ASSERT_EQ(ecuio_profile_register("test-last-window", &set, nullptr), ECUIO_OK);
+
+    QTemporaryDir root;
+    ASSERT_TRUE(root.isValid());
+    QtTuneBridge bridge;
+    bridge.setRecordingsRootForTesting(root.path());
+    bridge.setRecording(true);
+    ASSERT_TRUE(bridge.connectSession("mock://last?profile=test-last-window").isEmpty());
+    spinLoop(150);
+    ecuio_value_t value = {};
+    value.signal_id = 1;
+    value.kind = ECUIO_VALUE_UINT;
+    value.value = 42.0;
+    ecuio_value_batch_t batch = {};
+    batch.arbitration_id = 0x123;
+    batch.count = 1;
+    batch.values = &value;
+    bridge.dispatchValuesForTesting(batch);
+    ASSERT_TRUE(disconnectAndWait(bridge));   // no tick since the value
+
+    const QStringList folders = recordingFolders(root.path());
+    ASSERT_EQ(folders.size(), 1);
+    const QByteArray csv = readFile(root.path() + QStringLiteral("/") + folders.first() +
+                                    QStringLiteral("/signals.csv"));
+    EXPECT_TRUE(csv.contains(",Last,42,")) << csv.toStdString();
+    EXPECT_EQ(ecuio_profile_unregister("test-last-window"), ECUIO_OK);
+}
+
+/* One window holds a bounded number of samples, so the worker never
+ * allocates: past the limit, the recording misses them, the activity
+ * log says so once and gives the count at disconnect, and the row still
+ * shows the newest value */
+TEST(BridgeTest, ValuesPastTheWindowsLimitAreCountedAndLogged)
+{
+    constexpr int kRows = 3000;
+    constexpr int kLimit = 100;
+    QTemporaryDir recording, root;
+    ASSERT_TRUE(recording.isValid() && root.isValid());
+    const QString uri = writeRpmRows(recording.path(), kRows);
+    ASSERT_FALSE(uri.isEmpty());
+    QtTuneBridge bridge;
+    QStringList log;
+    QObject::connect(&bridge, &QtTuneBridge::logMessage,
+                     [&log](const QString& line) { log << line; });
+    bridge.setRecordingsRootForTesting(root.path());
+    bridge.setRecording(true);
+    bridge.setValueSampleLimitForTesting(kLimit);
+    ASSERT_TRUE(bridge.connectSession(uri).isEmpty());
+    // Held, so the whole replay lands in one window
+    std::this_thread::sleep_for(std::chrono::milliseconds(1500));
+    ASSERT_TRUE(spinUntil(
+        [&bridge]() {
+            return bridge.frameCount() + bridge.droppedFrames() >= kRows;
+        },
+        10000));
+    spinLoop(300);
+    SignalListModel* model = bridge.signalModel();
+    double shown = 0.0;
+    for (int r = 0; r < model->rowCount(); ++r) {
+        if (model->data(model->index(r, 0), SignalListModel::NameRole).toString() ==
+            QStringLiteral("RPM"))
+            shown = model->data(model->index(r, 0), SignalListModel::ValueRole).toDouble();
+    }
+    EXPECT_EQ(shown, 1000.0 + kRows - 1) << "the newest value, past the limit";
+    ASSERT_TRUE(disconnectAndWait(bridge));
+    const std::vector<double> rpm = recordedRpm(root.path());
+    EXPECT_LT(rpm.size(), static_cast<size_t>(kRows));
+    EXPECT_GE(rpm.size(), static_cast<size_t>(kLimit));
+    int warned = 0;
+    QString total;
+    for (const QString& line : log) {
+        if (line.startsWith(QStringLiteral("Values are arriving faster than 100 in 100 ms")))
+            ++warned;
+        if (line.startsWith(QStringLiteral("Values the recording missed: ")))
+            total = line;
+    }
+    EXPECT_EQ(warned, 1);
+    const qint64 missed = static_cast<qint64>(kRows) - static_cast<qint64>(rpm.size());
+    EXPECT_EQ(total, QStringLiteral("Values the recording missed: %1, past 100 in one "
+                                    "100 ms window").arg(missed))
+        << total.toStdString();
+}
+
+namespace {
+
+/* A recording's signals.csv rows past the header, each without its
+ * host_us column: signal, value, unit */
+QList<QByteArray> signalRows(const QString& folder)
+{
+    QList<QByteArray> out;
+    const QList<QByteArray> lines = readFile(folder + QStringLiteral("/signals.csv")).split('\n');
+    for (qsizetype i = 1; i < lines.size(); ++i) {
+        const QByteArray line = lines[i].trimmed();
+        const qsizetype comma = line.indexOf(',');
+        if (comma > 0)
+            out << line.mid(comma + 1);
+    }
+    return out;
+}
+
+/* The replay URI that decodes a recording as it was decoded live: the
+ * recorded URI's profile and DIDs, or its scheme's default profile */
+QString replayUriFor(const QString& folder)
+{
+    QString uri;
+    for (const QByteArray& line : readFile(folder + QStringLiteral("/events.log")).split('\n')) {
+        if (line.startsWith("uri ")) {
+            uri = QString::fromUtf8(line.mid(4).trimmed());
+            break;
+        }
+    }
+    if (uri.isEmpty())
+        return {};
+    QString profile = uri.startsWith(QStringLiteral("mock://")) ? QStringLiteral("mock")
+                                                                : QStringLiteral("obd2");
+    QStringList keep;
+    const qsizetype q = uri.indexOf(QLatin1Char('?'));
+    if (q >= 0) {
+        for (const QString& pair : uri.mid(q + 1).split(QLatin1Char('&'))) {
+            if (pair.startsWith(QStringLiteral("profile=")))
+                profile = pair.mid(8);
+            else if (pair.startsWith(QStringLiteral("did=")))
+                keep << pair;
+        }
+    }
+    keep.prepend(QStringLiteral("profile=") + profile);
+    return QStringLiteral("replay://%1?%2&speed=max").arg(folder, keep.join(QLatin1Char('&')));
+}
+
+} // namespace
+
+/* Local only: ECUIO_BENCH_RAW names a folder of real-car recordings
+ * (Testing/bench-raw, kept out of the repository by the bench-session
+ * rules). Each recording's frames.csv, replayed through the bridge
+ * under the profile its URI chose, records the values its own
+ * signals.csv holds, row for row: the decode on the worker against the
+ * one that ran on the GUI thread in the car. A mismatch names the
+ * recording, the row and the signal, never a value, which can be a
+ * vehicle's identity. */
+TEST(BridgeTest, VehicleRecordingsReplayToTheirOwnValues)
+{
+    const QString root = qEnvironmentVariable("ECUIO_BENCH_RAW");
+    if (root.isEmpty())
+        GTEST_SKIP() << "set ECUIO_BENCH_RAW to a folder of recordings";
+    QStringList folders;
+    QDirIterator it(root, {QStringLiteral("frames.csv")}, QDir::Files,
+                    QDirIterator::Subdirectories);
+    while (it.hasNext()) {
+        const QString dir = QFileInfo(it.next()).absolutePath();
+        if (QFile::exists(dir + QStringLiteral("/signals.csv")) &&
+            QFile::exists(dir + QStringLiteral("/events.log")))
+            folders << dir;
+    }
+    folders.sort();
+    ASSERT_FALSE(folders.isEmpty()) << "no recordings under ECUIO_BENCH_RAW";
+
+    qsizetype compared = 0;
+    for (const QString& folder : folders) {
+        const QString name = QDir(folder).dirName();
+        SCOPED_TRACE(name.toStdString());
+        const QString uri = replayUriFor(folder);
+        ASSERT_FALSE(uri.isEmpty()) << "no uri line in events.log";
+        const QList<QByteArray> frames = readFile(folder + QStringLiteral("/frames.csv")).split('\n');
+        int rows = 0;
+        for (qsizetype i = 1; i < frames.size(); ++i) {
+            if (!frames[i].trimmed().isEmpty())
+                ++rows;
+        }
+        if (rows == 0)
+            continue;   // a connect that heard nothing; replay refuses it
+
+        QTemporaryDir out;
+        ASSERT_TRUE(out.isValid());
+        QtTuneBridge bridge;
+        bridge.setRecordingsRootForTesting(out.path());
+        bridge.setRecording(true);
+        bridge.setValueSampleLimitForTesting(1 << 20);
+        const QString err = bridge.connectSession(uri);
+        if (!err.isEmpty()) {
+            ADD_FAILURE() << "replay refused: " << err.toStdString();
+            continue;
+        }
+        EXPECT_TRUE(spinUntil(
+            [&]() { return bridge.frameCount() + bridge.droppedFrames() >= rows; },
+            30000))
+            << bridge.frameCount() + bridge.droppedFrames() << " of " << rows << " frames";
+        spinLoop(300);
+        ASSERT_TRUE(disconnectAndWait(bridge));
+        const QStringList made = recordingFolders(out.path());
+        ASSERT_EQ(made.size(), 1);
+
+        const QList<QByteArray> live = signalRows(folder);
+        const QList<QByteArray> replayed = signalRows(out.path() + QStringLiteral("/") + made.first());
+        EXPECT_EQ(replayed.size(), live.size()) << "rows";
+        const qsizetype n = std::min(live.size(), replayed.size());
+        for (qsizetype i = 0; i < n; ++i) {
+            if (replayed[i] != live[i]) {
+                ADD_FAILURE() << "row " << i << ": " << live[i].left(live[i].indexOf(',')).toStdString()
+                              << " decodes differently";
+                break;
+            }
+        }
+        compared += n;
+    }
+    EXPECT_GT(compared, 0);
+    std::printf("compared %lld rows over %lld recordings\n", static_cast<long long>(compared),
+                static_cast<long long>(folders.size()));
 }
 
 TEST(BridgeTest, ReplayUriLabelKeepsTheRecordingsName)
