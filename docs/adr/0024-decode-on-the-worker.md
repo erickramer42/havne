@@ -1,8 +1,8 @@
 # ADR-0024: Decoding on the worker — a values callback delivers each frame's decoded signals
 
 - **Status:** Accepted.
-- **Date:** 2026-10-26. Steps 1 (core) and 2 (the bridge) built with
-  this record; step 3 follows (§10).
+- **Date:** 2026-10-26. Built with this record, in its three steps
+  (§10); the chart's side is ADR-0005's appendix of the same date.
 - **Builds on:** [ADR-0002](0002-callback-pair-identity-snapshot-dispatch.md)
   (callback identity and snapshot dispatch, which the new callback
   shares); [ADR-0003](0003-backpressure-bounds-in-flight-frames.md) (the
@@ -25,7 +25,7 @@ drains the staging into `SignalListModel::updateValues`, which stamps
 the whole batch with the tick's time (ADR-0005). Three things follow,
 in the order a user meets them:
 
-- **Known Issue #10: peaks drop out.** One value per signal per window
+- **Peaks drop out of the chart.** One value per signal per window
   survives, stamped with the window's time. The committed engine-start
   recording (`tests/fixtures/replay/2026-10-25-engine-start`) peaks at
   1,261 rpm; replayed under `obd2` at 10× through the bridge, the
@@ -325,8 +325,9 @@ recorded too.
 
 ## Consequences
 
-- Known Issue #10 can be fixed: every value carries its frame's time
-  from the worker. The chart's side is ADR-0005's appendix.
+- The chart can show each value at its own time and keep a window's
+  peak: every value carries its frame's time from the worker. The
+  chart's side is ADR-0005's appendix.
 - A front end gets decoded values from core with no loop of its own.
 - Values survive frames dropped at the cap, and `signals.csv` can hold
   values whose frames `frames.csv` doesn't. A recording's two files
@@ -377,5 +378,19 @@ recorded too.
   count when the connect was applied, after the worker had started, so
   the drops of a replay that passed the in-flight cap before then went
   uncounted. It zeroes the count before the start.
-- **Known Issue #10 stands until step 3:** the fixture at 10× still
-  peaks at 1,232 rpm on the model.
+- **The chart's peak waited for step 3:** after step 2 the fixture at
+  10× still peaked at 1,232 rpm on the model.
+
+## Appendix — step 3, the chart (2026-10-26)
+
+- Built under [ADR-0005](0005-coalesced-signal-updates.md)'s appendix
+  of this date: the staging keeps each signal's lowest, highest and
+  newest value in a window with their frames' times, the model's
+  history stores the distinct points among them in time order (360 a
+  signal), the chart's x-axis is session time, and a row's age counts
+  from its value's arrival.
+- The engine-start fixture's 1,261.25 rpm peak reaches the chart at
+  100× (`BridgeTest.TheChartKeepsTheFixturesPeak`), and `bench_bridge`
+  reads 1,261 at 10× and at `max`, against 1,232 and 758 before.
+- On `mock://demo` the trace shows the drive cycle's noise inside each
+  window, which the newest value alone smoothed away.

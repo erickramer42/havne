@@ -54,7 +54,7 @@ threads onto the GUI thread.
 | 2. The session hands it to every registered callback, from a snapshot of the callback list; then it decodes the frame against the profile's set and hands one batch of values, stamped with the frame's time, to each values callback ([ADR-0024](adr/0024-decode-on-the-worker.md)) | `ecuio_session_dispatch_callbacks` | transport worker |
 | 3. The bridge copies the frame (4120 bytes; its payload is inline) and posts it, unless 1000 frames are already in flight; the batch's values go straight into the bridge's staging, under a lock, so a frame dropped at the cap keeps its values | `QtTuneBridge::onFrame`, `onValues` | transport worker |
 | 4. The frame log gets a row (a ring of the newest 10k plain rows, the hex formatted only when shown) | `handleFrameInternal` | GUI |
-| 5. Every 100 ms the staging is swapped out: every sample goes to the recording and each signal's newest value into the signal model; link health is polled | coalesce timer | GUI |
+| 5. Every 100 ms the staging is swapped out: every sample goes to the recording, and each signal's window (newest, lowest and highest, at their frames' times) into the signal model; link health is polled | coalesce timer | GUI |
 | 6. Pages bind to the models: Log to frames, Live and Dashboard to signals | QML | GUI |
 
 **Why each step is shaped this way:**

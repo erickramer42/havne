@@ -28,6 +28,9 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
   ([ADR-0024](docs/adr/0024-decode-on-the-worker.md)): a frame dropped
   under load still delivers its values to the pages and the recording,
   and the UI's work per frame no longer grows with the profile.
+- Live's strip chart places each value at the time its frame was
+  received (a replay's own time), and keeps the highest and lowest
+  value of every 100 ms window, so a short peak stays on the chart.
 
 ### Fixed
 - The dropped-frame count includes frames a fast replay drops while

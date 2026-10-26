@@ -27,7 +27,8 @@ Three needs meet here:
   CX-5's replies on both dates; a test that replays them and checks the
   values keeps that true without the car.
 - **A load source.** Decoding on the worker (STATUS.md, backlog
-  "Full signal sets at full rate"; Known Issues #4 and #10) needs real
+  "Full signal sets at full rate"; Known Issue #4, and per-sample
+  time on the chart) needs real
   traffic at more than real time, with frames that carry their own
   times. `bench_bridge` measured the GUI thread's match against every
   def ([testing.md](../testing.md#performance)); the worker's per-frame
@@ -113,7 +114,7 @@ so the first row is 0 and pushed on by the file's span on each loop,
 so it never decreases. Under `speed` other than 1 it runs at the
 recording's pace, not the wall clock's: a frame replayed at 10× still
 says when it crossed the car's bus. That is what makes a replay the
-load test for per-sample time on the chart (Known Issue #10). `id`,
+load test for per-sample time on the chart. `id`,
 `flags` and `data` go out as recorded, the `TRUNCATED`, `EXTENDED` and
 `FD` flags included.
 
@@ -183,8 +184,8 @@ load test for per-sample time on the chart (Known Issue #10). `id`,
 
 Not decided here. When the decode moves to the worker, it gets its own
 ADR: it is an ABI addition with its own text-value question, and it
-should be citable apart from this transport. That ADR leads with Known
-Issue #10 (per-sample time on the chart), the reason a user sees; then
+should be citable apart from this transport. That ADR leads with
+per-sample time on the chart, the reason a user sees; then
 a decode every front end shares, and values that survive frames
 dropped under load. It cites `bench_bridge`'s result that the GUI
 thread's matching is no CPU problem at classic-CAN rates, so it isn't

@@ -45,11 +45,54 @@ read history through per-row model roles cheaply.
 
 - GUI emissions drop about 20× at mock rate (measured against the
   `guiNotifyCount` baseline) and no longer depend on the frame rate.
-- The chart's x-axis resolution is one window, about 100 ms (Known
-  Issue #10). Per-sample timestamps would need decoding to move onto
-  the worker.
+- The chart's x-axis resolution is one window, about 100 ms.
+  Per-sample timestamps would need decoding to move onto the worker
+  (done: the appendix below).
 - Every signal is decoded per frame, whether or not anything is
   subscribed to it (Known Issue #4).
 - Flattened arrays are easy to index wrongly. On 2026-10-10 the paint
   code read the newest *value* as the newest timestamp, and no C++
   test could see it. The manual smoke tier caught it.
+
+## Appendix — per-sample time and each window's envelope (2026-10-26)
+
+Decoding moved to the transport's worker
+([ADR-0024](0024-decode-on-the-worker.md)), and every decoded value
+reaches the bridge with its frame's session time. Two decisions above
+change with it; the 10 Hz coalescing, the pull API and the shared time
+axis stay.
+
+- **Samples carry their own time.** A history sample's time is its
+  frame's session time in milliseconds (`timestamp_us / 1000`), not the
+  tick that drained it. The chart's x-axis is session time: under a
+  replay it is the recording's time, so a replay at 10× shows ten
+  seconds of the recording in each second.
+- **A window keeps its envelope, not just its newest value.** For each
+  signal the bridge's staging keeps the window's newest value and its
+  lowest and highest, each with its time. The tick hands the model one
+  entry per signal (ADR-0024 §7), and the model's history takes the
+  distinct points among the three, in time order: one to three a
+  window. A short peak inside a window stays on the chart at its own
+  time. The engine-start recording peaks at 1,261 rpm; replayed at 10×
+  with the newest value alone, the model's highest was 1,232.
+- **The ring holds 360 samples,** three windows' worth for each of the
+  120 it held, so the trace still spans about 12 s at 10 Hz.
+- **Age is arrival, not sample time.** A row's age, which dims stale
+  values, counts from when its last value arrived on the GUI thread, on
+  the model's clock. Sample times are session time and can run faster
+  than the wall clock.
+- **The row shows the newest value,** as before; the envelope is the
+  chart's.
+- **`updateValues(values, timestampMs)` stays** as the one-point form:
+  each value is its window's lowest, highest and newest at that time.
+  Tests use it; the bridge hands the model whole windows
+  (`updateWindow`).
+
+Alternatives considered:
+
+- **Every sample in a time-based ring.** The most faithful, but the
+  ring's size and each repaint grow with the bus rate, which coalescing
+  exists to stop.
+- **Per-sample time, the newest value only.** The x-axis would be
+  right, but a peak between two windows' newest values would still
+  vanish.

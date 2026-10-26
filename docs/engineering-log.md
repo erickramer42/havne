@@ -99,6 +99,7 @@ Dates are commit dates.
 | 2026-10-23 | The discovery test demands a device where `ECUIO_EXPECT_J2534_DEVICES` says the machine has one; `scripts/verify.sh` sets it on Windows, so the dev machine's installed driver has to be found and the test can't pass vacuously there | `2639b42` |
 | 2026-10-25 | The GUI thread's decode cost per frame, measured (`bench_bridge`): about 3 ns a def a frame, so 1000 defs at a full 500 kbit/s classic CAN bus take under 2 % of it; decoding on the worker is about per-sample time on the chart, not CPU ([testing.md](testing.md#performance)) | `d063939`, `dbd672a` |
 | 2026-10-26 | The replay transport ([ADR-0023](adr/0023-replay-transport.md)): `replay://` plays a recording's `frames.csv` back on every platform, paced and stamped by the recording's own session time, at a speed or `max`, looping on request; the bridge takes frames from the moment a session starts, says what a replay is and when it ends; a recorded mock session round-trips value for value, and the second vehicle session's engine start is a scrubbed fixture whose replay decodes the sheet's values | `43c4c9e`, `4c75308`, `6c2294d` |
+| 2026-10-26 | Decoding on the worker ([ADR-0024](adr/0024-decode-on-the-worker.md)): core decodes each frame in its dispatch and hands a values callback one batch per frame with the frame's time; the bridge stages them from the worker, so a dropped frame keeps its values, and decodes nothing; the chart shows each value at its own time and keeps every window's lowest and highest (ADR-0005's appendix). The vehicle sessions' recordings replay to their own values, 24,632 of them | `ddcf095`, `92a09c3`, `0ea4126`, `e78ea57`, `6e6472a`, `8b3fa60` |
 
 ## Lessons learned
 
@@ -896,3 +897,21 @@ start. The replay also gave Known Issue #10 its first evidence: the
 engine start replayed at 10× showed a Dashboard RPM peak of 1,195
 against the recording's 1,261, the peak overwritten within its 100 ms
 window.
+
+**2026-10-26 — decoding on the worker:** **the same window, a second
+counter.** The replay's lesson above fixed the frame gate, but the
+dropped-frame count was still zeroed when the connect was applied,
+after the worker had started, so a replay at full speed that passed
+the in-flight cap in that gap lost its drops from the count. A test
+that held the event loop while a replay flooded in found it, at first
+as a failure that came and went. Anything a connect resets belongs
+before the start, with the gate. And **a benchmark column is cheaper
+than a review:** the model's update per tick searched every row for
+each value, quadratic in the profile (819 µs a tick at 1000 defs),
+which no review had flagged; adding the tick to `bench_bridge` to
+cite in the ADR showed it the first time it ran. Last, **the comparison
+that mattered was already on disk:** the plan was to keep both decode
+paths in the app until a car could compare them, but both run the same
+core functions on the same bytes; the vehicle sessions' recordings,
+replayed through the new path, compared 24,632 values offline, and the
+dual path never shipped.

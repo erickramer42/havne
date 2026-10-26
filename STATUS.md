@@ -78,7 +78,7 @@ second session ran the request engine, the probe, identification and
   [testing.md](docs/testing.md#gaps-not-verified)). The run sheets are
   [bench-runsheet.md](docs/bench-sessions/bench-runsheet.md) and
   [vehicle-runsheet.md](docs/bench-sessions/vehicle-runsheet.md).
-- **Tests:** 436 ctest cases on Windows (both trees rebuilt,
+- **Tests:** 438 ctest cases on Windows (both trees rebuilt,
   2026-10-26), all passing but two env-gated skips (the cross-arch
   case, and the real-car recordings' diff, run locally), plus the
   cross-arch subset (75/75); 0 MSVC warnings. CI runs ctest on Windows,
@@ -119,12 +119,12 @@ and the car's measurements.
 5. **Phase 4, record-replay transport**
    ([ADR-0023](docs/adr/0023-replay-transport.md)): built and
    UNIT-tested, against a real-bus fixture too.
-6. **Next: decoding on the worker thread**
-   ([ADR-0024](docs/adr/0024-decode-on-the-worker.md)), led by Known
-   Issue #10 ([Performance](#performance), in the backlog). Core
-   decodes on the worker and the bridge uses its values, checked
-   against the vehicle sessions' recordings; the chart's per-sample
-   history is next.
+6. **Decoding on the worker thread**
+   ([ADR-0024](docs/adr/0024-decode-on-the-worker.md)): built. Core
+   decodes on the transport's thread, the bridge stages its values (a
+   dropped frame keeps them), and the chart shows each value at its
+   frame's time with each window's peak (ADR-0005's appendix); checked
+   against the vehicle sessions' recordings, value for value.
 
 ## BENCH prep
 
@@ -159,13 +159,6 @@ an issue is resolved it is removed, and its number is not reused.
    mask can trim it if a CAN FD rate makes it matter.
 6. **The session API is single-caller by contract.** The bridge is the
    only caller.
-10. **Strip-chart x-axis resolution is one coalesce window, about
-    100 ms,** and a signal keeps only its latest value per window, so a
-    short peak can miss the screen: the fixture's engine start replayed
-    at 10× showed an RPM peak of 1,195 on the Dashboard against the
-    recording's 1,261 (docs/testing.md). Per-sample timestamps need
-    decoding to move onto the
-    worker.
 13. **The picker treats one registry entry as one device.** Multiple
     adapters behind one vendor DLL can't be told apart. They would be
     selected through `PassThruOpen`'s `pName` argument, which the
@@ -376,9 +369,9 @@ matters: the original-copy file format constrains everything after it.
   decodes on the worker and the bridge stages its values
   ([ADR-0024](docs/adr/0024-decode-on-the-worker.md)), so the GUI
   thread's cost per frame doesn't grow with the profile and values
-  survive frames dropped under load. Left: per-sample time on the chart
-  (Known Issue #10, ADR-0024's step 3), and the bridge's 4 KB copy per
-  frame, now the largest per-frame cost (`bench_bridge`,
+  survive frames dropped under load; the chart shows each value at its
+  frame's time and keeps a window's peak. Left: the bridge's 4 KB copy
+  per frame, now the largest per-frame cost (`bench_bridge`,
   [docs/testing.md](docs/testing.md#performance)).
 
 ### Toolchain
