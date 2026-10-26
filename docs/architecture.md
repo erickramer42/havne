@@ -99,7 +99,9 @@ passive: no request engine and no link health. Its default profile is
 `raw`, which can't decode a recording wrongly; a recorded J2534
 session decodes under `?profile=obd2` because its defs match replies,
 not requests. The bridge logs "Replay finished" once at the end of the
-file, and the session stays open.
+file, and the session stays open. A file that changed after create
+stops playback early with `ECUIO_ERR_RECORDING_CHANGED`, which the
+link state shows as `stopped`.
 
 A **profile** is a named signal set ([ADR-0013](adr/0013-protocol-profiles.md)).
 - **Signal defs:** each def says where its value sits in a frame
@@ -211,6 +213,7 @@ The bridge polls it on its 100 ms tick and maps it for the UI
 | `ECUIO_ERR_VEHICLE_TIMEOUT` | `quiet` | The adapter answers, but nothing arrives (debounced over ~1 s): no ECU awake on a bus that still acknowledges, as with the first vehicle's ignition off |
 | `ECUIO_ERR_REQUEST_FAILED` | `requests` | Writes fail while reads stay clean: nothing on the bus ACKs (the adapter on no live bus, or a bus fully asleep) |
 | `ECUIO_ERR_TRANSPORT_HARD_FAILURE` | `fault` | Reads fail: the adapter isn't answering |
+| `ECUIO_ERR_RECORDING_CHANGED` | `stopped` | A replay's file changed after it was opened, so playback stopped early ([ADR-0023](adr/0023-replay-transport.md)) |
 | no session | `disconnected` | |
 
 - **Why writes are judged apart from reads:** a quiet bus fails every

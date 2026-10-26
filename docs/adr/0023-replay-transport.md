@@ -125,7 +125,8 @@ load test for per-sample time on the chart (Known Issue #10). `id`,
   lines. A recorded J2534 session's replies still decode under `obd2`
   or `uds-generic`, because their defs match replies by ID and mux key,
   not by request.
-- **No link health.** The error state stays `ECUIO_OK`.
+- **No link health.** The error state stays `ECUIO_OK`, unless the file
+  changes under the replay (appendix of 2026-10-26).
 - **Session info** gains `ECUIO_BACKEND_REPLAY` (append-only) and three
   fields from its reserved words, `replay_frames` (the file's rows),
   `replay_span_ms` and `replay_speed_milli` (1000 is real time, 0 is
@@ -229,8 +230,9 @@ the change. Those numbers go in that ADR.
   pacing, link health, the probe's drops), frames the bridge dropped
   while recording, and the adapter's session log.
 - C ABI additions: `ECUIO_BACKEND_REPLAY`, a flag and three
-  session-info fields taken from its reserved words; no new function or
-  status code.
+  session-info fields taken from its reserved words, and one status
+  code, `ECUIO_ERR_RECORDING_CHANGED` (appendix of 2026-10-26); no new
+  function.
 - A committed fixture is real-car data, so its scrub rule is part of
   this decision, and a fixture added later follows it.
 - `frames.csv`'s header row now has a reader that enforces it: a change
@@ -240,3 +242,43 @@ the change. Those numbers go in that ADR.
 - Settings takes a replay as a typed URI. A "Replay a recording…" row
   with a folder picker would bring Qt Quick Dialogs, a new Qt module
   for the app, for one convenience that no test needs; deferred.
+
+## Appendix — a replay that stops early (2026-10-26)
+
+Attach checks the whole file, but the worker reads it again, and it can
+change in between: a recording copied while still being written, a file
+regenerated or deleted, a share that drops. The worker then stopped at
+the row it couldn't read, or at a file that wouldn't open again, and
+nothing said so: the frame count fell short of `replay_frames`, so
+"Replay finished" never came, and the session sat connected and silent.
+
+**Decision.** The worker publishes a new status code through the error
+state, `ECUIO_ERR_RECORDING_CHANGED` (16, appended), with one episode,
+and sends nothing more; the session stays open, as at the end of the
+file. A clean end of the file still leaves `ECUIO_OK`. The bridge maps
+the code to a link state of its own, `stopped` (amber, "Replay
+stopped" on the header pill, Home and the Dashboard; Live's banner
+"Replay stopped — the recording changed after it was opened"), and
+logs once "Replay stopped after N frames: the recording changed after
+it was opened". The link-health codes already there were the wrong
+words: `fault` names an adapter, `quiet` says to check the ignition.
+
+The log line gives the frames sent, not the frames.csv line: the line
+is in the worker thread's error detail, which the bridge can't read,
+and carrying it would need a session-info field the worker writes
+after attach, where today the info is written once. For a replay
+without `loop` that stopped at a bad row, the line is the count plus 2.
+
+The worker opens the file shared for reading and writing on Windows
+(`_wfsopen`, `_SH_DENYNO`), as `fopen` does elsewhere. `_wfopen_s` opened
+it unshared, so playing a recording locked it against being copied
+over or regenerated, and the case this appendix handles could happen
+on Windows only between two passes of a loop.
+
+Tests: `CoreTest.ReplayStopsAtARowThatTurnedBadAfterAttach` (the code
+and one episode), `.ReplayOfARecordingThatWentAwaySaysSo`, the end of
+the file leaving `ECUIO_OK` in `.ReplaySendsTheRecordedFramesAtTheirRebasedTimes`;
+`BridgeTest.ReplayThatStopsEarlySaysSo` (a looping replay whose file is
+rewritten: the state, the code, the episode, one line, no "Replay
+finished") and `.LinkStateMapsEveryPublishedCode`; `QmlTest.theme` and
+`.liveview` for the label, color and banner.

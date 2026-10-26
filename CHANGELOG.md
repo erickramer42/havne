@@ -16,7 +16,10 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
   platform at its own pace, at `?speed=` 0.1 to 100 or `max`, and with
   `?loop=1` round again. Its default profile is `raw`; a J2534
   recording decodes under `?profile=obd2`. The activity log says what's
-  playing and when it ends, and the session stays open at the end.
+  playing and when it ends, and the session stays open at the end. If
+  the recording changes or disappears while it plays, playback stops
+  and every page says "Replay stopped"; playing a recording never locks
+  the file.
 - Connect-failure text names a vendor's status in hex as well as
   decimal ("status 34 (0x22, vendor-specific)").
 
