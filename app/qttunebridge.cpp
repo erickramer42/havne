@@ -440,6 +440,7 @@ QtTuneBridge::QtTuneBridge(QObject* parent)
         pollLinkHealth();   // every tick while connected — transitions only
         pollChannelSupport();
         pollChannelIdentity();
+        pollReplayEnd();
         // Must fire even when nothing arrived this window: dimming exists
         // for rows that STOPPED updating. 100 ms is well
         // inside the 3 s dim threshold and the span emission is one
@@ -590,8 +591,11 @@ QString QtTuneBridge::connectCoreOnly(const QString& uri,
 // connected check. On failure the session is destroyed.
 QString QtTuneBridge::startSession(ecuio_session_t* session)
 {
+    m_framesDelivered.store(0, std::memory_order_relaxed);
+    m_accepting.store(true, std::memory_order_release);
     const ecuio_status_t rc = ecuio_session_start(session);
     if (rc != ECUIO_OK) {
+        m_accepting.store(false, std::memory_order_release);
         const QString err = failureText(rc);
         ecuio_unregister_frame_callback(session, &QtTuneBridge::onFrame, this);
         ecuio_session_destroy(session);
@@ -638,6 +642,9 @@ void QtTuneBridge::applyConnectedState(ecuio_session_t* session, const QString& 
         m_channelCount = std::min<uint32_t>(info.channel_count,
                                             ECUIO_SESSION_INFO_MAX_CHANNELS);
     }
+    m_replayFrames = info.replay_frames;
+    m_replayEndLogged = info.backend != ECUIO_BACKEND_REPLAY ||
+                        (info.flags & ECUIO_SESSION_INFO_REPLAY_LOOP) != 0;
     for (uint32_t& g : m_supportGeneration) {
         g = 0;
     }
@@ -734,6 +741,7 @@ void QtTuneBridge::disconnectSession()
     // onFrame and handleFrameInternal drop everything, and the GUI
     // thread never touches the session again.
     ecuio_session_t* session = std::exchange(m_session, nullptr);
+    m_accepting.store(false, std::memory_order_release);
     m_connected.store(false, std::memory_order_release);
     m_disconnecting = true;
     m_coalesceTimer->stop();
@@ -939,7 +947,8 @@ void QtTuneBridge::onFrame(const ecuio_frame_t* frame, void* user_data)
 {
     QtTuneBridge* self = static_cast<QtTuneBridge*>(user_data);
     if (!frame || !self) return;
-    if (!self->m_connected.load(std::memory_order_acquire)) return;
+    if (!self->m_accepting.load(std::memory_order_acquire)) return;
+    self->m_framesDelivered.fetch_add(1, std::memory_order_relaxed);
 
     // Backpressure: bound the QUEUED backlog, not the lifetime count.
     if (self->m_inFlightFrames.load(std::memory_order_relaxed) >= MaxInFlightFrames) {
@@ -1321,20 +1330,58 @@ QString QtTuneBridge::channelIdentityText(const ecuio_channel_identity_t& s)
  * other URI is unchanged. Settings and the activity log keep it whole. */
 QString QtTuneBridge::uriLabelFor(const QString& uri)
 {
-    const QString scheme = QStringLiteral("j2534://");
+    const bool replay = uri.startsWith(QStringLiteral("replay://"));
+    const QString scheme =
+        replay ? QStringLiteral("replay://") : QStringLiteral("j2534://");
     if (!uri.startsWith(scheme)) {
         return uri;
     }
     const qsizetype query = uri.indexOf(QLatin1Char('?'), scheme.size());
     const qsizetype end = query < 0 ? uri.size() : query;
-    const QString selector = uri.mid(scheme.size(), end - scheme.size());
-    const qsizetype sep = std::max(selector.lastIndexOf(QLatin1Char('/')),
-                                   selector.lastIndexOf(QLatin1Char('\\')));
+    QString selector = uri.mid(scheme.size(), end - scheme.size());
+    const auto lastSep = [](const QString& s) {
+        return std::max(s.lastIndexOf(QLatin1Char('/')),
+                        s.lastIndexOf(QLatin1Char('\\')));
+    };
+    if (replay) {
+        // The recording's folder name, and its frames.csv when named
+        while (selector.size() > 1 &&
+               lastSep(selector) == selector.size() - 1) {
+            selector.chop(1);
+        }
+        qsizetype sep = lastSep(selector);
+        if (sep > 0 &&
+            selector.mid(sep + 1).compare(QStringLiteral("frames.csv"),
+                                          Qt::CaseInsensitive) == 0) {
+            sep = lastSep(selector.left(sep));
+        }
+        if (sep < 0) {
+            return uri;
+        }
+        return scheme + QChar(0x2026) + QLatin1Char('/') +
+               selector.mid(sep + 1) + uri.mid(end);
+    }
+    const qsizetype sep = lastSep(selector);
     if (sep < 0) {
         return uri;
     }
     return scheme + QChar(0x2026) + QLatin1Char('/') + selector.mid(sep + 1) +
            uri.mid(end);
+}
+
+/* A replay without loop=1 stops sending at the end of its file and the
+ * session stays open (ADR-0023); this says so once, when every frame the
+ * file holds has reached onFrame, taken or dropped */
+void QtTuneBridge::pollReplayEnd()
+{
+    if (m_replayEndLogged ||
+        m_framesDelivered.load(std::memory_order_relaxed) < m_replayFrames) {
+        return;
+    }
+    m_replayEndLogged = true;
+    emit logMessage(
+        QStringLiteral("Replay finished: %1 frames; the session stays open")
+            .arg(m_replayFrames));
 }
 
 /* The published state strings, in one place; QML's Theme.linkColor and
@@ -1362,6 +1409,21 @@ QString QtTuneBridge::sessionInfoText(const ecuio_session_info_t& info)
             qstrnlen(info.profile, ECUIO_SESSION_INFO_PROFILE_LEN)));
     if (info.backend == ECUIO_BACKEND_MOCK) {
         return QStringLiteral("Session: mock transport; ") + profile;
+    }
+    if (info.backend == ECUIO_BACKEND_REPLAY) {
+        // The path is in the "Connected:" line just before
+        const QString speed =
+            info.replay_speed_milli == 0
+                ? QStringLiteral("at full speed")
+                : QStringLiteral("at %1x").arg(QString::number(
+                      info.replay_speed_milli / 1000.0, 'g', 6));
+        const bool loop = (info.flags & ECUIO_SESSION_INFO_REPLAY_LOOP) != 0;
+        return QStringLiteral(
+                   "Session: replay of a recording, %1 frames over %2 s %3%4; ")
+                   .arg(info.replay_frames)
+                   .arg(QString::number(info.replay_span_ms / 1000.0, 'f', 1),
+                        speed, loop ? QStringLiteral(", looping") : QString()) +
+               profile;
     }
     if (info.backend != ECUIO_BACKEND_J2534_INPROC &&
         info.backend != ECUIO_BACKEND_J2534_SURROGATE) {

@@ -17,6 +17,7 @@
 #include <QThread>
 #include <QVariant>
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <cstring>
@@ -2275,4 +2276,139 @@ TEST(BridgeTest, LinkStateMapsEveryPublishedCode)
     EXPECT_EQ(QtTuneBridge::linkStateForError(ECUIO_ERR_REQUEST_FAILED), QStringLiteral("requests"));
     EXPECT_EQ(QtTuneBridge::linkStateForError(ECUIO_ERR_TRANSPORT_HARD_FAILURE), QStringLiteral("fault"));
     EXPECT_EQ(QtTuneBridge::linkStateForError(static_cast<ecuio_status_t>(999)), QStringLiteral("degraded"));
+}
+
+/* ADR-0023's round trip: a recorded mock session, replayed at full speed
+ * under its profile, delivers every frame (the first included, though a
+ * replay sends it the moment the session starts) and decodes every value
+ * the recording holds; the replay's own recording matches the first one
+ * row for row, its times rebased to the first frame. The end of the file
+ * is logged once. */
+TEST(BridgeTest, ReplayOfAMockRecordingDecodesWhatWasRecorded)
+{
+    QTemporaryDir first, second;
+    ASSERT_TRUE(first.isValid() && second.isValid());
+    QtTuneBridge bridge;
+    bridge.setRecording(true);
+    bridge.setRecordingsRootForTesting(first.path());
+    ASSERT_TRUE(bridge.connectSession("mock://roundtrip").isEmpty());
+    ASSERT_TRUE(
+        spinUntil([&bridge]() { return bridge.frameCount() > 30; }, 10000));
+    ASSERT_TRUE(disconnectAndWait(bridge));
+    const QStringList recorded = recordingFolders(first.path());
+    ASSERT_EQ(recorded.size(), 1);
+    const QString a = first.path() + QStringLiteral("/") + recorded.first();
+    const QList<QByteArray> framesA =
+        fileLines(a + QStringLiteral("/frames.csv"));
+    const int n = static_cast<int>(framesA.size()) - 1;
+    ASSERT_GT(n, 30);
+
+    QStringList log;
+    QObject::connect(&bridge, &QtTuneBridge::logMessage,
+                     [&log](const QString& line) { log << line; });
+    bridge.setRecordingsRootForTesting(second.path());
+    const QString uri = QStringLiteral("replay://") + a +
+                        QStringLiteral("?profile=mock&speed=max");
+    ASSERT_TRUE(bridge.connectSession(uri).isEmpty());
+    const QString finished =
+        QStringLiteral("Replay finished: %1 frames; the session stays open")
+            .arg(n);
+    ASSERT_TRUE(spinUntil(
+        [&log, &finished]() { return log.contains(finished); }, 10000))
+        << log.join(QLatin1Char('\n')).toStdString();
+    spinLoop(300); // the last frames' queued calls, and a tick or two
+    EXPECT_EQ(bridge.droppedFrames(), 0)
+        << "the count below is whole only without drops";
+    EXPECT_EQ(bridge.frameCount(), n) << "every frame, the first included";
+    EXPECT_EQ(log.count(finished), 1) << "logged once";
+    const QString session =
+        QStringLiteral("Session: replay of a recording, %1 frames over ")
+            .arg(n);
+    EXPECT_TRUE(std::any_of(
+        log.cbegin(), log.cend(),
+        [&session](const QString& l) { return l.startsWith(session); }))
+        << log.join(QLatin1Char('\n')).toStdString();
+    ASSERT_TRUE(disconnectAndWait(bridge));
+
+    const QStringList replayed = recordingFolders(second.path());
+    ASSERT_EQ(replayed.size(), 1);
+    const QString b = second.path() + QStringLiteral("/") + replayed.first();
+    const QList<QByteArray> framesB =
+        fileLines(b + QStringLiteral("/frames.csv"));
+    ASSERT_EQ(framesB.size(), framesA.size());
+    const qulonglong t0 = framesA.at(1).split(',').at(1).toULongLong();
+    for (int i = 1; i < framesA.size(); ++i) {
+        const QList<QByteArray> ra = framesA.at(i).split(',');
+        const QList<QByteArray> rb = framesB.at(i).split(',');
+        ASSERT_EQ(ra.size(), 5);
+        ASSERT_EQ(rb.size(), 5);
+        EXPECT_EQ(rb.at(1).toULongLong(), ra.at(1).toULongLong() - t0)
+            << "row " << i;
+        EXPECT_EQ(rb.at(2), ra.at(2)) << "row " << i;
+        EXPECT_EQ(rb.at(3), ra.at(3)) << "row " << i;
+        ASSERT_EQ(rb.at(4), ra.at(4)) << "row " << i;
+    }
+
+    // Each decoded value, signal by signal in order (host_us aside)
+    const auto values = [](const QString& dir) {
+        QList<QByteArray> out;
+        const QList<QByteArray> rows =
+            fileLines(dir + QStringLiteral("/signals.csv"));
+        for (int i = 1; i < rows.size(); ++i) {
+            out << rows.at(i).mid(rows.at(i).indexOf(',') + 1);
+        }
+        return out;
+    };
+    const QList<QByteArray> valuesA = values(a);
+    ASSERT_FALSE(valuesA.isEmpty());
+    EXPECT_EQ(values(b), valuesA);
+}
+
+TEST(BridgeTest, ReplayUriLabelKeepsTheRecordingsName)
+{
+    const QString dots = QString(QChar(0x2026));
+    EXPECT_EQ(QtTuneBridge::uriLabelFor(
+                  QStringLiteral("replay://C:/Users/me/Documents/QtTune/"
+                                 "recordings/20261025-165100?profile=obd2")),
+              QStringLiteral("replay://") + dots +
+                  QStringLiteral("/20261025-165100?profile=obd2"));
+    EXPECT_EQ(
+        QtTuneBridge::uriLabelFor(QStringLiteral(
+            "replay://C:\\Users\\me\\recordings\\20261025-165100\\frames.csv")),
+        QStringLiteral("replay://") + dots +
+            QStringLiteral("/20261025-165100\\frames.csv"));
+    EXPECT_EQ(QtTuneBridge::uriLabelFor(
+                  QStringLiteral("replay:///home/me/rec/20261025-165100/")),
+              QStringLiteral("replay://") + dots +
+                  QStringLiteral("/20261025-165100"));
+    for (const char* uri :
+         {"replay://", "replay://?speed=max", "replay://frames.csv"}) {
+        EXPECT_EQ(QtTuneBridge::uriLabelFor(QString::fromLatin1(uri)),
+                  QString::fromLatin1(uri));
+    }
+}
+
+TEST(BridgeTest, SessionInfoTextDescribesAReplay)
+{
+    ecuio_session_info_t info{};
+    info.backend = ECUIO_BACKEND_REPLAY;
+    info.replay_frames = 7194;
+    info.replay_span_ms = 275224;
+    info.replay_speed_milli = 1000;
+    qstrncpy(info.profile, "obd2", sizeof(info.profile));
+    EXPECT_EQ(QtTuneBridge::sessionInfoText(info).toStdString(),
+              "Session: replay of a recording, 7194 frames over 275.2 s at 1x; "
+              "profile obd2");
+    info.replay_speed_milli = 2500;
+    info.flags = ECUIO_SESSION_INFO_REPLAY_LOOP;
+    EXPECT_EQ(QtTuneBridge::sessionInfoText(info).toStdString(),
+              "Session: replay of a recording, 7194 frames over 275.2 s at "
+              "2.5x, looping; "
+              "profile obd2");
+    info.replay_speed_milli = 0;
+    info.flags = 0;
+    EXPECT_EQ(QtTuneBridge::sessionInfoText(info).toStdString(),
+              "Session: replay of a recording, 7194 frames over 275.2 s at "
+              "full speed; "
+              "profile obd2");
 }

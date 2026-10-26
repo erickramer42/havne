@@ -279,7 +279,7 @@ public:
     ecuio_session_t* pendingSessionForTesting() const { return m_pendingSession.load(); }
     QString linkState() const;
     static QString linkStateForError(int32_t errorCode);  /* code → state string; static so tests need no session */
-    static QString uriLabelFor(const QString& uri);  /* a direct-load DLL path cut to its file name */
+    static QString uriLabelFor(const QString& uri);  /* a direct-load DLL or replay path cut to its last name */
     static QString sessionInfoText(const ecuio_session_info_t& info);  /* the activity log's "Session:" line */
     static QString channelSupportText(const ecuio_channel_support_t& support);  /* its "ECU 0x…:" lines */
     static QString channelIdentityText(const ecuio_channel_identity_t& identity);  /* its "ECU 0x… identity:" lines */
@@ -366,12 +366,22 @@ private:
     QString m_currentUri;
 
     std::atomic<bool> m_connected{false};
+    // onFrame's gate: set just before the session starts, so frames sent
+    // before the connect is applied queue instead of vanishing (a replay's
+    // first frame is due the moment it starts); the GUI-thread half still
+    // waits for m_connected, which they reach after the apply
+    std::atomic<bool> m_accepting{false};
+    // Every frame onFrame saw, dropped ones too
+    std::atomic<uint64_t> m_framesDelivered{0};
     std::atomic<int> m_droppedFrames{0};
     int m_currentFrameCount = 0;      // GUI-thread-only (queued invocations)
     int m_reportedFrameCount = 0;      // what QML was last told, and below
     int m_reportedNotifyCount = 0;
     int m_lastReportedDropped = 0;     // GUI-thread-only companion to m_droppedFrames
     bool m_logPaused = false;          // GUI-thread-only
+    // A replay without loop: its frames, and whether its end is logged
+    uint32_t m_replayFrames = 0;
+    bool m_replayEndLogged = true;
 
     FrameListModel* m_frameLog = nullptr;
 
@@ -417,6 +427,7 @@ private:
     uint32_t m_supportGeneration[ECUIO_SESSION_INFO_MAX_CHANNELS] = {};
     // What each channel's ECU said it is (ADR-0021), logged once complete
     void pollChannelIdentity();
+    void pollReplayEnd();   // the tick: "Replay finished" once, at the end of the file
     uint32_t m_identityGeneration[ECUIO_SESSION_INFO_MAX_CHANNELS] = {};
 
     bool m_recording = false;
