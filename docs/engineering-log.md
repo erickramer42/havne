@@ -929,3 +929,13 @@ change: the write cap, the SCONFIG codes and the ioctl cut each
 diverged between the backends until a test ran both. The price, 18–28
 ms a connect (docs/testing.md, "Connect cost: a surrogate per
 session"), is one no user waits on.
+
+**2026-10-26 — the Dashboard's peak hold:** **close an issue on the
+surface its evidence came from.** Known Issue #10 was opened from the
+Dashboard's tach, 1,195 rpm against the recording's 1,261, and closed
+when the strip chart kept the peak; the chart was where the fix
+landed, so the chart was what its test checked. The gauges still held
+each window's newest value, and the Dashboard's only peak test asked
+whether a peak existed, not which. A review that went back to the
+issue's first evidence found it; the tach now holds the window's
+highest, and a test replays the fixture into it.

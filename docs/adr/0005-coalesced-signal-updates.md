@@ -96,3 +96,11 @@ Alternatives considered:
 - **Per-sample time, the newest value only.** The x-axis would be
   right, but a peak between two windows' newest values would still
   vanish.
+
+**Note (2026-10-26):** the envelope is the Dashboard's too. The model
+gives each row its last window's highest and lowest beside the newest
+value (`windowHigh`, `windowLow`, displayed like the value), and the
+gauges' peak and low holds take them, so a gauge holds the peak the
+chart shows. Holding the newest value alone, the engine-start
+recording replayed at 100× never reached its 1,261 rpm on the tach
+(`QmlTest.dashboard`).

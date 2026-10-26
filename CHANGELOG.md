@@ -47,6 +47,9 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
   value of every 100 ms window, so a short peak stays on the chart.
 
 ### Fixed
+- The Dashboard's held peaks and lows catch a value between two
+  refreshes, as the strip chart does: the engine start replayed fast
+  had shown a peak of 1,195 rpm against the recording's 1,261.
 - Choosing raw for a replay in Settings no longer gives a URI the
   replay refuses.
 - A replay that can't play its recording no longer says it failed to
