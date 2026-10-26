@@ -2075,6 +2075,10 @@ struct ReplayCapture {
     std::mutex mutex;
     std::vector<ecuio_frame_t> frames;
     std::vector<std::chrono::steady_clock::time_point> arrived;
+    /* The callback holds the worker this long at this frame (a late
+     * frame); 0 never */
+    size_t stall_at = 0;
+    int stall_ms = 0;
     size_t count()
     {
         std::lock_guard<std::mutex> lock(mutex);
@@ -2085,9 +2089,16 @@ struct ReplayCapture {
 void replay_capture_cb(const ecuio_frame_t* frame, void* user_data)
 {
     auto* c = static_cast<ReplayCapture*>(user_data);
-    std::lock_guard<std::mutex> lock(c->mutex);
-    c->frames.push_back(*frame);
-    c->arrived.push_back(std::chrono::steady_clock::now());
+    size_t n = 0;
+    {
+        std::lock_guard<std::mutex> lock(c->mutex);
+        c->frames.push_back(*frame);
+        c->arrived.push_back(std::chrono::steady_clock::now());
+        n = c->frames.size();
+    }
+    if (c->stall_at != 0 && n == c->stall_at) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(c->stall_ms));
+    }
 }
 
 /* Creates, registers and starts a replay session, or fails the test */
@@ -2105,12 +2116,12 @@ ecuio_session_t* start_replay(const std::string& uri, ReplayCapture* capture)
     return session;
 }
 
-/* Rows at 100 ms steps of session time, 0x7E8 and 41 0C 1F 40 each */
-std::string paced_rows(int n)
+/* Rows at step_us steps of session time, 0x7E8 and 41 0C 1F 40 each */
+std::string paced_rows(int n, int step_us = 100000)
 {
     std::string text = kFramesHeader;
     for (int i = 0; i < n; ++i) {
-        const std::string t = std::to_string(5000000 + 100000 * i);
+        const std::string t = std::to_string(5000000 + int64_t{step_us} * i);
         text += t + "," + t + ",0x7E8,0x0,41 0C 1F 40\n";
     }
     return text;
@@ -2231,6 +2242,40 @@ TEST(CoreTest, ReplayPacesByTheRecordingsTimeOverTheSpeed)
             EXPECT_LE(ms, 400);
         }
         EXPECT_EQ(cap.frames.back().timestamp_us, 1000000u)
+            << "the recording's time";
+        ecuio_session_destroy(session);
+    }
+}
+
+/* Each frame is due at its time from the start of playback, not a step
+ * after the last send: a frame held up 400 ms is followed at once by the
+ * ones it delayed, and a second of recording still takes about a second.
+ * Waiting each step from the last send would add the stall, and on
+ * Windows every short wait's rounding, so 200 steps of 5 ms (speed 1) or
+ * 50 ms at 10x (5 ms waits) show it either way. */
+TEST(CoreTest, ReplayCatchesUpAfterALateFrameAndNeverDrifts)
+{
+    struct Case {
+        const char* query;
+        int step_us;
+    };
+    for (const Case& c : {Case{"", 5000}, Case{"?speed=10", 50000}}) {
+        SCOPED_TRACE(c.query);
+        TempRecording rec(paced_rows(201, c.step_us));
+        ReplayCapture cap;
+        cap.stall_at = 20;
+        cap.stall_ms = 400;
+        ecuio_session_t* session = start_replay(rec.uri(c.query), &cap);
+        ASSERT_NE(session, nullptr);
+        ASSERT_TRUE(wait_for([&] { return cap.count() >= 201; }, 5000));
+        ASSERT_EQ(ecuio_session_close(session), ECUIO_OK);
+        const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                            cap.arrived.back() - cap.arrived.front())
+                            .count();
+        EXPECT_GE(ms, 950) << "the last frame is due a second in";
+        EXPECT_LE(ms, 1250) << "late frames catch up; the stall isn't added";
+        EXPECT_EQ(cap.frames.back().timestamp_us,
+                  200u * static_cast<uint64_t>(c.step_us))
             << "the recording's time";
         ecuio_session_destroy(session);
     }

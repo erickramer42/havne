@@ -1,7 +1,8 @@
 // File/layer: core/src/replay_transport.cpp | C++17, Qt-free, CI-validated headless build
 // Testing: UNIT — CoreTest.Replay* (the reader's refusals with their line
 //          numbers, either line ending, a whole-message payload, pacing at
-//          speed 1 and 10, stamps rebased and never decreasing, the
+//          speed 1 and 10, late frames catching up with no drift, stamps
+//          rebased and never decreasing, the
 //          backward-step fallback, loop and end of file, the query);
 //          BridgeTest.ReplayOfAMockRecordingDecodesWhatWasRecorded (the
 //          round trip through SessionRecorder);
