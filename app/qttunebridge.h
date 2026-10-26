@@ -106,10 +106,25 @@ class SignalListModel : public QAbstractListModel
 public:
     explicit SignalListModel(QObject* parent = nullptr);
 
-    // Rolling history depth per signal — strip chart window.
-    // At 10 Hz coalesced batches this is a ~12 s trace. Kept constexpr so
-    // tests can assert exact ring behavior without a config surface.
-    static constexpr int HistoryCapacity = 120;
+    // Rolling history depth per signal — strip chart window. A window
+    // adds one to three samples (its lowest, highest and newest value,
+    // ADR-0005's appendix), so this is about a 12 s trace at 10 Hz.
+    // Kept constexpr so tests can assert exact ring behavior without a
+    // config surface.
+    static constexpr int HistoryCapacity = 360;
+
+    // One signal's coalesce window, as the bridge's staging hands it
+    // over: its newest value and its lowest and highest, each at its
+    // frame's session time in ms
+    struct WindowValue {
+        uint16_t id = 0;
+        double last = 0.0;
+        qint64 lastMs = 0;
+        double min = 0.0;
+        qint64 minMs = 0;
+        double max = 0.0;
+        qint64 maxMs = 0;
+    };
 
     enum SignalRoles {
         IdRole = Qt::UserRole + 1,
@@ -140,13 +155,15 @@ public:
     QVariant data(const QModelIndex& index, int role = Qt::DisplayRole) const override;
     QHash<int, QByteArray> roleNames() const override;
     void setSignalSet(const ecuio_signal_set_t* set);
-    // timestampMs < 0  => stamp from the internal clock (production path:
-    // coalesce-drain time, ~100 ms resolution).
-    // timestampMs >= 0  => use as-is (tests inject deterministic values).
-    // Values reach the bridge with their frame's session time (ADR-0024);
-    // the chart doesn't use it yet.
+    // The bridge's form: each signal's window. The row shows the newest
+    // value; the history takes the distinct points among the lowest,
+    // highest and newest, in time order, so a peak inside a window
+    // stays on the chart at its own time.
     // Every row updates, subscribed or not: a subscription only chooses
     // what chartData() plots, and the Dashboard reads every signal.
+    void updateWindow(const std::vector<WindowValue>& window);
+    // The one-point form: each value its window's lowest, highest and
+    // newest at timestampMs (< 0: the model's clock). Tests use it.
     void updateValues(const std::vector<std::pair<uint16_t, double>>& values,
                       qint64 timestampMs = -1);
     // The text rows' counterpart: each id's latest text. The sample's
@@ -212,9 +229,14 @@ private:
         Sample history[HistoryCapacity];
         uint32_t histHead = 0;   // next write slot
         uint32_t histCount = 0; // valid samples, saturates at HistoryCapacity
+        // When the last value arrived, on m_clock: ageMs counts from
+        // here, since sample times are session time and can run faster
+        // than the wall clock (a replay at 10x). -1 until one does.
+        qint64 arrivedMs = -1;
     };
 
     static void pushSample(Entry& e, qint64 stamp, double value);
+    static void pushWindow(Entry& e, const WindowValue& w);
     // A row's value as displayed in the current unit system
     ecuio_display_value_t shown(const Entry& e, double value) const;
 
@@ -408,8 +430,8 @@ private:
     FrameListModel* m_frameLog = nullptr;
 
     QTimer* m_coalesceTimer = nullptr;
-    // The model's batch for one tick: each signal's newest value
-    std::vector<std::pair<uint16_t, double>> m_stagingBuffer;
+    // The model's batch for one tick: each signal's window
+    std::vector<SignalListModel::WindowValue> m_stagingBuffer;
     std::vector<std::pair<uint16_t, QString>> m_stagingTexts;   // the text rows'
     int m_signalBatchCount = 0;
 
@@ -429,6 +451,13 @@ private:
         std::vector<Sample> samples;   // every value, in arrival order
         std::vector<char> text;        // the text samples' bytes
         std::vector<double> newest;    // per def: its newest numeric value
+        // per def: the window's lowest and highest, and each value's
+        // frame time in session µs
+        std::vector<double> lowest;
+        std::vector<double> highest;
+        std::vector<uint64_t> newestUs;
+        std::vector<uint64_t> lowestUs;
+        std::vector<uint64_t> highestUs;
         std::vector<int> newestText;   // per def: its newest text sample, or -1
         std::vector<uint8_t> has;      // per def: a value this window
         size_t sampleLimit = 0;
@@ -437,7 +466,7 @@ private:
 
         void prepare(size_t defs, size_t samplesMax, size_t textMax);
         void stage(uint32_t def, SessionRecorder::Clock::time_point arrived,
-                   const ecuio_value_t& v);
+                   uint64_t frameUs, const ecuio_value_t& v);
         void reset();
     };
     std::mutex m_valuesMutex;           // guards m_valueStaging and m_activeStaging

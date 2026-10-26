@@ -614,11 +614,13 @@ TEST(BridgeTest, SignalBatchesAreCoalesced)
     bridge.disconnectSession();
 }
 
-TEST(BridgeTest, TheNewestSampleInAWindowIsTheOneShown)
+TEST(BridgeTest, AWindowShowsItsNewestAndChartsItsEnvelope)
 {
     /* Three frames' values inside one coalesce window, as core's worker
-     * hands them to onValues: the row shows the third, numeric and text
-     * alike, and the window adds one sample to the chart. The mock's own
+     * hands them to onValues, at 1, 2 and 3 ms of session time: 20, then
+     * a peak of 30, then 10. The row shows the newest, numeric and text
+     * alike; the chart gets the window's highest and lowest at their own
+     * times, the peak included (ADR-0005's appendix). The mock's own
      * frames (0x0C0) match neither def. */
     static ecuio_signal_def_t defs[2] = {};
     defs[0] = {};
@@ -645,7 +647,8 @@ TEST(BridgeTest, TheNewestSampleInAWindowIsTheOneShown)
     ASSERT_TRUE(bridge.connectSession("mock://newest?profile=test-newest").isEmpty());
     spinLoop(150);   // a tick or more, so the window below starts clean
     const int batches = bridge.signalBatchCount();
-    for (const char* hex : {"0A", "14", "1E"}) {
+    uint64_t at = 0;
+    for (const char* hex : {"14", "1E", "0A"}) {
         ecuio_value_t values[2] = {};
         values[0].signal_id = 1;
         values[0].kind = ECUIO_VALUE_UINT;
@@ -655,6 +658,7 @@ TEST(BridgeTest, TheNewestSampleInAWindowIsTheOneShown)
         values[1].text = hex;
         values[1].text_len = 2;
         ecuio_value_batch_t batch = {};
+        batch.timestamp_us = at += 1000;
         batch.arbitration_id = 0x123;
         batch.count = 2;
         batch.values = values;
@@ -664,13 +668,17 @@ TEST(BridgeTest, TheNewestSampleInAWindowIsTheOneShown)
 
     SignalListModel* model = bridge.signalModel();
     ASSERT_EQ(model->rowCount(), 2);
-    EXPECT_EQ(model->data(model->index(0, 0), SignalListModel::ValueRole).toDouble(), 30.0);
+    EXPECT_EQ(model->data(model->index(0, 0), SignalListModel::ValueRole).toDouble(), 10.0)
+        << "the newest";
     EXPECT_EQ(model->data(model->index(1, 0), SignalListModel::TextRole).toString(),
-              QStringLiteral("1E"));
+              QStringLiteral("0A"));
     const QVariantList chart = model->chartData();
     ASSERT_EQ(chart.size(), 1);
-    EXPECT_EQ(chart.at(0).toMap().value("samples").toList().size(), 2)
-        << "one [time, value] pair for the window";
+    QList<double> samples;
+    for (const QVariant& v : chart.at(0).toMap().value("samples").toList())
+        samples << v.toDouble();
+    EXPECT_EQ(samples, (QList<double>{2, 30, 3, 10}))
+        << "the peak at 2 ms and the low, which is the newest, at 3 ms";
     ASSERT_TRUE(disconnectAndWait(bridge));
     EXPECT_EQ(ecuio_profile_unregister("test-newest"), ECUIO_OK);
 }
@@ -1152,7 +1160,7 @@ TEST(BridgeTest, HistoryRingEvictsOldestAtCapacity)
     buildTestSignalSet(defs, set);
     model.setSignalSet(&set);
 
-    // Push 10 MORE batches than capacity: 0..129 into a 120-slot ring.
+    // Push 10 MORE one-point batches than the ring holds.
     std::vector<std::pair<uint16_t, double>> batch;
     for (qint64 t = 0; t < SignalListModel::HistoryCapacity + 10; ++t) {
         batch.clear();
@@ -1171,15 +1179,16 @@ TEST(BridgeTest, HistoryRingEvictsOldestAtCapacity)
         ASSERT_EQ(samples.size(), SignalListModel::HistoryCapacity * 2)
             << "wrong sample count for " << m.value("name").toString().toStdString();
 
-        // Oldest retained = push #(130-120) = timestamp 10; newest = 129.
+        // Oldest retained = push #10; newest = the last push.
         // Exact ints: injected timestamps make wrap position deterministic.
+        const double newest = SignalListModel::HistoryCapacity + 9;
         EXPECT_EQ(samples.at(0).toDouble(), 10.0);
-        EXPECT_EQ(samples.at(samples.size() - 2).toDouble(), 129.0);
+        EXPECT_EQ(samples.at(samples.size() - 2).toDouble(), newest);
 
         // Values track their timestamps (order preserved through the wrap)
         const double offset = (m.value("id").toInt() == 1001) ? 0.0 : -40.0;
         EXPECT_NEAR(samples.at(1).toDouble(), 10.0 + offset, 0.01);
-        EXPECT_NEAR(samples.at(samples.size() - 1).toDouble(), 129.0 + offset, 0.01);
+        EXPECT_NEAR(samples.at(samples.size() - 1).toDouble(), newest + offset, 0.01);
 
         // Monotonic timestamps oldest->newest (wrap-around correctness)
         double prev = -1.0;
@@ -1188,6 +1197,50 @@ TEST(BridgeTest, HistoryRingEvictsOldestAtCapacity)
             prev = samples.at(i).toDouble();
         }
     }
+}
+
+/* A window's points (ADR-0005's appendix): its lowest, highest and
+ * newest value in time order, each once; the row's age counts from the
+ * value's arrival, whatever its sample time */
+TEST(BridgeTest, AWindowChartsItsLowestHighestAndNewestInTimeOrder)
+{
+    SignalListModel model;
+    ecuio_signal_def_t defs[2];
+    ecuio_signal_set_t set;
+    buildTestSignalSet(defs, set);
+    model.setSignalSet(&set);
+    const auto window = [](double last, qint64 lastMs, double min, qint64 minMs,
+                           double max, qint64 maxMs) {
+        SignalListModel::WindowValue w;
+        w.id = 1001;
+        w.last = last;
+        w.lastMs = lastMs;
+        w.min = min;
+        w.minMs = minMs;
+        w.max = max;
+        w.maxMs = maxMs;
+        return w;
+    };
+    const auto points = [&model]() {
+        QList<double> out;
+        for (const QVariant& v : model.chartData().at(0).toMap().value("samples").toList())
+            out << v.toDouble();
+        return out;
+    };
+    model.updateWindow({window(25, 30, 5, 10, 50, 20)});
+    EXPECT_EQ(points(), (QList<double>{10, 5, 20, 50, 30, 25})) << "three apart";
+    model.updateWindow({window(7, 40, 7, 40, 7, 40)});
+    EXPECT_EQ(points().size(), 8) << "one value: one point";
+    model.updateWindow({window(1, 60, 1, 60, 9, 50)});
+    EXPECT_EQ(points().mid(8), (QList<double>{50, 9, 60, 1}))
+        << "the high first; the low is the newest";
+    EXPECT_EQ(model.data(model.index(0, 0), SignalListModel::ValueRole).toDouble(), 1.0);
+
+    /* Sample times far past the model's clock, as a replay's can run */
+    model.updateWindow({window(3, 1000000000, 3, 1000000000, 3, 1000000000)});
+    const int age = model.data(model.index(0, 0), SignalListModel::AgeMsRole).toInt();
+    EXPECT_GE(age, 0);
+    EXPECT_LT(age, 5000) << "from arrival, not sample time";
 }
 
 TEST(BridgeTest, ChartDataFiltersUnsubscribedAndEmptyBatchesDoNotEmit)
@@ -2560,6 +2613,47 @@ void core_rows_values_cb(const ecuio_value_batch_t* batch, void* user_data)
 }
 
 } // namespace
+
+/* The chart keeps a peak (ADR-0005's appendix): the vehicle fixture's
+ * engine start peaks at 1,261 rpm, and replayed at 100x under obd2,
+ * ten seconds of the recording to a window, the chart reaches it. Each
+ * sample sits at its frame's time in the recording, in order */
+TEST(BridgeTest, TheChartKeepsTheFixturesPeak)
+{
+    const QString uri =
+        QStringLiteral("replay://%1/2026-10-25-engine-start?profile=obd2&speed=100")
+            .arg(QStringLiteral(ECUIO_REPLAY_FIXTURES));
+    QtTuneBridge bridge;
+    ASSERT_TRUE(bridge.connectSession(uri).isEmpty());
+    SignalListModel* model = bridge.signalModel();
+    double peak = 0.0;
+    bool ordered = true;
+    qint64 lastMs = -1;
+    QObject::connect(model, &SignalListModel::valuesUpdated, model, [&]() {
+        for (const QVariant& s : model->chartData()) {
+            const QVariantMap m = s.toMap();
+            if (m.value("name").toString() != QStringLiteral("RPM"))
+                continue;
+            const QVariantList samples = m.value("samples").toList();
+            qint64 prev = -1;
+            for (qsizetype i = 0; i + 1 < samples.size(); i += 2) {
+                const qint64 t = samples.at(i).toLongLong();
+                ordered = ordered && t >= prev && t <= 297446;
+                prev = t;
+                peak = std::max(peak, samples.at(i + 1).toDouble());
+            }
+            lastMs = prev;
+        }
+    });
+    ASSERT_TRUE(spinUntil(
+        [&bridge]() { return bridge.frameCount() + bridge.droppedFrames() >= 7074; },
+        20000));
+    spinLoop(300);
+    ASSERT_TRUE(disconnectAndWait(bridge));
+    EXPECT_NEAR(peak, 1261.25, 0.01) << "the recording's peak, the sheet's 1,261";
+    EXPECT_TRUE(ordered) << "times in order, inside the recording";
+    EXPECT_GT(lastMs, 290000) << "the last sample near the recording's end";
+}
 
 /* The recording holds every value core decodes (ADR-0024): over the
  * vehicle fixture under obd2, the bridge's signals.csv is, row for row,

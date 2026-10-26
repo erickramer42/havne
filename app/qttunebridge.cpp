@@ -3,9 +3,10 @@
 //          in-flight backpressure, the frame log's ring and order, its
 //          rows' payload storage (BridgeTest.FrameLogHoldsLongPayloadsOnlyWhileShown)
 //          and the counters on the tick, core's values staged from the
-//          worker (BridgeTest.Values*, .TheNewestSampleInAWindowIsTheOneShown,
-//          .RecordingHoldsEveryValueCoreDecodes), rows by id, the signal
-//          model's roles and age
+//          worker (BridgeTest.Values*, .RecordingHoldsEveryValueCoreDecodes),
+//          each window's envelope at its frames' times
+//          (BridgeTest.AWindow*, .TheChartKeepsTheFixturesPeak), rows by
+//          id, the signal model's roles and age
 //          refresh, link-state mapping, the activity log's session and
 //          ECU lines, session recording (BridgeTest.Recording*), display
 //          units on the rows, the chart and not the recording
@@ -212,14 +213,8 @@ QVariant SignalListModel::data(const QModelIndex& index, int role) const
         case SubscribedRole: return e.subscribed;
         case HasValueRole: return e.histCount > 0;
         case AgeMsRole:
-            if (e.histCount == 0) return -1;
-            {
-                const uint32_t last =
-                    (e.histHead + static_cast<uint32_t>(HistoryCapacity) - 1)
-                    % static_cast<uint32_t>(HistoryCapacity);
-                return static_cast<int>(m_clock.elapsed()
-                                         - e.history[last].timestampMs);
-            }
+            if (e.arrivedMs < 0) return -1;
+            return static_cast<int>(m_clock.elapsed() - e.arrivedMs);
         case DecimalsRole: return static_cast<int>(shown(e, e.value).decimal_places);
         case TextRole: return e.text;
         case IsTextRole: return e.isText;
@@ -293,25 +288,37 @@ void SignalListModel::refreshAges()
 void SignalListModel::updateValues(const std::vector<std::pair<uint16_t, double>>& values,
                                    qint64 timestampMs)
 {
-    if (m_entries.empty() || values.empty()) return;
-
-    // Batch-stamped time: the staging keeps each signal's newest value per
-    // coalescing window, so one timestamp per batch is the resolution the
-    // model has. timestampMs >= 0 injects a deterministic value (tests).
     const qint64 stamp = (timestampMs >= 0) ? timestampMs : m_clock.elapsed();
+    std::vector<WindowValue> window;
+    window.reserve(values.size());
+    for (const auto& pair : values) {
+        WindowValue w;
+        w.id = pair.first;
+        w.last = w.min = w.max = pair.second;
+        w.lastMs = w.minMs = w.maxMs = stamp;
+        window.push_back(w);
+    }
+    updateWindow(window);
+}
+
+void SignalListModel::updateWindow(const std::vector<WindowValue>& window)
+{
+    if (m_entries.empty() || window.empty()) return;
 
     // Every row, subscribed or not: `subscribed` filters chartData()
     // only. Skipping unsubscribed rows here would freeze the Dashboard's
     // gauges for a signal unticked on Live, and dim them as stale while
     // its frames still arrive.
+    const qint64 arrived = m_clock.elapsed();
     int firstRow = -1;
     int lastRow = -1;
-    for (const auto& pair : values) {
-        const int row = m_rowOfId.value(pair.first, -1);
+    for (const WindowValue& w : window) {
+        const int row = m_rowOfId.value(w.id, -1);
         if (row < 0) continue;
         Entry& e = m_entries[static_cast<size_t>(row)];
-        e.value = pair.second;
-        pushSample(e, stamp, pair.second);
+        e.value = w.last;
+        e.arrivedMs = arrived;
+        pushWindow(e, w);
         widenRows(row, firstRow, lastRow);
     }
     if (firstRow >= 0) {
@@ -338,8 +345,9 @@ void SignalListModel::updateTexts(const std::vector<std::pair<uint16_t, QString>
         Entry& e = m_entries[static_cast<size_t>(row)];
         if (!e.isText) continue;
         e.text = pair.second;
-        // The ring keeps the sample's time, for hasValue and ageMs;
-        // the value is never plotted
+        e.arrivedMs = m_clock.elapsed();
+        // The ring keeps the sample's time, for hasValue; the value is
+        // never plotted
         pushSample(e, stamp, 0.0);
         widenRows(row, firstRow, lastRow);
     }
@@ -381,6 +389,27 @@ void SignalListModel::pushSample(Entry& e, qint64 stamp, double value)
     e.histHead = (e.histHead + 1) % HistoryCapacity;
     if (e.histCount < HistoryCapacity) {
         ++e.histCount;
+    }
+}
+
+// A window's lowest, highest and newest value, in time order, each once:
+// a point repeating the one before it (same time and value) is dropped
+void SignalListModel::pushWindow(Entry& e, const WindowValue& w)
+{
+    Sample points[3] = {{w.minMs, w.min}, {w.maxMs, w.max}, {w.lastMs, w.last}};
+    std::stable_sort(std::begin(points), std::end(points),
+                     [](const Sample& a, const Sample& b) {
+                         return a.timestampMs < b.timestampMs;
+                     });
+    for (int i = 0; i < 3; ++i) {
+        bool repeat = false;
+        for (int j = 0; j < i; ++j) {
+            repeat = repeat || (points[j].timestampMs == points[i].timestampMs &&
+                                points[j].value == points[i].value);
+        }
+        if (!repeat) {
+            pushSample(e, points[i].timestampMs, points[i].value);
+        }
     }
 }
 
@@ -1083,6 +1112,11 @@ void QtTuneBridge::ValueStaging::prepare(size_t defs, size_t samplesMax,
     text.clear();
     text.reserve(textMax);
     newest.assign(defs, 0.0);
+    lowest.assign(defs, 0.0);
+    highest.assign(defs, 0.0);
+    newestUs.assign(defs, 0);
+    lowestUs.assign(defs, 0);
+    highestUs.assign(defs, 0);
     newestText.assign(defs, -1);
     has.assign(defs, 0);
     sampleLimit = samplesMax;
@@ -1090,16 +1124,26 @@ void QtTuneBridge::ValueStaging::prepare(size_t defs, size_t samplesMax,
     dropped = 0;
 }
 
-// Keeps a numeric signal's newest value whatever the limits; a sample
-// past one is counted, and only the recording misses it. Grows nothing:
-// prepare reserved the limits.
+// Keeps a numeric signal's window (newest, lowest, highest, each at its
+// frame's time) whatever the limits; a sample past one is counted, and
+// only the recording misses it. Grows nothing: prepare reserved the
+// limits.
 void QtTuneBridge::ValueStaging::stage(uint32_t def,
                                        SessionRecorder::Clock::time_point arrived,
-                                       const ecuio_value_t& v)
+                                       uint64_t frameUs, const ecuio_value_t& v)
 {
     const bool isText = v.text != nullptr;
     if (!isText) {
+        if (!has[def] || v.value < lowest[def]) {
+            lowest[def] = v.value;
+            lowestUs[def] = frameUs;
+        }
+        if (!has[def] || v.value > highest[def]) {
+            highest[def] = v.value;
+            highestUs[def] = frameUs;
+        }
         newest[def] = v.value;
+        newestUs[def] = frameUs;
         has[def] = 1;
     }
     if (samples.size() >= sampleLimit ||
@@ -1163,7 +1207,7 @@ void QtTuneBridge::onValues(const ecuio_value_batch_t* batch, void* user_data)
         if (def < 0 || static_cast<size_t>(def) >= staging.has.size()) {
             continue;
         }
-        staging.stage(static_cast<uint32_t>(def), arrived, v);
+        staging.stage(static_cast<uint32_t>(def), arrived, batch->timestamp_us, v);
     }
 }
 
@@ -1198,7 +1242,15 @@ void QtTuneBridge::drainValues()
                 id, QString::fromLatin1(full->text.data() + s.textAt,
                                         static_cast<qsizetype>(s.textLen)));
         } else {
-            m_stagingBuffer.emplace_back(id, full->newest[i]);
+            SignalListModel::WindowValue w;
+            w.id = id;
+            w.last = full->newest[i];
+            w.lastMs = static_cast<qint64>(full->newestUs[i] / 1000);
+            w.min = full->lowest[i];
+            w.minMs = static_cast<qint64>(full->lowestUs[i] / 1000);
+            w.max = full->highest[i];
+            w.maxMs = static_cast<qint64>(full->highestUs[i] / 1000);
+            m_stagingBuffer.push_back(w);
         }
     }
     if (full->dropped > 0) {
@@ -1219,7 +1271,7 @@ void QtTuneBridge::flushValues()
     drainValues();
     if (m_stagingBuffer.empty() && m_stagingTexts.empty()) return;
     if (!m_stagingBuffer.empty()) {
-        m_signalModel->updateValues(m_stagingBuffer);
+        m_signalModel->updateWindow(m_stagingBuffer);
         m_stagingBuffer.clear();
     }
     if (!m_stagingTexts.empty()) {

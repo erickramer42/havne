@@ -18,8 +18,8 @@
 // Then the committed engine-start recording replayed under obd2 at
 // speed=max and 10 (the load test ADR-0023 and ADR-0024 name): the
 // time taken, the frames handled and dropped at the cap, and the
-// highest RPM the model held at any tick, against the recording's
-// 1,261 (Known Issue #10).
+// highest RPM the strip chart held at any tick, against the recording's
+// 1,261 (ADR-0005's appendix: each window keeps its envelope).
 //
 // The defs sit four to a CAN ID, 16 bits each, as a passive-bus profile
 // packs them; each frame carries one ID, so it decodes four values and
@@ -241,8 +241,8 @@ double tickMicros(const ecuio_signal_set_t& set)
 
 // The committed engine-start recording replayed through the bridge under
 // obd2: wall time, frames handled and dropped at the cap, and the
-// highest RPM the model held at any tick (what the Dashboard can show;
-// the recording's own peak is 1,261)
+// highest RPM the strip chart held at any tick (the recording's own
+// peak is 1,261)
 struct ReplayRun {
     double seconds = 0.0;
     int handled = 0;
@@ -281,21 +281,16 @@ ReplayRun replayFixture(const char* speed)
     }
 
     SignalListModel* model = bridge.signalModel();
-    int rpmRow = -1;
-    for (int r = 0; r < model->rowCount(); ++r) {
-        if (model->data(model->index(r), SignalListModel::NameRole)
-                .toString() == QStringLiteral("RPM"))
-            rpmRow = r;
-    }
     ReplayRun run;
     QObject::connect(model, &SignalListModel::valuesUpdated, model, [&]() {
-        if (rpmRow < 0)
-            return;
-        const QModelIndex at = model->index(rpmRow);
-        if (model->data(at, SignalListModel::HasValueRole).toBool())
-            run.peakRpm = std::max(
-                run.peakRpm,
-                model->data(at, SignalListModel::ValueRole).toDouble());
+        for (const QVariant& s : model->chartData()) {
+            const QVariantMap m = s.toMap();
+            if (m.value(QStringLiteral("name")).toString() != QStringLiteral("RPM"))
+                continue;
+            const QVariantList samples = m.value(QStringLiteral("samples")).toList();
+            for (qsizetype i = 1; i < samples.size(); i += 2)
+                run.peakRpm = std::max(run.peakRpm, samples.at(i).toDouble());
+        }
     });
     while (bridge.frameCount() + bridge.droppedFrames() < total) {
         QCoreApplication::processEvents(QEventLoop::AllEvents, 5);
