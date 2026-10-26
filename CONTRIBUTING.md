@@ -97,10 +97,11 @@ contributions:
   core; the UI receives final display values. A Qt include in `core/` fails CI.
 - **Know your thread.** Frame callbacks run on the transport's worker thread:
   they must not block, and must never close or destroy their session (both
-  join that thread). The bridge's callback touches only atomics and posts the
-  frame to the GUI thread, where the rest of the bridge runs; slow vendor
-  calls (connect, disconnect) run on threads of their own, so the GUI never
-  waits on them.
+  join that thread). The bridge's frame callback touches only atomics and
+  posts the frame to the GUI thread, and its values callback holds one short
+  lock while it stages values for the GUI thread's 100 ms tick; the rest of
+  the bridge runs on the GUI thread. Slow vendor calls (connect, disconnect)
+  run on threads of their own, so the GUI never waits on them.
 - **Transports encode, never decode.** The URI selects the transport
   (`mock://`, `replay://`, `j2534://` on Windows); everything else is
   rejected.

@@ -237,9 +237,12 @@ The bridge polls it on its 100 ms tick and maps it for the UI
 
 ## The UI layer
 
-- **Bridge threading:** `QtTuneBridge` touches only atomics on the
-  worker thread; everything else runs on the GUI thread. It links
-  only QtCore, so `test_bridge` can exercise it headless.
+- **Bridge threading:** two of `QtTuneBridge`'s functions run on the
+  worker thread. The frame callback touches only atomics and posts a
+  copy of the frame; the values callback stages each value under one
+  short lock, which the 100 ms tick swaps out. Everything else runs on
+  the GUI thread. It links only QtCore, so `test_bridge` can exercise
+  it headless.
 - **The QML module is a library:** the `QtTune` module (the pages,
   `Theme`, the bridge and its `Bridge` registration) builds as the
   static library `qttune_ui`. The app and `test_qml` both link it and
@@ -250,8 +253,9 @@ The bridge polls it on its 100 ms tick and maps it for the UI
   stays QtCore-only, and qmllint checks every binding against it.
 - **Bridge outputs:** it exposes a frame model (a ring of the newest
   10k frames, newest or oldest first, with a pause for the Log page), a
-  signal model (value, `hasValue`,
-  `ageMs`, `decimals`, a 120-sample history per signal), the unit
+  signal model (value, `hasValue`, `ageMs`, `decimals`, and a
+  360-point history per signal: each window's lowest, highest and
+  newest, at their frames' times), the unit
   system, device discovery, and the link state.
 - **Recording is the bridge's too**
   ([ADR-0017](adr/0017-session-recording.md)): with it on, the

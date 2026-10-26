@@ -85,9 +85,9 @@ second session ran the request engine, the probe, identification and
   cross-arch subset (76/76); 0 MSVC warnings. CI runs ctest on Windows,
   macOS and Linux, core under ASan and UBSan, 60 s of each libFuzzer
   harness ([fuzz/README.md](fuzz/README.md)), the Android and iOS
-  cross-builds, and on pull requests an iOS Simulator smoke; it was
-  last read green on all nine jobs at `1ab2dd1` (2026-10-23). Tiers,
-  suites and gaps are in [docs/testing.md](docs/testing.md).
+  cross-builds, and on pull requests an iOS Simulator smoke; the badge
+  above shows its state. Tiers, suites and gaps are in
+  [docs/testing.md](docs/testing.md).
 
 ## Components
 
@@ -97,7 +97,7 @@ second session ran the request engine, the probe, identification and
 | Signal decode | Linear scaling in `double` of unsigned, signed and binary32 fields in either byte order, gated on message ID and a mux key of up to 3 bytes; text and hex fields; a validator that accepts exactly what the decoder decodes | [ADR-0004](docs/adr/0004-signal-decoding-model.md), [ADR-0016](docs/adr/0016-signal-definition-layout.md) |
 | Mock transport | A ~2-minute drive cycle on a vehicle model (`core/src/mock_drive_cycle.h`) whose readings stay consistent with each other, every tick round-tripped through the mock set (`CoreTest.MockDriveCycle*`) | — |
 | Replay transport | UNIT-tested, against a scrubbed real-bus fixture too; passive, default profile `raw` | [ADR-0023](docs/adr/0023-replay-transport.md) |
-| Bridge and models | Worker → GUI marshaling with bounded backpressure, 100 ms coalescing, a 10k-row frame log, a 120-sample history per signal, link-health polling, recording; QML reaches it as the `Bridge` singleton | [ADR-0003](docs/adr/0003-backpressure-bounds-in-flight-frames.md), [ADR-0005](docs/adr/0005-coalesced-signal-updates.md) |
+| Bridge and models | Worker → GUI marshaling with bounded backpressure, 100 ms coalescing, a 10k-row frame log, a 360-point history per signal (each 100 ms window's lowest, highest and newest), link-health polling, recording; QML reaches it as the `Bridge` singleton | [ADR-0003](docs/adr/0003-backpressure-bounds-in-flight-frames.md), [ADR-0005](docs/adr/0005-coalesced-signal-updates.md) |
 | QML pages | Home, Dashboard, Live, Log, Settings; `test_qml` runs them against a real bridge, offscreen | [docs/architecture.md](docs/architecture.md#the-ui-layer) |
 | J2534 | HARNESS-verified through the surrogate: x64 in CI, x86 cross-arch. BENCH: one adapter, quiet bus. Vehicle: one car, read-only, through the surrogate, two sessions | [docs/j2534.md](docs/j2534.md) |
 

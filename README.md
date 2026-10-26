@@ -71,24 +71,28 @@ screen, is [docs/architecture.md](docs/architecture.md).
 
 ## Engineering highlights
 
-- **32-bit vendor drivers in a 64-bit app.** The loader reads each
-  driver DLL's PE header. x86 drivers run in a separate,
-  single-threaded surrogate process over a private named pipe; the
-  transport above can't tell which backend it's on
+- **Vendor drivers isolated in their own process.** The loader reads
+  each driver DLL's PE header and loads it in a single-threaded
+  surrogate process of the same architecture, 32- or 64-bit, over a
+  private named pipe. A driver that crashes ends its surrogate, not the
+  app, and every vendor call lands in one session log; the transport
+  above can't tell which surrogate it's on
   ([ADR-0008](docs/adr/0008-x86-surrogate-host.md),
-  [ADR-0009](docs/adr/0009-pe-architecture-routing.md),
-  [ADR-0014](docs/adr/0014-single-threaded-surrogate.md)).
+  [ADR-0014](docs/adr/0014-single-threaded-surrogate.md),
+  [ADR-0025](docs/adr/0025-one-j2534-backend.md)).
 - **Link health that names the right problem.** Reads and writes are
   judged separately, so a quiet bus (ignition off, nothing ACKs) isn't
   reported as an adapter fault. While a failure lasts, probing backs
   off from 10 Hz to one try every 5 s.
 - **A bounded data path across threads.** Callbacks dispatch from a
-  snapshot, so they can unregister without deadlocking. Backpressure
-  bounds frames in flight, and values reach QML at 10 Hz whatever the
-  bus rate
+  snapshot, so they can unregister without deadlocking, and the worker
+  allocates nothing per frame. Core decodes on the transport's thread,
+  backpressure bounds frames in flight, and values reach QML at 10 Hz
+  whatever the bus rate, each at its frame's time
   ([ADR-0002](docs/adr/0002-callback-pair-identity-snapshot-dispatch.md),
   [ADR-0003](docs/adr/0003-backpressure-bounds-in-flight-frames.md),
-  [ADR-0005](docs/adr/0005-coalesced-signal-updates.md)).
+  [ADR-0005](docs/adr/0005-coalesced-signal-updates.md),
+  [ADR-0024](docs/adr/0024-decode-on-the-worker.md)).
 - **No fabricated readings.** A value never received shows "—", never
   0, and a value older than 3 s dims.
 - **Tested in tiers.** Unit tests cover the core, decoding, the C ABI
@@ -115,7 +119,8 @@ screen, is [docs/architecture.md](docs/architecture.md).
   lights, peak hold and stale-value dimming. A gauge whose signal the
   active profile doesn't provide says so instead of showing zero.
 - **Live view.** Decoded values with units, refreshed at 10 Hz, plus
-  a rolling strip chart.
+  a strip chart that plots each value at its frame's time and keeps
+  each 100 ms window's peak.
 - **Frame log.** Raw frames, newest-first or oldest-first, with Pause.
 - **Fits the screen.** The Dashboard rearranges for a short, wide
   window, pages that run long scroll, and Ctrl + / Ctrl − zooms the
@@ -133,9 +138,11 @@ screen, is [docs/architecture.md](docs/architecture.md).
   polls standard Mode-01 PIDs, so a bare `j2534://` streams decoded
   signals ([docs/j2534.md](docs/j2534.md)).
 - **Protocol profiles.** The URI picks how frames decode: `mock`
-  (the default for `mock://`), `obd2` (the default for `j2534://`) or
-  `raw` (log only), with `?profile=` to override
-  ([ADR-0013](docs/adr/0013-protocol-profiles.md)).
+  (the default for `mock://`), `obd2` (the default for `j2534://`),
+  `raw` (log only), or `uds-generic`, which polls or scans the UDS
+  DIDs the URI names, with `?profile=` to choose
+  ([ADR-0013](docs/adr/0013-protocol-profiles.md),
+  [ADR-0020](docs/adr/0020-uds-generic.md)).
 - **Replay.** A recorded session plays back at its own pace, or
   faster: `replay://<recording folder>?profile=obd2&speed=10`
   ([ADR-0023](docs/adr/0023-replay-transport.md)).
@@ -166,7 +173,7 @@ screen, is [docs/architecture.md](docs/architecture.md).
 | v0.2.0 | Callback API, mock transport, live frame log | ✅ Released |
 | v0.3.0 | Signal decoding, live view, J2534 transport, live vehicle read and logging (tested on one vehicle) | ✅ Released |
 | v0.3.1 | Request engine, PID-support probe, vehicle identification, generic UDS reads, imperial units; the first Windows download | ✅ Released |
-| v0.3.x | Record-replay transport; the request engine on a car | Next |
+| v0.3.x | Record-replay transport, decoding on the transport's thread, every driver in its own process | Built, unreleased ([CHANGELOG](CHANGELOG.md#unreleased)) |
 | v0.4.0 | Security access discovery, flash capability | Planned |
 | v0.5.0+ | Manufacturer plugin modules | Planned |
 
