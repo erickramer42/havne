@@ -51,10 +51,10 @@ threads onto the GUI thread.
 | Step | Where | Thread |
 |---|---|---|
 | 1. The transport produces a frame (the mock's 50 ms tick, a recording's row when its time comes, or a J2534 read) | `mock_transport.cpp`, `replay_transport.cpp`, `j2534_transport.cpp` | transport worker |
-| 2. The session hands it to every registered callback, from a snapshot of the callback list; then, for a values callback, decodes it against the profile's set and hands over one batch of values stamped with the frame's time ([ADR-0024](adr/0024-decode-on-the-worker.md); the bridge doesn't register one yet) | `ecuio_session_dispatch_callbacks` | transport worker |
-| 3. The bridge copies the frame (4120 bytes; its payload is inline) and posts it, unless 1000 frames are already in flight | `QtTuneBridge::onFrame` | transport worker |
-| 4. The frame log gets a row (a ring of the newest 10k plain rows, the hex formatted only when shown); the profile's signal defs decode it into a staging buffer, numbers and text apart | `handleFrameInternal` | GUI |
-| 5. Every 100 ms the staging buffer flushes into the signal model, and link health is polled | coalesce timer | GUI |
+| 2. The session hands it to every registered callback, from a snapshot of the callback list; then it decodes the frame against the profile's set and hands one batch of values, stamped with the frame's time, to each values callback ([ADR-0024](adr/0024-decode-on-the-worker.md)) | `ecuio_session_dispatch_callbacks` | transport worker |
+| 3. The bridge copies the frame (4120 bytes; its payload is inline) and posts it, unless 1000 frames are already in flight; the batch's values go straight into the bridge's staging, under a lock, so a frame dropped at the cap keeps its values | `QtTuneBridge::onFrame`, `onValues` | transport worker |
+| 4. The frame log gets a row (a ring of the newest 10k plain rows, the hex formatted only when shown) | `handleFrameInternal` | GUI |
+| 5. Every 100 ms the staging is swapped out: every sample goes to the recording and each signal's newest value into the signal model; link health is polled | coalesce timer | GUI |
 | 6. Pages bind to the models: Log to frames, Live and Dashboard to signals | QML | GUI |
 
 **Why each step is shaped this way:**
@@ -67,7 +67,13 @@ threads onto the GUI thread.
   `user_data` stays valid until close returns (`core.h`).
 - **Backpressure:** it bounds frames *in flight*, never a lifetime
   count, so a fast bus drops frames rather than freezing the stream
-  ([ADR-0003](adr/0003-backpressure-bounds-in-flight-frames.md)).
+  ([ADR-0003](adr/0003-backpressure-bounds-in-flight-frames.md)). A
+  dropped frame misses the frame log and `frames.csv`; its values,
+  staged from the worker, don't.
+- **Decode on the worker:** core runs the match and decode, so every
+  front end gets values without a loop of its own, and the GUI thread's
+  cost per frame doesn't grow with the profile
+  ([ADR-0024](adr/0024-decode-on-the-worker.md)).
 - **Coalescing:** values reach QML at 10 Hz whatever the bus rate,
   because a bus can outrun the screen
   ([ADR-0005](adr/0005-coalesced-signal-updates.md)).

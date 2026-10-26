@@ -1,8 +1,8 @@
 # ADR-0024: Decoding on the worker — a values callback delivers each frame's decoded signals
 
 - **Status:** Accepted.
-- **Date:** 2026-10-26. Step 1 (core) built with this record; steps 2
-  and 3 follow (§10).
+- **Date:** 2026-10-26. Steps 1 (core) and 2 (the bridge) built with
+  this record; step 3 follows (§10).
 - **Builds on:** [ADR-0002](0002-callback-pair-identity-snapshot-dispatch.md)
   (callback identity and snapshot dispatch, which the new callback
   shares); [ADR-0003](0003-backpressure-bounds-in-flight-frames.md) (the
@@ -340,3 +340,42 @@ recorded too.
   `data_length` bytes is a separate change, if the frame log needs it.
 - The C ABI grows two structs whose sizes follow the pointer width,
   as `ecuio_signal_set_t`'s already does; their asserts pin both.
+
+## Appendix — steps 1 and 2 built and measured (2026-10-26)
+
+- **Step 1** (`0ea4126`): the calls and structs of §3, the decode in
+  dispatch, the shared snapshot and the text slots of §4.
+  `CoreTest.Values*` checks every batch against direct decodes,
+  including every frame of the vehicle fixture.
+- **Step 2:** the bridge registers its values callback beside its frame
+  callback and stages values from the worker into two buffers it swaps
+  on the tick. Each holds 16,384 samples and 256 KB of text a window,
+  reserved at connect. The tick hands the model one entry per signal,
+  and the recorder every sample; a disconnect drains the window it ends.
+  The GUI thread's decode loop is gone.
+- **The real-car comparison:** the recordings of the two vehicle
+  sessions and the bench session before them, 25 connects with frames,
+  replayed through the step-2 bridge under the profile and DIDs each
+  connect used: 24,632 decoded values, every one equal to the
+  `signals.csv` row the GUI-thread decode wrote in the car
+  (`BridgeTest.VehicleRecordingsReplayToTheirOwnValues`, local only).
+- **`bench_bridge` after step 2** (µs a frame unless marked; the
+  median of three runs, two runs' range):
+
+  | Defs | GUI thread (drain) | worker: `onFrame` | worker: core's decode | worker: bridge's staging | one tick's `updateValues` |
+  |---|---|---|---|---|---|
+  | raw | 0.59–0.73 | 2.18–2.35 | — | — | — |
+  | 9 | 0.79 | 2.31–2.33 | 0.08–0.10 | 0.06–0.08 | 0.1 |
+  | 100 | 0.67–0.71 | 2.22 | 0.29 | 0.08–0.14 | 0.7–1.0 |
+  | 250 | 0.70–0.72 | 2.14–2.26 | 0.52–0.53 | 0.32–0.39 | 1.9–5.3 |
+  | 1000 | 0.42–0.52 | 1.61–1.79 | 2.13–2.16 | 0.19–0.29 | 14.7–23.6 |
+
+  The GUI thread's cost per frame no longer grows with the profile. The
+  decode moved to the worker at about the cost it had on the GUI
+  thread, and `onFrame`'s copy is still the largest per-frame cost.
+- **Found while building it:** the bridge zeroed its dropped-frame
+  count when the connect was applied, after the worker had started, so
+  the drops of a replay that passed the in-flight cap before then went
+  uncounted. It zeroes the count before the start.
+- **Known Issue #10 stands until step 3:** the fixture at 10× still
+  peaks at 1,232 rpm on the model.

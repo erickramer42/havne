@@ -78,8 +78,9 @@ second session ran the request engine, the probe, identification and
   [testing.md](docs/testing.md#gaps-not-verified)). The run sheets are
   [bench-runsheet.md](docs/bench-sessions/bench-runsheet.md) and
   [vehicle-runsheet.md](docs/bench-sessions/vehicle-runsheet.md).
-- **Tests:** 432 ctest cases on Windows (both trees rebuilt,
-  2026-10-26), all passing but the env-gated cross-arch skip, plus the
+- **Tests:** 436 ctest cases on Windows (both trees rebuilt,
+  2026-10-26), all passing but two env-gated skips (the cross-arch
+  case, and the real-car recordings' diff, run locally), plus the
   cross-arch subset (75/75); 0 MSVC warnings. CI runs ctest on Windows,
   macOS and Linux, core under ASan and UBSan, 60 s of each libFuzzer
   harness ([fuzz/README.md](fuzz/README.md)), the Android and iOS
@@ -120,10 +121,10 @@ and the car's measurements.
    UNIT-tested, against a real-bus fixture too.
 6. **Next: decoding on the worker thread**
    ([ADR-0024](docs/adr/0024-decode-on-the-worker.md)), led by Known
-   Issue #10 ([Performance](#performance), in the backlog). Core's
-   values callback is built and checked against the bridge's decode
-   over the vehicle fixture; the bridge switching to it, and the
-   chart's per-sample history, are next.
+   Issue #10 ([Performance](#performance), in the backlog). Core
+   decodes on the worker and the bridge uses its values, checked
+   against the vehicle sessions' recordings; the chart's per-sample
+   history is next.
 
 ## BENCH prep
 
@@ -148,14 +149,14 @@ an issue is resolved it is removed, and its number is not reused.
    (cross builds set `BUILD_TESTING=OFF`). Off Windows the
    transports are `mock://` and `replay://`, so a mobile session
    can't reach a vehicle yet.
-4. **Every def is matched against every frame on the GUI thread.** A
+4. **Every def is matched against every frame, on the transport's
+   worker** ([ADR-0024](docs/adr/0024-decode-on-the-worker.md)). A
    subscription can't trim that work: it is the chart's filter only,
    because the Dashboard reads every signal. Measured, it costs about
-   1.4 ns a def a frame: 1000 defs at a full 500 kbit/s classic CAN bus
-   would take under 1 % of the GUI thread, and about 3.5 % at a CAN FD
-   rate of 25,000 frames a second (worked out, not measured;
-   [docs/testing.md](docs/testing.md#performance)). Decoding on the
-   worker (Performance, in the backlog) removes it along with #10.
+   2 µs a frame at 1000 defs, well inside the J2534 worker's 10 ms read
+   slice, and the GUI thread's cost per frame no longer depends on it
+   ([docs/testing.md](docs/testing.md#performance)). A per-signal enable
+   mask can trim it if a CAN FD rate makes it matter.
 6. **The session API is single-caller by contract.** The bridge is the
    only caller.
 10. **Strip-chart x-axis resolution is one coalesce window, about
@@ -371,22 +372,14 @@ matters: the original-copy file format constrains everything after it.
   limited by the ECU's response time, with no per-frame GUI-thread
   cost. Requests already follow the replies
   ([ADR-0015](docs/adr/0015-request-engine.md)), and the frame log is
-  a fixed ring of plain rows, about 2 µs a frame at its cap. The part
-  left is decoding on the worker thread, which also brings per-sample
-  timestamps (Known Issue #10) and takes the per-frame def matching
-  off the GUI thread (#4).
-
-  The GUI thread's cost per frame by profile size is measured
-  (`bench_bridge`, [docs/testing.md](docs/testing.md#performance)): the
-  matching takes under 1 % of the GUI thread at a full classic CAN bus
-  with 1000 defs. The reasons to move the decode are #10's per-sample
-  time on the chart first, then a decode every front end shares and
-  values that survive frames dropped under load; not CPU. It gets its
-  own ADR when it's built, citing those numbers. The replay transport
-  is its load test: replay faster than real time drives this path with
-  recorded traffic whose frames carry their own times, and shows
-  whether the worker's per-frame copy or the per-row model update costs
-  more than the matching first.
+  a fixed ring of plain rows, about 2 µs a frame at its cap. Core
+  decodes on the worker and the bridge stages its values
+  ([ADR-0024](docs/adr/0024-decode-on-the-worker.md)), so the GUI
+  thread's cost per frame doesn't grow with the profile and values
+  survive frames dropped under load. Left: per-sample time on the chart
+  (Known Issue #10, ADR-0024's step 3), and the bridge's 4 KB copy per
+  frame, now the largest per-frame cost (`bench_bridge`,
+  [docs/testing.md](docs/testing.md#performance)).
 
 ### Toolchain
 

@@ -23,7 +23,15 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
 - Connect-failure text names a vendor's status in hex as well as
   decimal ("status 34 (0x22, vendor-specific)").
 
+### Changed
+- Decoding runs in core on the transport's thread, not in the UI
+  ([ADR-0024](docs/adr/0024-decode-on-the-worker.md)): a frame dropped
+  under load still delivers its values to the pages and the recording,
+  and the UI's work per frame no longer grows with the profile.
+
 ### Fixed
+- The dropped-frame count includes frames a fast replay drops while
+  the connect completes.
 - A URI with spaces around it, as pasted, connects.
 - The loader refuses a relative DLL path, from the registry or a
   direct caller, before anything loads it.
