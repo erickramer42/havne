@@ -107,14 +107,18 @@ connects each; µs a frame, GUI thread):
 - **Against the bus:** classic CAN at 500 kbit/s carries at most about
   4,500 eight-byte frames a second. At that rate, 1000 defs cost the GUI
   thread about 17 ms a second, under 2 %. The first vehicle's request
-  rotation ran about 26 frames a second.
-- **So the per-frame matching isn't a CPU problem at any CAN rate.**
-  What decoding on the worker would still bring is the samples' own
-  time on the chart (Known Issue #10): the staging keeps one value per
-  signal per 100 ms window, stamped with the tick's time.
+  rotation ran about 26 frames a second. A CAN FD bus can run several
+  times that rate: at 25,000 frames a second the same profile would
+  take about 9 % (worked out from these numbers; no CAN FD bus was
+  measured).
+- **So the per-frame matching isn't a CPU problem at any classic-CAN
+  rate.** What decoding on the worker would still bring, first, is the
+  samples' own time on the chart (Known Issue #10): the staging keeps
+  one value per signal per 100 ms window, stamped with the tick's time.
 - **Not measured:** the worker's side (the 4 KB copy into the queued
-  call), the tick's per-row model updates with many rows, a QML view
-  attached to the models, text defs, and any machine but the dev one.
+  call) and the tick's per-row model updates with many rows, either of
+  which may cost more than the matching at high rates; a QML view
+  attached to the models; text defs; any machine but the dev one.
 
 ## What is verified
 
