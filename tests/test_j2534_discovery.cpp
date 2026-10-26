@@ -90,8 +90,14 @@ TEST(J2534DiscoveryTest, DiscoveryReturnsValidVendorNames) {
             EXPECT_LT(strlen(devices[i].vendor_name),
                       ECUIO_J2534_VENDOR_NAME_LEN);
 
-            /* DLL paths should be absolute paths (typically) */
-            /* Don't assert specific format — some vendors may store relative */
+            /* A relative FUNCTIONLIBRARY is skipped: the loader refuses
+             * one. CI registers a relative entry to check that. */
+            const char* p = devices[i].dll_path;
+            const bool drive = ((p[0] >= 'A' && p[0] <= 'Z') ||
+                                (p[0] >= 'a' && p[0] <= 'z')) &&
+                               p[1] == ':' && (p[2] == '\\' || p[2] == '/');
+            const bool unc = p[0] == '\\' && p[1] == '\\';
+            EXPECT_TRUE(drive || unc) << "listed relative: " << p;
         }
 
         ecuio_j2534_free_devices(devices);

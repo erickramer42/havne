@@ -32,8 +32,9 @@ typedef struct ecuio_j2534_device {
     char vendor_name[ECUIO_J2534_VENDOR_NAME_LEN];   /* registry key name */
     char dll_path[ECUIO_J2534_DLL_PATH_LEN];         /* FUNCTIONLIBRARY,
                                                         expanded; a path
-                                                        too long for this
-                                                        isn't listed */
+                                                        too long for this,
+                                                        or relative, isn't
+                                                        listed */
     uint32_t supported_protocols; /* 0 — reserved for PROTOCOLS bitmask parse */
     uint32_t reserved[8];         /* ABI-stable expansion room
                                    * [0]: architecture (1=x86, 2=x64, 0=unknown) */
@@ -65,8 +66,10 @@ typedef struct ecuio_j2534_handle ecuio_j2534_handle_t;
  * - Loads the DLL named by device->dll_path (an x86 DLL loads in the
  *   surrogate process, ADR-0009), resolves all nine mandatory
  *   PassThru exports, and calls the vendor's PassThruOpen
- * - A missing or unloadable DLL, or a missing export, returns
- *   ECUIO_ERR_LOAD_FAILED; a refused PassThruOpen
+ * - device->dll_path must be absolute: a relative one would follow
+ *   the DLL search order, so it fails before anything opens it
+ * - A relative path, a missing or unloadable DLL, or a missing export,
+ *   returns ECUIO_ERR_LOAD_FAILED; a refused PassThruOpen
  *   ECUIO_ERR_VENDOR_REFUSED; a surrogate that won't start
  *   ECUIO_ERR_SURROGATE_FAILED. No module is left loaded, and
  *   ecuio_last_error_detail says why (ADR-0018)

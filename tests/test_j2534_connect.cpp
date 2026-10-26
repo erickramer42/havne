@@ -6,8 +6,8 @@
 //          status (by its J2534-1 v04.04 name, or as vendor-specific)
 //          and the vendor's own text from PassThruGetLastError, word for
 //          word alike on both backends. A DLL that won't load (missing,
-//          not a PE file, a path that isn't UTF-8), or loads without the
-//          J2534 exports, is LOAD_FAILED on both; a success
+//          not a PE file, a path that isn't UTF-8 or isn't absolute), or
+//          loads without the J2534 exports, is LOAD_FAILED on both; a success
 //          clears the detail. A session
 //          that connects describes what it runs on
 //          (ecuio_session_get_info): backend, DLL architecture, the
@@ -186,6 +186,43 @@ TEST_P(J2534ConnectTest, ADllWithoutTheJ2534ExportsFailsToLoad)
                      ? "the DLL doesn't export PassThruOpen"
                      : "the DLL lacks a mandatory J2534 export (the "
                        "surrogate's session log, in %TEMP%, names it)");
+}
+
+/* A relative path never reaches a load, whoever passes it: the URI's
+ * selector is refused earlier as BAD_URI, so this calls the loader
+ * directly, as a registry entry would reach it. The current directory
+ * (which the child inherits) holds the fake, so a relative load would
+ * find it there and open it. */
+TEST_P(J2534ConnectTest, ARelativeDllPathIsRefusedBeforeAnyLoad)
+{
+    const size_t sep = dll.find_last_of("\\/");
+    ASSERT_NE(sep, std::string::npos) << dll;
+    const std::string dir = dll.substr(0, sep);
+    const std::string name = dll.substr(sep + 1);
+
+    char old_dir[MAX_PATH] = {};
+    ASSERT_GT(GetCurrentDirectoryA(MAX_PATH, old_dir), 0u);
+    ASSERT_TRUE(SetCurrentDirectoryA(dir.c_str())) << dir;
+    struct Restore {
+        const char* dir;
+        ~Restore() { SetCurrentDirectoryA(dir); }
+    } restore{old_dir};
+
+    for (const std::string& path : {name, ".\\" + name, "\\" + name}) {
+        SCOPED_TRACE(path);
+        ecuio_j2534_device_t dev{};
+        strncpy(dev.dll_path, path.c_str(), sizeof(dev.dll_path) - 1);
+        ecuio_j2534_handle_t* h = nullptr;
+        EXPECT_EQ(ecuio_j2534_open(&dev, &h), ECUIO_ERR_LOAD_FAILED);
+        EXPECT_EQ(h, nullptr);
+        EXPECT_STREQ(ecuio_last_error_detail(),
+                     "the DLL path must be absolute, like "
+                     "C:\\path\\to\\vendor.dll");
+        if (h != nullptr) {
+            ecuio_j2534_close(h);
+        }
+    }
+    EXPECT_EQ(fake_control::opener_pid(page), 0ul) << "the fake opened";
 }
 
 /* A connect that works leaves nothing behind from the failure before. */

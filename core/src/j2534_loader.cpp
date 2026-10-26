@@ -1,7 +1,9 @@
 // File/layer: core/src/j2534_loader.cpp | C++17, Qt-free, CI-validated headless
 // Testing: HARNESS — live-registry discovery tests, test_j2534_load
-//          (load/export/open/close), test_j2534_stream (end to end) and
-//          test_j2534_routing (backend choice and parity)
+//          (load/export/open/close), test_j2534_stream (end to end),
+//          test_j2534_routing (backend choice and parity) and
+//          J2534ConnectTest.ARelativeDllPathIsRefusedBeforeAnyLoad (both
+//          backends; discovery's skip by the CI registry's relative entry)
 // CI: non-Windows gets linking stubs only; core.cpp guards routing
 
 #include "ecuio/j2534.h"
@@ -203,6 +205,10 @@ bool read_function_library(HKEY hvendor, char* out, size_t out_size)
         }
         path = expanded;
     }
+    /* A relative path is skipped: ecuio_j2534_open refuses one. */
+    if (!ecuio_is_absolute_path(path)) {
+        return false;
+    }
     /* A path whose UTF-8 form won't fit the device struct is skipped,
      * not truncated: a truncated path loads the wrong file or none. */
     return ecuio_wide_to_utf8(path, out, out_size) && out[0] != '\0';
@@ -386,6 +392,17 @@ ecuio_status_t ecuio_j2534_open(const ecuio_j2534_device_t* device,
         return ECUIO_ERR_NULL_ARGUMENT;
     }
     *out_handle = nullptr;
+
+    /* Every path reaches LoadLibraryEx with LOAD_WITH_ALTERED_SEARCH_PATH,
+     * in this process or the child, and a relative one follows the
+     * search order, the current directory included. Checked here, before
+     * the architecture sniff opens the file, so a URI's selector, a
+     * registry entry and a direct caller meet the same rule. */
+    if (!ecuio_is_absolute_path(device->dll_path)) {
+        ecuio_detail_set("the DLL path must be absolute, like "
+                         "C:\\path\\to\\vendor.dll");
+        return ECUIO_ERR_LOAD_FAILED;
+    }
 
     /* ROUTING DECISION — made here, once. x86 DLLs go to the
      * surrogate (exe next to the app, or ECUIO_SURROGATE_EXE);

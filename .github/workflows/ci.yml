@@ -204,8 +204,9 @@ jobs:
       # makes is registered as one: discovery walks a real entry and the
       # discovery test demands it. REG_EXPAND_SZ takes the path through
       # the environment expansion, and the copy in each registry view
-      # through the dedupe. Two broken entries beside it, an empty
-      # FUNCTIONLIBRARY and a number, are ones discovery must skip.
+      # through the dedupe. Three broken entries beside it, an empty
+      # FUNCTIONLIBRARY, a number and a relative path, are ones
+      # discovery must skip.
       - name: Register the fake DLL as a Pass-Thru device
         run: |
           $dll = '%GITHUB_WORKSPACE%\build-coverage\tests\RelWithDebInfo\fake_j2534.dll'
@@ -214,9 +215,10 @@ jobs:
             if ($LASTEXITCODE -ne 0) { exit 1 }
           }
           $root = 'HKLM:\SOFTWARE\PassThruSupport.04.04'
-          New-Item -Path "$root\QtTune empty", "$root\QtTune number" -Force | Out-Null
+          New-Item -Path "$root\QtTune empty", "$root\QtTune number", "$root\QtTune relative" -Force | Out-Null
           New-ItemProperty -Path "$root\QtTune empty" -Name FUNCTIONLIBRARY -Value '' -PropertyType String -Force | Out-Null
           New-ItemProperty -Path "$root\QtTune number" -Name FUNCTIONLIBRARY -Value 1 -PropertyType DWord -Force | Out-Null
+          New-ItemProperty -Path "$root\QtTune relative" -Name FUNCTIONLIBRARY -Value 'fake_j2534.dll' -PropertyType String -Force | Out-Null
 
       - name: Measure coverage
         shell: bash

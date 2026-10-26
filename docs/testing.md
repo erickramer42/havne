@@ -144,6 +144,7 @@ view. `scripts/coverage.sh` runs the same measurement locally
 | A child that misses two deadlines in a row is marked unresponsive: later transactions fail at once and close kills it without waiting | `J2534SurrogateTest.UnresponsiveChildFailsFastAfterTwoMissedDeadlines`, also cross-arch (2026-10-21, 21/21) |
 | A reply to another request (the child answers `OP_CONNECT` twice, `ECUIO_SUR_TEST_REPLY_TWICE`) marks the child unresponsive: the next call fails on the mismatch, and a write after it fails at once without reaching the child | `J2534SurrogateTest.RequestIdMismatchMakesTheChildUnresponsive`, also cross-arch. Against a client that only failed the call (checked 2026-10-24), the write reached the child and nothing was marked |
 | A relative DLL path is refused at create (`BAD_URI`), before any load; drive paths with either separator still reach the loader | `J2534QueryParamTest.RelativeDllPathsAreRefused`. Before the check (2026-10-24), `j2534://fake_j2534.dll` opened a session: the bare name loaded the fake through the DLL search order |
+| The loader refuses a relative `dll_path` (`LOAD_FAILED`, a bare name, `.\` and a drive-less root) on both backends before anything opens it, with the fake in the current directory the child inherits; discovery leaves out a relative `FUNCTIONLIBRARY` | `J2534ConnectTest.ARelativeDllPathIsRefusedBeforeAnyLoad`, also cross-arch. Without the check (2026-10-25) both backends loaded and opened the fake from the current directory. Discovery's skip: `J2534DiscoveryTest.DiscoveryReturnsValidVendorNames` against `win-coverage`'s relative entry |
 | A child that exits during `OP_OPEN` (failed DLL load) is reported by its exit code, not as a blocked vendor | Session logs read by hand, 2026-10-20 (`DeadDllFailsFastAtOpen`, `BlockedVendorOpenFailsAtHandshakeTimeout`) |
 | A missing surrogate exe is reported before any spawn, as "no surrogate (ecuio-j2534-surrogate.exe)" and why: `ECUIO_SURROGATE_EXE` naming no file, or none next to the app | `J2534SurrogateConnectTest.MissingSurrogateExeIsASurrogateFailure` (the variable). None next to the app: in the app, 2026-10-22, with the deployed copy moved aside (before the check, it read "couldn't start the surrogate: CreateProcess (Windows error 2)"). Every test binary has a surrogate beside it, so no test covers that case |
 | Spec-spelling export resolution (`PassThruIoctl` primary, legacy `PassThruIoCtl` fallback), both backends | `FakeFixture.SpecSpellingPassThruIoctlResolvesAndWorks` (spec fake, primary path) plus the whole existing suite against the legacy-spelling fake (fallback path) |
@@ -364,8 +365,10 @@ rows against the current Home, Settings and Dashboard header.
   `ECUIO_EXPECT_J2534_DEVICES=1` on Windows so the dev machine's
   installed driver has to be found. `win-coverage` registers the fake
   DLL in both registry views (`REG_EXPAND_SZ`, an environment-variable
-  path) beside two entries discovery must skip (an empty
-  `FUNCTIONLIBRARY`, a number) and demands it; `win-build` has no
+  path) beside three entries discovery must skip (an empty
+  `FUNCTIONLIBRARY`, a number, a relative path) and demands it, but a
+  test failing under the coverage tool shows only in the job's summary
+  line, not as a failed job; `win-build` has no
   vendors and never sees a non-empty result.
 - **The mobile apps have never run on a device or emulator** (Known
   Issue #2). CI compiles both kits. The simulator smoke shows the iOS
