@@ -92,7 +92,7 @@ URI. Leave it about two minutes:
 | "PassThruOpen returned status 34 (0x22, vendor-specific)" | The adapter isn't attached (the VX and the VT both answer 34 then) |
 | "built from other shared headers" | A stale `build-win32`: rebuild both trees |
 | "surrogate process failed: no surrogate" | The surrogate missing next to `qttune.exe` |
-| "failed to load transport library", fast | The DLL didn't load in the surrogate, or lacks an export: the exit codes in [j2534.md](../j2534.md#surrogate) |
+| "couldn't load what the URI names", fast | The DLL didn't load in the surrogate, or lacks an export: the exit codes in [j2534.md](../j2534.md#surrogate) |
 | A handshake timeout (8 s) | The child never started: security software holding a newly built exe, or a blocked spawn |
 | Filter registration rejected | BENCH prep #1, the 4-byte filter shape. Record the vendor status |
 | The app crashes | Capture the session log; don't guess, bisect |

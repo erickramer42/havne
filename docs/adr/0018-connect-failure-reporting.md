@@ -162,3 +162,13 @@ the standard ones that way, so the decimal alone sent a reader to a
 converter (the VX answers 34, 0x22, when no adapter is attached). The
 example in section 2 shows the earlier form. Pinned by
 `CoreTest.VendorDetailIsOneLine` and `J2534ConnectTest`.
+
+## Appendix — `LOAD_FAILED`'s words (2026-10-26)
+
+`ecuio_status_string(ECUIO_ERR_LOAD_FAILED)` reads "couldn't load what
+the URI names". The code covers a replay's recording as well as an
+adapter's DLL ([ADR-0023](0023-replay-transport.md)), and the bridge
+puts the status before the detail, so a replay refused for an empty
+`frames.csv` read "failed to load transport library: …". The detail
+after the colon still says which: the DLL and the loader's words, or
+the recording's line.

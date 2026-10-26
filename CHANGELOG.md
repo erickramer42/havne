@@ -28,11 +28,18 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
   ([ADR-0024](docs/adr/0024-decode-on-the-worker.md)): a frame dropped
   under load still delivers its values to the pages and the recording,
   and the UI's work per frame no longer grows with the profile.
+- A raw session on an adapter listens to the engine ECU without
+  `?filter=`, and `?profile=raw&poll=` asks it; Settings adds no
+  `filter=` of its own.
 - Live's strip chart places each value at the time its frame was
   received (a replay's own time), and keeps the highest and lowest
   value of every 100 ms window, so a short peak stays on the chart.
 
 ### Fixed
+- Choosing raw for a replay in Settings no longer gives a URI the
+  replay refuses.
+- A replay that can't play its recording no longer says it failed to
+  load a transport library.
 - The dropped-frame count includes frames a fast replay drops while
   the connect completes.
 - A URI with spaces around it, as pasted, connects.

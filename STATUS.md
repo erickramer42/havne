@@ -78,7 +78,7 @@ second session ran the request engine, the probe, identification and
   [testing.md](docs/testing.md#gaps-not-verified)). The run sheets are
   [bench-runsheet.md](docs/bench-sessions/bench-runsheet.md) and
   [vehicle-runsheet.md](docs/bench-sessions/vehicle-runsheet.md).
-- **Tests:** 438 ctest cases on Windows (both trees rebuilt,
+- **Tests:** 439 ctest cases on Windows (both trees rebuilt,
   2026-10-26), all passing but two env-gated skips (the cross-arch
   case, and the real-car recordings' diff, run locally), plus the
   cross-arch subset (75/75); 0 MSVC warnings. CI runs ctest on Windows,

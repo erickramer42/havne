@@ -412,3 +412,36 @@ malformed `?profile=` value `ECUIO_ERR_BAD_URI`, where both returned
 `ECUIO_ERR_NO_TRANSPORT` ([ADR-0018](0018-connect-failure-reporting.md)).
 Both still fail before any DLL loads. `ecuio_profile_lookup` keeps
 returning `ECUIO_ERR_NO_TRANSPORT` for an unknown name.
+
+## Appendix — raw listens to the engine ECU (2026-10-26)
+
+A raw session on an adapter had no channel unless its URI named one
+with `?filter=`, and an ISO 15765 channel with no filter receives
+nothing: a typed `j2534://Vendor?profile=raw` connected to a silent Log
+page. Settings worked around it by adding `filter=0x7E8` to the URI
+when its raw row was chosen, on any scheme but `mock://`, which put a
+transport's facts in the UI and broke a raw replay (`replay://` takes
+no `filter` key).
+
+- **Decision:** the J2534 transport gives a log-only profile (no signal
+  set: `raw`, or any profile registered with none) with no `?filter=`
+  the default profile's channels, `obd2`'s engine ECU (0x7E8, asked on
+  0x7E0). Raw means "log what the engine ECU sends", not "pass every
+  frame through", which an ISO 15765 channel can't do anyway.
+  `?filter=` and `?txid=` override as before, and `?profile=raw&poll=`
+  asks the engine ECU instead of being refused.
+- **Settings** composes no `filter=` and drops none: the page knows no
+  scheme's keys, and core's refusal names what a scheme takes.
+- **Unchanged:** a registered profile with signals and no channels
+  still dispatches verbatim with `arbitration_id` 0, and its requests
+  still need a channel; `mock://` and `replay://` have no channels.
+- **Alternatives:** the raw profile declaring the channel itself (it
+  would stop being the NULL set that `ecuio_session_signal_set` and the
+  bridge read as "no decode", a contract change), and the mock and
+  replay accepting and ignoring `filter` (a typed raw adapter URI would
+  still be silent, and every transport refuses keys it doesn't read on
+  purpose).
+- **Tests:** `J2534AdoptionTest.RawListensToTheEngineEcu`, the verbatim
+  path through a passive custom profile
+  (`J2534StreamTest.DirectLoadUriDeliversInjectedFramesExactly`), and
+  `QmlTest.settings`' `test_noSchemesKeysAddedOrTaken`.
