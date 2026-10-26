@@ -15,7 +15,7 @@ old one, and the old record's status is updated to point at it.
 | [0006](0006-frame-abi-v0.3.md) | Frame ABI v0.3 and the session close/destroy split | Accepted |
 | [0007](0007-uri-selected-transports.md) | Transports selected by URI; failures surface at create | Accepted |
 | [0008](0008-x86-surrogate-host.md) | Host 32-bit J2534 DLLs in an x86 surrogate process | Accepted; data plane and threading superseded by 0014 |
-| [0009](0009-pe-architecture-routing.md) | Route in-proc vs surrogate at the loader by PE machine type | Accepted |
+| [0009](0009-pe-architecture-routing.md) | Route in-proc vs surrogate at the loader by PE machine type | Accepted; routing superseded by 0025 |
 | [0010](0010-j2534-v0404-shared-types.md) | SAE J2534-1 v04.04 is the contract; one shared types header | Accepted |
 | [0011](0011-vendor-call-relay-wire-forms.md) | Vendor-call relay: flat wire forms, identical ioctl whitelist at both ends | Accepted |
 | [0012](0012-j2534-transport-adoption.md) | J2534 transport adoption: caller-chosen IDs, transport-driven request loop | Accepted |

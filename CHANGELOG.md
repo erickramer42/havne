@@ -24,6 +24,14 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
   decimal ("status 34 (0x22, vendor-specific)").
 
 ### Changed
+- Every J2534 driver runs in a helper process of its own architecture
+  ([ADR-0025](docs/adr/0025-one-j2534-backend.md)): 64-bit drivers in
+  the new `ecuio-j2534-surrogate-x64.exe`, which ships beside
+  `qttune.exe`, as 32-bit ones already did in
+  `ecuio-j2534-surrogate.exe`. A driver that crashes ends its helper,
+  not QtTune, and the session reports an adapter fault; every
+  session's driver calls are in the surrogate's session log. A file
+  that isn't a Windows DLL is refused with a plainer message.
 - Decoding runs in core on the transport's thread, not in the UI
   ([ADR-0024](docs/adr/0024-decode-on-the-worker.md)): a frame dropped
   under load still delivers its values to the pages and the recording,

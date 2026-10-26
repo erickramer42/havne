@@ -45,5 +45,5 @@ x86 surrogate, and one car, its engine ECU on 11-bit `0x7E8`:
   time counts from the first frame.
 - **Every item for any other adapter.** Each CONFIRMED above is the
   VX's. A second adapter, x64 or another vendor's, walks the whole
-  list again; its in-proc backend has met only the fake
+  list again; the x64 surrogate it would load in has met only the fake
   ([testing.md](../testing.md#gaps-not-verified)).

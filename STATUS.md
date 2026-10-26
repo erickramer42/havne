@@ -16,7 +16,7 @@ Safety, regulatory and warranty caveats are in
 **Current phase: v0.3.x.** v0.3.1, the first release with a Windows
 download, is out; what has changed since is in
 [CHANGELOG.md](CHANGELOG.md#unreleased). The J2534 stack is verified
-end to end against a fake vendor DLL, in-proc and through the x86
+end to end against a fake vendor DLL, through the x64 and the x86
 surrogate. One real adapter, the OBDX Pro VX, has run on a quiet bench
 bus and in two read-only sessions on one car
 ([2026-10-22](docs/bench-sessions/2026-10-22-vehicle.md),
@@ -32,9 +32,10 @@ second session ran the request engine, the probe, identification and
   - **Replay** ([ADR-0023](docs/adr/0023-replay-transport.md)), on every
     platform: `replay://<recording>` plays a recording's `frames.csv`
     back at its own pace or up to 100× faster.
-  - **J2534 on Windows:** discovery of installed drivers, x64 drivers
-    in-proc and 32-bit ones in a single-threaded surrogate process
-    ([ADR-0008](docs/adr/0008-x86-surrogate-host.md),
+  - **J2534 on Windows:** discovery of installed drivers, each driver
+    loaded in a single-threaded surrogate process of its own
+    architecture, x86 or x64, so a crashing driver ends its process,
+    not the app ([ADR-0025](docs/adr/0025-one-j2534-backend.md),
     [ADR-0014](docs/adr/0014-single-threaded-surrogate.md)), and
     channels and filters derived from the profile, so a bare
     `j2534://` streams ([ADR-0012](docs/adr/0012-j2534-transport-adoption.md)).
@@ -73,15 +74,15 @@ second session ran the request engine, the probe, identification and
     session log of every vendor call, with every request and reply
     while recording.
 - **Not yet:** real hardware beyond one adapter and one car: 29-bit
-  addressing, more than one ECU answering, a real x64 driver in-proc,
+  addressing, more than one ECU answering, a real x64 driver,
   and other vendors ([BENCH prep](docs/bench-sessions/bench-prep.md),
   [testing.md](docs/testing.md#gaps-not-verified)). The run sheets are
   [bench-runsheet.md](docs/bench-sessions/bench-runsheet.md) and
   [vehicle-runsheet.md](docs/bench-sessions/vehicle-runsheet.md).
-- **Tests:** 439 ctest cases on Windows (both trees rebuilt,
+- **Tests:** 400 ctest cases on Windows (both trees rebuilt,
   2026-10-26), all passing but two env-gated skips (the cross-arch
   case, and the real-car recordings' diff, run locally), plus the
-  cross-arch subset (75/75); 0 MSVC warnings. CI runs ctest on Windows,
+  cross-arch subset (76/76); 0 MSVC warnings. CI runs ctest on Windows,
   macOS and Linux, core under ASan and UBSan, 60 s of each libFuzzer
   harness ([fuzz/README.md](fuzz/README.md)), the Android and iOS
   cross-builds, and on pull requests an iOS Simulator smoke; it was
