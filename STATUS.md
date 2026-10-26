@@ -463,8 +463,11 @@ an issue is resolved it is removed, and its number is not reused.
    yet.
 4. **Every def is matched against every frame on the GUI thread.** A
    subscription can't trim that work: it is the chart's filter only,
-   because the Dashboard reads every signal. Once signal counts grow,
-   move decoding to the worker (Performance, in the backlog).
+   because the Dashboard reads every signal. Measured, it costs about
+   3 ns a def a frame: 1000 defs at a full 500 kbit/s bus would take
+   under 2 % of the GUI thread ([docs/testing.md](docs/testing.md#performance)),
+   so it limits nothing yet. Decoding on the worker (Performance, in the
+   backlog) removes it along with #10.
 6. **The session API is single-caller by contract.** The bridge is the
    only caller.
 10. **Strip-chart x-axis resolution is one coalesce window, about
@@ -681,9 +684,13 @@ matters: the original-copy file format constrains everything after it.
   timestamps (Known Issue #10) and takes the per-frame def matching
   off the GUI thread (#4).
 
-  Set a measured target before starting: sustained frames per second,
-  and per-PID refresh at N PIDs, recorded in
-  [docs/testing.md](docs/testing.md).
+  The GUI thread's cost per frame by profile size is measured
+  (`bench_bridge`, [docs/testing.md](docs/testing.md#performance)): the
+  matching takes under 2 % of the GUI thread at a full CAN bus with 1000
+  defs, so the reason to move the decode is #10's per-sample time and a
+  decode every front end shares, not CPU. Its ADR and the replay
+  transport go together: replay faster than real time loads this path
+  with recorded traffic, and its frames carry their own times.
 
 ### Toolchain
 

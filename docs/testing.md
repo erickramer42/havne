@@ -70,6 +70,52 @@ view. `scripts/coverage.sh` runs the same measurement locally
   can't provoke: pipe I/O timeouts, a child's startup exit codes, a
   thread that fails to start.
 
+## Performance
+
+### Decode cost per frame
+
+`tests/bench_bridge.cpp` (target `bench_bridge`, built with the tests,
+never run by ctest) measures the GUI thread's work per frame through the
+bridge, by the size of the session's profile: the queued call, the frame
+log, the match against every def (Known Issue #4), the decode and
+staging. Frames are queued as the worker queues them, then only the
+drain is timed; recording is off and no view is attached. The defs sit
+four to a CAN ID, 16 bits each, as a passive-bus profile packs them, so
+each frame decodes four values and is checked against every def. A raw
+session, which decodes nothing, is the baseline.
+
+```sh
+build/tests/Release/bench_bridge.exe [frames per run, default 20000]
+```
+
+Three runs on the dev machine, 2026-10-25 (Release, the median of three
+connects each; µs a frame, GUI thread):
+
+| Defs | 20,000 frames | 20,000 frames | 50,000 frames |
+|---|---|---|---|
+| raw | 0.86 | 0.52 | 0.82 |
+| 9 | 0.86 | 0.89 | 0.96 |
+| 50 | 1.17 | 1.22 | 1.05 |
+| 100 | 1.48 | 1.19 | 0.83 |
+| 250 | 1.82 | 1.80 | 1.27 |
+| 500 | 2.27 | 2.41 | 1.87 |
+| 1000 | 3.75 | 3.73 | 2.97 |
+
+- **Below about 100 defs the numbers are noise,** about ±0.3 µs run to
+  run. From 250 up they're steady: matching and decoding against 1000
+  defs adds 2 to 3 µs a frame, about 3 ns a def.
+- **Against the bus:** classic CAN at 500 kbit/s carries at most about
+  4,500 eight-byte frames a second. At that rate, 1000 defs cost the GUI
+  thread about 17 ms a second, under 2 %. The first vehicle's request
+  rotation ran about 26 frames a second.
+- **So the per-frame matching isn't a CPU problem at any CAN rate.**
+  What decoding on the worker would still bring is the samples' own
+  time on the chart (Known Issue #10): the staging keeps one value per
+  signal per 100 ms window, stamped with the tick's time.
+- **Not measured:** the worker's side (the 4 KB copy into the queued
+  call), the tick's per-row model updates with many rows, a QML view
+  attached to the models, text defs, and any machine but the dev one.
+
 ## What is verified
 
 | Capability | Verified by |
@@ -110,7 +156,7 @@ view. `scripts/coverage.sh` runs the same measurement locally
 | The vendor calls run off the GUI thread: an async connect's open, and a disconnect's teardown. Disconnect drops the UI state at once, refuses a connect until the teardown ends, and logs `Disconnecting:` then `Disconnected:`; a bridge destroyed mid-teardown waits for it | `BridgeTest.AsyncConnectOpensOffGuiThread`, `.DisconnectTearsDownOffGuiThread`, `.DestroyedMidDisconnectWaitsForTeardown` (Windows only: the fake's open and disconnect delays stall the call, and `GetLastCallThreadIds` names the thread that made it) |
 | Streaming continues past 10k cumulative frames; drops are counted and reported | `BridgeTest.StreamingContinuesPastTenThousandFrames`, `.BackpressureDropsAreCountedAndReported` |
 | Log order toggle (newest first / oldest first). Rows are in arrival order, not by frame timestamp, and a connect starts an empty table while a disconnect keeps the rows | `BridgeTest.FrameLogOrdersNewestFirstByDefault`, `.FrameLogTogglesToOldestFirst`, `.FrameLogOrdersByArrivalNotTimestamp`, `.ConnectStartsAnEmptyFrameLog` |
-| The frame log's ring at its cap: the newest 10k rows in arrival order either way, each with its own frame's bytes and length, the oldest leaving from its end and the new frame arriving at the other, still in order after going round oldest-first; the frame counters reach QML on the 100 ms tick, not per frame, and end exact at disconnect | `BridgeTest.FullFrameLogKeepsTheNewestInOrder`, `.FrameCountsAreReportedOnTheTick`. Each fails against a slot that ignores the oldest, a removal at the newest end, and counters emitted per frame. A frame costs about 2 µs at the cap (20,000 frames, no view attached). Log page smoke under `mock://demo`: newest and oldest first, the tail following, Pause and Clear |
+| The frame log's ring at its cap: the newest 10k rows in arrival order either way, each with its own frame's bytes and length, the oldest leaving from its end and the new frame arriving at the other, still in order after going round oldest-first; the frame counters reach QML on the 100 ms tick, not per frame, and end exact at disconnect | `BridgeTest.FullFrameLogKeepsTheNewestInOrder`, `.FrameCountsAreReportedOnTheTick`. Each fails against a slot that ignores the oldest, a removal at the newest end, and counters emitted per frame. A frame cost about 2 µs at the cap with its dispatch included (20,000 frames, no view attached, 2026-10-24); the GUI thread's drain alone is under [Performance](#performance). Log page smoke under `mock://demo`: newest and oldest first, the tail following, Pause and Clear |
 | The frame log's rows hold a payload up to 64 bytes inline and a longer one in a heap block only while the row is shown: a ring of 200-byte frames rounded by 27-byte ones holds no heap bytes, 64 bytes stays inline and 65 spills; Clear keeps the slots and frees the blocks, and a ring cleared before it filled grows only as far as it's used | `BridgeTest.FrameLogHoldsLongPayloadsOnlyWhileShown` (the model directly, through its slot and heap-byte seams). Each of five mutations fails it: a short frame keeping the block, Clear dropping the ring or keeping the blocks, growth by the cap alone, and the boundary at 63. Log page smoke, 2026-10-25: under `mock://demo` before and after Clear, and the fake's 203-byte `62 F1 A0` replies between 5-byte `62 1E 1C` ones, each row with its own length and bytes |
 | Session recording ([ADR-0017](adr/0017-session-recording.md)): off by default; with it on, one folder per connect holding every accepted frame (paused or not, host time never going backwards), each decoded value and the activity lines from `Connected:` through `Disconnected:`; the switch holds during a session; recording sets `ECUIO_SUR_LOG_FRAMES` in the OS environment the surrogate inherits and removes it at the next unrecorded connect, leaving a launch value alone | `BridgeTest.RecordingIsOffByDefault`, `.RecordingWritesFramesValuesAndEvents`, `.RecordingSwitchHoldsDuringASession`, `.RecordingTurnsOnSurrogateFrameLogging` |
 | The frame role names the Log page binds (`timestampUs`, `dlc`, `extended`, `payloadHex`, `arbId`), read through `Bridge.model` | `BridgeTest.FrameRoleNamesMatchLogPageBindings` |

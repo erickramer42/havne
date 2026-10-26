@@ -128,6 +128,25 @@ if(NOT QTTUNE_BUILD_CORE_ONLY)
 
     gtest_discover_tests(test_bridge)
 
+    # The GUI thread's cost per frame by profile size, a measurement for
+    # docs/testing.md; built with the tests, never run by ctest
+    add_executable(bench_bridge
+        bench_bridge.cpp
+        ../app/qttunebridge.cpp
+        ../app/sessionrecorder.cpp
+    )
+    set_target_properties(bench_bridge PROPERTIES AUTOMOC ON)
+    qttune_enable_warnings(bench_bridge)
+    target_include_directories(bench_bridge PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../app)
+    target_link_libraries(bench_bridge PRIVATE ecuio-core Qt6::Core)
+    if(WIN32)
+        add_custom_command(TARGET bench_bridge POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                    $<TARGET_RUNTIME_DLLS:bench_bridge> $<TARGET_FILE_DIR:bench_bridge>
+            COMMAND_EXPAND_LISTS
+        )
+    endif()
+
     # Tell ctest/gtest_discover where Qt DLLs live at runtime
     get_filename_component(QT_BIN_DIR "${Qt6Core_DIR}/../../bin" REALPATH)
 
