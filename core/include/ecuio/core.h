@@ -87,8 +87,11 @@ typedef enum {
                                            registration succeeds (pair
                                            identity, ADR-0002). Reserved,
                                            since codes are append-only */
-    ECUIO_ERR_LOAD_FAILED = 7,    /* the adapter DLL wouldn't load, or
-                                     lacks a mandatory J2534 export */
+    ECUIO_ERR_LOAD_FAILED = 7,    /* what the URI names couldn't be
+                                     loaded: an adapter DLL that wouldn't
+                                     load or lacks a mandatory J2534
+                                     export, or a recording a replay
+                                     can't play (ADR-0023) */
     /* Link-health codes: published by the J2534 worker through
      * ecuio_session_get_error_state while the session keeps running. */
     ECUIO_ERR_VEHICLE_TIMEOUT = 8,          /* reads answer, but nothing

@@ -430,7 +430,7 @@ const char* ecuio_status_string(ecuio_status_t status)
         case ECUIO_ERR_OUT_OF_MEMORY:           return "out of memory";
         case ECUIO_ERR_SESSION_CLOSED:          return "session already closed";
         case ECUIO_ERR_ALREADY_REGISTERED:      return "already registered";
-        case ECUIO_ERR_LOAD_FAILED:             return "failed to load transport library";
+        case ECUIO_ERR_LOAD_FAILED:             return "couldn't load what the URI names";
         case ECUIO_ERR_VEHICLE_TIMEOUT:         return "vehicle not responding (timeout)";
         case ECUIO_ERR_TRANSPORT_HARD_FAILURE: return "transport hard failure";
         case ECUIO_ERR_REQUEST_FAILED:          return "request failed (vehicle not accepting requests)";
