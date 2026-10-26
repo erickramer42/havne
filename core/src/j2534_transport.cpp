@@ -1,6 +1,6 @@
 // File/layer: core/src/j2534_transport.cpp | C++17, Qt-free, Win32-guarded
 // Testing: HARNESS — test_j2534_connect: connect failures and the
-//          session info, on both backends. test_j2534_stream: URI parsing,
+//          session info, also cross-arch. test_j2534_stream: URI parsing,
 //          the vendor clock's unit cases, connect parameters,
 //          filter registration, request framing and routing, header
 //          strip and arbitration_id stamp, raw on the engine ECU's
@@ -9,7 +9,7 @@
 //          recovery, the support report it publishes, uds-generic's
 //          requests, ECU prefix and DID scan, and identification's
 //          requests, ?identify=0 and the report it publishes.
-//          test_j2534_health, on both backends: the request engine's
+//          test_j2534_health, also cross-arch: the request engine's
 //          pacing (the floor, the wait, negative and pending replies,
 //          two channels at once), the drain in passive mode, and the
 //          link-health machine: hard and quiet reads, untouched counts,

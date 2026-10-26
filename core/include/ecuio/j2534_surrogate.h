@@ -29,8 +29,8 @@ typedef struct ecuio_j2534_sur_handle ecuio_j2534_sur_handle_t;
 ecuio_status_t ecuio_j2534_sur_open(const char* dll_path, uint32_t dll_arch,
                                     ecuio_j2534_sur_handle_t** out_handle);
 
-/* Channel lifecycle. baud==0 resolves to the ISO 15765 500k default,
- * mirroring the in-proc loader contract. */
+/* Channel lifecycle. baud==0 resolves to the ISO 15765 500k default
+ * (the transport's "unset"). */
 ecuio_status_t ecuio_j2534_sur_connect_channel(ecuio_j2534_sur_handle_t* handle,
                                                unsigned long baud,
                                                unsigned long flags,
@@ -108,8 +108,8 @@ ecuio_status_t ecuio_j2534_sur_stop_msg_filter(ecuio_j2534_sur_handle_t* handle,
                                                   unsigned long filter_id);
 
 /* Return one received message: from the cached batch if one is
- * pending, otherwise via one OP_READ (up to 16 messages). Same contract
- * as the in-proc read path: ERR_TIMEOUT -> ECUIO_ERR_VEHICLE_TIMEOUT,
+ * pending, otherwise via one OP_READ (up to 16 messages). The contract
+ * of ecuio_j2534_read_msg: ERR_TIMEOUT -> ECUIO_ERR_VEHICLE_TIMEOUT,
  * ERR_BUFFER_EMPTY -> no message, other statuses or a pipe failure ->
  * ECUIO_ERR_TRANSPORT_HARD_FAILURE; the message as the vendor gave it
  * (ecuio_pt_rx_t, j2534_ptypes.h): RxStatus, the raw timestamp, and

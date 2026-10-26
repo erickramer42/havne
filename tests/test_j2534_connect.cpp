@@ -349,8 +349,7 @@ TEST_F(J2534ConnectTest, HelperFailuresHaveOneCodePerCause)
     EXPECT_EQ(ecuio_j2534_inject_test_frame(h, req, 0, 0, 0),
               ECUIO_ERR_INVALID_ARGUMENT);
     EXPECT_EQ(ecuio_j2534_inject_test_frame(h, req, 6, 0, 0), ECUIO_OK)
-        << "the test seam reaches the fake on either backend";
-    EXPECT_EQ(ecuio_j2534_backend_name(nullptr), nullptr);
+        << "the test seam reaches the fake in the child";
     EXPECT_EQ(ecuio_j2534_backend(nullptr), 0u);
     const uint8_t big[65] = {};
     uint32_t written = 0;
@@ -463,8 +462,7 @@ protected:
 };
 
 /* Each architecture's surrogate is found by its own name and variable,
- * and a missing one fails the session, with no in-proc load to fall
- * back on. */
+ * and a missing one fails the session: nothing loads in this process. */
 TEST_F(J2534SurrogateConnectTest, MissingSurrogateExeIsASurrogateFailure)
 {
     const char* name = x86 ? "ecuio-j2534-surrogate.exe"

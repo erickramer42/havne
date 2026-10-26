@@ -28,7 +28,7 @@
 //          capped step, the vendor clock's cases and the J2534 status
 //          names are here; the
 //          request engine's pacing and the link-health machine run
-//          through both backends in test_j2534_health.cpp.
+//          through the surrogate in test_j2534_health.cpp.
 
 #include <gtest/gtest.h>
 
@@ -697,7 +697,7 @@ protected:
 };
 
 /* Sets one of the fake's knobs for a scope, on its page, which the fake
- * reads on every call on either backend; the destructor clears it, so a
+ * in the child reads on every call; the destructor clears it, so a
  * failed ASSERT can't leak it into the next case. */
 struct KnobGuard {
     const char* name;

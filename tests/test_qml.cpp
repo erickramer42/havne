@@ -52,8 +52,8 @@ public:
     }
 
     // Arms one of the fake's knobs (ECUIO_FAKE_*) in the OS environment,
-    // which the in-proc fake reads on every vendor call, as the gtest
-    // suites' FakeEnvArm does. clearFakeKnobs() removes every knob armed.
+    // which the surrogate child inherits at the next connect's spawn.
+    // clearFakeKnobs() removes every knob armed.
     Q_INVOKABLE void armFakeKnob(const QString& name, const QString& value)
     {
 #ifdef _WIN32

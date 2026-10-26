@@ -4,7 +4,8 @@
 //          the Dashboard header, LiveView's banner, Settings' status
 //          label and its activity log. Disconnected and ok everywhere
 //          (mock://demo); quiet, fault and requests on Windows, through
-//          the fake vendor DLL in-proc with a knob armed, as the manual
+//          the fake vendor DLL in the x64 surrogate with a knob armed
+//          before the connect spawns it, as the manual
 //          smoke recipe in docs/testing.md does. The pill and the
 //          Dashboard show the fake's direct-load URI cut to its file
 //          name (Bridge.uriLabel); Settings shows it whole.

@@ -224,8 +224,7 @@ static int handle_op_read(unsigned long channel, uint32_t timeout_ms,
     /* A batch that held only indications (ecuio_pt_is_indication) is
      * read again with what's left of the timeout, and at least once
      * more, so an indication never ends a read: a reply queued behind
-     * it comes back in this response. The in-proc loader reads the
-     * same way, a message at a time. */
+     * it comes back in this response. */
     const auto deadline = std::chrono::steady_clock::now() +
                           std::chrono::milliseconds(timeout_ms);
     uint32_t wait_ms = timeout_ms;
@@ -413,8 +412,8 @@ static int handle_op_start_filter(unsigned long channel_id, uint32_t filter_type
                                   const uint8_t* fc, uint32_t fc_len,
                                   uint32_t tx_flags, uint32_t* out_fid)
 {
-    /* Built as the in-proc loader builds them (ecuio_pt_fill_msg), so
-     * both backends send identical filter messages. */
+    /* Built as writes are (ecuio_pt_fill_msg): zeroed, so no stale
+     * byte reaches a vendor comparing struct contents. */
     PASSTHRU_MSG mask_msg, pattern_msg, fc_msg;
     ecuio_pt_fill_msg(&mask_msg, mask, mask_len, tx_flags);
     ecuio_pt_fill_msg(&pattern_msg, pattern, pattern_len, tx_flags);
@@ -493,8 +492,8 @@ int wmain(int argc, wchar_t* argv[])
     stage("dll loaded");
 
     /* Resolve the nine mandatory exports. Ioctl falls back to the
-     * legacy 'PassThruIoCtl' spelling, exactly as the in-proc loader
-     * does, so both backends accept the same vendor DLLs. */
+     * legacy 'PassThruIoCtl' spelling after the spec's 'PassThruIoctl'
+     * (SAE J2534-1 §7.3.19; the OBDX Pro VX exports that). */
     g_open         = reinterpret_cast<fn_pt_open>(resolve_export(g_module, "PassThruOpen", nullptr));
     g_close        = reinterpret_cast<fn_pt_close>(resolve_export(g_module, "PassThruClose", nullptr));
     g_connect      = reinterpret_cast<fn_pt_connect>(resolve_export(g_module, "PassThruConnect", nullptr));
@@ -523,7 +522,7 @@ int wmain(int argc, wchar_t* argv[])
     }
     stage("exports resolved");
     /* Optional: the text behind a refused call, and the versions in
-     * the session info. The in-proc loader resolves them the same way. */
+     * the session info. */
     g_get_last_error = reinterpret_cast<fn_pt_get_last_error>(
         GetProcAddress(g_module, "PassThruGetLastError"));
     if (g_get_last_error == nullptr) {

@@ -1,8 +1,8 @@
 // File/layer: tests/fake_j2534.cpp | Fake J2534 vendor DLL, HARNESS tier;
 //             built in BOTH trees
-// Testing: loaded by the J2534 suites' sessions, in-proc or in the
-//          surrogate child (either arch); tests reach it only through
-//          its control page (fake_control.h)
+// Testing: loaded by the J2534 suites' sessions in the surrogate
+//          child (either arch); tests reach it only through its
+//          control page (fake_control.h)
 // NOTE: ReadMsgs, WriteMsgs' replies and InjectFrame (OP_INJECT's and
 //      the loader's inject hook) share a mutex-guarded FIFO, so
 //      injections race safely against the polling worker. Connect
@@ -797,9 +797,8 @@ long __stdcall PassThruReadMsgs(unsigned long ChannelID,
      * call to return the given vendor status with zero messages —
      * 0x09 (ERR_TIMEOUT) for quiet-bus, a hard code (e.g. 0x07) for
      * the dead-adapter path. Persistent while set and re-read per
-     * call, so in-proc tests toggle it with SetEnvironmentVariableA
-     * between phases; the surrogate child sees only the value it
-     * inherited at spawn, unless the control page sets it. Checked
+     * call: the surrogate child sees the value it inherited at spawn,
+     * unless the control page sets it. Checked
      * before the queue, so a simulated dead adapter delivers nothing.
      * It always zeroes the count. Timeout WITH delivered messages is
      * spec mode's job, below. */
@@ -821,9 +820,9 @@ long __stdcall PassThruReadMsgs(unsigned long ChannelID,
      * buffer keeps whatever the caller put there (zeros, or the
      * surrogate child's previous batch contents). Mirrors the VX,
      * which reports "status 7, written 1" on a failed write
-     * (docs/bench-sessions/2026-10-20.md). Re-read per call:
-     * in-proc tests toggle live, the surrogate child sees the
-     * spawn-time value unless the control page sets it. */
+     * (docs/bench-sessions/2026-10-20.md). Re-read per call: the
+     * surrogate child sees the spawn-time value unless the control
+     * page sets it. */
     {
         char uc[32] = {};
         if (fake_j2534::read_knob("ECUIO_FAKE_UNTOUCHED_COUNT_STATUS",
@@ -980,8 +979,8 @@ long __stdcall PassThruWriteMsgs(unsigned long ChannelID,
      * *pNumMsgs is left as passed (1), the VX's "status 7, written 1",
      * so a write path that read the count before the status would be
      * caught. Unrecorded writes don't move the page's count. Re-read per
-     * call: in-proc tests toggle live; the child sees the spawn-time
-     * value unless the control page sets it. */
+     * call: the child sees the spawn-time value unless the control
+     * page sets it. */
     {
         char wb[32] = {};
         if (fake_j2534::read_knob("ECUIO_FAKE_WRITE_STATUS",

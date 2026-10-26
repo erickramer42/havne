@@ -565,9 +565,9 @@ QVariantList QtTuneBridge::discoverJ2534Devices() const
         m["vendorName"] = QString::fromUtf8(devices[i].vendor_name);
         m["dllPath"] = QString::fromUtf8(devices[i].dll_path);
         /* reserved[0] is the loader's PE sniff: 1 = x86, 2 = x64,
-         * 0 = unknown. Unknown is displayed honestly — routing
-         * treats it as in-proc (x64), which is the load-time
-         * fallback, not a claim about the binary. */
+         * 0 = unknown. Unknown is displayed honestly — the loader
+         * sends it to the x64 surrogate, which is where it would
+         * load, not a claim about the binary. */
         m["architecture"] = (devices[i].reserved[0] == 2)
                                 ? QStringLiteral("x64")
                             : (devices[i].reserved[0] == 1)
@@ -1617,8 +1617,7 @@ QString QtTuneBridge::sessionInfoText(const ecuio_session_info_t& info)
                         speed, loop ? QStringLiteral(", looping") : QString()) +
                profile;
     }
-    if (info.backend != ECUIO_BACKEND_J2534_INPROC &&
-        info.backend != ECUIO_BACKEND_J2534_SURROGATE) {
+    if (info.backend != ECUIO_BACKEND_J2534_SURROGATE) {
         return QStringLiteral("Session: backend %1").arg(info.backend);
     }
     const auto text = [](const char* s) {
@@ -1631,9 +1630,7 @@ QString QtTuneBridge::sessionInfoText(const ecuio_session_info_t& info)
     const QString arch = (info.dll_arch == ECUIO_DLL_ARCH_X86) ? QStringLiteral("x86 DLL")
                        : (info.dll_arch == ECUIO_DLL_ARCH_X64) ? QStringLiteral("x64 DLL")
                        : QStringLiteral("DLL of unknown architecture");
-    parts << arch + ((info.backend == ECUIO_BACKEND_J2534_SURROGATE)
-                         ? QStringLiteral(", through the surrogate")
-                         : QStringLiteral(", in-proc"));
+    parts << arch + QStringLiteral(", through the surrogate");
 
     QString link = (info.protocol_id == 6) ? QStringLiteral("ISO 15765")
                  : (info.protocol_id == 5) ? QStringLiteral("CAN")

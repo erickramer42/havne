@@ -5,10 +5,10 @@
 // A test process creates one named shared-memory page and names it in
 // the environment (ECUIO_FAKE_CONTROL) before any session opens.
 // Whichever fake instance serves the session reads it on every vendor
-// call: the module loaded in the test process, or the copy inside the
-// surrogate child, whose environment is frozen at spawn and which no
-// test hook can reach. The page is the only way a test reaches the
-// fake, so a test reads the same on either backend. Through it a test:
+// call: the copy inside the surrogate child, whose environment is
+// frozen at spawn and which no test hook can reach. The page is the
+// only way a test reaches the fake, whichever surrogate hosts it.
+// Through it a test:
 //   - sets and clears knobs mid-session; a knob on the page shadows the
 //     environment variable of the same name,
 //   - queues received messages with any RxStatus, and
@@ -161,8 +161,8 @@ inline Page* attach()
 }
 
 /* Test side: this process's page, created on first use as
- * Local\ecuio-fake-control-<pid> and named in the environment, so an
- * in-proc fake and any surrogate child spawned later both find it.
+ * Local\ecuio-fake-control-<pid> and named in the environment, so
+ * every surrogate child spawned later finds it.
  * It lives until the process exits. */
 inline Page* create_for_this_process()
 {

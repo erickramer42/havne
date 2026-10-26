@@ -1908,7 +1908,7 @@ fake_control::Page* fakePage()
 }
 
 /* Sets one of the fake's knobs for one test, on its page (which the
- * fake reads on every call, on either backend), and clears it on exit,
+ * fake in the child reads on every call), and clears it on exit,
  * so a failing ASSERT can't leak it into the next case. */
 class FakeEnvArm
 {
@@ -2259,6 +2259,9 @@ TEST(BridgeTest, SessionInfoTextNamesTheAdapter)
     later.backend = 7; // a backend this build doesn't know
     EXPECT_EQ(QtTuneBridge::sessionInfoText(later).toStdString(),
               "Session: backend 7");
+    later.backend = ECUIO_BACKEND_J2534_INPROC; // retired, never reported
+    EXPECT_EQ(QtTuneBridge::sessionInfoText(later).toStdString(),
+              "Session: backend 2");
 }
 
 /* The "ECU 0x…:" line's wording, from hand-built reports: the first

@@ -256,10 +256,11 @@ ecuio_status_t ecuio_session_get_error_state(
 
 /* backend */
 #define ECUIO_BACKEND_MOCK               1u
-#define ECUIO_BACKEND_J2534_INPROC       2u   /* the adapter's DLL loaded
-                                                 in this process */
-#define ECUIO_BACKEND_J2534_SURROGATE    3u   /* in the surrogate process
-                                                 (ADR-0008) */
+#define ECUIO_BACKEND_J2534_INPROC       2u   /* retired: no DLL loads in
+                                                 this process (ADR-0025) */
+#define ECUIO_BACKEND_J2534_SURROGATE    3u   /* the adapter's DLL in a
+                                                 surrogate process of its
+                                                 architecture (ADR-0025) */
 #define ECUIO_BACKEND_REPLAY             4u   /* a recording's frames.csv
                                                  (ADR-0023) */
 

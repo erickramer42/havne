@@ -18,7 +18,7 @@
  * reassembly buffer) per J2534-1 v4.04. VERIFIED. */
 #define ECUIO_PT_MSG_DATA_SIZE 4128
 
-/* The longest message either backend writes (and the tests inject),
+/* The longest message the loader writes (and the tests inject),
  * CAN ID included: ours, not J2534's. A request is 6 or 7 bytes, so
  * this is room to spare; reads take whole messages. */
 #define ECUIO_PT_WRITE_MAX 64
@@ -95,7 +95,7 @@ static inline const char* ecuio_pt_status_name(long status)
  * ...) means "assume nothing was written". ERR_BUFFER_OVERFLOW (0x12)
  * would qualify per spec (pNumMsgs = messages actually copied) but is
  * not defined here, so an overflow read drops its batch and counts as
- * a hard failure. Applies to ReadMsgs; both write paths check
+ * a hard failure. Applies to ReadMsgs; the write path checks
  * the status before the count, the count is never consumed, and the
  * surrogate logs the raw pair (it is diagnostic evidence of exactly
  * this vendor behavior).
@@ -134,7 +134,7 @@ static inline unsigned long ecuio_trusted_count(unsigned long status,
  * refused one), and the START_OF_MESSAGE indication a vendor queues
  * when a segmented ISO 15765 reply starts arriving, ahead of the whole
  * message (Quantex's PassThruReadMsgs reference). Skipping one doesn't
- * end a read: both read paths read again with what's left of the
+ * end a read: the surrogate child reads again with what's left of the
  * timeout, skipping at most ECUIO_PT_MAX_SKIPPED_PER_READ. */
 #define ECUIO_PT_MAX_SKIPPED_PER_READ 16
 
@@ -170,7 +170,7 @@ static inline int ecuio_pt_is_indication(unsigned long rx_status)
 /* ---- Ioctl SCONFIG structures (J2534-1 v04.04, VERIFIED) ----
  * NOTE: SCONFIG_LIST carries a POINTER (ConfigPtr). The vendor-facing
  * form below is only legal in the process that calls the vendor DLL
- * (in-proc loader, surrogate child). The surrogate pipe protocol must
+ * (the surrogate child). The surrogate pipe protocol must
  * carry a FLATTENED form (bounded param/value array) — never this
  * struct, whose pointer is meaningless across the boundary. */
 #define ECUIO_PT_SCONFIG_MAX_PARAMS 8
@@ -216,8 +216,8 @@ typedef struct ecuio_pt_rx {
     uint8_t  data[ECUIO_PT_MSG_DATA_SIZE];
 } ecuio_pt_rx_t;
 
-/* The one copy of a vendor's message into an ecuio_pt_rx_t, for the
- * in-proc loader and the surrogate child alike. */
+/* The one copy of a vendor's message into an ecuio_pt_rx_t (the
+ * surrogate child's read). */
 static inline void ecuio_pt_rx_from_msg(const PASSTHRU_MSG* m,
                                         ecuio_pt_rx_t* out)
 {
@@ -229,7 +229,7 @@ static inline void ecuio_pt_rx_from_msg(const PASSTHRU_MSG* m,
     memcpy(out->data, m->Data, n);
 }
 
-/* The one way either backend builds a message for a vendor: a write,
+/* The one way the child builds a message for a vendor: a write,
  * or a filter's mask, pattern or flow-control message. Zeroed first, so
  * no stale field or padding byte reaches a vendor comparing struct
  * contents; ExtraDataIndex = DataSize (the v04.04 no-extra-data

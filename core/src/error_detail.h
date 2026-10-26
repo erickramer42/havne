@@ -1,6 +1,6 @@
 // File/layer: core/src/error_detail.h | C++17, Qt-free, core-internal
 // Testing: CoreTest.CreateFailuresNameTheirCause,
-//          .LastErrorDetailIsPerThread; J2534ConnectTest on both backends
+//          .LastErrorDetailIsPerThread; J2534ConnectTest (also cross-arch)
 //
 // The text behind ecuio_last_error_detail (core.h): why the last
 // ecuio_session_create or ecuio_session_start on this thread failed.

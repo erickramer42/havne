@@ -127,9 +127,10 @@ ecuio_status_t ecuio_j2534_transport_attach(ecuio_session_t* session,
                                             const char* uri,
                                             const struct ecuio_uri_query* query);
 
-/* Vendor-call helpers implemented in j2534_loader.cpp —
- * j2534_transport.cpp policy layer goes through these so the vendor
- * ABI lives in exactly one TU. */
+/* Vendor-call helpers implemented in j2534_loader.cpp: the
+ * j2534_transport.cpp policy layer goes through these, and each checks
+ * its arguments and forwards to the surrogate client
+ * (j2534_surrogate.h), so the transport never sees the pipe. */
 ecuio_status_t ecuio_j2534_connect_channel(ecuio_j2534_handle_t* handle,
                                            unsigned long baud,
                                            unsigned long flags,
@@ -138,8 +139,8 @@ ecuio_status_t ecuio_j2534_disconnect_channel(ecuio_j2534_handle_t* handle,
                                               unsigned long channel);
 /* One received message, as the vendor gave it (ecuio_pt_rx_t,
  * j2534_ptypes.h): RxStatus, the raw 32-bit stamp, and Data whole with
- * the 4-byte CAN ID in front. Indications are skipped on both backends;
- * the transport makes the message a frame (pump_one). */
+ * the 4-byte CAN ID in front. Indications are skipped (the child does
+ * it); the transport makes the message a frame (pump_one). */
 ecuio_status_t ecuio_j2534_read_msg(ecuio_j2534_handle_t* handle,
                                     unsigned long channel,
                                     ecuio_pt_rx_t* out_msg,
@@ -148,25 +149,22 @@ ecuio_status_t ecuio_j2534_read_msg(ecuio_j2534_handle_t* handle,
 
 /* ---- Write / ioctl / filter vendor-call helpers ----
  *
- * Same routing discipline as the helpers above: each dispatches
- * branch-on-backend inside j2534_loader.cpp and the policy layer stays
- * backend-blind. All SCONFIG traffic is FLATTENED (Parameter, Value)
- * u32 pairs, little-endian, 8 bytes per pair, max
- * ECUIO_PT_SCONFIG_MAX_PARAMS pairs — pointer-bearing structs
- * (SCONFIG_LIST, raw PASSTHRU_MSG*) never cross the internal seam so
- * the in-proc and surrogate signatures are identical by construction.
+ * Like the helpers above, each forwards to the surrogate client. All
+ * SCONFIG traffic is FLATTENED (Parameter, Value) u32 pairs,
+ * little-endian, 8 bytes per pair, max ECUIO_PT_SCONFIG_MAX_PARAMS
+ * pairs — pointer-bearing structs (SCONFIG_LIST, raw PASSTHRU_MSG*)
+ * never cross the internal seam, so it maps onto the pipe one to one.
  *
- * Status codes, the same on both backends (ADR-0018, appendix of
- * 2026-10-23):
+ * Status codes (ADR-0018, appendix of 2026-10-23):
  *   ECUIO_ERR_NULL_ARGUMENT     a required pointer is NULL
  *   ECUIO_ERR_INVALID_ARGUMENT  a length or shape the call can't take,
  *                               refused before any vendor call
  *   ECUIO_ERR_NOT_IMPLEMENTED   an ioctl outside the whitelist, or a
  *                               DLL without an optional export
  *   ECUIO_ERR_VENDOR_REFUSED    the vendor's status wasn't
- *                               STATUS_NOERROR (through the surrogate,
- *                               also the child's own refusals, which
- *                               answer as a strict vendor would)
+ *                               STATUS_NOERROR, or the child's own
+ *                               refusals, which answer as a strict
+ *                               vendor would)
  *   ECUIO_ERR_SURROGATE_FAILED  the surrogate child didn't answer, or
  *                               answered past the wire's limits
  * Disconnect is best-effort and ignores the vendor's status, so it
@@ -194,9 +192,8 @@ ecuio_status_t ecuio_j2534_write_frame(ecuio_j2534_handle_t* handle,
  * output. For READ_VBATT: input_len 0, 4-byte result in output.
  * Pointer-bearing ioctls (FAST_INIT etc.) are out of contract — the
  * relay refuses them at this seam rather than guessing layouts.
- * output receives the first output_cap bytes of the result on either
- * backend, and *out_len its full length, so a caller spots a cut by
- * comparing. */
+ * output receives the first output_cap bytes of the result, and
+ * *out_len its full length, so a caller spots a cut by comparing. */
 ecuio_status_t ecuio_j2534_ioctl(ecuio_j2534_handle_t* handle,
                                   unsigned long channel,
                                   uint32_t ioctl_id,
@@ -245,33 +242,21 @@ ecuio_status_t ecuio_j2534_read_version(ecuio_j2534_handle_t* handle,
                                         char* dll,
                                         char* api);
 
-/* Backend introspection (routing diagnostics + tests): "inproc" or
- * "surrogate". NULL for a NULL handle. */
-const char* ecuio_j2534_backend_name(const ecuio_j2534_handle_t* handle);
-
-/* The same choice as ECUIO_BACKEND_J2534_INPROC or _SURROGATE, and the
- * DLL's PE machine as ECUIO_DLL_ARCH_* (core.h), for
- * ecuio_session_info_t. A forced surrogate (below) reports the x64 fake
- * as x64. 0 for a NULL handle. */
+/* For ecuio_session_info_t: the backend, always
+ * ECUIO_BACKEND_J2534_SURROGATE (ADR-0025), and the DLL's PE machine as
+ * ECUIO_DLL_ARCH_* (core.h), which chose the surrogate. 0 for a NULL
+ * handle. */
 uint32_t ecuio_j2534_backend(const ecuio_j2534_handle_t* handle);
 uint32_t ecuio_j2534_dll_arch(const ecuio_j2534_handle_t* handle);
 
-/* TEST-ONLY: inject a frame into the loaded module's InjectFrame hook
- * (fake DLL), routed by backend. UNIT/HARNESS use — never in product
- * paths; real messages arrive via ecuio_j2534_read_msg. */
+/* TEST-ONLY: inject a frame into the child's fake DLL through its
+ * InjectFrame hook (OP_INJECT). HARNESS use — never in product paths;
+ * real messages arrive via ecuio_j2534_read_msg. */
 ecuio_status_t ecuio_j2534_inject_test_frame(ecuio_j2534_handle_t* handle,
                                              const uint8_t* data,
                                              uint32_t len,
                                              uint32_t timestamp,
                                              uint32_t rx_flags);
-
-/* TEST-ONLY: while on, ecuio_j2534_open sends every DLL to the
- * surrogate, x64 ones included, so one HARNESS test can run a session
- * through both backends against the x64 fake. The surrogate exe must
- * match the DLL's architecture (ECUIO_SURROGATE_EXE names the x64
- * tree's). Process-wide and off by default; product code never calls
- * it. */
-void ecuio_j2534_force_surrogate_for_testing(bool on);
 
 #ifdef __cplusplus
 }

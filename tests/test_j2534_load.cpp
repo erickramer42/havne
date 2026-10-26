@@ -25,9 +25,9 @@ namespace {
 
 #ifdef _WIN32
 
-/* The fake's control page (fake_control.h) says which calls reached it,
- * on either backend: the process that ran PassThruOpen, and the closes
- * of the device it handed out. */
+/* The fake's control page (fake_control.h) says which calls reached it
+ * in the child: the process that ran PassThruOpen, and the closes of
+ * the device it handed out. */
 struct FakeFixture : public ::testing::Test {
     ecuio_j2534_device_t device{};
     fake_control::Page* page = nullptr;
@@ -214,7 +214,7 @@ TEST_F(FakeFixture, NonAsciiDllPathLoads) {
     memcpy(dev.dll_path, copy.utf8, strlen(copy.utf8) + 1);
     ecuio_j2534_handle_t* h = nullptr;
     ASSERT_EQ(ecuio_j2534_open(&dev, &h), ECUIO_OK);
-    EXPECT_STREQ(ecuio_j2534_backend_name(h), "surrogate");
+    EXPECT_EQ(ecuio_j2534_backend(h), ECUIO_BACKEND_J2534_SURROGATE);
     EXPECT_EQ(ecuio_j2534_close(h), ECUIO_OK);     /* unloads, so the copy can go */
 }
 

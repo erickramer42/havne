@@ -868,8 +868,8 @@ TEST_F(J2534HealthTest, RequestsFollowRepliesDownToTheFloor)
 /* On the VX a read holds its whole timeout unless the batch fills, and
  * the surrogate asks for 16 messages, so a reply 4 ms after its request
  * is seen only when the read ends. Reads capped at the 10 ms slice keep
- * requests near the floor's pace on both backends; a read held for the
- * 100 ms wait would leave about ten a second through the surrogate. */
+ * requests near the floor's pace; a read held for the 100 ms wait
+ * would leave about ten a second. */
 TEST_F(J2534HealthTest, VxRepliesAreSeenWithinASlice)
 {
     ASSERT_NO_FATAL_FAILURE(knob("ECUIO_FAKE_VX", "1"));
@@ -1021,7 +1021,7 @@ TEST_F(J2534HealthTest, PassiveModeDrainsABurstWithoutWaiting)
     EXPECT_EQ(frames.load(), 16);
 }
 
-/* A reply longer than a CAN-FD frame arrives whole on both backends:
+/* A reply longer than a CAN-FD frame arrives whole over the pipe:
  * 203 bytes, past the 64 a frame once held; ISO 15765-2's longest on
  * classic CAN, 4095; and one that fills PASSTHRU_MSG.Data, which a
  * frame holds only the first ECUIO_FRAME_DATA_MAX bytes of, marked

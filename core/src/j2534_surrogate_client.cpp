@@ -609,7 +609,7 @@ DWORD log_child_exit(const ecuio_j2534_sur_handle_t* h)
 }
 
 /* A child that exited during startup: a DLL that won't load is the
- * DLL's fault, as in-proc; anything else is the surrogate's. */
+ * DLL's fault (LOAD_FAILED); anything else is the surrogate's. */
 ecuio_status_t child_exit_failed(DWORD code)
 {
     switch (code) {
@@ -1102,7 +1102,7 @@ ecuio_status_t ecuio_j2534_sur_ioctl(ecuio_j2534_sur_handle_t* h,
         return ECUIO_ERR_SURROGATE_FAILED;
     }
     /* The caller's capacity bounds the copy; out_len keeps the full
-     * length, as in-proc. */
+     * length, so the caller spots a cut. */
     if (output != nullptr && resp.data_len > 0) {
         memcpy(output, resp.data,
                (resp.data_len < output_cap) ? resp.data_len : output_cap);
@@ -1268,8 +1268,8 @@ ecuio_status_t ecuio_j2534_sur_read_msg(ecuio_j2534_sur_handle_t* h,
     /* Deliver first, judge the status second. Per J2534-1 a read
      * asking for N messages with a nonzero timeout returns ERR_TIMEOUT
      * TOGETHER WITH however many arrived, so a conforming vendor reports
-     * nearly every response that way. The in-proc path delivers such a
-     * message too; dropping it would hide the ECU's answer and leave a
+     * nearly every response that way. Dropping such a message would
+     * hide the ECU's answer and leave a
      * healthy session showing nothing at all. The child has already
      * applied the count-trust rule (ecuio_trusted_count), so a
      * non-empty batch only arrives under NOERROR or ERR_TIMEOUT. */

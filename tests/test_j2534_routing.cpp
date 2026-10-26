@@ -85,7 +85,7 @@ TEST(J2534RoutingTest, X64FakeSelectsTheX64SurrogateAndRoundTrips)
 
     ecuio_j2534_handle_t* h = nullptr;
     ASSERT_EQ(ecuio_j2534_open(&dev, &h), ECUIO_OK);
-    EXPECT_STREQ(ecuio_j2534_backend_name(h), "surrogate");
+    EXPECT_EQ(ecuio_j2534_backend(h), ECUIO_BACKEND_J2534_SURROGATE);
     EXPECT_EQ(ecuio_j2534_dll_arch(h), ECUIO_DLL_ARCH_X64);
     EXPECT_EQ(GetModuleHandleA(FAKE_J2534_DLL_PATH), nullptr)
         << "the fake loaded in this process";
@@ -130,7 +130,7 @@ TEST(J2534RoutingTest, X64WriteIoctlFilterRoundTrips)
 
     ecuio_j2534_handle_t* h = nullptr;
     ASSERT_EQ(ecuio_j2534_open(&dev, &h), ECUIO_OK);
-    EXPECT_STREQ(ecuio_j2534_backend_name(h), "surrogate");
+    EXPECT_EQ(ecuio_j2534_backend(h), ECUIO_BACKEND_J2534_SURROGATE);
 
     unsigned long channel = 0;
     ASSERT_EQ(ecuio_j2534_connect_channel(h, 500000, 0, &channel), ECUIO_OK);
@@ -209,7 +209,7 @@ TEST(J2534RoutingTest, X86FakeSelectsSurrogateBackendAndRoundTrips)
 
     ecuio_j2534_handle_t* h = nullptr;
     ASSERT_EQ(ecuio_j2534_open(&dev, &h), ECUIO_OK);
-    EXPECT_STREQ(ecuio_j2534_backend_name(h), "surrogate");
+    EXPECT_EQ(ecuio_j2534_backend(h), ECUIO_BACKEND_J2534_SURROGATE);
 
     unsigned long channel = 0;
     ASSERT_EQ(ecuio_j2534_connect_channel(h, 500000, 0, &channel), ECUIO_OK);
@@ -250,9 +250,8 @@ TEST(J2534RoutingTest, X86FakeSelectsSurrogateBackendAndRoundTrips)
     EXPECT_EQ(ecuio_j2534_disconnect_channel(h, channel), ECUIO_OK);
     EXPECT_EQ(ecuio_j2534_close(h), ECUIO_OK);
 
-    /* SESSION-level smoke: the transport layer's function diet is
-     * identical for both backends, so the full session lifecycle
-     * must work over the routed surrogate too. (Frame-level session
+    /* SESSION-level smoke: the full session lifecycle over the routed
+     * surrogate. (Frame-level session
      * verification stays loader-side: no session API reaches the
      * inject hook.) */
     char uri[600];
