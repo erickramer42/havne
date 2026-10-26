@@ -51,7 +51,7 @@ threads onto the GUI thread.
 | Step | Where | Thread |
 |---|---|---|
 | 1. The transport produces a frame (the mock's 50 ms tick, a recording's row when its time comes, or a J2534 read) | `mock_transport.cpp`, `replay_transport.cpp`, `j2534_transport.cpp` | transport worker |
-| 2. The session hands it to every registered callback, from a snapshot of the callback list | `ecuio_session_dispatch_callbacks` | transport worker |
+| 2. The session hands it to every registered callback, from a snapshot of the callback list; then, for a values callback, decodes it against the profile's set and hands over one batch of values stamped with the frame's time ([ADR-0024](adr/0024-decode-on-the-worker.md); the bridge doesn't register one yet) | `ecuio_session_dispatch_callbacks` | transport worker |
 | 3. The bridge copies the frame (4120 bytes; its payload is inline) and posts it, unless 1000 frames are already in flight | `QtTuneBridge::onFrame` | transport worker |
 | 4. The frame log gets a row (a ring of the newest 10k plain rows, the hex formatted only when shown); the profile's signal defs decode it into a staging buffer, numbers and text apart | `handleFrameInternal` | GUI |
 | 5. Every 100 ms the staging buffer flushes into the signal model, and link health is polled | coalesce timer | GUI |

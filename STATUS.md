@@ -78,7 +78,7 @@ second session ran the request engine, the probe, identification and
   [testing.md](docs/testing.md#gaps-not-verified)). The run sheets are
   [bench-runsheet.md](docs/bench-sessions/bench-runsheet.md) and
   [vehicle-runsheet.md](docs/bench-sessions/vehicle-runsheet.md).
-- **Tests:** 424 ctest cases on Windows (both trees rebuilt,
+- **Tests:** 432 ctest cases on Windows (both trees rebuilt,
   2026-10-26), all passing but the env-gated cross-arch skip, plus the
   cross-arch subset (75/75); 0 MSVC warnings. CI runs ctest on Windows,
   macOS and Linux, core under ASan and UBSan, 60 s of each libFuzzer
@@ -118,9 +118,12 @@ and the car's measurements.
 5. **Phase 4, record-replay transport**
    ([ADR-0023](docs/adr/0023-replay-transport.md)): built and
    UNIT-tested, against a real-bus fixture too.
-6. **Next: decoding on the worker thread**, with an ADR of its own
-   first, led by Known Issue #10 ([Performance](#performance), in the
-   backlog); replay faster than real time is its load test.
+6. **Next: decoding on the worker thread**
+   ([ADR-0024](docs/adr/0024-decode-on-the-worker.md)), led by Known
+   Issue #10 ([Performance](#performance), in the backlog). Core's
+   values callback is built and checked against the bridge's decode
+   over the vehicle fixture; the bridge switching to it, and the
+   chart's per-sample history, are next.
 
 ## BENCH prep
 

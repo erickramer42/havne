@@ -1,7 +1,8 @@
 # ADR-0024: Decoding on the worker — a values callback delivers each frame's decoded signals
 
-- **Status:** Proposed.
-- **Date:** 2026-10-26.
+- **Status:** Accepted.
+- **Date:** 2026-10-26. Step 1 (core) built with this record; steps 2
+  and 3 follow (§10).
 - **Builds on:** [ADR-0002](0002-callback-pair-identity-snapshot-dispatch.md)
   (callback identity and snapshot dispatch, which the new callback
   shares); [ADR-0003](0003-backpressure-bounds-in-flight-frames.md) (the
@@ -115,10 +116,10 @@ typedef struct ecuio_value {
 typedef struct ecuio_value_batch {
     uint64_t timestamp_us;      /* the frame's session time */
     uint32_t arbitration_id;    /* the frame's */
-    uint32_t count;             /* values[0..count) */
-    const ecuio_value_t* values;
+    uint32_t count;             /* values[0..count), at least 1 */
     uint32_t flags;             /* 0; reserved */
     uint32_t reserved;
+    const ecuio_value_t* values;
 } ecuio_value_batch_t;
 
 typedef void (*ecuio_values_callback_t)(const ecuio_value_batch_t* batch,
@@ -132,9 +133,11 @@ ecuio_status_t ecuio_unregister_values_callback(ecuio_session_t*,
                                                 void* user_data);
 ```
 
-- Both structs hold a pointer, so their sizes follow the pointer width.
-  Static asserts in `profile.h` and `test_c_abi.c` pin both widths, and
-  `c_abi` runs in `build-win32` as well.
+- Each struct holds one pointer, and it comes last, so every other
+  field's offset is the same on 32- and 64-bit builds. Static asserts in
+  `profile.h` and `test_c_abi.c` pin the offsets, and the sizes (24 and
+  32 bytes) where pointers are 8 bytes; MSVC's x86 build pads to the
+  same sizes, and `c_abi` runs in `build-win32` as well.
 - A value is a def's decode that returned `ECUIO_DECODE_OK`. A def whose
   decode fails is left out of the batch, as the bridge leaves it out
   today.
