@@ -1,11 +1,13 @@
 # ADR-0025: One J2534 backend — every vendor DLL runs in a surrogate process
 
 - **Status:** Accepted.
-- **Date:** 2026-10-26. Steps 1 (§6, the tests on the control page)
-  and 2 (x64 DLLs through the x64 surrogate) built with this record;
-  step 3, the deletion, follows. Step 2 also took the health and
-  connect suites' `/InProc` half and their parameter: with routing
-  sending x64 DLLs to the surrogate, no session can reach in-proc.
+- **Date:** 2026-10-26. All three steps (§6) built with this record.
+  Step 2 also took the health and connect suites' `/InProc` half and
+  their parameter: with routing sending x64 DLLs to the surrogate, no
+  session can reach in-proc. Step 3 also took `ecuio_j2534_backend_name`
+  (the tests that read it read `ecuio_j2534_backend`), and the bridge
+  names a session reporting `ECUIO_BACKEND_J2534_INPROC` as an unknown
+  backend.
 - **Builds on:** [ADR-0008](0008-x86-surrogate-host.md) (the surrogate
   host, its job object and pipe); [ADR-0009](0009-pe-architecture-routing.md)
   (routing by PE machine type, which this record replaces);

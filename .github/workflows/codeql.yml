@@ -2,7 +2,7 @@ name: CodeQL
 
 # CodeQL static analysis, with results on the repository's code-scanning
 # dashboard. It covers the C++ that Windows compiles in a core-only build
-# (core, the J2534 layer and the x86 surrogate's source, no Qt needed)
+# (core, the J2534 layer and the surrogate, built x64; no Qt needed)
 # and the workflows themselves. The app and its QML aren't analyzed.
 # OpenSSF Scorecard's SAST check looks for this workflow.
 on:

@@ -915,3 +915,17 @@ paths in the app until a car could compare them, but both run the same
 core functions on the same bytes; the vehicle sessions' recordings,
 replayed through the new path, compared 24,632 values offline, and the
 dual path never shipped.
+
+**2026-10-26 — one J2534 backend (ADR-0025; `ae1f57e`, `7c224c3`):**
+**move the tests' seams before the code they pin.** The in-proc backend stayed alive
+less for product reasons than because the suites reached the fake
+through it: environment knobs toggled mid-session and hooks that only
+an in-process module could see. Once every test read and wrote the
+fake's control page (step 1), routing x64 through a surrogate changed
+the suites only by halving them (step 2), and deleting the in-proc
+calls, a net 367 lines of the loader, left every test's expectation
+standing (step 3). The parity suite had been the evidence for the
+change: the write cap, the SCONFIG codes and the ioctl cut each
+diverged between the backends until a test ran both. The price, 18–28
+ms a connect (docs/testing.md, "Connect cost: a surrogate per
+session"), is one no user waits on.

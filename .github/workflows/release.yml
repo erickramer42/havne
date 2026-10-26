@@ -1,9 +1,10 @@
 name: Release
 
-# A version tag publishes a Windows x64 release: the app, the x86 J2534
-# surrogate, the Qt runtime and the Visual C++ runtime in one zip that
-# runs without Qt or Visual Studio, with its SHA-256 and a signed build
-# provenance (attested, and attached as a .intoto.jsonl). A tag with -rcN publishes a pre-release, for a dry run.
+# A version tag publishes a Windows x64 release: the app, the x86 and
+# x64 J2534 surrogates, the Qt runtime and the Visual C++ runtime in one
+# zip that runs without Qt or Visual Studio, with its SHA-256 and a
+# signed build provenance (attested, and attached as a .intoto.jsonl).
+# A tag with -rcN publishes a pre-release, for a dry run.
 # The tagged commit must already have passed CI (ci.yml's push run).
 #
 #   git tag v0.3.1 && git push origin v0.3.1
