@@ -32,8 +32,9 @@ Using an adapter
 
 - Install your adapter vendor's J2534 driver first. QtTune finds
   installed drivers and lists them in Settings.
-- 32-bit vendor drivers run through ecuio-j2534-surrogate.exe, which
-  must stay next to qttune.exe.
+- Each vendor driver runs in a helper process of its own: 32-bit
+  drivers in ecuio-j2534-surrogate.exe, 64-bit ones in
+  ecuio-j2534-surrogate-x64.exe. Both must stay next to qttune.exe.
 - QtTune only reads: it sends standard OBD-II requests for live data
   and never changes anything in the vehicle. It has been tested read-only on one vehicle with one
   adapter; other vehicles and adapters are untested.
@@ -44,6 +45,8 @@ What's in this folder
 
 qttune.exe                  the application
 ecuio-j2534-surrogate.exe   the 32-bit helper for 32-bit J2534 drivers
+ecuio-j2534-surrogate-x64.exe
+                            the 64-bit helper for 64-bit J2534 drivers
 Qt6*.dll, qml\, platforms\  the Qt runtime (see THIRD_PARTY_NOTICES.txt)
 vcruntime140*.dll, msvcp140*.dll
                             the Microsoft Visual C++ runtime, so no

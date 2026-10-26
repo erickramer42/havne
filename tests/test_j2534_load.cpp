@@ -1,6 +1,7 @@
 // File/layer: tests/test_j2534_load.cpp | GTest, HARNESS tier
-// Testing: Exercises real LoadLibraryEx/export-resolution/open/close
-//          against the fake vendor DLLs — no hardware, no polling.
+// Testing: Exercises open/export-resolution/close through the loader,
+//          which loads the fake vendor DLLs in the x64 surrogate
+//          (ADR-0025) — no hardware, no polling.
 //          The everyday fake (spec spelling) path is baked in by CMake
 //          ($<TARGET_FILE:fake_j2534>); the legacy fixture (fallback
 //          spelling) via FAKE_J2534_LEGACY_DLL_PATH.
@@ -145,8 +146,8 @@ TEST_F(FakeFixture, LegacySpellingPassThruIoCtlFallsBackAndWorks) {
     strncpy(dev.dll_path, FAKE_J2534_LEGACY_DLL_PATH, sizeof(dev.dll_path) - 1);
     strcpy(dev.vendor_name, "ecuio-fake-legacy");
 
-    /* The legacy fixture is x64 in this tree — in-proc path, the same
-     * seam the surrogate child's resolve helper mirrors. */
+    /* The legacy fixture is x64 in this tree: the x64 surrogate's
+     * resolve helper falls back to the legacy spelling. */
     ecuio_j2534_handle_t* h = nullptr;
     ASSERT_EQ(ecuio_j2534_open(&dev, &h), ECUIO_OK);
     ASSERT_NE(h, nullptr);
@@ -202,8 +203,9 @@ TEST_F(FakeFixture, IoctlCopiesAtMostItsCapacity) {
 }
 
 /* dll_path is UTF-8 (j2534.h): a path no ANSI code page can spell
- * still loads, in-proc. Through the A APIs it would fail to load. */
-TEST_F(FakeFixture, NonAsciiDllPathLoadsInProc) {
+ * still loads, sniffed here and loaded in the surrogate. Through the A
+ * APIs it would fail to load. */
+TEST_F(FakeFixture, NonAsciiDllPathLoads) {
     NonAsciiCopy copy(FAKE_J2534_DLL_PATH);
     ASSERT_TRUE(copy.ok) << "couldn't stage the fake under a non-ASCII path";
 
@@ -212,7 +214,7 @@ TEST_F(FakeFixture, NonAsciiDllPathLoadsInProc) {
     memcpy(dev.dll_path, copy.utf8, strlen(copy.utf8) + 1);
     ecuio_j2534_handle_t* h = nullptr;
     ASSERT_EQ(ecuio_j2534_open(&dev, &h), ECUIO_OK);
-    EXPECT_STREQ(ecuio_j2534_backend_name(h), "inproc");
+    EXPECT_STREQ(ecuio_j2534_backend_name(h), "surrogate");
     EXPECT_EQ(ecuio_j2534_close(h), ECUIO_OK);     /* unloads, so the copy can go */
 }
 

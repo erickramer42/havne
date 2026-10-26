@@ -1,6 +1,9 @@
 # ADR-0009: Route in-proc vs surrogate at the loader by PE machine type
 
-- **Status:** Accepted
+- **Status:** Accepted. The routing table is superseded by
+  [ADR-0025](0025-one-j2534-backend.md) (appendix below); the sniff
+  and the rule that a file that can't be a DLL spawns nothing carry
+  over.
 - **Date:** 2026-10-14 (Phase 3 Part 3, `d98792f`)
 
 ## Context
@@ -43,3 +46,17 @@ routing, every future capability would be implemented twice.
   1 on unreadable files, contradicting its own header. It now returns 0
   (unknown). The bridge's architecture label still shows unknown as
   "x86" (Known Issue #18).
+
+## Appendix — every DLL in a surrogate (2026-10-26)
+
+[ADR-0025](0025-one-j2534-backend.md) replaces the table above: an x86
+DLL loads in `ecuio-j2534-surrogate.exe` as before, and an x64 DLL, or
+a PE for any other machine, in `ecuio-j2534-surrogate-x64.exe`, built
+in the app's own tree and shipped beside it. Nothing loads in the
+app's process. The sniff now tells apart what this record's "unknown"
+lumped together: a file it can't open and a file that isn't a PE are
+refused at the sniff with no spawn (the outcome in-proc
+`LoadLibraryEx` gave them), and a PE for another machine goes to the
+x64 surrogate, whose load answers as the app's process would. Each
+surrogate has its own relocation variable, `ECUIO_SURROGATE_EXE` and
+`ECUIO_SURROGATE_X64_EXE`.

@@ -8,8 +8,10 @@
 #   dist/SHA256SUMS.txt
 #
 # The checks are what a user without Visual Studio or Qt would hit first:
-#   - the x86 surrogate imports no C runtime DLL (it links it statically;
-#     an x86 vcruntime140.dll can't sit beside the app's x64 one);
+#   - both surrogates are there, the x86 one and the x64 one, since every
+#     vendor DLL runs in the one of its architecture (ADR-0025), and
+#     neither imports a C runtime DLL (each links it statically; an x86
+#     vcruntime140.dll can't sit beside the app's x64 one);
 #   - every DLL qttune.exe imports is in the folder or is part of Windows;
 #   - no QML debugging: qttune.exe doesn't import QQmlDebuggingEnabler
 #     (QT_QML_DEBUG, Debug builds only) and no qmltooling plugins ship;
@@ -38,6 +40,9 @@ function Fail([string] $why) { Write-Error "stage: $why"; exit 1 }
 if (-not (Test-Path (Join-Path $appDir 'qttune.exe'))) { Fail "no qttune.exe in $appDir; build the app first" }
 if (-not (Test-Path (Join-Path $appDir 'ecuio-j2534-surrogate.exe'))) {
     Fail 'no x86 surrogate beside qttune.exe; build build-win32 before configuring the app (CLAUDE.md, Commands)'
+}
+if (-not (Test-Path (Join-Path $appDir 'ecuio-j2534-surrogate-x64.exe'))) {
+    Fail 'no x64 surrogate beside qttune.exe; the app build copies it from its own tree (app/CMakeLists.txt)'
 }
 
 # ---- Visual Studio: the redistributable CRT and dumpbin
@@ -75,11 +80,13 @@ Copy-Item (Join-Path $PSScriptRoot 'THIRD_PARTY_NOTICES.txt') $stage
 Copy-Item -Recurse (Join-Path $PSScriptRoot 'licenses') $stage
 Write-Host "staged $name with the CRT from $($crt.FullName)"
 
-# ---- Check: the surrogate carries its own CRT
-$surImports = Imports (Join-Path $stage 'ecuio-j2534-surrogate.exe')
-$crtImports = $surImports | Where-Object { $_ -match '^(vcruntime|msvcp|ucrtbase|api-ms-win-crt)' }
-if ($crtImports) { Fail "the x86 surrogate imports the C runtime: $($crtImports -join ', ')" }
-Write-Host "surrogate imports: $($surImports -join ', ')"
+# ---- Check: each surrogate carries its own CRT
+foreach ($sur in 'ecuio-j2534-surrogate.exe', 'ecuio-j2534-surrogate-x64.exe') {
+    $surImports = Imports (Join-Path $stage $sur)
+    $crtImports = $surImports | Where-Object { $_ -match '^(vcruntime|msvcp|ucrtbase|api-ms-win-crt)' }
+    if ($crtImports) { Fail "$sur imports the C runtime: $($crtImports -join ', ')" }
+    Write-Host "$sur imports: $($surImports -join ', ')"
+}
 
 # ---- Check: everything qttune.exe imports is here or is Windows'
 $system = Join-Path $env:SystemRoot 'System32'

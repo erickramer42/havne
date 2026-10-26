@@ -37,13 +37,13 @@ section.
 
 ## Build configurations
 
-**Full app, Windows: two trees, the Win32 one first.** Most J2534
-vendor DLLs, the VX's among them, are 32-bit, so the app loads them
-through an x86 surrogate process
-([ADR-0008](adr/0008-x86-surrogate-host.md)). The surrogate comes from
-a core-only Win32 tree, because Qt ships no 32-bit kits, and the app
-tree copies it next to `qttune.exe`; that's why the Win32 tree is
-built first. The Visual Studio generator is multi-config, so
+**Full app, Windows: two trees, the Win32 one first.** Every J2534
+vendor DLL loads in a surrogate process of its own architecture
+([ADR-0025](adr/0025-one-j2534-backend.md)). Most, the VX's among
+them, are 32-bit, and their surrogate comes from a core-only Win32
+tree, because Qt ships no 32-bit kits; the app tree copies it next to
+`qttune.exe`, beside its own x64 surrogate, which is why the Win32
+tree is built first. The Visual Studio generator is multi-config, so
 `--config` and `-C` are required:
 
 ```sh
@@ -53,7 +53,7 @@ cmake --build build-win32 --config Release --target ecuio-j2534-surrogate fake_j
 
 # 2. The app tree, configured after step 1 so it finds the surrogate
 cmake -B build -DCMAKE_PREFIX_PATH=<qt-install>/msvc2022_64
-cmake --build build --config Release   # prints "Deploying Win32 J2534 surrogate"
+cmake --build build --config Release   # prints "Deploying x64 J2534 surrogate" and "Deploying Win32 J2534 surrogate"
 build/app/Release/qttune.exe           # windeployqt has run post-build
 ```
 
@@ -61,7 +61,10 @@ build/app/Release/qttune.exe           # windeployqt has run post-build
 the whole suite and the cross-arch subset
 ([Running tests](#running-tests)).
 
-**How the app tree finds the surrogate (automatic).** With the
+**How the app tree finds the surrogates (automatic).** The x64 one
+is the app tree's own `ecuio-j2534-surrogate` target
+(`ecuio-j2534-surrogate-x64.exe`), built and copied with the app. For
+the x86 one, with the
 two-tree layout there is nothing to configure: when
 `QTTUNE_SURROGATE_SOURCE` is unset (the default), CMake searches the
 sibling `build-win32/` tree and copies the surrogate next to
@@ -317,8 +320,10 @@ build/tests/qmltest/Release/test_qml.exe -input tests/qml/tst_linkhealth.qml Lin
 - The harness sets `QT_FORCE_STDERR_LOGGING=1` unless it's already set.
   Without a console (ctest, a pipe, Git Bash), Qt on Windows sends its
   warnings and the test log to the debugger, and a run prints nothing.
-- The link-state cases drive the fake in-proc, arming its knobs
-  through the harness's `Harness.armFakeKnob`; they skip off Windows.
+- The link-state cases drive the fake through the x64 surrogate
+  copied next to `test_qml`, arming its knobs in the environment
+  through the harness's `Harness.armFakeKnob` before the connect
+  spawns the child; they skip off Windows.
 - The page tests fail on any warning from the app's own QML
   (`qrc:/qt/qml/QtTune/…`), but not on Qt's.
 
@@ -343,7 +348,7 @@ fake DLL as a device first, and `scripts/coverage.sh` demands it.
 ```sh
 export ECUIO_SURROGATE_EXE='<repo>/build-win32/surrogate/Release/ecuio-j2534-surrogate.exe'
 export ECUIO_FAKE_DLL='<repo>/build-win32/tests/Release/fake_j2534.dll'
-ctest --test-dir build -C Release -R "J2534Routing|J2534Surrogate|J2534(Health|Connect)Test\..*/Surrogate" --output-on-failure
+ctest --test-dir build -C Release -R "J2534Routing|J2534Surrogate|J2534(Health|Connect)Test\." --output-on-failure
 ```
 
 Use Windows-style paths in these variables (forward slashes are
@@ -354,7 +359,9 @@ the open fails. Without these variables,
 skips.
 
 Every runtime variable carries the core's prefix, `ECUIO_`: these two,
-the fake's knobs and the surrogate's. The one `QTTUNE_` name is
+`ECUIO_SURROGATE_X64_EXE` (the x64 surrogate's, which no run needs:
+the tests find it next to themselves), the fake's knobs and the
+surrogate's. The one `QTTUNE_` name is
 `QTTUNE_SURROGATE_SOURCE`, the app build's CMake cache setting above,
 which is read at configure time, never at runtime. A variable under
 any other name is ignored without a word: the routing case skips, the
@@ -367,7 +374,7 @@ and the run looks green. Read the skip count, or use
 
 - A var set to the **wrong value** points the test at the wrong
   arch or a nonexistent path — the failure looks like a routing
-  regression (`inproc` instead of `surrogate`) or a fast
+  regression (the x64 surrogate where the x86 one belongs) or a fast
   `ECUIO_ERR_LOAD_FAILED` or `ECUIO_ERR_SURROGATE_FAILED`. Echo the
   variable before diagnosing code.
 - Each spawn takes `%TEMP%\ecuio-surrogate.log` and keeps the log it
@@ -410,7 +417,8 @@ README badge ([testing.md](testing.md#coverage)).
 | Cross-arch test fails with odd values, but same-arch passes | A stale `build-win32` fake: the fakes carry no build fingerprint. Rebuild both trees. |
 | In the app, an x86 adapter (for example the OBDX Pro VX) fails with "surrogate process failed: no surrogate (ecuio-j2534-surrogate.exe)", and `%TEMP%\ecuio-surrogate.log` holds an `open: no surrogate exe` line | No surrogate next to `qttune.exe`, so the child never launched. The x64 tree was configured before `build-win32` had a surrogate. Build the Win32 tree, re-run `cmake -B build`, check for `Deploying Win32 J2534 surrogate` in the output, and rebuild. Setting `ECUIO_SURROGATE_EXE` also works. |
 | The cross-arch routing case skips although the variables were exported | They're named something else, for example `QTTUNE_SURROGATE_EXE`: nothing reads that. The names are `ECUIO_SURROGATE_EXE` and `ECUIO_FAKE_DLL` (Cross-arch run, above). The rest of the run passes on the x64 surrogate, so the skip is the only sign. |
-| Cross-arch test fails expecting backend "surrogate", got "inproc" | `ECUIO_FAKE_DLL` points at an x64 fake (or the wrong tree). Check the value, not the code — unset skips, wrong-value fails. |
+| Cross-arch test fails expecting an x86 DLL, or the session log names `ecuio-j2534-surrogate-x64.exe` | `ECUIO_FAKE_DLL` points at an x64 fake (or the wrong tree). Check the value, not the code — unset skips, wrong-value fails. |
+| In the app or a test, an x64 DLL fails with "no surrogate (ecuio-j2534-surrogate-x64.exe): none next to the app" | The x64 surrogate wasn't copied: the app and each J2534 test copy it from their own tree POST_BUILD (`qttune_deploy_surrogate` in `tests/CMakeLists.txt`). Build the target again. |
 | J2534 test fails as `Failed (Timeout)` | A genuine hang, bounded by the 30 s ceiling. Attach to the surviving test and surrogate processes and check thread wait states before killing; the child log is `%TEMP%\ecuio-surrogate.log`, and earlier spawns' logs are kept beside it under dated names. |
 | Linker warning LNK4070 on a fake DLL | The `.def` file's `LIBRARY` directive disagrees with the output filename. Make them match. |
 | A mobile build fails during test discovery, or tries to run a test binary | `BUILD_TESTING` is on. Cross builds must pass `-DBUILD_TESTING=OFF` (see Mobile above). |
@@ -572,7 +580,7 @@ runtime.
 - **Build.** Qt 6.12.0 is installed as `win-build` does it, then
   `build-win32` (the surrogate only) and `build` (the app only), both
   with `BUILD_TESTING=OFF`, in the usual order so the app's build
-  copies the x86 surrogate beside `qttune.exe`. CI has already run the
+  copies the x86 surrogate beside `qttune.exe`, with its own x64 one. CI has already run the
   suite on the commit; the cross-arch suite is `scripts/verify.sh`'s.
 - **Stage, check and zip:** `packaging/windows/stage.ps1`, which also
   runs locally against a built tree

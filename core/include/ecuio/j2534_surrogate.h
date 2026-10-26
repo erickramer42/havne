@@ -1,4 +1,4 @@
-// File/layer: core/include/ecuio/j2534_surrogate.h | C ABI, x86-surrogate client
+// File/layer: core/include/ecuio/j2534_surrogate.h | C ABI, surrogate client (x86 and x64)
 // Testing: HARNESS — test_j2534_surrogate spawns the real surrogate
 //          hosting the fake DLL, end to end over the pipe.
 //          Non-Windows: stubs only.
@@ -18,12 +18,15 @@ extern "C" {
 typedef struct ecuio_j2534_sur_handle ecuio_j2534_sur_handle_t;
 
 /* Spawn the surrogate hosting dll_path under a kill-on-close job and
- * handshake with OP_OPEN. Blocking. A DLL the child couldn't load or
+ * handshake with OP_OPEN. Blocking. dll_arch (ECUIO_DLL_ARCH_*, the
+ * loader's sniff) picks the exe: x86 runs ecuio-j2534-surrogate.exe
+ * (relocated by ECUIO_SURROGATE_EXE), anything else
+ * ecuio-j2534-surrogate-x64.exe (ECUIO_SURROGATE_X64_EXE), ADR-0025. A DLL the child couldn't load or
  * resolve (exit 4 or 5) returns ECUIO_ERR_LOAD_FAILED; a refused or
  * never-returning PassThruOpen ECUIO_ERR_VENDOR_REFUSED; a missing exe,
  * a failed spawn or handshake, or a child from other shared headers
  * ECUIO_ERR_SURROGATE_FAILED. ecuio_last_error_detail says which. */
-ecuio_status_t ecuio_j2534_sur_open(const char* dll_path,
+ecuio_status_t ecuio_j2534_sur_open(const char* dll_path, uint32_t dll_arch,
                                     ecuio_j2534_sur_handle_t** out_handle);
 
 /* Channel lifecycle. baud==0 resolves to the ISO 15765 500k default,

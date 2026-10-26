@@ -128,14 +128,24 @@ if(WIN32)
     endif()
 endif()
 
-# --- Deploy the Win32 J2534 surrogate next to the exe (Windows only) ---
-# The surrogate that matters for real vendor DLLs is the x86 one from the
-# build-win32 tree. The x64 tree also builds a surrogate (for the
-# same-arch test suites), so this MUST NOT use $<TARGET_FILE:...> — copying
-# the x64 one next to the app would make the client's resolve_exe_path()
-# pick it for an x86 vendor DLL, which then dies at LoadLibrary with no
-# env var to blame.
-#
+# --- Deploy the J2534 surrogates next to the exe (Windows only) ---
+# Every vendor DLL loads in a surrogate of its own architecture
+# (ADR-0025): x64 ones in this tree's ecuio-j2534-surrogate-x64.exe,
+# copied first, and x86 ones in the build-win32 tree's
+# ecuio-j2534-surrogate.exe. The client picks each by name, so the two
+# can't be mixed up.
+if(WIN32 AND TARGET ecuio-j2534-surrogate)
+    add_dependencies(qttune ecuio-j2534-surrogate)
+    add_custom_command(TARGET qttune POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                $<TARGET_FILE:ecuio-j2534-surrogate>
+                $<TARGET_FILE_DIR:qttune>
+        COMMENT "Deploying x64 J2534 surrogate next to qttune.exe"
+        VERBATIM
+    )
+endif()
+
+# The x86 one:
 # Resolution order:
 #   1. QTTUNE_SURROGATE_SOURCE cache variable (explicit override)
 #   2. Auto-detect: conventional sibling build-win32 tree

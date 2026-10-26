@@ -1,14 +1,13 @@
 // File/layer: tests/test_j2534_routing.cpp | GTest, HARNESS tier
-// Testing: the PE routing decision itself (ADR-0009). ecuio_j2534_open must
-//          sniff the DLL's PE architecture and pick the backend:
-//          x64 fake -> "inproc" (CI-verifiable), x86 fake -> "surrogate"
-//          (dev-machine cross-arch, env-gated), unknown/missing -> honest
-//          ECUIO_ERR_LOAD_FAILED at in-proc LoadLibraryEx, no spawn.
-//          Round trips go through the FULL loader API surface
+// Testing: the PE routing decision itself (ADR-0025, replacing
+//          ADR-0009's table). ecuio_j2534_open must sniff the DLL's PE
+//          architecture and pick the surrogate: x64 fake -> the x64
+//          surrogate (CI-verifiable), x86 fake -> the x86 one
+//          (dev-machine cross-arch, env-gated), a missing file ->
+//          ECUIO_ERR_LOAD_FAILED from the sniff, no spawn. Round trips
+//          go through the FULL loader API surface
 //          (open/connect/inject/read/write/ioctl/filter/close) — the
-//          same functions j2534_transport.cpp consumes — so routing
-//          tests here double as backend-parity proof for the loader
-//          boundary.
+//          same functions j2534_transport.cpp consumes.
 
 #include <gtest/gtest.h>
 
@@ -18,6 +17,8 @@
 #include "ecuio/j2534_ptypes.h"
 
 #ifdef _WIN32
+
+#include <windows.h>
 
 #include <chrono>
 #include <cstdio>
@@ -74,23 +75,25 @@ uint32_t get_u32(const unsigned char* buf)
 
 } // namespace
 
-TEST(J2534RoutingTest, X64FakeSelectsInprocBackendAndRoundTrips)
+TEST(J2534RoutingTest, X64FakeSelectsTheX64SurrogateAndRoundTrips)
 {
-    /* Default tree: the fake is the same architecture as this test
-     * binary, so routing MUST pick in-proc — this is also the
-     * behavior-preservation proof for all pre-existing tests. */
+    /* Default tree: the fake is x64, so routing picks the x64 surrogate
+     * beside this binary (ecuio-j2534-surrogate-x64.exe), not the
+     * process itself. */
     ecuio_j2534_device_t dev;
     make_device(&dev, FAKE_J2534_DLL_PATH);
 
     ecuio_j2534_handle_t* h = nullptr;
     ASSERT_EQ(ecuio_j2534_open(&dev, &h), ECUIO_OK);
-    EXPECT_STREQ(ecuio_j2534_backend_name(h), "inproc");
+    EXPECT_STREQ(ecuio_j2534_backend_name(h), "surrogate");
+    EXPECT_EQ(ecuio_j2534_dll_arch(h), ECUIO_DLL_ARCH_X64);
+    EXPECT_EQ(GetModuleHandleA(FAKE_J2534_DLL_PATH), nullptr)
+        << "the fake loaded in this process";
 
     unsigned long channel = 0;
     ASSERT_EQ(ecuio_j2534_connect_channel(h, 500000, 0, &channel), ECUIO_OK);
 
-    /* The in-proc inject hook: first-ever exercise of lazy InjectFrame
-     * resolution through the loader boundary. */
+    /* The inject hook, through the child's OP_INJECT. */
     ASSERT_EQ(ecuio_j2534_inject_test_frame(h, kPayload, 8, 7000, 0),
               ECUIO_OK);
 
@@ -104,36 +107,35 @@ TEST(J2534RoutingTest, X64FakeSelectsInprocBackendAndRoundTrips)
     EXPECT_EQ(ecuio_j2534_close(h), ECUIO_OK);
 }
 
-TEST(J2534RoutingTest, MissingDllFailsAtOpenThroughInproc)
+TEST(J2534RoutingTest, MissingDllIsRefusedBeforeAnySpawn)
 {
-    /* Sniff can't read a nonexistent file -> 0 -> in-proc -> honest
-     * LoadLibraryEx failure. No surrogate process spawns: the wall-
-     * clock guard keeps that honest (a spawn would still be fast, but
-     * the point is the code path, pinned by timing being trivial). */
+    /* The sniff can't open a nonexistent file, so open refuses it with
+     * the open's Windows error and spawns nothing (ADR-0025). */
     ecuio_j2534_device_t dev;
     make_device(&dev, "C:\\does\\not\\exist.dll");
 
     ecuio_j2534_handle_t* h = nullptr;
     EXPECT_EQ(ecuio_j2534_open(&dev, &h), ECUIO_ERR_LOAD_FAILED);
     EXPECT_EQ(h, nullptr);
+    EXPECT_STREQ(ecuio_last_error_detail(),
+                 "couldn't open the DLL (Windows error 3)");
 }
 
-/* ---- Backend parity: write/ioctl/filter through the SAME loader
- * helpers both backends serve — in-proc leg here, surrogate leg
- * below. ---- */
-TEST(J2534RoutingTest, InprocWriteIoctlFilterRoundTrips)
+/* ---- write/ioctl/filter through the loader helpers, the x64 surrogate
+ * here, the x86 one below. ---- */
+TEST(J2534RoutingTest, X64WriteIoctlFilterRoundTrips)
 {
     ecuio_j2534_device_t dev;
     make_device(&dev, FAKE_J2534_DLL_PATH);
 
     ecuio_j2534_handle_t* h = nullptr;
     ASSERT_EQ(ecuio_j2534_open(&dev, &h), ECUIO_OK);
-    EXPECT_STREQ(ecuio_j2534_backend_name(h), "inproc");
+    EXPECT_STREQ(ecuio_j2534_backend_name(h), "surrogate");
 
     unsigned long channel = 0;
     ASSERT_EQ(ecuio_j2534_connect_channel(h, 500000, 0, &channel), ECUIO_OK);
 
-    /* WRITE through the loader seam (in-proc leg). */
+    /* WRITE through the loader seam. */
     const unsigned char req[3] = {0x01, 0x0C, 0x00};
     const unsigned char expect[3] = {0x41, 0x0C, 0x00};
     uint32_t num_written = 0;
@@ -165,7 +167,7 @@ TEST(J2534RoutingTest, InprocWriteIoctlFilterRoundTrips)
     EXPECT_EQ(get_u32(out), kParam);
     EXPECT_EQ(get_u32(out + 4), kValue);
 
-    /* Out-of-contract ioctl refused AT THE SEAM (in-proc leg). */
+    /* Out-of-contract ioctl refused AT THE SEAM. */
     EXPECT_EQ(ecuio_j2534_ioctl(h, channel, 0x05,
                                 nullptr, 0, nullptr, 0, nullptr),
               ECUIO_ERR_NOT_IMPLEMENTED);
@@ -191,8 +193,8 @@ TEST(J2534RoutingTest, X86FakeSelectsSurrogateBackendAndRoundTrips)
 {
     /* True cross-arch case: Win32-tree fake DLL + surrogate exe via
      * env overrides, driven from this (default-tree) x64 test binary.
-     * Skipped when the env isn't configured — CI runs the in-proc
-     * assertions; the dev machine runs the topology OBDX Pro needs.
+     * Skipped when the env isn't configured — CI runs the x64
+     * surrogate's; the dev machine runs the topology OBDX Pro needs.
      * It also runs a WRITE->echo round trip over the routed surrogate
      * — the OBDX topology doing request/response with zero hardware. */
     const char* dll = std::getenv("ECUIO_FAKE_DLL");

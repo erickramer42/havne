@@ -44,10 +44,10 @@ to watch the simulated car drive. Other platforms build from source
    │  sessions + callbacks · profiles + decode · transports
    ├── mock://    worker thread, scripted drive cycle
    ├── replay://  worker thread, a recording's frames.csv at its own pace
-   └── j2534://   worker thread → loader, which picks a backend:
-          ├── in-proc:   vendor DLL loaded into the app (x64 DLLs)
-          └── surrogate: client ══ named pipe ══ ecuio-j2534-surrogate.exe
-                         (x86 process hosting x86 vendor DLLs)
+   └── j2534://   worker thread → loader, which picks a surrogate by the
+                  DLL's architecture: client ══ named pipe ══
+          ├── ecuio-j2534-surrogate.exe      (x86 process, x86 vendor DLLs)
+          └── ecuio-j2534-surrogate-x64.exe  (x64 process, x64 vendor DLLs)
 ```
 
 Three rules shape it
@@ -94,8 +94,8 @@ screen, is [docs/architecture.md](docs/architecture.md).
 - **Tested in tiers.** Unit tests cover the core, decoding, the C ABI
   and the bridge (headless). Qt Quick tests run the app's own pages
   against a real bridge, offscreen. A harness tier drives the whole
-  J2534 stack against an in-tree fake vendor DLL, both in-proc and
-  through the surrogate. CI builds and tests on Windows, Linux and
+  J2534 stack against an in-tree fake vendor DLL, through the x64
+  surrogate, and locally through the x86 one. CI builds and tests on Windows, Linux and
   macOS, runs the core under ASan/UBSan, fuzzes the signal decoder and
   validators with libFuzzer ([fuzz/README.md](fuzz/README.md)),
   compiles Android and iOS, and, on pull requests, launches the iOS app

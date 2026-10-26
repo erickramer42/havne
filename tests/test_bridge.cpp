@@ -2066,7 +2066,7 @@ TEST(BridgeTest, ConnectLogsTheAdaptersSession)
     ASSERT_GE(log.size(), 2);
     EXPECT_TRUE(log.at(log.size() - 2).startsWith(QStringLiteral("Connected: ")));
     EXPECT_EQ(log.last().toStdString(),
-              "Session: x64 DLL, in-proc; ISO 15765 at 500000 baud; "
+              "Session: x64 DLL, through the surrogate; ISO 15765 at 500000 baud; "
               "profile raw, channel 0x7E8/0x7E0 (rx/tx); battery 13.8 V; "
               "firmware fake-fw 1.0, DLL fake_j2534 0.3, API 04.04");
     ASSERT_TRUE(disconnectAndWait(bridge));
@@ -2241,7 +2241,7 @@ TEST(BridgeTest, SessionInfoTextNamesTheAdapter)
               "battery 12.6 V; firmware 1.2.3, DLL 4.5, API 04.04");
 
     ecuio_session_info_t bare{};
-    bare.backend = ECUIO_BACKEND_J2534_INPROC;
+    bare.backend = ECUIO_BACKEND_J2534_SURROGATE;
     bare.dll_arch = ECUIO_DLL_ARCH_X64;
     bare.protocol_id = 6;
     bare.baud = 250000;
@@ -2251,7 +2251,7 @@ TEST(BridgeTest, SessionInfoTextNamesTheAdapter)
     bare.tx_ids[0] = 0x18DA10F1;
     qstrncpy(bare.profile, "raw", sizeof(bare.profile));
     EXPECT_EQ(QtTuneBridge::sessionInfoText(bare).toStdString(),
-              "Session: x64 DLL, in-proc; ISO 15765 at 250000 baud, flags 0x100; "
+              "Session: x64 DLL, through the surrogate; ISO 15765 at 250000 baud, flags 0x100; "
               "profile raw, channel 0x18DAF110/0x18DA10F1 (rx/tx); "
               "no battery reading; no version reading");
 

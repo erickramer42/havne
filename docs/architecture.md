@@ -20,10 +20,10 @@ threads onto the GUI thread.
    │  sessions + callbacks · profiles + decode · transports
    ├── mock://    worker thread, scripted drive cycle
    ├── replay://  worker thread, a recording's frames.csv at its own pace
-   └── j2534://   worker thread → loader, which picks a backend:
-          ├── in-proc:   vendor DLL loaded into the app (x64 DLLs)
-          └── surrogate: client ══ named pipe ══ ecuio-j2534-surrogate.exe
-                         (x86 process hosting x86 vendor DLLs)
+   └── j2534://   worker thread → loader, which picks a surrogate by the
+                  DLL's architecture: client ══ named pipe ══
+          ├── ecuio-j2534-surrogate.exe      (x86 process, x86 vendor DLLs)
+          └── ecuio-j2534-surrogate-x64.exe  (x64 process, x64 vendor DLLs)
 ```
 
 ## Three rules, and why
@@ -160,13 +160,16 @@ Tests round-trip real frames through both pairs.
 
 The full reference is [j2534.md](j2534.md).
 
-- **Backend routing:** the loader reads the DLL's PE header. An x86 DLL
-  can't load into the 64-bit app, so it runs in the **surrogate**, a
-  separate 32-bit process the app talks to over a named pipe. An x64
-  or unrecognized DLL loads in-proc, so an honest load error
-  survives. The transport above doesn't know which backend it's on
+- **Routing:** the loader reads the DLL's PE header and loads it in a
+  **surrogate**, a separate process of the DLL's architecture that the
+  app talks to over a named pipe: the 32-bit one for an x86 DLL (which
+  can't load into the 64-bit app), the 64-bit one for every other. A
+  vendor DLL that crashes ends its surrogate, not the app, and every
+  session's vendor calls are in the surrogate's session log. A file
+  that isn't a DLL is refused before any spawn. The transport above
+  doesn't know which surrogate it's on
   ([ADR-0008](adr/0008-x86-surrogate-host.md),
-  [ADR-0009](adr/0009-pe-architecture-routing.md)).
+  [ADR-0025](adr/0025-one-j2534-backend.md)).
 - **The surrogate is single-threaded:** one request in, at most one
   vendor call, one reply out. Vendor calls are serialized by
   construction and no locks exist. A vendor status is data, never a
@@ -303,7 +306,7 @@ The bridge polls it on its 100 ms tick and maps it for the UI
 | Unit | Core logic, decode, the C ABI |
 | Bridge | The bridge and its models, headless, against the real mock worker |
 | QML | The app's own QML module against a real bridge, offscreen: properties, not pixels |
-| HARNESS | The whole J2534 stack against an in-tree fake vendor DLL, in-proc and through the surrogate |
+| HARNESS | The whole J2534 stack against an in-tree fake vendor DLL, through the x64 surrogate |
 | Cross-arch | x64 tests driving the x86 surrogate and fake. Local only; CI never runs it |
 | Sanitizers | Core under ASan/UBSan in CI |
 | Fuzzing | The signal decoder and validators under libFuzzer, 60 s each in CI ([fuzz/README.md](../fuzz/README.md)) |

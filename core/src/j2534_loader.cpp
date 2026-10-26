@@ -1,9 +1,11 @@
 // File/layer: core/src/j2534_loader.cpp | C++17, Qt-free, CI-validated headless
 // Testing: HARNESS — live-registry discovery tests, test_j2534_load
 //          (load/export/open/close), test_j2534_stream (end to end),
-//          test_j2534_routing (backend choice and parity) and
-//          J2534ConnectTest.ARelativeDllPathIsRefusedBeforeAnyLoad (both
-//          backends; discovery's skip by the CI registry's relative entry)
+//          test_j2534_routing (the surrogate by PE architecture, the
+//          refusals before any spawn), J2534ConnectTest.MissingDllFailsToLoad
+//          (the sniff's three outcomes) and
+//          J2534ConnectTest.ARelativeDllPathIsRefusedBeforeAnyLoad
+//          (discovery's skip by the CI registry's relative entry)
 // CI: non-Windows gets linking stubs only; core.cpp guards routing
 
 #include "ecuio/j2534.h"
@@ -68,12 +70,11 @@ typedef long (__stdcall *fn_pt_read_version)(unsigned long DeviceID,
 
 /* Backing type for the header's opaque ecuio_j2534_handle_t.
  *
- * BACKEND SELECTION (ADR-0009): ecuio_j2534_open sniffs the PE
- * architecture once and routes — x86 DLLs load in the surrogate
- * process (an x64 process physically cannot LoadLibrary a 32-bit
- * DLL); x64/unknown load in-proc. Every downstream helper forwards
- * on is_surrogate, so the transport layer (j2534_transport.cpp) stays
- * single-path and unaware of which backend serves any given session. */
+ * BACKEND SELECTION (ADR-0025): ecuio_j2534_open sniffs the PE
+ * architecture once and loads every DLL in a surrogate of its own
+ * architecture, so is_surrogate is always set; the helpers' in-proc
+ * branches are unreachable. The transport layer (j2534_transport.cpp)
+ * stays single-path and unaware of which surrogate serves a session. */
 struct ecuio_j2534_handle {
     bool is_surrogate = false;
     uint32_t dll_arch = ECUIO_DLL_ARCH_UNKNOWN;   /* the PE sniff at open */
@@ -214,53 +215,70 @@ bool read_function_library(HKEY hvendor, char* out, size_t out_size)
     return ecuio_wide_to_utf8(path, out, out_size) && out[0] != '\0';
 }
 
-/* Sniff the PE architecture of a DLL: 1 = x86, 2 = x64, 0 = unknown
- * (j2534.h's reserved[0] contract).
- *
- * ecuio_j2534_open sends x86 to the surrogate and everything else
- * in-proc, so an unreadable or invalid file fails honestly at
- * LoadLibraryEx (ECUIO_ERR_LOAD_FAILED) without spawning a surrogate.
- * The discovery annotation is only a UI label; the sniff in open() is
- * authoritative and also covers direct-path selectors. */
-static uint32_t sniff_pe_architecture(const char* dll_path)
+/* What a DLL's headers say (ADR-0025): unreadable (error set, 0 for a
+ * path that isn't UTF-8 or is too long), not a PE, or a PE whose
+ * machine is x86, x64 or another (ECUIO_DLL_ARCH_UNKNOWN). */
+struct PeSniff {
+    enum Kind { kUnreadable, kNotPe, kPe };
+    Kind kind = kUnreadable;
+    uint32_t arch = ECUIO_DLL_ARCH_UNKNOWN;
+    DWORD error = 0;
+};
+
+/* ecuio_j2534_open routes on it: the unreadable and the non-PE are
+ * refused there, with no spawn; x86 goes to the x86 surrogate and every
+ * other PE to the x64 one. The discovery annotation is only a UI label
+ * (its arch); the sniff in open() is authoritative and also covers
+ * direct-path selectors. */
+PeSniff sniff_pe(const char* dll_path)
 {
+    PeSniff out;
     wchar_t wpath[ECUIO_J2534_DLL_PATH_LEN];
     if (!ecuio_utf8_to_wide(dll_path, wpath, _countof(wpath))) {
-        return 0; // not UTF-8 — open() fails it at the in-proc load
+        return out;
     }
     HANDLE hFile = CreateFileW(wpath, GENERIC_READ, FILE_SHARE_READ,
                                NULL, OPEN_EXISTING,
                                FILE_ATTRIBUTE_NORMAL, NULL);
     if (hFile == INVALID_HANDLE_VALUE) {
-        return 0; // unknown — open() falls back to in-proc
+        out.error = GetLastError();
+        return out;
     }
 
+    out.kind = PeSniff::kNotPe;
     DWORD bytes_read;
     IMAGE_DOS_HEADER dos_hdr = {};
     if (!ReadFile(hFile, &dos_hdr, sizeof(dos_hdr), &bytes_read, NULL) ||
-        dos_hdr.e_magic != IMAGE_DOS_SIGNATURE) {
+        bytes_read != sizeof(dos_hdr) || dos_hdr.e_magic != IMAGE_DOS_SIGNATURE) {
         CloseHandle(hFile);
-        return 0;
+        return out;
     }
 
     SetFilePointer(hFile, dos_hdr.e_lfanew, NULL, FILE_BEGIN);
     IMAGE_NT_HEADERS nt_hdr = {};
     if (!ReadFile(hFile, &nt_hdr, sizeof(nt_hdr), &bytes_read, NULL) ||
+        bytes_read < sizeof(DWORD) + sizeof(IMAGE_FILE_HEADER) ||
         nt_hdr.Signature != IMAGE_NT_SIGNATURE) {
         CloseHandle(hFile);
-        return 0;
+        return out;
     }
-
-    uint16_t machine = nt_hdr.FileHeader.Machine;
     CloseHandle(hFile);
 
+    out.kind = PeSniff::kPe;
+    const uint16_t machine = nt_hdr.FileHeader.Machine;
     if (machine == IMAGE_FILE_MACHINE_I386) {
-        return 1; // x86 — surrogate required from an x64 host process
+        out.arch = ECUIO_DLL_ARCH_X86;
     } else if (machine == IMAGE_FILE_MACHINE_AMD64) {
-        return 2; // x64 — in-proc
-    } else {
-        return 0; // ARM64/Itanium/etc — unknown, in-proc attempt
-    }
+        out.arch = ECUIO_DLL_ARCH_X64;
+    }   /* ARM64, Itanium, …: UNKNOWN, hosted by the x64 surrogate */
+    return out;
+}
+
+/* Discovery's label: 1 = x86, 2 = x64, 0 = anything else (j2534.h's
+ * reserved[0] contract). */
+uint32_t sniff_pe_architecture(const char* dll_path)
+{
+    return sniff_pe(dll_path).arch;
 }
 
 void enumerate_view(const wchar_t* root_path,
@@ -404,104 +422,42 @@ ecuio_status_t ecuio_j2534_open(const ecuio_j2534_device_t* device,
         return ECUIO_ERR_LOAD_FAILED;
     }
 
-    /* ROUTING DECISION — made here, once. x86 DLLs go to the
-     * surrogate (exe next to the app, or ECUIO_SURROGATE_EXE);
-     * everything else, including unknown (sniff 0), loads in-proc, so
-     * unreadable paths fail at LoadLibraryEx. A test can send every
-     * DLL to the surrogate (ecuio_j2534_force_surrogate_for_testing). */
-    const uint32_t arch = sniff_pe_architecture(device->dll_path);
-    if (g_force_surrogate.load() || arch == ECUIO_DLL_ARCH_X86) {
-        ecuio_j2534_sur_handle_t* sur = nullptr;
-        ecuio_status_t st = ecuio_j2534_sur_open(device->dll_path, &sur);
-        if (st != ECUIO_OK) {
-            return st;   /* spawn/DLL-load/PassThruOpen failure — its
-                            code and detail are set client-side */
+    /* ROUTING DECISION — made here, once (ADR-0025). A file that can't
+     * be a DLL is refused with no spawn. Every PE loads in a surrogate:
+     * x86 in the x86 one (next to the app, or ECUIO_SURROGATE_EXE),
+     * x64 and any other machine in the x64 one
+     * (ECUIO_SURROGATE_X64_EXE), which loads or refuses it as the app's
+     * own process would. */
+    const PeSniff pe = sniff_pe(device->dll_path);
+    if (pe.kind == PeSniff::kUnreadable) {
+        if (pe.error == 0) {
+            ecuio_detail_set("the DLL path isn't valid UTF-8, or is too long");
+        } else {
+            ecuio_detail_set("couldn't open the DLL (Windows error %lu)",
+                             pe.error);
         }
-        ecuio_j2534_handle_t* h = new (std::nothrow) ecuio_j2534_handle_t();
-        if (h == nullptr) {
-            ecuio_j2534_sur_close(sur);
-            return ECUIO_ERR_OUT_OF_MEMORY;
-        }
-        h->is_surrogate = true;
-        h->dll_arch = arch;
-        h->sur = sur;
-        *out_handle = h;
-        return ECUIO_OK;
-    }
-
-    wchar_t wpath[ECUIO_J2534_DLL_PATH_LEN];
-    if (!ecuio_utf8_to_wide(device->dll_path, wpath, _countof(wpath))) {
-        ecuio_detail_set("the DLL path isn't valid UTF-8, or is too long");
         return ECUIO_ERR_LOAD_FAILED;
     }
-    HMODULE module = LoadLibraryExW(wpath, nullptr,
-                                    LOAD_WITH_ALTERED_SEARCH_PATH);
-    if (module == nullptr) {
-        ecuio_detail_set("couldn't load the DLL (Windows error %lu)",
-                         GetLastError());
+    if (pe.kind == PeSniff::kNotPe) {
+        ecuio_detail_set("the file isn't a Windows DLL");
         return ECUIO_ERR_LOAD_FAILED;
     }
 
+    ecuio_j2534_sur_handle_t* sur = nullptr;
+    const ecuio_status_t st = ecuio_j2534_sur_open(device->dll_path, pe.arch,
+                                                   &sur);
+    if (st != ECUIO_OK) {
+        return st;   /* spawn/DLL-load/PassThruOpen failure — its
+                        code and detail are set client-side */
+    }
     ecuio_j2534_handle_t* h = new (std::nothrow) ecuio_j2534_handle_t();
     if (h == nullptr) {
-        FreeLibrary(module);
+        ecuio_j2534_sur_close(sur);
         return ECUIO_ERR_OUT_OF_MEMORY;
     }
-    h->module = module;
-    h->dll_arch = arch;
-
-    /* The nine v04.04 mandatory exports — the same set the surrogate
-     * child requires, so both backends accept the same DLLs. */
-    bool all_resolved = true;
-    h->open          = resolve_export<fn_pt_open>(module, "PassThruOpen", all_resolved);
-    h->close         = resolve_export<fn_pt_close>(module, "PassThruClose", all_resolved);
-    h->connect       = resolve_export<fn_pt_connect>(module, "PassThruConnect", all_resolved);
-    h->disconnect    = resolve_export<fn_pt_disconnect>(module, "PassThruDisconnect", all_resolved);
-    h->read_msgs     = resolve_export<fn_pt_read_msgs>(module, "PassThruReadMsgs", all_resolved);
-    h->write_msgs    = resolve_export<fn_pt_write_msgs>(module, "PassThruWriteMsgs", all_resolved);
-    /* Spec spelling first, legacy spelling second. The surrogate
-     * child has the same fallback; without it the backends would
-     * disagree on which DLLs load. */
-    h->ioctl         = resolve_export<fn_pt_ioctl>(module, "PassThruIoctl", all_resolved, "PassThruIoCtl");
-    h->start_filter  = resolve_export<fn_pt_start_filter>(module, "PassThruStartMsgFilter", all_resolved);
-    h->stop_filter   = resolve_export<fn_pt_stop_filter>(module, "PassThruStopMsgFilter", all_resolved);
-
-    if (!all_resolved) {
-        const char* missing =
-            !h->open         ? "PassThruOpen"
-          : !h->close        ? "PassThruClose"
-          : !h->connect      ? "PassThruConnect"
-          : !h->disconnect   ? "PassThruDisconnect"
-          : !h->read_msgs    ? "PassThruReadMsgs"
-          : !h->write_msgs   ? "PassThruWriteMsgs"
-          : !h->ioctl        ? "PassThruIoctl"
-          : !h->start_filter ? "PassThruStartMsgFilter"
-          :                    "PassThruStopMsgFilter";
-        ecuio_detail_set("the DLL doesn't export %s", missing);
-        FreeLibrary(module);
-        delete h;
-        return ECUIO_ERR_LOAD_FAILED;
-    }
-    /* Optional, unlike the nine: a DLL without them loses only the
-     * vendor's text and the session info's versions. The surrogate
-     * child resolves them the same way. */
-    h->get_last_error = reinterpret_cast<fn_pt_get_last_error>(
-        GetProcAddress(module, "PassThruGetLastError"));
-    h->read_version = reinterpret_cast<fn_pt_read_version>(
-        GetProcAddress(module, "PassThruReadVersion"));
-
-    unsigned long device_id = 0;
-    const long open_rc = h->open(nullptr, &device_id);
-    if (open_rc != kPtStatusNoError) {
-        char text[ECUIO_PT_TEXT_LEN + 1];
-        vendor_text(h, text);
-        ecuio_detail_set_vendor("PassThruOpen", open_rc, text);
-        FreeLibrary(module);
-        delete h;
-        return ECUIO_ERR_VENDOR_REFUSED;
-    }
-    h->device_id = device_id;
-
+    h->is_surrogate = true;
+    h->dll_arch = pe.arch;
+    h->sur = sur;
     *out_handle = h;
     return ECUIO_OK;
 }

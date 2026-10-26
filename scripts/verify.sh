@@ -15,9 +15,8 @@
 #               discovery test demand a device from the registry, since
 #               the dev machine has a Pass-Thru driver installed;
 #               --no-devices for a machine without one
-#   cross-arch  J2534Routing, J2534Surrogate, and the surrogate cases of
-#               J2534HealthTest and J2534ConnectTest, against the x86
-#               surrogate and fake
+#   cross-arch  J2534Routing, J2534Surrogate, J2534HealthTest and
+#               J2534ConnectTest, against the x86 surrogate and fake
 #               (Windows, needs build-win32; skipped with -R). Fails if the
 #               env-gated routing case skips, since that means the paths
 #               were wrong.
@@ -116,7 +115,7 @@ if [ "$cross" = 1 ] && [ "$have_win32" = 1 ] && [ -z "$regex" ]; then
     ECUIO_FAKE_DLL="$(cygpath -m "$PWD")/build-win32/tests/Release/fake_j2534.dll"
     export ECUIO_SURROGATE_EXE ECUIO_FAKE_DLL
     run cross-arch ctest --test-dir build -C Release --output-on-failure \
-        --no-tests=error -R "J2534Routing|J2534Surrogate|J2534(Health|Connect)Test\..*/Surrogate"
+        --no-tests=error -R "J2534Routing|J2534Surrogate|J2534(Health|Connect)Test\."
     [ "$rc" = 0 ] || ctest_failed cross-arch
     summary=$(ctest_summary "$LOGDIR/cross-arch.log")
     case "$summary" in

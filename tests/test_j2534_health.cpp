@@ -1,7 +1,7 @@
 // File/layer: tests/test_j2534_health.cpp | GTest, HARNESS tier
-// Testing: the J2534 worker through each backend: the fake loaded
-//          in-proc, and the same fake inside the surrogate child. Every
-//          case runs on both. The link-health machine: hard and quiet
+// Testing: the J2534 worker against the fake inside the surrogate
+//          child (this tree's x64 one, or the x86 one in the cross-arch
+//          run). The link-health machine: hard and quiet
 //          reads, episode counting, recovery through the continued
 //          request probe, untouched vendor counts, the write latch, its
 //          priority and its step-down when reads recover, a write
@@ -16,7 +16,8 @@
 //          and pending replies, two channels at once; and the drain in
 //          passive mode. Frames carry session time, not the vendor's
 //          stamps. With nothing left to ask, empty reads go quiet as
-//          in passive mode. Replies longer than a CAN-FD frame arrive
+//          in passive mode. A vendor DLL that crashes ends only its
+//          child. Replies longer than a CAN-FD frame arrive
 //          whole, up to ISO 15765-2's longest; a longer one is cut and
 //          marked.
 //          The backend setup and the fake's control page are in
@@ -38,7 +39,6 @@
 
 namespace {
 
-using j2534_backends::Backend;
 
 void count_cb(const ecuio_frame_t* /*frame*/, void* user_data)
 {
@@ -148,7 +148,7 @@ protected:
     {
         const std::string u = uri(query);
         ASSERT_EQ(ecuio_session_create(u.c_str(), &session), ECUIO_OK) << u;
-        ASSERT_NO_FATAL_FAILURE(expect_opened_on_backend());
+        ASSERT_NO_FATAL_FAILURE(expect_opened_in_the_surrogate());
         ASSERT_EQ(ecuio_register_frame_callback(session, count_cb, &frames),
                   ECUIO_OK);
         ASSERT_EQ(ecuio_register_frame_callback(session, delivery_cb,
@@ -182,7 +182,7 @@ protected:
  * since connect, not the vendor's stamp; the next the vendor's delta,
  * across the 32-bit wrap; and a vendor clock that steps back doesn't
  * take the session's time with it. */
-TEST_P(J2534HealthTest, VendorStampsBecomeSessionTime)
+TEST_F(J2534HealthTest, VendorStampsBecomeSessionTime)
 {
     const auto before = std::chrono::steady_clock::now();
     ASSERT_NO_FATAL_FAILURE(start_session("?profile=raw"));
@@ -237,9 +237,42 @@ bool wait_for_state(ecuio_session_t* s, int32_t want, int budget_ms,
     }
 }
 
+/* A vendor DLL that crashes mid-session ends its surrogate, not the
+ * app (ADR-0025): the session reports a hard failure, closes, and the
+ * next session connects. */
+TEST_F(J2534HealthTest, AVendorDllThatCrashesEndsOnlyItsChild)
+{
+    ASSERT_NO_FATAL_FAILURE(start_session("?profile=raw"));
+    const uint8_t reply[5] = {0x00, 0x00, 0x07, 0xE8, 0xA1};
+    ASSERT_TRUE(fake_control::post(page, reply, sizeof(reply), 0, 0));
+    ASSERT_TRUE(wait_for_frames(1, 5000)) << "no frame before the crash";
+
+    const unsigned long child = fake_control::opener_pid(page);
+    ASSERT_NO_FATAL_FAILURE(knob("ECUIO_FAKE_EXIT_ON_READ", "1"));
+    int32_t le = 0;
+    uint32_t ec = 0;
+    EXPECT_TRUE(wait_for_state(session, ECUIO_ERR_TRANSPORT_HARD_FAILURE,
+                               5000, le, ec))
+        << "the crash was never reported (was " << le << ")";
+    EXPECT_EQ(ec, 1u);
+    HANDLE p = OpenProcess(SYNCHRONIZE, FALSE, static_cast<DWORD>(child));
+    if (p != nullptr) {
+        EXPECT_EQ(WaitForSingleObject(p, 5000), WAIT_OBJECT_0)
+            << "the surrogate is still running";
+        CloseHandle(p);
+    }
+    close_session();
+
+    ASSERT_NO_FATAL_FAILURE(knob("ECUIO_FAKE_EXIT_ON_READ", nullptr));
+    ASSERT_NO_FATAL_FAILURE(start_session("?profile=raw"));
+    EXPECT_NE(fake_control::opener_pid(page), child) << "a new surrogate";
+    ASSERT_TRUE(fake_control::post(page, reply, sizeof(reply), 0, 0));
+    EXPECT_TRUE(wait_for_frames(2, 5000)) << "the next session got no frame";
+}
+
 /* Hard failure: one episode per outage, not per read, and recovery
  * through the continued request probe. */
-TEST_P(J2534HealthTest, HardFailureSetsCanonicalErrorAndRecovers)
+TEST_F(J2534HealthTest, HardFailureSetsCanonicalErrorAndRecovers)
 {
     ASSERT_NO_FATAL_FAILURE(start_session(""));
 
@@ -269,7 +302,7 @@ TEST_P(J2534HealthTest, HardFailureSetsCanonicalErrorAndRecovers)
     EXPECT_EQ(ec, 1u);   /* recovery adds no episode */
 }
 
-TEST_P(J2534HealthTest, QuietBusDebouncesToVehicleTimeoutWithoutEpisode)
+TEST_F(J2534HealthTest, QuietBusDebouncesToVehicleTimeoutWithoutEpisode)
 {
     ASSERT_NO_FATAL_FAILURE(start_session(""));
 
@@ -293,7 +326,7 @@ TEST_P(J2534HealthTest, QuietBusDebouncesToVehicleTimeoutWithoutEpisode)
  * go quiet about a second after the scan ends, with no episode. A frame
  * from the ECU then shows it's there again. Counting only timed-out
  * requests would keep the link ok for good. */
-TEST_P(J2534HealthTest, NothingLeftToAskGoesQuiet)
+TEST_F(J2534HealthTest, NothingLeftToAskGoesQuiet)
 {
     ASSERT_NO_FATAL_FAILURE(
         start_session("?profile=uds-generic&did=1E00-1E01&identify=0"));
@@ -319,7 +352,7 @@ TEST_P(J2534HealthTest, NothingLeftToAskGoesQuiet)
  * the static read batch. Without ecuio_trusted_count either would
  * dispatch phantom frames and report the link healthy. Bare URI: the
  * scheduler keeps writing, so recovery to OK is reachable. */
-TEST_P(J2534HealthTest, UntouchedCountUnderHardErrorReportsUnhealthy)
+TEST_F(J2534HealthTest, UntouchedCountUnderHardErrorReportsUnhealthy)
 {
     ASSERT_NO_FATAL_FAILURE(start_session(""));
 
@@ -351,7 +384,7 @@ TEST_P(J2534HealthTest, UntouchedCountUnderHardErrorReportsUnhealthy)
  * by holding reads quiet during recovery: only the write can produce
  * OK). The knob leaves the write count untouched, the VX's "status 7,
  * written 1". */
-TEST_P(J2534HealthTest, WriteFailureLatchesRequestFailedAndClears)
+TEST_F(J2534HealthTest, WriteFailureLatchesRequestFailedAndClears)
 {
     ASSERT_NO_FATAL_FAILURE(start_session(""));
 
@@ -388,7 +421,7 @@ TEST_P(J2534HealthTest, WriteFailureLatchesRequestFailedAndClears)
  * held while the knob holds, and cleared by the first write that really
  * goes out. Nothing answers the unsent writes, so without the count the
  * session would read as a quiet bus instead. */
-TEST_P(J2534HealthTest, ZeroWrittenCountIsAFailedWrite)
+TEST_F(J2534HealthTest, ZeroWrittenCountIsAFailedWrite)
 {
     ASSERT_NO_FATAL_FAILURE(start_session(""));
 
@@ -420,7 +453,7 @@ TEST_P(J2534HealthTest, ZeroWrittenCountIsAFailedWrite)
  * requests-failing. Both transitions happen in the first cycle (write,
  * then drain read), so exactly two episodes: one REQUEST_FAILED, one
  * HARD. While both persist, the write path must not downgrade back. */
-TEST_P(J2534HealthTest, HardReadFailureOutranksRequestFailed)
+TEST_F(J2534HealthTest, HardReadFailureOutranksRequestFailed)
 {
     ASSERT_NO_FATAL_FAILURE(start_session(""));
 
@@ -448,7 +481,7 @@ TEST_P(J2534HealthTest, HardReadFailureOutranksRequestFailed)
  * failing, with no new episode, because the adapter reads cleanly again
  * and what fails is the requests. The write that goes out at last
  * returns it to ok. */
-TEST_P(J2534HealthTest, CleanReadsWhileWritesFailStepDownToRequestsFailing)
+TEST_F(J2534HealthTest, CleanReadsWhileWritesFailStepDownToRequestsFailing)
 {
     ASSERT_NO_FATAL_FAILURE(start_session(""));
 
@@ -482,7 +515,7 @@ TEST_P(J2534HealthTest, CleanReadsWhileWritesFailStepDownToRequestsFailing)
  * after it are a few of the ten the debounce needs. It goes quiet when
  * they run out, with no episode. The passive URI keeps requests out of
  * it. */
-TEST_P(J2534HealthTest, UnmatchedFrameCountsAsAQuietRead)
+TEST_F(J2534HealthTest, UnmatchedFrameCountsAsAQuietRead)
 {
     ASSERT_NO_FATAL_FAILURE(start_session("?profile=raw&filter=0x7E8"));
 
@@ -515,7 +548,7 @@ TEST_P(J2534HealthTest, UnmatchedFrameCountsAsAQuietRead)
  * probes in 1.5 s (100 + 200 + 400 + 800 ms), against about 15 if it
  * reset to its base on every failure. Wide margins on purpose: the two
  * behaviors differ by 3x, so CI timing noise can't confuse them. */
-TEST_P(J2534HealthTest, BackoffGrowsUnderSustainedHardFailure)
+TEST_F(J2534HealthTest, BackoffGrowsUnderSustainedHardFailure)
 {
     ASSERT_NO_FATAL_FAILURE(start_session(""));
 
@@ -541,7 +574,7 @@ TEST_P(J2534HealthTest, BackoffGrowsUnderSustainedHardFailure)
  * a second, with no new episode, and the probe runs at about 10 writes
  * a second. Counted one read per backoff interval, the debounce would
  * take about 26 s. */
-TEST_P(J2534HealthTest, HardFailureEndingInSilenceGoesQuietAtFullCadence)
+TEST_F(J2534HealthTest, HardFailureEndingInSilenceGoesQuietAtFullCadence)
 {
     ASSERT_NO_FATAL_FAILURE(start_session(""));
 
@@ -570,7 +603,7 @@ TEST_P(J2534HealthTest, HardFailureEndingInSilenceGoesQuietAtFullCadence)
  * when the hard reads resume the backoff starts again: about 5 probes in
  * 1.5 s, against about 15 if a dead adapter were probed at the request
  * cadence. */
-TEST_P(J2534HealthTest, BackoffRestartsWhenHardReadsResume)
+TEST_F(J2534HealthTest, BackoffRestartsWhenHardReadsResume)
 {
     ASSERT_NO_FATAL_FAILURE(start_session(""));
 
@@ -621,7 +654,7 @@ TEST_P(J2534HealthTest, BackoffRestartsWhenHardReadsResume)
  * takes ten of them. The lower bound pins the hold: reads that
  * returned at once would reach quiet in about 200 ms (ten 20 ms
  * sleeps). The bench saw 1.42 s. */
-TEST_P(J2534HealthTest, VxQuietBusDebouncesOnBufferEmptyReads)
+TEST_F(J2534HealthTest, VxQuietBusDebouncesOnBufferEmptyReads)
 {
     ASSERT_NO_FATAL_FAILURE(knob("ECUIO_FAKE_VX", "1"));
     const auto t0 = std::chrono::steady_clock::now();
@@ -641,7 +674,7 @@ TEST_P(J2534HealthTest, VxQuietBusDebouncesOnBufferEmptyReads)
 
 /* Requests on the VX: each write's indication is dropped, its reply
  * decodes, and the link is ok with no episode. */
-TEST_P(J2534HealthTest, VxAnsweredRequestsKeepTheLinkOk)
+TEST_F(J2534HealthTest, VxAnsweredRequestsKeepTheLinkOk)
 {
     ASSERT_NO_FATAL_FAILURE(knob("ECUIO_FAKE_VX", "1"));
     ASSERT_NO_FATAL_FAILURE(start_session(""));
@@ -665,7 +698,7 @@ TEST_P(J2534HealthTest, VxAnsweredRequestsKeepTheLinkOk)
  * an indication and no reply, then every write blocks about 500 ms and
  * fails. One "requests failing" episode, no frames, and no further
  * write accepted. Closing waits for at most the write in flight. */
-TEST_P(J2534HealthTest, VxNoAckBusAcceptsThreeWritesThenRequestsFail)
+TEST_F(J2534HealthTest, VxNoAckBusAcceptsThreeWritesThenRequestsFail)
 {
     ASSERT_NO_FATAL_FAILURE(knob("ECUIO_FAKE_VX", "1"));
     ASSERT_NO_FATAL_FAILURE(knob("ECUIO_FAKE_NO_ACK", "1"));
@@ -705,7 +738,7 @@ TEST_P(J2534HealthTest, VxNoAckBusAcceptsThreeWritesThenRequestsFail)
  * the reply, 4 ms behind, comes back before the next request: the
  * indication is no answer, so the request stays outstanding until the
  * reply completes it. */
-TEST_P(J2534HealthTest, VxReplyArrivesBeforeTheNextRequest)
+TEST_F(J2534HealthTest, VxReplyArrivesBeforeTheNextRequest)
 {
     ASSERT_NO_FATAL_FAILURE(knob("ECUIO_FAKE_VX", "1"));
     ASSERT_NO_FATAL_FAILURE(start_session(""));
@@ -726,7 +759,7 @@ TEST_P(J2534HealthTest, VxReplyArrivesBeforeTheNextRequest)
  * reply: exactly one frame reaches the session, the reply's. Delivered,
  * the first-frame indication would arrive as an empty payload on the
  * reply's ID. */
-TEST_P(J2534HealthTest, IndicationsAheadOfAReplyAreSkipped)
+TEST_F(J2534HealthTest, IndicationsAheadOfAReplyAreSkipped)
 {
     ASSERT_NO_FATAL_FAILURE(start_session("?profile=raw&filter=0x7E8"));
 
@@ -759,11 +792,10 @@ TEST_P(J2534HealthTest, IndicationsAheadOfAReplyAreSkipped)
 
 /* Beneath the worker, at the loader seam: a read that meets an
  * indication reads on, so the reply queued behind it comes back from the
- * same call, on both backends (in-proc the loader reads a message at a
- * time, and the child a batch at a time). A read that stopped at the
+ * same call (the child reads a batch at a time). A read that stopped at the
  * indication would cost the reply a read slice, which no session-level
  * case can see. */
-TEST_P(J2534HealthTest, ReadPastAnIndicationReturnsTheReplyBehindIt)
+TEST_F(J2534HealthTest, ReadPastAnIndicationReturnsTheReplyBehindIt)
 {
     struct HandleGuard {
         ecuio_j2534_handle_t* h = nullptr;
@@ -772,7 +804,7 @@ TEST_P(J2534HealthTest, ReadPastAnIndicationReturnsTheReplyBehindIt)
     ecuio_j2534_device_t dev = {};
     strncpy_s(dev.dll_path, sizeof(dev.dll_path), dll.c_str(), _TRUNCATE);
     ASSERT_EQ(ecuio_j2534_open(&dev, &guard.h), ECUIO_OK);
-    ASSERT_NO_FATAL_FAILURE(expect_opened_on_backend());
+    ASSERT_NO_FATAL_FAILURE(expect_opened_in_the_surrogate());
     unsigned long ch = 0;
     ASSERT_EQ(ecuio_j2534_connect_channel(guard.h, 0, 0, &ch), ECUIO_OK);
 
@@ -818,7 +850,7 @@ TEST_P(J2534HealthTest, ReadPastAnIndicationReturnsTheReplyBehindIt)
  * requests, one per floor, against the 10 a fixed 100 ms slot sent. The
  * floor caps it: without one, an instant answer would bring the next
  * request at once. */
-TEST_P(J2534HealthTest, RequestsFollowRepliesDownToTheFloor)
+TEST_F(J2534HealthTest, RequestsFollowRepliesDownToTheFloor)
 {
     ASSERT_NO_FATAL_FAILURE(start_session(""));
     ASSERT_TRUE(wait_for_frames(3, 2000)) << "replies didn't arrive";
@@ -838,7 +870,7 @@ TEST_P(J2534HealthTest, RequestsFollowRepliesDownToTheFloor)
  * is seen only when the read ends. Reads capped at the 10 ms slice keep
  * requests near the floor's pace on both backends; a read held for the
  * 100 ms wait would leave about ten a second through the surrogate. */
-TEST_P(J2534HealthTest, VxRepliesAreSeenWithinASlice)
+TEST_F(J2534HealthTest, VxRepliesAreSeenWithinASlice)
 {
     ASSERT_NO_FATAL_FAILURE(knob("ECUIO_FAKE_VX", "1"));
     ASSERT_NO_FATAL_FAILURE(start_session(""));
@@ -855,7 +887,7 @@ TEST_P(J2534HealthTest, VxRepliesAreSeenWithinASlice)
  * the request like a positive one, so requests keep the floor's pace
  * instead of waiting out 100 ms each, and the ECU answering keeps the
  * link ok. */
-TEST_P(J2534HealthTest, NegativeReplyCompletesItsRequest)
+TEST_F(J2534HealthTest, NegativeReplyCompletesItsRequest)
 {
     ASSERT_NO_FATAL_FAILURE(start_session("?profile=raw&filter=0x7E8&poll=0x5D"));
     ASSERT_TRUE(wait_for_frames(3, 2000)) << "replies didn't arrive";
@@ -878,7 +910,7 @@ TEST_P(J2534HealthTest, NegativeReplyCompletesItsRequest)
  * about ten go out a second, and each late reply is still delivered,
  * which keeps the link ok. Waiting for the replies instead would send
  * about two and a half. */
-TEST_P(J2534HealthTest, UnansweredRequestWaitsOutItsWait)
+TEST_F(J2534HealthTest, UnansweredRequestWaitsOutItsWait)
 {
     ASSERT_NO_FATAL_FAILURE(knob("ECUIO_FAKE_REPLY_DELAY_MS", "400"));
     ASSERT_NO_FATAL_FAILURE(start_session(""));
@@ -899,7 +931,7 @@ TEST_P(J2534HealthTest, UnansweredRequestWaitsOutItsWait)
  * each reply arrives while its own request is the latest. Ending the
  * wait at 100 ms instead would send three times as many, each reply
  * landing after the next request. */
-TEST_P(J2534HealthTest, PendingReplyHoldsTheRequestForItsAnswer)
+TEST_F(J2534HealthTest, PendingReplyHoldsTheRequestForItsAnswer)
 {
     ASSERT_NO_FATAL_FAILURE(knob("ECUIO_FAKE_PENDING", "1"));
     ASSERT_NO_FATAL_FAILURE(knob("ECUIO_FAKE_REPLY_DELAY_MS", "300"));
@@ -930,7 +962,7 @@ TEST_P(J2534HealthTest, PendingReplyHoldsTheRequestForItsAnswer)
  * channel waits only for its own reply, so both requests are out before
  * either reply arrives, and both ECUs' replies come back. Test-only
  * profile, static storage (the registry keeps the pointer). */
-TEST_P(J2534HealthTest, ChannelsWaitOnlyForTheirOwnReplies)
+TEST_F(J2534HealthTest, ChannelsWaitOnlyForTheirOwnReplies)
 {
     static const ecuio_channel_decl_t kChannels[] = {{0x7E8u, 0x7E0u},
                                                      {0x7E9u, 0x7E1u}};
@@ -972,7 +1004,7 @@ TEST_P(J2534HealthTest, ChannelsWaitOnlyForTheirOwnReplies)
 
 /* Passive mode reads again at once after a frame, so a burst of 16 is
  * delivered together rather than one per pass with a wait between. */
-TEST_P(J2534HealthTest, PassiveModeDrainsABurstWithoutWaiting)
+TEST_F(J2534HealthTest, PassiveModeDrainsABurstWithoutWaiting)
 {
     ASSERT_NO_FATAL_FAILURE(start_session("?profile=raw&filter=0x7E8"));
 
@@ -994,7 +1026,7 @@ TEST_P(J2534HealthTest, PassiveModeDrainsABurstWithoutWaiting)
  * classic CAN, 4095; and one that fills PASSTHRU_MSG.Data, which a
  * frame holds only the first ECUIO_FRAME_DATA_MAX bytes of, marked
  * TRUNCATED. Through the surrogate each crosses the pipe whole. */
-TEST_P(J2534HealthTest, LongRepliesArriveWhole)
+TEST_F(J2534HealthTest, LongRepliesArriveWhole)
 {
     static const ecuio_channel_decl_t kChannel[] = {{0x7E8u, 0x7E0u}};
     static ecuio_signal_def_t defs[3] = {};
@@ -1042,11 +1074,6 @@ TEST_P(J2534HealthTest, LongRepliesArriveWhole)
     EXPECT_EQ(replies.flags[2], ECUIO_FRAME_FLAG_TRUNCATED);
     EXPECT_TRUE(replies.filled[2]);
 }
-
-INSTANTIATE_TEST_SUITE_P(Backend, J2534HealthTest,
-                         ::testing::Values(Backend::InProc,
-                                           Backend::Surrogate),
-                         j2534_backends::label);
 
 } // namespace
 

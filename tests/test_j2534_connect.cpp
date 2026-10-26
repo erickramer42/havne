@@ -1,22 +1,24 @@
 // File/layer: tests/test_j2534_connect.cpp | GTest, HARNESS tier
-// Testing: why a j2534:// connect failed, through each backend: the
+// Testing: why a j2534:// connect failed, through the surrogate: the
 //          status ecuio_session_create or ecuio_session_start returns,
 //          and ecuio_last_error_detail's words for it. A refused
 //          PassThruOpen, PassThruConnect or filter names the call, its
 //          status (by its J2534-1 v04.04 name, or as vendor-specific)
 //          and the vendor's own text from PassThruGetLastError, word for
-//          word alike on both backends. A DLL that won't load (missing,
-//          not a PE file, a path that isn't UTF-8 or isn't absolute), or
-//          loads without the J2534 exports, is LOAD_FAILED on both; a success
-//          clears the detail. A session
+//          word. A file that can't be a DLL (missing, not a PE, a path
+//          that isn't UTF-8 or isn't absolute) is LOAD_FAILED before any
+//          spawn; a PE the surrogate can't load (an ARM64 image), or one
+//          without the J2534 exports, is LOAD_FAILED from the child; a
+//          success clears the detail. A session
 //          that connects describes what it runs on
 //          (ecuio_session_get_info): backend, DLL architecture, the
 //          channel as connected, and the adapter's battery and version
 //          readings, which may be refused without failing the connect.
 //          Below the connect path, the loader seam's helpers give each
-//          cause of a failure its own code, alike on both backends.
+//          cause of a failure its own code.
 //          J2534SurrogateConnectTest: the surrogate's own failures (no
-//          surrogate exe, one built from other shared headers).
+//          surrogate exe for the DLL's architecture, one built from
+//          other shared headers).
 
 #include <gtest/gtest.h>
 
@@ -34,7 +36,6 @@
 
 namespace {
 
-using j2534_backends::Backend;
 using j2534_backends::EnvSwap;
 
 class J2534ConnectTest : public j2534_backends::BackendTest {
@@ -46,9 +47,8 @@ protected:
     uint32_t fake_arch() const
     {
         const char* cross = std::getenv("ECUIO_FAKE_DLL");
-        return (GetParam() == Backend::Surrogate && cross != nullptr &&
-                cross[0] != '\0')
-                   ? ECUIO_DLL_ARCH_X86 : ECUIO_DLL_ARCH_X64;
+        return (cross != nullptr && cross[0] != '\0') ? ECUIO_DLL_ARCH_X86
+                                                      : ECUIO_DLL_ARCH_X64;
     }
 
     ecuio_session_info_t info_of_session() const
@@ -70,13 +70,13 @@ protected:
     }
 };
 
-TEST_P(J2534ConnectTest, RefusedOpenNamesTheCallStatusAndVendorText)
+TEST_F(J2534ConnectTest, RefusedOpenNamesTheCallStatusAndVendorText)
 {
     ASSERT_NO_FATAL_FAILURE(knob("ECUIO_FAKE_OPEN_STATUS", "8"));
     EXPECT_EQ(ecuio_session_create(uri("").c_str(), &session),
               ECUIO_ERR_VENDOR_REFUSED);
     EXPECT_EQ(session, nullptr);
-    ASSERT_NO_FATAL_FAILURE(expect_opened_on_backend());
+    ASSERT_NO_FATAL_FAILURE(expect_opened_in_the_surrogate());
     EXPECT_STREQ(
         ecuio_last_error_detail(),
         "PassThruOpen returned status 8 (0x8, ERR_DEVICE_NOT_CONNECTED): "
@@ -85,7 +85,7 @@ TEST_P(J2534ConnectTest, RefusedOpenNamesTheCallStatusAndVendorText)
 
 /* The OBDX Pro VT and VX refuse to open with 34 when no adapter is
  * attached; J2534-1 v04.04 defines no status 34. */
-TEST_P(J2534ConnectTest, AVendorsOwnStatusIsCalledVendorSpecific)
+TEST_F(J2534ConnectTest, AVendorsOwnStatusIsCalledVendorSpecific)
 {
     ASSERT_NO_FATAL_FAILURE(knob("ECUIO_FAKE_OPEN_STATUS", "34"));
     EXPECT_EQ(ecuio_session_create(uri("").c_str(), &session),
@@ -95,7 +95,7 @@ TEST_P(J2534ConnectTest, AVendorsOwnStatusIsCalledVendorSpecific)
                  "fake_j2534: PassThruOpen refused (ECUIO_FAKE_OPEN_STATUS)");
 }
 
-TEST_P(J2534ConnectTest, RefusedConnectNamesTheBaud)
+TEST_F(J2534ConnectTest, RefusedConnectNamesTheBaud)
 {
     ASSERT_NO_FATAL_FAILURE(knob("ECUIO_FAKE_CONNECT_STATUS", "0x19"));
     EXPECT_EQ(ecuio_session_create(uri("?baud=250000").c_str(), &session),
@@ -108,7 +108,7 @@ TEST_P(J2534ConnectTest, RefusedConnectNamesTheBaud)
 }
 
 /* Filters register at start, so a refused one fails the start. */
-TEST_P(J2534ConnectTest, RefusedFilterFailsTheStartWithTheVendorText)
+TEST_F(J2534ConnectTest, RefusedFilterFailsTheStartWithTheVendorText)
 {
     ASSERT_NO_FATAL_FAILURE(knob("ECUIO_FAKE_FILTER_STATUS", "7"));
     ASSERT_EQ(ecuio_session_create(uri("").c_str(), &session), ECUIO_OK);
@@ -119,21 +119,21 @@ TEST_P(J2534ConnectTest, RefusedFilterFailsTheStartWithTheVendorText)
                  "(ECUIO_FAKE_FILTER_STATUS)");
 }
 
-/* A DLL that isn't there, or a file that isn't a DLL: in-proc
- * LoadLibrary fails; through the surrogate the child's does, and it
- * exits with code 4. A path that isn't UTF-8 never reaches a load. */
-TEST_P(J2534ConnectTest, MissingDllFailsToLoad)
+/* A DLL that isn't there, or a file that isn't a DLL, is refused by the
+ * sniff with no spawn (ADR-0025); a PE for another machine goes to the
+ * x64 surrogate, whose load refuses it (exit 4), as the app's own
+ * process would. A path that isn't UTF-8 never reaches a load. */
+TEST_F(J2534ConnectTest, MissingDllFailsToLoad)
 {
     EXPECT_EQ(ecuio_session_create(
                   "j2534://C:/ecuio-definitely-missing/fake_j2534.dll",
                   &session),
               ECUIO_ERR_LOAD_FAILED);
-    EXPECT_NE(strstr(ecuio_last_error_detail(), "load the DLL"), nullptr)
-        << ecuio_last_error_detail();
+    EXPECT_STREQ(ecuio_last_error_detail(),
+                 "couldn't open the DLL (Windows error 3)");
 
-    /* Text; an MS-DOS header with no PE header behind it; a PE header
-     * for an ARM64 image. The architecture sniff calls each unknown,
-     * and the load refuses each. */
+    /* Text; an MS-DOS header with no PE header behind it: no PE, so
+     * no spawn. A PE header for an ARM64 image: the child's load. */
     std::string text = "not a DLL";
     std::string mz_only(64, '\0');
     mz_only[0] = 'M';
@@ -149,15 +149,22 @@ TEST_P(J2534ConnectTest, MissingDllFailsToLoad)
         std::string path;
         ~Remove() { DeleteFileA(path.c_str()); }
     } remove{path};
-    for (const std::string* bytes : {&text, &mz_only, &arm64}) {
+    struct Case {
+        const std::string* bytes;
+        const char* detail;
+    };
+    for (const Case& c :
+         {Case{&text, "the file isn't a Windows DLL"},
+          Case{&mz_only, "the file isn't a Windows DLL"},
+          Case{&arm64, "the surrogate couldn't load the DLL (the Windows "
+                       "error is in its session log, in %TEMP%)"}}) {
         FILE* f = fopen(path.c_str(), "wb");
         ASSERT_NE(f, nullptr);
-        fwrite(bytes->data(), 1, bytes->size(), f);
+        fwrite(c.bytes->data(), 1, c.bytes->size(), f);
         fclose(f);
         EXPECT_EQ(ecuio_session_create(("j2534://" + path).c_str(), &session),
                   ECUIO_ERR_LOAD_FAILED);
-        EXPECT_NE(strstr(ecuio_last_error_detail(), "load the DLL"), nullptr)
-            << ecuio_last_error_detail();
+        EXPECT_STREQ(ecuio_last_error_detail(), c.detail);
     }
 
     EXPECT_EQ(ecuio_session_create("j2534://C:/ecuio-\xFF.dll", &session),
@@ -172,7 +179,7 @@ TEST_P(J2534ConnectTest, MissingDllFailsToLoad)
  * missed; through the surrogate the child exits with code 5 and its
  * session log names them all. (An x86 child reads System32 as
  * SysWOW64, so the cross-arch run loads a kernel32 too.) */
-TEST_P(J2534ConnectTest, ADllWithoutTheJ2534ExportsFailsToLoad)
+TEST_F(J2534ConnectTest, ADllWithoutTheJ2534ExportsFailsToLoad)
 {
     char sys[MAX_PATH] = {};
     const UINT n = GetSystemDirectoryA(sys, MAX_PATH);
@@ -182,10 +189,8 @@ TEST_P(J2534ConnectTest, ADllWithoutTheJ2534ExportsFailsToLoad)
     EXPECT_EQ(ecuio_session_create(u.c_str(), &session), ECUIO_ERR_LOAD_FAILED);
     EXPECT_EQ(session, nullptr);
     EXPECT_STREQ(ecuio_last_error_detail(),
-                 GetParam() == Backend::InProc
-                     ? "the DLL doesn't export PassThruOpen"
-                     : "the DLL lacks a mandatory J2534 export (the "
-                       "surrogate's session log, in %TEMP%, names it)");
+                 "the DLL lacks a mandatory J2534 export (the "
+                 "surrogate's session log, in %TEMP%, names it)");
 }
 
 /* A relative path never reaches a load, whoever passes it: the URI's
@@ -193,7 +198,7 @@ TEST_P(J2534ConnectTest, ADllWithoutTheJ2534ExportsFailsToLoad)
  * directly, as a registry entry would reach it. The current directory
  * (which the child inherits) holds the fake, so a relative load would
  * find it there and open it. */
-TEST_P(J2534ConnectTest, ARelativeDllPathIsRefusedBeforeAnyLoad)
+TEST_F(J2534ConnectTest, ARelativeDllPathIsRefusedBeforeAnyLoad)
 {
     const size_t sep = dll.find_last_of("\\/");
     ASSERT_NE(sep, std::string::npos) << dll;
@@ -226,7 +231,7 @@ TEST_P(J2534ConnectTest, ARelativeDllPathIsRefusedBeforeAnyLoad)
 }
 
 /* A connect that works leaves nothing behind from the failure before. */
-TEST_P(J2534ConnectTest, SuccessClearsTheDetail)
+TEST_F(J2534ConnectTest, SuccessClearsTheDetail)
 {
     ASSERT_NO_FATAL_FAILURE(knob("ECUIO_FAKE_OPEN_STATUS", "8"));
     ASSERT_EQ(ecuio_session_create(uri("").c_str(), &session),
@@ -242,14 +247,12 @@ TEST_P(J2534ConnectTest, SuccessClearsTheDetail)
 
 /* What a default session runs on: the obd2 profile's channel at the
  * ISO 15765 default, and the fake's battery and version readings. */
-TEST_P(J2534ConnectTest, InfoDescribesTheAdapter)
+TEST_F(J2534ConnectTest, InfoDescribesTheAdapter)
 {
     ASSERT_EQ(ecuio_session_create(uri("").c_str(), &session), ECUIO_OK);
-    ASSERT_NO_FATAL_FAILURE(expect_opened_on_backend());
+    ASSERT_NO_FATAL_FAILURE(expect_opened_in_the_surrogate());
     const ecuio_session_info_t info = info_of_session();
-    EXPECT_EQ(info.backend, GetParam() == Backend::InProc
-                                ? ECUIO_BACKEND_J2534_INPROC
-                                : ECUIO_BACKEND_J2534_SURROGATE);
+    EXPECT_EQ(info.backend, ECUIO_BACKEND_J2534_SURROGATE);
     EXPECT_EQ(info.dll_arch, fake_arch());
     EXPECT_EQ(info.protocol_id, 6u);   /* ISO 15765 */
     EXPECT_EQ(info.baud, 500000u);
@@ -273,7 +276,7 @@ TEST_P(J2534ConnectTest, InfoDescribesTheAdapter)
 }
 
 /* The URI's baud and channel, and the 29-bit flag its IDs need. */
-TEST_P(J2534ConnectTest, InfoCarriesTheUrisBaudAndChannel)
+TEST_F(J2534ConnectTest, InfoCarriesTheUrisBaudAndChannel)
 {
     ASSERT_EQ(ecuio_session_create(
                   uri("?profile=raw&baud=250000&filter=0x18DAF110"
@@ -290,7 +293,7 @@ TEST_P(J2534ConnectTest, InfoCarriesTheUrisBaudAndChannel)
 
 /* Neither reading is needed to stream: a refused one leaves its flag
  * clear, and the connect succeeds without a detail. */
-TEST_P(J2534ConnectTest, RefusedReadingsLeaveTheirFlagsClear)
+TEST_F(J2534ConnectTest, RefusedReadingsLeaveTheirFlagsClear)
 {
     ASSERT_NO_FATAL_FAILURE(knob("ECUIO_FAKE_VBATT_STATUS", "7"));
     ASSERT_NO_FATAL_FAILURE(knob("ECUIO_FAKE_VERSION_STATUS", "7"));
@@ -311,7 +314,7 @@ TEST_P(J2534ConnectTest, RefusedReadingsLeaveTheirFlagsClear)
  * refused before any vendor call, an ioctl outside the whitelist and a
  * vendor's refusal each have their own code, the same on both
  * backends. */
-TEST_P(J2534ConnectTest, HelperFailuresHaveOneCodePerCause)
+TEST_F(J2534ConnectTest, HelperFailuresHaveOneCodePerCause)
 {
     struct HandleGuard {
         ecuio_j2534_handle_t* h = nullptr;
@@ -321,7 +324,7 @@ TEST_P(J2534ConnectTest, HelperFailuresHaveOneCodePerCause)
     strncpy_s(dev.dll_path, sizeof(dev.dll_path), dll.c_str(), _TRUNCATE);
     ASSERT_EQ(ecuio_j2534_open(&dev, &guard.h), ECUIO_OK);
     ecuio_j2534_handle_t* h = guard.h;
-    ASSERT_NO_FATAL_FAILURE(expect_opened_on_backend());
+    ASSERT_NO_FATAL_FAILURE(expect_opened_in_the_surrogate());
     unsigned long ch = 0;
     ASSERT_EQ(ecuio_j2534_connect_channel(h, 0, 0, &ch), ECUIO_OK);
 
@@ -429,64 +432,52 @@ TEST_P(J2534ConnectTest, HelperFailuresHaveOneCodePerCause)
 
 /* PassThruReadVersion is optional, as PassThruGetLastError is: the
  * legacy fixture, beside the fake in each tree, doesn't export it. */
-TEST_P(J2534ConnectTest, ADllWithoutReadVersionReportsNoVersions)
+TEST_F(J2534ConnectTest, ADllWithoutReadVersionReportsNoVersions)
 {
     const std::string legacy =
         dll.substr(0, dll.find_last_of("\\/") + 1) + "fake_j2534_legacy.dll";
     ASSERT_EQ(ecuio_session_create(("j2534://" + legacy).c_str(), &session),
               ECUIO_OK);
-    ASSERT_NO_FATAL_FAILURE(expect_opened_on_backend());
+    ASSERT_NO_FATAL_FAILURE(expect_opened_in_the_surrogate());
     const ecuio_session_info_t info = info_of_session();
     EXPECT_EQ(info.flags, ECUIO_SESSION_INFO_VBATT);
     EXPECT_STREQ(info.firmware_version, "");
     EXPECT_STREQ(info.api_version, "");
 }
 
-INSTANTIATE_TEST_SUITE_P(Backend, J2534ConnectTest,
-                         ::testing::Values(Backend::InProc,
-                                           Backend::Surrogate),
-                         j2534_backends::label);
-
-/* The surrogate's own failures. Forced routing sends the x64 fake
- * through it; the cross-arch run's x86 fake routes there anyway. */
+/* The surrogate's own failures: the x64 fake in the x64 surrogate, or
+ * the cross-arch run's x86 fake in the x86 one. */
 class J2534SurrogateConnectTest : public ::testing::Test {
 protected:
     std::string dll;
-    std::unique_ptr<EnvSwap> exe_swap;
+    bool x86 = false;
 
     void SetUp() override
     {
-        const char* x86 = std::getenv("ECUIO_FAKE_DLL");
-        if (x86 != nullptr && x86[0] != '\0') {
-            dll = x86;   /* the cross-arch run names its surrogate */
-        } else {
-            dll = FAKE_J2534_DLL_PATH;
-            exe_swap = std::make_unique<EnvSwap>("ECUIO_SURROGATE_EXE",
-                                                 SURROGATE_EXE_PATH);
-        }
-        ecuio_j2534_force_surrogate_for_testing(true);
-    }
-
-    void TearDown() override
-    {
-        ecuio_j2534_force_surrogate_for_testing(false);
-        exe_swap.reset();
+        const char* cross = std::getenv("ECUIO_FAKE_DLL");
+        x86 = cross != nullptr && cross[0] != '\0';
+        dll = x86 ? cross : FAKE_J2534_DLL_PATH;
     }
 
     std::string uri() const { return "j2534://" + dll; }
 };
 
+/* Each architecture's surrogate is found by its own name and variable,
+ * and a missing one fails the session, with no in-proc load to fall
+ * back on. */
 TEST_F(J2534SurrogateConnectTest, MissingSurrogateExeIsASurrogateFailure)
 {
-    EnvSwap exe("ECUIO_SURROGATE_EXE",
-                "C:/ecuio-definitely-missing/ecuio-j2534-surrogate.exe");
+    const char* name = x86 ? "ecuio-j2534-surrogate.exe"
+                           : "ecuio-j2534-surrogate-x64.exe";
+    const char* var = x86 ? "ECUIO_SURROGATE_EXE" : "ECUIO_SURROGATE_X64_EXE";
+    EnvSwap exe(var, (std::string("C:/ecuio-definitely-missing/") + name).c_str());
     ecuio_session_t* session = nullptr;
     EXPECT_EQ(ecuio_session_create(uri().c_str(), &session),
               ECUIO_ERR_SURROGATE_FAILED);
     EXPECT_EQ(session, nullptr);
-    EXPECT_STREQ(ecuio_last_error_detail(),
-                 "no surrogate (ecuio-j2534-surrogate.exe): "
-                 "ECUIO_SURROGATE_EXE names no file");
+    EXPECT_EQ(std::string(ecuio_last_error_detail()),
+              std::string("no surrogate (") + name + "): " + var +
+                  " names no file");
 }
 
 TEST_F(J2534SurrogateConnectTest, SurrogateFromOtherHeadersIsASurrogateFailure)
