@@ -1,0 +1,9 @@
+[sur 16:02:35.058] open: child pid 7916, surrogate 'C:\…\qttune\build\app\Release\ecuio-j2534-surrogate.exe', dll 'C:\Program Files (x86)\OBDX Pro\J2534\OBDX Pro VX\OBDXVX_J2534.dll'
+[sur 16:02:35.058] open: log 'C:\Users\…\AppData\Local\Temp\ecuio-surrogate.log'
+[surrogate 16:02:35.106] pipe connected
+[surrogate 16:02:35.162] dll loaded
+[surrogate 16:02:35.162] exports resolved
+[surrogate 16:02:35.162] OP_OPEN: calling PassThruOpen
+[surrogate 16:02:35.525] OP_OPEN: vendor status 34, device_id=0
+[surrogate 16:02:35.525] OP_GET_LAST_ERROR: vendor status 7: Error reporting not yet added
+[sur 16:02:35.525] open: PassThruOpen refused (vendor status 34)

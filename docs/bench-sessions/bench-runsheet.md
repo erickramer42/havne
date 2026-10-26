@@ -7,9 +7,10 @@
 has its own sheet, [vehicle-runsheet.md](vehicle-runsheet.md).
 
 Fill in a copy as `docs/bench-sessions/<date>.md`. The sessions so far
-are [2026-10-16](2026-10-16.md), [2026-10-20](2026-10-20.md) and
-[2026-10-22](2026-10-22.md); the last ran this procedure, and its
-results are the expectations below.
+are [2026-10-16](2026-10-16.md), [2026-10-20](2026-10-20.md),
+[2026-10-22](2026-10-22.md) and [2026-10-25](2026-10-25-bench.md) (a
+laptop); the last two ran this procedure, and their results are the
+expectations below.
 
 ## Purpose
 
@@ -30,7 +31,9 @@ more than one that runs to the end undocumented.
 
 ## Pre-flight (before touching the adapter)
 
-- [ ] Fresh build of both trees, **Win32 first**, and the app build
+- [ ] Fresh build of both trees, **Win32 first**
+      ([development.md, "Build configurations"](../development.md#build-configurations)
+      has the commands), and the app build
       prints "Deploying Win32 J2534 surrogate next to qttune.exe". If
       it doesn't, re-run `cmake -B build` and rebuild: without the copy,
       an x86 adapter fails to connect with "surrogate process failed: no
@@ -65,9 +68,14 @@ URI. Leave it about two minutes:
       reading" ([ADR-0019](../adr/0019-session-info.md))
 - [ ] Three writes succeed, then the fourth blocks about 0.5 s and
       fails (`OP_WRITE: status 7`), as does every later one: nothing
-      acknowledges the frames. Amber "Requests failing" within about a
-      second, and "Link: requests failing (1 episode(s))" in the
-      activity log
+      acknowledges the frames. The three are the PID-support probe's
+      first bitmap (`01 00`), the rotation's first PID (`01 04`) and
+      identification's first item (`09 02`), in that order
+- [ ] The activity log reads "ECU 0x7E8: no answer to the
+      supported-PID query; 10 requests, none dropped" within about
+      0.3 s (nothing answers the bitmap, and silence drops nothing),
+      then amber "Requests failing" and "Link: requests failing
+      (1 episode(s))" within about a second
 - [ ] The probe interval grows to about 5.5 s as the backoff reaches
       its cap
 - [ ] Task Manager: `qttune.exe` and the 32-bit
@@ -109,9 +117,12 @@ URI. Leave it about two minutes:
     j2534://OBDX Pro - VX?profile=raw&filter=0x7E8&poll=0x40
 
 **Expected:**
-- [ ] Each connects and goes to "Requests failing" as in phase 1; with
-      `?poll=` a request goes out about every 220 ms, because its
-      100 ms read waits out its timeout
+- [ ] Each connects and goes to "Requests failing" as in phase 1.
+      With `?poll=` the writes fail the same way, so the backoff paces
+      them too: three accepted, then 0.6 s apart growing to the 5.6 s
+      cap. (On a bus that answers, `?poll=` sends the next request as
+      soon as the reply is in.) No probe or identification line:
+      `?poll=` asks only its PID
 - [ ] One recording folder per connect: `events.log` holding the URI,
       "surrogate frame logging on" and the link transition;
       `frames.csv` its header row only (no frame reaches the bridge);

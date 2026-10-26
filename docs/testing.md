@@ -16,8 +16,8 @@ where the gaps are. For build and run commands, see
 | **Fuzzing** | Two libFuzzer harnesses, `fuzz_decode_signal` and `fuzz_validate_set`, feed arbitrary defs, payloads and sets to the decoder and validators under ASan (and UBSan with Clang) and check their contracts on every input. Not ctest cases: a time-bounded fuzzer would make a green suite stop meaning green ([fuzz/README.md](../fuzz/README.md)) | CI `fuzz` job (Linux, Clang), 60 s per harness, crashing inputs uploaded; locally with MSVC's libFuzzer in a tree of its own |
 | **Simulator smoke** | The iOS app installs and launches on the iOS Simulator, QML loads, and the app is still running 45 s later. Nothing drives the UI. A pass doesn't prove the app drew anything, so look at the screenshots. | CI on pull requests, and on request: a manual run (Actions → CI → Run workflow; `smoke_only` skips the other platform jobs), or `[ios-smoke]` in the commit message (`ios-simulator-smoke`, Intel macOS runner) |
 | **Manual smoke** | Running the app: layout, Dashboard gauges, LiveView, strip chart, Settings picker against the live registry | Dev machine |
-| **BENCH** | A real vendor DLL and adapter, no vehicle | First formal session complete, 2026-10-16, quiet bus ([session sheet](bench-sessions/2026-10-16.md)); informal quiet-bus follow-up 2026-10-20 ([note](bench-sessions/2026-10-20.md)); quiet-bus run of the vehicle session's URIs with recording, 2026-10-22 ([sheet](bench-sessions/2026-10-22.md)) |
-| **Vehicle** | A live, read-only vehicle session | First session 2026-10-22: one car, its engine ECU on `0x7E8`, ignition off, engine off and idling ([session sheet](bench-sessions/2026-10-22-vehicle.md)); run sheet [vehicle-runsheet.md](bench-sessions/vehicle-runsheet.md) |
+| **BENCH** | A real vendor DLL and adapter, no vehicle | First formal session complete, 2026-10-16, quiet bus ([session sheet](bench-sessions/2026-10-16.md)); informal quiet-bus follow-up 2026-10-20 ([note](bench-sessions/2026-10-20.md)); quiet-bus run of the vehicle session's URIs with recording, 2026-10-22 ([sheet](bench-sessions/2026-10-22.md)), and again on the laptop that goes to the car, 2026-10-25 ([sheet](bench-sessions/2026-10-25-bench.md)) |
+| **Vehicle** | A live, read-only vehicle session | Two sessions on one car, its engine ECU on `0x7E8`: 2026-10-22, ignition off, engine off and idling ([session sheet](bench-sessions/2026-10-22-vehicle.md)); 2026-10-25, the same plus the request engine, the probe, identification, `uds-generic` and an ignition cycle ([session sheet](bench-sessions/2026-10-25-vehicle.md)); run sheet [vehicle-runsheet.md](bench-sessions/vehicle-runsheet.md) |
 
 The manual smoke tier earns its place. The 2026-10-10 strip-chart
 indexing bug lived in QML paint code, and every C++ test was blind to
@@ -283,45 +283,46 @@ rows against the current Home, Settings and Dashboard header.
   vendor code has run only through the surrogate. In-proc, every
   vendor call has met only the x64 fake.
 - **Real-hardware coverage is one adapter and one vehicle.** The
-  quiet-bus BENCH sessions (2026-10-16, 2026-10-20, 2026-10-22) and
-  the first vehicle session (2026-10-22,
-  [session sheet](bench-sessions/2026-10-22-vehicle.md)) all ran the
-  OBDX Pro VX through the surrogate, and the vehicle's engine ECU
-  answered on 11-bit `0x7E8`. Still unverified against real hardware:
-  VBATT and `PassThruReadVersion`, 29-bit addressing, more than one ECU answering, multi-frame
-  (segmented ISO-TP) replies, a vendor read failure, and any other
-  vendor's statuses (the VX never returned `ERR_TIMEOUT`).
-- **The request engine hasn't run on a vehicle.** The first vehicle
-  session ran the fixed 100 ms slot. The engine's floor (20 ms) was
-  chosen without a vehicle run, and its pacing, negative and pending
-  replies and two channels at once are tested against the fake only;
-  the car sent no "response pending" and answered from one ECU.
-- **The probe hasn't run on a vehicle.** Its walk and drops are
-  checked against the fake and, with the time passed in, against the
-  first vehicle's recorded bitmaps, which predict that only 0x5C goes.
-- **`uds-generic` hasn't read a DID on a vehicle.** Its requests, the
-  ECU prefix and the scan are checked against the fake, which knows
-  four DIDs and refuses the rest at once; a real ECU's refusal codes,
-  reply lengths and the scan's pace on a car are the second vehicle
-  session's to measure.
-  No car has answered past the third bitmap, refused a DID, or sent a
-  negative reply late.
-- **Identification hasn't run on a vehicle.** The list, its turns and
-  the text rule are checked against the fake, whose values are ASCII
-  or short binary and arrive at once. A real ECU's Service 09 items
-  (several CALIDs, a reply longer than one frame, items it refuses or
-  leaves unanswered) and which `F18x` DIDs it answers in its default
-  session are the second vehicle session's to see.
+  quiet-bus BENCH sessions (2026-10-16, 2026-10-20, 2026-10-22,
+  2026-10-25) and both vehicle sessions on one car (2026-10-22,
+  2026-10-25: [session sheet](bench-sessions/2026-10-25-vehicle.md))
+  all ran the OBDX Pro VX through the surrogate, and the car's engine
+  ECU answered on 11-bit `0x7E8`. Still unverified against real
+  hardware: 29-bit addressing, more than one ECU answering, and any
+  other vendor's statuses (the VX never returned `ERR_TIMEOUT`).
+- **The request engine has met one ECU.** On the car (2026-10-25) it
+  paced Service 01 at about 26 requests a second with every reply but
+  one in 7,196 in before the next request, and Service 0x22 at about
+  13. Two channels at once, a "response pending" reply and a late
+  negative reply are tested against the fake only: the car answered
+  from one ECU, sent no `78`, and refused only in step.
+- **The probe has met one car.** It walked six bitmaps there and
+  dropped only `01 5C`, as the first session's bitmaps predicted, and
+  a cold connect dropped nothing. A car that refuses the bitmap
+  request itself, or answers it with a negative reply, hasn't been
+  seen.
+- **`uds-generic` has met one ECU's default session.** The scan of
+  `F180-F1FF` and three text DIDs ran on the car; every refusal was
+  `7F 22 31`. Other refusal codes (`11`, `33`), an `<ecu>:` prefix on
+  a second ECU, and DIDs outside the identification range are tested
+  against the fake only.
+- **Identification has met one ECU.** On the car every item settled
+  (four Service 09 items and two DIDs answered, seven DIDs refused),
+  and its replies of up to 27 bytes arrived whole. An ECU with several
+  calibration IDs, or one that leaves an item unanswered while awake,
+  hasn't been seen.
 - **Link health is covered against the fake.** The tests above drive
   `ECUIO_FAKE_READ_STATUS`, `ECUIO_FAKE_UNTOUCHED_COUNT_STATUS`,
   `ECUIO_FAKE_WRITE_STATUS` and `ECUIO_FAKE_WRITE_ZERO_COUNT` through
   the worker on both backends. Not
   covered:
-  - a hard read failure from real hardware. Live runs on 2026-10-22
-    drove the other states through the surrogate on the VX: requests
-    failing at the bench, and ok, quiet and recovery on the vehicle.
-    No vendor read error has been seen yet; the session log is the
-    record when one is;
+  - a hard read failure from real hardware, beyond one. Live runs
+    drove every state through the surrogate on the VX: requests
+    failing at the bench, ok, quiet and recovery on the vehicle, and
+    on 2026-10-25, after the laptop resumed from hibernation, a read
+    returning vendor status 27 ("adapter fault", the backoff at its
+    cap, a clean disconnect). A failure of that kind mid-session,
+    with the adapter still enumerated, hasn't been seen;
   - other vendors' read and write statuses. The VX's are known: an
     empty read returns `ERR_BUFFER_EMPTY` and data comes with
     `NOERROR`, never `ERR_TIMEOUT`; with nothing acknowledging, three

@@ -20,7 +20,10 @@ the BENCH tier has covered a real adapter on a quiet bus; and in the
 first read-only vehicle session
 (2026-10-22, [session sheet](docs/bench-sessions/2026-10-22-vehicle.md))
 the engine ECU answered the Mode-01 requests with replies that decode
-to plausible values. Since the tag: the link-health tests run on both
+to plausible values. A second session on the same car (2026-10-25,
+[session sheet](docs/bench-sessions/2026-10-25-vehicle.md)) ran the
+request engine, the probe, identification and `uds-generic` there for
+the first time. Since the tag: the link-health tests run on both
 backends against a fake modeled on the VX, a failed connect says why
 ([ADR-0018](docs/adr/0018-connect-failure-reporting.md)), a session
 says what it runs on ([ADR-0019](docs/adr/0019-session-info.md)),
@@ -145,18 +148,19 @@ is the plan in [After v0.3.0](#after-v030).
 - **Not yet:**
   - Real-hardware coverage beyond one adapter and one vehicle. Every
     hardware session so far ran the OBDX Pro VX through the surrogate:
-    quiet-bus BENCH sessions on 2026-10-16, 2026-10-20 and 2026-10-22
+    quiet-bus BENCH sessions on 2026-10-16, 2026-10-20, 2026-10-22 and
+    2026-10-25
     ([2026-10-16](docs/bench-sessions/2026-10-16.md),
     [2026-10-20](docs/bench-sessions/2026-10-20.md),
-    [2026-10-22](docs/bench-sessions/2026-10-22.md)), and the first
-    vehicle session. Untested on hardware: VBATT and
-    `PassThruReadVersion`, a vendor read failure, 29-bit addressing, more than one ECU answering,
-    multi-frame replies, and the in-proc backend. The VT, and the VX,
+    [2026-10-22](docs/bench-sessions/2026-10-22.md),
+    [2026-10-25](docs/bench-sessions/2026-10-25-bench.md), a laptop),
+    and two vehicle sessions on one car. Untested on hardware: 29-bit
+    addressing, more than one ECU answering, and the in-proc backend. The VT, and the VX,
     refuse to open with status 34 when their adapter is absent. The
     run sheets are
     [bench-runsheet.md](docs/bench-sessions/bench-runsheet.md) and
     [vehicle-runsheet.md](docs/bench-sessions/vehicle-runsheet.md).
-  - **Tests:** 395 ctest cases (Windows, Visual Studio 18 build
+  - **Tests:** 397 ctest cases (Windows, Visual Studio 18 build
     tools, both trees rebuilt, 2026-10-25), the QML suites
     among them, plus the cross-arch subset (74/74). All passed except
     the env-gated cross-arch skip. Every first-party target builds with
@@ -312,12 +316,15 @@ Scheduled for v0.3.x, in this order. The vehicle session's
 measurements feed the first item.
 
 1. **Request engine** ([ADR-0015](docs/adr/0015-request-engine.md)):
-   built, HARNESS-tested on both backends. Its floor between requests
-   is chosen without a vehicle run; the second vehicle session
-   measures it on the car.
+   built, HARNESS-tested on both backends, and run on a car
+   (2026-10-25): about 26 Service 01 requests a second, replies 19 ms
+   after their request (median), all but one in 7,196 in before the
+   next request, so the 20 ms floor stands.
 2. **The `obd2` PID-support probe** (ADR-0015 §4, and its appendix
-   of 2026-10-23 on the probe as built): built, HARNESS-tested; the
-   second vehicle session checks it on the car.
+   of 2026-10-23 on the probe as built): built, HARNESS-tested, and
+   run on a car (2026-10-25): it walked six bitmaps, found 53
+   supported PIDs and dropped only `01 5C`, and a connect made with
+   the ignition off dropped nothing and walked once the ECU woke.
 3. **`uds-generic`** ([ADR-0020](docs/adr/0020-uds-generic.md)):
    built, HARNESS-tested. `?profile=uds-generic&did=…` names the DIDs
    (`[<ecu>:]<DID>[-<DID>][:<type>]`, several in a list); single DIDs
@@ -326,15 +333,19 @@ measurements feed the first item.
    shows the profile with no hardware. Settings composes the URI from a
    preset or a device, a profile row (default, `raw`, `uds-generic`)
    and a DID field, so none of it needs typing; the choices last while
-   the app runs (persisted preferences, below, will keep them). Its
-   first DIDs on a car are the second vehicle session's.
+   the app runs (persisted preferences, below, will keep them). On a
+   car (2026-10-25) the scan of `F180-F1FF` settled all 128 DIDs in
+   14.3 s, 2 found and 126 refused with `7F 22 31`; this ECU answers
+   Service 0x22 in about 80 ms.
 4. **Vehicle identification** ([ADR-0021](docs/adr/0021-vehicle-identification.md)):
    built, HARNESS-tested. Every requesting channel asks its ECU the
    VIN, calibration IDs and identification DIDs once at connect,
    taking turns with the rotation, and the activity log (so a
    recording's `events.log`) gets one line per ECU. `?identify=0`
-   turns it off. Its first run on a car is the second vehicle
-   session's.
+   turns it off. On a car (2026-10-25) every item settled: the four
+   Service 09 items and two DIDs answered, seven DIDs refused, and
+   the replies longer than one CAN frame (up to 27 bytes) arrived
+   whole.
    Items 1–4 ship in **v0.3.1**, the first release with a Windows
    download ([release notes](docs/releases/v0.3.1.md)): a zip built
    and checked by `.github/workflows/release.yml` that runs without
@@ -389,6 +400,9 @@ it a genuine connect candidate.
    indications did at the bench. The clock doesn't reset at open or
    connect, wraps 71.6 min after zero, and what sets its zero is
    unknown ([session sheet](docs/bench-sessions/2026-10-22-vehicle.md)).
+   The wrap came mid-connect on the second vehicle session, and
+   session time ran straight through it, within 15 ms of the host
+   clock ([session sheet](docs/bench-sessions/2026-10-25-vehicle.md)).
 6. **ReadMsgs statuses.** Split in both backends:
    `ERR_TIMEOUT` is a vehicle timeout, `ERR_BUFFER_EMPTY` is "no
    frame", and anything else is a hard failure. Frames that
@@ -426,10 +440,12 @@ it a genuine connect candidate.
 10. **The session info's readings**
     ([ADR-0019](docs/adr/0019-session-info.md)). Each connect asks the
     device for `READ_VBATT` and `PassThruReadVersion`, and the
-    activity log's "Session:" line shows the answers. Unverified on the
-    VX: whether it answers either, whether the voltage is in
-    millivolts and close to a meter's reading at the connector, and
-    what its version strings say.
+    activity log's "Session:" line shows the answers. CONFIRMED
+    2026-10-25 for the VX: it answers both; the voltage is in
+    millivolts, 0.0 V on USB power alone and within 0.1 V of the ECU's
+    own reading (PID 0x42) on the car; the versions read
+    `FW:1.0.1.0 HW:1.0.0.0`, DLL `1.8.9586.12845`, API `04.04`
+    ([session sheet](docs/bench-sessions/2026-10-25-vehicle.md)).
 
 ## Known issues and technical debt
 

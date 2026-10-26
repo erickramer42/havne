@@ -138,3 +138,24 @@ QML tests show a text row on every platform.
 - The late-negative caveat above is the price of a key-less negative
   reply; the probe already pays it.
 - The fuzz job gains `fuzz_uds_query`, since `?did=` is typed text.
+
+## Appendix — the first DIDs on a vehicle (2026-10-25)
+
+On the second vehicle session ([session sheet](../bench-sessions/2026-10-25-vehicle.md)), on the engine ECU's default
+session:
+
+- **The scan** `did=F180-F1FF` settled all 128 DIDs in 14.3 s after
+  identification's items: 2 found (F188 and F190, the two
+  identification read) and 126 refused. The ECU answers Service 0x22
+  in about 80 ms (median; 90th percentile about 90 ms, longest
+  135 ms), so the scan ran at about 13 requests a second, inside the
+  run sheet's 15 s estimate.
+- **Refusals** were all `7F 22 31` (request out of range); no `11`,
+  `33` or `78` appeared.
+- **Replies** were up to 27 bytes (`62 F1 88`, `62 F1 90`: this ECU
+  pads F190 past the VIN's 17 characters), each reassembled by the
+  adapter and delivered whole.
+- **A refused polled DID** (`did=F191:text`) dropped at its first
+  reply, and with nothing left to ask the link went quiet 1.9 s in,
+  as the appendix of 2026-10-24 to ADR-0015 says it should. F188 and
+  F190 as text refreshed about 13 times a second.

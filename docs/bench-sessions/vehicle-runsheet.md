@@ -1,14 +1,16 @@
 # VEHICLE run sheet — read-only vehicle session
 
-**Date:** <date>  **Second person present, or procedure posted:** <yes, or where posted>
-**Adapter:** OBDX Pro VX (USB)  **Vehicle:** <year make model>; CAN-era OBD-II, expected 11-bit IDs at 500 kbit/s
 **QtTune build:** <commit hash>  **Trees:** build, build-win32 both fresh
+**Date:** <date>
+**Adapter:** OBDX Pro VX (USB)  **Vehicle:** <year make model>; CAN-era OBD-II, expected 11-bit IDs at 500 kbit/s
 
 Fill in a copy of this sheet as `docs/bench-sessions/<date>.md`. The
 no-vehicle BENCH tier is [bench-runsheet.md](bench-runsheet.md); this
-sheet picks up at its stop point. The first vehicle session,
-[2026-10-22](2026-10-22-vehicle.md), ran this sheet; where an expectation
-below depends on the vehicle, it's that one's.
+sheet picks up at its stop point. Two sessions have run this sheet, on
+the same car: [2026-10-22](2026-10-22-vehicle.md) and
+[2026-10-25](2026-10-25-vehicle.md), the first with the probe,
+identification and `uds-generic`. Where an expectation below depends
+on the vehicle, it's that car's.
 
 ## Purpose
 
@@ -64,9 +66,11 @@ the machine the code was developed on.
 
 - [ ] The VX driver is installed on that laptop: the picker lists only
       adapters whose drivers are installed
-- [ ] Fresh build of both trees, **Win32 first**, and the app build
-      prints "Deploying Win32 J2534 surrogate next to qttune.exe"
-      (see [bench-runsheet.md](bench-runsheet.md) pre-flight)
+- [ ] Fresh build of both trees, **Win32 first**
+      ([development.md, "Build configurations"](../development.md#build-configurations)
+      has the commands), and the app build prints "Deploying Win32
+      J2534 surrogate next to qttune.exe" (see
+      [bench-runsheet.md](bench-runsheet.md) pre-flight)
 - [ ] Full suite green: every case passes except the env-gated skip
       (current count in [STATUS.md](../../STATUS.md)), plus the
       cross-arch subset. `scripts/verify.sh` runs both and prints four
@@ -384,17 +388,20 @@ takes turns with one polled request.
       (security access denied) refuses that one DID. Either of those
       is a finding, not a fault
 
-**Action, one DID as text.** Disconnect. Pick a found DID whose bytes
-read as ASCII in the Log page and isn't a serial or the VIN (F191,
-the hardware number, F189, the software version, or F195, the
-supplier software version, if the ECU answered them; the identity
-line already shows which). Connect with
-it polled as text, for example:
+**Action, one DID as text.** Disconnect. Pick a DID the identity line
+shows answered whose bytes read as ASCII in the Log page and isn't a
+serial or the VIN: F191 (the hardware number), F189 (the software
+version) or F195 (the supplier software version) where the ECU
+answers them. On the 2026-10-25 car only F188, the manufacturer's
+software number, qualified; it refused the other three. A refused DID
+drops at its first reply and, with nothing left to ask, the link goes
+quiet about a second later, by design. Connect with it polled as
+text, for example:
 
-    j2534://OBDX Pro - VX?profile=uds-generic&did=F191:text
+    j2534://OBDX Pro - VX?profile=uds-generic&did=F188:text
 
 **Expected:**
-- [ ] One Live row, `DID F191`, showing the text, refreshing on every
+- [ ] One Live row, `DID F188`, showing the text, refreshing on every
       reply (a text row's plot box is grayed out); `signals.csv` carries the
       text, quoted
 - [ ] No banner, the link ok, the value never dims
@@ -409,7 +416,7 @@ of it is committed (see Post-session actions).
 
 ## Phase 4 — engine idling (the decode check)
 
-Only if phases 0–3 were clean, and with the second person present.
+Only if phases 0–3 were clean.
 With the engine off, most values are 0 or ambient, which a wrong scale
 or byte order can still produce; Fuel Level and Battery Voltage are the
 exceptions. Idle is where RPM's two-byte value and the charging

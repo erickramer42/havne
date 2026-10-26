@@ -1,0 +1,47 @@
+[sur 16:14:03.083] open: child pid 7512, surrogate 'C:\…\qttune\build\app\Release\ecuio-j2534-surrogate.exe', dll 'C:\Program Files (x86)\OBDX Pro\J2534\OBDX Pro VX\OBDXVX_J2534.dll'
+[sur 16:14:03.083] open: log 'C:\Users\…\AppData\Local\Temp\ecuio-surrogate.log'
+[surrogate 16:14:03.131] pipe connected
+[surrogate 16:14:03.131] frame logging on (ECUIO_SUR_LOG_FRAMES=1)
+[surrogate 16:14:03.152] dll loaded
+[surrogate 16:14:03.152] exports resolved
+[surrogate 16:14:03.152] OP_OPEN: calling PassThruOpen
+[surrogate 16:14:03.268] OP_OPEN: vendor status 0, device_id=1
+[surrogate 16:14:03.292] OP_CONNECT: vendor status 0, channel=1 (device=1)
+[surrogate 16:14:03.323] OP_IOCTL: id 0x3 (VBATT), status 0
+[surrogate 16:14:03.323] OP_READ_VERSION: vendor status 0: firmware 'FW:1.0.1.0 HW:1.0.0.0', DLL '1.8.9586.12845', API '04.04'
+[surrogate 16:14:03.332] OP_START_FILTER: type 3, status 0, filter_id 1
+[surrogate 16:14:03.357] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 16:14:03.357] OP_WRITE: status 0, written 1
+[surrogate 16:14:03.380] OP_READ frame: status 0, rx 0x00000009, ts 1395311008, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 16:14:03.442] OP_READ: status 16, frames 0
+[surrogate 16:14:03.458] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 16:14:03.473] OP_READ frame: status 0, rx 0x00000009, ts 1395413803, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 16:14:03.569] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 16:14:03.582] OP_READ frame: status 0, rx 0x00000009, ts 1395524385, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 16:14:04.186] OP_WRITE frame: status 7, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 16:14:04.186] OP_WRITE: status 7, written 1
+[surrogate 16:14:04.205] OP_READ frame: status 0, rx 0x00000201, ts 1396141152, len 6: 00 00 07 E0 01 00 (indication, not delivered)
+[surrogate 16:14:04.866] OP_WRITE frame: status 7, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 16:14:04.911] OP_READ frame: status 0, rx 0x00000201, ts 1396831361, len 6: 00 00 07 E0 01 00 (indication, not delivered)
+[surrogate 16:14:05.678] OP_WRITE frame: status 7, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 16:14:05.694] OP_READ frame: status 0, rx 0x00000201, ts 1397635558, len 6: 00 00 07 E0 01 00 (indication, not delivered)
+[surrogate 16:14:06.668] OP_WRITE frame: status 7, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 16:14:06.710] OP_READ frame: status 0, rx 0x00000201, ts 1398630034, len 6: 00 00 07 E0 01 00 (indication, not delivered)
+[surrogate 16:14:08.075] OP_WRITE frame: status 7, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 16:14:08.091] OP_READ frame: status 0, rx 0x00000201, ts 1400032531, len 6: 00 00 07 E0 01 00 (indication, not delivered)
+[surrogate 16:14:10.244] OP_WRITE frame: status 7, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 16:14:10.282] OP_READ frame: status 0, rx 0x00000201, ts 1402211576, len 6: 00 00 07 E0 01 00 (indication, not delivered)
+[surrogate 16:14:14.050] OP_WRITE frame: status 7, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 16:14:14.090] OP_READ frame: status 0, rx 0x00000201, ts 1406018120, len 6: 00 00 07 E0 01 00 (indication, not delivered)
+[surrogate 16:14:19.647] OP_WRITE frame: status 7, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 16:14:19.666] OP_READ frame: status 0, rx 0x00000201, ts 1411607078, len 6: 00 00 07 E0 01 00 (indication, not delivered)
+[surrogate 16:14:25.236] OP_WRITE frame: status 7, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 16:14:25.251] OP_READ frame: status 0, rx 0x00000201, ts 1417191042, len 6: 00 00 07 E0 01 00 (indication, not delivered)
+[surrogate 16:14:30.816] OP_WRITE frame: status 7, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 16:14:30.845] OP_READ frame: status 0, rx 0x00000201, ts 1422779619, len 6: 00 00 07 E0 01 00 (indication, not delivered)
+[surrogate 16:14:36.431] OP_WRITE frame: status 7, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 16:14:36.455] OP_READ frame: status 0, rx 0x00000201, ts 1428388183, len 6: 00 00 07 E0 01 00 (indication, not delivered)
+[surrogate 16:14:42.017] OP_WRITE frame: status 7, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 16:14:42.033] OP_READ frame: status 0, rx 0x00000201, ts 1433973644, len 6: 00 00 07 E0 01 00 (indication, not delivered)
+[surrogate 16:14:43.653] OP_STOP_FILTER: fid 1, status 0
+[surrogate 16:14:43.653] OP_DISCONNECT: vendor status 0, channel=1

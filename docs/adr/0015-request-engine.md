@@ -440,3 +440,30 @@ say. The alternatives were stopping the 100 Hz reads but keeping the
 state, which can't see an ECU go away, and a heartbeat request the
 engine would send with no def asking for it, which §1 doesn't allow.
 `J2534HealthTest.NothingLeftToAskGoesQuiet` pins it on both backends.
+
+## Appendix — the engine on a vehicle (2026-10-25)
+
+The second vehicle session ran the engine on the first session's car
+([session sheet](../bench-sessions/2026-10-25-vehicle.md)), and its numbers are the first measurements the open values
+had:
+
+- **Pace.** Service 01 ran at 26–28 requests a second on one channel,
+  so the ten `obd2` signals refreshed about every 0.4 s (the fixed
+  100 ms slot gave 1.1 s). Replies came 19 ms after their request
+  (median; 90th percentile 30 ms, longest 116 ms), measured by the
+  session log's stamps. With the ECU awake, one reply in 7,196
+  arrived after the next request went out.
+- **The floor stays 20 ms.** Requests follow the replies, so the
+  floor binds only when a reply comes back inside it, and about half
+  did; the ECU answered every one at that pace. Nothing on this car
+  argues for a wider floor.
+- **No "response pending".** No `7F xx 78` in about 12,000 replies, so
+  the pending wait is still unexercised on hardware.
+- **The probe** walked six bitmaps, `41 00` to `41 A0` (the first
+  three byte for byte as the first session read them), found 53
+  supported data PIDs and dropped only `01 5C`. A connect made with the
+  ignition off dropped nothing, and the walk ran once the ECU woke
+  (the recovery's `ecuio_engine_probe`).
+- **Service 0x22** replies took about 80 ms on this ECU (median), four
+  times Service 01's, so a DID-heavy rotation runs at about 13
+  requests a second; the wait (100 ms) covers it with room.

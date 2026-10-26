@@ -37,21 +37,38 @@ section.
 
 ## Build configurations
 
-**Full app, Windows.** The Visual Studio generator is multi-config,
-so `--config` and `-C` are required:
+**Full app, Windows: two trees, the Win32 one first.** Most J2534
+vendor DLLs, the VX's among them, are 32-bit, so the app loads them
+through an x86 surrogate process
+([ADR-0008](adr/0008-x86-surrogate-host.md)). The surrogate comes from
+a core-only Win32 tree, because Qt ships no 32-bit kits, and the app
+tree copies it next to `qttune.exe`; that's why the Win32 tree is
+built first. The Visual Studio generator is multi-config, so
+`--config` and `-C` are required:
 
 ```sh
+# 1. The Win32 tree: the x86 surrogate, and the x86 fakes the cross-arch tests load
+cmake -B build-win32 -A Win32 -DQTTUNE_BUILD_CORE_ONLY=ON
+cmake --build build-win32 --config Release --target ecuio-j2534-surrogate fake_j2534 fake_j2534_legacy
+
+# 2. The app tree, configured after step 1 so it finds the surrogate
 cmake -B build -DCMAKE_PREFIX_PATH=<qt-install>/msvc2022_64
-cmake --build build --config Release
-# windeployqt runs post-build
-build/app/Release/qttune.exe
+cmake --build build --config Release   # prints "Deploying Win32 J2534 surrogate"
+build/app/Release/qttune.exe           # windeployqt has run post-build
 ```
 
-**Deploy the Win32 surrogate next to the app (automatic).** With the
+`scripts/verify.sh` (Git Bash) runs both builds in this order, then
+the whole suite and the cross-arch subset
+([Running tests](#running-tests)).
+
+**How the app tree finds the surrogate (automatic).** With the
 two-tree layout there is nothing to configure: when
 `QTTUNE_SURROGATE_SOURCE` is unset (the default), CMake searches the
 sibling `build-win32/` tree and copies the surrogate next to
-`qttune.exe` on every app build.
+`qttune.exe` on every app build. `QTTUNE_SURROGATE_SOURCE` is the app
+build's CMake setting, for a surrogate built somewhere else; the
+runtime variable `ECUIO_SURROGATE_EXE` is separate, and points one run
+at a surrogate (the cross-arch tests use it).
 
 Resolution order:
 
@@ -112,16 +129,9 @@ cmake -B build-core -DQTTUNE_BUILD_CORE_ONLY=ON
 cmake --build build-core --config Release
 ```
 
-**Cross-arch tree, Windows dev machines.** This builds the x86
-surrogate and fake DLLs that test the x64 → x86 path
-([ADR-0008](adr/0008-x86-surrogate-host.md)). It is core-only because
-modern Qt ships no 32-bit kits, and only the surrogate and vendor
-DLLs are ever x86:
-
-```sh
-cmake -B build-win32 -A Win32 -DQTTUNE_BUILD_CORE_ONLY=ON
-cmake --build build-win32 --config Release --target ecuio-j2534-surrogate fake_j2534 fake_j2534_legacy
-```
+**The cross-arch tree** is the Win32 tree of the Windows recipe
+above: besides the surrogate it builds the x86 fake DLLs that test
+the x64 → x86 path. Only the surrogate and vendor DLLs are ever x86.
 
 > ⚠️ **Rebuild both trees** after any change to `j2534_ptypes.h` or
 > `surrogate_protocol.h`. Their constants are ABI between binaries

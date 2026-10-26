@@ -1,0 +1,61 @@
+[sur 16:09:22.893] open: child pid 12344, surrogate 'C:\…\qttune\build\app\Release\ecuio-j2534-surrogate.exe', dll 'C:\Program Files (x86)\OBDX Pro\J2534\OBDX Pro VX\OBDXVX_J2534.dll'
+[sur 16:09:22.893] open: log 'C:\Users\…\AppData\Local\Temp\ecuio-surrogate.log'
+[surrogate 16:09:22.972] pipe connected
+[surrogate 16:09:22.972] frame logging on (ECUIO_SUR_LOG_FRAMES=1)
+[surrogate 16:09:22.993] dll loaded
+[surrogate 16:09:22.993] exports resolved
+[surrogate 16:09:22.993] OP_OPEN: calling PassThruOpen
+[surrogate 16:09:23.151] OP_OPEN: vendor status 0, device_id=1
+[surrogate 16:09:23.176] OP_CONNECT: vendor status 0, channel=1 (device=1)
+[surrogate 16:09:23.211] OP_IOCTL: id 0x3 (VBATT), status 0
+[surrogate 16:09:23.216] OP_READ_VERSION: vendor status 0: firmware 'FW:1.0.1.0 HW:1.0.0.0', DLL '1.8.9586.12845', API '04.04'
+[surrogate 16:09:23.233] OP_START_FILTER: type 3, status 0, filter_id 1
+[surrogate 16:09:23.256] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 00
+[surrogate 16:09:23.256] OP_WRITE: status 0, written 1
+[surrogate 16:09:23.288] OP_READ frame: status 0, rx 0x00000009, ts 1115212852, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 16:09:23.361] OP_READ: status 16, frames 0
+[surrogate 16:09:23.361] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 01 04
+[surrogate 16:09:23.377] OP_READ frame: status 0, rx 0x00000009, ts 1115317492, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 16:09:23.481] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 09 02
+[surrogate 16:09:23.500] OP_READ frame: status 0, rx 0x00000009, ts 1115438460, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 16:09:24.096] OP_WRITE frame: status 7, tx 0x00000040, len 6: 00 00 07 E0 01 05
+[surrogate 16:09:24.096] OP_WRITE: status 7, written 1
+[surrogate 16:09:24.111] OP_READ frame: status 0, rx 0x00000201, ts 1116050838, len 6: 00 00 07 E0 01 05 (indication, not delivered)
+[surrogate 16:09:24.786] OP_WRITE frame: status 7, tx 0x00000040, len 6: 00 00 07 E0 09 04
+[surrogate 16:09:24.813] OP_READ frame: status 0, rx 0x00000201, ts 1116744724, len 6: 00 00 07 E0 09 04 (indication, not delivered)
+[surrogate 16:09:25.575] OP_WRITE frame: status 7, tx 0x00000040, len 6: 00 00 07 E0 09 04
+[surrogate 16:09:25.616] OP_READ frame: status 0, rx 0x00000201, ts 1117541421, len 6: 00 00 07 E0 09 04 (indication, not delivered)
+[surrogate 16:09:26.583] OP_WRITE frame: status 7, tx 0x00000040, len 6: 00 00 07 E0 09 04
+[surrogate 16:09:26.624] OP_READ frame: status 0, rx 0x00000201, ts 1118551485, len 6: 00 00 07 E0 09 04 (indication, not delivered)
+[surrogate 16:09:27.995] OP_WRITE frame: status 7, tx 0x00000040, len 6: 00 00 07 E0 09 04
+[surrogate 16:09:28.026] OP_READ frame: status 0, rx 0x00000201, ts 1119951114, len 6: 00 00 07 E0 09 04 (indication, not delivered)
+[surrogate 16:09:30.216] OP_WRITE frame: status 7, tx 0x00000040, len 6: 00 00 07 E0 09 04
+[surrogate 16:09:30.246] OP_READ frame: status 0, rx 0x00000201, ts 1122178200, len 6: 00 00 07 E0 09 04 (indication, not delivered)
+[surrogate 16:09:34.011] OP_WRITE frame: status 7, tx 0x00000040, len 6: 00 00 07 E0 09 04
+[surrogate 16:09:34.033] OP_READ frame: status 0, rx 0x00000201, ts 1125969934, len 6: 00 00 07 E0 09 04 (indication, not delivered)
+[surrogate 16:09:39.606] OP_WRITE frame: status 7, tx 0x00000040, len 6: 00 00 07 E0 09 04
+[surrogate 16:09:39.630] OP_READ frame: status 0, rx 0x00000201, ts 1131568746, len 6: 00 00 07 E0 09 04 (indication, not delivered)
+[surrogate 16:09:45.189] OP_WRITE frame: status 7, tx 0x00000040, len 6: 00 00 07 E0 09 04
+[surrogate 16:09:45.230] OP_READ frame: status 0, rx 0x00000201, ts 1137149885, len 6: 00 00 07 E0 09 04 (indication, not delivered)
+[surrogate 16:09:50.810] OP_WRITE frame: status 7, tx 0x00000040, len 6: 00 00 07 E0 09 04
+[surrogate 16:09:50.826] OP_READ frame: status 0, rx 0x00000201, ts 1142765274, len 6: 00 00 07 E0 09 04 (indication, not delivered)
+[surrogate 16:09:56.409] OP_WRITE frame: status 7, tx 0x00000040, len 6: 00 00 07 E0 09 04
+[surrogate 16:09:56.435] OP_READ frame: status 0, rx 0x00000201, ts 1148364250, len 6: 00 00 07 E0 09 04 (indication, not delivered)
+[surrogate 16:10:02.001] OP_WRITE frame: status 7, tx 0x00000040, len 6: 00 00 07 E0 09 04
+[surrogate 16:10:02.016] OP_READ frame: status 0, rx 0x00000201, ts 1153956008, len 6: 00 00 07 E0 09 04 (indication, not delivered)
+[surrogate 16:10:07.579] OP_WRITE frame: status 7, tx 0x00000040, len 6: 00 00 07 E0 09 04
+[surrogate 16:10:07.619] OP_READ frame: status 0, rx 0x00000201, ts 1159541898, len 6: 00 00 07 E0 09 04 (indication, not delivered)
+[surrogate 16:10:13.176] OP_WRITE frame: status 7, tx 0x00000040, len 6: 00 00 07 E0 09 04
+[surrogate 16:10:13.203] OP_READ frame: status 0, rx 0x00000201, ts 1165139000, len 6: 00 00 07 E0 09 04 (indication, not delivered)
+[surrogate 16:10:18.767] OP_WRITE frame: status 7, tx 0x00000040, len 6: 00 00 07 E0 09 04
+[surrogate 16:10:18.803] OP_READ frame: status 0, rx 0x00000201, ts 1170733343, len 6: 00 00 07 E0 09 04 (indication, not delivered)
+[surrogate 16:10:24.363] OP_WRITE frame: status 7, tx 0x00000040, len 6: 00 00 07 E0 09 04
+[surrogate 16:10:24.404] OP_READ frame: status 0, rx 0x00000201, ts 1176328184, len 6: 00 00 07 E0 09 04 (indication, not delivered)
+[surrogate 16:10:29.965] OP_WRITE frame: status 7, tx 0x00000040, len 6: 00 00 07 E0 09 04
+[surrogate 16:10:29.981] OP_READ frame: status 0, rx 0x00000201, ts 1181925090, len 6: 00 00 07 E0 09 04 (indication, not delivered)
+[surrogate 16:10:35.532] OP_WRITE frame: status 7, tx 0x00000040, len 6: 00 00 07 E0 09 04
+[surrogate 16:10:35.573] OP_READ frame: status 0, rx 0x00000201, ts 1187498767, len 6: 00 00 07 E0 09 04 (indication, not delivered)
+[surrogate 16:10:41.123] OP_WRITE frame: status 7, tx 0x00000040, len 6: 00 00 07 E0 09 04
+[surrogate 16:10:41.145] OP_READ frame: status 0, rx 0x00000201, ts 1193085816, len 6: 00 00 07 E0 09 04 (indication, not delivered)
+[surrogate 16:10:42.982] OP_STOP_FILTER: fid 1, status 0
+[surrogate 16:10:42.996] OP_DISCONNECT: vendor status 0, channel=1

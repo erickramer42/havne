@@ -149,3 +149,22 @@ no channels and no engine, and `mock://` sessions report no identity.
   count the item out as refused.
 - Per-vehicle profiles ([STATUS.md](../../STATUS.md), backlog) now have
   their key.
+
+## Appendix — one ECU's answers (2026-10-25)
+
+On the second vehicle session ([session sheet](../bench-sessions/2026-10-25-vehicle.md)), the engine ECU of the first
+session's car, in its default session, with the ignition on:
+
+- **Answered:** all four Service 09 items (VIN, calibration ID, CVN,
+  ECU name) and two DIDs, F188 (the manufacturer's ECU software
+  number) and F190 (the VIN).
+- **Refused** with `7F 22 31`: F187, F189, F18A, F18C, F191, F194 and
+  F195.
+- **Unanswered:** none while the ECU was awake. With the ignition off
+  all 13 went unanswered, and the line said so; after the ECU woke,
+  the re-ask settled them and a second line followed.
+- **Lengths:** the replies longer than one CAN frame (`49 02` 20
+  bytes, `49 04` 19, `49 0A` 23, `62 F1 88` and `62 F1 90` 27) arrived
+  whole. This ECU has one calibration ID.
+
+The items are named here, never their values.
