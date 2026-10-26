@@ -4,8 +4,9 @@
 //          gaps), and to 1280 × 650 (the wide arrangement fits without
 //          scrolling); gauges sweep once per session. test_qml
 //          (tests/qml/tst_dashboard.qml) covers each Tap's lookup and
-//          note, the gauges' imperial units, scales and zones, and the
-//          peaks cleared on a change of units; tst_linkhealth.qml the
+//          note, the gauges' imperial units, scales and zones, the
+//          peaks cleared on a change of units, and a peak held from
+//          inside a window (the replayed fixture); tst_linkhealth.qml the
 //          header's link state, found by objectName
 
 import QtQuick
@@ -27,13 +28,16 @@ Page {
     // One gauge input: the first of `names` the active profile provides.
     // The mock and obd2 sets share display names; a profile that names a
     // signal differently adds its name to the list. Unit and decimals are
-    // core's display strings. `note` explains an empty gauge instead of
+    // core's display strings. `high` and `low` are the last window's,
+    // for the gauges' holds. `note` explains an empty gauge instead of
     // showing a fake zero.
     component Tap: QtObject {
         required property var names
         readonly property SignalHub.Entry entry: hub.lookup(names)
         readonly property bool live: Bridge.connected && entry !== null && entry.hasValue
         readonly property real value: entry ? entry.value : 0
+        readonly property real high: entry ? entry.windowHigh : 0
+        readonly property real low: entry ? entry.windowLow : 0
         readonly property bool stale: live && entry.ageMs > Theme.staleMs
         readonly property string unit: entry ? entry.unit : ""
         readonly property int decimals: entry ? entry.decimals : 0
@@ -194,7 +198,8 @@ Page {
                     count: root.compact ? 11 : 15
                     ledSpacing: root.compact ? 6 : 10
                     label: qsTr("Shift lights")
-                    value: rpm.value; hasValue: rpm.live; stale: rpm.stale
+                    value: rpm.value; windowHigh: rpm.high; windowLow: rpm.low
+                    hasValue: rpm.live; stale: rpm.stale
                     from: 4500; to: 6500
                 }
             }
@@ -217,7 +222,8 @@ Page {
                         caption: qsTr("×1000 r/min")
                         unit: rpm.unit || qsTr("RPM")
                         decimals: rpm.decimals
-                        value: rpm.value; hasValue: rpm.live; stale: rpm.stale; note: rpm.note
+                        value: rpm.value; windowHigh: rpm.high; windowLow: rpm.low
+                        hasValue: rpm.live; stale: rpm.stale; note: rpm.note
                         from: 0; to: 8000
                         majorStep: 1000; minorStep: 250; labelDivisor: 1000
                         // Danger from the shift point (6800), so the red
@@ -237,7 +243,8 @@ Page {
                         caption: speed.unit || root.shownUnit("km/h")
                         unit: speed.unit || root.shownUnit("km/h")
                         decimals: speed.decimals
-                        value: speed.value; hasValue: speed.live; stale: speed.stale; note: speed.note
+                        value: speed.value; windowHigh: speed.high; windowLow: speed.low
+                        hasValue: speed.live; stale: speed.stale; note: speed.note
                         // Round ends in either system: 260 km/h, 160 mph
                         from: 0; to: Bridge.unitSystem === 0 ? 260 : 160
                         majorStep: 20; minorStep: 10
@@ -264,7 +271,8 @@ Page {
                             label: qsTr("Coolant")
                             unit: coolant.unit || root.shownUnit(root.degC)
                             decimals: coolant.decimals
-                            value: coolant.value; hasValue: coolant.live; stale: coolant.stale
+                            value: coolant.value; windowHigh: coolant.high; windowLow: coolant.low
+                            hasValue: coolant.live; stale: coolant.stale
                             note: coolant.note
                             // From 0 °C, so a cold engine at ambient reads on
                             // the scale instead of pinning at its start
@@ -283,7 +291,8 @@ Page {
                             label: qsTr("Oil temp")
                             unit: oil.unit || root.shownUnit(root.degC)
                             decimals: oil.decimals
-                            value: oil.value; hasValue: oil.live; stale: oil.stale
+                            value: oil.value; windowHigh: oil.high; windowLow: oil.low
+                            hasValue: oil.live; stale: oil.stale
                             note: oil.note
                             // From 0 °C, like coolant
                             from: root.shown(root.degC, 0); to: root.shown(root.degC, 160)
@@ -302,7 +311,8 @@ Page {
                             description: qsTr("Intake air temperature")
                             unit: iat.unit || root.shownUnit(root.degC)
                             decimals: iat.decimals
-                            value: iat.value; hasValue: iat.live; stale: iat.stale; note: iat.note
+                            value: iat.value; windowHigh: iat.high; windowLow: iat.low
+                            hasValue: iat.live; stale: iat.stale; note: iat.note
                             from: root.shown(root.degC, 0); to: root.shown(root.degC, 120)
                             warnFrom: root.shown(root.degC, 55)
                             dangerFrom: root.shown(root.degC, 70)
@@ -318,7 +328,8 @@ Page {
                             description: qsTr("Mass air flow")
                             unit: maf.unit || root.shownUnit("g/s")
                             decimals: maf.decimals
-                            value: maf.value; hasValue: maf.live; stale: maf.stale; note: maf.note
+                            value: maf.value; windowHigh: maf.high; windowLow: maf.low
+                            hasValue: maf.live; stale: maf.stale; note: maf.note
                             from: 0; to: root.shown("g/s", 300)
                             accent: Theme.info
                         }
@@ -343,7 +354,8 @@ Page {
                         label: qsTr("Throttle")
                         unit: throttle.unit || "%"
                         decimals: throttle.decimals
-                        value: throttle.value; hasValue: throttle.live; stale: throttle.stale
+                        value: throttle.value; windowHigh: throttle.high; windowLow: throttle.low
+                        hasValue: throttle.live; stale: throttle.stale
                         note: throttle.note
                         accent: Theme.success
                     }
@@ -358,7 +370,8 @@ Page {
                         label: qsTr("Engine load")
                         unit: load.unit || "%"
                         decimals: load.decimals
-                        value: load.value; hasValue: load.live; stale: load.stale; note: load.note
+                        value: load.value; windowHigh: load.high; windowLow: load.low
+                        hasValue: load.live; stale: load.stale; note: load.note
                     }
                 }
             }

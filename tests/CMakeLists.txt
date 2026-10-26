@@ -179,9 +179,11 @@ if(NOT QTTUNE_BUILD_CORE_ONLY)
         qttune_uiplugin
         Qt6::QuickTest
     )
-    # Run with no -input, it runs every file in this directory
+    # Run with no -input, it runs every file in this directory. The
+    # engine-start fixture feeds the Dashboard's peak hold (ADR-0023)
     target_compile_definitions(test_qml PRIVATE
         QUICK_TEST_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/qml"
+        ECUIO_REPLAY_FIXTURES="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/replay"
     )
 
     # Windows: deployed like the app, into a directory of its own (the

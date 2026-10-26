@@ -4,12 +4,14 @@
 //          signal each gauge reads and the note it shows with no
 //          session, before the first value, with a value, and when the
 //          profile lacks the signal (?profile=raw); imperial units on the
-//          gauges, their scales and zones, and the peaks cleared on a
-//          change of units.
+//          gauges, their scales and zones, the peaks cleared on a
+//          change of units, and a peak held from inside a window (the
+//          engine-start fixture replayed).
 
 import QtQuick
 import QtTest
 import QtTune
+import QtTuneTest
 
 TestCase {
     id: testCase
@@ -181,6 +183,21 @@ TestCase {
         Bridge.unitSystem = 0
         compare(speedo.unit, "km/h")
         compare(coolant.to, 130)
+    }
+
+    // The engine start replayed at 100x, so each 100 ms window covers
+    // 10 s of the recording: the tach holds the recording's peak, the
+    // bench sheet's 1,261, though its window doesn't end on it
+    function test_peakHoldKeepsAPeakInsideAWindow() {
+        const page = createTemporaryObject(pageComponent, testCase)
+        const tach = gauges(page)["Engine speed"]
+        connect("replay://" + Harness.replayFixtures
+                + "/2026-10-25-engine-start?profile=obd2&speed=100")
+        tryVerify(() => Math.abs(tach.peakValue - 1261.25) < 0.01, 20000,
+                  "the tach holds the recording's peak")
+        wait(500)   // through the replay's end
+        fuzzyCompare(tach.peakValue, 1261.25, 0.01, "nothing past the peak")
+        verify(tach.lowValue < tach.peakValue)
     }
 
     // From a session that fed every gauge to one whose profile has none

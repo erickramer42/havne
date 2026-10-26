@@ -146,9 +146,15 @@ public:
         TextRole,       /* a text signal's latest value: TEXT shows the
                          * bytes as ASCII, HEX as hex pairs. "" for a
                          * numeric signal. Notified per batch. */
-        IsTextRole      /* the def's kind is a text kind: LiveView shows
+        IsTextRole,     /* the def's kind is a text kind: LiveView shows
                          * TextRole and never plots the row. Fixed per
                          * signal set. */
+        WindowHighRole, /* the last window's highest and lowest value,
+                         * displayed like ValueRole: the Dashboard's peak
+                         * and low hold read them, so a peak that isn't
+                         * a window's newest value still counts.
+                         * Notified with ValueRole. */
+        WindowLowRole
     };
 
     int rowCount(const QModelIndex& parent = {}) const override;
@@ -156,9 +162,9 @@ public:
     QHash<int, QByteArray> roleNames() const override;
     void setSignalSet(const ecuio_signal_set_t* set);
     // The bridge's form: each signal's window. The row shows the newest
-    // value; the history takes the distinct points among the lowest,
-    // highest and newest, in time order, so a peak inside a window
-    // stays on the chart at its own time.
+    // value, and the window's highest and lowest beside it; the history
+    // takes the distinct points among the three, in time order, so a
+    // peak inside a window stays on the chart at its own time.
     // Every row updates, subscribed or not: a subscription only chooses
     // what chartData() plots, and the Dashboard reads every signal.
     void updateWindow(const std::vector<WindowValue>& window);
@@ -217,6 +223,8 @@ private:
         char unit[16];
         uint8_t decimals = 0;
         double value = 0.0;
+        double windowHigh = 0.0;  // the last window's highest and lowest
+        double windowLow = 0.0;
         QString text;             // a text row's latest value
         bool isText = false;      // the def's kind is TEXT or HEX
         // Whether the strip chart plots this signal. Values and history

@@ -1,6 +1,7 @@
 // File/layer: app/qml/GaugeBase.qml | Qt6 Quick, UI layer
 // Testing: manual smoke via DashboardPage under mock://demo — needles
-//          ease between batches, sweep once per session, peaks reset
+//          ease between batches, sweep once per session, peaks reset;
+//          test_qml (tst_dashboard.qml) the held peak of a replay
 
 import QtQuick
 
@@ -11,6 +12,10 @@ Item {
     id: base
 
     property real value: 0
+    // The batch's highest and lowest, which the holds take: a batch
+    // covers a 100 ms window, and `value` is only its newest
+    property real windowHigh: value
+    property real windowLow: value
     property bool hasValue: false   // false: parks at `from`, readout "—"
     property bool stale: false      // dims readouts (LiveView's 3 s rule)
     property real from: 0
@@ -77,12 +82,13 @@ Item {
     }
 
     // Only fresh samples count toward the holds
-    onValueChanged: track()
+    onWindowHighChanged: track()
+    onWindowLowChanged: track()
     onHasValueChanged: track()
     function track() {
         if (!hasValue || stale) return
-        if (isNaN(peakValue) || value > peakValue) peakValue = value
-        if (isNaN(lowValue) || value < lowValue) lowValue = value
+        if (isNaN(peakValue) || windowHigh > peakValue) peakValue = windowHigh
+        if (isNaN(lowValue) || windowLow < lowValue) lowValue = windowLow
     }
 
     Accessible.role: Accessible.Indicator

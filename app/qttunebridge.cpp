@@ -218,6 +218,8 @@ QVariant SignalListModel::data(const QModelIndex& index, int role) const
         case DecimalsRole: return static_cast<int>(shown(e, e.value).decimal_places);
         case TextRole: return e.text;
         case IsTextRole: return e.isText;
+        case WindowHighRole: return shown(e, e.windowHigh).value;
+        case WindowLowRole: return shown(e, e.windowLow).value;
         default: return QVariant();
     }
 }
@@ -234,7 +236,9 @@ QHash<int, QByteArray> SignalListModel::roleNames() const
         {AgeMsRole, "ageMs"},
         {DecimalsRole, "decimals"},
         {TextRole, "text"},
-        {IsTextRole, "isText"}
+        {IsTextRole, "isText"},
+        {WindowHighRole, "windowHigh"},
+        {WindowLowRole, "windowLow"}
     };
 }
 
@@ -317,6 +321,8 @@ void SignalListModel::updateWindow(const std::vector<WindowValue>& window)
         if (row < 0) continue;
         Entry& e = m_entries[static_cast<size_t>(row)];
         e.value = w.last;
+        e.windowHigh = w.max;
+        e.windowLow = w.min;
         e.arrivedMs = arrived;
         pushWindow(e, w);
         widenRows(row, firstRow, lastRow);
@@ -326,7 +332,8 @@ void SignalListModel::updateWindow(const std::vector<WindowValue>& window)
         // bind opacity to ageMs; a QML-side clock stamped on value
         // changes would dim steady values that are still arriving.
         emit dataChanged(index(firstRow), index(lastRow),
-                         {ValueRole, HasValueRole, AgeMsRole});
+                         {ValueRole, WindowHighRole, WindowLowRole, HasValueRole,
+                          AgeMsRole});
         // One emission per batch — the strip chart's sole repaint trigger.
         emit valuesUpdated();
     }
@@ -377,7 +384,7 @@ void SignalListModel::setUnitSystem(uint32_t units)
     m_units = units;
     if (m_entries.empty()) return;
     emit dataChanged(index(0), index(static_cast<int>(m_entries.size()) - 1),
-                     {ValueRole, UnitRole, DecimalsRole});
+                     {ValueRole, WindowHighRole, WindowLowRole, UnitRole, DecimalsRole});
     emit valuesUpdated();   // the chart redraws its history in the new units
 }
 

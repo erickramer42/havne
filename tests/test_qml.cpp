@@ -40,8 +40,12 @@ class Harness : public QObject
     // The fake vendor DLL for a j2534:// URI; empty where there is none
     // (off Windows)
     Q_PROPERTY(QString fakeDllPath READ fakeDllPath CONSTANT)
+    // The directory of the scrubbed recordings replay:// plays
+    Q_PROPERTY(QString replayFixtures READ replayFixtures CONSTANT)
 
 public:
+    QString replayFixtures() const { return QStringLiteral(ECUIO_REPLAY_FIXTURES); }
+
     QString fakeDllPath() const
     {
 #ifdef FAKE_J2534_DLL_PATH

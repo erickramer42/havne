@@ -18,6 +18,8 @@ Instantiator {
         required property string name
         required property string unit       // as displayed, from core
         required property double value
+        required property double windowHigh  // the last window's highest
+        required property double windowLow   // and lowest
         required property int decimals      // core's decimal_places
         required property bool hasValue
         required property double ageMs   // -1 = never arrived

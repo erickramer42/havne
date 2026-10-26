@@ -620,8 +620,9 @@ TEST(BridgeTest, AWindowShowsItsNewestAndChartsItsEnvelope)
     /* Three frames' values inside one coalesce window, as core's worker
      * hands them to onValues, at 1, 2 and 3 ms of session time: 20, then
      * a peak of 30, then 10. The row shows the newest, numeric and text
-     * alike; the chart gets the window's highest and lowest at their own
-     * times, the peak included (ADR-0005's appendix). The mock's own
+     * alike, and the window's highest and lowest beside it; the chart
+     * gets those at their own times, the peak included (ADR-0005's
+     * appendix). The mock's own
      * frames (0x0C0) match neither def. */
     static ecuio_signal_def_t defs[2] = {};
     defs[0] = {};
@@ -671,6 +672,11 @@ TEST(BridgeTest, AWindowShowsItsNewestAndChartsItsEnvelope)
     ASSERT_EQ(model->rowCount(), 2);
     EXPECT_EQ(model->data(model->index(0, 0), SignalListModel::ValueRole).toDouble(), 10.0)
         << "the newest";
+    EXPECT_EQ(model->data(model->index(0, 0), SignalListModel::WindowHighRole).toDouble(), 30.0)
+        << "the Dashboard's peak hold sees the window's highest";
+    EXPECT_EQ(model->data(model->index(0, 0), SignalListModel::WindowLowRole).toDouble(), 10.0);
+    EXPECT_EQ(model->roleNames().value(SignalListModel::WindowHighRole), "windowHigh");
+    EXPECT_EQ(model->roleNames().value(SignalListModel::WindowLowRole), "windowLow");
     EXPECT_EQ(model->data(model->index(1, 0), SignalListModel::TextRole).toString(),
               QStringLiteral("0A"));
     const QVariantList chart = model->chartData();
