@@ -13,363 +13,114 @@ Safety, regulatory and warranty caveats are in
 
 ## Where things stand
 
-**Current phase: v0.3.x.** v0.3.1 is released, the first with a
-Windows download; v0.3.0 was tagged 2026-10-22.
-The HARNESS tier is complete, including transport adoption (ADR-0012);
-the BENCH tier has covered a real adapter on a quiet bus; and in the
-first read-only vehicle session
-(2026-10-22, [session sheet](docs/bench-sessions/2026-10-22-vehicle.md))
-the engine ECU answered the Mode-01 requests with replies that decode
-to plausible values. A second session on the same car (2026-10-25,
-[session sheet](docs/bench-sessions/2026-10-25-vehicle.md)) ran the
-request engine, the probe, identification and `uds-generic` there for
-the first time. Since the tag: the link-health tests run on both
-backends against a fake modeled on the VX, a failed connect says why
-([ADR-0018](docs/adr/0018-connect-failure-reporting.md)), a session
-says what it runs on ([ADR-0019](docs/adr/0019-session-info.md)),
-J2534 frames carry session time, the QML pages and the signal decoder
-have tests of their own (Qt Quick Test, libFuzzer), requests follow
-the ECU's replies instead of a fixed slot
-([ADR-0015](docs/adr/0015-request-engine.md)), the probe drops
-what each ECU says it doesn't support, a frame carries a whole
-ISO 15765 message, `uds-generic` reads and scans the DIDs a URI
-names ([ADR-0020](docs/adr/0020-uds-generic.md)), every session
-asks its ECU who it is
-([ADR-0021](docs/adr/0021-vehicle-identification.md)), Settings
-composes the URI from a preset, a profile row and a DID field, and a
-recording plays back through `replay://`
-([ADR-0023](docs/adr/0023-replay-transport.md)). Next is the plan in
-[After v0.3.0](#after-v030).
+**Current phase: v0.3.x.** v0.3.1, the first release with a Windows
+download, is out; what has changed since is in
+[CHANGELOG.md](CHANGELOG.md#unreleased). The J2534 stack is verified
+end to end against a fake vendor DLL, in-proc and through the x86
+surrogate. One real adapter, the OBDX Pro VX, has run on a quiet bench
+bus and in two read-only sessions on one car
+([2026-10-22](docs/bench-sessions/2026-10-22-vehicle.md),
+[2026-10-25](docs/bench-sessions/2026-10-25-vehicle.md)): the engine
+ECU answered, the values decoded and tracked the cluster, and the
+second session ran the request engine, the probe, identification and
+`uds-generic` there. Next is the plan in [After v0.3.0](#after-v030).
 
 - **Works:**
-  - The mock transport drives the live frame log, LiveView and the
-    strip chart with a scripted drive cycle: a cold start, 2nd- and
-    3rd-gear pulls onto the fuel-cut limiter, a highway cruise, then a
-    quarter-mile run off a wheelspin launch. Only the first loop runs
-    cold; later loops carry the heat over.
-  - J2534 runs end to end against the fake vendor DLL, both in-proc
-    and through the x86 surrogate. That includes write/ioctl/filter
-    relay on both backends and transport adoption: filters, the Mode-01
-    request loop, and frame identity via `?filter=`/`?txid=`/`?poll=`
-    (ADR-0012).
-  - A live vehicle, read-only, through the OBDX Pro VX and the x86
-    surrogate (2026-10-22,
-    [session sheet](docs/bench-sessions/2026-10-22-vehicle.md)): the `obd2`
-    rotation, `?poll=` and the supported-PID bitmaps were answered by
-    the engine ECU on `0x7E8`, and the decoded values tracked the
-    cluster through a cold start and at idle.
-  - The surrogate child is single-threaded and reads travel over the
-    pipe ([ADR-0014](docs/adr/0014-single-threaded-surrogate.md)):
-    vendor calls are serialized by construction, and the vendor's
-    read status reaches the transport on both backends (timeout, empty
-    and hard failure are told apart).
-  - Profile selection ([ADR-0013](docs/adr/0013-protocol-profiles.md),
-    slices 1–3): a string-keyed registry selects the session's signal
-    set. `mock://` defaults to the mock set, `j2534://` defaults to
-    `obd2`, and `?profile=<name>` overrides either. Unknown names are
-    rejected at session_create, before any transport attach or DLL
-    load. The bridge decodes the session's active set. The `obd2` set's
-    defs give the transport its Service 01 requests, and the set
-    declares its CAN channel (7E0/7E8), so the transport derives the
-    receive filter and request target from the profile: a bare
-    `j2534://` URI starts and streams with no `?filter=` required.
-    `?filter=` and `?txid=` override the derived channel, and `?poll=`
-    swaps the rotation for one PID under any profile.
-  - Requests ([ADR-0015](docs/adr/0015-request-engine.md)): a def's mux
-    key names the reply it reads, and so the request (`41 <PID>` asks
-    for `01 <PID>`, `62 <DID>` for `22 <DID>`), so one set can mix
-    Service 01 and 0x22, and nothing but reads (0x01, 0x09, 0x22) is
-    ever sent. Each channel has one request out at a time. The next
-    goes out when the reply is in, positive or negative ("response
-    pending" waits up to 5 s), or after a 100 ms wait, and no sooner
-    than 20 ms after the last; every mode drains what has arrived.
-    Against the fake that's about 30 requests a second, where the fixed
-    slot sent 10; on the car (2026-10-25), about 26.
-  - The PID-support probe (ADR-0015 §4): before its rotation, each
-    ECU's supported-PID bitmaps are read, and a request leaves the
-    rotation only when the ECU says it isn't supported (a clear bit, or
-    a negative reply that can't change in the session), never on
-    silence. A connect made with the ignition off reads them once the
-    ECU answers. The activity log names each ECU, what it supports and
-    what was dropped. `?probe=0` sends the set as written. On the car
-    (2026-10-25) it walked six bitmaps and dropped `0x5C` alone.
-  - Signal definitions
-    ([ADR-0016](docs/adr/0016-signal-definition-layout.md)): each def
-    states its value kind (unsigned, signed or
-    binary32 float) and its byte order, and decodes in `double` with
-    16-bit lengths; mux keys run to 3 bytes. A set carries a layout
-    version and zeroed reserved room, and a refused registration
-    names the failing check and the def or channel it failed on.
-  - Discovery finds the real installed drivers, and the Settings page
-    can pick one and connect.
-  - Connect and disconnect keep the slow vendor calls off the GUI
-    thread. A teardown runs on its own thread: a wedged adapter's
-    (about 6 s at most) shows "Disconnecting…" on every connection
-    surface, and no connect starts until it ends, because the adapter
-    may refuse a second open until its close returns.
-  - A connect explains itself. A failed one returns a code for its
-    cause and says why in words, with the vendor's
-    `PassThruGetLastError` text
-    ([ADR-0018](docs/adr/0018-connect-failure-reporting.md)). A
-    successful one logs a "Session:" line: the backend and the DLL's
-    architecture, protocol and baud, the profile and its channels, and
-    the adapter's battery voltage and firmware, DLL and API versions
-    ([ADR-0019](docs/adr/0019-session-info.md)).
-  - Link health: the J2534 worker tells a quiet bus, a dead adapter
-    and failing requests apart
-    ([docs/j2534.md](docs/j2534.md#session-lifecycle)), the bridge logs
-    transitions to
-    the Settings activity log, and the header pill, LiveView, the Home
-    status card, the Dashboard header and the Settings connection label
-    all show the state. On hardware, ok and quiet showed on the
-    vehicle, quiet through an ignition cycle and back, and "Requests
-    failing" on the VX with no vehicle (all 2026-10-22). The red fault
-    state hasn't been seen under the current rules: no vendor read has
-    failed.
-  - Dashboard: analog, ring, digital and bar gauges plus shift lights,
-    fed by name through `SignalHub` so one layout serves both the mock
-    and `obd2` profiles. Gauges show peak hold, dim stale values, and
-    say "not in profile" instead of showing zero (PR #12).
-  - Surrogate diagnostics: client and child write one session log,
-    both stamped `HH:MM:SS.mmm`, so a GUI launch keeps the whole story
-    without a stderr redirect; a second concurrent session gets its own
-    log (`995519b`, PR #11), and each spawn keeps the log it replaces,
-    the newest 50. With `ECUIO_SUR_LOG_FRAMES=1`, set at launch or by
-    recording, the child also logs every request and reply verbatim,
-    so a bench or vehicle session records its payloads without
-    screenshots.
-  - Session recording
-    ([ADR-0017](docs/adr/0017-session-recording.md)): with Record
-    sessions ticked in Settings (off by default), each connect writes
-    a folder under `Documents/QtTune/recordings` holding every frame
-    the bridge receives (`frames.csv`, host and vendor time side by
-    side), every decoded value (`signals.csv`) and the activity lines
-    (`events.log`).
-  - Replay ([ADR-0023](docs/adr/0023-replay-transport.md)):
-    `replay://<recording>` plays a recording's `frames.csv` back through
-    the frame API on every platform, at its own pace or up to 100×
-    faster, so a field session can be decoded again at the desk.
-- **Not yet:**
-  - Real-hardware coverage beyond one adapter and one vehicle. Every
-    hardware session so far ran the OBDX Pro VX through the surrogate:
-    quiet-bus BENCH sessions on 2026-10-16, 2026-10-20, 2026-10-22 and
-    2026-10-25
-    ([2026-10-16](docs/bench-sessions/2026-10-16.md),
-    [2026-10-20](docs/bench-sessions/2026-10-20.md),
-    [2026-10-22](docs/bench-sessions/2026-10-22.md),
-    [2026-10-25](docs/bench-sessions/2026-10-25-bench.md), a laptop),
-    and two vehicle sessions on one car. Untested on hardware: 29-bit
-    addressing, more than one ECU answering, and the in-proc backend. The VT, and the VX,
-    refuse to open with status 34 when their adapter is absent. The
-    run sheets are
-    [bench-runsheet.md](docs/bench-sessions/bench-runsheet.md) and
-    [vehicle-runsheet.md](docs/bench-sessions/vehicle-runsheet.md).
-  - **Tests:** 413 ctest cases (Windows, Visual Studio 18 build
-    tools, both trees rebuilt, 2026-10-26), the QML suites
-    among them, plus the cross-arch subset (75/75). All passed except
-    the env-gated cross-arch skip. Every first-party target builds with
-    compiler warnings on, at 0 on MSVC. CI was green on all nine jobs on
-    PR #17 (`ce8284f`, merged as `1145d11`), the simulator smoke
-    included, and on every push run since, the latest at `1ab2dd1`
-    (read from the GitHub API on 2026-10-23). That covers ctest on
-    Windows, macOS and Linux, core under ASan and UBSan, 60 s of each
-    libFuzzer harness ([fuzz/README.md](fuzz/README.md)), the Android
-    and iOS device cross-builds, and the simulator smoke. The smoke runs
-    on pull requests and on request, not on every push, because it
-    roughly doubles CI time. The cross-arch routing case skips unless
-    its environment variables are set. J2534 suites carry a 30 s
-    per-test timeout, so a hang fails bounded instead of wedging the
-    runner. Tiers, suites and gaps are in
-    [docs/testing.md](docs/testing.md).
-
-## Architecture
-
-```
-+--------------------------------+
-| Qt Quick UI (QML)              |  Home · Dash · Live · Log · Settings
-|                                |  sidebar at >= 720 px, TabBar below
-+---------------+----------------+
-                | QtTuneBridge: worker -> GUI marshaling, 100 ms coalescing
-+---------------v----------------+
-| ecuio-core (C++17, C ABI)      |  no Qt (CI-enforced)
-|  sessions + frame callbacks    |
-|  signal decode                 |
-|  transports: mock | replay     |  selected by URI
-|              | j2534           |
-|  j2534 loader: in-proc | x86   |  routed by the DLL's PE machine type
-+---------------+----------------+
-                | named pipe (control + batched reads, ADR-0014)
-                | + kill-on-close job object
-+---------------v----------------+
-| ecuio-j2534-surrogate (x86)    |  hosts 32-bit vendor DLLs
-+--------------------------------+
-```
-
-Three rules ([ADR-0001](docs/adr/0001-qt-free-core-c-abi.md)):
-
-1. **Core never links Qt.**
-2. **UI layers receive final display values, never raw frames.**
-3. **The C ABI is the FFI boundary.** That means opaque handles, flat
-   functions, POD structs and append-only enums, every name carrying
-   the core's prefix (`ecuio_`, `ECUIO_`).
-
-## Data path
-
-```
-mock worker (50 ms tick)  -or-  replay worker (a recording's frames.csv,
-      |                         paced by its session time)
-      |                   -or-  J2534 worker (request engine + ReadMsgs;
-      |                         in-proc, or batched over the surrogate's pipe)
-      | ecuio_frame_t
-      v
-core: snapshot dispatch to registered callbacks ............ ADR-0002
-      | QtTuneBridge::onFrame (worker thread): copy, in-flight gate, post
-      v
-GUI thread: handleFrameInternal ............................ ADR-0003
-      |- SessionRecorder (opt-in): frames.csv, signals.csv,
-      |    events.log .......................................... ADR-0017
-      |- FrameListModel (a 10k ring, newest or oldest first) -> LogPage
-      '- decode, gated on ID + mux key -> staging buffer ... ADR-0004
-             | 100 ms timer
-             v
-         SignalListModel::updateValues() -> LiveViewPage
-             table + strip chart (pulled via chartData()) .. ADR-0005
-```
-
-Contracts along this path:
-
-- **Backpressure** bounds frames that are queued but not yet handled
-  (1000), never the cumulative total. The stream never freezes.
-- **LiveView** updates at 10 Hz whatever the frame rate. The mock runs
-  at 20 frames/s, and J2534 may run far faster.
-- **Strip-chart samples are batch-stamped:** one timestamp per 100 ms
-  window.
-- **J2534 teardown:** the worker is joined before any call that
-  unmaps the vendor DLL. See [docs/j2534.md](docs/j2534.md#session-lifecycle).
+  - **Mock transport,** on every platform: a scripted drive cycle (a
+    cold start, two pulls onto the fuel-cut limiter, a cruise, a quarter
+    mile off launch control) whose later loops run warm.
+  - **Replay** ([ADR-0023](docs/adr/0023-replay-transport.md)), on every
+    platform: `replay://<recording>` plays a recording's `frames.csv`
+    back at its own pace or up to 100× faster.
+  - **J2534 on Windows:** discovery of installed drivers, x64 drivers
+    in-proc and 32-bit ones in a single-threaded surrogate process
+    ([ADR-0008](docs/adr/0008-x86-surrogate-host.md),
+    [ADR-0014](docs/adr/0014-single-threaded-surrogate.md)), and
+    channels and filters derived from the profile, so a bare
+    `j2534://` streams ([ADR-0012](docs/adr/0012-j2534-transport-adoption.md)).
+  - **Requests follow the replies**
+    ([ADR-0015](docs/adr/0015-request-engine.md)): one out per channel,
+    the next when the reply is in, a 100 ms wait and a 20 ms floor;
+    reads only (Service 01, 09 and 0x22). About 26 a second on the car.
+  - **The PID-support probe** (ADR-0015 §4) drops only what an ECU says
+    it lacks, never on silence; on the car it walked six bitmaps and
+    dropped `01 5C`.
+  - **Vehicle identification** at connect
+    ([ADR-0021](docs/adr/0021-vehicle-identification.md)), and
+    **`uds-generic`**, polling or scanning the DIDs a URI names
+    ([ADR-0020](docs/adr/0020-uds-generic.md)).
+  - **Profiles** chosen by the URI
+    ([ADR-0013](docs/adr/0013-protocol-profiles.md)): `mock`, `raw`,
+    `obd2` and `uds-generic`. Each signal def states its kind and byte
+    order ([ADR-0016](docs/adr/0016-signal-definition-layout.md)).
+  - **Connects explain themselves:** a failure says why, with the
+    vendor's own text
+    ([ADR-0018](docs/adr/0018-connect-failure-reporting.md)); a success
+    logs a "Session:" line with the adapter's battery and versions
+    ([ADR-0019](docs/adr/0019-session-info.md)). Connect and disconnect
+    run off the GUI thread.
+  - **Link health** tells a quiet bus, failing requests and a dead
+    adapter apart on every connection surface
+    ([docs/j2534.md](docs/j2534.md#session-lifecycle)); all four states
+    have shown on the VX.
+  - **The UI:** Dashboard gauges with peak hold and stale dimming,
+    Live's table and strip chart, the frame log, and Settings composing
+    the URI; zoom and metric or imperial units, kept between runs
+    ([ADR-0022](docs/adr/0022-display-units.md)).
+  - **Evidence for field sessions:** opt-in recording of every frame,
+    decoded value and activity line per connect
+    ([ADR-0017](docs/adr/0017-session-recording.md)), and a surrogate
+    session log of every vendor call, with every request and reply
+    while recording.
+- **Not yet:** real hardware beyond one adapter and one car: 29-bit
+  addressing, more than one ECU answering, a real x64 driver in-proc,
+  and other vendors ([BENCH prep](docs/bench-sessions/bench-prep.md),
+  [testing.md](docs/testing.md#gaps-not-verified)). The run sheets are
+  [bench-runsheet.md](docs/bench-sessions/bench-runsheet.md) and
+  [vehicle-runsheet.md](docs/bench-sessions/vehicle-runsheet.md).
+- **Tests:** 413 ctest cases on Windows (both trees rebuilt,
+  2026-10-26), all passing but the env-gated cross-arch skip, plus the
+  cross-arch subset (75/75); 0 MSVC warnings. CI runs ctest on Windows,
+  macOS and Linux, core under ASan and UBSan, 60 s of each libFuzzer
+  harness ([fuzz/README.md](fuzz/README.md)), the Android and iOS
+  cross-builds, and on pull requests an iOS Simulator smoke; it was
+  last read green on all nine jobs at `1ab2dd1` (2026-10-23). Tiers,
+  suites and gaps are in [docs/testing.md](docs/testing.md).
 
 ## Components
 
 | Component | State | Reference |
 |---|---|---|
-| Core sessions and callbacks | Stable. The frame ABI and close/destroy split changed in v0.3.0. | [ADR-0002](docs/adr/0002-callback-pair-identity-snapshot-dispatch.md), [ADR-0006](docs/adr/0006-frame-abi-v0.3.md) |
-| Signal decode | Linear scaling in `double`. Each def states its value kind (unsigned, signed, binary32 float) and byte order (Intel at any bit offset, big-endian in whole bytes), and is gated on message ID plus a mux key of up to 3 bytes. Two signal sets, `mock` and `obd2`, chosen by profile. The validator accepts exactly the defs the decoder decodes, with named return codes; the profile registry runs it at registration and reports the failing check and element. | [ADR-0004](docs/adr/0004-signal-decoding-model.md), [ADR-0013](docs/adr/0013-protocol-profiles.md), [ADR-0016](docs/adr/0016-signal-definition-layout.md) |
-| Mock transport | A scripted ~2-minute drive cycle on a vehicle model (`core/src/mock_drive_cycle.h`): a cold start with the first vehicle's fast idle, a 2nd-gear WOT pull from ~1550 rpm onto the 7000 rpm fuel-cut limiter with a 5 s hold, a longer 3rd-gear pull with the same hold, a 100 km/h cruise in 4th, then a quarter mile off launch control with wheelspin in 1st (~13.7 s, ~172 km/h trap). Only the first loop starts cold; each later one starts from where the last ended, so the second warms through the thermostat, from the third the coolant runs 88–102 °C (the fan cutting in on the quarter mile), and by the fifth the oil has built to 108–117 °C under the repeated pulls. The set carries lambda beside the eight shared quantities. Every tick keeps the signals consistent with each other (rpm with wheel speed, MAF with load, lambda with fuel cut) and round-trips through the mock set, in `CoreTest.MockDriveCycle*`. | — |
-| Bridge and models | Frame log with sort toggle; coalesced signal model with a 120-sample history per signal; device discovery for the picker; link-health polling. QML reaches it as the `Bridge` singleton. | [ADR-0003](docs/adr/0003-backpressure-bounds-in-flight-frames.md), [ADR-0005](docs/adr/0005-coalesced-signal-updates.md) |
-| QML pages | Home, Dashboard (gauges and shift lights through `SignalHub`), Live (table, and a strip chart with each trace's value at its end), Log (with Pause), Settings (presets, the device picker, a profile row and a DID field composing an editable URI, and the one place a session is connected). The Dashboard rearranges to fit a short, wide window, short pages scroll with their scroll bar shown, and the whole UI zooms (Ctrl + / Ctrl − / Ctrl 0, or Settings' Display row), kept between runs. Names, units and decimal places come from core, and Settings' Units row shows every page in metric or imperial, converted in core and kept between runs ([ADR-0022](docs/adr/0022-display-units.md)). `Theme` holds the palette, fonts, page margin and the link-state color and label functions; `PageHeader` gives the pages one title row. `test_qml` runs the pages and the app's window against a real bridge, offscreen: the link-health surfaces, Live's swatches and dashes, `SignalHub` and the gauges' notes. | [docs/architecture.md](docs/architecture.md#the-ui-layer) |
-| J2534 | HARNESS-verified, same-arch and cross-arch, including transport adoption (ADR-0012), profile-derived channels (ADR-0013) and the request engine (ADR-0015). BENCH: one adapter, quiet bus. Vehicle: one car, read-only, through the surrogate, two sessions, the second with the request engine, the probe, identification and `uds-generic`. | [docs/j2534.md](docs/j2534.md) |
-| Replay transport | UNIT-tested, against a scrubbed real-bus fixture too. Plays a recording's `frames.csv` paced and stamped by its session time; passive, default profile `raw`. | [ADR-0023](docs/adr/0023-replay-transport.md) |
-
-## v0.3.0 checklist
-
-- [x] **Phase 1, signals layer:** POD ABI, scale/offset decode, bit
-      extraction, sign extension, validator
-- [x] **Phase 1b, mock signal emission:** tick-driven simulation, with
-      a round-trip test on real worker frames
-- [x] **Phase 2, coalesced LiveView and strip chart**
-- [x] **Phase 3, J2534 HARNESS tier:**
-  - discovery, loader and session transport
-  - URI parameters and the device picker
-  - frame ABI redesign and the message-ID gate
-  - x86 surrogate host and PE routing
-  - v04.04 types verification
-  - write/ioctl/filter relay
-- [x] **Phase 3 Part 5, transport adoption:**
-      `?filter=`/`?txid=`/`?poll=`, header strip and ID stamping, and
-      filter teardown ([ADR-0012](docs/adr/0012-j2534-transport-adoption.md)).
-- [x] **Phase 3 close, BENCH tier and the first vehicle:**
-  - [x] first real vendor DLL load and connect: the OBDX Pro VX through
-    the surrogate, formal session 2026-10-16
-    ([session sheet](docs/bench-sessions/2026-10-16.md)). No x64
-    J2534 adapter is on hand, so the in-proc backend has run only
-    against the fake ([testing.md](docs/testing.md#gaps-not-verified))
-  - [x] **Surrogate vendor-call serialization:** one vendor call at a
-        time, one disconnect per channel, and no unload under a running
-        call; this cleared the BENCH gate (2026-10-17)
-  - [x] **Single-threaded surrogate, reads over the pipe**
-        ([ADR-0014](docs/adr/0014-single-threaded-surrogate.md),
-        2026-10-19). Read batches that arrive with `ERR_TIMEOUT` are
-        delivered.
-  - [x] work through [BENCH prep](#bench-prep): the quiet-bus items
-    on the VX (2026-10-16, 2026-10-20, 2026-10-22) and the talking-bus
-    items on the first vehicle (2026-10-22); items 1–3 and 5–9
-    settled for the VX, item 4 unexercised (the vehicle is 11-bit)
-  - [x] first live, read-only vehicle session, 2026-10-22
-    ([session sheet](docs/bench-sessions/2026-10-22-vehicle.md))
-- [x] **Protocol profiles** (ADR-0013), slices 1–3. The PID-support
-      probe and `uds-generic` came after the tag
-      ([after v0.3.0](#after-v030)):
-  - [x] slice 1: profile registry, `raw` profile, `?profile=`
-        override, bridge reads the session's active signal set
-  - [x] slice 2: the `obd2` signal set and the multi-PID scheduler
-        replacing the single-poll loop (paired with the read-rate
-        cap — one workstream per ADR-0013)
-  - [x] slice 3: channel declarations (§4) — profiles declare rx/tx
-        CAN channel pairs; the transport registers one flow-control
-        filter per channel and routes scheduler requests per PID; a
-        bare `j2534://` URI under `obd2` starts with no `?filter=`
-- [x] **Signal definition layout**
-      ([ADR-0016](docs/adr/0016-signal-definition-layout.md)): value
-      kinds and explicit byte order, `double` decode, 3-byte mux keys,
-      a set layout version, zero-checked reserved room, and validation
-      that names the failing element
-- [x] **Tagged v0.3.0** (2026-10-22), with the version string at
-      0.3.0, once the first vehicle session succeeded: an ECU answered
-      the Mode-01 requests and the replies decoded to plausible values
-      (the [vehicle run sheet](docs/bench-sessions/vehicle-runsheet.md)'s
-      first two goals; [session sheet](docs/bench-sessions/2026-10-22-vehicle.md))
+| Core sessions and callbacks | Stable: snapshot dispatch, the 4,120-byte frame, close and destroy apart | [ADR-0002](docs/adr/0002-callback-pair-identity-snapshot-dispatch.md), [ADR-0006](docs/adr/0006-frame-abi-v0.3.md) |
+| Signal decode | Linear scaling in `double` of unsigned, signed and binary32 fields in either byte order, gated on message ID and a mux key of up to 3 bytes; text and hex fields; a validator that accepts exactly what the decoder decodes | [ADR-0004](docs/adr/0004-signal-decoding-model.md), [ADR-0016](docs/adr/0016-signal-definition-layout.md) |
+| Mock transport | A ~2-minute drive cycle on a vehicle model (`core/src/mock_drive_cycle.h`) whose readings stay consistent with each other, every tick round-tripped through the mock set (`CoreTest.MockDriveCycle*`) | — |
+| Replay transport | UNIT-tested, against a scrubbed real-bus fixture too; passive, default profile `raw` | [ADR-0023](docs/adr/0023-replay-transport.md) |
+| Bridge and models | Worker → GUI marshaling with bounded backpressure, 100 ms coalescing, a 10k-row frame log, a 120-sample history per signal, link-health polling, recording; QML reaches it as the `Bridge` singleton | [ADR-0003](docs/adr/0003-backpressure-bounds-in-flight-frames.md), [ADR-0005](docs/adr/0005-coalesced-signal-updates.md) |
+| QML pages | Home, Dashboard, Live, Log, Settings; `test_qml` runs them against a real bridge, offscreen | [docs/architecture.md](docs/architecture.md#the-ui-layer) |
+| J2534 | HARNESS-verified on both backends and cross-arch. BENCH: one adapter, quiet bus. Vehicle: one car, read-only, through the surrogate, two sessions | [docs/j2534.md](docs/j2534.md) |
 
 ## After v0.3.0
 
-Scheduled for v0.3.x, in this order. The vehicle session's
-measurements feed the first item.
+The v0.3.x plan, in order. Items 1–4 shipped in v0.3.1 and item 5 is
+in [Unreleased](CHANGELOG.md#unreleased); each ADR holds the design
+and the car's measurements.
 
 1. **Request engine** ([ADR-0015](docs/adr/0015-request-engine.md)):
-   built, HARNESS-tested on both backends, and run on a car
-   (2026-10-25): about 26 Service 01 requests a second, replies 19 ms
-   after their request (median), all but one in 7,196 in before the
-   next request, so the 20 ms floor stands.
-2. **The `obd2` PID-support probe** (ADR-0015 §4, and its appendix
-   of 2026-10-23 on the probe as built): built, HARNESS-tested, and
-   run on a car (2026-10-25): it walked six bitmaps, found 53
-   supported PIDs and dropped only `01 5C`, and a connect made with
-   the ignition off dropped nothing and walked once the ECU woke.
+   built; on the car, about 26 requests a second, replies 19 ms after
+   their request (median).
+2. **The `obd2` PID-support probe** (ADR-0015 §4): built; on the car,
+   six bitmaps, 53 PIDs, only `01 5C` dropped.
 3. **`uds-generic`** ([ADR-0020](docs/adr/0020-uds-generic.md)):
-   built, HARNESS-tested. `?profile=uds-generic&did=…` names the DIDs
-   (`[<ecu>:]<DID>[-<DID>][:<type>]`, several in a list); single DIDs
-   are polled, a range is scanned once beside the rotation and the
-   DIDs the ECU answers join it; the mock answers them too, so the app
-   shows the profile with no hardware. Settings composes the URI from a
-   preset or a device, a profile row (default, `raw`, `uds-generic`)
-   and a DID field, so none of it needs typing; the choices last while
-   the app runs (persisted preferences, below, will keep them). On a
-   car (2026-10-25) the scan of `F180-F1FF` settled all 128 DIDs in
-   14.3 s, 2 found and 126 refused with `7F 22 31`; this ECU answers
-   Service 0x22 in about 80 ms.
-4. **Vehicle identification** ([ADR-0021](docs/adr/0021-vehicle-identification.md)):
-   built, HARNESS-tested. Every requesting channel asks its ECU the
-   VIN, calibration IDs and identification DIDs once at connect,
-   taking turns with the rotation, and the activity log (so a
-   recording's `events.log`) gets one line per ECU. `?identify=0`
-   turns it off. On a car (2026-10-25) every item settled: the four
-   Service 09 items and two DIDs answered, seven DIDs refused, and
-   the replies longer than one CAN frame (up to 27 bytes) arrived
-   whole.
-   Items 1–4 ship in **v0.3.1**, the first release with a Windows
-   download ([release notes](docs/releases/v0.3.1.md)): a zip built
-   and checked by `.github/workflows/release.yml` that runs without
-   Qt or Visual Studio, with a signed build provenance
-   ([development.md, "Releases"](docs/development.md#releases)).
-5. **Phase 4, record-replay transport** ([ADR-0023](docs/adr/0023-replay-transport.md)):
-   built and UNIT-tested, against a real-bus fixture too. `replay://<recording>` plays a
-   recording's `frames.csv` ([ADR-0017](docs/adr/0017-session-recording.md))
-   back through the frame API on every platform, paced and stamped
-   by the recording's session time (`?speed=` 0.1 to 100 or `max`,
-   `?loop=1`). A recorded mock session round-trips through the
-   recorder and replay value for value, and the second vehicle
-   session's engine start, scrubbed of its identification replies,
-   is a committed fixture whose replay decodes the sheet's values.
-   The bridge accepts frames from the moment a session starts, so a
-   replay's first frame isn't lost to the connect.
+   built; on the car, the `F180-F1FF` scan settled in 14.3 s.
+4. **Vehicle identification**
+   ([ADR-0021](docs/adr/0021-vehicle-identification.md)): built; on
+   the car, every item settled.
+5. **Phase 4, record-replay transport**
+   ([ADR-0023](docs/adr/0023-replay-transport.md)): built and
+   UNIT-tested, against a real-bus fixture too.
+6. **Next: decoding on the worker thread**, with an ADR of its own
+   first, led by Known Issue #10 ([Performance](#performance), in the
+   backlog); replay faster than real time is its load test.
 
 ## BENCH prep
 

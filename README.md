@@ -12,7 +12,7 @@ simulated vehicle lets it run with no hardware at all.
 > [!WARNING]
 > **Experimental software.** Tested read-only on one vehicle with one adapter — see [DISCLAIMER.md](DISCLAIMER.md).
 >
-> QtTune runs end-to-end against the simulator and a fake J2534 vendor driver. Through a real adapter it has read live data from one vehicle: in a read-only session on 2026-10-22 the engine ECU answered its Mode-01 requests and the values decoded and tracked the instrument cluster ([session sheet](docs/bench-sessions/2026-10-22-vehicle.md)). Other vehicles and adapters are untested; [STATUS.md](STATUS.md) tracks what is and isn't verified.
+> QtTune runs end-to-end against the simulator and a fake J2534 vendor driver. Through a real adapter it has read live data from one vehicle: in read-only sessions on 2026-10-22 and 2026-10-25 the engine ECU answered its requests and the values decoded and tracked the instrument cluster ([session sheet](docs/bench-sessions/2026-10-25-vehicle.md)). Other vehicles and adapters are untested; [STATUS.md](STATUS.md) tracks what is and isn't verified.
 
 ![The QtTune Dashboard through a quarter mile on the warmed-up simulated vehicle: launch control holds the engine near 4,000 rpm at the line, the tires spin off it, three upshifts at 6,800 rpm refill the shift lights, and speed climbs to about 107 mph at the line while coolant rises from 194 to 216 °F, where the fan cuts in, and the oil from 225 to 239 °F, before the driver lifts](docs/images/dashboard.gif)
 
@@ -170,7 +170,8 @@ screen, is [docs/architecture.md](docs/architecture.md).
 | v0.4.0 | Security access discovery, flash capability | Planned |
 | v0.5.0+ | Manufacturer plugin modules | Planned |
 
-The phase checklist and known issues are in [STATUS.md](STATUS.md).
+The plan and known issues are in [STATUS.md](STATUS.md); what each
+release changed is in [CHANGELOG.md](CHANGELOG.md).
 
 ## Build
 
@@ -245,7 +246,7 @@ build and test a change.
 | Document | What's in it |
 |---|---|
 | [docs/architecture.md](docs/architecture.md) | Start here: how the parts fit together and why, plus a map of the other docs |
-| [STATUS.md](STATUS.md) | Current state, phase checklist, known issues, detailed roadmap |
+| [STATUS.md](STATUS.md) | Current state, the plan, known issues, roadmap and backlog |
 | [docs/development.md](docs/development.md) | Build configurations, running tests, CI, troubleshooting |
 | [docs/testing.md](docs/testing.md) | Test tiers, suites, what is and isn't verified |
 | [docs/j2534.md](docs/j2534.md) | How the J2534 transport works |
