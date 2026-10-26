@@ -64,19 +64,35 @@ uint64_t step_us(const row& prev, const row& cur)
     return cur.host_us >= prev.host_us ? cur.host_us - prev.host_us : 0;
 }
 
-FILE* open_utf8(const std::string& path)
-{
+/* The recording's path in the form fopen takes, converted once in attach,
+ * so the worker opens it again without allocating */
+struct native_path {
 #ifdef _WIN32
-    std::vector<wchar_t> wide(path.size() + 1);
-    if (!ecuio_utf8_to_wide(path.c_str(), wide.data(), wide.size())) {
-        return nullptr;
-    }
-    FILE* f = nullptr;
-    return _wfopen_s(&f, wide.data(), L"rb") == 0 ? f : nullptr;
+    std::vector<wchar_t> wide;
 #else
-    return std::fopen(path.c_str(), "rb");
+    std::string narrow;
 #endif
-}
+    /* False when the UTF-8 doesn't convert; may throw bad_alloc */
+    bool set(const std::string& utf8)
+    {
+#ifdef _WIN32
+        wide.assign(utf8.size() + 1, L'\0');
+        return ecuio_utf8_to_wide(utf8.c_str(), wide.data(), wide.size());
+#else
+        narrow = utf8;
+        return true;
+#endif
+    }
+    FILE* open() const
+    {
+#ifdef _WIN32
+        FILE* f = nullptr;
+        return _wfopen_s(&f, wide.data(), L"rb") == 0 ? f : nullptr;
+#else
+        return std::fopen(narrow.c_str(), "rb");
+#endif
+    }
+};
 
 /* One line without its ending (LF or CRLF). False at the end of the file;
  * *too_long when the line doesn't fit kLineMax. */
@@ -205,21 +221,21 @@ bool read_header(FILE* f, std::vector<char>& buf)
 }
 
 /* The whole file, checked: every row parses. Gives the row count and the
- * session time of the last row. */
-ecuio_status_t check_file(const std::string& path, uint64_t* rows,
+ * session time of the last row. Reads through the worker's own line buffer
+ * and frame, which attach has made. */
+ecuio_status_t check_file(const native_path& path, std::vector<char>& buf,
+                          ecuio_frame_t* frame, uint64_t* rows,
                           uint64_t* span_us)
 {
-    FILE* f = open_utf8(path);
+    FILE* f = path.open();
     if (f == nullptr) {
         ecuio_detail_set("couldn't open the recording's frames.csv");
         return ECUIO_ERR_LOAD_FAILED;
     }
-    std::vector<char> buf(kLineMax + 2);
     if (!read_header(f, buf)) {
         std::fclose(f);
         return ECUIO_ERR_LOAD_FAILED;
     }
-    std::unique_ptr<ecuio_frame_t> frame(new ecuio_frame_t());
     row prev, cur;
     uint64_t n = 0, span = 0, line_no = 1;
     bool too_long = false;
@@ -228,7 +244,7 @@ ecuio_status_t check_file(const std::string& path, uint64_t* rows,
         const char* why = nullptr;
         if (too_long) {
             why = "the line is longer than any frame's row";
-        } else if (!parse_row(buf.data(), &cur, frame.get(), &why)) {
+        } else if (!parse_row(buf.data(), &cur, frame, &why)) {
             /* why is set */
         }
         if (why != nullptr) {
@@ -298,9 +314,13 @@ bool parse_speed(const ecuio_uri::param& p, uint32_t* milli)
 
 } // namespace
 
+/* Everything the worker uses is made in attach, so the worker allocates
+ * nothing: an exception can't end its thread */
 struct ecuio_replay_transport {
     ecuio_session_t* session = nullptr;
-    std::string path;                     /* the frames.csv, UTF-8 */
+    native_path path;                     /* the frames.csv */
+    std::vector<char> line;               /* kLineMax + 2 */
+    std::unique_ptr<ecuio_frame_t> frame; /* 4 KB, off the worker's stack */
     uint32_t speed_milli = kSpeedDefault; /* 0 = max */
     bool loop = false;
     std::thread worker;
@@ -316,11 +336,11 @@ namespace {
 void replay_worker(ecuio_replay_transport* t)
 {
     const auto start = std::chrono::steady_clock::now();
-    std::vector<char> buf(kLineMax + 2);
-    std::unique_ptr<ecuio_frame_t> frame(new ecuio_frame_t());
+    std::vector<char>& buf = t->line;
+    ecuio_frame_t* frame = t->frame.get();
     uint64_t base_us = 0; /* session time at the start of this pass */
     for (;;) {
-        FILE* f = open_utf8(t->path);
+        FILE* f = t->path.open();
         if (f == nullptr || !read_header(f, buf)) {
             if (f != nullptr)
                 std::fclose(f);
@@ -332,7 +352,7 @@ void replay_worker(ecuio_replay_transport* t)
         while (read_line(f, buf, &too_long)) {
             const char* why = nullptr;
             *frame = ecuio_frame_t{};
-            if (too_long || !parse_row(buf.data(), &cur, frame.get(), &why)) {
+            if (too_long || !parse_row(buf.data(), &cur, frame, &why)) {
                 std::fclose(f);
                 return; /* checked at attach; changed since */
             }
@@ -355,7 +375,7 @@ void replay_worker(ecuio_replay_transport* t)
                     return;
                 }
             }
-            ecuio_session_dispatch_callbacks(t->session, frame.get());
+            ecuio_session_dispatch_callbacks(t->session, frame);
         }
         std::fclose(f);
         if (!t->loop) {
@@ -437,45 +457,55 @@ ecuio_status_t ecuio_replay_transport_attach(ecuio_session_t* session,
 
     const char* body = uri + std::strlen("replay://");
     const char* q = std::strchr(body, '?');
-    std::string path(body, q != nullptr ? static_cast<size_t>(q - body)
-                                        : std::strlen(body));
-    if (path.empty()) {
+    const size_t body_len =
+        q != nullptr ? static_cast<size_t>(q - body) : std::strlen(body);
+    if (body_len == 0) {
         ecuio_detail_set(
             "replay:// needs a recording's folder or its frames.csv");
         return ECUIO_ERR_BAD_URI;
     }
-    if (!is_absolute(path)) {
-        ecuio_detail_set("the recording's path must be absolute, like "
-#ifdef _WIN32
-                         "C:\\path\\to\\recording"
-#else
-                         "/path/to/recording"
-#endif
-        );
-        return ECUIO_ERR_BAD_URI;
-    }
-    /* A path ending in .csv is the file; anything else is the folder */
-    const bool csv =
-        path.size() >= 4 && (path.compare(path.size() - 4, 4, ".csv") == 0 ||
-                             path.compare(path.size() - 4, 4, ".CSV") == 0);
-    if (!csv) {
-        while (path.size() > 1 && (path.back() == '/' || path.back() == '\\')) {
-            path.pop_back();
-        }
-        path += "/frames.csv";
-    }
 
+    /* Every allocation from here is inside the try: a bad_alloc becomes
+     * OUT_OF_MEMORY, never an exception out of ecuio_session_create */
     uint64_t rows = 0, span_us = 0;
-    const ecuio_status_t checked = check_file(path, &rows, &span_us);
-    if (checked != ECUIO_OK) {
-        return checked;
-    }
-
     try {
+        std::string path(body, body_len);
+        if (!is_absolute(path)) {
+            ecuio_detail_set("the recording's path must be absolute, like "
+#ifdef _WIN32
+                             "C:\\path\\to\\recording"
+#else
+                             "/path/to/recording"
+#endif
+            );
+            return ECUIO_ERR_BAD_URI;
+        }
+        /* A path ending in .csv is the file; anything else is the folder */
+        const bool csv = path.size() >= 4 &&
+                         (path.compare(path.size() - 4, 4, ".csv") == 0 ||
+                          path.compare(path.size() - 4, 4, ".CSV") == 0);
+        if (!csv) {
+            while (path.size() > 1 &&
+                   (path.back() == '/' || path.back() == '\\')) {
+                path.pop_back();
+            }
+            path += "/frames.csv";
+        }
+
         std::unique_ptr<ecuio_replay_transport> impl(
             new ecuio_replay_transport());
+        if (!impl->path.set(path)) {
+            ecuio_detail_set("couldn't open the recording's frames.csv");
+            return ECUIO_ERR_LOAD_FAILED;
+        }
+        impl->line.resize(kLineMax + 2);
+        impl->frame.reset(new ecuio_frame_t());
+        const ecuio_status_t checked = check_file(
+            impl->path, impl->line, impl->frame.get(), &rows, &span_us);
+        if (checked != ECUIO_OK) {
+            return checked;
+        }
         impl->session = session;
-        impl->path = std::move(path);
         impl->speed_milli = speed;
         impl->loop = loop;
         session->transport =
