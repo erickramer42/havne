@@ -6,7 +6,8 @@
 //          ECU lines, session recording (BridgeTest.Recording*), display
 //          units on the rows, the chart and not the recording
 //          (BridgeTest.UnitSystem*), the URI label
-//          (BridgeTest.UriLabelCutsADirectLoadPathToItsFileName). QML
+//          (BridgeTest.UriLabelCutsADirectLoadPathToItsFileName), the
+//          connect's trim (BridgeTest.ConnectTrimsSpacesAroundTheUri). QML
 //          rendering: manual smoke.
 
 #include "qttunebridge.h"
@@ -626,8 +627,11 @@ void QtTuneBridge::applyConnectedState(ecuio_session_t* session, const QString& 
     }
 }
 
-QString QtTuneBridge::connectSession(const QString& uri)
+QString QtTuneBridge::connectSession(const QString& typed)
 {
+    // Spaces around a pasted URI are the field's, not the URI's: core
+    // matches the scheme at the first character
+    const QString uri = typed.trimmed();
     if (m_disconnecting) {
         return QStringLiteral("Disconnect in progress");
     }
@@ -649,8 +653,9 @@ QString QtTuneBridge::connectSession(const QString& uri)
     return {};
 }
 
-void QtTuneBridge::connectSessionAsync(const QString& uri)
+void QtTuneBridge::connectSessionAsync(const QString& typed)
 {
+    const QString uri = typed.trimmed(); // as connectSession does
     if (m_connected.load(std::memory_order_acquire) || m_connecting
         || m_disconnecting) {
         return;   // one attempt at a time, none during a teardown; the

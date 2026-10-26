@@ -300,6 +300,7 @@ public:
     void setRecordingsRootForTesting(const QString& root) { m_recordingsRoot = root; }
 
 public slots:
+    // Both connects take the URI as typed and trim the spaces around it
     Q_INVOKABLE QString connectSession(const QString& uri);
     // Async disconnect: the GUI-facing state (connected, link state,
     // URI) drops at once, and the teardown (joining the worker, the

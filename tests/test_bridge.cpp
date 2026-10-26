@@ -1497,6 +1497,25 @@ TEST(BridgeTest, CurrentUriTracksConnectState)
     EXPECT_FALSE(bridge.connected());
 }
 
+TEST(BridgeTest, ConnectTrimsSpacesAroundTheUri)
+{
+    // A URI pasted with spaces around it connects, as the URI without
+    // them; core alone refuses it (the scheme is matched at the first
+    // character)
+    QtTuneBridge bridge;
+    ASSERT_TRUE(
+        bridge.connectSession(QStringLiteral("  mock://padded \t")).isEmpty());
+    EXPECT_TRUE(bridge.connected());
+    EXPECT_EQ(bridge.currentUri(), QStringLiteral("mock://padded"));
+    ASSERT_TRUE(disconnectAndWait(bridge));
+
+    bridge.connectSessionAsync(QStringLiteral(" mock://padded-async "));
+    ASSERT_TRUE(
+        spinUntil([&bridge]() { return bridge.connected(); }, 5000, 10));
+    EXPECT_EQ(bridge.currentUri(), QStringLiteral("mock://padded-async"));
+    ASSERT_TRUE(disconnectAndWait(bridge));
+}
+
 TEST(BridgeTest, UriLabelCutsADirectLoadPathToItsFileName)
 {
     const QString dots = QString(QChar(0x2026));
