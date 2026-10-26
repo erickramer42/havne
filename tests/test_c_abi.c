@@ -64,6 +64,11 @@ typedef char abi_identity_list_check[(offsetof(ecuio_channel_identity_t, list) =
 typedef char abi_display_size_check[(sizeof(ecuio_display_value_t) == 32) ? 1 : -1];
 typedef char abi_display_unit_check[(offsetof(ecuio_display_value_t, unit) == 8) ? 1 : -1];
 typedef char abi_display_decimals_check[(offsetof(ecuio_display_value_t, decimal_places) == 24) ? 1 : -1];
+typedef char abi_value_value_check[(offsetof(ecuio_value_t, value) == 8) ? 1 : -1];
+typedef char abi_value_text_check[(offsetof(ecuio_value_t, text) == 16) ? 1 : -1];
+typedef char abi_value_size_check[(sizeof(void*) != 8 || sizeof(ecuio_value_t) == 24) ? 1 : -1];
+typedef char abi_batch_values_check[(offsetof(ecuio_value_batch_t, values) == 24) ? 1 : -1];
+typedef char abi_batch_size_check[(sizeof(void*) != 8 || sizeof(ecuio_value_batch_t) == 32) ? 1 : -1];
 
 int main(void)
 {
@@ -102,6 +107,10 @@ int main(void)
         return 1;
     }
     if (ecuio_session_get_info(NULL, &info) != ECUIO_ERR_NULL_ARGUMENT) {
+        return 1;
+    }
+    if (ecuio_register_values_callback(NULL, NULL, NULL) != ECUIO_ERR_NULL_ARGUMENT ||
+        ecuio_unregister_values_callback(NULL, NULL, NULL) != ECUIO_ERR_NULL_ARGUMENT) {
         return 1;
     }
     if (ecuio_decode_text(NULL, NULL, 0, NULL, 0) != ECUIO_DECODE_ERR_NULL) {

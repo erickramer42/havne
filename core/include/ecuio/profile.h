@@ -1,5 +1,7 @@
 // File/layer: core/include/ecuio/profile.h | C ABI, public
-// Testing: UNIT (registry lookup/overwrite); session-level selection in test_core
+// Testing: UNIT (registry lookup/overwrite); session-level selection and
+//          the decoded values (CoreTest.Values*) in test_core; the value
+//          layouts in c_abi; BRIDGE (BridgeTest.BothDecodePathsAgreeOverTheFixture)
 
 #ifndef ECUIO_PROFILE_H
 #define ECUIO_PROFILE_H
@@ -83,6 +85,93 @@ ecuio_status_t ecuio_profile_lookup(const char* name,
  * the scheme default or ?profile=). NULL means "no decode" — the raw
  * profile. Written once at create, read-only afterwards. */
 const ecuio_signal_set_t* ecuio_session_signal_set(ecuio_session_t* session);
+
+/*
+ * Decoded values (ADR-0024).
+ *
+ * While a values callback is registered, the session decodes each frame
+ * against its set on the transport's worker, right after the frame
+ * callbacks have returned, and delivers what the frame decoded as one
+ * batch: every def it matches and decodes (ecuio_def_applies_to_frame,
+ * then ecuio_decode_signal or, for TEXT and HEX defs,
+ * ecuio_decode_text), in the set's order, stamped with the frame's
+ * session time. A def whose decode fails is left out; a frame with no
+ * value, or a raw session, delivers no batch. Nothing is decoded while
+ * no values callback is registered.
+ *
+ * The values callback keeps the frame callback's contract (core.h):
+ * it runs on the worker and must not block, must never call
+ * ecuio_session_close or ecuio_session_destroy, may register or
+ * unregister reentrantly, sees the list as it stood when the frame
+ * arrived (so after unregister returns, a dispatch under way may call
+ * it once more: keep user_data valid until ecuio_session_close
+ * returns), and is identified by the (callback, user_data) pair,
+ * deduplicated, with an idempotent unregister. Besides:
+ * - for each frame, every frame callback returns before any values
+ *   callback is called with that frame's batch;
+ * - the batch, its values and their text are valid only during the
+ *   call. Each text value has bytes of its own.
+ */
+
+/* One decoded value. The pointer is last, so every other field's
+ * offset is the same on 32- and 64-bit builds. */
+typedef struct ecuio_value {
+    uint16_t signal_id;    /* the def's id */
+    uint8_t  kind;         /* the def's ECUIO_VALUE_* */
+    uint8_t  flags;        /* 0; reserved */
+    uint32_t text_len;     /* TEXT and HEX: the bytes at text, the NUL
+                              not counted; 0 otherwise */
+    double   value;        /* the numeric kinds' value; 0 for text */
+    const char* text;      /* TEXT and HEX: NUL-terminated, valid during
+                              the call; NULL otherwise */
+} ecuio_value_t;
+
+/* What one frame decoded to */
+typedef struct ecuio_value_batch {
+    uint64_t timestamp_us;      /* the frame's session time */
+    uint32_t arbitration_id;    /* the frame's */
+    uint32_t count;             /* values[0..count), at least 1 */
+    uint32_t flags;             /* 0; reserved */
+    uint32_t reserved;
+    const ecuio_value_t* values;
+} ecuio_value_batch_t;
+
+#if defined(__cplusplus)
+static_assert(offsetof(ecuio_value_t, value) == 8, "value offset is ABI");
+static_assert(offsetof(ecuio_value_t, text) == 16, "text offset is ABI");
+static_assert(sizeof(void*) != 8 || sizeof(ecuio_value_t) == 24, "ecuio_value_t size is ABI");
+static_assert(offsetof(ecuio_value_batch_t, values) == 24, "batch values offset is ABI");
+static_assert(sizeof(void*) != 8 || sizeof(ecuio_value_batch_t) == 32, "ecuio_value_batch_t size is ABI");
+#elif defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
+_Static_assert(offsetof(ecuio_value_t, value) == 8, "value offset is ABI");
+_Static_assert(offsetof(ecuio_value_t, text) == 16, "text offset is ABI");
+_Static_assert(sizeof(void*) != 8 || sizeof(ecuio_value_t) == 24, "ecuio_value_t size is ABI");
+_Static_assert(offsetof(ecuio_value_batch_t, values) == 24, "batch values offset is ABI");
+_Static_assert(sizeof(void*) != 8 || sizeof(ecuio_value_batch_t) == 32, "ecuio_value_batch_t size is ABI");
+#endif
+
+/* Called from the transport's worker with one frame's values */
+typedef void (*ecuio_values_callback_t)(
+    const ecuio_value_batch_t* batch,
+    void* user_data
+);
+
+/* Register and unregister a values callback, as the frame callback's
+ * pair does (core.h): ECUIO_OK; ECUIO_ERR_NULL_ARGUMENT for a NULL
+ * session or callback (unregister: a NULL session);
+ * ECUIO_ERR_SESSION_CLOSED to register on a closed session;
+ * ECUIO_ERR_OUT_OF_MEMORY if the list can't grow. */
+ecuio_status_t ecuio_register_values_callback(
+    ecuio_session_t* session,
+    ecuio_values_callback_t callback,
+    void* user_data
+);
+
+ecuio_status_t ecuio_unregister_values_callback(
+    ecuio_session_t* session,
+    ecuio_values_callback_t callback,
+    void* user_data
+);
 
 #ifdef __cplusplus
 }

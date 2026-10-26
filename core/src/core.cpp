@@ -3,7 +3,9 @@
 //          profiles and every refusal), start, close and destroy,
 //          callbacks and their snapshot dispatch (every callback at any
 //          list length, the list as it stood, no allocation up to
-//          four), the error strings;
+//          four), the decoded values (CoreTest.Values*: the batch
+//          against direct decodes, a text slot each, the frame
+//          callbacks first), the error strings;
 //          HARNESS — the J2534 suites through create; test_c_abi links
 //          the public functions
 
@@ -18,6 +20,7 @@
 #include "error_detail.h"
 #include "ecuio/j2534_ptypes.h"   /* ecuio_pt_status_name; plain C, any OS */
 
+#include <algorithm>
 #include <atomic>
 #include <cstdarg>
 #include <cstdio>
@@ -75,6 +78,196 @@ namespace {
             }
             used += static_cast<size_t>(w);
         }
+    }
+
+    bool is_text(const ecuio_signal_def_t& def)
+    {
+        return def.kind == ECUIO_VALUE_TEXT || def.kind == ECUIO_VALUE_HEX;
+    }
+
+    /* The most text values one frame can decode to against set
+     * (ADR-0024 §4). On one message ID, every unkeyed text def matches
+     * every frame; of the keyed ones, one frame holds one key of each
+     * shape (offset and length), so each shape adds its largest group
+     * sharing one key. The answer is the largest such total over the
+     * IDs. Runs once, at create; throws bad_alloc, which create
+     * catches. */
+    uint32_t text_slots_for(const ecuio_signal_set_t* set)
+    {
+        struct text_key {
+            uint32_t message_id;
+            uint32_t shape;   /* 0 unkeyed; else offset << 8 | length */
+            uint32_t key;
+        };
+        std::vector<text_key> keys;
+        for (uint32_t i = 0; i < set->count; ++i) {
+            const ecuio_signal_def_t& d = set->defs[i];
+            if (!is_text(d)) {
+                continue;
+            }
+            const bool keyed = d.mux_length > 0;
+            keys.push_back(text_key{
+                d.message_id,
+                keyed ? (uint32_t{d.mux_offset} << 8 | d.mux_length) : 0u,
+                keyed ? d.mux_key : 0u});
+        }
+        std::sort(keys.begin(), keys.end(),
+                  [](const text_key& a, const text_key& b) {
+                      if (a.message_id != b.message_id)
+                          return a.message_id < b.message_id;
+                      if (a.shape != b.shape)
+                          return a.shape < b.shape;
+                      return a.key < b.key;
+                  });
+        uint32_t best = 0;
+        size_t i = 0;
+        while (i < keys.size()) {
+            const uint32_t id = keys[i].message_id;
+            uint32_t total = 0;
+            while (i < keys.size() && keys[i].message_id == id) {
+                const uint32_t shape = keys[i].shape;
+                uint32_t largest = 0;
+                while (i < keys.size() && keys[i].message_id == id &&
+                       keys[i].shape == shape) {
+                    uint32_t run = 0;
+                    const uint32_t key = keys[i].key;
+                    while (i < keys.size() && keys[i].message_id == id &&
+                           keys[i].shape == shape && keys[i].key == key) {
+                        ++run;
+                        ++i;
+                    }
+                    /* Unkeyed defs all match: their shape is one run */
+                    largest = std::max(largest, run);
+                }
+                total += largest;
+            }
+            best = std::max(best, total);
+        }
+        return best;
+    }
+
+    /* The list a dispatch calls (ADR-0002): copied under the callback
+     * mutex, called unlocked. It sits on the stack while the list fits,
+     * as the app's one callback does, so a frame costs the worker no
+     * allocation; a longer list is copied to the heap. */
+    template <typename Callback>
+    class snapshot_of {
+    public:
+        using entry = std::pair<Callback, void*>;
+
+        /* Copies list; the caller holds the mutex. False when the heap
+         * copy failed: the caller drops what it would have delivered,
+         * since a bad_alloc can't leave an extern "C" call on the
+         * worker. */
+        bool take(const std::vector<entry>& list)
+        {
+            count_ = list.size();
+            if (count_ <= kInline) {
+                for (size_t i = 0; i < count_; ++i) {
+                    inline_[i] = list[i];
+                }
+                return true;
+            }
+            try {
+                heap_ = list;
+            } catch (...) {
+                count_ = 0;
+                return false;
+            }
+            data_ = heap_.data();
+            return true;
+        }
+
+        size_t size() const { return count_; }
+        const entry& operator[](size_t i) const { return data_[i]; }
+
+    private:
+        static constexpr size_t kInline = 4;
+        entry inline_[kInline];
+        std::vector<entry> heap_;
+        const entry* data_ = inline_;
+        size_t count_ = 0;
+    };
+
+    /* Adds (callback, user_data) to list once; the caller holds the
+     * mutex */
+    template <typename Callback>
+    ecuio_status_t add_callback(std::vector<std::pair<Callback, void*>>& list,
+                                Callback callback, void* user_data)
+    {
+        for (const auto& entry : list) {
+            if (entry.first == callback && entry.second == user_data) {
+                return ECUIO_OK;
+            }
+        }
+        try {
+            list.emplace_back(callback, user_data);
+            return ECUIO_OK;
+        } catch (...) {
+            return ECUIO_ERR_OUT_OF_MEMORY;
+        }
+    }
+
+    /* Removes (callback, user_data) from list, if there; the caller
+     * holds the mutex */
+    template <typename Callback>
+    void remove_callback(std::vector<std::pair<Callback, void*>>& list,
+                         Callback callback, void* user_data)
+    {
+        for (auto it = list.begin(); it != list.end(); ++it) {
+            if (it->first == callback && it->second == user_data) {
+                list.erase(it);
+                return;
+            }
+        }
+    }
+
+    /* Decodes frame against the session's set into its buffers
+     * (ADR-0024 §4): the number of values, in the set's order. Each
+     * text value takes the next slot, from the first again each frame;
+     * create gave the session a slot for every text value a frame can
+     * decode to. */
+    uint32_t decode_values(ecuio_session_t* session,
+                           const ecuio_frame_t* frame)
+    {
+        const ecuio_signal_set_t* set = session->active_signal_set;
+        if (set == nullptr || set->defs == nullptr ||
+            session->values.size() < set->count) {
+            return 0;
+        }
+        const uint16_t len = (frame->data_length <= sizeof(frame->data))
+                                 ? frame->data_length
+                                 : static_cast<uint16_t>(sizeof(frame->data));
+        uint32_t n = 0;
+        uint32_t slot = 0;
+        for (uint32_t i = 0; i < set->count; ++i) {
+            const ecuio_signal_def_t& def = set->defs[i];
+            if (!ecuio_def_applies_to_frame(&def, frame)) {
+                continue;
+            }
+            ecuio_value_t v{};
+            v.signal_id = def.id;
+            v.kind = def.kind;
+            if (is_text(def)) {
+                if (slot >= session->text_slots) {
+                    continue;
+                }
+                char* out = session->text_scratch.data() +
+                            size_t{slot} * ECUIO_DECODE_TEXT_MAX;
+                if (ecuio_decode_text(&def, frame->data, len, out,
+                                      ECUIO_DECODE_TEXT_MAX) != ECUIO_DECODE_OK) {
+                    continue;
+                }
+                v.text = out;
+                v.text_len = static_cast<uint32_t>(strlen(out));
+                ++slot;
+            } else if (ecuio_decode_signal(&def, frame->data, len, &v.value) !=
+                       ECUIO_DECODE_OK) {
+                continue;
+            }
+            session->values[n++] = v;
+        }
+        return n;
     }
 } // namespace
 
@@ -389,6 +582,20 @@ ecuio_status_t ecuio_session_create(
      * and the worker both run after this store. */
     s->active_signal_set = profile_set;
 
+    /* The decode's buffers (ADR-0024 §4, §6), sized once: the set never
+     * changes after this */
+    if (profile_set != nullptr && profile_set->defs != nullptr &&
+        profile_set->count > 0) {
+        try {
+            s->values.resize(profile_set->count);
+            s->text_slots = text_slots_for(profile_set);
+            s->text_scratch.resize(size_t{s->text_slots} *
+                                   ECUIO_DECODE_TEXT_MAX);
+        } catch (...) {
+            return ECUIO_ERR_OUT_OF_MEMORY;
+        }
+    }
+
     ecuio_status_t status = ECUIO_ERR_NO_TRANSPORT;
 #ifdef _WIN32
     if (is_j2534) {
@@ -455,6 +662,7 @@ ecuio_status_t ecuio_session_close(ecuio_session_t* session)
     {
         std::lock_guard<std::mutex> lock(session->callback_mutex);
         session->callbacks.clear();
+        session->values_callbacks.clear();
     }
 
     return ECUIO_OK;
@@ -511,19 +719,7 @@ ecuio_status_t ecuio_register_frame_callback(
     }
 
     std::lock_guard<std::mutex> lock(session->callback_mutex);
-
-    for (const auto& entry : session->callbacks) {
-        if (entry.first == callback && entry.second == user_data) {
-            return ECUIO_OK;
-        }
-    }
-
-    try {
-        session->callbacks.emplace_back(callback, user_data);
-        return ECUIO_OK;
-    } catch (...) {
-        return ECUIO_ERR_OUT_OF_MEMORY;
-    }
+    return add_callback(session->callbacks, callback, user_data);
 }
 
 ecuio_status_t ecuio_unregister_frame_callback(
@@ -536,17 +732,37 @@ ecuio_status_t ecuio_unregister_frame_callback(
     }
 
     std::lock_guard<std::mutex> lock(session->callback_mutex);
+    remove_callback(session->callbacks, callback, user_data);
+    return ECUIO_OK;
+}
 
-    auto it = session->callbacks.begin();
-    while (it != session->callbacks.end()) {
-        if (it->first == callback && it->second == user_data) {
-            it = session->callbacks.erase(it);
-            break;
-        } else {
-            ++it;
-        }
+ecuio_status_t ecuio_register_values_callback(
+    ecuio_session_t* session,
+    ecuio_values_callback_t callback,
+    void* user_data)
+{
+    if (session == nullptr || callback == nullptr) {
+        return ECUIO_ERR_NULL_ARGUMENT;
+    }
+    if (session->closed.load()) {
+        return ECUIO_ERR_SESSION_CLOSED;
     }
 
+    std::lock_guard<std::mutex> lock(session->callback_mutex);
+    return add_callback(session->values_callbacks, callback, user_data);
+}
+
+ecuio_status_t ecuio_unregister_values_callback(
+    ecuio_session_t* session,
+    ecuio_values_callback_t callback,
+    void* user_data)
+{
+    if (session == nullptr) {
+        return ECUIO_ERR_NULL_ARGUMENT;
+    }
+
+    std::lock_guard<std::mutex> lock(session->callback_mutex);
+    remove_callback(session->values_callbacks, callback, user_data);
     return ECUIO_OK;
 }
 
@@ -561,36 +777,39 @@ void ecuio_session_dispatch_callbacks(
         return;
     }
 
-    /* The snapshot sits on the stack while the list fits, as the app's
-     * one callback does, so a frame costs the worker no allocation. A
-     * longer list is copied to the heap; if that copy fails the frame
-     * is dropped, since a bad_alloc can't leave an extern "C" call on
-     * the worker. */
-    using entry = std::pair<ecuio_frame_callback_t, void*>;
-    constexpr size_t kInline = 4;
-    entry inline_snapshot[kInline];
-    std::vector<entry> heap_snapshot;
-    const entry* snapshot = inline_snapshot;
-    size_t count = 0;
+    /* Both lists as they stand when the frame arrives */
+    snapshot_of<ecuio_frame_callback_t> frames;
+    snapshot_of<ecuio_values_callback_t> values;
+    bool frames_taken = false;
+    bool values_taken = false;
     {
         std::lock_guard<std::mutex> lock(session->callback_mutex);
-        count = session->callbacks.size();
-        if (count <= kInline) {
-            for (size_t i = 0; i < count; ++i) {
-                inline_snapshot[i] = session->callbacks[i];
-            }
-        } else {
-            try {
-                heap_snapshot = session->callbacks;
-            } catch (...) {
-                return;
-            }
-            snapshot = heap_snapshot.data();
+        frames_taken = frames.take(session->callbacks);
+        values_taken = values.take(session->values_callbacks);
+    }
+
+    if (frames_taken) {
+        for (size_t i = 0; i < frames.size(); ++i) {
+            frames[i].first(frame, frames[i].second);
         }
     }
 
-    for (size_t i = 0; i < count; ++i) {
-        snapshot[i].first(frame, snapshot[i].second);
+    /* Then the frame's values (ADR-0024), decoded only for a values
+     * callback */
+    if (!values_taken || values.size() == 0) {
+        return;
+    }
+    const uint32_t count = decode_values(session, frame);
+    if (count == 0) {
+        return;
+    }
+    ecuio_value_batch_t batch{};
+    batch.timestamp_us = frame->timestamp_us;
+    batch.arbitration_id = frame->arbitration_id;
+    batch.count = count;
+    batch.values = session->values.data();
+    for (size_t i = 0; i < values.size(); ++i) {
+        values[i].first(&batch, values[i].second);
     }
 }
 

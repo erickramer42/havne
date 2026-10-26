@@ -113,6 +113,11 @@ if(NOT QTTUNE_BUILD_CORE_ONLY)
         ${CMAKE_CURRENT_SOURCE_DIR}/../app
     )
 
+    # The engine-start fixture, which both decode paths read (ADR-0024)
+    target_compile_definitions(test_bridge PRIVATE
+        ECUIO_REPLAY_FIXTURES="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/replay"
+    )
+
     target_link_libraries(test_bridge PRIVATE
         ecuio-core
         Qt6::Core

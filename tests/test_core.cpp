@@ -2263,7 +2263,13 @@ struct WorkerNews {
     std::atomic<int> frames{0};
     std::atomic<unsigned long> at_from{0};
     std::atomic<unsigned long> at_to{0};
+    int batches = 0; /* values batches, counted on the worker */
 };
+
+void worker_news_values_cb(const ecuio_value_batch_t*, void* user_data)
+{
+    ++static_cast<WorkerNews*>(user_data)->batches;
+}
 
 void worker_news_cb(const ecuio_frame_t*, void* user_data)
 {
@@ -2279,11 +2285,11 @@ void worker_news_cb(const ecuio_frame_t*, void* user_data)
 
 /* Past start-up a worker's frames cost it no allocation, so none can
  * throw: the mock's ticks, and replay's rows and passes (the file
- * reopened each time round) */
+ * reopened each time round), each decoded for a values callback too */
 TEST(CoreTest, WorkersAllocateNothingPerFrame)
 {
     TempRecording rec(paced_rows(3));
-    const std::string replay = rec.uri("?speed=max&loop=1");
+    const std::string replay = rec.uri("?speed=max&loop=1&profile=obd2");
     struct Case {
         const char* uri;
         int to;
@@ -2297,12 +2303,16 @@ TEST(CoreTest, WorkersAllocateNothingPerFrame)
             << ecuio_last_error_detail();
         EXPECT_EQ(ecuio_register_frame_callback(session, worker_news_cb, &w),
                   ECUIO_OK);
+        EXPECT_EQ(
+            ecuio_register_values_callback(session, worker_news_values_cb, &w),
+            ECUIO_OK);
         EXPECT_EQ(ecuio_session_start(session), ECUIO_OK);
         const bool reached =
             wait_for([&] { return w.frames.load() >= c.to; }, 5000);
         EXPECT_EQ(ecuio_session_close(session), ECUIO_OK);
         ecuio_session_destroy(session);
         ASSERT_TRUE(reached) << w.frames.load() << " frames";
+        EXPECT_GT(w.batches, 0) << "the values path ran";
         EXPECT_EQ(w.at_to.load() - w.at_from.load(), 0u)
             << "operator new on the worker between frames " << WorkerNews::kFrom
             << " and " << c.to;
@@ -2803,4 +2813,531 @@ TEST(CoreTest, ReplayOfTheVehicleFixtureDecodesTheSheetsValues)
     EXPECT_EQ(cap.frames.back().timestamp_us, 297446075u)
         << "the recording's span, rebased";
     ecuio_session_destroy(session);
+}
+
+/* ---- Decoded values (ADR-0024) ------------------------------------- */
+
+namespace {
+
+/* One delivered value, copied out of its batch */
+struct SeenValue {
+    uint16_t id = 0;
+    uint8_t kind = 0;
+    double value = 0.0;
+    std::string text;
+    const char* text_at = nullptr; /* where the batch held it */
+    uint32_t text_len = 0;
+};
+
+struct SeenBatch {
+    uint64_t timestamp_us = 0;
+    uint32_t arbitration_id = 0;
+    std::vector<SeenValue> values;
+};
+
+/* Every batch a values callback received */
+struct ValuesCapture {
+    std::mutex mutex;
+    std::vector<SeenBatch> batches;
+    size_t count()
+    {
+        std::lock_guard<std::mutex> lock(mutex);
+        return batches.size();
+    }
+};
+
+void values_capture_cb(const ecuio_value_batch_t* batch, void* user_data)
+{
+    SeenBatch b;
+    b.timestamp_us = batch->timestamp_us;
+    b.arbitration_id = batch->arbitration_id;
+    for (uint32_t i = 0; i < batch->count; ++i) {
+        const ecuio_value_t& v = batch->values[i];
+        SeenValue s;
+        s.id = v.signal_id;
+        s.kind = v.kind;
+        s.value = v.value;
+        s.text_at = v.text;
+        s.text_len = v.text_len;
+        if (v.text != nullptr)
+            s.text = v.text;
+        b.values.push_back(s);
+    }
+    auto* c = static_cast<ValuesCapture*>(user_data);
+    std::lock_guard<std::mutex> lock(c->mutex);
+    c->batches.push_back(std::move(b));
+}
+
+void values_counting_cb(const ecuio_value_batch_t*, void* user_data)
+{
+    ++*static_cast<int*>(user_data);
+}
+
+ecuio_signal_def_t value_def(uint16_t id, uint8_t kind, uint32_t message_id)
+{
+    ecuio_signal_def_t d{};
+    d.id = id;
+    d.kind = kind;
+    d.message_id = message_id;
+    d.scale = 1.0;
+    std::snprintf(d.name, sizeof(d.name), "V%u", static_cast<unsigned>(id));
+    return d;
+}
+
+/* A text def reading byte_length bytes from start, keyed when key_len */
+ecuio_signal_def_t text_value_def(uint16_t id, uint8_t kind, uint8_t key_len,
+                                  uint32_t key, uint16_t start,
+                                  uint16_t byte_length)
+{
+    ecuio_signal_def_t d = value_def(id, kind, 0x123);
+    d.mux_length = key_len;
+    d.mux_key = key;
+    d.start_byte = start;
+    d.byte_length = byte_length;
+    return d;
+}
+
+ecuio_frame_t value_frame(uint32_t id, std::initializer_list<uint8_t> bytes,
+                          uint64_t timestamp_us = 0)
+{
+    ecuio_frame_t f{};
+    f.arbitration_id = id;
+    f.timestamp_us = timestamp_us;
+    for (uint8_t b : bytes)
+        f.data[f.data_length++] = b;
+    return f;
+}
+
+} // namespace
+
+/* A frame's batch holds every def it decodes, in the set's order, with
+ * the values ecuio_decode_signal gives and the frame's time and ID; a
+ * def that matches but can't decode (past the payload) is left out; a
+ * frame that decodes nothing, and a raw session, deliver no batch */
+TEST(CoreTest, ValuesCallbackDeliversEachFramesDecodeWithItsTime)
+{
+    static ecuio_signal_def_t defs[4];
+    defs[0] = value_def(1, ECUIO_VALUE_UINT, 0x123);
+    defs[0].bit_length = 8;
+    defs[1] = value_def(2, ECUIO_VALUE_UINT, 0x456); /* another ID */
+    defs[1].bit_length = 8;
+    defs[2] = value_def(3, ECUIO_VALUE_UINT, 0x123);
+    defs[2].byte_order = ECUIO_BYTE_ORDER_BE;
+    defs[2].start_byte = 1;
+    defs[2].bit_length = 16;
+    defs[2].scale = 0.5;
+    defs[3] = value_def(4, ECUIO_VALUE_UINT, 0x123); /* past 3 bytes */
+    defs[3].start_byte = 5;
+    defs[3].bit_length = 8;
+    static ecuio_signal_set_t set{};
+    set.layout_version = ECUIO_SIGNAL_SET_LAYOUT;
+    set.count = 4;
+    set.defs = defs;
+    ASSERT_EQ(ecuio_profile_register("test-values", &set, nullptr), ECUIO_OK);
+
+    ecuio_session_t* session = nullptr;
+    ASSERT_EQ(ecuio_session_create("mock://v?profile=test-values", &session),
+              ECUIO_OK);
+    ValuesCapture cap;
+    EXPECT_EQ(ecuio_register_values_callback(session, values_capture_cb, &cap),
+              ECUIO_OK);
+    const ecuio_frame_t f = value_frame(0x123, {10, 0x01, 0x00}, 777);
+    ecuio_session_dispatch_callbacks(session, &f);
+    const ecuio_frame_t other = value_frame(0x999, {1, 2, 3});
+    ecuio_session_dispatch_callbacks(session, &other);
+
+    ASSERT_EQ(cap.batches.size(), 1u)
+        << "no batch for a frame that decodes nothing";
+    const SeenBatch& b = cap.batches[0];
+    EXPECT_EQ(b.timestamp_us, 777u);
+    EXPECT_EQ(b.arbitration_id, 0x123u);
+    ASSERT_EQ(b.values.size(), 2u);
+    for (size_t i = 0; i < 2; ++i) {
+        const ecuio_signal_def_t& d = defs[i == 0 ? 0 : 2];
+        double expected = 0.0;
+        ASSERT_EQ(ecuio_decode_signal(&d, f.data, f.data_length, &expected),
+                  ECUIO_DECODE_OK);
+        EXPECT_EQ(b.values[i].id, d.id);
+        EXPECT_EQ(b.values[i].kind, ECUIO_VALUE_UINT);
+        EXPECT_EQ(b.values[i].value, expected);
+        EXPECT_EQ(b.values[i].text_at, nullptr);
+        EXPECT_EQ(b.values[i].text_len, 0u);
+    }
+    EXPECT_EQ(b.values[1].value, 128.0);
+    ecuio_session_destroy(session);
+
+    ASSERT_EQ(ecuio_session_create("mock://v?profile=raw", &session), ECUIO_OK);
+    ValuesCapture none;
+    EXPECT_EQ(ecuio_register_values_callback(session, values_capture_cb, &none),
+              ECUIO_OK);
+    ecuio_session_dispatch_callbacks(session, &f);
+    EXPECT_EQ(none.batches.size(), 0u) << "raw decodes nothing";
+    ecuio_session_destroy(session);
+    EXPECT_EQ(ecuio_profile_unregister("test-values"), ECUIO_OK);
+}
+
+/* The frame callback's registration rules: a NULL argument refused, a
+ * pair registered twice called once, unregister idempotent, no
+ * registering on a closed session */
+TEST(CoreTest, ValuesCallbackRegistersAsTheFrameCallbackDoes)
+{
+    ecuio_session_t* session = make_test_session();
+    int batches = 0;
+    EXPECT_EQ(
+        ecuio_register_values_callback(nullptr, values_counting_cb, &batches),
+        ECUIO_ERR_NULL_ARGUMENT);
+    EXPECT_EQ(ecuio_register_values_callback(session, nullptr, &batches),
+              ECUIO_ERR_NULL_ARGUMENT);
+    EXPECT_EQ(
+        ecuio_unregister_values_callback(nullptr, values_counting_cb, &batches),
+        ECUIO_ERR_NULL_ARGUMENT);
+    EXPECT_EQ(
+        ecuio_register_values_callback(session, values_counting_cb, &batches),
+        ECUIO_OK);
+    EXPECT_EQ(
+        ecuio_register_values_callback(session, values_counting_cb, &batches),
+        ECUIO_OK);
+
+    /* The mock set's telemetry frame */
+    const ecuio_signal_set_t* set = ecuio_session_signal_set(session);
+    ASSERT_NE(set, nullptr);
+    ecuio_frame_t f{};
+    f.arbitration_id = set->defs[0].message_id;
+    f.data_length = ECUIO_MOCK_TELEMETRY_PAYLOAD_LEN;
+    ecuio_session_dispatch_callbacks(session, &f);
+    EXPECT_EQ(batches, 1) << "deduplicated";
+
+    EXPECT_EQ(
+        ecuio_unregister_values_callback(session, values_counting_cb, &batches),
+        ECUIO_OK);
+    EXPECT_EQ(
+        ecuio_unregister_values_callback(session, values_counting_cb, &batches),
+        ECUIO_OK);
+    ecuio_session_dispatch_callbacks(session, &f);
+    EXPECT_EQ(batches, 1) << "unregistered";
+
+    EXPECT_EQ(ecuio_session_close(session), ECUIO_OK);
+    EXPECT_EQ(
+        ecuio_register_values_callback(session, values_counting_cb, &batches),
+        ECUIO_ERR_SESSION_CLOSED);
+    EXPECT_EQ(
+        ecuio_unregister_values_callback(session, values_counting_cb, &batches),
+        ECUIO_OK);
+    ecuio_session_destroy(session);
+}
+
+namespace {
+
+/* The frame callbacks' count when each values callback ran, and a
+ * values callback the first frame callback registers */
+struct OrderCtx {
+    ecuio_session_t* session = nullptr;
+    int frames = 0;
+    std::vector<int> frames_at_values;
+    int late_batches = 0;
+};
+
+void late_values_cb(const ecuio_value_batch_t*, void* user_data)
+{
+    ++static_cast<OrderCtx*>(user_data)->late_batches;
+}
+
+void order_frame_cb(const ecuio_frame_t*, void* user_data)
+{
+    auto* c = static_cast<OrderCtx*>(user_data);
+    if (++c->frames == 1)
+        ecuio_register_values_callback(c->session, late_values_cb, c);
+}
+
+void order_values_cb(const ecuio_value_batch_t*, void* user_data)
+{
+    auto* c = static_cast<OrderCtx*>(user_data);
+    c->frames_at_values.push_back(c->frames);
+}
+
+} // namespace
+
+/* Each frame reaches the frame callbacks before its values reach the
+ * values callbacks, and a values callback registered by a frame
+ * callback starts with the next frame: the lists are taken as they
+ * stand when the frame arrives */
+TEST(CoreTest, ValuesFollowTheFrameCallbacks)
+{
+    ecuio_session_t* session = make_test_session();
+    OrderCtx c;
+    c.session = session;
+    EXPECT_EQ(ecuio_register_frame_callback(session, order_frame_cb, &c),
+              ECUIO_OK);
+    EXPECT_EQ(ecuio_register_values_callback(session, order_values_cb, &c),
+              ECUIO_OK);
+    const ecuio_signal_set_t* set = ecuio_session_signal_set(session);
+    ASSERT_NE(set, nullptr);
+    ecuio_frame_t f{};
+    f.arbitration_id = set->defs[0].message_id;
+    f.data_length = ECUIO_MOCK_TELEMETRY_PAYLOAD_LEN;
+    ecuio_session_dispatch_callbacks(session, &f);
+    ecuio_session_dispatch_callbacks(session, &f);
+    EXPECT_EQ(c.frames_at_values, (std::vector<int>{1, 2}))
+        << "the frame callback ran first both times";
+    EXPECT_EQ(c.late_batches, 1) << "from the second frame only";
+    ecuio_session_destroy(session);
+}
+
+namespace {
+
+/* The first values callback unregisters the second and registers a
+ * third, on the first batch only */
+struct ValuesSwap {
+    ecuio_session_t* session = nullptr;
+    int removed = 0;
+    int added = 0;
+    bool swapped = false;
+};
+
+void values_removed_cb(const ecuio_value_batch_t*, void* user_data)
+{
+    ++static_cast<ValuesSwap*>(user_data)->removed;
+}
+
+void values_added_cb(const ecuio_value_batch_t*, void* user_data)
+{
+    ++static_cast<ValuesSwap*>(user_data)->added;
+}
+
+void values_swapping_cb(const ecuio_value_batch_t*, void* user_data)
+{
+    auto* c = static_cast<ValuesSwap*>(user_data);
+    if (!c->swapped) {
+        c->swapped = true;
+        ecuio_unregister_values_callback(c->session, values_removed_cb, c);
+        ecuio_register_values_callback(c->session, values_added_cb, c);
+    }
+}
+
+} // namespace
+
+/* As for the frame callbacks: a values callback removed mid-dispatch
+ * still gets that frame's batch, one added doesn't, the next frame the
+ * reverse, on a list that fits the stack and one that doesn't */
+TEST(CoreTest, ValuesReachTheListAsItStoodWhenTheFrameArrived)
+{
+    for (int fillers : {0, 4}) {
+        SCOPED_TRACE(fillers);
+        ecuio_session_t* session = make_test_session();
+        ValuesSwap c;
+        c.session = session;
+        int filler_batches[4] = {};
+        EXPECT_EQ(
+            ecuio_register_values_callback(session, values_swapping_cb, &c),
+            ECUIO_OK);
+        EXPECT_EQ(
+            ecuio_register_values_callback(session, values_removed_cb, &c),
+            ECUIO_OK);
+        for (int i = 0; i < fillers; ++i) {
+            EXPECT_EQ(ecuio_register_values_callback(
+                          session, values_counting_cb, &filler_batches[i]),
+                      ECUIO_OK);
+        }
+        const ecuio_signal_set_t* set = ecuio_session_signal_set(session);
+        ASSERT_NE(set, nullptr);
+        ecuio_frame_t f{};
+        f.arbitration_id = set->defs[0].message_id;
+        f.data_length = ECUIO_MOCK_TELEMETRY_PAYLOAD_LEN;
+        ecuio_session_dispatch_callbacks(session, &f);
+        EXPECT_EQ(c.removed, 1) << "in the snapshot";
+        EXPECT_EQ(c.added, 0) << "not in it";
+        ecuio_session_dispatch_callbacks(session, &f);
+        EXPECT_EQ(c.removed, 1);
+        EXPECT_EQ(c.added, 1);
+        for (int i = 0; i < fillers; ++i) {
+            EXPECT_EQ(filler_batches[i], 2) << "filler " << i;
+        }
+        ecuio_session_destroy(session);
+    }
+}
+
+/* Every text value of a batch has bytes of its own (ADR-0024 Â§4): an
+ * unkeyed def, two defs sharing a one-byte key and one with a two-byte
+ * key all match "ABCD", four text values at once; a def keyed on
+ * another byte doesn't match. The next frame starts from the first slot
+ * again */
+TEST(CoreTest, ValuesGiveEachTextValueASlotOfItsOwn)
+{
+    static ecuio_signal_def_t defs[5];
+    defs[0] = text_value_def(1, ECUIO_VALUE_HEX, 0, 0, 0, 2);
+    defs[1] = text_value_def(2, ECUIO_VALUE_TEXT, 1, 0x41, 2, 1);
+    defs[2] = text_value_def(3, ECUIO_VALUE_TEXT, 1, 0x41, 3, 1);
+    defs[3] = text_value_def(4, ECUIO_VALUE_TEXT, 2, 0x4142, 2, 2);
+    defs[4] = text_value_def(5, ECUIO_VALUE_TEXT, 1, 0x5A, 1, 1);
+    static ecuio_signal_set_t set{};
+    set.layout_version = ECUIO_SIGNAL_SET_LAYOUT;
+    set.count = 5;
+    set.defs = defs;
+    ecuio_validation_t why{};
+    ASSERT_EQ(ecuio_profile_register("test-text-slots", &set, &why), ECUIO_OK)
+        << "code " << why.code << " at def " << why.index;
+
+    ecuio_session_t* session = nullptr;
+    ASSERT_EQ(
+        ecuio_session_create("mock://t?profile=test-text-slots", &session),
+        ECUIO_OK);
+    ValuesCapture cap;
+    EXPECT_EQ(ecuio_register_values_callback(session, values_capture_cb, &cap),
+              ECUIO_OK);
+    const ecuio_frame_t abcd = value_frame(0x123, {'A', 'B', 'C', 'D'});
+    const ecuio_frame_t abef = value_frame(0x123, {'A', 'B', 'E', 'F'});
+    ecuio_session_dispatch_callbacks(session, &abcd);
+    ecuio_session_dispatch_callbacks(session, &abef);
+    ASSERT_EQ(cap.batches.size(), 2u);
+
+    const std::vector<SeenValue>& v = cap.batches[0].values;
+    ASSERT_EQ(v.size(), 4u) << "a slot for every text value the frame decodes";
+    const char* const expected[] = {"41 42", "C", "D", "CD"};
+    for (size_t i = 0; i < 4; ++i) {
+        EXPECT_EQ(v[i].id, i + 1);
+        EXPECT_EQ(v[i].text, expected[i]) << "value " << i;
+        EXPECT_EQ(v[i].text_len, std::strlen(expected[i]));
+        EXPECT_EQ(v[i].value, 0.0);
+        for (size_t j = 0; j < i; ++j) {
+            const std::ptrdiff_t apart = v[i].text_at - v[j].text_at;
+            EXPECT_GE(std::abs(apart),
+                      static_cast<std::ptrdiff_t>(ECUIO_DECODE_TEXT_MAX))
+                << "values " << j << " and " << i << " share bytes";
+        }
+    }
+    const std::vector<SeenValue>& next = cap.batches[1].values;
+    ASSERT_EQ(next.size(), 4u);
+    EXPECT_EQ(next[1].text, "E");
+    EXPECT_EQ(next[3].text, "EF");
+    EXPECT_EQ(next[0].text_at, v[0].text_at) << "the slots start again";
+    ecuio_session_destroy(session);
+    EXPECT_EQ(ecuio_profile_unregister("test-text-slots"), ECUIO_OK);
+}
+
+/* uds-generic's set holds a scanned range's DIDs from create, so a
+ * reply for one decodes before the scan has found it (ADR-0024 Â§1) */
+TEST(CoreTest, ValuesOfAScannedDidComeFromTheSetBuiltAtCreate)
+{
+    ecuio_session_t* session = nullptr;
+    ASSERT_EQ(ecuio_session_create("mock://u?profile=uds-generic&did=F180-F182",
+                                   &session),
+              ECUIO_OK)
+        << ecuio_last_error_detail();
+    const ecuio_signal_set_t* set = ecuio_session_signal_set(session);
+    ASSERT_NE(set, nullptr);
+    uint16_t f181 = 0;
+    for (uint32_t i = 0; i < set->count; ++i) {
+        if (set->defs[i].mux_key == 0x62F181u)
+            f181 = set->defs[i].id;
+    }
+    ASSERT_NE(f181, 0) << "F181 is in the set";
+    ValuesCapture cap;
+    EXPECT_EQ(ecuio_register_values_callback(session, values_capture_cb, &cap),
+              ECUIO_OK);
+    const ecuio_frame_t reply =
+        value_frame(0x7E8, {0x62, 0xF1, 0x81, 0x41, 0x42});
+    ecuio_session_dispatch_callbacks(session, &reply);
+    ASSERT_EQ(cap.batches.size(), 1u);
+    ASSERT_EQ(cap.batches[0].values.size(), 1u);
+    EXPECT_EQ(cap.batches[0].values[0].id, f181);
+    EXPECT_EQ(cap.batches[0].values[0].kind, ECUIO_VALUE_HEX);
+    EXPECT_EQ(cap.batches[0].values[0].text, "41 42");
+    ecuio_session_destroy(session);
+}
+
+namespace {
+
+/* What a frame decodes to, by direct calls, set by the frame callback
+ * and checked by the values callback that follows it on the worker */
+struct DirectCheck {
+    const ecuio_signal_set_t* set = nullptr;
+    std::vector<SeenValue> expected;
+    std::atomic<int> frames{0};
+    std::atomic<int> batches{0};
+    std::atomic<int> mismatches{0};
+    std::atomic<int> missing{0}; /* a frame that decoded, no batch */
+    bool pending = false;
+};
+
+void direct_frame_cb(const ecuio_frame_t* frame, void* user_data)
+{
+    auto* c = static_cast<DirectCheck*>(user_data);
+    if (c->pending)
+        ++c->missing;
+    c->expected.clear();
+    const uint16_t len = frame->data_length;
+    char text[ECUIO_DECODE_TEXT_MAX];
+    for (uint32_t i = 0; i < c->set->count; ++i) {
+        const ecuio_signal_def_t& d = c->set->defs[i];
+        if (!ecuio_def_applies_to_frame(&d, frame))
+            continue;
+        SeenValue s;
+        s.id = d.id;
+        if (d.kind == ECUIO_VALUE_TEXT || d.kind == ECUIO_VALUE_HEX) {
+            if (ecuio_decode_text(&d, frame->data, len, text, sizeof(text)) !=
+                ECUIO_DECODE_OK)
+                continue;
+            s.text = text;
+        } else if (ecuio_decode_signal(&d, frame->data, len, &s.value) !=
+                   ECUIO_DECODE_OK) {
+            continue;
+        }
+        c->expected.push_back(s);
+    }
+    c->pending = !c->expected.empty();
+    ++c->frames;
+}
+
+void direct_values_cb(const ecuio_value_batch_t* batch, void* user_data)
+{
+    auto* c = static_cast<DirectCheck*>(user_data);
+    ++c->batches;
+    bool same = c->pending && batch->count == c->expected.size();
+    for (uint32_t i = 0; same && i < batch->count; ++i) {
+        const ecuio_value_t& v = batch->values[i];
+        const SeenValue& e = c->expected[i];
+        same = v.signal_id == e.id && v.value == e.value &&
+               (v.text == nullptr ? e.text.empty() : e.text == v.text);
+    }
+    if (!same)
+        ++c->mismatches;
+    c->pending = false;
+}
+
+} // namespace
+
+/* Every batch equals the direct decode of its frame, over the vehicle
+ * fixture under obd2 and the mock's drive cycle under its own set */
+TEST(CoreTest, ValuesMatchDirectDecodesOfEveryFrame)
+{
+    const std::string fixture =
+        "replay://" + std::string(ECUIO_REPLAY_FIXTURES) +
+        "/2026-10-25-engine-start?profile=obd2&speed=max";
+    struct Case {
+        const char* uri;
+        int frames;
+    };
+    for (const Case& k :
+         {Case{fixture.c_str(), 7074}, Case{"mock://direct", 20}}) {
+        SCOPED_TRACE(k.uri);
+        ecuio_session_t* session = nullptr;
+        ASSERT_EQ(ecuio_session_create(k.uri, &session), ECUIO_OK)
+            << ecuio_last_error_detail();
+        DirectCheck c;
+        c.set = ecuio_session_signal_set(session);
+        ASSERT_NE(c.set, nullptr);
+        EXPECT_EQ(ecuio_register_frame_callback(session, direct_frame_cb, &c),
+                  ECUIO_OK);
+        EXPECT_EQ(ecuio_register_values_callback(session, direct_values_cb, &c),
+                  ECUIO_OK);
+        EXPECT_EQ(ecuio_session_start(session), ECUIO_OK);
+        const bool reached =
+            wait_for([&] { return c.frames.load() >= k.frames; }, 10000);
+        EXPECT_EQ(ecuio_session_close(session), ECUIO_OK);
+        ecuio_session_destroy(session);
+        ASSERT_TRUE(reached) << c.frames.load() << " frames";
+        EXPECT_GT(c.batches.load(), 0);
+        EXPECT_EQ(c.mismatches.load(), 0);
+        EXPECT_EQ(c.missing.load(), 0) << "a frame that decoded with no batch";
+    }
 }

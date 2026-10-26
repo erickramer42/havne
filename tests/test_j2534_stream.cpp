@@ -1818,15 +1818,17 @@ TEST_F(J2534AdoptionTest, IdentifyOffSendsNoIdentificationRequest)
 }
 
 /* The worker's whole engine past start-up (the probe's walk, the
- * identification one-shots, the rotation) costs it no allocation per
- * frame, so none can throw. Counts core's operator new only: the fake
- * DLL's own don't reach the counter */
+ * identification one-shots, the rotation) and the decode for a values
+ * callback cost it no allocation per frame, so none can throw. Counts
+ * core's operator new only: the fake DLL's own don't reach the
+ * counter */
 TEST_F(J2534AdoptionTest, TheWorkerAllocatesNothingPerFrame)
 {
     struct News {
         std::atomic<int> frames{0};
         std::atomic<unsigned long> at_from{0};
         std::atomic<unsigned long> at_to{0};
+        std::atomic<int> batches{0};
     };
     static constexpr int kFrom = 3;
     static constexpr int kTo = 40;
@@ -1847,6 +1849,13 @@ TEST_F(J2534AdoptionTest, TheWorkerAllocatesNothingPerFrame)
                   },
                   &news),
               ECUIO_OK);
+    ASSERT_EQ(ecuio_register_values_callback(
+                  session,
+                  [](const ecuio_value_batch_t*, void* user_data) {
+                      ++static_cast<News*>(user_data)->batches;
+                  },
+                  &news),
+              ECUIO_OK);
     ASSERT_EQ(ecuio_session_start(session), ECUIO_OK);
     const auto deadline =
         std::chrono::steady_clock::now() + std::chrono::seconds(10);
@@ -1857,6 +1866,7 @@ TEST_F(J2534AdoptionTest, TheWorkerAllocatesNothingPerFrame)
     EXPECT_EQ(ecuio_session_close(session), ECUIO_OK);
     ecuio_session_destroy(session);
     ASSERT_GE(news.frames.load(), kTo);
+    EXPECT_GT(news.batches.load(), 0) << "the values path ran";
     EXPECT_EQ(news.at_to.load() - news.at_from.load(), 0u)
         << "operator new on the worker between frames " << kFrom << " and "
         << kTo;

@@ -3,7 +3,8 @@
 //          worker (and, on Windows, the fake J2534 DLL): marshaling,
 //          coalescing, backpressure, the frame log's ring and order, the
 //          signal model's roles and freshness, link states, the activity
-//          log's lines, connect and disconnect threads, recording
+//          log's lines, connect and disconnect threads, both decode
+//          paths over the vehicle fixture, recording
 
 #include <gtest/gtest.h>
 
@@ -11,6 +12,7 @@
 #include <QDir>
 #include <QEventLoop>
 #include <QFile>
+#include <QHash>
 #include <QStringList>
 #include <QTemporaryDir>
 #include <QTimer>
@@ -2515,6 +2517,106 @@ TEST(BridgeTest, ReplayOfAMockRecordingDecodesWhatWasRecorded)
     const QList<QByteArray> valuesA = values(a);
     ASSERT_FALSE(valuesA.isEmpty());
     EXPECT_EQ(values(b), valuesA);
+}
+
+namespace {
+
+/* What core's values callback delivers, as signals.csv rows: name and
+ * value, formatted as SessionRecorder writes them */
+struct CoreRows {
+    QHash<uint16_t, QByteArray> names;
+    std::vector<std::pair<QByteArray, QByteArray>> rows;
+    std::atomic<int> frames{0};
+};
+
+void core_rows_frame_cb(const ecuio_frame_t*, void* user_data)
+{
+    ++static_cast<CoreRows*>(user_data)->frames;
+}
+
+void core_rows_values_cb(const ecuio_value_batch_t* batch, void* user_data)
+{
+    auto* c = static_cast<CoreRows*>(user_data);
+    for (uint32_t i = 0; i < batch->count; ++i) {
+        const ecuio_value_t& v = batch->values[i];
+        c->rows.emplace_back(c->names.value(v.signal_id),
+                             v.text != nullptr
+                                 ? QByteArray(v.text)
+                                 : QByteArray::number(v.value, 'g', 12));
+    }
+}
+
+} // namespace
+
+/* The two decode paths agree over the vehicle fixture under obd2
+ * (ADR-0024, step 1): the values the bridge decodes on the GUI thread
+ * and records in signals.csv are, row for row, the ones core's values
+ * callback delivers from the worker for the same recording */
+TEST(BridgeTest, BothDecodePathsAgreeOverTheFixture)
+{
+    const QString uri =
+        QStringLiteral("replay://%1/2026-10-25-engine-start?profile=obd2&speed=100")
+            .arg(QStringLiteral(ECUIO_REPLAY_FIXTURES));
+    constexpr int kFrames = 7074;
+
+    QTemporaryDir root;
+    ASSERT_TRUE(root.isValid());
+    QtTuneBridge bridge;
+    bridge.setRecordingsRootForTesting(root.path());
+    bridge.setRecording(true);
+    ASSERT_TRUE(bridge.connectSession(uri).isEmpty());
+    ASSERT_TRUE(spinUntil(
+        [&bridge]() {
+            return bridge.frameCount() + bridge.droppedFrames() >= kFrames;
+        },
+        20000));
+    ASSERT_EQ(bridge.droppedFrames(), 0) << "a dropped frame loses its values";
+    ASSERT_TRUE(disconnectAndWait(bridge));
+    const QStringList folders = recordingFolders(root.path());
+    ASSERT_EQ(folders.size(), 1);
+    const QByteArray csv = readFile(root.path() + QStringLiteral("/") +
+                                    folders.first() + QStringLiteral("/signals.csv"));
+    std::vector<std::pair<QByteArray, QByteArray>> recorded;
+    const QList<QByteArray> lines = csv.split('\n');
+    for (qsizetype i = 1; i < lines.size(); ++i) {   // past the header
+        const QList<QByteArray> cols = lines[i].split(',');
+        if (cols.size() == 4)
+            recorded.emplace_back(cols[1], cols[2]);
+    }
+
+    ecuio_session_t* session = nullptr;
+    const QByteArray utf8 = uri.toUtf8();
+    ASSERT_EQ(ecuio_session_create(utf8.constData(), &session), ECUIO_OK)
+        << ecuio_last_error_detail();
+    CoreRows core;
+    const ecuio_signal_set_t* set = ecuio_session_signal_set(session);
+    ASSERT_NE(set, nullptr);
+    for (uint32_t i = 0; i < set->count; ++i) {
+        core.names.insert(set->defs[i].id,
+                          QByteArray(set->defs[i].name,
+                                     qstrnlen(set->defs[i].name,
+                                              sizeof set->defs[i].name)));
+    }
+    EXPECT_EQ(ecuio_register_frame_callback(session, core_rows_frame_cb, &core),
+              ECUIO_OK);
+    EXPECT_EQ(ecuio_register_values_callback(session, core_rows_values_cb, &core),
+              ECUIO_OK);
+    EXPECT_EQ(ecuio_session_start(session), ECUIO_OK);
+    const bool reached =
+        spinUntil([&core]() { return core.frames.load() >= kFrames; }, 20000);
+    EXPECT_EQ(ecuio_session_close(session), ECUIO_OK);
+    ecuio_session_destroy(session);
+    ASSERT_TRUE(reached) << core.frames.load() << " frames";
+
+    ASSERT_GT(recorded.size(), 1000u);
+    ASSERT_EQ(core.rows.size(), recorded.size());
+    for (size_t i = 0; i < recorded.size(); ++i) {
+        ASSERT_EQ(core.rows[i], recorded[i])
+            << "row " << i << ": core " << core.rows[i].first.toStdString()
+            << " " << core.rows[i].second.toStdString() << ", bridge "
+            << recorded[i].first.toStdString() << " "
+            << recorded[i].second.toStdString();
+    }
 }
 
 TEST(BridgeTest, ReplayUriLabelKeepsTheRecordingsName)
