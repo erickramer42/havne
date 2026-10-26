@@ -232,6 +232,22 @@ endif()
 # no known hang surface there, and mock tests are sub-2s anyway.
 set(J2534_TEST_TIMEOUT_SECONDS 30)
 
+# Every J2534 session runs in a surrogate (ADR-0025), found next to the
+# running exe as in the app: each test that opens one gets this tree's
+# (x64) surrogate beside it. The cross-arch run names the x86 one with
+# ECUIO_SURROGATE_EXE instead.
+function(qttune_deploy_surrogate target)
+    if(TARGET ecuio-j2534-surrogate)
+        add_dependencies(${target} ecuio-j2534-surrogate)
+        add_custom_command(TARGET ${target} POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                $<TARGET_FILE:ecuio-j2534-surrogate>
+                $<TARGET_FILE_DIR:${target}>
+            COMMENT "Deploying the surrogate next to ${target}"
+        )
+    endif()
+endfunction()
+
 # J2534 discovery tests (Win32-only)
 if(WIN32)
     add_executable(test_j2534_discovery
@@ -307,14 +323,17 @@ if(WIN32 AND NOT QTTUNE_BUILD_CORE_ONLY)
         FAKE_J2534_DLL_PATH="$<TARGET_FILE:fake_j2534>"
     )
     add_dependencies(test_bridge fake_j2534)
+    qttune_deploy_surrogate(test_bridge)
     target_compile_definitions(test_qml PRIVATE
         FAKE_J2534_DLL_PATH="$<TARGET_FILE:fake_j2534>"
     )
     add_dependencies(test_qml fake_j2534)
+    qttune_deploy_surrogate(test_qml)
 endif()
 
-# J2534 loader tests (Win32-only, HARNESS tier — real LoadLibraryEx
-# against the fake vendor DLL; path baked in at generation time)
+# J2534 loader tests (Win32-only, HARNESS tier — open, exports and close
+# against the fake vendor DLL, through the surrogate; path baked in at
+# generation time)
 if(WIN32)
     add_executable(test_j2534_load
         ../tests/test_j2534_load.cpp
@@ -329,6 +348,7 @@ if(WIN32)
     )
     add_dependencies(test_j2534_load fake_j2534)
     add_dependencies(test_j2534_load fake_j2534_legacy)
+    qttune_deploy_surrogate(test_j2534_load)
     qttune_enable_warnings(test_j2534_load)
     gtest_discover_tests(test_j2534_load
         PROPERTIES TIMEOUT ${J2534_TEST_TIMEOUT_SECONDS}
@@ -352,6 +372,7 @@ if(WIN32)
         FAKE_J2534_DLL_PATH="$<TARGET_FILE:fake_j2534>"
     )
     add_dependencies(test_j2534_stream fake_j2534)
+    qttune_deploy_surrogate(test_j2534_stream)
     qttune_enable_warnings(test_j2534_stream)
     gtest_discover_tests(test_j2534_stream
         PROPERTIES TIMEOUT ${J2534_TEST_TIMEOUT_SECONDS}
@@ -376,17 +397,10 @@ if(WIN32)
         FAKE_J2534_DLL_PATH="$<TARGET_FILE:fake_j2534>"
     )
     add_dependencies(test_j2534_surrogate fake_j2534)
-    add_dependencies(test_j2534_surrogate ecuio-j2534-surrogate)
-
-    # Deploy the surrogate exe next to the test exe: the client's
-    # resolve_exe_path() finds it in its own image directory
-    # (same discipline as the baked fake-DLL path — no PATH games).
-    add_custom_command(TARGET test_j2534_surrogate POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            $<TARGET_FILE:ecuio-j2534-surrogate>
-            $<TARGET_FILE_DIR:test_j2534_surrogate>
-        COMMENT "Deploying surrogate exe next to test_j2534_surrogate"
-    )
+    # The client's resolve_exe_path() finds it in its own image
+    # directory (same discipline as the baked fake-DLL path — no PATH
+    # games).
+    qttune_deploy_surrogate(test_j2534_surrogate)
 
     qttune_enable_warnings(test_j2534_surrogate)
     gtest_discover_tests(test_j2534_surrogate
@@ -394,11 +408,9 @@ if(WIN32)
     )
 endif()
 
-# J2534 link-health tests (Win32-only, HARNESS tier): every case runs
-# one session in-proc and one through the surrogate. In this tree the
-# surrogate case uses the x64 surrogate by path (ECUIO_SURROGATE_EXE,
-# set per case), so no second copy lands next to the test exe; the
-# cross-arch run points it at the Win32 tree's instead.
+# J2534 link-health tests (Win32-only, HARNESS tier): every case runs a
+# session through the surrogate: in this tree the x64 one beside the
+# test, in the cross-arch run the Win32 tree's.
 if(WIN32)
     add_executable(test_j2534_health
         test_j2534_health.cpp
@@ -412,7 +424,7 @@ if(WIN32)
         SURROGATE_EXE_PATH="$<TARGET_FILE:ecuio-j2534-surrogate>"
     )
     add_dependencies(test_j2534_health fake_j2534)
-    add_dependencies(test_j2534_health ecuio-j2534-surrogate)
+    qttune_deploy_surrogate(test_j2534_health)
     qttune_enable_warnings(test_j2534_health)
     gtest_discover_tests(test_j2534_health
         PROPERTIES TIMEOUT ${J2534_TEST_TIMEOUT_SECONDS}
@@ -420,8 +432,7 @@ if(WIN32)
 endif()
 
 # J2534 connect-failure tests (Win32-only, HARNESS tier): why a connect
-# failed, each case in-proc and through the surrogate, set up as for
-# test_j2534_health.
+# failed, set up as for test_j2534_health.
 if(WIN32)
     add_executable(test_j2534_connect
         test_j2534_connect.cpp
@@ -436,16 +447,16 @@ if(WIN32)
     )
     add_dependencies(test_j2534_connect fake_j2534)
     add_dependencies(test_j2534_connect fake_j2534_legacy)   # beside the fake
-    add_dependencies(test_j2534_connect ecuio-j2534-surrogate)
+    qttune_deploy_surrogate(test_j2534_connect)
     qttune_enable_warnings(test_j2534_connect)
     gtest_discover_tests(test_j2534_connect
         PROPERTIES TIMEOUT ${J2534_TEST_TIMEOUT_SECONDS}
     )
 endif()
 
-# J2534 routing tests (Win32-only, HARNESS tier — backend selection by
-# PE architecture: in-proc for x64 (CI), surrogate for x86 (dev-machine,
-# env-gated via ECUIO_FAKE_DLL/ECUIO_SURROGATE_EXE))
+# J2534 routing tests (Win32-only, HARNESS tier — the surrogate chosen by
+# PE architecture: the x64 one for x64 (CI), the x86 one for x86
+# (dev-machine, env-gated via ECUIO_FAKE_DLL/ECUIO_SURROGATE_EXE))
 if(WIN32)
     add_executable(test_j2534_routing
         test_j2534_routing.cpp
@@ -458,6 +469,7 @@ if(WIN32)
         FAKE_J2534_DLL_PATH="$<TARGET_FILE:fake_j2534>"
     )
     add_dependencies(test_j2534_routing fake_j2534)
+    qttune_deploy_surrogate(test_j2534_routing)
     qttune_enable_warnings(test_j2534_routing)
     gtest_discover_tests(test_j2534_routing
         PROPERTIES TIMEOUT ${J2534_TEST_TIMEOUT_SECONDS}

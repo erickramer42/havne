@@ -61,7 +61,7 @@ namespace {
 
 /* ---- the fake, through its control page (fake_control.h) -----------
  * The page reaches the fake whichever backend serves the session, so
- * these read the same in-proc and through the surrogate. The page must
+ * these read the fake inside the surrogate child. The page must
  * exist before a session opens (a child takes its name at spawn): a
  * fixture creates and resets it in SetUp. */
 typedef void (*fn_inject_frame)(const unsigned char*, unsigned long,

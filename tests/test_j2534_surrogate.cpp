@@ -55,6 +55,29 @@ static const char* fake_dll_path()
     return (env != nullptr && env[0] != '\0') ? env : FAKE_J2534_DLL_PATH;
 }
 
+/* The fake's architecture, which picks the surrogate (ADR-0025): the
+ * Win32 tree's x86 one in the cross-arch run, this tree's x64 one
+ * otherwise. */
+static uint32_t fake_dll_arch()
+{
+    const char* env = std::getenv("ECUIO_FAKE_DLL");
+    return (env != nullptr && env[0] != '\0') ? ECUIO_DLL_ARCH_X86
+                                               : ECUIO_DLL_ARCH_X64;
+}
+
+/* That surrogate's relocation variable and exe name. */
+static const char* surrogate_env()
+{
+    return fake_dll_arch() == ECUIO_DLL_ARCH_X86 ? "ECUIO_SURROGATE_EXE"
+                                                 : "ECUIO_SURROGATE_X64_EXE";
+}
+static const char* surrogate_name()
+{
+    return fake_dll_arch() == ECUIO_DLL_ARCH_X86
+               ? "ecuio-j2534-surrogate.exe"
+               : "ecuio-j2534-surrogate-x64.exe";
+}
+
 namespace {
 
 struct SurCapture {
@@ -127,7 +150,7 @@ TEST(J2534SurrogateTest, OpenConnectInjectReadCloseCycle)
 
     /* Spawn: creates mapping/event/pipe, spawns under the kill-on-close
      * job, surrogate loads the fake DLL, calls PassThruOpen, handshakes. */
-    ASSERT_EQ(ecuio_j2534_sur_open(fake_dll_path(), &h), ECUIO_OK);
+    ASSERT_EQ(ecuio_j2534_sur_open(fake_dll_path(), fake_dll_arch(), &h), ECUIO_OK);
     ASSERT_NE(h, nullptr);
 
     /* Connect with default sentinel baud — resolves to ISO 15765 500k
@@ -192,7 +215,7 @@ TEST(J2534SurrogateTest, ReadPumpIsGatedOnConnect)
      * share one queue,
      * so parking is real, not an artifact of separate containers. */
     ecuio_j2534_sur_handle_t* h = nullptr;
-    ASSERT_EQ(ecuio_j2534_sur_open(fake_dll_path(), &h), ECUIO_OK);
+    ASSERT_EQ(ecuio_j2534_sur_open(fake_dll_path(), fake_dll_arch(), &h), ECUIO_OK);
 
     SurCapture cap;
     const unsigned char f0[8] = {1, 2, 3, 4, 5, 6, 7, 8};
@@ -237,7 +260,7 @@ TEST(J2534SurrogateTest, DeviceAndChannelIdZeroAreRealIds)
     ASSERT_TRUE(fake_control::set(page, "ECUIO_FAKE_ZERO_IDS", "1"));
 
     ecuio_j2534_sur_handle_t* h = nullptr;
-    ASSERT_EQ(ecuio_j2534_sur_open(fake_dll_path(), &h), ECUIO_OK);
+    ASSERT_EQ(ecuio_j2534_sur_open(fake_dll_path(), fake_dll_arch(), &h), ECUIO_OK);
     unsigned long channel = 0x55;
     ASSERT_EQ(ecuio_j2534_sur_connect_channel(h, 0, 0, &channel), ECUIO_OK);
     EXPECT_EQ(channel, 0ul);
@@ -263,7 +286,7 @@ TEST(J2534SurrogateTest, DeadDllFailsFastAtOpen)
      * is the contract. Wall-clock guard: 5s budget proves fail-fast. */
     const auto t0 = std::chrono::steady_clock::now();
     ecuio_j2534_sur_handle_t* h = nullptr;
-    EXPECT_EQ(ecuio_j2534_sur_open("C:\\does\\not\\exist.dll", &h),
+    EXPECT_EQ(ecuio_j2534_sur_open("C:\\does\\not\\exist.dll", fake_dll_arch(), &h),
               ECUIO_ERR_LOAD_FAILED);
     EXPECT_STREQ(ecuio_last_error_detail(),
                  "the surrogate couldn't load the DLL (the Windows error is "
@@ -277,8 +300,8 @@ TEST(J2534SurrogateTest, DeadDllFailsFastAtOpen)
 TEST(J2534SurrogateTest, NullArgumentsRejected)
 {
     ecuio_j2534_sur_handle_t* h = nullptr;
-    EXPECT_EQ(ecuio_j2534_sur_open(nullptr, &h), ECUIO_ERR_NULL_ARGUMENT);
-    EXPECT_EQ(ecuio_j2534_sur_open(FAKE_J2534_DLL_PATH, nullptr),
+    EXPECT_EQ(ecuio_j2534_sur_open(nullptr, fake_dll_arch(), &h), ECUIO_ERR_NULL_ARGUMENT);
+    EXPECT_EQ(ecuio_j2534_sur_open(FAKE_J2534_DLL_PATH, fake_dll_arch(), nullptr),
               ECUIO_ERR_NULL_ARGUMENT);
     EXPECT_EQ(ecuio_j2534_sur_close(nullptr), ECUIO_OK);     /* free(nullptr) */
 
@@ -314,7 +337,7 @@ TEST(J2534SurrogateTest, NullArgumentsRejected)
 TEST(J2534SurrogateTest, MalformedRequestsAreRefusedAtBothEnds)
 {
     ecuio_j2534_sur_handle_t* h = nullptr;
-    ASSERT_EQ(ecuio_j2534_sur_open(fake_dll_path(), &h), ECUIO_OK);
+    ASSERT_EQ(ecuio_j2534_sur_open(fake_dll_path(), fake_dll_arch(), &h), ECUIO_OK);
     struct Closer {
         ecuio_j2534_sur_handle_t* h;
         ~Closer() { (void)ecuio_j2534_sur_close(h); }
@@ -390,7 +413,7 @@ TEST(J2534SurrogateTest, WriteRoundTripProducesEchoResponse)
      * it back over the pipe. Observable from EITHER architecture — no
      * fake-instance hooks involved. */
     ecuio_j2534_sur_handle_t* h = nullptr;
-    ASSERT_EQ(ecuio_j2534_sur_open(fake_dll_path(), &h), ECUIO_OK);
+    ASSERT_EQ(ecuio_j2534_sur_open(fake_dll_path(), fake_dll_arch(), &h), ECUIO_OK);
     unsigned long channel = 0;
     ASSERT_EQ(ecuio_j2534_sur_connect_channel(h, 0, 0, &channel), ECUIO_OK);
 
@@ -422,7 +445,7 @@ TEST(J2534SurrogateTest, IoctlSetGetConfigRoundTrip)
      * in ITS address space), stores, then GET must report the stored
      * value back through the re-flattened response payload. */
     ecuio_j2534_sur_handle_t* h = nullptr;
-    ASSERT_EQ(ecuio_j2534_sur_open(fake_dll_path(), &h), ECUIO_OK);
+    ASSERT_EQ(ecuio_j2534_sur_open(fake_dll_path(), fake_dll_arch(), &h), ECUIO_OK);
     unsigned long channel = 0;
     ASSERT_EQ(ecuio_j2534_sur_connect_channel(h, 0, 0, &channel), ECUIO_OK);
 
@@ -451,7 +474,7 @@ TEST(J2534SurrogateTest, IoctlSetGetConfigRoundTrip)
 TEST(J2534SurrogateTest, IoctlReadVbattReturnsFixedVoltage)
 {
     ecuio_j2534_sur_handle_t* h = nullptr;
-    ASSERT_EQ(ecuio_j2534_sur_open(fake_dll_path(), &h), ECUIO_OK);
+    ASSERT_EQ(ecuio_j2534_sur_open(fake_dll_path(), fake_dll_arch(), &h), ECUIO_OK);
     unsigned long channel = 0;
     ASSERT_EQ(ecuio_j2534_sur_connect_channel(h, 0, 0, &channel), ECUIO_OK);
 
@@ -468,11 +491,11 @@ TEST(J2534SurrogateTest, IoctlReadVbattReturnsFixedVoltage)
 
 /* The caller's capacity bounds the copy, and out_len still reports
  * the whole result, so a cut shows: the loader passes callers' buffers
- * straight through, as it does in-proc (FakeFixture's twin). */
+ * straight through (FakeFixture's twin, through the loader). */
 TEST(J2534SurrogateTest, IoctlCopiesAtMostItsCapacity)
 {
     ecuio_j2534_sur_handle_t* h = nullptr;
-    ASSERT_EQ(ecuio_j2534_sur_open(fake_dll_path(), &h), ECUIO_OK);
+    ASSERT_EQ(ecuio_j2534_sur_open(fake_dll_path(), fake_dll_arch(), &h), ECUIO_OK);
     unsigned long channel = 0;
     ASSERT_EQ(ecuio_j2534_sur_connect_channel(h, 0, 0, &channel), ECUIO_OK);
 
@@ -508,7 +531,7 @@ TEST(J2534SurrogateTest, IoctlCopiesAtMostItsCapacity)
 TEST(J2534SurrogateTest, ReadVersionRelaysTheThreeStrings)
 {
     ecuio_j2534_sur_handle_t* h = nullptr;
-    ASSERT_EQ(ecuio_j2534_sur_open(fake_dll_path(), &h), ECUIO_OK);
+    ASSERT_EQ(ecuio_j2534_sur_open(fake_dll_path(), fake_dll_arch(), &h), ECUIO_OK);
     unsigned long channel = 0;
     ASSERT_EQ(ecuio_j2534_sur_connect_channel(h, 0, 0, &channel), ECUIO_OK);
 
@@ -531,7 +554,7 @@ TEST(J2534SurrogateTest, IoctlWhitelistRefusesUnsupportedIds)
      * ECUIO_ERR_VENDOR_REFUSED. Driving the client directly (this
      * suite) exercises the child side. */
     ecuio_j2534_sur_handle_t* h = nullptr;
-    ASSERT_EQ(ecuio_j2534_sur_open(fake_dll_path(), &h), ECUIO_OK);
+    ASSERT_EQ(ecuio_j2534_sur_open(fake_dll_path(), fake_dll_arch(), &h), ECUIO_OK);
     unsigned long channel = 0;
     ASSERT_EQ(ecuio_j2534_sur_connect_channel(h, 0, 0, &channel), ECUIO_OK);
 
@@ -550,7 +573,7 @@ TEST(J2534SurrogateTest, FilterStartStopLifecycle)
      * must surface as an error, proving vendor status isn't being
      * flattened into silent success anywhere on the relay. */
     ecuio_j2534_sur_handle_t* h = nullptr;
-    ASSERT_EQ(ecuio_j2534_sur_open(fake_dll_path(), &h), ECUIO_OK);
+    ASSERT_EQ(ecuio_j2534_sur_open(fake_dll_path(), fake_dll_arch(), &h), ECUIO_OK);
     unsigned long channel = 0;
     ASSERT_EQ(ecuio_j2534_sur_connect_channel(h, 0, 0, &channel), ECUIO_OK);
 
@@ -597,7 +620,7 @@ TEST(J2534SurrogateTest, TimedOutOpDoesNotDesyncNextRequest)
 {
     SetEnvironmentVariableA("ECUIO_FAKE_IOCTL_DELAY_MS", "3500");
     ecuio_j2534_sur_handle_t* h = nullptr;
-    ASSERT_EQ(ecuio_j2534_sur_open(fake_dll_path(), &h), ECUIO_OK);
+    ASSERT_EQ(ecuio_j2534_sur_open(fake_dll_path(), fake_dll_arch(), &h), ECUIO_OK);
     SetEnvironmentVariableA("ECUIO_FAKE_IOCTL_DELAY_MS", nullptr);
 
     unsigned long channel = 0;
@@ -635,7 +658,7 @@ TEST(J2534SurrogateTest, BlockedVendorOpenFailsAtHandshakeTimeout)
     const auto t0 = std::chrono::steady_clock::now();
 
     ecuio_j2534_sur_handle_t* h = nullptr;
-    const ecuio_status_t rc = ecuio_j2534_sur_open(fake_dll_path(), &h);
+    const ecuio_status_t rc = ecuio_j2534_sur_open(fake_dll_path(), fake_dll_arch(), &h);
     const std::string detail = ecuio_last_error_detail();
 
     const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -687,7 +710,7 @@ static std::string read_session_log(const std::string& path)
 TEST(J2534SurrogateTest, ClientAndChildLinesShareTheSessionLog)
 {
     ecuio_j2534_sur_handle_t* h = nullptr;
-    ASSERT_EQ(ecuio_j2534_sur_open(fake_dll_path(), &h), ECUIO_OK);
+    ASSERT_EQ(ecuio_j2534_sur_open(fake_dll_path(), fake_dll_arch(), &h), ECUIO_OK);
     const std::string path = ecuio_j2534_sur_log_path(h);
     /* Close first: the child exits, so the file is complete. */
     ASSERT_EQ(ecuio_j2534_sur_close(h), ECUIO_OK);
@@ -747,7 +770,8 @@ struct EnvSwap {
 };
 }  // namespace
 
-/* ECUIO_SURROGATE_EXE relocates the surrogate and nothing more: a
+/* The surrogate's variable (ECUIO_SURROGATE_EXE, or _X64_EXE)
+ * relocates the surrogate and nothing more: a
  * relative path, another program, or a missing file is refused before
  * anything spawns. */
 TEST(J2534SurrogateTest, SurrogateExeOverrideIsRestricted)
@@ -755,14 +779,15 @@ TEST(J2534SurrogateTest, SurrogateExeOverrideIsRestricted)
     char self[MAX_PATH] = {};
     ASSERT_GT(GetModuleFileNameA(nullptr, self, MAX_PATH), 0u);
     const std::string too_long =
-        "C:/" + std::string(MAX_PATH, 'a') + "/ecuio-j2534-surrogate.exe";
+        "C:/" + std::string(MAX_PATH, 'a') + "/" + surrogate_name();
+    const std::string missing =
+        std::string("C:/ecuio-definitely-missing/") + surrogate_name();
     for (const char* exe :
-         {"ecuio-j2534-surrogate.exe", static_cast<const char*>(self),
-          "C:/ecuio-definitely-missing/ecuio-j2534-surrogate.exe",
+         {surrogate_name(), static_cast<const char*>(self), missing.c_str(),
           too_long.c_str()}) {
-        EnvSwap swap("ECUIO_SURROGATE_EXE", exe);
+        EnvSwap swap(surrogate_env(), exe);
         ecuio_j2534_sur_handle_t* h = nullptr;
-        EXPECT_EQ(ecuio_j2534_sur_open(fake_dll_path(), &h), ECUIO_ERR_SURROGATE_FAILED) << exe;
+        EXPECT_EQ(ecuio_j2534_sur_open(fake_dll_path(), fake_dll_arch(), &h), ECUIO_ERR_SURROGATE_FAILED) << exe;
         EXPECT_EQ(h, nullptr) << exe;
     }
 }
@@ -787,15 +812,15 @@ TEST(J2534SurrogateTest, SurrogateExitingAtStartupNamesItsExitCode)
     } cleanup;
     cleanup.dir = std::string(tmp) + "ecuio-foreign-surrogate-" +
                   std::to_string(GetCurrentProcessId());
-    cleanup.exe = cleanup.dir + "\\ecuio-j2534-surrogate.exe";
+    cleanup.exe = cleanup.dir + "\\" + surrogate_name();
     ASSERT_TRUE(CreateDirectoryA(cleanup.dir.c_str(), nullptr) ||
                 GetLastError() == ERROR_ALREADY_EXISTS);
     ASSERT_TRUE(CopyFileA((std::string(sys) + "\\whoami.exe").c_str(),
                           cleanup.exe.c_str(), FALSE));
 
-    EnvSwap swap("ECUIO_SURROGATE_EXE", cleanup.exe.c_str());
+    EnvSwap swap(surrogate_env(), cleanup.exe.c_str());
     ecuio_j2534_sur_handle_t* h = nullptr;
-    EXPECT_EQ(ecuio_j2534_sur_open(fake_dll_path(), &h),
+    EXPECT_EQ(ecuio_j2534_sur_open(fake_dll_path(), fake_dll_arch(), &h),
               ECUIO_ERR_SURROGATE_FAILED);
     EXPECT_STREQ(ecuio_last_error_detail(),
                  "the surrogate exited during startup with code 1");
@@ -815,7 +840,7 @@ TEST(J2534SurrogateTest, MismatchedFingerprintRefusesOpenBeforeVendor)
     const auto t0 = std::chrono::steady_clock::now();
 
     ecuio_j2534_sur_handle_t* h = nullptr;
-    EXPECT_EQ(ecuio_j2534_sur_open(fake_dll_path(), &h),
+    EXPECT_EQ(ecuio_j2534_sur_open(fake_dll_path(), fake_dll_arch(), &h),
               ECUIO_ERR_SURROGATE_FAILED);
     EXPECT_EQ(h, nullptr);
 
@@ -831,7 +856,7 @@ TEST(J2534SurrogateTest, NonAsciiDllPathLoadsInTheChild)
     NonAsciiCopy copy(fake_dll_path());
     ASSERT_TRUE(copy.ok) << "couldn't stage the fake under a non-ASCII path";
     ecuio_j2534_sur_handle_t* h = nullptr;
-    ASSERT_EQ(ecuio_j2534_sur_open(copy.utf8, &h), ECUIO_OK);
+    ASSERT_EQ(ecuio_j2534_sur_open(copy.utf8, fake_dll_arch(), &h), ECUIO_OK);
     unsigned long channel = 0;
     EXPECT_EQ(ecuio_j2534_sur_connect_channel(h, 0, 0, &channel), ECUIO_OK);
     EXPECT_EQ(ecuio_j2534_sur_close(h), ECUIO_OK);     /* the child exits, so the copy can go */
@@ -849,7 +874,7 @@ TEST(J2534SurrogateTest, FrameLoggingRecordsPayloadsVerbatimWhenEnabled)
     for (int enabled = 1; enabled >= 0; --enabled) {
         EnvArm arm("ECUIO_SUR_LOG_FRAMES", enabled ? "1" : nullptr);
         ecuio_j2534_sur_handle_t* h = nullptr;
-        ASSERT_EQ(ecuio_j2534_sur_open(fake_dll_path(), &h), ECUIO_OK);
+        ASSERT_EQ(ecuio_j2534_sur_open(fake_dll_path(), fake_dll_arch(), &h), ECUIO_OK);
         unsigned long channel = 0;
         ASSERT_EQ(ecuio_j2534_sur_connect_channel(h, 0, 0, &channel), ECUIO_OK);
 
@@ -898,7 +923,7 @@ TEST(J2534SurrogateTest, UnresponsiveChildFailsFastAfterTwoMissedDeadlines)
     ecuio_j2534_sur_handle_t* h = nullptr;
     {
         EnvArm arm("ECUIO_FAKE_IOCTL_DELAY_MS", "20000");
-        ASSERT_EQ(ecuio_j2534_sur_open(fake_dll_path(), &h), ECUIO_OK);
+        ASSERT_EQ(ecuio_j2534_sur_open(fake_dll_path(), fake_dll_arch(), &h), ECUIO_OK);
     }
     unsigned long channel = 0;
     ASSERT_EQ(ecuio_j2534_sur_connect_channel(h, 0, 0, &channel), ECUIO_OK);
@@ -946,7 +971,7 @@ TEST(J2534SurrogateTest, RequestIdMismatchMakesTheChildUnresponsive)
         snprintf(twice, sizeof(twice), "%u",
                  static_cast<unsigned>(ECUIO_SUR_OP_CONNECT));
         EnvArm arm("ECUIO_SUR_TEST_REPLY_TWICE", twice);
-        ASSERT_EQ(ecuio_j2534_sur_open(fake_dll_path(), &h), ECUIO_OK);
+        ASSERT_EQ(ecuio_j2534_sur_open(fake_dll_path(), fake_dll_arch(), &h), ECUIO_OK);
     }
     unsigned long channel = 0;
     ASSERT_EQ(ecuio_j2534_sur_connect_channel(h, 0, 0, &channel), ECUIO_OK);
@@ -1008,7 +1033,7 @@ TEST(J2534SurrogateTest, LateReadReplyIsDroppedAndLogged)
     ecuio_j2534_sur_handle_t* h = nullptr;
     {
         EnvArm arm("ECUIO_FAKE_READ_DELAY_MS", "1500");
-        ASSERT_EQ(ecuio_j2534_sur_open(fake_dll_path(), &h), ECUIO_OK);
+        ASSERT_EQ(ecuio_j2534_sur_open(fake_dll_path(), fake_dll_arch(), &h), ECUIO_OK);
     }
     unsigned long channel = 0;
     ASSERT_EQ(ecuio_j2534_sur_connect_channel(h, 0, 0, &channel), ECUIO_OK);
@@ -1049,8 +1074,8 @@ TEST(J2534SurrogateTest, SecondConcurrentSessionGetsItsOwnLog)
 {
     ecuio_j2534_sur_handle_t* a = nullptr;
     ecuio_j2534_sur_handle_t* b = nullptr;
-    ASSERT_EQ(ecuio_j2534_sur_open(fake_dll_path(), &a), ECUIO_OK);
-    const ecuio_status_t rb = ecuio_j2534_sur_open(fake_dll_path(), &b);
+    ASSERT_EQ(ecuio_j2534_sur_open(fake_dll_path(), fake_dll_arch(), &a), ECUIO_OK);
+    const ecuio_status_t rb = ecuio_j2534_sur_open(fake_dll_path(), fake_dll_arch(), &b);
     const std::string path_a = ecuio_j2534_sur_log_path(a);
     const std::string path_b = ecuio_j2534_sur_log_path(b);
     ecuio_j2534_sur_close(b);
@@ -1097,7 +1122,7 @@ TEST(J2534SurrogateTest, EarlierSessionLogIsKept)
 {
     const std::string fixed_name = "ecuio-surrogate.log";
     ecuio_j2534_sur_handle_t* a = nullptr;
-    ASSERT_EQ(ecuio_j2534_sur_open(fake_dll_path(), &a), ECUIO_OK);
+    ASSERT_EQ(ecuio_j2534_sur_open(fake_dll_path(), fake_dll_arch(), &a), ECUIO_OK);
     const std::string path_a = ecuio_j2534_sur_log_path(a);
     ASSERT_EQ(ecuio_j2534_sur_close(a), ECUIO_OK);
     if (path_a.size() < fixed_name.size() ||
@@ -1110,7 +1135,7 @@ TEST(J2534SurrogateTest, EarlierSessionLogIsKept)
     ASSERT_NE(log_a.find("open: child pid"), std::string::npos) << log_a;
 
     ecuio_j2534_sur_handle_t* b = nullptr;
-    ASSERT_EQ(ecuio_j2534_sur_open(fake_dll_path(), &b), ECUIO_OK);
+    ASSERT_EQ(ecuio_j2534_sur_open(fake_dll_path(), fake_dll_arch(), &b), ECUIO_OK);
     const std::string path_b = ecuio_j2534_sur_log_path(b);
     ASSERT_EQ(ecuio_j2534_sur_close(b), ECUIO_OK);
     EXPECT_EQ(path_b, path_a) << "the second session should take the fixed name";
@@ -1145,7 +1170,7 @@ TEST(J2534SurrogateTest, SpecTimeoutReadDeliversPartialBatch)
 {
     SetEnvironmentVariableA("ECUIO_FAKE_SPEC_READ_SEMANTICS", "1");
     ecuio_j2534_sur_handle_t* h = nullptr;
-    ASSERT_EQ(ecuio_j2534_sur_open(fake_dll_path(), &h), ECUIO_OK);
+    ASSERT_EQ(ecuio_j2534_sur_open(fake_dll_path(), fake_dll_arch(), &h), ECUIO_OK);
     unsigned long channel = 0;
     ASSERT_EQ(ecuio_j2534_sur_connect_channel(h, 0, 0, &channel), ECUIO_OK);
 
@@ -1201,7 +1226,7 @@ TEST(J2534SurrogateTest, ABatchOfLongMessagesCrossesThePipeWhole)
 {
     EnvArm spec("ECUIO_FAKE_SPEC_READ_SEMANTICS", "1");
     ecuio_j2534_sur_handle_t* h = nullptr;
-    ASSERT_EQ(ecuio_j2534_sur_open(fake_dll_path(), &h), ECUIO_OK);
+    ASSERT_EQ(ecuio_j2534_sur_open(fake_dll_path(), fake_dll_arch(), &h), ECUIO_OK);
     unsigned long channel = 0;
     ASSERT_EQ(ecuio_j2534_sur_connect_channel(h, 0, 0, &channel), ECUIO_OK);
     const unsigned char mask[4] = {0xFF, 0xFF, 0xFF, 0xFF};
@@ -1253,7 +1278,7 @@ TEST(J2534SurrogateTest, HardErrorUntouchedCountDeliversNoFrames)
 {
     SetEnvironmentVariableA("ECUIO_FAKE_UNTOUCHED_COUNT_STATUS", "7");
     ecuio_j2534_sur_handle_t* h = nullptr;
-    ASSERT_EQ(ecuio_j2534_sur_open(fake_dll_path(), &h), ECUIO_OK);
+    ASSERT_EQ(ecuio_j2534_sur_open(fake_dll_path(), fake_dll_arch(), &h), ECUIO_OK);
     SetEnvironmentVariableA("ECUIO_FAKE_UNTOUCHED_COUNT_STATUS", nullptr);
     unsigned long channel = 0;
     ASSERT_EQ(ecuio_j2534_sur_connect_channel(h, 0, 0, &channel), ECUIO_OK);

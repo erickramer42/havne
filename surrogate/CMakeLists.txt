@@ -5,11 +5,13 @@
 #          scripts/verify.sh). The release workflow checks its imports name
 #          no CRT DLL.
 #
-# ARCHITECTURE STORY (the "both targets" design):
+# ARCHITECTURE STORY (the "both targets" design, ADR-0025):
 # - Whatever architecture THIS tree is configured as, the surrogate and the
-#   fake DLL build in that same architecture. x64 tree -> x64 surrogate
-#   (CI-runnable IPC test); Win32 tree (-A Win32) -> x86 surrogate + x86
-#   fake, the true cross-arch case driven via ECUIO_SURROGATE_EXE.
+#   fake DLL build in that same architecture. x64 tree ->
+#   ecuio-j2534-surrogate-x64.exe, which hosts every x64 vendor DLL and
+#   ships next to the app; Win32 tree (-A Win32) ->
+#   ecuio-j2534-surrogate.exe, for x86 DLLs, + the x86 fake, the
+#   cross-arch case driven via ECUIO_SURROGATE_EXE.
 # - No cross-arch compilation happens inside a single configure pass; the
 #   second architecture comes from a second build directory.
 # - CI (x64 job) builds the all-x64 surrogate test; the x86 verification
@@ -29,8 +31,14 @@ target_include_directories(ecuio-j2534-surrogate PRIVATE
 
 # Entry point is wmain() (the DLL path arrives as UTF-16); subsystem
 # defaults to console, and the client spawns it with CREATE_NO_WINDOW.
+# The client picks the exe by the DLL's architecture, by name.
+if(CMAKE_SIZEOF_VOID_P EQUAL 8)
+    set(_sur_name "ecuio-j2534-surrogate-x64")
+else()
+    set(_sur_name "ecuio-j2534-surrogate")
+endif()
 set_target_properties(ecuio-j2534-surrogate PROPERTIES
-    OUTPUT_NAME "ecuio-j2534-surrogate"
+    OUTPUT_NAME "${_sur_name}"
 )
 qttune_enable_warnings(ecuio-j2534-surrogate)
 

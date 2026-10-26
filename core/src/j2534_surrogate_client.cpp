@@ -1,5 +1,6 @@
 // File/layer: core/src/j2534_surrogate_client.cpp | C++17, Qt-free, Win32-guarded
-// Testing: HARNESS — full stream and cross-arch suites
+// Testing: HARNESS — every J2534 suite (the x64 surrogate) and the
+//          cross-arch run (the x86 one); the exe chosen by the DLL's arch
 
 #include "ecuio/j2534_surrogate.h"
 #include "ecuio/core.h"
@@ -61,7 +62,27 @@ struct ecuio_j2534_sur_handle {
 
 namespace {
 
-constexpr const wchar_t* kSurrogateExeName = L"ecuio-j2534-surrogate.exe";
+/* One surrogate per DLL architecture (ADR-0025): the x86 exe, and the
+ * x64 one that also hosts a PE for any other machine, so Windows
+ * answers it as the app's own process would. Each has its own
+ * relocation variable. */
+struct SurrogateExe {
+    const wchar_t* name;
+    const char* name8;
+    const wchar_t* env;
+    const char* env8;
+};
+constexpr SurrogateExe kX86Surrogate = {
+    L"ecuio-j2534-surrogate.exe", "ecuio-j2534-surrogate.exe",
+    L"ECUIO_SURROGATE_EXE", "ECUIO_SURROGATE_EXE"};
+constexpr SurrogateExe kX64Surrogate = {
+    L"ecuio-j2534-surrogate-x64.exe", "ecuio-j2534-surrogate-x64.exe",
+    L"ECUIO_SURROGATE_X64_EXE", "ECUIO_SURROGATE_X64_EXE"};
+
+const SurrogateExe& surrogate_for(uint32_t dll_arch)
+{
+    return dll_arch == ECUIO_DLL_ARCH_X86 ? kX86Surrogate : kX64Surrogate;
+}
 constexpr DWORD kTransactTimeoutMs   = 3000;
 constexpr DWORD kHandshakeTimeoutMs_default = 8000;
 
@@ -217,26 +238,27 @@ HANDLE open_session_log(LONG seq, SECURITY_ATTRIBUTES* sa,
     return f;
 }
 
-/* The surrogate exe: ECUIO_SURROGATE_EXE when set, else the one next
- * to the running exe. The variable relocates the surrogate and nothing
- * more: it must be an absolute path to an existing file named
- * ecuio-j2534-surrogate.exe, so it can't start some other program, and
- * the path is always logged. Either way the file must exist, so a
- * missing copy says so instead of failing CreateProcess. On failure,
- * *why says what was wrong. */
-bool resolve_exe_path(wchar_t* out, size_t cap, bool* from_env, const char** why)
+/* The surrogate exe: its variable (ECUIO_SURROGATE_EXE or
+ * ECUIO_SURROGATE_X64_EXE) when set, else the one next to the running
+ * exe. The variable relocates the surrogate and nothing more: it must
+ * be an absolute path to an existing file of that surrogate's name, so
+ * it can't start some other program, and the path is always logged.
+ * Either way the file must exist, so a missing copy says so instead of
+ * failing CreateProcess. On failure, why says what was wrong. */
+bool resolve_exe_path(const SurrogateExe& sur, wchar_t* out, size_t cap,
+                      bool* from_env, char* why, size_t why_cap)
 {
     *from_env = false;
-    const DWORD n = GetEnvironmentVariableW(L"ECUIO_SURROGATE_EXE",
-                                             out, static_cast<DWORD>(cap));
+    const DWORD n = GetEnvironmentVariableW(sur.env, out,
+                                            static_cast<DWORD>(cap));
     if (n > 0) {
         *from_env = true;
         if (n >= cap) {
-            *why = "ECUIO_SURROGATE_EXE is too long";
+            snprintf(why, why_cap, "%s is too long", sur.env8);
             return false;
         }
         if (!ecuio_is_absolute_path(out)) {
-            *why = "ECUIO_SURROGATE_EXE is not an absolute path";
+            snprintf(why, why_cap, "%s is not an absolute path", sur.env8);
             return false;
         }
         /* An absolute path has a separator; the last one starts the
@@ -244,13 +266,13 @@ bool resolve_exe_path(wchar_t* out, size_t cap, bool* from_env, const char** why
         const wchar_t* sep = wcsrchr(out, L'\\');
         const wchar_t* fwd = wcsrchr(out, L'/');
         if (fwd != nullptr && (sep == nullptr || fwd > sep)) sep = fwd;
-        if (_wcsicmp(sep + 1, kSurrogateExeName) != 0) {
-            *why = "ECUIO_SURROGATE_EXE does not name ecuio-j2534-surrogate.exe";
+        if (_wcsicmp(sep + 1, sur.name) != 0) {
+            snprintf(why, why_cap, "%s does not name %s", sur.env8, sur.name8);
             return false;
         }
         const DWORD attr = GetFileAttributesW(out);
         if (attr == INVALID_FILE_ATTRIBUTES || (attr & FILE_ATTRIBUTE_DIRECTORY) != 0) {
-            *why = "ECUIO_SURROGATE_EXE names no file";
+            snprintf(why, why_cap, "%s names no file", sur.env8);
             return false;
         }
         return true;
@@ -259,19 +281,19 @@ bool resolve_exe_path(wchar_t* out, size_t cap, bool* from_env, const char** why
     const DWORD sn = GetModuleFileNameW(nullptr, self, MAX_PATH);
     const wchar_t* slash = wcsrchr(self, L'\\');
     if (sn == 0 || sn >= MAX_PATH || slash == nullptr) {
-        *why = "the app's own path is unavailable";
+        snprintf(why, why_cap, "the app's own path is unavailable");
         return false;
     }
     const size_t dir = static_cast<size_t>(slash - self) + 1;
-    if (dir + wcslen(kSurrogateExeName) + 1 > cap) {
-        *why = "the app's path is too long";
+    if (dir + wcslen(sur.name) + 1 > cap) {
+        snprintf(why, why_cap, "the app's path is too long");
         return false;
     }
     wmemcpy(out, self, dir);
-    wcscpy_s(out + dir, cap - dir, kSurrogateExeName);
+    wcscpy_s(out + dir, cap - dir, sur.name);
     const DWORD attr = GetFileAttributesW(out);
     if (attr == INVALID_FILE_ATTRIBUTES || (attr & FILE_ATTRIBUTE_DIRECTORY) != 0) {
-        *why = "none next to the app";
+        snprintf(why, why_cap, "none next to the app");
         return false;
     }
     return true;
@@ -645,7 +667,7 @@ void fetch_vendor_text(ecuio_j2534_sur_handle_t* h, char* out)
 
 extern "C" {
 
-ecuio_status_t ecuio_j2534_sur_open(const char* dll_path,
+ecuio_status_t ecuio_j2534_sur_open(const char* dll_path, uint32_t dll_arch,
                                     ecuio_j2534_sur_handle_t** out_handle)
 {
     if (dll_path == nullptr || out_handle == nullptr || dll_path[0] == '\0') {
@@ -674,17 +696,18 @@ ecuio_status_t ecuio_j2534_sur_open(const char* dll_path,
     h->log = open_session_log(seq, &inherit_sa, h->log_path, sizeof(h->log_path));
     const DWORD log_err = (h->log == INVALID_HANDLE_VALUE) ? GetLastError() : 0;
 
+    const SurrogateExe& sur = surrogate_for(dll_arch);
     wchar_t exe[MAX_PATH] = {};
     bool exe_from_env = false;
-    const char* exe_why = "";
-    const bool exe_ok = resolve_exe_path(exe, _countof(exe), &exe_from_env, &exe_why);
+    char exe_why[160] = {};
+    const bool exe_ok = resolve_exe_path(sur, exe, _countof(exe), &exe_from_env,
+                                         exe_why, sizeof(exe_why));
     char exe8[3 * MAX_PATH];
     (void)ecuio_wide_to_utf8(exe, exe8, sizeof(exe8));
     if (!exe_ok) {
         SUR_LOG(h, "open: no surrogate exe: %s ('%s')\n", exe_why, exe8);
         ecuio_j2534_sur_close(h);
-        ecuio_detail_set("no surrogate (ecuio-j2534-surrogate.exe): %s",
-                         exe_why);
+        ecuio_detail_set("no surrogate (%s): %s", sur.name8, exe_why);
         return ECUIO_ERR_SURROGATE_FAILED;
     }
 
@@ -798,9 +821,9 @@ ecuio_status_t ecuio_j2534_sur_open(const char* dll_path,
     }
     /* Logged while the child is still suspended, so it heads the
      * session log instead of racing the child's first line. */
-    SUR_LOG(h, "open: child pid %lu, surrogate '%s'%s, dll '%s'\n",
-            pi.dwProcessId, exe8,
-            exe_from_env ? " (ECUIO_SURROGATE_EXE)" : "", dll_path);
+    SUR_LOG(h, "open: child pid %lu, surrogate '%s'%s%s%s, dll '%s'\n",
+            pi.dwProcessId, exe8, exe_from_env ? " (" : "",
+            exe_from_env ? sur.env8 : "", exe_from_env ? ")" : "", dll_path);
     if (h->log_path[0] != '\0') {
         SUR_LOG(h, "open: log '%s'\n", h->log_path);
     } else {
@@ -1338,7 +1361,8 @@ const char* ecuio_j2534_sur_log_path(const ecuio_j2534_sur_handle_t* h)
 
 extern "C" {
 
-ecuio_status_t ecuio_j2534_sur_open(const char*, ecuio_j2534_sur_handle_t**)
+ecuio_status_t ecuio_j2534_sur_open(const char*, uint32_t,
+                                    ecuio_j2534_sur_handle_t**)
 { return ECUIO_ERR_NOT_IMPLEMENTED; }
 ecuio_status_t ecuio_j2534_sur_connect_channel(ecuio_j2534_sur_handle_t*,
                                                unsigned long, unsigned long,

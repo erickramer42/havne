@@ -82,6 +82,8 @@
 //    passed (a sloppy vendor; see ecuio_trusted_count);
 //    ECUIO_FAKE_SPEC_READ_SEMANTICS=1 switches to J2534-1 batches.
 //    ECUIO_FAKE_READ_DELAY_MS stalls the first read after load, once.
+//    ECUIO_FAKE_EXIT_ON_READ=1 ends a surrogate's process at its next
+//    read (a vendor DLL that crashes).
 //  * ECUIO_FAKE_VX=1 models the OBDX Pro VX as measured
 //    (docs/bench-sessions/2026-10-22.md and its vehicle sheet): batch
 //    reads held for their timeout, a short batch with STATUS_NOERROR
@@ -265,6 +267,21 @@ long long now_us()
 {
     return std::chrono::duration_cast<std::chrono::microseconds>(
         std::chrono::steady_clock::now().time_since_epoch()).count();
+}
+
+/* Whether this process is a surrogate (its exe is
+ * ecuio-j2534-surrogate*.exe), the only host ECUIO_FAKE_EXIT_ON_READ
+ * may end. */
+bool in_a_surrogate()
+{
+    char path[MAX_PATH] = {};
+    const DWORD n = GetModuleFileNameA(nullptr, path, MAX_PATH);
+    if (n == 0 || n >= MAX_PATH) {
+        return false;
+    }
+    const char* name = strrchr(path, '\\');
+    name = (name != nullptr) ? name + 1 : path;
+    return _strnicmp(name, "ecuio-j2534-surrogate", 21) == 0;
 }
 
 /* The VX's clock: microseconds, 32 bits, wrapping. */
@@ -745,6 +762,15 @@ long __stdcall PassThruReadMsgs(unsigned long ChannelID,
     (void)ChannelID; (void)Timeout;
     if (pMsg == nullptr || pNumMsgs == nullptr) {
         return STATUS_FAILED;
+    }
+
+    /* ECUIO_FAKE_EXIT_ON_READ=1: the vendor DLL crashes mid-session.
+     * It ends the process at once (exit code 9, no surrogate stage's),
+     * but only a surrogate's, so a test that loads the fake itself
+     * never takes its own runner down. */
+    if (fake_j2534::knob_on("ECUIO_FAKE_EXIT_ON_READ") &&
+        fake_j2534::in_a_surrogate()) {
+        TerminateProcess(GetCurrentProcess(), 9);
     }
 
     /* ECUIO_FAKE_READ_DELAY_MS: the first ReadMsgs after load sleeps
