@@ -35,8 +35,12 @@ mkdir -p "$LOGDIR"
 rm -f "$LOGDIR"/*.log
 
 root=$(pwd -W 2>/dev/null || pwd)
+# C and C++ sources in the source tree only: the database also lists
+# generated files, such as the version resource in the tree's own
+# surrogate/ folder, which clang-tidy can't read
 files=$(grep -oE '"file": *"[^"]*"' "$DB" | sed -E 's/"file": *"(.*)"/\1/' |
-    tr '\\' '/' | grep -E "/(core|surrogate)/" | sort -u)
+    tr '\\' '/' | grep -E "/(core|surrogate)/" | grep -E '\.(c|cc|cpp|cxx)$' |
+    grep -vF "/$TREE/" | sort -u)
 if [ -z "$files" ]; then
     echo "no core/ or surrogate/ sources in $DB" >&2
     exit 2
