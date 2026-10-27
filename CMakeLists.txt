@@ -2,7 +2,7 @@
 cmake_minimum_required(VERSION 3.21)
 
 project(QtTune
-    VERSION 0.3.1
+    VERSION 0.3.2
     DESCRIPTION "Cross-platform ECU reading, logging, and tuning"
     LANGUAGES C CXX
 )
@@ -80,6 +80,22 @@ function(qttune_enable_warnings target)
                 -Wl,-z,relro -Wl,-z,now)
         endif()
     endif()
+endfunction()
+
+# Windows: a VERSIONINFO resource for a shipped executable, from
+# project(QtTune VERSION ...): Explorer's Details tab shows it, code
+# signing reads it, and stage.ps1 checks it against the release.
+# <name> is the file's name without .exe.
+set(QTTUNE_VERSION_RC_IN "${CMAKE_CURRENT_SOURCE_DIR}/packaging/windows/version.rc.in")
+function(qttune_add_version_resource target name description)
+    if(NOT WIN32)
+        return()
+    endif()
+    set(QTTUNE_RC_NAME "${name}")
+    set(QTTUNE_RC_DESCRIPTION "${description}")
+    set(rc "${CMAKE_CURRENT_BINARY_DIR}/${name}_version.rc")
+    configure_file("${QTTUNE_VERSION_RC_IN}" "${rc}" @ONLY)
+    target_sources(${target} PRIVATE "${rc}")
 endfunction()
 
 add_subdirectory(core)

@@ -1,0 +1,39 @@
+// File/layer: packaging/windows/version.rc.in | Windows resource template
+// Testing: manual — the built exe's Details in Explorer, or
+//          (Get-Item <exe>).VersionInfo; stage.ps1 checks each packaged
+//          exe's ProductVersion against the release's version
+//
+// The version resource of each Windows executable QtTune ships:
+// Explorer's Details tab shows it, and code signing reads it. Filled in
+// by qttune_add_version_resource() (root CMakeLists.txt) from
+// project(QtTune VERSION ...), the one source of the version.
+
+#include <winver.h>
+
+VS_VERSION_INFO VERSIONINFO
+ FILEVERSION @QtTune_VERSION_MAJOR@,@QtTune_VERSION_MINOR@,@QtTune_VERSION_PATCH@,0
+ PRODUCTVERSION @QtTune_VERSION_MAJOR@,@QtTune_VERSION_MINOR@,@QtTune_VERSION_PATCH@,0
+ FILEFLAGSMASK VS_FFI_FILEFLAGSMASK
+ FILEFLAGS 0x0L
+ FILEOS VOS_NT_WINDOWS32
+ FILETYPE VFT_APP
+ FILESUBTYPE VFT2_UNKNOWN
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "040904b0"
+        BEGIN
+            VALUE "FileDescription", "@QTTUNE_RC_DESCRIPTION@"
+            VALUE "FileVersion", "@QtTune_VERSION@"
+            VALUE "InternalName", "@QTTUNE_RC_NAME@"
+            VALUE "LegalCopyright", "Copyright (c) 2026 Eric Kramer. MIT License."
+            VALUE "OriginalFilename", "@QTTUNE_RC_NAME@.exe"
+            VALUE "ProductName", "QtTune"
+            VALUE "ProductVersion", "@QtTune_VERSION@"
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x409, 1200
+    END
+END

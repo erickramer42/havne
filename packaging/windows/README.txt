@@ -24,7 +24,20 @@ Running it
    and Log pages all follow it.
 
 To remove QtTune, delete the folder. It keeps two preferences (zoom
-and units) under HKEY_CURRENT_USER\Software\QtTune.
+and units) under HKEY_CURRENT_USER\Software\QtTune, and any sessions
+you recorded under Documents\QtTune\recordings.
+
+
+Recording and replaying a session
+---------------------------------
+
+- Turn on "Record sessions" in Settings before you connect. Each
+  connect then writes a folder under Documents\QtTune\recordings: every
+  frame, every decoded value and the activity log.
+- To play one back, with no adapter or car: in Settings, enter
+  replay://<that folder's full path>?profile=obd2 (or ?profile=mock for
+  a recording of the simulated car) and Connect. Add &speed=10 to play
+  it ten times faster, or &loop=1 to play it again and again.
 
 
 Using an adapter

@@ -1,6 +1,6 @@
 # QtTune — Project Status
 
-**Updated:** 2026-10-26 · **Version:** v0.3.1 ·
+**Updated:** 2026-10-26 · **Version:** v0.3.2 ·
 [![CI](https://github.com/erickramer42/qttune/actions/workflows/ci.yml/badge.svg)](https://github.com/erickramer42/qttune/actions/workflows/ci.yml)
 
 This file covers the project as it stands: what works, what comes
@@ -13,8 +13,9 @@ Safety, regulatory and warranty caveats are in
 
 ## Where things stand
 
-**Current phase: v0.3.x.** v0.3.1, the first release with a Windows
-download, is out; what has changed since is in
+**Current phase: v0.3.x, its plan complete.** v0.3.2 is out: replay,
+decoding on the transport's thread, and every driver in a process of
+its own; what has changed since is in
 [CHANGELOG.md](CHANGELOG.md#unreleased). The J2534 stack is verified
 end to end against a fake vendor DLL, through the x64 and the x86
 surrogate. One real adapter, the OBDX Pro VX, has run on a quiet bench
@@ -23,7 +24,9 @@ bus and in two read-only sessions on one car
 [2026-10-25](docs/bench-sessions/2026-10-25-vehicle.md)): the engine
 ECU answered, the values decoded and tracked the cluster, and the
 second session ran the request engine, the probe, identification and
-`uds-generic` there. Next is the plan in [After v0.3.0](#after-v030).
+`uds-generic` there. Every item in [After v0.3.0](#after-v030) has
+shipped; the next milestone is still to be chosen from the
+[backlog](#backlog).
 
 - **Works:**
   - **Mock transport,** on every platform: a scripted drive cycle (a
@@ -103,9 +106,8 @@ second session ran the request engine, the probe, identification and
 
 ## After v0.3.0
 
-The v0.3.x plan, in order. Items 1–4 shipped in v0.3.1 and item 5 is
-in [Unreleased](CHANGELOG.md#unreleased); each ADR holds the design
-and the car's measurements.
+The v0.3.x plan, in order. Items 1–4 shipped in v0.3.1, items 5 and
+6 in v0.3.2; each ADR holds the design and the car's measurements.
 
 1. **Request engine** ([ADR-0015](docs/adr/0015-request-engine.md)):
    built; on the car, about 26 requests a second, replies 19 ms after
@@ -186,7 +188,7 @@ an issue is resolved it is removed, and its number is not reused.
 | v0.1.0 | Skeleton: core ABI, Qt shell, responsive layout | ✅ Released |
 | v0.2.0 | Callback API, mock transport, live frame log, CI | ✅ Released (tagged) |
 | v0.3.0 | Signal decoding, LiveView, J2534 transport, live vehicle read and logging | ✅ Released (tagged) |
-| v0.3.x | Request engine, PID-support probe, `uds-generic`, vehicle identification, record-replay transport | Under way: [after v0.3.0](#after-v030) |
+| v0.3.x | Request engine, PID-support probe, `uds-generic`, vehicle identification (v0.3.1); record-replay transport, decoding on the transport's thread (v0.3.2) | ✅ Released |
 | v0.4.0 | Security access discovery, flash capability | Planned |
 | v0.5.0+ | Manufacturer plugin modules (ADR-0013's profile API) | Planned |
 

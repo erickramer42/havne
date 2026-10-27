@@ -563,7 +563,7 @@ optional Quick plugins this app never uses.
 
 A version tag publishes a Windows x64 download through
 `.github/workflows/release.yml`. The zip runs on a PC with neither Qt
-nor Visual Studio: it carries the app, the x86 J2534 surrogate, the Qt
+nor Visual Studio: it carries the app, the x86 and x64 J2534 surrogates, the Qt
 runtime that windeployqt deploys, and the app-local Visual C++
 runtime.
 
@@ -613,7 +613,10 @@ runtime.
   the surrogate imports a CRT DLL (it links the CRT statically, `/MT`,
   because an x86 `vcruntime140.dll` can't sit beside the app's x64
   one), if `qttune.exe` imports a DLL that is neither in the folder nor
-  part of Windows, if it carries QML debugging (an import of
+  part of Windows, if `qttune.exe` or either surrogate carries a version
+  resource other than "QtTune X.Y.Z" (`packaging/windows/version.rc.in`,
+  filled from the CMake project version; a stale tree fails it), if it
+  carries QML debugging (an import of
   `QQmlDebuggingEnabler`, or `qmltooling` plugins in the folder: a
   build with `QT_QML_DEBUG` opens an unauthenticated debug server when
   launched with `-qmljsdebugger`, so `app/CMakeLists.txt` defines it

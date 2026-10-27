@@ -83,6 +83,7 @@ target_link_libraries(qttune PRIVATE
     qttune_uiplugin
 )
 qttune_enable_warnings(qttune)
+qttune_add_version_resource(qttune qttune "QtTune ECU reader and logger")
 
 if(WIN32)
     set_target_properties(qttune PROPERTIES WIN32_EXECUTABLE TRUE)

@@ -13,6 +13,8 @@
 #     neither imports a C runtime DLL (each links it statically; an x86
 #     vcruntime140.dll can't sit beside the app's x64 one);
 #   - every DLL qttune.exe imports is in the folder or is part of Windows;
+#   - qttune.exe and both surrogates carry this release's version in
+#     their version resource (Explorer's Details; code signing reads it);
 #   - no QML debugging: qttune.exe doesn't import QQmlDebuggingEnabler
 #     (QT_QML_DEBUG, Debug builds only) and no qmltooling plugins ship;
 #   - the staged qttune.exe starts and is still running after -SmokeSeconds,
@@ -97,6 +99,16 @@ foreach ($dll in Imports (Join-Path $stage 'qttune.exe')) {
     Fail "qttune.exe imports $dll, which is neither in the package nor part of Windows"
 }
 Write-Host 'qttune.exe imports: all present'
+
+# ---- Check: each exe's version resource is this release's version
+$want = $Version -replace '-.*$', ''   # 0.3.2-rc1 and 0.3.2-local carry 0.3.2
+foreach ($exe in 'qttune.exe', 'ecuio-j2534-surrogate.exe', 'ecuio-j2534-surrogate-x64.exe') {
+    $info = (Get-Item (Join-Path $stage $exe)).VersionInfo
+    if ($info.ProductVersion -ne $want -or $info.ProductName -ne 'QtTune') {
+        Fail "$exe carries '$($info.ProductName) $($info.ProductVersion)', not 'QtTune $want'; rebuild both trees after the version changes"
+    }
+}
+Write-Host "version resources: QtTune $want"
 
 # ---- Check: no QML debugging. A build with it opens a debug server that
 # can run script in the app when launched with -qmljsdebugger.

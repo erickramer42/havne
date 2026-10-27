@@ -34,13 +34,17 @@ target_include_directories(ecuio-j2534-surrogate PRIVATE
 # The client picks the exe by the DLL's architecture, by name.
 if(CMAKE_SIZEOF_VOID_P EQUAL 8)
     set(_sur_name "ecuio-j2534-surrogate-x64")
+    set(_sur_bits "64-bit")
 else()
     set(_sur_name "ecuio-j2534-surrogate")
+    set(_sur_bits "32-bit")
 endif()
 set_target_properties(ecuio-j2534-surrogate PROPERTIES
     OUTPUT_NAME "${_sur_name}"
 )
 qttune_enable_warnings(ecuio-j2534-surrogate)
+qttune_add_version_resource(ecuio-j2534-surrogate "${_sur_name}"
+    "QtTune helper for ${_sur_bits} J2534 drivers")
 
 # No ecuio-core link needed: the surrogate resolves the vendor DLL's
 # exports through GetProcAddress and speaks the POD protocol types from

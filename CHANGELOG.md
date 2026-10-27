@@ -10,6 +10,8 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
 
 ## [Unreleased]
 
+## [0.3.2] - 2026-10-26
+
 ### Added
 - **Replay** ([ADR-0023](docs/adr/0023-replay-transport.md)):
   `replay://<recording>` plays a recording's `frames.csv` back on every
@@ -23,6 +25,8 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
   the file.
 - Connect-failure text names a vendor's status in hex as well as
   decimal ("status 34 (0x22, vendor-specific)").
+- The Windows executables carry a version resource, so Explorer's
+  Details tab names QtTune and its version.
 - The Windows download's signed build provenance is a release file
   too (`<zip>.intoto.jsonl`), so the zip can be checked with
   `gh attestation verify <zip> --bundle <zip>.intoto.jsonl -R erickramer42/qttune`.
@@ -146,7 +150,8 @@ The first release with a Windows download
   shell with a responsive layout.
 - CI on Windows, macOS and Linux, running the core's tests.
 
-[Unreleased]: https://github.com/erickramer42/qttune/compare/v0.3.1...HEAD
+[Unreleased]: https://github.com/erickramer42/qttune/compare/v0.3.2...HEAD
+[0.3.2]: https://github.com/erickramer42/qttune/compare/v0.3.1...v0.3.2
 [0.3.1]: https://github.com/erickramer42/qttune/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/erickramer42/qttune/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/erickramer42/qttune/compare/v0.1.0...v0.2.0

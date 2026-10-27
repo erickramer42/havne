@@ -181,7 +181,7 @@ screen, is [docs/architecture.md](docs/architecture.md).
 | v0.2.0 | Callback API, mock transport, live frame log | ✅ Released |
 | v0.3.0 | Signal decoding, live view, J2534 transport, live vehicle read and logging (tested on one vehicle) | ✅ Released |
 | v0.3.1 | Request engine, PID-support probe, vehicle identification, generic UDS reads, imperial units; the first Windows download | ✅ Released |
-| v0.3.x | Record-replay transport, decoding on the transport's thread, every driver in its own process | Built, unreleased ([CHANGELOG](CHANGELOG.md#unreleased)) |
+| v0.3.2 | Record-replay transport, decoding on the transport's thread, every driver in its own process | ✅ Released |
 | v0.4.0 | Security access discovery, flash capability | Planned |
 | v0.5.0+ | Manufacturer plugin modules | Planned |
 
