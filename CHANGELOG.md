@@ -10,6 +10,10 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
 
 ## [Unreleased]
 
+### Changed
+- Home's logo is a small tachometer whose needle idles and blips into
+  the red.
+
 ## [0.3.2] - 2026-10-26
 
 Replay, decoding in core, and every driver in a process of its own
