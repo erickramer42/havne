@@ -231,6 +231,7 @@ present", and the field stays empty.
 | `AT Z` | contract | a known state; its answer must be an ELM327 version string (`ELM327` and a version, any case) |
 | `AT E0`, `AT L0`, `AT S0` | contract | no echo, no linefeeds, no spaces: fewer bytes per reply |
 | `AT H1` | contract | the CAN ID and the PCI byte on every line, so core reassembles and correlates |
+| `AT D0` | contract | no data length digit between the ID and the data. An STN prints one when its parameter 29 is on, which another app could have set; the OBDX takes `AT D0` as a compatibility command and answers OK |
 | `AT CAF1`, `AT CFC1` | contract | the adapter adds the PCI bytes when sending and sends the flow control after a First Frame. Both are defaults, set anyway: the framing rests on them, and a clone's defaults aren't trusted |
 | `AT SP 6`, `7`, `8` or `9` | contract | ISO 15765-4 at the mode and rate of section 2, never an automatic search |
 | `AT SH <tx>` | contract | the first channel's request ID |
@@ -240,7 +241,7 @@ present", and the field stays empty.
 | `AT I` | reading | the version string for the session info |
 | `STI` | reading | an STN chip's firmware (`STN<id> vX.Y.Z`). A plain ELM327 answers `?`, which means it isn't an STN, not that it failed |
 | `STVR` on an STN, else `AT RV` | reading | the adapter's input voltage, for `vbatt_mv`. Dashes (over 65.5 V) or anything unparsable mean no reading |
-| `AT PPS` on an STN | reading | the programmable parameters. If parameter 2A is on with bit 2 clear (no `7F xx 78` processing), the session line says so, since a pending reply would then be lost (open questions) |
+| `AT PPS` on an STN | reading | the programmable parameters. If parameter 2A is on with bit 2 clear (no `7F xx 78` processing), the session info flags it (`ECUIO_SESSION_INFO_PENDING_OFF`) and the session line says so, since a pending reply would then be lost (open questions) |
 
 **The worker** drives the request engine as the J2534 worker does,
 with one difference: **one command is outstanding for the whole
@@ -360,8 +361,8 @@ UI needs no new code.
   `7F 22 31` and `7F 22 78` reaching the engine.
 - **HARNESS:** a fake ELM327 behind the byte-stream interface
   (`tests/fake_elm327.h`), answering from the same canned replies the
-  fake J2534 DLL uses (`g_obd2_canned`, its DIDs and identification
-  items), with knobs for `NO DATA`, `CAN ERROR`, `?` to `STI` (a plain
+  fake J2534 DLL uses (one ECU for both fakes, `tests/fake_ecu.h`: its
+  PIDs, DIDs and identification items), with knobs for `NO DATA`, `CAN ERROR`, `?` to `STI` (a plain
   ELM327), a dropped link and a slow reply. That covers the probe, the
   rotation, the scan, identification, link health and recovery, the
   pending path, and nothing allocated per frame.

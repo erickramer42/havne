@@ -1,0 +1,1080 @@
+// File/layer: tests/test_elm327_session.cpp | GTest, HARNESS tier,
+//             headless CI job (every platform)
+// Testing: HARNESS — the ELM327 transport (core/src/elm327_transport.cpp,
+//          ADR-0026) end to end against the fake ELM327
+//          (tests/fake_elm327.h) behind the port opener (internal.h):
+//          Elm327SessionTest pins the URI and its refusals, the setup,
+//          the session info, the requests, multi-frame replies, link
+//          health and recovery, and that the worker allocates nothing per
+//          frame. Elm327PortTest (POSIX only) runs the OS's termios port
+//          against the fake on a pseudo-terminal. Qt-free.
+
+#include <gtest/gtest.h>
+
+#include "ecuio/core.h"
+#include "ecuio/internal.h"
+#include "ecuio/profile.h"
+#include "elm327_port.h" /* core/src */
+#include "fake_elm327.h"
+#include "new_counter.h"
+
+#include <algorithm>
+#include <atomic>
+#include <chrono>
+#include <cstring>
+#include <functional>
+#include <mutex>
+#include <string>
+#include <thread>
+#include <vector>
+
+#ifndef _WIN32
+#include <cerrno>
+#include <fcntl.h>
+#include <poll.h>
+#include <stdlib.h>
+#include <unistd.h>
+#endif
+
+namespace {
+
+/* A port name this OS's URIs take; the fake opener ignores it. */
+#ifdef _WIN32
+constexpr char kPort[] = "COM7";
+#else
+constexpr char kPort[] = "/dev/fake-elm327";
+#endif
+
+std::string uri(const std::string& query = "")
+{
+    return std::string("elm327://") + kPort + query;
+}
+
+bool wait_for(const std::function<bool()>& pred, int timeout_ms)
+{
+    const auto deadline = std::chrono::steady_clock::now() +
+                          std::chrono::milliseconds(timeout_ms);
+    while (std::chrono::steady_clock::now() < deadline) {
+        if (pred()) {
+            return true;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    return pred();
+}
+
+std::string hex_of(const uint8_t* d, size_t n)
+{
+    static const char digits[] = "0123456789ABCDEF";
+    std::string s;
+    for (size_t i = 0; i < n; ++i) {
+        if (i > 0) {
+            s += ' ';
+        }
+        s += digits[d[i] >> 4];
+        s += digits[d[i] & 0x0F];
+    }
+    return s;
+}
+
+/* Every frame the session delivered: ID, flags and bytes, plus the
+ * length, so a long reply is checked without its text. */
+struct Capture {
+    struct Frame {
+        uint32_t id;
+        uint32_t flags;
+        std::vector<uint8_t> data;
+    };
+    std::mutex m;
+    std::vector<Frame> frames;
+
+    static void cb(const ecuio_frame_t* f, void* user)
+    {
+        auto* c = static_cast<Capture*>(user);
+        std::lock_guard<std::mutex> g(c->m);
+        c->frames.push_back(
+            {f->arbitration_id, f->flags,
+             std::vector<uint8_t>(f->data, f->data + f->data_length)});
+    }
+
+    /* Frames whose bytes start with prefix (hex, spaced). */
+    size_t count(const std::string& prefix)
+    {
+        std::lock_guard<std::mutex> g(m);
+        size_t n = 0;
+        for (const Frame& f : frames) {
+            n += hex_of(f.data.data(), f.data.size()).rfind(prefix, 0) == 0;
+        }
+        return n;
+    }
+
+    bool find(const std::string& prefix, Frame* out)
+    {
+        std::lock_guard<std::mutex> g(m);
+        for (const Frame& f : frames) {
+            if (hex_of(f.data.data(), f.data.size()).rfind(prefix, 0) == 0) {
+                *out = f;
+                return true;
+            }
+        }
+        return false;
+    }
+};
+
+/* A started session with a capture, destroyed at the end of the scope. */
+struct Session {
+    ecuio_session_t* s = nullptr;
+    Capture cap;
+
+    ecuio_status_t create(const std::string& u)
+    {
+        return ecuio_session_create(u.c_str(), &s);
+    }
+    void start()
+    {
+        ASSERT_NE(s, nullptr);
+        ASSERT_EQ(ecuio_register_frame_callback(s, Capture::cb, &cap),
+                  ECUIO_OK);
+        ASSERT_EQ(ecuio_session_start(s), ECUIO_OK);
+    }
+    int32_t state(uint32_t* episodes = nullptr)
+    {
+        int32_t last = -1;
+        uint32_t count = 0;
+        EXPECT_EQ(ecuio_session_get_error_state(s, &last, &count), ECUIO_OK);
+        if (episodes != nullptr) {
+            *episodes = count;
+        }
+        return last;
+    }
+    ~Session() { ecuio_session_destroy(s); }
+};
+
+/* Runs fn on the fake's adapter under its lock; returns its result. */
+template <typename T, typename Fn> T on_fake(Fn&& fn)
+{
+    T out{};
+    fake_elm327::with([&](fake_elm327::adapter& a) { out = fn(a); });
+    return out;
+}
+
+uint32_t fake_count(const char* prefix)
+{
+    return on_fake<uint32_t>(
+        [&](fake_elm327::adapter& a) { return a.count(prefix); });
+}
+
+std::vector<std::string> fake_commands()
+{
+    return on_fake<std::vector<std::string>>([](fake_elm327::adapter& a) {
+        std::vector<std::string> v;
+        for (uint32_t i = 0; i < a.commands && i < a.kRecordDepth; ++i) {
+            v.emplace_back(a.recorded[i]);
+        }
+        return v;
+    });
+}
+
+void set_knobs(const std::function<void(fake_elm327::knobs&)>& fn)
+{
+    fake_elm327::with([&](fake_elm327::adapter& a) { fn(a.k); });
+}
+
+class Elm327SessionTest : public ::testing::Test
+{
+protected:
+    fake_elm327::installed fake_;
+};
+
+} // namespace
+
+/* The setup's contract commands in order, then the readings, then the
+ * requests: the obd2 profile's probe first, each Service 01 request to
+ * the engine ECU with the count digit (ADR-0026 §3) */
+TEST_F(Elm327SessionTest, SetupRunsTheContractThenTheReadings)
+{
+    Session s;
+    ASSERT_EQ(s.create(uri()), ECUIO_OK) << ecuio_last_error_detail();
+    const std::vector<std::string> setup = {
+        "ATZ",      "ATE0",   "ATL0",  "ATS0",  "ATH1",   "ATD0",
+        "ATCAF1",   "ATCFC1", "ATSP6", "ATAT1", "ATST19", "ATSH7E0",
+        "ATCRA7E8", "ATI",    "STI",   "STVR",  "ATPPS"};
+    EXPECT_EQ(fake_commands(), setup);
+
+    s.start();
+    ASSERT_TRUE(wait_for([&] { return fake_count("01") >= 3; }, 3000));
+    const std::vector<std::string> sent = fake_commands();
+    ASSERT_GT(sent.size(), setup.size());
+    EXPECT_EQ(sent[setup.size()], "01001") << "the probe's first bitmap";
+    EXPECT_EQ(
+        on_fake<uint32_t>([](fake_elm327::adapter& a) { return a.bare_crs; }),
+        0u)
+        << "a bare CR repeats the last command";
+}
+
+/* What the session runs on (ADR-0026 §7): the backend, ISO 15765 at the
+ * CAN rate, the channel, an STN's two version strings and STVR's
+ * voltage */
+TEST_F(Elm327SessionTest, TheSessionInfoSaysWhatItRunsOn)
+{
+    Session s;
+    ASSERT_EQ(s.create(uri()), ECUIO_OK) << ecuio_last_error_detail();
+    ecuio_session_info_t info{};
+    ASSERT_EQ(ecuio_session_get_info(s.s, &info), ECUIO_OK);
+    EXPECT_EQ(info.backend, ECUIO_BACKEND_ELM327);
+    EXPECT_EQ(info.dll_arch, ECUIO_DLL_ARCH_UNKNOWN);
+    EXPECT_EQ(info.protocol_id, 6u) << "ISO 15765";
+    EXPECT_EQ(info.baud, 500000u);
+    EXPECT_EQ(info.channel_count, 1u);
+    EXPECT_EQ(info.rx_ids[0], 0x7E8u);
+    EXPECT_EQ(info.tx_ids[0], 0x7E0u);
+    EXPECT_STREQ(info.firmware_version, "ELM327 v1.4b, STN2255 v9.9.9");
+    EXPECT_STREQ(info.dll_version, "");
+    EXPECT_STREQ(info.api_version, "");
+    EXPECT_EQ(info.vbatt_mv, 13800u);
+    EXPECT_EQ(info.flags,
+              ECUIO_SESSION_INFO_VBATT | ECUIO_SESSION_INFO_VERSIONS);
+    EXPECT_STREQ(info.profile, "obd2") << "elm327://'s default";
+}
+
+/* A plain ELM327 refuses the ST commands: not an STN, which is no
+ * failure. Its voltage comes from AT RV, and AT PPS isn't asked */
+TEST_F(Elm327SessionTest, APlainElm327ConnectsWithoutTheStnReadings)
+{
+    set_knobs([](fake_elm327::knobs& k) { k.plain = true; });
+    Session s;
+    ASSERT_EQ(s.create(uri()), ECUIO_OK) << ecuio_last_error_detail();
+    ecuio_session_info_t info{};
+    ASSERT_EQ(ecuio_session_get_info(s.s, &info), ECUIO_OK);
+    EXPECT_STREQ(info.firmware_version, "ELM327 v1.4b");
+    EXPECT_EQ(info.vbatt_mv, 13800u) << "AT RV's 13.8V";
+    EXPECT_EQ(fake_count("STVR"), 0u);
+    EXPECT_EQ(fake_count("ATRV"), 1u);
+    EXPECT_EQ(fake_count("ATPPS"), 0u);
+}
+
+/* Parameter 2A on with bit 2 clear: the adapter won't wait past a
+ * 7F xx 78, and the session info says so. Off, or on with the bit set,
+ * it does */
+TEST_F(Elm327SessionTest, AnStnSetNotToWaitOnPendingRepliesIsReported)
+{
+    struct Case {
+        uint8_t value;
+        bool on;
+        bool reported;
+    };
+    for (const Case c : {Case{0x00, true, true}, Case{0x00, false, false},
+                         Case{0x04, true, false}, Case{0xFB, true, true}}) {
+        SCOPED_TRACE(testing::Message()
+                     << "2A " << int{c.value} << " " << (c.on ? 'N' : 'F'));
+        set_knobs([&](fake_elm327::knobs& k) {
+            k.pp2a = c.value;
+            k.pp2a_on = c.on;
+        });
+        Session s;
+        ASSERT_EQ(s.create(uri()), ECUIO_OK) << ecuio_last_error_detail();
+        ecuio_session_info_t info{};
+        ASSERT_EQ(ecuio_session_get_info(s.s, &info), ECUIO_OK);
+        EXPECT_EQ((info.flags & ECUIO_SESSION_INFO_PENDING_OFF) != 0,
+                  c.reported);
+    }
+}
+
+/* The obd2 profile's values arrive from the engine ECU as the J2534
+ * fake's do: the same ECU answers both (tests/fake_ecu.h), and the
+ * session stays OK */
+TEST_F(Elm327SessionTest, Obd2ValuesArriveFromTheEngineEcu)
+{
+    Session s;
+    ASSERT_EQ(s.create(uri()), ECUIO_OK) << ecuio_last_error_detail();
+    s.start();
+    ASSERT_TRUE(wait_for([&] { return s.cap.count("41 0C") >= 2; }, 5000));
+    Capture::Frame f{};
+    ASSERT_TRUE(s.cap.find("41 0C", &f));
+    EXPECT_EQ(f.id, 0x7E8u);
+    EXPECT_EQ(f.flags, 0u);
+    EXPECT_EQ(hex_of(f.data.data(), f.data.size()), "41 0C 1F 40")
+        << "the PCI byte and the padding are gone";
+    EXPECT_GE(s.cap.count("41 05"), 1u);
+    uint32_t episodes = 99;
+    EXPECT_EQ(s.state(&episodes), ECUIO_OK);
+    EXPECT_EQ(episodes, 0u);
+}
+
+/* The probe walks the supported-PID chain (01 00, 20, 40), and the
+ * support report says what it learned */
+TEST_F(Elm327SessionTest, TheProbeWalksTheChainAndReportsIt)
+{
+    Session s;
+    ASSERT_EQ(s.create(uri("?identify=0")), ECUIO_OK);
+    s.start();
+    ecuio_channel_support_t sup{};
+    ASSERT_TRUE(wait_for(
+        [&] {
+            return ecuio_session_get_channel_support(s.s, 0, &sup) ==
+                       ECUIO_OK &&
+                   (sup.flags & ECUIO_SUPPORT_COMPLETE) != 0;
+        },
+        5000));
+    EXPECT_EQ(sup.rx_id, 0x7E8u);
+    EXPECT_EQ(sup.ranges, 0x07u) << "the bitmaps at 0x00, 0x20 and 0x40";
+    EXPECT_EQ(sup.dropped, 0u) << "the fake supports every obd2 PID";
+    EXPECT_EQ(fake_count("01001"), 1u);
+    EXPECT_EQ(fake_count("01201"), 1u);
+    EXPECT_EQ(fake_count("01401"), 1u);
+}
+
+/* Identification's replies span frames (the VIN's 20 bytes: a First
+ * Frame and two Consecutive Frames), are reassembled and reach the
+ * identity report; Service 09 and 0x22 carry no count digit */
+TEST_F(Elm327SessionTest, IdentificationReassemblesItsLongReplies)
+{
+    Session s;
+    ASSERT_EQ(s.create(uri("?probe=0")), ECUIO_OK);
+    s.start();
+    ecuio_channel_identity_t id{};
+    ASSERT_TRUE(wait_for(
+        [&] {
+            return ecuio_session_get_channel_identity(s.s, 0, &id) ==
+                       ECUIO_OK &&
+                   (id.flags & ECUIO_IDENTITY_COMPLETE) != 0;
+        },
+        8000));
+    ASSERT_GT(id.items, 0u);
+    EXPECT_EQ(id.list[0].request[0], 0x09);
+    EXPECT_EQ(id.list[0].request[1], 0x02);
+    EXPECT_EQ(id.list[0].outcome, ECUIO_IDENTITY_ANSWERED);
+    EXPECT_STREQ(id.list[0].text, "FAKEJ2534VIN00001");
+    EXPECT_EQ(fake_count("0902"), 1u);
+    EXPECT_EQ(fake_count("09021"), 0u);
+    EXPECT_EQ(fake_count("22F190"), 1u);
+    EXPECT_EQ(fake_count("22F1901"), 0u);
+    Capture::Frame f{};
+    ASSERT_TRUE(s.cap.find("49 02", &f));
+    EXPECT_EQ(f.data.size(), 20u);
+}
+
+/* ISO-TP's longest message, 4095 bytes in 586 frame lines, arrives as
+ * one frame, every byte in place */
+TEST_F(Elm327SessionTest, TheLongestMessageArrivesWhole)
+{
+    Session s;
+    ASSERT_EQ(s.create(uri("?profile=uds-generic&did=F1A1&identify=0")),
+              ECUIO_OK)
+        << ecuio_last_error_detail();
+    s.start();
+    ASSERT_TRUE(wait_for([&] { return s.cap.count("62 F1 A1") >= 1; }, 5000));
+    Capture::Frame f{};
+    ASSERT_TRUE(s.cap.find("62 F1 A1", &f));
+    ASSERT_EQ(f.data.size(), 4095u);
+    EXPECT_EQ(f.flags & ECUIO_FRAME_FLAG_TRUNCATED, 0u);
+    bool in_place = true;
+    for (size_t i = 3; i < f.data.size(); ++i) {
+        in_place =
+            in_place && f.data[i] == static_cast<uint8_t>((i - 3) & 0xFF);
+    }
+    EXPECT_TRUE(in_place);
+}
+
+/* Two ECUs: the receive filter passes both (AT CF/CM), each request goes
+ * out under its channel's header, and AT SH is sent only on a switch */
+TEST_F(Elm327SessionTest, EachChannelIsAskedUnderItsOwnHeader)
+{
+    Session s;
+    ASSERT_EQ(s.create(uri("?profile=uds-generic&did=7E8:1E1C&did=7E9:1E1C"
+                           "&identify=0")),
+              ECUIO_OK)
+        << ecuio_last_error_detail();
+    const std::vector<std::string> setup = fake_commands();
+    EXPECT_NE(std::find(setup.begin(), setup.end(), "ATCF7E8"), setup.end());
+    EXPECT_NE(std::find(setup.begin(), setup.end(), "ATCM7FE"), setup.end());
+    s.start();
+    ASSERT_TRUE(wait_for(
+        [&] {
+            std::lock_guard<std::mutex> g(s.cap.m);
+            int a = 0;
+            int b = 0;
+            for (const Capture::Frame& f : s.cap.frames) {
+                a += f.id == 0x7E8u;
+                b += f.id == 0x7E9u;
+            }
+            return a >= 3 && b >= 3;
+        },
+        5000));
+    const std::vector<std::string> sent = fake_commands();
+    std::string header;
+    for (size_t i = setup.size(); i < sent.size(); ++i) {
+        if (sent[i].rfind("ATSH", 0) == 0) {
+            EXPECT_NE(sent[i], header) << "AT SH repeated at " << i;
+            header = sent[i];
+        } else if (sent[i] == "221E1C") {
+            EXPECT_TRUE(header == "ATSH7E0" || header == "ATSH7E1" ||
+                        (header.empty() && i == setup.size()))
+                << sent[i] << " at " << i;
+        }
+    }
+}
+
+/* 29-bit channels: protocol 7, the priority and header in two commands,
+ * the 29-bit receive filter, and frames flagged EXTENDED */
+TEST_F(Elm327SessionTest, TwentyNineBitChannelsUseTheirOwnProtocol)
+{
+    Session s;
+    ASSERT_EQ(s.create(uri("?filter=0x18DAF110&txid=0x18DA10F1&poll=0x0C")),
+              ECUIO_OK)
+        << ecuio_last_error_detail();
+    const std::vector<std::string> setup = fake_commands();
+    for (const char* cmd : {"ATSP7", "ATCP18", "ATSHDA10F1", "ATCRA18DAF110"}) {
+        EXPECT_NE(std::find(setup.begin(), setup.end(), cmd), setup.end())
+            << cmd;
+    }
+    s.start();
+    ASSERT_TRUE(wait_for([&] { return s.cap.count("41 0C") >= 1; }, 3000));
+    Capture::Frame f{};
+    ASSERT_TRUE(s.cap.find("41 0C", &f));
+    EXPECT_EQ(f.id, 0x18DAF110u);
+    EXPECT_EQ(f.flags, uint32_t{ECUIO_FRAME_FLAG_EXTENDED});
+}
+
+/* ?baud=250000 picks protocol 8, and the session info says so */
+TEST_F(Elm327SessionTest, TheCanRatePicksTheProtocol)
+{
+    Session s;
+    ASSERT_EQ(s.create(uri("?baud=250000&poll=0x0C")), ECUIO_OK);
+    EXPECT_EQ(fake_count("ATSP8"), 1u);
+    ecuio_session_info_t info{};
+    ASSERT_EQ(ecuio_session_get_info(s.s, &info), ECUIO_OK);
+    EXPECT_EQ(info.baud, 250000u);
+}
+
+/* raw has the engine ECU's channel (ADR-0013's appendix), so ?poll=
+ * asks it, with the count digit; a lone ?poll= sends nothing else */
+TEST_F(Elm327SessionTest, RawWithPollAsksTheEngineEcu)
+{
+    Session s;
+    ASSERT_EQ(s.create(uri("?profile=raw&poll=0x0C")), ECUIO_OK)
+        << ecuio_last_error_detail();
+    s.start();
+    ASSERT_TRUE(wait_for([&] { return s.cap.count("41 0C") >= 3; }, 3000));
+    const uint32_t requests =
+        on_fake<uint32_t>([](fake_elm327::adapter& a) { return a.requests; });
+    EXPECT_EQ(fake_count("010C1"), requests) << "only ?poll='s request";
+}
+
+/* An adapter that prints an 11-bit ID as two bytes (07E8) reads the
+ * same */
+TEST_F(Elm327SessionTest, FourDigitElevenBitIdsReadTheSame)
+{
+    set_knobs([](fake_elm327::knobs& k) { k.four_digit_ids = true; });
+    Session s;
+    ASSERT_EQ(s.create(uri("?poll=0x0C")), ECUIO_OK);
+    s.start();
+    ASSERT_TRUE(
+        wait_for([&] { return s.cap.count("41 0C 1F 40") >= 2; }, 3000));
+}
+
+/* A pending reply (7F 01 78) and its answer in the same read: the
+ * engine waits on, the answer completes the request, and the rotation
+ * keeps its pace */
+TEST_F(Elm327SessionTest, APendingReplyIsFollowedByItsAnswer)
+{
+    set_knobs([](fake_elm327::knobs& k) { k.pending = true; });
+    Session s;
+    ASSERT_EQ(s.create(uri("?poll=0x0C")), ECUIO_OK);
+    s.start();
+    ASSERT_TRUE(wait_for([&] { return s.cap.count("41 0C") >= 5; }, 2000))
+        << "each answer completes its request, no 5 s pending wait";
+    EXPECT_GE(s.cap.count("7F 01 78"), 5u);
+    EXPECT_EQ(s.state(), ECUIO_OK);
+}
+
+/* An ECU that keeps answering 7F 01 78 past 5 s: the adapter listens on,
+ * and so does the worker, since its 5 s limit counts from the last line,
+ * not the request; the answer at 5.5 s completes the request, with no
+ * failure on the way */
+TEST_F(Elm327SessionTest, RepeatedPendingRepliesHoldTheReadPastFiveSeconds)
+{
+    set_knobs([](fake_elm327::knobs& k) {
+        k.pending = true;
+        k.pending_count = 2;
+        k.pending_gap_ms = 3000;
+        k.reply_delay_ms = 5500;
+    });
+    Session s;
+    ASSERT_EQ(s.create(uri("?poll=0x0C")), ECUIO_OK);
+    s.start();
+    bool failed = false;
+    ASSERT_TRUE(wait_for(
+        [&] {
+            failed = failed || s.state() != ECUIO_OK;
+            return s.cap.count("41 0C") >= 1;
+        },
+        9000));
+    EXPECT_FALSE(failed);
+    uint32_t episodes = 99;
+    EXPECT_EQ(s.state(&episodes), ECUIO_OK);
+    EXPECT_EQ(episodes, 0u);
+    EXPECT_GE(s.cap.count("7F 01 78"), 2u)
+        << "both pending replies, and maybe the next request's first";
+}
+
+/* Read-only (ADR-0026 §5): nothing written to the adapter's memory, no
+ * serial number asked, no monitor, no OBDX binary mode, across a session
+ * that probes, identifies and polls */
+TEST_F(Elm327SessionTest, NothingIsWrittenOrAskedThatTheAdrRulesOut)
+{
+    Session s;
+    ASSERT_EQ(s.create(uri()), ECUIO_OK);
+    s.start();
+    ecuio_channel_identity_t id{};
+    ASSERT_TRUE(wait_for(
+        [&] {
+            return ecuio_session_get_channel_identity(s.s, 0, &id) ==
+                       ECUIO_OK &&
+                   (id.flags & ECUIO_IDENTITY_COMPLETE) != 0;
+        },
+        8000));
+    for (const std::string& c : fake_commands()) {
+        for (const char* banned :
+             {"ATPP", "STWBR", "STRSTNVM", "STSATI", "STSDI", "STS@1", "STBTDN",
+              "STSN", "DX", "ATMA", "STMA", "ATBRD", "STSBR"}) {
+            if (c.rfind(banned, 0) == 0 && c != "ATPPS") {
+                ADD_FAILURE() << "sent " << c;
+            }
+        }
+        if (c.rfind("AT", 0) != 0 && c.rfind("ST", 0) != 0) {
+            EXPECT_TRUE(c.rfind("01", 0) == 0 || c.rfind("09", 0) == 0 ||
+                        c.rfind("22", 0) == 0)
+                << "request " << c << ": only Services 01, 09 and 22";
+        }
+    }
+}
+
+/* NO DATA to every request: the engine's waits run out, ten in a row go
+ * quiet, with no episode; the answers' return is OK again */
+TEST_F(Elm327SessionTest, NoDataGoesQuietWithoutAnEpisode)
+{
+    set_knobs([](fake_elm327::knobs& k) { k.no_data = true; });
+    Session s;
+    ASSERT_EQ(s.create(uri("?poll=0x0C")), ECUIO_OK);
+    s.start();
+    ASSERT_TRUE(
+        wait_for([&] { return s.state() == ECUIO_ERR_VEHICLE_TIMEOUT; }, 5000));
+    uint32_t episodes = 99;
+    (void)s.state(&episodes);
+    EXPECT_EQ(episodes, 0u);
+    set_knobs([](fake_elm327::knobs& k) { k.no_data = false; });
+    EXPECT_TRUE(wait_for([&] { return s.state() == ECUIO_OK; }, 3000));
+}
+
+/* A scan whose DIDs are all refused leaves nothing to ask: the worker
+ * listens, and ten quiet reads (about a second) go quiet, as J2534's
+ * passive reads do */
+TEST_F(Elm327SessionTest, NothingLeftToAskGoesQuiet)
+{
+    Session s;
+    ASSERT_EQ(s.create(uri("?profile=uds-generic&did=1E00-1E03&identify=0")),
+              ECUIO_OK)
+        << ecuio_last_error_detail();
+    s.start();
+    ecuio_channel_support_t sup{};
+    ASSERT_TRUE(wait_for(
+        [&] {
+            return ecuio_session_get_channel_support(s.s, 0, &sup) ==
+                       ECUIO_OK &&
+                   (sup.flags & ECUIO_SUPPORT_SCAN_COMPLETE) != 0;
+        },
+        3000));
+    EXPECT_EQ(sup.scan_refused, 4u);
+    const auto from = std::chrono::steady_clock::now();
+    ASSERT_TRUE(
+        wait_for([&] { return s.state() == ECUIO_ERR_VEHICLE_TIMEOUT; }, 4000));
+    const auto took = std::chrono::duration_cast<std::chrono::milliseconds>(
+                          std::chrono::steady_clock::now() - from)
+                          .count();
+    EXPECT_GE(took, 700) << "ten idle reads of 100 ms";
+    const uint32_t requests =
+        on_fake<uint32_t>([](fake_elm327::adapter& a) { return a.requests; });
+    std::this_thread::sleep_for(std::chrono::milliseconds(300));
+    EXPECT_EQ(
+        on_fake<uint32_t>([](fake_elm327::adapter& a) { return a.requests; }),
+        requests)
+        << "nothing more is asked";
+}
+
+/* CAN ERROR (no node acknowledges): requests failing, one episode; the
+ * bus's return clears it */
+TEST_F(Elm327SessionTest, CanErrorIsRequestsFailingUntilTheBusAnswers)
+{
+    Session s;
+    ASSERT_EQ(s.create(uri("?poll=0x0C")), ECUIO_OK);
+    s.start();
+    ASSERT_TRUE(wait_for([&] { return s.cap.count("41 0C") >= 1; }, 3000));
+    set_knobs([](fake_elm327::knobs& k) { k.can_error = true; });
+    ASSERT_TRUE(
+        wait_for([&] { return s.state() == ECUIO_ERR_REQUEST_FAILED; }, 3000));
+    std::this_thread::sleep_for(std::chrono::milliseconds(400));
+    uint32_t episodes = 0;
+    EXPECT_EQ(s.state(&episodes), ECUIO_ERR_REQUEST_FAILED);
+    EXPECT_EQ(episodes, 1u) << "one episode, however many requests fail";
+    set_knobs([](fake_elm327::knobs& k) { k.can_error = false; });
+    EXPECT_TRUE(wait_for([&] { return s.state() == ECUIO_OK; }, 8000));
+    (void)s.state(&episodes);
+    EXPECT_EQ(episodes, 1u);
+}
+
+/* The link drops (a Bluetooth adapter out of range): a hard failure, one
+ * episode, the port reopened on the backoff's schedule; its return runs
+ * the setup again and the values resume, with no reconnect */
+TEST_F(Elm327SessionTest, ADroppedLinkRecoversWithoutAReconnect)
+{
+    Session s;
+    ASSERT_EQ(s.create(uri("?poll=0x0C")), ECUIO_OK);
+    s.start();
+    ASSERT_TRUE(wait_for([&] { return s.cap.count("41 0C") >= 1; }, 3000));
+    set_knobs([](fake_elm327::knobs& k) { k.dropped = true; });
+    ASSERT_TRUE(wait_for(
+        [&] { return s.state() == ECUIO_ERR_TRANSPORT_HARD_FAILURE; }, 3000));
+    std::this_thread::sleep_for(std::chrono::milliseconds(500));
+    uint32_t episodes = 0;
+    EXPECT_EQ(s.state(&episodes), ECUIO_ERR_TRANSPORT_HARD_FAILURE);
+    EXPECT_EQ(episodes, 1u);
+    const size_t before = s.cap.count("41 0C");
+    set_knobs([](fake_elm327::knobs& k) { k.dropped = false; });
+    ASSERT_TRUE(wait_for([&] { return s.state() == ECUIO_OK; }, 10000));
+    EXPECT_TRUE(wait_for([&] { return s.cap.count("41 0C") > before; }, 3000));
+    EXPECT_EQ(fake_count("ATZ"), 2u) << "the setup ran again";
+    const uint32_t opens = [] {
+        std::lock_guard<std::mutex> g(fake_elm327::state().lock);
+        return fake_elm327::state().opens;
+    }();
+    EXPECT_GE(opens, 2u);
+    (void)s.state(&episodes);
+    EXPECT_EQ(episodes, 1u);
+}
+
+/* The adapter resets on its own (a supply dip) and prints its banner:
+ * the setup runs again on the same port, with no failure */
+TEST_F(Elm327SessionTest, AnAdapterResetGetsItsSetupAgain)
+{
+    Session s;
+    ASSERT_EQ(s.create(uri("?poll=0x0C")), ECUIO_OK);
+    s.start();
+    ASSERT_TRUE(wait_for([&] { return s.cap.count("41 0C") >= 1; }, 3000));
+    fake_elm327::with([](fake_elm327::adapter& a) {
+        a.spontaneous_reset(fake_elm327::steady_us());
+    });
+    ASSERT_TRUE(wait_for([&] { return fake_count("ATZ") >= 2; }, 3000));
+    const size_t before = s.cap.count("41 0C");
+    EXPECT_TRUE(
+        wait_for([&] { return s.cap.count("41 0C") > before + 2; }, 3000));
+    uint32_t episodes = 99;
+    EXPECT_EQ(s.state(&episodes), ECUIO_OK);
+    EXPECT_EQ(episodes, 0u);
+    EXPECT_EQ(fake_count("ATE0"), 2u);
+}
+
+/* A reset whose setup then fails (the adapter refuses a contract
+ * command): a hard failure, one episode, until the setup goes through
+ * again */
+TEST_F(Elm327SessionTest, AResetWhoseSetupFailsIsAHardFailure)
+{
+    Session s;
+    ASSERT_EQ(s.create(uri("?poll=0x0C")), ECUIO_OK);
+    s.start();
+    ASSERT_TRUE(wait_for([&] { return s.cap.count("41 0C") >= 1; }, 3000));
+    fake_elm327::with([](fake_elm327::adapter& a) {
+        a.k.refuse = "ATH1";
+        a.spontaneous_reset(fake_elm327::steady_us());
+    });
+    ASSERT_TRUE(wait_for(
+        [&] { return s.state() == ECUIO_ERR_TRANSPORT_HARD_FAILURE; }, 3000));
+    set_knobs([](fake_elm327::knobs& k) { k.refuse = nullptr; });
+    ASSERT_TRUE(wait_for([&] { return s.state() == ECUIO_OK; }, 10000));
+    uint32_t episodes = 0;
+    (void)s.state(&episodes);
+    EXPECT_EQ(episodes, 1u);
+}
+
+/* An adapter that stops answering, prompt and all: a hard failure once
+ * 5 s pass with nothing */
+TEST_F(Elm327SessionTest, NoPromptWithinFiveSecondsIsAHardFailure)
+{
+    Session s;
+    ASSERT_EQ(s.create(uri("?poll=0x0C")), ECUIO_OK);
+    s.start();
+    ASSERT_TRUE(wait_for([&] { return s.cap.count("41 0C") >= 1; }, 3000));
+    set_knobs([](fake_elm327::knobs& k) { k.silent = true; });
+    const auto from = std::chrono::steady_clock::now();
+    ASSERT_TRUE(wait_for(
+        [&] { return s.state() == ECUIO_ERR_TRANSPORT_HARD_FAILURE; }, 9000));
+    const auto took = std::chrono::duration_cast<std::chrono::milliseconds>(
+                          std::chrono::steady_clock::now() - from)
+                          .count();
+    EXPECT_GE(took, 4900);
+}
+
+/* Each malformed form fails at create, before the port opens */
+TEST_F(Elm327SessionTest, MalformedUrisAreRefusedBeforeThePortOpens)
+{
+    const std::vector<std::string> bad = {
+        "elm327://",
+        "elm327://?poll=0x0C",
+#ifdef _WIN32
+        "elm327://COM0",
+        "elm327://COM256",
+        "elm327://COM05",
+        "elm327://LPT1",
+        "elm327:///dev/ttyUSB0",
+#else
+        "elm327://COM5",
+        "elm327://dev/ttyUSB0",
+        "elm327:///dev/",
+#endif
+        uri("?baud=125000"),
+        uri("?baud=0"),
+        uri("?baud=abc"),
+        uri("?serial=0"),
+        uri("?serial=299"),
+        uri("?serial=4000001"),
+        uri("?serial=0x"),
+        uri("?filter=0"),
+        uri("?filter=0x20000000"),
+        uri("?txid=-1"),
+        uri("?poll=0x100"),
+        uri("?poll="),
+        uri("?probe=2"),
+        uri("?identify=yes"),
+        uri("?flags=0"),
+        uri("?profile=uds-generic&did=7E8:1E1C&did=18DAF110:1E1C"),
+        uri("?profile=uds-generic"),
+        uri("?did=1E1C"),
+    };
+    for (const std::string& u : bad) {
+        ecuio_session_t* s = nullptr;
+        const ecuio_status_t st = ecuio_session_create(u.c_str(), &s);
+        EXPECT_EQ(st, ECUIO_ERR_BAD_URI)
+            << u << ": " << ecuio_last_error_detail();
+        EXPECT_EQ(s, nullptr) << u;
+        EXPECT_STRNE(ecuio_last_error_detail(), "") << u;
+        ecuio_session_destroy(s);
+    }
+    std::lock_guard<std::mutex> g(fake_elm327::state().lock);
+    EXPECT_EQ(fake_elm327::state().opens, 0u);
+}
+
+/* The refusals' words: what was wrong and what's wanted */
+TEST_F(Elm327SessionTest, RefusalsNameTheirCause)
+{
+    struct Case {
+        std::string uri;
+        ecuio_status_t status;
+        std::string detail;
+    };
+    const std::vector<Case> cases = {
+        {"elm327://", ECUIO_ERR_BAD_URI,
+         std::string("elm327:// needs a port: ") + elm327_port_name_example()},
+        {uri("?baud=125000"), ECUIO_ERR_BAD_URI,
+         "?baud= needs 500000 or 250000, not '125000'"},
+        {uri("?serial=9"), ECUIO_ERR_BAD_URI,
+         "?serial= needs a serial rate from 300 to 4000000, not '9'"},
+        {uri("?flags=0"), ECUIO_ERR_BAD_URI,
+         "elm327:// takes no query key 'flags', only baud, serial, filter, "
+         "txid, poll, probe, identify, profile and did"},
+        {uri("?profile=uds-generic&did=7E8:1E1C&did=18DAF110:1E1C"),
+         ECUIO_ERR_BAD_URI,
+         "the channels mix 11-bit and 29-bit IDs, which one connection "
+         "can't carry"},
+        {uri("?profile=raw"), ECUIO_ERR_NOT_IMPLEMENTED,
+         "elm327:// listens only for replies to its requests, and this "
+         "session asks nothing: add ?poll=, or use a profile that requests "
+         "PIDs"},
+    };
+    for (const Case& c : cases) {
+        ecuio_session_t* s = nullptr;
+        EXPECT_EQ(ecuio_session_create(c.uri.c_str(), &s), c.status) << c.uri;
+        EXPECT_EQ(std::string(ecuio_last_error_detail()), c.detail) << c.uri;
+        ecuio_session_destroy(s);
+    }
+}
+
+/* A port that won't open says why, naming the port (LOAD_FAILED) */
+TEST_F(Elm327SessionTest, APortThatWontOpenSaysWhy)
+{
+    set_knobs([](fake_elm327::knobs& k) { k.dropped = true; });
+    ecuio_session_t* s = nullptr;
+    EXPECT_EQ(ecuio_session_create(uri().c_str(), &s), ECUIO_ERR_LOAD_FAILED);
+    EXPECT_EQ(std::string(ecuio_last_error_detail()),
+              std::string(kPort) + ": no such port");
+    EXPECT_EQ(s, nullptr);
+}
+
+/* The serial rate reaches the opener: ?serial=, else 38400 */
+TEST_F(Elm327SessionTest, TheSerialRateReachesThePort)
+{
+    for (const auto& c :
+         {std::make_pair(std::string(""), 38400u),
+          std::make_pair(std::string("?serial=115200"), 115200u)}) {
+        const std::string u = uri(c.first);
+        Session s;
+        ASSERT_EQ(s.create(u), ECUIO_OK) << u;
+        std::lock_guard<std::mutex> g(fake_elm327::state().lock);
+        EXPECT_EQ(fake_elm327::state().last_serial, c.second) << u;
+        EXPECT_STREQ(fake_elm327::state().last_name, kPort);
+    }
+}
+
+/* A contract command answered wrongly refuses the connect, naming the
+ * command and its answer (VENDOR_REFUSED); so does a reset that isn't an
+ * ELM327's, after a second try */
+TEST_F(Elm327SessionTest, AWrongSetupAnswerRefusesTheConnect)
+{
+    set_knobs([](fake_elm327::knobs& k) { k.refuse = "ATH1"; });
+    ecuio_session_t* s = nullptr;
+    EXPECT_EQ(ecuio_session_create(uri().c_str(), &s),
+              ECUIO_ERR_VENDOR_REFUSED);
+    EXPECT_EQ(std::string(ecuio_last_error_detail()),
+              std::string("the adapter on ") + kPort +
+                  " answered ATH1 with '?', not OK");
+    EXPECT_EQ(fake_count("ATS0"), 1u);
+    EXPECT_EQ(fake_count("ATD0"), 0u) << "nothing after the refusal";
+
+    fake_elm327::with([](fake_elm327::adapter& a) {
+        a.clear();
+        a.k.version = "OBDII to RS232 Interpreter";
+    });
+    EXPECT_EQ(ecuio_session_create(uri().c_str(), &s),
+              ECUIO_ERR_VENDOR_REFUSED);
+    EXPECT_EQ(std::string(ecuio_last_error_detail()),
+              std::string("the adapter on ") + kPort +
+                  " answered ATZ with 'OBDII to RS232 Interpreter', not an "
+                  "ELM327 version");
+    EXPECT_EQ(fake_count("ATZ"), 2u);
+    EXPECT_EQ(s, nullptr);
+}
+
+/* What a frame costs the worker: no operator new between two frames once
+ * the session runs, for its frames and its values (ADR-0026 §3) */
+namespace {
+struct WorkerNews {
+    static constexpr int kFrom = 8;
+    int to = 40;
+    std::atomic<int> frames{0};
+    std::atomic<unsigned long> at_from{0};
+    std::atomic<unsigned long> at_to{0};
+    std::atomic<int> batches{0};
+};
+
+void worker_news_cb(const ecuio_frame_t*, void* user)
+{
+    auto* w = static_cast<WorkerNews*>(user);
+    const int n = ++w->frames;
+    if (n == WorkerNews::kFrom) {
+        w->at_from = new_counter::on_this_thread();
+    } else if (n == w->to) {
+        w->at_to = new_counter::on_this_thread();
+    }
+}
+
+void worker_news_values_cb(const ecuio_value_batch_t*, void* user)
+{
+    ++static_cast<WorkerNews*>(user)->batches;
+}
+} // namespace
+
+TEST_F(Elm327SessionTest, TheWorkerAllocatesNothingPerFrame)
+{
+    WorkerNews w;
+    ecuio_session_t* s = nullptr;
+    ASSERT_EQ(ecuio_session_create(uri("?probe=0&identify=0").c_str(), &s),
+              ECUIO_OK);
+    EXPECT_EQ(ecuio_register_frame_callback(s, worker_news_cb, &w), ECUIO_OK);
+    EXPECT_EQ(ecuio_register_values_callback(s, worker_news_values_cb, &w),
+              ECUIO_OK);
+    EXPECT_EQ(ecuio_session_start(s), ECUIO_OK);
+    const bool reached =
+        wait_for([&] { return w.frames.load() >= w.to; }, 8000);
+    EXPECT_EQ(ecuio_session_close(s), ECUIO_OK);
+    ecuio_session_destroy(s);
+    ASSERT_TRUE(reached) << w.frames.load() << " frames";
+    EXPECT_GT(w.batches.load(), 0) << "the values path ran";
+    EXPECT_EQ(w.at_to.load() - w.at_from.load(), 0u)
+        << "operator new on the worker between frames " << WorkerNews::kFrom
+        << " and " << w.to;
+}
+
+#ifndef _WIN32
+
+/* ---- The POSIX port over a pseudo-terminal (ADR-0026 §8) ---------------
+ * The fake ELM327 on the master side, the transport's termios port on
+ * the slave: the real port code, its settings and its timeouts. */
+namespace {
+
+/* A pseudo-terminal pair with the fake on its master, pumped by a
+ * thread until destroyed. The slave stays open here too, so the master
+ * never reads end of file between the transport's opens. */
+class PtyElm327
+{
+public:
+    PtyElm327()
+    {
+        master_ = posix_openpt(O_RDWR | O_NOCTTY);
+        if (master_ < 0 || grantpt(master_) != 0 || unlockpt(master_) != 0) {
+            return;
+        }
+        const char* name = ptsname(master_);
+        if (name == nullptr) {
+            return;
+        }
+        slave_name_ = name;
+        hold_ = open(name, O_RDWR | O_NOCTTY);
+        adapter_.clear();
+        pump_ = std::thread([this] { run(); });
+    }
+    ~PtyElm327()
+    {
+        stop_ = true;
+        if (pump_.joinable()) {
+            pump_.join();
+        }
+        close_master();
+        if (hold_ >= 0) {
+            close(hold_);
+        }
+    }
+    bool ok() const { return hold_ >= 0 && pump_.joinable(); }
+    const std::string& slave() const { return slave_name_; }
+    uint32_t requests()
+    {
+        std::lock_guard<std::mutex> g(lock_);
+        return adapter_.requests;
+    }
+    /* The far side goes away: what a dropped link looks like. */
+    void close_master()
+    {
+        stop_ = true;
+        if (pump_.joinable()) {
+            pump_.join();
+        }
+        if (master_ >= 0) {
+            close(master_);
+            master_ = -1;
+        }
+    }
+
+private:
+    int master_ = -1;
+    int hold_ = -1;
+    std::string slave_name_;
+    std::mutex lock_;
+    fake_elm327::adapter adapter_;
+    std::atomic<bool> stop_{false};
+    std::thread pump_;
+
+    void run()
+    {
+        uint8_t buf[512];
+        while (!stop_.load()) {
+            pollfd p{};
+            p.fd = master_;
+            p.events = POLLIN;
+            if (poll(&p, 1, 5) > 0 && (p.revents & POLLIN) != 0) {
+                const ssize_t n = read(master_, buf, sizeof(buf));
+                if (n > 0) {
+                    std::lock_guard<std::mutex> g(lock_);
+                    adapter_.from_host(buf, static_cast<size_t>(n),
+                                       fake_elm327::steady_us());
+                }
+            }
+            size_t n = 0;
+            {
+                std::lock_guard<std::mutex> g(lock_);
+                n = adapter_.to_host(buf, sizeof(buf),
+                                     fake_elm327::steady_us());
+            }
+            for (size_t done = 0; done < n;) {
+                const ssize_t w = write(master_, buf + done, n - done);
+                if (w <= 0) {
+                    break;
+                }
+                done += static_cast<size_t>(w);
+            }
+        }
+    }
+};
+
+} // namespace
+
+/* A whole session through the OS's port: setup, requests and values */
+TEST(Elm327PortTest, ASessionRunsOverAPseudoTerminal)
+{
+    static PtyElm327 pty; /* 600 KB of fake: off the stack */
+    ASSERT_TRUE(pty.ok()) << strerror(errno);
+    ecuio_elm327_set_port_opener(nullptr);
+    Session s;
+    ASSERT_EQ(s.create("elm327://" + pty.slave() + "?poll=0x0C&serial=115200"),
+              ECUIO_OK)
+        << ecuio_last_error_detail();
+    s.start();
+    EXPECT_TRUE(
+        wait_for([&] { return s.cap.count("41 0C 1F 40") >= 3; }, 5000));
+    EXPECT_EQ(s.state(), ECUIO_OK);
+    EXPECT_GE(pty.requests(), 3u);
+}
+
+/* The port's reads: nothing within the timeout returns 0 after about
+ * that long; the far side closing is a failure, not a timeout */
+TEST(Elm327PortTest, ReadsTimeOutAndSeeTheFarSideGo)
+{
+    static PtyElm327 pty;
+    ASSERT_TRUE(pty.ok()) << strerror(errno);
+    ecuio_elm327_port_t port{};
+    char why[128] = "";
+    ASSERT_EQ(elm327_port_open_os(pty.slave().c_str(), 38400, &port, why,
+                                  sizeof(why)),
+              ECUIO_OK)
+        << why;
+    uint8_t buf[64];
+    const auto from = std::chrono::steady_clock::now();
+    EXPECT_EQ(port.ops->read(port.impl, buf, sizeof(buf), 80), 0);
+    const auto took = std::chrono::duration_cast<std::chrono::milliseconds>(
+                          std::chrono::steady_clock::now() - from)
+                          .count();
+    EXPECT_GE(took, 70);
+    EXPECT_LT(took, 1000);
+
+    ASSERT_TRUE(port.ops->write(port.impl,
+                                reinterpret_cast<const uint8_t*>("ATI\r"), 4));
+    std::string got;
+    ASSERT_TRUE(wait_for(
+        [&] {
+            const int32_t n = port.ops->read(port.impl, buf, sizeof(buf), 20);
+            if (n > 0) {
+                got.append(reinterpret_cast<const char*>(buf),
+                           static_cast<size_t>(n));
+            }
+            return got.find('>') != std::string::npos;
+        },
+        2000));
+    EXPECT_NE(got.find("ELM327 v1.4b"), std::string::npos) << got;
+
+    pty.close_master();
+    EXPECT_TRUE(wait_for(
+        [&] { return port.ops->read(port.impl, buf, sizeof(buf), 20) < 0; },
+        2000))
+        << "a far side that went is a failed port";
+    port.ops->close(port.impl);
+}
+
+/* What the OS's opener says for a port that isn't there */
+TEST(Elm327PortTest, AMissingPortIsNoSuchPort)
+{
+    ecuio_elm327_port_t port{};
+    char why[128] = "";
+    EXPECT_EQ(elm327_port_open_os("/dev/qttune-no-such-port", 38400, &port, why,
+                                  sizeof(why)),
+              ECUIO_ERR_LOAD_FAILED);
+    EXPECT_STREQ(why, "no such port");
+}
+
+#endif /* !_WIN32 */

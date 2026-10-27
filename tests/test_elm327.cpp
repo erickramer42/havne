@@ -526,6 +526,35 @@ TEST(Elm327ProtocolTest, VoltagesReadInMillivoltsOrNotAtAll)
     }
 }
 
+/* AT PPS lines, as the datasheet prints them: a parameter's value and
+ * whether it's on, from any entry of the line, spaced or not */
+TEST(Elm327ProtocolTest, ParameterSummaryLinesGiveEachValueAndState)
+{
+    const char line[] = "28:FF F  29:FF F  2A:38 F  2B:02 F";
+    uint8_t value = 0;
+    bool on = true;
+    ASSERT_TRUE(elm327_pps_value(line, strlen(line), 0x2A, &value, &on));
+    EXPECT_EQ(value, 0x38);
+    EXPECT_FALSE(on);
+    ASSERT_TRUE(elm327_pps_value(line, strlen(line), 0x28, &value, &on));
+    EXPECT_EQ(value, 0xFF);
+    ASSERT_TRUE(elm327_pps_value(line, strlen(line), 0x2B, &value, &on));
+    EXPECT_EQ(value, 0x02);
+
+    const char tight[] = "28:FFF29:FFF2a:00n2B:02F";
+    ASSERT_TRUE(elm327_pps_value(tight, strlen(tight), 0x2A, &value, &on));
+    EXPECT_EQ(value, 0x00);
+    EXPECT_TRUE(on) << "N in either case is on";
+
+    for (const char* bad : {"00:FF F  01:00 N", "2A:04", "2A:04 X", "2A=04 N",
+                            "2A:0G N", "OK", "?", ""}) {
+        value = 0x55;
+        EXPECT_FALSE(elm327_pps_value(bad, strlen(bad), 0x2A, &value, &on))
+            << '"' << bad << '"';
+        EXPECT_EQ(value, 0x55) << '"' << bad << '"';
+    }
+}
+
 TEST(Elm327ProtocolTest, VersionStringsAndEchoesAreRecognized)
 {
     for (const char* v :

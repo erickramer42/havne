@@ -11,6 +11,15 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
 ## [Unreleased]
 
 ### Added
+- **ELM327 adapters** ([ADR-0026](docs/adr/0026-elm327-transport.md)):
+  `elm327://<port>` reads a car through an ELM327-compatible adapter,
+  such as an OBDLink or an OBDX Pro in its ELM mode, on a serial port:
+  USB, or Bluetooth paired as a port (`COM5` on Windows, a `/dev/` path
+  on macOS and Linux). It takes the `obd2` profile by default and the
+  same query keys as `j2534://`, plus `?serial=` for a wired adapter's
+  rate. A dropped Bluetooth link recovers on its own. Settings doesn't
+  list serial ports yet, so type the URI; no real adapter has run it
+  yet.
 - Settings remembers the last URI that connected, with its profile and
   DIDs, and the Record sessions switch between runs. A URI that failed
   to connect isn't kept.

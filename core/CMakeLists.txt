@@ -6,6 +6,8 @@ add_library(ecuio-core STATIC
     src/replay_transport.cpp
     src/j2534_loader.cpp
     src/j2534_transport.cpp
+    src/elm327_transport.cpp
+    src/elm327_port.cpp
     src/signals.cpp
     src/signal_sets.cpp
     src/obd2_signal_sets.cpp

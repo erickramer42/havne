@@ -1,9 +1,11 @@
 // File/layer: core/include/ecuio/internal.h | internal, not ABI-exported;
 //             C declarations, Qt-free; included by core sources,
-//             test_core, test_j2534_load and test_j2534_routing
+//             test_core, test_elm327, test_j2534_load and
+//             test_j2534_routing
 // Testing: HARNESS — test_j2534_load and test_j2534_routing call the
 //          loader helpers directly, the other J2534 suites reach them
-//          through the transport ops; UNIT — CoreTest through the mock
+//          through the transport ops; test_elm327 puts its fake ELM327
+//          behind the port opener; UNIT — CoreTest through the mock
 //          transport
 
 #ifndef ECUIO_INTERNAL_H
@@ -59,6 +61,7 @@ struct ecuio_uri_query;
 extern const char* const ecuio_mock_query_keys[];
 extern const char* const ecuio_j2534_query_keys[];
 extern const char* const ecuio_replay_query_keys[];
+extern const char* const ecuio_elm327_query_keys[];
 
 /* Mock transport factory — attaches a transport to a session
  * (idempotent). Its keys, profile and did, are core's, so it reads
@@ -78,6 +81,57 @@ ecuio_status_t ecuio_mock_transport_attach(ecuio_session_t* session,
 ecuio_status_t ecuio_replay_transport_attach(ecuio_session_t* session,
                                               const char* uri,
                                               const struct ecuio_uri_query* query);
+
+/* ELM327 transport factory (ADR-0026), every platform:
+ *   elm327://<port>[?profile=…][&did=…][&baud=500000|250000][&serial=<n>]
+ *                  [&filter=…][&txid=…][&poll=…][&probe=0|1][&identify=0|1]
+ * <port> is COMn on Windows, a /dev/ path elsewhere. Attach checks the
+ * values, derives the channels and requests as J2534 attach does
+ * (core/src/request_setup.h), refuses a session with nothing to ask
+ * (NOT_IMPLEMENTED: passive listening is a later step), then opens the
+ * port (LOAD_FAILED with the OS's reason) and runs the adapter's setup
+ * (VENDOR_REFUSED naming the command and its answer). The worker starts
+ * with ecuio_session_start. */
+ecuio_status_t ecuio_elm327_transport_attach(ecuio_session_t* session,
+                                              const char* uri,
+                                              const struct ecuio_uri_query* query);
+
+/* The byte stream an ELM327 session runs over: an OS serial port
+ * (core/src/elm327_port.h), or a test's fake ELM327 behind the opener
+ * below. Called from one thread at a time: attach's, then the worker's. */
+typedef struct ecuio_elm327_port_ops {
+    /* Writes all len bytes; false when the port failed. */
+    bool (*write)(void* impl, const uint8_t* data, uint32_t len);
+    /* What has arrived, up to cap bytes, waiting up to timeout_ms (0: not
+     * at all) for the first: the count, 0 when nothing came, -1 when the
+     * port failed (a read error, the link dropped). */
+    int32_t (*read)(void* impl, uint8_t* buf, uint32_t cap,
+                    uint32_t timeout_ms);
+    /* Closes the port and frees impl. */
+    void (*close)(void* impl);
+} ecuio_elm327_port_ops_t;
+
+typedef struct ecuio_elm327_port {
+    const ecuio_elm327_port_ops_t* ops;
+    void* impl;
+} ecuio_elm327_port_t;
+
+/* Opens the port the URI names at serial_baud (bit/s; a Bluetooth port
+ * ignores it) into *out: ECUIO_OK, or LOAD_FAILED with the reason, on
+ * one line, in why (why_cap bytes): "no such port", "the port is in use
+ * by another program". */
+typedef ecuio_status_t (*ecuio_elm327_port_open_t)(const char* name,
+                                                   uint32_t serial_baud,
+                                                   ecuio_elm327_port_t* out,
+                                                   char* why,
+                                                   uint32_t why_cap);
+
+/* TEST-ONLY: the opener ELM327 sessions created after this call use;
+ * NULL restores the OS's serial ports. HARNESS use (the session tests'
+ * fake ELM327, tests/fake_elm327.h): it replaces only the port, so the
+ * protocol layer, the worker and link health run as they do on an
+ * adapter. */
+void ecuio_elm327_set_port_opener(ecuio_elm327_port_open_t open);
 
 /*
  * J2534 transport factory (Win32). URI grammar:

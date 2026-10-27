@@ -263,6 +263,9 @@ ecuio_status_t ecuio_session_get_error_state(
                                                  architecture (ADR-0025) */
 #define ECUIO_BACKEND_REPLAY             4u   /* a recording's frames.csv
                                                  (ADR-0023) */
+#define ECUIO_BACKEND_ELM327             5u   /* an ELM327-compatible
+                                                 adapter on a serial port
+                                                 (ADR-0026) */
 
 /* dll_arch: the adapter DLL's PE machine, as discovery's reserved[0]
  * reports it (j2534.h) */
@@ -275,6 +278,12 @@ ecuio_status_t ecuio_session_get_error_state(
 #define ECUIO_SESSION_INFO_VERSIONS      0x00000002u   /* the three
                                                           version strings */
 #define ECUIO_SESSION_INFO_REPLAY_LOOP   0x00000004u   /* replay://?loop=1 */
+#define ECUIO_SESSION_INFO_PENDING_OFF   0x00000008u   /* an STN adapter set
+                                                          not to wait past a
+                                                          7F xx 78 (its
+                                                          parameter 2A), so a
+                                                          pending reply's
+                                                          answer is lost */
 
 /* POD, 432 bytes, no hidden padding on any supported platform; pinned
  * by the assertions below. New fields take the reserved room. */
@@ -283,12 +292,14 @@ typedef struct ecuio_session_info {
     uint32_t backend;         /* ECUIO_BACKEND_* */
     uint32_t dll_arch;        /* ECUIO_DLL_ARCH_*; UNKNOWN for mock */
     uint32_t protocol_id;     /* the J2534 ProtocolID the channel connected
-                                 with (6 = ISO 15765); 0 for mock */
-    uint32_t baud;            /* bit/s it connected at; 0 for mock */
+                                 with (6 = ISO 15765; an ELM327's too); 0
+                                 for mock */
+    uint32_t baud;            /* the CAN bit/s it connected at; 0 for mock */
     uint32_t connect_flags;   /* PassThruConnect's Flags: ?flags=, plus
                                  CAN_29BIT_ID (0x100) for 29-bit channels */
     uint32_t vbatt_mv;        /* battery voltage at connect, millivolts
-                                 (READ_VBATT); with ECUIO_SESSION_INFO_VBATT */
+                                 (READ_VBATT; an ELM327's STVR or AT RV);
+                                 with ECUIO_SESSION_INFO_VBATT */
     uint32_t channel_count;   /* CAN channels the session filters and
                                  requests on; 0 for a passive session */
     uint32_t rx_ids[ECUIO_SESSION_INFO_MAX_CHANNELS];   /* each one's
@@ -296,7 +307,9 @@ typedef struct ecuio_session_info {
     uint32_t tx_ids[ECUIO_SESSION_INFO_MAX_CHANNELS];   /* and transmit ID */
     /* The adapter's firmware, its DLL and the J2534 API version it
      * implements (PassThruReadVersion), each NUL-terminated on one line;
-     * "" without ECUIO_SESSION_INFO_VERSIONS. */
+     * "" without ECUIO_SESSION_INFO_VERSIONS. An ELM327's firmware is its
+     * AT I answer, then ", " and STI's on an STN chip; its other two are
+     * "". */
     char firmware_version[ECUIO_SESSION_INFO_TEXT_LEN];
     char dll_version[ECUIO_SESSION_INFO_TEXT_LEN];
     char api_version[ECUIO_SESSION_INFO_TEXT_LEN];

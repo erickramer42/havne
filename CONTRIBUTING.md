@@ -105,8 +105,8 @@ contributions:
   the bridge runs on the GUI thread. Slow vendor calls (connect, disconnect)
   run on threads of their own, so the GUI never waits on them.
 - **Transports encode, never decode.** The URI selects the transport
-  (`mock://`, `replay://`, `j2534://` on Windows); everything else is
-  rejected.
+  (`mock://`, `replay://`, `elm327://`, `j2534://` on Windows);
+  everything else is rejected.
 - **ABI-breaking or architectural changes need an ADR** under `docs/adr/`
   before the code. Look at the existing ones first; your change may already
   have one.
@@ -146,10 +146,14 @@ input adds its check, a test that the check refuses, and, for parsers of
 arbitrary bytes or text, a fuzz harness ([fuzz/README.md](fuzz/README.md)).
 The threat model is [docs/security-assurance.md](docs/security-assurance.md).
 
-- **URIs**: `mock://`, `replay://` and `j2534://` only. Every scheme shares
-  one strict query grammar (`core/src/uri_query.h`): an unknown key, a
-  malformed value or an unknown profile is refused at session create,
-  before any DLL loads.
+- **URIs**: `mock://`, `replay://`, `elm327://` and `j2534://` only. Every
+  scheme shares one strict query grammar (`core/src/uri_query.h`): an
+  unknown key, a malformed value or an unknown profile is refused at
+  session create, before any DLL loads or any port opens.
+- **Serial ports**: an `elm327://` port is `COM1` to `COM255` on Windows
+  and a `/dev/` path elsewhere; an adapter's answers are parsed by a pure
+  layer (`core/src/elm327_protocol.h`) that bounds every line, and a
+  setup answer that isn't the expected one refuses the connect.
 - **Vendor DLLs**: the path must be absolute, and the file must be a
   Windows DLL by its PE header, before any surrogate starts.
 - **Frames**: a frame holds up to 4,096 payload bytes (`ECUIO_FRAME_DATA_MAX`,

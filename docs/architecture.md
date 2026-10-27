@@ -20,6 +20,8 @@ threads onto the GUI thread.
    │  sessions + callbacks · profiles + decode · transports
    ├── mock://    worker thread, scripted drive cycle
    ├── replay://  worker thread, a recording's frames.csv at its own pace
+   ├── elm327://  worker thread → a serial port (USB, or Bluetooth SPP):
+   │              an ELM327-compatible adapter's AT commands, one at a time
    └── j2534://   worker thread → loader, which picks a surrogate by the
                   DLL's architecture: client ══ named pipe ══
           ├── ecuio-j2534-surrogate.exe      (x86 process, x86 vendor DLLs)
@@ -88,6 +90,7 @@ decode.
 | `mock://[label][?profile=…]` | Mock, on every platform | `mock` |
 | `replay://<recording folder or frames.csv>[?query]` | Replay, on every platform ([ADR-0023](adr/0023-replay-transport.md)) | `raw` |
 | `j2534://[vendor or DLL path][?query]` | J2534, Windows only | `obd2` |
+| `elm327://<port>[?query]` | An ELM327-compatible adapter on a serial port (`COM5`, `/dev/ttyUSB0`), on every platform ([ADR-0026](adr/0026-elm327-transport.md)) | `obd2` |
 | any URI with `?profile=raw` | as above | `raw` (log only, no decode) |
 | any URI with `?profile=uds-generic&did=…` | as above | `uds-generic`: the DIDs the URI names, polled or scanned ([ADR-0020](adr/0020-uds-generic.md)) |
 
@@ -95,7 +98,12 @@ Every scheme shares one strict query grammar (`core/src/uri_query.h`).
 `ecuio_session_create` splits the query once and refuses any key the
 scheme's transport doesn't take, before anything attaches; `mock://`
 takes only `profile` and `did`, both core's, and `replay://` adds
-`speed` (0.1 to 100, or `max`) and `loop`.
+`speed` (0.1 to 100, or `max`) and `loop`. `j2534://` and `elm327://`
+share the request keys (`filter`, `txid`, `poll`, `probe`, `identify`)
+and derive their channels and requests the same way
+(`core/src/request_setup.h`), so a run sheet's query means the same on
+either; `baud` is the CAN rate on both, and `elm327://` adds `serial`,
+the serial port's rate for a wired adapter.
 
 A **replay** plays a recording's `frames.csv` ([ADR-0017](adr/0017-session-recording.md))
 back through the frame API, each frame when the recording's own
@@ -118,8 +126,9 @@ A **profile** is a named signal set ([ADR-0013](adr/0013-protocol-profiles.md)).
   ([ADR-0016](adr/0016-signal-definition-layout.md)).
 - **The `obd2` set** also declares its CAN channel (requests to
   `0x7E0`, replies on `0x7E8`). Its defs carry Service 01 mux keys,
-  so the J2534 transport derives both its receive filter and its
-  requests from the profile; a bare `j2534://` needs no parameters.
+  so the J2534 and ELM327 transports derive both their receive filter
+  and their requests from the profile; a bare `j2534://` needs no
+  parameters.
 - **The `uds-generic` set** is built per session from the URI's
   `?did=` entries (`core/src/uds_generic.h`) and owned by the session:
   one `HEX`, `TEXT` or big-endian numeric def per DID, keyed
@@ -211,9 +220,40 @@ The full reference is [j2534.md](j2534.md).
   adapters leave it untouched, so trusting it would replay stale
   frames as live data (`ecuio_trusted_count` in `j2534_ptypes.h`).
 
+## ELM327
+
+`elm327://` drives an ELM327-compatible adapter, an OBDLink's STN chip
+or the OBDX in its ELM mode, over a serial port that core opens itself:
+`\\.\COMn` on Windows, `termios` elsewhere. A paired Bluetooth SPP
+adapter is a serial port on every desktop system, so core never touches
+a Bluetooth stack ([ADR-0026](adr/0026-elm327-transport.md)).
+
+- **A pure protocol layer** (`core/src/elm327_protocol.h`) turns bytes
+  into lines and line kinds, parses frame lines by the addressing mode,
+  reassembles ISO-TP per CAN ID (two ECUs' replies can interleave), and
+  formats the commands. It does no I/O and reads no clock, so every rule
+  is a unit test over canned bytes.
+- **The setup** sends contract commands, each of which must answer OK
+  or the connect is refused naming the command and its answer, then
+  readings (the version strings, the voltage) that never fail a
+  connect. Headers stay on, so core sees every CAN ID and PCI byte.
+- **The worker** drives the same request engine as J2534's, with one
+  command outstanding for the whole adapter, since an ELM327 takes the
+  next only after its prompt. A Service 01 request to one ECU carries
+  the response-count digit, so the adapter returns as soon as the reply
+  is in.
+- **Read-only** as every session is: the adapter's memory is never
+  written, and no serial number is asked for.
+- **Not yet:** passive listening (`AT MA`) and Bluetooth LE, which has
+  no serial port; a session with nothing to ask is refused at create.
+
 ## Link health
 
-The J2534 worker judges every read and write and publishes one state.
+The J2534 and ELM327 workers judge every read and write
+(`core/src/link_health.h`) and publish one state. An ELM327's `NO DATA`
+leaves the request engine's wait to time the request out, `CAN ERROR`
+is a write that failed, and a port that fails, or no prompt within 5 s,
+is a hard failure: the port reopens on the backoff's schedule.
 The bridge polls it on its 100 ms tick and maps it for the UI
 (`Theme.linkColor`, `Theme.linkLabel`).
 
@@ -314,7 +354,7 @@ The bridge polls it on its 100 ms tick and maps it for the UI
 | Unit | Core logic, decode, the C ABI |
 | Bridge | The bridge and its models, headless, against the real mock worker |
 | QML | The app's own QML module against a real bridge, offscreen: properties, not pixels |
-| HARNESS | The whole J2534 stack against an in-tree fake vendor DLL, through the x64 surrogate |
+| HARNESS | The whole J2534 stack against an in-tree fake vendor DLL, through the x64 surrogate; the ELM327 transport against a fake ELM327 behind its port, and on Linux and macOS the serial port code over a pseudo-terminal |
 | Cross-arch | x64 tests driving the x86 surrogate and fake. Local only; CI never runs it |
 | Sanitizers | Core under ASan/UBSan in CI |
 | Fuzzing | The signal decoder, the validators and the `uds-generic` query parser under libFuzzer, 60 s each in CI ([fuzz/README.md](../fuzz/README.md)) |

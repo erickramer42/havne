@@ -553,6 +553,39 @@ inline bool elm327_parse_millivolts(const char* s, size_t n, uint32_t* out_mv)
     return true;
 }
 
+/* A programmable parameter from one line of AT PPS, which lists them
+ * four to a line as <pp>:<value> <state>, the state N (on: the value
+ * applies) or F (off: the default does), as in "28:FF F  29:FF F
+ * 2A:04 N  2B:02 F". Without spaces each entry is six characters. False
+ * when the line doesn't list pp, or isn't in that form. */
+inline bool elm327_pps_value(const char* s, size_t n, uint8_t pp,
+                             uint8_t* out_value, bool* out_on)
+{
+    char norm[ELM327_LINE_MAX + 1];
+    const size_t k =
+        elm327_normalize(s, n < ELM327_LINE_MAX ? n : ELM327_LINE_MAX, norm);
+    if (k == 0 || k % 6 != 0) {
+        return false;
+    }
+    for (size_t i = 0; i < k; i += 6) {
+        const char* e = norm + i;
+        const int p1 = elm327_hex_value(e[0]);
+        const int p0 = elm327_hex_value(e[1]);
+        const int v1 = elm327_hex_value(e[3]);
+        const int v0 = elm327_hex_value(e[4]);
+        if (p1 < 0 || p0 < 0 || e[2] != ':' || v1 < 0 || v0 < 0 ||
+            (e[5] != 'N' && e[5] != 'F')) {
+            return false;
+        }
+        if (((p1 << 4) | p0) == pp) {
+            *out_value = static_cast<uint8_t>((v1 << 4) | v0);
+            *out_on = e[5] == 'N';
+            return true;
+        }
+    }
+    return false;
+}
+
 /* ---- Commands -------------------------------------------------------
  * Every command and request ends with CR. Each writer returns the length
  * written (NUL-terminated), or 0 if it doesn't fit in cap. */

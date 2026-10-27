@@ -44,6 +44,8 @@ to watch the simulated car drive. Other platforms build from source
    │  sessions + callbacks · profiles + decode · transports
    ├── mock://    worker thread, scripted drive cycle
    ├── replay://  worker thread, a recording's frames.csv at its own pace
+   ├── elm327://  worker thread → a serial port (USB, or Bluetooth SPP):
+   │              an ELM327-compatible adapter's AT commands, one at a time
    └── j2534://   worker thread → loader, which picks a surrogate by the
                   DLL's architecture: client ══ named pipe ══
           ├── ecuio-j2534-surrogate.exe      (x86 process, x86 vendor DLLs)

@@ -6,8 +6,8 @@
 //          four), the decoded values (CoreTest.Values*: the batch
 //          against direct decodes, a text slot each, the frame
 //          callbacks first), the error strings;
-//          HARNESS — the J2534 suites through create; test_c_abi links
-//          the public functions
+//          HARNESS — the J2534 suites and Elm327SessionTest through
+//          create; test_c_abi links the public functions
 
 #include "ecuio/version.h"
 #include "ecuio/core.h"
@@ -471,7 +471,8 @@ ecuio_status_t ecuio_session_create(
 #endif
     const bool is_mock = strncmp(transport_uri, "mock://", 7) == 0;
     const bool is_replay = strncmp(transport_uri, "replay://", 9) == 0;
-    if (!is_mock && !is_replay && !is_j2534) {
+    const bool is_elm327 = strncmp(transport_uri, "elm327://", 9) == 0;
+    if (!is_mock && !is_replay && !is_j2534 && !is_elm327) {
 #ifndef _WIN32
         if (strncmp(transport_uri, "j2534://", 8) == 0) {
             ecuio_detail_set("j2534:// needs Windows, where J2534 adapters "
@@ -480,7 +481,7 @@ ecuio_status_t ecuio_session_create(
         }
 #endif
         ecuio_detail_set("unsupported URI scheme: expected mock://, "
-                         "replay:// or j2534://");
+                         "replay://, j2534:// or elm327://");
         return ECUIO_ERR_NO_TRANSPORT;
     }
 
@@ -490,9 +491,11 @@ ecuio_status_t ecuio_session_create(
      * discovery, the same way on every scheme. */
     const char* scheme = is_mock     ? "mock://"
                          : is_replay ? "replay://"
+                         : is_elm327 ? "elm327://"
                                      : "j2534://";
     const char* const* keys = is_mock     ? ecuio_mock_query_keys
                               : is_replay ? ecuio_replay_query_keys
+                              : is_elm327 ? ecuio_elm327_query_keys
                                           : ecuio_j2534_query_keys;
     const char* rest = transport_uri + strlen(scheme);
     ecuio_uri_query query;
@@ -533,8 +536,8 @@ ecuio_status_t ecuio_session_create(
             return ECUIO_ERR_BAD_URI;
         case ProfileQuery::Absent:
         default:
-            /* Scheme defaults: mock:// -> mock; j2534:// -> obd2
-             * (decode, the Service 01 requests and the declared
+            /* Scheme defaults: mock:// -> mock; j2534:// and elm327://
+             * -> obd2 (decode, the Service 01 requests and the declared
              * 7E0/7E8 channel); replay:// -> raw, which can't decode a
              * recording wrongly (ADR-0023). ?profile=raw gives a
              * log-only session. */
@@ -577,8 +580,8 @@ ecuio_status_t ecuio_session_create(
         return ECUIO_ERR_BAD_URI;
     }
 
-    /* Set before attach: the j2534 transport derives its requests
-     * and channels from it during attach. Single writer — attach
+    /* Set before attach: the requesting transports derive their
+     * requests and channels from it during attach. Single writer — attach
      * and the worker both run after this store. */
     s->active_signal_set = profile_set;
 
@@ -602,6 +605,8 @@ ecuio_status_t ecuio_session_create(
                                              &query);
     } else if (is_replay) {
         status = ecuio_replay_transport_attach(s.get(), transport_uri, &query);
+    } else if (is_elm327) {
+        status = ecuio_elm327_transport_attach(s.get(), transport_uri, &query);
     } else if (is_j2534) {
 #ifdef _WIN32
         status = ecuio_j2534_transport_attach(s.get(), transport_uri, &query);
