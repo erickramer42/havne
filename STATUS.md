@@ -19,15 +19,19 @@ decoding on the transport's thread, and every driver in a process of
 its own; changes since then go under
 [CHANGELOG.md's "Unreleased"](CHANGELOG.md#unreleased). The J2534 stack is verified
 end to end against a fake vendor DLL, through the x64 and the x86
-surrogate. One real adapter, the OBDX Pro VX, has run on a quiet bench
-bus and in two read-only sessions on one car
+surrogate. One real J2534 adapter, the OBDX Pro VX, has run on a quiet
+bench bus and in two read-only sessions on one car
 ([2026-10-22](docs/bench-sessions/2026-10-22-vehicle.md),
 [2026-10-25](docs/bench-sessions/2026-10-25-vehicle.md)): the engine
 ECU answered, the values decoded and tracked the cluster, and the
 second session ran the request engine, the probe, identification and
 `uds-generic` there. Every item in [After v0.3.0](#after-v030) has
-shipped; the next milestone is the [ELM327 transport](#the-elm327-transport)
-([ADR-0026](docs/adr/0026-elm327-transport.md)).
+shipped. The [ELM327 transport](#the-elm327-transport)
+([ADR-0026](docs/adr/0026-elm327-transport.md)) is built and has read
+the same car through the OBDLink MX+ over Bluetooth
+([2026-10-27](docs/bench-sessions/2026-10-27-elm327-vehicle.md)); it
+goes out in the next release. The milestone after it is chosen from the
+[backlog](#backlog).
 
 - **Works:**
   - **Mock transport,** on every platform: a scripted drive cycle (a
@@ -85,7 +89,7 @@ shipped; the next milestone is the [ELM327 transport](#the-elm327-transport)
     ([ADR-0017](docs/adr/0017-session-recording.md)), and a surrogate
     session log of every vendor call, with every request and reply
     while recording.
-- **Not yet:** real hardware beyond one adapter and one car: 29-bit
+- **Not yet:** real hardware beyond two adapters and one car: 29-bit
   addressing, more than one ECU answering, a real x64 driver,
   and other vendors ([BENCH prep](docs/bench-sessions/bench-prep.md),
   [testing.md](docs/testing.md#gaps-not-verified)). The run sheets are
@@ -184,8 +188,8 @@ OBDX Pro VX in its ELM mode (USB-powered). In order:
    the MX+ (Bluetooth, an STN2255) and the VX in ELM mode both read the
    car, decoding the J2534 sessions' values through a cold start and
    idle; the MX+ sustained ~32 requests/s over Bluetooth (the VX read
-   26/s through J2534), and a Bluetooth drop recovered in ~28 s with no
-   reconnect. The MX+ is vehicle-only (no 12 V supply), so its bench
+   26/s through J2534), and a Bluetooth drop recovered with no
+   reconnect, the first value within ~6.5 s of Bluetooth coming back. The MX+ is vehicle-only (no 12 V supply), so its bench
    items ran on the car (ADR-0026's appendix of 2026-10-27). The run sheets are
    [elm327-bench-runsheet.md](docs/bench-sessions/elm327-bench-runsheet.md)
    and [elm327-vehicle-runsheet.md](docs/bench-sessions/elm327-vehicle-runsheet.md);
@@ -415,7 +419,8 @@ matters: the original-copy file format constrains everything after it.
 
 ### Transports and platforms
 
-- **ELM327 adapters:** scheduled; see [The ELM327 transport](#the-elm327-transport).
+- **ELM327 adapters:** built; see [The ELM327 transport](#the-elm327-transport),
+  which lists what comes later (passive listening, BLE, WiFi).
 - **Legacy buses:** see the roadmap above.
 
 ### Performance

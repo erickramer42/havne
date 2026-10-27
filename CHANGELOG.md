@@ -23,8 +23,8 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
   adapter's firmware and the battery voltage. Each connect writes a
   wire log to the temporary folder (`ecuio-elm327.<date-time>.log`):
   every command and what the adapter answered, and, while recording,
-  every request and reply with its timing. No real adapter has run it
-  yet.
+  every request and reply with its timing. It has read a car through
+  an OBDLink MX+ over Bluetooth and an OBDX Pro VX over USB.
 - Settings remembers the last URI that connected, with its profile and
   DIDs, and the Record sessions switch between runs. A URI that failed
   to connect isn't kept.

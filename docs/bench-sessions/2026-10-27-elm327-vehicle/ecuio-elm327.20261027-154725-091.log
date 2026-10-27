@@ -86,32 +86,32 @@
 [elm327 15:47:26.315 +1.221396] < 7E803410400
 [elm327 15:47:26.315 +1.221537] prompt 12.1 ms after 01041
 [elm327 15:47:26.330 +1.232992] > 0902
-[elm327 15:47:26.330 +1.240072] < <redacted: identification data (VIN/CALID/serial/part no.)>
-[elm327 15:47:26.339 +1.245139] < <redacted: identification data (VIN/CALID/serial/part no.)>
-[elm327 15:47:26.339 +1.251406] < <redacted: identification data (VIN/CALID/serial/part no.)>
+[elm327 15:47:26.330 +1.240072] < 7E81014490201<VIN>
+[elm327 15:47:26.339 +1.245139] < 7E821<VIN>
+[elm327 15:47:26.339 +1.251406] < 7E822<VIN>
 [elm327 15:47:26.376 +1.279666] prompt 46.5 ms after 0902
 [elm327 15:47:26.376 +1.279839] > 01051
 [elm327 15:47:26.380 +1.289965] < 7E80341054D
 [elm327 15:47:26.380 +1.290167] prompt 10.2 ms after 01051
 [elm327 15:47:26.410 +1.312976] > 0904
-[elm327 15:47:26.437 +1.341551] < <redacted: identification data (VIN/CALID/serial/part no.)>
-[elm327 15:47:26.437 +1.344338] < <redacted: identification data (VIN/CALID/serial/part no.)>
-[elm327 15:47:26.437 +1.346394] < <redacted: identification data (VIN/CALID/serial/part no.)>
+[elm327 15:47:26.437 +1.341551] < 7E81013490401<CALID>
+[elm327 15:47:26.437 +1.344338] < 7E821<CALID>
+[elm327 15:47:26.437 +1.346394] < 7E822<CALID>
 [elm327 15:47:26.453 +1.361013] prompt 47.9 ms after 0904
 [elm327 15:47:26.453 +1.361254] > 010C1
 [elm327 15:47:26.461 +1.375441] < 7E804410C0000
 [elm327 15:47:26.461 +1.375732] prompt 14.4 ms after 010C1
 [elm327 15:47:26.493 +1.395510] > 0906
-[elm327 15:47:26.517 +1.427525] < <redacted: identification data (VIN/CALID/serial/part no.)>
+[elm327 15:47:26.517 +1.427525] < 7E807490601<CVN>
 [elm327 15:47:26.517 +1.434729] prompt 39.1 ms after 0906
 [elm327 15:47:26.517 +1.435096] > 010D1
 [elm327 15:47:26.542 +1.445473] < 7E803410D00
 [elm327 15:47:26.542 +1.446118] prompt 10.8 ms after 010D1
 [elm327 15:47:26.558 +1.460665] > 090A
-[elm327 15:47:26.583 +1.495143] < <redacted: identification data (VIN/CALID/serial/part no.)>
-[elm327 15:47:26.598 +1.508988] < <redacted: identification data (VIN/CALID/serial/part no.)>
-[elm327 15:47:26.598 +1.511268] < <redacted: identification data (VIN/CALID/serial/part no.)>
-[elm327 15:47:26.598 +1.513762] < <redacted: identification data (VIN/CALID/serial/part no.)>
+[elm327 15:47:26.583 +1.495143] < 7E81017490A0145434D
+[elm327 15:47:26.598 +1.508988] < 7E821002D456E67696E
+[elm327 15:47:26.598 +1.511268] < 7E82265436F6E74726F
+[elm327 15:47:26.598 +1.513762] < 7E8236C000000000000
 [elm327 15:47:26.598 +1.516006] prompt 55.2 ms after 090A
 [elm327 15:47:26.598 +1.516204] > 010F1
 [elm327 15:47:26.614 +1.525537] < 7E803410F4E
@@ -123,10 +123,10 @@
 [elm327 15:47:26.721 +1.636233] < 7E803411138
 [elm327 15:47:26.721 +1.636438] prompt 36.4 ms after 01111
 [elm327 15:47:26.721 +1.636658] > 22F188
-[elm327 15:47:26.736 +1.646014] < <redacted: identification data (VIN/CALID/serial/part no.)>
-[elm327 15:47:26.746 +1.650016] < <redacted: identification data (VIN/CALID/serial/part no.)>
-[elm327 15:47:26.746 +1.655140] < <redacted: identification data (VIN/CALID/serial/part no.)>
-[elm327 15:47:26.746 +1.660353] < <redacted: identification data (VIN/CALID/serial/part no.)>
+[elm327 15:47:26.736 +1.646014] < 7E8101B62F188<software number>
+[elm327 15:47:26.746 +1.650016] < 7E821<software number>
+[elm327 15:47:26.746 +1.655140] < 7E822<software number>
+[elm327 15:47:26.746 +1.660353] < 7E823<software number>
 [elm327 15:47:26.796 +1.711036] prompt 74.3 ms after 22F188
 [elm327 15:47:26.796 +1.711226] > 012F1
 [elm327 15:47:26.811 +1.720218] < 7E803412F63
@@ -150,10 +150,10 @@
 [elm327 15:47:27.039 +1.955008] < 7E803410400
 [elm327 15:47:27.039 +1.955158] prompt 8.8 ms after 01041
 [elm327 15:47:27.071 +1.973520] > 22F190
-[elm327 15:47:27.080 +1.985074] < <redacted: identification data (VIN/CALID/serial/part no.)>
-[elm327 15:47:27.080 +1.991263] < <redacted: identification data (VIN/CALID/serial/part no.)>
-[elm327 15:47:27.080 +1.995090] < <redacted: identification data (VIN/CALID/serial/part no.)>
-[elm327 15:47:27.096 +1.999935] < <redacted: identification data (VIN/CALID/serial/part no.)>
+[elm327 15:47:27.080 +1.985074] < 7E8101B62F190<VIN>
+[elm327 15:47:27.080 +1.991263] < 7E821<VIN>
+[elm327 15:47:27.080 +1.995090] < 7E822<VIN>
+[elm327 15:47:27.096 +1.999935] < 7E823<VIN>
 [elm327 15:47:27.136 +2.053406] prompt 79.7 ms after 22F190
 [elm327 15:47:27.136 +2.053544] > 01051
 [elm327 15:47:27.161 +2.064933] < 7E80341054D
