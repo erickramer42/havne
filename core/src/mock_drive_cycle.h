@@ -172,8 +172,11 @@ constexpr float kPedalStabPct = 20.0f;
 constexpr float kPedalLiftPct = 25.0f;
 constexpr float kPedalEasePct = 2.5f;
 
+/* Rounds half up by hand: std::lround isn't constexpr in C++17, and
+ * every caller passes a positive constant. */
 constexpr uint32_t ticks_for(float seconds)
 {
+    // NOLINTNEXTLINE(bugprone-incorrect-roundings)
     return static_cast<uint32_t>(seconds / kTickS + 0.5f);
 }
 
@@ -959,14 +962,14 @@ inline uint8_t clamp_u8(float v)
 {
     if (v < 0.0f) return 0;
     if (v > 255.0f) return 255;
-    return static_cast<uint8_t>(v + 0.5f);
+    return static_cast<uint8_t>(std::lround(v));
 }
 
 inline uint16_t clamp_u16(float v)
 {
     if (v < 0.0f) return 0;
     if (v > 65535.0f) return 65535;
-    return static_cast<uint16_t>(v + 0.5f);
+    return static_cast<uint16_t>(std::lround(v));
 }
 
 /* Encode side of the signal contract. Layout MUST mirror kMockDefs in

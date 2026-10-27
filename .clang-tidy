@@ -1,0 +1,43 @@
+# clang-tidy's checks for core/ and surrogate/: scripts/tidy.sh, and the
+# clang-tidy job in CI, which fails on any warning. The families that find
+# bugs run whole: clang-analyzer (the static analyzer), bugprone,
+# concurrency, performance and portability, plus a few misc checks of the
+# same kind. The style families (readability, modernize,
+# cppcoreguidelines) stay off: the public and J2534 headers must compile
+# as C, and the tree isn't written to them.
+#
+# Turned off, and why:
+#   bugprone-easily-swappable-parameters     the C ABI's flat functions
+#       take neighboring parameters of one type by design
+#   bugprone-implicit-widening-of-multiplication-result   flags "i * 8"
+#       offsets in the C headers, whose operands are bounded
+#   bugprone-inc-dec-in-conditions           the CSV parsers' "*p++ != ','"
+#       runs after a short-circuit, which is well defined
+#   bugprone-throwing-static-initialization  the static signal tables; an
+#       allocation that fails while the library loads is fatal either way
+#   performance-enum-size                    enum sizes are part of the ABI
+#
+# A warning that is right in general and wrong at one line gets a
+# NOLINTNEXTLINE(check) with the reason beside it, never a wider exclusion.
+Checks: >-
+  -*,
+  bugprone-*,
+  clang-analyzer-*,
+  concurrency-*,
+  performance-*,
+  portability-*,
+  misc-misplaced-const,
+  misc-new-delete-overloads,
+  misc-redundant-expression,
+  misc-throw-by-value-catch-by-reference,
+  misc-unconventional-assign-operator,
+  misc-uniqueptr-reset-release,
+  misc-unused-using-decls,
+  readability-misleading-indentation,
+  -bugprone-easily-swappable-parameters,
+  -bugprone-implicit-widening-of-multiplication-result,
+  -bugprone-inc-dec-in-conditions,
+  -bugprone-throwing-static-initialization,
+  -performance-enum-size
+WarningsAsErrors: '*'
+HeaderFilterRegex: '.*[/\\](core|surrogate)[/\\].*'

@@ -784,8 +784,10 @@ ecuio_status_t ecuio_j2534_sur_open(const char* dll_path, uint32_t dll_arch,
             ecuio_j2534_sur_close(h);
             return spawn_failed("attribute list", 0);
         }
-        if (!UpdateProcThreadAttribute(attrs, 0, PROC_THREAD_ATTRIBUTE_HANDLE_LIST,
-                                       &h->log, sizeof(h->log), nullptr, nullptr)) {
+        if (!UpdateProcThreadAttribute(attrs, 0,
+                                       PROC_THREAD_ATTRIBUTE_HANDLE_LIST,
+                                       static_cast<void*>(&h->log),
+                                       sizeof(h->log), nullptr, nullptr)) {
             const DWORD err = GetLastError();
             DeleteProcThreadAttributeList(attrs);
             SUR_LOG(h, "open: handle list failed (err=%lu)\n", err);
