@@ -34,6 +34,7 @@
 
 #include "qttunebridge.h"   // QtTuneBridge + FrameListModel
 #include <ecuio/profile.h>
+#include <ecuio/serial.h>
 
 #ifdef _WIN32
 #ifndef NOMINMAX
@@ -1697,6 +1698,26 @@ TEST(BridgeTest, DiscoveredDevicesHaveWellFormedEntries)
     }
 }
 
+/* The serial ports as core lists them, name for name and in its order
+ * (most machines have none, and the call itself is SerialPortsTest's) */
+TEST(BridgeTest, SerialPortsAreListedAsCoreFindsThem)
+{
+    QtTuneBridge bridge;
+    const QVariantList listed = bridge.discoverSerialPorts();
+
+    uint32_t count = 0;
+    ASSERT_EQ(ecuio_serial_ports(nullptr, 0, &count), ECUIO_OK);
+    std::vector<ecuio_serial_port_t> ports(count);
+    ASSERT_EQ(ecuio_serial_ports(ports.data(), count, &count), ECUIO_OK);
+    ASSERT_EQ(listed.size(), static_cast<qsizetype>(count))
+        << "a port came or went between the two calls";
+    for (uint32_t i = 0; i < count; ++i) {
+        const QVariantMap m = listed[static_cast<qsizetype>(i)].toMap();
+        EXPECT_EQ(m.value("name").toString().toStdString(), ports[i].name);
+        EXPECT_EQ(m.value("device").toString().toStdString(), ports[i].device);
+    }
+}
+
 TEST(BridgeTest, CurrentUriTracksConnectState)
 {
     /* currentUri: empty while disconnected, set after a successful
@@ -2262,6 +2283,34 @@ TEST(BridgeTest, SessionInfoTextNamesTheAdapter)
               "Session: x64 DLL, through the surrogate; ISO 15765 at 250000 baud, flags 0x100; "
               "profile raw, channel 0x18DAF110/0x18DA10F1 (rx/tx); "
               "no battery reading; no version reading");
+
+    /* An ELM327 on an STN chip, its port in the "Connected:" line */
+    ecuio_session_info_t elm{};
+    elm.backend = ECUIO_BACKEND_ELM327;
+    elm.protocol_id = 6;
+    elm.baud = 500000;
+    elm.channel_count = 1;
+    elm.rx_ids[0] = 0x7E8;
+    elm.tx_ids[0] = 0x7E0;
+    elm.flags = ECUIO_SESSION_INFO_VBATT | ECUIO_SESSION_INFO_VERSIONS;
+    elm.vbatt_mv = 13800;
+    qstrncpy(elm.firmware_version, "ELM327 v1.4b, STN2255 v9.9.9",
+             sizeof(elm.firmware_version));
+    qstrncpy(elm.profile, "obd2", sizeof(elm.profile));
+    EXPECT_EQ(QtTuneBridge::sessionInfoText(elm).toStdString(),
+              "Session: ELM327 adapter (ELM327 v1.4b, STN2255 v9.9.9); "
+              "ISO 15765 at 500000 baud; profile obd2, channel "
+              "0x7E8/0x7E0 (rx/tx); battery 13.8 V");
+
+    /* Set not to wait past a pending reply, and no readings */
+    elm.flags = ECUIO_SESSION_INFO_PENDING_OFF;
+    elm.baud = 250000;
+    EXPECT_EQ(QtTuneBridge::sessionInfoText(elm).toStdString(),
+              "Session: ELM327 adapter (no version reading); ISO 15765 "
+              "at 250000 baud; profile obd2, channel 0x7E8/0x7E0 "
+              "(rx/tx); no battery reading; the adapter is set not to "
+              "wait past 7F xx 78 (STN parameter 2A), so a pending "
+              "reply's answer is lost");
 
     ecuio_session_info_t later{};
     later.backend = 7; // a backend this build doesn't know

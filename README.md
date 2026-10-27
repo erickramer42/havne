@@ -39,7 +39,7 @@ to watch the simulated car drive. Other platforms build from source
    ▼  properties and list models, GUI thread only
  QtTuneBridge (app/)          the only caller of the core
    │  worker → GUI marshaling, 100 ms coalescing, link-health polling
-   ▼  C ABI: core.h · signals.h · profile.h · j2534.h
+   ▼  C ABI: core.h · signals.h · profile.h · j2534.h · serial.h
  ecuio-core (core/)           no Qt, ever
    │  sessions + callbacks · profiles + decode · transports
    ├── mock://    worker thread, scripted drive cycle

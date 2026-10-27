@@ -39,8 +39,9 @@ shipped; the next milestone is the [ELM327 transport](#the-elm327-transport)
   - **ELM327 adapters** in core, on every platform
     ([ADR-0026](docs/adr/0026-elm327-transport.md)): `elm327://<port>`
     on a serial port, USB or Bluetooth SPP, with the same request
-    engine, probe, identification and link health as J2534. Verified
-    against a fake ELM327 only; Settings doesn't list serial ports yet.
+    engine, probe, identification and link health as J2534, and
+    Settings lists the serial ports. Verified against a fake ELM327
+    only.
   - **J2534 on Windows:** discovery of installed drivers, each driver
     loaded in a single-threaded surrogate process of its own
     architecture, x86 or x64, so a crashing driver ends its process,
@@ -89,7 +90,7 @@ shipped; the next milestone is the [ELM327 transport](#the-elm327-transport)
   [testing.md](docs/testing.md#gaps-not-verified)). The run sheets are
   [bench-runsheet.md](docs/bench-sessions/bench-runsheet.md) and
   [vehicle-runsheet.md](docs/bench-sessions/vehicle-runsheet.md).
-- **Tests:** 456 ctest cases on Windows (both trees rebuilt,
+- **Tests:** 463 ctest cases on Windows (both trees rebuilt,
   2026-10-27), all passing but two env-gated skips (the cross-arch
   case, and the real-car recordings' diff, run locally), plus the
   cross-arch subset (76/76); 0 MSVC warnings. CI runs ctest on Windows,
@@ -161,8 +162,11 @@ OBDX Pro VX in its ELM mode (USB-powered). In order:
    the same ECU as the fake J2534 DLL, `tests/fake_ecu.h`) and, on
    Linux and macOS, the termios port over a pseudo-terminal
    (`Elm327PortTest`). The Win32 port waits for the bench.
-4. **The app:** serial ports in Settings, an `elm327://` preset, the
-   session line.
+4. **The app:** built. Settings lists the serial ports
+   (`ecuio_serial_ports`, `serial.h`: the registry or `/dev`, nothing
+   opened) beside the J2534 interfaces and has an `elm327://` preset;
+   the "Session:" line has an ELM327 form (`SerialPortsTest`,
+   `BridgeTest`, `QmlTest.settings`).
 5. **BENCH** (the VX on USB; the MX+ on a 12 V supply), then a
    read-only vehicle session.
 

@@ -1,7 +1,8 @@
 // File/layer: app/qttunebridge.h | Qt6 Core, app layer, C++17
 // Testing: test_bridge (Qt-linked target): the frame log's ring, order
 //          and payload storage, SignalListModel's history ring and display units,
-//          discoverJ2534Devices' marshaling shape, the delivery figures
+//          discoverJ2534Devices' and discoverSerialPorts' marshaling
+//          shape, the delivery figures
 //          (BridgeTest.DeliveryText*, .DisconnectLogsTheDelivery)
 
 #pragma once
@@ -356,6 +357,12 @@ public:
     // values only (rule 2) — dllPath is exposed because it is the user's
     // route to a direct-load URI, not for parsing.
     Q_INVOKABLE QVariantList discoverJ2534Devices() const;
+    // The machine's serial ports, for elm327:// (ADR-0026 §7): one map
+    // per port, { name, device } as QStrings, in core's order. name is
+    // what follows elm327://; device is the driver's device on Windows
+    // ("\Device\BthModem0"), "" elsewhere. A registry read or a /dev
+    // listing; no port is opened, so it's safe to call from QML.
+    Q_INVOKABLE QVariantList discoverSerialPorts() const;
     int linkErrorCode() const { return m_linkErrorCode; }
     int errorEpisodes() const { return m_errorEpisodes; }
     bool logPaused() const { return m_logPaused; }

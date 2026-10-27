@@ -17,9 +17,11 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
   USB, or Bluetooth paired as a port (`COM5` on Windows, a `/dev/` path
   on macOS and Linux). It takes the `obd2` profile by default and the
   same query keys as `j2534://`, plus `?serial=` for a wired adapter's
-  rate. A dropped Bluetooth link recovers on its own. Settings doesn't
-  list serial ports yet, so type the URI; no real adapter has run it
-  yet.
+  rate. A dropped Bluetooth link recovers on its own. Settings lists
+  the machine's serial ports beside the J2534 interfaces, without
+  opening any, and the activity log's "Session:" line names the
+  adapter's firmware and the battery voltage. No real adapter has run
+  it yet.
 - Settings remembers the last URI that connected, with its profile and
   DIDs, and the Record sessions switch between runs. A URI that failed
   to connect isn't kept.

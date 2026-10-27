@@ -5,7 +5,8 @@
 //          vehicle run sheet's URIs pass through untouched), refuses
 //          query characters in the DID field, shows core's refusal of a
 //          DID list in the error line, connects a composed uds-generic
-//          URI through the mock, and
+//          URI through the mock, lists serial ports after the interfaces
+//          (a port's row and the elm327:// preset filling the field), and
 //          locks every control, the device rows among them, while a
 //          connect is in flight (Windows: the fake's open stalled by a
 //          knob); the Units row sets the bridge's unit system, connected
@@ -133,6 +134,45 @@ TestCase {
         press(page, "profile_uds-generic")
         compare(uri.text, "j2534://Vendor?poll=0x0C&profile=uds-generic&did=1E1C:u16,F190:text")
         compare(did.text, " 1E1C:u16, F190:text ", "the field keeps what was typed")
+    }
+
+    // Serial ports join the device list after the interfaces; the
+    // elm327:// preset gives the scheme alone and a port's row the whole
+    // base, keeping the query either way
+    function test_serialPortRowsFillAnElm327Uri() {
+        const page = createPage()
+        const uri = find(page, "uriField")
+        const list = find(page, "deviceList")
+        const count = find(page, "deviceCount")
+
+        page.j2534Devices = []
+        page.serialPorts = []
+        verify(count.text.indexOf("None found") >= 0, "the empty state: " + count.text)
+        verify(!list.visible)
+
+        page.j2534Devices = [{ vendorName: "Fake", dllPath: "C:/drivers/fake.dll",
+                               architecture: "x64" }]
+        page.serialPorts = [{ name: "COM5", device: "\\Device\\BthModem0" },
+                            { name: "/dev/ttyUSB0", device: "" }]
+        compare(list.count, 3)
+        verify(count.text.indexOf("J2534 interfaces: 1, serial ports: 2") >= 0, count.text)
+        tryVerify(() => list.itemAtIndex(2) !== null, 2000, "the rows have delegates")
+        compare(find(list.itemAtIndex(0), "deviceTitle").text, "Fake  (x64)")
+        compare(find(list.itemAtIndex(1), "deviceTitle").text, "COM5")
+        compare(find(list.itemAtIndex(1), "deviceDetail").text,
+                "Serial port, for elm327:// · \\Device\\BthModem0")
+        compare(find(list.itemAtIndex(2), "deviceDetail").text, "Serial port, for elm327://")
+
+        press(page, "preset_elm327")
+        compare(uri.text, "elm327://", "the port is the user's pick")
+        press(page, "profile_raw")
+        compare(uri.text, "elm327://?profile=raw")
+        mouseClick(find(list.itemAtIndex(1), "deviceRowArea"))
+        compare(uri.text, "elm327://COM5?profile=raw", "the row's base, the query kept")
+        mouseClick(find(list.itemAtIndex(2), "deviceRowArea"))
+        compare(uri.text, "elm327:///dev/ttyUSB0?profile=raw")
+        mouseClick(find(list.itemAtIndex(0), "deviceRowArea"))
+        compare(uri.text, "j2534://Fake?profile=raw")
     }
 
     // A URI the page didn't compose: typed, pasted or set from outside

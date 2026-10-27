@@ -15,7 +15,7 @@ threads onto the GUI thread.
    ▼  properties and list models, GUI thread only
  QtTuneBridge (app/)          the only caller of the core
    │  worker → GUI marshaling, 100 ms coalescing, link-health polling
-   ▼  C ABI: core.h · signals.h · profile.h · j2534.h
+   ▼  C ABI: core.h · signals.h · profile.h · j2534.h · serial.h
  ecuio-core (core/)           no Qt, ever
    │  sessions + callbacks · profiles + decode · transports
    ├── mock://    worker thread, scripted drive cycle
@@ -242,6 +242,14 @@ a Bluetooth stack ([ADR-0026](adr/0026-elm327-transport.md)).
   next only after its prompt. A Service 01 request to one ECU carries
   the response-count digit, so the adapter returns as soon as the reply
   is in.
+- **Discovery** (`ecuio_serial_ports`, `serial.h`) lists the ports the
+  OS knows (the `SERIALCOMM` registry key on Windows, `/dev/cu.*` on
+  macOS, `/dev/ttyUSB*`, `ttyACM*` and `rfcomm*` on Linux) and opens
+  none: an adapter's commands could disturb whatever else sits on a
+  port, so the user picks it in Settings, as with a J2534 interface.
+- **The session line** names the adapter's firmware (`AT I`, plus
+  `STI` on an STN), the CAN rate, the channels and the battery, and
+  warns when an STN is set not to wait past a `7F xx 78`.
 - **Read-only** as every session is: the adapter's memory is never
   written, and no serial number is asked for.
 - **Not yet:** passive listening (`AT MA`) and Bluetooth LE, which has
@@ -317,7 +325,8 @@ The bridge polls it on its 100 ms tick and maps it for the UI
   lights), **Live** (value table and strip chart), **Log** (raw
   frames), **Settings** (device picker, URI, activity log). Settings is
   the one place a session is connected; the header and Home open it.
-  It composes the URI from a preset or a device, a profile row
+  It composes the URI from a preset or a device (a J2534 interface or
+  a serial port), a profile row
   (default, `raw`, `uds-generic`) and a DID field, and leaves the
   field editable: a typed URI sets the row and the field from its
   `profile=` and `did=`, and the next click recomposes it with every

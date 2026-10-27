@@ -8,7 +8,9 @@
 //          (BridgeTest.AWindow*, .TheChartKeepsTheFixturesPeak), rows by
 //          id, the signal model's roles and age
 //          refresh, link-state mapping, the activity log's session,
-//          ECU and delivery lines, session recording (BridgeTest.Recording*), display
+//          ECU and delivery lines (the ELM327 session line too,
+//          BridgeTest.SessionInfoTextNamesTheAdapter), the serial ports as
+//          core lists them, session recording (BridgeTest.Recording*), display
 //          units on the rows, the chart and not the recording
 //          (BridgeTest.UnitSystem*), the URI label
 //          (BridgeTest.UriLabelCutsADirectLoadPathToItsFileName), the
@@ -20,6 +22,7 @@
 #include "ecuio/signals.h"
 #include "ecuio/j2534.h"
 #include "ecuio/profile.h"
+#include "ecuio/serial.h"
 
 #include <QMetaObject>
 #include <QByteArray>
@@ -583,6 +586,29 @@ QVariantList QtTuneBridge::discoverJ2534Devices() const
         out.append(m);
     }
     ecuio_j2534_free_devices(devices);
+    return out;
+}
+
+QVariantList QtTuneBridge::discoverSerialPorts() const
+{
+    QVariantList out;
+    uint32_t count = 0;
+    if (ecuio_serial_ports(nullptr, 0, &count) != ECUIO_OK || count == 0) {
+        return out;
+    }
+    /* A port plugged in between the calls is left for the next refresh */
+    std::vector<ecuio_serial_port_t> ports(count);
+    if (ecuio_serial_ports(ports.data(), count, &count) != ECUIO_OK) {
+        return out;
+    }
+    const uint32_t listed =
+        std::min<uint32_t>(count, static_cast<uint32_t>(ports.size()));
+    for (uint32_t i = 0; i < listed; ++i) {
+        QVariantMap m;
+        m["name"] = QString::fromUtf8(ports[i].name);
+        m["device"] = QString::fromUtf8(ports[i].device);
+        out.append(m);
+    }
     return out;
 }
 
@@ -1711,7 +1737,8 @@ QString QtTuneBridge::sessionInfoText(const ecuio_session_info_t& info)
                         speed, loop ? QStringLiteral(", looping") : QString()) +
                profile;
     }
-    if (info.backend != ECUIO_BACKEND_J2534_SURROGATE) {
+    const bool elm327 = info.backend == ECUIO_BACKEND_ELM327;
+    if (!elm327 && info.backend != ECUIO_BACKEND_J2534_SURROGATE) {
         return QStringLiteral("Session: backend %1").arg(info.backend);
     }
     const auto text = [](const char* s) {
@@ -1721,10 +1748,21 @@ QString QtTuneBridge::sessionInfoText(const ecuio_session_info_t& info)
     };
 
     QStringList parts;
-    const QString arch = (info.dll_arch == ECUIO_DLL_ARCH_X86) ? QStringLiteral("x86 DLL")
-                       : (info.dll_arch == ECUIO_DLL_ARCH_X64) ? QStringLiteral("x64 DLL")
-                       : QStringLiteral("DLL of unknown architecture");
-    parts << arch + QStringLiteral(", through the surrogate");
+    if (elm327) {
+        // The port is in the "Connected:" line just before; the firmware
+        // is the AT I answer, then STI's on an STN chip
+        parts << QStringLiteral("ELM327 adapter (%1)")
+                     .arg((info.flags & ECUIO_SESSION_INFO_VERSIONS)
+                              ? text(info.firmware_version)
+                              : QStringLiteral("no version reading"));
+    } else {
+        const QString arch =
+            (info.dll_arch == ECUIO_DLL_ARCH_X86) ? QStringLiteral("x86 DLL")
+            : (info.dll_arch == ECUIO_DLL_ARCH_X64)
+                ? QStringLiteral("x64 DLL")
+                : QStringLiteral("DLL of unknown architecture");
+        parts << arch + QStringLiteral(", through the surrogate");
+    }
 
     QString link = (info.protocol_id == 6) ? QStringLiteral("ISO 15765")
                  : (info.protocol_id == 5) ? QStringLiteral("CAN")
@@ -1754,6 +1792,17 @@ QString QtTuneBridge::sessionInfoText(const ecuio_session_info_t& info)
     parts << ((info.flags & ECUIO_SESSION_INFO_VBATT)
                   ? QStringLiteral("battery %1 V").arg(info.vbatt_mv / 1000.0, 0, 'f', 1)
                   : QStringLiteral("no battery reading"));
+    if (elm327) {
+        // An STN with parameter 2A on and its bit 2 clear stops listening
+        // at a 7F xx 78, before the answer comes (ADR-0026)
+        if ((info.flags & ECUIO_SESSION_INFO_PENDING_OFF) != 0) {
+            parts << QStringLiteral(
+                "the adapter is set not to wait past 7F xx 78 "
+                "(STN parameter 2A), so a pending reply's "
+                "answer is lost");
+        }
+        return QStringLiteral("Session: ") + parts.join(QStringLiteral("; "));
+    }
     parts << ((info.flags & ECUIO_SESSION_INFO_VERSIONS)
                   ? QStringLiteral("firmware %1, DLL %2, API %3")
                         .arg(text(info.firmware_version), text(info.dll_version),

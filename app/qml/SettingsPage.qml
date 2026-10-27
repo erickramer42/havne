@@ -8,11 +8,14 @@
 //          uds-generic URI connecting through the mock, every control
 //          locked while a connect is in flight, the last URI that
 //          connected and the Record switch back in a new page (a refused
-//          URI not kept); the status label
+//          URI not kept), the device list's rows for interfaces and
+//          serial ports, a serial port's row and the elm327:// preset
+//          filling the field; the status label
 //          and the activity log's link lines in each link state
 //          (tests/qml/tst_linkhealth.qml), by objectName.
-//          Manual smoke — discovery list renders (Windows: real registry;
-//          macOS/Linux: empty-state hint) sized to its rows, a device row
+//          Manual smoke — the live discovery list renders (Windows: the
+//          registry's interfaces and ports; macOS/Linux: the /dev ports or
+//          the empty-state hint) sized to its rows, a device row
 //          fills the URI field only, Connect button drives
 //          connectSessionAsync (UI stays responsive while a vendor blocks
 //          ~8 s), activity log shows connect lifecycle and takes the
@@ -45,6 +48,24 @@ Pane {
     // Empty on non-Windows or when no drivers are installed.
     property var j2534Devices: []
 
+    // The machine's serial ports, for elm327:// (ADR-0026 §7): [{ name,
+    // device }, ...], device the driver's on Windows, "" elsewhere. Every
+    // port is listed, whatever is behind it: none is opened until Connect
+    property var serialPorts: []
+
+    // The device list's rows, the interfaces then the ports: { title,
+    // detail, base }, base being what a click puts in the URI field
+    readonly property var devices: j2534Devices.map(d => ({
+            title: d.vendorName + (d.architecture ? "  (" + d.architecture + ")" : ""),
+            detail: d.dllPath,
+            base: "j2534://" + d.vendorName
+        })).concat(serialPorts.map(p => ({
+            title: p.name,
+            detail: p.device !== "" ? qsTr("Serial port, for elm327:// · %1").arg(p.device)
+                                    : qsTr("Serial port, for elm327://"),
+            base: "elm327://" + p.name
+        })))
+
     // No session, and none starting or ending. Every control that chooses
     // or starts a session is enabled by this one value, so none can be
     // used during a multi-second vendor block: the bridge refuses a
@@ -61,6 +82,7 @@ Pane {
 
     function refreshDevices() {
         j2534Devices = Bridge.discoverJ2534Devices()
+        serialPorts = Bridge.discoverSerialPorts()
     }
 
     // The URI is composed from three choices, so none of it needs typing:
@@ -80,7 +102,8 @@ Pane {
           hint: qsTr("The scheme's own profile: obd2 on an adapter, the demo set on mock://") },
         { name: "raw", label: qsTr("raw (log only)"),
           hint: qsTr("No decode: frames reach the Log page only. On an adapter it listens "
-                     + "to the engine ECU (0x7E8); add ?filter= for another ID") },
+                     + "to the engine ECU (0x7E8); add ?filter= for another ID. An ELM327 "
+                     + "hears only replies to its requests, so add ?poll= there") },
         { name: "uds-generic", label: qsTr("uds-generic (DIDs)"),
           hint: qsTr("Service 0x22 reads of the DIDs below, polled; a range is scanned "
                      + "once and the DIDs the ECU answers join the polling") }
@@ -325,7 +348,8 @@ Pane {
                     // ?poll= replaces the profile's PID rotation. Raw on an
                     // adapter listens to the engine ECU, so ?poll= alone
                     // asks it; under the obd2 default it also decodes.
-                    placeholderText: qsTr("URI — e.g. mock://demo or j2534://Vendor?profile=raw&poll=0x0C")
+                    placeholderText: qsTr("URI — e.g. mock://demo, elm327://COM5 or "
+                                          + "j2534://Vendor?profile=raw&poll=0x0C")
                     enabled: page.idle
                     color: Theme.text
                     // Any text the page didn't compose is read back
@@ -375,7 +399,10 @@ Pane {
                     model: [
                         { name: "mock", uri: "mock://demo", label: "mock://demo" },
                         // A bare j2534:// opens the first discovered device
-                        { name: "j2534", uri: "j2534://", label: qsTr("j2534:// (first device)") }
+                        { name: "j2534", uri: "j2534://", label: qsTr("j2534:// (first device)") },
+                        // elm327:// takes no first port: the user picks one
+                        // from the list below (core's refusal says so)
+                        { name: "elm327", uri: "elm327://", label: qsTr("elm327:// (a port below)") }
                     ]
                     ThemedButton {
                         required property var modelData
@@ -541,18 +568,20 @@ Pane {
                 }
             }
 
-            // ---- J2534 interfaces ----
-            Heading { text: qsTr("J2534 Pass-Thru Interfaces") }
+            // ---- Adapters: J2534 interfaces and serial ports ----
+            Heading { text: qsTr("Adapters") }
 
             RowLayout {
                 spacing: Theme.spacing
                 Label {
-                    text: page.j2534Devices.length === 0
-                          ? qsTr("None discovered — install a Pass-Thru driver "
-                                 + "(Windows) or enter a direct path above")
-                          : qsTr("%1 found — select one to put its URI in the field above, "
-                                 + "then Connect").arg(page.j2534Devices.length)
-                    color: page.j2534Devices.length === 0 ? Theme.textDim : Theme.text
+                    objectName: "deviceCount"
+                    text: page.devices.length === 0
+                          ? qsTr("None found — install a Pass-Thru driver (Windows), plug in "
+                                 + "or pair an ELM327 adapter, or enter a URI above")
+                          : qsTr("J2534 interfaces: %1, serial ports: %2 — select one to put "
+                                 + "its URI in the field above, then Connect")
+                                .arg(page.j2534Devices.length).arg(page.serialPorts.length)
+                    color: page.devices.length === 0 ? Theme.textDim : Theme.text
                     wrapMode: Text.WordWrap
                     Layout.fillWidth: true
                 }
@@ -574,7 +603,7 @@ Pane {
                 clip: true
                 spacing: 2
                 boundsBehavior: Flickable.StopAtBounds
-                model: page.j2534Devices
+                model: page.devices
 
                 ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
 
@@ -593,7 +622,7 @@ Pane {
                         hoverEnabled: true
                         cursorShape: Qt.PointingHandCursor
                         enabled: page.idle
-                        onClicked: page.fillUri("j2534://" + row.modelData.vendorName)
+                        onClicked: page.fillUri(row.modelData.base)
                     }
 
                     ColumnLayout {
@@ -602,14 +631,13 @@ Pane {
                         spacing: 2
 
                         Label {
-                            text: row.modelData.vendorName
-                                  + (row.modelData.architecture
-                                       ? "  (" + row.modelData.architecture + ")"
-                                       : "")
+                            objectName: "deviceTitle"
+                            text: row.modelData.title
                             color: page.idle ? Theme.text : Theme.textDim
                         }
                         Label {
-                            text: row.modelData.dllPath
+                            objectName: "deviceDetail"
+                            text: row.modelData.detail
                             color: Theme.textDim
                             font.pointSize: 8
                             elide: Text.ElideMiddle
