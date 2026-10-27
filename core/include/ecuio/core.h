@@ -134,7 +134,7 @@ typedef enum {
 } ecuio_status_t;
 
 /* Lifecycle. Core needs no global setup: sessions, the profile registry
- * (profile.h) and discovery (j2534.h) work without ecuio_init. Both
+ * (profile.h) and discovery (j2534.h, serial.h) work without ecuio_init. Both
  * calls are optional and do nothing; init always returns ECUIO_OK. A
  * caller may pair them, call either any number of times, or never call
  * them, and shutdown leaves open sessions working. */

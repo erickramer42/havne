@@ -19,6 +19,7 @@
 #include "ecuio/surrogate_protocol.h"
 #include "ecuio/j2534_surrogate.h"
 #include "ecuio/j2534.h"
+#include "ecuio/serial.h"
 #include "ecuio/profile.h"
 #include "ecuio/signal_sets.h"
 #include "ecuio/signals.h"
@@ -69,6 +70,9 @@ typedef char abi_value_text_check[(offsetof(ecuio_value_t, text) == 16) ? 1 : -1
 typedef char abi_value_size_check[(sizeof(void*) != 8 || sizeof(ecuio_value_t) == 24) ? 1 : -1];
 typedef char abi_batch_values_check[(offsetof(ecuio_value_batch_t, values) == 24) ? 1 : -1];
 typedef char abi_batch_size_check[(sizeof(void*) != 8 || sizeof(ecuio_value_batch_t) == 32) ? 1 : -1];
+typedef char abi_serial_size_check[(sizeof(ecuio_serial_port_t) == 288) ? 1 : -1];
+typedef char abi_serial_device_check[(offsetof(ecuio_serial_port_t, device) == 128) ? 1 : -1];
+typedef char abi_serial_flags_check[(offsetof(ecuio_serial_port_t, flags) == 256) ? 1 : -1];
 
 int main(void)
 {
@@ -82,6 +86,7 @@ int main(void)
     ecuio_display_value_t shown;
     ecuio_sur_request_t sur_request;
     ecuio_transport_ops_t ops;
+    uint32_t serial_count = 0;
     const uint8_t vin_request[2] = {0x09, 0x02};
     frame.arbitration_id = 0x7FF;
     frame.channel_id = 0;
@@ -134,6 +139,10 @@ int main(void)
     memset(&sur_request, 0, sizeof sur_request);
     memset(&ops, 0, sizeof ops);
     if (sur_request.opcode != 0 || ops.start != NULL) {
+        return 1;
+    }
+    if (ecuio_serial_ports(NULL, 0, &serial_count) != ECUIO_OK ||
+        ecuio_serial_ports(NULL, 1, &serial_count) != ECUIO_ERR_NULL_ARGUMENT) {
         return 1;
     }
     ecuio_j2534_free_devices(NULL);

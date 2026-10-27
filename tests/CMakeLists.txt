@@ -78,7 +78,9 @@ gtest_discover_tests(test_obd2)
 # test_elm327_session.cpp: the transport against the fake ELM327 behind
 # internal.h's port opener, and on POSIX the OS's port over a
 # pseudo-terminal (elm327_port.h); it holds the binary's new_counter.h.
-add_executable(test_elm327 test_elm327.cpp test_elm327_session.cpp)
+# test_serial_ports.cpp: serial-port discovery (serial.h, serial_ports.h).
+add_executable(test_elm327 test_elm327.cpp test_elm327_session.cpp
+    test_serial_ports.cpp)
 target_include_directories(test_elm327 PRIVATE
     ${CMAKE_SOURCE_DIR}/core/src
 )
