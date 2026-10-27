@@ -325,7 +325,8 @@ TEST(BridgeTest, RecordingWritesFramesValuesAndEvents)
 
     const QByteArray events = readFile(dir + QStringLiteral("/events.log"));
     for (const char* expected : { "uri      mock://rec", "signals  ", "Connected: mock://rec",
-                                  "Disconnecting: mock://rec", "Disconnected: mock://rec",
+                                  "Disconnecting: mock://rec", "Delivery: ",
+                                  "Disconnected: mock://rec",
                                   "end      disconnected: " }) {
         EXPECT_TRUE(events.contains(expected)) << expected << "\n" << events.toStdString();
     }
@@ -2027,8 +2028,9 @@ TEST(BridgeTest, DisconnectTearsDownOffGuiThread)
     EXPECT_GE(clock.elapsed(), 700) << "the stall never reached the teardown";
     EXPECT_EQ(hooks.disconnect_count(), disconnects_before + 1);
 
-    ASSERT_GE(log.size(), 2);
-    EXPECT_TRUE(log.at(log.size() - 2).startsWith(QStringLiteral("Disconnecting: ")));
+    ASSERT_GE(log.size(), 3);
+    EXPECT_TRUE(log.at(log.size() - 3).startsWith(QStringLiteral("Disconnecting: ")));
+    EXPECT_TRUE(log.at(log.size() - 2).startsWith(QStringLiteral("Delivery: ")));
     EXPECT_TRUE(log.last().startsWith(QStringLiteral("Disconnected: ")));
 
     // The adapter is free again once the teardown has ended
@@ -2647,6 +2649,121 @@ TEST(BridgeTest, TheChartKeepsTheFixturesPeak)
     EXPECT_NEAR(peak, 1261.25, 0.01) << "the recording's peak, the sheet's 1,261";
     EXPECT_TRUE(ordered) << "times in order, inside the recording";
     EXPECT_GT(lastMs, 290000) << "the last sample near the recording's end";
+}
+
+/* LatencyStats reads a quantile back at the top of the bucket holding
+ * it: exact below 16 µs, at most an eighth above the true value past
+ * that, never below it, and the maximum exactly */
+TEST(BridgeTest, LatencyStatsReadsQuantilesWithinABucket)
+{
+    LatencyStats empty;
+    EXPECT_EQ(empty.count(), 0u);
+    EXPECT_EQ(empty.quantileUs(0.5), 0u);
+
+    LatencyStats small;
+    for (int us : {0, 3, 7, 15})
+        small.add(us);
+    small.add(-5);   // a clock step backwards counts as 0
+    EXPECT_EQ(small.count(), 5u);
+    EXPECT_EQ(small.quantileUs(0.0), 0u);
+    EXPECT_EQ(small.quantileUs(0.5), 3u) << "exact below 16 µs";
+    EXPECT_EQ(small.quantileUs(1.0), 15u);
+
+    LatencyStats l;
+    for (int us = 1; us <= 100000; ++us)
+        l.add(us);
+    EXPECT_EQ(l.count(), 100000u);
+    EXPECT_EQ(l.maxUs(), 100000u);
+    for (double q : {0.01, 0.25, 0.5, 0.9, 0.99, 0.999}) {
+        const double truth = q * 100000.0;
+        const double got = static_cast<double>(l.quantileUs(q));
+        EXPECT_GE(got, truth) << q;
+        EXPECT_LE(got, truth * 1.125 + 1.0) << q;
+    }
+    EXPECT_EQ(l.quantileUs(1.0), 100000u) << "the maximum, exactly";
+
+    LatencyStats huge;
+    huge.add(int64_t(1) << 50);   // past the last bucket: kept, and the max
+    EXPECT_EQ(huge.quantileUs(0.5), uint64_t(1) << 50);
+    l.clear();
+    EXPECT_EQ(l.count(), 0u);
+    EXPECT_EQ(l.maxUs(), 0u);
+}
+
+/* The activity log's "Delivery:" line: frames and drops, what was still
+ * queued, then each path's median, p99 and max (µs below a millisecond,
+ * ms with a decimal below 10, whole ms past that); a session that
+ * decoded nothing has no values clause */
+TEST(BridgeTest, DeliveryTextNamesFramesDropsAndTimes)
+{
+    QtTuneBridge::DeliveryStats none;
+    EXPECT_EQ(QtTuneBridge::deliveryText(none).toStdString(), "Delivery: no frames");
+
+    QtTuneBridge::DeliveryStats raw;
+    raw.frames = 3;
+    for (int us : {12, 12, 900})
+        raw.frameToGui.add(us);
+    EXPECT_EQ(QtTuneBridge::deliveryText(raw).toStdString(),
+              "Delivery: 3 frames, none dropped; to the GUI thread "
+              "in median 12 µs, p99 900 µs, max 900 µs");
+
+    QtTuneBridge::DeliveryStats busy;
+    busy.frames = 2000;
+    busy.dropped = 500;
+    busy.queuedAtEnd = 7;
+    for (int i = 0; i < 1493; ++i)
+        busy.frameToGui.add(2500);
+    busy.values = 4000;
+    busy.valuesMissed = 10;
+    for (int i = 0; i < 3990; ++i)
+        busy.valueToModel.add(i < 3900 ? 52000 : 99000);
+    /* 52 ms reads 53: its bucket's top is 53.247 ms, an eighth of
+     * 32.768 ms past its floor. 99 ms reads exact, capped at the max. */
+    EXPECT_EQ(QtTuneBridge::deliveryText(busy).toStdString(),
+              "Delivery: 2000 frames, 500 dropped at the in-flight cap "
+              "(25.0 %), 7 still queued at the end; to the GUI thread "
+              "in median 2.5 ms, p99 2.5 ms, max 2.5 ms; 4000 values, "
+              "to the model in median 53 ms, p99 99 ms, max 99 ms "
+              "(10 past the staging's limit, not timed)");
+}
+
+/* At disconnect the activity log says how the session's frames and
+ * values were delivered: over the engine-start fixture at full speed,
+ * every frame accounted for (handled or dropped at the cap), each
+ * handled frame and each staged value timed, and the line is the
+ * figures the bridge kept */
+TEST(BridgeTest, DisconnectLogsTheDelivery)
+{
+    const QString uri =
+        QStringLiteral("replay://%1/2026-10-25-engine-start?profile=obd2&speed=max")
+            .arg(QStringLiteral(ECUIO_REPLAY_FIXTURES));
+    constexpr quint64 kFrames = 7074;
+    QtTuneBridge bridge;
+    ASSERT_TRUE(bridge.connectSession(uri).isEmpty());
+    ASSERT_TRUE(spinUntil(
+        [&bridge]() { return bridge.frameCount() + bridge.droppedFrames() >= int(kFrames); },
+        20000));
+    spinLoop(300);   // past two ticks: every value drained
+
+    const QtTuneBridge::DeliveryStats s = bridge.deliveryStats();
+    EXPECT_EQ(s.frames, kFrames);
+    EXPECT_EQ(s.dropped + static_cast<quint64>(bridge.frameCount()), kFrames);
+    EXPECT_EQ(s.queuedAtEnd, 0u);
+    EXPECT_EQ(s.frameToGui.count(), static_cast<quint64>(bridge.frameCount()))
+        << "every handled frame timed";
+    EXPECT_GT(s.values, 0u);
+    EXPECT_EQ(s.valuesMissed, 0u);
+    EXPECT_EQ(s.valueToModel.count(), s.values) << "every staged value timed";
+
+    QStringList log;
+    QObject::connect(&bridge, &QtTuneBridge::logMessage,
+                     [&log](const QString& line) { log << line; });
+    ASSERT_TRUE(disconnectAndWait(bridge));
+    const QStringList delivery = log.filter(QStringLiteral("Delivery: "));
+    ASSERT_EQ(delivery.size(), 1) << log.join('\n').toStdString();
+    EXPECT_EQ(delivery.first(), QtTuneBridge::deliveryText(s));
+    EXPECT_TRUE(delivery.first().startsWith(QStringLiteral("Delivery: 7074 frames, ")));
+    EXPECT_TRUE(delivery.first().contains(QStringLiteral("values, to the model in median ")));
 }
 
 /* The recording holds every value core decodes (ADR-0024): over the

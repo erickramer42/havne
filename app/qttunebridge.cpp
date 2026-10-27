@@ -7,8 +7,8 @@
 //          each window's envelope at its frames' times
 //          (BridgeTest.AWindow*, .TheChartKeepsTheFixturesPeak), rows by
 //          id, the signal model's roles and age
-//          refresh, link-state mapping, the activity log's session and
-//          ECU lines, session recording (BridgeTest.Recording*), display
+//          refresh, link-state mapping, the activity log's session,
+//          ECU and delivery lines, session recording (BridgeTest.Recording*), display
 //          units on the rows, the chart and not the recording
 //          (BridgeTest.UnitSystem*), the URI label
 //          (BridgeTest.UriLabelCutsADirectLoadPathToItsFileName), the
@@ -631,6 +631,9 @@ QString QtTuneBridge::startSession(ecuio_session_t* session)
     m_framesDelivered.store(0, std::memory_order_relaxed);
     m_droppedFrames.store(0, std::memory_order_relaxed);
     m_lastReportedDropped = 0;
+    m_frameLatency.clear();
+    m_valueLatency.clear();
+    m_valuesStaged = 0;
     prepareValueStaging(ecuio_session_signal_set(session));
     m_accepting.store(true, std::memory_order_release);
     const ecuio_status_t rc = ecuio_session_start(session);
@@ -798,6 +801,7 @@ void QtTuneBridge::disconnectSession()
                             .arg(m_valuesDropped)
                             .arg(m_valueSampleLimit));
     }
+    emit logMessage(deliveryText(deliveryStats()));
     m_valueSet = nullptr;  // the drain's; onValues stops at m_accepting
     m_stagingBuffer.clear();
     m_stagingTexts.clear();
@@ -1052,6 +1056,10 @@ void QtTuneBridge::handleFrameInternal(const ecuio_frame_t* frame,
                          ? frame->data_length
                          : static_cast<uint16_t>(sizeof(frame->data));
 
+    m_frameLatency.add(std::chrono::duration_cast<std::chrono::microseconds>(
+                           SessionRecorder::Clock::now() - arrived)
+                           .count());
+
     // Recorded whether or not the log is paused
     m_recorder.frame(arrived, *frame, len);
 
@@ -1228,8 +1236,14 @@ void QtTuneBridge::drainValues()
         m_activeStaging ^= 1;
     }
     // The worker writes the other one now, so this one is the GUI
-    // thread's until the next swap
+    // thread's until the next swap. Its values reach the model with this
+    // drain, so each one's wait ends here.
+    const auto drained = SessionRecorder::Clock::now();
+    m_valuesStaged += full->samples.size() + full->dropped;
     for (const ValueStaging::Sample& s : full->samples) {
+        m_valueLatency.add(std::chrono::duration_cast<std::chrono::microseconds>(
+                               drained - s.arrived)
+                               .count());
         const ecuio_signal_def_t& def = m_valueSet->defs[s.def];
         if (s.isText) {
             m_recorder.sample(s.arrived, def,
@@ -1287,6 +1301,79 @@ void QtTuneBridge::flushValues()
     }
     ++m_signalBatchCount;
     emit signalBatchChanged();
+}
+
+QtTuneBridge::DeliveryStats QtTuneBridge::deliveryStats() const
+{
+    DeliveryStats s;
+    s.frames = m_framesDelivered.load(std::memory_order_relaxed);
+    s.dropped = static_cast<quint64>(m_droppedFrames.load(std::memory_order_relaxed));
+    const int queued = m_inFlightFrames.load(std::memory_order_relaxed);
+    s.queuedAtEnd = queued > 0 ? static_cast<quint64>(queued) : 0;
+    s.values = m_valuesStaged;
+    s.valuesMissed = m_valuesDropped;
+    s.frameToGui = m_frameLatency;
+    s.valueToModel = m_valueLatency;
+    return s;
+}
+
+namespace {
+
+// A latency for the activity log: µs below a millisecond, then ms with
+// one decimal below 10 ms, then whole ms
+QString latencyText(uint64_t us)
+{
+    if (us < 1000) return QStringLiteral("%1 µs").arg(us);
+    if (us < 10000) {
+        return QStringLiteral("%1 ms").arg(static_cast<double>(us) / 1000.0, 0, 'f', 1);
+    }
+    return QStringLiteral("%1 ms").arg((us + 500) / 1000);
+}
+
+QString quantilesText(const LatencyStats& l)
+{
+    return QStringLiteral("median %1, p99 %2, max %3")
+        .arg(latencyText(l.quantileUs(0.5)), latencyText(l.quantileUs(0.99)),
+             latencyText(l.maxUs()));
+}
+
+} // namespace
+
+// "Delivery: 7074 frames, none dropped; to the GUI thread in median
+// 31 µs, p99 412 µs, max 1.2 ms; 28296 values, to the model in median
+// 51 ms, p99 99 ms, max 101 ms". A quantile is the top of its bucket,
+// at most 12.5 % above the true value (LatencyStats).
+QString QtTuneBridge::deliveryText(const DeliveryStats& s)
+{
+    if (s.frames == 0) {
+        return QStringLiteral("Delivery: no frames");
+    }
+    QString line = QStringLiteral("Delivery: %1 frames, ").arg(s.frames);
+    if (s.dropped == 0) {
+        line += QStringLiteral("none dropped");
+    } else {
+        line += QStringLiteral("%1 dropped at the in-flight cap (%2 %)")
+                    .arg(s.dropped)
+                    .arg(100.0 * static_cast<double>(s.dropped) / static_cast<double>(s.frames),
+                         0, 'f', 1);
+    }
+    if (s.queuedAtEnd > 0) {
+        line += QStringLiteral(", %1 still queued at the end").arg(s.queuedAtEnd);
+    }
+    if (s.frameToGui.count() > 0) {
+        line += QStringLiteral("; to the GUI thread in ") + quantilesText(s.frameToGui);
+    }
+    if (s.values > 0) {
+        line += QStringLiteral("; %1 values").arg(s.values);
+        if (s.valueToModel.count() > 0) {
+            line += QStringLiteral(", to the model in ") + quantilesText(s.valueToModel);
+        }
+        if (s.valuesMissed > 0) {
+            line += QStringLiteral(" (%1 past the staging's limit, not timed)")
+                        .arg(s.valuesMissed);
+        }
+    }
+    return line;
 }
 
 void QtTuneBridge::pollLinkHealth()

@@ -1,7 +1,8 @@
 // File/layer: app/qttunebridge.h | Qt6 Core, app layer, C++17
 // Testing: test_bridge (Qt-linked target): the frame log's ring, order
 //          and payload storage, SignalListModel's history ring and display units,
-//          discoverJ2534Devices' marshaling shape
+//          discoverJ2534Devices' marshaling shape, the delivery figures
+//          (BridgeTest.DeliveryText*, .DisconnectLogsTheDelivery)
 
 #pragma once
 
@@ -24,6 +25,7 @@
 #include "ecuio/core.h"
 #include "ecuio/profile.h"
 #include "ecuio/signals.h"
+#include "latencystats.h"
 #include "sessionrecorder.h"
 
 // The Log page's frames, newest first by default. The last MaxFrames
@@ -325,6 +327,23 @@ public:
     static QString channelSupportText(const ecuio_channel_support_t& support);  /* its "ECU 0x…:" lines */
     static QString channelIdentityText(const ecuio_channel_identity_t& identity);  /* its "ECU 0x… identity:" lines */
 
+    // A session's delivery so far: what the worker handed the bridge,
+    // what the in-flight cap dropped, and how long each frame took to
+    // reach the GUI thread (onFrame's stamp to handleFrameInternal) and
+    // each value to reach the model (onValues' stamp to the tick that
+    // drains it). Zeroed at each session's start; GUI thread only.
+    struct DeliveryStats {
+        quint64 frames = 0;          // every frame onFrame accepted, dropped ones too
+        quint64 dropped = 0;         // at the in-flight cap
+        quint64 queuedAtEnd = 0;     // still queued when the session ended
+        quint64 values = 0;          // every value onValues staged
+        quint64 valuesMissed = 0;    // past the staging's limits: not timed or recorded
+        LatencyStats frameToGui;
+        LatencyStats valueToModel;
+    };
+    DeliveryStats deliveryStats() const;
+    static QString deliveryText(const DeliveryStats& stats);  /* the activity log's "Delivery:" line */
+
     Q_INVOKABLE QString statusString(int statusCode) const;
     Q_INVOKABLE int maxFrameCount() const { return FrameListModel::MaxFrames; }
     Q_INVOKABLE void forceFrameCountForTesting(int count);
@@ -526,6 +545,11 @@ private:
     void pollChannelIdentity();
     void pollReplayEnd();   // the tick: "Replay finished" once, at the end of the file
     uint32_t m_identityGeneration[ECUIO_SESSION_INFO_MAX_CHANNELS] = {};
+
+    // This session's delivery figures (deliveryStats), GUI thread only
+    LatencyStats m_frameLatency;
+    LatencyStats m_valueLatency;
+    quint64 m_valuesStaged = 0;
 
     bool m_recording = false;
     SessionRecorder m_recorder;

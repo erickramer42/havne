@@ -22,6 +22,7 @@ qt_add_library(qttune_ui STATIC
     bridgesingleton.h
     qttunebridge.cpp
     qttunebridge.h
+    latencystats.h
     sessionrecorder.cpp
     sessionrecorder.h
 )
