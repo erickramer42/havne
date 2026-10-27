@@ -18,6 +18,8 @@
 // Knobs (fake_elm327::knobs), set under the port's lock (with()):
 //   plain        a plain ELM327: STI, STVR and every ST command answer '?'
 //   version      what AT Z and AT I answer ("ELM327 v1.4b")
+//   reset_ok     AT Z and AT WS answer OK, and only AT I the version, as
+//                the OBDX Pro VX does
 //   refuse       one command, without its CR ("ATH1"), answered '?'
 //   no_data      every request answered NO DATA
 //   can_error    every request answered CAN ERROR (no node to ACK)
@@ -52,6 +54,7 @@ namespace fake_elm327 {
 struct knobs {
     bool plain = false;
     const char* version = "ELM327 v1.4b";
+    bool reset_ok = false;
     const char* refuse = nullptr;
     bool no_data = false;
     bool can_error = false;
@@ -350,6 +353,10 @@ private:
         if (is("Z") || is("WS")) {
             ++resets;
             settings_defaults();
+            if (k.reset_ok) {
+                reply("OK", now);
+                return;
+            }
             end_line(now);
             end_line(now);
             reply(k.version, now);

@@ -410,35 +410,58 @@ setup_answer set_header(transport* t, uint32_t tx, char* failed_cmd)
     return a;
 }
 
+/* AT Z or AT I: ok when a line is an ELM327 version, copied to version
+ * (when not NULL). With plain_ok, an OK line sets it instead of being
+ * the answer quoted. */
+setup_answer identify(transport* t, const char* cmd, char* version,
+                      size_t version_cap, bool* plain_ok)
+{
+    setup_answer a;
+    a.io = command(t, cmd, false, [&](const elm327_reader& r) {
+        if (elm327_is_version(r.line, r.len)) {
+            a.ok = true;
+            if (version != nullptr) {
+                copy_text(version, version_cap, r.line);
+            }
+        } else if (plain_ok != nullptr &&
+                   elm327_classify(r, t->ext29, nullptr) == elm327_line::ok) {
+            *plain_ok = true;
+        } else if (a.first[0] == '\0') {
+            quote(r, a.first);
+        }
+    });
+    a.ok = a.ok && a.io == elm327_io::prompt;
+    return a;
+}
+
 /* The setup's contract commands (ADR-0026 §3), each answered before the
  * next: a known state, then everything the framing rests on. Any
  * answer but OK refuses, so an adapter never runs half-configured. The
  * reset is sent twice at most: an adapter still monitoring the bus takes
- * the first character as its stop and answers the rest '?'. */
+ * the first character as its stop and answers the rest '?'. A reset
+ * answered OK alone (an OBDX) leaves the version to AT I, which must
+ * give one. */
 ecuio_status_t run_setup(transport* t, char* version, size_t version_cap)
 {
     t->configured = false;
     t->header_set = false;
     t->reader = elm327_reader{};
     setup_answer reset;
+    bool reset_ok = false;
     for (int attempt = 0; attempt < 2; ++attempt) {
-        reset = setup_answer{};
-        reset.io = command(t, "ATZ\r", false, [&](const elm327_reader& r) {
-            if (elm327_is_version(r.line, r.len)) {
-                reset.ok = true;
-                if (version != nullptr) {
-                    copy_text(version, version_cap, r.line);
-                }
-            } else if (reset.first[0] == '\0') {
-                quote(r, reset.first);
-            }
-        });
-        if (reset.io != elm327_io::prompt || reset.ok) {
+        reset_ok = false;
+        reset = identify(t, "ATZ\r", version, version_cap, &reset_ok);
+        if (reset.io != elm327_io::prompt || reset.ok || reset_ok) {
             break;
         }
     }
-    if (!reset.ok || reset.io != elm327_io::prompt) {
-        reset.ok = false;
+    if (reset.io == elm327_io::prompt && !reset.ok && reset_ok) {
+        const setup_answer id =
+            identify(t, "ATI\r", version, version_cap, nullptr);
+        if (!id.ok) {
+            return refuse(t, "ATI\r", id, "an ELM327 version");
+        }
+    } else if (!reset.ok) {
         return refuse(t, "ATZ\r", reset, "an ELM327 version");
     }
 

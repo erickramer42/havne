@@ -411,6 +411,42 @@ TEST_F(Elm327SessionTest, APlainElm327ConnectsWithoutTheStnReadings)
     EXPECT_EQ(fake_count("ATPPS"), 0u);
 }
 
+/* An adapter whose reset answers OK alone (the OBDX Pro VX, ADR-0026's
+ * appendix of 2026-10-27) names its version to AT I, asked straight
+ * after; the reset isn't sent again. A dropped link's setup does the
+ * same */
+TEST_F(Elm327SessionTest, AResetAnsweredOkTakesTheVersionFromAtI)
+{
+    set_knobs([](fake_elm327::knobs& k) {
+        k.reset_ok = true;
+        k.plain = true;
+        k.version = "ELM327 V2.1";
+    });
+    Session s;
+    ASSERT_EQ(s.create(uri("?poll=0x0C")), ECUIO_OK)
+        << ecuio_last_error_detail();
+    const std::vector<std::string> sent = fake_commands();
+    ASSERT_GE(sent.size(), 3u);
+    EXPECT_EQ(sent[0], "ATZ");
+    EXPECT_EQ(sent[1], "ATI");
+    EXPECT_EQ(sent[2], "ATE0");
+    EXPECT_EQ(fake_count("ATZ"), 1u);
+    ecuio_session_info_t info{};
+    ASSERT_EQ(ecuio_session_get_info(s.s, &info), ECUIO_OK);
+    EXPECT_STREQ(info.firmware_version, "ELM327 V2.1");
+
+    s.start();
+    ASSERT_TRUE(wait_for([&] { return s.cap.count("41 0C") >= 1; }, 3000));
+    set_knobs([](fake_elm327::knobs& k) { k.dropped = true; });
+    ASSERT_TRUE(wait_for(
+        [&] { return s.state() == ECUIO_ERR_TRANSPORT_HARD_FAILURE; }, 3000));
+    const size_t before = s.cap.count("41 0C");
+    set_knobs([](fake_elm327::knobs& k) { k.dropped = false; });
+    ASSERT_TRUE(wait_for([&] { return s.state() == ECUIO_OK; }, 10000));
+    EXPECT_TRUE(wait_for([&] { return s.cap.count("41 0C") > before; }, 3000));
+    EXPECT_EQ(fake_count("ATZ"), 2u) << "the setup ran again";
+}
+
 /* Parameter 2A on with bit 2 clear: the adapter won't wait past a
  * 7F xx 78, and the session info says so. Off, or on with the bit set,
  * it does */
@@ -1008,6 +1044,22 @@ TEST_F(Elm327SessionTest, AWrongSetupAnswerRefusesTheConnect)
                   " answered ATZ with 'OBDII to RS232 Interpreter', not an "
                   "ELM327 version");
     EXPECT_EQ(fake_count("ATZ"), 2u);
+    EXPECT_EQ(s, nullptr);
+
+    /* A reset answered OK, then AT I with no version */
+    fake_elm327::with([](fake_elm327::adapter& a) {
+        a.clear();
+        a.k.reset_ok = true;
+        a.k.version = "OBDII to RS232 Interpreter";
+    });
+    EXPECT_EQ(ecuio_session_create(uri().c_str(), &s),
+              ECUIO_ERR_VENDOR_REFUSED);
+    EXPECT_EQ(std::string(ecuio_last_error_detail()),
+              std::string("the adapter on ") + kPort +
+                  " answered ATI with 'OBDII to RS232 Interpreter', not an "
+                  "ELM327 version");
+    EXPECT_EQ(fake_count("ATZ"), 1u);
+    EXPECT_EQ(fake_count("ATE0"), 0u) << "nothing after the refusal";
     EXPECT_EQ(s, nullptr);
 }
 
