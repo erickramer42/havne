@@ -20,8 +20,11 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
   rate. A dropped Bluetooth link recovers on its own. Settings lists
   the machine's serial ports beside the J2534 interfaces, without
   opening any, and the activity log's "Session:" line names the
-  adapter's firmware and the battery voltage. No real adapter has run
-  it yet.
+  adapter's firmware and the battery voltage. Each connect writes a
+  wire log to the temporary folder (`ecuio-elm327.<date-time>.log`):
+  every command and what the adapter answered, and, while recording,
+  every request and reply with its timing. No real adapter has run it
+  yet.
 - Settings remembers the last URI that connected, with its profile and
   DIDs, and the Record sessions switch between runs. A URI that failed
   to connect isn't kept.

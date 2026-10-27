@@ -250,6 +250,14 @@ a Bluetooth stack ([ADR-0026](adr/0026-elm327-transport.md)).
 - **The session line** names the adapter's firmware (`AT I`, plus
   `STI` on an STN), the CAN rate, the channels and the battery, and
   warns when an STN is set not to wait past a `7F xx 78`.
+- **A wire log** per connect (`core/src/elm327_log.cpp`,
+  `ecuio-elm327.<YYYYMMDD-HHMMSS-mmm>.log` in the temporary directory,
+  `%TEMP%` on Windows, the newest 50 kept),
+  the counterpart of the surrogate's session log: every setup command
+  and what came back, the readings, lines the adapter sent unasked, and
+  the port's failures and reopens. With `ECUIO_SUR_LOG_FRAMES=1`, which
+  a recording sets, every request and reply line too, each prompt with
+  its time after the request.
 - **Read-only** as every session is: the adapter's memory is never
   written, and no serial number is asked for.
 - **Not yet:** passive listening (`AT MA`) and Bluetooth LE, which has

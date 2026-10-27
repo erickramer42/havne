@@ -22,15 +22,19 @@ port code's first run (it has no automated test). Goals, in order:
 3. With no bus at all, its failure word reads as "Requests failing"
    (#15), and an unplugged cable as a fault that recovers (#16)
 
-`elm327://` writes no wire log, so the evidence is the activity log
-(each connect's `events.log` when recording) and what the screen shows.
+The evidence is each connect's wire log,
+`%TEMP%\ecuio-elm327.<YYYYMMDD-HHMMSS-mmm>.log`: every command, every
+line the adapter sent back, and, with **Record sessions** on, every
+request and reply with its prompt's time after the request. The
+activity log (`events.log` when recording) has the link's states.
 
 ## Pre-flight
 
 - [ ] `scripts/verify.sh` prints four `ok` lines on this build
 - [ ] The OBDX vendor app closed, and no `j2534://` session open: one
       program at a time can hold the port
-- [ ] Launch QtTune and tick **Record sessions**
+- [ ] Launch QtTune and tick **Record sessions**, so the wire logs
+      hold the requests too
 
 ## Phase 1 — the port
 
@@ -49,6 +53,9 @@ port code's first run (it has no automated test). Goals, in order:
 Connect, and leave it about a minute.
 
 **Expected:**
+- [ ] The wire log: the answer to every setup command (`< OK`, or what
+      came instead) and each prompt's time; after each request, `CAN
+      ERROR` or its kin (#15) and the time to its prompt
 - [ ] Connect succeeds within a few seconds. Copy the "Session:" line:
       `ELM327 adapter (ELM327 v…); ISO 15765 at 500000 baud; profile
       obd2, channel 0x7E8/0x7E0 (rx/tx); …`. No STN part (the VX isn't
@@ -96,8 +103,8 @@ cable for about 10 s, then plug it back in.
 
 ## Post-session actions
 
-1. Copy this sheet, filled in, to `docs/bench-sessions/<date>-elm327-bench.md`.
-   Scrub it as [bench-runsheet.md](bench-runsheet.md) says: no names,
-   no local paths
+1. Copy this sheet, filled in, to `docs/bench-sessions/<date>-elm327-bench.md`,
+   and the session's wire logs to a folder beside it. Scrub them as
+   [bench-runsheet.md](bench-runsheet.md) says: no names, no local paths
 2. Mark BENCH prep #11–#16 for the VX in [bench-prep.md](bench-prep.md)
 3. Update STATUS.md, and testing.md's gaps (the Win32 port)

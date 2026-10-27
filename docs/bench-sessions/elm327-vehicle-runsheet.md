@@ -21,8 +21,13 @@ is the finding.
    VX's 26
 4. A Bluetooth drop recovers without a reconnect (#16)
 
-`elm327://` writes no wire log: the evidence is the activity log (each
-connect's `events.log`), the recordings and photos.
+The evidence is each connect's wire log
+(`%TEMP%\ecuio-elm327.<YYYYMMDD-HHMMSS-mmm>.log`: every command and
+line, and with **Record sessions** on every request and reply with its
+prompt's time), the activity log (each connect's `events.log`), the
+recordings and photos. The wire log holds the identification replies
+in hex (`49 02` the VIN, `49 04` the CALID, `62 F1 xx` the ECU's
+serials): scrub before committing.
 
 ## Safety and pre-flight
 
@@ -67,7 +72,8 @@ connect's `events.log`), the recordings and photos.
       never writes them
 - [ ] Nothing answers with the ignition off: quiet after a second or
       two ("Vehicle not responding"), as through the VX; or "Requests
-      failing" on a bus that sleeps. Record which
+      failing" on a bus that sleeps. Record which, and from the wire
+      log the time from a request to its `NO DATA` prompt
 - [ ] Disconnect
 
 A refused connect names the command and its answer: copy it verbatim
@@ -80,6 +86,8 @@ keep this connect through the start.
 
 - [ ] The ECU line within a few seconds: `ECU 0x7E8: supports 53 PIDs;
       …, 1 dropped: 01 5C (not in its supported PIDs)` on this car
+- [ ] In the wire log, a reply line: its ID as `7E8` or `07E8` (#14),
+      and any `7F xx 78` line (#17)
 - [ ] The identity line (personal data: scrub it), with the same items
       answered and refused as on 2026-10-25
 - [ ] Engine-off values as [vehicle-runsheet.md](vehicle-runsheet.md)'s
@@ -135,10 +143,11 @@ the laptop's Bluetooth off for about 10 s, then on.
 
 1. Disconnect, unplug the MX+, key off
 2. As [vehicle-runsheet.md](vehicle-runsheet.md)'s post-session
-   actions: copy this sheet, filled in, with its photos, scrubbed (no
-   VIN, CALID or serials: the identity line, Phase 5's scan); the
+   actions: copy this sheet, filled in, with its photos and wire logs,
+   scrubbed (no VIN, CALID or serials: the identity line, Phase 5's
+   scan, and the identification replies in the wire logs); the
    recordings stay on the laptop
-3. Mark BENCH prep #12–#16 for the MX+ in [bench-prep.md](bench-prep.md),
+3. Mark BENCH prep #12–#17 for the MX+ in [bench-prep.md](bench-prep.md),
    and record the rate and the drop's recovery time in ADR-0026 as a
    dated appendix
 4. Update STATUS.md and testing.md's Vehicle tier and gaps

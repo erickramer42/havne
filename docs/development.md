@@ -384,7 +384,10 @@ and the run looks green. Read the skip count, or use
   replaces under a dated name, the newest 50 of them. A suite run
   spawns dozens, so copy a log that's evidence before running the
   tests, and check its stamps: the fixed name always holds the latest
-  spawn, which may not be the run you mean.
+  spawn, which may not be the run you mean. An `elm327://` connect's
+  wire log, `%TEMP%\ecuio-elm327.<stamp>.log`, keeps the newest 50 the
+  same way; the ELM327 tests write theirs to a directory of their own,
+  so a run never pushes those out.
 
 **Fuzzing** isn't part of ctest. The three libFuzzer harnesses need a
 tree of their own (`-DECUIO_BUILD_FUZZERS=ON` with

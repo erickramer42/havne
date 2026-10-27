@@ -544,3 +544,21 @@ first request:
 `CAN ERROR` with no bus at all is left to the VX's bench session, on
 USB power with no car; that session covers the VX alone (its serial
 port, its ELM answers, its voltage reading).
+
+## Appendix: 2026-10-27, a wire log
+
+Several of §8's bench items are what the adapter prints: each setup
+command's answer, how an 11-bit ID is printed, a `7F xx 78` line, and
+how long a request waits for its prompt with nothing to answer. The
+J2534 path has the surrogate's session log for that; `elm327://` had
+nothing below the activity log, which shows only states. So each
+connect writes a wire log of its own (`core/src/elm327_log.cpp`):
+`ecuio-elm327.<YYYYMMDD-HHMMSS-mmm>.log` in the temporary directory,
+the newest 50 kept. The setup, the readings, lines the adapter sends
+unasked, and the port's failures and reopens go in always. Every
+request and reply goes in with `ECUIO_SUR_LOG_FRAMES=1`, the switch a
+recording already sets for the surrogate's frame lines, so one switch
+serves both transports; each prompt carries its time after the
+request. The worker writes it with no allocation, which
+`Elm327SessionTest.TheWorkerAllocatesNothingPerFrame` checks with the
+requests' lines on.

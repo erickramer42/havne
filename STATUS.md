@@ -90,7 +90,7 @@ shipped; the next milestone is the [ELM327 transport](#the-elm327-transport)
   [testing.md](docs/testing.md#gaps-not-verified)). The run sheets are
   [bench-runsheet.md](docs/bench-sessions/bench-runsheet.md) and
   [vehicle-runsheet.md](docs/bench-sessions/vehicle-runsheet.md).
-- **Tests:** 463 ctest cases on Windows (both trees rebuilt,
+- **Tests:** 468 ctest cases on Windows (both trees rebuilt,
   2026-10-27), all passing but two env-gated skips (the cross-arch
   case, and the real-car recordings' diff, run locally), plus the
   cross-arch subset (76/76); 0 MSVC warnings. CI runs ctest on Windows,
@@ -166,7 +166,10 @@ OBDX Pro VX in its ELM mode (USB-powered). In order:
    (`ecuio_serial_ports`, `serial.h`: the registry or `/dev`, nothing
    opened) beside the J2534 interfaces and has an `elm327://` preset;
    the "Session:" line has an ELM327 form (`SerialPortsTest`,
-   `BridgeTest`, `QmlTest.settings`).
+   `BridgeTest`, `QmlTest.settings`). Each connect writes a wire log
+   (`ecuio-elm327.<stamp>.log` in the temporary directory: the setup's
+   answers always, every request and reply while recording;
+   `Elm327SessionTest.TheWireLog*`), the bench's evidence.
 5. **BENCH** with the VX on USB, then a read-only vehicle session.
    The MX+ is vehicle-only: with no 12 V supply, it first powers up on
    the car, where its bench items run ahead of its first request
