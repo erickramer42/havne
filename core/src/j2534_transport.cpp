@@ -26,17 +26,16 @@
 #include "session.h"
 #include "ecuio/j2534.h"
 #include "request_engine.h"
+#include "request_setup.h"
 #include "link_health.h"
 #include "j2534_clock.h"
 #include "uri_query.h"
 #include "error_detail.h"
 #include "ecuio/profile.h"
-#include "ecuio/signal_sets.h"
 
 #include <atomic>
 #include <chrono>
 #include <cstring>
-#include <limits>
 #include <memory>
 #include <thread>
 
@@ -79,11 +78,6 @@ constexpr uint32_t J2534_READ_SLICE_MS = 10;
  * docs. */
 constexpr uint32_t J2534_ADDR_LEN       = 4;
 constexpr uint32_t J2534_FILTER_MSG_LEN = 4;
-constexpr uint32_t J2534_TX_ID_DEFAULT = ECUIO_OBD2_TESTER_ARB_ID;   /* shared
-                                       * macro — cannot drift from the
-                                       * obd2 set's own declaration */
-constexpr uint32_t J2534_CAN_ID_MAX     = 0x1FFFFFFFu;   /* 29-bit */
-constexpr uint32_t J2534_PID_MAX        = 0xFFu;
 
 /* A read's outcome. "matched" (stripped and dispatched to one of our
  * channels) is kept apart from "delivered but unmatched" (the adapter
@@ -160,95 +154,36 @@ struct ecuio_j2534_transport {
     std::thread worker;
 };
 
-/* Collected URI query parameters — parse_query fills, resolve_uri
- * passes through, attach stores into the transport impl. One struct
- * rather than a six-pointer parse signature, and one place for the
- * coupling rule to live.
+/* Collected URI query parameters — parse_query fills, attach stores into
+ * the transport impl. One struct rather than a six-pointer parse
+ * signature, and one place for the coupling rule to live.
  *
  * baud == 0 is the "unset" sentinel (the parser rejects an explicit
  * baud=0), and j2534_loader's connect_channel substitutes the ISO 15765
  * default. flags pass through verbatim: 0 is both the default and a
- * legitimate value, and no bit is interpreted. */
+ * legitimate value, and no bit is interpreted. The request keys are
+ * every requesting transport's (request_setup.h). */
 struct j2534_uri_params {
     unsigned long baud = 0;
     unsigned long flags = 0;
-    unsigned long rx_id = 0;     /* 0 = no ?filter= override */
-    unsigned long tx_id = 0;     /* 0 = unset: profile's tx, else 0x7E0 */
-    bool has_poll = false;       /* false = no ?poll= (passive or the
-                                  * set's rotation) */
-    unsigned long poll_pid = 0;  /* valid when has_poll; 0x00 allowed */
-    bool probe = true;           /* ?probe=0 turns it off */
-    bool identify = true;        /* ?identify=0 turns it off */
+    request_params req;
 };
 
-/* The channel ?poll='s request goes to, by the rule the set's rotation
- * follows (request_engine.h): that of a def whose value comes back in
- * its reply, else channel 0. */
-uint32_t poll_channel(const ecuio_signal_set_t* set, uint8_t pid,
-                      const uint32_t* rx_ids, uint32_t rx_count)
+/* The channel table, from the set plus URI overrides
+ * (ecuio_resolve_channels), each with its filter's CAN_29BIT_ID: an
+ * ISO 15765 channel with no filter hears nothing, so a channel is a
+ * receive ID to register one for. */
+void resolve_channels(ecuio_j2534_transport* t, const ecuio_signal_set_t* set,
+                      const request_params& params)
 {
-    if (set == nullptr || set->defs == nullptr) {
-        return 0;
-    }
-    for (uint32_t i = 0; i < set->count; ++i) {
-        uint8_t req[3] = {};
-        uint8_t len = 0;
-        if (ecuio_engine_request_for_def(&set->defs[i], req, &len) &&
-            len == 2 && req[0] == 0x01 && req[1] == pid) {
-            return ecuio_engine_channel_for(&set->defs[i], rx_ids, rx_count);
-        }
-    }
-    return 0;
-}
-
-/* Derive the channel table from the set plus URI overrides. Never
- * fails: bounded by construction, and malformed set entries are
- * skipped. A log-only profile (raw: no set) with no ?filter= listens
- * on the default profile's channels, obd2's engine ECU (ADR-0013's
- * appendix of 2026-10-26): an ISO 15765 channel with no filter hears
- * nothing. A set without channels, and a lone ?txid= on one, yields
- * no channel — there is no receive ID to register a filter for. */
-void resolve_channels(ecuio_j2534_transport* t,
-                      const ecuio_signal_set_t* set,
-                      const j2534_uri_params& params)
-{
-    if (set == nullptr && params.rx_id == 0) {
-        set = ecuio_obd2_signal_set();
-    }
-    uint32_t n = 0;
-    if (params.rx_id != 0) {
-        uint32_t tx = static_cast<uint32_t>(params.tx_id);
-        if (tx == 0 && set != nullptr && set->channel_count > 0) {
-            tx = set->channels[0].tx_id;
-        }
-        if (tx == 0) {
-            tx = J2534_TX_ID_DEFAULT;
-        }
-        t->chans[0].rx_id = static_cast<uint32_t>(params.rx_id);
-        t->chans[0].tx_id = tx;
-        n = 1;
-    } else if (set != nullptr) {
-        for (uint32_t i = 0; i < set->channel_count &&
-                            n < ECUIO_MAX_CHANNELS; ++i) {
-            const uint32_t rx = set->channels[i].rx_id;
-            if (rx == 0) {
-                continue;
-            }
-            uint32_t tx = (params.tx_id != 0)
-                            ? static_cast<uint32_t>(params.tx_id)
-                            : set->channels[i].tx_id;
-            if (tx == 0) {
-                tx = J2534_TX_ID_DEFAULT;
-            }
-            t->chans[n].rx_id = rx;
-            t->chans[n].tx_id = tx;
-            ++n;
-        }
-    }
+    uint32_t rx[ECUIO_MAX_CHANNELS] = {};
+    uint32_t tx[ECUIO_MAX_CHANNELS] = {};
+    const uint32_t n = ecuio_resolve_channels(set, params, rx, tx);
     for (uint32_t i = 0; i < n; ++i) {
+        t->chans[i].rx_id = rx[i];
+        t->chans[i].tx_id = tx[i];
         t->chans[i].addr_flags =
-            (t->chans[i].rx_id > 0x7FF || t->chans[i].tx_id > 0x7FF)
-                ? ECUIO_PT_CAN_29BIT_ID : 0;
+            ecuio_channel_is_29bit(rx[i], tx[i]) ? ECUIO_PT_CAN_29BIT_ID : 0;
     }
     t->chan_count = n;
 }
@@ -317,7 +252,7 @@ read_outcome pump_one(ecuio_j2534_transport* t, uint32_t timeout_ms)
             (static_cast<uint32_t>(msg.data[2]) << 8) |
              static_cast<uint32_t>(msg.data[3]);
         for (uint32_t i = 0; i < t->chan_count; ++i) {
-            if ((hdr & J2534_CAN_ID_MAX) == t->chans[i].rx_id) {
+            if ((hdr & ECUIO_CAN_ID_MAX) == t->chans[i].rx_id) {
                 frame_from_msg(msg, J2534_ADDR_LEN, t->chans[i].rx_id, at_us,
                                &frame);
                 o.matched = true;
@@ -424,41 +359,6 @@ uint32_t read_timeout_ms(int64_t next_us)
     return (ms < 1) ? 1u : static_cast<uint32_t>(ms);
 }
 
-/* Hands what channel c's ECU has said it supports to the session, for
- * ecuio_session_get_channel_support, when the engine has learned
- * something new. */
-void publish_support(ecuio_j2534_transport* t, uint32_t c,
-                     uint32_t& published)
-{
-    const ecuio_request_engine& e = t->engine;
-    if (e.chans[c].generation == published) {
-        return;
-    }
-    published = e.chans[c].generation;
-    ecuio_channel_support_t s;
-    ecuio_engine_support(&e, c, &s);
-    s.rx_id = t->chans[c].rx_id;
-    std::lock_guard<std::mutex> lock(t->session->support_mutex);
-    t->session->support[c] = s;
-}
-
-/* Hands what channel c's ECU has said it is to the session, for
- * ecuio_session_get_channel_identity, when an item has settled. */
-void publish_identity(ecuio_j2534_transport* t, uint32_t c,
-                      uint32_t& published)
-{
-    const ecuio_request_engine& e = t->engine;
-    if (e.chans[c].ident_generation == published) {
-        return;
-    }
-    published = e.chans[c].ident_generation;
-    ecuio_channel_identity_t s;
-    ecuio_engine_identity(&e, c, &s);
-    s.rx_id = t->chans[c].rx_id;
-    std::lock_guard<std::mutex> lock(t->session->support_mutex);
-    t->session->identity[c] = s;
-}
-
 /* Worker entrypoint — mirrors mock_worker's discipline: impl-owned
  * state, dispatch through the session snapshot path, stop via atom.
  *
@@ -536,8 +436,10 @@ void j2534_worker(ecuio_j2534_transport* t)
             }
         }
         for (uint32_t c = 0; requests && c < t->chan_count; ++c) {
-            publish_support(t, c, published[c]);
-            publish_identity(t, c, published_identity[c]);
+            ecuio_publish_support(t->session, e, c, t->chans[c].rx_id,
+                                  published[c]);
+            ecuio_publish_identity(t->session, e, c, t->chans[c].rx_id,
+                                   published_identity[c]);
         }
 
         if (h.backoff_ms > 0) {
@@ -559,69 +461,15 @@ void j2534_worker(ecuio_j2534_transport* t)
     }
 }
 
-/* Strict unsigned parse: decimal by default, '0x'/'0X' prefix enables
- * hex digits. Rejects empty digits, '+', '-', whitespace, and overflow.
- * No strtoul — its tolerance for signs/whitespace is a liability at
- * an ABI boundary where garbage must become an error, not a value. */
-bool parse_number(const char* s, size_t len, unsigned long* out_val)
-{
-    if (len == 0) {
-        return false;
-    }
-
-    bool hex = false;
-    size_t i = 0;
-    if (len >= 2 && s[0] == '0' && (s[1] == 'x' || s[1] == 'X')) {
-        hex = true;
-        i = 2;
-        if (i == len) {
-            return false;   /* bare "0x" */
-        }
-    }
-
-    const unsigned long max =
-        (std::numeric_limits<unsigned long>::max)();   /* windows.h's max */
-    const unsigned long base = hex ? 16ul : 10ul;
-    unsigned long value = 0;
-    for (; i < len; ++i) {
-        unsigned long digit;
-        const char c = s[i];
-        if (c >= '0' && c <= '9') {
-            digit = static_cast<unsigned long>(c - '0');
-        } else if (hex && c >= 'a' && c <= 'f') {
-            digit = static_cast<unsigned long>(c - 'a') + 10;
-        } else if (hex && c >= 'A' && c <= 'F') {
-            digit = static_cast<unsigned long>(c - 'A') + 10;
-        } else {
-            return false;
-        }
-        if (value > (max - digit) / base) {
-            return false;   /* would overflow unsigned long */
-        }
-        value = value * base + digit;
-    }
-
-    *out_val = value;
-    return true;
-}
-
 /* The query's values (ecuio_j2534_query_keys). Contract (strict — a bad
  * value means BAD_URI, surfacing at session_create before any DLL
  * load):
  *   - lowercase keys only:
  *       baud   decimal, nonzero
  *       flags  0x-hex or decimal; 0 legal
- *       filter CAN id 1..0x1FFFFFFF — receive ID; replaces the
- *              profile's channels (registers a FLOW_CONTROL filter)
- *       txid   CAN id 1..0x1FFFFFFF — transmit ID; default is the
- *              profile's tx, else 0x7E0
- *       poll   PID 0x00..0xFF — single-PID Mode-01 loop (0x00 reads
- *              the supported-PIDs bitmap); overrides the profile's
- *              rotation
- *       probe  0 or 1 — the supported-PID probe (ADR-0015 §4), on by
- *              default
- *       identify 0 or 1 — vehicle identification (ADR-0021), on by
- *              default with a set's requests
+ *       filter, txid, poll, probe, identify: the request keys
+ *              (ecuio_request_param); ?filter='s channel registers a
+ *              FLOW_CONTROL filter
  *       profile core's key, read by ecuio_session_create
  *   - every occurrence is judged, and of good ones the last wins
  *   - create has split the query by the shared grammar and refused
@@ -638,57 +486,24 @@ ecuio_status_t parse_query(const ecuio_uri_query* query, j2534_uri_params* p)
         /* What a refused value should have been. */
         const char* wanted = nullptr;
         if (q.is("baud")) {
-            if (!parse_number(q.val, q.val_len, &v) || v == 0) {
+            if (!ecuio_parse_number(q.val, q.val_len, &v) || v == 0) {
                 wanted = "a nonzero decimal";
             } else {
                 p->baud = v;
             }
-        } else if (q.is("txid")) {
-            if (!parse_number(q.val, q.val_len, &v) ||
-                v == 0 || v > J2534_CAN_ID_MAX) {
-                wanted = "a CAN ID from 1 to 0x1FFFFFFF";
-            } else {
-                p->tx_id = v;
-            }
-        } else if (q.is("poll")) {
-            if (!parse_number(q.val, q.val_len, &v) || v > J2534_PID_MAX) {
-                wanted = "a PID from 0x00 to 0xFF";
-            } else {
-                p->poll_pid = v;
-                p->has_poll = true;
-            }
         } else if (q.is("flags")) {
-            if (!parse_number(q.val, q.val_len, &v)) {
+            if (!ecuio_parse_number(q.val, q.val_len, &v)) {
                 wanted = "a decimal or 0x-hex number";
             } else {
                 p->flags = v;
             }
-        } else if (q.is("filter")) {
-            if (!parse_number(q.val, q.val_len, &v) ||
-                v == 0 || v > J2534_CAN_ID_MAX) {
-                wanted = "a CAN ID from 1 to 0x1FFFFFFF";
-            } else {
-                p->rx_id = v;
-            }
-        } else if (q.is("probe")) {
-            if (q.val_len != 1 || (q.val[0] != '0' && q.val[0] != '1')) {
-                wanted = "0 or 1";
-            } else {
-                p->probe = q.val[0] == '1';
-            }
-        } else if (q.is("identify")) {
-            if (q.val_len != 1 || (q.val[0] != '0' && q.val[0] != '1')) {
-                wanted = "0 or 1";
-            } else {
-                p->identify = q.val[0] == '1';
-            }
-        }   /* else profile or did: core's, read and validated by create */
+        } else {
+            /* the request keys; profile and did are core's, read and
+             * validated by create */
+            (void)ecuio_request_param(q, &p->req, &wanted);
+        }
         if (wanted != nullptr) {
-            const int shown = static_cast<int>(
-                (q.val_len < 32) ? q.val_len : 32);
-            ecuio_detail_set("?%.*s= needs %s, not '%.*s'",
-                             static_cast<int>(q.key_len), q.key,
-                             wanted, shown, q.val);
+            ecuio_detail_bad_value(q, wanted);
             return ECUIO_ERR_BAD_URI;
         }
     }
@@ -948,80 +763,22 @@ ecuio_status_t j2534_attach(ecuio_session_t* session, const char* uri,
     if (t == nullptr) {
         return ECUIO_ERR_OUT_OF_MEMORY;
     }
-    resolve_channels(t.get(), set, params);
+    resolve_channels(t.get(), set, params.req);
 
-    /* Requests, fixed before the thread starts:
-     *   ?poll=        -> that one Service 01 request; the set's rotation
-     *                    isn't built, so the PID in the URI is the only
-     *                    one asked for. It may be 0x00 (the
-     *                    supported-PIDs bitmap), hence the presence flag
-     *   uds-generic   -> the rotation from the set's polled head, and
-     *                    the scan of its ranges (ADR-0020)
-     *   any other set -> the set's rotation (request_engine.h), which
-     *                    registration kept within the table
-     *   no requests   -> passive receive */
+    /* Requests, fixed before the thread starts (ecuio_build_requests):
+     * ?poll='s one, uds-generic's rotation and scan, or the set's
+     * rotation, then identification; none is passive receive. Shipped
+     * profiles declare channels, so its coupling check fires for a set
+     * author omitting them, or ?poll= without one; before any hardware
+     * is touched. */
     uint32_t rx_ids[ECUIO_MAX_CHANNELS] = {};
     for (uint32_t i = 0; i < t->chan_count; ++i) {
         rx_ids[i] = t->chans[i].rx_id;
     }
-    ecuio_engine_init(&t->engine, t->chan_count);
-    if (params.has_poll) {
-        const uint8_t req[2] = {0x01, static_cast<uint8_t>(params.poll_pid)};
-        (void)ecuio_engine_add(&t->engine,
-                               poll_channel(set, req[1], rx_ids, t->chan_count),
-                               req, sizeof(req));
-    } else if (session->uds == nullptr) {
-        (void)ecuio_engine_derive(&t->engine, set, rx_ids, t->chan_count,
-                                  nullptr);
-    } else {
-        /* uds-generic (ADR-0020): the rotation from the set's polled
-         * head, then each scanned DID once, on the channel of its ECU by
-         * the rule the rotation's requests follow (ecuio_engine_channel_for:
-         * channel 0 under a ?filter= override). Create's limits keep both
-         * within the engine's tables. */
-        const ecuio_signal_set_t head = ecuio_uds_polled_set(*session->uds);
-        (void)ecuio_engine_derive(&t->engine, &head, rx_ids, t->chan_count,
-                                  nullptr);
-        {
-            for (const ecuio_uds_scan_target& s : session->uds->scan) {
-                uint32_t c = 0;
-                for (uint32_t i = 0; i < t->chan_count; ++i) {
-                    if (rx_ids[i] == s.rx_id) {
-                        c = i;
-                    }
-                }
-                (void)ecuio_engine_scan_add(&t->engine, c, s.did);
-            }
-        }
-    }
-    /* ?poll= sends its one request as asked, whatever the ECU says. */
-    t->probe = params.probe && !params.has_poll;
-    /* Identification (ADR-0021) rides on a session that already
-     * requests: a passive session sends nothing, and ?poll= asks its one
-     * PID alone. Every channel asks the list once. */
-    t->identify = params.identify && !params.has_poll &&
-                  (t->engine.count > 0 || t->engine.scan_count > 0);
-    if (t->identify) {
-        ecuio_engine_identify(&t->engine);
-    }
-
-    /* Coupling check: requests need at least one channel to receive on,
-     * or they go out against guaranteed silence forever (an ISO 15765
-     * channel with no filter receives nothing). A set's requests get
-     * theirs from the set; ?poll= may take ?filter= or the profile's
-     * declared channels. Shipped profiles declare channels, so the set's
-     * arm is reachable only by a set author omitting them. Fires before
-     * any hardware is touched. */
-    if ((t->engine.count > 0 || t->engine.scan_count > 0) &&
-        t->chan_count == 0) {
-        if (params.has_poll) {
-            ecuio_detail_set("?poll= needs a channel to receive on: add "
-                             "?filter=, or use a profile that declares one");
-        } else {
-            ecuio_detail_set("the profile requests PIDs but declares no "
-                             "channel to receive on");
-        }
-        return ECUIO_ERR_BAD_URI;
+    st = ecuio_build_requests(session, set, params.req, rx_ids, t->chan_count,
+                              &t->engine, &t->probe, &t->identify);
+    if (st != ECUIO_OK) {
+        return st;
     }
 
     /* Connect flags: ?flags= as given, plus CAN_29BIT_ID when the
@@ -1071,18 +828,7 @@ ecuio_status_t j2534_attach(ecuio_session_t* session, const char* uri,
     t->handle = handle;
     t->channel = channel;
     describe_session(t.get(), params.baud, connect_flags, &session->info);
-    {
-        /* Each channel's ECU, its requests and its identification
-         * items, nothing learned yet. */
-        std::lock_guard<std::mutex> lock(session->support_mutex);
-        session->support_count = t->chan_count;
-        for (uint32_t c = 0; c < t->chan_count; ++c) {
-            ecuio_engine_support(&t->engine, c, &session->support[c]);
-            session->support[c].rx_id = t->chans[c].rx_id;
-            ecuio_engine_identity(&t->engine, c, &session->identity[c]);
-            session->identity[c].rx_id = t->chans[c].rx_id;
-        }
-    }
+    ecuio_seed_reports(session, t->engine, rx_ids, t->chan_count);
     t->epoch = std::chrono::steady_clock::now();   /* as mock: end of attach */
 
     wrap->impl = t.release();

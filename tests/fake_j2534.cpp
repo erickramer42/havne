@@ -16,7 +16,7 @@
 //        [4-byte ID BE][01|09][PID] (exactly 6 bytes, the adapter-framed
 //        logical message) or Service 0x22 [ID][22][DID] (7 bytes). The
 //        ECU the request is addressed to answers: [reply ID BE][41][PID]
-//        [canned] from g_obd2_canned or its supported-PID bitmap;
+//        [canned] from tests/fake_ecu.h or its supported-PID bitmap;
 //        [ID][49][item][01][data] for Service 09's VIN (02), CALID
 //        (04), CVN (06) and ECU name (0A), synthetic values marked FAKE;
 //        or [ID][62][DID][value] for the DIDs it knows: 0x1E1C (2 bytes),
@@ -101,6 +101,7 @@
 
 #include "ecuio/j2534_ptypes.h"
 #include "fake_control.h"
+#include "fake_ecu.h"
 
 #include <chrono>
 #include <condition_variable>
@@ -192,31 +193,6 @@ constexpr unsigned long kDeviceId = 1;
 constexpr unsigned long kChannelId = 0x55;
 unsigned long g_device_id = kDeviceId;
 unsigned long g_channel_id = kChannelId;
-
-/* ---- OBD-II canned response data (HARNESS only, ADR-0013) ----
- * Standard PIDs that express as simple byte-extraction + scale/offset.
- * Each default is a plausible reading on its own, not one consistent
- * engine state: RPM 2000, speed 0, load ~10%, throttle ~8%, coolant
- * and IAT 20 degC, oil 80 degC, fuel ~25%, voltage ~13.9 V, MAF
- * 1.00 g/s. Oil reads warmer than coolant and IAT so a test can tell
- * the A - 40 temperatures apart. */
-struct Obd2CannedValues {
-    uint8_t pid_04_engine_load;
-    uint8_t pid_05_coolant_temp;
-    uint8_t pid_0C_rpm_high;
-    uint8_t pid_0C_rpm_low;
-    uint8_t pid_0D_speed;
-    uint8_t pid_0F_iat;
-    uint8_t pid_11_throttle;
-    uint8_t pid_2F_fuel_level;
-    uint8_t pid_42_volt_high;
-    uint8_t pid_42_volt_low;
-    uint8_t pid_10_maf_high;
-    uint8_t pid_10_maf_low;
-    uint8_t pid_5C_oil_temp;
-};
-
-Obd2CannedValues g_obd2_canned;
 
 /* A knob's value: the control page's when it holds the name, else the
  * environment's. False when neither sets it, or it doesn't fit buf. */
@@ -354,26 +330,6 @@ void take_posted_locked()
     }
 }
 
-/* Reset canned OBD-II values to the cold-idle defaults. Called once
- * per module load from PassThruOpen (function-local static guards the
- * once-ness). */
-void reset_obd2_canned()
-{
-    g_obd2_canned.pid_04_engine_load = 25;   /* 25 * 100/255 ~= 9.8% */
-    g_obd2_canned.pid_05_coolant_temp = 60;  /* 60 - 40 = 20 degC */
-    g_obd2_canned.pid_0C_rpm_high = 0x1F;    /* 0x1F40 * 0.25 = 2000 RPM */
-    g_obd2_canned.pid_0C_rpm_low = 0x40;
-    g_obd2_canned.pid_0D_speed = 0;          /* 0 km/h */
-    g_obd2_canned.pid_0F_iat = 60;           /* 20 degC */
-    g_obd2_canned.pid_11_throttle = 20;      /* ~= 7.8% */
-    g_obd2_canned.pid_2F_fuel_level = 64;    /* ~= 25% tank */
-    g_obd2_canned.pid_42_volt_high = 0x36;   /* 0x3630 = 13872 mV */
-    g_obd2_canned.pid_42_volt_low = 0x30;
-    g_obd2_canned.pid_10_maf_high = 0x00;  /* 0x0064 * 0.01 = 1.00 g/s */
-    g_obd2_canned.pid_10_maf_low = 0x64;
-    g_obd2_canned.pid_5C_oil_temp = 0x78;  /* 120 - 40 = 80 degC */
-}
-
 /* Matches the most recent active filter against a frame's first
  * mask_len bytes (the pattern is applied with the mask — classic
  * filter semantics). Returns true if the frame passes. The mask is
@@ -392,23 +348,15 @@ bool filter_matches(const unsigned char* frame_data, unsigned long frame_size,
     return true;
 }
 
-/* The ID an ECU answers a request on, into out (4 bytes, big-endian):
- * 11-bit physical requests 0x7E0 to 0x7E7 get theirs 8 above, the
- * functional 0x7DF is answered by the engine ECU (0x7E8), and a 29-bit
- * 18DA<ecu><tester> request by 18DA<tester><ecu> (ISO 15765-4). Any
- * other ID falls back to the last filter's pattern. */
+/* The ID the fake's ECU answers a request on (fake_ecu::reply_id), into
+ * out (4 bytes, big-endian); any other ID falls back to the last
+ * filter's pattern. */
 void reply_header(const unsigned char* req, unsigned char* out)
 {
     const uint32_t tx = (uint32_t{req[0]} << 24) | (uint32_t{req[1]} << 16) |
                         (uint32_t{req[2]} << 8) | uint32_t{req[3]};
-    uint32_t rx = 0;
-    if (tx == 0x7DFu) {
-        rx = 0x7E8u;
-    } else if (tx >= 0x7E0u && tx <= 0x7E7u) {
-        rx = tx + 8;
-    } else if ((tx & 0xFFFF0000u) == 0x18DA0000u) {
-        rx = 0x18DA0000u | ((tx & 0xFFu) << 8) | ((tx >> 8) & 0xFFu);
-    } else {
+    const uint32_t rx = fake_ecu::reply_id(tx);
+    if (rx == 0) {
         memcpy(out, g_last_filter.pattern, 4);
         return;
     }
@@ -416,89 +364,6 @@ void reply_header(const unsigned char* req, unsigned char* out)
     out[1] = static_cast<unsigned char>(rx >> 16);
     out[2] = static_cast<unsigned char>(rx >> 8);
     out[3] = static_cast<unsigned char>(rx);
-}
-
-/* The Service 0x22 DIDs the fake's ECU knows: ADR-0015's example, and
- * three whose replies are long, filled with their byte index (& 0xFF).
- * A reply is [ID][62][DID][data], so 0xF1A1's 4092 bytes make the
- * longest ISO 15765-2 message on classic CAN, 4095, and 0xF1A2's fill
- * PASSTHRU_MSG.Data, past what a frame holds. */
-constexpr uint16_t kFakeDid = 0x1E1C;
-constexpr unsigned char kFakeDidValue[2] = {0x12, 0x34};
-constexpr uint16_t kFakeLongDid = 0xF1A0;
-constexpr unsigned long kFakeLongDidLen = 200;
-constexpr uint16_t kFakeMaxDid = 0xF1A1;
-constexpr unsigned long kFakeMaxDidLen = 4092;
-constexpr uint16_t kFakeOverlongDid = 0xF1A2;
-constexpr unsigned long kFakeOverlongDidLen = ECUIO_PT_MSG_DATA_SIZE - 7;
-
-/* What the fake's ECU says it is (ADR-0021), every value marked FAKE so
- * none can pass for a vehicle's. The VIN has a VIN's 17 characters; the
- * CALID and the ECU name are NUL-padded to J1979's 16 and 20 bytes; the
- * CVN is four binary bytes. */
-constexpr char kFakeVin[] = "FAKEJ2534VIN00001";
-constexpr char kFakeCalid[16] = "FAKECAL-01";
-constexpr unsigned char kFakeCvn[4] = {0xDE, 0xAD, 0xBE, 0xEF};
-constexpr char kFakeEcuName[20] = "FAKE-ECM";
-
-/* The identification DIDs the fake's ECU answers, as text; nullptr for
- * any other DID. 0xF194 and 0xF195 are left out, so identification
- * meets a refusal. */
-const char* did_text(uint16_t did)
-{
-    switch (did) {
-        case 0xF187: return "FAKE-PART-0001";
-        case 0xF188: return "FAKE-SW-0001";
-        case 0xF189: return "FAKE 1.0";
-        case 0xF18A: return "FAKE SUPPLIER";
-        case 0xF18C: return "FAKE-SERIAL-000001";
-        case 0xF190: return kFakeVin;
-        case 0xF191: return "FAKE-HW-01";
-        default:     return nullptr;
-    }
-}
-
-/* A DID's data length, or 0 for one the fake doesn't know. */
-unsigned long did_length(uint16_t did)
-{
-    if (const char* text = did_text(did)) {
-        return static_cast<unsigned long>(strlen(text));
-    }
-    switch (did) {
-        case kFakeDid:         return sizeof(kFakeDidValue);
-        case kFakeLongDid:     return kFakeLongDidLen;
-        case kFakeMaxDid:      return kFakeMaxDidLen;
-        case kFakeOverlongDid: return kFakeOverlongDidLen;
-        default:               return 0;
-    }
-}
-
-/* The Service 01 PIDs the fake's ECU supports: its canned ones, and the
- * bitmaps that lead to them. */
-bool supports_pid(unsigned pid)
-{
-    switch (pid) {
-        case 0x00: case 0x04: case 0x05: case 0x0C: case 0x0D: case 0x0F:
-        case 0x10: case 0x11: case 0x20: case 0x2F: case 0x40: case 0x42:
-        case 0x5C:
-            return true;
-        default:
-            return false;
-    }
-}
-
-/* The supported-PID bitmap at PID base (0x00, 0x20, 0x40), into out[4]:
- * PID base + k (k from 1 to 32) is bit 0x80 >> ((k - 1) % 8) of byte
- * (k - 1) / 8 (SAE J1979), the last bit the next bitmap. */
-void pid_bitmap(unsigned base, unsigned char* out)
-{
-    for (unsigned k = 1; k <= 32; ++k) {
-        const unsigned char bit = static_cast<unsigned char>(
-            0x80u >> ((k - 1) % 8));
-        if (supports_pid(base + k)) {
-            out[(k - 1) / 8] = static_cast<unsigned char>(out[(k - 1) / 8] | bit);
-        }
-    }
 }
 
 /* A request's negative reply: [reply ID][7F][service][code]. */
@@ -512,120 +377,29 @@ void build_negative(const unsigned char* req, unsigned char code,
     *resp_len = 7;
 }
 
-/* Build an OBD-II Service 01, 09 or 0x22 response into resp, which
- * holds ECUIO_PT_MSG_DATA_SIZE bytes.
- * Caller (WriteMsgs, mutex HELD) has verified: [tx_id BE][0x01][PID] or
- * [tx_id BE][0x09][item] (6 bytes) or [tx_id BE][0x22][DID] (7 bytes),
- * and an active filter.
- * Output: [reply ID BE][0x41][PID][canned data],
- * [reply ID BE][0x49][item][01][data] or
- * [reply ID BE][0x62][DID][value], or the negative reply for a PID, item
- * or DID the fake doesn't support — NO PCI BYTE in either direction. The
- * fake models the ADAPTER side of ISO-TP: this queue content is what a
+/* An OBD-II Service 01, 09 or 0x22 response into resp, which holds
+ * ECUIO_PT_MSG_DATA_SIZE bytes: [reply ID BE] and the fake's ECU's
+ * answer (fake_ecu::answer) — NO PCI BYTE in either direction. The fake
+ * models the ADAPTER side of ISO-TP: this queue content is what a
  * conforming adapter delivers from ReadMsgs, and the transport's header
  * strip lands the bridge on [41][PID][A][B]... — the obd2 set's
- * mux-at-offset-0 grammar. Response length varies per PID.
- * unsupported_nrc is ECUIO_FAKE_UNSUPPORTED_NRC: -1 (unset) answers an
- * unsupported PID 0x12 and an unknown DID 0x31, 0 answers neither (an
- * ECU that stays silent), any other value is the code for both. False
- * when nothing answers. */
+ * mux-at-offset-0 grammar.
+ * Caller (WriteMsgs, mutex HELD) has verified: [tx_id BE][0x01][PID] or
+ * [tx_id BE][0x09][item] (6 bytes) or [tx_id BE][0x22][DID] (7 bytes),
+ * and an active filter. False when nothing answers. */
 bool build_obd2_response(const unsigned char* req, unsigned long req_len,
                          long unsupported_nrc,
                          unsigned char* resp, unsigned long* resp_len)
 {
-    (void)req_len;   /* shape pre-validated by the caller */
-    const auto refuse = [&](unsigned char fallback) {
-        if (unsupported_nrc == 0) {
-            return false;
-        }
-        build_negative(req, (unsupported_nrc < 0)
-                                ? fallback
-                                : static_cast<unsigned char>(unsupported_nrc),
-                       resp, resp_len);
-        return true;
-    };
-    if (req[4] == 0x22) {
-        const uint16_t did = static_cast<uint16_t>((req[5] << 8) | req[6]);
-        const unsigned long n = did_length(did);
-        if (n == 0) {
-            return refuse(0x31);   /* request out of range */
-        }
-        reply_header(req, resp);
-        resp[4] = 0x62;
-        resp[5] = req[5];
-        resp[6] = req[6];
-        const char* text = did_text(did);
-        for (unsigned long i = 0; i < n; ++i) {
-            resp[7 + i] = (text != nullptr) ? static_cast<unsigned char>(text[i])
-                        : (did == kFakeDid) ? kFakeDidValue[i]
-                        : static_cast<unsigned char>(i & 0xFF);
-        }
-        *resp_len = 7 + n;
-        return true;
+    static_assert(4 + fake_ecu::kReplyMax <= ECUIO_PT_MSG_DATA_SIZE,
+                  "the longest answer fills PASSTHRU_MSG.Data");
+    size_t n = 0;
+    if (!fake_ecu::answer(req + 4, req_len - 4, unsupported_nrc, resp + 4,
+                          &n)) {
+        return false;
     }
-    if (req[4] == 0x09) {
-        /* Vehicle information: [ID][49][item][count 01][data]. */
-        const unsigned char* data = nullptr;
-        unsigned long n = 0;
-        switch (req[5]) {
-            case 0x02:
-                data = reinterpret_cast<const unsigned char*>(kFakeVin);
-                n = sizeof(kFakeVin) - 1;
-                break;
-            case 0x04:
-                data = reinterpret_cast<const unsigned char*>(kFakeCalid);
-                n = sizeof(kFakeCalid);
-                break;
-            case 0x06:
-                data = kFakeCvn;
-                n = sizeof(kFakeCvn);
-                break;
-            case 0x0A:
-                data = reinterpret_cast<const unsigned char*>(kFakeEcuName);
-                n = sizeof(kFakeEcuName);
-                break;
-            default:
-                return refuse(0x12);
-        }
-        reply_header(req, resp);
-        resp[4] = 0x49;
-        resp[5] = req[5];
-        resp[6] = 0x01;
-        memcpy(resp + 7, data, n);
-        *resp_len = 7 + n;
-        return true;
-    }
-    const uint8_t pid = req[5];
-    if (!supports_pid(pid)) {
-        return refuse(0x12);   /* the first vehicle's answer for 0x5C */
-    }
-
     reply_header(req, resp);
-    resp[4] = 0x41;   /* Mode 01 + 0x40 response */
-    resp[5] = pid;    /* PID echo */
-
-    switch (pid) {
-        case 0x00:
-        case 0x20:
-        case 0x40:
-            resp[6] = resp[7] = resp[8] = resp[9] = 0;
-            pid_bitmap(pid, resp + 6);
-            *resp_len = 10;
-            break;
-        case 0x04: resp[6] = g_obd2_canned.pid_04_engine_load;  *resp_len = 7;  break;
-        case 0x05: resp[6] = g_obd2_canned.pid_05_coolant_temp; *resp_len = 7;  break;
-        case 0x0C: resp[6] = g_obd2_canned.pid_0C_rpm_high;
-                   resp[7] = g_obd2_canned.pid_0C_rpm_low;      *resp_len = 8;  break;
-        case 0x0D: resp[6] = g_obd2_canned.pid_0D_speed;        *resp_len = 7;  break;
-        case 0x0F: resp[6] = g_obd2_canned.pid_0F_iat;          *resp_len = 7;  break;
-        case 0x11: resp[6] = g_obd2_canned.pid_11_throttle;      *resp_len = 7;  break;
-        case 0x2F: resp[6] = g_obd2_canned.pid_2F_fuel_level;    *resp_len = 7;  break;
-        case 0x42: resp[6] = g_obd2_canned.pid_42_volt_high;
-                   resp[7] = g_obd2_canned.pid_42_volt_low;     *resp_len = 8;  break;
-        case 0x10: resp[6] = g_obd2_canned.pid_10_maf_high;
-                   resp[7] = g_obd2_canned.pid_10_maf_low;      *resp_len = 8;  break;
-        case 0x5C: resp[6] = g_obd2_canned.pid_5C_oil_temp;     *resp_len = 7;  break;
-    }
+    *resp_len = static_cast<unsigned long>(4 + n);
     return true;
 }
 
@@ -637,13 +411,6 @@ long __stdcall PassThruOpen(void* pName, unsigned long* pDeviceID)
     (void)pName;
     if (pDeviceID == nullptr) {
         return STATUS_FAILED;
-    }
-
-    /* Initialize canned OBD values ONCE per module load. */
-    static bool canned_initialized = false;
-    if (!canned_initialized) {
-        fake_j2534::reset_obd2_canned();
-        canned_initialized = true;
     }
 
     /* Test-only open blocking: ECUIO_FAKE_OPEN_DELAY_MS
