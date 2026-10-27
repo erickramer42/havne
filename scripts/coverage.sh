@@ -21,7 +21,8 @@
 # Not counted: QML/JS (OpenCppCoverage sees only native code), the x86
 # surrogate (the cross-arch run isn't covered), the tests and the fake
 # DLLs. OPENCPPCOVERAGE names the tool if it isn't on PATH or in
-# Program Files; QT_PREFIX the Qt kit (default C:/Qt/6.12.0/msvc2022_64).
+# Program Files; QT_PREFIX the Qt kit (by default the one `build` was
+# configured with, from its CMakeCache.txt).
 set -u
 cd "$(dirname "$0")/.." || exit 2
 LOGDIR=Testing/coverage
@@ -75,8 +76,13 @@ build_failed() {
 
 if [ "$tests_only" = 0 ]; then
     if [ ! -f "$TREE/CMakeCache.txt" ]; then
+        qt=${QT_PREFIX:-$(sed -n 's/^CMAKE_PREFIX_PATH:[A-Z]*=//p' build/CMakeCache.txt 2>/dev/null)}
+        if [ -z "$qt" ]; then
+            echo "no Qt kit: set QT_PREFIX, or configure build first (CLAUDE.md, Commands)" >&2
+            exit 2
+        fi
         run configure cmake -B "$TREE" \
-            -DCMAKE_PREFIX_PATH="${QT_PREFIX:-C:/Qt/6.12.0/msvc2022_64}" \
+            -DCMAKE_PREFIX_PATH="$qt" \
             "-DCMAKE_CXX_FLAGS_RELWITHDEBINFO=/Zi /Od /Ob0 /DNDEBUG" \
             "-DCMAKE_C_FLAGS_RELWITHDEBINFO=/Zi /Od /Ob0 /DNDEBUG"
         [ "$rc" = 0 ] || build_failed configure

@@ -28,7 +28,8 @@ second session ran the request engine, the probe, identification and
 `uds-generic` there. Every item in [After v0.3.0](#after-v030) has
 shipped. The [ELM327 transport](#the-elm327-transport)
 ([ADR-0026](docs/adr/0026-elm327-transport.md)) is built and has read
-the same car through the OBDLink MX+ over Bluetooth
+the same car through the OBDLink MX+ over Bluetooth and the VX in ELM
+mode over USB
 ([2026-10-27](docs/bench-sessions/2026-10-27-elm327-vehicle.md)); it
 goes out in the next release. The milestone after it is chosen from the
 [backlog](#backlog).

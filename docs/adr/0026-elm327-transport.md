@@ -641,9 +641,10 @@ identification replies in hex and are committed with those redacted
 **Note, 2026-10-27, later:** three statements above go further than the
 committed evidence. The MX+'s `STVR` read 12.1 V with the ignition off,
 the VX's reading; the 11.6 V came with the ignition on and isn't
-comparable. The VX's ELM-mode connect on the car kept no wire log, so
-how it prints 11-bit replies on a car is unrecorded; the MX+'s print
-as `7E8`. And the drop failed the port at once, its fault within 0.1 s;
+comparable. The VX's ELM-mode connect in the session kept no wire log;
+a later one that day (the sheet's `vx_elm/` logs) ran through an engine
+start at about 30 completed requests a second, its replies printed as
+`7E8` like the MX+'s. And the drop failed the port at once, its fault within 0.1 s;
 of the 28 seconds to recovery most was Bluetooth off, and the first
 value came within about 6.5 seconds of Bluetooth coming back (the
 reopen's 5-second backoff and the setup).

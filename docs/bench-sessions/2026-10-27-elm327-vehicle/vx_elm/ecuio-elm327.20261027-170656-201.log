@@ -1,0 +1,7 @@
+[elm327 17:06:56.204 +0.000003] QtTune ELM327 wire log (ADR-0026), core 0.3.2
+[elm327 17:06:56.204 +0.000207] uri elm327://COM7
+[elm327 17:06:56.204 +0.000283] COM7 at 38400 bit/s; CAN at 500000 bit/s, protocol 6; every request and reply (ECUIO_SUR_LOG_FRAMES=1)
+[elm327 17:06:56.204 +0.000378] > ATZ
+[elm327 17:06:58.315 +2.108240] the port failed (writing ATZ)
+[elm327 17:06:58.315 +2.108352] the setup failed: COM7: the port failed during the adapter's setup
+[elm327 17:06:58.315 +2.108863] COM7 closed
