@@ -3,7 +3,9 @@
 //          bridge's lines stamped, bounded to its newest lines, alone
 //          with developer mode off; the Activity | Frames switch and the
 //          frame table only in developer mode, back to the activity log
-//          when it goes off; the link lines in each link state
+//          when it goes off; either order button, and Latest, at the newest
+//          row from a scrolled view (the top newest-first, the end
+//          oldest-first); the link lines in each link state
 //          (tests/qml/tst_linkhealth.qml). The frame table: render
 //          verified manually; the arbId column by the smoke
 //          recipe's "Frames + arbId column" row (docs/testing.md). The
@@ -225,15 +227,26 @@ Pane {
                         anchors.centerIn: parent
                         spacing: 2
 
+                        // A click goes to the newest row: a new order resets
+                        // the model, which leaves the view where it was, and
+                        // the same order brings a scrolled view back
                         SegmentButton {
+                            objectName: "order_newest"
                             text: qsTr("Newest first")
                             selected: Bridge.model.newestFirst
-                            onClicked: Bridge.model.newestFirst = true
+                            onClicked: {
+                                Bridge.model.newestFirst = true
+                                Qt.callLater(frameList.jumpToLatest)
+                            }
                         }
                         SegmentButton {
+                            objectName: "order_oldest"
                             text: qsTr("Oldest first")
                             selected: !Bridge.model.newestFirst
-                            onClicked: Bridge.model.newestFirst = false
+                            onClicked: {
+                                Bridge.model.newestFirst = false
+                                Qt.callLater(frameList.jumpToLatest)
+                            }
                         }
                     }
                 }
@@ -278,6 +291,7 @@ Pane {
 
                 ListView {
                     id: frameList
+                    objectName: "frameList"
                     anchors { top: columnHeader.bottom; left: parent.left
                               right: parent.right; bottom: parent.bottom }
                     anchors.margins: 4
@@ -292,11 +306,16 @@ Pane {
                     property bool follow: true
                     readonly property bool tailing: !Bridge.model.newestFirst
 
-                    // Position first, then follow: positioning cancels a flick
-                    // still coasting, and that flick's movementEnded would
-                    // otherwise clear follow before the view reaches the end.
+                    // The newest row: the top in newest-first order, the end
+                    // in oldest-first. Position first, then follow:
+                    // positioning cancels a flick still coasting, and that
+                    // flick's movementEnded would otherwise clear follow
+                    // before the view reaches the end.
                     function jumpToLatest() {
-                        positionViewAtEnd()
+                        if (tailing)
+                            positionViewAtEnd()
+                        else
+                            positionViewAtBeginning()
                         follow = true
                     }
                     // Named, so Qt.callLater folds a burst of frames into one
@@ -314,13 +333,6 @@ Pane {
                     // whether it resumes. positionViewAtEnd emits neither.
                     onMovementStarted: follow = false
                     onMovementEnded: follow = atYEnd
-
-                    Connections {
-                        target: Bridge.model
-                        function onNewestFirstChanged() {
-                            if (frameList.tailing) Qt.callLater(frameList.jumpToLatest)
-                        }
-                    }
 
                     ScrollBar.vertical: ScrollBar {
                         policy: ScrollBar.AsNeeded
@@ -389,13 +401,16 @@ Pane {
                     }
                 }
 
-                // Resumes following after a scroll up; on a phone there's
-                // no scroll bar to drag back down
+                // Back to the newest row after a scroll away (and following
+                // again, oldest-first); on a phone there's no scroll bar to
+                // drag
                 ThemedButton {
+                    objectName: "latestButton"
                     anchors { right: parent.right; bottom: parent.bottom; margins: 12 }
                     z: 3
-                    visible: frameList.tailing && !frameList.follow && frameList.count > 0
-                    text: qsTr("Latest ↓")
+                    visible: frameList.count > 0
+                             && (frameList.tailing ? !frameList.follow : !frameList.atYBeginning)
+                    text: frameList.tailing ? qsTr("Latest ↓") : qsTr("Latest ↑")
                     onClicked: frameList.jumpToLatest()
                 }
             }

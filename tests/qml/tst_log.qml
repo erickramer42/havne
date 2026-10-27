@@ -33,6 +33,7 @@ TestCase {
 
     function cleanup() {
         Theme.developerMode = false
+        Bridge.model.newestFirst = true
         Bridge.disconnectSession()
         tryVerify(() => !Bridge.disconnecting, 5000, "disconnect ends")
     }
@@ -89,6 +90,38 @@ TestCase {
         verify(activity.visible, "back to the activity log")
         verify(!frames.visible)
         verify(!toFrames.visible)
+    }
+
+    // Either order button, and Latest, goes to the newest row: the top in
+    // newest-first order, the end in oldest-first, from wherever the view
+    // was scrolled, and whether or not the order changes
+    function test_theOrderButtonsGoToTheNewestRow() {
+        Theme.developerMode = true
+        Bridge.model.newestFirst = true
+        const page = create(logComponent)
+        find(page, "view_frames").clicked()
+        const list = find(page, "frameList")
+        const latest = find(page, "latestButton")
+        tryVerify(() => list.height > 200, 2000, "the table is laid out")
+        compare(Bridge.connectSession("mock://demo"), "")
+        tryVerify(() => list.contentHeight > 3 * list.height, 15000, "enough rows to scroll")
+
+        list.positionViewAtEnd()
+        verify(!list.atYBeginning, "scrolled away from the newest")
+        verify(latest.visible, "Latest offered in newest-first order too")
+        find(page, "order_newest").clicked()
+        tryVerify(() => list.atYBeginning, 2000, "the same order: back to the top")
+        verify(!latest.visible)
+
+        find(page, "order_oldest").clicked()
+        tryVerify(() => list.atYEnd, 2000, "oldest-first: the end")
+
+        find(page, "order_newest").clicked()
+        tryVerify(() => list.atYBeginning, 2000, "newest-first from oldest-first: the top")
+
+        list.positionViewAtEnd()
+        latest.clicked()
+        tryVerify(() => list.atYBeginning, 2000, "Latest: the top")
     }
 
     function test_settingsDeveloperBoxSetsTheModeAndTheMockPreset() {
