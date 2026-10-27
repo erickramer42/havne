@@ -602,3 +602,38 @@ prints nothing on power-up that reaches the port. With no node to
 acknowledge them, its first three requests after a setup reach their
 prompt in 100 ms and every later one in 300 ms, the three frames its
 CAN controller holds; on a car the bus acknowledges.
+
+## Appendix: 2026-10-27, the first vehicle session
+
+The MX+ (Bluetooth, an STN2255 v5.12.2) and the VX in ELM mode both read
+the car (docs/bench-sessions/2026-10-27-elm327-vehicle.md), the first
+`elm327://` sessions on a vehicle. The `obd2` values decoded through a
+cold start and idle to the values the VX produced through J2534 on
+2026-10-25, and identification returned the same items. This settles the
+open questions:
+
+- **STN answers:** the MX201 is an STN2255 (firmware v5.12.2). `AT I`,
+  `STI` and `AT PPS` answered in the datasheet's and the FRPM's forms,
+  parameter 2A at its default (no app had changed it).
+- **The voltage:** `STVR` read the battery at the connector, 11.6-12.1 V,
+  within 0.2 V of the VX's reading on the same car. The MX+ first powered
+  up here, as the appendix "no bench supply for the MX+" provided; no
+  12 V bench supply was needed.
+- **Rate:** over Bluetooth the MX+ sustained ~32 completed requests a
+  second, on both a single-PID poll and the full rotation, above the
+  VX's 26 a second through J2534 on the same car. The STN's turnaround,
+  not the PID count, sets it.
+- **The OBDX in ELM mode:** the VX took a serial port over USB, answered
+  `AT Z` with `OK` and the version to `AT I` (the appendix "the VX's
+  answers"), printed 11-bit IDs as three hex digits, and decoded to the
+  same values.
+
+A Bluetooth drop (the laptop's Bluetooth off, then on) failed the port,
+went to "Adapter fault", and recovered in about 28 seconds: the port
+reopened on the backoff and the setup ran again, with no reconnect, as a
+J2534 adapter's hard failure does. The car sent no `7F xx 78`, so
+response pending (an open question) is still unseen.
+
+This completes ADR-0026 step 5 (section 9). The wire logs hold the
+identification replies in hex and are committed with those redacted
+(bench-sessions.md).

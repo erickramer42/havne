@@ -40,8 +40,9 @@ shipped; the next milestone is the [ELM327 transport](#the-elm327-transport)
     ([ADR-0026](docs/adr/0026-elm327-transport.md)): `elm327://<port>`
     on a serial port, USB or Bluetooth SPP, with the same request
     engine, probe, identification and link health as J2534, and
-    Settings lists the serial ports. Verified against a fake ELM327,
-    and on the bench with the OBDX VX (no bus); no car yet.
+    Settings lists the serial ports. Verified against a fake ELM327, on the bench with the OBDX VX, and
+    on a car through the OBDLink MX+ (Bluetooth) and the VX in ELM mode
+    (2026-10-27).
   - **J2534 on Windows:** discovery of installed drivers, each driver
     loaded in a single-threaded surrogate process of its own
     architecture, x86 or x64, so a crashing driver ends its process,
@@ -178,10 +179,14 @@ OBDX Pro VX in its ELM mode (USB-powered). In order:
    its `AT Z` answers `OK` alone, which the setup takes, asking `AT I`
    for the version; with no bus it answers `NO DATA`, so the bench
    reads quiet; it connects at both CAN rates and recovers from a
-   cable pull with no reconnect. The vehicle session is next. The MX+
-   is vehicle-only: with no 12 V supply, it first powers up on
-   the car, where its bench items run ahead of its first request
-   (ADR-0026's appendix of 2026-10-27). The run sheets are
+   cable pull with no reconnect. The vehicle session is done
+   ([2026-10-27-elm327-vehicle](docs/bench-sessions/2026-10-27-elm327-vehicle.md)):
+   the MX+ (Bluetooth, an STN2255) and the VX in ELM mode both read the
+   car, decoding the J2534 sessions' values through a cold start and
+   idle; the MX+ sustained ~32 requests/s over Bluetooth (the VX read
+   26/s through J2534), and a Bluetooth drop recovered in ~28 s with no
+   reconnect. The MX+ is vehicle-only (no 12 V supply), so its bench
+   items ran on the car (ADR-0026's appendix of 2026-10-27). The run sheets are
    [elm327-bench-runsheet.md](docs/bench-sessions/elm327-bench-runsheet.md)
    and [elm327-vehicle-runsheet.md](docs/bench-sessions/elm327-vehicle-runsheet.md);
    the items they settle are BENCH prep #11–#17.

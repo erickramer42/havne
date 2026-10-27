@@ -17,7 +17,7 @@ where the gaps are. For build and run commands, see
 | **Simulator smoke** | The iOS app installs and launches on the iOS Simulator, QML loads, and the app is still running 45 s later. Nothing drives the UI. A pass doesn't prove the app drew anything, so look at the screenshots. | CI on pull requests, and on request: a manual run (Actions → CI → Run workflow; `smoke_only` skips the other platform jobs), or `[ios-smoke]` in the commit message (`ios-simulator-smoke`, Intel macOS runner) |
 | **Manual smoke** | Running the app: layout, Dashboard gauges, LiveView, strip chart, Settings picker against the live registry and the machine's serial ports | Dev machine |
 | **BENCH** | A real vendor DLL and adapter, no vehicle | First formal session complete, 2026-10-16, quiet bus ([session sheet](bench-sessions/2026-10-16.md)); informal quiet-bus follow-up 2026-10-20 ([note](bench-sessions/2026-10-20.md)); quiet-bus run of the vehicle session's URIs with recording, 2026-10-22 ([sheet](bench-sessions/2026-10-22.md)), and again on the laptop that goes to the car, 2026-10-25 ([sheet](bench-sessions/2026-10-25-bench.md)) |
-| **Vehicle** | A live, read-only vehicle session | Two sessions on one car, its engine ECU on `0x7E8`: 2026-10-22, ignition off, engine off and idling ([session sheet](bench-sessions/2026-10-22-vehicle.md)); 2026-10-25, the same plus the request engine, the probe, identification, `uds-generic` and an ignition cycle ([session sheet](bench-sessions/2026-10-25-vehicle.md)); run sheet [vehicle-runsheet.md](bench-sessions/vehicle-runsheet.md) |
+| **Vehicle** | A live, read-only vehicle session | Two sessions on one car, its engine ECU on `0x7E8`: 2026-10-22, ignition off, engine off and idling ([session sheet](bench-sessions/2026-10-22-vehicle.md)); 2026-10-25, the same plus the request engine, the probe, identification, `uds-generic` and an ignition cycle ([session sheet](bench-sessions/2026-10-25-vehicle.md)); run sheet [vehicle-runsheet.md](bench-sessions/vehicle-runsheet.md); 2026-10-27, the same car read through the ELM327 transport (the OBDLink MX+ over Bluetooth and the VX in ELM mode), through a cold start and idle, the values matching the J2534 sessions ([session sheet](bench-sessions/2026-10-27-elm327-vehicle.md)) |
 
 The smoke tiers earn their place: they have caught bugs no C++ test
 could see. A strip-chart indexing bug lived in QML paint code, and the
@@ -444,16 +444,11 @@ requests and quiet states
   `\\.\COMn` open, the DCB, the read timeouts) is verified at BENCH
   and on the vehicle only: the VX's bench session ran through it, a
   cable pull and the reopen included
-  (docs/bench-sessions/2026-10-27-elm327-bench-2.md). The POSIX half runs
+  (docs/bench-sessions/2026-10-27-elm327-bench-2.md), and the vehicle
+  session ran it over a Bluetooth COM port (the MX+) and the VX's USB
+  port (docs/bench-sessions/2026-10-27-elm327-vehicle.md). The POSIX half runs
   over a pseudo-terminal in CI ([ADR-0026](adr/0026-elm327-transport.md)
   §8).
-- **No ELM327 adapter has read a car yet.** The VX has carried
-  `elm327://` sessions on the bench, with no bus, so no reply has
-  crossed it; the fake ELM327 is written from the datasheet and the
-  OBDLink and OBDX manuals, and its `reset_ok` from the VX's answers.
-  The MX+'s answers and replies through either adapter are the
-  vehicle session's (ADR-0026's open questions).
-
 - **The surrogate pipe's protections have no direct test.** Its
   current-user DACL, `FILE_FLAG_FIRST_PIPE_INSTANCE`,
   `PIPE_REJECT_REMOTE_CLIENTS` and the one-handle inheritance list are
