@@ -37,7 +37,6 @@
 #include "ecuio/j2534_ptypes.h"
 #include "ecuio/profile.h"
 #include "ecuio/signal_sets.h"
-#include "j2534_backoff.h"   /* core/src: the worker's backoff step */
 #include "j2534_clock.h"     /* core/src: vendor stamps to session time */
 #include "request_engine.h"  /* core/src: ECUIO_IDENT_REQUESTS */
 
@@ -2042,28 +2041,6 @@ TEST_F(J2534AdoptionTest, ProbeResumesWhenTheLinkRecovers)
 
     EXPECT_EQ(ecuio_session_close(session), ECUIO_OK);
     ecuio_session_destroy(session);
-}
-
-/* The backoff step, without a session: from the base every wait grows
- * and none exceeds the cap, including the step that lands on it, and
- * at the cap it stays. The worker test above can't see this; reaching
- * the cap takes over 6 s of sustained failure. */
-TEST(J2534StreamTest, BackoffStepDoublesToCapWithoutOvershoot)
-{
-    uint32_t ms = J2534_BACKOFF_BASE_MS;
-    uint32_t steps = 0;
-    while (ms < J2534_BACKOFF_CAP_MS) {
-        const uint32_t next = j2534_backoff_next(ms);
-        EXPECT_GT(next, ms);
-        EXPECT_LE(next, J2534_BACKOFF_CAP_MS) << "overshoot after " << ms;
-        ms = next;
-        ASSERT_LT(++steps, 32u) << "never reached the cap";
-    }
-    EXPECT_EQ(ms, J2534_BACKOFF_CAP_MS);
-    EXPECT_EQ(j2534_backoff_next(J2534_BACKOFF_CAP_MS), J2534_BACKOFF_CAP_MS);
-    EXPECT_EQ(j2534_backoff_next(J2534_BACKOFF_CAP_MS - 1), J2534_BACKOFF_CAP_MS);
-    EXPECT_EQ(j2534_backoff_next(UINT32_MAX), J2534_BACKOFF_CAP_MS)
-        << "doubling must not wrap";
 }
 
 /* The vendor clock (j2534_clock.h): the first frame takes the host's

@@ -32,6 +32,7 @@ extern "C" {
 /* C++ headers (namespaced classes and inline functions): must stay
  * outside the extern "C" block above. */
 #include "error_detail.h" /* core/src: a refused vendor call's words */
+#include "link_health.h"  /* core/src: the workers' link-health rules */
 #include "mock_drive_cycle.h"
 #include "uds_generic.h"   /* core/src: the template set's identity */
 #include "new_counter.h"   /* tests: operator new counted per thread */
@@ -3385,4 +3386,169 @@ TEST(CoreTest, ValuesMatchDirectDecodesOfEveryFrame)
         EXPECT_EQ(c.mismatches.load(), 0);
         EXPECT_EQ(c.missing.load(), 0) << "a frame that decoded with no batch";
     }
+}
+
+/* ---- Link health (link_health.h), session-free: the rules every worker
+ * that judges a link shares. The J2534 worker's use of them is HARNESS
+ * (J2534HealthTest). */
+
+/* The backoff step: from the base every wait grows and none exceeds the
+ * cap, including the step that lands on it, and at the cap it stays. A
+ * worker test can't see this; reaching the cap takes over 6 s of
+ * sustained failure. */
+TEST(CoreTest, LinkBackoffStepDoublesToCapWithoutOvershoot)
+{
+    uint32_t ms = LINK_BACKOFF_BASE_MS;
+    uint32_t steps = 0;
+    while (ms < LINK_BACKOFF_CAP_MS) {
+        const uint32_t next = link_backoff_next(ms);
+        EXPECT_GT(next, ms);
+        EXPECT_LE(next, LINK_BACKOFF_CAP_MS) << "overshoot after " << ms;
+        ms = next;
+        ASSERT_LT(++steps, 32u) << "never reached the cap";
+    }
+    EXPECT_EQ(ms, LINK_BACKOFF_CAP_MS);
+    EXPECT_EQ(link_backoff_next(LINK_BACKOFF_CAP_MS), LINK_BACKOFF_CAP_MS);
+    EXPECT_EQ(link_backoff_next(LINK_BACKOFF_CAP_MS - 1), LINK_BACKOFF_CAP_MS);
+    EXPECT_EQ(link_backoff_next(UINT32_MAX), LINK_BACKOFF_CAP_MS)
+        << "doubling must not wrap";
+}
+
+/* A hard read failure is one episode however long it lasts. A clean read
+ * ends the backoff without ending the failure, and the next hard read
+ * backs off from the base again, still in the same episode. A matched
+ * reply ends it. */
+TEST(CoreTest, LinkHardReadIsOneEpisodeAndBacksOffFromTheBase)
+{
+    std::atomic<int32_t> published{ECUIO_OK};
+    std::atomic<uint32_t> episodes{0};
+    link_health h(published, episodes);
+
+    link_on_read(h, true, false, false);
+    EXPECT_EQ(published.load(), ECUIO_ERR_TRANSPORT_HARD_FAILURE);
+    EXPECT_EQ(episodes.load(), 1u);
+    EXPECT_EQ(h.backoff_ms, LINK_BACKOFF_BASE_MS);
+
+    h.backoff_ms = link_backoff_next(h.backoff_ms); /* the worker's sleep */
+    link_on_read(h, true, false, false);
+    EXPECT_EQ(episodes.load(), 1u) << "the same failure, no new episode";
+    EXPECT_EQ(h.backoff_ms, 2 * LINK_BACKOFF_BASE_MS) << "left to grow";
+
+    link_on_read(h, false, false, false);
+    EXPECT_EQ(h.backoff_ms, 0u) << "a clean read ends the backoff";
+    EXPECT_EQ(published.load(), ECUIO_ERR_TRANSPORT_HARD_FAILURE)
+        << "but not the failure";
+
+    link_on_read(h, true, false, false);
+    EXPECT_EQ(h.backoff_ms, LINK_BACKOFF_BASE_MS) << "restarted from the base";
+    EXPECT_EQ(episodes.load(), 1u);
+
+    h.recovered = false;
+    link_on_read(h, false, true, false);
+    EXPECT_EQ(published.load(), ECUIO_OK);
+    EXPECT_EQ(h.backoff_ms, 0u);
+    EXPECT_TRUE(h.recovered) << "the probe resumes on recovery";
+    EXPECT_EQ(episodes.load(), 1u);
+}
+
+/* Quiet is a run of LINK_HEALTH_QUIET_RUN, with no episode: reads count
+ * only when told to (passive, or nothing left to ask), request timeouts
+ * always, and a matched reply starts the run over. */
+TEST(CoreTest, LinkQuietRunGoesQuietWithoutAnEpisode)
+{
+    std::atomic<int32_t> published{ECUIO_OK};
+    std::atomic<uint32_t> episodes{0};
+    link_health h(published, episodes);
+
+    for (uint32_t i = 0; i < 3 * LINK_HEALTH_QUIET_RUN; ++i) {
+        link_on_read(h, false, false, false);
+    }
+    EXPECT_EQ(published.load(), ECUIO_OK)
+        << "empty reads between requests mean nothing";
+
+    for (uint32_t i = 0; i + 1 < LINK_HEALTH_QUIET_RUN; ++i) {
+        link_on_read(h, false, false, true);
+    }
+    EXPECT_EQ(published.load(), ECUIO_OK) << "one short of the run";
+    link_on_read(h, false, true, true);
+    EXPECT_EQ(h.quiet_runs, 0u) << "a reply starts the run over";
+
+    for (uint32_t i = 0; i + 1 < LINK_HEALTH_QUIET_RUN; ++i) {
+        link_on_request_timeout(h);
+    }
+    EXPECT_EQ(published.load(), ECUIO_OK);
+    link_on_request_timeout(h);
+    EXPECT_EQ(published.load(), ECUIO_ERR_VEHICLE_TIMEOUT);
+    EXPECT_EQ(episodes.load(), 0u) << "quiet isn't a failure";
+}
+
+/* A failed write latches REQUESTS_FAILED as one episode with a backoff.
+ * While it's latched, timeouts don't count toward quiet and replies don't
+ * clear it; only a sent write does. */
+TEST(CoreTest, LinkFailedWriteLatchesUntilAWriteGoesThrough)
+{
+    std::atomic<int32_t> published{ECUIO_OK};
+    std::atomic<uint32_t> episodes{0};
+    link_health h(published, episodes);
+
+    link_on_write(h, false);
+    EXPECT_EQ(published.load(), ECUIO_ERR_REQUEST_FAILED);
+    EXPECT_EQ(episodes.load(), 1u);
+    EXPECT_EQ(h.backoff_ms, LINK_BACKOFF_BASE_MS);
+
+    link_on_write(h, false);
+    EXPECT_EQ(episodes.load(), 1u);
+    for (uint32_t i = 0; i < 2 * LINK_HEALTH_QUIET_RUN; ++i) {
+        link_on_request_timeout(h);
+    }
+    EXPECT_EQ(h.quiet_runs, 0u) << "the state is the writes'";
+    link_on_read(h, false, true, true);
+    EXPECT_EQ(published.load(), ECUIO_ERR_REQUEST_FAILED)
+        << "a reply doesn't clear the latch";
+
+    h.recovered = false;
+    link_on_write(h, true);
+    EXPECT_EQ(published.load(), ECUIO_OK);
+    EXPECT_EQ(h.backoff_ms, 0u);
+    EXPECT_TRUE(h.recovered);
+    EXPECT_EQ(episodes.load(), 1u);
+}
+
+/* A hard read outranks a failing write and counts its own episode; a
+ * write failing under it changes nothing; a clean read under the latch
+ * steps down to REQUESTS_FAILED without a new episode. */
+TEST(CoreTest, LinkHardReadOutranksTheLatchAndStepsDownToIt)
+{
+    std::atomic<int32_t> published{ECUIO_OK};
+    std::atomic<uint32_t> episodes{0};
+    link_health h(published, episodes);
+
+    link_on_write(h, false);
+    link_on_read(h, true, false, false);
+    EXPECT_EQ(published.load(), ECUIO_ERR_TRANSPORT_HARD_FAILURE);
+    EXPECT_EQ(episodes.load(), 2u);
+
+    link_on_write(h, false);
+    EXPECT_EQ(published.load(), ECUIO_ERR_TRANSPORT_HARD_FAILURE);
+    EXPECT_EQ(episodes.load(), 2u);
+
+    link_on_read(h, false, false, false);
+    EXPECT_EQ(published.load(), ECUIO_ERR_REQUEST_FAILED);
+    EXPECT_EQ(episodes.load(), 2u) << "a step down, not a new failure";
+}
+
+/* The session's atomics are written only on a transition, so a reader
+ * polling them never sees churn from a steady state. */
+TEST(CoreTest, LinkPublishesOnlyTransitions)
+{
+    std::atomic<int32_t> published{ECUIO_OK};
+    std::atomic<uint32_t> episodes{0};
+    link_health h(published, episodes);
+
+    published.store(-99); /* a marker: a store would overwrite it */
+    link_on_read(h, false, true, false);
+    link_on_write(h, true);
+    EXPECT_EQ(published.load(), -99) << "OK to OK is no transition";
+    link_on_read(h, true, false, false);
+    EXPECT_EQ(published.load(), ECUIO_ERR_TRANSPORT_HARD_FAILURE);
 }

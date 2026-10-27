@@ -21,7 +21,8 @@ endif()
 # --- Core tests: MUST stay Qt-free (Ubuntu CI job has no Qt installed) ---
 add_executable(test_core test_core.cpp)
 
-# core/src for mock_drive_cycle.h, which is internal (test_obd2 precedent).
+# core/src for mock_drive_cycle.h and link_health.h, which are internal
+# (test_obd2 precedent).
 target_include_directories(test_core PRIVATE
     ${CMAKE_SOURCE_DIR}/core/src
 )
@@ -362,7 +363,7 @@ if(WIN32)
     add_executable(test_j2534_stream
         ../tests/test_j2534_stream.cpp
     )
-    # core/src for j2534_backoff.h, which is internal (test_obd2 precedent).
+    # core/src for j2534_clock.h, which is internal (test_obd2 precedent).
     target_include_directories(test_j2534_stream PRIVATE
         ${CMAKE_SOURCE_DIR}/core/src
     )

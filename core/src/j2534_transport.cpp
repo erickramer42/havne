@@ -12,7 +12,8 @@
 //          test_j2534_health, also cross-arch: the request engine's
 //          pacing (the floor, the wait, negative and pending replies,
 //          two channels at once), the drain in passive mode, and the
-//          link-health machine: hard and quiet reads, untouched counts,
+//          link-health machine (link_health.h, UNIT in CoreTest.Link*)
+//          through this worker: hard and quiet reads, untouched counts,
 //          the write latch, its priority and its step-down, a zero
 //          written count, unmatched frames, backoff growth, its end at
 //          a clean read and its restart, and quiet reads once nothing
@@ -25,7 +26,7 @@
 #include "session.h"
 #include "ecuio/j2534.h"
 #include "request_engine.h"
-#include "j2534_backoff.h"
+#include "link_health.h"
 #include "j2534_clock.h"
 #include "uri_query.h"
 #include "error_detail.h"
@@ -66,8 +67,8 @@ constexpr uint32_t J2534_IDLE_READ_TIMEOUT_MS = 100;
  * of arriving. */
 constexpr uint32_t J2534_READ_SLICE_MS = 10;
 
-/* The request engine's timing is in request_engine.h, the failure
- * backoff's in j2534_backoff.h. */
+/* The request engine's timing is in request_engine.h; the link-health
+ * rules, their quiet run and the failure backoff in link_health.h. */
 
 /* On ISO 15765 channels J2534 carries the CAN ID in-band as 4
  * big-endian bytes, and the filter mask, pattern and flow-control
@@ -83,12 +84,6 @@ constexpr uint32_t J2534_TX_ID_DEFAULT = ECUIO_OBD2_TESTER_ARB_ID;   /* shared
                                        * obd2 set's own declaration */
 constexpr uint32_t J2534_CAN_ID_MAX     = 0x1FFFFFFFu;   /* 29-bit */
 constexpr uint32_t J2534_PID_MAX        = 0xFFu;
-/* "Not responding" is this many in a row: requests whose wait ran out,
- * while there is something to ask; reads that brought nothing from an
- * ECU we talk to, in passive mode and once nothing is left to ask. About
- * a second either way. One empty read means nothing: with requests, most
- * reads between two of them are empty. */
-constexpr uint32_t J2534_HEALTH_QUIET_RUN = 10;
 
 /* A read's outcome. "matched" (stripped and dispatched to one of our
  * channels) is kept apart from "delivered but unmatched" (the adapter
@@ -339,146 +334,18 @@ read_outcome pump_one(ecuio_j2534_transport* t, uint32_t timeout_ms)
     return o;
 }
 
-/* Link health (the full table is in docs/j2534.md), worker-local: the
- * session's atomics change only on transitions. */
-struct link_health {
-    int32_t state = ECUIO_OK;
-    bool write_failed = false;   /* latched by a failed write, cleared
-                                  * only by a sent one */
-    uint32_t backoff_ms = 0;     /* 0 = the normal cadence */
-    uint32_t quiet_runs = 0;
-    bool recovered = false;      /* back to OK since the worker last
-                                  * looked: the probe resumes */
-};
-
-void set_state(ecuio_j2534_transport* t, link_health& h, int32_t state)
+/* A read's outcome in link health's terms (link_health.h). pump_one
+ * guarantees got implies ECUIO_OK, so any status other than ECUIO_OK
+ * and the vehicle-timeout translation is hard. Everything else the
+ * adapter answered is clean: an empty read, ERR_TIMEOUT (the same
+ * thing: it had nothing; the VX answers every empty read
+ * ERR_BUFFER_EMPTY, which the read paths map to an empty ECUIO_OK), or
+ * a frame for another ID. */
+void update_health(link_health& h, const read_outcome& o, bool reads_count)
 {
-    if (h.state != state) {
-        t->session->last_error.store(state);
-        h.recovered = h.recovered || state == ECUIO_OK;
-        h.state = state;
-    }
-}
-
-/* A transition into a failure that counts an episode. The count goes
- * first: ecuio_session_get_error_state reads the code, then the count,
- * so a reader that sees the code sees its episode (replay's stop_early
- * does the same). */
-void begin_episode(ecuio_j2534_transport* t, link_health& h, int32_t state)
-{
-    t->session->error_count.fetch_add(1);
-    set_state(t, h, state);
-}
-
-/* One more sign of nothing to hear: after J2534_HEALTH_QUIET_RUN in a
- * row, VEHICLE_TIMEOUT, with no episode. */
-void count_quiet(ecuio_j2534_transport* t, link_health& h)
-{
-    if (++h.quiet_runs >= J2534_HEALTH_QUIET_RUN) {
-        set_state(t, h, ECUIO_ERR_VEHICLE_TIMEOUT);
-    }
-}
-
-/* Read-side link health. First match wins:
- *   hard read failure  -> TRANSPORT_HARD_FAILURE, one episode, backoff
- *                         (restarted if a clean read had ended it)
- *   write latch set    -> a hard failure steps down to REQUEST_FAILED,
- *                         with no new episode: the adapter reads again,
- *                         so what fails is the writes. Otherwise no
- *                         change; the backoff stays the writes'
- *   matched frame      -> OK, backoff and quiet count cleared
- *   anything else      -> backoff cleared; when reads count (passive
- *                         mode, or nothing left to ask), one more quiet
- *                         read
- * While there is something to ask the quiet count is the requests' own
- * (request_timed_out), and the empty reads between two requests mean
- * nothing. A frame for no channel of ours answers nothing, so it moves
- * no state; it only shows the adapter reads, which ends the backoff. */
-void update_health(ecuio_j2534_transport* t, link_health& h,
-                   const read_outcome& o, bool reads_count)
-{
-    /* pump_one guarantees got implies ECUIO_OK, so any status other
-     * than ECUIO_OK and the vehicle-timeout translation is hard. */
-    if (o.status != ECUIO_OK && o.status != ECUIO_ERR_VEHICLE_TIMEOUT) {
-        if (h.state != ECUIO_ERR_TRANSPORT_HARD_FAILURE) {
-            begin_episode(t, h, ECUIO_ERR_TRANSPORT_HARD_FAILURE);
-            h.backoff_ms = J2534_BACKOFF_BASE_MS;
-        } else if (h.backoff_ms == 0) {
-            /* A clean read ended the backoff, and the adapter is
-             * failing again: back off from the base, still one episode. */
-            h.backoff_ms = J2534_BACKOFF_BASE_MS;
-        }
-        h.quiet_runs = 0;
-        return;
-    }
-
-    if (h.write_failed) {
-        if (h.state == ECUIO_ERR_TRANSPORT_HARD_FAILURE) {
-            set_state(t, h, ECUIO_ERR_REQUEST_FAILED);
-        }
-        return;
-    }
-
-    if (o.got && o.matched) {
-        set_state(t, h, ECUIO_OK);
-        h.backoff_ms = 0;
-        h.quiet_runs = 0;
-        return;
-    }
-
-    /* The adapter answered: an empty read, ERR_TIMEOUT (the same thing:
-     * it had nothing; the VX answers every empty read ERR_BUFFER_EMPTY,
-     * which the read paths map to an empty ECUIO_OK), or a frame for
-     * another ID. Ending the backoff here keeps a hard failure that
-     * ends in silence from counting its quiet run one backoff interval
-     * at a time, about 26 s. */
-    h.backoff_ms = 0;
-    if (reads_count) {
-        count_quiet(t, h);
-    }
-}
-
-/* A request's wait ran out with no answer, the request modes' quiet
- * unit. While the write latch is set the state is the writes', so it
- * doesn't count. */
-void request_timed_out(ecuio_j2534_transport* t, link_health& h)
-{
-    if (!h.write_failed) {
-        count_quiet(t, h);
-    }
-}
-
-/* Write-side link health, separate from reads, because a bus where no
- * node ACKs (ignition off, ECU asleep) fails writes while the adapter
- * still reads cleanly; calling that a hard failure would blame the
- * adapter. A failed write latches REQUEST_FAILED with ONE episode; a
- * successful write clears it at once, since an accepted write proves
- * requests flow. A hard READ failure outranks it; quiet reads can't
- * downgrade it. */
-void handle_write_result(ecuio_j2534_transport* t, link_health& h,
-                         bool sent)
-{
-    if (sent) {
-        if (h.write_failed) {
-            h.write_failed = false;
-            if (h.state == ECUIO_ERR_REQUEST_FAILED) {
-                set_state(t, h, ECUIO_OK);
-                h.backoff_ms = 0;
-            }
-        }
-        return;
-    }
-
-    h.write_failed = true;
-    if (h.state == ECUIO_ERR_TRANSPORT_HARD_FAILURE) {
-        return;  /* hard read failure outranks, don't change state */
-    }
-    if (h.state != ECUIO_ERR_REQUEST_FAILED) {
-        /* Transition INTO requests-failing: ONE episode, backoff at base */
-        begin_episode(t, h, ECUIO_ERR_REQUEST_FAILED);
-        h.backoff_ms = J2534_BACKOFF_BASE_MS;
-    }
-    /* Already REQUEST_FAILED: leave backoff alone, it doubles at sleep site */
+    const bool hard =
+        o.status != ECUIO_OK && o.status != ECUIO_ERR_VEHICLE_TIMEOUT;
+    link_on_read(h, hard, o.got && o.matched, reads_count);
 }
 
 /* Writes a request to its channel's tx ID: [4-byte tx ID][service][key],
@@ -506,7 +373,7 @@ bool send_request(ecuio_j2534_transport* t, const ecuio_request& r,
             ECUIO_PT_TX_ISO15765_FRAME_PAD,
         0, &written);
     const bool sent = (wst == ECUIO_OK && written >= 1);
-    handle_write_result(t, h, sent);
+    link_on_write(h, sent);
     return sent;
 }
 
@@ -618,7 +485,7 @@ void j2534_worker(ecuio_j2534_transport* t)
 {
     ecuio_request_engine& e = t->engine;
     const bool requests = e.count > 0 || e.scan_count > 0;
-    link_health h;
+    link_health h(t->session->last_error, t->session->error_count);
     uint32_t published[ECUIO_MAX_CHANNELS] = {};
     uint32_t published_identity[ECUIO_MAX_CHANNELS] = {};
     if (requests && t->probe) {
@@ -630,7 +497,7 @@ void j2534_worker(ecuio_j2534_transport* t)
             const int64_t now = engine_now_us(t);
             for (uint32_t c = 0; c < e.chan_count; ++c) {
                 if (ecuio_engine_expire(&e, c, now)) {
-                    request_timed_out(t, h);
+                    link_on_request_timeout(h);
                 }
                 const int32_t r = ecuio_engine_due(&e, c, now);
                 if (r != ECUIO_ENGINE_NONE) {
@@ -657,7 +524,7 @@ void j2534_worker(ecuio_j2534_transport* t)
             (void)ecuio_engine_on_frame(&e, o.chan, o.payload, o.len,
                                         engine_now_us(t), nullptr);
         }
-        update_health(t, h, o, !asking);
+        update_health(h, o, !asking);
         if (h.recovered) {
             h.recovered = false;
             if (requests && t->probe) {
@@ -677,7 +544,7 @@ void j2534_worker(ecuio_j2534_transport* t)
             if (backoff_sleep(t, h.backoff_ms)) {
                 break;
             }
-            h.backoff_ms = j2534_backoff_next(h.backoff_ms);
+            h.backoff_ms = link_backoff_next(h.backoff_ms);
         } else if (!o.got) {
             /* An empty read waits out its timeout, even from a vendor
              * that returns at once, so the loop never spins. */
