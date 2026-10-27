@@ -330,8 +330,9 @@ The bridge polls it on its 100 ms tick and maps it for the UI
   precision of its own. The bridge converts on the way out; its
   history and recordings keep the decoded values.
 - **Pages:** **Home** (status), **Dashboard** (gauges and shift
-  lights), **Live** (value table and strip chart), **Log** (raw
-  frames), **Settings** (device picker, URI, activity log). Settings is
+  lights), **Live** (value table and strip chart), **Log** (the
+  activity log; in developer mode, the raw frames), **Settings**
+  (device picker, URI, developer mode). Settings is
   the one place a session is connected; the header and Home open it.
   It composes the URI from a preset or a device (a J2534 interface or
   a serial port), a profile row

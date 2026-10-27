@@ -12,18 +12,18 @@
 //          serial ports, a serial port's row and the elm327:// preset
 //          filling the field, each row's versions last seen at a connect
 //          (kept across a new page; the fake's on Windows); the status label
-//          and the activity log's link lines in each link state
-//          (tests/qml/tst_linkhealth.qml), by objectName.
+//          in each link state (tests/qml/tst_linkhealth.qml), by
+//          objectName; the developer box and the mock:// preset that
+//          follows it (tests/qml/tst_log.qml).
 //          Manual smoke — the live discovery list renders (Windows: the
 //          registry's interfaces and ports; macOS/Linux: the /dev ports or
 //          the empty-state hint) sized to its rows, a device row
 //          fills the URI field only, Connect button drives
 //          connectSessionAsync (UI stays responsive while a vendor blocks
-//          ~8 s), activity log shows connect lifecycle and takes the
-//          remaining height, Record sessions fixed during a session and
-//          its folder shown relative to Documents; at 1280 × 650 the page
-//          scrolls and the activity log keeps its minimum height; the
-//          Display row steps Theme.zoom. The recording's bridge side:
+//          ~8 s), Record sessions fixed during a session and its folder
+//          shown relative to Documents; at 1280 × 650 the page scrolls;
+//          the Display row steps Theme.zoom; developer mode kept between
+//          runs (Main.qml). The recording's bridge side:
 //          BridgeTest.Recording*. The Units row sets Bridge.unitSystem
 //          (tst_settings.qml); its conversions: SignalsTest.DisplayConvert*,
 //          BridgeTest.UnitSystem*.
@@ -40,7 +40,6 @@ Pane {
     padding: 0
     background: Rectangle { color: Theme.bg }
 
-    readonly property int maxLogLines: 200
     readonly property int deviceRowHeight: 56
     readonly property int deviceRowsShown: 4   // the list scrolls past this
 
@@ -265,28 +264,6 @@ Pane {
         // Connecting/Connected/failed lines arrive via logMessage.
     }
 
-    // Each line is stamped with local time in the surrogate session
-    // log's format (HH:MM:SS.mmm), so the two line up, and a disconnect
-    // or a recovery can be timed from here.
-    function appendLog(message) {
-        activityLog.append(Qt.formatTime(new Date(), "hh:mm:ss.zzz") + "  " + message)
-        // Bound the log: QML TextArea.append keeps growing otherwise.
-        // Removes whole oldest LINES (split on "\n") — NOT visual
-        // rows. lineCount counts wrapped rows, so a single long
-        // wrapped message can exceed maxLogLines while the text has
-        // no newline at all; indexOf("\n") then returns -1, and
-        // remove(0, 0) would remove nothing and spin forever. The
-        // guard breaks the loop instead: such a message stays until a
-        // newline-bearing line can be trimmed.
-        while (activityLog.lineCount > page.maxLogLines) {
-            const nl = activityLog.text.indexOf("\n")
-            if (nl < 0)
-                break
-            activityLog.remove(0, nl + 1)
-        }
-        activityLog.cursorPosition = activityLog.length
-    }
-
     // ---- The last URI that connected, the Record switch and each
     // device's versions (seenVersions, as JSON), kept between runs as
     // Main.qml keeps the zoom and units. Only a URI that connected is
@@ -317,10 +294,6 @@ Pane {
 
     Connections {
         target: Bridge
-
-        function onLogMessage(message) {
-            page.appendLog(message)
-        }
 
         function onConnectResult(uri, error) {
             errorLabel.text = error
@@ -445,6 +418,8 @@ Pane {
                         required property var modelData
                         objectName: "preset_" + modelData.name
                         text: modelData.label
+                        // The mock is a developer's tool, not a device
+                        visible: modelData.name !== "mock" || Theme.developerMode
                         enabled: page.idle
                         onClicked: page.fillUri(modelData.uri)
                     }
@@ -605,6 +580,24 @@ Pane {
                 }
             }
 
+            // Developer mode (Theme.developerMode); Main.qml stores it
+            CheckBox {
+                id: developerBox
+                objectName: "developerBox"
+                text: qsTr("Developer mode: the mock:// preset, and the raw frames on the Log page")
+                checked: Theme.developerMode
+                onToggled: {
+                    Theme.developerMode = checked
+                    checked = Qt.binding(() => Theme.developerMode)
+                }
+                contentItem: Label {
+                    text: developerBox.text
+                    color: Theme.text
+                    leftPadding: developerBox.indicator.width + developerBox.spacing
+                    verticalAlignment: Text.AlignVCenter
+                }
+            }
+
             // ---- Adapters: J2534 interfaces and serial ports ----
             Heading { text: qsTr("Adapters") }
 
@@ -698,33 +691,6 @@ Pane {
                             Layout.fillWidth: true
                         }
                     }
-                }
-            }
-
-            // ---- Activity log ----
-            Heading { text: qsTr("Activity") }
-
-            ScrollView {
-                Layout.fillWidth: true
-                Layout.fillHeight: true
-                // Its share of the page's implicit height: about a dozen
-                // lines. Without it, the text's own height would grow the
-                // page instead of scrolling the log
-                Layout.preferredHeight: 200
-                Layout.minimumHeight: 200
-
-                TextArea {
-                    id: activityLog
-                    objectName: "activityLog"
-                    readOnly: true
-                    wrapMode: TextArea.WrapAnywhere
-                    font.pointSize: 8
-                    color: Theme.textDim
-                    background: Rectangle {
-                        radius: Theme.radius
-                        color: Theme.elevated
-                    }
-                    text: qsTr("Ready.")
                 }
             }
         }

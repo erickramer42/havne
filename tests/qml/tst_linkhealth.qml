@@ -2,7 +2,7 @@
 // Testing: every link-health surface, in the app's own window (Main),
 //          for each link state: the header pill, Home's status card,
 //          the Dashboard header, LiveView's banner, Settings' status
-//          label and its activity log. Disconnected and ok everywhere
+//          label and the Log page's activity log. Disconnected and ok everywhere
 //          (mock://demo); quiet, fault and requests on Windows, through
 //          the fake vendor DLL in the x64 surrogate with a knob armed
 //          before the connect spawns it, as the manual
@@ -71,7 +71,7 @@ TestCase {
     }
 
     function activityLog(main) {
-        return find(find(main.contentItem, "settingsPage"), "activityLog").text
+        return find(find(main.contentItem, "logPage"), "activityLog").text
     }
 
     // Every surface shows `state`; LiveView's banner reads `banner`

@@ -140,7 +140,9 @@ screen, is [docs/architecture.md](docs/architecture.md).
 - **Live view.** Decoded values with units, refreshed at 10 Hz, plus
   a strip chart that plots each value at its frame's time and keeps
   each 100 ms window's peak.
-- **Frame log.** Raw frames, newest-first or oldest-first, with Pause.
+- **Activity log.** The Log page names every connect, link change,
+  adapter and ECU, time-stamped. Developer mode adds the raw frames,
+  newest-first or oldest-first, with Pause.
 - **Fits the screen.** The Dashboard rearranges for a short, wide
   window, pages that run long scroll, and Ctrl + / Ctrl − zooms the
   whole UI (or Settings' Display row), kept between runs.

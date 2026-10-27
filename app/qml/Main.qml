@@ -3,7 +3,8 @@
 //          pill elides at 400 px, keyboard focus rings, the window opens
 //          within a 1280 × 720 screen, zoom steps with Ctrl + / Ctrl − /
 //          Ctrl 0 and Settings' Display row and survives a restart, as
-//          does the unit system (2026-10-24).
+//          does the unit system (2026-10-24) and developer mode
+//          (2026-10-27).
 //          test_qml (tests/qml/tst_linkhealth.qml) checks the pill and
 //          each page's link surfaces in every link state, finding the
 //          pages and the pill by objectName
@@ -61,7 +62,8 @@ ApplicationWindow {
 
     function gotoPage(index) { stack.currentIndex = index }
 
-    // ---- Zoom (Theme.zoom) and units (Bridge.unitSystem), kept between runs
+    // ---- Zoom (Theme.zoom), units (Bridge.unitSystem) and developer mode
+    // (Theme.developerMode), kept between runs
     Settings {
         id: uiSettings
         category: "ui"
@@ -69,12 +71,14 @@ ApplicationWindow {
         // Imperial until changed (ADR-0022's appendix of 2026-10-25); the
         // bridge and recordings stay in core's decoded, metric units
         property int unitSystem: 1
+        property bool developerMode: false
     }
     property bool zoomRestored: false
     Component.onCompleted: {
         Theme.zoom = Theme.clampZoom(uiSettings.zoom)
         zoomRestored = true
         Bridge.unitSystem = uiSettings.unitSystem   // anything but 0 or 1 is ignored
+        Theme.developerMode = uiSettings.developerMode
     }
     Connections {
         target: Bridge
@@ -87,6 +91,7 @@ ApplicationWindow {
             if (root.zoomRestored)
                 zoomBadge.show()
         }
+        function onDeveloperModeChanged() { uiSettings.developerMode = Theme.developerMode }
     }
     // Ctrl + is Ctrl Shift = on most layouts, so Ctrl = counts too
     Shortcut { sequences: [StandardKey.ZoomIn, "Ctrl+="]; onActivated: Theme.stepZoom(1) }

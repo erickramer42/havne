@@ -1,7 +1,8 @@
 // File/layer: app/qml/Theme.qml | Qt6 Quick singleton, UI layer
 // Testing: test_qml (tests/qml/tst_theme.qml) pins linkColor and
 //          linkLabel for every state and the trace palette's rules;
-//          how the palette looks is manual smoke.
+//          developerMode's effect on the Log page and Settings:
+//          tests/qml/tst_log.qml; how the palette looks is manual smoke.
 pragma Singleton
 import QtQuick
 
@@ -50,6 +51,12 @@ QtObject {
                 if (zoomSteps[i] < zoom - 0.001) { zoom = zoomSteps[i]; return }
         }
     }
+
+    // Developer mode, Settings' switch, off until switched on; Main.qml
+    // stores it with the zoom. Off, the app offers only real devices and
+    // the Log page shows the activity log alone. On, it adds the mock://
+    // preset and the Log page's raw frame table with its bridge counters.
+    property bool developerMode: false
 
     // Fixed-pitch family, so hex columns and digits keep their width row
     // to row. "monospace" is a fontconfig and Android alias; Windows and

@@ -249,7 +249,9 @@ Rectangle {
 
         Text {
             visible: !Bridge.connected
-            text: qsTr("Choose a J2534 device, or the mock://demo preset, in Settings")
+            text: Theme.developerMode
+                  ? qsTr("Choose a J2534 interface or a serial port, or the mock://demo preset, in Settings")
+                  : qsTr("Choose a J2534 interface or a serial port in Settings")
             font.pixelSize: 12
             color: Theme.textDim
             Layout.alignment: Qt.AlignHCenter

@@ -81,8 +81,10 @@ goes out in the next release. The milestone after it is chosen from the
     ([docs/j2534.md](docs/j2534.md#session-lifecycle)); all four states
     have shown on the VX.
   - **The UI:** Dashboard gauges with peak hold and stale dimming,
-    Live's table and strip chart, the frame log, and Settings composing
-    the URI; zoom, metric or imperial units
+    Live's table and strip chart, the Log page's activity log, and
+    Settings composing the URI; developer mode (off until switched on:
+    the `mock://` preset and the Log page's raw frame table with its
+    bridge counters), zoom, metric or imperial units
     ([ADR-0022](docs/adr/0022-display-units.md)), the last URI that
     connected, the Record sessions switch and each device's versions as
     last seen at a connect (shown on its row in Settings, since the list
@@ -304,16 +306,6 @@ week or more or a design that needs an ADR first.
 
 ### User interface
 
-- **Developer mode (S).** A persisted Settings toggle, off by default.
-  With it off the app offers only real devices. With it on, the app
-  also shows:
-  - the mock transport (the `mock://demo` preset in Settings);
-  - the raw frame log;
-  - the Log page's notify and batch counters.
-- **Log page as the application log (S).** Show the application's
-  event log on the Log page (it sits at the bottom of Settings) and
-  move the raw frame table into developer mode. Pairs with
-  developer mode.
 - **Units of measure, per-signal overrides (S).** Metric or imperial
   for the whole UI is built ([ADR-0022](docs/adr/0022-display-units.md):
   converted in core by unit string, chosen on Settings, kept between

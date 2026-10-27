@@ -31,8 +31,15 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
 - Settings' adapter list shows each device's firmware versions as last
   seen at a connect ("last seen: …"), without opening the adapter. A
   serial port shows whatever adapter answered on it last.
+- Developer mode, a switch in Settings that's remembered between runs.
+  It adds the `mock://demo` preset and the Log page's raw frame table,
+  with its delivery counters; with it off, the app offers only real
+  adapters.
 
 ### Changed
+- The Log page shows the activity log (every connect, link change and
+  ECU line, time-stamped), which sat at the bottom of Settings. The raw
+  frame table is behind its Activity | Frames switch in developer mode.
 - Home's logo is a small tachometer whose needle idles and blips into
   the red.
 
