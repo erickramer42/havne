@@ -1,0 +1,7 @@
+# clang-tidy for the CI job and scripts/tidy.sh, a static build from PyPI
+# (the clang-tidy wheel), pinned by hash. A new LLVM release adds checks to
+# the families .clang-tidy runs whole, so bump by hand: run scripts/tidy.sh
+# on the new version and fix or turn off what it finds in the same commit.
+clang-tidy==22.1.8 \
+    --hash=sha256:df9bf841ecbf501d08b6fa34523be840f59b1a76d16b6ee5edb0e5c7c22b59c2 \
+    --hash=sha256:1a3de07ba82d4403d8b692ae63a5520d4db5c606014c92c24bbcef9259057bf1

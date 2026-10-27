@@ -109,7 +109,8 @@ screen, is [docs/architecture.md](docs/architecture.md).
   surrogate, and locally through the x86 one. CI builds and tests on Windows, Linux and
   macOS, runs the core under ASan/UBSan, fuzzes the signal decoder and
   validators with libFuzzer ([fuzz/README.md](fuzz/README.md)),
-  compiles Android and iOS, and, on pull requests, launches the iOS app
+  holds the core and the surrogate to clang-tidy's static analyzer and
+  bug-finding checks, compiles Android and iOS, and, on pull requests, launches the iOS app
   in the Simulator ([docs/testing.md](docs/testing.md)). The coverage
   badge is line coverage of the native code (core, surrogate, bridge)
   over the whole suite on Windows CI; QML isn't counted

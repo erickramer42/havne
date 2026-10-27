@@ -444,6 +444,25 @@ build. `scripts/verify.sh` prints the count per build step; keep it at
 the house style. The tree wasn't reformatted when it was added, so
 format only the lines you change: `git clang-format` after staging.
 
+**clang-tidy:** `.clang-tidy` runs the static analyzer and the
+bug-finding families (bugprone, concurrency, performance, portability,
+a few misc checks) over `core/` and `surrogate/`, and CI's
+`clang-tidy` job fails on any warning. The style families stay off,
+and the file says why each excluded check is excluded. To run it
+locally, install the pinned version and configure a Ninja tree from a
+Developer prompt (the Visual Studio generator writes no compile
+database), then run `scripts/tidy.sh`:
+
+```sh
+python -m pip install --require-hashes -r .github/clang-tidy-requirements.txt
+cmake -B build-tidy -G Ninja -DQTTUNE_BUILD_CORE_ONLY=ON -DBUILD_TESTING=OFF -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+scripts/tidy.sh                  # one line; each file's output in Testing/tidy/
+```
+
+Nothing needs building. Another clang-tidy version finds other things
+(`$CLANG_TIDY` names the binary). A warning that is wrong at one line
+gets a `NOLINTNEXTLINE(<check>)` with the reason beside it.
+
 ## Portability traps
 
 CI builds core with GCC, MSVC and AppleClang, and cross-compiles it
@@ -472,6 +491,7 @@ every job has a `timeout-minutes` of roughly 3-5x its usual duration:
 | `core-and-tests` | Ubuntu, GCC, no Qt | Builds core and the Qt-free tests, then runs ctest. This enforces "core never links Qt." Gates every other job. |
 | `core-sanitizers` | Ubuntu, GCC, no Qt | The same build and tests in Debug under AddressSanitizer and UndefinedBehaviorSanitizer. LeakSanitizer runs too, so a test that closes a session without destroying it fails here. Blocking since its first green run (2026-10-20). |
 | `fuzz` | Ubuntu, Clang, no Qt | Installs the image's clang with its `libclang-rt` runtimes, checks that `-fsanitize=fuzzer` links, builds `fuzz/` (`-DECUIO_BUILD_FUZZERS=ON`, RelWithDebInfo), runs each harness for 60 s, and uploads any crashing input ([fuzz/README.md](../fuzz/README.md)) |
+| `clang-tidy` | Windows, MSVC's headers | Installs the hash-pinned clang-tidy wheel, configures a core-only Ninja tree in a Developer shell, and runs `scripts/tidy.sh` over core, the J2534 layer and the surrogate. Any warning fails it. Nothing is built. |
 | `win-build` | Windows, MSVC 2022 | Builds the full app, then runs ctest (the bridge, J2534 and QML suites included), then the load test (`bench_bridge --load`): its table goes to the run's summary, and the step fails on a broken invariant or a bound far below the dev machine's figures ([testing.md](testing.md#load-test-the-replay-fixture-through-the-bridge)) |
 | `macos-build` | macOS (arm64), AppleClang | Builds the full app, then runs ctest. The QML suites' link-state cases skip without the fake. |
 | `linux-build` | Ubuntu, GCC | Builds the full app, then runs ctest, as on macOS, then the load test as on Windows. Installs QtGui's EGL and OpenGL runtime libraries, which `test_qml` loads. |
