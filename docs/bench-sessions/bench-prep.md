@@ -12,8 +12,9 @@ The numbers are stable: run sheets, session sheets and ADRs cite them
 ("BENCH prep #5"). A settled item keeps its row and its number.
 
 So far all the hardware is one adapter, the OBDX Pro VX, through the
-x86 surrogate, and one car, its engine ECU on 11-bit `0x7E8`. The
-ELM327 items (#11 on) have met no adapter yet: their run sheets are
+x86 surrogate, and one car, its engine ECU on 11-bit `0x7E8`. Of the
+ELM327 items (#11 on), the VX on USB has settled its port and its
+answers, short of a session that connects; their run sheets are
 [elm327-bench-runsheet.md](elm327-bench-runsheet.md) (the VX) and
 [elm327-vehicle-runsheet.md](elm327-vehicle-runsheet.md) (the MX+,
 which has no bench session):
@@ -26,6 +27,7 @@ which has no bench session):
 | [2026-10-22-vehicle](2026-10-22-vehicle.md) | Vehicle, before the request engine |
 | [2026-10-25-bench](2026-10-25-bench.md) | Bench, quiet bus, the laptop that goes to the car |
 | [2026-10-25-vehicle](2026-10-25-vehicle.md) | Vehicle: the request engine, the probe, identification, `uds-generic` |
+| [2026-10-27-elm327-bench](2026-10-27-elm327-bench.md) | Bench, no bus: the VX as an ELM327, refused at `AT Z`; a probe of its answers |
 
 ## The list
 
@@ -46,11 +48,11 @@ which has no bench session):
 
 | # | Assumption in the code | State | Evidence |
 |---|---|---|---|
-| 11 | **The VX gets a serial port over USB**, which `elm327://COMn` opens at 38400 baud unless `?serial=` says otherwise | STILL UNKNOWN | Windows on the dev machine knows the VX as USB `VID_0483&PID_5740`, STMicroelectronics' virtual COM port (USB CDC), last seen as "OBDX Pro Serial (COM4)": OBDX's `obdxdriver.inf` binds Windows' own `usbser.sys` to it and names it. A CDC device needs no vendor driver on Windows 10 and later, macOS (`/dev/cu.usbmodem*`) or Linux (`/dev/ttyACM*`); no session has opened the port yet |
-| 12 | **The setup's contract commands each answer OK**: `AT Z` with an `ELM327` version, then `AT E0 L0 S0 H1 D0 CAF1 CFC1 SP<n> AT1 ST19`, the header and the receive filter | STILL UNKNOWN | The OBDX manual lists `AT D0` as a compatibility command answering OK; the FRPM lists every one for the STN |
-| 13 | **The readings' forms:** `AT I` an `ELM327` version, `STI` `STN<id> vX.Y.Z` on an STN only, `STVR` `12.34` or `AT RV` `12.6V`, read at the connector; an STN's parameter 2A at its default | STILL UNKNOWN | The forms are the datasheet's, the FRPM's and the OBDX manual's; the VX's `READ_VBATT` read 0.0 V on USB power (#10) |
+| 11 | **The VX gets a serial port over USB**, which `elm327://COMn` opens at 38400 baud unless `?serial=` says otherwise | CONFIRMED for the VX on Windows, with the OBDX software installed. Whether the port appears on a machine without OBDX's INF is unknown | The VX is USB `VID_0483&PID_5740`, STMicroelectronics' virtual COM port (USB CDC): "OBDX Pro Serial (COM4)", `\Device\USBSER000`, Microsoft's `usbser.sys` bound by OBDX's `obdxdriver.inf`. `elm327://COM4` opened it, wrote and read it and closed it ([2026-10-27-elm327-bench](2026-10-27-elm327-bench.md)). A CDC device needs no vendor driver on Windows 10 and later, macOS (`/dev/cu.usbmodem*`) or Linux (`/dev/ttyACM*`) |
+| 12 | **The setup's contract commands each answer OK**: `AT Z` with an `ELM327` version, or `OK` alone and then `AT I` with one; then `AT E0 L0 S0 H1 D0 CAF1 CFC1 SP<n> AT1 ST19`, the header and the receive filter | REFUTED for the VX as first written (`AT Z` had to answer a version), and handled: the `OK` reset is the rule's second form (ADR-0026's appendix of 2026-10-27, "the VX's answers"). The rest is CONFIRMED for the VX by a probe outside QtTune; QtTune's own setup on it is next | The VX answers `AT Z` with `OK` alone, twice ([2026-10-27-elm327-bench](2026-10-27-elm327-bench.md)), as its Command Set Reference has it; a probe of the same adapter got `OK` to every other contract command, `AT SP 8` included. The FRPM lists every one for the STN |
+| 13 | **The readings' forms:** `AT I` an `ELM327` version, `STI` `STN<id> vX.Y.Z` on an STN only, `STVR` `12.34` or `AT RV` `12.6V`, read at the connector; an STN's parameter 2A at its default | CONFIRMED for the VX's forms by the probe; STILL UNKNOWN for the MX+ | The VX: `AT I` `ELM327 V2.1`, `STI` `?`, `AT RV` `0.00V` on USB power, as its J2534 `READ_VBATT` read (#10) ([2026-10-27-elm327-bench](2026-10-27-elm327-bench.md)). The STN's forms are the FRPM's |
 | 14 | **Frame lines with `AT H1`:** an 11-bit ID of three hex digits (or four with a leading 0), the PCI byte, the data, no length digit; replies reassemble and decode to what the VX gave through J2534 | STILL UNKNOWN | The OBDX manual shows no 11-bit line; the parser takes both widths |
-| 15 | **No bus** answers `CAN ERROR` or a word like it, which the worker counts as a failed write ("Requests failing") | STILL UNKNOWN | The datasheet: "often … simply from not being connected to a CAN system" |
+| 15 | **No bus** answers `CAN ERROR` or a word like it, which the worker counts as a failed write ("Requests failing") | REFUTED for the VX: it answers `NO DATA`, which the worker leaves to the engine's wait, so no bus reads as quiet ("Vehicle not responding"). Nothing to fix: it can't tell a missing bus from a silent ECU. The MX+ never meets a missing bus (it powers up only on the car) | The probe: `01001`, `0100` and `010C1` with nothing on the VX's OBD side, each `NO DATA` ([2026-10-27-elm327-bench](2026-10-27-elm327-bench.md)). The datasheet: `CAN ERROR` "often … simply from not being connected to a CAN system" |
 | 16 | **A lost link** (a cable pulled, Bluetooth dropped) fails the port's reads or writes, or leaves it silent for 5 s, and reopening the port on the backoff brings the adapter back | STILL UNKNOWN | The pseudo-terminal test covers a far side that goes away on Linux and macOS; nothing covers Windows' ports |
 | 17 | **Response pending:** an adapter that prints `7F xx 78` goes on listening for the answer (an STN with parameter 2A's bit 2 set does, by the FRPM; a plain ELM327's datasheet doesn't say) | STILL UNKNOWN | The car never sent a `78` to the J2534 sessions |
 

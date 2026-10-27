@@ -19,8 +19,8 @@ port code's first run (it has no automated test). Goals, in order:
 1. The VX gets a serial port over USB (BENCH prep #11)
 2. It takes the setup's every command (#12) and gives its readings
    (#13)
-3. With no bus at all, its failure word reads as "Requests failing"
-   (#15), and an unplugged cable as a fault that recovers (#16)
+3. With no bus at all, its `NO DATA` reads as quiet (#15), and an
+   unplugged cable as a fault that recovers (#16)
 
 The evidence is each connect's wire log,
 `%TEMP%\ecuio-elm327.<YYYYMMDD-HHMMSS-mmm>.log`: every command, every
@@ -61,18 +61,19 @@ activity log (`events.log` when recording) has the link's states.
 Connect, and leave it about a minute.
 
 **Expected:**
-- [ ] The wire log: the answer to every setup command (`< OK`, or what
-      came instead) and each prompt's time; after each request, `CAN
-      ERROR` or its kin (#15) and the time to its prompt
+- [ ] The wire log: the answer to every setup command and each
+      prompt's time: `AT Z` answered `OK` alone, then `AT I` with
+      `ELM327 V2.1`, then `< OK` to each command (or what came instead);
+      after each request, `NO DATA` (#15) and the time to its prompt
 - [ ] Connect succeeds within a few seconds. Copy the "Session:" line:
       `ELM327 adapter (ELM327 v…); ISO 15765 at 500000 baud; profile
       obd2, channel 0x7E8/0x7E0 (rx/tx); …`. No STN part (the VX isn't
       one, so `STI` is refused), and the battery `0.0 V` or "no battery
       reading" on USB power (the J2534 path read 0.0 V, BENCH prep #10)
-- [ ] Amber "Requests failing" and "Link: requests failing (1
-      episode(s))" within a few seconds: nothing on a bus answers
-      `CAN ERROR` or a word like it, and the requests go on, backing off
-      to one every 5 s
+- [ ] Amber "Vehicle not responding" and "Link: vehicle not
+      responding" within a few seconds: the VX answers `NO DATA` with no
+      bus, as with an ECU that doesn't answer (ADR-0026's appendix of
+      2026-10-27, "the VX's answers"), and the requests go on
 - [ ] Task Manager: `qttune.exe` under 1 % CPU
 - [ ] Disconnect: `Disconnected:` at once
 
@@ -82,20 +83,22 @@ answer is the finding (#12).
 
 ## Phase 3 — the cable pulled
 
-**Action:** connect again, wait for "Requests failing", unplug the USB
-cable for about 10 s, then plug it back in.
+**Action:** connect again, wait for "Vehicle not responding", unplug
+the USB cable for about 10 s, then plug it back in.
 
 - [ ] Unplugged: red "Adapter fault" within about 10 s
-- [ ] Plugged back: the link returns to "Requests failing" within
-      about 10 s, with no reconnect (the port reopens and the setup runs
-      again). Record the times. If Windows gives the VX another `COMn`,
-      it can't recover: record that
+- [ ] Plugged back: the link returns to "Vehicle not responding"
+      within about 10 s, with no reconnect (the port reopens and the
+      setup runs again). Record the times, and copy the wire log's
+      `unasked:` lines after the reopen: what the VX prints on power-up.
+      If Windows gives the VX another `COMn`, it can't recover: record
+      that
 - [ ] Disconnect
 
 ## Phase 4 — the other CAN rate, and the J2534 path after
 
 - [ ] `elm327://COMn?baud=250000`, about 15 s: connects (protocol 8)
-      and fails its requests as in Phase 2. Disconnect
+      and goes quiet as in Phase 2. Disconnect
 - [ ] `j2534://OBDX Pro - VX`, about 15 s: still connects, as on
       [bench-runsheet.md](bench-runsheet.md)'s Phase 1. Disconnect
 
@@ -105,7 +108,7 @@ cable for about 10 s, then plug it back in.
 |---|---|
 | "COMn: the port is in use by another program" | The vendor app, or a `j2534://` session, holds it |
 | "the adapter on COMn didn't answer ATZ within 5 s" | The serial rate: retry with `?serial=115200`. Then a port that isn't the VX's |
-| "answered ATZ with '…', not an ELM327 version" | Garbled text: the serial rate, as above. Readable text: the adapter isn't in ELM mode, or another device is on the port |
+| "answered ATZ with '…', not an ELM327 version", or ATI | Garbled text: the serial rate, as above. Readable text: the adapter isn't in ELM mode, or another device is on the port |
 | Connects, then red "Adapter fault" with the cable in | The port's reads or writes failing: copy the activity log whole |
 | The app crashes | Capture the activity log and stop |
 

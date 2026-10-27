@@ -1,0 +1,39 @@
+The OBDX Pro VX on COM4 (USB power, nothing on its OBD side), probed
+outside QtTune after the session: a script sending ELM commands only
+(no DX, no STSN, nothing written to the adapter's memory), each with
+its CR, reading to the '>' prompt. Each line is the command sent, then
+everything that came back, \r and \n shown as escapes. A second run
+gave the same answers. Timings are left out: the script's read loop
+set them, not the adapter.
+
+<CR>      \r\n?\r\n>
+ATZ       ATZ\r\nOK\r\n>
+ATI       ATI\r\nELM327 V2.1\r\n>
+AT@1      AT@1\r\nOBDX Pro VX\r\n>
+ATE0      ATE0\r\nOK\r\n>
+ATZ       OK\r\n>
+ATI       ATI\r\nELM327 V2.1\r\n>
+ATE0      ATE0\r\nOK\r\n>
+ATL0      OK\r>
+ATS0      OK\r>
+ATH1      OK\r>
+ATD0      OK\r>
+ATCAF1    OK\r>
+ATCFC1    OK\r>
+ATSP6     OK\r>
+ATAT1     OK\r>
+ATST19    OK\r>
+ATSH7E0   OK\r>
+ATCRA7E8  OK\r>
+ATRV      0.00V\r>
+STI       ?\r>
+ATPPS     OK\r>
+ATDPN     6\r>
+01001     NO DATA\r>
+0100      NO DATA\r>
+010C1     NO DATA\r>
+ATSP8     OK\r>
+01001     NO DATA\r>
+ATSP6     OK\r>
+ATWS      OK\r>
+ATI       ELM327 V2.1\r>

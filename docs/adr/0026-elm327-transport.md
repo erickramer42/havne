@@ -228,7 +228,7 @@ present", and the field stays empty.
 
 | Command | Kind | Why |
 |---|---|---|
-| `AT Z` | contract | a known state; its answer must be an ELM327 version string (`ELM327` and a version, any case) |
+| `AT Z` | contract | a known state; its answer must be an ELM327 version string (`ELM327` and a version, any case), or `OK` alone, as an OBDX's is: then `AT I`, sent next, must answer one |
 | `AT E0`, `AT L0`, `AT S0` | contract | no echo, no linefeeds, no spaces: fewer bytes per reply |
 | `AT H1` | contract | the CAN ID and the PCI byte on every line, so core reassembles and correlates |
 | `AT D0` | contract | no data length digit between the ID and the data. An STN prints one when its parameter 29 is on, which another app could have set; the OBDX takes `AT D0` as a compatibility command and answers OK |
@@ -461,7 +461,8 @@ UI needs no new code.
   against what.
 - **The OBDX in ELM mode:**
   - whether the VX gets a serial port over USB;
-  - what it answers to `AT Z`, `AT I`, `STI` and `AT RV`;
+  - what it answers to `AT Z`, `AT I`, `STI` and `AT RV` (answered:
+    the appendix of 2026-10-27, "the VX's answers");
   - how it prints an 11-bit ID with `AT H1` (three digits or four);
   - whether it keeps listening after a `7F xx 78`, which its manual
     doesn't say.
@@ -562,3 +563,33 @@ serves both transports; each prompt carries its time after the
 request. The worker writes it with no allocation, which
 `Elm327SessionTest.TheWorkerAllocatesNothingPerFrame` checks with the
 requests' lines on.
+
+## Appendix: 2026-10-27, the VX's answers
+
+The VX's bench session (docs/bench-sessions/2026-10-27-elm327-bench.md)
+opened its USB serial port (COM4, Windows' own `usbser.sys`) and was
+refused at the first command: the VX answers `AT Z` with `OK` alone,
+where an ELM327 prints its version. The OBDX Command Set Reference
+says as much: `AT Z` "does a full reset", and `AT I` reports
+`ELM327 v2.1` "for legacy support". A probe of the same adapter, ELM
+commands only, gave the rest:
+
+- `AT I`: `ELM327 V2.1`; `AT @1`: `OBDX Pro VX`; `STI`: `?`;
+  `AT RV`: `0.00V` on USB power.
+- Every other contract command answers `OK`, `AT SP 8` included.
+- With no bus at all, a request answers `NO DATA`, not `CAN ERROR`.
+
+So the reset's rule widens: `AT Z` answered by a version, or by `OK`
+alone, in which case `AT I` is asked next and must answer a version.
+A device that isn't an ELM327 is still refused, now at `AT I`.
+
+`NO DATA` with no bus means the VX can't tell a missing bus from an
+ECU that doesn't answer, so on the bench it reads as quiet
+("Vehicle not responding"), not "Requests failing". §6's mapping is
+unchanged: on a car the bus is there.
+
+An adapter that resets on its own is found by its version line
+arriving unasked (§6). The VX's reset prints none, so a reset
+without a power cut would go unseen; on USB it can't lose power
+without the port closing, which reopens the port and runs the setup
+again. What it prints on power-up is for its next session's wire log.

@@ -1,0 +1,13 @@
+[elm327 13:47:25.671 +0.000000] QtTune ELM327 wire log (ADR-0026), core 0.3.2
+[elm327 13:47:25.671 +0.000041] uri elm327://COM4
+[elm327 13:47:25.671 +0.000051] COM4 at 38400 bit/s; CAN at 500000 bit/s, protocol 6; every request and reply (ECUIO_SUR_LOG_FRAMES=1)
+[elm327 13:47:25.671 +0.000068] > ATZ
+[elm327 13:47:25.689 +0.018448] < ATZ
+[elm327 13:47:25.689 +0.018485] < OK
+[elm327 13:47:25.689 +0.018497] prompt 18.4 ms after ATZ
+[elm327 13:47:25.689 +0.018516] > ATZ
+[elm327 13:47:25.690 +0.018720] < ATZ
+[elm327 13:47:25.690 +0.018733] < OK
+[elm327 13:47:25.690 +0.019396] prompt 0.8 ms after ATZ
+[elm327 13:47:25.690 +0.019402] the setup failed: the adapter on COM4 answered ATZ with 'OK', not an ELM327 version
+[elm327 13:47:25.690 +0.019666] COM4 closed
