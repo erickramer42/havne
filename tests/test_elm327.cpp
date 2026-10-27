@@ -318,10 +318,14 @@ TEST(Elm327ProtocolTest, FrameLinesFollowTheAddressingMode)
 
 namespace {
 
+/* A Single Frame's message points into its frame, so the frame is kept
+ * here until the next take, as elm327_message's contract asks */
 elm327_isotp_result take(elm327_isotp& iso, const char* line, elm327_message* m,
                          bool ext29 = false)
 {
-    return elm327_isotp_take(iso, frame_of(line, ext29), m);
+    static elm327_can_line f;
+    f = frame_of(line, ext29);
+    return elm327_isotp_take(iso, f, m);
 }
 
 } // namespace
