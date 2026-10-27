@@ -1,0 +1,103 @@
+# ELM327 BENCH run sheet — the VX in ELM mode, no vehicle
+
+**Date:** <date>  **Adapter:** OBDX Pro VX (USB), as an ELM327
+**Machine:** <the dev machine, or the laptop that goes to the car>
+**QtTune build:** <commit hash>
+
+Fill in a copy as `docs/bench-sessions/<date>-elm327-bench.md`. The
+J2534 bench sheet is [bench-runsheet.md](bench-runsheet.md); the
+vehicle follows [elm327-vehicle-runsheet.md](elm327-vehicle-runsheet.md).
+The MX+ has no bench session: it takes its power only from the OBD
+connector ([ADR-0026](../adr/0026-elm327-transport.md)'s appendix of
+2026-10-27).
+
+## Purpose
+
+`elm327://` on a real adapter for the first time, and the Win32 serial
+port code's first run (it has no automated test). Goals, in order:
+
+1. The VX gets a serial port over USB (BENCH prep #11)
+2. It takes the setup's every command (#12) and gives its readings
+   (#13)
+3. With no bus at all, its failure word reads as "Requests failing"
+   (#15), and an unplugged cable as a fault that recovers (#16)
+
+`elm327://` writes no wire log, so the evidence is the activity log
+(each connect's `events.log` when recording) and what the screen shows.
+
+## Pre-flight
+
+- [ ] `scripts/verify.sh` prints four `ok` lines on this build
+- [ ] The OBDX vendor app closed, and no `j2534://` session open: one
+      program at a time can hold the port
+- [ ] Launch QtTune and tick **Record sessions**
+
+## Phase 1 — the port
+
+**Action:** plug the VX in by USB. In Device Manager, open "Ports (COM
+& LPT)"; in Settings, press **Refresh**.
+
+- [ ] A new `COMn` in both, the Settings row reading "Serial port, for
+      elm327:// · \Device\…". Copy the port and the device name
+- [ ] No new port: the OBDX USB driver may be missing (OBDX's "How to
+      Connect to Wired/Wireless"). Install it and retry, or record and
+      stop: nothing below can run
+
+## Phase 2 — connect with no bus
+
+**Action:** click the port's row (the field reads `elm327://COMn`),
+Connect, and leave it about a minute.
+
+**Expected:**
+- [ ] Connect succeeds within a few seconds. Copy the "Session:" line:
+      `ELM327 adapter (ELM327 v…); ISO 15765 at 500000 baud; profile
+      obd2, channel 0x7E8/0x7E0 (rx/tx); …`. No STN part (the VX isn't
+      one, so `STI` is refused), and the battery `0.0 V` or "no battery
+      reading" on USB power (the J2534 path read 0.0 V, BENCH prep #10)
+- [ ] Amber "Requests failing" and "Link: requests failing (1
+      episode(s))" within a few seconds: nothing on a bus answers
+      `CAN ERROR` or a word like it, and the requests go on, backing off
+      to one every 5 s
+- [ ] Task Manager: `qttune.exe` under 1 % CPU
+- [ ] Disconnect: `Disconnected:` at once
+
+A refused connect names the command and the answer ("the adapter on
+COMn answered ATxx with '…', not OK"): copy it verbatim and stop. That
+answer is the finding (#12).
+
+## Phase 3 — the cable pulled
+
+**Action:** connect again, wait for "Requests failing", unplug the USB
+cable for about 10 s, then plug it back in.
+
+- [ ] Unplugged: red "Adapter fault" within about 10 s
+- [ ] Plugged back: the link returns to "Requests failing" within
+      about 10 s, with no reconnect (the port reopens and the setup runs
+      again). Record the times. If Windows gives the VX another `COMn`,
+      it can't recover: record that
+- [ ] Disconnect
+
+## Phase 4 — the other CAN rate, and the J2534 path after
+
+- [ ] `elm327://COMn?baud=250000`, about 15 s: connects (protocol 8)
+      and fails its requests as in Phase 2. Disconnect
+- [ ] `j2534://OBDX Pro - VX`, about 15 s: still connects, as on
+      [bench-runsheet.md](bench-runsheet.md)'s Phase 1. Disconnect
+
+## If it fails, suspect
+
+| Symptom | Suspect |
+|---|---|
+| "COMn: the port is in use by another program" | The vendor app, or a `j2534://` session, holds it |
+| "the adapter on COMn didn't answer ATZ within 5 s" | The serial rate: retry with `?serial=115200`. Then a port that isn't the VX's |
+| "answered ATZ with '…', not an ELM327 version" | Garbled text: the serial rate, as above. Readable text: the adapter isn't in ELM mode, or another device is on the port |
+| Connects, then red "Adapter fault" with the cable in | The port's reads or writes failing: copy the activity log whole |
+| The app crashes | Capture the activity log and stop |
+
+## Post-session actions
+
+1. Copy this sheet, filled in, to `docs/bench-sessions/<date>-elm327-bench.md`.
+   Scrub it as [bench-runsheet.md](bench-runsheet.md) says: no names,
+   no local paths
+2. Mark BENCH prep #11–#16 for the VX in [bench-prep.md](bench-prep.md)
+3. Update STATUS.md, and testing.md's gaps (the Win32 port)

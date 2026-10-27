@@ -170,7 +170,10 @@ OBDX Pro VX in its ELM mode (USB-powered). In order:
 5. **BENCH** with the VX on USB, then a read-only vehicle session.
    The MX+ is vehicle-only: with no 12 V supply, it first powers up on
    the car, where its bench items run ahead of its first request
-   (ADR-0026's appendix of 2026-10-27).
+   (ADR-0026's appendix of 2026-10-27). The run sheets are
+   [elm327-bench-runsheet.md](docs/bench-sessions/elm327-bench-runsheet.md)
+   and [elm327-vehicle-runsheet.md](docs/bench-sessions/elm327-vehicle-runsheet.md);
+   the items they settle are BENCH prep #11–#17.
 
 Later, each with its own record: passive listening, the app-fed
 stream for BLE and the mobile apps, and WiFi adapters over TCP.
