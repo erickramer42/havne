@@ -2098,7 +2098,11 @@ TEST(BridgeTest, ConnectLogsTheAdaptersSession)
               "Session: x64 DLL, through the surrogate; ISO 15765 at 500000 baud; "
               "profile raw, channel 0x7E8/0x7E0 (rx/tx); battery 13.8 V; "
               "firmware fake-fw 1.0, DLL fake_j2534 0.3, API 04.04");
+    /* What Settings keeps for the device, and none past the session */
+    EXPECT_EQ(bridge.adapterVersions().toStdString(),
+              "firmware fake-fw 1.0, DLL fake_j2534 0.3, API 04.04");
     ASSERT_TRUE(disconnectAndWait(bridge));
+    EXPECT_TRUE(bridge.adapterVersions().isEmpty());
 }
 
 /* The probe's answer reaches the activity log once: the fake's ECU lists
@@ -2268,6 +2272,9 @@ TEST(BridgeTest, SessionInfoTextNamesTheAdapter)
               "Session: x86 DLL, through the surrogate; ISO 15765 at 500000 "
               "baud; profile obd2, channels 0x7E8/0x7E0, 0x7E9/0x7E1 (rx/tx); "
               "battery 12.6 V; firmware 1.2.3, DLL 4.5, API 04.04");
+    EXPECT_EQ(QtTuneBridge::versionsText(vx).toStdString(),
+              "firmware 1.2.3, DLL 4.5, API 04.04");
+    EXPECT_TRUE(QtTuneBridge::versionsText(mock).isEmpty());
 
     ecuio_session_info_t bare{};
     bare.backend = ECUIO_BACKEND_J2534_SURROGATE;
@@ -2283,6 +2290,7 @@ TEST(BridgeTest, SessionInfoTextNamesTheAdapter)
               "Session: x64 DLL, through the surrogate; ISO 15765 at 250000 baud, flags 0x100; "
               "profile raw, channel 0x18DAF110/0x18DA10F1 (rx/tx); "
               "no battery reading; no version reading");
+    EXPECT_TRUE(QtTuneBridge::versionsText(bare).isEmpty());
 
     /* An ELM327 on an STN chip, its port in the "Connected:" line */
     ecuio_session_info_t elm{};
@@ -2301,6 +2309,8 @@ TEST(BridgeTest, SessionInfoTextNamesTheAdapter)
               "Session: ELM327 adapter (ELM327 v1.4b, STN2255 v9.9.9); "
               "ISO 15765 at 500000 baud; profile obd2, channel "
               "0x7E8/0x7E0 (rx/tx); battery 13.8 V");
+    EXPECT_EQ(QtTuneBridge::versionsText(elm).toStdString(),
+              "ELM327 v1.4b, STN2255 v9.9.9");
 
     /* Set not to wait past a pending reply, and no readings */
     elm.flags = ECUIO_SESSION_INFO_PENDING_OFF;
@@ -2311,6 +2321,7 @@ TEST(BridgeTest, SessionInfoTextNamesTheAdapter)
               "(rx/tx); no battery reading; the adapter is set not to "
               "wait past 7F xx 78 (STN parameter 2A), so a pending "
               "reply's answer is lost");
+    EXPECT_TRUE(QtTuneBridge::versionsText(elm).isEmpty());
 
     ecuio_session_info_t later{};
     later.backend = 7; // a backend this build doesn't know
@@ -2480,6 +2491,7 @@ TEST(BridgeTest, ConnectLogsTheMockSession)
     ASSERT_GE(log.size(), 2);
     EXPECT_EQ(log.at(log.size() - 2), QStringLiteral("Connected: mock://demo"));
     EXPECT_EQ(log.last(), QStringLiteral("Session: mock transport; profile mock"));
+    EXPECT_TRUE(bridge.adapterVersions().isEmpty()) << "no adapter, nothing to keep";
     ASSERT_TRUE(disconnectAndWait(bridge));
 }
 

@@ -28,6 +28,9 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
 - Settings remembers the last URI that connected, with its profile and
   DIDs, and the Record sessions switch between runs. A URI that failed
   to connect isn't kept.
+- Settings' adapter list shows each device's firmware versions as last
+  seen at a connect ("last seen: …"), without opening the adapter. A
+  serial port shows whatever adapter answered on it last.
 
 ### Changed
 - Home's logo is a small tachometer whose needle idles and blips into

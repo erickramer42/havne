@@ -84,7 +84,9 @@ goes out in the next release. The milestone after it is chosen from the
     Live's table and strip chart, the frame log, and Settings composing
     the URI; zoom, metric or imperial units
     ([ADR-0022](docs/adr/0022-display-units.md)), the last URI that
-    connected and the Record sessions switch, kept between runs.
+    connected, the Record sessions switch and each device's versions as
+    last seen at a connect (shown on its row in Settings, since the list
+    opens no adapter), kept between runs.
   - **Evidence for field sessions:** opt-in recording of every frame,
     decoded value and activity line per connect
     ([ADR-0017](docs/adr/0017-session-recording.md)), and a surrogate
@@ -285,18 +287,6 @@ roadmap above when it is scheduled. Defects and debt live under
 
 Sizes are rough: **S** is a day or less, **M** a few days, **L** a
 week or more or a design that needs an ADR first.
-
-### Diagnostics and error reporting
-
-These make a failed field session explainable, so they come first
-in the backlog.
-
-- **Adapter versions in the interface list (S).** The activity log's
-  "Session:" line names a connected adapter's firmware, DLL and API
-  versions ([ADR-0019](docs/adr/0019-session-info.md)). The interface
-  list can't ask for them without opening each adapter, which the VX
-  and VT refuse while unattached; showing the versions last seen for
-  each one means storing them with the preferences (QML `Settings`).
 
 ### Data capture
 

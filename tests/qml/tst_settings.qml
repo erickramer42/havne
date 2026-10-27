@@ -12,8 +12,11 @@
 //          knob); the Units row sets the bridge's unit system, connected
 //          or not; a new page (a restart) gets back the last URI that
 //          connected, read into the row, and the Record switch, while a
-//          refused URI isn't kept. The live registry, and the units kept
-//          across a restart (Main.qml's Settings), are manual smoke.
+//          refused URI isn't kept; a device's row shows the versions last
+//          seen there (Windows: the fake's, from a connect), across a
+//          restart, and a damaged store shows none. The live registry, and
+//          the units kept across a restart (Main.qml's Settings), are
+//          manual smoke.
 
 import QtCore
 import QtQuick
@@ -31,8 +34,8 @@ TestCase {
         SettingsPage { width: 1000; height: 800 }
     }
 
-    // The page's stored URI and Record switch (test_qml keeps them in a
-    // scratch ini), written straight to the store
+    // The page's stored URI, Record switch and versions (test_qml keeps
+    // them in a scratch ini), written straight to the store
     Settings {
         id: stored
         category: "session"
@@ -44,6 +47,7 @@ TestCase {
         failOnWarning(/^qrc:\/qt\/qml\/QtTune\//)
         stored.setValue("uri", "")
         stored.setValue("recording", false)
+        stored.setValue("adapterVersions", "{}")
         stored.sync()
     }
 
@@ -366,6 +370,68 @@ TestCase {
         verify(find(page, "profile_raw").highlighted, "read back into the row")
         verify(Bridge.recording, "the Record switch comes back")
         verify(find(page, "recordBox").checked)
+    }
+
+    function versionsOf(page, index) {
+        const list = find(page, "deviceList")
+        tryVerify(() => list.itemAtIndex(index) !== null, 2000, "the row has a delegate")
+        const label = find(list.itemAtIndex(index), "deviceVersions")
+        return label.visible ? label.text : ""
+    }
+
+    function listDevices(page, vendorName) {
+        page.j2534Devices = [{ vendorName: vendorName, dllPath: "C:/drivers/fake.dll",
+                               architecture: "x64" }]
+        page.serialPorts = [{ name: "COM5", device: "" }]
+    }
+
+    // A connect keeps its adapter's versions for that row; a port shows
+    // whatever answered there last, and nothing comes from a session with
+    // no adapter
+    function test_aDeviceShowsTheVersionsLastSeenThere() {
+        let page = createPage()
+        listDevices(page, "Fake")
+        compare(versionsOf(page, 0), "", "nothing seen yet")
+        compare(versionsOf(page, 1), "")
+
+        page.rememberVersions("elm327://COM5?profile=raw", "ELM327 v1.4b, STN2255 v5.12.2")
+        page.rememberVersions("mock://demo", "")
+        compare(versionsOf(page, 1), "last seen: ELM327 v1.4b, STN2255 v5.12.2",
+                "keyed by the URI's base, its query left out")
+        page.rememberVersions("elm327://COM5", "ELM327 V2.1")
+        compare(versionsOf(page, 1), "last seen: ELM327 V2.1", "another adapter on the port")
+        compare(versionsOf(page, 0), "")
+
+        page.destroy()
+        wait(10)
+        page = createPage()
+        listDevices(page, "Fake")
+        compare(versionsOf(page, 1), "last seen: ELM327 V2.1", "kept across a restart")
+    }
+
+    function test_aDamagedVersionStoreShowsNone() {
+        stored.setValue("adapterVersions", "not json")
+        stored.sync()
+        const page = createPage()
+        listDevices(page, "Fake")
+        compare(versionsOf(page, 1), "")
+    }
+
+    function test_aConnectKeepsTheAdaptersVersions() {
+        if (Harness.fakeDllPath === "")
+            skip("needs the fake J2534 DLL (Windows)")
+        const page = createPage()
+        listDevices(page, Harness.fakeDllPath)   // a row whose base is the URI's
+        find(page, "uriField").text = "j2534://" + Harness.fakeDllPath + "?profile=raw"
+        press(page, "connectButton")
+        tryVerify(() => Bridge.connected, 10000, "the fake connects")
+        compare(versionsOf(page, 0),
+                "last seen: firmware fake-fw 1.0, DLL fake_j2534 0.3, API 04.04")
+        Bridge.disconnectSession()
+        tryVerify(() => !Bridge.disconnecting, 5000, "disconnect ends")
+        compare(versionsOf(page, 0),
+                "last seen: firmware fake-fw 1.0, DLL fake_j2534 0.3, API 04.04",
+                "still shown with no session")
     }
 
     // While a vendor's open blocks, nothing may rewrite the URI field or

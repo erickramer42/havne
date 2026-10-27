@@ -9,7 +9,8 @@
 //          id, the signal model's roles and age
 //          refresh, link-state mapping, the activity log's session,
 //          ECU and delivery lines (the ELM327 session line too,
-//          BridgeTest.SessionInfoTextNamesTheAdapter), the serial ports as
+//          BridgeTest.SessionInfoTextNamesTheAdapter; its versions clause
+//          as adapterVersions, .ConnectLogsTheAdaptersSession), the serial ports as
 //          core lists them, session recording (BridgeTest.Recording*), display
 //          units on the rows, the chart and not the recording
 //          (BridgeTest.UnitSystem*), the URI label
@@ -686,6 +687,9 @@ void QtTuneBridge::applyConnectedState(ecuio_session_t* session, const QString& 
     m_connected.store(true, std::memory_order_release);
     // Before the queued frames run, so the recording holds every one
     startRecording(uri, ecuio_session_signal_set(session));
+    ecuio_session_info_t info{};
+    const bool haveInfo = ecuio_session_get_info(session, &info) == ECUIO_OK;
+    m_adapterVersions = haveInfo ? versionsText(info) : QString();
     m_currentUri = uri;
     emit currentUriChanged();
     // The frame log belongs to a session, like its count: rows from two
@@ -705,9 +709,8 @@ void QtTuneBridge::applyConnectedState(ecuio_session_t* session, const QString& 
     emit framesReset();
 
     emit logMessage(QStringLiteral("Connected: %1").arg(uri));
-    ecuio_session_info_t info{};
     m_channelCount = 0;
-    if (ecuio_session_get_info(session, &info) == ECUIO_OK) {
+    if (haveInfo) {
         emit logMessage(sessionInfoText(info));
         m_channelCount = std::min<uint32_t>(info.channel_count,
                                             ECUIO_SESSION_INFO_MAX_CHANNELS);
@@ -832,6 +835,7 @@ void QtTuneBridge::disconnectSession()
     m_stagingBuffer.clear();
     m_stagingTexts.clear();
     m_currentUri.clear();
+    m_adapterVersions.clear();
     m_linkErrorCode = ECUIO_OK;           // the properties must not
     m_errorEpisodes = 0;              // outlive the session
 
@@ -1741,20 +1745,14 @@ QString QtTuneBridge::sessionInfoText(const ecuio_session_info_t& info)
     if (!elm327 && info.backend != ECUIO_BACKEND_J2534_SURROGATE) {
         return QStringLiteral("Session: backend %1").arg(info.backend);
     }
-    const auto text = [](const char* s) {
-        const QString t = QString::fromUtf8(s, static_cast<qsizetype>(
-            qstrnlen(s, ECUIO_SESSION_INFO_TEXT_LEN)));
-        return t.isEmpty() ? QStringLiteral("(none)") : t;
-    };
+    const QString versions = versionsText(info);
+    const QString versionsOrNone =
+        versions.isEmpty() ? QStringLiteral("no version reading") : versions;
 
     QStringList parts;
     if (elm327) {
-        // The port is in the "Connected:" line just before; the firmware
-        // is the AT I answer, then STI's on an STN chip
-        parts << QStringLiteral("ELM327 adapter (%1)")
-                     .arg((info.flags & ECUIO_SESSION_INFO_VERSIONS)
-                              ? text(info.firmware_version)
-                              : QStringLiteral("no version reading"));
+        // The port is in the "Connected:" line just before
+        parts << QStringLiteral("ELM327 adapter (%1)").arg(versionsOrNone);
     } else {
         const QString arch =
             (info.dll_arch == ECUIO_DLL_ARCH_X86) ? QStringLiteral("x86 DLL")
@@ -1803,12 +1801,34 @@ QString QtTuneBridge::sessionInfoText(const ecuio_session_info_t& info)
         }
         return QStringLiteral("Session: ") + parts.join(QStringLiteral("; "));
     }
-    parts << ((info.flags & ECUIO_SESSION_INFO_VERSIONS)
-                  ? QStringLiteral("firmware %1, DLL %2, API %3")
-                        .arg(text(info.firmware_version), text(info.dll_version),
-                             text(info.api_version))
-                  : QStringLiteral("no version reading"));
+    parts << versionsOrNone;
     return QStringLiteral("Session: ") + parts.join(QStringLiteral("; "));
+}
+
+/* The "Session:" line's versions, which Settings also keeps for each
+ * device: an ELM327's AT I answer, then STI's on an STN chip; a J2534
+ * adapter's firmware, DLL and API. "" without a reading, and for the
+ * backends that have no adapter. */
+QString QtTuneBridge::versionsText(const ecuio_session_info_t& info)
+{
+    if ((info.flags & ECUIO_SESSION_INFO_VERSIONS) == 0) {
+        return {};
+    }
+    const auto text = [](const char* s) {
+        const QString t = QString::fromUtf8(
+            s,
+            static_cast<qsizetype>(qstrnlen(s, ECUIO_SESSION_INFO_TEXT_LEN)));
+        return t.isEmpty() ? QStringLiteral("(none)") : t;
+    };
+    if (info.backend == ECUIO_BACKEND_ELM327) {
+        return text(info.firmware_version);
+    }
+    if (info.backend == ECUIO_BACKEND_J2534_SURROGATE) {
+        return QStringLiteral("firmware %1, DLL %2, API %3")
+            .arg(text(info.firmware_version), text(info.dll_version),
+                 text(info.api_version));
+    }
+    return {};
 }
 
 QString QtTuneBridge::linkState() const

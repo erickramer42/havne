@@ -276,6 +276,9 @@ class QtTuneBridge : public QObject
     Q_PROPERTY(QString currentUri READ currentUri NOTIFY currentUriChanged)
     // currentUri as the header pill and the Dashboard show it (uriLabelFor)
     Q_PROPERTY(QString uriLabel READ uriLabel NOTIFY currentUriChanged)
+    // The connected adapter's versions (versionsText), "" with none read
+    // or no session; Settings keeps the last seen for each device
+    Q_PROPERTY(QString adapterVersions READ adapterVersions NOTIFY currentUriChanged)
     Q_PROPERTY(QString linkState READ linkState NOTIFY linkStateChanged)
     Q_PROPERTY(int linkErrorCode READ linkErrorCode NOTIFY linkStateChanged)
     Q_PROPERTY(int errorEpisodes READ errorEpisodes NOTIFY linkStateChanged)
@@ -311,6 +314,7 @@ public:
     SignalListModel* signalModel() const { return m_signalModel; }
     QString currentUri() const { return m_currentUri; }
     QString uriLabel() const { return uriLabelFor(m_currentUri); }
+    QString adapterVersions() const { return m_adapterVersions; }
     bool connecting() const { return m_connecting; }
     bool disconnecting() const { return m_disconnecting; }
     void dispatchFrameForTesting(const ecuio_frame_t& frame);
@@ -325,6 +329,7 @@ public:
     static QString linkStateForError(int32_t errorCode);  /* code → state string; static so tests need no session */
     static QString uriLabelFor(const QString& uri);  /* a direct-load DLL or replay path cut to its last name */
     static QString sessionInfoText(const ecuio_session_info_t& info);  /* the activity log's "Session:" line */
+    static QString versionsText(const ecuio_session_info_t& info);  /* its versions clause; "" with none read */
     static QString channelSupportText(const ecuio_channel_support_t& support);  /* its "ECU 0x…:" lines */
     static QString channelIdentityText(const ecuio_channel_identity_t& identity);  /* its "ECU 0x… identity:" lines */
 
@@ -442,6 +447,7 @@ private:
 
     ecuio_session_t* m_session = nullptr;
     QString m_currentUri;
+    QString m_adapterVersions;
 
     std::atomic<bool> m_connected{false};
     // onFrame's gate: set just before the session starts, so frames sent

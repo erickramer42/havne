@@ -10,7 +10,8 @@
 //          connected and the Record switch back in a new page (a refused
 //          URI not kept), the device list's rows for interfaces and
 //          serial ports, a serial port's row and the elm327:// preset
-//          filling the field; the status label
+//          filling the field, each row's versions last seen at a connect
+//          (kept across a new page; the fake's on Windows); the status label
 //          and the activity log's link lines in each link state
 //          (tests/qml/tst_linkhealth.qml), by objectName.
 //          Manual smoke — the live discovery list renders (Windows: the
@@ -53,18 +54,43 @@ Pane {
     // port is listed, whatever is behind it: none is opened until Connect
     property var serialPorts: []
 
+    // Each device's versions as last seen at a connect, { base: text }
+    // (Bridge.adapterVersions). The list can't ask for them without
+    // opening the adapter, which the VX and VT refuse while unattached
+    property var seenVersions: ({})
+
     // The device list's rows, the interfaces then the ports: { title,
-    // detail, base }, base being what a click puts in the URI field
-    readonly property var devices: j2534Devices.map(d => ({
+    // detail, base, versions }, base being what a click puts in the URI
+    // field
+    readonly property var devices: j2534Devices.map(d => withVersions({
             title: d.vendorName + (d.architecture ? "  (" + d.architecture + ")" : ""),
             detail: d.dllPath,
             base: "j2534://" + d.vendorName
-        })).concat(serialPorts.map(p => ({
+        })).concat(serialPorts.map(p => withVersions({
             title: p.name,
             detail: p.device !== "" ? qsTr("Serial port, for elm327:// · %1").arg(p.device)
                                     : qsTr("Serial port, for elm327://"),
             base: "elm327://" + p.name
         })))
+
+    function withVersions(row) {
+        row.versions = page.seenVersions[row.base] || ""
+        return row
+    }
+
+    // A port names no adapter: whatever answered on it last is what it
+    // shows, until another connect there says otherwise
+    function rememberVersions(uri, versions) {
+        if (versions === "")
+            return
+        const base = splitUri(uri).base
+        if (seenVersions[base] === versions)
+            return
+        const next = Object.assign({}, seenVersions)
+        next[base] = versions
+        seenVersions = next
+        sessionSettings.adapterVersions = JSON.stringify(next)
+    }
 
     // No session, and none starting or ending. Every control that chooses
     // or starts a session is enabled by this one value, so none can be
@@ -261,17 +287,26 @@ Pane {
         activityLog.cursorPosition = activityLog.length
     }
 
-    // ---- The last URI that connected and the Record switch, kept between
-    // runs as Main.qml keeps the zoom and units. Only a URI that connected
-    // is stored, so a typo or a refused query doesn't come back
+    // ---- The last URI that connected, the Record switch and each
+    // device's versions (seenVersions, as JSON), kept between runs as
+    // Main.qml keeps the zoom and units. Only a URI that connected is
+    // stored, so a typo or a refused query doesn't come back
     Settings {
         id: sessionSettings
         category: "session"
         property string uri: ""
         property bool recording: false
+        property string adapterVersions: "{}"
     }
 
     Component.onCompleted: {
+        try {
+            const seen = JSON.parse(sessionSettings.adapterVersions)
+            if (seen !== null && typeof seen === "object" && !Array.isArray(seen))
+                seenVersions = seen
+        } catch (e) {
+            // a damaged store shows no versions until the next connect
+        }
         refreshDevices()
         // Set like typed text, so the profile row and the DID field read
         // it back
@@ -290,8 +325,10 @@ Pane {
         function onConnectResult(uri, error) {
             errorLabel.text = error
             errorLabel.visible = (error !== "")
-            if (error === "")
+            if (error === "") {
                 sessionSettings.uri = uri
+                page.rememberVersions(uri, Bridge.adapterVersions)
+            }
         }
 
         function onRecordingChanged() {
@@ -630,10 +667,27 @@ Pane {
                         anchors.margins: Theme.spacing
                         spacing: 2
 
-                        Label {
-                            objectName: "deviceTitle"
-                            text: row.modelData.title
-                            color: page.idle ? Theme.text : Theme.textDim
+                        RowLayout {
+                            Layout.fillWidth: true
+                            spacing: Theme.spacing
+
+                            Label {
+                                objectName: "deviceTitle"
+                                text: row.modelData.title
+                                color: page.idle ? Theme.text : Theme.textDim
+                            }
+                            Label {
+                                objectName: "deviceVersions"
+                                visible: text !== ""
+                                text: row.modelData.versions === ""
+                                      ? "" : qsTr("last seen: %1").arg(row.modelData.versions)
+                                color: Theme.textDim
+                                font.pointSize: 8
+                                elide: Text.ElideRight
+                                horizontalAlignment: Text.AlignRight
+                                rightPadding: Theme.spacing   // clear of the list's scroll bar
+                                Layout.fillWidth: true
+                            }
                         }
                         Label {
                             objectName: "deviceDetail"
