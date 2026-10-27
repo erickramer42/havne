@@ -1,7 +1,7 @@
 # ADR-0026: ELM327 transport — `elm327://` drives an ELM327-compatible adapter over a serial port, with the request engine
 
-- **Status:** Proposed.
-- **Date:** 2026-10-27.
+- **Status:** Accepted.
+- **Date:** 2026-10-27. Built in the steps of section 9.
 - **Builds on:** [ADR-0007](0007-uri-selected-transports.md) (a
   transport per URI scheme, failures at create);
   [ADR-0013](0013-protocol-profiles.md) (the profile decides the

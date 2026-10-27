@@ -32,7 +32,7 @@ old one, and the old record's status is updated to point at it.
 | [0023](0023-replay-transport.md) | Replay transport: `replay://` plays a recording's `frames.csv` back through the frame API, paced by its session time | Accepted |
 | [0024](0024-decode-on-the-worker.md) | Decoding on the worker: a values callback delivers each frame's decoded signals with the frame's time | Accepted |
 | [0025](0025-one-j2534-backend.md) | One J2534 backend: every vendor DLL runs in a surrogate of its own architecture; the in-proc vendor calls are deleted | Accepted |
-| [0026](0026-elm327-transport.md) | ELM327 transport: `elm327://` drives an ELM327-compatible adapter over a serial port, with the request engine | Proposed |
+| [0026](0026-elm327-transport.md) | ELM327 transport: `elm327://` drives an ELM327-compatible adapter over a serial port, with the request engine | Accepted |
 
 ## Adding a record
 

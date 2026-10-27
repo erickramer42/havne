@@ -26,8 +26,8 @@ bus and in two read-only sessions on one car
 ECU answered, the values decoded and tracked the cluster, and the
 second session ran the request engine, the probe, identification and
 `uds-generic` there. Every item in [After v0.3.0](#after-v030) has
-shipped; the next milestone is the ELM327 transport
-([ADR-0026](docs/adr/0026-elm327-transport.md), proposed).
+shipped; the next milestone is the [ELM327 transport](#the-elm327-transport)
+([ADR-0026](docs/adr/0026-elm327-transport.md)).
 
 - **Works:**
   - **Mock transport,** on every platform: a scripted drive cycle (a
@@ -131,6 +131,32 @@ The v0.3.x plan, in order. Items 1–4 shipped in v0.3.1, items 5 and
    dropped frame keeps them), and the chart shows each value at its
    frame's time with each window's peak (ADR-0005's appendix); checked
    against the vehicle sessions' recordings, value for value.
+
+## The ELM327 transport
+
+`elm327://` reads a car through an ELM327-compatible adapter on a
+serial port: USB, or classic Bluetooth paired as a port. That is the
+route to a car on macOS and Linux, and on Windows without J2534
+([ADR-0026](docs/adr/0026-elm327-transport.md), which holds the
+design and the order). The adapters on hand are the OBDLink MX+
+(MX201, an STN chip, powered only from the OBD connector) and the
+OBDX Pro VX in its ELM mode (USB-powered). In order:
+
+1. **Link health in a shared header** (`core/src/link_health.h`):
+   built. The J2534 worker uses it unchanged, and its rules have
+   session-free unit cases (`CoreTest.Link*`).
+2. **The protocol layer** (`elm327_protocol.h`, no I/O, no clock) and
+   its unit tests.
+3. **The transport:** the port on Windows and POSIX, the worker, the
+   session info, the URI, the fake ELM327, the HARNESS tests and the
+   pseudo-terminal test. The docs that name the schemes move with it.
+4. **The app:** serial ports in Settings, an `elm327://` preset, the
+   session line.
+5. **BENCH** (the VX on USB; the MX+ on a 12 V supply), then a
+   read-only vehicle session.
+
+Later, each with its own record: passive listening, the app-fed
+stream for BLE and the mobile apps, and WiFi adapters over TCP.
 
 ## BENCH prep
 
@@ -353,17 +379,7 @@ matters: the original-copy file format constrains everything after it.
 
 ### Transports and platforms
 
-- **ELM327 transport (L).** ELM327-compatible adapters over USB serial,
-  Bluetooth and BLE (the OBDLink MX+ and CX among them). This is the
-  path to a vehicle on macOS, Linux, iOS and Android, where only
-  `mock://` and `replay://` exist (Known Issue #2).
-  - It's a new transport, not a J2534 shim: ELM327 is a text
-    AT-command protocol with its own framing and flow control.
-  - [ADR-0026](docs/adr/0026-elm327-transport.md) (proposed) has core
-    open serial ports itself, which covers USB and classic Bluetooth
-    (a paired SPP adapter is a serial port on every desktop system).
-    Bluetooth LE and the mobile apps need a byte stream the app layer
-    feeds, built later behind the same seam.
+- **ELM327 adapters:** scheduled; see [The ELM327 transport](#the-elm327-transport).
 - **Legacy buses:** see the roadmap above.
 
 ### Performance
