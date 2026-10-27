@@ -9,9 +9,12 @@
 //          locks every control, the device rows among them, while a
 //          connect is in flight (Windows: the fake's open stalled by a
 //          knob); the Units row sets the bridge's unit system, connected
-//          or not. The live registry, and the units kept across a
-//          restart (Main.qml's Settings), are manual smoke.
+//          or not; a new page (a restart) gets back the last URI that
+//          connected, read into the row, and the Record switch, while a
+//          refused URI isn't kept. The live registry, and the units kept
+//          across a restart (Main.qml's Settings), are manual smoke.
 
+import QtCore
 import QtQuick
 import QtTest
 import QtTune
@@ -27,9 +30,20 @@ TestCase {
         SettingsPage { width: 1000; height: 800 }
     }
 
-    // A binding error in the app's QML fails the test
+    // The page's stored URI and Record switch (test_qml keeps them in a
+    // scratch ini), written straight to the store
+    Settings {
+        id: stored
+        category: "session"
+    }
+
+    // A binding error in the app's QML fails the test. Each case starts
+    // with nothing stored, or the last case's URI would fill the field
     function init() {
         failOnWarning(/^qrc:\/qt\/qml\/QtTune\//)
+        stored.setValue("uri", "")
+        stored.setValue("recording", false)
+        stored.sync()
     }
 
     // Every connect here is asynchronous, so a case that fails between
@@ -38,6 +52,7 @@ TestCase {
     // bridge and fails for the wrong reason
     function cleanup() {
         Bridge.unitSystem = 0
+        Bridge.recording = false
         tryVerify(() => !Bridge.connecting, 10000, "a connect in flight ends")
         Bridge.disconnectSession()
         tryVerify(() => !Bridge.disconnecting, 5000, "disconnect ends")
@@ -280,6 +295,37 @@ TestCase {
         verify(!find(page, "profile_raw").enabled)
         verify(!find(page, "preset_mock").enabled)
         compare(find(page, "connectButton").text, "Disconnect")
+    }
+
+    // A restart gets back the last URI that connected and the Record
+    // switch. Recording is switched on only after the connects, so no
+    // session here records
+    function test_theLastConnectedUriAndTheRecordSwitchComeBack() {
+        let page = createPage()
+        const error = find(page, "errorLabel")
+        find(page, "uriField").text = "mock://demo?profile=raw"
+        press(page, "connectButton")
+        tryVerify(() => Bridge.connected, 5000, "the URI connects")
+        Bridge.disconnectSession()
+        tryVerify(() => !Bridge.disconnecting, 5000, "disconnect ends")
+
+        find(page, "uriField").text = "mock://demo?profile=uds-generic"
+        press(page, "connectButton")
+        tryVerify(() => error.visible, 5000, "core refuses it: no ?did=")
+        Bridge.recording = true
+        verify(find(page, "recordBox").checked)
+
+        // The page's store writes when the page goes, as at a quit
+        page.destroy()
+        wait(10)
+        Bridge.recording = false   // a fresh bridge starts with it off
+
+        page = createPage()
+        compare(find(page, "uriField").text, "mock://demo?profile=raw",
+                "the URI that connected, not the refused one")
+        verify(find(page, "profile_raw").highlighted, "read back into the row")
+        verify(Bridge.recording, "the Record switch comes back")
+        verify(find(page, "recordBox").checked)
     }
 
     // While a vendor's open blocks, nothing may rewrite the URI field or

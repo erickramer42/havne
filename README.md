@@ -146,6 +146,9 @@ screen, is [docs/architecture.md](docs/architecture.md).
   °C and g/s and mph, °F and lb/min, chart history included, and
   remembers the choice. Recordings keep the values as the ECU sent
   them ([ADR-0022](docs/adr/0022-display-units.md)).
+- **Picks up where you left off.** Settings remembers the last URI
+  that connected (the device, profile and DIDs with it) and the Record
+  sessions switch.
 - **Session recording.** Opt-in: each connect writes every frame,
   every decoded value and the session's events to CSV and text files,
   with host and adapter time side by side

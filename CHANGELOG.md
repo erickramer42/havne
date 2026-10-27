@@ -10,6 +10,11 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
 
 ## [Unreleased]
 
+### Added
+- Settings remembers the last URI that connected, with its profile and
+  DIDs, and the Record sessions switch between runs. A URI that failed
+  to connect isn't kept.
+
 ## [0.3.2] - 2026-10-26
 
 Replay, decoding in core, and every driver in a process of its own

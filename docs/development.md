@@ -430,6 +430,14 @@ README badge ([testing.md](testing.md#coverage)).
 | `ios-simulator-smoke` fails with "qttune exited within 45 s", and the printed stderr says `Failed to initialize graphics backend` | Qt Quick couldn't get a Metal device from the runner VM. Check the boot step's `system_profiler` output. Before suspecting the app, try `SIMCTL_CHILD_QSG_RHI_BACKEND=opengl` on the launch line. |
 | `ios-simulator-smoke` fails with "No available iPhone simulator on iOS 18 or later" | The runner image dropped its iOS 18+ runtimes, or the job moved to a runner without them. The step prints the available devices. |
 
+**Preferences:** the app keeps the zoom, the units, the last URI that
+connected and the Record sessions switch with QML `Settings`; on
+Windows that's `HKCU\Software\QtTune\QtTune`, which every QtTune on
+the machine shares. `QTTUNE_SETTINGS_DIR=<folder>` keeps one
+instance's preferences in an ini file under that folder instead, so a
+scripted run neither reads nor changes the user's; `test_qml` keeps
+its own in a scratch folder the same way.
+
 **QML lint:** run `cmake --build build --config Release --target all_qmllint`.
 Warnings don't fail the build. The bridge is the registered `Bridge`
 singleton, so qmllint checks every `Bridge.*` binding; the baseline is

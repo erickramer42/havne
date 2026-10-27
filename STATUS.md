@@ -70,8 +70,9 @@ shipped; the next milestone is still to be chosen from the
     have shown on the VX.
   - **The UI:** Dashboard gauges with peak hold and stale dimming,
     Live's table and strip chart, the frame log, and Settings composing
-    the URI; zoom and metric or imperial units, kept between runs
-    ([ADR-0022](docs/adr/0022-display-units.md)).
+    the URI; zoom, metric or imperial units
+    ([ADR-0022](docs/adr/0022-display-units.md)), the last URI that
+    connected and the Record sessions switch, kept between runs.
   - **Evidence for field sessions:** opt-in recording of every frame,
     decoded value and activity line per connect
     ([ADR-0017](docs/adr/0017-session-recording.md)), and a surrogate
@@ -228,7 +229,7 @@ in the backlog.
   versions ([ADR-0019](docs/adr/0019-session-info.md)). The interface
   list can't ask for them without opening each adapter, which the VX
   and VT refuse while unattached; showing the versions last seen for
-  each one would need persisted preferences.
+  each one means storing them with the preferences (QML `Settings`).
 
 ### Data capture
 
@@ -236,9 +237,9 @@ in the backlog.
   session per connect, and its `events.log` names the vehicle through
   the identity line ([ADR-0021](docs/adr/0021-vehicle-identification.md)).
   Still to do: name the folder by vehicle as well as date (the folder
-  opens before the VIN arrives, so this waits for persisted
-  preferences), keep the Record sessions switch across restarts (with
-  the same preferences), and copy selected Log rows for quick notes.
+  opens before the VIN arrives, so it would take the VIN last seen on
+  that URI, stored with the preferences), and copy selected Log rows
+  for quick notes.
 - **Triggered logging (M).** Record only while a condition holds
   (RPM over a threshold) or capture a window around a link fault.
   Needs a trigger model in core, similar in shape to the probe: data
@@ -246,11 +247,6 @@ in the backlog.
 
 ### User interface
 
-- **Persisted preferences (S).** The UI zoom and the unit system
-  (imperial until changed) survive a restart, through QML `Settings`
-  in `Main.qml` (category `ui`). Developer mode, theme, the last-used
-  device, the Record sessions switch and Settings' profile choice and
-  DID list need the same. It belongs in the app layer, not core.
 - **Developer mode (S).** A persisted Settings toggle, off by default.
   With it off the app offers only real devices. With it on, the app
   also shows:
@@ -287,11 +283,12 @@ in the backlog.
   label the user names: profile, channel overrides, dashboard
   arrangement, last device. Nobody reconfigures the tool each time
   they plug into the same car. The VIN key exists
-  ([ADR-0021](docs/adr/0021-vehicle-identification.md)); the rest
-  needs persisted preferences.
+  ([ADR-0021](docs/adr/0021-vehicle-identification.md)), and the app
+  keeps preferences through QML `Settings`; a store per vehicle is
+  new.
 - **User-configurable dashboards (L).** User-authored pages choosing
   from the gauge library. The gauges are already modular, but layout
-  persistence is new ground and needs the preferences item first.
+  persistence is new ground.
 
 ### Vehicle coverage
 

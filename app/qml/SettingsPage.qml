@@ -6,7 +6,9 @@
 //          the DID field refusing query characters, the field left
 //          editable, core's refusal in the error line, a composed
 //          uds-generic URI connecting through the mock, every control
-//          locked while a connect is in flight; the status label
+//          locked while a connect is in flight, the last URI that
+//          connected and the Record switch back in a new page (a refused
+//          URI not kept); the status label
 //          and the activity log's link lines in each link state
 //          (tests/qml/tst_linkhealth.qml), by objectName.
 //          Manual smoke — discovery list renders (Windows: real registry;
@@ -22,6 +24,7 @@
 //          (tst_settings.qml); its conversions: SignalsTest.DisplayConvert*,
 //          BridgeTest.UnitSystem*.
 
+import QtCore
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
@@ -235,7 +238,24 @@ Pane {
         activityLog.cursorPosition = activityLog.length
     }
 
-    Component.onCompleted: refreshDevices()
+    // ---- The last URI that connected and the Record switch, kept between
+    // runs as Main.qml keeps the zoom and units. Only a URI that connected
+    // is stored, so a typo or a refused query doesn't come back
+    Settings {
+        id: sessionSettings
+        category: "session"
+        property string uri: ""
+        property bool recording: false
+    }
+
+    Component.onCompleted: {
+        refreshDevices()
+        // Set like typed text, so the profile row and the DID field read
+        // it back
+        if (uriField.text === "")
+            uriField.text = sessionSettings.uri
+        Bridge.recording = sessionSettings.recording
+    }
 
     Connections {
         target: Bridge
@@ -247,6 +267,12 @@ Pane {
         function onConnectResult(uri, error) {
             errorLabel.text = error
             errorLabel.visible = (error !== "")
+            if (error === "")
+                sessionSettings.uri = uri
+        }
+
+        function onRecordingChanged() {
+            sessionSettings.recording = Bridge.recording
         }
     }
 
@@ -416,15 +442,16 @@ Pane {
             }
 
             // ---- Recording (ADR-0017) ----
-            // Off by default. It takes effect at the next connect, so it's
-            // fixed while a session is up and each recording covers a whole
-            // session.
+            // Off until switched on, and kept between runs. It takes effect
+            // at the next connect, so it's fixed while a session is up and
+            // each recording covers a whole session.
             RowLayout {
                 Layout.fillWidth: true
                 spacing: Theme.spacing
 
                 CheckBox {
                     id: recordBox
+                    objectName: "recordBox"
                     text: qsTr("Record sessions")
                     checked: Bridge.recording
                     enabled: page.idle
