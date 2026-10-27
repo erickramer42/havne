@@ -72,6 +72,20 @@ target_link_libraries(test_obd2 PRIVATE
 qttune_enable_warnings(test_obd2)
 gtest_discover_tests(test_obd2)
 
+# --- ELM327 protocol tests: MUST stay Qt-free (UNIT tier, ADR-0026) ---
+# elm327_protocol.h is header-only and internal, like request_engine.h,
+# which these tests also include to hand it the replies.
+add_executable(test_elm327 test_elm327.cpp)
+target_include_directories(test_elm327 PRIVATE
+    ${CMAKE_SOURCE_DIR}/core/src
+)
+target_link_libraries(test_elm327 PRIVATE
+    ecuio-core
+    GTest::gtest_main
+)
+qttune_enable_warnings(test_elm327)
+gtest_discover_tests(test_elm327)
+
 # --- C ABI compilation check: MUST stay Qt-free, builds everywhere ---
 # Compiles the public headers as strict C and links exported symbols
 # from a C TU — catches C++-isms and name-mangling regressions an FFI

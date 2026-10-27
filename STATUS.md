@@ -84,8 +84,8 @@ shipped; the next milestone is the [ELM327 transport](#the-elm327-transport)
   [testing.md](docs/testing.md#gaps-not-verified)). The run sheets are
   [bench-runsheet.md](docs/bench-sessions/bench-runsheet.md) and
   [vehicle-runsheet.md](docs/bench-sessions/vehicle-runsheet.md).
-- **Tests:** 404 ctest cases on Windows (both trees rebuilt,
-  2026-10-26), all passing but two env-gated skips (the cross-arch
+- **Tests:** 426 ctest cases on Windows (both trees rebuilt,
+  2026-10-27), all passing but two env-gated skips (the cross-arch
   case, and the real-car recordings' diff, run locally), plus the
   cross-arch subset (76/76); 0 MSVC warnings. CI runs ctest on Windows,
   macOS and Linux; core under ASan and UBSan; 60 s of each libFuzzer
@@ -145,8 +145,9 @@ OBDX Pro VX in its ELM mode (USB-powered). In order:
 1. **Link health in a shared header** (`core/src/link_health.h`):
    built. The J2534 worker uses it unchanged, and its rules have
    session-free unit cases (`CoreTest.Link*`).
-2. **The protocol layer** (`elm327_protocol.h`, no I/O, no clock) and
-   its unit tests.
+2. **The protocol layer** (`core/src/elm327_protocol.h`, no I/O, no
+   clock): built, with its unit tests (`Elm327ProtocolTest`,
+   `test_elm327`, Qt-free, so in every CI job).
 3. **The transport:** the port on Windows and POSIX, the worker, the
    session info, the URI, the fake ELM327, the HARNESS tests and the
    pseudo-terminal test. The docs that name the schemes move with it.
