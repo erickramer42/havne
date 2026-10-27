@@ -71,9 +71,9 @@ serials): scrub before committing.
       it: another app changed the adapter's parameter 2A, and QtTune
       never writes them
 - [ ] Nothing answers with the ignition off: quiet after a second or
-      two ("Vehicle not responding"), as through the VX; or "Requests
-      failing" on a bus that sleeps. Record which, and from the wire
-      log the time from a request to its `NO DATA` prompt
+      two ("Link quiet"; Live: "Vehicle not responding"), as through the
+      VX; or "Requests failing" on a bus that sleeps. Record which, and
+      from the wire log the time from a request to its `NO DATA` prompt
 - [ ] Disconnect
 
 A refused connect names the command and its answer: copy it verbatim

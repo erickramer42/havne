@@ -40,8 +40,8 @@ shipped; the next milestone is the [ELM327 transport](#the-elm327-transport)
     ([ADR-0026](docs/adr/0026-elm327-transport.md)): `elm327://<port>`
     on a serial port, USB or Bluetooth SPP, with the same request
     engine, probe, identification and link health as J2534, and
-    Settings lists the serial ports. Verified against a fake ELM327
-    only.
+    Settings lists the serial ports. Verified against a fake ELM327,
+    and on the bench with the OBDX VX (no bus); no car yet.
   - **J2534 on Windows:** discovery of installed drivers, each driver
     loaded in a single-threaded surrogate process of its own
     architecture, x86 or x64, so a crashing driver ends its process,
@@ -161,7 +161,8 @@ OBDX Pro VX in its ELM mode (USB-powered). In order:
    against a fake ELM327 behind the port (`Elm327SessionTest`, with
    the same ECU as the fake J2534 DLL, `tests/fake_ecu.h`) and, on
    Linux and macOS, the termios port over a pseudo-terminal
-   (`Elm327PortTest`). The Win32 port has opened the VX on the bench.
+   (`Elm327PortTest`). The Win32 port has carried the VX's bench
+   session, a cable pull included.
 4. **The app:** built. Settings lists the serial ports
    (`ecuio_serial_ports`, `serial.h`: the registry or `/dev`, nothing
    opened) beside the J2534 interfaces and has an `elm327://` preset;
@@ -171,12 +172,14 @@ OBDX Pro VX in its ELM mode (USB-powered). In order:
    answers always, every request and reply while recording;
    `Elm327SessionTest.TheWireLog*`), the bench's evidence.
 5. **BENCH** with the VX on USB, then a read-only vehicle session.
-   The VX's first bench session found its port and its answers
-   ([2026-10-27-elm327-bench](docs/bench-sessions/2026-10-27-elm327-bench.md)):
+   The VX's bench is done
+   ([2026-10-27-elm327-bench](docs/bench-sessions/2026-10-27-elm327-bench.md),
+   [2026-10-27-elm327-bench-2](docs/bench-sessions/2026-10-27-elm327-bench-2.md)):
    its `AT Z` answers `OK` alone, which the setup takes, asking `AT I`
-   for the version, and with no bus it answers `NO DATA`, so the
-   bench reads quiet. Its connect, cable pull and 250 kbit/s run are
-   next. The MX+ is vehicle-only: with no 12 V supply, it first powers up on
+   for the version; with no bus it answers `NO DATA`, so the bench
+   reads quiet; it connects at both CAN rates and recovers from a
+   cable pull with no reconnect. The vehicle session is next. The MX+
+   is vehicle-only: with no 12 V supply, it first powers up on
    the car, where its bench items run ahead of its first request
    (ADR-0026's appendix of 2026-10-27). The run sheets are
    [elm327-bench-runsheet.md](docs/bench-sessions/elm327-bench-runsheet.md)

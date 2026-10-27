@@ -70,9 +70,10 @@ Connect, and leave it about a minute.
       obd2, channel 0x7E8/0x7E0 (rx/tx); …`. No STN part (the VX isn't
       one, so `STI` is refused), and the battery `0.0 V` or "no battery
       reading" on USB power (the J2534 path read 0.0 V, BENCH prep #10)
-- [ ] Amber "Vehicle not responding" and "Link: vehicle not
-      responding" within a few seconds: the VX answers `NO DATA` with no
-      bus, as with an ECU that doesn't answer (ADR-0026's appendix of
+- [ ] Amber "Link quiet" in the header (Live's banner: "Vehicle not
+      responding") and "Link: vehicle not responding" in the activity
+      log within a few seconds: the VX answers `NO DATA` with no bus, as
+      with an ECU that doesn't answer (ADR-0026's appendix of
       2026-10-27, "the VX's answers"), and the requests go on
 - [ ] Task Manager: `qttune.exe` under 1 % CPU
 - [ ] Disconnect: `Disconnected:` at once
@@ -83,12 +84,12 @@ answer is the finding (#12).
 
 ## Phase 3 — the cable pulled
 
-**Action:** connect again, wait for "Vehicle not responding", unplug
+**Action:** connect again, wait for "Link quiet", unplug
 the USB cable for about 10 s, then plug it back in.
 
 - [ ] Unplugged: red "Adapter fault" within about 10 s
-- [ ] Plugged back: the link returns to "Vehicle not responding"
-      within about 10 s, with no reconnect (the port reopens and the
+- [ ] Plugged back: the link returns to "Link quiet" within about
+      10 s, with no reconnect (the port reopens and the
       setup runs again). Record the times, and copy the wire log's
       `unasked:` lines after the reopen: what the VX prints on power-up.
       If Windows gives the VX another `COMn`, it can't recover: record

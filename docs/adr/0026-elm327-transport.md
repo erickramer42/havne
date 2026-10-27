@@ -593,3 +593,12 @@ arriving unasked (§6). The VX's reset prints none, so a reset
 without a power cut would go unseen; on USB it can't lose power
 without the port closing, which reopens the port and runs the setup
 again. What it prints on power-up is for its next session's wire log.
+
+**Note, 2026-10-27, later:** the second session
+(docs/bench-sessions/2026-10-27-elm327-bench-2.md) connected through
+the widened rule, went quiet with no bus, and recovered from a cable
+pull with no reconnect. After the reopen nothing came unasked: the VX
+prints nothing on power-up that reaches the port. With no node to
+acknowledge them, its first three requests after a setup reach their
+prompt in 100 ms and every later one in 300 ms, the three frames its
+CAN controller holds; on a car the bus acknowledges.

@@ -442,16 +442,17 @@ requests and quiet states
 - **The Win32 serial port has no automated test.** Windows has no
   built-in virtual COM pair, so `elm327_port.cpp`'s Win32 half (the
   `\\.\COMn` open, the DCB, the read timeouts) is verified at BENCH
-  and on the vehicle only: it has opened, written, read and closed the
-  VX's USB port, but no session has run through it to the end
-  (docs/bench-sessions/2026-10-27-elm327-bench.md). The POSIX half runs
+  and on the vehicle only: the VX's bench session ran through it, a
+  cable pull and the reopen included
+  (docs/bench-sessions/2026-10-27-elm327-bench-2.md). The POSIX half runs
   over a pseudo-terminal in CI ([ADR-0026](adr/0026-elm327-transport.md)
   §8).
-- **No ELM327 adapter has carried an `elm327://` session yet.** The
-  fake ELM327 is written from the datasheet and the OBDLink and OBDX
-  manuals, and its `reset_ok` from the VX's answers; the VX's setup
-  and readings are known from a probe outside QtTune, and the MX+'s
-  are the vehicle session's (ADR-0026's open questions).
+- **No ELM327 adapter has read a car yet.** The VX has carried
+  `elm327://` sessions on the bench, with no bus, so no reply has
+  crossed it; the fake ELM327 is written from the datasheet and the
+  OBDLink and OBDX manuals, and its `reset_ok` from the VX's answers.
+  The MX+'s answers and replies through either adapter are the
+  vehicle session's (ADR-0026's open questions).
 
 - **The surrogate pipe's protections have no direct test.** Its
   current-user DACL, `FILE_FLAG_FIRST_PIPE_INSTANCE`,
