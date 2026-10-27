@@ -167,8 +167,10 @@ OBDX Pro VX in its ELM mode (USB-powered). In order:
    opened) beside the J2534 interfaces and has an `elm327://` preset;
    the "Session:" line has an ELM327 form (`SerialPortsTest`,
    `BridgeTest`, `QmlTest.settings`).
-5. **BENCH** (the VX on USB; the MX+ on a 12 V supply), then a
-   read-only vehicle session.
+5. **BENCH** with the VX on USB, then a read-only vehicle session.
+   The MX+ is vehicle-only: with no 12 V supply, it first powers up on
+   the car, where its bench items run ahead of its first request
+   (ADR-0026's appendix of 2026-10-27).
 
 Later, each with its own record: passive listening, the app-fed
 stream for BLE and the mobile apps, and WiFi adapters over TCP.

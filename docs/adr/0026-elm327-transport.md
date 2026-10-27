@@ -523,3 +523,24 @@ UI needs no new code.
 - BLE and the mobile apps still can't reach a car until the app-fed
   stream is built. This record leaves that seam in place but doesn't
   build it.
+
+## Appendix: 2026-10-27, no bench supply for the MX+
+
+There is no 12 V supply on hand, and the MX201 takes its power only
+from the OBD connector, so the MX+ first powers up on the car. As §8
+provides, its bench items move to the vehicle session, ahead of its
+first request:
+
+- the setup's answers, and what it says to `AT I`, `STI` and `AT PPS`
+  (the open questions' "STN answers");
+- `STVR` against the battery voltage the VX's `READ_VBATT` reports on
+  the same car in the same visit, in place of a supply's own reading;
+- the time from a request to its prompt with nothing to answer, with
+  the ignition off: this car's bus still acknowledges then, and no ECU
+  answers (docs/bench-sessions/2026-10-22-vehicle.md);
+- a Bluetooth drop and its recovery, by turning the laptop's Bluetooth
+  off and on mid-session.
+
+`CAN ERROR` with no bus at all is left to the VX's bench session, on
+USB power with no car; that session covers the VX alone (its serial
+port, its ELM answers, its voltage reading).
