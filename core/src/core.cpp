@@ -597,17 +597,15 @@ ecuio_status_t ecuio_session_create(
     }
 
     ecuio_status_t status = ECUIO_ERR_NO_TRANSPORT;
-#ifdef _WIN32
-    if (is_j2534) {
-        status = ecuio_j2534_transport_attach(s.get(), transport_uri,
-                                              &query);
-    } else
-#endif
     if (is_mock) {
         status = ecuio_mock_transport_attach(s.get(), transport_uri,
                                              &query);
     } else if (is_replay) {
         status = ecuio_replay_transport_attach(s.get(), transport_uri, &query);
+    } else if (is_j2534) {
+#ifdef _WIN32
+        status = ecuio_j2534_transport_attach(s.get(), transport_uri, &query);
+#endif
     }
 
     if (status != ECUIO_OK) {

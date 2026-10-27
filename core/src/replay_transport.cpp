@@ -104,6 +104,9 @@ struct native_path {
 bool read_line(FILE* f, std::vector<char>& buf, bool* too_long)
 {
     *too_long = false;
+    /* No lock is held here: the worker's wait block ends before the next
+     * read. clang-tidy 22's analyzer loses the unique_lock's unlock. */
+    // NOLINTNEXTLINE(clang-analyzer-unix.BlockInCriticalSection)
     if (std::fgets(buf.data(), static_cast<int>(buf.size()), f) == nullptr) {
         return false;
     }
@@ -526,8 +529,8 @@ ecuio_status_t ecuio_replay_transport_attach(ecuio_session_t* session,
         impl->speed_milli = speed;
         impl->loop = loop;
         session->transport =
-            new ecuio_transport_t{&kReplayTransportOps, impl.get()};
-        impl.release();
+            new ecuio_transport_t{&kReplayTransportOps, nullptr};
+        session->transport->impl = impl.release();
     } catch (...) {
         return ECUIO_ERR_OUT_OF_MEMORY;
     }

@@ -714,9 +714,9 @@ bool parse_number(const char* s, size_t len, unsigned long* out_val)
         if (c >= '0' && c <= '9') {
             digit = static_cast<unsigned long>(c - '0');
         } else if (hex && c >= 'a' && c <= 'f') {
-            digit = static_cast<unsigned long>(c - 'a' + 10);
+            digit = static_cast<unsigned long>(c - 'a') + 10;
         } else if (hex && c >= 'A' && c <= 'F') {
-            digit = static_cast<unsigned long>(c - 'A' + 10);
+            digit = static_cast<unsigned long>(c - 'A') + 10;
         } else {
             return false;
         }

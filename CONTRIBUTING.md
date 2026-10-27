@@ -130,8 +130,11 @@ with the guide for the language they touch.
   target-scoped properties, comments explaining why rather than what.
 
 Beyond formatting: every first-party target builds with `/W4` or
-`-Wall -Wextra` at zero warnings on MSVC, and comments are present tense and
-cite open Known Issues by number.
+`-Wall -Wextra` at zero warnings on MSVC; `core/` and `surrogate/` pass
+clang-tidy with the checks in [.clang-tidy](.clang-tidy) (`scripts/tidy.sh`,
+and CI fails on any warning; [docs/development.md](docs/development.md)
+says how to run it); and comments are present tense and cite open Known
+Issues by number.
 
 ## Input validation
 
