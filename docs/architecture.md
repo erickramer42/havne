@@ -145,7 +145,8 @@ A **profile** is a named signal set ([ADR-0013](adr/0013-protocol-profiles.md)).
   which for J2534 loads and opens the DLL.
 - `start` registers the receive filters and starts the worker.
 - `close` stops the worker and tears the transport down, and is safe
-  to call twice. `destroy` frees the session.
+  to call twice.
+- `destroy` frees the session.
 
 Load failures surface at create, so nothing half-starts.
 
@@ -256,7 +257,10 @@ The bridge polls it on its 100 ms tick and maps it for the UI
   signal model (value, `hasValue`, `ageMs`, `decimals`, and a
   360-point history per signal: each window's lowest, highest and
   newest, at their frames' times), the unit
-  system, device discovery, and the link state.
+  system, device discovery, and the link state. Each session ends with
+  its delivery figures in the activity log: frames received and
+  dropped, and how long frames took to reach the GUI thread and values
+  the model (median, p99, max).
 - **Recording is the bridge's too**
   ([ADR-0017](adr/0017-session-recording.md)): with it on, the
   bridge writes every frame it accepts, each decoded value and the
@@ -313,7 +317,9 @@ The bridge polls it on its 100 ms tick and maps it for the UI
 | HARNESS | The whole J2534 stack against an in-tree fake vendor DLL, through the x64 surrogate |
 | Cross-arch | x64 tests driving the x86 surrogate and fake. Local only; CI never runs it |
 | Sanitizers | Core under ASan/UBSan in CI |
-| Fuzzing | The signal decoder and validators under libFuzzer, 60 s each in CI ([fuzz/README.md](../fuzz/README.md)) |
+| Fuzzing | The signal decoder, the validators and the `uds-generic` query parser under libFuzzer, 60 s each in CI ([fuzz/README.md](../fuzz/README.md)) |
+| Static analysis | clang-tidy's analyzer and bug-finding checks over core and the surrogate, any warning failing CI; CodeQL too |
+| Load test | A recorded engine start replayed through the bridge on Windows and Linux CI: throughput, drops and latency, failing on a lost frame or peak or a gross regression |
 | Simulator smoke | The iOS app launches and draws |
 | Manual smoke | The real app, page by page |
 | BENCH / Vehicle | A real adapter with no vehicle; then a real car, read-only |
