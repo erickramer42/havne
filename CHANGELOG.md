@@ -43,6 +43,10 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
 - A raw session on an adapter listens to the engine ECU without
   `?filter=`, and `?profile=raw&poll=` asks it; Settings adds no
   `filter=` of its own.
+- At disconnect the activity log, and a recording's `events.log`, give
+  the session's delivery: frames received and dropped, and how long
+  frames took to reach the app and values to reach its pages (median,
+  99th percentile and maximum).
 - Live's strip chart places each value at the time its frame was
   received (a replay's own time), and keeps the highest and lowest
   value of every 100 ms window, so a short peak stays on the chart.

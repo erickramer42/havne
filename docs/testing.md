@@ -134,7 +134,12 @@ connects each; µs a frame, GUI thread):
   3.5 % at 25,000 frames a second (worked out). The worker's side of a
   frame (`onFrame`: the 4 KB copy and the queued call) costs 1.2 to
   2.0 µs at any profile size, more than the match and decode
-  ([ADR-0024](adr/0024-decode-on-the-worker.md)).
+  ([ADR-0024](adr/0024-decode-on-the-worker.md)). Re-measured three
+  times on 2026-10-26, after each window's envelope reached the chart
+  and the Dashboard ([ADR-0005](adr/0005-coalesced-signal-updates.md)'s
+  appendix), one tick's update is 0.3–0.4, 1.9–2.2, 4.7–5.3, 9.2–9.8
+  and 18.2–19.6 µs at 9, 100, 250, 500 and 1000 defs: about 0.02 % of
+  the GUI thread at 1000 defs and 10 Hz.
 - **The engine-start fixture under `obd2`** (7,074 frames, 297 s
   recorded, peaking at 1,261 rpm): at `speed=10`, 29.75 s, and at
   `max`, none dropped, and the strip chart's highest RPM is 1,261 at
@@ -142,9 +147,69 @@ connects each; µs a frame, GUI thread):
   ([ADR-0005](adr/0005-coalesced-signal-updates.md)'s appendix). With
   each window's newest value alone it was 1,232 at 10× and 758 at
   `max`, the whole recording drained in a tick or two (2026-10-26).
-- **Not measured:** a QML view attached to the models; text defs; a
-  replay fast enough to reach the in-flight cap; any machine but the
-  dev one.
+- **Not measured:** a QML view attached to the models; text defs.
+
+### Load test: the replay fixture through the bridge
+
+`bench_bridge --load` replays the engine-start fixture (7,074 frames
+over 297 s recorded, under `obd2`, RPM peaking at 1,261.25) through a
+real `QtTuneBridge`: once at full speed, once at 100× (paced, about
+3 s), and looping at full speed for 3 s. The full bench adds a 10× run
+(about 30 s) after its per-profile table. Each run reports the bridge's
+own delivery figures, the ones the activity log's "Delivery:" line
+gives at every disconnect:
+- **Worker frames/s:** frames through the worker's whole path: the
+  replay's read, core's decode and the bridge's two callbacks.
+- **Frame to GUI thread:** from `onFrame` on the worker to the frame
+  log's handler on the GUI thread.
+- **Value to model:** from `onValues` on the worker to the 100 ms tick
+  that puts the value in the model the pages draw from.
+
+Latencies are read at the top of a histogram bucket, at most 12.5 %
+above the true value; the maximum is exact. QML's painting isn't
+included: the bench runs headless.
+
+Three runs on the dev machine, 2026-10-26 (ranges across the runs;
+milliseconds as median / p99):
+
+| Run | Frames handled / dropped | Worker frames/s | Frame to GUI thread | Value to model | Chart's peak, rpm |
+|---|---|---|---|---|---|
+| Full speed, one pass (13–16 ms) | 7,074 / 0 | | 0.08–0.14 / 0.32–0.70 | 107–115 / 108–116 | 1,261.25 |
+| 100×, one pass (2.99 s) | 7,074 / 0 | | 0.08 / 0.29–0.38 | 57–61 / 111–114 | 1,261.25 |
+| 10×, one pass (29.75 s) | 7,074 / 0 | | 0.04 / 0.32–0.35 | 49–53 / 112–113 | 1,261.25 |
+| Full speed, looping 3 s | 1.35–1.42 million / 0 | 386,000–411,000 | 0.21–0.24 / 0.96–1.15 | 90 / 111–112 | |
+
+- **Throughput:** the worker sustains about 400,000 frames a second,
+  nearly 90 times a fully loaded classic CAN bus (about 4,500 frames a
+  second), and the GUI thread keeps up with it. The cap does drop at
+  that rate now and then: in two earlier runs of the same build a
+  one-pass run dropped 255 and 467 frames, and a looping run 40,288 of
+  1.27 million (3 %). Every value of a dropped frame still reaches the
+  pages ([ADR-0024](adr/0024-decode-on-the-worker.md)).
+- **Values wait for the tick, by design**
+  ([ADR-0005](adr/0005-coalesced-signal-updates.md)): paced, the
+  median is about half a tick and p99 a tick plus the timer's jitter.
+  At full speed a whole pass arrives within milliseconds of a tick and
+  waits out the rest of it.
+- **Frames reach the GUI thread** in under a quarter of a millisecond
+  at the median, and about a millisecond at p99 even at full speed.
+- **The limit it found:** at full speed the recording misses about 60 %
+  of the values. The staging holds 16,384 values a window, 164,000 a
+  second, against about 400,000 arriving. The pages lose nothing: each
+  window keeps every signal's newest, lowest and highest value whatever
+  the limit, and the activity log says when the recording misses some.
+  A full classic CAN bus at four values a frame gives 18,000 a second.
+- **In CI:** `win-build` and `linux-build` run `bench_bridge --load`
+  on every push and put its table in the run's summary, so each run
+  publishes a second and third machine's figures. The step fails on a
+  broken invariant (a one-pass run must account for every frame, time
+  every value and keep the 1,261.25 rpm peak) or a bound: at least
+  10,000 frames a second through the worker, and at 100× a p99 under
+  500 ms to the GUI thread and 1,000 ms to the model. The bounds sit
+  far from the dev machine's figures because shared runners vary; they
+  catch a regression of an order of magnitude, and smaller drift shows
+  in the summaries. macOS doesn't run it: its runner wakes timers
+  100–200 ms late.
 
 ### Connect cost: a surrogate per session
 
@@ -208,6 +273,7 @@ round trip each, negligible at the transport's read cap
 | Log order toggle (newest first / oldest first). Rows are in arrival order, not by frame timestamp, and a connect starts an empty table while a disconnect keeps the rows | `BridgeTest.FrameLogOrdersNewestFirstByDefault`, `.FrameLogTogglesToOldestFirst`, `.FrameLogOrdersByArrivalNotTimestamp`, `.ConnectStartsAnEmptyFrameLog` |
 | The frame log's ring at its cap: the newest 10k rows in arrival order either way, each with its own frame's bytes and length, the oldest leaving from its end and the new frame arriving at the other, still in order after going round oldest-first; the frame counters reach QML on the 100 ms tick, not per frame, and end exact at disconnect | `BridgeTest.FullFrameLogKeepsTheNewestInOrder`, `.FrameCountsAreReportedOnTheTick`. Each fails against a slot that ignores the oldest, a removal at the newest end, and counters emitted per frame. A frame cost about 2 µs at the cap with its dispatch included (20,000 frames, no view attached, 2026-10-24); the GUI thread's drain alone is under [Performance](#performance). Log page smoke under `mock://demo`: newest and oldest first, the tail following, Pause and Clear |
 | The frame log's rows hold a payload up to 64 bytes inline and a longer one in a heap block only while the row is shown: a ring of 200-byte frames rounded by 27-byte ones holds no heap bytes, 64 bytes stays inline and 65 spills; Clear keeps the slots and frees the blocks, and a ring cleared before it filled grows only as far as it's used | `BridgeTest.FrameLogHoldsLongPayloadsOnlyWhileShown` (the model directly, through its slot and heap-byte seams). Each of five mutations fails it: a short frame keeping the block, Clear dropping the ring or keeping the blocks, growth by the cap alone, and the boundary at 63. Log page smoke, 2026-10-25: under `mock://demo` before and after Clear, and the fake's 203-byte `62 F1 A0` replies between 5-byte `62 1E 1C` ones, each row with its own length and bytes |
+| The activity log's "Delivery:" line at disconnect: frames received, dropped at the in-flight cap and still queued, then how long frames took to reach the GUI thread and values the model (median, p99, max), the line naming exactly the figures the bridge kept. Over the engine-start fixture at full speed every frame is accounted for and every handled frame and staged value timed. A quantile reads at the top of its bucket: exact below 16 µs, at most 12.5 % high past that, the maximum exact | `BridgeTest.LatencyStatsReadsQuantilesWithinABucket`, `.DeliveryTextNamesFramesDropsAndTimes`, `.DisconnectLogsTheDelivery`; the line's place by `.DisconnectTearsDownOffGuiThread` and `.RecordingWritesFramesValuesAndEvents` (`events.log`). The fixture case failed with either timing left out (2026-10-26). App smoke under `mock://demo`, 2026-10-26: "Delivery: 98 frames, none dropped; to the GUI thread in median 95 µs, p99 8.7 ms, max 8.7 ms; 819 values, to the model in median 53 ms, p99 109 ms, max 109 ms" |
 | Session recording ([ADR-0017](adr/0017-session-recording.md)): off by default; with it on, one folder per connect holding every accepted frame (paused or not, host time never going backwards), each decoded value and the activity lines from `Connected:` through `Disconnected:`; the switch holds during a session; recording sets `ECUIO_SUR_LOG_FRAMES` in the OS environment the surrogate inherits and removes it at the next unrecorded connect, leaving a launch value alone | `BridgeTest.RecordingIsOffByDefault`, `.RecordingWritesFramesValuesAndEvents`, `.RecordingSwitchHoldsDuringASession`, `.RecordingTurnsOnSurrogateFrameLogging` |
 | Replay ([ADR-0023](adr/0023-replay-transport.md)): each recorded row goes out with its ID, flags and bytes (an empty payload and a whole 4,096-byte message included), stamped with the recording's session time rebased to the first row; a backward stamp (a raw adapter clock wrapping) is timed by its host step; `loop=1` carries the stamps on, never decreasing; one second of recording takes about a second at speed 1 and a tenth at 10; each frame is due at its time from the start of playback, so frames a 400 ms stall held up go out at once and 200 short steps still take about a second, at speed 1 and 10; a close during an hour-long gap returns at once; the end of the file sends nothing more, and a row that turned bad after attach, or a file deleted before start, ends playback with `ECUIO_ERR_RECORDING_CHANGED` and one episode in the error state, which a clean end leaves at `ECUIO_OK`; the session info names the backend, frames, span, speed and loop | `CoreTest.ReplaySendsTheRecordedFramesAtTheirRebasedTimes`, `.ReplayTimesABackwardStampByTheHostClock`, `.ReplayLoopsWithStampsThatNeverDecrease`, `.ReplayPacesByTheRecordingsTimeOverTheSpeed`, `.ReplayCatchesUpAfterALateFrameAndNeverDrifts`, `.ReplayClosesAtOnceDuringAGap`, `.ReplayStopsAtARowThatTurnedBadAfterAttach`, `.ReplayOfARecordingThatWentAwaySaysSo`; also in the x86 tree. Each failed against its mutation (2026-10-25): no host fallback, stamps not rebased, the speed ignored, no pacing, loop stamps restarting, a sleep for the condition wait (the close hung), a bad row sent anyway. Each wait timed from the last send instead of the start (2026-10-26) passes `.ReplayPacesByTheRecordingsTimeOverTheSpeed` and fails `.ReplayCatchesUpAfterALateFrameAndNeverDrifts`: 3.5 s on the condition variable, whose short waits Windows rounds up, and 1.4–1.6 s busy-waited, where only the stall shows |
 | Replay refuses what isn't a recording, at create: anything but `frames.csv`'s header row, an empty file, no frames, and each malformed field with its line number (`LOAD_FAILED`); a relative or empty path, and every malformed `speed` and `loop` value, and `loop=1` on a recording whose frames all share one time (`BAD_URI`; played once, it plays); either line ending reads; a folder means its `frames.csv`; `raw` is the default profile, and a recorded reply decodes under `?profile=obd2` | `CoreTest.ReplayRefusesABadRecordingWithItsLineNumber`, `.ReplayJudgesItsPathAndQuery`, `.ReplayRefusesToLoopARecordingWithNoSpan`, `.ReplayDecodesUnderTheProfileItNames`. The header check, the CRLF strip and the span check each failed against their mutation |
