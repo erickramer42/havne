@@ -171,6 +171,12 @@ jobs:
           cmake --build build --config Release
       - name: Run tests
         run: ctest --test-dir build -C Release --output-on-failure --no-tests=error
+      # The replay fixture through the bridge (tests/bench_bridge.cpp): its
+      # table goes to the run's summary, and the step fails only on a
+      # broken invariant or a bound far below the dev machine's figures
+      - name: Load test
+        shell: bash
+        run: build/tests/Release/bench_bridge.exe --load | tee -a "$GITHUB_STEP_SUMMARY"
 
   # Line coverage for the README badge: the whole suite under
   # OpenCppCoverage (scripts/coverage.sh), uploaded to Codecov. Windows,
@@ -282,6 +288,9 @@ jobs:
           cmake --build build
       - name: Run tests
         run: ctest --test-dir build --output-on-failure --no-tests=error
+      - name: Load test
+        shell: bash   # -o pipefail: tee must not hide the bench's exit status
+        run: build/tests/bench_bridge --load | tee -a "$GITHUB_STEP_SUMMARY"
 
   # Cross builds (Android, iOS) are build-only: BUILD_TESTING=OFF, because
   # gtest_discover_tests runs each test binary at build time, which can't
