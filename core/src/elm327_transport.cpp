@@ -7,7 +7,9 @@
 //          digit, header switches, the rotation, the probe, the DID scan,
 //          identification), multi-frame replies, link health and its
 //          recovery (NO DATA, CAN ERROR, a dropped link, an adapter
-//          reset), the pending reply, and nothing allocated per frame.
+//          reset), the pending reply, the wire log (TheWireLog*), and
+//          nothing allocated per frame, with the log's request lines on
+//          or off.
 //          Elm327PortTest (POSIX): a whole session over a
 //          pseudo-terminal through the OS's port. BENCH: the Win32 port.
 
@@ -15,6 +17,7 @@
 #include "ecuio/internal.h"
 #include "ecuio/j2534_ptypes.h" /* ECUIO_PT_PROTOCOL_ISO15765; plain C */
 #include "session.h"
+#include "elm327_log.h"
 #include "elm327_port.h"
 #include "elm327_protocol.h"
 #include "request_engine.h"
@@ -112,9 +115,20 @@ struct ecuio_elm327_transport {
     /* Session time counts from the end of attach, as mock's does; the
      * frame dispatched from here. */
     std::chrono::steady_clock::time_point epoch{};
+    /* The last command's send, for its prompt's time in the wire log */
+    std::chrono::steady_clock::time_point sent_at{};
     ecuio_frame_t rx_frame{};
-    std::atomic<bool> stop_requested{false};
     std::thread worker;
+    elm327_log log; /* the wire log (elm327_log.h) */
+    std::atomic<bool> stop_requested{false};
+    /* A request's exchange is under way: the wire log takes it only
+     * with frame logging */
+    bool in_ask = false;
+
+    ecuio_elm327_transport() = default;
+    ecuio_elm327_transport(const ecuio_elm327_transport&) = delete;
+    ecuio_elm327_transport& operator=(const ecuio_elm327_transport&) = delete;
+    ~ecuio_elm327_transport() { elm327_log_close(log); }
 };
 
 using transport = ecuio_elm327_transport;
@@ -147,9 +161,50 @@ void copy_text(char* dst, size_t cap, const char* src)
     dst[n] = '\0';
 }
 
+/* Whether the exchange under way goes in the wire log: all but a
+ * request's, which goes in only with frame logging (elm327_log.h) */
+bool logging(const transport* t)
+{
+    return elm327_log_is_open(t->log) && (!t->in_ask || t->log.requests);
+}
+
+/* A line read, as the log shows it: "<" for a command's, "unasked:"
+ * when no command was out (sent nullptr), which always goes in */
+void log_line(transport* t, const char* sent, const elm327_reader& r)
+{
+    if (!elm327_log_is_open(t->log) || (sent != nullptr && !logging(t))) {
+        return;
+    }
+    char text[ELM327_LINE_MAX * 4 + 1];
+    elm327_log_text(r.line, r.len, text, sizeof(text));
+    elm327_log_write(t->log, "%s %s%s", sent == nullptr ? "unasked:" : "<",
+                     text,
+                     r.overflow ? " (cut: longer than a line holds)" : "");
+}
+
+/* A prompt: a command's with its time since the send, to a tenth of a
+ * millisecond; one with no command out is dropped, and always logged */
+void log_prompt(transport* t, const char* sent)
+{
+    if (sent == nullptr) {
+        elm327_log_write(t->log, "unasked prompt, dropped");
+        return;
+    }
+    if (!logging(t)) {
+        return;
+    }
+    const long long us = static_cast<long long>(
+        std::chrono::duration_cast<std::chrono::microseconds>(
+            std::chrono::steady_clock::now() - t->sent_at)
+            .count());
+    elm327_log_write(t->log, "prompt %lld.%lld ms after %s", us / 1000,
+                     (us % 1000) / 100, sent);
+}
+
 /* Feeds what has been read to the reader, calling on_line for each line
  * that isn't an echo of sent (nullptr: no echo expected), until the
- * prompt (true) or the bytes run out (false). */
+ * prompt (true) or the bytes run out (false). Every line and prompt goes
+ * to the wire log, echoes too. */
 template <typename OnLine>
 bool take_bytes(transport* t, const char* sent, OnLine& on_line, bool* line)
 {
@@ -157,12 +212,14 @@ bool take_bytes(transport* t, const char* sent, OnLine& on_line, bool* line)
         const elm327_step s = elm327_take(t->reader, t->rx_buf[t->rx_pos++]);
         if (s.line) {
             *line = true;
+            log_line(t, sent, t->reader);
             if (sent == nullptr ||
                 !elm327_is_echo(t->reader.line, t->reader.len, sent)) {
                 on_line(t->reader);
             }
         }
         if (s.prompt) {
+            log_prompt(t, sent);
             return true;
         }
     }
@@ -189,6 +246,8 @@ elm327_io drain(transport* t, uint32_t timeout_ms)
         const int32_t n =
             t->port.ops->read(t->port.impl, t->rx_buf, sizeof(t->rx_buf), wait);
         if (n < 0) {
+            elm327_log_write(t->log, "the port failed (a read with no "
+                                     "command out)");
             return elm327_io::failed;
         }
         if (n == 0) {
@@ -218,8 +277,13 @@ elm327_io command(transport* t, const char* cmd, bool watch_reset,
     }
     char sent[ELM327_CMD_MAX];
     bare_command(cmd, sent);
+    if (logging(t)) {
+        elm327_log_write(t->log, "> %s", sent);
+    }
+    t->sent_at = std::chrono::steady_clock::now();
     if (!t->port.ops->write(t->port.impl, reinterpret_cast<const uint8_t*>(cmd),
                             static_cast<uint32_t>(strlen(cmd)))) {
+        elm327_log_write(t->log, "the port failed (writing %s)", sent);
         return elm327_io::failed;
     }
     auto last = std::chrono::steady_clock::now();
@@ -239,6 +303,9 @@ elm327_io command(transport* t, const char* cmd, bool watch_reset,
             std::chrono::duration_cast<std::chrono::milliseconds>(now - last)
                 .count();
         if (quiet >= ELM327_PROMPT_TIMEOUT_MS) {
+            elm327_log_write(
+                t->log, "no line and no prompt for %u s (%s)",
+                static_cast<unsigned>(ELM327_PROMPT_TIMEOUT_MS / 1000), sent);
             return elm327_io::silent;
         }
         const uint32_t left =
@@ -247,6 +314,8 @@ elm327_io command(transport* t, const char* cmd, bool watch_reset,
             t->port.impl, t->rx_buf, sizeof(t->rx_buf),
             (left < ELM327_READ_SLICE_MS) ? left : ELM327_READ_SLICE_MS);
         if (n < 0) {
+            elm327_log_write(t->log,
+                             "the port failed (reading the reply to %s)", sent);
             return elm327_io::failed;
         }
         t->rx_len = static_cast<uint32_t>(n);
@@ -289,18 +358,19 @@ setup_answer contract(transport* t, const char* cmd)
 
 /* A setup command's failure, as attach reports it: the port's
  * (LOAD_FAILED), silence or a wrong answer (VENDOR_REFUSED, naming the
- * command and what came back). */
-ecuio_status_t refuse(const transport* t, const char* cmd,
-                      const setup_answer& a, const char* wanted)
+ * command and what came back). The words go in the wire log too. */
+ecuio_status_t refuse(transport* t, const char* cmd, const setup_answer& a,
+                      const char* wanted)
 {
+    const ecuio_status_t st = (a.io == elm327_io::failed)
+                                  ? ECUIO_ERR_LOAD_FAILED
+                                  : ECUIO_ERR_VENDOR_REFUSED;
     char sent[ELM327_CMD_MAX];
     bare_command(cmd, sent);
     if (a.io == elm327_io::failed) {
         ecuio_detail_set("%s: the port failed during the adapter's setup",
                          t->port_name);
-        return ECUIO_ERR_LOAD_FAILED;
-    }
-    if (a.io == elm327_io::silent) {
+    } else if (a.io == elm327_io::silent) {
         ecuio_detail_set(
             "the adapter on %s didn't answer %s within %u s", t->port_name,
             sent, static_cast<unsigned>(ELM327_PROMPT_TIMEOUT_MS / 1000));
@@ -311,7 +381,8 @@ ecuio_status_t refuse(const transport* t, const char* cmd,
         ecuio_detail_set("the adapter on %s answered %s with '%s', not %s",
                          t->port_name, sent, a.first, wanted);
     }
-    return ECUIO_ERR_VENDOR_REFUSED;
+    elm327_log_write(t->log, "the setup failed: %s", ecuio_last_error_detail());
+    return st;
 }
 
 /* AT SH (and AT CP for 29-bit) for transmit ID tx, unless it's the one
@@ -534,6 +605,15 @@ void take_frame(transport* t, const elm327_can_line& f, reply_seen& seen)
  * one single-frame reply is certain, then the reply to its prompt. */
 elm327_io ask(transport* t, uint32_t c, int32_t r, reply_seen& seen)
 {
+    /* The header switch, the request and its reply go in the wire log
+     * only with frame logging */
+    struct asking {
+        transport* t;
+        explicit asking(transport* x) : t(x) { t->in_ask = true; }
+        ~asking() { t->in_ask = false; }
+        asking(const asking&) = delete;
+        asking& operator=(const asking&) = delete;
+    } scope(t);
     ecuio_request_engine& e = t->engine;
     /* Until the request goes out, an early return leaves it unsent: a
      * one-shot stays due */
@@ -594,6 +674,7 @@ void close_port(transport* t)
     if (t->port_open) {
         t->port.ops->close(t->port.impl);
         t->port_open = false;
+        elm327_log_write(t->log, "%s closed", t->port_name);
     }
     t->configured = false;
     t->rx_len = t->rx_pos = 0;
@@ -607,10 +688,13 @@ bool reconnect(transport* t)
         char why[128];
         if (t->opener(t->port_name, t->serial_baud, &t->port, why,
                       sizeof(why)) != ECUIO_OK) {
+            elm327_log_write(t->log, "reopening %s failed: %s", t->port_name,
+                             why);
             return false;
         }
         t->port_open = true;
         t->rx_len = t->rx_pos = 0;
+        elm327_log_write(t->log, "%s reopened", t->port_name);
     }
     return run_setup(t, nullptr, 0) == ECUIO_OK;
 }
@@ -732,6 +816,8 @@ void elm327_worker(transport* t)
                 link_on_read(h, true, false, false);
             } else if (io == elm327_io::reset) {
                 /* setup again next pass; hard only if that fails */
+                elm327_log_write(t->log, "the adapter reset: the setup runs "
+                                         "again");
                 t->configured = false;
             }
         }
@@ -785,6 +871,7 @@ void elm327_detach(ecuio_session_t* session, void* impl)
         t->stop_requested.store(true);
         t->worker.join();
     }
+    elm327_log_write(t->log, "the session closes");
     close_port(t);
     delete t;
 }
@@ -905,6 +992,22 @@ ecuio_status_t elm327_attach(ecuio_session_t* session, const char* uri,
         return st;
     }
     t->port_open = true;
+    elm327_log_open(t->log);
+    if (elm327_log_is_open(t->log)) {
+        char text[512];
+        elm327_log_text(uri, strlen(uri), text, sizeof(text));
+        elm327_log_write(t->log, "QtTune ELM327 wire log (ADR-0026), core %s",
+                         ecuio_version_string());
+        elm327_log_write(t->log, "uri %s", text);
+        elm327_log_write(
+            t->log, "%s at %u bit/s; CAN at %lu bit/s, protocol %c; %s",
+            t->port_name, static_cast<unsigned>(t->serial_baud), t->can_baud,
+            t->protocol,
+            t->log.requests
+                ? "every request and reply (ECUIO_SUR_LOG_FRAMES=1)"
+                : "the setup, the readings and the link's events; the "
+                  "requests with ECUIO_SUR_LOG_FRAMES=1");
+    }
     char version[ELM327_LINE_MAX + 1] = {};
     st = run_setup(t.get(), version, sizeof(version));
     if (st != ECUIO_OK) {

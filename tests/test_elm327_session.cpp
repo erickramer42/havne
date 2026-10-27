@@ -14,6 +14,7 @@
 #include "ecuio/core.h"
 #include "ecuio/internal.h"
 #include "ecuio/profile.h"
+#include "elm327_log.h" /* core/src */
 #include "elm327_port.h" /* core/src */
 #include "fake_elm327.h"
 #include "new_counter.h"
@@ -22,11 +23,21 @@
 #include <atomic>
 #include <chrono>
 #include <cstring>
+#include <filesystem>
+#include <fstream>
 #include <functional>
 #include <mutex>
+#include <sstream>
 #include <string>
 #include <thread>
 #include <vector>
+
+#ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#endif
 
 #ifndef _WIN32
 #include <cerrno>
@@ -49,6 +60,153 @@ std::string uri(const std::string& query = "")
 {
     return std::string("elm327://") + kPort + query;
 }
+
+namespace fs = std::filesystem;
+
+/* Every session here writes its wire log into a directory of this run's
+ * own, so a run never prunes the user's logs in the temporary
+ * directory */
+fs::path g_log_root;
+
+class LogRootEnvironment : public ::testing::Environment
+{
+public:
+    void SetUp() override
+    {
+        g_log_root =
+            fs::temp_directory_path() /
+            ("qttune-elm327-logs-" +
+             std::to_string(
+                 std::chrono::steady_clock::now().time_since_epoch().count()));
+        fs::create_directories(g_log_root);
+        ecuio_elm327_set_log_dir(g_log_root.u8string().c_str());
+    }
+    void TearDown() override
+    {
+        ecuio_elm327_set_log_dir(nullptr);
+        std::error_code ec;
+        fs::remove_all(g_log_root, ec);
+    }
+};
+
+[[maybe_unused]] ::testing::Environment* const kLogRoot =
+    ::testing::AddGlobalTestEnvironment(new LogRootEnvironment);
+
+/* A directory of a test's own for the logs it reads; the run's again at
+ * the end of the scope */
+class LogDir
+{
+public:
+    explicit LogDir(const char* name) : dir_(g_log_root / name)
+    {
+        fs::create_directories(dir_);
+        ecuio_elm327_set_log_dir(dir_.u8string().c_str());
+    }
+    ~LogDir() { ecuio_elm327_set_log_dir(g_log_root.u8string().c_str()); }
+    LogDir(const LogDir&) = delete;
+    LogDir& operator=(const LogDir&) = delete;
+
+    const fs::path& path() const { return dir_; }
+
+    /* The names in the directory, sorted */
+    std::vector<std::string> names() const
+    {
+        std::vector<std::string> v;
+        for (const auto& e : fs::directory_iterator(dir_)) {
+            v.push_back(e.path().filename().u8string());
+        }
+        std::sort(v.begin(), v.end());
+        return v;
+    }
+
+    /* The one wire log here, whole */
+    std::string only_log() const
+    {
+        std::vector<std::string> logs;
+        for (const std::string& n : names()) {
+            if (elm327_log_kept_name(n.c_str())) {
+                logs.push_back(n);
+            }
+        }
+        EXPECT_EQ(logs.size(), 1u);
+        if (logs.empty()) {
+            return "";
+        }
+        std::ifstream in(dir_ / logs.back(), std::ios::binary);
+        std::stringstream ss;
+        ss << in.rdbuf();
+        return ss.str();
+    }
+
+private:
+    fs::path dir_;
+};
+
+/* Whether text holds each of parts, in this order */
+::testing::AssertionResult in_order(const std::string& text,
+                                    const std::vector<std::string>& parts)
+{
+    size_t at = 0;
+    for (const std::string& p : parts) {
+        const size_t found = text.find(p, at);
+        if (found == std::string::npos) {
+            return ::testing::AssertionFailure()
+                   << "'" << p << "' missing after offset " << at << " in:\n"
+                   << text;
+        }
+        at = found + p.size();
+    }
+    return ::testing::AssertionSuccess();
+}
+
+/* An environment variable set for a scope, as the transport reads it
+ * (GetEnvironmentVariable on Windows), restored after */
+class EnvSet
+{
+public:
+    EnvSet(const char* name, const char* value) : name_(name)
+    {
+#ifdef _WIN32
+        char old[64];
+        const DWORD n = GetEnvironmentVariableA(name, old, sizeof(old));
+        had_ = n > 0 && n < sizeof(old);
+        if (had_) {
+            old_ = old;
+        }
+        SetEnvironmentVariableA(name, value);
+#else
+        const char* old = getenv(name);
+        had_ = old != nullptr;
+        if (had_) {
+            old_ = old;
+        }
+        if (value != nullptr) {
+            setenv(name, value, 1);
+        } else {
+            unsetenv(name);
+        }
+#endif
+    }
+    ~EnvSet()
+    {
+#ifdef _WIN32
+        SetEnvironmentVariableA(name_.c_str(), had_ ? old_.c_str() : nullptr);
+#else
+        if (had_) {
+            setenv(name_.c_str(), old_.c_str(), 1);
+        } else {
+            unsetenv(name_.c_str());
+        }
+#endif
+    }
+    EnvSet(const EnvSet&) = delete;
+    EnvSet& operator=(const EnvSet&) = delete;
+
+private:
+    std::string name_;
+    std::string old_;
+    bool had_ = false;
+};
 
 bool wait_for(const std::function<bool()>& pred, int timeout_ms)
 {
@@ -853,8 +1011,172 @@ TEST_F(Elm327SessionTest, AWrongSetupAnswerRefusesTheConnect)
     EXPECT_EQ(s, nullptr);
 }
 
+/* ---- The wire log (core/src/elm327_log.h) ---------------------------- */
+
+/* Without frame logging: the header, the setup and the readings, each
+ * command with what came back and its prompt; the requests stay out */
+TEST_F(Elm327SessionTest, TheWireLogHoldsTheSetupAndTheReadings)
+{
+    const EnvSet off("ECUIO_SUR_LOG_FRAMES", nullptr);
+    const LogDir logs("setup");
+    {
+        Session s;
+        ASSERT_EQ(s.create(uri("?poll=0x0C")), ECUIO_OK);
+        s.start();
+        ASSERT_TRUE(wait_for([&] { return s.cap.count("41 0C") >= 3; }, 3000));
+    }
+    const std::string log = logs.only_log();
+    EXPECT_TRUE(in_order(
+        log, {"] QtTune ELM327 wire log (ADR-0026), core ",
+              std::string("] uri ") + uri("?poll=0x0C"),
+              std::string("] ") + kPort +
+                  " at 38400 bit/s; CAN at 500000 bit/s, protocol 6; the setup",
+              "] > ATZ", "] < ELM327 v1.4b", "] prompt ", " ms after ATZ",
+              "] > ATE0", "] < OK", "] > ATST19", "] > ATI", "] > STI",
+              "] < STN2255 v9.9.9", "] > STVR", "] < 13.80", "] > ATPPS",
+              "] the session closes", std::string("] ") + kPort + " closed"}));
+    EXPECT_EQ(log.find("] > 010C"), std::string::npos) << log;
+    EXPECT_EQ(log.find("] < 7E8"), std::string::npos) << log;
+}
+
+/* With frame logging, as a recording sets it: every request, every line
+ * of its reply, and its prompt's time after the request */
+TEST_F(Elm327SessionTest, TheWireLogTakesEveryRequestWhenRecording)
+{
+    const EnvSet on("ECUIO_SUR_LOG_FRAMES", "1");
+    const LogDir logs("requests");
+    {
+        Session s;
+        ASSERT_EQ(s.create(uri("?poll=0x0C")), ECUIO_OK);
+        s.start();
+        ASSERT_TRUE(wait_for([&] { return s.cap.count("41 0C") >= 3; }, 3000));
+    }
+    const std::string log = logs.only_log();
+    EXPECT_TRUE(
+        in_order(log, {"every request and reply (ECUIO_SUR_LOG_FRAMES=1)",
+                       "] > ATPPS", "] > 010C1", "] < 7E8", " ms after 010C1",
+                       "] > 010C1", "] < 7E8"}));
+}
+
+/* A refused setup says why, and a dropped link shows its failure, the
+ * reopens that fail and the one that brings the setup back */
+TEST_F(Elm327SessionTest, TheWireLogNamesFailuresAndRecoveries)
+{
+    const EnvSet off("ECUIO_SUR_LOG_FRAMES", nullptr);
+    {
+        const LogDir logs("refused");
+        set_knobs([](fake_elm327::knobs& k) { k.refuse = "ATH1"; });
+        ecuio_session_t* s = nullptr;
+        EXPECT_EQ(ecuio_session_create(uri().c_str(), &s),
+                  ECUIO_ERR_VENDOR_REFUSED);
+        EXPECT_TRUE(
+            in_order(logs.only_log(),
+                     {"] > ATH1", "] < ?",
+                      std::string("] the setup failed: the adapter on ") +
+                          kPort + " answered ATH1 with '?', not OK",
+                      std::string("] ") + kPort + " closed"}));
+        set_knobs([](fake_elm327::knobs& k) { k.refuse = nullptr; });
+    }
+    const LogDir logs("dropped");
+    {
+        Session s;
+        ASSERT_EQ(s.create(uri("?poll=0x0C")), ECUIO_OK);
+        s.start();
+        ASSERT_TRUE(wait_for([&] { return s.cap.count("41 0C") >= 1; }, 3000));
+        set_knobs([](fake_elm327::knobs& k) { k.dropped = true; });
+        ASSERT_TRUE(wait_for(
+            [&] { return s.state() == ECUIO_ERR_TRANSPORT_HARD_FAILURE; },
+            3000));
+        std::this_thread::sleep_for(std::chrono::milliseconds(300));
+        set_knobs([](fake_elm327::knobs& k) { k.dropped = false; });
+        ASSERT_TRUE(wait_for([&] { return s.state() == ECUIO_OK; }, 10000));
+    }
+    EXPECT_TRUE(in_order(
+        logs.only_log(),
+        {"] the port failed (", std::string("] ") + kPort + " closed",
+         std::string("] reopening ") + kPort + " failed: no such port",
+         std::string("] ") + kPort + " reopened", "] > ATZ", "] > ATST19"}));
+
+    const LogDir reset_logs("reset");
+    {
+        Session s;
+        ASSERT_EQ(s.create(uri("?poll=0x0C")), ECUIO_OK);
+        s.start();
+        ASSERT_TRUE(wait_for([&] { return s.cap.count("41 0C") >= 1; }, 3000));
+        const uint32_t resets = fake_count("ATE0");
+        fake_elm327::with([](fake_elm327::adapter& a) {
+            a.spontaneous_reset(fake_elm327::steady_us());
+        });
+        ASSERT_TRUE(
+            wait_for([&] { return fake_count("ATE0") > resets; }, 3000));
+    }
+    EXPECT_TRUE(in_order(reset_logs.only_log(),
+                         {"] > ATPPS", "] unasked: ELM327 v1.4b",
+                          "] the adapter reset: the setup runs again",
+                          "] > ATZ", "] > ATE0"}));
+}
+
+/* Each connect starts a log; the oldest past the newest 50 go, and a
+ * name of another shape is never touched */
+TEST_F(Elm327SessionTest, TheWireLogKeepsTheNewest50)
+{
+    const LogDir logs("kept");
+    for (int i = 0; i < 55; ++i) {
+        char name[64];
+        snprintf(name, sizeof(name), "ecuio-elm327.20200101-000000-%03d.log",
+                 i);
+        std::ofstream(logs.path() / name) << "earlier\n";
+    }
+    std::ofstream(logs.path() / "ecuio-elm327.notes.log") << "mine\n";
+    std::ofstream(logs.path() / "other.log") << "mine\n";
+    {
+        Session s;
+        ASSERT_EQ(s.create(uri()), ECUIO_OK);
+    }
+    const std::vector<std::string> names = logs.names();
+    const auto kept =
+        std::count_if(names.begin(), names.end(), [](const std::string& n) {
+            return elm327_log_kept_name(n.c_str());
+        });
+    EXPECT_EQ(kept, ELM327_KEPT_LOGS);
+    const auto has = [&](const char* n) {
+        return std::find(names.begin(), names.end(), n) != names.end();
+    };
+    EXPECT_FALSE(has("ecuio-elm327.20200101-000000-005.log"))
+        << "the oldest go";
+    EXPECT_TRUE(has("ecuio-elm327.20200101-000000-006.log"));
+    EXPECT_TRUE(has("ecuio-elm327.notes.log"));
+    EXPECT_TRUE(has("other.log"));
+    EXPECT_FALSE(has("ecuio-elm327.20200101-000000-000.log"));
+}
+
+/* The names the log keeps, and how it shows a byte that isn't text */
+TEST(Elm327LogTest, KeptNamesAndTextHaveTheirShape)
+{
+    EXPECT_TRUE(elm327_log_kept_name("ecuio-elm327.20261027-172533-123.log"));
+    EXPECT_TRUE(elm327_log_kept_name("ecuio-elm327.20261027-172533-123-2.log"));
+    EXPECT_TRUE(elm327_log_kept_name("ecuio-elm327.20261027-172533-123-9.log"));
+    for (const char* other : {"ecuio-elm327.log", "ecuio-elm327.notes.log",
+                              "ecuio-elm327.20261027-172533-123-1.log",
+                              "ecuio-elm327.20261027-172533-123-10.log",
+                              "ecuio-elm327.2026102-172533-123.log",
+                              "ecuio-elm327.20261027-172533-123.log.bak",
+                              "ecuio-surrogate.20261027-172533-123.log"}) {
+        EXPECT_FALSE(elm327_log_kept_name(other)) << other;
+    }
+
+    char out[32];
+    elm327_log_text("AB\x01\\>\x8F", 6, out, sizeof(out));
+    EXPECT_STREQ(out, "AB\\x01\\x5C>\\x8F");
+    elm327_log_text("ABCDEF", 6, out, 4);
+    EXPECT_STREQ(out, "ABC") << "cut to fit, terminated";
+    elm327_log_text("A\x01", 2, out, 5);
+    EXPECT_STREQ(out, "A") << "an escape is never cut part way";
+}
+
 /* What a frame costs the worker: no operator new between two frames once
- * the session runs, for its frames and its values (ADR-0026 §3) */
+ * the session runs, for its frames and its values (ADR-0026 §3), with
+ * the wire log taking every request and reply too */
 namespace {
 struct WorkerNews {
     static constexpr int kFrom = 8;
@@ -884,23 +1206,28 @@ void worker_news_values_cb(const ecuio_value_batch_t*, void* user)
 
 TEST_F(Elm327SessionTest, TheWorkerAllocatesNothingPerFrame)
 {
-    WorkerNews w;
-    ecuio_session_t* s = nullptr;
-    ASSERT_EQ(ecuio_session_create(uri("?probe=0&identify=0").c_str(), &s),
-              ECUIO_OK);
-    EXPECT_EQ(ecuio_register_frame_callback(s, worker_news_cb, &w), ECUIO_OK);
-    EXPECT_EQ(ecuio_register_values_callback(s, worker_news_values_cb, &w),
-              ECUIO_OK);
-    EXPECT_EQ(ecuio_session_start(s), ECUIO_OK);
-    const bool reached =
-        wait_for([&] { return w.frames.load() >= w.to; }, 8000);
-    EXPECT_EQ(ecuio_session_close(s), ECUIO_OK);
-    ecuio_session_destroy(s);
-    ASSERT_TRUE(reached) << w.frames.load() << " frames";
-    EXPECT_GT(w.batches.load(), 0) << "the values path ran";
-    EXPECT_EQ(w.at_to.load() - w.at_from.load(), 0u)
-        << "operator new on the worker between frames " << WorkerNews::kFrom
-        << " and " << w.to;
+    for (const char* lines : {static_cast<const char*>(nullptr), "1"}) {
+        const EnvSet frame_logging("ECUIO_SUR_LOG_FRAMES", lines);
+        WorkerNews w;
+        ecuio_session_t* s = nullptr;
+        ASSERT_EQ(ecuio_session_create(uri("?probe=0&identify=0").c_str(), &s),
+                  ECUIO_OK);
+        EXPECT_EQ(ecuio_register_frame_callback(s, worker_news_cb, &w),
+                  ECUIO_OK);
+        EXPECT_EQ(ecuio_register_values_callback(s, worker_news_values_cb, &w),
+                  ECUIO_OK);
+        EXPECT_EQ(ecuio_session_start(s), ECUIO_OK);
+        const bool reached =
+            wait_for([&] { return w.frames.load() >= w.to; }, 8000);
+        EXPECT_EQ(ecuio_session_close(s), ECUIO_OK);
+        ecuio_session_destroy(s);
+        const char* mode = lines ? "with request lines" : "without";
+        ASSERT_TRUE(reached) << w.frames.load() << " frames, " << mode;
+        EXPECT_GT(w.batches.load(), 0) << "the values path ran, " << mode;
+        EXPECT_EQ(w.at_to.load() - w.at_from.load(), 0u)
+            << "operator new on the worker between frames " << WorkerNews::kFrom
+            << " and " << w.to << ", " << mode;
+    }
 }
 
 #ifndef _WIN32

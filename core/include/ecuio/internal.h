@@ -133,6 +133,12 @@ typedef ecuio_status_t (*ecuio_elm327_port_open_t)(const char* name,
  * adapter. */
 void ecuio_elm327_set_port_opener(ecuio_elm327_port_open_t open);
 
+/* TEST-ONLY: the directory (UTF-8) the wire logs of ELM327 sessions
+ * created after this call go to; NULL restores the temporary directory.
+ * The session tests keep their logs, and their pruning, out of the
+ * user's. */
+void ecuio_elm327_set_log_dir(const char* dir);
+
 /*
  * J2534 transport factory (Win32). URI grammar:
  *   j2534://[<selector>][?<key>=<value>[&<key>=<value>...]]
