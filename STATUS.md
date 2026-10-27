@@ -266,8 +266,8 @@ in the backlog.
 - **Low-glare and night themes (M).** Amber and red-on-black schemes
   for driving at night.
   - `Theme` already centralizes the palette, but the analog gauge
-    hard-codes its face, bezel and needle colors, and Home its logo
-    gradient; they need Theme roles first.
+    hard-codes its face, bezel and needle colors; they need Theme roles
+    first.
   - A near-monochrome scheme must keep warning and danger
     distinguishable by more than hue, for example with a label or
     icon.
