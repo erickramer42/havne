@@ -374,7 +374,7 @@ round trip each, negligible at the transport's read cap
 | Fault state on real hardware, clean teardown; 4-byte filter shape accepted with logged vendor status 0 | Informal bench observation 2026-10-20 ([sheet](bench-sessions/2026-10-20.md)), under that build's link rules; under the current rules the same no-ACK setup latches `ECUIO_ERR_REQUEST_FAILED` (next row). |
 | Requests-failing and quiet states on real hardware through the x86 surrogate: the banner at the first failed write, one episode, the backoff to its 5 s cap; quiet after ten empty reads (`ERR_BUFFER_EMPTY`) under `?profile=raw`; clean teardown on every connect | BENCH run on the OBDX Pro VX, 2026-10-22 (`0a8beae`, [sheet](bench-sessions/2026-10-22.md)) |
 | The `obd2` set on a live vehicle through the x86 surrogate: its rotation, `?poll=` and the three supported-PID bitmaps answered by the engine ECU; the values, decoded a second time from the logged bytes with the J1979 formulas, match the display, and RPM matched the tachometer; ok, quiet and recovery through an ignition cycle | Vehicle session, 2026-10-22 ([sheet](bench-sessions/2026-10-22-vehicle.md)) |
-| The v0.3.1 release zip, as a user gets it: its SHA-256 matches `SHA256SUMS.txt`, `gh attestation verify` passes, and after SmartScreen's "Run anyway" the extracted `qttune.exe` runs `mock://demo`; with no VX attached, connecting `j2534://OBDX Pro - VX` fails with "the adapter's driver refused: PassThruOpen returned status 34 (vendor-specific)" (v0.3.1's wording); with the VX on USB and no car, the session opens through the x86 surrogate (battery 0.0 V, the VX's firmware and DLL versions), the supported-PID query goes unanswered and the link goes to requests failing; disconnects are clean | BENCH, 2026-10-25, the owner's `-rc1` dry run and the `v0.3.1` download (the activity log read back in the session, not committed). On the dev machine, which has Visual Studio, so it doesn't show the app-local runtime on a bare PC (Gaps) |
+| The v0.3.1 release zip, as a user gets it: its SHA-256 matches `SHA256SUMS.txt`, `gh attestation verify` passes, and after SmartScreen's "Run anyway" the extracted `qttune.exe` runs `mock://demo`; with no VX attached, connecting `j2534://OBDX Pro - VX` fails with "the adapter's driver refused: PassThruOpen returned status 34 (vendor-specific)" (v0.3.1's wording); with the VX on USB and no car, the session opens through the x86 surrogate (battery 0.0 V, the VX's firmware and DLL versions), the supported-PID query goes unanswered and the link goes to requests failing; disconnects are clean | BENCH, 2026-10-25, the owner's `-rc1` dry run and the `v0.3.1` download (the activity log read back in the session, not committed), on the dev machine, which has Visual Studio. The owner also ran the `v0.3.1` zip on a PC without Visual Studio: the simulated vehicle drove, the Log page showed frames and Live filled with mock values; no adapter was connected there (Gaps) |
 
 ## Manual smoke — link-health UI
 
@@ -417,11 +417,14 @@ requests and quiet states
 - **Discovery's UTF-16 registry read is untested.** The non-ASCII
   tests start from a path; reading one from `FUNCTIONLIBRARY` would
   need an HKLM entry, which needs elevation.
-- **The release zip hasn't run on a PC without Visual Studio.** The
-  owner's run of v0.3.1 (2026-10-25) was on the dev machine, where the
-  Visual C++ runtime is installed anyway. `stage.ps1` checks that every
-  DLL `qttune.exe` imports ships in the zip or is part of Windows, and
-  that the staged app starts, but on that same machine.
+- **The release zip has run on a PC without Visual Studio only on
+  mock data.** There, v0.3.1's zip ran `mock://demo`, and frames and
+  Live's values arrived. No adapter has been connected on such a PC,
+  so neither surrogate has run on one. v0.3.2's zip, which adds the
+  x64 surrogate, hasn't run there at all.
+  Each surrogate links the C runtime statically, and `stage.ps1`
+  checks that every DLL `qttune.exe` imports ships in the zip or is
+  part of Windows, but both checks run on the dev machine.
 - **GCC and Clang warnings are seen only in CI logs.** Every target
   builds with warnings on, and the local MSVC count is 0, but no GCC
   or Clang build runs on the dev machine and warnings don't fail CI.
