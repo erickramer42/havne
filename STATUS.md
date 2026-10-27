@@ -26,8 +26,8 @@ bus and in two read-only sessions on one car
 ECU answered, the values decoded and tracked the cluster, and the
 second session ran the request engine, the probe, identification and
 `uds-generic` there. Every item in [After v0.3.0](#after-v030) has
-shipped; the next milestone is still to be chosen from the
-[backlog](#backlog).
+shipped; the next milestone is the ELM327 transport
+([ADR-0026](docs/adr/0026-elm327-transport.md), proposed).
 
 - **Works:**
   - **Mock transport,** on every platform: a scripted drive cycle (a
@@ -359,10 +359,11 @@ matters: the original-copy file format constrains everything after it.
   `mock://` and `replay://` exist (Known Issue #2).
   - It's a new transport, not a J2534 shim: ELM327 is a text
     AT-command protocol with its own framing and flow control.
-  - Settle in an ADR first: core can't link Qt, so Bluetooth needs
-    either per-platform native code in core (CoreBluetooth, WinRT,
-    BlueZ, the Android SDK) or a byte-stream transport that the app
-    layer feeds.
+  - [ADR-0026](docs/adr/0026-elm327-transport.md) (proposed) has core
+    open serial ports itself, which covers USB and classic Bluetooth
+    (a paired SPP adapter is a serial port on every desktop system).
+    Bluetooth LE and the mobile apps need a byte stream the app layer
+    feeds, built later behind the same seam.
 - **Legacy buses:** see the roadmap above.
 
 ### Performance
