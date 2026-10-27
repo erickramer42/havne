@@ -134,5 +134,6 @@ $zip = Join-Path $out "$name.zip"
 if (Test-Path $zip) { Remove-Item -Force $zip }
 Compress-Archive -Path $stage -DestinationPath $zip
 $hash = (Get-FileHash -Algorithm SHA256 $zip).Hash.ToLowerInvariant()
-"$hash  $name.zip" | Set-Content -Encoding ascii (Join-Path $out 'SHA256SUMS.txt')
+# LF, not Set-Content's CRLF: sha256sum -c reads the CR as part of the name
+[IO.File]::WriteAllText((Join-Path $out 'SHA256SUMS.txt'), "$hash  $name.zip`n")
 Write-Host "$name.zip $([math]::Round((Get-Item $zip).Length / 1MB, 1)) MB, sha256 $hash"
