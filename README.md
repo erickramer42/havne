@@ -94,8 +94,8 @@ screen, is [docs/architecture.md](docs/architecture.md).
   [ADR-0005](docs/adr/0005-coalesced-signal-updates.md),
   [ADR-0024](docs/adr/0024-decode-on-the-worker.md)).
 - **Measured under load.** A recorded engine start replayed through
-  the app's bridge: the worker sustains about 400,000 frames a second
-  through decode, nearly 90 times a full classic CAN bus; frames reach
+  the app's bridge: the worker sustains over 400,000 frames a second
+  through decode, more than 90 times a full classic CAN bus; frames reach
   the GUI thread in under a quarter of a millisecond (median), and
   values reach the pages at the next 10 Hz tick. CI re-runs the load
   test on Windows and Linux for every push, and every session's

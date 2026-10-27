@@ -158,8 +158,8 @@ an issue is resolved it is removed, and its number is not reused.
    worker** ([ADR-0024](docs/adr/0024-decode-on-the-worker.md)). A
    subscription can't trim that work: it is the chart's filter only,
    because the Dashboard reads every signal. Measured, it costs about
-   1.4 µs a frame at 1000 defs, well inside the J2534 worker's 10 ms read
-   slice, and the GUI thread's cost per frame no longer depends on it
+   1.4 to 2.2 µs a frame at 1000 defs (the figure varies by session),
+   well inside the J2534 worker's 10 ms read slice, and the GUI thread's cost per frame no longer depends on it
    ([docs/testing.md](docs/testing.md#performance)). A per-signal enable
    mask can trim it if a CAN FD rate makes it matter.
 6. **The session API is single-caller by contract.** The bridge is the
@@ -379,7 +379,8 @@ matters: the original-copy file format constrains everything after it.
   thread's cost per frame doesn't grow with the profile and values
   survive frames dropped under load; the chart shows each value at its
   frame's time and keeps a window's peak. Left: the bridge's 4 KB copy
-  per frame, the worker's largest per-frame cost (`bench_bridge`,
+  per frame, the worker's largest per-frame cost up to about 500 defs
+  (`bench_bridge`,
   [docs/testing.md](docs/testing.md#performance)).
 
 ### Toolchain

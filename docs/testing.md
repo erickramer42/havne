@@ -90,34 +90,41 @@ which decodes nothing, is the baseline.
 build/tests/Release/bench_bridge.exe [frames per run, default 20000]
 ```
 
-On the dev machine, 2026-10-26 (Release; each figure the median of
-three runs of 20,000 frames; the tick's range is across three such
-measurements):
+On the dev machine, 2026-10-27, with no heavy process running
+(Release; each figure the median of three runs of 20,000 frames; the
+ranges are across three such measurements):
 
 | Defs | Worker: match and decode, µs a frame | GUI thread: one tick's update, µs |
 |---|---|---|
-| 9 | 0.09 | 0.3–0.4 |
-| 100 | 0.23 | 1.9–2.2 |
-| 250 | 0.42 | 4.7–5.3 |
-| 500 | 0.77 | 9.2–9.8 |
-| 1000 | 1.37 | 18.2–19.6 |
+| 9 | 0.08–0.09 | 0.3–0.7 |
+| 100 | 0.26–0.28 | 1.8–2.3 |
+| 250 | 0.50–0.53 | 4.4–5.7 |
+| 500 | 0.92–0.94 | 8.9–9.1 |
+| 1000 | 1.76–1.77 | 18.1–18.6 |
 
-- **The match and decode cost about 1.4 ns a def a frame.** Against
+- **The match and decode cost about 1.7 ns a def a frame.** Against
   the bus: classic CAN at 500 kbit/s carries at most about 4,500
-  eight-byte frames a second, so 1000 defs take about 6 ms of the
+  eight-byte frames a second, so 1000 defs take about 8 ms of the
   worker's second, under 1 %. The first vehicle's request rotation ran
   about 26 frames a second. A CAN FD bus can run several times the
   classic rate: at 25,000 frames a second the same profile would take
-  about 3.5 % (worked out from these numbers; no CAN FD bus was
+  about 4.4 % (worked out from these numbers; no CAN FD bus was
   measured). It sits well inside the J2534 worker's 10 ms read slice.
-- **The 4 KB copy is the worker's largest cost:** `onFrame` (the copy
-  and the queued call) takes 1.2 to 2.0 µs at any profile size, more
-  than the match and decode.
+- **The decode figure varies between sessions more than within one.**
+  The three measurements above agree within 0.01 µs, but other
+  sessions on the same machine read 1.37 to 2.16 µs at 1000 defs
+  ([ADR-0024](adr/0024-decode-on-the-worker.md)), so read it as about
+  1.4 to 2.2 ns a def a frame: 6 to 10 ms of the worker's second on a
+  full classic bus, 3.4 to 5.4 % at the CAN FD rate above. The tick
+  and the drain stay within their ranges across those sessions.
+- **The 4 KB copy is the worker's largest cost up to about 500 defs:**
+  `onFrame` (the copy and the queued call) takes 0.9 to 2.1 µs at any
+  profile size, more than the match and decode until 1000 defs, where
+  the decode passes it.
 - **The GUI thread's cost per frame doesn't grow with the profile:**
-  its drain stays under 1 µs from a raw session to 1000 defs, because
-  the decode runs on the worker (three runs on 2026-10-26 with other
-  heavy processes on the machine, so an upper bound). The bridge's
-  staging of a batch is near the bench's resolution at every size.
+  its drain stays under 0.4 µs from a raw session to 1000 defs, because
+  the decode runs on the worker. The bridge's staging of a batch is
+  near the bench's resolution at every size.
 - **The tick's update is linear in the profile:** under 0.02 % of the
   GUI thread at 1000 defs and 10 Hz. Each window keeps every signal's
   newest, lowest and highest value
@@ -147,23 +154,29 @@ Latencies are read at the top of a histogram bucket, at most 12.5 %
 above the true value; the maximum is exact. QML's painting isn't
 included: the bench runs headless.
 
-Three runs on the dev machine, 2026-10-26 (ranges across the runs;
-milliseconds as median / p99):
+Three runs on the dev machine, 2026-10-27, with no heavy process
+running (ranges across the runs; milliseconds as median / p99):
 
 | Run | Frames handled / dropped | Worker frames/s | Frame to GUI thread | Value to model | Chart's peak, rpm |
 |---|---|---|---|---|---|
-| Full speed, one pass (13–16 ms) | 7,074 / 0 | | 0.08–0.14 / 0.32–0.70 | 107–115 / 108–116 | 1,261.25 |
-| 100×, one pass (2.99 s) | 7,074 / 0 | | 0.08 / 0.29–0.38 | 57–61 / 111–114 | 1,261.25 |
-| 10×, one pass (29.75 s) | 7,074 / 0 | | 0.04 / 0.32–0.35 | 49–53 / 112–113 | 1,261.25 |
-| Full speed, looping 3 s | 1.35–1.42 million / 0 | 386,000–411,000 | 0.21–0.24 / 0.96–1.15 | 90 / 111–112 | |
+| Full speed, one pass (14–16 ms) | 7,074 / 0 | | 0.09–0.10 / 0.38–1.28 | 98–115 / 100–116 | 1,261.25 |
+| 100×, one pass (2.98 s) | 7,074 / 0 | | 0.08–0.10 / 0.38–0.41, one run 28.7 | 49–57 / 110–113, one run 359 | 1,261.25 |
+| 10×, one pass (29.75 s) | 7,074 / 0 | | 0.04–0.05 / 0.32–0.35 | 49 / 112–115 | 1,261.25 |
+| Full speed, looping 3 s | 1.44–1.72 million / 0–955 | 417,000–474,000 | 0.24–0.26 / 1.15–1.28 | 90–98 / 111–113 | |
 
-- **Throughput:** the worker sustains about 400,000 frames a second,
-  nearly 90 times a fully loaded classic CAN bus (about 4,500 frames a
-  second), and the GUI thread keeps up with it. The cap does drop at
-  that rate now and then: in two earlier runs of the same build a
-  one-pass run dropped 255 and 467 frames, and a looping run 40,288 of
-  1.27 million (3 %). Every value of a dropped frame still reaches the
-  pages ([ADR-0024](adr/0024-decode-on-the-worker.md)).
+- **Throughput:** the worker sustains 417,000 to 474,000 frames a
+  second, more than 90 times a fully loaded classic CAN bus (about
+  4,500 frames a second), and the GUI thread keeps up with it. The cap
+  does drop at that rate now and then: one looping run above dropped
+  955 of 1.72 million frames, and on 2026-10-26 one-pass runs dropped
+  255 and 467 frames and a looping run 40,288 of 1.27 million (3 %).
+  Every value of a dropped frame still reaches the pages
+  ([ADR-0024](adr/0024-decode-on-the-worker.md)).
+- **One stall in three runs:** in one 100× pass the GUI thread was held
+  up once, up to 316 ms for a frame and 359 ms at p99 for a value.
+  Nothing dropped and the peak held. The other runs show no stall, and
+  its cause wasn't found. CI's bounds (500 ms and 1,000 ms at p99) have
+  room for a stall that size, but not much.
 - **Values wait for the tick, by design**
   ([ADR-0005](adr/0005-coalesced-signal-updates.md)): paced, the
   median is about half a tick and p99 a tick plus the timer's jitter.
@@ -171,9 +184,9 @@ milliseconds as median / p99):
   waits out the rest of it.
 - **Frames reach the GUI thread** in under a quarter of a millisecond
   at the median, and about a millisecond at p99 even at full speed.
-- **The limit it found:** at full speed the recording misses about 60 %
-  of the values. The staging holds 16,384 values a window, 164,000 a
-  second, against about 400,000 arriving. The pages lose nothing: each
+- **The limit it found:** at full speed the recording misses about two
+  thirds of the values. The staging holds 16,384 values a window,
+  164,000 a second, against 480,000 to 570,000 arriving. The pages lose nothing: each
   window keeps every signal's newest, lowest and highest value whatever
   the limit, and the activity log says when the recording misses some.
   A full classic CAN bus at four values a frame gives 18,000 a second.
