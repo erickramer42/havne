@@ -14,7 +14,8 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
 - **Replay** ([ADR-0023](docs/adr/0023-replay-transport.md)):
   `replay://<recording>` plays a recording's `frames.csv` back on every
   platform at its own pace, at `?speed=` 0.1 to 100 or `max`, and with
-  `?loop=1` round again. Its default profile is `raw`; a J2534
+  `?loop=1` round again (a recording whose frames all share one time
+  plays once). Its default profile is `raw`; a J2534
   recording decodes under `?profile=obd2`. The activity log says what's
   playing and when it ends, and the session stays open at the end. If
   the recording changes or disappears while it plays, playback stops
@@ -47,6 +48,8 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
   value of every 100 ms window, so a short peak stays on the chart.
 
 ### Fixed
+- A link failure's activity-log line always counts its own episode:
+  one could read "adapter fault (0 episode(s))" and repeat with 1.
 - The Dashboard's held peaks and lows catch a value between two
   refreshes, as the strip chart does: the engine start replayed fast
   had shown a peak of 1,195 rpm against the recording's 1,261.
