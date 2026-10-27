@@ -48,9 +48,10 @@ Using an adapter
 - Each vendor driver runs in a helper process of its own: 32-bit
   drivers in ecuio-j2534-surrogate.exe, 64-bit ones in
   ecuio-j2534-surrogate-x64.exe. Both must stay next to qttune.exe.
-- QtTune only reads: it sends standard OBD-II requests for live data
-  and never changes anything in the vehicle. It has been tested read-only on one vehicle with one
-  adapter; other vehicles and adapters are untested.
+- QtTune only reads: it sends standard diagnostic read requests (live
+  data and identification) and never changes anything in the vehicle.
+  It has been tested read-only on one vehicle with one adapter; other
+  vehicles and adapters are untested.
 
 
 What's in this folder

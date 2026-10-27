@@ -12,6 +12,9 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
 
 ## [0.3.2] - 2026-10-26
 
+Replay, decoding in core, and every driver in a process of its own
+([full notes](docs/releases/v0.3.2.md)).
+
 ### Added
 - **Replay** ([ADR-0023](docs/adr/0023-replay-transport.md)):
   `replay://<recording>` plays a recording's `frames.csv` back on every

@@ -12,7 +12,7 @@ simulated vehicle lets it run with no hardware at all.
 > [!WARNING]
 > **Experimental software.** Tested read-only on one vehicle with one adapter — see [DISCLAIMER.md](DISCLAIMER.md).
 >
-> QtTune runs end-to-end against the simulator and a fake J2534 vendor driver. Through a real adapter it has read live data from one vehicle: in read-only sessions on 2026-10-22 and 2026-10-25 the engine ECU answered its requests and the values decoded and tracked the instrument cluster ([session sheet](docs/bench-sessions/2026-10-25-vehicle.md)). Other vehicles and adapters are untested; [STATUS.md](STATUS.md) tracks what is and isn't verified.
+> QtTune runs end to end against its simulated vehicle and a fake J2534 vendor driver. Through one real adapter, an OBDX Pro VX, it has read live data from one car in two read-only sessions: the engine ECU answered its requests, and the values decoded and tracked the instrument cluster ([session sheet](docs/bench-sessions/2026-10-25-vehicle.md)). Other vehicles and adapters are untested; [STATUS.md](STATUS.md) tracks what is and isn't verified.
 
 ![The QtTune Dashboard through a quarter mile on the warmed-up simulated vehicle: launch control holds the engine near 4,000 rpm at the line, the tires spin off it, three upshifts at 6,800 rpm refill the shift lights, and speed climbs to about 107 mph at the line while coolant rises from 194 to 216 °F, where the fan cuts in, and the oil from 225 to 239 °F, before the driver lifts](docs/images/dashboard.gif)
 
@@ -96,25 +96,33 @@ screen, is [docs/architecture.md](docs/architecture.md).
 - **Measured under load.** A recorded engine start replayed through
   the app's bridge: the worker sustains about 400,000 frames a second
   through decode, nearly 90 times a full classic CAN bus; frames reach
-  the GUI thread in under a quarter of a millisecond (median), and values reach the pages
-  at the next 10 Hz tick. CI re-runs the load test on Windows and Linux
-  for every push, and every session's activity log ends with the same
-  figures ([docs/testing.md](docs/testing.md#load-test-the-replay-fixture-through-the-bridge)).
+  the GUI thread in under a quarter of a millisecond (median), and
+  values reach the pages at the next 10 Hz tick. CI re-runs the load
+  test on Windows and Linux for every push, and every session's
+  activity log ends with the same figures
+  ([docs/testing.md](docs/testing.md#load-test-the-replay-fixture-through-the-bridge)).
 - **No fabricated readings.** A value never received shows "—", never
   0, and a value older than 3 s dims.
 - **Tested in tiers.** Unit tests cover the core, decoding, the C ABI
   and the bridge (headless). Qt Quick tests run the app's own pages
   against a real bridge, offscreen. A harness tier drives the whole
   J2534 stack against an in-tree fake vendor DLL, through the x64
-  surrogate, and locally through the x86 one. CI builds and tests on Windows, Linux and
-  macOS, runs the core under ASan/UBSan, fuzzes the signal decoder and
-  validators with libFuzzer ([fuzz/README.md](fuzz/README.md)),
-  holds the core and the surrogate to clang-tidy's static analyzer and
-  bug-finding checks, compiles Android and iOS, and, on pull requests, launches the iOS app
-  in the Simulator ([docs/testing.md](docs/testing.md)). The coverage
-  badge is line coverage of the native code (core, surrogate, bridge)
-  over the whole suite on Windows CI; QML isn't counted
+  surrogate, and locally through the x86 one
+  ([docs/testing.md](docs/testing.md)).
+- **CI on every push.** Builds and tests on Windows, Linux and macOS;
+  runs the core under ASan and UBSan; fuzzes the signal decoder, the
+  validators and the `uds-generic` query parser with libFuzzer
+  ([fuzz/README.md](fuzz/README.md)); holds the core and the surrogate
+  to clang-tidy's analyzer and bug-finding checks, with CodeQL beside
+  it; compiles Android and iOS; and, on pull requests, launches the iOS
+  app in the Simulator. The coverage badge is line coverage of the
+  native code (core, surrogate, bridge) over the whole suite on
+  Windows; QML isn't counted
   ([docs/testing.md](docs/testing.md#coverage)).
+- **Releases with signed provenance.** Each Windows download is built by a
+  tagged workflow that refuses a commit whose CI didn't pass, checks
+  the package before zipping it, and attaches a signed SLSA build
+  provenance ([docs/development.md](docs/development.md#releases)).
 - **Decisions and evidence on record.** Design decisions are
   [ADRs](docs/adr/README.md), lessons go in a dated
   [engineering log](docs/engineering-log.md), and every real-adapter
@@ -143,7 +151,7 @@ screen, is [docs/architecture.md](docs/architecture.md).
   ([ADR-0017](docs/adr/0017-session-recording.md)).
 - **J2534 Pass-Thru (Windows).** Finds installed vendor drivers; pick
   one in Settings or enter a `j2534://` URI. The `obd2` profile
-  polls standard Mode-01 PIDs, so a bare `j2534://` streams decoded
+  polls standard Service 01 PIDs, so a bare `j2534://` streams decoded
   signals ([docs/j2534.md](docs/j2534.md)).
 - **Protocol profiles.** The URI picks how frames decode: `mock`
   (the default for `mock://`), `obd2` (the default for `j2534://`),
@@ -182,11 +190,12 @@ screen, is [docs/architecture.md](docs/architecture.md).
 | v0.3.0 | Signal decoding, live view, J2534 transport, live vehicle read and logging (tested on one vehicle) | ✅ Released |
 | v0.3.1 | Request engine, PID-support probe, vehicle identification, generic UDS reads, imperial units; the first Windows download | ✅ Released |
 | v0.3.2 | Record-replay transport, decoding on the transport's thread, every driver in its own process | ✅ Released |
-| v0.4.0 | Security access discovery, flash capability | Planned |
-| v0.5.0+ | Manufacturer plugin modules | Planned |
+| v0.4.0 | Security access discovery, flash capability | Proposed |
+| v0.5.0+ | Manufacturer plugin modules | Proposed |
 
-The plan and known issues are in [STATUS.md](STATUS.md); what each
-release changed is in [CHANGELOG.md](CHANGELOG.md).
+The next milestone is still to be chosen from the backlog; the plan
+and known issues are in [STATUS.md](STATUS.md), and what each release
+changed is in [CHANGELOG.md](CHANGELOG.md).
 
 ## Build
 
@@ -220,11 +229,11 @@ preset and connect.
 Add `-DQTTUNE_BUILD_CORE_ONLY=ON` to build only the core library and
 its tests, without Qt.
 
-**32-bit vendor drivers (Windows, optional).** x86-only J2534 drivers,
-such as the OBDX Pro VX's, need the Win32 surrogate from a second
-build tree. Build it **before** configuring `build`: the app's
-configure step finds it in `build-win32/` and copies it next to
-`qttune.exe` on every app build.
+**32-bit vendor drivers (Windows).** The app tree builds the x64
+surrogate itself. 32-bit J2534 drivers, such as the OBDX Pro VX's,
+need the x86 surrogate from a second, core-only tree. Build it
+**before** configuring `build`: the app's configure step finds it in
+`build-win32/` and copies it next to `qttune.exe` on every app build.
 
 ```sh
 cmake -B build-win32 -A Win32 -DQTTUNE_BUILD_CORE_ONLY=ON
@@ -237,10 +246,11 @@ a device yet. Their command lines are in
 ways to deploy the surrogate, the cross-architecture tests and
 troubleshooting.
 
-**Runtime:** Windows needs a current Microsoft Visual C++
-Redistributable (x64), at least as new as the MSVC that built the app
-and Qt; Visual Studio installs one, and the post-build deploy step
-doesn't copy it. Linux and macOS need the Qt runtime libraries.
+**Runtime for a source build:** Windows needs a current Microsoft
+Visual C++ Redistributable (x64), at least as new as the MSVC that
+built the app and Qt; Visual Studio installs one, and the post-build
+deploy step doesn't copy it (the release zip carries its own). Linux
+and macOS need the Qt runtime libraries.
 A J2534 vendor driver is only needed for a real adapter; the tests use
 a bundled fake.
 
@@ -270,6 +280,7 @@ build and test a change.
 | [docs/engineering-log.md](docs/engineering-log.md) | Milestone history and lessons learned |
 | [docs/bench-sessions/](docs/bench-sessions/bench-prep.md) | Real-hardware sessions, their run sheets, and the assumptions only hardware can confirm |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | Reporting bugs, the rules a change must respect, testing and pull requests |
+| [SECURITY.md](SECURITY.md) | Reporting a vulnerability; the threat model and its defenses are in [docs/security-assurance.md](docs/security-assurance.md) |
 
 ## License
 

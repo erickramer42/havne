@@ -49,9 +49,10 @@ maintainer before merging.
 
 ## Scope
 
-QtTune is **read-only today**: it sends OBD-II Mode-01 requests and nothing
-else. There is no code clearing DTCs, no writes, no flashing (see
-[DISCLAIMER.md](DISCLAIMER.md)). Tuning-application features are on the
+QtTune is **read-only today**: its request engine sends OBD-II Services 01
+and 09 and UDS Service 0x22 (ReadDataByIdentifier), and refuses any other
+service ([ADR-0015](docs/adr/0015-request-engine.md)). There is no code
+clearing DTCs, no writes, no flashing (see [DISCLAIMER.md](DISCLAIMER.md)). Tuning-application features are on the
 [roadmap](STATUS.md), not yet built. Proposals in these directions are worth
 discussing in an issue before any code is written — they carry regulatory
 weight (emissions law, warranty, effects on safety systems) that must be
@@ -75,8 +76,9 @@ also need the Win32 surrogate from a second build tree; the README's Build
 section and [docs/development.md](docs/development.md) cover both.
 
 The build validates that the core never links Qt; the CI matrix runs ctest on
-Windows, macOS and Linux, core under ASan/UBSan, Android/iOS cross-builds, and
-libFuzzer harnesses. **A pull request that isn't green on CI won't be merged.**
+Windows, macOS and Linux, core under ASan/UBSan, the libFuzzer harnesses,
+clang-tidy and CodeQL, the load test, and the Android/iOS cross-builds.
+**A pull request that isn't green on CI won't be merged.**
 If CI fails on your change, check whether it's the code or the toolchain before
 assuming either.
 
@@ -138,10 +140,26 @@ Issues by number.
 
 ## Input validation
 
-- **URI schemes**: `mock://`, `replay://`, `j2534://` only; all others rejected immediately.
-- **Frame buffers**: a frame holds up to 4,096 payload bytes (`ECUIO_FRAME_DATA_MAX`, a whole ISO 15765 message); a longer message is cut there and flagged `ECUIO_FRAME_FLAG_TRUNCATED`, and a replayed row longer than that is refused.
-- **Numeric fields**: parsed within documented OBD-II parameter ranges; out-of-range values rejected.
-- **Signal identifiers**: checked against enumerated list defined in obd2/defs; unknown IDs rejected.
+Anything a session takes from outside is checked before it is used, and
+anything unrecognized is refused, never guessed at. A change that adds an
+input adds its check, a test that the check refuses, and, for parsers of
+arbitrary bytes or text, a fuzz harness ([fuzz/README.md](fuzz/README.md)).
+The threat model is [docs/security-assurance.md](docs/security-assurance.md).
+
+- **URIs**: `mock://`, `replay://` and `j2534://` only. Every scheme shares
+  one strict query grammar (`core/src/uri_query.h`): an unknown key, a
+  malformed value or an unknown profile is refused at session create,
+  before any DLL loads.
+- **Vendor DLLs**: the path must be absolute, and the file must be a
+  Windows DLL by its PE header, before any surrogate starts.
+- **Frames**: a frame holds up to 4,096 payload bytes (`ECUIO_FRAME_DATA_MAX`,
+  a whole ISO 15765 message); a longer message is cut there and flagged
+  `ECUIO_FRAME_FLAG_TRUNCATED`, and a replayed row longer than that is
+  refused.
+- **Signal definitions**: `ecuio_profile_register` runs the set validator,
+  which accepts exactly the defs the decoder can decode, requires reserved
+  bytes to be zero and rejects duplicate IDs
+  ([ADR-0016](docs/adr/0016-signal-definition-layout.md)).
 
 ## Testing
 
@@ -154,7 +172,9 @@ right tier:
 | Bridge | The Qt bridge and models, headless |
 | QML | The app's QML pages against a real bridge, offscreen (Qt Quick Test) |
 | HARNESS | The J2534 stack against the in-tree fake vendor DLL (Windows) |
-| Fuzzing | The signal decoder and validators under libFuzzer, in CI ([fuzz/README.md](fuzz/README.md)) |
+| Cross-arch | The HARNESS tier through the x86 surrogate (Windows; maintainer-run, CI never runs it) |
+| Fuzzing | The signal decoder, the validators and the `uds-generic` query parser under libFuzzer, in CI ([fuzz/README.md](fuzz/README.md)) |
+| Load test | A recorded engine start replayed through the bridge, in CI on Windows and Linux |
 | Simulator/Manual smoke | The running app's layout and paint |
 | BENCH / Vehicle | Real hardware — **maintainer-run only** |
 

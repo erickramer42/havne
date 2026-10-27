@@ -13,7 +13,8 @@ instructions, see the [README](../README.md#build).
 | GoogleTest | 1.14.0 | Fetched automatically on the first configure if it isn't installed |
 | Android NDK, JDK | NDK r27, JDK 21 | Android builds only. Qt 6.12's Android kit expects these versions. |
 | Xcode | 16+ (iOS 18 SDK) | iOS builds only, on a macOS host |
-| Python (optional) | 3.13+, 64-bit | Reserved for future trace-analysis tooling |
+| Python (optional) | 3.x, 64-bit | Installs the pinned clang-tidy wheel for `scripts/tidy.sh`, and aqtinstall if you install Qt that way |
+| OpenCppCoverage (optional) | any | Windows line coverage, `scripts/coverage.sh` |
 
 ## Installing Qt with aqtinstall
 
@@ -64,8 +65,8 @@ the whole suite and the cross-arch subset
 **How the app tree finds the surrogates (automatic).** The x64 one
 is the app tree's own `ecuio-j2534-surrogate` target
 (`ecuio-j2534-surrogate-x64.exe`), built and copied with the app. For
-the x86 one, with the
-two-tree layout there is nothing to configure: when
+the x86 one, with the two-tree layout there is nothing to configure:
+when
 `QTTUNE_SURROGATE_SOURCE` is unset (the default), CMake searches the
 sibling `build-win32/` tree and copies the surrogate next to
 `qttune.exe` on every app build. `QTTUNE_SURROGATE_SOURCE` is the app
@@ -152,8 +153,8 @@ the mobile kit, which applies Qt's toolchain file and finds the host
 desktop Qt. Mobile builds set `BUILD_TESTING=OFF`:
 `gtest_discover_tests` runs each test binary at build time, and the
 build host can't execute an Android or iOS binary. Off Windows the
-transports are `mock://` and `replay://` (Known Issue #2). Qt Creator with an
-Android or iOS kit is the interactive alternative.
+transports are `mock://` and `replay://` (Known Issue #2). Qt Creator
+with an Android or iOS kit is the interactive alternative.
 
 *Android* (this mirrors the `android-build` CI job). On Windows, add
 `-G Ninja`, because the Visual Studio generator can't target Android:
@@ -211,8 +212,10 @@ app, and send its Qt log output to a file.
 ## Test fixtures: the two fake vendors
 
 Both fakes compile the same source and differ only in their `.def`
-export surface — together they pin the PassThruIoctl export-spelling
-resolver (see the 2026-10-16 VX incident):
+export surface. Together they pin the loader's resolution of the ioctl
+export, which the spec spells `PassThruIoctl` and some vendors ship as
+`PassThruIoCtl` ([engineering log](engineering-log.md), "Lessons
+learned"):
 
 | Target | Exports | Pins |
 |---|---|---|
@@ -227,8 +230,8 @@ negative assertion will catch it, but best not to trigger it).
 ## Recommended verification sequence
 
 `scripts/verify.sh` (Git Bash on Windows; any shell elsewhere) runs
-steps 1–3 below and prints one line per step (the counts below are an
-example):
+steps 1–3 below and prints one line per step (a run on the dev
+machine, 2026-10-26; the times vary with the machine's load):
 
 ```sh
 scripts/verify.sh                         # both trees, full suite, cross-arch
@@ -236,10 +239,10 @@ scripts/verify.sh --tests-only -R '^BridgeTest\.'   # a subset, no build
 ```
 
 ```
-win32       ok       1 s  0 warnings
-build       ok       6 s  0 warnings
-ctest       ok      32 s  171/171 passed, 1 skipped
-cross-arch  ok      13 s  21/21 passed, 0 skipped
+win32       ok       3 s  0 warnings
+build       ok      89 s  0 warnings
+ctest       ok     109 s  404/404 passed, 2 skipped
+cross-arch  ok      45 s  76/76 passed, 0 skipped
 ```
 
 Full output goes to `Testing/verify/<step>.log` (git-ignored). On a
@@ -383,7 +386,7 @@ and the run looks green. Read the skip count, or use
   tests, and check its stamps: the fixed name always holds the latest
   spawn, which may not be the run you mean.
 
-**Fuzzing** isn't part of ctest. The two libFuzzer harnesses need a
+**Fuzzing** isn't part of ctest. The three libFuzzer harnesses need a
 tree of their own (`-DECUIO_BUILD_FUZZERS=ON` with
 `QTTUNE_BUILD_CORE_ONLY=ON` and `BUILD_TESTING=OFF`; `build-fuzz-msvc`
 on Windows), because nothing else can link the instrumented core.
@@ -483,8 +486,9 @@ request to `main`, and on demand (Actions → CI → Run workflow, on any
 branch, or `gh workflow run ci.yml --ref <branch>`). A manual run
 includes the iOS simulator smoke; its `smoke_only` input
 (`-f smoke_only=true`) skips the other platform jobs, leaving
-`core-and-tests`, which the smoke depends on. Every job that uses Qt uses 6.12.0, and
-every job has a `timeout-minutes` of roughly 3-5x its usual duration:
+`core-and-tests`, which the smoke depends on. Every job that uses Qt
+uses 6.12.0, and every job has a `timeout-minutes` of roughly 3-5x
+its usual duration:
 
 | Job | Runner | Does |
 |---|---|---|
@@ -563,9 +567,9 @@ optional Quick plugins this app never uses.
 
 A version tag publishes a Windows x64 download through
 `.github/workflows/release.yml`. The zip runs on a PC with neither Qt
-nor Visual Studio: it carries the app, the x86 and x64 J2534 surrogates, the Qt
-runtime that windeployqt deploys, and the app-local Visual C++
-runtime.
+nor Visual Studio: it carries the app, the x86 and x64 J2534
+surrogates, the Qt runtime that windeployqt deploys, and the
+app-local Visual C++ runtime.
 
 **To release:**
 
@@ -576,7 +580,10 @@ runtime.
    those entries. Say what's new, and what's verified at which tier
    ([testing.md](testing.md)), including what hasn't run on hardware.
 2. Push that commit to `main` and wait for its CI run to pass: the
-   release job refuses a commit whose CI hasn't.
+   release job refuses a commit whose CI hasn't. A tag pushed first
+   fails the job at its CI gate; once CI on the commit passes, rerun
+   the failed job (`gh run rerun <run id>`), which keeps the tag's
+   ref and so the provenance's signer.
    For a dry run, tag that commit `vX.Y.Z-rc1` and push the tag. The
    workflow publishes a pre-release. Download its zip, run it on a PC
    without Visual Studio if one is available, and check the
@@ -600,17 +607,18 @@ runtime.
 - **Build.** Qt 6.12.0 is installed as `win-build` does it, then
   `build-win32` (the surrogate only) and `build` (the app only), both
   with `BUILD_TESTING=OFF`, in the usual order so the app's build
-  copies the x86 surrogate beside `qttune.exe`, with its own x64 one. CI has already run the
-  suite on the commit; the cross-arch suite is `scripts/verify.sh`'s.
+  copies the x86 surrogate beside `qttune.exe`, with its own x64 one.
+  CI has already run the suite on the commit; the cross-arch suite is
+  `scripts/verify.sh`'s.
 - **Stage, check and zip:** `packaging/windows/stage.ps1`, which also
   runs locally against a built tree
   (`pwsh packaging/windows/stage.ps1 -Version X.Y.Z-local -OutDir Testing/dist`).
-  It copies the deployed app without its `.pdb`, `.lib` and `.exp`
-  files, adds the x64 CRT from Visual Studio's redistributable folder
+  It copies the deployed app without its `.pdb`, `.lib`, `.exp` and
+  `.ilk` files, adds the x64 CRT from Visual Studio's redistributable folder
   (found with `vswhere`; windeployqt runs with `--no-compiler-runtime`),
   `LICENSE`, `DISCLAIMER.md` and `packaging/windows/`'s README,
   third-party notices and license texts. It then fails the release if
-  the surrogate imports a CRT DLL (it links the CRT statically, `/MT`,
+  either surrogate imports a CRT DLL (each links the CRT statically, `/MT`,
   because an x86 `vcruntime140.dll` can't sit beside the app's x64
   one), if `qttune.exe` imports a DLL that is neither in the folder nor
   part of Windows, if `qttune.exe` or either surrogate carries a version

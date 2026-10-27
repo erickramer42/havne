@@ -19,13 +19,10 @@ where the gaps are. For build and run commands, see
 | **BENCH** | A real vendor DLL and adapter, no vehicle | First formal session complete, 2026-10-16, quiet bus ([session sheet](bench-sessions/2026-10-16.md)); informal quiet-bus follow-up 2026-10-20 ([note](bench-sessions/2026-10-20.md)); quiet-bus run of the vehicle session's URIs with recording, 2026-10-22 ([sheet](bench-sessions/2026-10-22.md)), and again on the laptop that goes to the car, 2026-10-25 ([sheet](bench-sessions/2026-10-25-bench.md)) |
 | **Vehicle** | A live, read-only vehicle session | Two sessions on one car, its engine ECU on `0x7E8`: 2026-10-22, ignition off, engine off and idling ([session sheet](bench-sessions/2026-10-22-vehicle.md)); 2026-10-25, the same plus the request engine, the probe, identification, `uds-generic` and an ignition cycle ([session sheet](bench-sessions/2026-10-25-vehicle.md)); run sheet [vehicle-runsheet.md](bench-sessions/vehicle-runsheet.md) |
 
-The manual smoke tier earns its place. The 2026-10-10 strip-chart
-indexing bug lived in QML paint code, and every C++ test was blind to
-it. The simulator screenshots caught two more layout bugs on their
-first good run (2026-10-20). The Home status card was off-center. And
-the compact layout's tab bar, which only narrow windows show, said
-"Setup" for the page the sidebar calls "Settings". Both were fixed,
-and the next run's screenshots confirmed the fixes the same day.
+The smoke tiers earn their place: they have caught bugs no C++ test
+could see. A strip-chart indexing bug lived in QML paint code, and the
+iOS Simulator's narrow window showed an off-center status card and a
+tab bar that named the Settings page "Setup".
 
 ## Suites
 
@@ -72,81 +69,62 @@ view. `scripts/coverage.sh` runs the same measurement locally
 
 ## Performance
 
-### Decode cost per frame
+### Cost per frame, by profile size
 
 `tests/bench_bridge.cpp` (target `bench_bridge`, built with the tests,
-never run by ctest) measures the GUI thread's work per frame through the
-bridge, by the size of the session's profile: the queued call, the frame
-log, the match against every def (Known Issue #4), the decode and
-staging. Frames are queued as the worker queues them, then only the
-drain is timed; recording is off and no view is attached. The defs sit
-four to a CAN ID, 16 bits each, as a passive-bus profile packs them, so
-each frame decodes four values and is checked against every def. A raw
-session, which decodes nothing, is the baseline.
+never run by ctest) measures each thread's work per frame through the
+bridge, by the size of the session's profile:
+- **On the worker** ([ADR-0024](adr/0024-decode-on-the-worker.md)):
+  `onFrame` (the frame's 4 KB copy and the queued call), core's match
+  of the frame against every def and decode into a batch (Known Issue
+  #4), and the bridge's staging of that batch.
+- **On the GUI thread:** the drain (the queued call, the frame log and
+  the counters), and one 100 ms tick's update of a model of N rows.
+
+Recording is off and no view is attached. The defs sit four to a CAN
+ID, 16 bits each, as a passive-bus profile packs them, so each frame
+decodes four values and is checked against every def. A raw session,
+which decodes nothing, is the baseline.
 
 ```sh
 build/tests/Release/bench_bridge.exe [frames per run, default 20000]
 ```
 
-Three runs on the dev machine, 2026-10-25 (Release, the median of three
-connects each; µs a frame, GUI thread):
+On the dev machine, 2026-10-26 (Release; each figure the median of
+three runs of 20,000 frames; the tick's range is across three such
+measurements):
 
-| Defs | 20,000 frames | 20,000 frames | 50,000 frames |
-|---|---|---|---|
-| raw | 0.86 | 0.52 | 0.82 |
-| 9 | 0.86 | 0.89 | 0.96 |
-| 50 | 1.17 | 1.22 | 1.05 |
-| 100 | 1.48 | 1.19 | 0.83 |
-| 250 | 1.82 | 1.80 | 1.27 |
-| 500 | 2.27 | 2.41 | 1.87 |
-| 1000 | 3.75 | 3.73 | 2.97 |
+| Defs | Worker: match and decode, µs a frame | GUI thread: one tick's update, µs |
+|---|---|---|
+| 9 | 0.09 | 0.3–0.4 |
+| 100 | 0.23 | 1.9–2.2 |
+| 250 | 0.42 | 4.7–5.3 |
+| 500 | 0.77 | 9.2–9.8 |
+| 1000 | 1.37 | 18.2–19.6 |
 
-- **Below about 100 defs the numbers are noise,** about ±0.3 µs run to
-  run. From 250 up they're steady: matching and decoding against 1000
-  defs adds 2 to 3 µs a frame, about 3 ns a def.
-- **Against the bus:** classic CAN at 500 kbit/s carries at most about
-  4,500 eight-byte frames a second. At that rate, 1000 defs cost the GUI
-  thread about 17 ms a second, under 2 %. The first vehicle's request
-  rotation ran about 26 frames a second. A CAN FD bus can run several
-  times that rate: at 25,000 frames a second the same profile would
-  take about 9 % (worked out from these numbers; no CAN FD bus was
-  measured).
-- **So the per-frame matching isn't a CPU problem at any classic-CAN
-  rate.** Decoding moved to the worker for the samples' own time on
-  the chart, a decode every front end shares, and values that survive
-  dropped frames ([ADR-0024](adr/0024-decode-on-the-worker.md)).
-- **Rows and staging found without a search** (2026-10-26, one run
-  each in the same session, the bench's later columns): the model looks
-  a signal's row up by id, and the bridge stages a value by its def's
-  index. Before, each value searched the rows and the staging, so one
-  tick's `updateValues` grew with the square of the profile.
-
-  | Defs | match and decode, µs a frame, before | after | one tick's `updateValues`, µs, before | after |
-  |---|---|---|---|---|
-  | 9 | 0.12 | 0.09 | 0.2 | 0.2 |
-  | 100 | 0.35 | 0.23 | 9.1 | 0.9 |
-  | 250 | 0.61 | 0.42 | 48.0 | 2.0 |
-  | 500 | 1.12 | 0.77 | 190.4 | 3.2 |
-  | 1000 | 1.92 | 1.37 | 819.0 | 7.6 |
-
-  So the match and decode cost about 1.4 ns a def a frame: 1000 defs at
-  a full classic CAN bus take under 1 % of the GUI thread, and about
-  3.5 % at 25,000 frames a second (worked out). The worker's side of a
-  frame (`onFrame`: the 4 KB copy and the queued call) costs 1.2 to
-  2.0 µs at any profile size, more than the match and decode
-  ([ADR-0024](adr/0024-decode-on-the-worker.md)). Re-measured three
-  times on 2026-10-26, after each window's envelope reached the chart
-  and the Dashboard ([ADR-0005](adr/0005-coalesced-signal-updates.md)'s
-  appendix), one tick's update is 0.3–0.4, 1.9–2.2, 4.7–5.3, 9.2–9.8
-  and 18.2–19.6 µs at 9, 100, 250, 500 and 1000 defs: about 0.02 % of
-  the GUI thread at 1000 defs and 10 Hz.
+- **The match and decode cost about 1.4 ns a def a frame.** Against
+  the bus: classic CAN at 500 kbit/s carries at most about 4,500
+  eight-byte frames a second, so 1000 defs take about 6 ms of the
+  worker's second, under 1 %. The first vehicle's request rotation ran
+  about 26 frames a second. A CAN FD bus can run several times the
+  classic rate: at 25,000 frames a second the same profile would take
+  about 3.5 % (worked out from these numbers; no CAN FD bus was
+  measured). It sits well inside the J2534 worker's 10 ms read slice.
+- **The 4 KB copy is the worker's largest cost:** `onFrame` (the copy
+  and the queued call) takes 1.2 to 2.0 µs at any profile size, more
+  than the match and decode.
+- **The GUI thread's cost per frame doesn't grow with the profile:**
+  its drain stays under 1 µs from a raw session to 1000 defs, because
+  the decode runs on the worker (three runs on 2026-10-26 with other
+  heavy processes on the machine, so an upper bound). The bridge's
+  staging of a batch is near the bench's resolution at every size.
+- **The tick's update is linear in the profile:** under 0.02 % of the
+  GUI thread at 1000 defs and 10 Hz. Each window keeps every signal's
+  newest, lowest and highest value
+  ([ADR-0005](adr/0005-coalesced-signal-updates.md)'s appendix).
 - **The engine-start fixture under `obd2`** (7,074 frames, 297 s
-  recorded, peaking at 1,261 rpm): at `speed=10`, 29.75 s, and at
-  `max`, none dropped, and the strip chart's highest RPM is 1,261 at
-  both, each window keeping its lowest and highest
-  ([ADR-0005](adr/0005-coalesced-signal-updates.md)'s appendix). With
-  each window's newest value alone it was 1,232 at 10× and 758 at
-  `max`, the whole recording drained in a tick or two (2026-10-26).
+  recorded, peaking at 1,261 rpm): at `speed=10` and at `max`, no frame
+  dropped, and the strip chart's highest RPM is 1,261 at both.
 - **Not measured:** a QML view attached to the models; text defs.
 
 ### Load test: the replay fixture through the bridge
@@ -240,7 +218,7 @@ round trip each, negligible at the transport's read cap
 | The bridge stages values from the worker (ADR-0024): a frame dropped at the in-flight cap keeps its values, so with the event loop held while 5,000 frames flood in, thousands drop, yet the recording holds every row's value in order and the row shows the last; past a window's sample limit the recording misses values, the activity log says so once and gives the count at disconnect, and the row still shows the newest; a disconnect drains the window it ends | `BridgeTest.ValuesSurviveFramesDroppedAtTheCap`, `.ValuesPastTheWindowsLimitAreCountedAndLogged`, `.ValuesStagedAtDisconnectAreRecorded`. Each fails against a mutant: values never staged, the newest lost past the limit, samples never recorded, no drain at disconnect, the limit never counted, the warning never logged, a staging never reset. The first also fails when the dropped-frame count is zeroed after the worker starts |
 | Real-car recordings decode on the worker as they decoded in the car: each recording's `frames.csv`, replayed through the bridge under the profile and DIDs its connect used, records the values its own `signals.csv` holds. 24,632 values over 25 connects (the two vehicle sessions and the bench), 2026-10-26 | `BridgeTest.VehicleRecordingsReplayToTheirOwnValues`, local only: it skips unless `ECUIO_BENCH_RAW` names the recordings' folder (`Testing/bench-raw`, never committed). A mismatch names the recording, row and signal, never a value |
 | Session lifecycle: idempotent close, close/destroy split | `CoreTest` |
-| `ecuio_session_send` refuses a `data_length` past the frame's data (`INVALID_ARGUMENT`) and says it isn't built for one that fits; `ecuio_profile_lookup` answers an unknown name `UNKNOWN_PROFILE` | `CoreTest.SessionSendRefusesALengthPastTheFramesData`, `.ProfileLookupUnknownNameFailsWithoutTouchingOut`. **Both failed against the old codes** |
+| `ecuio_session_send` refuses a `data_length` past the frame's data (`INVALID_ARGUMENT`) and says it isn't built for one that fits; `ecuio_profile_lookup` answers an unknown name `UNKNOWN_PROFILE` | `CoreTest.SessionSendRefusesALengthPastTheFramesData`, `.ProfileLookupUnknownNameFailsWithoutTouchingOut`. Both fail against the codes they replaced |
 | `ecuio_init` and `ecuio_shutdown` are optional: a session needs neither, and one open when shutdown runs keeps delivering | `CoreTest.InitShutdownIdempotent`, `.ShutdownLeavesAnOpenSessionWorking` |
 | Signal decode: bit extraction, sign extension, error-code order (the kind and byte order before the bit parameters), the validator; results in `double`, exact for every 32-bit raw value; 16-bit payload lengths and start bytes past byte 255; binary32 floats and signed integers in both byte orders | `SignalDecodeTest` (including `.Uint32DecodesExactly`, `.PayloadLengthPastByte255IsNotNarrowed`, `.StartBytePastByte255Reaches`, `.FloatDecodesInBothByteOrders`, `.BigEndianIntSignExtends`), `SignalsTest` |
 | The validator accepts exactly what the two decoders decode: unknown kinds and unknown byte orders are refused; a `FLOAT` must be 32 bits at bit 0, in either byte order; big-endian fields must be whole bytes; every reserved byte and `flags` must be zero; a set's layout version is checked before anything else, and its reserved fields must be zero; a set can't repeat a def ID; an empty set (no defs, maybe channels) is valid | `SignalsTest.ValidatorAcceptsExactlyWhatTheDecoderDecodes`, `.ValidatorRejectsKindsWithNoDecoder`, `.ValidatorRejectsUnknownByteOrder`, `.ValidatorRequiresFloatAs32BitsAtBitZero`, `.ValidatorRequiresByteAlignedBigEndian`, `.ValidatorRefusesEveryNonzeroReservedByte`, `.SetValidationChecksLayoutVersionFirst`, `.SetValidationRefusesNonzeroReservedFields`, `.SetValidationRejectsDuplicateIds`, `.SetValidationAcceptsAnEmptySet` |
@@ -367,10 +345,10 @@ round trip each, negligible at the transport's read cap
 | `ECUIO_ERR_REQUEST_FAILED` has its own status string | `J2534StreamTest.RequestFailedStatusHasDistinctString` |
 | A failed connect says why ([ADR-0018](adr/0018-connect-failure-reporting.md)): a code per cause, and `ecuio_last_error_detail` in words, cleared by a success and kept per thread; a bad URI key, a bad value and an unknown profile each name themselves | `CoreTest.CreateFailuresNameTheirCause`, `.LastErrorDetailIsPerThread`, `.StatusStringValidValues`; the j2534 rejection tests (`J2534QueryParamTest.MalformedQueriesRejectedAtSessionCreate` and others) for the codes |
 | A refused `PassThruOpen`, `PassThruConnect` or filter names the call, its status (in decimal and hex, then by its J2534-1 name or as vendor-specific, as for the VX's 34, 0x22) and the vendor's `PassThruGetLastError` text, word for word; a file that can't be a DLL is `ECUIO_ERR_LOAD_FAILED` with no spawn, and a PE the child can't load from it; the surrogate's own failures (no exe, other shared headers, a `PassThruOpen` that never returns, a DLL the child can't load) have their codes and words | `J2534ConnectTest`, `J2534SurrogateConnectTest`, `J2534SurrogateTest.BlockedVendorOpenFailsAtHandshakeTimeout`, `.DeadDllFailsFastAtOpen`, `.MismatchedFingerprintRefusesOpenBeforeVendor` |
-| Below the connect path, the loader seam's helpers give each cause its own code: a NULL pointer `ECUIO_ERR_NULL_ARGUMENT`; a bad write length, ioctl length, SCONFIG array or filter shape `ECUIO_ERR_INVALID_ARGUMENT`, with no write reaching the fake; an ioctl outside the whitelist `ECUIO_ERR_NOT_IMPLEMENTED`; a refused write, `READ_VBATT`, `PassThruReadVersion` or second filter stop `ECUIO_ERR_VENDOR_REFUSED`; a surrogate that stops answering `ECUIO_ERR_SURROGATE_FAILED` | `J2534ConnectTest.HelperFailuresHaveOneCodePerCause`; `J2534SurrogateTest.TimedOutOpDoesNotDesyncNextRequest`, `.UnresponsiveChildFailsFastAfterTwoMissedDeadlines`. Against the old codes (checked by hand, 2026-10-23) it failed on both, and showed the backends disagreeing: a malformed SCONFIG array was a NULL argument in-proc and a transport failure through the surrogate |
+| Below the connect path, the loader seam's helpers give each cause its own code: a NULL pointer `ECUIO_ERR_NULL_ARGUMENT`; a bad write length, ioctl length, SCONFIG array or filter shape `ECUIO_ERR_INVALID_ARGUMENT`, with no write reaching the fake; an ioctl outside the whitelist `ECUIO_ERR_NOT_IMPLEMENTED`; a refused write, `READ_VBATT`, `PassThruReadVersion` or second filter stop `ECUIO_ERR_VENDOR_REFUSED`; a surrogate that stops answering `ECUIO_ERR_SURROGATE_FAILED` | `J2534ConnectTest.HelperFailuresHaveOneCodePerCause`; `J2534SurrogateTest.TimedOutOpDoesNotDesyncNextRequest`, `.UnresponsiveChildFailsFastAfterTwoMissedDeadlines`. Each fails against the codes it replaced (checked by hand, 2026-10-23) |
 | A connected session describes what it runs on ([ADR-0019](adr/0019-session-info.md)): backend, DLL architecture, protocol, baud and connect flags, channels, profile, and the adapter's battery and version readings; a refused reading leaves its flag clear without failing the connect or setting a detail; a DLL without `PassThruReadVersion` reports no versions; a mock session names its backend and profile; the struct's layout is the same in both trees | `J2534ConnectTest.InfoDescribesTheAdapter`, `.InfoCarriesTheUrisBaudAndChannel`, `.RefusedReadingsLeaveTheirFlagsClear`, `.ADllWithoutReadVersionReportsNoVersions` (also cross-arch), `J2534SurrogateTest.ReadVersionRelaysTheThreeStrings`, `CoreTest.MockSessionInfoNamesTheBackend`; `c_abi` in both trees |
-| The activity log's "Session:" line follows "Connected:", with every field's wording, and "no battery reading" or "no version reading" for a refused one | `BridgeTest.SessionInfoTextNamesTheAdapter`, `.ConnectLogsTheMockSession`, `.ConnectLogsTheAdaptersSession` (the fake, through the x64 surrogate); in the app, 2026-10-22 (the run-qttune driver), through the x64 fake in-proc and the x86 fake through the deployed surrogate; 2026-10-26, each fake through its own surrogate |
-| An ioctl result longer than the caller's buffer fills it and no more, and reports its whole length | `FakeFixture.IoctlCopiesAtMostItsCapacity`, `J2534SurrogateTest.IoctlCopiesAtMostItsCapacity`. Against the old copies (checked by hand, 2026-10-22): in-proc left a 2-byte buffer untouched, and the surrogate client wrote all 4 bytes |
+| The activity log's "Session:" line follows "Connected:", with every field's wording, and "no battery reading" or "no version reading" for a refused one | `BridgeTest.SessionInfoTextNamesTheAdapter`, `.ConnectLogsTheMockSession`, `.ConnectLogsTheAdaptersSession` (the fake, through the x64 surrogate); in the app (the run-qttune driver), 2026-10-26, the x64 and x86 fakes each through its own surrogate |
+| An ioctl result longer than the caller's buffer fills it and no more, and reports its whole length | `FakeFixture.IoctlCopiesAtMostItsCapacity`, `J2534SurrogateTest.IoctlCopiesAtMostItsCapacity`. Both fail against the copies they replaced (checked by hand, 2026-10-22), one of which left a short buffer untouched and the other overran it |
 | The bridge returns and logs a failed connect as "<status>: <detail>", and Settings shows it in its error line | `BridgeTest.FailedConnectNamesItsCause`; in the app, 2026-10-22 (the run-qttune driver): `mock://demo?interval=10`, and the x86 fake through the app's deployed surrogate with `ECUIO_FAKE_OPEN_STATUS=34`, each in the error line and the activity log |
 | A batch the vendor returns with `ERR_TIMEOUT` is delivered through the surrogate; an empty one maps to a vehicle timeout; both reads hold for their 50 ms timeout | `J2534SurrogateTest.SpecTimeoutReadDeliversPartialBatch` (spec-mode fake) |
 | A vendor that returns a hard error with the message count untouched delivers no frames: the session reports a hard failure, dispatches nothing and recovers once reads are honest; through the surrogate, the next request after the poisoned read still correlates | `J2534HealthTest.UntouchedCountUnderHardErrorReportsUnhealthy`, `J2534SurrogateTest.HardErrorUntouchedCountDeliversNoFrames` (`ECUIO_FAKE_UNTOUCHED_COUNT_STATUS`) |
@@ -392,8 +370,8 @@ round trip each, negligible at the transport's read cap
 | Live's strip chart stays sharp under zoom: its Canvas paints at the zoomed size and is scaled back, so its labels and traces read as crisp as the list's text; nine labels in a short plot stay inside it | Manual smoke, 2026-10-25 (the run-qttune driver, 1600 × 900, all nine mock signals plotted). At 200 % on a 100 % monitor, before the change, the chart's labels were visibly blocky beside the list's values and the top label was cut at the plot's edge; after it, at 200 % on a 150 % monitor, the labels match the list's sharpness and sit inside the plot, and at 100 % all nine show a line apart |
 | On a short page (a small window, a large zoom) Live's list gives up rows, down to one, so the chart stays whole on the page at its minimum height or more; a tall page shows every row | `QmlTest.liveview` (`test_chartStaysOnAShortPage`, pages 330, 450, 600 and 1000 px tall under mock). With the list's earlier caps (2026-10-25) the chart ended at 379 px on the 330 px page and past the margin on the 450 px one. Manual smoke the same day at 1600 × 900: at 200 % four rows and a scroll bar above the whole chart, time axis included; at 100 % all nine rows |
 | QML reaches the bridge as the `Bridge` singleton (`app/bridgesingleton.h`), not a context property: every page binds through it, and qmllint resolves its properties | Manual smoke, 2026-10-21: `mock://demo` streaming on Home, Dashboard, Live and Log, and the x86 fake through the app's own deployed surrogate (2000 RPM decoded, the spawn line naming the exe). `all_qmllint` went from 103 `[unqualified]` warnings to 7, all on LogPage's delegate roles |
-| Link-health UI: quiet/fault/degraded banner, activity-log transitions, "—" cells, stale dimming, the arbId column | The banner, the other surfaces and the log lines are `QmlTest.linkhealth`'s (above); Live's "—" cells, stale dimming and the arbId column are manual only. Manual smoke, 2026-10-20 (fake quiet/fault via `ECUIO_FAKE_READ_STATUS`; mock; recipe below). The first run recorded dimming and the arbId column as working when the code couldn't produce either (dimming keyed on value changes; the ID column bound a misspelled role). Both rows were re-run and passed after the fixes, the arbId row through the x86 surrogate. |
-| Fault state on real hardware, clean teardown; 4-byte filter shape accepted with logged vendor status 0 | Informal bench observation 2026-10-20 ([sheet](bench-sessions/2026-10-20.md)), under the rules before `946bdf5`. The same no-ACK setup now latches `ECUIO_ERR_REQUEST_FAILED` instead (next row). |
+| Link-health UI: quiet/fault/degraded banner, activity-log transitions, "—" cells, stale dimming, the arbId column | The banner, the other surfaces and the log lines are `QmlTest.linkhealth`'s (above); Live's "—" cells, stale dimming and the arbId column are manual only. Manual smoke, 2026-10-20 (fake quiet/fault via `ECUIO_FAKE_READ_STATUS`; mock; recipe below). The arbId row ran through the x86 surrogate. |
+| Fault state on real hardware, clean teardown; 4-byte filter shape accepted with logged vendor status 0 | Informal bench observation 2026-10-20 ([sheet](bench-sessions/2026-10-20.md)), under that build's link rules; under the current rules the same no-ACK setup latches `ECUIO_ERR_REQUEST_FAILED` (next row). |
 | Requests-failing and quiet states on real hardware through the x86 surrogate: the banner at the first failed write, one episode, the backoff to its 5 s cap; quiet after ten empty reads (`ERR_BUFFER_EMPTY`) under `?profile=raw`; clean teardown on every connect | BENCH run on the OBDX Pro VX, 2026-10-22 (`0a8beae`, [sheet](bench-sessions/2026-10-22.md)) |
 | The `obd2` set on a live vehicle through the x86 surrogate: its rotation, `?poll=` and the three supported-PID bitmaps answered by the engine ECU; the values, decoded a second time from the logged bytes with the J1979 formulas, match the display, and RPM matched the tachometer; ok, quiet and recovery through an ignition cycle | Vehicle session, 2026-10-22 ([sheet](bench-sessions/2026-10-22-vehicle.md)) |
 | The v0.3.1 release zip, as a user gets it: its SHA-256 matches `SHA256SUMS.txt`, `gh attestation verify` passes, and after SmartScreen's "Run anyway" the extracted `qttune.exe` runs `mock://demo`; with no VX attached, connecting `j2534://OBDX Pro - VX` fails with "the adapter's driver refused: PassThruOpen returned status 34 (vendor-specific)" (v0.3.1's wording); with the VX on USB and no car, the session opens through the x86 surrogate (battery 0.0 V, the VX's firmware and DLL versions), the supported-PID query goes unanswered and the link goes to requests failing; disconnects are clean | BENCH, 2026-10-25, the owner's `-rc1` dry run and the `v0.3.1` download (the activity log read back in the session, not committed). On the dev machine, which has Visual Studio, so it doesn't show the app-local runtime on a bare PC (Gaps) |
@@ -412,22 +390,20 @@ doesn't reach a running session):
 |---|---|---|---|
 | Quiet banner | `ECUIO_FAKE_READ_STATUS=9` | `j2534://<fake.dll>?profile=raw&filter=0x7E8` | Amber "Vehicle not responding" after ~1.2 s; no frames, empty signal list (raw profile) |
 | Fault banner | `ECUIO_FAKE_READ_STATUS=7` | same | Red "Adapter fault" banner with episode count; the knob holds for the session: the child took the environment at spawn |
-| Requests banner | `ECUIO_FAKE_WRITE_STATUS=7` | `j2534://<fake.dll>` (bare: the `obd2` rotation keeps writing) | At the first failed write: amber "Requests failing — check the vehicle connection and ignition" on LiveView, "Requests failing" with an amber dot on Home and the Dashboard header, an amber Settings label, and "Link: requests failing (1 episode(s))" in the activity log. **Verified 2026-10-21** (`55373f4` plus the reordered series palette, x64 fake in-proc): every surface as listed; values stay "—" |
-| Frames + arbId column | — | `j2534://<fake.dll>?profile=raw&filter=0x7E8&poll=0x0C` | Frames on LogPage with `0x7E8` in the ID column, DLC 4, payload `41 0C 1F 40` (2000 RPM canned); link ok, no banner. **Verified 2026-10-20** after the role-name fix (`1674f5c`), using the Win32-tree fake (`build-win32/tests/Release/fake_j2534.dll`). The session log confirmed it ran through the x86 surrogate, so this row also covers surrogate routing, the strip/stamp path and poll mode in the app. It doesn't exercise `?poll=` outranking a profile's rotation: `raw` has none. |
-| Dimming baseline | — | `mock://demo` | Values stream at full opacity, steady ones (IAT) included, because every mock signal arrives every 50 ms. Only a signal that stops arriving dims, 3 s after its last sample. **Verified 2026-10-20** after dimming moved to the model's `ageMs` (`7e9bd5e`): nothing dims on mock. The first run had expected IAT to dim, which was the bug itself. |
+| Requests banner | `ECUIO_FAKE_WRITE_STATUS=7` | `j2534://<fake.dll>` (bare: the `obd2` rotation keeps writing) | At the first failed write: amber "Requests failing — check the vehicle connection and ignition" on LiveView, "Requests failing" with an amber dot on Home and the Dashboard header, an amber Settings label, and "Link: requests failing (1 episode(s))" in the activity log. **Verified 2026-10-21** (x64 fake): every surface as listed; values stay "—" |
+| Frames + arbId column | — | `j2534://<fake.dll>?profile=raw&filter=0x7E8&poll=0x0C` | Frames on LogPage with `0x7E8` in the ID column, DLC 4, payload `41 0C 1F 40` (2000 RPM canned); link ok, no banner. **Verified 2026-10-20** using the Win32-tree fake (`build-win32/tests/Release/fake_j2534.dll`). The session log confirmed it ran through the x86 surrogate, so this row also covers surrogate routing, the strip/stamp path and poll mode in the app. It doesn't exercise `?poll=` outranking a profile's rotation: `raw` has none. |
+| Dimming baseline | — | `mock://demo` | Values stream at full opacity, steady ones (IAT) included, because every mock signal arrives every 50 ms. Only a signal that stops arriving dims, 3 s after its last sample. **Verified 2026-10-20:** nothing dims on mock. |
 | Disconnect reset | after any of the above | Disconnect | Home dot and Settings label show plain disconnected, not the last session's fault/quiet |
-| Slow teardown | `ECUIO_FAKE_DISCONNECT_DELAY_MS=6000` | `j2534://<fake.dll>`, then Disconnect | For the 6 s: "Disconnecting…" on the header pill, the Settings label and button, LiveView's status line and the header button; Connect and the presets disabled; `Disconnecting:` in the activity log. Then "No session", Connect enabled, `Disconnected:` in the log, and a reconnect works. **Verified 2026-10-21** with the x64 fake in-proc, and through the x86 surrogate (`-x86` fake, a 20000 ms stall): the session log marked the child unresponsive, `Disconnected:` followed about 6 s after `Disconnecting:`, and the window answered UI Automation throughout |
+| Slow teardown | `ECUIO_FAKE_DISCONNECT_DELAY_MS=6000` | `j2534://<fake.dll>`, then Disconnect | For the 6 s: "Disconnecting…" on the header pill, the Settings label and button, LiveView's status line and the header button; Connect and the presets disabled; `Disconnecting:` in the activity log. Then "No session", Connect enabled, `Disconnected:` in the log, and a reconnect works. **Verified 2026-10-21** with the x64 fake, and through the x86 surrogate (`-x86` fake, a 20000 ms stall): the session log marked the child unresponsive, `Disconnected:` followed about 6 s after `Disconnecting:`, and the window answered UI Automation throughout |
 
-All four states (ok/quiet/fault/disconnected) were verified 2026-10-20,
-plus the fault state on the OBDX Pro VX quiet bus (BENCH,
-[bench-sessions/2026-10-20.md](bench-sessions/2026-10-20.md)), and the
-requests and quiet states on it on 2026-10-22
-([bench-sessions/2026-10-22.md](bench-sessions/2026-10-22.md)). The
-first run's dimming and arbId results couldn't have been real. Both
-rows were re-run after the fixes the same day and passed. The
-requests-banner row, which covers the `requests` state, passed on
-2026-10-21, along with a re-run of the quiet, fault and disconnect
-rows against the current Home, Settings and Dashboard header.
+Every row has passed in the app: the quiet, fault, arbId, dimming and
+disconnect rows on 2026-10-20, and the requests and slow-teardown rows
+on 2026-10-21, with the quiet, fault and disconnect rows re-run against
+the current Home, Settings and Dashboard header. On real hardware the
+OBDX Pro VX has shown the fault state
+([bench-sessions/2026-10-20.md](bench-sessions/2026-10-20.md)) and the
+requests and quiet states
+([bench-sessions/2026-10-22.md](bench-sessions/2026-10-22.md)).
 
 ## Gaps (not verified)
 

@@ -3,9 +3,9 @@
 **This software may damage your vehicle's control modules.**
 
 QtTune is a cross-platform ECU diagnostic and tuning application in
-early development. When vehicle communication and flashing features
-are added, errors in this software, its configuration, or your use of
-it may result in:
+early development. It reads only today. If writing and flashing
+features are added, errors in this software, its configuration, or
+your use of it may result in:
 
 - Corrupted firmware or calibration ("bricked" modules)
 - Engine or transmission damage
@@ -14,31 +14,33 @@ it may result in:
 **Back up your ECU contents before any session where writes are
 possible. Never flash a vehicle with an unstable power supply.**
 
-## Current State
+## Current state
 
 This project is in early development. Through a J2534 Pass-Thru
-adapter (Windows only), it can send standard, read-only OBD-II Mode-01
-requests ("show current data") and display the replies. That path has
-been tested on the bench, against a simulated adapter and a real
-adapter with no vehicle attached, and in one read-only session on one
-vehicle with one adapter. It has **not** been validated beyond that.
+adapter (Windows only), it sends read-only diagnostic requests (OBD-II
+Service 01 "current data" and Service 09 "vehicle information", and
+UDS Service 0x22 "read data by identifier") and displays the replies.
+That path has been tested against a simulated adapter, on the bench
+with a real adapter and no vehicle, and in two read-only sessions on
+one vehicle with one adapter. It has **not** been validated beyond
+that.
 QtTune has **no** capability to write, clear codes or flash any ECU.
 Do not connect it to a vehicle expecting reliable results.
 
-## Intended Purpose
+## Intended purpose
 
-- **Diagnostics:** Read and log vehicle data
-- **Calibration:** View and edit maps for supported vehicles
-- **Research:** Understand diagnostic protocol behavior
+- **Diagnostics:** read and log vehicle data
+- **Calibration (planned, not built):** view and edit maps for supported vehicles
+- **Research:** understand diagnostic protocol behavior
 
-## Not Intended For
+## Not intended for
 
 - Defeating emissions controls or safety interlocks
 - Circumventing manufacturer security in violation of any law,
   license agreement, or regulation
 - Road use of modified calibrations where not street-legal
 
-## Regulatory Notice
+## Regulatory notice
 
 Modifying engine control software may violate:
 
@@ -49,7 +51,7 @@ Modifying engine control software may violate:
 
 Vehicle modifications may void your powertrain warranty.
 
-## Warranty & Liability
+## Warranty and liability
 
 THIS SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND.
 The authors accept no responsibility for vehicle damage, warranty

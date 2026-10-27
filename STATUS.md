@@ -6,8 +6,9 @@
 This file covers the project as it stands: what works, what comes
 next, and what is known to be wrong. For how the parts fit together,
 start with [docs/architecture.md](docs/architecture.md). Why it is
-built this way is in [docs/adr/](docs/adr/README.md). How it got here, with lessons
-learned, is in [docs/engineering-log.md](docs/engineering-log.md).
+built this way is in [docs/adr/](docs/adr/README.md). How it got
+here, with lessons learned, is in
+[docs/engineering-log.md](docs/engineering-log.md).
 Safety, regulatory and warranty caveats are in
 [DISCLAIMER.md](DISCLAIMER.md).
 
@@ -15,8 +16,8 @@ Safety, regulatory and warranty caveats are in
 
 **Current phase: v0.3.x, its plan complete.** v0.3.2 is out: replay,
 decoding on the transport's thread, and every driver in a process of
-its own; what has changed since is in
-[CHANGELOG.md](CHANGELOG.md#unreleased). The J2534 stack is verified
+its own; changes since then go under
+[CHANGELOG.md's "Unreleased"](CHANGELOG.md#unreleased). The J2534 stack is verified
 end to end against a fake vendor DLL, through the x64 and the x86
 surrogate. One real adapter, the OBDX Pro VX, has run on a quiet bench
 bus and in two read-only sessions on one car
@@ -82,15 +83,16 @@ shipped; the next milestone is still to be chosen from the
   [testing.md](docs/testing.md#gaps-not-verified)). The run sheets are
   [bench-runsheet.md](docs/bench-sessions/bench-runsheet.md) and
   [vehicle-runsheet.md](docs/bench-sessions/vehicle-runsheet.md).
-- **Tests:** 400 ctest cases on Windows (both trees rebuilt,
+- **Tests:** 404 ctest cases on Windows (both trees rebuilt,
   2026-10-26), all passing but two env-gated skips (the cross-arch
   case, and the real-car recordings' diff, run locally), plus the
   cross-arch subset (76/76); 0 MSVC warnings. CI runs ctest on Windows,
-  macOS and Linux, core under ASan and UBSan, 60 s of each libFuzzer
-  harness ([fuzz/README.md](fuzz/README.md)), the Android and iOS
-  cross-builds, and on pull requests an iOS Simulator smoke; the badge
-  above shows its state. Tiers, suites and gaps are in
-  [docs/testing.md](docs/testing.md).
+  macOS and Linux; core under ASan and UBSan; 60 s of each libFuzzer
+  harness ([fuzz/README.md](fuzz/README.md)); clang-tidy and CodeQL;
+  the load test on Windows and Linux; line coverage on Windows; the
+  Android and iOS cross-builds; and, on pull requests, an iOS
+  Simulator smoke. The badge above shows its state. Tiers, suites and
+  gaps are in [docs/testing.md](docs/testing.md).
 
 ## Components
 
@@ -143,7 +145,7 @@ sets the VX clock's zero (#5), and every item for any other adapter.
 These numbers are stable IDs, and code and docs refer to them. When
 an issue is resolved it is removed, and its number is not reused.
 
-2. **The mobile apps are unvalidated.** Since 2026-10-20, CI
+2. **The mobile apps are unvalidated.** CI
    cross-builds an Android arm64-v8a APK and an unsigned iOS arm64
    device build. On pull requests and on request, it also launches
    the iOS app on the Simulator and screenshots it
@@ -156,7 +158,7 @@ an issue is resolved it is removed, and its number is not reused.
    worker** ([ADR-0024](docs/adr/0024-decode-on-the-worker.md)). A
    subscription can't trim that work: it is the chart's filter only,
    because the Dashboard reads every signal. Measured, it costs about
-   2 µs a frame at 1000 defs, well inside the J2534 worker's 10 ms read
+   1.4 µs a frame at 1000 defs, well inside the J2534 worker's 10 ms read
    slice, and the GUI thread's cost per frame no longer depends on it
    ([docs/testing.md](docs/testing.md#performance)). A per-signal enable
    mask can trim it if a CAN FD rate makes it matter.
@@ -186,21 +188,24 @@ an issue is resolved it is removed, and its number is not reused.
 | Version | Scope | Status |
 |---|---|---|
 | v0.1.0 | Skeleton: core ABI, Qt shell, responsive layout | ✅ Released |
-| v0.2.0 | Callback API, mock transport, live frame log, CI | ✅ Released (tagged) |
-| v0.3.0 | Signal decoding, LiveView, J2534 transport, live vehicle read and logging | ✅ Released (tagged) |
-| v0.3.x | Request engine, PID-support probe, `uds-generic`, vehicle identification (v0.3.1); record-replay transport, decoding on the transport's thread (v0.3.2) | ✅ Released |
-| v0.4.0 | Security access discovery, flash capability | Planned |
-| v0.5.0+ | Manufacturer plugin modules (ADR-0013's profile API) | Planned |
+| v0.2.0 | Callback API, mock transport, live frame log, CI | ✅ Released |
+| v0.3.0 | Signal decoding, LiveView, J2534 transport, live vehicle read and logging | ✅ Released |
+| v0.3.1 | Request engine, PID-support probe, `uds-generic`, vehicle identification, imperial units; the first Windows download | ✅ Released |
+| v0.3.2 | Record-replay transport, decoding on the transport's thread, every driver in its own process | ✅ Released |
+| v0.4.0 | Security access discovery, flash capability | Proposed |
+| v0.5.0+ | Manufacturer plugin modules (ADR-0013's profile API) | Proposed |
 
-Flash support depends on discovering each manufacturer's
-secure-gateway authentication. That research is tracked outside this
-repo for now.
+Neither proposed milestone is scheduled; the next one is chosen from
+the [backlog](#backlog). Flash support depends on discovering each
+manufacturer's secure-gateway authentication, research tracked
+outside this repository.
+
 Legacy-bus support (ISO 9141-2/KWP, J1850 VPW/PWM) is a missing
-workstream between the profile work and the manufacturer-plugin
-milestone: the expanded target list (pre-2008 Mazda/Ford/GM) needs
-transport-layer protocol support before any profile can serve those
-cars. Whether and when it is built depends on which target vehicles
-matter most — CAN-era targets need none of it.
+workstream between the profile work and the manufacturer plugins:
+pre-2008 cars (older Mazda, Ford and GM targets) need transport-layer
+protocol support before any profile can serve them. Whether and when
+it is built depends on which vehicles matter most; CAN-era cars need
+none of it.
 
 ## Backlog
 
@@ -241,10 +246,10 @@ in the backlog.
 ### User interface
 
 - **Persisted preferences (S).** The UI zoom and the unit system
-  (imperial until changed) survive a restart, through QML `Settings` in `Main.qml` (category
-  `ui`). Developer mode, theme, the last-used device, the Record
-  sessions switch and Settings' profile choice and DID list need the
-  same. It belongs in the app layer, not core.
+  (imperial until changed) survive a restart, through QML `Settings`
+  in `Main.qml` (category `ui`). Developer mode, theme, the last-used
+  device, the Record sessions switch and Settings' profile choice and
+  DID list need the same. It belongs in the app layer, not core.
 - **Developer mode (S).** A persisted Settings toggle, off by default.
   With it off the app offers only real devices. With it on, the app
   also shows:
@@ -374,7 +379,7 @@ matters: the original-copy file format constrains everything after it.
   thread's cost per frame doesn't grow with the profile and values
   survive frames dropped under load; the chart shows each value at its
   frame's time and keeps a window's peak. Left: the bridge's 4 KB copy
-  per frame, now the largest per-frame cost (`bench_bridge`,
+  per frame, the worker's largest per-frame cost (`bench_bridge`,
   [docs/testing.md](docs/testing.md#performance)).
 
 ### Toolchain

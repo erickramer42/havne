@@ -1,6 +1,6 @@
 // File/layer: tests/bench_bridge.cpp | Qt6 Core, benchmark, C++17
 // Testing: none of its own; a measurement, not a test. Not registered
-//          with ctest. docs/testing.md ("Decode cost per frame") records
+//          with ctest. docs/testing.md ("Cost per frame") records
 //          its results and how to run it.
 //
 // Each thread's cost per frame through the bridge, by the number of

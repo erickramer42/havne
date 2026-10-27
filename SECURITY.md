@@ -1,62 +1,72 @@
-# Security Policy
+# Security policy
 
-## Supported Versions
+## Supported versions
 
-QtTune is in active pre-release development (v0.1.0–v0.3.0). There are no supported production versions at this time.
+QtTune is pre-release software. Security fixes go into the latest
+release only.
 
-| Version | Supported          |
-| ------- | ------------------ |
-| v0.3.x  | :white_check_mark: (development) |
-| < v0.3  | :x:                |
+| Version | Supported |
+|---|---|
+| Latest v0.3.x release | ✅ |
+| Anything older | ❌ |
 
-Once v1.0.0 is released, this table will document long-term support windows for each release line.
+Once v1.0.0 is released, this table will give each release line's
+support window.
 
-## Reporting a Vulnerability
+## Reporting a vulnerability
 
-If you discover a potential security vulnerability in QtTune (e.g., code scanning findings, supply-chain risks, or unexpected behavior that could compromise host systems), please report it using **GitHub Security Advisories**:
+Report a suspected vulnerability privately through **GitHub Security
+Advisories**, not in a public issue:
 
-1. Go to https://github.com/erickramer42/qttune/security/advisories/new
-2. Select **Report a vulnerability**
-3. Describe the issue in detail with reproduction steps
+1. Go to https://github.com/erickramer42/qttune/security/advisories/new.
+2. Describe the issue, with steps to reproduce it and the version or
+   commit.
 
-### What to Expect
+Leave vehicle data out of the report: VINs, calibration IDs, adapter
+serial numbers and local paths (CONTRIBUTING.md, "Handling vehicle
+data").
 
-- **Initial acknowledgment:** Within 7 days
-- **Status update:** Within 30 days on remediation progress
-- **Public disclosure:** After mitigation is available, unless ongoing investigation requires delay
+**What to expect:**
+- **Acknowledgment** within 7 days.
+- **A status update** on remediation within 30 days.
+- **Public disclosure** once a fix is available, unless an ongoing
+  investigation needs more time.
 
-### Vulnerability Categories
+## What counts
 
-QtTune operates in a unique threat model:
+The threat model, the trust boundaries and the defenses at each are in
+[docs/security-assurance.md](docs/security-assurance.md). In scope:
 
-| Category | Response Path |
-|----------|---------------|
-| Code security (buffer overflows, memory safety) | Fixed via CVE assignment if severe |
-| Supply-chain (dependency, action pinning) | Addressed in next release |
-| **Vehicle safety (ECU flashing, protocol bypass)** | See disclaimer below |
-| Privacy (logging, credential exposure) | Patched and disclosed |
+| Category | Examples |
+|---|---|
+| Memory safety | A frame, a recording, a vendor reply or a URI that makes QtTune read or write out of bounds |
+| Host integrity | A way for another process or user to reach the surrogate's pipe, or for a DLL to load from somewhere it shouldn't |
+| Supply chain | An unpinned action or dependency, or a release whose provenance doesn't verify |
+| Privacy | Vehicle identity or local paths written anywhere the user didn't choose to record them |
 
-### Important Disclaimer
+Out of scope:
+- **Vulnerabilities in vendor J2534 drivers or adapter firmware.**
+  Report those to their manufacturers. QtTune isolates each driver in
+  a process of its own so that a faulty driver can't take the app
+  down, but it doesn't vouch for the driver.
+- **Vehicle-side security** (security access, gateways, emissions
+  controls). QtTune sends read-only diagnostic requests and has no
+  write path; reports about bypassing a manufacturer's protections
+  aren't handled as QtTune vulnerabilities. See
+  [DISCLAIMER.md](DISCLAIMER.md).
 
-This project interacts with automotive diagnostic protocols that can affect vehicle safety systems. Many "vulnerabilities" discovered in QtTune are **intentional design decisions** related to ECU communication—not security flaws to be fixed.
+## Security practices
 
-If your report concerns:
-- Security gateway bypass mechanisms
-- ECU authentication/workaround discovery
-- Emissions compliance circumvention
-
-Please note: **QtTune is for research and understanding only**. The maintainers will evaluate whether the finding represents a genuine vulnerability versus expected protocol analysis behavior. Reports about third-party tool vulnerabilities (vendor drivers, J2534 interfaces) should be directed to those manufacturers, not QtTune.
-
-## Security Features in Progress
-
-As development proceeds, the following will be implemented:
-
-- [ ] Secure storage for any credentials (currently: none stored)
-- [ ] Integrity verification of calibration files
-- [ ] Signed release artifacts (when v1.0 ships)
-
-Until then, the development workflow (branch protection, least-privilege permissions, CodeQL scanning) provides baseline security assurances.
-
----
-
-*This document complements [DISCLAIMER.md](DISCLAIMER.md), which covers legal, regulatory, and safety caveats.*
+- **CI on every push:** AddressSanitizer and UndefinedBehaviorSanitizer
+  over the core, libFuzzer over the decoder, the validators and the
+  URI parser, clang-tidy's analyzer checks, and CodeQL
+  ([docs/testing.md](docs/testing.md)).
+- **Supply chain:** `main` is protected; workflows run with
+  least-privilege permissions; every action is pinned to a full commit
+  SHA, and Dependabot proposes updates; OpenSSF Scorecard runs weekly.
+- **Releases:** each Windows download carries a signed SLSA build
+  provenance from the release workflow, attached to the release as
+  `<zip>.intoto.jsonl`, and a SHA-256 checksum
+  ([docs/development.md](docs/development.md#releases)).
+- **Not yet:** the executables aren't code-signed, so Windows
+  SmartScreen warns on first run.
