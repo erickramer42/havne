@@ -1487,14 +1487,14 @@ namespace {
 
 struct TickCapture {
     std::atomic<int> count{0};
-    uint64_t ts[64] = {}; /* read after close, which joins the worker */
+    uint64_t ts[96] = {}; /* read after close, which joins the worker */
 };
 
 void tick_capture_cb(const ecuio_frame_t* frame, void* user_data)
 {
     TickCapture* c = static_cast<TickCapture*>(user_data);
     const int i = c->count.fetch_add(1);
-    if (i < 64) {
+    if (i < 96) {
         c->ts[i] = frame->timestamp_us;
     }
 }
@@ -1504,22 +1504,26 @@ void tick_capture_cb(const ecuio_frame_t* frame, void* user_data)
 /* Contract: one frame per kTickS of wall time. The drive cycle advances
  * kTickS per frame, so a slower worker plays the car in slow motion
  * against the frames' timestamps (a 0-100 time, the limiter's period).
- * The bound is the mean gap over 2 s, leaving out stalls (gaps over two
- * intervals, as a loaded CI VM gives for a second at a time). A deadline
- * schedule holds that mean whatever the OS's sleep step, but not any
- * single gap: on Windows they land on its 15.6 ms step (about 47 or
- * 62 ms), and a host whose sleeps never end sooner than ~63 ms falls
- * behind a little each tick until the schedule restarts, which fires the
- * next tick at once (gaps 63, 63, 63, 63, ~0: a median of 63 at real
- * time). A stall's long gap is followed by the restart's short one,
- * which stays in the mean. Sleeping a fixed 50 ms after each tick makes
- * every gap the long one and fails on every host.
  *
- * A host that keeps waking the worker more than an interval late can't
- * hold the cadence with any schedule, so the test skips there: the
+ * The worker sleeps to a deadline (due += interval) and restarts the
+ * schedule only when a wake comes more than an interval late. So between
+ * restarts every frame is sent between its due time and one interval
+ * past it, and a run of k gaps sums to 50 k ms within one interval,
+ * whatever each gap is: on Windows they land on the 15.6 ms sleep step
+ * (about 47 or 62 ms). A stall, a gap over two intervals, is left out
+ * of the mean. Every restart sends its next frame at once, a gap under
+ * half an interval, and each stall or restart moves the sum by less than
+ * an interval. Counting stalls and short gaps as e events, the mean of n
+ * gaps is 50 ms within 50 (e + 1) / n, plus a millisecond for the
+ * clock.
+ *
+ * Sleeping a fixed 50 ms after each tick makes every gap the long one:
+ * 62 ms on Windows, which fails this at once. On Linux a fixed sleep
+ * overshoots by a fraction of a millisecond, which no 4 s run can tell
+ * from a deadline. A host that stalls so often that the bound can't see
+ * a worker 10 % slow skips, and ctest reports the skip as one: the
  * macos-build runner wakes 50 ms sleeps 100-200 ms late, a third of the
- * gaps at a time. The fixed-sleep regression shows on Windows and
- * Linux. */
+ * gaps at a time. */
 TEST(CoreTest, MockFramesKeepTheTickInterval)
 {
     ecuio_session_t* session = nullptr;
@@ -1530,35 +1534,44 @@ TEST(CoreTest, MockFramesKeepTheTickInterval)
               ECUIO_OK);
     ASSERT_EQ(ecuio_session_start(session), ECUIO_OK);
 
-    wait_for([&cap]() { return cap.count.load() >= 41; }, 10000);
+    constexpr int kFrames = 81; /* 80 gaps, 4 s */
+    wait_for([&]() { return cap.count.load() >= kFrames; }, 20000);
 
     ecuio_session_close(session);
     ecuio_session_destroy(session);
 
-    const int n = std::min(cap.count.load(), 64);
-    ASSERT_GE(n, 41);
+    ASSERT_GE(cap.count.load(), kFrames);
     double sum_ms = 0.0;
     int counted = 0;
     int stalls = 0;
+    int events = 0; /* stalls, and gaps under half an interval */
     std::string gaps; /* every gap, for a failure on a host we can't run */
-    for (int i = 1; i < n; ++i) {
+    for (int i = 1; i < kFrames; ++i) {
         const double gap_ms =
             static_cast<double>(cap.ts[i] - cap.ts[i - 1]) / 1000.0;
         gaps += std::to_string(static_cast<int>(gap_ms)) + " ";
         if (gap_ms <= 100.0) {
             sum_ms += gap_ms;
             ++counted;
+            if (gap_ms < 25.0)
+                ++events;
         } else {
             ++stalls;
+            ++events;
         }
     }
-    if (stalls > 2) {
-        GTEST_SKIP() << "this host woke the worker more than an interval "
-                        "late " << stalls << " times; gaps (ms): " << gaps;
+    ASSERT_GT(counted, 0) << "gaps (ms): " << gaps;
+    const double bound_ms = 50.0 * (events + 1) / counted + 1.0;
+    if (bound_ms >= 5.0) {
+        GTEST_SKIP() << "this host stalled the worker " << stalls
+                     << " times (" << events << " stalls and restarts), "
+                        "so the bound (+/- "
+                     << bound_ms << " ms) can't see a worker 10 % slow; "
+                        "gaps (ms): " << gaps;
     }
     const double mean_ms = sum_ms / counted;
-    EXPECT_GE(mean_ms, 40.0) << "gaps (ms): " << gaps;
-    EXPECT_LE(mean_ms, 56.0)
+    EXPECT_GE(mean_ms, 50.0 - bound_ms) << "gaps (ms): " << gaps;
+    EXPECT_LE(mean_ms, 50.0 + bound_ms)
         << "the drive cycle would play slower than real time; gaps (ms): "
         << gaps;
 }
@@ -2414,6 +2427,38 @@ TEST(CoreTest, ReplayLoopsWithStampsThatNeverDecrease)
     EXPECT_EQ(cap.frames[3].timestamp_us, 2000u);
     EXPECT_EQ(cap.frames[2].data[2], 0x00) << "from the top";
     ecuio_session_destroy(session);
+}
+
+/* A recording whose frames all share one time (one frame, or several
+ * stamped alike) has no span to pace a pass by: ?loop=1 is refused at
+ * create, where the worker would spin; played once, it plays */
+TEST(CoreTest, ReplayRefusesToLoopARecordingWithNoSpan)
+{
+    struct Case {
+        const char* rows;
+        size_t frames;
+    };
+    for (const Case& c : {Case{"5,7,0x7E8,0x0,41 0D 00\n", 1},
+                          Case{"5,7,0x7E8,0x0,41 0D 00\n"
+                               "6,7,0x7E8,0x0,41 0D 01\n", 2}}) {
+        TempRecording rec(std::string(kFramesHeader) + c.rows);
+        ecuio_session_t* session = nullptr;
+        EXPECT_EQ(ecuio_session_create(rec.uri("?loop=1").c_str(), &session),
+                  ECUIO_ERR_BAD_URI);
+        EXPECT_EQ(session, nullptr);
+        EXPECT_STREQ(ecuio_last_error_detail(),
+                     "?loop=1 needs a recording that spans time; this one's "
+                     "frames all share one time");
+
+        ReplayCapture cap;
+        session = start_replay(rec.uri("?speed=max"), &cap);
+        ASSERT_NE(session, nullptr);
+        ASSERT_TRUE(wait_for([&] { return cap.count() >= c.frames; }, 2000));
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        ASSERT_EQ(ecuio_session_close(session), ECUIO_OK);
+        EXPECT_EQ(cap.frames.size(), c.frames) << "played once";
+        ecuio_session_destroy(session);
+    }
 }
 
 /* One second of recording takes about a second at speed 1 and a tenth of

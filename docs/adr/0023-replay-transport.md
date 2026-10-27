@@ -283,3 +283,12 @@ the file leaving `ECUIO_OK` in `.ReplaySendsTheRecordedFramesAtTheirRebasedTimes
 rewritten: the state, the code, the episode, one line, no "Replay
 finished") and `.LinkStateMapsEveryPublishedCode`; `QmlTest.theme` and
 `.liveview` for the label, color and banner.
+
+**Note (2026-10-26): a loop needs a span.** A recording whose frames
+all share one time (one frame, or several stamped alike) gives a pass
+that never waits, so with `loop=1` the worker would send the same
+instant again and again, as fast as it can. Create refuses it
+(`BAD_URI`, "?loop=1 needs a recording that spans time; this one's
+frames all share one time"); attach already knows the span from its
+check of the file. Played once, such a recording plays.
+`CoreTest.ReplayRefusesToLoopARecordingWithNoSpan`.

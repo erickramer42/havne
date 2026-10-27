@@ -525,6 +525,13 @@ ecuio_status_t ecuio_replay_transport_attach(ecuio_session_t* session,
         if (checked != ECUIO_OK) {
             return checked;
         }
+        /* A pass with no span would never wait: the worker would spin,
+         * sending the same instant again and again */
+        if (loop && span_us == 0) {
+            ecuio_detail_set("?loop=1 needs a recording that spans time; "
+                             "this one's frames all share one time");
+            return ECUIO_ERR_BAD_URI;
+        }
         impl->session = session;
         impl->speed_milli = speed;
         impl->loop = loop;

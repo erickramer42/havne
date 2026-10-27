@@ -360,6 +360,16 @@ void set_state(ecuio_j2534_transport* t, link_health& h, int32_t state)
     }
 }
 
+/* A transition into a failure that counts an episode. The count goes
+ * first: ecuio_session_get_error_state reads the code, then the count,
+ * so a reader that sees the code sees its episode (replay's stop_early
+ * does the same). */
+void begin_episode(ecuio_j2534_transport* t, link_health& h, int32_t state)
+{
+    t->session->error_count.fetch_add(1);
+    set_state(t, h, state);
+}
+
 /* One more sign of nothing to hear: after J2534_HEALTH_QUIET_RUN in a
  * row, VEHICLE_TIMEOUT, with no episode. */
 void count_quiet(ecuio_j2534_transport* t, link_health& h)
@@ -391,8 +401,7 @@ void update_health(ecuio_j2534_transport* t, link_health& h,
      * than ECUIO_OK and the vehicle-timeout translation is hard. */
     if (o.status != ECUIO_OK && o.status != ECUIO_ERR_VEHICLE_TIMEOUT) {
         if (h.state != ECUIO_ERR_TRANSPORT_HARD_FAILURE) {
-            set_state(t, h, ECUIO_ERR_TRANSPORT_HARD_FAILURE);
-            t->session->error_count.fetch_add(1);
+            begin_episode(t, h, ECUIO_ERR_TRANSPORT_HARD_FAILURE);
             h.backoff_ms = J2534_BACKOFF_BASE_MS;
         } else if (h.backoff_ms == 0) {
             /* A clean read ended the backoff, and the adapter is
@@ -466,8 +475,7 @@ void handle_write_result(ecuio_j2534_transport* t, link_health& h,
     }
     if (h.state != ECUIO_ERR_REQUEST_FAILED) {
         /* Transition INTO requests-failing: ONE episode, backoff at base */
-        set_state(t, h, ECUIO_ERR_REQUEST_FAILED);
-        t->session->error_count.fetch_add(1);
+        begin_episode(t, h, ECUIO_ERR_REQUEST_FAILED);
         h.backoff_ms = J2534_BACKOFF_BASE_MS;
     }
     /* Already REQUEST_FAILED: leave backoff alone, it doubles at sleep site */
