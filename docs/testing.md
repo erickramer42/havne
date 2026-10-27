@@ -164,26 +164,32 @@ running (ranges across the runs; milliseconds as median / p99):
 | 10×, one pass (29.75 s) | 7,074 / 0 | | 0.04–0.05 / 0.32–0.35 | 49 / 112–115 | 1,261.25 |
 | Full speed, looping 3 s | 1.44–1.72 million / 0–955 | 417,000–474,000 | 0.24–0.26 / 1.15–1.28 | 90–98 / 111–113 | |
 
-- **Throughput:** the worker sustains 417,000 to 474,000 frames a
-  second, more than 90 times a fully loaded classic CAN bus (about
-  4,500 frames a second), and the GUI thread keeps up with it. The cap
-  does drop at that rate now and then: one looping run above dropped
-  955 of 1.72 million frames, and on 2026-10-26 one-pass runs dropped
-  255 and 467 frames and a looping run 40,288 of 1.27 million (3 %).
-  Every value of a dropped frame still reaches the pages
-  ([ADR-0024](adr/0024-decode-on-the-worker.md)).
-- **One stall in three runs:** in one 100× pass the GUI thread was held
-  up once, up to 316 ms for a frame and 359 ms at p99 for a value.
-  Nothing dropped and the peak held. The other runs show no stall, and
-  its cause wasn't found. CI's bounds (500 ms and 1,000 ms at p99) have
-  room for a stall that size, but not much.
+- **Throughput:** across thirteen runs that day (the three above and
+  ten more), the worker sustains 375,000 to 565,000 frames a second,
+  more than 80 times a fully loaded classic CAN bus (about 4,500
+  frames a second).
+- **At full speed the in-flight cap drops frames**
+  ([ADR-0003](adr/0003-backpressure-bounds-in-flight-frames.md)): a
+  one-pass run sends the 7,074 frames in about 15 ms, faster than the
+  GUI thread drains them. Five of the ten further runs dropped 1,322
+  to 6,074 of them; in the worst the GUI thread waited 22 ms and only
+  the cap's 1,000 got through. One looping run in thirteen dropped
+  955 of 1.72 million. Every value of a dropped frame still reaches
+  the pages ([ADR-0024](adr/0024-decode-on-the-worker.md)): every
+  one-pass run timed all 7,061 values and kept the peak.
+- **One stall in thirteen runs:** in one 100× pass the GUI thread was
+  held up once, up to 316 ms for a frame and 359 ms at p99 for a
+  value. Nothing dropped and the peak held. The other twelve stayed
+  under 0.6 ms at p99 to the GUI thread, and the stall's cause wasn't
+  found. CI's bounds (500 ms and 1,000 ms at p99) have room for a stall
+  that size, but not much.
 - **Values wait for the tick, by design**
   ([ADR-0005](adr/0005-coalesced-signal-updates.md)): paced, the
   median is about half a tick and p99 a tick plus the timer's jitter.
   At full speed a whole pass arrives within milliseconds of a tick and
   waits out the rest of it.
 - **Frames reach the GUI thread** in under a quarter of a millisecond
-  at the median, and about a millisecond at p99 even at full speed.
+  at the median, and within 1 to 3 ms at p99 even at full speed.
 - **The limit it found:** at full speed the recording misses about two
   thirds of the values. The staging holds 16,384 values a window,
   164,000 a second, against 480,000 to 570,000 arriving. The pages lose nothing: each

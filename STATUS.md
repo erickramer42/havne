@@ -159,7 +159,8 @@ an issue is resolved it is removed, and its number is not reused.
    subscription can't trim that work: it is the chart's filter only,
    because the Dashboard reads every signal. Measured, it costs about
    1.4 to 2.2 µs a frame at 1000 defs (the figure varies by session),
-   well inside the J2534 worker's 10 ms read slice, and the GUI thread's cost per frame no longer depends on it
+   well inside the J2534 worker's 10 ms read slice, and the GUI
+   thread's cost per frame no longer depends on it
    ([docs/testing.md](docs/testing.md#performance)). A per-signal enable
    mask can trim it if a CAN FD rate makes it matter.
 6. **The session API is single-caller by contract.** The bridge is the
