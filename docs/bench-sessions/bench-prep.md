@@ -46,7 +46,7 @@ which has no bench session):
 
 | # | Assumption in the code | State | Evidence |
 |---|---|---|---|
-| 11 | **The VX gets a serial port over USB**, which `elm327://COMn` opens at 38400 baud unless `?serial=` says otherwise | STILL UNKNOWN | The dev machine lists only `COM1` with no adapter attached |
+| 11 | **The VX gets a serial port over USB**, which `elm327://COMn` opens at 38400 baud unless `?serial=` says otherwise | STILL UNKNOWN | Windows on the dev machine knows the VX as USB `VID_0483&PID_5740`, STMicroelectronics' virtual COM port (USB CDC), last seen as "OBDX Pro Serial (COM4)": OBDX's `obdxdriver.inf` binds Windows' own `usbser.sys` to it and names it. A CDC device needs no vendor driver on Windows 10 and later, macOS (`/dev/cu.usbmodem*`) or Linux (`/dev/ttyACM*`); no session has opened the port yet |
 | 12 | **The setup's contract commands each answer OK**: `AT Z` with an `ELM327` version, then `AT E0 L0 S0 H1 D0 CAF1 CFC1 SP<n> AT1 ST19`, the header and the receive filter | STILL UNKNOWN | The OBDX manual lists `AT D0` as a compatibility command answering OK; the FRPM lists every one for the STN |
 | 13 | **The readings' forms:** `AT I` an `ELM327` version, `STI` `STN<id> vX.Y.Z` on an STN only, `STVR` `12.34` or `AT RV` `12.6V`, read at the connector; an STN's parameter 2A at its default | STILL UNKNOWN | The forms are the datasheet's, the FRPM's and the OBDX manual's; the VX's `READ_VBATT` read 0.0 V on USB power (#10) |
 | 14 | **Frame lines with `AT H1`:** an 11-bit ID of three hex digits (or four with a leading 0), the PCI byte, the data, no length digit; replies reassemble and decode to what the VX gave through J2534 | STILL UNKNOWN | The OBDX manual shows no 11-bit line; the parser takes both widths |

@@ -42,10 +42,18 @@ activity log (`events.log` when recording) has the link's states.
 & LPT)"; in Settings, press **Refresh**.
 
 - [ ] A new `COMn` in both, the Settings row reading "Serial port, for
-      elm327:// · \Device\…". Copy the port and the device name
-- [ ] No new port: the OBDX USB driver may be missing (OBDX's "How to
-      Connect to Wired/Wireless"). Install it and retry, or record and
-      stop: nothing below can run
+      elm327:// · \Device\…". Copy the port and the device name. The
+      VX is a USB CDC serial device (VID 0483, PID 5740, STM32's virtual
+      COM port): "OBDX Pro Serial (COM4)" on the dev machine, where
+      OBDX's `obdxdriver.inf` names it; Windows 10 and 11 bind their own
+      `usbser.sys` without it, as "USB Serial Device (COMn)"
+- [ ] Device Manager, the port's Properties, Driver tab: copy the
+      provider and the driver file (`usbser.sys`). On a machine without
+      the OBDX software, note whether the port appears at all: that
+      says whether `elm327://` needs no vendor install on Windows
+- [ ] No new port: record what Device Manager shows for the VX (an
+      unknown device, or one under another class) and stop: nothing
+      below can run
 
 ## Phase 2 — connect with no bus
 
