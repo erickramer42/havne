@@ -4,7 +4,8 @@
 //          within a 1280 × 720 screen, zoom steps with Ctrl + / Ctrl − /
 //          Ctrl 0 and Settings' Display row and survives a restart, as
 //          does the unit system (2026-10-24) and developer mode
-//          (2026-10-27). The safe area's margins (Android's system
+//          (2026-10-27); Home's Connect… opens Settings with Adapter
+//          unfolded (2026-10-28). The safe area's margins (Android's system
 //          bars), the window filling a phone's screen after it turns,
 //          and the "Display:" line a phone logs in developer mode:
 //          BENCH, the phone run sheet.
@@ -71,6 +72,11 @@ ApplicationWindow {
     readonly property int settingsPage: 4
 
     function gotoPage(index) { stack.currentIndex = index }
+    // Connect… from any page: Settings, with what to connect to open
+    function openConnect() {
+        settingsView.showAdapters()
+        gotoPage(settingsPage)
+    }
 
     // ---- Zoom (Theme.zoom), units (Bridge.unitSystem) and developer mode
     // (Theme.developerMode), kept between runs
@@ -246,7 +252,7 @@ ApplicationWindow {
                             : Bridge.disconnecting ? qsTr("Disconnecting…")
                             : qsTr("Connect…")
                         onClicked: Bridge.connected ? Bridge.disconnectSession()
-                                                    : root.gotoPage(root.settingsPage)
+                                                    : root.openConnect()
                     }
                 }
             }
@@ -303,15 +309,18 @@ ApplicationWindow {
                     clip: true
                     HomePage {
                         objectName: "homePage"
-                        onConnectRequested: root.gotoPage(root.settingsPage)
+                        onConnectRequested: root.openConnect()
                     }
                     DashboardPage { objectName: "dashboardPage" }
                     LiveViewPage {
                         objectName: "livePage"
-                        onConnectRequested: root.gotoPage(root.settingsPage)
+                        onConnectRequested: root.openConnect()
                     }
                     LogPage { objectName: "logPage" }
-                    SettingsPage { objectName: "settingsPage" }
+                    SettingsPage {
+                        id: settingsView
+                        objectName: "settingsPage"
+                    }
                 }
             }
 

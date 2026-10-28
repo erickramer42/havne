@@ -92,12 +92,21 @@ TestCase {
         return item
     }
 
+    readonly property var sections: ["adapterSection", "vehicleSection", "profileSection",
+                                     "recordingSection", "displaySection"]
+
     // The page goes under the window's root, not the TestCase: TestCase is
     // an invisible item, and visible reads the effective visibility, so a
-    // child of it would read invisible whatever the page did
-    function createPage() {
+    // child of it would read invisible whatever the page did. Its sections
+    // start folded; a case reading or clicking what's in them opens them
+    // all, unless it asks for the page as it opens
+    function createPage(asItOpens) {
         const page = createTemporaryObject(pageComponent, testCase.parent)
         verify(page, "Settings loads")
+        if (!asItOpens) {
+            for (const name of sections)
+                find(page, name).open = true
+        }
         return page
     }
 
@@ -176,41 +185,61 @@ TestCase {
         }
     }
 
-    // The presets, the recent recordings and the adapters fold behind a
-    // button each (on a phone they start folded: they filled screens of
-    // its page)
-    function test_foldButtonsShowAndHideTheirSections_data() {
+    // The page opens on the connect bar and five folded sections, each
+    // heading naming what its section holds now; a heading opens and
+    // folds its section
+    function test_sectionsStartFoldedAndOpenFromTheirHeadings_data() {
         return [
-            { tag: "presets", toggle: "presetsToggle", shown: "presetsShown",
-              parts: ["preset_wifi_obdx", "preset_j2534"], title: "Presets" },
-            { tag: "recordings", toggle: "recordingsToggle", shown: "recordingsShown",
-              parts: ["recordingsCaption", "recordingList"], title: "Recent recordings (1)" },
-            { tag: "adapters", toggle: "adaptersToggle", shown: "adaptersShown",
-              parts: ["deviceCount", "deviceList"], title: "Adapters (1)" },
+            { tag: "adapter", section: "adapterSection", title: "Adapter", summary: "1 found",
+              parts: ["deviceCount", "deviceList", "preset_wifi_obdx", "preset_j2534"] },
+            { tag: "vehicle", section: "vehicleSection", title: "Vehicle", summary: "None",
+              parts: ["vehicle_none", "vehicleLabelField", "vehicleNew"] },
+            { tag: "profile", section: "profileSection", title: "What to read", summary: "Default",
+              parts: ["profile_raw", "profileHint"] },
+            { tag: "recording", section: "recordingSection", title: "Recording",
+              summary: "off · 1 saved", parts: ["recordBox", "recordingsCaption", "recordingList"] },
+            { tag: "display", section: "displaySection", title: "Display",
+              summary: "100 % · metric", parts: ["units_metric", "developerBox"] },
         ]
     }
-    function test_foldButtonsShowAndHideTheirSections(data) {
-        const page = createPage()
+    function test_sectionsStartFoldedAndOpenFromTheirHeadings(data) {
+        const page = createPage(true)
         page.recordings = [{ title: "2026-10-28 14:30:12", uri: "replay://C:/rec/x?profile=mock",
                              source: "mock://demo", profile: "mock" }]
         page.j2534Devices = []
         page.serialPorts = [{ name: "COM5", device: "" }]
-        const toggle = find(page, data.toggle)
-        compare(page[data.shown], !Theme.mobile, "open on the desktop, folded on a phone")
-        const chevron = find(toggle, "foldChevron")
-        page[data.shown] = true
-        compare(toggle.text, data.title)
-        compare(chevron.rotation, 90, "pointing down while open")
-        for (const name of data.parts)
-            verify(find(page, name).visible, name + " shown")
-        toggle.clicked()
+        for (const name of sections)
+            verify(!find(page, name).open, name + " starts folded")
+        verify(find(page, "uriField").visible, "the connect bar shows")
+        verify(find(page, "connectButton").visible)
+
+        const section = find(page, data.section)
+        const heading = find(page, data.section + "Heading")
+        const chevron = find(heading, "sectionChevron")
+        compare(heading.Accessible.name, data.title)
+        compare(find(heading, "sectionSummary").text, data.summary)
         compare(chevron.rotation, 0, "pointing right while folded")
         for (const name of data.parts)
             verify(!find(page, name).visible, name + " folded")
-        verify(toggle.visible, "the button stays")
-        toggle.clicked()
+        heading.clicked()
+        verify(section.open)
+        compare(chevron.rotation, 90, "pointing down while open")
         for (const name of data.parts)
-            verify(find(page, name).visible, name + " open again")
+            verify(find(page, name).visible, name + " shown")
+        heading.clicked()
+        for (const name of data.parts)
+            verify(!find(page, name).visible, name + " folded again")
+    }
+
+    // Connect… elsewhere opens what to connect to, at the page's top
+    function test_showAdaptersOpensWhatToConnectTo() {
+        const page = createPage(true)
+        page.j2534Devices = []
+        page.serialPorts = [{ name: "COM5", device: "" }]
+        page.showAdapters()
+        verify(find(page, "adapterSection").open)
+        verify(find(page, "deviceList").visible)
+        verify(!find(page, "vehicleSection").open, "the rest stay folded")
     }
 
     // The bridge doesn't record a replay; the switch keeps its setting
@@ -239,6 +268,36 @@ TestCase {
         press(page, "profile_raw")
         press(page, "preset_wifi_elm")
         compare(uri.text, "elm327://192.168.0.10:35000?profile=raw")
+    }
+
+    // A preset or row of another scheme keeps the query's keys that
+    // scheme takes and drops the rest, and the mock profile on an
+    // adapter; one of the same scheme keeps the query whole
+    function test_anotherSchemeDropsWhatItCantUse() {
+        const page = createPage()
+        const uri = find(page, "uriField")
+
+        type(uri, "replay://C:/rec/x?profile=mock&speed=10&loop=1")
+        press(page, "preset_wifi_obdx")
+        compare(uri.text, "elm327://192.168.4.1:23", "a replay's keys and the mock profile go")
+        verify(find(page, "profile_default").highlighted)
+
+        type(uri, "replay://C:/rec/x?profile=uds-generic&did=1E1C:u16&speed=max")
+        press(page, "preset_j2534")
+        compare(uri.text, "j2534://?profile=uds-generic&did=1E1C:u16",
+                "an adapter takes the recorded profile and DIDs")
+
+        type(uri, "elm327://COM5?profile=raw&poll=0x0C&serial=1")
+        press(page, "preset_mock")
+        compare(uri.text, "mock://demo?profile=raw", "the mock takes no adapter's keys")
+        press(page, "preset_wifi_obdx")
+        compare(uri.text, "elm327://192.168.4.1:23?profile=raw")
+
+        // A key outside the page's list (core's to judge) stays too
+        type(uri, "elm327://COM5?poll=0x0C&later=1")
+        press(page, "preset_wifi_elm")
+        compare(uri.text, "elm327://192.168.0.10:35000?poll=0x0C&later=1",
+                "the same scheme keeps the query whole")
     }
 
     // The Units row sets the bridge's unit system, connected or not, and
@@ -431,7 +490,8 @@ TestCase {
         did.text = ""
         compare(uri.text, "j2534://V?identify=0&profile=uds-generic", "no DIDs, no did= key")
         press(page, "preset_mock")
-        compare(uri.text, "mock://demo?identify=0&profile=uds-generic", "a new base keeps the query")
+        compare(uri.text, "mock://demo?profile=uds-generic",
+                "a new scheme keeps the keys it takes: the mock takes no identify=")
     }
 
     // The vehicle run sheet's URIs, typed, pass through untouched
