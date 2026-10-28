@@ -237,9 +237,11 @@ OBDX Pro VX in its ELM mode (USB-powered). In order:
    ([2026-10-27-elm327-bench-6](docs/bench-sessions/2026-10-27-elm327-bench-6.md)):
    one link at a time, a power cycle before WiFi after USB.
 
-Later, each with its own record: the app-fed stream for BLE and the
-mobile apps, and listening to the whole bus (raw frames, for a car
-whose OBD port carries more than diagnostics).
+The app-fed stream for Bluetooth on Android and BLE is
+[ADR-0028](docs/adr/0028-app-fed-streams.md) (accepted; step 1, the
+Android baseline, under way: the CI APK and the phone run). Later,
+with its own record: listening to the whole bus (raw frames, for a
+car whose OBD port carries more than diagnostics).
 
 ## BENCH prep
 
@@ -261,9 +263,11 @@ an issue is resolved it is removed, and its number is not reused.
    the iOS app on the Simulator and screenshots it
    (`ios-simulator-smoke`). Neither app has run on a device, the
    Android app has never been launched, and no tests run on either
-   (cross builds set `BUILD_TESTING=OFF`). Off Windows the
-   transports are `mock://` and `replay://`, so a mobile session
-   can't reach a vehicle yet.
+   (cross builds set `BUILD_TESTING=OFF`). A phone's route to a car
+   is `elm327://` to a WiFi adapter's address, untried on a phone;
+   Bluetooth on Android is [ADR-0028](docs/adr/0028-app-fed-streams.md),
+   whose first step is the phone run. CI uploads the Android build's
+   debug APK for it.
 4. **Every def is matched against every frame, on the transport's
    worker** ([ADR-0024](docs/adr/0024-decode-on-the-worker.md)). A
    subscription can't trim that work: it is the chart's filter only,

@@ -98,6 +98,12 @@ if(ANDROID AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/android")
     set_target_properties(qttune PROPERTIES
         QT_ANDROID_PACKAGE_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/android")
 endif()
+# Core's TCP socket (elm327://<address>) needs INTERNET, and the app
+# links no QtNetwork, the module that would declare it (ADR-0028 §2).
+# CI's android-build checks the merged manifest for it.
+if(ANDROID)
+    qt_add_android_permission(qttune NAME android.permission.INTERNET)
+endif()
 
 # Icon helpers later: qt_add_resources, ios/macos asset catalogs, etc.
 

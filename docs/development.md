@@ -152,9 +152,10 @@ and core are shared, and only the kit differs. Use `qt-cmake` from
 the mobile kit, which applies Qt's toolchain file and finds the host
 desktop Qt. Mobile builds set `BUILD_TESTING=OFF`:
 `gtest_discover_tests` runs each test binary at build time, and the
-build host can't execute an Android or iOS binary. Off Windows the
-transports are `mock://` and `replay://` (Known Issue #2). Qt Creator
-with an Android or iOS kit is the interactive alternative.
+build host can't execute an Android or iOS binary. On a phone the
+transports are `mock://`, `replay://` and `elm327://` to a WiFi
+adapter's address (Known Issue #2). Qt Creator with an Android or iOS
+kit is the interactive alternative.
 
 *Android* (this mirrors the `android-build` CI job). On Windows, add
 `-G Ninja`, because the Visual Studio generator can't target Android:
@@ -174,7 +175,16 @@ desktop Qt, and `--autodesktop` installs it. A custom
 manifest or icons go in `app/android/`. CMake sets
 `QT_ANDROID_PACKAGE_SOURCE_DIR` only when that directory exists, so
 `androiddeployqt` is never pointed at a missing template. No template
-exists yet.
+exists yet. The app declares `INTERNET` with
+`qt_add_android_permission`, because core's TCP socket needs it and
+nothing else puts it in the manifest; `android-build` fails if the
+generated manifest lacks it.
+
+To install on a phone without an Android kit, take the
+`qttune-android-arm64-v8a` artifact from a CI run (kept 14 days): the
+debug-signed APK. Each run signs with a new debug key, so uninstall
+the previous build before installing the next (Android refuses an
+update signed by another key).
 
 *iOS, device* (macOS host; this mirrors `ios-build`). `qt-cmake` also
 applies Qt's minimum deployment target, iOS 18 for Qt 6.12:

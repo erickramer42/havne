@@ -64,6 +64,14 @@ which has no bench session):
 | 19 | **Listening hears another tester's replies:** `AT MA` with the setup's `AT CRA` passes the channel's reply ID and nothing else, the monitor never acknowledges, and the replies reassemble as a request's do, multi-frame ones too once the other tester sends the flow control | STILL UNKNOWN | Fake-tested only. Needs an OBD Y-splitter: the VX polling through J2534 and the MX+ listening through `elm327://COMn?profile=raw`, the listener's messages compared with the poller's recording |
 | 20 | **The VX over WiFi** (ADR-0026's appendix "WiFi over TCP"): its open access point at 192.168.4.1, port 23, takes `elm327://192.168.4.1:23`, the setup answering as on its USB port; leaving its network and rejoining it is a hard failure that recovers with no reconnect; whether WiFi answers while a program holds the USB port too | CONFIRMED in part: a session runs over it, and leaving the network is a fault at once that recovers on the backoff with no reconnect once the VX answers. The VX's network side hangs after a client leaves with its socket open, until a power cycle. WiFi with the USB port held: REFUTED, one link at a time | With a session holding the USB port, J2534 or `elm327://COM4`, a WiFi join was refused though the network was listed, and after the J2534 session closed the access point was gone until a power cycle ([2026-10-27-elm327-bench-6](2026-10-27-elm327-bench-6.md), observed on screen, no logs). Leaving the network mid-session, twice: the read failed at once, or the 5 s silence rule caught it ("Adapter fault"), and the reopens followed the backoff; on rejoining, the VX answered no TCP, no ARP and once no DHCP, with QtTune disconnected for 2 minutes as much as with it retrying, until the VX was power-cycled; then the next reopen ran the setup and the link went quiet with no reconnect. A stall that QtTune closed while the network was up recovered at the next connect ([2026-10-27-elm327-bench-5](2026-10-27-elm327-bench-5.md)). A QtTune session, no bus: the setup answered as on USB, each prompt 5 to 39 ms after its command; `NO DATA` 108 to 130 ms after the first three requests and about 306 ms after the rest, USB's 100 and 300 ms plus a few ms; the link quiet 2.5 s after the connect, no episode ([2026-10-27-elm327-bench-4](2026-10-27-elm327-bench-4.md)). Before it, a probe outside QtTune (ELM commands only, 2026-10-27, the dev machine on the VX's network): the socket connected in 25 ms, nothing arrived before the first command (no telnet negotiation on port 23), `AT Z` `OK`, `AT I` `ELM327 V2.1`, `AT @1` `OBDX Pro VX`, `AT RV` `0.00V`, each prompt about 5 ms after its command (USB's take 0.1–0.3 ms). The network is up on USB power alone and on the OBD port's alone. To run: the VX on USB power, the machine on its network, `elm327://192.168.4.1:23?profile=raw&poll=0x0C`, the wire log |
 
+### Android ([ADR-0028](../adr/0028-app-fed-streams.md))
+
+| # | Assumption in the code | State | Evidence |
+|---|---|---|---|
+| 21 | **The Android app runs:** CI's debug APK installs on a phone, the pages lay out at phone width (the tab bar under 720 px), `mock://` streams, and a session survives the app in the background and the screen off | STILL UNKNOWN | Built in CI only; the app has never been launched. To run: [android-phone-runsheet.md](android-phone-runsheet.md), Phases 1–2 |
+| 22 | **`elm327://` over TCP from Android:** the declared `INTERNET` lets core's socket reach the VX's WiFi at 192.168.4.1:23, with the setup answering as on the computer; whether Android sends the socket over mobile data while the phone is on a WiFi network with no internet | STILL UNKNOWN | CI checks the manifest declares `INTERNET`. To run: the run sheet's Phase 4 |
+| 23 | **Where an Android app's files land:** the wire log in `TMPDIR` and recordings under `DocumentsLocation`, both inside the app's own storage, readable with `adb run-as` on a debug build; whether a recording can be replayed by its path from the phone | STILL UNKNOWN | To run: the run sheet's Phases 3 and 5 |
+
 ## Still open
 
 - **#4, 29-bit addressing:** needs a 29-bit vehicle.
@@ -73,6 +81,8 @@ which has no bench session):
   there.
 - **#17, response pending:** needs an ECU that answers `7F xx 78`.
 - **#19, listening to another tester:** a car and an OBD Y-splitter.
+- **#21–#23, the Android app:** the phone run
+  ([android-phone-runsheet.md](android-phone-runsheet.md)).
 - **Every item for any other adapter.** Each CONFIRMED above is the
   VX's. A second adapter, x64 or another vendor's, walks the whole
   list again; the x64 surrogate it would load in has met only the fake
