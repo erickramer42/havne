@@ -68,7 +68,7 @@ which has no bench session):
 
 | # | Assumption in the code | State | Evidence |
 |---|---|---|---|
-| 21 | **The Android app runs:** CI's debug APK installs on a phone, the pages lay out at phone width (the tab bar under 720 px), `mock://` streams, and a session survives the app in the background and the screen off | STILL UNKNOWN | Built in CI only; the app has never been launched. To run: [android-phone-runsheet.md](android-phone-runsheet.md), Phases 1–2 |
+| 21 | **The Android app runs:** CI's debug APK installs on a phone, the pages lay out at phone width (the tab bar under 720 px), `mock://` streams, and a session survives the app in the background and the screen off | REFUTED in part: it installs and launches, and every page draws, but at phone width Settings runs off the screen (Connect with it) and the system bars cover the bottom, so nothing could connect. Settings and Home now fit a phone's sizes in `test_qml` and the UI keeps out of the system bars, untried on the phone | Android 16, the CI APK of `00ad719`: installed after Play Protect's "Install anyway", the first page near instant, the pages relaid on turning; Settings overflows to the right in portrait and in landscape, a bar along the bottom covers Home's Connect in landscape, Home's top is cut off in landscape, no zoom without a keyboard ([2026-10-28-android](2026-10-28-android.md)). To run: [android-phone-runsheet.md](android-phone-runsheet.md), Phases 1–2 |
 | 22 | **`elm327://` over TCP from Android:** the declared `INTERNET` lets core's socket reach the VX's WiFi at 192.168.4.1:23, with the setup answering as on the computer; whether Android sends the socket over mobile data while the phone is on a WiFi network with no internet | STILL UNKNOWN | CI checks the manifest declares `INTERNET`. To run: the run sheet's Phase 4 |
 | 23 | **Where an Android app's files land:** the wire log in `TMPDIR` and recordings under `DocumentsLocation`, both inside the app's own storage, readable with `adb run-as` on a debug build; whether a recording can be replayed by its path from the phone | STILL UNKNOWN | To run: the run sheet's Phases 3 and 5 |
 
@@ -82,7 +82,8 @@ which has no bench session):
 - **#17, response pending:** needs an ECU that answers `7F xx 78`.
 - **#19, listening to another tester:** a car and an OBD Y-splitter.
 - **#21–#23, the Android app:** the phone run
-  ([android-phone-runsheet.md](android-phone-runsheet.md)).
+  ([android-phone-runsheet.md](android-phone-runsheet.md)), once the
+  pages fit a phone; #22 and #23 weren't reached.
 - **Every item for any other adapter.** Each CONFIRMED above is the
   VX's. A second adapter, x64 or another vendor's, walks the whole
   list again; the x64 surrogate it would load in has met only the fake

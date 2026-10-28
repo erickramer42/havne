@@ -4,7 +4,8 @@
 //          within a 1280 × 720 screen, zoom steps with Ctrl + / Ctrl − /
 //          Ctrl 0 and Settings' Display row and survives a restart, as
 //          does the unit system (2026-10-24) and developer mode
-//          (2026-10-27).
+//          (2026-10-27). The safe area's margins (Android's system
+//          bars): BENCH, the phone run sheet.
 //          test_qml (tests/qml/tst_linkhealth.qml) checks the pill and
 //          each page's link surfaces in every link state, finding the
 //          pages and the pill by objectName
@@ -101,10 +102,16 @@ ApplicationWindow {
     // The whole UI, laid out at the window's size divided by the zoom and
     // scaled by it, so pages reflow as if the window were that size.
     // Shapes and text are vector-drawn, so they stay sharp at any zoom.
+    // It keeps out of the safe area's margins: Android draws the window
+    // under its status and navigation bars (edge to edge), where the
+    // window's color shows; elsewhere the margins are 0.
     Item {
         id: zoomRoot
-        width: parent.width / Theme.zoom
-        height: parent.height / Theme.zoom
+        readonly property var safe: parent.SafeArea.margins
+        x: safe.left
+        y: safe.top
+        width: (parent.width - safe.left - safe.right) / Theme.zoom
+        height: (parent.height - safe.top - safe.bottom) / Theme.zoom
         scale: Theme.zoom
         transformOrigin: Item.TopLeft
 
@@ -317,7 +324,7 @@ ApplicationWindow {
         function show() { opacity = 1; zoomBadgeTimer.restart() }
         anchors.horizontalCenter: parent.horizontalCenter
         anchors.bottom: parent.bottom
-        anchors.bottomMargin: 24
+        anchors.bottomMargin: 24 + zoomRoot.safe.bottom
         width: zoomBadgeLabel.implicitWidth + 32
         height: 36
         radius: 18

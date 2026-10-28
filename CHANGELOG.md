@@ -66,6 +66,9 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
   the red.
 
 ### Fixed
+- Settings and Home fit a narrow window: Settings' rows of buttons wrap
+  instead of pushing Connect off the right edge, and Home scrolls when
+  the window is shorter than it.
 - A J2534 driver reporting a buffer overflow on a read no longer reads
   as "Adapter fault" with the read's messages dropped: the messages
   arrive, and the session carries on.

@@ -19,7 +19,8 @@
 //          and Forget all asking once, kept across a new page, picking
 //          that fills the field, locked during a session, a mock session
 //          left alone, and (Windows, the fake) an adapter's connect
-//          keeping its URI and plotting, its VIN learned and logged.
+//          keeping its URI and plotting, its VIN learned and logged;
+//          every item inside the page's width at a phone's (380 px).
 //          Manual smoke — the live discovery list renders (Windows: the
 //          registry's interfaces and ports; macOS/Linux: the /dev ports or
 //          the empty-state hint) sized to its rows, a device row
@@ -166,6 +167,27 @@ Pane {
         font.pixelSize: 16
         font.weight: Font.DemiBold
         Layout.topMargin: Theme.spacing
+    }
+
+    // A caption, then buttons that wrap: a row of them would hold the
+    // page at its natural width, past a phone's
+    component LabeledFlow: RowLayout {
+        property alias label: caption.text
+        default property alias content: flow.data
+        Layout.fillWidth: true
+        spacing: Theme.spacing
+
+        Label {
+            id: caption
+            color: Theme.textDim
+            Layout.alignment: Qt.AlignTop
+            topPadding: 8
+        }
+        Flow {
+            id: flow
+            Layout.fillWidth: true
+            spacing: Theme.spacing
+        }
     }
 
     function refreshDevices() {
@@ -422,6 +444,7 @@ Pane {
 
         ColumnLayout {
             id: column
+            objectName: "settingsColumn"
             x: Theme.pageMargin
             y: Theme.pageMargin
             width: flick.width - 2 * Theme.pageMargin
@@ -505,43 +528,31 @@ Pane {
             // ---- Vehicle (ADR-0027): picked before a connect, its
             // connection filling the field; every change to the list is
             // made here. Locked while a session is up or in flight ----
-            RowLayout {
-                Layout.fillWidth: true
-                spacing: Theme.spacing
+            LabeledFlow {
+                label: qsTr("Vehicle:")
 
-                Label {
-                    text: qsTr("Vehicle:")
-                    color: Theme.textDim
-                    Layout.alignment: Qt.AlignTop
-                    topPadding: 8
+                ThemedButton {
+                    objectName: "vehicle_none"
+                    text: qsTr("None")
+                    highlighted: page.pickedVehicle === null
+                    enabled: page.idle
+                    onClicked: page.pickVehicle("")
                 }
-                Flow {
-                    Layout.fillWidth: true
-                    spacing: Theme.spacing
-
+                // Keyed by the count, not the list: each change makes a
+                // new list, and a list model would rebuild every
+                // button (losing focus) for a pick or a rename
+                Repeater {
+                    model: page.vehicles.list.length
                     ThemedButton {
-                        objectName: "vehicle_none"
-                        text: qsTr("None")
-                        highlighted: page.pickedVehicle === null
+                        required property int index
+                        // Undefined for a moment when the list shrinks,
+                        // before the button goes
+                        readonly property var vehicle: page.vehicles.list[index]
+                        objectName: "vehicle_" + (vehicle?.id ?? "")
+                        text: vehicle?.label ?? ""
+                        highlighted: vehicle !== undefined && page.vehicles.picked === vehicle.id
                         enabled: page.idle
-                        onClicked: page.pickVehicle("")
-                    }
-                    // Keyed by the count, not the list: each change makes a
-                    // new list, and a list model would rebuild every
-                    // button (losing focus) for a pick or a rename
-                    Repeater {
-                        model: page.vehicles.list.length
-                        ThemedButton {
-                            required property int index
-                            // Undefined for a moment when the list shrinks,
-                            // before the button goes
-                            readonly property var vehicle: page.vehicles.list[index]
-                            objectName: "vehicle_" + (vehicle?.id ?? "")
-                            text: vehicle?.label ?? ""
-                            highlighted: vehicle !== undefined && page.vehicles.picked === vehicle.id
-                            enabled: page.idle
-                            onClicked: page.pickVehicle(vehicle.id)
-                        }
+                        onClicked: page.pickVehicle(vehicle.id)
                     }
                 }
             }
@@ -554,7 +565,7 @@ Pane {
                 TextField {
                     id: vehicleLabelField
                     objectName: "vehicleLabelField"
-                    width: 300
+                    width: Math.min(300, parent.width)
                     enabled: page.idle
                     placeholderText: qsTr("Label")
                 }
@@ -625,8 +636,9 @@ Pane {
             }
 
             // A removal asks once, in place
-            RowLayout {
+            Flow {
                 visible: page.confirming !== ""
+                Layout.fillWidth: true
                 spacing: Theme.spacing
 
                 Label {
@@ -653,9 +665,8 @@ Pane {
             }
 
             // ---- Presets: the URI's base ----
-            RowLayout {
-                spacing: Theme.spacing
-                Label { text: qsTr("Presets:"); color: Theme.textDim }
+            LabeledFlow {
+                label: qsTr("Presets:")
                 Repeater {
                     model: [
                         { name: "mock", uri: "mock://demo", label: "mock://demo" },
@@ -680,9 +691,8 @@ Pane {
 
             // ---- Profile: the URI's query (ADR-0013, ADR-0020) ----
             // The chosen button is drawn as the primary color
-            RowLayout {
-                spacing: Theme.spacing
-                Label { text: qsTr("Profile:"); color: Theme.textDim }
+            LabeledFlow {
+                label: qsTr("Profile:")
                 Repeater {
                     model: page.profiles
                     ThemedButton {
@@ -779,18 +789,20 @@ Pane {
 
             // ---- Display ----
             // The whole UI's zoom; Main.qml applies and stores it
-            RowLayout {
-                spacing: Theme.spacing
-                Label { text: qsTr("Display size:"); color: Theme.textDim }
+            LabeledFlow {
+                label: qsTr("Display size:")
                 ThemedButton {
+                    id: smaller
                     text: "−"
                     Accessible.name: qsTr("Smaller")
                     enabled: Theme.zoom > Theme.zoomSteps[0] + 0.001
                     onClicked: Theme.stepZoom(-1)
                 }
                 Label {
-                    Layout.minimumWidth: 52
+                    width: Math.max(52, implicitWidth)
+                    height: smaller.height
                     horizontalAlignment: Text.AlignHCenter
+                    verticalAlignment: Text.AlignVCenter
                     text: qsTr("%1 %").arg(Math.round(Theme.zoom * 100))
                     color: Theme.text
                 }
@@ -805,18 +817,21 @@ Pane {
                     enabled: Math.abs(Theme.zoom - 1) > 0.001
                     onClicked: Theme.zoom = 1
                 }
-                Label {
-                    text: qsTr("or Ctrl + / Ctrl − / Ctrl 0")
-                    color: Theme.textDim
-                }
+            }
+            // A phone has no keyboard to zoom with
+            Label {
+                visible: Qt.platform.os !== "android" && Qt.platform.os !== "ios"
+                text: qsTr("or Ctrl + / Ctrl − / Ctrl 0")
+                color: Theme.textDim
+                wrapMode: Text.WordWrap
+                Layout.fillWidth: true
             }
 
             // Units: what the pages show, converted in core (ADR-0022);
             // recordings keep the decoded values. Main.qml stores it.
             // Takes effect at once, connected or not.
-            RowLayout {
-                spacing: Theme.spacing
-                Label { text: qsTr("Units:"); color: Theme.textDim }
+            LabeledFlow {
+                label: qsTr("Units:")
                 Repeater {
                     model: [
                         { system: 0, name: "metric", label: qsTr("Metric (km/h, °C)") },
@@ -838,6 +853,7 @@ Pane {
                 objectName: "developerBox"
                 text: qsTr("Developer mode: the mock:// preset, and the raw frames on the Log page")
                 checked: Theme.developerMode
+                Layout.fillWidth: true
                 onToggled: {
                     Theme.developerMode = checked
                     checked = Qt.binding(() => Theme.developerMode)
@@ -847,6 +863,7 @@ Pane {
                     color: Theme.text
                     leftPadding: developerBox.indicator.width + developerBox.spacing
                     verticalAlignment: Text.AlignVCenter
+                    wrapMode: Text.WordWrap
                 }
             }
 

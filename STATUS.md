@@ -239,7 +239,8 @@ OBDX Pro VX in its ELM mode (USB-powered). In order:
 
 The app-fed stream for Bluetooth on Android and BLE is
 [ADR-0028](docs/adr/0028-app-fed-streams.md) (accepted; step 1, the
-Android baseline, under way: the CI APK and the phone run). Later,
+Android baseline, under way: the CI APK runs on a phone, and its
+pages are fixed to fit one, to be checked there). Later,
 with its own record: listening to the whole bus (raw frames, for a
 car whose OBD port carries more than diagnostics).
 
@@ -261,8 +262,13 @@ an issue is resolved it is removed, and its number is not reused.
    cross-builds an Android arm64-v8a APK and an unsigned iOS arm64
    device build. On pull requests and on request, it also launches
    the iOS app on the Simulator and screenshots it
-   (`ios-simulator-smoke`). Neither app has run on a device, the
-   Android app has never been launched, and no tests run on either
+   (`ios-simulator-smoke`). The Android app installs and launches on
+   a phone, where Settings ran off the screen, Connect with it, and
+   the system bars covered the bottom, so it couldn't start a session
+   ([2026-10-28-android](docs/bench-sessions/2026-10-28-android.md)).
+   Settings and Home fit a phone's sizes in `test_qml`, and the UI
+   keeps out of the safe area's margins, both untried on the phone.
+   The iOS app hasn't run on a device, and no tests run on either
    (cross builds set `BUILD_TESTING=OFF`). A phone's route to a car
    is `elm327://` to a WiFi adapter's address, untried on a phone;
    Bluetooth on Android is [ADR-0028](docs/adr/0028-app-fed-streams.md),

@@ -20,7 +20,8 @@
 //          fills the field; locked during a session; a mock session
 //          leaves the vehicle alone, and (Windows, the fake) an adapter's
 //          connect keeps its URI and plotted signals and its VIN is
-//          learned and logged. The live registry, and
+//          learned and logged. At a phone's width every item lies
+//          inside the page. The live registry, and
 //          the units kept across a restart (Main.qml's Settings), are
 //          manual smoke.
 
@@ -39,7 +40,7 @@ TestCase {
         id: pageComponent
         // Tall enough that the device list sits inside the page's
         // scroll area, which clips what's below it from a click
-        SettingsPage { width: 1000; height: 1000 }
+        SettingsPage { width: 1000; height: 1200 }
     }
 
     // The page's stored URI, Record switch and versions (test_qml keeps
@@ -97,6 +98,38 @@ TestCase {
     // A button's click, through its own handler
     function press(page, name) {
         find(page, name).clicked()
+    }
+
+    // The visible items under item whose right edge lies past column's,
+    // named by objectName, text or type
+    function pastTheEdge(item, column, out) {
+        for (let i = 0; i < item.children.length; ++i) {
+            const child = item.children[i]
+            if (!child.visible || child.width <= 0)
+                continue
+            const right = child.mapToItem(column, child.width, 0).x
+            if (right > column.width + 0.5)
+                out.push((child.objectName || child.text || String(child))
+                         + " at " + Math.round(right))
+            pastTheEdge(child, column, out)
+        }
+        return out
+    }
+
+    // A phone's width (docs/bench-sessions/2026-10-28-android.md): the
+    // page scrolls only up and down, so every item lies inside its
+    // column, Connect among them
+    function test_everyItemFitsAPhonesWidth() {
+        const page = createPage()
+        page.width = 380
+        const column = find(page, "settingsColumn")
+        tryCompare(column, "width", 380 - 2 * Theme.pageMargin)
+        waitForPolish(column)
+        compare(pastTheEdge(column, column, []).join("; "), "",
+                "nothing past the column's right edge, " + column.width)
+        const connect = find(page, "connectButton")
+        verify(connect.mapToItem(column, connect.width, 0).x <= column.width,
+               "Connect inside the column")
     }
 
     // The Units row sets the bridge's unit system, connected or not, and
