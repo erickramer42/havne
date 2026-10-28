@@ -10,3 +10,6 @@ sur.log
 
 # Release staging (packaging/windows/stage.ps1)
 dist/
+
+# Editor swap files
+*.sw[op]

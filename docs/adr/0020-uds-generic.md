@@ -11,7 +11,7 @@
 
 ## Context
 
-The curated sets this project wants (`mazda-kf` and the like) need
+The curated sets this project wants (one per make and platform) need
 research on a car: which Service 0x22 DIDs an ECU answers, how long
 each reply is, and which bytes move with what. The `obd2` profile can't
 ask for a DID, and a registered profile is static data: the registry
@@ -24,8 +24,8 @@ with the probe on, leaves the rotation when the ECU refuses it. A `HEX`
 def shows a reply of any length as hex pairs, and a `TEXT` def as ASCII.
 What's missing is a profile whose set is built from the URI.
 
-A research session also wants to sweep a block of DIDs (Mazda's
-enhanced data sits in `0x1Exx`; identification in `0xF1xx`) and see
+A research session also wants to sweep a block of DIDs (a make's
+enhanced data in a block such as `0x1Exx`; identification in `0xF1xx`) and see
 which answer. A block of 256 is twice the request table, and most of it
 is refused; it must not sit in the rotation.
 

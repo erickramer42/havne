@@ -2,7 +2,7 @@
 
 **QtTune build:** <commit hash>  **Trees:** build, build-win32 both fresh
 **Date:** <date>
-**Adapter:** OBDX Pro VX (USB)  **Vehicle:** <year make model>; CAN-era OBD-II, expected 11-bit IDs at 500 kbit/s
+**Adapter:** OBDX Pro VX (USB)  **Vehicle:** a pseudonym ("the test car"; never its make, model or year); CAN-era OBD-II, expected 11-bit IDs at 500 kbit/s
 
 Fill in a copy of this sheet as `docs/bench-sessions/<date>-vehicle.md`.
 The no-vehicle BENCH tier is [bench-runsheet.md](bench-runsheet.md);

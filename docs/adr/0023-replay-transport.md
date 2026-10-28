@@ -24,7 +24,7 @@ the bytes a real ECU sent.
 Three needs meet here:
 
 - **Regression evidence from a real bus.** The `obd2` set decoded the
-  CX-5's replies on both dates; a test that replays them and checks the
+  test car's replies on both dates; a test that replays them and checks the
   values keeps that true without the car.
 - **A load source.** Decoding on the worker (STATUS.md, backlog
   "Full signal sets at full rate"; Known Issue #4, and per-sample

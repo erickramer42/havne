@@ -261,7 +261,7 @@ appendix, before and after the engine.
   is known; the payload log keeps the bytes.
 - Ship order stays as ADR-0013 §6 has it: `obd2` with the probe, then
   `uds-generic` to research DIDs on a vehicle, then curated sets.
-  Curated sets are scoped to a platform (for example `mazda-kf`),
+  Curated sets are scoped to a platform (for example `<make>-<platform>`),
   because DIDs and formulas vary by platform and model year.
 
 ## Appendix — first vehicle session measurements (2026-10-22)

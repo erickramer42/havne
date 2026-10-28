@@ -446,7 +446,7 @@ UI needs no new code.
   line, the final reply arrives while it isn't listening and is lost,
   and the engine waits out its pending wait (5.05 s) and asks again.
   The count digit is never sent with 0x22 or 0x09, where a `78` is
-  plausible. The CX-5 never sent a `78` to the J2534 sessions.
+  plausible. The test car never sent a `78` to the J2534 sessions.
 - **STN answers:** what the MX201 answers to `AT I`, `STI` and
   `AT PPS` (whether any parameter has been changed by another app),
   and which STN chip it is (STN2255 or STN2256). The FRPM gives the

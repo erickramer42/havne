@@ -239,9 +239,10 @@ OBDX Pro VX in its ELM mode (USB-powered). In order:
 
 The app-fed stream for Bluetooth on Android and BLE is
 [ADR-0028](docs/adr/0028-app-fed-streams.md) (accepted; step 1, the
-Android baseline, under way: the app runs on a phone, reaches the
-VX over WiFi and replays a recording by a tap; Settings' sections to
-try on a phone next). Later,
+Android baseline, is complete: the app runs on a phone, reaches the
+VX over WiFi and replays a recording by a tap
+([2026-10-28-android-6](docs/bench-sessions/2026-10-28-android-6.md));
+step 2, the core stream, is next). Later,
 with its own record: listening to the whole bus (raw frames, for a
 car whose OBD port carries more than diagnostics).
 
@@ -268,8 +269,8 @@ an issue is resolved it is removed, and its number is not reused.
    WiFi, and a recording replays by a tap on its row in Settings
    ([2026-10-28-android-3](docs/bench-sessions/2026-10-28-android-3.md)).
    The window follows the screen when the phone turns, and Settings
-   fits connected
-   ([2026-10-28-android-5](docs/bench-sessions/2026-10-28-android-5.md)).
+   fits connected, its sections folded
+   ([2026-10-28-android-6](docs/bench-sessions/2026-10-28-android-6.md)).
    The iOS app hasn't
    run on a device, and no tests run on either (cross builds set
    `BUILD_TESTING=OFF`). Bluetooth on Android is

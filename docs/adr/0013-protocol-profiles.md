@@ -63,7 +63,7 @@ Additionally, the request loop's placement is wrong: it lives in the J2534 trans
    - `raw` (immediate; escape hatch for unknown vehicles)
    - `obd2` v1 (static starter set: RPM, speed, coolant, intake temp, load, throttle; multi-PID round-robin scheduler replacing the single-PID loop)
    - `obd2` v2 (bitmap probe phase)
-   - `uds-generic` (Mode-22 DID reads, user-entered DIDs — the Mazda/Honda research vehicle)
+   - `uds-generic` (Mode-22 DID reads, user-entered DIDs — the research vehicle)
    - `mazda-uds`, `honda-uds` (curated, post-research, v0.5.0 plugin territory)
 
 ## Alternatives considered

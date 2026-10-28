@@ -1,7 +1,7 @@
 # ELM327 VEHICLE run sheet — the MX+ on the car, read-only
 
 **Date:** <date>  **Adapter:** OBDLink MX+ (MX201, Bluetooth)
-**Vehicle:** <year make model>; the car of the J2534 sessions
+**Vehicle:** the test car, the car of the J2534 sessions (never its make, model or year)
 **QtTune build:** <commit hash>
 
 Fill in a copy as `docs/bench-sessions/<date>-elm327-vehicle.md`. The
