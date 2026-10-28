@@ -34,6 +34,7 @@
 #include <sstream>
 #include <string>
 #include <thread>
+#include <utility>
 #include <vector>
 
 #ifdef _WIN32
@@ -660,9 +661,12 @@ TEST_F(Elm327SessionTest, RawWithPollAsksTheEngineEcu)
         << ecuio_last_error_detail();
     s.start();
     ASSERT_TRUE(wait_for([&] { return s.cap.count("41 0C") >= 3; }, 3000));
-    const uint32_t requests =
-        on_fake<uint32_t>([](fake_elm327::adapter& a) { return a.requests; });
-    EXPECT_EQ(fake_count("010C1"), requests) << "only ?poll='s request";
+    /* Both under one lock: the worker keeps polling between two reads */
+    const std::pair<uint32_t, uint32_t> counts =
+        on_fake<std::pair<uint32_t, uint32_t>>([](fake_elm327::adapter& a) {
+            return std::make_pair(a.count("010C1"), a.requests);
+        });
+    EXPECT_EQ(counts.first, counts.second) << "only ?poll='s request";
 }
 
 /* An adapter that prints an 11-bit ID as two bytes (07E8) reads the
