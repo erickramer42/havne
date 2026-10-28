@@ -1,0 +1,100 @@
+[elm327 20:51:02.127 +0.000000] QtTune ELM327 wire log (ADR-0026), core 0.3.2
+[elm327 20:51:02.127 +0.000042] uri elm327://COM4?profile=raw
+[elm327 20:51:02.127 +0.000053] COM4 at 38400 bit/s; CAN at 500000 bit/s, protocol 6; every request and reply (ECUIO_SUR_LOG_FRAMES=1)
+[elm327 20:51:02.127 +0.000070] > ATZ
+[elm327 20:51:02.132 +0.003898] < ATZ
+[elm327 20:51:02.132 +0.003921] < OK
+[elm327 20:51:02.132 +0.003933] prompt 3.8 ms after ATZ
+[elm327 20:51:02.132 +0.003952] > ATI
+[elm327 20:51:02.132 +0.004116] < ATI
+[elm327 20:51:02.132 +0.004129] < ELM327 V2.1
+[elm327 20:51:02.132 +0.004259] prompt 0.2 ms after ATI
+[elm327 20:51:02.132 +0.004276] > ATE0
+[elm327 20:51:02.132 +0.004509] < ATE0
+[elm327 20:51:02.132 +0.004514] < OK
+[elm327 20:51:02.132 +0.004519] prompt 0.2 ms after ATE0
+[elm327 20:51:02.132 +0.004531] > ATL0
+[elm327 20:51:02.132 +0.004679] < OK
+[elm327 20:51:02.132 +0.004683] prompt 0.1 ms after ATL0
+[elm327 20:51:02.132 +0.004695] > ATS0
+[elm327 20:51:02.132 +0.004823] < OK
+[elm327 20:51:02.132 +0.004826] prompt 0.1 ms after ATS0
+[elm327 20:51:02.132 +0.004834] > ATH1
+[elm327 20:51:02.133 +0.004962] < OK
+[elm327 20:51:02.133 +0.004965] prompt 0.1 ms after ATH1
+[elm327 20:51:02.133 +0.004972] > ATD0
+[elm327 20:51:02.133 +0.005105] < OK
+[elm327 20:51:02.133 +0.005107] prompt 0.1 ms after ATD0
+[elm327 20:51:02.133 +0.005115] > ATCAF1
+[elm327 20:51:02.133 +0.005307] < OK
+[elm327 20:51:02.133 +0.005310] prompt 0.1 ms after ATCAF1
+[elm327 20:51:02.133 +0.005318] > ATCFC1
+[elm327 20:51:02.133 +0.005453] < OK
+[elm327 20:51:02.133 +0.005456] prompt 0.1 ms after ATCFC1
+[elm327 20:51:02.133 +0.005464] > ATSP6
+[elm327 20:51:02.133 +0.005844] < OK
+[elm327 20:51:02.134 +0.005847] prompt 0.3 ms after ATSP6
+[elm327 20:51:02.134 +0.005855] > ATAT1
+[elm327 20:51:02.134 +0.005990] < OK
+[elm327 20:51:02.134 +0.005993] prompt 0.1 ms after ATAT1
+[elm327 20:51:02.134 +0.006001] > ATST19
+[elm327 20:51:02.134 +0.006147] < OK
+[elm327 20:51:02.134 +0.006150] prompt 0.1 ms after ATST19
+[elm327 20:51:02.134 +0.006158] > ATSH7E0
+[elm327 20:51:02.134 +0.006307] < OK
+[elm327 20:51:02.134 +0.006310] prompt 0.1 ms after ATSH7E0
+[elm327 20:51:02.134 +0.006318] > ATCRA7E8
+[elm327 20:51:02.134 +0.006472] < OK
+[elm327 20:51:02.134 +0.006475] prompt 0.1 ms after ATCRA7E8
+[elm327 20:51:02.134 +0.006489] > ATI
+[elm327 20:51:02.134 +0.006621] < ELM327 V2.1
+[elm327 20:51:02.134 +0.006626] prompt 0.1 ms after ATI
+[elm327 20:51:02.134 +0.006634] > STI
+[elm327 20:51:02.134 +0.006759] < ?
+[elm327 20:51:02.134 +0.006763] prompt 0.1 ms after STI
+[elm327 20:51:02.134 +0.006777] > ATRV
+[elm327 20:51:02.148 +0.021157] < 0.00V
+[elm327 20:51:02.148 +0.021170] prompt 14.3 ms after ATRV
+[elm327 20:51:02.150 +0.021746] the monitor starts (AT MA)
+[elm327 20:51:02.150 +0.021754] > ATMA
+[elm327 20:51:07.150 +5.022226] no line for 5 s: the monitor stops to check the adapter
+[elm327 20:51:07.150 +5.022244] > (a space: the monitor's stop)
+[elm327 20:51:07.150 +5.022406] < STOPPED
+[elm327 20:51:07.150 +5.022415] prompt 0.1 ms after ATMA
+[elm327 20:51:07.150 +5.022418] the adapter answered the stop: AT MA again
+[elm327 20:51:07.150 +5.022430] the monitor starts (AT MA)
+[elm327 20:51:07.150 +5.022433] > ATMA
+[elm327 20:51:12.151 +10.023162] no line for 5 s: the monitor stops to check the adapter
+[elm327 20:51:12.151 +10.023192] > (a space: the monitor's stop)
+[elm327 20:51:12.151 +10.023361] < STOPPED
+[elm327 20:51:12.151 +10.023378] prompt 0.1 ms after ATMA
+[elm327 20:51:12.151 +10.023381] the adapter answered the stop: AT MA again
+[elm327 20:51:12.151 +10.023394] the monitor starts (AT MA)
+[elm327 20:51:12.151 +10.023396] > ATMA
+[elm327 20:51:17.174 +15.045671] no line for 5 s: the monitor stops to check the adapter
+[elm327 20:51:17.174 +15.045693] > (a space: the monitor's stop)
+[elm327 20:51:17.174 +15.045883] < STOPPED
+[elm327 20:51:17.174 +15.045893] prompt 0.1 ms after ATMA
+[elm327 20:51:17.174 +15.045897] the adapter answered the stop: AT MA again
+[elm327 20:51:17.174 +15.045914] the monitor starts (AT MA)
+[elm327 20:51:17.174 +15.045965] > ATMA
+[elm327 20:51:22.197 +20.068704] no line for 5 s: the monitor stops to check the adapter
+[elm327 20:51:22.197 +20.068727] > (a space: the monitor's stop)
+[elm327 20:51:22.197 +20.068947] < STOPPED
+[elm327 20:51:22.197 +20.068958] prompt 0.2 ms after ATMA
+[elm327 20:51:22.197 +20.068963] the adapter answered the stop: AT MA again
+[elm327 20:51:22.197 +20.068980] the monitor starts (AT MA)
+[elm327 20:51:22.197 +20.068984] > ATMA
+[elm327 20:51:27.221 +25.093519] no line for 5 s: the monitor stops to check the adapter
+[elm327 20:51:27.221 +25.093564] > (a space: the monitor's stop)
+[elm327 20:51:27.221 +25.093870] < STOPPED
+[elm327 20:51:27.221 +25.093878] prompt 0.3 ms after ATMA
+[elm327 20:51:27.221 +25.093881] the adapter answered the stop: AT MA again
+[elm327 20:51:27.221 +25.093895] the monitor starts (AT MA)
+[elm327 20:51:27.221 +25.093898] > ATMA
+[elm327 20:51:31.859 +29.730731] > (a space: the monitor's stop)
+[elm327 20:51:31.859 +29.730951] < STOPPED
+[elm327 20:51:31.859 +29.730960] prompt 0.2 ms after ATMA
+[elm327 20:51:31.859 +29.730963] the monitor stopped: the session closes
+[elm327 20:51:31.859 +29.731045] the session closes
+[elm327 20:51:31.860 +29.731827] COM4 closed

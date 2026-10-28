@@ -1,0 +1,17 @@
+QtTune session recording (ADR-0017)
+started  2026-10-27 20:51:02.150 (local time)
+core     0.3.2
+uri      elm327://COM4?profile=raw
+signals  none: the raw profile, frames only
+surrogate frame logging  on, set by this recording
+columns  local time, seconds since the recording started (host_us / 1e6 in the CSV files), message
+
+20:51:02.150  +0.000  Recording: Documents\QtTune\recordings\20261027-205102
+20:51:02.180  +0.030  Connected: elm327://COM4?profile=raw
+20:51:02.180  +0.030  Session: ELM327 adapter (ELM327 V2.1); ISO 15765 at 500000 baud; profile raw, channel 0x7E8/0x7E0 (rx/tx); battery 0.0 V
+20:51:03.485  +1.335  Link: vehicle not responding
+20:51:31.834  +29.683  Disconnecting: elm327://COM4?profile=raw
+20:51:31.834  +29.683  Delivery: no frames
+20:51:31.861  +29.710  Disconnected: elm327://COM4?profile=raw
+
+end      disconnected: 0 frames, 0 values, 0 frames dropped by the bridge

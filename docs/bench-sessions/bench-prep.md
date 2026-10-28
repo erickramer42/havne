@@ -13,10 +13,10 @@ The numbers are stable: run sheets, session sheets and ADRs cite them
 
 So far the J2534 hardware is one adapter, the OBDX Pro VX, through the
 x86 surrogate, and one car, its engine ECU on 11-bit `0x7E8`. The
-ELM327 items (#11 on) are settled but #17 and passive listening's #18
-and #19: the VX on the bench (its
-port, answers and a cable pull, no bus) and both adapters on the car
-(2026-10-27); their run sheets are
+ELM327 items (#11 on) are settled but #17 and passive listening's #19:
+the VX on the bench (its
+port, answers and a cable pull, no bus; its monitor, #18) and both
+adapters on the car (2026-10-27); their run sheets are
 [elm327-bench-runsheet.md](elm327-bench-runsheet.md) (the VX) and
 [elm327-vehicle-runsheet.md](elm327-vehicle-runsheet.md) (the MX+,
 which has no bench session):
@@ -59,7 +59,7 @@ which has no bench session):
 | 15 | **No bus** answers `CAN ERROR` or a word like it, which the worker counts as a failed write ("Requests failing") | REFUTED for the VX: it answers `NO DATA`, which the worker leaves to the engine's wait, so no bus reads as quiet. Nothing to fix: it can't tell a missing bus from a silent ECU. The MX+ never meets a missing bus (it powers up only on the car) | Every request `NO DATA`, the link quiet 2.4 s after the connect with no episode. The first three after each setup 100 ms after the request (`AT ST 19`), every later one 300 ms: with nothing to acknowledge them the VX holds three frames, as its J2534 writes do (#8) ([2026-10-27-elm327-bench](2026-10-27-elm327-bench.md), [2026-10-27-elm327-bench-2](2026-10-27-elm327-bench-2.md)). The datasheet: `CAN ERROR` "often … simply from not being connected to a CAN system" |
 | 16 | **A lost link** (a cable pulled, Bluetooth dropped) fails the port's reads or writes, or leaves it silent for 5 s, and reopening the port on the backoff brings the adapter back | CONFIRMED for the VX on USB and the MX+'s Bluetooth | Unplugged, the read failed at once and the link went to "Adapter fault"; the reopens failed "no such port" on the backoff, and the first after the plug went back in reopened COM4 and ran the setup, with no reconnect and nothing printed unasked ([2026-10-27-elm327-bench-2](2026-10-27-elm327-bench-2.md)); the MX+'s Bluetooth turned off failed the port at once, the reopens failed "no such port" until it was back, and the next reopened COM6 and ran the setup, the first value within ~6.5 s of Bluetooth on (the backoff's 5 s and the setup), with no reconnect ([2026-10-27-elm327-vehicle](2026-10-27-elm327-vehicle.md)). The pseudo-terminal test covers a far side that goes away on Linux and macOS |
 | 17 | **Response pending:** an adapter that prints `7F xx 78` goes on listening for the answer (an STN with parameter 2A's bit 2 set does, by the FRPM; a plain ELM327's datasheet doesn't say) | STILL UNKNOWN | The car sent no `7F xx 78` to the J2534 sessions or to the MX+ ([2026-10-27-elm327-vehicle](2026-10-27-elm327-vehicle.md)) |
-| 18 | **The monitor's start and stop** (ADR-0026's appendix "passive listening"): `AT MA` prints nothing until a frame passes the receive filter; one space stops it with `STOPPED` and the prompt, and a space at the prompt is ignored; the 5 s check stops and restarts it on a quiet bus with no failure | STILL UNKNOWN | Fake-tested only. The datasheet and the FRPM give the stop (any character, discarded, `STOPPED` then the prompt) and that a space is ignored at the prompt; the OBDX manual gives `STOPPED`. To run: the VX on USB, no bus, `elm327://COMn?profile=raw`, the wire log's monitor lines |
+| 18 | **The monitor's start and stop** (ADR-0026's appendix "passive listening"): `AT MA` prints nothing until a frame passes the receive filter; one space stops it with `STOPPED` and the prompt, and a space at the prompt is ignored; the 5 s check stops and restarts it on a quiet bus with no failure | CONFIRMED for the VX, no bus | `AT MA` printed nothing in 30 s with no bus; five 5 s checks each sent one space and got `STOPPED` and the prompt within 0.3 ms, `AT MA` again at once, the link quiet with no episode; the stop at disconnect the same ([2026-10-27-elm327-bench-3](2026-10-27-elm327-bench-3.md)). A space at the prompt wasn't exercised: that it's ignored rests on the datasheet and the FRPM |
 | 19 | **Listening hears another tester's replies:** `AT MA` with the setup's `AT CRA` passes the channel's reply ID and nothing else, the monitor never acknowledges, and the replies reassemble as a request's do, multi-frame ones too once the other tester sends the flow control | STILL UNKNOWN | Fake-tested only. Needs an OBD Y-splitter: the VX polling through J2534 and the MX+ listening through `elm327://COMn?profile=raw`, the listener's messages compared with the poller's recording |
 
 ## Still open
@@ -70,7 +70,6 @@ which has no bench session):
 - **#11, a machine without OBDX's INF:** whether the VX's port appears
   there.
 - **#17, response pending:** needs an ECU that answers `7F xx 78`.
-- **#18, the monitor's start and stop:** a VX bench session, no bus.
 - **#19, listening to another tester:** a car and an OBD Y-splitter.
 - **Every item for any other adapter.** Each CONFIRMED above is the
   VX's. A second adapter, x64 or another vendor's, walks the whole

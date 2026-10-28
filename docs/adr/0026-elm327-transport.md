@@ -761,3 +761,125 @@ each `BUFFER FULL` and each liveness check. Frame lines go in only with
   the MX+ listening through `elm327://…?profile=raw`. The listener's
   messages are compared with the poller's recording of the same
   replies. Without a splitter this item waits.
+
+**Note, 2026-10-27, later:** the VX's bench item ran
+(docs/bench-sessions/2026-10-27-elm327-bench-3.md). With no bus, `AT MA`
+printed nothing; each 5 s check's space got `STOPPED` and the prompt
+within 0.3 ms, and the monitor started again with the link quiet and no
+failure. The stop at close went the same way.
+
+## Appendix: 2026-10-27, WiFi over TCP
+
+§9's item 6 names a TCP socket as a second kind of port. A WiFi
+adapter runs its own access point and takes a TCP connection on a fixed
+address:
+- **The OBDX:** 192.168.4.1, port 23. Its "How to Connect to
+  Wired/Wireless" guide gives the address, the same on Windows, iOS and
+  Android, and an access point with no password. The VX's product page
+  lists USB, Bluetooth and WiFi, so the adapter on hand has it.
+- **OBDLink's WiFi models:** 192.168.0.74, port 23.
+- **Clones:** most at 192.168.0.10, port 35000; PLX's KiWi on port
+  30000; some on 192.168.1.10.
+
+The ELM command set is the
+same over the socket as over a serial port, so only the port changes.
+The setup, the worker, the monitor and link health run unchanged, behind
+§1's byte-stream interface (`ecuio_elm327_port_ops_t`). A socket in
+core also serves step 6's mobile apps: WiFi reaches a car from iOS
+without BLE.
+
+**The URI:** `elm327://<IPv4 address>:<port>[?…]`, for example
+`elm327://192.168.0.10:35000`.
+- **Which kind of port.** The text before the query is a TCP address
+  when it's a dotted IPv4 address, a colon and a port from 1 to 65535.
+  Anything else is a serial port, as in §2. The two can't be confused:
+  a `COMn` name has no dot or colon, and a POSIX device starts with `/`.
+- **The port is required.** The adapters differ (23, 30000 or 35000), and a
+  default would turn a wrong guess into "connection refused", which
+  hides the cause.
+- **No host names.** Every adapter has a fixed address on its own
+  network. A name lookup can block for seconds with no timeout core
+  controls, and it sends the name to whatever DNS server the machine
+  uses. IPv6 isn't taken either: the adapters' access points are IPv4.
+- **`serial=` with an address is refused** (`BAD_URI`). A socket has no
+  serial rate, and a run sheet that carries one over from a USB session
+  should be told so. A Bluetooth port takes the key and ignores it only
+  because core can't tell it from a USB port; a socket it can tell.
+- **Every other key** works as in §2.
+
+**Connecting:**
+- **A 2 s limit.** The opener connects without blocking and waits at
+  most 2 s. On the adapter's own network an answer, or a refusal, takes
+  milliseconds. The limit also bounds how long a close waits on a
+  worker that is reconnecting.
+- **Nagle off (`TCP_NODELAY`).** Each command is a few bytes followed by
+  a wait for its prompt, so nothing gains from coalescing writes, and a
+  held write would delay every request.
+- **No keepalive.** The worker already notices a dead link: a request
+  with no prompt in 5 s is silent, and a monitor with no line for 5 s is
+  stopped and asked (the appendix "passive listening"). Both are a hard
+  failure, as a Bluetooth port's silence is.
+- **The far side closing** (a read of 0 bytes) or resetting is a failed
+  read, as a pulled cable is. It is a hard failure, and the socket is
+  reconnected and the setup runs on the backoff (§6). A laptop that
+  leaves the adapter's network and rejoins it recovers without a
+  reconnect.
+- **No `SIGPIPE`.** On POSIX a write to a closed socket must not raise
+  `SIGPIPE`, which would end the app: `MSG_NOSIGNAL` on Linux,
+  `SO_NOSIGPIPE` on macOS.
+- **Winsock.** On Windows the opener calls `WSAStartup` and the close
+  calls `WSACleanup`. Both count, so `ecuio_init` stays a no-op, as
+  core.h promises.
+- **Failures** read as a serial port's do: `LOAD_FAILED` with the
+  address and the reason. Examples: "192.168.0.10:35000: no answer
+  within 2 s (is this computer on the adapter's WiFi?)", "…: the
+  connection was refused", "…: the network is unreachable".
+
+**No discovery.** Settings lists no WiFi adapters. Finding one would
+mean connecting to addresses on the network: the write §7 won't make to
+an unknown serial port. The user joins the adapter's network and types
+its address. The URI field's hint and the `elm327://` preset name both
+forms. The address is the session's port name: it appears in the
+session line, the "Connected:" line and the wire log. An adapter's
+address on its own access point is the maker's default, not personal
+data, so a record keeps it.
+
+**Verification:**
+- **UNIT:** the name rules.
+  - Accepted: addresses with ports at both bounds.
+  - Refused: no port, a port of 0 or 65536, a host name, an IPv6
+    address, five octets, an octet over 255, a stray dot.
+  - Unchanged: `COMn` names and `/dev/` paths.
+- **HARNESS, on every platform:** a loopback test. The test listens on
+  127.0.0.1, on a port the OS picks, and puts the fake ELM327 behind
+  the socket it accepts. So the real TCP opener runs in CI on Linux,
+  macOS and Windows: its reads, its timeouts, and its end when the far
+  side closes. It is the first Win32 port code CI runs (the serial
+  port's stays a BENCH item, §8). Loopback only, so no firewall prompt.
+  The tests:
+  - a whole session through the socket;
+  - the far side closing, then listening again: a hard failure, then
+    recovery on the backoff;
+  - nothing listening: `LOAD_FAILED`, "the connection was refused";
+  - `serial=` with an address: `BAD_URI`.
+- **Not tested: the 2 s limit.** Reaching it needs an address that
+  drops packets, and a test can't count on one.
+- **BENCH:** the VX over WiFi, on USB power with no bus, as its serial
+  bench sessions ran. The items:
+  - `elm327://192.168.4.1:23` connects, and the setup answers as on
+    COM4;
+  - the connect's time against the 2 s limit;
+  - a request's time to its `NO DATA` prompt, against USB's 100 ms and
+    300 ms (the appendix "the VX's answers");
+  - leaving the VX's network and rejoining it: a hard failure, then
+    recovery on the backoff;
+  - whether the VX serves WiFi while its USB port is open too. Its
+    guide doesn't say.
+
+  Port 23 is telnet's, and the guide says to open a plain socket, so no
+  telnet negotiation is expected. The wire log would show any.
+
+**The access point has no password.** Anyone in range can join it and
+reach the adapter while it sits on the car. That is the adapter's
+design; QtTune can't change it, and it is the reason to unplug a WiFi
+adapter rather than leave it on the car.

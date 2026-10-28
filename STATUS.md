@@ -214,9 +214,11 @@ OBDX Pro VX in its ELM mode (USB-powered). In order:
    stopped with a space at close. `BUFFER FULL` flags the next frame
    `ECUIO_FRAME_FLAG_OVERFLOW`, as a J2534 driver's
    `ERR_BUFFER_OVERFLOW` does (`Elm327SessionTest.Listening*` and
-   neighbors, `J2534HealthTest.*Overflow*`). Still to come: the VX's
-   bench (BENCH prep #18) and a car with a second tester on an OBD
-   Y-splitter (#19).
+   neighbors, `J2534HealthTest.*Overflow*`). The VX ran it on the bench
+   with no bus (BENCH prep #18,
+   [2026-10-27-elm327-bench-3](docs/bench-sessions/2026-10-27-elm327-bench-3.md)):
+   silent, checked every 5 s, stopped at close. Still to come: a car
+   with a second tester on an OBD Y-splitter (#19).
 
 Later, each with its own record: the app-fed stream for BLE and the
 mobile apps, WiFi adapters over TCP, and listening to the whole bus
