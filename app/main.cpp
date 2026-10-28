@@ -1,6 +1,7 @@
 // File/layer: app/main.cpp | Qt6 Gui/Qml/Quick, app entry point, C++17
 // Testing: manual smoke (the built app launched; QTTUNE_SETTINGS_DIR
-//          through the run-qttune skill's launch; the dark title bar);
+//          through the run-qttune skill's launch; the title bar in the
+//          header's color on Windows 11);
 //          BENCH, the phone run sheet (the system bars' color, Android's
 //          window behind Qt's dark); CI's android-build compiles the
 //          Android part;
@@ -17,6 +18,14 @@
 #ifdef Q_OS_ANDROID
 #include <QJniObject>
 #include <QtCore/qcoreapplication_platform.h>
+#endif
+#ifdef Q_OS_WIN
+#include <QWindow>
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#include <dwmapi.h>
 #endif
 
 #include "bridgesingleton.h"
@@ -67,6 +76,20 @@ static void darkenAndroidWindow()
 }
 #endif
 
+#ifdef Q_OS_WIN
+// The title bar in the header's color (Theme.surface) with the app's text
+// color, so the two read as one bar. Windows 11 takes both; Windows 10
+// refuses them and keeps the dark title bar the color scheme gives it
+static void colorTitleBar(QWindow *window)
+{
+    const auto hwnd = reinterpret_cast<HWND>(window->winId());
+    const COLORREF caption = RGB(0x1e, 0x1e, 0x2e); // Theme.surface
+    const COLORREF text = RGB(0xe8, 0xe8, 0xf0);    // Theme.text
+    (void)DwmSetWindowAttribute(hwnd, DWMWA_CAPTION_COLOR, &caption, sizeof caption);
+    (void)DwmSetWindowAttribute(hwnd, DWMWA_TEXT_COLOR, &text, sizeof text);
+}
+#endif
+
 int main(int argc, char *argv[])
 {
     QGuiApplication app(argc, argv);
@@ -104,6 +127,10 @@ int main(int argc, char *argv[])
     }
 #ifdef Q_OS_ANDROID
     darkenAndroidWindow();
+#endif
+#ifdef Q_OS_WIN
+    if (auto *window = qobject_cast<QWindow *>(engine.rootObjects().constFirst()))
+        colorTitleBar(window);
 #endif
 
     return app.exec();

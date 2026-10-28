@@ -88,6 +88,8 @@ qttune_add_version_resource(qttune qttune "QtTune ECU reader and logger")
 
 if(WIN32)
     set_target_properties(qttune PROPERTIES WIN32_EXECUTABLE TRUE)
+    # The title bar's color (main.cpp, DwmSetWindowAttribute)
+    target_link_libraries(qttune PRIVATE dwmapi)
 endif()
 if(APPLE)
     set_target_properties(qttune PROPERTIES MACOSX_BUNDLE TRUE)
