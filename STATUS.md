@@ -239,9 +239,9 @@ OBDX Pro VX in its ELM mode (USB-powered). In order:
 
 The app-fed stream for Bluetooth on Android and BLE is
 [ADR-0028](docs/adr/0028-app-fed-streams.md) (accepted; step 1, the
-Android baseline, under way: the app runs on a phone and reaches the
-VX over WiFi; the phone's layout and replay fixes built, a third
-phone run next). Later,
+Android baseline, under way: the app runs on a phone, reaches the
+VX over WiFi and replays a recording by a tap; the connected status
+line and the window after a rotation next). Later,
 with its own record: listening to the whole bus (raw frames, for a
 car whose OBD port carries more than diagnostics).
 
@@ -264,13 +264,13 @@ an issue is resolved it is removed, and its number is not reused.
    device build. On pull requests and on request, it also launches
    the iOS app on the Simulator and screenshots it
    (`ios-simulator-smoke`). The Android app runs on a phone: the
-   pages fit, `mock://` streams, and `elm327://` reaches the VX over
-   WiFi ([2026-10-28-android-2](docs/bench-sessions/2026-10-28-android-2.md)).
-   On a phone Settings still ran past the right edge upright (only
-   "Dis" of Disconnect showed), the navigation bar's area shows white, the Dashboard's dials are sized to the
-   page's width (a third of one fits on its side), and a recording
-   could be replayed only by typing its long path (Settings lists the
-   recent ones to replay by a tap, not yet run on the phone). The iOS app hasn't
+   pages fit, `mock://` streams, `elm327://` reaches the VX over
+   WiFi, and a recording replays by a tap on its row in Settings
+   ([2026-10-28-android-3](docs/bench-sessions/2026-10-28-android-3.md)).
+   On a phone Settings runs past the right edge upright once a long
+   URI connects (its status line doesn't wrap), and after the phone
+   turns, white bands show where the app's window stops short of the
+   screen. The iOS app hasn't
    run on a device, and no tests run on either (cross builds set
    `BUILD_TESTING=OFF`). Bluetooth on Android is
    [ADR-0028](docs/adr/0028-app-fed-streams.md). CI uploads the
@@ -310,8 +310,11 @@ an issue is resolved it is removed, and its number is not reused.
     worker keeps reading, but the bridge's 100 ms windows stop, so
     Live's chart has a gap for that time and the activity log says
     nothing ([2026-10-28-android-2](docs/bench-sessions/2026-10-28-android-2.md)).
-    Whether a recording loses frames there is unchecked: the bridge
-    drops frames the GUI thread doesn't take (ADR-0003). A logger in
+    The frames wait for the GUI thread: a recording through 30 s in
+    the background and 30 s with the screen off held every frame and
+    value ([2026-10-28-android-3](docs/bench-sessions/2026-10-28-android-3.md)).
+    A longer pause drops them past the bridge's in-flight cap
+    (ADR-0003), which `mock://` reaches in 50 s. A logger in
     a car runs with the screen off, so this needs a decision of its
     own (a foreground service, or recording off the GUI thread).
 
