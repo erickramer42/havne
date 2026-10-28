@@ -1,0 +1,575 @@
+[elm327 22:04:05.639 +0.000000] QtTune ELM327 wire log (ADR-0026), core 0.3.2
+[elm327 22:04:05.639 +0.000036] uri elm327://192.168.4.1:23
+[elm327 22:04:05.639 +0.000046] 192.168.4.1:23 over TCP; CAN at 500000 bit/s, protocol 6; every request and reply (ECUIO_SUR_LOG_FRAMES=1)
+[elm327 22:04:05.639 +0.000063] > ATZ
+[elm327 22:04:05.660 +0.019851] < NO DATA
+[elm327 22:04:05.660 +0.019873] prompt 19.8 ms after ATZ
+[elm327 22:04:05.660 +0.019882] unasked: OK
+[elm327 22:04:05.660 +0.019889] unasked prompt, dropped
+[elm327 22:04:05.660 +0.019899] > ATZ
+[elm327 22:04:05.690 +0.050345] < ATZ
+[elm327 22:04:05.690 +0.050354] < OK
+[elm327 22:04:05.690 +0.050359] prompt 30.3 ms after ATZ
+[elm327 22:04:05.690 +0.050367] > ATI
+[elm327 22:04:05.722 +0.081858] < ATI
+[elm327 22:04:05.722 +0.081869] < ELM327 V2.1
+[elm327 22:04:05.722 +0.081873] prompt 31.5 ms after ATI
+[elm327 22:04:05.722 +0.081881] > ATE0
+[elm327 22:04:05.737 +0.097456] < ATE0
+[elm327 22:04:05.737 +0.097471] < OK
+[elm327 22:04:05.737 +0.097478] prompt 15.5 ms after ATE0
+[elm327 22:04:05.737 +0.097490] > ATL0
+[elm327 22:04:05.750 +0.110727] < OK
+[elm327 22:04:05.750 +0.110736] prompt 13.2 ms after ATL0
+[elm327 22:04:05.750 +0.110743] > ATS0
+[elm327 22:04:05.762 +0.122816] < OK
+[elm327 22:04:05.762 +0.122826] prompt 12.0 ms after ATS0
+[elm327 22:04:05.762 +0.122834] > ATH1
+[elm327 22:04:05.770 +0.130715] < OK
+[elm327 22:04:05.770 +0.130724] prompt 7.8 ms after ATH1
+[elm327 22:04:05.770 +0.130731] > ATD0
+[elm327 22:04:05.786 +0.146772] < OK
+[elm327 22:04:05.786 +0.146781] prompt 16.0 ms after ATD0
+[elm327 22:04:05.786 +0.146789] > ATCAF1
+[elm327 22:04:05.800 +0.161079] < OK
+[elm327 22:04:05.800 +0.161089] prompt 14.2 ms after ATCAF1
+[elm327 22:04:05.800 +0.161096] > ATCFC1
+[elm327 22:04:05.845 +0.205268] < OK
+[elm327 22:04:05.845 +0.205284] prompt 44.1 ms after ATCFC1
+[elm327 22:04:05.845 +0.205297] > ATSP6
+[elm327 22:04:05.855 +0.215352] < OK
+[elm327 22:04:05.855 +0.215366] prompt 10.0 ms after ATSP6
+[elm327 22:04:05.855 +0.215376] > ATAT1
+[elm327 22:04:05.876 +0.235783] < OK
+[elm327 22:04:05.876 +0.235793] prompt 20.4 ms after ATAT1
+[elm327 22:04:05.876 +0.235802] > ATST19
+[elm327 22:04:05.886 +0.247044] < OK
+[elm327 22:04:05.886 +0.247054] prompt 11.2 ms after ATST19
+[elm327 22:04:05.886 +0.247063] > ATSH7E0
+[elm327 22:04:05.891 +0.251975] < OK
+[elm327 22:04:05.891 +0.251984] prompt 4.9 ms after ATSH7E0
+[elm327 22:04:05.891 +0.251991] > ATCRA7E8
+[elm327 22:04:05.901 +0.261164] < OK
+[elm327 22:04:05.901 +0.261173] prompt 9.1 ms after ATCRA7E8
+[elm327 22:04:05.901 +0.261188] > ATI
+[elm327 22:04:05.907 +0.268200] < ELM327 V2.1
+[elm327 22:04:05.907 +0.268208] prompt 7.0 ms after ATI
+[elm327 22:04:05.907 +0.268215] > STI
+[elm327 22:04:05.937 +0.297463] < ?
+[elm327 22:04:05.937 +0.297476] prompt 29.2 ms after STI
+[elm327 22:04:05.937 +0.297490] > ATRV
+[elm327 22:04:05.961 +0.321352] < 0.00V
+[elm327 22:04:05.961 +0.321361] prompt 23.8 ms after ATRV
+[elm327 22:04:05.962 +0.322012] > 01001
+[elm327 22:04:06.074 +0.435184] < NO DATA
+[elm327 22:04:06.074 +0.435201] prompt 113.1 ms after 01001
+[elm327 22:04:06.074 +0.435216] > 01041
+[elm327 22:04:06.185 +0.545230] < NO DATA
+[elm327 22:04:06.185 +0.545248] prompt 110.0 ms after 01041
+[elm327 22:04:06.185 +0.545263] > 0902
+[elm327 22:04:06.292 +0.652441] < NO DATA
+[elm327 22:04:06.292 +0.652455] prompt 107.1 ms after 0902
+[elm327 22:04:06.292 +0.652467] > 01051
+[elm327 22:04:06.606 +0.965733] < NO DATA
+[elm327 22:04:06.606 +0.965755] prompt 313.2 ms after 01051
+[elm327 22:04:06.606 +0.965775] > 0904
+[elm327 22:04:06.910 +1.270848] < NO DATA
+[elm327 22:04:06.910 +1.270865] prompt 305.0 ms after 0904
+[elm327 22:04:06.910 +1.270881] > 010C1
+[elm327 22:04:07.217 +1.577310] < NO DATA
+[elm327 22:04:07.217 +1.577324] prompt 306.4 ms after 010C1
+[elm327 22:04:07.217 +1.577336] > 0906
+[elm327 22:04:07.522 +1.882792] < NO DATA
+[elm327 22:04:07.523 +1.882808] prompt 305.4 ms after 0906
+[elm327 22:04:07.523 +1.882820] > 010D1
+[elm327 22:04:07.826 +2.187808] < NO DATA
+[elm327 22:04:07.826 +2.187865] prompt 305.0 ms after 010D1
+[elm327 22:04:07.826 +2.187884] > 090A
+[elm327 22:04:08.133 +2.492884] < NO DATA
+[elm327 22:04:08.133 +2.492898] prompt 305.0 ms after 090A
+[elm327 22:04:08.133 +2.492910] > 010F1
+[elm327 22:04:08.437 +2.797816] < NO DATA
+[elm327 22:04:08.437 +2.797832] prompt 304.9 ms after 010F1
+[elm327 22:04:08.437 +2.797848] > 22F187
+[elm327 22:04:08.757 +3.117019] < NO DATA
+[elm327 22:04:08.757 +3.117043] prompt 319.1 ms after 22F187
+[elm327 22:04:08.757 +3.117061] > 01111
+[elm327 22:04:09.063 +3.423933] < NO DATA
+[elm327 22:04:09.063 +3.423947] prompt 306.8 ms after 01111
+[elm327 22:04:09.063 +3.423959] > 22F188
+[elm327 22:04:09.369 +3.729056] < NO DATA
+[elm327 22:04:09.369 +3.729070] prompt 305.1 ms after 22F188
+[elm327 22:04:09.369 +3.729081] > 012F1
+[elm327 22:04:09.674 +4.034928] < NO DATA
+[elm327 22:04:09.674 +4.034941] prompt 305.8 ms after 012F1
+[elm327 22:04:09.674 +4.034953] > 22F189
+[elm327 22:04:09.984 +4.344228] < NO DATA
+[elm327 22:04:09.984 +4.344247] prompt 309.2 ms after 22F189
+[elm327 22:04:09.984 +4.344260] > 01421
+[elm327 22:04:10.289 +4.649927] < NO DATA
+[elm327 22:04:10.289 +4.649946] prompt 305.6 ms after 01421
+[elm327 22:04:10.289 +4.649961] > 22F18A
+[elm327 22:04:10.595 +4.954871] < NO DATA
+[elm327 22:04:10.595 +4.954887] prompt 304.9 ms after 22F18A
+[elm327 22:04:10.595 +4.954902] > 01101
+[elm327 22:04:10.901 +5.261526] < NO DATA
+[elm327 22:04:10.901 +5.261541] prompt 306.6 ms after 01101
+[elm327 22:04:10.901 +5.261552] > 22F18C
+[elm327 22:04:11.210 +5.570536] < NO DATA
+[elm327 22:04:11.210 +5.570556] prompt 309.0 ms after 22F18C
+[elm327 22:04:11.210 +5.570573] > 015C1
+[elm327 22:04:11.515 +5.876004] < NO DATA
+[elm327 22:04:11.515 +5.876021] prompt 305.4 ms after 015C1
+[elm327 22:04:11.515 +5.876032] > 22F190
+[elm327 22:04:11.821 +6.182485] < NO DATA
+[elm327 22:04:11.821 +6.182513] prompt 306.4 ms after 22F190
+[elm327 22:04:11.821 +6.182526] > 01041
+[elm327 22:04:12.129 +6.489023] < NO DATA
+[elm327 22:04:12.129 +6.489045] prompt 306.5 ms after 01041
+[elm327 22:04:12.129 +6.489059] > 22F191
+[elm327 22:04:12.437 +6.797203] < NO DATA
+[elm327 22:04:12.437 +6.797216] prompt 308.1 ms after 22F191
+[elm327 22:04:12.437 +6.797231] > 01051
+[elm327 22:04:12.742 +7.101847] < NO DATA
+[elm327 22:04:12.742 +7.101863] prompt 304.6 ms after 01051
+[elm327 22:04:12.742 +7.101880] > 22F194
+[elm327 22:04:13.047 +7.407676] < NO DATA
+[elm327 22:04:13.047 +7.407693] prompt 305.8 ms after 22F194
+[elm327 22:04:13.047 +7.407707] > 010C1
+[elm327 22:04:13.357 +7.717808] < NO DATA
+[elm327 22:04:13.357 +7.717827] prompt 310.1 ms after 010C1
+[elm327 22:04:13.357 +7.717845] > 22F195
+[elm327 22:04:13.677 +8.038367] < NO DATA
+[elm327 22:04:13.677 +8.038384] prompt 320.5 ms after 22F195
+[elm327 22:04:13.677 +8.038397] > 010D1
+[elm327 22:04:13.985 +8.345072] < NO DATA
+[elm327 22:04:13.985 +8.345089] prompt 306.6 ms after 010D1
+[elm327 22:04:13.985 +8.345103] > 010F1
+[elm327 22:04:14.293 +8.653435] < NO DATA
+[elm327 22:04:14.293 +8.653449] prompt 308.3 ms after 010F1
+[elm327 22:04:14.293 +8.653459] > 01111
+[elm327 22:04:14.600 +8.959995] < NO DATA
+[elm327 22:04:14.600 +8.960009] prompt 306.5 ms after 01111
+[elm327 22:04:14.600 +8.960020] > 012F1
+[elm327 22:04:14.908 +9.268661] < NO DATA
+[elm327 22:04:14.908 +9.268679] prompt 308.6 ms after 012F1
+[elm327 22:04:14.908 +9.268690] > 01421
+[elm327 22:04:15.216 +9.576361] < NO DATA
+[elm327 22:04:15.216 +9.576374] prompt 307.6 ms after 01421
+[elm327 22:04:15.216 +9.576385] > 01101
+[elm327 22:04:15.523 +9.883354] < NO DATA
+[elm327 22:04:15.523 +9.883376] prompt 306.9 ms after 01101
+[elm327 22:04:15.523 +9.883390] > 015C1
+[elm327 22:04:15.831 +10.191112] < NO DATA
+[elm327 22:04:15.831 +10.191128] prompt 307.7 ms after 015C1
+[elm327 22:04:15.831 +10.191142] > 01041
+[elm327 22:04:16.136 +10.497019] < NO DATA
+[elm327 22:04:16.136 +10.497035] prompt 305.8 ms after 01041
+[elm327 22:04:16.136 +10.497048] > 01051
+[elm327 22:04:16.443 +10.803065] < NO DATA
+[elm327 22:04:16.443 +10.803089] prompt 306.0 ms after 01051
+[elm327 22:04:16.443 +10.803157] > 010C1
+[elm327 22:04:16.748 +11.109100] < NO DATA
+[elm327 22:04:16.748 +11.109118] prompt 305.9 ms after 010C1
+[elm327 22:04:16.748 +11.109131] > 010D1
+[elm327 22:04:17.054 +11.415166] < NO DATA
+[elm327 22:04:17.054 +11.415188] prompt 306.0 ms after 010D1
+[elm327 22:04:17.054 +11.415203] > 010F1
+[elm327 22:04:17.362 +11.722543] < NO DATA
+[elm327 22:04:17.362 +11.722559] prompt 307.3 ms after 010F1
+[elm327 22:04:17.362 +11.722574] > 01111
+[elm327 22:04:17.668 +12.029176] < NO DATA
+[elm327 22:04:17.668 +12.029195] prompt 306.6 ms after 01111
+[elm327 22:04:17.669 +12.029211] > 012F1
+[elm327 22:04:17.976 +12.336651] < NO DATA
+[elm327 22:04:17.976 +12.336671] prompt 307.4 ms after 012F1
+[elm327 22:04:17.976 +12.336688] > 01421
+[elm327 22:04:18.282 +12.643101] < NO DATA
+[elm327 22:04:18.282 +12.643130] prompt 306.4 ms after 01421
+[elm327 22:04:18.282 +12.643145] > 01101
+[elm327 22:04:18.589 +12.950543] < NO DATA
+[elm327 22:04:18.590 +12.950575] prompt 307.4 ms after 01101
+[elm327 22:04:18.590 +12.950591] > 015C1
+[elm327 22:04:18.898 +13.259021] < NO DATA
+[elm327 22:04:18.898 +13.259037] prompt 308.4 ms after 015C1
+[elm327 22:04:18.898 +13.259052] > 01041
+[elm327 22:04:19.208 +13.568222] < NO DATA
+[elm327 22:04:19.208 +13.568234] prompt 309.1 ms after 01041
+[elm327 22:04:19.208 +13.568245] > 01051
+[elm327 22:04:19.533 +13.892841] < NO DATA
+[elm327 22:04:19.533 +13.892857] prompt 324.6 ms after 01051
+[elm327 22:04:19.533 +13.892870] > 010C1
+[elm327 22:04:19.867 +14.228530] < NO DATA
+[elm327 22:04:19.867 +14.228544] prompt 335.6 ms after 010C1
+[elm327 22:04:19.867 +14.228557] > 010D1
+[elm327 22:04:20.174 +14.535223] < NO DATA
+[elm327 22:04:20.174 +14.535241] prompt 306.6 ms after 010D1
+[elm327 22:04:20.174 +14.535256] > 010F1
+[elm327 22:04:20.481 +14.841139] < NO DATA
+[elm327 22:04:20.481 +14.841153] prompt 305.8 ms after 010F1
+[elm327 22:04:20.481 +14.841163] > 01111
+[elm327 22:04:20.787 +15.147195] < NO DATA
+[elm327 22:04:20.787 +15.147220] prompt 306.0 ms after 01111
+[elm327 22:04:20.787 +15.147233] > 012F1
+[elm327 22:04:21.094 +15.454758] < NO DATA
+[elm327 22:04:21.094 +15.454774] prompt 307.5 ms after 012F1
+[elm327 22:04:21.094 +15.454786] > 01421
+[elm327 22:04:21.401 +15.761215] < NO DATA
+[elm327 22:04:21.401 +15.761232] prompt 306.4 ms after 01421
+[elm327 22:04:21.401 +15.761244] > 01101
+[elm327 22:04:21.710 +16.070519] < NO DATA
+[elm327 22:04:21.710 +16.070540] prompt 309.2 ms after 01101
+[elm327 22:04:21.710 +16.070554] > 015C1
+[elm327 22:04:22.016 +16.376286] < NO DATA
+[elm327 22:04:22.016 +16.376302] prompt 305.7 ms after 015C1
+[elm327 22:04:22.016 +16.376318] > 01041
+[elm327 22:04:22.323 +16.683530] < NO DATA
+[elm327 22:04:22.323 +16.683543] prompt 307.2 ms after 01041
+[elm327 22:04:22.323 +16.683554] > 01051
+[elm327 22:04:22.628 +16.989333] < NO DATA
+[elm327 22:04:22.628 +16.989352] prompt 305.7 ms after 01051
+[elm327 22:04:22.628 +16.989368] > 010C1
+[elm327 22:04:22.935 +17.295380] < NO DATA
+[elm327 22:04:22.935 +17.295400] prompt 306.0 ms after 010C1
+[elm327 22:04:22.935 +17.295414] > 010D1
+[elm327 22:04:23.243 +17.602854] < NO DATA
+[elm327 22:04:23.243 +17.602869] prompt 307.4 ms after 010D1
+[elm327 22:04:23.243 +17.602880] > 010F1
+[elm327 22:04:23.550 +17.910636] < NO DATA
+[elm327 22:04:23.550 +17.910654] prompt 307.7 ms after 010F1
+[elm327 22:04:23.550 +17.910668] > 01111
+[elm327 22:04:23.857 +18.217278] < NO DATA
+[elm327 22:04:23.857 +18.217297] prompt 306.6 ms after 01111
+[elm327 22:04:23.857 +18.217311] > 012F1
+[elm327 22:04:24.168 +18.529085] < NO DATA
+[elm327 22:04:24.168 +18.529115] prompt 311.8 ms after 012F1
+[elm327 22:04:24.168 +18.529130] > 01421
+[elm327 22:04:24.477 +18.837418] < NO DATA
+[elm327 22:04:24.477 +18.837432] prompt 308.2 ms after 01421
+[elm327 22:04:24.477 +18.837446] > 01101
+[elm327 22:04:24.786 +19.146742] < NO DATA
+[elm327 22:04:24.786 +19.146753] prompt 309.3 ms after 01101
+[elm327 22:04:24.786 +19.146765] > 015C1
+[elm327 22:04:25.093 +19.453304] < NO DATA
+[elm327 22:04:25.093 +19.453317] prompt 306.5 ms after 015C1
+[elm327 22:04:25.093 +19.453328] > 01041
+[elm327 22:04:25.949 +20.309620] the port failed (reading the reply to 01041)
+[elm327 22:04:25.950 +20.310253] 192.168.4.1:23 closed
+[elm327 22:04:28.065 +22.425059] reopening 192.168.4.1:23 failed: no answer within 2 s (is this computer on the adapter's WiFi?)
+[elm327 22:04:30.274 +24.634139] reopening 192.168.4.1:23 failed: no answer within 2 s (is this computer on the adapter's WiFi?)
+[elm327 22:04:32.691 +27.051682] reopening 192.168.4.1:23 failed: no answer within 2 s (is this computer on the adapter's WiFi?)
+[elm327 22:04:35.500 +29.859881] reopening 192.168.4.1:23 failed: no answer within 2 s (is this computer on the adapter's WiFi?)
+[elm327 22:04:39.122 +33.481962] reopening 192.168.4.1:23 failed: no answer within 2 s (is this computer on the adapter's WiFi?)
+[elm327 22:04:42.436 +36.796289] 192.168.4.1:23 reopened
+[elm327 22:04:42.436 +36.796319] > ATZ
+[elm327 22:04:47.437 +41.796714] no line and no prompt for 5 s (ATZ)
+[elm327 22:04:47.437 +41.796736] the setup failed: the adapter on 192.168.4.1:23 didn't answer ATZ within 5 s
+[elm327 22:04:47.437 +41.796857] 192.168.4.1:23 closed
+[elm327 22:04:54.454 +48.814338] reopening 192.168.4.1:23 failed: no answer within 2 s (is this computer on the adapter's WiFi?)
+[elm327 22:05:01.470 +55.830748] reopening 192.168.4.1:23 failed: no answer within 2 s (is this computer on the adapter's WiFi?)
+[elm327 22:05:08.497 +62.857652] reopening 192.168.4.1:23 failed: no answer within 2 s (is this computer on the adapter's WiFi?)
+[elm327 22:05:15.503 +69.862906] reopening 192.168.4.1:23 failed: no answer within 2 s (is this computer on the adapter's WiFi?)
+[elm327 22:05:22.520 +76.880058] reopening 192.168.4.1:23 failed: no answer within 2 s (is this computer on the adapter's WiFi?)
+[elm327 22:05:29.535 +83.895404] reopening 192.168.4.1:23 failed: no answer within 2 s (is this computer on the adapter's WiFi?)
+[elm327 22:05:36.554 +90.913804] reopening 192.168.4.1:23 failed: no answer within 2 s (is this computer on the adapter's WiFi?)
+[elm327 22:05:43.576 +97.936490] reopening 192.168.4.1:23 failed: no answer within 2 s (is this computer on the adapter's WiFi?)
+[elm327 22:05:50.595 +104.955626] reopening 192.168.4.1:23 failed: no answer within 2 s (is this computer on the adapter's WiFi?)
+[elm327 22:05:57.613 +111.972850] reopening 192.168.4.1:23 failed: no answer within 2 s (is this computer on the adapter's WiFi?)
+[elm327 22:06:04.632 +118.992455] reopening 192.168.4.1:23 failed: no answer within 2 s (is this computer on the adapter's WiFi?)
+[elm327 22:06:11.654 +126.014236] reopening 192.168.4.1:23 failed: no answer within 2 s (is this computer on the adapter's WiFi?)
+[elm327 22:06:18.677 +133.036912] reopening 192.168.4.1:23 failed: no answer within 2 s (is this computer on the adapter's WiFi?)
+[elm327 22:06:25.692 +140.052448] reopening 192.168.4.1:23 failed: no answer within 2 s (is this computer on the adapter's WiFi?)
+[elm327 22:06:32.707 +147.066813] reopening 192.168.4.1:23 failed: no answer within 2 s (is this computer on the adapter's WiFi?)
+[elm327 22:06:39.717 +154.076861] reopening 192.168.4.1:23 failed: no answer within 2 s (is this computer on the adapter's WiFi?)
+[elm327 22:06:46.732 +161.092385] reopening 192.168.4.1:23 failed: no answer within 2 s (is this computer on the adapter's WiFi?)
+[elm327 22:06:53.741 +168.100982] reopening 192.168.4.1:23 failed: no answer within 2 s (is this computer on the adapter's WiFi?)
+[elm327 22:07:00.767 +175.127364] reopening 192.168.4.1:23 failed: no answer within 2 s (is this computer on the adapter's WiFi?)
+[elm327 22:07:07.793 +182.153681] reopening 192.168.4.1:23 failed: no answer within 2 s (is this computer on the adapter's WiFi?)
+[elm327 22:07:14.817 +189.177034] reopening 192.168.4.1:23 failed: no answer within 2 s (is this computer on the adapter's WiFi?)
+[elm327 22:07:21.845 +196.205387] reopening 192.168.4.1:23 failed: no answer within 2 s (is this computer on the adapter's WiFi?)
+[elm327 22:07:28.865 +203.225560] reopening 192.168.4.1:23 failed: no answer within 2 s (is this computer on the adapter's WiFi?)
+[elm327 22:07:35.870 +210.229916] reopening 192.168.4.1:23 failed: no answer within 2 s (is this computer on the adapter's WiFi?)
+[elm327 22:07:42.884 +217.243805] reopening 192.168.4.1:23 failed: no answer within 2 s (is this computer on the adapter's WiFi?)
+[elm327 22:07:49.906 +224.266290] reopening 192.168.4.1:23 failed: no answer within 2 s (is this computer on the adapter's WiFi?)
+[elm327 22:07:56.911 +231.271317] reopening 192.168.4.1:23 failed: no answer within 2 s (is this computer on the adapter's WiFi?)
+[elm327 22:08:03.919 +238.279070] reopening 192.168.4.1:23 failed: no answer within 2 s (is this computer on the adapter's WiFi?)
+[elm327 22:08:10.931 +245.291215] reopening 192.168.4.1:23 failed: no answer within 2 s (is this computer on the adapter's WiFi?)
+[elm327 22:08:16.952 +251.312345] 192.168.4.1:23 reopened
+[elm327 22:08:16.952 +251.312377] > ATZ
+[elm327 22:08:21.960 +256.319894] no line and no prompt for 5 s (ATZ)
+[elm327 22:08:21.960 +256.319919] the setup failed: the adapter on 192.168.4.1:23 didn't answer ATZ within 5 s
+[elm327 22:08:21.960 +256.320063] 192.168.4.1:23 closed
+[elm327 22:08:28.982 +263.342040] reopening 192.168.4.1:23 failed: no answer within 2 s (is this computer on the adapter's WiFi?)
+[elm327 22:08:36.010 +270.370315] reopening 192.168.4.1:23 failed: no answer within 2 s (is this computer on the adapter's WiFi?)
+[elm327 22:08:43.033 +277.393383] reopening 192.168.4.1:23 failed: no answer within 2 s (is this computer on the adapter's WiFi?)
+[elm327 22:08:50.045 +284.405089] reopening 192.168.4.1:23 failed: no answer within 2 s (is this computer on the adapter's WiFi?)
+[elm327 22:08:57.059 +291.419094] reopening 192.168.4.1:23 failed: no answer within 2 s (is this computer on the adapter's WiFi?)
+[elm327 22:09:04.079 +298.439717] reopening 192.168.4.1:23 failed: no answer within 2 s (is this computer on the adapter's WiFi?)
+[elm327 22:09:11.106 +305.466101] reopening 192.168.4.1:23 failed: no answer within 2 s (is this computer on the adapter's WiFi?)
+[elm327 22:09:18.119 +312.478826] reopening 192.168.4.1:23 failed: no answer within 2 s (is this computer on the adapter's WiFi?)
+[elm327 22:09:25.123 +319.482972] reopening 192.168.4.1:23 failed: no answer within 2 s (is this computer on the adapter's WiFi?)
+[elm327 22:09:32.135 +326.495492] reopening 192.168.4.1:23 failed: no answer within 2 s (is this computer on the adapter's WiFi?)
+[elm327 22:09:39.159 +333.519031] reopening 192.168.4.1:23 failed: no answer within 2 s (is this computer on the adapter's WiFi?)
+[elm327 22:09:46.182 +340.541836] reopening 192.168.4.1:23 failed: no answer within 2 s (is this computer on the adapter's WiFi?)
+[elm327 22:09:53.206 +347.566690] reopening 192.168.4.1:23 failed: no answer within 2 s (is this computer on the adapter's WiFi?)
+[elm327 22:10:00.225 +354.585233] reopening 192.168.4.1:23 failed: no answer within 2 s (is this computer on the adapter's WiFi?)
+[elm327 22:10:07.244 +361.604478] reopening 192.168.4.1:23 failed: no answer within 2 s (is this computer on the adapter's WiFi?)
+[elm327 22:10:14.262 +368.622575] reopening 192.168.4.1:23 failed: no answer within 2 s (is this computer on the adapter's WiFi?)
+[elm327 22:10:21.269 +375.629738] reopening 192.168.4.1:23 failed: no answer within 2 s (is this computer on the adapter's WiFi?)
+[elm327 22:10:28.283 +382.643415] reopening 192.168.4.1:23 failed: no answer within 2 s (is this computer on the adapter's WiFi?)
+[elm327 22:10:35.303 +389.662836] reopening 192.168.4.1:23 failed: no answer within 2 s (is this computer on the adapter's WiFi?)
+[elm327 22:10:42.320 +396.680558] reopening 192.168.4.1:23 failed: no answer within 2 s (is this computer on the adapter's WiFi?)
+[elm327 22:10:49.340 +403.700723] reopening 192.168.4.1:23 failed: no answer within 2 s (is this computer on the adapter's WiFi?)
+[elm327 22:10:56.361 +410.721651] reopening 192.168.4.1:23 failed: no answer within 2 s (is this computer on the adapter's WiFi?)
+[elm327 22:11:03.375 +417.734981] reopening 192.168.4.1:23 failed: no answer within 2 s (is this computer on the adapter's WiFi?)
+[elm327 22:11:10.379 +424.739125] reopening 192.168.4.1:23 failed: no answer within 2 s (is this computer on the adapter's WiFi?)
+[elm327 22:11:17.392 +431.752345] reopening 192.168.4.1:23 failed: no answer within 2 s (is this computer on the adapter's WiFi?)
+[elm327 22:11:24.415 +438.774809] reopening 192.168.4.1:23 failed: no answer within 2 s (is this computer on the adapter's WiFi?)
+[elm327 22:11:31.434 +445.794730] reopening 192.168.4.1:23 failed: no answer within 2 s (is this computer on the adapter's WiFi?)
+[elm327 22:11:38.451 +452.810997] reopening 192.168.4.1:23 failed: no answer within 2 s (is this computer on the adapter's WiFi?)
+[elm327 22:11:45.476 +459.836384] reopening 192.168.4.1:23 failed: no answer within 2 s (is this computer on the adapter's WiFi?)
+[elm327 22:11:52.503 +466.863545] reopening 192.168.4.1:23 failed: no answer within 2 s (is this computer on the adapter's WiFi?)
+[elm327 22:11:59.515 +473.875340] reopening 192.168.4.1:23 failed: no answer within 2 s (is this computer on the adapter's WiFi?)
+[elm327 22:12:06.531 +480.891634] reopening 192.168.4.1:23 failed: no answer within 2 s (is this computer on the adapter's WiFi?)
+[elm327 22:12:11.790 +486.150504] 192.168.4.1:23 reopened
+[elm327 22:12:11.790 +486.150537] > ATZ
+[elm327 22:12:11.939 +486.298707] < ATZ
+[elm327 22:12:11.939 +486.298721] < OK
+[elm327 22:12:11.939 +486.298726] prompt 148.1 ms after ATZ
+[elm327 22:12:11.939 +486.298739] > ATI
+[elm327 22:12:12.077 +486.438871] < ATI
+[elm327 22:12:12.077 +486.438880] < ELM327 V2.1
+[elm327 22:12:12.077 +486.438883] prompt 140.1 ms after ATI
+[elm327 22:12:12.077 +486.438890] > ATE0
+[elm327 22:12:12.138 +486.498986] < ATE0
+[elm327 22:12:12.138 +486.498999] < OK
+[elm327 22:12:12.138 +486.499004] prompt 60.1 ms after ATE0
+[elm327 22:12:12.138 +486.499013] > ATL0
+[elm327 22:12:12.183 +486.544076] < OK
+[elm327 22:12:12.183 +486.544086] prompt 45.0 ms after ATL0
+[elm327 22:12:12.183 +486.544093] > ATS0
+[elm327 22:12:12.241 +486.601066] < OK
+[elm327 22:12:12.241 +486.601077] prompt 56.9 ms after ATS0
+[elm327 22:12:12.241 +486.601085] > ATH1
+[elm327 22:12:12.252 +486.612615] < OK
+[elm327 22:12:12.252 +486.612624] prompt 11.5 ms after ATH1
+[elm327 22:12:12.252 +486.612631] > ATD0
+[elm327 22:12:12.311 +486.671375] < OK
+[elm327 22:12:12.311 +486.671385] prompt 58.7 ms after ATD0
+[elm327 22:12:12.311 +486.671392] > ATCAF1
+[elm327 22:12:12.367 +486.727702] < OK
+[elm327 22:12:12.367 +486.727711] prompt 56.3 ms after ATCAF1
+[elm327 22:12:12.367 +486.727717] > ATCFC1
+[elm327 22:12:12.416 +486.776500] < OK
+[elm327 22:12:12.416 +486.776509] prompt 48.7 ms after ATCFC1
+[elm327 22:12:12.416 +486.776516] > ATSP6
+[elm327 22:12:12.453 +486.814066] < OK
+[elm327 22:12:12.453 +486.814075] prompt 37.5 ms after ATSP6
+[elm327 22:12:12.453 +486.814081] > ATAT1
+[elm327 22:12:12.508 +486.868751] < OK
+[elm327 22:12:12.508 +486.868761] prompt 54.6 ms after ATAT1
+[elm327 22:12:12.508 +486.868768] > ATST19
+[elm327 22:12:12.521 +486.881526] < OK
+[elm327 22:12:12.521 +486.881539] prompt 12.7 ms after ATST19
+[elm327 22:12:12.521 +486.881549] > ATSH7E0
+[elm327 22:12:12.544 +486.905452] < OK
+[elm327 22:12:12.544 +486.905461] prompt 23.9 ms after ATSH7E0
+[elm327 22:12:12.544 +486.905469] > ATCRA7E8
+[elm327 22:12:12.557 +486.917627] < OK
+[elm327 22:12:12.557 +486.917636] prompt 12.1 ms after ATCRA7E8
+[elm327 22:12:12.557 +486.917645] > 01051
+[elm327 22:12:12.673 +487.032993] < NO DATA
+[elm327 22:12:12.673 +487.033003] prompt 115.3 ms after 01051
+[elm327 22:12:12.673 +487.033013] > 010C1
+[elm327 22:12:12.794 +487.153974] < NO DATA
+[elm327 22:12:12.794 +487.153985] prompt 120.9 ms after 010C1
+[elm327 22:12:12.794 +487.153995] > 010D1
+[elm327 22:12:12.907 +487.267501] < NO DATA
+[elm327 22:12:12.907 +487.267511] prompt 113.5 ms after 010D1
+[elm327 22:12:12.907 +487.267520] > 010F1
+[elm327 22:12:13.215 +487.576228] < NO DATA
+[elm327 22:12:13.215 +487.576241] prompt 308.7 ms after 010F1
+[elm327 22:12:13.215 +487.576251] > 01111
+[elm327 22:12:13.522 +487.881947] < NO DATA
+[elm327 22:12:13.522 +487.881961] prompt 305.7 ms after 01111
+[elm327 22:12:13.522 +487.881971] > 012F1
+[elm327 22:12:13.829 +488.189543] < NO DATA
+[elm327 22:12:13.829 +488.189554] prompt 307.5 ms after 012F1
+[elm327 22:12:13.829 +488.189564] > 01421
+[elm327 22:12:14.135 +488.495122] < NO DATA
+[elm327 22:12:14.135 +488.495139] prompt 305.5 ms after 01421
+[elm327 22:12:14.135 +488.495154] > 01101
+[elm327 22:12:14.440 +488.801387] < NO DATA
+[elm327 22:12:14.440 +488.801403] prompt 306.2 ms after 01101
+[elm327 22:12:14.440 +488.801417] > 015C1
+[elm327 22:12:14.747 +489.107700] < NO DATA
+[elm327 22:12:14.747 +489.107711] prompt 306.2 ms after 015C1
+[elm327 22:12:14.747 +489.107720] > 01041
+[elm327 22:12:15.054 +489.414277] < NO DATA
+[elm327 22:12:15.054 +489.414288] prompt 306.5 ms after 01041
+[elm327 22:12:15.054 +489.414297] > 01051
+[elm327 22:12:15.362 +489.722144] < NO DATA
+[elm327 22:12:15.362 +489.722155] prompt 307.8 ms after 01051
+[elm327 22:12:15.362 +489.722164] > 010C1
+[elm327 22:12:15.669 +490.029430] < NO DATA
+[elm327 22:12:15.669 +490.029442] prompt 307.2 ms after 010C1
+[elm327 22:12:15.669 +490.029451] > 010D1
+[elm327 22:12:18.048 +492.408630] < NO DATA
+[elm327 22:12:18.048 +492.408654] prompt 2379.2 ms after 010D1
+[elm327 22:12:18.048 +492.408666] > 010F1
+[elm327 22:12:18.387 +492.747203] < NO DATA
+[elm327 22:12:18.387 +492.747223] prompt 338.5 ms after 010F1
+[elm327 22:12:18.387 +492.747234] > 01111
+[elm327 22:12:18.697 +493.057647] < NO DATA
+[elm327 22:12:18.697 +493.057666] prompt 310.4 ms after 01111
+[elm327 22:12:18.697 +493.057676] > 012F1
+[elm327 22:12:19.008 +493.368371] < NO DATA
+[elm327 22:12:19.008 +493.368386] prompt 310.7 ms after 012F1
+[elm327 22:12:19.008 +493.368399] > 01421
+[elm327 22:12:19.326 +493.686942] < NO DATA
+[elm327 22:12:19.326 +493.686961] prompt 318.5 ms after 01421
+[elm327 22:12:19.326 +493.686976] > 01101
+[elm327 22:12:19.645 +494.005214] < NO DATA
+[elm327 22:12:19.645 +494.005227] prompt 318.2 ms after 01101
+[elm327 22:12:19.645 +494.005237] > 015C1
+[elm327 22:12:19.979 +494.339842] < NO DATA
+[elm327 22:12:19.979 +494.339854] prompt 334.6 ms after 015C1
+[elm327 22:12:19.979 +494.339863] > 01041
+[elm327 22:12:20.294 +494.655067] < NO DATA
+[elm327 22:12:20.294 +494.655083] prompt 315.2 ms after 01041
+[elm327 22:12:20.294 +494.655095] > 01051
+[elm327 22:12:20.604 +494.964533] < NO DATA
+[elm327 22:12:20.604 +494.964551] prompt 309.4 ms after 01051
+[elm327 22:12:20.604 +494.964569] > 010C1
+[elm327 22:12:20.914 +495.274674] < NO DATA
+[elm327 22:12:20.914 +495.274689] prompt 310.1 ms after 010C1
+[elm327 22:12:20.914 +495.274699] > 010D1
+[elm327 22:12:21.249 +495.609661] < NO DATA
+[elm327 22:12:21.249 +495.609674] prompt 334.9 ms after 010D1
+[elm327 22:12:21.249 +495.609684] > 010F1
+[elm327 22:12:21.560 +495.920610] < NO DATA
+[elm327 22:12:21.560 +495.920626] prompt 310.9 ms after 010F1
+[elm327 22:12:21.560 +495.920637] > 01111
+[elm327 22:12:21.874 +496.234991] < NO DATA
+[elm327 22:12:21.874 +496.235005] prompt 314.3 ms after 01111
+[elm327 22:12:21.874 +496.235017] > 012F1
+[elm327 22:12:22.218 +496.577772] < NO DATA
+[elm327 22:12:22.218 +496.577787] prompt 342.7 ms after 012F1
+[elm327 22:12:22.218 +496.577798] > 01421
+[elm327 22:12:27.031 +501.392081] < NO DATA
+[elm327 22:12:27.031 +501.392098] prompt 4814.2 ms after 01421
+[elm327 22:12:27.031 +501.392110] > 01101
+[elm327 22:12:27.344 +501.705334] < NO DATA
+[elm327 22:12:27.344 +501.705362] prompt 313.2 ms after 01101
+[elm327 22:12:27.344 +501.705377] > 015C1
+[elm327 22:12:27.655 +502.015380] < NO DATA
+[elm327 22:12:27.655 +502.015395] prompt 310.0 ms after 015C1
+[elm327 22:12:27.655 +502.015405] > 01041
+[elm327 22:12:27.965 +502.325629] < NO DATA
+[elm327 22:12:27.965 +502.325656] prompt 310.2 ms after 01041
+[elm327 22:12:27.965 +502.325668] > 01051
+[elm327 22:12:28.276 +502.637377] < NO DATA
+[elm327 22:12:28.276 +502.637392] prompt 311.7 ms after 01051
+[elm327 22:12:28.276 +502.637403] > 010C1
+[elm327 22:12:28.587 +502.947592] < NO DATA
+[elm327 22:12:28.587 +502.947606] prompt 310.2 ms after 010C1
+[elm327 22:12:28.587 +502.947616] > 010D1
+[elm327 22:12:28.901 +503.261071] < NO DATA
+[elm327 22:12:28.901 +503.261090] prompt 313.4 ms after 010D1
+[elm327 22:12:28.901 +503.261103] > 010F1
+[elm327 22:12:29.237 +503.597837] < NO DATA
+[elm327 22:12:29.237 +503.597851] prompt 336.7 ms after 010F1
+[elm327 22:12:29.237 +503.597861] > 01111
+[elm327 22:12:29.578 +503.938123] < NO DATA
+[elm327 22:12:29.578 +503.938137] prompt 340.2 ms after 01111
+[elm327 22:12:29.578 +503.938147] > 012F1
+[elm327 22:12:29.889 +504.250174] < NO DATA
+[elm327 22:12:29.889 +504.250187] prompt 312.0 ms after 012F1
+[elm327 22:12:29.889 +504.250197] > 01421
+[elm327 22:12:30.200 +504.560149] < NO DATA
+[elm327 22:12:30.200 +504.560163] prompt 309.9 ms after 01421
+[elm327 22:12:30.200 +504.560172] > 01101
+[elm327 22:12:30.510 +504.870229] < NO DATA
+[elm327 22:12:30.510 +504.870243] prompt 310.0 ms after 01101
+[elm327 22:12:30.510 +504.870252] > 015C1
+[elm327 22:12:30.820 +505.180593] < NO DATA
+[elm327 22:12:30.820 +505.180609] prompt 310.3 ms after 015C1
+[elm327 22:12:30.820 +505.180618] > 01041
+[elm327 22:12:31.133 +505.493536] < NO DATA
+[elm327 22:12:31.133 +505.493554] prompt 312.9 ms after 01041
+[elm327 22:12:31.133 +505.493567] > 01051
+[elm327 22:12:31.445 +505.805586] < NO DATA
+[elm327 22:12:31.445 +505.805599] prompt 312.0 ms after 01051
+[elm327 22:12:31.445 +505.805610] > 010C1
+[elm327 22:12:31.758 +506.118222] < NO DATA
+[elm327 22:12:31.758 +506.118238] prompt 312.6 ms after 010C1
+[elm327 22:12:31.758 +506.118252] > 010D1
+[elm327 22:12:32.066 +506.427599] < NO DATA
+[elm327 22:12:32.066 +506.427616] prompt 309.3 ms after 010D1
+[elm327 22:12:32.066 +506.427626] > 010F1
+[elm327 22:12:32.377 +506.736935] < NO DATA
+[elm327 22:12:32.377 +506.736948] prompt 309.3 ms after 010F1
+[elm327 22:12:32.377 +506.736956] > 01111
+[elm327 22:12:32.688 +507.048307] < NO DATA
+[elm327 22:12:32.688 +507.048326] prompt 311.3 ms after 01111
+[elm327 22:12:32.688 +507.048343] > 012F1
+[elm327 22:12:33.035 +507.396541] < NO DATA
+[elm327 22:12:33.035 +507.396562] prompt 348.2 ms after 012F1
+[elm327 22:12:33.035 +507.396579] > 01421
+[elm327 22:12:33.383 +507.743016] < NO DATA
+[elm327 22:12:33.383 +507.743032] prompt 346.4 ms after 01421
+[elm327 22:12:33.383 +507.743045] > 01101
+[elm327 22:12:33.692 +508.053216] < NO DATA
+[elm327 22:12:33.692 +508.053229] prompt 310.1 ms after 01101
+[elm327 22:12:33.692 +508.053238] > 015C1
+[elm327 22:12:34.005 +508.364957] < NO DATA
+[elm327 22:12:34.005 +508.364975] prompt 311.7 ms after 015C1
+[elm327 22:12:34.005 +508.364986] > 01041
+[elm327 22:12:34.313 +508.673490] < NO DATA
+[elm327 22:12:34.313 +508.673504] prompt 308.5 ms after 01041
+[elm327 22:12:34.313 +508.673515] > 01051
+[elm327 22:12:34.623 +508.983129] < NO DATA
+[elm327 22:12:34.623 +508.983145] prompt 309.6 ms after 01051
+[elm327 22:12:34.623 +508.983157] > 010C1
+[elm327 22:12:34.932 +509.292691] < NO DATA
+[elm327 22:12:34.932 +509.292707] prompt 309.5 ms after 010C1
+[elm327 22:12:34.932 +509.292718] > 010D1
+[elm327 22:12:35.249 +509.609485] < NO DATA
+[elm327 22:12:35.249 +509.609515] prompt 316.7 ms after 010D1
+[elm327 22:12:35.249 +509.609528] > 010F1
+[elm327 22:12:35.558 +509.919530] < NO DATA
+[elm327 22:12:35.558 +509.919545] prompt 310.0 ms after 010F1
+[elm327 22:12:35.558 +509.919556] > 01111
+[elm327 22:12:36.971 +511.331056] < NO DATA
+[elm327 22:12:36.971 +511.331072] prompt 1411.5 ms after 01111
+[elm327 22:12:36.971 +511.331083] > 012F1
+[elm327 22:12:37.280 +511.640467] < NO DATA
+[elm327 22:12:37.280 +511.640484] prompt 309.3 ms after 012F1
+[elm327 22:12:37.280 +511.640495] > 01421
+[elm327 22:12:37.644 +512.005167] < NO DATA
+[elm327 22:12:37.644 +512.005190] prompt 364.6 ms after 01421
+[elm327 22:12:37.644 +512.005205] > 01101
+[elm327 22:12:38.103 +512.463924] < NO DATA
+[elm327 22:12:38.103 +512.463991] prompt 458.7 ms after 01101
+[elm327 22:12:38.103 +512.464007] > 015C1
+[elm327 22:12:38.473 +512.834424] < NO DATA
+[elm327 22:12:38.473 +512.834437] prompt 370.4 ms after 015C1
+[elm327 22:12:38.473 +512.834452] > 01041
+[elm327 22:12:38.859 +513.219599] < NO DATA
+[elm327 22:12:38.859 +513.219617] prompt 385.1 ms after 01041
+[elm327 22:12:38.859 +513.219631] > 01051
+[elm327 22:12:39.663 +514.023479] the port failed (reading the reply to 01051)
+[elm327 22:12:39.669 +514.029700] 192.168.4.1:23 closed
+[elm327 22:12:41.792 +516.152272] reopening 192.168.4.1:23 failed: no answer within 2 s (is this computer on the adapter's WiFi?)
+[elm327 22:12:44.002 +518.362263] reopening 192.168.4.1:23 failed: no answer within 2 s (is this computer on the adapter's WiFi?)
+[elm327 22:12:46.423 +520.783695] reopening 192.168.4.1:23 failed: no answer within 2 s (is this computer on the adapter's WiFi?)
+[elm327 22:12:49.232 +523.592762] reopening 192.168.4.1:23 failed: no answer within 2 s (is this computer on the adapter's WiFi?)
+[elm327 22:12:52.855 +527.214835] reopening 192.168.4.1:23 failed: no answer within 2 s (is this computer on the adapter's WiFi?)
+[elm327 22:12:58.079 +532.439065] reopening 192.168.4.1:23 failed: no answer within 2 s (is this computer on the adapter's WiFi?)
+[elm327 22:13:05.104 +539.464463] reopening 192.168.4.1:23 failed: no answer within 2 s (is this computer on the adapter's WiFi?)
+[elm327 22:13:12.113 +546.473595] reopening 192.168.4.1:23 failed: no answer within 2 s (is this computer on the adapter's WiFi?)
+[elm327 22:13:19.131 +553.490863] reopening 192.168.4.1:23 failed: no answer within 2 s (is this computer on the adapter's WiFi?)
+[elm327 22:13:26.156 +560.515870] reopening 192.168.4.1:23 failed: no answer within 2 s (is this computer on the adapter's WiFi?)
+[elm327 22:13:33.177 +567.537363] reopening 192.168.4.1:23 failed: no answer within 2 s (is this computer on the adapter's WiFi?)
+[elm327 22:13:40.200 +574.559815] reopening 192.168.4.1:23 failed: no answer within 2 s (is this computer on the adapter's WiFi?)
+[elm327 22:13:43.572 +577.932728] the session closes

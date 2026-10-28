@@ -1,0 +1,22 @@
+QtTune session recording (ADR-0017)
+started  2026-10-27 22:04:05.962 (local time)
+core     0.3.2
+uri      elm327://192.168.4.1:23
+signals  10: Engine Load, Coolant Temp, RPM, Vehicle Speed, Intake Air Temp, Throttle Position, Fuel Level, Battery Voltage, MAF, Engine Oil Temp
+surrogate frame logging  on, set by this recording
+columns  local time, seconds since the recording started (host_us / 1e6 in the CSV files), message
+
+22:04:05.963  +0.000  Recording: Documents\QtTune\recordings\20261027-220405
+22:04:06.012  +0.049  Connected: elm327://192.168.4.1:23
+22:04:06.012  +0.049  Session: ELM327 adapter (ELM327 V2.1); ISO 15765 at 500000 baud; profile obd2, channel 0x7E8/0x7E0 (rx/tx); battery 0.0 V
+22:04:06.230  +0.268  ECU 0x7E8: no answer to the supported-PID query; 10 requests, none dropped
+22:04:08.518  +2.556  Link: vehicle not responding
+22:04:13.990  +8.028  ECU 0x7E8 identity: 13 unanswered
+22:04:26.022  +20.060  Link: adapter fault (1 episode(s))
+22:12:15.062  +489.100  Link: vehicle not responding
+22:12:39.670  +513.708  Link: adapter fault (2 episode(s))
+22:13:43.558  +577.596  Disconnecting: elm327://192.168.4.1:23
+22:13:43.559  +577.596  Delivery: no frames
+22:13:43.573  +577.611  Disconnected: elm327://192.168.4.1:23
+
+end      disconnected: 0 frames, 0 values, 0 frames dropped by the bridge

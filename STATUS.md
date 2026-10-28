@@ -228,8 +228,12 @@ OBDX Pro VX in its ELM mode (USB-powered). In order:
    socket on every platform (`Elm327TcpTest`). The VX's WiFi carried a
    session on the bench with no bus, its answers and timing those of
    its USB port plus a few ms
-   ([2026-10-27-elm327-bench-4](docs/bench-sessions/2026-10-27-elm327-bench-4.md));
-   leaving and rejoining its network is still to come (BENCH prep #20).
+   ([2026-10-27-elm327-bench-4](docs/bench-sessions/2026-10-27-elm327-bench-4.md)).
+   Leaving its network is a fault at once that recovers on the backoff
+   with no reconnect, though the VX's network side hangs after a client
+   leaves with its socket open, until a power cycle
+   ([2026-10-27-elm327-bench-5](docs/bench-sessions/2026-10-27-elm327-bench-5.md));
+   WiFi with its USB port held is still to come (BENCH prep #20).
 
 Later, each with its own record: the app-fed stream for BLE and the
 mobile apps, and listening to the whole bus (raw frames, for a car

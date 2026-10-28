@@ -900,4 +900,12 @@ a refusal arrives in about 1 s and a SYN that WiFi drops is still sent
 again. The VX items are BENCH prep #20. The first, a session over the
 VX's WiFi, ran on the bench the same evening
 (docs/bench-sessions/2026-10-27-elm327-bench-4.md): the setup and
-`NO DATA` as on its USB port, a few ms slower per command.
+`NO DATA` as on its USB port, a few ms slower per command. Leaving the
+network mid-session (docs/bench-sessions/2026-10-27-elm327-bench-5.md)
+failed the read at once and recovered on the backoff with no reconnect,
+but only after the VX was power-cycled: once a client left without
+closing, its WiFi answered no ARP, no TCP and no DHCP, whether QtTune
+went on reopening or was disconnected. The adapter can't be reached to
+be fixed from here,
+so a WiFi adapter that stays in "Adapter fault" after its network is
+back wants a power cycle.
