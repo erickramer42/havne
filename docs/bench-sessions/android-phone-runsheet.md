@@ -75,10 +75,10 @@ for about 20 s, disconnect.
 - [ ] The activity log's "Recording:" line. Copy it: it says where
       Android put the recordings (BENCH prep #23). An error instead
       (the folder couldn't be made): copy it, and skip the replay
-- [ ] If the line gives a full path (it starts with `/`): connect
-      `replay://<that folder>` and confirm the values play back. If it
-      starts `Documents/`, the full path is unknown on the phone:
-      record that, and skip the replay
+- [ ] Settings → **Recent recordings**: the newest row has this
+      recording's time and "mock://demo · replays as mock". Select it:
+      the field gets its `replay://` address. Connect, and confirm the
+      values play back
 - [ ] **Record sessions** off again
 
 ## Phase 4 — the VX's WiFi

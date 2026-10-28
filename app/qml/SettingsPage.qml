@@ -20,7 +20,9 @@
 //          that fills the field, locked during a session, a mock session
 //          left alone, and (Windows, the fake) an adapter's connect
 //          keeping its URI and plotting, its VIN learned and logged;
-//          every item inside the page's width at a phone's (380 px).
+//          every item inside the page's width at a phone's (320 px); a
+//          recording that ends listed, its row filling the field with a
+//          replay that connects under the recorded profile and DIDs.
 //          Manual smoke — the live discovery list renders (Windows: the
 //          registry's interfaces and ports; macOS/Linux: the /dev ports or
 //          the empty-state hint) sized to its rows, a device row
@@ -187,6 +189,22 @@ Pane {
     function refreshDevices() {
         j2534Devices = Bridge.discoverJ2534Devices()
         serialPorts = Bridge.discoverSerialPorts()
+    }
+
+    // The newest recordings, [{ title, uri, source, profile }, ...]
+    // (Bridge.recentRecordings): read at start and after each recording
+    // ends. A row fills the field with its replay:// URI, under the
+    // profile it was recorded with, so a phone needs nothing typed
+    readonly property int recordingsListed: 20
+    property var recordings: []
+
+    function refreshRecordings() {
+        recordings = Bridge.recentRecordings(recordingsListed)
+    }
+
+    // Set like typed text, so the profile row and the DID field read it
+    function pickRecording(uri) {
+        uriField.text = uri
     }
 
     // The URI is composed from three choices, so none of it needs typing:
@@ -371,6 +389,7 @@ Pane {
         vehicles = VehicleBook.parse(vehicleStore.document)
         Bridge.vehicleLabel = pickedVehicle !== null ? pickedVehicle.label : ""
         refreshDevices()
+        refreshRecordings()
         // Set like typed text, so the profile row and the DID field read
         // it back
         if (uriField.text === "")
@@ -408,6 +427,12 @@ Pane {
 
         function onRecordingChanged() {
             sessionSettings.recording = Bridge.recording
+        }
+
+        // A recording that ended joins the list
+        function onRecordingStateChanged() {
+            if (!Bridge.recordingActive)
+                page.refreshRecordings()
         }
     }
 
@@ -790,6 +815,76 @@ Pane {
                     text: qsTr("Open folder")
                     visible: Bridge.recordingFolder !== "" && !Theme.mobile
                     onClicked: Qt.openUrlExternally(Bridge.recordingFolderUrl)
+                }
+            }
+
+            Label {
+                objectName: "recordingsCaption"
+                visible: page.recordings.length > 0
+                text: qsTr("Recent recordings — select one to put its replay in the field above")
+                color: Theme.textDim
+                wrapMode: Text.WordWrap
+                Layout.fillWidth: true
+            }
+
+            // Sized like the device list: up to deviceRowsShown rows, then
+            // it scrolls
+            ListView {
+                id: recordingList
+                objectName: "recordingList"
+                Layout.fillWidth: true
+                Layout.preferredHeight: contentHeight
+                Layout.maximumHeight: page.deviceRowsShown * (page.deviceRowHeight + spacing) - spacing
+                visible: count > 0
+                clip: true
+                spacing: 2
+                boundsBehavior: Flickable.StopAtBounds
+                model: page.recordings
+
+                ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
+
+                delegate: Rectangle {
+                    id: recordingRow
+                    required property var modelData
+                    width: recordingList.width
+                    height: page.deviceRowHeight
+                    radius: Theme.radius
+                    color: recordingMouse.containsMouse ? Theme.elevatedLight : Theme.elevated
+
+                    MouseArea {
+                        id: recordingMouse
+                        objectName: "recordingRowArea"
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        cursorShape: Qt.PointingHandCursor
+                        enabled: page.idle
+                        onClicked: page.pickRecording(recordingRow.modelData.uri)
+                    }
+
+                    ColumnLayout {
+                        anchors.fill: parent
+                        anchors.margins: Theme.spacing
+                        spacing: 2
+
+                        Label {
+                            objectName: "recordingTitle"
+                            text: recordingRow.modelData.title
+                            color: page.idle ? Theme.text : Theme.textDim
+                            elide: Text.ElideRight
+                            Layout.fillWidth: true
+                        }
+                        Label {
+                            objectName: "recordingDetail"
+                            text: recordingRow.modelData.source !== ""
+                                  ? qsTr("%1 · replays as %2").arg(recordingRow.modelData.source)
+                                                              .arg(recordingRow.modelData.profile)
+                                  : qsTr("replays as %1").arg(recordingRow.modelData.profile)
+                            color: Theme.textDim
+                            font.pointSize: 8
+                            elide: Text.ElideMiddle
+                            Layout.fillWidth: true
+                        }
+                    }
                 }
             }
 

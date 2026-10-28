@@ -20,8 +20,11 @@
 //          fills the field; locked during a session; a mock session
 //          leaves the vehicle alone, and (Windows, the fake) an adapter's
 //          connect keeps its URI and plotted signals and its VIN is
-//          learned and logged. At the narrowest phone's width (320 px) every item lies
-//          inside the page, a long URI in the field too; the URI and
+//          learned and logged. A recording that ends is listed, and its
+//          row fills the field with a replay that connects, under the
+//          profile and DIDs recorded. At the narrowest phone's width (320 px) every item lies
+//          inside the page, a long URI in the field and a recording's row
+//          too; the URI and
 //          DID fields ask the keyboard for no
 //          capitals or predictions; the WiFi presets fill their
 //          addresses. The live registry, and
@@ -126,6 +129,10 @@ TestCase {
     function test_everyItemFitsAPhonesWidth() {
         const page = createPage()
         page.width = 320
+        page.recordings = [{ title: "2026-10-28 14:30:12 · A vehicle label forty characters long",
+                             uri: "replay://C:/rec/x?profile=raw",
+                             source: "elm327://192.168.4.1:23?profile=raw&poll=0x0C",
+                             profile: "raw" }]
         const column = find(page, "settingsColumn")
         tryCompare(column, "width", 320 - 2 * Theme.pageMargin)
         waitForPolish(column)
@@ -258,6 +265,40 @@ TestCase {
         compare(uri.text, "elm327:///dev/ttyUSB0?profile=raw")
         mouseClick(find(list.itemAtIndex(0), "deviceRowArea"))
         compare(uri.text, "j2534://Fake?profile=raw")
+    }
+
+    // A recording that ends joins the list, and its row fills the field
+    // with its replay under the profile and DIDs it was recorded with
+    // (test_qml's recordings go to a scratch folder)
+    function test_aRecordingsRowFillsTheFieldWithItsReplay() {
+        const page = createPage()
+        const uri = find(page, "uriField")
+        const list = find(page, "recordingList")
+        const before = list.count
+
+        Bridge.recording = true
+        uri.text = "mock://recorded?profile=uds-generic&did=F190:text"
+        press(page, "connectButton")
+        tryVerify(() => Bridge.connected, 10000, "the mock connects")
+        Bridge.disconnectSession()
+        tryVerify(() => list.count === Math.min(before + 1, page.recordingsListed), 10000,
+                  "the recording that ended is listed")
+        verify(find(page, "recordingsCaption").visible)
+        tryVerify(() => list.itemAtIndex(0) !== null, 2000, "the row has a delegate")
+        compare(find(list.itemAtIndex(0), "recordingDetail").text,
+                "mock://recorded?profile=uds-generic&did=F190:text · replays as uds-generic")
+
+        press(page, "profile_raw")
+        mouseClick(find(list.itemAtIndex(0), "recordingRowArea"))
+        verify(uri.text.startsWith("replay://")
+               && uri.text.endsWith("?profile=uds-generic&did=F190:text"), uri.text)
+        verify(find(page, "profile_uds-generic").highlighted, "the row reads its profile back")
+        compare(find(page, "didField").text, "F190:text")
+
+        Bridge.recording = false
+        press(page, "connectButton")
+        tryVerify(() => Bridge.connected, 10000, "the replay connects as it stands")
+        compare(Bridge.currentUri, uri.text)
     }
 
     // A URI the page didn't compose: typed, pasted or set from outside

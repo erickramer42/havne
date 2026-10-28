@@ -109,6 +109,9 @@ public slots:
         QQuickStyle::setStyle(QStringLiteral("Basic"));   // as main() sets it
 
         m_bridge = std::make_unique<QtTuneBridge>();
+        // Settings lists the recordings: here an empty scratch folder,
+        // never the user's Documents
+        m_bridge->setRecordingsRootForTesting(m_recordingsDir.path());
         BridgeSingleton::instance = m_bridge.get();
         qmlRegisterSingletonInstance("QtTuneTest", 1, 0, "Harness", &m_harness);
     }
@@ -122,6 +125,7 @@ public slots:
 
 private:
     QTemporaryDir m_settingsDir;
+    QTemporaryDir m_recordingsDir;
     Harness m_harness;
     std::unique_ptr<QtTuneBridge> m_bridge;
 };

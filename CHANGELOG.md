@@ -58,6 +58,11 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
   with its delivery counters; with it off, the app offers only real
   adapters.
 
+- Settings lists the recent recordings, newest first. Selecting one
+  puts its `replay://` address in the field, with the profile and DIDs
+  it was recorded with, so a recording replays without typing its path
+  (on a phone, the only way).
+
 ### Changed
 - Settings' presets include the two usual WiFi adapter addresses,
   `elm327://192.168.4.1:23` (an OBDX Pro) and

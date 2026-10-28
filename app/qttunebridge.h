@@ -2,7 +2,8 @@
 // Testing: test_bridge (Qt-linked target): the frame log's ring, order
 //          and payload storage, SignalListModel's history ring and display units,
 //          discoverJ2534Devices' and discoverSerialPorts' marshaling
-//          shape, the delivery figures
+//          shape, recentRecordings and replayUriFor
+//          (BridgeTest.RecentRecordings*, .ReplayUriFor*), the delivery figures
 //          (BridgeTest.DeliveryText*, .DisconnectLogsTheDelivery), the
 //          vehicle's VIN key, label and plotted names (ADR-0027;
 //          BridgeTest.VinFromIdentity*, .UnplottedNames*, …)
@@ -383,6 +384,21 @@ public:
     // ("\Device\BthModem0"), "" elsewhere. A registry read or a /dev
     // listing; no port is opened, so it's safe to call from QML.
     Q_INVOKABLE QVariantList discoverSerialPorts() const;
+    // The newest recordings first, at most limit, for Settings to replay
+    // by a tap: one map per folder holding a frames.csv, { title, uri,
+    // source, profile } as QStrings. title is the folder's date and
+    // label ("2026-10-28 14:30:12 · Daily driver"), uri its replay://
+    // URI (replayUriFor), source the recorded URI as the pill shows it
+    // (uriLabelFor), "" when events.log doesn't name one. A directory
+    // listing and one short read per folder.
+    Q_INVOKABLE QVariantList recentRecordings(int limit) const;
+    // A recording's replay:// URI, decoding under the profile it was
+    // recorded with: the recorded URI's profile= (with its did= under
+    // uds-generic), else its scheme's default (mock:// mock, replay://
+    // raw, an adapter obd2); raw when nothing was recorded. Static, so
+    // tests need no files.
+    static QString replayUriFor(const QString& folder,
+                                const QString& recordedUri);
     int linkErrorCode() const { return m_linkErrorCode; }
     int errorEpisodes() const { return m_errorEpisodes; }
     bool logPaused() const { return m_logPaused; }
@@ -475,6 +491,9 @@ private:
     // and once more at disconnect)
     void flushValues();
     void applyFrameLoggingEnv();
+    // Where recordings go: the test root, else Documents/QtTune/recordings;
+    // "" with no Documents folder
+    QString recordingsRoot() const;
     void startRecording(const QString& uri, const ecuio_signal_set_t* set);
     void stopRecording(const QString& why);
     QString recordingSummary(const QString& why) const;

@@ -240,7 +240,8 @@ OBDX Pro VX in its ELM mode (USB-powered). In order:
 The app-fed stream for Bluetooth on Android and BLE is
 [ADR-0028](docs/adr/0028-app-fed-streams.md) (accepted; step 1, the
 Android baseline, under way: the app runs on a phone and reaches the
-VX over WiFi; the phone's layout and replay fixes next). Later,
+VX over WiFi; the phone's layout and replay fixes built, a third
+phone run next). Later,
 with its own record: listening to the whole bus (raw frames, for a
 car whose OBD port carries more than diagnostics).
 
@@ -268,7 +269,8 @@ an issue is resolved it is removed, and its number is not reused.
    On a phone Settings still ran past the right edge upright (only
    "Dis" of Disconnect showed), the navigation bar's area shows white, the Dashboard's dials are sized to the
    page's width (a third of one fits on its side), and a recording
-   can't be replayed without typing its long path. The iOS app hasn't
+   could be replayed only by typing its long path (Settings lists the
+   recent ones to replay by a tap, not yet run on the phone). The iOS app hasn't
    run on a device, and no tests run on either (cross builds set
    `BUILD_TESTING=OFF`). Bluetooth on Android is
    [ADR-0028](docs/adr/0028-app-fed-streams.md). CI uploads the

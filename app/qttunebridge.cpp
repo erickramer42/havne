@@ -11,7 +11,9 @@
 //          ECU and delivery lines (the ELM327 session line too,
 //          BridgeTest.SessionInfoTextNamesTheAdapter; its versions clause
 //          as adapterVersions, .ConnectLogsTheAdaptersSession), the serial ports as
-//          core lists them, session recording (BridgeTest.Recording*), display
+//          core lists them, session recording (BridgeTest.Recording*) and
+//          the recent ones' replay URIs (.RecentRecordings*,
+//          .ReplayUriForTakesTheRecordedProfile), display
 //          units on the rows, the chart and not the recording
 //          (BridgeTest.UnitSystem*), the URI label
 //          (BridgeTest.UriLabelCutsADirectLoadPathToItsFileName), the
@@ -34,7 +36,10 @@
 #include <QCryptographicHash>
 #include <QDateTime>
 #include <QDir>
+#include <QFile>
+#include <QFileInfo>
 #include <QRandomGenerator>
+#include <QRegularExpression>
 #include <QStandardPaths>
 #include <QStringList>
 #include <QtGlobal>
@@ -655,6 +660,105 @@ QVariantList QtTuneBridge::discoverSerialPorts() const
     return out;
 }
 
+QString QtTuneBridge::replayUriFor(const QString& folder,
+                                   const QString& recordedUri)
+{
+    const qsizetype q = recordedUri.indexOf(QLatin1Char('?'));
+    QString profile;
+    QStringList dids;
+    if (q >= 0) {
+        // Core's grammar: key=value pairs split on &, the last profile=
+        // winning
+        const QStringList pairs =
+            recordedUri.mid(q + 1).split(QLatin1Char('&'));
+        for (const QString& pair : pairs) {
+            if (pair.startsWith(QLatin1String("profile="))) {
+                profile = pair.mid(8);
+            } else if (pair.startsWith(QLatin1String("did="))) {
+                dids << pair;
+            }
+        }
+    }
+    if (profile.isEmpty()) {
+        // Core's defaults by scheme (ADR-0013); a replay's is raw, which
+        // can't decode a recording wrongly, and so is an unknown source's
+        profile = recordedUri.startsWith(QLatin1String("mock://"),
+                                         Qt::CaseInsensitive)
+                      ? QStringLiteral("mock")
+                  : recordedUri.startsWith(QLatin1String("j2534://"),
+                                           Qt::CaseInsensitive) ||
+                          recordedUri.startsWith(QLatin1String("elm327://"),
+                                                 Qt::CaseInsensitive)
+                      ? QStringLiteral("obd2")
+                      : QStringLiteral("raw");
+    }
+    QString uri = QStringLiteral("replay://") +
+                  QDir::fromNativeSeparators(folder) +
+                  QStringLiteral("?profile=") + profile;
+    // did= belongs to uds-generic alone; core refuses it under any other
+    if (profile == QLatin1String("uds-generic")) {
+        for (const QString& did : dids)
+            uri += QLatin1Char('&') + did;
+    }
+    return uri;
+}
+
+QVariantList QtTuneBridge::recentRecordings(int limit) const
+{
+    QVariantList out;
+    const QString root = recordingsRoot();
+    if (root.isEmpty() || limit <= 0)
+        return out;
+    // "<yyyyMMdd-HHmmss>[-n][ <label>]" (SessionRecorder::start): by name,
+    // last first, is newest first
+    static const QRegularExpression kName(
+        QStringLiteral("^(\\d{4})(\\d{2})(\\d{2})-(\\d{2})(\\d{2})(\\d{2})(?:-"
+                       "\\d+)?(?: (.+))?$"));
+    const QFileInfoList folders = QDir(root).entryInfoList(
+        QDir::Dirs | QDir::NoDotAndDotDot, QDir::Name | QDir::Reversed);
+    for (const QFileInfo& info : folders) {
+        if (out.size() >= limit)
+            break;
+        const QString folder = info.absoluteFilePath();
+        if (!QFileInfo::exists(folder + QStringLiteral("/frames.csv")))
+            continue;
+
+        // The header's "uri" line, among events.log's first few
+        QString recorded;
+        QFile events(folder + QStringLiteral("/events.log"));
+        if (events.open(QIODevice::ReadOnly | QIODevice::Text)) {
+            for (int i = 0; i < 12 && !events.atEnd(); ++i) {
+                const QString line =
+                    QString::fromUtf8(events.readLine()).trimmed();
+                if (line.startsWith(QLatin1String("uri "))) {
+                    recorded = line.mid(4).trimmed();
+                    break;
+                }
+            }
+        }
+
+        const QRegularExpressionMatch m = kName.match(info.fileName());
+        QString title = info.fileName();
+        if (m.hasMatch()) {
+            title = QStringLiteral("%1-%2-%3 %4:%5:%6")
+                        .arg(m.captured(1), m.captured(2), m.captured(3),
+                             m.captured(4), m.captured(5), m.captured(6));
+            if (m.hasCaptured(7))
+                title += QStringLiteral(" · ") + m.captured(7);
+        }
+        const QString uri = replayUriFor(folder, recorded);
+        QVariantMap row;
+        row["title"] = title;
+        row["uri"] = uri;
+        row["source"] = uriLabelFor(recorded);
+        // After the query's "?profile=", the last ? in it
+        row["profile"] = uri.mid(uri.lastIndexOf(QLatin1Char('?')) + 9)
+                             .section(QLatin1Char('&'), 0, 0);
+        out.append(row);
+    }
+    return out;
+}
+
 // Pure-core half: safe on ANY thread. Creates and registers, the slow
 // part (DLL load, PassThruOpen), but doesn't start: until the GUI thread
 // has taken the session, no worker may call onFrame with `this`. On
@@ -1001,18 +1105,25 @@ void QtTuneBridge::applyFrameLoggingEnv()
     }
 }
 
+QString QtTuneBridge::recordingsRoot() const
+{
+    if (!m_recordingsRoot.isEmpty())
+        return m_recordingsRoot;
+    const QString docs =
+        QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation);
+    return docs.isEmpty() ? QString()
+                          : docs + QStringLiteral("/QtTune/recordings");
+}
+
 void QtTuneBridge::startRecording(const QString& uri, const ecuio_signal_set_t* set)
 {
     if (!m_recording) return;
 
-    QString root = m_recordingsRoot;
+    const QString root = recordingsRoot();
     if (root.isEmpty()) {
-        const QString docs = QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation);
-        if (docs.isEmpty()) {
-            emit logMessage(QStringLiteral("Recording failed: no Documents folder"));
-            return;
-        }
-        root = docs + QStringLiteral("/QtTune/recordings");
+        emit logMessage(
+            QStringLiteral("Recording failed: no Documents folder"));
+        return;
     }
 
     QStringList names;

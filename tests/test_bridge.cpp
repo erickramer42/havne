@@ -2859,6 +2859,128 @@ TEST(BridgeTest, ReplayOfAMockRecordingDecodesWhatWasRecorded)
     EXPECT_EQ(values(b), valuesA);
 }
 
+/* Settings' recordings list: a recording replays under the profile it
+ * was recorded with, so a tap leaves nothing to type */
+TEST(BridgeTest, ReplayUriForTakesTheRecordedProfile)
+{
+    const auto r = [](const char* recorded) {
+        return QtTuneBridge::replayUriFor(
+                   QStringLiteral("C:\\rec\\20261028-143012 Daily driver"),
+                   QString::fromUtf8(recorded))
+            .toStdString();
+    };
+    const std::string base =
+        "replay://C:/rec/20261028-143012 Daily driver?profile=";
+    EXPECT_EQ(r("elm327://192.168.4.1:23?profile=raw&poll=0x0C"), base + "raw")
+        << "an adapter's keys stay behind";
+    EXPECT_EQ(r("elm327://COM5"), base + "obd2");
+    EXPECT_EQ(r("j2534://OBDX Pro - VX"), base + "obd2");
+    EXPECT_EQ(r("mock://demo"), base + "mock");
+    EXPECT_EQ(r("replay://C:/rec/x?speed=10"), base + "raw");
+    EXPECT_EQ(r(""), base + "raw")
+        << "no source named: what can't decode wrongly";
+    EXPECT_EQ(r("mock://demo?profile=uds-generic&did=F190:text,1E1C:u16"),
+              base + "uds-generic&did=F190:text,1E1C:u16");
+    EXPECT_EQ(r("mock://demo?did=F190&profile=obd2"), base + "obd2")
+        << "did= only under uds-generic, which core insists on";
+    EXPECT_EQ(r("mock://demo?profile=raw&profile=obd2"), base + "obd2")
+        << "the last profile= wins, as in core";
+}
+
+TEST(BridgeTest, RecentRecordingsListTheNewestFirst)
+{
+    QTemporaryDir root;
+    ASSERT_TRUE(root.isValid());
+    const auto make = [&root](const char* name, const char* uriLine) {
+        const QString dir =
+            root.path() + QLatin1Char('/') + QString::fromUtf8(name);
+        ASSERT_TRUE(QDir().mkpath(dir));
+        QFile frames(dir + QStringLiteral("/frames.csv"));
+        ASSERT_TRUE(frames.open(QIODevice::WriteOnly));
+        if (uriLine != nullptr) {
+            QFile events(dir + QStringLiteral("/events.log"));
+            ASSERT_TRUE(events.open(QIODevice::WriteOnly));
+            events.write("QtTune session recording (ADR-0017)\n"
+                         "started  2026-10-28 14:30:12.000 (local time)\n"
+                         "core     0.3.2\n");
+            events.write(uriLine);
+            events.write("\n");
+        }
+    };
+    make("20261027-090000", "uri      mock://demo");
+    make("20261028-143012 Daily driver",
+         "uri      elm327://192.168.4.1:23?profile=raw&poll=0x0C");
+    make("20261028-143012-2 Daily driver", nullptr);
+    ASSERT_TRUE(QDir().mkpath(root.path() + QStringLiteral("/20261029-080000")))
+        << "no frames.csv: not a recording";
+
+    QtTuneBridge bridge;
+    bridge.setRecordingsRootForTesting(root.path());
+    const QVariantList rows = bridge.recentRecordings(10);
+    ASSERT_EQ(rows.size(), 3);
+    const auto field = [&rows](int i, const char* key) {
+        return rows.at(i)
+            .toMap()
+            .value(QString::fromUtf8(key))
+            .toString()
+            .toStdString();
+    };
+    const std::string at = "replay://" + root.path().toStdString() + "/";
+    EXPECT_EQ(field(0, "title"), "2026-10-28 14:30:12 \xC2\xB7 Daily driver");
+    EXPECT_EQ(field(0, "uri"),
+              at + "20261028-143012-2 Daily driver?profile=raw");
+    EXPECT_EQ(field(0, "source"), "") << "no events.log";
+    EXPECT_EQ(field(1, "title"), "2026-10-28 14:30:12 \xC2\xB7 Daily driver");
+    EXPECT_EQ(field(1, "source"),
+              "elm327://192.168.4.1:23?profile=raw&poll=0x0C");
+    EXPECT_EQ(field(1, "profile"), "raw");
+    EXPECT_EQ(field(2, "title"), "2026-10-27 09:00:00");
+    EXPECT_EQ(field(2, "uri"), at + "20261027-090000?profile=mock");
+    EXPECT_EQ(field(2, "profile"), "mock");
+
+    EXPECT_EQ(bridge.recentRecordings(2).size(), 2);
+    EXPECT_TRUE(bridge.recentRecordings(0).isEmpty());
+    bridge.setRecordingsRootForTesting(root.path() + QStringLiteral("/none"));
+    EXPECT_TRUE(bridge.recentRecordings(10).isEmpty()) << "no folder yet";
+}
+
+/* The list's URI connects as it stands, uds-generic's DIDs and all */
+TEST(BridgeTest, RecentRecordingsReplayUnderTheirOwnProfile)
+{
+    QTemporaryDir first, second;
+    ASSERT_TRUE(first.isValid() && second.isValid());
+    QtTuneBridge bridge;
+    bridge.setRecording(true);
+    bridge.setRecordingsRootForTesting(first.path());
+    ASSERT_TRUE(
+        bridge
+            .connectSession(QStringLiteral(
+                "mock://recent?profile=uds-generic&did=F190:text,1E1C:u16"))
+            .isEmpty());
+    ASSERT_TRUE(
+        spinUntil([&bridge]() { return bridge.frameCount() > 3; }, 10000));
+    ASSERT_TRUE(disconnectAndWait(bridge));
+
+    const QVariantList rows = bridge.recentRecordings(5);
+    ASSERT_EQ(rows.size(), 1);
+    const QString uri =
+        rows.first().toMap().value(QStringLiteral("uri")).toString();
+    EXPECT_TRUE(uri.endsWith(
+        QStringLiteral("?profile=uds-generic&did=F190:text,1E1C:u16")))
+        << uri.toStdString();
+
+    QStringList log;
+    QObject::connect(&bridge, &QtTuneBridge::logMessage,
+                     [&log](const QString& line) { log << line; });
+    bridge.setRecordingsRootForTesting(second.path());
+    ASSERT_EQ(bridge.connectSession(uri), QString());
+    EXPECT_TRUE(std::any_of(log.cbegin(), log.cend(), [](const QString& l) {
+        return l.startsWith(QStringLiteral("Session: replay of a recording")) &&
+               l.endsWith(QStringLiteral("; profile uds-generic"));
+    })) << log.join(QLatin1Char('\n')).toStdString();
+    ASSERT_TRUE(disconnectAndWait(bridge));
+}
+
 namespace {
 
 /* What core's values callback delivers, as signals.csv rows: name and
