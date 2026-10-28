@@ -897,4 +897,7 @@ answers a refused connect by sending the SYN again, every 500 ms, and
 reports the refusal only after 2 s, which the 2 s limit would read as
 no answer. The socket sets `SIO_TCP_INITIAL_RTO` to two SYN retries, so
 a refusal arrives in about 1 s and a SYN that WiFi drops is still sent
-again. The VX items are BENCH prep #20.
+again. The VX items are BENCH prep #20. The first, a session over the
+VX's WiFi, ran on the bench the same evening
+(docs/bench-sessions/2026-10-27-elm327-bench-4.md): the setup and
+`NO DATA` as on its USB port, a few ms slower per command.

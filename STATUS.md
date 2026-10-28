@@ -225,9 +225,11 @@ OBDX Pro VX in its ELM mode (USB-powered). In order:
    socket where a serial port would be: a 2 s connect, Nagle off, no
    host names; the far side closing is a hard failure that reconnects
    on the backoff. Verified against the fake ELM327 behind a loopback
-   socket on every platform (`Elm327TcpTest`). The VX's WiFi answered
-   a probe outside QtTune as its USB port does; a QtTune session over
-   it is BENCH prep #20.
+   socket on every platform (`Elm327TcpTest`). The VX's WiFi carried a
+   session on the bench with no bus, its answers and timing those of
+   its USB port plus a few ms
+   ([2026-10-27-elm327-bench-4](docs/bench-sessions/2026-10-27-elm327-bench-4.md));
+   leaving and rejoining its network is still to come (BENCH prep #20).
 
 Later, each with its own record: the app-fed stream for BLE and the
 mobile apps, and listening to the whole bus (raw frames, for a car
