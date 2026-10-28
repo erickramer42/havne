@@ -46,6 +46,9 @@ class BluetoothDevices : public QObject
     Q_PROPERTY(bool scanning READ scanning NOTIFY scanningChanged)
     // Why the list is short, in a sentence ("Bluetooth is off"), or ""
     Q_PROPERTY(QString status READ status NOTIFY statusChanged)
+    // The status asks the user to act (Bluetooth off, the permission
+    // refused, a failed scan), not just reports
+    Q_PROPERTY(bool statusWarns READ statusWarns NOTIFY statusChanged)
 
 public:
     explicit BluetoothDevices(QObject* parent = nullptr);
@@ -64,6 +67,7 @@ public:
     QVariantList adapters() const;
     bool scanning() const { return m_scanning; }
     QString status() const { return m_status; }
+    bool statusWarns() const { return m_statusWarns; }
 
     // Lists the paired adapters. With ask, asks for the permission when
     // Android hasn't been asked yet; without, lists only once it's given
@@ -84,13 +88,14 @@ signals:
     void statusChanged();
 
 private:
-    void setStatus(const QString& status);
+    void setStatus(const QString& status, bool warns = false);
     void setScanning(bool scanning);
 
     QVariantList m_paired;
     QVariantList m_scanned;
     bool m_scanning = false;
     QString m_status;
+    bool m_statusWarns = false;
 #ifdef QTTUNE_BLUETOOTH
     // Whether Android has been asked and what it said
     bool permitted(bool ask, bool forScan);

@@ -173,10 +173,11 @@ QString BluetoothDevices::streamName(const QString& uri)
     return {};
 }
 
-void BluetoothDevices::setStatus(const QString& status)
+void BluetoothDevices::setStatus(const QString& status, bool warns)
 {
-    if (m_status != status) {
+    if (m_status != status || m_statusWarns != warns) {
         m_status = status;
+        m_statusWarns = warns;
         emit statusChanged();
     }
 }
@@ -219,7 +220,8 @@ bool BluetoothDevices::permitted(bool ask, bool forScan)
         return true;
     case Qt::PermissionStatus::Denied:
         setStatus(tr("Allow Nearby devices for QtTune in Android's settings to "
-                     "reach Bluetooth adapters"));
+                     "reach Bluetooth adapters"),
+                  true);
         return false;
     case Qt::PermissionStatus::Undetermined:
         break;
@@ -238,7 +240,8 @@ bool BluetoothDevices::permitted(bool ask, bool forScan)
             } else {
                 setStatus(
                     tr("Allow Nearby devices for QtTune in Android's settings "
-                       "to reach Bluetooth adapters"));
+                       "to reach Bluetooth adapters"),
+                    true);
             }
         });
     return false;
@@ -255,11 +258,11 @@ void BluetoothDevices::listPaired()
 {
     const QBluetoothLocalDevice local;
     if (!local.isValid()) {
-        setStatus(tr("This device has no Bluetooth"));
+        setStatus(tr("This device has no Bluetooth"), true);
         return;
     }
     if (local.hostMode() == QBluetoothLocalDevice::HostPoweredOff) {
-        setStatus(tr("Bluetooth is off: turn it on, then Refresh"));
+        setStatus(tr("Bluetooth is off: turn it on, then Refresh"), true);
         if (!m_paired.isEmpty()) {
             m_paired.clear();
             emit adaptersChanged();
@@ -318,7 +321,8 @@ void BluetoothDevices::scanNow()
                 [this](QBluetoothDeviceDiscoveryAgent::Error) {
                     setScanning(false);
                     setStatus(
-                        tr("The scan failed: %1").arg(m_agent->errorString()));
+                        tr("The scan failed: %1").arg(m_agent->errorString()),
+                        true);
                 });
     }
     m_scanned.clear();

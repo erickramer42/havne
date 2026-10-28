@@ -309,6 +309,22 @@ Pane {
     // Set like typed text, so the profile row and the DID field read it
     function pickRecording(uri) {
         uriField.text = uri
+        showUriField()
+    }
+
+    // The row a device or recording list shows outlined: its URI is in
+    // the field, whatever the query
+    function isChosen(uri) {
+        return uri !== "" && splitUri(uriField.text).base === splitUri(uri).base
+    }
+
+    // A row or preset fills the field: scrolls the page back to the field,
+    // Connect and the error line under them when they're above the view,
+    // as on a phone, where the pick otherwise seems to do nothing
+    function showUriField() {
+        const top = uriField.mapToItem(column, 0, 0).y + column.y - Theme.spacing
+        if (top < flick.contentY)
+            flick.contentY = Math.max(0, top)
     }
 
     // The URI is composed from three choices, so none of it needs typing:
@@ -585,6 +601,7 @@ Pane {
     // otherwise the activity log takes the height that's left
     Flickable {
         id: flick
+        objectName: "settingsFlick"
         anchors.fill: parent
         contentWidth: width
         contentHeight: column.height + 2 * Theme.pageMargin
@@ -737,7 +754,7 @@ Pane {
                               ? Bluetooth.status
                               : qsTr("Paired adapters are listed; pair one in Android's "
                                      + "Bluetooth settings")
-                        color: Theme.textDim
+                        color: Bluetooth.statusWarns ? Theme.warning : Theme.textDim
                         wrapMode: Text.WordWrap
                         Layout.fillWidth: true
                     }
@@ -776,6 +793,8 @@ Pane {
                         height: page.deviceRowHeight
                         radius: Theme.radius
                         color: mouse.containsMouse ? Theme.elevatedLight : Theme.elevated
+                        border.width: page.isChosen(row.modelData.base) ? 2 : 0
+                        border.color: Theme.primary
 
                         MouseArea {
                             id: mouse
@@ -784,7 +803,10 @@ Pane {
                             hoverEnabled: true
                             cursorShape: Qt.PointingHandCursor
                             enabled: page.idle
-                            onClicked: page.fillUri(row.modelData.base)
+                            onClicked: {
+                                page.fillUri(row.modelData.base)
+                                page.showUriField()
+                            }
                         }
 
                         ColumnLayout {
@@ -856,7 +878,10 @@ Pane {
                             // The mock is a developer's tool, not a device
                             visible: modelData.name !== "mock" || Theme.developerMode
                             enabled: page.idle
-                            onClicked: page.fillUri(modelData.uri)
+                            onClicked: {
+                                page.fillUri(modelData.uri)
+                                page.showUriField()
+                            }
                         }
                     }
                 }
@@ -1170,6 +1195,8 @@ Pane {
                         height: page.deviceRowHeight
                         radius: Theme.radius
                         color: recordingMouse.containsMouse ? Theme.elevatedLight : Theme.elevated
+                        border.width: page.isChosen(recordingRow.modelData.uri) ? 2 : 0
+                        border.color: Theme.primary
 
                         MouseArea {
                             id: recordingMouse

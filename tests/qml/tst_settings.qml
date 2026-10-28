@@ -428,6 +428,43 @@ TestCase {
         compare(uri.text, "elm327://bt:00:11:22:33:44:55?profile=raw")
         mouseClick(find(list.itemAtIndex(1), "deviceRowArea"))
         compare(uri.text, "elm327://ble:AA:BB:CC:DD:EE:FF?profile=raw")
+
+        // The row in the field is outlined, whatever the query
+        compare(list.itemAtIndex(0).border.width, 0)
+        verify(list.itemAtIndex(1).border.width > 0, "the chosen row is outlined")
+        uri.text = "elm327://bt:00:11:22:33:44:55"
+        verify(list.itemAtIndex(0).border.width > 0, "a typed URI outlines its row")
+        compare(list.itemAtIndex(1).border.width, 0)
+    }
+
+    // On a phone the field and Connect are scrolled out of view by the
+    // time a device row is reached: picking one brings them back, so the
+    // pick doesn't seem to do nothing (docs/bench-sessions/2026-10-28-android-7.md)
+    function test_aPickedRowScrollsTheFieldIntoView() {
+        const page = createPage()
+        page.width = 360
+        page.height = 400
+        page.j2534Devices = []
+        page.serialPorts = []
+        page.bluetoothAdapters = [{ name: "OBDLink MX+", address: "00:11:22:33:44:55", kind: "bt" }]
+        const flick = find(page, "settingsFlick")
+        const list = find(page, "deviceList")
+        const uri = find(page, "uriField")
+        tryVerify(() => list.itemAtIndex(0) !== null, 2000, "the row has a delegate")
+        waitForPolish(find(page, "settingsColumn"))
+
+        // The list at the top of the view, the field above it
+        flick.contentY = list.mapToItem(flick.contentItem, 0, 0).y
+        verify(uri.mapToItem(flick, 0, 0).y < 0, "the field is out of view")
+        mouseClick(find(list.itemAtIndex(0), "deviceRowArea"))
+        compare(uri.text, "elm327://bt:00:11:22:33:44:55")
+        const top = uri.mapToItem(flick, 0, 0).y
+        verify(top >= 0 && top + uri.height <= flick.height, "the field is in view, at " + top)
+
+        // A field already in view stays where it is
+        flick.contentY = 0
+        page.showUriField()
+        compare(flick.contentY, 0)
     }
 
     // A computer reaches a Bluetooth adapter through its serial port: a

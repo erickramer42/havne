@@ -82,6 +82,9 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
   Display. Connect… on Home, Live or the header opens Settings with
   Adapter unfolded. A button too long for a phone's width wraps its
   text.
+- Selecting a device, a recording or a preset in Settings scrolls back
+  to the URI field and Connect when they're out of view, as on a phone,
+  and the chosen row is outlined.
 - With **Record sessions** on, a replay isn't recorded: it would copy
   the recording it plays. Settings' Record line and the activity log
   say so; the switch keeps its setting for the next live session.
