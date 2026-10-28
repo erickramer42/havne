@@ -279,7 +279,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Setup Qt 6.12.0
-        uses: jurplel/install-qt-action@a9c63c7c123f3069cff414e7e482d95dfa9d8125 # v4.4.1
+        uses: jurplel/install-qt-action@b344308e4483fc892e0d27b3cd1b173ebdd95f06 # v4.5.0
         with:
           version: '6.12.0'
           host: 'mac'
@@ -304,7 +304,7 @@ jobs:
       # Qt 6.7+ names the Linux desktop arch linux_gcc_64 (gcc_64 no
       # longer resolves for 6.12.0).
       - name: Install Qt 6.12.0 desktop (linux_gcc_64)
-        uses: jurplel/install-qt-action@a9c63c7c123f3069cff414e7e482d95dfa9d8125 # v4.4.1
+        uses: jurplel/install-qt-action@b344308e4483fc892e0d27b3cd1b173ebdd95f06 # v4.5.0
         with:
           version: '6.12.0'
           host: 'linux'
@@ -338,7 +338,7 @@ jobs:
       # Qt 6.7+ publishes Android kits under the all_os host. A mobile kit
       # needs the desktop Qt of the build host too; --autodesktop installs it.
       - name: Install Qt 6.12.0 (android_arm64_v8a + linux host)
-        uses: jurplel/install-qt-action@a9c63c7c123f3069cff414e7e482d95dfa9d8125 # v4.4.1
+        uses: jurplel/install-qt-action@b344308e4483fc892e0d27b3cd1b173ebdd95f06 # v4.5.0
         with:
           version: '6.12.0'
           host: 'all_os'
@@ -418,7 +418,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Install Qt 6.12.0 (ios + macOS host)
-        uses: jurplel/install-qt-action@a9c63c7c123f3069cff414e7e482d95dfa9d8125 # v4.4.1
+        uses: jurplel/install-qt-action@b344308e4483fc892e0d27b3cd1b173ebdd95f06 # v4.5.0
         with:
           version: '6.12.0'
           host: 'mac'
@@ -463,7 +463,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Install Qt 6.12.0 (ios + macOS host)
-        uses: jurplel/install-qt-action@a9c63c7c123f3069cff414e7e482d95dfa9d8125 # v4.4.1
+        uses: jurplel/install-qt-action@b344308e4483fc892e0d27b3cd1b173ebdd95f06 # v4.5.0
         with:
           version: '6.12.0'
           host: 'mac'
