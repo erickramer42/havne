@@ -5,8 +5,11 @@
 //          own, a gap breaking a trace into segments, the time ticks'
 //          step and captions, and the value labels nudged apart and kept
 //          inside the plot, closed up and then thinned when they don't fit;
-//          a crowded trace's thinner stroke. LiveViewPage.qml draws what it returns; the
-//          drawing itself is manual smoke (docs/testing.md).
+//          a crowded trace's wide swings as a band (each column its whole
+//          range, a swing on a column edge too), a ramp, a small wiggle and
+//          a spike's peak as its line. LiveViewPage.qml draws
+//          what it returns; the drawing itself is manual smoke
+//          (docs/testing.md).
 
 pragma Singleton
 import QtQml
@@ -25,12 +28,20 @@ QtObject {
     readonly property int bottomPad: 4
     readonly property int labelGap: 14   // between the plot and the labels' column
     readonly property int minTickX: 24   // no caption left of this
-    // A trace's stroke, thinner where its points crowd: a signal that
-    // swings every window (lambda through fuel cut) zigzags at about a
-    // pixel a point on a phone, and the wide stroke filled it solid
+    // A trace's stroke. Where its points crowd and the line swings back
+    // and forth widely it draws as a band instead: per column, the lowest
+    // to the highest the line passes through, filled faintly and edged
+    // with a thin stroke. A signal that swings every window (lambda
+    // through fuel cut) zigzags at about a pixel a point on a phone, which
+    // hatched the plot as a line; as a band it reads as the range it
+    // swings over. A small wiggle (a sensor's noise on a ramp, the rev
+    // limiter's bounce) stays a line: banded, its edges drew it double
     readonly property int lineW: 2
-    readonly property int denseLineW: 1
+    readonly property real bandEdgeW: 1.5
     readonly property int denseSpacing: 3   // px a point, below which it's dense
+    readonly property int bandColumnW: 2    // px of the plot a band column covers
+    readonly property real bandSwingShare: 0.1   // of the plot's height, the least swing banded
+    readonly property int bandSwingMin: 6        // px, the least on a short plot
 
     // The time axis's tick step, in seconds, for a span in seconds
     function tickStep(spanS) {
@@ -75,6 +86,98 @@ QtObject {
         return out
     }
 
+    // A crowded segment as pieces: per column of w px, where its line
+    // enters and leaves, its lowest and highest y, how far it travels and
+    // how often it turns back (each piece of line cut at the column
+    // edges). Over a column and its neighbors, so a turn on a column edge
+    // counts too, the travel beyond the net change per turn is the size
+    // of a swing; past swing px the column swings. Calm columns join into
+    // a line through their entries and exits; swinging ones into a band,
+    // its top and bottom edges joined to the line on either side, so a
+    // lone spike keeps its peak.
+    // [{ band: false, points: [{x, y}] }, { band: true, top, bottom }]
+    function bandPieces(seg, w, swing) {
+        const cols = {}
+        const add = (c, x, y, travel) => {
+            let col = cols[c]
+            if (!col) {
+                col = cols[c] = { x0: x, yIn: y, x1: x, yOut: y, top: y, bottom: y, travel: 0,
+                                  turns: 0, firstDir: 0, lastDir: 0 }
+            } else {
+                if (x < col.x0) { col.x0 = x; col.yIn = y }
+                if (x >= col.x1) { col.x1 = x; col.yOut = y }
+                col.top = Math.min(col.top, y)
+                col.bottom = Math.max(col.bottom, y)
+            }
+            col.travel += travel
+        }
+        add(Math.floor(seg[0].x / w), seg[0].x, seg[0].y, 0)
+        for (let i = 1; i < seg.length; ++i) {
+            const p = seg[i - 1], q = seg[i]
+            let a = p
+            const cut = b => {
+                const c = Math.floor((a.x + b.x) / 2 / w)
+                add(c, a.x, a.y, 0)
+                add(c, b.x, b.y, Math.abs(b.y - a.y))
+                const col = cols[c]
+                if (b.y !== a.y) {
+                    const dir = b.y > a.y ? 1 : -1
+                    if (col.lastDir !== 0 && dir !== col.lastDir)
+                        ++col.turns
+                    if (col.firstDir === 0)
+                        col.firstDir = dir
+                    col.lastDir = dir
+                }
+                a = b
+            }
+            for (let c = Math.floor(p.x / w) + 1; c * w < q.x; ++c) {
+                const x = c * w
+                cut({ x: x, y: p.y + (q.y - p.y) * (x - p.x) / (q.x - p.x) })
+            }
+            cut(q)
+        }
+        const list = Object.keys(cols).map(Number).sort((a, b) => a - b).map(c => cols[c])
+        const swings = list.map((col, i) => {
+            const from = Math.max(0, i - 1), to = Math.min(list.length - 1, i + 1)
+            let travel = 0, turns = 0
+            for (let k = from; k <= to; ++k) {
+                travel += list[k].travel
+                turns += list[k].turns
+                if (k > from && list[k - 1].lastDir * list[k].firstDir < 0)
+                    ++turns
+            }
+            return turns > 0
+                && (travel - Math.abs(list[to].yOut - list[from].yIn)) / turns > swing
+        })
+        const pieces = []
+        let i = 0
+        while (i < list.length) {
+            let j = i
+            while (j + 1 < list.length && swings[j + 1] === swings[i])
+                ++j
+            const first = list[i], last = list[j]
+            if (swings[i]) {
+                const top = [{ x: first.x0, y: first.yIn }]
+                const bottom = [{ x: first.x0, y: first.yIn }]
+                for (let k = i; k <= j; ++k) {
+                    const x = (list[k].x0 + list[k].x1) / 2
+                    top.push({ x: x, y: list[k].top })
+                    bottom.push({ x: x, y: list[k].bottom })
+                }
+                top.push({ x: last.x1, y: last.yOut })
+                bottom.push({ x: last.x1, y: last.yOut })
+                pieces.push({ band: true, top: top, bottom: bottom })
+            } else {
+                const points = [{ x: first.x0, y: first.yIn }]
+                for (let k = i; k <= j; ++k)
+                    points.push({ x: list[k].x1, y: list[k].yOut })
+                pieces.push({ band: false, points: points })
+            }
+            i = j + 1
+        }
+        return pieces
+    }
+
     // Label rows pushed apart where traces end close together, and kept
     // inside the plot's height. traces have endY; each gets labeled, and
     // a labeled one labelY. Rows are lineH apart while they fit, closer
@@ -113,8 +216,9 @@ QtObject {
     // Returns null when there is nothing to draw (no series with a
     // sample, or no time span), else:
     // { plotW, plotH, top, hGrid: [y], ticks: [{ x, seconds }] newest first,
-    //   traces: [{ row, segments: [[{x, y}]], endY, label, lineWidth,
-    //              labeled, labelY }]
+    //   traces: [{ row, segments: [[{x, y}]], pieces (what's drawn,
+    //              each a segment's line or, crowded, bandPieces'),
+    //              endY, label, labeled, labelY }]
     //   in label order top down, labelX }
     function layout(series, width, height, opts) {
         if (!series || series.length === 0)
@@ -154,6 +258,7 @@ QtObject {
                                                    width * 0.4))
         const xOf = t => (t - tMin) / (tMax - tMin) * (plotW - 1)
         const yOf = norm => top + (1 - norm) * plotH
+        const swing = Math.max(bandSwingMin, bandSwingShare * plotH)
 
         // Flat traces each get a lane of their own instead of stacking on
         // one line, top down in list order; the label carries the value
@@ -185,11 +290,18 @@ QtObject {
             const points = tr.sp.length / 2
             const spread = xOf(tr.sp[tr.sp.length - 2]) - xOf(tr.sp[0])
             const spacing = points > 1 ? spread / (points - 1) : Infinity
+            const segs = segments(tr.sp, opts.gapMs, xOf, traceY)
+            let pieces = []
+            for (const seg of segs) {
+                pieces = pieces.concat(spacing < denseSpacing
+                                       ? bandPieces(seg, bandColumnW, swing)
+                                       : [{ band: false, points: seg }])
+            }
             out.push({ row: tr.row,
-                       segments: segments(tr.sp, opts.gapMs, xOf, traceY),
+                       segments: segs,
+                       pieces: pieces,
                        endY: traceY(tr.sp[tr.sp.length - 1]),
-                       label: tr.label,
-                       lineWidth: spacing < denseSpacing ? denseLineW : lineW })
+                       label: tr.label })
         }
 
         return { plotW: plotW, plotH: plotH, top: top, hGrid: hGrid, ticks: ticks,

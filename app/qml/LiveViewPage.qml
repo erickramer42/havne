@@ -4,7 +4,7 @@
 //          tst_linkhealth.qml for the banner in each link state), which
 //          finds items by objectName, and the list giving up rows so the
 //          chart stays whole on a short page; the strip chart's layout (ranges,
-//          lanes, gaps, ticks, labels) by tst_chartlayout.qml through
+//          lanes, gaps, ticks, labels, a crowded trace's band) by tst_chartlayout.qml through
 //          ChartLayout; the drawing itself, sharp under zoom, is verified
 //          manually (docs/testing.md).
 
@@ -43,6 +43,8 @@ Page {
     // palette reuse its colors with a dashed trace, so the chart still
     // tells them apart (the row swatch shows the color only).
     readonly property var traceDashes: [[], [8, 4], [2, 3]]
+    // A crowded trace's band fill, faint so the traces under it show
+    readonly property real bandAlpha: 0.3
     function seriesColor(row) { return Theme.seriesColors[row % Theme.seriesColors.length] }
     function seriesDash(row) {
         const tier = Math.floor(row / Theme.seriesColors.length)
@@ -341,18 +343,36 @@ Page {
                                      tick.x, l.top + l.plotH + 3)
                     }
 
-                    // Traces, each segment its own stroke (a gap is a break),
-                    // a crowded trace thinner
+                    // Traces, each piece its own stroke (a gap is a break);
+                    // a band filled faintly, then its two edges
+                    const polyline = pts => {
+                        ctx.moveTo(pts[0].x, pts[0].y)
+                        for (let i = 1; i < pts.length; ++i)
+                            ctx.lineTo(pts[i].x, pts[i].y)
+                    }
                     for (const tr of l.traces) {
-                        ctx.lineWidth = tr.lineWidth
-                        ctx.strokeStyle = root.seriesColor(tr.row)
+                        const color = root.seriesColor(tr.row)
+                        ctx.strokeStyle = color
+                        ctx.fillStyle = color
                         ctx.setLineDash(root.seriesDash(tr.row))
-                        for (const seg of tr.segments) {
-                            ctx.beginPath()
-                            for (let i = 0; i < seg.length; ++i) {
-                                if (i === 0) ctx.moveTo(seg[i].x, seg[i].y)
-                                else ctx.lineTo(seg[i].x, seg[i].y)
+                        for (const piece of tr.pieces) {
+                            if (!piece.band) {
+                                ctx.lineWidth = ChartLayout.lineW
+                                ctx.beginPath()
+                                polyline(piece.points)
+                                ctx.stroke()
+                                continue
                             }
+                            ctx.globalAlpha = root.bandAlpha
+                            ctx.beginPath()
+                            polyline(piece.top.concat(piece.bottom.slice().reverse()))
+                            ctx.closePath()
+                            ctx.fill()
+                            ctx.globalAlpha = 1
+                            ctx.lineWidth = ChartLayout.bandEdgeW
+                            ctx.beginPath()
+                            polyline(piece.top)
+                            polyline(piece.bottom)
                             ctx.stroke()
                         }
                     }

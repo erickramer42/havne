@@ -6,7 +6,9 @@
 pragma Singleton
 import QtQuick
 
-// Central palette - dark mode
+// Central palette - dark mode. main.cpp repeats three of these for the
+// platform's own window: bg behind Android's, surface and text in
+// Windows' title bar; change them there too
 QtObject {
     readonly property color bg:             "#14141c"
     readonly property color surface:        "#1e1e2e"
@@ -82,6 +84,8 @@ QtObject {
         "#ffa94d",   // orange
         "#f2f2f2",   // near-white
         "#b08cff",   // violet
+        "#a3e635",   // lime
+        "#e879f9",   // fuchsia
     ]
 
     // Link state → color. Whitelists the healthy and the explained

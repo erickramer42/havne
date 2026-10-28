@@ -3,7 +3,8 @@
 //          synthetic series: nothing to draw, the plot's width against the
 //          widest label, per-trace scaling with the minimum span, flat
 //          lanes, segments broken at a gap, the time ticks and the value
-//          labels nudged apart inside the plot. No bridge, no session.
+//          labels nudged apart inside the plot, a crowded trace's band.
+//          No bridge, no session.
 
 import QtQuick
 import QtTest
@@ -40,22 +41,112 @@ TestCase {
                what + ": " + actual + ", expected " + expected + " ± " + tolerance)
     }
 
-    // A trace whose points crowd (about a pixel each, a phone's chart
-    // through the limiter) strokes thinner; a sparse one keeps the width
-    function test_aCrowdedTraceStrokesThinner() {
-        const zigzag = n => {
-            const pairs = []
-            for (let i = 0; i < n; ++i)
-                pairs.push([i * 100, i % 2 === 0 ? 0.8 : 1.3])
-            return pairs
-        }
+    function zigzag(n) {
+        const pairs = []
+        for (let i = 0; i < n; ++i)
+            pairs.push([i * 100, i % 2 === 0 ? 0.8 : 1.3])
+        return pairs
+    }
+
+    function bandsOf(tr) { return tr.pieces.filter(p => p.band) }
+    function linesOf(tr) { return tr.pieces.filter(p => !p.band) }
+    function bandSpan(tr) {
+        let span = 0
+        for (const b of bandsOf(tr))
+            span += b.top[b.top.length - 1].x - b.top[0].x
+        return span
+    }
+
+    // A crowded trace that swings every point (about a pixel each, a
+    // phone's chart through the limiter) draws as one band, each column
+    // the whole swing; a sparse one is its line
+    function test_aSwingingCrowdedTraceDrawsAsABand() {
         const l = layout([series(0, zigzag(360), 2), series(1, [[0, 1], [35900, 2]])])
         verify(l)
         const byRow = row => l.traces.filter(t => t.row === row)[0]
-        compare(byRow(0).lineWidth, ChartLayout.denseLineW, "360 points over " + l.plotW + " px")
-        compare(byRow(1).lineWidth, ChartLayout.lineW, "two points across the plot")
+        const dense = byRow(0)
+        const seg = dense.segments[0]
+        compare(bandsOf(dense).length, 1, "one band, 360 points over " + l.plotW + " px")
+        verify(bandSpan(dense) >= 0.9 * (seg[seg.length - 1].x - seg[0].x),
+               "the band spans " + bandSpan(dense) + " px")
+        const ys = seg.map(p => p.y)
+        const top = Math.min.apply(null, ys), bottom = Math.max.apply(null, ys)
+        const b = bandsOf(dense)[0]
+        // The first and last points join the line on either side
+        for (let i = 1; i < b.top.length - 1; ++i) {
+            near(b.top[i].y, top, 0.001, "column " + i + "'s top")
+            near(b.bottom[i].y, bottom, 0.001, "column " + i + "'s bottom")
+            verify(b.top[i].x > b.top[i - 1].x, "left to right")
+        }
+        const sparse = byRow(1)   // two points across the plot
+        compare(sparse.pieces.length, sparse.segments.length, "a piece a segment")
+        for (let i = 0; i < sparse.pieces.length; ++i) {
+            compare(sparse.pieces[i].band, false)
+            compare(sparse.pieces[i].points, sparse.segments[i])
+        }
         const wide = ChartLayout.layout([series(0, zigzag(40), 2)], 1200, chartH, opts({}))
-        compare(wide.traces[0].lineWidth, ChartLayout.lineW, "40 points over 1200 px")
+        compare(bandsOf(wide.traces[0]).length, 0, "40 points over 1200 px")
+    }
+
+    // A swing whose reversals fall on the column edges (a point every
+    // column) still bands: the swing counts over a column's neighbors
+    function test_aSwingAtTheColumnsPitchBands() {
+        // 355 px less the label's 54 is a 301 px plot: 150 steps of 2 px
+        const l = ChartLayout.layout([series(0, zigzag(151), 2)], 355, chartH, opts({}))
+        const tr = l.traces[0]
+        const seg = tr.segments[0]
+        const spacing = (seg[seg.length - 1].x - seg[0].x) / (seg.length - 1)
+        near(spacing, ChartLayout.bandColumnW, 0.0001, "a point on every column edge")
+        verify(bandSpan(tr) >= 0.9 * (seg[seg.length - 1].x - seg[0].x),
+               "the band spans " + bandSpan(tr) + " px")
+    }
+
+    // A crowded ramp is its line, sampled at the column edges: no band,
+    // whose two edges a slope apart drew a ramp double
+    function test_aCrowdedRampStaysALine() {
+        const pairs = []
+        for (let i = 0; i < 360; ++i)
+            pairs.push([i * 100, i / 3.6])
+        const tr = layout([series(0, pairs, 0)]).traces[0]
+        compare(tr.pieces.length, 1)
+        compare(tr.pieces[0].band, false)
+        const seg = tr.segments[0], a = seg[0], z = seg[seg.length - 1]
+        const pts = tr.pieces[0].points
+        verify(pts.length >= (z.x - a.x) / ChartLayout.bandColumnW - 1, pts.length + " points")
+        for (const pt of pts)
+            near(pt.y, a.y + (z.y - a.y) * (pt.x - a.x) / (z.x - a.x), 0.01, "on the ramp at " + pt.x)
+        compare(pts[0], a, "from the first point")
+        compare(pts[pts.length - 1], z, "to the last")
+    }
+
+    // A small wiggle on a crowded ramp (a sensor's noise, 5 % of its
+    // range) stays a line: under bandSwingShare of the plot's height
+    function test_aSmallWiggleStaysALine() {
+        const pairs = []
+        for (let i = 0; i < 360; ++i)
+            pairs.push([i * 100, i / 3.6 + (i % 2 ? 5 : 0)])
+        const l = layout([series(0, pairs, 0)])
+        const tr = l.traces[0]
+        const seg = tr.segments[0]
+        const wiggle = Math.abs(seg[1].y - seg[0].y)
+        verify(wiggle > ChartLayout.bandSwingMin && wiggle < ChartLayout.bandSwingShare * l.plotH,
+               "a " + wiggle + " px wiggle on a " + l.plotH + " px plot")
+        compare(bandsOf(tr).length, 0, "no band")
+    }
+
+    // A lone spike in a crowded trace bands only around it, its top edge
+    // through the peak
+    function test_aCrowdedSpikeKeepsItsPeak() {
+        const pairs = []
+        for (let i = 0; i < 360; ++i)
+            pairs.push([i * 100, i === 180 ? 2 : 1])
+        const tr = layout([series(0, pairs, 2)]).traces[0]
+        const bands = bandsOf(tr)
+        compare(bands.length, 1, "one band, at the spike")
+        verify(bandSpan(tr) <= 4 * ChartLayout.bandColumnW, "the band spans " + bandSpan(tr) + " px")
+        const peak = tr.segments[0][180].y
+        near(Math.min.apply(null, bands[0].top.map(p => p.y)), peak, 0.001, "the top edge's peak")
+        compare(linesOf(tr).length, 2, "the line on either side")
     }
 
     function test_nothingToDraw() {
