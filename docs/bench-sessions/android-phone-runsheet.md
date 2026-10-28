@@ -50,13 +50,19 @@ unknown developer ("Install anyway").
 - [ ] Each page opens from the tab bar: Home, Dashboard, Live, Log,
       Settings. Screenshot each. Note text that is cut off or controls
       too small to press
-- [ ] Turn the phone to landscape and back: the page lays out again
+- [ ] Turn the phone to landscape and back: the page lays out again,
+      filling the screen. Note any band of another color (white or
+      light gray) around the app, and where; the navigation bar's
+      buttons should be light on dark
 
 ## Phase 2 — mock
 
 **Action:** Settings → **Developer mode** on, then **Mock**, then
 **Connect**.
 
+- [ ] Turn the phone to landscape and back once more, then on the
+      Log page copy the "Display:" lines (developer mode logs the
+      screen, the window and the safe area after each change)
 - [ ] Connected within a second; the Log page's "Session:" line reads
       "mock transport"
 - [ ] Live's values move and the chart draws; the Dashboard's gauges
@@ -104,13 +110,17 @@ to stay connected. In QtTune, Settings: `elm327://192.168.4.1:23?profile=raw&pol
 ## Phase 5 — the files (with `adb`; optional)
 
 **Action:** the phone in developer mode with USB debugging on, on a
-computer with `adb`. The package's name: `adb shell pm list packages | grep -i qttune`.
+computer with `adb`. The package is `org.qtproject.example.qttune`
+(`adb shell pm list packages qttune` prints it after `package:`,
+which isn't part of the name).
 
-- [ ] `adb shell run-as <package> ls -R cache files`: copy the listing.
+- [ ] `adb shell run-as org.qtproject.example.qttune ls -R cache files`:
+      copy the listing.
       The wire logs are `ecuio-elm327.*.log` in the temporary folder;
       note which directory holds them
 - [ ] Copy Phase 4's wire log off:
-      `adb exec-out run-as <package> cat <path> > ecuio-elm327.log`
+      `adb exec-out run-as org.qtproject.example.qttune cat cache/<log's name> > <log's name>`,
+      once for each `ecuio-elm327.*.log` the listing shows
 - [ ] If Phase 3 couldn't find its recording: `find` it here, and
       record the full path
 

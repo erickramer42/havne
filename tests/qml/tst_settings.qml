@@ -107,13 +107,16 @@ TestCase {
     }
 
     // The visible items under item whose right edge lies past column's,
-    // named by objectName, text or type
+    // named by objectName, text or type. A Text's (it has elide) is its
+    // painted text's when wider: an unwrapped label paints past its width
     function pastTheEdge(item, column, out) {
         for (let i = 0; i < item.children.length; ++i) {
             const child = item.children[i]
             if (!child.visible || child.width <= 0)
                 continue
-            const right = child.mapToItem(column, child.width, 0).x
+            const painted = child.elide !== undefined && !child.clip
+                            ? Math.max(child.width, child.contentWidth) : child.width
+            const right = child.mapToItem(column, painted, 0).x
             if (right > column.width + 0.5)
                 out.push((child.objectName || child.text || String(child))
                          + " at " + Math.round(right))
@@ -147,6 +150,16 @@ TestCase {
         waitForPolish(column)
         compare(pastTheEdge(column, column, []).join("; "), "",
                 "nothing past the edge with a long URI")
+
+        // Connected, the status line names it too: the third phone run's
+        // page ran past the edge then (the mock's label stands in)
+        find(page, "uriField").text =
+            "mock://a-label-as-long-as-the-phone-runs-wifi-uri?profile=raw"
+        press(page, "connectButton")
+        tryVerify(() => Bridge.connected, 10000, "the mock connects")
+        waitForPolish(column)
+        compare(pastTheEdge(column, column, []).join("; "), "",
+                "nothing past the edge once connected")
     }
 
     // A URI isn't prose: no capital first letter, no predicted words
@@ -158,6 +171,22 @@ TestCase {
             verify(hints & Qt.ImhNoAutoUppercase, name + " doesn't capitalize")
             verify(hints & Qt.ImhNoPredictiveText, name + " doesn't predict")
         }
+    }
+
+    // The presets fold behind one button (on a phone they start folded:
+    // they filled a screen of its page)
+    function test_thePresetsButtonShowsAndHidesThem() {
+        const page = createPage()
+        const toggle = find(page, "presetsToggle")
+        const wifi = find(page, "preset_wifi_obdx")
+        compare(page.presetsShown, !Theme.mobile, "open on the desktop, folded on a phone")
+        page.presetsShown = true
+        verify(wifi.visible)
+        toggle.clicked()
+        verify(!wifi.visible && !find(page, "preset_j2534").visible, "folded")
+        verify(toggle.visible, "the button stays")
+        toggle.clicked()
+        verify(wifi.visible, "open again")
     }
 
     // WiFi adapters aren't discovered: the two common addresses are

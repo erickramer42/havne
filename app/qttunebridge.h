@@ -434,6 +434,9 @@ public:
     Q_INVOKABLE QString displayUnit(const QString& unit) const;
     // Test seam: where recordings go instead of Documents/QtTune/recordings
     void setRecordingsRootForTesting(const QString& root) { m_recordingsRoot = root; }
+    // Test seam: record a replay too, to compare it with its source. The
+    // app never records one: it would copy the recording it plays
+    void setRecordReplaysForTesting(bool on) { m_recordReplays = on; }
 
 public slots:
     // Both connects take the URI as typed and trim the spaces around it
@@ -630,5 +633,6 @@ private:
     bool m_recording = false;
     SessionRecorder m_recorder;
     QString m_recordingsRoot;          // empty: Documents/QtTune/recordings
+    bool m_recordReplays = false;      // tests only
     bool m_setFrameLogging = false;    // the bridge, not the launch, set ECUIO_SUR_LOG_FRAMES
 };

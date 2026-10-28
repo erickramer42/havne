@@ -4,7 +4,8 @@
 //          own range with a minimum span, flat traces in lanes of their
 //          own, a gap breaking a trace into segments, the time ticks'
 //          step and captions, and the value labels nudged apart and kept
-//          inside the plot, closed up and then thinned when they don't fit. LiveViewPage.qml draws what it returns; the
+//          inside the plot, closed up and then thinned when they don't fit;
+//          a crowded trace's thinner stroke. LiveViewPage.qml draws what it returns; the
 //          drawing itself is manual smoke (docs/testing.md).
 
 pragma Singleton
@@ -24,6 +25,12 @@ QtObject {
     readonly property int bottomPad: 4
     readonly property int labelGap: 14   // between the plot and the labels' column
     readonly property int minTickX: 24   // no caption left of this
+    // A trace's stroke, thinner where its points crowd: a signal that
+    // swings every window (lambda through fuel cut) zigzags at about a
+    // pixel a point on a phone, and the wide stroke filled it solid
+    readonly property int lineW: 2
+    readonly property int denseLineW: 1
+    readonly property int denseSpacing: 3   // px a point, below which it's dense
 
     // The time axis's tick step, in seconds, for a span in seconds
     function tickStep(spanS) {
@@ -106,7 +113,8 @@ QtObject {
     // Returns null when there is nothing to draw (no series with a
     // sample, or no time span), else:
     // { plotW, plotH, top, hGrid: [y], ticks: [{ x, seconds }] newest first,
-    //   traces: [{ row, segments: [[{x, y}]], endY, label, labeled, labelY }]
+    //   traces: [{ row, segments: [[{x, y}]], endY, label, lineWidth,
+    //              labeled, labelY }]
     //   in label order top down, labelX }
     function layout(series, width, height, opts) {
         if (!series || series.length === 0)
@@ -173,10 +181,15 @@ QtObject {
         for (const tr of traces) {
             const traceY = tr.flat ? () => yOf(tr.lane)
                                    : v => yOf((v - tr.vMin) / (tr.vMax - tr.vMin))
+            // Its points' mean spacing across the time they cover
+            const points = tr.sp.length / 2
+            const spread = xOf(tr.sp[tr.sp.length - 2]) - xOf(tr.sp[0])
+            const spacing = points > 1 ? spread / (points - 1) : Infinity
             out.push({ row: tr.row,
                        segments: segments(tr.sp, opts.gapMs, xOf, traceY),
                        endY: traceY(tr.sp[tr.sp.length - 1]),
-                       label: tr.label })
+                       label: tr.label,
+                       lineWidth: spacing < denseSpacing ? denseLineW : lineW })
         }
 
         return { plotW: plotW, plotH: plotH, top: top, hGrid: hGrid, ticks: ticks,

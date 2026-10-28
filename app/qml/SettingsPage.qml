@@ -181,10 +181,15 @@ Pane {
 
         Label {
             id: caption
+            visible: text !== ""
             color: Theme.textDim
             topPadding: 8
         }
     }
+
+    // The presets' buttons, shown on the desktop and folded on a phone
+    // until its Presets button opens them; for this page's life
+    property bool presetsShown: !Theme.mobile
 
     function refreshDevices() {
         j2534Devices = Bridge.discoverJ2534Devices()
@@ -485,6 +490,10 @@ Pane {
                       : Bridge.disconnecting ? qsTr("Disconnecting…")
                       : qsTr("Not connected")
                 color: Theme.linkColor(Bridge.linkState)
+                // A long URI breaks anywhere: unwrapped, it widened the
+                // page past a phone's edge once connected
+                wrapMode: Text.WrapAnywhere
+                Layout.fillWidth: true
             }
 
             RowLayout {
@@ -688,7 +697,15 @@ Pane {
 
             // ---- Presets: the URI's base ----
             LabeledFlow {
-                label: qsTr("Presets:")
+                label: ""
+                // A phone's page is narrow, and the presets fill a screen
+                // of it: one button shows or hides them in place (a
+                // ComboBox's Popup wouldn't follow the zoom)
+                ThemedButton {
+                    objectName: "presetsToggle"
+                    text: page.presetsShown ? qsTr("Presets ▾") : qsTr("Presets ▸")
+                    onClicked: page.presetsShown = !page.presetsShown
+                }
                 Repeater {
                     model: [
                         { name: "mock", uri: "mock://demo", label: "mock://demo" },
@@ -711,7 +728,8 @@ Pane {
                         objectName: "preset_" + modelData.name
                         text: modelData.label
                         // The mock is a developer's tool, not a device
-                        visible: modelData.name !== "mock" || Theme.developerMode
+                        visible: page.presetsShown
+                                 && (modelData.name !== "mock" || Theme.developerMode)
                         enabled: page.idle
                         onClicked: page.fillUri(modelData.uri)
                     }

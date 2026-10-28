@@ -40,6 +40,24 @@ TestCase {
                what + ": " + actual + ", expected " + expected + " ± " + tolerance)
     }
 
+    // A trace whose points crowd (about a pixel each, a phone's chart
+    // through the limiter) strokes thinner; a sparse one keeps the width
+    function test_aCrowdedTraceStrokesThinner() {
+        const zigzag = n => {
+            const pairs = []
+            for (let i = 0; i < n; ++i)
+                pairs.push([i * 100, i % 2 === 0 ? 0.8 : 1.3])
+            return pairs
+        }
+        const l = layout([series(0, zigzag(360), 2), series(1, [[0, 1], [35900, 2]])])
+        verify(l)
+        const byRow = row => l.traces.filter(t => t.row === row)[0]
+        compare(byRow(0).lineWidth, ChartLayout.denseLineW, "360 points over " + l.plotW + " px")
+        compare(byRow(1).lineWidth, ChartLayout.lineW, "two points across the plot")
+        const wide = ChartLayout.layout([series(0, zigzag(40), 2)], 1200, chartH, opts({}))
+        compare(wide.traces[0].lineWidth, ChartLayout.lineW, "40 points over 1200 px")
+    }
+
     function test_nothingToDraw() {
         compare(layout([]), null, "no series")
         compare(layout(null), null, "no list")

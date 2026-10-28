@@ -2785,6 +2785,8 @@ TEST(BridgeTest, ReplayOfAMockRecordingDecodesWhatWasRecorded)
     ASSERT_TRUE(first.isValid() && second.isValid());
     QtTuneBridge bridge;
     bridge.setRecording(true);
+    // A replay, compared with its source
+    bridge.setRecordReplaysForTesting(true);
     bridge.setRecordingsRootForTesting(first.path());
     ASSERT_TRUE(bridge.connectSession("mock://roundtrip").isEmpty());
     ASSERT_TRUE(
@@ -2942,6 +2944,33 @@ TEST(BridgeTest, RecentRecordingsListTheNewestFirst)
     EXPECT_TRUE(bridge.recentRecordings(0).isEmpty());
     bridge.setRecordingsRootForTesting(root.path() + QStringLiteral("/none"));
     EXPECT_TRUE(bridge.recentRecordings(10).isEmpty()) << "no folder yet";
+}
+
+/* With Record on, a replay isn't recorded: it would copy the recording
+ * it plays (the third phone run's Record left on made one) */
+TEST(BridgeTest, AReplayIsNotRecorded)
+{
+    QTemporaryDir root;
+    ASSERT_TRUE(root.isValid());
+    QtTuneBridge bridge;
+    bridge.setRecording(true);
+    bridge.setRecordingsRootForTesting(root.path());
+    QStringList log;
+    QObject::connect(&bridge, &QtTuneBridge::logMessage,
+                     [&log](const QString& line) { log << line; });
+    const QString uri =
+        QStringLiteral(
+            "replay://%1/2026-10-25-engine-start?profile=obd2&speed=max")
+            .arg(QStringLiteral(ECUIO_REPLAY_FIXTURES));
+    ASSERT_EQ(bridge.connectSession(uri), QString());
+    EXPECT_FALSE(bridge.recordingActive());
+    EXPECT_TRUE(log.contains(
+        QStringLiteral("Not recording: a replay plays a recording already")))
+        << log.join(QLatin1Char('\n')).toStdString();
+    ASSERT_TRUE(disconnectAndWait(bridge));
+    EXPECT_TRUE(recordingFolders(root.path()).isEmpty());
+    EXPECT_TRUE(bridge.recording())
+        << "the switch stays on for the next session";
 }
 
 /* The list's URI connects as it stands, uds-generic's DIDs and all */
@@ -3182,6 +3211,8 @@ TEST(BridgeTest, RecordingHoldsEveryValueCoreDecodes)
     QtTuneBridge bridge;
     bridge.setRecordingsRootForTesting(root.path());
     bridge.setRecording(true);
+    // A replay, compared with its source
+    bridge.setRecordReplaysForTesting(true);
     ASSERT_TRUE(bridge.connectSession(uri).isEmpty());
     ASSERT_TRUE(spinUntil(
         [&bridge]() {
@@ -3292,6 +3323,8 @@ TEST(BridgeTest, ValuesSurviveFramesDroppedAtTheCap)
     QtTuneBridge bridge;
     bridge.setRecordingsRootForTesting(root.path());
     bridge.setRecording(true);
+    // A replay, compared with its source
+    bridge.setRecordReplaysForTesting(true);
     ASSERT_TRUE(bridge.connectSession(uri).isEmpty());
     // No event processing: the queued frames pile up to the cap
     std::this_thread::sleep_for(std::chrono::milliseconds(1500));
@@ -3383,6 +3416,8 @@ TEST(BridgeTest, ValuesPastTheWindowsLimitAreCountedAndLogged)
                      [&log](const QString& line) { log << line; });
     bridge.setRecordingsRootForTesting(root.path());
     bridge.setRecording(true);
+    // A replay, compared with its source
+    bridge.setRecordReplaysForTesting(true);
     bridge.setValueSampleLimitForTesting(kLimit);
     ASSERT_TRUE(bridge.connectSession(uri).isEmpty());
     // Held, so the whole replay lands in one window
@@ -3513,6 +3548,8 @@ TEST(BridgeTest, VehicleRecordingsReplayToTheirOwnValues)
         QtTuneBridge bridge;
         bridge.setRecordingsRootForTesting(out.path());
         bridge.setRecording(true);
+        // A replay, compared with its source
+        bridge.setRecordReplaysForTesting(true);
         bridge.setValueSampleLimitForTesting(1 << 20);
         const QString err = bridge.connectSession(uri);
         if (!err.isEmpty()) {

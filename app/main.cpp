@@ -1,7 +1,9 @@
 // File/layer: app/main.cpp | Qt6 Gui/Qml/Quick, app entry point, C++17
 // Testing: manual smoke (the built app launched; QTTUNE_SETTINGS_DIR
 //          through the run-qttune skill's launch; the dark title bar);
-//          BENCH, the phone run sheet (the system bars' color);
+//          BENCH, the phone run sheet (the system bars' color, Android's
+//          window behind Qt's dark); CI's android-build compiles the
+//          Android part;
 //          QmlTest drives the same QML module and Bridge singleton
 //          without this file
 
@@ -12,6 +14,11 @@
 #include <QSettings>
 #include <QStyleHints>
 
+#ifdef Q_OS_ANDROID
+#include <QJniObject>
+#include <QtCore/qcoreapplication_platform.h>
+#endif
+
 #include "bridgesingleton.h"
 #include "qttunebridge.h"
 #include "ecuio/version.h"
@@ -19,6 +26,46 @@
 // The QtTune module is a static library (app/CMakeLists.txt); this pulls
 // in its plugin, which registers the module's types
 Q_IMPORT_QML_PLUGIN(QtTunePlugin)
+
+#ifdef Q_OS_ANDROID
+// Android's own window, behind Qt's, follows the phone's day/night theme
+// (QtActivity's DayNight): light on a light phone. After a rotation, the
+// screen Qt's window didn't reach showed white, and three-button
+// navigation sat on a light scrim (docs/bench-sessions/2026-10-28-android-3.md).
+// Dark like the app instead, no scrim, the navigation buttons drawn light.
+static void darkenAndroidWindow()
+{
+    using QNativeInterface::QAndroidApplication;
+    QAndroidApplication::runOnAndroidMainThread([]() {
+        const QJniObject activity = QAndroidApplication::context();
+        const QJniObject window =
+            activity.callObjectMethod("getWindow", "()Landroid/view/Window;");
+        if (!window.isValid())
+            return;
+        const QJniObject background("android/graphics/drawable/ColorDrawable",
+                                    "(I)V",
+                                    static_cast<jint>(0xFF14141Cu)); // Theme.bg
+        window.callMethod<void>("setBackgroundDrawable",
+                                "(Landroid/graphics/drawable/Drawable;)V",
+                                background.object());
+        if (QAndroidApplication::sdkVersion() >= 29) {
+            window.callMethod<void>("setNavigationBarContrastEnforced", "(Z)V",
+                                    static_cast<jboolean>(false));
+        }
+        if (QAndroidApplication::sdkVersion() >= 30) {
+            const QJniObject insets = window.callObjectMethod(
+                "getInsetsController",
+                "()Landroid/view/WindowInsetsController;");
+            if (insets.isValid()) {
+                // APPEARANCE_LIGHT_NAVIGATION_BARS (0x10) off: light buttons
+                insets.callMethod<void>("setSystemBarsAppearance", "(II)V",
+                                        static_cast<jint>(0),
+                                        static_cast<jint>(0x10));
+            }
+        }
+    });
+}
+#endif
 
 int main(int argc, char *argv[])
 {
@@ -55,6 +102,9 @@ int main(int argc, char *argv[])
         qCritical("=== QML FAILED TO LOAD ===");
         return -1;
     }
+#ifdef Q_OS_ANDROID
+    darkenAndroidWindow();
+#endif
 
     return app.exec();
 }

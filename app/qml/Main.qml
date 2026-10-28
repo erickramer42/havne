@@ -5,7 +5,8 @@
 //          Ctrl 0 and Settings' Display row and survives a restart, as
 //          does the unit system (2026-10-24) and developer mode
 //          (2026-10-27). The safe area's margins (Android's system
-//          bars): BENCH, the phone run sheet.
+//          bars) and the "Display:" line a phone logs in developer
+//          mode: BENCH, the phone run sheet.
 //          test_qml (tests/qml/tst_linkhealth.qml) checks the pill and
 //          each page's link surfaces in every link state, finding the
 //          pages and the pill by objectName
@@ -92,12 +93,43 @@ ApplicationWindow {
             if (root.zoomRestored)
                 zoomBadge.show()
         }
-        function onDeveloperModeChanged() { uiSettings.developerMode = Theme.developerMode }
+        function onDeveloperModeChanged() {
+            uiSettings.developerMode = Theme.developerMode
+            if (Theme.mobile && Theme.developerMode)
+                displayTimer.restart()
+        }
     }
     // Ctrl + is Ctrl Shift = on most layouts, so Ctrl = counts too
     Shortcut { sequences: [StandardKey.ZoomIn, "Ctrl+="]; onActivated: Theme.stepZoom(1) }
     Shortcut { sequences: [StandardKey.ZoomOut]; onActivated: Theme.stepZoom(-1) }
     Shortcut { sequence: "Ctrl+0"; onActivated: Theme.zoom = 1 }
+
+    // ---- A phone in developer mode logs its display: the screen, the
+    // window and the safe area's margins, once they settle after a change.
+    // After a rotation the window stopped short of the screen
+    // (docs/bench-sessions/2026-10-28-android-3.md); this says which
+    // size didn't follow
+    function orientationName(o) {
+        return o === Qt.PortraitOrientation ? "portrait"
+             : o === Qt.LandscapeOrientation ? "landscape"
+             : o === Qt.InvertedPortraitOrientation ? "portrait, inverted"
+             : o === Qt.InvertedLandscapeOrientation ? "landscape, inverted" : "unknown"
+    }
+    readonly property string displayLine: {
+        const s = zoomRoot.safe
+        return "Display: screen " + Screen.width + " × " + Screen.height
+             + " (" + orientationName(Screen.orientation) + ", " + Screen.devicePixelRatio + "x)"
+             + ", available " + Screen.desktopAvailableWidth + " × " + Screen.desktopAvailableHeight
+             + ", window " + root.width + " × " + root.height + " at " + root.x + ", " + root.y
+             + ", safe area left " + Math.round(s.left) + ", top " + Math.round(s.top)
+             + ", right " + Math.round(s.right) + ", bottom " + Math.round(s.bottom)
+    }
+    onDisplayLineChanged: if (Theme.mobile && Theme.developerMode) displayTimer.restart()
+    Timer {
+        id: displayTimer
+        interval: 500
+        onTriggered: Bridge.logEvent(root.displayLine)
+    }
 
     // The whole UI, laid out at the window's size divided by the zoom and
     // scaled by it, so pages reflow as if the window were that size.

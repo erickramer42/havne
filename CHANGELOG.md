@@ -64,6 +64,13 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
   (on a phone, the only way).
 
 ### Changed
+- Settings' presets fold behind one **Presets** button, folded at
+  first on a phone, where they filled a screen of the page.
+- With **Record sessions** on, a replay isn't recorded: it would copy
+  the recording it plays. The activity log says so.
+- Live's chart draws a trace thinner where its points crowd, so a
+  signal that swings every moment (lambda through the rev limiter, on
+  a phone's narrow chart) reads as lines rather than a solid block.
 - Settings' presets include the two usual WiFi adapter addresses,
   `elm327://192.168.4.1:23` (an OBDX Pro) and
   `elm327://192.168.0.10:35000` (most others), and the Log page has a
@@ -76,6 +83,8 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
   the red.
 
 ### Fixed
+- On a phone, connecting a long URI no longer pushes Settings past the
+  screen's right edge: the "Connected:" line wraps.
 - Settings and Home fit a narrow window: Settings' rows of buttons wrap
   instead of pushing Connect off the right edge, and Home scrolls when
   the window is shorter than it. On a short window the Dashboard's

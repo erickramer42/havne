@@ -341,9 +341,10 @@ Page {
                                      tick.x, l.top + l.plotH + 3)
                     }
 
-                    // Traces, each segment its own stroke (a gap is a break)
-                    ctx.lineWidth = 2
+                    // Traces, each segment its own stroke (a gap is a break),
+                    // a crowded trace thinner
                     for (const tr of l.traces) {
+                        ctx.lineWidth = tr.lineWidth
                         ctx.strokeStyle = root.seriesColor(tr.row)
                         ctx.setLineDash(root.seriesDash(tr.row))
                         for (const seg of tr.segments) {

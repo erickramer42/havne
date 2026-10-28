@@ -1118,6 +1118,13 @@ QString QtTuneBridge::recordingsRoot() const
 void QtTuneBridge::startRecording(const QString& uri, const ecuio_signal_set_t* set)
 {
     if (!m_recording) return;
+    // A replay would copy the recording it plays
+    if (!m_recordReplays &&
+        uri.startsWith(QLatin1String("replay://"), Qt::CaseInsensitive)) {
+        emit logMessage(QStringLiteral(
+            "Not recording: a replay plays a recording already"));
+        return;
+    }
 
     const QString root = recordingsRoot();
     if (root.isEmpty()) {
