@@ -572,12 +572,15 @@ requests and quiet states
   test failing under the coverage tool shows only in the job's summary
   line, not as a failed job; `win-build` has no
   vendors and never sees a non-empty result.
-- **The mobile apps have never run on a device or emulator** (Known
-  Issue #2). CI compiles both kits. The simulator smoke shows the iOS
-  app starts and draws, but nothing taps through its UI, and it skips
-  ordinary pushes. No tests run on either mobile
-  platform, because cross builds set `BUILD_TESTING=OFF`. The Android
-  app has never been launched anywhere.
+- **The mobile apps have no automated run on a device or emulator**
+  (Known Issue #2). CI compiles both kits. The simulator smoke shows
+  the iOS app starts and draws, but nothing taps through its UI, and
+  it skips ordinary pushes. No tests run on either mobile platform,
+  because cross builds set `BUILD_TESTING=OFF`. The Android app has
+  run only on the owner's phone, by hand
+  ([android-phone-runsheet.md](bench-sessions/android-phone-runsheet.md));
+  `test_qml` checks Settings and Home at a phone's sizes on the
+  desktop.
 - **CI never launches the desktop app itself.** `test_qml` builds the
   app's window and pages from the same QML module, offscreen, on all
   three desktop platforms, but never runs the `qttune` executable, and

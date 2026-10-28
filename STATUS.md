@@ -239,8 +239,8 @@ OBDX Pro VX in its ELM mode (USB-powered). In order:
 
 The app-fed stream for Bluetooth on Android and BLE is
 [ADR-0028](docs/adr/0028-app-fed-streams.md) (accepted; step 1, the
-Android baseline, under way: the CI APK runs on a phone, and its
-pages are fixed to fit one, to be checked there). Later,
+Android baseline, under way: the app runs on a phone and reaches the
+VX over WiFi; the phone's layout and replay fixes next). Later,
 with its own record: listening to the whole bus (raw frames, for a
 car whose OBD port carries more than diagnostics).
 
@@ -262,18 +262,17 @@ an issue is resolved it is removed, and its number is not reused.
    cross-builds an Android arm64-v8a APK and an unsigned iOS arm64
    device build. On pull requests and on request, it also launches
    the iOS app on the Simulator and screenshots it
-   (`ios-simulator-smoke`). The Android app installs and launches on
-   a phone, where Settings ran off the screen, Connect with it, and
-   the system bars covered the bottom, so it couldn't start a session
-   ([2026-10-28-android](docs/bench-sessions/2026-10-28-android.md)).
-   Settings and Home fit a phone's sizes in `test_qml`, and the UI
-   keeps out of the safe area's margins, both untried on the phone.
-   The iOS app hasn't run on a device, and no tests run on either
-   (cross builds set `BUILD_TESTING=OFF`). A phone's route to a car
-   is `elm327://` to a WiFi adapter's address, untried on a phone;
-   Bluetooth on Android is [ADR-0028](docs/adr/0028-app-fed-streams.md),
-   whose first step is the phone run. CI uploads the Android build's
-   debug APK for it.
+   (`ios-simulator-smoke`). The Android app runs on a phone: the
+   pages fit, `mock://` streams, and `elm327://` reaches the VX over
+   WiFi ([2026-10-28-android-2](docs/bench-sessions/2026-10-28-android-2.md)).
+   On a phone Settings still ran past the right edge upright (only
+   "Dis" of Disconnect showed), the navigation bar's area shows white, the Dashboard's dials are sized to the
+   page's width (a third of one fits on its side), and a recording
+   can't be replayed without typing its long path. The iOS app hasn't
+   run on a device, and no tests run on either (cross builds set
+   `BUILD_TESTING=OFF`). Bluetooth on Android is
+   [ADR-0028](docs/adr/0028-app-fed-streams.md). CI uploads the
+   Android build's debug APK.
 4. **Every def is matched against every frame, on the transport's
    worker** ([ADR-0024](docs/adr/0024-decode-on-the-worker.md)). A
    subscription can't trim that work: it is the chart's filter only,
@@ -303,6 +302,16 @@ an issue is resolved it is removed, and its number is not reused.
     run), or Qt's arm64 simulator libraries if Qt ships them. Apple is
     also winding down Rosetta, so the first option has its own end
     date.
+37. **On Android, the app in the background leaves a gap.** Android
+    pauses the app's GUI thread while it's in the background or the
+    screen is off. The session stays connected and the transport's
+    worker keeps reading, but the bridge's 100 ms windows stop, so
+    Live's chart has a gap for that time and the activity log says
+    nothing ([2026-10-28-android-2](docs/bench-sessions/2026-10-28-android-2.md)).
+    Whether a recording loses frames there is unchecked: the bridge
+    drops frames the GUI thread doesn't take (ADR-0003). A logger in
+    a car runs with the screen off, so this needs a decision of its
+    own (a foreground service, or recording off the GUI thread).
 
 ## Roadmap
 
