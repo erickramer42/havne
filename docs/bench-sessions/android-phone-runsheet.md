@@ -1,14 +1,15 @@
-# Android phone run sheet — the app on a phone, then the VX's WiFi
+# Android phone run sheet — the app on a phone, the VX's WiFi, then Bluetooth
 
-**Date:** <date>  **Phone:** Android <version>
+**Date:** <date>  **Phone:** Android <version> (12 or later)
 **Adapter:** OBDX Pro VX over WiFi, no vehicle
 **QtTune build:** <commit hash> (CI run <run id>)
 
-Fill in a copy as `docs/bench-sessions/<date>-android.md`. This is
-step 1 of [ADR-0028](../adr/0028-app-fed-streams.md): the Android app
-has never been launched (Known Issue #2), and its first route to a
-car, `elm327://` over WiFi, needs no Bluetooth code. The VX's WiFi on
-a computer is [elm327-bench-runsheet.md](elm327-bench-runsheet.md)'s
+Fill in a copy as `docs/bench-sessions/<date>-android[-n].md`. Phases
+1–5 are step 1 of [ADR-0028](../adr/0028-app-fed-streams.md), the
+Android baseline (Known Issue #2): the app, and its first route to a
+car, `elm327://` over WiFi, which needs no Bluetooth code. Phase 6 is
+step 3, the phone's Bluetooth without an adapter. The VX's WiFi on a
+computer is [elm327-bench-runsheet.md](elm327-bench-runsheet.md)'s
 pre-flight and BENCH prep #20.
 
 ## Purpose
@@ -19,6 +20,10 @@ Goals, in order:
 2. `mock://` streams; a recording is written, and found again
    (#21, #23)
 3. `elm327://192.168.4.1:23` reaches the VX from the phone (#22)
+4. Bluetooth: the permission, the paired list, a BLE scan, and a
+   connect refused as it should be (#24, ADR-0028 step 3). An adapter
+   over Bluetooth is the car's run (step 4): the MX+ takes its power
+   from the car only
 
 The evidence is the activity log (the Log page; copy it whole after
 each phase) and screenshots. The ELM327 wire log stays in the app's
@@ -125,6 +130,30 @@ which isn't part of the name).
 - [ ] If Phase 3 couldn't find its recording: `find` it here, and
       record the full path
 
+## Phase 6 — Bluetooth, no adapter
+
+**Action:** Bluetooth on. Settings: open **Adapter**.
+
+- [ ] Android asks for the Nearby devices permission once, when
+      Adapter opens (not at launch). Allow it
+- [ ] The device list shows the phone's paired Bluetooth devices,
+      each "Bluetooth, paired · <address>" (headphones and the like
+      too: the list can't tell an adapter without connecting). Copy
+      the count line
+- [ ] **Scan for BLE**: the button reads "Scanning…" for about 8 s;
+      BLE devices nearby join the list as "Bluetooth LE · <address>",
+      or the line under it says the scan found none
+- [ ] Select a paired device that isn't an adapter (headphones, a
+      watch) and **Connect**. Record how long until the error line
+      appears and its words (the link refused, or "the link didn't
+      open within 10 s"). The app stays responsive throughout
+- [ ] Turn Bluetooth off, then **Refresh**: the line under the count
+      reads "Bluetooth is off: turn it on, then Refresh". Bluetooth
+      back on
+- [ ] Optional: Android's settings, Apps, QtTune, Permissions, Nearby
+      devices: Don't allow. Back in QtTune, **Refresh**: the line says
+      to allow it. Allow it again
+
 ## If it fails, suspect
 
 | Symptom | Suspect |
@@ -134,6 +163,8 @@ which isn't part of the name).
 | A blank or black window | The graphics backend: note the phone's chip if known, and stop |
 | "no answer within 2 s" on WiFi with mobile data off | The phone isn't on the VX's network, or the VX's network side hung (power-cycle it) |
 | "the network is unreachable" or a permission error on WiFi | `INTERNET` missing from the manifest, which CI checks: copy the error whole |
+| No permission prompt, and the list says to allow Nearby devices | The permission was refused earlier: allow it in Android's settings |
+| No paired devices listed with Bluetooth on | Copy the count line and the line under it; `adb logcat -d | grep -i -E "qttune|bluetooth"` if `adb` is at hand |
 
 ## Post-session actions
 
@@ -141,5 +172,6 @@ which isn't part of the name).
    the screenshots and the wire log to a folder beside it. Scrub them
    as [bench-runsheet.md](bench-runsheet.md) says: the VX's MAC (in its
    network's name), no names, no paths with an account name
-2. Mark BENCH prep #21–#23 in [bench-prep.md](bench-prep.md)
+2. Mark BENCH prep #21–#24 in [bench-prep.md](bench-prep.md). Scrub
+   Bluetooth addresses from the sheet and screenshots: `<BT address>`
 3. Update Known Issue #2 in STATUS.md, and testing.md's gaps

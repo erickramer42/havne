@@ -16,6 +16,7 @@
 #include <memory>
 #include <utility>
 
+#include "bluetoothdevices.h"
 #include "bridgesingleton.h"
 #include "qttunebridge.h"
 
@@ -113,6 +114,10 @@ public slots:
         // never the user's Documents
         m_bridge->setRecordingsRootForTesting(m_recordingsDir.path());
         BridgeSingleton::instance = m_bridge.get();
+        // As main() wires it: a bt: URI is refused before core is asked
+        m_bluetooth = std::make_unique<BluetoothDevices>();
+        BluetoothDevices::instance = m_bluetooth.get();
+        m_bluetooth->attachTo(m_bridge.get());
         qmlRegisterSingletonInstance("QtTuneTest", 1, 0, "Harness", &m_harness);
     }
 
@@ -121,12 +126,15 @@ public slots:
         m_harness.clearFakeKnobs();
         m_bridge.reset();   // ends a session a test left up, joining its threads
         BridgeSingleton::instance = nullptr;
+        m_bluetooth.reset(); // after the bridge: its sessions are closed
+        BluetoothDevices::instance = nullptr;
     }
 
 private:
     QTemporaryDir m_settingsDir;
     QTemporaryDir m_recordingsDir;
     Harness m_harness;
+    std::unique_ptr<BluetoothDevices> m_bluetooth;
     std::unique_ptr<QtTuneBridge> m_bridge;
 };
 

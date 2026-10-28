@@ -337,6 +337,7 @@ jobs:
 
       # Qt 6.7+ publishes Android kits under the all_os host. A mobile kit
       # needs the desktop Qt of the build host too; --autodesktop installs it.
+      # qtconnectivity is QtBluetooth, the phone's links (ADR-0028 §2).
       - name: Install Qt 6.12.0 (android_arm64_v8a + linux host)
         uses: jurplel/install-qt-action@b344308e4483fc892e0d27b3cd1b173ebdd95f06 # v4.5.0
         with:
@@ -344,6 +345,7 @@ jobs:
           host: 'all_os'
           target: 'android'
           arch: 'android_arm64_v8a'
+          modules: 'qtconnectivity'
           extra: '--autodesktop'
 
       # Qt 6.12 for Android wants NDK r27 and JDK 21. The Ubuntu 24.04 and
@@ -380,9 +382,11 @@ jobs:
           cmake --build build
           cmake --build build --target apk
 
-      # Core's TCP socket needs INTERNET (ADR-0028 §2), so a manifest
-      # without it fails here, not on a phone.
-      - name: Check the manifest declares INTERNET and the app icon
+      # Core's TCP socket needs INTERNET; Bluetooth needs CONNECT and SCAN,
+      # the scan never for location, on Android 12 and later (ADR-0028 §2
+      # and its appendix of 2026-10-28). A manifest without them fails
+      # here, not on a phone.
+      - name: Check the manifest's permissions, minimum SDK and icon
         run: |
           MANIFEST=$(find build -path '*android-build*' -name AndroidManifest.xml -not -path '*/intermediates/*' | head -n 1)
           if [ -z "$MANIFEST" ]; then
@@ -393,6 +397,19 @@ jobs:
           grep -n 'uses-permission' "$MANIFEST"
           grep -q 'android.permission.INTERNET' "$MANIFEST" \
             || { echo "::error::$MANIFEST declares no INTERNET permission"; exit 1; }
+          grep -q 'android.permission.BLUETOOTH_CONNECT' "$MANIFEST" \
+            || { echo "::error::$MANIFEST declares no BLUETOOTH_CONNECT permission"; exit 1; }
+          grep 'android.permission.BLUETOOTH_SCAN' "$MANIFEST" | grep -q 'neverForLocation' \
+            || { echo "::error::$MANIFEST declares no BLUETOOTH_SCAN never for location"; exit 1; }
+          if grep -q 'ACCESS_FINE_LOCATION' "$MANIFEST"; then
+            echo "::warning::$MANIFEST asks for location, which the BLE scan doesn't need"
+          fi
+          # The minimum SDK, in androiddeployqt's gradle.properties or the
+          # manifest itself
+          BUILD_DIR=$(dirname "$MANIFEST")
+          grep -n -E 'qtMinSdkVersion|minSdkVersion' "$BUILD_DIR/gradle.properties" "$MANIFEST" 2>/dev/null || true
+          grep -q -E '(qtMinSdkVersion *= *31|minSdkVersion="31")' "$BUILD_DIR/gradle.properties" "$MANIFEST" 2>/dev/null \
+            || { echo "::error::the app's minimum SDK isn't 31 (Android 12)"; exit 1; }
           # QT_ANDROID_APP_ICON's adaptive icon, not Qt's default
           grep -n 'android:icon' "$MANIFEST"
           grep -q 'android:icon="@mipmap/ic_launcher"' "$MANIFEST" \

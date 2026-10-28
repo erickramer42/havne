@@ -890,9 +890,15 @@ QString QtTuneBridge::connectSession(const QString& typed)
         return {};
     }
 
+    QString err = m_streamPreparer ? m_streamPreparer(uri) : QString();
+    if (!err.isEmpty()) {
+        emit logMessage(
+            QStringLiteral("Connect failed: %1 (%2)").arg(uri, err));
+        return err;
+    }
     applyFrameLoggingEnv();
     ecuio_session_t* session = nullptr;
-    QString err = connectCoreOnly(uri, &session);
+    err = connectCoreOnly(uri, &session);
     if (err.isEmpty()) {
         err = startSession(session);
     }
@@ -911,6 +917,16 @@ void QtTuneBridge::connectSessionAsync(const QString& typed)
         || m_disconnecting) {
         return;   // one attempt at a time, none during a teardown; the
                   // UI already reflects state
+    }
+    // An app-fed stream's link is readied here, on the GUI thread, before
+    // core opens it on the connect thread
+    const QString unprepared =
+        m_streamPreparer ? m_streamPreparer(uri) : QString();
+    if (!unprepared.isEmpty()) {
+        emit logMessage(
+            QStringLiteral("Connect failed: %1 (%2)").arg(uri, unprepared));
+        emit connectResult(uri, unprepared);
+        return;
     }
     m_connecting = true;
     emit connectingChanged();

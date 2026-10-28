@@ -28,6 +28,7 @@
 #include <dwmapi.h>
 #endif
 
+#include "bluetoothdevices.h"
 #include "bridgesingleton.h"
 #include "qttunebridge.h"
 #include "ecuio/version.h"
@@ -114,9 +115,15 @@ int main(int argc, char *argv[])
 
     QQuickStyle::setStyle("Basic");
 
+    // Declared before the bridge, so it outlives the bridge's sessions:
+    // the Bluetooth links' streams unregister when it goes (ADR-0028)
+    BluetoothDevices bluetooth;
+    BluetoothDevices::instance = &bluetooth;
+
     // Declared before the engine, so it outlives everything QML holds.
     QtTuneBridge bridge;
     BridgeSingleton::instance = &bridge;
+    bluetooth.attachTo(&bridge);
 
     QQmlApplicationEngine engine;
     engine.loadFromModule("QtTune", "Main");

@@ -253,7 +253,12 @@ a Bluetooth stack ([ADR-0026](adr/0026-elm327-transport.md)).
   the bytes it received and `failed`. Core waits up to 10 s for an open
   on its own thread, buffers what arrives (64 KB; more fails the link),
   and reopens on the worker's backoff, so the app never reconnects by
-  itself and never blocks core.
+  itself and never blocks core. On Android the app's side is
+  `app/btstream.cpp` (a classic adapter's SPP socket, or a BLE
+  adapter's GATT service) and the `Bluetooth` QML singleton, which
+  lists the paired adapters and scans for BLE ones; the bridge, which
+  stays QtCore-only, asks it to register the URI's stream before each
+  connect.
 - **Discovery** (`ecuio_serial_ports`, `serial.h`) lists the ports the
   OS knows (the `SERIALCOMM` registry key on Windows, `/dev/cu.*` on
   macOS, `/dev/ttyUSB*`, `ttyACM*` and `rfcomm*` on Linux) and opens

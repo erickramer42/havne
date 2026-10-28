@@ -19,6 +19,10 @@ qt_standard_project_setup(REQUIRES 6.12)
 # the plugin with Q_IMPORT_QML_PLUGIN(QtTunePlugin), or the module's
 # types are never registered.
 qt_add_library(qttune_ui STATIC
+    blepicker.cpp
+    blepicker.h
+    bluetoothdevices.cpp
+    bluetoothdevices.h
     bridgesingleton.h
     qttunebridge.cpp
     qttunebridge.h
@@ -67,6 +71,15 @@ target_link_libraries(qttune_ui PUBLIC
     ecuio-core
 )
 qttune_enable_warnings(qttune_ui)
+# The phone's Bluetooth (ADR-0028 §2): the links behind core's app-fed
+# streams, on Android only, so no desktop build ships it unverified.
+# Elsewhere the Bluetooth singleton lists nothing.
+if(ANDROID)
+    find_package(Qt6 6.12 REQUIRED COMPONENTS Bluetooth)
+    target_sources(qttune_ui PRIVATE btstream.cpp btstream.h)
+    target_link_libraries(qttune_ui PUBLIC Qt6::Bluetooth)
+    target_compile_definitions(qttune_ui PUBLIC QTTUNE_BLUETOOTH)
+endif()
 # MSVC's C4702 (unreachable code) fires inside Qt's inline headers, as
 # the generated QML registration code instantiates them; none of it is
 # this project's code.
@@ -114,8 +127,17 @@ endif()
 # Core's TCP socket (elm327://<address>) needs INTERNET: declared here,
 # not left to the permissions Qt adds by default (ADR-0028 §2).
 # CI's android-build checks the merged manifest for it.
+# Bluetooth needs CONNECT (a paired adapter, the paired list) and SCAN
+# (BLE), the scan declared never for location. Android 12 (API 31) is the
+# minimum, the first with those two: older releases want location for a
+# scan, a path no phone here could test (ADR-0028's appendix of
+# 2026-10-28). CI's android-build checks the manifest and the minimum.
 if(ANDROID)
     qt_add_android_permission(qttune NAME android.permission.INTERNET)
+    qt_add_android_permission(qttune NAME android.permission.BLUETOOTH_CONNECT)
+    qt_add_android_permission(qttune NAME android.permission.BLUETOOTH_SCAN
+        ATTRIBUTES usesPermissionFlags neverForLocation)
+    set_target_properties(qttune PROPERTIES QT_ANDROID_MIN_SDK_VERSION 31)
 endif()
 
 # QML debugging in Debug builds only. A build with QT_QML_DEBUG opens a

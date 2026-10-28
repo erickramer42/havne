@@ -277,3 +277,38 @@ states otherwise:
 
 Pushes between a `close` and the next `open` are discarded, and the next
 `open` empties the buffer as well; the tests pin the two together.
+
+## Appendix: 2026-10-28, the app's Bluetooth (step 3)
+
+Step 3 is built, compiled by CI's `android-build` and not yet run on a
+phone: `app/btstream.{h,cpp}` (the links, Android only),
+`app/bluetoothdevices.{h,cpp}` (the `Bluetooth` QML singleton, the list
+and the permission), `app/blepicker.{h,cpp}` (§2's service list as a
+pure function, UNIT-tested in `test_bridge`), and Settings' rows. It
+settled five points:
+
+- **Android 12 (API 31) is the minimum.** It is the first release with
+  `BLUETOOTH_CONNECT` and `BLUETOOTH_SCAN`; older ones want location
+  permission for a scan, a path the one phone here (Android 16) can't
+  test. §2's "the minimum SDK decides whether that path exists" is
+  decided: it doesn't. CI's `android-build` checks the minimum and the
+  two permissions, the scan's `neverForLocation` included.
+- **The paired list is Android's own.** Qt lists no paired devices, so
+  the singleton reads `BluetoothAdapter.getBondedDevices()` through JNI
+  (a device of type LE is `ble:`, any other `bt:`). Every paired device
+  is listed, headphones too: the list can't tell an adapter without
+  connecting, as with serial ports.
+- **The permission is asked for when Adapter first opens**, or at
+  Refresh, Scan or a `bt:` connect, never at launch.
+- **The bridge stays QtCore-only.** It gains a hook,
+  `setStreamPreparer`, that `main()` points at the singleton: before
+  every connect, on the GUI thread, it registers the URI's stream the
+  first time (one `BtLink` per adapter, kept until the app ends) or says
+  why it can't, and that refusal fails the connect before core is
+  asked. On a desktop build a `bt:` or `ble:` URI is refused with what
+  to use instead (the adapter's serial port).
+- **Core's calls are queued to the GUI thread**, where QtBluetooth
+  delivers its signals, in the order core made them, and return at
+  once. A BLE link discovers every service's characteristics before the
+  picker chooses, writes without response when the characteristic
+  allows it, and is up once its notifications are on.

@@ -9,7 +9,8 @@
 //          locked while a connect is in flight, the last URI that
 //          connected and the Record switch back in a new page (a refused
 //          URI not kept), the device list's rows for interfaces and
-//          serial ports, a serial port's row and the elm327:// preset
+//          serial ports and Bluetooth adapters, a serial port's and a
+//          Bluetooth adapter's row and the elm327:// preset
 //          filling the field, each row's versions last seen at a connect
 //          (kept across a new page; the fake's on Windows); the status label
 //          in each link state (tests/qml/tst_linkhealth.qml), by
@@ -67,14 +68,18 @@ Pane {
     // port is listed, whatever is behind it: none is opened until Connect
     property var serialPorts: []
 
+    // The phone's Bluetooth adapters (ADR-0028 §2): [{ name, address,
+    // kind }], kind "bt" (classic, paired) or "ble". Empty off Android
+    property var bluetoothAdapters: Bluetooth.adapters
+
     // Each device's versions as last seen at a connect, { base: text }
     // (Bridge.adapterVersions). The list can't ask for them without
     // opening the adapter, which the VX and VT refuse while unattached
     property var seenVersions: ({})
 
-    // The device list's rows, the interfaces then the ports: { title,
-    // detail, base, versions }, base being what a click puts in the URI
-    // field
+    // The device list's rows, the interfaces, the ports, then the
+    // Bluetooth adapters: { title, detail, base, versions }, base being
+    // what a click puts in the URI field
     readonly property var devices: j2534Devices.map(d => withVersions({
             title: d.vendorName + (d.architecture ? "  (" + d.architecture + ")" : ""),
             detail: d.dllPath,
@@ -84,6 +89,11 @@ Pane {
             detail: p.device !== "" ? qsTr("Serial port, for elm327:// · %1").arg(p.device)
                                     : qsTr("Serial port, for elm327://"),
             base: "elm327://" + p.name
+        }))).concat(bluetoothAdapters.map(a => withVersions({
+            title: a.name !== "" ? a.name : a.address,
+            detail: a.kind === "ble" ? qsTr("Bluetooth LE · %1").arg(a.address)
+                                     : qsTr("Bluetooth, paired · %1").arg(a.address),
+            base: "elm327://" + a.kind + ":" + a.address
         })))
 
     function withVersions(row) {
@@ -511,6 +521,7 @@ Pane {
         vehicles = VehicleBook.parse(vehicleStore.document)
         Bridge.vehicleLabel = pickedVehicle !== null ? pickedVehicle.label : ""
         refreshDevices()
+        Bluetooth.refresh(false)   // asked for when Adapter first opens
         refreshRecordings()
         // Set like typed text, so the profile row and the DID field read
         // it back
@@ -680,6 +691,9 @@ Pane {
                 title: qsTr("Adapter")
                 summary: page.devices.length === 0 ? qsTr("none found")
                                                    : qsTr("%1 found").arg(page.devices.length)
+                // The phone's Bluetooth permission is asked for here, when
+                // the list is first wanted, not at launch
+                onOpenChanged: if (open) Bluetooth.refresh(true)
 
                 // ---- Adapters: J2534 interfaces and serial ports ----
                 RowLayout {
@@ -691,16 +705,47 @@ Pane {
                         text: page.devices.length === 0
                               ? qsTr("None found — install a Pass-Thru driver (Windows), plug in "
                                      + "or pair an ELM327 adapter, or pick one below")
-                              : qsTr("J2534 interfaces: %1, serial ports: %2 — select one to put "
-                                     + "its URI in the field above, then Connect")
+                              : qsTr("J2534 interfaces: %1, serial ports: %2%3 — select one to "
+                                     + "put its URI in the field above, then Connect")
                                     .arg(page.j2534Devices.length).arg(page.serialPorts.length)
+                                    .arg(Bluetooth.available || page.bluetoothAdapters.length > 0
+                                         ? qsTr(", Bluetooth: %1").arg(page.bluetoothAdapters.length)
+                                         : "")
                         color: page.devices.length === 0 ? Theme.textDim : Theme.text
                         wrapMode: Text.WordWrap
                         Layout.fillWidth: true
                     }
                     ThemedButton {
                         text: qsTr("Refresh")
-                        onClicked: page.refreshDevices()
+                        onClicked: {
+                            page.refreshDevices()
+                            Bluetooth.refresh(true)
+                        }
+                    }
+                }
+
+                // ---- Bluetooth (Android): why the list is short, and a
+                // scan for BLE adapters, which aren't paired ----
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: Theme.spacing
+                    visible: Bluetooth.available
+
+                    Label {
+                        objectName: "bluetoothStatus"
+                        text: Bluetooth.status !== ""
+                              ? Bluetooth.status
+                              : qsTr("Paired adapters are listed; pair one in Android's "
+                                     + "Bluetooth settings")
+                        color: Theme.textDim
+                        wrapMode: Text.WordWrap
+                        Layout.fillWidth: true
+                    }
+                    ThemedButton {
+                        objectName: "bleScanButton"
+                        text: Bluetooth.scanning ? qsTr("Scanning…") : qsTr("Scan for BLE")
+                        enabled: page.idle && !Bluetooth.scanning
+                        onClicked: Bluetooth.scan()
                     }
                 }
 

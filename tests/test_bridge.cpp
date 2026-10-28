@@ -4,7 +4,8 @@
 //          coalescing, backpressure, the frame log's ring and order, the
 //          signal model's roles and freshness, link states, the activity
 //          log's lines, connect and disconnect threads, both decode
-//          paths over the vehicle fixture, recording
+//          paths over the vehicle fixture, recording, the stream
+//          preparer's refusal (ADR-0028), the BLE service picker
 
 #include <gtest/gtest.h>
 
@@ -34,6 +35,7 @@
 #include <thread>
 #include <vector>
 
+#include "blepicker.h"
 #include "qttunebridge.h"   // QtTuneBridge + FrameListModel
 #include <ecuio/profile.h>
 #include <ecuio/serial.h>
@@ -201,6 +203,147 @@ TEST(BridgeTest, FailedConnectNamesItsCause)
     EXPECT_FALSE(bridge.connected());
     EXPECT_EQ(bridge.statusString(ECUIO_ERR_BAD_URI),
               QStringLiteral("malformed transport URI"));
+}
+
+// An app-fed stream's link is readied before core is asked (ADR-0028):
+// the preparer sees the trimmed URI before each connect, sync or async,
+// and its refusal fails the connect with its words, logged as any other
+TEST(BridgeTest, AStreamPreparersRefusalFailsTheConnect)
+{
+    QtTuneBridge bridge;
+    QStringList asked;
+    bridge.setStreamPreparer([&asked](const QString& uri) {
+        asked << uri;
+        return uri.startsWith(QStringLiteral("elm327://bt:"))
+                   ? QStringLiteral("bt:AA: not reachable")
+                   : QString();
+    });
+    QStringList log;
+    QObject::connect(&bridge, &QtTuneBridge::logMessage,
+                     [&log](const QString& line) { log << line; });
+
+    EXPECT_EQ(bridge.connectSession("  elm327://bt:AA?poll=0x0C "),
+              QStringLiteral("bt:AA: not reachable"));
+    EXPECT_FALSE(bridge.connected());
+    ASSERT_EQ(asked.size(), 1);
+    EXPECT_EQ(asked.front(), QStringLiteral("elm327://bt:AA?poll=0x0C"));
+    EXPECT_TRUE(log.contains(QStringLiteral(
+        "Connect failed: elm327://bt:AA?poll=0x0C (bt:AA: not reachable)")))
+        << log.join('\n').toStdString();
+
+    QString result = QStringLiteral("none");
+    QObject::connect(
+        &bridge, &QtTuneBridge::connectResult,
+        [&result](const QString&, const QString& error) { result = error; });
+    bridge.connectSessionAsync("elm327://bt:AA");
+    EXPECT_EQ(result, QStringLiteral("bt:AA: not reachable"))
+        << "refused at once";
+    EXPECT_FALSE(bridge.connecting()) << "no connect started";
+
+    EXPECT_EQ(bridge.connectSession("mock://demo"), QString());
+    EXPECT_TRUE(bridge.connected()) << "a URI it passes connects";
+    EXPECT_EQ(asked.size(), 3);
+    bridge.disconnectSession();
+}
+
+namespace {
+
+BleCharacteristic bleChar(const QString& uuid, bool write, bool noResponse,
+                          bool notify, bool indicate = false)
+{
+    BleCharacteristic c;
+    c.uuid = uuid;
+    c.write = write;
+    c.writeNoResponse = noResponse;
+    c.notify = notify;
+    c.indicate = indicate;
+    return c;
+}
+
+BleService bleService(const QString& uuid, std::vector<BleCharacteristic> chars)
+{
+    BleService s;
+    s.uuid = uuid;
+    s.characteristics = std::move(chars);
+    return s;
+}
+
+// What the generic access service and a device-information service look
+// like: never the adapter's text
+std::vector<BleService> bleStandardServices()
+{
+    return {bleService("1800", {bleChar("2a00", false, false, false)}),
+            bleService("180a", {bleChar("2a29", false, false, false)})};
+}
+
+} // namespace
+
+TEST(BridgeTest, BlePickerExpandsShortUuids)
+{
+    EXPECT_EQ(bleUuid("FFF0"),
+              QStringLiteral("0000fff0-0000-1000-8000-00805f9b34fb"));
+    EXPECT_EQ(bleUuid("{6E400001-B5A3-F393-E0A9-E50E24DCCA9E}"),
+              QStringLiteral("6e400001-b5a3-f393-e0a9-e50e24dcca9e"));
+}
+
+// ADR-0028 §2's order: the Nordic UART service first, then FFF0, then
+// FFE0, whatever order the adapter lists them in
+TEST(BridgeTest, BlePickerTakesTheListedServicesInOrder)
+{
+    std::vector<BleService> services = bleStandardServices();
+    services.push_back(
+        bleService("ffe0", {bleChar("ffe1", false, true, true)}));
+    services.push_back(
+        bleService("fff0", {bleChar("fff1", false, false, true),
+                            bleChar("fff2", true, false, false)}));
+    services.push_back(bleService(
+        "6E400001-B5A3-F393-E0A9-E50E24DCCA9E",
+        {bleChar("6e400003-b5a3-f393-e0a9-e50e24dcca9e", false, false, true),
+         bleChar("6e400002-b5a3-f393-e0a9-e50e24dcca9e", true, true, false)}));
+
+    BlePick pick = pickBleService(services);
+    EXPECT_EQ(pick.service, 4) << "the Nordic UART service";
+    EXPECT_EQ(pick.write, 1);
+    EXPECT_EQ(pick.notify, 0);
+
+    services.pop_back();
+    pick = pickBleService(services);
+    EXPECT_EQ(pick.service, 3) << "FFF0";
+    EXPECT_EQ(pick.write, 1);
+    EXPECT_EQ(pick.notify, 0);
+
+    services.pop_back();
+    pick = pickBleService(services);
+    EXPECT_EQ(pick.service, 2) << "FFE0, one characteristic both ways";
+    EXPECT_EQ(pick.write, 0);
+    EXPECT_EQ(pick.notify, 0);
+}
+
+// A listed service that can't carry the text is passed over for the next
+// rule; the last rule takes the first service that can write and notify,
+// indications counting as notifications
+TEST(BridgeTest, BlePickerPassesOverAServiceMissingItsParts)
+{
+    std::vector<BleService> services = bleStandardServices();
+    services.push_back(
+        bleService("fff0", {bleChar("fff1", false, false, true)})); // no FFF2
+    services.push_back(bleService(
+        "ffe0", {bleChar("ffe1", false, false, true)})); // can't write
+    services.push_back(bleService(
+        "0000abcd-0000-1000-8000-00805f9b34fb",
+        {bleChar("0000abce-0000-1000-8000-00805f9b34fb", false, false, false,
+                 true),
+         bleChar("0000abcf-0000-1000-8000-00805f9b34fb", false, true, false)}));
+    const BlePick pick = pickBleService(services);
+    EXPECT_EQ(pick.service, 4) << "the first that writes and notifies";
+    EXPECT_EQ(pick.write, 1);
+    EXPECT_EQ(pick.notify, 0);
+}
+
+TEST(BridgeTest, BlePickerFindsNothingInAnAdapterWithoutAWay)
+{
+    EXPECT_FALSE(pickBleService({}).found());
+    EXPECT_FALSE(pickBleService(bleStandardServices()).found());
 }
 
 TEST(BridgeTest, FramesMarshalFromWorkerToGuiThread)

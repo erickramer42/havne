@@ -244,7 +244,9 @@ VX over WiFi and replays a recording by a tap
 ([2026-10-28-android-6](docs/bench-sessions/2026-10-28-android-6.md));
 step 2, the core stream (`stream.h`, `core/src/elm327_stream.cpp`), is
 built and HARNESS-tested (`Elm327StreamTest`); step 3, the app's
-Bluetooth, is next). Later,
+Bluetooth (`app/btstream.cpp`, Settings' paired adapters and BLE scan,
+Android 12 and later), is built and compiled by CI, not yet run on a
+phone). Later,
 with its own record: listening to the whole bus (raw frames, for a
 car whose OBD port carries more than diagnostics).
 
@@ -275,8 +277,10 @@ an issue is resolved it is removed, and its number is not reused.
    ([2026-10-28-android-6](docs/bench-sessions/2026-10-28-android-6.md)).
    The iOS app hasn't
    run on a device, and no tests run on either (cross builds set
-   `BUILD_TESTING=OFF`). Bluetooth on Android is
-   [ADR-0028](docs/adr/0028-app-fed-streams.md). CI uploads the
+   `BUILD_TESTING=OFF`). Bluetooth on Android
+   ([ADR-0028](docs/adr/0028-app-fed-streams.md)) is built, its BLE
+   service choice UNIT-tested, and hasn't run on a phone; the app needs
+   Android 12 or later. CI uploads the
    Android build's debug APK.
 4. **Every def is matched against every frame, on the transport's
    worker** ([ADR-0024](docs/adr/0024-decode-on-the-worker.md)). A

@@ -6,7 +6,10 @@
 //          query characters in the DID field, shows core's refusal of a
 //          DID list in the error line, connects a composed uds-generic
 //          URI through the mock, lists serial ports after the interfaces
-//          (a port's row and the elm327:// preset filling the field), and
+//          (a port's row and the elm327:// preset filling the field) and
+//          the phone's Bluetooth adapters after them (a bt: or ble: row's
+//          stream URI; on the desktop a bt: URI refused, its reason in the
+//          error line), and
 //          locks every control, the device rows among them, while a
 //          connect is in flight (Windows: the fake's open stalled by a
 //          knob); the Units row sets the bridge's unit system, connected
@@ -393,6 +396,54 @@ TestCase {
         compare(uri.text, "elm327:///dev/ttyUSB0?profile=raw")
         mouseClick(find(list.itemAtIndex(0), "deviceRowArea"))
         compare(uri.text, "j2534://Fake?profile=raw")
+    }
+
+    // The phone's Bluetooth adapters join the list after the ports
+    // (ADR-0028 §2): a paired classic one fills elm327://bt:<address>, a
+    // BLE one elm327://ble:<address>, the query kept; the count names
+    // them. The desktop lists none, so the test sets them
+    function test_bluetoothRowsFillAStreamUri() {
+        const page = createPage()
+        const uri = find(page, "uriField")
+        const list = find(page, "deviceList")
+        const count = find(page, "deviceCount")
+        page.j2534Devices = []
+        page.serialPorts = []
+        page.bluetoothAdapters = [
+            { name: "OBDLink MX+", address: "00:11:22:33:44:55", kind: "bt" },
+            { name: "", address: "AA:BB:CC:DD:EE:FF", kind: "ble" }]
+        compare(list.count, 2)
+        verify(count.text.indexOf("Bluetooth: 2") >= 0, count.text)
+        tryVerify(() => list.itemAtIndex(1) !== null, 2000, "the rows have delegates")
+        compare(find(list.itemAtIndex(0), "deviceTitle").text, "OBDLink MX+")
+        compare(find(list.itemAtIndex(0), "deviceDetail").text,
+                "Bluetooth, paired · 00:11:22:33:44:55")
+        compare(find(list.itemAtIndex(1), "deviceTitle").text, "AA:BB:CC:DD:EE:FF",
+                "no name: the address")
+        compare(find(list.itemAtIndex(1), "deviceDetail").text,
+                "Bluetooth LE · AA:BB:CC:DD:EE:FF")
+
+        press(page, "profile_raw")
+        mouseClick(find(list.itemAtIndex(0), "deviceRowArea"))
+        compare(uri.text, "elm327://bt:00:11:22:33:44:55?profile=raw")
+        mouseClick(find(list.itemAtIndex(1), "deviceRowArea"))
+        compare(uri.text, "elm327://ble:AA:BB:CC:DD:EE:FF?profile=raw")
+    }
+
+    // A computer reaches a Bluetooth adapter through its serial port: a
+    // bt: URI is refused before core is asked, and the error line says
+    // what to do instead
+    function test_aBluetoothUriIsRefusedOnTheDesktop() {
+        if (Bluetooth.available)
+            skip("this build reaches Bluetooth")
+        const page = createPage()
+        const error = find(page, "errorLabel")
+        find(page, "uriField").text = "elm327://bt:00:11:22:33:44:55"
+        press(page, "connectButton")
+        tryVerify(() => error.visible, 5000, "refused")
+        verify(error.text.indexOf("Bluetooth links open in the Android app") >= 0, error.text)
+        verify(!Bridge.connected)
+        verify(!find(page, "bleScanButton").visible, "no scan without Bluetooth")
     }
 
     // A recording that ends joins the list, and its row fills the field

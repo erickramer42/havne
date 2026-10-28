@@ -61,6 +61,14 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
   with its delivery counters; with it off, the app offers only real
   adapters.
 
+- On Android (12 or later), Settings lists the phone's paired
+  Bluetooth adapters, and a **Scan for BLE** button finds BLE ones.
+  Selecting one puts `elm327://bt:<address>` or `elm327://ble:<address>`
+  in the field, and the session runs over the phone's Bluetooth as it
+  would over a serial port, reconnecting on its own when the link
+  drops. Pairing stays in Android's Bluetooth settings, and QtTune asks
+  for the Nearby devices permission when the adapter list first opens.
+  It hasn't run with an adapter yet.
 - Settings lists the recent recordings, newest first. Selecting one
   puts its `replay://` address in the field, with the profile and DIDs
   it was recorded with, so a recording replays without typing its path
