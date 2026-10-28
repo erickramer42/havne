@@ -380,9 +380,8 @@ jobs:
           cmake --build build
           cmake --build build --target apk
 
-      # Core's TCP socket needs INTERNET (ADR-0028 §2); nothing but the
-      # app's own declaration puts it in the manifest androiddeployqt
-      # writes, so a lost declaration fails here, not on a phone.
+      # Core's TCP socket needs INTERNET (ADR-0028 §2), so a manifest
+      # without it fails here, not on a phone.
       - name: Check the manifest declares INTERNET
         run: |
           MANIFEST=$(find build -path '*android-build*' -name AndroidManifest.xml -not -path '*/intermediates/*' | head -n 1)

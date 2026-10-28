@@ -176,9 +176,9 @@ manifest or icons go in `app/android/`. CMake sets
 `QT_ANDROID_PACKAGE_SOURCE_DIR` only when that directory exists, so
 `androiddeployqt` is never pointed at a missing template. No template
 exists yet. The app declares `INTERNET` with
-`qt_add_android_permission`, because core's TCP socket needs it and
-nothing else puts it in the manifest; `android-build` fails if the
-generated manifest lacks it.
+`qt_add_android_permission`, because core's TCP socket needs it,
+rather than leaving it to the permissions Qt adds by default;
+`android-build` fails if the generated manifest lacks it.
 
 To install on a phone without an Android kit, take the
 `qttune-android-arm64-v8a` artifact from a CI run (kept 14 days): the

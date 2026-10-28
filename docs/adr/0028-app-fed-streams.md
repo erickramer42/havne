@@ -151,9 +151,8 @@ QtBluetooth is found; on Android only for now):
 - **Permissions:** Android 12 and later ask for `BLUETOOTH_CONNECT` and
   `BLUETOOTH_SCAN` (declared "never for location"), through Qt's
   `QBluetoothPermission` when the list first needs them. The manifest
-  declares `INTERNET` explicitly, because core's TCP socket needs it
-  and the app doesn't link QtNetwork, which is what would otherwise
-  bring it in. Android 11 and earlier need location permission for a
+  declares `INTERNET` explicitly, because core's TCP socket needs it,
+  rather than leaving it to the permissions Qt adds by default. Android 11 and earlier need location permission for a
   scan; the minimum SDK decides whether that path exists, and the
   phone run settles it.
 
