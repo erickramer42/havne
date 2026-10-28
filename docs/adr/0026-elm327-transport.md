@@ -908,4 +908,8 @@ closing, its WiFi answered no ARP, no TCP and no DHCP, whether QtTune
 went on reopening or was disconnected. The adapter can't be reached to
 be fixed from here,
 so a WiFi adapter that stays in "Adapter fault" after its network is
-back wants a power cycle.
+back wants a power cycle. So does WiFi after USB: with a session on the
+VX's USB port, J2534 or `elm327://`, a WiFi join was refused, and after
+the J2534 session closed the access point was gone
+(docs/bench-sessions/2026-10-27-elm327-bench-6.md). The VX gives one
+link at a time.

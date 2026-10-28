@@ -33,6 +33,10 @@ activity log (`events.log` when recording) has the link's states.
 - [ ] `scripts/verify.sh` prints four `ok` lines on this build
 - [ ] The OBDX vendor app closed, and no `j2534://` session open: one
       program at a time can hold the port
+- [ ] For WiFi (`elm327://192.168.4.1:23`): nothing on the VX's USB
+      port, and the VX power-cycled since the last USB session or
+      unclean WiFi leave; disconnect in QtTune before leaving its
+      network (BENCH prep #20)
 - [ ] Launch QtTune and tick **Record sessions**, so the wire logs
       hold the requests too
 
