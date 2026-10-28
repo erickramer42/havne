@@ -67,9 +67,13 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
   (on a phone, the only way).
 
 ### Changed
-- Settings' presets, recent recordings and adapter list fold behind a
-  button each, folded at first on a phone, where they filled screens
-  of the page. A button too long for a phone's width wraps its text.
+- Settings opens on the connect bar and five folded sections, each
+  heading saying what it holds now: Adapter (the devices found, then
+  the WiFi addresses and other choices the list doesn't show), Vehicle,
+  What to read, Recording (with the recent recordings to replay) and
+  Display. Connect… on Home, Live or the header opens Settings with
+  Adapter unfolded. A button too long for a phone's width wraps its
+  text.
 - With **Record sessions** on, a replay isn't recorded: it would copy
   the recording it plays. Settings' Record line and the activity log
   say so; the switch keeps its setting for the next live session.
@@ -92,6 +96,11 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
   the red.
 
 ### Fixed
+- Choosing a preset or a device of another kind in Settings no longer
+  carries options it can't use into the URI, which failed the next
+  connect (a replay's `profile=mock` or `speed=` on an adapter): keys
+  that kind doesn't take are dropped, and the profile row shows Default
+  in place of the mock's. One of the same kind keeps them all.
 - On a phone, the app fills the screen after the phone turns, where
   bands showed at the right and the bottom.
 - On a phone, connecting a long URI no longer pushes Settings past the

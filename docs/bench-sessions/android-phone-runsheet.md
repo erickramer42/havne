@@ -57,7 +57,8 @@ unknown developer ("Install anyway").
 
 ## Phase 2 — mock
 
-**Action:** Settings → **Developer mode** on, then **Mock**, then
+**Action:** Settings → **Display** → **Developer mode** on, then
+**Adapter** → **Mock**, then
 **Connect**.
 
 - [ ] Turn the phone to landscape and back once more, then on the
@@ -75,13 +76,13 @@ unknown developer ("Install anyway").
 
 ## Phase 3 — a recording, then its replay
 
-**Action:** Settings → **Record sessions** on, connect `mock://demo`
+**Action:** Settings → **Recording** → **Record sessions** on, connect `mock://demo`
 for about 20 s, disconnect.
 
 - [ ] The activity log's "Recording:" line. Copy it: it says where
       Android put the recordings (BENCH prep #23). An error instead
       (the folder couldn't be made): copy it, and skip the replay
-- [ ] Settings → **Recent recordings**: the newest row has this
+- [ ] Settings → **Recording**, its recent recordings: the newest row has this
       recording's time and "mock://demo · replays as mock". Select it:
       the field gets its `replay://` address. Connect, and confirm the
       values play back
