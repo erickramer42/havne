@@ -23,7 +23,9 @@
 //          every item inside the page's width at a phone's (320 px); a
 //          recording that ends listed, its row filling the field with a
 //          replay that connects under the recorded profile and DIDs; the
-//          presets, recordings and adapters folding behind their buttons.
+//          presets, recordings and adapters folding behind their buttons,
+//          each button's chevron turning; the Record line saying a
+//          replay isn't recorded.
 //          Manual smoke — the live discovery list renders (Windows: the
 //          registry's interfaces and ports; macOS/Linux: the /dev ports or
 //          the empty-state hint) sized to its rows, a device row
@@ -41,6 +43,7 @@ import QtCore
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
+import QtQuick.Shapes
 
 pragma ComponentBehavior: Bound
 
@@ -195,9 +198,50 @@ Pane {
     property bool recordingsShown: !Theme.mobile
     property bool adaptersShown: !Theme.mobile
 
-    function foldText(title, shown) {
-        return title + (shown ? " ▾" : " ▸")
+    // A section's button: its title and a chevron, pointing right while
+    // the section is folded and down while it's open. The chevron is
+    // drawn: Android's fonts have no ▸ or ▾, which showed as a box
+    component FoldButton: ThemedButton {
+        id: fold
+        property bool shown: false
+        contentItem: Item {
+            implicitWidth: foldRow.implicitWidth
+            implicitHeight: foldRow.implicitHeight
+            Row {
+                id: foldRow
+                anchors.centerIn: parent
+                spacing: 6
+                Text {
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: fold.text
+                    font.pixelSize: 14
+                    color: Theme.text
+                }
+                Shape {
+                    objectName: "foldChevron"
+                    anchors.verticalCenter: parent.verticalCenter
+                    width: 10
+                    height: 10
+                    rotation: fold.shown ? 90 : 0
+                    preferredRendererType: Shape.CurveRenderer
+                    ShapePath {
+                        strokeColor: Theme.text
+                        strokeWidth: 1.5
+                        fillColor: "transparent"
+                        capStyle: ShapePath.RoundCap
+                        joinStyle: ShapePath.RoundJoin
+                        startX: 3.5; startY: 1
+                        PathLine { x: 7.5; y: 5 }
+                        PathLine { x: 3.5; y: 9 }
+                    }
+                }
+            }
+        }
     }
+
+    // A replay plays a recording already, so the bridge doesn't record
+    // one; the Record switch keeps its setting for the next live session
+    readonly property bool replayInField: /^\s*replay:\/\//i.test(uriField.text)
 
     function refreshDevices() {
         j2534Devices = Bridge.discoverJ2534Devices()
@@ -711,9 +755,10 @@ Pane {
                 // A phone's page is narrow, and the presets fill a screen
                 // of it: one button shows or hides them in place (a
                 // ComboBox's Popup wouldn't follow the zoom)
-                ThemedButton {
+                FoldButton {
                     objectName: "presetsToggle"
-                    text: page.foldText(qsTr("Presets"), page.presetsShown)
+                    text: qsTr("Presets")
+                    shown: page.presetsShown
                     onClicked: page.presetsShown = !page.presetsShown
                 }
                 Repeater {
@@ -830,11 +875,14 @@ Pane {
                     }
                 }
                 Label {
+                    objectName: "recordStatus"
                     Layout.fillWidth: true
                     elide: Text.ElideMiddle
                     color: Bridge.recordingActive ? Theme.success : Theme.textDim
                     text: Bridge.recordingActive
                           ? qsTr("Recording to %1").arg(Bridge.recordingFolder)
+                          : Bridge.recording && page.replayInField
+                            ? qsTr("Replays aren't recorded")
                           : Bridge.recordingFolder !== ""
                             ? qsTr("Last: %1").arg(Bridge.recordingFolder)
                           : Bridge.recording
@@ -849,11 +897,11 @@ Pane {
                 }
             }
 
-            ThemedButton {
+            FoldButton {
                 objectName: "recordingsToggle"
                 visible: page.recordings.length > 0
-                text: page.foldText(qsTr("Recent recordings (%1)").arg(page.recordings.length),
-                                    page.recordingsShown)
+                text: qsTr("Recent recordings (%1)").arg(page.recordings.length)
+                shown: page.recordingsShown
                 onClicked: page.recordingsShown = !page.recordingsShown
             }
 
@@ -1012,10 +1060,10 @@ Pane {
                 Layout.fillWidth: true
                 Layout.topMargin: Theme.spacing
                 spacing: Theme.spacing
-                ThemedButton {
+                FoldButton {
                     objectName: "adaptersToggle"
-                    text: page.foldText(qsTr("Adapters (%1)").arg(page.devices.length),
-                                        page.adaptersShown)
+                    text: qsTr("Adapters (%1)").arg(page.devices.length)
+                    shown: page.adaptersShown
                     onClicked: page.adaptersShown = !page.adaptersShown
                 }
                 Item { Layout.fillWidth: true }

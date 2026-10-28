@@ -5,8 +5,9 @@
 //          Ctrl 0 and Settings' Display row and survives a restart, as
 //          does the unit system (2026-10-24) and developer mode
 //          (2026-10-27). The safe area's margins (Android's system
-//          bars) and the "Display:" line a phone logs in developer
-//          mode: BENCH, the phone run sheet.
+//          bars), the window filling a phone's screen after it turns,
+//          and the "Display:" line a phone logs in developer mode:
+//          BENCH, the phone run sheet.
 //          test_qml (tests/qml/tst_linkhealth.qml) checks the pill and
 //          each page's link surfaces in every link state, finding the
 //          pages and the pill by objectName
@@ -20,10 +21,17 @@ pragma ComponentBehavior: Bound
 
 ApplicationWindow {
     id: root
-    // 1280 × 800, or less so the window opens within the screen: a 1080p
-    // laptop at 150 % scaling has 1280 × 720, the taskbar included
-    width: Math.min(1280, Screen.desktopAvailableWidth - 16)
-    height: Math.min(800, Screen.desktopAvailableHeight - 48)
+    // A phone's window fills the screen, and follows it when the phone
+    // turns: a size short of the screen leaves bands at the right and the
+    // bottom (docs/bench-sessions/2026-10-28-android-4.md). A desktop's
+    // opens at 1280 × 800, or less so it fits the screen (a 1080p laptop
+    // at 150 % scaling has 1280 × 720, the taskbar included), and keeps
+    // it: Component.onCompleted ends the binding, which would resize the
+    // window on another monitor
+    width: Theme.mobile ? Screen.desktopAvailableWidth
+                        : Math.min(1280, Screen.desktopAvailableWidth - 16)
+    height: Theme.mobile ? Screen.desktopAvailableHeight
+                         : Math.min(800, Screen.desktopAvailableHeight - 48)
     visible: true
     title: qsTr("QtTune")
     color: Theme.bg
@@ -77,6 +85,11 @@ ApplicationWindow {
     }
     property bool zoomRestored: false
     Component.onCompleted: {
+        if (!Theme.mobile) {
+            // The same size, as a value: the bindings above end
+            width = width
+            height = height
+        }
         Theme.zoom = Theme.clampZoom(uiSettings.zoom)
         zoomRestored = true
         Bridge.unitSystem = uiSettings.unitSystem   // anything but 0 or 1 is ignored

@@ -197,18 +197,36 @@ TestCase {
         page.serialPorts = [{ name: "COM5", device: "" }]
         const toggle = find(page, data.toggle)
         compare(page[data.shown], !Theme.mobile, "open on the desktop, folded on a phone")
+        const chevron = find(toggle, "foldChevron")
         page[data.shown] = true
-        compare(toggle.text, data.title + " ▾")
+        compare(toggle.text, data.title)
+        compare(chevron.rotation, 90, "pointing down while open")
         for (const name of data.parts)
             verify(find(page, name).visible, name + " shown")
         toggle.clicked()
-        compare(toggle.text, data.title + " ▸")
+        compare(chevron.rotation, 0, "pointing right while folded")
         for (const name of data.parts)
             verify(!find(page, name).visible, name + " folded")
         verify(toggle.visible, "the button stays")
         toggle.clicked()
         for (const name of data.parts)
             verify(find(page, name).visible, name + " open again")
+    }
+
+    // The bridge doesn't record a replay; the switch keeps its setting
+    // for the next live session, and the line beside it says so
+    function test_theRecordLineSaysAReplayIsntRecorded() {
+        const page = createPage()
+        const status = find(page, "recordStatus")
+        Bridge.recording = true
+        find(page, "uriField").text = "replay://C:/rec/x?profile=mock"
+        compare(status.text, "Replays aren't recorded")
+        verify(find(page, "recordBox").checked, "the setting stays")
+        find(page, "uriField").text = "mock://demo"
+        verify(status.text !== "Replays aren't recorded", "a live session records")
+        find(page, "uriField").text = "replay://C:/rec/x"
+        Bridge.recording = false
+        verify(status.text !== "Replays aren't recorded", "nothing to say with Record off")
     }
 
     // WiFi adapters aren't discovered: the two common addresses are
