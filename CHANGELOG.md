@@ -71,15 +71,20 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
   button each, folded at first on a phone, where they filled screens
   of the page. A button too long for a phone's width wraps its text.
 - With **Record sessions** on, a replay isn't recorded: it would copy
-  the recording it plays. The activity log says so.
-- Live's chart draws a trace thinner where its points crowd, so a
-  signal that swings every moment (lambda through the rev limiter, on
-  a phone's narrow chart) reads as lines rather than a solid block.
+  the recording it plays. Settings' Record line and the activity log
+  say so; the switch keeps its setting for the next live session.
+- Live's chart draws a crowded trace's back-and-forth stretches as a
+  faint band, the range it swings over edged by thin lines, so a signal
+  that swings every moment (lambda through the rev limiter, on a
+  phone's narrow chart) reads as one shape rather than a hatch; its
+  ramps, steps and small wiggles stay a line. Ten signals get a color
+  of their own before any repeats dashed.
 - Settings' presets include the two usual WiFi adapter addresses,
   `elm327://192.168.4.1:23` (an OBDX Pro) and
   `elm327://192.168.0.10:35000` (most others), and the Log page has a
   Copy button for the whole activity log.
-- The window's title bar is dark on Windows, to match the app.
+- The window's title bar is dark on Windows, to match the app; on
+  Windows 11 it takes the header's color, so the two read as one bar.
 - The Log page shows the activity log (every connect, link change and
   ECU line, time-stamped), which sat at the bottom of Settings. The raw
   frame table is behind its Activity | Frames switch in developer mode.
@@ -87,6 +92,8 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
   the red.
 
 ### Fixed
+- On a phone, the app fills the screen after the phone turns, where
+  bands showed at the right and the bottom.
 - On a phone, connecting a long URI no longer pushes Settings past the
   screen's right edge: the "Connected:" line wraps.
 - Settings and Home fit a narrow window: Settings' rows of buttons wrap

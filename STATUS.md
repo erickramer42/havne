@@ -241,7 +241,7 @@ The app-fed stream for Bluetooth on Android and BLE is
 [ADR-0028](docs/adr/0028-app-fed-streams.md) (accepted; step 1, the
 Android baseline, under way: the app runs on a phone, reaches the
 VX over WiFi and replays a recording by a tap; the connected status
-line and the window after a rotation next). Later,
+line and the window after a turn to confirm on a phone next). Later,
 with its own record: listening to the whole bus (raw frames, for a
 car whose OBD port carries more than diagnostics).
 
@@ -267,10 +267,12 @@ an issue is resolved it is removed, and its number is not reused.
    pages fit, `mock://` streams, `elm327://` reaches the VX over
    WiFi, and a recording replays by a tap on its row in Settings
    ([2026-10-28-android-3](docs/bench-sessions/2026-10-28-android-3.md)).
-   On a phone Settings runs past the right edge upright once a long
-   URI connects (its status line doesn't wrap), and after the phone
-   turns, white bands show where the app's window stops short of the
-   screen. The iOS app hasn't
+   Two phone fixes wait for a phone run: the connected status line
+   wraps (a long URI ran Settings past the right edge upright), and
+   the window follows the screen when the phone turns (it kept a
+   size short of the screen, leaving bands,
+   [2026-10-28-android-4](docs/bench-sessions/2026-10-28-android-4.md)).
+   The iOS app hasn't
    run on a device, and no tests run on either (cross builds set
    `BUILD_TESTING=OFF`). Bluetooth on Android is
    [ADR-0028](docs/adr/0028-app-fed-streams.md). CI uploads the
