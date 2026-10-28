@@ -1,14 +1,17 @@
 # Android phone run sheet — the app on a phone, the VX's WiFi, then Bluetooth
 
 **Date:** <date>  **Phone:** Android <version> (12 or later)
-**Adapter:** OBDX Pro VX over WiFi, no vehicle
+**Adapter:** OBDX Pro VX over WiFi, no vehicle (Phases 1–6); the
+OBDLink MX+ on the test car (Phase 7)
 **QtTune build:** <commit hash> (CI run <run id>)
 
 Fill in a copy as `docs/bench-sessions/<date>-android[-n].md`. Phases
 1–5 are step 1 of [ADR-0028](../adr/0028-app-fed-streams.md), the
 Android baseline (Known Issue #2): the app, and its first route to a
 car, `elm327://` over WiFi, which needs no Bluetooth code. Phase 6 is
-step 3, the phone's Bluetooth without an adapter. The VX's WiFi on a
+step 3, the phone's Bluetooth without an adapter. Phase 7 is step 4,
+the MX+ through the phone on the car: run it on its own day, with
+Phase 1's install and nothing else. The VX's WiFi on a
 computer is [elm327-bench-runsheet.md](elm327-bench-runsheet.md)'s
 pre-flight and BENCH prep #20.
 
@@ -159,6 +162,83 @@ which isn't part of the name).
       devices: Don't allow. Back in QtTune, **Refresh**: the line says
       to allow it. Allow it again
 
+## Phase 7 — the MX+ on the car (ADR-0028 step 4)
+
+The MX+ over the phone's classic Bluetooth, held against the same
+adapter through the laptop
+([2026-10-27-elm327-vehicle](2026-10-27-elm327-vehicle.md)): a
+difference is the finding. The phone's own wire log and recordings are
+the evidence, so a computer with `adb` afterwards, or Phase 5's
+copies.
+
+**Pre-flight:**
+- [ ] [vehicle-runsheet.md](vehicle-runsheet.md)'s "Safety and scope"
+      holds in full: read-only, parked, ignition on with the engine off
+      kept short, the abort order (Disconnect, then unplug the MX+)
+- [ ] The phone charged, its screen kept on for the run (Display,
+      Screen timeout, the longest), Do not disturb on
+- [ ] The laptop's Bluetooth off, or the MX+ unpaired from it, and the
+      OBDLink app closed: the MX+ takes one connection at a time
+- [ ] The phone's earlier recordings backed up, if a reinstall comes
+      first (uninstalling deletes them)
+- [ ] QtTune: Settings, Recording, **Record sessions** on
+
+**7a — pair, ignition off.**
+
+**Action:** plug in the MX+. Pair it in Android's Bluetooth settings
+(Pair new device; press the MX+'s button when asked). In QtTune,
+Settings, Adapter, **Refresh**: the MX+ row, "Bluetooth, paired ·
+<address>". Select it, then **Connect** (`elm327://bt:<address>`),
+for about 30 s.
+
+- [ ] It connects within a few seconds. Copy the "Session:" line:
+      `ELM327 adapter (ELM327 v1.4b, STN2255 v5.12.2); ISO 15765 at
+      500000 baud; profile obd2, …; battery …` (12.1 V through the
+      laptop with the ignition off)
+- [ ] Quiet with the ignition off, as through the laptop ("Link
+      quiet"). Disconnect
+
+**7b — ignition on, the start, idling.**
+
+**Action:** ignition on, engine off. Connect the MX+ row and keep this
+connect through the start and a minute of idling.
+
+- [ ] The ECU line within a few seconds: `ECU 0x7E8: supports 53
+      PIDs; …, 1 dropped: 01 5C (not in its supported PIDs)`
+- [ ] The identity line (personal data: never photographed, scrubbed
+      from the sheet)
+- [ ] Start the engine within about two minutes. RPM rises within a
+      second on Live and the Dashboard. A drop in the crank recovers by
+      itself: record how long
+- [ ] Idling: RPM against the tachometer, Battery Voltage 13.4–14.5 V,
+      Coolant Temp rising with the gauge. A screenshot of the Dashboard
+      (no identity line in view). Disconnect
+- [ ] The rate: put `?poll=0x0C` after the address in the field,
+      Connect for about 15 s, Disconnect. The replies a second come
+      from the recording (~32/s through the laptop)
+
+**7c — a Bluetooth drop, idling.**
+
+**Action:** connect the MX+ row (without `?poll=`) and wait for
+values. Turn the phone's Bluetooth off from the quick settings for
+about 10 s, then on, and come back to QtTune.
+
+- [ ] Off: values dim after 3 s, and the link turns red ("Adapter
+      fault") within about 10 s
+- [ ] On: values resume with no reconnect. Record the time from
+      Bluetooth on to the first value (~6.5 s through the laptop). Over
+      a minute is a finding: Disconnect and connect again
+
+**7d — the app in the background (optional, Known Issue #37).**
+
+**Action:** connected and idling, press Home for about 20 s, then
+return to QtTune.
+
+- [ ] The link survives (no fault, or one that recovers by itself),
+      and Live's chart shows the gap Known Issue #37 describes. Record
+      what the link did
+- [ ] Disconnect, unplug the MX+, key off
+
 ## If it fails, suspect
 
 | Symptom | Suspect |
@@ -169,6 +249,7 @@ which isn't part of the name).
 | "no answer within 2 s" on WiFi with mobile data off | The phone isn't on the VX's network, or the VX's network side hung (power-cycle it) |
 | "the network is unreachable" or a permission error on WiFi | `INTERNET` missing from the manifest, which CI checks: copy the error whole |
 | No permission prompt, and the list says to allow Nearby devices | The permission was refused earlier: allow it in Android's settings |
+| The MX+ "didn't answer ATZ within 5 s" | Its Power light off (it takes power from the car only), or the laptop or the OBDLink app holding it: close them, connect again |
 | No paired devices listed with Bluetooth on | Copy the count line and the line under it; `adb logcat -d | grep -i -E "qttune|bluetooth"` if `adb` is at hand |
 
 ## Post-session actions
@@ -178,5 +259,9 @@ which isn't part of the name).
    as [bench-runsheet.md](bench-runsheet.md) says: the VX's MAC (in its
    network's name), no names, no paths with an account name
 2. Mark BENCH prep #21–#24 in [bench-prep.md](bench-prep.md). Scrub
-   Bluetooth addresses from the sheet and screenshots: `<BT address>`
+   Bluetooth addresses from the sheet and screenshots: `<BT address>`.
+   After Phase 7, also the identity line, and the wire log's
+   identification replies (`49 02` VIN, `49 04` CALID, `62 F1 xx`
+   serials), as [elm327-vehicle-runsheet.md](elm327-vehicle-runsheet.md)
+   says
 3. Update Known Issue #2 in STATUS.md, and testing.md's gaps
