@@ -951,3 +951,15 @@ name and meaning. The same read showed the J2534 path treating
 messages, which the standard says come back with it (review 86): a
 deliberate choice, written down in a comment, that no test or bench
 session had reason to question.
+
+**2026-10-27 — WiFi over TCP (ADR-0026's appendix):** **time the
+failure path on each platform before fixing a limit around it.** The
+appendix set a 2 s connect limit on the reasoning that, on the
+adapter's own network, an answer or a refusal takes milliseconds. A
+measurement before the code showed Windows taking 2.05 s to report a
+refused loopback connect: it sends the SYN again every 500 ms after a
+reset, by default for 2 s. A user typing the wrong port would have
+read "no answer, is this computer on the adapter's WiFi?" instead of
+"refused". Two SYN retries (`SIO_TCP_INITIAL_RTO`) bring it to about
+1 s, and `Elm327TcpTest.NothingListeningIsARefusal` holds it under the
+limit on every CI runner.

@@ -90,7 +90,7 @@ decode.
 | `mock://[label][?profile=…]` | Mock, on every platform | `mock` |
 | `replay://<recording folder or frames.csv>[?query]` | Replay, on every platform ([ADR-0023](adr/0023-replay-transport.md)) | `raw` |
 | `j2534://[vendor or DLL path][?query]` | J2534, Windows only | `obd2` |
-| `elm327://<port>[?query]` | An ELM327-compatible adapter on a serial port (`COM5`, `/dev/ttyUSB0`), on every platform ([ADR-0026](adr/0026-elm327-transport.md)) | `obd2` |
+| `elm327://<port>[?query]` | An ELM327-compatible adapter on a serial port (`COM5`, `/dev/ttyUSB0`) or at a WiFi adapter's address (`192.168.4.1:23`), on every platform ([ADR-0026](adr/0026-elm327-transport.md)) | `obd2` |
 | any URI with `?profile=raw` | as above | `raw` (log only, no decode) |
 | any URI with `?profile=uds-generic&did=…` | as above | `uds-generic`: the DIDs the URI names, polled or scanned ([ADR-0020](adr/0020-uds-generic.md)) |
 

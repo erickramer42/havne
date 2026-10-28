@@ -13,7 +13,9 @@
 //          stop at detach), the wire log (TheWireLog*), and nothing
 //          allocated per frame, with the log's request lines on or off.
 //          Elm327PortTest (POSIX): a whole session over a
-//          pseudo-terminal through the OS's port. BENCH: the Win32 port.
+//          pseudo-terminal through the OS's port. Elm327TcpTest (every
+//          platform): a session over a loopback socket, the far side's
+//          close and its recovery. BENCH: the Win32 port, the VX's WiFi.
 
 #include "ecuio/core.h"
 #include "ecuio/internal.h"
@@ -21,6 +23,7 @@
 #include "session.h"
 #include "elm327_log.h"
 #include "elm327_port.h"
+#include "elm327_tcp.h"
 #include "elm327_protocol.h"
 #include "request_engine.h"
 #include "request_setup.h"
@@ -97,6 +100,9 @@ struct ecuio_elm327_transport {
     unsigned long can_baud = ELM327_CAN_BAUD_DEFAULT;
     bool ext29 = false;  /* the channels' addressing mode */
     char protocol = '6'; /* AT SP's: the mode at the CAN rate */
+    /* port_name is a WiFi adapter's address; ?serial= was in the URI */
+    bool tcp = false;
+    bool serial_given = false;
     /* The opener attach used; the worker reopens through it. */
     ecuio_elm327_port_open_t opener = nullptr;
     ecuio_elm327_port_t port{};
@@ -1154,7 +1160,7 @@ const ecuio_transport_ops_t kElm327Ops = {elm327_start, elm327_detach};
  *   baud    the CAN rate: 500000 (the default) or 250000, ISO 15765-4's
  *           two, which the ELM327 has protocols for
  *   serial  the serial port's rate for a wired adapter, default 38400;
- *           a Bluetooth port ignores it
+ *           a Bluetooth port ignores it, a TCP address refuses it
  *   filter, txid, poll, probe, identify: the request keys
  *           (ecuio_request_param), as for j2534://
  *   profile, did: core's, read by create */
@@ -1178,6 +1184,7 @@ ecuio_status_t parse_query(const ecuio_uri_query* query, transport* t,
                 wanted = "a serial rate from 300 to 4000000";
             } else {
                 t->serial_baud = static_cast<uint32_t>(v);
+                t->serial_given = true;
             }
         } else {
             (void)ecuio_request_param(q, req, &wanted);
@@ -1207,12 +1214,14 @@ ecuio_status_t elm327_attach(ecuio_session_t* session, const char* uri,
     const size_t name_len =
         (q != nullptr) ? static_cast<size_t>(q - name) : strlen(name);
     if (name_len == 0) {
-        ecuio_detail_set("elm327:// needs a port: %s",
-                         elm327_port_name_example());
+        ecuio_detail_set("elm327:// needs a port: %s, or %s",
+                         elm327_port_name_example(), elm327_tcp_example());
         return ECUIO_ERR_BAD_URI;
     }
-    if (!elm327_port_name_ok(name, name_len)) {
-        ecuio_detail_set("the port must be %s", elm327_port_name_example());
+    t->tcp = elm327_tcp_address(name, name_len, nullptr, nullptr);
+    if (!t->tcp && !elm327_port_name_ok(name, name_len)) {
+        ecuio_detail_set("the port must be %s, or %s",
+                         elm327_port_name_example(), elm327_tcp_example());
         return ECUIO_ERR_BAD_URI;
     }
     memcpy(t->port_name, name, name_len);
@@ -1222,6 +1231,14 @@ ecuio_status_t elm327_attach(ecuio_session_t* session, const char* uri,
     ecuio_status_t st = parse_query(query, t.get(), &req);
     if (st != ECUIO_OK) {
         return st;
+    }
+    /* A socket has no serial rate; a run sheet that carries one over from
+     * a USB session is told so rather than ignored */
+    if (t->tcp && t->serial_given) {
+        ecuio_detail_set("?serial= is a serial port's rate, and %s is a TCP "
+                         "address, which has none",
+                         t->port_name);
+        return ECUIO_ERR_BAD_URI;
     }
 
     /* Channels, their addressing mode, and the requests, before the port
@@ -1274,10 +1291,16 @@ ecuio_status_t elm327_attach(ecuio_session_t* session, const char* uri,
         elm327_log_write(t->log, "QtTune ELM327 wire log (ADR-0026), core %s",
                          ecuio_version_string());
         elm327_log_write(t->log, "uri %s", text);
+        char link[48];
+        if (t->tcp) {
+            snprintf(link, sizeof(link), "over TCP");
+        } else {
+            snprintf(link, sizeof(link), "at %u bit/s",
+                     static_cast<unsigned>(t->serial_baud));
+        }
         elm327_log_write(
-            t->log, "%s at %u bit/s; CAN at %lu bit/s, protocol %c; %s",
-            t->port_name, static_cast<unsigned>(t->serial_baud), t->can_baud,
-            t->protocol,
+            t->log, "%s %s; CAN at %lu bit/s, protocol %c; %s", t->port_name,
+            link, t->can_baud, t->protocol,
             t->log.requests
                 ? "every request and reply (ECUIO_SUR_LOG_FRAMES=1)"
                 : "the setup, the readings and the link's events; the "

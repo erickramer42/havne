@@ -864,22 +864,37 @@ data, so a record keeps it.
   - `serial=` with an address: `BAD_URI`.
 - **Not tested: the 2 s limit.** Reaching it needs an address that
   drops packets, and a test can't count on one.
-- **BENCH:** the VX over WiFi, on USB power with no bus, as its serial
-  bench sessions ran. The items:
-  - `elm327://192.168.4.1:23` connects, and the setup answers as on
-    COM4;
-  - the connect's time against the 2 s limit;
-  - a request's time to its `NO DATA` prompt, against USB's 100 ms and
-    300 ms (the appendix "the VX's answers");
+- **BENCH:** the VX over WiFi, on USB power with no bus, from the
+  laptop. The VX's network ("OBDX Pro VX" and its MAC address, open,
+  2.4 GHz) is up on USB power alone and on the OBD port's alone, with
+  no USB cable; the laptop sees
+  it and the dev machine doesn't (2026-10-27), a matter of that
+  machine's radio: with its adapter set to prefer 2.4 GHz, it joined. A record writes the network's name without the MAC, which
+  identifies the adapter as a serial number does.
+
+  A probe from the dev machine (ELM commands only, outside QtTune)
+  settled three things. The socket connected in 25 ms, well inside the
+  2 s limit. Nothing came before the first command: port 23 carries no
+  telnet negotiation. And `AT Z`, `AT I`, `AT @1` and `AT RV` answered
+  as on COM4 (the appendix "the VX's answers"), each prompt about 5 ms
+  after its command, where USB's take 0.1 to 0.3 ms. The items left:
+  - `elm327://192.168.4.1:23` connects and the session goes quiet;
+  - whether WiFi answers while a program holds the USB port too;
   - leaving the VX's network and rejoining it: a hard failure, then
     recovery on the backoff;
-  - whether the VX serves WiFi while its USB port is open too. Its
-    guide doesn't say.
-
-  Port 23 is telnet's, and the guide says to open a plain socket, so no
-  telnet negotiation is expected. The wire log would show any.
+  - on the car, the request rate against the VX's serial and J2534
+    sessions'.
 
 **The access point has no password.** Anyone in range can join it and
 reach the adapter while it sits on the car. That is the adapter's
 design; QtTune can't change it, and it is the reason to unplug a WiFi
 adapter rather than leave it on the car.
+
+**Note, 2026-10-27, later:** built (`core/src/elm327_tcp.cpp`), with
+the HARNESS tests above (`Elm327TcpTest`). One statement above holds
+only off Windows: a refusal doesn't take milliseconds there. Windows
+answers a refused connect by sending the SYN again, every 500 ms, and
+reports the refusal only after 2 s, which the 2 s limit would read as
+no answer. The socket sets `SIO_TCP_INITIAL_RTO` to two SYN retries, so
+a refusal arrives in about 1 s and a SYN that WiFi drops is still sent
+again. The VX items are BENCH prep #20.

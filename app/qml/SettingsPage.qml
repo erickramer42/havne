@@ -456,7 +456,10 @@ Pane {
                     // ?poll= replaces the profile's PID rotation. Raw on an
                     // adapter listens to the engine ECU, so ?poll= alone
                     // asks it; under the obd2 default it also decodes.
-                    placeholderText: qsTr("URI — e.g. mock://demo, elm327://COM5 or "
+                    // A WiFi adapter is typed: nothing lists it (ADR-0026's
+                    // appendix "WiFi over TCP")
+                    placeholderText: qsTr("URI — e.g. mock://demo, elm327://COM5, "
+                                          + "elm327://192.168.0.10:35000 or "
                                           + "j2534://Vendor?profile=raw&poll=0x0C")
                     enabled: page.idle
                     color: Theme.text
@@ -659,8 +662,9 @@ Pane {
                         // A bare j2534:// opens the first discovered device
                         { name: "j2534", uri: "j2534://", label: qsTr("j2534:// (first device)") },
                         // elm327:// takes no first port: the user picks one
-                        // from the list below (core's refusal says so)
-                        { name: "elm327", uri: "elm327://", label: qsTr("elm327:// (a port below)") }
+                        // from the list below or types a WiFi adapter's
+                        // address (core's refusal says so)
+                        { name: "elm327", uri: "elm327://", label: qsTr("elm327:// (a port below, or an address)") }
                     ]
                     ThemedButton {
                         required property var modelData

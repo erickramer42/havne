@@ -8,6 +8,7 @@ add_library(ecuio-core STATIC
     src/j2534_transport.cpp
     src/elm327_transport.cpp
     src/elm327_port.cpp
+    src/elm327_tcp.cpp
     src/elm327_log.cpp
     src/serial_ports.cpp
     src/signals.cpp
@@ -25,10 +26,11 @@ target_include_directories(ecuio-core
 
 qttune_enable_warnings(ecuio-core)
 
-# bcrypt: BCryptGenRandom names the surrogate's pipe. A static library's
-# private link still reaches whatever links core.
+# bcrypt: BCryptGenRandom names the surrogate's pipe; ws2_32: a WiFi
+# adapter's socket (elm327_tcp.cpp). A static library's private link
+# still reaches whatever links core.
 if(WIN32)
-    target_link_libraries(ecuio-core PRIVATE bcrypt)
+    target_link_libraries(ecuio-core PRIVATE bcrypt ws2_32)
 endif()
 
 # Critical invariant: core never links Qt (ADR-0001). The check lives at

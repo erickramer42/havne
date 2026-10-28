@@ -4,7 +4,7 @@
 //          kind, frame shapes in both addressing modes, ISO-TP
 //          reassembly per CAN ID, the voltage and the version strings,
 //          the commands it formats, and replies reaching the request
-//          engine. Qt-free.
+//          engine; a WiFi adapter's address (elm327_tcp.h). Qt-free.
 
 #include <gtest/gtest.h>
 
@@ -15,6 +15,7 @@
 #include <vector>
 
 #include "elm327_protocol.h" /* core/src */
+#include "elm327_tcp.h"      /* core/src: a WiFi adapter's address */
 #include "request_engine.h"  /* core/src: replies reaching the engine */
 
 namespace {
@@ -660,4 +661,61 @@ TEST(Elm327ProtocolTest, TheProtocolFollowsTheModeAndTheRate)
     EXPECT_EQ(elm327_protocol_for(true, 250000), '9');
     EXPECT_EQ(elm327_protocol_for(false, 125000), 0);
     EXPECT_EQ(elm327_protocol_for(false, 0), 0);
+}
+
+/* A WiFi adapter's address (ADR-0026's appendix "WiFi over TCP"): four
+ * octets, a colon and a port, nothing else; a serial port's name never
+ * reads as one */
+TEST(Elm327TcpTest, AddressesAreADottedIpv4AndAPort)
+{
+    struct Good {
+        const char* name;
+        uint32_t ip;
+        uint16_t port;
+    };
+    const Good good[] = {
+        {"192.168.4.1:23", 0xC0A80401u, 23},
+        {"192.168.0.10:35000", 0xC0A8000Au, 35000},
+        {"127.0.0.1:1", 0x7F000001u, 1},
+        {"0.0.0.0:65535", 0u, 65535},
+        {"255.255.255.255:80", 0xFFFFFFFFu, 80},
+    };
+    for (const Good& g : good) {
+        uint32_t ip = 1;
+        uint16_t port = 0;
+        EXPECT_TRUE(elm327_tcp_address(g.name, strlen(g.name), &ip, &port))
+            << g.name;
+        EXPECT_EQ(ip, g.ip) << g.name;
+        EXPECT_EQ(port, g.port) << g.name;
+    }
+    const char* const bad[] = {
+        "192.168.4.1",       /* no port */
+        "192.168.4.1:",      /* an empty port */
+        "192.168.4.1:0",     /* port 0 */
+        "192.168.4.1:65536", /* past 65535 */
+        "192.168.4.1:023",   /* a leading zero */
+        "192.168.4.1:2a",    /* not digits */
+        "192.168.4.1:23:1",  /* two colons */
+        "192.168.4:23",      /* three octets */
+        "192.168.4.1.5:23",  /* five */
+        "192.168.4.256:23",  /* an octet past 255 */
+        "192.168.04.1:23",   /* a leading zero in an octet */
+        "192.168..1:23",     /* an empty octet */
+        ".192.168.4.1:23",   /* a stray dot */
+        "192.168.4.1.:23",
+        "-1.168.4.1:23",
+        " 192.168.4.1:23", /* a space */
+        "obdx.local:23",   /* a host name */
+        "[::1]:23",        /* IPv6 */
+        "::1",
+        "COM5", /* serial ports */
+        "/dev/ttyUSB0",
+        "",
+    };
+    for (const char* b : bad) {
+        EXPECT_FALSE(elm327_tcp_address(b, strlen(b), nullptr, nullptr)) << b;
+    }
+    /* The length bounds the name, not a NUL: a port cut short is refused */
+    EXPECT_FALSE(elm327_tcp_address("192.168.4.1:23", 12, nullptr, nullptr));
+    EXPECT_TRUE(elm327_tcp_address("192.168.4.1:2345", 14, nullptr, nullptr));
 }

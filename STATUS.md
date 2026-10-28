@@ -43,7 +43,8 @@ goes out in the next release. The milestone after it is chosen from the
     back at its own pace or up to 100× faster.
   - **ELM327 adapters** in core, on every platform
     ([ADR-0026](docs/adr/0026-elm327-transport.md)): `elm327://<port>`
-    on a serial port, USB or Bluetooth SPP, with the same request
+    on a serial port, USB or Bluetooth SPP, or at a WiFi adapter's
+    address (`elm327://192.168.4.1:23`), with the same request
     engine, probe, identification and link health as J2534, and
     Settings lists the serial ports. Verified against a fake ELM327, on the bench with the OBDX VX, and
     on a car through the OBDLink MX+ (Bluetooth) and the VX in ELM mode
@@ -219,10 +220,18 @@ OBDX Pro VX in its ELM mode (USB-powered). In order:
    [2026-10-27-elm327-bench-3](docs/bench-sessions/2026-10-27-elm327-bench-3.md)):
    silent, checked every 5 s, stopped at close. Still to come: a car
    with a second tester on an OBD Y-splitter (#19).
+7. **WiFi over TCP** (ADR-0026's appendix "WiFi over TCP",
+   `core/src/elm327_tcp.cpp`): built. `elm327://<IPv4>:<port>` opens a
+   socket where a serial port would be: a 2 s connect, Nagle off, no
+   host names; the far side closing is a hard failure that reconnects
+   on the backoff. Verified against the fake ELM327 behind a loopback
+   socket on every platform (`Elm327TcpTest`). The VX's WiFi answered
+   a probe outside QtTune as its USB port does; a QtTune session over
+   it is BENCH prep #20.
 
 Later, each with its own record: the app-fed stream for BLE and the
-mobile apps, WiFi adapters over TCP, and listening to the whole bus
-(raw frames, for a car whose OBD port carries more than diagnostics).
+mobile apps, and listening to the whole bus (raw frames, for a car
+whose OBD port carries more than diagnostics).
 
 ## BENCH prep
 
@@ -416,7 +425,7 @@ matters: the original-copy file format constrains everything after it.
 ### Transports and platforms
 
 - **ELM327 adapters:** built; see [The ELM327 transport](#the-elm327-transport),
-  which lists what comes later (BLE, WiFi, the whole bus).
+  which lists what comes later (BLE, the whole bus).
 - **Legacy buses:** see the roadmap above.
 
 ### Performance

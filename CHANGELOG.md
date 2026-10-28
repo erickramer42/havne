@@ -25,6 +25,12 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
   every command and what the adapter answered, and, while recording,
   every request and reply with its timing. It has read a car through
   an OBDLink MX+ over Bluetooth and an OBDX Pro VX over USB.
+- `elm327://` reaches a WiFi adapter by its address and port, for
+  example `elm327://192.168.4.1:23` (an OBDX Pro) or
+  `elm327://192.168.0.10:35000` (most clones), once the computer has
+  joined the adapter's network. The address is typed: QtTune doesn't
+  search the network. A connection that drops is tried again on its
+  own, as a serial port is.
 - An `elm327://` session that asks nothing (`?profile=raw` without
   `?poll=`) listens: the adapter monitors the bus for the engine ECU's
   messages (or `?filter=`'s ID), silently, so another tool's

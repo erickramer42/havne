@@ -150,8 +150,10 @@ The threat model is [docs/security-assurance.md](docs/security-assurance.md).
   scheme shares one strict query grammar (`core/src/uri_query.h`): an
   unknown key, a malformed value or an unknown profile is refused at
   session create, before any DLL loads or any port opens.
-- **Serial ports**: an `elm327://` port is `COM1` to `COM255` on Windows
-  and a `/dev/` path elsewhere; an adapter's answers are parsed by a pure
+- **Serial ports and sockets**: an `elm327://` port is `COM1` to `COM255`
+  on Windows and a `/dev/` path elsewhere, or a WiFi adapter's dotted
+  IPv4 address and port (never a host name, so nothing is looked up);
+  an adapter's answers are parsed by a pure
   layer (`core/src/elm327_protocol.h`) that bounds every line, and a
   setup answer that isn't the expected one refuses the connect.
 - **Vendor DLLs**: the path must be absolute, and the file must be a

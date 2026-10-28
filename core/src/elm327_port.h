@@ -8,6 +8,8 @@
 // CreateFileW on \\.\COMn on Windows, open and termios elsewhere. A
 // paired Bluetooth SPP adapter is a serial port on all three desktop
 // systems, so this covers USB and classic Bluetooth alike (ADR-0026 §1).
+// A WiFi adapter's socket is elm327_tcp.h's, reached through the same
+// opener.
 
 #ifndef ECUIO_ELM327_PORT_H
 #define ECUIO_ELM327_PORT_H
@@ -31,7 +33,8 @@ const char* elm327_port_name_example();
 
 /* The OS's opener, ecuio_elm327_port_open_t's contract: 8 data bits, no
  * parity, one stop bit, no flow control, at serial_baud. A Bluetooth
- * port takes the setting and ignores it. */
+ * port takes the setting and ignores it. A TCP address
+ * (elm327_tcp_address) goes to elm327_tcp_open, which has no rate. */
 ecuio_status_t elm327_port_open_os(const char* name, uint32_t serial_baud,
                                    ecuio_elm327_port_t* out, char* why,
                                    uint32_t why_cap);

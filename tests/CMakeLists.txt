@@ -88,6 +88,10 @@ target_link_libraries(test_elm327 PRIVATE
     ecuio-core
     GTest::gtest_main
 )
+if(WIN32)
+    # Elm327TcpTest's loopback listener
+    target_link_libraries(test_elm327 PRIVATE ws2_32)
+endif()
 qttune_enable_warnings(test_elm327)
 gtest_discover_tests(test_elm327 PROPERTIES TIMEOUT 30)
 

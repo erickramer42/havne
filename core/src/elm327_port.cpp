@@ -1,11 +1,13 @@
 // File/layer: core/src/elm327_port.cpp | C++17, Qt-free; Win32 and POSIX
 //             halves, one built per platform
 // Testing: HARNESS — Elm327PortTest (test_elm327, POSIX): the termios
-//          port over a pseudo-terminal pair; BENCH — the Win32 port
-//          (ADR-0026 §8: Windows has no built-in virtual COM pair, a
-//          known gap)
+//          port over a pseudo-terminal pair; Elm327TcpTest (every
+//          platform): an address reaching the TCP opener; BENCH — the
+//          Win32 port (ADR-0026 §8: Windows has no built-in virtual COM
+//          pair, a known gap)
 
 #include "elm327_port.h"
+#include "elm327_tcp.h"
 
 #include <cstdio>
 #include <cstring>
@@ -119,9 +121,11 @@ const char* elm327_port_name_example()
     return "COM1 to COM255, like COM5";
 }
 
-ecuio_status_t elm327_port_open_os(const char* name, uint32_t serial_baud,
-                                   ecuio_elm327_port_t* out, char* why,
-                                   uint32_t why_cap)
+namespace {
+
+ecuio_status_t serial_open(const char* name, uint32_t serial_baud,
+                           ecuio_elm327_port_t* out, char* why,
+                           uint32_t why_cap)
 {
     /* \\.\COMn opens every port, past COM9 too */
     wchar_t path[16] = L"\\\\.\\";
@@ -200,6 +204,8 @@ ecuio_status_t elm327_port_open_os(const char* name, uint32_t serial_baud,
     out->impl = p;
     return ECUIO_OK;
 }
+
+} // namespace
 
 #else /* POSIX */
 
@@ -344,9 +350,11 @@ const char* elm327_port_name_example()
     return "a /dev/ path, like /dev/ttyUSB0 or /dev/cu.OBDLink";
 }
 
-ecuio_status_t elm327_port_open_os(const char* name, uint32_t serial_baud,
-                                   ecuio_elm327_port_t* out, char* why,
-                                   uint32_t why_cap)
+namespace {
+
+ecuio_status_t serial_open(const char* name, uint32_t serial_baud,
+                           ecuio_elm327_port_t* out, char* why,
+                           uint32_t why_cap)
 {
     speed_t speed = B38400;
     if (!speed_for(serial_baud, &speed)) {
@@ -415,4 +423,17 @@ ecuio_status_t elm327_port_open_os(const char* name, uint32_t serial_baud,
     return ECUIO_OK;
 }
 
+} // namespace
+
 #endif /* _WIN32 */
+
+ecuio_status_t elm327_port_open_os(const char* name, uint32_t serial_baud,
+                                   ecuio_elm327_port_t* out, char* why,
+                                   uint32_t why_cap)
+{
+    /* A WiFi adapter's address (ADR-0026's appendix "WiFi over TCP") */
+    if (elm327_tcp_address(name, strlen(name), nullptr, nullptr)) {
+        return elm327_tcp_open(name, out, why, why_cap);
+    }
+    return serial_open(name, serial_baud, out, why, why_cap);
+}
