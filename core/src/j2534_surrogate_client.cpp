@@ -58,6 +58,9 @@ struct ecuio_j2534_sur_handle {
     ecuio_pt_rx_t pending[ECUIO_SUR_MAX_FRAMES_PER_READ];
     uint32_t pending_count = 0;
     uint32_t pending_next = 0;
+    /* A read answered ERR_BUFFER_OVERFLOW with no message after the
+     * loss: the next one dispensed carries ECUIO_PT_BUFFER_OVERFLOW */
+    bool overflow_pending = false;
 };
 
 namespace {
@@ -1249,6 +1252,10 @@ ecuio_status_t ecuio_j2534_sur_read_msg(ecuio_j2534_sur_handle_t* h,
      * is partially consumed. */
     if (h->pending_next < h->pending_count) {
         *out_msg = h->pending[h->pending_next++];
+        if (h->overflow_pending) {
+            out_msg->rx_status |= ECUIO_PT_BUFFER_OVERFLOW;
+            h->overflow_pending = false;
+        }
         *got_msg = true;
         return ECUIO_OK;
     }
@@ -1274,7 +1281,8 @@ ecuio_status_t ecuio_j2534_sur_read_msg(ecuio_j2534_sur_handle_t* h,
      * hide the ECU's answer and leave a
      * healthy session showing nothing at all. The child has already
      * applied the count-trust rule (ecuio_trusted_count), so a
-     * non-empty batch only arrives under NOERROR or ERR_TIMEOUT. */
+     * non-empty batch only arrives under NOERROR, ERR_TIMEOUT or
+     * ERR_BUFFER_OVERFLOW, whose loss the child marked on a frame. */
     if (resp.num_frames > 0) {
         h->pending_count = resp.num_frames;
         h->pending_next = 0;
@@ -1283,7 +1291,13 @@ ecuio_status_t ecuio_j2534_sur_read_msg(ecuio_j2534_sur_handle_t* h,
                                         got_msg);
     }
 
-    /* Empty batch: the status decides. */
+    /* Empty batch: the status decides. ERR_BUFFER_OVERFLOW with nothing
+     * after it: frames were lost and the adapter reads on, so the next
+     * message delivered carries the bit, and the link is as it was. */
+    if (resp.status == static_cast<int32_t>(ECUIO_PT_STATUS_BUFFER_OVERFLOW)) {
+        h->overflow_pending = true;
+        return ECUIO_OK;
+    }
     if (resp.status == static_cast<int32_t>(ECUIO_PT_STATUS_TIMEOUT)) {
         return ECUIO_ERR_VEHICLE_TIMEOUT;
     }

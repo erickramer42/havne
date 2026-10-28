@@ -382,10 +382,14 @@ ecuio_status_t ecuio_j2534_disconnect_channel(ecuio_j2534_handle_t* handle,
  *
  *   NOERROR, no message            -> ECUIO_OK, no frame (idle)
  *   ERR_BUFFER_EMPTY (0x10)        -> ECUIO_OK, no frame (queue drained)
+ *   ERR_BUFFER_OVERFLOW (0x12)     -> ECUIO_OK; the first message
+ *                                     after the loss carries
+ *                                     ECUIO_PT_BUFFER_OVERFLOW
  *   ERR_TIMEOUT (0x09)             -> ECUIO_ERR_VEHICLE_TIMEOUT (quiet bus)
  *   any other nonzero             -> ECUIO_ERR_TRANSPORT_HARD_FAILURE
- *   num > 0 under NOERROR or      -> deliver the message (J2534-1 pairs
- *     ERR_TIMEOUT                     ERR_TIMEOUT with data)
+ *   num > 0 under NOERROR,        -> deliver the message (J2534-1 pairs
+ *     ERR_TIMEOUT or                  ERR_TIMEOUT and ERR_BUFFER_OVERFLOW
+ *     ERR_BUFFER_OVERFLOW             with data)
  *   an indication                 -> skipped, and the read goes on with
  *                                     what's left of its timeout
  *                                     (ecuio_pt_is_indication); the

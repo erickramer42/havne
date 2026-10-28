@@ -26,6 +26,10 @@ typedef struct ecuio_session ecuio_session_t;
 #define ECUIO_FRAME_FLAG_TRUNCATED        0x00000040u /* the message was longer than
                                                          data[] holds; data_length
                                                          bytes of it are here */
+#define ECUIO_FRAME_FLAG_OVERFLOW         0x00000080u /* the adapter's buffer
+                                                         overflowed before this
+                                                         frame: frames were lost
+                                                         (J2534's BUFFER_OVERFLOW) */
 
 /* The most payload a frame carries: room for a whole ISO 15765-2 message
  * on classic CAN (4095 bytes, its 12-bit length), so a reassembled

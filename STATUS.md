@@ -47,7 +47,9 @@ goes out in the next release. The milestone after it is chosen from the
     engine, probe, identification and link health as J2534, and
     Settings lists the serial ports. Verified against a fake ELM327, on the bench with the OBDX VX, and
     on a car through the OBDLink MX+ (Bluetooth) and the VX in ELM mode
-    (2026-10-27).
+    (2026-10-27). A session that asks nothing listens with `AT MA` on
+    its channels (fake-tested; the bench and a car with a second tester
+    are to come).
   - **J2534 on Windows:** discovery of installed drivers, each driver
     loaded in a single-threaded surrogate process of its own
     architecture, x86 or x64, so a crashing driver ends its process,
@@ -205,8 +207,20 @@ OBDX Pro VX in its ELM mode (USB-powered). In order:
    and [elm327-vehicle-runsheet.md](docs/bench-sessions/elm327-vehicle-runsheet.md);
    the items they settle are BENCH prep #11–#17.
 
-Later, each with its own record: passive listening, the app-fed
-stream for BLE and the mobile apps, and WiFi adapters over TCP.
+6. **Passive listening** (ADR-0026's appendix "passive listening"):
+   built and fake-tested. A session with nothing to ask monitors with
+   `AT MA`, which keeps the receive filter, so it hears its channels'
+   IDs; it is checked every 5 s of silence, restarted when it ends, and
+   stopped with a space at close. `BUFFER FULL` flags the next frame
+   `ECUIO_FRAME_FLAG_OVERFLOW`, as a J2534 driver's
+   `ERR_BUFFER_OVERFLOW` does (`Elm327SessionTest.Listening*` and
+   neighbors, `J2534HealthTest.*Overflow*`). Still to come: the VX's
+   bench (BENCH prep #18) and a car with a second tester on an OBD
+   Y-splitter (#19).
+
+Later, each with its own record: the app-fed stream for BLE and the
+mobile apps, WiFi adapters over TCP, and listening to the whole bus
+(raw frames, for a car whose OBD port carries more than diagnostics).
 
 ## BENCH prep
 
@@ -400,7 +414,7 @@ matters: the original-copy file format constrains everything after it.
 ### Transports and platforms
 
 - **ELM327 adapters:** built; see [The ELM327 transport](#the-elm327-transport),
-  which lists what comes later (passive listening, BLE, WiFi).
+  which lists what comes later (BLE, WiFi, the whole bus).
 - **Legacy buses:** see the roadmap above.
 
 ### Performance

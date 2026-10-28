@@ -25,6 +25,14 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
   every command and what the adapter answered, and, while recording,
   every request and reply with its timing. It has read a car through
   an OBDLink MX+ over Bluetooth and an OBDX Pro VX over USB.
+- An `elm327://` session that asks nothing (`?profile=raw` without
+  `?poll=`) listens: the adapter monitors the bus for the engine ECU's
+  messages (or `?filter=`'s ID), silently, so another tool's
+  conversation can be logged and recorded.
+- When an adapter's buffer overflows and frames are lost (an ELM327's
+  `BUFFER FULL`, a J2534 driver's `ERR_BUFFER_OVERFLOW`), the next frame
+  says so in the recording's flags, the activity log says so once, and
+  the Log page's frame view counts them.
 - Settings remembers the last URI that connected, with its profile and
   DIDs, and the Record sessions switch between runs. A URI that failed
   to connect isn't kept.
@@ -50,6 +58,11 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
   frame table is behind its Activity | Frames switch in developer mode.
 - Home's logo is a small tachometer whose needle idles and blips into
   the red.
+
+### Fixed
+- A J2534 driver reporting a buffer overflow on a read no longer reads
+  as "Adapter fault" with the read's messages dropped: the messages
+  arrive, and the session carries on.
 
 ## [0.3.2] - 2026-10-26
 

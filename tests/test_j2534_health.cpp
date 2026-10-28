@@ -19,7 +19,10 @@
 //          in passive mode. A vendor DLL that crashes ends only its
 //          child. Replies longer than a CAN-FD frame arrive
 //          whole, up to ISO 15765-2's longest; a longer one is cut and
-//          marked.
+//          marked. Frames lost (ERR_BUFFER_OVERFLOW with or without a
+//          message, v05.00's BUFFER_OVERFLOW bit) flag the next frame
+//          dispatched with the link unchanged; an ERROR_INDICATION is
+//          no frame.
 //          The backend setup and the fake's control page are in
 //          j2534_backend_fixture.h.
 
@@ -59,6 +62,7 @@ struct Delivery {
     uint8_t payloads[16][8] = {};
     uint64_t stamps[16] = {};
     uint32_t ids[16] = {};
+    uint32_t flags[16] = {};
     uint32_t writes_at[16] = {};
 };
 
@@ -75,6 +79,7 @@ void delivery_cb(const ecuio_frame_t* frame, void* user_data)
         memcpy(d->payloads[i], frame->data, sizeof(d->payloads[i]));
         d->stamps[i] = frame->timestamp_us;
         d->ids[i] = frame->arbitration_id;
+        d->flags[i] = frame->flags;
         d->writes_at[i] = writes;
     }
 }
@@ -1073,6 +1078,134 @@ TEST_F(J2534HealthTest, LongRepliesArriveWhole)
     EXPECT_EQ(replies.length[2], ECUIO_FRAME_DATA_MAX);
     EXPECT_EQ(replies.flags[2], ECUIO_FRAME_FLAG_TRUNCATED);
     EXPECT_TRUE(replies.filled[2]);
+}
+
+/* ---- Frames lost (ERR_BUFFER_OVERFLOW, the BUFFER_OVERFLOW bit) ------ */
+
+/* A message on the engine ECU's channel, 41 0C <n> */
+bool post_reply(fake_control::Page* page, uint8_t n, uint32_t rx_status = 0)
+{
+    const uint8_t msg[7] = {0x00, 0x00, 0x07, 0xE8, 0x41, 0x0C, n};
+    return fake_control::post(page, msg, sizeof(msg), 1000u + n, rx_status);
+}
+
+/* A v04.04 vendor's ERR_BUFFER_OVERFLOW with the message it read: the
+ * message arrives flagged, the next one doesn't, and the link is as it
+ * was: no hard failure, no episode */
+TEST_F(J2534HealthTest, AnOverflowReadDeliversItsMessageFlagged)
+{
+    ASSERT_NO_FATAL_FAILURE(start_session("?profile=raw&filter=0x7E8"));
+    ASSERT_TRUE(post_reply(page, 1));
+    ASSERT_TRUE(wait_for_frames(1, 2000));
+    ASSERT_NO_FATAL_FAILURE(knob("ECUIO_FAKE_READ_OVERFLOW", "1"));
+    ASSERT_TRUE(post_reply(page, 2));
+    ASSERT_TRUE(wait_for_frames(2, 2000)) << "the overflow read's message";
+    ASSERT_NO_FATAL_FAILURE(knob("ECUIO_FAKE_READ_OVERFLOW", nullptr));
+    ASSERT_TRUE(post_reply(page, 3));
+    ASSERT_TRUE(wait_for_frames(3, 2000));
+    int32_t le = 0;
+    uint32_t ec = 0;
+    (void)ecuio_session_get_error_state(session, &le, &ec);
+    EXPECT_EQ(le, ECUIO_OK);
+    EXPECT_EQ(ec, 0u);
+    ASSERT_NO_FATAL_FAILURE(close_session());
+    EXPECT_EQ(delivered.payloads[1][2], 2u);
+    EXPECT_EQ(delivered.flags[0] & ECUIO_FRAME_FLAG_OVERFLOW, 0u);
+    EXPECT_NE(delivered.flags[1] & ECUIO_FRAME_FLAG_OVERFLOW, 0u);
+    EXPECT_EQ(delivered.flags[2] & ECUIO_FRAME_FLAG_OVERFLOW, 0u);
+}
+
+/* v05.00's BUFFER_OVERFLOW bit on a message flags it; one on a message
+ * for no channel of ours carries to the next one dispatched */
+TEST_F(J2534HealthTest, TheOverflowBitFlagsTheNextFrameDispatched)
+{
+    ASSERT_NO_FATAL_FAILURE(start_session("?profile=raw&filter=0x7E8"));
+    ASSERT_TRUE(post_reply(page, 1, ECUIO_PT_BUFFER_OVERFLOW));
+    ASSERT_TRUE(post_reply(page, 2));
+    ASSERT_TRUE(wait_for_frames(2, 2000));
+    const uint8_t stray[7] = {0x00, 0x00, 0x07, 0xD0, 0x41, 0x0C, 0x09};
+    ASSERT_TRUE(fake_control::post(page, stray, sizeof(stray), 1050,
+                                   ECUIO_PT_BUFFER_OVERFLOW));
+    ASSERT_TRUE(post_reply(page, 3));
+    ASSERT_TRUE(wait_for_frames(3, 2000));
+    ASSERT_NO_FATAL_FAILURE(close_session());
+    EXPECT_NE(delivered.flags[0] & ECUIO_FRAME_FLAG_OVERFLOW, 0u);
+    EXPECT_EQ(delivered.flags[1] & ECUIO_FRAME_FLAG_OVERFLOW, 0u);
+    EXPECT_EQ(delivered.payloads[2][2], 3u);
+    EXPECT_NE(delivered.flags[2] & ECUIO_FRAME_FLAG_OVERFLOW, 0u)
+        << "the stray's loss went with it";
+}
+
+/* The bit on an indication, which the child skips, reaches the next
+ * message it delivers */
+TEST_F(J2534HealthTest, TheOverflowBitOnAnIndicationFlagsTheNextMessage)
+{
+    ASSERT_NO_FATAL_FAILURE(start_session("?profile=raw&filter=0x7E8"));
+    ASSERT_TRUE(
+        post_reply(page, 1, ECUIO_PT_TX_INDICATION | ECUIO_PT_BUFFER_OVERFLOW));
+    ASSERT_TRUE(post_reply(page, 2));
+    ASSERT_TRUE(post_reply(page, 3));
+    ASSERT_TRUE(wait_for_frames(2, 2000));
+    ASSERT_NO_FATAL_FAILURE(close_session());
+    EXPECT_EQ(frames.load(), 2) << "the indication is no frame";
+    EXPECT_EQ(delivered.payloads[0][2], 2u);
+    EXPECT_NE(delivered.flags[0] & ECUIO_FRAME_FLAG_OVERFLOW, 0u);
+    EXPECT_EQ(delivered.flags[1] & ECUIO_FRAME_FLAG_OVERFLOW, 0u);
+}
+
+/* The same with nothing behind the indication in its read: the child
+ * answers the status, so the loss waits for the next message */
+TEST_F(J2534HealthTest, AnOverflowBitWithNothingAfterItWaitsForTheNextMessage)
+{
+    ASSERT_NO_FATAL_FAILURE(start_session("?profile=raw&filter=0x7E8"));
+    ASSERT_TRUE(
+        post_reply(page, 1, ECUIO_PT_TX_INDICATION | ECUIO_PT_BUFFER_OVERFLOW));
+    std::this_thread::sleep_for(std::chrono::milliseconds(300));
+    ASSERT_TRUE(post_reply(page, 2));
+    ASSERT_TRUE(wait_for_frames(1, 2000));
+    int32_t le = 0;
+    uint32_t ec = 0;
+    (void)ecuio_session_get_error_state(session, &le, &ec);
+    EXPECT_NE(le, ECUIO_ERR_TRANSPORT_HARD_FAILURE);
+    EXPECT_EQ(ec, 0u);
+    ASSERT_NO_FATAL_FAILURE(close_session());
+    EXPECT_EQ(delivered.payloads[0][2], 2u);
+    EXPECT_NE(delivered.flags[0] & ECUIO_FRAME_FLAG_OVERFLOW, 0u);
+}
+
+/* ERR_BUFFER_OVERFLOW with nothing read: no failure, and the next
+ * message arrives flagged */
+TEST_F(J2534HealthTest, AnEmptyOverflowReadFlagsTheNextMessage)
+{
+    ASSERT_NO_FATAL_FAILURE(start_session("?profile=raw&filter=0x7E8"));
+    ASSERT_NO_FATAL_FAILURE(knob("ECUIO_FAKE_READ_STATUS", "0x12"));
+    std::this_thread::sleep_for(std::chrono::milliseconds(300));
+    int32_t le = 0;
+    uint32_t ec = 0;
+    (void)ecuio_session_get_error_state(session, &le, &ec);
+    EXPECT_NE(le, ECUIO_ERR_TRANSPORT_HARD_FAILURE);
+    EXPECT_EQ(ec, 0u);
+    ASSERT_NO_FATAL_FAILURE(knob("ECUIO_FAKE_READ_STATUS", nullptr));
+    ASSERT_TRUE(post_reply(page, 1));
+    ASSERT_TRUE(post_reply(page, 2));
+    ASSERT_TRUE(wait_for_frames(2, 2000));
+    ASSERT_NO_FATAL_FAILURE(close_session());
+    EXPECT_NE(delivered.flags[0] & ECUIO_FRAME_FLAG_OVERFLOW, 0u);
+    EXPECT_EQ(delivered.flags[1] & ECUIO_FRAME_FLAG_OVERFLOW, 0u);
+}
+
+/* v05.00's ERROR_INDICATION is an indication, not a frame, even on a
+ * channel's ID */
+TEST_F(J2534HealthTest, AnErrorIndicationIsNoFrame)
+{
+    ASSERT_NO_FATAL_FAILURE(start_session("?profile=raw&filter=0x7E8"));
+    ASSERT_TRUE(post_reply(page, 1, ECUIO_PT_ERROR_INDICATION));
+    ASSERT_TRUE(post_reply(page, 2));
+    ASSERT_TRUE(wait_for_frames(1, 2000));
+    std::this_thread::sleep_for(std::chrono::milliseconds(200));
+    EXPECT_EQ(frames.load(), 1);
+    ASSERT_NO_FATAL_FAILURE(close_session());
+    EXPECT_EQ(delivered.payloads[0][2], 2u);
 }
 
 } // namespace

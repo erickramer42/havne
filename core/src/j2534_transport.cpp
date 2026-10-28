@@ -16,8 +16,10 @@
 //          through this worker: hard and quiet reads, untouched counts,
 //          the write latch, its priority and its step-down, a zero
 //          written count, unmatched frames, backoff growth, its end at
-//          a clean read and its restart, and quiet reads once nothing
-//          is left to ask.
+//          a clean read and its restart, quiet reads once nothing is
+//          left to ask, and frames lost (ERR_BUFFER_OVERFLOW, the
+//          BUFFER_OVERFLOW bit) flagged on the next frame with the link
+//          unchanged.
 // CI: non-Windows builds a linking stub; core.cpp routes j2534://
 //     only on _WIN32, so the stub is unreachable there
 
@@ -150,6 +152,9 @@ struct ecuio_j2534_transport {
      * worker-only, and 4 KB, so it lives with the transport rather than
      * on the worker's stack. read_outcome::payload points into it. */
     ecuio_frame_t rx_frame{};
+    /* A message carried BUFFER_OVERFLOW and no frame has said so yet
+     * (mark_overflow); worker-only */
+    bool overflow_pending = false;
     std::atomic<bool> stop_requested{false};
     std::thread worker;
 };
@@ -211,6 +216,18 @@ void frame_from_msg(const ecuio_pt_rx_t& m, uint32_t skip,
     }
 }
 
+/* ECUIO_FRAME_FLAG_OVERFLOW on the frame about to be dispatched, when a
+ * message since the last one carried BUFFER_OVERFLOW (J2534-1 v05.00's
+ * RxStatus bit; the surrogate child sets it for a v04.04 vendor's
+ * ERR_BUFFER_OVERFLOW). */
+void mark_overflow(ecuio_j2534_transport* t, ecuio_frame_t* f)
+{
+    if (t->overflow_pending) {
+        f->flags |= ECUIO_FRAME_FLAG_OVERFLOW;
+        t->overflow_pending = false;
+    }
+}
+
 /* Read one message and dispatch it as a frame if it matches a channel.
  * Returns the outcome: status, whether a message arrived, and whether
  * it matched. An unmatched delivery is kept distinct from silence (see
@@ -235,11 +252,16 @@ read_outcome pump_one(ecuio_j2534_transport* t, uint32_t timeout_ms)
     const uint64_t at_us = j2534_clock_step(t->clock, msg.timestamp,
                                             host_us);
     ecuio_frame_t& frame = t->rx_frame;
+    /* Frames were lost before this message: the next frame dispatched
+     * says so, this one or a later one if this isn't ours */
+    t->overflow_pending =
+        t->overflow_pending || (msg.rx_status & ECUIO_PT_BUFFER_OVERFLOW) != 0;
 
     if (t->chan_count == 0) {
         /* no channels — verbatim, id 0 (raw passive) counts as matched
          * since we explicitly requested verbatim delivery. */
         frame_from_msg(msg, 0, 0, at_us, &frame);
+        mark_overflow(t, &frame);
         ecuio_session_dispatch_callbacks(t->session, &frame);
         o.matched = true;
         return o;
@@ -255,6 +277,7 @@ read_outcome pump_one(ecuio_j2534_transport* t, uint32_t timeout_ms)
             if ((hdr & ECUIO_CAN_ID_MAX) == t->chans[i].rx_id) {
                 frame_from_msg(msg, J2534_ADDR_LEN, t->chans[i].rx_id, at_us,
                                &frame);
+                mark_overflow(t, &frame);
                 o.matched = true;
                 o.chan = i;
                 o.len = frame.data_length;

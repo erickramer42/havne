@@ -81,6 +81,8 @@
 //    forces a status with the caller's count and buffer left as
 //    passed (a sloppy vendor; see ecuio_trusted_count);
 //    ECUIO_FAKE_SPEC_READ_SEMANTICS=1 switches to J2534-1 batches.
+//    ECUIO_FAKE_READ_OVERFLOW=1 answers each delivered message with
+//    ERR_BUFFER_OVERFLOW (v04.04's form of frames lost).
 //    ECUIO_FAKE_READ_DELAY_MS stalls the first read after load, once.
 //    ECUIO_FAKE_EXIT_ON_READ=1 ends a surrogate's process at its next
 //    read (a vendor DLL that crashes).
@@ -724,6 +726,12 @@ long __stdcall PassThruReadMsgs(unsigned long ChannelID,
     fake_j2534::pop_front_locked(1);
 
     *pNumMsgs = 1;
+    /* ECUIO_FAKE_READ_OVERFLOW=1: a v04.04 vendor whose buffer
+     * overflowed, answering ERR_BUFFER_OVERFLOW with the message it read
+     * and no RxStatus bit */
+    if (fake_j2534::knob_on("ECUIO_FAKE_READ_OVERFLOW")) {
+        return ECUIO_PT_STATUS_BUFFER_OVERFLOW;
+    }
     return STATUS_NOERROR;
 }
 

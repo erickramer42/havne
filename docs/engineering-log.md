@@ -939,3 +939,15 @@ each window's newest value, and the Dashboard's only peak test asked
 whether a peak existed, not which. A review that went back to the
 issue's first evidence found it; the tach now holds the window's
 highest, and a test replays the fixture into it.
+
+**2026-10-27 — passive listening (ADR-0026's appendix):** **read the
+standard before the design leaves draft.** The appendix proposed a
+frame flag for "frames were lost before this one" as a new idea. A
+check against J2534-1 v05.00 found the same rule already there, the
+`BUFFER_OVERFLOW` bit "for the first successfully received message
+after the overflow condition has cleared", so the flag took J2534's
+name and meaning. The same read showed the J2534 path treating
+`ERR_BUFFER_OVERFLOW` as a hard failure and dropping the read's
+messages, which the standard says come back with it (review 86): a
+deliberate choice, written down in a comment, that no test or bench
+session had reason to question.

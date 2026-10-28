@@ -220,7 +220,9 @@ TEST(Elm327ProtocolTest, SpacesLinefeedsAndCaseDontMatter)
 /* ---- Line kinds ----------------------------------------------------- */
 
 /* Every word the three manuals list, as an ELM327 prints it and as a
- * clone might under AT S0 or in lower case. */
+ * clone might under AT S0 or in lower case, and the lines a monitor
+ * marks (a flow control's FC:, an error beside a frame's bytes), which
+ * aren't frames. */
 TEST(Elm327ProtocolTest, EveryWordHasItsKind)
 {
     struct Case {
@@ -247,6 +249,11 @@ TEST(Elm327ProtocolTest, EveryWordHasItsKind)
         {"<DATA ERROR", elm327_line::read_error},
         {"<RX ERROR", elm327_line::read_error},
         {"7E8 03 41 0D <DATA ERROR", elm327_line::read_error},
+        {"7E8 02 01 0C <RX ERROR", elm327_line::read_error},
+        /* A monitor's flow control: not a frame */
+        {"7E8 FC: 30 00 00", elm327_line::text},
+        {"7E8FC:300000", elm327_line::text},
+        {"FC: 30 00 00", elm327_line::text},
         {"FC RX TIMEOUT", elm327_line::read_error},
         {"OUT OF MEMORY", elm327_line::read_error},
         {"UART RX OVERFLOW", elm327_line::read_error},

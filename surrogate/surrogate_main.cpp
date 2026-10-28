@@ -224,12 +224,19 @@ static int handle_op_read(unsigned long channel, uint32_t timeout_ms,
     /* A batch that held only indications (ecuio_pt_is_indication) is
      * read again with what's left of the timeout, and at least once
      * more, so an indication never ends a read: a reply queued behind
-     * it comes back in this response. */
+     * it comes back in this response.
+     *
+     * Frames were lost (ERR_BUFFER_OVERFLOW, or a message with
+     * BUFFER_OVERFLOW set, indications too): the first frame delivered
+     * from there on carries the bit, the v05.00 form, whatever the
+     * vendor's version. With none delivered after it, the response's
+     * status says ERR_BUFFER_OVERFLOW, and the client marks the next. */
     const auto deadline = std::chrono::steady_clock::now() +
                           std::chrono::milliseconds(timeout_ms);
     uint32_t wait_ms = timeout_ms;
     uint32_t skipped = 0;
     uint32_t n = 0;
+    bool lost = false;
     long rc = ECUIO_PT_STATUS_NOERROR;
     for (;;) {
         unsigned long num = ECUIO_SUR_MAX_FRAMES_PER_READ;
@@ -243,6 +250,7 @@ static int handle_op_read(unsigned long channel, uint32_t timeout_ms,
            cleared, so it would replay the PREVIOUS read's frames as
            phantoms. */
         num = ecuio_trusted_count(rc, num);
+        lost = lost || rc == ECUIO_PT_STATUS_BUFFER_OVERFLOW;
 
         /* Frames are collected under either trusted status,
          * ERR_TIMEOUT included: per J2534-1 a read that asks for N
@@ -262,11 +270,16 @@ static int handle_op_read(unsigned long channel, uint32_t timeout_ms,
                       rc, m.RxStatus, m.Timestamp, m.DataSize, hex,
                       indication ? " (indication, not delivered)" : "");
             }
+            lost = lost || (m.RxStatus & ECUIO_PT_BUFFER_OVERFLOW) != 0;
             if (indication) {
                 ++skipped;
                 continue;
             }
             ecuio_pt_rx_from_msg(&m, &s_read_frames[n]);
+            if (lost) {
+                s_read_frames[n].rx_status |= ECUIO_PT_BUFFER_OVERFLOW;
+                lost = false;
+            }
             ++n;
         }
         if (n > 0 || num == 0 || skipped >= ECUIO_PT_MAX_SKIPPED_PER_READ) {
@@ -280,6 +293,9 @@ static int handle_op_read(unsigned long channel, uint32_t timeout_ms,
             : 0;
     }
     resp->num_frames = n;
+    if (lost) {
+        rc = ECUIO_PT_STATUS_BUFFER_OVERFLOW; /* the client marks the next */
+    }
 
     /* Trace frames and status changes only: between requests the
      * worker reads up to 100 times a second, and every empty read

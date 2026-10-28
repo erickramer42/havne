@@ -34,6 +34,7 @@
 #define ECUIO_PT_STATUS_FAILED      0x07L
 #define ECUIO_PT_STATUS_TIMEOUT     0x09L
 #define ECUIO_PT_STATUS_BUFFER_EMPTY 0x10L
+#define ECUIO_PT_STATUS_BUFFER_OVERFLOW 0x12L
 
 /* J2534-1 v04.04's name for a status, or NULL for one it doesn't
  * define: a vendor's own (the OBDX Pro VT and VX refuse to open with 34
@@ -91,11 +92,12 @@ static inline const char* ecuio_pt_status_name(long status)
  *   STATUS_NOERROR       - all requested messages read
  *   ERR_TIMEOUT          - partial batch already copied (J2534-1)
  *
+ *   ERR_BUFFER_OVERFLOW  - messages were lost before these, which were
+ *                          copied (J2534-1 v05.00, PassThruReadMsgs)
+ *
  * Every other status (ERR_FAILED, ERR_BUFFER_EMPTY, device errors,
- * ...) means "assume nothing was written". ERR_BUFFER_OVERFLOW (0x12)
- * would qualify per spec (pNumMsgs = messages actually copied) but is
- * not defined here, so an overflow read drops its batch and counts as
- * a hard failure. Applies to ReadMsgs; the write path checks
+ * ...) means "assume nothing was written". Applies to ReadMsgs; the
+ * write path checks
  * the status before the count, the count is never consumed, and the
  * surrogate logs the raw pair (it is diagnostic evidence of exactly
  * this vendor behavior).
@@ -106,6 +108,7 @@ static inline unsigned long ecuio_trusted_count(unsigned long status,
     switch (status) {
     case ECUIO_PT_STATUS_NOERROR:
     case ECUIO_PT_STATUS_TIMEOUT:
+    case ECUIO_PT_STATUS_BUFFER_OVERFLOW:
         return reported;
     default:
         return 0;
@@ -128,12 +131,23 @@ static inline unsigned long ecuio_trusted_count(unsigned long status,
 #define ECUIO_PT_ISO15765_ADDR_TYPE     0x0080UL
 #define ECUIO_PT_CAN_29BIT_ID           0x0100UL
 
+/* Two bits J2534-1 v05.00 (2022, §9.1) defines where v04.04 reserves
+ * them: ERROR_INDICATION, an indication carrying error information,
+ * and BUFFER_OVERFLOW, set on "the first successfully received message
+ * after the overflow condition has cleared". A read returning that
+ * message answers ERR_BUFFER_OVERFLOW (0x12, in both versions), which a
+ * v04.04 adapter returns without the bit. The surrogate child sets the
+ * bit itself for such a read (handle_op_read). */
+#define ECUIO_PT_ERROR_INDICATION       0x0020UL
+#define ECUIO_PT_BUFFER_OVERFLOW        0x0040UL
+
 /* Messages a read skips, because none is a received frame: a TX
  * indication or loopback echo (TX_MSG_TYPE or TX_INDICATION; the OBDX
  * Pro VX queues 0x09 after each accepted write and 0x201 after a
- * refused one), and the START_OF_MESSAGE indication a vendor queues
- * when a segmented ISO 15765 reply starts arriving, ahead of the whole
- * message (Quantex's PassThruReadMsgs reference). Skipping one doesn't
+ * refused one, v05.00's TX_FAILED), the START_OF_MESSAGE indication a
+ * vendor queues when a segmented ISO 15765 reply starts arriving, ahead
+ * of the whole message (Quantex's PassThruReadMsgs reference), and an
+ * ERROR_INDICATION. Skipping one doesn't
  * end a read: the surrogate child reads again with what's left of the
  * timeout, skipping at most ECUIO_PT_MAX_SKIPPED_PER_READ. */
 #define ECUIO_PT_MAX_SKIPPED_PER_READ 16
@@ -141,7 +155,8 @@ static inline unsigned long ecuio_trusted_count(unsigned long status,
 static inline int ecuio_pt_is_indication(unsigned long rx_status)
 {
     return (rx_status & (ECUIO_PT_TX_MSG_TYPE | ECUIO_PT_TX_INDICATION |
-                         ECUIO_PT_START_OF_MESSAGE)) != 0;
+                         ECUIO_PT_START_OF_MESSAGE |
+                         ECUIO_PT_ERROR_INDICATION)) != 0;
 }
 
 /* TxFlags (J2534-1 v04.04, VERIFIED). On ISO 15765 channels the

@@ -938,6 +938,46 @@ TEST(BridgeTest, FrameCountsAreReportedOnTheTick)
         << "one GUI-thread delivery per frame";
 }
 
+/* Frames flagged ECUIO_FRAME_FLAG_OVERFLOW (the adapter lost frames
+ * before them) are counted on the tick, the first with one activity-log
+ * line; a new session starts the count again */
+TEST(BridgeTest, FramesAfterALossAtTheAdapterAreCountedAndLoggedOnce)
+{
+    QtTuneBridge bridge;
+    QStringList log;
+    QObject::connect(&bridge, &QtTuneBridge::logMessage,
+                     [&log](const QString& line) { log << line; });
+    int changes = 0;
+    QObject::connect(&bridge, &QtTuneBridge::overflowFramesChanged,
+                     [&changes]() { ++changes; });
+    ASSERT_TRUE(bridge.connectSession("mock://overflow").isEmpty());
+    ecuio_frame_t f{};
+    f.arbitration_id = 0x123;
+    f.data_length = 1;
+    bridge.dispatchFrameForTesting(f);
+    f.flags = ECUIO_FRAME_FLAG_OVERFLOW;
+    bridge.dispatchFrameForTesting(f);
+    spinLoop(250);
+    EXPECT_EQ(bridge.overflowFrames(), 1);
+    bridge.dispatchFrameForTesting(f);
+    bridge.dispatchFrameForTesting(f);
+    spinLoop(250);
+    EXPECT_EQ(bridge.overflowFrames(), 3);
+    EXPECT_GE(changes, 2);
+    const QString line =
+        QStringLiteral("The adapter's buffer overflowed: frames were lost");
+    EXPECT_EQ(log.count(line), 1) << log.join('\n').toStdString();
+    ASSERT_TRUE(disconnectAndWait(bridge));
+    EXPECT_EQ(bridge.overflowFrames(), 3) << "readable after the disconnect";
+    ASSERT_TRUE(bridge.connectSession("mock://overflow-again").isEmpty());
+    EXPECT_EQ(bridge.overflowFrames(), 0);
+    bridge.dispatchFrameForTesting(f);
+    spinLoop(250);
+    EXPECT_EQ(bridge.overflowFrames(), 1);
+    EXPECT_EQ(log.count(line), 2) << "once a session";
+    ASSERT_TRUE(disconnectAndWait(bridge));
+}
+
 TEST(BridgeTest, StreamingContinuesPastTenThousandFrames)
 {
     QtTuneBridge bridge;

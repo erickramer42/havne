@@ -276,6 +276,9 @@ class QtTuneBridge : public QObject
     Q_PROPERTY(bool disconnecting READ disconnecting NOTIFY disconnectingChanged)
     Q_PROPERTY(int frameCount READ frameCount NOTIFY frameCountChanged)
     Q_PROPERTY(int droppedFrames READ droppedFrames NOTIFY droppedFramesChanged)
+    // This session's frames that came after a loss at the adapter
+    // (ECUIO_FRAME_FLAG_OVERFLOW: its buffer overflowed, frames were lost)
+    Q_PROPERTY(int overflowFrames READ overflowFrames NOTIFY overflowFramesChanged)
     Q_PROPERTY(FrameListModel* model READ model CONSTANT)
     Q_PROPERTY(int guiNotifyCount READ guiNotifyCount NOTIFY notifyCountChanged)
     Q_PROPERTY(int signalBatchCount READ signalBatchCount NOTIFY signalBatchChanged)
@@ -319,6 +322,7 @@ public:
     bool connected() const { return m_connected.load(std::memory_order_acquire); }
     int frameCount() const { return m_currentFrameCount; }
     int droppedFrames() const { return m_droppedFrames.load(std::memory_order_relaxed); }
+    int overflowFrames() const { return m_reportedOverflow; }
     FrameListModel* model() const { return m_frameLog; }
     int guiNotifyCount() const { return m_guiNotifyCount; }
     int signalBatchCount() const { return m_signalBatchCount; }
@@ -438,6 +442,7 @@ signals:
     void frameCountChanged();
     void framesReset();
     void droppedFramesChanged(int);
+    void overflowFramesChanged();
     void notifyCountChanged(int newCount);
     void signalBatchChanged();
     void currentUriChanged();
@@ -490,6 +495,11 @@ private:
     // Every frame onFrame saw, dropped ones too
     std::atomic<uint64_t> m_framesDelivered{0};
     std::atomic<int> m_droppedFrames{0};
+    // Frames flagged ECUIO_FRAME_FLAG_OVERFLOW, counted in onFrame so one
+    // the in-flight cap drops still counts; reported on the tick, the
+    // first time with an activity-log line
+    std::atomic<int> m_overflowFrames{0};
+    int m_reportedOverflow = 0;        // GUI-thread-only
     int m_currentFrameCount = 0;      // GUI-thread-only (queued invocations)
     int m_reportedFrameCount = 0;      // what QML was last told, and below
     int m_reportedNotifyCount = 0;

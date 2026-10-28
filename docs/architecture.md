@@ -260,8 +260,16 @@ a Bluetooth stack ([ADR-0026](adr/0026-elm327-transport.md)).
   its time after the request.
 - **Read-only** as every session is: the adapter's memory is never
   written, and no serial number is asked for.
-- **Not yet:** passive listening (`AT MA`) and Bluetooth LE, which has
-  no serial port; a session with nothing to ask is refused at create.
+- **Passive listening:** a session with nothing to ask monitors with
+  `AT MA` (ADR-0026's appendix "passive listening"), which keeps the
+  receive filter, so it hears its channels' IDs and never acknowledges.
+  Five seconds with no line stop and restart it, which proves the
+  adapter is there; `BUFFER FULL` flags the next frame
+  `ECUIO_FRAME_FLAG_OVERFLOW`, as a J2534 driver's
+  `ERR_BUFFER_OVERFLOW` does; closing stops it with a space. A session
+  with no channel is refused at create.
+- **Not yet:** Bluetooth LE, which has no serial port, and the whole
+  bus unfiltered.
 
 ## Link health
 

@@ -34,6 +34,16 @@
 //   pp2a, pp2a_on   AT PPS's parameter 2A
 //   dropped      the link is down: the port's reads and writes fail, and
 //                opening it says "no such port"
+//   hung         while monitoring, a stop gets nothing back and the
+//                monitor prints nothing more: no STOPPED, no prompt
+//   full_ends_monitor  BUFFER FULL ends the monitor with a prompt, as a
+//                plain ELM327's does
+//
+// AT MA monitors (ADR-0026's appendix "passive listening"): the
+// messages bus() puts on the bus print, one ISO-TP frame a line, while
+// they pass the receive filter; any byte from the host stops it,
+// discarded, with STOPPED and the prompt. buffer_full() and
+// end_monitor() are the monitor's other ends.
 
 #ifndef ECUIO_TESTS_FAKE_ELM327_H
 #define ECUIO_TESTS_FAKE_ELM327_H
@@ -68,6 +78,8 @@ struct knobs {
     uint8_t pp2a = 0x04;
     bool pp2a_on = false;
     bool dropped = false;
+    bool hung = false;
+    bool full_ends_monitor = false;
 };
 
 /* The fake's STN firmware string: an STN chip's shape, a version no chip
@@ -97,6 +109,8 @@ public:
     uint32_t requests = 0;
     uint32_t resets = 0;   /* AT Z */
     uint32_t bare_crs = 0; /* a CR alone, which repeats a command */
+    uint32_t stops = 0;    /* bytes that stopped a monitor */
+    uint8_t last_stop = 0; /* the last of them */
 
     /* Back to power-on: settings, output and the record. */
     void clear()
@@ -105,8 +119,59 @@ public:
         protocol_ = '0';
         head_ = tail_ = 0;
         in_len_ = 0;
-        commands = requests = resets = bare_crs = 0;
+        commands = requests = resets = bare_crs = stops = 0;
+        last_stop = 0;
         k = knobs{};
+    }
+
+    bool monitoring() const { return monitoring_; }
+
+    /* A message on the bus at now_us, from CAN ID id: printed while
+     * monitoring, if the receive filter passes it. */
+    void bus(uint32_t id, const uint8_t* m, size_t len, int64_t now_us)
+    {
+        if (monitoring_ && !k.hung && passes(id)) {
+            message(id, m, len, now_us);
+        }
+    }
+
+    /* A line printed as it is while monitoring: a flow control's FC:, a
+     * frame with <DATA ERROR beside it. */
+    void monitor_line(const char* text, int64_t now_us)
+    {
+        if (monitoring_ && !k.hung) {
+            text_line(text, now_us);
+        }
+    }
+
+    /* The adapter's buffer overflowed while monitoring: BUFFER FULL, and
+     * with full_ends_monitor the prompt after it. */
+    void buffer_full(int64_t now_us)
+    {
+        if (!monitoring_ || k.hung) {
+            return;
+        }
+        text_line("BUFFER FULL", now_us);
+        if (k.full_ends_monitor) {
+            monitoring_ = false;
+            end_line(now_us);
+            prompt(now_us);
+        }
+    }
+
+    /* The monitor ends with no stop sent: word (CAN ERROR, STOPPED, or
+     * nullptr for the prompt alone), then the prompt. */
+    void end_monitor(const char* word, int64_t now_us)
+    {
+        if (!monitoring_) {
+            return;
+        }
+        monitoring_ = false;
+        if (word != nullptr) {
+            text_line(word, now_us);
+        }
+        end_line(now_us);
+        prompt(now_us);
     }
 
     /* The command index i (0-based) as recorded, or "" past the end. */
@@ -131,6 +196,16 @@ public:
     {
         for (size_t i = 0; i < n; ++i) {
             const char c = static_cast<char>(data[i]);
+            if (monitoring_) {
+                /* Any byte stops the monitor and is discarded */
+                ++stops;
+                last_stop = data[i];
+                if (!k.hung) {
+                    monitoring_ = false;
+                    reply("STOPPED", now_us);
+                }
+                continue;
+            }
             if (echo_ && c != '\r') {
                 put(&data[i], 1, now_us);
             }
@@ -203,9 +278,11 @@ private:
     bool cfm_set_ = false;
     uint32_t cf_ = 0;
     uint32_t cm_ = 0;
+    bool monitoring_ = false;
 
     void settings_defaults()
     {
+        monitoring_ = false;
         echo_ = true;
         linefeeds_ = false;
         spaces_ = true;
@@ -217,6 +294,13 @@ private:
     }
 
     bool ext29() const { return protocol_ == '7' || protocol_ == '9'; }
+
+    /* Whether the receive filter passes CAN ID id */
+    bool passes(uint32_t id) const
+    {
+        return !cra_set_ ? (!cfm_set_ || (id & cm_) == (cf_ & cm_))
+                         : id == cra_;
+    }
 
     void put(const void* bytes, size_t n, int64_t at)
     {
@@ -362,7 +446,9 @@ private:
             reply(k.version, now);
             return;
         }
-        if (is("I")) {
+        if (is("MA")) {
+            monitoring_ = true; /* no answer until it's stopped */
+        } else if (is("I")) {
             reply(k.version, now);
         } else if (is("RV")) {
             char v[16];
@@ -555,10 +641,8 @@ private:
         const uint32_t tx = ext29() ? (uint32_t{cp_} << 24) | (sh_ & 0xFFFFFFu)
                                     : (sh_ & 0x7FFu);
         const uint32_t rx = fake_ecu::reply_id(tx);
-        const bool passes =
-            !cra_set_ ? (!cfm_set_ || (rx & cm_) == (cf_ & cm_)) : rx == cra_;
         size_t answer_len = 0;
-        if (k.no_data || rx == 0 || !passes ||
+        if (k.no_data || rx == 0 || !passes(rx) ||
             !fake_ecu::answer(req, len, k.unsupported_nrc, answer_,
                               &answer_len) ||
             answer_len > 4095) {

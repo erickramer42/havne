@@ -700,6 +700,11 @@ QString QtTuneBridge::startSession(ecuio_session_t* session)
     m_framesDelivered.store(0, std::memory_order_relaxed);
     m_droppedFrames.store(0, std::memory_order_relaxed);
     m_lastReportedDropped = 0;
+    m_overflowFrames.store(0, std::memory_order_relaxed);
+    if (m_reportedOverflow != 0) {
+        m_reportedOverflow = 0;
+        emit overflowFramesChanged();
+    }
     m_frameLatency.clear();
     m_valueLatency.clear();
     m_valuesStaged = 0;
@@ -1086,6 +1091,9 @@ void QtTuneBridge::onFrame(const ecuio_frame_t* frame, void* user_data)
     if (!frame || !self) return;
     if (!self->m_accepting.load(std::memory_order_acquire)) return;
     self->m_framesDelivered.fetch_add(1, std::memory_order_relaxed);
+    if (frame->flags & ECUIO_FRAME_FLAG_OVERFLOW) {
+        self->m_overflowFrames.fetch_add(1, std::memory_order_relaxed);
+    }
 
     // Backpressure: bound the QUEUED backlog, not the lifetime count.
     if (self->m_inFlightFrames.load(std::memory_order_relaxed) >= MaxInFlightFrames) {
@@ -1166,6 +1174,15 @@ void QtTuneBridge::notifyFrameCounts()
     if (m_guiNotifyCount != m_reportedNotifyCount) {
         m_reportedNotifyCount = m_guiNotifyCount;
         emit notifyCountChanged(m_guiNotifyCount);
+    }
+    const int overflow = m_overflowFrames.load(std::memory_order_relaxed);
+    if (overflow != m_reportedOverflow) {
+        if (m_reportedOverflow == 0) {
+            emit logMessage(QStringLiteral(
+                "The adapter's buffer overflowed: frames were lost"));
+        }
+        m_reportedOverflow = overflow;
+        emit overflowFramesChanged();
     }
 }
 

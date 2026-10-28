@@ -204,6 +204,17 @@ Pane {
                     visible: Bridge.droppedFrames > 0
                 }
 
+                // Frames that came after the adapter lost some (its buffer
+                // overflowed), as against the ones dropped above
+                Label {
+                    objectName: "overflowLabel"
+                    text: qsTr("%1 after a loss at the adapter")
+                        .arg(Bridge.overflowFrames)
+                    color: Theme.warning
+                    font.pixelSize: 13
+                    visible: Bridge.overflowFrames > 0
+                }
+
                 // Bridge diagnostics: frames delivered to the GUI thread (one
                 // queued call each, ADR-0005's per-frame baseline) and the
                 // coalesced signal batches. Left out at phone width.

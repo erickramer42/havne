@@ -648,3 +648,116 @@ start at about 30 completed requests a second, its replies printed as
 of the 28 seconds to recovery most was Bluetooth off, and the first
 value came within about 6.5 seconds of Bluetooth coming back (the
 reopen's 5-second backoff and the setup).
+
+## Appendix: 2026-10-27, passive listening
+
+The request path has run on a car (the appendix "the first vehicle
+session"), so §4's later step is built. This appendix settles its
+details. A session with nothing to ask (`raw` without `?poll=`, or a
+profile with no requests) listens with `AT MA` instead of being refused
+at create.
+
+**`AT MA` on every adapter, never `STMA`.** On both chips `AT MA` keeps
+the CAN receive filter the setup sets (`AT CRA`, or `AT CF` and
+`AT CM`). The datasheet says the monitor "will be affected by" CF, CM
+and CRA. The FRPM says `ATMA` opens the flow control, pass and block
+filters but not the CAN hardware filter, which `STMA` opens as well. So
+`AT MA` hears exactly the channels' reply IDs on both chips, as a J2534
+passive session does, and §3's one path for every adapter holds. The
+FRPM lists `ATMA` among the commands kept for backwards compatibility;
+the STN still answers it.
+
+**What it hears:**
+- **The channels, from §2:** `?filter=`, the profile's, or for `raw`
+  the default profile's engine ECU.
+- **A session with no channel is still refused at create:** a profile
+  that declares none, without `?filter=`. An unfiltered bus is more than
+  a 256-byte buffer and a serial link carry, and its broadcast frames
+  aren't ISO-TP, so the reassembly below can't take them. Listening to
+  the whole bus (raw frames, `AT CAF0`, for a car whose OBD port carries
+  more than diagnostics) would be a step of its own.
+- **The monitor is silent.** Both manuals say it sends no ACK and no
+  flow control, so a passive session never reaches the bus, which goes
+  beyond §5.
+- **A multi-frame message completes only when the tester it answers
+  sends the flow control.**
+
+**Lines become frames as a reply's do.** Each frame line goes through
+the same ISO-TP reassembly per CAN ID and is dispatched with its arrival
+time. Some lines the monitor marks: a flow control prefixed `FC:`, a
+line ending `<DATA ERROR` or `<RX ERROR`. These aren't frames; each is
+ignored and counted. The engine gets nothing, since it has no requests.
+
+**Starting and stopping.** The worker sends `AT MA` once the setup has
+run. It then reads lines, with no prompt expected, in the request
+path's 20 ms slices. To stop the monitor it sends one space and reads to
+the prompt, with `STOPPED` before it.
+- **Why a space:** both chips ignore spaces at the prompt, so a stop
+  that crosses a monitor already ended can't become a command. A lone
+  CR would repeat the last command, `AT MA` itself.
+- **Detach:** the worker waits at most 1 s for the prompt, then closes
+  the port either way. An adapter left monitoring is already handled at
+  the next connect: the setup sends `AT Z` twice at most for exactly
+  that case.
+
+**Link health**, §6's table for a session that only listens:
+
+| What happens | State |
+|---|---|
+| A whole message from a channel | `ECUIO_OK` |
+| No message: each 100 ms read counts toward the quiet run, as J2534's passive reads do | `ECUIO_ERR_VEHICLE_TIMEOUT` (quiet), no episode |
+| 5 s with no line at all | the worker stops the monitor. `STOPPED` and the prompt within 5 s show the adapter is there, and `AT MA` starts again with the state unchanged. No prompt is a hard failure. A quiet bus and a hung adapter look the same until the adapter is asked |
+| The port fails | `ECUIO_ERR_TRANSPORT_HARD_FAILURE`; the port is reopened and the setup runs on the backoff's schedule, then `AT MA` (§6) |
+| `BUFFER FULL` | frames lost (below), the state unchanged. If a prompt follows (the monitor ended), `AT MA` again at once |
+| The monitor ends unasked any other way (`CAN ERROR`, `STOPPED` with no stop sent, a prompt) | logged, and `AT MA` again on the backoff's schedule; counts as quiet. The VX answers `NO DATA` with no bus at all (the appendix "the VX's answers"), so a missing bus isn't something the monitor can report reliably |
+| `LV RESET`, or the version string | the setup again, as §6 |
+
+**Frames lost.** `BUFFER FULL` means the adapter dropped lines it
+couldn't send in time, and how many is unknown.
+- **The next frame dispatched carries a new flag,**
+  `ECUIO_FRAME_FLAG_OVERFLOW` (`0x80`, appended): frames were lost
+  before this one. The flag is J2534's own rule. J2534-1 (v05.00,
+  §7.2.2.1 and its error handling) sets the `BUFFER_OVERFLOW` bit of
+  `RxStatus` "for the first successfully received message after the
+  overflow condition has cleared". A read that returns such a message
+  answers `ERR_BUFFER_OVERFLOW`, with the messages it read.
+- **The loss travels with the data.** `frames.csv` records each frame's
+  flags, so a recording shows where the gap is and its replay plays it
+  back.
+- **The bridge counts flagged frames.** The Log page's frame view shows
+  the count beside the frames the bridge itself dropped, and the
+  activity log says so the first time in a session ("The adapter's
+  buffer overflowed: frames were lost").
+
+**The wire log** always takes the monitor's start, each stop and why,
+each `BUFFER FULL` and each liveness check. Frame lines go in only with
+`ECUIO_SUR_LOG_FRAMES=1`, as a request's do.
+
+**Verification:**
+- **UNIT:** the `FC:` line and a frame line ending `<DATA ERROR` are
+  classified as not frames.
+- **HARNESS:** the fake ELM327 learns `AT MA`. It streams its ECU's
+  frames through the receive filter it was given (single and
+  multi-frame, plus one ID the filter must stop) until a character
+  arrives. Its knobs cover `BUFFER FULL` with and without a prompt
+  after it, no prompt to a stop (a hung adapter), and a dropped link.
+  The tests:
+  - a `raw` session's messages are dispatched, the channel's only;
+  - the quiet run reads as quiet;
+  - the liveness check stops and restarts the monitor;
+  - a hung adapter is a hard failure and recovers;
+  - `BUFFER FULL` flags the next frame and leaves the state alone;
+  - detach sends a space and waits for the prompt;
+  - nothing is allocated per frame;
+  - a session with no channel is refused at create. The test that
+    expected a passive session to be refused now expects it to run.
+- **Bridge:** a flagged frame is counted, and the activity log line
+  appears once.
+- **BENCH:** the VX on USB power with no bus. What it prints to
+  `AT MA`, the quiet state, the liveness cycle every 5 s and the stop at
+  detach, all from the wire log.
+- **Vehicle:** a passive session needs another tester on the bus. That
+  means an OBD Y-splitter cable, with the VX polling through J2534 and
+  the MX+ listening through `elm327://…?profile=raw`. The listener's
+  messages are compared with the poller's recording of the same
+  replies. Without a splitter this item waits.

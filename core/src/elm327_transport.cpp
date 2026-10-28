@@ -7,9 +7,11 @@
 //          digit, header switches, the rotation, the probe, the DID scan,
 //          identification), multi-frame replies, link health and its
 //          recovery (NO DATA, CAN ERROR, a dropped link, an adapter
-//          reset), the pending reply, the wire log (TheWireLog*), and
-//          nothing allocated per frame, with the log's request lines on
-//          or off.
+//          reset), the pending reply, passive listening (Listening*:
+//          AT MA, the channels' messages, the quiet run, the liveness
+//          check, BUFFER FULL's overflow flag, the monitor's ends and the
+//          stop at detach), the wire log (TheWireLog*), and nothing
+//          allocated per frame, with the log's request lines on or off.
 //          Elm327PortTest (POSIX): a whole session over a
 //          pseudo-terminal through the OS's port. BENCH: the Win32 port.
 
@@ -62,9 +64,16 @@ constexpr uint32_t ELM327_READ_SLICE_MS = 20;
 
 /* With nothing left to ask the worker listens this long a pass, as the
  * J2534 worker's passive reads do, so a quiet run takes the same time;
- * waiting for a request's floor or wait, at most the slice. */
+ * waiting for a request's floor or wait, at most the slice. A monitor
+ * counts each window this long with no message toward the quiet run. */
 constexpr uint32_t ELM327_IDLE_READ_MS = 100;
 constexpr uint32_t ELM327_WAIT_SLICE_MS = 10;
+
+/* A monitor with no line this long is stopped, to show the adapter is
+ * there; its prompt is waited for as long. At detach the stop's prompt
+ * is waited for this long, then the port closes either way. */
+constexpr uint32_t ELM327_MONITOR_CHECK_MS = 5000;
+constexpr uint32_t ELM327_MONITOR_DETACH_MS = 1000;
 
 /* Commands and requests, CR included. */
 constexpr size_t ELM327_CMD_MAX = 24;
@@ -121,9 +130,12 @@ struct ecuio_elm327_transport {
     std::thread worker;
     elm327_log log; /* the wire log (elm327_log.h) */
     std::atomic<bool> stop_requested{false};
-    /* A request's exchange is under way: the wire log takes it only
-     * with frame logging */
+    /* A request's exchange, or a monitor, is under way: the wire log
+     * takes its lines only with frame logging */
     bool in_ask = false;
+    /* BUFFER FULL came: the next frame dispatched carries
+     * ECUIO_FRAME_FLAG_OVERFLOW */
+    bool overflow_pending = false;
 
     ecuio_elm327_transport() = default;
     ecuio_elm327_transport(const ecuio_elm327_transport&) = delete;
@@ -593,10 +605,31 @@ struct reply_seen {
     bool reset = false;   /* the adapter reset */
 };
 
+/* The wire log's lines of a request's exchange or a monitor go in only
+ * with frame logging (logging()) */
+struct exchange_scope {
+    transport* t;
+    explicit exchange_scope(transport* x) : t(x) { t->in_ask = true; }
+    ~exchange_scope() { t->in_ask = false; }
+    exchange_scope(const exchange_scope&) = delete;
+    exchange_scope& operator=(const exchange_scope&) = delete;
+};
+
+/* BUFFER FULL: the adapter dropped lines it couldn't send in time. The
+ * next frame dispatched says so (ADR-0026's appendix "passive
+ * listening"); the link's state is unchanged. */
+void note_overflow(transport* t)
+{
+    t->overflow_pending = true;
+    elm327_log_write(t->log, "BUFFER FULL: frames were lost");
+}
+
 /* A frame line toward its message; a whole one from a channel's ECU is
- * dispatched and handed to the engine. One from another ID got past the
+ * dispatched, and handed to the engine when to_engine (a monitor's
+ * messages answer no request of ours). One from another ID got past the
  * receive filter's mask and is dropped, as J2534's are. */
-void take_frame(transport* t, const elm327_can_line& f, reply_seen& seen)
+void take_frame(transport* t, const elm327_can_line& f, reply_seen& seen,
+                bool to_engine)
 {
     elm327_message m;
     if (elm327_isotp_take(t->isotp, f, &m) != elm327_isotp_result::complete) {
@@ -611,13 +644,19 @@ void take_frame(transport* t, const elm327_can_line& f, reply_seen& seen)
         frame.timestamp_us = static_cast<uint64_t>(at);
         frame.arbitration_id = m.id;
         frame.flags = t->ext29 ? ECUIO_FRAME_FLAG_EXTENDED : 0u;
+        if (t->overflow_pending) {
+            frame.flags |= ECUIO_FRAME_FLAG_OVERFLOW;
+            t->overflow_pending = false;
+        }
         frame.reserved = 0;
         /* ISO-TP's longest message, 4095 bytes, fits the frame whole */
         memcpy(frame.data, m.data, m.len);
         frame.data_length = m.len;
         ecuio_session_dispatch_callbacks(t->session, &frame);
-        (void)ecuio_engine_on_frame(&t->engine, c, frame.data,
-                                    frame.data_length, at, nullptr);
+        if (to_engine) {
+            (void)ecuio_engine_on_frame(&t->engine, c, frame.data,
+                                        frame.data_length, at, nullptr);
+        }
         seen.matched = true;
         return;
     }
@@ -630,13 +669,7 @@ elm327_io ask(transport* t, uint32_t c, int32_t r, reply_seen& seen)
 {
     /* The header switch, the request and its reply go in the wire log
      * only with frame logging */
-    struct asking {
-        transport* t;
-        explicit asking(transport* x) : t(x) { t->in_ask = true; }
-        ~asking() { t->in_ask = false; }
-        asking(const asking&) = delete;
-        asking& operator=(const asking&) = delete;
-    } scope(t);
+    const exchange_scope scope(t);
     ecuio_request_engine& e = t->engine;
     /* Until the request goes out, an early return leaves it unsent: a
      * one-shot stays due */
@@ -667,7 +700,7 @@ elm327_io ask(transport* t, uint32_t c, int32_t r, reply_seen& seen)
         elm327_can_line f;
         switch (elm327_classify(line, t->ext29, &f)) {
         case elm327_line::frame:
-            take_frame(t, f, seen);
+            take_frame(t, f, seen, true);
             break;
         case elm327_line::no_bus:
             seen.no_bus = true;
@@ -689,6 +722,200 @@ elm327_io ask(transport* t, uint32_t c, int32_t r, reply_seen& seen)
         (void)elm327_isotp_end_reply(t->isotp);
     }
     return io;
+}
+
+/* ---- Passive listening (ADR-0026's appendix "passive listening") ----
+ * A session with nothing to ask monitors with AT MA, which keeps the
+ * receive filter the setup set, so it hears the channels' reply IDs on
+ * every adapter. The monitor is silent: no ACK, no flow control. */
+
+/* How a monitor ended. */
+struct monitor_end {
+    /* prompt: the monitor ended and the adapter takes commands; else
+     * what ended the read (silent, failed, stopped, reset) */
+    elm327_io io = elm327_io::prompt;
+    bool at_once = false; /* AT MA again without a wait: a check or
+                           * BUFFER FULL ended it */
+    bool heard = false;   /* a channel's message arrived */
+};
+
+/* Stops the monitor with one space and reads to the prompt within
+ * timeout_ms, its lines still taken. A space because both chips ignore
+ * one at the prompt: a stop that crosses a monitor already ended can't
+ * become a command, where a CR alone would repeat AT MA. */
+template <typename OnLine>
+elm327_io stop_monitor(transport* t, uint32_t timeout_ms, OnLine& on_line)
+{
+    if (logging(t)) {
+        elm327_log_write(t->log, "> (a space: the monitor's stop)");
+    }
+    t->sent_at = std::chrono::steady_clock::now();
+    const uint8_t stop = ' ';
+    if (!t->port.ops->write(t->port.impl, &stop, 1)) {
+        elm327_log_write(t->log,
+                         "the port failed (writing the monitor's stop)");
+        return elm327_io::failed;
+    }
+    const auto deadline = t->sent_at + std::chrono::milliseconds(timeout_ms);
+    for (;;) {
+        bool line = false;
+        if (take_bytes(t, "ATMA", on_line, &line)) {
+            return elm327_io::prompt;
+        }
+        const auto now = std::chrono::steady_clock::now();
+        if (now >= deadline) {
+            return elm327_io::silent;
+        }
+        const auto left = static_cast<uint32_t>(
+            std::chrono::duration_cast<std::chrono::milliseconds>(deadline -
+                                                                  now)
+                .count());
+        const int32_t n = t->port.ops->read(
+            t->port.impl, t->rx_buf, sizeof(t->rx_buf),
+            (left < ELM327_READ_SLICE_MS) ? left + 1 : ELM327_READ_SLICE_MS);
+        if (n < 0) {
+            elm327_log_write(t->log,
+                             "the port failed (reading to the monitor's stop)");
+            return elm327_io::failed;
+        }
+        t->rx_len = static_cast<uint32_t>(n);
+        t->rx_pos = 0;
+    }
+}
+
+/* One monitor: AT MA, then its lines with no prompt expected. A
+ * channel's message is dispatched and matched; each 100 ms with none
+ * counts toward the quiet run. It ends on:
+ *   the prompt         BUFFER FULL ended it (AT MA again at once), or
+ *                      something else did (again on the backoff's
+ *                      schedule, counted as quiet)
+ *   5 s with no line   the check: stopped, and STOPPED and the prompt
+ *                      within 5 s show the adapter is there (AT MA
+ *                      again); no prompt is silent, a hard failure,
+ *                      since a quiet bus and a hung adapter look the
+ *                      same until the adapter is asked
+ *   the session closes stopped, the prompt waited for at most 1 s
+ *   a reset line, or the port failing */
+monitor_end listen(transport* t, link_health& h)
+{
+    monitor_end end;
+    end.io = drain(t, 0);
+    if (end.io != elm327_io::prompt) {
+        return end;
+    }
+    const exchange_scope scope(t);
+    elm327_log_write(t->log, "the monitor starts (AT MA)");
+    if (logging(t)) {
+        elm327_log_write(t->log, "> ATMA");
+    }
+    static const char kMonitor[] = "ATMA\r";
+    t->sent_at = std::chrono::steady_clock::now();
+    if (!t->port.ops->write(t->port.impl,
+                            reinterpret_cast<const uint8_t*>(kMonitor),
+                            static_cast<uint32_t>(sizeof(kMonitor) - 1))) {
+        elm327_log_write(t->log, "the port failed (writing ATMA)");
+        end.io = elm327_io::failed;
+        return end;
+    }
+    bool full = false;
+    bool reset = false;
+    bool heard_now = false; /* a message in this 100 ms window */
+    auto on_line = [&](const elm327_reader& r) {
+        elm327_can_line f;
+        switch (elm327_classify(r, t->ext29, &f)) {
+        case elm327_line::frame: {
+            reply_seen seen;
+            take_frame(t, f, seen, false);
+            if (seen.matched) {
+                heard_now = true;
+                end.heard = true;
+                link_on_read(h, false, true, false);
+            }
+            break;
+        }
+        case elm327_line::buffer_full:
+            note_overflow(t);
+            full = true;
+            break;
+        case elm327_line::reset:
+            reset = true;
+            break;
+        default:
+            /* a flow control's FC:, <DATA ERROR, STOPPED, CAN ERROR:
+             * not frames; a prompt after them ends the monitor */
+            break;
+        }
+    };
+    auto last_line = t->sent_at;
+    auto window = t->sent_at;
+    for (;;) {
+        bool line = false;
+        const bool prompt = take_bytes(t, "ATMA", on_line, &line);
+        if (reset) {
+            end.io = elm327_io::reset;
+            break;
+        }
+        if (prompt) {
+            end.at_once = full;
+            elm327_log_write(t->log,
+                             full ? "the monitor ended at BUFFER FULL: AT MA "
+                                    "again"
+                                  : "the monitor ended unasked: AT MA again "
+                                    "after a wait");
+            break;
+        }
+        const auto now = std::chrono::steady_clock::now();
+        if (line) {
+            last_line = now;
+        }
+        if (t->stop_requested.load()) {
+            (void)stop_monitor(t, ELM327_MONITOR_DETACH_MS, on_line);
+            elm327_log_write(t->log, "the monitor stopped: the session "
+                                     "closes");
+            end.io = elm327_io::stopped;
+            break;
+        }
+        if (now - window >= std::chrono::milliseconds(ELM327_IDLE_READ_MS)) {
+            if (!heard_now) {
+                link_on_read(h, false, false, true);
+            }
+            heard_now = false;
+            window = now;
+        }
+        if (now - last_line >=
+            std::chrono::milliseconds(ELM327_MONITOR_CHECK_MS)) {
+            elm327_log_write(
+                t->log,
+                "no line for %u s: the monitor stops to "
+                "check the adapter",
+                static_cast<unsigned>(ELM327_MONITOR_CHECK_MS / 1000));
+            end.io = stop_monitor(t, ELM327_MONITOR_CHECK_MS, on_line);
+            if (reset) {
+                end.io = elm327_io::reset;
+            } else if (end.io == elm327_io::prompt) {
+                end.at_once = true;
+                elm327_log_write(t->log, "the adapter answered the stop: AT MA "
+                                         "again");
+            } else if (end.io == elm327_io::silent) {
+                elm327_log_write(
+                    t->log, "no prompt within %u s of the stop",
+                    static_cast<unsigned>(ELM327_MONITOR_CHECK_MS / 1000));
+            }
+            break;
+        }
+        const int32_t n = t->port.ops->read(
+            t->port.impl, t->rx_buf, sizeof(t->rx_buf), ELM327_READ_SLICE_MS);
+        if (n < 0) {
+            elm327_log_write(t->log, "the port failed (reading the monitor)");
+            end.io = elm327_io::failed;
+            break;
+        }
+        t->rx_len = static_cast<uint32_t>(n);
+        t->rx_pos = 0;
+    }
+    /* a message under way when the monitor ended never finishes */
+    (void)elm327_isotp_end_reply(t->isotp);
+    return end;
 }
 
 /* Closes the port; the worker reopens it on the backoff's schedule. */
@@ -758,7 +985,11 @@ bool backoff_sleep(transport* t, uint32_t ms)
  * the port is reopened and the setup run on the backoff's schedule, so a
  * Bluetooth link that drops and returns recovers without a reconnect. An
  * adapter that resets on its own gets its setup again, and is a hard
- * failure only until that succeeds. */
+ * failure only until that succeeds.
+ *
+ * A session with nothing to ask at all listens instead (listen(), AT MA):
+ * a monitor that ends unasked starts again on the backoff's schedule,
+ * reset by a message heard. */
 void elm327_worker(transport* t)
 {
     ecuio_request_engine& e = t->engine;
@@ -766,6 +997,8 @@ void elm327_worker(transport* t)
     uint32_t published[ECUIO_MAX_CHANNELS] = {};
     uint32_t published_identity[ECUIO_MAX_CHANNELS] = {};
     uint32_t next_chan = 0;
+    const bool passive = e.count == 0 && e.scan_count == 0;
+    uint32_t relisten_ms = 0;
     if (t->probe) {
         ecuio_engine_probe(&e, now_us(t));
     }
@@ -799,7 +1032,22 @@ void elm327_worker(transport* t)
                 r = ecuio_engine_due(&e, c, now);
             }
             elm327_io io = elm327_io::prompt;
-            if (r != ECUIO_ENGINE_NONE) {
+            if (passive) {
+                const monitor_end m = listen(t, h);
+                io = m.io;
+                if (m.heard) {
+                    relisten_ms = 0;
+                }
+                if (io == elm327_io::prompt && !m.at_once) {
+                    link_on_read(h, false, false, true);
+                    relisten_ms = (relisten_ms == 0)
+                                      ? LINK_BACKOFF_BASE_MS
+                                      : link_backoff_next(relisten_ms);
+                    if (backoff_sleep(t, relisten_ms)) {
+                        break;
+                    }
+                }
+            } else if (r != ECUIO_ENGINE_NONE) {
                 next_chan = (c + 1) % e.chan_count;
                 reply_seen seen;
                 io = ask(t, c, r, seen);
@@ -998,10 +1246,14 @@ ecuio_status_t elm327_attach(ecuio_session_t* session, const char* uri,
     if (st != ECUIO_OK) {
         return st;
     }
-    if (t->engine.count == 0 && t->engine.scan_count == 0) {
-        ecuio_detail_set("elm327:// listens only for replies to its "
-                         "requests, and this session asks nothing: add "
-                         "?poll=, or use a profile that requests PIDs");
+    /* A session that asks nothing listens on its channels (AT MA keeps
+     * the receive filter); with none, the whole bus would be raw frames
+     * a serial link can't carry, a step of its own */
+    if (t->engine.count == 0 && t->engine.scan_count == 0 &&
+        t->chan_count == 0) {
+        ecuio_detail_set("elm327:// listens on its channels' IDs, and this "
+                         "session has none: add ?filter=, or use a profile "
+                         "that declares a channel");
         return ECUIO_ERR_NOT_IMPLEMENTED;
     }
 
