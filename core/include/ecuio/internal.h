@@ -85,7 +85,8 @@ ecuio_status_t ecuio_replay_transport_attach(ecuio_session_t* session,
 /* ELM327 transport factory (ADR-0026), every platform:
  *   elm327://<port>[?profile=…][&did=…][&baud=500000|250000][&serial=<n>]
  *                  [&filter=…][&txid=…][&poll=…][&probe=0|1][&identify=0|1]
- * <port> is COMn on Windows, a /dev/ path elsewhere. Attach checks the
+ * <port> is COMn on Windows, a /dev/ path elsewhere, a WiFi adapter's
+ * address, or an app-fed stream's name (ecuio/stream.h). Attach checks the
  * values, derives the channels and requests as J2534 attach does
  * (core/src/request_setup.h), refuses a session with nothing to ask
  * (NOT_IMPLEMENTED: passive listening is a later step), then opens the
@@ -132,6 +133,11 @@ typedef ecuio_status_t (*ecuio_elm327_port_open_t)(const char* name,
  * protocol layer, the worker and link health run as they do on an
  * adapter. */
 void ecuio_elm327_set_port_opener(ecuio_elm327_port_open_t open);
+
+/* TEST-ONLY: how long an app-fed stream's open waits for the app's
+ * answer (ms; ecuio/stream.h, ADR-0028); 0 restores the 10 s. The session
+ * tests' open that never answers ends in a fraction of it. */
+void ecuio_elm327_set_stream_open_ms(uint32_t ms);
 
 /* TEST-ONLY: the directory (UTF-8) the wire logs of ELM327 sessions
  * created after this call go to; NULL restores the temporary directory.

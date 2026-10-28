@@ -15,7 +15,10 @@
 //          Elm327PortTest (POSIX): a whole session over a
 //          pseudo-terminal through the OS's port. Elm327TcpTest (every
 //          platform): a session over a loopback socket, the far side's
-//          close and its recovery. BENCH: the Win32 port, the VX's WiFi.
+//          close and its recovery. Elm327StreamTest (every platform): a
+//          session through an app-fed stream (ADR-0028), its failure and
+//          reopen, the open's wait and its stop. BENCH: the Win32 port,
+//          the VX's WiFi.
 
 #include "ecuio/core.h"
 #include "ecuio/internal.h"
@@ -24,6 +27,7 @@
 #include "elm327_log.h"
 #include "elm327_port.h"
 #include "elm327_tcp.h"
+#include "elm327_stream.h"
 #include "elm327_protocol.h"
 #include "request_engine.h"
 #include "request_setup.h"
@@ -100,10 +104,13 @@ struct ecuio_elm327_transport {
     unsigned long can_baud = ELM327_CAN_BAUD_DEFAULT;
     bool ext29 = false;  /* the channels' addressing mode */
     char protocol = '6'; /* AT SP's: the mode at the CAN rate */
-    /* port_name is a WiFi adapter's address; ?serial= was in the URI */
+    /* port_name is a WiFi adapter's address, or an app-fed stream's name
+     * (ADR-0028); ?serial= was in the URI */
     bool tcp = false;
+    bool stream = false;
     bool serial_given = false;
-    /* The opener attach used; the worker reopens through it. */
+    /* The opener attach used; the worker reopens through it. A stream
+     * opens through the registry instead (open_port). */
     ecuio_elm327_port_open_t opener = nullptr;
     ecuio_elm327_port_t port{};
     bool port_open = false;
@@ -924,6 +931,17 @@ monitor_end listen(transport* t, link_health& h)
     return end;
 }
 
+/* Opens the port attach named: an app-fed stream through the registry,
+ * its wait ended by a close; anything else through the opener. */
+ecuio_status_t open_port(transport* t, char* why, uint32_t why_cap)
+{
+    if (t->stream) {
+        return elm327_stream_open(t->port_name, &t->stop_requested, &t->port,
+                                  why, why_cap);
+    }
+    return t->opener(t->port_name, t->serial_baud, &t->port, why, why_cap);
+}
+
 /* Closes the port; the worker reopens it on the backoff's schedule. */
 void close_port(transport* t)
 {
@@ -942,8 +960,7 @@ bool reconnect(transport* t)
 {
     if (!t->port_open) {
         char why[128];
-        if (t->opener(t->port_name, t->serial_baud, &t->port, why,
-                      sizeof(why)) != ECUIO_OK) {
+        if (open_port(t, why, sizeof(why)) != ECUIO_OK) {
             elm327_log_write(t->log, "reopening %s failed: %s", t->port_name,
                              why);
             return false;
@@ -1219,7 +1236,8 @@ ecuio_status_t elm327_attach(ecuio_session_t* session, const char* uri,
         return ECUIO_ERR_BAD_URI;
     }
     t->tcp = elm327_tcp_address(name, name_len, nullptr, nullptr);
-    if (!t->tcp && !elm327_port_name_ok(name, name_len)) {
+    t->stream = !t->tcp && elm327_stream_name(name, name_len);
+    if (!t->tcp && !t->stream && !elm327_port_name_ok(name, name_len)) {
         ecuio_detail_set("the port must be %s, or %s",
                          elm327_port_name_example(), elm327_tcp_example());
         return ECUIO_ERR_BAD_URI;
@@ -1234,10 +1252,11 @@ ecuio_status_t elm327_attach(ecuio_session_t* session, const char* uri,
     }
     /* A socket has no serial rate; a run sheet that carries one over from
      * a USB session is told so rather than ignored */
-    if (t->tcp && t->serial_given) {
-        ecuio_detail_set("?serial= is a serial port's rate, and %s is a TCP "
-                         "address, which has none",
-                         t->port_name);
+    if ((t->tcp || t->stream) && t->serial_given) {
+        ecuio_detail_set("?serial= is a serial port's rate, and %s is %s, "
+                         "which has none",
+                         t->port_name,
+                         t->tcp ? "a TCP address" : "an app's stream");
         return ECUIO_ERR_BAD_URI;
     }
 
@@ -1278,7 +1297,7 @@ ecuio_status_t elm327_attach(ecuio_session_t* session, const char* uri,
     ecuio_elm327_port_open_t opener = g_opener.load();
     t->opener = (opener != nullptr) ? opener : elm327_port_open_os;
     char why[128] = "";
-    st = t->opener(t->port_name, t->serial_baud, &t->port, why, sizeof(why));
+    st = open_port(t.get(), why, sizeof(why));
     if (st != ECUIO_OK) {
         ecuio_detail_set("%s: %s", t->port_name, why);
         return st;
@@ -1294,6 +1313,8 @@ ecuio_status_t elm327_attach(ecuio_session_t* session, const char* uri,
         char link[48];
         if (t->tcp) {
             snprintf(link, sizeof(link), "over TCP");
+        } else if (t->stream) {
+            snprintf(link, sizeof(link), "(app stream)");
         } else {
             snprintf(link, sizeof(link), "at %u bit/s",
                      static_cast<unsigned>(t->serial_baud));

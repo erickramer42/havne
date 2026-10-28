@@ -9,6 +9,7 @@ add_library(ecuio-core STATIC
     src/elm327_transport.cpp
     src/elm327_port.cpp
     src/elm327_tcp.cpp
+    src/elm327_stream.cpp
     src/elm327_log.cpp
     src/serial_ports.cpp
     src/signals.cpp

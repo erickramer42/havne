@@ -19,6 +19,7 @@
 #include "ecuio/surrogate_protocol.h"
 #include "ecuio/j2534_surrogate.h"
 #include "ecuio/j2534.h"
+#include "ecuio/stream.h"
 #include "ecuio/serial.h"
 #include "ecuio/profile.h"
 #include "ecuio/signal_sets.h"
@@ -73,6 +74,8 @@ typedef char abi_batch_size_check[(sizeof(void*) != 8 || sizeof(ecuio_value_batc
 typedef char abi_serial_size_check[(sizeof(ecuio_serial_port_t) == 288) ? 1 : -1];
 typedef char abi_serial_device_check[(offsetof(ecuio_serial_port_t, device) == 128) ? 1 : -1];
 typedef char abi_serial_flags_check[(offsetof(ecuio_serial_port_t, flags) == 256) ? 1 : -1];
+typedef char abi_stream_flags_check[(offsetof(ecuio_stream_callbacks_t, flags) == 4 * sizeof(void*)) ? 1 : -1];
+typedef char abi_stream_size_check[(sizeof(void*) != 8 || sizeof(ecuio_stream_callbacks_t) == 56) ? 1 : -1];
 
 int main(void)
 {
@@ -86,6 +89,8 @@ int main(void)
     ecuio_display_value_t shown;
     ecuio_sur_request_t sur_request;
     ecuio_transport_ops_t ops;
+    ecuio_stream_callbacks_t stream_cb;
+    ecuio_stream_t* stream = NULL;
     uint32_t serial_count = 0;
     const uint8_t vin_request[2] = {0x09, 0x02};
     frame.arbitration_id = 0x7FF;
@@ -145,6 +150,14 @@ int main(void)
         ecuio_serial_ports(NULL, 1, &serial_count) != ECUIO_ERR_NULL_ARGUMENT) {
         return 1;
     }
+    memset(&stream_cb, 0, sizeof stream_cb);
+    if (ecuio_stream_register("bt:x", &stream_cb, &stream) != ECUIO_ERR_NULL_ARGUMENT ||
+        ecuio_stream_unregister(NULL) != ECUIO_ERR_NULL_ARGUMENT || stream != NULL) {
+        return 1;
+    }
+    ecuio_stream_opened(NULL);
+    ecuio_stream_received(NULL, NULL, 0);
+    ecuio_stream_failed(NULL, NULL);
     ecuio_j2534_free_devices(NULL);
     printf("log '%s'\n", ecuio_j2534_sur_log_path(NULL));
     (void)frame;

@@ -9,7 +9,9 @@
 //          frame. Elm327PortTest (POSIX only) runs the OS's termios port
 //          against the fake on a pseudo-terminal; Elm327TcpTest (every
 //          platform) runs the TCP port (core/src/elm327_tcp.cpp) against
-//          the fake behind a loopback listener. Qt-free.
+//          the fake behind a loopback listener; Elm327StreamTest (every
+//          platform) runs an app-fed stream (core/src/elm327_stream.cpp,
+//          ADR-0028) with a pump thread as the app. Qt-free.
 
 #include <gtest/gtest.h>
 
@@ -19,6 +21,8 @@
 #include "elm327_log.h" /* core/src */
 #include "elm327_port.h" /* core/src */
 #include "elm327_tcp.h"  /* core/src */
+#include "elm327_stream.h" /* core/src */
+#include "ecuio/stream.h"
 #include "fake_elm327.h"
 #include "new_counter.h"
 
@@ -2236,4 +2240,466 @@ TEST(Elm327TcpTest, NothingListeningIsARefusal)
               address + ": the connection was refused");
     EXPECT_LT(took, static_cast<long long>(ELM327_TCP_CONNECT_MS));
     EXPECT_EQ(s, nullptr);
+}
+
+/* ---- App-fed streams (ADR-0028, ecuio/stream.h) -------------------------
+ * The fake ELM327 behind a registered stream, a pump thread playing the
+ * app as QtBluetooth would: open answered later from its own thread,
+ * write fed to the adapter, the adapter's output pushed as received. The
+ * real registry, opener and port, on every platform. */
+namespace {
+
+/* The open's wait for a scope, then the 10 s again */
+class OpenWait
+{
+public:
+    explicit OpenWait(uint32_t ms) { ecuio_elm327_set_stream_open_ms(ms); }
+    ~OpenWait() { ecuio_elm327_set_stream_open_ms(0); }
+    OpenWait(const OpenWait&) = delete;
+    OpenWait& operator=(const OpenWait&) = delete;
+};
+
+class AppStream
+{
+public:
+    /* How the app answers an open */
+    enum class answer { opened, failed, nothing };
+
+    explicit AppStream(const char* name)
+    {
+        adapter_.clear();
+        ecuio_stream_callbacks_t cb{};
+        cb.open = on_open;
+        cb.write = on_write;
+        cb.close = on_close;
+        cb.user = this;
+        registered_ = ecuio_stream_register(name, &cb, &stream_);
+        pump_ = std::thread([this] { run(); });
+    }
+    ~AppStream()
+    {
+        stop_ = true;
+        if (pump_.joinable()) {
+            pump_.join();
+        }
+        if (stream_ != nullptr) {
+            (void)ecuio_stream_unregister(stream_);
+        }
+    }
+    AppStream(const AppStream&) = delete;
+    AppStream& operator=(const AppStream&) = delete;
+
+    ecuio_status_t registered() const { return registered_; }
+    ecuio_status_t unregister()
+    {
+        const ecuio_status_t st = ecuio_stream_unregister(stream_);
+        if (st == ECUIO_OK) {
+            stream_ = nullptr;
+        }
+        return st;
+    }
+    void answer_with(answer a, const char* reason = "")
+    {
+        std::lock_guard<std::mutex> g(lock_);
+        answer_ = a;
+        reason_ = reason;
+    }
+    /* The link drops under the session */
+    void fail(const char* reason)
+    {
+        {
+            std::lock_guard<std::mutex> g(lock_);
+            up_ = false;
+        }
+        ecuio_stream_failed(stream_, reason);
+    }
+    void push(const std::string& bytes)
+    {
+        ecuio_stream_received(stream_,
+                              reinterpret_cast<const uint8_t*>(bytes.data()),
+                              static_cast<uint32_t>(bytes.size()));
+    }
+    uint32_t opens() const { return opens_.load(); }
+    uint32_t closes() const { return closes_.load(); }
+    uint32_t requests()
+    {
+        std::lock_guard<std::mutex> g(lock_);
+        return adapter_.requests;
+    }
+
+private:
+    ecuio_stream_t* stream_ = nullptr;
+    ecuio_status_t registered_ = ECUIO_ERR_NOT_IMPLEMENTED;
+    std::mutex lock_;
+    fake_elm327::adapter adapter_;
+    answer answer_ = answer::opened;
+    std::string reason_;
+    bool up_ = false;
+    std::atomic<bool> open_asked_{false};
+    std::atomic<uint32_t> opens_{0};
+    std::atomic<uint32_t> closes_{0};
+    std::atomic<bool> stop_{false};
+    std::thread pump_;
+
+    /* Core's calls return at once, as the ADR asks: the open is answered
+     * from the pump thread */
+    static void on_open(void* user)
+    {
+        auto* self = static_cast<AppStream*>(user);
+        self->opens_.fetch_add(1);
+        self->open_asked_ = true;
+    }
+    static void on_write(void* user, const uint8_t* data, uint32_t len)
+    {
+        auto* self = static_cast<AppStream*>(user);
+        std::lock_guard<std::mutex> g(self->lock_);
+        if (self->up_) {
+            self->adapter_.from_host(data, len, fake_elm327::steady_us());
+        }
+    }
+    static void on_close(void* user)
+    {
+        auto* self = static_cast<AppStream*>(user);
+        self->closes_.fetch_add(1);
+        std::lock_guard<std::mutex> g(self->lock_);
+        self->up_ = false;
+    }
+
+    void run()
+    {
+        uint8_t buf[512];
+        while (!stop_.load()) {
+            if (open_asked_.exchange(false)) {
+                answer a = answer::nothing;
+                std::string reason;
+                {
+                    std::lock_guard<std::mutex> g(lock_);
+                    a = answer_;
+                    reason = reason_;
+                    if (a == answer::opened) {
+                        up_ = true;
+                        adapter_.drop_output();
+                    }
+                }
+                if (a == answer::opened) {
+                    ecuio_stream_opened(stream_);
+                } else if (a == answer::failed) {
+                    ecuio_stream_failed(stream_, reason.c_str());
+                }
+            }
+            size_t n = 0;
+            {
+                std::lock_guard<std::mutex> g(lock_);
+                if (up_) {
+                    n = adapter_.to_host(buf, sizeof(buf),
+                                         fake_elm327::steady_us());
+                }
+            }
+            if (n > 0) {
+                ecuio_stream_received(stream_, buf, static_cast<uint32_t>(n));
+            } else {
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            }
+        }
+    }
+};
+
+constexpr char kBt[] = "bt:00:11:22:33:44:55";
+
+std::string bt_uri(const std::string& query)
+{
+    return std::string("elm327://") + kBt + query;
+}
+
+long long ms_since(std::chrono::steady_clock::time_point from)
+{
+    return std::chrono::duration_cast<std::chrono::milliseconds>(
+               std::chrono::steady_clock::now() - from)
+        .count();
+}
+
+} // namespace
+
+/* A whole session through the app's stream: setup, requests and values;
+ * the wire log names the link; the close reaches the app, and the stream
+ * is the app's to unregister once the session is gone */
+TEST(Elm327StreamTest, ASessionRunsThroughTheAppsStream)
+{
+    /* 600 KB of fake: off the stack */
+    auto app = std::make_unique<AppStream>(kBt);
+    ASSERT_EQ(app->registered(), ECUIO_OK);
+    LogDir dir("stream-session");
+    {
+        Session s;
+        ASSERT_EQ(s.create(bt_uri("?poll=0x0C")), ECUIO_OK)
+            << ecuio_last_error_detail();
+        s.start();
+        EXPECT_TRUE(
+            wait_for([&] { return s.cap.count("41 0C 1F 40") >= 3; }, 5000));
+        EXPECT_EQ(s.state(), ECUIO_OK);
+        EXPECT_GE(app->requests(), 3u);
+        EXPECT_EQ(app->unregister(), ECUIO_ERR_INVALID_ARGUMENT)
+            << "refused while a session holds it";
+        EXPECT_EQ(app->opens(), 1u);
+        EXPECT_EQ(app->closes(), 0u);
+    }
+    EXPECT_EQ(app->closes(), 1u);
+    EXPECT_EQ(app->unregister(), ECUIO_OK);
+    EXPECT_TRUE(
+        in_order(dir.only_log(),
+                 {std::string(kBt) + " (app stream); CAN at 500000 bit/s"}));
+}
+
+/* The app's failed is a hard failure: close, then open again on the
+ * backoff, the setup run, values again, one episode, no reconnect */
+TEST(Elm327StreamTest, AFailedLinkIsAHardFailureThatOpensAgain)
+{
+    auto app = std::make_unique<AppStream>(kBt);
+    ASSERT_EQ(app->registered(), ECUIO_OK);
+    Session s;
+    ASSERT_EQ(s.create(bt_uri("?poll=0x0C")), ECUIO_OK)
+        << ecuio_last_error_detail();
+    s.start();
+    ASSERT_TRUE(
+        wait_for([&] { return s.cap.count("41 0C 1F 40") >= 2; }, 5000));
+
+    app->fail("the adapter went out of range");
+    uint32_t episodes = 0;
+    EXPECT_TRUE(wait_for(
+        [&] {
+            return s.state(&episodes) == ECUIO_ERR_TRANSPORT_HARD_FAILURE ||
+                   episodes > 0;
+        },
+        5000))
+        << "the failure is a hard failure";
+    const size_t before = s.cap.count("41 0C 1F 40");
+    EXPECT_TRUE(wait_for(
+        [&] {
+            return app->opens() == 2u && s.state() == ECUIO_OK &&
+                   s.cap.count("41 0C 1F 40") > before;
+        },
+        5000))
+        << "opened again, values again";
+    EXPECT_EQ(app->closes(), 1u) << "closed before the reopen";
+    s.state(&episodes);
+    EXPECT_EQ(episodes, 1u);
+}
+
+/* An open the app never answers is refused after the wait, said as one,
+ * and the app is told to stop connecting */
+TEST(Elm327StreamTest, AnOpenThatNeverAnswersIsRefusedAfterItsWait)
+{
+    auto app = std::make_unique<AppStream>(kBt);
+    ASSERT_EQ(app->registered(), ECUIO_OK);
+    app->answer_with(AppStream::answer::nothing);
+    OpenWait wait(300);
+    ecuio_session_t* s = nullptr;
+    const auto from = std::chrono::steady_clock::now();
+    EXPECT_EQ(ecuio_session_create(bt_uri("?poll=0x0C").c_str(), &s),
+              ECUIO_ERR_LOAD_FAILED);
+    const long long took = ms_since(from);
+    EXPECT_EQ(std::string(ecuio_last_error_detail()),
+              std::string(kBt) + ": the link didn't open within 1 s");
+    EXPECT_GE(took, 280);
+    EXPECT_LT(took, 2000);
+    EXPECT_EQ(s, nullptr);
+    EXPECT_EQ(app->closes(), 1u);
+    EXPECT_EQ(app->unregister(), ECUIO_OK) << "free again after the refusal";
+}
+
+/* The app's reason for a failed open is the connect's detail, on one
+ * line */
+TEST(Elm327StreamTest, AFailedOpenSaysWhy)
+{
+    auto app = std::make_unique<AppStream>(kBt);
+    ASSERT_EQ(app->registered(), ECUIO_OK);
+    app->answer_with(AppStream::answer::failed, "pairing was\nrefused");
+    ecuio_session_t* s = nullptr;
+    EXPECT_EQ(ecuio_session_create(bt_uri("?poll=0x0C").c_str(), &s),
+              ECUIO_ERR_LOAD_FAILED);
+    EXPECT_EQ(std::string(ecuio_last_error_detail()),
+              std::string(kBt) + ": pairing was refused");
+    EXPECT_EQ(s, nullptr);
+    EXPECT_EQ(app->closes(), 1u);
+}
+
+/* Closing the session ends a reopen's wait at once, not after 10 s */
+TEST(Elm327StreamTest, ClosingEndsAReopensWait)
+{
+    auto app = std::make_unique<AppStream>(kBt);
+    ASSERT_EQ(app->registered(), ECUIO_OK);
+    auto s = std::make_unique<Session>();
+    ASSERT_EQ(s->create(bt_uri("?poll=0x0C")), ECUIO_OK)
+        << ecuio_last_error_detail();
+    s->start();
+    ASSERT_TRUE(
+        wait_for([&] { return s->cap.count("41 0C 1F 40") >= 1; }, 5000));
+    app->answer_with(AppStream::answer::nothing);
+    app->fail("the link dropped");
+    ASSERT_TRUE(wait_for([&] { return app->opens() == 2u; }, 5000))
+        << "the worker waits on its reopen";
+    const auto from = std::chrono::steady_clock::now();
+    s.reset();
+    EXPECT_LT(ms_since(from), 1000);
+    EXPECT_EQ(app->closes(), 2u) << "the failure's, then the waiting open's";
+    EXPECT_EQ(app->unregister(), ECUIO_OK);
+}
+
+/* A name nothing registered is no such port, as a missing COM port is;
+ * a stream has no serial rate */
+TEST(Elm327StreamTest, AnUnregisteredNameIsNoSuchPort)
+{
+    ecuio_session_t* s = nullptr;
+    EXPECT_EQ(ecuio_session_create("elm327://ble:AA:BB?poll=0x0C", &s),
+              ECUIO_ERR_LOAD_FAILED);
+    EXPECT_EQ(std::string(ecuio_last_error_detail()),
+              "ble:AA:BB: no such port");
+    EXPECT_EQ(s, nullptr);
+
+    auto app = std::make_unique<AppStream>(kBt);
+    ASSERT_EQ(app->registered(), ECUIO_OK);
+    EXPECT_EQ(ecuio_session_create(bt_uri("?serial=115200").c_str(), &s),
+              ECUIO_ERR_BAD_URI);
+    EXPECT_EQ(std::string(ecuio_last_error_detail()),
+              std::string("?serial= is a serial port's rate, and ") + kBt +
+                  " is an app's stream, which has none");
+    EXPECT_EQ(app->opens(), 0u) << "refused before the open";
+}
+
+/* The registry's refusals: missing arguments, names of another shape,
+ * nonzero growth space, a name taken */
+TEST(Elm327StreamTest, TheRegistryRefusesWhatItCantTake)
+{
+    ecuio_stream_callbacks_t cb{};
+    cb.open = [](void*) {};
+    cb.write = [](void*, const uint8_t*, uint32_t) {};
+    cb.close = [](void*) {};
+    ecuio_stream_t* s = nullptr;
+    EXPECT_EQ(ecuio_stream_register(nullptr, &cb, &s), ECUIO_ERR_NULL_ARGUMENT);
+    EXPECT_EQ(ecuio_stream_register("bt:x", nullptr, &s),
+              ECUIO_ERR_NULL_ARGUMENT);
+    EXPECT_EQ(ecuio_stream_register("bt:x", &cb, nullptr),
+              ECUIO_ERR_NULL_ARGUMENT);
+    ecuio_stream_callbacks_t no_write = cb;
+    no_write.write = nullptr;
+    EXPECT_EQ(ecuio_stream_register("bt:x", &no_write, &s),
+              ECUIO_ERR_NULL_ARGUMENT);
+    EXPECT_EQ(ecuio_stream_unregister(nullptr), ECUIO_ERR_NULL_ARGUMENT);
+
+    const std::string too_long = "bt:" + std::string(125, 'a');
+    for (const std::string& bad :
+         {std::string("BT:x"), std::string("bt:"), std::string(":x"),
+          std::string("bt"), std::string("b1:x"), std::string("bt:a b"),
+          std::string("bt:a?b"), std::string("bt:a\tb"), std::string("COM5"),
+          std::string("192.168.0.10:35000"), too_long}) {
+        EXPECT_EQ(ecuio_stream_register(bad.c_str(), &cb, &s),
+                  ECUIO_ERR_INVALID_ARGUMENT)
+            << bad;
+    }
+    ecuio_stream_callbacks_t flagged = cb;
+    flagged.flags = 1;
+    EXPECT_EQ(ecuio_stream_register("bt:x", &flagged, &s),
+              ECUIO_ERR_INVALID_ARGUMENT);
+    ecuio_stream_callbacks_t grown = cb;
+    grown.reserved[4] = 1;
+    EXPECT_EQ(ecuio_stream_register("bt:x", &grown, &s),
+              ECUIO_ERR_INVALID_ARGUMENT);
+
+    const std::string longest = "bt:" + std::string(124, 'a');
+    ASSERT_EQ(ecuio_stream_register(longest.c_str(), &cb, &s), ECUIO_OK);
+    ecuio_stream_t* again = nullptr;
+    EXPECT_EQ(ecuio_stream_register(longest.c_str(), &cb, &again),
+              ECUIO_ERR_INVALID_ARGUMENT)
+        << "a name taken";
+    EXPECT_EQ(ecuio_stream_unregister(s), ECUIO_OK);
+    ASSERT_EQ(ecuio_stream_register(longest.c_str(), &cb, &again), ECUIO_OK)
+        << "free once unregistered";
+    EXPECT_EQ(ecuio_stream_unregister(again), ECUIO_OK);
+}
+
+/* Bytes past the buffer can't be resynchronized: the next read is a
+ * failed link, the session hard-fails, opens again and recovers */
+TEST(Elm327StreamTest, BytesPastTheBufferFailTheLink)
+{
+    auto app = std::make_unique<AppStream>(kBt);
+    ASSERT_EQ(app->registered(), ECUIO_OK);
+    Session s;
+    ASSERT_EQ(s.create(bt_uri("?poll=0x0C")), ECUIO_OK)
+        << ecuio_last_error_detail();
+    s.start();
+    ASSERT_TRUE(
+        wait_for([&] { return s.cap.count("41 0C 1F 40") >= 1; }, 5000));
+
+    app->push(std::string(ELM327_STREAM_BUFFER + 1, 'X'));
+    uint32_t episodes = 0;
+    EXPECT_TRUE(wait_for(
+        [&] {
+            s.state(&episodes);
+            return episodes > 0;
+        },
+        5000))
+        << "the overflow fails the link";
+    const size_t before = s.cap.count("41 0C 1F 40");
+    EXPECT_TRUE(wait_for(
+        [&] {
+            return app->opens() == 2u && s.state() == ECUIO_OK &&
+                   s.cap.count("41 0C 1F 40") > before;
+        },
+        5000))
+        << "opened again, values again";
+}
+
+/* The port itself: reads time out and carry what the app pushed; pushes
+ * outside an open are discarded; one session at a time; a failure ends
+ * reads and writes */
+TEST(Elm327StreamTest, ThePortTakesOnlyTheOpenLinksBytes)
+{
+    auto app = std::make_unique<AppStream>("bt:port");
+    ASSERT_EQ(app->registered(), ECUIO_OK);
+    app->push("before any open");
+
+    ecuio_elm327_port_t port{};
+    char why[128] = "";
+    ASSERT_EQ(elm327_stream_open("bt:port", nullptr, &port, why, sizeof(why)),
+              ECUIO_OK)
+        << why;
+    ecuio_elm327_port_t second{};
+    EXPECT_EQ(elm327_stream_open("bt:port", nullptr, &second, why, sizeof(why)),
+              ECUIO_ERR_LOAD_FAILED);
+    EXPECT_STREQ(why, "the link is in use by another session");
+
+    uint8_t buf[64];
+    const auto from = std::chrono::steady_clock::now();
+    EXPECT_EQ(port.ops->read(port.impl, buf, sizeof(buf), 80), 0)
+        << "nothing from before the open";
+    EXPECT_GE(ms_since(from), 70);
+
+    ASSERT_TRUE(port.ops->write(port.impl,
+                                reinterpret_cast<const uint8_t*>("ATI\r"), 4));
+    std::string got;
+    ASSERT_TRUE(wait_for(
+        [&] {
+            const int32_t n = port.ops->read(port.impl, buf, sizeof(buf), 20);
+            if (n > 0) {
+                got.append(reinterpret_cast<const char*>(buf),
+                           static_cast<size_t>(n));
+            }
+            return got.find('>') != std::string::npos;
+        },
+        2000));
+    EXPECT_NE(got.find("ELM327 v1.4b"), std::string::npos) << got;
+    port.ops->close(port.impl);
+    EXPECT_EQ(app->closes(), 1u);
+
+    app->push("after the close");
+    ASSERT_EQ(elm327_stream_open("bt:port", nullptr, &port, why, sizeof(why)),
+              ECUIO_OK)
+        << why;
+    EXPECT_EQ(port.ops->read(port.impl, buf, sizeof(buf), 0), 0)
+        << "nothing from after the close";
+    app->fail("gone");
+    EXPECT_EQ(port.ops->read(port.impl, buf, sizeof(buf), 0), -1);
+    EXPECT_FALSE(
+        port.ops->write(port.impl, reinterpret_cast<const uint8_t*>("\r"), 1));
+    port.ops->close(port.impl);
 }

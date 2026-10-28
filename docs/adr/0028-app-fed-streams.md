@@ -244,3 +244,36 @@ item records it as open.
   is on hand. iOS remains unverified on a device.
 - The 10 s open wait means a session whose adapter is off takes 10 s
   to refuse, where a missing COM port refuses at once.
+
+## Appendix: 2026-10-28, the core stream (step 2)
+
+Step 1 closed with the sixth phone run
+([2026-10-28-android-6](../bench-sessions/2026-10-28-android-6.md)).
+Step 2 is built: `ecuio/stream.h`, `core/src/elm327_stream.{h,cpp}`, and
+the HARNESS cases of §4 (`Elm327StreamTest`), with the strict-C check
+in `test_c_abi`. Building it settled five points that §1 leaves open or
+states otherwise:
+
+- **A whole name is one stream.** `open` takes no address, so core
+  can't tell the app which adapter to reach under a kind. The app
+  registers a stream per adapter, `bt:00:11:22:33:44:55`, and core
+  matches the whole name; one never registered is "no such port". Where
+  §1 says "a name with a kind that isn't registered", read "a name that
+  isn't registered".
+- **`reserved[5]`, not `[4]`.** With four, the callbacks struct ends in
+  4 bytes of padding on 64-bit. Five make it 56 bytes with none, pinned
+  where pointers are 8 bytes; `flags` sits at four pointers on every
+  width.
+- **No `?serial=`.** A stream has no serial rate, so the key is refused
+  (`BAD_URI`), as it is for a TCP address, rather than ignored.
+- **A failed open is closed.** An open that fails, runs out its wait or
+  is stopped is followed by `close`, so the app stops connecting and the
+  stream is free for the next session.
+- **The stop reaches the wait through the transport.** The worker's
+  reopen waits with the session's stop flag; attach has no stop of its
+  own, as §1 says. A test-only setter in `internal.h`
+  (`ecuio_elm327_set_stream_open_ms`) shortens the 10 s for the case of
+  an open that never answers.
+
+Pushes between a `close` and the next `open` are discarded, and the next
+`open` empties the buffer as well; the tests pin the two together.

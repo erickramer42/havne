@@ -15,13 +15,15 @@ threads onto the GUI thread.
    ▼  properties and list models, GUI thread only
  QtTuneBridge (app/)          the only caller of the core
    │  worker → GUI marshaling, 100 ms coalescing, link-health polling
-   ▼  C ABI: core.h · signals.h · profile.h · j2534.h · serial.h
+   ▼  C ABI: core.h · signals.h · profile.h · j2534.h · serial.h · stream.h
  ecuio-core (core/)           no Qt, ever
    │  sessions + callbacks · profiles + decode · transports
    ├── mock://    worker thread, scripted drive cycle
    ├── replay://  worker thread, a recording's frames.csv at its own pace
-   ├── elm327://  worker thread → a serial port (USB, or Bluetooth SPP):
-   │              an ELM327-compatible adapter's AT commands, one at a time
+   ├── elm327://  worker thread → a serial port (USB, Bluetooth SPP), a
+   │              WiFi adapter's TCP socket, or a link the app opens
+   │              (Bluetooth on a phone): an ELM327-compatible adapter's
+   │              AT commands, one at a time
    └── j2534://   worker thread → loader, which picks a surrogate by the
                   DLL's architecture: client ══ named pipe ══
           ├── ecuio-j2534-surrogate.exe      (x86 process, x86 vendor DLLs)
@@ -242,6 +244,16 @@ a Bluetooth stack ([ADR-0026](adr/0026-elm327-transport.md)).
   next only after its prompt. A Service 01 request to one ECU carries
   the response-count digit, so the adapter returns as soon as the reply
   is in.
+- **App-fed streams** (`stream.h`, `core/src/elm327_stream.cpp`,
+  [ADR-0028](adr/0028-app-fed-streams.md)) are the port for links only
+  the app's framework reaches: classic Bluetooth on Android, Bluetooth
+  LE. The app registers a stream by name (`bt:<address>`), and
+  `elm327://bt:<address>` runs through it. Core calls the app's `open`,
+  `write` and `close`, which return at once; the app pushes `opened`,
+  the bytes it received and `failed`. Core waits up to 10 s for an open
+  on its own thread, buffers what arrives (64 KB; more fails the link),
+  and reopens on the worker's backoff, so the app never reconnects by
+  itself and never blocks core.
 - **Discovery** (`ecuio_serial_ports`, `serial.h`) lists the ports the
   OS knows (the `SERIALCOMM` registry key on Windows, `/dev/cu.*` on
   macOS, `/dev/ttyUSB*`, `ttyACM*` and `rfcomm*` on Linux) and opens

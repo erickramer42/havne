@@ -242,7 +242,9 @@ The app-fed stream for Bluetooth on Android and BLE is
 Android baseline, is complete: the app runs on a phone, reaches the
 VX over WiFi and replays a recording by a tap
 ([2026-10-28-android-6](docs/bench-sessions/2026-10-28-android-6.md));
-step 2, the core stream, is next). Later,
+step 2, the core stream (`stream.h`, `core/src/elm327_stream.cpp`), is
+built and HARNESS-tested (`Elm327StreamTest`); step 3, the app's
+Bluetooth, is next). Later,
 with its own record: listening to the whole bus (raw frames, for a
 car whose OBD port carries more than diagnostics).
 

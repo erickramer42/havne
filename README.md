@@ -39,13 +39,14 @@ to watch the simulated car drive. Other platforms build from source
    ▼  properties and list models, GUI thread only
  QtTuneBridge (app/)          the only caller of the core
    │  worker → GUI marshaling, 100 ms coalescing, link-health polling
-   ▼  C ABI: core.h · signals.h · profile.h · j2534.h · serial.h
+   ▼  C ABI: core.h · signals.h · profile.h · j2534.h · serial.h · stream.h
  ecuio-core (core/)           no Qt, ever
    │  sessions + callbacks · profiles + decode · transports
    ├── mock://    worker thread, scripted drive cycle
    ├── replay://  worker thread, a recording's frames.csv at its own pace
-   ├── elm327://  worker thread → a serial port (USB, Bluetooth SPP) or a
-   │              WiFi adapter's TCP socket: an ELM327-compatible
+   ├── elm327://  worker thread → a serial port (USB, Bluetooth SPP), a
+   │              WiFi adapter's TCP socket, or a link the app opens
+   │              (Bluetooth on a phone): an ELM327-compatible
    │              adapter's AT commands, one at a time
    └── j2534://   worker thread → loader, which picks a surrogate by the
                   DLL's architecture: client ══ named pipe ══
