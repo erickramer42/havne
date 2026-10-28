@@ -26,10 +26,13 @@ Button {
         border.color: Theme.text
     }
 
+    // Given less than its text's width, the text wraps and the button
+    // grows taller
     contentItem: Text {
         text: control.text
         font.pixelSize: 14
         color: Theme.text
+        wrapMode: Text.Wrap
         horizontalAlignment: Text.AlignHCenter
         verticalAlignment: Text.AlignVCenter
     }

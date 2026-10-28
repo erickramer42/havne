@@ -67,8 +67,9 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
   (on a phone, the only way).
 
 ### Changed
-- Settings' presets fold behind one **Presets** button, folded at
-  first on a phone, where they filled a screen of the page.
+- Settings' presets, recent recordings and adapter list fold behind a
+  button each, folded at first on a phone, where they filled screens
+  of the page. A button too long for a phone's width wraps its text.
 - With **Record sessions** on, a replay isn't recorded: it would copy
   the recording it plays. The activity log says so.
 - Live's chart draws a trace thinner where its points crowd, so a

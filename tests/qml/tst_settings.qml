@@ -46,7 +46,7 @@ TestCase {
         id: pageComponent
         // Tall enough that the device list sits inside the page's
         // scroll area, which clips what's below it from a click
-        SettingsPage { width: 1000; height: 1200 }
+        SettingsPage { width: 1000; height: 1400 }
     }
 
     // The page's stored URI, Record switch and versions (test_qml keeps
@@ -132,6 +132,9 @@ TestCase {
     function test_everyItemFitsAPhonesWidth() {
         const page = createPage()
         page.width = 320
+        // The longest vehicle label, wider than the column on any font (a
+        // wider one, Linux's, put two presets past the edge)
+        page.vehicles = VehicleBook.add(VehicleBook.empty(), "W".repeat(40))
         page.recordings = [{ title: "2026-10-28 14:30:12 · A vehicle label forty characters long",
                              uri: "replay://C:/rec/x?profile=raw",
                              source: "elm327://192.168.4.1:23?profile=raw&poll=0x0C",
@@ -173,20 +176,39 @@ TestCase {
         }
     }
 
-    // The presets fold behind one button (on a phone they start folded:
-    // they filled a screen of its page)
-    function test_thePresetsButtonShowsAndHidesThem() {
+    // The presets, the recent recordings and the adapters fold behind a
+    // button each (on a phone they start folded: they filled screens of
+    // its page)
+    function test_foldButtonsShowAndHideTheirSections_data() {
+        return [
+            { tag: "presets", toggle: "presetsToggle", shown: "presetsShown",
+              parts: ["preset_wifi_obdx", "preset_j2534"], title: "Presets" },
+            { tag: "recordings", toggle: "recordingsToggle", shown: "recordingsShown",
+              parts: ["recordingsCaption", "recordingList"], title: "Recent recordings (1)" },
+            { tag: "adapters", toggle: "adaptersToggle", shown: "adaptersShown",
+              parts: ["deviceCount", "deviceList"], title: "Adapters (1)" },
+        ]
+    }
+    function test_foldButtonsShowAndHideTheirSections(data) {
         const page = createPage()
-        const toggle = find(page, "presetsToggle")
-        const wifi = find(page, "preset_wifi_obdx")
-        compare(page.presetsShown, !Theme.mobile, "open on the desktop, folded on a phone")
-        page.presetsShown = true
-        verify(wifi.visible)
+        page.recordings = [{ title: "2026-10-28 14:30:12", uri: "replay://C:/rec/x?profile=mock",
+                             source: "mock://demo", profile: "mock" }]
+        page.j2534Devices = []
+        page.serialPorts = [{ name: "COM5", device: "" }]
+        const toggle = find(page, data.toggle)
+        compare(page[data.shown], !Theme.mobile, "open on the desktop, folded on a phone")
+        page[data.shown] = true
+        compare(toggle.text, data.title + " ▾")
+        for (const name of data.parts)
+            verify(find(page, name).visible, name + " shown")
         toggle.clicked()
-        verify(!wifi.visible && !find(page, "preset_j2534").visible, "folded")
+        compare(toggle.text, data.title + " ▸")
+        for (const name of data.parts)
+            verify(!find(page, name).visible, name + " folded")
         verify(toggle.visible, "the button stays")
         toggle.clicked()
-        verify(wifi.visible, "open again")
+        for (const name of data.parts)
+            verify(find(page, name).visible, name + " open again")
     }
 
     // WiFi adapters aren't discovered: the two common addresses are

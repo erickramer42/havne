@@ -2865,9 +2865,10 @@ TEST(BridgeTest, ReplayOfAMockRecordingDecodesWhatWasRecorded)
  * was recorded with, so a tap leaves nothing to type */
 TEST(BridgeTest, ReplayUriForTakesTheRecordedProfile)
 {
+    // A folder as QFileInfo gives it, '/' on every platform
     const auto r = [](const char* recorded) {
         return QtTuneBridge::replayUriFor(
-                   QStringLiteral("C:\\rec\\20261028-143012 Daily driver"),
+                   QStringLiteral("C:/rec/20261028-143012 Daily driver"),
                    QString::fromUtf8(recorded))
             .toStdString();
     };

@@ -22,7 +22,8 @@
 //          keeping its URI and plotting, its VIN learned and logged;
 //          every item inside the page's width at a phone's (320 px); a
 //          recording that ends listed, its row filling the field with a
-//          replay that connects under the recorded profile and DIDs.
+//          replay that connects under the recorded profile and DIDs; the
+//          presets, recordings and adapters folding behind their buttons.
 //          Manual smoke — the live discovery list renders (Windows: the
 //          registry's interfaces and ports; macOS/Linux: the /dev ports or
 //          the empty-state hint) sized to its rows, a device row
@@ -187,9 +188,16 @@ Pane {
         }
     }
 
-    // The presets' buttons, shown on the desktop and folded on a phone
-    // until its Presets button opens them; for this page's life
+    // The presets, the recent recordings and the adapters fold behind a
+    // button each: open on the desktop, folded on a phone, whose narrow
+    // page they'd fill; for this page's life
     property bool presetsShown: !Theme.mobile
+    property bool recordingsShown: !Theme.mobile
+    property bool adaptersShown: !Theme.mobile
+
+    function foldText(title, shown) {
+        return title + (shown ? " ▾" : " ▸")
+    }
 
     function refreshDevices() {
         j2534Devices = Bridge.discoverJ2534Devices()
@@ -581,6 +589,8 @@ Pane {
                         readonly property var vehicle: page.vehicles.list[index]
                         objectName: "vehicle_" + (vehicle?.id ?? "")
                         text: vehicle?.label ?? ""
+                        // A long label wraps rather than run past a phone's edge
+                        width: Math.min(implicitWidth, parent.width)
                         highlighted: vehicle !== undefined && page.vehicles.picked === vehicle.id
                         enabled: page.idle
                         onClicked: page.pickVehicle(vehicle.id)
@@ -703,7 +713,7 @@ Pane {
                 // ComboBox's Popup wouldn't follow the zoom)
                 ThemedButton {
                     objectName: "presetsToggle"
-                    text: page.presetsShown ? qsTr("Presets ▾") : qsTr("Presets ▸")
+                    text: page.foldText(qsTr("Presets"), page.presetsShown)
                     onClicked: page.presetsShown = !page.presetsShown
                 }
                 Repeater {
@@ -727,6 +737,9 @@ Pane {
                         required property var modelData
                         objectName: "preset_" + modelData.name
                         text: modelData.label
+                        // Wraps rather than run past a narrow page's edge
+                        // (Linux's font at 320 px did)
+                        width: Math.min(implicitWidth, parent.width)
                         // The mock is a developer's tool, not a device
                         visible: page.presetsShown
                                  && (modelData.name !== "mock" || Theme.developerMode)
@@ -836,10 +849,18 @@ Pane {
                 }
             }
 
+            ThemedButton {
+                objectName: "recordingsToggle"
+                visible: page.recordings.length > 0
+                text: page.foldText(qsTr("Recent recordings (%1)").arg(page.recordings.length),
+                                    page.recordingsShown)
+                onClicked: page.recordingsShown = !page.recordingsShown
+            }
+
             Label {
                 objectName: "recordingsCaption"
-                visible: page.recordings.length > 0
-                text: qsTr("Recent recordings — select one to put its replay in the field above")
+                visible: page.recordings.length > 0 && page.recordingsShown
+                text: qsTr("Select one to put its replay in the field above")
                 color: Theme.textDim
                 wrapMode: Text.WordWrap
                 Layout.fillWidth: true
@@ -853,7 +874,7 @@ Pane {
                 Layout.fillWidth: true
                 Layout.preferredHeight: contentHeight
                 Layout.maximumHeight: page.deviceRowsShown * (page.deviceRowHeight + spacing) - spacing
-                visible: count > 0
+                visible: count > 0 && page.recordingsShown
                 clip: true
                 spacing: 2
                 boundsBehavior: Flickable.StopAtBounds
@@ -987,26 +1008,35 @@ Pane {
             }
 
             // ---- Adapters: J2534 interfaces and serial ports ----
-            Heading { text: qsTr("Adapters") }
-
             RowLayout {
+                Layout.fillWidth: true
+                Layout.topMargin: Theme.spacing
                 spacing: Theme.spacing
-                Label {
-                    objectName: "deviceCount"
-                    text: page.devices.length === 0
-                          ? qsTr("None found — install a Pass-Thru driver (Windows), plug in "
-                                 + "or pair an ELM327 adapter, or enter a URI above")
-                          : qsTr("J2534 interfaces: %1, serial ports: %2 — select one to put "
-                                 + "its URI in the field above, then Connect")
-                                .arg(page.j2534Devices.length).arg(page.serialPorts.length)
-                    color: page.devices.length === 0 ? Theme.textDim : Theme.text
-                    wrapMode: Text.WordWrap
-                    Layout.fillWidth: true
+                ThemedButton {
+                    objectName: "adaptersToggle"
+                    text: page.foldText(qsTr("Adapters (%1)").arg(page.devices.length),
+                                        page.adaptersShown)
+                    onClicked: page.adaptersShown = !page.adaptersShown
                 }
+                Item { Layout.fillWidth: true }
                 ThemedButton {
                     text: qsTr("Refresh")
                     onClicked: page.refreshDevices()
                 }
+            }
+
+            Label {
+                objectName: "deviceCount"
+                visible: page.adaptersShown
+                text: page.devices.length === 0
+                      ? qsTr("None found — install a Pass-Thru driver (Windows), plug in "
+                             + "or pair an ELM327 adapter, or enter a URI above")
+                      : qsTr("J2534 interfaces: %1, serial ports: %2 — select one to put "
+                             + "its URI in the field above, then Connect")
+                            .arg(page.j2534Devices.length).arg(page.serialPorts.length)
+                color: page.devices.length === 0 ? Theme.textDim : Theme.text
+                wrapMode: Text.WordWrap
+                Layout.fillWidth: true
             }
 
             // Sized to its rows up to deviceRowsShown, then it scrolls; the
@@ -1017,7 +1047,7 @@ Pane {
                 Layout.fillWidth: true
                 Layout.preferredHeight: contentHeight
                 Layout.maximumHeight: page.deviceRowsShown * (page.deviceRowHeight + spacing) - spacing
-                visible: count > 0
+                visible: count > 0 && page.adaptersShown
                 clip: true
                 spacing: 2
                 boundsBehavior: Flickable.StopAtBounds
