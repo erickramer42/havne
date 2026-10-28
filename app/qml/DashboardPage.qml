@@ -84,8 +84,11 @@ Page {
             ? Math.max(120, Math.min(tileCell * 1.05, 220, (flick.height - fixedHeight - g) / 2))
             : Math.min(tileCell * 1.05, 220)
         readonly property real dialWidth: wide ? (w - 2 * g) / 3 : narrow ? w : (w - g) / 2
+        // At most what the page shows, so a phone on its side sees a
+        // whole dial; below the floor the page scrolls instead
         readonly property real dialHeight: wide ? 2 * tileHeight + g
-                                                : Math.min(dialWidth * 0.88, 380)
+            : Math.min(dialWidth * 0.88, 380,
+                       Math.max(160, flick.height - 2 * root.margin))
     }
 
     // Ignition-style sweep, once per session, the first time the page
@@ -213,6 +216,7 @@ Page {
                 uniformCellWidths: true
 
                 GaugeCard {
+                    objectName: "tachCard"
                     Layout.fillWidth: true
                     Layout.preferredHeight: fit.dialHeight
                     AnalogGauge {

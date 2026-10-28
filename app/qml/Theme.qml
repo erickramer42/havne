@@ -24,6 +24,10 @@ QtObject {
     readonly property int spacing:          8
     readonly property int pageMargin:       16
 
+    // A phone or tablet: touch only, no keyboard shortcuts, no file
+    // manager for the app's own folders
+    readonly property bool mobile: Qt.platform.os === "android" || Qt.platform.os === "ios"
+
     // A value this old is stale: Live dims its row and the chart breaks
     // its trace across the gap, and the Dashboard dims its gauge. 3 s is
     // generous against a full rotation of the requests, at most the

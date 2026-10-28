@@ -170,23 +170,17 @@ Pane {
     }
 
     // A caption, then buttons that wrap: a row of them would hold the
-    // page at its natural width, past a phone's
-    component LabeledFlow: RowLayout {
+    // page at its natural width, past a phone's. The caption is the
+    // flow's first item, so a wrapped button has the whole width
+    component LabeledFlow: Flow {
         property alias label: caption.text
-        default property alias content: flow.data
         Layout.fillWidth: true
         spacing: Theme.spacing
 
         Label {
             id: caption
             color: Theme.textDim
-            Layout.alignment: Qt.AlignTop
             topPadding: 8
-        }
-        Flow {
-            id: flow
-            Layout.fillWidth: true
-            spacing: Theme.spacing
         }
     }
 
@@ -486,6 +480,9 @@ Pane {
                                           + "j2534://Vendor?profile=raw&poll=0x0C")
                     enabled: page.idle
                     color: Theme.text
+                    // A URI, not prose: a phone's keyboard capitalized
+                    // "Replay://" into a scheme core doesn't know
+                    inputMethodHints: Qt.ImhNoAutoUppercase | Qt.ImhNoPredictiveText
                     // Any text the page didn't compose is read back
                     onTextChanged: {
                         if (!page.composing)
@@ -675,7 +672,14 @@ Pane {
                         // elm327:// takes no first port: the user picks one
                         // from the list below or types a WiFi adapter's
                         // address (core's refusal says so)
-                        { name: "elm327", uri: "elm327://", label: qsTr("elm327:// (a port below, or an address)") }
+                        { name: "elm327", uri: "elm327://", label: qsTr("elm327:// (a port below, or an address)") },
+                        // WiFi adapters aren't listed (ADR-0026's appendix
+                        // "WiFi over TCP"): the two common addresses, so a
+                        // phone needn't type one
+                        { name: "wifi_obdx", uri: "elm327://192.168.4.1:23",
+                          label: qsTr("WiFi: OBDX (192.168.4.1:23)") },
+                        { name: "wifi_elm", uri: "elm327://192.168.0.10:35000",
+                          label: qsTr("WiFi: most others (192.168.0.10:35000)") }
                     ]
                     ThemedButton {
                         required property var modelData
@@ -732,6 +736,7 @@ Pane {
                     placeholderText: qsTr("1E1C:u16, F190:text, 7E9:1E1C, 1E00-1EFF — "
                                           + "[ecu:]DID[-DID][:hex|text|u8…u32|i8…i32]")
                     validator: RegularExpressionValidator { regularExpression: /[0-9A-Za-z:,\-\s]*/ }
+                    inputMethodHints: Qt.ImhNoAutoUppercase | Qt.ImhNoPredictiveText
                     enabled: page.idle
                     color: Theme.text
                     onTextChanged: {
@@ -780,9 +785,10 @@ Pane {
                             ? qsTr("Frames, values and events, from the next connect")
                           : ""
                 }
+                // A phone has no app that opens the app's own folders
                 ThemedButton {
                     text: qsTr("Open folder")
-                    visible: Bridge.recordingFolder !== ""
+                    visible: Bridge.recordingFolder !== "" && !Theme.mobile
                     onClicked: Qt.openUrlExternally(Bridge.recordingFolderUrl)
                 }
             }
@@ -820,7 +826,7 @@ Pane {
             }
             // A phone has no keyboard to zoom with
             Label {
-                visible: Qt.platform.os !== "android" && Qt.platform.os !== "ios"
+                visible: !Theme.mobile
                 text: qsTr("or Ctrl + / Ctrl − / Ctrl 0")
                 color: Theme.textDim
                 wrapMode: Text.WordWrap

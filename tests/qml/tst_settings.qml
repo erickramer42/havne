@@ -20,8 +20,11 @@
 //          fills the field; locked during a session; a mock session
 //          leaves the vehicle alone, and (Windows, the fake) an adapter's
 //          connect keeps its URI and plotted signals and its VIN is
-//          learned and logged. At a phone's width every item lies
-//          inside the page. The live registry, and
+//          learned and logged. At the narrowest phone's width (320 px) every item lies
+//          inside the page, a long URI in the field too; the URI and
+//          DID fields ask the keyboard for no
+//          capitals or predictions; the WiFi presets fill their
+//          addresses. The live registry, and
 //          the units kept across a restart (Main.qml's Settings), are
 //          manual smoke.
 
@@ -118,18 +121,48 @@ TestCase {
 
     // A phone's width (docs/bench-sessions/2026-10-28-android.md): the
     // page scrolls only up and down, so every item lies inside its
-    // column, Connect among them
+    // column, Connect among them. 320 px is the narrowest phone, where
+    // the URI field's natural 200 px and Connect don't fit side by side
     function test_everyItemFitsAPhonesWidth() {
         const page = createPage()
-        page.width = 380
+        page.width = 320
         const column = find(page, "settingsColumn")
-        tryCompare(column, "width", 380 - 2 * Theme.pageMargin)
+        tryCompare(column, "width", 320 - 2 * Theme.pageMargin)
         waitForPolish(column)
         compare(pastTheEdge(column, column, []).join("; "), "",
                 "nothing past the column's right edge, " + column.width)
         const connect = find(page, "connectButton")
         verify(connect.mapToItem(column, connect.width, 0).x <= column.width,
                "Connect inside the column")
+
+        // The phone run's URI, with which only "Dis" of the button showed
+        find(page, "uriField").text = "elm327://192.168.4.1:23?profile=raw&poll=0x0C"
+        waitForPolish(column)
+        compare(pastTheEdge(column, column, []).join("; "), "",
+                "nothing past the edge with a long URI")
+    }
+
+    // A URI isn't prose: no capital first letter, no predicted words
+    // ("Replay://" is a scheme core doesn't know)
+    function test_theUriFieldTakesAUriNotProse() {
+        const page = createPage()
+        for (const name of ["uriField", "didField"]) {
+            const hints = find(page, name).inputMethodHints
+            verify(hints & Qt.ImhNoAutoUppercase, name + " doesn't capitalize")
+            verify(hints & Qt.ImhNoPredictiveText, name + " doesn't predict")
+        }
+    }
+
+    // WiFi adapters aren't discovered: the two common addresses are
+    // presets, and the field's query stays
+    function test_wifiPresetsFillTheirAddress() {
+        const page = createPage()
+        const uri = find(page, "uriField")
+        press(page, "preset_wifi_obdx")
+        compare(uri.text, "elm327://192.168.4.1:23")
+        press(page, "profile_raw")
+        press(page, "preset_wifi_elm")
+        compare(uri.text, "elm327://192.168.0.10:35000?profile=raw")
     }
 
     // The Units row sets the bridge's unit system, connected or not, and

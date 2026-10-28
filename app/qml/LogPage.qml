@@ -128,6 +128,19 @@ Pane {
                 }
             }
 
+            // The whole activity log to the clipboard: a phone can't
+            // select it (docs/bench-sessions/2026-10-28-android-2.md)
+            ThemedButton {
+                objectName: "copyLog"
+                visible: !page.showingFrames
+                text: qsTr("Copy")
+                onClicked: {
+                    activityLog.selectAll()
+                    activityLog.copy()
+                    activityLog.deselect()
+                }
+            }
+
             // Holds the table still so rows can be read. Frames that
             // arrive while paused are counted but not logged; decoding,
             // Live and the Dashboard carry on.

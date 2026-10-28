@@ -5,7 +5,8 @@
 //          Activity | Frames switch shows the raw frame table, and turning
 //          developer mode off goes back to the activity log. Settings'
 //          developer box sets Theme.developerMode and the mock:// preset
-//          follows it. How the page looks is manual smoke.
+//          follows it. Copy puts the whole log on the clipboard and
+//          leaves nothing selected. How the page looks is manual smoke.
 
 import QtQuick
 import QtTest
@@ -140,5 +141,20 @@ TestCase {
         Theme.developerMode = false   // as a restore at launch would
         verify(!box.checked, "the box follows the mode")
         verify(!mock.visible)
+    }
+
+    // A phone can't select the log's text: Copy puts all of it on the
+    // clipboard (docs/bench-sessions/2026-10-28-android-2.md)
+    function test_copyPutsTheWholeLogOnTheClipboard() {
+        const page = create(logComponent)
+        Bridge.logEvent("a line to copy")
+        const log = find(page, "activityLog")
+        tryVerify(() => log.text.indexOf("a line to copy") >= 0, 2000, "the line is logged")
+        find(page, "copyLog").clicked()
+        compare(log.selectedText, "", "nothing is left selected")
+        const pasted = createTemporaryQmlObject("import QtQuick; TextEdit {}", testCase)
+        pasted.paste()
+        verify(pasted.text.indexOf("Ready.") >= 0 && pasted.text.indexOf("a line to copy") >= 0,
+               "the whole log was copied: " + pasted.text)
     }
 }

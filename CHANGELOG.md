@@ -59,6 +59,11 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
   adapters.
 
 ### Changed
+- Settings' presets include the two usual WiFi adapter addresses,
+  `elm327://192.168.4.1:23` (an OBDX Pro) and
+  `elm327://192.168.0.10:35000` (most others), and the Log page has a
+  Copy button for the whole activity log.
+- The window's title bar is dark on Windows, to match the app.
 - The Log page shows the activity log (every connect, link change and
   ECU line, time-stamped), which sat at the bottom of Settings. The raw
   frame table is behind its Activity | Frames switch in developer mode.
@@ -68,7 +73,11 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
 ### Fixed
 - Settings and Home fit a narrow window: Settings' rows of buttons wrap
   instead of pushing Connect off the right edge, and Home scrolls when
-  the window is shorter than it.
+  the window is shorter than it. On a short window the Dashboard's
+  dials fit the page.
+- On a phone, the URI field no longer capitalizes or predicts what's
+  typed into it, and Settings no longer offers an Open folder button
+  that no app can open.
 - A J2534 driver reporting a buffer overflow on a read no longer reads
   as "Adapter fault" with the read's messages dropped: the messages
   arrive, and the session carries on.

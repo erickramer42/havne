@@ -6,7 +6,8 @@
 //          profile lacks the signal (?profile=raw); imperial units on the
 //          gauges, their scales and zones, the peaks cleared on a
 //          change of units, and a peak held from inside a window (the
-//          engine-start fixture replayed).
+//          engine-start fixture replayed); on a phone on its side
+//          (500 x 300 beside the sidebar) a whole dial fits the page.
 
 import QtQuick
 import QtTest
@@ -217,5 +218,18 @@ TestCase {
             compare(all[label].hasValue, false, label)
             compare(all[label].valueText, "—", label)
         }
+    }
+
+    // A phone on its side: the page beside the sidebar is narrow and
+    // short, and each dial is sized to the width, so it would be taller
+    // than the page (docs/bench-sessions/2026-10-28-android-2.md)
+    function test_aWholeDialFitsAShortPage() {
+        const page = createTemporaryObject(pageComponent, testCase,
+                                           { width: 500, height: 300 })
+        const tach = findChild(page, "tachCard")
+        verify(tach, "the tachometer's card")
+        tryVerify(() => tach.height > 0, 2000, "the grid lays the card out")
+        verify(tach.height <= page.height - 2 * Theme.pageMargin,
+               "the dial fits the page: " + tach.height)
     }
 }
