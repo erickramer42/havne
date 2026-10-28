@@ -321,3 +321,23 @@ an SPP service and an LED light a BLE service none of §2's list names
 (the last rule chose it); both links opened and carried `ATZ` out, and
 with nothing answering the connect failed after 5 s and the link
 closed. An adapter's answers wait for the MX+ (step 4).
+
+## Appendix: 2026-10-28, the MX+ through the phone (step 4)
+
+Step 4 ran on the test car
+([2026-10-28-android-8](../bench-sessions/2026-10-28-android-8.md)):
+the MX+ over the phone's classic Bluetooth gave the readings, the ECU
+line and the identity it gives through the laptop, at about 36 replies
+a second (about 32 through the laptop), and a Bluetooth drop failed
+the stream at once and recovered on the backoff, values back 4.2 s
+after Bluetooth came on. The stream's contract held on a real link.
+
+One thing it didn't hold: the app in the background. §2 queues core's
+calls to the GUI thread, where QtBluetooth delivers its signals, and
+Android pauses that thread in the background, so a write waits there
+until the app returns and the session faults on core's 5 s silence. On
+return the waiting calls run at once, and two flaws in the link show:
+an open core has given up on still connects, and a new open starts a
+second socket connect while an abandoned one is still blocked (one
+blocked 25 s). Recovery took 38 s. Both belong to Known Issue #37's
+fix, which also has to keep the link running in the background.

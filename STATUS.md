@@ -248,7 +248,10 @@ Bluetooth (`app/btstream.cpp`, Settings' paired adapters and BLE scan,
 Android 12 and later), is built and ran on the phone with no adapter:
 the permission, the lists, and a classic and a BLE link carrying the
 setup ([2026-10-28-android-7](docs/bench-sessions/2026-10-28-android-7.md));
-step 4 is the MX+ through the phone on the car). Later,
+step 4, the MX+ through the phone on the car, is complete: the same
+readings as through the laptop, ~36 replies a second, a Bluetooth drop
+recovered in 4.2 s ([2026-10-28-android-8](docs/bench-sessions/2026-10-28-android-8.md)),
+except in the background (Known Issue #37)). Later,
 with its own record: listening to the whole bus (raw frames, for a
 car whose OBD port carries more than diagnostics).
 
@@ -323,9 +326,16 @@ an issue is resolved it is removed, and its number is not reused.
     the background and 30 s with the screen off held every frame and
     value ([2026-10-28-android-3](docs/bench-sessions/2026-10-28-android-3.md)).
     A longer pause drops them past the bridge's in-flight cap
-    (ADR-0003), which `mock://` reaches in 50 s. A logger in
+    (ADR-0003), which `mock://` reaches in 50 s. A Bluetooth link
+    stops outright: the app's link does its work on the GUI thread, so
+    in the background nothing core asks of it runs; the session
+    faults within 5 s, and on return the queued calls and overlapping
+    socket connects took 38 s to recover
+    ([2026-10-28-android-8](docs/bench-sessions/2026-10-28-android-8.md)).
+    A logger in
     a car runs with the screen off, so this needs a decision of its
-    own (a foreground service, or recording off the GUI thread).
+    own: a foreground service, and the recorder and the Bluetooth
+    link off the GUI thread.
 
 ## Roadmap
 
