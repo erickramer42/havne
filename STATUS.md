@@ -245,8 +245,10 @@ VX over WiFi and replays a recording by a tap
 step 2, the core stream (`stream.h`, `core/src/elm327_stream.cpp`), is
 built and HARNESS-tested (`Elm327StreamTest`); step 3, the app's
 Bluetooth (`app/btstream.cpp`, Settings' paired adapters and BLE scan,
-Android 12 and later), is built and compiled by CI, not yet run on a
-phone). Later,
+Android 12 and later), is built and ran on the phone with no adapter:
+the permission, the lists, and a classic and a BLE link carrying the
+setup ([2026-10-28-android-7](docs/bench-sessions/2026-10-28-android-7.md));
+step 4 is the MX+ through the phone on the car). Later,
 with its own record: listening to the whole bus (raw frames, for a
 car whose OBD port carries more than diagnostics).
 

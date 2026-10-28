@@ -144,9 +144,14 @@ which isn't part of the name).
       BLE devices nearby join the list as "Bluetooth LE · <address>",
       or the line under it says the scan found none
 - [ ] Select a paired device that isn't an adapter (headphones, a
-      watch) and **Connect**. Record how long until the error line
-      appears and its words (the link refused, or "the link didn't
-      open within 10 s"). The app stays responsive throughout
+      watch): the page scrolls back to the URI field, which now holds
+      `elm327://bt:<address>`, and the row is outlined. Then
+      **Connect**. Record how long until the error line appears and
+      its words: the link refused, "the link didn't open within 10 s",
+      or, from a device that offers a serial service (earbuds often
+      do), "didn't answer ATZ within 5 s". The app stays responsive
+      throughout
+- [ ] The same with a BLE row from the scan
 - [ ] Turn Bluetooth off, then **Refresh**: the line under the count
       reads "Bluetooth is off: turn it on, then Refresh". Bluetooth
       back on

@@ -312,3 +312,12 @@ settled five points:
   once. A BLE link discovers every service's characteristics before the
   picker chooses, writes without response when the characteristic
   allows it, and is up once its notifications are on.
+
+**Note, 2026-10-28, on the phone.** Phase 6 of the phone's run sheet
+ran with no adapter
+([2026-10-28-android-7](../bench-sessions/2026-10-28-android-7.md)):
+the prompt came once, when Adapter opened; a pair of earbuds offered
+an SPP service and an LED light a BLE service none of §2's list names
+(the last rule chose it); both links opened and carried `ATZ` out, and
+with nothing answering the connect failed after 5 s and the link
+closed. An adapter's answers wait for the MX+ (step 4).
