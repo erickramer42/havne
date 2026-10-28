@@ -14,7 +14,13 @@
 //          connected, read into the row, and the Record switch, while a
 //          refused URI isn't kept; a device's row shows the versions last
 //          seen there (Windows: the fake's, from a connect), across a
-//          restart, and a damaged store shows none. The live registry, and
+//          restart, and a damaged store shows none. The Vehicle section
+//          (ADR-0027): New, Rename, Duplicate and the defaults, Forget
+//          and Forget all asking once, kept across a restart; picking
+//          fills the field; locked during a session; a mock session
+//          leaves the vehicle alone, and (Windows, the fake) an adapter's
+//          connect keeps its URI and plotted signals and its VIN is
+//          learned and logged. The live registry, and
 //          the units kept across a restart (Main.qml's Settings), are
 //          manual smoke.
 
@@ -31,7 +37,9 @@ TestCase {
 
     Component {
         id: pageComponent
-        SettingsPage { width: 1000; height: 800 }
+        // Tall enough that the device list sits inside the page's
+        // scroll area, which clips what's below it from a click
+        SettingsPage { width: 1000; height: 1000 }
     }
 
     // The page's stored URI, Record switch and versions (test_qml keeps
@@ -39,6 +47,10 @@ TestCase {
     Settings {
         id: stored
         category: "session"
+    }
+    Settings {
+        id: storedVehicles
+        category: "vehicles"
     }
 
     // A binding error in the app's QML fails the test. Each case starts
@@ -49,6 +61,8 @@ TestCase {
         stored.setValue("recording", false)
         stored.setValue("adapterVersions", "{}")
         stored.sync()
+        storedVehicles.setValue("document", "")
+        storedVehicles.sync()
     }
 
     // Every connect here is asynchronous, so a case that fails between
@@ -62,6 +76,7 @@ TestCase {
         Bridge.disconnectSession()
         tryVerify(() => !Bridge.disconnecting, 5000, "disconnect ends")
         Harness.clearFakeKnobs()
+        Bridge.vehicleLabel = ""
     }
 
     function find(within, name) {
@@ -432,6 +447,138 @@ TestCase {
         compare(versionsOf(page, 0),
                 "last seen: firmware fake-fw 1.0, DLL fake_j2534 0.3, API 04.04",
                 "still shown with no session")
+    }
+
+    function labels(page) {
+        return page.vehicles.list.map(v => v.label)
+    }
+
+    // ADR-0027 §1: every change to the list is made in the section, a
+    // label typed or left to its default
+    function test_theVehicleSectionMakesNamesAndForgetsVehicles() {
+        let page = createPage()
+        const field = find(page, "vehicleLabelField")
+        verify(find(page, "vehicle_none").highlighted, "no vehicle to start")
+        verify(!find(page, "vehicleDuplicate").enabled, "nothing to copy")
+        compare(find(page, "vehicleLabelHint").text, "Left empty, New makes “Vehicle 1”")
+
+        press(page, "vehicleNew")
+        compare(labels(page), ["Vehicle 1"], "the default, with the field empty")
+        compare(Bridge.vehicleLabel, "Vehicle 1", "the recording's label follows the pick")
+        verify(find(page, "vehicle_v1").highlighted)
+
+        field.text = "Daily driver"
+        press(page, "vehicleRename")
+        compare(labels(page), ["Daily driver"])
+        compare(field.text, "", "the field empties for the next label")
+
+        press(page, "vehicleDuplicate")
+        compare(labels(page), ["Daily driver", "Daily driver (copy)"])
+        compare(page.vehicles.picked, "v2")
+        compare(find(page, "vehicleLabelHint").text,
+                "Left empty, New makes “Vehicle 1” and Duplicate “Daily driver (copy 2)”")
+
+        field.text = " daily DRIVER "
+        verify(!find(page, "vehicleNew").enabled, "a label in use")
+        verify(!find(page, "vehicleRename").enabled)
+        verify(find(page, "vehicleLabelProblem").visible)
+        field.text = "x".repeat(41)
+        verify(!find(page, "vehicleNew").enabled, "over 40 characters")
+        field.text = ""
+
+        press(page, "vehicleForget")
+        compare(find(page, "vehicleConfirmText").text, "Forget Daily driver (copy)?")
+        press(page, "vehicleCancel")
+        compare(labels(page).length, 2, "Cancel keeps it")
+        press(page, "vehicleForget")
+        // A change rebuilds the buttons, and the Flow places them at its
+        // next polish
+        const v1 = find(page, "vehicle_v1")
+        tryVerify(() => v1.x > 0, 2000, "the button is placed")
+        mouseClick(v1)
+        compare(page.confirming, "", "picking another backs out")
+        compare(labels(page).length, 2)
+        press(page, "vehicleForget")
+        press(page, "vehicleConfirm")
+        compare(labels(page), ["Daily driver (copy)"])
+        verify(find(page, "vehicle_none").highlighted)
+
+        // The store writes as it changes, and a new page (a restart) reads it
+        page.destroy()
+        wait(10)
+        page = createPage()
+        compare(labels(page), ["Daily driver (copy)"])
+
+        press(page, "vehicleForgetAll")
+        compare(find(page, "vehicleConfirmText").text, "Forget all vehicles?")
+        press(page, "vehicleConfirm")
+        compare(page.vehicles, VehicleBook.empty())
+    }
+
+    function test_pickingAVehicleFillsItsConnection() {
+        const page = createPage()
+        press(page, "vehicleNew")
+        page.saveVehicles(VehicleBook.rememberUri(page.vehicles,
+                                                  "elm327://COM6?profile=uds-generic&did=F190"))
+        press(page, "vehicle_none")
+        find(page, "uriField").text = "mock://demo"
+        mouseClick(find(page, "vehicle_v1"))
+        compare(find(page, "uriField").text, "elm327://COM6?profile=uds-generic&did=F190")
+        verify(find(page, "profile_uds-generic").highlighted, "read back into the row")
+        compare(find(page, "didField").text, "F190")
+    }
+
+    // The vehicle a session runs under can't change beneath it, and a
+    // mock's session isn't that car's
+    function test_aMockSessionLeavesTheVehicleAloneAndLocksTheSection() {
+        const page = createPage()
+        press(page, "vehicleNew")
+        find(page, "uriField").text = "mock://demo"
+        press(page, "connectButton")
+        tryVerify(() => Bridge.connected, 5000, "the mock connects")
+        verify(!find(page, "vehicleNew").enabled)
+        verify(!find(page, "vehicle_none").enabled)
+        verify(!find(page, "vehicleForgetAll").enabled)
+        Bridge.signalModel.toggleSubscribed(0)
+        compare(page.pickedVehicle.uri, "", "a mock's URI isn't kept")
+        compare(page.pickedVehicle.unplotted, [], "nor its plotting")
+        Bridge.signalModel.toggleSubscribed(0)
+    }
+
+    // ADR-0027 §2-§4 through the fake: the connect keeps the URI, the VIN
+    // is learned and logged, Live's plotting is kept and comes back
+    function test_anAdaptersConnectKeepsItsVehiclesSetup() {
+        if (Harness.fakeDllPath === "")
+            skip("needs the fake J2534 DLL (Windows)")
+        let log = []
+        const collect = line => log.push(line)
+        Bridge.logMessage.connect(collect)
+        const page = createPage()
+        find(page, "vehicleLabelField").text = "Daily driver"
+        press(page, "vehicleNew")
+        const uri = "j2534://" + Harness.fakeDllPath
+        find(page, "uriField").text = uri
+        press(page, "connectButton")
+        tryVerify(() => Bridge.connected, 10000, "the fake connects")
+        compare(page.pickedVehicle.uri, uri)
+        tryVerify(() => page.pickedVehicle.vinKey !== "", 5000, "the VIN is learned")
+        verify(page.vehicles.salt.length === 32, "a salt made for it")
+        verify(log.includes("Vehicle: Daily driver (recognized from now on)"), log.join("\n"))
+        verify(!JSON.stringify(page.vehicles).includes("FAKEJ2534VIN"), "no VIN in the store")
+
+        Bridge.signalModel.toggleSubscribed(0)
+        const unticked = Bridge.signalModel.unplottedNames()
+        compare(unticked.length, 1)
+        compare(page.pickedVehicle.unplotted, unticked, "an untick is kept")
+
+        Bridge.disconnectSession()
+        tryVerify(() => !Bridge.disconnecting, 5000, "disconnect ends")
+        log = []
+        press(page, "connectButton")
+        tryVerify(() => Bridge.connected, 10000, "connects again")
+        compare(Bridge.signalModel.unplottedNames(), unticked, "the untick comes back")
+        tryVerify(() => log.includes("Vehicle: Daily driver"), 5000, "recognized: " + log.join("\n"))
+        Bridge.logMessage.disconnect(collect)
     }
 
     // While a vendor's open blocks, nothing may rewrite the URI field or

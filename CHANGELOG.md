@@ -31,6 +31,14 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
 - Settings' adapter list shows each device's firmware versions as last
   seen at a connect ("last seen: …"), without opening the adapter. A
   serial port shows whatever adapter answered on it last.
+- Vehicles ([ADR-0027](docs/adr/0027-vehicle-profiles.md)). Settings'
+  Vehicle row keeps named vehicles: pick one before connecting and it
+  fills in that car's adapter, profile and DIDs, restores the signals
+  plotted on Live, and names the session's recording folder after it.
+  The VIN recognizes a saved car on the next connect, and an unknown
+  one is saved as "Vehicle N". Only a salted hash of the VIN is stored.
+  New, Duplicate, Rename, Forget the VIN, Forget and Forget all are
+  buttons there, so nothing needs a file edited.
 - Developer mode, a switch in Settings that's remembered between runs.
   It adds the `mock://demo` preset and the Log page's raw frame table,
   with its delivery counters; with it off, the app offers only real

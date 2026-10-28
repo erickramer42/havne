@@ -14,7 +14,12 @@
 //          (kept across a new page; the fake's on Windows); the status label
 //          in each link state (tests/qml/tst_linkhealth.qml), by
 //          objectName; the developer box and the mock:// preset that
-//          follows it (tests/qml/tst_log.qml).
+//          follows it (tests/qml/tst_log.qml); the Vehicle section
+//          (ADR-0027): New, Rename, Duplicate and their defaults, Forget
+//          and Forget all asking once, kept across a new page, picking
+//          that fills the field, locked during a session, a mock session
+//          left alone, and (Windows, the fake) an adapter's connect
+//          keeping its URI and plotting, its VIN learned and logged.
 //          Manual smoke — the live discovery list renders (Windows: the
 //          registry's interfaces and ports; macOS/Linux: the /dev ports or
 //          the empty-state hint) sized to its rows, a device row
@@ -89,6 +94,64 @@ Pane {
         next[base] = versions
         seenVersions = next
         sessionSettings.adapterVersions = JSON.stringify(next)
+    }
+
+    // ---- Vehicles (ADR-0027): VehicleBook's document, stored as JSON in
+    // the "vehicles" category. A stored text that doesn't parse leaves no
+    // vehicles, and is overwritten only by the next change
+    property var vehicles: VehicleBook.empty()
+    readonly property var pickedVehicle: VehicleBook.picked(vehicles)
+    // A removal waiting for its second press: "", "forget" or "forgetAll"
+    property string confirming: ""
+    // The picked vehicle's plotted signals reach Live once this session's
+    // rows exist; a change of rows before that isn't the user's
+    property bool plottedApplied: false
+    readonly property string typedLabel: vehicleLabelField.text.trim()
+    readonly property string newLabel: typedLabel !== "" ? typedLabel
+                                                         : VehicleBook.defaultNewLabel(vehicles)
+    readonly property string copyLabel: typedLabel !== "" || pickedVehicle === null
+                                        ? typedLabel
+                                        : VehicleBook.defaultCopyLabel(vehicles, pickedVehicle.label)
+
+    function saveVehicles(doc) {
+        vehicles = doc
+        vehicleStore.document = VehicleBook.serialize(doc)
+        Bridge.vehicleLabel = pickedVehicle !== null ? pickedVehicle.label : ""
+    }
+
+    // Picking fills the field with the vehicle's connection, read back
+    // like typed text so the profile row and the DID field follow
+    function pickVehicle(id) {
+        confirming = ""
+        saveVehicles(VehicleBook.pick(vehicles, id))
+        if (pickedVehicle !== null && pickedVehicle.uri !== "")
+            uriField.text = pickedVehicle.uri
+    }
+
+    // A change of the list from the section's buttons: the field empties
+    // for the next label
+    function changeVehicles(doc) {
+        confirming = ""
+        saveVehicles(doc)
+        vehicleLabelField.text = ""
+    }
+
+    // The VIN settled which vehicle this is (ADR-0027 §4)
+    function recognizeVehicle() {
+        if (!VehicleBook.isAdapterUri(Bridge.currentUri))
+            return
+        let doc = vehicles
+        if (doc.salt === "") {
+            doc = VehicleBook.copy(doc)
+            doc.salt = Bridge.newSalt()
+        }
+        const r = VehicleBook.recognize(doc, Bridge.vinKey(doc.salt), Bridge.currentUri)
+        saveVehicles(r.doc)
+        if (r.outcome === "new" && plottedApplied)
+            saveVehicles(VehicleBook.rememberUnplotted(vehicles, Bridge.signalModel.unplottedNames()))
+        else if (r.outcome === "switched" && plottedApplied)
+            Bridge.signalModel.setUnplotted(pickedVehicle.unplotted)
+        Bridge.logEvent(VehicleBook.logLine(r))
     }
 
     // No session, and none starting or ending. Every control that chooses
@@ -275,6 +338,11 @@ Pane {
         property bool recording: false
         property string adapterVersions: "{}"
     }
+    Settings {
+        id: vehicleStore
+        category: "vehicles"
+        property string document: ""
+    }
 
     Component.onCompleted: {
         try {
@@ -284,6 +352,8 @@ Pane {
         } catch (e) {
             // a damaged store shows no versions until the next connect
         }
+        vehicles = VehicleBook.parse(vehicleStore.document)
+        Bridge.vehicleLabel = pickedVehicle !== null ? pickedVehicle.label : ""
         refreshDevices()
         // Set like typed text, so the profile row and the DID field read
         // it back
@@ -301,11 +371,39 @@ Pane {
             if (error === "") {
                 sessionSettings.uri = uri
                 page.rememberVersions(uri, Bridge.adapterVersions)
+                // The picked vehicle's connection and plotted signals,
+                // for an adapter's session only (ADR-0027 §1, §2)
+                if (VehicleBook.isAdapterUri(uri) && page.pickedVehicle !== null) {
+                    page.saveVehicles(VehicleBook.rememberUri(page.vehicles, uri))
+                    Bridge.signalModel.setUnplotted(page.pickedVehicle.unplotted)
+                }
+                page.plottedApplied = true
             }
+        }
+
+        function onConnectedChanged() {
+            if (!Bridge.connected)
+                page.plottedApplied = false
+        }
+
+        function onVehicleIdentified() {
+            page.recognizeVehicle()
         }
 
         function onRecordingChanged() {
             sessionSettings.recording = Bridge.recording
+        }
+    }
+
+    // A tick or an untick on Live is the picked vehicle's from now on
+    Connections {
+        target: Bridge.signalModel
+
+        function onSubscribedCountChanged() {
+            if (page.plottedApplied && page.pickedVehicle !== null
+                    && VehicleBook.isAdapterUri(Bridge.currentUri))
+                page.saveVehicles(VehicleBook.rememberUnplotted(
+                    page.vehicles, Bridge.signalModel.unplottedNames()))
         }
     }
 
@@ -399,6 +497,156 @@ Pane {
                 wrapMode: Text.WrapAnywhere
                 Layout.fillWidth: true
                 text: ""
+            }
+
+            // ---- Vehicle (ADR-0027): picked before a connect, its
+            // connection filling the field; every change to the list is
+            // made here. Locked while a session is up or in flight ----
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: Theme.spacing
+
+                Label {
+                    text: qsTr("Vehicle:")
+                    color: Theme.textDim
+                    Layout.alignment: Qt.AlignTop
+                    topPadding: 8
+                }
+                Flow {
+                    Layout.fillWidth: true
+                    spacing: Theme.spacing
+
+                    ThemedButton {
+                        objectName: "vehicle_none"
+                        text: qsTr("None")
+                        highlighted: page.pickedVehicle === null
+                        enabled: page.idle
+                        onClicked: page.pickVehicle("")
+                    }
+                    // Keyed by the count, not the list: each change makes a
+                    // new list, and a list model would rebuild every
+                    // button (losing focus) for a pick or a rename
+                    Repeater {
+                        model: page.vehicles.list.length
+                        ThemedButton {
+                            required property int index
+                            // Undefined for a moment when the list shrinks,
+                            // before the button goes
+                            readonly property var vehicle: page.vehicles.list[index]
+                            objectName: "vehicle_" + (vehicle?.id ?? "")
+                            text: vehicle?.label ?? ""
+                            highlighted: vehicle !== undefined && page.vehicles.picked === vehicle.id
+                            enabled: page.idle
+                            onClicked: page.pickVehicle(vehicle.id)
+                        }
+                    }
+                }
+            }
+
+            Flow {
+                Layout.fillWidth: true
+                spacing: Theme.spacing
+                visible: page.confirming === ""
+
+                TextField {
+                    id: vehicleLabelField
+                    objectName: "vehicleLabelField"
+                    width: 300
+                    enabled: page.idle
+                    placeholderText: qsTr("Label")
+                }
+                ThemedButton {
+                    objectName: "vehicleNew"
+                    text: qsTr("New")
+                    enabled: page.idle && VehicleBook.labelProblem(page.vehicles, page.newLabel, "") === ""
+                    onClicked: page.changeVehicles(VehicleBook.add(page.vehicles, page.newLabel))
+                }
+                ThemedButton {
+                    objectName: "vehicleDuplicate"
+                    text: qsTr("Duplicate")
+                    enabled: page.idle && page.pickedVehicle !== null
+                             && VehicleBook.labelProblem(page.vehicles, page.copyLabel, "") === ""
+                    onClicked: page.changeVehicles(VehicleBook.duplicate(page.vehicles, page.copyLabel))
+                }
+                ThemedButton {
+                    objectName: "vehicleRename"
+                    text: qsTr("Rename")
+                    enabled: page.idle && page.pickedVehicle !== null && page.typedLabel !== ""
+                             && page.typedLabel !== page.pickedVehicle.label
+                             && VehicleBook.labelProblem(page.vehicles, page.typedLabel,
+                                                         page.pickedVehicle.id) === ""
+                    onClicked: page.changeVehicles(VehicleBook.rename(page.vehicles, page.typedLabel))
+                }
+                ThemedButton {
+                    objectName: "vehicleForgetVin"
+                    text: qsTr("Forget the VIN")
+                    enabled: page.idle && page.pickedVehicle !== null && page.pickedVehicle.vinKey !== ""
+                    onClicked: page.changeVehicles(VehicleBook.forgetVin(page.vehicles))
+                }
+                ThemedButton {
+                    objectName: "vehicleForget"
+                    text: qsTr("Forget")
+                    enabled: page.idle && page.pickedVehicle !== null
+                    onClicked: page.confirming = "forget"
+                }
+                ThemedButton {
+                    objectName: "vehicleForgetAll"
+                    text: qsTr("Forget all vehicles")
+                    enabled: page.idle && page.vehicles.list.length > 0
+                    onClicked: page.confirming = "forgetAll"
+                }
+            }
+
+            // With the field empty, the defaults New and Duplicate take
+            Label {
+                objectName: "vehicleLabelHint"
+                visible: page.typedLabel === "" && page.confirming === ""
+                text: page.pickedVehicle === null
+                    ? qsTr("Left empty, New makes “%1”").arg(VehicleBook.defaultNewLabel(page.vehicles))
+                    : qsTr("Left empty, New makes “%1” and Duplicate “%2”")
+                          .arg(VehicleBook.defaultNewLabel(page.vehicles),
+                               VehicleBook.defaultCopyLabel(page.vehicles, page.pickedVehicle.label))
+                color: Theme.textDim
+                wrapMode: Text.Wrap
+                Layout.fillWidth: true
+            }
+
+            // Why a typed label can't be used
+            Label {
+                objectName: "vehicleLabelProblem"
+                visible: text !== "" && page.confirming === ""
+                text: page.typedLabel === "" ? ""
+                    : VehicleBook.labelProblem(page.vehicles, page.typedLabel,
+                                               page.pickedVehicle !== null ? page.pickedVehicle.id : "")
+                color: Theme.warning
+            }
+
+            // A removal asks once, in place
+            RowLayout {
+                visible: page.confirming !== ""
+                spacing: Theme.spacing
+
+                Label {
+                    objectName: "vehicleConfirmText"
+                    text: page.confirming === "forgetAll" ? qsTr("Forget all vehicles?")
+                        : page.pickedVehicle !== null ? qsTr("Forget %1?").arg(page.pickedVehicle.label)
+                        : ""
+                    color: Theme.text
+                }
+                ThemedButton {
+                    objectName: "vehicleConfirm"
+                    text: qsTr("Forget")
+                    highlighted: true
+                    enabled: page.idle
+                    onClicked: page.changeVehicles(page.confirming === "forgetAll"
+                                                   ? VehicleBook.forgetAll(page.vehicles)
+                                                   : VehicleBook.forget(page.vehicles))
+                }
+                ThemedButton {
+                    objectName: "vehicleCancel"
+                    text: qsTr("Cancel")
+                    onClicked: page.confirming = ""
+                }
             }
 
             // ---- Presets: the URI's base ----

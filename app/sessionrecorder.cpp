@@ -1,5 +1,6 @@
 // File/layer: app/sessionrecorder.cpp | Qt6 Core, app layer, C++17
-// Testing: test_bridge (BridgeTest.Recording*), through the bridge
+// Testing: test_bridge (BridgeTest.Recording*, the vehicle's label in
+//          the folder's name among them), through the bridge
 
 #include "sessionrecorder.h"
 
@@ -38,13 +39,15 @@ QByteArray hex(quint32 v)
 
 }  // namespace
 
-bool SessionRecorder::start(const QString& root, const QStringList& header, QString* error)
+bool SessionRecorder::start(const QString& root, const QStringList& header,
+                            QString* error, const QString& label)
 {
     const QString stamp = QDateTime::currentDateTime().toString(QStringLiteral("yyyyMMdd-HHmmss"));
+    const QString tail = label.isEmpty() ? QString() : QLatin1Char(' ') + label;
     QDir dir(root);
-    QString name = stamp;
+    QString name = stamp + tail;
     for (int n = 2; dir.exists(name); ++n) {
-        name = stamp + QLatin1Char('-') + QString::number(n);
+        name = stamp + QLatin1Char('-') + QString::number(n) + tail;
     }
     if (!dir.mkpath(name)) {
         *error = QStringLiteral("can't create %1").arg(dir.filePath(name));

@@ -3,7 +3,9 @@
 //          and payload storage, SignalListModel's history ring and display units,
 //          discoverJ2534Devices' and discoverSerialPorts' marshaling
 //          shape, the delivery figures
-//          (BridgeTest.DeliveryText*, .DisconnectLogsTheDelivery)
+//          (BridgeTest.DeliveryText*, .DisconnectLogsTheDelivery), the
+//          vehicle's VIN key, label and plotted names (ADR-0027;
+//          BridgeTest.VinFromIdentity*, .UnplottedNames*, …)
 
 #pragma once
 
@@ -190,6 +192,11 @@ public:
     void setUnitSystem(uint32_t units);
 
     Q_INVOKABLE void toggleSubscribed(int row);
+    // A vehicle's plotted signals (ADR-0027 §1): the names of the
+    // numeric rows the chart leaves out, and setting them, which ticks
+    // every other numeric row. Text rows are never plotted or listed.
+    Q_INVOKABLE QStringList unplottedNames() const;
+    Q_INVOKABLE void setUnplotted(const QStringList& names);
 
     // Strip-chart pull API: one map per SUBSCRIBED signal with non-empty
     // history: { id, row, name, unit, decimals, value,
@@ -295,6 +302,10 @@ class QtTuneBridge : public QObject
     Q_PROPERTY(QString recordingFolder READ recordingFolder NOTIFY recordingStateChanged)
     Q_PROPERTY(QUrl recordingFolderUrl READ recordingFolderUrl NOTIFY recordingStateChanged)
     Q_PROPERTY(bool recordingActive READ recordingActive NOTIFY recordingStateChanged)
+    // The picked vehicle's label (ADR-0027 §2), "" for none: an adapter
+    // session's recording folder is named "<stamp> <label>". Settings
+    // sets it before each connect.
+    Q_PROPERTY(QString vehicleLabel READ vehicleLabel WRITE setVehicleLabel NOTIFY vehicleLabelChanged)
     // Display units (ADR-0022): ECUIO_UNITS_METRIC (0) or _IMPERIAL (1).
     // Applies to what the UI shows at once, connected or not; recordings
     // keep the decoded values. Main.qml persists it.
@@ -377,6 +388,23 @@ public:
     QString recordingFolder() const;
     QUrl recordingFolderUrl() const;
     bool recordingActive() const { return m_recorder.active(); }
+    QString vehicleLabel() const { return m_vehicleLabel; }
+    void setVehicleLabel(const QString& label);
+    // The VIN (ADR-0027 §3) stays in the bridge: QML gets a salted
+    // SHA-256 of it, as lowercase hex, and "" before vehicleIdentified()
+    // or with no session. newSalt() is 16 random bytes as hex.
+    Q_INVOKABLE QString vinKey(const QString& salt) const;
+    Q_INVOKABLE QString newSalt() const;
+    // A line in the activity log (and a recording's events.log), for the
+    // app's own events: the vehicle lines of ADR-0027 §4
+    Q_INVOKABLE void logEvent(const QString& line) { emit logMessage(line); }
+    // The VIN in an identity report: 09 02's text, or 22 F190's when 09
+    // 02 wasn't answered, letters and digits only, upper case, accepted
+    // at 17 characters; "" otherwise. Static, so tests need no session.
+    static QString vinFromIdentity(const ecuio_channel_identity_t& identity);
+    // A label as a recording folder takes it: letters, digits, space,
+    // -, _ and ., trimmed, at most 40 characters, no trailing dot
+    static QString folderLabel(const QString& label);
     int unitSystem() const { return static_cast<int>(m_signalModel->unitSystem()); }
     void setUnitSystem(int units);   // anything but 0 or 1 is ignored
     // A quantity in a decoded unit, as the current unit system shows it:
@@ -417,6 +445,10 @@ signals:
     void disconnectingChanged();
     void connectResult(const QString& uri, const QString& error);
     void logMessage(const QString& line);
+    // The first channel's identity named a VIN this session hadn't
+    // (ADR-0027 §3): vinKey() has an answer now
+    void vehicleIdentified();
+    void vehicleLabelChanged();
     void linkStateChanged();
     void logPausedChanged();
     void recordingChanged();
@@ -558,6 +590,8 @@ private:
     void pollChannelIdentity();
     void pollReplayEnd();   // the tick: "Replay finished" once, at the end of the file
     uint32_t m_identityGeneration[ECUIO_SESSION_INFO_MAX_CHANNELS] = {};
+    QString m_vin;            // the first channel's, this session; never leaves the bridge
+    QString m_vehicleLabel;   // the picked vehicle's, for the recording folder
 
     // This session's delivery figures (deliveryStats), GUI thread only
     LatencyStats m_frameLatency;

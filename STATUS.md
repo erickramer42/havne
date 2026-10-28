@@ -89,6 +89,11 @@ goes out in the next release. The milestone after it is chosen from the
     connected, the Record sessions switch and each device's versions as
     last seen at a connect (shown on its row in Settings, since the list
     opens no adapter), kept between runs.
+  - **Vehicles** ([ADR-0027](docs/adr/0027-vehicle-profiles.md)): a
+    named vehicle, picked in Settings before a connect, remembers its
+    adapter URI and Live's plotted signals and names its recordings'
+    folders; a salted hash of the VIN recognizes it at the next
+    connect. Made, copied, renamed and forgotten in the app.
   - **Evidence for field sessions:** opt-in recording of every frame,
     decoded value and activity line per connect
     ([ADR-0017](docs/adr/0017-session-recording.md)), and a surrogate
@@ -295,10 +300,9 @@ week or more or a design that needs an ADR first.
 - **Recording, what's left (S).** ADR-0017's recorder writes a whole
   session per connect, and its `events.log` names the vehicle through
   the identity line ([ADR-0021](docs/adr/0021-vehicle-identification.md)).
-  Still to do: name the folder by vehicle as well as date (the folder
-  opens before the VIN arrives, so it would take the VIN last seen on
-  that URI, stored with the preferences), and copy selected Log rows
-  for quick notes.
+  The folder is named by the picked vehicle as well as the date
+  ([ADR-0027](docs/adr/0027-vehicle-profiles.md)). Still to do: copy
+  selected Log rows for quick notes.
 - **Triggered logging (M).** Record only while a condition holds
   (RPM over a threshold) or capture a window around a link fault.
   Needs a trigger model in core, similar in shape to the probe: data
@@ -328,13 +332,6 @@ week or more or a design that needs an ADR first.
   Confirm that a live-gauge app qualifies before building anything.
   Out of scope: modifying or replacing a vehicle's own infotainment
   system.
-- **Vehicle profiles (M).** Remember per vehicle, keyed by VIN or a
-  label the user names: profile, channel overrides, dashboard
-  arrangement, last device. Nobody reconfigures the tool each time
-  they plug into the same car. The VIN key exists
-  ([ADR-0021](docs/adr/0021-vehicle-identification.md)), and the app
-  keeps preferences through QML `Settings`; a store per vehicle is
-  new.
 - **User-configurable dashboards (L).** User-authored pages choosing
   from the gauge library. The gauges are already modular, but layout
   persistence is new ground.

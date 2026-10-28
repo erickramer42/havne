@@ -1,5 +1,6 @@
 // File/layer: app/sessionrecorder.h | Qt6 Core, app layer, C++17
-// Testing: test_bridge (BridgeTest.Recording*), through the bridge
+// Testing: test_bridge (BridgeTest.Recording*, the vehicle's label in
+//          the folder's name among them), through the bridge
 
 #pragma once
 
@@ -24,10 +25,13 @@ class SessionRecorder
 public:
     using Clock = std::chrono::steady_clock;
 
-    /* Creates <root>/<yyyyMMdd-HHmmss>[-n]/ and its three files, then
-     * writes header (one line each) into events.log. False, with *error
-     * set, if the folder or a file can't be created. */
-    bool start(const QString& root, const QStringList& header, QString* error);
+    /* Creates <root>/<yyyyMMdd-HHmmss>[-n][ <label>]/ and its three
+     * files, then writes header (one line each) into events.log. The
+     * label (ADR-0027 §2) comes as a folder name may take it
+     * (QtTuneBridge::folderLabel); "" leaves the date alone. False, with
+     * *error set, if the folder or a file can't be created. */
+    bool start(const QString& root, const QStringList& header, QString* error,
+               const QString& label = {});
     bool active() const { return m_active; }
     /* False once a write has failed; the bridge then stops the recording. */
     bool ok() const { return m_ok; }

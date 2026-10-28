@@ -15,7 +15,11 @@
 //          units on the rows, the chart and not the recording
 //          (BridgeTest.UnitSystem*), the URI label
 //          (BridgeTest.UriLabelCutsADirectLoadPathToItsFileName), the
-//          connect's trim (BridgeTest.ConnectTrimsSpacesAroundTheUri). QML
+//          connect's trim (BridgeTest.ConnectTrimsSpacesAroundTheUri), the
+//          vehicle's parts (ADR-0027: BridgeTest.VinFromIdentity*,
+//          .NewSalt*, .FolderLabel*, .UnplottedNames*, and on Windows
+//          .AConnectsVinReachesQmlOnlyAsASaltedHash and
+//          .RecordingFolderNamesThePickedVehicleForAnAdapterOnly). QML
 //          rendering: manual smoke.
 
 #include "qttunebridge.h"
@@ -27,8 +31,10 @@
 
 #include <QMetaObject>
 #include <QByteArray>
+#include <QCryptographicHash>
 #include <QDateTime>
 #include <QDir>
+#include <QRandomGenerator>
 #include <QStandardPaths>
 #include <QStringList>
 #include <QtGlobal>
@@ -256,6 +262,7 @@ void SignalListModel::setSignalSet(const ecuio_signal_set_t* set)
         m_rowOfId.clear();
         m_subscribedCount = 0;
         endResetModel();
+        emit subscribedCountChanged();
         m_clock.restart();
         return;
     }
@@ -281,6 +288,8 @@ void SignalListModel::setSignalSet(const ecuio_signal_set_t* set)
         m_entries.push_back(e);
     }
     endResetModel();
+    // A new set plots every numeric row, whatever the last one plotted
+    emit subscribedCountChanged();
 
     m_clock.restart();
 }
@@ -466,6 +475,39 @@ void SignalListModel::toggleSubscribed(int row)
     if (e.subscribed) ++m_subscribedCount; else --m_subscribedCount;
     emit dataChanged(index(row), index(row), {SubscribedRole});
     emit subscribedCountChanged();
+}
+
+QStringList SignalListModel::unplottedNames() const
+{
+    QStringList names;
+    for (const Entry& e : m_entries) {
+        if (!e.isText && !e.subscribed) {
+            names << QString::fromUtf8(e.name);
+        }
+    }
+    return names;
+}
+
+void SignalListModel::setUnplotted(const QStringList& names)
+{
+    bool changed = false;
+    for (Entry& e : m_entries) {
+        if (e.isText) {
+            continue;
+        }
+        const bool subscribed = !names.contains(QString::fromUtf8(e.name));
+        if (subscribed != e.subscribed) {
+            e.subscribed = subscribed;
+            m_subscribedCount += subscribed ? 1 : -1;
+            changed = true;
+        }
+    }
+    if (changed && !m_entries.empty()) {
+        emit dataChanged(index(0),
+                         index(static_cast<int>(m_entries.size()) - 1),
+                         {SubscribedRole});
+        emit subscribedCountChanged();
+    }
 }
 
 // ---------------- QtTuneBridge ----------------
@@ -690,6 +732,7 @@ void QtTuneBridge::applyConnectedState(ecuio_session_t* session, const QString& 
     ecuio_session_info_t info{};
     const bool haveInfo = ecuio_session_get_info(session, &info) == ECUIO_OK;
     m_adapterVersions = haveInfo ? versionsText(info) : QString();
+    m_vin.clear(); // this car's comes with its identity
     m_currentUri = uri;
     emit currentUriChanged();
     // The frame log belongs to a session, like its count: rows from two
@@ -836,6 +879,7 @@ void QtTuneBridge::disconnectSession()
     m_stagingTexts.clear();
     m_currentUri.clear();
     m_adapterVersions.clear();
+    m_vin.clear();
     m_linkErrorCode = ECUIO_OK;           // the properties must not
     m_errorEpisodes = 0;              // outlive the session
 
@@ -990,8 +1034,14 @@ void QtTuneBridge::startRecording(const QString& uri, const ecuio_signal_set_t* 
                       .arg(QString::fromUtf8(frameLogging)),
     };
 
+    // The picked vehicle names an adapter's session only (ADR-0027 §1):
+    // a mock or a replay isn't that car
+    const bool adapter =
+        uri.startsWith(QStringLiteral("j2534://"), Qt::CaseInsensitive) ||
+        uri.startsWith(QStringLiteral("elm327://"), Qt::CaseInsensitive);
     QString error;
-    if (!m_recorder.start(root, header, &error)) {
+    if (!m_recorder.start(root, header, &error,
+                          adapter ? folderLabel(m_vehicleLabel) : QString())) {
         emit logMessage(QStringLiteral("Recording failed: %1").arg(error));
         return;
     }
@@ -1579,7 +1629,95 @@ void QtTuneBridge::pollChannelIdentity()
         }
         m_identityGeneration[c] = s.generation;
         emit logMessage(channelIdentityText(s));
+        // The vehicle is the first channel's ECU's VIN (ADR-0027 §3);
+        // a recovery's re-asks settle on the same one and say nothing
+        if (c == 0) {
+            const QString vin = vinFromIdentity(s);
+            if (!vin.isEmpty() && vin != m_vin) {
+                m_vin = vin;
+                emit vehicleIdentified();
+            }
+        }
     }
+}
+
+QString QtTuneBridge::vinFromIdentity(const ecuio_channel_identity_t& identity)
+{
+    QString fromService09;
+    QString fromF190;
+    const uint32_t items =
+        std::min<uint32_t>(identity.items, ECUIO_IDENTITY_MAX_ITEMS);
+    for (uint32_t i = 0; i < items; ++i) {
+        const ecuio_identity_item_t& it = identity.list[i];
+        if (it.outcome != ECUIO_IDENTITY_ANSWERED) {
+            continue;
+        }
+        QString vin;
+        for (uint8_t k = 0; k < it.text_length && k < ECUIO_IDENTITY_TEXT_LEN;
+             ++k) {
+            const QChar ch = QLatin1Char(it.text[k]);
+            if (ch.isLetterOrNumber() && ch.unicode() < 0x80) {
+                vin += ch.toUpper();
+            }
+        }
+        if (vin.size() != 17) {
+            continue;
+        }
+        if (it.length == 2 && it.request[0] == 0x09 && it.request[1] == 0x02) {
+            fromService09 = vin;
+        } else if (it.length == 3 && it.request[0] == 0x22 &&
+                   it.request[1] == 0xF1 && it.request[2] == 0x90) {
+            fromF190 = vin;
+        }
+    }
+    return fromService09.isEmpty() ? fromF190 : fromService09;
+}
+
+QString QtTuneBridge::vinKey(const QString& salt) const
+{
+    if (m_vin.isEmpty()) {
+        return {};
+    }
+    return QString::fromLatin1(
+        QCryptographicHash::hash((salt + m_vin).toUtf8(),
+                                 QCryptographicHash::Sha256)
+            .toHex());
+}
+
+QString QtTuneBridge::newSalt() const
+{
+    QByteArray bytes(16, '\0');
+    for (char& b : bytes) {
+        b = static_cast<char>(QRandomGenerator::system()->bounded(256));
+    }
+    return QString::fromLatin1(bytes.toHex());
+}
+
+void QtTuneBridge::setVehicleLabel(const QString& label)
+{
+    if (label == m_vehicleLabel) {
+        return;
+    }
+    m_vehicleLabel = label;
+    emit vehicleLabelChanged();
+}
+
+QString QtTuneBridge::folderLabel(const QString& label)
+{
+    QString out;
+    for (const QChar ch : label) {
+        if (ch.isLetterOrNumber() || ch == QLatin1Char(' ') ||
+            ch == QLatin1Char('-') || ch == QLatin1Char('_') ||
+            ch == QLatin1Char('.')) {
+            out += ch;
+        }
+    }
+    out = out.simplified().left(40);
+    // Windows refuses a folder name ending in a dot or a space
+    while (out.endsWith(QLatin1Char('.')) || out.endsWith(QLatin1Char(' '))) {
+        out.chop(1);
+    }
+    return out;
 }
 
 /* One channel's "ECU 0x… identity:" line: each answered item by its

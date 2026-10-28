@@ -140,6 +140,9 @@ screen, is [docs/architecture.md](docs/architecture.md).
 - **Live view.** Decoded values with units, refreshed at 10 Hz, plus
   a strip chart that plots each value at its frame's time and keeps
   each 100 ms window's peak.
+- **Vehicles.** Name each car once: picking it fills in its adapter,
+  profile and DIDs, restores what Live plots, and names its recordings.
+  Its VIN recognizes it next time, stored only as a salted hash.
 - **Activity log.** The Log page names every connect, link change,
   adapter and ECU, time-stamped. Developer mode adds the raw frames,
   newest-first or oldest-first, with Pause.

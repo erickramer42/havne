@@ -9,12 +9,14 @@
 #include <gtest/gtest.h>
 
 #include <QCoreApplication>
+#include <QCryptographicHash>
 #include <QDir>
 #include <QDirIterator>
 #include <QEventLoop>
 #include <QFile>
 #include <QFileInfo>
 #include <QHash>
+#include <QRegularExpression>
 #include <QStringList>
 #include <QTemporaryDir>
 #include <QTimer>
@@ -2166,6 +2168,63 @@ TEST(BridgeTest, RefusedStartNamesItsCauseAndLeavesNoSession)
     EXPECT_TRUE(bridge.connected());
     ASSERT_TRUE(disconnectAndWait(bridge));
 }
+/* ADR-0027 §3: the fake's VIN reaches QML only as a salted SHA-256, once
+ * a session, and nothing is left of it after the disconnect. A bare URI
+ * runs obd2, whose rotation asks the identity. */
+TEST(BridgeTest, AConnectsVinReachesQmlOnlyAsASaltedHash)
+{
+    QtTuneBridge bridge;
+    int identified = 0;
+    QObject::connect(&bridge, &QtTuneBridge::vehicleIdentified,
+                     [&identified]() { ++identified; });
+    EXPECT_TRUE(bridge.vinKey(QStringLiteral("salt")).isEmpty())
+        << "no session, no key";
+    const QString uri = QStringLiteral("j2534://%1")
+                            .arg(QString::fromUtf8(FAKE_J2534_DLL_PATH));
+    ASSERT_TRUE(bridge.connectSession(uri).isEmpty());
+    ASSERT_TRUE(spinUntil([&identified]() { return identified > 0; }, 5000))
+        << "vehicleIdentified never came";
+    const QString expected = QString::fromLatin1(
+        QCryptographicHash::hash(QByteArrayLiteral("saltFAKEJ2534VIN00001"),
+                                 QCryptographicHash::Sha256)
+            .toHex());
+    EXPECT_EQ(bridge.vinKey(QStringLiteral("salt")), expected);
+    EXPECT_NE(bridge.vinKey(QStringLiteral("pepper")), expected)
+        << "the salt is in the key";
+    spinLoop(300);
+    EXPECT_EQ(identified, 1) << "once a session";
+    ASSERT_TRUE(disconnectAndWait(bridge));
+    EXPECT_TRUE(bridge.vinKey(QStringLiteral("salt")).isEmpty());
+}
+
+/* ADR-0027 §2: an adapter session's recording folder names the picked
+ * vehicle, as a folder name may take it; a mock session's doesn't. */
+TEST(BridgeTest, RecordingFolderNamesThePickedVehicleForAnAdapterOnly)
+{
+    QTemporaryDir root;
+    ASSERT_TRUE(root.isValid());
+    QtTuneBridge bridge;
+    bridge.setRecordingsRootForTesting(root.path());
+    bridge.setRecording(true);
+    bridge.setVehicleLabel(QStringLiteral("Daily driver/2"));
+
+    ASSERT_TRUE(bridge.connectSession(QStringLiteral("mock://rec")).isEmpty());
+    ASSERT_TRUE(disconnectAndWait(bridge));
+    ASSERT_TRUE(bridge.connectSession(fakeUri()).isEmpty());
+    ASSERT_TRUE(disconnectAndWait(bridge));
+
+    const QStringList folders = recordingFolders(root.path());
+    ASSERT_EQ(folders.size(), 2) << folders.join(',').toStdString();
+    const QRegularExpression dateOnly(
+        QStringLiteral("^[0-9]{8}-[0-9]{6}(-[0-9]+)?$"));
+    const QRegularExpression named(
+        QStringLiteral("^[0-9]{8}-[0-9]{6}(-[0-9]+)? Daily driver2$"));
+    EXPECT_EQ(folders.filter(dateOnly).size(), 1)
+        << folders.join(',').toStdString();
+    EXPECT_EQ(folders.filter(named).size(), 1)
+        << folders.join(',').toStdString();
+}
+
 #endif  // _WIN32
 
 // ---------------------------------------------------------------------------
@@ -2423,6 +2482,124 @@ TEST(BridgeTest, ChannelSupportTextNamesTheEcuAndWhatItDropped)
     EXPECT_EQ(QtTuneBridge::channelSupportText(running).toStdString(),
               "ECU 0x7E9: 128 requests, none dropped; "
               "scan: 256 DIDs, 130 found (128 polled), 120 refused, 6 unanswered");
+}
+/* ADR-0027 §3: the VIN a vehicle is known by, from the first channel's
+ * report: 09 02's text, else F190's; letters and digits only, upper
+ * case, at 17 characters. */
+TEST(BridgeTest, VinFromIdentityTakesService09ThenF190)
+{
+    const auto item = [](std::initializer_list<uint8_t> request,
+                         uint8_t outcome, const std::string& text) {
+        ecuio_identity_item_t it{};
+        uint8_t k = 0;
+        for (uint8_t b : request) {
+            it.request[k++] = b;
+        }
+        it.length = k;
+        it.outcome = outcome;
+        it.text_length = static_cast<uint8_t>(text.size());
+        memcpy(it.text, text.data(), text.size());
+        return it;
+    };
+    ecuio_channel_identity_t id{};
+    id.flags = ECUIO_IDENTITY_COMPLETE;
+    id.items = 2;
+    id.list[0] =
+        item({0x22, 0xF1, 0x90}, ECUIO_IDENTITY_ANSWERED, "f190vin0000000002");
+    id.list[1] = item({0x09, 0x02}, ECUIO_IDENTITY_ANSWERED,
+                      std::string(2, '\0') + " FAKEJ2534VIN00001");
+    EXPECT_EQ(QtTuneBridge::vinFromIdentity(id).toStdString(),
+              "FAKEJ2534VIN00001")
+        << "09 02 first, its padding dropped";
+
+    id.list[1].outcome = ECUIO_IDENTITY_REFUSED;
+    EXPECT_EQ(QtTuneBridge::vinFromIdentity(id).toStdString(),
+              "F190VIN0000000002")
+        << "F190 when 09 02 wasn't answered, in upper case";
+
+    id.list[0] =
+        item({0x22, 0xF1, 0x90}, ECUIO_IDENTITY_ANSWERED, "FAKEJ2534VIN0001");
+    EXPECT_TRUE(QtTuneBridge::vinFromIdentity(id).isEmpty()) << "16 characters";
+    id.list[0] =
+        item({0x22, 0xF1, 0x90}, ECUIO_IDENTITY_ANSWERED, "FAKEJ2534VIN000012");
+    EXPECT_TRUE(QtTuneBridge::vinFromIdentity(id).isEmpty()) << "18 characters";
+
+    id.list[0] =
+        item({0x09, 0x04}, ECUIO_IDENTITY_ANSWERED, "CALIBRATION00001X");
+    EXPECT_TRUE(QtTuneBridge::vinFromIdentity(id).isEmpty())
+        << "a CALID of 17 isn't a VIN";
+
+    id.items = 1;
+    id.list[1] =
+        item({0x09, 0x02}, ECUIO_IDENTITY_ANSWERED, "FAKEJ2534VIN00001");
+    EXPECT_TRUE(QtTuneBridge::vinFromIdentity(id).isEmpty())
+        << "past the count isn't read";
+}
+
+TEST(BridgeTest, NewSaltIsSixteenRandomBytes)
+{
+    QtTuneBridge bridge;
+    const QString a = bridge.newSalt();
+    const QString b = bridge.newSalt();
+    EXPECT_TRUE(QRegularExpression(QStringLiteral("^[0-9a-f]{32}$"))
+                    .match(a)
+                    .hasMatch())
+        << a.toStdString();
+    EXPECT_NE(a, b);
+}
+
+/* ADR-0027 §2: a label as a recording folder may take it */
+TEST(BridgeTest, FolderLabelKeepsWhatAFolderNameMay)
+{
+    const auto f = [](const char* label) {
+        return QtTuneBridge::folderLabel(QString::fromUtf8(label))
+            .toStdString();
+    };
+    EXPECT_EQ(f("Daily driver"), "Daily driver");
+    EXPECT_EQ(f("  Weekend   car  "), "Weekend car");
+    EXPECT_EQ(f("a/b:c*?<>|d"), "abcd");
+    EXPECT_EQ(f("v1.2_track-day"), "v1.2_track-day");
+    EXPECT_EQ(f("Car..."), "Car") << "Windows refuses a trailing dot";
+    EXPECT_EQ(f("..."), "");
+    EXPECT_EQ(f(std::string(60, 'x').c_str()), std::string(40, 'x'));
+}
+
+/* ADR-0027 §1: a vehicle's plotted signals are the numeric rows the
+ * chart leaves out, read and set by name */
+TEST(BridgeTest, UnplottedNamesReadAndSetTheChartsRows)
+{
+    QtTuneBridge bridge;
+    SignalListModel* m = bridge.signalModel();
+    int countNotified = 0;
+    QObject::connect(m, &SignalListModel::subscribedCountChanged,
+                     [&countNotified]() { ++countNotified; });
+    ASSERT_TRUE(bridge.connectSession(QStringLiteral("mock://demo")).isEmpty());
+    EXPECT_EQ(countNotified, 1) << "a new set's count is notified";
+    ASSERT_GE(m->rowCount(), 3);
+    const auto name = [m](int row) {
+        return m->data(m->index(row), SignalListModel::NameRole).toString();
+    };
+    const auto plotted = [m](int row) {
+        return m->data(m->index(row), SignalListModel::SubscribedRole).toBool();
+    };
+    const int all = m->subscribedCount();
+    EXPECT_TRUE(m->unplottedNames().isEmpty())
+        << "every numeric row starts plotted";
+
+    m->setUnplotted({name(0), name(2), QStringLiteral("Not a signal")});
+    EXPECT_EQ(m->unplottedNames(), (QStringList{name(0), name(2)}));
+    EXPECT_EQ(m->subscribedCount(), all - 2);
+    EXPECT_FALSE(plotted(0));
+    EXPECT_TRUE(plotted(1));
+
+    m->setUnplotted({});
+    EXPECT_TRUE(m->unplottedNames().isEmpty());
+    EXPECT_EQ(m->subscribedCount(), all);
+
+    m->toggleSubscribed(1);
+    EXPECT_EQ(m->unplottedNames(), QStringList{name(1)})
+        << "a click is read back";
+    ASSERT_TRUE(disconnectAndWait(bridge));
 }
 
 /* The identity line (ADR-0021): each answered item by name, the refused

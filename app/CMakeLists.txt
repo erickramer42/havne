@@ -27,7 +27,7 @@ qt_add_library(qttune_ui STATIC
     sessionrecorder.h
 )
 
-set_source_files_properties(qml/Theme.qml qml/ChartLayout.qml PROPERTIES
+set_source_files_properties(qml/Theme.qml qml/ChartLayout.qml qml/VehicleBook.qml PROPERTIES
     QT_QML_SINGLETON_TYPE TRUE
 )
 
@@ -48,6 +48,7 @@ qt_add_qml_module(qttune_ui
         qml/Theme.qml
         qml/LiveViewPage.qml
         qml/ChartLayout.qml
+        qml/VehicleBook.qml
         qml/SignalHub.qml
         qml/GaugeBase.qml
         qml/GaugeArc.qml
