@@ -11,6 +11,9 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
 ## [Unreleased]
 
 ### Added
+- An app icon on Android and iOS: the Home page's tachometer on the
+  app's purple. On Android it's an adaptive icon, shaped to fit
+  whichever icon style the launcher uses.
 - **ELM327 adapters** ([ADR-0026](docs/adr/0026-elm327-transport.md)):
   `elm327://<port>` reads a car through an ELM327-compatible adapter,
   such as an OBDLink or an OBDX Pro in its ELM mode, on a serial port:

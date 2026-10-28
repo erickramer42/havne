@@ -219,6 +219,21 @@ Then launch it from the simulator's home screen. The CI job's launch
 step shows how to read the bundle ID from `Info.plist`, launch the
 app, and send its Qt log output to a file.
 
+*The app icon.* `packaging/icons/make_icons.py` draws it from one
+geometry (the Home page's tachometer on the accent color's tile) and
+writes every copy: the SVG masters in `packaging/icons/`, Android's
+adaptive launcher icon as vector drawables in `app/android/res/`
+(named in the manifest through `QT_ANDROID_APP_ICON`, which
+`android-build` checks), and iOS's asset catalog in
+`app/ios/Assets.xcassets/`. Its 1024 px PNG is rendered by a desktop
+Qt kit's `qml` runtime, offscreen:
+
+```sh
+python packaging/icons/make_icons.py --qt C:/Qt/6.12.0/msvc2022_64
+```
+
+Change the script, not its output, and commit both.
+
 ## Test fixtures: the two fake vendors
 
 Both fakes compile the same source and differ only in their `.def`

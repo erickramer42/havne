@@ -382,7 +382,7 @@ jobs:
 
       # Core's TCP socket needs INTERNET (ADR-0028 §2), so a manifest
       # without it fails here, not on a phone.
-      - name: Check the manifest declares INTERNET
+      - name: Check the manifest declares INTERNET and the app icon
         run: |
           MANIFEST=$(find build -path '*android-build*' -name AndroidManifest.xml -not -path '*/intermediates/*' | head -n 1)
           if [ -z "$MANIFEST" ]; then
@@ -393,6 +393,10 @@ jobs:
           grep -n 'uses-permission' "$MANIFEST"
           grep -q 'android.permission.INTERNET' "$MANIFEST" \
             || { echo "::error::$MANIFEST declares no INTERNET permission"; exit 1; }
+          # QT_ANDROID_APP_ICON's adaptive icon, not Qt's default
+          grep -n 'android:icon' "$MANIFEST"
+          grep -q 'android:icon="@mipmap/ic_launcher"' "$MANIFEST" \
+            || { echo "::error::$MANIFEST doesn't name @mipmap/ic_launcher"; exit 1; }
 
       # The debug-signed APK, for sideloading onto a phone (ADR-0028 §3).
       # Each run signs with a new debug key, so a phone uninstalls the

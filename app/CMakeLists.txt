@@ -92,11 +92,22 @@ endif()
 if(APPLE)
     set_target_properties(qttune PROPERTIES MACOSX_BUNDLE TRUE)
 endif()
-# Custom Android package template (manifest, icons). Only set once the
-# directory exists, so androiddeployqt is never pointed at a missing one.
-if(ANDROID AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/android")
+# The app icon (packaging/icons/make_icons.py writes both). Android: an
+# adaptive launcher icon, vector drawables in the package source's res/;
+# Qt's manifest names it through QT_ANDROID_APP_ICON (Qt 6.9+).
+if(ANDROID)
     set_target_properties(qttune PROPERTIES
-        QT_ANDROID_PACKAGE_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/android")
+        QT_ANDROID_PACKAGE_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/android"
+        QT_ANDROID_APP_ICON "@mipmap/ic_launcher")
+endif()
+# iOS: an asset catalog holding the 1024 px AppIcon, compiled by Xcode
+if(IOS)
+    set(qttune_asset_catalog "${CMAKE_CURRENT_SOURCE_DIR}/ios/Assets.xcassets")
+    target_sources(qttune PRIVATE "${qttune_asset_catalog}")
+    set_source_files_properties("${qttune_asset_catalog}" PROPERTIES
+        MACOSX_PACKAGE_LOCATION Resources)
+    set_target_properties(qttune PROPERTIES
+        XCODE_ATTRIBUTE_ASSETCATALOG_COMPILER_APPICON_NAME AppIcon)
 endif()
 # Core's TCP socket (elm327://<address>) needs INTERNET: declared here,
 # not left to the permissions Qt adds by default (ADR-0028 §2).
@@ -104,8 +115,6 @@ endif()
 if(ANDROID)
     qt_add_android_permission(qttune NAME android.permission.INTERNET)
 endif()
-
-# Icon helpers later: qt_add_resources, ios/macos asset catalogs, etc.
 
 # QML debugging in Debug builds only. A build with QT_QML_DEBUG opens a
 # debug server when launched with -qmljsdebugger, one that can run
