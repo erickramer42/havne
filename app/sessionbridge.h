@@ -344,7 +344,7 @@ public:
     ecuio_session_t* pendingSessionForTesting() const { return m_pendingSession.load(); }
     QString linkState() const;
     static QString linkStateForError(int32_t errorCode);  /* code → state string; static so tests need no session */
-    static QString uriLabelFor(const QString& uri);  /* a direct-load DLL or replay path cut to its last name */
+    static QString uriLabelFor(const QString& uri);  /* a direct-load DLL or replay path cut to its last name, a Bluetooth address to its last two octets */
     static QString sessionInfoText(const ecuio_session_info_t& info);  /* the activity log's "Session:" line */
     static QString versionsText(const ecuio_session_info_t& info);  /* its versions clause; "" with none read */
     static QString channelSupportText(const ecuio_channel_support_t& support);  /* its "ECU 0x…:" lines */

@@ -2030,6 +2030,29 @@ TEST(BridgeTest, ConnectTrimsSpacesAroundTheUri)
     ASSERT_TRUE(disconnectAndWait(bridge));
 }
 
+/* A Bluetooth adapter's address is personal data, and the label reaches
+ * the phone's lock screen in the session's notification: the last two
+ * octets stay, the query too. A TCP address, a serial port, a short or
+ * empty address and another stream kind pass */
+TEST(BridgeTest, UriLabelKeepsABluetoothAddresssLastOctets)
+{
+    const QString dots = QString(QChar(0x2026));
+    EXPECT_EQ(SessionBridge::uriLabelFor(
+                  QStringLiteral("elm327://bt:00:11:22:33:44:55")),
+              QStringLiteral("elm327://bt:") + dots + QStringLiteral(":44:55"));
+    EXPECT_EQ(SessionBridge::uriLabelFor(QStringLiteral(
+                  "elm327://ble:00:11:22:33:44:55?profile=raw&filter=0x7E8")),
+              QStringLiteral("elm327://ble:") + dots +
+                  QStringLiteral(":44:55?profile=raw&filter=0x7E8"));
+    for (const char* uri :
+         {"elm327://192.168.4.1:23", "elm327://COM7?serial=115200",
+          "elm327:///dev/rfcomm0", "elm327://bt:44:55",
+          "elm327://bt:", "elm327://usb:00:11:22:33:44:55", "elm327://"}) {
+        EXPECT_EQ(SessionBridge::uriLabelFor(QString::fromLatin1(uri)),
+                  QString::fromLatin1(uri));
+    }
+}
+
 TEST(BridgeTest, UriLabelCutsADirectLoadPathToItsFileName)
 {
     const QString dots = QString(QChar(0x2026));

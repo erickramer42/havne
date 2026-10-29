@@ -16,7 +16,8 @@
 //          .ReplayUriForTakesTheRecordedProfile), display
 //          units on the rows, the chart and not the recording
 //          (BridgeTest.UnitSystem*), the URI label
-//          (BridgeTest.UriLabelCutsADirectLoadPathToItsFileName), the
+//          (BridgeTest.UriLabelCutsADirectLoadPathToItsFileName,
+//          .UriLabelKeepsABluetoothAddresssLastOctets), the
 //          connect's trim (BridgeTest.ConnectTrimsSpacesAroundTheUri), the
 //          vehicle's parts (ADR-0027: BridgeTest.VinFromIdentity*,
 //          .NewSalt*, .FolderLabel*, .UnplottedNames*, and on Windows
@@ -1956,6 +1957,26 @@ QString SessionBridge::channelIdentityText(const ecuio_channel_identity_t& s)
  * other URI is unchanged. Settings and the activity log keep it whole. */
 QString SessionBridge::uriLabelFor(const QString& uri)
 {
+    // A Bluetooth adapter's stream (ADR-0028): the address is personal
+    // data, and the label reaches the lock screen through the session's
+    // notification, so only its last two octets stay, enough to tell two
+    // adapters apart
+    const QString elm = QStringLiteral("elm327://");
+    if (uri.startsWith(elm)) {
+        const qsizetype query = uri.indexOf(QLatin1Char('?'), elm.size());
+        const qsizetype end = query < 0 ? uri.size() : query;
+        const QString port = uri.mid(elm.size(), end - elm.size());
+        const qsizetype colon = port.indexOf(QLatin1Char(':'));
+        const QString kind = port.left(colon);
+        const qsizetype kept = 6; // ":AB:CD"
+        if (colon > 0 &&
+            (kind == QLatin1String("bt") || kind == QLatin1String("ble")) &&
+            port.size() - colon - 1 > kept) {
+            return elm + kind + QLatin1Char(':') + QChar(0x2026) +
+                   port.right(kept) + uri.mid(end);
+        }
+        return uri;
+    }
     const bool replay = uri.startsWith(QStringLiteral("replay://"));
     const QString scheme =
         replay ? QStringLiteral("replay://") : QStringLiteral("j2534://");
