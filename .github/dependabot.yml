@@ -9,4 +9,11 @@ updates:
     labels:
       - "dependencies"
     open-pull-requests-limit: 5
+    # CodeQL refuses a run whose steps are on different versions of the
+    # action ("Loaded a configuration file for version …"), so its parts
+    # (init, analyze, upload-sarif) move in one pull request
+    groups:
+      codeql-action:
+        patterns:
+          - "github/codeql-action*"
     
