@@ -12,13 +12,17 @@
 #     vendor DLL runs in the one of its architecture (ADR-0025), and
 #     neither imports a C runtime DLL (each links it statically; an x86
 #     vcruntime140.dll can't sit beside the app's x64 one);
-#   - every DLL havne.exe imports is in the folder or is part of Windows;
-#   - havne.exe and both surrogates carry this release's version in
-#     their version resource (Explorer's Details; code signing reads it);
+#   - every DLL havne.exe and havne-cli.exe import is in the folder or is
+#     part of Windows;
+#   - havne.exe, havne-cli.exe and both surrogates carry this release's
+#     version in their version resource (Explorer's Details; code signing
+#     reads it);
 #   - no QML debugging: havne.exe doesn't import QQmlDebuggingEnabler
 #     (QT_QML_DEBUG, Debug builds only) and no qmltooling plugins ship;
 #   - the staged havne.exe starts and is still running after -SmokeSeconds,
-#     which a missing Qt plugin or QML module would stop at once.
+#     which a missing Qt plugin or QML module would stop at once, and the
+#     staged havne-cli.exe streams a few mock:// frames and ends with
+#     exit 0 (ADR-0031).
 #
 # Usage: pwsh packaging/windows/stage.ps1 -Version 0.3.1 [-BuildDir build]
 #        [-OutDir dist] [-SmokeSeconds 10]
@@ -45,6 +49,9 @@ if (-not (Test-Path (Join-Path $appDir 'ecuio-j2534-surrogate.exe'))) {
 }
 if (-not (Test-Path (Join-Path $appDir 'ecuio-j2534-surrogate-x64.exe'))) {
     Fail 'no x64 surrogate beside havne.exe; the app build copies it from its own tree (app/CMakeLists.txt)'
+}
+if (-not (Test-Path (Join-Path $appDir 'havne-cli.exe'))) {
+    Fail 'no havne-cli.exe beside havne.exe; the app build copies it from cli/ (app/CMakeLists.txt)'
 }
 
 # ---- Visual Studio: the redistributable CRT and dumpbin
@@ -90,19 +97,21 @@ foreach ($sur in 'ecuio-j2534-surrogate.exe', 'ecuio-j2534-surrogate-x64.exe') {
     Write-Host "$sur imports: $($surImports -join ', ')"
 }
 
-# ---- Check: everything havne.exe imports is here or is Windows'
+# ---- Check: everything havne.exe and havne-cli.exe import is here or is Windows'
 $system = Join-Path $env:SystemRoot 'System32'
-foreach ($dll in Imports (Join-Path $stage 'havne.exe')) {
-    if ($dll -match '^(api|ext)-ms-') { continue }   # API sets resolve inside Windows
-    if (Test-Path (Join-Path $stage $dll)) { continue }
-    if (Test-Path (Join-Path $system $dll)) { continue }
-    Fail "havne.exe imports $dll, which is neither in the package nor part of Windows"
+foreach ($exe in 'havne.exe', 'havne-cli.exe') {
+    foreach ($dll in Imports (Join-Path $stage $exe)) {
+        if ($dll -match '^(api|ext)-ms-') { continue }   # API sets resolve inside Windows
+        if (Test-Path (Join-Path $stage $dll)) { continue }
+        if (Test-Path (Join-Path $system $dll)) { continue }
+        Fail "$exe imports $dll, which is neither in the package nor part of Windows"
+    }
+    Write-Host "$exe imports: all present"
 }
-Write-Host 'havne.exe imports: all present'
 
 # ---- Check: each exe's version resource is this release's version
 $want = $Version -replace '-.*$', ''   # 0.3.2-rc1 and 0.3.2-local carry 0.3.2
-foreach ($exe in 'havne.exe', 'ecuio-j2534-surrogate.exe', 'ecuio-j2534-surrogate-x64.exe') {
+foreach ($exe in 'havne.exe', 'havne-cli.exe', 'ecuio-j2534-surrogate.exe', 'ecuio-j2534-surrogate-x64.exe') {
     $info = (Get-Item (Join-Path $stage $exe)).VersionInfo
     if ($info.ProductVersion -ne $want -or $info.ProductName -ne 'Havne') {
         Fail "$exe carries '$($info.ProductName) $($info.ProductVersion)', not 'Havne $want'; rebuild both trees after the version changes"
@@ -128,6 +137,14 @@ if ($SmokeSeconds -gt 0) {
     Stop-Process -Id $p.Id -Force
     Write-Host "smoke: havne.exe ran $SmokeSeconds s"
 }
+# The CLI needs no desktop: a few frames, an end line, exit 0
+$cliOut = & (Join-Path $stage 'havne-cli.exe') stream mock://stage --count 5
+if ($LASTEXITCODE -ne 0) { Fail "the staged havne-cli.exe exited $LASTEXITCODE on mock://stage" }
+$cliEnd = $cliOut | Select-Object -Last 1
+if ($cliEnd -notmatch '^\{"type":"end","reason":"count","frames":5,') {
+    Fail "the staged havne-cli.exe didn't end its mock:// stream: $cliEnd"
+}
+Write-Host 'smoke: havne-cli.exe streamed 5 mock:// frames'
 
 # ---- Zip and checksum
 $zip = Join-Path $out "$name.zip"

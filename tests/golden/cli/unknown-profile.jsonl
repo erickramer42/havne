@@ -1,0 +1,2 @@
+{"schema": 1, "type": "start"}
+{"code": 13, "detail": "no profile is named 'nonesuch'", "message": "unknown profile", "type": "error"}

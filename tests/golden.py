@@ -8,19 +8,25 @@
 # golden file line by line. A difference names the line and the key,
 # and --update rewrites the golden file from the run.
 #
-#   python3 tests/golden.py run --golden <file> [--ignore key ...] [--update] -- <command...>
+#   python3 tests/golden.py run --golden <file> [--ignore key ...] [--last N] [--exit N] [--slow]
+#                               [--update] -- <command...>
 #   python3 tests/golden.py compare <actual> <golden> [--ignore key ...]
 #   python3 tests/golden.py selftest
 #
-# --ignore drops a key wherever it appears, at any depth. Exit 0 on a
-# match, 1 on a difference, 2 on an error (a line that isn't JSON, a
-# command that fails).
+# --ignore drops a key wherever it appears, at any depth. --last N
+# compares (and --update writes) only the run's last N lines, for a run
+# too long to keep whole. --exit N is the command's expected exit code
+# (default 0). --slow reads the output 4 KB at a time with a pause
+# between, a slow terminal, so a command that writes faster meets a full
+# pipe and its own backpressure. Exit 0 on a match, 1 on a difference, 2 on an error (a
+# line that isn't JSON, a command exiting with another code).
 
 import argparse
 import json
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 
@@ -105,20 +111,49 @@ def report(problems, golden):
     return 1
 
 
+def run_slowly(command):
+    """(exit code, stdout, stderr), its output read a little at a time
+    with a pause between, as a slow terminal would: a writer that
+    outpaces it meets a full pipe"""
+    with tempfile.TemporaryFile() as err:
+        p = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=err)
+        chunks = []
+        while True:
+            chunk = p.stdout.read1(SLOW_READ_BYTES)
+            if not chunk:
+                break
+            chunks.append(chunk)
+            time.sleep(SLOW_READ_PAUSE_S)
+        code = p.wait()
+        err.seek(0)
+        return code, b"".join(chunks).decode("utf-8"), err.read().decode("utf-8", "replace")
+
+
+SLOW_READ_BYTES = 4096
+SLOW_READ_PAUSE_S = 0.001
+
+
 def cmd_run(args):
     if not args.command:
         print("golden: run needs a command after --", file=sys.stderr)
         return 2
-    done = subprocess.run(args.command, capture_output=True, text=True)
-    if done.returncode != 0:
-        print(f"golden: {args.command[0]} exited {done.returncode}\n{done.stderr}", file=sys.stderr)
+    if args.slow:
+        code, stdout, stderr = run_slowly(args.command)
+    else:
+        done = subprocess.run(args.command, capture_output=True, text=True, encoding="utf-8")
+        code, stdout, stderr = done.returncode, done.stdout, done.stderr
+    if code != args.exit:
+        print(f"golden: {args.command[0]} exited {code}, not {args.exit}\n{stderr}",
+              file=sys.stderr)
         return 2
     ignore = set(args.ignore)
     try:
-        actual = parse(done.stdout, args.command[0])
+        actual = parse(stdout, args.command[0])
     except ValueError as e:
         print(f"golden: {e}", file=sys.stderr)
         return 2
+    if args.last:
+        actual = actual[-args.last:]
     golden = Path(args.golden)
     if args.update:
         golden.write_text(golden_text(actual, ignore), encoding="utf-8", newline="\n")
@@ -175,11 +210,36 @@ def cmd_selftest(_args):
     with tempfile.TemporaryDirectory() as tmp:
         golden = Path(tmp) / "out.jsonl"
         emit = [sys.executable, "-c", 'print(\'{"t_us": 7, "id": "0x7E8"}\')']
-        ns = argparse.Namespace(golden=str(golden), ignore=["t_us"], update=True, command=emit)
+        ns = argparse.Namespace(golden=str(golden), ignore=["t_us"], update=True, command=emit,
+                                last=0, exit=0, slow=False)
         wrote = cmd_run(ns) == 0 and golden.read_text(encoding="utf-8") == '{"id": "0x7E8"}\n'
         checks.append(("--update writes the run without ignored keys", wrote))
         ns.update = False
         checks.append(("a run matches what --update wrote", cmd_run(ns) == 0))
+        # --last: only the tail is written and compared
+        ns.command = [sys.executable, "-c", 'for n in (1, 2, 3): print(\'{"n": %d}\' % n)']
+        ns.update, ns.last = True, 2
+        cmd_run(ns)
+        checks.append(("--last 2 writes the last two lines",
+                       golden.read_text(encoding="utf-8") == '{"n": 2}\n{"n": 3}\n'))
+        ns.update = False
+        checks.append(("--last 2 matches them", cmd_run(ns) == 0))
+        ns.last = 3
+        checks.append(("--last 3 sees the line more", cmd_run(ns) == 1))
+        # --exit: the code the command must exit with; any other is an error
+        ns.command = [sys.executable, "-c", 'import sys; print(\'{"n": 3}\'); sys.exit(3)']
+        ns.last, ns.update = 0, True
+        checks.append(("a run exiting 3 is an error by default", cmd_run(ns) == 2))
+        ns.exit = 3
+        checks.append(("--exit 3 takes it", cmd_run(ns) == 0))
+        # --slow reads the same output and exit code, a chunk at a time
+        ns.update, ns.slow = False, True
+        checks.append(("--slow reads the same run", cmd_run(ns) == 0))
+        ns.command = [sys.executable, "-c", 'for n in range(3000): print(\'{"n": %d}\' % n)']
+        ns.update, ns.slow, ns.exit = True, False, 0
+        cmd_run(ns)
+        ns.update, ns.slow = False, True
+        checks.append(("--slow reads a run longer than one chunk whole", cmd_run(ns) == 0))
     bad = [name for name, passed in checks if not passed]
     for name in bad:
         print(f"FAIL  {name}")
@@ -194,6 +254,9 @@ def main():
     run.add_argument("--golden", required=True)
     run.add_argument("--ignore", action="append", default=[])
     run.add_argument("--update", action="store_true")
+    run.add_argument("--last", type=int, default=0)
+    run.add_argument("--exit", type=int, default=0)
+    run.add_argument("--slow", action="store_true")
     run.add_argument("command", nargs=argparse.REMAINDER)
     cmp_ = sub.add_parser("compare")
     cmp_.add_argument("actual")

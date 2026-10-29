@@ -62,10 +62,25 @@ Using an adapter
   vehicles and adapters are untested.
 
 
+The command line
+----------------
+
+havne-cli.exe opens the same sessions from a terminal and prints them
+as JSON lines, one object per line, for scripts and tools such as jq:
+
+  havne-cli stream mock://demo --values --count 20
+  havne-cli stream "replay://<folder>?profile=obd2&speed=max" --values
+  havne-cli devices
+
+It stops at Ctrl+C, after --count frames or --seconds, or at a
+replay's last frame. havne-cli --help lists the rest.
+
+
 What's in this folder
 ---------------------
 
 havne.exe                  the application
+havne-cli.exe              the command-line client
 ecuio-j2534-surrogate.exe   the 32-bit helper for 32-bit J2534 drivers
 ecuio-j2534-surrogate-x64.exe
                             the 64-bit helper for 64-bit J2534 drivers

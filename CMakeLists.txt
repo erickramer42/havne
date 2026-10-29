@@ -116,6 +116,12 @@ endfunction()
 add_subdirectory(core)
 add_subdirectory(surrogate)
 
+# The command-line client (ADR-0031): desktop platforms only, and not in
+# a fuzzing tree, whose instrumented core only the harnesses can link
+if(NOT ANDROID AND NOT IOS AND NOT ECUIO_BUILD_FUZZERS)
+    add_subdirectory(cli)
+endif()
+
 include(CTest)
 if(BUILD_TESTING)
     add_subdirectory(tests)

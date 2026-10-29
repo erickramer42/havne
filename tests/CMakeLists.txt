@@ -126,6 +126,69 @@ if(Python3_Interpreter_FOUND)
         COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/scripts/abi_report.py selftest)
 endif()
 
+# --- havne-cli (ADR-0031): Qt-free, every desktop platform ---
+# test_cli.cpp: its line formatting and output ring (cli/, header-only).
+# The golden runs: the program as a child process, its whole output
+# against tests/golden/cli/ ("core", the version, ignored; mock's t_us
+# too, which is the host's clock). Rewrite one after a deliberate change
+# with the same command plus --update, and read its diff.
+if(TARGET havne-cli)
+    add_executable(test_cli test_cli.cpp)
+    target_include_directories(test_cli PRIVATE ${CMAKE_SOURCE_DIR}/cli)
+    find_package(Threads REQUIRED)
+    target_link_libraries(test_cli PRIVATE GTest::gtest_main Threads::Threads)
+    app_enable_warnings(test_cli)
+    gtest_discover_tests(test_cli PROPERTIES TIMEOUT 30)
+
+    if(Python3_Interpreter_FOUND)
+        set(_cli_golden ${CMAKE_CURRENT_SOURCE_DIR}/golden/cli)
+        set(_cli_replay "replay://${CMAKE_CURRENT_SOURCE_DIR}/fixtures/replay/2026-10-25-engine-start")
+        function(app_cli_golden name golden)
+            add_test(NAME CliGoldenTest.${name}
+                COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/golden.py run
+                        --golden ${_cli_golden}/${golden} --ignore core ${ARGN})
+            set_tests_properties(CliGoldenTest.${name} PROPERTIES TIMEOUT 60)
+        endfunction()
+        # The real car's engine start through obd2, from outside the
+        # process: its first frames and values, then the run to its end
+        app_cli_golden(ReplayThroughObd2 replay-obd2.jsonl
+            -- $<TARGET_FILE:havne-cli> stream "${_cli_replay}?profile=obd2&speed=max"
+               --values --count 300)
+        # A ring of a few lines and a slow reader, so a replay at max speed
+        # meets a full ring at once: it must wait, and its end line count
+        # every frame and no drop
+        app_cli_golden(ReplayRunsToItsLastFrame replay-end.jsonl --last 3 --slow
+            -- $<TARGET_FILE:havne-cli> stream "${_cli_replay}?profile=obd2&speed=max"
+               --values)
+        set_tests_properties(CliGoldenTest.ReplayRunsToItsLastFrame PROPERTIES
+            ENVIRONMENT HAVNE_CLI_RING_BYTES=40000)
+        app_cli_golden(MockDriveCycle mock.jsonl --ignore t_us
+            -- $<TARGET_FILE:havne-cli> stream mock://golden --values --count 40)
+        app_cli_golden(BadUriIsRefused bad-uri.jsonl --exit 3
+            -- $<TARGET_FILE:havne-cli> stream "mock://golden?speed=2")
+        app_cli_golden(UnknownProfileIsRefused unknown-profile.jsonl --exit 3
+            -- $<TARGET_FILE:havne-cli> stream "mock://golden?profile=nonesuch")
+    endif()
+    function(app_cli_usage name args)
+        add_test(NAME CliUsageTest.${name}
+            COMMAND ${CMAKE_COMMAND} -DCLI=$<TARGET_FILE:havne-cli> -DEXPECT=2
+                    "-DARGS=${args}" -P ${CMAKE_CURRENT_SOURCE_DIR}/cli_exit.cmake)
+    endfunction()
+    app_cli_usage(NoArgumentsIsUsage "")
+    app_cli_usage(NoUriIsUsage "stream")
+    app_cli_usage(AnUnknownCommandIsUsage "listen")
+    app_cli_usage(AnUnknownOptionIsUsage "stream|mock://x|--fast")
+    app_cli_usage(ACountOfZeroIsUsage "stream|mock://x|--count|0")
+    app_cli_usage(TwoUrisIsUsage "stream|mock://a|mock://b")
+    # Ctrl+C: POSIX only, since a console event can't go to one child
+    # alone on Windows (ADR-0031 §6)
+    if(UNIX)
+        add_test(NAME CliSignalTest.InterruptEndsTheStreamCleanly
+            COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/cli_signal.sh $<TARGET_FILE:havne-cli>)
+        set_tests_properties(CliSignalTest.InterruptEndsTheStreamCleanly PROPERTIES TIMEOUT 30)
+    endif()
+endif()
+
 # --- C ABI compilation check: MUST stay Qt-free, builds everywhere ---
 # Compiles the public headers as strict C and links exported symbols
 # from a C TU — catches C++-isms and name-mangling regressions an FFI
