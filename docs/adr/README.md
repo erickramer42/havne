@@ -35,6 +35,7 @@ old one, and the old record's status is updated to point at it.
 | [0026](0026-elm327-transport.md) | ELM327 transport: `elm327://` drives an ELM327-compatible adapter over a serial port, with the request engine | Accepted |
 | [0027](0027-vehicle-profiles.md) | Vehicle profiles: a named vehicle remembers its connection, its plotted signals and its recordings' name; a salted hash of the VIN recognizes it | Accepted |
 | [0028](0028-app-fed-streams.md) | App-fed streams: the app opens the Bluetooth links core can't (Android SPP, BLE) and feeds an `elm327` session through `ecuio/stream.h` | Accepted |
+| [0029](0029-android-background-sessions.md) | Android background sessions: the GUI thread keeps running, a foreground service keeps the process, one Bluetooth connect at a time | Proposed |
 
 ## Adding a record
 
