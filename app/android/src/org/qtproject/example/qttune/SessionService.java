@@ -20,6 +20,7 @@ import android.content.pm.PackageManager;
 import android.content.pm.ServiceInfo;
 import android.os.Build;
 import android.os.IBinder;
+import android.os.PowerManager;
 import android.util.Log;
 
 // The foreground service held while an adapter session is up (ADR-0029
@@ -27,12 +28,19 @@ import android.util.Log;
 // no work itself: core's threads and the GUI thread do the session's. Its
 // notification says what is connected; a tap opens the app.
 // androidsession.cpp starts, updates and stops it through JNI.
+//
+// It also holds a partial wake lock while it runs: the service keeps
+// Android from freezing the app, not the CPU from sleeping, and with the
+// screen off the CPU slept about 100 s of a session, no request going out
+// (docs/bench-sessions/2026-10-28-android-9.md). The screen still goes off
 public class SessionService extends Service
 {
     private static final String TAG = "QtTune";
     private static final String CHANNEL = "session";
     private static final String EXTRA_TEXT = "text";
     private static final int NOTIFICATION_ID = 1;
+
+    private PowerManager.WakeLock wakeLock;
 
     // Starts the service, or updates its notification's text. The app is
     // in the foreground at a connect, where Android allows the start
@@ -80,11 +88,33 @@ public class SessionService extends Service
         try {
             startForeground(NOTIFICATION_ID, notification(text != null ? text : ""),
                     ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE);
+            holdWakeLock();
         } catch (RuntimeException e) {
             Log.w(TAG, "the session's foreground service was refused: " + e);
             stopSelf();
         }
         return START_NOT_STICKY;
+    }
+
+    // Until the service stops: no timeout, since a session lasts as long
+    // as the drive. Android releases it if the process dies
+    private void holdWakeLock()
+    {
+        if (wakeLock != null)
+            return;
+        PowerManager power = getSystemService(PowerManager.class);
+        wakeLock = power.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "QtTune:session");
+        wakeLock.setReferenceCounted(false);
+        wakeLock.acquire();
+    }
+
+    @Override
+    public void onDestroy()
+    {
+        if (wakeLock != null && wakeLock.isHeld())
+            wakeLock.release();
+        wakeLock = null;
+        super.onDestroy();
     }
 
     @Override

@@ -150,6 +150,9 @@ if(ANDROID)
         NAME android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE)
     qt_add_android_permission(qttune NAME android.permission.CHANGE_NETWORK_STATE)
     qt_add_android_permission(qttune NAME android.permission.POST_NOTIFICATIONS)
+    # The service's partial wake lock: with the screen off the CPU sleeps
+    # otherwise, service or not (docs/bench-sessions/2026-10-28-android-9.md)
+    qt_add_android_permission(qttune NAME android.permission.WAKE_LOCK)
     set_target_properties(qttune PROPERTIES QT_ANDROID_MIN_SDK_VERSION 31)
 endif()
 
