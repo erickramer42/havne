@@ -168,23 +168,34 @@ cmake --build build-android
 cmake --build build-android --target apk
 ```
 
-For an emulator on an x86-64 PC, use the `android_x86_64` kit. Since
+Leave `CMAKE_BUILD_TYPE` unset, as CI does: the build is then Debug,
+and Gradle signs the APK with the machine's debug key. A Release build
+makes an unsigned APK that a phone won't install. For an emulator on
+an x86-64 PC, use the `android_x86_64` kit. Since
 Qt 6.7, Qt publishes Android kits under the `all_os` host (the name
 aqtinstall and install-qt-action use). They need the build host's
-desktop Qt, and `--autodesktop` installs it. A custom
-manifest or icons go in `app/android/`. CMake sets
-`QT_ANDROID_PACKAGE_SOURCE_DIR` only when that directory exists, so
-`androiddeployqt` is never pointed at a missing template. No template
-exists yet. The app declares `INTERNET` with
-`qt_add_android_permission`, because core's TCP socket needs it,
-rather than leaving it to the permissions Qt adds by default;
-`android-build` fails if the generated manifest lacks it.
+desktop Qt, and `--autodesktop` installs it; when the kit names a host
+Qt that isn't installed, pass `-DQT_HOST_PATH=<qt-install>/<desktop kit>`.
+
+`app/android/` is the package source (`QT_ANDROID_PACKAGE_SOURCE_DIR`):
+the icons in `res/`, the Java in `src/`, and the app's own
+`AndroidManifest.xml`. That manifest is Qt 6.12's template with its
+`%%INSERT_…%%` placeholders kept, plus what
+[ADR-0029](adr/0029-android-background-sessions.md) adds: the
+`android.app.background_running` meta-data and the session's
+foreground service. On a Qt upgrade, diff it against the new kit's
+`src/android/templates/AndroidManifest.xml`. The permissions come from
+`qt_add_android_permission` in `app/CMakeLists.txt`, not the manifest,
+rather than from the ones Qt adds by default: `INTERNET` for core's
+TCP socket, then the Bluetooth and the foreground service ones.
+`android-build` fails if the generated manifest lacks any of them.
 
 To install on a phone without an Android kit, take the
 `qttune-android-arm64-v8a` artifact from a CI run (kept 14 days): the
 debug-signed APK. Each run signs with a new debug key, so uninstall
 the previous build before installing the next (Android refuses an
-update signed by another key).
+update signed by another key). Local builds share one key, so each
+updates the last in place and the app keeps its recordings.
 
 *iOS, device* (macOS host; this mirrors `ios-build`). `qt-cmake` also
 applies Qt's minimum deployment target, iOS 18 for Qt 6.12:

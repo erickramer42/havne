@@ -68,7 +68,13 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
   would over a serial port, reconnecting on its own when the link
   drops. Pairing stays in Android's Bluetooth settings, and QtTune asks
   for the Nearby devices permission when the adapter list first opens.
-  It hasn't run with an adapter yet.
+  It has read a car through an OBDLink MX+.
+- On Android, an adapter session keeps running in the background and
+  with the screen off, recording included. While it's connected a
+  quiet notification says so ("Connected to …", "· recording"); a tap
+  opens the app. QtTune asks once, at the first adapter connect, to
+  show notifications. A dropped classic Bluetooth link reconnects with
+  one connection attempt at a time. It hasn't run on a phone yet.
 - Settings lists the recent recordings, newest first. Selecting one
   puts its `replay://` address in the field, with the profile and DIDs
   it was recorded with, so a recording replays without typing its path

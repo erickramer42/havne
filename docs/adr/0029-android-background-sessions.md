@@ -1,6 +1,6 @@
 # ADR-0029: Android background sessions — the GUI thread keeps running, a foreground service keeps the process, one Bluetooth connect at a time
 
-- **Status:** Proposed.
+- **Status:** Accepted.
 - **Date:** 2026-10-28.
 - **Closes:** Known Issue #37 (the app in the background), once the
   phone runs in §5 pass.

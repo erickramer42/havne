@@ -332,10 +332,15 @@ an issue is resolved it is removed, and its number is not reused.
     faults within 5 s, and on return the queued calls and overlapping
     socket connects took 38 s to recover
     ([2026-10-28-android-8](docs/bench-sessions/2026-10-28-android-8.md)).
-    A logger in
-    a car runs with the screen off, so this needs a decision of its
-    own: a foreground service, and the recorder and the Bluetooth
-    link off the GUI thread.
+    [ADR-0029](docs/adr/0029-android-background-sessions.md) (accepted)
+    is built: the app's own manifest keeps Qt's GUI loop running in the
+    background (`android.app.background_running`), a `connectedDevice`
+    foreground service holds the process while an adapter session is
+    up (`app/androidsession.cpp`, `SessionService.java`), and a classic
+    Bluetooth link runs one socket connect at a time
+    (`app/btconnect.cpp`, UNIT-tested). CI checks the manifest; Phase 8
+    of the [phone run sheet](docs/bench-sessions/android-phone-runsheet.md)
+    checks the rest on the phone, and closes this when it passes.
 
 ## Roadmap
 

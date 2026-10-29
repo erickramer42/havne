@@ -11,7 +11,8 @@ Android baseline (Known Issue #2): the app, and its first route to a
 car, `elm327://` over WiFi, which needs no Bluetooth code. Phase 6 is
 step 3, the phone's Bluetooth without an adapter. Phase 7 is step 4,
 the MX+ through the phone on the car: run it on its own day, with
-Phase 1's install and nothing else. The VX's WiFi on a
+Phase 1's install and nothing else. Phase 8 is Known Issue #37's fix,
+background sessions (ADR-0029). The VX's WiFi on a
 computer is [elm327-bench-runsheet.md](elm327-bench-runsheet.md)'s
 pre-flight and BENCH prep #20.
 
@@ -237,6 +238,45 @@ return to QtTune.
 - [ ] The link survives (no fault, or one that recovers by itself),
       and Live's chart shows the gap Known Issue #37 describes. Record
       what the link did
+- [ ] Disconnect, unplug the MX+, key off
+
+## Phase 8 — background sessions (ADR-0029)
+
+The build with Known Issue #37's fix: the app keeps running in the
+background, with a notification while an adapter session is up. 8a at
+the desk, 8b on the car. The phone's log (`adb logcat`) and the
+recordings are the evidence, so a computer with `adb` afterwards.
+
+**8a — at the desk, `mock://`.**
+
+**Action:** Settings, Recording, **Record sessions** on; Display,
+**Developer mode** on. Connect `mock://demo`, wait for values.
+
+- [ ] No notification for the mock (only an adapter session gets one)
+- [ ] Press Home for about 2 minutes. Return: still connected, no
+      fault in the activity log, and Live's chart has **no gap** for
+      the time away
+- [ ] The screen off for about 5 minutes (the power button). On: the
+      same, and the app returned without a crash
+- [ ] Disconnect. The recording's events.log (Phase 5's copy, or
+      `adb`) ends "0 frames dropped by the bridge"
+
+**8b — on the car, the MX+, engine idling.** Phase 7's pre-flight and
+safety hold.
+
+**Action:** connect the MX+ row, **Record sessions** on.
+
+- [ ] At the first adapter connect Android asks to allow
+      notifications: allow it. A notification "QtTune — Connected to
+      …" with "· recording", for as long as the session is up
+- [ ] Press Home for about 2 minutes, then the screen off for about
+      5. Return: the link stayed up the whole time (no "Link: adapter
+      fault" in the activity log), Live has no gap, the values kept
+      recording
+- [ ] With the screen off, Bluetooth off for about 10 s from the quick
+      settings, then on. Back in QtTune: a fault, then recovered on its
+      own, as in 7c
+- [ ] Disconnect: the notification goes at once
 - [ ] Disconnect, unplug the MX+, key off
 
 ## If it fails, suspect
