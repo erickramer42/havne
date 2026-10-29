@@ -43,6 +43,19 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
   "Asleep for N s: nothing was read meanwhile", and `havne-cli` writes
   a `slept` line.
 
+- **Debug symbols with each release**
+  ([ADR-0034](docs/adr/0034-debug-symbols-and-probes.md)):
+  `havne-X.Y.Z-windows-x64-symbols.zip` holds the PDBs of `havne.exe`,
+  `havne-cli.exe` and both J2534 surrogates, checksummed and attested
+  like the zip, so a crash dump or a profile reads against the source.
+  `docs/development.md` ("Debug symbols and tracing") says how to keep a
+  dump and open it.
+- **USDT probes on Linux:** core marks a session's start and close and
+  each frame (`ecuio:session_start`, `session_close`, `frame`), so
+  `bpftrace` and `perf` can count and time the frame path of a running
+  Havne or `havne-cli` with no debug build. Unused, a probe costs one
+  `nop`.
+
 ### Fixed
 - **A sleep on Linux or Android is a gap,** on Live, in a recording's
   times and in `havne-cli`'s stream, instead of the values on either

@@ -261,7 +261,7 @@ an issue is resolved it is removed, and its number is not reused.
 | v0.3.1 | Request engine, PID-support probe, `uds-generic`, vehicle identification, imperial units; the first Windows download | ✅ Released |
 | v0.3.2 | Record-replay transport, decoding on the transport's thread, every driver in its own process | ✅ Released |
 | v0.3.3 | ELM327 adapters, preferences and vehicles, Android with Bluetooth and background sessions and a signed APK, the rename to Havne | ✅ Released |
-| v0.3.4 | A command-line client over the C ABI; Linux as a supported desktop; a SocketCAN transport that listens | In progress: the CLI, SocketCAN listening and a session clock that counts sleep built |
+| v0.3.4 | A command-line client over the C ABI; Linux as a supported desktop; a SocketCAN transport that listens | In progress: the CLI, SocketCAN listening, a session clock that counts sleep, and debug symbols and probes built |
 | v0.3.5 | Full OBD-II diagnostics (Services 01–0A, clearing codes); SocketCAN requests through ISO-TP | Planned |
 | v0.4.0 | Python bindings; PCAP export and candump import; ECU, DID and service discovery (needs requests to every ECU and listening to the whole bus first) | Proposed |
 | v0.5.0 | The plugin framework (ADR-0013's profile API), with no manufacturer plugin yet; legacy buses (ISO 9141-2, KWP2000, J1850) | Proposed |
@@ -284,6 +284,13 @@ scheduled. What each holds, past its row:
   native CAN interface, listen-only, and `havne-cli play`, a simulated
   ECU on Linux's virtual CAN bus that runs it with no car. Left: a real
   controller on the bench and a car (BENCH prep #26).
+- **Debug symbols and probes:** built
+  ([ADR-0034](docs/adr/0034-debug-symbols-and-probes.md)): every MSVC
+  Release build writes PDBs, and each release ships the executables'
+  PDBs in a zip of their own, checked against the binaries; three USDT
+  probes in core on Linux (a session's start and close, each frame),
+  checked in the ELF notes and traced with `bpftrace` on CI. Left:
+  Linux debug info, which ships with the deb and tarball (§2).
 - **The session clock counts sleep:** built
   ([ADR-0033](docs/adr/0033-session-time-counts-sleep.md)): one host
   clock for core and the app, counting the time the machine sleeps on
