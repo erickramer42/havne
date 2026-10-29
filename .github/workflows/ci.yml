@@ -364,7 +364,7 @@ jobs:
       - name: Compare the C ABI with the newest release
         shell: bash
         run: |
-          scripts/abi-check.sh | tee abi.txt
+          bash scripts/abi-check.sh | tee abi.txt
           { echo '### C ABI'; echo; echo '```'; tail -n 40 abi.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
 
   # The Linux AppImage (packaging/linux/make-appimage.sh), on the oldest
