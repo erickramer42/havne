@@ -272,9 +272,8 @@ an issue is resolved it is removed, and its number is not reused.
 
 2. **The mobile apps are unvalidated.** CI
    cross-builds an Android arm64-v8a APK and an unsigned iOS arm64
-   device build. On pull requests and on request, it also launches
-   the iOS app on the Simulator and screenshots it
-   (`ios-simulator-smoke`). The Android app runs on a phone: the
+   device build. On request, it also launches the iOS app on the
+   Simulator and screenshots it (`ios-simulator-smoke`). The Android app runs on a phone: the
    pages fit, `mock://` streams, `elm327://` reaches the VX over
    WiFi, and a recording replays by a tap on its row in Settings
    ([2026-10-28-android-3](docs/bench-sessions/2026-10-28-android-3.md)).
@@ -284,9 +283,11 @@ an issue is resolved it is removed, and its number is not reused.
    The iOS app hasn't
    run on a device, and no tests run on either (cross builds set
    `BUILD_TESTING=OFF`). Bluetooth on Android
-   ([ADR-0028](docs/adr/0028-app-fed-streams.md)) is built, its BLE
-   service choice UNIT-tested, and hasn't run on a phone; the app needs
-   Android 12 or later. CI uploads the
+   ([ADR-0028](docs/adr/0028-app-fed-streams.md)) has read the test
+   car through an OBDLink MX+, in the background and with the screen
+   off ([2026-10-28-android-11](docs/bench-sessions/2026-10-28-android-11.md),
+   [2026-10-29-android](docs/bench-sessions/2026-10-29-android.md));
+   no BLE adapter has. The app needs Android 12 or later. CI uploads the
    Android build's debug APK.
 4. **Every def is matched against every frame, on the transport's
    worker** ([ADR-0024](docs/adr/0024-decode-on-the-worker.md)). A
