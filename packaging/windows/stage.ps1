@@ -5,6 +5,7 @@
 # Stages the Windows release from a built tree, checks it, and zips it:
 #   dist/havne-<version>-windows-x64/       the folder a user unzips
 #   dist/havne-<version>-windows-x64.zip
+#   dist/havne-<version>-windows-x64-symbols.zip   the four PDBs (ADR-0034)
 #   dist/SHA256SUMS.txt
 #
 # The checks are what a user without Visual Studio or Qt would hit first:
@@ -19,19 +20,32 @@
 #     reads it);
 #   - no QML debugging: havne.exe doesn't import QQmlDebuggingEnabler
 #     (QT_QML_DEBUG, Debug builds only) and no qmltooling plugins ship;
+#   - each of the four executables has its PDB, which matches it (dumpbin
+#     finds it beside the exe, signature and age checked), and records
+#     only the PDB's file name, never the build's path: release.yml builds
+#     with LINK=/PDBALTPATH:%_PDB%, since CMake's Visual Studio generator
+#     can't pass a % through (CMake issue 15865);
 #   - the staged havne.exe starts and is still running after -SmokeSeconds,
 #     which a missing Qt plugin or QML module would stop at once, and the
 #     staged havne-cli.exe streams a few mock:// frames and ends with
 #     exit 0 (ADR-0031).
 #
 # Usage: pwsh packaging/windows/stage.ps1 -Version 0.3.1 [-BuildDir build]
-#        [-OutDir dist] [-SmokeSeconds 10]
+#        [-Win32BuildDir build-win32] [-OutDir dist] [-SmokeSeconds 10]
+#        [-AllowBuildPath]
+#
+# -AllowBuildPath: a local dry run of trees built without LINK set (the
+# release skill's check, after scripts/verify.sh): an exe may record its
+# PDB's full build path, as long as the file name is right and the PDB
+# matches. Never for a published release.
 
 param(
     [Parameter(Mandatory)] [string] $Version,
     [string] $BuildDir = 'build',
+    [string] $Win32BuildDir = 'build-win32',
     [string] $OutDir = 'dist',
-    [int] $SmokeSeconds = 10
+    [int] $SmokeSeconds = 10,
+    [switch] $AllowBuildPath
 )
 
 $ErrorActionPreference = 'Stop'
@@ -129,6 +143,50 @@ if (Test-Path (Join-Path $stage 'qmltooling')) {
 }
 Write-Host 'QML debugging: none'
 
+# ---- Symbols (ADR-0034): each executable's PDB, from the tree that built
+# it (the app build copies only the .exe beside havne.exe)
+$pdbs = [ordered]@{
+    'havne.exe'                     = Join-Path $repo "$BuildDir\app\Release\havne.pdb"
+    'havne-cli.exe'                 = Join-Path $repo "$BuildDir\cli\Release\havne-cli.pdb"
+    'ecuio-j2534-surrogate-x64.exe' = Join-Path $repo "$BuildDir\surrogate\Release\ecuio-j2534-surrogate-x64.pdb"
+    'ecuio-j2534-surrogate.exe'     = Join-Path $repo "$Win32BuildDir\surrogate\Release\ecuio-j2534-surrogate.pdb"
+}
+$symName = "$name-symbols"
+$symStage = Join-Path $out $symName
+if (Test-Path $symStage) { Remove-Item -Recurse -Force $symStage }
+New-Item -ItemType Directory -Force $symStage | Out-Null
+$check = Join-Path $out 'pdb-check'
+foreach ($exe in $pdbs.Keys) {
+    $pdb = $pdbs[$exe]
+    $pdbName = [IO.Path]::GetFileName($pdb)
+    if (-not (Test-Path $pdb)) { Fail "no $pdbName for $exe at $pdb; a Release build writes one (CMakeLists.txt, ADR-0034)" }
+    # The debug directory names the PDB: its file name only
+    # ("Format: RSDS, {GUID}, age, <recorded path>")
+    $rsds = & $dumpbin /nologo /headers (Join-Path $stage $exe) |
+        Select-String -Pattern 'Format: RSDS, \{[^}]+\}, \d+, (.*)$' | Select-Object -First 1
+    $recorded = if ($rsds) { $rsds.Matches[0].Groups[1].Value.Trim() } else { '' }
+    $buildPath = $AllowBuildPath -and [IO.Path]::GetFileName($recorded) -eq $pdbName
+    if ($recorded -ne $pdbName -and -not $buildPath) {
+        Fail "$exe records its PDB as '$recorded', not '$pdbName'; build with LINK=/PDBALTPATH:%_PDB% in the environment (release.yml does)"
+    }
+    # The shipped exe and its PDB, alone in a folder: dumpbin finds the PDB
+    # only if its signature and age are the exe's. An exe that records its
+    # build path is found there first, the same file
+    if (Test-Path $check) { Remove-Item -Recurse -Force $check }
+    New-Item -ItemType Directory -Force $check | Out-Null
+    Copy-Item (Join-Path $stage $exe) $check
+    Copy-Item $pdb $check
+    $at = @(Join-Path $check $pdbName)
+    if ($buildPath) { $at += (Resolve-Path $pdb).Path }
+    $found = & $dumpbin /nologo /pdbpath:verbose (Join-Path $check $exe) |
+        Select-String -Pattern 'PDB file found at ''(.*)''' |
+        Where-Object { $at -contains $_.Matches[0].Groups[1].Value }
+    if (-not $found) { Fail "$pdbName doesn't match the staged $exe; rebuild both trees" }
+    Copy-Item $pdb $symStage
+}
+Remove-Item -Recurse -Force $check
+Write-Host "symbols: $($pdbs.Count) PDBs, each matching its exe"
+
 # ---- Check: the staged app starts and stays up
 if ($SmokeSeconds -gt 0) {
     $p = Start-Process -FilePath (Join-Path $stage 'havne.exe') -WorkingDirectory $stage -PassThru
@@ -147,10 +205,14 @@ if ($cliEnd -notmatch '^\{"type":"end","reason":"count","frames":5,') {
 Write-Host 'smoke: havne-cli.exe streamed 5 mock:// frames'
 
 # ---- Zip and checksum
-$zip = Join-Path $out "$name.zip"
-if (Test-Path $zip) { Remove-Item -Force $zip }
-Compress-Archive -Path $stage -DestinationPath $zip
-$hash = (Get-FileHash -Algorithm SHA256 $zip).Hash.ToLowerInvariant()
+$sums = ''
+foreach ($folder in $name, $symName) {
+    $zip = Join-Path $out "$folder.zip"
+    if (Test-Path $zip) { Remove-Item -Force $zip }
+    Compress-Archive -Path (Join-Path $out $folder) -DestinationPath $zip
+    $hash = (Get-FileHash -Algorithm SHA256 $zip).Hash.ToLowerInvariant()
+    $sums += "$hash  $folder.zip`n"
+    Write-Host "$folder.zip $([math]::Round((Get-Item $zip).Length / 1MB, 1)) MB, sha256 $hash"
+}
 # LF, not Set-Content's CRLF: sha256sum -c reads the CR as part of the name
-[IO.File]::WriteAllText((Join-Path $out 'SHA256SUMS.txt'), "$hash  $name.zip`n")
-Write-Host "$name.zip $([math]::Round((Get-Item $zip).Length / 1MB, 1)) MB, sha256 $hash"
+[IO.File]::WriteAllText((Join-Path $out 'SHA256SUMS.txt'), $sums)

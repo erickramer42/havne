@@ -532,6 +532,47 @@ sudo --preserve-env=ECUIO_VCAN_REQUIRED build-core/tests/test_vcan \
   --gtest_filter='SocketCanBusTest.TheInterfaceGoingDown*'
 ```
 
+## Debug symbols and tracing
+
+[ADR-0034](adr/0034-debug-symbols-and-probes.md). Every MSVC Release
+build writes a PDB beside each binary (`/Zi`, `/DEBUG`, with `/OPT:REF`
+and `/OPT:ICF` kept), and each release publishes the shipped
+executables' PDBs as `havne-X.Y.Z-windows-x64-symbols.zip`.
+
+**A crash dump on Windows.** Windows keeps one when asked, per program,
+in the registry (as administrator):
+
+```bat
+reg add "HKLM\SOFTWARE\Microsoft\Windows\Windows Error Reporting\LocalDumps\havne.exe" /v DumpType /t REG_DWORD /d 2
+```
+
+The next crash leaves a full dump in `%LOCALAPPDATA%\CrashDumps`. Open
+it in WinDbg or Visual Studio with the release's unzipped symbols on the
+symbol path (`.sympath+ <folder>`, then `!analyze -v`); the PDB must be
+the same release's, as the debugger checks.
+
+**USDT probes on Linux.** Core built where `<sys/sdt.h>` exists
+(`systemtap-sdt-dev`) carries three probes under provider `ecuio`, each
+one `nop` until a tracer attaches:
+
+| Probe | Arguments |
+|---|---|
+| `session_start` | session, backend (`ECUIO_BACKEND_*`) |
+| `session_close` | session |
+| `frame` | session, arbitration ID, flags, data length, `timestamp_us` |
+
+```sh
+readelf --notes build-core/cli/havne-cli | grep -A1 'Provider: ecuio'   # they're there
+# frames per ID while a stream runs
+sudo bpftrace -e 'usdt:build-core/cli/havne-cli:ecuio:frame { @[arg1] = count(); }' \
+  -c 'build-core/cli/havne-cli stream mock://demo --count 200'
+```
+
+`ProbeNotesTest` checks the notes in `test_core` and `havne-cli`; CI's
+`linux-build` runs `tests/probe_trace.sh` under `sudo`, which counts a
+`mock://` stream's probes (locally: `sudo sh tests/probe_trace.sh
+build-core/cli/havne-cli`).
+
 ## Troubleshooting
 
 | Symptom | Cause and fix |
@@ -837,6 +878,18 @@ A version tag publishes two downloads through
   10 s after it starts (QML that fails to load exits at once; the
   check was confirmed against a package with `qml/QtQuick/Controls`
   removed, 2026-10-25). It writes the zip to `dist/` (git-ignored).
+  Beside it goes `havne-X.Y.Z-windows-x64-symbols.zip`, the four
+  executables' PDBs from the trees that built them
+  ([ADR-0034](adr/0034-debug-symbols-and-probes.md)). The release fails
+  if one is missing, if an exe records anything but its PDB's file name
+  (the job builds with `LINK=/PDBALTPATH:%_PDB%` in the environment,
+  since CMake's Visual Studio generator can't pass the `%` through; a
+  local stage needs the same), or if `dumpbin /pdbpath:verbose` doesn't
+  find the PDB beside its exe, which it does only when the signature and
+  age match (a PDB from another build failed it, 2026-10-29). A local
+  dry run of trees built without `LINK` (`scripts/verify.sh`'s) passes
+  `-AllowBuildPath`: the recorded path may be the build's, the PDB must
+  still match.
 - **`android`: build and sign.** The kit, NDK and JDK as
   `android-build`, but a Release build: optimized, not debuggable, and
   unsigned. The job is the only one that names the `release`
@@ -849,8 +902,9 @@ A version tag publishes two downloads through
   one pinned in `packaging/android/release-cert.sha256`. Locally,
   `HAVNE_CERT_SHA256` overrides the pin, so a throwaway key runs the
   same checks.
-- **`publish`: checksums and provenance.** `SHA256SUMS.txt` lists both
-  downloads, with LF line ends. `actions/attest-build-provenance` signs
+- **`publish`: checksums and provenance.** `SHA256SUMS.txt` lists the
+  three downloads (the zip, the symbols zip and the APK), with LF line
+  ends. `actions/attest-build-provenance` signs
   a SLSA build provenance for each, tied to this repository's
   workflow, and stores it in GitHub's attestation store. The job also
   copies each Sigstore bundle into `dist/` as `<download>.intoto.jsonl`,
@@ -858,7 +912,7 @@ A version tag publishes two downloads through
   files (it counts `*.intoto.jsonl` as provenance and `*.sig`, `*.asc`
   or `*.sigstore.json` as signatures), and so a download can be checked
   with `gh attestation verify <file> --bundle <file>.intoto.jsonl`.
-- **`publish`: the release.** `gh release create` with both downloads,
+- **`publish`: the release.** `gh release create` with the three downloads,
   their `.intoto.jsonl` files, `SHA256SUMS.txt` and the notes file. A
   manual run for an existing tag
   (`gh workflow run release.yml -f tag=vX.Y.Z`) rebuilds it and

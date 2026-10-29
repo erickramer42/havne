@@ -230,6 +230,23 @@ target_link_libraries(test_c_abi PRIVATE
 add_test(NAME c_abi COMMAND test_c_abi)
 set_tests_properties(c_abi PROPERTIES LABELS "abi")
 
+# Core's USDT probes (ADR-0034 §4) in each binary that links core and
+# ships or runs here: their ELF notes, which is all a tracer reads.
+# Only where core was built with them (Linux with <sys/sdt.h>).
+if(ECUIO_HAVE_SDT)
+    find_program(APP_READELF readelf REQUIRED)
+    set(_probe_binaries test_core)
+    if(TARGET havne-cli)
+        list(APPEND _probe_binaries havne-cli)
+    endif()
+    foreach(bin IN LISTS _probe_binaries)
+        add_test(NAME ProbeNotesTest.${bin}
+            COMMAND ${CMAKE_COMMAND} -DREADELF=${APP_READELF}
+                    -DBINARY=$<TARGET_FILE:${bin}>
+                    -P ${CMAKE_CURRENT_SOURCE_DIR}/probe_notes.cmake)
+    endforeach()
+endif()
+
 # --- Bridge tests: only when the full app (and Qt) is available ---
 if(NOT HAVNE_BUILD_CORE_ONLY)
 
