@@ -2,7 +2,8 @@
 //             platform (ADR-0026)
 // Testing: HARNESS — Elm327SessionTest (test_elm327) through the fake
 //          ELM327 behind the port opener (tests/fake_elm327.h): the URI
-//          and its refusals, the setup and its refusals, the session
+//          and its refusals, the setup and its refusals (a command
+//          answered by a late reset sent again), the session
 //          info and the readings' "not present", the requests (the count
 //          digit, header switches, the rotation, the probe, the DID scan,
 //          identification), multi-frame replies, link health and its
@@ -366,18 +367,38 @@ struct setup_answer {
     char first[ELM327_QUOTE_MAX + 1] = {}; /* else the first line */
 };
 
-/* A contract command (ADR-0026 §3): its answer must be OK. */
+/* A contract command (ADR-0026 §3): its answer must be OK. An answer
+ * that holds a reset's banner instead belonged to a reset still
+ * finishing when the command went out (the MX+ on a new Bluetooth link
+ * answered AT Z twice, the second time late:
+ * docs/bench-sessions/2026-10-29-android.md), so the command is sent
+ * once more; sending any contract command twice is harmless. */
 setup_answer contract(transport* t, const char* cmd)
 {
     setup_answer a;
-    a.io = command(t, cmd, false, [&](const elm327_reader& r) {
-        if (elm327_classify(r, t->ext29, nullptr) == elm327_line::ok) {
-            a.ok = true;
-        } else if (a.first[0] == '\0') {
-            quote(r, a.first);
+    for (int attempt = 0; attempt < 2; ++attempt) {
+        a = setup_answer{};
+        bool reset = false;
+        a.io = command(t, cmd, false, [&](const elm327_reader& r) {
+            const elm327_line kind = elm327_classify(r, t->ext29, nullptr);
+            if (kind == elm327_line::ok) {
+                a.ok = true;
+                return;
+            }
+            reset = reset || kind == elm327_line::reset;
+            if (a.first[0] == '\0') {
+                quote(r, a.first);
+            }
+        });
+        a.ok = a.ok && a.io == elm327_io::prompt;
+        if (a.ok || a.io != elm327_io::prompt || !reset) {
+            break;
         }
-    });
-    a.ok = a.ok && a.io == elm327_io::prompt;
+        char sent[ELM327_CMD_MAX];
+        bare_command(cmd, sent);
+        elm327_log_write(t->log, "a reset's answer came for %s: sent again",
+                         sent);
+    }
     return a;
 }
 

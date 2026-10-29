@@ -750,6 +750,55 @@ TEST(RequestEngineTest, SilenceEndsTheWalkAndDropsNothing) {
     EXPECT_EQ(e.chans[0].requests, 2u);
 }
 
+/* A bitmap whose wait ends after a reply naming another PID is asked
+ * once more: on the car, 01 00 drew 41 1F 00 01, the run time's answer
+ * (docs/bench-sessions/2026-10-29-android.md). Asked again, it's
+ * answered and the walk goes on; another PID's answer the second time
+ * ends the walk as silence does. */
+TEST(RequestEngineTest, AnotherPidsAnswerAsksTheBitmapAgainOnce)
+{
+    const uint8_t run_time[4] = {0x41, 0x1F, 0x00, 0x01};
+    {
+        ecuio_request_engine e;
+        ASSERT_NO_FATAL_FAILURE(one_channel_of(&e, {0x0B, 0x0C}));
+        ecuio_engine_probe(&e, 0);
+        int64_t now = 0;
+        ASSERT_NO_FATAL_FAILURE(send_bitmap_request(&e, 0, 0x00, now));
+        EXPECT_EQ(ecuio_engine_on_frame(&e, 0, run_time, sizeof(run_time),
+                                        now + 4 * kMs, nullptr),
+                  ecuio_reply::none);
+        now += ECUIO_ENGINE_WAIT_US;
+        EXPECT_TRUE(ecuio_engine_expire(&e, 0, now));
+        ASSERT_NO_FATAL_FAILURE(send_bitmap_request(&e, 0, 0x00, now))
+            << "the same bitmap again";
+        EXPECT_EQ(answer_bitmap(&e, 0, 0x00, 0xBE1FA812u, now + 4 * kMs),
+                  ecuio_reply::positive);
+        EXPECT_EQ(send_next(&e, 0, now + ECUIO_ENGINE_WAIT_US), 0x0Cu)
+            << "the walk ended with the chain, and dropped 0x0B";
+        ecuio_channel_support_t s;
+        ecuio_engine_support(&e, 0, &s);
+        EXPECT_EQ(s.ranges, 0x1u);
+    }
+    {
+        ecuio_request_engine e;
+        ASSERT_NO_FATAL_FAILURE(one_channel_of(&e, {0x0B, 0x0C}));
+        ecuio_engine_probe(&e, 0);
+        int64_t now = 0;
+        for (int ask = 0; ask < 2; ++ask) {
+            ASSERT_NO_FATAL_FAILURE(send_bitmap_request(&e, 0, 0x00, now));
+            (void)ecuio_engine_on_frame(&e, 0, run_time, sizeof(run_time),
+                                        now + 4 * kMs, nullptr);
+            now += ECUIO_ENGINE_WAIT_US;
+            EXPECT_TRUE(ecuio_engine_expire(&e, 0, now));
+        }
+        EXPECT_EQ(send_next(&e, 0, now), 0x0Bu) << "the walk ended, once";
+        ecuio_channel_support_t s;
+        ecuio_engine_support(&e, 0, &s);
+        EXPECT_EQ(s.ranges, 0u);
+        EXPECT_EQ(s.dropped, 0u);
+    }
+}
+
 /* With the probe on, a negative reply drops its request when its code
  * can't change within the session: 0x12 and 0x31 (not supported), 0x33
  * and 0x7F (security access, another session: the engine asks for

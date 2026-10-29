@@ -130,6 +130,12 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
   the red.
 
 ### Fixed
+- An ELM327 adapter whose reset answered twice, the second time late
+  (an OBDLink MX+ over a new Bluetooth link), no longer fails the
+  connect: the setup command that drew the late answer is sent again.
+- A supported-PID query answered with another PID's reply is asked
+  once more, instead of the session polling without knowing which
+  PIDs the car supports.
 - Choosing a preset or a device of another kind in Settings no longer
   carries options it can't use into the URI, which failed the next
   connect (a replay's `profile=mock` or `speed=` on an adapter): keys

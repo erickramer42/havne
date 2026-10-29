@@ -462,6 +462,22 @@ TEST_F(Elm327SessionTest, AResetAnsweredOkTakesTheVersionFromAtI)
     EXPECT_EQ(fake_count("ATZ"), 2u) << "the setup ran again";
 }
 
+/* A link that opens with a reset's banner already on it (the MX+ over a
+ * new Bluetooth link, docs/bench-sessions/2026-10-29-android.md): AT Z
+ * takes that banner for its answer, its own answer comes late, for
+ * AT E0, and AT E0 is sent once more; the setup goes through */
+TEST_F(Elm327SessionTest, ASetupCommandAnsweredByALateResetIsSentAgain)
+{
+    set_knobs([](fake_elm327::knobs& k) { k.stale_banner = true; });
+    Session s;
+    ASSERT_EQ(s.create(uri("?poll=0x0C")), ECUIO_OK)
+        << ecuio_last_error_detail();
+    EXPECT_EQ(fake_count("ATZ"), 1u);
+    EXPECT_EQ(fake_count("ATE0"), 2u) << "AT E0 again after the late reset";
+    s.start();
+    EXPECT_TRUE(wait_for([&] { return s.cap.count("41 0C") >= 1; }, 3000));
+}
+
 /* Parameter 2A on with bit 2 clear: the adapter won't wait past a
  * 7F xx 78, and the session info says so. Off, or on with the bit set,
  * it does */

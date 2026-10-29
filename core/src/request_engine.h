@@ -4,7 +4,8 @@
 // C++17, Qt-free, no platform headers.
 // Testing: UNIT — derivation, deduplication and the limit, the
 //     read-only rule, rotation per channel, correlation, the wait, the
-//     pending wait and the floor; the supported-PID walk, its budget and
+//     pending wait and the floor; the supported-PID walk, its budget,
+//     a bitmap asked again once after another PID's answer, and
 //     its resumption (behind a one-shot already taken), and what each
 //     answer drops; the DID scan's turns, outcomes and rescan;
 //     identification's turns, outcomes, text and report
@@ -37,7 +38,11 @@
  * requests first walks the supported-PID chain (01 00, then 01 20 while
  * each bitmap's last bit says the next exists, up to 01 E0), one request
  * at a time through the channel's one-shot slot, and its rotation starts
- * when the walk ends. While the probe is on, a request leaves the
+ * when the walk ends. A bitmap whose wait ends with nothing is the
+ * walk's end; one whose wait ends after a reply naming another PID
+ * (an answer that came late, docs/bench-sessions/2026-10-29-android.md)
+ * is asked once more, within the walk's budget. While the probe is
+ * on, a request leaves the
  * rotation only on an explicit answer: its PID's bit clear in an answered
  * bitmap, or a negative reply that won't change within the session.
  *
@@ -167,6 +172,9 @@ struct ecuio_engine_channel {
      * them: bit 0x80 >> ((p - 1) % 8) of byte (p - 1) / 8. */
     bool walking = false;       /* the walk has a bitmap to ask */
     ecuio_request walk = {};    /* that bitmap; the one-shot copies it */
+    bool walk_stray = false;    /* while it was out, a reply named another
+                                 * Service 01 PID */
+    bool walk_reasked = false;  /* it was asked again for one */
     bool probed = false;        /* a walk has started */
     bool walked = false;        /* the chain was answered to its end */
     uint8_t ranges = 0;         /* bit i: the bitmap at 0x20 * i answered */
@@ -627,6 +635,8 @@ inline void ecuio_engine_take_bitmap(ecuio_request_engine* e, uint32_t c,
                                      const uint8_t* data, int64_t now_us)
 {
     ecuio_engine_channel& ch = e->chans[c];
+    ch.walk_stray = false;
+    ch.walk_reasked = false;
     const uint32_t range = ch.walk.bytes[1] / 0x20u;
     for (uint32_t b = 0; b < 4; ++b) {
         ch.known[range * 4 + b] = 0xFF;
@@ -687,6 +697,8 @@ inline void ecuio_engine_probe(ecuio_request_engine* e, int64_t now_us)
         ch.walk.bytes[1] = static_cast<uint8_t>(range * 0x20u);
         ch.walk.len = 2;
         ch.walk.channel = static_cast<uint8_t>(c);
+        ch.walk_stray = false;
+        ch.walk_reasked = false;
         ch.walking = true;
         ch.probed = true;
     }
@@ -784,8 +796,10 @@ inline void ecuio_engine_sent(ecuio_request_engine* e, uint32_t c,
 /* Ends channel c's request once its wait has run out: true when one
  * timed out, which is that request's outcome. Its reply may still come,
  * so the channel is out of step until a positive reply. A bitmap that
- * times out ends the walk; a scanned DID or an identification item that
- * does is unanswered. */
+ * times out ends the walk, unless a reply naming another PID came
+ * while it waited: then it's asked once more, while the budget lasts.
+ * A scanned DID or an identification item that times out is
+ * unanswered. */
 inline bool ecuio_engine_expire(ecuio_request_engine* e, uint32_t c,
                                 int64_t now_us)
 {
@@ -802,8 +816,13 @@ inline bool ecuio_engine_expire(ecuio_request_engine* e, uint32_t c,
     } else if (once && ch.scanning) {
         ecuio_engine_scan_settle(e, c, ECUIO_SCAN_UNANSWERED, 0);
     } else if (once) {
-        ecuio_engine_end_walk(e, c);
+        if (ch.walk_stray && !ch.walk_reasked && now_us < e->walk_until_us) {
+            ch.walk_reasked = true; /* due asks the same bitmap again */
+        } else {
+            ecuio_engine_end_walk(e, c);
+        }
     }
+    ch.walk_stray = false;
     return true;
 }
 
@@ -851,6 +870,11 @@ inline ecuio_reply ecuio_engine_on_frame(ecuio_request_engine* e, uint32_t c,
             }
         }
         return ecuio_reply::positive;
+    }
+    if (out == ECUIO_ENGINE_ONCE && ch.walking && !ch.identifying &&
+        !ch.scanning && len >= 2 &&
+        data[0] == static_cast<uint8_t>(r.bytes[0] + 0x40)) {
+        ch.walk_stray = true; /* another PID's answer, not the bitmap's */
     }
     if (len < 3 || data[0] != ECUIO_NEGATIVE_RESPONSE ||
         data[1] != r.bytes[0]) {

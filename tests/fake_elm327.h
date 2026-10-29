@@ -38,6 +38,12 @@
 //                monitor prints nothing more: no STOPPED, no prompt
 //   full_ends_monitor  BUFFER FULL ends the monitor with a prompt, as a
 //                plain ELM327's does
+//   stale_banner the next link opens with a reset's banner and prompt
+//                already on it, which arrive ahead of the first
+//                command's answer, and that link's first reset answers
+//                kLateResetMs late, after anything sent meanwhile was
+//                taken (the MX+ over a new Bluetooth link,
+//                docs/bench-sessions/2026-10-29-android.md); one link
 //
 // AT MA monitors (ADR-0026's appendix "passive listening"): the
 // messages bus() puts on the bus print, one ISO-TP frame a line, while
@@ -80,12 +86,15 @@ struct knobs {
     bool dropped = false;
     bool hung = false;
     bool full_ends_monitor = false;
+    bool stale_banner = false;
 };
 
 /* The fake's STN firmware string: an STN chip's shape, a version no chip
  * has. */
 constexpr char kStnVersion[] = "STN2255 v9.9.9";
 constexpr uint32_t kVbattMv = 13800;
+/* How late a reset answers after stale_banner */
+constexpr int64_t kLateResetMs = 300;
 
 inline int64_t steady_us()
 {
@@ -121,6 +130,7 @@ public:
         in_len_ = 0;
         commands = requests = resets = bare_crs = stops = 0;
         last_stop = 0;
+        held_ = late_reset_ = false;
         k = knobs{};
     }
 
@@ -191,9 +201,33 @@ public:
         return n;
     }
 
+    /* A link opened at now_us: with stale_banner, a reset's answer is
+     * already on it, held until the host's first byte (so a drain
+     * before the first command can't take it), and the link's first
+     * reset answers late. */
+    void link_opened(int64_t now_us)
+    {
+        (void)now_us;
+        if (!k.stale_banner) {
+            return;
+        }
+        k.stale_banner = false;
+        reply(k.version, kHeld);
+        held_ = true;
+        late_reset_ = true;
+    }
+
     /* Bytes from the host, at now_us. */
     void from_host(const uint8_t* data, size_t n, int64_t now_us)
     {
+        if (held_) {
+            for (size_t i = head_; i != tail_; i = (i + 1) % kOutDepth) {
+                if (due_[i] == kHeld) {
+                    due_[i] = now_us;
+                }
+            }
+            held_ = false;
+        }
         for (size_t i = 0; i < n; ++i) {
             const char c = static_cast<char>(data[i]);
             if (monitoring_) {
@@ -257,6 +291,9 @@ public:
 
 private:
     static constexpr size_t kOutDepth = 1u << 16;
+    static constexpr int64_t kHeld = INT64_MAX - 1; /* due on a release */
+    bool held_ = false;       /* stale_banner's bytes wait for the host */
+    bool late_reset_ = false; /* the link's first reset answers late */
     uint8_t out_[kOutDepth] = {};
     int64_t due_[kOutDepth] = {};
     size_t head_ = 0;
@@ -437,13 +474,15 @@ private:
         if (is("Z") || is("WS")) {
             ++resets;
             settings_defaults();
+            const int64_t at = late_reset_ ? now + kLateResetMs * 1000 : now;
+            late_reset_ = false;
             if (k.reset_ok) {
-                reply("OK", now);
+                reply("OK", at);
                 return;
             }
-            end_line(now);
-            end_line(now);
-            reply(k.version, now);
+            end_line(at);
+            end_line(at);
+            reply(k.version, at);
             return;
         }
         if (is("MA")) {
@@ -754,6 +793,7 @@ inline ecuio_status_t port_open(const char* name, uint32_t serial_baud,
     ++s.opens;
     s.open = true;
     s.a.drop_output();
+    s.a.link_opened(steady_us());
     out->ops = &kPortOps;
     out->impl = &s;
     return ECUIO_OK;
