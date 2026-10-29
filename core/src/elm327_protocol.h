@@ -3,12 +3,14 @@
 // C++17, Qt-free, no platform headers. No I/O, no clock, no allocation.
 // Testing: UNIT — Elm327ProtocolTest (test_elm327): canned transcripts
 //     chunked every way, every line kind, ISO-TP reassembly, the values,
-//     the commands it formats, and replies reaching the request engine.
+//     the commands it formats and the PIDs given the response count, and
+//     replies reaching the request engine.
 
 #ifndef ECUIO_ELM327_PROTOCOL_H
 #define ECUIO_ELM327_PROTOCOL_H
 
-#include "ecuio/core.h" /* ECUIO_FRAME_DATA_MAX */
+#include "ecuio/core.h"    /* ECUIO_FRAME_DATA_MAX */
+#include "ecuio/signals.h" /* the defs the count digit is chosen from */
 
 #include <stddef.h>
 #include <stdint.h>
@@ -590,15 +592,87 @@ inline bool elm327_pps_value(const char* s, size_t n, uint8_t pp,
  * Every command and request ends with CR. Each writer returns the length
  * written (NUL-terminated), or 0 if it doesn't fit in cap. */
 
-/* The response-count digit for a request (ADR-0026 §3; the datasheet
- * from v1.3): 1 for a Service 01 request to a physical ID, which one ECU
- * answers in one Single Frame (the service byte, the PID and at most
- * four data bytes); 0, no digit, otherwise. A Service 09 or 0x22 reply
- * can span frames or be held pending (7F xx 78), and a functional ID
- * (0x7DF, 0x18DB33F1) can draw several ECUs. */
-inline uint8_t elm327_response_count(uint8_t service, uint32_t tx_id)
+/* A Single Frame on classic CAN carries this much of a message: the
+ * service byte, the PID and five data bytes. */
+constexpr uint16_t ELM327_SINGLE_FRAME_MAX = 7;
+
+/* The Service 01 PIDs whose reply is taken to fit one Single Frame: bit
+ * 0x80 >> (p % 8) of byte p / 8, as the bitmaps carry them. */
+struct elm327_one_frame_pids {
+    uint8_t bits[32] = {};
+};
+
+inline bool elm327_one_frame(const elm327_one_frame_pids& s, uint8_t pid)
 {
-    if (service != 0x01 || tx_id == 0x7DFu || tx_id == 0x18DB33F1u) {
+    return (s.bits[pid / 8] & (0x80u >> (pid % 8))) != 0;
+}
+
+inline void elm327_one_frame_set(elm327_one_frame_pids& s, uint8_t pid, bool on)
+{
+    const uint8_t bit = static_cast<uint8_t>(0x80u >> (pid % 8));
+    s.bits[pid / 8] = static_cast<uint8_t>(on ? (s.bits[pid / 8] | bit)
+                                              : (s.bits[pid / 8] & ~bit));
+}
+
+/* Where a def's field ends in its message, or 0 when that isn't known (a
+ * text field running to the end of the payload). */
+inline uint32_t elm327_def_end(const ecuio_signal_def_t& d)
+{
+    if (d.kind == ECUIO_VALUE_TEXT || d.kind == ECUIO_VALUE_HEX) {
+        return (d.byte_length == 0) ? 0u
+                                    : uint32_t{d.start_byte} + d.byte_length;
+    }
+    return d.start_byte + (uint32_t{d.bit_offset} + d.bit_length + 7) / 8;
+}
+
+/* The PIDs a set's requests get the response-count digit for: the
+ * supported-PID bitmaps (0x00, 0x20, ... 0xE0: four data bytes), and
+ * each PID whose every def keyed 41 <PID> ends within a Single Frame. A
+ * PID's reply length is J1979's, not the def's, so a def reading the
+ * first bytes of a longer reply misleads the rule; the transport takes
+ * the PID out when a reply spans frames after all. A NULL set gives the
+ * bitmaps alone. */
+inline void elm327_one_frame_pids_for(const ecuio_signal_set_t* set,
+                                      elm327_one_frame_pids* out)
+{
+    elm327_one_frame_pids listed;
+    elm327_one_frame_pids longer;
+    if (set != nullptr && set->defs != nullptr) {
+        for (uint32_t i = 0; i < set->count; ++i) {
+            const ecuio_signal_def_t& d = set->defs[i];
+            if (d.mux_offset != 0 || d.mux_length != 2 ||
+                (d.mux_key >> 8) != 0x41u) {
+                continue;
+            }
+            const uint8_t pid = static_cast<uint8_t>(d.mux_key);
+            const uint32_t end = elm327_def_end(d);
+            elm327_one_frame_set(listed, pid, true);
+            if (end == 0 || end > ELM327_SINGLE_FRAME_MAX) {
+                elm327_one_frame_set(longer, pid, true);
+            }
+        }
+    }
+    for (size_t i = 0; i < sizeof(out->bits); ++i) {
+        out->bits[i] = static_cast<uint8_t>(listed.bits[i] & ~longer.bits[i]);
+    }
+    for (uint32_t pid = 0; pid <= 0xE0; pid += 0x20) {
+        elm327_one_frame_set(*out, static_cast<uint8_t>(pid), true);
+    }
+}
+
+/* The response-count digit for a request (ADR-0026 §3; the datasheet
+ * from v1.3, which counts lines): 1 for a Service 01 request to a
+ * physical ID whose PID is in one, so one ECU answers in one line; 0, no
+ * digit, otherwise. A digit too small ends the reply early and loses a
+ * multi-frame message; a Service 09 or 0x22 reply can span frames or be
+ * held pending (7F xx 78), and a functional ID (0x7DF, 0x18DB33F1) can
+ * draw several ECUs. */
+inline uint8_t elm327_response_count(const uint8_t* bytes, size_t n,
+                                     uint32_t tx_id,
+                                     const elm327_one_frame_pids& one)
+{
+    if (n != 2 || bytes[0] != 0x01 || tx_id == 0x7DFu || tx_id == 0x18DB33F1u ||
+        !elm327_one_frame(one, bytes[1])) {
         return 0;
     }
     return 1;

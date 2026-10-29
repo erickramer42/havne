@@ -593,17 +593,107 @@ TEST(Elm327ProtocolTest, VersionStringsAndEchoesAreRecognized)
 
 /* ---- Commands ------------------------------------------------------- */
 
+namespace {
+
+/* A numeric def keyed 41 <pid>, its field start_byte to start_byte +
+ * bytes */
+ecuio_signal_def_t pid_def(uint8_t pid, uint16_t start_byte, uint8_t bytes)
+{
+    ecuio_signal_def_t d{};
+    d.message_id = 0x7E8;
+    d.mux_length = 2;
+    d.mux_key = 0x4100u | pid;
+    d.kind = ECUIO_VALUE_UINT;
+    d.byte_order = ECUIO_BYTE_ORDER_BE;
+    d.start_byte = start_byte;
+    d.bit_length = static_cast<uint8_t>(8 * bytes);
+    d.scale = 1.0;
+    return d;
+}
+
+ecuio_signal_set_t set_of(const ecuio_signal_def_t* defs, uint32_t n)
+{
+    ecuio_signal_set_t set{};
+    set.layout_version = ECUIO_SIGNAL_SET_LAYOUT;
+    set.count = n;
+    set.defs = defs;
+    return set;
+}
+
+} // namespace
+
+/* The PIDs given the count digit: the bitmaps, and a PID whose every def
+ * ends within a Single Frame's seven bytes; a text field to the end, or
+ * any def past the seventh byte, keeps the digit off */
+TEST(Elm327ProtocolTest, TheCountDigitGoesToPidsWhoseDefsFitOneFrame)
+{
+    ecuio_signal_def_t defs[7] = {
+        pid_def(0x0C, 2, 2), /* rpm: ends at 4 */
+        pid_def(0x42, 2, 2),
+        pid_def(0x7F, 3, 4), /* the first field of a long reply: ends at 7 */
+        pid_def(0x81, 3, 4), /* fits, but the next def doesn't */
+        pid_def(0x81, 7, 4), /* ends at 11 */
+        pid_def(0x01, 2, 1),
+        pid_def(0x02, 2, 1),
+    };
+    defs[5].kind = ECUIO_VALUE_TEXT; /* to the end of the payload */
+    defs[5].bit_length = 0;
+    defs[6].kind = ECUIO_VALUE_HEX; /* 2 to 7 */
+    defs[6].bit_length = 0;
+    defs[6].byte_length = 5;
+    const ecuio_signal_set_t set = set_of(defs, 7);
+    elm327_one_frame_pids one;
+    elm327_one_frame_pids_for(&set, &one);
+    EXPECT_TRUE(elm327_one_frame(one, 0x0C));
+    EXPECT_TRUE(elm327_one_frame(one, 0x42));
+    EXPECT_TRUE(elm327_one_frame(one, 0x7F))
+        << "the defs are all the rule sees; the transport learns the rest";
+    EXPECT_FALSE(elm327_one_frame(one, 0x81));
+    EXPECT_FALSE(elm327_one_frame(one, 0x01));
+    EXPECT_TRUE(elm327_one_frame(one, 0x02));
+    EXPECT_FALSE(elm327_one_frame(one, 0x0D)) << "no def: length unknown";
+    for (unsigned pid = 0; pid <= 0xE0; pid += 0x20) {
+        EXPECT_TRUE(elm327_one_frame(one, static_cast<uint8_t>(pid))) << pid;
+    }
+
+    /* A def keyed another way enrols nothing here */
+    ecuio_signal_def_t other = pid_def(0x05, 9, 1);
+    other.mux_offset = 1;
+    const ecuio_signal_set_t odd = set_of(&other, 1);
+    elm327_one_frame_pids_for(&odd, &one);
+    EXPECT_FALSE(elm327_one_frame(one, 0x05));
+    elm327_one_frame_pids_for(nullptr, &one);
+    EXPECT_TRUE(elm327_one_frame(one, 0x00));
+    EXPECT_FALSE(elm327_one_frame(one, 0x0C));
+
+    elm327_one_frame_set(one, 0x0C, true);
+    EXPECT_TRUE(elm327_one_frame(one, 0x0C));
+    elm327_one_frame_set(one, 0x0C, false);
+    EXPECT_FALSE(elm327_one_frame(one, 0x0C));
+    EXPECT_TRUE(elm327_one_frame(one, 0x00)) << "a neighbor's bit stays";
+}
+
 TEST(Elm327ProtocolTest, RequestsCarryTheCountDigitOnlyWhereOneReplyIsCertain)
 {
-    EXPECT_EQ(elm327_response_count(0x01, 0x7E0), 1u);
-    EXPECT_EQ(elm327_response_count(0x01, 0x18DA10F1), 1u);
-    EXPECT_EQ(elm327_response_count(0x01, 0x7DF), 0u) << "functional";
-    EXPECT_EQ(elm327_response_count(0x01, 0x18DB33F1), 0u) << "functional";
-    EXPECT_EQ(elm327_response_count(0x09, 0x7E0), 0u);
-    EXPECT_EQ(elm327_response_count(0x22, 0x7E0), 0u);
+    elm327_one_frame_pids one;
+    elm327_one_frame_set(one, 0x0C, true);
+    const uint8_t rpm[2] = {0x01, 0x0C};
+    const uint8_t speed[2] = {0x01, 0x0D};
+    const uint8_t vin[2] = {0x09, 0x02};
+    const uint8_t did[3] = {0x22, 0x1E, 0x1C};
+    const uint8_t did_0c[3] = {0x01, 0x0C, 0x00};
+    EXPECT_EQ(elm327_response_count(rpm, 2, 0x7E0, one), 1u);
+    EXPECT_EQ(elm327_response_count(rpm, 2, 0x18DA10F1, one), 1u);
+    EXPECT_EQ(elm327_response_count(rpm, 2, 0x7DF, one), 0u) << "functional";
+    EXPECT_EQ(elm327_response_count(rpm, 2, 0x18DB33F1, one), 0u)
+        << "functional";
+    EXPECT_EQ(elm327_response_count(speed, 2, 0x7E0, one), 0u)
+        << "not in the set";
+    EXPECT_EQ(elm327_response_count(vin, 2, 0x7E0, one), 0u);
+    EXPECT_EQ(elm327_response_count(did, 3, 0x7E0, one), 0u);
+    EXPECT_EQ(elm327_response_count(did_0c, 3, 0x7E0, one), 0u);
 
     char out[32];
-    const uint8_t rpm[2] = {0x01, 0x0C};
     EXPECT_EQ(elm327_format_request(rpm, 2, 1, out, sizeof out), 6u);
     EXPECT_STREQ(out, "010C1\r");
     const uint8_t vin_did[3] = {0x22, 0xF1, 0x90};

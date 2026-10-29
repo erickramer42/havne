@@ -673,7 +673,8 @@ TEST_F(Elm327SessionTest, TheCanRatePicksTheProtocol)
 }
 
 /* raw has the engine ECU's channel (ADR-0013's appendix), so ?poll=
- * asks it, with the count digit; a lone ?poll= sends nothing else */
+ * asks it; a lone ?poll= sends nothing else, and with no def to size the
+ * reply, no count digit */
 TEST_F(Elm327SessionTest, RawWithPollAsksTheEngineEcu)
 {
     Session s;
@@ -681,12 +682,91 @@ TEST_F(Elm327SessionTest, RawWithPollAsksTheEngineEcu)
         << ecuio_last_error_detail();
     s.start();
     ASSERT_TRUE(wait_for([&] { return s.cap.count("41 0C") >= 3; }, 3000));
-    /* Both under one lock: the worker keeps polling between two reads */
-    const std::pair<uint32_t, uint32_t> counts =
-        on_fake<std::pair<uint32_t, uint32_t>>([](fake_elm327::adapter& a) {
-            return std::make_pair(a.count("010C1"), a.requests);
+    /* All under one lock: the worker keeps polling between two reads */
+    const std::vector<uint32_t> counts =
+        on_fake<std::vector<uint32_t>>([](fake_elm327::adapter& a) {
+            return std::vector<uint32_t>{a.count("010C"), a.requests,
+                                         a.count("010C1")};
         });
-    EXPECT_EQ(counts.first, counts.second) << "only ?poll='s request";
+    EXPECT_EQ(counts[0], counts[1]) << "only ?poll='s request";
+    EXPECT_EQ(counts[2], 0u);
+}
+
+namespace {
+
+/* A set reading PID 0x7F (engine run time, 13 data bytes: a First Frame
+ * and two Consecutive Frames) from the engine ECU, one def at
+ * start_byte, 4 bytes, registered as name */
+void register_run_time(const char* name, ecuio_signal_def_t* def,
+                       ecuio_signal_set_t* set, uint16_t start_byte)
+{
+    static const ecuio_channel_decl_t kEngine[] = {{0x7E8u, 0x7E0u}};
+    *def = ecuio_signal_def_t{};
+    def->id = 1;
+    def->message_id = 0x7E8u;
+    def->mux_length = 2;
+    def->mux_key = 0x417Fu;
+    def->kind = ECUIO_VALUE_UINT;
+    def->byte_order = ECUIO_BYTE_ORDER_BE;
+    def->start_byte = start_byte;
+    def->bit_length = 32;
+    def->scale = 1.0;
+    *set = ecuio_signal_set_t{};
+    set->layout_version = ECUIO_SIGNAL_SET_LAYOUT;
+    set->count = 1;
+    set->defs = def;
+    set->channel_count = 1;
+    set->channels = kEngine;
+    ASSERT_EQ(ecuio_profile_register(name, set, nullptr), ECUIO_OK);
+}
+
+} // namespace
+
+/* A def ending past a Single Frame (0x7F's idle time, bytes 7 to 10)
+ * says the reply spans frames: the PID goes without the count digit,
+ * which would end the reply after its First Frame */
+TEST_F(Elm327SessionTest, ALongServiceOnePidGoesWithoutTheCountDigit)
+{
+    static ecuio_signal_def_t def;
+    static ecuio_signal_set_t set;
+    register_run_time("test-elm-idle-time", &def, &set, 7);
+    Session s;
+    ASSERT_EQ(s.create(uri("?profile=test-elm-idle-time&probe=0&identify=0")),
+              ECUIO_OK)
+        << ecuio_last_error_detail();
+    s.start();
+    ASSERT_TRUE(wait_for([&] { return s.cap.count("41 7F") >= 2; }, 3000));
+    Capture::Frame f{};
+    ASSERT_TRUE(s.cap.find("41 7F", &f));
+    EXPECT_EQ(hex_of(f.data.data(), f.data.size()),
+              "41 7F 07 00 00 0E 10 00 00 03 84 00 00 00 00");
+    EXPECT_EQ(fake_count("017F1"), 0u);
+}
+
+/* A def that fits a Single Frame (0x7F's total, bytes 3 to 6) can't say
+ * the reply is longer: the first request goes with the digit, the
+ * adapter stops after the First Frame, and from then on the PID goes
+ * without it and its replies arrive whole */
+TEST_F(Elm327SessionTest, AReplyThatSpansFramesTakesThePidOffTheCountDigit)
+{
+    static ecuio_signal_def_t def;
+    static ecuio_signal_set_t set;
+    register_run_time("test-elm-run-time", &def, &set, 3);
+    Session s;
+    ASSERT_EQ(s.create(uri("?profile=test-elm-run-time&probe=0&identify=0")),
+              ECUIO_OK)
+        << ecuio_last_error_detail();
+    s.start();
+    ASSERT_TRUE(wait_for([&] { return s.cap.count("41 7F") >= 2; }, 3000));
+    Capture::Frame f{};
+    ASSERT_TRUE(s.cap.find("41 7F", &f));
+    EXPECT_EQ(f.data.size(), 15u);
+    const std::vector<uint32_t> counts =
+        on_fake<std::vector<uint32_t>>([](fake_elm327::adapter& a) {
+            return std::vector<uint32_t>{a.count("017F1"), a.count("017F")};
+        });
+    EXPECT_EQ(counts[0], 1u) << "the digit once, on the first request";
+    EXPECT_GE(counts[1] - counts[0], 2u) << "then none";
 }
 
 /* An adapter that prints an 11-bit ID as two bytes (07E8) reads the

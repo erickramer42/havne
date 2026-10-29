@@ -37,6 +37,13 @@ constexpr uint8_t kPid11Throttle = 20;           /* ~= 7.8% */
 constexpr uint8_t kPid2FFuelLevel = 64;          /* ~= 25% tank */
 constexpr uint8_t kPid42Volts[2] = {0x36, 0x30}; /* 0x3630 = 13872 mV */
 constexpr uint8_t kPid5COilTemp = 0x78;          /* 120 - 40 = 80 degC */
+/* PID 0x7F, engine run time: J1979's 13 data bytes, a reply no Single
+ * Frame holds (the support byte, then the total, idle and PTO times, 4
+ * bytes each in seconds: 3600, 900 and 0). Supported, but past the
+ * bitmaps' chain (0x60 isn't), so the probe drops it: a test asking it
+ * turns the probe off. */
+constexpr uint8_t kPid7FRunTime[13] = {0x07, 0x00, 0x00, 0x0E, 0x10, 0x00, 0x00,
+                                       0x03, 0x84, 0x00, 0x00, 0x00, 0x00};
 
 /* The Service 0x22 DIDs the ECU knows: ADR-0015's example, and three
  * whose replies are long, filled with their byte index (& 0xFF). A
@@ -129,7 +136,7 @@ inline unsigned long did_length(uint16_t did)
 }
 
 /* The Service 01 PIDs the ECU supports: its canned ones, and the
- * bitmaps that lead to them. */
+ * bitmaps that lead to them (all but 0x7F's). */
 inline bool supports_pid(unsigned pid)
 {
     switch (pid) {
@@ -146,6 +153,7 @@ inline bool supports_pid(unsigned pid)
     case 0x40:
     case 0x42:
     case 0x5C:
+    case 0x7F:
         return true;
     default:
         return false;
@@ -295,6 +303,9 @@ inline bool answer(const unsigned char* req, size_t req_len,
         break;
     case 0x5C:
         put(&kPid5COilTemp, 1);
+        break;
+    case 0x7F:
+        put(kPid7FRunTime, sizeof(kPid7FRunTime));
         break;
     default:
         return false;

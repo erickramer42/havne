@@ -11,7 +11,8 @@
 // filter), its replies ended by a blank line and the '>' prompt, an
 // STN's ST commands, and requests answered by the fake J2534 DLL's ECU
 // (tests/fake_ecu.h) as the CAN frames an ISO 15765 ECU sends, one line
-// each. It records the commands it was sent, so a test can pin the
+// each, at most a request's response-count digit of them (the
+// datasheet's adapter returns after that many lines). It records the commands it was sent, so a test can pin the
 // setup and show what was never sent. Nothing allocates: the transport's
 // worker calls it, and its per-frame allocation is counted.
 //
@@ -316,6 +317,24 @@ private:
     uint32_t cf_ = 0;
     uint32_t cm_ = 0;
     bool monitoring_ = false;
+    /* The frame lines a reply may still print: its response count, or
+     * kNoCount */
+    static constexpr uint32_t kNoCount = UINT32_MAX;
+    uint32_t lines_left_ = kNoCount;
+
+    /* Whether the reply's response count leaves room for one more line,
+     * which it takes */
+    bool line_room()
+    {
+        if (lines_left_ == kNoCount) {
+            return true;
+        }
+        if (lines_left_ == 0) {
+            return false;
+        }
+        --lines_left_;
+        return true;
+    }
 
     void settings_defaults()
     {
@@ -609,10 +628,15 @@ private:
                     n += static_cast<size_t>(
                         snprintf(line + n, sizeof(line) - n, "%02X", m[i]));
                 }
-                text_line(line, at);
+                if (line_room()) {
+                    text_line(line, at);
+                }
                 return;
             }
             snprintf(line, sizeof(line), "%03X", static_cast<unsigned>(len));
+            if (!line_room()) {
+                return;
+            }
             text_line(line, at);
             size_t i = 0;
             for (unsigned idx = 0; i < len; ++idx) {
@@ -623,6 +647,9 @@ private:
                     n += static_cast<size_t>(
                         snprintf(line + n, sizeof(line) - n, "%02X", m[i]));
                 }
+                if (!line_room()) {
+                    return;
+                }
                 text_line(line, at);
             }
             return;
@@ -631,12 +658,17 @@ private:
             memset(f, 0xAA, sizeof(f));
             f[0] = static_cast<uint8_t>(len);
             memcpy(f + 1, m, len);
-            frame_line(id, f, at);
+            if (line_room()) {
+                frame_line(id, f, at);
+            }
             return;
         }
         f[0] = static_cast<uint8_t>(0x10 | ((len >> 8) & 0x0F));
         f[1] = static_cast<uint8_t>(len & 0xFF);
         memcpy(f + 2, m, 6);
+        if (!line_room()) {
+            return;
+        }
         frame_line(id, f, at);
         size_t i = 6;
         for (uint8_t seq = 1; i < len;
@@ -646,6 +678,9 @@ private:
             const size_t take = (len - i < 7) ? len - i : 7;
             memcpy(f + 1, m + i, take);
             i += take;
+            if (!line_room()) {
+                return;
+            }
             frame_line(id, f, at);
         }
     }
@@ -653,8 +688,16 @@ private:
     void request(const char* cmd, size_t n, int64_t now)
     {
         ++requests;
-        /* An odd digit at the end is the response count */
+        /* An odd digit at the end is the response count: the adapter
+         * returns after that many lines (the datasheet's "09 02 1" loses
+         * the VIN), so the rest of a longer reply never prints. 0 is no
+         * count */
         const size_t digits = (n % 2 == 1) ? n - 1 : n;
+        const int count_digit = (n % 2 == 1) ? hex(cmd[n - 1]) : 0;
+        if (count_digit < 0) {
+            reply("?", now);
+            return;
+        }
         uint8_t req[8] = {};
         const size_t len = digits / 2;
         if (len == 0 || len > sizeof(req)) {
@@ -695,7 +738,13 @@ private:
                         now + int64_t{i} * k.pending_gap_ms * 1000);
             }
         }
+        /* A 7F xx 78 isn't counted: the datasheet doesn't say whether it
+         * is, and the transport's pending tests take it that an adapter
+         * waiting past one (parameter 2A) waits for the answer */
+        lines_left_ =
+            (count_digit == 0) ? kNoCount : static_cast<uint32_t>(count_digit);
         message(rx, answer_, answer_len, at);
+        lines_left_ = kNoCount;
         end_line(at);
         prompt(at);
     }

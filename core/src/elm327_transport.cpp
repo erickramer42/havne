@@ -5,7 +5,8 @@
 //          and its refusals, the setup and its refusals (a command
 //          answered by a late reset sent again), the session
 //          info and the readings' "not present", the requests (the count
-//          digit, header switches, the rotation, the probe, the DID scan,
+//          digit, and its loss for a reply that spans frames, header
+//          switches, the rotation, the probe, the DID scan,
 //          identification), multi-frame replies, link health and its
 //          recovery (NO DATA, CAN ERROR, a dropped link, an adapter
 //          reset), the pending reply, passive listening (Listening*:
@@ -128,6 +129,10 @@ struct ecuio_elm327_transport {
     ecuio_request_engine engine;
     bool probe = false;
     bool identify = false;
+    /* The Service 01 PIDs asked with the response-count digit
+     * (elm327_one_frame_pids_for); one whose reply spans frames after
+     * all leaves it */
+    elm327_one_frame_pids one_frame;
     /* Bytes read and not yet taken, the line under way, and the
      * messages under way (32 KB, so here rather than on a stack). */
     uint8_t rx_buf[256] = {};
@@ -698,7 +703,8 @@ void take_frame(transport* t, const elm327_can_line& f, reply_seen& seen,
 
 /* Asks request r of channel c (ADR-0026 §3): its header if another
  * channel's is set, then the request with the response-count digit when
- * one single-frame reply is certain, then the reply to its prompt. */
+ * its reply is taken to fit one Single Frame (elm327_response_count),
+ * then the reply to its prompt. */
 elm327_io ask(transport* t, uint32_t c, int32_t r, reply_seen& seen)
 {
     /* The header switch, the request and its reply go in the wire log
@@ -723,10 +729,11 @@ elm327_io ask(transport* t, uint32_t c, int32_t r, reply_seen& seen)
                                                        : header.io);
     }
     const ecuio_request& q = ecuio_engine_request_of(&e, c, r);
+    const uint8_t count =
+        elm327_response_count(q.bytes, q.len, t->tx_ids[c], t->one_frame);
+    const uint8_t pid = q.bytes[1]; /* the one-shot settles in the reply */
     char cmd[ELM327_CMD_MAX];
-    if (elm327_format_request(q.bytes, q.len,
-                              elm327_response_count(q.bytes[0], t->tx_ids[c]),
-                              cmd, sizeof(cmd)) == 0) {
+    if (elm327_format_request(q.bytes, q.len, count, cmd, sizeof(cmd)) == 0) {
         return unsent(elm327_io::prompt); /* never: 2 or 3 bytes */
     }
     ecuio_engine_sent(&e, c, r, true, now_us(t));
@@ -752,8 +759,16 @@ elm327_io ask(transport* t, uint32_t c, int32_t r, reply_seen& seen)
             break;
         }
     });
-    if (io == elm327_io::prompt) {
-        (void)elm327_isotp_end_reply(t->isotp);
+    if (io == elm327_io::prompt && elm327_isotp_end_reply(t->isotp) > 0 &&
+        count > 0) {
+        /* The digit ended the reply after a First Frame: the PID's reply
+         * spans frames, and this one is lost to the engine's wait. From
+         * now on it goes without the digit */
+        elm327_one_frame_set(t->one_frame, pid, false);
+        elm327_log_write(t->log,
+                         "01 %02X's reply spans frames: asked with no "
+                         "response count from now on",
+                         static_cast<unsigned>(pid));
     }
     return io;
 }
@@ -1303,6 +1318,7 @@ ecuio_status_t elm327_attach(ecuio_session_t* session, const char* uri,
     if (st != ECUIO_OK) {
         return st;
     }
+    elm327_one_frame_pids_for(set, &t->one_frame);
     /* A session that asks nothing listens on its channels (AT MA keeps
      * the receive filter); with none, the whole bus would be raw frames
      * a serial link can't carry, a step of its own */
