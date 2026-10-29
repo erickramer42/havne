@@ -1,7 +1,8 @@
 // File/layer: app/btstream.cpp | Qt6 Core/Bluetooth, app layer, C++17;
 //             built on Android only (QTTUNE_BLUETOOTH)
 // Testing: CI's android-build compiles it; BENCH and Vehicle on the phone
-//          (ADR-0028 §4); the BLE choice is UNIT-tested (blepicker.h)
+//          (ADR-0028 §4, ADR-0029 §5); the BLE choice and the classic
+//          connect's rules are UNIT-tested (blepicker.h, btconnect.h)
 
 #include "btstream.h"
 #include "blepicker.h"
@@ -85,24 +86,28 @@ void BtLink::onClose(void* user)
 
 void BtLink::open()
 {
+    if (m_kind == Kind::Classic) {
+        act(m_classic.open());
+        return;
+    }
     teardown();
     m_opening = true;
-    if (m_kind == Kind::Classic) {
-        openClassic();
-    } else {
-        openLowEnergy();
-    }
+    openLowEnergy();
 }
 
 void BtLink::write(const QByteArray& bytes)
 {
-    if (!m_up) {
-        return; // core sees the failure it was told of
-    }
-    if (m_socket != nullptr) {
-        if (m_socket->write(bytes) != bytes.size()) {
-            fail(tr("the write failed: %1").arg(m_socket->errorString()));
+    if (m_kind == Kind::Classic) {
+        if (!m_classic.up() || m_socket == nullptr) {
+            return; // core sees the failure it was told of
         }
+        if (m_socket->write(bytes) != bytes.size()) {
+            act(m_classic.lost(),
+                tr("the write failed: %1").arg(m_socket->errorString()));
+        }
+        return;
+    }
+    if (!m_up) {
         return;
     }
     if (m_service != nullptr) {
@@ -116,8 +121,61 @@ void BtLink::write(const QByteArray& bytes)
 
 void BtLink::close()
 {
+    if (m_kind == Kind::Classic) {
+        act(m_classic.close());
+        return;
+    }
     m_opening = m_up = false;
     teardown();
+}
+
+void BtLink::act(BtConnectRules::Action action, const QString& why)
+{
+    using Action = BtConnectRules::Action;
+    switch (action) {
+    case Action::None:
+        break;
+    case Action::Connect:
+        dropSocket(); // a finished one, or an open link core reopens
+        openClassic();
+        break;
+    case Action::ReportOpened:
+        ecuio_stream_opened(m_stream);
+        break;
+    case Action::ReportFailed: {
+        dropSocket();
+        const QByteArray why8 = why.toUtf8();
+        ecuio_stream_failed(m_stream, why8.constData());
+        break;
+    }
+    case Action::CloseSocket:
+        dropSocket();
+        break;
+    }
+}
+
+// The socket's connect ended in failure, or the open link dropped
+void BtLink::classicFailed(const QString& why)
+{
+    if (m_classic.connecting()) {
+        const BtConnectRules::Action action = m_classic.connectFailed();
+        dropSocket(); // it has ended: closing it can't wait on anything
+        act(action, why);
+    } else {
+        act(m_classic.lost(), why);
+    }
+}
+
+// Only once its connect has ended: an abort mid-connect waits for Java's
+// connect() anyway, and a second socket would connect beside it
+void BtLink::dropSocket()
+{
+    if (m_socket != nullptr) {
+        m_socket->disconnect(this);
+        m_socket->abort();
+        m_socket->deleteLater();
+        m_socket = nullptr;
+    }
 }
 
 void BtLink::opened()
@@ -145,12 +203,7 @@ void BtLink::fail(const QString& reason)
 // The link's objects go, their signals cut first: one may be emitting
 void BtLink::teardown()
 {
-    if (m_socket != nullptr) {
-        m_socket->disconnect(this);
-        m_socket->abort();
-        m_socket->deleteLater();
-        m_socket = nullptr;
-    }
+    dropSocket();
     if (m_controller != nullptr) {
         for (QLowEnergyService* s : m_services) {
             s->disconnect(this);
@@ -173,10 +226,11 @@ void BtLink::openClassic()
 {
     m_socket =
         new QBluetoothSocket(QBluetoothServiceInfo::RfcommProtocol, this);
-    connect(m_socket, &QBluetoothSocket::connected, this, &BtLink::opened);
+    connect(m_socket, &QBluetoothSocket::connected, this,
+            [this] { act(m_classic.connected()); });
     connect(m_socket, &QBluetoothSocket::readyRead, this, [this] {
         const QByteArray bytes = m_socket->readAll();
-        if (m_up && !bytes.isEmpty()) {
+        if (m_classic.up() && !bytes.isEmpty()) {
             ecuio_stream_received(
                 m_stream, reinterpret_cast<const uint8_t*>(bytes.constData()),
                 static_cast<uint32_t>(bytes.size()));
@@ -184,10 +238,10 @@ void BtLink::openClassic()
     });
     connect(m_socket, &QBluetoothSocket::errorOccurred, this,
             [this](QBluetoothSocket::SocketError) {
-                fail(m_socket->errorString());
+                classicFailed(m_socket->errorString());
             });
     connect(m_socket, &QBluetoothSocket::disconnected, this,
-            [this] { fail(tr("the adapter disconnected")); });
+            [this] { classicFailed(tr("the adapter disconnected")); });
     m_socket->connectToService(
         m_address,
         QBluetoothUuid(QBluetoothUuid::ServiceClassUuid::SerialPort));

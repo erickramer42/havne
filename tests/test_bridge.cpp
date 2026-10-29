@@ -36,6 +36,7 @@
 #include <vector>
 
 #include "blepicker.h"
+#include "btconnect.h"
 #include "qttunebridge.h"   // QtTuneBridge + FrameListModel
 #include <ecuio/profile.h>
 #include <ecuio/serial.h>
@@ -344,6 +345,89 @@ TEST(BridgeTest, BlePickerFindsNothingInAnAdapterWithoutAWay)
 {
     EXPECT_FALSE(pickBleService({}).found());
     EXPECT_FALSE(pickBleService(bleStandardServices()).found());
+}
+
+using BtAction = BtConnectRules::Action;
+
+// The plain path: open, connect, the link up; close takes it down
+TEST(BridgeTest, BtConnectOpensAndClosesALink)
+{
+    BtConnectRules r;
+    EXPECT_EQ(r.open(), BtAction::Connect);
+    EXPECT_TRUE(r.connecting());
+    EXPECT_EQ(r.connected(), BtAction::ReportOpened);
+    EXPECT_TRUE(r.up());
+    EXPECT_EQ(r.close(), BtAction::CloseSocket);
+    EXPECT_FALSE(r.up());
+
+    EXPECT_EQ(r.open(), BtAction::Connect);
+    EXPECT_EQ(r.connectFailed(), BtAction::ReportFailed) << "core hears why";
+    EXPECT_FALSE(r.connecting());
+    EXPECT_FALSE(r.wanted());
+
+    EXPECT_EQ(r.open(), BtAction::Connect);
+    EXPECT_EQ(r.connected(), BtAction::ReportOpened);
+    EXPECT_EQ(r.lost(), BtAction::ReportFailed) << "a dropped link";
+    EXPECT_EQ(r.lost(), BtAction::None) << "told once";
+    EXPECT_EQ(r.close(), BtAction::None) << "core's close after the failure";
+}
+
+// The car run (docs/bench-sessions/2026-10-28-android-8.md): core gave up
+// on an open while its connect still ran, and the next open started a
+// second connect beside it. Now the next open adopts the running one
+TEST(BridgeTest, BtConnectAnOpenAdoptsTheRunningConnect)
+{
+    BtConnectRules r;
+    EXPECT_EQ(r.open(), BtAction::Connect);
+    EXPECT_EQ(r.close(), BtAction::None) << "the connect is left running";
+    EXPECT_TRUE(r.connecting());
+    EXPECT_EQ(r.open(), BtAction::None) << "no second connect";
+    EXPECT_EQ(r.close(), BtAction::None);
+    EXPECT_EQ(r.open(), BtAction::None) << "still one connect";
+    EXPECT_EQ(r.connected(), BtAction::ReportOpened) << "the adopted one opens";
+    EXPECT_TRUE(r.up());
+}
+
+// An abandoned connect that succeeds with no open waiting is closed, and
+// one that fails is dropped quietly: core gave up on it already
+TEST(BridgeTest, BtConnectAnAbandonedConnectEndsQuietly)
+{
+    BtConnectRules r;
+    EXPECT_EQ(r.open(), BtAction::Connect);
+    EXPECT_EQ(r.close(), BtAction::None);
+    EXPECT_EQ(r.connected(), BtAction::CloseSocket);
+    EXPECT_FALSE(r.up());
+    EXPECT_FALSE(r.connecting());
+
+    EXPECT_EQ(r.open(), BtAction::Connect);
+    EXPECT_EQ(r.close(), BtAction::None);
+    EXPECT_EQ(r.connectFailed(), BtAction::None);
+    EXPECT_EQ(r.open(), BtAction::Connect) << "nothing running: a fresh one";
+}
+
+// An adopted connect that fails began for an earlier open: the waiting
+// open gets a connect of its own, and only its failure reaches core
+TEST(BridgeTest, BtConnectAFailedAdoptedConnectStartsAFreshOne)
+{
+    BtConnectRules r;
+    EXPECT_EQ(r.open(), BtAction::Connect);
+    EXPECT_EQ(r.close(), BtAction::None);
+    EXPECT_EQ(r.open(), BtAction::None);
+    EXPECT_EQ(r.connectFailed(), BtAction::Connect);
+    EXPECT_TRUE(r.connecting());
+    EXPECT_EQ(r.connectFailed(), BtAction::ReportFailed);
+    EXPECT_FALSE(r.wanted());
+}
+
+// Results with no connect running are stale: nothing happens
+TEST(BridgeTest, BtConnectIgnoresResultsWithNoConnectRunning)
+{
+    BtConnectRules r;
+    EXPECT_EQ(r.connected(), BtAction::None);
+    EXPECT_EQ(r.connectFailed(), BtAction::None);
+    EXPECT_EQ(r.lost(), BtAction::None);
+    EXPECT_EQ(r.close(), BtAction::None);
+    EXPECT_FALSE(r.up());
 }
 
 TEST(BridgeTest, FramesMarshalFromWorkerToGuiThread)

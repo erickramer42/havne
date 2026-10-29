@@ -21,6 +21,8 @@ qt_standard_project_setup(REQUIRES 6.12)
 qt_add_library(qttune_ui STATIC
     blepicker.cpp
     blepicker.h
+    btconnect.cpp
+    btconnect.h
     bluetoothdevices.cpp
     bluetoothdevices.h
     bridgesingleton.h
@@ -79,6 +81,9 @@ if(ANDROID)
     target_sources(qttune_ui PRIVATE btstream.cpp btstream.h)
     target_link_libraries(qttune_ui PUBLIC Qt6::Bluetooth)
     target_compile_definitions(qttune_ui PUBLIC QTTUNE_BLUETOOTH)
+    # The foreground service held while an adapter session is up
+    # (ADR-0029 §2; its Java half is in android/src)
+    target_sources(qttune_ui PRIVATE androidsession.cpp androidsession.h)
 endif()
 # MSVC's C4702 (unreachable code) fires inside Qt's inline headers, as
 # the generated QML registration code instantiates them; none of it is
@@ -137,6 +142,14 @@ if(ANDROID)
     qt_add_android_permission(qttune NAME android.permission.BLUETOOTH_CONNECT)
     qt_add_android_permission(qttune NAME android.permission.BLUETOOTH_SCAN
         ATTRIBUTES usesPermissionFlags neverForLocation)
+    # The session's foreground service (ADR-0029 §2), type connectedDevice:
+    # its two permissions, CHANGE_NETWORK_STATE so a WiFi adapter's session
+    # qualifies without Bluetooth granted, and its notification
+    qt_add_android_permission(qttune NAME android.permission.FOREGROUND_SERVICE)
+    qt_add_android_permission(qttune
+        NAME android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE)
+    qt_add_android_permission(qttune NAME android.permission.CHANGE_NETWORK_STATE)
+    qt_add_android_permission(qttune NAME android.permission.POST_NOTIFICATIONS)
     set_target_properties(qttune PROPERTIES QT_ANDROID_MIN_SDK_VERSION 31)
 endif()
 

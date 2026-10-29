@@ -28,6 +28,9 @@
 #include <dwmapi.h>
 #endif
 
+#ifdef Q_OS_ANDROID
+#include "androidsession.h"
+#endif
 #include "bluetoothdevices.h"
 #include "bridgesingleton.h"
 #include "qttunebridge.h"
@@ -124,6 +127,10 @@ int main(int argc, char *argv[])
     QtTuneBridge bridge;
     BridgeSingleton::instance = &bridge;
     bluetooth.attachTo(&bridge);
+#ifdef Q_OS_ANDROID
+    // The foreground service while an adapter session is up (ADR-0029 §2)
+    AndroidSession androidSession(&bridge);
+#endif
 
     QQmlApplicationEngine engine;
     engine.loadFromModule("QtTune", "Main");

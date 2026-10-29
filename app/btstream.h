@@ -16,6 +16,7 @@
 
 #include <vector>
 
+#include "btconnect.h"
 #include "ecuio/stream.h"
 
 class QBluetoothSocket;
@@ -27,7 +28,8 @@ class QLowEnergyController;
 // signals) and returns at once, and the link's answers go back as
 // ecuio_stream_opened, _received and _failed. Core's backoff paces the
 // reopens, so the link never retries on its own.
-//   Classic: an RFCOMM socket to the SPP service of a paired adapter.
+//   Classic: an RFCOMM socket to the SPP service of a paired adapter,
+//        one connect at a time (btconnect.h, ADR-0029 §3).
 //   BLE: a GATT connection, its services discovered and the one
 //        pickBleService chooses, notifications on, writes split to the
 //        ATT MTU less 3.
@@ -59,6 +61,10 @@ private:
     void fail(const QString& reason);
     void teardown();
 
+    // Classic: what m_classic's rules say to do, and the socket's end
+    void act(BtConnectRules::Action action, const QString& why = {});
+    void classicFailed(const QString& why);
+    void dropSocket();
     void openClassic();
     void openLowEnergy();
     void servicesFound();
@@ -68,7 +74,9 @@ private:
     Kind m_kind;
     QBluetoothAddress m_address;
     ecuio_stream_t* m_stream = nullptr;
-    // Between open and close: opening until the link is up, then up
+    // Classic: when the socket connects (btconnect.h)
+    BtConnectRules m_classic;
+    // BLE, between open and close: opening until the link is up, then up
     bool m_opening = false;
     bool m_up = false;
 

@@ -129,6 +129,7 @@ if(NOT QTTUNE_BUILD_CORE_ONLY)
         ../app/qttunebridge.cpp
         ../app/sessionrecorder.cpp
         ../app/blepicker.cpp
+        ../app/btconnect.cpp
     )
 
     set_target_properties(test_bridge PROPERTIES AUTOMOC ON)

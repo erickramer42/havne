@@ -414,6 +414,16 @@ jobs:
           grep -n 'android:icon' "$MANIFEST"
           grep -q 'android:icon="@mipmap/ic_launcher"' "$MANIFEST" \
             || { echo "::error::$MANIFEST doesn't name @mipmap/ic_launcher"; exit 1; }
+          # Background sessions (ADR-0029): Qt's GUI loop kept running, and
+          # the foreground service with its permissions
+          grep -A1 'android.app.background_running' "$MANIFEST" | grep -q 'android:value="true"' \
+            || { echo "::error::$MANIFEST doesn't set android.app.background_running to true"; exit 1; }
+          grep -A3 'SessionService' "$MANIFEST" | grep -q 'foregroundServiceType="connectedDevice"' \
+            || { echo "::error::$MANIFEST has no SessionService of type connectedDevice"; exit 1; }
+          for p in FOREGROUND_SERVICE FOREGROUND_SERVICE_CONNECTED_DEVICE CHANGE_NETWORK_STATE POST_NOTIFICATIONS; do
+            grep -q "android.permission.$p\"" "$MANIFEST" \
+              || { echo "::error::$MANIFEST declares no $p permission"; exit 1; }
+          done
 
       # The debug-signed APK, for sideloading onto a phone (ADR-0028 §3).
       # Each run signs with a new debug key, so a phone uninstalls the
