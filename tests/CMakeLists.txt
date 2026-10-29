@@ -95,18 +95,28 @@ endif()
 app_enable_warnings(test_elm327)
 gtest_discover_tests(test_elm327 PROPERTIES TIMEOUT 30)
 
+# --- SocketCAN listening's rules: Qt-free, every platform (UNIT, ADR-0032) ---
+# socketcan_wire.h is internal and portable (the kernel's values mirrored),
+# so its rules test everywhere; the transport on a bus is test_vcan's.
+add_executable(test_socketcan test_socketcan.cpp)
+target_include_directories(test_socketcan PRIVATE ${CMAKE_SOURCE_DIR}/core/src)
+target_link_libraries(test_socketcan PRIVATE ecuio-core GTest::gtest_main)
+app_enable_warnings(test_socketcan)
+gtest_discover_tests(test_socketcan)
+
 # --- The simulated CAN bus: Qt-free, Linux only (SocketCAN) ---
 # test_vcan.cpp: vcan_bus.h's fake ECU through the kernel's ISO-TP and a
 # recording played onto vcan0. Each case skips without the interface;
 # CI's linux-build brings it up and sets ECUIO_VCAN_REQUIRED=1.
+# test_vcan_socketcan.cpp: the SocketCAN transport on that bus
+# (ADR-0032, SocketCanBusTest); it holds the binary's new_counter.h.
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
-    add_executable(test_vcan test_vcan.cpp)
-    target_include_directories(test_vcan PRIVATE ${CMAKE_SOURCE_DIR}/core/include)
+    add_executable(test_vcan test_vcan.cpp test_vcan_socketcan.cpp)
     target_compile_definitions(test_vcan PRIVATE
         ECUIO_REPLAY_FIXTURES="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/replay"
     )
     find_package(Threads REQUIRED)
-    target_link_libraries(test_vcan PRIVATE GTest::gtest_main Threads::Threads)
+    target_link_libraries(test_vcan PRIVATE ecuio-core GTest::gtest_main Threads::Threads)
     app_enable_warnings(test_vcan)
     gtest_discover_tests(test_vcan PROPERTIES TIMEOUT 30)
 endif()

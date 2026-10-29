@@ -22,6 +22,22 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
   with an `end` line. `havne-cli devices` lists the serial ports and
   J2534 adapters a URI can name. On Windows it ships beside
   `havne.exe` in the zip.
+- **SocketCAN, listening, on Linux**
+  ([ADR-0032](docs/adr/0032-socketcan-listening.md)):
+  `socketcan://can0` reads a native CAN interface (a candleLight or
+  CANable adapter, PEAK, Kvaser, a Raspberry Pi's CAN hat) and sends
+  nothing: every frame on the bus, or the IDs `?filter=` names, CAN FD
+  and error frames included, timed by the kernel. Bring the interface
+  up first, at the bus's bit rate and in listen-only mode
+  (`sudo ip link set can0 up type can bitrate 500000 listen-only on`);
+  Havne refuses one that could transmit and says how to fix it.
+  Settings and `havne-cli devices` list the CAN interfaces. Requesting
+  profiles (`obd2`, `uds-generic`) don't run on SocketCAN yet.
+- **A simulated car on a virtual CAN bus:** `havne-cli play mock://demo
+  --to vcan0` puts the simulated car's frames on Linux's `vcan0`, where
+  `socketcan://vcan0?profile=mock` (or any SocketCAN tool) can listen,
+  with no hardware. It writes only to virtual interfaces, never to a
+  real bus.
 
 ## [0.3.3] - 2026-10-29
 

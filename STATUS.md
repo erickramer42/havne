@@ -110,6 +110,17 @@ background too. Next come v0.3.4 and v0.3.5 ([roadmap](#roadmap)).
     refusals; a stop from outside ends it cleanly (SIGINT and SIGTERM
     tested on Linux and macOS, Ctrl+Break on Windows), and so does a
     reader closing the pipe (`| head`).
+  - **SocketCAN, listening** ([ADR-0032](docs/adr/0032-socketcan-listening.md)),
+    on Linux: `socketcan://can0` reads a CAN interface's whole bus (or
+    `?filter=`'s IDs) with the kernel's receive times, CAN FD and error
+    frames included, and sends nothing. Core reads the interface and
+    never configures it: a controller that isn't in listen-only mode is
+    refused, with the `ip link` commands that make it so. Settings and
+    `havne-cli devices` list the interfaces. `havne-cli play mock://demo
+    --to vcan0` drives the simulated car on a virtual bus, so the whole
+    path runs with no hardware: verified on `vcan0` (on CI too); no real
+    controller has run yet (BENCH prep #26). Profiles that request
+    (`obd2`, `uds-generic`) wait for ISO-TP.
   - **Vehicles** ([ADR-0027](docs/adr/0027-vehicle-profiles.md)): a
     named vehicle, picked in Settings before a connect, remembers its
     adapter URI and Live's plotted signals and names its recordings'
@@ -246,7 +257,7 @@ an issue is resolved it is removed, and its number is not reused.
 | v0.3.1 | Request engine, PID-support probe, `uds-generic`, vehicle identification, imperial units; the first Windows download | ✅ Released |
 | v0.3.2 | Record-replay transport, decoding on the transport's thread, every driver in its own process | ✅ Released |
 | v0.3.3 | ELM327 adapters, preferences and vehicles, Android with Bluetooth and background sessions and a signed APK, the rename to Havne | ✅ Released |
-| v0.3.4 | A command-line client over the C ABI; Linux as a supported desktop; a SocketCAN transport that listens | In progress: the CLI built |
+| v0.3.4 | A command-line client over the C ABI; Linux as a supported desktop; a SocketCAN transport that listens | In progress: the CLI and SocketCAN listening built |
 | v0.3.5 | Full OBD-II diagnostics (Services 01–0A, clearing codes); SocketCAN requests through ISO-TP | Planned |
 | v0.4.0 | Python bindings; PCAP export and candump import; ECU, DID and service discovery (needs requests to every ECU and listening to the whole bus first) | Proposed |
 | v0.5.0 | The plugin framework (ADR-0013's profile API), with no manufacturer plugin yet; legacy buses (ISO 9141-2, KWP2000, J1850) | Proposed |
@@ -264,9 +275,11 @@ scheduled. What each holds, past its row:
 - **Linux as a supported desktop:** CI already builds and tests the app
   on Ubuntu, and ELM327 runs over termios; left are runs on the
   distributions and an AppImage.
-- **SocketCAN, listening:** raw frames from a native CAN interface at a
-  set bit rate, listen-only; a simulated ECU on Linux's virtual CAN bus
-  runs it with no car.
+- **SocketCAN, listening:** built
+  ([ADR-0032](docs/adr/0032-socketcan-listening.md)): raw frames from a
+  native CAN interface, listen-only, and `havne-cli play`, a simulated
+  ECU on Linux's virtual CAN bus that runs it with no car. Left: a real
+  controller on the bench and a car (BENCH prep #26).
 
 ### v0.3.5: full OBD-II diagnostics, SocketCAN requests
 
@@ -290,7 +303,11 @@ scheduled. What each holds, past its row:
   resets (the readiness monitors).
 - **SocketCAN requests:** ISO-TP segmentation, which J2534 and ELM327
   adapters do themselves, so the request engine and the profiles run on
-  a native CAN interface. An ADR first.
+  a native CAN interface. An ADR first, which also revisits
+  [ADR-0032](docs/adr/0032-socketcan-listening.md)'s listen-only rule:
+  a session that sends needs the controller in normal mode, so it says
+  when that's allowed and what then guards a car's bus against a wrong
+  bit rate.
 
 ### v0.4.0 and v0.5.0 (proposed)
 

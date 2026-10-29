@@ -292,3 +292,21 @@ roadmap asks of the CLI.
     fixture's 7,074 frames with `--values` at `speed=max` take about
     30 ms in all on the development machine, writing included, so a
     few microseconds a frame against a bus's milliseconds.
+
+## Appendix: 2026-10-29, SocketCAN
+
+[ADR-0032](0032-socketcan-listening.md) grows schema 1 the way §3
+allows, adding without changing anything a reader already reads:
+
+- **`session`:** `backend` takes `"socketcan"`, and `listen_only`
+  (`true`) appears when the interface is a CAN controller in
+  listen-only mode.
+- **`devices`:** a `can` line per CAN interface (Linux): `name`, `kind`
+  (`"can"` or `"vcan"`), `up`, `listen_only`, `fd`, `bitrate` (0 for
+  `vcan`) and `uri` (`"socketcan://can0"`).
+- **A third command, `play <uri> --to <vcan>`** (Linux), writes a
+  session's frames to a virtual CAN interface. Its output: `start`, the
+  source's `session`, a `play` line (`to`, `fd`), and an `end` line
+  whose `frames` is joined by `sent` and `skipped`; no `frame` lines.
+  It ends as `stream` does, and its exit codes are §5's. Elsewhere it
+  is a usage error that says it needs Linux.

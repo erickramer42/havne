@@ -472,7 +472,9 @@ ecuio_status_t ecuio_session_create(
     const bool is_mock = strncmp(transport_uri, "mock://", 7) == 0;
     const bool is_replay = strncmp(transport_uri, "replay://", 9) == 0;
     const bool is_elm327 = strncmp(transport_uri, "elm327://", 9) == 0;
-    if (!is_mock && !is_replay && !is_j2534 && !is_elm327) {
+    const bool is_socketcan = ECUIO_HAVE_SOCKETCAN &&
+                              strncmp(transport_uri, "socketcan://", 12) == 0;
+    if (!is_mock && !is_replay && !is_j2534 && !is_elm327 && !is_socketcan) {
 #ifndef _WIN32
         if (strncmp(transport_uri, "j2534://", 8) == 0) {
             ecuio_detail_set("j2534:// needs Windows, where J2534 adapters "
@@ -480,8 +482,13 @@ ecuio_status_t ecuio_session_create(
             return ECUIO_ERR_NO_TRANSPORT;
         }
 #endif
+        if (strncmp(transport_uri, "socketcan://", 12) == 0) {
+            ecuio_detail_set("socketcan:// needs Linux, where a CAN "
+                             "interface is a network device");
+            return ECUIO_ERR_NO_TRANSPORT;
+        }
         ecuio_detail_set("unsupported URI scheme: expected mock://, "
-                         "replay://, j2534:// or elm327://");
+                         "replay://, j2534://, elm327:// or socketcan://");
         return ECUIO_ERR_NO_TRANSPORT;
     }
 
@@ -489,14 +496,16 @@ ecuio_status_t ecuio_session_create(
      * the scheme's transport reads, before anything attaches: a
      * malformed query or an unknown key fails with no DLL load and no
      * discovery, the same way on every scheme. */
-    const char* scheme = is_mock     ? "mock://"
-                         : is_replay ? "replay://"
-                         : is_elm327 ? "elm327://"
-                                     : "j2534://";
-    const char* const* keys = is_mock     ? ecuio_mock_query_keys
-                              : is_replay ? ecuio_replay_query_keys
-                              : is_elm327 ? ecuio_elm327_query_keys
-                                          : ecuio_j2534_query_keys;
+    const char* scheme = is_mock        ? "mock://"
+                         : is_replay    ? "replay://"
+                         : is_elm327    ? "elm327://"
+                         : is_socketcan ? "socketcan://"
+                                        : "j2534://";
+    const char* const* keys = is_mock        ? ecuio_mock_query_keys
+                              : is_replay    ? ecuio_replay_query_keys
+                              : is_elm327    ? ecuio_elm327_query_keys
+                              : is_socketcan ? ecuio_socketcan_query_keys
+                                             : ecuio_j2534_query_keys;
     const char* rest = transport_uri + strlen(scheme);
     ecuio_uri_query query;
     switch (ecuio_uri::split(ecuio_uri::query_of(rest), &query)) {
@@ -539,9 +548,12 @@ ecuio_status_t ecuio_session_create(
             /* Scheme defaults: mock:// -> mock; j2534:// and elm327://
              * -> obd2 (decode, the Service 01 requests and the declared
              * 7E0/7E8 channel); replay:// -> raw, which can't decode a
-             * recording wrongly (ADR-0023). ?profile=raw gives a
+             * recording wrongly (ADR-0023); socketcan:// -> raw, the
+             * whole bus as it is (ADR-0032). ?profile=raw gives a
              * log-only session. */
-            chosen = is_mock ? "mock" : is_replay ? "raw" : "obd2";
+            chosen = is_mock                    ? "mock"
+                     : is_replay || is_socketcan ? "raw"
+                                                 : "obd2";
             break;
     }
 
@@ -607,6 +619,11 @@ ecuio_status_t ecuio_session_create(
         status = ecuio_replay_transport_attach(s.get(), transport_uri, &query);
     } else if (is_elm327) {
         status = ecuio_elm327_transport_attach(s.get(), transport_uri, &query);
+    } else if (is_socketcan) {
+#if ECUIO_HAVE_SOCKETCAN
+        status = ecuio_socketcan_transport_attach(s.get(), transport_uri,
+                                                  &query);
+#endif
     } else if (is_j2534) {
 #ifdef _WIN32
         status = ecuio_j2534_transport_attach(s.get(), transport_uri, &query);

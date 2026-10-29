@@ -32,6 +32,7 @@
 #include "ecuio/j2534.h"
 #include "ecuio/profile.h"
 #include "ecuio/serial.h"
+#include "ecuio/socketcan.h"
 
 #include <QMetaObject>
 #include <QByteArray>
@@ -656,6 +657,33 @@ QVariantList SessionBridge::discoverSerialPorts() const
         QVariantMap m;
         m["name"] = QString::fromUtf8(ports[i].name);
         m["device"] = QString::fromUtf8(ports[i].device);
+        out.append(m);
+    }
+    return out;
+}
+
+QVariantList SessionBridge::discoverCanInterfaces() const
+{
+    QVariantList out;
+    uint32_t count = 0;
+    if (ecuio_can_interfaces(nullptr, 0, &count) != ECUIO_OK || count == 0) {
+        return out;
+    }
+    /* An interface added between the calls is left for the next refresh */
+    std::vector<ecuio_can_interface_t> list(count);
+    if (ecuio_can_interfaces(list.data(), count, &count) != ECUIO_OK) {
+        return out;
+    }
+    const uint32_t listed =
+        std::min<uint32_t>(count, static_cast<uint32_t>(list.size()));
+    for (uint32_t i = 0; i < listed; ++i) {
+        QVariantMap m;
+        m["name"] = QString::fromLatin1(list[i].name);
+        m["kind"] = QString::fromLatin1(list[i].kind);
+        m["up"] = (list[i].flags & ECUIO_CAN_UP) != 0;
+        m["listenOnly"] = (list[i].flags & ECUIO_CAN_LISTEN_ONLY) != 0;
+        m["fd"] = (list[i].flags & ECUIO_CAN_FD) != 0;
+        m["bitrate"] = list[i].bitrate;
         out.append(m);
     }
     return out;
@@ -2071,6 +2099,16 @@ QString SessionBridge::sessionInfoText(const ecuio_session_info_t& info)
                    .arg(info.replay_frames)
                    .arg(QString::number(info.replay_span_ms / 1000.0, 'f', 1),
                         speed, loop ? QStringLiteral(", looping") : QString()) +
+               profile;
+    }
+    if (info.backend == ECUIO_BACKEND_SOCKETCAN) {
+        // The interface is in the "Connected:" line just before
+        const QString bus =
+            (info.flags & ECUIO_SESSION_INFO_LISTEN_ONLY) != 0
+                ? QStringLiteral("a CAN controller in listen-only mode at %1 bit/s")
+                      .arg(info.baud)
+                : QStringLiteral("a virtual CAN bus");
+        return QStringLiteral("Session: SocketCAN, %1, listening; ").arg(bus) +
                profile;
     }
     const bool elm327 = info.backend == ECUIO_BACKEND_ELM327;

@@ -211,6 +211,7 @@ TestCase {
                              source: "mock://demo", profile: "mock" }]
         page.j2534Devices = []
         page.serialPorts = [{ name: "COM5", device: "" }]
+        page.canInterfaces = []
         for (const name of sections)
             verify(!find(page, name).open, name + " starts folded")
         verify(find(page, "uriField").visible, "the connect bar shows")
@@ -370,6 +371,7 @@ TestCase {
 
         page.j2534Devices = []
         page.serialPorts = []
+        page.canInterfaces = []
         verify(count.text.indexOf("None found") >= 0, "the empty state: " + count.text)
         verify(!list.visible)
 
@@ -409,6 +411,7 @@ TestCase {
         const count = find(page, "deviceCount")
         page.j2534Devices = []
         page.serialPorts = []
+        page.canInterfaces = []
         page.bluetoothAdapters = [
             { name: "OBDLink MX+", address: "00:11:22:33:44:55", kind: "bt" },
             { name: "", address: "AA:BB:CC:DD:EE:FF", kind: "ble" }]
@@ -437,6 +440,47 @@ TestCase {
         compare(list.itemAtIndex(1).border.width, 0)
     }
 
+    // A machine's CAN interfaces join the list after the ports (ADR-0032
+    // §7): a row fills socketcan://<name>, and its line says why core
+    // would refuse it before a connect is tried. Only Linux lists any, so
+    // the test sets them
+    function test_canRowsFillASocketcanUri() {
+        const page = createPage()
+        const uri = find(page, "uriField")
+        const list = find(page, "deviceList")
+        const count = find(page, "deviceCount")
+        page.j2534Devices = []
+        page.serialPorts = []
+        page.canInterfaces = [
+            { name: "vcan0", kind: "vcan", up: true, listenOnly: false, fd: true, bitrate: 0 },
+            { name: "can0", kind: "can", up: true, listenOnly: false, fd: false, bitrate: 500000 },
+            { name: "can1", kind: "can", up: true, listenOnly: true, fd: false, bitrate: 500000 }]
+        compare(list.count, 3)
+        verify(count.text.indexOf("CAN interfaces: 3") >= 0, count.text)
+        tryVerify(() => list.itemAtIndex(2) !== null, 2000, "the rows have delegates")
+        compare(find(list.itemAtIndex(0), "deviceTitle").text, "vcan0")
+        compare(find(list.itemAtIndex(0), "deviceDetail").text,
+                "Virtual CAN bus, for socketcan://")
+        compare(find(list.itemAtIndex(1), "deviceDetail").text,
+                "CAN interface, not listen-only: socketcan:// refuses it until it is")
+        compare(find(list.itemAtIndex(2), "deviceDetail").text,
+                "CAN interface, listen-only at 500000 bit/s, for socketcan://")
+        compare(page.canDetail({ name: "vcan1", kind: "vcan", up: false }),
+                "Virtual CAN bus, down: sudo ip link set vcan1 up")
+        compare(page.canDetail({ name: "can2", kind: "can", up: false }),
+                "CAN interface, down: bring it up listen-only with ip link")
+
+        // SocketCAN only listens: uds-generic gives way to the default
+        uri.text = "j2534://?profile=uds-generic&did=1E1C:u16"
+        compare(page.profileChoice, "uds-generic")
+        mouseClick(find(list.itemAtIndex(0), "deviceRowArea"))
+        compare(uri.text, "socketcan://vcan0")
+        compare(page.profileChoice, "default")
+        press(page, "profile_raw")
+        mouseClick(find(list.itemAtIndex(2), "deviceRowArea"))
+        compare(uri.text, "socketcan://can1?profile=raw", "the row's base, the query kept")
+    }
+
     // On a phone the field and Connect are scrolled out of view by the
     // time a device row is reached: picking one brings them back, so the
     // pick doesn't seem to do nothing (docs/bench-sessions/2026-10-28-android-7.md)
@@ -446,6 +490,7 @@ TestCase {
         page.height = 400
         page.j2534Devices = []
         page.serialPorts = []
+        page.canInterfaces = []
         page.bluetoothAdapters = [{ name: "OBDLink MX+", address: "00:11:22:33:44:55", kind: "bt" }]
         const flick = find(page, "settingsFlick")
         const list = find(page, "deviceList")
