@@ -161,8 +161,11 @@ private:
         error = errno;
         closed = errno == EPIPE;
 #ifdef _WIN32
-        // The CRT reports a pipe whose reader has gone as EINVAL too
-        closed = closed || errno == EINVAL;
+        // A pipe whose reader has gone fails WriteFile with ERROR_NO_DATA
+        // (Git Bash's head, PowerShell's Select-Object -First), which the
+        // CRT reports as EINVAL; ERROR_BROKEN_PIPE is EPIPE already
+        const DWORD last = GetLastError();
+        closed = closed || last == ERROR_NO_DATA || last == ERROR_BROKEN_PIPE;
 #endif
     }
 };

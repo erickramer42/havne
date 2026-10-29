@@ -69,7 +69,10 @@ havne-cli --version | --help
   comes first.
 - **`devices`** lists what a URI can name: the serial ports
   (`ecuio_serial_ports`) and, on Windows, the J2534 adapters
-  (`ecuio_j2534_discover_devices`). It opens nothing.
+  (`ecuio_j2534_discover_devices`). It opens nothing. Its output is
+  schema 1 too (§3): `start`, then a `port` or `j2534` line per device;
+  no `end` line, since a list has no stream to end, and exit 0 says it
+  is whole.
 
 The CLI adds no request of its own. A session asks what its profile
 and URI make it ask, as in the app, and core's request path is
@@ -77,9 +80,12 @@ read-only by construction (ADR-0015).
 
 ### 3. The output: JSON lines, schema 1
 
-Standard output holds only JSON lines: one object per line, UTF-8,
-`\n` line ends on every platform. Every object has `"type"`. Messages
-for a person go to standard error.
+Standard output holds only JSON lines, for both commands: one object
+per line, UTF-8, `\n` line ends on every platform. Every object has
+`"type"`. Messages for a person go to standard error, the usage text
+after a usage error included, so a usage error writes nothing to
+standard output. The exceptions are `--help` and `--version`: asked
+for, they print plain text there.
 
 | `type` | When | Fields |
 |---|---|---|
@@ -89,15 +95,18 @@ for a person go to standard error.
 | `frame` | each frame | `t_us`, `id` (`"0x7E8"`), `ch`, `flags`, `data` (hex pairs, `"41 0C 1A F8"`, as `frames.csv` writes them) |
 | `values` | with `--values`, each batch, after its frame | `t_us`, `id`, `values`: `[{"id":1,"value":2512.5}]`, or `"text"` for the text kinds |
 | `health` | when the link state or its episode count changes | `code`, `message` (`ecuio_status_string`), `episodes` |
-| `dropped` | before the next line, after lines were lost | `frames`, `values` |
-| `end` | last | `reason` (`"interrupted"`, `"count"`, `"seconds"`, `"replay-end"`), `frames` (written or dropped; with `--count`, at most `N`), `dropped_frames`, `dropped_values` |
+| `dropped` | directly before the first line that got into the ring after lines were lost (§4) | `frames`, `values`: the lines lost since the last report |
+| `end` | last | `reason` (`"interrupted"`, `"count"`, `"seconds"`, `"replay-end"`), `frames` (written or dropped; with `--count`, at most `N`), `dropped_frames`, `dropped_values`: the stream's totals |
 | `error` | instead of `session`, when the connect fails | `code`, `message`, `detail` (`ecuio_last_error_detail`) |
+| `port` | `devices`: each serial port | `name`, `device` (Windows' driver device, else `""`), `uri` (`"elm327://COM5"`) |
+| `j2534` | `devices`, Windows: each installed adapter | `name`, `dll`, `arch` (`"x86"`, `"x64"`, `"unknown"`), `uri` (`"j2534://<name>"`) |
 
 - **Numbers** read back as the same double: 15 significant digits
   when they do, which is most values and the short form of a reading
   with a few decimals (`2512.5`), else 16 or 17. A NaN or an infinity
-  is `null`, which JSON has in their place. Values are core's, in its units (metric); conversion stays a
-  front end's choice (ADR-0022) and isn't in the skeleton.
+  is `null`, which JSON has in their place. Values are core's, in its
+  units (metric); conversion stays a front end's choice (ADR-0022)
+  and isn't in the skeleton.
 - **Identifiers and data** are text, in the forms `frames.csv` and
   the activity log use, so a line and a recording's row can be
   compared by eye.
@@ -117,13 +126,33 @@ Nothing on the worker allocates, writes to a file or waits on output.
 Frame and values lines share the ring, so they come out in dispatch
 order: a frame, then its values (ADR-0024).
 
-When the ring is full a live session's line is dropped and counted,
-and `dropped` reports the count before the next line written; a slow
-terminal costs lines, never the session's timing. A replay waits for
-room instead: a recording has no bus to fall behind, and its output is
-then complete at any speed, `speed=max` included, which the tests and
-batch processing need. The wait ends when the CLI stops, so close never
-waits on a full ring.
+**The ring** is 1 MiB of text, and a line at most 32 KiB (the line
+buffer). A frame line with a classic CAN payload is 85 to 95 bytes,
+and an `obd2` values line about 90 (measured over the replay fixture:
+83 and 88 on average; a mock batch of nine values, about 310), so the
+ring holds some 6,000 frames with `--values` (11,000 without): about
+1.5 s of a fully loaded
+500 kbit/s bus (some 4,000 frames a second) with the output stalled,
+and minutes of a request-paced session (26 to 36 replies a second on
+the car). Sized for a terminal that stalls briefly; a reader that
+can't keep up for long loses lines, by design.
+
+When the ring is full a live session's line is dropped and counted; a
+slow terminal costs lines, never the session's timing. The worker
+writes the report: the next push that finds room for both its line and
+a `dropped` line puts the `dropped` line in first, under the same lock,
+so the report sits directly before that line and is never itself
+dropped. A push without room for both is dropped too and adds to the
+count. Lines lost after the last line that got in (at the end, or when
+the output closed) have no `dropped` line; the `end` line's totals
+count every drop, and are the ones to trust.
+
+A replay waits for room instead: a recording has no bus to fall
+behind, and its output is then complete at any speed, `speed=max`
+included, which the tests and batch processing need. The main thread
+keeps draining while the session closes, so a waiting push always
+completes; the waits end early only when the output has failed and
+nothing drains the ring any more.
 
 A line longer than the line buffer (a text value near
 `ECUIO_DECODE_TEXT_MAX`) carries its text cut short and `"cut":true`.
@@ -136,8 +165,20 @@ while close joins the worker (a replay's last push may be waiting for
 room), then writes what is left and the `end` line, destroys the
 session and exits. A closed standard output (`havne-cli stream … |
 head`) ends the stream the same way, with no message and no `end`
-line: SIGPIPE is ignored, the failed write (`EPIPE`) is the end, and
-the ring stops its waits, since nothing drains it any more.
+line, and the ring stops its waits, since nothing drains it any more.
+How a closed pipe shows differs by platform:
+
+- **POSIX:** SIGPIPE is ignored, so the write fails with `EPIPE`.
+- **Windows:** `WriteFile` to a pipe whose reader has gone fails with
+  `ERROR_NO_DATA`, which the CRT reports as `EINVAL`, not `EPIPE`, so
+  the CLI reads `GetLastError()` after the failed write and takes
+  `ERROR_NO_DATA` and `ERROR_BROKEN_PIPE` as closed (measured
+  2026-10-29: Git Bash's `| head -1` and PowerShell's
+  `| Select-Object -First 2`, both `ERROR_NO_DATA`, both exit 0 with
+  nothing on standard error). Any other failure is an error (exit 1).
+
+A pipe still open whose reader stops reading isn't closed: the writes
+block, the ring fills and a live session drops lines, as above.
 
 | Exit | Meaning |
 |---|---|
