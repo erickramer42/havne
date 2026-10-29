@@ -35,6 +35,7 @@
 #endif
 #include "bluetoothdevices.h"
 #include "bridgesingleton.h"
+#include "carryover.h"
 #include "qttunebridge.h"
 #include "ecuio/version.h"
 
@@ -152,6 +153,11 @@ int main(int argc, char *argv[])
         QSettings::setDefaultFormat(QSettings::IniFormat);
         QSettings::setPath(QSettings::IniFormat, QSettings::UserScope, settingsDir);
     }
+    // The earlier product name's preferences, copied once into an empty
+    // store before anything reads it (ADR-0001's appendix of 2026-10-28)
+    const int carriedOver =
+        carryOverSettings(earlierProductName(), earlierProductName(),
+                          app.organizationName(), app.applicationName());
 
     QQuickStyle::setStyle("Basic");
 
@@ -175,6 +181,12 @@ int main(int argc, char *argv[])
     if (engine.rootObjects().isEmpty()) {
         qCritical("=== QML FAILED TO LOAD ===");
         return -1;
+    }
+    if (carriedOver > 0) {
+        bridge.logEvent(
+            QStringLiteral("Preferences carried over from %1: %2 settings")
+                .arg(earlierProductName())
+                .arg(carriedOver));
     }
 #ifdef Q_OS_ANDROID
     darkenAndroidWindow();

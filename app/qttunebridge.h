@@ -390,7 +390,9 @@ public:
     // source, profile } as QStrings. title is the folder's date and
     // label ("2026-10-28 14:30:12 · Daily driver"), uri its replay://
     // URI (replayUriFor), source the recorded URI as the pill shows it
-    // (uriLabelFor), "" when events.log doesn't name one. A directory
+    // (uriLabelFor), "" when events.log doesn't name one. Reads the
+    // earlier product name's folder too, when it's another (ADR-0001's
+    // appendix of 2026-10-28), newest first across both. A directory
     // listing and one short read per folder.
     Q_INVOKABLE QVariantList recentRecordings(int limit) const;
     // A recording's replay:// URI, decoding under the profile it was
@@ -435,6 +437,12 @@ public:
     Q_INVOKABLE QString displayUnit(const QString& unit) const;
     // Test seam: where recordings go instead of Documents/QtTune/recordings
     void setRecordingsRootForTesting(const QString& root) { m_recordingsRoot = root; }
+    // Test seam: the earlier name's recordings, instead of
+    // Documents/<earlierProductName()>/recordings
+    void setEarlierRecordingsRootForTesting(const QString& root)
+    {
+        m_earlierRecordingsRoot = root;
+    }
     // Before every connect, on the GUI thread: readies the link an app-fed
     // stream stands behind (ADR-0028; main() hands it the Bluetooth
     // singleton's prepare) and returns why it can't, "" when it can or
@@ -507,6 +515,10 @@ private:
     // Where recordings go: the test root, else Documents/QtTune/recordings;
     // "" with no Documents folder
     QString recordingsRoot() const;
+    // The earlier product name's recordings, read but never written: the
+    // test root, else Documents/<earlierProductName()>/recordings; "" when
+    // that's recordingsRoot() itself or there's no Documents folder
+    QString earlierRecordingsRoot() const;
     void startRecording(const QString& uri, const ecuio_signal_set_t* set);
     void stopRecording(const QString& why);
     QString recordingSummary(const QString& why) const;
@@ -643,6 +655,7 @@ private:
     bool m_recording = false;
     SessionRecorder m_recorder;
     QString m_recordingsRoot;          // empty: Documents/QtTune/recordings
+    QString m_earlierRecordingsRoot;   // empty: the earlier name's folder
     bool m_recordReplays = false;      // tests only
     bool m_setFrameLogging = false;    // the bridge, not the launch, set ECUIO_SUR_LOG_FRAMES
     std::function<QString(const QString&)>

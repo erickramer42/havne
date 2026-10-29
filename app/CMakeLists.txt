@@ -26,6 +26,8 @@ qt_add_library(qttune_ui STATIC
     bluetoothdevices.cpp
     bluetoothdevices.h
     bridgesingleton.h
+    carryover.cpp
+    carryover.h
     qttunebridge.cpp
     qttunebridge.h
     latencystats.h

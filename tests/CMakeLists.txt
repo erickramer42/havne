@@ -130,6 +130,7 @@ if(NOT QTTUNE_BUILD_CORE_ONLY)
         ../app/sessionrecorder.cpp
         ../app/blepicker.cpp
         ../app/btconnect.cpp
+        ../app/carryover.cpp
     )
 
     set_target_properties(test_bridge PROPERTIES AUTOMOC ON)
@@ -170,6 +171,7 @@ if(NOT QTTUNE_BUILD_CORE_ONLY)
         bench_bridge.cpp
         ../app/qttunebridge.cpp
         ../app/sessionrecorder.cpp
+        ../app/carryover.cpp
     )
     set_target_properties(bench_bridge PROPERTIES AUTOMOC ON)
     qttune_enable_warnings(bench_bridge)

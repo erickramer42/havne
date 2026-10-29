@@ -25,6 +25,7 @@
 //          rendering: manual smoke.
 
 #include "qttunebridge.h"
+#include "carryover.h"
 #include "ecuio/version.h"
 #include "ecuio/signals.h"
 #include "ecuio/j2534.h"
@@ -706,16 +707,25 @@ QString QtTuneBridge::replayUriFor(const QString& folder,
 QVariantList QtTuneBridge::recentRecordings(int limit) const
 {
     QVariantList out;
-    const QString root = recordingsRoot();
-    if (root.isEmpty() || limit <= 0)
+    if (limit <= 0)
         return out;
     // "<yyyyMMdd-HHmmss>[-n][ <label>]" (SessionRecorder::start): by name,
     // last first, is newest first
     static const QRegularExpression kName(
         QStringLiteral("^(\\d{4})(\\d{2})(\\d{2})-(\\d{2})(\\d{2})(\\d{2})(?:-"
                        "\\d+)?(?: (.+))?$"));
-    const QFileInfoList folders = QDir(root).entryInfoList(
-        QDir::Dirs | QDir::NoDotAndDotDot, QDir::Name | QDir::Reversed);
+    // Both roots' folders, newest first across them (the names start with
+    // the stamp)
+    QFileInfoList folders;
+    for (const QString& root : {recordingsRoot(), earlierRecordingsRoot()}) {
+        if (!root.isEmpty())
+            folders +=
+                QDir(root).entryInfoList(QDir::Dirs | QDir::NoDotAndDotDot);
+    }
+    std::sort(folders.begin(), folders.end(),
+              [](const QFileInfo& a, const QFileInfo& b) {
+                  return a.fileName() > b.fileName();
+              });
     for (const QFileInfo& info : folders) {
         if (out.size() >= limit)
             break;
@@ -1129,6 +1139,19 @@ QString QtTuneBridge::recordingsRoot() const
         QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation);
     return docs.isEmpty() ? QString()
                           : docs + QStringLiteral("/QtTune/recordings");
+}
+
+QString QtTuneBridge::earlierRecordingsRoot() const
+{
+    if (!m_earlierRecordingsRoot.isEmpty())
+        return m_earlierRecordingsRoot;
+    if (!m_recordingsRoot.isEmpty())
+        return QString(); // a test's own root: Documents is never read
+    const QString docs =
+        QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation);
+    const QString root = docs + QLatin1Char('/') + earlierProductName() +
+                         QStringLiteral("/recordings");
+    return docs.isEmpty() || root == recordingsRoot() ? QString() : root;
 }
 
 void QtTuneBridge::startRecording(const QString& uri, const ecuio_signal_set_t* set)

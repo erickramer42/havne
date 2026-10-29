@@ -18,6 +18,7 @@
 #include <QFileInfo>
 #include <QHash>
 #include <QRegularExpression>
+#include <QSettings>
 #include <QStringList>
 #include <QTemporaryDir>
 #include <QTimer>
@@ -37,6 +38,7 @@
 
 #include "blepicker.h"
 #include "btconnect.h"
+#include "carryover.h"
 #include "qttunebridge.h"   // QtTuneBridge + FrameListModel
 #include <ecuio/profile.h>
 #include <ecuio/serial.h>
@@ -3202,6 +3204,127 @@ TEST(BridgeTest, AReplayIsNotRecorded)
 }
 
 /* The list's URI connects as it stands, uds-generic's DIDs and all */
+// ---- What the product's earlier name left (ADR-0001's appendix of
+// 2026-10-28): its preferences copied once, its recordings read --------
+
+namespace {
+
+// QSettings' default format and the user scope's ini path, pointed at a
+// scratch directory for one test, then back to the native format
+struct ScratchSettings {
+    QTemporaryDir dir;
+    ScratchSettings()
+    {
+        QSettings::setDefaultFormat(QSettings::IniFormat);
+        QSettings::setPath(QSettings::IniFormat, QSettings::UserScope,
+                           dir.path());
+    }
+    ~ScratchSettings() { QSettings::setDefaultFormat(QSettings::NativeFormat); }
+};
+
+QVariant storedValue(const char* org, const char* app, const char* key)
+{
+    QSettings store(QSettings::IniFormat, QSettings::UserScope,
+                    QString::fromUtf8(org), QString::fromUtf8(app));
+    return store.value(QString::fromUtf8(key));
+}
+
+void storeValue(const char* org, const char* app, const char* key,
+                const QVariant& value)
+{
+    QSettings store(QSettings::IniFormat, QSettings::UserScope,
+                    QString::fromUtf8(org), QString::fromUtf8(app));
+    store.setValue(QString::fromUtf8(key), value);
+}
+
+} // namespace
+
+TEST(BridgeTest, CarryOverCopiesTheEarlierPreferencesOnce)
+{
+    ScratchSettings scratch;
+    ASSERT_TRUE(scratch.dir.isValid());
+    storeValue("Old", "Old", "ui/zoom", 1.25);
+    storeValue("Old", "Old", "session/uri", QStringLiteral("mock://demo"));
+    storeValue("Old", "Old", "vehicles/document", QStringLiteral("{\"list\":[]}"));
+
+    EXPECT_EQ(carryOverSettings(QStringLiteral("Old"), QStringLiteral("Old"),
+                                QStringLiteral("New"), QStringLiteral("New")),
+              3);
+    EXPECT_EQ(storedValue("New", "New", "ui/zoom").toDouble(), 1.25);
+    EXPECT_EQ(storedValue("New", "New", "session/uri").toString(),
+              QStringLiteral("mock://demo"));
+    EXPECT_EQ(storedValue("New", "New", "vehicles/document").toString(),
+              QStringLiteral("{\"list\":[]}"));
+
+    // Once: a later change to the earlier store isn't copied again
+    storeValue("Old", "Old", "ui/zoom", 2.0);
+    EXPECT_EQ(carryOverSettings(QStringLiteral("Old"), QStringLiteral("Old"),
+                                QStringLiteral("New"), QStringLiteral("New")),
+              0);
+    EXPECT_EQ(storedValue("New", "New", "ui/zoom").toDouble(), 1.25);
+    // and the earlier store is left as it was, for an older build
+    EXPECT_EQ(storedValue("Old", "Old", "session/uri").toString(),
+              QStringLiteral("mock://demo"));
+}
+
+TEST(BridgeTest, CarryOverNeverWritesOverAStoreThatHasPreferences)
+{
+    ScratchSettings scratch;
+    ASSERT_TRUE(scratch.dir.isValid());
+    storeValue("Old", "Old", "ui/zoom", 1.25);
+    storeValue("Old", "Old", "session/uri", QStringLiteral("mock://demo"));
+    storeValue("New", "New", "ui/zoom", 1.5);
+
+    EXPECT_EQ(carryOverSettings(QStringLiteral("Old"), QStringLiteral("Old"),
+                                QStringLiteral("New"), QStringLiteral("New")),
+              0);
+    EXPECT_EQ(storedValue("New", "New", "ui/zoom").toDouble(), 1.5);
+    EXPECT_FALSE(storedValue("New", "New", "session/uri").isValid());
+
+    // The same name, or nothing to carry: nothing happens
+    EXPECT_EQ(carryOverSettings(QStringLiteral("Old"), QStringLiteral("Old"),
+                                QStringLiteral("Old"), QStringLiteral("Old")),
+              0);
+    EXPECT_EQ(carryOverSettings(QStringLiteral("None"), QStringLiteral("None"),
+                                QStringLiteral("Empty"), QStringLiteral("Empty")),
+              0);
+}
+
+TEST(BridgeTest, RecentRecordingsReadTheEarlierNamesFolderToo)
+{
+    QTemporaryDir current;
+    QTemporaryDir earlier;
+    ASSERT_TRUE(current.isValid());
+    ASSERT_TRUE(earlier.isValid());
+    const auto make = [](const QTemporaryDir& root, const char* name) {
+        const QString dir =
+            root.path() + QLatin1Char('/') + QString::fromUtf8(name);
+        ASSERT_TRUE(QDir().mkpath(dir));
+        QFile frames(dir + QStringLiteral("/frames.csv"));
+        ASSERT_TRUE(frames.open(QIODevice::WriteOnly));
+    };
+    make(current, "20261029-090000");
+    make(earlier, "20261028-100000");
+    make(earlier, "20261030-080000 Weekend car");
+
+    QtTuneBridge bridge;
+    bridge.setRecordingsRootForTesting(current.path());
+    bridge.setEarlierRecordingsRootForTesting(earlier.path());
+    const QVariantList rows = bridge.recentRecordings(10);
+    ASSERT_EQ(rows.size(), 3) << "both folders are read";
+    const auto uri = [&rows](int i) {
+        return rows.at(i).toMap().value(QStringLiteral("uri")).toString().toStdString();
+    };
+    // Newest first across the two, each replaying from its own folder
+    EXPECT_EQ(uri(0), "replay://" + earlier.path().toStdString() +
+                          "/20261030-080000 Weekend car?profile=raw");
+    EXPECT_EQ(uri(1), "replay://" + current.path().toStdString() +
+                          "/20261029-090000?profile=raw");
+    EXPECT_EQ(uri(2), "replay://" + earlier.path().toStdString() +
+                          "/20261028-100000?profile=raw");
+    EXPECT_EQ(bridge.recentRecordings(2).size(), 2) << "the limit spans both";
+}
+
 TEST(BridgeTest, RecentRecordingsReplayUnderTheirOwnProfile)
 {
     QTemporaryDir first, second;
