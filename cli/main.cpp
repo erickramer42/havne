@@ -63,11 +63,11 @@ size_t ring_bytes()
         return kRingBytes;
     }
 #else
-    const char* v = std::getenv("HAVNE_CLI_RING_BYTES");
-    if (!v || std::strlen(v) >= sizeof env) {
+    const char* value = std::getenv("HAVNE_CLI_RING_BYTES");
+    if (!value || std::strlen(value) >= sizeof env) {
         return kRingBytes;
     }
-    std::memcpy(env, v, std::strlen(v));
+    std::memcpy(env, value, std::strlen(value));
 #endif
     if (!*env) {
         return kRingBytes;
