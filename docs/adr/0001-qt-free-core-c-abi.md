@@ -85,3 +85,56 @@ break the ABI again. Each scope has its own name:
 
 The engineering log, filled-in bench sheets and earlier ADR
 appendices keep the old names as written.
+
+## Appendix — the product's name (2026-10-28)
+
+The product is renamed **Havne** (Danish "harbors"): QtTune overlaps the
+Qt Company's trademark. Trademark searches (2026-10-28) found no other
+mark named Havne: none at the USPTO, and at the EUIPO only
+HAVNEMØLLERNE, a flour brand registered for foods (Nice classes 30 and
+31), not software (classes 9 and 42). The Norwegian sense (*å havne*,
+"to end up", as in *havne i grøfta*, "end up in the ditch") was
+weighed and accepted. It lands before code signing, since the
+certificate carries the name, and before any Android release, since the
+package id is permanent.
+
+The appendix of 2026-10-22 gave the app side the product's name. That
+narrows: **the product's name goes only where a user sees it**, and
+the app's internal names become neutral, so a later rename touches
+only those places. The core keeps `ecuio`.
+
+| Scope | Old | New |
+|---|---|---|
+| Seen by users | `qttune` executable and target, `qttune.app`; the window title, About, the notification | `havne`, Havne |
+| | Release zip `qttune-<version>-windows-x64.zip`, the version resource's "QtTune <X.Y.Z>" | `havne-<version>-windows-x64.zip`, "Havne <X.Y.Z>" |
+| | QSettings organization and application, `Documents/QtTune/recordings` | Havne, Havne; `Documents/Havne/recordings` |
+| | Android `org.qtproject.example.qttune`, version name `1.0` | `io.github.erickramer42.havne` (the reverse of the project's GitHub Pages address, `erickramer42.github.io`); the version name from `project(VERSION)`, the version code `major * 10000 + minor * 100 + patch` |
+| | Build options and variables a builder types: `QTTUNE_BUILD_CORE_ONLY`, `QTTUNE_SETTINGS_DIR`, `project(QtTune …)` | `HAVNE_BUILD_CORE_ONLY` (the old one honored for one release, with a warning), `HAVNE_SETTINGS_DIR`, `project(Havne …)` |
+| | The repository, `qttune` | `havne` (GitHub redirects the old URL) |
+| Internal | QML module `QtTune` (`QtTunePlugin`), `QtTuneBridge` (`qttunebridge.{h,cpp}`), `qttune_ui`, `qttune_uiplugin` | `App` (`AppPlugin`), `SessionBridge` (`sessionbridge.{h,cpp}`), `app_ui`, `app_uiplugin` |
+| | CMake functions and variables (`qttune_enable_warnings`, `qttune_add_version_resource`, `qttune_deploy_surrogate`, `_qttune_*`), compile definitions (`QTTUNE_BLUETOOTH`, `QTTUNE_RC_*`, …), `packaging/icons/qttune*.svg` | `app_*`, `APP_*`, `packaging/icons/app*.svg` |
+| Core | `ecuio_*`, `ecuio-core`, `ecuio-j2534-surrogate`, `ECUIO_*` | unchanged |
+
+The user's data comes along:
+
+- **Preferences are copied once, on the desktop.** Before the first
+  `QSettings` read, if the new store holds no keys and the old one
+  does, every key is copied, and the activity log says so. The old store
+  stays as it was, so an older build still finds its own; moving it
+  would strand that build. The vehicles' salted VIN hashes (ADR-0027)
+  travel with it; without the copy each car would need reconnecting.
+- **Recordings stay where they are.** New ones go to the new folder; the
+  recent list and replay read both, newest first. Moving a user's files
+  could fail halfway or meet a folder in use.
+- **Android starts fresh.** A new package is a new app, and Android
+  keeps each app's files private, so the new one can't read the old
+  one's. The run sheet's install step backs up the old app's recordings
+  with `adb` and leaves it to be removed by hand. No Android release has
+  shipped, so only the test phone has the old app.
+
+The migration lands first, with the old and new names still equal, so
+it changes nothing until the rename and its tests stand on their own.
+The rename is then one mechanical change (files moved first, then
+CMake, types, the QML module and the text), CI and the release workflow
+included; afterwards the old name appears only in the records, which
+keep it, as in the earlier appendices.
