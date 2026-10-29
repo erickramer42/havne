@@ -102,7 +102,14 @@ verify=$("$APKSIGNER" verify --verbose --print-certs "$out" | tr -d '\r') \
 grep -qx "Verified using v3 scheme (APK Signature Scheme v3): true" <<< "$verify" \
     || die "$out doesn't verify with APK Signature Scheme v3"
 grep -qx "Number of signers: 1" <<< "$verify" || die "$out hasn't exactly one signer"
-got=$(sed -n "s/^Signer #1 certificate SHA-256 digest: //p" <<< "$verify")
-[ "$got" = "$expected" ] || die "$out is signed by certificate $got, not the release key's $expected"
+# Every certificate digest apksigner prints, whatever it calls the
+# signer ("Signer #1", or by SDK range in newer build-tools), as
+# lowercase hex: one certificate, and the pinned one
+certs=$(grep -i "certificate SHA-256 digest:" <<< "$verify" || true)
+got=$(sed -n 's/.*[Cc]ertificate SHA-256 digest: *//p' <<< "$certs" | tr -d ': ' | tr 'A-F' 'a-f' | sort -u)
+if [ "$got" != "$expected" ]; then
+    echo "$certs" >&2
+    die "$out is signed by certificate '${got//$'\n'/, }', not the release key's $expected"
+fi
 "$ZIPALIGN" -c -P 16 4 "$out" > /dev/null || die "$out isn't aligned"
 echo "ok    $out: v3 signed by $got, aligned"
