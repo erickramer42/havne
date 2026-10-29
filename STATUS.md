@@ -102,6 +102,13 @@ background too. Next come v0.3.4 and v0.3.5 ([roadmap](#roadmap)).
     connected, the Record sessions switch and each device's versions as
     last seen at a connect (shown on its row in Settings, since the list
     opens no adapter), kept between runs.
+  - **`havne-cli`** ([ADR-0031](docs/adr/0031-command-line-client.md)),
+    on every desktop platform: a session's frames, and with `--values`
+    its decoded values, as JSON lines on standard output, through the
+    public headers alone. Golden runs pin its output: the replay
+    fixture through `obd2` frame for frame, the mock's cycle and the
+    refusals; Ctrl+C ends it cleanly (SIGINT and SIGTERM tested on
+    Linux and macOS, Windows' console events by hand).
   - **Vehicles** ([ADR-0027](docs/adr/0027-vehicle-profiles.md)): a
     named vehicle, picked in Settings before a connect, remembers its
     adapter URI and Live's plotted signals and names its recordings'
@@ -205,8 +212,10 @@ an issue is resolved it is removed, and its number is not reused.
    thread's cost per frame no longer depends on it
    ([docs/testing.md](docs/testing.md#performance)). A per-signal enable
    mask can trim it if a CAN FD rate makes it matter.
-6. **The session API is single-caller by contract.** The bridge is the
-   only caller.
+6. **The session API is single-caller by contract.** Each session has
+   one caller: the bridge in the app, `havne-cli` in its own process
+   ([ADR-0031](docs/adr/0031-command-line-client.md)). Two front ends
+   sharing one session would need more.
 13. **The picker treats one registry entry as one device.** Multiple
     adapters behind one vendor DLL can't be told apart. They would be
     selected through `PassThruOpen`'s `pName` argument, which the
@@ -247,9 +256,10 @@ scheduled. What each holds, past its row:
 
 ### v0.3.4: a command-line client, Linux, SocketCAN listening
 
-- **`havne-cli`:** a client over the Qt-free core that starts a
-  session, streams frames as JSON lines and exits cleanly, with tests
-  that hold the C ABI to its promises.
+- **`havne-cli`:** built ([ADR-0031](docs/adr/0031-command-line-client.md)):
+  a client over the Qt-free core that starts a session, streams frames
+  as JSON lines and exits cleanly, with golden runs that hold what the
+  C ABI shows a caller. Left: the Linux tarball and deb that carry it.
 - **Linux as a supported desktop:** CI already builds and tests the app
   on Ubuntu, and ELM327 runs over termios; left are runs on the
   distributions and an AppImage.

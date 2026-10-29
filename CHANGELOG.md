@@ -10,6 +10,19 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
 
 ## [Unreleased]
 
+### Added
+- **`havne-cli`**, a command-line client
+  ([ADR-0031](docs/adr/0031-command-line-client.md)):
+  `havne-cli stream <uri>` opens any session the app can (`mock://`,
+  `replay://`, `elm327://`, `j2534://` on Windows) and writes its
+  frames to standard output as JSON lines, one object per line, for
+  `jq`, scripts and logging without a desktop; `--values` adds the
+  values the profile decodes. It stops at Ctrl+C, after `--count`
+  frames or `--seconds`, or at a replay's last frame, and always ends
+  with an `end` line. `havne-cli devices` lists the serial ports and
+  J2534 adapters a URI can name. On Windows it ships beside
+  `havne.exe` in the zip.
+
 ## [0.3.3] - 2026-10-29
 
 ### Added

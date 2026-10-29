@@ -44,6 +44,8 @@ tab bar that named the Settings page "Setup".
 | `test_elm327` | `Elm327ProtocolTest`, `Elm327SessionTest`, `Elm327LogTest`, `SerialPortsTest`, `Elm327TcpTest`, `Elm327StreamTest`, and on Linux and macOS `Elm327PortTest` | Nothing (Qt-free). The session cases put the fake ELM327 (`tests/fake_elm327.h`) behind the transport's port opener; the port cases put it on a pseudo-terminal, the TCP cases behind a listener on 127.0.0.1, the stream cases behind a registered app-fed stream with a thread playing the app |
 | `test_vcan` | `VcanTest` | Linux (Qt-free), and `vcan0` up with `can-isotp` loaded; each case skips without them, and fails under `ECUIO_VCAN_REQUIRED=1` (CI's `linux-build`). The simulated bus itself (`tests/vcan_bus.h`): the fakes' ECU answering through the kernel's ISO-TP, and a recording played onto the bus |
 | (ctest only) | `GoldenTest.SelfTest`, `AbiReportTest.SelfTest` | Python 3 (left out without it). The golden-output comparator (`tests/golden.py`) and the ABI check's judge of an abidiff report (`scripts/abi_report.py`), each over its own cases |
+| `test_cli` | `CliLineTest`, `CliRingTest` | Nothing (Qt-free). `havne-cli`'s line formatting and its worker-to-output ring (`cli/`, header-only) |
+| (ctest only) | `CliGoldenTest`, `CliUsageTest`, `CliSignalTest` | `havne-cli` run as a child process. The golden runs need Python 3 and compare its whole output with `tests/golden/cli/`; the usage cases run under `cmake -P` (`tests/cli_exit.cmake`); the signal case is Linux and macOS only (`tests/cli_signal.sh`) |
 
 `ctest -N` lists every case. The current total is in
 [STATUS.md](../STATUS.md).

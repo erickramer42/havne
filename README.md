@@ -115,8 +115,9 @@ a quarter mile off launch control on a warm loop.*
 ```
  QML pages: Home · Dashboard · Live · Log · Settings
    ▼  properties and list models, GUI thread only
- SessionBridge (app/)          the only caller of the core: worker → GUI
+ SessionBridge (app/)          the app's caller of the core: worker → GUI
    │                           marshaling, 100 ms coalescing, link health
+   │   havne-cli (cli/)        a second front end: a session as JSON lines
    ▼  C ABI: core.h · signals.h · profile.h · j2534.h · serial.h · stream.h
  ecuio-core (core/)            no Qt, ever: sessions, profiles, decoding
    ├── mock://    a scripted drive on a vehicle model
@@ -142,6 +143,7 @@ it, a frame's path from transport to screen included.
 | [`core/src/j2534_surrogate_client.cpp`](core/src/j2534_surrogate_client.cpp), [`surrogate/surrogate_main.cpp`](surrogate/surrogate_main.cpp) | Both ends of the out-of-process driver host: the pipe's protections, late replies, a child that dies |
 | [`core/src/link_health.h`](core/src/link_health.h) | The link's state machine, shared by both adapter transports |
 | [`app/sessionbridge.cpp`](app/sessionbridge.cpp) | The worker-to-GUI boundary: backpressure, coalescing, recording |
+| [`cli/main.cpp`](cli/main.cpp), [`cli/line_ring.h`](cli/line_ring.h) | A second front end over the public headers alone: lines formatted on the worker with no allocation, a ring that drops for a live bus and waits for a replay |
 | [`core/src/mock_drive_cycle.h`](core/src/mock_drive_cycle.h) | The simulated vehicle and its physics |
 
 ## Try it
@@ -164,7 +166,9 @@ cmake --build build --config Release
 ctest --test-dir build -C Release --output-on-failure
 ```
 
-`-DHAVNE_BUILD_CORE_ONLY=ON` builds the core and its tests without Qt.
+`-DHAVNE_BUILD_CORE_ONLY=ON` builds the core, `havne-cli` and their
+tests without Qt; `havne-cli stream mock://demo --values` then streams
+the simulated car as JSON lines.
 [docs/development.md](docs/development.md) covers the 32-bit
 surrogate's second tree, Linux, macOS, Android and iOS, and
 troubleshooting.
