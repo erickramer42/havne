@@ -14,7 +14,7 @@ Safety, regulatory and warranty caveats are in
 
 ## Where things stand
 
-**Current phase: v0.3.x, its plan complete.** v0.3.2 is out: replay,
+**Current phase: v0.3.3, under way.** v0.3.2 is out: replay,
 decoding on the transport's thread, and every driver in a process of
 its own; changes since then go under
 [CHANGELOG.md's "Unreleased"](CHANGELOG.md#unreleased). The J2534 stack is verified
@@ -31,8 +31,9 @@ shipped. The [ELM327 transport](#the-elm327-transport)
 the same car through the OBDLink MX+ over Bluetooth and the VX in ELM
 mode over USB
 ([2026-10-27](docs/bench-sessions/2026-10-27-elm327-vehicle.md)); it
-goes out in the next release. The milestone after it is chosen from the
-[backlog](#backlog).
+goes out in v0.3.3 with persisted preferences and vehicles, the Android
+app with Bluetooth and background sessions, and the rename to Havne.
+The milestone after it is chosen from the [backlog](#backlog).
 
 - **Works:**
   - **Mock transport,** on every platform: a scripted drive cycle (a
@@ -51,6 +52,17 @@ goes out in the next release. The milestone after it is chosen from the
     (2026-10-27). A session that asks nothing listens with `AT MA` on
     its channels (fake-tested; the bench and a car with a second tester
     are to come).
+  - **Android** ([ADR-0028](docs/adr/0028-app-fed-streams.md),
+    [ADR-0029](docs/adr/0029-android-background-sessions.md)): the app
+    on Android 12 and later reaches a Bluetooth adapter through the
+    phone (classic SPP, or the BLE service it picks), and an adapter
+    session keeps running in the background and with the screen off,
+    under a foreground service with a wake lock and a notification. On
+    the car through the OBDLink MX+
+    ([2026-10-28-android-8](docs/bench-sessions/2026-10-28-android-8.md),
+    [2026-10-28-android-11](docs/bench-sessions/2026-10-28-android-11.md),
+    [2026-10-29-android](docs/bench-sessions/2026-10-29-android.md)); no
+    BLE adapter has run.
   - **J2534 on Windows:** discovery of installed drivers, each driver
     loaded in a single-threaded surrogate process of its own
     architecture, x86 or x64, so a crashing driver ends its process,
@@ -108,14 +120,14 @@ goes out in the next release. The milestone after it is chosen from the
   [testing.md](docs/testing.md#gaps-not-verified)). The run sheets are
   [bench-runsheet.md](docs/bench-sessions/bench-runsheet.md) and
   [vehicle-runsheet.md](docs/bench-sessions/vehicle-runsheet.md).
-- **Tests:** 468 ctest cases on Windows (both trees rebuilt,
-  2026-10-27), all passing but two env-gated skips (the cross-arch
+- **Tests:** 532 ctest cases on Windows (both trees rebuilt,
+  2026-10-29), all passing but two env-gated skips (the cross-arch
   case, and the real-car recordings' diff, run locally), plus the
-  cross-arch subset (76/76); 0 MSVC warnings. CI runs ctest on Windows,
+  cross-arch subset (82/82); 0 MSVC warnings. CI runs ctest on Windows,
   macOS and Linux; core under ASan and UBSan; 60 s of each libFuzzer
   harness ([fuzz/README.md](fuzz/README.md)); clang-tidy and CodeQL;
   the load test on Windows and Linux; line coverage on Windows; the
-  Android and iOS cross-builds; and, on pull requests, an iOS
+  Android and iOS cross-builds; and, on request, an iOS
   Simulator smoke. The badge above shows its state. Tiers, suites and
   gaps are in [docs/testing.md](docs/testing.md).
 
@@ -328,6 +340,7 @@ an issue is resolved it is removed, and its number is not reused.
 | v0.3.0 | Signal decoding, LiveView, J2534 transport, live vehicle read and logging | ✅ Released |
 | v0.3.1 | Request engine, PID-support probe, `uds-generic`, vehicle identification, imperial units; the first Windows download | ✅ Released |
 | v0.3.2 | Record-replay transport, decoding on the transport's thread, every driver in its own process | ✅ Released |
+| v0.3.3 | ELM327 adapters, preferences and vehicles, Android with Bluetooth and background sessions, the rename to Havne | In progress |
 | v0.4.0 | Security access discovery, flash capability | Proposed |
 | v0.5.0+ | Manufacturer plugin modules (ADR-0013's profile API) | Proposed |
 

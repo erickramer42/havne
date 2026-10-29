@@ -1004,3 +1004,15 @@ the whole diff's hunks pair it. Of the statements the rename touched,
 most were already outside the format, so only the lines it lengthened
 past 80 columns and the continuations it shifted by one column were
 fixed, keeping the commit a rename.
+
+**2026-10-29 — a review pass after ELM327 and Android:** **a fake that
+drops an argument it doesn't model can't test what that argument
+does.** The fake ELM327 stripped the response-count digit from each
+request and answered every reply in full. With the digit sent where
+it truncates a reply, the VIN request among them, the VIN still
+arrived whole, and only a test pinning the command's text failed. The
+datasheet counts the digit in lines, so a real adapter stops after
+the first one, and a Service 01 PID whose reply spans frames would be
+lost every time. A fake models the device's documented behavior for
+every argument it accepts, or refuses the argument, so a test can see
+the difference.

@@ -6,13 +6,15 @@
 Havne is a cross-platform OBD-II reader and logger. A Qt-free C++17
 core does the vehicle I/O and decoding behind a stable C ABI. A Qt 6 / QML
 front end shows the results as gauges, a live strip chart and a raw CAN
-frame log. It talks to J2534 Pass-Thru adapters on Windows, and a built-in
-simulated vehicle lets it run with no hardware at all.
+frame log. It talks to J2534 Pass-Thru adapters on Windows and to
+ELM327-compatible adapters on every platform (USB, Bluetooth or WiFi),
+runs on an Android phone over its Bluetooth, and a built-in simulated
+vehicle lets it run with no hardware at all.
 
 > [!WARNING]
-> **Experimental software.** Tested read-only on one vehicle with one adapter — see [DISCLAIMER.md](DISCLAIMER.md).
+> **Experimental software.** Tested read-only on one vehicle with two adapters — see [DISCLAIMER.md](DISCLAIMER.md).
 >
-> Havne runs end to end against its simulated vehicle and a fake J2534 vendor driver. Through one real adapter, an OBDX Pro VX, it has read live data from one car in two read-only sessions: the engine ECU answered its requests, and the values decoded and tracked the instrument cluster ([session sheet](docs/bench-sessions/2026-10-25-vehicle.md)). Other vehicles and adapters are untested; [STATUS.md](STATUS.md) tracks what is and isn't verified.
+> Havne runs end to end against its simulated vehicle, a fake J2534 vendor driver and a fake ELM327. On one car, read-only, it has read live data through an OBDX Pro VX as a J2534 adapter and in its ELM327 mode, and through an OBDLink MX+ over Bluetooth, from a laptop and from an Android phone: the engine ECU answered its requests, and the values decoded and tracked the instrument cluster ([J2534](docs/bench-sessions/2026-10-25-vehicle.md), [ELM327](docs/bench-sessions/2026-10-27-elm327-vehicle.md), [the phone](docs/bench-sessions/2026-10-28-android-8.md)). Other vehicles and adapters are untested; [STATUS.md](STATUS.md) tracks what is and isn't verified.
 
 ![The Havne Dashboard through a quarter mile on the warmed-up simulated vehicle: launch control holds the engine near 4,000 rpm at the line, the tires spin off it, three upshifts at 6,800 rpm refill the shift lights, and speed climbs to about 107 mph at the line while coolant rises from 194 to 216 °F, where the fan cuts in, and the oil from 225 to 239 °F, before the driver lifts](docs/images/dashboard.gif)
 
@@ -112,7 +114,9 @@ screen, is [docs/architecture.md](docs/architecture.md).
   and the bridge (headless). Qt Quick tests run the app's own pages
   against a real bridge, offscreen. A harness tier drives the whole
   J2534 stack against an in-tree fake vendor DLL, through the x64
-  surrogate, and locally through the x86 one
+  surrogate, and locally through the x86 one; the ELM327 transport
+  runs against a fake ELM327 behind its port, over a loopback socket
+  and, on Linux and macOS, a pseudo-terminal
   ([docs/testing.md](docs/testing.md)).
 - **CI on every push.** Builds and tests on Windows, Linux and macOS;
   runs the core under ASan and UBSan; fuzzes the signal decoder, the
@@ -166,8 +170,20 @@ screen, is [docs/architecture.md](docs/architecture.md).
   one in Settings or enter a `j2534://` URI. The `obd2` profile
   polls standard Service 01 PIDs, so a bare `j2534://` streams decoded
   signals ([docs/j2534.md](docs/j2534.md)).
+- **ELM327 adapters (every platform).** `elm327://` drives an
+  ELM327-compatible adapter, such as an OBDLink or an OBDX Pro in its
+  ELM mode, on a serial port (USB, or Bluetooth paired as a port) or
+  at a WiFi adapter's address, with the same requests and link health
+  as J2534; Settings lists the serial ports
+  ([ADR-0026](docs/adr/0026-elm327-transport.md)).
+- **Android.** The app runs on Android 12 and later and reaches a
+  Bluetooth adapter through the phone, classic or BLE; a session keeps
+  running in the background and with the screen off, recording
+  included ([ADR-0028](docs/adr/0028-app-fed-streams.md),
+  [ADR-0029](docs/adr/0029-android-background-sessions.md)).
 - **Protocol profiles.** The URI picks how frames decode: `mock`
-  (the default for `mock://`), `obd2` (the default for `j2534://`),
+  (the default for `mock://`), `obd2` (the default for `j2534://` and
+  `elm327://`),
   `raw` (log only), or `uds-generic`, which polls or scans the UDS
   DIDs the URI names, with `?profile=` to choose
   ([ADR-0013](docs/adr/0013-protocol-profiles.md),
@@ -203,10 +219,11 @@ screen, is [docs/architecture.md](docs/architecture.md).
 | v0.3.0 | Signal decoding, live view, J2534 transport, live vehicle read and logging (tested on one vehicle) | ✅ Released |
 | v0.3.1 | Request engine, PID-support probe, vehicle identification, generic UDS reads, imperial units; the first Windows download | ✅ Released |
 | v0.3.2 | Record-replay transport, decoding on the transport's thread, every driver in its own process | ✅ Released |
+| v0.3.3 | ELM327 adapters, preferences and vehicles, Android with Bluetooth and background sessions, the rename to Havne | In progress |
 | v0.4.0 | Security access discovery, flash capability | Proposed |
 | v0.5.0+ | Manufacturer plugin modules | Proposed |
 
-The next milestone is still to be chosen from the backlog; the plan
+v0.3.3's changes so far are under CHANGELOG's "Unreleased"; the plan
 and known issues are in [STATUS.md](STATUS.md), and what each release
 changed is in [CHANGELOG.md](CHANGELOG.md).
 
@@ -253,8 +270,9 @@ cmake -B build-win32 -A Win32 -DHAVNE_BUILD_CORE_ONLY=ON
 cmake --build build-win32 --config Release --target ecuio-j2534-surrogate fake_j2534 fake_j2534_legacy
 ```
 
-**Mobile.** The Android and iOS builds compile in CI but haven't run on
-a device yet. Their command lines are in
+**Mobile.** The Android app runs on a phone (Android 12 and later; a
+debug build, sideloaded, with no store release yet); the iOS build has
+run only on the Simulator. Their command lines are in
 [docs/development.md](docs/development.md), which also covers other
 ways to deploy the surrogate, the cross-architecture tests and
 troubleshooting.

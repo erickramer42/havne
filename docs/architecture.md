@@ -389,6 +389,24 @@ The bridge polls it on its 100 ms tick and maps it for the UI
 - **Freshness:** a value never received shows "—", never a fabricated
   0. A value older than 3 s dims; the model refreshes ages every tick,
   so a signal that stops arriving dims even when nothing else changes.
+- **Preferences** are Qt's `QSettings` under the product's name (the
+  registry on Windows); `HAVNE_SETTINGS_DIR` gives one instance an ini
+  file of its own, which the test driver uses. At launch the earlier
+  name's preferences are copied once into an empty store, and the
+  recent recordings read the earlier name's folder beside the current
+  one ([ADR-0001](adr/0001-qt-free-core-c-abi.md)'s appendix of
+  2026-10-28). **Vehicles**
+  ([ADR-0027](adr/0027-vehicle-profiles.md)) are one JSON document
+  among them: each named vehicle's adapter URI and plotted signals,
+  recognized at the next connect by a salted hash of its VIN.
+- **On a phone**
+  ([ADR-0029](adr/0029-android-background-sessions.md)), Qt's GUI loop
+  keeps running in the background, and while an adapter session is up
+  a `connectedDevice` foreground service holds a partial wake lock and
+  shows a notification. `main.cpp` drops drawing events while the app
+  isn't active: Qt 6.12's Android plugin otherwise waits forever for a
+  surface after the screen turns off. The phone's Bluetooth reaches
+  core as an app-fed stream ([ELM327](#elm327)).
 
 ## How it's verified
 
