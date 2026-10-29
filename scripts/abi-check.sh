@@ -76,7 +76,9 @@ dump() {
         -Wl,--version-script="$OUT/exports.map" -pthread
     abidw --headers-dir "$src/core/include" --drop-private-types --no-show-locs \
         --out-file "$OUT/$name.abi" "$tree/libecuio-core.so"
-    echo "dumped $name: $(grep -c '<function-decl' "$OUT/$name.abi") functions"
+    # The exported functions: the dump's declarations also hold C++
+    # library ones, as many as the libabigail version keeps
+    echo "dumped $name: $(grep -c "<elf-symbol name='ecuio_[^']*' type='func-type'.*is-defined='yes'" "$OUT/$name.abi") exported functions"
 }
 
 dump "$base_src" base
