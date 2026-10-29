@@ -4,6 +4,7 @@
 
 #include "jsonl.h"
 #include "line_ring.h"
+#include "sleep_watch.h"
 
 #include <gtest/gtest.h>
 
@@ -290,4 +291,18 @@ TEST(CliRingTest, WakeEndsADrainsWait)
     EXPECT_EQ(ring.drain(out.data(), std::chrono::seconds(10)), 0u);
     EXPECT_LT(std::chrono::steady_clock::now() - t0, std::chrono::seconds(5));
     waker.join();
+}
+
+// A sleep is a rise of a second or more in one poll (ADR-0033 §6), told
+// once; smaller rises are taken in, so they never add up to a line
+TEST(CliSleepTest, ARiseOfASecondInOnePollIsASleep)
+{
+    cli::SleepWatch w(7000000);
+    EXPECT_EQ(w.poll(7000000), 0u);
+    EXPECT_EQ(w.poll(105400000), 98400000u);
+    EXPECT_EQ(w.poll(105400000), 0u) << "told once";
+    EXPECT_EQ(w.poll(106300000), 0u) << "0.9 s";
+    EXPECT_EQ(w.poll(106900000), 0u) << "0.6 s more: not 1.5 s";
+    EXPECT_EQ(w.poll(107900000), 1000000u) << "a second exactly";
+    EXPECT_EQ(w.poll(5), 0u) << "a count that went back";
 }

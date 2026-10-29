@@ -29,6 +29,7 @@ const char* const ecuio_socketcan_query_keys[] = {"profile", "did", "baud",
 
 #include "link_health.h"
 #include "socketcan_netlink.h"
+#include "host_clock.h"
 
 #include <errno.h>
 #include <linux/can.h>
@@ -74,7 +75,7 @@ struct ecuio_socketcan_transport {
     size_t filter_count = 0;
     int fd = -1;
     int wake_fd = -1;
-    std::chrono::steady_clock::time_point epoch;
+    host_clock::time_point epoch;
     std::unique_ptr<ecuio_frame_t> frame;
     std::thread worker;
     std::atomic<bool> stop{false};
@@ -255,7 +256,7 @@ void socketcan_worker(ecuio_socketcan_transport* t)
             socketcan_to_frame(in, frame);
             const uint64_t host_us = static_cast<uint64_t>(
                 std::chrono::duration_cast<std::chrono::microseconds>(
-                    std::chrono::steady_clock::now() - t->epoch)
+                    host_clock::now() - t->epoch)
                     .count());
             frame->timestamp_us =
                 socketcan_clock_step(clock, kernel_ns, host_us);
@@ -454,7 +455,7 @@ ecuio_socketcan_transport_attach(ecuio_session_t* session, const char* uri,
             ecuio_detail_set("%s: %s", name, why(errno).c_str());
             return ECUIO_ERR_LOAD_FAILED;
         }
-        impl->epoch = std::chrono::steady_clock::now();
+        impl->epoch = host_clock::now();
         session->transport =
             new ecuio_transport_t{&kSocketCanTransportOps, nullptr};
         session->transport->impl = impl.release();

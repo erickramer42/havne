@@ -309,7 +309,7 @@ void elm327_log_open(elm327_log& log)
     const char* v = getenv("ECUIO_SUR_LOG_FRAMES");
     log.requests = v != nullptr && strcmp(v, "1") == 0;
 #endif
-    log.opened = std::chrono::steady_clock::now();
+    log.opened = host_clock::now();
 }
 
 void elm327_log_write(elm327_log& log, const char* fmt, ...)
@@ -320,7 +320,7 @@ void elm327_log_write(elm327_log& log, const char* fmt, ...)
     const local_time t = now_local();
     const long long us = static_cast<long long>(
         std::chrono::duration_cast<std::chrono::microseconds>(
-            std::chrono::steady_clock::now() - log.opened)
+            host_clock::now() - log.opened)
             .count());
     char line[1024];
     const size_t room = sizeof(line) - sizeof(kNewline);

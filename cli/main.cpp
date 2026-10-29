@@ -2,13 +2,15 @@
 // Testing: HARNESS: golden runs of the program (CliGoldenTest, against
 //          tests/golden/cli/: the replay fixture, mock://, the refusals),
 //          its usage errors (CliUsageTest) and, on POSIX, SIGINT and
-//          SIGTERM (CliSignalTest); the formatting and the ring UNIT
-//          (tests/test_cli.cpp)
+//          SIGTERM (CliSignalTest); the formatting, the ring and the
+//          sleep rule UNIT (tests/test_cli.cpp); a real sleep BENCH
+//          (BENCH prep #27)
 //
 // Public headers only: what any program linking core can do.
 
 #include "jsonl.h"
 #include "line_ring.h"
+#include "sleep_watch.h"
 
 #include "ecuio/core.h"
 #include "ecuio/j2534.h"
@@ -532,7 +534,9 @@ int run_stream(const StreamArgs& args)
         return kExitConnect;
     }
 
-    const auto started = std::chrono::steady_clock::now();
+    // Session time's clock (ADR-0033): --seconds counts a sleep too
+    const uint64_t started = ecuio_clock_us();
+    cli::SleepWatch sleep_watch(ecuio_clock_slept_us());
     int32_t last_error = ECUIO_OK;
     uint32_t episodes = 0;
     const char* reason = nullptr;
@@ -551,9 +555,19 @@ int run_stream(const StreamArgs& args)
             reason = "count";
         } else if (replay_ends && covered >= info.replay_frames) {
             reason = "replay-end";
-        } else if (args.seconds && std::chrono::steady_clock::now() - started >=
-                                       std::chrono::seconds(args.seconds)) {
+        } else if (args.seconds &&
+                   ecuio_clock_us() - started >= args.seconds * 1000000u) {
             reason = "seconds";
+        }
+
+        if (const uint64_t slept = sleep_watch.poll(ecuio_clock_slept_us())) {
+            char buf[64];
+            cli::Line l(buf, sizeof buf);
+            l.raw("{\"type\":\"slept\"");
+            l.key("us");
+            l.u64(slept);
+            l.ch('}');
+            write_line(out, l);
         }
 
         int32_t now_error = ECUIO_OK;
@@ -911,7 +925,7 @@ int run_play(const PlayArgs& args)
         return kExitConnect;
     }
 
-    const auto started = std::chrono::steady_clock::now();
+    const uint64_t started = ecuio_clock_us();
     const char* reason = nullptr;
     while (!reason) {
         std::this_thread::sleep_for(kPoll);
@@ -922,8 +936,8 @@ int run_play(const PlayArgs& args)
             reason = "count";
         } else if (replay_ends && covered >= info.replay_frames) {
             reason = "replay-end";
-        } else if (args.seconds && std::chrono::steady_clock::now() - started >=
-                                       std::chrono::seconds(args.seconds)) {
+        } else if (args.seconds &&
+                   ecuio_clock_us() - started >= args.seconds * 1000000u) {
             reason = "seconds";
         }
     }

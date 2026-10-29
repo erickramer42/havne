@@ -379,6 +379,20 @@ TEST(SocketCanTest, TheClockTakesTheHostsTimeThenTheKernelsSpacing)
     EXPECT_EQ(socketcan_clock_step(c, k0 + 12000000, 2509000), 17000u);
 }
 
+/* The kernel's wall clock counts a sleep, and so does the host's
+ * (ADR-0033 §5): the two deltas agree, so the gap stands. A host clock
+ * that stopped in the sleep would put the kernel's delta past the read
+ * and lose the gap to its own */
+TEST(SocketCanTest, ASleepKeepsItsGap)
+{
+    socketcan_clock c;
+    const uint64_t k0 = 1700000000000000000ull;
+    EXPECT_EQ(socketcan_clock_step(c, k0, 5000), 5000u);
+    /* 100 s asleep, the frame read 5 ms after it arrived */
+    EXPECT_EQ(socketcan_clock_step(c, k0 + 100000000000ull, 100010000),
+              100005000u);
+}
+
 TEST(SocketCanTest, AWallClockStepGivesWayToTheHostsTime)
 {
     socketcan_clock c;

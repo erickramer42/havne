@@ -36,6 +36,7 @@
 #include "link_health.h"
 #include "uri_query.h"
 #include "error_detail.h"
+#include "host_clock.h"
 
 #include <atomic>
 #include <chrono>
@@ -142,7 +143,7 @@ struct ecuio_elm327_transport {
     elm327_isotp isotp;
     /* Session time counts from the end of attach, as mock's does; the
      * frame dispatched from here. */
-    std::chrono::steady_clock::time_point epoch{};
+    host_clock::time_point epoch{};
     /* The last command's send, for its prompt's time in the wire log */
     std::chrono::steady_clock::time_point sent_at{};
     ecuio_frame_t rx_frame{};
@@ -168,7 +169,7 @@ int64_t now_us(const transport* t)
 {
     return static_cast<int64_t>(
         std::chrono::duration_cast<std::chrono::microseconds>(
-            std::chrono::steady_clock::now() - t->epoch)
+            host_clock::now() - t->epoch)
             .count());
 }
 
@@ -1380,7 +1381,7 @@ ecuio_status_t elm327_attach(ecuio_session_t* session, const char* uri,
     t->session = session;
     describe_session(t.get(), version, &session->info);
     ecuio_seed_reports(session, t->engine, t->rx_ids, t->chan_count);
-    t->epoch = std::chrono::steady_clock::now(); /* as mock: end of attach */
+    t->epoch = host_clock::now(); /* as mock: end of attach */
     wrap->impl = t.release();
     session->transport = wrap;
     return ECUIO_OK;

@@ -16,7 +16,6 @@
 #include <QVariantList>
 #include <QVariantMap>
 #include <QTimer>
-#include <QElapsedTimer>
 #include <QHash>
 #include <QUrl>
 
@@ -103,6 +102,22 @@ private:
     size_t m_oldest = 0;       // the oldest row's slot
     int m_count = 0;           // rows shown, at most m_ring.size()
     bool m_newestFirst = true;
+};
+
+// QElapsedTimer's restart() and elapsed() on core's clock (ecuio_clock_us),
+// which counts the time the machine sleeps (ADR-0033): a value read before
+// a sleep is as old as it is at the wake, and dims then
+class HostElapsedTimer
+{
+public:
+    void restart() { m_startUs = ecuio_clock_us(); }
+    qint64 elapsed() const
+    {
+        return static_cast<qint64>((ecuio_clock_us() - m_startUs) / 1000);
+    }
+
+private:
+    uint64_t m_startUs = ecuio_clock_us();
 };
 
 class SignalListModel : public QAbstractListModel
@@ -266,7 +281,7 @@ private:
     QHash<uint16_t, int> m_rowOfId;
     int m_subscribedCount = 0;
     uint32_t m_units = ECUIO_UNITS_METRIC;
-    QElapsedTimer m_clock;   // fallback timestamp source; started in setSignalSet
+    HostElapsedTimer m_clock;   // fallback stamps; restarted in setSignalSet
 };
 
 class SessionBridge : public QObject
@@ -460,6 +475,9 @@ public:
     // Test seam: record a replay too, to compare it with its source. The
     // app never records one: it would copy the recording it plays
     void setRecordReplaysForTesting(bool on) { m_recordReplays = on; }
+    // Test seam: a sleep of this long, added to what core's count says,
+    // for the tick to find (no runner can sleep)
+    void addSleptForTesting(uint64_t us) { m_sleptAddedForTesting += us; }
 
 public slots:
     // Both connects take the URI as typed and trim the spaces around it
@@ -557,6 +575,14 @@ private:
     // A replay without loop: its frames, and whether its end is logged
     uint32_t m_replayFrames = 0;
     bool m_replayEndLogged = true;
+    // The machine's slept count at the last tick (ADR-0033 §6), and the
+    // test seam's addition to it
+    uint64_t m_sleptUs = 0;
+    uint64_t m_sleptAddedForTesting = 0;
+    uint64_t sleptUs() const
+    {
+        return ecuio_clock_slept_us() + m_sleptAddedForTesting;
+    }
 
     FrameListModel* m_frameLog = nullptr;
 
@@ -648,6 +674,7 @@ private:
     // What each channel's ECU said it is (ADR-0021), logged once complete
     void pollChannelIdentity();
     void pollReplayEnd();   // the tick: "Replay finished" once, at the end of the file
+    void pollSleep();       // the tick: "Asleep for N s" after a sleep
     uint32_t m_identityGeneration[ECUIO_SESSION_INFO_MAX_CHANNELS] = {};
     QString m_vin;            // the first channel's, this session; never leaves the bridge
     QString m_vehicleLabel;   // the picked vehicle's, for the recording folder
