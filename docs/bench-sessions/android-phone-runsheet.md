@@ -271,10 +271,16 @@ safety hold.
 - [ ] At the first adapter connect Android asks to allow
       notifications: allow it. A notification "QtTune — Connected to
       …" with "· recording", for as long as the session is up
-- [ ] Press Home for about 2 minutes, then the screen off for about
-      5. Return: the link stayed up the whole time (no "Link: adapter
-      fault" in the activity log), Live has no gap, the values kept
-      recording. Note the times the screen went off and on
+- [ ] Press Home for about 2 minutes, then return. The link stayed up
+      the whole time (no "Link: adapter fault" in the activity log),
+      Live has no gap, the values kept recording
+- [ ] On Live, with QtTune in front, the screen off for about 5
+      minutes (the power button), then on: the same. This is the case
+      that stopped the GUI thread
+      ([2026-10-28-android-10](2026-10-28-android-10.md)). Note the
+      times the screen went off and on
+- [ ] Afterwards, with `adb`: the recording's Delivery line (events.log,
+      at the disconnect), "to the GUI thread … max" well under a second
 - [ ] Afterwards, with `adb`: in the recording's events.log, the
       time between two lines by the clock (the first column) and by
       the session ("+seconds") agree within a second across the

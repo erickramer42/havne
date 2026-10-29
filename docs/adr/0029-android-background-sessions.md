@@ -178,3 +178,37 @@ the build of `ee1db00` on Android 16:
 - Whether core's host clock should count deep sleep (`CLOCK_BOOTTIME`
   on Android and Linux), so that a sleep shows as a gap, is a decision
   of its own, planned for v0.3.4.
+
+## Appendix: 2026-10-28, a drawing deadlock as the screen goes off
+
+With the wake lock the CPU stays awake
+([2026-10-28-android-10](../bench-sessions/2026-10-28-android-10.md)),
+but the screen turned off with QtTune in front stopped the GUI thread
+for as long as the screen stayed off: 305 s on the car, the Bluetooth
+link's work queued behind it, and up to 23 s at a time at the desk
+under `mock://`, in some screen-offs and not others.
+
+- **The cause is Qt's.** Stacks caught at the desk (the record's
+  findings 9 and 10): handling the screen going off, Qt 6.12's Android
+  plugin destroys the window's surface (`applicationStateChanged`) and,
+  in the same nested state change, delivers exposes while the app is
+  Inactive, which Qt counts as exposed. A draw they start waits in
+  `QAndroidPlatformOpenGLWindow::eglSurface()` for Android to make a new
+  surface, which it doesn't with the screen off. Under the threaded
+  render loop the render thread waits there and the GUI thread waits
+  on it; under the basic loop the GUI thread waits there itself. Qt's
+  guard against it holds only while the event loops are stopped, which
+  §1 turns off.
+- **§1 adds: no drawing while the app isn't active.** On Android the
+  window drops `Expose` and `UpdateRequest` events unless the app is
+  Active (`main.cpp`'s `NoDrawWhileInactive`), and Qt Quick runs its
+  basic render loop (`QSG_RENDER_LOOP=basic` unless set), so every draw
+  starts from one of those events on the GUI thread; the threaded
+  loop's render thread starts frames the filter can't see. Qt sends an
+  expose when the app is active again, so the page redraws then. At the
+  desk, 26 screen-offs, every one delivering the Inactive exposes the
+  filter dropped: the GUI thread never waited more than 126 ms. The car
+  confirms it (Phase 8b, the screen off with QtTune in front).
+- Keeping the Bluetooth link and the recorder off the GUI thread, the
+  alternative this ADR set aside, would make any other GUI-thread stall
+  cost only what Live shows. Not needed for this one; a hardening item.
