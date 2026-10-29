@@ -73,8 +73,12 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
   with the screen off, recording included. While it's connected a
   quiet notification says so ("Connected to …", "· recording"); a tap
   opens the app. QtTune asks once, at the first adapter connect, to
-  show notifications. A dropped classic Bluetooth link reconnects with
-  one connection attempt at a time. It hasn't run on a phone yet.
+  show notifications, and the phone stays awake (not its screen) for
+  as long as the session lasts. A dropped classic Bluetooth link
+  reconnects with one connection attempt at a time. It has held an
+  OBDLink MX+ on a car through the Home screen and the screen off. A
+  `mock://` or `replay://` session may pause while the app is in the
+  background.
 - Settings lists the recent recordings, newest first. Selecting one
   puts its `replay://` address in the field, with the profile and DIDs
   it was recorded with, so a recording replays without typing its path

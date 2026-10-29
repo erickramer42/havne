@@ -254,12 +254,14 @@ recordings are the evidence, so a computer with `adb` afterwards.
 
 - [ ] No notification for the mock (only an adapter session gets one)
 - [ ] Press Home for about 2 minutes. Return: still connected, no
-      fault in the activity log, and Live's chart has **no gap** for
-      the time away
+      fault in the activity log. Live's chart may have a gap: with no
+      service, Android may freeze the app or let the CPU sleep, as it
+      decides ([2026-10-28-android-9](2026-10-28-android-9.md); mock
+      and replay are desk tools)
 - [ ] The screen off for about 5 minutes (the power button). On: the
       same, and the app returned without a crash
-- [ ] Disconnect. The recording's events.log (Phase 5's copy, or
-      `adb`) ends "0 frames dropped by the bridge"
+- [ ] Disconnect. Copy the recording's Delivery line (events.log,
+      Phase 5's copy or `adb`)
 
 **8b — on the car, the MX+, engine idling.** Phase 7's pre-flight and
 safety hold.
@@ -272,7 +274,14 @@ safety hold.
 - [ ] Press Home for about 2 minutes, then the screen off for about
       5. Return: the link stayed up the whole time (no "Link: adapter
       fault" in the activity log), Live has no gap, the values kept
-      recording
+      recording. Note the times the screen went off and on
+- [ ] Afterwards, with `adb`: in the recording's events.log, the
+      time between two lines by the clock (the first column) and by
+      the session ("+seconds") agree within a second across the
+      screen off. Live and the recording run on the session clock,
+      which on Android doesn't count the CPU's sleep, so a sleep shows
+      only there ([2026-10-28-android-9](2026-10-28-android-9.md):
+      104 s apart, with no gap on Live)
 - [ ] With the screen off, Bluetooth off for about 10 s from the quick
       settings, then on. Back in QtTune: a fault, then recovered on its
       own, as in 7c

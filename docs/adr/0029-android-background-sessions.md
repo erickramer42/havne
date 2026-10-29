@@ -145,3 +145,36 @@ the run saw one block 25 s and a second start beside it.
   package with the rest.
 - iOS is unchanged: it has no equivalent of a foreground service for a
   Bluetooth serial link, and the app isn't on a device yet.
+
+## Appendix: 2026-10-28, the phone run, and a wake lock
+
+Phase 8 of the phone run sheet
+([2026-10-28-android-9](../bench-sessions/2026-10-28-android-9.md)),
+the build of `ee1db00` on Android 16:
+
+- **An adapter session holds in the background.** The MX+ on the car
+  stayed connected through 2 minutes on Home and the screen off, the
+  notification with it; Android never froze the app while the service
+  ran. Bluetooth off and on with the screen off recovered in 4.0 s
+  with one socket connect (§3).
+- **The CPU still sleeps.** With the screen off it slept about 100 s
+  of one 118 s stretch: no request went out and no frame came in. The
+  service keeps the process from being frozen, not the CPU awake. Core's
+  host clock on Android (`CLOCK_MONOTONIC`) doesn't count deep sleep, so
+  Live and the recording joined the values on either side with no gap;
+  only the activity log's wall-clock column against its session
+  seconds shows it. **§2 adds a partial wake lock**, held by the
+  service from its start to its stop (`WAKE_LOCK`, granted without a
+  prompt; CI's manifest check names it): the CPU runs for as long as
+  an adapter session does, the screen still goes off. Phase 8b's
+  screen off runs again on the car, and its sheet now compares the two
+  clocks.
+- **`mock://` and `replay://` pause in the background**, as §2 left
+  them without the service: Android froze the app's process once
+  (19:52:49 to 19:58:45) and let the CPU sleep another time, so a run
+  may or may not show a gap, as Android decides. Accepted: they are
+  desk tools. §5's first check expected no gap; the sheet no longer
+  does.
+- Whether core's host clock should count deep sleep (`CLOCK_BOOTTIME`
+  on Android and Linux), so that a sleep shows as a gap, is a decision
+  of its own, planned for v0.3.4.

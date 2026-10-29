@@ -251,7 +251,9 @@ setup ([2026-10-28-android-7](docs/bench-sessions/2026-10-28-android-7.md));
 step 4, the MX+ through the phone on the car, is complete: the same
 readings as through the laptop, ~36 replies a second, a Bluetooth drop
 recovered in 4.2 s ([2026-10-28-android-8](docs/bench-sessions/2026-10-28-android-8.md)),
-except in the background (Known Issue #37)). Later,
+and in the background with ADR-0029's foreground service
+([2026-10-28-android-9](docs/bench-sessions/2026-10-28-android-9.md);
+the CPU's sleep with the screen off is Known Issue #37)). Later,
 with its own record: listening to the whole bus (raw frames, for a
 car whose OBD port carries more than diagnostics).
 
@@ -316,31 +318,21 @@ an issue is resolved it is removed, and its number is not reused.
     run), or Qt's arm64 simulator libraries if Qt ships them. Apple is
     also winding down Rosetta, so the first option has its own end
     date.
-37. **On Android, the app in the background leaves a gap.** Android
-    pauses the app's GUI thread while it's in the background or the
-    screen is off. The session stays connected and the transport's
-    worker keeps reading, but the bridge's 100 ms windows stop, so
-    Live's chart has a gap for that time and the activity log says
-    nothing ([2026-10-28-android-2](docs/bench-sessions/2026-10-28-android-2.md)).
-    The frames wait for the GUI thread: a recording through 30 s in
-    the background and 30 s with the screen off held every frame and
-    value ([2026-10-28-android-3](docs/bench-sessions/2026-10-28-android-3.md)).
-    A longer pause drops them past the bridge's in-flight cap
-    (ADR-0003), which `mock://` reaches in 50 s. A Bluetooth link
-    stops outright: the app's link does its work on the GUI thread, so
-    in the background nothing core asks of it runs; the session
-    faults within 5 s, and on return the queued calls and overlapping
-    socket connects took 38 s to recover
-    ([2026-10-28-android-8](docs/bench-sessions/2026-10-28-android-8.md)).
-    [ADR-0029](docs/adr/0029-android-background-sessions.md) (accepted)
-    is built: the app's own manifest keeps Qt's GUI loop running in the
-    background (`android.app.background_running`), a `connectedDevice`
-    foreground service holds the process while an adapter session is
-    up (`app/androidsession.cpp`, `SessionService.java`), and a classic
-    Bluetooth link runs one socket connect at a time
-    (`app/btconnect.cpp`, UNIT-tested). CI checks the manifest; Phase 8
-    of the [phone run sheet](docs/bench-sessions/android-phone-runsheet.md)
-    checks the rest on the phone, and closes this when it passes.
+37. **On Android, the CPU may sleep under an adapter session with the
+    screen off.** With
+    [ADR-0029](docs/adr/0029-android-background-sessions.md)'s fix, a
+    session holds in the background: the MX+ on the car stayed
+    connected through Home and the screen off, Android never froze the
+    app while its foreground service ran, and a Bluetooth drop with the
+    screen off recovered in 4.0 s
+    ([2026-10-28-android-9](docs/bench-sessions/2026-10-28-android-9.md)).
+    But the service doesn't keep the CPU awake: it slept about 100 s
+    of one screen-off stretch, no request going out, and since the
+    session clock doesn't count deep sleep, Live and the recording
+    showed no gap. The service now holds a partial wake lock while it
+    runs (ADR-0029's appendix); Phase 8b's screen off on the car checks
+    it, and closes this when it passes. `mock://` and `replay://` run
+    without the service and may pause in the background, by design.
 
 ## Roadmap
 
