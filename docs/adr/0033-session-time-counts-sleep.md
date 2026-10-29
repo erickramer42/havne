@@ -216,3 +216,19 @@ line, so they never add up to one.
     only.
 - Two functions join the C ABI (append-only), and `test_c_abi` covers
   them.
+
+## Appendix: 2026-10-29, the phone's sleeps
+
+[2026-10-29-android-2](../bench-sessions/2026-10-29-android-2.md), the
+build of `27592cf` on the test phone under `mock://`:
+
+- **On USB** (charging, `adb` attached) the CPU never slept; the gaps
+  on Live were the app frozen, and no "Asleep" line came, rightly.
+- **Off USB** the CPU slept thirteen times in 674 s, 583 s in all. Each
+  sleep was a gap of its length on Live, in `frames.csv` and in
+  `signals.csv`'s `host_us`, each named by an "Asleep for N s" line,
+  and session time kept the wall clock's pace (674.47 s against
+  674.46 s; about 91 s on a clock that stops in sleep).
+- **A freeze with a sleep inside it** is one gap, longer than its
+  "Asleep" line, which counts the sleep alone (357.5 s with 342.1 s
+  asleep). §6's line reports the machine's sleep, not the app's freeze.

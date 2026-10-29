@@ -133,8 +133,8 @@ background too. Next come v0.3.4 and v0.3.5 ([roadmap](#roadmap)).
     while recording. Session time counts the machine's sleep on every
     platform, so a sleep is a gap on Live and in a recording, and the
     activity log and `havne-cli` say how long it was
-    ([ADR-0033](docs/adr/0033-session-time-counts-sleep.md); a real
-    sleep, BENCH prep #27, to come).
+    ([ADR-0033](docs/adr/0033-session-time-counts-sleep.md); the test
+    phone's sleeps, [2026-10-29-android-2](docs/bench-sessions/2026-10-29-android-2.md)).
 - **Not yet:** real hardware beyond two adapters and one car: 29-bit
   addressing, more than one ECU answering, a real x64 driver,
   and other vendors ([BENCH prep](docs/bench-sessions/bench-prep.md),
@@ -289,7 +289,10 @@ scheduled. What each holds, past its row:
   clock for core and the app, counting the time the machine sleeps on
   every platform (`CLOCK_BOOTTIME` on Linux and Android), so a sleep is
   a gap on Live and in a recording, and the activity log says how long
-  it was. Left: a real sleep on the phone (BENCH prep #27).
+  it was. Confirmed on the test phone
+  ([2026-10-29-android-2](docs/bench-sessions/2026-10-29-android-2.md):
+  thirteen sleeps, each a gap of its length); a Linux machine's suspend
+  is left (BENCH prep #27).
 
 ### v0.3.5: full OBD-II diagnostics, SocketCAN requests
 

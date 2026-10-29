@@ -84,7 +84,7 @@ which has no bench session):
 
 | # | Assumption in the code | State | Evidence |
 |---|---|---|---|
-| 27 | **A sleep counts in session time:** `CLOCK_BOOTTIME` on Android and Linux, `QueryPerformanceCounter` on Windows and `CLOCK_MONOTONIC_RAW` on Apple keep counting while the machine sleeps, and the slept count (`ecuio_clock_slept_us`) rises by the sleep. On the phone, with the screen off under `mock://` (no wake lock), Live and `signals.csv`'s `host_us` show a gap as long as the sleep, and the activity log says "Asleep for N s" | STILL UNKNOWN: no sleep has run since | Each platform's documentation says so (Microsoft's *Acquiring high-resolution time stamps*; libc++'s choice of `CLOCK_MONOTONIC_RAW`; `clock_gettime(2)`). `CoreTest.ClockIsThePlatformsSleepCountingClock` reads the platform's clock, but no CI runner or WSL VM had slept since it started, so it can't tell that clock from the one that stops. Before: the CPU slept about 100 s with no gap ([2026-10-28-android-9](2026-10-28-android-9.md)) |
+| 27 | **A sleep counts in session time:** `CLOCK_BOOTTIME` on Android and Linux, `QueryPerformanceCounter` on Windows and `CLOCK_MONOTONIC_RAW` on Apple keep counting while the machine sleeps, and the slept count (`ecuio_clock_slept_us`) rises by the sleep. On the phone, with the screen off under `mock://` (no wake lock), Live and `signals.csv`'s `host_us` show a gap as long as the sleep, and the activity log says "Asleep for N s" | CONFIRMED on Android; a Linux machine's suspend not yet run | [2026-10-29-android-2](2026-10-29-android-2.md): off USB the test phone's CPU slept thirteen times in 674 s under `mock://`, 583 s in all; each sleep a gap of its length in `frames.csv` and `signals.csv`'s `host_us` and on Live, each named by an "Asleep" line, and session time kept the wall clock's pace. On USB (charging, `adb` attached) the CPU never slept. Windows and Apple rest on their documentation (Microsoft's *Acquiring high-resolution time stamps*; libc++'s choice of `CLOCK_MONOTONIC_RAW`), as did their sessions before ADR-0033. Before: the CPU slept about 100 s with no gap ([2026-10-28-android-9](2026-10-28-android-9.md)) |
 
 ## Still open
 
@@ -98,8 +98,8 @@ which has no bench session):
 - **#25, a BLE adapter's service:** needs a BLE adapter.
 - **#26, a real CAN controller:** a `gs_usb` adapter on the bench, then
   a car through an OBD cable (CAN-H pin 6, CAN-L pin 14), listen-only.
-- **#27, a sleep in session time:** the phone with its screen off under
-  `mock://`; a Linux machine suspended mid-session, if one is at hand.
+- **#27, a sleep in session time, on Linux:** a Linux machine suspended
+  mid-session, if one is at hand (Android is confirmed).
 - **Every item for any other adapter.** Each CONFIRMED above is the
   VX's. A second adapter, x64 or another vendor's, walks the whole
   list again; the x64 surrogate it would load in has met only the fake

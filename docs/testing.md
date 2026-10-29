@@ -476,11 +476,11 @@ requests and quiet states
 
 ## Gaps (not verified)
 
-- **No sleep has run since session time counts it.** No CI runner or
-  WSL VM can sleep, so the property ADR-0033 rests on (the platform
-  clock keeps counting while the machine sleeps) is the platforms'
-  documentation until the phone's screen-off run under `mock://`
-  (BENCH prep #27).
+- **A sleep in session time has run on Android only.** No CI runner or
+  WSL VM can sleep. The test phone's sleeps counted
+  ([2026-10-29-android-2](bench-sessions/2026-10-29-android-2.md));
+  a Linux machine's suspend hasn't run, and Windows and Apple rest on
+  their documentation (BENCH prep #27).
 
 - **The ABI check doesn't see a change that keeps the layout.** A
   field renamed, or `uint32_t` becoming `int32_t`, changes no offset
