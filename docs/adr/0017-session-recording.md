@@ -157,3 +157,13 @@ rather than when the connect is applied, so frames sent in between
 are recorded too; the consequence above, "not recorded: frames before
 the connect is applied", now covers only frames before the start,
 which a transport doesn't send.
+
+## Appendix — `host_us` counts sleep (2026-10-29)
+
+`host_us` is microseconds since the recording started on core's clock
+(`ecuio_clock_us`, [ADR-0033](0033-session-time-counts-sleep.md)),
+which counts the time the machine sleeps on every platform. The steady
+clock it was taken from doesn't on Linux and Android, so a sleep there
+left no gap in `host_us`. The format is unchanged; a sleep is a gap in
+`host_us` as in `timestamp_us`, and `events.log` names it ("Asleep for
+N s").

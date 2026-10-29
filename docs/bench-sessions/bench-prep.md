@@ -80,6 +80,12 @@ which has no bench session):
 |---|---|---|---|
 | 26 | **A real CAN controller, listening:** a `gs_usb` adapter (candleLight firmware) reports its link kind `can`, its bit rate and `CAN_CTRLMODE_LISTENONLY` through rtnetlink as the canned messages in `SocketCanTest` have them; in listen-only mode it never ACKs or sends an error frame; on a car's bus at the right rate its frames arrive with the kernel's times, and at a wrong rate it reports errors but disturbs nothing; unplugged, the session fails hard and recovers when it's back | STILL UNKNOWN: no native CAN adapter on hand | The netlink parsing and the listen-only rule are UNIT-tested over canned messages, and the transport is HARNESS-tested on `vcan0` (`SocketCanBusTest`), which has no controller. WSL's kernel (6.18) has `gs_usb`, `slcan`, `peak_usb`, `kvaser_usb` and the USB/IP client, so an adapter reaches it through `usbipd-win` (2026-10-29) |
 
+### The session clock ([ADR-0033](../adr/0033-session-time-counts-sleep.md))
+
+| # | Assumption in the code | State | Evidence |
+|---|---|---|---|
+| 27 | **A sleep counts in session time:** `CLOCK_BOOTTIME` on Android and Linux, `QueryPerformanceCounter` on Windows and `CLOCK_MONOTONIC_RAW` on Apple keep counting while the machine sleeps, and the slept count (`ecuio_clock_slept_us`) rises by the sleep. On the phone, with the screen off under `mock://` (no wake lock), Live and `signals.csv`'s `host_us` show a gap as long as the sleep, and the activity log says "Asleep for N s" | STILL UNKNOWN: no sleep has run since | Each platform's documentation says so (Microsoft's *Acquiring high-resolution time stamps*; libc++'s choice of `CLOCK_MONOTONIC_RAW`; `clock_gettime(2)`). `CoreTest.ClockIsThePlatformsSleepCountingClock` reads the platform's clock, but no CI runner or WSL VM had slept since it started, so it can't tell that clock from the one that stops. Before: the CPU slept about 100 s with no gap ([2026-10-28-android-9](2026-10-28-android-9.md)) |
+
 ## Still open
 
 - **#4, 29-bit addressing:** needs a 29-bit vehicle.
@@ -92,6 +98,8 @@ which has no bench session):
 - **#25, a BLE adapter's service:** needs a BLE adapter.
 - **#26, a real CAN controller:** a `gs_usb` adapter on the bench, then
   a car through an OBD cable (CAN-H pin 6, CAN-L pin 14), listen-only.
+- **#27, a sleep in session time:** the phone with its screen off under
+  `mock://`; a Linux machine suspended mid-session, if one is at hand.
 - **Every item for any other adapter.** Each CONFIRMED above is the
   VX's. A second adapter, x64 or another vendor's, walks the whole
   list again; the x64 surrogate it would load in has met only the fake

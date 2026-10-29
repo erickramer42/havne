@@ -106,6 +106,7 @@ Dates are commit dates.
 | 2026-10-29 | v0.3.4's tooling: the simulated CAN bus (`vcan0` and the kernel's `can-isotp`) tested on CI's Linux runner, a C ABI check against the last release (`scripts/abi-check.sh`, libabigail), and a Linux AppImage that runs on Ubuntu, Arch and Kali; merged through the first pull request from `dev` | `e43eb6c`, `74e346c`, `5901d9c`, PR #28 |
 | 2026-10-29 | `havne-cli` ([ADR-0031](adr/0031-command-line-client.md)): a second front end over the public headers alone, a session's frames and values as JSON lines; lines formatted on the worker into a ring that drops for a live bus and waits for a replay; golden runs of the program pin what the ABI shows a caller, the vehicle fixture frame for frame; ships beside `havne.exe` | `e8a3449`, `8d6fce1`, `0a30ad2` |
 | 2026-10-29 | SocketCAN, listening ([ADR-0032](adr/0032-socketcan-listening.md)): `socketcan://` reads a Linux CAN interface through a `CAN_RAW` socket with the kernel's receive times, CAN FD, error frames and the kernel's drop count, refusing a controller that isn't listen-only; `ecuio/socketcan.h` lists the interfaces for Settings and the CLI; `havne-cli play` drives the mock's car on `vcan0`, so the path runs end to end with no hardware, on CI too | `3d3ca10` |
+| 2026-10-29 | Session time counts sleep ([ADR-0033](adr/0033-session-time-counts-sleep.md)): one host clock, `ecuio_clock_us`, for every transport's stamps, the request engine, a recording's `host_us`, a value's age and the CLI, counting the time the machine sleeps on every platform (`CLOCK_BOOTTIME` on Linux and Android, where `steady_clock` stops); the activity log and the CLI say when the machine slept and for how long | `fe37ad4` |
 
 ## Lessons learned
 
@@ -1069,3 +1070,18 @@ being an `int` complement (−49153, not 0x3FFF) at the first Linux
 compile; and **a virtual device's defaults move with the kernel**: WSL's
 6.18 creates `vcan0` with CAN XL's MTU (2060), so CAN FD works there
 with no setup, while CI sets 72 explicitly rather than trust a default.
+
+**2026-10-29 — session time counts sleep (ADR-0033):** **`steady_clock`
+promises monotonic, not what happens in a sleep.** MSVC's counts it
+(`QueryPerformanceCounter`), and so does libc++'s on Apple
+(`CLOCK_MONOTONIC_RAW`); libstdc++ and Android's libc++ use
+`CLOCK_MONOTONIC`, which stops. One type, two behaviors, and the phone
+run that found it had to compare the activity log's wall clock with its
+session seconds to see the 100 s hole. Core now names each platform's
+clock outright. A related limit: **a test can't produce what the
+runner can't do.** No CI runner or WSL VM can sleep, and on one that
+hasn't since it started the clock that counts sleep and the one that
+doesn't read the same, so the test that pins the clock can't see the
+wrong one there. The rule that matters is tested through a seam (the
+bridge's slept count), and the property itself waits for a sleep on
+the bench.

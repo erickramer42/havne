@@ -221,3 +221,13 @@ under `mock://`, in some screen-offs and not others.
 - Keeping the Bluetooth link and the recorder off the GUI thread, the
   alternative this ADR set aside, would make any other GUI-thread stall
   cost only what Live shows. Not needed for this one; a hardening item.
+
+## Appendix: 2026-10-29, session time counts sleep
+
+The open question in the appendix of 2026-10-28, whether core's host
+clock should count deep sleep, is decided by
+[ADR-0033](0033-session-time-counts-sleep.md): session time, a
+recording's `host_us` and a value's age all count it
+(`CLOCK_BOOTTIME` on Android), and the activity log says when the
+machine slept and for how long. The wake lock still keeps an adapter
+session awake; a sleep under `mock://` or `replay://` is now a gap.
