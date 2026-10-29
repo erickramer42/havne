@@ -102,6 +102,9 @@ Dates are commit dates.
 | 2026-10-26 | Decoding on the worker ([ADR-0024](adr/0024-decode-on-the-worker.md)): core decodes each frame in its dispatch and hands a values callback one batch per frame with the frame's time; the bridge stages them from the worker, so a dropped frame keeps its values, and decodes nothing; the chart shows each value at its own time and keeps every window's lowest and highest (ADR-0005's appendix). The vehicle sessions' recordings replay to their own values, 24,632 of them | `ddcf095`, `92a09c3`, `0ea4126`, `e78ea57`, `6e6472a`, `8b3fa60` |
 | 2026-10-28 | Android background sessions ([ADR-0029](adr/0029-android-background-sessions.md)): Qt's GUI loop kept running in the background, a `connectedDevice` foreground service with a wake lock while an adapter session is up, one Bluetooth socket connect at a time, and no drawing while the app isn't active (Qt 6.12's Android plugin deadlocked drawing for exposes after destroying the surface as the screen went off); the MX+ on the car held through the screen off with the app in front ([2026-10-28-android-11](bench-sessions/2026-10-28-android-11.md)) | `ee1db00`, `3d5b59f`, `bea2d48` |
 | 2026-10-28 | QtTune is renamed Havne ([ADR-0001](adr/0001-qt-free-core-c-abi.md)'s appendix of 2026-10-28): the product's name only where a user or builder sees it (`havne.exe`, the window, the release zip, `HAVNE_*` options, the Android package `io.github.erickramer42.havne` with its version from `project()`), neutral names inside (`SessionBridge`, the `App` QML module, `app_*`); the earlier name's preferences copied once and its recordings folder listed beside the new one, landed first with both names equal | `a4c9ba9`, `a5b689a` |
+| 2026-10-29 | v0.3.3 released: the Windows zip and, for the first time, a signed Android APK ([ADR-0030](adr/0030-signed-android-releases.md)); an rc dry run of the release workflow found apksigner 37's changed fingerprint line first, and its APK updated the test phone's local build in place | tag `v0.3.3` (`e9b8768`) |
+| 2026-10-29 | v0.3.4's tooling: the simulated CAN bus (`vcan0` and the kernel's `can-isotp`) tested on CI's Linux runner, a C ABI check against the last release (`scripts/abi-check.sh`, libabigail), and a Linux AppImage that runs on Ubuntu, Arch and Kali; merged through the first pull request from `dev` | `e43eb6c`, `74e346c`, `5901d9c`, PR #28 |
+| 2026-10-29 | `havne-cli` ([ADR-0031](adr/0031-command-line-client.md)): a second front end over the public headers alone, a session's frames and values as JSON lines; lines formatted on the worker into a ring that drops for a live bus and waits for a replay; golden runs of the program pin what the ABI shows a caller, the vehicle fixture frame for frame; ships beside `havne.exe` | `e8a3449`, `8d6fce1`, `0a30ad2` |
 
 ## Lessons learned
 
@@ -1016,3 +1019,37 @@ the first one, and a Service 01 PID whose reply spans frames would be
 lost every time. A fake models the device's documented behavior for
 every argument it accepts, or refuses the argument, so a test can see
 the difference.
+
+**2026-10-29 — v0.3.4's tooling:** **count what the contract names,
+not what a tool happens to print.** The ABI check's summary counted
+`abidw`'s function declarations: 186 locally, 1,619 on CI's runner,
+because the two libabigail versions keep different numbers of the
+C++ library's declarations in the dump. The check passed either way,
+since `abidiff` judges, but a number that moves with the tool says
+nothing about the library; the exported `ecuio_` symbols (73) are
+what the ABI promises, and the count is those now. And **a script
+committed from Windows has no executable bit**: the ABI job's first
+run failed with "Permission denied" (126). CI calls every script
+through `bash` now, and a new one gets `git update-index --chmod=+x`.
+
+**2026-10-29 — the command-line client (ADR-0031):** **a branch the
+development compiler never compiles hasn't been checked.** The last
+change before the hand-over moved the ring-size knob's read to
+`GetEnvironmentVariableA`, and the POSIX branch beside it reused a
+name for a pointer; MSVC never saw that branch, GCC refused it, and
+CI's first job stopped every other. An edit inside an `#ifdef` is
+built on the other side too (the WSL tree takes half a minute) before
+it's handed over. **A closed pipe isn't `EPIPE` everywhere:** on
+Windows the write fails with `ERROR_NO_DATA`, which the CRT reports as
+`EINVAL`; measured, the CLI now matches the Win32 code rather than
+the CRT's broad one. **A test of backpressure needs a slow reader.**
+The replay's wait was meant to be pinned by a golden run with the ring
+shrunk to a few lines, yet a mutant that dropped instead of waiting
+passed it: Python drained the pipe as fast as the replay filled the
+ring. Reading 4 KB at a time with a pause (`golden.py --slow`) made
+the same mutant drop 6,567 frames and fail. A test of a rate-dependent
+property is mutation-checked before it's trusted. And **what can't be
+sent can sometimes be sent another way:** Ctrl+C can't go to one child
+on Windows, but Ctrl+Break can, to a child in its own process group,
+through the same handler, so the stop ADR-0031 first left to a check by
+hand became a ctest case.

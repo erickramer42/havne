@@ -224,6 +224,19 @@ if(WIN32 AND TARGET ecuio-j2534-surrogate)
     )
 endif()
 
+# havne-cli ships beside havne.exe (ADR-0031 §7), where it finds both
+# surrogates, and stage.ps1 packs the folder
+if(WIN32 AND TARGET havne-cli)
+    add_dependencies(havne havne-cli)
+    add_custom_command(TARGET havne POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                $<TARGET_FILE:havne-cli>
+                $<TARGET_FILE_DIR:havne>
+        COMMENT "Deploying havne-cli next to havne.exe"
+        VERBATIM
+    )
+endif()
+
 # The x86 one:
 # Resolution order:
 #   1. HAVNE_SURROGATE_SOURCE cache variable (explicit override)

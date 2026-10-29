@@ -1,0 +1,3 @@
+{"ch": 0, "data": "41 0C 0B D7", "flags": 0, "id": "0x7E8", "t_us": 297446075, "type": "frame"}
+{"id": "0x7E8", "t_us": 297446075, "type": "values", "values": [{"id": 7003, "value": 757.75}]}
+{"dropped_frames": 0, "dropped_values": 0, "frames": 7074, "reason": "replay-end", "type": "end"}

@@ -37,6 +37,7 @@ old one, and the old record's status is updated to point at it.
 | [0028](0028-app-fed-streams.md) | App-fed streams: the app opens the Bluetooth links core can't (Android SPP, BLE) and feeds an `elm327` session through `ecuio/stream.h` | Accepted |
 | [0029](0029-android-background-sessions.md) | Android background sessions: the GUI thread keeps running, a foreground service keeps the process, one Bluetooth connect at a time | Accepted |
 | [0030](0030-signed-android-releases.md) | Signed Android releases: one release key, offline and in a protected environment, its certificate pinned in the repository | Accepted |
+| [0031](0031-command-line-client.md) | The command-line client: `havne-cli` streams a session as JSON lines over the public C ABI alone | Accepted |
 
 ## Adding a record
 

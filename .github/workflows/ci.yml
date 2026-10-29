@@ -6,11 +6,18 @@ on:
   pull_request:
     branches: [main]
   # Actions > CI > Run workflow, or: gh workflow run ci.yml --ref <branch>
-  # [-f smoke_only=true]. A manual run is the way to get the iOS simulator
-  # smoke, besides [ios-smoke] in a pushed commit's message; re-running a
-  # push run replays the push and skips the smoke again.
+  # [-f ios_smoke=true | -f smoke_only=true]. A manual run is how a feature
+  # branch gets CI, so it skips the 20-minute iOS simulator smoke unless
+  # asked: ios_smoke adds it to the whole run, smoke_only runs it with
+  # core-and-tests alone. [ios-smoke] in a pushed commit's message also
+  # asks for it; re-running a push run replays the push and skips the
+  # smoke again.
   workflow_dispatch:
     inputs:
+      ios_smoke:
+        description: Also run the iOS simulator smoke (about 20 minutes)
+        type: boolean
+        default: false
       smoke_only:
         description: >-
           Run only core-and-tests and the iOS simulator smoke, skipping the
@@ -570,17 +577,16 @@ jobs:
   # after that this needs Rosetta plus the universal iOS platform, or
   # arm64 simulator libraries from Qt.
   #
-  # Runs on pull requests and on request, not on every push: it takes
-  # 20-30 min against a few minutes for the rest of CI. Request it with a
-  # manual run (Actions > CI > Run workflow, on any branch; tick
-  # smoke_only to skip the other platform jobs), or with "[ios-smoke]" in
-  # the pushed commit's message. A re-run replays the original event, so
-  # re-running a skipped smoke skips it again.
+  # Runs on request only, not on pushes, pull requests or plain manual
+  # runs: it takes 20-30 min against a few minutes for the rest of CI.
+  # Request it with a manual run that ticks ios_smoke (the whole run) or
+  # smoke_only (the smoke and core-and-tests alone), on any branch, or
+  # with "[ios-smoke]" in the pushed commit's message. A re-run replays
+  # the original event, so re-running a skipped smoke skips it again.
   ios-simulator-smoke:
-    # On request only: it takes 20 minutes on the Intel runner, so pull
-    # requests don't wait on it
     if: >-
-      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'workflow_dispatch' &&
+      (inputs.ios_smoke || inputs.smoke_only)) ||
       (github.event_name == 'push' &&
       contains(github.event.head_commit.message, '[ios-smoke]'))
     runs-on: macos-15-intel

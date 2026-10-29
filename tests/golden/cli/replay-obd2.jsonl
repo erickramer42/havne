@@ -1,0 +1,591 @@
+{"schema": 1, "type": "start"}
+{"backend": "replay", "baud": 0, "channels": [], "profile": "obd2", "protocol_id": 0, "replay": {"frames": 7074, "loop": false, "span_ms": 297446, "speed_milli": 0}, "type": "session"}
+{"signals": [{"decimals": 1, "id": 7001, "name": "Engine Load", "unit": "%"}, {"decimals": 0, "id": 7002, "name": "Coolant Temp", "unit": "\u00b0C"}, {"decimals": 0, "id": 7003, "name": "RPM", "unit": "RPM"}, {"decimals": 0, "id": 7004, "name": "Vehicle Speed", "unit": "km/h"}, {"decimals": 0, "id": 7005, "name": "Intake Air Temp", "unit": "\u00b0C"}, {"decimals": 1, "id": 7006, "name": "Throttle Position", "unit": "%"}, {"decimals": 1, "id": 7007, "name": "Fuel Level", "unit": "%"}, {"decimals": 2, "id": 7008, "name": "Battery Voltage", "unit": "V"}, {"decimals": 1, "id": 7009, "name": "MAF", "unit": "g/s"}, {"decimals": 0, "id": 7010, "name": "Engine Oil Temp", "unit": "\u00b0C"}], "type": "signals"}
+{"ch": 0, "data": "41 00 FE 7F A8 13", "flags": 0, "id": "0x7E8", "t_us": 0, "type": "frame"}
+{"ch": 0, "data": "41 20 A0 17 F0 11", "flags": 0, "id": "0x7E8", "t_us": 30142, "type": "frame"}
+{"ch": 0, "data": "41 40 FE D0 8C 81", "flags": 0, "id": "0x7E8", "t_us": 49999, "type": "frame"}
+{"ch": 0, "data": "41 60 63 08 00 01", "flags": 0, "id": "0x7E8", "t_us": 75172, "type": "frame"}
+{"ch": 0, "data": "41 80 00 04 00 0D", "flags": 0, "id": "0x7E8", "t_us": 110479, "type": "frame"}
+{"ch": 0, "data": "41 A0 04 00 00 00", "flags": 0, "id": "0x7E8", "t_us": 140669, "type": "frame"}
+{"ch": 0, "data": "41 04 00", "flags": 0, "id": "0x7E8", "t_us": 181225, "type": "frame"}
+{"id": "0x7E8", "t_us": 181225, "type": "values", "values": [{"id": 7001, "value": 0}]}
+{"ch": 0, "data": "41 05 64", "flags": 0, "id": "0x7E8", "t_us": 265286, "type": "frame"}
+{"id": "0x7E8", "t_us": 265286, "type": "values", "values": [{"id": 7002, "value": 60}]}
+{"ch": 0, "data": "41 0C 00 00", "flags": 0, "id": "0x7E8", "t_us": 366063, "type": "frame"}
+{"id": "0x7E8", "t_us": 366063, "type": "values", "values": [{"id": 7003, "value": 0}]}
+{"ch": 0, "data": "41 0D 00", "flags": 0, "id": "0x7E8", "t_us": 426294, "type": "frame"}
+{"id": "0x7E8", "t_us": 426294, "type": "values", "values": [{"id": 7004, "value": 0}]}
+{"ch": 0, "data": "41 0F 67", "flags": 0, "id": "0x7E8", "t_us": 561916, "type": "frame"}
+{"id": "0x7E8", "t_us": 561916, "type": "values", "values": [{"id": 7005, "value": 63}]}
+{"ch": 0, "data": "7F 22 31", "flags": 0, "id": "0x7E8", "t_us": 590874, "type": "frame"}
+{"ch": 0, "data": "41 11 38", "flags": 0, "id": "0x7E8", "t_us": 621345, "type": "frame"}
+{"id": "0x7E8", "t_us": 621345, "type": "values", "values": [{"id": 7006, "value": 21.96078431372549}]}
+{"ch": 0, "data": "41 2F 8A", "flags": 0, "id": "0x7E8", "t_us": 736377, "type": "frame"}
+{"id": "0x7E8", "t_us": 736377, "type": "values", "values": [{"id": 7007, "value": 54.11764705882353}]}
+{"ch": 0, "data": "7F 22 31", "flags": 0, "id": "0x7E8", "t_us": 772201, "type": "frame"}
+{"ch": 0, "data": "41 42 2D FA", "flags": 0, "id": "0x7E8", "t_us": 815254, "type": "frame"}
+{"id": "0x7E8", "t_us": 815254, "type": "values", "values": [{"id": 7008, "value": 11.77}]}
+{"ch": 0, "data": "7F 22 31", "flags": 0, "id": "0x7E8", "t_us": 860450, "type": "frame"}
+{"ch": 0, "data": "41 10 00 1F", "flags": 0, "id": "0x7E8", "t_us": 891219, "type": "frame"}
+{"id": "0x7E8", "t_us": 891219, "type": "values", "values": [{"id": 7009, "value": 0.31}]}
+{"ch": 0, "data": "7F 22 31", "flags": 0, "id": "0x7E8", "t_us": 916071, "type": "frame"}
+{"ch": 0, "data": "41 04 00", "flags": 0, "id": "0x7E8", "t_us": 951489, "type": "frame"}
+{"id": "0x7E8", "t_us": 951489, "type": "values", "values": [{"id": 7001, "value": 0}]}
+{"ch": 0, "data": "41 05 64", "flags": 0, "id": "0x7E8", "t_us": 1071814, "type": "frame"}
+{"id": "0x7E8", "t_us": 1071814, "type": "values", "values": [{"id": 7002, "value": 60}]}
+{"ch": 0, "data": "7F 22 31", "flags": 0, "id": "0x7E8", "t_us": 1101541, "type": "frame"}
+{"ch": 0, "data": "41 0C 00 00", "flags": 0, "id": "0x7E8", "t_us": 1126205, "type": "frame"}
+{"id": "0x7E8", "t_us": 1126205, "type": "values", "values": [{"id": 7003, "value": 0}]}
+{"ch": 0, "data": "7F 22 31", "flags": 0, "id": "0x7E8", "t_us": 1166159, "type": "frame"}
+{"ch": 0, "data": "41 0D 00", "flags": 0, "id": "0x7E8", "t_us": 1180595, "type": "frame"}
+{"id": "0x7E8", "t_us": 1180595, "type": "values", "values": [{"id": 7004, "value": 0}]}
+{"ch": 0, "data": "7F 22 31", "flags": 0, "id": "0x7E8", "t_us": 1216445, "type": "frame"}
+{"ch": 0, "data": "41 0F 67", "flags": 0, "id": "0x7E8", "t_us": 1250975, "type": "frame"}
+{"id": "0x7E8", "t_us": 1250975, "type": "values", "values": [{"id": 7005, "value": 63}]}
+{"ch": 0, "data": "41 11 38", "flags": 0, "id": "0x7E8", "t_us": 1284667, "type": "frame"}
+{"id": "0x7E8", "t_us": 1284667, "type": "values", "values": [{"id": 7006, "value": 21.96078431372549}]}
+{"ch": 0, "data": "41 2F 8A", "flags": 0, "id": "0x7E8", "t_us": 1316328, "type": "frame"}
+{"id": "0x7E8", "t_us": 1316328, "type": "values", "values": [{"id": 7007, "value": 54.11764705882353}]}
+{"ch": 0, "data": "41 42 2D FA", "flags": 0, "id": "0x7E8", "t_us": 1341476, "type": "frame"}
+{"id": "0x7E8", "t_us": 1341476, "type": "values", "values": [{"id": 7008, "value": 11.77}]}
+{"ch": 0, "data": "41 10 00 20", "flags": 0, "id": "0x7E8", "t_us": 1371030, "type": "frame"}
+{"id": "0x7E8", "t_us": 1371030, "type": "values", "values": [{"id": 7009, "value": 0.32}]}
+{"ch": 0, "data": "41 04 00", "flags": 0, "id": "0x7E8", "t_us": 1416307, "type": "frame"}
+{"id": "0x7E8", "t_us": 1416307, "type": "values", "values": [{"id": 7001, "value": 0}]}
+{"ch": 0, "data": "41 05 64", "flags": 0, "id": "0x7E8", "t_us": 1461070, "type": "frame"}
+{"id": "0x7E8", "t_us": 1461070, "type": "values", "values": [{"id": 7002, "value": 60}]}
+{"ch": 0, "data": "41 0C 00 00", "flags": 0, "id": "0x7E8", "t_us": 1491042, "type": "frame"}
+{"id": "0x7E8", "t_us": 1491042, "type": "values", "values": [{"id": 7003, "value": 0}]}
+{"ch": 0, "data": "41 0D 00", "flags": 0, "id": "0x7E8", "t_us": 1521709, "type": "frame"}
+{"id": "0x7E8", "t_us": 1521709, "type": "values", "values": [{"id": 7004, "value": 0}]}
+{"ch": 0, "data": "41 0F 67", "flags": 0, "id": "0x7E8", "t_us": 1551224, "type": "frame"}
+{"id": "0x7E8", "t_us": 1551224, "type": "values", "values": [{"id": 7005, "value": 63}]}
+{"ch": 0, "data": "41 11 38", "flags": 0, "id": "0x7E8", "t_us": 1581550, "type": "frame"}
+{"id": "0x7E8", "t_us": 1581550, "type": "values", "values": [{"id": 7006, "value": 21.96078431372549}]}
+{"ch": 0, "data": "41 2F 8A", "flags": 0, "id": "0x7E8", "t_us": 1621501, "type": "frame"}
+{"id": "0x7E8", "t_us": 1621501, "type": "values", "values": [{"id": 7007, "value": 54.11764705882353}]}
+{"ch": 0, "data": "41 42 2D C4", "flags": 0, "id": "0x7E8", "t_us": 1670989, "type": "frame"}
+{"id": "0x7E8", "t_us": 1670989, "type": "values", "values": [{"id": 7008, "value": 11.716000000000001}]}
+{"ch": 0, "data": "41 10 00 1F", "flags": 0, "id": "0x7E8", "t_us": 1701147, "type": "frame"}
+{"id": "0x7E8", "t_us": 1701147, "type": "values", "values": [{"id": 7009, "value": 0.31}]}
+{"ch": 0, "data": "41 04 00", "flags": 0, "id": "0x7E8", "t_us": 1731116, "type": "frame"}
+{"id": "0x7E8", "t_us": 1731116, "type": "values", "values": [{"id": 7001, "value": 0}]}
+{"ch": 0, "data": "41 05 64", "flags": 0, "id": "0x7E8", "t_us": 1761124, "type": "frame"}
+{"id": "0x7E8", "t_us": 1761124, "type": "values", "values": [{"id": 7002, "value": 60}]}
+{"ch": 0, "data": "41 0C 00 00", "flags": 0, "id": "0x7E8", "t_us": 1796199, "type": "frame"}
+{"id": "0x7E8", "t_us": 1796199, "type": "values", "values": [{"id": 7003, "value": 0}]}
+{"ch": 0, "data": "41 0D 00", "flags": 0, "id": "0x7E8", "t_us": 1830998, "type": "frame"}
+{"id": "0x7E8", "t_us": 1830998, "type": "values", "values": [{"id": 7004, "value": 0}]}
+{"ch": 0, "data": "41 0F 67", "flags": 0, "id": "0x7E8", "t_us": 1871258, "type": "frame"}
+{"id": "0x7E8", "t_us": 1871258, "type": "values", "values": [{"id": 7005, "value": 63}]}
+{"ch": 0, "data": "41 11 38", "flags": 0, "id": "0x7E8", "t_us": 1915925, "type": "frame"}
+{"id": "0x7E8", "t_us": 1915925, "type": "values", "values": [{"id": 7006, "value": 21.96078431372549}]}
+{"ch": 0, "data": "41 2F 8A", "flags": 0, "id": "0x7E8", "t_us": 1956473, "type": "frame"}
+{"id": "0x7E8", "t_us": 1956473, "type": "values", "values": [{"id": 7007, "value": 54.11764705882353}]}
+{"ch": 0, "data": "41 42 2D C5", "flags": 0, "id": "0x7E8", "t_us": 2001508, "type": "frame"}
+{"id": "0x7E8", "t_us": 2001508, "type": "values", "values": [{"id": 7008, "value": 11.717}]}
+{"ch": 0, "data": "41 10 00 1F", "flags": 0, "id": "0x7E8", "t_us": 2061034, "type": "frame"}
+{"id": "0x7E8", "t_us": 2061034, "type": "values", "values": [{"id": 7009, "value": 0.31}]}
+{"ch": 0, "data": "41 04 00", "flags": 0, "id": "0x7E8", "t_us": 2085950, "type": "frame"}
+{"id": "0x7E8", "t_us": 2085950, "type": "values", "values": [{"id": 7001, "value": 0}]}
+{"ch": 0, "data": "41 05 64", "flags": 0, "id": "0x7E8", "t_us": 2126049, "type": "frame"}
+{"id": "0x7E8", "t_us": 2126049, "type": "values", "values": [{"id": 7002, "value": 60}]}
+{"ch": 0, "data": "41 0C 00 00", "flags": 0, "id": "0x7E8", "t_us": 2154979, "type": "frame"}
+{"id": "0x7E8", "t_us": 2154979, "type": "values", "values": [{"id": 7003, "value": 0}]}
+{"ch": 0, "data": "41 0D 00", "flags": 0, "id": "0x7E8", "t_us": 2181581, "type": "frame"}
+{"id": "0x7E8", "t_us": 2181581, "type": "values", "values": [{"id": 7004, "value": 0}]}
+{"ch": 0, "data": "41 0F 67", "flags": 0, "id": "0x7E8", "t_us": 2203969, "type": "frame"}
+{"id": "0x7E8", "t_us": 2203969, "type": "values", "values": [{"id": 7005, "value": 63}]}
+{"ch": 0, "data": "41 11 38", "flags": 0, "id": "0x7E8", "t_us": 2255173, "type": "frame"}
+{"id": "0x7E8", "t_us": 2255173, "type": "values", "values": [{"id": 7006, "value": 21.96078431372549}]}
+{"ch": 0, "data": "41 2F 8A", "flags": 0, "id": "0x7E8", "t_us": 2295218, "type": "frame"}
+{"id": "0x7E8", "t_us": 2295218, "type": "values", "values": [{"id": 7007, "value": 54.11764705882353}]}
+{"ch": 0, "data": "41 42 2D C4", "flags": 0, "id": "0x7E8", "t_us": 2316257, "type": "frame"}
+{"id": "0x7E8", "t_us": 2316257, "type": "values", "values": [{"id": 7008, "value": 11.716000000000001}]}
+{"ch": 0, "data": "41 10 00 1F", "flags": 0, "id": "0x7E8", "t_us": 2345667, "type": "frame"}
+{"id": "0x7E8", "t_us": 2345667, "type": "values", "values": [{"id": 7009, "value": 0.31}]}
+{"ch": 0, "data": "41 04 00", "flags": 0, "id": "0x7E8", "t_us": 2375869, "type": "frame"}
+{"id": "0x7E8", "t_us": 2375869, "type": "values", "values": [{"id": 7001, "value": 0}]}
+{"ch": 0, "data": "41 05 64", "flags": 0, "id": "0x7E8", "t_us": 2421203, "type": "frame"}
+{"id": "0x7E8", "t_us": 2421203, "type": "values", "values": [{"id": 7002, "value": 60}]}
+{"ch": 0, "data": "41 0C 00 00", "flags": 0, "id": "0x7E8", "t_us": 2455986, "type": "frame"}
+{"id": "0x7E8", "t_us": 2455986, "type": "values", "values": [{"id": 7003, "value": 0}]}
+{"ch": 0, "data": "41 0D 00", "flags": 0, "id": "0x7E8", "t_us": 2501206, "type": "frame"}
+{"id": "0x7E8", "t_us": 2501206, "type": "values", "values": [{"id": 7004, "value": 0}]}
+{"ch": 0, "data": "41 0F 67", "flags": 0, "id": "0x7E8", "t_us": 2521178, "type": "frame"}
+{"id": "0x7E8", "t_us": 2521178, "type": "values", "values": [{"id": 7005, "value": 63}]}
+{"ch": 0, "data": "41 11 38", "flags": 0, "id": "0x7E8", "t_us": 2555318, "type": "frame"}
+{"id": "0x7E8", "t_us": 2555318, "type": "values", "values": [{"id": 7006, "value": 21.96078431372549}]}
+{"ch": 0, "data": "41 2F 8A", "flags": 0, "id": "0x7E8", "t_us": 2581218, "type": "frame"}
+{"id": "0x7E8", "t_us": 2581218, "type": "values", "values": [{"id": 7007, "value": 54.11764705882353}]}
+{"ch": 0, "data": "41 42 2D C1", "flags": 0, "id": "0x7E8", "t_us": 2624017, "type": "frame"}
+{"id": "0x7E8", "t_us": 2624017, "type": "values", "values": [{"id": 7008, "value": 11.713000000000001}]}
+{"ch": 0, "data": "41 10 00 1F", "flags": 0, "id": "0x7E8", "t_us": 2661205, "type": "frame"}
+{"id": "0x7E8", "t_us": 2661205, "type": "values", "values": [{"id": 7009, "value": 0.31}]}
+{"ch": 0, "data": "41 04 00", "flags": 0, "id": "0x7E8", "t_us": 2701084, "type": "frame"}
+{"id": "0x7E8", "t_us": 2701084, "type": "values", "values": [{"id": 7001, "value": 0}]}
+{"ch": 0, "data": "41 05 64", "flags": 0, "id": "0x7E8", "t_us": 2741036, "type": "frame"}
+{"id": "0x7E8", "t_us": 2741036, "type": "values", "values": [{"id": 7002, "value": 60}]}
+{"ch": 0, "data": "41 0C 00 00", "flags": 0, "id": "0x7E8", "t_us": 2780948, "type": "frame"}
+{"id": "0x7E8", "t_us": 2780948, "type": "values", "values": [{"id": 7003, "value": 0}]}
+{"ch": 0, "data": "41 0D 00", "flags": 0, "id": "0x7E8", "t_us": 2826114, "type": "frame"}
+{"id": "0x7E8", "t_us": 2826114, "type": "values", "values": [{"id": 7004, "value": 0}]}
+{"ch": 0, "data": "41 0F 67", "flags": 0, "id": "0x7E8", "t_us": 2866236, "type": "frame"}
+{"id": "0x7E8", "t_us": 2866236, "type": "values", "values": [{"id": 7005, "value": 63}]}
+{"ch": 0, "data": "41 11 38", "flags": 0, "id": "0x7E8", "t_us": 2906523, "type": "frame"}
+{"id": "0x7E8", "t_us": 2906523, "type": "values", "values": [{"id": 7006, "value": 21.96078431372549}]}
+{"ch": 0, "data": "41 2F 8A", "flags": 0, "id": "0x7E8", "t_us": 2945802, "type": "frame"}
+{"id": "0x7E8", "t_us": 2945802, "type": "values", "values": [{"id": 7007, "value": 54.11764705882353}]}
+{"ch": 0, "data": "41 42 25 5C", "flags": 0, "id": "0x7E8", "t_us": 2986275, "type": "frame"}
+{"id": "0x7E8", "t_us": 2986275, "type": "values", "values": [{"id": 7008, "value": 9.564}]}
+{"ch": 0, "data": "41 10 01 00", "flags": 0, "id": "0x7E8", "t_us": 3025746, "type": "frame"}
+{"id": "0x7E8", "t_us": 3025746, "type": "values", "values": [{"id": 7009, "value": 2.56}]}
+{"ch": 0, "data": "41 04 00", "flags": 0, "id": "0x7E8", "t_us": 3065965, "type": "frame"}
+{"id": "0x7E8", "t_us": 3065965, "type": "values", "values": [{"id": 7001, "value": 0}]}
+{"ch": 0, "data": "41 05 64", "flags": 0, "id": "0x7E8", "t_us": 3106028, "type": "frame"}
+{"id": "0x7E8", "t_us": 3106028, "type": "values", "values": [{"id": 7002, "value": 60}]}
+{"ch": 0, "data": "41 0C 00 00", "flags": 0, "id": "0x7E8", "t_us": 3151052, "type": "frame"}
+{"id": "0x7E8", "t_us": 3151052, "type": "values", "values": [{"id": 7003, "value": 0}]}
+{"ch": 0, "data": "41 0D 00", "flags": 0, "id": "0x7E8", "t_us": 3185544, "type": "frame"}
+{"id": "0x7E8", "t_us": 3185544, "type": "values", "values": [{"id": 7004, "value": 0}]}
+{"ch": 0, "data": "41 0F 67", "flags": 0, "id": "0x7E8", "t_us": 3230726, "type": "frame"}
+{"id": "0x7E8", "t_us": 3230726, "type": "values", "values": [{"id": 7005, "value": 63}]}
+{"ch": 0, "data": "41 11 38", "flags": 0, "id": "0x7E8", "t_us": 3267105, "type": "frame"}
+{"id": "0x7E8", "t_us": 3267105, "type": "values", "values": [{"id": 7006, "value": 21.96078431372549}]}
+{"ch": 0, "data": "41 2F 8A", "flags": 0, "id": "0x7E8", "t_us": 3291386, "type": "frame"}
+{"id": "0x7E8", "t_us": 3291386, "type": "values", "values": [{"id": 7007, "value": 54.11764705882353}]}
+{"ch": 0, "data": "41 42 25 EB", "flags": 0, "id": "0x7E8", "t_us": 3321205, "type": "frame"}
+{"id": "0x7E8", "t_us": 3321205, "type": "values", "values": [{"id": 7008, "value": 9.707}]}
+{"ch": 0, "data": "41 10 00 00", "flags": 0, "id": "0x7E8", "t_us": 3371370, "type": "frame"}
+{"id": "0x7E8", "t_us": 3371370, "type": "values", "values": [{"id": 7009, "value": 0}]}
+{"ch": 0, "data": "41 04 FF", "flags": 0, "id": "0x7E8", "t_us": 3398635, "type": "frame"}
+{"id": "0x7E8", "t_us": 3398635, "type": "values", "values": [{"id": 7001, "value": 100}]}
+{"ch": 0, "data": "41 05 64", "flags": 0, "id": "0x7E8", "t_us": 3421250, "type": "frame"}
+{"id": "0x7E8", "t_us": 3421250, "type": "values", "values": [{"id": 7002, "value": 60}]}
+{"ch": 0, "data": "41 0C 03 ED", "flags": 0, "id": "0x7E8", "t_us": 3451493, "type": "frame"}
+{"id": "0x7E8", "t_us": 3451493, "type": "values", "values": [{"id": 7003, "value": 251.25}]}
+{"ch": 0, "data": "41 0D 00", "flags": 0, "id": "0x7E8", "t_us": 3485843, "type": "frame"}
+{"id": "0x7E8", "t_us": 3485843, "type": "values", "values": [{"id": 7004, "value": 0}]}
+{"ch": 0, "data": "41 0F 67", "flags": 0, "id": "0x7E8", "t_us": 3522903, "type": "frame"}
+{"id": "0x7E8", "t_us": 3522903, "type": "values", "values": [{"id": 7005, "value": 63}]}
+{"ch": 0, "data": "41 11 38", "flags": 0, "id": "0x7E8", "t_us": 3560968, "type": "frame"}
+{"id": "0x7E8", "t_us": 3560968, "type": "values", "values": [{"id": 7006, "value": 21.96078431372549}]}
+{"ch": 0, "data": "41 2F 8A", "flags": 0, "id": "0x7E8", "t_us": 3601171, "type": "frame"}
+{"id": "0x7E8", "t_us": 3601171, "type": "values", "values": [{"id": 7007, "value": 54.11764705882353}]}
+{"ch": 0, "data": "41 42 27 89", "flags": 0, "id": "0x7E8", "t_us": 3641008, "type": "frame"}
+{"id": "0x7E8", "t_us": 3641008, "type": "values", "values": [{"id": 7008, "value": 10.121}]}
+{"ch": 0, "data": "41 10 00 C6", "flags": 0, "id": "0x7E8", "t_us": 3681328, "type": "frame"}
+{"id": "0x7E8", "t_us": 3681328, "type": "values", "values": [{"id": 7009, "value": 1.98}]}
+{"ch": 0, "data": "41 04 AD", "flags": 0, "id": "0x7E8", "t_us": 3725721, "type": "frame"}
+{"id": "0x7E8", "t_us": 3725721, "type": "values", "values": [{"id": 7001, "value": 67.84313725490196}]}
+{"ch": 0, "data": "41 05 64", "flags": 0, "id": "0x7E8", "t_us": 3771435, "type": "frame"}
+{"id": "0x7E8", "t_us": 3771435, "type": "values", "values": [{"id": 7002, "value": 60}]}
+{"ch": 0, "data": "41 0C 0E BD", "flags": 0, "id": "0x7E8", "t_us": 3806218, "type": "frame"}
+{"id": "0x7E8", "t_us": 3806218, "type": "values", "values": [{"id": 7003, "value": 943.25}]}
+{"ch": 0, "data": "41 0D 00", "flags": 0, "id": "0x7E8", "t_us": 3846156, "type": "frame"}
+{"id": "0x7E8", "t_us": 3846156, "type": "values", "values": [{"id": 7004, "value": 0}]}
+{"ch": 0, "data": "41 0F 67", "flags": 0, "id": "0x7E8", "t_us": 3890906, "type": "frame"}
+{"id": "0x7E8", "t_us": 3890906, "type": "values", "values": [{"id": 7005, "value": 63}]}
+{"ch": 0, "data": "41 11 1A", "flags": 0, "id": "0x7E8", "t_us": 3931103, "type": "frame"}
+{"id": "0x7E8", "t_us": 3931103, "type": "values", "values": [{"id": 7006, "value": 10.196078431372548}]}
+{"ch": 0, "data": "41 2F 8A", "flags": 0, "id": "0x7E8", "t_us": 3951278, "type": "frame"}
+{"id": "0x7E8", "t_us": 3951278, "type": "values", "values": [{"id": 7007, "value": 54.11764705882353}]}
+{"ch": 0, "data": "41 42 2B 8E", "flags": 0, "id": "0x7E8", "t_us": 3980986, "type": "frame"}
+{"id": "0x7E8", "t_us": 3980986, "type": "values", "values": [{"id": 7008, "value": 11.15}]}
+{"ch": 0, "data": "41 10 00 AB", "flags": 0, "id": "0x7E8", "t_us": 4007194, "type": "frame"}
+{"id": "0x7E8", "t_us": 4007194, "type": "values", "values": [{"id": 7009, "value": 1.71}]}
+{"ch": 0, "data": "41 04 34", "flags": 0, "id": "0x7E8", "t_us": 4050804, "type": "frame"}
+{"id": "0x7E8", "t_us": 4050804, "type": "values", "values": [{"id": 7001, "value": 20.392156862745097}]}
+{"ch": 0, "data": "41 05 64", "flags": 0, "id": "0x7E8", "t_us": 4100797, "type": "frame"}
+{"id": "0x7E8", "t_us": 4100797, "type": "values", "values": [{"id": 7002, "value": 60}]}
+{"ch": 0, "data": "41 0C 0E 9F", "flags": 0, "id": "0x7E8", "t_us": 4135613, "type": "frame"}
+{"id": "0x7E8", "t_us": 4135613, "type": "values", "values": [{"id": 7003, "value": 935.75}]}
+{"ch": 0, "data": "41 0D 00", "flags": 0, "id": "0x7E8", "t_us": 4156155, "type": "frame"}
+{"id": "0x7E8", "t_us": 4156155, "type": "values", "values": [{"id": 7004, "value": 0}]}
+{"ch": 0, "data": "41 0F 66", "flags": 0, "id": "0x7E8", "t_us": 4207044, "type": "frame"}
+{"id": "0x7E8", "t_us": 4207044, "type": "values", "values": [{"id": 7005, "value": 62}]}
+{"ch": 0, "data": "41 11 24", "flags": 0, "id": "0x7E8", "t_us": 4245361, "type": "frame"}
+{"id": "0x7E8", "t_us": 4245361, "type": "values", "values": [{"id": 7006, "value": 14.117647058823529}]}
+{"ch": 0, "data": "41 2F 8A", "flags": 0, "id": "0x7E8", "t_us": 4280535, "type": "frame"}
+{"id": "0x7E8", "t_us": 4280535, "type": "values", "values": [{"id": 7007, "value": 54.11764705882353}]}
+{"ch": 0, "data": "41 42 2C 1E", "flags": 0, "id": "0x7E8", "t_us": 4307233, "type": "frame"}
+{"id": "0x7E8", "t_us": 4307233, "type": "values", "values": [{"id": 7008, "value": 11.294}]}
+{"ch": 0, "data": "41 10 01 1E", "flags": 0, "id": "0x7E8", "t_us": 4345565, "type": "frame"}
+{"id": "0x7E8", "t_us": 4345565, "type": "values", "values": [{"id": 7009, "value": 2.86}]}
+{"ch": 0, "data": "41 04 26", "flags": 0, "id": "0x7E8", "t_us": 4371328, "type": "frame"}
+{"id": "0x7E8", "t_us": 4371328, "type": "values", "values": [{"id": 7001, "value": 14.901960784313726}]}
+{"ch": 0, "data": "41 05 64", "flags": 0, "id": "0x7E8", "t_us": 4433488, "type": "frame"}
+{"id": "0x7E8", "t_us": 4433488, "type": "values", "values": [{"id": 7002, "value": 60}]}
+{"ch": 0, "data": "41 0C 0F FE", "flags": 0, "id": "0x7E8", "t_us": 4456336, "type": "frame"}
+{"id": "0x7E8", "t_us": 4456336, "type": "values", "values": [{"id": 7003, "value": 1023.5}]}
+{"ch": 0, "data": "41 0D 00", "flags": 0, "id": "0x7E8", "t_us": 4494895, "type": "frame"}
+{"id": "0x7E8", "t_us": 4494895, "type": "values", "values": [{"id": 7004, "value": 0}]}
+{"ch": 0, "data": "41 0F 66", "flags": 0, "id": "0x7E8", "t_us": 4525955, "type": "frame"}
+{"id": "0x7E8", "t_us": 4525955, "type": "values", "values": [{"id": 7005, "value": 62}]}
+{"ch": 0, "data": "41 11 24", "flags": 0, "id": "0x7E8", "t_us": 4556843, "type": "frame"}
+{"id": "0x7E8", "t_us": 4556843, "type": "values", "values": [{"id": 7006, "value": 14.117647058823529}]}
+{"ch": 0, "data": "41 2F 8A", "flags": 0, "id": "0x7E8", "t_us": 4580625, "type": "frame"}
+{"id": "0x7E8", "t_us": 4580625, "type": "values", "values": [{"id": 7007, "value": 54.11764705882353}]}
+{"ch": 0, "data": "41 42 2C 3D", "flags": 0, "id": "0x7E8", "t_us": 4622099, "type": "frame"}
+{"id": "0x7E8", "t_us": 4622099, "type": "values", "values": [{"id": 7008, "value": 11.325000000000001}]}
+{"ch": 0, "data": "41 10 01 DE", "flags": 0, "id": "0x7E8", "t_us": 4656593, "type": "frame"}
+{"id": "0x7E8", "t_us": 4656593, "type": "values", "values": [{"id": 7009, "value": 4.78}]}
+{"ch": 0, "data": "41 04 1D", "flags": 0, "id": "0x7E8", "t_us": 4681237, "type": "frame"}
+{"id": "0x7E8", "t_us": 4681237, "type": "values", "values": [{"id": 7001, "value": 11.372549019607844}]}
+{"ch": 0, "data": "41 05 64", "flags": 0, "id": "0x7E8", "t_us": 4730930, "type": "frame"}
+{"id": "0x7E8", "t_us": 4730930, "type": "values", "values": [{"id": 7002, "value": 60}]}
+{"ch": 0, "data": "41 0C 11 A1", "flags": 0, "id": "0x7E8", "t_us": 4766105, "type": "frame"}
+{"id": "0x7E8", "t_us": 4766105, "type": "values", "values": [{"id": 7003, "value": 1128.25}]}
+{"ch": 0, "data": "41 0D 00", "flags": 0, "id": "0x7E8", "t_us": 4793891, "type": "frame"}
+{"id": "0x7E8", "t_us": 4793891, "type": "values", "values": [{"id": 7004, "value": 0}]}
+{"ch": 0, "data": "41 0F 66", "flags": 0, "id": "0x7E8", "t_us": 4826556, "type": "frame"}
+{"id": "0x7E8", "t_us": 4826556, "type": "values", "values": [{"id": 7005, "value": 62}]}
+{"ch": 0, "data": "41 11 23", "flags": 0, "id": "0x7E8", "t_us": 4894992, "type": "frame"}
+{"id": "0x7E8", "t_us": 4894992, "type": "values", "values": [{"id": 7006, "value": 13.72549019607843}]}
+{"ch": 0, "data": "41 2F 8A", "flags": 0, "id": "0x7E8", "t_us": 4925832, "type": "frame"}
+{"id": "0x7E8", "t_us": 4925832, "type": "values", "values": [{"id": 7007, "value": 54.11764705882353}]}
+{"ch": 0, "data": "41 42 2C 9E", "flags": 0, "id": "0x7E8", "t_us": 4974440, "type": "frame"}
+{"id": "0x7E8", "t_us": 4974440, "type": "values", "values": [{"id": 7008, "value": 11.422}]}
+{"ch": 0, "data": "41 10 01 AD", "flags": 0, "id": "0x7E8", "t_us": 5033887, "type": "frame"}
+{"id": "0x7E8", "t_us": 5033887, "type": "values", "values": [{"id": 7009, "value": 4.29}]}
+{"ch": 0, "data": "41 04 18", "flags": 0, "id": "0x7E8", "t_us": 5060736, "type": "frame"}
+{"id": "0x7E8", "t_us": 5060736, "type": "values", "values": [{"id": 7001, "value": 9.411764705882353}]}
+{"ch": 0, "data": "41 05 64", "flags": 0, "id": "0x7E8", "t_us": 5095207, "type": "frame"}
+{"id": "0x7E8", "t_us": 5095207, "type": "values", "values": [{"id": 7002, "value": 60}]}
+{"ch": 0, "data": "41 0C 13 3E", "flags": 0, "id": "0x7E8", "t_us": 5140966, "type": "frame"}
+{"id": "0x7E8", "t_us": 5140966, "type": "values", "values": [{"id": 7003, "value": 1231.5}]}
+{"ch": 0, "data": "41 0D 00", "flags": 0, "id": "0x7E8", "t_us": 5225976, "type": "frame"}
+{"id": "0x7E8", "t_us": 5225976, "type": "values", "values": [{"id": 7004, "value": 0}]}
+{"ch": 0, "data": "41 0F 66", "flags": 0, "id": "0x7E8", "t_us": 5274129, "type": "frame"}
+{"id": "0x7E8", "t_us": 5274129, "type": "values", "values": [{"id": 7005, "value": 62}]}
+{"ch": 0, "data": "41 11 23", "flags": 0, "id": "0x7E8", "t_us": 5301490, "type": "frame"}
+{"id": "0x7E8", "t_us": 5301490, "type": "values", "values": [{"id": 7006, "value": 13.72549019607843}]}
+{"ch": 0, "data": "41 2F 8A", "flags": 0, "id": "0x7E8", "t_us": 5341175, "type": "frame"}
+{"id": "0x7E8", "t_us": 5341175, "type": "values", "values": [{"id": 7007, "value": 54.11764705882353}]}
+{"ch": 0, "data": "41 42 2C 9C", "flags": 0, "id": "0x7E8", "t_us": 5395308, "type": "frame"}
+{"id": "0x7E8", "t_us": 5395308, "type": "values", "values": [{"id": 7008, "value": 11.42}]}
+{"ch": 0, "data": "41 10 01 A0", "flags": 0, "id": "0x7E8", "t_us": 5426252, "type": "frame"}
+{"id": "0x7E8", "t_us": 5426252, "type": "values", "values": [{"id": 7009, "value": 4.16}]}
+{"ch": 0, "data": "41 04 15", "flags": 0, "id": "0x7E8", "t_us": 5466272, "type": "frame"}
+{"id": "0x7E8", "t_us": 5466272, "type": "values", "values": [{"id": 7001, "value": 8.235294117647058}]}
+{"ch": 0, "data": "41 05 65", "flags": 0, "id": "0x7E8", "t_us": 5511142, "type": "frame"}
+{"id": "0x7E8", "t_us": 5511142, "type": "values", "values": [{"id": 7002, "value": 61}]}
+{"ch": 0, "data": "41 0C 13 B5", "flags": 0, "id": "0x7E8", "t_us": 5536192, "type": "frame"}
+{"id": "0x7E8", "t_us": 5536192, "type": "values", "values": [{"id": 7003, "value": 1261.25}]}
+{"ch": 0, "data": "41 0D 00", "flags": 0, "id": "0x7E8", "t_us": 5571410, "type": "frame"}
+{"id": "0x7E8", "t_us": 5571410, "type": "values", "values": [{"id": 7004, "value": 0}]}
+{"ch": 0, "data": "41 0F 66", "flags": 0, "id": "0x7E8", "t_us": 5601233, "type": "frame"}
+{"id": "0x7E8", "t_us": 5601233, "type": "values", "values": [{"id": 7005, "value": 62}]}
+{"ch": 0, "data": "41 11 23", "flags": 0, "id": "0x7E8", "t_us": 5636373, "type": "frame"}
+{"id": "0x7E8", "t_us": 5636373, "type": "values", "values": [{"id": 7006, "value": 13.72549019607843}]}
+{"ch": 0, "data": "41 2F 8A", "flags": 0, "id": "0x7E8", "t_us": 5661483, "type": "frame"}
+{"id": "0x7E8", "t_us": 5661483, "type": "values", "values": [{"id": 7007, "value": 54.11764705882353}]}
+{"ch": 0, "data": "41 42 2C 63", "flags": 0, "id": "0x7E8", "t_us": 5699478, "type": "frame"}
+{"id": "0x7E8", "t_us": 5699478, "type": "values", "values": [{"id": 7008, "value": 11.363}]}
+{"ch": 0, "data": "41 10 01 9E", "flags": 0, "id": "0x7E8", "t_us": 5766095, "type": "frame"}
+{"id": "0x7E8", "t_us": 5766095, "type": "values", "values": [{"id": 7009, "value": 4.14}]}
+{"ch": 0, "data": "41 04 14", "flags": 0, "id": "0x7E8", "t_us": 5817543, "type": "frame"}
+{"id": "0x7E8", "t_us": 5817543, "type": "values", "values": [{"id": 7001, "value": 7.8431372549019605}]}
+{"ch": 0, "data": "41 05 65", "flags": 0, "id": "0x7E8", "t_us": 5845939, "type": "frame"}
+{"id": "0x7E8", "t_us": 5845939, "type": "values", "values": [{"id": 7002, "value": 61}]}
+{"ch": 0, "data": "41 0C 13 61", "flags": 0, "id": "0x7E8", "t_us": 5871275, "type": "frame"}
+{"id": "0x7E8", "t_us": 5871275, "type": "values", "values": [{"id": 7003, "value": 1240.25}]}
+{"ch": 0, "data": "41 0D 00", "flags": 0, "id": "0x7E8", "t_us": 5905202, "type": "frame"}
+{"id": "0x7E8", "t_us": 5905202, "type": "values", "values": [{"id": 7004, "value": 0}]}
+{"ch": 0, "data": "41 0F 66", "flags": 0, "id": "0x7E8", "t_us": 5936136, "type": "frame"}
+{"id": "0x7E8", "t_us": 5936136, "type": "values", "values": [{"id": 7005, "value": 62}]}
+{"ch": 0, "data": "41 11 23", "flags": 0, "id": "0x7E8", "t_us": 5961547, "type": "frame"}
+{"id": "0x7E8", "t_us": 5961547, "type": "values", "values": [{"id": 7006, "value": 13.72549019607843}]}
+{"ch": 0, "data": "41 2F 8A", "flags": 0, "id": "0x7E8", "t_us": 5994951, "type": "frame"}
+{"id": "0x7E8", "t_us": 5994951, "type": "values", "values": [{"id": 7007, "value": 54.11764705882353}]}
+{"ch": 0, "data": "41 42 2C E6", "flags": 0, "id": "0x7E8", "t_us": 6026675, "type": "frame"}
+{"id": "0x7E8", "t_us": 6026675, "type": "values", "values": [{"id": 7008, "value": 11.494}]}
+{"ch": 0, "data": "41 10 01 96", "flags": 0, "id": "0x7E8", "t_us": 6081979, "type": "frame"}
+{"id": "0x7E8", "t_us": 6081979, "type": "values", "values": [{"id": 7009, "value": 4.0600000000000005}]}
+{"ch": 0, "data": "41 04 15", "flags": 0, "id": "0x7E8", "t_us": 6117481, "type": "frame"}
+{"id": "0x7E8", "t_us": 6117481, "type": "values", "values": [{"id": 7001, "value": 8.235294117647058}]}
+{"ch": 0, "data": "41 05 65", "flags": 0, "id": "0x7E8", "t_us": 6201610, "type": "frame"}
+{"id": "0x7E8", "t_us": 6201610, "type": "values", "values": [{"id": 7002, "value": 61}]}
+{"ch": 0, "data": "41 0C 12 AC", "flags": 0, "id": "0x7E8", "t_us": 6236944, "type": "frame"}
+{"id": "0x7E8", "t_us": 6236944, "type": "values", "values": [{"id": 7003, "value": 1195}]}
+{"ch": 0, "data": "41 0D 00", "flags": 0, "id": "0x7E8", "t_us": 6272365, "type": "frame"}
+{"id": "0x7E8", "t_us": 6272365, "type": "values", "values": [{"id": 7004, "value": 0}]}
+{"ch": 0, "data": "41 0F 66", "flags": 0, "id": "0x7E8", "t_us": 6315079, "type": "frame"}
+{"id": "0x7E8", "t_us": 6315079, "type": "values", "values": [{"id": 7005, "value": 62}]}
+{"ch": 0, "data": "41 11 23", "flags": 0, "id": "0x7E8", "t_us": 6353843, "type": "frame"}
+{"id": "0x7E8", "t_us": 6353843, "type": "values", "values": [{"id": 7006, "value": 13.72549019607843}]}
+{"ch": 0, "data": "41 2F 8A", "flags": 0, "id": "0x7E8", "t_us": 6384053, "type": "frame"}
+{"id": "0x7E8", "t_us": 6384053, "type": "values", "values": [{"id": 7007, "value": 54.11764705882353}]}
+{"ch": 0, "data": "41 42 2D 39", "flags": 0, "id": "0x7E8", "t_us": 6413788, "type": "frame"}
+{"id": "0x7E8", "t_us": 6413788, "type": "values", "values": [{"id": 7008, "value": 11.577}]}
+{"ch": 0, "data": "41 10 01 89", "flags": 0, "id": "0x7E8", "t_us": 6441894, "type": "frame"}
+{"id": "0x7E8", "t_us": 6441894, "type": "values", "values": [{"id": 7009, "value": 3.93}]}
+{"ch": 0, "data": "41 04 18", "flags": 0, "id": "0x7E8", "t_us": 6481937, "type": "frame"}
+{"id": "0x7E8", "t_us": 6481937, "type": "values", "values": [{"id": 7001, "value": 9.411764705882353}]}
+{"ch": 0, "data": "41 05 65", "flags": 0, "id": "0x7E8", "t_us": 6531615, "type": "frame"}
+{"id": "0x7E8", "t_us": 6531615, "type": "values", "values": [{"id": 7002, "value": 61}]}
+{"ch": 0, "data": "41 0C 11 C0", "flags": 0, "id": "0x7E8", "t_us": 6560957, "type": "frame"}
+{"id": "0x7E8", "t_us": 6560957, "type": "values", "values": [{"id": 7003, "value": 1136}]}
+{"ch": 0, "data": "41 0D 00", "flags": 0, "id": "0x7E8", "t_us": 6594988, "type": "frame"}
+{"id": "0x7E8", "t_us": 6594988, "type": "values", "values": [{"id": 7004, "value": 0}]}
+{"ch": 0, "data": "41 0F 66", "flags": 0, "id": "0x7E8", "t_us": 6626187, "type": "frame"}
+{"id": "0x7E8", "t_us": 6626187, "type": "values", "values": [{"id": 7005, "value": 62}]}
+{"ch": 0, "data": "41 11 22", "flags": 0, "id": "0x7E8", "t_us": 6657087, "type": "frame"}
+{"id": "0x7E8", "t_us": 6657087, "type": "values", "values": [{"id": 7006, "value": 13.333333333333334}]}
+{"ch": 0, "data": "41 2F 8A", "flags": 0, "id": "0x7E8", "t_us": 6697756, "type": "frame"}
+{"id": "0x7E8", "t_us": 6697756, "type": "values", "values": [{"id": 7007, "value": 54.11764705882353}]}
+{"ch": 0, "data": "41 42 2D 37", "flags": 0, "id": "0x7E8", "t_us": 6746152, "type": "frame"}
+{"id": "0x7E8", "t_us": 6746152, "type": "values", "values": [{"id": 7008, "value": 11.575000000000001}]}
+{"ch": 0, "data": "41 10 01 6B", "flags": 0, "id": "0x7E8", "t_us": 6775883, "type": "frame"}
+{"id": "0x7E8", "t_us": 6775883, "type": "values", "values": [{"id": 7009, "value": 3.63}]}
+{"ch": 0, "data": "41 04 1C", "flags": 0, "id": "0x7E8", "t_us": 6816702, "type": "frame"}
+{"id": "0x7E8", "t_us": 6816702, "type": "values", "values": [{"id": 7001, "value": 10.980392156862745}]}
+{"ch": 0, "data": "41 05 65", "flags": 0, "id": "0x7E8", "t_us": 6844944, "type": "frame"}
+{"id": "0x7E8", "t_us": 6844944, "type": "values", "values": [{"id": 7002, "value": 61}]}
+{"ch": 0, "data": "41 0C 10 83", "flags": 0, "id": "0x7E8", "t_us": 6894881, "type": "frame"}
+{"id": "0x7E8", "t_us": 6894881, "type": "values", "values": [{"id": 7003, "value": 1056.75}]}
+{"ch": 0, "data": "41 0D 00", "flags": 0, "id": "0x7E8", "t_us": 6930573, "type": "frame"}
+{"id": "0x7E8", "t_us": 6930573, "type": "values", "values": [{"id": 7004, "value": 0}]}
+{"ch": 0, "data": "41 0F 66", "flags": 0, "id": "0x7E8", "t_us": 6965454, "type": "frame"}
+{"id": "0x7E8", "t_us": 6965454, "type": "values", "values": [{"id": 7005, "value": 62}]}
+{"ch": 0, "data": "41 11 22", "flags": 0, "id": "0x7E8", "t_us": 7000661, "type": "frame"}
+{"id": "0x7E8", "t_us": 7000661, "type": "values", "values": [{"id": 7006, "value": 13.333333333333334}]}
+{"ch": 0, "data": "41 2F 8A", "flags": 0, "id": "0x7E8", "t_us": 7041097, "type": "frame"}
+{"id": "0x7E8", "t_us": 7041097, "type": "values", "values": [{"id": 7007, "value": 54.11764705882353}]}
+{"ch": 0, "data": "41 42 2D 49", "flags": 0, "id": "0x7E8", "t_us": 7065650, "type": "frame"}
+{"id": "0x7E8", "t_us": 7065650, "type": "values", "values": [{"id": 7008, "value": 11.593}]}
+{"ch": 0, "data": "41 10 01 58", "flags": 0, "id": "0x7E8", "t_us": 7106821, "type": "frame"}
+{"id": "0x7E8", "t_us": 7106821, "type": "values", "values": [{"id": 7009, "value": 3.44}]}
+{"ch": 0, "data": "41 04 22", "flags": 0, "id": "0x7E8", "t_us": 7130871, "type": "frame"}
+{"id": "0x7E8", "t_us": 7130871, "type": "values", "values": [{"id": 7001, "value": 13.333333333333334}]}
+{"ch": 0, "data": "41 05 65", "flags": 0, "id": "0x7E8", "t_us": 7163768, "type": "frame"}
+{"id": "0x7E8", "t_us": 7163768, "type": "values", "values": [{"id": 7002, "value": 61}]}
+{"ch": 0, "data": "41 0C 0F 63", "flags": 0, "id": "0x7E8", "t_us": 7185785, "type": "frame"}
+{"id": "0x7E8", "t_us": 7185785, "type": "values", "values": [{"id": 7003, "value": 984.75}]}
+{"ch": 0, "data": "41 0D 00", "flags": 0, "id": "0x7E8", "t_us": 7220645, "type": "frame"}
+{"id": "0x7E8", "t_us": 7220645, "type": "values", "values": [{"id": 7004, "value": 0}]}
+{"ch": 0, "data": "41 0F 66", "flags": 0, "id": "0x7E8", "t_us": 7253774, "type": "frame"}
+{"id": "0x7E8", "t_us": 7253774, "type": "values", "values": [{"id": 7005, "value": 62}]}
+{"ch": 0, "data": "41 11 21", "flags": 0, "id": "0x7E8", "t_us": 7285971, "type": "frame"}
+{"id": "0x7E8", "t_us": 7285971, "type": "values", "values": [{"id": 7006, "value": 12.941176470588236}]}
+{"ch": 0, "data": "41 2F 8A", "flags": 0, "id": "0x7E8", "t_us": 7310649, "type": "frame"}
+{"id": "0x7E8", "t_us": 7310649, "type": "values", "values": [{"id": 7007, "value": 54.11764705882353}]}
+{"ch": 0, "data": "41 42 2D 61", "flags": 0, "id": "0x7E8", "t_us": 7341466, "type": "frame"}
+{"id": "0x7E8", "t_us": 7341466, "type": "values", "values": [{"id": 7008, "value": 11.617}]}
+{"ch": 0, "data": "41 10 01 24", "flags": 0, "id": "0x7E8", "t_us": 7415427, "type": "frame"}
+{"id": "0x7E8", "t_us": 7415427, "type": "values", "values": [{"id": 7009, "value": 2.92}]}
+{"ch": 0, "data": "41 04 25", "flags": 0, "id": "0x7E8", "t_us": 7440590, "type": "frame"}
+{"id": "0x7E8", "t_us": 7440590, "type": "values", "values": [{"id": 7001, "value": 14.509803921568627}]}
+{"ch": 0, "data": "41 05 65", "flags": 0, "id": "0x7E8", "t_us": 7495626, "type": "frame"}
+{"id": "0x7E8", "t_us": 7495626, "type": "values", "values": [{"id": 7002, "value": 61}]}
+{"ch": 0, "data": "41 0C 0D A1", "flags": 0, "id": "0x7E8", "t_us": 7533657, "type": "frame"}
+{"id": "0x7E8", "t_us": 7533657, "type": "values", "values": [{"id": 7003, "value": 872.25}]}
+{"ch": 0, "data": "41 0D 00", "flags": 0, "id": "0x7E8", "t_us": 7603527, "type": "frame"}
+{"id": "0x7E8", "t_us": 7603527, "type": "values", "values": [{"id": 7004, "value": 0}]}
+{"ch": 0, "data": "41 0F 66", "flags": 0, "id": "0x7E8", "t_us": 7625952, "type": "frame"}
+{"id": "0x7E8", "t_us": 7625952, "type": "values", "values": [{"id": 7005, "value": 62}]}
+{"ch": 0, "data": "41 11 22", "flags": 0, "id": "0x7E8", "t_us": 7660798, "type": "frame"}
+{"id": "0x7E8", "t_us": 7660798, "type": "values", "values": [{"id": 7006, "value": 13.333333333333334}]}
+{"ch": 0, "data": "41 2F 8A", "flags": 0, "id": "0x7E8", "t_us": 7698465, "type": "frame"}
+{"id": "0x7E8", "t_us": 7698465, "type": "values", "values": [{"id": 7007, "value": 54.11764705882353}]}
+{"ch": 0, "data": "41 42 2D 9C", "flags": 0, "id": "0x7E8", "t_us": 7734910, "type": "frame"}
+{"id": "0x7E8", "t_us": 7734910, "type": "values", "values": [{"id": 7008, "value": 11.676}]}
+{"ch": 0, "data": "41 10 01 63", "flags": 0, "id": "0x7E8", "t_us": 7761133, "type": "frame"}
+{"id": "0x7E8", "t_us": 7761133, "type": "values", "values": [{"id": 7009, "value": 3.5500000000000003}]}
+{"ch": 0, "data": "41 04 31", "flags": 0, "id": "0x7E8", "t_us": 7803366, "type": "frame"}
+{"id": "0x7E8", "t_us": 7803366, "type": "values", "values": [{"id": 7001, "value": 19.215686274509803}]}
+{"ch": 0, "data": "41 05 65", "flags": 0, "id": "0x7E8", "t_us": 7834226, "type": "frame"}
+{"id": "0x7E8", "t_us": 7834226, "type": "values", "values": [{"id": 7002, "value": 61}]}
+{"ch": 0, "data": "41 0C 0D 32", "flags": 0, "id": "0x7E8", "t_us": 7865406, "type": "frame"}
+{"id": "0x7E8", "t_us": 7865406, "type": "values", "values": [{"id": 7003, "value": 844.5}]}
+{"ch": 0, "data": "41 0D 00", "flags": 0, "id": "0x7E8", "t_us": 7885985, "type": "frame"}
+{"id": "0x7E8", "t_us": 7885985, "type": "values", "values": [{"id": 7004, "value": 0}]}
+{"ch": 0, "data": "41 0F 66", "flags": 0, "id": "0x7E8", "t_us": 7934564, "type": "frame"}
+{"id": "0x7E8", "t_us": 7934564, "type": "values", "values": [{"id": 7005, "value": 62}]}
+{"ch": 0, "data": "41 11 23", "flags": 0, "id": "0x7E8", "t_us": 7975226, "type": "frame"}
+{"id": "0x7E8", "t_us": 7975226, "type": "values", "values": [{"id": 7006, "value": 13.72549019607843}]}
+{"ch": 0, "data": "41 2F 8A", "flags": 0, "id": "0x7E8", "t_us": 8046616, "type": "frame"}
+{"id": "0x7E8", "t_us": 8046616, "type": "values", "values": [{"id": 7007, "value": 54.11764705882353}]}
+{"ch": 0, "data": "41 42 2D E1", "flags": 0, "id": "0x7E8", "t_us": 8083538, "type": "frame"}
+{"id": "0x7E8", "t_us": 8083538, "type": "values", "values": [{"id": 7008, "value": 11.745000000000001}]}
+{"ch": 0, "data": "41 10 01 76", "flags": 0, "id": "0x7E8", "t_us": 8117004, "type": "frame"}
+{"id": "0x7E8", "t_us": 8117004, "type": "values", "values": [{"id": 7009, "value": 3.74}]}
+{"ch": 0, "data": "41 04 33", "flags": 0, "id": "0x7E8", "t_us": 8175569, "type": "frame"}
+{"id": "0x7E8", "t_us": 8175569, "type": "values", "values": [{"id": 7001, "value": 20}]}
+{"ch": 0, "data": "41 05 65", "flags": 0, "id": "0x7E8", "t_us": 8215930, "type": "frame"}
+{"id": "0x7E8", "t_us": 8215930, "type": "values", "values": [{"id": 7002, "value": 61}]}
+{"ch": 0, "data": "41 0C 0D 6E", "flags": 0, "id": "0x7E8", "t_us": 8246638, "type": "frame"}
+{"id": "0x7E8", "t_us": 8246638, "type": "values", "values": [{"id": 7003, "value": 859.5}]}
+{"ch": 0, "data": "41 0D 00", "flags": 0, "id": "0x7E8", "t_us": 8275995, "type": "frame"}
+{"id": "0x7E8", "t_us": 8275995, "type": "values", "values": [{"id": 7004, "value": 0}]}
+{"ch": 0, "data": "41 0F 65", "flags": 0, "id": "0x7E8", "t_us": 8308987, "type": "frame"}
+{"id": "0x7E8", "t_us": 8308987, "type": "values", "values": [{"id": 7005, "value": 61}]}
+{"ch": 0, "data": "41 11 23", "flags": 0, "id": "0x7E8", "t_us": 8340769, "type": "frame"}
+{"id": "0x7E8", "t_us": 8340769, "type": "values", "values": [{"id": 7006, "value": 13.72549019607843}]}
+{"ch": 0, "data": "41 2F 8A", "flags": 0, "id": "0x7E8", "t_us": 8364462, "type": "frame"}
+{"id": "0x7E8", "t_us": 8364462, "type": "values", "values": [{"id": 7007, "value": 54.11764705882353}]}
+{"ch": 0, "data": "41 42 2D F1", "flags": 0, "id": "0x7E8", "t_us": 8404320, "type": "frame"}
+{"id": "0x7E8", "t_us": 8404320, "type": "values", "values": [{"id": 7008, "value": 11.761000000000001}]}
+{"ch": 0, "data": "41 10 01 7D", "flags": 0, "id": "0x7E8", "t_us": 8446891, "type": "frame"}
+{"id": "0x7E8", "t_us": 8446891, "type": "values", "values": [{"id": 7009, "value": 3.81}]}
+{"ch": 0, "data": "41 04 36", "flags": 0, "id": "0x7E8", "t_us": 8494791, "type": "frame"}
+{"id": "0x7E8", "t_us": 8494791, "type": "values", "values": [{"id": 7001, "value": 21.176470588235293}]}
+{"ch": 0, "data": "41 05 65", "flags": 0, "id": "0x7E8", "t_us": 8535761, "type": "frame"}
+{"id": "0x7E8", "t_us": 8535761, "type": "values", "values": [{"id": 7002, "value": 61}]}
+{"ch": 0, "data": "41 0C 0D 5B", "flags": 0, "id": "0x7E8", "t_us": 8560717, "type": "frame"}
+{"id": "0x7E8", "t_us": 8560717, "type": "values", "values": [{"id": 7003, "value": 854.75}]}
+{"ch": 0, "data": "41 0D 00", "flags": 0, "id": "0x7E8", "t_us": 8595425, "type": "frame"}
+{"id": "0x7E8", "t_us": 8595425, "type": "values", "values": [{"id": 7004, "value": 0}]}
+{"ch": 0, "data": "41 0F 65", "flags": 0, "id": "0x7E8", "t_us": 8636006, "type": "frame"}
+{"id": "0x7E8", "t_us": 8636006, "type": "values", "values": [{"id": 7005, "value": 61}]}
+{"ch": 0, "data": "41 11 23", "flags": 0, "id": "0x7E8", "t_us": 8719022, "type": "frame"}
+{"id": "0x7E8", "t_us": 8719022, "type": "values", "values": [{"id": 7006, "value": 13.72549019607843}]}
+{"ch": 0, "data": "41 2F 8A", "flags": 0, "id": "0x7E8", "t_us": 8753790, "type": "frame"}
+{"id": "0x7E8", "t_us": 8753790, "type": "values", "values": [{"id": 7007, "value": 54.11764705882353}]}
+{"ch": 0, "data": "41 42 2E 1D", "flags": 0, "id": "0x7E8", "t_us": 8781444, "type": "frame"}
+{"id": "0x7E8", "t_us": 8781444, "type": "values", "values": [{"id": 7008, "value": 11.805}]}
+{"ch": 0, "data": "41 10 01 85", "flags": 0, "id": "0x7E8", "t_us": 8815798, "type": "frame"}
+{"id": "0x7E8", "t_us": 8815798, "type": "values", "values": [{"id": 7009, "value": 3.89}]}
+{"ch": 0, "data": "41 04 36", "flags": 0, "id": "0x7E8", "t_us": 8840678, "type": "frame"}
+{"id": "0x7E8", "t_us": 8840678, "type": "values", "values": [{"id": 7001, "value": 21.176470588235293}]}
+{"ch": 0, "data": "41 05 65", "flags": 0, "id": "0x7E8", "t_us": 8875264, "type": "frame"}
+{"id": "0x7E8", "t_us": 8875264, "type": "values", "values": [{"id": 7002, "value": 61}]}
+{"ch": 0, "data": "41 0C 0D 8D", "flags": 0, "id": "0x7E8", "t_us": 8925540, "type": "frame"}
+{"id": "0x7E8", "t_us": 8925540, "type": "values", "values": [{"id": 7003, "value": 867.25}]}
+{"ch": 0, "data": "41 0D 00", "flags": 0, "id": "0x7E8", "t_us": 9045950, "type": "frame"}
+{"id": "0x7E8", "t_us": 9045950, "type": "values", "values": [{"id": 7004, "value": 0}]}
+{"ch": 0, "data": "41 0F 65", "flags": 0, "id": "0x7E8", "t_us": 9117988, "type": "frame"}
+{"id": "0x7E8", "t_us": 9117988, "type": "values", "values": [{"id": 7005, "value": 61}]}
+{"ch": 0, "data": "41 11 23", "flags": 0, "id": "0x7E8", "t_us": 9180419, "type": "frame"}
+{"id": "0x7E8", "t_us": 9180419, "type": "values", "values": [{"id": 7006, "value": 13.72549019607843}]}
+{"ch": 0, "data": "41 2F 8A", "flags": 0, "id": "0x7E8", "t_us": 9232527, "type": "frame"}
+{"id": "0x7E8", "t_us": 9232527, "type": "values", "values": [{"id": 7007, "value": 54.11764705882353}]}
+{"ch": 0, "data": "41 42 2E 4F", "flags": 0, "id": "0x7E8", "t_us": 9275148, "type": "frame"}
+{"id": "0x7E8", "t_us": 9275148, "type": "values", "values": [{"id": 7008, "value": 11.855}]}
+{"ch": 0, "data": "41 10 01 9C", "flags": 0, "id": "0x7E8", "t_us": 9308596, "type": "frame"}
+{"id": "0x7E8", "t_us": 9308596, "type": "values", "values": [{"id": 7009, "value": 4.12}]}
+{"ch": 0, "data": "41 04 38", "flags": 0, "id": "0x7E8", "t_us": 9334987, "type": "frame"}
+{"id": "0x7E8", "t_us": 9334987, "type": "values", "values": [{"id": 7001, "value": 21.96078431372549}]}
+{"ch": 0, "data": "41 05 65", "flags": 0, "id": "0x7E8", "t_us": 9356500, "type": "frame"}
+{"id": "0x7E8", "t_us": 9356500, "type": "values", "values": [{"id": 7002, "value": 61}]}
+{"ch": 0, "data": "41 0C 0D B7", "flags": 0, "id": "0x7E8", "t_us": 9375711, "type": "frame"}
+{"id": "0x7E8", "t_us": 9375711, "type": "values", "values": [{"id": 7003, "value": 877.75}]}
+{"ch": 0, "data": "41 0D 00", "flags": 0, "id": "0x7E8", "t_us": 9421059, "type": "frame"}
+{"id": "0x7E8", "t_us": 9421059, "type": "values", "values": [{"id": 7004, "value": 0}]}
+{"ch": 0, "data": "41 0F 65", "flags": 0, "id": "0x7E8", "t_us": 9446106, "type": "frame"}
+{"id": "0x7E8", "t_us": 9446106, "type": "values", "values": [{"id": 7005, "value": 61}]}
+{"ch": 0, "data": "41 11 23", "flags": 0, "id": "0x7E8", "t_us": 9475766, "type": "frame"}
+{"id": "0x7E8", "t_us": 9475766, "type": "values", "values": [{"id": 7006, "value": 13.72549019607843}]}
+{"ch": 0, "data": "41 2F 8A", "flags": 0, "id": "0x7E8", "t_us": 9518887, "type": "frame"}
+{"id": "0x7E8", "t_us": 9518887, "type": "values", "values": [{"id": 7007, "value": 54.11764705882353}]}
+{"ch": 0, "data": "41 42 2E 57", "flags": 0, "id": "0x7E8", "t_us": 9563694, "type": "frame"}
+{"id": "0x7E8", "t_us": 9563694, "type": "values", "values": [{"id": 7008, "value": 11.863}]}
+{"ch": 0, "data": "41 10 01 A4", "flags": 0, "id": "0x7E8", "t_us": 9612705, "type": "frame"}
+{"id": "0x7E8", "t_us": 9612705, "type": "values", "values": [{"id": 7009, "value": 4.2}]}
+{"ch": 0, "data": "41 04 39", "flags": 0, "id": "0x7E8", "t_us": 9655660, "type": "frame"}
+{"id": "0x7E8", "t_us": 9655660, "type": "values", "values": [{"id": 7001, "value": 22.352941176470587}]}
+{"ch": 0, "data": "41 05 65", "flags": 0, "id": "0x7E8", "t_us": 9675814, "type": "frame"}
+{"id": "0x7E8", "t_us": 9675814, "type": "values", "values": [{"id": 7002, "value": 61}]}
+{"ch": 0, "data": "41 0C 0D 68", "flags": 0, "id": "0x7E8", "t_us": 9712909, "type": "frame"}
+{"id": "0x7E8", "t_us": 9712909, "type": "values", "values": [{"id": 7003, "value": 858}]}
+{"ch": 0, "data": "41 0D 00", "flags": 0, "id": "0x7E8", "t_us": 9773722, "type": "frame"}
+{"id": "0x7E8", "t_us": 9773722, "type": "values", "values": [{"id": 7004, "value": 0}]}
+{"ch": 0, "data": "41 0F 65", "flags": 0, "id": "0x7E8", "t_us": 9804769, "type": "frame"}
+{"id": "0x7E8", "t_us": 9804769, "type": "values", "values": [{"id": 7005, "value": 61}]}
+{"ch": 0, "data": "41 11 23", "flags": 0, "id": "0x7E8", "t_us": 9821352, "type": "frame"}
+{"id": "0x7E8", "t_us": 9821352, "type": "values", "values": [{"id": 7006, "value": 13.72549019607843}]}
+{"ch": 0, "data": "41 2F 8A", "flags": 0, "id": "0x7E8", "t_us": 9861932, "type": "frame"}
+{"id": "0x7E8", "t_us": 9861932, "type": "values", "values": [{"id": 7007, "value": 54.11764705882353}]}
+{"ch": 0, "data": "41 42 2E 7A", "flags": 0, "id": "0x7E8", "t_us": 9925262, "type": "frame"}
+{"id": "0x7E8", "t_us": 9925262, "type": "values", "values": [{"id": 7008, "value": 11.898}]}
+{"ch": 0, "data": "41 10 01 A6", "flags": 0, "id": "0x7E8", "t_us": 9946606, "type": "frame"}
+{"id": "0x7E8", "t_us": 9946606, "type": "values", "values": [{"id": 7009, "value": 4.22}]}
+{"ch": 0, "data": "41 04 3A", "flags": 0, "id": "0x7E8", "t_us": 9977157, "type": "frame"}
+{"id": "0x7E8", "t_us": 9977157, "type": "values", "values": [{"id": 7001, "value": 22.745098039215687}]}
+{"ch": 0, "data": "41 05 65", "flags": 0, "id": "0x7E8", "t_us": 10013348, "type": "frame"}
+{"id": "0x7E8", "t_us": 10013348, "type": "values", "values": [{"id": 7002, "value": 61}]}
+{"ch": 0, "data": "41 0C 0D 96", "flags": 0, "id": "0x7E8", "t_us": 10046088, "type": "frame"}
+{"id": "0x7E8", "t_us": 10046088, "type": "values", "values": [{"id": 7003, "value": 869.5}]}
+{"ch": 0, "data": "41 0D 00", "flags": 0, "id": "0x7E8", "t_us": 10072463, "type": "frame"}
+{"id": "0x7E8", "t_us": 10072463, "type": "values", "values": [{"id": 7004, "value": 0}]}
+{"ch": 0, "data": "41 0F 65", "flags": 0, "id": "0x7E8", "t_us": 10104491, "type": "frame"}
+{"id": "0x7E8", "t_us": 10104491, "type": "values", "values": [{"id": 7005, "value": 61}]}
+{"ch": 0, "data": "41 11 23", "flags": 0, "id": "0x7E8", "t_us": 10135562, "type": "frame"}
+{"id": "0x7E8", "t_us": 10135562, "type": "values", "values": [{"id": 7006, "value": 13.72549019607843}]}
+{"ch": 0, "data": "41 2F 8A", "flags": 0, "id": "0x7E8", "t_us": 10157483, "type": "frame"}
+{"id": "0x7E8", "t_us": 10157483, "type": "values", "values": [{"id": 7007, "value": 54.11764705882353}]}
+{"ch": 0, "data": "41 42 2E 8F", "flags": 0, "id": "0x7E8", "t_us": 10195805, "type": "frame"}
+{"id": "0x7E8", "t_us": 10195805, "type": "values", "values": [{"id": 7008, "value": 11.919}]}
+{"ch": 0, "data": "41 10 01 A8", "flags": 0, "id": "0x7E8", "t_us": 10225592, "type": "frame"}
+{"id": "0x7E8", "t_us": 10225592, "type": "values", "values": [{"id": 7009, "value": 4.24}]}
+{"ch": 0, "data": "41 04 39", "flags": 0, "id": "0x7E8", "t_us": 10278602, "type": "frame"}
+{"id": "0x7E8", "t_us": 10278602, "type": "values", "values": [{"id": 7001, "value": 22.352941176470587}]}
+{"ch": 0, "data": "41 05 65", "flags": 0, "id": "0x7E8", "t_us": 10335062, "type": "frame"}
+{"id": "0x7E8", "t_us": 10335062, "type": "values", "values": [{"id": 7002, "value": 61}]}
+{"ch": 0, "data": "41 0C 0D CC", "flags": 0, "id": "0x7E8", "t_us": 10397383, "type": "frame"}
+{"id": "0x7E8", "t_us": 10397383, "type": "values", "values": [{"id": 7003, "value": 883}]}
+{"ch": 0, "data": "41 0D 00", "flags": 0, "id": "0x7E8", "t_us": 10475376, "type": "frame"}
+{"id": "0x7E8", "t_us": 10475376, "type": "values", "values": [{"id": 7004, "value": 0}]}
+{"ch": 0, "data": "41 0F 65", "flags": 0, "id": "0x7E8", "t_us": 10526741, "type": "frame"}
+{"id": "0x7E8", "t_us": 10526741, "type": "values", "values": [{"id": 7005, "value": 61}]}
+{"ch": 0, "data": "41 11 23", "flags": 0, "id": "0x7E8", "t_us": 10565405, "type": "frame"}
+{"id": "0x7E8", "t_us": 10565405, "type": "values", "values": [{"id": 7006, "value": 13.72549019607843}]}
+{"ch": 0, "data": "41 2F 8A", "flags": 0, "id": "0x7E8", "t_us": 10620655, "type": "frame"}
+{"id": "0x7E8", "t_us": 10620655, "type": "values", "values": [{"id": 7007, "value": 54.11764705882353}]}
+{"ch": 0, "data": "41 42 2E 9C", "flags": 0, "id": "0x7E8", "t_us": 10646403, "type": "frame"}
+{"id": "0x7E8", "t_us": 10646403, "type": "values", "values": [{"id": 7008, "value": 11.932}]}
+{"ch": 0, "data": "41 10 01 C1", "flags": 0, "id": "0x7E8", "t_us": 10673916, "type": "frame"}
+{"id": "0x7E8", "t_us": 10673916, "type": "values", "values": [{"id": 7009, "value": 4.49}]}
+{"ch": 0, "data": "41 04 3C", "flags": 0, "id": "0x7E8", "t_us": 10698115, "type": "frame"}
+{"id": "0x7E8", "t_us": 10698115, "type": "values", "values": [{"id": 7001, "value": 23.52941176470588}]}
+{"ch": 0, "data": "41 05 65", "flags": 0, "id": "0x7E8", "t_us": 10747734, "type": "frame"}
+{"id": "0x7E8", "t_us": 10747734, "type": "values", "values": [{"id": 7002, "value": 61}]}
+{"ch": 0, "data": "41 0C 0D 9A", "flags": 0, "id": "0x7E8", "t_us": 10792087, "type": "frame"}
+{"id": "0x7E8", "t_us": 10792087, "type": "values", "values": [{"id": 7003, "value": 870.5}]}
+{"ch": 0, "data": "41 0D 00", "flags": 0, "id": "0x7E8", "t_us": 10858979, "type": "frame"}
+{"id": "0x7E8", "t_us": 10858979, "type": "values", "values": [{"id": 7004, "value": 0}]}
+{"ch": 0, "data": "41 0F 65", "flags": 0, "id": "0x7E8", "t_us": 10925997, "type": "frame"}
+{"id": "0x7E8", "t_us": 10925997, "type": "values", "values": [{"id": 7005, "value": 61}]}
+{"ch": 0, "data": "41 11 23", "flags": 0, "id": "0x7E8", "t_us": 10955365, "type": "frame"}
+{"id": "0x7E8", "t_us": 10955365, "type": "values", "values": [{"id": 7006, "value": 13.72549019607843}]}
+{"ch": 0, "data": "41 2F 8A", "flags": 0, "id": "0x7E8", "t_us": 11003472, "type": "frame"}
+{"id": "0x7E8", "t_us": 11003472, "type": "values", "values": [{"id": 7007, "value": 54.11764705882353}]}
+{"ch": 0, "data": "41 42 2E BE", "flags": 0, "id": "0x7E8", "t_us": 11061287, "type": "frame"}
+{"id": "0x7E8", "t_us": 11061287, "type": "values", "values": [{"id": 7008, "value": 11.966000000000001}]}
+{"ch": 0, "data": "41 10 01 C3", "flags": 0, "id": "0x7E8", "t_us": 11097123, "type": "frame"}
+{"id": "0x7E8", "t_us": 11097123, "type": "values", "values": [{"id": 7009, "value": 4.51}]}
+{"ch": 0, "data": "41 04 3B", "flags": 0, "id": "0x7E8", "t_us": 11155008, "type": "frame"}
+{"id": "0x7E8", "t_us": 11155008, "type": "values", "values": [{"id": 7001, "value": 23.137254901960784}]}
+{"ch": 0, "data": "41 05 65", "flags": 0, "id": "0x7E8", "t_us": 11180781, "type": "frame"}
+{"id": "0x7E8", "t_us": 11180781, "type": "values", "values": [{"id": 7002, "value": 61}]}
+{"ch": 0, "data": "41 0C 0D B1", "flags": 0, "id": "0x7E8", "t_us": 11221643, "type": "frame"}
+{"id": "0x7E8", "t_us": 11221643, "type": "values", "values": [{"id": 7003, "value": 876.25}]}
+{"ch": 0, "data": "41 0D 00", "flags": 0, "id": "0x7E8", "t_us": 11275652, "type": "frame"}
+{"id": "0x7E8", "t_us": 11275652, "type": "values", "values": [{"id": 7004, "value": 0}]}
+{"ch": 0, "data": "41 0F 65", "flags": 0, "id": "0x7E8", "t_us": 11340293, "type": "frame"}
+{"id": "0x7E8", "t_us": 11340293, "type": "values", "values": [{"id": 7005, "value": 61}]}
+{"ch": 0, "data": "41 11 23", "flags": 0, "id": "0x7E8", "t_us": 11408618, "type": "frame"}
+{"id": "0x7E8", "t_us": 11408618, "type": "values", "values": [{"id": 7006, "value": 13.72549019607843}]}
+{"ch": 0, "data": "41 2F 8A", "flags": 0, "id": "0x7E8", "t_us": 11454806, "type": "frame"}
+{"id": "0x7E8", "t_us": 11454806, "type": "values", "values": [{"id": 7007, "value": 54.11764705882353}]}
+{"ch": 0, "data": "41 42 2E CD", "flags": 0, "id": "0x7E8", "t_us": 11503020, "type": "frame"}
+{"id": "0x7E8", "t_us": 11503020, "type": "values", "values": [{"id": 7008, "value": 11.981}]}
+{"ch": 0, "data": "41 10 01 BB", "flags": 0, "id": "0x7E8", "t_us": 11543853, "type": "frame"}
+{"id": "0x7E8", "t_us": 11543853, "type": "values", "values": [{"id": 7009, "value": 4.43}]}
+{"ch": 0, "data": "41 04 3C", "flags": 0, "id": "0x7E8", "t_us": 11580717, "type": "frame"}
+{"id": "0x7E8", "t_us": 11580717, "type": "values", "values": [{"id": 7001, "value": 23.52941176470588}]}
+{"ch": 0, "data": "41 05 64", "flags": 0, "id": "0x7E8", "t_us": 11613535, "type": "frame"}
+{"id": "0x7E8", "t_us": 11613535, "type": "values", "values": [{"id": 7002, "value": 60}]}
+{"ch": 0, "data": "41 0C 0D 9C", "flags": 0, "id": "0x7E8", "t_us": 11655984, "type": "frame"}
+{"id": "0x7E8", "t_us": 11655984, "type": "values", "values": [{"id": 7003, "value": 871}]}
+{"ch": 0, "data": "41 0D 00", "flags": 0, "id": "0x7E8", "t_us": 11696720, "type": "frame"}
+{"id": "0x7E8", "t_us": 11696720, "type": "values", "values": [{"id": 7004, "value": 0}]}
+{"ch": 0, "data": "41 0F 65", "flags": 0, "id": "0x7E8", "t_us": 11736729, "type": "frame"}
+{"id": "0x7E8", "t_us": 11736729, "type": "values", "values": [{"id": 7005, "value": 61}]}
+{"ch": 0, "data": "41 11 24", "flags": 0, "id": "0x7E8", "t_us": 11777924, "type": "frame"}
+{"id": "0x7E8", "t_us": 11777924, "type": "values", "values": [{"id": 7006, "value": 14.117647058823529}]}
+{"ch": 0, "data": "41 2F 8A", "flags": 0, "id": "0x7E8", "t_us": 11815681, "type": "frame"}
+{"id": "0x7E8", "t_us": 11815681, "type": "values", "values": [{"id": 7007, "value": 54.11764705882353}]}
+{"ch": 0, "data": "41 42 2E E6", "flags": 0, "id": "0x7E8", "t_us": 11864219, "type": "frame"}
+{"id": "0x7E8", "t_us": 11864219, "type": "values", "values": [{"id": 7008, "value": 12.006}]}
+{"dropped_frames": 0, "dropped_values": 0, "frames": 300, "reason": "count", "type": "end"}

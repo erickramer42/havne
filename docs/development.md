@@ -465,6 +465,37 @@ and `-R` work as in `verify.sh`. CI's `win-coverage` job runs the same
 script on every push and uploads the Cobertura file to Codecov for the
 README badge ([testing.md](testing.md#coverage)).
 
+## The command-line client
+
+`havne-cli` ([ADR-0031](adr/0031-command-line-client.md)) builds in
+every desktop tree, the core-only one included: `build-core/cli/Release/`
+on Windows, `build-core/cli/` with a single-config generator. The app
+build copies it next to `havne.exe`.
+
+```sh
+havne-cli stream mock://demo --values --count 20          # the simulated car
+havne-cli stream "replay://<folder>?profile=obd2&speed=max" --values > run.jsonl
+havne-cli stream elm327://COM5 --seconds 60               # an adapter: as the app would
+havne-cli devices                                         # what a URI can name
+```
+
+Its output is JSON lines, schema 1 (ADR-0031 §3). Its tests are
+`test_cli` (the formatting and the ring) and ctest's `CliGoldenTest`,
+`CliUsageTest` and `CliSignalTest`. A golden run compares the whole
+output with `tests/golden/cli/`; after a deliberate change to what it
+prints (or to what core decodes), rewrite the golden file with the
+test's own command plus `--update`, then read the diff before
+committing it:
+
+```sh
+ctest --test-dir build-core -C Release -R '^CliGoldenTest\.' -V   # shows each command
+python tests/golden.py run --golden tests/golden/cli/mock.jsonl --ignore core --ignore t_us \
+  --update -- "$(pwd -W)/build-core/cli/Release/havne-cli.exe" stream mock://golden --values --count 40
+```
+
+On Windows, give `golden.py` the executable's absolute path:
+Python's `CreateProcess` doesn't resolve `build-core/cli/...`.
+
 ## Troubleshooting
 
 | Symptom | Cause and fix |
@@ -483,7 +514,7 @@ README badge ([testing.md](testing.md#coverage)).
 | J2534 test fails as `Failed (Timeout)` | A genuine hang, bounded by the 30 s ceiling. Attach to the surviving test and surrogate processes and check thread wait states before killing; the child log is `%TEMP%\ecuio-surrogate.log`, and earlier spawns' logs are kept beside it under dated names. |
 | Linker warning LNK4070 on a fake DLL | The `.def` file's `LIBRARY` directive disagrees with the output filename. Make them match. |
 | A mobile build fails during test discovery, or tries to run a test binary | `BUILD_TESTING` is on. Cross builds must pass `-DBUILD_TESTING=OFF` (see Mobile above). |
-| Re-running a skipped `ios-simulator-smoke` skips it again | A re-run replays the original event and commit, so the job's condition comes out the same. Start a manual run instead (Actions → CI → Run workflow, or `gh workflow run ci.yml --ref <branch>`); tick `smoke_only` to skip the other platform jobs. A commit whose message contains `[ios-smoke]` also works. |
+| Re-running a skipped `ios-simulator-smoke` skips it again | A re-run replays the original event and commit, so the job's condition comes out the same. Start a manual run instead that asks for it (Actions → CI → Run workflow and tick `ios_smoke`, or `gh workflow run ci.yml --ref <branch> -f ios_smoke=true`); `smoke_only` instead skips the other platform jobs. A commit whose message contains `[ios-smoke]` also works. |
 | `ios-simulator-smoke` passes, but the app screenshots are blank | Seen once, on the first run (2026-10-20). That run launched the app straight after a cold boot, and the frame was blank at 15 s. With the boot overlapping the build, the next run drew by 15 s. If it recurs: a blank `home.png` means the runner's simulator display is at fault. No `QSG_INFO` lines in stderr means the window was never exposed. `QSG_INFO` present with blank shots means frames aren't reaching the screen, so try another `QSG_RHI_BACKEND`. A blank 15 s shot with a drawn 45 s shot means a slow first frame. |
 | `ios-simulator-smoke` fails with "Havne exited within 45 s", and the printed stderr says `Failed to initialize graphics backend` | Qt Quick couldn't get a Metal device from the runner VM. Check the boot step's `system_profiler` output. Before suspecting the app, try `SIMCTL_CHILD_QSG_RHI_BACKEND=opengl` on the launch line. |
 | `ios-simulator-smoke` fails with "No available iPhone simulator on iOS 18 or later" | The runner image dropped its iOS 18+ runtimes, or the job moved to a runner without them. The step prints the available devices. |
@@ -549,10 +580,11 @@ on MSVC is not necessarily portable:
 
 `ci.yml` runs on every push to `main` and `dev`, on every pull
 request to `main`, and on demand (Actions → CI → Run workflow, on any
-branch, or `gh workflow run ci.yml --ref <branch>`). A manual run
-includes the iOS simulator smoke; its `smoke_only` input
-(`-f smoke_only=true`) skips the other platform jobs, leaving
-`core-and-tests`, which the smoke depends on. Every job that uses Qt
+branch, or `gh workflow run ci.yml --ref <branch>`, which is how a
+feature branch gets CI). A manual run leaves out the iOS simulator
+smoke unless asked: `-f ios_smoke=true` adds it to the whole run, and
+`-f smoke_only=true` runs it with `core-and-tests` alone, which the
+smoke depends on. Every job that uses Qt
 uses 6.12.0, and every job has a `timeout-minutes` of roughly 3-5x
 its usual duration:
 
@@ -569,7 +601,7 @@ its usual duration:
 | `linux-appimage` | Ubuntu 24.04, GCC | Builds the app in Release and packs it with `packaging/linux/make-appimage.sh` ([Linux: the AppImage](#linux-the-appimage)), then uploads `havne-linux-x86_64` (kept 14 days). On 24.04 because an AppImage runs only where glibc is at least its build machine's. |
 | `android-build` | Ubuntu → Android arm64-v8a | Selects NDK r27 and JDK 21 by version, failing with a clear error if the image lacks either. Then cross-builds and packages the APK. Build only, no tests. |
 | `ios-build` | macOS (arm64) → iOS device (arm64) | Unsigned device build with the Xcode generator. Build only, no tests. |
-| `ios-simulator-smoke` | macOS 15 Intel → iOS Simulator (x86_64) | Runs on a manual run (with or without `smoke_only`) or when the pushed commit's message contains `[ios-smoke]`; skipped on pull requests and other pushes (about 20 minutes on the Intel runner). Boots the newest iOS 18+ iPhone while the app builds, then installs and launches the app. Passes if QML loaded and the app is still running 45 s later. Uploads the `ios-simulator-smoke` artifact: a home-screen control shot, app shots at 15 s and 45 s, the app's stdout/stderr (with `QSG_INFO`), plus crash reports on failure. The job log also prints the stderr. |
+| `ios-simulator-smoke` | macOS 15 Intel → iOS Simulator (x86_64) | Runs on a manual run with `ios_smoke` or `smoke_only` ticked, or when the pushed commit's message contains `[ios-smoke]`; skipped on pull requests, other pushes and other manual runs (about 20 minutes on the Intel runner). Boots the newest iOS 18+ iPhone while the app builds, then installs and launches the app. Passes if QML loaded and the app is still running 45 s later. Uploads the `ios-simulator-smoke` artifact: a home-screen control shot, app shots at 15 s and 45 s, the app's stdout/stderr (with `QSG_INFO`), plus crash reports on failure. The job log also prints the stderr. |
 
 The smoke job's pass/fail proves the app starts and stays up. Only
 the screenshots show that it drew anything. It doesn't tap through
