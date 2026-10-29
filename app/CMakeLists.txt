@@ -111,8 +111,16 @@ if(WIN32)
     # The title bar's color (main.cpp, DwmSetWindowAttribute)
     target_link_libraries(havne PRIVATE dwmapi)
 endif()
+# The name people see is capitalized: Apple's bundle, which Finder and
+# the home screen show (iOS's display name is Xcode's PRODUCT_NAME, the
+# output name), and Android's launcher label. Executables elsewhere stay
+# lowercase, as havne.exe and Linux's havne
 if(APPLE)
-    set_target_properties(havne PROPERTIES MACOSX_BUNDLE TRUE)
+    set_target_properties(havne PROPERTIES
+        MACOSX_BUNDLE TRUE
+        OUTPUT_NAME Havne
+        MACOSX_BUNDLE_BUNDLE_NAME Havne
+        MACOSX_BUNDLE_GUI_IDENTIFIER io.github.erickramer42.havne)
 endif()
 # The app icon (packaging/icons/make_icons.py writes both). Android: an
 # adaptive launcher icon, vector drawables in the package source's res/;
@@ -127,6 +135,7 @@ if(ANDROID)
     set_target_properties(havne PROPERTIES
         QT_ANDROID_PACKAGE_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/android"
         QT_ANDROID_APP_ICON "@mipmap/ic_launcher"
+        QT_ANDROID_APP_NAME "Havne"
         QT_ANDROID_PACKAGE_NAME "io.github.erickramer42.havne"
         QT_ANDROID_VERSION_NAME "${Havne_VERSION}"
         QT_ANDROID_VERSION_CODE "${_app_version_code}")

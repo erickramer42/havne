@@ -418,6 +418,9 @@ jobs:
             || { echo "::error::$MANIFEST's package isn't io.github.erickramer42.havne"; exit 1; }
           grep -q "android:versionName=\"$VERSION\"" "$MANIFEST" \
             || { echo "::error::$MANIFEST's version name isn't $VERSION"; exit 1; }
+          # The launcher's label, capitalized (QT_ANDROID_APP_NAME)
+          grep -q 'android:label="Havne"' "$MANIFEST" \
+            || { echo "::error::$MANIFEST's label isn't Havne"; exit 1; }
           # QT_ANDROID_APP_ICON's adaptive icon, not Qt's default
           grep -n 'android:icon' "$MANIFEST"
           grep -q 'android:icon="@mipmap/ic_launcher"' "$MANIFEST" \
@@ -552,11 +555,11 @@ jobs:
       # main() returns -1 when QML fails to load, and a scene graph that
       # can't initialize aborts, so "still running" covers both. It does
       # not prove the app drew anything; the screenshots are for that.
-      - name: Launch and check havne stays up
+      - name: Launch and check Havne stays up
         run: |
-          APP=$(find build -type d -name havne.app -path '*iphonesimulator*' | head -n 1)
+          APP=$(find build -type d -name Havne.app -path '*iphonesimulator*' | head -n 1)
           if [ -z "$APP" ]; then
-            echo "::error::havne.app not found under build/"
+            echo "::error::Havne.app not found under build/"
             exit 1
           fi
           BUNDLE_ID=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$APP/Info.plist")
@@ -577,7 +580,7 @@ jobs:
           xcrun simctl io "$UDID" screenshot smoke/launch-15s.png || true
           sleep 30
           xcrun simctl io "$UDID" screenshot smoke/launch-45s.png || true
-          echo "--- havne stderr ---"
+          echo "--- Havne stderr ---"
           cat smoke/stderr.log 2>/dev/null || true
           echo "--- end stderr ---"
           if grep -q "QML FAILED TO LOAD" smoke/stderr.log 2>/dev/null; then
@@ -585,16 +588,16 @@ jobs:
             exit 1
           fi
           if ! kill -0 "$PID" 2>/dev/null; then
-            echo "::error::havne exited within 45 s of launch"
+            echo "::error::Havne exited within 45 s of launch"
             exit 1
           fi
-          echo "havne still running after 45 s"
+          echo "Havne still running after 45 s"
 
       - name: Collect crash reports
         if: failure()
         run: |
           mkdir -p smoke
-          cp ~/Library/Logs/DiagnosticReports/havne* smoke/ 2>/dev/null || true
+          cp ~/Library/Logs/DiagnosticReports/Havne* smoke/ 2>/dev/null || true
 
       - name: Upload smoke artifacts
         if: always()

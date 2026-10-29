@@ -118,7 +118,7 @@ safe — regeneration is cheap.
 cmake -B build -DCMAKE_PREFIX_PATH=/path/to/qt
 cmake --build build
 build/app/havne                              # Linux
-build/app/havne.app/Contents/MacOS/havne    # macOS
+build/app/Havne.app/Contents/MacOS/Havne    # macOS
 ```
 
 On Debian or Ubuntu, Qt's desktop kit needs `libgl1-mesa-dev` and
@@ -223,7 +223,7 @@ Boot a simulator before installing:
     -DBUILD_TESTING=OFF \
     -DCMAKE_OSX_SYSROOT=iphonesimulator -DCMAKE_OSX_ARCHITECTURES=x86_64
 cmake --build build-iossim --config Release -- CODE_SIGNING_ALLOWED=NO
-xcrun simctl install booted build-iossim/app/Release-iphonesimulator/havne.app
+xcrun simctl install booted build-iossim/app/Release-iphonesimulator/Havne.app
 ```
 
 Then launch it from the simulator's home screen. The CI job's launch
@@ -466,7 +466,7 @@ README badge ([testing.md](testing.md#coverage)).
 | A mobile build fails during test discovery, or tries to run a test binary | `BUILD_TESTING` is on. Cross builds must pass `-DBUILD_TESTING=OFF` (see Mobile above). |
 | Re-running a skipped `ios-simulator-smoke` skips it again | A re-run replays the original event and commit, so the job's condition comes out the same. Start a manual run instead (Actions → CI → Run workflow, or `gh workflow run ci.yml --ref <branch>`); tick `smoke_only` to skip the other platform jobs. A commit whose message contains `[ios-smoke]` also works. |
 | `ios-simulator-smoke` passes, but the app screenshots are blank | Seen once, on the first run (2026-10-20). That run launched the app straight after a cold boot, and the frame was blank at 15 s. With the boot overlapping the build, the next run drew by 15 s. If it recurs: a blank `home.png` means the runner's simulator display is at fault. No `QSG_INFO` lines in stderr means the window was never exposed. `QSG_INFO` present with blank shots means frames aren't reaching the screen, so try another `QSG_RHI_BACKEND`. A blank 15 s shot with a drawn 45 s shot means a slow first frame. |
-| `ios-simulator-smoke` fails with "havne exited within 45 s", and the printed stderr says `Failed to initialize graphics backend` | Qt Quick couldn't get a Metal device from the runner VM. Check the boot step's `system_profiler` output. Before suspecting the app, try `SIMCTL_CHILD_QSG_RHI_BACKEND=opengl` on the launch line. |
+| `ios-simulator-smoke` fails with "Havne exited within 45 s", and the printed stderr says `Failed to initialize graphics backend` | Qt Quick couldn't get a Metal device from the runner VM. Check the boot step's `system_profiler` output. Before suspecting the app, try `SIMCTL_CHILD_QSG_RHI_BACKEND=opengl` on the launch line. |
 | `ios-simulator-smoke` fails with "No available iPhone simulator on iOS 18 or later" | The runner image dropped its iOS 18+ runtimes, or the job moved to a runner without them. The step prints the available devices. |
 
 **Preferences:** the app keeps the zoom, the units, the last URI that

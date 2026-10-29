@@ -233,7 +233,7 @@ cmake -B build -DCMAKE_PREFIX_PATH=/path/to/qt
 cmake --build build
 ctest --test-dir build --output-on-failure
 build/app/havne                              # Linux
-build/app/havne.app/Contents/MacOS/havne    # macOS (an app bundle)
+build/app/Havne.app/Contents/MacOS/Havne    # macOS (an app bundle)
 ```
 
 To try it without hardware, open **Settings**, pick the `mock://demo`
