@@ -276,7 +276,8 @@ safety hold.
 
 - [ ] At the first adapter connect Android asks to allow
       notifications: allow it. A notification "Havne — Connected to
-      …" with "· recording", for as long as the session is up
+      …" with "· recording", for as long as the session is up, and
+      the gauge icon in the status bar, with no sound or vibration
 - [ ] Press Home for about 2 minutes, then return. The link stayed up
       the whole time (no "Link: adapter fault" in the activity log),
       Live has no gap, the values kept recording

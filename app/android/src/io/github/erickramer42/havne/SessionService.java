@@ -123,16 +123,28 @@ public class SessionService extends Service
         return null;
     }
 
+    // Default importance, so the status bar shows the icon while a session
+    // runs; at low importance there was none and the notification sat in
+    // the shade's Silent section, where it went unseen
+    // (docs/bench-sessions/2026-10-28-android-10.md). No sound, vibration
+    // or badge, and an update (recording on or off) alerts nothing.
+    // Android fixes a channel's importance when it's first made: a change
+    // here reaches an installed app only under a new channel id
     private Notification notification(String text)
     {
         NotificationManager manager = getSystemService(NotificationManager.class);
-        manager.createNotificationChannel(new NotificationChannel(
-                CHANNEL, "Sessions", NotificationManager.IMPORTANCE_LOW));
+        NotificationChannel channel = new NotificationChannel(
+                CHANNEL, "Sessions", NotificationManager.IMPORTANCE_DEFAULT);
+        channel.setSound(null, null);
+        channel.enableVibration(false);
+        channel.setShowBadge(false);
+        manager.createNotificationChannel(channel);
         Intent open = getPackageManager().getLaunchIntentForPackage(getPackageName());
         PendingIntent tap = PendingIntent.getActivity(this, 0, open,
                 PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
         return new Notification.Builder(this, CHANNEL)
-                .setSmallIcon(getApplicationInfo().icon)
+                .setSmallIcon(R.drawable.ic_notification)
+                .setOnlyAlertOnce(true)
                 .setContentTitle("Havne")
                 .setContentText(text)
                 .setContentIntent(tap)

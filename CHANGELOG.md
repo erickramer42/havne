@@ -84,8 +84,8 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
   It has read a car through an OBDLink MX+.
 - On Android, an adapter session keeps running in the background and
   with the screen off, recording included. While it's connected a
-  quiet notification says so ("Connected to …", "· recording"); a tap
-  opens the app. Havne asks once, at the first adapter connect, to
+  notification says so ("Connected to …", "· recording"), with a
+  small gauge in the status bar and no sound; a tap opens the app. Havne asks once, at the first adapter connect, to
   show notifications, and the phone stays awake (not its screen) for
   as long as the session lasts. A dropped classic Bluetooth link
   reconnects with one connection attempt at a time. It has held an
