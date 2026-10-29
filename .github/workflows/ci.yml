@@ -448,6 +448,11 @@ jobs:
             grep -q "android.permission.$p\"" "$MANIFEST" \
               || { echo "::error::$MANIFEST declares no $p permission"; exit 1; }
           done
+          # No backup: the app's files can hold the VIN (docs/security-assurance.md)
+          grep -q 'android:allowBackup="false"' "$MANIFEST" \
+            || { echo "::error::$MANIFEST doesn't turn backup off"; exit 1; }
+          grep -q 'android:dataExtractionRules="@xml/data_extraction_rules"' "$MANIFEST" \
+            || { echo "::error::$MANIFEST names no data extraction rules"; exit 1; }
 
       # The debug-signed APK, for sideloading onto a phone (ADR-0028 §3).
       # Each run signs with a new debug key, so a phone uninstalls the

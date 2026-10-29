@@ -1,9 +1,13 @@
 <?xml version="1.0"?>
 <!-- Qt 6.12's template (src/android/templates/AndroidManifest.xml), its
-     placeholders kept for androiddeployqt, plus two things of the app's
-     own (ADR-0029): background_running, and the session's foreground
-     service. The permissions come from app/CMakeLists.txt. On a Qt
-     upgrade, diff this against the new template. -->
+     placeholders kept for androiddeployqt, plus the app's own: ADR-0029's
+     background_running and the session's foreground service, and no
+     backup (allowBackup off, and res/xml/data_extraction_rules.xml for
+     Android 12's device-to-device transfer, which allowBackup alone
+     leaves on): the preferences and recordings can hold the VIN, and
+     nothing of them leaves the phone but by the user's hand. The
+     permissions come from app/CMakeLists.txt. On a Qt upgrade, diff
+     this against the new template. -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="org.qtproject.example"
     android:installLocation="auto"
@@ -19,6 +23,8 @@
     <application
         android:name="org.qtproject.qt.android.bindings.QtApplication"
         android:hardwareAccelerated="true"
+        android:allowBackup="false"
+        android:dataExtractionRules="@xml/data_extraction_rules"
         android:label="-- %%INSERT_APP_NAME%% --"
         android:icon="-- %%INSERT_APP_ICON%% --"
         android:enableOnBackInvokedCallback="true">
