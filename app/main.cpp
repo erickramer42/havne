@@ -3,8 +3,10 @@
 //          through the run-qttune skill's launch; the title bar in the
 //          header's color on Windows 11);
 //          BENCH, the phone run sheet (the system bars' color, Android's
-//          window behind Qt's dark); CI's android-build compiles the
-//          Android part;
+//          window behind Qt's dark; Phase 8, no drawing while inactive:
+//          the screen turned off with the app in front, the Delivery
+//          line's longest wait for the GUI thread); CI's android-build
+//          compiles the Android part;
 //          QmlTest drives the same QML module and Bridge singleton
 //          without this file
 
@@ -14,13 +16,13 @@
 #include <QQuickStyle>
 #include <QSettings>
 #include <QStyleHints>
+#include <QWindow>
 
 #ifdef Q_OS_ANDROID
 #include <QJniObject>
 #include <QtCore/qcoreapplication_platform.h>
 #endif
 #ifdef Q_OS_WIN
-#include <QWindow>
 #ifndef NOMINMAX
 #define NOMINMAX
 #endif
@@ -80,6 +82,33 @@ static void darkenAndroidWindow()
 }
 #endif
 
+#ifdef Q_OS_ANDROID
+// No drawing while the app isn't active. With the event loops kept running
+// in the background (ADR-0029 §1), Qt 6.12's Android plugin, handling the
+// screen going off, destroys the window's surface and then still delivers
+// an expose that draws; the draw waits for Android to make a new surface,
+// which it doesn't with the screen off, and the thread that draws stops
+// until the screen comes back (docs/bench-sessions/2026-10-28-android-10.md).
+// With the basic render loop every draw starts from one of these two
+// events on the GUI thread; Qt sends a new expose when the app is active
+// again, so the page redraws then
+class NoDrawWhileInactive : public QObject
+{
+public:
+    using QObject::QObject;
+
+protected:
+    bool eventFilter(QObject* watched, QEvent* event) override
+    {
+        if ((event->type() == QEvent::Expose ||
+             event->type() == QEvent::UpdateRequest) &&
+            QGuiApplication::applicationState() != Qt::ApplicationActive)
+            return true;
+        return QObject::eventFilter(watched, event);
+    }
+};
+#endif
+
 #ifdef Q_OS_WIN
 // The title bar in the header's color (Theme.surface) with the app's text
 // color, so the two read as one bar. Windows 11 takes both; Windows 10
@@ -96,6 +125,14 @@ static void colorTitleBar(QWindow *window)
 
 int main(int argc, char *argv[])
 {
+#ifdef Q_OS_ANDROID
+    // Qt Quick's basic render loop: every draw on the GUI thread, started
+    // by an event NoDrawWhileInactive sees. The threaded loop's render
+    // thread starts frames of its own, and one that started as the screen
+    // went off waited there, the GUI thread waiting on it
+    if (!qEnvironmentVariableIsSet("QSG_RENDER_LOOP"))
+        qputenv("QSG_RENDER_LOOP", "basic");
+#endif
     QGuiApplication app(argc, argv);
     app.setOrganizationName("QtTune");
     app.setApplicationName("QtTune");
@@ -141,6 +178,9 @@ int main(int argc, char *argv[])
     }
 #ifdef Q_OS_ANDROID
     darkenAndroidWindow();
+    if (auto* window =
+            qobject_cast<QWindow*>(engine.rootObjects().constFirst()))
+        window->installEventFilter(new NoDrawWhileInactive(window));
 #endif
 #ifdef Q_OS_WIN
     if (auto *window = qobject_cast<QWindow *>(engine.rootObjects().constFirst()))
