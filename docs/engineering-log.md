@@ -100,6 +100,7 @@ Dates are commit dates.
 | 2026-10-25 | The GUI thread's decode cost per frame, measured (`bench_bridge`): about 3 ns a def a frame, so 1000 defs at a full 500 kbit/s classic CAN bus take under 2 % of it; decoding on the worker is about per-sample time on the chart, not CPU ([testing.md](testing.md#performance)) | `d063939`, `dbd672a` |
 | 2026-10-26 | The replay transport ([ADR-0023](adr/0023-replay-transport.md)): `replay://` plays a recording's `frames.csv` back on every platform, paced and stamped by the recording's own session time, at a speed or `max`, looping on request; the bridge takes frames from the moment a session starts, says what a replay is and when it ends; a recorded mock session round-trips value for value, and the second vehicle session's engine start is a scrubbed fixture whose replay decodes the sheet's values | `43c4c9e`, `4c75308`, `6c2294d` |
 | 2026-10-26 | Decoding on the worker ([ADR-0024](adr/0024-decode-on-the-worker.md)): core decodes each frame in its dispatch and hands a values callback one batch per frame with the frame's time; the bridge stages them from the worker, so a dropped frame keeps its values, and decodes nothing; the chart shows each value at its own time and keeps every window's lowest and highest (ADR-0005's appendix). The vehicle sessions' recordings replay to their own values, 24,632 of them | `ddcf095`, `92a09c3`, `0ea4126`, `e78ea57`, `6e6472a`, `8b3fa60` |
+| 2026-10-28 | Android background sessions ([ADR-0029](adr/0029-android-background-sessions.md)): Qt's GUI loop kept running in the background, a `connectedDevice` foreground service with a wake lock while an adapter session is up, one Bluetooth socket connect at a time, and no drawing while the app isn't active (Qt 6.12's Android plugin deadlocked drawing for exposes after destroying the surface as the screen went off); the MX+ on the car held through the screen off with the app in front ([2026-10-28-android-11](bench-sessions/2026-10-28-android-11.md)) | `ee1db00`, `3d5b59f`, `bea2d48` |
 
 ## Lessons learned
 
@@ -963,3 +964,26 @@ read "no answer, is this computer on the adapter's WiFi?" instead of
 "refused". Two SYN retries (`SIO_TCP_INITIAL_RTO`) bring it to about
 1 s, and `Elm327TcpTest.NothingListeningIsARefusal` holds it under the
 limit on every CI runner.
+
+**2026-10-28 — Android background sessions (ADR-0029):** **when a
+thread stops and no tool can see it, have the process report its own
+stack.** The screen turned off with the app in front stopped the GUI
+thread for minutes in some screen-offs and not others. Thread states
+showed nothing wrong, `jdb` shows only Java frames (and with it
+attached, six screen-offs passed clean), `debuggerd` needs root, and
+`simpleperf` couldn't record off-CPU time for another user's process.
+A throwaway build with a watchdog did it: the GUI thread beat every
+100 ms, and a watchdog thread that found it 2 s stale signaled it, its
+handler unwinding its own stack into logcat. The first stalled
+screen-off showed the GUI thread waiting on Qt Quick's render thread,
+and the render thread waiting in Qt's Android plugin for a surface
+Android doesn't make with the screen off. A filter that logged what it
+dropped then showed the trigger, exposes while Inactive, arriving on
+every screen-off: the intermittency was only in the race that followed,
+so the fix could be judged by the trigger it blocked, not by counting
+clean runs alone. Two more things the runs taught: the session clock
+(`CLOCK_MONOTONIC`) skips the CPU's deep sleep, so a sleep left no gap
+on Live or in a recording, and only the activity log's wall-clock
+column against its session seconds showed it; and a phone's logcat
+rotates in minutes, so evidence from a run away from the computer has
+to go to a file.

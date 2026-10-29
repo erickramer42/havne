@@ -2,8 +2,9 @@
 
 - **Status:** Accepted.
 - **Date:** 2026-10-28.
-- **Closes:** Known Issue #37 (the app in the background), once the
-  phone runs in §5 pass.
+- **Closes:** Known Issue #37 (the app in the background), closed
+  after the phone runs on the car
+  ([2026-10-28-android-11](../bench-sessions/2026-10-28-android-11.md)).
 - **Builds on:** [ADR-0028](0028-app-fed-streams.md) (the app's
   Bluetooth link, whose calls run on the GUI thread);
   [ADR-0017](0017-session-recording.md) (the recorder, on the GUI
@@ -209,6 +210,14 @@ under `mock://`, in some screen-offs and not others.
   desk, 26 screen-offs, every one delivering the Inactive exposes the
   filter dropped: the GUI thread never waited more than 126 ms. The car
   confirms it (Phase 8b, the screen off with QtTune in front).
+
+> **Amended 2026-10-28:** the car confirmed it
+> ([2026-10-28-android-11](../bench-sessions/2026-10-28-android-11.md)):
+> the screen off with QtTune in front for five minutes, then Home, with
+> no gap over 1 s in 481 s. The same run found `BtLink::write` reading
+> the socket's error after a failed write whose handler had already
+> dropped the socket (§3's rules report and drop on a failure); it now
+> checks the socket is still there.
 - Keeping the Bluetooth link and the recorder off the GUI thread, the
   alternative this ADR set aside, would make any other GUI-thread stall
   cost only what Live shows. Not needed for this one; a hardening item.
