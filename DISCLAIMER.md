@@ -2,35 +2,87 @@
 
 **This software may damage your vehicle's control modules.**
 
-Havne is a cross-platform ECU diagnostic and tuning application in
-early development. It reads only today. If writing and flashing
-features are added, errors in this software, its configuration, or
-your use of it may result in:
+Havne is a cross-platform ECU reader and logger in early development.
+It reads only today. Clearing trouble codes and, later, writing and
+flashing are on the [roadmap](STATUS.md#roadmap). If those features
+are added, errors in this software, its configuration, or your use of
+it may result in:
 
 - Corrupted firmware or calibration ("bricked" modules)
 - Engine or transmission damage
 - Disabled or degraded safety systems (ABS, TCS, stability control)
+- Cleared emissions readiness monitors, so the vehicle fails an
+  inspection until it has been driven enough for them to complete
+  again (clearing codes does this)
 
 **Back up your ECU contents before any session where writes are
 possible. Never flash a vehicle with an unstable power supply.**
 
 ## Current state
 
-This project is in early development. Through a J2534 Pass-Thru
-adapter (Windows only), it sends read-only diagnostic requests (OBD-II
-Service 01 "current data" and Service 09 "vehicle information", and
-UDS Service 0x22 "read data by identifier") and displays the replies.
-That path has been tested against a simulated adapter, on the bench
-with a real adapter and no vehicle, and in two read-only sessions on
-one vehicle with one adapter. It has **not** been validated beyond
-that.
-Havne has **no** capability to write, clear codes or flash any ECU.
-Do not connect it to a vehicle expecting reliable results.
+Havne sends only read-only diagnostic requests: OBD-II Service 01
+("current data") and Service 09 ("vehicle information"), and UDS
+Service 0x22 ("read data by identifier"). It refuses every other
+service ([ADR-0015](docs/adr/0015-request-engine.md)). It has **no**
+capability to clear codes, write or flash any ECU. It reaches a
+vehicle through:
+
+- a **J2534 Pass-Thru** adapter, on Windows only;
+- an **ELM327-compatible** adapter over USB, Bluetooth or WiFi, on
+  Windows, Linux and macOS;
+- an **Android phone** (Android 12 or later) and a Bluetooth adapter.
+
+It has been tested against its simulated vehicle and fake adapters, on
+the bench with real adapters and no vehicle, and in read-only sessions
+on **one** vehicle with **two** adapters (the OBDX Pro VX, as a J2534
+adapter and in its ELM327 mode, and the OBDLink MX+ over Bluetooth),
+from a laptop and from an Android phone. It has **not** been validated
+beyond that: other vehicles, other adapters, Bluetooth LE adapters,
+29-bit CAN addressing, several ECUs answering at once and the iOS app
+on a device are all untested. [STATUS.md](STATUS.md) tracks what is
+and isn't verified. Do not rely on its readings for safety-related
+decisions.
+
+## Using it on a vehicle
+
+- **Don't operate the app while driving.** Set up the session before
+  you set off, mount the phone or laptop where it can't fall into the
+  footwell or under the pedals, and leave anything you need to
+  operate to a passenger. Follow your local law on device use behind
+  the wheel.
+- **Route the adapter and its cable** clear of the pedals, the
+  steering column and the driver's knees.
+- **A session keeps the adapter awake.** While it's connected, Havne
+  asks the engine ECU for data continuously, and on Android it keeps
+  running in the background and with the screen off. An adapter left
+  plugged in, or a session left running with the engine off, drains
+  the vehicle's battery. Disconnect when you're done, and unplug an
+  adapter that doesn't sleep on its own.
+- **Requests are traffic on the vehicle's bus.** They are the
+  requests a scan tool sends, paced by the ECU's replies, but any
+  device on the diagnostic port carries some risk. A module that
+  behaves unusually while Havne is connected is a reason to
+  disconnect.
+
+## Your data
+
+A session can read your vehicle's VIN and its ECUs' identifiers
+(calibration IDs, serial numbers). Havne shows them in the activity
+log, and, when **Record sessions** is on, writes them into the
+recording's files on your device (`Documents/Havne/recordings` on a
+desktop). An ELM327 session also writes a wire log to the system's
+temporary folder. Havne sends nothing over the network except to the
+adapter you connect to. On Android, though, the phone's own backup
+may copy the app's preferences and recordings to your cloud backup
+when backup is on. Before you share a recording, a log or a
+screenshot, see [CONTRIBUTING.md](CONTRIBUTING.md#handling-vehicle-data)
+for what to remove.
 
 ## Intended purpose
 
 - **Diagnostics:** read and log vehicle data
-- **Calibration (planned, not built):** view and edit maps for supported vehicles
+- **Calibration (planned, not built):** view and edit maps for
+  supported vehicles
 - **Research:** understand diagnostic protocol behavior
 
 ## Not intended for

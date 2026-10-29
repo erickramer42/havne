@@ -164,7 +164,8 @@ Load failures surface at create, so nothing half-starts.
 **Two encode/decode pairs must change together**, because a mistake in
 either half still passes structural validation:
 - the mock encoder (`mock_drive_cycle.h`) and the mock defs;
-- the `obd2` defs and the fake vendor DLL's canned replies.
+- the `obd2` defs and the fakes' canned replies (`tests/fake_ecu.h`,
+  the one ECU the fake J2534 DLL and the fake ELM327 both answer from).
 
 Tests round-trip real frames through both pairs.
 

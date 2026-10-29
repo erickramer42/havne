@@ -147,15 +147,18 @@ the x64 → x86 path. Only the surrogate and vendor DLLs are ever x86.
 > fakes', carry no fingerprint, and the cross-arch run loads them
 > from `build-win32` directly, so rebuild both after those too.
 
-**Mobile (builds in CI, not yet run on a device).** The QML, bridge
-and core are shared, and only the kit differs. Use `qt-cmake` from
+**Mobile (both build in CI; Android runs on a phone, iOS only on
+the Simulator).** The QML, bridge and core are shared, and only the
+kit differs. Use `qt-cmake` from
 the mobile kit, which applies Qt's toolchain file and finds the host
 desktop Qt. Mobile builds set `BUILD_TESTING=OFF`:
 `gtest_discover_tests` runs each test binary at build time, and the
 build host can't execute an Android or iOS binary. On a phone the
-transports are `mock://`, `replay://` and `elm327://` to a WiFi
-adapter's address (Known Issue #2). Qt Creator with an Android or iOS
-kit is the interactive alternative.
+transports are `mock://`, `replay://` and `elm327://`, to a WiFi
+adapter's address or, on Android, a Bluetooth adapter through the
+phone ([ADR-0028](adr/0028-app-fed-streams.md); Known Issue #2 says
+what has run where). Qt Creator with an Android or iOS kit is the
+interactive alternative.
 
 *Android* (this mirrors the `android-build` CI job). On Windows, add
 `-G Ninja`, because the Visual Studio generator can't target Android:
