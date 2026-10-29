@@ -147,6 +147,15 @@ void ecuio_shutdown(void);
 const char* ecuio_version_string(void);
 const char* ecuio_status_string(ecuio_status_t status);
 
+/* The host clock session time runs on (ADR-0033): microseconds that keep
+ * counting while the machine sleeps, on every platform. Its origin is the
+ * platform's, so only a difference means anything. Any thread. */
+uint64_t ecuio_clock_us(void);
+/* Microseconds the machine has slept since it started, on the same clock.
+ * It never decreases, so a rise between two reads is a sleep between
+ * them; 0 where the platform can't say. Any thread. */
+uint64_t ecuio_clock_slept_us(void);
+
 /* Session management.
  *
  * Lifecycle follows FILE/free discipline:

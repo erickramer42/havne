@@ -1,6 +1,7 @@
 # core/CMakeLists.txt
 add_library(ecuio-core STATIC
     src/core.cpp
+    src/host_clock.cpp
     src/profile_registry.cpp
     src/mock_transport.cpp
     src/replay_transport.cpp

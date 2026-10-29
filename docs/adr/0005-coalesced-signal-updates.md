@@ -104,3 +104,11 @@ gauges' peak and low holds take them, so a gauge holds the peak the
 chart shows. Holding the newest value alone, the engine-start
 recording replayed at 100× never reached its 1,261 rpm on the tach
 (`QmlTest.dashboard`).
+
+## Appendix — the model's timer counts sleep (2026-10-29)
+
+The model's timer, behind a value's age and the fallback stamp, reads
+core's clock (`ecuio_clock_us`, [ADR-0033](0033-session-time-counts-sleep.md))
+instead of a `QElapsedTimer`, which on Linux and Android stops while
+the machine sleeps. A value read before a sleep is as old as it is at
+the wake, and its gauge dims then.

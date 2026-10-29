@@ -33,6 +33,7 @@
 #include "j2534_clock.h"
 #include "uri_query.h"
 #include "error_detail.h"
+#include "host_clock.h"
 #include "ecuio/profile.h"
 
 #include <atomic>
@@ -146,7 +147,7 @@ struct ecuio_j2534_transport {
     /* Frame time (j2534_clock.h): the host's at the first frame, counted
      * from epoch, the end of attach; the vendor's deltas after that.
      * Worker-only, through pump_one. */
-    std::chrono::steady_clock::time_point epoch{};
+    host_clock::time_point epoch{};
     j2534_clock clock;
     /* The frame pump_one builds from each read, dispatched from here;
      * worker-only, and 4 KB, so it lives with the transport rather than
@@ -248,7 +249,7 @@ read_outcome pump_one(ecuio_j2534_transport* t, uint32_t timeout_ms)
     /* Both backends deliver the vendor's 32-bit stamp as it came. */
     const uint64_t host_us = static_cast<uint64_t>(
         std::chrono::duration_cast<std::chrono::microseconds>(
-            std::chrono::steady_clock::now() - t->epoch).count());
+            host_clock::now() - t->epoch).count());
     const uint64_t at_us = j2534_clock_step(t->clock, msg.timestamp,
                                             host_us);
     ecuio_frame_t& frame = t->rx_frame;
@@ -361,7 +362,7 @@ int64_t engine_now_us(const ecuio_j2534_transport* t)
 {
     return static_cast<int64_t>(
         std::chrono::duration_cast<std::chrono::microseconds>(
-            std::chrono::steady_clock::now() - t->epoch).count());
+            host_clock::now() - t->epoch).count());
 }
 
 /* A read's timeout from the engine's next event (INT64_MAX: nothing to
@@ -852,7 +853,7 @@ ecuio_status_t j2534_attach(ecuio_session_t* session, const char* uri,
     t->channel = channel;
     describe_session(t.get(), params.baud, connect_flags, &session->info);
     ecuio_seed_reports(session, t->engine, rx_ids, t->chan_count);
-    t->epoch = std::chrono::steady_clock::now();   /* as mock: end of attach */
+    t->epoch = host_clock::now();   /* as mock: end of attach */
 
     wrap->impl = t.release();
     session->transport = wrap;   /* session.h member — direct install */

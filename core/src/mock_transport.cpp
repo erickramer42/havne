@@ -4,7 +4,8 @@
 //          itself is tested deterministically (CoreTest.MockDriveCycle*);
 //          CoreTest.MockAnswersTheSessionsDids decodes its DID replies
 //          under uds-generic; CoreTest.MockFramesKeepTheTickInterval
-//          bounds the worker's cadence against its timestamps
+//          bounds the worker's cadence against its timestamps;
+//          CoreTest.SessionTimeRunsOnTheClock (stamps on ecuio_clock_us)
 
 #include "ecuio/core.h"
 #include "ecuio/internal.h"
@@ -12,6 +13,7 @@
 #include "ecuio/signals.h"
 #include "ecuio/signal_sets.h"
 #include "mock_drive_cycle.h"
+#include "host_clock.h"
 
 #include <atomic>
 #include <chrono>
@@ -36,7 +38,7 @@ struct ecuio_mock_transport {
     /* Session epoch, captured at attach (inside session_create).
      * Written once before the worker spawns and read-only after, so
      * thread creation publishes it; no further synchronization. */
-    std::chrono::steady_clock::time_point epoch{};
+    host_clock::time_point epoch{};
     ecuio_mock::DriveCycle sim;    /* owned by worker — only touched on worker thread */
 };
 
@@ -61,7 +63,7 @@ void mock_worker(ecuio_mock_transport* t)
         /* Session-relative and monotonic, per the core.h contract. */
         frame.timestamp_us = static_cast<uint64_t>(
             std::chrono::duration_cast<std::chrono::microseconds>(
-                std::chrono::steady_clock::now() - t->epoch).count());
+                host_clock::now() - t->epoch).count());
         frame.data_length = ECUIO_MOCK_TELEMETRY_PAYLOAD_LEN;
 
         /* Every 16th frame is a 29-bit "diagnostic" frame carrying the
@@ -214,7 +216,7 @@ ecuio_status_t ecuio_mock_transport_attach(ecuio_session_t* session,
             return ECUIO_ERR_OUT_OF_MEMORY;
         }
         impl->session = session;  /* for callback dispatch */
-        impl->epoch = std::chrono::steady_clock::now();  /* session start */
+        impl->epoch = host_clock::now();  /* session start */
     } catch (...) {
         return ECUIO_ERR_OUT_OF_MEMORY;
     }

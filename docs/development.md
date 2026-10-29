@@ -479,8 +479,9 @@ havne-cli stream elm327://COM5 --seconds 60               # an adapter: as the a
 havne-cli devices                                         # what a URI can name
 ```
 
-Its output is JSON lines, schema 1 (ADR-0031 §3). Its tests are
-`test_cli` (the formatting and the ring) and ctest's `CliGoldenTest`,
+Its output is JSON lines, schema 1 (ADR-0031 §3); a `slept` line marks
+a gap the machine's sleep made (ADR-0033 §6). Its tests are
+`test_cli` (the formatting, the ring and the sleep rule) and ctest's `CliGoldenTest`,
 `CliUsageTest` and `CliSignalTest`. A golden run compares the whole
 output with `tests/golden/cli/`; after a deliberate change to what it
 prints (or to what core decodes), rewrite the golden file with the

@@ -38,6 +38,18 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
   `socketcan://vcan0?profile=mock` (or any SocketCAN tool) can listen,
   with no hardware. It writes only to virtual interfaces, never to a
   real bus.
+- **A sleep says so:** when the computer or phone sleeps during a
+  session, the activity log (and a recording's `events.log`) says
+  "Asleep for N s: nothing was read meanwhile", and `havne-cli` writes
+  a `slept` line.
+
+### Fixed
+- **A sleep on Linux or Android is a gap,** on Live, in a recording's
+  times and in `havne-cli`'s stream, instead of the values on either
+  side being joined as if nothing had been missed; values read before
+  the sleep dim as stale at the wake
+  ([ADR-0033](docs/adr/0033-session-time-counts-sleep.md)). Windows,
+  macOS and iOS already counted a sleep.
 
 ## [0.3.3] - 2026-10-29
 

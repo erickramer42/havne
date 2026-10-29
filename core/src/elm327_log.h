@@ -23,6 +23,8 @@
 #include <cstddef>
 #include <cstdint>
 
+#include "host_clock.h"
+
 /* Earlier connects' logs kept beside the newest. */
 constexpr int ELM327_KEPT_LOGS = 50;
 
@@ -36,7 +38,7 @@ constexpr elm327_log_file ELM327_LOG_NONE = -1;
 #endif
 
 struct elm327_log {
-    std::chrono::steady_clock::time_point opened{};
+    host_clock::time_point opened{}; /* session time's clock (ADR-0033) */
     elm327_log_file file = ELM327_LOG_NONE;
     bool requests = false; /* ECUIO_SUR_LOG_FRAMES=1: the requests' lines */
 };

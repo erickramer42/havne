@@ -9,6 +9,7 @@
 //          id, the signal model's roles and age
 //          refresh, link-state mapping, the activity log's session,
 //          ECU and delivery lines (the ELM327 session line too,
+//          a sleep's line: BridgeTest.ASleepWhileConnectedIsLoggedWithItsLength,
 //          BridgeTest.SessionInfoTextNamesTheAdapter; its versions clause
 //          as adapterVersions, .ConnectLogsTheAdaptersSession), the serial ports as
 //          core lists them, session recording (BridgeTest.Recording*) and
@@ -533,6 +534,7 @@ SessionBridge::SessionBridge(QObject* parent)
         pollChannelSupport();
         pollChannelIdentity();
         pollReplayEnd();
+        pollSleep();
         // Must fire even when nothing arrived this window: dimming exists
         // for rows that STOPPED updating. 100 ms is well
         // inside the 3 s dim threshold and the span emission is one
@@ -906,6 +908,7 @@ void SessionBridge::applyConnectedState(ecuio_session_t* session, const QString&
                                             ECUIO_SESSION_INFO_MAX_CHANNELS);
     }
     m_replayFrames = info.replay_frames;
+    m_sleptUs = sleptUs();
     m_replayEndLogged = info.backend != ECUIO_BACKEND_REPLAY ||
                         (info.flags & ECUIO_SESSION_INFO_REPLAY_LOOP) != 0;
     for (uint32_t& g : m_supportGeneration) {
@@ -2057,6 +2060,23 @@ void SessionBridge::pollReplayEnd()
     emit logMessage(
         QStringLiteral("Replay finished: %1 frames; the session stays open")
             .arg(m_replayFrames));
+}
+
+/* A sleep while connected (ADR-0033 §6): the machine's slept count rose
+ * a second or more since the last tick. Session time counts the sleep, so
+ * Live and the recording show it as a gap; this says what the gap is.
+ * Smaller rises are taken in without a line */
+void SessionBridge::pollSleep()
+{
+    const uint64_t now = sleptUs();
+    const uint64_t rise = now > m_sleptUs ? now - m_sleptUs : 0;
+    m_sleptUs = now;
+    if (rise < 1000000u) {
+        return;
+    }
+    emit logMessage(
+        QStringLiteral("Asleep for %1 s: nothing was read meanwhile")
+            .arg(static_cast<double>(rise) / 1e6, 0, 'f', 1));
 }
 
 /* The published state strings, in one place; QML's Theme.linkColor and

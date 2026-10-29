@@ -13,6 +13,7 @@
 #include <QCryptographicHash>
 #include <QDir>
 #include <QDirIterator>
+#include <QElapsedTimer>
 #include <QEventLoop>
 #include <QFile>
 #include <QFileInfo>
@@ -3133,6 +3134,54 @@ TEST(BridgeTest, ReplayOfAMockRecordingDecodesWhatWasRecorded)
 
 /* Settings' recordings list: a recording replays under the profile it
  * was recorded with, so a tap leaves nothing to type */
+/* A sleep while connected (ADR-0033 §6) is one activity line saying how
+ * long, in the recording's events.log too; a rise under a second, one
+ * before the connect, or one after the disconnect says nothing. No runner
+ * can sleep, so the seam adds to the count the tick reads */
+TEST(BridgeTest, ASleepWhileConnectedIsLoggedWithItsLength)
+{
+    QTemporaryDir root;
+    ASSERT_TRUE(root.isValid());
+    SessionBridge bridge;
+    bridge.setRecording(true);
+    bridge.setRecordingsRootForTesting(root.path());
+    QStringList log;
+    QObject::connect(&bridge, &SessionBridge::logMessage,
+                     [&log](const QString& line) { log << line; });
+
+    // Before the connect: not this session's
+    bridge.addSleptForTesting(5000000);
+    ASSERT_TRUE(bridge.connectSession("mock://asleep").isEmpty());
+    spinLoop(300);
+    EXPECT_TRUE(log.filter(QStringLiteral("Asleep")).isEmpty())
+        << log.join(QLatin1Char('\n')).toStdString();
+
+    bridge.addSleptForTesting(98400000);
+    const QString line =
+        QStringLiteral("Asleep for 98.4 s: nothing was read meanwhile");
+    ASSERT_TRUE(spinUntil([&log, &line]() { return log.contains(line); }, 5000))
+        << log.join(QLatin1Char('\n')).toStdString();
+    bridge.addSleptForTesting(900000);
+    spinLoop(300);
+    EXPECT_EQ(log.filter(QStringLiteral("Asleep")).size(), 1)
+        << "told once; 0.9 s is no line";
+
+    ASSERT_TRUE(disconnectAndWait(bridge));
+    bridge.addSleptForTesting(3000000);
+    spinLoop(300);
+    EXPECT_EQ(log.filter(QStringLiteral("Asleep")).size(), 1)
+        << "nothing while disconnected";
+
+    const QStringList folders = recordingFolders(root.path());
+    ASSERT_EQ(folders.size(), 1);
+    const QList<QByteArray> events =
+        fileLines(root.path() + QStringLiteral("/") + folders.first() +
+                  QStringLiteral("/events.log"));
+    EXPECT_TRUE(std::any_of(
+        events.cbegin(), events.cend(),
+        [&line](const QByteArray& e) { return e.endsWith(line.toUtf8()); }));
+}
+
 TEST(BridgeTest, ReplayUriForTakesTheRecordedProfile)
 {
     // A folder as QFileInfo gives it, '/' on every platform

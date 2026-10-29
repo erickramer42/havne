@@ -18,6 +18,7 @@
 #include <direct.h> /* _mkdir, _rmdir */
 #else
 #include <sys/stat.h>
+#include <time.h> /* clock_gettime: the platform's clock, for ecuio_clock_us */
 #include <unistd.h>
 #endif
 
@@ -1575,6 +1576,114 @@ TEST(CoreTest, MockFramesKeepTheTickInterval)
     EXPECT_LE(mean_ms, 50.0 + bound_ms)
         << "the drive cycle would play slower than real time; gaps (ms): "
         << gaps;
+}
+
+/* Session time's clock (ADR-0033 §1) never goes back, nor does its slept
+ * count, and while the machine is awake it keeps the waits' pace */
+TEST(CoreTest, ClockNeverGoesBackAndKeepsPace)
+{
+    uint64_t last = ecuio_clock_us();
+    uint64_t slept = ecuio_clock_slept_us();
+    for (int i = 0; i < 10000; ++i) {
+        const uint64_t now = ecuio_clock_us();
+        ASSERT_GE(now, last);
+        last = now;
+        const uint64_t s = ecuio_clock_slept_us();
+        ASSERT_GE(s, slept);
+        slept = s;
+    }
+    const uint64_t c0 = ecuio_clock_us();
+    const auto s0 = std::chrono::steady_clock::now();
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    const uint64_t elapsed = ecuio_clock_us() - c0;
+    const auto steady = std::chrono::duration_cast<std::chrono::microseconds>(
+                            std::chrono::steady_clock::now() - s0)
+                            .count();
+    EXPECT_GE(elapsed, 50000u);
+    EXPECT_NEAR(static_cast<double>(elapsed), static_cast<double>(steady),
+                1000.0);
+}
+
+/* It is the platform's clock that counts sleep, read between two reads of
+ * that clock. Where that clock and the one that stops in sleep agree (a
+ * machine that hasn't slept since it started, as a CI runner), this can't
+ * tell them apart; a real sleep is the bench's (BENCH prep #27) */
+TEST(CoreTest, ClockIsThePlatformsSleepCountingClock)
+{
+#if defined(__linux__)
+    const auto platform = []() {
+        timespec ts;
+        clock_gettime(CLOCK_BOOTTIME, &ts);
+        return static_cast<uint64_t>(ts.tv_sec) * 1000000u +
+               static_cast<uint64_t>(ts.tv_nsec) / 1000u;
+    };
+    const uint64_t slack = 0;
+#elif defined(__APPLE__)
+    const auto platform = []() {
+        return clock_gettime_nsec_np(CLOCK_MONOTONIC_RAW) / 1000u;
+    };
+    const uint64_t slack = 0;
+#else
+    /* MSVC's steady_clock is QueryPerformanceCounter, to nanoseconds by
+     * its own rounding: a microsecond either way */
+    const auto platform = []() {
+        return static_cast<uint64_t>(
+            std::chrono::duration_cast<std::chrono::microseconds>(
+                std::chrono::steady_clock::now().time_since_epoch())
+                .count());
+    };
+    const uint64_t slack = 1;
+#endif
+    const uint64_t before = platform();
+    const uint64_t clock = ecuio_clock_us();
+    const uint64_t after = platform();
+    EXPECT_LE(before, clock + slack);
+    EXPECT_LE(clock, after + slack);
+}
+
+namespace {
+
+struct ClockCapture {
+    std::atomic<int> count{0};
+    uint64_t stamp[8] = {}; /* read after close, which joins the worker */
+    uint64_t clock[8] = {};
+};
+
+void clock_capture_cb(const ecuio_frame_t* frame, void* user_data)
+{
+    ClockCapture* c = static_cast<ClockCapture*>(user_data);
+    const int i = c->count.fetch_add(1);
+    if (i < 8) {
+        c->clock[i] = ecuio_clock_us();
+        c->stamp[i] = frame->timestamp_us;
+    }
+}
+
+} // namespace
+
+/* A session's time is ecuio_clock_us since its attach, the clock the app
+ * stamps a recording's host_us with: each frame's clock less its stamp
+ * lands between the reads around create, give or take its dispatch */
+TEST(CoreTest, SessionTimeRunsOnTheClock)
+{
+    ecuio_session_t* session = nullptr;
+    const uint64_t before = ecuio_clock_us();
+    ASSERT_EQ(ecuio_session_create("mock://clock", &session), ECUIO_OK);
+    const uint64_t after = ecuio_clock_us();
+    ClockCapture cap;
+    ASSERT_EQ(ecuio_register_frame_callback(session, &clock_capture_cb, &cap),
+              ECUIO_OK);
+    ASSERT_EQ(ecuio_session_start(session), ECUIO_OK);
+    wait_for([&]() { return cap.count.load() >= 8; }, 10000);
+    ecuio_session_close(session);
+    ecuio_session_destroy(session);
+
+    ASSERT_GE(cap.count.load(), 8);
+    for (int i = 0; i < 8; ++i) {
+        const uint64_t epoch = cap.clock[i] - cap.stamp[i];
+        EXPECT_GE(epoch, before) << "frame " << i;
+        EXPECT_LE(epoch, after + 20000) << "frame " << i;
+    }
 }
 
 TEST(CoreTest, CloseIsIdempotentAndDestroyIsSafe)

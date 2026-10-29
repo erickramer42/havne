@@ -17,13 +17,26 @@
 /* One recording per connect (ADR-0017): a folder holding frames.csv
  * (every frame the bridge receives), signals.csv (every decoded value)
  * and events.log (a header, then the activity lines). Times are host
- * microseconds since the recording started, from the steady clock, so a
- * vendor's timestamps can be checked against them. GUI-thread-only, like
- * the rest of the bridge. */
+ * microseconds since the recording started, on core's clock
+ * (ecuio_clock_us), which counts the time the machine sleeps, so a sleep
+ * is a gap here as it is in session time (ADR-0033) and a vendor's
+ * timestamps can be checked against them. GUI-thread-only, like the rest
+ * of the bridge. */
 class SessionRecorder
 {
 public:
-    using Clock = std::chrono::steady_clock;
+    // ecuio_clock_us as a chrono clock; the bridge stamps arrivals with it
+    struct Clock {
+        using duration = std::chrono::microseconds;
+        using rep = duration::rep;
+        using period = duration::period;
+        using time_point = std::chrono::time_point<Clock>;
+        static constexpr bool is_steady = true;
+        static time_point now() noexcept
+        {
+            return time_point(duration(static_cast<rep>(ecuio_clock_us())));
+        }
+    };
 
     /* Creates <root>/<yyyyMMdd-HHmmss>[-n][ <label>]/ and its three
      * files, then writes header (one line each) into events.log. The

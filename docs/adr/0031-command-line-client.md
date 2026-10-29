@@ -310,3 +310,11 @@ allows, adding without changing anything a reader already reads:
   whose `frames` is joined by `sent` and `skipped`; no `frame` lines.
   It ends as `stream` does, and its exit codes are §5's. Elsewhere it
   is a usage error that says it needs Linux.
+
+## Appendix: 2026-10-29, a sleep
+
+[ADR-0033](0033-session-time-counts-sleep.md) grows schema 1 by one
+type. A `slept` line (`us`) comes when the machine's slept count
+(`ecuio_clock_slept_us`) rose a second or more within one 100 ms poll:
+the stream's frames have a gap that long. `--seconds` counts on the
+same clock as session time, so a sleep counts toward it.

@@ -39,6 +39,7 @@ old one, and the old record's status is updated to point at it.
 | [0030](0030-signed-android-releases.md) | Signed Android releases: one release key, offline and in a protected environment, its certificate pinned in the repository | Accepted |
 | [0031](0031-command-line-client.md) | The command-line client: `havne-cli` streams a session as JSON lines over the public C ABI alone | Accepted |
 | [0032](0032-socketcan-listening.md) | SocketCAN, listening: `socketcan://` reads a Linux CAN interface, listen-only, never configuring it; `havne-cli play` drives a simulated car on a virtual bus | Accepted |
+| [0033](0033-session-time-counts-sleep.md) | Session time counts sleep: one host clock for core and the app (`CLOCK_BOOTTIME` on Linux and Android), and a sleep that says so | Accepted |
 
 ## Adding a record
 

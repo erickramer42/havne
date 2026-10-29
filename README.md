@@ -95,7 +95,10 @@ a quarter mile off launch control on a warm loop.*
   and event; `replay://` plays a recording back at its own pace or
   faster, through the same decoding
   ([ADR-0017](docs/adr/0017-session-recording.md),
-  [ADR-0023](docs/adr/0023-replay-transport.md)).
+  [ADR-0023](docs/adr/0023-replay-transport.md)). If the computer or
+  phone sleeps mid-session, the sleep is a gap on Live and in the
+  recording, and the activity log says how long it was
+  ([ADR-0033](docs/adr/0033-session-time-counts-sleep.md)).
 - **Vehicles and preferences.** Name a car once and it remembers its
   adapter, what Live plots and its recordings' folder; it's recognized
   next time by a salted hash of its VIN. Metric or imperial, zoom and

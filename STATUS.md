@@ -130,7 +130,11 @@ background too. Next come v0.3.4 and v0.3.5 ([roadmap](#roadmap)).
     decoded value and activity line per connect
     ([ADR-0017](docs/adr/0017-session-recording.md)), and a surrogate
     session log of every vendor call, with every request and reply
-    while recording.
+    while recording. Session time counts the machine's sleep on every
+    platform, so a sleep is a gap on Live and in a recording, and the
+    activity log and `havne-cli` say how long it was
+    ([ADR-0033](docs/adr/0033-session-time-counts-sleep.md); the test
+    phone's sleeps, [2026-10-29-android-2](docs/bench-sessions/2026-10-29-android-2.md)).
 - **Not yet:** real hardware beyond two adapters and one car: 29-bit
   addressing, more than one ECU answering, a real x64 driver,
   and other vendors ([BENCH prep](docs/bench-sessions/bench-prep.md),
@@ -257,7 +261,7 @@ an issue is resolved it is removed, and its number is not reused.
 | v0.3.1 | Request engine, PID-support probe, `uds-generic`, vehicle identification, imperial units; the first Windows download | ✅ Released |
 | v0.3.2 | Record-replay transport, decoding on the transport's thread, every driver in its own process | ✅ Released |
 | v0.3.3 | ELM327 adapters, preferences and vehicles, Android with Bluetooth and background sessions and a signed APK, the rename to Havne | ✅ Released |
-| v0.3.4 | A command-line client over the C ABI; Linux as a supported desktop; a SocketCAN transport that listens | In progress: the CLI and SocketCAN listening built |
+| v0.3.4 | A command-line client over the C ABI; Linux as a supported desktop; a SocketCAN transport that listens | In progress: the CLI, SocketCAN listening and a session clock that counts sleep built |
 | v0.3.5 | Full OBD-II diagnostics (Services 01–0A, clearing codes); SocketCAN requests through ISO-TP | Planned |
 | v0.4.0 | Python bindings; PCAP export and candump import; ECU, DID and service discovery (needs requests to every ECU and listening to the whole bus first) | Proposed |
 | v0.5.0 | The plugin framework (ADR-0013's profile API), with no manufacturer plugin yet; legacy buses (ISO 9141-2, KWP2000, J1850) | Proposed |
@@ -280,6 +284,15 @@ scheduled. What each holds, past its row:
   native CAN interface, listen-only, and `havne-cli play`, a simulated
   ECU on Linux's virtual CAN bus that runs it with no car. Left: a real
   controller on the bench and a car (BENCH prep #26).
+- **The session clock counts sleep:** built
+  ([ADR-0033](docs/adr/0033-session-time-counts-sleep.md)): one host
+  clock for core and the app, counting the time the machine sleeps on
+  every platform (`CLOCK_BOOTTIME` on Linux and Android), so a sleep is
+  a gap on Live and in a recording, and the activity log says how long
+  it was. Confirmed on the test phone
+  ([2026-10-29-android-2](docs/bench-sessions/2026-10-29-android-2.md):
+  thirteen sleeps, each a gap of its length); a Linux machine's suspend
+  is left (BENCH prep #27).
 
 ### v0.3.5: full OBD-II diagnostics, SocketCAN requests
 
