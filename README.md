@@ -3,7 +3,7 @@
 [![CI](https://github.com/erickramer42/havne/actions/workflows/ci.yml/badge.svg)](https://github.com/erickramer42/havne/actions/workflows/ci.yml) [![Coverage](https://codecov.io/gh/erickramer42/havne/graph/badge.svg)](https://codecov.io/gh/erickramer42/havne) [![Release](https://img.shields.io/github/v/release/erickramer42/havne)](https://github.com/erickramer42/havne/releases/latest)
 [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/erickramer42/havne/badge)](https://scorecard.dev/viewer/?uri=github.com/erickramer42/havne) [![OpenSSF Best Practices](https://www.bestpractices.dev/projects/15816/badge)](https://www.bestpractices.dev/projects/15816)
 
-Havne reads a car's engine computer and shows what it says: live
+Havne reads a car's computer and shows what it says: live
 gauges, a strip chart, a log of every frame. A Qt-free C++17 core does
 the vehicle I/O and decoding behind a C ABI; a Qt 6 / QML front end
 draws the results on Windows, Linux, macOS and Android. It talks to
