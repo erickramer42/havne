@@ -1,0 +1,11 @@
+# libabigail suppressions for scripts/abi-check.sh (the CI abi job): a
+# deliberate C ABI break, accepted until the next release becomes the
+# base. Before 1.0 a minor version may break the ABI (CHANGELOG.md);
+# each entry gives its reason and the release it ships in, and goes once
+# that release is tagged. Growth into a struct's reserved room needs no
+# entry: scripts/abi_report.py accepts it (a type suppression here would
+# hide every other change to the struct with it).
+#
+# [suppress_type]
+#   # v0.4.0 widens ecuio_frame.flags to 64 bits (CHANGELOG.md)
+#   name = ecuio_frame

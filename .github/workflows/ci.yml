@@ -331,11 +331,82 @@ jobs:
           sudo apt-get update && sudo apt-get install -y libgl1-mesa-dev libxkbcommon-dev libegl1 libopengl0
           cmake -B build -DCMAKE_PREFIX_PATH="$QT_ROOT_DIR"
           cmake --build build
+      # The simulated CAN bus (tests/vcan_bus.h): vcan and can-isotp load
+      # as installed on the hosted Ubuntu runners
+      - name: Bring up vcan0
+        run: |
+          sudo modprobe vcan
+          sudo modprobe can-isotp
+          sudo ip link add dev vcan0 type vcan
+          sudo ip link set up vcan0
+      # ECUIO_VCAN_REQUIRED: VcanTest fails rather than skips without vcan0
       - name: Run tests
+        env:
+          ECUIO_VCAN_REQUIRED: '1'
         run: ctest --test-dir build --output-on-failure --no-tests=error
       - name: Load test
         shell: bash   # -o pipefail: tee must not hide the bench's exit status
         run: build/tests/bench_bridge --load | tee -a "$GITHUB_STEP_SUMMARY"
+
+  # The C ABI against the newest release's (scripts/abi-check.sh,
+  # libabigail): an incompatible change fails, an addition is reported
+  abi:
+    if: ${{ !inputs.smoke_only }}
+    runs-on: ubuntu-latest
+    needs: core-and-tests
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0   # the tags, and the base release's tree
+      - name: Install libabigail and Ninja
+        run: sudo apt-get update && sudo apt-get install -y abigail-tools ninja-build
+      - name: Compare the C ABI with the newest release
+        shell: bash
+        run: |
+          scripts/abi-check.sh | tee abi.txt
+          { echo '### C ABI'; echo; echo '```'; tail -n 40 abi.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+
+  # The Linux AppImage (packaging/linux/make-appimage.sh), on the oldest
+  # Ubuntu it supports: an AppImage runs where glibc is at least its
+  # build machine's
+  linux-appimage:
+    if: ${{ !inputs.smoke_only }}
+    runs-on: ubuntu-24.04
+    needs: core-and-tests
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install Qt 6.12.0 desktop (linux_gcc_64)
+        uses: jurplel/install-qt-action@b344308e4483fc892e0d27b3cd1b173ebdd95f06 # v4.5.0
+        with:
+          version: '6.12.0'
+          host: 'linux'
+          target: 'desktop'
+          arch: 'linux_gcc_64'
+
+      # The xcb platform plugin's libraries, which linuxdeploy bundles
+      - name: Build the Release app
+        run: |
+          sudo apt-get update && sudo apt-get install -y libgl1-mesa-dev libxkbcommon-dev libegl1 libopengl0 \
+            libxcb-cursor0 libxcb-icccm4 libxcb-image0 libxcb-keysyms1 libxcb-randr0 libxcb-render-util0 \
+            libxcb-shape0 libxcb-sync1 libxcb-xfixes0 libxcb-xinerama0 libxcb-xkb1 libxkbcommon-x11-0
+          cmake -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF -DCMAKE_PREFIX_PATH="$QT_ROOT_DIR"
+          cmake --build build
+
+      - name: Pack and check the AppImage
+        run: |
+          VERSION=$(sed -n '/^project(Havne/,/)/s/^ *VERSION \([0-9.]*\).*/\1/p' CMakeLists.txt)
+          QMAKE="$QT_ROOT_DIR/bin/qmake" bash packaging/linux/make-appimage.sh "$VERSION-ci" build dist
+
+      - name: Upload the AppImage
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: havne-linux-x86_64
+          path: dist/*.AppImage
+          if-no-files-found: error
+          retention-days: 14
 
   # Cross builds (Android, iOS) are build-only: BUILD_TESTING=OFF, because
   # gtest_discover_tests runs each test binary at build time, which can't

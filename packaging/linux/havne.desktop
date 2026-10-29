@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Havne
+GenericName=ECU reader and logger
+Comment=Read a car's computer: live gauges, a strip chart, a log of every frame
+Exec=havne
+Icon=havne
+Terminal=false
+Categories=Development;Engineering;
+Keywords=OBD;CAN;ELM327;J2534;ECU;car;
