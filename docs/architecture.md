@@ -17,7 +17,7 @@ threads onto the GUI thread.
    │  worker → GUI marshaling, 100 ms coalescing, link-health polling
    │                   havne-cli (cli/): a session as JSON lines on
    │                   standard output, the public headers alone (ADR-0031)
-   ▼  C ABI: core.h · signals.h · profile.h · j2534.h · serial.h · stream.h
+   ▼  C ABI: core.h · signals.h · profile.h · j2534.h · serial.h · stream.h · socketcan.h
  ecuio-core (core/)           no Qt, ever
    │  sessions + callbacks · profiles + decode · transports
    ├── mock://    worker thread, scripted drive cycle
@@ -26,6 +26,8 @@ threads onto the GUI thread.
    │              WiFi adapter's TCP socket, or a link the app opens
    │              (Bluetooth on a phone): an ELM327-compatible adapter's
    │              AT commands, one at a time
+   ├── socketcan:// worker thread → a CAN_RAW socket on a Linux CAN
+   │              interface, listen-only: every frame, the kernel's times
    └── j2534://   worker thread → loader, which picks a surrogate by the
                   DLL's architecture: client ══ named pipe ══
           ├── ecuio-j2534-surrogate.exe      (x86 process, x86 vendor DLLs)

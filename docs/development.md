@@ -496,6 +496,41 @@ python tests/golden.py run --golden tests/golden/cli/mock.jsonl --ignore core --
 On Windows, give `golden.py` the executable's absolute path:
 Python's `CreateProcess` doesn't resolve `build-core/cli/...`.
 
+## SocketCAN on Linux
+
+`socketcan://` ([ADR-0032](adr/0032-socketcan-listening.md)) reads an
+interface someone has brought up; Havne never configures one.
+
+```sh
+# A virtual bus, for development and the tests (lasts until reboot)
+sudo modprobe vcan can-isotp
+sudo ip link add dev vcan0 type vcan
+sudo ip link set vcan0 mtu 72        # CAN FD, if the kernel's default is 16
+sudo ip link set up vcan0
+
+# The simulated car on it, and a session listening
+havne-cli play mock://demo --to vcan0 &
+havne-cli stream "socketcan://vcan0?profile=mock" --values
+
+# A real adapter (gs_usb: candleLight, CANable), listen-only at the bus's rate
+sudo ip link set can0 up type can bitrate 500000 listen-only on
+havne-cli stream socketcan://can0
+```
+
+Under WSL a USB adapter reaches Linux through `usbipd-win`, run on
+Windows: `usbipd list`, `usbipd bind --busid <id>` (once, as
+administrator) and `usbipd attach --wsl --busid <id>`; the WSL kernel
+has `gs_usb`, `slcan`, `peak_usb` and `kvaser_usb`.
+
+The tests: `test_socketcan` runs everywhere; `SocketCanBusTest` (in
+`test_vcan`) needs `vcan0` up and skips without it, and its
+interface-down case needs root:
+
+```sh
+sudo --preserve-env=ECUIO_VCAN_REQUIRED build-core/tests/test_vcan \
+  --gtest_filter='SocketCanBusTest.TheInterfaceGoingDown*'
+```
+
 ## Troubleshooting
 
 | Symptom | Cause and fix |

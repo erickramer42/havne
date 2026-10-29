@@ -105,6 +105,7 @@ Dates are commit dates.
 | 2026-10-29 | v0.3.3 released: the Windows zip and, for the first time, a signed Android APK ([ADR-0030](adr/0030-signed-android-releases.md)); an rc dry run of the release workflow found apksigner 37's changed fingerprint line first, and its APK updated the test phone's local build in place | tag `v0.3.3` (`e9b8768`) |
 | 2026-10-29 | v0.3.4's tooling: the simulated CAN bus (`vcan0` and the kernel's `can-isotp`) tested on CI's Linux runner, a C ABI check against the last release (`scripts/abi-check.sh`, libabigail), and a Linux AppImage that runs on Ubuntu, Arch and Kali; merged through the first pull request from `dev` | `e43eb6c`, `74e346c`, `5901d9c`, PR #28 |
 | 2026-10-29 | `havne-cli` ([ADR-0031](adr/0031-command-line-client.md)): a second front end over the public headers alone, a session's frames and values as JSON lines; lines formatted on the worker into a ring that drops for a live bus and waits for a replay; golden runs of the program pin what the ABI shows a caller, the vehicle fixture frame for frame; ships beside `havne.exe` | `e8a3449`, `8d6fce1`, `0a30ad2` |
+| 2026-10-29 | SocketCAN, listening ([ADR-0032](adr/0032-socketcan-listening.md)): `socketcan://` reads a Linux CAN interface through a `CAN_RAW` socket with the kernel's receive times, CAN FD, error frames and the kernel's drop count, refusing a controller that isn't listen-only; `ecuio/socketcan.h` lists the interfaces for Settings and the CLI; `havne-cli play` drives the mock's car on `vcan0`, so the path runs end to end with no hardware, on CI too | `3d3ca10` |
 
 ## Lessons learned
 
@@ -1053,3 +1054,18 @@ sent can sometimes be sent another way:** Ctrl+C can't go to one child
 on Windows, but Ctrl+Break can, to a child in its own process group,
 through the same handler, so the stop ADR-0031 first left to a check by
 hand became a ctest case.
+
+**2026-10-29 — SocketCAN, listening (ADR-0032):** **read what the
+kernel promises before testing for it.** The overflow test stalled the
+worker, flooded the bus, and looked for a flagged frame among those
+the socket had held, and found none: the kernel stamps a frame with the
+socket's drop count as it queues it, so every frame already in the full
+buffer came before the loss, and the flood was over before the worker
+read again. The first frame queued after the loss carries it, so the
+test sends one more frame once the stall ends. Two smaller lessons from
+the same day: **a kernel constant mirrored for portability is checked
+against the real one where it exists**, which caught `NLA_TYPE_MASK`
+being an `int` complement (−49153, not 0x3FFF) at the first Linux
+compile; and **a virtual device's defaults move with the kernel**: WSL's
+6.18 creates `vcan0` with CAN XL's MTU (2060), so CAN FD works there
+with no setup, while CI sets 72 explicitly rather than trust a default.
