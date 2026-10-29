@@ -265,9 +265,21 @@ recordings are the evidence, so a computer with `adb` afterwards.
       decides ([2026-10-28-android-9](2026-10-28-android-9.md); mock
       and replay are desk tools)
 - [ ] The screen off for about 5 minutes (the power button). On: the
-      same, and the app returned without a crash
+      same, and the app returned without a crash. Note the times the
+      screen went off and on
+- [ ] The sleep in session time (BENCH prep #27, ADR-0033): with no
+      wake lock under mock, the CPU sleeps with the screen off. The
+      activity log says "Asleep for N s: nothing was read meanwhile",
+      N about the time the CPU slept (at most the screen-off time), and
+      Live's chart has a gap that long. No "Asleep" line: note it, and
+      whether values kept moving through the screen-off (then the CPU
+      didn't sleep, and #27 stays open)
 - [ ] Disconnect. Copy the recording's Delivery line (events.log,
       Phase 5's copy or `adb`)
+- [ ] Afterwards, with `adb`: in the recording, `signals.csv`'s
+      `host_us` jumps by about N s where the "Asleep" line falls, and
+      events.log's two columns (the clock, and "+seconds") agree
+      within a second across the screen-off
 
 **8b — on the car, the MX+, engine idling.** Phase 7's pre-flight and
 safety hold.
@@ -294,10 +306,9 @@ safety hold.
 - [ ] Afterwards, with `adb`: in the recording's events.log, the
       time between two lines by the clock (the first column) and by
       the session ("+seconds") agree within a second across the
-      screen off. Live and the recording run on the session clock,
-      which on Android doesn't count the CPU's sleep, so a sleep shows
-      only there ([2026-10-28-android-9](2026-10-28-android-9.md):
-      104 s apart, with no gap on Live)
+      screen off: the session clock counts a sleep (ADR-0033). The
+      wake lock keeps the CPU awake, so no "Asleep" line is expected;
+      one means the CPU slept despite it (note N)
 - [ ] With the screen off, Bluetooth off for about 10 s from the quick
       settings, then on. Back in Havne: a fault, then recovered on its
       own, as in 7c
