@@ -37,7 +37,7 @@ target_compile_definitions(test_core PRIVATE
     ECUIO_REPLAY_FIXTURES="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/replay"
 )
 
-qttune_enable_warnings(test_core)
+app_enable_warnings(test_core)
 gtest_discover_tests(test_core)
 
 # --- Signals tests: MUST stay Qt-free (Ubuntu CI job has no Qt installed) ---
@@ -48,7 +48,7 @@ target_link_libraries(test_signals PRIVATE
     GTest::gtest_main
 )
 
-qttune_enable_warnings(test_signals)
+app_enable_warnings(test_signals)
 gtest_discover_tests(test_signals)
 
 # --- OBD-II set + request engine tests: MUST stay Qt-free (UNIT tier) ---
@@ -69,7 +69,7 @@ target_link_libraries(test_obd2 PRIVATE
     GTest::gtest_main
 )
 
-qttune_enable_warnings(test_obd2)
+app_enable_warnings(test_obd2)
 gtest_discover_tests(test_obd2)
 
 # --- ELM327 tests: MUST stay Qt-free (UNIT and HARNESS tiers, ADR-0026) ---
@@ -92,7 +92,7 @@ if(WIN32)
     # Elm327TcpTest's loopback listener
     target_link_libraries(test_elm327 PRIVATE ws2_32)
 endif()
-qttune_enable_warnings(test_elm327)
+app_enable_warnings(test_elm327)
 gtest_discover_tests(test_elm327 PROPERTIES TIMEOUT 30)
 
 # --- C ABI compilation check: MUST stay Qt-free, builds everywhere ---
@@ -103,7 +103,7 @@ gtest_discover_tests(test_elm327 PROPERTIES TIMEOUT 30)
 # has it, so a GNU-only construct in a header warns.
 add_executable(test_c_abi test_c_abi.c)
 set_target_properties(test_c_abi PROPERTIES C_EXTENSIONS OFF)
-qttune_enable_warnings(test_c_abi)
+app_enable_warnings(test_c_abi)
 if(NOT MSVC)
     target_compile_options(test_c_abi PRIVATE -pedantic)
 endif()
@@ -120,13 +120,13 @@ add_test(NAME c_abi COMMAND test_c_abi)
 set_tests_properties(c_abi PROPERTIES LABELS "abi")
 
 # --- Bridge tests: only when the full app (and Qt) is available ---
-if(NOT QTTUNE_BUILD_CORE_ONLY)
+if(NOT HAVNE_BUILD_CORE_ONLY)
 
     find_package(Qt6 6.12 COMPONENTS Core REQUIRED)   # app/CMakeLists.txt's minimum
 
     add_executable(test_bridge
         test_bridge.cpp
-        ../app/qttunebridge.cpp
+        ../app/sessionbridge.cpp
         ../app/sessionrecorder.cpp
         ../app/blepicker.cpp
         ../app/btconnect.cpp
@@ -134,7 +134,7 @@ if(NOT QTTUNE_BUILD_CORE_ONLY)
     )
 
     set_target_properties(test_bridge PROPERTIES AUTOMOC ON)
-    qttune_enable_warnings(test_bridge)
+    app_enable_warnings(test_bridge)
 
     target_include_directories(test_bridge PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/../app
@@ -169,12 +169,12 @@ if(NOT QTTUNE_BUILD_CORE_ONLY)
     # docs/testing.md; built with the tests, never run by ctest
     add_executable(bench_bridge
         bench_bridge.cpp
-        ../app/qttunebridge.cpp
+        ../app/sessionbridge.cpp
         ../app/sessionrecorder.cpp
         ../app/carryover.cpp
     )
     set_target_properties(bench_bridge PROPERTIES AUTOMOC ON)
-    qttune_enable_warnings(bench_bridge)
+    app_enable_warnings(bench_bridge)
     target_include_directories(bench_bridge PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../app)
     target_link_libraries(bench_bridge PRIVATE ecuio-core Qt6::Core)
     # The engine-start fixture, replayed as the load test (ADR-0023)
@@ -192,7 +192,7 @@ if(NOT QTTUNE_BUILD_CORE_ONLY)
     # Tell ctest/gtest_discover where Qt DLLs live at runtime
     get_filename_component(QT_BIN_DIR "${Qt6Core_DIR}/../../bin" REALPATH)
 
-    # --- QML tests (Qt Quick Test): the app's QtTune module, linked
+    # --- QML tests (Qt Quick Test): the app's App module, linked
     # from app/ (which the root adds after this directory), against a
     # real bridge. Each qml/tst_*.qml file is a ctest case of its own,
     # QmlTest.<name>, in its own process; offscreen and on the software
@@ -201,10 +201,10 @@ if(NOT QTTUNE_BUILD_CORE_ONLY)
 
     add_executable(test_qml test_qml.cpp)
     set_target_properties(test_qml PROPERTIES AUTOMOC ON)
-    qttune_enable_warnings(test_qml)
+    app_enable_warnings(test_qml)
     target_link_libraries(test_qml PRIVATE
-        qttune_ui
-        qttune_uiplugin
+        app_ui
+        app_uiplugin
         Qt6::QuickTest
     )
     # Run with no -input, it runs every file in this directory. The
@@ -266,7 +266,7 @@ set(J2534_TEST_TIMEOUT_SECONDS 30)
 # running exe as in the app: each test that opens one gets this tree's
 # (x64) surrogate beside it. The cross-arch run names the x86 one with
 # ECUIO_SURROGATE_EXE instead.
-function(qttune_deploy_surrogate target)
+function(app_deploy_surrogate target)
     if(TARGET ecuio-j2534-surrogate)
         add_dependencies(${target} ecuio-j2534-surrogate)
         add_custom_command(TARGET ${target} POST_BUILD
@@ -290,7 +290,7 @@ if(WIN32)
     set_target_properties(test_j2534_discovery PROPERTIES
         VS_DEBUGGER_WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
     )
-    qttune_enable_warnings(test_j2534_discovery)
+    app_enable_warnings(test_j2534_discovery)
     gtest_discover_tests(test_j2534_discovery
         PROPERTIES TIMEOUT ${J2534_TEST_TIMEOUT_SECONDS}
     )
@@ -316,7 +316,7 @@ if(WIN32)
         OUTPUT_NAME "fake_j2534"
         RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/$<CONFIG>"
     )
-    qttune_enable_warnings(fake_j2534)
+    app_enable_warnings(fake_j2534)
 
     # LEGACY-spelling fixture: the fallback-vendor case — exports the
     # legacy 'PassThruIoCtl' spelling via def alias while the shared
@@ -342,23 +342,23 @@ if(WIN32)
         OUTPUT_NAME "fake_j2534_legacy"
         RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/$<CONFIG>"
     )
-    qttune_enable_warnings(fake_j2534_legacy)
+    app_enable_warnings(fake_j2534_legacy)
 endif()
 
 # test_bridge's connect and disconnect thread tests run a fake J2534
 # session, and test_qml's link-health cases drive the UI through one;
 # they're compiled only on Windows
-if(WIN32 AND NOT QTTUNE_BUILD_CORE_ONLY)
+if(WIN32 AND NOT HAVNE_BUILD_CORE_ONLY)
     target_compile_definitions(test_bridge PRIVATE
         FAKE_J2534_DLL_PATH="$<TARGET_FILE:fake_j2534>"
     )
     add_dependencies(test_bridge fake_j2534)
-    qttune_deploy_surrogate(test_bridge)
+    app_deploy_surrogate(test_bridge)
     target_compile_definitions(test_qml PRIVATE
         FAKE_J2534_DLL_PATH="$<TARGET_FILE:fake_j2534>"
     )
     add_dependencies(test_qml fake_j2534)
-    qttune_deploy_surrogate(test_qml)
+    app_deploy_surrogate(test_qml)
 endif()
 
 # J2534 loader tests (Win32-only, HARNESS tier — open, exports and close
@@ -378,8 +378,8 @@ if(WIN32)
     )
     add_dependencies(test_j2534_load fake_j2534)
     add_dependencies(test_j2534_load fake_j2534_legacy)
-    qttune_deploy_surrogate(test_j2534_load)
-    qttune_enable_warnings(test_j2534_load)
+    app_deploy_surrogate(test_j2534_load)
+    app_enable_warnings(test_j2534_load)
     gtest_discover_tests(test_j2534_load
         PROPERTIES TIMEOUT ${J2534_TEST_TIMEOUT_SECONDS}
     )
@@ -402,8 +402,8 @@ if(WIN32)
         FAKE_J2534_DLL_PATH="$<TARGET_FILE:fake_j2534>"
     )
     add_dependencies(test_j2534_stream fake_j2534)
-    qttune_deploy_surrogate(test_j2534_stream)
-    qttune_enable_warnings(test_j2534_stream)
+    app_deploy_surrogate(test_j2534_stream)
+    app_enable_warnings(test_j2534_stream)
     gtest_discover_tests(test_j2534_stream
         PROPERTIES TIMEOUT ${J2534_TEST_TIMEOUT_SECONDS}
     )
@@ -430,9 +430,9 @@ if(WIN32)
     # The client's resolve_exe_path() finds it in its own image
     # directory (same discipline as the baked fake-DLL path — no PATH
     # games).
-    qttune_deploy_surrogate(test_j2534_surrogate)
+    app_deploy_surrogate(test_j2534_surrogate)
 
-    qttune_enable_warnings(test_j2534_surrogate)
+    app_enable_warnings(test_j2534_surrogate)
     gtest_discover_tests(test_j2534_surrogate
         PROPERTIES TIMEOUT ${J2534_TEST_TIMEOUT_SECONDS}
     )
@@ -454,8 +454,8 @@ if(WIN32)
         SURROGATE_EXE_PATH="$<TARGET_FILE:ecuio-j2534-surrogate>"
     )
     add_dependencies(test_j2534_health fake_j2534)
-    qttune_deploy_surrogate(test_j2534_health)
-    qttune_enable_warnings(test_j2534_health)
+    app_deploy_surrogate(test_j2534_health)
+    app_enable_warnings(test_j2534_health)
     gtest_discover_tests(test_j2534_health
         PROPERTIES TIMEOUT ${J2534_TEST_TIMEOUT_SECONDS}
     )
@@ -477,8 +477,8 @@ if(WIN32)
     )
     add_dependencies(test_j2534_connect fake_j2534)
     add_dependencies(test_j2534_connect fake_j2534_legacy)   # beside the fake
-    qttune_deploy_surrogate(test_j2534_connect)
-    qttune_enable_warnings(test_j2534_connect)
+    app_deploy_surrogate(test_j2534_connect)
+    app_enable_warnings(test_j2534_connect)
     gtest_discover_tests(test_j2534_connect
         PROPERTIES TIMEOUT ${J2534_TEST_TIMEOUT_SECONDS}
     )
@@ -499,8 +499,8 @@ if(WIN32)
         FAKE_J2534_DLL_PATH="$<TARGET_FILE:fake_j2534>"
     )
     add_dependencies(test_j2534_routing fake_j2534)
-    qttune_deploy_surrogate(test_j2534_routing)
-    qttune_enable_warnings(test_j2534_routing)
+    app_deploy_surrogate(test_j2534_routing)
+    app_enable_warnings(test_j2534_routing)
     gtest_discover_tests(test_j2534_routing
         PROPERTIES TIMEOUT ${J2534_TEST_TIMEOUT_SECONDS}
     )

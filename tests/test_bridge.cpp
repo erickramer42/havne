@@ -39,7 +39,7 @@
 #include "blepicker.h"
 #include "btconnect.h"
 #include "carryover.h"
-#include "qttunebridge.h"   // QtTuneBridge + FrameListModel
+#include "sessionbridge.h"   // SessionBridge + FrameListModel
 #include <ecuio/profile.h>
 #include <ecuio/serial.h>
 
@@ -89,7 +89,7 @@ bool spinUntil(Predicate pred, int timeout_ms, int step_ms = 50)
 /* Disconnect is async: connected drops at once and the teardown ends on
  * a worker thread. A test that connects again waits for it, as the UI
  * does (Connect stays disabled while disconnecting). */
-bool disconnectAndWait(QtTuneBridge& bridge, int timeout_ms = 5000)
+bool disconnectAndWait(SessionBridge& bridge, int timeout_ms = 5000)
 {
     bridge.disconnectSession();
     return spinUntil([&bridge]() { return !bridge.disconnecting(); }, timeout_ms, 10);
@@ -154,7 +154,7 @@ int main(int argc, char** argv)
 
 TEST(BridgeTest, LifecycleIsIdempotent)
 {
-    QtTuneBridge bridge;
+    SessionBridge bridge;
 
     EXPECT_FALSE(bridge.connected());
 
@@ -185,7 +185,7 @@ TEST(BridgeTest, LifecycleIsIdempotent)
 
 TEST(BridgeTest, InvalidUriReturnsError)
 {
-    QtTuneBridge bridge;
+    SessionBridge bridge;
     EXPECT_FALSE(bridge.connectSession("j2534://dev0").isEmpty());   // no transport
     EXPECT_FALSE(bridge.connected());
 
@@ -197,7 +197,7 @@ TEST(BridgeTest, InvalidUriReturnsError)
 // status, then core's detail.
 TEST(BridgeTest, FailedConnectNamesItsCause)
 {
-    QtTuneBridge bridge;
+    SessionBridge bridge;
     EXPECT_EQ(bridge.connectSession("mock://demo?interval=10"),
               QStringLiteral("malformed transport URI: mock:// takes no query "
                              "key 'interval', only profile and did"));
@@ -213,7 +213,7 @@ TEST(BridgeTest, FailedConnectNamesItsCause)
 // and its refusal fails the connect with its words, logged as any other
 TEST(BridgeTest, AStreamPreparersRefusalFailsTheConnect)
 {
-    QtTuneBridge bridge;
+    SessionBridge bridge;
     QStringList asked;
     bridge.setStreamPreparer([&asked](const QString& uri) {
         asked << uri;
@@ -222,7 +222,7 @@ TEST(BridgeTest, AStreamPreparersRefusalFailsTheConnect)
                    : QString();
     });
     QStringList log;
-    QObject::connect(&bridge, &QtTuneBridge::logMessage,
+    QObject::connect(&bridge, &SessionBridge::logMessage,
                      [&log](const QString& line) { log << line; });
 
     EXPECT_EQ(bridge.connectSession("  elm327://bt:AA?poll=0x0C "),
@@ -236,7 +236,7 @@ TEST(BridgeTest, AStreamPreparersRefusalFailsTheConnect)
 
     QString result = QStringLiteral("none");
     QObject::connect(
-        &bridge, &QtTuneBridge::connectResult,
+        &bridge, &SessionBridge::connectResult,
         [&result](const QString&, const QString& error) { result = error; });
     bridge.connectSessionAsync("elm327://bt:AA");
     EXPECT_EQ(result, QStringLiteral("bt:AA: not reachable"))
@@ -434,7 +434,7 @@ TEST(BridgeTest, BtConnectIgnoresResultsWithNoConnectRunning)
 
 TEST(BridgeTest, FramesMarshalFromWorkerToGuiThread)
 {
-    QtTuneBridge bridge;
+    SessionBridge bridge;
 
     // The frame log's countChanged fires on the thread that appends
     std::atomic<Qt::HANDLE> append_thread{nullptr};
@@ -471,7 +471,7 @@ TEST(BridgeTest, FramesMarshalFromWorkerToGuiThread)
 
 TEST(BridgeTest, ClearFramesResets)
 {
-    QtTuneBridge bridge;
+    SessionBridge bridge;
     ASSERT_TRUE(bridge.connectSession("mock://test").isEmpty());
     ASSERT_TRUE(spinUntil(
         [&bridge]() { return bridge.frameCount() > 0; }, 5000));
@@ -489,7 +489,7 @@ TEST(BridgeTest, RecordingIsOffByDefault)
 {
     QTemporaryDir root;
     ASSERT_TRUE(root.isValid());
-    QtTuneBridge bridge;
+    SessionBridge bridge;
     bridge.setRecordingsRootForTesting(root.path());
     EXPECT_FALSE(bridge.recording());
 
@@ -509,7 +509,7 @@ TEST(BridgeTest, RecordingWritesFramesValuesAndEvents)
 {
     QTemporaryDir root;
     ASSERT_TRUE(root.isValid());
-    QtTuneBridge bridge;
+    SessionBridge bridge;
     bridge.setRecordingsRootForTesting(root.path());
     bridge.setRecording(true);
     ASSERT_TRUE(bridge.recording());
@@ -571,7 +571,7 @@ TEST(BridgeTest, DestroyedWhileRecordingClosesSessionAndRecording)
     QTemporaryDir root;
     ASSERT_TRUE(root.isValid());
     {
-        QtTuneBridge bridge;
+        SessionBridge bridge;
         bridge.setRecordingsRootForTesting(root.path());
         bridge.setRecording(true);
         ASSERT_TRUE(bridge.connectSession("mock://closing").isEmpty());
@@ -602,11 +602,11 @@ TEST(BridgeTest, RecordingThatCantStartIsLoggedAndTheSessionRuns)
         QFile f(file);
         ASSERT_TRUE(f.open(QIODevice::WriteOnly));
     }
-    QtTuneBridge bridge;
+    SessionBridge bridge;
     bridge.setRecordingsRootForTesting(file);
     bridge.setRecording(true);
     QStringList log;
-    QObject::connect(&bridge, &QtTuneBridge::logMessage,
+    QObject::connect(&bridge, &SessionBridge::logMessage,
                      [&log](const QString& line) { log << line; });
 
     ASSERT_TRUE(bridge.connectSession("mock://unrecorded").isEmpty());
@@ -626,7 +626,7 @@ TEST(BridgeTest, RecordingSwitchHoldsDuringASession)
 {
     QTemporaryDir root;
     ASSERT_TRUE(root.isValid());
-    QtTuneBridge bridge;
+    SessionBridge bridge;
     bridge.setRecordingsRootForTesting(root.path());
 
     ASSERT_TRUE(bridge.connectSession("mock://late").isEmpty());
@@ -656,7 +656,7 @@ TEST(BridgeTest, RecordingTurnsOnSurrogateFrameLogging)
     qunsetenv("ECUIO_SUR_LOG_FRAMES");
     QTemporaryDir root;
     ASSERT_TRUE(root.isValid());
-    QtTuneBridge bridge;
+    SessionBridge bridge;
     bridge.setRecordingsRootForTesting(root.path());
 
     bridge.setRecording(true);
@@ -688,7 +688,7 @@ TEST(BridgeTest, RecordingTurnsOnSurrogateFrameLogging)
  * the synchronous connect returns, before any queued frame can land. */
 TEST(BridgeTest, ConnectStartsAnEmptyFrameLog)
 {
-    QtTuneBridge bridge;
+    SessionBridge bridge;
     ASSERT_TRUE(bridge.connectSession("mock://first").isEmpty());
     FrameListModel* proxy = bridge.model();
     ASSERT_TRUE(spinUntil([proxy]() { return proxy->rowCount() > 0; }, 5000));
@@ -708,7 +708,7 @@ TEST(BridgeTest, ConnectStartsAnEmptyFrameLog)
  * arriving later is still the newest row. */
 TEST(BridgeTest, FrameLogOrdersByArrivalNotTimestamp)
 {
-    QtTuneBridge bridge;
+    SessionBridge bridge;
     ASSERT_TRUE(bridge.connectSession("mock://arrival").isEmpty());
 
     ecuio_frame_t first{};
@@ -753,7 +753,7 @@ TEST(BridgeTest, FrameLogOrdersByArrivalNotTimestamp)
 
 TEST(BridgeTest, FrameLogOrdersNewestFirstByDefault)
 {
-    QtTuneBridge bridge;
+    SessionBridge bridge;
     ASSERT_TRUE(bridge.connectSession("mock://sort-default").isEmpty());
 
     FrameListModel* proxy = bridge.model();
@@ -775,7 +775,7 @@ TEST(BridgeTest, FrameLogOrdersNewestFirstByDefault)
 
 TEST(BridgeTest, FrameLogTogglesToOldestFirst)
 {
-    QtTuneBridge bridge;
+    SessionBridge bridge;
     ASSERT_TRUE(bridge.connectSession("mock://sort-toggle").isEmpty());
 
     FrameListModel* proxy = bridge.model();
@@ -812,7 +812,7 @@ TEST(BridgeTest, FrameLogTogglesToOldestFirst)
 
 TEST(BridgeTest, NotifyCountTracksFrameProcessing)
 {
-    QtTuneBridge bridge;
+    SessionBridge bridge;
     ASSERT_TRUE(bridge.connectSession("mock://notify").isEmpty());
     ASSERT_TRUE(spinUntil(
         [&bridge]() { return bridge.guiNotifyCount() > 0; }, 5000));
@@ -823,7 +823,7 @@ TEST(BridgeTest, NotifyCountTracksFrameProcessing)
 
 TEST(BridgeTest, SignalBatchesAreCoalesced)
 {
-    QtTuneBridge bridge;
+    SessionBridge bridge;
     ASSERT_TRUE(bridge.connectSession("mock://coalesce").isEmpty());
 
     // CONTRACT: batches accumulate while the stream runs. No upper
@@ -878,7 +878,7 @@ TEST(BridgeTest, AWindowShowsItsNewestAndChartsItsEnvelope)
     set.defs = defs;
     ASSERT_EQ(ecuio_profile_register("test-newest", &set, nullptr), ECUIO_OK);
 
-    QtTuneBridge bridge;
+    SessionBridge bridge;
     ASSERT_TRUE(bridge.connectSession("mock://newest?profile=test-newest").isEmpty());
     spinLoop(150);   // a tick or more, so the window below starts clean
     const int batches = bridge.signalBatchCount();
@@ -927,12 +927,12 @@ namespace {
 
 /* Dispatches n frames with ID 0x123 and stamps first, first + 1, …,
  * letting each burst drain so none is dropped at the in-flight gate. */
-void dispatchNumbered(QtTuneBridge& bridge, int first, int n)
+void dispatchNumbered(SessionBridge& bridge, int first, int n)
 {
     ecuio_frame_t f{};
     f.arbitration_id = 0x123;   // not the mock's 0x0C0
     f.data_length = 2;
-    const int burst = QtTuneBridge::maxInFlightForTesting() / 2;
+    const int burst = SessionBridge::maxInFlightForTesting() / 2;
     for (int i = 0; i < n; ++i) {
         f.timestamp_us = static_cast<uint64_t>(first + i);
         f.data[0] = static_cast<uint8_t>((first + i) >> 8);
@@ -971,7 +971,7 @@ std::vector<quint64> numberedRows(const FrameListModel* model, int* others)
  * at the other, which is what keeps a ListView's rows right. */
 TEST(BridgeTest, FullFrameLogKeepsTheNewestInOrder)
 {
-    QtTuneBridge bridge;
+    SessionBridge bridge;
     ASSERT_TRUE(bridge.connectSession("mock://ring").isEmpty());
     FrameListModel* model = bridge.model();
     int wrongRemovals = 0;
@@ -1140,15 +1140,15 @@ TEST(BridgeTest, FrameLogHoldsLongPayloadsOnlyWhileShown)
  * disconnect reports the last of them, so what QML last saw is exact. */
 TEST(BridgeTest, FrameCountsAreReportedOnTheTick)
 {
-    QtTuneBridge bridge;
+    SessionBridge bridge;
     ASSERT_TRUE(bridge.connectSession("mock://counts").isEmpty());
     int countSignals = 0;
     int notifySignals = 0;
     int seenFrames = -1;
     int seenNotify = -1;
-    QObject::connect(&bridge, &QtTuneBridge::frameCountChanged,
+    QObject::connect(&bridge, &SessionBridge::frameCountChanged,
                      [&]() { ++countSignals; seenFrames = bridge.frameCount(); });
-    QObject::connect(&bridge, &QtTuneBridge::notifyCountChanged,
+    QObject::connect(&bridge, &SessionBridge::notifyCountChanged,
                      [&](int n) { ++notifySignals; seenNotify = n; });
 
     const int before = bridge.frameCount();
@@ -1172,12 +1172,12 @@ TEST(BridgeTest, FrameCountsAreReportedOnTheTick)
  * line; a new session starts the count again */
 TEST(BridgeTest, FramesAfterALossAtTheAdapterAreCountedAndLoggedOnce)
 {
-    QtTuneBridge bridge;
+    SessionBridge bridge;
     QStringList log;
-    QObject::connect(&bridge, &QtTuneBridge::logMessage,
+    QObject::connect(&bridge, &SessionBridge::logMessage,
                      [&log](const QString& line) { log << line; });
     int changes = 0;
-    QObject::connect(&bridge, &QtTuneBridge::overflowFramesChanged,
+    QObject::connect(&bridge, &SessionBridge::overflowFramesChanged,
                      [&changes]() { ++changes; });
     ASSERT_TRUE(bridge.connectSession("mock://overflow").isEmpty());
     ecuio_frame_t f{};
@@ -1209,7 +1209,7 @@ TEST(BridgeTest, FramesAfterALossAtTheAdapterAreCountedAndLoggedOnce)
 
 TEST(BridgeTest, StreamingContinuesPastTenThousandFrames)
 {
-    QtTuneBridge bridge;
+    SessionBridge bridge;
     ASSERT_TRUE(bridge.connectSession("mock://longrun").isEmpty());
 
     // CONTRACT: at least one frame flows first. Poll, no fixed 150ms.
@@ -1240,7 +1240,7 @@ TEST(BridgeTest, StreamingContinuesPastTenThousandFrames)
 
 TEST(BridgeTest, DispatchedShortFrameHonorsDataLength)
 {
-    QtTuneBridge bridge;
+    SessionBridge bridge;
     ASSERT_TRUE(bridge.connectSession("mock://short").isEmpty());
 
     // Unique timestamp so we can find OUR row among mock frames
@@ -1300,7 +1300,7 @@ TEST(BridgeTest, DispatchedShortFrameHonorsDataLength)
  * through Bridge.model, what QML gets. */
 TEST(BridgeTest, FrameRoleNamesMatchLogPageBindings)
 {
-    QtTuneBridge bridge;
+    SessionBridge bridge;
     const QHash<int, QByteArray> roles = bridge.model()->roleNames();
     EXPECT_EQ(roles.value(FrameListModel::TimestampRole), QByteArray("timestampUs"));
     EXPECT_EQ(roles.value(FrameListModel::DlcRole), QByteArray("dlc"));
@@ -1315,7 +1315,7 @@ TEST(BridgeTest, LogPauseStopsFrameLogNotDecode)
      * paused, but frames are still counted and decoded, so Live and the
      * Dashboard carry on. Resume appends again, and pause belongs to a
      * session: disconnect clears it and a new session starts unpaused. */
-    QtTuneBridge bridge;
+    SessionBridge bridge;
     ASSERT_TRUE(bridge.connectSession("mock://pause").isEmpty());
     FrameListModel* proxy = bridge.model();
     ASSERT_TRUE(spinUntil([proxy]() { return proxy->rowCount() > 0; }, 5000));
@@ -1350,19 +1350,19 @@ TEST(BridgeTest, LogPauseStopsFrameLogNotDecode)
 
 TEST(BridgeTest, BackpressureDropsAreCountedAndReported)
 {
-    QtTuneBridge bridge;
+    SessionBridge bridge;
     ASSERT_TRUE(bridge.connectSession("mock://drops").isEmpty());
 
     // Lambda-counter instead of QSignalSpy: avoids a new Qt6::Test dependency
     int notifyCount = 0;
     int lastReported = -1;
-    QObject::connect(&bridge, &QtTuneBridge::droppedFramesChanged,
+    QObject::connect(&bridge, &SessionBridge::droppedFramesChanged,
                      [&](int dropped) { ++notifyCount; lastReported = dropped; });
 
     ecuio_frame_t f{};
     f.data_length = 8;
 
-    const int inject = QtTuneBridge::maxInFlightForTesting() + 500;
+    const int inject = SessionBridge::maxInFlightForTesting() + 500;
 
     // Synchronous flood from the test thread: no event processing happens,
     // so in-flight climbs monotonically to the cap and stays there.
@@ -1692,7 +1692,7 @@ TEST(BridgeTest, TextSignalsReachTheRowAndTheRecording)
 
     QTemporaryDir root;
     ASSERT_TRUE(root.isValid());
-    QtTuneBridge bridge;
+    SessionBridge bridge;
     bridge.setRecordingsRootForTesting(root.path());
     bridge.setRecording(true);
     ASSERT_TRUE(bridge.connectSession("mock://text?profile=test-text").isEmpty());
@@ -1856,11 +1856,11 @@ TEST(BridgeTest, UnitSystemShowsImperialAndRecordsDecodedUnits)
      * whatever the screen shows. */
     QTemporaryDir root;
     ASSERT_TRUE(root.isValid());
-    QtTuneBridge bridge;
+    SessionBridge bridge;
     bridge.setRecordingsRootForTesting(root.path());
     EXPECT_EQ(bridge.unitSystem(), 0);
     int changes = 0;
-    QObject::connect(&bridge, &QtTuneBridge::unitSystemChanged, [&changes]() { ++changes; });
+    QObject::connect(&bridge, &SessionBridge::unitSystemChanged, [&changes]() { ++changes; });
     bridge.setUnitSystem(7);
     EXPECT_EQ(bridge.unitSystem(), 0);
     bridge.setUnitSystem(1);
@@ -1899,7 +1899,7 @@ TEST(BridgeTest, StripChartDataPopulatedByLiveStream)
        of a fixed 750ms window: the CONTRACT is history accumulates,
        not that 7.5 windows elapse. Monotonicity assertions are timing-
        independent once the data exists. */
-    QtTuneBridge bridge;
+    SessionBridge bridge;
     ASSERT_TRUE(bridge.connectSession("mock://strips").isEmpty());
 
     // CONTRACT: every subscribed signal has at least 4 samples
@@ -1953,7 +1953,7 @@ TEST(BridgeTest, DiscoveredDevicesHaveWellFormedEntries)
        SHAPE: every entry carries string vendorName/dllPath/architecture.
        An entry with a missing or non-string field would feed garbage
        into the SettingsPage picker's bindings. */
-    QtTuneBridge bridge;
+    SessionBridge bridge;
     const QVariantList devices = bridge.discoverJ2534Devices();
 
     EXPECT_GE(devices.size(), 0);   // documents the legitimate empty case
@@ -1973,7 +1973,7 @@ TEST(BridgeTest, DiscoveredDevicesHaveWellFormedEntries)
  * (most machines have none, and the call itself is SerialPortsTest's) */
 TEST(BridgeTest, SerialPortsAreListedAsCoreFindsThem)
 {
-    QtTuneBridge bridge;
+    SessionBridge bridge;
     const QVariantList listed = bridge.discoverSerialPorts();
 
     uint32_t count = 0;
@@ -1995,7 +1995,7 @@ TEST(BridgeTest, CurrentUriTracksConnectState)
        connect, cleared by disconnect. The QML picker displays it as
        the ground truth of what's live — staleness here lies to the
        user. Failed connects must not leave a residue either. */
-    QtTuneBridge bridge;
+    SessionBridge bridge;
     EXPECT_TRUE(bridge.currentUri().isEmpty());
 
     ASSERT_TRUE(bridge.connectSession("mock://uri-track").isEmpty());
@@ -2016,7 +2016,7 @@ TEST(BridgeTest, ConnectTrimsSpacesAroundTheUri)
     // A URI pasted with spaces around it connects, as the URI without
     // them; core alone refuses it (the scheme is matched at the first
     // character)
-    QtTuneBridge bridge;
+    SessionBridge bridge;
     ASSERT_TRUE(
         bridge.connectSession(QStringLiteral("  mock://padded \t")).isEmpty());
     EXPECT_TRUE(bridge.connected());
@@ -2034,36 +2034,36 @@ TEST(BridgeTest, UriLabelCutsADirectLoadPathToItsFileName)
 {
     const QString dots = QString(QChar(0x2026));
     // A path selector, either separator, a drive or UNC root, the query kept
-    EXPECT_EQ(QtTuneBridge::uriLabelFor(
+    EXPECT_EQ(SessionBridge::uriLabelFor(
                   QStringLiteral("j2534://E:/dev/build/fake_j2534.dll")),
               QStringLiteral("j2534://") + dots +
                   QStringLiteral("/fake_j2534.dll"));
-    EXPECT_EQ(QtTuneBridge::uriLabelFor(QStringLiteral(
+    EXPECT_EQ(SessionBridge::uriLabelFor(QStringLiteral(
                   "j2534://C:\\Program "
                   "Files\\Vendor\\vendor32.dll?profile=raw&filter=0x7E8")),
               QStringLiteral("j2534://") + dots +
                   QStringLiteral("/vendor32.dll?profile=raw&filter=0x7E8"));
-    EXPECT_EQ(QtTuneBridge::uriLabelFor(
+    EXPECT_EQ(SessionBridge::uriLabelFor(
                   QStringLiteral("j2534://\\\\server\\share\\pt.dll")),
               QStringLiteral("j2534://") + dots + QStringLiteral("/pt.dll"));
 
     // A '/' in the query isn't a path
-    EXPECT_EQ(QtTuneBridge::uriLabelFor(
+    EXPECT_EQ(SessionBridge::uriLabelFor(
                   QStringLiteral("j2534://OBDX Pro - VX?did=a/b")),
               QStringLiteral("j2534://OBDX Pro - VX?did=a/b"));
     // Vendor names, the first device, the mock and nothing pass unchanged
     for (const char* uri :
          {"j2534://OBDX Pro - VX", "j2534://", "j2534://?probe=0",
           "mock://demo", "mock://a/b", ""}) {
-        EXPECT_EQ(QtTuneBridge::uriLabelFor(QString::fromLatin1(uri)),
+        EXPECT_EQ(SessionBridge::uriLabelFor(QString::fromLatin1(uri)),
                   QString::fromLatin1(uri));
     }
 
     // The property follows currentUri
-    QtTuneBridge bridge;
+    SessionBridge bridge;
     EXPECT_TRUE(bridge.uriLabel().isEmpty());
     int changed = 0;
-    QObject::connect(&bridge, &QtTuneBridge::currentUriChanged,
+    QObject::connect(&bridge, &SessionBridge::currentUriChanged,
                      [&changed]() { ++changed; });
     ASSERT_TRUE(bridge.connectSession("mock://label").isEmpty());
     EXPECT_EQ(bridge.uriLabel(), QStringLiteral("mock://label"));
@@ -2075,14 +2075,14 @@ TEST(BridgeTest, UriLabelCutsADirectLoadPathToItsFileName)
 
 TEST(BridgeTest, AsyncConnectCompletesOffGuiThread)
 {
-    QtTuneBridge bridge;
+    SessionBridge bridge;
     // Run a spinner on the GUI thread DURING the connect: if the
     // blocking core calls ran on this thread, the spinner would be
     // starved past its deadline. The mock's connect is fast, so give
     // a generous-but-finite margin.
     std::atomic<bool> done{false};
     QString gotErr = "unset";
-    QObject::connect(&bridge, &QtTuneBridge::connectResult,
+    QObject::connect(&bridge, &SessionBridge::connectResult,
                      [&](const QString&, const QString& error) {
                          gotErr = error;
                          done.store(true);
@@ -2109,12 +2109,12 @@ TEST(BridgeTest, AsyncConnectCompletesOffGuiThread)
  * of the apply's emits. */
 TEST(BridgeTest, AConnectFromAHandlerDuringTheApplyIsRefused)
 {
-    QtTuneBridge bridge;
+    SessionBridge bridge;
     QStringList log;
-    QObject::connect(&bridge, &QtTuneBridge::logMessage,
+    QObject::connect(&bridge, &SessionBridge::logMessage,
                      [&log](const QString& line) { log << line; });
     bool tried = false;
-    QObject::connect(&bridge, &QtTuneBridge::currentUriChanged, [&]() {
+    QObject::connect(&bridge, &SessionBridge::currentUriChanged, [&]() {
         if (!tried && !bridge.currentUri().isEmpty()) {
             tried = true;
             (void)bridge.connectSession(QStringLiteral("mock://second"));
@@ -2132,12 +2132,12 @@ TEST(BridgeTest, AConnectFromAHandlerDuringTheApplyIsRefused)
  * handler's chance too */
 TEST(BridgeTest, AConnectFromConnectingChangedIsRefused)
 {
-    QtTuneBridge bridge;
+    SessionBridge bridge;
     QStringList log;
-    QObject::connect(&bridge, &QtTuneBridge::logMessage,
+    QObject::connect(&bridge, &SessionBridge::logMessage,
                      [&log](const QString& line) { log << line; });
     bool tried = false;
-    QObject::connect(&bridge, &QtTuneBridge::connectingChanged, [&]() {
+    QObject::connect(&bridge, &SessionBridge::connectingChanged, [&]() {
         if (!tried && !bridge.connecting()) {
             tried = true;
             bridge.connectSessionAsync(QStringLiteral("mock://second"));
@@ -2169,7 +2169,7 @@ void countFramesCb(const ecuio_frame_t*, void* user_data)
  * a started mock session would reach the probe callback every 50 ms. */
 TEST(BridgeTest, DestroyedMidConnectLeavesNoRunningSession)
 {
-    auto bridge = std::make_unique<QtTuneBridge>();
+    auto bridge = std::make_unique<SessionBridge>();
     bridge->connectSessionAsync(QStringLiteral("mock://demo"));
 
     ecuio_session_t* pending = nullptr;
@@ -2263,10 +2263,10 @@ TEST(BridgeTest, AsyncConnectOpensOffGuiThread)
     ASSERT_TRUE(hooks.load());
     FakeEnvArm delay("ECUIO_FAKE_OPEN_DELAY_MS", "600");
 
-    QtTuneBridge bridge;
+    SessionBridge bridge;
     std::atomic<bool> done{false};
     QString gotErr = "unset";
-    QObject::connect(&bridge, &QtTuneBridge::connectResult,
+    QObject::connect(&bridge, &SessionBridge::connectResult,
                      [&](const QString&, const QString& error) {
                          gotErr = error;
                          done.store(true);
@@ -2294,9 +2294,9 @@ TEST(BridgeTest, DisconnectTearsDownOffGuiThread)
     FakeHooks hooks;
     ASSERT_TRUE(hooks.load());
 
-    QtTuneBridge bridge;
+    SessionBridge bridge;
     QStringList log;
-    QObject::connect(&bridge, &QtTuneBridge::logMessage,
+    QObject::connect(&bridge, &SessionBridge::logMessage,
                      [&log](const QString& line) { log << line; });
     ASSERT_TRUE(bridge.connectSession(fakeUri()).isEmpty());
     const unsigned long disconnects_before = hooks.disconnect_count();
@@ -2338,7 +2338,7 @@ TEST(BridgeTest, DestroyedMidDisconnectWaitsForTeardown)
     FakeHooks hooks;
     ASSERT_TRUE(hooks.load());
 
-    auto bridge = std::make_unique<QtTuneBridge>();
+    auto bridge = std::make_unique<SessionBridge>();
     ASSERT_TRUE(bridge->connectSession(fakeUri()).isEmpty());
     const unsigned long disconnects_before = hooks.disconnect_count();
 
@@ -2358,9 +2358,9 @@ TEST(BridgeTest, DestroyedMidDisconnectWaitsForTeardown)
  * from the fake's own readings. */
 TEST(BridgeTest, ConnectLogsTheAdaptersSession)
 {
-    QtTuneBridge bridge;
+    SessionBridge bridge;
     QStringList log;
-    QObject::connect(&bridge, &QtTuneBridge::logMessage,
+    QObject::connect(&bridge, &SessionBridge::logMessage,
                      [&log](const QString& line) { log << line; });
     ASSERT_TRUE(bridge.connectSession(fakeUri()).isEmpty());
     ASSERT_GE(log.size(), 2);
@@ -2381,9 +2381,9 @@ TEST(BridgeTest, ConnectLogsTheAdaptersSession)
  * dropped. */
 TEST(BridgeTest, ConnectLogsWhatTheEcuSupports)
 {
-    QtTuneBridge bridge;
+    SessionBridge bridge;
     QStringList log;
-    QObject::connect(&bridge, &QtTuneBridge::logMessage,
+    QObject::connect(&bridge, &SessionBridge::logMessage,
                      [&log](const QString& line) { log << line; });
     const QString uri = QStringLiteral("j2534://%1")
                             .arg(QString::fromUtf8(FAKE_J2534_DLL_PATH));
@@ -2422,7 +2422,7 @@ TEST(BridgeTest, ConnectLogsWhatTheEcuSupports)
  * keeps no session: a second connect works once the refusal is gone. */
 TEST(BridgeTest, RefusedStartNamesItsCauseAndLeavesNoSession)
 {
-    QtTuneBridge bridge;
+    SessionBridge bridge;
     const QString uri = QStringLiteral("j2534://%1")
                             .arg(QString::fromUtf8(FAKE_J2534_DLL_PATH));
     {
@@ -2442,9 +2442,9 @@ TEST(BridgeTest, RefusedStartNamesItsCauseAndLeavesNoSession)
  * runs obd2, whose rotation asks the identity. */
 TEST(BridgeTest, AConnectsVinReachesQmlOnlyAsASaltedHash)
 {
-    QtTuneBridge bridge;
+    SessionBridge bridge;
     int identified = 0;
-    QObject::connect(&bridge, &QtTuneBridge::vehicleIdentified,
+    QObject::connect(&bridge, &SessionBridge::vehicleIdentified,
                      [&identified]() { ++identified; });
     EXPECT_TRUE(bridge.vinKey(QStringLiteral("salt")).isEmpty())
         << "no session, no key";
@@ -2472,7 +2472,7 @@ TEST(BridgeTest, RecordingFolderNamesThePickedVehicleForAnAdapterOnly)
 {
     QTemporaryDir root;
     ASSERT_TRUE(root.isValid());
-    QtTuneBridge bridge;
+    SessionBridge bridge;
     bridge.setRecordingsRootForTesting(root.path());
     bridge.setRecording(true);
     bridge.setVehicleLabel(QStringLiteral("Daily driver/2"));
@@ -2508,7 +2508,7 @@ TEST(BridgeTest, RawProfileLeavesSignalModelEmpty)
      * without clearing leaves a raw session displaying the PREVIOUS
      * session's rows with no live updates — stale data posing as live.
      * Frames still flow to the Log page; decode alone is silenced. */
-    QtTuneBridge bridge;
+    SessionBridge bridge;
     ASSERT_TRUE(bridge.connectSession("mock://profile-then-raw").isEmpty());
     ASSERT_TRUE(spinUntil(
         [&bridge]() { return bridge.signalModel()->rowCount() > 0; }, 5000));
@@ -2577,7 +2577,7 @@ TEST(BridgeTest, SessionInfoTextNamesTheAdapter)
     ecuio_session_info_t mock{};
     mock.backend = ECUIO_BACKEND_MOCK;
     qstrncpy(mock.profile, "mock", sizeof(mock.profile));
-    EXPECT_EQ(QtTuneBridge::sessionInfoText(mock).toStdString(),
+    EXPECT_EQ(SessionBridge::sessionInfoText(mock).toStdString(),
               "Session: mock transport; profile mock");
 
     ecuio_session_info_t vx{};
@@ -2596,13 +2596,13 @@ TEST(BridgeTest, SessionInfoTextNamesTheAdapter)
     qstrncpy(vx.dll_version, "4.5", sizeof(vx.dll_version));
     qstrncpy(vx.api_version, "04.04", sizeof(vx.api_version));
     qstrncpy(vx.profile, "obd2", sizeof(vx.profile));
-    EXPECT_EQ(QtTuneBridge::sessionInfoText(vx).toStdString(),
+    EXPECT_EQ(SessionBridge::sessionInfoText(vx).toStdString(),
               "Session: x86 DLL, through the surrogate; ISO 15765 at 500000 "
               "baud; profile obd2, channels 0x7E8/0x7E0, 0x7E9/0x7E1 (rx/tx); "
               "battery 12.6 V; firmware 1.2.3, DLL 4.5, API 04.04");
-    EXPECT_EQ(QtTuneBridge::versionsText(vx).toStdString(),
+    EXPECT_EQ(SessionBridge::versionsText(vx).toStdString(),
               "firmware 1.2.3, DLL 4.5, API 04.04");
-    EXPECT_TRUE(QtTuneBridge::versionsText(mock).isEmpty());
+    EXPECT_TRUE(SessionBridge::versionsText(mock).isEmpty());
 
     ecuio_session_info_t bare{};
     bare.backend = ECUIO_BACKEND_J2534_SURROGATE;
@@ -2614,11 +2614,11 @@ TEST(BridgeTest, SessionInfoTextNamesTheAdapter)
     bare.rx_ids[0] = 0x18DAF110;
     bare.tx_ids[0] = 0x18DA10F1;
     qstrncpy(bare.profile, "raw", sizeof(bare.profile));
-    EXPECT_EQ(QtTuneBridge::sessionInfoText(bare).toStdString(),
+    EXPECT_EQ(SessionBridge::sessionInfoText(bare).toStdString(),
               "Session: x64 DLL, through the surrogate; ISO 15765 at 250000 baud, flags 0x100; "
               "profile raw, channel 0x18DAF110/0x18DA10F1 (rx/tx); "
               "no battery reading; no version reading");
-    EXPECT_TRUE(QtTuneBridge::versionsText(bare).isEmpty());
+    EXPECT_TRUE(SessionBridge::versionsText(bare).isEmpty());
 
     /* An ELM327 on an STN chip, its port in the "Connected:" line */
     ecuio_session_info_t elm{};
@@ -2633,30 +2633,30 @@ TEST(BridgeTest, SessionInfoTextNamesTheAdapter)
     qstrncpy(elm.firmware_version, "ELM327 v1.4b, STN2255 v9.9.9",
              sizeof(elm.firmware_version));
     qstrncpy(elm.profile, "obd2", sizeof(elm.profile));
-    EXPECT_EQ(QtTuneBridge::sessionInfoText(elm).toStdString(),
+    EXPECT_EQ(SessionBridge::sessionInfoText(elm).toStdString(),
               "Session: ELM327 adapter (ELM327 v1.4b, STN2255 v9.9.9); "
               "ISO 15765 at 500000 baud; profile obd2, channel "
               "0x7E8/0x7E0 (rx/tx); battery 13.8 V");
-    EXPECT_EQ(QtTuneBridge::versionsText(elm).toStdString(),
+    EXPECT_EQ(SessionBridge::versionsText(elm).toStdString(),
               "ELM327 v1.4b, STN2255 v9.9.9");
 
     /* Set not to wait past a pending reply, and no readings */
     elm.flags = ECUIO_SESSION_INFO_PENDING_OFF;
     elm.baud = 250000;
-    EXPECT_EQ(QtTuneBridge::sessionInfoText(elm).toStdString(),
+    EXPECT_EQ(SessionBridge::sessionInfoText(elm).toStdString(),
               "Session: ELM327 adapter (no version reading); ISO 15765 "
               "at 250000 baud; profile obd2, channel 0x7E8/0x7E0 "
               "(rx/tx); no battery reading; the adapter is set not to "
               "wait past 7F xx 78 (STN parameter 2A), so a pending "
               "reply's answer is lost");
-    EXPECT_TRUE(QtTuneBridge::versionsText(elm).isEmpty());
+    EXPECT_TRUE(SessionBridge::versionsText(elm).isEmpty());
 
     ecuio_session_info_t later{};
     later.backend = 7; // a backend this build doesn't know
-    EXPECT_EQ(QtTuneBridge::sessionInfoText(later).toStdString(),
+    EXPECT_EQ(SessionBridge::sessionInfoText(later).toStdString(),
               "Session: backend 7");
     later.backend = ECUIO_BACKEND_J2534_INPROC; // retired, never reported
-    EXPECT_EQ(QtTuneBridge::sessionInfoText(later).toStdString(),
+    EXPECT_EQ(SessionBridge::sessionInfoText(later).toStdString(),
               "Session: backend 2");
 }
 
@@ -2677,13 +2677,13 @@ TEST(BridgeTest, ChannelSupportTextNamesTheEcuAndWhatItDropped)
     memcpy(car.pid_bitmap, bitmaps, sizeof(bitmaps));
     car.dropped = 1;
     car.dropped_list[0] = {{0x01, 0x5C, 0x00}, 2, ECUIO_DROP_BITMAP, 0, {0, 0}};
-    EXPECT_EQ(QtTuneBridge::channelSupportText(car).toStdString(),
+    EXPECT_EQ(SessionBridge::channelSupportText(car).toStdString(),
               "ECU 0x7E8: supports 44 PIDs up to 0x60, no answer past that; "
               "10 requests, 1 dropped: 01 5C (not in its supported PIDs)");
 
     ecuio_channel_support_t later = car; // a reason this build doesn't know
     later.dropped_list[0].reason = 99;
-    EXPECT_EQ(QtTuneBridge::channelSupportText(later).toStdString(),
+    EXPECT_EQ(SessionBridge::channelSupportText(later).toStdString(),
               "ECU 0x7E8: supports 44 PIDs up to 0x60, no answer past that; "
               "10 requests, 1 dropped: 01 5C (reason 99)");
 
@@ -2693,14 +2693,14 @@ TEST(BridgeTest, ChannelSupportTextNamesTheEcuAndWhatItDropped)
     all.requests = 1;
     all.ranges = 0x1;
     all.pid_bitmap[0] = 0x81;   /* PIDs 01 and 08 */
-    EXPECT_EQ(QtTuneBridge::channelSupportText(all).toStdString(),
+    EXPECT_EQ(SessionBridge::channelSupportText(all).toStdString(),
               "ECU 0x18DAF110: supports 2 PIDs; 1 request, none dropped");
 
     ecuio_channel_support_t part = all;
     part.flags = ECUIO_SUPPORT_PROBED;
     part.ranges = 0;
     part.pid_bitmap[0] = 0;
-    EXPECT_EQ(QtTuneBridge::channelSupportText(part).toStdString(),
+    EXPECT_EQ(SessionBridge::channelSupportText(part).toStdString(),
               "ECU 0x18DAF110: no answer to the supported-PID query; "
               "1 request, none dropped");
 
@@ -2714,7 +2714,7 @@ TEST(BridgeTest, ChannelSupportTextNamesTheEcuAndWhatItDropped)
         dids.dropped_list[i] = {{0x22, 0x40, static_cast<uint8_t>(i)}, 3,
                                 ECUIO_DROP_SERVICE, 0x11, {0, 0}};
     }
-    EXPECT_EQ(QtTuneBridge::channelSupportText(dids).toStdString(),
+    EXPECT_EQ(SessionBridge::channelSupportText(dids).toStdString(),
               "ECU 0x7E9: 12 requests, 10 dropped: "
               "22 1E 1D (not supported: 7F 22 31), "
               "22 1E 1E (needs security access or another session: 7F 22 33), "
@@ -2737,7 +2737,7 @@ TEST(BridgeTest, ChannelSupportTextNamesTheEcuAndWhatItDropped)
     scan.scan_found = 1;
     scan.scan_refused = 8;
     scan.scan_polled = 1;
-    EXPECT_EQ(QtTuneBridge::channelSupportText(scan).toStdString(),
+    EXPECT_EQ(SessionBridge::channelSupportText(scan).toStdString(),
               "ECU 0x7E8: 1 request, none dropped; scan: 9 DIDs, 1 found, 8 refused");
 
     ecuio_channel_support_t running{};
@@ -2748,7 +2748,7 @@ TEST(BridgeTest, ChannelSupportTextNamesTheEcuAndWhatItDropped)
     running.scan_found = 130;
     running.scan_refused = 120;
     running.scan_polled = 128;
-    EXPECT_EQ(QtTuneBridge::channelSupportText(running).toStdString(),
+    EXPECT_EQ(SessionBridge::channelSupportText(running).toStdString(),
               "ECU 0x7E9: 128 requests, none dropped; "
               "scan: 256 DIDs, 130 found (128 polled), 120 refused, 6 unanswered");
 }
@@ -2777,37 +2777,39 @@ TEST(BridgeTest, VinFromIdentityTakesService09ThenF190)
         item({0x22, 0xF1, 0x90}, ECUIO_IDENTITY_ANSWERED, "f190vin0000000002");
     id.list[1] = item({0x09, 0x02}, ECUIO_IDENTITY_ANSWERED,
                       std::string(2, '\0') + " FAKEJ2534VIN00001");
-    EXPECT_EQ(QtTuneBridge::vinFromIdentity(id).toStdString(),
+    EXPECT_EQ(SessionBridge::vinFromIdentity(id).toStdString(),
               "FAKEJ2534VIN00001")
         << "09 02 first, its padding dropped";
 
     id.list[1].outcome = ECUIO_IDENTITY_REFUSED;
-    EXPECT_EQ(QtTuneBridge::vinFromIdentity(id).toStdString(),
+    EXPECT_EQ(SessionBridge::vinFromIdentity(id).toStdString(),
               "F190VIN0000000002")
         << "F190 when 09 02 wasn't answered, in upper case";
 
     id.list[0] =
         item({0x22, 0xF1, 0x90}, ECUIO_IDENTITY_ANSWERED, "FAKEJ2534VIN0001");
-    EXPECT_TRUE(QtTuneBridge::vinFromIdentity(id).isEmpty()) << "16 characters";
+    EXPECT_TRUE(SessionBridge::vinFromIdentity(id).isEmpty())
+        << "16 characters";
     id.list[0] =
         item({0x22, 0xF1, 0x90}, ECUIO_IDENTITY_ANSWERED, "FAKEJ2534VIN000012");
-    EXPECT_TRUE(QtTuneBridge::vinFromIdentity(id).isEmpty()) << "18 characters";
+    EXPECT_TRUE(SessionBridge::vinFromIdentity(id).isEmpty())
+        << "18 characters";
 
     id.list[0] =
         item({0x09, 0x04}, ECUIO_IDENTITY_ANSWERED, "CALIBRATION00001X");
-    EXPECT_TRUE(QtTuneBridge::vinFromIdentity(id).isEmpty())
+    EXPECT_TRUE(SessionBridge::vinFromIdentity(id).isEmpty())
         << "a CALID of 17 isn't a VIN";
 
     id.items = 1;
     id.list[1] =
         item({0x09, 0x02}, ECUIO_IDENTITY_ANSWERED, "FAKEJ2534VIN00001");
-    EXPECT_TRUE(QtTuneBridge::vinFromIdentity(id).isEmpty())
+    EXPECT_TRUE(SessionBridge::vinFromIdentity(id).isEmpty())
         << "past the count isn't read";
 }
 
 TEST(BridgeTest, NewSaltIsSixteenRandomBytes)
 {
-    QtTuneBridge bridge;
+    SessionBridge bridge;
     const QString a = bridge.newSalt();
     const QString b = bridge.newSalt();
     EXPECT_TRUE(QRegularExpression(QStringLiteral("^[0-9a-f]{32}$"))
@@ -2821,7 +2823,7 @@ TEST(BridgeTest, NewSaltIsSixteenRandomBytes)
 TEST(BridgeTest, FolderLabelKeepsWhatAFolderNameMay)
 {
     const auto f = [](const char* label) {
-        return QtTuneBridge::folderLabel(QString::fromUtf8(label))
+        return SessionBridge::folderLabel(QString::fromUtf8(label))
             .toStdString();
     };
     EXPECT_EQ(f("Daily driver"), "Daily driver");
@@ -2837,7 +2839,7 @@ TEST(BridgeTest, FolderLabelKeepsWhatAFolderNameMay)
  * chart leaves out, read and set by name */
 TEST(BridgeTest, UnplottedNamesReadAndSetTheChartsRows)
 {
-    QtTuneBridge bridge;
+    SessionBridge bridge;
     SignalListModel* m = bridge.signalModel();
     int countNotified = 0;
     QObject::connect(m, &SignalListModel::subscribedCountChanged,
@@ -2900,7 +2902,7 @@ TEST(BridgeTest, ChannelIdentityTextNamesWhatTheEcuSaid)
     car.list[2] = item({0x22, 0xF1, 0x94}, ECUIO_IDENTITY_REFUSED, 0x31, "");
     car.list[3] = item({0x09, 0x0A}, ECUIO_IDENTITY_UNANSWERED, 0, "");
     car.list[4] = item({0x22, 0xF1, 0x8C}, ECUIO_IDENTITY_REFUSED, 0x33, "");
-    EXPECT_EQ(QtTuneBridge::channelIdentityText(car).toStdString(),
+    EXPECT_EQ(SessionBridge::channelIdentityText(car).toStdString(),
               "ECU 0x7E8 identity: VIN FAKEJ2534VIN00001; CALID CAL-A, CAL-B; "
               "2 refused: 22 F1 94 (7F 22 31), 22 F1 8C (7F 22 33); 1 unanswered");
 
@@ -2910,7 +2912,7 @@ TEST(BridgeTest, ChannelIdentityTextNamesWhatTheEcuSaid)
     silent.items = 2;
     silent.list[0] = item({0x09, 0x02}, ECUIO_IDENTITY_UNANSWERED, 0, "");
     silent.list[1] = item({0x22, 0xF1, 0x90}, ECUIO_IDENTITY_UNANSWERED, 0, "");
-    EXPECT_EQ(QtTuneBridge::channelIdentityText(silent).toStdString(),
+    EXPECT_EQ(SessionBridge::channelIdentityText(silent).toStdString(),
               "ECU 0x18DAF110 identity: 2 unanswered");
 
     ecuio_channel_identity_t odd{};
@@ -2918,20 +2920,20 @@ TEST(BridgeTest, ChannelIdentityTextNamesWhatTheEcuSaid)
     odd.items = 2;
     odd.list[0] = item({0x22, 0x12, 0x34}, ECUIO_IDENTITY_ANSWERED, 0, "");
     odd.list[1] = item({0x22, 0xF1, 0x91}, ECUIO_IDENTITY_UNASKED, 0, "");
-    EXPECT_EQ(QtTuneBridge::channelIdentityText(odd).toStdString(),
+    EXPECT_EQ(SessionBridge::channelIdentityText(odd).toStdString(),
               "ECU 0x7E9 identity: 22 12 34 (empty)");
 
     ecuio_channel_identity_t none{};
     none.rx_id = 0x7E8;
-    EXPECT_EQ(QtTuneBridge::channelIdentityText(none).toStdString(),
+    EXPECT_EQ(SessionBridge::channelIdentityText(none).toStdString(),
               "ECU 0x7E8 identity: nothing asked");
 }
 
 TEST(BridgeTest, ConnectLogsTheMockSession)
 {
-    QtTuneBridge bridge;
+    SessionBridge bridge;
     QStringList log;
-    QObject::connect(&bridge, &QtTuneBridge::logMessage,
+    QObject::connect(&bridge, &SessionBridge::logMessage,
                      [&log](const QString& line) { log << line; });
     ASSERT_TRUE(bridge.connectSession(QStringLiteral("mock://demo")).isEmpty());
     ASSERT_GE(log.size(), 2);
@@ -2947,12 +2949,12 @@ TEST(BridgeTest, LinkStateMapsEveryPublishedCode)
      * helper. Covers all four link-health codes plus the forward-
      * compatible fallback; QML's Theme keys colors and labels on
      * these strings. */
-    EXPECT_EQ(QtTuneBridge::linkStateForError(ECUIO_OK), QStringLiteral("ok"));
-    EXPECT_EQ(QtTuneBridge::linkStateForError(ECUIO_ERR_VEHICLE_TIMEOUT), QStringLiteral("quiet"));
-    EXPECT_EQ(QtTuneBridge::linkStateForError(ECUIO_ERR_REQUEST_FAILED), QStringLiteral("requests"));
-    EXPECT_EQ(QtTuneBridge::linkStateForError(ECUIO_ERR_TRANSPORT_HARD_FAILURE), QStringLiteral("fault"));
-    EXPECT_EQ(QtTuneBridge::linkStateForError(ECUIO_ERR_RECORDING_CHANGED), QStringLiteral("stopped"));
-    EXPECT_EQ(QtTuneBridge::linkStateForError(static_cast<ecuio_status_t>(999)), QStringLiteral("degraded"));
+    EXPECT_EQ(SessionBridge::linkStateForError(ECUIO_OK), QStringLiteral("ok"));
+    EXPECT_EQ(SessionBridge::linkStateForError(ECUIO_ERR_VEHICLE_TIMEOUT), QStringLiteral("quiet"));
+    EXPECT_EQ(SessionBridge::linkStateForError(ECUIO_ERR_REQUEST_FAILED), QStringLiteral("requests"));
+    EXPECT_EQ(SessionBridge::linkStateForError(ECUIO_ERR_TRANSPORT_HARD_FAILURE), QStringLiteral("fault"));
+    EXPECT_EQ(SessionBridge::linkStateForError(ECUIO_ERR_RECORDING_CHANGED), QStringLiteral("stopped"));
+    EXPECT_EQ(SessionBridge::linkStateForError(static_cast<ecuio_status_t>(999)), QStringLiteral("degraded"));
 }
 
 /* A replay whose recording changes under it stops, and the bridge says
@@ -2976,9 +2978,9 @@ TEST(BridgeTest, ReplayThatStopsEarlySaysSo)
     }
     ASSERT_TRUE(write(rows));
 
-    QtTuneBridge bridge;
+    SessionBridge bridge;
     QStringList log;
-    QObject::connect(&bridge, &QtTuneBridge::logMessage,
+    QObject::connect(&bridge, &SessionBridge::logMessage,
                      [&log](const QString& line) { log << line; });
     ASSERT_TRUE(bridge.connectSession(QStringLiteral("replay://") + csv +
                                       QStringLiteral("?loop=1"))
@@ -3012,7 +3014,7 @@ TEST(BridgeTest, ReplayOfAMockRecordingDecodesWhatWasRecorded)
 {
     QTemporaryDir first, second;
     ASSERT_TRUE(first.isValid() && second.isValid());
-    QtTuneBridge bridge;
+    SessionBridge bridge;
     bridge.setRecording(true);
     // A replay, compared with its source
     bridge.setRecordReplaysForTesting(true);
@@ -3030,7 +3032,7 @@ TEST(BridgeTest, ReplayOfAMockRecordingDecodesWhatWasRecorded)
     ASSERT_GT(n, 30);
 
     QStringList log;
-    QObject::connect(&bridge, &QtTuneBridge::logMessage,
+    QObject::connect(&bridge, &SessionBridge::logMessage,
                      [&log](const QString& line) { log << line; });
     bridge.setRecordingsRootForTesting(second.path());
     const QString uri = QStringLiteral("replay://") + a +
@@ -3096,7 +3098,7 @@ TEST(BridgeTest, ReplayUriForTakesTheRecordedProfile)
 {
     // A folder as QFileInfo gives it, '/' on every platform
     const auto r = [](const char* recorded) {
-        return QtTuneBridge::replayUriFor(
+        return SessionBridge::replayUriFor(
                    QStringLiteral("C:/rec/20261028-143012 Daily driver"),
                    QString::fromUtf8(recorded))
             .toStdString();
@@ -3132,7 +3134,7 @@ TEST(BridgeTest, RecentRecordingsListTheNewestFirst)
         if (uriLine != nullptr) {
             QFile events(dir + QStringLiteral("/events.log"));
             ASSERT_TRUE(events.open(QIODevice::WriteOnly));
-            events.write("QtTune session recording (ADR-0017)\n"
+            events.write("Havne session recording (ADR-0017)\n"
                          "started  2026-10-28 14:30:12.000 (local time)\n"
                          "core     0.3.2\n");
             events.write(uriLine);
@@ -3146,7 +3148,7 @@ TEST(BridgeTest, RecentRecordingsListTheNewestFirst)
     ASSERT_TRUE(QDir().mkpath(root.path() + QStringLiteral("/20261029-080000")))
         << "no frames.csv: not a recording";
 
-    QtTuneBridge bridge;
+    SessionBridge bridge;
     bridge.setRecordingsRootForTesting(root.path());
     const QVariantList rows = bridge.recentRecordings(10);
     ASSERT_EQ(rows.size(), 3);
@@ -3182,11 +3184,11 @@ TEST(BridgeTest, AReplayIsNotRecorded)
 {
     QTemporaryDir root;
     ASSERT_TRUE(root.isValid());
-    QtTuneBridge bridge;
+    SessionBridge bridge;
     bridge.setRecording(true);
     bridge.setRecordingsRootForTesting(root.path());
     QStringList log;
-    QObject::connect(&bridge, &QtTuneBridge::logMessage,
+    QObject::connect(&bridge, &SessionBridge::logMessage,
                      [&log](const QString& line) { log << line; });
     const QString uri =
         QStringLiteral(
@@ -3307,7 +3309,7 @@ TEST(BridgeTest, RecentRecordingsReadTheEarlierNamesFolderToo)
     make(earlier, "20261028-100000");
     make(earlier, "20261030-080000 Weekend car");
 
-    QtTuneBridge bridge;
+    SessionBridge bridge;
     bridge.setRecordingsRootForTesting(current.path());
     bridge.setEarlierRecordingsRootForTesting(earlier.path());
     const QVariantList rows = bridge.recentRecordings(10);
@@ -3329,7 +3331,7 @@ TEST(BridgeTest, RecentRecordingsReplayUnderTheirOwnProfile)
 {
     QTemporaryDir first, second;
     ASSERT_TRUE(first.isValid() && second.isValid());
-    QtTuneBridge bridge;
+    SessionBridge bridge;
     bridge.setRecording(true);
     bridge.setRecordingsRootForTesting(first.path());
     ASSERT_TRUE(
@@ -3350,7 +3352,7 @@ TEST(BridgeTest, RecentRecordingsReplayUnderTheirOwnProfile)
         << uri.toStdString();
 
     QStringList log;
-    QObject::connect(&bridge, &QtTuneBridge::logMessage,
+    QObject::connect(&bridge, &SessionBridge::logMessage,
                      [&log](const QString& line) { log << line; });
     bridge.setRecordingsRootForTesting(second.path());
     ASSERT_EQ(bridge.connectSession(uri), QString());
@@ -3399,7 +3401,7 @@ TEST(BridgeTest, TheChartKeepsTheFixturesPeak)
     const QString uri =
         QStringLiteral("replay://%1/2026-10-25-engine-start?profile=obd2&speed=100")
             .arg(QStringLiteral(ECUIO_REPLAY_FIXTURES));
-    QtTuneBridge bridge;
+    SessionBridge bridge;
     ASSERT_TRUE(bridge.connectSession(uri).isEmpty());
     SignalListModel* model = bridge.signalModel();
     double peak = 0.0;
@@ -3476,18 +3478,18 @@ TEST(BridgeTest, LatencyStatsReadsQuantilesWithinABucket)
  * decoded nothing has no values clause */
 TEST(BridgeTest, DeliveryTextNamesFramesDropsAndTimes)
 {
-    QtTuneBridge::DeliveryStats none;
-    EXPECT_EQ(QtTuneBridge::deliveryText(none).toStdString(), "Delivery: no frames");
+    SessionBridge::DeliveryStats none;
+    EXPECT_EQ(SessionBridge::deliveryText(none).toStdString(), "Delivery: no frames");
 
-    QtTuneBridge::DeliveryStats raw;
+    SessionBridge::DeliveryStats raw;
     raw.frames = 3;
     for (int us : {12, 12, 900})
         raw.frameToGui.add(us);
-    EXPECT_EQ(QtTuneBridge::deliveryText(raw).toStdString(),
+    EXPECT_EQ(SessionBridge::deliveryText(raw).toStdString(),
               "Delivery: 3 frames, none dropped; to the GUI thread "
               "in median 12 µs, p99 900 µs, max 900 µs");
 
-    QtTuneBridge::DeliveryStats busy;
+    SessionBridge::DeliveryStats busy;
     busy.frames = 2000;
     busy.dropped = 500;
     busy.queuedAtEnd = 7;
@@ -3499,7 +3501,7 @@ TEST(BridgeTest, DeliveryTextNamesFramesDropsAndTimes)
         busy.valueToModel.add(i < 3900 ? 52000 : 99000);
     /* 52 ms reads 53: its bucket's top is 53.247 ms, an eighth of
      * 32.768 ms past its floor. 99 ms reads exact, capped at the max. */
-    EXPECT_EQ(QtTuneBridge::deliveryText(busy).toStdString(),
+    EXPECT_EQ(SessionBridge::deliveryText(busy).toStdString(),
               "Delivery: 2000 frames, 500 dropped at the in-flight cap "
               "(25.0 %), 7 still queued at the end; to the GUI thread "
               "in median 2.5 ms, p99 2.5 ms, max 2.5 ms; 4000 values, "
@@ -3518,14 +3520,14 @@ TEST(BridgeTest, DisconnectLogsTheDelivery)
         QStringLiteral("replay://%1/2026-10-25-engine-start?profile=obd2&speed=max")
             .arg(QStringLiteral(ECUIO_REPLAY_FIXTURES));
     constexpr quint64 kFrames = 7074;
-    QtTuneBridge bridge;
+    SessionBridge bridge;
     ASSERT_TRUE(bridge.connectSession(uri).isEmpty());
     ASSERT_TRUE(spinUntil(
         [&bridge]() { return bridge.frameCount() + bridge.droppedFrames() >= int(kFrames); },
         20000));
     spinLoop(300);   // past two ticks: every value drained
 
-    const QtTuneBridge::DeliveryStats s = bridge.deliveryStats();
+    const SessionBridge::DeliveryStats s = bridge.deliveryStats();
     EXPECT_EQ(s.frames, kFrames);
     EXPECT_EQ(s.dropped + static_cast<quint64>(bridge.frameCount()), kFrames);
     EXPECT_EQ(s.queuedAtEnd, 0u);
@@ -3536,12 +3538,12 @@ TEST(BridgeTest, DisconnectLogsTheDelivery)
     EXPECT_EQ(s.valueToModel.count(), s.values) << "every staged value timed";
 
     QStringList log;
-    QObject::connect(&bridge, &QtTuneBridge::logMessage,
+    QObject::connect(&bridge, &SessionBridge::logMessage,
                      [&log](const QString& line) { log << line; });
     ASSERT_TRUE(disconnectAndWait(bridge));
     const QStringList delivery = log.filter(QStringLiteral("Delivery: "));
     ASSERT_EQ(delivery.size(), 1) << log.join('\n').toStdString();
-    EXPECT_EQ(delivery.first(), QtTuneBridge::deliveryText(s));
+    EXPECT_EQ(delivery.first(), SessionBridge::deliveryText(s));
     EXPECT_TRUE(delivery.first().startsWith(QStringLiteral("Delivery: 7074 frames, ")));
     EXPECT_TRUE(delivery.first().contains(QStringLiteral("values, to the model in median ")));
 }
@@ -3559,7 +3561,7 @@ TEST(BridgeTest, RecordingHoldsEveryValueCoreDecodes)
 
     QTemporaryDir root;
     ASSERT_TRUE(root.isValid());
-    QtTuneBridge bridge;
+    SessionBridge bridge;
     bridge.setRecordingsRootForTesting(root.path());
     bridge.setRecording(true);
     // A replay, compared with its source
@@ -3671,7 +3673,7 @@ TEST(BridgeTest, ValuesSurviveFramesDroppedAtTheCap)
     ASSERT_TRUE(recording.isValid() && root.isValid());
     const QString uri = writeRpmRows(recording.path(), kRows);
     ASSERT_FALSE(uri.isEmpty());
-    QtTuneBridge bridge;
+    SessionBridge bridge;
     bridge.setRecordingsRootForTesting(root.path());
     bridge.setRecording(true);
     // A replay, compared with its source
@@ -3725,7 +3727,7 @@ TEST(BridgeTest, ValuesStagedAtDisconnectAreRecorded)
 
     QTemporaryDir root;
     ASSERT_TRUE(root.isValid());
-    QtTuneBridge bridge;
+    SessionBridge bridge;
     bridge.setRecordingsRootForTesting(root.path());
     bridge.setRecording(true);
     ASSERT_TRUE(bridge.connectSession("mock://last?profile=test-last-window").isEmpty());
@@ -3761,9 +3763,9 @@ TEST(BridgeTest, ValuesPastTheWindowsLimitAreCountedAndLogged)
     ASSERT_TRUE(recording.isValid() && root.isValid());
     const QString uri = writeRpmRows(recording.path(), kRows);
     ASSERT_FALSE(uri.isEmpty());
-    QtTuneBridge bridge;
+    SessionBridge bridge;
     QStringList log;
-    QObject::connect(&bridge, &QtTuneBridge::logMessage,
+    QObject::connect(&bridge, &SessionBridge::logMessage,
                      [&log](const QString& line) { log << line; });
     bridge.setRecordingsRootForTesting(root.path());
     bridge.setRecording(true);
@@ -3896,7 +3898,7 @@ TEST(BridgeTest, VehicleRecordingsReplayToTheirOwnValues)
 
         QTemporaryDir out;
         ASSERT_TRUE(out.isValid());
-        QtTuneBridge bridge;
+        SessionBridge bridge;
         bridge.setRecordingsRootForTesting(out.path());
         bridge.setRecording(true);
         // A replay, compared with its source
@@ -3937,23 +3939,23 @@ TEST(BridgeTest, VehicleRecordingsReplayToTheirOwnValues)
 TEST(BridgeTest, ReplayUriLabelKeepsTheRecordingsName)
 {
     const QString dots = QString(QChar(0x2026));
-    EXPECT_EQ(QtTuneBridge::uriLabelFor(
-                  QStringLiteral("replay://C:/Users/me/Documents/QtTune/"
+    EXPECT_EQ(SessionBridge::uriLabelFor(
+                  QStringLiteral("replay://C:/Users/me/Documents/Havne/"
                                  "recordings/20261025-165100?profile=obd2")),
               QStringLiteral("replay://") + dots +
                   QStringLiteral("/20261025-165100?profile=obd2"));
     EXPECT_EQ(
-        QtTuneBridge::uriLabelFor(QStringLiteral(
+        SessionBridge::uriLabelFor(QStringLiteral(
             "replay://C:\\Users\\me\\recordings\\20261025-165100\\frames.csv")),
         QStringLiteral("replay://") + dots +
             QStringLiteral("/20261025-165100\\frames.csv"));
-    EXPECT_EQ(QtTuneBridge::uriLabelFor(
+    EXPECT_EQ(SessionBridge::uriLabelFor(
                   QStringLiteral("replay:///home/me/rec/20261025-165100/")),
               QStringLiteral("replay://") + dots +
                   QStringLiteral("/20261025-165100"));
     for (const char* uri :
          {"replay://", "replay://?speed=max", "replay://frames.csv"}) {
-        EXPECT_EQ(QtTuneBridge::uriLabelFor(QString::fromLatin1(uri)),
+        EXPECT_EQ(SessionBridge::uriLabelFor(QString::fromLatin1(uri)),
                   QString::fromLatin1(uri));
     }
 }
@@ -3966,18 +3968,18 @@ TEST(BridgeTest, SessionInfoTextDescribesAReplay)
     info.replay_span_ms = 275224;
     info.replay_speed_milli = 1000;
     qstrncpy(info.profile, "obd2", sizeof(info.profile));
-    EXPECT_EQ(QtTuneBridge::sessionInfoText(info).toStdString(),
+    EXPECT_EQ(SessionBridge::sessionInfoText(info).toStdString(),
               "Session: replay of a recording, 7194 frames over 275.2 s at 1x; "
               "profile obd2");
     info.replay_speed_milli = 2500;
     info.flags = ECUIO_SESSION_INFO_REPLAY_LOOP;
-    EXPECT_EQ(QtTuneBridge::sessionInfoText(info).toStdString(),
+    EXPECT_EQ(SessionBridge::sessionInfoText(info).toStdString(),
               "Session: replay of a recording, 7194 frames over 275.2 s at "
               "2.5x, looping; "
               "profile obd2");
     info.replay_speed_milli = 0;
     info.flags = 0;
-    EXPECT_EQ(QtTuneBridge::sessionInfoText(info).toStdString(),
+    EXPECT_EQ(SessionBridge::sessionInfoText(info).toStdString(),
               "Session: replay of a recording, 7194 frames over 275.2 s at "
               "full speed; "
               "profile obd2");

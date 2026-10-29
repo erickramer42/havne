@@ -143,7 +143,7 @@ summary=$(awk -v prefix="$prefix" -v out="$xml" '
         print "<?xml version=\"1.0\" encoding=\"utf-8\"?>" > out
         printf "<coverage line-rate=\"%.4f\" branch-rate=\"0\" lines-covered=\"%d\" lines-valid=\"%d\" branches-covered=\"0\" branches-valid=\"0\" complexity=\"0\" timestamp=\"%d\" version=\"0\">\n", rate, tc, tv, systime() > out
         print "  <sources><source>.</source></sources>" > out
-        printf "  <packages><package name=\"qttune\" line-rate=\"%.4f\" branch-rate=\"0\" complexity=\"0\"><classes>\n", rate > out
+        printf "  <packages><package name=\"havne\" line-rate=\"%.4f\" branch-rate=\"0\" complexity=\"0\"><classes>\n", rate > out
         for (f in hits) {
             n = split(f, p, "/")
             printf "    <class name=\"%s\" filename=\"%s\" line-rate=\"%.4f\" branch-rate=\"0\" complexity=\"0\"><methods/><lines>\n", p[n], f, cov[f] / valid[f] > out

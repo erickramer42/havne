@@ -43,19 +43,19 @@ vendor DLL loads in a surrogate process of its own architecture
 ([ADR-0025](adr/0025-one-j2534-backend.md)). Most, the VX's among
 them, are 32-bit, and their surrogate comes from a core-only Win32
 tree, because Qt ships no 32-bit kits; the app tree copies it next to
-`qttune.exe`, beside its own x64 surrogate, which is why the Win32
+`havne.exe`, beside its own x64 surrogate, which is why the Win32
 tree is built first. The Visual Studio generator is multi-config, so
 `--config` and `-C` are required:
 
 ```sh
 # 1. The Win32 tree: the x86 surrogate, and the x86 fakes the cross-arch tests load
-cmake -B build-win32 -A Win32 -DQTTUNE_BUILD_CORE_ONLY=ON
+cmake -B build-win32 -A Win32 -DHAVNE_BUILD_CORE_ONLY=ON
 cmake --build build-win32 --config Release --target ecuio-j2534-surrogate fake_j2534 fake_j2534_legacy
 
 # 2. The app tree, configured after step 1 so it finds the surrogate
 cmake -B build -DCMAKE_PREFIX_PATH=<qt-install>/msvc2022_64
 cmake --build build --config Release   # prints "Deploying x64 J2534 surrogate" and "Deploying Win32 J2534 surrogate"
-build/app/Release/qttune.exe           # windeployqt has run post-build
+build/app/Release/havne.exe           # windeployqt has run post-build
 ```
 
 `scripts/verify.sh` (Git Bash) runs both builds in this order, then
@@ -67,16 +67,16 @@ is the app tree's own `ecuio-j2534-surrogate` target
 (`ecuio-j2534-surrogate-x64.exe`), built and copied with the app. For
 the x86 one, with the two-tree layout there is nothing to configure:
 when
-`QTTUNE_SURROGATE_SOURCE` is unset (the default), CMake searches the
+`HAVNE_SURROGATE_SOURCE` is unset (the default), CMake searches the
 sibling `build-win32/` tree and copies the surrogate next to
-`qttune.exe` on every app build. `QTTUNE_SURROGATE_SOURCE` is the app
+`havne.exe` on every app build. `HAVNE_SURROGATE_SOURCE` is the app
 build's CMake setting, for a surrogate built somewhere else; the
 runtime variable `ECUIO_SURROGATE_EXE` is separate, and points one run
 at a surrogate (the cross-arch tests use it).
 
 Resolution order:
 
-1. `QTTUNE_SURROGATE_SOURCE` cache variable, if set. A configured
+1. `HAVNE_SURROGATE_SOURCE` cache variable, if set. A configured
    path that does not exist is a configure-time `FATAL_ERROR`, not a
    silent no-op.
 2. Otherwise, `<repo>/build-win32/surrogate/*/ecuio-j2534-surrogate.exe`,
@@ -101,11 +101,11 @@ previous surrogate.
 
 **Cache caveat.** The cache variable
 persists across reconfigures. A tree previously configured with an
-explicit `-DQTTUNE_SURROGATE_SOURCE=...` keeps that value and
+explicit `-DHAVNE_SURROGATE_SOURCE=...` keeps that value and
 disables auto-detection until it is cleared:
 
 ```sh
-cmake -B build -U QTTUNE_SURROGATE_SOURCE
+cmake -B build -U HAVNE_SURROGATE_SOURCE
 ```
 
 Blowing away `CMakeCache.txt` is the blunt equivalent and equally
@@ -117,8 +117,8 @@ safe — regeneration is cheap.
 ```sh
 cmake -B build -DCMAKE_PREFIX_PATH=/path/to/qt
 cmake --build build
-build/app/qttune                              # Linux
-build/app/qttune.app/Contents/MacOS/qttune    # macOS
+build/app/havne                              # Linux
+build/app/havne.app/Contents/MacOS/havne    # macOS
 ```
 
 On Debian or Ubuntu, Qt's desktop kit needs `libgl1-mesa-dev` and
@@ -129,7 +129,7 @@ To show the window under X11 you also need `libxkbcommon-x11-0` and
 **Core only, no Qt.** This mirrors the Ubuntu CI job:
 
 ```sh
-cmake -B build-core -DQTTUNE_BUILD_CORE_ONLY=ON
+cmake -B build-core -DHAVNE_BUILD_CORE_ONLY=ON
 cmake --build build-core --config Release
 ```
 
@@ -191,7 +191,7 @@ TCP socket, then the Bluetooth and the foreground service ones.
 `android-build` fails if the generated manifest lacks any of them.
 
 To install on a phone without an Android kit, take the
-`qttune-android-arm64-v8a` artifact from a CI run (kept 14 days): the
+`havne-android-arm64-v8a` artifact from a CI run (kept 14 days): the
 debug-signed APK. Each run signs with a new debug key, so uninstall
 the previous build before installing the next (Android refuses an
 update signed by another key). Local builds share one key, so each
@@ -223,7 +223,7 @@ Boot a simulator before installing:
     -DBUILD_TESTING=OFF \
     -DCMAKE_OSX_SYSROOT=iphonesimulator -DCMAKE_OSX_ARCHITECTURES=x86_64
 cmake --build build-iossim --config Release -- CODE_SIGNING_ALLOWED=NO
-xcrun simctl install booted build-iossim/app/Release-iphonesimulator/qttune.app
+xcrun simctl install booted build-iossim/app/Release-iphonesimulator/havne.app
 ```
 
 Then launch it from the simulator's home screen. The CI job's launch
@@ -314,7 +314,7 @@ client/transport — in this order:
    - Tests can read the log through `ecuio_j2534_sur_log_path()`, as
      `ClientAndChildLinesShareTheSessionLog` does. A new trace line is
      still worth reading by eye once.
-5. If the app is affected, rebuild the `qttune` target (after the
+5. If the app is affected, rebuild the `havne` target (after the
    Win32 tree) so the deployment copy picks up the new surrogate.
 
 ## Running tests
@@ -335,7 +335,7 @@ matches `BridgeTest.SignalBatchesAreCoalesced`. The suites and what
 each one covers are listed in [testing.md](testing.md).
 
 **QML tests** (`test_qml`, Qt Quick Test) load the app's QML module,
-the `qttune_ui` library, against a real bridge. Each
+the `app_ui` library, against a real bridge. Each
 `tests/qml/tst_*.qml` file is one ctest case, `QmlTest.<name>`, in a
 process of its own; a new file is picked up at the next configure.
 
@@ -364,7 +364,7 @@ build/tests/qmltest/Release/test_qml.exe -input tests/qml/tst_linkhealth.qml Lin
   through the harness's `Harness.armFakeKnob` before the connect
   spawns the child; they skip off Windows.
 - The page tests fail on any warning from the app's own QML
-  (`qrc:/qt/qml/QtTune/…`), but not on Qt's.
+  (`qrc:/qt/qml/App/…`), but not on Qt's.
 
 **J2534 suites carry a 30 s per-test timeout.** The slowest
 legitimate case (the cross-arch timeout-recovery test, ~3.5 s) has
@@ -400,8 +400,8 @@ skips.
 Every runtime variable carries the core's prefix, `ECUIO_`: these two,
 `ECUIO_SURROGATE_X64_EXE` (the x64 surrogate's, which no run needs:
 the tests find it next to themselves), the fake's knobs and the
-surrogate's. The one `QTTUNE_` name is
-`QTTUNE_SURROGATE_SOURCE`, the app build's CMake cache setting above,
+surrogate's. The one `HAVNE_` name is
+`HAVNE_SURROGATE_SOURCE`, the app build's CMake cache setting above,
 which is read at configure time, never at runtime. A variable under
 any other name is ignored without a word: the routing case skips, the
 other surrogate cases run against the x64 tree's surrogate and pass,
@@ -427,7 +427,7 @@ and the run looks green. Read the skip count, or use
 
 **Fuzzing** isn't part of ctest. The three libFuzzer harnesses need a
 tree of their own (`-DECUIO_BUILD_FUZZERS=ON` with
-`QTTUNE_BUILD_CORE_ONLY=ON` and `BUILD_TESTING=OFF`; `build-fuzz-msvc`
+`HAVNE_BUILD_CORE_ONLY=ON` and `BUILD_TESTING=OFF`; `build-fuzz-msvc`
 on Windows), because nothing else can link the instrumented core.
 [fuzz/README.md](../fuzz/README.md) has the MSVC and Clang recipes and
 how to replay a crash.
@@ -451,28 +451,28 @@ README badge ([testing.md](testing.md#coverage)).
 | Symptom | Cause and fix |
 |---|---|
 | `QmlCacheGeneratedCode` unresolved externals after adding a QML file | Stale QML cache. Do a clean reconfigure (`rm -rf build`). |
-| A `QmlTest` case fails with "Received a warning that resulted in a failure" | A binding in the app's QML raised a warning: the message names the file and line under `qrc:/qt/qml/QtTune/`. Fix the binding; a common cause is a delegate reading its `index` (-1) while the model resets. |
-| `test_qml` exits at once and prints that a QML type isn't available, or `module "QtTune" is not installed` | The module's plugin isn't linked or imported. Whatever links `qttune_ui` also links `qttune_uiplugin` and has `Q_IMPORT_QML_PLUGIN(QtTunePlugin)` in one source file, as `app/main.cpp` and `tests/test_qml.cpp` do. |
+| A `QmlTest` case fails with "Received a warning that resulted in a failure" | A binding in the app's QML raised a warning: the message names the file and line under `qrc:/qt/qml/App/`. Fix the binding; a common cause is a delegate reading its `index` (-1) while the model resets. |
+| `test_qml` exits at once and prints that a QML type isn't available, or `module "App" is not installed` | The module's plugin isn't linked or imported. Whatever links `app_ui` also links `app_uiplugin` and has `Q_IMPORT_QML_PLUGIN(AppPlugin)` in one source file, as `app/main.cpp` and `tests/test_qml.cpp` do. |
 | Test discovery fails at build time with `0xc0000135` | A DLL is missing. Discovery runs the test binary during the build, so Qt-linked test targets must copy `$<TARGET_RUNTIME_DLLS>` POST_BUILD, ordered before `gtest_discover_tests`. |
 | Surrogate test fails with child exit code 5 | An export can't be found by name, usually because of x86 `__stdcall` decoration. Check the `.def` file. Other exit codes are listed in [j2534.md](j2534.md#surrogate). |
 | Surrogate opens fail, in tests or the app, and the session log says "built from other shared headers" | One tree was built from older copies of `j2534_ptypes.h` or `surrogate_protocol.h`, usually a stale `build-win32`. Rebuild both trees, Win32 first. |
 | Cross-arch test fails with odd values, but same-arch passes | A stale `build-win32` fake: the fakes carry no build fingerprint. Rebuild both trees. |
-| In the app, an x86 adapter (for example the OBDX Pro VX) fails with "surrogate process failed: no surrogate (ecuio-j2534-surrogate.exe)", and `%TEMP%\ecuio-surrogate.log` holds an `open: no surrogate exe` line | No surrogate next to `qttune.exe`, so the child never launched. The x64 tree was configured before `build-win32` had a surrogate. Build the Win32 tree, re-run `cmake -B build`, check for `Deploying Win32 J2534 surrogate` in the output, and rebuild. Setting `ECUIO_SURROGATE_EXE` also works. |
-| The cross-arch routing case skips although the variables were exported | They're named something else, for example `QTTUNE_SURROGATE_EXE`: nothing reads that. The names are `ECUIO_SURROGATE_EXE` and `ECUIO_FAKE_DLL` (Cross-arch run, above). The rest of the run passes on the x64 surrogate, so the skip is the only sign. |
+| In the app, an x86 adapter (for example the OBDX Pro VX) fails with "surrogate process failed: no surrogate (ecuio-j2534-surrogate.exe)", and `%TEMP%\ecuio-surrogate.log` holds an `open: no surrogate exe` line | No surrogate next to `havne.exe`, so the child never launched. The x64 tree was configured before `build-win32` had a surrogate. Build the Win32 tree, re-run `cmake -B build`, check for `Deploying Win32 J2534 surrogate` in the output, and rebuild. Setting `ECUIO_SURROGATE_EXE` also works. |
+| The cross-arch routing case skips although the variables were exported | They're named something else, for example `HAVNE_SURROGATE_EXE`: nothing reads that. The names are `ECUIO_SURROGATE_EXE` and `ECUIO_FAKE_DLL` (Cross-arch run, above). The rest of the run passes on the x64 surrogate, so the skip is the only sign. |
 | Cross-arch test fails expecting an x86 DLL, or the session log names `ecuio-j2534-surrogate-x64.exe` | `ECUIO_FAKE_DLL` points at an x64 fake (or the wrong tree). Check the value, not the code — unset skips, wrong-value fails. |
-| In the app or a test, an x64 DLL fails with "no surrogate (ecuio-j2534-surrogate-x64.exe): none next to the app" | The x64 surrogate wasn't copied: the app and each J2534 test copy it from their own tree POST_BUILD (`qttune_deploy_surrogate` in `tests/CMakeLists.txt`). Build the target again. |
+| In the app or a test, an x64 DLL fails with "no surrogate (ecuio-j2534-surrogate-x64.exe): none next to the app" | The x64 surrogate wasn't copied: the app and each J2534 test copy it from their own tree POST_BUILD (`app_deploy_surrogate` in `tests/CMakeLists.txt`). Build the target again. |
 | J2534 test fails as `Failed (Timeout)` | A genuine hang, bounded by the 30 s ceiling. Attach to the surviving test and surrogate processes and check thread wait states before killing; the child log is `%TEMP%\ecuio-surrogate.log`, and earlier spawns' logs are kept beside it under dated names. |
 | Linker warning LNK4070 on a fake DLL | The `.def` file's `LIBRARY` directive disagrees with the output filename. Make them match. |
 | A mobile build fails during test discovery, or tries to run a test binary | `BUILD_TESTING` is on. Cross builds must pass `-DBUILD_TESTING=OFF` (see Mobile above). |
 | Re-running a skipped `ios-simulator-smoke` skips it again | A re-run replays the original event and commit, so the job's condition comes out the same. Start a manual run instead (Actions → CI → Run workflow, or `gh workflow run ci.yml --ref <branch>`); tick `smoke_only` to skip the other platform jobs. A commit whose message contains `[ios-smoke]` also works. |
 | `ios-simulator-smoke` passes, but the app screenshots are blank | Seen once, on the first run (2026-10-20). That run launched the app straight after a cold boot, and the frame was blank at 15 s. With the boot overlapping the build, the next run drew by 15 s. If it recurs: a blank `home.png` means the runner's simulator display is at fault. No `QSG_INFO` lines in stderr means the window was never exposed. `QSG_INFO` present with blank shots means frames aren't reaching the screen, so try another `QSG_RHI_BACKEND`. A blank 15 s shot with a drawn 45 s shot means a slow first frame. |
-| `ios-simulator-smoke` fails with "qttune exited within 45 s", and the printed stderr says `Failed to initialize graphics backend` | Qt Quick couldn't get a Metal device from the runner VM. Check the boot step's `system_profiler` output. Before suspecting the app, try `SIMCTL_CHILD_QSG_RHI_BACKEND=opengl` on the launch line. |
+| `ios-simulator-smoke` fails with "havne exited within 45 s", and the printed stderr says `Failed to initialize graphics backend` | Qt Quick couldn't get a Metal device from the runner VM. Check the boot step's `system_profiler` output. Before suspecting the app, try `SIMCTL_CHILD_QSG_RHI_BACKEND=opengl` on the launch line. |
 | `ios-simulator-smoke` fails with "No available iPhone simulator on iOS 18 or later" | The runner image dropped its iOS 18+ runtimes, or the job moved to a runner without them. The step prints the available devices. |
 
 **Preferences:** the app keeps the zoom, the units, the last URI that
 connected and the Record sessions switch with QML `Settings`; on
-Windows that's `HKCU\Software\QtTune\QtTune`, which every QtTune on
-the machine shares. `QTTUNE_SETTINGS_DIR=<folder>` keeps one
+Windows that's `HKCU\Software\Havne\Havne`, which every Havne on
+the machine shares. `HAVNE_SETTINGS_DIR=<folder>` keeps one
 instance's preferences in an ini file under that folder instead, so a
 scripted run neither reads nor changes the user's; `test_qml` keeps
 its own in a scratch folder the same way.
@@ -485,7 +485,7 @@ delegate. Check for new warnings in the files you touched.
 
 **Compiler warnings:** every first-party target builds with `/W4`
 (MSVC) or `-Wall -Wextra` (GCC, Clang) through
-`qttune_enable_warnings()` in the root `CMakeLists.txt`; `test_c_abi`
+`app_enable_warnings()` in the root `CMakeLists.txt`; `test_c_abi`
 adds `-pedantic` with compiler extensions off. Warnings don't fail the
 build. `scripts/verify.sh` prints the count per build step; keep it at
 0 on MSVC.
@@ -505,7 +505,7 @@ database), then run `scripts/tidy.sh`:
 
 ```sh
 python -m pip install --require-hashes -r .github/clang-tidy-requirements.txt
-cmake -B build-tidy -G Ninja -DQTTUNE_BUILD_CORE_ONLY=ON -DBUILD_TESTING=OFF -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+cmake -B build-tidy -G Ninja -DHAVNE_BUILD_CORE_ONLY=ON -DBUILD_TESTING=OFF -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
 scripts/tidy.sh                  # one line; each file's output in Testing/tidy/
 ```
 
@@ -620,7 +620,7 @@ app-local Visual C++ runtime.
 
 **To release:**
 
-1. In one commit, set `project(QtTune VERSION X.Y.Z)` in the root
+1. In one commit, set `project(Havne VERSION X.Y.Z)` in the root
    `CMakeLists.txt`, move CHANGELOG.md's "Unreleased" entries under
    `## [X.Y.Z] - <date>` (and add its compare link at the foot), and
    add `docs/releases/vX.Y.Z.md`, the release notes, starting from
@@ -635,7 +635,7 @@ app-local Visual C++ runtime.
    workflow publishes a pre-release. Download its zip, run it on a PC
    without Visual Studio if one is available, and check the
    provenance with
-   `gh attestation verify <zip> -R erickramer42/qttune`. Then delete
+   `gh attestation verify <zip> -R erickramer42/havne`. Then delete
    the pre-release and its tag.
 3. Tag `vX.Y.Z` and push it.
 
@@ -654,7 +654,7 @@ app-local Visual C++ runtime.
 - **Build.** Qt 6.12.0 is installed as `win-build` does it, then
   `build-win32` (the surrogate only) and `build` (the app only), both
   with `BUILD_TESTING=OFF`, in the usual order so the app's build
-  copies the x86 surrogate beside `qttune.exe`, with its own x64 one.
+  copies the x86 surrogate beside `havne.exe`, with its own x64 one.
   CI has already run the suite on the commit; the cross-arch suite is
   `scripts/verify.sh`'s.
 - **Stage, check and zip:** `packaging/windows/stage.ps1`, which also
@@ -667,16 +667,16 @@ app-local Visual C++ runtime.
   third-party notices and license texts. It then fails the release if
   either surrogate imports a CRT DLL (each links the CRT statically, `/MT`,
   because an x86 `vcruntime140.dll` can't sit beside the app's x64
-  one), if `qttune.exe` imports a DLL that is neither in the folder nor
-  part of Windows, if `qttune.exe` or either surrogate carries a version
-  resource other than "QtTune X.Y.Z" (`packaging/windows/version.rc.in`,
+  one), if `havne.exe` imports a DLL that is neither in the folder nor
+  part of Windows, if `havne.exe` or either surrogate carries a version
+  resource other than "Havne X.Y.Z" (`packaging/windows/version.rc.in`,
   filled from the CMake project version; a stale tree fails it), if it
   carries QML debugging (an import of
   `QQmlDebuggingEnabler`, or `qmltooling` plugins in the folder: a
   build with `QT_QML_DEBUG` opens an unauthenticated debug server when
   launched with `-qmljsdebugger`, so `app/CMakeLists.txt` defines it
   and windeployqt deploys the plugins in Debug only), or if the staged
-  `qttune.exe` isn't still running
+  `havne.exe` isn't still running
   10 s after it starts (QML that fails to load exits at once; the
   check was confirmed against a package with `qml/QtQuick/Controls`
   removed, 2026-10-25). It writes the zip and `SHA256SUMS.txt` to

@@ -6,8 +6,8 @@
 // What the product's earlier name left on the user's machine comes along
 // after a rename (ADR-0001's appendix of 2026-10-28): its preferences are
 // copied into the current name's store once, and its recordings folder is
-// read beside the current one (QtTuneBridge::recentRecordings). While the
-// two names are the same, both do nothing.
+// read beside the current one (SessionBridge::recentRecordings). Where
+// the two names are the same, both do nothing.
 
 #pragma once
 

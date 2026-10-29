@@ -1,6 +1,6 @@
 // File/layer: app/bridgesingleton.h | Qt6 Qml, app layer, C++17
-// Testing: manual smoke (run-qttune skill): every page binds Bridge.*;
-//          all_qmllint resolves Bridge's properties through this
+// Testing: manual smoke (the app driven through UI Automation): every
+//          page binds Bridge.*; all_qmllint resolves Bridge's properties through this
 //          registration
 
 #pragma once
@@ -9,9 +9,9 @@
 #include <QQmlEngine>
 #include <QtQml/qqmlregistration.h>
 
-#include "qttunebridge.h"
+#include "sessionbridge.h"
 
-// Exposes main()'s bridge to QML as the `Bridge` singleton of the QtTune
+// Exposes main()'s bridge to QML as the `Bridge` singleton of the App
 // module. A registered type, unlike a context property, is visible to
 // qmllint and the QML compiler, and its name doesn't shadow the module's.
 // The registrations live in these foreign wrappers because the bridge
@@ -19,15 +19,15 @@
 struct BridgeSingleton
 {
     Q_GADGET
-    QML_FOREIGN(QtTuneBridge)
+    QML_FOREIGN(SessionBridge)
     QML_SINGLETON
     QML_NAMED_ELEMENT(Bridge)
 
 public:
     // main()'s bridge. Set before the engine loads any QML.
-    inline static QtTuneBridge* instance = nullptr;
+    inline static SessionBridge* instance = nullptr;
 
-    static QtTuneBridge* create(QQmlEngine*, QJSEngine* engine)
+    static SessionBridge* create(QQmlEngine*, QJSEngine* engine)
     {
         Q_ASSERT(instance != nullptr);
         Q_ASSERT(engine->thread() == instance->thread());

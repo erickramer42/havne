@@ -2,7 +2,7 @@
 
 **This software may damage your vehicle's control modules.**
 
-QtTune is a cross-platform ECU diagnostic and tuning application in
+Havne is a cross-platform ECU diagnostic and tuning application in
 early development. It reads only today. If writing and flashing
 features are added, errors in this software, its configuration, or
 your use of it may result in:
@@ -24,7 +24,7 @@ That path has been tested against a simulated adapter, on the bench
 with a real adapter and no vehicle, and in two read-only sessions on
 one vehicle with one adapter. It has **not** been validated beyond
 that.
-QtTune has **no** capability to write, clear codes or flash any ECU.
+Havne has **no** capability to write, clear codes or flash any ECU.
 Do not connect it to a vehicle expecting reliable results.
 
 ## Intended purpose

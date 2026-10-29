@@ -42,9 +42,9 @@ endif()
 set_target_properties(ecuio-j2534-surrogate PROPERTIES
     OUTPUT_NAME "${_sur_name}"
 )
-qttune_enable_warnings(ecuio-j2534-surrogate)
-qttune_add_version_resource(ecuio-j2534-surrogate "${_sur_name}"
-    "QtTune helper for ${_sur_bits} J2534 drivers")
+app_enable_warnings(ecuio-j2534-surrogate)
+app_add_version_resource(ecuio-j2534-surrogate "${_sur_name}"
+    "Havne helper for ${_sur_bits} J2534 drivers")
 
 # No ecuio-core link needed: the surrogate resolves the vendor DLL's
 # exports through GetProcAddress and speaks the POD protocol types from

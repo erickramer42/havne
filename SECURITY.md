@@ -2,7 +2,7 @@
 
 ## Supported versions
 
-QtTune is pre-release software. Security fixes go into the latest
+Havne is pre-release software. Security fixes go into the latest
 release only.
 
 | Version | Supported |
@@ -18,7 +18,7 @@ support window.
 Report a suspected vulnerability privately through **GitHub Security
 Advisories**, not in a public issue:
 
-1. Go to https://github.com/erickramer42/qttune/security/advisories/new.
+1. Go to https://github.com/erickramer42/havne/security/advisories/new.
 2. Describe the issue, with steps to reproduce it and the version or
    commit.
 
@@ -39,20 +39,20 @@ The threat model, the trust boundaries and the defenses at each are in
 
 | Category | Examples |
 |---|---|
-| Memory safety | A frame, a recording, a vendor reply or a URI that makes QtTune read or write out of bounds |
+| Memory safety | A frame, a recording, a vendor reply or a URI that makes Havne read or write out of bounds |
 | Host integrity | A way for another process or user to reach the surrogate's pipe, or for a DLL to load from somewhere it shouldn't |
 | Supply chain | An unpinned action or dependency, or a release whose provenance doesn't verify |
 | Privacy | Vehicle identity or local paths written anywhere the user didn't choose to record them |
 
 Out of scope:
 - **Vulnerabilities in vendor J2534 drivers or adapter firmware.**
-  Report those to their manufacturers. QtTune isolates each driver in
+  Report those to their manufacturers. Havne isolates each driver in
   a process of its own so that a faulty driver can't take the app
   down, but it doesn't vouch for the driver.
 - **Vehicle-side security** (security access, gateways, emissions
-  controls). QtTune sends read-only diagnostic requests and has no
+  controls). Havne sends read-only diagnostic requests and has no
   write path; reports about bypassing a manufacturer's protections
-  aren't handled as QtTune vulnerabilities. See
+  aren't handled as Havne vulnerabilities. See
   [DISCLAIMER.md](DISCLAIMER.md).
 
 ## Security practices

@@ -9,8 +9,7 @@
 
 import QtQuick
 import QtTest
-import QtTune
-
+import App
 TestCase {
     id: testCase
     name: "LiveView"
@@ -24,7 +23,7 @@ TestCase {
 
     // A binding error in the app's QML fails the test
     function init() {
-        failOnWarning(/^qrc:\/qt\/qml\/QtTune\//)
+        failOnWarning(/^qrc:\/qt\/qml\/App\//)
     }
 
     function cleanup() {

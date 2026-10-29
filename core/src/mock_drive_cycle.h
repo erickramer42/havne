@@ -58,7 +58,7 @@ namespace ecuio_mock {
  * load, and the warm-up rate follow the first vehicle session
  * (docs/bench-sessions/2026-10-22-vehicle.md), scaled to this engine's
  * 4.5 L. No car has been logged at WOT or on the limiter through
- * QtTune; those states follow the model's physics and the usual
+ * Havne; those states follow the model's physics and the usual
  * signatures (fuel cut leaves airflow up and lambda lean, a NA engine's
  * intake air stays near ambient at speed). So do the warm temperatures:
  * a thermostat that opens at 84 C, coolant climbing past 210 F on a hard

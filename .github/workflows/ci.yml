@@ -33,7 +33,7 @@ jobs:
 
       - name: Build core + tests (no Qt present)
         run: |
-          cmake -B build -DCMAKE_BUILD_TYPE=Release -DQTTUNE_BUILD_CORE_ONLY=ON
+          cmake -B build -DCMAKE_BUILD_TYPE=Release -DHAVNE_BUILD_CORE_ONLY=ON
           cmake --build build
 
       - name: Run tests
@@ -55,7 +55,7 @@ jobs:
       - name: Build core + tests with ASan and UBSan
         run: |
           SAN="-fsanitize=address,undefined -fno-sanitize-recover=undefined -fno-omit-frame-pointer"
-          cmake -B build -DCMAKE_BUILD_TYPE=Debug -DQTTUNE_BUILD_CORE_ONLY=ON \
+          cmake -B build -DCMAKE_BUILD_TYPE=Debug -DHAVNE_BUILD_CORE_ONLY=ON \
             -DCMAKE_C_FLAGS="$SAN" -DCMAKE_CXX_FLAGS="$SAN" \
             -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=address,undefined"
           cmake --build build
@@ -103,7 +103,7 @@ jobs:
         # second, and core has no asserts for NDEBUG to lose.
         run: |
           cmake -B build-fuzz -DCMAKE_BUILD_TYPE=RelWithDebInfo \
-            -DQTTUNE_BUILD_CORE_ONLY=ON -DBUILD_TESTING=OFF \
+            -DHAVNE_BUILD_CORE_ONLY=ON -DBUILD_TESTING=OFF \
             -DECUIO_BUILD_FUZZERS=ON \
             -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++
           cmake --build build-fuzz --target fuzz_decode_signal fuzz_validate_set fuzz_uds_query
@@ -160,7 +160,7 @@ jobs:
           Import-Module "$vs\Common7\Tools\Microsoft.VisualStudio.DevShell.dll"
           Enter-VsDevShell -VsInstallPath $vs -SkipAutomaticLocation `
             -DevCmdArguments '-arch=x64 -host_arch=x64'
-          cmake -B build-tidy -G Ninja -DQTTUNE_BUILD_CORE_ONLY=ON `
+          cmake -B build-tidy -G Ninja -DHAVNE_BUILD_CORE_ONLY=ON `
             -DBUILD_TESTING=OFF -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           clang-tidy --version
@@ -249,14 +249,14 @@ jobs:
         run: |
           $dll = '%GITHUB_WORKSPACE%\build-coverage\tests\RelWithDebInfo\fake_j2534.dll'
           foreach ($view in '64', '32') {
-            reg add "HKLM\SOFTWARE\PassThruSupport.04.04\QtTune fake" /v FUNCTIONLIBRARY /t REG_EXPAND_SZ /d $dll /reg:$view /f
+            reg add "HKLM\SOFTWARE\PassThruSupport.04.04\Havne fake" /v FUNCTIONLIBRARY /t REG_EXPAND_SZ /d $dll /reg:$view /f
             if ($LASTEXITCODE -ne 0) { exit 1 }
           }
           $root = 'HKLM:\SOFTWARE\PassThruSupport.04.04'
-          New-Item -Path "$root\QtTune empty", "$root\QtTune number", "$root\QtTune relative" -Force | Out-Null
-          New-ItemProperty -Path "$root\QtTune empty" -Name FUNCTIONLIBRARY -Value '' -PropertyType String -Force | Out-Null
-          New-ItemProperty -Path "$root\QtTune number" -Name FUNCTIONLIBRARY -Value 1 -PropertyType DWord -Force | Out-Null
-          New-ItemProperty -Path "$root\QtTune relative" -Name FUNCTIONLIBRARY -Value 'fake_j2534.dll' -PropertyType String -Force | Out-Null
+          New-Item -Path "$root\Havne empty", "$root\Havne number", "$root\Havne relative" -Force | Out-Null
+          New-ItemProperty -Path "$root\Havne empty" -Name FUNCTIONLIBRARY -Value '' -PropertyType String -Force | Out-Null
+          New-ItemProperty -Path "$root\Havne number" -Name FUNCTIONLIBRARY -Value 1 -PropertyType DWord -Force | Out-Null
+          New-ItemProperty -Path "$root\Havne relative" -Name FUNCTIONLIBRARY -Value 'fake_j2534.dll' -PropertyType String -Force | Out-Null
 
       - name: Measure coverage
         shell: bash
@@ -367,7 +367,7 @@ jobs:
             echo "::error::JAVA_HOME_21_X64 is not set on this runner image"
             exit 1
           fi
-          echo "QTTUNE_NDK_ROOT=$NDK" >> "$GITHUB_ENV"
+          echo "APP_NDK_ROOT=$NDK" >> "$GITHUB_ENV"
           echo "JAVA_HOME=$JAVA_HOME_21_X64" >> "$GITHUB_ENV"
           echo "NDK $(basename "$NDK")"
           "$JAVA_HOME_21_X64/bin/java" -version
@@ -378,7 +378,7 @@ jobs:
           "$QT_ROOT_DIR/bin/qt-cmake" -B build \
             -DBUILD_TESTING=OFF \
             -DANDROID_SDK_ROOT="$ANDROID_SDK_ROOT" \
-            -DANDROID_NDK_ROOT="$QTTUNE_NDK_ROOT"
+            -DANDROID_NDK_ROOT="$APP_NDK_ROOT"
           cmake --build build
           cmake --build build --target apk
 
@@ -410,6 +410,14 @@ jobs:
           grep -n -E 'qtMinSdkVersion|minSdkVersion' "$BUILD_DIR/gradle.properties" "$MANIFEST" 2>/dev/null || true
           grep -q -E '(qtMinSdkVersion *= *31|minSdkVersion="31")' "$BUILD_DIR/gradle.properties" "$MANIFEST" 2>/dev/null \
             || { echo "::error::the app's minimum SDK isn't 31 (Android 12)"; exit 1; }
+          # The package id (permanent: another is another app) and the
+          # version from project() (ADR-0001's appendix of 2026-10-28)
+          VERSION=$(sed -n '/^project(Havne/,/)/s/^ *VERSION \([0-9.]*\).*/\1/p' CMakeLists.txt)
+          grep -n -E 'package=|versionName|versionCode' "$MANIFEST"
+          grep -q 'package="io.github.erickramer42.havne"' "$MANIFEST" \
+            || { echo "::error::$MANIFEST's package isn't io.github.erickramer42.havne"; exit 1; }
+          grep -q "android:versionName=\"$VERSION\"" "$MANIFEST" \
+            || { echo "::error::$MANIFEST's version name isn't $VERSION"; exit 1; }
           # QT_ANDROID_APP_ICON's adaptive icon, not Qt's default
           grep -n 'android:icon' "$MANIFEST"
           grep -q 'android:icon="@mipmap/ic_launcher"' "$MANIFEST" \
@@ -431,7 +439,7 @@ jobs:
       - name: Upload APK
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: qttune-android-arm64-v8a
+          name: havne-android-arm64-v8a
           path: build/**/outputs/apk/**/*.apk
           if-no-files-found: error
           retention-days: 14
@@ -544,11 +552,11 @@ jobs:
       # main() returns -1 when QML fails to load, and a scene graph that
       # can't initialize aborts, so "still running" covers both. It does
       # not prove the app drew anything; the screenshots are for that.
-      - name: Launch and check qttune stays up
+      - name: Launch and check havne stays up
         run: |
-          APP=$(find build -type d -name qttune.app -path '*iphonesimulator*' | head -n 1)
+          APP=$(find build -type d -name havne.app -path '*iphonesimulator*' | head -n 1)
           if [ -z "$APP" ]; then
-            echo "::error::qttune.app not found under build/"
+            echo "::error::havne.app not found under build/"
             exit 1
           fi
           BUNDLE_ID=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$APP/Info.plist")
@@ -569,7 +577,7 @@ jobs:
           xcrun simctl io "$UDID" screenshot smoke/launch-15s.png || true
           sleep 30
           xcrun simctl io "$UDID" screenshot smoke/launch-45s.png || true
-          echo "--- qttune stderr ---"
+          echo "--- havne stderr ---"
           cat smoke/stderr.log 2>/dev/null || true
           echo "--- end stderr ---"
           if grep -q "QML FAILED TO LOAD" smoke/stderr.log 2>/dev/null; then
@@ -577,16 +585,16 @@ jobs:
             exit 1
           fi
           if ! kill -0 "$PID" 2>/dev/null; then
-            echo "::error::qttune exited within 45 s of launch"
+            echo "::error::havne exited within 45 s of launch"
             exit 1
           fi
-          echo "qttune still running after 45 s"
+          echo "havne still running after 45 s"
 
       - name: Collect crash reports
         if: failure()
         run: |
           mkdir -p smoke
-          cp ~/Library/Logs/DiagnosticReports/qttune* smoke/ 2>/dev/null || true
+          cp ~/Library/Logs/DiagnosticReports/havne* smoke/ 2>/dev/null || true
 
       - name: Upload smoke artifacts
         if: always()

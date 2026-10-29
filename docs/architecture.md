@@ -1,9 +1,9 @@
 # Architecture
 
-A short map of how QtTune fits together and why. Each section points to
+A short map of how Havne fits together and why. Each section points to
 the document that holds the detail.
 
-QtTune is an ECU reader and logger. A Qt-free C++17 **core** sits
+Havne is an ECU reader and logger. A Qt-free C++17 **core** sits
 behind a C ABI. It owns sessions, transports and signal decoding. A
 Qt 6 / QML **front end** turns the core's output into pages. Between
 them, a single **bridge** object moves data from the core's worker
@@ -13,7 +13,7 @@ threads onto the GUI thread.
  QML pages: Home · Dashboard · Live · Log · Settings
    │  Theme (colors, link-state labels) · SignalHub (signals by name)
    ▼  properties and list models, GUI thread only
- QtTuneBridge (app/)          the only caller of the core
+ SessionBridge (app/)          the only caller of the core
    │  worker → GUI marshaling, 100 ms coalescing, link-health polling
    ▼  C ABI: core.h · signals.h · profile.h · j2534.h · serial.h · stream.h
  ecuio-core (core/)           no Qt, ever
@@ -56,7 +56,7 @@ threads onto the GUI thread.
 |---|---|---|
 | 1. The transport produces a frame (the mock's 50 ms tick, a recording's row when its time comes, or a J2534 read) | `mock_transport.cpp`, `replay_transport.cpp`, `j2534_transport.cpp` | transport worker |
 | 2. The session hands it to every registered callback, from a snapshot of the callback list; then it decodes the frame against the profile's set and hands one batch of values, stamped with the frame's time, to each values callback ([ADR-0024](adr/0024-decode-on-the-worker.md)) | `ecuio_session_dispatch_callbacks` | transport worker |
-| 3. The bridge copies the frame (4120 bytes; its payload is inline) and posts it, unless 1000 frames are already in flight; the batch's values go straight into the bridge's staging, under a lock, so a frame dropped at the cap keeps its values | `QtTuneBridge::onFrame`, `onValues` | transport worker |
+| 3. The bridge copies the frame (4120 bytes; its payload is inline) and posts it, unless 1000 frames are already in flight; the batch's values go straight into the bridge's staging, under a lock, so a frame dropped at the cap keeps its values | `SessionBridge::onFrame`, `onValues` | transport worker |
 | 4. The frame log gets a row (a ring of the newest 10k plain rows, the hex formatted only when shown) | `handleFrameInternal` | GUI |
 | 5. Every 100 ms the staging is swapped out: every sample goes to the recording, and each signal's window (newest, lowest and highest, at their frames' times) into the signal model; link health is polled | coalesce timer | GUI |
 | 6. Pages bind to the models: Log to frames, Live and Dashboard to signals | QML | GUI |
@@ -319,18 +319,18 @@ The bridge polls it on its 100 ms tick and maps it for the UI
 
 ## The UI layer
 
-- **Bridge threading:** two of `QtTuneBridge`'s functions run on the
+- **Bridge threading:** two of `SessionBridge`'s functions run on the
   worker thread. The frame callback touches only atomics and posts a
   copy of the frame; the values callback stages each value under one
   short lock, which the 100 ms tick swaps out. Everything else runs on
   the GUI thread. It links only QtCore, so `test_bridge` can exercise
   it headless.
-- **The QML module is a library:** the `QtTune` module (the pages,
+- **The QML module is a library:** the `App` module (the pages,
   `Theme`, the bridge and its `Bridge` registration) builds as the
-  static library `qttune_ui`. The app and `test_qml` both link it and
+  static library `app_ui`. The app and `test_qml` both link it and
   its plugin, so the QML tests load the module the app runs.
 - **Bridge in QML:** pages reach it as the `Bridge` singleton of the
-  `QtTune` module (`Bridge.connected`, `Bridge.signalModel`). The
+  `App` module (`Bridge.connected`, `Bridge.signalModel`). The
   registration lives in `app/bridgesingleton.h`, so the bridge itself
   stays QtCore-only, and qmllint checks every binding against it.
 - **Bridge outputs:** it exposes a frame model (a ring of the newest

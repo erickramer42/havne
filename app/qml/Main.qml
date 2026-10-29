@@ -34,7 +34,7 @@ ApplicationWindow {
     height: Theme.mobile ? Screen.desktopAvailableHeight
                          : Math.min(800, Screen.desktopAvailableHeight - 48)
     visible: true
-    title: qsTr("QtTune")
+    title: qsTr("Havne")
     color: Theme.bg
 
     // Every role the Basic style reads, so stock controls (CheckBox,
@@ -187,7 +187,7 @@ ApplicationWindow {
                     spacing: 12
 
                     Label {
-                        text: qsTr("QtTune")
+                        text: qsTr("Havne")
                         font.pixelSize: 16
                         font.weight: Font.DemiBold
                         color: Theme.text

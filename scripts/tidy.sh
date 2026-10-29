@@ -10,7 +10,7 @@
 # the Visual Studio generator doesn't write. On Windows, configure it from
 # a Developer prompt (vcvars64), so the compile database names cl.exe:
 #
-#   cmake -B build-tidy -G Ninja -DQTTUNE_BUILD_CORE_ONLY=ON \
+#   cmake -B build-tidy -G Ninja -DHAVNE_BUILD_CORE_ONLY=ON \
 #         -DBUILD_TESTING=OFF -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
 #
 # Nothing needs building first. clang-tidy is the pinned version in

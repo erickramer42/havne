@@ -220,7 +220,7 @@ bool read_header(FILE* f, std::vector<char>& buf)
         line += 3; /* a byte-order mark, should an editor add one */
     }
     if (std::strcmp(line, kHeader) != 0) {
-        ecuio_detail_set("not a QtTune frames.csv, or a newer format: the "
+        ecuio_detail_set("not a Havne frames.csv, or a newer format: the "
                          "header row isn't %s",
                          kHeader);
         return false;

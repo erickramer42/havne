@@ -1,12 +1,12 @@
 # Security assurance case
 
-Why QtTune's design and checks are enough for what it does, and where
+Why Havne's design and checks are enough for what it does, and where
 they stop. How to report a vulnerability is in
 [SECURITY.md](../SECURITY.md).
 
 ## Threat model
 
-QtTune is a desktop program that loads third-party J2534 drivers,
+Havne is a desktop program that loads third-party J2534 drivers,
 reads a vehicle's diagnostic replies, and replays recordings from
 disk. It opens no network port.
 
@@ -22,7 +22,7 @@ disk. It opens no network port.
     pipe;
   - a compromised build dependency or CI action.
 - **Out of scope:** writing to an ECU (there is no write path), network
-  attackers (QtTune is local only), and an attacker who already runs
+  attackers (Havne is local only), and an attacker who already runs
   code as the user or as an administrator (they can replace the driver
   or the app outright).
 

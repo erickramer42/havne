@@ -1307,7 +1307,7 @@ ecuio_status_t elm327_attach(ecuio_session_t* session, const char* uri,
     if (elm327_log_is_open(t->log)) {
         char text[512];
         elm327_log_text(uri, strlen(uri), text, sizeof(text));
-        elm327_log_write(t->log, "QtTune ELM327 wire log (ADR-0026), core %s",
+        elm327_log_write(t->log, "Havne ELM327 wire log (ADR-0026), core %s",
                          ecuio_version_string());
         elm327_log_write(t->log, "uri %s", text);
         char link[48];

@@ -1,23 +1,23 @@
-# Contributing to QtTune
+# Contributing to Havne
 
-Thanks for your interest in improving QtTune. This document explains how to
+Thanks for your interest in improving Havne. This document explains how to
 report problems, propose changes, and get a contribution accepted.
 
-QtTune is a one-maintainer project built deliberately: an append-only C ABI, a
+Havne is a one-maintainer project built deliberately: an append-only C ABI, a
 Qt-free core, ADRs for every architectural decision, and a tiered test suite.
 Contributions that respect those constraints land quickly. Contributions that
 fight them won't land at all.
 
 ## Reporting a bug
 
-Open a [GitHub Issue](https://github.com/erickramer42/qttune/issues) with:
+Open a [GitHub Issue](https://github.com/erickramer42/havne/issues) with:
 
-1. The QtTune version (or commit) and your OS.
+1. The Havne version (or commit) and your OS.
 2. What you expected, and what happened instead.
 3. How you connected: the adapter and vehicle, if a session is involved.
 
 **Never paste raw session recordings, surrogate logs, or screenshots that
-contain them.** QtTune logs can carry VINs, adapter serial numbers and
+contain them.** Havne logs can carry VINs, adapter serial numbers and
 account-bearing file paths. Scrub them (see *Handling vehicle data* below) or
 describe the contents instead.
 
@@ -25,7 +25,7 @@ Feature requests are welcome too — but see *Scope* first.
 
 ## Governance
 
-QtTune uses a single-maintainer model (benevolent dictator). Eric Kramer is
+Havne uses a single-maintainer model (benevolent dictator). Eric Kramer is
 the project owner and lead developer; he makes all final decisions on scope,
 architecture and merges. Proposed changes are discussed in GitHub issues,
 reviewed through pull requests, and decided by the maintainer. Architectural
@@ -33,7 +33,7 @@ decisions are recorded as ADRs in docs/adr/.
 
 ## Roles and Responsibilities
 
-QtTune currently has one maintainer. The roles below describe the functions
+Havne currently has one maintainer. The roles below describe the functions
 that exist in the project and who performs them.
 
 | Role | Holder | Responsibilities |
@@ -49,7 +49,7 @@ maintainer before merging.
 
 ## Scope
 
-QtTune is **read-only today**: its request engine sends OBD-II Services 01
+Havne is **read-only today**: its request engine sends OBD-II Services 01
 and 09 and UDS Service 0x22 (ReadDataByIdentifier), and refuses any other
 service ([ADR-0015](docs/adr/0015-request-engine.md)). There is no code
 clearing DTCs, no writes, no flashing (see [DISCLAIMER.md](DISCLAIMER.md)). Tuning-application features are on the
@@ -228,7 +228,7 @@ PRs from forks get a human review — there is one maintainer, so allow time.
 
 ## Handling vehicle data
 
-QtTune's domain produces data that never belongs in a public repository:
+Havne's domain produces data that never belongs in a public repository:
 VINs, calibration IDs, adapter serial numbers, absolute local paths, user and
 machine names. Before committing anything captured from a session — logs,
 recordings, bench notes — scrub it or use placeholders (`<VIN>`,

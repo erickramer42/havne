@@ -1,6 +1,6 @@
 # VEHICLE run sheet — read-only vehicle session
 
-**QtTune build:** <commit hash>  **Trees:** build, build-win32 both fresh
+**Havne build:** <commit hash>  **Trees:** build, build-win32 both fresh
 **Date:** <date>
 **Adapter:** OBDX Pro VX (USB)  **Vehicle:** a pseudonym ("the test car"; never its make, model or year); CAN-era OBD-II, expected 11-bit IDs at 500 kbit/s
 
@@ -34,7 +34,7 @@ to the end undocumented.
 
 ## Safety and scope
 
-- **Read-only.** QtTune sends only read requests: Service 01 ("show
+- **Read-only.** Havne sends only read requests: Service 01 ("show
   current data"), Service 09 (vehicle information: VIN, calibration
   IDs) and Service 0x22 (ReadDataByIdentifier), the same read-only
   services a generic scanner uses. It has no code path that writes,
@@ -75,7 +75,7 @@ Run every item on the laptop that goes to the car.
 - [ ] Fresh build of both trees, **Win32 first**
       ([development.md, "Build configurations"](../development.md#build-configurations)),
       and the app build prints "Deploying Win32 J2534 surrogate next to
-      qttune.exe"
+      havne.exe"
 - [ ] `scripts/verify.sh` prints four `ok` lines, the cross-arch one
       reading `0 skipped`. On Windows it demands that discovery finds a
       device, which the VX's driver provides
@@ -115,7 +115,7 @@ Run every item on the laptop that goes to the car.
       link-health UI" table
 - [ ] Launch the app and tick **Record sessions** in Settings (it
       can't change during a session). Each connect writes a folder
-      under `Documents\QtTune\recordings` (`frames.csv`, `signals.csv`,
+      under `Documents\Havne\recordings` (`frames.csv`, `signals.csv`,
       `events.log`), and the activity log names it. Recording also turns
       on the surrogate's payload logging: the session log at
       `%TEMP%\ecuio-surrogate.log` reads "frame logging on" and has an
@@ -134,9 +134,9 @@ Run every item on the laptop that goes to the car.
       its `did=`; `poll=` is typed, and a URI typed or pasted whole
       works the same
 - [ ] A reference for the values: the cluster's gauges, and a second
-      scan tool if you have one. Use it between connects, with QtTune
+      scan tool if you have one. Use it between connects, with Havne
       disconnected, **never on the bus at the same time**: its replies
-      also arrive on 0x7E8, so QtTune would record them as its own, and
+      also arrive on 0x7E8, so Havne would record them as its own, and
       both adapters may answer a multi-frame reply with flow control
 - [ ] Camera or notebook ready
 
@@ -330,14 +330,14 @@ ignition-on.
 
 | Symptom | Suspect |
 |---|---|
-| Connect fails at once, before any write | The Settings error line names the cause: "surrogate process failed" (no surrogate next to `qttune.exe`, or a stale `build-win32`: rebuild both trees), "couldn't load what the URI names" (the DLL not loading), or "the adapter's driver refused: PassThruOpen returned status 34" (the adapter isn't attached; the VT and VX both answer 34). Check the URI names the VX |
+| Connect fails at once, before any write | The Settings error line names the cause: "surrogate process failed" (no surrogate next to `havne.exe`, or a stale `build-win32`: rebuild both trees), "couldn't load what the URI names" (the DLL not loading), or "the adapter's driver refused: PassThruOpen returned status 34" (the adapter isn't attached; the VT and VX both answer 34). Check the URI names the VX |
 | Writes fail with the ignition on (`OP_WRITE: status` nonzero) | BENCH prep #2, request framing (6-byte logical message with `ISO15765_FRAME_PAD`); then baud (500 k assumed) or a 29-bit vehicle (prep #4). The bare URI is 11-bit only. 29-bit IDs given with `?filter=`/`?txid=` connect with `CAN_29BIT_ID` automatically, but no 29-bit OBD IDs are prepared: record and stop rather than improvise |
 | Writes succeed but no frames arrive | The ECU doesn't answer physical 0x7E0: retry Phase 3's one PID with `?poll=0x0C&txid=0x7DF` (functional request, replies still on 0x7E8); then the flow-control filter (prep #1) |
 | `0x7E8` frames on the Log page, but Live shows "—" everywhere | Payload shape: stamping already proves the channel matched, so suspect a PCI byte left in-band shifting `[41][PID]`. The `OP_READ frame` lines show the bytes as the vendor returned them |
 | Values implausible (−40 °C, huge RPM) | Scaling or byte order: temperatures are unsigned 8-bit with a −40 offset; 2-byte PIDs are big-endian |
 | Link flips between ok and quiet while frames arrive | Unmatched frames interleaving with replies; note the frame IDs |
 | Values refresh much slower than once a rotation | Replies arriving after the next request: compare each `OP_READ frame` stamp with the request before it. Measure; don't fix in the session |
-| The scan finds nothing: every DID `7F 22 31` | The ECU keeps its identification DIDs for another diagnostic session, or uses another range. Compare with the identity line's `22 F1 xx` items: if those answered, the scan should find them too. With nothing found there's nothing left to ask, so the link turns quiet a second after the last refusal, by design. QtTune never changes the session |
+| The scan finds nothing: every DID `7F 22 31` | The ECU keeps its identification DIDs for another diagnostic session, or uses another range. Compare with the identity line's `22 F1 xx` items: if those answered, the scan should find them too. With nothing found there's nothing left to ask, so the link turns quiet a second after the last refusal, by design. Havne never changes the session |
 | Every Service 0x22 reply is `7F 22 11` | The ECU doesn't serve Service 0x22 here: every identification DID and scanned DID is asked once and refused (`scan: 128 DIDs, 0 found, 128 refused`), then quiet, as in the row above. Identification by Service 09 still works |
 | The identity line never arrives | An item left unanswered holds the line until the link recovers and the re-ask settles. Find the `22 F1 xx` or `09 xx` request with no reply in the session log; the ECU line doesn't wait for it |
 | "Disconnecting…" lasts seconds | A wedged adapter. The teardown runs off the GUI thread and gives up after about 6 s. Note how long (the `Disconnecting:` and `Disconnected:` lines bracket it) and whether the session log says `child unresponsive`. A frozen window is a bug: capture the session log |

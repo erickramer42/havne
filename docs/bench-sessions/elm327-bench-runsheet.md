@@ -2,7 +2,7 @@
 
 **Date:** <date>  **Adapter:** OBDX Pro VX (USB), as an ELM327
 **Machine:** <the dev machine, or the laptop that goes to the car>
-**QtTune build:** <commit hash>
+**Havne build:** <commit hash>
 
 Fill in a copy as `docs/bench-sessions/<date>-elm327-bench.md`. The
 J2534 bench sheet is [bench-runsheet.md](bench-runsheet.md); the
@@ -35,9 +35,9 @@ activity log (`events.log` when recording) has the link's states.
       program at a time can hold the port
 - [ ] For WiFi (`elm327://192.168.4.1:23`): nothing on the VX's USB
       port, and the VX power-cycled since the last USB session or
-      unclean WiFi leave; disconnect in QtTune before leaving its
+      unclean WiFi leave; disconnect in Havne before leaving its
       network (BENCH prep #20)
-- [ ] Launch QtTune and tick **Record sessions**, so the wire logs
+- [ ] Launch Havne and tick **Record sessions**, so the wire logs
       hold the requests too
 
 ## Phase 1 — the port
@@ -79,7 +79,7 @@ Connect, and leave it about a minute.
       log within a few seconds: the VX answers `NO DATA` with no bus, as
       with an ECU that doesn't answer (ADR-0026's appendix of
       2026-10-27, "the VX's answers"), and the requests go on
-- [ ] Task Manager: `qttune.exe` under 1 % CPU
+- [ ] Task Manager: `havne.exe` under 1 % CPU
 - [ ] Disconnect: `Disconnected:` at once
 
 A refused connect names the command and the answer ("the adapter on

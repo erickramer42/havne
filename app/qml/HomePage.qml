@@ -203,7 +203,7 @@ Rectangle {
 
             // Branding text
             Text {
-                text: qsTr("QtTune")
+                text: qsTr("Havne")
                 font.pixelSize: 32
                 font.bold: true
                 color: Theme.text

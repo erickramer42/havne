@@ -8,7 +8,7 @@
 #
 #   win32       build-win32's surrogate and fake DLLs (Windows, when
 #               build-win32 exists). First, because the app build copies
-#               the Win32 surrogate next to qttune.exe.
+#               the Win32 surrogate next to havne.exe.
 #   build       the build tree
 #   ctest       the suite, or the -R subset (an -R matching nothing fails).
 #               On Windows, ECUIO_EXPECT_J2534_DEVICES=1 makes the

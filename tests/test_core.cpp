@@ -2623,7 +2623,7 @@ TEST(CoreTest, ReplayRefusesABadRecordingWithItsLineNumber)
     const std::vector<Case> cases = {
         {"", "the recording's frames.csv is empty"},
         {"host_us,signal,value,unit\n1,RPM,800,RPM\n",
-         "not a QtTune frames.csv, or a newer format"},
+         "not a Havne frames.csv, or a newer format"},
         {kFramesHeader, "the recording's frames.csv holds no frames"},
         {std::string(kFramesHeader) + ok_row + "2,2,7E8,0x0,41\n",
          "frames.csv line 3: id isn't 0x-prefixed hex"},

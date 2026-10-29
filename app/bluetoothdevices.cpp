@@ -6,7 +6,7 @@
 //          (ADR-0028 §4)
 
 #include "bluetoothdevices.h"
-#include "qttunebridge.h"
+#include "sessionbridge.h"
 
 #include <QJSEngine>
 #include <QQmlEngine>
@@ -14,7 +14,7 @@
 
 #include <algorithm>
 
-#ifdef QTTUNE_BLUETOOTH
+#ifdef APP_BLUETOOTH
 #include "btstream.h"
 
 #include <QBluetoothDeviceDiscoveryAgent>
@@ -32,7 +32,7 @@
 
 namespace {
 
-#ifdef QTTUNE_BLUETOOTH
+#ifdef APP_BLUETOOTH
 // How long a scan looks for BLE adapters
 constexpr int kScanMs = 8000;
 #endif
@@ -122,7 +122,7 @@ BluetoothDevices* BluetoothDevices::create(QQmlEngine*, QJSEngine* engine)
     return new BluetoothDevices; // the engine's
 }
 
-void BluetoothDevices::attachTo(QtTuneBridge* bridge)
+void BluetoothDevices::attachTo(SessionBridge* bridge)
 {
     bridge->setStreamPreparer(
         [this](const QString& uri) { return prepare(uri); });
@@ -130,7 +130,7 @@ void BluetoothDevices::attachTo(QtTuneBridge* bridge)
 
 bool BluetoothDevices::available() const
 {
-#ifdef QTTUNE_BLUETOOTH
+#ifdef APP_BLUETOOTH
     return true;
 #else
     return false;
@@ -190,7 +190,7 @@ void BluetoothDevices::setScanning(bool scanning)
     }
 }
 
-#ifndef QTTUNE_BLUETOOTH
+#ifndef APP_BLUETOOTH
 
 void BluetoothDevices::refresh(bool) {}
 void BluetoothDevices::scan() {}
@@ -219,7 +219,7 @@ bool BluetoothDevices::permitted(bool ask, bool forScan)
     case Qt::PermissionStatus::Granted:
         return true;
     case Qt::PermissionStatus::Denied:
-        setStatus(tr("Allow Nearby devices for QtTune in Android's settings to "
+        setStatus(tr("Allow Nearby devices for Havne in Android's settings to "
                      "reach Bluetooth adapters"),
                   true);
         return false;
@@ -239,7 +239,7 @@ bool BluetoothDevices::permitted(bool ask, bool forScan)
                 }
             } else {
                 setStatus(
-                    tr("Allow Nearby devices for QtTune in Android's settings "
+                    tr("Allow Nearby devices for Havne in Android's settings "
                        "to reach Bluetooth adapters"),
                     true);
             }
@@ -339,7 +339,7 @@ QString BluetoothDevices::prepare(const QString& uri)
         return {};
     }
     if (!permitted(true, false)) {
-        return tr("QtTune needs the Nearby devices permission to reach "
+        return tr("Havne needs the Nearby devices permission to reach "
                   "Bluetooth adapters: allow it, then connect again");
     }
     const bool ble = name.startsWith(QLatin1String("ble:"));

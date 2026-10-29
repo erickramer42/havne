@@ -25,7 +25,7 @@ target_include_directories(ecuio-core
         ${CMAKE_BINARY_DIR}/generated   # generated version.h
 )
 
-qttune_enable_warnings(ecuio-core)
+app_enable_warnings(ecuio-core)
 
 # bcrypt: BCryptGenRandom names the surrogate's pipe; ws2_32: a WiFi
 # adapter's socket (elm327_tcp.cpp). A static library's private link

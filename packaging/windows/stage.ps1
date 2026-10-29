@@ -3,8 +3,8 @@
 #          by hand against a local build (docs/development.md, "Releases").
 #
 # Stages the Windows release from a built tree, checks it, and zips it:
-#   dist/qttune-<version>-windows-x64/       the folder a user unzips
-#   dist/qttune-<version>-windows-x64.zip
+#   dist/havne-<version>-windows-x64/       the folder a user unzips
+#   dist/havne-<version>-windows-x64.zip
 #   dist/SHA256SUMS.txt
 #
 # The checks are what a user without Visual Studio or Qt would hit first:
@@ -12,12 +12,12 @@
 #     vendor DLL runs in the one of its architecture (ADR-0025), and
 #     neither imports a C runtime DLL (each links it statically; an x86
 #     vcruntime140.dll can't sit beside the app's x64 one);
-#   - every DLL qttune.exe imports is in the folder or is part of Windows;
-#   - qttune.exe and both surrogates carry this release's version in
+#   - every DLL havne.exe imports is in the folder or is part of Windows;
+#   - havne.exe and both surrogates carry this release's version in
 #     their version resource (Explorer's Details; code signing reads it);
-#   - no QML debugging: qttune.exe doesn't import QQmlDebuggingEnabler
+#   - no QML debugging: havne.exe doesn't import QQmlDebuggingEnabler
 #     (QT_QML_DEBUG, Debug builds only) and no qmltooling plugins ship;
-#   - the staged qttune.exe starts and is still running after -SmokeSeconds,
+#   - the staged havne.exe starts and is still running after -SmokeSeconds,
 #     which a missing Qt plugin or QML module would stop at once.
 #
 # Usage: pwsh packaging/windows/stage.ps1 -Version 0.3.1 [-BuildDir build]
@@ -33,18 +33,18 @@ param(
 $ErrorActionPreference = 'Stop'
 $repo = Resolve-Path (Join-Path $PSScriptRoot '..\..')
 $appDir = Join-Path $repo "$BuildDir\app\Release"
-$name = "qttune-$Version-windows-x64"
+$name = "havne-$Version-windows-x64"
 $out = Join-Path $repo $OutDir
 $stage = Join-Path $out $name
 
 function Fail([string] $why) { Write-Error "stage: $why"; exit 1 }
 
-if (-not (Test-Path (Join-Path $appDir 'qttune.exe'))) { Fail "no qttune.exe in $appDir; build the app first" }
+if (-not (Test-Path (Join-Path $appDir 'havne.exe'))) { Fail "no havne.exe in $appDir; build the app first" }
 if (-not (Test-Path (Join-Path $appDir 'ecuio-j2534-surrogate.exe'))) {
-    Fail 'no x86 surrogate beside qttune.exe; build build-win32 before configuring the app (CLAUDE.md, Commands)'
+    Fail 'no x86 surrogate beside havne.exe; build build-win32 before configuring the app (CLAUDE.md, Commands)'
 }
 if (-not (Test-Path (Join-Path $appDir 'ecuio-j2534-surrogate-x64.exe'))) {
-    Fail 'no x64 surrogate beside qttune.exe; the app build copies it from its own tree (app/CMakeLists.txt)'
+    Fail 'no x64 surrogate beside havne.exe; the app build copies it from its own tree (app/CMakeLists.txt)'
 }
 
 # ---- Visual Studio: the redistributable CRT and dumpbin
@@ -90,31 +90,31 @@ foreach ($sur in 'ecuio-j2534-surrogate.exe', 'ecuio-j2534-surrogate-x64.exe') {
     Write-Host "$sur imports: $($surImports -join ', ')"
 }
 
-# ---- Check: everything qttune.exe imports is here or is Windows'
+# ---- Check: everything havne.exe imports is here or is Windows'
 $system = Join-Path $env:SystemRoot 'System32'
-foreach ($dll in Imports (Join-Path $stage 'qttune.exe')) {
+foreach ($dll in Imports (Join-Path $stage 'havne.exe')) {
     if ($dll -match '^(api|ext)-ms-') { continue }   # API sets resolve inside Windows
     if (Test-Path (Join-Path $stage $dll)) { continue }
     if (Test-Path (Join-Path $system $dll)) { continue }
-    Fail "qttune.exe imports $dll, which is neither in the package nor part of Windows"
+    Fail "havne.exe imports $dll, which is neither in the package nor part of Windows"
 }
-Write-Host 'qttune.exe imports: all present'
+Write-Host 'havne.exe imports: all present'
 
 # ---- Check: each exe's version resource is this release's version
 $want = $Version -replace '-.*$', ''   # 0.3.2-rc1 and 0.3.2-local carry 0.3.2
-foreach ($exe in 'qttune.exe', 'ecuio-j2534-surrogate.exe', 'ecuio-j2534-surrogate-x64.exe') {
+foreach ($exe in 'havne.exe', 'ecuio-j2534-surrogate.exe', 'ecuio-j2534-surrogate-x64.exe') {
     $info = (Get-Item (Join-Path $stage $exe)).VersionInfo
-    if ($info.ProductVersion -ne $want -or $info.ProductName -ne 'QtTune') {
-        Fail "$exe carries '$($info.ProductName) $($info.ProductVersion)', not 'QtTune $want'; rebuild both trees after the version changes"
+    if ($info.ProductVersion -ne $want -or $info.ProductName -ne 'Havne') {
+        Fail "$exe carries '$($info.ProductName) $($info.ProductVersion)', not 'Havne $want'; rebuild both trees after the version changes"
     }
 }
-Write-Host "version resources: QtTune $want"
+Write-Host "version resources: Havne $want"
 
 # ---- Check: no QML debugging. A build with it opens a debug server that
 # can run script in the app when launched with -qmljsdebugger.
-$debugImport = & $dumpbin /nologo /imports (Join-Path $stage 'qttune.exe') |
+$debugImport = & $dumpbin /nologo /imports (Join-Path $stage 'havne.exe') |
     Select-String -SimpleMatch 'QQmlDebuggingEnabler'
-if ($debugImport) { Fail 'qttune.exe was built with QT_QML_DEBUG (app/CMakeLists.txt: Debug builds only)' }
+if ($debugImport) { Fail 'havne.exe was built with QT_QML_DEBUG (app/CMakeLists.txt: Debug builds only)' }
 if (Test-Path (Join-Path $stage 'qmltooling')) {
     Fail "qmltooling is staged: an older deploy left it in $appDir; delete it and build again"
 }
@@ -122,11 +122,11 @@ Write-Host 'QML debugging: none'
 
 # ---- Check: the staged app starts and stays up
 if ($SmokeSeconds -gt 0) {
-    $p = Start-Process -FilePath (Join-Path $stage 'qttune.exe') -WorkingDirectory $stage -PassThru
+    $p = Start-Process -FilePath (Join-Path $stage 'havne.exe') -WorkingDirectory $stage -PassThru
     Start-Sleep -Seconds $SmokeSeconds
-    if ($p.HasExited) { Fail "the staged qttune.exe exited within $SmokeSeconds s (code $($p.ExitCode))" }
+    if ($p.HasExited) { Fail "the staged havne.exe exited within $SmokeSeconds s (code $($p.ExitCode))" }
     Stop-Process -Id $p.Id -Force
-    Write-Host "smoke: qttune.exe ran $SmokeSeconds s"
+    Write-Host "smoke: havne.exe ran $SmokeSeconds s"
 }
 
 # ---- Zip and checksum

@@ -4,7 +4,7 @@
 //          while an adapter session is up, none after, the session running
 //          on with the screen off
 
-package org.qtproject.example.qttune;
+package io.github.erickramer42.havne;
 
 import android.Manifest;
 import android.app.Activity;
@@ -35,7 +35,7 @@ import android.util.Log;
 // (docs/bench-sessions/2026-10-28-android-9.md). The screen still goes off
 public class SessionService extends Service
 {
-    private static final String TAG = "QtTune";
+    private static final String TAG = "Havne";
     private static final String CHANNEL = "session";
     private static final String EXTRA_TEXT = "text";
     private static final int NOTIFICATION_ID = 1;
@@ -103,7 +103,7 @@ public class SessionService extends Service
         if (wakeLock != null)
             return;
         PowerManager power = getSystemService(PowerManager.class);
-        wakeLock = power.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "QtTune:session");
+        wakeLock = power.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "Havne:session");
         wakeLock.setReferenceCounted(false);
         wakeLock.acquire();
     }
@@ -133,7 +133,7 @@ public class SessionService extends Service
                 PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
         return new Notification.Builder(this, CHANNEL)
                 .setSmallIcon(getApplicationInfo().icon)
-                .setContentTitle("QtTune")
+                .setContentTitle("Havne")
                 .setContentText(text)
                 .setContentIntent(tap)
                 .setOngoing(true)

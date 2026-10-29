@@ -3,7 +3,7 @@
 **Date:** <date>  **Phone:** Android <version> (12 or later)
 **Adapter:** OBDX Pro VX over WiFi, no vehicle (Phases 1–6); the
 OBDLink MX+ on the test car (Phase 7)
-**QtTune build:** <commit hash> (CI run <run id>)
+**Havne build:** <commit hash> (CI run <run id>)
 
 Fill in a copy as `docs/bench-sessions/<date>-android[-n].md`. Phases
 1–5 are step 1 of [ADR-0028](../adr/0028-app-fed-streams.md), the
@@ -37,11 +37,17 @@ private storage: Phase 5 copies it off with `adb`, if a computer with
 ## Pre-flight
 
 - [ ] The CI run of the build is green on `android-build`. Download
-      its `qttune-android-arm64-v8a` artifact (the run's page, or
-      `gh run download <run id> -n qttune-android-arm64-v8a`) and unzip
+      its `havne-android-arm64-v8a` artifact (the run's page, or
+      `gh run download <run id> -n havne-android-arm64-v8a`) and unzip
       the APK
-- [ ] A previous QtTune on the phone uninstalled: each CI run signs
+- [ ] A previous Havne on the phone uninstalled: each CI run signs
       with a new debug key, and Android refuses the update
+- [ ] A QtTune on the phone (package `org.qtproject.example.qttune`,
+      the name before the rename) is another app: its recordings
+      copied off first if they're wanted (Phase 5's `adb run-as`
+      with that package, `files/Documents/QtTune/recordings`), then
+      it's uninstalled by hand. Havne starts with its own empty
+      preferences and recordings
 - [ ] The VX power-cycled since its last USB session or unclean WiFi
       leave, then powered from a USB charger, nothing holding its USB
       port (BENCH prep #20: one link at a time)
@@ -101,7 +107,7 @@ for about 20 s, disconnect.
 
 **Action:** turn the phone's mobile data off. Join the VX's network
 ("OBDX Pro VX <MAC>"); when Android says it has no internet, choose
-to stay connected. In QtTune, Settings: `elm327://192.168.4.1:23?profile=raw&poll=0x0C`,
+to stay connected. In Havne, Settings: `elm327://192.168.4.1:23?profile=raw&poll=0x0C`,
 **Connect**.
 
 - [ ] Connects within a few seconds. Copy the "Session:" line: on
@@ -109,7 +115,7 @@ to stay connected. In QtTune, Settings: `elm327://192.168.4.1:23?profile=raw&pol
       0.0 V", as on the computer
 - [ ] Amber "Link quiet" within about 3 s (no bus: every request
       `NO DATA`, BENCH prep #15), no fault, for about 30 s
-- [ ] Disconnect in QtTune **before** leaving the VX's network (an
+- [ ] Disconnect in Havne **before** leaving the VX's network (an
       unclean leave hangs the VX's network side until a power cycle,
       BENCH prep #20)
 - [ ] Mobile data back on, still on the VX's network: connect the same
@@ -120,16 +126,16 @@ to stay connected. In QtTune, Settings: `elm327://192.168.4.1:23?profile=raw&pol
 ## Phase 5 — the files (with `adb`; optional)
 
 **Action:** the phone in developer mode with USB debugging on, on a
-computer with `adb`. The package is `org.qtproject.example.qttune`
-(`adb shell pm list packages qttune` prints it after `package:`,
+computer with `adb`. The package is `io.github.erickramer42.havne`
+(`adb shell pm list packages havne` prints it after `package:`,
 which isn't part of the name).
 
-- [ ] `adb shell run-as org.qtproject.example.qttune ls -R cache files`:
+- [ ] `adb shell run-as io.github.erickramer42.havne ls -R cache files`:
       copy the listing.
       The wire logs are `ecuio-elm327.*.log` in the temporary folder;
       note which directory holds them
 - [ ] Copy Phase 4's wire log off:
-      `adb exec-out run-as org.qtproject.example.qttune cat cache/<log's name> > <log's name>`,
+      `adb exec-out run-as io.github.erickramer42.havne cat cache/<log's name> > <log's name>`,
       once for each `ecuio-elm327.*.log` the listing shows
 - [ ] If Phase 3 couldn't find its recording: `find` it here, and
       record the full path
@@ -159,8 +165,8 @@ which isn't part of the name).
 - [ ] Turn Bluetooth off, then **Refresh**: the line under the count
       reads "Bluetooth is off: turn it on, then Refresh". Bluetooth
       back on
-- [ ] Optional: Android's settings, Apps, QtTune, Permissions, Nearby
-      devices: Don't allow. Back in QtTune, **Refresh**: the line says
+- [ ] Optional: Android's settings, Apps, Havne, Permissions, Nearby
+      devices: Don't allow. Back in Havne, **Refresh**: the line says
       to allow it. Allow it again
 
 ## Phase 7 — the MX+ on the car (ADR-0028 step 4)
@@ -182,12 +188,12 @@ copies.
       OBDLink app closed: the MX+ takes one connection at a time
 - [ ] The phone's earlier recordings backed up, if a reinstall comes
       first (uninstalling deletes them)
-- [ ] QtTune: Settings, Recording, **Record sessions** on
+- [ ] Havne: Settings, Recording, **Record sessions** on
 
 **7a — pair, ignition off.**
 
 **Action:** plug in the MX+. Pair it in Android's Bluetooth settings
-(Pair new device; press the MX+'s button when asked). In QtTune,
+(Pair new device; press the MX+'s button when asked). In Havne,
 Settings, Adapter, **Refresh**: the MX+ row, "Bluetooth, paired ·
 <address>". Select it, then **Connect** (`elm327://bt:<address>`),
 for about 30 s.
@@ -222,7 +228,7 @@ connect through the start and a minute of idling.
 
 **Action:** connect the MX+ row (without `?poll=`) and wait for
 values. Turn the phone's Bluetooth off from the quick settings for
-about 10 s, then on, and come back to QtTune.
+about 10 s, then on, and come back to Havne.
 
 - [ ] Off: values dim after 3 s, and the link turns red ("Adapter
       fault") within about 10 s
@@ -233,7 +239,7 @@ about 10 s, then on, and come back to QtTune.
 **7d — the app in the background (optional, Known Issue #37).**
 
 **Action:** connected and idling, press Home for about 20 s, then
-return to QtTune.
+return to Havne.
 
 - [ ] The link survives (no fault, or one that recovers by itself),
       and Live's chart shows the gap Known Issue #37 describes. Record
@@ -269,12 +275,12 @@ safety hold.
 **Action:** connect the MX+ row, **Record sessions** on.
 
 - [ ] At the first adapter connect Android asks to allow
-      notifications: allow it. A notification "QtTune — Connected to
+      notifications: allow it. A notification "Havne — Connected to
       …" with "· recording", for as long as the session is up
 - [ ] Press Home for about 2 minutes, then return. The link stayed up
       the whole time (no "Link: adapter fault" in the activity log),
       Live has no gap, the values kept recording
-- [ ] On Live, with QtTune in front, the screen off for about 5
+- [ ] On Live, with Havne in front, the screen off for about 5
       minutes (the power button), then on: the same. This is the case
       that stopped the GUI thread
       ([2026-10-28-android-10](2026-10-28-android-10.md)). Note the
@@ -289,7 +295,7 @@ safety hold.
       only there ([2026-10-28-android-9](2026-10-28-android-9.md):
       104 s apart, with no gap on Live)
 - [ ] With the screen off, Bluetooth off for about 10 s from the quick
-      settings, then on. Back in QtTune: a fault, then recovered on its
+      settings, then on. Back in Havne: a fault, then recovered on its
       own, as in 7c
 - [ ] Disconnect: the notification goes at once
 - [ ] Disconnect, unplug the MX+, key off
@@ -298,14 +304,14 @@ safety hold.
 
 | Symptom | Suspect |
 |---|---|
-| "App not installed" | A previous QtTune signed with another key: uninstall it first |
+| "App not installed" | A previous Havne signed with another key: uninstall it first |
 | It closes at launch | Copy `adb logcat -d` around the launch if `adb` is at hand; otherwise note the Android version and stop |
 | A blank or black window | The graphics backend: note the phone's chip if known, and stop |
 | "no answer within 2 s" on WiFi with mobile data off | The phone isn't on the VX's network, or the VX's network side hung (power-cycle it) |
 | "the network is unreachable" or a permission error on WiFi | `INTERNET` missing from the manifest, which CI checks: copy the error whole |
 | No permission prompt, and the list says to allow Nearby devices | The permission was refused earlier: allow it in Android's settings |
 | The MX+ "didn't answer ATZ within 5 s" | Its Power light off (it takes power from the car only), or the laptop or the OBDLink app holding it: close them, connect again |
-| No paired devices listed with Bluetooth on | Copy the count line and the line under it; `adb logcat -d | grep -i -E "qttune|bluetooth"` if `adb` is at hand |
+| No paired devices listed with Bluetooth on | Copy the count line and the line under it; `adb logcat -d | grep -i -E "havne|bluetooth"` if `adb` is at hand |
 
 ## Post-session actions
 

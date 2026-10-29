@@ -10,8 +10,8 @@
 
 import QtQuick
 import QtTest
-import QtTune
-import QtTuneTest
+import App
+import AppTest
 
 TestCase {
     id: testCase
@@ -28,7 +28,7 @@ TestCase {
     }
 
     function init() {
-        failOnWarning(/^qrc:\/qt\/qml\/QtTune\//)
+        failOnWarning(/^qrc:\/qt\/qml\/App\//)
         Theme.developerMode = false
     }
 

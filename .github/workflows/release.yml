@@ -43,13 +43,13 @@ jobs:
 
       # The tag names the version the binaries report, so they must agree
       # before anything builds: v0.3.1 and v0.3.1-rc2 both need
-      # project(QtTune VERSION 0.3.1) in the root CMakeLists.txt.
+      # project(Havne VERSION 0.3.1) in the root CMakeLists.txt.
       - name: Check the tag against the project version
         shell: bash
         run: |
           [[ "$TAG" =~ ^v([0-9]+\.[0-9]+\.[0-9]+)(-rc[0-9]+)?$ ]] || { echo "::error::$TAG is not vX.Y.Z or vX.Y.Z-rcN"; exit 1; }
           tag_version="${BASH_REMATCH[1]}"
-          cmake_version=$(sed -n '/^project(QtTune/,/)/s/^ *VERSION \([0-9.]*\).*/\1/p' CMakeLists.txt)
+          cmake_version=$(sed -n '/^project(Havne/,/)/s/^ *VERSION \([0-9.]*\).*/\1/p' CMakeLists.txt)
           if [ "$tag_version" != "$cmake_version" ]; then
             echo "::error::$TAG is version $tag_version, but CMakeLists.txt says $cmake_version"
             exit 1
@@ -93,18 +93,18 @@ jobs:
           "QT_PREFIX=$prefix" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
       # build-win32 first: the app's configure finds its x86 surrogate and
-      # copies it next to qttune.exe; the app build adds its own tree's
+      # copies it next to havne.exe; the app build adds its own tree's
       # x64 one. No tests in either tree; ci.yml ran them on the commit,
       # and verify.sh runs the cross-arch suite.
       - name: Build the x86 surrogate
         run: |
-          cmake -B build-win32 -A Win32 -DQTTUNE_BUILD_CORE_ONLY=ON -DBUILD_TESTING=OFF
+          cmake -B build-win32 -A Win32 -DHAVNE_BUILD_CORE_ONLY=ON -DBUILD_TESTING=OFF
           cmake --build build-win32 --config Release --target ecuio-j2534-surrogate
 
       - name: Build the app
         run: |
           cmake -B build -DCMAKE_PREFIX_PATH="$env:QT_PREFIX" -DBUILD_TESTING=OFF
-          cmake --build build --config Release --target qttune
+          cmake --build build --config Release --target havne
 
       - name: Stage, check and zip
         run: pwsh -NoProfile -File packaging/windows/stage.ps1 -Version $env:VERSION
@@ -113,7 +113,7 @@ jobs:
         id: attest
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
-          subject-path: dist/qttune-${{ env.VERSION }}-windows-x64.zip
+          subject-path: dist/havne-${{ env.VERSION }}-windows-x64.zip
 
       # The same signed provenance (a Sigstore bundle) as a release file.
       # OpenSSF Scorecard's Signed-Releases check reads release files, not
@@ -123,15 +123,15 @@ jobs:
       - name: Copy the provenance into dist
         env:
           BUNDLE: ${{ steps.attest.outputs.bundle-path }}
-        run: Copy-Item -LiteralPath $env:BUNDLE -Destination "dist/qttune-$env:VERSION-windows-x64.zip.intoto.jsonl"
+        run: Copy-Item -LiteralPath $env:BUNDLE -Destination "dist/havne-$env:VERSION-windows-x64.zip.intoto.jsonl"
 
       - name: Publish the release
         shell: bash
         run: |
-          zip="dist/qttune-$VERSION-windows-x64.zip"
+          zip="dist/havne-$VERSION-windows-x64.zip"
           if gh release view "$TAG" > /dev/null 2>&1; then
             gh release upload "$TAG" "$zip" "$zip.intoto.jsonl" dist/SHA256SUMS.txt --clobber
           else
             gh release create "$TAG" "$zip" "$zip.intoto.jsonl" dist/SHA256SUMS.txt --verify-tag \
-              --title "QtTune $TAG" --notes-file "docs/releases/$NOTES_TAG.md" $PRERELEASE
+              --title "Havne $TAG" --notes-file "docs/releases/$NOTES_TAG.md" $PRERELEASE
           fi

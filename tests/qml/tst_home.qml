@@ -7,8 +7,7 @@
 
 import QtQuick
 import QtTest
-import QtTune
-
+import App
 TestCase {
     id: testCase
     name: "Home"
@@ -20,7 +19,7 @@ TestCase {
     }
 
     function init() {
-        failOnWarning(/^qrc:\/qt\/qml\/QtTune\//)
+        failOnWarning(/^qrc:\/qt\/qml\/App\//)
     }
 
     // A singleton's state, shared by every case

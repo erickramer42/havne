@@ -47,7 +47,7 @@ jobs:
       - name: Build core, the J2534 layer and the surrogate
         if: matrix.build-mode == 'manual'
         run: |
-          cmake -B build-core -DQTTUNE_BUILD_CORE_ONLY=ON -DBUILD_TESTING=OFF
+          cmake -B build-core -DHAVNE_BUILD_CORE_ONLY=ON -DBUILD_TESTING=OFF
           cmake --build build-core --config Release
 
       - uses: github/codeql-action/analyze@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1

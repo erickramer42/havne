@@ -50,7 +50,7 @@
 #include <string>
 #include <vector>
 
-#include "qttunebridge.h"
+#include "sessionbridge.h"
 #include "ecuio/internal.h"   /* ecuio_session_dispatch_callbacks */
 #include "ecuio/profile.h"
 #include "ecuio/signals.h"
@@ -87,11 +87,11 @@ struct PerFrame {
     double worker = 0.0;
 };
 
-PerFrame microsPerFrame(QtTuneBridge& bridge, int frames, int ids)
+PerFrame microsPerFrame(SessionBridge& bridge, int frames, int ids)
 {
     ecuio_frame_t f{};
     f.data_length = 8;
-    const int burst = QtTuneBridge::maxInFlightForTesting() / 2;
+    const int burst = SessionBridge::maxInFlightForTesting() / 2;
     std::chrono::steady_clock::duration drained{};
     std::chrono::steady_clock::duration posted{};
     int sent = 0;
@@ -127,7 +127,7 @@ PerFrame measure(const QString& uri, int frames, int ids)
 {
     std::vector<PerFrame> runs;
     for (int r = 0; r < kRuns; ++r) {
-        QtTuneBridge bridge;
+        SessionBridge bridge;
         const QString err = bridge.connectSession(uri);
         if (!err.isEmpty()) {
             std::fprintf(stderr, "connect %s failed: %s\n", qPrintable(uri),
@@ -169,7 +169,7 @@ void ignoreValues(const ecuio_value_batch_t*, void*) {}
 
 void forwardValues(const ecuio_value_batch_t* batch, void* bridge)
 {
-    static_cast<QtTuneBridge*>(bridge)->dispatchValuesForTesting(*batch);
+    static_cast<SessionBridge*>(bridge)->dispatchValuesForTesting(*batch);
 }
 
 double dispatchMicros(ecuio_session_t* session, int frames, int ids)
@@ -206,7 +206,7 @@ ValuesPath valuesMicros(const QString& uri, int frames, int ids)
 
         // The bridge's own session runs the same profile, so it knows the
         // ids; its mock frames match none of them
-        QtTuneBridge bridge;
+        SessionBridge bridge;
         bridge.setValueSampleLimitForTesting(frames * kDefsPerId);
         if (!bridge.connectSession(uri).isEmpty()) {
             std::fprintf(stderr, "connect %s failed\n", qPrintable(uri));
@@ -272,7 +272,7 @@ struct LoadRun {
     double handledRate = 0.0;    // sustained: frames a second the GUI thread handled
     int handled = 0;
     double peakRpm = 0.0;
-    QtTuneBridge::DeliveryStats stats;
+    SessionBridge::DeliveryStats stats;
 };
 
 void spin(double seconds)
@@ -289,7 +289,7 @@ void replayFixture(LoadRun& run)
     const QString uri =
         QStringLiteral("replay://%1/2026-10-25-engine-start?profile=obd2&%2")
             .arg(QStringLiteral(ECUIO_REPLAY_FIXTURES), QString::fromLatin1(run.query));
-    QtTuneBridge bridge;
+    SessionBridge bridge;
     SignalListModel* model = bridge.signalModel();
     QObject::connect(model, &SignalListModel::valuesUpdated, model, [&]() {
         for (const QVariant& s : model->chartData()) {

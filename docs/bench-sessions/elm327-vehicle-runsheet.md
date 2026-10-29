@@ -2,7 +2,7 @@
 
 **Date:** <date>  **Adapter:** OBDLink MX+ (MX201, Bluetooth)
 **Vehicle:** the test car, the car of the J2534 sessions (never its make, model or year)
-**QtTune build:** <commit hash>
+**Havne build:** <commit hash>
 
 Fill in a copy as `docs/bench-sessions/<date>-elm327-vehicle.md`. The
 MX+ first powers up here, so this sheet also runs its bench items
@@ -40,7 +40,7 @@ serials): scrub before committing.
       this laptop and build
 - [ ] The phone's Bluetooth off, or the OBDLink app closed: the MX+
       takes one connection at a time
-- [ ] QtTune launched, **Record sessions** ticked
+- [ ] Havne launched, **Record sessions** ticked
 
 ## Phase 0 — the reference, ignition off
 
@@ -68,7 +68,7 @@ serials): scrub before committing.
       obd2, channel 0x7E8/0x7E0 (rx/tx); battery …`. The battery within
       0.2 V of Phase 0's
 - [ ] No "set not to wait past 7F xx 78" note. If it's there, record
-      it: another app changed the adapter's parameter 2A, and QtTune
+      it: another app changed the adapter's parameter 2A, and Havne
       never writes them
 - [ ] Nothing answers with the ignition off: quiet after a second or
       two ("Link quiet"; Live: "Vehicle not responding"), as through the

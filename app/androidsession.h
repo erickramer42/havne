@@ -9,7 +9,7 @@
 #include <QObject>
 #include <QString>
 
-class QtTuneBridge;
+class SessionBridge;
 
 // Holds the foreground service (SessionService.java, ADR-0029 §2) while an
 // adapter session is up: started at the connect, its notification's text
@@ -21,13 +21,13 @@ class AndroidSession : public QObject
     Q_OBJECT
 
 public:
-    explicit AndroidSession(QtTuneBridge* bridge, QObject* parent = nullptr);
+    explicit AndroidSession(SessionBridge* bridge, QObject* parent = nullptr);
     ~AndroidSession() override;
 
 private:
     void update();
     void stop();
 
-    QtTuneBridge* m_bridge;
+    SessionBridge* m_bridge;
     QString m_shown; // the notification's text, "" while none is up
 };

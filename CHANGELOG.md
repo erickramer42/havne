@@ -1,6 +1,6 @@
 # Changelog
 
-What changed in each release, for people using QtTune. The format
+What changed in each release, for people using Havne. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 versions follow [Semantic Versioning](https://semver.org/) (before
 1.0, a minor version may break the C ABI). A release's full notes,
@@ -9,6 +9,19 @@ How each change was built, with its commits and the lessons along the
 way, is in [docs/engineering-log.md](docs/engineering-log.md).
 
 ## [Unreleased]
+
+### Changed
+- **QtTune is now Havne**: the program is `havne.exe`, the release
+  zip `havne-<version>-windows-x64.zip`, and the repository
+  `erickramer42/havne` (the old address redirects). The first
+  launch copies QtTune's preferences, vehicles included, and
+  Settings' recent recordings list the sessions in
+  `Documents\QtTune\recordings` beside the new ones in
+  `Documents\Havne\recordings`; neither is moved or deleted. On
+  Android Havne is a new app (`io.github.erickramer42.havne`) that
+  starts empty. The build option `QTTUNE_BUILD_CORE_ONLY` is
+  `HAVNE_BUILD_CORE_ONLY`; the old name still works, with a warning,
+  until v0.3.4.
 
 ### Added
 - An app icon on Android and iOS: the Home page's tachometer on the
@@ -31,7 +44,7 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
 - `elm327://` reaches a WiFi adapter by its address and port, for
   example `elm327://192.168.4.1:23` (an OBDX Pro) or
   `elm327://192.168.0.10:35000` (most clones), once the computer has
-  joined the adapter's network. The address is typed: QtTune doesn't
+  joined the adapter's network. The address is typed: Havne doesn't
   search the network. A connection that drops is tried again on its
   own, as a serial port is.
 - An `elm327://` session that asks nothing (`?profile=raw` without
@@ -66,13 +79,13 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
   Selecting one puts `elm327://bt:<address>` or `elm327://ble:<address>`
   in the field, and the session runs over the phone's Bluetooth as it
   would over a serial port, reconnecting on its own when the link
-  drops. Pairing stays in Android's Bluetooth settings, and QtTune asks
+  drops. Pairing stays in Android's Bluetooth settings, and Havne asks
   for the Nearby devices permission when the adapter list first opens.
   It has read a car through an OBDLink MX+.
 - On Android, an adapter session keeps running in the background and
   with the screen off, recording included. While it's connected a
   quiet notification says so ("Connected to …", "· recording"); a tap
-  opens the app. QtTune asks once, at the first adapter connect, to
+  opens the app. Havne asks once, at the first adapter connect, to
   show notifications, and the phone stays awake (not its screen) for
   as long as the session lasts. A dropped classic Bluetooth link
   reconnects with one connection attempt at a time. It has held an
@@ -280,9 +293,9 @@ The first release with a Windows download
   shell with a responsive layout.
 - CI on Windows, macOS and Linux, running the core's tests.
 
-[Unreleased]: https://github.com/erickramer42/qttune/compare/v0.3.2...HEAD
-[0.3.2]: https://github.com/erickramer42/qttune/compare/v0.3.1...v0.3.2
-[0.3.1]: https://github.com/erickramer42/qttune/compare/v0.3.0...v0.3.1
-[0.3.0]: https://github.com/erickramer42/qttune/compare/v0.2.0...v0.3.0
-[0.2.0]: https://github.com/erickramer42/qttune/compare/v0.1.0...v0.2.0
-[0.1.0]: https://github.com/erickramer42/qttune/releases/tag/v0.1.0
+[Unreleased]: https://github.com/erickramer42/havne/compare/v0.3.2...HEAD
+[0.3.2]: https://github.com/erickramer42/havne/compare/v0.3.1...v0.3.2
+[0.3.1]: https://github.com/erickramer42/havne/compare/v0.3.0...v0.3.1
+[0.3.0]: https://github.com/erickramer42/havne/compare/v0.2.0...v0.3.0
+[0.2.0]: https://github.com/erickramer42/havne/compare/v0.1.0...v0.2.0
+[0.1.0]: https://github.com/erickramer42/havne/releases/tag/v0.1.0

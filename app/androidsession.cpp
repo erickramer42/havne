@@ -4,14 +4,14 @@
 //          (ADR-0029 §5)
 
 #include "androidsession.h"
-#include "qttunebridge.h"
+#include "sessionbridge.h"
 
 #include <QJniObject>
 #include <QtCore/qcoreapplication_platform.h>
 
 namespace {
 
-constexpr const char* kService = "org/qtproject/example/qttune/SessionService";
+constexpr const char* kService = "io/github/erickramer42/havne/SessionService";
 
 QJniObject appContext()
 {
@@ -20,14 +20,14 @@ QJniObject appContext()
 
 } // namespace
 
-AndroidSession::AndroidSession(QtTuneBridge* bridge, QObject* parent)
+AndroidSession::AndroidSession(SessionBridge* bridge, QObject* parent)
     : QObject(parent), m_bridge(bridge)
 {
-    connect(bridge, &QtTuneBridge::connectedChanged, this,
+    connect(bridge, &SessionBridge::connectedChanged, this,
             &AndroidSession::update);
-    connect(bridge, &QtTuneBridge::currentUriChanged, this,
+    connect(bridge, &SessionBridge::currentUriChanged, this,
             &AndroidSession::update);
-    connect(bridge, &QtTuneBridge::recordingStateChanged, this,
+    connect(bridge, &SessionBridge::recordingStateChanged, this,
             &AndroidSession::update);
 }
 

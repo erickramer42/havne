@@ -16,8 +16,8 @@
 
 class QJSEngine;
 class QQmlEngine;
-class QtTuneBridge;
-#ifdef QTTUNE_BLUETOOTH
+class SessionBridge;
+#ifdef APP_BLUETOOTH
 class BtLink;
 class QBluetoothDeviceDiscoveryAgent;
 #endif
@@ -30,7 +30,7 @@ class QBluetoothDeviceDiscoveryAgent;
 // address's app-fed stream with core (btstream.h) the first time.
 // Pairing stays in Android's settings.
 //
-// Built with QtBluetooth on Android only (QTTUNE_BLUETOOTH); elsewhere
+// Built with QtBluetooth on Android only (APP_BLUETOOTH); elsewhere
 // `available` is false, the list empty, and a bt: or ble: URI is refused
 // with what to use instead. Exposed to QML as the `Bluetooth` singleton.
 class BluetoothDevices : public QObject
@@ -61,7 +61,7 @@ public:
 
     // Hands the bridge prepare() for every connect. Destroy this after the
     // bridge's sessions are closed: the streams unregister here.
-    void attachTo(QtTuneBridge* bridge);
+    void attachTo(SessionBridge* bridge);
 
     bool available() const;
     QVariantList adapters() const;
@@ -96,7 +96,7 @@ private:
     bool m_scanning = false;
     QString m_status;
     bool m_statusWarns = false;
-#ifdef QTTUNE_BLUETOOTH
+#ifdef APP_BLUETOOTH
     // Whether Android has been asked and what it said
     bool permitted(bool ask, bool forScan);
     void listPaired();

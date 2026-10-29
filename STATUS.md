@@ -1,7 +1,7 @@
-# QtTune — Project Status
+# Havne — Project Status
 
 **Updated:** 2026-10-26 · **Version:** v0.3.2 ·
-[![CI](https://github.com/erickramer42/qttune/actions/workflows/ci.yml/badge.svg)](https://github.com/erickramer42/qttune/actions/workflows/ci.yml)
+[![CI](https://github.com/erickramer42/havne/actions/workflows/ci.yml/badge.svg)](https://github.com/erickramer42/havne/actions/workflows/ci.yml)
 
 This file covers the project as it stands: what works, what comes
 next, and what is known to be wrong. For how the parts fit together,

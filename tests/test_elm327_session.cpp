@@ -90,7 +90,7 @@ public:
     {
         g_log_root =
             fs::temp_directory_path() /
-            ("qttune-elm327-logs-" +
+            ("havne-elm327-logs-" +
              std::to_string(
                  std::chrono::steady_clock::now().time_since_epoch().count()));
         fs::create_directories(g_log_root);
@@ -1481,7 +1481,7 @@ TEST_F(Elm327SessionTest, TheWireLogHoldsTheSetupAndTheReadings)
     }
     const std::string log = logs.only_log();
     EXPECT_TRUE(in_order(
-        log, {"] QtTune ELM327 wire log (ADR-0026), core ",
+        log, {"] Havne ELM327 wire log (ADR-0026), core ",
               std::string("] uri ") + uri("?poll=0x0C"),
               std::string("] ") + kPort +
                   " at 38400 bit/s; CAN at 500000 bit/s, protocol 6; the setup",
@@ -1891,7 +1891,7 @@ TEST(Elm327PortTest, AMissingPortIsNoSuchPort)
 {
     ecuio_elm327_port_t port{};
     char why[128] = "";
-    EXPECT_EQ(elm327_port_open_os("/dev/qttune-no-such-port", 38400, &port, why,
+    EXPECT_EQ(elm327_port_open_os("/dev/havne-no-such-port", 38400, &port, why,
                                   sizeof(why)),
               ECUIO_ERR_LOAD_FAILED);
     EXPECT_STREQ(why, "no such port");

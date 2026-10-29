@@ -1,5 +1,5 @@
 // File/layer: tests/test_qml.cpp | Qt Quick Test, QML tier
-// Testing: runs tests/qml/tst_*.qml against the app's QtTune module
+// Testing: runs tests/qml/tst_*.qml against the app's App module
 //          and a real bridge, the one its Bridge singleton serves.
 //          ctest runs each file in its own process (QmlTest.<name>).
 
@@ -18,7 +18,7 @@
 
 #include "bluetoothdevices.h"
 #include "bridgesingleton.h"
-#include "qttunebridge.h"
+#include "sessionbridge.h"
 
 #ifdef _WIN32
 #ifndef NOMINMAX
@@ -30,11 +30,11 @@
 #include <windows.h>
 #endif
 
-Q_IMPORT_QML_PLUGIN(QtTunePlugin)
+Q_IMPORT_QML_PLUGIN(AppPlugin)
 
 namespace {
 
-// Test-only helpers, as the QtTuneTest module's Harness singleton
+// Test-only helpers, as the AppTest module's Harness singleton
 class Harness : public QObject
 {
     Q_OBJECT
@@ -103,13 +103,13 @@ public slots:
     void applicationAvailable()
     {
         // Main.qml stores its zoom with Settings; here that goes to a
-        // scratch ini file, never the user's QtTune settings
-        QCoreApplication::setOrganizationName(QStringLiteral("QtTune"));
+        // scratch ini file, never the user's Havne settings
+        QCoreApplication::setOrganizationName(QStringLiteral("Havne"));
         QSettings::setDefaultFormat(QSettings::IniFormat);
         QSettings::setPath(QSettings::IniFormat, QSettings::UserScope, m_settingsDir.path());
         QQuickStyle::setStyle(QStringLiteral("Basic"));   // as main() sets it
 
-        m_bridge = std::make_unique<QtTuneBridge>();
+        m_bridge = std::make_unique<SessionBridge>();
         // Settings lists the recordings: here an empty scratch folder,
         // never the user's Documents
         m_bridge->setRecordingsRootForTesting(m_recordingsDir.path());
@@ -118,7 +118,7 @@ public slots:
         m_bluetooth = std::make_unique<BluetoothDevices>();
         BluetoothDevices::instance = m_bluetooth.get();
         m_bluetooth->attachTo(m_bridge.get());
-        qmlRegisterSingletonInstance("QtTuneTest", 1, 0, "Harness", &m_harness);
+        qmlRegisterSingletonInstance("AppTest", 1, 0, "Harness", &m_harness);
     }
 
     void cleanupTestCase()
@@ -135,11 +135,11 @@ private:
     QTemporaryDir m_recordingsDir;
     Harness m_harness;
     std::unique_ptr<BluetoothDevices> m_bluetooth;
-    std::unique_ptr<QtTuneBridge> m_bridge;
+    std::unique_ptr<SessionBridge> m_bridge;
 };
 
 }  // namespace
 
-QUICK_TEST_MAIN_WITH_SETUP(qttune, Setup)
+QUICK_TEST_MAIN_WITH_SETUP(app, Setup)
 
 #include "test_qml.moc"

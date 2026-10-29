@@ -13,12 +13,12 @@ find_package(Qt6 6.12 REQUIRED COMPONENTS Quick QuickControls2)
 
 qt_standard_project_setup(REQUIRES 6.12)
 
-# The QtTune QML module and the bridge it binds live in a static library
+# The App QML module and the bridge it binds live in a static library
 # of their own, so test_qml (tests/CMakeLists.txt) loads the same module
-# the app does. Whatever links it also links qttune_uiplugin and imports
-# the plugin with Q_IMPORT_QML_PLUGIN(QtTunePlugin), or the module's
+# the app does. Whatever links it also links app_uiplugin and imports
+# the plugin with Q_IMPORT_QML_PLUGIN(AppPlugin), or the module's
 # types are never registered.
-qt_add_library(qttune_ui STATIC
+qt_add_library(app_ui STATIC
     blepicker.cpp
     blepicker.h
     btconnect.cpp
@@ -28,8 +28,8 @@ qt_add_library(qttune_ui STATIC
     bridgesingleton.h
     carryover.cpp
     carryover.h
-    qttunebridge.cpp
-    qttunebridge.h
+    sessionbridge.cpp
+    sessionbridge.h
     latencystats.h
     sessionrecorder.cpp
     sessionrecorder.h
@@ -39,11 +39,11 @@ set_source_files_properties(qml/Theme.qml qml/ChartLayout.qml qml/VehicleBook.qm
     QT_QML_SINGLETON_TYPE TRUE
 )
 
-qt_add_qml_module(qttune_ui
-    URI QtTune
+qt_add_qml_module(app_ui
+    URI App
     VERSION 1.0
     # Ends in the URI, as qmllint expects of a library's module
-    OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/QtTune
+    OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/App
     QML_FILES
         qml/Main.qml
         qml/HomePage.qml
@@ -68,67 +68,76 @@ qt_add_qml_module(qttune_ui
         qml/ShiftLightBar.qml
 )
 
-target_include_directories(qttune_ui PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
-target_link_libraries(qttune_ui PUBLIC
+target_include_directories(app_ui PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+target_link_libraries(app_ui PUBLIC
     Qt6::Quick
     Qt6::QuickControls2
     ecuio-core
 )
-qttune_enable_warnings(qttune_ui)
+app_enable_warnings(app_ui)
 # The phone's Bluetooth (ADR-0028 §2): the links behind core's app-fed
 # streams, on Android only, so no desktop build ships it unverified.
 # Elsewhere the Bluetooth singleton lists nothing.
 if(ANDROID)
     find_package(Qt6 6.12 REQUIRED COMPONENTS Bluetooth)
-    target_sources(qttune_ui PRIVATE btstream.cpp btstream.h)
-    target_link_libraries(qttune_ui PUBLIC Qt6::Bluetooth)
-    target_compile_definitions(qttune_ui PUBLIC QTTUNE_BLUETOOTH)
+    target_sources(app_ui PRIVATE btstream.cpp btstream.h)
+    target_link_libraries(app_ui PUBLIC Qt6::Bluetooth)
+    target_compile_definitions(app_ui PUBLIC APP_BLUETOOTH)
     # The foreground service held while an adapter session is up
     # (ADR-0029 §2; its Java half is in android/src)
-    target_sources(qttune_ui PRIVATE androidsession.cpp androidsession.h)
+    target_sources(app_ui PRIVATE androidsession.cpp androidsession.h)
 endif()
 # MSVC's C4702 (unreachable code) fires inside Qt's inline headers, as
 # the generated QML registration code instantiates them; none of it is
 # this project's code.
 if(MSVC)
-    target_compile_options(qttune_ui PRIVATE /wd4702)
+    target_compile_options(app_ui PRIVATE /wd4702)
 endif()
 
-qt_add_executable(qttune
+qt_add_executable(havne
     MANUAL_FINALIZATION
     main.cpp
 )
 
-target_link_libraries(qttune PRIVATE
-    qttune_ui
-    qttune_uiplugin
+target_link_libraries(havne PRIVATE
+    app_ui
+    app_uiplugin
 )
-qttune_enable_warnings(qttune)
-qttune_add_version_resource(qttune qttune "QtTune ECU reader and logger")
+app_enable_warnings(havne)
+app_add_version_resource(havne havne "Havne ECU reader and logger")
 
 if(WIN32)
-    set_target_properties(qttune PROPERTIES WIN32_EXECUTABLE TRUE)
+    set_target_properties(havne PROPERTIES WIN32_EXECUTABLE TRUE)
     # The title bar's color (main.cpp, DwmSetWindowAttribute)
-    target_link_libraries(qttune PRIVATE dwmapi)
+    target_link_libraries(havne PRIVATE dwmapi)
 endif()
 if(APPLE)
-    set_target_properties(qttune PROPERTIES MACOSX_BUNDLE TRUE)
+    set_target_properties(havne PROPERTIES MACOSX_BUNDLE TRUE)
 endif()
 # The app icon (packaging/icons/make_icons.py writes both). Android: an
 # adaptive launcher icon, vector drawables in the package source's res/;
 # Qt's manifest names it through QT_ANDROID_APP_ICON (Qt 6.9+).
+# The package id is permanent: another one is another app (ADR-0001's
+# appendix of 2026-10-28). The version name is project()'s, the version
+# code major * 10000 + minor * 100 + patch, so each release installs
+# over the one before.
 if(ANDROID)
-    set_target_properties(qttune PROPERTIES
+    math(EXPR _app_version_code
+        "${Havne_VERSION_MAJOR} * 10000 + ${Havne_VERSION_MINOR} * 100 + ${Havne_VERSION_PATCH}")
+    set_target_properties(havne PROPERTIES
         QT_ANDROID_PACKAGE_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/android"
-        QT_ANDROID_APP_ICON "@mipmap/ic_launcher")
+        QT_ANDROID_APP_ICON "@mipmap/ic_launcher"
+        QT_ANDROID_PACKAGE_NAME "io.github.erickramer42.havne"
+        QT_ANDROID_VERSION_NAME "${Havne_VERSION}"
+        QT_ANDROID_VERSION_CODE "${_app_version_code}")
 endif()
 # iOS: an asset catalog holding the 1024 px AppIcon, compiled by Xcode
 if(IOS)
-    set(qttune_asset_catalog "${CMAKE_CURRENT_SOURCE_DIR}/ios/Assets.xcassets")
-    target_sources(qttune PRIVATE "${qttune_asset_catalog}")
-    set_source_files_properties("${qttune_asset_catalog}" PROPERTIES
+    set(app_asset_catalog "${CMAKE_CURRENT_SOURCE_DIR}/ios/Assets.xcassets")
+    target_sources(havne PRIVATE "${app_asset_catalog}")
+    set_source_files_properties("${app_asset_catalog}" PROPERTIES
         MACOSX_PACKAGE_LOCATION Resources)
-    set_target_properties(qttune PROPERTIES
+    set_target_properties(havne PROPERTIES
         XCODE_ATTRIBUTE_ASSETCATALOG_COMPILER_APPICON_NAME AppIcon)
 endif()
 # Core's TCP socket (elm327://<address>) needs INTERNET: declared here,
@@ -140,22 +149,22 @@ endif()
 # scan, a path no phone here could test (ADR-0028's appendix of
 # 2026-10-28). CI's android-build checks the manifest and the minimum.
 if(ANDROID)
-    qt_add_android_permission(qttune NAME android.permission.INTERNET)
-    qt_add_android_permission(qttune NAME android.permission.BLUETOOTH_CONNECT)
-    qt_add_android_permission(qttune NAME android.permission.BLUETOOTH_SCAN
+    qt_add_android_permission(havne NAME android.permission.INTERNET)
+    qt_add_android_permission(havne NAME android.permission.BLUETOOTH_CONNECT)
+    qt_add_android_permission(havne NAME android.permission.BLUETOOTH_SCAN
         ATTRIBUTES usesPermissionFlags neverForLocation)
     # The session's foreground service (ADR-0029 §2), type connectedDevice:
     # its two permissions, CHANGE_NETWORK_STATE so a WiFi adapter's session
     # qualifies without Bluetooth granted, and its notification
-    qt_add_android_permission(qttune NAME android.permission.FOREGROUND_SERVICE)
-    qt_add_android_permission(qttune
+    qt_add_android_permission(havne NAME android.permission.FOREGROUND_SERVICE)
+    qt_add_android_permission(havne
         NAME android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE)
-    qt_add_android_permission(qttune NAME android.permission.CHANGE_NETWORK_STATE)
-    qt_add_android_permission(qttune NAME android.permission.POST_NOTIFICATIONS)
+    qt_add_android_permission(havne NAME android.permission.CHANGE_NETWORK_STATE)
+    qt_add_android_permission(havne NAME android.permission.POST_NOTIFICATIONS)
     # The service's partial wake lock: with the screen off the CPU sleeps
     # otherwise, service or not (docs/bench-sessions/2026-10-28-android-9.md)
-    qt_add_android_permission(qttune NAME android.permission.WAKE_LOCK)
-    set_target_properties(qttune PROPERTIES QT_ANDROID_MIN_SDK_VERSION 31)
+    qt_add_android_permission(havne NAME android.permission.WAKE_LOCK)
+    set_target_properties(havne PROPERTIES QT_ANDROID_MIN_SDK_VERSION 31)
 endif()
 
 # QML debugging in Debug builds only. A build with QT_QML_DEBUG opens a
@@ -163,7 +172,7 @@ endif()
 # script in the app with no authentication, so no release carries it
 # (packaging/windows/stage.ps1 checks the exe's imports).
 if(QT_FEATURE_qml_debug)
-    target_compile_definitions(qttune PRIVATE $<$<CONFIG:Debug>:QT_QML_DEBUG>)
+    target_compile_definitions(havne PRIVATE $<$<CONFIG:Debug>:QT_QML_DEBUG>)
 endif()
 
 # --- Deploy Qt runtime DLLs next to the exe (Windows only) ---
@@ -171,14 +180,14 @@ if(WIN32)
     get_target_property(QT_WINDEPLOYQT_LOCATION Qt6::windeployqt IMPORTED_LOCATION)
 
     if(QT_WINDEPLOYQT_LOCATION)
-        add_custom_command(TARGET qttune POST_BUILD
+        add_custom_command(TARGET havne POST_BUILD
             # Outside Debug, no qmltooling plugins: the debug server's
             # half, which nothing but a QT_QML_DEBUG build loads
             COMMAND ${QT_WINDEPLOYQT_LOCATION}
                     --no-compiler-runtime
                     "$<$<NOT:$<CONFIG:Debug>>:--skip-plugin-types;qmltooling>"
                     --qmldir ${CMAKE_CURRENT_SOURCE_DIR}/qml
-                    $<TARGET_FILE:qttune>
+                    $<TARGET_FILE:havne>
             COMMENT "Deploying Qt runtime DLLs"
             VERBATIM
             COMMAND_EXPAND_LISTS   # the Debug case expands to no argument
@@ -195,50 +204,50 @@ endif()
 # ecuio-j2534-surrogate.exe. The client picks each by name, so the two
 # can't be mixed up.
 if(WIN32 AND TARGET ecuio-j2534-surrogate)
-    add_dependencies(qttune ecuio-j2534-surrogate)
-    add_custom_command(TARGET qttune POST_BUILD
+    add_dependencies(havne ecuio-j2534-surrogate)
+    add_custom_command(TARGET havne POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
                 $<TARGET_FILE:ecuio-j2534-surrogate>
-                $<TARGET_FILE_DIR:qttune>
-        COMMENT "Deploying x64 J2534 surrogate next to qttune.exe"
+                $<TARGET_FILE_DIR:havne>
+        COMMENT "Deploying x64 J2534 surrogate next to havne.exe"
         VERBATIM
     )
 endif()
 
 # The x86 one:
 # Resolution order:
-#   1. QTTUNE_SURROGATE_SOURCE cache variable (explicit override)
+#   1. HAVNE_SURROGATE_SOURCE cache variable (explicit override)
 #   2. Auto-detect: conventional sibling build-win32 tree
 #      (development.md two-tree layout), any config, Release preferred
 #   3. Neither -> STATUS message, no copy; runtime ECUIO_SURROGATE_EXE
 #      env override still works (checked first by the client).
-set(QTTUNE_SURROGATE_SOURCE "" CACHE PATH "Win32-tree ecuio-j2534-surrogate.exe to deploy; empty = auto-detect")
+set(HAVNE_SURROGATE_SOURCE "" CACHE PATH "Win32-tree ecuio-j2534-surrogate.exe to deploy; empty = auto-detect")
 
-if(WIN32 AND QTTUNE_SURROGATE_SOURCE STREQUAL "")
+if(WIN32 AND HAVNE_SURROGATE_SOURCE STREQUAL "")
     file(GLOB _sur_found "${CMAKE_SOURCE_DIR}/build-win32/surrogate/*/ecuio-j2534-surrogate.exe")
     if(EXISTS "${CMAKE_SOURCE_DIR}/build-win32/surrogate/Release/ecuio-j2534-surrogate.exe")
         list(INSERT _sur_found 0 "${CMAKE_SOURCE_DIR}/build-win32/surrogate/Release/ecuio-j2534-surrogate.exe")
     endif()
     list(LENGTH _sur_found _sur_found_n)
     if(_sur_found_n GREATER 0)
-        list(GET _sur_found 0 QTTUNE_SURROGATE_SOURCE)
+        list(GET _sur_found 0 HAVNE_SURROGATE_SOURCE)
     endif()
 endif()
 
-if(WIN32 AND NOT QTTUNE_SURROGATE_SOURCE STREQUAL "")
-    if(NOT EXISTS "${QTTUNE_SURROGATE_SOURCE}")
-        message(FATAL_ERROR "QTTUNE_SURROGATE_SOURCE not found: ${QTTUNE_SURROGATE_SOURCE}")
+if(WIN32 AND NOT HAVNE_SURROGATE_SOURCE STREQUAL "")
+    if(NOT EXISTS "${HAVNE_SURROGATE_SOURCE}")
+        message(FATAL_ERROR "HAVNE_SURROGATE_SOURCE not found: ${HAVNE_SURROGATE_SOURCE}")
     endif()
-    message(STATUS "Deploying Win32 J2534 surrogate: ${QTTUNE_SURROGATE_SOURCE}")
-    add_custom_command(TARGET qttune POST_BUILD
+    message(STATUS "Deploying Win32 J2534 surrogate: ${HAVNE_SURROGATE_SOURCE}")
+    add_custom_command(TARGET havne POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                "${QTTUNE_SURROGATE_SOURCE}"
-                $<TARGET_FILE_DIR:qttune>
-        COMMENT "Deploying Win32 J2534 surrogate next to qttune.exe"
+                "${HAVNE_SURROGATE_SOURCE}"
+                $<TARGET_FILE_DIR:havne>
+        COMMENT "Deploying Win32 J2534 surrogate next to havne.exe"
         VERBATIM
     )
 elseif(WIN32)
-    message(STATUS "No build-win32 surrogate found; build the Win32 tree per development.md and reconfigure, or set QTTUNE_SURROGATE_SOURCE, or export ECUIO_SURROGATE_EXE at runtime")
+    message(STATUS "No build-win32 surrogate found; build the Win32 tree per development.md and reconfigure, or set HAVNE_SURROGATE_SOURCE, or export ECUIO_SURROGATE_EXE at runtime")
 endif()
 
-qt_finalize_executable(qttune)
+qt_finalize_executable(havne)

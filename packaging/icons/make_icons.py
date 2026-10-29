@@ -1,14 +1,14 @@
-"""QtTune's app icon, from one geometry: the Home page's tachometer,
+"""Havne's app icon, from one geometry: the Home page's tachometer,
 simplified to read at launcher sizes, on the accent color's tile.
 
     python packaging/icons/make_icons.py [--qt <Qt kit, e.g. C:/Qt/6.12.0/msvc2022_64>]
 
 Writes, from the repository root:
-  packaging/icons/qttune.svg        the master: the tile with rounded corners
-  packaging/icons/qttune-ios.svg    full bleed, square (iOS masks its own)
+  packaging/icons/app.svg        the master: the tile with rounded corners
+  packaging/icons/app-ios.svg    full bleed, square (iOS masks its own)
   app/android/res/...               the adaptive launcher icon as vector
                                     drawables (Android 8+; sharp at every density)
-and, with --qt, renders qttune-ios.svg through the kit's qml runtime and
+and, with --qt, renders app-ios.svg through the kit's qml runtime and
 SVG plugin into app/ios/Assets.xcassets/AppIcon.appiconset/AppIcon.png
 (1024 px, the alpha channel dropped: iOS wants it opaque).
 
@@ -308,15 +308,15 @@ def main():
     args = ap.parse_args()
 
     g = gauge()
-    write("packaging/icons/qttune.svg", svg([tile(True)] + g, "18 18 72 72"))
-    write("packaging/icons/qttune-ios.svg", svg([tile(False)] + g, "18 18 72 72"))
+    write("packaging/icons/app.svg", svg([tile(True)] + g, "18 18 72 72"))
+    write("packaging/icons/app-ios.svg", svg([tile(False)] + g, "18 18 72 72"))
     write("app/android/res/drawable/ic_launcher_foreground.xml", vector(g))
     write("app/android/res/drawable/ic_launcher_background.xml", vector([tile(False)]))
     write("app/android/res/mipmap-anydpi-v26/ic_launcher.xml", ADAPTIVE)
     write("app/ios/Assets.xcassets/Contents.json", CATALOG_CONTENTS)
     write("app/ios/Assets.xcassets/AppIcon.appiconset/Contents.json", IOS_CONTENTS)
     if args.qt:
-        render(args.qt, "packaging/icons/qttune-ios.svg",
+        render(args.qt, "packaging/icons/app-ios.svg",
                "app/ios/Assets.xcassets/AppIcon.appiconset/AppIcon.png", 1024, args.scratch)
     print("ok")
 

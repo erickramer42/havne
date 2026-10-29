@@ -1,7 +1,7 @@
 Third-party software in this package
 ====================================
 
-QtTune itself is licensed under the MIT license (LICENSE.txt). This
+Havne itself is licensed under the MIT license (LICENSE.txt). This
 package also contains the software below, each under its own terms.
 
 
@@ -10,7 +10,7 @@ Qt 6.12.0
 
 Copyright (C) The Qt Company Ltd. and other contributors.
 
-QtTune uses Qt under the GNU Lesser General Public License, version 3
+Havne uses Qt under the GNU Lesser General Public License, version 3
 (licenses\LGPL-3.0.txt, which builds on licenses\GPL-3.0.txt). Qt is
 linked dynamically: the Qt6*.dll files and the plugins and QML modules
 under platforms\, qml\ and the other folders here are Qt's unmodified
@@ -28,7 +28,7 @@ them: D3Dcompiler_47.dll, dxcompiler.dll and dxil.dll (Microsoft
 DirectX shader compilers) and opengl32sw.dll (a software OpenGL
 renderer built from Mesa).
 
-QtTune is an independent project, not affiliated with or endorsed by
+Havne is an independent project, not affiliated with or endorsed by
 The Qt Company.
 
 

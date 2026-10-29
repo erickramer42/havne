@@ -19,14 +19,14 @@ each for 60 s on Linux with Clang and uploads any crashing input.
 
 `-DECUIO_BUILD_FUZZERS=ON` instruments `ecuio-core` and the harnesses
 itself, so no compiler flags need passing. It needs a tree of its own
-(`QTTUNE_BUILD_CORE_ONLY=ON`, `BUILD_TESTING=OFF`), because nothing but
+(`HAVNE_BUILD_CORE_ONLY=ON`, `BUILD_TESTING=OFF`), because nothing but
 a harness can link the instrumented core.
 
 **Windows, with the Visual Studio build tools** (MSVC's experimental
 libFuzzer, Visual Studio 2022 17.0 or later; nothing else to install):
 
 ```sh
-cmake -B build-fuzz-msvc -A x64 -DQTTUNE_BUILD_CORE_ONLY=ON -DBUILD_TESTING=OFF -DECUIO_BUILD_FUZZERS=ON
+cmake -B build-fuzz-msvc -A x64 -DHAVNE_BUILD_CORE_ONLY=ON -DBUILD_TESTING=OFF -DECUIO_BUILD_FUZZERS=ON
 cmake --build build-fuzz-msvc --config RelWithDebInfo --target fuzz_decode_signal fuzz_validate_set fuzz_uds_query
 build-fuzz-msvc/fuzz/RelWithDebInfo/fuzz_decode_signal.exe -max_total_time=60
 ```
@@ -39,7 +39,7 @@ covers that half.
 runtimes are in `libclang-rt-<major>-dev` on Ubuntu):
 
 ```sh
-cmake -B build-fuzz -DCMAKE_BUILD_TYPE=RelWithDebInfo -DQTTUNE_BUILD_CORE_ONLY=ON \
+cmake -B build-fuzz -DCMAKE_BUILD_TYPE=RelWithDebInfo -DHAVNE_BUILD_CORE_ONLY=ON \
   -DBUILD_TESTING=OFF -DECUIO_BUILD_FUZZERS=ON -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++
 cmake --build build-fuzz --target fuzz_decode_signal fuzz_validate_set fuzz_uds_query
 ./build-fuzz/fuzz/fuzz_decode_signal -max_total_time=60

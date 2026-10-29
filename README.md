@@ -1,9 +1,9 @@
-# QtTune
+# Havne
 
-[![CI](https://github.com/erickramer42/qttune/actions/workflows/ci.yml/badge.svg)](https://github.com/erickramer42/qttune/actions/workflows/ci.yml) [![Coverage](https://codecov.io/gh/erickramer42/qttune/graph/badge.svg)](https://codecov.io/gh/erickramer42/qttune) [![Release](https://img.shields.io/github/v/release/erickramer42/qttune)](https://github.com/erickramer42/qttune/releases/latest)
-[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/erickramer42/qttune/badge)](https://scorecard.dev/viewer/?uri=github.com/erickramer42/qttune) [![OpenSSF Best Practices](https://www.bestpractices.dev/projects/15816/badge)](https://www.bestpractices.dev/projects/15816)
+[![CI](https://github.com/erickramer42/havne/actions/workflows/ci.yml/badge.svg)](https://github.com/erickramer42/havne/actions/workflows/ci.yml) [![Coverage](https://codecov.io/gh/erickramer42/havne/graph/badge.svg)](https://codecov.io/gh/erickramer42/havne) [![Release](https://img.shields.io/github/v/release/erickramer42/havne)](https://github.com/erickramer42/havne/releases/latest)
+[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/erickramer42/havne/badge)](https://scorecard.dev/viewer/?uri=github.com/erickramer42/havne) [![OpenSSF Best Practices](https://www.bestpractices.dev/projects/15816/badge)](https://www.bestpractices.dev/projects/15816)
 
-QtTune is a cross-platform OBD-II reader and logger. A Qt-free C++17
+Havne is a cross-platform OBD-II reader and logger. A Qt-free C++17
 core does the vehicle I/O and decoding behind a stable C ABI. A Qt 6 / QML
 front end shows the results as gauges, a live strip chart and a raw CAN
 frame log. It talks to J2534 Pass-Thru adapters on Windows, and a built-in
@@ -12,9 +12,9 @@ simulated vehicle lets it run with no hardware at all.
 > [!WARNING]
 > **Experimental software.** Tested read-only on one vehicle with one adapter — see [DISCLAIMER.md](DISCLAIMER.md).
 >
-> QtTune runs end to end against its simulated vehicle and a fake J2534 vendor driver. Through one real adapter, an OBDX Pro VX, it has read live data from one car in two read-only sessions: the engine ECU answered its requests, and the values decoded and tracked the instrument cluster ([session sheet](docs/bench-sessions/2026-10-25-vehicle.md)). Other vehicles and adapters are untested; [STATUS.md](STATUS.md) tracks what is and isn't verified.
+> Havne runs end to end against its simulated vehicle and a fake J2534 vendor driver. Through one real adapter, an OBDX Pro VX, it has read live data from one car in two read-only sessions: the engine ECU answered its requests, and the values decoded and tracked the instrument cluster ([session sheet](docs/bench-sessions/2026-10-25-vehicle.md)). Other vehicles and adapters are untested; [STATUS.md](STATUS.md) tracks what is and isn't verified.
 
-![The QtTune Dashboard through a quarter mile on the warmed-up simulated vehicle: launch control holds the engine near 4,000 rpm at the line, the tires spin off it, three upshifts at 6,800 rpm refill the shift lights, and speed climbs to about 107 mph at the line while coolant rises from 194 to 216 °F, where the fan cuts in, and the oil from 225 to 239 °F, before the driver lifts](docs/images/dashboard.gif)
+![The Havne Dashboard through a quarter mile on the warmed-up simulated vehicle: launch control holds the engine near 4,000 rpm at the line, the tires spin off it, three upshifts at 6,800 rpm refill the shift lights, and speed climbs to about 107 mph at the line while coolant rises from 194 to 216 °F, where the fan cuts in, and the oil from 225 to 239 °F, before the driver lifts](docs/images/dashboard.gif)
 
 *The Dashboard in real time on the built-in simulated vehicle
 (`mock://demo`), with no hardware attached: a quarter mile off launch
@@ -23,8 +23,8 @@ control on a warm loop, then the lift.*
 ## Try it
 
 On Windows 10 or 11 (x64), download the zip from the
-[latest release](https://github.com/erickramer42/qttune/releases/latest),
-unzip it and run `qttune.exe`. Nothing else is needed: Qt and the
+[latest release](https://github.com/erickramer42/havne/releases/latest),
+unzip it and run `havne.exe`. Nothing else is needed: Qt and the
 Visual C++ runtime are in the zip. The program isn't code-signed, so
 SmartScreen may stop it the first time (**More info**, then **Run
 anyway**). In Settings, press the `mock://demo` preset and **Connect**
@@ -37,7 +37,7 @@ to watch the simulated car drive. Other platforms build from source
  QML pages: Home · Dashboard · Live · Log · Settings
    │  Theme (colors, link-state labels) · SignalHub (signals by name)
    ▼  properties and list models, GUI thread only
- QtTuneBridge (app/)          the only caller of the core
+ SessionBridge (app/)          the only caller of the core
    │  worker → GUI marshaling, 100 ms coalescing, link-health polling
    ▼  C ABI: core.h · signals.h · profile.h · j2534.h · serial.h · stream.h
  ecuio-core (core/)           no Qt, ever
@@ -226,30 +226,30 @@ Installing Qt 6.11+ with aqtinstall needs a workaround; see
 cmake -B build -DCMAKE_PREFIX_PATH=<qt-install>/msvc2022_64
 cmake --build build --config Release
 ctest --test-dir build -C Release --output-on-failure
-build/app/Release/qttune.exe
+build/app/Release/havne.exe
 
 # Linux / macOS
 cmake -B build -DCMAKE_PREFIX_PATH=/path/to/qt
 cmake --build build
 ctest --test-dir build --output-on-failure
-build/app/qttune                              # Linux
-build/app/qttune.app/Contents/MacOS/qttune    # macOS (an app bundle)
+build/app/havne                              # Linux
+build/app/havne.app/Contents/MacOS/havne    # macOS (an app bundle)
 ```
 
 To try it without hardware, open **Settings**, pick the `mock://demo`
 preset and connect.
 
-Add `-DQTTUNE_BUILD_CORE_ONLY=ON` to build only the core library and
+Add `-DHAVNE_BUILD_CORE_ONLY=ON` to build only the core library and
 its tests, without Qt.
 
 **32-bit vendor drivers (Windows).** The app tree builds the x64
 surrogate itself. 32-bit J2534 drivers, such as the OBDX Pro VX's,
 need the x86 surrogate from a second, core-only tree. Build it
 **before** configuring `build`: the app's configure step finds it in
-`build-win32/` and copies it next to `qttune.exe` on every app build.
+`build-win32/` and copies it next to `havne.exe` on every app build.
 
 ```sh
-cmake -B build-win32 -A Win32 -DQTTUNE_BUILD_CORE_ONLY=ON
+cmake -B build-win32 -A Win32 -DHAVNE_BUILD_CORE_ONLY=ON
 cmake --build build-win32 --config Release --target ecuio-j2534-surrogate fake_j2534 fake_j2534_legacy
 ```
 
@@ -270,7 +270,7 @@ a bundled fake.
 ## Feedback and contributing
 
 Found a bug, or have a feature in mind?
-[Open an issue](https://github.com/erickramer42/qttune/issues) — include
+[Open an issue](https://github.com/erickramer42/havne/issues) — include
 the version, your OS and how you connected, and scrub any logs of
 vehicle data (VINs, adapter serials) before attaching them.
 
@@ -299,7 +299,7 @@ build and test a change.
 
 MIT. See the [LICENSE](LICENSE) file.
 
-QtTune uses [Qt](https://www.qt.io), licensed under LGPL-3.0. Qt is
+Havne uses [Qt](https://www.qt.io), licensed under LGPL-3.0. Qt is
 not bundled in this repository; see qt.io for sources and the license
-text. QtTune is an independent project, not affiliated with or
+text. Havne is an independent project, not affiliated with or
 endorsed by The Qt Company.

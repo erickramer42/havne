@@ -55,7 +55,7 @@
              Android keeps the process running with the screen off
              (ADR-0029 §2) -->
         <service
-            android:name="org.qtproject.example.qttune.SessionService"
+            android:name="io.github.erickramer42.havne.SessionService"
             android:exported="false"
             android:foregroundServiceType="connectedDevice" />
 

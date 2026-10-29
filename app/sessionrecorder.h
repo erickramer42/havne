@@ -28,7 +28,7 @@ public:
     /* Creates <root>/<yyyyMMdd-HHmmss>[-n][ <label>]/ and its three
      * files, then writes header (one line each) into events.log. The
      * label (ADR-0027 §2) comes as a folder name may take it
-     * (QtTuneBridge::folderLabel); "" leaves the date alone. False, with
+     * (SessionBridge::folderLabel); "" leaves the date alone. False, with
      * *error set, if the folder or a file can't be created. */
     bool start(const QString& root, const QStringList& header, QString* error,
                const QString& label = {});

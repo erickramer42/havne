@@ -1,6 +1,6 @@
 // File/layer: app/main.cpp | Qt6 Gui/Qml/Quick, app entry point, C++17
-// Testing: manual smoke (the built app launched; QTTUNE_SETTINGS_DIR
-//          through the run-qttune skill's launch; the title bar in the
+// Testing: manual smoke (the built app launched; HAVNE_SETTINGS_DIR
+//          set by a driven launch; the title bar in the
 //          header's color on Windows 11);
 //          BENCH, the phone run sheet (the system bars' color, Android's
 //          window behind Qt's dark; Phase 8, no drawing while inactive:
@@ -36,12 +36,12 @@
 #include "bluetoothdevices.h"
 #include "bridgesingleton.h"
 #include "carryover.h"
-#include "qttunebridge.h"
+#include "sessionbridge.h"
 #include "ecuio/version.h"
 
-// The QtTune module is a static library (app/CMakeLists.txt); this pulls
+// The App module is a static library (app/CMakeLists.txt); this pulls
 // in its plugin, which registers the module's types
-Q_IMPORT_QML_PLUGIN(QtTunePlugin)
+Q_IMPORT_QML_PLUGIN(AppPlugin)
 
 #ifdef Q_OS_ANDROID
 // Android's own window, behind Qt's, follows the phone's day/night theme
@@ -135,8 +135,8 @@ int main(int argc, char *argv[])
         qputenv("QSG_RENDER_LOOP", "basic");
 #endif
     QGuiApplication app(argc, argv);
-    app.setOrganizationName("QtTune");
-    app.setApplicationName("QtTune");
+    app.setOrganizationName("Havne");
+    app.setApplicationName("Havne");
     app.setApplicationVersion(QStringLiteral(ECUIO_VERSION_STRING));
 
     // The UI is dark only. Saying so lets the platform match it: a dark
@@ -145,10 +145,10 @@ int main(int argc, char *argv[])
     // (docs/bench-sessions/2026-10-28-android-2.md)
     QGuiApplication::styleHints()->setColorScheme(Qt::ColorScheme::Dark);
 
-    // QTTUNE_SETTINGS_DIR keeps this instance's preferences in an ini file
+    // HAVNE_SETTINGS_DIR keeps this instance's preferences in an ini file
     // there instead of the user's (the registry on Windows), so a scripted
     // run neither reads nor changes them: the URI, the Record switch, zoom
-    const QString settingsDir = qEnvironmentVariable("QTTUNE_SETTINGS_DIR");
+    const QString settingsDir = qEnvironmentVariable("HAVNE_SETTINGS_DIR");
     if (!settingsDir.isEmpty()) {
         QSettings::setDefaultFormat(QSettings::IniFormat);
         QSettings::setPath(QSettings::IniFormat, QSettings::UserScope, settingsDir);
@@ -167,7 +167,7 @@ int main(int argc, char *argv[])
     BluetoothDevices::instance = &bluetooth;
 
     // Declared before the engine, so it outlives everything QML holds.
-    QtTuneBridge bridge;
+    SessionBridge bridge;
     BridgeSingleton::instance = &bridge;
     bluetooth.attachTo(&bridge);
 #ifdef Q_OS_ANDROID
@@ -176,7 +176,7 @@ int main(int argc, char *argv[])
 #endif
 
     QQmlApplicationEngine engine;
-    engine.loadFromModule("QtTune", "Main");
+    engine.loadFromModule("App", "Main");
 
     if (engine.rootObjects().isEmpty()) {
         qCritical("=== QML FAILED TO LOAD ===");

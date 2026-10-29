@@ -5,8 +5,7 @@
 
 import QtQuick
 import QtTest
-import QtTune
-
+import App
 TestCase {
     name: "Theme"
 

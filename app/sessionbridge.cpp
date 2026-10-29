@@ -1,4 +1,4 @@
-// File/layer: app/qttunebridge.cpp | Qt6 Core, app layer, C++17
+// File/layer: app/sessionbridge.cpp | Qt6 Core, app layer, C++17
 // Testing: test_bridge (QtCore only): worker→GUI marshaling, coalescing,
 //          in-flight backpressure, the frame log's ring and order, its
 //          rows' payload storage (BridgeTest.FrameLogHoldsLongPayloadsOnlyWhileShown)
@@ -24,7 +24,7 @@
 //          .RecordingFolderNamesThePickedVehicleForAnAdapterOnly). QML
 //          rendering: manual smoke.
 
-#include "qttunebridge.h"
+#include "sessionbridge.h"
 #include "carryover.h"
 #include "ecuio/version.h"
 #include "ecuio/signals.h"
@@ -516,8 +516,8 @@ void SignalListModel::setUnplotted(const QStringList& names)
     }
 }
 
-// ---------------- QtTuneBridge ----------------
-QtTuneBridge::QtTuneBridge(QObject* parent)
+// ---------------- SessionBridge ----------------
+SessionBridge::SessionBridge(QObject* parent)
     : QObject(parent)
     , m_frameLog(new FrameListModel(this))
     , m_coalesceTimer(new QTimer(this))
@@ -551,13 +551,12 @@ QtTuneBridge::QtTuneBridge(QObject* parent)
 
     // The activity lines, link transitions included, go into the
     // recording's events.log too
-    connect(this, &QtTuneBridge::logMessage, this, [this](const QString& line) {
-        m_recorder.event(line);
-    });
+    connect(this, &SessionBridge::logMessage, this,
+            [this](const QString& line) { m_recorder.event(line); });
 }
 
 
-QtTuneBridge::~QtTuneBridge()
+SessionBridge::~SessionBridge()
 {
     // Async connect worker first: it calls core and posts a queued
     // completion against `this`. Join before tearing the session or
@@ -591,7 +590,7 @@ QtTuneBridge::~QtTuneBridge()
     ecuio_shutdown();
 }
 
-void QtTuneBridge::destroySessionLocked()
+void SessionBridge::destroySessionLocked()
 {
     // The destructor's teardown. destroy() closes the session first if needed.
     if (m_session != nullptr) {
@@ -600,17 +599,17 @@ void QtTuneBridge::destroySessionLocked()
     }
 }
 
-QString QtTuneBridge::coreVersion() const
+QString SessionBridge::coreVersion() const
 {
     return QString::fromUtf8(ecuio_version_string());
 }
 
-QString QtTuneBridge::statusString(int statusCode) const
+QString SessionBridge::statusString(int statusCode) const
 {
     return QString::fromUtf8(ecuio_status_string(static_cast<ecuio_status_t>(statusCode)));
 }
 
-QVariantList QtTuneBridge::discoverJ2534Devices() const
+QVariantList SessionBridge::discoverJ2534Devices() const
 {
     QVariantList out;
 
@@ -638,7 +637,7 @@ QVariantList QtTuneBridge::discoverJ2534Devices() const
     return out;
 }
 
-QVariantList QtTuneBridge::discoverSerialPorts() const
+QVariantList SessionBridge::discoverSerialPorts() const
 {
     QVariantList out;
     uint32_t count = 0;
@@ -661,8 +660,8 @@ QVariantList QtTuneBridge::discoverSerialPorts() const
     return out;
 }
 
-QString QtTuneBridge::replayUriFor(const QString& folder,
-                                   const QString& recordedUri)
+QString SessionBridge::replayUriFor(const QString& folder,
+                                    const QString& recordedUri)
 {
     const qsizetype q = recordedUri.indexOf(QLatin1Char('?'));
     QString profile;
@@ -704,7 +703,7 @@ QString QtTuneBridge::replayUriFor(const QString& folder,
     return uri;
 }
 
-QVariantList QtTuneBridge::recentRecordings(int limit) const
+QVariantList SessionBridge::recentRecordings(int limit) const
 {
     QVariantList out;
     if (limit <= 0)
@@ -776,7 +775,7 @@ QVariantList QtTuneBridge::recentRecordings(int limit) const
 // the error string. On success the caller owns *out_session and must
 // startSession() and applyConnectedState() on the GUI thread. Touches no
 // Qt models, timers, or properties.
-QString QtTuneBridge::connectCoreOnly(const QString& uri,
+QString SessionBridge::connectCoreOnly(const QString& uri,
                                        ecuio_session_t** out_session)
 {
     const QByteArray uri8 = uri.toUtf8();
@@ -786,11 +785,11 @@ QString QtTuneBridge::connectCoreOnly(const QString& uri,
         return failureText(rc);
     }
 
-    rc = ecuio_register_frame_callback(session, &QtTuneBridge::onFrame, this);
+    rc = ecuio_register_frame_callback(session, &SessionBridge::onFrame, this);
     if (rc == ECUIO_OK) {
         // ADR-0024: core decodes on the worker and hands each frame's
         // values to onValues, after onFrame
-        rc = ecuio_register_values_callback(session, &QtTuneBridge::onValues, this);
+        rc = ecuio_register_values_callback(session, &SessionBridge::onValues, this);
     }
     if (rc != ECUIO_OK) {
         ecuio_session_destroy(session);
@@ -807,7 +806,7 @@ QString QtTuneBridge::connectCoreOnly(const QString& uri,
 // handleFrameInternal after applyConnectedState, and its values wait in
 // the staging, sized here, for the first tick. On failure the session
 // is destroyed.
-QString QtTuneBridge::startSession(ecuio_session_t* session)
+QString SessionBridge::startSession(ecuio_session_t* session)
 {
     // Zeroed before the worker starts, not at the apply: a replay at max
     // can pass the in-flight cap before then, and those drops count
@@ -828,8 +827,8 @@ QString QtTuneBridge::startSession(ecuio_session_t* session)
     if (rc != ECUIO_OK) {
         m_accepting.store(false, std::memory_order_release);
         const QString err = failureText(rc);
-        ecuio_unregister_frame_callback(session, &QtTuneBridge::onFrame, this);
-        ecuio_unregister_values_callback(session, &QtTuneBridge::onValues, this);
+        ecuio_unregister_frame_callback(session, &SessionBridge::onFrame, this);
+        ecuio_unregister_values_callback(session, &SessionBridge::onValues, this);
         ecuio_session_destroy(session);
         return err;
     }
@@ -840,7 +839,7 @@ QString QtTuneBridge::startSession(ecuio_session_t* session)
 // ending with the "Connected:" and "Session:" log lines. Factored out of
 // connectSession so the sync and async paths apply IDENTICAL state
 // (parity by construction, not by care).
-void QtTuneBridge::applyConnectedState(ecuio_session_t* session, const QString& uri)
+void SessionBridge::applyConnectedState(ecuio_session_t* session, const QString& uri)
 {
     // Before any emit: each runs handlers synchronously, and a connect one
     // of them starts must be refused, not replace this session
@@ -888,7 +887,7 @@ void QtTuneBridge::applyConnectedState(ecuio_session_t* session, const QString& 
     }
 }
 
-QString QtTuneBridge::connectSession(const QString& typed)
+QString SessionBridge::connectSession(const QString& typed)
 {
     // Spaces around a pasted URI are the field's, not the URI's: core
     // matches the scheme at the first character
@@ -920,7 +919,7 @@ QString QtTuneBridge::connectSession(const QString& typed)
     return {};
 }
 
-void QtTuneBridge::connectSessionAsync(const QString& typed)
+void SessionBridge::connectSessionAsync(const QString& typed)
 {
     const QString uri = typed.trimmed(); // as connectSession does
     if (m_connected.load(std::memory_order_acquire) || m_connecting
@@ -983,7 +982,7 @@ void QtTuneBridge::connectSessionAsync(const QString& typed)
     });
 }
 
-void QtTuneBridge::disconnectSession()
+void SessionBridge::disconnectSession()
 {
     if (!m_connected.load(std::memory_order_acquire) || m_disconnecting) return;
 
@@ -1047,7 +1046,7 @@ void QtTuneBridge::disconnectSession()
     });
 }
 
-void QtTuneBridge::setRecording(bool on)
+void SessionBridge::setRecording(bool on)
 {
     if (m_connected.load(std::memory_order_acquire) || m_connecting || m_disconnecting) {
         emit recordingChanged();   // refused: puts the switch back
@@ -1058,7 +1057,7 @@ void QtTuneBridge::setRecording(bool on)
     emit recordingChanged();
 }
 
-void QtTuneBridge::setUnitSystem(int units)
+void SessionBridge::setUnitSystem(int units)
 {
     if (units != static_cast<int>(ECUIO_UNITS_METRIC) &&
         units != static_cast<int>(ECUIO_UNITS_IMPERIAL)) {
@@ -1069,7 +1068,7 @@ void QtTuneBridge::setUnitSystem(int units)
     emit unitSystemChanged();
 }
 
-double QtTuneBridge::displayValue(const QString& unit, double value) const
+double SessionBridge::displayValue(const QString& unit, double value) const
 {
     ecuio_display_value_t out;
     const QByteArray u = unit.toUtf8();
@@ -1080,7 +1079,7 @@ double QtTuneBridge::displayValue(const QString& unit, double value) const
     return out.value;
 }
 
-QString QtTuneBridge::displayUnit(const QString& unit) const
+QString SessionBridge::displayUnit(const QString& unit) const
 {
     ecuio_display_value_t out;
     const QByteArray u = unit.toUtf8();
@@ -1091,7 +1090,7 @@ QString QtTuneBridge::displayUnit(const QString& unit) const
     return QString::fromUtf8(out.unit);
 }
 
-QString QtTuneBridge::recordingFolder() const
+QString SessionBridge::recordingFolder() const
 {
     const QString folder = m_recorder.folder();
     if (folder.isEmpty()) return {};
@@ -1105,7 +1104,7 @@ QString QtTuneBridge::recordingFolder() const
     return QDir::toNativeSeparators(folder);
 }
 
-QUrl QtTuneBridge::recordingFolderUrl() const
+QUrl SessionBridge::recordingFolderUrl() const
 {
     const QString folder = m_recorder.folder();
     return folder.isEmpty() ? QUrl() : QUrl::fromLocalFile(folder);
@@ -1117,7 +1116,7 @@ QUrl QtTuneBridge::recordingFolderUrl() const
 // bridge set comes off again at the next connect without recording.
 // Called on the GUI thread before the connect spawns anything; the child
 // inherits the environment at spawn.
-void QtTuneBridge::applyFrameLoggingEnv()
+void SessionBridge::applyFrameLoggingEnv()
 {
     static const char kVar[] = "ECUIO_SUR_LOG_FRAMES";
     if (m_recording) {
@@ -1131,17 +1130,17 @@ void QtTuneBridge::applyFrameLoggingEnv()
     }
 }
 
-QString QtTuneBridge::recordingsRoot() const
+QString SessionBridge::recordingsRoot() const
 {
     if (!m_recordingsRoot.isEmpty())
         return m_recordingsRoot;
     const QString docs =
         QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation);
     return docs.isEmpty() ? QString()
-                          : docs + QStringLiteral("/QtTune/recordings");
+                          : docs + QStringLiteral("/Havne/recordings");
 }
 
-QString QtTuneBridge::earlierRecordingsRoot() const
+QString SessionBridge::earlierRecordingsRoot() const
 {
     if (!m_earlierRecordingsRoot.isEmpty())
         return m_earlierRecordingsRoot;
@@ -1154,7 +1153,7 @@ QString QtTuneBridge::earlierRecordingsRoot() const
     return docs.isEmpty() || root == recordingsRoot() ? QString() : root;
 }
 
-void QtTuneBridge::startRecording(const QString& uri, const ecuio_signal_set_t* set)
+void SessionBridge::startRecording(const QString& uri, const ecuio_signal_set_t* set)
 {
     if (!m_recording) return;
     // A replay would copy the recording it plays
@@ -1180,7 +1179,7 @@ void QtTuneBridge::startRecording(const QString& uri, const ecuio_signal_set_t* 
     }
     const QByteArray frameLogging = qgetenv("ECUIO_SUR_LOG_FRAMES");
     const QStringList header = {
-        QStringLiteral("QtTune session recording (ADR-0017)"),
+        QStringLiteral("Havne session recording (ADR-0017)"),
         QStringLiteral("started  %1 (local time)")
             .arg(QDateTime::currentDateTime().toString(QStringLiteral("yyyy-MM-dd HH:mm:ss.zzz"))),
         QStringLiteral("core     %1").arg(coreVersion()),
@@ -1211,7 +1210,7 @@ void QtTuneBridge::startRecording(const QString& uri, const ecuio_signal_set_t* 
     emit logMessage(QStringLiteral("Recording: %1").arg(recordingFolder()));
 }
 
-QString QtTuneBridge::recordingSummary(const QString& why) const
+QString SessionBridge::recordingSummary(const QString& why) const
 {
     return QStringLiteral("end      %1: %2 frames, %3 values, %4 frames dropped by the bridge")
         .arg(why)
@@ -1220,21 +1219,21 @@ QString QtTuneBridge::recordingSummary(const QString& why) const
         .arg(m_droppedFrames.load(std::memory_order_relaxed));
 }
 
-void QtTuneBridge::stopRecording(const QString& why)
+void SessionBridge::stopRecording(const QString& why)
 {
     if (!m_recorder.active()) return;
     m_recorder.stop(recordingSummary(why));
     emit recordingStateChanged();
 }
 
-void QtTuneBridge::setLogPaused(bool paused)
+void SessionBridge::setLogPaused(bool paused)
 {
     if (m_logPaused == paused) return;
     m_logPaused = paused;
     emit logPausedChanged();
 }
 
-void QtTuneBridge::clearFrames()
+void SessionBridge::clearFrames()
 {
     m_frameLog->clear();
     m_currentFrameCount = 0;
@@ -1242,9 +1241,9 @@ void QtTuneBridge::clearFrames()
     emit framesReset();
 }
 
-void QtTuneBridge::onFrame(const ecuio_frame_t* frame, void* user_data)
+void SessionBridge::onFrame(const ecuio_frame_t* frame, void* user_data)
 {
-    QtTuneBridge* self = static_cast<QtTuneBridge*>(user_data);
+    SessionBridge* self = static_cast<SessionBridge*>(user_data);
     if (!frame || !self) return;
     if (!self->m_accepting.load(std::memory_order_acquire)) return;
     self->m_framesDelivered.fetch_add(1, std::memory_order_relaxed);
@@ -1290,8 +1289,8 @@ void QtTuneBridge::onFrame(const ecuio_frame_t* frame, void* user_data)
     }, Qt::QueuedConnection);
 }
 
-void QtTuneBridge::handleFrameInternal(const ecuio_frame_t* frame,
-                                       SessionRecorder::Clock::time_point arrived)
+void SessionBridge::handleFrameInternal(
+    const ecuio_frame_t* frame, SessionRecorder::Clock::time_point arrived)
 {
     if (!m_connected.load(std::memory_order_acquire)) return;
 
@@ -1322,7 +1321,7 @@ void QtTuneBridge::handleFrameInternal(const ecuio_frame_t* frame,
 
 // The frame counters reach QML at the coalesce tick's rate, and at
 // connect, disconnect and clear, never per frame.
-void QtTuneBridge::notifyFrameCounts()
+void SessionBridge::notifyFrameCounts()
 {
     if (m_currentFrameCount != m_reportedFrameCount) {
         m_reportedFrameCount = m_currentFrameCount;
@@ -1343,7 +1342,7 @@ void QtTuneBridge::notifyFrameCounts()
     }
 }
 
-void QtTuneBridge::notifyDropped()
+void SessionBridge::notifyDropped()
 {
     const int dropped = m_droppedFrames.load(std::memory_order_relaxed);
     if (dropped != m_lastReportedDropped) {
@@ -1352,7 +1351,7 @@ void QtTuneBridge::notifyDropped()
     }
 }
 
-void QtTuneBridge::forceFrameCountForTesting(int count)
+void SessionBridge::forceFrameCountForTesting(int count)
 {
     if (count < 0) {
         return;
@@ -1361,20 +1360,20 @@ void QtTuneBridge::forceFrameCountForTesting(int count)
     notifyFrameCounts();   // keep the QML binding in sync
 }
 
-void QtTuneBridge::dispatchFrameForTesting(const ecuio_frame_t& frame)
+void SessionBridge::dispatchFrameForTesting(const ecuio_frame_t& frame)
 {
     onFrame(&frame, this);
 }
 
-void QtTuneBridge::dispatchValuesForTesting(const ecuio_value_batch_t& batch)
+void SessionBridge::dispatchValuesForTesting(const ecuio_value_batch_t& batch)
 {
     onValues(&batch, this);
 }
 
 // ---- Decoded values from core's worker (ADR-0024) ----
 
-void QtTuneBridge::ValueStaging::prepare(size_t defs, size_t samplesMax,
-                                         size_t textMax)
+void SessionBridge::ValueStaging::prepare(size_t defs, size_t samplesMax,
+                                          size_t textMax)
 {
     samples.clear();
     samples.reserve(samplesMax);
@@ -1397,9 +1396,9 @@ void QtTuneBridge::ValueStaging::prepare(size_t defs, size_t samplesMax,
 // frame's time) whatever the limits; a sample past one is counted, and
 // only the recording misses it. Grows nothing: prepare reserved the
 // limits.
-void QtTuneBridge::ValueStaging::stage(uint32_t def,
-                                       SessionRecorder::Clock::time_point arrived,
-                                       uint64_t frameUs, const ecuio_value_t& v)
+void SessionBridge::ValueStaging::stage(
+    uint32_t def, SessionRecorder::Clock::time_point arrived, uint64_t frameUs,
+    const ecuio_value_t& v)
 {
     const bool isText = v.text != nullptr;
     if (!isText) {
@@ -1435,7 +1434,7 @@ void QtTuneBridge::ValueStaging::stage(uint32_t def,
     samples.push_back(s);
 }
 
-void QtTuneBridge::ValueStaging::reset()
+void SessionBridge::ValueStaging::reset()
 {
     samples.clear();
     text.clear();
@@ -1444,7 +1443,7 @@ void QtTuneBridge::ValueStaging::reset()
     dropped = 0;
 }
 
-void QtTuneBridge::prepareValueStaging(const ecuio_signal_set_t* set)
+void SessionBridge::prepareValueStaging(const ecuio_signal_set_t* set)
 {
     const bool decodes = set != nullptr && set->defs != nullptr && set->count > 0;
     const size_t defs = decodes ? set->count : 0;
@@ -1462,9 +1461,9 @@ void QtTuneBridge::prepareValueStaging(const ecuio_signal_set_t* set)
     m_valuesDropped = 0;
 }
 
-void QtTuneBridge::onValues(const ecuio_value_batch_t* batch, void* user_data)
+void SessionBridge::onValues(const ecuio_value_batch_t* batch, void* user_data)
 {
-    QtTuneBridge* self = static_cast<QtTuneBridge*>(user_data);
+    SessionBridge* self = static_cast<SessionBridge*>(user_data);
     if (!batch || !self) return;
     if (!self->m_accepting.load(std::memory_order_acquire)) return;
     const auto arrived = SessionRecorder::Clock::now();
@@ -1480,7 +1479,7 @@ void QtTuneBridge::onValues(const ecuio_value_batch_t* batch, void* user_data)
     }
 }
 
-void QtTuneBridge::drainValues()
+void SessionBridge::drainValues()
 {
     if (m_valueSet == nullptr) return;
     ValueStaging* full = nullptr;
@@ -1541,7 +1540,7 @@ void QtTuneBridge::drainValues()
 
 // The tick's half: the window's values into the model, one entry per
 // signal, whatever the frame rate (ADR-0024 §7)
-void QtTuneBridge::flushValues()
+void SessionBridge::flushValues()
 {
     drainValues();
     if (m_stagingBuffer.empty() && m_stagingTexts.empty()) return;
@@ -1557,7 +1556,7 @@ void QtTuneBridge::flushValues()
     emit signalBatchChanged();
 }
 
-QtTuneBridge::DeliveryStats QtTuneBridge::deliveryStats() const
+SessionBridge::DeliveryStats SessionBridge::deliveryStats() const
 {
     DeliveryStats s;
     s.frames = m_framesDelivered.load(std::memory_order_relaxed);
@@ -1597,7 +1596,7 @@ QString quantilesText(const LatencyStats& l)
 // 31 µs, p99 412 µs, max 1.2 ms; 28296 values, to the model in median
 // 51 ms, p99 99 ms, max 101 ms". A quantile is the top of its bucket,
 // at most 12.5 % above the true value (LatencyStats).
-QString QtTuneBridge::deliveryText(const DeliveryStats& s)
+QString SessionBridge::deliveryText(const DeliveryStats& s)
 {
     if (s.frames == 0) {
         return QStringLiteral("Delivery: no frames");
@@ -1630,7 +1629,7 @@ QString QtTuneBridge::deliveryText(const DeliveryStats& s)
     return line;
 }
 
-void QtTuneBridge::pollLinkHealth()
+void SessionBridge::pollLinkHealth()
 {
     if (!m_connected.load(std::memory_order_acquire) || m_session == nullptr) {
         return;
@@ -1673,7 +1672,7 @@ void QtTuneBridge::pollLinkHealth()
 /* What each channel's ECU said it supports (ADR-0015 §4), in the
  * activity log once per update: the probe's walk ending, and each
  * request it drops. Generation 0 is nothing learned yet. */
-void QtTuneBridge::pollChannelSupport()
+void SessionBridge::pollChannelSupport()
 {
     if (!m_connected.load(std::memory_order_acquire) || m_session == nullptr) {
         return;
@@ -1692,7 +1691,7 @@ void QtTuneBridge::pollChannelSupport()
 /* One channel's "ECU 0x…:" line: what its supported-PID bitmaps list,
  * and which requests left the rotation, and why. Static, like
  * sessionInfoText, so test_bridge pins the wording without an adapter. */
-QString QtTuneBridge::channelSupportText(const ecuio_channel_support_t& s)
+QString SessionBridge::channelSupportText(const ecuio_channel_support_t& s)
 {
 
     QStringList parts;
@@ -1789,7 +1788,7 @@ QString QtTuneBridge::channelSupportText(const ecuio_channel_support_t& s)
  * the unanswered items and they settle. One line per ECU, so the VIN
  * and the calibration IDs land in the log and in a recording's
  * events.log together. */
-void QtTuneBridge::pollChannelIdentity()
+void SessionBridge::pollChannelIdentity()
 {
     if (!m_connected.load(std::memory_order_acquire) || m_session == nullptr) {
         return;
@@ -1815,7 +1814,7 @@ void QtTuneBridge::pollChannelIdentity()
     }
 }
 
-QString QtTuneBridge::vinFromIdentity(const ecuio_channel_identity_t& identity)
+QString SessionBridge::vinFromIdentity(const ecuio_channel_identity_t& identity)
 {
     QString fromService09;
     QString fromF190;
@@ -1847,7 +1846,7 @@ QString QtTuneBridge::vinFromIdentity(const ecuio_channel_identity_t& identity)
     return fromService09.isEmpty() ? fromF190 : fromService09;
 }
 
-QString QtTuneBridge::vinKey(const QString& salt) const
+QString SessionBridge::vinKey(const QString& salt) const
 {
     if (m_vin.isEmpty()) {
         return {};
@@ -1858,7 +1857,7 @@ QString QtTuneBridge::vinKey(const QString& salt) const
             .toHex());
 }
 
-QString QtTuneBridge::newSalt() const
+QString SessionBridge::newSalt() const
 {
     QByteArray bytes(16, '\0');
     for (char& b : bytes) {
@@ -1867,7 +1866,7 @@ QString QtTuneBridge::newSalt() const
     return QString::fromLatin1(bytes.toHex());
 }
 
-void QtTuneBridge::setVehicleLabel(const QString& label)
+void SessionBridge::setVehicleLabel(const QString& label)
 {
     if (label == m_vehicleLabel) {
         return;
@@ -1876,7 +1875,7 @@ void QtTuneBridge::setVehicleLabel(const QString& label)
     emit vehicleLabelChanged();
 }
 
-QString QtTuneBridge::folderLabel(const QString& label)
+QString SessionBridge::folderLabel(const QString& label)
 {
     QString out;
     for (const QChar ch : label) {
@@ -1898,7 +1897,7 @@ QString QtTuneBridge::folderLabel(const QString& label)
  * name and text, then the refused requests with their codes, then how
  * many went unanswered. Static, like channelSupportText, so test_bridge
  * pins the wording without an adapter. */
-QString QtTuneBridge::channelIdentityText(const ecuio_channel_identity_t& s)
+QString SessionBridge::channelIdentityText(const ecuio_channel_identity_t& s)
 {
 
     QStringList parts;
@@ -1955,7 +1954,7 @@ QString QtTuneBridge::channelIdentityText(const ecuio_channel_identity_t& s)
  * a local folder never reaches the screen or a screenshot, and a long
  * path can't elide the DLL off the pill's end. The query stays; every
  * other URI is unchanged. Settings and the activity log keep it whole. */
-QString QtTuneBridge::uriLabelFor(const QString& uri)
+QString SessionBridge::uriLabelFor(const QString& uri)
 {
     const bool replay = uri.startsWith(QStringLiteral("replay://"));
     const QString scheme =
@@ -1999,7 +1998,7 @@ QString QtTuneBridge::uriLabelFor(const QString& uri)
 /* A replay without loop=1 stops sending at the end of its file and the
  * session stays open (ADR-0023); this says so once, when every frame the
  * file holds has reached onFrame, taken or dropped */
-void QtTuneBridge::pollReplayEnd()
+void SessionBridge::pollReplayEnd()
 {
     if (m_replayEndLogged ||
         m_framesDelivered.load(std::memory_order_relaxed) < m_replayFrames) {
@@ -2015,7 +2014,7 @@ void QtTuneBridge::pollReplayEnd()
  * Theme.linkLabel key on them. Static and session-free so test_bridge
  * can pin every mapping without a transport — linkState() itself stays
  * a connected-check + delegation. */
-QString QtTuneBridge::linkStateForError(int32_t errorCode)
+QString SessionBridge::linkStateForError(int32_t errorCode)
 {
     switch (errorCode) {
         case ECUIO_OK:                         return QStringLiteral("ok");
@@ -2030,7 +2029,7 @@ QString QtTuneBridge::linkStateForError(int32_t errorCode)
 /* What the session runs on, for the activity log (and so the
  * recording's events.log). Static, like linkStateForError, so
  * test_bridge pins the wording without an adapter. */
-QString QtTuneBridge::sessionInfoText(const ecuio_session_info_t& info)
+QString SessionBridge::sessionInfoText(const ecuio_session_info_t& info)
 {
     const QString profile = QStringLiteral("profile ") + QString::fromUtf8(
         info.profile, static_cast<qsizetype>(
@@ -2121,7 +2120,7 @@ QString QtTuneBridge::sessionInfoText(const ecuio_session_info_t& info)
  * device: an ELM327's AT I answer, then STI's on an STN chip; a J2534
  * adapter's firmware, DLL and API. "" without a reading, and for the
  * backends that have no adapter. */
-QString QtTuneBridge::versionsText(const ecuio_session_info_t& info)
+QString SessionBridge::versionsText(const ecuio_session_info_t& info)
 {
     if ((info.flags & ECUIO_SESSION_INFO_VERSIONS) == 0) {
         return {};
@@ -2143,7 +2142,7 @@ QString QtTuneBridge::versionsText(const ecuio_session_info_t& info)
     return {};
 }
 
-QString QtTuneBridge::linkState() const
+QString SessionBridge::linkState() const
 {
     if (!m_connected.load(std::memory_order_acquire)) {
         return QStringLiteral("disconnected");

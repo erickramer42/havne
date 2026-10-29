@@ -12,8 +12,8 @@
 
 import QtQuick
 import QtTest
-import QtTune
-import QtTuneTest
+import App
+import AppTest
 
 TestCase {
     id: testCase
@@ -24,7 +24,7 @@ TestCase {
 
     // A binding error in the app's QML fails the test
     function init() {
-        failOnWarning(/^qrc:\/qt\/qml\/QtTune\//)
+        failOnWarning(/^qrc:\/qt\/qml\/App\//)
     }
 
     function cleanup() {

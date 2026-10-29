@@ -37,8 +37,8 @@
 import QtCore
 import QtQuick
 import QtTest
-import QtTune
-import QtTuneTest
+import App
+import AppTest
 
 TestCase {
     id: testCase
@@ -66,7 +66,7 @@ TestCase {
     // A binding error in the app's QML fails the test. Each case starts
     // with nothing stored, or the last case's URI would fill the field
     function init() {
-        failOnWarning(/^qrc:\/qt\/qml\/QtTune\//)
+        failOnWarning(/^qrc:\/qt\/qml\/App\//)
         stored.setValue("uri", "")
         stored.setValue("recording", false)
         stored.setValue("adapterVersions", "{}")

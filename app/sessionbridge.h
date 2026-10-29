@@ -1,4 +1,4 @@
-// File/layer: app/qttunebridge.h | Qt6 Core, app layer, C++17
+// File/layer: app/sessionbridge.h | Qt6 Core, app layer, C++17
 // Testing: test_bridge (Qt-linked target): the frame log's ring, order
 //          and payload storage, SignalListModel's history ring and display units,
 //          discoverJ2534Devices' and discoverSerialPorts' marshaling
@@ -269,7 +269,7 @@ private:
     QElapsedTimer m_clock;   // fallback timestamp source; started in setSignalSet
 };
 
-class QtTuneBridge : public QObject
+class SessionBridge : public QObject
 {
     Q_OBJECT
     Q_PROPERTY(QString coreVersion READ coreVersion CONSTANT)
@@ -317,8 +317,8 @@ class QtTuneBridge : public QObject
     Q_PROPERTY(int unitSystem READ unitSystem WRITE setUnitSystem NOTIFY unitSystemChanged)
 
 public:
-    explicit QtTuneBridge(QObject* parent = nullptr);
-    ~QtTuneBridge() override;
+    explicit SessionBridge(QObject* parent = nullptr);
+    ~SessionBridge() override;
 
     QString coreVersion() const;
     bool connected() const { return m_connected.load(std::memory_order_acquire); }
@@ -435,7 +435,7 @@ public:
     // units, and converted here rather than in QML (rule 2).
     Q_INVOKABLE double displayValue(const QString& unit, double value) const;
     Q_INVOKABLE QString displayUnit(const QString& unit) const;
-    // Test seam: where recordings go instead of Documents/QtTune/recordings
+    // Test seam: where recordings go instead of Documents/Havne/recordings
     void setRecordingsRootForTesting(const QString& root) { m_recordingsRoot = root; }
     // Test seam: the earlier name's recordings, instead of
     // Documents/<earlierProductName()>/recordings
@@ -512,7 +512,7 @@ private:
     // and once more at disconnect)
     void flushValues();
     void applyFrameLoggingEnv();
-    // Where recordings go: the test root, else Documents/QtTune/recordings;
+    // Where recordings go: the test root, else Documents/Havne/recordings;
     // "" with no Documents folder
     QString recordingsRoot() const;
     // The earlier product name's recordings, read but never written: the
@@ -654,7 +654,7 @@ private:
 
     bool m_recording = false;
     SessionRecorder m_recorder;
-    QString m_recordingsRoot;          // empty: Documents/QtTune/recordings
+    QString m_recordingsRoot;          // empty: Documents/Havne/recordings
     QString m_earlierRecordingsRoot;   // empty: the earlier name's folder
     bool m_recordReplays = false;      // tests only
     bool m_setFrameLogging = false;    // the bridge, not the launch, set ECUIO_SUR_LOG_FRAMES

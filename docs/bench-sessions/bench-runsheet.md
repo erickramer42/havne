@@ -2,7 +2,7 @@
 
 **Date:** <date>  **Adapter:** OBDX Pro VX (USB)
 **Machine:** <the dev machine, or the laptop that goes to the car>
-**QtTune build:** <commit hash>  **Trees:** build, build-win32 both fresh
+**Havne build:** <commit hash>  **Trees:** build, build-win32 both fresh
 **Vehicle connected:** No. This is the BENCH tier; a vehicle session
 has its own sheet, [vehicle-runsheet.md](vehicle-runsheet.md).
 
@@ -36,7 +36,7 @@ more than one that runs to the end undocumented.
 - [ ] Fresh build of both trees, **Win32 first**
       ([development.md, "Build configurations"](../development.md#build-configurations)
       has the commands), and the app build
-      prints "Deploying Win32 J2534 surrogate next to qttune.exe". If
+      prints "Deploying Win32 J2534 surrogate next to havne.exe". If
       it doesn't, re-run `cmake -B build` and rebuild: without the copy,
       an x86 adapter fails to connect with "surrogate process failed: no
       surrogate (ecuio-j2534-surrogate.exe): none next to the app"
@@ -80,7 +80,7 @@ URI. Leave it about two minutes:
       (1 episode(s))" within about a second
 - [ ] The probe interval grows to about 5.6 s as the backoff reaches
       its 5 s cap
-- [ ] Task Manager: `qttune.exe` and the 32-bit
+- [ ] Task Manager: `havne.exe` and the 32-bit
       `ecuio-j2534-surrogate.exe` both under 1 % CPU
 - [ ] Disconnect: `Disconnected:` within about 0.5 s, one
       `OP_DISCONNECT: vendor status 0`, and the surrogate process gone
@@ -91,7 +91,7 @@ URI. Leave it about two minutes:
 |---|---|
 | "PassThruOpen returned status 34 (0x22, vendor-specific)" | The adapter isn't attached (the VX and the VT both answer 34 then) |
 | "built from other shared headers" | A stale `build-win32`: rebuild both trees |
-| "surrogate process failed: no surrogate" | The surrogate missing next to `qttune.exe` |
+| "surrogate process failed: no surrogate" | The surrogate missing next to `havne.exe` |
 | "couldn't load what the URI names", fast | The DLL didn't load in the surrogate, or lacks an export: the exit codes in [j2534.md](../j2534.md#surrogate) |
 | A handshake timeout (8 s) | The child never started: security software holding a newly built exe, or a blocked spawn |
 | Filter registration rejected | BENCH prep #1, the 4-byte filter shape. Record the vendor status |

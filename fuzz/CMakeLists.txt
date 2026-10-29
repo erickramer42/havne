@@ -15,11 +15,11 @@
 # Instrumented core can only link into a harness: anything else would
 # miss libFuzzer's coverage callbacks. So the fuzzers get a tree of
 # their own.
-if(BUILD_TESTING OR NOT QTTUNE_BUILD_CORE_ONLY)
+if(BUILD_TESTING OR NOT HAVNE_BUILD_CORE_ONLY)
     message(FATAL_ERROR
         "ECUIO_BUILD_FUZZERS=ON instruments ecuio-core, which the tests "
         "and the app can't link: configure a separate tree with "
-        "-DQTTUNE_BUILD_CORE_ONLY=ON -DBUILD_TESTING=OFF.")
+        "-DHAVNE_BUILD_CORE_ONLY=ON -DBUILD_TESTING=OFF.")
 endif()
 
 set(_ecuio_fuzzers fuzz_decode_signal fuzz_validate_set fuzz_uds_query)
@@ -39,7 +39,7 @@ if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang" AND
         target_include_directories(${_t} PRIVATE ${CMAKE_SOURCE_DIR}/core/src)
         target_compile_options(${_t} PRIVATE ${_ecuio_fuzz_instrument})
         target_link_options(${_t} PRIVATE -fsanitize=fuzzer,address,undefined)
-        qttune_enable_warnings(${_t})
+        app_enable_warnings(${_t})
     endforeach()
 elseif(MSVC)
     # The /fsanitize-coverage options are what /fsanitize=fuzzer implies,
@@ -58,7 +58,7 @@ elseif(MSVC)
         target_include_directories(${_t} PRIVATE ${CMAKE_SOURCE_DIR}/core/src)
         target_compile_options(${_t} PRIVATE /fsanitize=address /fsanitize=fuzzer)
         target_link_options(${_t} PRIVATE /INCREMENTAL:NO)   # ASan refuses it
-        qttune_enable_warnings(${_t})
+        app_enable_warnings(${_t})
         # The ASan runtime is a DLL beside cl.exe; copied next to the
         # harness so it runs from any shell.
         add_custom_command(TARGET ${_t} POST_BUILD
