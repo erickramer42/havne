@@ -1,6 +1,7 @@
 // File/layer: core/src/elm327_tcp.h | internal, C++17, Qt-free
-// Testing: UNIT — Elm327TcpTest.AddressesAreADottedIpv4AndAPort
-//          (test_elm327): the address rules; HARNESS — Elm327TcpTest
+// Testing: UNIT — Elm327TcpTest.AddressesAreADottedIpv4AndAPort and
+//          .ConnectFailuresAreWorded (test_elm327): the address rules,
+//          a failed connect's words; HARNESS — Elm327TcpTest
 //          (test_elm327_session, every platform): the socket against the
 //          fake ELM327 behind a loopback listener
 //
@@ -33,6 +34,11 @@ bool elm327_tcp_address(const char* name, size_t n, uint32_t* ip,
 
 /* What an address looks like, for a refusal's detail. */
 const char* elm327_tcp_example();
+
+/* A failed connect's reason in the port's words, from the socket's error
+ * (a Windows sockets code on Windows, errno elsewhere); a code with no
+ * words of its own is named by its number or strerror. */
+void elm327_tcp_describe(int error, char* why, uint32_t why_cap);
 
 /* Connects to name, a TCP address, within ELM327_TCP_CONNECT_MS: Nagle
  * off, no SIGPIPE. ECUIO_OK, or LOAD_FAILED with the reason in why

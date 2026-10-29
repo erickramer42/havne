@@ -4,11 +4,13 @@
 //          kind, frame shapes in both addressing modes, ISO-TP
 //          reassembly per CAN ID, the voltage and the version strings,
 //          the commands it formats, and replies reaching the request
-//          engine; a WiFi adapter's address (elm327_tcp.h). Qt-free.
+//          engine; a WiFi adapter's address and a failed connect's words
+//          (elm327_tcp.h). Qt-free.
 
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <cerrno>
 #include <cstdlib>
 #include <cstring>
 #include <string>
@@ -808,4 +810,36 @@ TEST(Elm327TcpTest, AddressesAreADottedIpv4AndAPort)
     /* The length bounds the name, not a NUL: a port cut short is refused */
     EXPECT_FALSE(elm327_tcp_address("192.168.4.1:23", 12, nullptr, nullptr));
     EXPECT_TRUE(elm327_tcp_address("192.168.4.1:2345", 14, nullptr, nullptr));
+}
+
+/* A failed connect says what happened in words: the bench's reconnect
+ * after the adapter's WiFi went away read "Windows sockets error 10053";
+ * a code with no words of its own still names itself */
+TEST(Elm327TcpTest, ConnectFailuresAreWorded)
+{
+#ifdef _WIN32
+    const int refused = 10061, unreachable = 10051, timed_out = 10060,
+              aborted = 10053, reset = 10054, other = 10013;
+#else
+    const int refused = ECONNREFUSED, unreachable = ENETUNREACH,
+              timed_out = ETIMEDOUT, aborted = ECONNABORTED,
+              reset = ECONNRESET, other = EACCES;
+#endif
+    char why[160];
+    const auto words = [&](int e) {
+        why[0] = '\0';
+        elm327_tcp_describe(e, why, sizeof(why));
+        return std::string(why);
+    };
+    EXPECT_EQ(words(refused), "the connection was refused");
+    EXPECT_EQ(words(unreachable), "the network is unreachable");
+    EXPECT_EQ(words(timed_out),
+              "no answer within 2 s (is this computer on the adapter's "
+              "WiFi?)");
+    EXPECT_EQ(words(aborted), "the connection was cut off on this "
+                              "computer's side (did it leave the adapter's "
+                              "WiFi?)");
+    EXPECT_EQ(words(reset), "the adapter reset the connection");
+    EXPECT_EQ(words(other).rfind("the connection failed (", 0), 0u)
+        << words(other);
 }

@@ -1,7 +1,7 @@
 // File/layer: core/src/elm327_tcp.cpp | C++17, Qt-free; Winsock and POSIX
 //             sockets
-// Testing: UNIT — Elm327TcpTest.AddressesAreADottedIpv4AndAPort
-//          (test_elm327); HARNESS — Elm327TcpTest (test_elm327_session,
+// Testing: UNIT — Elm327TcpTest.AddressesAreADottedIpv4AndAPort and
+//          .ConnectFailuresAreWorded (test_elm327); HARNESS — Elm327TcpTest (test_elm327_session,
 //          every platform): a session over loopback, reads and their
 //          timeouts, the far side closing, a refusal; BENCH — the VX's
 //          WiFi (ADR-0026's appendix "WiFi over TCP")
@@ -114,6 +114,11 @@ void close_socket(sock_t s)
 
 const char kNoAnswer[] =
     "no answer within 2 s (is this computer on the adapter's WiFi?)";
+/* This computer's network stack dropped the connection: on the bench, a
+ * reconnect after the adapter's WiFi went away */
+const char kCutOff[] = "the connection was cut off on this computer's side "
+                       "(did it leave the adapter's WiFi?)";
+const char kReset[] = "the adapter reset the connection";
 
 /* A failed connect's reason, in the port's words. */
 void describe(int e, char* why, uint32_t cap)
@@ -127,6 +132,10 @@ void describe(int e, char* why, uint32_t cap)
         set_why(why, cap, "the address is unreachable");
     } else if (e == WSAETIMEDOUT) {
         set_why(why, cap, kNoAnswer);
+    } else if (e == WSAECONNABORTED) {
+        set_why(why, cap, kCutOff);
+    } else if (e == WSAECONNRESET) {
+        set_why(why, cap, kReset);
     } else if (cap > 0) {
         snprintf(why, cap, "the connection failed (Windows sockets error %d)",
                  e);
@@ -140,6 +149,10 @@ void describe(int e, char* why, uint32_t cap)
         set_why(why, cap, "the address is unreachable");
     } else if (e == ETIMEDOUT) {
         set_why(why, cap, kNoAnswer);
+    } else if (e == ECONNABORTED) {
+        set_why(why, cap, kCutOff);
+    } else if (e == ECONNRESET) {
+        set_why(why, cap, kReset);
     } else if (cap > 0) {
         snprintf(why, cap, "the connection failed (%s)", strerror(e));
     }
@@ -384,6 +397,11 @@ bool elm327_tcp_address(const char* name, size_t n, uint32_t* ip,
 const char* elm327_tcp_example()
 {
     return "an IPv4 address and port, like 192.168.0.10:35000";
+}
+
+void elm327_tcp_describe(int error, char* why, uint32_t why_cap)
+{
+    describe(error, why, why_cap);
 }
 
 ecuio_status_t elm327_tcp_open(const char* name, ecuio_elm327_port_t* out,
