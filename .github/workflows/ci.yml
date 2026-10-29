@@ -7,8 +7,8 @@ on:
     branches: [main]
   # Actions > CI > Run workflow, or: gh workflow run ci.yml --ref <branch>
   # [-f smoke_only=true]. A manual run is the way to get the iOS simulator
-  # smoke outside a pull request; re-running a push run replays the push
-  # and skips the smoke again.
+  # smoke, besides [ios-smoke] in a pushed commit's message; re-running a
+  # push run replays the push and skips the smoke again.
   workflow_dispatch:
     inputs:
       smoke_only:
@@ -488,8 +488,9 @@ jobs:
   # the pushed commit's message. A re-run replays the original event, so
   # re-running a skipped smoke skips it again.
   ios-simulator-smoke:
+    # On request only: it takes 20 minutes on the Intel runner, so pull
+    # requests don't wait on it
     if: >-
-      github.event_name == 'pull_request' ||
       github.event_name == 'workflow_dispatch' ||
       (github.event_name == 'push' &&
       contains(github.event.head_commit.message, '[ios-smoke]'))

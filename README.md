@@ -119,8 +119,8 @@ screen, is [docs/architecture.md](docs/architecture.md).
   validators and the `uds-generic` query parser with libFuzzer
   ([fuzz/README.md](fuzz/README.md)); holds the core and the surrogate
   to clang-tidy's analyzer and bug-finding checks, with CodeQL beside
-  it; compiles Android and iOS; and, on pull requests, launches the iOS
-  app in the Simulator. The coverage badge is line coverage of the
+  it; compiles Android and iOS; and, on request, launches the iOS app in
+  the Simulator. The coverage badge is line coverage of the
   native code (core, surrogate, bridge) over the whole suite on
   Windows; QML isn't counted
   ([docs/testing.md](docs/testing.md#coverage)).
