@@ -94,7 +94,9 @@ endfunction()
 # Windows: a VERSIONINFO resource for a shipped executable, from
 # project(Havne VERSION ...): Explorer's Details tab shows it, code
 # signing reads it, and stage.ps1 checks it against the release.
-# <name> is the file's name without .exe.
+# <name> is the file's name without .exe. An optional fourth argument
+# names an .ico, which becomes the executable's icon (IDI_ICON1, which
+# Qt's Windows plugin also takes for the window's).
 set(APP_VERSION_RC_IN "${CMAKE_CURRENT_SOURCE_DIR}/packaging/windows/version.rc.in")
 function(app_add_version_resource target name description)
     if(NOT WIN32)
@@ -102,6 +104,10 @@ function(app_add_version_resource target name description)
     endif()
     set(APP_RC_NAME "${name}")
     set(APP_RC_DESCRIPTION "${description}")
+    set(APP_RC_ICON "")
+    if(ARGC GREATER 3)
+        set(APP_RC_ICON "IDI_ICON1 ICON \"${ARGV3}\"")
+    endif()
     set(rc "${CMAKE_CURRENT_BINARY_DIR}/${name}_version.rc")
     configure_file("${APP_VERSION_RC_IN}" "${rc}" @ONLY)
     target_sources(${target} PRIVATE "${rc}")

@@ -6,9 +6,12 @@
 // The version resource of each Windows executable Havne ships:
 // Explorer's Details tab shows it, and code signing reads it. Filled in
 // by app_add_version_resource() (root CMakeLists.txt) from
-// project(Havne VERSION ...), the one source of the version.
+// project(Havne VERSION ...), the one source of the version, and, for
+// havne.exe, its icon (app/windows/app.ico, from make_icons.py).
 
 #include <winver.h>
+
+@APP_RC_ICON@
 
 VS_VERSION_INFO VERSIONINFO
  FILEVERSION @Havne_VERSION_MAJOR@,@Havne_VERSION_MINOR@,@Havne_VERSION_PATCH@,0

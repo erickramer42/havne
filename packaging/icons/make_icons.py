@@ -10,9 +10,14 @@ Writes, from the repository root:
                                  drawables (Android 8+; sharp at every
                                  density), and the session notification's
                                  status-bar icon
-and, with --qt, renders app-ios.svg through the kit's qml runtime and
-SVG plugin into app/ios/Assets.xcassets/AppIcon.appiconset/AppIcon.png
-(1024 px, the alpha channel dropped: iOS wants it opaque).
+and, with --qt, renders through the kit's qml runtime and SVG plugin:
+  app/ios/Assets.xcassets/AppIcon.appiconset/AppIcon.png
+                                 app-ios.svg at 1024 px, the alpha
+                                 channel dropped: iOS wants it opaque
+  app/windows/app.ico            app.svg at Windows' icon sizes, the
+                                 corners transparent: 32-bit bitmaps up
+                                 to 64 px and a PNG at 256 px, as
+                                 Explorer and the taskbar read them
 
 The geometry lives on Android's 108-unit adaptive canvas: launchers show
 its middle 72 units, and the face fits the 66-unit safe circle.
@@ -250,7 +255,7 @@ Window {
     id: win
     width: %(size)d; height: %(size)d
     visible: true
-    color: "black"
+    color: "%(background)s"
     Image { anchors.fill: parent; source: "file:///%(svg)s"; sourceSize: Qt.size(%(size)d, %(size)d) }
     Timer {
         interval: 500; running: true
@@ -268,8 +273,9 @@ def write(rel, text):
         fh.write(text)
 
 
-def png_without_alpha(path):
-    """Rewrites an 8-bit RGBA PNG as RGB (stdlib only)"""
+def png_rgba(path):
+    """An 8-bit PNG's width, height, color type and unfiltered rows
+    (stdlib only); None for an RGB image"""
     with open(path, "rb") as fh:
         data = fh.read()
     pos, idat, ihdr = 8, b"", None
@@ -283,7 +289,7 @@ def png_without_alpha(path):
         pos += 12 + length
     w, h, depth, ctype, _, _, interlace = struct.unpack(">IIBBBBB", ihdr)
     if (depth, ctype) == (8, 2):
-        return              # RGB already: Qt writes an opaque image without alpha
+        return None         # RGB already: Qt writes an opaque image without alpha
     if (depth, ctype, interlace) != (8, 6, 0):
         raise SystemExit(f"{path}: expected 8-bit RGBA, not interlaced")
     raw, bpp, stride = zlib.decompress(idat), 4, w * 4
@@ -305,8 +311,18 @@ def png_without_alpha(path):
                 p = a + b - c
                 pa, pb, pc = abs(p - a), abs(p - b), abs(p - c)
                 line[x] = (line[x] + (a if pa <= pb and pa <= pc else b if pb <= pc else c)) & 255
-        rows.append(b"\x00" + bytes(v for k, v in enumerate(line) if k % 4 != 3))
+        rows.append(bytes(line))
         prev = line
+    return w, h, rows
+
+
+def png_without_alpha(path):
+    """Rewrites an 8-bit RGBA PNG as RGB (stdlib only)"""
+    image = png_rgba(path)
+    if image is None:
+        return
+    w, h, rgba = image
+    rows = [b"\x00" + bytes(v for k, v in enumerate(line) if k % 4 != 3) for line in rgba]
 
     def chunk(kind, body):
         return struct.pack(">I", len(body)) + kind + body + struct.pack(">I", zlib.crc32(kind + body))
@@ -317,24 +333,74 @@ def png_without_alpha(path):
         fh.write(out)
 
 
-def render(qt, svg_rel, png_rel, size, scratch):
+def render(qt, svg_rel, png_path, size, scratch, background="black"):
+    """Renders svg_rel at size into png_path (absolute), on background"""
     svg_path = os.path.join(ROOT, svg_rel).replace("\\", "/")
-    png_path = os.path.join(ROOT, png_rel).replace("\\", "/")
+    png_path = png_path.replace("\\", "/")
     os.makedirs(os.path.dirname(png_path), exist_ok=True)
     qml = os.path.join(scratch, "render.qml")
     with open(qml, "w", encoding="utf-8") as fh:
-        fh.write(RENDER_QML % {"size": size, "svg": svg_path, "png": png_path})
+        fh.write(RENDER_QML % {"size": size, "svg": svg_path, "png": png_path,
+                               "background": background})
     # Offscreen, on the software renderer: at the size asked, whatever the
     # screen's scaling, and no window opens
     env = dict(os.environ, PATH=os.path.join(qt, "bin") + os.pathsep + os.environ["PATH"],
                QT_QPA_PLATFORM="offscreen", QT_QUICK_BACKEND="software")
     subprocess.run([os.path.join(qt, "bin", "qml"), qml], check=True, env=env, timeout=60)
-    png_without_alpha(png_path)
+
+
+# ---- Windows icon
+
+ICO_SIZES = (16, 20, 24, 32, 40, 48, 64, 256)
+
+
+def ico_bitmap(w, h, rows):
+    """An icon directory entry's bitmap: BITMAPINFOHEADER at twice the
+    height (the image and its mask), BGRA rows bottom up, then the AND
+    mask, set where the pixel is fully transparent"""
+    header = struct.pack("<IiiHHIIiiII", 40, w, 2 * h, 1, 32, 0, 0, 0, 0, 0, 0)
+    pixels = b"".join(bytes(v for x in range(w) for v in
+                            (row[4 * x + 2], row[4 * x + 1], row[4 * x], row[4 * x + 3]))
+                      for row in reversed(rows))
+    stride = (w + 31) // 32 * 4
+    mask = bytearray()
+    for row in reversed(rows):
+        bits = bytearray(stride)
+        for x in range(w):
+            if row[4 * x + 3] == 0:
+                bits[x // 8] |= 0x80 >> (x % 8)
+        mask += bits
+    return header + pixels + bytes(mask)
+
+
+def write_ico(qt, scratch):
+    images = []
+    for size in ICO_SIZES:
+        png = os.path.join(scratch, f"havne-icon-{size}.png")
+        render(qt, "packaging/icons/app.svg", png, size, scratch, background="transparent")
+        image = png_rgba(png)
+        if image is None or image[:2] != (size, size):
+            raise SystemExit(f"{png}: expected a {size} px RGBA render")
+        if size == 256:
+            with open(png, "rb") as fh:
+                images.append((size, fh.read()))
+        else:
+            images.append((size, ico_bitmap(*image)))
+    out = struct.pack("<HHH", 0, 1, len(images))
+    offset = 6 + 16 * len(images)
+    for size, body in images:
+        out += struct.pack("<BBBBHHII", size % 256, size % 256, 0, 0, 1, 32, len(body), offset)
+        offset += len(body)
+    out += b"".join(body for _, body in images)
+    path = os.path.join(ROOT, "app/windows/app.ico")
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "wb") as fh:
+        fh.write(out)
 
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--qt", help="a desktop Qt kit, to render the iOS PNG")
+    ap.add_argument("--qt", help="a desktop Qt kit, to render the iOS PNG and the Windows icon")
     ap.add_argument("--scratch", default=os.environ.get("TEMP", "/tmp"))
     args = ap.parse_args()
 
@@ -350,8 +416,10 @@ def main():
     write("app/ios/Assets.xcassets/Contents.json", CATALOG_CONTENTS)
     write("app/ios/Assets.xcassets/AppIcon.appiconset/Contents.json", IOS_CONTENTS)
     if args.qt:
-        render(args.qt, "packaging/icons/app-ios.svg",
-               "app/ios/Assets.xcassets/AppIcon.appiconset/AppIcon.png", 1024, args.scratch)
+        ios = os.path.join(ROOT, "app/ios/Assets.xcassets/AppIcon.appiconset/AppIcon.png")
+        render(args.qt, "packaging/icons/app-ios.svg", ios, 1024, args.scratch)
+        png_without_alpha(ios)
+        write_ico(args.qt, args.scratch)
     print("ok")
 
 

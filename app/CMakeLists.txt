@@ -104,7 +104,8 @@ target_link_libraries(havne PRIVATE
     app_uiplugin
 )
 app_enable_warnings(havne)
-app_add_version_resource(havne havne "Havne ECU reader and logger")
+app_add_version_resource(havne havne "Havne ECU reader and logger"
+    "${CMAKE_CURRENT_SOURCE_DIR}/windows/app.ico")
 
 if(WIN32)
     set_target_properties(havne PROPERTIES WIN32_EXECUTABLE TRUE)
