@@ -1,6 +1,6 @@
 # Havne — Project Status
 
-**Updated:** 2026-10-26 · **Version:** v0.3.2 ·
+**Updated:** 2026-10-29 · **Version:** v0.3.2 ·
 [![CI](https://github.com/erickramer42/havne/actions/workflows/ci.yml/badge.svg)](https://github.com/erickramer42/havne/actions/workflows/ci.yml)
 
 This file covers the project as it stands: what works, what comes
@@ -340,21 +340,20 @@ an issue is resolved it is removed, and its number is not reused.
 | v0.3.0 | Signal decoding, LiveView, J2534 transport, live vehicle read and logging | ✅ Released |
 | v0.3.1 | Request engine, PID-support probe, `uds-generic`, vehicle identification, imperial units; the first Windows download | ✅ Released |
 | v0.3.2 | Record-replay transport, decoding on the transport's thread, every driver in its own process | ✅ Released |
-| v0.3.3 | ELM327 adapters, preferences and vehicles, Android with Bluetooth and background sessions, the rename to Havne | In progress |
-| v0.4.0 | Security access discovery, flash capability | Proposed |
-| v0.5.0+ | Manufacturer plugin modules (ADR-0013's profile API) | Proposed |
+| v0.3.3 | ELM327 adapters, preferences and vehicles, Android with Bluetooth and background sessions, the rename to Havne | Built; release pending |
+| v0.3.4 | A command-line client over the C ABI; Linux as a supported desktop; a SocketCAN transport that listens | Planned |
+| v0.3.5 | Full OBD-II diagnostics (Services 01–0A, clearing codes); SocketCAN requests through ISO-TP | Planned |
+| v0.4.0 | Python bindings, PCAP and candump interop, discovery of the ECUs and data a car offers | Proposed |
+| v0.5.0 | A plugin framework for make-specific signal sets (ADR-0013's profile API); legacy buses | Proposed |
+| 1.0+ | The write path: a copy of the original calibration, table editors, guarded writes | Proposed |
 
-Neither proposed milestone is scheduled; the next one is chosen from
-the [backlog](#backlog). Flash support depends on discovering each
-manufacturer's secure-gateway authentication, research tracked
-outside this repository.
-
-Legacy-bus support (ISO 9141-2/KWP, J1850 VPW/PWM) is a missing
-workstream between the profile work and the manufacturer plugins:
-pre-2008 cars (older Mazda, Ford and GM targets) need transport-layer
-protocol support before any profile can serve them. Whether and when
-it is built depends on which vehicles matter most; CAN-era cars need
-none of it.
+The planned releases are in order; the proposed ones are not
+scheduled. Legacy buses (ISO 9141-2, KWP2000, J1850 VPW and PWM) are
+what pre-2008 cars need before any profile can serve them; CAN-era
+cars need none of it. The write path needs an ADR per item (see the
+[backlog](#editing-and-write-path-10-and-later-nothing-below-is-scheduled)),
+and flashing depends on each manufacturer's secure-gateway
+authentication, research tracked outside this repository.
 
 ## Backlog
 
@@ -428,7 +427,7 @@ week or more or a design that needs an ADR first.
   decodes the reply (ADR-0015, ADR-0016), so what's missing is the
   data: the DIDs and their formulas, which `uds-generic`'s `?did=`
   polling and range scan are for ([ADR-0020](docs/adr/0020-uds-generic.md)).
-  It serves as the pilot for the v0.5.0 plugin modules.
+  It serves as the pilot for the v0.5.0 plugin framework.
 - **Computed signals (M).** Values derived from other signals, such
   as boost pressure: intake manifold absolute pressure (PID 0x0B)
   minus barometric pressure (PID 0x33). Neither PID is in the `obd2`
@@ -441,7 +440,7 @@ week or more or a design that needs an ADR first.
   conversions, smoothing). Stays in core per rule 2, and is the same
   data-describing-arithmetic shape ADR-0015 uses for requests.
 
-### Editing and write path (v0.4+; nothing below is scheduled)
+### Editing and write path (1.0 and later; nothing below is scheduled)
 
 Every item here needs its own ADR first, and the UDS services it raises
 (0x27, 0x2E, 0x31, 0x34/0x36/0x37, 0x3D) carry emissions-law, warranty and

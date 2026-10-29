@@ -219,13 +219,17 @@ screen, is [docs/architecture.md](docs/architecture.md).
 | v0.3.0 | Signal decoding, live view, J2534 transport, live vehicle read and logging (tested on one vehicle) | ✅ Released |
 | v0.3.1 | Request engine, PID-support probe, vehicle identification, generic UDS reads, imperial units; the first Windows download | ✅ Released |
 | v0.3.2 | Record-replay transport, decoding on the transport's thread, every driver in its own process | ✅ Released |
-| v0.3.3 | ELM327 adapters, preferences and vehicles, Android with Bluetooth and background sessions, the rename to Havne | In progress |
-| v0.4.0 | Security access discovery, flash capability | Proposed |
-| v0.5.0+ | Manufacturer plugin modules | Proposed |
+| v0.3.3 | ELM327 adapters, preferences and vehicles, Android with Bluetooth and background sessions, the rename to Havne | Built; release pending |
+| v0.3.4 | A command-line client; Linux as a supported desktop; a SocketCAN transport that listens | Planned |
+| v0.3.5 | Full OBD-II diagnostics, including reading and clearing trouble codes; SocketCAN requests | Planned |
+| v0.4.0 | Python bindings, PCAP and candump interop, discovery of the ECUs and data a car offers | Proposed |
+| v0.5.0 | A plugin framework for make-specific signal sets; legacy buses for pre-2008 cars | Proposed |
+| 1.0+ | The write path: a copy of the original calibration, table editors, guarded writes | Proposed |
 
-v0.3.3's changes so far are under CHANGELOG's "Unreleased"; the plan
-and known issues are in [STATUS.md](STATUS.md), and what each release
-changed is in [CHANGELOG.md](CHANGELOG.md).
+The planned releases come in order; the proposed ones are not
+scheduled yet. v0.3.3's changes are under CHANGELOG's "Unreleased";
+the plan, the backlog and known issues are in [STATUS.md](STATUS.md),
+and what each release changed is in [CHANGELOG.md](CHANGELOG.md).
 
 ## Build
 
