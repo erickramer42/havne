@@ -1,0 +1,67 @@
+name: vcan probe
+
+# Whether GitHub's Ubuntu runners can load Linux's virtual CAN bus
+# (`vcan`), and `can-isotp` with it, before v0.3.4's simulated ECU and
+# SocketCAN tests are planned around them (Testing/roadmap.md, "A
+# simulated ECU on vcan"). Manual only: `gh workflow run vcan-probe.yml`.
+# The run's summary has a table; the job fails when no vcan0 carries a
+# frame. Nothing is checked out or built.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, ubuntu-24.04]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    steps:
+      - name: Load vcan and can-isotp, send a frame over vcan0
+        shell: bash
+        run: |
+          set -uo pipefail
+          row() { echo "| $1 | $2 |" >> "$GITHUB_STEP_SUMMARY"; echo "$1: $2"; }
+          {
+            echo "### ${{ matrix.os }}: kernel $(uname -r)"
+            echo
+            echo "| Check | Result |"
+            echo "|---|---|"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          # The runners' kernels keep CAN in linux-modules-extra, which
+          # may not be installed
+          if sudo modprobe vcan 2>/dev/null; then
+            row "vcan" "loads as installed"
+          elif sudo apt-get install -y -q "linux-modules-extra-$(uname -r)" >/dev/null 2>&1 \
+               && sudo modprobe vcan; then
+            row "vcan" "loads after linux-modules-extra-$(uname -r)"
+          else
+            row "vcan" "**not available**"
+          fi
+          if sudo modprobe can-isotp 2>/dev/null; then
+            row "can-isotp" "loads"
+          else
+            row "can-isotp" "**not available** (core's own ISO-TP, or a kernel that has it)"
+          fi
+
+          sudo ip link add dev vcan0 type vcan 2>/dev/null && sudo ip link set up vcan0 \
+            || { row "vcan0" "**can't be created**"; exit 1; }
+          row "vcan0" "up"
+
+          sudo apt-get install -y -q can-utils >/dev/null 2>&1 \
+            || { row "can-utils" "**not installed**"; exit 1; }
+          timeout 5 candump -n 1 vcan0 > candump.txt &
+          sleep 1
+          cansend vcan0 7E8#04410C1AF8000000
+          wait
+          if grep -q "7E8" candump.txt; then
+            row "a frame over vcan0" "\`$(tr -s ' ' < candump.txt | head -n 1)\`"
+          else
+            row "a frame over vcan0" "**not received**"
+            exit 1
+          fi
