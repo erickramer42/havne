@@ -10,18 +10,7 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
 
 ## [Unreleased]
 
-### Changed
-- **QtTune is now Havne**: the program is `havne.exe`, the release
-  zip `havne-<version>-windows-x64.zip`, and the repository
-  `erickramer42/havne` (the old address redirects). The first
-  launch copies QtTune's preferences, vehicles included, and
-  Settings' recent recordings list the sessions in
-  `Documents\QtTune\recordings` beside the new ones in
-  `Documents\Havne\recordings`; neither is moved or deleted. On
-  Android Havne is a new app (`io.github.erickramer42.havne`) that
-  starts empty. The build option `QTTUNE_BUILD_CORE_ONLY` is
-  `HAVNE_BUILD_CORE_ONLY`; the old name still works, with a warning,
-  until v0.3.4.
+## [0.3.3] - 2026-10-29
 
 ### Added
 - An app icon on Windows, Android and iOS: the Home page's tachometer
@@ -74,7 +63,6 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
   It adds the `mock://demo` preset and the Log page's raw frame table,
   with its delivery counters; with it off, the app offers only real
   adapters.
-
 - On Android (12 or later), Settings lists the phone's paired
   Bluetooth adapters, and a **Scan for BLE** button finds BLE ones.
   Selecting one puts `elm327://bt:<address>` or `elm327://ble:<address>`
@@ -106,6 +94,17 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
   (on a phone, the only way).
 
 ### Changed
+- **QtTune is now Havne**: the program is `havne.exe`, the release
+  zip `havne-<version>-windows-x64.zip`, and the repository
+  `erickramer42/havne` (the old address redirects). The first
+  launch copies QtTune's preferences, vehicles included, and
+  Settings' recent recordings list the sessions in
+  `Documents\QtTune\recordings` beside the new ones in
+  `Documents\Havne\recordings`; neither is moved or deleted. On
+  Android Havne is a new app (`io.github.erickramer42.havne`) that
+  starts empty. The build option `QTTUNE_BUILD_CORE_ONLY` is
+  `HAVNE_BUILD_CORE_ONLY`; the old name still works, with a warning,
+  until v0.3.4.
 - Settings opens on the connect bar and five folded sections, each
   heading saying what it holds now: Adapter (the devices found, then
   the WiFi addresses and other choices the list doesn't show), Vehicle,
@@ -322,7 +321,8 @@ The first release with a Windows download
   shell with a responsive layout.
 - CI on Windows, macOS and Linux, running the core's tests.
 
-[Unreleased]: https://github.com/erickramer42/havne/compare/v0.3.2...HEAD
+[Unreleased]: https://github.com/erickramer42/havne/compare/v0.3.3...HEAD
+[0.3.3]: https://github.com/erickramer42/havne/compare/v0.3.2...v0.3.3
 [0.3.2]: https://github.com/erickramer42/havne/compare/v0.3.1...v0.3.2
 [0.3.1]: https://github.com/erickramer42/havne/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/erickramer42/havne/compare/v0.2.0...v0.3.0

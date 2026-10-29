@@ -1,6 +1,6 @@
 # Havne — Project Status
 
-**Updated:** 2026-10-29 · **Version:** v0.3.2 ·
+**Updated:** 2026-10-29 · **Version:** v0.3.3 ·
 [![CI](https://github.com/erickramer42/havne/actions/workflows/ci.yml/badge.svg)](https://github.com/erickramer42/havne/actions/workflows/ci.yml)
 
 This file covers the project as it stands: what works, what comes
@@ -14,9 +14,9 @@ Safety, regulatory and warranty caveats are in
 
 ## Where things stand
 
-**Current phase: v0.3.3, under way.** v0.3.2 is out: replay,
-decoding on the transport's thread, and every driver in a process of
-its own; changes since then go under
+**Current phase: v0.3.4, under way.** v0.3.3 is out: ELM327
+adapters, persisted preferences and vehicles, the Android app as a
+signed download, and the name Havne; changes since then go under
 [CHANGELOG.md's "Unreleased"](CHANGELOG.md#unreleased). The J2534 stack is verified
 end to end against a fake vendor DLL, through the x64 and the x86
 surrogate. One real J2534 adapter, the OBDX Pro VX, has run on a quiet
@@ -29,11 +29,9 @@ second session ran the request engine, the probe, identification and
 ([ADR-0026](docs/adr/0026-elm327-transport.md)) is built and has read
 the same car through the OBDLink MX+ over Bluetooth and the VX in ELM
 mode over USB
-([2026-10-27](docs/bench-sessions/2026-10-27-elm327-vehicle.md)); it
-goes out in v0.3.3 with persisted preferences and vehicles, the Android
-app with Bluetooth and background sessions as a signed APK beside the
-Windows zip, and the rename to Havne.
-After it come v0.3.4 and v0.3.5 ([roadmap](#roadmap)).
+([2026-10-27](docs/bench-sessions/2026-10-27-elm327-vehicle.md)), and
+the Android app reaches the car through the phone's Bluetooth, in the
+background too. Next come v0.3.4 and v0.3.5 ([roadmap](#roadmap)).
 
 - **Works:**
   - **Mock transport,** on every platform: a scripted drive cycle (a
@@ -196,9 +194,8 @@ an issue is resolved it is removed, and its number is not reused.
    set `BUILD_TESTING=OFF`, so the phone is checked by its run sheet
    ([android-phone-runsheet.md](docs/bench-sessions/android-phone-runsheet.md)).
    The app needs Android 12 or later; CI uploads the Android build's
-   debug APK, and releases from v0.3.3 carry one signed with the
-   release key ([ADR-0030](docs/adr/0030-signed-android-releases.md)),
-   a Release build that no phone has run yet.
+   debug APK, and each release carries one signed with the release key
+   ([ADR-0030](docs/adr/0030-signed-android-releases.md)).
 4. **Every def is matched against every frame, on the transport's
    worker** ([ADR-0024](docs/adr/0024-decode-on-the-worker.md)). A
    subscription can't trim that work: it is the chart's filter only,
@@ -238,7 +235,7 @@ an issue is resolved it is removed, and its number is not reused.
 | v0.3.0 | Signal decoding, LiveView, J2534 transport, live vehicle read and logging | ✅ Released |
 | v0.3.1 | Request engine, PID-support probe, `uds-generic`, vehicle identification, imperial units; the first Windows download | ✅ Released |
 | v0.3.2 | Record-replay transport, decoding on the transport's thread, every driver in its own process | ✅ Released |
-| v0.3.3 | ELM327 adapters, preferences and vehicles, Android with Bluetooth and background sessions and a signed APK, the rename to Havne | Built; release pending |
+| v0.3.3 | ELM327 adapters, preferences and vehicles, Android with Bluetooth and background sessions and a signed APK, the rename to Havne | ✅ Released |
 | v0.3.4 | A command-line client over the C ABI; Linux as a supported desktop; a SocketCAN transport that listens | Planned |
 | v0.3.5 | Full OBD-II diagnostics (Services 01–0A, clearing codes); SocketCAN requests through ISO-TP | Planned |
 | v0.4.0 | Python bindings; PCAP export and candump import; ECU, DID and service discovery (needs requests to every ECU and listening to the whole bus first) | Proposed |

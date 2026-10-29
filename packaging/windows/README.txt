@@ -18,14 +18,16 @@ Running it
    The program isn't code-signed, so Windows SmartScreen may say it
    "protected your PC". Choose "More info", then "Run anyway".
 
-3. To see it work with no hardware: Settings, then the "mock://demo"
-   preset, then Connect. The simulated car warms up, then drives a loop
+3. To see it work with no hardware: in Settings, tick "Developer mode"
+   under Display, then press the "mock://demo" preset under Adapter,
+   then Connect. The simulated car warms up, then drives a loop
    of pulls, a highway cruise and a quarter mile. The Dashboard, Live
    and Log pages all follow it.
 
-To remove Havne, delete the folder. It keeps two preferences (zoom
-and units) under HKEY_CURRENT_USER\Software\Havne, and any sessions
-you recorded under Documents\Havne\recordings.
+To remove Havne, delete the folder. It keeps its preferences (the
+display, the last connection, your vehicles) under
+HKEY_CURRENT_USER\Software\Havne, and any sessions you recorded under
+Documents\Havne\recordings.
 
 Havne was called QtTune before version 0.3.3. Its first launch copies
 QtTune's preferences (HKEY_CURRENT_USER\Software\QtTune) once, and

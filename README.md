@@ -148,8 +148,10 @@ On Windows 10 or 11 (x64), download the zip from the
 [latest release](https://github.com/erickramer42/havne/releases/latest),
 unzip it and run `havne.exe`; Qt and the Visual C++ runtime are inside.
 It isn't code-signed, so SmartScreen may ask first (**More info**, then
-**Run anyway**). In Settings, press the `mock://demo` preset and
-**Connect**.
+**Run anyway**). On Android 12 or later, download and open the release's
+APK on the phone; it's signed with Havne's release key, and each
+release installs over the last. In Settings, tick **Developer mode**
+under Display, then press the `mock://demo` preset and **Connect**.
 
 To build from source you need CMake 3.21+, Qt 6.12 and a C++17
 compiler:
@@ -168,8 +170,7 @@ troubleshooting.
 ## Status
 
 v0.3.3 (ELM327 adapters, preferences and vehicles, Android with
-Bluetooth, the rename from QtTune) is built, and its release is next.
-Then:
+Bluetooth, the rename from QtTune) is the latest release. Next:
 
 | Version | Plan |
 |---|---|
