@@ -86,8 +86,9 @@ Out of scope:
 - **Android:** the app asks only for the permissions its features use
   (Bluetooth declared "never for location", notifications, a
   connected-device foreground service and a wake lock for background
-  sessions, and internet for a WiFi adapter's socket), and its service
-  isn't exported to other apps.
+  sessions, and internet for a WiFi adapter's socket), its service
+  isn't exported to other apps, and its files stay out of the phone's
+  backup and device-to-device transfer.
 - **Not yet:** the executables aren't code-signed, so Windows
   SmartScreen warns on first run, and there is no signed Android
   release.

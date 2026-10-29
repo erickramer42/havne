@@ -48,7 +48,7 @@ names, a WiFi adapter's.
 | User → ELM327 port | A port name or address | `COM1` to `COM255` on Windows, a `/dev/` path elsewhere, a dotted IPv4 address with a port (no host names, so nothing is looked up), or the name of a stream the app registered; anything else is refused at create ([ADR-0026](adr/0026-elm327-transport.md)). The socket and the serial handle aren't inherited by the surrogate |
 | Adapter → ELM327 transport | Text lines over serial, TCP or Bluetooth | A pure parser (`core/src/elm327_protocol.h`, no allocation) keeps each line to a fixed length and flags a cut one, counts a frame line's digits before indexing it, and reassembles ISO-TP within what its First Frame said and 4,095 bytes; a setup answer that isn't the expected one refuses the connect. Fuzzed (`fuzz_elm327_reply`). Whatever comes back, the requests stay reads |
 | App's Bluetooth → core | Bytes from the phone's link, through `ecuio/stream.h` | The same parser behind a fixed 64 KB buffer; bytes past it fail the link rather than resynchronize mid-reply, and nothing calls back into the app under a core lock ([ADR-0028](adr/0028-app-fed-streams.md)) |
-| Android → app | Other apps, the system | The background session's service isn't exported; the permissions are those the features use: Bluetooth connect and scan declared "never for location", notifications, a connected-device foreground service, a wake lock, and internet for the WiFi socket ([ADR-0029](adr/0029-android-background-sessions.md)) |
+| Android → app | Other apps, the system | The background session's service isn't exported; the permissions are those the features use: Bluetooth connect and scan declared "never for location", notifications, a connected-device foreground service, a wake lock, and internet for the WiFi socket ([ADR-0029](adr/0029-android-background-sessions.md)). The app's files, which can hold the VIN, are kept out of the system's backup and device-to-device transfer (`allowBackup` off and data-extraction rules that exclude every domain; CI checks the manifest for both) |
 | Disk → replay | A recording's `frames.csv` | The whole file is checked at connect, and a row that doesn't parse or is longer than a frame holds is refused, naming its line but never the path; a file that changes during playback stops it ([ADR-0023](adr/0023-replay-transport.md)). Fuzzed (`fuzz_replay_file`) |
 | App → vehicle | Requests | The request engine sends services 0x01, 0x09 and 0x22 (reads) only, and refuses any other service even if one reaches it ([ADR-0015](adr/0015-request-engine.md) §3) |
 | Source → release | The Windows zip | Actions pinned to commit SHAs, a hash-pinned clang-tidy wheel, a release job that requires the commit's CI to have passed and checks the package's imports and version resources, and a signed SLSA build provenance on every download ([development.md](development.md#releases)) |
@@ -101,10 +101,5 @@ names, a WiFi adapter's.
   reply as untrusted and the requests stay reads, so the exposure is
   the session's data: a device posing as the adapter can feed it false
   values.
-- **Android's app-data backup isn't turned off.** The manifest leaves
-  `allowBackup` at Android's default, so with the phone's backup on,
-  the system may copy the app's preferences and recordings, which can
-  hold the VIN, to the user's cloud backup or to a new phone. Havne
-  itself sends neither.
 - **The executables aren't code-signed,** so their integrity on disk
   rests on the provenance and the checksum, which a user has to check.

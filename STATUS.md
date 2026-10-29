@@ -25,15 +25,14 @@ bench bus and in two read-only sessions on one car
 [2026-10-25](docs/bench-sessions/2026-10-25-vehicle.md)): the engine
 ECU answered, the values decoded and tracked the cluster, and the
 second session ran the request engine, the probe, identification and
-`uds-generic` there. Every item in [After v0.3.0](#after-v030) has
-shipped. The [ELM327 transport](#the-elm327-transport)
+`uds-generic` there. The [ELM327 transport](docs/elm327.md)
 ([ADR-0026](docs/adr/0026-elm327-transport.md)) is built and has read
 the same car through the OBDLink MX+ over Bluetooth and the VX in ELM
 mode over USB
 ([2026-10-27](docs/bench-sessions/2026-10-27-elm327-vehicle.md)); it
 goes out in v0.3.3 with persisted preferences and vehicles, the Android
 app with Bluetooth and background sessions, and the rename to Havne.
-The milestone after it is chosen from the [backlog](#backlog).
+After it come v0.3.4 and v0.3.5 ([roadmap](#roadmap)).
 
 - **Works:**
   - **Mock transport,** on every platform: a scripted drive cycle (a
@@ -50,8 +49,8 @@ The milestone after it is chosen from the [backlog](#backlog).
     Settings lists the serial ports. Verified against a fake ELM327, on the bench with the OBDX VX, and
     on a car through the OBDLink MX+ (Bluetooth) and the VX in ELM mode
     (2026-10-27). A session that asks nothing listens with `AT MA` on
-    its channels (fake-tested; the bench and a car with a second tester
-    are to come).
+    its channels (on the VX's bench; a car with a second tester is to
+    come). How it works: [docs/elm327.md](docs/elm327.md).
   - **Android** ([ADR-0028](docs/adr/0028-app-fed-streams.md),
     [ADR-0029](docs/adr/0029-android-background-sessions.md)): the app
     on Android 12 and later reaches a Bluetooth adapter through the
@@ -118,9 +117,12 @@ The milestone after it is chosen from the [backlog](#backlog).
   addressing, more than one ECU answering, a real x64 driver,
   and other vendors ([BENCH prep](docs/bench-sessions/bench-prep.md),
   [testing.md](docs/testing.md#gaps-not-verified)). The run sheets are
-  [bench-runsheet.md](docs/bench-sessions/bench-runsheet.md) and
-  [vehicle-runsheet.md](docs/bench-sessions/vehicle-runsheet.md).
-- **Tests:** 532 ctest cases on Windows (both trees rebuilt,
+  [bench-runsheet.md](docs/bench-sessions/bench-runsheet.md),
+  [vehicle-runsheet.md](docs/bench-sessions/vehicle-runsheet.md), the
+  ELM327 [bench](docs/bench-sessions/elm327-bench-runsheet.md) and
+  [vehicle](docs/bench-sessions/elm327-vehicle-runsheet.md) sheets, and
+  the [phone's](docs/bench-sessions/android-phone-runsheet.md).
+- **Tests:** 537 ctest cases on Windows (both trees rebuilt,
   2026-10-29), all passing but two env-gated skips (the cross-arch
   case, and the real-car recordings' diff, run locally), plus the
   cross-arch subset (82/82); 0 MSVC warnings. CI runs ctest on Windows,
@@ -142,165 +144,58 @@ The milestone after it is chosen from the [backlog](#backlog).
 | Bridge and models | Worker → GUI marshaling with bounded backpressure, 100 ms coalescing, a 10k-row frame log, a 360-point history per signal (each 100 ms window's lowest, highest and newest), link-health polling, recording; QML reaches it as the `Bridge` singleton | [ADR-0003](docs/adr/0003-backpressure-bounds-in-flight-frames.md), [ADR-0005](docs/adr/0005-coalesced-signal-updates.md) |
 | QML pages | Home, Dashboard, Live, Log, Settings; `test_qml` runs them against a real bridge, offscreen | [docs/architecture.md](docs/architecture.md#the-ui-layer) |
 | J2534 | HARNESS-verified through the surrogate: x64 in CI, x86 cross-arch. BENCH: one adapter, quiet bus. Vehicle: one car, read-only, through the surrogate, two sessions | [docs/j2534.md](docs/j2534.md) |
-
-## After v0.3.0
-
-The v0.3.x plan, in order. Items 1–4 shipped in v0.3.1, items 5 and
-6 in v0.3.2; each ADR holds the design and the car's measurements.
-
-1. **Request engine** ([ADR-0015](docs/adr/0015-request-engine.md)):
-   built; on the car, about 26 requests a second, replies 19 ms after
-   their request (median).
-2. **The `obd2` PID-support probe** (ADR-0015 §4): built; on the car,
-   six bitmaps, 53 PIDs, only `01 5C` dropped.
-3. **`uds-generic`** ([ADR-0020](docs/adr/0020-uds-generic.md)):
-   built; on the car, the `F180-F1FF` scan settled in 14.3 s.
-4. **Vehicle identification**
-   ([ADR-0021](docs/adr/0021-vehicle-identification.md)): built; on
-   the car, every item settled.
-5. **Phase 4, record-replay transport**
-   ([ADR-0023](docs/adr/0023-replay-transport.md)): built and
-   UNIT-tested, against a real-bus fixture too.
-6. **Decoding on the worker thread**
-   ([ADR-0024](docs/adr/0024-decode-on-the-worker.md)): built. Core
-   decodes on the transport's thread, the bridge stages its values (a
-   dropped frame keeps them), and the chart shows each value at its
-   frame's time with each window's peak (ADR-0005's appendix); checked
-   against the vehicle sessions' recordings, value for value.
+| ELM327 | HARNESS-verified against a fake ELM327 on every platform (serial, TCP, app stream). BENCH: the VX on USB and WiFi, no bus. Vehicle: one car, read-only, through the MX+ (Bluetooth) and the VX (USB) | [docs/elm327.md](docs/elm327.md) |
+| Android app | Android 12 and later; Bluetooth through the phone, background sessions. On one phone and one car, with the MX+; built in CI, no tests run on the phone | [ADR-0028](docs/adr/0028-app-fed-streams.md), [ADR-0029](docs/adr/0029-android-background-sessions.md) |
 
 ## The ELM327 transport
 
-`elm327://` reads a car through an ELM327-compatible adapter on a
-serial port: USB, or classic Bluetooth paired as a port. That is the
-route to a car on macOS and Linux, and on Windows without J2534
-([ADR-0026](docs/adr/0026-elm327-transport.md), which holds the
-design and the order). The adapters on hand are the OBDLink MX+
-(MX201, an STN chip, powered only from the OBD connector) and the
-OBDX Pro VX in its ELM mode (USB-powered). In order:
-
-1. **Link health in a shared header** (`core/src/link_health.h`):
-   built. The J2534 worker uses it unchanged, and its rules have
-   session-free unit cases (`CoreTest.Link*`).
-2. **The protocol layer** (`core/src/elm327_protocol.h`, no I/O, no
-   clock): built, with its unit tests (`Elm327ProtocolTest`,
-   `test_elm327`, Qt-free, so in every CI job).
-3. **The transport** (`core/src/elm327_transport.cpp`,
-   `elm327_port.cpp`): built. The worker drives the request engine with
-   one command out for the whole adapter, sharing the channel and
-   request setup with J2534 (`core/src/request_setup.h`); verified
-   against a fake ELM327 behind the port (`Elm327SessionTest`, with
-   the same ECU as the fake J2534 DLL, `tests/fake_ecu.h`) and, on
-   Linux and macOS, the termios port over a pseudo-terminal
-   (`Elm327PortTest`). The Win32 port has carried the VX's bench
-   session, a cable pull included.
-4. **The app:** built. Settings lists the serial ports
-   (`ecuio_serial_ports`, `serial.h`: the registry or `/dev`, nothing
-   opened) beside the J2534 interfaces and has an `elm327://` preset;
-   the "Session:" line has an ELM327 form (`SerialPortsTest`,
-   `BridgeTest`, `QmlTest.settings`). Each connect writes a wire log
-   (`ecuio-elm327.<stamp>.log` in the temporary directory: the setup's
-   answers always, every request and reply while recording;
-   `Elm327SessionTest.TheWireLog*`), the bench's evidence.
-5. **BENCH** with the VX on USB, then a read-only vehicle session.
-   The VX's bench is done
-   ([2026-10-27-elm327-bench](docs/bench-sessions/2026-10-27-elm327-bench.md),
-   [2026-10-27-elm327-bench-2](docs/bench-sessions/2026-10-27-elm327-bench-2.md)):
-   its `AT Z` answers `OK` alone, which the setup takes, asking `AT I`
-   for the version; with no bus it answers `NO DATA`, so the bench
-   reads quiet; it connects at both CAN rates and recovers from a
-   cable pull with no reconnect. The vehicle session is done
-   ([2026-10-27-elm327-vehicle](docs/bench-sessions/2026-10-27-elm327-vehicle.md)):
-   the MX+ (Bluetooth, an STN2255) and the VX in ELM mode both read the
-   car, decoding the J2534 sessions' values through a cold start and
-   idle; the MX+ sustained ~32 requests/s over Bluetooth (the VX read
-   26/s through J2534), and a Bluetooth drop recovered with no
-   reconnect, the first value within ~6.5 s of Bluetooth coming back. The MX+ is vehicle-only (no 12 V supply), so its bench
-   items ran on the car (ADR-0026's appendix of 2026-10-27). The run sheets are
-   [elm327-bench-runsheet.md](docs/bench-sessions/elm327-bench-runsheet.md)
-   and [elm327-vehicle-runsheet.md](docs/bench-sessions/elm327-vehicle-runsheet.md);
-   the items they settle are BENCH prep #11–#17.
-
-6. **Passive listening** (ADR-0026's appendix "passive listening"):
-   built and fake-tested. A session with nothing to ask monitors with
-   `AT MA`, which keeps the receive filter, so it hears its channels'
-   IDs; it is checked every 5 s of silence, restarted when it ends, and
-   stopped with a space at close. `BUFFER FULL` flags the next frame
-   `ECUIO_FRAME_FLAG_OVERFLOW`, as a J2534 driver's
-   `ERR_BUFFER_OVERFLOW` does (`Elm327SessionTest.Listening*` and
-   neighbors, `J2534HealthTest.*Overflow*`). The VX ran it on the bench
-   with no bus (BENCH prep #18,
-   [2026-10-27-elm327-bench-3](docs/bench-sessions/2026-10-27-elm327-bench-3.md)):
-   silent, checked every 5 s, stopped at close. Still to come: a car
-   with a second tester on an OBD Y-splitter (#19).
-7. **WiFi over TCP** (ADR-0026's appendix "WiFi over TCP",
-   `core/src/elm327_tcp.cpp`): built. `elm327://<IPv4>:<port>` opens a
-   socket where a serial port would be: a 2 s connect, Nagle off, no
-   host names; the far side closing is a hard failure that reconnects
-   on the backoff. Verified against the fake ELM327 behind a loopback
-   socket on every platform (`Elm327TcpTest`). The VX's WiFi carried a
-   session on the bench with no bus, its answers and timing those of
-   its USB port plus a few ms
-   ([2026-10-27-elm327-bench-4](docs/bench-sessions/2026-10-27-elm327-bench-4.md)).
-   Leaving its network is a fault at once that recovers on the backoff
-   with no reconnect, though the VX's network side hangs after a client
-   leaves with its socket open, until a power cycle
-   ([2026-10-27-elm327-bench-5](docs/bench-sessions/2026-10-27-elm327-bench-5.md)).
-   A session on its USB port, J2534 or ELM, shuts its WiFi out
-   ([2026-10-27-elm327-bench-6](docs/bench-sessions/2026-10-27-elm327-bench-6.md)):
-   one link at a time, a power cycle before WiFi after USB.
-
-The app-fed stream for Bluetooth on Android and BLE is
-[ADR-0028](docs/adr/0028-app-fed-streams.md) (accepted; step 1, the
-Android baseline, is complete: the app runs on a phone, reaches the
-VX over WiFi and replays a recording by a tap
-([2026-10-28-android-6](docs/bench-sessions/2026-10-28-android-6.md));
-step 2, the core stream (`stream.h`, `core/src/elm327_stream.cpp`), is
-built and HARNESS-tested (`Elm327StreamTest`); step 3, the app's
-Bluetooth (`app/btstream.cpp`, Settings' paired adapters and BLE scan,
-Android 12 and later), is built and ran on the phone with no adapter:
-the permission, the lists, and a classic and a BLE link carrying the
-setup ([2026-10-28-android-7](docs/bench-sessions/2026-10-28-android-7.md));
-step 4, the MX+ through the phone on the car, is complete: the same
-readings as through the laptop, ~36 replies a second, a Bluetooth drop
-recovered in 4.2 s ([2026-10-28-android-8](docs/bench-sessions/2026-10-28-android-8.md)),
-and in the background with the screen off, through ADR-0029
-([2026-10-28-android-11](docs/bench-sessions/2026-10-28-android-11.md))). Later,
-with its own record: listening to the whole bus (raw frames, for a
-car whose OBD port carries more than diagnostics).
+Built and read on one car; how it works, and what each adapter on hand
+does, is in [docs/elm327.md](docs/elm327.md), and why in
+[ADR-0026](docs/adr/0026-elm327-transport.md). Bluetooth on Android
+goes through the app ([ADR-0028](docs/adr/0028-app-fed-streams.md)),
+with background sessions ([ADR-0029](docs/adr/0029-android-background-sessions.md)).
+Open, all needing hardware not on hand:
+- **Response pending** (BENCH prep #17): whether an adapter waits past
+  `7F xx 78`, and whether it counts that line toward the
+  response-count digit. The car never sent one.
+- **Listening to another tester** (#19): `AT MA` on a car, through an
+  OBD Y-splitter.
+- **A BLE adapter** (#25): the service the app picks, on a real one.
+- Later, with records of their own: Bluetooth LE on iOS and the
+  desktop (ADR-0028 step 5), and listening to the whole bus (raw
+  frames, for a car whose OBD port carries more than diagnostics).
 
 ## BENCH prep
 
-The assumptions in the J2534 code that only real hardware can confirm,
-each with its evidence, are in
+The assumptions in the J2534 and ELM327 code that only real hardware
+can confirm, each with its evidence, are in
 [docs/bench-sessions/bench-prep.md](docs/bench-sessions/bench-prep.md);
-every session walks it. Items 1–3 and 5–10 are settled for the OBDX Pro VX.
-Open: #4 (29-bit addressing, unexercised on the 11-bit car), what
-sets the VX clock's zero (#5), and every item for any other adapter.
+every session walks it. Every item is settled for the adapters on
+hand but these: 29-bit addressing (#4, the car is 11-bit), what sets
+the VX clock's zero (#5), the VX's serial port on a machine without
+OBDX's software (#11), response pending (#17), listening to another
+tester (#19), the VX's WiFi while its USB port is held (#20, in
+part), and a BLE adapter (#25). Any other adapter starts the list
+again.
 
 ## Known issues and technical debt
 
 These numbers are stable IDs, and code and docs refer to them. When
 an issue is resolved it is removed, and its number is not reused.
 
-2. **The mobile apps are unvalidated.** CI
-   cross-builds an Android arm64-v8a APK and an unsigned iOS arm64
-   device build. On request, it also launches the iOS app on the
-   Simulator and screenshots it (`ios-simulator-smoke`). The Android app runs on a phone: the
-   pages fit, `mock://` streams, `elm327://` reaches the VX over
-   WiFi, and a recording replays by a tap on its row in Settings
-   ([2026-10-28-android-3](docs/bench-sessions/2026-10-28-android-3.md)).
-   The window follows the screen when the phone turns, and Settings
-   fits connected, its sections folded
-   ([2026-10-28-android-6](docs/bench-sessions/2026-10-28-android-6.md)).
-   The iOS app hasn't
-   run on a device, and no tests run on either (cross builds set
-   `BUILD_TESTING=OFF`). Bluetooth on Android
-   ([ADR-0028](docs/adr/0028-app-fed-streams.md)) has read the test
-   car through an OBDLink MX+, in the background and with the screen
-   off ([2026-10-28-android-11](docs/bench-sessions/2026-10-28-android-11.md),
+2. **The iOS app is unvalidated, and no tests run on a phone.** CI
+   cross-builds an unsigned iOS arm64 device build and, on request,
+   launches the app on the Simulator and screenshots it
+   (`ios-simulator-smoke`); it has never run on a device, which needs
+   signing. The Android app has run on one phone (Android 16) and one
+   car, with the MX+ over classic Bluetooth, in the background and with
+   the screen off ([2026-10-28-android-11](docs/bench-sessions/2026-10-28-android-11.md),
    [2026-10-29-android](docs/bench-sessions/2026-10-29-android.md));
-   no BLE adapter has. The app needs Android 12 or later. CI uploads the
-   Android build's debug APK.
+   no BLE adapter has. Neither platform runs the suite: cross builds
+   set `BUILD_TESTING=OFF`, so the phone is checked by its run sheet
+   ([android-phone-runsheet.md](docs/bench-sessions/android-phone-runsheet.md)).
+   The app needs Android 12 or later; CI uploads the Android build's
+   debug APK.
 4. **Every def is matched against every frame, on the transport's
    worker** ([ADR-0024](docs/adr/0024-decode-on-the-worker.md)). A
    subscription can't trim that work: it is the chart's filter only,
@@ -348,16 +243,94 @@ an issue is resolved it is removed, and its number is not reused.
 | v1.0+ | The first manufacturer plugins; the write path, with security access (0x27) and flashing through each plugin after the gateway research | Proposed |
 
 The planned releases are in order; the proposed ones are not
-scheduled. The write path needs an ADR per item (see the
-[backlog](#editing-and-write-path-10-and-later-nothing-below-is-scheduled)),
-and flashing depends on each manufacturer's secure-gateway
-authentication, research tracked outside this repository.
+scheduled. What each holds, past its row:
+
+### v0.3.4: a command-line client, Linux, SocketCAN listening
+
+- **`havne-cli`:** a client over the Qt-free core that starts a
+  session, streams frames as JSON lines and exits cleanly, with tests
+  that hold the C ABI to its promises.
+- **Linux as a supported desktop:** CI already builds and tests the app
+  on Ubuntu, and ELM327 runs over termios; left are runs on the
+  distributions and an AppImage.
+- **SocketCAN, listening:** raw frames from a native CAN interface at a
+  set bit rate, listen-only; a simulated ECU on Linux's virtual CAN bus
+  runs it with no car.
+
+### v0.3.5: full OBD-II diagnostics, SocketCAN requests
+
+- **Full standard OBD-II coverage.** Grow the `obd2` set toward
+  the whole SAE J1979 Service 01 table, including PIDs that carry two
+  values (oxygen sensors with fuel trims), which need two defs on one
+  PID.
+  - The probe drops the PIDs a car's bitmaps mark unsupported, so a
+    bigger set costs only the ones the car has. Each kept PID still
+    costs a request per pass, so the refresh policy ADR-0015 leaves
+    open (rate classes, or a curated set beside a full one) comes with
+    it.
+  - Verify each PID's meaning and formula against a public J1979
+    table. The fake's canned replies share the def's assumptions, so
+    the tests can't catch a wrong PID.
+- **Trouble codes:** read stored, pending and permanent codes and the
+  freeze frame (Services 03, 07, 0A, 02), and clear them (Service 04),
+  the first request that changes anything in the car. It gets its own
+  gate: the codes and freeze frame read and saved first, ignition on
+  with the engine off, and a confirmation that says what clearing
+  resets (the readiness monitors).
+- **SocketCAN requests:** ISO-TP segmentation, which J2534 and ELM327
+  adapters do themselves, so the request engine and the profiles run on
+  a native CAN interface. An ADR first.
+
+### v0.4.0 and v0.5.0 (proposed)
+
+- **v0.4.0:** Python bindings over the C ABI; PCAP export and candump
+  import; discovering which ECUs answer and what they offer, which
+  needs requests to more than one ECU and listening to the whole bus
+  first.
+- **v0.5.0:** a plugin framework (ADR-0013's profile API made
+  general); the pre-2008 buses (ISO 9141-2, KWP2000, J1850), through
+  ELM327 and J2534.
+
+### 1.0 and later: make-specific data and the write path (proposed)
+
+- **A first manufacturer signal set,** the pilot for the first
+  plugins: one make's enhanced Service 22 data, such as transmission
+  temperature, which the standard set doesn't include. A def keyed
+  `62 <DID>` already enrols its request and decodes the reply
+  (ADR-0015, ADR-0016), so what's missing is the data: the DIDs and
+  their formulas, which `uds-generic`'s polling and range scan are for
+  ([ADR-0020](docs/adr/0020-uds-generic.md)).
+- **The write path.** Security access (0x27) and flashing go through
+  each manufacturer's plugin and depend on its secure-gateway
+  authentication, researched outside this repository. Every item needs
+  its own ADR first, and the UDS services it raises (0x27, 0x2E, 0x31,
+  0x34/0x36/0x37, 0x3D) carry emissions-law, warranty and
+  ABS/traction/stability exposure that the record has to cover. Design
+  order matters: the original copy's format constrains everything
+  after it.
+  - **The original copy (L).** Read the calibration as it stands,
+    store it as a versioned, checksum-addressed artifact, and keep it
+    immutable. Every edited value shows against this shadow, so a
+    restore path always exists. Session recordings are frame logs, not
+    a calibration image.
+  - **Table and curve editors (L).** VE and spark tables: grid cells,
+    2D curves with draggable points, a 3D heatmap view. The signal
+    model describes a single scalar, so core needs a richer def type,
+    the biggest schema change since the signal set, and QML needs
+    editors.
+  - **Diff and undo (M).** Changed values highlighted against the
+    original, per-value revert, global rollback; cheap if the original
+    copy exists, painful to retrofit if it doesn't.
+  - **Write-flow safety (M).** During any write: battery voltage
+    visible, a do-not-power-off state, and a resumable or recoverable
+    transfer whose recovery story is stated before the write starts.
+    The surrogate's wedged-child latch bounds a hung read; a wedged
+    write is a worse failure and must never be silent.
 
 ## Backlog
 
-Unscheduled work, grouped by theme. Nothing here is committed to a
-release: an item moves into [After v0.3.0](#after-v030) or the
-roadmap above when it is scheduled. Defects and debt live under
+Work not placed in a release, grouped by theme. An item moves into
+the roadmap above when it is. Defects and debt live under
 [Known issues](#known-issues-and-technical-debt), not here.
 
 Sizes are rough: **S** is a day or less, **M** a few days, **L** a
@@ -406,26 +379,6 @@ week or more or a design that needs an ADR first.
 
 ### Vehicle coverage
 
-- **Full standard OBD-II coverage (L).** Grow the `obd2` set toward
-  the whole SAE J1979 Service 01 table, including PIDs that carry two
-  values (oxygen sensors with fuel trims), which need two defs on one
-  PID.
-  - The probe drops the PIDs a car's bitmaps mark unsupported, so a
-    bigger set costs only the ones the car has. Each kept PID still
-    costs a request per pass, so the refresh policy ADR-0015 leaves
-    open (rate classes, or a curated set beside a full one) comes with
-    it.
-  - Verify each PID's meaning and formula against a public J1979
-    table. The fake's canned replies share the def's assumptions, so
-    the tests can't catch a wrong PID.
-- **A first manufacturer signal set (L).** One make's enhanced
-  Service 22 data, such as transmission temperature, which the
-  standard set doesn't include. Choose the make from the target
-  vehicles. A def keyed `62 <DID>` already enrols its request and
-  decodes the reply (ADR-0015, ADR-0016), so what's missing is the
-  data: the DIDs and their formulas, which `uds-generic`'s `?did=`
-  polling and range scan are for ([ADR-0020](docs/adr/0020-uds-generic.md)).
-  It serves as the pilot for the first plugins.
 - **Computed signals (M).** Values derived from other signals, such
   as boost pressure: intake manifold absolute pressure (PID 0x0B)
   minus barometric pressure (PID 0x33). Neither PID is in the `obd2`
@@ -437,39 +390,6 @@ week or more or a design that needs an ADR first.
   above: a user-facing expression per channel (differences, unit
   conversions, smoothing). Stays in core per rule 2, and is the same
   data-describing-arithmetic shape ADR-0015 uses for requests.
-
-### Editing and write path (1.0 and later; nothing below is scheduled)
-
-Every item here needs its own ADR first, and the UDS services it raises
-(0x27, 0x2E, 0x31, 0x34/0x36/0x37, 0x3D) carry emissions-law, warranty and
-ABS/traction/stability exposure that the record has to cover. Design order
-matters: the original-copy file format constrains everything after it.
-
-- **The original copy (L; ADR first).** Read the calibration as it
-  stands, store it as a versioned, checksum-addressed artifact, and
-  keep it immutable. Every edited value shows against this shadow, so
-  a restore path always exists. The recording is of data, not frames:
-  session recordings today are frame logs, not a calibration image.
-- **Table and curve editors (L; ADR first).** Editing ECU data means
-  editing arrays: VE and spark tables (grid cells, 2D curves with
-  draggable points, a 3D heatmap view). The signal model describes a
-  single scalar; core needs a richer def type, the biggest schema
-  change since the signal set, and the QML side needs editors the
-  current page set has no gesture at.
-- **Diff and undo (M).** Changed values highlighted against the
-  original, per-value revert, global rollback. Cheap if the original
-  copy exists; painful to retrofit if it doesn't.
-- **Write-flow safety UX (M).** During any write: battery voltage
-  visible, a do-not-power-off state, and a resumable or recoverable
-  transfer whose recovery story is stated before the write starts.
-  The surrogate's wedged-child latch bounds a hung read; a wedged
-  write is a worse failure class and must never be silent.
-
-### Transports and platforms
-
-- **ELM327 adapters:** built; see [The ELM327 transport](#the-elm327-transport),
-  which lists what comes later (BLE, the whole bus).
-- **Legacy buses:** see the roadmap above.
 
 ### Performance
 

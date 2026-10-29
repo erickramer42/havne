@@ -24,9 +24,10 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
   until v0.3.4.
 
 ### Added
-- An app icon on Android and iOS: the Home page's tachometer on the
-  app's purple. On Android it's an adaptive icon, shaped to fit
-  whichever icon style the launcher uses.
+- An app icon on Windows, Android and iOS: the Home page's tachometer
+  on the app's purple. On Windows it's `havne.exe`'s icon, in Explorer,
+  the taskbar and the title bar; on Android it's an adaptive icon,
+  shaped to fit whichever icon style the launcher uses.
 - **ELM327 adapters** ([ADR-0026](docs/adr/0026-elm327-transport.md)):
   `elm327://<port>` reads a car through an ELM327-compatible adapter,
   such as an OBDLink or an OBDX Pro in its ELM mode, on a serial port:
@@ -145,6 +146,9 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
   bands showed at the right and the bottom.
 - On a phone, connecting a long URI no longer pushes Settings past the
   screen's right edge: the "Connected:" line wraps.
+- A WiFi adapter that can't be reached because this computer left its
+  network says so ("the connection was cut off on this computer's
+  side"), instead of a Windows sockets error number.
 - Settings and Home fit a narrow window: Settings' rows of buttons wrap
   instead of pushing Connect off the right edge, and Home scrolls when
   the window is shorter than it. On a short window the Dashboard's
@@ -160,6 +164,9 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
   response count that ended the reply after its first frame, so every
   request timed out. Only a profile you register can ask one; the
   built-in `obd2` doesn't.
+- On Android, nothing of Havne's goes into the phone's backup or a
+  transfer to a new phone: its preferences and recordings can hold the
+  vehicle's VIN.
 - The phone's session notification, and the header's connection label,
   show a Bluetooth adapter's address only by its last two parts
   (`elm327://bt:…:44:55`), so a screenshot or the lock screen doesn't

@@ -26,7 +26,7 @@ document that holds the detail. Then, by what you want to do:
 | Change the core, a transport or the C ABI | architecture.md's "Sessions, profiles and decode", the public headers in `core/include/ecuio/` (each documents its contract), [ADR-0007](docs/adr/0007-uri-selected-transports.md) (transports by URI) and [ADR-0016](docs/adr/0016-signal-definition-layout.md) (the def layout) |
 | Add a PID or a profile | [ADR-0013](docs/adr/0013-protocol-profiles.md) (profiles), [ADR-0015](docs/adr/0015-request-engine.md) (how a def's mux key becomes a request), and architecture.md's note on the pairs that must change together. Check a PID's formula against a public SAE J1979 table, never from memory: the fakes answer from the same assumption, so the tests can't catch a wrong one |
 | Work on J2534 | [docs/j2534.md](docs/j2534.md), then ADRs [0010](docs/adr/0010-j2534-v0404-shared-types.md), [0014](docs/adr/0014-single-threaded-surrogate.md) and [0025](docs/adr/0025-one-j2534-backend.md) |
-| Work on ELM327 adapters or Bluetooth | [ADR-0026](docs/adr/0026-elm327-transport.md) and its appendices, [ADR-0028](docs/adr/0028-app-fed-streams.md) (Bluetooth through the app), architecture.md's "ELM327" |
+| Work on ELM327 adapters or Bluetooth | [docs/elm327.md](docs/elm327.md), then [ADR-0026](docs/adr/0026-elm327-transport.md) and its appendices and [ADR-0028](docs/adr/0028-app-fed-streams.md) (Bluetooth through the app) |
 | Work on the UI | architecture.md's "The UI layer", [ADR-0005](docs/adr/0005-coalesced-signal-updates.md) (10 Hz updates), the QML tests in `tests/qml/` |
 | Work on Android | [ADR-0028](docs/adr/0028-app-fed-streams.md), [ADR-0029](docs/adr/0029-android-background-sessions.md), development.md's "Build configurations" (Mobile, then *Android*) |
 | Know how a change is verified | [docs/testing.md](docs/testing.md): the tiers, every verified behavior with the test that pins it, and the gaps |
@@ -149,8 +149,9 @@ assuming either.
 ## Conventions your change must respect
 
 The project's architecture is enforced, not aspirational. The full rules live
-in [docs/architecture.md](docs/architecture.md), with the J2534 specifics in
-[docs/j2534.md](docs/j2534.md) and the build and test workflow in
+in [docs/architecture.md](docs/architecture.md), with the transports'
+specifics in [docs/j2534.md](docs/j2534.md) and
+[docs/elm327.md](docs/elm327.md), and the build and test workflow in
 [docs/development.md](docs/development.md); the ones that reject most outside
 contributions:
 

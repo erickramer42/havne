@@ -72,9 +72,9 @@ log, and, when **Record sessions** is on, writes them into the
 recording's files on your device (`Documents/Havne/recordings` on a
 desktop). An ELM327 session also writes a wire log to the system's
 temporary folder. Havne sends nothing over the network except to the
-adapter you connect to. On Android, though, the phone's own backup
-may copy the app's preferences and recordings to your cloud backup
-when backup is on. Before you share a recording, a log or a
+adapter you connect to, and on Android it keeps its files out of the
+phone's backup and out of a transfer to a new phone. Before you share
+a recording, a log or a
 screenshot, see [CONTRIBUTING.md](CONTRIBUTING.md#handling-vehicle-data)
 for what to remove.
 

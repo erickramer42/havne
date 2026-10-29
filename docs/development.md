@@ -126,6 +126,13 @@ On Debian or Ubuntu, Qt's desktop kit needs `libgl1-mesa-dev` and
 To show the window under X11 you also need `libxkbcommon-x11-0` and
 `libxcb-cursor0`. CI never launches the app, so it skips them.
 
+**Running a source build.** On Windows it needs a current Microsoft
+Visual C++ Redistributable (x64), at least as new as the MSVC that
+built the app and Qt: Visual Studio installs one, and windeployqt
+doesn't copy it (the release zip carries its own). Linux and macOS
+need the Qt runtime libraries. A J2534 vendor driver is needed only
+for a real adapter; the tests use the in-tree fake.
+
 **Core only, no Qt.** This mirrors the Ubuntu CI job:
 
 ```sh
@@ -238,9 +245,13 @@ geometry (the Home page's tachometer on the accent color's tile) and
 writes every copy: the SVG masters in `packaging/icons/`, Android's
 adaptive launcher icon as vector drawables in `app/android/res/`
 (named in the manifest through `QT_ANDROID_APP_ICON`, which
-`android-build` checks), and iOS's asset catalog in
-`app/ios/Assets.xcassets/`. Its 1024 px PNG is rendered by a desktop
-Qt kit's `qml` runtime, offscreen:
+`android-build` checks), iOS's asset catalog in
+`app/ios/Assets.xcassets/`, and Windows' `app/windows/app.ico`, which
+`app_add_version_resource` puts in `havne.exe`'s resource (Qt's
+Windows plugin takes it for the window too). The iOS 1024 px PNG and
+the `.ico`'s images (16 to 64 px as 32-bit bitmaps, 256 px as PNG,
+the corners transparent) are rendered by a desktop Qt kit's `qml`
+runtime, offscreen:
 
 ```sh
 python packaging/icons/make_icons.py --qt C:/Qt/6.12.0/msvc2022_64

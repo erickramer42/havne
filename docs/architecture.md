@@ -287,8 +287,10 @@ a Bluetooth stack ([ADR-0026](adr/0026-elm327-transport.md)).
   `ECUIO_FRAME_FLAG_OVERFLOW`, as a J2534 driver's
   `ERR_BUFFER_OVERFLOW` does; closing stops it with a space. A session
   with no channel is refused at create.
-- **Not yet:** Bluetooth LE, which has no serial port, and the whole
-  bus unfiltered.
+- **Not yet:** Bluetooth LE on iOS and the desktop (ADR-0028 step 5),
+  and the whole bus unfiltered.
+
+The full reference is [elm327.md](elm327.md).
 
 ## Link health
 
@@ -438,6 +440,7 @@ Detail and gaps: [testing.md](testing.md).
 | What works, what's broken, what's next | [STATUS.md](../STATUS.md) |
 | Why was it built this way | [adr/](adr/README.md) |
 | How the J2534 stack works, op by op | [j2534.md](j2534.md) |
+| How the ELM327 transport works, and the adapters it has run on | [elm327.md](elm327.md) |
 | How to build, run tests, read CI, troubleshoot | [development.md](development.md) |
 | What is verified, by which test, and the known gaps | [testing.md](testing.md) |
 | What changed in each release | [CHANGELOG.md](../CHANGELOG.md) |

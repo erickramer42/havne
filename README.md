@@ -3,326 +3,199 @@
 [![CI](https://github.com/erickramer42/havne/actions/workflows/ci.yml/badge.svg)](https://github.com/erickramer42/havne/actions/workflows/ci.yml) [![Coverage](https://codecov.io/gh/erickramer42/havne/graph/badge.svg)](https://codecov.io/gh/erickramer42/havne) [![Release](https://img.shields.io/github/v/release/erickramer42/havne)](https://github.com/erickramer42/havne/releases/latest)
 [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/erickramer42/havne/badge)](https://scorecard.dev/viewer/?uri=github.com/erickramer42/havne) [![OpenSSF Best Practices](https://www.bestpractices.dev/projects/15816/badge)](https://www.bestpractices.dev/projects/15816)
 
-Havne is a cross-platform OBD-II reader and logger. A Qt-free C++17
-core does the vehicle I/O and decoding behind a stable C ABI. A Qt 6 / QML
-front end shows the results as gauges, a live strip chart and a raw CAN
-frame log. It talks to J2534 Pass-Thru adapters on Windows and to
-ELM327-compatible adapters on every platform (USB, Bluetooth or WiFi),
-runs on an Android phone over its Bluetooth, and a built-in simulated
-vehicle lets it run with no hardware at all.
+Havne reads a car's engine computer and shows what it says: live
+gauges, a strip chart, a log of every frame. A Qt-free C++17 core does
+the vehicle I/O and decoding behind a C ABI; a Qt 6 / QML front end
+draws the results on Windows, Linux, macOS and Android. It talks to
+J2534 Pass-Thru adapters on Windows and to ELM327-compatible adapters
+everywhere (USB, Bluetooth, WiFi), and a simulated vehicle runs every
+page with no hardware.
 
 > [!WARNING]
-> **Experimental software.** Tested read-only on one vehicle with two adapters — see [DISCLAIMER.md](DISCLAIMER.md).
->
-> Havne runs end to end against its simulated vehicle, a fake J2534 vendor driver and a fake ELM327. On one car, read-only, it has read live data through an OBDX Pro VX as a J2534 adapter and in its ELM327 mode, and through an OBDLink MX+ over Bluetooth, from a laptop and from an Android phone: the engine ECU answered its requests, and the values decoded and tracked the instrument cluster ([J2534](docs/bench-sessions/2026-10-25-vehicle.md), [ELM327](docs/bench-sessions/2026-10-27-elm327-vehicle.md), [the phone](docs/bench-sessions/2026-10-28-android-8.md)). Other vehicles and adapters are untested; [STATUS.md](STATUS.md) tracks what is and isn't verified.
+> **Experimental, read-only.** It has read one car through two adapters, from a laptop and from an Android phone; other vehicles and adapters are untested. Read [DISCLAIMER.md](DISCLAIMER.md) before connecting it to a vehicle.
 
 ![The Havne Dashboard through a quarter mile on the warmed-up simulated vehicle: launch control holds the engine near 4,000 rpm at the line, the tires spin off it, three upshifts at 6,800 rpm refill the shift lights, and speed climbs to about 107 mph at the line while coolant rises from 194 to 216 °F, where the fan cuts in, and the oil from 225 to 239 °F, before the driver lifts](docs/images/dashboard.gif)
 
-*The Dashboard in real time on the built-in simulated vehicle
-(`mock://demo`), with no hardware attached: a quarter mile off launch
-control on a warm loop, then the lift.*
+*The Dashboard on the simulated vehicle (`mock://demo`), in real time:
+a quarter mile off launch control on a warm loop.*
 
-## Try it
+## Engineering highlights
 
-On Windows 10 or 11 (x64), download the zip from the
-[latest release](https://github.com/erickramer42/havne/releases/latest),
-unzip it and run `havne.exe`. Nothing else is needed: Qt and the
-Visual C++ runtime are in the zip. The program isn't code-signed, so
-SmartScreen may stop it the first time (**More info**, then **Run
-anyway**). In Settings, press the `mock://demo` preset and **Connect**
-to watch the simulated car drive. Other platforms build from source
-([Build](#build)).
+- **Vendor drivers run in a process of their own.** J2534 drivers are
+  third-party DLLs, often 32-bit. The loader reads each DLL's PE header
+  and runs it in a single-threaded surrogate process of the same
+  architecture behind a private named pipe, so a crashing driver ends
+  its surrogate, not the app, and every vendor call lands in one log
+  ([ADR-0025](docs/adr/0025-one-j2534-backend.md),
+  [ADR-0014](docs/adr/0014-single-threaded-surrogate.md)).
+- **A bounded data path, measured.** Callbacks dispatch from a
+  snapshot, the transport's worker decodes and allocates nothing per
+  frame (a test counts its allocations), backpressure bounds the frames
+  in flight, and values reach QML at 10 Hz whatever the bus rate. A
+  recorded engine start replayed through the app sustains 375,000 to
+  565,000 frames a second through decode, more than 80 times a full
+  classic CAN bus, and CI re-runs that load test on every push
+  ([ADR-0024](docs/adr/0024-decode-on-the-worker.md),
+  [docs/testing.md](docs/testing.md#load-test-the-replay-fixture-through-the-bridge)).
+- **Requests follow the replies.** One request out per ECU, the next
+  when the answer is in; a supported-PID probe drops only what the ECU
+  says it lacks, never on silence; nothing but read services can be
+  sent ([ADR-0015](docs/adr/0015-request-engine.md)). On the car,
+  about 26 requests a second through J2534 and over 30 through an
+  ELM327 on Bluetooth.
+- **Link health that names the right problem.** Reads and writes are
+  judged apart, so a quiet bus (ignition off) isn't an adapter fault
+  and failing requests aren't a dead adapter; recovery backs off from
+  100 ms to 5 s. A value never received shows "—", never 0.
+- **Protocol parsers built to be fuzzed.** The ELM327 wire layer is
+  pure (no I/O, no clock, no allocation), so every rule is a unit test
+  over canned bytes, and libFuzzer runs it, the signal decoder, the
+  validators and the replay reader in CI under ASan and UBSan
+  ([fuzz/README.md](fuzz/README.md)).
+- **A stable C ABI.** Opaque handles, flat functions and POD structs
+  with reserved room, append-only enums; a strict-C compile of every
+  public header pins the layout, and a CI job builds and tests the core
+  on a machine with no Qt
+  ([ADR-0001](docs/adr/0001-qt-free-core-c-abi.md)).
+- **Verified in tiers, and honest about it.** Unit, bridge and Qt Quick
+  tests; a harness tier that drives the whole J2534 stack against an
+  in-tree fake vendor DLL (through the 32-bit surrogate too) and the
+  ELM327 transport against a fake adapter; clang-tidy and CodeQL; a
+  signed build provenance on every download. What only hardware can
+  confirm is listed, and every real-adapter session is written up
+  ([docs/testing.md](docs/testing.md),
+  [bench-prep.md](docs/bench-sessions/bench-prep.md)).
+- **Decisions on record.** Every design decision is an
+  [architecture decision record](docs/adr/README.md), with the
+  alternatives it turned down and dated appendices where hardware
+  changed the plan; lessons go in an
+  [engineering log](docs/engineering-log.md).
+
+## What it does
+
+- **Dashboard, Live and Log pages.** Gauges with shift lights, peak
+  hold and stale dimming; decoded values and a strip chart that keeps
+  each 100 ms window's peak; an activity log of every connect, link
+  change, adapter and ECU, with the raw frames in developer mode.
+- **Three ways to reach a car.** J2534 Pass-Thru on Windows
+  ([docs/j2534.md](docs/j2534.md)); ELM327-compatible adapters on a
+  serial port, Bluetooth or WiFi on every desktop
+  ([docs/elm327.md](docs/elm327.md)); and an Android phone's Bluetooth,
+  with sessions that keep running in the background
+  ([ADR-0028](docs/adr/0028-app-fed-streams.md),
+  [ADR-0029](docs/adr/0029-android-background-sessions.md)).
+- **Profiles chosen by the URI.** `obd2` polls standard PIDs,
+  `uds-generic` polls or scans the UDS identifiers the URI names, and
+  `raw` logs frames; the car's VIN and calibration IDs are read at
+  connect ([ADR-0013](docs/adr/0013-protocol-profiles.md),
+  [ADR-0021](docs/adr/0021-vehicle-identification.md)).
+- **Recording and replay.** Each connect can record every frame, value
+  and event; `replay://` plays a recording back at its own pace or
+  faster, through the same decoding
+  ([ADR-0017](docs/adr/0017-session-recording.md),
+  [ADR-0023](docs/adr/0023-replay-transport.md)).
+- **Vehicles and preferences.** Name a car once and it remembers its
+  adapter, what Live plots and its recordings' folder; it's recognized
+  next time by a salted hash of its VIN. Metric or imperial, zoom and
+  the last connection are kept between runs.
+- **A simulated vehicle.** A modeled car (gearing, airflow, tires with
+  weight transfer, coolant and oil heat) drives a cold start, two pulls
+  onto the rev limiter, a cruise and a quarter mile, with readings that
+  stay consistent with each other the way a real ECU's log does.
+
+| Live view | Activity log | Link health |
+|---|---|---|
+| [![Live view: RPM, speed, MAF and lambda plotted through a 3rd-gear pull onto the limiter](docs/images/live.png)](docs/images/live.png) | [![The Log page's activity log: a mock session's connect, its Session line, the Delivery line at the disconnect (none dropped, the GUI thread's wait in microseconds) and a second connect](docs/images/log.png)](docs/images/log.png) | [![Live view over J2534 with every request failing: an amber "Requests failing" banner and pill, and each signal waiting for data](docs/images/link-health.png)](docs/images/link-health.png) |
+| A 3rd-gear pull onto the limiter: rpm, speed and MAF rise together, then rpm saws while speed holds and lambda swings lean on each fuel cut | Each session as it happened: the connect, the "Session:" line, and how its frames reached the screen | Every request refused by the fake J2534 driver: the link reads "requests failing", not idle, and the page says what to check |
 
 ## Architecture
 
 ```
  QML pages: Home · Dashboard · Live · Log · Settings
-   │  Theme (colors, link-state labels) · SignalHub (signals by name)
    ▼  properties and list models, GUI thread only
- SessionBridge (app/)          the only caller of the core
-   │  worker → GUI marshaling, 100 ms coalescing, link-health polling
+ SessionBridge (app/)          the only caller of the core: worker → GUI
+   │                           marshaling, 100 ms coalescing, link health
    ▼  C ABI: core.h · signals.h · profile.h · j2534.h · serial.h · stream.h
- ecuio-core (core/)           no Qt, ever
-   │  sessions + callbacks · profiles + decode · transports
-   ├── mock://    worker thread, scripted drive cycle
-   ├── replay://  worker thread, a recording's frames.csv at its own pace
-   ├── elm327://  worker thread → a serial port (USB, Bluetooth SPP), a
-   │              WiFi adapter's TCP socket, or a link the app opens
-   │              (Bluetooth on a phone): an ELM327-compatible
-   │              adapter's AT commands, one at a time
-   └── j2534://   worker thread → loader, which picks a surrogate by the
-                  DLL's architecture: client ══ named pipe ══
-          ├── ecuio-j2534-surrogate.exe      (x86 process, x86 vendor DLLs)
-          └── ecuio-j2534-surrogate-x64.exe  (x64 process, x64 vendor DLLs)
+ ecuio-core (core/)            no Qt, ever: sessions, profiles, decoding
+   ├── mock://    a scripted drive on a vehicle model
+   ├── replay://  a recording's frames.csv at its own pace
+   ├── elm327://  a serial port, a WiFi socket, or a link the app opens
+   └── j2534://   a surrogate process per driver, over a named pipe
+          ├── ecuio-j2534-surrogate.exe      (32-bit drivers)
+          └── ecuio-j2534-surrogate-x64.exe  (64-bit drivers)
 ```
 
-Three rules shape it
-([ADR-0001](docs/adr/0001-qt-free-core-c-abi.md)):
+Three rules shape it: **the core never links Qt**, so other front ends
+can drive the same core; **the UI receives final display values**, so
+decoding, scaling and units have one home; and **the C ABI is the
+boundary**. [docs/architecture.md](docs/architecture.md) walks through
+it, a frame's path from transport to screen included.
 
-1. **The core never links Qt.** A CI job builds and tests the core on
-   a machine with no Qt, and every configure fails if `ecuio-core`
-   links a Qt target.
-2. **The UI receives final display values.** Decoding, scaling and
-   units live in the core, so QML never parses a frame and there is
-   one decode path.
-3. **The C ABI is the boundary.** Opaque handles, flat `extern "C"`
-   functions and POD structs with reserved room; enum values are
-   append-only. It exists so other front ends (mobile, scripting) can
-   drive the same core, and a strict-C compile of every public header
-   pins it. Its names carry the core's own prefix, `ecuio_` (ECU I/O),
-   so they don't change with the product's name.
+**Where to look in the code:**
 
-The full walkthrough, including a frame's path from transport to
-screen, is [docs/architecture.md](docs/architecture.md).
+| File | What it shows |
+|---|---|
+| [`core/src/request_engine.h`](core/src/request_engine.h) | The request engine: pacing, the probe, the DID scan and identification, with no I/O and no clock, so every rule is a unit test |
+| [`core/src/elm327_protocol.h`](core/src/elm327_protocol.h) | A pure protocol layer: line reading, frame parsing, ISO-TP reassembly; fuzzed |
+| [`core/src/j2534_surrogate_client.cpp`](core/src/j2534_surrogate_client.cpp), [`surrogate/surrogate_main.cpp`](surrogate/surrogate_main.cpp) | Both ends of the out-of-process driver host: the pipe's protections, late replies, a child that dies |
+| [`core/src/link_health.h`](core/src/link_health.h) | The link's state machine, shared by both adapter transports |
+| [`app/sessionbridge.cpp`](app/sessionbridge.cpp) | The worker-to-GUI boundary: backpressure, coalescing, recording |
+| [`core/src/mock_drive_cycle.h`](core/src/mock_drive_cycle.h) | The simulated vehicle and its physics |
 
-## Engineering highlights
+## Try it
 
-- **Vendor drivers isolated in their own process.** The loader reads
-  each driver DLL's PE header and loads it in a single-threaded
-  surrogate process of the same architecture, 32- or 64-bit, over a
-  private named pipe. A driver that crashes ends its surrogate, not the
-  app, and every vendor call lands in one session log; the transport
-  above can't tell which surrogate it's on
-  ([ADR-0008](docs/adr/0008-x86-surrogate-host.md),
-  [ADR-0014](docs/adr/0014-single-threaded-surrogate.md),
-  [ADR-0025](docs/adr/0025-one-j2534-backend.md)).
-- **Link health that names the right problem.** Reads and writes are
-  judged separately, so a quiet bus (ignition off, nothing ACKs) isn't
-  reported as an adapter fault. While a failure lasts, probing backs
-  off from 10 Hz to one try every 5 s.
-- **A bounded data path across threads.** Callbacks dispatch from a
-  snapshot, so they can unregister without deadlocking, and the worker
-  allocates nothing per frame. Core decodes on the transport's thread,
-  backpressure bounds frames in flight, and values reach QML at 10 Hz
-  whatever the bus rate, each at its frame's time
-  ([ADR-0002](docs/adr/0002-callback-pair-identity-snapshot-dispatch.md),
-  [ADR-0003](docs/adr/0003-backpressure-bounds-in-flight-frames.md),
-  [ADR-0005](docs/adr/0005-coalesced-signal-updates.md),
-  [ADR-0024](docs/adr/0024-decode-on-the-worker.md)).
-- **Measured under load.** A recorded engine start replayed through
-  the app's bridge: the worker sustains 375,000 to 565,000 frames a
-  second through decode, more than 80 times a full classic CAN bus;
-  frames reach the GUI thread in under a quarter of a millisecond
-  (median), and
-  values reach the pages at the next 10 Hz tick. CI re-runs the load
-  test on Windows and Linux for every push, and every session's
-  activity log ends with the same figures
-  ([docs/testing.md](docs/testing.md#load-test-the-replay-fixture-through-the-bridge)).
-- **No fabricated readings.** A value never received shows "—", never
-  0, and a value older than 3 s dims.
-- **Tested in tiers.** Unit tests cover the core, decoding, the C ABI
-  and the bridge (headless). Qt Quick tests run the app's own pages
-  against a real bridge, offscreen. A harness tier drives the whole
-  J2534 stack against an in-tree fake vendor DLL, through the x64
-  surrogate, and locally through the x86 one; the ELM327 transport
-  runs against a fake ELM327 behind its port, over a loopback socket
-  and, on Linux and macOS, a pseudo-terminal
-  ([docs/testing.md](docs/testing.md)).
-- **CI on every push.** Builds and tests on Windows, Linux and macOS;
-  runs the core under ASan and UBSan; fuzzes the signal decoder, the
-  validators, the `uds-generic` query parser, the ELM327 reply parsers
-  and the replay reader with libFuzzer
-  ([fuzz/README.md](fuzz/README.md)); holds the core and the surrogate
-  to clang-tidy's analyzer and bug-finding checks, with CodeQL beside
-  it; compiles Android and iOS; and, on request, launches the iOS app in
-  the Simulator. The coverage badge is line coverage of the
-  native code (core, surrogate, bridge) over the whole suite on
-  Windows; QML isn't counted
-  ([docs/testing.md](docs/testing.md#coverage)).
-- **Releases with signed provenance.** Each Windows download is built by a
-  tagged workflow that refuses a commit whose CI didn't pass, checks
-  the package before zipping it, and attaches a signed SLSA build
-  provenance ([docs/development.md](docs/development.md#releases)).
-- **Decisions and evidence on record.** Design decisions are
-  [ADRs](docs/adr/README.md), lessons go in a dated
-  [engineering log](docs/engineering-log.md), and every real-adapter
-  session is written up in
-  [docs/bench-sessions/](docs/bench-sessions/).
+On Windows 10 or 11 (x64), download the zip from the
+[latest release](https://github.com/erickramer42/havne/releases/latest),
+unzip it and run `havne.exe`; Qt and the Visual C++ runtime are inside.
+It isn't code-signed, so SmartScreen may ask first (**More info**, then
+**Run anyway**). In Settings, press the `mock://demo` preset and
+**Connect**.
 
-## Features
-
-- **Dashboard.** Analog, ring, digital and bar gauges with shift
-  lights, peak hold and stale-value dimming. A gauge whose signal the
-  active profile doesn't provide says so instead of showing zero.
-- **Live view.** Decoded values with units, refreshed at 10 Hz, plus
-  a strip chart that plots each value at its frame's time and keeps
-  each 100 ms window's peak.
-- **Vehicles.** Name each car once: picking it fills in its adapter,
-  profile and DIDs, restores what Live plots, and names its recordings.
-  Its VIN recognizes it next time, stored only as a salted hash.
-- **Activity log.** The Log page names every connect, link change,
-  adapter and ECU, time-stamped. Developer mode adds the raw frames,
-  newest-first or oldest-first, with Pause.
-- **Fits the screen.** The Dashboard rearranges for a short, wide
-  window, pages that run long scroll, and Ctrl + / Ctrl − zooms the
-  whole UI (or Settings' Display row), kept between runs.
-- **Metric or imperial.** Settings switches every page between km/h,
-  °C and g/s and mph, °F and lb/min, chart history included, and
-  remembers the choice. Recordings keep the values as the ECU sent
-  them ([ADR-0022](docs/adr/0022-display-units.md)).
-- **Picks up where you left off.** Settings remembers the last URI
-  that connected (the device, profile and DIDs with it) and the Record
-  sessions switch.
-- **Session recording.** Opt-in: each connect writes every frame,
-  every decoded value and the session's events to CSV and text files,
-  with host and adapter time side by side
-  ([ADR-0017](docs/adr/0017-session-recording.md)).
-- **J2534 Pass-Thru (Windows).** Finds installed vendor drivers; pick
-  one in Settings or enter a `j2534://` URI. The `obd2` profile
-  polls standard Service 01 PIDs, so a bare `j2534://` streams decoded
-  signals ([docs/j2534.md](docs/j2534.md)).
-- **ELM327 adapters (every platform).** `elm327://` drives an
-  ELM327-compatible adapter, such as an OBDLink or an OBDX Pro in its
-  ELM mode, on a serial port (USB, or Bluetooth paired as a port) or
-  at a WiFi adapter's address, with the same requests and link health
-  as J2534; Settings lists the serial ports
-  ([ADR-0026](docs/adr/0026-elm327-transport.md)).
-- **Android.** The app runs on Android 12 and later and reaches a
-  Bluetooth adapter through the phone, classic or BLE; a session keeps
-  running in the background and with the screen off, recording
-  included ([ADR-0028](docs/adr/0028-app-fed-streams.md),
-  [ADR-0029](docs/adr/0029-android-background-sessions.md)).
-- **Protocol profiles.** The URI picks how frames decode: `mock`
-  (the default for `mock://`), `obd2` (the default for `j2534://` and
-  `elm327://`),
-  `raw` (log only), or `uds-generic`, which polls or scans the UDS
-  DIDs the URI names, with `?profile=` to choose
-  ([ADR-0013](docs/adr/0013-protocol-profiles.md),
-  [ADR-0020](docs/adr/0020-uds-generic.md)).
-- **Replay.** A recorded session plays back at its own pace, or
-  faster: `replay://<recording folder>?profile=obd2&speed=10`
-  ([ADR-0023](docs/adr/0023-replay-transport.md)).
-- **Simulated vehicle.** A modeled car (gear ratios, airflow and
-  torque, tires with weight transfer, block, coolant and oil
-  temperatures) runs a scripted drive: a cold start, two full-throttle
-  pulls onto a fuel-cut limiter, a highway cruise, then a quarter mile
-  off launch control with wheelspin. Only the first loop is cold: each
-  later one picks up the heat the last left, so the temperatures climb
-  to where a hard-driven car's sit. Its readings stay consistent with
-  each other the way a real ECU's log does: rpm with speed and gear,
-  airflow with load and lambda. Like a real log they never sit dead
-  still: the idle hunts, the driver can't hold a speed to the km/h,
-  and the road rises and falls. Every page works with no hardware.
-
-## Screenshots
-
-| Live view | Frame log | Link health |
-|---|---|---|
-| [![Live view: RPM, speed, MAF and lambda plotted through a 3rd-gear pull onto the limiter](docs/images/live.png)](docs/images/live.png) | [![Frame log: raw mock frames newest-first, about 50 ms apart, with the 29-bit diagnostic frame every 16th](docs/images/log.png)](docs/images/log.png) | [![Live view over J2534 with every request failing: an amber "Requests failing" banner and pill, and each signal waiting for data](docs/images/link-health.png)](docs/images/link-health.png) |
-| A 3rd-gear pull onto the limiter: rpm and speed rise together, then rpm saws while speed holds, MAF stays on its plateau and lambda (dashed) swings lean on each fuel cut | Raw frames as they arrive, with session time, length, the extended-ID flag and payload | Through the in-tree fake J2534 driver with every write refused: the link is judged "requests failing", not idle, and the page says what to check |
-
-## Roadmap
-
-| Version | Milestone | Status |
-|---|---|---|
-| v0.1.0 | Skeleton: core ABI, Qt shell, responsive layout | ✅ Released |
-| v0.2.0 | Callback API, mock transport, live frame log | ✅ Released |
-| v0.3.0 | Signal decoding, live view, J2534 transport, live vehicle read and logging (tested on one vehicle) | ✅ Released |
-| v0.3.1 | Request engine, PID-support probe, vehicle identification, generic UDS reads, imperial units; the first Windows download | ✅ Released |
-| v0.3.2 | Record-replay transport, decoding on the transport's thread, every driver in its own process | ✅ Released |
-| v0.3.3 | ELM327 adapters, preferences and vehicles, Android with Bluetooth and background sessions, the rename to Havne | Built; release pending |
-| v0.3.4 | A command-line client; Linux as a supported desktop; a SocketCAN transport that listens | Planned |
-| v0.3.5 | Full OBD-II diagnostics, including reading and clearing trouble codes; SocketCAN requests | Planned |
-| v0.4.0 | Python bindings; PCAP export and candump import; finding the ECUs and data a car offers | Proposed |
-| v0.5.0 | A plugin framework for make-specific signal sets; buses for pre-2008 cars | Proposed |
-| v1.0+ | The first make-specific plugins; writing to the ECU, starting from a copy of the original calibration | Proposed |
-
-The planned releases come in order; the proposed ones are not
-scheduled yet. v0.3.3's changes are under CHANGELOG's "Unreleased";
-the plan, the backlog and known issues are in [STATUS.md](STATUS.md),
-and what each release changed is in [CHANGELOG.md](CHANGELOG.md).
-
-## Build
-
-| Component | Version | Notes |
-|---|---|---|
-| CMake | 3.21+ | |
-| Qt | 6.12+ (LGPL) | Core, Gui and Quick modules |
-| C++ compiler | C++17 | MSVC 2022+, GCC 10+ or Xcode 16+ (Qt 6.12's minimums; a core-only build needs just C++17) |
-
-Installing Qt 6.11+ with aqtinstall needs a workaround; see
-[docs/development.md](docs/development.md#installing-qt-with-aqtinstall).
+To build from source you need CMake 3.21+, Qt 6.12 and a C++17
+compiler:
 
 ```sh
-# Windows (adjust the path to your Qt installation)
-cmake -B build -DCMAKE_PREFIX_PATH=<qt-install>/msvc2022_64
+cmake -B build -DCMAKE_PREFIX_PATH=<qt-install>/<kit>
 cmake --build build --config Release
 ctest --test-dir build -C Release --output-on-failure
-build/app/Release/havne.exe
-
-# Linux / macOS
-cmake -B build -DCMAKE_PREFIX_PATH=/path/to/qt
-cmake --build build
-ctest --test-dir build --output-on-failure
-build/app/havne                              # Linux
-build/app/Havne.app/Contents/MacOS/Havne    # macOS (an app bundle)
 ```
 
-To try it without hardware, open **Settings**, pick the `mock://demo`
-preset and connect.
-
-Add `-DHAVNE_BUILD_CORE_ONLY=ON` to build only the core library and
-its tests, without Qt.
-
-**32-bit vendor drivers (Windows).** The app tree builds the x64
-surrogate itself. 32-bit J2534 drivers, such as the OBDX Pro VX's,
-need the x86 surrogate from a second, core-only tree. Build it
-**before** configuring `build`: the app's configure step finds it in
-`build-win32/` and copies it next to `havne.exe` on every app build.
-
-```sh
-cmake -B build-win32 -A Win32 -DHAVNE_BUILD_CORE_ONLY=ON
-cmake --build build-win32 --config Release --target ecuio-j2534-surrogate fake_j2534 fake_j2534_legacy
-```
-
-**Mobile.** The Android app runs on a phone (Android 12 and later; a
-debug build, sideloaded, with no store release yet); the iOS build has
-run only on the Simulator. Their command lines are in
-[docs/development.md](docs/development.md), which also covers other
-ways to deploy the surrogate, the cross-architecture tests and
+`-DHAVNE_BUILD_CORE_ONLY=ON` builds the core and its tests without Qt.
+[docs/development.md](docs/development.md) covers the 32-bit
+surrogate's second tree, Linux, macOS, Android and iOS, and
 troubleshooting.
 
-**Runtime for a source build:** Windows needs a current Microsoft
-Visual C++ Redistributable (x64), at least as new as the MSVC that
-built the app and Qt; Visual Studio installs one, and the post-build
-deploy step doesn't copy it (the release zip carries its own). Linux
-and macOS need the Qt runtime libraries.
-A J2534 vendor driver is only needed for a real adapter; the tests use
-a bundled fake.
+## Status
 
-## Feedback and contributing
+v0.3.3 (ELM327 adapters, preferences and vehicles, Android with
+Bluetooth, the rename from QtTune) is built, and its release is next.
+Then:
 
-Found a bug, or have a feature in mind?
-[Open an issue](https://github.com/erickramer42/havne/issues) — include
-the version, your OS and how you connected, and scrub any logs of
-vehicle data (VINs, adapter serials) before attaching them.
+| Version | Plan |
+|---|---|
+| v0.3.4 | A command-line client over the C ABI; Linux as a supported desktop; a SocketCAN transport that listens |
+| v0.3.5 | Full OBD-II diagnostics, reading and clearing trouble codes; SocketCAN requests through ISO-TP |
+| Later | Python bindings, capture formats and discovery; a plugin framework for make-specific data; older buses; writing to the ECU at 1.0 and beyond |
 
-Pull requests are welcome; read
-[CONTRIBUTING.md](CONTRIBUTING.md) first — it covers the project's
-rules (append-only C ABI, Qt-free core, tiered testing) and how to
-build and test a change.
+[STATUS.md](STATUS.md) holds what works, what's verified, the known
+issues and the full roadmap; [CHANGELOG.md](CHANGELOG.md) what each
+release changed.
 
 ## Documentation
 
 | Document | What's in it |
 |---|---|
-| [docs/architecture.md](docs/architecture.md) | Start here: how the parts fit together and why, plus a map of the other docs |
-| [STATUS.md](STATUS.md) | Current state, the plan, known issues, roadmap and backlog |
-| [docs/development.md](docs/development.md) | Build configurations, running tests, CI, troubleshooting |
-| [docs/testing.md](docs/testing.md) | Test tiers, suites, what is and isn't verified |
-| [docs/j2534.md](docs/j2534.md) | How the J2534 transport works |
-| [docs/adr/](docs/adr/README.md) | Architecture decision records |
-| [CHANGELOG.md](CHANGELOG.md) | What changed in each release |
-| [docs/engineering-log.md](docs/engineering-log.md) | Milestone history and lessons learned |
-| [docs/bench-sessions/](docs/bench-sessions/bench-prep.md) | Real-hardware sessions, their run sheets, and the assumptions only hardware can confirm |
-| [CONTRIBUTING.md](CONTRIBUTING.md) | Reporting bugs, the rules a change must respect, testing and pull requests |
-| [SECURITY.md](SECURITY.md) | Reporting a vulnerability; the threat model and its defenses are in [docs/security-assurance.md](docs/security-assurance.md) |
+| [docs/architecture.md](docs/architecture.md) | How the parts fit together and why, and a map of the other docs |
+| [docs/adr/](docs/adr/README.md) | The architecture decision records |
+| [docs/testing.md](docs/testing.md) | Test tiers, what each test pins, and what isn't verified |
+| [docs/j2534.md](docs/j2534.md), [docs/elm327.md](docs/elm327.md) | How each adapter transport works |
+| [docs/development.md](docs/development.md) | Builds, tests, CI, releases, troubleshooting |
+| [docs/bench-sessions/](docs/bench-sessions/bench-prep.md) | Real-hardware sessions, their run sheets, and what only hardware can confirm |
+| [docs/engineering-log.md](docs/engineering-log.md) | Milestones and lessons learned |
+| [CONTRIBUTING.md](CONTRIBUTING.md), [SECURITY.md](SECURITY.md) | Where to start, the rules a change follows, reporting a vulnerability |
 
 ## License
 
-MIT. See the [LICENSE](LICENSE) file.
-
-Havne uses [Qt](https://www.qt.io), licensed under LGPL-3.0. Qt is
-not bundled in this repository; see qt.io for sources and the license
-text. Havne is an independent project, not affiliated with or
-endorsed by The Qt Company.
+MIT; see [LICENSE](LICENSE). Havne uses [Qt](https://www.qt.io) under
+LGPL-3.0; Qt isn't bundled in this repository. Havne is an independent
+project, not affiliated with or endorsed by The Qt Company.
