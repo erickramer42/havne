@@ -180,12 +180,19 @@ if(TARGET havne-cli)
     app_cli_usage(AnUnknownOptionIsUsage "stream|mock://x|--fast")
     app_cli_usage(ACountOfZeroIsUsage "stream|mock://x|--count|0")
     app_cli_usage(TwoUrisIsUsage "stream|mock://a|mock://b")
-    # Ctrl+C: POSIX only, since a console event can't go to one child
-    # alone on Windows (ADR-0031 §6)
+    # A stop from outside (ADR-0031 §6): SIGINT and SIGTERM on POSIX;
+    # on Windows Ctrl+Break to a child in a process group of its own
+    # (Ctrl+C can't be sent to one), skipped where there's no console
     if(UNIX)
         add_test(NAME CliSignalTest.InterruptEndsTheStreamCleanly
             COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/cli_signal.sh $<TARGET_FILE:havne-cli>)
         set_tests_properties(CliSignalTest.InterruptEndsTheStreamCleanly PROPERTIES TIMEOUT 30)
+    elseif(WIN32 AND Python3_Interpreter_FOUND)
+        add_test(NAME CliSignalTest.CtrlBreakEndsTheStreamCleanly
+            COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/cli_ctrl_break.py
+                    $<TARGET_FILE:havne-cli> "${_cli_replay}?profile=obd2")
+        set_tests_properties(CliSignalTest.CtrlBreakEndsTheStreamCleanly PROPERTIES
+            TIMEOUT 30 SKIP_RETURN_CODE 77)
     endif()
 endif()
 
