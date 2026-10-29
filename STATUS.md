@@ -130,7 +130,11 @@ background too. Next come v0.3.4 and v0.3.5 ([roadmap](#roadmap)).
     decoded value and activity line per connect
     ([ADR-0017](docs/adr/0017-session-recording.md)), and a surrogate
     session log of every vendor call, with every request and reply
-    while recording.
+    while recording. Session time counts the machine's sleep on every
+    platform, so a sleep is a gap on Live and in a recording, and the
+    activity log and `havne-cli` say how long it was
+    ([ADR-0033](docs/adr/0033-session-time-counts-sleep.md); a real
+    sleep, BENCH prep #27, to come).
 - **Not yet:** real hardware beyond two adapters and one car: 29-bit
   addressing, more than one ECU answering, a real x64 driver,
   and other vendors ([BENCH prep](docs/bench-sessions/bench-prep.md),

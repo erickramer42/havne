@@ -85,6 +85,14 @@ threads onto the GUI thread.
 - **Coalescing:** values reach QML at 10 Hz whatever the bus rate,
   because a bus can outrun the screen
   ([ADR-0005](adr/0005-coalesced-signal-updates.md)).
+- **One clock:** every transport stamps its frames, the request engine
+  schedules, the recorder writes `host_us` and the model ages values on
+  `ecuio_clock_us`, which keeps counting while the machine sleeps
+  (`CLOCK_BOOTTIME` on Linux and Android, where `steady_clock` stops).
+  A sleep is then a gap on Live and in a recording rather than the
+  values on either side joined, and the bridge logs "Asleep for N s"
+  ([ADR-0033](adr/0033-session-time-counts-sleep.md)). Waits stay on
+  `steady_clock`, the only clock the standard's waits take.
 
 ## Sessions, profiles and decode
 
