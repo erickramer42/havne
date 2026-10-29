@@ -251,8 +251,9 @@ command only after its prompt. Each pass:
 2. asks the channels in turn for a request that is due;
 3. sends `AT SH <tx>` if the channel's request ID isn't the one set;
 4. sends the request as hex, plus the response-count digit `1` when
-   one single-frame reply is certain (a Service 01 request to a
-   physical ID; never for 09, 22, or a functional ID);
+   one single-frame reply is expected (a Service 01 request to a
+   physical ID whose reply fits one frame, by the appendix of
+   2026-10-29; never for 09, 22, or a functional ID);
 5. reads to the prompt, dispatches each reassembled frame through
    `ecuio_session_dispatch_callbacks`, and hands each matched frame to
    `ecuio_engine_on_frame`.
@@ -913,3 +914,39 @@ VX's USB port, J2534 or `elm327://`, a WiFi join was refused, and after
 the J2534 session closed the access point was gone
 (docs/bench-sessions/2026-10-27-elm327-bench-6.md). The VX gives one
 link at a time.
+
+## Appendix: 2026-10-29, the count digit and long Service 01 replies
+
+§9's step 4 sent the digit with every Service 01 request to a physical
+ID, on the reasoning that one ECU answers in one Single Frame. The
+datasheet counts the digit in lines ("Setting the number of
+responses": `09 02 5` for the VIN's five lines, and "if you should
+mistakenly send `09 02 1`, you might cause problems"), and J1979 has
+Service 01 PIDs whose replies don't fit a Single Frame's seven bytes:
+`0x7F`, engine run time, returns 13 data bytes (Wikipedia's "OBD-II
+PIDs" table, among others). With `1` the adapter returns after
+the First Frame's line, the message never finishes, and the request
+times out every time. The shipped `obd2` set asks none of them, so a
+registered set naming one was the only way to meet it.
+
+The digit now goes only where the reply is expected to fit:
+- **The bitmaps** (`0x00`, `0x20`, … `0xE0`): four data bytes, always.
+- **A PID whose every def** keyed `41 <PID>` ends within the Single
+  Frame (`elm327_one_frame_pids_for` in `core/src/elm327_protocol.h`).
+  A PID no def describes (`?poll=` under `raw`) gets none.
+- **Learned:** a def reading only the first bytes of a longer reply
+  (`0x7F`'s total run time, bytes 3 to 6) misleads that rule. A reply
+  to a request with the digit that ends with a message under way takes
+  the PID off the digit for the rest of the session, with a wire-log
+  line ("01 7F's reply spans frames: asked with no response count from
+  now on"). That one reply is lost to the engine's wait; the next goes
+  without the digit and arrives whole.
+
+A request without the digit waits out the adapter's `AT ST` timer after
+its reply, 100 ms, so only the long PIDs pay for it. The fake ELM327
+honors the digit as the datasheet does, printing at most that many
+frame lines, so the session tests can fail on what it does
+(`Elm327SessionTest.ALongServiceOnePidGoesWithoutTheCountDigit`,
+`.AReplyThatSpansFramesTakesThePidOffTheCountDigit`). Whether an
+adapter counts a `7F xx 78` line toward the digit is still unknown:
+neither the datasheet nor the FRPM says, and the fake doesn't count it.

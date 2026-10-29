@@ -155,6 +155,15 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
 - A J2534 driver reporting a buffer overflow on a read no longer reads
   as "Adapter fault" with the read's messages dropped: the messages
   arrive, and the session carries on.
+- Over an ELM327, a Service 01 PID whose reply spans several CAN frames
+  (engine run time, 0x7F, for one) is read: it was asked with a
+  response count that ended the reply after its first frame, so every
+  request timed out. Only a profile you register can ask one; the
+  built-in `obd2` doesn't.
+- The phone's session notification, and the header's connection label,
+  show a Bluetooth adapter's address only by its last two parts
+  (`elm327://bt:…:44:55`), so a screenshot or the lock screen doesn't
+  carry the whole address.
 
 ## [0.3.2] - 2026-10-26
 

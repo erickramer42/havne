@@ -120,7 +120,8 @@ screen, is [docs/architecture.md](docs/architecture.md).
   ([docs/testing.md](docs/testing.md)).
 - **CI on every push.** Builds and tests on Windows, Linux and macOS;
   runs the core under ASan and UBSan; fuzzes the signal decoder, the
-  validators and the `uds-generic` query parser with libFuzzer
+  validators, the `uds-generic` query parser, the ELM327 reply parsers
+  and the replay reader with libFuzzer
   ([fuzz/README.md](fuzz/README.md)); holds the core and the surrogate
   to clang-tidy's analyzer and bug-finding checks, with CodeQL beside
   it; compiles Android and iOS; and, on request, launches the iOS app in

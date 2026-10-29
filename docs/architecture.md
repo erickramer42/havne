@@ -241,9 +241,10 @@ a Bluetooth stack ([ADR-0026](adr/0026-elm327-transport.md)).
   connect. Headers stay on, so core sees every CAN ID and PCI byte.
 - **The worker** drives the same request engine as J2534's, with one
   command outstanding for the whole adapter, since an ELM327 takes the
-  next only after its prompt. A Service 01 request to one ECU carries
-  the response-count digit, so the adapter returns as soon as the reply
-  is in.
+  next only after its prompt. A Service 01 request to one ECU whose
+  reply fits one frame carries the response-count digit, so the adapter
+  returns as soon as the reply is in (ADR-0026's appendix of
+  2026-10-29).
 - **App-fed streams** (`stream.h`, `core/src/elm327_stream.cpp`,
   [ADR-0028](adr/0028-app-fed-streams.md)) are the port for links only
   the app's framework reaches: classic Bluetooth on Android, Bluetooth
@@ -418,7 +419,7 @@ The bridge polls it on its 100 ms tick and maps it for the UI
 | HARNESS | The whole J2534 stack against an in-tree fake vendor DLL, through the x64 surrogate; the ELM327 transport against a fake ELM327 behind its port, and on Linux and macOS the serial port code over a pseudo-terminal |
 | Cross-arch | x64 tests driving the x86 surrogate and fake. Local only; CI never runs it |
 | Sanitizers | Core under ASan/UBSan in CI |
-| Fuzzing | The signal decoder, the validators and the `uds-generic` query parser under libFuzzer, 60 s each in CI ([fuzz/README.md](../fuzz/README.md)) |
+| Fuzzing | The signal decoder, the validators, the `uds-generic` query parser, the ELM327 reply parsers and the replay reader under libFuzzer, 60 s each in CI ([fuzz/README.md](../fuzz/README.md)) |
 | Static analysis | clang-tidy's analyzer and bug-finding checks over core and the surrogate, any warning failing CI; CodeQL too |
 | Load test | A recorded engine start replayed through the bridge on Windows and Linux CI: throughput, drops and latency, failing on a lost frame or peak or a gross regression |
 | Simulator smoke | The iOS app launches and draws |

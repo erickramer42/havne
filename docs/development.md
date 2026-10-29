@@ -425,7 +425,7 @@ and the run looks green. Read the skip count, or use
   same way; the ELM327 tests write theirs to a directory of their own,
   so a run never pushes those out.
 
-**Fuzzing** isn't part of ctest. The three libFuzzer harnesses need a
+**Fuzzing** isn't part of ctest. The libFuzzer harnesses need a
 tree of their own (`-DECUIO_BUILD_FUZZERS=ON` with
 `HAVNE_BUILD_CORE_ONLY=ON` and `BUILD_TESTING=OFF`; `build-fuzz-msvc`
 on Windows), because nothing else can link the instrumented core.
