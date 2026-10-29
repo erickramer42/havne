@@ -64,6 +64,18 @@ option(HAVNE_BUILD_CORE_ONLY "Build core library and tests; skip Qt app" OFF)
 # fuzz/README.md has the local recipe.
 option(ECUIO_BUILD_FUZZERS "Build libFuzzer harnesses (Clang or MSVC)" OFF)
 
+# Symbols for every MSVC Release build (ADR-0034 §1): a PDB beside each
+# binary, with the optimizations /DEBUG would turn off kept, so the code
+# is a plain Release build's. The binary records only the PDB's file
+# name, not the build's path, which names the account on a dev machine.
+# The release ships the PDBs in a zip of their own (stage.ps1).
+if(MSVC)
+    add_compile_options("$<$<CONFIG:Release>:/Zi>")
+    add_link_options("$<$<CONFIG:Release>:/DEBUG>"
+                     "$<$<CONFIG:Release>:/OPT:REF>"
+                     "$<$<CONFIG:Release>:/OPT:ICF>")
+endif()
+
 # Compiler warnings for every first-party target: core, the surrogate,
 # the app, the tests and the fake DLLs. They don't fail the build (no /WX
 # or -Werror): CI compiles with GCC, MSVC and AppleClang, and one

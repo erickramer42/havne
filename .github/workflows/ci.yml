@@ -38,8 +38,11 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      # systemtap-sdt-dev: <sys/sdt.h>, so core carries its USDT probes
+      # (ADR-0034 §4) and ProbeNotesTest runs
       - name: Build core + tests (no Qt present)
         run: |
+          sudo apt-get update && sudo apt-get install -y systemtap-sdt-dev
           cmake -B build -DCMAKE_BUILD_TYPE=Release -DHAVNE_BUILD_CORE_ONLY=ON
           cmake --build build
 
@@ -61,6 +64,7 @@ jobs:
 
       - name: Build core + tests with ASan and UBSan
         run: |
+          sudo apt-get update && sudo apt-get install -y systemtap-sdt-dev
           SAN="-fsanitize=address,undefined -fno-sanitize-recover=undefined -fno-omit-frame-pointer"
           cmake -B build -DCMAKE_BUILD_TYPE=Debug -DHAVNE_BUILD_CORE_ONLY=ON \
             -DCMAKE_C_FLAGS="$SAN" -DCMAKE_CXX_FLAGS="$SAN" \
@@ -332,10 +336,12 @@ jobs:
           arch: 'linux_gcc_64'
 
       # libegl1 and libopengl0: QtGui's runtime libraries, which test_qml
-      # loads (offscreen, so nothing for X11 or a GPU)
+      # loads (offscreen, so nothing for X11 or a GPU); systemtap-sdt-dev
+      # and bpftrace: core's USDT probes and the step that traces them
       - name: Build full app
         run: |
-          sudo apt-get update && sudo apt-get install -y libgl1-mesa-dev libxkbcommon-dev libegl1 libopengl0
+          sudo apt-get update && sudo apt-get install -y libgl1-mesa-dev libxkbcommon-dev libegl1 libopengl0 \
+            systemtap-sdt-dev bpftrace
           cmake -B build -DCMAKE_PREFIX_PATH="$QT_ROOT_DIR"
           cmake --build build
       # The simulated CAN bus (tests/vcan_bus.h): vcan and can-isotp load
@@ -365,6 +371,10 @@ jobs:
           sudo --preserve-env=ECUIO_VCAN_REQUIRED,ECUIO_VCAN_ROOT_REQUIRED
           build/tests/test_vcan
           --gtest_filter='SocketCanBusTest.TheInterfaceGoingDownIsAHardFailureThatRecovers'
+      # Core's probes fire in a running program (ADR-0034 §4): bpftrace
+      # attaches to havne-cli's and counts a mock:// stream's
+      - name: USDT probes under bpftrace
+        run: sudo sh tests/probe_trace.sh build/cli/havne-cli
       - name: Load test
         shell: bash   # -o pipefail: tee must not hide the bench's exit status
         run: build/tests/bench_bridge --load | tee -a "$GITHUB_STEP_SUMMARY"
@@ -412,7 +422,8 @@ jobs:
         run: |
           sudo apt-get update && sudo apt-get install -y libgl1-mesa-dev libxkbcommon-dev libegl1 libopengl0 \
             libxcb-cursor0 libxcb-icccm4 libxcb-image0 libxcb-keysyms1 libxcb-randr0 libxcb-render-util0 \
-            libxcb-shape0 libxcb-sync1 libxcb-xfixes0 libxcb-xinerama0 libxcb-xkb1 libxkbcommon-x11-0
+            libxcb-shape0 libxcb-sync1 libxcb-xfixes0 libxcb-xinerama0 libxcb-xkb1 libxkbcommon-x11-0 \
+            systemtap-sdt-dev
           cmake -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF -DCMAKE_PREFIX_PATH="$QT_ROOT_DIR"
           cmake --build build
 

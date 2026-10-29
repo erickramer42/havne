@@ -7,7 +7,8 @@
 //          against direct decodes, a text slot each, the frame
 //          callbacks first), the error strings;
 //          HARNESS — the J2534 suites and Elm327SessionTest through
-//          create; test_c_abi links the public functions
+//          create; test_c_abi links the public functions; the USDT
+//          probes: ProbeNotesTest (their notes) and CI's bpftrace step
 
 #include "ecuio/version.h"
 #include "ecuio/core.h"
@@ -18,6 +19,7 @@
 #include "request_engine.h"   /* ECUIO_IDENT_REQUESTS, for the names */
 #include "uri_query.h"
 #include "error_detail.h"
+#include "probes.h"
 #include "ecuio/j2534_ptypes.h"   /* ecuio_pt_status_name; plain C, any OS */
 
 #include <algorithm>
@@ -656,7 +658,12 @@ ecuio_status_t ecuio_session_start(ecuio_session_t* session)
     if (session->transport == nullptr) {
         return ECUIO_ERR_NO_TRANSPORT;
     }
-    return session->transport->ops->start(session, session->transport->impl);
+    const ecuio_status_t st =
+        session->transport->ops->start(session, session->transport->impl);
+    if (st == ECUIO_OK) {
+        ECUIO_PROBE2(session_start, session, session->info.backend);
+    }
+    return st;
 }
 
 ecuio_status_t ecuio_session_close(ecuio_session_t* session)
@@ -685,6 +692,7 @@ ecuio_status_t ecuio_session_close(ecuio_session_t* session)
         session->values_callbacks.clear();
     }
 
+    ECUIO_PROBE1(session_close, session);
     return ECUIO_OK;
 }
 
@@ -796,6 +804,8 @@ void ecuio_session_dispatch_callbacks(
     if (session->closed.load()) {
         return;
     }
+    ECUIO_PROBE5(frame, session, frame->arbitration_id, frame->flags,
+                 frame->data_length, frame->timestamp_us);
 
     /* Both lists as they stand when the frame arrives */
     snapshot_of<ecuio_frame_callback_t> frames;
