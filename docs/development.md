@@ -564,7 +564,9 @@ its usual duration:
 | `clang-tidy` | Windows, MSVC's headers | Installs the hash-pinned clang-tidy wheel, configures a core-only Ninja tree in a Developer shell, and runs `scripts/tidy.sh` over core, the J2534 layer and the surrogate. Any warning fails it. Nothing is built. |
 | `win-build` | Windows, MSVC 2022 | Builds the full app, then runs ctest (the bridge, J2534 and QML suites included), then the load test (`bench_bridge --load`): its table goes to the run's summary, and the step fails on a broken invariant or a bound far below the dev machine's figures ([testing.md](testing.md#load-test-the-replay-fixture-through-the-bridge)) |
 | `macos-build` | macOS (arm64), AppleClang | Builds the full app, then runs ctest. The QML suites' link-state cases skip without the fake. |
-| `linux-build` | Ubuntu, GCC | Builds the full app, then runs ctest, as on macOS, then the load test as on Windows. Installs QtGui's EGL and OpenGL runtime libraries, which `test_qml` loads. |
+| `linux-build` | Ubuntu, GCC | Builds the full app, brings up `vcan0` (the `vcan` and `can-isotp` modules load as installed on the hosted runners), then runs ctest with `ECUIO_VCAN_REQUIRED=1`, so the simulated-bus suite fails rather than skips without the bus, then the load test as on Windows. Installs QtGui's EGL and OpenGL runtime libraries, which `test_qml` loads. |
+| `abi` | Ubuntu, GCC, no Qt | Installs libabigail and runs `scripts/abi-check.sh` against the newest release tag ([The C ABI check](#the-c-abi-check)); the result goes to the run's summary. |
+| `linux-appimage` | Ubuntu 24.04, GCC | Builds the app in Release and packs it with `packaging/linux/make-appimage.sh` ([Linux: the AppImage](#linux-the-appimage)), then uploads `havne-linux-x86_64` (kept 14 days). On 24.04 because an AppImage runs only where glibc is at least its build machine's. |
 | `android-build` | Ubuntu → Android arm64-v8a | Selects NDK r27 and JDK 21 by version, failing with a clear error if the image lacks either. Then cross-builds and packages the APK. Build only, no tests. |
 | `ios-build` | macOS (arm64) → iOS device (arm64) | Unsigned device build with the Xcode generator. Build only, no tests. |
 | `ios-simulator-smoke` | macOS 15 Intel → iOS Simulator (x86_64) | Runs on a manual run (with or without `smoke_only`) or when the pushed commit's message contains `[ios-smoke]`; skipped on pull requests and other pushes (about 20 minutes on the Intel runner). Boots the newest iOS 18+ iPhone while the app builds, then installs and launches the app. Passes if QML loaded and the app is still running 45 s later. Uploads the `ios-simulator-smoke` artifact: a home-screen control shot, app shots at 15 s and 45 s, the app's stdout/stderr (with `QSG_INFO`), plus crash reports on failure. The job log also prints the stderr. |
@@ -628,6 +630,64 @@ on.
 **Ignorable CI noise:** `Qt6TaskTree` and `QmlAssetDownloaderPrivate`
 not-found warnings, and missing Vulkan headers. These come from
 optional Quick plugins this app never uses.
+
+### The C ABI check
+
+`scripts/abi-check.sh` holds the C ABI to its promises
+([ADR-0001](adr/0001-qt-free-core-c-abi.md)): the core at HEAD against
+the newest `vX.Y.Z` tag, or a tag, commit or source folder named as
+its argument. It runs on Linux, with libabigail (`abigail-tools` on
+Ubuntu): each tree's core-only build has its static archive linked
+into a shared object that exports only the `ecuio_` functions, as an
+FFI consumer would load it; `abidw` dumps the functions and the types
+the public headers declare, and `abidiff` compares the two. Output
+goes to `build-abi/` (`report.txt`).
+
+- **Fails:** a function removed or its signature changed; a struct
+  field moved, resized or retyped; a struct's size changed; an enum
+  value renumbered.
+- **Passes, reported:** a new function or variable; an enum value
+  appended; a struct growing into its reserved room, with its size the
+  same and every field outside the room where it was.
+  `scripts/abi_report.py` tells that growth from a break by reading the
+  report, since a libabigail suppression of the type would hide every
+  other change to the struct with it.
+- **Not seen:** a change that keeps the layout, such as a field's name,
+  or `uint32_t` becoming `int32_t`. Neither changes the binary, but
+  both change what a consumer's source means.
+
+A deliberate break (before 1.0, a minor version may make one) goes in
+`abi/suppressions.abignore` with its reason and its release, and comes
+out once that release is tagged and becomes the base. The rules were
+checked against mutants of the headers (2026-10-29): every break above
+fails, and the passes pass.
+
+### Linux: the AppImage
+
+`packaging/linux/make-appimage.sh <version> [build dir] [out dir]`
+packs a Release tree into `dist/havne-<version>-linux-x86_64.AppImage`:
+linuxdeploy and its Qt plugin, pinned releases checked against their
+SHA-256 and kept in `~/.cache/havne-linuxdeploy`, gather the app, the
+Qt libraries, plugins and QML modules it loads (the plugin scans
+`app/qml`), the xcb platform plugin and the offscreen one, and
+`packaging/linux/havne.desktop` with the icon. It then fails a package
+that holds `qmltooling` (a Debug build's QML debugger), or one that
+isn't still running 10 s after it starts on the offscreen platform.
+
+- **The build machine** needs Qt's xcb plugin libraries for linuxdeploy
+  to bundle: `libxcb-cursor0 libxcb-icccm4 libxcb-image0
+  libxcb-keysyms1 libxcb-randr0 libxcb-render-util0 libxcb-shape0
+  libxcb-sync1 libxcb-xfixes0 libxcb-xinerama0 libxcb-xkb1
+  libxkbcommon-x11-0` on Ubuntu.
+- **glibc:** an AppImage runs only where glibc is at least its build
+  machine's, so the one to hand out is CI's (`linux-appimage`, Ubuntu
+  24.04, glibc 2.39). One built on a newer distribution is for checking
+  the packing.
+- **OpenGL comes from the system:** an AppImage leaves out libGL,
+  libGLX and libEGL, which belong to the machine's graphics driver.
+  Every desktop has them; a minimal install (WSL's Arch and Kali, for
+  one) doesn't, and the app then stops at once with
+  "libGLX.so.0: cannot open shared object file".
 
 ## Releases
 
