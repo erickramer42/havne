@@ -22,7 +22,8 @@ if(BUILD_TESTING OR NOT HAVNE_BUILD_CORE_ONLY)
         "-DHAVNE_BUILD_CORE_ONLY=ON -DBUILD_TESTING=OFF.")
 endif()
 
-set(_ecuio_fuzzers fuzz_decode_signal fuzz_validate_set fuzz_uds_query)
+set(_ecuio_fuzzers fuzz_decode_signal fuzz_validate_set fuzz_uds_query
+    fuzz_elm327_reply fuzz_replay_file)
 
 if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang" AND
    NOT CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC")
@@ -35,7 +36,8 @@ if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang" AND
         add_executable(${_t} ${_t}.cpp)
         target_link_libraries(${_t} PRIVATE ecuio-core)
         # core/src: fuzz_uds_query drives the builder and the query
-        # split, which are internal (the tests' precedent)
+        # split, fuzz_elm327_reply the ELM327 wire, all internal (the
+        # tests' precedent)
         target_include_directories(${_t} PRIVATE ${CMAKE_SOURCE_DIR}/core/src)
         target_compile_options(${_t} PRIVATE ${_ecuio_fuzz_instrument})
         target_link_options(${_t} PRIVATE -fsanitize=fuzzer,address,undefined)
@@ -58,6 +60,9 @@ elseif(MSVC)
         target_include_directories(${_t} PRIVATE ${CMAKE_SOURCE_DIR}/core/src)
         target_compile_options(${_t} PRIVATE /fsanitize=address /fsanitize=fuzzer)
         target_link_options(${_t} PRIVATE /INCREMENTAL:NO)   # ASan refuses it
+        # fopen/getenv on purpose (fuzz_replay_file's scratch file), as
+        # in the tests
+        target_compile_definitions(${_t} PRIVATE _CRT_SECURE_NO_WARNINGS)
         app_enable_warnings(${_t})
         # The ASan runtime is a DLL beside cl.exe; copied next to the
         # harness so it runs from any shell.
