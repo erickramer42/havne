@@ -465,6 +465,37 @@ and `-R` work as in `verify.sh`. CI's `win-coverage` job runs the same
 script on every push and uploads the Cobertura file to Codecov for the
 README badge ([testing.md](testing.md#coverage)).
 
+## The command-line client
+
+`havne-cli` ([ADR-0031](adr/0031-command-line-client.md)) builds in
+every desktop tree, the core-only one included: `build-core/cli/Release/`
+on Windows, `build-core/cli/` with a single-config generator. The app
+build copies it next to `havne.exe`.
+
+```sh
+havne-cli stream mock://demo --values --count 20          # the simulated car
+havne-cli stream "replay://<folder>?profile=obd2&speed=max" --values > run.jsonl
+havne-cli stream elm327://COM5 --seconds 60               # an adapter: as the app would
+havne-cli devices                                         # what a URI can name
+```
+
+Its output is JSON lines, schema 1 (ADR-0031 §3). Its tests are
+`test_cli` (the formatting and the ring) and ctest's `CliGoldenTest`,
+`CliUsageTest` and `CliSignalTest`. A golden run compares the whole
+output with `tests/golden/cli/`; after a deliberate change to what it
+prints (or to what core decodes), rewrite the golden file with the
+test's own command plus `--update`, then read the diff before
+committing it:
+
+```sh
+ctest --test-dir build-core -C Release -R '^CliGoldenTest\.' -V   # shows each command
+python tests/golden.py run --golden tests/golden/cli/mock.jsonl --ignore core --ignore t_us \
+  --update -- "$(pwd -W)/build-core/cli/Release/havne-cli.exe" stream mock://golden --values --count 40
+```
+
+On Windows, give `golden.py` the executable's absolute path:
+Python's `CreateProcess` doesn't resolve `build-core/cli/...`.
+
 ## Troubleshooting
 
 | Symptom | Cause and fix |

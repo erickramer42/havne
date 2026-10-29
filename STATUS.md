@@ -107,8 +107,9 @@ background too. Next come v0.3.4 and v0.3.5 ([roadmap](#roadmap)).
     its decoded values, as JSON lines on standard output, through the
     public headers alone. Golden runs pin its output: the replay
     fixture through `obd2` frame for frame, the mock's cycle and the
-    refusals; Ctrl+C ends it cleanly (SIGINT and SIGTERM tested on
-    Linux and macOS, Windows' console events by hand).
+    refusals; a stop from outside ends it cleanly (SIGINT and SIGTERM
+    tested on Linux and macOS, Ctrl+Break on Windows), and so does a
+    reader closing the pipe (`| head`).
   - **Vehicles** ([ADR-0027](docs/adr/0027-vehicle-profiles.md)): a
     named vehicle, picked in Settings before a connect, remembers its
     adapter URI and Live's plotted signals and names its recordings'
@@ -245,7 +246,7 @@ an issue is resolved it is removed, and its number is not reused.
 | v0.3.1 | Request engine, PID-support probe, `uds-generic`, vehicle identification, imperial units; the first Windows download | ✅ Released |
 | v0.3.2 | Record-replay transport, decoding on the transport's thread, every driver in its own process | ✅ Released |
 | v0.3.3 | ELM327 adapters, preferences and vehicles, Android with Bluetooth and background sessions and a signed APK, the rename to Havne | ✅ Released |
-| v0.3.4 | A command-line client over the C ABI; Linux as a supported desktop; a SocketCAN transport that listens | Planned |
+| v0.3.4 | A command-line client over the C ABI; Linux as a supported desktop; a SocketCAN transport that listens | In progress: the CLI built |
 | v0.3.5 | Full OBD-II diagnostics (Services 01–0A, clearing codes); SocketCAN requests through ISO-TP | Planned |
 | v0.4.0 | Python bindings; PCAP export and candump import; ECU, DID and service discovery (needs requests to every ECU and listening to the whole bus first) | Proposed |
 | v0.5.0 | The plugin framework (ADR-0013's profile API), with no manufacturer plugin yet; legacy buses (ISO 9141-2, KWP2000, J1850) | Proposed |

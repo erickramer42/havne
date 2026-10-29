@@ -215,10 +215,15 @@ block, the ring fills and a live session drops lines, as above.
 - **Usage** (`CliUsageTest`, `cmake -P`, no Python needed): no
   arguments, no URI, an unknown command or option, a zero count, two
   URIs, each exit 2 with nothing on standard output.
-- **A stop on a signal**, POSIX only (ctest under a shell): SIGINT,
-  then SIGTERM, to a running `mock://` stream ends it with exit 0 and
-  an `end` line whose reason is `interrupted`. Windows' Ctrl+C is checked by hand, since a
-  console event can't be sent to one child alone.
+- **A stop from outside** (`CliSignalTest`): on POSIX, SIGINT, then
+  SIGTERM, to a running `mock://` stream (ctest under a shell); on
+  Windows, Ctrl+Break to a `mock://` and a replay stream, each started
+  in a process group of its own so the event reaches it alone (Ctrl+C
+  can't be sent to a group; Ctrl+Break goes through the same handler),
+  skipped where the test has no console to send it through. Each must
+  exit 0 with an `end` line whose reason is `interrupted`. Ctrl+C at a
+  console and closing the console window are left to the same handler,
+  untested.
 
 A change to what core shows a caller (a frame field, a decode, a
 code, a detail's words) then fails a golden run, and goes in only with
