@@ -93,6 +93,13 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
   OBDLink MX+ on a car through the Home screen and the screen off. A
   `mock://` or `replay://` session may pause while the app is in the
   background.
+- **An Android download** beside the Windows one: each release carries
+  `havne-<version>-android-arm64-v8a.apk`, for Android 12 or later,
+  signed with Havne's release key
+  ([ADR-0030](docs/adr/0030-signed-android-releases.md)), so each
+  release installs over the one before and keeps the app's data. The
+  notes give the key's certificate fingerprint, and the APK has its
+  own build provenance, as the zip does.
 - Settings lists the recent recordings, newest first. Selecting one
   puts its `replay://` address in the field, with the profile and DIDs
   it was recorded with, so a recording replays without typing its path

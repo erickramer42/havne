@@ -180,7 +180,10 @@ cmake --build build-android --target apk
 
 Leave `CMAKE_BUILD_TYPE` unset, as CI does: the build is then Debug,
 and Gradle signs the APK with the machine's debug key. A Release build
-makes an unsigned APK that a phone won't install. For an emulator on
+makes an unsigned APK that a phone won't install until
+`packaging/android/sign-apk.sh` signs it, as the release job does
+([Releases](#releases)); it isn't debuggable, so `run-as` can't read
+its wire logs, and phone runs use a Debug build. For an emulator on
 an x86-64 PC, use the `android_x86_64` kit. Since
 Qt 6.7, Qt publishes Android kits under the `all_os` host (the name
 aqtinstall and install-qt-action use). They need the build host's
@@ -205,7 +208,9 @@ To install on a phone without an Android kit, take the
 debug-signed APK. Each run signs with a new debug key, so uninstall
 the previous build before installing the next (Android refuses an
 update signed by another key). Local builds share one key, so each
-updates the last in place and the app keeps its recordings.
+updates the last in place and the app keeps its recordings. A
+release's APK carries a third key, the release key, so moving a phone
+between it and a development build is an uninstall too.
 
 *iOS, device* (macOS host; this mirrors `ios-build`). `qt-cmake` also
 applies Qt's minimum deployment target, iOS 18 for Qt 6.12:
@@ -626,11 +631,15 @@ optional Quick plugins this app never uses.
 
 ## Releases
 
-A version tag publishes a Windows x64 download through
-`.github/workflows/release.yml`. The zip runs on a PC with neither Qt
-nor Visual Studio: it carries the app, the x86 and x64 J2534
-surrogates, the Qt runtime that windeployqt deploys, and the
-app-local Visual C++ runtime.
+A version tag publishes two downloads through
+`.github/workflows/release.yml`:
+
+- **Windows x64,** a zip that runs on a PC with neither Qt nor Visual
+  Studio: the app, the x86 and x64 J2534 surrogates, the Qt runtime
+  that windeployqt deploys, and the app-local Visual C++ runtime.
+- **Android arm64-v8a,** an APK for Android 12 or later, signed with
+  the release key ([ADR-0030](adr/0030-signed-android-releases.md)),
+  so each release installs over the one before.
 
 **To release:**
 
@@ -639,7 +648,8 @@ app-local Visual C++ runtime.
    `## [X.Y.Z] - <date>` (and add its compare link at the foot), and
    add `docs/releases/vX.Y.Z.md`, the release notes, starting from
    those entries. Say what's new, and what's verified at which tier
-   ([testing.md](testing.md)), including what hasn't run on hardware.
+   ([testing.md](testing.md)), including what hasn't run on hardware,
+   and give the release key's certificate fingerprint.
 2. Push that commit to `main` and wait for its CI run to pass: the
    release job refuses a commit whose CI hasn't. A tag pushed first
    fails the job at its CI gate; once CI on the commit passes, rerun
@@ -647,32 +657,32 @@ app-local Visual C++ runtime.
    ref and so the provenance's signer.
    For a dry run, tag that commit `vX.Y.Z-rc1` and push the tag. The
    workflow publishes a pre-release. Download its zip, run it on a PC
-   without Visual Studio if one is available, and check the
-   provenance with
-   `gh attestation verify <zip> -R erickramer42/havne`. Then delete
+   without Visual Studio if one is available, install its APK on a
+   phone, and check both provenances with
+   `gh attestation verify <file> -R erickramer42/havne`. Then delete
    the pre-release and its tag.
 3. Tag `vX.Y.Z` and push it.
 
-**What the job does,** in order:
+**What the jobs do,** in order:
 
-- **Version gate.** The tag must be `vX.Y.Z` or `vX.Y.Z-rcN`, its
-  `X.Y.Z` must equal the CMake project version, and
-  `docs/releases/vX.Y.Z.md` must exist, or the job fails before
+- **`gate`: the version.** The tag must be `vX.Y.Z` or `vX.Y.Z-rcN`,
+  its `X.Y.Z` must equal the CMake project version, and
+  `docs/releases/vX.Y.Z.md` must exist, or the run fails before
   anything builds. An `-rcN` tag publishes as a pre-release with the
   same notes.
-- **CI gate.** ci.yml never runs on tags, so the job reads the newest
+- **`gate`: CI.** ci.yml never runs on tags, so the job reads the newest
   `push` run of ci.yml on the tagged commit (`gh run list --commit`)
   and fails unless it has completed with `success`: a tag pushed
   before CI finished, or on a commit whose CI failed, publishes
   nothing.
-- **Build.** Qt 6.12.0 is installed as `win-build` does it, then
-  `build-win32` (the surrogate only) and `build` (the app only), both
-  with `BUILD_TESTING=OFF`, in the usual order so the app's build
+- **`windows`: build.** Qt 6.12.0 is installed as `win-build` does it,
+  then `build-win32` (the surrogate only) and `build` (the app only),
+  both with `BUILD_TESTING=OFF`, in the usual order so the app's build
   copies the x86 surrogate beside `havne.exe`, with its own x64 one.
   CI has already run the suite on the commit; the cross-arch suite is
   `scripts/verify.sh`'s.
-- **Stage, check and zip:** `packaging/windows/stage.ps1`, which also
-  runs locally against a built tree
+- **`windows`: stage, check and zip:** `packaging/windows/stage.ps1`,
+  which also runs locally against a built tree
   (`pwsh packaging/windows/stage.ps1 -Version X.Y.Z-local -OutDir Testing/dist`).
   It copies the deployed app without its `.pdb`, `.lib`, `.exp` and
   `.ilk` files, adds the x64 CRT from Visual Studio's redistributable folder
@@ -693,20 +703,84 @@ app-local Visual C++ runtime.
   `havne.exe` isn't still running
   10 s after it starts (QML that fails to load exits at once; the
   check was confirmed against a package with `qml/QtQuick/Controls`
-  removed, 2026-10-25). It writes the zip and `SHA256SUMS.txt` to
-  `dist/` (git-ignored).
-- **Provenance:** `actions/attest-build-provenance` signs a SLSA build
-  provenance for the zip, tied to this repository's workflow, and
-  stores it in GitHub's attestation store. The job also copies that
-  Sigstore bundle into `dist/` as `<zip>.intoto.jsonl`, because
-  OpenSSF Scorecard's Signed-Releases check reads only release files
-  (it counts `*.intoto.jsonl` as provenance and `*.sig`, `*.asc` or
-  `*.sigstore.json` as signatures), and so a download can be checked
-  with `gh attestation verify <zip> --bundle <zip>.intoto.jsonl`.
-- **Publish:** `gh release create` with the zip, its `.intoto.jsonl`,
-  `SHA256SUMS.txt` and the notes file. A manual run for an existing tag
+  removed, 2026-10-25). It writes the zip to `dist/` (git-ignored).
+- **`android`: build and sign.** The kit, NDK and JDK as
+  `android-build`, but a Release build: optimized, not debuggable, and
+  unsigned. The job is the only one that names the `release`
+  environment, whose secrets hold the release key; the keystore exists
+  on the runner for the signing step only.
+  `packaging/android/sign-apk.sh` checks the unsigned APK (package
+  `io.github.erickramer42.havne`, the version name and code, not
+  debuggable, arm64-v8a only), aligns it, signs it with APK Signature
+  Scheme v3, and fails unless the signer's certificate SHA-256 is the
+  one pinned in `packaging/android/release-cert.sha256`. Locally,
+  `HAVNE_CERT_SHA256` overrides the pin, so a throwaway key runs the
+  same checks.
+- **`publish`: checksums and provenance.** `SHA256SUMS.txt` lists both
+  downloads, with LF line ends. `actions/attest-build-provenance` signs
+  a SLSA build provenance for each, tied to this repository's
+  workflow, and stores it in GitHub's attestation store. The job also
+  copies each Sigstore bundle into `dist/` as `<download>.intoto.jsonl`,
+  because OpenSSF Scorecard's Signed-Releases check reads only release
+  files (it counts `*.intoto.jsonl` as provenance and `*.sig`, `*.asc`
+  or `*.sigstore.json` as signatures), and so a download can be checked
+  with `gh attestation verify <file> --bundle <file>.intoto.jsonl`.
+- **`publish`: the release.** `gh release create` with both downloads,
+  their `.intoto.jsonl` files, `SHA256SUMS.txt` and the notes file. A
+  manual run for an existing tag
   (`gh workflow run release.yml -f tag=vX.Y.Z`) rebuilds it and
   replaces the release's files.
 
 The exe isn't code-signed, so SmartScreen warns on first run; the
 zip's `README.txt` and the release notes say how to get past it.
+
+### The Android release key
+
+Android installs an update only when it carries the same certificate
+as the app it replaces, so the release key is the app's identity for
+good ([ADR-0030](adr/0030-signed-android-releases.md)). It is made
+once:
+
+1. **The key:** a PKCS12 keystore with one RSA 4096 key, alias
+   `havne`, one password for store and key, validity 10,000 days, and
+   the certificate name `CN=Havne` only (anyone with the APK can read
+   it). Pass the password through an environment variable, never on
+   the command line:
+
+   ```sh
+   read -rs -p 'release key password: ' HAVNE_KEYSTORE_PASS; echo; export HAVNE_KEYSTORE_PASS
+   keytool -genkeypair -keystore havne-release.p12 -storetype PKCS12 -alias havne \
+       -keyalg RSA -keysize 4096 -validity 10000 -dname "CN=Havne" \
+       -storepass:env HAVNE_KEYSTORE_PASS -keypass:env HAVNE_KEYSTORE_PASS
+   ```
+
+2. **The pin:** the certificate's SHA-256, lowercase hex without
+   colons, in `packaging/android/release-cert.sha256`, committed:
+
+   ```sh
+   keytool -list -v -keystore havne-release.p12 -alias havne -storepass:env HAVNE_KEYSTORE_PASS \
+       | tr -d '\r' | sed -n 's/^[[:space:]]*SHA256: //p' | tr -d ':' | tr 'A-F' 'a-f' \
+       > packaging/android/release-cert.sha256
+   ```
+
+3. **The environment:** a GitHub environment named `release` that only
+   `v*` tags and `main` may deploy to (Settings → Environments, or
+   `gh api -X PUT repos/<repo>/environments/release` with a custom
+   deployment policy, then one tag rule and one branch rule).
+4. **Its secrets,** from stdin, so neither lands in the shell's
+   history:
+
+   ```sh
+   base64 -w0 havne-release.p12 | gh secret set ANDROID_KEYSTORE_B64 --env release
+   printf '%s' "$HAVNE_KEYSTORE_PASS" | gh secret set ANDROID_KEYSTORE_PASS --env release
+   ```
+
+5. **A local signing** with the real key, before any tag: a Release
+   tree built with the Android kit (as above, with
+   `-DCMAKE_BUILD_TYPE=Release`), then
+   `HAVNE_KEYSTORE=havne-release.p12 ANDROID_SDK_ROOT=<sdk> packaging/android/sign-apk.sh <tree>/app/android-build/build/outputs/apk/release/android-build-release-unsigned.apk X.Y.Z-local Testing/dist`.
+
+Keep the keystore and its password in two places off the development
+machine, a password manager and an offline copy. A lost key can't be
+replaced: every phone would have to uninstall the app, and its data
+with it, to take a build signed by another.

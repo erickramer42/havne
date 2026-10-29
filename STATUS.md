@@ -31,7 +31,8 @@ the same car through the OBDLink MX+ over Bluetooth and the VX in ELM
 mode over USB
 ([2026-10-27](docs/bench-sessions/2026-10-27-elm327-vehicle.md)); it
 goes out in v0.3.3 with persisted preferences and vehicles, the Android
-app with Bluetooth and background sessions, and the rename to Havne.
+app with Bluetooth and background sessions as a signed APK beside the
+Windows zip, and the rename to Havne.
 After it come v0.3.4 and v0.3.5 ([roadmap](#roadmap)).
 
 - **Works:**
@@ -195,7 +196,9 @@ an issue is resolved it is removed, and its number is not reused.
    set `BUILD_TESTING=OFF`, so the phone is checked by its run sheet
    ([android-phone-runsheet.md](docs/bench-sessions/android-phone-runsheet.md)).
    The app needs Android 12 or later; CI uploads the Android build's
-   debug APK.
+   debug APK, and releases from v0.3.3 carry one signed with the
+   release key ([ADR-0030](docs/adr/0030-signed-android-releases.md)),
+   a Release build that no phone has run yet.
 4. **Every def is matched against every frame, on the transport's
    worker** ([ADR-0024](docs/adr/0024-decode-on-the-worker.md)). A
    subscription can't trim that work: it is the chart's filter only,
@@ -235,7 +238,7 @@ an issue is resolved it is removed, and its number is not reused.
 | v0.3.0 | Signal decoding, LiveView, J2534 transport, live vehicle read and logging | ✅ Released |
 | v0.3.1 | Request engine, PID-support probe, `uds-generic`, vehicle identification, imperial units; the first Windows download | ✅ Released |
 | v0.3.2 | Record-replay transport, decoding on the transport's thread, every driver in its own process | ✅ Released |
-| v0.3.3 | ELM327 adapters, preferences and vehicles, Android with Bluetooth and background sessions, the rename to Havne | Built; release pending |
+| v0.3.3 | ELM327 adapters, preferences and vehicles, Android with Bluetooth and background sessions and a signed APK, the rename to Havne | Built; release pending |
 | v0.3.4 | A command-line client over the C ABI; Linux as a supported desktop; a SocketCAN transport that listens | Planned |
 | v0.3.5 | Full OBD-II diagnostics (Services 01–0A, clearing codes); SocketCAN requests through ISO-TP | Planned |
 | v0.4.0 | Python bindings; PCAP export and candump import; ECU, DID and service discovery (needs requests to every ECU and listening to the whole bus first) | Proposed |

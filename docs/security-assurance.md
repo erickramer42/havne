@@ -51,13 +51,13 @@ names, a WiFi adapter's.
 | Android → app | Other apps, the system | The background session's service isn't exported; the permissions are those the features use: Bluetooth connect and scan declared "never for location", notifications, a connected-device foreground service, a wake lock, and internet for the WiFi socket ([ADR-0029](adr/0029-android-background-sessions.md)). The app's files, which can hold the VIN, are kept out of the system's backup and device-to-device transfer (`allowBackup` off and data-extraction rules that exclude every domain; CI checks the manifest for both) |
 | Disk → replay | A recording's `frames.csv` | The whole file is checked at connect, and a row that doesn't parse or is longer than a frame holds is refused, naming its line but never the path; a file that changes during playback stops it ([ADR-0023](adr/0023-replay-transport.md)). Fuzzed (`fuzz_replay_file`) |
 | App → vehicle | Requests | The request engine sends services 0x01, 0x09 and 0x22 (reads) only, and refuses any other service even if one reaches it ([ADR-0015](adr/0015-request-engine.md) §3) |
-| Source → release | The Windows zip | Actions pinned to commit SHAs, a hash-pinned clang-tidy wheel, a release job that requires the commit's CI to have passed and checks the package's imports and version resources, and a signed SLSA build provenance on every download ([development.md](development.md#releases)) |
+| Source → release | The Windows zip, the Android APK | Actions pinned to commit SHAs, a hash-pinned clang-tidy wheel, a release workflow that requires the commit's CI to have passed and checks the zip's imports and version resources and the APK's package, version and debuggability, and a signed SLSA build provenance on every download ([development.md](development.md#releases)). The APK is signed with the release key, which only the Android job reads, from a `release` environment that only `v*` tags and `main` deploy to; the signing step fails unless the certificate is the one pinned in the repository ([ADR-0030](adr/0030-signed-android-releases.md)) |
 
 ## Design principles applied
 
 | Principle | Where it shows |
 |---|---|
-| Least privilege | Every workflow defaults to read-only permissions, and a job gets more only for its one task: code-scanning uploads, or the release job's release and attestation writes. The surrogate's pipe admits the current user only. The Android app declares only the permissions its features use |
+| Least privilege | Every workflow defaults to read-only permissions, and a job gets more only for its one task: code-scanning uploads, or the release workflow's release and attestation writes, in its last job only; only its Android job reads the signing key. The surrogate's pipe admits the current user only. The Android app declares only the permissions its features use |
 | Isolation | Every vendor DLL in a surrogate process of its own; the core never links Qt, and the UI never parses a frame |
 | Fail-safe defaults | Anything unrecognized (scheme, query key, profile, port name, DLL type, ioctl, service, an adapter's setup answer) is refused, never guessed at |
 | Complete mediation | Every path to a vendor call goes through the loader's checks and the surrogate's whitelist; there is no in-process backend to bypass them |
@@ -101,5 +101,11 @@ names, a WiFi adapter's.
   reply as untrusted and the requests stay reads, so the exposure is
   the session's data: a device posing as the adapter can feed it false
   values.
-- **The executables aren't code-signed,** so their integrity on disk
-  rests on the provenance and the checksum, which a user has to check.
+- **The Windows executables aren't code-signed,** so their integrity
+  on disk rests on the provenance and the checksum, which a user has to
+  check.
+- **The Android release key is one key, kept offline.** A leaked key
+  could sign an update that phones accept; APK Signature Scheme v3 can
+  rotate to a new key while the old one exists, but a lost key can't be
+  replaced without every phone uninstalling the app
+  ([ADR-0030](adr/0030-signed-android-releases.md)).

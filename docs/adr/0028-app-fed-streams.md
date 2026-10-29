@@ -341,3 +341,14 @@ an open core has given up on still connects, and a new open starts a
 second socket connect while an abandoned one is still blocked (one
 blocked 25 s). Recovery took 38 s. Both belong to Known Issue #37's
 fix, which also has to keep the link running in the background.
+
+## Appendix: 2026-10-29, signed releases
+
+§3 kept release builds and a signing key out of this record, and the
+release workflow Windows-only until Known Issue #2 closed. Known Issue
+#2 now covers iOS and the missing on-phone test suite, and the Android
+app has run on a phone and a car, so releases carry an APK signed with
+a release key from v0.3.3 on: [ADR-0030](0030-signed-android-releases.md).
+CI's debug APK and local builds stay as §3 describes them, for
+development and for phone runs that read the wire logs through
+`run-as`.

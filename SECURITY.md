@@ -10,10 +10,12 @@ release only.
 | Latest v0.3.x release | ✅ |
 | Anything older | ❌ |
 
-A release is the Windows download on the
-[releases page](https://github.com/erickramer42/havne/releases). The
-Android APK that CI builds is a debug-signed development build, not a
-release; report what you find in it all the same.
+A release is what the
+[releases page](https://github.com/erickramer42/havne/releases) offers:
+the Windows zip and, from v0.3.3, the Android APK signed with the
+release key. The APK that CI builds on each push is a debug-signed
+development build, not a release; report what you find in it all the
+same.
 
 Once v1.0.0 is released, this table will give each release line's
 support window.
@@ -79,16 +81,20 @@ Out of scope:
 - **Supply chain:** `main` is protected; workflows run with
   least-privilege permissions; every action is pinned to a full commit
   SHA, and Dependabot proposes updates; OpenSSF Scorecard runs weekly.
-- **Releases:** each Windows download carries a signed SLSA build
-  provenance from the release workflow, attached to the release as
-  `<zip>.intoto.jsonl`, and a SHA-256 checksum
-  ([docs/development.md](docs/development.md#releases)).
+- **Releases:** each download carries a signed SLSA build provenance
+  from the release workflow, attached to the release as
+  `<download>.intoto.jsonl`, and a SHA-256 checksum. The APK is signed
+  with the release key, which only the release workflow's Android job
+  can read, from an environment that only release tags and `main`
+  deploy to, and whose certificate fingerprint is pinned in the
+  repository and given in each release's notes
+  ([ADR-0030](docs/adr/0030-signed-android-releases.md),
+  [docs/development.md](docs/development.md#releases)).
 - **Android:** the app asks only for the permissions its features use
   (Bluetooth declared "never for location", notifications, a
   connected-device foreground service and a wake lock for background
   sessions, and internet for a WiFi adapter's socket), its service
   isn't exported to other apps, and its files stay out of the phone's
   backup and device-to-device transfer.
-- **Not yet:** the executables aren't code-signed, so Windows
-  SmartScreen warns on first run, and there is no signed Android
-  release.
+- **Not yet:** the Windows executables aren't code-signed, so
+  SmartScreen warns on first run.

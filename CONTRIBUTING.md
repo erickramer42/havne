@@ -28,7 +28,7 @@ document that holds the detail. Then, by what you want to do:
 | Work on J2534 | [docs/j2534.md](docs/j2534.md), then ADRs [0010](docs/adr/0010-j2534-v0404-shared-types.md), [0014](docs/adr/0014-single-threaded-surrogate.md) and [0025](docs/adr/0025-one-j2534-backend.md) |
 | Work on ELM327 adapters or Bluetooth | [docs/elm327.md](docs/elm327.md), then [ADR-0026](docs/adr/0026-elm327-transport.md) and its appendices and [ADR-0028](docs/adr/0028-app-fed-streams.md) (Bluetooth through the app) |
 | Work on the UI | architecture.md's "The UI layer", [ADR-0005](docs/adr/0005-coalesced-signal-updates.md) (10 Hz updates), the QML tests in `tests/qml/` |
-| Work on Android | [ADR-0028](docs/adr/0028-app-fed-streams.md), [ADR-0029](docs/adr/0029-android-background-sessions.md), development.md's "Build configurations" (Mobile, then *Android*) |
+| Work on Android | [ADR-0028](docs/adr/0028-app-fed-streams.md), [ADR-0029](docs/adr/0029-android-background-sessions.md), development.md's "Build configurations" (Mobile, then *Android*); the signed release APK: [ADR-0030](docs/adr/0030-signed-android-releases.md) and development.md's "Releases" |
 | Know how a change is verified | [docs/testing.md](docs/testing.md): the tiers, every verified behavior with the test that pins it, and the gaps |
 | Fuzz a parser | [fuzz/README.md](fuzz/README.md) |
 | Report a security problem | [SECURITY.md](SECURITY.md), privately; the threat model is [docs/security-assurance.md](docs/security-assurance.md) |

@@ -1,9 +1,11 @@
 name: Release
 
-# A version tag publishes a Windows x64 release: the app, the x86 and
-# x64 J2534 surrogates, the Qt runtime and the Visual C++ runtime in one
-# zip that runs without Qt or Visual Studio, with its SHA-256 and a
-# signed build provenance (attested, and attached as a .intoto.jsonl).
+# A version tag publishes a release with two downloads: a Windows x64
+# zip (the app, the x86 and x64 J2534 surrogates, the Qt runtime and the
+# Visual C++ runtime, running without Qt or Visual Studio) and an Android
+# arm64-v8a APK signed with the release key (ADR-0030). Both come with
+# their SHA-256 and a signed build provenance each (attested, and
+# attached as a .intoto.jsonl).
 # A tag with -rcN publishes a pre-release, for a dry run.
 # The tagged commit must already have passed CI (ci.yml's push run).
 #
@@ -11,6 +13,10 @@ name: Release
 #
 # A manual run rebuilds an existing tag and replaces the release's files:
 #   gh workflow run release.yml -f tag=v0.3.1
+#
+# Jobs: gate (the tag and CI) -> windows and android, side by side ->
+# publish (checksums, provenance, the release). Only android reads the
+# signing key, from the "release" environment's secrets.
 on:
   push:
     tags: ['v[0-9]+.[0-9]+.[0-9]+', 'v[0-9]+.[0-9]+.[0-9]+-rc[0-9]+']
@@ -24,18 +30,25 @@ on:
 permissions:
   contents: read
 
+env:
+  TAG: ${{ inputs.tag || github.ref_name }}
+
 jobs:
-  windows:
-    runs-on: windows-latest
-    timeout-minutes: 30
+  gate:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash   # -eo pipefail
+    timeout-minutes: 5
     permissions:
-      contents: write       # create the release and upload its files
-      id-token: write       # sign the build provenance
-      attestations: write   # store it
+      contents: read
       actions: read         # read ci.yml's runs on the tagged commit
     env:
-      TAG: ${{ inputs.tag || github.ref_name }}
       GH_TOKEN: ${{ github.token }}
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      notes_tag: ${{ steps.version.outputs.notes_tag }}
+      prerelease: ${{ steps.version.outputs.prerelease }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -45,7 +58,7 @@ jobs:
       # before anything builds: v0.3.1 and v0.3.1-rc2 both need
       # project(Havne VERSION 0.3.1) in the root CMakeLists.txt.
       - name: Check the tag against the project version
-        shell: bash
+        id: version
         run: |
           [[ "$TAG" =~ ^v([0-9]+\.[0-9]+\.[0-9]+)(-rc[0-9]+)?$ ]] || { echo "::error::$TAG is not vX.Y.Z or vX.Y.Z-rcN"; exit 1; }
           tag_version="${BASH_REMATCH[1]}"
@@ -54,17 +67,18 @@ jobs:
             echo "::error::$TAG is version $tag_version, but CMakeLists.txt says $cmake_version"
             exit 1
           fi
-          echo "VERSION=${TAG#v}" >> "$GITHUB_ENV"
-          echo "NOTES_TAG=v$tag_version" >> "$GITHUB_ENV"
-          if [ -n "${BASH_REMATCH[2]}" ]; then echo "PRERELEASE=--prerelease" >> "$GITHUB_ENV"; fi
           test -f "docs/releases/v$tag_version.md" || { echo "::error::no docs/releases/v$tag_version.md"; exit 1; }
+          {
+            echo "version=${TAG#v}"
+            echo "notes_tag=v$tag_version"
+            if [ -n "${BASH_REMATCH[2]}" ]; then echo "prerelease=--prerelease"; else echo "prerelease="; fi
+          } >> "$GITHUB_OUTPUT"
 
-      # This job builds no tests: ci.yml ran them when the commit was
+      # The build jobs run no tests: ci.yml ran them when the commit was
       # pushed to main or dev (it never runs on tags). So the newest of
       # those push runs must have finished green, or a tag pushed early,
       # or on a red commit, would publish an untested build.
       - name: Check CI passed on the tagged commit
-        shell: bash
         run: |
           sha=$(git rev-parse HEAD)
           run=$(gh run list -R "$GITHUB_REPOSITORY" --workflow ci.yml --event push --commit "$sha" --limit 1 \
@@ -80,6 +94,17 @@ jobs:
             exit 1
           fi
           echo "CI passed on $sha: $url"
+
+  windows:
+    needs: gate
+    runs-on: windows-latest
+    timeout-minutes: 30
+    env:
+      VERSION: ${{ needs.gate.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.TAG }}
 
       # The same Qt install as ci.yml's win-build; see the notes there.
       - name: Install aqtinstall (pinned master commit)
@@ -109,29 +134,155 @@ jobs:
       - name: Stage, check and zip
         run: pwsh -NoProfile -File packaging/windows/stage.ps1 -Version $env:VERSION
 
-      - name: Attest build provenance
-        id: attest
+      - name: Upload the zip
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: windows
+          path: dist/havne-${{ env.VERSION }}-windows-x64.zip
+          if-no-files-found: error
+          retention-days: 1
+
+  android:
+    needs: gate
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash   # -eo pipefail
+    timeout-minutes: 25
+    # The release key's secrets live in this environment, which only
+    # release tags and main may deploy to (docs/development.md,
+    # "The Android release key")
+    environment: release
+    env:
+      VERSION: ${{ needs.gate.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.TAG }}
+
+      # The same kit, NDK and JDK as ci.yml's android-build; see the notes
+      # there.
+      - name: Install Qt 6.12.0 (android_arm64_v8a + linux host)
+        uses: jurplel/install-qt-action@b344308e4483fc892e0d27b3cd1b173ebdd95f06 # v4.5.0
+        with:
+          version: '6.12.0'
+          host: 'all_os'
+          target: 'android'
+          arch: 'android_arm64_v8a'
+          modules: 'qtconnectivity'
+          extra: '--autodesktop'
+
+      - name: Select NDK r27 and JDK 21
+        run: |
+          NDK=$(ls -d "$ANDROID_SDK_ROOT"/ndk/27.* 2>/dev/null | sort -V | tail -n 1 || true)
+          [ -n "$NDK" ] || { echo "::error::No NDK r27 under $ANDROID_SDK_ROOT/ndk"; exit 1; }
+          [ -n "${JAVA_HOME_21_X64:-}" ] || { echo "::error::JAVA_HOME_21_X64 is not set on this runner image"; exit 1; }
+          echo "APP_NDK_ROOT=$NDK" >> "$GITHUB_ENV"
+          echo "JAVA_HOME=$JAVA_HOME_21_X64" >> "$GITHUB_ENV"
+
+      # Release, unlike CI's Debug build: optimized, not debuggable, and
+      # unsigned until the next step
+      - name: Build the Release APK
+        run: |
+          "$QT_ROOT_DIR/bin/qt-cmake" -B build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DBUILD_TESTING=OFF \
+            -DANDROID_SDK_ROOT="$ANDROID_SDK_ROOT" \
+            -DANDROID_NDK_ROOT="$APP_NDK_ROOT"
+          cmake --build build
+          cmake --build build --target apk
+
+      # The keystore exists on the runner only for this step
+      - name: Sign and check
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_B64 }}
+          HAVNE_KEYSTORE_PASS: ${{ secrets.ANDROID_KEYSTORE_PASS }}
+        run: |
+          [ -n "$KEYSTORE_B64" ] && [ -n "$HAVNE_KEYSTORE_PASS" ] \
+            || { echo "::error::the release environment has no ANDROID_KEYSTORE_B64 or ANDROID_KEYSTORE_PASS"; exit 1; }
+          export HAVNE_KEYSTORE="$RUNNER_TEMP/release.p12"
+          trap 'rm -f "$HAVNE_KEYSTORE"' EXIT
+          printf '%s' "$KEYSTORE_B64" | base64 -d > "$HAVNE_KEYSTORE"
+          unsigned=$(find build -path '*outputs/apk/release/*' -name '*-unsigned.apk' | head -n 1)
+          [ -n "$unsigned" ] || { echo "::error::the build made no unsigned Release APK"; exit 1; }
+          bash packaging/android/sign-apk.sh "$unsigned" "$VERSION" dist
+
+      - name: Upload the APK
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: android
+          path: dist/havne-${{ env.VERSION }}-android-arm64-v8a.apk
+          if-no-files-found: error
+          retention-days: 1
+
+  publish:
+    needs: [gate, windows, android]
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash   # -eo pipefail
+    timeout-minutes: 10
+    permissions:
+      contents: write       # create the release and upload its files
+      id-token: write       # sign the build provenance
+      attestations: write   # store it
+    env:
+      GH_TOKEN: ${{ github.token }}
+      VERSION: ${{ needs.gate.outputs.version }}
+      NOTES_TAG: ${{ needs.gate.outputs.notes_tag }}
+      PRERELEASE: ${{ needs.gate.outputs.prerelease }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.TAG }}
+
+      - name: Download the builds
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          path: dist
+          merge-multiple: true
+
+      # LF line ends (sha256sum's own): sha256sum -c reads a CR as part
+      # of the name
+      - name: Checksums
+        working-directory: dist
+        run: |
+          sha256sum "havne-$VERSION-windows-x64.zip" "havne-$VERSION-android-arm64-v8a.apk" > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
+      - name: Attest the zip's build provenance
+        id: attest-zip
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
           subject-path: dist/havne-${{ env.VERSION }}-windows-x64.zip
 
-      # The same signed provenance (a Sigstore bundle) as a release file.
-      # OpenSSF Scorecard's Signed-Releases check reads release files, not
-      # GitHub's attestation store, and counts *.intoto.jsonl as
-      # provenance. A download can also be checked against the file with
-      # gh attestation verify --bundle.
+      - name: Attest the APK's build provenance
+        id: attest-apk
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: dist/havne-${{ env.VERSION }}-android-arm64-v8a.apk
+
+      # The same signed provenance (a Sigstore bundle) as a release file
+      # beside each download. OpenSSF Scorecard's Signed-Releases check
+      # reads release files, not GitHub's attestation store, and counts
+      # *.intoto.jsonl as provenance. A download can also be checked
+      # against its file with gh attestation verify --bundle.
       - name: Copy the provenance into dist
         env:
-          BUNDLE: ${{ steps.attest.outputs.bundle-path }}
-        run: Copy-Item -LiteralPath $env:BUNDLE -Destination "dist/havne-$env:VERSION-windows-x64.zip.intoto.jsonl"
+          ZIP_BUNDLE: ${{ steps.attest-zip.outputs.bundle-path }}
+          APK_BUNDLE: ${{ steps.attest-apk.outputs.bundle-path }}
+        run: |
+          cp "$ZIP_BUNDLE" "dist/havne-$VERSION-windows-x64.zip.intoto.jsonl"
+          cp "$APK_BUNDLE" "dist/havne-$VERSION-android-arm64-v8a.apk.intoto.jsonl"
 
       - name: Publish the release
-        shell: bash
         run: |
           zip="dist/havne-$VERSION-windows-x64.zip"
+          apk="dist/havne-$VERSION-android-arm64-v8a.apk"
+          files=("$zip" "$zip.intoto.jsonl" "$apk" "$apk.intoto.jsonl" dist/SHA256SUMS.txt)
           if gh release view "$TAG" > /dev/null 2>&1; then
-            gh release upload "$TAG" "$zip" "$zip.intoto.jsonl" dist/SHA256SUMS.txt --clobber
+            gh release upload "$TAG" "${files[@]}" --clobber
           else
-            gh release create "$TAG" "$zip" "$zip.intoto.jsonl" dist/SHA256SUMS.txt --verify-tag \
+            gh release create "$TAG" "${files[@]}" --verify-tag \
               --title "Havne $TAG" --notes-file "docs/releases/$NOTES_TAG.md" $PRERELEASE
           fi
