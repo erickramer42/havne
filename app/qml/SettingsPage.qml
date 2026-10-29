@@ -68,6 +68,12 @@ Pane {
     // port is listed, whatever is behind it: none is opened until Connect
     property var serialPorts: []
 
+    // The machine's CAN interfaces, for socketcan:// (ADR-0032 §7): [{
+    // name, kind, up, listenOnly, fd, bitrate }, ...]. Empty off Linux.
+    // Listed whatever their mode; core refuses a controller that isn't
+    // listen-only, and the row says so first
+    property var canInterfaces: []
+
     // The phone's Bluetooth adapters (ADR-0028 §2): [{ name, address,
     // kind }], kind "bt" (classic, paired) or "ble". Empty off Android
     property var bluetoothAdapters: Bluetooth.adapters
@@ -89,12 +95,29 @@ Pane {
             detail: p.device !== "" ? qsTr("Serial port, for elm327:// · %1").arg(p.device)
                                     : qsTr("Serial port, for elm327://"),
             base: "elm327://" + p.name
+        }))).concat(canInterfaces.map(c => withVersions({
+            title: c.name,
+            detail: canDetail(c),
+            base: "socketcan://" + c.name
         }))).concat(bluetoothAdapters.map(a => withVersions({
             title: a.name !== "" ? a.name : a.address,
             detail: a.kind === "ble" ? qsTr("Bluetooth LE · %1").arg(a.address)
                                      : qsTr("Bluetooth, paired · %1").arg(a.address),
             base: "elm327://" + a.kind + ":" + a.address
         })))
+
+    // A CAN interface's row: what it is, and why a connect would be
+    // refused before one is tried
+    function canDetail(c) {
+        if (c.kind === "vcan")
+            return c.up ? qsTr("Virtual CAN bus, for socketcan://")
+                        : qsTr("Virtual CAN bus, down: sudo ip link set %1 up").arg(c.name)
+        if (!c.up)
+            return qsTr("CAN interface, down: bring it up listen-only with ip link")
+        if (!c.listenOnly)
+            return qsTr("CAN interface, not listen-only: socketcan:// refuses it until it is")
+        return qsTr("CAN interface, listen-only at %1 bit/s, for socketcan://").arg(c.bitrate)
+    }
 
     function withVersions(row) {
         row.versions = page.seenVersions[row.base] || ""
@@ -293,6 +316,7 @@ Pane {
     function refreshDevices() {
         j2534Devices = Bridge.discoverJ2534Devices()
         serialPorts = Bridge.discoverSerialPorts()
+        canInterfaces = Bridge.discoverCanInterfaces()
     }
 
     // The newest recordings, [{ title, uri, source, profile }, ...]
@@ -341,7 +365,8 @@ Pane {
     // outside the list highlights no button; core judges it at connect.
     readonly property var profiles: [
         { name: "default", label: qsTr("Default"),
-          hint: qsTr("The scheme's own profile: obd2 on an adapter, the demo set on mock://") },
+          hint: qsTr("The scheme's own profile: obd2 on an adapter, raw on a replay or a "
+                     + "CAN interface, the demo set on mock://") },
         { name: "raw", label: qsTr("raw (log only)"),
           hint: qsTr("No decode: frames reach the Log page only. On an adapter it listens "
                      + "to the engine ECU (0x7E8); add ?filter= for another ID. An ELM327 "
@@ -444,7 +469,8 @@ Pane {
         "mock": ["profile", "did"],
         "replay": ["profile", "did", "speed", "loop"],
         "j2534": ["baud", "flags", "filter", "txid", "poll", "probe", "identify", "profile", "did"],
-        "elm327": ["baud", "serial", "filter", "txid", "poll", "probe", "identify", "profile", "did"]
+        "elm327": ["baud", "serial", "filter", "txid", "poll", "probe", "identify", "profile", "did"],
+        "socketcan": ["profile", "did", "baud", "filter"]
     })
 
     function schemeOf(text) {
@@ -467,6 +493,9 @@ Pane {
         if (keys !== undefined && scheme !== schemeOf(uriField.text)) {
             pairs = pairs.filter(p => keys.indexOf(p[0]) >= 0)
             if (profileChoice === "mock" && (scheme === "j2534" || scheme === "elm327"))
+                profileChoice = "default"
+            // SocketCAN only listens: a profile that requests is refused there
+            if (profileChoice === "uds-generic" && scheme === "socketcan")
                 profileChoice = "default"
         }
         setUri(composeUri(base, pairs))
@@ -725,9 +754,12 @@ Pane {
                               : qsTr("J2534 interfaces: %1, serial ports: %2%3 — select one to "
                                      + "put its URI in the field above, then Connect")
                                     .arg(page.j2534Devices.length).arg(page.serialPorts.length)
-                                    .arg(Bluetooth.available || page.bluetoothAdapters.length > 0
-                                         ? qsTr(", Bluetooth: %1").arg(page.bluetoothAdapters.length)
-                                         : "")
+                                    .arg((page.canInterfaces.length > 0
+                                          ? qsTr(", CAN interfaces: %1").arg(page.canInterfaces.length)
+                                          : "")
+                                         + (Bluetooth.available || page.bluetoothAdapters.length > 0
+                                            ? qsTr(", Bluetooth: %1").arg(page.bluetoothAdapters.length)
+                                            : ""))
                         color: page.devices.length === 0 ? Theme.textDim : Theme.text
                         wrapMode: Text.WordWrap
                         Layout.fillWidth: true

@@ -90,7 +90,7 @@ TEST(CoreTest, CreateFailuresNameTheirCause) {
     EXPECT_EQ(ecuio_session_create("can://bus0", &s), ECUIO_ERR_NO_TRANSPORT);
     EXPECT_STREQ(ecuio_last_error_detail(),
                  "unsupported URI scheme: expected mock://, replay://, "
-                 "j2534:// or elm327://");
+                 "j2534://, elm327:// or socketcan://");
     EXPECT_EQ(ecuio_session_create("mock://x?interval=10", &s), ECUIO_ERR_BAD_URI);
     EXPECT_STREQ(ecuio_last_error_detail(),
                  "mock:// takes no query key 'interval', only profile and did");

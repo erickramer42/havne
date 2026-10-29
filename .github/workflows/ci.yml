@@ -339,18 +339,32 @@ jobs:
           cmake -B build -DCMAKE_PREFIX_PATH="$QT_ROOT_DIR"
           cmake --build build
       # The simulated CAN bus (tests/vcan_bus.h): vcan and can-isotp load
-      # as installed on the hosted Ubuntu runners
+      # as installed on the hosted Ubuntu runners. MTU 72 takes CAN FD
+      # frames (the mock's 12-byte telemetry), whatever the kernel's
+      # default; it's set before the link goes up, as vcan requires
       - name: Bring up vcan0
         run: |
           sudo modprobe vcan
           sudo modprobe can-isotp
           sudo ip link add dev vcan0 type vcan
+          sudo ip link set vcan0 mtu 72
           sudo ip link set up vcan0
-      # ECUIO_VCAN_REQUIRED: VcanTest fails rather than skips without vcan0
+      # ECUIO_VCAN_REQUIRED: VcanTest and SocketCanBusTest fail rather than
+      # skip without vcan0
       - name: Run tests
         env:
           ECUIO_VCAN_REQUIRED: '1'
         run: ctest --test-dir build --output-on-failure --no-tests=error
+      # The one SocketCAN case that sets the interface down and up again
+      # needs CAP_NET_ADMIN; it skips in the run above, and runs here
+      - name: SocketCAN as root (the interface down and up)
+        env:
+          ECUIO_VCAN_REQUIRED: '1'
+          ECUIO_VCAN_ROOT_REQUIRED: '1'
+        run: >-
+          sudo --preserve-env=ECUIO_VCAN_REQUIRED,ECUIO_VCAN_ROOT_REQUIRED
+          build/tests/test_vcan
+          --gtest_filter='SocketCanBusTest.TheInterfaceGoingDownIsAHardFailureThatRecovers'
       - name: Load test
         shell: bash   # -o pipefail: tee must not hide the bench's exit status
         run: build/tests/bench_bridge --load | tee -a "$GITHUB_STEP_SUMMARY"

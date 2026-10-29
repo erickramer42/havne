@@ -12,6 +12,8 @@ add_library(ecuio-core STATIC
     src/elm327_stream.cpp
     src/elm327_log.cpp
     src/serial_ports.cpp
+    src/socketcan_interfaces.cpp
+    src/socketcan_transport.cpp
     src/signals.cpp
     src/signal_sets.cpp
     src/obd2_signal_sets.cpp

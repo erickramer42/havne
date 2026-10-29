@@ -62,6 +62,15 @@ extern const char* const ecuio_mock_query_keys[];
 extern const char* const ecuio_j2534_query_keys[];
 extern const char* const ecuio_replay_query_keys[];
 extern const char* const ecuio_elm327_query_keys[];
+extern const char* const ecuio_socketcan_query_keys[];
+
+/* SocketCAN builds on Linux alone (ADR-0032): Android's kernels ship
+ * without CAN */
+#if defined(__linux__) && !defined(__ANDROID__)
+#define ECUIO_HAVE_SOCKETCAN 1
+#else
+#define ECUIO_HAVE_SOCKETCAN 0
+#endif
 
 /* Mock transport factory — attaches a transport to a session
  * (idempotent). Its keys, profile and did, are core's, so it reads
@@ -96,6 +105,20 @@ ecuio_status_t ecuio_replay_transport_attach(ecuio_session_t* session,
 ecuio_status_t ecuio_elm327_transport_attach(ecuio_session_t* session,
                                               const char* uri,
                                               const struct ecuio_uri_query* query);
+
+/* SocketCAN transport factory (ADR-0032), Linux only
+ * (ECUIO_HAVE_SOCKETCAN):
+ *   socketcan://<interface>[?profile=…][&baud=500000|250000]
+ *                          [&filter=<id>[/<mask>],…]
+ * Listens: refuses a profile that requests (NOT_IMPLEMENTED), reads the
+ * interface through rtnetlink and refuses one that isn't CAN, is down,
+ * is a controller not in listen-only mode (LOAD_FAILED) or runs at
+ * another rate than ?baud= (BAD_URI), then opens a CAN_RAW socket. The
+ * worker starts with ecuio_session_start. Elsewhere create answers the
+ * scheme NO_TRANSPORT and never calls this. */
+ecuio_status_t ecuio_socketcan_transport_attach(ecuio_session_t* session,
+                                                const char* uri,
+                                                const struct ecuio_uri_query* query);
 
 /* The byte stream an ELM327 session runs over: an OS serial port
  * (core/src/elm327_port.h), or a test's fake ELM327 behind the opener

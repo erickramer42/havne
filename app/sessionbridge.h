@@ -385,6 +385,11 @@ public:
     // ("\Device\BthModem0"), "" elsewhere. A registry read or a /dev
     // listing; no port is opened, so it's safe to call from QML.
     Q_INVOKABLE QVariantList discoverSerialPorts() const;
+    // The machine's CAN interfaces, for socketcan:// (ADR-0032 §7), Linux
+    // only: one map per interface, { name, kind, up, listenOnly, fd,
+    // bitrate }, kind "can" or "vcan", bitrate in bit/s (0 for vcan). A
+    // netlink read; nothing is opened. Empty elsewhere.
+    Q_INVOKABLE QVariantList discoverCanInterfaces() const;
     // The newest recordings first, at most limit, for Settings to replay
     // by a tap: one map per folder holding a frames.csv, { title, uri,
     // source, profile } as QStrings. title is the folder's date and

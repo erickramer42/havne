@@ -21,6 +21,7 @@
 #include "ecuio/j2534.h"
 #include "ecuio/stream.h"
 #include "ecuio/serial.h"
+#include "ecuio/socketcan.h"
 #include "ecuio/profile.h"
 #include "ecuio/signal_sets.h"
 #include "ecuio/signals.h"
@@ -74,6 +75,8 @@ typedef char abi_batch_size_check[(sizeof(void*) != 8 || sizeof(ecuio_value_batc
 typedef char abi_serial_size_check[(sizeof(ecuio_serial_port_t) == 288) ? 1 : -1];
 typedef char abi_serial_device_check[(offsetof(ecuio_serial_port_t, device) == 128) ? 1 : -1];
 typedef char abi_serial_flags_check[(offsetof(ecuio_serial_port_t, flags) == 256) ? 1 : -1];
+typedef char abi_can_size_check[(sizeof(ecuio_can_interface_t) == 64) ? 1 : -1];
+typedef char abi_can_flags_check[(offsetof(ecuio_can_interface_t, flags) == 32) ? 1 : -1];
 typedef char abi_stream_flags_check[(offsetof(ecuio_stream_callbacks_t, flags) == 4 * sizeof(void*)) ? 1 : -1];
 typedef char abi_stream_size_check[(sizeof(void*) != 8 || sizeof(ecuio_stream_callbacks_t) == 56) ? 1 : -1];
 
@@ -92,6 +95,7 @@ int main(void)
     ecuio_stream_callbacks_t stream_cb;
     ecuio_stream_t* stream = NULL;
     uint32_t serial_count = 0;
+    uint32_t can_count = 0;
     const uint8_t vin_request[2] = {0x09, 0x02};
     frame.arbitration_id = 0x7FF;
     frame.channel_id = 0;
@@ -148,6 +152,9 @@ int main(void)
     }
     if (ecuio_serial_ports(NULL, 0, &serial_count) != ECUIO_OK ||
         ecuio_serial_ports(NULL, 1, &serial_count) != ECUIO_ERR_NULL_ARGUMENT) {
+        return 1;
+    }
+    if (ecuio_can_interfaces(NULL, 1, &can_count) != ECUIO_ERR_NULL_ARGUMENT) {
         return 1;
     }
     memset(&stream_cb, 0, sizeof stream_cb);

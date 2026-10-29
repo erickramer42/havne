@@ -2674,6 +2674,22 @@ TEST(BridgeTest, SessionInfoTextNamesTheAdapter)
               "reply's answer is lost");
     EXPECT_TRUE(SessionBridge::versionsText(elm).isEmpty());
 
+    /* SocketCAN (ADR-0032): a listen-only controller, and vcan */
+    ecuio_session_info_t can{};
+    can.backend = ECUIO_BACKEND_SOCKETCAN;
+    can.baud = 500000;
+    can.flags = ECUIO_SESSION_INFO_LISTEN_ONLY;
+    qstrncpy(can.profile, "raw", sizeof(can.profile));
+    EXPECT_EQ(SessionBridge::sessionInfoText(can).toStdString(),
+              "Session: SocketCAN, a CAN controller in listen-only mode at "
+              "500000 bit/s, listening; profile raw");
+    can.baud = 0;
+    can.flags = 0;
+    qstrncpy(can.profile, "mock", sizeof(can.profile));
+    EXPECT_EQ(SessionBridge::sessionInfoText(can).toStdString(),
+              "Session: SocketCAN, a virtual CAN bus, listening; profile mock");
+    EXPECT_TRUE(SessionBridge::versionsText(can).isEmpty());
+
     ecuio_session_info_t later{};
     later.backend = 7; // a backend this build doesn't know
     EXPECT_EQ(SessionBridge::sessionInfoText(later).toStdString(),

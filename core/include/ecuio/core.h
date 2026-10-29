@@ -270,6 +270,8 @@ ecuio_status_t ecuio_session_get_error_state(
 #define ECUIO_BACKEND_ELM327             5u   /* an ELM327-compatible
                                                  adapter on a serial port
                                                  (ADR-0026) */
+#define ECUIO_BACKEND_SOCKETCAN          6u   /* a Linux CAN interface,
+                                                 listening (ADR-0032) */
 
 /* dll_arch: the adapter DLL's PE machine, as discovery's reserved[0]
  * reports it (j2534.h) */
@@ -288,6 +290,10 @@ ecuio_status_t ecuio_session_get_error_state(
                                                           parameter 2A), so a
                                                           pending reply's
                                                           answer is lost */
+#define ECUIO_SESSION_INFO_LISTEN_ONLY   0x00000010u   /* a CAN controller in
+                                                          listen-only mode,
+                                                          which never
+                                                          transmits (ADR-0032) */
 
 /* POD, 432 bytes, no hidden padding on any supported platform; pinned
  * by the assertions below. New fields take the reserved room. */
