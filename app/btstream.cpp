@@ -101,7 +101,11 @@ void BtLink::write(const QByteArray& bytes)
         if (!m_classic.up() || m_socket == nullptr) {
             return; // core sees the failure it was told of
         }
-        if (m_socket->write(bytes) != bytes.size()) {
+        // A failed write emits errorOccurred before it returns, and
+        // classicFailed reports the loss and drops the socket then; with
+        // Bluetooth turned off that left m_socket null here
+        // (docs/bench-sessions/2026-10-28-android-11.md)
+        if (m_socket->write(bytes) != bytes.size() && m_socket != nullptr) {
             act(m_classic.lost(),
                 tr("the write failed: %1").arg(m_socket->errorString()));
         }
