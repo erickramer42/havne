@@ -683,11 +683,16 @@ isn't still running 10 s after it starts on the offscreen platform.
   machine's, so the one to hand out is CI's (`linux-appimage`, Ubuntu
   24.04, glibc 2.39). One built on a newer distribution is for checking
   the packing.
-- **OpenGL comes from the system:** an AppImage leaves out libGL,
-  libGLX and libEGL, which belong to the machine's graphics driver.
-  Every desktop has them; a minimal install (WSL's Arch and Kali, for
-  one) doesn't, and the app then stops at once with
-  "libGLX.so.0: cannot open shared object file".
+- **Some libraries come from the system:** linuxdeploy's exclude list
+  leaves out what every desktop has. Those are OpenGL (libGL, libGLX
+  and libEGL, which belong to the machine's graphics driver),
+  fontconfig, freetype and libgpg-error. A minimal install (WSL's Arch
+  and Kali images, for example) lacks some of them, and the app then stops at once
+  with "error while loading shared libraries: libGLX.so.0" (or
+  `libfreetype.so.6`, or another). Mesa and the font libraries fix it:
+  `pacman -S --needed libglvnd mesa fontconfig freetype2` on Arch, and
+  `apt-get install libgl1 libegl1 libopengl0 libfontconfig1 libfreetype6 libgpg-error0`
+  on Debian and its kin.
 
 ## Releases
 
