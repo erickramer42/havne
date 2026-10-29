@@ -222,9 +222,9 @@ screen, is [docs/architecture.md](docs/architecture.md).
 | v0.3.3 | ELM327 adapters, preferences and vehicles, Android with Bluetooth and background sessions, the rename to Havne | Built; release pending |
 | v0.3.4 | A command-line client; Linux as a supported desktop; a SocketCAN transport that listens | Planned |
 | v0.3.5 | Full OBD-II diagnostics, including reading and clearing trouble codes; SocketCAN requests | Planned |
-| v0.4.0 | Python bindings, PCAP and candump interop, discovery of the ECUs and data a car offers | Proposed |
-| v0.5.0 | A plugin framework for make-specific signal sets; legacy buses for pre-2008 cars | Proposed |
-| 1.0+ | The write path: a copy of the original calibration, table editors, guarded writes | Proposed |
+| v0.4.0 | Python bindings; PCAP export and candump import; finding the ECUs and data a car offers | Proposed |
+| v0.5.0 | A plugin framework for make-specific signal sets; buses for pre-2008 cars | Proposed |
+| v1.0+ | The first make-specific plugins; writing to the ECU, starting from a copy of the original calibration | Proposed |
 
 The planned releases come in order; the proposed ones are not
 scheduled yet. v0.3.3's changes are under CHANGELOG's "Unreleased";

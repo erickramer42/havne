@@ -343,14 +343,12 @@ an issue is resolved it is removed, and its number is not reused.
 | v0.3.3 | ELM327 adapters, preferences and vehicles, Android with Bluetooth and background sessions, the rename to Havne | Built; release pending |
 | v0.3.4 | A command-line client over the C ABI; Linux as a supported desktop; a SocketCAN transport that listens | Planned |
 | v0.3.5 | Full OBD-II diagnostics (Services 01–0A, clearing codes); SocketCAN requests through ISO-TP | Planned |
-| v0.4.0 | Python bindings, PCAP and candump interop, discovery of the ECUs and data a car offers | Proposed |
-| v0.5.0 | A plugin framework for make-specific signal sets (ADR-0013's profile API); legacy buses | Proposed |
-| 1.0+ | The write path: a copy of the original calibration, table editors, guarded writes | Proposed |
+| v0.4.0 | Python bindings; PCAP export and candump import; ECU, DID and service discovery (needs requests to every ECU and listening to the whole bus first) | Proposed |
+| v0.5.0 | The plugin framework (ADR-0013's profile API), with no manufacturer plugin yet; legacy buses (ISO 9141-2, KWP2000, J1850) | Proposed |
+| v1.0+ | The first manufacturer plugins; the write path, with security access (0x27) and flashing through each plugin after the gateway research | Proposed |
 
 The planned releases are in order; the proposed ones are not
-scheduled. Legacy buses (ISO 9141-2, KWP2000, J1850 VPW and PWM) are
-what pre-2008 cars need before any profile can serve them; CAN-era
-cars need none of it. The write path needs an ADR per item (see the
+scheduled. The write path needs an ADR per item (see the
 [backlog](#editing-and-write-path-10-and-later-nothing-below-is-scheduled)),
 and flashing depends on each manufacturer's secure-gateway
 authentication, research tracked outside this repository.
@@ -427,7 +425,7 @@ week or more or a design that needs an ADR first.
   decodes the reply (ADR-0015, ADR-0016), so what's missing is the
   data: the DIDs and their formulas, which `uds-generic`'s `?did=`
   polling and range scan are for ([ADR-0020](docs/adr/0020-uds-generic.md)).
-  It serves as the pilot for the v0.5.0 plugin framework.
+  It serves as the pilot for the first plugins.
 - **Computed signals (M).** Values derived from other signals, such
   as boost pressure: intake manifold absolute pressure (PID 0x0B)
   minus barometric pressure (PID 0x33). Neither PID is in the `obd2`
