@@ -95,6 +95,37 @@ endif()
 app_enable_warnings(test_elm327)
 gtest_discover_tests(test_elm327 PROPERTIES TIMEOUT 30)
 
+# --- The simulated CAN bus: Qt-free, Linux only (SocketCAN) ---
+# test_vcan.cpp: vcan_bus.h's fake ECU through the kernel's ISO-TP and a
+# recording played onto vcan0. Each case skips without the interface;
+# CI's linux-build brings it up and sets ECUIO_VCAN_REQUIRED=1.
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    add_executable(test_vcan test_vcan.cpp)
+    target_include_directories(test_vcan PRIVATE ${CMAKE_SOURCE_DIR}/core/include)
+    target_compile_definitions(test_vcan PRIVATE
+        ECUIO_REPLAY_FIXTURES="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/replay"
+    )
+    find_package(Threads REQUIRED)
+    target_link_libraries(test_vcan PRIVATE GTest::gtest_main Threads::Threads)
+    app_enable_warnings(test_vcan)
+    gtest_discover_tests(test_vcan PROPERTIES TIMEOUT 30)
+endif()
+
+# --- Golden-output comparator: Python 3, no packages ---
+# golden.py compares JSON-lines output with a committed golden file,
+# dropping the keys a run changes; its self-test pins those rules. Left
+# out where no Python 3 is found.
+find_package(Python3 COMPONENTS Interpreter QUIET)
+# scripts/abi_report.py, the ABI check's judge of an abidiff report
+# (growth into a struct's reserved room passes, a break fails): its
+# self-test runs over reports of real mutants, on every platform.
+if(Python3_Interpreter_FOUND)
+    add_test(NAME GoldenTest.SelfTest
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/golden.py selftest)
+    add_test(NAME AbiReportTest.SelfTest
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/scripts/abi_report.py selftest)
+endif()
+
 # --- C ABI compilation check: MUST stay Qt-free, builds everywhere ---
 # Compiles the public headers as strict C and links exported symbols
 # from a C TU — catches C++-isms and name-mangling regressions an FFI
