@@ -35,7 +35,7 @@ typedef struct ecuio_j2534_device {
                                                         too long for this,
                                                         or relative, isn't
                                                         listed */
-    uint32_t supported_protocols; /* 0 — reserved for PROTOCOLS bitmask parse */
+    uint32_t supported_protocols; /* 0: reserved for PROTOCOLS bitmask parse */
     uint32_t reserved[8];         /* ABI-stable expansion room
                                    * [0]: architecture (1=x86, 2=x64, 0=unknown) */
 } ecuio_j2534_device_t;
@@ -82,7 +82,7 @@ ecuio_status_t ecuio_j2534_open(const ecuio_j2534_device_t* device,
 
 /*
  * Close device, unload module, free handle. NULL is a safe no-op.
- * Closing INVALIDATES the handle — reuse after close is UB.
+ * Closing INVALIDATES the handle: reuse after close is UB.
  */
 ecuio_status_t ecuio_j2534_close(ecuio_j2534_handle_t* handle);
 

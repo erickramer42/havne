@@ -1,5 +1,5 @@
 // File/layer: core/include/ecuio/surrogate_protocol.h | shared app<->surrogate contract
-// Testing: structural — compiled by BOTH x64 client and x86 surrogate, so
+// Testing: structural: compiled by BOTH x64 client and x86 surrogate, so
 //          layout drift is impossible WITHIN a tree. Across trees it fails
 //          loudly: byte-mode pipe reads return the WRITER's struct size.
 //          A changed value in a same-sized struct is caught at OP_OPEN by
@@ -25,7 +25,7 @@
                                               or one PassThruReadVersion string */
 #define ECUIO_SUR_TEXT_FIELDS 3            /* texts in one reply */
 
-/* Request opcodes — append-only, never renumber.
+/* Request opcodes: append-only, never renumber.
  *
  * One request, one response, paired by request_id. The child answers
  * every request with a ecuio_sur_response_t whose status is the

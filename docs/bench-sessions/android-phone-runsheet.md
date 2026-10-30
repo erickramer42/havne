@@ -1,4 +1,4 @@
-# Android phone run sheet — the app on a phone, the VX's WiFi, then Bluetooth
+# Android phone run sheet: the app on a phone, the VX's WiFi, then Bluetooth
 
 **Date:** <date>  **Phone:** Android <version> (12 or later)
 **Adapter:** OBDX Pro VX over WiFi, no vehicle (Phases 1–6); the
@@ -52,7 +52,7 @@ private storage: Phase 5 copies it off with `adb`, if a computer with
       leave, then powered from a USB charger, nothing holding its USB
       port (BENCH prep #20: one link at a time)
 
-## Phase 1 — install and launch
+## Phase 1: install and launch
 
 **Action:** copy the APK to the phone and open it. Allow installs from
 the app that opens it when asked; Play Protect may warn about an
@@ -70,7 +70,7 @@ unknown developer ("Install anyway").
       light gray) around the app, and where; the navigation bar's
       buttons should be light on dark
 
-## Phase 2 — mock
+## Phase 2: mock
 
 **Action:** Settings → **Display** → **Developer mode** on, then
 **Adapter** → **Mock**, then
@@ -89,7 +89,7 @@ unknown developer ("Install anyway").
 - [ ] Turn the screen off for about 30 s and back on: the same check
 - [ ] Disconnect: "Disconnected:" at once
 
-## Phase 3 — a recording, then its replay
+## Phase 3: a recording, then its replay
 
 **Action:** Settings → **Recording** → **Record sessions** on, connect `mock://demo`
 for about 20 s, disconnect.
@@ -103,7 +103,7 @@ for about 20 s, disconnect.
       values play back
 - [ ] **Record sessions** off again
 
-## Phase 4 — the VX's WiFi
+## Phase 4: the VX's WiFi
 
 **Action:** turn the phone's mobile data off. Join the VX's network
 ("OBDX Pro VX <MAC>"); when Android says it has no internet, choose
@@ -123,7 +123,7 @@ to stay connected. In Havne, Settings: `elm327://192.168.4.1:23?profile=raw&poll
       within 2 s": Android may send the socket over mobile data, which
       can't reach 192.168.4.1. Disconnect
 
-## Phase 5 — the files (with `adb`; optional)
+## Phase 5: the files (with `adb`; optional)
 
 **Action:** the phone in developer mode with USB debugging on, on a
 computer with `adb`. The package is `io.github.erickramer42.havne`
@@ -140,7 +140,7 @@ which isn't part of the name).
 - [ ] If Phase 3 couldn't find its recording: `find` it here, and
       record the full path
 
-## Phase 6 — Bluetooth, no adapter
+## Phase 6: Bluetooth, no adapter
 
 **Action:** Bluetooth on. Settings: open **Adapter**.
 
@@ -169,7 +169,7 @@ which isn't part of the name).
       devices: Don't allow. Back in Havne, **Refresh**: the line says
       to allow it. Allow it again
 
-## Phase 7 — the MX+ on the car (ADR-0028 step 4)
+## Phase 7: the MX+ on the car (ADR-0028 step 4)
 
 The MX+ over the phone's classic Bluetooth, held against the same
 adapter through the laptop
@@ -190,7 +190,7 @@ copies.
       first (uninstalling deletes them)
 - [ ] Havne: Settings, Recording, **Record sessions** on
 
-**7a — pair, ignition off.**
+**7a: pair, ignition off.**
 
 **Action:** plug in the MX+. Pair it in Android's Bluetooth settings
 (Pair new device; press the MX+'s button when asked). In Havne,
@@ -205,7 +205,7 @@ for about 30 s.
 - [ ] Quiet with the ignition off, as through the laptop ("Link
       quiet"). Disconnect
 
-**7b — ignition on, the start, idling.**
+**7b: ignition on, the start, idling.**
 
 **Action:** ignition on, engine off. Connect the MX+ row and keep this
 connect through the start and a minute of idling.
@@ -224,7 +224,7 @@ connect through the start and a minute of idling.
       Connect for about 15 s, Disconnect. The replies a second come
       from the recording (~32/s through the laptop)
 
-**7c — a Bluetooth drop, idling.**
+**7c: a Bluetooth drop, idling.**
 
 **Action:** connect the MX+ row (without `?poll=`) and wait for
 values. Turn the phone's Bluetooth off from the quick settings for
@@ -253,7 +253,7 @@ adapter session is up. 8a at
 the desk, 8b on the car. The phone's log (`adb logcat`) and the
 recordings are the evidence, so a computer with `adb` afterwards.
 
-**8a — at the desk, `mock://`.**
+**8a: at the desk, `mock://`.**
 
 **Action:** Settings, Recording, **Record sessions** on; Display,
 **Developer mode** on. Connect `mock://demo`, wait for values.
@@ -281,13 +281,13 @@ recordings are the evidence, so a computer with `adb` afterwards.
       events.log's two columns (the clock, and "+seconds") agree
       within a second across the screen-off
 
-**8b — on the car, the MX+, engine idling.** Phase 7's pre-flight and
+**8b: on the car, the MX+, engine idling.** Phase 7's pre-flight and
 safety hold.
 
 **Action:** connect the MX+ row, **Record sessions** on.
 
 - [ ] At the first adapter connect Android asks to allow
-      notifications: allow it. A notification "Havne — Connected to
+      notifications: allow it. A notification, "Havne" over "Connected to
       …" with "· recording", for as long as the session is up, and
       the gauge icon in the status bar, with no sound or vibration
 - [ ] The notification and the header name the adapter as

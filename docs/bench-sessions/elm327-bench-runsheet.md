@@ -1,4 +1,4 @@
-# ELM327 BENCH run sheet — the VX in ELM mode, no vehicle
+# ELM327 BENCH run sheet: the VX in ELM mode, no vehicle
 
 **Date:** <date>  **Adapter:** OBDX Pro VX (USB), as an ELM327
 **Machine:** <the dev machine, or the laptop that goes to the car>
@@ -40,7 +40,7 @@ activity log (`events.log` when recording) has the link's states.
 - [ ] Launch Havne and tick **Record sessions**, so the wire logs
       hold the requests too
 
-## Phase 1 — the port
+## Phase 1: the port
 
 **Action:** plug the VX in by USB. In Device Manager, open "Ports (COM
 & LPT)"; in Settings, press **Refresh**.
@@ -59,7 +59,7 @@ activity log (`events.log` when recording) has the link's states.
       unknown device, or one under another class) and stop: nothing
       below can run
 
-## Phase 2 — connect with no bus
+## Phase 2: connect with no bus
 
 **Action:** click the port's row (the field reads `elm327://COMn`),
 Connect, and leave it about a minute.
@@ -86,7 +86,7 @@ A refused connect names the command and the answer ("the adapter on
 COMn answered ATxx with '…', not OK"): copy it verbatim and stop. That
 answer is the finding (#12).
 
-## Phase 3 — the cable pulled
+## Phase 3: the cable pulled
 
 **Action:** connect again, wait for "Link quiet", unplug
 the USB cable for about 10 s, then plug it back in.
@@ -100,7 +100,7 @@ the USB cable for about 10 s, then plug it back in.
       that
 - [ ] Disconnect
 
-## Phase 4 — the other CAN rate, and the J2534 path after
+## Phase 4: the other CAN rate, and the J2534 path after
 
 - [ ] `elm327://COMn?baud=250000`, about 15 s: connects (protocol 8)
       and goes quiet as in Phase 2. Disconnect

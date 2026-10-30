@@ -1,8 +1,8 @@
 // File/layer: core/src/session.h | internal, C++17, Qt-free; the session
 //             struct behind the opaque ecuio_session_t
-// Testing: UNIT — CoreTest (sessions, callbacks, the decoded values and
+// Testing: UNIT: CoreTest (sessions, callbacks, the decoded values and
 //          their buffers, the info, support and identity copies);
-//          HARNESS — the J2534 suites, whose worker writes support[] and
+//          HARNESS: the J2534 suites, whose worker writes support[] and
 //          identity[]
 
 #ifndef ECUIO_SESSION_H

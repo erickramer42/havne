@@ -83,7 +83,7 @@ Resolution order:
    `Release/` preferred over any other config.
 3. Neither found (no `build-win32` tree, non-standard layout): a
    STATUS message, nothing copied. The app then resolves the
-   surrogate through `ECUIO_SURROGATE_EXE` at runtime — see the
+   surrogate through `ECUIO_SURROGATE_EXE` at runtime: see the
    cross-arch run below.
 
 Build order matters: build the Win32 tree **first**, then configure
@@ -109,7 +109,7 @@ cmake -B build -U HAVNE_SURROGATE_SOURCE
 ```
 
 Blowing away `CMakeCache.txt` is the blunt equivalent and equally
-safe — regeneration is cheap.
+safe: regeneration is cheap.
 
 **Full app, Linux and macOS.** Single-config generators drop the
 `Release/` path segment. On macOS the app is a bundle:
@@ -274,8 +274,8 @@ learned"):
 
 | Target | Exports | Pins |
 |---|---|---|
-| `fake_j2534` | `PassThruIoctl` (spec spelling, directly) | Primary resolution — the conformant-vendor case; exercised by every default test |
-| `fake_j2534_legacy` | `PassThruIoCtl` (legacy alias only) | The fallback resolver — what some real vendors still ship |
+| `fake_j2534` | `PassThruIoctl` (spec spelling, directly) | Primary resolution: the conformant-vendor case; exercised by every default test |
+| `fake_j2534_legacy` | `PassThruIoCtl` (legacy alias only) | The fallback resolver: what some real vendors still ship |
 
 Do not add `__declspec(dllexport)` back to the fake's vendor
 functions: the `.def` files own the export surface, and a stray
@@ -309,12 +309,12 @@ configured. Off Windows, or without `build-win32`, the Win32 and
 cross-arch steps are left out.
 
 For any change touching the surrogate, the fakes, or the J2534
-client/transport — in this order:
+client/transport: in this order:
 
 1. **Rebuild both trees, Win32 first.** The cross-arch run consumes
    `build-win32` artifacts directly, and the app build copies
    whatever surrogate `build-win32` holds at that moment.
-2. **Full suite, bare shell** (no env vars — the cross-arch case
+2. **Full suite, bare shell** (no env vars: the cross-arch case
    must *skip*, visibly, never silently fall back).
 3. **Cross-arch run** with the variables exported (below).
 4. **Session-log check** when tracing changed. The log is
@@ -387,7 +387,7 @@ build/tests/qmltest/Release/test_qml.exe -input tests/qml/tst_linkhealth.qml Lin
 
 **J2534 suites carry a 30 s per-test timeout.** The slowest
 legitimate case (the cross-arch timeout-recovery test, ~3.5 s) has
-near-10x headroom, so a slow CI machine cannot false-alarm — but a
+near-10x headroom, so a slow CI machine cannot false-alarm, but a
 hang (the IPC deadlock class caught 2026-10-17) fails bounded as
 `Failed (Timeout)` instead of wedging the runner.
 
@@ -431,7 +431,7 @@ and the run looks green. Read the skip count, or use
 2026-10-16 bench pre-flight, both operator error):
 
 - A var set to the **wrong value** points the test at the wrong
-  arch or a nonexistent path — the failure looks like a routing
+  arch or a nonexistent path: the failure looks like a routing
   regression (the x64 surrogate where the x86 one belongs) or a fast
   `ECUIO_ERR_LOAD_FAILED` or `ECUIO_ERR_SURROGATE_FAILED`. Echo the
   variable before diagnosing code.
@@ -586,7 +586,7 @@ build-core/cli/havne-cli`).
 | Cross-arch test fails with odd values, but same-arch passes | A stale `build-win32` fake: the fakes carry no build fingerprint. Rebuild both trees. |
 | In the app, an x86 adapter (for example the OBDX Pro VX) fails with "surrogate process failed: no surrogate (ecuio-j2534-surrogate.exe)", and `%TEMP%\ecuio-surrogate.log` holds an `open: no surrogate exe` line | No surrogate next to `havne.exe`, so the child never launched. The x64 tree was configured before `build-win32` had a surrogate. Build the Win32 tree, re-run `cmake -B build`, check for `Deploying Win32 J2534 surrogate` in the output, and rebuild. Setting `ECUIO_SURROGATE_EXE` also works. |
 | The cross-arch routing case skips although the variables were exported | They're named something else, for example `HAVNE_SURROGATE_EXE`: nothing reads that. The names are `ECUIO_SURROGATE_EXE` and `ECUIO_FAKE_DLL` (Cross-arch run, above). The rest of the run passes on the x64 surrogate, so the skip is the only sign. |
-| Cross-arch test fails expecting an x86 DLL, or the session log names `ecuio-j2534-surrogate-x64.exe` | `ECUIO_FAKE_DLL` points at an x64 fake (or the wrong tree). Check the value, not the code — unset skips, wrong-value fails. |
+| Cross-arch test fails expecting an x86 DLL, or the session log names `ecuio-j2534-surrogate-x64.exe` | `ECUIO_FAKE_DLL` points at an x64 fake (or the wrong tree). Check the value, not the code: unset skips, wrong-value fails. |
 | In the app or a test, an x64 DLL fails with "no surrogate (ecuio-j2534-surrogate-x64.exe): none next to the app" | The x64 surrogate wasn't copied: the app and each J2534 test copy it from their own tree POST_BUILD (`app_deploy_surrogate` in `tests/CMakeLists.txt`). Build the target again. |
 | J2534 test fails as `Failed (Timeout)` | A genuine hang, bounded by the 30 s ceiling. Attach to the surviving test and surrogate processes and check thread wait states before killing; the child log is `%TEMP%\ecuio-surrogate.log`, and earlier spawns' logs are kept beside it under dated names. |
 | Linker warning LNK4070 on a fake DLL | The `.def` file's `LIBRARY` directive disagrees with the output filename. Make them match. |

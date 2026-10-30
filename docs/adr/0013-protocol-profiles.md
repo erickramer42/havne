@@ -1,4 +1,4 @@
-# ADR-0013: Protocol profiles — selection by URI, capability by probe
+# ADR-0013: Protocol profiles, selection by URI, capability by probe
 
 - **Status:** Accepted. [ADR-0015](0015-request-engine.md) supersedes
   §1's placement of request correlation in the profile and §5's
@@ -24,7 +24,7 @@ Additionally, the request loop's placement is wrong: it lives in the J2534 trans
    - `mock://` → profile `mock` (the existing mock signal set).
    - `j2534://` → profile `obd2` by default.
    - `?profile=<name>` overrides the default. `?profile=raw` selects the null profile (no requests, no signal set; Log page only) and is today's behavior promoted to a named thing.
-   - Selection rules join the existing strict grammar: lowercase, unknown names rejected at `ecuio_session_create` before any DLL loads (`ECUIO_ERR_NO_TRANSPORT`), last occurrence wins. The URI must fully determine session behavior — every bench sheet records a URI, and it must be complete provenance.
+   - Selection rules join the existing strict grammar: lowercase, unknown names rejected at `ecuio_session_create` before any DLL loads (`ECUIO_ERR_NO_TRANSPORT`), last occurrence wins. The URI must fully determine session behavior; every bench sheet records a URI, and it must be complete provenance.
    - Profiles are string-keyed in a registry, not an ABI enum, so v0.5.0 out-of-tree manufacturer plugins register names without ABI churn.
 
 3. **Probing is a phase inside a profile, never a selection mechanism.** The `obd2` profile gains (in its v2) a post-connect probe: the PID 0x00→0x20→0x40… bitmask chain, driven through the profile's own request/response callbacks. Probe failure degrades to the static signal set; it never fails the session. Selection is never inferred from what the vehicle says, because the things this project ultimately wants to select (Mazda/Honda UDS) cannot be announced. **What you connect to is a decision; what it supports is a discovery.**
@@ -53,23 +53,23 @@ Additionally, the request loop's placement is wrong: it lives in the J2534 trans
        void (*accept_response)(void* ctx, const ecuio_frame_t* frame);
             /* correlation is the profile's own state machine */
        const ecuio_signal_set_t* (*signal_set)(void* ctx);
-            /* re-query after accept_response — probe results reshape it */
+            /* re-query after accept_response: probe results reshape it */
    } ecuio_profile_ops;
    ```
 
-   Ownership division: core owns threading, filter registration from the channel list, teardown ordering, and transport routing. A buggy profile can mishandle only its own state. This table is, deliberately, the seed of the v0.5.0 plugin API — decide it consciously now so it does not become an accidental ABI later.
+   Ownership division: core owns threading, filter registration from the channel list, teardown ordering, and transport routing. A buggy profile can mishandle only its own state. This table is, deliberately, the seed of the v0.5.0 plugin API; decide it consciously now so it does not become an accidental ABI later.
 
 6. **Profiles ship in this order:**
    - `raw` (immediate; escape hatch for unknown vehicles)
    - `obd2` v1 (static starter set: RPM, speed, coolant, intake temp, load, throttle; multi-PID round-robin scheduler replacing the single-PID loop)
    - `obd2` v2 (bitmap probe phase)
-   - `uds-generic` (Mode-22 DID reads, user-entered DIDs — the research vehicle)
+   - `uds-generic` (Mode-22 DID reads, user-entered DIDs: the research vehicle)
    - `mazda-uds`, `honda-uds` (curated, post-research, v0.5.0 plugin territory)
 
 ## Alternatives considered
 
 - **Auto-detect the profile by probing.** Rejected: only OBD-II can be confirmed by detection, which is already the default; UDS and multi-ECU mappings are not discoverable, so detection buys nothing for the actual targets while creating an ambiguous-silent-failure state (silence is uninterpretable, Known Issue #11) and complicating failure design.
-- **Selection in UI settings instead of the URI.** Rejected: splits configuration across two places and breaks URI-as-complete-provenance — every bench sheet and test fixture records a URI that must fully determine behavior.
+- **Selection in UI settings instead of the URI.** Rejected: splits configuration across two places and breaks URI-as-complete-provenance; every bench sheet and test fixture records a URI that must fully determine behavior.
 - **Compile-time profile enum.** Rejected: forecloses out-of-tree manufacturer profiles, which is the stated v0.5.0 direction.
 - **Request loop stays in the transport, parameterized per protocol.** Rejected: every new protocol profile would fork the transport; the loop is profile data, and moving it is prerequisite for UDS.
 - **Unknown vehicle fails the session.** Rejected: the exploratory-tool worst case; `raw` exists precisely so an unprofiled vehicle always connects and logs.
@@ -78,13 +78,13 @@ Additionally, the request loop's placement is wrong: it lives in the J2534 trans
 
 - The bridge's hardcoded `ecuio_mock_signal_set()` disappears; LiveView renders whatever the active set contains, and Known Issue #21 closes for every profiled transport.
 - ADR-0012's "one PID per session" ends with the `obd2` scheduler; `?poll=` remains as the single-PID convenience and the probe's primitive.
-- Probe quality depends on splitting ReadMsgs timeout from hard error (Known Issue #11) — the probe elevates that issue from nice-to-have to load-bearing.
-- The channel-decl list is the one surface a plugin can request filters through; it must be bounded and validated at registration (plugins are eventually native code selected by name from a folder — opt-in, like all tuner software, but the blast radius is the filter table, not the process).
+- Probe quality depends on splitting ReadMsgs timeout from hard error (Known Issue #11): the probe elevates that issue from nice-to-have to load-bearing.
+- The channel-decl list is the one surface a plugin can request filters through; it must be bounded and validated at registration (plugins are eventually native code selected by name from a folder: opt-in, like all tuner software, but the blast radius is the filter table, not the process).
 - **The pre-2008 fleet needs transport-protocol work below this ADR.**
   Target-era cars split cleanly: 2008+ is CAN (ISO 15765 / UDS) and
   this architecture serves it directly; 1996–2007 is OBD-II over
-  legacy buses — ISO 9141-2/KWP2000 (Mazda NB/late NA, early Mazda
-  3/6, pre-2008 Ford/GM), J1850 VPW (GM), J1850 PWM (Ford) — none of
+  legacy buses: ISO 9141-2/KWP2000 (Mazda NB/late NA, early Mazda
+  3/6, pre-2008 Ford/GM), J1850 VPW (GM), J1850 PWM (Ford): none of
   which this transport connects. Legacy-bus support is its own
   workstream: new `PassThruConnect` protocol support, and the
   K-line init ioctls (currently deliberately refused, Known Issue
@@ -97,7 +97,7 @@ Additionally, the request loop's placement is wrong: it lives in the J2534 trans
   transport feature, not a profile-selection mechanism.** Real scan
   tools auto-detect which of the five OBD-II flavors a 1996–2007 car
   speaks (`?proto=auto`-style). That detection is transport-layer
-  negotiation and is legitimately detectable — unlike profiles,
+  negotiation and is legitimately detectable: unlike profiles,
   which this ADR keeps statically selected (§3). The two kinds of
   probing must never be conflated: the vehicle answers an
   OBD-II-flavor query; it cannot announce which profile to use.
@@ -105,12 +105,12 @@ Additionally, the request loop's placement is wrong: it lives in the J2534 trans
 
 ---
 
-## Appendix — slice 2 implementation notes (2026-10-18)
+## Appendix: slice 2 implementation notes (2026-10-18)
 
 **Status:** implemented; HARNESS-verified
 Extends §6's `obd2` v1 bullet with the concrete mechanisms slice 2
 chose, and records what was learned during implementation. The
-decision text above is unchanged — this appendix is the
+decision text above is unchanged: this appendix is the
 implementation record.
 
 > **Superseded details (corrected 2026-10-19: adapter-owned ISO-TP
@@ -142,7 +142,7 @@ matching the mux key.
 The derivation contract binding definitions to the scheduler: a
 definition drives scheduling iff it carries `mux_offset == 1`,
 `mux_length == 2`, and `mux_key == 0x4100u | PID`. The PID to
-request is the key's LOW byte — the high byte `0x41` is the Mode-01
+request is the key's LOW byte: the high byte `0x41` is the Mode-01
 response echo. Nothing enforces the shape at registration
 (`qttune_profile_register` does not run the validator), so
 `qttune_sched_from_set` checks it at enrollment.
@@ -168,7 +168,7 @@ up empty and the worker runs `?poll=` or passive.
 ### Scheduler constants and cadence
 
 - Fixed capacity: 16 PIDs (`QTTUNE_SCHED_MAX_PIDS`). No heap
-  allocation. Owned exclusively by the transport worker thread —
+  allocation. Owned exclusively by the transport worker thread:
   single-threaded by construction, so no internal synchronization.
 - Rotation: round-robin in first-seen set order. `obd2` v1 defines
   eight PIDs, so the cursor wraps every 8 cycles.
@@ -184,13 +184,13 @@ START:
 1. `qttune_sched_next` yields a PID; build the Mode-01 request
    (12 wire bytes: 4-byte tx ID big-endian, SF PCI `02`, `01`, PID,
    zero padding).
-2. Write the request. A failed send retries next cycle — the loop's
+2. Write the request. A failed send retries next cycle: the loop's
    job is resilience, and persistent failure presents as a silent
    bus, which is the BENCH diagnostic story rather than a
    transport-layer error to synthesize here.
 3. **Drain:** up to `J2534_DRAIN_BUDGET` (10) reads with a short
    20 ms timeout. The first empty read ends the drain. Leftover
-   frames persist into the next cycle's drain — no drops, no
+   frames persist into the next cycle's drain: no drops, no
    head-of-line blocking.
 4. Sleep the cycle remainder against the absolute deadline, so
    accumulated drain cost cannot drift the request cadence.
@@ -203,7 +203,7 @@ raising the old poll-mode receive ceiling (about 10/s, Issue #25) by
 an order of magnitude. The 20 ms read timeout is deliberately short:
 on a real device `ReadMsgs` blocks up to the timeout when the queue
 is empty, so draining with the legacy 100 ms timeout would spend the
-whole cycle waiting for silence. The first EMPTY read ends the drain —
+whole cycle waiting for silence. The first EMPTY read ends the drain:
 the budget exists for bursts, not for silence.
 
 **Whether roughly 100 msg/s clears a busy real bus is a BENCH
@@ -217,7 +217,7 @@ Rationale, the same one the legacy `?poll=` rule rests on: per
 J2534-1 v4.04 an ISO 15765 channel receives nothing without a
 registered filter, so a scheduler would write requests against
 guaranteed silence forever. A guaranteed-silent session is a delayed
-failure, not a feature — so it fails fast.
+failure, not a feature, so it fails fast.
 
 Enforcement point: `j2534_start` checks `sched_mode && rx_id == 0`
 and returns `QT_ERR_NO_TRANSPORT` BEFORE connecting the channel. It
@@ -228,7 +228,7 @@ this check then becomes the backstop for a user override that did
 not break it.
 
 Failure mode: a refused start leaves the channel closed, so session
-teardown has nothing to disconnect — clean failure, no leaked
+teardown has nothing to disconnect: clean failure, no leaked
 resources.
 
 ### Default flip consequence
@@ -239,7 +239,7 @@ either `?profile=raw` (log-only mode) or `?filter=0x7E8` (accept the
 scheduler with an explicit channel). Existing harness tests were
 updated with `?profile=raw` opt-outs to pin their legacy semantics;
 the flip itself is pinned by the `DefaultProfileIsObd2` and
-`BareJ2534UriRequiresFilterUnderObd2Default`(replaced in slice 3 — see below) tests.
+`BareJ2534UriRequiresFilterUnderObd2Default`(replaced in slice 3: see below) tests.
 
 ### PID table (obd2 v1, set order)
 
@@ -255,7 +255,7 @@ the flip itself is pinned by the `DefaultProfileIsObd2` and
 | 7 | 0x42 | Battery Voltage | 2 | BE, `0.001` |
 
 Scale formulas are the standard SAE J1979 Mode-01 conversions. The
-set enumerates SUPPORTED PIDs — what is absent is neither requested
+set enumerates SUPPORTED PIDs: what is absent is neither requested
 nor decoded. **Multi-frame responses are out of scope for v1**:
 definitions assume single-frame response shapes. PIDs 0x0C and 0x42
 are 2-byte big-endian; all others are single-byte.
@@ -279,7 +279,7 @@ are 2-byte big-endian; all others are single-byte.
 
 - **Big-endian support:** `QTTUNE_SIGNAL_FLAG_BIG_ENDIAN` (bit 0)
   activates byte-reversed extraction. Non-byte-aligned BE fields are
-  rejected at validation time — a configuration error, not a runtime
+  rejected at validation time: a configuration error, not a runtime
   condition.
 - **Mux dispatch:** `qttune_decode_signal` and
   `qttune_def_matches_frame` gate muxed definitions on a mux-key match
@@ -307,38 +307,38 @@ are 2-byte big-endian; all others are single-byte.
 The fake DLL recognizes Mode-01 request shapes (`[02][01][PID]`) and
 responds with proper OBD-II grammar (`[04][41][PID][data]`) carrying
 deterministic canned values (RPM raw 0x1F40 gives 2000 RPM at 0.25
-scale — the one pinned numeric value). Legacy non-Mode-01 traffic
+scale: the one pinned numeric value). Legacy non-Mode-01 traffic
 keeps the echo path. Note: the fake's uniform PCI byte 0x04 is one
 byte fatter than a strict ECU would send for single-byte PIDs
-(0x03) — decoder-irrelevant, to be normalized when multi-frame work
+(0x03): decoder-irrelevant, to be normalized when multi-frame work
 forces precision.
 
 ### Test coverage added
 
-- **UNIT** (headless, all platforms): `test_obd2` — set structure,
+- **UNIT** (headless, all platforms): `test_obd2`, set structure,
   decoder round-trips against wire bytes, and scheduler
   rotation/wrap/dedupe/capacity logic.
-- **HARNESS** (Win32, fake DLL): `test_j2534_stream` — scheduler
+- **HARNESS** (Win32, fake DLL): `test_j2534_stream`, scheduler
   rotation order and wrap read from recorded writes, coupling
   rejection at start (both explicit and via the default flip), and
   drain-backlog delivery beyond the per-cycle budget.
 
 Tier discipline: UNIT proves the logic, HARNESS proves the cadence
 and integration, BENCH proves real-device throughput. The drain
-budget mandates HARNESS minimum — no unit test can verify that a
+budget mandates HARNESS minimum: no unit test can verify that a
 20 ms timeout plus a 10-read budget actually clears a busy bus within
 the cycle.
 
-## Appendix — slice 3 implementation notes (channel declarations) (2026-10-19)
+## Appendix: slice 3 implementation notes (channel declarations) (2026-10-19)
 
 **Status:** implemented; HARNESS-verified
 Implements §4 for the `obd2` v1 set. The decision text above is
-unchanged — this appendix is the implementation record.
+unchanged: this appendix is the implementation record.
 
 ### Shipped ABI shape
 
 `QttuneChannelDecl` (signals.h) is `{ uint32_t rx_id; uint32_t tx_id; }`
-— the §4 sketch used `unsigned long`; the shipped POD uses
+(the §4 sketch used `unsigned long`); the shipped POD uses
 fixed-width types per the C-ABI rule (append-only, POD-only growth).
 `QttuneSignalSet` gains trailing `channel_count`/`channels` and the
 obd2 set bumps its version to 2. Capacity is `QTTUNE_MAX_CHANNELS`
@@ -354,7 +354,7 @@ out-of-CAN-range ids (-12), duplicate rx (-13).
 
 The channel table is derived at **attach**, before the device opens.
 Priority: an explicit `?filter=` wins outright (single-channel
-shorthand — the pre-channel-declaration semantics, preserved for
+shorthand: the pre-channel-declaration semantics, preserved for
 hand-built URIs);
 otherwise the profile's declared channels fill the table, with a
 lone `?txid=` rewriting every derived tx. A lone `?txid=` with no
@@ -366,7 +366,7 @@ defensively; the validator is the enforcement point.
 ### Coupling-rule relocation
 
 Slice 2 enforced scheduled-PIDs-need-a-filter at `j2534_start`, after
-`PassThruOpen` — the ORDERING NOTE in its "Generalized coupling
+`PassThruOpen`: the ORDERING NOTE in its "Generalized coupling
 rule" section. Slice 3 resolves channels at attach and demotes that
 check to a backstop firing before any hardware is touched, reachable
 only by a future set author declaring scheduler-driving defs
@@ -405,7 +405,7 @@ that pinned the rejection at start were replaced:
 rotation) and `TxidOverrideRewritesDerivedTransmitTarget` (derived
 rx kept, tx rewritten to the broadcast pattern).
 
-## Appendix — failure codes (2026-10-22)
+## Appendix: failure codes (2026-10-22)
 
 An unknown profile name returns `ECUIO_ERR_UNKNOWN_PROFILE`, and a
 malformed `?profile=` value `ECUIO_ERR_BAD_URI`, where both returned
@@ -413,7 +413,7 @@ malformed `?profile=` value `ECUIO_ERR_BAD_URI`, where both returned
 Both still fail before any DLL loads. `ecuio_profile_lookup` keeps
 returning `ECUIO_ERR_NO_TRANSPORT` for an unknown name.
 
-## Appendix — raw listens to the engine ECU (2026-10-26)
+## Appendix: raw listens to the engine ECU (2026-10-26)
 
 A raw session on an adapter had no channel unless its URI named one
 with `?filter=`, and an ISO 15765 channel with no filter receives

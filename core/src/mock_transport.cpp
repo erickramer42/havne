@@ -1,5 +1,5 @@
 // File/layer: core/src/mock_transport.cpp | C++17, Qt-free, CI-validated headless build
-// Testing: UNIT — CoreTest.MockFramesDecodeAgainstMockSignalSet decodes
+// Testing: UNIT: CoreTest.MockFramesDecodeAgainstMockSignalSet decodes
 //          real worker frames against the mock set; the drive cycle
 //          itself is tested deterministically (CoreTest.MockDriveCycle*);
 //          CoreTest.MockAnswersTheSessionsDids decodes its DID replies
@@ -39,7 +39,7 @@ struct ecuio_mock_transport {
      * Written once before the worker spawns and read-only after, so
      * thread creation publishes it; no further synchronization. */
     host_clock::time_point epoch{};
-    ecuio_mock::DriveCycle sim;    /* owned by worker — only touched on worker thread */
+    ecuio_mock::DriveCycle sim;    /* owned by worker: only touched on worker thread */
 };
 
 namespace {
@@ -158,7 +158,7 @@ ecuio_status_t mock_start(ecuio_session_t* session, void* impl)
         return ECUIO_ERR_NO_TRANSPORT;
     }
     if (t->worker.joinable()) {
-        return ECUIO_OK; /* already running — idempotent */
+        return ECUIO_OK; /* already running: idempotent */
     }
     try {
         t->worker = std::thread(mock_worker, t);
@@ -182,7 +182,7 @@ void mock_detach(ecuio_session_t* session, void* impl)
     delete t;
 }
 
-/* Static ops table — one per transport implementation, immutable. */
+/* Static ops table: one per transport implementation, immutable. */
 const ecuio_transport_ops_t kMockTransportOps = {
     mock_start,
     mock_detach
@@ -212,7 +212,7 @@ ecuio_status_t ecuio_mock_transport_attach(ecuio_session_t* session,
         try {
             session->transport = new ecuio_transport_t{&kMockTransportOps, impl};
         } catch (...) {
-            delete impl;   /* wrapper alloc failed — no leak */
+            delete impl;   /* wrapper alloc failed: no leak */
             return ECUIO_ERR_OUT_OF_MEMORY;
         }
         impl->session = session;  /* for callback dispatch */
@@ -221,7 +221,7 @@ ecuio_status_t ecuio_mock_transport_attach(ecuio_session_t* session,
         return ECUIO_ERR_OUT_OF_MEMORY;
     }
     session->info.backend = ECUIO_BACKEND_MOCK;
-    /* NOTE: worker thread NOT started here — explicit start required.
+    /* NOTE: worker thread NOT started here; explicit start required.
      * Keeps registration-only sessions single-threaded for tests. */
     return ECUIO_OK;
 }

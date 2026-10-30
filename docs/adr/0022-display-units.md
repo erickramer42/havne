@@ -1,4 +1,4 @@
-# ADR-0022: Display units — metric or imperial, converted in core at the edge of the UI
+# ADR-0022: Display units, metric or imperial, converted in core at the edge of the UI
 
 - **Status:** Accepted.
 - **Date:** 2026-10-24. Implemented with this record.
@@ -110,7 +110,7 @@ corrupt stored value leaves the default.
 - `ecuio_display_value_t` is ABI: 32 bytes, pinned by static asserts
   and `test_c_abi.c`, with six reserved bytes.
 
-## Appendix — the default system (2026-10-25)
+## Appendix: the default system (2026-10-25)
 
 The app starts in imperial until the Units row is used: `Main.qml`'s
 `Settings` default for `unitSystem` is imperial, and a stored choice

@@ -1,7 +1,7 @@
 // File/layer: core/src/socketcan_interfaces.cpp | C++17, Qt-free; netlink on
 //             Linux, an empty list elsewhere
-// Testing: UNIT — SocketCanTest.Interfaces* (the arguments' contract on
-//          every platform); HARNESS — VcanTest.InterfacesListVcan0 (Linux);
+// Testing: UNIT: SocketCanTest.Interfaces* (the arguments' contract on
+//          every platform); HARNESS: VcanTest.InterfacesListVcan0 (Linux);
 //          the attributes' parsing is socketcan_wire.h's, UNIT
 //
 // CAN-interface discovery (ecuio/socketcan.h, ADR-0032 §7) and the link

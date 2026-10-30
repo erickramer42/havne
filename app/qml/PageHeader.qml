@@ -1,5 +1,5 @@
 // File/layer: app/qml/PageHeader.qml | Qt6 Quick, UI layer
-// Testing: manual smoke — Dashboard, Live, Log and Settings open with
+// Testing: manual smoke: Dashboard, Live, Log and Settings open with
 //          it, the titles aligned at Theme.pageMargin
 
 import QtQuick

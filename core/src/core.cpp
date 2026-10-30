@@ -1,12 +1,12 @@
 // File/layer: core/src/core.cpp | C++17, Qt-free, CI-validated headless build
-// Testing: UNIT — CoreTest: session create (routing, the query split,
+// Testing: UNIT: CoreTest: session create (routing, the query split,
 //          profiles and every refusal), start, close and destroy,
 //          callbacks and their snapshot dispatch (every callback at any
 //          list length, the list as it stood, no allocation up to
 //          four), the decoded values (CoreTest.Values*: the batch
 //          against direct decodes, a text slot each, the frame
 //          callbacks first), the error strings;
-//          HARNESS — the J2534 suites and Elm327SessionTest through
+//          HARNESS: the J2534 suites and Elm327SessionTest through
 //          create; test_c_abi links the public functions; the USDT
 //          probes: ProbeNotesTest (their notes) and CI's bpftrace step
 
@@ -40,7 +40,7 @@ namespace {
 
     /* The LAST `profile` value of a split query. Tri-state: a
      * present-but-malformed value (empty or over-length) is INVALID and
-     * fails session_create — it must NEVER silently downgrade to the
+     * fails session_create: it must NEVER silently downgrade to the
      * scheme default, which would hand a typo'd ?profile=raw a decoding
      * session or vice versa. Any malformed occurrence fails; last-wins
      * applies only across valid values. out_val holds
@@ -595,7 +595,7 @@ ecuio_status_t ecuio_session_create(
     }
 
     /* Set before attach: the requesting transports derive their
-     * requests and channels from it during attach. Single writer — attach
+     * requests and channels from it during attach. Single writer: attach
      * and the worker both run after this store. */
     s->active_signal_set = profile_set;
 

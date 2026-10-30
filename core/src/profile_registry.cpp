@@ -1,5 +1,5 @@
 // File/layer: core/src/profile_registry.cpp | C++17, Qt-free
-// Testing: UNIT — lookup semantics (null set is a success), unknown
+// Testing: UNIT: lookup semantics (null set is a success), unknown
 //          names fail, register overwrites, registration validates,
 //          reports the validator's result, refuses a set with more
 //          requests than the engine's table holds, protects the
@@ -31,8 +31,8 @@ Registry& registry()
 {
     static Registry r = {
         {"mock", ecuio_mock_signal_set()},
-        {"raw",  nullptr},   /* null profile — Log page only */
-        /* ADR-0013: the OBD-II v1 set — mux-gated decode, plus the
+        {"raw",  nullptr},   /* null profile: Log page only */
+        /* ADR-0013: the OBD-II v1 set, mux-gated decode, plus the
          * requests and channels the j2534 transport takes from it at
          * attach. */
         {"obd2", ecuio_obd2_signal_set()},
@@ -169,7 +169,7 @@ ecuio_status_t ecuio_profile_lookup(const char* name,
         if (it == registry().end()) {
             return ECUIO_ERR_UNKNOWN_PROFILE;
         }
-        *out_set = it->second;   /* may be NULL — that IS "raw" */
+        *out_set = it->second;   /* may be NULL: that IS "raw" */
         return ECUIO_OK;
     } catch (...) {
         return ECUIO_ERR_OUT_OF_MEMORY;

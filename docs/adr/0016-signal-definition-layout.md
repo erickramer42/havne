@@ -1,4 +1,4 @@
-# ADR-0016: Signal definition layout — value kind, byte order, layout version
+# ADR-0016: Signal definition layout, value kind, byte order, layout version
 
 - **Status:** Accepted. The layout shipped with its tests before the
   v0.3.0 tag, and the list of changes that ride with it is frozen;
@@ -306,7 +306,7 @@ table catches that.
   fix is additive. The 16-bit lengths let the decoder read a longer
   buffer once one is delivered.
 
-## Appendix — the read path keeps whole messages (2026-10-23)
+## Appendix: the read path keeps whole messages (2026-10-23)
 
 The J2534 read paths deliver a message whole, up to the frame's
 `ECUIO_FRAME_DATA_MAX` ([ADR-0006](0006-frame-abi-v0.3.md), appendix),
@@ -315,7 +315,7 @@ a mux key past a 64-byte payload, is retired and never reused: every
 key a one-byte `mux_offset` can place fits the frame, and decode still
 refuses one past the payload it's given.
 
-## Appendix — text kinds (2026-10-23)
+## Appendix: text kinds (2026-10-23)
 
 `ECUIO_VALUE_TEXT` (3), reserved above, has its decoder, and
 `ECUIO_VALUE_HEX` (4) is appended beside it: both read a byte field

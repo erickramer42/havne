@@ -1,4 +1,4 @@
-# ADR-0018: Connect failures say why — status codes and a thread-local detail
+# ADR-0018: Connect failures say why, status codes and a thread-local detail
 
 - **Status:** Accepted.
 - **Date:** 2026-10-22. Implemented with this record.
@@ -112,7 +112,7 @@ Settings error line and the activity log's "Connect failed:" line.
   connect or a filter on request (`ECUIO_FAKE_OPEN_STATUS`,
   `ECUIO_FAKE_CONNECT_STATUS`, `ECUIO_FAKE_FILTER_STATUS`).
 
-## Appendix — the helpers below the connect path (2026-10-23)
+## Appendix: the helpers below the connect path (2026-10-23)
 
 The same codes now cover the J2534 helpers the connect path doesn't
 reach, on both backends (`internal.h`, and the surrogate client in
@@ -142,7 +142,7 @@ connect path's. The surrogate client's functions are in a public
 header, so a direct caller of them sees the new codes; the loader and
 the tests are the only ones.
 
-## Appendix — the two public functions (2026-10-23)
+## Appendix: the two public functions (2026-10-23)
 
 `ecuio_profile_lookup` answers an unknown name with
 `ECUIO_ERR_UNKNOWN_PROFILE`, the code `ecuio_session_create` gives
@@ -153,7 +153,7 @@ past the frame's `data` with `ECUIO_ERR_INVALID_ARGUMENT` in place of
 `ECUIO_ERR_NOT_IMPLEMENTED`, since send isn't built. The bridge
 reaches neither.
 
-## Appendix — the status in hex (2026-10-25)
+## Appendix: the status in hex (2026-10-25)
 
 A vendor status is printed in hex as well as decimal, before its name:
 `PassThruOpen returned status 34 (0x22, vendor-specific): <vendor text>`.
@@ -163,7 +163,7 @@ converter (the VX answers 34, 0x22, when no adapter is attached). The
 example in section 2 shows the earlier form. Pinned by
 `CoreTest.VendorDetailIsOneLine` and `J2534ConnectTest`.
 
-## Appendix — `LOAD_FAILED`'s words (2026-10-26)
+## Appendix: `LOAD_FAILED`'s words (2026-10-26)
 
 `ecuio_status_string(ECUIO_ERR_LOAD_FAILED)` reads "couldn't load what
 the URI names". The code covers a replay's recording as well as an

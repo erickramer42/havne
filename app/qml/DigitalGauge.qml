@@ -1,5 +1,5 @@
 // File/layer: app/qml/DigitalGauge.qml | Qt6 Quick + Shapes, UI layer
-// Testing: manual smoke — DashboardPage under mock://demo; sparkline
+// Testing: manual smoke: DashboardPage under mock://demo; sparkline
 //          scrolls at 10 Hz, flat-line guard holds at idle; "not in
 //          profile" note for signals the active set lacks
 

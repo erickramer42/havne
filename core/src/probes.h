@@ -1,6 +1,6 @@
 // File/layer: core/src/probes.h | C++17, Qt-free, header-only
-// Testing: UNIT — ProbeNotesTest (the probes in the ELF notes, Linux with
-//          <sys/sdt.h>); HARNESS — CI's linux-build bpftrace step (each
+// Testing: UNIT: ProbeNotesTest (the probes in the ELF notes, Linux with
+//          <sys/sdt.h>); HARNESS: CI's linux-build bpftrace step (each
 //          probe fires, on a havne-cli mock:// stream)
 //
 // USDT probes in core (ADR-0034 §4): named points a tracer (bpftrace,

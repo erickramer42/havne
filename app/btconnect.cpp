@@ -1,5 +1,5 @@
 // File/layer: app/btconnect.cpp | C++17, app layer, no Qt
-// Testing: UNIT — BridgeTest.BtConnect* (test_bridge)
+// Testing: UNIT: BridgeTest.BtConnect* (test_bridge)
 
 #include "btconnect.h"
 

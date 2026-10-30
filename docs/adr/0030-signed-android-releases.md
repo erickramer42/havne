@@ -1,4 +1,4 @@
-# ADR-0030: Signed Android releases — one release key, offline and in a protected environment, its certificate pinned in the repository
+# ADR-0030: Signed Android releases, one release key, offline and in a protected environment, its certificate pinned in the repository
 
 - **Status:** Accepted.
 - **Date:** 2026-10-29.

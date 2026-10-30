@@ -1,5 +1,5 @@
 // File/layer: app/qml/DashboardPage.qml | Qt6 Quick, UI layer
-// Testing: manual smoke — mock://demo drives every gauge; resize across
+// Testing: manual smoke: mock://demo drives every gauge; resize across
 //          760 px content width (4 ↔ 2 grid columns) and 600 px (compact
 //          gaps), and to 1280 × 650 (the wide arrangement fits without
 //          scrolling); gauges sweep once per session. test_qml

@@ -17,7 +17,7 @@ extern "C" {
  * Protocol profile registry (ADR-0013).
  *
  * A profile binds a string name to the signal set its sessions use.
- * "raw" is the null profile: registered with a NULL signal set — no
+ * "raw" is the null profile: registered with a NULL signal set, no
  * decode, Log page only. "mock" binds the mock set, "obd2" the OBD-II
  * set. "uds-generic" (ADR-0020) binds an empty set: each of its
  * sessions gets a set of its own, built by ecuio_session_create from
@@ -82,7 +82,7 @@ ecuio_status_t ecuio_profile_lookup(const char* name,
                                     const ecuio_signal_set_t** out_set);
 
 /* The session's active signal set (selected at session_create from
- * the scheme default or ?profile=). NULL means "no decode" — the raw
+ * the scheme default or ?profile=). NULL means "no decode": the raw
  * profile. Written once at create, read-only afterwards. */
 const ecuio_signal_set_t* ecuio_session_signal_set(ecuio_session_t* session);
 

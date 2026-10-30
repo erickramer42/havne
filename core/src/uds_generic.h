@@ -1,11 +1,11 @@
 // File/layer: core/src/uds_generic.h | internal, not ABI-exported;
 //             C++17, Qt-free, every platform (core.cpp builds the set,
 //             the transports read it)
-// Testing: UNIT — UdsGenericTest (test_obd2): the ?did= grammar, each
+// Testing: UNIT: UdsGenericTest (test_obd2): the ?did= grammar, each
 //     refusal and its words, the set it builds, that the set validates
 //     and fits the engine's table; CoreTest: selection by URI, the mock's
-//     DID frames. HARNESS — J2534AdoptionTest: the requests, the ECU
-//     prefix and the scan against the fake. FUZZ — fuzz_uds_query.
+//     DID frames. HARNESS: J2534AdoptionTest: the requests, the ECU
+//     prefix and the scan against the fake. FUZZ: fuzz_uds_query.
 
 #ifndef ECUIO_UDS_GENERIC_H
 #define ECUIO_UDS_GENERIC_H

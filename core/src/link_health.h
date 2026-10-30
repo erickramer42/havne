@@ -2,7 +2,7 @@
 //             included by the transports whose workers judge a link
 //             (j2534_transport.cpp; the ELM327 transport, ADR-0026)
 // C++17, Qt-free, no platform headers.
-// Testing: UNIT — every rule below and the backoff step, session-free
+// Testing: UNIT: every rule below and the backoff step, session-free
 //     (CoreTest.Link*, test_core); through a worker HARNESS
 //     (J2534HealthTest).
 

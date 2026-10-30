@@ -1,4 +1,4 @@
-# ADR-0029: Android background sessions — the GUI thread keeps running, a foreground service keeps the process, one Bluetooth connect at a time
+# ADR-0029: Android background sessions, the GUI thread keeps running, a foreground service keeps the process, one Bluetooth connect at a time
 
 - **Status:** Accepted.
 - **Date:** 2026-10-28.
@@ -79,7 +79,7 @@ the run saw one block 25 s and a second start beside it.
 2. **A foreground service while an adapter session is up.** A small
    Java service in the APK
    (`app/android/src/…/SessionService.java`, type `connectedDevice`)
-   holds a low-priority notification: "QtTune — connected to <the
+   holds a low-priority notification, "QtTune" over "connected to <the
    URI's label>", and "recording" when it is; a tap opens the app. An
    app-side class starts it through JNI when an `elm327://` session
    connects and stops it at the disconnect (and when the app ends).

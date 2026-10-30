@@ -1,5 +1,5 @@
 // File/layer: app/qml/Main.qml | Qt6 Quick, UI layer
-// Testing: manual smoke — navigation, sidebar↔TabBar at 720px, header
+// Testing: manual smoke: navigation, sidebar↔TabBar at 720px, header
 //          pill elides at 400 px, keyboard focus rings, the window opens
 //          within a 1280 × 720 screen, zoom steps with Ctrl + / Ctrl − /
 //          Ctrl 0 and Settings' Display row and survives a restart, as

@@ -1,7 +1,7 @@
 // File/layer: core/include/ecuio/stream.h | C ABI, public interface
-// Testing: HARNESS — Elm327StreamTest (test_elm327): the fake ELM327
+// Testing: HARNESS: Elm327StreamTest (test_elm327): the fake ELM327
 //          behind a registered stream, a pump thread playing the app; UNIT
-//          — test_c_abi: the header as strict C and the callbacks' layout
+//          (test_c_abi): the header as strict C and the callbacks' layout
 
 #ifndef ECUIO_STREAM_H
 #define ECUIO_STREAM_H

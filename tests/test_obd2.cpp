@@ -1,13 +1,13 @@
 // File/layer: tests/test_obd2.cpp | GTest, UNIT tier, headless, all
-//             platforms (pure data + decoder + request engine — no
+//             platforms (pure data + decoder + request engine: no
 //             transport)
-// Testing: UNIT — set validation, wire-byte decode round-trips matching
+// Testing: UNIT: set validation, wire-byte decode round-trips matching
 //          the fake's canned responses, mux gate accept/reject, the
 //          request engine (request_engine.h) with the time passed in,
 //          its DID scan and its identification (the turns, the text, the
 //          report), and uds-generic's ?did= grammar and the set it
 //          builds (uds_generic.h). End-to-end pacing is HARNESS (stream
-//          and health tests) and BENCH (VX) — not this file.
+//          and health tests) and BENCH (VX), not this file.
 
 #include <gtest/gtest.h>
 
@@ -26,7 +26,7 @@
 namespace {
 
 /* Wire payload as the bridge hands it to the decoder (header stripped):
- * [0x41][PID][data...] — header stripped; the adapter owns ISO-TP
+ * [0x41][PID][data...]: header stripped; the adapter owns ISO-TP
  * framing, so there is no PCI byte */
 ecuio_frame_t make_obd2_frame(const uint8_t* payload, uint8_t len)
 {
@@ -188,7 +188,7 @@ TEST(Obd2DecodeTest, MafCentigramScale) {
     const ecuio_signal_set_t* set = ecuio_obd2_signal_set();
     const ecuio_signal_def_t* d = find_def(set, ECUIO_OBD2_SIG_MAF_ID);
     ASSERT_NE(d, nullptr);
-    /* 0x0064 = 100 raw * 0.01 = 1.00 g/s — pins the /100 (centi-grams/s)
+    /* 0x0064 = 100 raw * 0.01 = 1.00 g/s: pins the /100 (centi-grams/s)
      * scale through the generic scale+offset path, with no decoder
      * special case. */
     const uint8_t wire[] = {0x41, 0x10, 0x00, 0x64};
@@ -219,7 +219,7 @@ TEST(Obd2MuxTest, WrongPidRejectedByMatchAndDecode) {
     const ecuio_signal_def_t* rpm = find_def(set, ECUIO_OBD2_SIG_RPM_ID);
     ASSERT_NE(rpm, nullptr);
     /* A PID 0x0D response whose data bytes would vacuously decode as
-     * RPM if the mux gate were absent — the Blocker-1 scenario. */
+     * RPM if the mux gate were absent: the Blocker-1 scenario. */
     const uint8_t wire[] = {0x41, 0x0D, 0x1F, 0x40};
     ecuio_frame_t f = make_obd2_frame(wire, sizeof wire);
     EXPECT_FALSE(ecuio_def_applies_to_frame(rpm, &f));

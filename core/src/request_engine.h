@@ -2,7 +2,7 @@
 //             included by j2534_transport.cpp (its driver) and
 //             profile_registry.cpp (the request limit)
 // C++17, Qt-free, no platform headers.
-// Testing: UNIT — derivation, deduplication and the limit, the
+// Testing: UNIT: derivation, deduplication and the limit, the
 //     read-only rule, rotation per channel, correlation, the wait, the
 //     pending wait and the floor; the supported-PID walk, its budget,
 //     a bitmap asked again once after another PID's answer, and

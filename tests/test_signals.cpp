@@ -136,7 +136,7 @@ TEST_F(SignalDecodeTest, ValidateSignal_NameUnitDecimals)
     ecuio_signal_def_t signal = {};
     signal.kind = ECUIO_VALUE_UINT;
     signal.bit_length = 8;
-    /* Fill ALL 32 bytes with non-null chars — no room for terminator */
+    /* Fill ALL 32 bytes with non-null chars: no room for terminator */
     /* Intentional: tests validator's handling of unterminated strings */
     for (size_t i = 0; i < sizeof(signal.name); ++i) {
         signal.name[i] = 'A';

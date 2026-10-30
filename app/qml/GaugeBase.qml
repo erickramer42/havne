@@ -1,5 +1,5 @@
 // File/layer: app/qml/GaugeBase.qml | Qt6 Quick, UI layer
-// Testing: manual smoke via DashboardPage under mock://demo — needles
+// Testing: manual smoke via DashboardPage under mock://demo, needles
 //          ease between batches, sweep once per session, peaks reset;
 //          test_qml (tst_dashboard.qml) the held peak of a replay
 

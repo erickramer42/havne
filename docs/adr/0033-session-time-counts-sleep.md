@@ -1,4 +1,4 @@
-# ADR-0033: Session time counts sleep — one host clock for core and the app, and a sleep that says so
+# ADR-0033: Session time counts sleep, one host clock for core and the app, and a sleep that says so
 
 - **Status:** Accepted.
 - **Date:** 2026-10-29. Implemented with this record.

@@ -73,7 +73,7 @@ through the ring, from either architecture.
   checks now catch layout skew between the two build trees, loudly.
   Skew in constant values remains silent (Known Issue #19).
 
-## Appendix — output capacity and a version relay (2026-10-22)
+## Appendix: output capacity and a version relay (2026-10-22)
 
 The surrogate client's ioctl takes the caller's output capacity, as
 the loader's helper does. On both backends the output gets the first
@@ -83,7 +83,7 @@ its own. `OP_READ_VERSION` (12) relays `PassThruReadVersion`, an
 optional export like `PassThruGetLastError`
 ([ADR-0019](0019-session-info.md)).
 
-## Appendix — reads carry whole messages (2026-10-23)
+## Appendix: reads carry whole messages (2026-10-23)
 
 An `OP_READ` reply is the response followed by `num_frames` messages,
 each an `ecuio_pt_rx_t` (`j2534_ptypes.h`): the vendor's `RxStatus`,

@@ -30,7 +30,7 @@
 //        is the request's plus 8 (0x7E0 ->
 //        0x7E8; the functional 0x7DF is answered from 0x7E8) or, 29-bit,
 //        18DA<tester><ecu> for 18DA<ecu><tester>. NO PCI byte in either
-//        direction — the fake models the adapter side of ISO-TP, and
+//        direction: the fake models the adapter side of ISO-TP, and
 //        the transport's 4-byte header strip lands the bridge on the
 //        obd2 set's mux-at-offset-0 grammar.
 //      - Everything else: the legacy deterministic echo (byte 0
@@ -179,7 +179,7 @@ unsigned long g_filter_seq = 0;
 FilterRecord g_last_filter;              /* the last started: its pattern
                                           * heads the echo and the replies */
 /* One-shot ioctl stall: env-armed sleep on
- * the FIRST PassThruIoctl only — a vendor op that outlives the
+ * the FIRST PassThruIoctl only: a vendor op that outlives the
  * client's 3s transact timeout, while every later op answers
  * instantly, isolating the recovery path under test. */
 bool g_ioctl_delay_fired = false;
@@ -333,7 +333,7 @@ void take_posted_locked()
 }
 
 /* Matches the most recent active filter against a frame's first
- * mask_len bytes (the pattern is applied with the mask — classic
+ * mask_len bytes (the pattern is applied with the mask: classic
  * filter semantics). Returns true if the frame passes. The mask is
  * assumed to be zero-padded beyond the meaningful bytes. */
 bool filter_matches(const unsigned char* frame_data, unsigned long frame_size,
@@ -381,10 +381,10 @@ void build_negative(const unsigned char* req, unsigned char code,
 
 /* An OBD-II Service 01, 09 or 0x22 response into resp, which holds
  * ECUIO_PT_MSG_DATA_SIZE bytes: [reply ID BE] and the fake's ECU's
- * answer (fake_ecu::answer) — NO PCI BYTE in either direction. The fake
+ * answer (fake_ecu::answer): NO PCI BYTE in either direction. The fake
  * models the ADAPTER side of ISO-TP: this queue content is what a
  * conforming adapter delivers from ReadMsgs, and the transport's header
- * strip lands the bridge on [41][PID][A][B]... — the obd2 set's
+ * strip lands the bridge on [41][PID][A][B]...: the obd2 set's
  * mux-at-offset-0 grammar.
  * Caller (WriteMsgs, mutex HELD) has verified: [tx_id BE][0x01][PID] or
  * [tx_id BE][0x09][item] (6 bytes) or [tx_id BE][0x22][DID] (7 bytes),
@@ -416,7 +416,7 @@ long __stdcall PassThruOpen(void* pName, unsigned long* pDeviceID)
     }
 
     /* Test-only open blocking: ECUIO_FAKE_OPEN_DELAY_MS
-     * makes PassThruOpen sleep before doing anything — the blocked-
+     * makes PassThruOpen sleep before doing anything: the blocked-
      * vendor-open mode. Armed via ENVIRONMENT, not a hook: the child
      * inherits the parent's environment, so an x64 test arms the x86
      * child's fake with zero protocol surface. */
@@ -511,7 +511,7 @@ long __stdcall PassThruDisconnect(unsigned long ChannelID)
     }
 
     /* Tolerant by design: a real vendor's second-disconnect behavior
-     * is vendor swamp we don't model — the COUNT is the contract
+     * is vendor swamp we don't model: the COUNT is the contract
      * observable, not the return code. */
     std::lock_guard<std::mutex> lk(fake_j2534::g_lock);
     if (ChannelID == fake_j2534::g_channel_id) {
@@ -563,7 +563,7 @@ long __stdcall PassThruReadMsgs(unsigned long ChannelID,
     }
 
     /* Link-health knob (HARNESS): ECUIO_FAKE_READ_STATUS forces this
-     * call to return the given vendor status with zero messages —
+     * call to return the given vendor status with zero messages:
      * 0x09 (ERR_TIMEOUT) for quiet-bus, a hard code (e.g. 0x07) for
      * the dead-adapter path. Persistent while set and re-read per
      * call: the surrogate child sees the value it inherited at spawn,
@@ -585,7 +585,7 @@ long __stdcall PassThruReadMsgs(unsigned long ChannelID,
 
     /* The sloppy vendor: unlike ECUIO_FAKE_READ_STATUS above, this
      * returns the given hard status WITHOUT touching *pNumMsgs or the
-     * message array — the caller's request count stays DIRTY and its
+     * message array: the caller's request count stays DIRTY and its
      * buffer keeps whatever the caller put there (zeros, or the
      * surrogate child's previous batch contents). Mirrors the VX,
      * which reports "status 7, written 1" on a failed write
@@ -668,7 +668,7 @@ long __stdcall PassThruReadMsgs(unsigned long ChannelID,
     }
 
     /* FILTER GATING (ECUIO_FAKE_FILTER_GATING=1): model the device's
-     * filter hardware — non-matching frames are DISCARDED, never
+     * filter hardware: non-matching frames are DISCARDED, never
      * parked. Drain rejected frames from the queue head until a
      * matching frame is found (deliver it) or the queue empties.
      * Returning "0 messages" while leaving a rejected frame at the
@@ -711,7 +711,7 @@ long __stdcall PassThruReadMsgs(unsigned long ChannelID,
             return STATUS_NOERROR;
         }
     } else if (arrived == 0) {
-        *pNumMsgs = 0;   /* quiet bus — idle, not an error */
+        *pNumMsgs = 0;   /* quiet bus: idle, not an error */
         return STATUS_NOERROR;
     }
 
@@ -748,7 +748,7 @@ long __stdcall PassThruWriteMsgs(unsigned long ChannelID,
 
     /* ECUIO_FAKE_WRITE_STATUS
      * makes every WriteMsgs return the given vendor status WITHOUT
-     * recording the message or generating a response — the VX quiet-
+     * recording the message or generating a response: the VX quiet-
      * bus shape: writes fail (no ACK on the bus) while reads stay
      * clean. Like ECUIO_FAKE_UNTOUCHED_COUNT_STATUS on the read side,
      * *pNumMsgs is left as passed (1), the VX's "status 7, written 1",
@@ -777,7 +777,7 @@ long __stdcall PassThruWriteMsgs(unsigned long ChannelID,
     }
 
     if (*pNumMsgs != 1) {
-        return STATUS_FAILED;   /* the relay sends one at a time — strict */
+        return STATUS_FAILED;   /* the relay sends one at a time: strict */
     }
 
     unsigned long n = pMsg->DataSize;
@@ -834,7 +834,7 @@ long __stdcall PassThruWriteMsgs(unsigned long ChannelID,
 
     /* RESPONSE GENERATION.
      * A request: Service 01 or 09, EXACTLY 6 bytes with req[4] 0x01 or
-     * 0x09, or Service 0x22, 7 bytes — the adapter-framed logical
+     * 0x09, or Service 0x22, 7 bytes: the adapter-framed logical
      * message. With
      * an active filter the ECU it's addressed to answers; without one an
      * ISO 15765 channel receives nothing, so the legacy echo applies.
@@ -884,7 +884,7 @@ long __stdcall PassThruWriteMsgs(unsigned long ChannelID,
             arrives_us);
     }
 
-    return STATUS_NOERROR;   /* *pNumMsgs stays 1 — fully written */
+    return STATUS_NOERROR;   /* *pNumMsgs stays 1: fully written */
 }
 
 extern "C"
@@ -981,7 +981,7 @@ long __stdcall PassThruIoctl(unsigned long ChannelID,
     case ECUIO_PT_IOCTL_READ_VBATT:
         /* Contract pin: v04.04 passes the DeviceID
          * to READ_VBATT. This fake's PassThruOpen returns device 1 and
-         * PassThruConnect returns channel 0x55 — a caller passing the
+         * PassThruConnect returns channel 0x55: a caller passing the
          * channel FAILS here instead of passing by coincidence. */
         if (ChannelID != fake_j2534::g_device_id) {
             return STATUS_FAILED;
@@ -1076,7 +1076,7 @@ long __stdcall PassThruStopMsgFilter(unsigned long ChannelID,
             return STATUS_NOERROR;
         }
     }
-    return STATUS_FAILED;   /* unknown/already-stopped — strict vendor */
+    return STATUS_FAILED;   /* unknown/already-stopped: strict vendor */
 }
 
 /* v04.04's form (DeviceID first). Like READ_VBATT, it fails for any

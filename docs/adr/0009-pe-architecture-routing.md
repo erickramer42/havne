@@ -47,7 +47,7 @@ routing, every future capability would be implemented twice.
   (unknown). The bridge's architecture label still shows unknown as
   "x86" (Known Issue #18).
 
-## Appendix — every DLL in a surrogate (2026-10-26)
+## Appendix: every DLL in a surrogate (2026-10-26)
 
 [ADR-0025](0025-one-j2534-backend.md) replaces the table above: an x86
 DLL loads in `ecuio-j2534-surrogate.exe` as before, and an x64 DLL, or

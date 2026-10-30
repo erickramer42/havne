@@ -1,5 +1,5 @@
 // File/layer: fuzz/fuzz_replay_file.cpp | C++17, Qt-free, libFuzzer
-// Testing: FUZZ — arbitrary rows of a recording's frames.csv (ADR-0017)
+// Testing: FUZZ: arbitrary rows of a recording's frames.csv (ADR-0017)
 //          under its header, through ecuio_session_create's replay
 //          attach, which reads the whole file (ADR-0023): the status is
 //          ECUIO_OK or ECUIO_ERR_LOAD_FAILED, a refusal names its line in

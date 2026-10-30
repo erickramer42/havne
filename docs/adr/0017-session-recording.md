@@ -1,4 +1,4 @@
-# ADR-0017: Session recording — one folder per connect, frames.csv as the replay format
+# ADR-0017: Session recording, one folder per connect, frames.csv as the replay format
 
 - **Status:** Accepted.
 - **Date:** 2026-10-22. Implemented with this record.
@@ -118,7 +118,7 @@ once.
 - The files are written in text mode, so lines end in CRLF on Windows;
   a reader accepts either ending.
 
-## Appendix — J2534 `timestamp_us` is session time (2026-10-22)
+## Appendix: J2534 `timestamp_us` is session time (2026-10-22)
 
 A J2534 frame's `timestamp_us` became session time: the host's at the
 first frame, then the adapter's own deltas, carried across its 32-bit
@@ -134,7 +134,7 @@ consequences above describe, from the session log instead: its
 to their wall-clock times. That is how the vehicle session showed the
 VX counts microseconds (STATUS.md, BENCH prep item 5).
 
-## Appendix — text values (2026-10-23)
+## Appendix: text values (2026-10-23)
 
 A text signal ([ADR-0016](0016-signal-definition-layout.md), appendix)
 goes into `signals.csv` like a number: one row per decoded value, the
@@ -142,7 +142,7 @@ text in the `value` column, CSV-quoted when it holds a comma, a quote
 or a newline (a HEX value never does; a TEXT value shows such bytes as
 `.`). The columns and the header row are unchanged.
 
-## Appendix — the reader exists (2026-10-25)
+## Appendix: the reader exists (2026-10-25)
 
 `replay://` ([ADR-0023](0023-replay-transport.md)) is the reader point
 5 promised. It accepts only the header row above and refuses a bad row
@@ -158,7 +158,7 @@ are recorded too; the consequence above, "not recorded: frames before
 the connect is applied", now covers only frames before the start,
 which a transport doesn't send.
 
-## Appendix — `host_us` counts sleep (2026-10-29)
+## Appendix: `host_us` counts sleep (2026-10-29)
 
 `host_us` is microseconds since the recording started on core's clock
 (`ecuio_clock_us`, [ADR-0033](0033-session-time-counts-sleep.md)),

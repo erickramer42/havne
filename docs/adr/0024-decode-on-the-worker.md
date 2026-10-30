@@ -1,4 +1,4 @@
-# ADR-0024: Decoding on the worker — a values callback delivers each frame's decoded signals
+# ADR-0024: Decoding on the worker, a values callback delivers each frame's decoded signals
 
 - **Status:** Accepted.
 - **Date:** 2026-10-26. Built with this record, in its three steps
@@ -45,7 +45,7 @@ by def index:
 
 | Defs | GUI thread a frame (drain) | of it, match and decode | worker's side a frame (`onFrame`) | one tick's `updateValues` |
 |---|---|---|---|---|
-| raw | 0.35 | — | 1.97 | — |
+| raw | 0.35 | n/a | 1.97 | n/a |
 | 9 | 0.44 | 0.09 | 1.91 | 0.2 |
 | 100 | 0.57 | 0.23 | 1.59 | 0.9 |
 | 250 | 0.77 | 0.42 | 1.78 | 2.0 |
@@ -342,7 +342,7 @@ recorded too.
 - The C ABI grows two structs whose sizes follow the pointer width,
   as `ecuio_signal_set_t`'s already does; their asserts pin both.
 
-## Appendix — steps 1 and 2 built and measured (2026-10-26)
+## Appendix: steps 1 and 2 built and measured (2026-10-26)
 
 - **Step 1** (`0ea4126`): the calls and structs of §3, the decode in
   dispatch, the shared snapshot and the text slots of §4.
@@ -365,7 +365,7 @@ recorded too.
 
   | Defs | GUI thread (drain) | worker: `onFrame` | worker: core's decode | worker: bridge's staging | one tick's `updateValues` |
   |---|---|---|---|---|---|
-  | raw | 0.59–0.73 | 2.18–2.35 | — | — | — |
+  | raw | 0.59–0.73 | 2.18–2.35 | n/a | n/a | n/a |
   | 9 | 0.79 | 2.31–2.33 | 0.08–0.10 | 0.06–0.08 | 0.1 |
   | 100 | 0.67–0.71 | 2.22 | 0.29 | 0.08–0.14 | 0.7–1.0 |
   | 250 | 0.70–0.72 | 2.14–2.26 | 0.52–0.53 | 0.32–0.39 | 1.9–5.3 |
@@ -381,7 +381,7 @@ recorded too.
 - **The chart's peak waited for step 3:** after step 2 the fixture at
   10× still peaked at 1,232 rpm on the model.
 
-## Appendix — step 3, the chart (2026-10-26)
+## Appendix: step 3, the chart (2026-10-26)
 
 - Built under [ADR-0005](0005-coalesced-signal-updates.md)'s appendix
   of this date: the staging keeps each signal's lowest, highest and

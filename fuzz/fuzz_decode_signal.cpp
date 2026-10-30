@@ -1,5 +1,5 @@
 // File/layer: fuzz/fuzz_decode_signal.cpp | C++17, Qt-free, libFuzzer
-// Testing: FUZZ — arbitrary def geometry and payloads against the
+// Testing: FUZZ: arbitrary def geometry and payloads against the
 //          decoder and the per-def validator, under ASan+UBSan
 
 #include <ecuio/signals.h>

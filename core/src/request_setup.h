@@ -1,6 +1,6 @@
 // File/layer: core/src/request_setup.h | internal, C++17, Qt-free,
 //             header-only; no platform headers
-// Testing: HARNESS — through both requesting transports:
+// Testing: HARNESS: through both requesting transports:
 //          J2534QueryParamTest and J2534AdoptionTest (the query keys,
 //          the channels, raw on the engine ECU, ?poll=, uds-generic's
 //          scan, identification, the support and identity reports),
@@ -44,7 +44,7 @@ struct request_params {
 
 /* Strict unsigned parse: decimal by default, '0x'/'0X' prefix enables
  * hex digits. Rejects empty digits, '+', '-', whitespace, and overflow.
- * No strtoul — its tolerance for signs/whitespace is a liability at
+ * No strtoul: its tolerance for signs/whitespace is a liability at
  * an ABI boundary where garbage must become an error, not a value. */
 inline bool ecuio_parse_number(const char* s, size_t len,
                                unsigned long* out_val)
@@ -90,16 +90,16 @@ inline bool ecuio_parse_number(const char* s, size_t len,
 }
 
 /* Reads q into p when it's a request key:
- *   filter   CAN id 1..0x1FFFFFFF — receive ID; replaces the profile's
+ *   filter   CAN id 1..0x1FFFFFFF: receive ID; replaces the profile's
  *            channels with this one
- *   txid     CAN id 1..0x1FFFFFFF — transmit ID; default is the
+ *   txid     CAN id 1..0x1FFFFFFF: transmit ID; default is the
  *            profile's tx, else 0x7E0
- *   poll     PID 0x00..0xFF — one Service 01 request, repeated as the
+ *   poll     PID 0x00..0xFF: one Service 01 request, repeated as the
  *            whole rotation (0x00 reads the supported-PIDs bitmap);
  *            replaces the profile's requests
- *   probe    0 or 1 — the supported-PID probe (ADR-0015 §4), on by
+ *   probe    0 or 1: the supported-PID probe (ADR-0015 §4), on by
  *            default
- *   identify 0 or 1 — vehicle identification (ADR-0021), on by default
+ *   identify 0 or 1: vehicle identification (ADR-0021), on by default
  *            with a set's requests
  * False when q is another key. A bad value leaves p alone and sets
  * *wanted to what it should have been; the caller words the detail. */

@@ -1,4 +1,4 @@
-# DISCLAIMER — READ BEFORE USING
+# DISCLAIMER: READ BEFORE USING
 
 **This software may damage your vehicle's control modules.**
 

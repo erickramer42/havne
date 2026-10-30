@@ -1,4 +1,4 @@
-# ADR-0020: `uds-generic` — DIDs named in the URI, a set built per session, and a scan
+# ADR-0020: `uds-generic`, DIDs named in the URI, a set built per session, and a scan
 
 - **Status:** Accepted.
 - **Date:** 2026-10-23. Implemented with this record.
@@ -139,7 +139,7 @@ QML tests show a text row on every platform.
   reply; the probe already pays it.
 - The fuzz job gains `fuzz_uds_query`, since `?did=` is typed text.
 
-## Appendix — the first DIDs on a vehicle (2026-10-25)
+## Appendix: the first DIDs on a vehicle (2026-10-25)
 
 On the second vehicle session ([session sheet](../bench-sessions/2026-10-25-vehicle.md)), on the engine ECU's default
 session:

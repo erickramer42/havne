@@ -1,4 +1,4 @@
-# VEHICLE run sheet — read-only vehicle session
+# VEHICLE run sheet: read-only vehicle session
 
 **Havne build:** <commit hash>  **Trees:** build, build-win32 both fresh
 **Date:** <date>
@@ -111,7 +111,7 @@ Run every item on the laptop that goes to the car.
       Then do the teardown and the post-session scrub on what it
       produced. Phase 4's recovery can't be rehearsed this way: the
       surrogate reads the fake's settings once, at spawn. The knob
-      recipes are in [testing.md](../testing.md)'s "Manual smoke —
+      recipes are in [testing.md](../testing.md)'s "Manual smoke:
       link-health UI" table
 - [ ] Launch the app and tick **Record sessions** in Settings (it
       can't change during a session). Each connect writes a folder
@@ -125,7 +125,7 @@ Run every item on the laptop that goes to the car.
       `ecuio-surrogate.<YYYYMMDD-HHMMSS-mmm>.log`, the newest 50
 - [ ] Know the four link states (see
       [j2534.md](../j2534.md#session-lifecycle)): no banner, ok; amber
-      "Vehicle not responding", quiet; amber "Requests failing — check
+      "Vehicle not responding", quiet; amber "Requests failing: check
       the vehicle connection and ignition", writes fail with nothing on
       the bus acknowledging; red "Adapter fault", reads fail. The
       activity log records each transition
@@ -143,7 +143,7 @@ Run every item on the laptop that goes to the car.
 Abort condition: the suite isn't green, or the surrogate isn't
 deployed. Stop and fix it at the desk; the vehicle adds nothing.
 
-## Phase 0 — ignition off
+## Phase 0: ignition off
 
 **Action:** adapter plugged into the vehicle, ignition **off**. Connect
 the bare URI for about 30 s:
@@ -169,7 +169,7 @@ the bare URI for about 30 s:
 Either state is correct with no ECU awake. If an ECU does answer with
 the ignition off, record that instead.
 
-## Phase 1 — ignition on, engine off: one connect, about two minutes
+## Phase 1: ignition on, engine off (one connect, about two minutes)
 
 **Action:** lights and accessories off (see Safety), ignition **on**,
 engine off. Connect the bare URI and leave it connected into Phase 2:
@@ -215,7 +215,7 @@ The bitmaps in this log replace the three `?poll=0x00`/`0x20`/`0x40`
 connects earlier sessions made; run those (Phase 3) only if the ECU
 line disagrees with the earlier sheet.
 
-## Phase 2 — engine idling (the decode check)
+## Phase 2: engine idling (the decode check)
 
 Still on Phase 1's connect. With the engine off most values are 0 or
 ambient, which a wrong scale or byte order can still produce; idle is
@@ -237,7 +237,7 @@ together, and the recording: each signal's refresh interval from
 the session log's stamps for requests a second and each reply's time
 after its request.
 
-## Phase 3 — the other URIs, engine idling
+## Phase 3: the other URIs, engine idling
 
 One connect each, Disconnect between them; the engine keeps idling.
 
@@ -304,7 +304,7 @@ One connect each, Disconnect between them; the engine keeps idling.
 from the scan and the text DID carries the VIN and the ECU's serial,
 so it's scrubbed before any of it is committed.
 
-## Phase 4 — restart (link health through an ignition cycle)
+## Phase 4: restart (link health through an ignition cycle)
 
 **Action:** connect the bare URI with the engine idling. Key off (the
 engine stops), wait 10 s, then start the engine again; don't pause at

@@ -54,7 +54,7 @@ read history through per-row model roles cheaply.
   code read the newest *value* as the newest timestamp, and no C++
   test could see it. The manual smoke tier caught it.
 
-## Appendix — per-sample time and each window's envelope (2026-10-26)
+## Appendix: per-sample time and each window's envelope (2026-10-26)
 
 Decoding moved to the transport's worker
 ([ADR-0024](0024-decode-on-the-worker.md)), and every decoded value
@@ -105,7 +105,7 @@ chart shows. Holding the newest value alone, the engine-start
 recording replayed at 100× never reached its 1,261 rpm on the tach
 (`QmlTest.dashboard`).
 
-## Appendix — the model's timer counts sleep (2026-10-29)
+## Appendix: the model's timer counts sleep (2026-10-29)
 
 The model's timer, behind a value's age and the fallback stamp, reads
 core's clock (`ecuio_clock_us`, [ADR-0033](0033-session-time-counts-sleep.md))

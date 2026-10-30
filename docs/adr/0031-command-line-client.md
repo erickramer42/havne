@@ -1,4 +1,4 @@
-# ADR-0031: The command-line client — `havne-cli` streams a session as JSON lines over the C ABI
+# ADR-0031: The command-line client, `havne-cli` streams a session as JSON lines over the C ABI
 
 - **Status:** Accepted.
 - **Date:** 2026-10-29. Implemented with this record.

@@ -1,5 +1,5 @@
 // File/layer: core/src/win_utf8.h | internal, Win32-only, C++17, Qt-free
-// Testing: HARNESS — FakeFixture.NonAsciiDllPathLoads and
+// Testing: HARNESS: FakeFixture.NonAsciiDllPathLoads and
 //          J2534SurrogateTest.NonAsciiDllPathLoadsInTheChild load the
 //          fake DLL from a directory with a non-ASCII name;
 //          J2534QueryParamTest.RelativeDllPathsAreRefused and

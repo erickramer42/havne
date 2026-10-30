@@ -95,7 +95,7 @@ the worker has been joined.
     timeout (Known Issue #27).
   - The child still treats channel and device ID 0 as "none".
 
-## Appendix — whole messages and one event per handle (2026-10-23)
+## Appendix: whole messages and one event per handle (2026-10-23)
 
 `OP_READ`'s batch no longer clamps a message to 64 bytes: the child
 copies each vendor message whole into an `ecuio_pt_rx_t` and writes

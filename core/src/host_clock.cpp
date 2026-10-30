@@ -1,6 +1,6 @@
 // File/layer: core/src/host_clock.cpp | C++17, Qt-free; one clock per platform
-// Testing: UNIT — CoreTest.Clock* (never back, advances by a sleep_for,
-//          reads the platform's clock); BENCH — a real sleep
+// Testing: UNIT: CoreTest.Clock* (never back, advances by a sleep_for,
+//          reads the platform's clock); BENCH: a real sleep
 //          (docs/bench-sessions/bench-prep.md, BENCH prep #27)
 //
 // The host clock session time runs on (ADR-0033 §1). Each platform's

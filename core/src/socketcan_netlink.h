@@ -2,7 +2,7 @@
 //             socketcan_interfaces.cpp defines it, socketcan_transport.cpp
 //             uses it
 // C++17, Qt-free.
-// Testing: HARNESS — VcanTest (Linux): vcan0 found, up, its MTU; the
+// Testing: HARNESS: VcanTest (Linux): vcan0 found, up, its MTU; the
 //     attributes' parsing is socketcan_wire.h's, UNIT on every platform
 //
 // The kernel's list of network links over rtnetlink (RTM_GETLINK, a

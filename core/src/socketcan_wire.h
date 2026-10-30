@@ -3,7 +3,7 @@
 // C++17, Qt-free, no platform headers: the kernel's values are mirrored
 // here (and checked against <linux/can.h> and <linux/rtnetlink.h> where
 // those exist), so every rule below is a unit test on every platform.
-// Testing: UNIT — SocketCanTest.* (test_socketcan): the interface name,
+// Testing: UNIT: SocketCanTest.* (test_socketcan): the interface name,
 //     the filters, a link's netlink attributes and the verdict on them,
 //     a kernel frame to an ecuio_frame_t, the clock
 //

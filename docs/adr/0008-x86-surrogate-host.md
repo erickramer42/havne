@@ -59,7 +59,7 @@ functions).
   enforced by routing ([ADR-0009](0009-pe-architecture-routing.md)) and
   by parity tests ([ADR-0011](0011-vendor-call-relay-wire-forms.md)).
 
-## Appendix — build fingerprint (2026-10-22)
+## Appendix: build fingerprint (2026-10-22)
 
 A struct-size mismatch between the trees fails at the pipe, but a
 changed constant in a same-sized struct didn't. Each tree's configure

@@ -1,5 +1,5 @@
 // File/layer: core/src/signal_sets.cpp | C++17, Qt-free, every platform
-// Testing: UNIT — Obd2SetTest, Obd2DecodeTest and Obd2MuxTest (test_obd2)
+// Testing: UNIT: Obd2SetTest, Obd2DecodeTest and Obd2MuxTest (test_obd2)
 //          for the obd2 set; CoreTest.MockFramesDecodeAgainstMockSignalSet
 //          and SignalsTest for the mock set; every set passes the
 //          validator at registration
@@ -125,7 +125,7 @@ static int check_set(const ecuio_signal_set_t* set, uint32_t* index)
             }
         }
     }
-    /* ADR-0013 §4: channel declarations — bounded, legal CAN
+    /* ADR-0013 §4: channel declarations, bounded, legal CAN
      * ids, unique rx. Negative codes so they can't collide with
      * ecuio_validate_signal's per-def returns. */
     if (set->channel_count > 0) {

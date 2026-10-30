@@ -1,5 +1,5 @@
 // File/layer: app/blepicker.cpp | Qt6 Core, app layer, C++17
-// Testing: UNIT — BridgeTest.BlePicker* (test_bridge)
+// Testing: UNIT: BridgeTest.BlePicker* (test_bridge)
 
 #include "blepicker.h"
 

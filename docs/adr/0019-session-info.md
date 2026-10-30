@@ -1,4 +1,4 @@
-# ADR-0019: Sessions say what they run on — an info struct and the activity log's "Session:" line
+# ADR-0019: Sessions say what they run on, an info struct and the activity log's "Session:" line
 
 - **Status:** Accepted.
 - **Date:** 2026-10-22. Implemented with this record.

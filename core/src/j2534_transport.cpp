@@ -1,5 +1,5 @@
 // File/layer: core/src/j2534_transport.cpp | C++17, Qt-free, Win32-guarded
-// Testing: HARNESS — test_j2534_connect: connect failures and the
+// Testing: HARNESS: test_j2534_connect: connect failures and the
 //          session info, also cross-arch. test_j2534_stream: URI parsing,
 //          the vendor clock's unit cases, connect parameters,
 //          filter registration, request framing and routing, header
@@ -160,7 +160,7 @@ struct ecuio_j2534_transport {
     std::thread worker;
 };
 
-/* Collected URI query parameters — parse_query fills, attach stores into
+/* Collected URI query parameters: parse_query fills, attach stores into
  * the transport impl. One struct rather than a six-pointer parse
  * signature, and one place for the coupling rule to live.
  *
@@ -259,7 +259,7 @@ read_outcome pump_one(ecuio_j2534_transport* t, uint32_t timeout_ms)
         t->overflow_pending || (msg.rx_status & ECUIO_PT_BUFFER_OVERFLOW) != 0;
 
     if (t->chan_count == 0) {
-        /* no channels — verbatim, id 0 (raw passive) counts as matched
+        /* no channels: verbatim, id 0 (raw passive) counts as matched
          * since we explicitly requested verbatim delivery. */
         frame_from_msg(msg, 0, 0, at_us, &frame);
         mark_overflow(t, &frame);
@@ -336,7 +336,7 @@ bool send_request(ecuio_j2534_transport* t, const ecuio_request& r,
     return sent;
 }
 
-/* Backoff-aware sleep, abortable within 20 ms of a stop request —
+/* Backoff-aware sleep, abortable within 20 ms of a stop request:
  * a 5 s capped backoff must not turn into a 5 s join at detach.
  * Returns true if stop was requested (caller should exit promptly). */
 bool backoff_sleep(ecuio_j2534_transport* t, uint32_t ms)
@@ -383,7 +383,7 @@ uint32_t read_timeout_ms(int64_t next_us)
     return (ms < 1) ? 1u : static_cast<uint32_t>(ms);
 }
 
-/* Worker entrypoint — mirrors mock_worker's discipline: impl-owned
+/* Worker entrypoint: mirrors mock_worker's discipline: impl-owned
  * state, dispatch through the session snapshot path, stop via atom.
  *
  * One loop serves every mode (ADR-0015 §1). With requests (the set's
@@ -485,7 +485,7 @@ void j2534_worker(ecuio_j2534_transport* t)
     }
 }
 
-/* The query's values (ecuio_j2534_query_keys). Contract (strict — a bad
+/* The query's values (ecuio_j2534_query_keys). Contract (strict: a bad
  * value means BAD_URI, surfacing at session_create before any DLL
  * load):
  *   - lowercase keys only:
@@ -536,7 +536,7 @@ ecuio_status_t parse_query(const ecuio_uri_query* query, j2534_uri_params* p)
      * this parser can't see the profile's declared channels, and
      * rejecting ?poll= without ?filter= here would refuse a profile
      * that declares its own (?profile=obd2&poll=0x0C). Syntax is this
-     * function's job; coupling is attach's — and attach still fires
+     * function's job; coupling is attach's, and attach still fires
      * before any DLL load, so malformed URIs stay fail-fast. */
     return ECUIO_OK;
 }
@@ -578,7 +578,7 @@ ecuio_status_t resolve_uri(const char* uri, ecuio_j2534_device_t* dev)
             ecuio_detail_set("no J2534 adapter is installed");
             return ECUIO_ERR_NO_TRANSPORT;
         }
-        *dev = devices[0];   /* first device — documented default */
+        *dev = devices[0];   /* first device: documented default */
         ecuio_j2534_free_devices(devices);
         return ECUIO_OK;
     }
@@ -652,7 +652,7 @@ ecuio_status_t j2534_start(ecuio_session_t* session, void* impl)
             t->chans[i].addr_flags | ECUIO_PT_TX_ISO15765_FRAME_PAD,
             &t->chans[i].filter_id);
         if (st != ECUIO_OK) {
-            /* Unwind the ones already registered — no partial
+            /* Unwind the ones already registered: no partial
              * filter state survives a failed start. */
             for (uint32_t j = 0; j < i; ++j) {
                 if (t->chans[j].filter_active) {
@@ -682,7 +682,7 @@ ecuio_status_t j2534_start(ecuio_session_t* session, void* impl)
     return ECUIO_OK;
 }
 
-/* detach(session, impl) — void per internal.h, called exactly once from
+/* detach(session, impl): void per internal.h, called exactly once from
  * ecuio_session_close AFTER the closed flag is set. Worker joined
  * FIRST (never alive while vendor code could be unmapped), filter
  * stop best-effort before disconnect, then free impl (the session
@@ -856,7 +856,7 @@ ecuio_status_t j2534_attach(ecuio_session_t* session, const char* uri,
     t->epoch = host_clock::now();   /* as mock: end of attach */
 
     wrap->impl = t.release();
-    session->transport = wrap;   /* session.h member — direct install */
+    session->transport = wrap;   /* session.h member: direct install */
     return ECUIO_OK;
 }
 
@@ -870,7 +870,7 @@ extern "C" ecuio_status_t ecuio_j2534_transport_attach(
 
 #else /* !_WIN32 */
 
-/* Linking stub — core.cpp routes j2534:// only on _WIN32, but the
+/* Linking stub: core.cpp routes j2534:// only on _WIN32, but the
  * symbol must exist for the headless-Unix CI build (core links
  * without Win32 J2534). */
 extern "C" ecuio_status_t ecuio_j2534_transport_attach(

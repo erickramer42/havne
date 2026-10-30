@@ -1,5 +1,5 @@
 // File/layer: surrogate/surrogate_main.cpp | Win32, x86, Qt-free; rebuild build-win32
-// Testing: HARNESS — test_j2534_surrogate, plus the cross-arch routing
+// Testing: HARNESS: test_j2534_surrogate, plus the cross-arch routing
 //          case against the Win32-tree build (ADR-0014)
 
 #define WIN32_LEAN_AND_MEAN
@@ -376,7 +376,7 @@ static int handle_op_ioctl(uint32_t channel_id, uint32_t ioctl_id,
     if (ioctl_id == ECUIO_PT_IOCTL_SET_CONFIG ||
         ioctl_id == ECUIO_PT_IOCTL_GET_CONFIG) {
         /* Trust boundary: the pipe is untrusted. Shape-check before
-         * touching anything — a malformed length must never reach the
+         * touching anything: a malformed length must never reach the
          * vendor, and the pair count must fit both the SCONFIG array
          * and the response payload the client sized for this request. */
         if (input == nullptr || input_len == 0 || (input_len % 8) != 0) {
@@ -417,7 +417,7 @@ static int handle_op_ioctl(uint32_t channel_id, uint32_t ioctl_id,
     }
     /* Out-of-contract ioctl: refuse like a strict vendor. Pointer-
      * bearing ids (FAST_INIT, FIVE_BAUD_INIT...) cannot be shaped
-     * across this seam — refusing beats guessing. */
+     * across this seam: refusing beats guessing. */
     stage("OP_IOCTL: id 0x%X refused (whitelist)", ioctl_id);
     return static_cast<int>(ECUIO_PT_STATUS_FAILED);
 }
@@ -560,7 +560,7 @@ int wmain(int argc, wchar_t* argv[])
         resp.request_id = req.request_id;
         resp.status = ECUIO_PT_STATUS_FAILED;
 
-        /* Trust-boundary checks BEFORE calling handlers —
+        /* Trust-boundary checks BEFORE calling handlers:
          * the pipe is an untrusted boundary */
         switch (req.opcode) {
         case ECUIO_SUR_OP_OPEN:

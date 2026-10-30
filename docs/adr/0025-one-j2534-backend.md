@@ -1,4 +1,4 @@
-# ADR-0025: One J2534 backend — every vendor DLL runs in a surrogate process
+# ADR-0025: One J2534 backend, every vendor DLL runs in a surrogate process
 
 - **Status:** Accepted.
 - **Date:** 2026-10-26. All three steps (§6) built with this record.

@@ -1,7 +1,7 @@
 // File/layer: tests/test_j2534_load.cpp | GTest, HARNESS tier
 // Testing: Exercises open/export-resolution/close through the loader,
 //          which loads the fake vendor DLLs in the x64 surrogate
-//          (ADR-0025) — no hardware, no polling.
+//          (ADR-0025): no hardware, no polling.
 //          The everyday fake (spec spelling) path is baked in by CMake
 //          ($<TARGET_FILE:fake_j2534>); the legacy fixture (fallback
 //          spelling) via FAKE_J2534_LEGACY_DLL_PATH.
@@ -99,7 +99,7 @@ TEST_F(FakeFixture, CloseNullIsSafeNoOp) {
     EXPECT_EQ(ecuio_j2534_close(nullptr), ECUIO_OK);
 }
 
-/* Spec-spelling PRIMARY resolution (the conformant-vendor case —
+/* Spec-spelling PRIMARY resolution (the conformant-vendor case:
  * what the OBDX Pro VX and every spec-following DLL ships): the
  * everyday fake exports 'PassThruIoctl' DIRECTLY. Every routing and
  * surrogate test exercises this resolution implicitly; this pins it
@@ -113,7 +113,7 @@ TEST_F(FakeFixture, SpecSpellingPassThruIoctlResolvesAndWorks) {
     ASSERT_NE(h, nullptr);
 
     /* Negative assertion: the everyday fake must not export the
-     * legacy spelling — else this test passes vacuously (either
+     * legacy spelling: else this test passes vacuously (either
      * spelling works, nothing is pinned). */
     HMODULE probe = LoadLibraryExA(FAKE_J2534_DLL_PATH, nullptr,
                                     LOAD_WITH_ALTERED_SEARCH_PATH);
@@ -132,13 +132,13 @@ TEST_F(FakeFixture, SpecSpellingPassThruIoctlResolvesAndWorks) {
     EXPECT_EQ(out_len, 4u);
     unsigned long vbatt = 0;
     memcpy(&vbatt, out, 4);
-    EXPECT_EQ(vbatt, 13800ul);   /* the fake's fixed VBATT — right function */
+    EXPECT_EQ(vbatt, 13800ul);   /* the fake's fixed VBATT: right function */
 
     EXPECT_EQ(ecuio_j2534_close(h), ECUIO_OK);
 }
 
 /* Legacy-spelling FALLBACK: the legacy fixture exports
- * 'PassThruIoCtl' ONLY — a spelling some real vendors still ship
+ * 'PassThruIoCtl' ONLY: a spelling some real vendors still ship
  * (the spec's is 'PassThruIoctl', which the VX uses). Resolution must
  * fall back to it and land on a working function. */
 TEST_F(FakeFixture, LegacySpellingPassThruIoCtlFallsBackAndWorks) {

@@ -1,5 +1,5 @@
 # File/layer: surrogate/CMakeLists.txt | Win32, Qt-free, links core headers only
-# Testing: HARNESS — surrogate exe is spawned by ecuio_j2534_sur_open and by
+# Testing: HARNESS: surrogate exe is spawned by ecuio_j2534_sur_open and by
 #          test_j2534_surrogate; verified end-to-end over pipe+ring+job objects,
 #          in the x64 tree and cross-arch (the x86 build, static CRT, through
 #          scripts/verify.sh). The release workflow checks its imports name
@@ -48,7 +48,7 @@ app_add_version_resource(ecuio-j2534-surrogate "${_sur_name}"
 
 # No ecuio-core link needed: the surrogate resolves the vendor DLL's
 # exports through GetProcAddress and speaks the POD protocol types from
-# the shared headers. Keeping it dependency-light is deliberate — this
+# the shared headers. Keeping it dependency-light is deliberate: this
 # binary must be deployable standalone next to the app exe.
 #
 # The C runtime is linked in statically (/MT) for the same reason. The

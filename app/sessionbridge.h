@@ -128,7 +128,7 @@ class SignalListModel : public QAbstractListModel
 public:
     explicit SignalListModel(QObject* parent = nullptr);
 
-    // Rolling history depth per signal — strip chart window. A window
+    // Rolling history depth per signal: strip chart window. A window
     // adds one to three samples (its lowest, highest and newest value,
     // ADR-0005's appendix), so this is about a 12 s trace at 10 Hz.
     // Kept constexpr so tests can assert exact ring behavior without a
@@ -227,7 +227,7 @@ public:
     Q_INVOKABLE QVariantList chartData() const;
 
     /* Periodic age refresh: ageMs is computed lazily from
-     * the internal clock, but dataChanged only fires on updateValues —
+     * the internal clock, but dataChanged only fires on updateValues:
      * so a stalled signal's row never re-evaluates and never dims, the
      * exact row dimming exists for. Emits dataChanged over ALL rows for
      * AgeMsRole ONLY: views re-query data(), which recomputes elapsed
@@ -388,10 +388,10 @@ public:
 
     // J2534 device discovery (Windows; empty list elsewhere). One map per
     // installed Pass-Thru interface driver: { vendorName, dllPath,
-    // architecture } — all QString. Registry read, no session attached; bounded at
+    // architecture }: all QString. Registry read, no session attached; bounded at
     // ECUIO_J2534_MAX_VENDORS by core. Safe to call synchronously from
     // QML (few reg keys, no I/O beyond the registry). UI sees display
-    // values only (rule 2) — dllPath is exposed because it is the user's
+    // values only (rule 2): dllPath is exposed because it is the user's
     // route to a direct-load URI, not for parsing.
     Q_INVOKABLE QVariantList discoverJ2534Devices() const;
     // The machine's serial ports, for elm327:// (ADR-0026 §7): one map
@@ -493,7 +493,7 @@ public slots:
     // Async connect: the slow core work (create and register, the DLL
     // load and PassThruOpen included) runs on a worker thread; starting
     // the session, GUI state application and the result signal follow
-    // queued on the GUI thread. Never blocks the UI — a J2534 handshake
+    // queued on the GUI thread. Never blocks the UI: a J2534 handshake
     // can legally take seconds (the surrogate allows 8 s per stage).
     Q_INVOKABLE void connectSessionAsync(const QString& uri);
 

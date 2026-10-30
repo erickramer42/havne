@@ -1,5 +1,5 @@
 // File/layer: app/qml/HomePage.qml | Qt6 Quick + Shapes, UI layer
-// Testing: manual smoke — logo renders centered at 96px, the tach needle
+// Testing: manual smoke: logo renders centered at 96px, the tach needle
 //          revs only while Home is on screen, status card centered
 //          (the hint line below is the column's widest item), the
 //          button opens Settings when disconnected and ends the session
@@ -40,7 +40,7 @@ Rectangle {
             y: Math.max(Theme.pageMargin, (flick.height - height) / 2)
             spacing: 24
 
-            // Logo block — animated tachometer mark: 0..8 ×1000 r/min, red
+            // Logo block: animated tachometer mark, 0..8 ×1000 r/min, red
             // from 6.5. No numerals or readout; at this size they'd crowd it.
             Rectangle {
                 id: logo

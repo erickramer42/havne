@@ -1,5 +1,5 @@
 // File/layer: app/latencystats.h | C++17, app layer, no Qt
-// Testing: test_bridge — BridgeTest.LatencyStatsReadsQuantilesWithinABucket
+// Testing: UNIT (test_bridge): BridgeTest.LatencyStatsReadsQuantilesWithinABucket
 //          (bucketing and quantiles), .DeliveryText* and
 //          .DisconnectLogsTheDelivery (through the bridge)
 

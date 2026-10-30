@@ -29,7 +29,7 @@
 //          Record line saying a
 //          replay isn't recorded; a preset of another scheme dropping
 //          the keys it doesn't take and the mock profile on an adapter.
-//          Manual smoke — the live discovery list renders (Windows: the
+//          Manual smoke: the live discovery list renders (Windows: the
 //          registry's interfaces and ports; macOS/Linux: the /dev ports or
 //          the empty-state hint) sized to its rows, a device row
 //          fills the URI field only, Connect button drives
@@ -683,7 +683,7 @@ Pane {
                     // asks it; under the obd2 default it also decodes.
                     // A WiFi adapter is typed: nothing lists it (ADR-0026's
                     // appendix "WiFi over TCP")
-                    placeholderText: qsTr("URI — e.g. mock://demo, elm327://COM5, "
+                    placeholderText: qsTr("URI, e.g. mock://demo, elm327://COM5, "
                                           + "elm327://192.168.0.10:35000 or "
                                           + "j2534://Vendor?profile=raw&poll=0x0C")
                     enabled: page.idle
@@ -749,9 +749,9 @@ Pane {
                     Label {
                         objectName: "deviceCount"
                         text: page.devices.length === 0
-                              ? qsTr("None found — install a Pass-Thru driver (Windows), plug in "
+                              ? qsTr("None found: install a Pass-Thru driver (Windows), plug in "
                                      + "or pair an ELM327 adapter, or pick one below")
-                              : qsTr("J2534 interfaces: %1, serial ports: %2%3 — select one to "
+                              : qsTr("J2534 interfaces: %1, serial ports: %2%3; select one to "
                                      + "put its URI in the field above, then Connect")
                                     .arg(page.j2534Devices.length).arg(page.serialPorts.length)
                                     .arg((page.canInterfaces.length > 0
@@ -1117,7 +1117,7 @@ Pane {
                         // name any mistake. The validator admits only the
                         // grammar's characters, so a query metacharacter (&,
                         // =, ?, #) can't split the URI into other keys.
-                        placeholderText: qsTr("1E1C:u16, F190:text, 7E9:1E1C, 1E00-1EFF — "
+                        placeholderText: qsTr("1E1C:u16, F190:text, 7E9:1E1C, 1E00-1EFF; "
                                               + "[ecu:]DID[-DID][:hex|text|u8…u32|i8…i32]")
                         validator: RegularExpressionValidator { regularExpression: /[0-9A-Za-z:,\-\s]*/ }
                         inputMethodHints: Qt.ImhNoAutoUppercase | Qt.ImhNoPredictiveText

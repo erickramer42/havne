@@ -1,4 +1,4 @@
-# BENCH prep — what only real hardware can confirm
+# BENCH prep: what only real hardware can confirm
 
 The J2534 and ELM327 code rests on assumptions about adapters and
 buses that the fakes can't test, because each fake is written from the

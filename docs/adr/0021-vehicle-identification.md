@@ -1,4 +1,4 @@
-# ADR-0021: Vehicle identification — the VIN and the ECU's identifiers, asked once at connect
+# ADR-0021: Vehicle identification, the VIN and the ECU's identifiers, asked once at connect
 
 - **Status:** Accepted.
 - **Date:** 2026-10-23. Implemented with this record.
@@ -150,7 +150,7 @@ no channels and no engine, and `mock://` sessions report no identity.
 - Per-vehicle profiles ([STATUS.md](../../STATUS.md), backlog) now have
   their key.
 
-## Appendix — one ECU's answers (2026-10-25)
+## Appendix: one ECU's answers (2026-10-25)
 
 On the second vehicle session ([session sheet](../bench-sessions/2026-10-25-vehicle.md)), the engine ECU of the first
 session's car, in its default session, with the ignition on:

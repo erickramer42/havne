@@ -1,5 +1,5 @@
 // File/layer: tests/non_ascii_copy.h | GTest helper, Win32-only, header-only
-// Testing: HARNESS — used by test_j2534_load and test_j2534_surrogate
+// Testing: HARNESS: used by test_j2534_load and test_j2534_surrogate
 //
 // A copy of a DLL in a directory whose name holds Greek and CJK
 // characters, which no ANSI code page has all of: only a path that

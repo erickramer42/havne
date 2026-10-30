@@ -135,7 +135,7 @@ int ecuio_decode_signal(const ecuio_signal_def_t* signal,
         return ECUIO_DECODE_ERR_UNSUPPORTED;   /* binary32 only */
     }
 
-    /* Highest bit consumed lies in this byte index — single uniform
+    /* Highest bit consumed lies in this byte index: single uniform
        bounds check for every kind and byte order. */
     uint32_t last_bit = (uint32_t)signal->start_byte * 8u
                         + signal->bit_offset + signal->bit_length - 1u;
@@ -375,7 +375,7 @@ int ecuio_validate_signal(const ecuio_signal_def_t* signal)
         return ECUIO_VALIDATE_ERR_FLOAT32;
     }
 
-    /* Last byte MUST be null — guarantees C-string fits in fixed buffer */
+    /* Last byte MUST be null: guarantees C-string fits in fixed buffer */
     if (signal->name[sizeof(signal->name) - 1] != '\0') {
         return ECUIO_VALIDATE_ERR_NAME;
     }

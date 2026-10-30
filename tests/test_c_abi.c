@@ -1,5 +1,5 @@
 /* File/layer: tests/test_c_abi.c | strict C compilation of public headers
- * Testing: UNIT — compile-only guarantee that the C ABI headers are C,
+ * Testing: UNIT: compile-only guarantee that the C ABI headers are C,
  *          not C++-in-disguise. Without this, `static_assert`
  *          spellings, name mangling surprises, or stray C++ keywords
  *          would only surface at a third-party FFI consumer's build.
@@ -31,7 +31,7 @@
 #include <stdio.h>
 #include <string.h>
 
-/* Negative-array-size idiom — valid in ALL C standards including
+/* Negative-array-size idiom: valid in ALL C standards including
  * pedantic C89, complementing the header's _Static_assert (C11+). */
 typedef char abi_frame_size_check[(sizeof(ecuio_frame_t) == 4120) ? 1 : -1];
 typedef char abi_data_offset_check[(offsetof(ecuio_frame_t, data) == 16) ? 1 : -1];
@@ -103,7 +103,7 @@ int main(void)
     frame.flags = ECUIO_FRAME_FLAG_EXTENDED;
     frame.reserved = 0;
 
-    /* Exercise exported symbols from each header — catches mangling
+    /* Exercise exported symbols from each header: catches mangling
      * regressions at link time. */
     printf("%s %s\n", ecuio_version_string(),
            ecuio_status_string(ECUIO_ERR_SESSION_CLOSED));

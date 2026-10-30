@@ -1,6 +1,6 @@
 // File/layer: core/src/uds_generic.cpp | C++17, Qt-free, every platform
-// Testing: UNIT — UdsGenericTest (test_obd2); HARNESS through
-//          J2534AdoptionTest; FUZZ — fuzz_uds_query. See uds_generic.h.
+// Testing: UNIT: UdsGenericTest (test_obd2); HARNESS through
+//          J2534AdoptionTest; FUZZ: fuzz_uds_query. See uds_generic.h.
 
 #include "uds_generic.h"
 

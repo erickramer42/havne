@@ -1,4 +1,4 @@
-# ADR-0023: Replay transport — `replay://` plays a recording's `frames.csv` back through the frame API
+# ADR-0023: Replay transport, `replay://` plays a recording's `frames.csv` back through the frame API
 
 - **Status:** Accepted.
 - **Date:** 2026-10-25. Implemented with this record.
@@ -244,7 +244,7 @@ the change. Those numbers go in that ADR.
   with a folder picker would bring Qt Quick Dialogs, a new Qt module
   for the app, for one convenience that no test needs; deferred.
 
-## Appendix — a replay that stops early (2026-10-26)
+## Appendix: a replay that stops early (2026-10-26)
 
 Attach checks the whole file, but the worker reads it again, and it can
 change in between: a recording copied while still being written, a file
@@ -259,7 +259,7 @@ and sends nothing more; the session stays open, as at the end of the
 file. A clean end of the file still leaves `ECUIO_OK`. The bridge maps
 the code to a link state of its own, `stopped` (amber, "Replay
 stopped" on the header pill, Home and the Dashboard; Live's banner
-"Replay stopped — the recording changed after it was opened"), and
+"Replay stopped: the recording changed after it was opened"), and
 logs once "Replay stopped after N frames: the recording changed after
 it was opened". The link-health codes already there were the wrong
 words: `fault` names an adapter, `quiet` says to check the ignition.
