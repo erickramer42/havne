@@ -487,6 +487,28 @@ TEST_F(SignalDecodeTest, ThreeByteMuxKeyGatesAndDecodes)
     EXPECT_EQ(ecuio_def_applies_to_frame(&signal, &f), 1);
 }
 
+/* An error report (SocketCAN's, ID = its class bits) on a def's ID
+ * carries the error's detail, never the def's message: 0x0C0, the
+ * mock's telemetry ID, is BUSERROR | BUSOFF. Data on the same ID still
+ * applies. */
+TEST(SignalsTest, AnErrorFrameAppliesToNoDef)
+{
+    const ecuio_signal_set_t* set = ecuio_mock_signal_set();
+    ASSERT_NE(set, nullptr);
+    ASSERT_GT(set->count, 0u);
+    ecuio_frame_t f = {};
+    f.arbitration_id = ECUIO_MOCK_TELEMETRY_ARB_ID;
+    f.data_length = ECUIO_MOCK_TELEMETRY_PAYLOAD_LEN;
+    for (uint32_t i = 0; i < set->count; ++i) {
+        f.flags = ECUIO_FRAME_FLAG_FD;
+        EXPECT_EQ(ecuio_def_applies_to_frame(&set->defs[i], &f), 1)
+            << set->defs[i].name;
+        f.flags = ECUIO_FRAME_FLAG_ERROR;
+        EXPECT_EQ(ecuio_def_applies_to_frame(&set->defs[i], &f), 0)
+            << set->defs[i].name;
+    }
+}
+
 TEST(SignalsTest, SignalDefLayoutIsPinned)
 {
     /* ABI pin, matching the static asserts in signals.h. No padding:

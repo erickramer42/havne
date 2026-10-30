@@ -1,8 +1,9 @@
 // File/layer: tests/test_vcan_socketcan.cpp | test-only, C++17, Qt-free, Linux only
-// Testing: HARNESS — the SocketCAN transport (ADR-0032) on the simulated
+// Testing: HARNESS: the SocketCAN transport (ADR-0032) on the simulated
 //          bus (vcan_bus.h): discovery, frames in order with their flags,
 //          the filter, the mock's drive cycle decoding off the bus, a
-//          quiet bus and back, an overflow, no allocation per frame, and
+//          quiet bus and back, an overflow, error frames (flagged, never
+//          decoded, bus-off a hard failure), no allocation per frame, and
 //          (as root) the interface going down and coming back. Each case
 //          skips without the interface; ECUIO_VCAN_REQUIRED=1 makes that a
 //          failure. Holds the binary's new_counter.h.
@@ -14,6 +15,8 @@
 #include "vcan_bus.h"
 
 #include <gtest/gtest.h>
+
+#include <linux/can/error.h>
 
 #include <atomic>
 #include <chrono>
@@ -431,6 +434,60 @@ TEST_F(SocketCanBusTest, TheWorkerAllocatesNothingPerFrame)
     ASSERT_TRUE(wait_for([&] { return c.count.load() >= 200; }));
     EXPECT_EQ(c.news_at_200.load(), c.news_at_10.load())
         << "operator new on the worker between frames 10 and 200";
+}
+
+/* Error frames pass every session's ID filter (CAN_RAW_ERR_FILTER), so
+ * this case's reach the other cases' sessions only if they ran at once:
+ * test_vcan runs serially (RUN_SERIAL) */
+TEST_F(SocketCanBusTest, ErrorFramesAreFlaggedAndOnlyBusOffFails)
+{
+    Collector c;
+    Session s("?profile=mock&filter=0x5A9", &c, true);
+    ASSERT_EQ(s.status(), ECUIO_OK) << s.detail();
+    vcan_bus::Fd w = writer();
+    ASSERT_TRUE(w.ok());
+    std::this_thread::sleep_for(50ms);
+
+    /* The controller's warning: reported, and the link stands */
+    ASSERT_TRUE(send(w.get(), CAN_ERR_FLAG | CAN_ERR_CRTL,
+                     {0, CAN_ERR_CRTL_RX_WARNING, 0, 0, 0, 0, 0, 0}));
+    ASSERT_TRUE(wait_for([&] { return c.count.load() >= 1; }));
+    std::this_thread::sleep_for(100ms);
+    EXPECT_NE(s.state(), ECUIO_ERR_TRANSPORT_HARD_FAILURE);
+
+    /* Bus-off with a bus error: its class bits are 0x0C0, the mock's
+     * telemetry ID, and its detail bytes decode as no signal */
+    const std::vector<uint8_t> detail{0x10, 0x20, 0x30, 0x40,
+                                      0x50, 0x60, 0x70, 0x80};
+    ASSERT_TRUE(send(w.get(), CAN_ERR_FLAG | CAN_ERR_BUSERROR | CAN_ERR_BUSOFF,
+                     detail));
+    EXPECT_TRUE(wait_for([&] {
+        return s.state() == ECUIO_ERR_TRANSPORT_HARD_FAILURE;
+    })) << "state "
+        << s.state();
+
+    /* A data frame heard: the link is back, still one episode */
+    ASSERT_TRUE(send(w.get(), 0x5A9, {1}));
+    EXPECT_TRUE(wait_for([&] { return s.state() == ECUIO_OK; }))
+        << "state " << s.state();
+    int32_t e = 0;
+    uint32_t episodes = 0;
+    ecuio_session_get_error_state(s.get(), &e, &episodes);
+    EXPECT_EQ(episodes, 1u);
+
+    const auto f = c.snapshot();
+    ASSERT_EQ(f.size(), 3u);
+    EXPECT_EQ(f[0].id, static_cast<uint32_t>(CAN_ERR_CRTL));
+    EXPECT_EQ(f[0].flags, static_cast<uint32_t>(ECUIO_FRAME_FLAG_ERROR));
+    EXPECT_EQ(f[0].data[1], CAN_ERR_CRTL_RX_WARNING);
+    EXPECT_EQ(f[1].id, 0x0C0u);
+    EXPECT_EQ(f[1].flags, static_cast<uint32_t>(ECUIO_FRAME_FLAG_ERROR));
+    EXPECT_EQ(f[1].data, detail);
+    EXPECT_EQ(f[2].id, 0x5A9u);
+    EXPECT_EQ(f[2].flags, 0u);
+    std::lock_guard<std::mutex> lock(c.mutex);
+    EXPECT_TRUE(c.values.empty())
+        << c.values.size() << " batches decoded from error frames";
 }
 
 /* Needs CAP_NET_ADMIN to set the interface down: CI's linux-build runs it

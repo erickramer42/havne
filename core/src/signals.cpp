@@ -1,6 +1,7 @@
 // File/layer: core/src/signals.cpp | C++17, Qt-free
-// Testing: UNIT — BE vs LE round-trip, mux acceptance/rejection, validator
-//          rules, display-unit conversion (SignalsTest.DisplayConvert*)
+// Testing: UNIT: BE vs LE round-trip, mux acceptance/rejection, the frame
+//          gate (an error frame applies to no def), validator rules,
+//          display-unit conversion (SignalsTest.DisplayConvert*)
 
 #include <ecuio/signals.h>
 #include <ecuio/internal.h>
@@ -273,6 +274,12 @@ int ecuio_def_applies_to_frame(const ecuio_signal_def_t* signal,
                                const ecuio_frame_t* frame)
 {
     if (!signal || !frame) {
+        return 0;
+    }
+
+    /* An error report's ID is its error class (SocketCAN), not a
+     * message, and its bytes are the error's detail */
+    if (frame->flags & ECUIO_FRAME_FLAG_ERROR) {
         return 0;
     }
 

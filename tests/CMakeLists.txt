@@ -113,6 +113,8 @@ gtest_discover_tests(test_socketcan)
 # CI's linux-build brings it up and sets ECUIO_VCAN_REQUIRED=1.
 # test_vcan_socketcan.cpp: the SocketCAN transport on that bus
 # (ADR-0032, SocketCanBusTest); it holds the binary's new_counter.h.
+# RUN_SERIAL: the cases share the bus, and an error frame passes every
+# session's ID filter.
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     add_executable(test_vcan test_vcan.cpp test_vcan_socketcan.cpp)
     target_compile_definitions(test_vcan PRIVATE
@@ -121,7 +123,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     find_package(Threads REQUIRED)
     target_link_libraries(test_vcan PRIVATE ecuio-core GTest::gtest_main Threads::Threads)
     app_enable_warnings(test_vcan)
-    gtest_discover_tests(test_vcan PROPERTIES TIMEOUT 30)
+    gtest_discover_tests(test_vcan PROPERTIES TIMEOUT 30 RUN_SERIAL TRUE)
 endif()
 
 # --- Golden-output comparator: Python 3, no packages ---
