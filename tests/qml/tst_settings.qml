@@ -630,6 +630,16 @@ TestCase {
                 "a new scheme keeps the keys it takes: the mock takes no identify=")
     }
 
+    // diagnose= (ADR-0037) is a key the mock takes too: it survives the
+    // move from an adapter to the simulated car
+    function test_diagnoseOffCrossesToTheMock() {
+        const page = createPage()
+        const uri = find(page, "uriField")
+        type(uri, "j2534://V?identify=0&diagnose=0")
+        press(page, "preset_mock")
+        compare(uri.text, "mock://demo?diagnose=0")
+    }
+
     // The vehicle run sheet's URIs, typed, pass through untouched
     function test_runSheetUrisPassThroughUntouched_data() {
         return [

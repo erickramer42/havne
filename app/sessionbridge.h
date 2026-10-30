@@ -364,6 +364,7 @@ public:
     static QString versionsText(const ecuio_session_info_t& info);  /* its versions clause; "" with none read */
     static QString channelSupportText(const ecuio_channel_support_t& support);  /* its "ECU 0x…:" lines */
     static QString channelIdentityText(const ecuio_channel_identity_t& identity);  /* its "ECU 0x… identity:" lines */
+    static QString channelDiagnosticsText(const ecuio_channel_diagnostics_t& diagnostics);  /* its "ECU 0x… diagnostics:" lines */
 
     // A session's delivery so far: what the worker handed the bridge,
     // what the in-flight cap dropped, and how long each frame took to
@@ -676,6 +677,10 @@ private:
     void pollReplayEnd();   // the tick: "Replay finished" once, at the end of the file
     void pollSleep();       // the tick: "Asleep for N s" after a sleep
     uint32_t m_identityGeneration[ECUIO_SESSION_INFO_MAX_CHANNELS] = {};
+    // What each channel's ECU reported of its diagnostics (ADR-0037),
+    // logged once per completed read
+    void pollChannelDiagnostics();
+    uint32_t m_diagnosticsGeneration[ECUIO_SESSION_INFO_MAX_CHANNELS] = {};
     QString m_vin;            // the first channel's, this session; never leaves the bridge
     QString m_vehicleLabel;   // the picked vehicle's, for the recording folder
 

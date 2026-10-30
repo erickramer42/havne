@@ -144,6 +144,13 @@ QByteArray osEnv(const char* name)
 #endif
 }
 
+/* The fake ECU's diagnostics as the activity log words them (ADR-0037):
+ * the fake J2534 DLL's and the mock's alike (core/src/mock_ecu.h) */
+const char* const kFakeEcuDiagnosticsLine =
+    "ECU 0x7E8 diagnostics: MIL on; stored P0301 P0420 U0100; pending P0171 "
+    "C0035 B1001; permanent P0420; readiness 8 of 8 complete; freeze frame "
+    "for P0301";
+
 } // namespace
 
 int main(int argc, char** argv)
@@ -2438,6 +2445,20 @@ TEST(BridgeTest, ConnectLogsWhatTheEcuSupports)
               "supplier FAKE SUPPLIER; ECU serial FAKE-SERIAL-000001; "
               "VIN (F190) FAKEJ2534VIN00001; hardware number FAKE-HW-01; "
               "2 refused: 22 F1 94 (7F 22 31), 22 F1 95 (7F 22 31)");
+
+    /* Diagnostics (ADR-0037) log one line once the list has settled:
+     * the fake ECU's codes, readiness and freeze frame */
+    const auto diagnostics_lines = [&log]() {
+        return log.filter(QStringLiteral("ECU 0x7E8 diagnostics:"));
+    };
+    ASSERT_TRUE(
+        spinUntil([&]() { return !diagnostics_lines().isEmpty(); }, 5000))
+        << "no diagnostics line in the log";
+    spinLoop(300);
+    ASSERT_EQ(diagnostics_lines().size(), 1)
+        << diagnostics_lines().join('\n').toStdString();
+    EXPECT_EQ(diagnostics_lines().first().toStdString(),
+              kFakeEcuDiagnosticsLine);
     ASSERT_TRUE(disconnectAndWait(bridge));
 }
 
@@ -2967,6 +2988,116 @@ TEST(BridgeTest, ChannelIdentityTextNamesWhatTheEcuSaid)
     none.rx_id = 0x7E8;
     EXPECT_EQ(SessionBridge::channelIdentityText(none).toStdString(),
               "ECU 0x7E8 identity: nothing asked");
+}
+
+/* The mock's one ECU reports the fake ECU's diagnostics, so the line
+ * the activity log and a recording's events.log keep is the same on
+ * every platform: logged once, after the Session line */
+TEST(BridgeTest, ConnectLogsTheMocksDiagnostics)
+{
+    SessionBridge bridge;
+    QStringList log;
+    QObject::connect(&bridge, &SessionBridge::logMessage,
+                     [&log](const QString& line) { log << line; });
+    ASSERT_TRUE(bridge.connectSession(QStringLiteral("mock://demo")).isEmpty());
+    const auto lines = [&log]() {
+        return log.filter(QStringLiteral(" diagnostics: "));
+    };
+    ASSERT_TRUE(spinUntil([&]() { return !lines().isEmpty(); }, 2000))
+        << "no diagnostics line in the log";
+    spinLoop(300);
+    ASSERT_EQ(lines().size(), 1) << lines().join('\n').toStdString();
+    EXPECT_EQ(lines().first().toStdString(), kFakeEcuDiagnosticsLine);
+    EXPECT_GT(
+        log.indexOf(lines().first()),
+        log.indexOf(QStringLiteral("Session: mock transport; profile mock")));
+    ASSERT_TRUE(disconnectAndWait(bridge));
+
+    /* ?diagnose=0: no line */
+    log.clear();
+    ASSERT_TRUE(bridge.connectSession(QStringLiteral("mock://demo?diagnose=0"))
+                    .isEmpty());
+    spinLoop(300);
+    EXPECT_TRUE(lines().isEmpty()) << lines().join('\n').toStdString();
+    ASSERT_TRUE(disconnectAndWait(bridge));
+}
+
+/* The diagnostics line's wording: each list as answered, cut, refused
+ * or unanswered; readiness with the incomplete monitors by their short
+ * names, a compression engine's by its own; the freeze frame's code or
+ * its absence; nothing asked */
+TEST(BridgeTest, ChannelDiagnosticsTextNamesWhatTheEcuReported)
+{
+    const auto monitor = [](uint8_t id, bool complete) {
+        ecuio_monitor_t m{};
+        m.id = id;
+        m.flags = complete ? ECUIO_MONITOR_COMPLETE : 0;
+        return m;
+    };
+
+    ecuio_channel_diagnostics_t older{};
+    older.flags = ECUIO_DIAG_ASKED | ECUIO_DIAG_COMPLETE | ECUIO_DIAG_READINESS;
+    older.rx_id = 0x7E8;
+    older.readiness = ECUIO_DIAG_ANSWERED;
+    older.monitor_count = 4;
+    older.monitors[0] = monitor(0, true);
+    older.monitors[1] = monitor(8, false);
+    older.monitors[2] = monitor(10, false);
+    older.monitors[3] = monitor(14, true);
+    older.lists[ECUIO_DIAG_STORED].outcome = ECUIO_DIAG_ANSWERED;
+    older.lists[ECUIO_DIAG_PENDING].outcome = ECUIO_DIAG_ANSWERED;
+    older.lists[ECUIO_DIAG_PENDING].reported = 5;
+    older.lists[ECUIO_DIAG_PENDING].held = 2;
+    older.lists[ECUIO_DIAG_PENDING].codes[0] = 0x0171;
+    older.lists[ECUIO_DIAG_PENDING].codes[1] = 0x4035;
+    older.lists[ECUIO_DIAG_PERMANENT].outcome = ECUIO_DIAG_REFUSED;
+    older.lists[ECUIO_DIAG_PERMANENT].nrc = 0x11;
+    older.freeze = ECUIO_DIAG_ANSWERED;
+    EXPECT_EQ(
+        SessionBridge::channelDiagnosticsText(older).toStdString(),
+        "ECU 0x7E8 diagnostics: MIL off; stored none; pending P0171 C0035 "
+        "and 3 more; permanent refused (7F 0A 11); readiness 2 of 4 "
+        "complete (catalyst, EVAP incomplete); no freeze frame");
+
+    ecuio_channel_diagnostics_t diesel{};
+    diesel.flags = ECUIO_DIAG_ASKED | ECUIO_DIAG_COMPLETE |
+                   ECUIO_DIAG_READINESS | ECUIO_DIAG_MIL_ON |
+                   ECUIO_DIAG_COMPRESSION | ECUIO_DIAG_FREEZE_FRAME;
+    diesel.rx_id = 0x7E8;
+    diesel.readiness = ECUIO_DIAG_ANSWERED;
+    diesel.monitor_count = 2;
+    diesel.monitors[0] = monitor(8, false);
+    diesel.monitors[1] = monitor(14, false);
+    diesel.lists[ECUIO_DIAG_STORED].outcome = ECUIO_DIAG_ANSWERED;
+    diesel.lists[ECUIO_DIAG_STORED].reported = 1;
+    diesel.lists[ECUIO_DIAG_STORED].held = 1;
+    diesel.lists[ECUIO_DIAG_STORED].codes[0] = 0x2002;
+    diesel.freeze = ECUIO_DIAG_ANSWERED;
+    diesel.freeze_dtc = 0x2002;
+    EXPECT_EQ(
+        SessionBridge::channelDiagnosticsText(diesel).toStdString(),
+        "ECU 0x7E8 diagnostics: MIL on; stored P2002; readiness 0 of 2 "
+        "complete (NMHC catalyst, PM filter incomplete); freeze frame for "
+        "P2002");
+
+    ecuio_channel_diagnostics_t silent{};
+    silent.flags = ECUIO_DIAG_ASKED | ECUIO_DIAG_COMPLETE;
+    silent.rx_id = 0x18DAF110;
+    silent.readiness = ECUIO_DIAG_UNANSWERED;
+    for (ecuio_dtc_list_t& l : silent.lists) {
+        l.outcome = ECUIO_DIAG_UNANSWERED;
+    }
+    silent.freeze = ECUIO_DIAG_REFUSED;
+    silent.freeze_nrc = 0x12;
+    EXPECT_EQ(SessionBridge::channelDiagnosticsText(silent).toStdString(),
+              "ECU 0x18DAF110 diagnostics: stored unanswered; pending "
+              "unanswered; permanent unanswered; readiness unanswered; freeze "
+              "frame refused (7F 02 12)");
+
+    ecuio_channel_diagnostics_t none{};
+    none.rx_id = 0x7E8;
+    EXPECT_EQ(SessionBridge::channelDiagnosticsText(none).toStdString(),
+              "ECU 0x7E8 diagnostics: nothing asked");
 }
 
 TEST(BridgeTest, ConnectLogsTheMockSession)
