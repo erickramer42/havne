@@ -1,5 +1,5 @@
 // File/layer: tests/test_bridge.cpp | GTest + QtCore, app-layer tests
-// Testing: UNIT/HARNESS — the bridge and its models against the real mock
+// Testing: UNIT/HARNESS: the bridge and its models against the real mock
 //          worker (and, on Windows, the fake J2534 DLL): marshaling,
 //          coalescing, backpressure, the frame log's ring and order, the
 //          signal model's roles and freshness, link states, the activity
@@ -67,12 +67,12 @@ void spinLoop(int ms)
 }
 
 /* Poll-until-predicate with deadline, event-loop flavored. The mock's
- * 50ms cadence is a LOCAL expectation, not a CI-runner guarantee —
+ * 50ms cadence is a LOCAL expectation, not a CI-runner guarantee:
  * a starved macOS VM can deliver 2 frames in 200+ ms of wall clock.
  * Polling keeps the asserted CONTRACT (the
  * condition eventually holds on a healthy stream) and drops the
  * coincidence (any particular wall-clock duration). The event loop
- * must keep turning while polling — worker lambdas drain through it. */
+ * must keep turning while polling: worker lambdas drain through it. */
 template <typename Predicate>
 bool spinUntil(Predicate pred, int timeout_ms, int step_ms = 50)
 {
@@ -452,7 +452,7 @@ TEST(BridgeTest, FramesMarshalFromWorkerToGuiThread)
     // CONTRACT: frames eventually flow. Poll instead of a fixed 300ms.
     const bool flowing = spinUntil(
         [&bridge]() { return bridge.frameCount() > 0; }, 5000);
-    ASSERT_TRUE(flowing) << "no frames in 5s — stream is dead, not slow";
+    ASSERT_TRUE(flowing) << "no frames in 5s: stream is dead, not slow";
 
     // Frames flowed...
     EXPECT_GT(bridge.frameCount(), 0);
@@ -464,7 +464,7 @@ TEST(BridgeTest, FramesMarshalFromWorkerToGuiThread)
 
     // Mid-stream disconnect: late-arriving frames must be dropped,
     // not crash, not append. Equality assertion after a settle window
-    // is duration-independent — any arriving frame would break it.
+    // is duration-independent: any arriving frame would break it.
     bridge.disconnectSession();
     spinLoop(300);   // settle: let any in-flight lambdas drain and drop
     EXPECT_EQ(bridge.frameCount(), frames_before);
@@ -792,7 +792,7 @@ TEST(BridgeTest, FrameLogTogglesToOldestFirst)
         FrameListModel::TimestampRole).toULongLong();
     EXPECT_LT(first, last);
 
-    // Toggle back — must re-sort to descending without reconnect
+    // Toggle back: must re-sort to descending without reconnect
     proxy->setNewestFirst(true);
 
     // Capture BOTH ends fresh
@@ -803,7 +803,7 @@ TEST(BridgeTest, FrameLogTogglesToOldestFirst)
 
     // Top is the newest we've ever seen (>= because the stream kept ticking)
     EXPECT_GE(firstAgain, last);
-    // Bottom is the oldest — at most the original ascending-order top,
+    // Bottom is the oldest: at most the original ascending-order top,
     // and strictly older than the top of the list
     EXPECT_LE(lastAgain, first);      // 'first' = oldest captured earlier
     EXPECT_GT(firstAgain, lastAgain); // reversal actually happened
@@ -840,7 +840,7 @@ TEST(BridgeTest, SignalBatchesAreCoalesced)
     // Ratio contract: at ~20fps
     // frames vs 10Hz batches, coalescing means fewer batches than
     // frames. Per-frame emission (the regression this guards) yields
-    // exact equality — one emission per frame.
+    // exact equality: one emission per frame.
     EXPECT_LE(bridge.signalBatchCount(), bridge.frameCount());
 
     // Values actually flowed through the model
@@ -1224,13 +1224,13 @@ TEST(BridgeTest, StreamingContinuesPastTenThousandFrames)
     bridge.forceFrameCountForTesting(9999);
 
     // CONTRACT: the count advances past the boundary. Was a fixed
-    // 600ms wait (needs ~2 frames) — poll until it's demonstrably past.
+    // 600ms wait (needs ~2 frames): poll until it's demonstrably past.
     ASSERT_TRUE(spinUntil(
         [&bridge]() { return bridge.frameCount() > 10000; }, 5000))
         << "stream stalled at " << bridge.frameCount();
     EXPECT_GT(bridge.frameCount(), 10000);
 
-    // And no drops occurred — nothing was rejected at the boundary
+    // And no drops occurred: nothing was rejected at the boundary
     EXPECT_EQ(bridge.droppedFrames(), 0);
 
     // Liveness, not coincidence: the log model kept receiving rows too
@@ -1247,7 +1247,7 @@ TEST(BridgeTest, DispatchedShortFrameHonorsDataLength)
     // Unique timestamp so we can find OUR row among mock frames
     ecuio_frame_t f{};
     f.timestamp_us = 777777;   // steady-clock µs from the mock won't collide
-    f.arbitration_id = 0x0C0;  // telemetry ID — decodes (gate-consistent)
+    f.arbitration_id = 0x0C0;  // telemetry ID: decodes (gate-consistent)
     f.channel_id = 0;
     f.data_length = 4;          // the whole point: NOT 8
     f.flags = ECUIO_FRAME_FLAG_EXTENDED;    // was: f.is_extended = 1
@@ -1259,7 +1259,7 @@ TEST(BridgeTest, DispatchedShortFrameHonorsDataLength)
     bridge.dispatchFrameForTesting(f);
 
     // CONTRACT: our dispatched frame reaches the model. Poll on the
-    // finding condition instead of a fixed 200ms settle — the row must
+    // finding condition instead of a fixed 200ms settle: the row must
     // appear through the queued-invocation path regardless of runner speed.
     FrameListModel* proxy = bridge.model();
     auto row_finder = [proxy]() {
@@ -1376,10 +1376,10 @@ TEST(BridgeTest, BackpressureDropsAreCountedAndReported)
     // GE not EQ: the mock worker may contribute a frame or two mid-loop.
     EXPECT_GE(bridge.droppedFrames(), 500);
 
-    // Nothing could have been reported yet — the queue hasn't been processed
+    // Nothing could have been reported yet: the queue hasn't been processed
     EXPECT_EQ(notifyCount, 0);
 
-    // CONTRACT: the backlog drains. Was a fixed 800ms — poll until the
+    // CONTRACT: the backlog drains. Was a fixed 800ms; poll until the
     // overwhelming majority of the queued invocations processed.
     ASSERT_TRUE(spinUntil(
         [&bridge]() { return bridge.frameCount() > 900; }, 10000))
@@ -1392,7 +1392,7 @@ TEST(BridgeTest, BackpressureDropsAreCountedAndReported)
     EXPECT_EQ(lastReported, bridge.droppedFrames());
     // The queued frames were actually processed, not silently lost
     EXPECT_GT(bridge.frameCount(), 900);
-    // Drained backlog frees the gate again — no permanent wedge
+    // Drained backlog frees the gate again: no permanent wedge
     // (the running mock resumes normal delivery after this)
 
     bridge.disconnectSession();
@@ -1404,7 +1404,7 @@ TEST(BridgeTest, BackpressureDropsAreCountedAndReported)
 
 namespace {
 
-/* Minimal two-signal set, built test-side. Plain assignments only —
+/* Minimal two-signal set, built test-side. Plain assignments only:
    designated initializers are C++20, and MSVC accepts them where GCC
    rejects them. */
 void buildTestSignalSet(ecuio_signal_def_t (&defs)[2], ecuio_signal_set_t& set)
@@ -1456,7 +1456,7 @@ TEST(BridgeTest, HistoryRingEvictsOldestAtCapacity)
     for (int s = 0; s < 2; ++s) {
         const QVariantMap m = data.at(s).toMap();
         const QVariantList samples = m.value("samples").toList();
-        // Exactly capacity survives — ring size is a hard bound, no leaks
+        // Exactly capacity survives: ring size is a hard bound, no leaks
         ASSERT_EQ(samples.size(), SignalListModel::HistoryCapacity * 2)
             << "wrong sample count for " << m.value("name").toString().toStdString();
 
@@ -1948,7 +1948,7 @@ TEST(BridgeTest, StripChartDataPopulatedByLiveStream)
 
 TEST(BridgeTest, DiscoveredDevicesHaveWellFormedEntries)
 {
-    /* Marshaling only — the discovery itself is covered by
+    /* Marshaling only: the discovery itself is covered by
        test_j2534_discovery against the live registry. Count is
        registry-dependent (0..16, empty on non-Windows), so this pins
        SHAPE: every entry carries string vendorName/dllPath/architecture.
@@ -1994,7 +1994,7 @@ TEST(BridgeTest, CurrentUriTracksConnectState)
 {
     /* currentUri: empty while disconnected, set after a successful
        connect, cleared by disconnect. The QML picker displays it as
-       the ground truth of what's live — staleness here lies to the
+       the ground truth of what's live: staleness here lies to the
        user. Failed connects must not leave a residue either. */
     SessionBridge bridge;
     EXPECT_TRUE(bridge.currentUri().isEmpty());
@@ -2530,7 +2530,7 @@ TEST(BridgeTest, RawProfileLeavesSignalModelEmpty)
     /* A raw session after a mock session must CLEAR the signal model.
      * Failure shape guarded: a setSignalSet that early-returns on NULL
      * without clearing leaves a raw session displaying the PREVIOUS
-     * session's rows with no live updates — stale data posing as live.
+     * session's rows with no live updates: stale data posing as live.
      * Frames still flow to the Log page; decode alone is silenced. */
     SessionBridge bridge;
     ASSERT_TRUE(bridge.connectSession("mock://profile-then-raw").isEmpty());
@@ -2542,7 +2542,7 @@ TEST(BridgeTest, RawProfileLeavesSignalModelEmpty)
 
     ASSERT_TRUE(bridge.connectSession("mock://profile-raw-stage2?profile=raw")
                     .isEmpty());
-    /* Frames keep arriving (mock streams regardless of profile) —
+    /* Frames keep arriving (mock streams regardless of profile):
      * the Log page stays live while LiveView stays empty. */
     ASSERT_TRUE(spinUntil(
         [&bridge]() { return bridge.frameCount() > 0; }, 5000));
@@ -2555,7 +2555,7 @@ TEST(BridgeTest, AgeMsRoleEmittedAndRefreshesWhileStalled)
 {
     /* Freshness contract: (a) updateValues emits dataChanged carrying
      * AgeMsRole; (b) refreshAges emits over all rows for AgeMsRole
-     * ONLY — the stalled-row dimming path; (c) ageMs is -1 before the
+     * ONLY: the stalled-row dimming path; (c) ageMs is -1 before the
      * first sample and a sane clock delta after. ageMs's wall-clock
      * basis is nondeterministic by nature, so assert ranges, not
      * exact values. */
@@ -2591,7 +2591,7 @@ TEST(BridgeTest, AgeMsRoleEmittedAndRefreshesWhileStalled)
     EXPECT_EQ(ageEmissions, before + 1);
 
     SignalListModel empty;
-    empty.refreshAges();   // no rows — silent, no crash
+    empty.refreshAges();   // no rows: silent, no crash
 }
 
 /* The "Session:" line's wording, from hand-built infos: every field

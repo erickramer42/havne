@@ -1,6 +1,6 @@
 // File/layer: core/src/uri_query.h | internal, C++17, Qt-free, header-only
-// Testing: UNIT — CoreTest's profile-query and mock-query cases;
-//          HARNESS — J2534QueryParamTest's malformed-query cases
+// Testing: UNIT: CoreTest's profile-query and mock-query cases;
+//          HARNESS: J2534QueryParamTest's malformed-query cases
 //
 // The one URI query grammar. ecuio_session_create splits the query once,
 // refuses any key its scheme's transport doesn't read and reads ?profile=,

@@ -22,7 +22,7 @@
 // fake) runs when ECUIO_SURROGATE_EXE points at Win32-tree artifacts.
 // The write/ioctl/filter assertions are deliberately observable
 // through RETURN VALUES and frames read back over the pipe alone (no
-// fake-instance hooks) so they hold in BOTH architectures unchanged —
+// fake-instance hooks) so they hold in BOTH architectures unchanged:
 // an x64 test cannot reach into the x86 child's fake instance.
 
 #include <gtest/gtest.h>
@@ -98,7 +98,7 @@ void sur_capture(const ecuio_pt_rx_t* msg, SurCapture* cap)
     }
 }
 
-/* Poll-until-condition with deadline — no wall-clock bets: a starved
+/* Poll-until-condition with deadline, no wall-clock bets: a starved
  * CI runner can take far longer than the local cadence suggests. */
 template <typename Pred>
 bool wait_until(Pred pred, int timeout_ms, int step_ms = 10)
@@ -126,7 +126,7 @@ void drain_sur_frames(ecuio_j2534_sur_handle_t* h, SurCapture* cap)
 }
 
 /* Flattened-SCONFIG helper: one (Parameter, Value) u32 pair, host
- * endianness (memcpy) — valid because every participant in this
+ * endianness (memcpy): valid because every participant in this
  * suite is x86 or x64, both little-endian, and both sides of the
  * wire use memcpy-based (un)flattening. */
 void put_pair(unsigned char* buf, uint32_t param, uint32_t value)
@@ -153,7 +153,7 @@ TEST(J2534SurrogateTest, OpenConnectInjectReadCloseCycle)
     ASSERT_EQ(ecuio_j2534_sur_open(fake_dll_path(), fake_dll_arch(), &h), ECUIO_OK);
     ASSERT_NE(h, nullptr);
 
-    /* Connect with default sentinel baud — resolves to ISO 15765 500k
+    /* Connect with default sentinel baud: resolves to ISO 15765 500k
      * client-side per the loader contract; the surrogate relays the
      * resolved values verbatim to the fake's PassThruConnect. */
     unsigned long channel = 0;
@@ -174,7 +174,7 @@ TEST(J2534SurrogateTest, OpenConnectInjectReadCloseCycle)
                   h, f2, 8, 3000, 0), ECUIO_OK);
 
     SurCapture cap;
-    /* The predicate MUST drain — cap only grows when reads are
+    /* The predicate MUST drain: cap only grows when reads are
      * issued over the pipe, so waiting on count without draining
      * inside the loop burns the full timeout every run. Sub-second
      * when IPC works. */
@@ -211,7 +211,7 @@ TEST(J2534SurrogateTest, ReadPumpIsGatedOnConnect)
 {
     /* Frame injected PRE-connect parks in the fake's FIFO; the child's
      * read gate (no channel connected yet) must hold it there. It
-     * arrives only after CONNECT — the fake's InjectFrame and ReadMsgs
+     * arrives only after CONNECT: the fake's InjectFrame and ReadMsgs
      * share one queue,
      * so parking is real, not an artifact of separate containers. */
     ecuio_j2534_sur_handle_t* h = nullptr;
@@ -225,7 +225,7 @@ TEST(J2534SurrogateTest, ReadPumpIsGatedOnConnect)
     const bool early = wait_until(
         [&]() { drain_sur_frames(h, &cap); return cap.count.load() > 0; },
         1500, 50);
-    EXPECT_FALSE(early) << "frame flowed before CONNECT — pump gating broken";
+    EXPECT_FALSE(early) << "frame flowed before CONNECT: pump gating broken";
     EXPECT_EQ(cap.count.load(), 0);
 
     unsigned long channel = 0;
@@ -410,7 +410,7 @@ TEST(J2534SurrogateTest, WriteRoundTripProducesEchoResponse)
      * pipe, the surrogate materializes a PASSTHRU_MSG and calls
      * PassThruWriteMsgs, the fake records it and enqueues its
      * deterministic echo (byte 0 + 0x40), and our next OP_READ brings
-     * it back over the pipe. Observable from EITHER architecture — no
+     * it back over the pipe. Observable from EITHER architecture: no
      * fake-instance hooks involved. */
     ecuio_j2534_sur_handle_t* h = nullptr;
     ASSERT_EQ(ecuio_j2534_sur_open(fake_dll_path(), fake_dll_arch(), &h), ECUIO_OK);
@@ -549,7 +549,7 @@ TEST(J2534SurrogateTest, IoctlWhitelistRefusesUnsupportedIds)
     /* Both ends must refuse an out-of-contract ioctl: the loader seam
      * returns NOT_IMPLEMENTED before the pipe; the CHILD whitelist
      * (patched into the OP_IOCTL handler) must independently fail it
-     * if a request somehow arrives — it answers STATUS_FAILED, as a
+     * if a request somehow arrives: it answers STATUS_FAILED, as a
      * strict vendor would, which crosses the pipe as
      * ECUIO_ERR_VENDOR_REFUSED. Driving the client directly (this
      * suite) exercises the child side. */
@@ -558,7 +558,7 @@ TEST(J2534SurrogateTest, IoctlWhitelistRefusesUnsupportedIds)
     unsigned long channel = 0;
     ASSERT_EQ(ecuio_j2534_sur_connect_channel(h, 0, 0, &channel), ECUIO_OK);
 
-    /* 0x05 = FIVE_BAUD_INIT — pointer-bearing, never shapable. */
+    /* 0x05 = FIVE_BAUD_INIT: pointer-bearing, never shapable. */
     EXPECT_EQ(ecuio_j2534_sur_ioctl(h, channel, 0x05,
                                     nullptr, 0, nullptr, 0, nullptr),
               ECUIO_ERR_VENDOR_REFUSED);
@@ -569,7 +569,7 @@ TEST(J2534SurrogateTest, IoctlWhitelistRefusesUnsupportedIds)
 TEST(J2534SurrogateTest, FilterStartStopLifecycle)
 {
     /* Register a PASS filter for a 29-bit-style 4-byte pattern, stop
-     * it, then stop it AGAIN — the strict-vendor stop-twice refusal
+     * it, then stop it AGAIN: the strict-vendor stop-twice refusal
      * must surface as an error, proving vendor status isn't being
      * flattened into silent success anywhere on the relay. */
     ecuio_j2534_sur_handle_t* h = nullptr;
@@ -604,14 +604,14 @@ TEST(J2534SurrogateTest, FilterStartStopLifecycle)
 
     EXPECT_EQ(ecuio_j2534_sur_stop_msg_filter(h, channel, filter_id), ECUIO_OK);
     EXPECT_EQ(ecuio_j2534_sur_stop_msg_filter(h, channel, filter_id),
-              ECUIO_ERR_VENDOR_REFUSED);    /* already stopped — strict vendor */
+              ECUIO_ERR_VENDOR_REFUSED);    /* already stopped: strict vendor */
 
     EXPECT_EQ(ecuio_j2534_sur_close(h), ECUIO_OK);
 }
 
 /* A mid-session vendor call that outlives the client's 3s transact
  * timeout leaves its response in flight. The NEXT request must
- * recover — consume the stale response — not desync against it.
+ * recover (consume the stale response), not desync against it.
  * Without that, this second, valid ioctl fails on a request-ID
  * mismatch. Knob armed BEFORE open (the child snapshots the environment at
  * spawn; SetEnvironmentVariableA afterwards does not propagate) and
@@ -626,7 +626,7 @@ TEST(J2534SurrogateTest, TimedOutOpDoesNotDesyncNextRequest)
     unsigned long channel = 0;
     ASSERT_EQ(ecuio_j2534_sur_connect_channel(h, 0, 0, &channel), ECUIO_OK);
 
-    /* Vendor ioctl sleeps 3.5s — 0.5s past the 3s transact timeout:
+    /* Vendor ioctl sleeps 3.5s: 0.5s past the 3s transact timeout:
      * parent gives up at ~3s, response lands at ~3.5s. */
     unsigned char out[8] = {};
     uint32_t out_len = 0;
@@ -675,7 +675,7 @@ TEST(J2534SurrogateTest, BlockedVendorOpenFailsAtHandshakeTimeout)
     EXPECT_EQ(detail, "PassThruOpen didn't return within 500 ms; the "
                       "driver may be waiting for its adapter");
     EXPECT_EQ(h, nullptr);
-    /* Failed at the SHRUNK window (~0.5s), nowhere near the 8s default —
+    /* Failed at the SHRUNK window (~0.5s), nowhere near the 8s default:
      * if this approaches 8s, an env knob stopped being honored. */
     EXPECT_LT(elapsed, 3000);
 }
@@ -1164,7 +1164,7 @@ TEST(J2534SurrogateTest, EarlierSessionLogIsKept)
  * the batch and only judge the status when the batch is empty. A
  * client that judged the status first would discard the batch and
  * render a talking bus invisible. Knob armed BEFORE
- * open — the child snapshots the environment at spawn (same
+ * open: the child snapshots the environment at spawn (same
  * discipline as ECUIO_FAKE_IOCTL_DELAY_MS). */
 TEST(J2534SurrogateTest, SpecTimeoutReadDeliversPartialBatch)
 {
@@ -1272,7 +1272,7 @@ TEST(J2534SurrogateTest, ABatchOfLongMessagesCrossesThePipeWhole)
  * 16 stale/zero frames and the client reports the batch as healthy.
  * The knob is sticky in the child (env inherited at spawn; the
  * parent's clear never propagates), so recovery is not observable
- * here — instead the follow-up ioctl proves request correlation
+ * here: instead the follow-up ioctl proves request correlation
  * survived the poisoned request. */
 TEST(J2534SurrogateTest, HardErrorUntouchedCountDeliversNoFrames)
 {

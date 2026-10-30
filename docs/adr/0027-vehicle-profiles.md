@@ -1,4 +1,4 @@
-# ADR-0027: Vehicle profiles — a named vehicle remembers its connection, its plotted signals and its recordings' name, and the VIN recognizes it
+# ADR-0027: Vehicle profiles, a named vehicle remembers its connection, its plotted signals and its recordings' name, and the VIN recognizes it
 
 - **Status:** Accepted.
 - **Date:** 2026-10-27. Implemented with this record.

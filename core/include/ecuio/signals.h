@@ -1,11 +1,11 @@
 // File/layer: core/include/ecuio/signals.h | C ABI, public
-// Testing: UNIT — validator edge cases, mux range checks, BE vs LE comparison
+// Testing: UNIT: validator edge cases, mux range checks, BE vs LE comparison
 
 #ifndef ECUIO_SIGNALS_H
 #define ECUIO_SIGNALS_H
 
 /* ecuio_def_applies_to_frame needs the complete ecuio_frame_t, so
- * include core.h (which never includes this header — no cycle). A
+ * include core.h (which never includes this header: no cycle). A
  * forward declaration would clash with core.h's typedef (C2371). */
 #include "ecuio/core.h"
 
@@ -97,7 +97,7 @@ _Static_assert(offsetof(ecuio_signal_def_t, reserved) == 96, "def reserved offse
 /* ADR-0013 §4: profile-declared channels. rx_id is the
  * flow-control filter target (receive); tx_id is the request
  * destination. Sets declaring none (raw/mock) keep channel_count
- * 0 — no filters, no requests, exactly today's behavior. This is
+ * 0: no filters, no requests, exactly today's behavior. This is
  * the seed of the v0.5.0 plugin filter surface: bounded, validated
  * at registration, consumed by the j2534 transport only. */
 #define ECUIO_MAX_CHANNELS 4
@@ -245,11 +245,12 @@ _Static_assert(offsetof(ecuio_validation_t, reserved) == 8, "validation reserved
  * is checked first, then the byte order. */
 int ecuio_validate_signal(const ecuio_signal_def_t* signal);
 
-/* Frame gate, called BEFORE ecuio_decode_signal (the bridge's decode
+/* Frame gate, called BEFORE ecuio_decode_signal (dispatch's decode
  * loop): returns 1 when the def applies to the frame (its message_id
  * is the frame's arbitration ID and, with mux on, the frame carries
- * its mux key), and 0 otherwise or for a NULL argument. Saves the
- * extraction for frames the def can't read. */
+ * its mux key), and 0 otherwise, for a frame flagged
+ * ECUIO_FRAME_FLAG_ERROR (its ID is an error class) or for a NULL
+ * argument. Saves the extraction for frames the def can't read. */
 int ecuio_def_applies_to_frame(const ecuio_signal_def_t* signal,
                                const ecuio_frame_t* frame);
 

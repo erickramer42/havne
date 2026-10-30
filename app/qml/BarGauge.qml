@@ -1,5 +1,5 @@
 // File/layer: app/qml/BarGauge.qml | Qt6 Quick, UI layer
-// Testing: manual smoke — DashboardPage under mock://demo; segment
+// Testing: manual smoke: DashboardPage under mock://demo; segment
 //          count follows width (phone ~30, desktop ~50); the leading
 //          segment fades in, so motion reads smooth at any count
 

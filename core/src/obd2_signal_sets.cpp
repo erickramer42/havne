@@ -1,7 +1,7 @@
 // File/layer: core/src/obd2_signal_sets.cpp | C++17, Qt-free, ALL platforms
 //             (signal data is transport-agnostic; j2534-only consumers route
 //             through the profile registry, which exists everywhere)
-// Testing: UNIT — tests/test_obd2.cpp validates the set and round-trips
+// Testing: UNIT: tests/test_obd2.cpp validates the set and round-trips
 //          decode against wire bytes matching the fake's canned responses;
 //          end-to-end HARNESS coverage rides the Phase 5 stream tests.
 //

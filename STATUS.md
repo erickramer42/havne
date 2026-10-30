@@ -1,4 +1,4 @@
-# Havne — Project Status
+# Havne: Project Status
 
 **Updated:** 2026-10-29 · **Version:** v0.3.3 ·
 [![CI](https://github.com/erickramer42/havne/actions/workflows/ci.yml/badge.svg)](https://github.com/erickramer42/havne/actions/workflows/ci.yml)
@@ -144,15 +144,19 @@ background too. Next come v0.3.4 and v0.3.5 ([roadmap](#roadmap)).
   ELM327 [bench](docs/bench-sessions/elm327-bench-runsheet.md) and
   [vehicle](docs/bench-sessions/elm327-vehicle-runsheet.md) sheets, and
   the [phone's](docs/bench-sessions/android-phone-runsheet.md).
-- **Tests:** 537 ctest cases on Windows (both trees rebuilt,
-  2026-10-29), all passing but two env-gated skips (the cross-arch
+- **Tests:** 587 ctest cases on Windows (both trees rebuilt,
+  2026-10-30), all passing but two env-gated skips (the cross-arch
   case, and the real-car recordings' diff, run locally), plus the
   cross-arch subset (82/82); 0 MSVC warnings. CI runs ctest on Windows,
-  macOS and Linux; core under ASan and UBSan; 60 s of each libFuzzer
+  macOS and Linux, with SocketCAN's suites on Linux's `vcan0`; core
+  under ASan and UBSan, `vcan0` included; 60 s of each libFuzzer
   harness ([fuzz/README.md](fuzz/README.md)); clang-tidy and CodeQL;
-  the load test on Windows and Linux; line coverage on Windows; the
-  Android and iOS cross-builds; and, on request, an iOS
-  Simulator smoke. The badge above shows its state. Tiers, suites and
+  the C ABI against the last release's; the load test on Windows and
+  Linux; line coverage on Windows; the AppImage, built and started
+  offscreen; the core packages, built twice to the same bytes, then
+  installed and built against; the probes under `bpftrace`; the
+  Android and iOS cross-builds; and, on request, an iOS Simulator
+  smoke. The badge above shows its state. Tiers, suites and
   gaps are in [docs/testing.md](docs/testing.md).
 
 ## Components
@@ -161,7 +165,7 @@ background too. Next come v0.3.4 and v0.3.5 ([roadmap](#roadmap)).
 |---|---|---|
 | Core sessions and callbacks | Stable: snapshot dispatch, the 4,120-byte frame, close and destroy apart | [ADR-0002](docs/adr/0002-callback-pair-identity-snapshot-dispatch.md), [ADR-0006](docs/adr/0006-frame-abi-v0.3.md) |
 | Signal decode | Linear scaling in `double` of unsigned, signed and binary32 fields in either byte order, gated on message ID and a mux key of up to 3 bytes; text and hex fields; a validator that accepts exactly what the decoder decodes | [ADR-0004](docs/adr/0004-signal-decoding-model.md), [ADR-0016](docs/adr/0016-signal-definition-layout.md) |
-| Mock transport | A ~2-minute drive cycle on a vehicle model (`core/src/mock_drive_cycle.h`) whose readings stay consistent with each other, every tick round-tripped through the mock set (`CoreTest.MockDriveCycle*`) | — |
+| Mock transport | A ~2-minute drive cycle on a vehicle model (`core/src/mock_drive_cycle.h`) whose readings stay consistent with each other, every tick round-tripped through the mock set (`CoreTest.MockDriveCycle*`) | none |
 | Replay transport | UNIT-tested, against a scrubbed real-bus fixture too; passive, default profile `raw` | [ADR-0023](docs/adr/0023-replay-transport.md) |
 | Bridge and models | Worker → GUI marshaling with bounded backpressure, 100 ms coalescing, a 10k-row frame log, a 360-point history per signal (each 100 ms window's lowest, highest and newest), link-health polling, recording; QML reaches it as the `Bridge` singleton | [ADR-0003](docs/adr/0003-backpressure-bounds-in-flight-frames.md), [ADR-0005](docs/adr/0005-coalesced-signal-updates.md) |
 | QML pages | Home, Dashboard, Live, Log, Settings; `test_qml` runs them against a real bridge, offscreen | [docs/architecture.md](docs/architecture.md#the-ui-layer) |
@@ -280,8 +284,10 @@ scheduled. What each holds, past its row:
   Ubuntu, ELM327 runs over termios, and the AppImage runs on Ubuntu,
   Arch and Kali; [docs/linux.md](docs/linux.md) is the guide: the
   downloads, adapters and their permissions, SocketCAN, tracing, and
-  what has run where. Not yet run: the app's window on a Linux desktop
-  and an adapter on a Linux machine.
+  what has run where. Its window ran under WSLg on all three (the
+  simulated car connected, every page, closed cleanly). Not yet run: the
+  app on a Linux machine's own desktop and an adapter on a Linux
+  machine.
 - **Linux downloads, an SBOM, reproducible builds:** built
   ([ADR-0035](docs/adr/0035-linux-downloads-sbom-reproducible.md)):
   each release adds the AppImage and core alone as a deb and a tarball

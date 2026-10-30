@@ -1,8 +1,8 @@
 // File/layer: core/src/session.h | internal, C++17, Qt-free; the session
 //             struct behind the opaque ecuio_session_t
-// Testing: UNIT — CoreTest (sessions, callbacks, the decoded values and
+// Testing: UNIT: CoreTest (sessions, callbacks, the decoded values and
 //          their buffers, the info, support and identity copies);
-//          HARNESS — the J2534 suites, whose worker writes support[] and
+//          HARNESS: the J2534 suites, whose worker writes support[] and
 //          identity[]
 
 #ifndef ECUIO_SESSION_H
@@ -22,6 +22,10 @@
 
 struct ecuio_session {
     std::atomic<bool> closed{false};
+    /* The worker was started: a start after it is the transport's no-op,
+     * and the session_start probe marks the first only (ADR-0034 §4).
+     * The session's one caller alone reads and writes it. */
+    bool started = false;
     std::mutex callback_mutex;
     std::vector<std::pair<ecuio_frame_callback_t, void*>> callbacks;
     /* Under the same mutex: the values callbacks (ADR-0024) */

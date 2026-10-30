@@ -356,7 +356,7 @@ void SignalListModel::updateWindow(const std::vector<WindowValue>& window)
         emit dataChanged(index(firstRow), index(lastRow),
                          {ValueRole, WindowHighRole, WindowLowRole, HasValueRole,
                           AgeMsRole});
-        // One emission per batch — the strip chart's sole repaint trigger.
+        // One emission per batch: the strip chart's sole repaint trigger.
         emit valuesUpdated();
     }
 }
@@ -530,7 +530,7 @@ SessionBridge::SessionBridge(QObject* parent)
 
     connect(m_coalesceTimer, &QTimer::timeout, this, [this]() {
         notifyFrameCounts();
-        pollLinkHealth();   // every tick while connected — transitions only
+        pollLinkHealth();   // every tick while connected: transitions only
         pollChannelSupport();
         pollChannelIdentity();
         pollReplayEnd();
@@ -565,7 +565,7 @@ SessionBridge::~SessionBridge()
     // Async connect worker first: it calls core and posts a queued
     // completion against `this`. Join before tearing the session or
     // shutting core down. Worst case bounded by the surrogate handshake
-    // timeout (~8 s) at app exit with a wedged vendor — acceptable for
+    // timeout (~8 s) at app exit with a wedged vendor: acceptable for
     // shutdown, unacceptable for the UI thread mid-session (which is
     // why connect is async at all).
     if (m_connectThread.joinable()) {
@@ -627,7 +627,7 @@ QVariantList SessionBridge::discoverJ2534Devices() const
         m["vendorName"] = QString::fromUtf8(devices[i].vendor_name);
         m["dllPath"] = QString::fromUtf8(devices[i].dll_path);
         /* reserved[0] is the loader's PE sniff: 1 = x86, 2 = x64,
-         * 0 = unknown. Unknown is displayed honestly — the loader
+         * 0 = unknown. Unknown is displayed honestly: the loader
          * sends it to the x64 surrogate, which is where it would
          * load, not a claim about the binary. */
         m["architecture"] = (devices[i].reserved[0] == 2)
@@ -1302,7 +1302,7 @@ void SessionBridge::onFrame(const ecuio_frame_t* frame, void* user_data)
         return;
     }
 
-    // ecuio_frame_t holds its payload INLINE (data[ECUIO_FRAME_DATA_MAX]) —
+    // ecuio_frame_t holds its payload INLINE (data[ECUIO_FRAME_DATA_MAX]):
     // this struct copy is a deep copy of the payload; no dangling pointer
     // is possible.
     const ecuio_frame_t copy = *frame;
@@ -1670,14 +1670,14 @@ void SessionBridge::pollLinkHealth()
     uint32_t episodes = 0;
     (void)ecuio_session_get_error_state(m_session, &last_error, &episodes);
     if (last_error == m_linkErrorCode && episodes == m_errorEpisodes) {
-        return;   // silent on unchanged state — the atomics only move
+        return;   // silent on unchanged state: the atomics only move
                   // on transitions, so this is not a poll storm
     }
     const int32_t prev = m_linkErrorCode;
     m_linkErrorCode = last_error;
     m_errorEpisodes = episodes;
 
-    /* Transitions land in the activity log with ZERO QML work — this
+    /* Transitions land in the activity log with ZERO QML work: this
      * alone turns "connected with frozen values" into a named fault
      * in the existing log surface. */
     if (prev != ECUIO_OK && last_error == ECUIO_OK) {
@@ -2081,7 +2081,7 @@ void SessionBridge::pollSleep()
 
 /* The published state strings, in one place; QML's Theme.linkColor and
  * Theme.linkLabel key on them. Static and session-free so test_bridge
- * can pin every mapping without a transport — linkState() itself stays
+ * can pin every mapping without a transport: linkState() itself stays
  * a connected-check + delegation. */
 QString SessionBridge::linkStateForError(int32_t errorCode)
 {

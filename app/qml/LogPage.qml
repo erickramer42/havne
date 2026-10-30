@@ -15,7 +15,7 @@
 //          the row order (arrival; a connect empties the table) by
 //          BridgeTest.FrameLogOrdersByArrivalNotTimestamp and
 //          .ConnectStartsAnEmptyFrameLog.
-//          Oldest-first follow: manual smoke — while mock:// streams,
+//          Oldest-first follow: manual smoke while mock:// streams,
 //          scroll up by drag, wheel and scroll bar (the view holds), then
 //          "Latest" or scrolling to the end resumes following.
 
@@ -201,9 +201,9 @@ Pane {
                     elide: Text.ElideRight
                     text: !Bridge.connected ? qsTr("Idle")
                         : Bridge.logPaused
-                          ? qsTr("Paused — %1 frames received; new frames aren't logged")
+                          ? qsTr("Paused: %1 frames received; new frames aren't logged")
                                 .arg(Bridge.frameCount)
-                        : qsTr("Logging — %1 frames").arg(Bridge.frameCount)
+                        : qsTr("Logging: %1 frames").arg(Bridge.frameCount)
                     color: !Bridge.connected ? Theme.textDim
                          : Bridge.logPaused ? Theme.warning
                          : Theme.success
@@ -372,7 +372,7 @@ Pane {
                         required property int  index
 
                         // Roles from FrameListModel::roleNames(): the model
-                        // registers "arbId" — bind exactly that name. A
+                        // registers "arbId": bind exactly that name. A
                         // misspelled role is undefined at runtime, not a
                         // build error: the column would render empty and
                         // throw per delegate.
@@ -418,7 +418,7 @@ Pane {
                     Label {
                         anchors.centerIn: parent
                         visible: frameList.count === 0
-                        text: !Bridge.connected ? qsTr("No session — connect one from Settings")
+                        text: !Bridge.connected ? qsTr("No session: connect one from Settings")
                             : Bridge.logPaused ? qsTr("Paused")
                             : qsTr("Waiting for frames…")
                         color: Theme.textDim

@@ -1,5 +1,5 @@
 // File/layer: fuzz/fuzz_uds_query.cpp | C++17, Qt-free, libFuzzer
-// Testing: FUZZ — arbitrary ?did= values through the query split and the
+// Testing: FUZZ: arbitrary ?did= values through the query split and the
 //          uds-generic builder: the status is one of two, the detail is a
 //          terminated line, a success builds a set the validator accepts
 //          whose polled head fits the engine's table, two calls agree

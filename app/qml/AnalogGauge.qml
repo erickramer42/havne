@@ -1,5 +1,5 @@
 // File/layer: app/qml/AnalogGauge.qml | Qt6 Quick + Shapes, UI layer
-// Testing: manual smoke — DashboardPage under mock://demo at 160 px
+// Testing: manual smoke: DashboardPage under mock://demo at 160 px
 //          (numerals shrink, then thin out) through 480 px; sweep on
 //          connect; tap clears the peak marker
 

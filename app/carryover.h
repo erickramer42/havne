@@ -1,5 +1,5 @@
 // File/layer: app/carryover.h | Qt6 Core, app layer, C++17
-// Testing: UNIT — BridgeTest.CarryOver* (test_bridge): the preferences
+// Testing: UNIT: BridgeTest.CarryOver* (test_bridge): the preferences
 //          copied once, never over a store that has some, and the
 //          bridge's recent recordings reading the earlier folder too
 //

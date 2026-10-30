@@ -136,7 +136,7 @@ TEST_F(SignalDecodeTest, ValidateSignal_NameUnitDecimals)
     ecuio_signal_def_t signal = {};
     signal.kind = ECUIO_VALUE_UINT;
     signal.bit_length = 8;
-    /* Fill ALL 32 bytes with non-null chars — no room for terminator */
+    /* Fill ALL 32 bytes with non-null chars: no room for terminator */
     /* Intentional: tests validator's handling of unterminated strings */
     for (size_t i = 0; i < sizeof(signal.name); ++i) {
         signal.name[i] = 'A';
@@ -485,6 +485,28 @@ TEST_F(SignalDecodeTest, ThreeByteMuxKeyGatesAndDecodes)
     signal.mux_offset = 0;
     f.data_length = static_cast<uint16_t>(ECUIO_FRAME_DATA_MAX + 1u);
     EXPECT_EQ(ecuio_def_applies_to_frame(&signal, &f), 1);
+}
+
+/* An error report (SocketCAN's, ID = its class bits) on a def's ID
+ * carries the error's detail, never the def's message: 0x0C0, the
+ * mock's telemetry ID, is BUSERROR | BUSOFF. Data on the same ID still
+ * applies. */
+TEST(SignalsTest, AnErrorFrameAppliesToNoDef)
+{
+    const ecuio_signal_set_t* set = ecuio_mock_signal_set();
+    ASSERT_NE(set, nullptr);
+    ASSERT_GT(set->count, 0u);
+    ecuio_frame_t f = {};
+    f.arbitration_id = ECUIO_MOCK_TELEMETRY_ARB_ID;
+    f.data_length = ECUIO_MOCK_TELEMETRY_PAYLOAD_LEN;
+    for (uint32_t i = 0; i < set->count; ++i) {
+        f.flags = ECUIO_FRAME_FLAG_FD;
+        EXPECT_EQ(ecuio_def_applies_to_frame(&set->defs[i], &f), 1)
+            << set->defs[i].name;
+        f.flags = ECUIO_FRAME_FLAG_ERROR;
+        EXPECT_EQ(ecuio_def_applies_to_frame(&set->defs[i], &f), 0)
+            << set->defs[i].name;
+    }
 }
 
 TEST(SignalsTest, SignalDefLayoutIsPinned)

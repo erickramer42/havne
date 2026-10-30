@@ -1,5 +1,5 @@
 // File/layer: fuzz/fuzz_validate_set.cpp | C++17, Qt-free, libFuzzer
-// Testing: FUZZ — arbitrary sets against the set validator: the code
+// Testing: FUZZ: arbitrary sets against the set validator: the code
 //          range, the index semantics, the out contract, determinism
 
 #include <ecuio/signals.h>

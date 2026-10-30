@@ -2,10 +2,10 @@
 //             C declarations, Qt-free; included by core sources,
 //             test_core, test_elm327, test_j2534_load and
 //             test_j2534_routing
-// Testing: HARNESS — test_j2534_load and test_j2534_routing call the
+// Testing: HARNESS: test_j2534_load and test_j2534_routing call the
 //          loader helpers directly, the other J2534 suites reach them
 //          through the transport ops; test_elm327 puts its fake ELM327
-//          behind the port opener; UNIT — CoreTest through the mock
+//          behind the port opener; UNIT: CoreTest through the mock
 //          transport
 
 #ifndef ECUIO_INTERNAL_H
@@ -29,7 +29,7 @@ void ecuio_session_dispatch_callbacks(ecuio_session_t* session,
  * polymorphically. ops is a pointer to static, immutable vtable storage
  * owned by the transport implementation TU; impl is the implementation's
  * private state. Both start() and detach() are invoked by the session,
- * never by transports themselves — no re-entry into session lifecycle.
+ * never by transports themselves: no re-entry into session lifecycle.
  *
  * Contract:
  * - start(): called from ecuio_session_start. Must be idempotent
@@ -72,7 +72,7 @@ extern const char* const ecuio_socketcan_query_keys[];
 #define ECUIO_HAVE_SOCKETCAN 0
 #endif
 
-/* Mock transport factory — attaches a transport to a session
+/* Mock transport factory: attaches a transport to a session
  * (idempotent). Its keys, profile and did, are core's, so it reads
  * nothing from the query; under uds-generic its worker answers the
  * session's DIDs with synthetic values. */
@@ -181,28 +181,28 @@ void ecuio_elm327_set_log_dir(const char* dir);
  *   j2534://<path ending .dll or    direct DLL load (tests/dev)
  *            containing \ or />)
  *
- * Query parameters (strict — malformed URIs fail at session_create
+ * Query parameters (strict: malformed URIs fail at session_create
  * with ECUIO_ERR_BAD_URI, before any DLL load):
  *   baud    decimal, nonzero; default resolved by connect_channel to
  *           the ISO 15765 500k default
  *   flags   0x-prefixed hex or decimal, passed to PassThruConnect
- *           verbatim — no bit is interpreted
- *   filter  CAN id 1..0x1FFFFFFF — receive ID; overrides the profile's
+ *           verbatim: no bit is interpreted
+ *   filter  CAN id 1..0x1FFFFFFF: receive ID; overrides the profile's
  *           declared channels with this single channel (registers a
  *           FLOW_CONTROL filter; frames matching it get their 4-byte
  *           address header stripped and arbitration_id stamped)
- *   txid    CAN id 1..0x1FFFFFFF — transmit ID; default is the
+ *   txid    CAN id 1..0x1FFFFFFF: transmit ID; default is the
  *           profile's declared tx, else 0x7E0
- *   poll    PID 0x00..0xFF — one Service 01 request, repeated as the
+ *   poll    PID 0x00..0xFF: one Service 01 request, repeated as the
  *           whole rotation (0x00 reads the supported-PIDs bitmap);
  *           replaces the profile's requests, sent as asked: no probe,
  *           nothing dropped. Needs a channel, from filter or the
  *           profile's declarations; rejected at attach (still before any
  *           DLL load) when neither supplies one
- *   probe   0 or 1 (default 1) — ADR-0015 §4: walk each ECU's
+ *   probe   0 or 1 (default 1, ADR-0015 §4): walk each ECU's
  *           supported-PID chain before the rotation and drop the
  *           requests it explicitly refuses; 0 sends the set as written
- *   profile name — validated by ecuio_session_create before attach
+ *   profile name: validated by ecuio_session_create before attach
  *   did     the uds-generic profile's DIDs (core/src/uds_generic.h,
  *           ADR-0020), read by create: single DIDs join the rotation,
  *           ranges are scanned once; every did= key adds up
@@ -241,7 +241,7 @@ ecuio_status_t ecuio_j2534_read_msg(ecuio_j2534_handle_t* handle,
  * Like the helpers above, each forwards to the surrogate client. All
  * SCONFIG traffic is FLATTENED (Parameter, Value) u32 pairs,
  * little-endian, 8 bytes per pair, max ECUIO_PT_SCONFIG_MAX_PARAMS
- * pairs — pointer-bearing structs (SCONFIG_LIST, raw PASSTHRU_MSG*)
+ * pairs: pointer-bearing structs (SCONFIG_LIST, raw PASSTHRU_MSG*)
  * never cross the internal seam, so it maps onto the pipe one to one.
  *
  * Status codes (ADR-0018, appendix of 2026-10-23):
@@ -266,7 +266,7 @@ ecuio_status_t ecuio_j2534_read_msg(ecuio_j2534_handle_t* handle,
  * CAN_29BIT_ID for 29-bit targets). timeout_ms passes through to the
  * vendor unchanged; 0 = non-blocking. out_num_written may be NULL;
  * *out_num_written < 1 after ECUIO_OK means the vendor reported
- * success-but-wrote-nothing — callers treat that as a failed send. */
+ * success-but-wrote-nothing: callers treat that as a failed send. */
 ecuio_status_t ecuio_j2534_write_frame(ecuio_j2534_handle_t* handle,
                                        unsigned long channel,
                                        const uint8_t* data,
@@ -279,7 +279,7 @@ ecuio_status_t ecuio_j2534_write_frame(ecuio_j2534_handle_t* handle,
  * flattened SCONFIG array as described above, input_len a nonzero
  * multiple of 8; for GET_CONFIG the vendor-updated pairs return in
  * output. For READ_VBATT: input_len 0, 4-byte result in output.
- * Pointer-bearing ioctls (FAST_INIT etc.) are out of contract — the
+ * Pointer-bearing ioctls (FAST_INIT etc.) are out of contract: the
  * relay refuses them at this seam rather than guessing layouts.
  * output receives the first output_cap bytes of the result, and
  * *out_len its full length, so a caller spots a cut by comparing. */
@@ -298,7 +298,7 @@ ecuio_status_t ecuio_j2534_ioctl(ecuio_j2534_handle_t* handle,
  * ECUIO_PT_FLOW_CONTROL_FILTER (fc_len must then equal mask_len;
  * for PASS/BLOCK filters pass fc_len 0 and flow_control NULL).
  * tx_flags stamps the filter messages' TxFlags (CAN_29BIT_ID for
- * 29-bit matching — mask and pattern are compared against the frame
+ * 29-bit matching: mask and pattern are compared against the frame
  * ID in the filter messages' Data[], big-endian, per J2534-1 §5.7). */
 ecuio_status_t ecuio_j2534_start_msg_filter(ecuio_j2534_handle_t* handle,
                                             unsigned long channel,
@@ -314,7 +314,7 @@ ecuio_status_t ecuio_j2534_start_msg_filter(ecuio_j2534_handle_t* handle,
 
 /* PassThruStopMsgFilter relay. Idempotence is the VENDOR'S contract
  * (a strict one answers a second stop with ERR_FAILED, so
- * ECUIO_ERR_VENDOR_REFUSED) — we pass the refusal on rather than
+ * ECUIO_ERR_VENDOR_REFUSED): we pass the refusal on rather than
  * second-guessing it. */
 ecuio_status_t ecuio_j2534_stop_msg_filter(ecuio_j2534_handle_t* handle,
                                            unsigned long channel,
@@ -339,7 +339,7 @@ uint32_t ecuio_j2534_backend(const ecuio_j2534_handle_t* handle);
 uint32_t ecuio_j2534_dll_arch(const ecuio_j2534_handle_t* handle);
 
 /* TEST-ONLY: inject a frame into the child's fake DLL through its
- * InjectFrame hook (OP_INJECT). HARNESS use — never in product paths;
+ * InjectFrame hook (OP_INJECT). HARNESS use: never in product paths;
  * real messages arrive via ecuio_j2534_read_msg. */
 ecuio_status_t ecuio_j2534_inject_test_frame(ecuio_j2534_handle_t* handle,
                                              const uint8_t* data,

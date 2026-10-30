@@ -1,4 +1,4 @@
-# ADR-0015: Request engine — correlated, response-paced requests derived from signal definitions
+# ADR-0015: Request engine, correlated, response-paced requests derived from signal definitions
 
 - **Status:** Accepted. The values left open under "Open until the
   first vehicle session" are chosen in the appendix of 2026-10-23,
@@ -264,7 +264,7 @@ appendix, before and after the engine.
   Curated sets are scoped to a platform (for example `<make>-<platform>`),
   because DIDs and formulas vary by platform and model year.
 
-## Appendix — first vehicle session measurements (2026-10-22)
+## Appendix: first vehicle session measurements (2026-10-22)
 
 From the first read-only vehicle session
 ([session sheet](../bench-sessions/2026-10-22-vehicle.md)): one car,
@@ -290,7 +290,7 @@ chosen; these are the measurements they wait on.
   (requests every 100–123 ms on that laptop, 109–112 ms on average);
   `?poll=` ran at about 229 ms per request.
 
-## Appendix — the values, and the engine as built (2026-10-23)
+## Appendix: the values, and the engine as built (2026-10-23)
 
 §1 to §3 are built: `core/src/request_engine.h` holds the engine, and
 the J2534 worker drives it in one loop for the rotation, `?poll=` and
@@ -344,7 +344,7 @@ replies correlated with requests:
 (rate classes, or a curated set beside a full one); several PIDs per
 Service 01 request; decoding on the worker thread.
 
-## Appendix — the probe as built (2026-10-23)
+## Appendix: the probe as built (2026-10-23)
 
 §4 is built in `core/src/request_engine.h` and driven by the J2534
 worker. These are the choices it makes where §4 left room:
@@ -400,7 +400,7 @@ worker. These are the choices it makes where §4 left room:
   drops 0x5C and nothing else. The second vehicle session checks it on
   the car.
 
-## Appendix — the Service 09 record (2026-10-23)
+## Appendix: the Service 09 record (2026-10-23)
 
 The text values this record's scope left to a record of their own have
 it: [ADR-0021](0021-vehicle-identification.md). Service 09's items and
@@ -408,7 +408,7 @@ the identification DIDs go out as the one-shot requests §1 describes,
 through the slot the probe and the scan use, taking turns with the
 rotation, and their text is formed in core.
 
-## Appendix — a resumed walk and a taken slot (2026-10-24)
+## Appendix: a resumed walk and a taken slot (2026-10-24)
 
 A walk that resumes on recovery can meet the one-shot slot taken by an
 identification item or a scanned DID, either waiting for its reply or
@@ -424,7 +424,7 @@ walk unjudged, and the next recovery resumes it.
 `RequestEngineTest.RecoveryWalkWaitsForTheItemOut` and
 `.RecoveryWalkWaitsForAnUnsentItem` pin both.
 
-## Appendix — nothing left to ask (2026-10-24)
+## Appendix: nothing left to ask (2026-10-24)
 
 A session with requests can run out of things to ask while it runs: a
 `uds-generic` scan that found nothing and polls nothing, once
@@ -441,7 +441,7 @@ state, which can't see an ECU go away, and a heartbeat request the
 engine would send with no def asking for it, which §1 doesn't allow.
 `J2534HealthTest.NothingLeftToAskGoesQuiet` pins it on both backends.
 
-## Appendix — the engine on a vehicle (2026-10-25)
+## Appendix: the engine on a vehicle (2026-10-25)
 
 The second vehicle session ran the engine on the first session's car
 ([session sheet](../bench-sessions/2026-10-25-vehicle.md)), and its numbers are the first measurements the open values

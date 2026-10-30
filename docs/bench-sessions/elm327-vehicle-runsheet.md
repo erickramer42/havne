@@ -1,4 +1,4 @@
-# ELM327 VEHICLE run sheet — the MX+ on the car, read-only
+# ELM327 VEHICLE run sheet: the MX+ on the car, read-only
 
 **Date:** <date>  **Adapter:** OBDLink MX+ (MX201, Bluetooth)
 **Vehicle:** the test car, the car of the J2534 sessions (never its make, model or year)
@@ -42,7 +42,7 @@ serials): scrub before committing.
       takes one connection at a time
 - [ ] Havne launched, **Record sessions** ticked
 
-## Phase 0 — the reference, ignition off
+## Phase 0: the reference, ignition off
 
 **Action:** the VX in the OBD port, ignition off. Connect
 `j2534://OBDX Pro - VX` for about 15 s, then Disconnect and unplug it.
@@ -50,7 +50,7 @@ serials): scrub before committing.
 - [ ] Copy the battery from its "Session:" line (12.2 V on
       2026-10-25): the MX+'s reading is held against it (#13)
 
-## Phase 1 — pair and connect the MX+, ignition off
+## Phase 1: pair and connect the MX+, ignition off
 
 **Action:**
 1. Plug in the MX+. Note its four lights (Power, OBD, Host, Link)
@@ -79,7 +79,7 @@ serials): scrub before committing.
 A refused connect names the command and its answer: copy it verbatim
 and stop (#12).
 
-## Phase 2 — ignition on, engine off, then the start
+## Phase 2: ignition on, engine off, then the start
 
 **Action:** accessories off, ignition on. Connect `elm327://COMn` and
 keep this connect through the start.
@@ -97,7 +97,7 @@ keep this connect through the start.
       rises within a second. If the link drops in the crank, it should
       recover by itself: record how long
 
-## Phase 3 — idling
+## Phase 3: idling
 
 - [ ] On the same connect, about a minute: RPM against the tachometer,
       Battery Voltage 13.4–14.5 V, Coolant Temp rising with the gauge.
@@ -106,7 +106,7 @@ keep this connect through the start.
       Live. Disconnect. From the recording's `frames.csv`, the replies a
       second (26 through the VX)
 
-## Phase 4 — a Bluetooth drop
+## Phase 4: a Bluetooth drop
 
 **Action:** connect `elm327://COMn` at idle and wait for values. Turn
 the laptop's Bluetooth off for about 10 s, then on.
@@ -119,7 +119,7 @@ the laptop's Bluetooth off for about 10 s, then on.
       connect again
 - [ ] Disconnect
 
-## Phase 5 — optional
+## Phase 5: optional
 
 - [ ] The DID scan: `elm327://COMn?profile=uds-generic&did=F180-F1FF`
       until its ECU line settles (`scan: 128 DIDs, 2 found, 126

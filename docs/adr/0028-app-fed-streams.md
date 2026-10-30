@@ -1,4 +1,4 @@
-# ADR-0028: App-fed streams — the app opens the Bluetooth links core can't, and an `elm327` session runs over them
+# ADR-0028: App-fed streams, the app opens the Bluetooth links core can't, and an `elm327` session runs over them
 
 - **Status:** Accepted.
 - **Date:** 2026-10-28.

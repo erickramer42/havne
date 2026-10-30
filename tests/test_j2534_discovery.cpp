@@ -40,9 +40,9 @@ TEST(J2534DiscoveryTest, NullArgumentsRejected) {
 }
 
 TEST(J2534DiscoveryTest, FreeDevicesHandlesNull) {
-    /* delete[] nullptr is legal — this test documents that contract */
+    /* delete[] nullptr is legal: this test documents that contract */
     ecuio_j2534_free_devices(nullptr);
-    /* No assertion needed — just verifies no crash */
+    /* No assertion needed: just verifies no crash */
 }
 
 TEST(J2534DiscoveryTest, DiscoverySucceedsWithConsistentResultOnAnyMachine) {

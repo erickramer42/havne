@@ -1,8 +1,8 @@
 // File/layer: core/src/elm327_port.cpp | C++17, Qt-free; Win32 and POSIX
 //             halves, one built per platform
-// Testing: HARNESS — Elm327PortTest (test_elm327, POSIX): the termios
+// Testing: HARNESS: Elm327PortTest (test_elm327, POSIX): the termios
 //          port over a pseudo-terminal pair; Elm327TcpTest (every
-//          platform): an address reaching the TCP opener; BENCH — the
+//          platform): an address reaching the TCP opener; BENCH: the
 //          Win32 port (ADR-0026 §8: Windows has no built-in virtual COM
 //          pair, a known gap)
 

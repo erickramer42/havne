@@ -61,7 +61,7 @@ ecuio_session_t* make_test_session(void)
 }
 
 /* Poll-until-predicate with deadline. The mock's 50ms cadence is a
- * LOCAL expectation, not a CI-runner guarantee — a starved macOS VM
+ * LOCAL expectation, not a CI-runner guarantee: a starved macOS VM
  * can deliver 2 frames in 200+ ms of wall clock. Polling keeps the
  * asserted CONTRACT (the
  * condition eventually holds on a healthy stream) and drops the
@@ -403,7 +403,7 @@ TEST(CoreTest, CallbackSnapshotPatternCompiles) {
     EXPECT_EQ(ecuio_register_frame_callback(
         session, counting_callback, &counter), ECUIO_OK);
     
-    /* Null frame is a documented no-op — proves precondition guard */
+    /* Null frame is a documented no-op: proves precondition guard */
     ecuio_session_dispatch_callbacks(session, nullptr);
     
     ecuio_session_close(session);
@@ -422,7 +422,7 @@ TEST(CoreTest, CallbackDispatchInvokesRegisteredCallback) {
     ecuio_session_dispatch_callbacks(session, &frame);
     EXPECT_EQ(counter, 1);
 
-    /* Duplicate registration is deduplicated — one invocation per dispatch */
+    /* Duplicate registration is deduplicated: one invocation per dispatch */
     EXPECT_EQ(ecuio_register_frame_callback(
         session, counting_callback, &counter), ECUIO_OK);
     ecuio_session_dispatch_callbacks(session, &frame);
@@ -448,7 +448,7 @@ TEST(CoreTest, MockTransportDeliversFrames) {
 
     /* CONTRACT: at least 3 frames eventually arrive. The 50ms tick
      * implies ~4 in 200ms LOCALLY, but CI runners under load deliver
-     * fewer (2 in 356 ms has been seen on macOS) — poll to the
+     * fewer (2 in 356 ms has been seen on macOS): poll to the
      * condition instead of betting on a fixed sleep. */
     const bool delivered = wait_for(
         [&frame_count]() { return frame_count.load() >= 3; },
@@ -505,7 +505,7 @@ TEST(CoreTest, CallbackExecutesOnTransportWorkerThread) {
     const auto main_id = std::this_thread::get_id();
     EXPECT_EQ(ecuio_session_start(session), ECUIO_OK);
 
-    /* Already a poll loop — widened deadline only (400ms -> 2s) to
+    /* Already a poll loop: widened deadline only (400ms -> 2s) to
      * cover starved runners; the shape was right. */
     const bool seen = wait_for(
         [&seen_id]() { return seen_id.load() != std::thread::id{}; },
@@ -530,7 +530,7 @@ struct ReentryCtx {
     std::atomic<int> other_count{0};
 };
 
-/* NAMED function — required so the callback can unregister ITSELF.
+/* NAMED function: required so the callback can unregister ITSELF.
  * A captureless lambda cannot refer to its own function pointer. */
 void self_unregistering_cb(const ecuio_frame_t*, void* user_data)
 {
@@ -563,7 +563,7 @@ TEST(CoreTest, SelfUnregisterDuringLiveDispatch) {
         session, &sibling_counter_cb, &ctx), ECUIO_OK);
 
     EXPECT_EQ(ecuio_session_start(session), ECUIO_OK);
-    /* Poll until the sibling has seen >= 3 frames — that implies the
+    /* Poll until the sibling has seen >= 3 frames: that implies the
      * self-callback fired (it dispatched first) and the stream is
      * flowing. Polls to the CONDITION instead of a fixed 250ms. */
     wait_for([&ctx]() { return ctx.other_count.load() >= 3; }, 5000);
@@ -728,7 +728,7 @@ struct MockCapture {
     size_t count = 0;
 };
 
-/* Named free function — payload capture needs self-reference-free
+/* Named free function: payload capture needs self-reference-free
  * simplicity; user_data points at a stack struct, safe because
  * session_close joins the worker before the stack frame unwinds. */
 void capture_payload_cb(const ecuio_frame_t* frame, void* user_data)
@@ -769,7 +769,7 @@ TEST(CoreTest, MockFramesDecodeAgainstMockSignalSet) {
     /* Encoder/decoder round-trip contract: every frame decodes under
      * every mock definition with physically plausible results. A
      * byte-order or scale inversion passes structural checks but
-     * produces absurd physics — the range assertions catch that. */
+     * produces absurd physics: the range assertions catch that. */
     const ecuio_signal_set_t* set = ecuio_mock_signal_set();
     ASSERT_NE(set, nullptr);
 
@@ -1448,9 +1448,9 @@ void arb_capture_cb(const ecuio_frame_t* frame, void* user_data)
 
 } // namespace
 
-/* Contract: the mock emits exactly two arbitration IDs — the
+/* Contract: the mock emits exactly two arbitration IDs, the
  * telemetry ID the signal set declares (0x0C0) and a 29-bit diagnostic
- * ID every 16th frame — with FLAG_EXTENDED set iff the ID is 29-bit.
+ * ID every 16th frame: with FLAG_EXTENDED set iff the ID is 29-bit.
  * Combined with MockSignalsDeclareTelemetryMessageId (test_signals),
  * this pins the two halves of the bridge's decode gate; the gate line
  * itself is exercised end-to-end by MockFramesDecodeAgainstMockSignalSet
@@ -1480,7 +1480,7 @@ TEST(CoreTest, MockEmitsKnownArbitrationIds)
     /* Session-relative timestamps must never regress (header contract) */
     EXPECT_EQ(cap.ts_regression.load(), 0);
     /* First sample lands within the first tick, not microseconds since
-     * boot — session-relative, not absolute. */
+     * boot: session-relative, not absolute. */
     EXPECT_LT(cap.last_ts.load(), uint64_t{600} * 1000 * 1000 * 1000);
     EXPECT_EQ(cap.fd_mismatch.load(), 0) << "FD flag missing on one or more frames";
 }
@@ -1728,7 +1728,7 @@ TEST(CoreTest, CloseIsIdempotentAndDestroyIsSafe)
 TEST(CoreTest, DestroyAutoClosesActiveSession)
 {
     /* The fclose/free split's convenience path: destroy on an open,
-     * RUNNING session must join the worker and free — no hang, no leak. */
+     * RUNNING session must join the worker and free: no hang, no leak. */
     ecuio_session_t* session = nullptr;
     ASSERT_EQ(ecuio_session_create("mock://autodestroy", &session), ECUIO_OK);
     ASSERT_EQ(ecuio_session_start(session), ECUIO_OK);
@@ -1747,7 +1747,7 @@ TEST(CoreTest, DestroyAutoClosesActiveSession)
 TEST(CoreTest, ProfileLookupRawReturnsOkWithNullSet) {
     /* THE contract the null-profile design lives or dies on: "raw" is
      * REGISTERED with a NULL set. Lookup success + null is distinct
-     * from lookup failure — presence and content are separate axes,
+     * from lookup failure: presence and content are separate axes,
      * and the first sketch of this feature collapsed them. */
     const ecuio_signal_set_t* set = nullptr;
     EXPECT_EQ(ecuio_profile_lookup("raw", &set), ECUIO_OK);
@@ -1765,7 +1765,7 @@ TEST(CoreTest, ProfileLookupUnknownNameFailsWithoutTouchingOut) {
     const ecuio_signal_set_t* set = &sentinel;
     EXPECT_EQ(ecuio_profile_lookup("no-such-profile", &set),
               ECUIO_ERR_UNKNOWN_PROFILE);
-    EXPECT_EQ(set, &sentinel);   /* untouched on failure — caller may
+    EXPECT_EQ(set, &sentinel);   /* untouched on failure: caller may
                                     rely on its own initialization */
 }
 
@@ -1959,7 +1959,7 @@ TEST(CoreTest, MockSessionSelectsMockSet) {
 
 TEST(CoreTest, ProfileOverrideRawYieldsNullSet) {
     /* ?profile=raw on a mock session: override to the null profile.
-     * ALSO the probe for mock-transport query tolerance (ASSUMED —
+     * ALSO the probe for mock-transport query tolerance (ASSUMED:
      * mock_transport.cpp not reviewed): if this goes red, the mock is
      * choking on the query, and the fix belongs THERE, not here. */
     ecuio_session_t* session = nullptr;
@@ -1991,7 +1991,7 @@ TEST(CoreTest, MockUriQueryIsStrict) {
 
 TEST(CoreTest, UnknownProfileRejectedAtCreate) {
     /* Strict grammar: an unknown name is ECUIO_ERR_UNKNOWN_PROFILE at
-     * session_create — cross-platform, scheme-independent. */
+     * session_create: cross-platform, scheme-independent. */
     ecuio_session_t* session = nullptr;
     EXPECT_EQ(ecuio_session_create("mock://x?profile=bogus", &session),
               ECUIO_ERR_UNKNOWN_PROFILE);
@@ -2002,7 +2002,7 @@ TEST(CoreTest, UnknownProfileRejectedAtCreate) {
 TEST(CoreTest, UnknownProfileRejectedBeforeDllLoad) {
     /* Ordering discriminator, Windows-only: bogus profile on a
      * NONEXISTENT DLL path. Profile validation must run BEFORE
-     * transport attach — so this yields ECUIO_ERR_UNKNOWN_PROFILE, not
+     * transport attach, so this yields ECUIO_ERR_UNKNOWN_PROFILE, not
      * ECUIO_ERR_LOAD_FAILED. If it ever returns LOAD_FAILED, the profile check
      * moved after the attach and the fail-fast contract broke. */
     ecuio_session_t* session = nullptr;
@@ -2014,14 +2014,14 @@ TEST(CoreTest, UnknownProfileRejectedBeforeDllLoad) {
 #endif
 
 // ---------------------------------------------------------------------------
-// ADR-0013: profile query tri-state — a present-but-malformed
+// ADR-0013: profile query tri-state, a present-but-malformed
 // ?profile= value must fail session_create, never silently downgrade
 // to the scheme default. Core is as strict about ?profile= as
 // parse_query is about every other key.
 // ---------------------------------------------------------------------------
 
 TEST(CoreTest, ProfileQueryEmptyValueRejected) {
-    /* ?profile= with nothing after '=': PRESENT but malformed — the
+    /* ?profile= with nothing after '=': PRESENT but malformed, the
      * old tolerant scanner silently fell back to the scheme default,
      * which could hand a typo'd ?profile=raw a decoding session. */
     ecuio_session_t* session = nullptr;
@@ -2044,7 +2044,7 @@ TEST(CoreTest, ProfileQueryTooLongValueRejected) {
 TEST(CoreTest, ProfileQueryBoundaryLengthAcceptedAt63) {
     /* 63 chars is the last length the scanner accepts. Registered
      * under exactly that name so this proves the ACCEPTING side of
-     * the boundary — the 64 case above pins the rejecting side. */
+     * the boundary: the 64 case above pins the rejecting side. */
     const std::string name63(63, 'q');
     const ecuio_signal_set_t* mock_set = ecuio_mock_signal_set();
     ASSERT_EQ(ecuio_profile_register(name63.c_str(), mock_set, nullptr), ECUIO_OK);
@@ -2066,9 +2066,9 @@ TEST(CoreTest, ProfileQueryMalformedFailsEvenWhenLaterValidExists) {
               ECUIO_ERR_BAD_URI);
     EXPECT_EQ(session, nullptr);
 
-    /* Reverse order: valid first, malformed LAST — a later malformed
+    /* Reverse order: valid first, malformed LAST, a later malformed
      * value still poisons the URI (it is not a "drop the bad one,
-     * keep scanning" grammar — it is strict). */
+     * keep scanning" grammar: it is strict). */
     EXPECT_EQ(ecuio_session_create("mock://x?profile=mock&profile=",
                                    &session),
               ECUIO_ERR_BAD_URI);
@@ -2076,12 +2076,12 @@ TEST(CoreTest, ProfileQueryMalformedFailsEvenWhenLaterValidExists) {
 }
 
 TEST(CoreTest, ProfileQueryLastValidWinsAcrossDuplicates) {
-    /* Across WELL-FORMED values, the last wins — matching the
+    /* Across WELL-FORMED values, the last wins: matching the
      * documented duplicate-key rule for every other URI parameter.
      * Distinguished from the malformed cases above by using a real,
      * registered name that differs from the scheme default. */
     const std::string name63(63, 'q');   /* registered by the boundary
-                                            test above — but tests
+                                            test above, but tests
                                             shouldn't depend on order. */
     ASSERT_EQ(ecuio_profile_register(name63.c_str(),
                                      ecuio_mock_signal_set(), nullptr), ECUIO_OK);
@@ -2671,6 +2671,58 @@ TEST(CoreTest, ReplayStopsAtARowThatTurnedBadAfterAttach)
     EXPECT_EQ(cap.count(), 3u) << "nothing past the bad row";
     ASSERT_EQ(ecuio_session_close(session), ECUIO_OK);
     ecuio_session_destroy(session);
+}
+
+/* A recording cut short after attach plays what's left, then says why it
+ * stopped: a reader counting to attach's rows would wait forever. One
+ * that grew plays attach's rows and ends as at the end of its file */
+TEST(CoreTest, ReplayOfARecordingWithOtherRowsPlaysAttachsAtMost)
+{
+    struct Case {
+        int rows_now;
+        ecuio_status_t state;
+    };
+    for (const Case& c :
+         {Case{3, ECUIO_ERR_RECORDING_CHANGED}, Case{7, ECUIO_OK}}) {
+        SCOPED_TRACE(c.rows_now);
+        TempRecording rec(paced_rows(5));
+        ecuio_session_t* session = nullptr;
+        ASSERT_EQ(ecuio_session_create(rec.uri("?speed=max").c_str(), &session),
+                  ECUIO_OK)
+            << ecuio_last_error_detail();
+        {
+            const std::string rows = paced_rows(c.rows_now);
+            FILE* f = std::fopen(rec.csv.c_str(), "wb");
+            ASSERT_NE(f, nullptr);
+            std::fwrite(rows.data(), 1, rows.size(), f);
+            std::fclose(f);
+        }
+        ReplayCapture cap;
+        ASSERT_EQ(
+            ecuio_register_frame_callback(session, replay_capture_cb, &cap),
+            ECUIO_OK);
+        ASSERT_EQ(ecuio_session_start(session), ECUIO_OK);
+        const size_t played =
+            static_cast<size_t>(c.rows_now < 5 ? c.rows_now : 5);
+        ASSERT_TRUE(wait_for([&] { return cap.count() >= played; }, 2000));
+        int32_t last = ECUIO_OK;
+        uint32_t episodes = 0;
+        if (c.state != ECUIO_OK) {
+            ASSERT_TRUE(wait_for(
+                [&] {
+                    ecuio_session_get_error_state(session, &last, &episodes);
+                    return last != ECUIO_OK;
+                },
+                2000));
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        ecuio_session_get_error_state(session, &last, &episodes);
+        EXPECT_EQ(last, c.state);
+        EXPECT_EQ(episodes, c.state == ECUIO_OK ? 0u : 1u);
+        EXPECT_EQ(cap.count(), played) << "attach's rows at most";
+        ASSERT_EQ(ecuio_session_close(session), ECUIO_OK);
+        ecuio_session_destroy(session);
+    }
 }
 
 /* A recording deleted between attach and start: nothing to play, and the

@@ -1,5 +1,5 @@
 // File/layer: app/qml/ShiftLightBar.qml | Qt6 Quick, UI layer
-// Testing: manual smoke — DashboardPage under mock://demo; LEDs fill
+// Testing: manual smoke: DashboardPage under mock://demo; LEDs fill
 //          green → amber → red through the band and flash at the shift
 //          point (the 2nd/3rd-gear limiter holds show it for 5 s)
 

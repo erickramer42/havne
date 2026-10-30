@@ -1,5 +1,5 @@
 // File/layer: core/src/j2534_surrogate_client.cpp | C++17, Qt-free, Win32-guarded
-// Testing: HARNESS — every J2534 suite (the x64 surrogate) and the
+// Testing: HARNESS: every J2534 suite (the x64 surrogate) and the
 //          cross-arch run (the x86 one); the exe chosen by the DLL's arch
 
 #include "ecuio/j2534_surrogate.h"
@@ -583,7 +583,7 @@ bool transact(ecuio_j2534_sur_handle_t* h, const ecuio_sur_request_t& req,
         /* The child answers one reply per request, so this request's is
          * still in the pipe and every later one would read the reply
          * before its own: out of step for good, like a short read. */
-        SUR_LOG(h, "transact: DESYNC — got req_id=%u want=%u; child "
+        SUR_LOG(h, "transact: DESYNC (got req_id=%u want=%u); child "
                 "unresponsive\n", out_resp->request_id, req.request_id);
         h->unresponsive = true;
         return false;
@@ -872,7 +872,7 @@ ecuio_status_t ecuio_j2534_sur_open(const char* dll_path, uint32_t dll_arch,
             exit_code = log_child_exit(h);
         } else {
             handshake_timed_out = true;
-            SUR_LOG(h, "open: handshake timeout after %lu ms — child alive but "
+            SUR_LOG(h, "open: handshake timeout after %lu ms; child alive but "
                     "never opened the pipe (process startup stalled)\n",
                     handshake_timeout_ms());
         }
@@ -881,14 +881,14 @@ ecuio_status_t ecuio_j2534_sur_open(const char* dll_path, uint32_t dll_arch,
     /* A failed handshake can leave ConnectNamedPipe pending. Cancel and
      * drain it BEFORE releasing the event and the pipe, or the kernel
      * completes that I/O into freed structures. CancelIoEx on an
-     * already-completed request is harmless — it reports NOT_FOUND. */
+     * already-completed request is harmless: it reports NOT_FOUND. */
     if (!connected) {
         CancelIoEx(h->pipe, &ov);
         DWORD drained = 0;
         (void)GetOverlappedResult(h->pipe, &ov, &drained, TRUE);
     }
     if (!connected) {
-        SUR_LOG(h, "open: handshake failed — child never connected\n");
+        SUR_LOG(h, "open: handshake failed, child never connected\n");
         ecuio_j2534_sur_close(h);
         if (exit_code != STILL_ACTIVE) {
             return child_exit_failed(exit_code);
@@ -1248,7 +1248,7 @@ ecuio_status_t ecuio_j2534_sur_read_msg(ecuio_j2534_sur_handle_t* h,
     }
     *got_msg = false;
 
-    /* Dispense from the cache first — no pipe traffic while a batch
+    /* Dispense from the cache first: no pipe traffic while a batch
      * is partially consumed. */
     if (h->pending_next < h->pending_count) {
         *out_msg = h->pending[h->pending_next++];
@@ -1303,7 +1303,7 @@ ecuio_status_t ecuio_j2534_sur_read_msg(ecuio_j2534_sur_handle_t* h,
     }
     if (resp.status != static_cast<int32_t>(ECUIO_PT_STATUS_NOERROR)) {
         if (resp.status == static_cast<int32_t>(ECUIO_PT_STATUS_BUFFER_EMPTY)) {
-            return ECUIO_OK;    /* queue drained — quiet, not failed */
+            return ECUIO_OK;    /* queue drained: quiet, not failed */
         }
         return ECUIO_ERR_TRANSPORT_HARD_FAILURE;
     }

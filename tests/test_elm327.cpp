@@ -1,5 +1,5 @@
 // File/layer: tests/test_elm327.cpp | GTest, UNIT tier, headless CI job
-// Testing: UNIT — the ELM327 wire (core/src/elm327_protocol.h, ADR-0026
+// Testing: UNIT: the ELM327 wire (core/src/elm327_protocol.h, ADR-0026
 //          §3) over canned transcripts: lines in any chunking, every line
 //          kind, frame shapes in both addressing modes, ISO-TP
 //          reassembly per CAN ID, the voltage and the version strings,

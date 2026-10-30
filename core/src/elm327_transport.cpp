@@ -1,6 +1,6 @@
 // File/layer: core/src/elm327_transport.cpp | C++17, Qt-free, every
 //             platform (ADR-0026)
-// Testing: HARNESS — Elm327SessionTest (test_elm327) through the fake
+// Testing: HARNESS: Elm327SessionTest (test_elm327) through the fake
 //          ELM327 behind the port opener (tests/fake_elm327.h): the URI
 //          and its refusals, the setup and its refusals (a command
 //          answered by a late reset sent again), the session

@@ -1,4 +1,4 @@
-# ADR-0026: ELM327 transport — `elm327://` drives an ELM327-compatible adapter over a serial port, with the request engine
+# ADR-0026: ELM327 transport, `elm327://` drives an ELM327-compatible adapter over a serial port, with the request engine
 
 - **Status:** Accepted.
 - **Date:** 2026-10-27. Built in the steps of section 9.

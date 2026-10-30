@@ -10,7 +10,7 @@
 //          PassThruConnect, as the fake publishes them on its page;
 //          malformed queries and relative DLL paths rejected at
 //          session_create (no DLL load).
-//          Adoption tests (ADR-0012): ?filter=/?txid=/?poll= — filter
+//          Adoption tests (ADR-0012): ?filter=/?txid=/?poll=, filter
 //          registration shape, request framing, header strip + ID
 //          stamp, stop-on-detach, gating, passive receive.
 //          ADR-0013: j2534 defaults to the obd2 profile (its requests +
@@ -326,14 +326,14 @@ TEST_F(J2534QueryParamTest, MalformedQueriesRejectedAtSessionCreate)
               ECUIO_ERR_NO_TRANSPORT);
     EXPECT_EQ(session, nullptr);
 
-    /* Query splits from path; a nonexistent path fails AT LOAD —
+    /* Query splits from path; a nonexistent path fails AT LOAD:
      * proves the filename never got '?baud=...' glued onto it. */
     EXPECT_EQ(ecuio_session_create("j2534://C:\\does\\not\\exist.dll?baud=250000",
                                    &session),
               ECUIO_ERR_LOAD_FAILED);
     EXPECT_EQ(session, nullptr);
 
-    /* Malformed queries must reject AT PARSE, before any DLL load —
+    /* Malformed queries must reject AT PARSE, before any DLL load:
      * asserted against the REAL fake path so a load success would
      * prove the parse wrongly accepted the query. */
     char uri[600];
@@ -499,10 +499,10 @@ TEST(J2534StreamTest, DirectLoadUriDeliversInjectedFramesExactly)
     /* Vendor stamps an hour into the adapter's clock, as a real one's
      * can be at connect. */
     inject(f0, 8, 4000000000ul, 0, 1);   /* standard */
-    inject(f1, 8, 4000001000ul, 1, 1);   /* EXTENDED — exercises the 29-bit path */
+    inject(f1, 8, 4000001000ul, 1, 1);   /* EXTENDED: exercises the 29-bit path */
     inject(f2, 8, 4000002000ul, 0, 1);   /* standard */
 
-    /* Worker polls at 20ms; budget generously, assert EXACTLY 3 —
+    /* Worker polls at 20ms; budget generously, assert EXACTLY 3:
      * a fourth would mean the fake fabricated traffic. */
     for (int i = 0; i < 200 && cap.count.load() < 3; ++i) {
         std::this_thread::sleep_for(std::chrono::milliseconds(10));
@@ -566,7 +566,7 @@ TEST(J2534StreamTest, UnknownVendorNameRejected)
 }
 
 /* ====================================================================
- * Adoption suite (ADR-0012) — ?filter= / ?txid= / ?poll=. Every URI
+ * Adoption suite (ADR-0012): ?filter= / ?txid= / ?poll=. Every URI
  * opts out of the obd2 default with ?profile=raw, so these pin the
  * raw-profile contract.
  * ==================================================================== */
@@ -602,7 +602,7 @@ protected:
     }
 
     /* Obd2/scheduler variant: wait for the WORK side instead of the
-     * receive side — rotation order is asserted from the recorded
+     * receive side: rotation order is asserted from the recorded
      * writes' indices, so writes are the primary observable. */
     static void wait_for_writes(fn_get_write_count get_wc,
                                 unsigned long target, int iters)
@@ -825,7 +825,7 @@ TEST_F(J2534AdoptionTest, FilterRegisteredOnSessionStart)
     EXPECT_EQ(mask[2], 0xFFu); EXPECT_EQ(mask[3], 0xFFu);
     EXPECT_EQ(pattern[0], 0x00u); EXPECT_EQ(pattern[1], 0x00u);
     EXPECT_EQ(pattern[2], 0x07u); EXPECT_EQ(pattern[3], 0xE8u);
-    /* FC is the bare tester ID, same 4-byte shape — not exposed by
+    /* FC is the bare tester ID, same 4-byte shape, not exposed by
      * the page's last filter; equal-length passing is the seam under test. */
 
     EXPECT_EQ(ecuio_session_close(session), ECUIO_OK);
@@ -866,7 +866,7 @@ TEST_F(J2534AdoptionTest, DetachStopsFilterBeforeDisconnect)
 }
 
 /* COUPLING RULE: ?poll= needs a channel to receive on. Under raw the
- * profile declares none, so this is rejected — at ATTACH, not at
+ * profile declares none, so this is rejected: at ATTACH, not at
  * parse, because the rule consults the profile's channels, which
  * parse_query can't see. Still before any DLL load. */
 TEST_F(J2534AdoptionTest, PollWithoutChannelRejectedBeforeDllLoad)
@@ -913,7 +913,7 @@ TEST_F(J2534AdoptionTest, PollWithoutChannelRejectedBeforeDllLoad)
     EXPECT_EQ(session, nullptr);
 }
 
-/* PASSIVE RECEIVE: ?profile=raw&filter=0x7E8 without ?poll= — filter
+/* PASSIVE RECEIVE: ?profile=raw&filter=0x7E8 without ?poll=, filter
  * registers, no writes generated, frames still stripped and stamped. */
 /* Raw with no ?filter= listens on the default profile's channel, the
  * engine ECU (ADR-0013's appendix of 2026-10-26): its filter is 0x7E8,
@@ -1044,7 +1044,7 @@ TEST_F(J2534AdoptionTest, FilterGatingDropsNonMatchingFrames)
     inject(nomatch, sizeof(nomatch), 1100, 0, 1);
     inject(match,   sizeof(match),   1200, 0, 1);
 
-    /* Exactly the 2 matching frames — the non-matching one is DRAINED
+    /* Exactly the 2 matching frames: the non-matching one is DRAINED
      * by the fake, not parked at the queue head (head-of-line check).
      * No poll on this URI, so nothing else can dispatch. */
     wait_for_count(cap, 2, 50);
@@ -1096,7 +1096,7 @@ TEST_F(J2534AdoptionTest, TxidOverrideChangesRequestTarget)
 
 TEST(J2534StreamTest, DefaultProfileIsObd2)
 {
-    /* SLICE 2 FLIP: j2534:// with no override selects the obd2 set —
+    /* SLICE 2 FLIP: j2534:// with no override selects the obd2 set:
      * decode + multi-PID scheduler. Create/destroy without start: the
      * assertion is about selection, not streaming, so no filter
      * coupling fires (coupling lives in session_start). */
@@ -1142,10 +1142,10 @@ TEST(J2534StreamTest, UnknownProfileRejectedAtCreate)
 }
 
 // ---------------------------------------------------------------------------
-// ADR-0013: obd2 scheduler mode — rotation, coupling, drain
+// ADR-0013: obd2 scheduler mode, rotation, coupling, drain
 // ---------------------------------------------------------------------------
 
-/* ROTATION: ?profile=obd2&filter=0x7E8 — the worker requests PIDs
+/* ROTATION: ?profile=obd2&filter=0x7E8, the worker requests PIDs
  * round-robin in set order. Rotation order is asserted from the fake's
  * recorded WRITES (deterministic, one per reply), not from received
  * frames. ?probe=0 leaves out the bitmaps the probe asks first
@@ -1193,7 +1193,7 @@ TEST_F(J2534AdoptionTest, Obd2SchedulerRotatesPidsInSetOrder)
     EXPECT_EQ(wbuf[5], 0x5Cu);               /* Oil Temp */
     get_recorded_write(10, wbuf, &wlen, &wflags);
     ASSERT_EQ(wlen, 6u);
-    EXPECT_EQ(wbuf[5], 0x04u);              /* wrapped — round-robin */
+    EXPECT_EQ(wbuf[5], 0x04u);              /* wrapped: round-robin */
 
     /* RX: the next request waits for the reply to the last, so the
      * first three received frames answer the first three requests in
@@ -1214,7 +1214,7 @@ TEST_F(J2534AdoptionTest, Obd2SchedulerRotatesPidsInSetOrder)
 }
 
 /* FLAGSHIP: a bare j2534:// URI derives its channel from the obd2
- * profile — filter pattern 7E8, requests to 7E0, scheduler running.
+ * profile: filter pattern 7E8, requests to 7E0, scheduler running.
  * No ?filter= needed; when present, it's an override. */
 TEST_F(J2534AdoptionTest, BareJ2534UriDerivesObd2ChannelAndStarts)
 {
@@ -1253,7 +1253,7 @@ TEST_F(J2534AdoptionTest, BareJ2534UriDerivesObd2ChannelAndStarts)
 }
 
 /* OVERRIDE SEMANTICS: a lone ?txid= under the obd2 default keeps
- * the derived 7E8 filter but rewrites the request target — the
+ * the derived 7E8 filter but rewrites the request target: the
  * broadcast-request pattern (?txid=0x7DF) without restating the
  * channel. Mixed override + derived channel. */
 TEST_F(J2534AdoptionTest, TxidOverrideRewritesDerivedTransmitTarget)

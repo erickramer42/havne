@@ -1,5 +1,5 @@
 // File/layer: packaging/windows/version.rc.in | Windows resource template
-// Testing: manual — the built exe's Details in Explorer, or
+// Testing: manual: the built exe's Details in Explorer, or
 //          (Get-Item <exe>).VersionInfo; stage.ps1 checks each packaged
 //          exe's ProductVersion against the release's version
 //

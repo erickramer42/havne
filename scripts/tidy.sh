@@ -14,8 +14,13 @@
 #         -DBUILD_TESTING=OFF -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
 #
 # Nothing needs building first. clang-tidy is the pinned version in
-# .github/clang-tidy-requirements.txt (pip install --require-hashes -r ...),
-# found on PATH or named by $CLANG_TIDY; another version finds other things.
+# .github/clang-tidy-requirements.txt, found on PATH or named by
+# $CLANG_TIDY. Another version finds other things, so the script refuses
+# it unless CLANG_TIDY_ANY=1 (trying a new pin). To get the pinned one:
+#
+#   python -m venv tidyvenv
+#   tidyvenv/Scripts/pip install --require-hashes -r .github/clang-tidy-requirements.txt
+#   CLANG_TIDY=tidyvenv/Scripts/clang-tidy scripts/tidy.sh   # bin/ off Windows
 set -u
 cd "$(dirname "$0")/.." || exit 2
 LOGDIR=Testing/tidy
@@ -30,6 +35,16 @@ fi
 if ! version=$("$TIDY" --version 2>/dev/null | grep -oE 'version [0-9.]+'); then
     echo "no clang-tidy at '$TIDY' (set CLANG_TIDY)" >&2
     exit 2
+fi
+pin=$(sed -nE 's/^clang-tidy==([0-9.]+).*/\1/p' .github/clang-tidy-requirements.txt)
+if [ "$version" != "version $pin" ]; then
+    if [ "${CLANG_TIDY_ANY:-0}" != 1 ]; then
+        echo "clang-tidy at '$TIDY' is $version; CI pins $pin" \
+            "(.github/clang-tidy-requirements.txt): see the top of $0," \
+            "or CLANG_TIDY_ANY=1 to run it anyway" >&2
+        exit 2
+    fi
+    echo "warning: clang-tidy $version, not CI's $pin" >&2
 fi
 mkdir -p "$LOGDIR"
 rm -f "$LOGDIR"/*.log

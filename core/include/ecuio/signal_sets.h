@@ -55,7 +55,7 @@ extern "C" {
  * the fake's canned response header so all three agree on the channel. */
 #define ECUIO_OBD2_ECU_ARB_ID  0x7E8u
 
-/* OBD-II tester request arbitration ID — physical pairing with
+/* OBD-II tester request arbitration ID: physical pairing with
  * ECUIO_OBD2_ECU_ARB_ID (0x7E0 <-> 0x7E8). Consumed by the obd2 set's
  * channel declaration and the transport's fallback, so the two
  * cannot drift apart (ECUIO_MOCK_TELEMETRY_ARB_ID precedent). */

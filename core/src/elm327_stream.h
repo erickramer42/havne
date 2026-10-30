@@ -1,5 +1,5 @@
 // File/layer: core/src/elm327_stream.h | internal, C++17, Qt-free
-// Testing: HARNESS — Elm327StreamTest (test_elm327): the fake ELM327
+// Testing: HARNESS: Elm327StreamTest (test_elm327): the fake ELM327
 //          behind a registered stream, a pump thread playing the app: a
 //          session through it, a failure and its reopen, an open that
 //          never answers or fails, a stop during the wait, an unknown

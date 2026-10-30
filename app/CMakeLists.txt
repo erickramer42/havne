@@ -1,5 +1,5 @@
 # File/layer: app/CMakeLists.txt | CMake 3.21+, Qt 6.12+/Quick
-# Testing: HARNESS — build-time behavior; verify by launching the app with
+# Testing: HARNESS: build-time behavior; verify by launching the app with
 #     NO env vars and connecting the fake direct-load URI; the surrogate
 #     must spawn from the exe dir. Verify the no-variable case still builds
 #     clean (contributors without a win32 tree). Check CI invariant: this

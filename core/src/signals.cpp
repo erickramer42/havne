@@ -1,6 +1,7 @@
 // File/layer: core/src/signals.cpp | C++17, Qt-free
-// Testing: UNIT — BE vs LE round-trip, mux acceptance/rejection, validator
-//          rules, display-unit conversion (SignalsTest.DisplayConvert*)
+// Testing: UNIT: BE vs LE round-trip, mux acceptance/rejection, the frame
+//          gate (an error frame applies to no def), validator rules,
+//          display-unit conversion (SignalsTest.DisplayConvert*)
 
 #include <ecuio/signals.h>
 #include <ecuio/internal.h>
@@ -134,7 +135,7 @@ int ecuio_decode_signal(const ecuio_signal_def_t* signal,
         return ECUIO_DECODE_ERR_UNSUPPORTED;   /* binary32 only */
     }
 
-    /* Highest bit consumed lies in this byte index — single uniform
+    /* Highest bit consumed lies in this byte index: single uniform
        bounds check for every kind and byte order. */
     uint32_t last_bit = (uint32_t)signal->start_byte * 8u
                         + signal->bit_offset + signal->bit_length - 1u;
@@ -276,6 +277,12 @@ int ecuio_def_applies_to_frame(const ecuio_signal_def_t* signal,
         return 0;
     }
 
+    /* An error report's ID is its error class (SocketCAN), not a
+     * message, and its bytes are the error's detail */
+    if (frame->flags & ECUIO_FRAME_FLAG_ERROR) {
+        return 0;
+    }
+
     /* Arb ID gate */
     if (frame->arbitration_id != signal->message_id) {
         return 0;
@@ -368,7 +375,7 @@ int ecuio_validate_signal(const ecuio_signal_def_t* signal)
         return ECUIO_VALIDATE_ERR_FLOAT32;
     }
 
-    /* Last byte MUST be null — guarantees C-string fits in fixed buffer */
+    /* Last byte MUST be null: guarantees C-string fits in fixed buffer */
     if (signal->name[sizeof(signal->name) - 1] != '\0') {
         return ECUIO_VALIDATE_ERR_NAME;
     }

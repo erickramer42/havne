@@ -12,7 +12,7 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 
-// Lexical id scoping — lets the delegate reference signalList (outer id)
+// Lexical id scoping: lets the delegate reference signalList (outer id)
 // statically and is required for the required-property delegate pattern.
 pragma ComponentBehavior: Bound
 
@@ -74,11 +74,11 @@ Page {
         switch (state) {
         // Ignition off reads as quiet on a bus that still acknowledges
         // (the first vehicle's did), so the hint goes here too
-        case "quiet":    return qsTr("Vehicle not responding — quiet bus; check the ignition")
-        case "requests": return qsTr("Requests failing — check the vehicle connection and ignition")
-        case "fault":    return qsTr("Adapter fault — %1 episode(s), retrying with backoff").arg(episodes)
+        case "quiet":    return qsTr("Vehicle not responding: quiet bus; check the ignition")
+        case "requests": return qsTr("Requests failing: check the vehicle connection and ignition")
+        case "fault":    return qsTr("Adapter fault: %1 episode(s), retrying with backoff").arg(episodes)
         // A replay's file changed under it (ADR-0023): nothing more will come
-        case "stopped":  return qsTr("Replay stopped — the recording changed after it was opened")
+        case "stopped":  return qsTr("Replay stopped: the recording changed after it was opened")
         default:         return qsTr("Link degraded (error %1)").arg(errorCode)
         }
     }

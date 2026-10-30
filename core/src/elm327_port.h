@@ -1,5 +1,5 @@
 // File/layer: core/src/elm327_port.h | internal, C++17, Qt-free
-// Testing: HARNESS — Elm327PortTest (test_elm327, POSIX): the termios
+// Testing: HARNESS: Elm327PortTest (test_elm327, POSIX): the termios
 //          port over a pseudo-terminal, its read timeouts and its end
 //          when the far side closes, and a whole session through it;
 //          the Win32 port is verified at BENCH (ADR-0026 §8)

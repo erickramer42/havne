@@ -2,8 +2,8 @@
 // Testing: test_qml (tests/qml/tst_settings.qml): the Bluetooth rows in
 //          Settings' device list and the field they fill; a bt: URI on the
 //          desktop refused before core is asked, its reason in the error
-//          line. BENCH — the phone (ADR-0028 §4): the permission prompt,
-//          the paired list, the BLE scan; Vehicle — the MX+ through it
+//          line. BENCH: the phone (ADR-0028 §4): the permission prompt,
+//          the paired list, the BLE scan; Vehicle: the MX+ through it
 
 #pragma once
 

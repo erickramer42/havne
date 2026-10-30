@@ -49,7 +49,7 @@ to three rules:
   macro namespace, and unprefixed names (`MOCK_`, `OBD2_`) collide in
   any consumer that has its own.
 
-## Appendix — naming (2026-10-21)
+## Appendix: naming (2026-10-21)
 
 Status codes were renamed from `QT_OK` / `QT_ERR_*` to `QTTUNE_OK` /
 `QTTUNE_ERR_*`, and the mock and OBD-II ID macros gained the
@@ -59,7 +59,7 @@ QML name changed from the context property `QtTune` to the `Bridge`
 singleton. The engineering log, filled-in bench sheets and earlier ADR
 appendices keep the old names as written.
 
-## Appendix — the core's own name (2026-10-22)
+## Appendix: the core's own name (2026-10-22)
 
 The core's public names moved from the product's prefix to a
 brand-neutral one, `ecuio` ("ECU I/O"), so a product rename can't
@@ -86,7 +86,7 @@ break the ABI again. Each scope has its own name:
 The engineering log, filled-in bench sheets and earlier ADR
 appendices keep the old names as written.
 
-## Appendix — the product's name (2026-10-28)
+## Appendix: the product's name (2026-10-28)
 
 The product is renamed **Havne** (Danish "harbors"): QtTune overlaps the
 Qt Company's trademark. Trademark searches (2026-10-28) found no other

@@ -1,5 +1,5 @@
 // File/layer: fuzz/fuzz_elm327_reply.cpp | C++17, Qt-free, libFuzzer
-// Testing: FUZZ — arbitrary bytes from an ELM327 (serial, TCP, an app's
+// Testing: FUZZ: arbitrary bytes from an ELM327 (serial, TCP, an app's
 //          Bluetooth stream) through the line reader, the line kinds, the
 //          frame parser and ISO-TP reassembly, in either addressing mode,
 //          and the value parsers on each line: every line is within

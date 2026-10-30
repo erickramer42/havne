@@ -1,8 +1,8 @@
 // File/layer: app/btconnect.h | C++17, app layer, no Qt
-// Testing: UNIT — BridgeTest.BtConnect* (test_bridge): an open while a
+// Testing: UNIT: BridgeTest.BtConnect* (test_bridge): an open while a
 //          connect runs adopts it, an abandoned connect that succeeds is
 //          closed, a failed adopted connect starts a fresh one, one connect
-//          at a time throughout; BENCH — the phone (ADR-0029 §5)
+//          at a time throughout; BENCH: the phone (ADR-0029 §5)
 
 #pragma once
 

@@ -59,7 +59,7 @@ gtest_discover_tests(test_signals)
 # agnostic), and request_engine.h is header-only, so this suite builds
 # and runs in the headless Ubuntu job alongside test_core/test_signals.
 # The explicit core/src include is required because request_engine.h is
-# INTERNAL — ecuio-core's PUBLIC include dirs cover only core/include,
+# INTERNAL: ecuio-core's PUBLIC include dirs cover only core/include,
 # and the engine is deliberately not part of the public tree.
 add_executable(test_obd2 test_obd2.cpp)
 
@@ -113,6 +113,8 @@ gtest_discover_tests(test_socketcan)
 # CI's linux-build brings it up and sets ECUIO_VCAN_REQUIRED=1.
 # test_vcan_socketcan.cpp: the SocketCAN transport on that bus
 # (ADR-0032, SocketCanBusTest); it holds the binary's new_counter.h.
+# RUN_SERIAL: the cases share the bus, and an error frame passes every
+# session's ID filter.
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     add_executable(test_vcan test_vcan.cpp test_vcan_socketcan.cpp)
     target_compile_definitions(test_vcan PRIVATE
@@ -121,7 +123,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     find_package(Threads REQUIRED)
     target_link_libraries(test_vcan PRIVATE ecuio-core GTest::gtest_main Threads::Threads)
     app_enable_warnings(test_vcan)
-    gtest_discover_tests(test_vcan PROPERTIES TIMEOUT 30)
+    gtest_discover_tests(test_vcan PROPERTIES TIMEOUT 30 RUN_SERIAL TRUE)
 endif()
 
 # --- Golden-output comparator: Python 3, no packages ---
@@ -184,6 +186,12 @@ if(TARGET havne-cli)
             -- $<TARGET_FILE:havne-cli> stream "mock://golden?speed=2")
         app_cli_golden(UnknownProfileIsRefused unknown-profile.jsonl --exit 3
             -- $<TARGET_FILE:havne-cli> stream "mock://golden?profile=nonesuch")
+        # A replay cut short under it stops early, and the stream ends
+        # with it instead of waiting for a last frame that never comes
+        add_test(NAME CliReplayTest.ACutRecordingEndsTheStream
+            COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/cli_recording_changed.py
+                    $<TARGET_FILE:havne-cli>)
+        set_tests_properties(CliReplayTest.ACutRecordingEndsTheStream PROPERTIES TIMEOUT 30)
     endif()
     function(app_cli_usage name args)
         add_test(NAME CliUsageTest.${name}
@@ -214,7 +222,7 @@ endif()
 
 # --- C ABI compilation check: MUST stay Qt-free, builds everywhere ---
 # Compiles the public headers as strict C and links exported symbols
-# from a C TU — catches C++-isms and name-mangling regressions an FFI
+# from a C TU: catches C++-isms and name-mangling regressions an FFI
 # consumer would hit. It is the only target that compiles headers as C:
 # ISO C11 without compiler extensions, and -pedantic where the compiler
 # has it, so a GNU-only construct in a header warns.
@@ -392,7 +400,7 @@ endif()
 # BlockedVendorOpen ~2.5s) has near-10x headroom, so a slow CI VM
 # cannot false-alarm, but a hang in vendor or pipe code (a blocking
 # flush, a wedged child) becomes a bounded "Failed (Timeout)" instead
-# of a wedged runner. Non-J2534 suites keep ctest defaults —
+# of a wedged runner. Non-J2534 suites keep ctest defaults:
 # no known hang surface there, and mock tests are sub-2s anyway.
 set(J2534_TEST_TIMEOUT_SECONDS 30)
 
@@ -452,7 +460,7 @@ if(WIN32)
     )
     app_enable_warnings(fake_j2534)
 
-    # LEGACY-spelling fixture: the fallback-vendor case — exports the
+    # LEGACY-spelling fixture: the fallback-vendor case, exports the
     # legacy 'PassThruIoCtl' spelling via def alias while the shared
     # source defines the spec spelling. The everyday fake_j2534 above
     # exports the spec spelling directly, so primary resolution is what
@@ -495,7 +503,7 @@ if(WIN32 AND NOT HAVNE_BUILD_CORE_ONLY)
     app_deploy_surrogate(test_qml)
 endif()
 
-# J2534 loader tests (Win32-only, HARNESS tier — open, exports and close
+# J2534 loader tests (Win32-only, HARNESS tier: open, exports and close
 # against the fake vendor DLL, through the surrogate; path baked in at
 # generation time)
 if(WIN32)
@@ -543,7 +551,7 @@ if(WIN32)
     )
 endif()
 
-# J2534 surrogate host tests (Win32-only, HARNESS tier — real process
+# J2534 surrogate host tests (Win32-only, HARNESS tier: real process
 # spawn: named pipe + shared ring + kill-on-close job, end to end)
 # Arch note: in this tree's configure this is the all-same-arch IPC test
 # (CI-valid); the true cross-arch case (x64 test -> x86 surrogate -> x86
@@ -562,7 +570,7 @@ if(WIN32)
     )
     add_dependencies(test_j2534_surrogate fake_j2534)
     # The client's resolve_exe_path() finds it in its own image
-    # directory (same discipline as the baked fake-DLL path — no PATH
+    # directory (same discipline as the baked fake-DLL path: no PATH
     # games).
     app_deploy_surrogate(test_j2534_surrogate)
 
@@ -618,7 +626,7 @@ if(WIN32)
     )
 endif()
 
-# J2534 routing tests (Win32-only, HARNESS tier — the surrogate chosen by
+# J2534 routing tests (Win32-only, HARNESS tier: the surrogate chosen by
 # PE architecture: the x64 one for x64 (CI), the x86 one for x86
 # (dev-machine, env-gated via ECUIO_FAKE_DLL/ECUIO_SURROGATE_EXE))
 if(WIN32)

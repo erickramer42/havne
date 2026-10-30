@@ -1,5 +1,5 @@
 // File/layer: app/carryover.cpp | Qt6 Core, app layer, C++17
-// Testing: UNIT — BridgeTest.CarryOver* (test_bridge)
+// Testing: UNIT: BridgeTest.CarryOver* (test_bridge)
 
 #include "carryover.h"
 

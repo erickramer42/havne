@@ -1,7 +1,7 @@
 // File/layer: core/src/mock_drive_cycle.h | internal, not ABI-exported;
 //             included by mock_transport.cpp (its only producer)
 // C++17, Qt-free, no platform headers.
-// Testing: UNIT — CoreTest.MockDriveCycle* step whole loops tick by tick
+// Testing: UNIT: CoreTest.MockDriveCycle* step whole loops tick by tick
 //     and round-trip every tick through the mock signal set (test_core);
 //     CoreTest.MockDriveCycleSignalsStayPhysical checks every tick against
 //     the consistency rules below, and ...ReadingsNeverHoldDeadStill that

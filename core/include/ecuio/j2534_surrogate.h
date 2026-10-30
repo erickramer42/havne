@@ -1,5 +1,5 @@
 // File/layer: core/include/ecuio/j2534_surrogate.h | C ABI, surrogate client (x86 and x64)
-// Testing: HARNESS — test_j2534_surrogate spawns the real surrogate
+// Testing: HARNESS: test_j2534_surrogate spawns the real surrogate
 //          hosting the fake DLL, end to end over the pipe.
 //          Non-Windows: stubs only.
 
@@ -51,7 +51,7 @@ ecuio_status_t ecuio_j2534_sur_disconnect_channel(ecuio_j2534_sur_handle_t* hand
 
 /* One PassThruWriteMsgs call. data_len must be <= 64 (the wire limit).
  * out_num_written is optional (NULL ok) and receives the vendor's
- * actual-written count — callers should treat <1 as a failed send. */
+ * actual-written count: callers should treat <1 as a failed send. */
 ecuio_status_t ecuio_j2534_sur_write_frame(ecuio_j2534_sur_handle_t* handle,
                                               unsigned long channel,
                                               const uint8_t* data,

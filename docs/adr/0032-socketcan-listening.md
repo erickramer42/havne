@@ -1,4 +1,4 @@
-# ADR-0032: SocketCAN, listening — `socketcan://` reads a Linux CAN interface, listen-only, and a simulated ECU feeds it
+# ADR-0032: SocketCAN, listening, `socketcan://` reads a Linux CAN interface, listen-only, and a simulated ECU feeds it
 
 - **Status:** Accepted.
 - **Date:** 2026-10-29. Implemented with this record.

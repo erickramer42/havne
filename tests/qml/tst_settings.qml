@@ -541,6 +541,9 @@ TestCase {
         uri.text = "mock://recorded?profile=uds-generic&did=F190:text"
         press(page, "connectButton")
         tryVerify(() => Bridge.connected, 10000, "the mock connects")
+        // Connected comes before the first frame: a recording that ends
+        // with none is refused as a replay ("holds no frames")
+        tryVerify(() => Bridge.frameCount > 0, 10000, "a frame is recorded")
         Bridge.disconnectSession()
         tryVerify(() => list.count === Math.min(before + 1, page.recordingsListed), 10000,
                   "the recording that ended is listed")

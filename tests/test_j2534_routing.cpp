@@ -6,7 +6,7 @@
 //          (dev-machine cross-arch, env-gated), a missing file ->
 //          ECUIO_ERR_LOAD_FAILED from the sniff, no spawn. Round trips
 //          go through the FULL loader API surface
-//          (open/connect/inject/read/write/ioctl/filter/close) — the
+//          (open/connect/inject/read/write/ioctl/filter/close): the
 //          same functions j2534_transport.cpp consumes.
 
 #include <gtest/gtest.h>
@@ -58,7 +58,7 @@ bool read_until(ecuio_j2534_handle_t* h, unsigned long channel,
 
 const unsigned char kPayload[8] = {0x02, 0x01, 0x00, 0, 0, 0, 0, 0};
 
-/* Flattened-SCONFIG helpers (host LE, memcpy — both participants are
+/* Flattened-SCONFIG helpers (host LE, memcpy: both participants are
  * x86/x64 and both sides unflatten via memcpy). */
 void put_pair(unsigned char* buf, uint32_t param, uint32_t value)
 {
@@ -193,10 +193,10 @@ TEST(J2534RoutingTest, X86FakeSelectsSurrogateBackendAndRoundTrips)
 {
     /* True cross-arch case: Win32-tree fake DLL + surrogate exe via
      * env overrides, driven from this (default-tree) x64 test binary.
-     * Skipped when the env isn't configured — CI runs the x64
+     * Skipped when the env isn't configured: CI runs the x64
      * surrogate's; the dev machine runs the topology OBDX Pro needs.
      * It also runs a WRITE->echo round trip over the routed surrogate
-     * — the OBDX topology doing request/response with zero hardware. */
+     * (the OBDX topology doing request/response with zero hardware). */
     const char* dll = std::getenv("ECUIO_FAKE_DLL");
     if (dll == nullptr || dll[0] == '\0') {
         GTEST_SKIP() << "cross-arch routing: ECUIO_FAKE_DLL unset "
@@ -224,7 +224,7 @@ TEST(J2534RoutingTest, X86FakeSelectsSurrogateBackendAndRoundTrips)
     EXPECT_EQ(frame.timestamp, 7000u);
 
     /* WRITE through the loader seam routes to the surrogate with no
-     * caller change — backend parity in one assertion. */
+     * caller change: backend parity in one assertion. */
     const unsigned char req[3] = {0x01, 0x0D, 0x00};    /* Mode 01, PID 0D */
     const unsigned char expect[3] = {0x41, 0x0D, 0x00};
     uint32_t num_written = 0;

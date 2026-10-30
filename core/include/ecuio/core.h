@@ -1,5 +1,5 @@
 // File/layer: core/include/ecuio/core.h | C ABI, public interface
-// Testing: Public API contract — every function needs a corresponding test
+// Testing: Public API contract: every function needs a corresponding test
 
 #ifndef ECUIO_CORE_H
 #define ECUIO_CORE_H
@@ -36,7 +36,7 @@ typedef struct ecuio_session ecuio_session_t;
  * reply arrives whole. */
 #define ECUIO_FRAME_DATA_MAX 4096u
 
-/* Frame structure — POD only, no pointers. Layout is pinned by the
+/* Frame structure: POD only, no pointers. Layout is pinned by the
  * assertions below: 4120 bytes, no hidden padding on any supported
  * platform (ADR-0006, appendix of 2026-10-23). The payload is inline,
  * so copying a frame copies all of it.
@@ -49,7 +49,7 @@ typedef struct ecuio_frame {
                                  carried across its 32-bit wrap */
     uint32_t arbitration_id;  /* CAN identifier: <= 0x7FF standard, up to
                                  0x1FFFFFFF when FLAG_EXTENDED set */
-    uint16_t channel_id;      /* Bus/channel index only — never multiplexes
+    uint16_t channel_id;      /* Bus/channel index only: never multiplexes
                                  an arbitration ID */
     uint16_t data_length;     /* Bytes used in data[]: 0..ECUIO_FRAME_DATA_MAX */
     uint8_t  data[ECUIO_FRAME_DATA_MAX];   /* a CAN frame's 8 or CAN-FD's 64
@@ -62,7 +62,7 @@ typedef struct ecuio_frame {
 /* Compile-time ABI pinning. C++ and C11 paths; C99 falls back to the
  * negative-array-size idiom in tests/test_c_abi.c. */
 #if defined(__cplusplus)
-static_assert(sizeof(ecuio_frame_t) == 4120, "ecuio_frame_t size is ABI — bump version if this moves");
+static_assert(sizeof(ecuio_frame_t) == 4120, "ecuio_frame_t size is ABI: bump version if this moves");
 static_assert(offsetof(ecuio_frame_t, data) == 16, "frame data offset is ABI");
 static_assert(offsetof(ecuio_frame_t, flags) == 4112, "frame flags offset is ABI");
 #elif defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
@@ -159,12 +159,12 @@ uint64_t ecuio_clock_slept_us(void);
 /* Session management.
  *
  * Lifecycle follows FILE/free discipline:
- * - create()  — allocates and attaches a transport (fopen)
- * - close()   — stops streaming, detaches the transport, releases worker
+ * - create():  allocates and attaches a transport (fopen)
+ * - close():   stops streaming, detaches the transport, releases worker
  *               and callback state. A second close returns
  *               ECUIO_ERR_SESSION_CLOSED; the session stays valid until
  *               destroy().
- * - destroy() — frees the session (free). The handle is INVALID afterward;
+ * - destroy(): frees the session (free). The handle is INVALID afterward;
  *               calling any API with it is undefined behavior, exactly as
  *               free(p); *p. Null is a safe no-op. Auto-closes first if
  *               still open.
@@ -213,13 +213,13 @@ ecuio_status_t ecuio_session_receive(
  * - Callbacks execute on transport thread, NOT the calling thread
  * - Callbacks must not block (>10ms risks transport backlog)
  * - Callbacks must not call ecuio_session_close() or
- *   ecuio_session_destroy() — they synchronize with the worker
+ *   ecuio_session_destroy(): they synchronize with the worker
  * - register/unregister ARE permitted from inside a callback:
  *   dispatch snapshots the callback list under lock and invokes
  *   unlocked, so reentry cannot deadlock (tested:
  *   SelfUnregisterDuringLiveDispatch)
  * - Duplicate (callback, user_data) pairs are silently deduplicated
- * - unregister is idempotent—calling it twice is safe
+ * - unregister is idempotent: calling it twice is safe
  * - The other side of the snapshot: after unregister returns, a
  *   dispatch already under way may call the callback once more, with
  *   its user_data. Keep user_data valid until ecuio_session_close

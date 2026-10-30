@@ -1,9 +1,9 @@
 // File/layer: core/src/elm327_tcp.cpp | C++17, Qt-free; Winsock and POSIX
 //             sockets
-// Testing: UNIT — Elm327TcpTest.AddressesAreADottedIpv4AndAPort and
-//          .ConnectFailuresAreWorded (test_elm327); HARNESS — Elm327TcpTest (test_elm327_session,
+// Testing: UNIT: Elm327TcpTest.AddressesAreADottedIpv4AndAPort and
+//          .ConnectFailuresAreWorded (test_elm327); HARNESS: Elm327TcpTest (test_elm327_session,
 //          every platform): a session over loopback, reads and their
-//          timeouts, the far side closing, a refusal; BENCH — the VX's
+//          timeouts, the far side closing, a refusal; BENCH: the VX's
 //          WiFi (ADR-0026's appendix "WiFi over TCP")
 
 #include "elm327_tcp.h"

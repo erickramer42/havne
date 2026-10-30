@@ -1,7 +1,7 @@
 // File/layer: core/src/elm327_protocol.h | internal, not ABI-exported;
 //             the ELM327 wire (ADR-0026 §3), for the ELM327 transport
 // C++17, Qt-free, no platform headers. No I/O, no clock, no allocation.
-// Testing: UNIT — Elm327ProtocolTest (test_elm327): canned transcripts
+// Testing: UNIT: Elm327ProtocolTest (test_elm327): canned transcripts
 //     chunked every way, every line kind, ISO-TP reassembly, the values,
 //     the commands it formats and the PIDs given the response count, and
 //     replies reaching the request engine.

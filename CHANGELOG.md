@@ -18,8 +18,9 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
   frames to standard output as JSON lines, one object per line, for
   `jq`, scripts and logging without a desktop; `--values` adds the
   values the profile decodes. It stops at Ctrl+C, after `--count`
-  frames or `--seconds`, or at a replay's last frame, and always ends
-  with an `end` line. `havne-cli devices` lists the serial ports and
+  frames or `--seconds`, at a replay's last frame, or when a replay
+  stops early because its recording changed, and always ends with an
+  `end` line. `havne-cli devices` lists the serial ports and
   J2534 adapters a URI can name. On Windows it ships beside
   `havne.exe` in the zip.
 - **SocketCAN, listening, on Linux**
@@ -27,7 +28,8 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
   `socketcan://can0` reads a native CAN interface (a candleLight or
   CANable adapter, PEAK, Kvaser, a Raspberry Pi's CAN hat) and sends
   nothing: every frame on the bus, or the IDs `?filter=` names, CAN FD
-  and error frames included, timed by the kernel. Bring the interface
+  and error frames included (an error frame is reported, never decoded
+  as values), timed by the kernel. Bring the interface
   up first, at the bus's bit rate and in listen-only mode
   (`sudo ip link set can0 up type can bitrate 500000 listen-only on`);
   Havne refuses one that could transmit and says how to fix it.
@@ -81,6 +83,11 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
   the sleep dim as stale at the wake
   ([ADR-0033](docs/adr/0033-session-time-counts-sleep.md)). Windows,
   macOS and iOS already counted a sleep.
+- **A replay of a recording cut short after it was opened** says
+  "Replay stopped" with the frames it sent, as one whose rows turned
+  bad does, instead of going quiet as if finished. Rows added to a
+  recording while it plays (one still being written) wait for the next
+  replay, so its frame count and length stay as shown at the start.
 
 ## [0.3.3] - 2026-10-29
 

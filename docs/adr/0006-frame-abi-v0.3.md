@@ -48,12 +48,12 @@ with no hidden padding. `static_assert`s pin its size and offsets.
   Issue #16). The ABI break is documented, but the version number
   doesn't show it yet.
 
-## Appendix — the version (2026-10-22)
+## Appendix: the version (2026-10-22)
 
 The version string became 0.3.0 with the v0.3.0 tag, so the number
 now shows this record's ABI break.
 
-## Appendix — J2534 frame time (2026-10-22)
+## Appendix: J2534 frame time (2026-10-22)
 
 The J2534 transport passed the vendor's 32-bit stamp through as
 `timestamp_us`, which is neither session-relative nor free of the
@@ -64,7 +64,7 @@ when the vendor clock steps (`core/src/j2534_clock.h`,
 [j2534.md](../j2534.md#session-lifecycle), "Frame time"). The layout
 is unchanged.
 
-## Appendix — whole ISO 15765 messages (2026-10-23)
+## Appendix: whole ISO 15765 messages (2026-10-23)
 
 The 64-byte payload kept at most 60 bytes of a reassembled ISO 15765
 reply, the CAN ID taking the rest, and nothing marked the cut. Service

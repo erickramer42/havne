@@ -1,5 +1,5 @@
 /* File/layer: tests/package/consumer.c | an outside program, strict C
- * Testing: HARNESS — tests/package_check.sh builds it against an
+ * Testing: HARNESS: tests/package_check.sh builds it against an
  *          installed core package (ADR-0035 §6): through find_package and
  *          pkg-config from the deb, and from the unpacked tarball. It runs
  *          a mock session and exits 0 once frames arrive.

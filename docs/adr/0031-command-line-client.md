@@ -1,4 +1,4 @@
-# ADR-0031: The command-line client — `havne-cli` streams a session as JSON lines over the C ABI
+# ADR-0031: The command-line client, `havne-cli` streams a session as JSON lines over the C ABI
 
 - **Status:** Accepted.
 - **Date:** 2026-10-29. Implemented with this record.
@@ -318,3 +318,18 @@ type. A `slept` line (`us`) comes when the machine's slept count
 (`ecuio_clock_slept_us`) rose a second or more within one 100 ms poll:
 the stream's frames have a gap that long. `--seconds` counts on the
 same clock as session time, so a sleep counts toward it.
+
+## Appendix: 2026-10-30, a replay that stops early
+
+A replay whose recording changes under it stops short of its last frame
+and says so through the error state (`ECUIO_ERR_RECORDING_CHANGED`,
+[ADR-0023](0023-replay-transport.md)'s appendix of 2026-10-26). `stream`
+and `play` counted to `replay_frames` and waited for the rest, which
+never came: a script piping a replay sat there for good. Both now end
+on that code, with a fifth `end` reason, `"recording-changed"`, after
+`stream`'s `health` line (code 16), and exit 0 as for any `end` reason
+(§5): the stream ended, and its health line says why it ended short.
+A new value of `reason` grows schema 1 the way §3 allows; a reader that
+knows only the four first ones still reads the line.
+`CliReplayTest.ACutRecordingEndsTheStream` (`tests/cli_recording_changed.py`)
+cuts a recording half a second into its play.

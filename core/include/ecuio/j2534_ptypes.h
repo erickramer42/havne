@@ -1,12 +1,12 @@
 // File/layer: core/include/ecuio/j2534_ptypes.h | INTERNAL shared types
-// Testing: structural — consumed identically by loader, surrogate, fake
+// Testing: structural: consumed identically by loader, surrogate, fake
 //
 // Single source of truth for the PASSTHRU contract between
 // core/src/j2534_loader.cpp, surrogate/surrogate_main.cpp, and
 // tests/fake_j2534.cpp. Because everyone compiles from THIS header,
 // layout drift between them is structurally impossible.
 //
-// NOT public ABI — public consumers use ecuio/j2534.h only.
+// NOT public ABI: public consumers use ecuio/j2534.h only.
 
 #ifndef ECUIO_J2534_PTYPES_H
 #define ECUIO_J2534_PTYPES_H
@@ -186,7 +186,7 @@ static inline int ecuio_pt_is_indication(unsigned long rx_status)
  * NOTE: SCONFIG_LIST carries a POINTER (ConfigPtr). The vendor-facing
  * form below is only legal in the process that calls the vendor DLL
  * (the surrogate child). The surrogate pipe protocol must
- * carry a FLATTENED form (bounded param/value array) — never this
+ * carry a FLATTENED form (bounded param/value array): never this
  * struct, whose pointer is meaningless across the boundary. */
 #define ECUIO_PT_SCONFIG_MAX_PARAMS 8
 

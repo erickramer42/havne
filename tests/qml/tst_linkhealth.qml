@@ -137,7 +137,7 @@ TestCase {
         const main = createMain()
         connect(fakeUri("?profile=raw&filter=0x7E8"))
         tryCompare(Bridge, "linkState", "quiet", 5000)
-        checkSurfaces(main, "quiet", "Vehicle not responding — quiet bus; check the ignition")
+        checkSurfaces(main, "quiet", "Vehicle not responding: quiet bus; check the ignition")
         verify(activityLog(main).includes("Link: vehicle not responding"), "quiet log line")
     }
 
@@ -148,7 +148,7 @@ TestCase {
         connect(fakeUri("?profile=raw&filter=0x7E8"))
         tryCompare(Bridge, "linkState", "fault", 5000)
         compare(Bridge.errorEpisodes, 1, "one episode while the failure lasts")
-        checkSurfaces(main, "fault", "Adapter fault — 1 episode(s), retrying with backoff")
+        checkSurfaces(main, "fault", "Adapter fault: 1 episode(s), retrying with backoff")
         verify(activityLog(main).includes("Link: adapter fault (1 episode(s))"), "fault log line")
     }
 
@@ -159,7 +159,7 @@ TestCase {
         const main = createMain()
         connect(fakeUri(""))
         tryCompare(Bridge, "linkState", "requests", 5000)
-        checkSurfaces(main, "requests", "Requests failing — check the vehicle connection and ignition")
+        checkSurfaces(main, "requests", "Requests failing: check the vehicle connection and ignition")
         verify(activityLog(main).includes("Link: requests failing (1 episode(s))"),
                "requests log line")
     }

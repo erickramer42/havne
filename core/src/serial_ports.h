@@ -1,5 +1,5 @@
 // File/layer: core/src/serial_ports.h | internal, C++17, Qt-free, header-only
-// Testing: UNIT — SerialPortsTest (test_elm327): the order, the dedupe,
+// Testing: UNIT: SerialPortsTest (test_elm327): the order, the dedupe,
 //          the capacity and the /dev names, over made-up ports on every
 //          platform
 //

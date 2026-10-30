@@ -1,4 +1,4 @@
-# ADR-0023: Replay transport — `replay://` plays a recording's `frames.csv` back through the frame API
+# ADR-0023: Replay transport, `replay://` plays a recording's `frames.csv` back through the frame API
 
 - **Status:** Accepted.
 - **Date:** 2026-10-25. Implemented with this record.
@@ -244,7 +244,7 @@ the change. Those numbers go in that ADR.
   with a folder picker would bring Qt Quick Dialogs, a new Qt module
   for the app, for one convenience that no test needs; deferred.
 
-## Appendix — a replay that stops early (2026-10-26)
+## Appendix: a replay that stops early (2026-10-26)
 
 Attach checks the whole file, but the worker reads it again, and it can
 change in between: a recording copied while still being written, a file
@@ -259,7 +259,7 @@ and sends nothing more; the session stays open, as at the end of the
 file. A clean end of the file still leaves `ECUIO_OK`. The bridge maps
 the code to a link state of its own, `stopped` (amber, "Replay
 stopped" on the header pill, Home and the Dashboard; Live's banner
-"Replay stopped — the recording changed after it was opened"), and
+"Replay stopped: the recording changed after it was opened"), and
 logs once "Replay stopped after N frames: the recording changed after
 it was opened". The link-health codes already there were the wrong
 words: `fault` names an adapter, `quiet` says to check the ignition.
@@ -283,6 +283,17 @@ the file leaving `ECUIO_OK` in `.ReplaySendsTheRecordedFramesAtTheirRebasedTimes
 rewritten: the state, the code, the episode, one line, no "Replay
 finished") and `.LinkStateMapsEveryPublishedCode`; `QmlTest.theme` and
 `.liveview` for the label, color and banner.
+
+**Note (2026-10-30): a pass plays attach's rows.** A recording cut
+short after attach (a copy truncated, a file regenerated smaller) ended
+its pass at the end of the file as if whole, so nothing said that
+fewer frames came than `replay_frames` promised, and `havne-cli`
+waited for the rest ([ADR-0031](0031-command-line-client.md)'s appendix
+of 2026-10-30). The worker counts each pass's rows against attach's:
+fewer stop it with `ECUIO_ERR_RECORDING_CHANGED`, as a bad row does.
+Rows added since attach (a recording still being written) aren't
+played: a pass ends at attach's count, cleanly, so `replay_frames` and
+`replay_span_ms` stay true. `CoreTest.ReplayOfARecordingWithOtherRowsPlaysAttachsAtMost`.
 
 **Note (2026-10-26): a loop needs a span.** A recording whose frames
 all share one time (one frame, or several stamped alike) gives a pass

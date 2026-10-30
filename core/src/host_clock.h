@@ -1,5 +1,5 @@
 // File/layer: core/src/host_clock.h | C++17, Qt-free, header-only
-// Testing: UNIT — CoreTest.Clock* (the clock it reads)
+// Testing: UNIT: CoreTest.Clock* (the clock it reads)
 //
 // ecuio_clock_us (ADR-0033) as a chrono clock, so a transport's epoch and
 // the stamps it takes from it keep their chrono types. Waits stay on

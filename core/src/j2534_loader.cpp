@@ -1,5 +1,5 @@
 // File/layer: core/src/j2534_loader.cpp | C++17, Qt-free, CI-validated headless
-// Testing: HARNESS — live-registry discovery tests, test_j2534_load
+// Testing: HARNESS: live-registry discovery tests, test_j2534_load
 //          (load/export/open/close), test_j2534_stream (end to end),
 //          test_j2534_routing (the surrogate by PE architecture, the
 //          refusals before any spawn), J2534ConnectTest.MissingDllFailsToLoad
@@ -41,7 +41,7 @@ namespace {
 
 /* Root registry keys swept by discovery, per SAE J2534-1 v4.04 §5.3
  * ("Pass-Thru Support.04.04") PLUS the no-hyphen variant some vendor
- * installers write ("PassThruSupport.04.04" — observed: OBDX Pro).
+ * installers write ("PassThruSupport.04.04", as the OBDX Pro does).
  * Both spellings exist in the wild; the spec spelling is kept first
  * so conforming vendors keep discovery-order precedence. Dedupe in
  * ecuio_j2534_discover_devices absorbs a vendor writing both. */
@@ -300,7 +300,7 @@ ecuio_status_t ecuio_j2534_open(const ecuio_j2534_device_t* device,
         return ECUIO_ERR_LOAD_FAILED;
     }
 
-    /* ROUTING DECISION — made here, once (ADR-0025). A file that can't
+    /* ROUTING DECISION: made here, once (ADR-0025). A file that can't
      * be a DLL is refused with no spawn. Every PE loads in a surrogate:
      * x86 in the x86 one (next to the app, or ECUIO_SURROGATE_EXE),
      * x64 and any other machine in the x64 one
@@ -325,7 +325,7 @@ ecuio_status_t ecuio_j2534_open(const ecuio_j2534_device_t* device,
     const ecuio_status_t st = ecuio_j2534_sur_open(device->dll_path, pe.arch,
                                                    &sur);
     if (st != ECUIO_OK) {
-        return st;   /* spawn/DLL-load/PassThruOpen failure — its
+        return st;   /* spawn/DLL-load/PassThruOpen failure: its
                         code and detail are set client-side */
     }
     ecuio_j2534_handle_t* h = new (std::nothrow) ecuio_j2534_handle_t();
@@ -344,7 +344,7 @@ ecuio_status_t ecuio_j2534_close(ecuio_j2534_handle_t* handle)
     if (handle == nullptr) {
         return ECUIO_OK;
     }
-    /* Polite SHUTDOWN, bounded wait, job-object kill — all inside the
+    /* Polite SHUTDOWN, bounded wait, job-object kill: all inside the
      * surrogate client. Deleting the box after is safe: the transport
      * already joined its worker before calling here. */
     const ecuio_status_t st = ecuio_j2534_sur_close(handle->sur);
@@ -470,7 +470,7 @@ ecuio_status_t ecuio_j2534_ioctl(ecuio_j2534_handle_t* handle,
 
     /* Contract: only ioctls we can SHAPE correctly may cross this
      * seam. Pointer-bearing ids (FAST_INIT, FIVE_BAUD_INIT...) would
-     * require vendor-specific struct marshaling — refusing beats
+     * require vendor-specific struct marshaling: refusing beats
      * guessing. Transport-layer init sequences that need them get a
      * proper wire op if/when required. */
     const bool is_sconfig = (ioctl_id == ECUIO_PT_IOCTL_GET_CONFIG ||
@@ -514,7 +514,7 @@ ecuio_status_t ecuio_j2534_start_msg_filter(ecuio_j2534_handle_t* handle,
     }
     /* Spec: pattern 1..12 bytes, mask/pattern lengths equal, flow
      * control only with FLOW_CONTROL_FILTER and then also matching
-     * lengths. Enforced at the seam — malformed filters must not
+     * lengths. Enforced at the seam: malformed filters must not
      * reach a real device. */
     if (mask_len < 1 || mask_len > ECUIO_PT_FILTER_PATTERN_MAX ||
         mask_len != pattern_len ||

@@ -1,6 +1,6 @@
 // File/layer: tests/test_elm327_session.cpp | GTest, HARNESS tier,
 //             headless CI job (every platform)
-// Testing: HARNESS — the ELM327 transport (core/src/elm327_transport.cpp,
+// Testing: HARNESS: the ELM327 transport (core/src/elm327_transport.cpp,
 //          ADR-0026) end to end against the fake ELM327
 //          (tests/fake_elm327.h) behind the port opener (internal.h):
 //          Elm327SessionTest pins the URI and its refusals, the setup,

@@ -1,9 +1,9 @@
 // File/layer: core/src/elm327_log.h | internal, C++17, Qt-free
-// Testing: HARNESS — Elm327SessionTest.TheWireLog* (test_elm327): the
+// Testing: HARNESS: Elm327SessionTest.TheWireLog* (test_elm327): the
 //          file and its lines, request lines only with frame logging, a
 //          refusal's reason, a dropped link, a reset, the newest 50 kept;
 //          .TheWorkerAllocatesNothingPerFrame with the requests' lines
-//          on. UNIT — Elm327LogTest: the kept name and the text's escapes
+//          on. UNIT: Elm327LogTest: the kept name and the text's escapes
 //
 // The ELM327 transport's wire log (ADR-0026): one file per connect in
 // the temporary directory, ecuio-elm327.<YYYYMMDD-HHMMSS-mmm>.log, named

@@ -1,7 +1,7 @@
 // File/layer: core/src/j2534_clock.h | internal, not ABI-exported;
 //             included by j2534_transport.cpp (its only consumer)
 // C++17, Qt-free, no platform headers.
-// Testing: UNIT — J2534StreamTest.VendorClock* (test_j2534_stream); the
+// Testing: UNIT: J2534StreamTest.VendorClock* (test_j2534_stream); the
 //     worker's use of it is HARNESS (J2534HealthTest.VendorStampsBecomeSessionTime).
 
 #ifndef ECUIO_J2534_CLOCK_H

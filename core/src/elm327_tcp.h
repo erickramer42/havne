@@ -1,7 +1,7 @@
 // File/layer: core/src/elm327_tcp.h | internal, C++17, Qt-free
-// Testing: UNIT — Elm327TcpTest.AddressesAreADottedIpv4AndAPort and
+// Testing: UNIT: Elm327TcpTest.AddressesAreADottedIpv4AndAPort and
 //          .ConnectFailuresAreWorded (test_elm327): the address rules,
-//          a failed connect's words; HARNESS — Elm327TcpTest
+//          a failed connect's words; HARNESS: Elm327TcpTest
 //          (test_elm327_session, every platform): the socket against the
 //          fake ELM327 behind a loopback listener
 //

@@ -1,4 +1,4 @@
-# BENCH run sheet — real adapter, no vehicle
+# BENCH run sheet: real adapter, no vehicle
 
 **Date:** <date>  **Adapter:** OBDX Pro VX (USB)
 **Machine:** <the dev machine, or the laptop that goes to the car>
@@ -54,7 +54,7 @@ more than one that runs to the end undocumented.
 Abort condition: the picker doesn't list the VX. Stop and file it as a
 discovery problem; nothing below is meaningful.
 
-## Phase 1 — load, open, requests on a bus with no other node
+## Phase 1: load, open, requests on a bus with no other node
 
 **Action:** connect the VX by USB, pick its row, and Connect the bare
 URI. Leave it about two minutes:
@@ -97,7 +97,7 @@ URI. Leave it about two minutes:
 | Filter registration rejected | BENCH prep #1, the 4-byte filter shape. Record the vendor status |
 | The app crashes | Capture the session log; don't guess, bisect |
 
-## Phase 2 — listen only
+## Phase 2: listen only
 
 **Action:** about 30 s:
 
@@ -109,7 +109,7 @@ URI. Leave it about two minutes:
       out its 100 ms timeout; amber "Vehicle not responding" after
       about 1.2 s
 
-## Phase 3 — the vehicle session's other URIs
+## Phase 3: the vehicle session's other URIs
 
 **Action:** connect each for 15–30 s:
 
@@ -132,7 +132,7 @@ URI. Leave it about two minutes:
       `ecuio-surrogate.<YYYYMMDD-HHMMSS-mmm>.log`, stamped with its
       last line
 
-## Phase 4 — VBATT
+## Phase 4: VBATT
 
 Each connect reads the battery once (`READ_VBATT`), and the activity
 log's "Session:" line shows it.
