@@ -167,6 +167,12 @@ information) and 0x22 (ReadDataByIdentifier), and nothing else.
   control stay out of scope. They are v0.4 work, need their own
   record, and fall under DISCLAIMER.md's regulatory posture.
 
+> **Amended 2026-10-30 ([ADR-0037](0037-reading-trouble-codes.md)):**
+> four more reads join the list: 0x02 (the freeze frame), 0x03
+> (stored trouble codes), 0x07 (pending) and 0x0A (permanent), asked
+> by core itself through the one-shot slot. 0x04 (clearing codes)
+> stays refused with every service that changes the car.
+
 ### 4. The probe runs on the engine, and only explicit answers prune
 
 The post-connect probe (ADR-0013 §3) uses the engine before the
