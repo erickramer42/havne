@@ -454,6 +454,7 @@ Detail and gaps: [testing.md](testing.md).
 | How the J2534 stack works, op by op | [j2534.md](j2534.md) |
 | How the ELM327 transport works, and the adapters it has run on | [elm327.md](elm327.md) |
 | How to build, run tests, read CI, troubleshoot | [development.md](development.md) |
+| How to run Havne on Linux: the downloads, adapters and permissions, SocketCAN, tracing | [linux.md](linux.md) |
 | What is verified, by which test, and the known gaps | [testing.md](testing.md) |
 | What changed in each release | [CHANGELOG.md](../CHANGELOG.md) |
 | How it got here, and the lessons along the way | [engineering-log.md](engineering-log.md) |
