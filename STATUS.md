@@ -123,6 +123,25 @@ background too. Next comes v0.3.5 ([roadmap](#roadmap)).
     path runs with no hardware: verified on `vcan0` (on CI too); no real
     controller has run yet (BENCH prep #26). Profiles that request
     (`obd2`, `uds-generic`) wait for ISO-TP.
+  - **Linux** ([docs/linux.md](docs/linux.md)): the app as an
+    AppImage, and core alone as a deb and a tarball (`havne-cli`, the
+    static library, its C headers, a CMake package and a pkg-config
+    file, with `havne-cli`'s debug info by build ID), built on Ubuntu
+    24.04 for glibc 2.39 and later. CI builds the core packages twice
+    and requires the same bytes, then installs and builds against
+    them; the AppImage is built by the commit's time, and two builds of
+    one commit match. The AppImage ran with a window under WSLg on
+    Ubuntu 26.04, Arch and Kali; not yet on a Linux machine's own
+    desktop, nor with an adapter on Linux.
+  - **Every release** carries the Windows zip and a zip of its PDBs,
+    the signed APK, the Linux files, one SPDX SBOM over them, and
+    checksums and a provenance for each download
+    ([ADR-0034](docs/adr/0034-debug-symbols-and-probes.md),
+    [ADR-0035](docs/adr/0035-linux-downloads-sbom-reproducible.md)),
+    each checked from the published release (v0.3.4's dry run, its
+    APK updating the previous release on the test phone). Core carries
+    three USDT probes on Linux (a session's start and close, each
+    frame), traced with `bpftrace` on CI.
   - **Vehicles** ([ADR-0027](docs/adr/0027-vehicle-profiles.md)): a
     named vehicle, picked in Settings before a connect, remembers its
     adapter URI and Live's plotted signals and names its recordings'
@@ -136,7 +155,8 @@ background too. Next comes v0.3.5 ([roadmap](#roadmap)).
     platform, so a sleep is a gap on Live and in a recording, and the
     activity log and `havne-cli` say how long it was
     ([ADR-0033](docs/adr/0033-session-time-counts-sleep.md); the test
-    phone's sleeps, [2026-10-29-android-2](docs/bench-sessions/2026-10-29-android-2.md)).
+    phone's sleeps, [2026-10-29-android-2](docs/bench-sessions/2026-10-29-android-2.md);
+    a Linux machine's suspend is left, BENCH prep #27).
 - **Not yet:** real hardware beyond two adapters and one car: 29-bit
   addressing, more than one ECU answering, a real x64 driver,
   and other vendors ([BENCH prep](docs/bench-sessions/bench-prep.md),
@@ -203,8 +223,8 @@ hand but these: 29-bit addressing (#4, the car is 11-bit), what sets
 the VX clock's zero (#5), the VX's serial port on a machine without
 OBDX's software (#11), response pending (#17), listening to another
 tester (#19), the VX's WiFi while its USB port is held (#20, in
-part), and a BLE adapter (#25). Any other adapter starts the list
-again.
+part), a BLE adapter (#25), a real CAN controller (#26) and a sleep
+on a Linux machine (#27). Any other adapter starts the list again.
 
 ## Known issues and technical debt
 
@@ -275,52 +295,6 @@ an issue is resolved it is removed, and its number is not reused.
 
 The planned releases are in order; the proposed ones are not
 scheduled. What each holds, past its row:
-
-### v0.3.4: a command-line client, Linux, SocketCAN listening
-
-- **`havne-cli`:** built ([ADR-0031](docs/adr/0031-command-line-client.md)):
-  a client over the Qt-free core that starts a session, streams frames
-  as JSON lines and exits cleanly, with golden runs that hold what the
-  C ABI shows a caller. The Linux deb and tarball carry it (below).
-- **Linux as a supported desktop:** CI builds and tests the app on
-  Ubuntu, ELM327 runs over termios, and the AppImage runs on Ubuntu,
-  Arch and Kali; [docs/linux.md](docs/linux.md) is the guide: the
-  downloads, adapters and their permissions, SocketCAN, tracing, and
-  what has run where. Its window ran under WSLg on all three (the
-  simulated car connected, every page, closed cleanly). Not yet run: the
-  app on a Linux machine's own desktop and an adapter on a Linux
-  machine.
-- **Linux downloads, an SBOM, reproducible builds:** built
-  ([ADR-0035](docs/adr/0035-linux-downloads-sbom-reproducible.md)):
-  each release adds the AppImage and core alone as a deb and a tarball
-  (`havne-cli`, the static library, its headers, a CMake package and a
-  pkg-config file), with `havne-cli`'s debug info by build ID; one SPDX
-  SBOM lists every download's components, validated and attested. CI
-  builds the core packages twice under `reprotest` and requires the same
-  bytes, then installs and uses them. Left: the first release's run of
-  the `linux` and `publish` jobs. The AppImage is built by the commit's
-  time, and two builds of one commit match, but CI doesn't require it.
-- **SocketCAN, listening:** built
-  ([ADR-0032](docs/adr/0032-socketcan-listening.md)): raw frames from a
-  native CAN interface, listen-only, and `havne-cli play`, a simulated
-  ECU on Linux's virtual CAN bus that runs it with no car. Left: a real
-  controller on the bench and a car (BENCH prep #26).
-- **Debug symbols and probes:** built
-  ([ADR-0034](docs/adr/0034-debug-symbols-and-probes.md)): every MSVC
-  Release build writes PDBs, and each release ships the executables'
-  PDBs in a zip of their own, checked against the binaries; three USDT
-  probes in core on Linux (a session's start and close, each frame),
-  checked in the ELF notes and traced with `bpftrace` on CI. Linux
-  debug info ships with the deb and tarball (ADR-0035).
-- **The session clock counts sleep:** built
-  ([ADR-0033](docs/adr/0033-session-time-counts-sleep.md)): one host
-  clock for core and the app, counting the time the machine sleeps on
-  every platform (`CLOCK_BOOTTIME` on Linux and Android), so a sleep is
-  a gap on Live and in a recording, and the activity log says how long
-  it was. Confirmed on the test phone
-  ([2026-10-29-android-2](docs/bench-sessions/2026-10-29-android-2.md):
-  thirteen sleeps, each a gap of its length); a Linux machine's suspend
-  is left (BENCH prep #27).
 
 ### v0.3.5: full OBD-II diagnostics, SocketCAN requests
 
