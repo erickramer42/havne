@@ -143,7 +143,7 @@ jobs:
             -DECUIO_BUILD_FUZZERS=ON \
             -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++
           cmake --build build-fuzz --target fuzz_decode_signal fuzz_validate_set fuzz_uds_query \
-            fuzz_elm327_reply fuzz_replay_file fuzz_socketcan_wire
+            fuzz_elm327_reply fuzz_replay_file fuzz_socketcan_wire fuzz_diagnostics
 
       - name: fuzz_decode_signal (60 s)
         run: |
@@ -179,6 +179,12 @@ jobs:
         run: |
           mkdir -p artifacts
           ./build-fuzz/fuzz/fuzz_socketcan_wire -max_total_time=60 -timeout=25 \
+            -rss_limit_mb=2560 -artifact_prefix=artifacts/ -print_final_stats=1
+
+      - name: fuzz_diagnostics (60 s)
+        run: |
+          mkdir -p artifacts
+          ./build-fuzz/fuzz/fuzz_diagnostics -max_total_time=60 -timeout=25 \
             -rss_limit_mb=2560 -artifact_prefix=artifacts/ -print_final_stats=1
 
       - name: Upload fuzz artifacts

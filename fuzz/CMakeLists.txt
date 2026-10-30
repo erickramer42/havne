@@ -23,7 +23,7 @@ if(BUILD_TESTING OR NOT HAVNE_BUILD_CORE_ONLY)
 endif()
 
 set(_ecuio_fuzzers fuzz_decode_signal fuzz_validate_set fuzz_uds_query
-    fuzz_elm327_reply fuzz_replay_file fuzz_socketcan_wire)
+    fuzz_elm327_reply fuzz_replay_file fuzz_socketcan_wire fuzz_diagnostics)
 
 if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang" AND
    NOT CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC")
@@ -37,7 +37,8 @@ if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang" AND
         target_link_libraries(${_t} PRIVATE ecuio-core)
         # core/src: fuzz_uds_query drives the builder and the query
         # split, fuzz_elm327_reply the ELM327 wire, fuzz_socketcan_wire
-        # SocketCAN's, all internal (the tests' precedent)
+        # SocketCAN's, fuzz_diagnostics the request engine, all internal
+        # (the tests' precedent)
         target_include_directories(${_t} PRIVATE ${CMAKE_SOURCE_DIR}/core/src)
         target_compile_options(${_t} PRIVATE ${_ecuio_fuzz_instrument})
         target_link_options(${_t} PRIVATE -fsanitize=fuzzer,address,undefined)
