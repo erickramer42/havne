@@ -94,7 +94,9 @@ for root in "$debroot/usr" "$tarroot"; do cp "$stripped" "$root/bin/havne-cli"; 
 readelf -n "$stripped" | grep -q "Build ID: $id" || die "the stripped havne-cli lost its build ID"
 probes=$(readelf -n "$stripped" | grep -c 'Provider: ecuio' || true)
 [ "$probes" -ge 3 ] || die "the stripped havne-cli has $probes USDT probes, not 3"
-readelf --debug-dump=info "$stripped" 2>/dev/null | grep -q DW_TAG_compile_unit \
+# The section list, not a dump of the debug info: grep -q leaving a long
+# pipe early ends readelf with SIGPIPE, which pipefail turns into a pass
+readelf -SW "$stripped" | grep -q '\.debug_info' \
     && die "the stripped havne-cli still holds debug info"
 readelf -S "$stripped" | grep -q '\.gnu_debuglink' || die "havne-cli has no debug link"
 

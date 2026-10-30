@@ -88,7 +88,9 @@ linuxdeploy-x86_64.AppImage --appdir "$appdir" \
 [ -f "$out/$name" ] || die "linuxdeploy wrote no $out/$name (log: $build/appimage.log)"
 
 # ---- Check: no QML debugging
-if find "$appdir" -path '*plugins/qmltooling*' | grep -q .; then
+# -quit: find stops at the first, so grep -q never cuts a pipe short (a
+# SIGPIPE'd find would fail the pipeline under pipefail and pass this)
+if find "$appdir" -path '*plugins/qmltooling*' -print -quit | grep -q .; then
     die "the AppImage carries qmltooling plugins (a Debug build's QML debugger)"
 fi
 echo "QML debugging: none"

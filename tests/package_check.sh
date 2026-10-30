@@ -52,6 +52,9 @@ cmake --build "$work/tar" > /dev/null
 "$prefix/bin/havne-cli" stream mock://package --count 1 > /dev/null || die "the tarball's havne-cli doesn't run"
 
 sudo apt-get install -y "$deb" "$dbgdeb" > /dev/null
-gdb -batch -ex 'info functions ^main$' /usr/bin/havne-cli 2>&1 | grep -q 'File .*cli/main.cpp:' \
-    || die "gdb found no debug info for havne-cli"
+# Captured, then matched: grep -q leaving a pipe early would end gdb
+# with SIGPIPE, which pipefail reads as a failure
+found=$(gdb -batch -ex 'info functions ^main$' /usr/bin/havne-cli 2>&1 || true)
+grep -q 'File .*cli/main\.cpp:' <<< "$found" \
+    || { echo "$found"; die "gdb found no debug info for havne-cli"; }
 echo "gdb: havne-cli's debug info found by build ID"
