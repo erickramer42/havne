@@ -676,6 +676,7 @@ its usual duration:
 | `linux-build` | Ubuntu, GCC | Builds the full app, brings up `vcan0` (the `vcan` and `can-isotp` modules load as installed on the hosted runners), then runs ctest with `ECUIO_VCAN_REQUIRED=1`, so the simulated-bus suite fails rather than skips without the bus, then the load test as on Windows. Installs QtGui's EGL and OpenGL runtime libraries, which `test_qml` loads. |
 | `abi` | Ubuntu, GCC, no Qt | Installs libabigail and runs `scripts/abi-check.sh` against the newest release tag ([The C ABI check](#the-c-abi-check)); the result goes to the run's summary. |
 | `linux-appimage` | Ubuntu 24.04, GCC | Builds the app in Release and packs it with `packaging/linux/make-appimage.sh` ([Linux: the AppImage](#linux-the-appimage)), then uploads `havne-linux-x86_64` (kept 14 days). On 24.04 because an AppImage runs only where glibc is at least its build machine's. |
+| `linux-packages` | Ubuntu 24.04, GCC | Builds the core packages twice under `reprotest` and fails on any difference, then installs and uses them (`tests/package_check.sh`), builds an SBOM from their component lists and validates it and `sbom.py`'s self-test document with `pyspdxtools`, and uploads `havne-core-linux-x86_64` (kept 14 days) ([Linux: the core packages](#linux-the-core-packages)). |
 | `android-build` | Ubuntu → Android arm64-v8a | Selects NDK r27 and JDK 21 by version, failing with a clear error if the image lacks either. Then cross-builds and packages the APK. Build only, no tests. |
 | `ios-build` | macOS (arm64) → iOS device (arm64) | Unsigned device build with the Xcode generator. Build only, no tests. |
 | `ios-simulator-smoke` | macOS 15 Intel → iOS Simulator (x86_64) | Runs on a manual run with `ios_smoke` or `smoke_only` ticked, or when the pushed commit's message contains `[ios-smoke]`; skipped on pull requests, other pushes and other manual runs (about 20 minutes on the Intel runner). Boots the newest iOS 18+ iPhone while the app builds, then installs and launches the app. Passes if QML loaded and the app is still running 45 s later. Uploads the `ios-simulator-smoke` artifact: a home-screen control shot, app shots at 15 s and 45 s, the app's stdout/stderr (with `QSG_INFO`), plus crash reports on failure. The job log also prints the stderr. |
@@ -803,9 +804,61 @@ isn't still running 10 s after it starts on the offscreen platform.
   `apt-get install libgl1 libegl1 libopengl0 libfontconfig1 libfreetype6 libgpg-error0`
   on Debian and its kin.
 
+### Linux: the core packages
+
+`packaging/linux/make-core-packages.sh <version> [build dir] [out dir]`
+builds core and `havne-cli` in a core-only tree of its own and packs
+them ([ADR-0035](adr/0035-linux-downloads-sbom-reproducible.md)):
+
+| File | Holds |
+|---|---|
+| `havne-core_<version>_amd64.deb` | `/usr/bin/havne-cli`, `/usr/lib/libecuio-core.a`, the public headers in `/usr/include/ecuio/`, a CMake package (`find_package(ecuio)`, target `ecuio::core`) and `ecuio.pc` |
+| `havne-core-<version>-linux-x86_64.tar.gz` | the same tree under one folder, relocatable |
+| `havne-core-dbgsym_<version>_amd64.deb`, `…-debug.tar.gz` | `havne-cli`'s debug info, `/usr/lib/debug/.build-id/<xx>/<rest>.debug` |
+
+`cmake --install <tree> --prefix <dir>` lays out the same tree from any
+core build (`install()` rules in `core/` and `cli/`; the internal
+headers stay out).
+
+- **The build machine** needs `cmake ninja-build dpkg-dev
+  systemtap-sdt-dev` (Ubuntu); the script refuses a build without the
+  USDT probes.
+- **Reproducible:** the same commit and toolchain give the same bytes
+  anywhere. `-ffile-prefix-map` maps the source and build folders away,
+  `SOURCE_DATE_EPOCH` (default: the commit's time) dates every file,
+  and modes, owners and order are fixed. CI's `linux-packages` builds
+  twice under `reprotest` and fails on any difference;
+  `reprotest 'bash packaging/linux/make-core-packages.sh 0.3.4-x build-packages dist' 'dist/*'`
+  does the same by hand (Ubuntu: `sudo apt install reprotest diffoscope`).
+- **The checks** in the script: the stripped `havne-cli` keeps its
+  build ID and the three probes, has no debug info left and a debug link;
+  no internal header ships; no file names the build's folders.
+  `tests/package_check.sh <out dir> <version>` (needs `sudo`, `gdb` and
+  `pkg-config`) installs both debs, runs `havne-cli`, builds
+  `tests/package/consumer.c` through `find_package`, `pkg-config` and
+  the unpacked tarball, and checks `gdb` finds the debug info.
+
+To read a crash or a profile of the packaged `havne-cli`, install
+`havne-core-dbgsym` (or unpack the `-debug` tarball under `/`): `gdb`
+and `perf report` find the debug file by the binary's build ID.
+
+### The SBOM
+
+`packaging/sbom.py` writes the release's SPDX 2.3 document
+(ADR-0035 §5) from the component lists the build jobs write beside each
+download (`<download>.components.json`): `stage.ps1` (every DLL in the
+Windows folder, by its version resource; an unknown one fails the
+stage), `make-appimage.sh` (Qt and ICU from the kit, every other
+library by its Ubuntu package), `make-core-packages.sh` (the deb's
+`Depends`) and `sbom.py apk` (the APK's native libraries and
+`gradlew dependencies`). `python3 packaging/sbom.py selftest` pins its
+rules (ctest `SbomTest.SelfTest`). Validate a document with
+`pyspdxtools -i <file>` from `.github/spdx-requirements.txt` (hash-pinned;
+bump by hand, as its comment says).
+
 ## Releases
 
-A version tag publishes two downloads through
+A version tag publishes these downloads through
 `.github/workflows/release.yml`:
 
 - **Windows x64,** a zip that runs on a PC with neither Qt nor Visual
@@ -814,6 +867,14 @@ A version tag publishes two downloads through
 - **Android arm64-v8a,** an APK for Android 12 or later, signed with
   the release key ([ADR-0030](adr/0030-signed-android-releases.md)),
   so each release installs over the one before.
+- **Linux x86_64,** the AppImage ([Linux: the AppImage](#linux-the-appimage)),
+  and core alone as a deb and a tarball
+  ([Linux: the core packages](#linux-the-core-packages)), built on
+  Ubuntu 24.04, so they run where glibc is 2.39 or later.
+
+Beside them: the Windows PDBs and `havne-cli`'s Linux debug info, an
+SPDX SBOM of every download, `SHA256SUMS.txt`, and each file's
+provenance.
 
 **To release:**
 
@@ -832,9 +893,11 @@ A version tag publishes two downloads through
    For a dry run, tag that commit `vX.Y.Z-rc1` and push the tag. The
    workflow publishes a pre-release. Download its zip, run it on a PC
    without Visual Studio if one is available, install its APK on a
-   phone, and check both provenances with
-   `gh attestation verify <file> -R erickramer42/havne`. Then delete
-   the pre-release and its tag.
+   phone, run its AppImage on the distributions (the `linux` skill's
+   `distros`), and check the provenances with
+   `gh attestation verify <file> -R erickramer42/havne` and the SBOM's
+   with `--predicate-type https://spdx.dev/Document/v2.3` added. Then
+   delete the pre-release and its tag.
 3. Tag `vX.Y.Z` and push it.
 
 **What the jobs do,** in order:
@@ -901,19 +964,31 @@ A version tag publishes two downloads through
   Scheme v3, and fails unless the signer's certificate SHA-256 is the
   one pinned in `packaging/android/release-cert.sha256`. Locally,
   `HAVNE_CERT_SHA256` overrides the pin, so a throwaway key runs the
-  same checks.
-- **`publish`: checksums and provenance.** `SHA256SUMS.txt` lists the
-  three downloads (the zip, the symbols zip and the APK), with LF line
-  ends. `actions/attest-build-provenance` signs
-  a SLSA build provenance for each, tied to this repository's
-  workflow, and stores it in GitHub's attestation store. The job also
+  same checks. A last step writes the APK's component list
+  (`sbom.py apk`).
+- **`linux`: build and pack** (Ubuntu 24.04). Qt as `linux-appimage`,
+  the app built and packed by `make-appimage.sh`, then
+  `make-core-packages.sh`: the same scripts and checks CI ran on the
+  commit.
+- **`publish`: the SBOM.** `sbom.py build` over the zip, the APK, the
+  AppImage, the deb and the tarball (the symbols and debug files carry
+  no component of their own), dated by the commit, then validated by
+  `pyspdxtools` before anything is published.
+- **`publish`: checksums and provenance.** `SHA256SUMS.txt` lists every
+  download, the debug files and the SBOM, with LF line ends.
+  `actions/attest-build-provenance` signs a SLSA build provenance for
+  each download (one attestation covers the five Linux files), tied to
+  this repository's workflow, and stores it in GitHub's attestation
+  store; `actions/attest` attests the SBOM over the downloads it
+  describes. The job also
   copies each Sigstore bundle into `dist/` as `<download>.intoto.jsonl`,
   because OpenSSF Scorecard's Signed-Releases check reads only release
   files (it counts `*.intoto.jsonl` as provenance and `*.sig`, `*.asc`
   or `*.sigstore.json` as signatures), and so a download can be checked
   with `gh attestation verify <file> --bundle <file>.intoto.jsonl`.
-- **`publish`: the release.** `gh release create` with the three downloads,
-  their `.intoto.jsonl` files, `SHA256SUMS.txt` and the notes file. A
+- **`publish`: the release.** `gh release create` with the downloads,
+  their `.intoto.jsonl` files, the SBOM, `SHA256SUMS.txt` and the notes
+  file. A
   manual run for an existing tag
   (`gh workflow run release.yml -f tag=vX.Y.Z`) rebuilds it and
   replaces the release's files.
