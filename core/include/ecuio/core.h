@@ -320,7 +320,8 @@ typedef struct ecuio_session_info {
                                  (READ_VBATT; an ELM327's STVR or AT RV);
                                  with ECUIO_SESSION_INFO_VBATT */
     uint32_t channel_count;   /* CAN channels the session filters and
-                                 requests on; 0 for a passive session */
+                                 requests on; 0 for a passive session,
+                                 1 for mock (its simulated engine ECU) */
     uint32_t rx_ids[ECUIO_SESSION_INFO_MAX_CHANNELS];   /* each one's
                                                            receive ID */
     uint32_t tx_ids[ECUIO_SESSION_INFO_MAX_CHANNELS];   /* and transmit ID */
@@ -444,9 +445,10 @@ _Static_assert(offsetof(ecuio_channel_support_t, reserved) == 132, "support rese
 #endif
 
 /* Copies what channel `channel` has learned into *out_support: an index
- * into the session info's channels, below its channel_count, so a mock
- * or passive session has none (ECUIO_ERR_INVALID_ARGUMENT). Callable from
- * any thread until destroy; after close it keeps the last update. */
+ * into the session info's channels, below its channel_count, so a
+ * passive session has none (ECUIO_ERR_INVALID_ARGUMENT); the mock's one
+ * channel learns nothing. Callable from any thread until destroy; after
+ * close it keeps the last update. */
 ecuio_status_t ecuio_session_get_channel_support(
     const ecuio_session_t* session,
     uint32_t channel,

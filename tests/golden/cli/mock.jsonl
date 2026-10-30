@@ -1,5 +1,5 @@
 {"schema": 1, "type": "start"}
-{"backend": "mock", "baud": 0, "channels": [], "profile": "mock", "protocol_id": 0, "type": "session"}
+{"backend": "mock", "baud": 0, "channels": [{"rx": "0x7E8", "tx": "0x7E0"}], "profile": "mock", "protocol_id": 0, "type": "session"}
 {"signals": [{"decimals": 0, "id": 1001, "name": "RPM", "unit": "RPM"}, {"decimals": 0, "id": 2001, "name": "Coolant Temp", "unit": "\u00b0C"}, {"decimals": 0, "id": 3001, "name": "Vehicle Speed", "unit": "km/h"}, {"decimals": 1, "id": 4001, "name": "Throttle Position", "unit": "%"}, {"decimals": 0, "id": 5001, "name": "Intake Air Temp", "unit": "\u00b0C"}, {"decimals": 1, "id": 6001, "name": "Engine Load", "unit": "%"}, {"decimals": 1, "id": 8001, "name": "MAF", "unit": "g/s"}, {"decimals": 0, "id": 9001, "name": "Engine Oil Temp", "unit": "\u00b0C"}, {"decimals": 2, "id": 10001, "name": "Lambda", "unit": "\u03bb"}], "type": "signals"}
 {"ch": 0, "data": "50 16 3C 00 61 3C 7B C8 09 3C 81 79", "flags": 5, "id": "0x18FF0C00", "type": "frame"}
 {"ch": 0, "data": "4B 16 3C 00 61 3C 7B BE 09 3C 7A 79", "flags": 4, "id": "0xC0", "type": "frame"}

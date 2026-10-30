@@ -201,7 +201,7 @@ TEST(BridgeTest, FailedConnectNamesItsCause)
     SessionBridge bridge;
     EXPECT_EQ(bridge.connectSession("mock://demo?interval=10"),
               QStringLiteral("malformed transport URI: mock:// takes no query "
-                             "key 'interval', only profile and did"));
+                             "key 'interval', only profile, did and diagnose"));
     EXPECT_EQ(bridge.connectSession("mock://demo?profile=bogus"),
               QStringLiteral("unknown profile: no profile is named 'bogus'"));
     EXPECT_FALSE(bridge.connected());
