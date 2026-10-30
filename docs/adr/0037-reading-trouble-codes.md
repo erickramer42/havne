@@ -1,6 +1,8 @@
 # ADR-0037: Reading trouble codes, readiness and the freeze frame, asked at connect
 
-- **Status:** Accepted. Not yet built.
+- **Status:** Accepted. Built on 2026-10-30: core, the J2534, ELM327
+  and mock transports, the app's page and log line, and `havne-cli`'s
+  line; not yet run on a car (BENCH prep #28).
 - **Date:** 2026-10-30.
 - **Builds on:** [ADR-0015](0015-request-engine.md) §1 (one-shot
   requests through the engine's pacing) and §3 (the services the engine
@@ -135,6 +137,13 @@ the app, the README's screenshots and `havne-cli`'s goldens show
 diagnostics on every platform with no hardware. What else reads the
 mock's channel count (the bridge's per-channel polls, `havne-cli`) is
 checked against an empty report.
+
+> **Amended 2026-10-30:** the mock's report is published at attach, so
+> it is complete when `ecuio_session_create` returns, before the
+> session starts; a Read again is taken on the worker's next tick and
+> read at once. `?diagnose=0` gives the mock no report. Its answers
+> are `core/src/mock_ecu.h`, which mirrors `tests/fake_ecu.h` byte for
+> byte.
 
 ### 7. ELM327's response count
 

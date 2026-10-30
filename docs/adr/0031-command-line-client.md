@@ -333,3 +333,31 @@ A new value of `reason` grows schema 1 the way §3 allows; a reader that
 knows only the four first ones still reads the line.
 `CliReplayTest.ACutRecordingEndsTheStream` (`tests/cli_recording_changed.py`)
 cuts a recording half a second into its play.
+
+## Appendix: 2026-10-30, trouble codes
+
+[ADR-0037](0037-reading-trouble-codes.md) grows schema 1 by one type.
+`stream` writes a `diagnostics` line for an ECU each time its read
+completes (`ECUIO_DIAG_COMPLETE`, at a generation not yet written):
+right after `session` for a read that finished before the stream began
+(the mock's, at create), then from the main thread's drain as reads
+complete, a Read again's included. The main thread polls the report,
+so the worker's callbacks (§4) are unchanged. Its fields:
+
+- `rx` and `generation`;
+- `readiness`: `outcome`, and when answered `mil`, `dtc_count`,
+  `compression` and `monitors`, each a `name` and `complete`;
+- `stored`, `pending` and `permanent`: `outcome`, and when answered
+  `reported` (the count the ECU gave) and `codes`, each as it's
+  written (`"P0301"`);
+- `freeze`: `outcome`, and when answered `code` (`null` when none is
+  stored) and `values`, each an `id`, the `name` and `unit` of the
+  `obd2` def that decoded it, and its `value` in that unit.
+
+An `outcome` is `"answered"`, `"refused"` (with `reply`, the negative
+reply in `frames.csv`'s form, `"7F 0A 11"`), `"unanswered"` or
+`"unasked"`. The names come from core (`ecuio_dtc_format`,
+`ecuio_monitor_name`, the `obd2` set), through the public headers as
+§1 requires. `cli/diagnostics_line.h` formats it; `CliDiagnosticsTest`
+covers each outcome, and the mock's line is in `CliGoldenTest`'s
+`mock.jsonl`.

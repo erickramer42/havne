@@ -302,6 +302,11 @@ other OBD bytes. The AT commands it sends configure the adapter and
 never reach the bus as diagnostic requests. No URI key sends raw text
 to the adapter.
 
+> **Amended 2026-10-30 ([ADR-0037](0037-reading-trouble-codes.md)):**
+> the engine's reads grow by 0x02, 0x03, 0x07 and 0x0A (the freeze
+> frame and the trouble codes), which this transport sends as it sends
+> the others; 0x04 stays refused.
+
 The adapter is left as it was found. The transport never writes its
 non-volatile memory: no `AT PP … SV`/`ON`, `STWBR`, `STRSTNVM`,
 `STSATI`, `STSDI`, `STS@1` or `STBTDN`. Every setting it makes

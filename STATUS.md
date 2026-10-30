@@ -14,7 +14,7 @@ Safety, regulatory and warranty caveats are in
 
 ## Where things stand
 
-**Current phase: v0.3.5, next.** v0.3.4 is out: `havne-cli`, a
+**Current phase: v0.3.5, in progress.** v0.3.4 is out: `havne-cli`, a
 command-line client over the C ABI; Linux as a supported desktop,
 with the AppImage, the core as a deb and a tarball, and SocketCAN
 listening; debug symbols, an SBOM and reproducible Linux downloads
@@ -33,7 +33,8 @@ the same car through the OBDLink MX+ over Bluetooth and the VX in ELM
 mode over USB
 ([2026-10-27](docs/bench-sessions/2026-10-27-elm327-vehicle.md)), and
 the Android app reaches the car through the phone's Bluetooth, in the
-background too. Next comes v0.3.5 ([roadmap](#roadmap)).
+background too. v0.3.5 has begun with reading trouble codes; clearing
+them and SocketCAN requests come next ([roadmap](#roadmap)).
 
 - **Works:**
   - **Mock transport,** on every platform: a scripted drive cycle (a
@@ -73,7 +74,8 @@ background too. Next comes v0.3.5 ([roadmap](#roadmap)).
   - **Requests follow the replies**
     ([ADR-0015](docs/adr/0015-request-engine.md)): one out per channel,
     the next when the reply is in, a 100 ms wait and a 20 ms floor;
-    reads only (Service 01, 09 and 0x22). About 26 a second on the car.
+    reads only (Services 01, 02, 03, 07, 09, 0A and 0x22). About 26 a
+    second on the car.
   - **The PID-support probe** (ADR-0015 §4) drops only what an ECU says
     it lacks, never on silence; on the car it walked six bitmaps and
     dropped `01 5C`.
@@ -81,6 +83,15 @@ background too. Next comes v0.3.5 ([roadmap](#roadmap)).
     ([ADR-0021](docs/adr/0021-vehicle-identification.md)), and
     **`uds-generic`**, polling or scanning the DIDs a URI names
     ([ADR-0020](docs/adr/0020-uds-generic.md)).
+  - **Trouble codes, readiness and the freeze frame** at connect
+    ([ADR-0037](docs/adr/0037-reading-trouble-codes.md)): each ECU's
+    check-engine light, stored, pending and permanent codes, readiness
+    monitors and freeze frame, read once between the live requests and
+    again on request, on the Diagnostics page, in the activity log and
+    in `havne-cli`'s output; the simulated car has codes of its own.
+    Verified against the fakes' ECU through J2534 (both surrogates) and
+    ELM327; not yet on a car (BENCH prep #28). Reading only: clearing
+    is the rest of v0.3.5.
   - **Profiles** chosen by the URI
     ([ADR-0013](docs/adr/0013-protocol-profiles.md)): `mock`, `raw`,
     `obd2` and `uds-generic`. Each signal def states its kind and byte
@@ -166,10 +177,10 @@ background too. Next comes v0.3.5 ([roadmap](#roadmap)).
   ELM327 [bench](docs/bench-sessions/elm327-bench-runsheet.md) and
   [vehicle](docs/bench-sessions/elm327-vehicle-runsheet.md) sheets, and
   the [phone's](docs/bench-sessions/android-phone-runsheet.md).
-- **Tests:** 587 ctest cases on Windows (both trees rebuilt,
+- **Tests:** 624 ctest cases on Windows (both trees rebuilt,
   2026-10-30), all passing but two env-gated skips (the cross-arch
   case, and the real-car recordings' diff, run locally), plus the
-  cross-arch subset (82/82); 0 MSVC warnings. CI runs ctest on Windows,
+  cross-arch subset (84/84); 0 MSVC warnings. CI runs ctest on Windows,
   macOS and Linux, with SocketCAN's suites on Linux's `vcan0`; core
   under ASan and UBSan, `vcan0` included; 60 s of each libFuzzer
   harness ([fuzz/README.md](fuzz/README.md)); clang-tidy and CodeQL;
@@ -288,7 +299,7 @@ an issue is resolved it is removed, and its number is not reused.
 | v0.3.2 | Record-replay transport, decoding on the transport's thread, every driver in its own process | ✅ Released |
 | v0.3.3 | ELM327 adapters, preferences and vehicles, Android with Bluetooth and background sessions and a signed APK, the rename to Havne | ✅ Released |
 | v0.3.4 | A command-line client over the C ABI; Linux as a supported desktop; a SocketCAN transport that listens | ✅ Released |
-| v0.3.5 | Full OBD-II diagnostics (Services 01–0A, clearing codes); SocketCAN requests through ISO-TP | Planned |
+| v0.3.5 | Full OBD-II diagnostics (Services 01–0A, clearing codes); SocketCAN requests through ISO-TP | In progress: reading codes built |
 | v0.3.6–v0.3.9 | Recordings you can open, compare and share: a log viewer with run overlay, CSV import and export with scrubbing, a health report, triggered logging and alerts | Planned |
 | v0.4.0 | Python bindings; PCAP export and candump import; ECU, DID and service discovery (needs requests to every ECU and listening to the whole bus first) | Proposed |
 | v0.5.0 | The plugin framework (ADR-0013's profile API), with no manufacturer plugin yet; legacy buses (ISO 9141-2, KWP2000, J1850) | Proposed |
@@ -310,12 +321,17 @@ scheduled. What each holds, past its row:
   - Verify each PID's meaning and formula against a public J1979
     table. The fake's canned replies share the def's assumptions, so
     the tests can't catch a wrong PID.
-- **Trouble codes:** read stored, pending and permanent codes and the
-  freeze frame (Services 03, 07, 0A, 02), and clear them (Service 04),
-  the first request that changes anything in the car. It gets its own
-  gate: the codes and freeze frame read and saved first, ignition on
-  with the engine off, and a confirmation that says what clearing
-  resets (the readiness monitors).
+- **Trouble codes:** reading is built
+  ([ADR-0037](docs/adr/0037-reading-trouble-codes.md)): stored, pending
+  and permanent codes, readiness and the freeze frame (Services 03, 07,
+  0A, 01 and 02), on the Diagnostics page, in the activity log and in
+  `havne-cli`; on the test car through both adapters, beside a second
+  scan tool, to come (BENCH prep #28). Next, clearing them (Service
+  04), the first request that changes anything in the car, on its own
+  branch and record. It gets its own gate: the codes and freeze frame
+  read and saved first, ignition on with the engine off, and a
+  confirmation that says what clearing resets (the readiness
+  monitors).
 - **SocketCAN requests:** ISO-TP segmentation, which J2534 and ELM327
   adapters do themselves, so the request engine and the profiles run on
   a native CAN interface. An ADR first, which also revisits

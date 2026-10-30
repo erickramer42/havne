@@ -10,6 +10,30 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
 
 ## [Unreleased]
 
+### Added
+- **Trouble codes, readiness and the freeze frame**
+  ([ADR-0037](docs/adr/0037-reading-trouble-codes.md)): a session that
+  asks the car (`obd2` or `uds-generic`, through a J2534 or ELM327
+  adapter) reads each ECU's check-engine light, its stored, pending and
+  permanent trouble codes, its readiness monitors and the freeze frame
+  stored with a code, once at connect, taking turns with the live
+  values. Reading only: Havne still can't clear a code. `?diagnose=0`
+  leaves them out.
+- **A Diagnostics page** (after Live in the sidebar, "Codes" among a
+  narrow window's tabs) shows each ECU's light, its codes by list,
+  which monitors are complete and the freeze frame's values in the
+  chosen units; **Read again** asks once more. The last read stays on
+  the page after a disconnect.
+- The activity log gets one line per ECU per read
+  (`ECU 0x7E8 diagnostics: MIL on; stored P0301 …`), so a recording's
+  `events.log` keeps the codes as they were.
+- The simulated car (`mock://`) has an engine ECU with trouble codes, a
+  readiness report and a freeze frame, so the page and the log line
+  show with no hardware (`?diagnose=0` leaves them out).
+- `havne-cli stream` writes a `diagnostics` line per ECU when its read
+  completes: the light, each list's codes, the monitors and the freeze
+  frame's values, with a refusal's reply bytes.
+
 ### Changed
 - The Log page's **Activity | Frames** switch (developer mode) sits
   beside the title and stays in place when the view changes, so it no
