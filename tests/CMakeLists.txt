@@ -8,6 +8,9 @@ if(NOT GTest_FOUND)
         GIT_REPOSITORY https://github.com/google/googletest.git
         GIT_TAG v1.14.0
     )
+    # GoogleTest's own install rules would put it in `cmake --install`'s
+    # tree beside the core package (ADR-0035)
+    set(INSTALL_GTEST OFF CACHE BOOL "" FORCE)
     FetchContent_MakeAvailable(googletest)
 endif()
 
@@ -134,6 +137,9 @@ if(Python3_Interpreter_FOUND)
         COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/golden.py selftest)
     add_test(NAME AbiReportTest.SelfTest
         COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/scripts/abi_report.py selftest)
+    # packaging/sbom.py, the release's SBOM (ADR-0035 §5)
+    add_test(NAME SbomTest.SelfTest
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/packaging/sbom.py selftest)
 endif()
 
 # --- havne-cli (ADR-0031): Qt-free, every desktop platform ---

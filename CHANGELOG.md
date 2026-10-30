@@ -55,6 +55,20 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
   `bpftrace` and `perf` can count and time the frame path of a running
   Havne or `havne-cli` with no debug build. Unused, a probe costs one
   `nop`.
+- **Linux downloads** ([ADR-0035](docs/adr/0035-linux-downloads-sbom-reproducible.md)):
+  each release carries the app as an AppImage, and core alone as
+  `havne-core_X.Y.Z_amd64.deb` and a tarball: `havne-cli`, the static
+  library and its C headers, with a CMake package (`find_package(ecuio)`)
+  and a pkg-config file (`ecuio`) for your own programs. Built on
+  Ubuntu 24.04, they run on distributions with glibc 2.39 or later.
+  `havne-cli`'s debug info ships beside them, as `havne-core-dbgsym`
+  and a `-debug` tarball, found by `gdb` and `perf` by build ID.
+- **An SBOM with each release:** `havne-X.Y.Z.spdx.json` (SPDX 2.3)
+  lists what each download contains, Qt and the other libraries it
+  bundles at their versions, and is attested like the downloads.
+- **Reproducible core packages:** the deb and tarball build to the same
+  bytes from the same source, wherever they're built; CI checks it on
+  every change.
 
 ### Fixed
 - **A sleep on Linux or Android is a gap,** on Live, in a recording's

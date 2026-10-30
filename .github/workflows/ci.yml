@@ -440,6 +440,59 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
+  # The core packages (ADR-0035): a deb, its -dbgsym and two tarballs,
+  # on 24.04 like the release's. Built twice by reprotest, the second
+  # time in another folder, locale, time zone, umask, CPU count and so on;
+  # every byte must match. user_group is left out: it needs other
+  # accounts on the runner. Then installed and used as a user would.
+  linux-packages:
+    if: ${{ !inputs.smoke_only }}
+    runs-on: ubuntu-24.04
+    needs: core-and-tests
+    timeout-minutes: 20
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install the tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build dpkg-dev systemtap-sdt-dev reprotest diffoscope gdb pkg-config
+
+      - name: Build twice under reprotest
+        run: |
+          VERSION=$(sed -n '/^project(Havne/,/)/s/^ *VERSION \([0-9.]*\).*/\1/p' CMakeLists.txt)
+          echo "VERSION=$VERSION-ci" >> "$GITHUB_ENV"
+          SOURCE_DATE_EPOCH=$(git log -1 --format=%ct) reprotest --min-cpus="$(nproc)" \
+            --variations=-user_group \
+            "bash packaging/linux/make-core-packages.sh $VERSION-ci build-packages dist" 'dist/*'
+
+      - name: Build, install and use
+        run: |
+          bash packaging/linux/make-core-packages.sh "$VERSION" build-packages dist
+          bash tests/package_check.sh dist "$VERSION"
+
+      # packaging/sbom.py over these packages' component lists, and its
+      # self-test's document, each validated as the release's is
+      - name: The SBOM
+        run: |
+          python3 -m venv "$RUNNER_TEMP/spdx"
+          "$RUNNER_TEMP/spdx/bin/pip" install --require-hashes -r .github/spdx-requirements.txt
+          python3 packaging/sbom.py selftest --out "$RUNNER_TEMP/selftest.spdx.json"
+          python3 packaging/sbom.py build --version "$VERSION" --tag "v$VERSION" --out "$RUNNER_TEMP/core.spdx.json" \
+            "dist/havne-core_${VERSION}_amd64.deb" "dist/havne-core-$VERSION-linux-x86_64.tar.gz"
+          for f in selftest core; do "$RUNNER_TEMP/spdx/bin/pyspdxtools" -i "$RUNNER_TEMP/$f.spdx.json"; done
+
+      - name: Upload the packages
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: havne-core-linux-x86_64
+          path: dist/havne-core*
+          if-no-files-found: error
+          retention-days: 14
+
   # Cross builds (Android, iOS) are build-only: BUILD_TESTING=OFF, because
   # gtest_discover_tests runs each test binary at build time, which can't
   # work for a target the runner can't execute.

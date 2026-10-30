@@ -6,6 +6,7 @@
 #   dist/havne-<version>-windows-x64/       the folder a user unzips
 #   dist/havne-<version>-windows-x64.zip
 #   dist/havne-<version>-windows-x64-symbols.zip   the four PDBs (ADR-0034)
+#   dist/havne-<version>-windows-x64.zip.components.json   for the SBOM (ADR-0035)
 #   dist/SHA256SUMS.txt
 #
 # The checks are what a user without Visual Studio or Qt would hit first:
@@ -203,6 +204,53 @@ if ($cliEnd -notmatch '^\{"type":"end","reason":"count","frames":5,') {
     Fail "the staged havne-cli.exe didn't end its mock:// stream: $cliEnd"
 }
 Write-Host 'smoke: havne-cli.exe streamed 5 mock:// frames'
+
+# ---- The component list for the release's SBOM (packaging/sbom.py,
+# ADR-0035 §5): every DLL in the folder belongs to a component, by name,
+# with the version its own version resource carries; one that doesn't
+# fails the release rather than go unlisted. Havne's executables are
+# sbom.py's to add.
+# The product version's first word ("1.8.2502.11 (239921522)"); none
+# for a DLL without a version resource (opengl32sw.dll)
+function DllVersion([string] $path) {
+    $v = (Get-Item $path).VersionInfo.ProductVersion
+    if ($v) { ($v.Trim() -split '\s+')[0] } else { $null }
+}
+$groups = [ordered]@{
+    'Qt'                                 = @{ match = '^Qt6.*\.dll$'; supplier = 'Organization: The Qt Company'; license = 'LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only'; versionOf = 'Qt6Core.dll' }
+    'Microsoft Visual C++ runtime'       = @{ match = '^(vcruntime|msvcp|concrt|vccorlib)\d+.*\.dll$'; supplier = 'Organization: Microsoft'; versionOf = 'vcruntime140.dll'; comment = 'app-local' }
+    'Microsoft D3DCompiler'              = @{ match = '^D3Dcompiler_47\.dll$'; supplier = 'Organization: Microsoft'; versionOf = 'D3Dcompiler_47.dll' }
+    'Microsoft DirectX Shader Compiler'  = @{ match = '^(dxcompiler|dxil)\.dll$'; supplier = 'Organization: Microsoft'; versionOf = 'dxcompiler.dll' }
+    'Mesa llvmpipe'                      = @{ match = '^opengl32sw\.dll$'; versionOf = 'opengl32sw.dll'; comment = 'opengl32sw.dll, the software OpenGL fallback windeployqt deploys' }
+}
+$files = @{}
+foreach ($k in $groups.Keys) { $files[$k] = [Collections.Generic.List[string]]::new() }
+foreach ($dll in Get-ChildItem $stage -Recurse -Filter *.dll) {
+    $rel = $dll.FullName.Substring($stage.Length + 1).Replace('\', '/')
+    $owner = $null
+    foreach ($k in $groups.Keys) {
+        # A DLL in a subfolder (plugins, QML modules) is windeployqt's Qt
+        if ($rel -match $groups[$k].match -or ($k -eq 'Qt' -and $rel.Contains('/'))) { $owner = $k; break }
+    }
+    if (-not $owner) { Fail "$rel belongs to no SBOM component: add it to stage.ps1's list" }
+    $files[$owner].Add($rel)
+}
+$components = foreach ($k in $groups.Keys) {
+    if ($files[$k].Count -eq 0) { continue }
+    $g = $groups[$k]
+    $c = [ordered]@{ name = $k; files = @($files[$k] | Sort-Object) }
+    $version = DllVersion (Join-Path $stage $g.versionOf)
+    if ($k -eq 'Qt') { $version = ($version -split '\.')[0..2] -join '.' }   # 6.12.0.0
+    if ($version) { $c.version = $version }
+    if ($g.supplier) { $c.supplier = $g.supplier }
+    if ($g.license) { $c.license = $g.license }
+    if ($g.comment) { $c.comment = $g.comment }
+    if ($k -eq 'Qt') { $c.purl = "pkg:generic/qt@$($c.version)" }
+    $c
+}
+$listing = [ordered]@{ download = "$name.zip"; purpose = 'APPLICATION'; components = @($components) }
+[IO.File]::WriteAllText((Join-Path $out "$name.zip.components.json"), ($listing | ConvertTo-Json -Depth 5) + "`n")
+Write-Host "components: $(@($components).Count) listed for the SBOM"
 
 # ---- Zip and checksum
 $sums = ''
