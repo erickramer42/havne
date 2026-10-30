@@ -5,7 +5,9 @@
 //     and round-trip every tick through the mock signal set (test_core);
 //     CoreTest.MockDriveCycleSignalsStayPhysical checks every tick against
 //     the consistency rules below, and ...ReadingsNeverHoldDeadStill that
-//     rpm neither sits still nor steps; CoreTest.MockFramesDecodeAgainstMockSignalSet
+//     rpm neither sits still nor steps, the engine stopped aside;
+//     CoreTest.MockDriveCycleEachLoopStartsWithTheEngineStopped the
+//     key-on phase and the start; CoreTest.MockFramesDecodeAgainstMockSignalSet
 //     covers the worker.
 
 #ifndef ECUIO_MOCK_DRIVE_CYCLE_H
@@ -26,6 +28,11 @@ namespace ecuio_mock {
  * each other: rpm with speed and gear, airflow with load and lambda,
  * temperatures with the heat that went in.
  *
+ *   KeyOn       15 s with the key on and the engine stopped (0 rpm), where
+ *               a clear can run (ADR-0038); after the first loop the
+ *               engine runs down from idle
+ *   Start       the starter cranks (~220 rpm), the engine catches and
+ *               settles to its idle (2 s in all)
  *   WarmUp      cold start: fast idle, open-loop fueling (first loop only)
  *   Roll2nd     pull away in 1st, shift to 2nd, roll at ~27 km/h (~1700 rpm)
  *   Pull2nd     WOT in 2nd to the rev limiter (~113 km/h)
@@ -44,7 +51,7 @@ namespace ecuio_mock {
  *   DragRun     standing 1/4 mile: clutch dump, wheelspin the driver
  *               feathers out, upshifts at 6800 rpm through 4th
  *   Shutdown    lift past the line, brake to a stop
- *   Cooldown    idle, then loop back to Roll2nd
+ *   Cooldown    idle, then the engine stops: back to KeyOn
  *
  * Only the first loop starts cold. Each later one starts from where the
  * last ended, so the first loop's runs are on a cold engine and the
@@ -123,6 +130,11 @@ constexpr float kDfcoOnRpm = 1400.0f;        /* decel fuel cut, closed throttle 
 constexpr float kDfcoOffRpm = 1200.0f;
 constexpr float kPeakTorqueNm = 400.0f;
 
+/* The start: the starter's speed, and how fast rpm flares in the first
+ * second after the engine catches (rpm a tick, ~2800 rpm/s) */
+constexpr float kCrankRpm = 220.0f;
+constexpr float kCatchRiseRpm = 140.0f;
+
 /* Absolute throttle position (J1979 PID 0x11) never reads 0 or 100:
  * the closed blade and the WOT stop sit inside the sensor's range. */
 constexpr float kTpClosedPct = 14.5f;
@@ -186,6 +198,11 @@ constexpr uint32_t kShiftTicks = ticks_for(0.3f);
 constexpr uint32_t kRoadShiftTicks = ticks_for(0.7f);
 constexpr uint32_t kDfcoDelayTicks = ticks_for(0.5f);
 constexpr uint32_t kLimiterTicks = ticks_for(5.0f);
+/* Key on with the engine stopped, cranking before it catches, and the
+ * start's whole phase */
+constexpr uint32_t kKeyOnTicks = ticks_for(15.0f);
+constexpr uint32_t kCrankTicks = ticks_for(0.6f);
+constexpr uint32_t kStartTicks = ticks_for(2.0f);
 
 inline float clampf(float v, float lo, float hi)
 {
@@ -323,6 +340,8 @@ inline float drift(float t, float period, uint32_t salt)
 }
 
 enum class Phase : uint8_t {
+    KeyOn,
+    Start,
     WarmUp,
     Roll2nd,
     Pull2nd,
@@ -343,7 +362,7 @@ enum class Phase : uint8_t {
 
 struct DriveCycle {
     /* Outputs in physical units; encode_payload() reads these. */
-    float rpm = kFastIdleRpm;  /* the engine has just started */
+    float rpm = 0.0f;          /* the key on, the engine stopped */
     float speed_kmh = 0.0f;    /* driven wheels, as the ECU's VSS reads it */
     float throttle_pct = kTpClosedPct;   /* absolute TP, PID 0x11 */
     float load_pct = 0.0f;     /* calculated load, PID 0x04 */
@@ -351,10 +370,12 @@ struct DriveCycle {
     float iat_c = kColdStartC;
     float maf_gs = 0.0f;
     float oil_c = kColdStartC;
-    float lambda = kLambdaColdOpenLoop;
+    float lambda = kLambdaLean; /* no exhaust: the sensor reads air */
+    /* The engine turning on its own: false stopped or cranking */
+    bool running = false;
 
     /* Script and drivetrain state. */
-    Phase phase = Phase::WarmUp;
+    Phase phase = Phase::KeyOn;
     uint32_t phase_ticks = 0;
     int gear = 0;              /* 0 = neutral or clutch in */
     bool clutch_slip = false;  /* pulling away: clutch slipping at slip_rpm */
@@ -378,7 +399,7 @@ struct DriveCycle {
     float distance_m = 0.0f;
     float drag_et_s = 0.0f;
     float drag_trap_kmh = 0.0f;
-    uint32_t loops = 0;        /* completed loops back to Roll2nd */
+    uint32_t loops = 0;        /* completed loops back to KeyOn */
 
     float phase_s() const { return static_cast<float>(phase_ticks) * kTickS; }
     float run_time_s() const { return static_cast<float>(tick) * kTickS; }
@@ -419,6 +440,21 @@ private:
     uint32_t shift_len_ = kShiftTicks;
     float shift_from_rpm_ = 0.0f;
     float odo_m_ = 0.0f;       /* distance along the road, for its grade */
+    uint64_t catch_tick_ = 0;  /* the tick the engine last caught */
+    uint64_t first_catch_tick_ = 0;
+    bool caught_ = false;      /* caught once: the cold start's clock runs */
+
+    /* Seconds since the engine first caught, the cold-start strategy's
+     * clock (0 before), and since it last did */
+    float cold_start_s() const
+    {
+        return caught_ ? static_cast<float>(tick - first_catch_tick_) * kTickS
+                       : 0.0f;
+    }
+    float since_catch_s() const
+    {
+        return static_cast<float>(tick - catch_tick_) * kTickS;
+    }
 
     void enter(Phase next)
     {
@@ -428,6 +464,9 @@ private:
          * doesn't jump when the script hands over */
         hold_i_ = blade * 100.0f;
         switch (next) {
+        case Phase::KeyOn:
+            running = false; /* the driver stops the engine, key left on */
+            break;
         case Phase::Roll2nd:
             /* Easing the clutch out from idle */
             pull_away(1, 1250.0f, 0.15f, 150.0f);
@@ -505,6 +544,27 @@ private:
         rev_cap_ = kRevLimitRpm;
 
         switch (phase) {
+        case Phase::KeyOn:
+            if (phase_ticks >= kKeyOnTicks) {
+                enter(Phase::Start);
+            }
+            break;
+        case Phase::Start:
+            /* The starter cranks until the engine catches, and it
+             * settles to its idle before the driver pulls away; the
+             * first loop's cold start idles on through WarmUp */
+            if (phase_ticks == kCrankTicks) {
+                running = true;
+                catch_tick_ = tick;
+                if (!caught_) {
+                    caught_ = true;
+                    first_catch_tick_ = tick;
+                }
+            }
+            if (phase_ticks >= kStartTicks) {
+                enter(loops == 0 ? Phase::WarmUp : Phase::Roll2nd);
+            }
+            break;
         case Phase::WarmUp:
             if (phase_ticks >= ticks_for(20.0f)) {
                 enter(Phase::Roll2nd);
@@ -610,7 +670,7 @@ private:
         case Phase::Cooldown:
             if (phase_ticks >= ticks_for(10.0f)) {
                 ++loops;
-                enter(Phase::Roll2nd);
+                enter(Phase::KeyOn);
             }
             break;
         }
@@ -621,8 +681,8 @@ private:
     }
 
     /* Idle speed target: the cold-start strategy's fast idle for the
-     * first kFastIdleS, then a warm-up idle that falls as the coolant
-     * warms. */
+     * first kFastIdleS after the first start, then a warm-up idle that
+     * falls as the coolant warms. */
     float idle_target() const
     {
         const float warm = kIdleRpm +
@@ -634,7 +694,8 @@ private:
      * kFastIdleEndS */
     float fast_idle_weight() const
     {
-        return clampf(1.0f - (run_time_s() - kFastIdleS) / kFastIdleEndS, 0.0f, 1.0f);
+        return clampf(1.0f - (cold_start_s() - kFastIdleS) / kFastIdleEndS,
+                      0.0f, 1.0f);
     }
 
     /* The idle controller never sits still: it hunts slowly around its
@@ -671,7 +732,22 @@ private:
         const float resist = kAeroCoeff * v_mps * v_mps +
                              ((v_mps > 0.0f) ? kRollingN : 0.0f) + grade_n();
 
-        if (limiter) {
+        if (!running) {
+            /* The engine stopped: it runs down at friction's rate, or
+             * turns at the starter's speed while it cranks, drawing air
+             * past the closed blade unfueled; the car stands */
+            const float target = (phase == Phase::Start)
+                                     ? kCrankRpm + 30.0f * tick_noise(tick, 71)
+                                     : 0.0f;
+            rpm += clampf(target - rpm, -120.0f, 120.0f);
+            fuel_cut = true;
+            airflow = (rpm > 0.0f) ? airflow_frac(0.0f, rpm) : 0.0f;
+            lambda_cmd = kLambdaLean;
+            accel_mps2 = 0.0f;
+            v_mps = 0.0f;
+            wheel_mps = 0.0f;
+            spinning = false;
+        } else if (limiter) {
             /* Fuel cut, not throttle: the blade stays open and the engine
              * keeps pumping air. The engine only needs road-load torque,
              * so it spends most of each ~150 ms cycle in cut. Crank speed
@@ -720,8 +796,14 @@ private:
                     target += idle_hunt();
                 }
                 /* Unloaded, the engine spins up fast but falls no faster
-                 * than its friction slows it, ~2400 rpm/s */
-                rpm += std::fmax((clampf(target, 0.0f, rev_cap_) - rpm) * 0.35f, -120.0f);
+                 * than its friction slows it, ~2400 rpm/s; it flares
+                 * more slowly in the second after it catches */
+                const float rise =
+                    (since_catch_s() < 1.0f) ? kCatchRiseRpm : 1e9f;
+                rpm += std::fmin(
+                    std::fmax((clampf(target, 0.0f, rev_cap_) - rpm) * 0.35f,
+                              -120.0f),
+                    rise);
             }
             const bool two_step = phase == Phase::Launch && rpm >= rev_cap_ - 40.0f;
             if (two_step) {
@@ -878,9 +960,10 @@ private:
         const float t = run_time_s();
         float target = cmd;
         if (cmd == 1.0f) {
-            target = (t < kO2ReadyS)
-                ? kLambdaColdOpenLoop + 0.003f * drift(t, 1.1f, 41)
-                : 1.0f + 0.012f * drift(t, 0.7f, 42) + 0.004f * tick_noise(tick, 43);
+            target = (cold_start_s() < kO2ReadyS)
+                         ? kLambdaColdOpenLoop + 0.003f * drift(t, 1.1f, 41)
+                         : 1.0f + 0.012f * drift(t, 0.7f, 42) +
+                               0.004f * tick_noise(tick, 43);
         } else if (cmd == kLambdaWot) {
             target = kLambdaWot + 0.01f * drift(t, 0.9f, 44);
         }
@@ -925,7 +1008,10 @@ private:
         }
         const float ua =
             0.25f + kRadiatorUaPerKmh * speed + (fan_on ? 0.9f : 0.0f);
-        const float q_rad = open * ua * (coolant_c - kAmbientC);
+        /* The water pump turns with the engine: stopped, the coolant
+         * stands in the radiator and the block soaks into it */
+        const float pump = running ? 1.0f : 0.0f;
+        const float q_rad = pump * open * ua * (coolant_c - kAmbientC);
         const float q_bc = 1.5f * (block_c - coolant_c);
         const float q_bo = 0.3f * (block_c - oil_c);
         const float q_block_loss = 0.03f * (block_c - kAmbientC);

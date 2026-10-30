@@ -9,6 +9,7 @@
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
+#include <memory>
 #include <mutex>
 #include <string>
 #include <thread>
@@ -36,6 +37,7 @@ extern "C" {
 #include "error_detail.h" /* core/src: a refused vendor call's words */
 #include "link_health.h"  /* core/src: the workers' link-health rules */
 #include "mock_drive_cycle.h"
+#include "mock_ecu.h"      /* core/src: the simulated ECU's answers */
 #include "uds_generic.h"   /* core/src: the template set's identity */
 #include "new_counter.h"   /* tests: operator new counted per thread */
 
@@ -323,6 +325,72 @@ TEST(CoreTest, MockDiagnoseOffReportsNone)
     EXPECT_EQ(ecuio_session_create("mock://demo?diagnose=2", &s),
               ECUIO_ERR_BAD_URI);
     EXPECT_STREQ(ecuio_last_error_detail(), "?diagnose= needs 0 or 1, not '2'");
+}
+
+/* ADR-0038 on the simulated ECU, no worker: at an engine speed the
+ * drive cycle could give it, a clear asks 01 0C and stops there while
+ * the engine turns; with it stopped, 04 clears the ECU and the list read
+ * again is the fake's cleared report */
+TEST(CoreTest, MockEcuClearsOnlyWithTheEngineStopped)
+{
+    auto e = std::make_unique<ecuio_request_engine>();
+    ecuio_engine_init(e.get(), 1);
+    ecuio_engine_diagnose(e.get(), ecuio_obd2_signal_set());
+    const ecuio_channel_diagnostics_t& d = e->chans[0].diag;
+    ecuio_mock::DriveCycle car;
+    ecuio_mock_ecu ecu;
+    ecu.engine = &car;
+    int64_t now = 0;
+    ecuio_mock_ecu_read(e.get(), &ecu, &now);
+    fake_diagnostics::expect_report(d);
+
+    car.rpm = 812.25f;
+    ASSERT_TRUE(ecuio_engine_clear(e.get(), 0, d.generation));
+    ecuio_mock_ecu_read(e.get(), &ecu, &now);
+    EXPECT_EQ(d.clear, ECUIO_CLEAR_ENGINE_RUNNING);
+    EXPECT_EQ(d.clear_rpm, 813u) << "rounded up";
+    EXPECT_FALSE(ecu.cleared);
+    fake_diagnostics::expect_report(d);
+
+    car.rpm = 0.0f;
+    ASSERT_TRUE(ecuio_engine_clear(e.get(), 0, d.generation));
+    ecuio_mock_ecu_read(e.get(), &ecu, &now);
+    EXPECT_TRUE(ecu.cleared);
+    fake_diagnostics::expect_cleared_report(d);
+}
+
+/* Through the worker: a session starts with the key on and the engine
+ * stopped, so a clear of the report saved at create empties it on an
+ * early tick, and that generation is gone; a new connect starts
+ * uncleared */
+TEST(CoreTest, MockClearsTheReportLikeTheFakeEcu)
+{
+    ecuio_session_t* s = nullptr;
+    ASSERT_EQ(ecuio_session_create("mock://demo", &s), ECUIO_OK);
+    ecuio_channel_diagnostics_t d{};
+    ASSERT_EQ(ecuio_session_get_channel_diagnostics(s, 0, &d), ECUIO_OK);
+    const uint32_t saved = d.generation;
+    EXPECT_EQ(ecuio_session_clear_diagnostics(s, 0, saved), ECUIO_OK)
+        << "before start: taken on the first tick";
+    ASSERT_EQ(ecuio_session_start(s), ECUIO_OK);
+    EXPECT_TRUE(wait_for(
+        [&] {
+            return ecuio_session_get_channel_diagnostics(s, 0, &d) ==
+                       ECUIO_OK &&
+                   d.clear != ECUIO_CLEAR_NONE &&
+                   (d.flags & ECUIO_DIAG_COMPLETE) != 0;
+        },
+        2000));
+    fake_diagnostics::expect_cleared_report(d);
+    EXPECT_EQ(ecuio_session_clear_diagnostics(s, 0, saved),
+              ECUIO_ERR_REPORT_CHANGED);
+    ecuio_session_destroy(s);
+
+    ASSERT_EQ(ecuio_session_create("mock://demo", &s), ECUIO_OK);
+    ASSERT_EQ(ecuio_session_get_channel_diagnostics(s, 0, &d), ECUIO_OK);
+    fake_diagnostics::expect_report(d);
+    EXPECT_EQ(d.clear, ECUIO_CLEAR_NONE);
+    ecuio_session_destroy(s);
 }
 
 /* ADR-0038: a clear names the report the caller saved, so anything else
@@ -851,7 +919,7 @@ namespace {
 /* The mock's physical envelope across a whole drive cycle. Shared by
  * the worker test below, which sees only the first second of the
  * cycle, and the deterministic cycle tests, which see all of it. */
-constexpr float kMockRpmMin = 600.0f;
+constexpr float kMockRpmMin = 0.0f; /* key on, the engine stopped */
 constexpr float kMockRpmMax = 7100.0f;
 constexpr float kMockCoolantMin = 15.0f;
 constexpr float kMockCoolantMax = 110.0f;
@@ -975,7 +1043,7 @@ struct PhaseStats {
 struct LoopRun {
     PhaseStats phase[kPhaseCount];
     std::vector<Phase> order;  /* phases in visit order */
-    bool closed = false;       /* looped back to Roll2nd */
+    bool closed = false;       /* looped back to KeyOn */
     DriveCycle end;
 };
 
@@ -984,8 +1052,8 @@ const PhaseStats& stats(const LoopRun& r, Phase p)
     return r.phase[static_cast<int>(p)];
 }
 
-/* Step one loop, WarmUp through Cooldown, stopping at the tick that
- * returns to Roll2nd. Bounded at 10 simulated minutes. */
+/* Step one loop, KeyOn through Cooldown, stopping at the tick that
+ * returns to KeyOn. Bounded at 10 simulated minutes. */
 LoopRun run_one_loop()
 {
     LoopRun r;
@@ -1023,13 +1091,13 @@ LoopRun run_one_loop()
 TEST(CoreTest, MockDriveCycleVisitsEveryPhaseInOrder)
 {
     const LoopRun r = run_one_loop();
-    ASSERT_TRUE(r.closed) << "the cycle never looped back to Roll2nd";
+    ASSERT_TRUE(r.closed) << "the cycle never looped back to KeyOn";
     ASSERT_EQ(r.order.size(), static_cast<size_t>(kPhaseCount));
     for (int i = 0; i < kPhaseCount; ++i) {
         EXPECT_EQ(static_cast<int>(r.order[static_cast<size_t>(i)]), i)
             << "visit " << i;
     }
-    EXPECT_EQ(r.end.phase, Phase::Roll2nd);
+    EXPECT_EQ(r.end.phase, Phase::KeyOn);
 }
 
 TEST(CoreTest, MockDriveCycleSecondGearPullHoldsTheLimiter)
@@ -1359,7 +1427,9 @@ TEST(CoreTest, MockDriveCycleSignalsStayPhysical)
 
         const float estimate = ecuio_mock::maf_wot_gs(dc.rpm) * dc.load_pct / 100.0f;
         EXPECT_NEAR(dc.maf_gs, estimate, 0.1f * estimate + 0.5f) << "tick " << dc.tick;
-        EXPECT_GT(dc.maf_gs, 5.0f) << "engine running, tick " << dc.tick;
+        if (dc.running && dc.rpm >= 600.0f) {
+            EXPECT_GT(dc.maf_gs, 5.0f) << "engine running, tick " << dc.tick;
+        }
         EXPECT_GE(dc.throttle_pct, ecuio_mock::kTpClosedPct - 0.01f);
         EXPECT_LE(dc.throttle_pct, ecuio_mock::kTpWotPct + 0.01f);
 
@@ -1391,10 +1461,11 @@ TEST(CoreTest, MockDriveCycleReadingsNeverHoldDeadStill)
 {
     /* A running engine's rpm, as the wire carries it, never holds one
      * value for long: the idle hunts, the driver's speed wanders, the
-     * crank reading jitters. And away from the moments that are quick
-     * on a real car (a shift, the limiter, the launch and the drag run),
-     * rpm never steps between ticks by more than an engine can change,
-     * phase changes included. */
+     * crank reading jitters. A stopped one reads 0 (KeyOn). And away
+     * from the moments that are quick on a real car (a shift, the
+     * limiter, the launch and the drag run), rpm never steps between
+     * ticks by more than an engine can change, phase changes, a stop and
+     * a start included. */
     DriveCycle dc;
     uint8_t payload[ECUIO_MOCK_TELEMETRY_PAYLOAD_LEN] = {};
     uint16_t last_raw = 0;
@@ -1406,7 +1477,9 @@ TEST(CoreTest, MockDriveCycleReadingsNeverHoldDeadStill)
         dc.step();
         ecuio_mock::encode_payload(dc, payload);
         const uint16_t raw = static_cast<uint16_t>(payload[0] | (payload[1] << 8));
-        same = (dc.tick > 1 && raw == last_raw) ? same + 1 : 0;
+        same = (dc.tick > 1 && raw == last_raw && dc.phase != Phase::KeyOn)
+                   ? same + 1
+                   : 0;
         longest = std::max(longest, same);
         last_raw = raw;
 
@@ -1422,6 +1495,71 @@ TEST(CoreTest, MockDriveCycleReadingsNeverHoldDeadStill)
     ASSERT_EQ(dc.loops, 2u) << "two loops never completed";
     EXPECT_LE(longest, 10u) << "rpm read the same for over half a second";
     EXPECT_LE(worst_step, 150.0f) << "rpm stepped at tick " << worst_tick;
+}
+
+TEST(CoreTest, MockDriveCycleEachLoopStartsWithTheEngineStopped)
+{
+    /* Every loop starts with 15 s of the key on and the engine stopped,
+     * where a clear can run (ADR-0038): from the first tick on the
+     * first loop, and once the engine has run down from idle on later
+     * ones, it reads 0 rpm with no air, no speed and the sensor lean,
+     * and with the pump stopped the warm coolant soaks heat from the
+     * block rather than losing it to the radiator. Then the starter
+     * cranks it, and it catches and runs at its idle by the end of the
+     * start. */
+    constexpr uint32_t kLoops = 3;
+    uint32_t key_on[kLoops] = {}, stopped[kLoops] = {};
+    float crank_hi[kLoops] = {}, start_end_rpm[kLoops] = {};
+    float soak_entry[kLoops] = {}, soak_lo[kLoops] = {};
+    bool started[kLoops] = {};
+    bool ran_with_key_on = false;
+    DriveCycle dc;
+    EXPECT_EQ(dc.phase, Phase::KeyOn);
+    EXPECT_EQ(dc.rpm, 0.0f);
+    while (dc.loops < kLoops && dc.tick < ecuio_mock::ticks_for(1200.0f)) {
+        dc.step();
+        if (dc.loops >= kLoops) {
+            break;
+        }
+        const uint32_t i = dc.loops;
+        if (dc.phase == Phase::KeyOn) {
+            if (key_on[i] == 0) {
+                soak_entry[i] = soak_lo[i] = dc.coolant_c;
+            }
+            soak_lo[i] = std::fmin(soak_lo[i], dc.coolant_c);
+            ++key_on[i];
+            ran_with_key_on = ran_with_key_on || dc.running;
+            if (dc.rpm == 0.0f) {
+                ++stopped[i];
+                EXPECT_EQ(dc.maf_gs, 0.0f) << "tick " << dc.tick;
+                EXPECT_EQ(dc.load_pct, 0.0f) << "tick " << dc.tick;
+                EXPECT_EQ(dc.speed_kmh, 0.0f) << "tick " << dc.tick;
+                EXPECT_GT(dc.lambda, 1.3f) << "tick " << dc.tick;
+            }
+        } else if (dc.phase == Phase::Start) {
+            if (!dc.running) {
+                crank_hi[i] = std::fmax(crank_hi[i], dc.rpm);
+            }
+            start_end_rpm[i] = dc.rpm;
+            started[i] = dc.running;
+        }
+    }
+    ASSERT_EQ(dc.loops, kLoops) << "three loops never completed";
+    EXPECT_FALSE(ran_with_key_on);
+    ASSERT_GT(soak_entry[kLoops - 1], ecuio_mock::kThermostatOpenC);
+    EXPECT_GE(soak_lo[kLoops - 1], soak_entry[kLoops - 1] - 0.1f)
+        << "the radiator cooled a stopped engine";
+    for (uint32_t i = 0; i < kLoops; ++i) {
+        SCOPED_TRACE(i + 1);
+        EXPECT_EQ(key_on[i], ecuio_mock::kKeyOnTicks);
+        EXPECT_GE(stopped[i], ecuio_mock::ticks_for(14.0f))
+            << "it ran down within a second";
+        EXPECT_GE(crank_hi[i], 180.0f);
+        EXPECT_LE(crank_hi[i], 260.0f);
+        EXPECT_TRUE(started[i]);
+        EXPECT_GE(start_end_rpm[i], 700.0f);
+        EXPECT_LE(start_end_rpm[i], 1500.0f);
+    }
 }
 
 TEST(CoreTest, MockDriveCycleLimiterCutsFuelNotAir)
@@ -1449,7 +1587,7 @@ TEST(CoreTest, MockDriveCycleLimiterCutsFuelNotAir)
         ++ticks;
     });
     ASSERT_EQ(ticks, ecuio_mock::ticks_for(5.0f));
-    EXPECT_GE(min_load, 95.0f);
+    EXPECT_GE(min_load, 94.0f) << "near WOT air, less the MAF noise";
     EXPECT_GE(min_maf, 0.9f * pull_maf);
     EXPECT_GT(max_lambda, 1.6f);
     EXPECT_GT(cut, ticks / 2) << "the limiter should spend most of its time in cut";

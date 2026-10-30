@@ -2149,13 +2149,7 @@ TEST_F(J2534AdoptionTest, AClearAtAStoppedEngineEmptiesTheReport)
         },
         5000))
         << "clear " << int{d.clear} << ", generation " << d.generation;
-    EXPECT_EQ(d.flags & (ECUIO_DIAG_MIL_ON | ECUIO_DIAG_FREEZE_FRAME |
-                         ECUIO_DIAG_CLEARING),
-              0u);
-    EXPECT_EQ(d.lists[ECUIO_DIAG_STORED].held, 0u);
-    EXPECT_EQ(d.lists[ECUIO_DIAG_PENDING].held, 0u);
-    EXPECT_EQ(d.lists[ECUIO_DIAG_PERMANENT].held, 1u) << "permanent stays";
-    EXPECT_EQ(d.freeze_count, 0u);
+    fake_diagnostics::expect_cleared_report(d);
     EXPECT_EQ(ecuio_session_clear_diagnostics(session, 0, saved),
               ECUIO_ERR_REPORT_CHANGED)
         << "the saved report is gone";
