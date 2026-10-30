@@ -511,9 +511,10 @@ int run_stream(const StreamArgs& args)
     ecuio_session_info_t info;
     std::memset(&info, 0, sizeof info);
     ecuio_session_get_info(session, &info);
-    stream->wait = info.backend == ECUIO_BACKEND_REPLAY;
-    const bool replay_ends = info.backend == ECUIO_BACKEND_REPLAY &&
-                             !(info.flags & ECUIO_SESSION_INFO_REPLAY_LOOP);
+    const bool replay = info.backend == ECUIO_BACKEND_REPLAY;
+    stream->wait = replay;
+    const bool replay_ends =
+        replay && !(info.flags & ECUIO_SESSION_INFO_REPLAY_LOOP);
     write_session(out, info);
     if (args.values) {
         write_signals(out, ecuio_session_signal_set(session));
@@ -589,6 +590,11 @@ int run_stream(const StreamArgs& args)
             l.u64(now_episodes);
             l.ch('}');
             write_line(out, l);
+        }
+        // A replay whose file changed has stopped, short of its last
+        // frame: the health line above says so, then the stream ends
+        if (!reason && replay && now_error == ECUIO_ERR_RECORDING_CHANGED) {
+            reason = "recording-changed";
         }
     }
 
@@ -897,8 +903,9 @@ int run_play(const PlayArgs& args)
     ecuio_session_info_t info;
     std::memset(&info, 0, sizeof info);
     ecuio_session_get_info(session, &info);
-    const bool replay_ends = info.backend == ECUIO_BACKEND_REPLAY &&
-                             !(info.flags & ECUIO_SESSION_INFO_REPLAY_LOOP);
+    const bool replay = info.backend == ECUIO_BACKEND_REPLAY;
+    const bool replay_ends =
+        replay && !(info.flags & ECUIO_SESSION_INFO_REPLAY_LOOP);
     write_session(out, info);
     {
         char buf[256];
@@ -939,6 +946,12 @@ int run_play(const PlayArgs& args)
         } else if (args.seconds &&
                    ecuio_clock_us() - started >= args.seconds * 1000000u) {
             reason = "seconds";
+        }
+        int32_t error = ECUIO_OK;
+        uint32_t episodes = 0;
+        ecuio_session_get_error_state(session, &error, &episodes);
+        if (!reason && replay && error == ECUIO_ERR_RECORDING_CHANGED) {
+            reason = "recording-changed"; /* stopped short of its end */
         }
     }
     ecuio_session_close(session);

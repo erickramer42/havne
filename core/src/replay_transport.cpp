@@ -3,7 +3,9 @@
 //          numbers, either line ending, a whole-message payload, pacing at
 //          speed 1 and 10, late frames catching up with no drift, stamps
 //          rebased and never decreasing, the backward-step fallback, loop
-//          and end of file, an early stop's error state, the query);
+//          and end of file, an early stop's error state (a bad row, a
+//          file gone, fewer rows; rows added played no further), the
+//          query);
 //          BridgeTest.ReplayOfAMockRecordingDecodesWhatWasRecorded (the
 //          round trip through SessionRecorder), .ReplayThatStopsEarlySaysSo;
 //          CoreTest.ReplayOfTheVehicleFixtureDecodesTheSheetsValues
@@ -329,6 +331,8 @@ struct ecuio_replay_transport {
     native_path path;                     /* the frames.csv */
     std::vector<char> line;               /* kLineMax + 2 */
     std::unique_ptr<ecuio_frame_t> frame; /* 4 KB, off the worker's stack */
+    uint64_t rows = 0;                    /* attach's count, what a pass
+                                             plays */
     uint32_t speed_milli = kSpeedDefault; /* 0 = max */
     bool loop = false;
     std::thread worker;
@@ -339,10 +343,10 @@ struct ecuio_replay_transport {
 
 namespace {
 
-/* The file isn't the one attach checked (a row that no longer parses, or
- * a file that won't open again): published through the error state, one
- * episode, so the app can say why playback stopped. The count goes first,
- * so a reader that sees the code sees its episode. */
+/* The file isn't the one attach checked (a row that no longer parses,
+ * fewer rows, or a file that won't open again): published through the
+ * error state, one episode, so the app can say why playback stopped. The
+ * count goes first, so a reader that sees the code sees its episode. */
 void stop_early(ecuio_replay_transport* t)
 {
     t->session->error_count.fetch_add(1);
@@ -366,9 +370,12 @@ void replay_worker(ecuio_replay_transport* t)
             return;
         }
         row prev, cur;
-        uint64_t pass_us = 0;
+        uint64_t pass_us = 0, n = 0;
         bool first = true, too_long = false;
-        while (read_line(f, buf, &too_long)) {
+        /* Attach's rows and no more: rows added since (a recording
+         * still being written) wait for another session */
+        while (n < t->rows && read_line(f, buf, &too_long)) {
+            ++n;
             const char* why = nullptr;
             *frame = ecuio_frame_t{};
             if (too_long || !parse_row(buf.data(), &cur, frame, &why)) {
@@ -398,6 +405,11 @@ void replay_worker(ecuio_replay_transport* t)
             ecuio_session_dispatch_callbacks(t->session, frame);
         }
         std::fclose(f);
+        if (n != t->rows) {
+            stop_early(t); /* cut short: a reader waiting for the last
+                              frame would wait forever */
+            return;
+        }
         if (!t->loop) {
             return; /* the end of the file: the session stays open, silent */
         }
@@ -525,6 +537,7 @@ ecuio_status_t ecuio_replay_transport_attach(ecuio_session_t* session,
         if (checked != ECUIO_OK) {
             return checked;
         }
+        impl->rows = rows;
         /* A pass with no span would never wait: the worker would spin,
          * sending the same instant again and again */
         if (loop && span_us == 0) {

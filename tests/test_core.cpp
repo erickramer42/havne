@@ -2673,6 +2673,58 @@ TEST(CoreTest, ReplayStopsAtARowThatTurnedBadAfterAttach)
     ecuio_session_destroy(session);
 }
 
+/* A recording cut short after attach plays what's left, then says why it
+ * stopped: a reader counting to attach's rows would wait forever. One
+ * that grew plays attach's rows and ends as at the end of its file */
+TEST(CoreTest, ReplayOfARecordingWithOtherRowsPlaysAttachsAtMost)
+{
+    struct Case {
+        int rows_now;
+        ecuio_status_t state;
+    };
+    for (const Case& c :
+         {Case{3, ECUIO_ERR_RECORDING_CHANGED}, Case{7, ECUIO_OK}}) {
+        SCOPED_TRACE(c.rows_now);
+        TempRecording rec(paced_rows(5));
+        ecuio_session_t* session = nullptr;
+        ASSERT_EQ(ecuio_session_create(rec.uri("?speed=max").c_str(), &session),
+                  ECUIO_OK)
+            << ecuio_last_error_detail();
+        {
+            const std::string rows = paced_rows(c.rows_now);
+            FILE* f = std::fopen(rec.csv.c_str(), "wb");
+            ASSERT_NE(f, nullptr);
+            std::fwrite(rows.data(), 1, rows.size(), f);
+            std::fclose(f);
+        }
+        ReplayCapture cap;
+        ASSERT_EQ(
+            ecuio_register_frame_callback(session, replay_capture_cb, &cap),
+            ECUIO_OK);
+        ASSERT_EQ(ecuio_session_start(session), ECUIO_OK);
+        const size_t played =
+            static_cast<size_t>(c.rows_now < 5 ? c.rows_now : 5);
+        ASSERT_TRUE(wait_for([&] { return cap.count() >= played; }, 2000));
+        int32_t last = ECUIO_OK;
+        uint32_t episodes = 0;
+        if (c.state != ECUIO_OK) {
+            ASSERT_TRUE(wait_for(
+                [&] {
+                    ecuio_session_get_error_state(session, &last, &episodes);
+                    return last != ECUIO_OK;
+                },
+                2000));
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        ecuio_session_get_error_state(session, &last, &episodes);
+        EXPECT_EQ(last, c.state);
+        EXPECT_EQ(episodes, c.state == ECUIO_OK ? 0u : 1u);
+        EXPECT_EQ(cap.count(), played) << "attach's rows at most";
+        ASSERT_EQ(ecuio_session_close(session), ECUIO_OK);
+        ecuio_session_destroy(session);
+    }
+}
+
 /* A recording deleted between attach and start: nothing to play, and the
  * error state says so */
 TEST(CoreTest, ReplayOfARecordingThatWentAwaySaysSo)

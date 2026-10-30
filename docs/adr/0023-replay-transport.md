@@ -284,6 +284,17 @@ rewritten: the state, the code, the episode, one line, no "Replay
 finished") and `.LinkStateMapsEveryPublishedCode`; `QmlTest.theme` and
 `.liveview` for the label, color and banner.
 
+**Note (2026-10-30): a pass plays attach's rows.** A recording cut
+short after attach (a copy truncated, a file regenerated smaller) ended
+its pass at the end of the file as if whole, so nothing said that
+fewer frames came than `replay_frames` promised, and `havne-cli`
+waited for the rest ([ADR-0031](0031-command-line-client.md)'s appendix
+of 2026-10-30). The worker counts each pass's rows against attach's:
+fewer stop it with `ECUIO_ERR_RECORDING_CHANGED`, as a bad row does.
+Rows added since attach (a recording still being written) aren't
+played: a pass ends at attach's count, cleanly, so `replay_frames` and
+`replay_span_ms` stay true. `CoreTest.ReplayOfARecordingWithOtherRowsPlaysAttachsAtMost`.
+
 **Note (2026-10-26): a loop needs a span.** A recording whose frames
 all share one time (one frame, or several stamped alike) gives a pass
 that never waits, so with `loop=1` the worker would send the same

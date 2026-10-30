@@ -186,6 +186,12 @@ if(TARGET havne-cli)
             -- $<TARGET_FILE:havne-cli> stream "mock://golden?speed=2")
         app_cli_golden(UnknownProfileIsRefused unknown-profile.jsonl --exit 3
             -- $<TARGET_FILE:havne-cli> stream "mock://golden?profile=nonesuch")
+        # A replay cut short under it stops early, and the stream ends
+        # with it instead of waiting for a last frame that never comes
+        add_test(NAME CliReplayTest.ACutRecordingEndsTheStream
+            COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/cli_recording_changed.py
+                    $<TARGET_FILE:havne-cli>)
+        set_tests_properties(CliReplayTest.ACutRecordingEndsTheStream PROPERTIES TIMEOUT 30)
     endif()
     function(app_cli_usage name args)
         add_test(NAME CliUsageTest.${name}
