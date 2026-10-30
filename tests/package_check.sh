@@ -53,8 +53,12 @@ cmake --build "$work/tar" > /dev/null
 
 sudo apt-get install -y "$deb" "$dbgdeb" > /dev/null
 # Captured, then matched: grep -q leaving a pipe early would end gdb
-# with SIGPIPE, which pipefail reads as a failure
-found=$(gdb -batch -ex 'info functions ^main$' /usr/bin/havne-cli 2>&1 || true)
+# with SIGPIPE, which pipefail reads as a failure. ^main, not ^main$:
+# gdb matches a C++ function by its signature, main(int, char**).
+# debuginfod off before the file loads (-iex): the debug file must come
+# from the -dbgsym package, not a download
+found=$(gdb -batch -iex 'set debuginfod enabled off' -ex 'info functions ^main' \
+    /usr/bin/havne-cli 2>&1 || true)
 grep -q 'File .*cli/main\.cpp:' <<< "$found" \
     || { echo "$found"; die "gdb found no debug info for havne-cli"; }
 echo "gdb: havne-cli's debug info found by build ID"
