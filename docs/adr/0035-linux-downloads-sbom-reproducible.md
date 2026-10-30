@@ -71,7 +71,9 @@ folder otherwise):
   `${pcfiledir}/../..`.
 - `lib/cmake/ecuio/`: `find_package(ecuio)` gives the imported target
   `ecuio::core`. A minor version accepts only its own minor
-  (`SameMinorVersion`), since before 1.0 a minor may break the ABI.
+  (`SameMinorVersion`), since before 1.0 a minor may break the ABI. A
+  project that enables only C links with the C driver, which leaves out
+  the C++ runtime, so on Linux the package names it there too.
 - `share/doc/havne-core/copyright` (the MIT license)
 
 `lib/`, not Debian's multiarch `lib/x86_64-linux-gnu/`: one layout

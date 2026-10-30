@@ -108,6 +108,7 @@ Dates are commit dates.
 | 2026-10-29 | SocketCAN, listening ([ADR-0032](adr/0032-socketcan-listening.md)): `socketcan://` reads a Linux CAN interface through a `CAN_RAW` socket with the kernel's receive times, CAN FD, error frames and the kernel's drop count, refusing a controller that isn't listen-only; `ecuio/socketcan.h` lists the interfaces for Settings and the CLI; `havne-cli play` drives the mock's car on `vcan0`, so the path runs end to end with no hardware, on CI too | `3d3ca10` |
 | 2026-10-29 | Session time counts sleep ([ADR-0033](adr/0033-session-time-counts-sleep.md)): one host clock, `ecuio_clock_us`, for every transport's stamps, the request engine, a recording's `host_us`, a value's age and the CLI, counting the time the machine sleeps on every platform (`CLOCK_BOOTTIME` on Linux and Android, where `steady_clock` stops); the activity log and the CLI say when the machine slept and for how long | `fe37ad4` |
 | 2026-10-29 | Debug symbols and probes ([ADR-0034](adr/0034-debug-symbols-and-probes.md)): every MSVC Release build writes PDBs, and the release ships the four executables' PDBs in a zip of their own, each checked against its binary; three USDT probes in core on Linux (a session's start and close, each frame), checked in the ELF notes and fired under `bpftrace` on CI | `75f7daa` |
+| 2026-10-30 | Linux downloads, an SBOM and reproducible core packages ([ADR-0035](adr/0035-linux-downloads-sbom-reproducible.md)): core and `havne-cli` as a deb and a tarball with a CMake package and a pkg-config file, `havne-cli`'s debug info split by build ID; CI builds them under `reprotest` and two runners made the same bytes; the release adds them and the AppImage, and one SPDX SBOM built from what each job packed | `3b86431` |
 
 ## Lessons learned
 
@@ -1086,3 +1087,17 @@ doesn't read the same, so the test that pins the clock can't see the
 wrong one there. The rule that matters is tested through a seam (the
 bridge's slept count), and the property itself waits for a sleep on
 the bench.
+
+**2026-10-30 — the Linux packages (ADR-0035):** **a package is tested
+the way its users will use it, not the way it was built.** The core
+tree and `cmake --install` looked right, and a C++ consumer would have
+linked; the first C program built through `find_package` didn't. CMake
+picks the linker from the languages a project enables, so a C-only
+project links a C++ archive with the C driver and loses the C++
+runtime; the package now names it for such a project, as `ecuio.pc`
+already did. And **a second machine finds what one machine can't.**
+reprotest varies one build's folder, clock and locale, but both of its
+builds start from the same checkout. Two CI runners' AppImages differed
+in 46 bytes: `rcc` records each embedded file's modification time,
+which is when that runner checked the code out. The core packages
+embed no file times, and the two runners made the same bytes.
