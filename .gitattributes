@@ -1,3 +1,9 @@
 # Shell scripts run under Linux (WSL, CI) and Git Bash: LF in every
 # checkout, a Windows one with core.autocrlf included, or sh rejects them
 *.sh text eol=lf
+
+# Read by Linux tools from this tree (the linux skill syncs a Windows
+# checkout into WSL): a CR ends linuxdeploy's Icon= value and pkg-config's
+# Libs with a stray byte
+*.desktop text eol=lf
+*.pc.in text eol=lf
