@@ -299,7 +299,7 @@ an issue is resolved it is removed, and its number is not reused.
 | v0.3.2 | Record-replay transport, decoding on the transport's thread, every driver in its own process | ✅ Released |
 | v0.3.3 | ELM327 adapters, preferences and vehicles, Android with Bluetooth and background sessions and a signed APK, the rename to Havne | ✅ Released |
 | v0.3.4 | A command-line client over the C ABI; Linux as a supported desktop; a SocketCAN transport that listens | ✅ Released |
-| v0.3.5 | Full OBD-II diagnostics (Services 01–0A, clearing codes); SocketCAN requests through ISO-TP | In progress: reading codes built |
+| v0.3.5 | Full OBD-II diagnostics (Services 01–0A, clearing codes); SocketCAN requests through ISO-TP; fault injection on a replay; a performance benchmark with latency per PID | In progress: reading codes built |
 | v0.3.6–v0.3.9 | Recordings you can open, compare and share: a log viewer with run overlay, CSV import and export with scrubbing, a health report, triggered logging and alerts | Planned |
 | v0.4.0 | Python bindings; PCAP export and candump import; ECU, DID and service discovery (needs requests to every ECU and listening to the whole bus first) | Proposed |
 | v0.5.0 | The plugin framework (ADR-0013's profile API), with no manufacturer plugin yet; legacy buses (ISO 9141-2, KWP2000, J1850) | Proposed |
@@ -339,6 +339,29 @@ scheduled. What each holds, past its row:
   a session that sends needs the controller in normal mode, so it says
   when that's allowed and what then guards a car's bus against a wrong
   bit rate.
+  - The simulated ECU on `vcan0` answers requests through ISO-TP (the
+    fakes' ECU, `tests/fake_ecu.h`), so all of it runs with no car.
+  - Conformance tests against it: STmin, block sizes, wait frames,
+    flow-control overflow, the N_Bs and N_Cr timeouts, out-of-order
+    sequence numbers. Adapters hide these; on SocketCAN they're core's
+    to get right.
+  - A fuzz target for the ISO-TP reassembly.
+- **Fault injection on a replay:** frames dropped, delayed or corrupted
+  (a bad ISO-TP sequence, a late reply) in a replayed session, so the
+  error handling is proven against real traffic with no vehicle.
+  `replay://` already plays byte for byte and the fakes inject faults;
+  injecting into a replay is the new part.
+- **A performance benchmark:** frames per second, throughput and zero
+  dropped as published numbers, building on CI's load test and
+  `bench_bridge` ([docs/testing.md](docs/testing.md#performance)); and
+  per PID, reply latency and the spread of its refresh interval (P50,
+  P99, P99.9), as a `latency.csv` per session. A J2534 frame carries
+  the adapter's time and an ELM327's the host's, whose jitter includes
+  the serial link's, so the output says which.
+- **Done when:** a script reads a live car through SocketCAN at a
+  documented rate. Python bindings come in v0.4.0, so the script is
+  `havne-cli`. The car run needs a SocketCAN adapter and an OBD-to-DB9
+  cable (BENCH prep #26).
 
 ### v0.3.6 to v0.3.9: recordings you can open, compare and share
 
@@ -351,21 +374,47 @@ across the four releases is decided as they come.
   crossing or a marker). Seeking needs no new format, since `host_us`
   only increases; the recording container waits for whole-bus
   listening (v0.4.0).
+  - Drawn at scale: each pixel column's lowest and highest, with memory
+    bounded on an hour-long recording.
+  - With it, the same chart code on Live: the chart as a time window
+    (the last N seconds, the same span on any adapter, instead of the
+    last 360 points per signal), and on the phone pinch zoom and
+    smaller Dashboard gauges when it's upright.
+  - Done when two recordings of the mock's pulls overlay aligned on the
+    pull's start, and an hour-long recording opens and scrubs within a
+    stated memory bound.
 - **In and out:** CSV import of another logger's timed signals through
-  a column map; CSV export; every export scrubbed of VINs, calibration
-  IDs, serials and paths; a health report (trouble codes, readiness,
-  identification and key values) as one scrubbed export.
+  a column map, with a fuzz target for its parser; CSV export; every
+  export scrubbed of VINs, calibration IDs, serials and paths; a
+  health report (trouble codes, readiness, identification with the
+  VIN decoded to make, model and year, and key values) as one scrubbed
+  export, with readiness for the current drive cycle (PID 41) and a
+  summary of whether the car would pass an inspection.
+  - The Log page's frames: a filter by the columns an engineer reads a
+    bus by (the ID, one or a list, a range or an ID and mask; the
+    length; the payload, a byte at a position or a masked hex sequence
+    such as `41 0C`; the flags; a time range), a per-ID view (each
+    ID's newest frame, count and rate, the bytes that changed
+    highlighted), an export of what the filter shows, and copied rows
+    for quick notes.
 - **Conditions:** one condition model in core, data rather than code,
   for triggered logging (record while a condition holds, or a window
-  around a link fault), alerts, and markers the viewer shows; computed
-  signals (boost from MAP and barometric pressure) beside it.
+  around a link fault), alerts (color, sound or a banner), and markers
+  the viewer shows; computed signals beside it, in a derived-signal
+  stage in core that keeps the UI on final display values: boost is
+  intake manifold pressure (PID 0x0B) minus barometric pressure (PID
+  0x33), neither yet in the `obd2` set, so both are checked against a
+  public J1979 table first.
 
 ### v0.4.0 and v0.5.0 (proposed)
 
 - **v0.4.0:** Python bindings over the C ABI; PCAP export and candump
-  import; discovering which ECUs answer and what they offer, which
-  needs requests to more than one ECU and listening to the whole bus
-  first.
+  import (a fuzz target for the candump parser); discovering which
+  ECUs answer and what they offer, which needs requests to more than
+  one ECU and listening to the whole bus first, with the simulated ECU
+  grown to several modules (engine, transmission, body) to test them
+  with no car. Done when a Python script opens SocketCAN, decodes PIDs
+  and prints the values.
 - **v0.5.0:** a plugin framework (ADR-0013's profile API made
   general); the pre-2008 buses (ISO 9141-2, KWP2000, J1850), through
   ELM327 and J2534.
@@ -378,19 +427,6 @@ the roadmap above when it is. Defects and debt live under
 
 Sizes are rough: **S** is a day or less, **M** a few days, **L** a
 week or more or a design that needs an ADR first.
-
-### Data capture
-
-- **Recording, what's left (S).** ADR-0017's recorder writes a whole
-  session per connect, and its `events.log` names the vehicle through
-  the identity line ([ADR-0021](docs/adr/0021-vehicle-identification.md)).
-  The folder is named by the picked vehicle as well as the date
-  ([ADR-0027](docs/adr/0027-vehicle-profiles.md)). Still to do: copy
-  selected Log rows for quick notes.
-- **Triggered logging (M).** Record only while a condition holds
-  (RPM over a threshold) or capture a window around a link fault.
-  Needs a trigger model in core, similar in shape to the probe: data
-  describing a condition, not code on the worker thread.
 
 ### User interface
 
@@ -422,16 +458,10 @@ week or more or a design that needs an ADR first.
 
 ### Vehicle coverage
 
-- **Computed signals (M).** Values derived from other signals, such
-  as boost pressure: intake manifold absolute pressure (PID 0x0B)
-  minus barometric pressure (PID 0x33). Neither PID is in the `obd2`
-  set yet. A def decodes one field of one frame, so this needs a
-  derived-signal stage in core, which keeps the UI on final display
-  values (rule 2 above). Verify both PIDs against a public J1979
-  table before adding them.
-- **Custom derived channels (M).** Beyond the fixed computed signals
-  above: a user-facing expression per channel (differences, unit
-  conversions, smoothing). Stays in core per rule 2, and is the same
+- **Custom derived channels (M).** Beyond the computed signals planned
+  for v0.3.6–v0.3.9: a user-facing expression per channel
+  (differences, unit conversions, smoothing). Stays in core, so the UI
+  still gets final display values, and is the same
   data-describing-arithmetic shape ADR-0015 uses for requests.
 
 ### Performance
