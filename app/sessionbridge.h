@@ -330,6 +330,11 @@ class SessionBridge : public QObject
     // Applies to what the UI shows at once, connected or not; recordings
     // keep the decoded values. Main.qml persists it.
     Q_PROPERTY(int unitSystem READ unitSystem WRITE setUnitSystem NOTIFY unitSystemChanged)
+    // What each channel's ECU has reported of its diagnostics (ADR-0037),
+    // one map per ECU (diagnosticsEntry), for the Diagnostics page:
+    // refreshed on the tick as a read settles each item, and when the
+    // unit system changes; emptied at connect, kept after disconnect
+    Q_PROPERTY(QVariantList diagnostics READ diagnostics NOTIFY diagnosticsChanged)
 
 public:
     explicit SessionBridge(QObject* parent = nullptr);
@@ -456,6 +461,21 @@ public:
     // units, and converted here rather than in QML (rule 2).
     Q_INVOKABLE double displayValue(const QString& unit, double value) const;
     Q_INVOKABLE QString displayUnit(const QString& unit) const;
+    QVariantList diagnostics() const { return m_diagnostics; }
+    // Read again: every ECU's diagnostics asked once more
+    // (ecuio_session_read_diagnostics); nothing without a session
+    Q_INVOKABLE void readDiagnostics();
+    // One ECU's report as the page shows it: ecu ("0x7E8"); asked,
+    // complete; readiness (an outcome: "unasked", "answered", "refused",
+    // "unanswered") and readinessNrc ("7F 01 12" when refused); mil,
+    // dtcCount, compression; lists, three of {key ("stored", "pending",
+    // "permanent"), outcome, nrc, codes (["P0301", …]), more (codes past
+    // the held ones)}; monitors, [{id, name, complete}]; freeze, {outcome,
+    // nrc, stored, code, values: [{name, value, unit, decimals}]}, each
+    // value through the obd2 def that decoded it and the unit system.
+    // Static, so test_bridge pins it without a session.
+    static QVariantMap diagnosticsEntry(const ecuio_channel_diagnostics_t& d,
+                                        uint32_t units);
     // Test seam: where recordings go instead of Documents/Havne/recordings
     void setRecordingsRootForTesting(const QString& root) { m_recordingsRoot = root; }
     // Test seam: the earlier name's recordings, instead of
@@ -520,6 +540,7 @@ signals:
     void recordingChanged();
     void recordingStateChanged();
     void unitSystemChanged();
+    void diagnosticsChanged();
 
 private:
     static void onFrame(const ecuio_frame_t* frame, void* user_data);
@@ -681,6 +702,11 @@ private:
     // logged once per completed read
     void pollChannelDiagnostics();
     uint32_t m_diagnosticsGeneration[ECUIO_SESSION_INFO_MAX_CHANNELS] = {};
+    // The reports the page shows, as last read, and their entries
+    ecuio_channel_diagnostics_t m_diagnosticsShown[ECUIO_SESSION_INFO_MAX_CHANNELS] = {};
+    uint32_t m_diagnosticsShownCount = 0;
+    QVariantList m_diagnostics;
+    void rebuildDiagnostics();
     QString m_vin;            // the first channel's, this session; never leaves the bridge
     QString m_vehicleLabel;   // the picked vehicle's, for the recording folder
 
