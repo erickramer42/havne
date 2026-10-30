@@ -9,9 +9,11 @@ Havne reads a car's computer and shows what it says: live
 gauges, a strip chart, a log of every frame. A Qt-free C++17 core does
 the vehicle I/O and decoding behind a C ABI; a Qt 6 / QML front end
 draws the results on Windows, Linux, macOS and Android. It talks to
-J2534 Pass-Thru adapters on Windows and to ELM327-compatible adapters
-everywhere (USB, Bluetooth, WiFi), and a simulated vehicle runs every
-page with no hardware.
+J2534 Pass-Thru adapters on Windows, to ELM327-compatible adapters
+everywhere (USB, Bluetooth, WiFi) and to native CAN interfaces on Linux
+through SocketCAN, listening only. `havne-cli` streams any session as
+JSON lines for scripts, and a simulated vehicle runs every page with no
+hardware.
 
 > [!WARNING]
 > **Experimental, read-only.** It has read one car through two adapters, from a laptop and from an Android phone; other vehicles and adapters are untested. Read [DISCLAIMER.md](DISCLAIMER.md) before connecting it to a vehicle.
@@ -52,17 +54,29 @@ a quarter mile off launch control on a warm loop.*
 - **Protocol parsers built to be fuzzed.** The ELM327 wire layer is
   pure (no I/O, no clock, no allocation), so every rule is a unit test
   over canned bytes, and libFuzzer runs it, the signal decoder, the
-  validators and the replay reader in CI under ASan and UBSan
-  ([fuzz/README.md](fuzz/README.md)).
+  validators, the replay reader and SocketCAN's parsers in CI under
+  ASan and UBSan ([fuzz/README.md](fuzz/README.md)).
 - **A stable C ABI.** Opaque handles, flat functions and POD structs
   with reserved room, append-only enums; a strict-C compile of every
-  public header pins the layout, and a CI job builds and tests the core
-  on a machine with no Qt
-  ([ADR-0001](docs/adr/0001-qt-free-core-c-abi.md)).
+  public header pins the layout, a CI job compares the ABI with the
+  last release's, and another builds and tests the core on a machine
+  with no Qt ([ADR-0001](docs/adr/0001-qt-free-core-c-abi.md)).
+  `havne-cli` is a second front end written against the public headers
+  alone ([ADR-0031](docs/adr/0031-command-line-client.md)).
+- **Downloads anyone can check.** Every download carries a signed build
+  provenance and is listed in an SPDX SBOM; the Linux core packages
+  build to the same bytes under varied folders, clocks and locales,
+  which CI checks on every change, and two runners built the same
+  AppImage from one commit. Each release ships its PDBs and Linux debug
+  info, and USDT probes let `bpftrace` and `perf` time the frame path
+  of a running build
+  ([ADR-0034](docs/adr/0034-debug-symbols-and-probes.md),
+  [ADR-0035](docs/adr/0035-linux-downloads-sbom-reproducible.md)).
 - **Verified in tiers, and honest about it.** Unit, bridge and Qt Quick
   tests; a harness tier that drives the whole J2534 stack against an
-  in-tree fake vendor DLL (through the 32-bit surrogate too) and the
-  ELM327 transport against a fake adapter; clang-tidy and CodeQL; a
+  in-tree fake vendor DLL (through the 32-bit surrogate too), the
+  ELM327 transport against a fake adapter, and SocketCAN and a
+  simulated ECU on Linux's virtual CAN bus; clang-tidy and CodeQL; a
   signed build provenance on every download. What only hardware can
   confirm is listed, and every real-adapter session is written up
   ([docs/testing.md](docs/testing.md),
@@ -79,13 +93,23 @@ a quarter mile off launch control on a warm loop.*
   hold and stale dimming; decoded values and a strip chart that keeps
   each 100 ms window's peak; an activity log of every connect, link
   change, adapter and ECU, with the raw frames in developer mode.
-- **Three ways to reach a car.** J2534 Pass-Thru on Windows
+- **Four ways to reach a car.** J2534 Pass-Thru on Windows
   ([docs/j2534.md](docs/j2534.md)); ELM327-compatible adapters on a
   serial port, Bluetooth or WiFi on every desktop
-  ([docs/elm327.md](docs/elm327.md)); and an Android phone's Bluetooth,
+  ([docs/elm327.md](docs/elm327.md)); an Android phone's Bluetooth,
   with sessions that keep running in the background
   ([ADR-0028](docs/adr/0028-app-fed-streams.md),
-  [ADR-0029](docs/adr/0029-android-background-sessions.md)).
+  [ADR-0029](docs/adr/0029-android-background-sessions.md)); and a
+  native CAN interface on Linux through SocketCAN, listen-only, every
+  frame on the bus or the IDs a filter names
+  ([ADR-0032](docs/adr/0032-socketcan-listening.md),
+  [docs/linux.md](docs/linux.md)).
+- **A command-line client.** `havne-cli stream <uri>` writes any
+  session's frames, decoded values and link health as JSON lines for
+  `jq`, scripts and headless logging; `havne-cli devices` lists the
+  ports, adapters and CAN interfaces a URI can name; on Linux,
+  `havne-cli play` puts the simulated car or a recording on a virtual
+  CAN bus ([ADR-0031](docs/adr/0031-command-line-client.md)).
 - **Profiles chosen by the URI.** `obd2` polls standard PIDs,
   `uds-generic` polls or scans the UDS identifiers the URI names, and
   `raw` logs frames; the car's VIN and calibration IDs are read at
