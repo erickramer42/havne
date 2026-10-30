@@ -42,7 +42,6 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
   session, the activity log (and a recording's `events.log`) says
   "Asleep for N s: nothing was read meanwhile", and `havne-cli` writes
   a `slept` line.
-
 - **Debug symbols with each release**
   ([ADR-0034](docs/adr/0034-debug-symbols-and-probes.md)):
   `havne-X.Y.Z-windows-x64-symbols.zip` holds the PDBs of `havne.exe`,
@@ -66,9 +65,10 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
 - **An SBOM with each release:** `havne-X.Y.Z.spdx.json` (SPDX 2.3)
   lists what each download contains, Qt and the other libraries it
   bundles at their versions, and is attested like the downloads.
-- **Reproducible core packages:** the deb and tarball build to the same
-  bytes from the same source, wherever they're built; CI checks it on
-  every change.
+- **Reproducible Linux downloads:** the deb and tarball build to the
+  same bytes from the same source, wherever they're built, which CI
+  checks on every change; the AppImage does too, built on the same
+  Ubuntu packages.
 
 ### Removed
 - The build option `QTTUNE_BUILD_CORE_ONLY`, the name before the

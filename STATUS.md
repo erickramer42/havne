@@ -290,8 +290,8 @@ scheduled. What each holds, past its row:
   SBOM lists every download's components, validated and attested. CI
   builds the core packages twice under `reprotest` and requires the same
   bytes, then installs and uses them. Left: the first release's run of
-  the `linux` and `publish` jobs, and the AppImage's reproducibility,
-  measured but not required.
+  the `linux` and `publish` jobs. The AppImage is built by the commit's
+  time, and two builds of one commit match, but CI doesn't require it.
 - **SocketCAN, listening:** built
   ([ADR-0032](docs/adr/0032-socketcan-listening.md)): raw frames from a
   native CAN interface, listen-only, and `havne-cli play`, a simulated

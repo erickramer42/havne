@@ -77,7 +77,9 @@ change the C ABI, so the CMake package answers a version request only
 with the same minor: `find_package(ecuio 0.3)` takes any 0.3.x.
 
 The core packages are reproducible: the same release tag builds the
-same bytes, which CI checks on every change.
+same bytes, which CI checks on every change. The AppImage is too, as
+long as Ubuntu's packages it bundles haven't changed since the release
+was built.
 
 ## Adapters
 
