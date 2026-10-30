@@ -144,15 +144,19 @@ background too. Next come v0.3.4 and v0.3.5 ([roadmap](#roadmap)).
   ELM327 [bench](docs/bench-sessions/elm327-bench-runsheet.md) and
   [vehicle](docs/bench-sessions/elm327-vehicle-runsheet.md) sheets, and
   the [phone's](docs/bench-sessions/android-phone-runsheet.md).
-- **Tests:** 537 ctest cases on Windows (both trees rebuilt,
-  2026-10-29), all passing but two env-gated skips (the cross-arch
+- **Tests:** 587 ctest cases on Windows (both trees rebuilt,
+  2026-10-30), all passing but two env-gated skips (the cross-arch
   case, and the real-car recordings' diff, run locally), plus the
   cross-arch subset (82/82); 0 MSVC warnings. CI runs ctest on Windows,
-  macOS and Linux; core under ASan and UBSan; 60 s of each libFuzzer
+  macOS and Linux, with SocketCAN's suites on Linux's `vcan0`; core
+  under ASan and UBSan, `vcan0` included; 60 s of each libFuzzer
   harness ([fuzz/README.md](fuzz/README.md)); clang-tidy and CodeQL;
-  the load test on Windows and Linux; line coverage on Windows; the
-  Android and iOS cross-builds; and, on request, an iOS
-  Simulator smoke. The badge above shows its state. Tiers, suites and
+  the C ABI against the last release's; the load test on Windows and
+  Linux; line coverage on Windows; the AppImage, built and started
+  offscreen; the core packages, built twice to the same bytes, then
+  installed and built against; the probes under `bpftrace`; the
+  Android and iOS cross-builds; and, on request, an iOS Simulator
+  smoke. The badge above shows its state. Tiers, suites and
   gaps are in [docs/testing.md](docs/testing.md).
 
 ## Components
@@ -280,8 +284,10 @@ scheduled. What each holds, past its row:
   Ubuntu, ELM327 runs over termios, and the AppImage runs on Ubuntu,
   Arch and Kali; [docs/linux.md](docs/linux.md) is the guide: the
   downloads, adapters and their permissions, SocketCAN, tracing, and
-  what has run where. Not yet run: the app's window on a Linux desktop
-  and an adapter on a Linux machine.
+  what has run where. Its window ran under WSLg on all three (the
+  simulated car connected, every page, closed cleanly). Not yet run: the
+  app on a Linux machine's own desktop and an adapter on a Linux
+  machine.
 - **Linux downloads, an SBOM, reproducible builds:** built
   ([ADR-0035](docs/adr/0035-linux-downloads-sbom-reproducible.md)):
   each release adds the AppImage and core alone as a deb and a tarball

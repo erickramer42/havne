@@ -168,9 +168,12 @@ counts the frames per CAN ID.
   used; SocketCAN against `vcan0`; the USDT probes traced with
   `bpftrace`.
 - **WSL** on Windows: the AppImage started offscreen on Ubuntu 26.04,
-  Arch and Kali; the app and the core built and their tests run with
-  GCC on Ubuntu 26.04; SocketCAN on `vcan0`.
-- **Not yet:** the app's window on a Linux desktop, an ELM327 adapter
+  Arch and Kali, and with a window under WSLg (through XWayland) on all
+  three: the simulated car connected with recording on, the pages drew
+  and took input, and closing the window ended the app; the app and the
+  core built and their tests run with GCC on Ubuntu 26.04; SocketCAN on
+  `vcan0`.
+- **Not yet:** the app on a Linux machine's own desktop, an ELM327 adapter
   on a Linux machine (the serial code is tested against a fake adapter
   on a pseudo-terminal), a real CAN controller, and a car through
   SocketCAN. [testing.md](testing.md) keeps the details.
