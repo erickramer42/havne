@@ -564,6 +564,8 @@ const char* ecuio_identity_request_name(
                                                           ?poll= or a passive
                                                           session, whose
                                                           report stays empty */
+#define ECUIO_DIAG_CLEARING              0x00000040u   /* a clear runs on this
+                                                          channel (ADR-0038) */
 
 /* lists[]: one per service */
 #define ECUIO_DIAG_STORED                0u   /* Service 03: confirmed */
@@ -577,6 +579,22 @@ const char* ecuio_identity_request_name(
 #define ECUIO_DIAG_ANSWERED              1u
 #define ECUIO_DIAG_REFUSED               2u   /* nrc holds the code */
 #define ECUIO_DIAG_UNANSWERED            3u
+
+/* clear: what became of the channel's last clear (ADR-0038) */
+#define ECUIO_CLEAR_NONE                 0u   /* none yet */
+#define ECUIO_CLEAR_CLEARED              1u   /* 44: the ECU cleared */
+#define ECUIO_CLEAR_REFUSED              2u   /* clear_nrc holds the code;
+                                                 nothing changed */
+#define ECUIO_CLEAR_UNANSWERED           3u   /* 04 went unanswered: the
+                                                 read after it shows whether
+                                                 it took */
+#define ECUIO_CLEAR_ENGINE_RUNNING       4u   /* 01 0C read clear_rpm above
+                                                 0: 04 not sent */
+#define ECUIO_CLEAR_NO_ENGINE_SPEED      5u   /* 01 0C refused (clear_nrc)
+                                                 or unanswered: 04 not sent */
+#define ECUIO_CLEAR_REPORT_CHANGED       6u   /* the report wasn't the one
+                                                 the caller saved: 04 not
+                                                 sent */
 
 /* ecuio_monitor_t flags */
 #define ECUIO_MONITOR_COMPLETE           0x01u   /* complete, or not
@@ -628,8 +646,13 @@ typedef struct ecuio_channel_diagnostics {
     uint16_t freeze_dtc;      /* the code that stored it (02 02 00); 0 =
                                  none */
     uint8_t freeze_count;     /* entries of freeze_values in use */
-    uint8_t reserved0[3];     /* zero */
-    uint32_t reserved[4];     /* zero; ABI growth space */
+    uint8_t clear;            /* the last clear's outcome (ECUIO_CLEAR_*);
+                                 kept across reads until the next clear */
+    uint8_t clear_nrc;        /* its negative reply's code */
+    uint8_t reserved0[1];     /* zero */
+    uint32_t clear_rpm;       /* the engine speed its 01 0C read, rounded
+                                 up, so a turning engine never reads 0 */
+    uint32_t reserved[3];     /* zero; ABI growth space */
     ecuio_dtc_list_t lists[ECUIO_DIAG_LISTS];   /* ECUIO_DIAG_STORED .. */
     ecuio_monitor_t monitors[ECUIO_DIAG_MAX_MONITORS];
     uint32_t reserved1;       /* zero; aligns freeze_values */
@@ -641,6 +664,8 @@ static_assert(sizeof(ecuio_dtc_list_t) == 68, "ecuio_dtc_list_t size is ABI");
 static_assert(sizeof(ecuio_monitor_t) == 4, "ecuio_monitor_t size is ABI");
 static_assert(sizeof(ecuio_freeze_value_t) == 16, "ecuio_freeze_value_t size is ABI");
 static_assert(sizeof(ecuio_channel_diagnostics_t) == 552, "ecuio_channel_diagnostics_t size is ABI");
+static_assert(offsetof(ecuio_channel_diagnostics_t, clear) == 21, "diagnostics clear offset is ABI");
+static_assert(offsetof(ecuio_channel_diagnostics_t, clear_rpm) == 24, "diagnostics clear_rpm offset is ABI");
 static_assert(offsetof(ecuio_channel_diagnostics_t, lists) == 40, "diagnostics lists offset is ABI");
 static_assert(offsetof(ecuio_channel_diagnostics_t, monitors) == 244, "diagnostics monitors offset is ABI");
 static_assert(offsetof(ecuio_channel_diagnostics_t, freeze_values) == 296, "diagnostics freeze offset is ABI");
@@ -649,6 +674,8 @@ _Static_assert(sizeof(ecuio_dtc_list_t) == 68, "ecuio_dtc_list_t size is ABI");
 _Static_assert(sizeof(ecuio_monitor_t) == 4, "ecuio_monitor_t size is ABI");
 _Static_assert(sizeof(ecuio_freeze_value_t) == 16, "ecuio_freeze_value_t size is ABI");
 _Static_assert(sizeof(ecuio_channel_diagnostics_t) == 552, "ecuio_channel_diagnostics_t size is ABI");
+_Static_assert(offsetof(ecuio_channel_diagnostics_t, clear) == 21, "diagnostics clear offset is ABI");
+_Static_assert(offsetof(ecuio_channel_diagnostics_t, clear_rpm) == 24, "diagnostics clear_rpm offset is ABI");
 _Static_assert(offsetof(ecuio_channel_diagnostics_t, lists) == 40, "diagnostics lists offset is ABI");
 _Static_assert(offsetof(ecuio_channel_diagnostics_t, monitors) == 244, "diagnostics monitors offset is ABI");
 _Static_assert(offsetof(ecuio_channel_diagnostics_t, freeze_values) == 296, "diagnostics freeze offset is ABI");
