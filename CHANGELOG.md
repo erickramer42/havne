@@ -70,6 +70,10 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
   bytes from the same source, wherever they're built; CI checks it on
   every change.
 
+### Removed
+- The build option `QTTUNE_BUILD_CORE_ONLY`, the name before the
+  rename: use `HAVNE_BUILD_CORE_ONLY`.
+
 ### Fixed
 - **A sleep on Linux or Android is a gap,** on Live, in a recording's
   times and in `havne-cli`'s stream, instead of the values on either

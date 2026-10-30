@@ -48,15 +48,6 @@ file(CONFIGURE
     @ONLY
 )
 
-# QTTUNE_BUILD_CORE_ONLY is the option's name before the rename (ADR-0001's
-# appendix of 2026-10-28), honored until v0.3.4 so a configured tree or a
-# script that passes it still builds core alone
-if(DEFINED QTTUNE_BUILD_CORE_ONLY AND NOT DEFINED HAVNE_BUILD_CORE_ONLY)
-    message(WARNING "QTTUNE_BUILD_CORE_ONLY is now HAVNE_BUILD_CORE_ONLY; "
-        "reconfigure with -DHAVNE_BUILD_CORE_ONLY=${QTTUNE_BUILD_CORE_ONLY}")
-    set(HAVNE_BUILD_CORE_ONLY ${QTTUNE_BUILD_CORE_ONLY} CACHE BOOL
-        "Build core library and tests; skip Qt app")
-endif()
 option(HAVNE_BUILD_CORE_ONLY "Build core library and tests; skip Qt app" OFF)
 
 # libFuzzer harnesses (fuzz/): Clang or MSVC, off by default, in a tree
