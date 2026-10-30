@@ -132,10 +132,15 @@ a quarter mile off launch control on a warm loop.*
   onto the rev limiter, a cruise and a quarter mile, with readings that
   stay consistent with each other the way a real ECU's log does.
 
-| Live view | Activity log | Link health |
-|---|---|---|
-| [![Live view: RPM, speed, MAF and lambda plotted through a 3rd-gear pull onto the limiter](docs/images/live.png)](docs/images/live.png) | [![The Log page's activity log: a mock session's connect, its Session line, the Delivery line at the disconnect (none dropped, the GUI thread's wait in microseconds) and a second connect](docs/images/log.png)](docs/images/log.png) | [![Live view over J2534 with every request failing: an amber "Requests failing" banner and pill, and each signal waiting for data](docs/images/link-health.png)](docs/images/link-health.png) |
-| A 3rd-gear pull onto the limiter: rpm, speed and MAF rise together, then rpm saws while speed holds and lambda swings lean on each fuel cut | Each session as it happened: the connect, the "Session:" line, and how its frames reached the screen | Every request refused by the fake J2534 driver: the link reads "requests failing", not idle, and the page says what to check |
+| Live view | Link health |
+|---|---|
+| [![Live view: RPM, speed, MAF and lambda plotted through a 3rd-gear pull onto the limiter](docs/images/live.png)](docs/images/live.png) | [![Live view over J2534 with every request failing: an amber "Requests failing" banner and pill, and each signal waiting for data](docs/images/link-health.png)](docs/images/link-health.png) |
+| A 3rd-gear pull onto the limiter: rpm, speed and MAF rise together, then rpm saws while speed holds and lambda swings lean on each fuel cut | Every request refused by the fake J2534 driver: the link reads "requests failing", not idle, and the page says what to check |
+
+![The Log page in developer mode on the simulated vehicle: the activity log holds two connects with their Session lines and, between them, the Delivery line of the disconnect (none dropped, the GUI thread's wait in microseconds); the pointer clicks Frames and the raw frame table streams, newest first, each frame's time, length, standard or extended ID and payload; then it clicks back to Activity](docs/images/log.gif)
+
+*The Log page on the simulated vehicle (`mock://demo`), in developer
+mode: each session as it happened, then the frames as they arrive.*
 
 ## Architecture
 
