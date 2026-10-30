@@ -1,6 +1,6 @@
 # Havne: Project Status
 
-**Updated:** 2026-10-29 · **Version:** v0.3.3 ·
+**Updated:** 2026-10-30 · **Version:** v0.3.4 ·
 [![CI](https://github.com/erickramer42/havne/actions/workflows/ci.yml/badge.svg)](https://github.com/erickramer42/havne/actions/workflows/ci.yml)
 
 This file covers the project as it stands: what works, what comes
@@ -14,9 +14,11 @@ Safety, regulatory and warranty caveats are in
 
 ## Where things stand
 
-**Current phase: v0.3.4, under way.** v0.3.3 is out: ELM327
-adapters, persisted preferences and vehicles, the Android app as a
-signed download, and the name Havne; changes since then go under
+**Current phase: v0.3.5, next.** v0.3.4 is out: `havne-cli`, a
+command-line client over the C ABI; Linux as a supported desktop,
+with the AppImage, the core as a deb and a tarball, and SocketCAN
+listening; debug symbols, an SBOM and reproducible Linux downloads
+with each release. Changes since then go under
 [CHANGELOG.md's "Unreleased"](CHANGELOG.md#unreleased). The J2534 stack is verified
 end to end against a fake vendor DLL, through the x64 and the x86
 surrogate. One real J2534 adapter, the OBDX Pro VX, has run on a quiet
@@ -31,7 +33,7 @@ the same car through the OBDLink MX+ over Bluetooth and the VX in ELM
 mode over USB
 ([2026-10-27](docs/bench-sessions/2026-10-27-elm327-vehicle.md)), and
 the Android app reaches the car through the phone's Bluetooth, in the
-background too. Next come v0.3.4 and v0.3.5 ([roadmap](#roadmap)).
+background too. Next comes v0.3.5 ([roadmap](#roadmap)).
 
 - **Works:**
   - **Mock transport,** on every platform: a scripted drive cycle (a
@@ -265,11 +267,11 @@ an issue is resolved it is removed, and its number is not reused.
 | v0.3.1 | Request engine, PID-support probe, `uds-generic`, vehicle identification, imperial units; the first Windows download | ✅ Released |
 | v0.3.2 | Record-replay transport, decoding on the transport's thread, every driver in its own process | ✅ Released |
 | v0.3.3 | ELM327 adapters, preferences and vehicles, Android with Bluetooth and background sessions and a signed APK, the rename to Havne | ✅ Released |
-| v0.3.4 | A command-line client over the C ABI; Linux as a supported desktop; a SocketCAN transport that listens | In progress: the CLI, SocketCAN listening, a session clock that counts sleep, debug symbols and probes, the Linux downloads with an SBOM, and the Linux guide built |
+| v0.3.4 | A command-line client over the C ABI; Linux as a supported desktop; a SocketCAN transport that listens | ✅ Released |
 | v0.3.5 | Full OBD-II diagnostics (Services 01–0A, clearing codes); SocketCAN requests through ISO-TP | Planned |
+| v0.3.6–v0.3.9 | Recordings you can open, compare and share: a log viewer with run overlay, CSV import and export with scrubbing, a health report, triggered logging and alerts | Planned |
 | v0.4.0 | Python bindings; PCAP export and candump import; ECU, DID and service discovery (needs requests to every ECU and listening to the whole bus first) | Proposed |
 | v0.5.0 | The plugin framework (ADR-0013's profile API), with no manufacturer plugin yet; legacy buses (ISO 9141-2, KWP2000, J1850) | Proposed |
-| v1.0+ | The first manufacturer plugins; the write path, with security access (0x27) and flashing through each plugin after the gateway research | Proposed |
 
 The planned releases are in order; the proposed ones are not
 scheduled. What each holds, past its row:
@@ -348,6 +350,26 @@ scheduled. What each holds, past its row:
   when that's allowed and what then guards a car's bus against a wrong
   bit rate.
 
+### v0.3.6 to v0.3.9: recordings you can open, compare and share
+
+A recording becomes something to open offline, line up against
+another, bring in from another logger and post safely; the split
+across the four releases is decided as they come.
+
+- **A log viewer:** a recording opened offline with seeking, zoom and
+  markers, and two runs overlaid on a common zero (a threshold
+  crossing or a marker). Seeking needs no new format, since `host_us`
+  only increases; the recording container waits for whole-bus
+  listening (v0.4.0).
+- **In and out:** CSV import of another logger's timed signals through
+  a column map; CSV export; every export scrubbed of VINs, calibration
+  IDs, serials and paths; a health report (trouble codes, readiness,
+  identification and key values) as one scrubbed export.
+- **Conditions:** one condition model in core, data rather than code,
+  for triggered logging (record while a condition holds, or a window
+  around a link fault), alerts, and markers the viewer shows; computed
+  signals (boost from MAP and barometric pressure) beside it.
+
 ### v0.4.0 and v0.5.0 (proposed)
 
 - **v0.4.0:** Python bindings over the C ABI; PCAP export and candump
@@ -357,42 +379,6 @@ scheduled. What each holds, past its row:
 - **v0.5.0:** a plugin framework (ADR-0013's profile API made
   general); the pre-2008 buses (ISO 9141-2, KWP2000, J1850), through
   ELM327 and J2534.
-
-### 1.0 and later: make-specific data and the write path (proposed)
-
-- **A first manufacturer signal set,** the pilot for the first
-  plugins: one make's enhanced Service 22 data, such as transmission
-  temperature, which the standard set doesn't include. A def keyed
-  `62 <DID>` already enrols its request and decodes the reply
-  (ADR-0015, ADR-0016), so what's missing is the data: the DIDs and
-  their formulas, which `uds-generic`'s polling and range scan are for
-  ([ADR-0020](docs/adr/0020-uds-generic.md)).
-- **The write path.** Security access (0x27) and flashing go through
-  each manufacturer's plugin and depend on its secure-gateway
-  authentication, researched outside this repository. Every item needs
-  its own ADR first, and the UDS services it raises (0x27, 0x2E, 0x31,
-  0x34/0x36/0x37, 0x3D) carry emissions-law, warranty and
-  ABS/traction/stability exposure that the record has to cover. Design
-  order matters: the original copy's format constrains everything
-  after it.
-  - **The original copy (L).** Read the calibration as it stands,
-    store it as a versioned, checksum-addressed artifact, and keep it
-    immutable. Every edited value shows against this shadow, so a
-    restore path always exists. Session recordings are frame logs, not
-    a calibration image.
-  - **Table and curve editors (L).** VE and spark tables: grid cells,
-    2D curves with draggable points, a 3D heatmap view. The signal
-    model describes a single scalar, so core needs a richer def type,
-    the biggest schema change since the signal set, and QML needs
-    editors.
-  - **Diff and undo (M).** Changed values highlighted against the
-    original, per-value revert, global rollback; cheap if the original
-    copy exists, painful to retrofit if it doesn't.
-  - **Write-flow safety (M).** During any write: battery voltage
-    visible, a do-not-power-off state, and a resumable or recoverable
-    transfer whose recovery story is stated before the write starts.
-    The surrogate's wedged-child latch bounds a hung read; a wedged
-    write is a worse failure and must never be silent.
 
 ## Backlog
 

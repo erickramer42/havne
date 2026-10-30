@@ -10,6 +10,8 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
 
 ## [Unreleased]
 
+## [0.3.4] - 2026-10-30
+
 ### Added
 - **`havne-cli`**, a command-line client
   ([ADR-0031](docs/adr/0031-command-line-client.md)):
@@ -400,7 +402,8 @@ The first release with a Windows download
   shell with a responsive layout.
 - CI on Windows, macOS and Linux, running the core's tests.
 
-[Unreleased]: https://github.com/erickramer42/havne/compare/v0.3.3...HEAD
+[Unreleased]: https://github.com/erickramer42/havne/compare/v0.3.4...HEAD
+[0.3.4]: https://github.com/erickramer42/havne/compare/v0.3.3...v0.3.4
 [0.3.3]: https://github.com/erickramer42/havne/compare/v0.3.2...v0.3.3
 [0.3.2]: https://github.com/erickramer42/havne/compare/v0.3.1...v0.3.2
 [0.3.1]: https://github.com/erickramer42/havne/compare/v0.3.0...v0.3.1

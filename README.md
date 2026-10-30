@@ -184,7 +184,7 @@ It isn't code-signed, so SmartScreen may ask first (**More info**, then
 **Run anyway**). On Android 12 or later, download and open the release's
 APK on the phone; it's signed with Havne's release key, and each
 release installs over the last. On Linux (x86_64, glibc 2.39 or
-later), from v0.3.4, download the AppImage, make it executable and run it;
+later), download the AppImage, make it executable and run it;
 [docs/linux.md](docs/linux.md) covers what it needs, the core packages
 for `havne-cli` and your own programs, serial permissions and
 SocketCAN. In Settings, tick **Developer mode** under Display, then
@@ -208,14 +208,15 @@ troubleshooting.
 
 ## Status
 
-v0.3.3 (ELM327 adapters, preferences and vehicles, Android with
-Bluetooth, the rename from QtTune) is the latest release. Next:
+v0.3.4 (`havne-cli`, Linux as a supported desktop with SocketCAN
+listening, the core as packages, debug symbols and an SBOM) is the
+latest release. Next:
 
 | Version | Plan |
 |---|---|
-| v0.3.4 | A command-line client over the C ABI; Linux as a supported desktop; a SocketCAN transport that listens |
 | v0.3.5 | Full OBD-II diagnostics, reading and clearing trouble codes; SocketCAN requests through ISO-TP |
-| Later | Python bindings, capture formats and discovery; a plugin framework for make-specific data; older buses; writing to the ECU at 1.0 and beyond |
+| v0.3.6–v0.3.9 | A log viewer that overlays runs; CSV import and export, scrubbed for sharing; a health report; triggered logging and alerts |
+| Later | Python bindings, capture formats and discovery; a plugin framework; older buses |
 
 [STATUS.md](STATUS.md) holds what works, what's verified, the known
 issues and the full roadmap; [CHANGELOG.md](CHANGELOG.md) what each
