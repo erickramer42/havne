@@ -1,10 +1,12 @@
 // File/layer: core/src/socketcan_transport.cpp | C++17, Qt-free; Linux only
 //             (ECUIO_HAVE_SOCKETCAN), its query keys everywhere
-// Testing: UNIT — SocketCanTest.* (the URI's refusals off Linux and on it,
-//          before any interface is read); HARNESS — VcanTest.SocketCan*
+// Testing: UNIT: SocketCanTest.* (the URI's refusals off Linux and on it,
+//          before any interface is read); HARNESS: SocketCanBusTest.*
 //          (Linux, vcan0: frames in order with their flags, the filter,
 //          the mock's drive cycle decoding, quiet and back, the interface
-//          down and up, an overflow, no allocation per frame)
+//          down and up, an overflow, error frames, no allocation per
+//          frame). A failed poll other than EINTR by code reading only:
+//          nothing makes the kernel fail one on demand
 //
 // socketcan:// (ADR-0032): a Linux CAN interface, listening. Attach reads
 // the interface through rtnetlink and refuses one a session can't listen
@@ -190,7 +192,15 @@ void socketcan_worker(ecuio_socketcan_transport* t)
         struct pollfd p[2] = {{t->fd, POLLIN, 0}, {t->wake_fd, POLLIN, 0}};
         const int ready = poll(p, 2, kWaitMs);
         if (ready < 0) {
-            continue; /* EINTR */
+            if (errno == EINTR) {
+                continue;
+            }
+            /* ENOMEM and kin return at once: polling again would spin.
+             * Back off and reopen, as for a failed read. */
+            link_on_read(h, true, false, false);
+            close(t->fd);
+            t->fd = -1;
+            continue;
         }
         if (p[1].revents != 0) {
             break;

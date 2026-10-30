@@ -22,6 +22,10 @@
 
 struct ecuio_session {
     std::atomic<bool> closed{false};
+    /* The worker was started: a start after it is the transport's no-op,
+     * and the session_start probe marks the first only (ADR-0034 §4).
+     * The session's one caller alone reads and writes it. */
+    bool started = false;
     std::mutex callback_mutex;
     std::vector<std::pair<ecuio_frame_callback_t, void*>> callbacks;
     /* Under the same mutex: the values callbacks (ADR-0024) */

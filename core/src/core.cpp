@@ -660,7 +660,8 @@ ecuio_status_t ecuio_session_start(ecuio_session_t* session)
     }
     const ecuio_status_t st =
         session->transport->ops->start(session, session->transport->impl);
-    if (st == ECUIO_OK) {
+    if (st == ECUIO_OK && !session->started) {
+        session->started = true;
         ECUIO_PROBE2(session_start, session, session->info.backend);
     }
     return st;
