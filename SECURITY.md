@@ -81,9 +81,9 @@ Out of scope:
 - **Supply chain:** `main` is protected; workflows run with
   least-privilege permissions; every action is pinned to a full commit
   SHA, and Dependabot proposes updates; OpenSSF Scorecard runs weekly.
-- **Releases:** each download carries a signed SLSA build provenance
-  from the release workflow, attached to the release as
-  `<download>.intoto.jsonl`, and a SHA-256 checksum. The APK is signed
+- **Releases:** every download is covered by a signed SLSA build
+  provenance from the release workflow, attached to the release as
+  `havne-X.Y.Z.intoto.jsonl`, and has a SHA-256 checksum. The APK is signed
   with the release key, which only the release workflow's Android job
   can read, from an environment that only release tags and `main`
   deploy to, and whose certificate fingerprint is pinned in the

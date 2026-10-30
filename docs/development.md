@@ -883,8 +883,8 @@ A version tag publishes these downloads through
   Ubuntu 24.04, so they run where glibc is 2.39 or later.
 
 Beside them: the Windows PDBs and `havne-cli`'s Linux debug info, an
-SPDX SBOM of every download, `SHA256SUMS.txt`, and each file's
-provenance.
+SPDX SBOM of every download, `SHA256SUMS.txt`, and one build
+provenance over every file.
 
 **To release:**
 
@@ -892,7 +892,9 @@ provenance.
    `CMakeLists.txt`, move CHANGELOG.md's "Unreleased" entries under
    `## [X.Y.Z] - <date>` (and add its compare link at the foot), and
    add `docs/releases/vX.Y.Z.md`, the release notes, starting from
-   those entries. Say what's new, and what's verified at which tier
+   those entries. Open with a Downloads table linking the file each
+   platform wants, since the release's own list is flat and sorted by
+   name. Say what's new, and what's verified at which tier
    ([testing.md](testing.md)), including what hasn't run on hardware,
    and give the release key's certificate fingerprint.
 2. Push that commit to `main` and wait for its CI run to pass: the
@@ -987,18 +989,18 @@ provenance.
   `pyspdxtools` before anything is published.
 - **`publish`: checksums and provenance.** `SHA256SUMS.txt` lists every
   download, the debug files and the SBOM, with LF line ends.
-  `actions/attest-build-provenance` signs a SLSA build provenance for
-  each download (one attestation covers the five Linux files), tied to
-  this repository's workflow, and stores it in GitHub's attestation
-  store; `actions/attest` attests the SBOM over the downloads it
-  describes. The job also
-  copies each Sigstore bundle into `dist/` as `<download>.intoto.jsonl`,
-  because OpenSSF Scorecard's Signed-Releases check reads only release
-  files (it counts `*.intoto.jsonl` as provenance and `*.sig`, `*.asc`
-  or `*.sigstore.json` as signatures), and so a download can be checked
-  with `gh attestation verify <file> --bundle <file>.intoto.jsonl`.
+  `actions/attest-build-provenance` signs one SLSA build provenance
+  over every download, tied to this repository's workflow, and stores
+  it in GitHub's attestation store; `actions/attest` attests the SBOM
+  over the downloads it describes. The job also copies the Sigstore
+  bundle into `dist/` as `havne-X.Y.Z.intoto.jsonl`, one file for all
+  the downloads, because OpenSSF Scorecard's Signed-Releases check
+  reads only release files (it counts `*.intoto.jsonl` as provenance
+  and `*.sig`, `*.asc` or `*.sigstore.json` as signatures), and so a
+  download can be checked with
+  `gh attestation verify <file> --bundle havne-X.Y.Z.intoto.jsonl`.
 - **`publish`: the release.** `gh release create` with the downloads,
-  their `.intoto.jsonl` files, the SBOM, `SHA256SUMS.txt` and the notes
+  the provenance bundle, the SBOM, `SHA256SUMS.txt` and the notes
   file. A
   manual run for an existing tag
   (`gh workflow run release.yml -f tag=vX.Y.Z`) rebuilds it and

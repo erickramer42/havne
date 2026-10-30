@@ -135,7 +135,7 @@ background too. Next comes v0.3.5 ([roadmap](#roadmap)).
     desktop, nor with an adapter on Linux.
   - **Every release** carries the Windows zip and a zip of its PDBs,
     the signed APK, the Linux files, one SPDX SBOM over them, and
-    checksums and a provenance for each download
+    checksums and one signed provenance over every download
     ([ADR-0034](docs/adr/0034-debug-symbols-and-probes.md),
     [ADR-0035](docs/adr/0035-linux-downloads-sbom-reproducible.md)),
     each checked from the published release (v0.3.4's dry run, its
