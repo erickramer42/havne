@@ -6,8 +6,11 @@
 //          request engine (request_engine.h) with the time passed in,
 //          its DID scan and its identification (the turns, the text, the
 //          report), and uds-generic's ?did= grammar and the set it
-//          builds (uds_generic.h). End-to-end pacing is HARNESS (stream
-//          and health tests) and BENCH (VX), not this file.
+//          builds (uds_generic.h). The Service 01 table
+//          (fixtures/obd2/service01.csv) against its own ranges, the
+//          obd2 set and the fakes' ECU; that ECU's diagnostics
+//          (fake_ecu.h). End-to-end pacing is HARNESS (stream and
+//          health tests) and BENCH (VX), not this file.
 
 #include <gtest/gtest.h>
 
@@ -17,11 +20,16 @@
 #include "../core/src/uds_generic.h"
 #include "../core/src/uri_query.h"
 #include "ecuio/core.h"
+#include "fake_ecu.h"
 
+#include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
+#include <fstream>
 #include <initializer_list>
 #include <string>
+#include <vector>
 
 namespace {
 
@@ -1859,4 +1867,394 @@ TEST(UdsGenericTest, TemplateSetIsEmptyAndValid) {
     EXPECT_EQ(found, t) << "the registry binds the name to it";
     EXPECT_EQ(ecuio_profile_register(ECUIO_UDS_GENERIC_NAME, t, nullptr),
               ECUIO_ERR_INVALID_ARGUMENT) << "a built-in";
+}
+
+/* ---------- the Service 01 table (fixtures/obd2/service01.csv) ---------- */
+
+namespace {
+
+struct PidRow {
+    int line = 0;
+    unsigned pid = 0;
+    unsigned bytes = 0;
+    std::string kind;
+    unsigned start = 0;
+    unsigned bits = 0;
+    bool is_signed = false;
+    double scale = 0;
+    double offset = 0;
+    std::string unit;
+    double min = 0;
+    double max = 0;
+    std::string name;
+};
+
+constexpr const char* kTableHeader =
+    "pid,bytes,kind,start,bits,signed,scale,offset,unit,min,max,name,note";
+
+/* A number, or a fraction like 100/255 */
+double number(const std::string& s)
+{
+    const size_t slash = s.find('/');
+    if (slash == std::string::npos) {
+        return std::strtod(s.c_str(), nullptr);
+    }
+    return std::strtod(s.substr(0, slash).c_str(), nullptr) /
+           std::strtod(s.substr(slash + 1).c_str(), nullptr);
+}
+
+/* The table's rows; empty with why set when it won't read */
+std::vector<PidRow> load_table(std::string* why)
+{
+    std::vector<PidRow> rows;
+    std::ifstream in(ECUIO_OBD2_TABLE, std::ios::binary);
+    if (!in) {
+        *why = "can't open " ECUIO_OBD2_TABLE;
+        return {};
+    }
+    std::string text;
+    int n = 0;
+    bool header = false;
+    while (std::getline(in, text)) {
+        ++n;
+        if (!text.empty() && text.back() == '\r') {
+            text.pop_back();
+        }
+        if (text.empty() || text[0] == '#') {
+            continue;
+        }
+        if (!header) {
+            if (text != kTableHeader) {
+                *why = "line " + std::to_string(n) + " isn't the header";
+                return {};
+            }
+            header = true;
+            continue;
+        }
+        std::vector<std::string> f;
+        size_t from = 0;
+        for (size_t comma; (comma = text.find(',', from)) != std::string::npos;
+             from = comma + 1) {
+            f.push_back(text.substr(from, comma - from));
+        }
+        f.push_back(text.substr(from));
+        if (f.size() != 13) {
+            *why = "line " + std::to_string(n) + " has " +
+                   std::to_string(f.size()) + " fields, not 13";
+            return {};
+        }
+        PidRow r;
+        r.line = n;
+        r.pid = static_cast<unsigned>(std::strtoul(f[0].c_str(), nullptr, 16));
+        r.bytes =
+            static_cast<unsigned>(std::strtoul(f[1].c_str(), nullptr, 10));
+        r.kind = f[2];
+        if (r.kind == "linear") {
+            r.start =
+                static_cast<unsigned>(std::strtoul(f[3].c_str(), nullptr, 10));
+            r.bits =
+                static_cast<unsigned>(std::strtoul(f[4].c_str(), nullptr, 10));
+            r.is_signed = f[5] == "1";
+            r.scale = number(f[6]);
+            r.offset = number(f[7]);
+            r.unit = f[8];
+            r.min = number(f[9]);
+            r.max = number(f[10]);
+        }
+        r.name = f[11];
+        rows.push_back(r);
+    }
+    if (rows.empty()) {
+        *why = "no rows";
+    }
+    return rows;
+}
+
+class Obd2TableTest : public ::testing::Test
+{
+protected:
+    void SetUp() override
+    {
+        fake_ecu::reset_diagnostics();
+        std::string why;
+        rows_ = load_table(&why);
+        ASSERT_FALSE(rows_.empty()) << why;
+    }
+
+    /* The linear row for a PID's field at a data byte, or nullptr */
+    const PidRow* linear(unsigned pid, unsigned start) const
+    {
+        for (const PidRow& r : rows_) {
+            if (r.pid == pid && r.kind == "linear" && r.start == start) {
+                return &r;
+            }
+        }
+        return nullptr;
+    }
+
+    /* The PID's byte count, or 0 when the table lacks it */
+    unsigned bytes_of(unsigned pid) const
+    {
+        for (const PidRow& r : rows_) {
+            if (r.pid == pid) {
+                return r.bytes;
+            }
+        }
+        return 0;
+    }
+
+    std::vector<PidRow> rows_;
+};
+
+} // namespace
+
+TEST_F(Obd2TableTest, RowsAreWellFormed)
+{
+    const std::string kinds = " linear bitmap bits enum dtc complex ";
+    unsigned last = 0;
+    for (const PidRow& r : rows_) {
+        SCOPED_TRACE("line " + std::to_string(r.line) + ", " + r.name);
+        EXPECT_NE(kinds.find(" " + r.kind + " "), std::string::npos) << r.kind;
+        EXPECT_LE(r.pid, 0xFFu);
+        EXPECT_GE(r.pid, last) << "rows run in PID order";
+        last = r.pid;
+        EXPECT_EQ(r.bytes, bytes_of(r.pid)) << "one byte count per PID";
+        EXPECT_GE(r.bytes, 1u);
+        EXPECT_EQ(r.kind == "bitmap", r.pid % 0x20 == 0)
+            << "bitmaps at 00, 20, 40 and on";
+        if (r.kind == "bitmap") {
+            EXPECT_EQ(r.bytes, 4u);
+        }
+        if (r.kind == "linear") {
+            EXPECT_TRUE(r.bits == 8 || r.bits == 16 || r.bits == 32) << r.bits;
+            EXPECT_LE(r.start + r.bits / 8, r.bytes)
+                << "the field fits the reply";
+            EXPECT_NE(r.scale, 0.0);
+            EXPECT_EQ(linear(r.pid, r.start), &r) << "one field per start byte";
+        }
+    }
+}
+
+/* The range the scaling gives a field's raw extremes against the
+ * source's: a wrong scale, offset, width or sign shows as a range that
+ * doesn't match. Within 0.2% of the span, which the source's rounded
+ * maxima (99.2 for 99.21875) need. */
+TEST_F(Obd2TableTest, EachRangeFollowsFromItsScaling)
+{
+    for (const PidRow& r : rows_) {
+        if (r.kind != "linear") {
+            continue;
+        }
+        SCOPED_TRACE("line " + std::to_string(r.line) + ", " + r.name);
+        const double span = std::ldexp(1.0, static_cast<int>(r.bits));
+        const double raw_lo = r.is_signed ? -span / 2 : 0.0;
+        const double raw_hi = r.is_signed ? span / 2 - 1 : span - 1;
+        const double lo = raw_lo * r.scale + r.offset;
+        const double hi = raw_hi * r.scale + r.offset;
+        const double tolerance = 0.002 * std::fabs(r.max - r.min) + 1e-9;
+        EXPECT_NEAR(lo, r.min, tolerance);
+        EXPECT_NEAR(hi, r.max, tolerance);
+    }
+}
+
+/* Each obd2 def against its PID's row: where the field sits, its width,
+ * sign, byte order, scaling and unit */
+TEST_F(Obd2TableTest, EveryObd2DefMatchesItsRow)
+{
+    const ecuio_signal_set_t* set = ecuio_obd2_signal_set();
+    ASSERT_NE(set, nullptr);
+    for (uint32_t i = 0; i < set->count; ++i) {
+        const ecuio_signal_def_t& d = set->defs[i];
+        SCOPED_TRACE(d.name);
+        ASSERT_EQ(d.mux_offset, 0u);
+        ASSERT_EQ(d.mux_length, 2u);
+        ASSERT_EQ(d.mux_key >> 8, 0x41u) << "a Service 01 reply";
+        const unsigned pid = d.mux_key & 0xFFu;
+        ASSERT_GE(d.start_byte, 2u);
+        const PidRow* r = linear(pid, d.start_byte - 2u);
+        ASSERT_NE(r, nullptr) << "no linear row for PID " << pid;
+        EXPECT_EQ(d.bit_offset, 0u);
+        EXPECT_EQ(d.bit_length, r->bits);
+        EXPECT_EQ(d.kind,
+                  static_cast<uint8_t>(r->is_signed ? ECUIO_VALUE_INT
+                                                    : ECUIO_VALUE_UINT));
+        if (r->bits > 8) {
+            EXPECT_EQ(d.byte_order, static_cast<uint8_t>(ECUIO_BYTE_ORDER_BE))
+                << "J1979's multi-byte values";
+        }
+        EXPECT_NEAR(d.scale, r->scale, 1e-12 * std::fabs(r->scale));
+        EXPECT_DOUBLE_EQ(d.offset, r->offset);
+        EXPECT_STREQ(d.unit, r->unit.c_str());
+    }
+}
+
+/* Every PID the fakes' ECU supports answers with the table's byte
+ * count, and every PID the obd2 set asks is one it supports (else the
+ * probe drops it in every test) */
+TEST_F(Obd2TableTest, TheFakeEcuAnswersEachSupportedPidWithItsLength)
+{
+    for (unsigned pid = 0; pid <= 0xFF; ++pid) {
+        if (!fake_ecu::supports_pid(pid)) {
+            continue;
+        }
+        SCOPED_TRACE("PID " + std::to_string(pid));
+        const unsigned bytes = bytes_of(pid);
+        ASSERT_NE(bytes, 0u) << "the table lacks it";
+        const unsigned char req[2] = {0x01, static_cast<unsigned char>(pid)};
+        unsigned char out[fake_ecu::kReplyMax] = {};
+        size_t n = 0;
+        ASSERT_TRUE(fake_ecu::answer(req, sizeof(req), -1, out, &n));
+        EXPECT_EQ(out[0], 0x41);
+        EXPECT_EQ(out[1], pid);
+        EXPECT_EQ(n, 2u + bytes);
+    }
+    const ecuio_signal_set_t* set = ecuio_obd2_signal_set();
+    for (uint32_t i = 0; i < set->count; ++i) {
+        EXPECT_TRUE(fake_ecu::supports_pid(set->defs[i].mux_key & 0xFFu))
+            << set->defs[i].name;
+    }
+}
+
+/* ---------- the fakes' ECU: diagnostics (fake_ecu.h) ---------- */
+
+namespace {
+
+/* The ECU's answer to req, or {} when it stays silent */
+std::vector<uint8_t> ecu(std::initializer_list<uint8_t> req)
+{
+    const std::vector<uint8_t> r(req);
+    unsigned char out[fake_ecu::kReplyMax] = {};
+    size_t n = 0;
+    if (!fake_ecu::answer(r.data(), r.size(), -1, out, &n)) {
+        return {};
+    }
+    return std::vector<uint8_t>(out, out + n);
+}
+
+/* A DTC's five characters, from SAE J1979's layout: A7-A6 the category
+ * (P C B U), A5-A4 the first digit, then a hex digit per nibble */
+std::string dtc(uint8_t a, uint8_t b)
+{
+    static const char kHex[] = "0123456789ABCDEF";
+    std::string s(1, "PCBU"[a >> 6]);
+    s += kHex[(a >> 4) & 0x3];
+    s += kHex[a & 0xF];
+    s += kHex[b >> 4];
+    s += kHex[b & 0xF];
+    return s;
+}
+
+/* A list reply's DTCs, after checking its count */
+std::vector<std::string> dtcs(const std::vector<uint8_t>& reply)
+{
+    std::vector<std::string> out;
+    if (reply.size() < 2 || reply.size() != 2u + 2u * reply[1]) {
+        ADD_FAILURE() << "a list reply of " << reply.size() << " bytes";
+        return out;
+    }
+    for (size_t i = 2; i + 1 < reply.size(); i += 2) {
+        out.push_back(dtc(reply[i], reply[i + 1]));
+    }
+    return out;
+}
+
+using Codes = std::vector<std::string>;
+using Bytes = std::vector<uint8_t>;
+
+class FakeEcuTest : public ::testing::Test
+{
+protected:
+    void SetUp() override { fake_ecu::reset_diagnostics(); }
+    void TearDown() override { fake_ecu::reset_diagnostics(); }
+};
+
+} // namespace
+
+/* The lists cover all four categories; three stored DTCs make an
+ * 8-byte reply, past a Single Frame */
+TEST_F(FakeEcuTest, TheDtcListsAndTheMilBeforeAClear)
+{
+    const Bytes stored = ecu({0x03});
+    ASSERT_EQ(stored.size(), 8u);
+    EXPECT_EQ(stored[0], 0x43);
+    EXPECT_EQ(dtcs(stored), (Codes{"P0301", "P0420", "U0100"}));
+    const Bytes pending = ecu({0x07});
+    ASSERT_FALSE(pending.empty());
+    EXPECT_EQ(pending[0], 0x47);
+    EXPECT_EQ(dtcs(pending), (Codes{"P0171", "C0035", "B1001"}));
+    const Bytes permanent = ecu({0x0A});
+    ASSERT_FALSE(permanent.empty());
+    EXPECT_EQ(permanent[0], 0x4A);
+    EXPECT_EQ(dtcs(permanent), (Codes{"P0420"}));
+
+    EXPECT_EQ(ecu({0x01, 0x01}), (Bytes{0x41, 0x01, 0x83, 0x07, 0xE5, 0x00}))
+        << "MIL on, 3 DTCs; every monitor complete";
+    EXPECT_EQ(ecu({0x01, 0x41}), (Bytes{0x41, 0x41, 0x00, 0x07, 0xE5, 0x00}));
+    EXPECT_EQ(ecu({0x01, 0x21}), (Bytes{0x41, 0x21, 0x00, 0x2A}));
+    EXPECT_EQ(ecu({0x01, 0x30}), (Bytes{0x41, 0x30, 20}));
+    EXPECT_EQ(ecu({0x01, 0x31}), (Bytes{0x41, 0x31, 0x04, 0xD2}));
+    EXPECT_EQ(ecu({0x01, 0x4D}), (Bytes{0x41, 0x4D, 0x00, 0x3C}));
+    EXPECT_EQ(ecu({0x01, 0x4E}), (Bytes{0x41, 0x4E, 0x0B, 0xB8}));
+}
+
+TEST_F(FakeEcuTest, TheFreezeFrameHoldsItsOwnValues)
+{
+    EXPECT_EQ(ecu({0x02, 0x00, 0x00}),
+              (Bytes{0x42, 0x00, 0x00, 0x58, 0x18, 0x00, 0x00}))
+        << "PIDs 02 04 05 0C 0D";
+    const Bytes cause = ecu({0x02, 0x02, 0x00});
+    ASSERT_EQ(cause.size(), 5u);
+    EXPECT_EQ(dtc(cause[3], cause[4]), "P0301");
+    EXPECT_EQ(ecu({0x02, 0x0C, 0x00}), (Bytes{0x42, 0x0C, 0x00, 0x2E, 0xE0}))
+        << "3000 RPM";
+    EXPECT_EQ(ecu({0x01, 0x0C}), (Bytes{0x41, 0x0C, 0x1F, 0x40}))
+        << "the live value differs";
+    EXPECT_EQ(ecu({0x02, 0x0C, 0x01}), (Bytes{0x7F, 0x02, 0x12}))
+        << "only frame 0";
+    EXPECT_EQ(ecu({0x02, 0x0F, 0x00}), (Bytes{0x7F, 0x02, 0x12}))
+        << "not in the frame";
+}
+
+/* What J1979 lists a clear as resetting, reset; the permanent DTC
+ * stays */
+TEST_F(FakeEcuTest, AClearEmptiesTheListsAndResetsTheMonitors)
+{
+    EXPECT_EQ(ecu({0x04}), (Bytes{0x44}));
+    EXPECT_EQ(fake_ecu::diagnostics().clears.load(), 1u);
+    EXPECT_EQ(ecu({0x03}), (Bytes{0x43, 0x00}));
+    EXPECT_EQ(ecu({0x07}), (Bytes{0x47, 0x00}));
+    EXPECT_EQ(dtcs(ecu({0x0A})), (Codes{"P0420"}));
+    EXPECT_EQ(ecu({0x01, 0x01}), (Bytes{0x41, 0x01, 0x00, 0x07, 0xE5, 0xE5}))
+        << "MIL off; C's monitors incomplete";
+    EXPECT_EQ(ecu({0x01, 0x41}), (Bytes{0x41, 0x41, 0x00, 0x07, 0xE5, 0xE5}));
+    EXPECT_EQ(ecu({0x01, 0x21}), (Bytes{0x41, 0x21, 0x00, 0x00}));
+    EXPECT_EQ(ecu({0x01, 0x30}), (Bytes{0x41, 0x30, 0x00}));
+    EXPECT_EQ(ecu({0x01, 0x31}), (Bytes{0x41, 0x31, 0x00, 0x00}));
+    EXPECT_EQ(ecu({0x01, 0x4D}), (Bytes{0x41, 0x4D, 0x00, 0x00}));
+    EXPECT_EQ(ecu({0x01, 0x4E}), (Bytes{0x41, 0x4E, 0x00, 0x00}));
+    EXPECT_EQ(ecu({0x02, 0x00, 0x00}),
+              (Bytes{0x42, 0x00, 0x00, 0x40, 0x00, 0x00, 0x00}));
+    EXPECT_EQ(ecu({0x02, 0x02, 0x00}), (Bytes{0x42, 0x02, 0x00, 0x00, 0x00}))
+        << "J1979: 00 00 when no freeze frame is stored";
+    EXPECT_EQ(ecu({0x02, 0x0C, 0x00}), (Bytes{0x7F, 0x02, 0x12}));
+    EXPECT_EQ(ecu({0x01, 0x0C}), (Bytes{0x41, 0x0C, 0x1F, 0x40}))
+        << "live data stays";
+}
+
+TEST_F(FakeEcuTest, ARefusedClearChangesNothing)
+{
+    fake_ecu::diagnostics().clear_nrc = 0x22; /* conditionsNotCorrect */
+    EXPECT_EQ(ecu({0x04}), (Bytes{0x7F, 0x04, 0x22}));
+    EXPECT_FALSE(fake_ecu::diagnostics().cleared.load());
+    EXPECT_EQ(fake_ecu::diagnostics().clears.load(), 0u);
+    EXPECT_EQ(dtcs(ecu({0x03})).size(), 3u);
+}
+
+TEST_F(FakeEcuTest, OtherRequestShapesGetNoAnswer)
+{
+    EXPECT_TRUE(ecu({0x05}).empty()) << "Service 05 isn't on CAN";
+    EXPECT_TRUE(ecu({0x03, 0x00}).empty());
+    EXPECT_TRUE(ecu({0x04, 0x00}).empty());
+    EXPECT_TRUE(ecu({0x02, 0x0C}).empty()) << "no frame byte";
+    EXPECT_FALSE(fake_ecu::diagnostics().cleared.load());
 }

@@ -1536,14 +1536,15 @@ TEST_F(J2534AdoptionTest, PollOverridesSchedulerRotation)
  * and dropping only on explicit answers.
  * ==================================================================== */
 
-/* The fake's ECU supports the obd2 set's PIDs, and its bitmaps say so,
- * so the walk asks 0x00, 0x20 and 0x40 (whose last bit is clear) and
- * drops nothing. The expected bitmaps are worked out here from the PIDs
- * by SAE J1979's layout (PID base + k is bit 0x80 >> ((k - 1) % 8) of
- * byte (k - 1) / 8), not taken from the fake:
- *   0x00: 04 05 | 0C 0D 0F 10 | 11 | 20  ->  18 1B 80 01
- *   0x20: 2F, 40                         ->  00 02 00 01
- *   0x40: 42, 5C                         ->  40 00 00 10 */
+/* The fake's ECU supports the obd2 set's PIDs (and the diagnostics'
+ * 01, 21, 30, 31, 41, 4D and 4E), and its bitmaps say so, so the walk
+ * asks 0x00, 0x20 and 0x40 (whose last bit is clear) and drops nothing.
+ * The expected bitmaps are worked out here from the PIDs by SAE J1979's
+ * layout (PID base + k is bit 0x80 >> ((k - 1) % 8) of byte (k - 1) / 8),
+ * not taken from the fake:
+ *   0x00: 01 04 05 | 0C 0D 0F 10 | 11 | 20  ->  98 1B 80 01
+ *   0x20: 21 | 2F 30 | 31 | 40              ->  80 03 80 01
+ *   0x40: 41 42 | 4D 4E | | 5C              ->  C0 0C 00 10 */
 TEST_F(J2534AdoptionTest, ProbeWalksTheChainBeforeTheRotation)
 {
     char uri[512];
@@ -1566,8 +1567,8 @@ TEST_F(J2534AdoptionTest, ProbeWalksTheChainBeforeTheRotation)
     EXPECT_EQ(s.flags, ECUIO_SUPPORT_PROBED | ECUIO_SUPPORT_COMPLETE);
     EXPECT_EQ(s.rx_id, 0x7E8u);
     EXPECT_EQ(s.ranges, 0x7u);
-    const uint8_t want[32] = {0x18, 0x1B, 0x80, 0x01, 0x00, 0x02, 0x00, 0x01,
-                              0x40, 0x00, 0x00, 0x10};
+    const uint8_t want[32] = {0x98, 0x1B, 0x80, 0x01, 0x80, 0x03,
+                              0x80, 0x01, 0xC0, 0x0C, 0x00, 0x10};
     EXPECT_EQ(memcmp(s.pid_bitmap, want, sizeof(want)), 0);
     EXPECT_EQ(s.requests, 10u);
     EXPECT_EQ(s.dropped, 0u);

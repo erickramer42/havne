@@ -1,0 +1,237 @@
+# SAE J1979 Service 01 PIDs: what Obd2TableTest checks the obd2 set and
+# the fakes' ECU (tests/fake_ecu.h) against. Verify a row against a
+# public J1979 table before adding or changing it, never from memory;
+# a def or a canned reply written from the same mistake as its test
+# passes every other check.
+#
+# pid      hex; one row per field, so a PID with two values has two
+# bytes    the data bytes after [41][PID]
+# kind     linear (value = raw * scale + offset), or what isn't: bitmap
+#          (supported PIDs), bits, enum, dtc, complex (several fields
+#          or a layout the source leaves open)
+# start    the field's first data byte (0 = A); linear rows only
+# bits     8, 16 or 32, big-endian
+# signed   1 for two's complement
+# scale    a number or a fraction (100/255)
+# unit     the display string the sets use, not the source's spelling
+# min,max  the range the sources give (the note says where they
+#          differ), which the test recomputes from the scaling: a
+#          mismatch is a transcription error
+#
+# Sources: Wikipedia's "OBD-II PIDs" Service 01 table; every linear row
+# also against CSS Electronics' OBD2 DBC (v4.3), and where the two
+# disagree, against J1979 (2002) if it defines the PID. A disagreement
+# or a gap is in the row's note.
+pid,bytes,kind,start,bits,signed,scale,offset,unit,min,max,name,note
+00,4,bitmap,,,,,,,,,PIDs supported 01-20,
+01,4,bits,,,,,,,,,Monitor status since DTCs cleared,A7 MIL; A6-A0 DTC count; B-D readiness
+02,2,dtc,,,,,,,,,DTC that stored the freeze frame,Service 02
+03,2,bits,,,,,,,,,Fuel system status,
+04,1,linear,0,8,0,100/255,0,%,0,100,Engine load,
+05,1,linear,0,8,0,1,-40,°C,-40,215,Coolant temperature,
+06,1,linear,0,8,0,100/128,-100,%,-100,99.2,Short-term fuel trim bank 1,
+07,1,linear,0,8,0,100/128,-100,%,-100,99.2,Long-term fuel trim bank 1,
+08,1,linear,0,8,0,100/128,-100,%,-100,99.2,Short-term fuel trim bank 2,
+09,1,linear,0,8,0,100/128,-100,%,-100,99.2,Long-term fuel trim bank 2,
+0A,1,linear,0,8,0,3,0,kPa,0,765,Fuel pressure (gauge),
+0B,1,linear,0,8,0,1,0,kPa,0,255,Intake manifold absolute pressure,
+0C,2,linear,0,16,0,1/4,0,RPM,0,16383.75,Engine speed,
+0D,1,linear,0,8,0,1,0,km/h,0,255,Vehicle speed,
+0E,1,linear,0,8,0,1/2,-64,°,-64,63.5,Timing advance,before TDC
+0F,1,linear,0,8,0,1,-40,°C,-40,215,Intake air temperature,
+10,2,linear,0,16,0,1/100,0,g/s,0,655.35,Mass air flow,
+11,1,linear,0,8,0,100/255,0,%,0,100,Throttle position,
+12,1,bits,,,,,,,,,Commanded secondary air status,
+13,1,bits,,,,,,,,,Oxygen sensors present (2 banks),
+14,2,linear,0,8,0,1/200,0,V,0,1.275,O2 sensor 1 voltage,
+14,2,linear,1,8,0,100/128,-100,%,-100,99.2,O2 sensor 1 short-term trim,B = FF: the sensor isn't used in trim
+15,2,linear,0,8,0,1/200,0,V,0,1.275,O2 sensor 2 voltage,
+15,2,linear,1,8,0,100/128,-100,%,-100,99.2,O2 sensor 2 short-term trim,B = FF: the sensor isn't used in trim
+16,2,linear,0,8,0,1/200,0,V,0,1.275,O2 sensor 3 voltage,
+16,2,linear,1,8,0,100/128,-100,%,-100,99.2,O2 sensor 3 short-term trim,B = FF: the sensor isn't used in trim
+17,2,linear,0,8,0,1/200,0,V,0,1.275,O2 sensor 4 voltage,
+17,2,linear,1,8,0,100/128,-100,%,-100,99.2,O2 sensor 4 short-term trim,B = FF: the sensor isn't used in trim
+18,2,linear,0,8,0,1/200,0,V,0,1.275,O2 sensor 5 voltage,
+18,2,linear,1,8,0,100/128,-100,%,-100,99.2,O2 sensor 5 short-term trim,B = FF: the sensor isn't used in trim
+19,2,linear,0,8,0,1/200,0,V,0,1.275,O2 sensor 6 voltage,
+19,2,linear,1,8,0,100/128,-100,%,-100,99.2,O2 sensor 6 short-term trim,B = FF: the sensor isn't used in trim
+1A,2,linear,0,8,0,1/200,0,V,0,1.275,O2 sensor 7 voltage,
+1A,2,linear,1,8,0,100/128,-100,%,-100,99.2,O2 sensor 7 short-term trim,B = FF: the sensor isn't used in trim
+1B,2,linear,0,8,0,1/200,0,V,0,1.275,O2 sensor 8 voltage,
+1B,2,linear,1,8,0,100/128,-100,%,-100,99.2,O2 sensor 8 short-term trim,B = FF: the sensor isn't used in trim
+1C,1,enum,,,,,,,,,OBD standard the vehicle conforms to,
+1D,1,bits,,,,,,,,,Oxygen sensors present (4 banks),
+1E,1,bits,,,,,,,,,Auxiliary input status,A0 power take-off
+1F,2,linear,0,16,0,1,0,s,0,65535,Run time since engine start,
+20,4,bitmap,,,,,,,,,PIDs supported 21-40,
+21,2,linear,0,16,0,1,0,km,0,65535,Distance with the MIL on,
+22,2,linear,0,16,0,0.079,0,kPa,0,5177.265,Fuel rail pressure (relative to manifold),
+23,2,linear,0,16,0,10,0,kPa,0,655350,Fuel rail gauge pressure,
+24,4,linear,0,16,0,2/65536,0,λ,0,2,O2 sensor 1 lambda,
+24,4,linear,2,16,0,8/65536,0,V,0,8,O2 sensor 1 voltage (wide range),
+25,4,linear,0,16,0,2/65536,0,λ,0,2,O2 sensor 2 lambda,
+25,4,linear,2,16,0,8/65536,0,V,0,8,O2 sensor 2 voltage (wide range),
+26,4,linear,0,16,0,2/65536,0,λ,0,2,O2 sensor 3 lambda,
+26,4,linear,2,16,0,8/65536,0,V,0,8,O2 sensor 3 voltage (wide range),
+27,4,linear,0,16,0,2/65536,0,λ,0,2,O2 sensor 4 lambda,
+27,4,linear,2,16,0,8/65536,0,V,0,8,O2 sensor 4 voltage (wide range),
+28,4,linear,0,16,0,2/65536,0,λ,0,2,O2 sensor 5 lambda,
+28,4,linear,2,16,0,8/65536,0,V,0,8,O2 sensor 5 voltage (wide range),
+29,4,linear,0,16,0,2/65536,0,λ,0,2,O2 sensor 6 lambda,
+29,4,linear,2,16,0,8/65536,0,V,0,8,O2 sensor 6 voltage (wide range),
+2A,4,linear,0,16,0,2/65536,0,λ,0,2,O2 sensor 7 lambda,
+2A,4,linear,2,16,0,8/65536,0,V,0,8,O2 sensor 7 voltage (wide range),
+2B,4,linear,0,16,0,2/65536,0,λ,0,2,O2 sensor 8 lambda,
+2B,4,linear,2,16,0,8/65536,0,V,0,8,O2 sensor 8 voltage (wide range),
+2C,1,linear,0,8,0,100/255,0,%,0,100,Commanded EGR,
+2D,1,linear,0,8,0,100/128,-100,%,-100,99.2,EGR error,
+2E,1,linear,0,8,0,100/255,0,%,0,100,Commanded evaporative purge,
+2F,1,linear,0,8,0,100/255,0,%,0,100,Fuel tank level,
+30,1,linear,0,8,0,1,0,,0,255,Warm-ups since codes cleared,
+31,2,linear,0,16,0,1,0,km,0,65535,Distance since codes cleared,
+32,2,linear,0,16,1,1/4,0,Pa,-8192,8191.75,Evaporative system vapor pressure,signed in J1979 (2002): $8000 is -8192 Pa
+33,1,linear,0,8,0,1,0,kPa,0,255,Barometric pressure,
+34,4,linear,0,16,0,2/65536,0,λ,0,2,O2 sensor 1 lambda,
+34,4,linear,2,16,0,1/256,-128,mA,-128,128,O2 sensor 1 current,
+35,4,linear,0,16,0,2/65536,0,λ,0,2,O2 sensor 2 lambda,
+35,4,linear,2,16,0,1/256,-128,mA,-128,128,O2 sensor 2 current,
+36,4,linear,0,16,0,2/65536,0,λ,0,2,O2 sensor 3 lambda,
+36,4,linear,2,16,0,1/256,-128,mA,-128,128,O2 sensor 3 current,
+37,4,linear,0,16,0,2/65536,0,λ,0,2,O2 sensor 4 lambda,
+37,4,linear,2,16,0,1/256,-128,mA,-128,128,O2 sensor 4 current,
+38,4,linear,0,16,0,2/65536,0,λ,0,2,O2 sensor 5 lambda,
+38,4,linear,2,16,0,1/256,-128,mA,-128,128,O2 sensor 5 current,
+39,4,linear,0,16,0,2/65536,0,λ,0,2,O2 sensor 6 lambda,
+39,4,linear,2,16,0,1/256,-128,mA,-128,128,O2 sensor 6 current,
+3A,4,linear,0,16,0,2/65536,0,λ,0,2,O2 sensor 7 lambda,
+3A,4,linear,2,16,0,1/256,-128,mA,-128,128,O2 sensor 7 current,
+3B,4,linear,0,16,0,2/65536,0,λ,0,2,O2 sensor 8 lambda,
+3B,4,linear,2,16,0,1/256,-128,mA,-128,128,O2 sensor 8 current,
+3C,2,linear,0,16,0,1/10,-40,°C,-40,6513.5,Catalyst temperature bank 1 sensor 1,
+3D,2,linear,0,16,0,1/10,-40,°C,-40,6513.5,Catalyst temperature bank 2 sensor 1,
+3E,2,linear,0,16,0,1/10,-40,°C,-40,6513.5,Catalyst temperature bank 1 sensor 2,
+3F,2,linear,0,16,0,1/10,-40,°C,-40,6513.5,Catalyst temperature bank 2 sensor 2,
+40,4,bitmap,,,,,,,,,PIDs supported 41-60,
+41,4,bits,,,,,,,,,Monitor status this drive cycle,PID 01's layout with A = 0
+42,2,linear,0,16,0,1/1000,0,V,0,65.535,Control module voltage,
+43,2,linear,0,16,0,100/255,0,%,0,25700,Absolute load,
+44,2,linear,0,16,0,2/65536,0,λ,0,2,Commanded lambda,
+45,1,linear,0,8,0,100/255,0,%,0,100,Relative throttle position,
+46,1,linear,0,8,0,1,-40,°C,-40,215,Ambient air temperature,
+47,1,linear,0,8,0,100/255,0,%,0,100,Absolute throttle position B,
+48,1,linear,0,8,0,100/255,0,%,0,100,Absolute throttle position C,
+49,1,linear,0,8,0,100/255,0,%,0,100,Accelerator pedal position D,
+4A,1,linear,0,8,0,100/255,0,%,0,100,Accelerator pedal position E,
+4B,1,linear,0,8,0,100/255,0,%,0,100,Accelerator pedal position F,
+4C,1,linear,0,8,0,100/255,0,%,0,100,Commanded throttle actuator,
+4D,2,linear,0,16,0,1,0,min,0,65535,Time run with the MIL on,
+4E,2,linear,0,16,0,1,0,min,0,65535,Time since codes cleared,
+4F,4,linear,0,8,0,1,0,λ,0,255,Maximum lambda,
+4F,4,linear,1,8,0,1,0,V,0,255,Maximum O2 sensor voltage,
+4F,4,linear,2,8,0,1,0,mA,0,255,Maximum O2 sensor current,
+4F,4,linear,3,8,0,10,0,kPa,0,2550,Maximum intake manifold pressure,
+50,4,linear,0,8,0,10,0,g/s,0,2550,Maximum mass air flow,B-D reserved
+51,1,enum,,,,,,,,,Fuel type,
+52,1,linear,0,8,0,100/255,0,%,0,100,Ethanol fuel,
+53,2,linear,0,16,0,1/200,0,kPa,0,327.675,Absolute evaporative system vapor pressure,
+54,2,linear,0,16,1,1,0,Pa,-32768,32767,Evaporative system vapor pressure,sources differ: two's complement here; an OBD2 DBC reads it unsigned with offset -32767; check J1979 before use
+55,2,linear,0,8,0,100/128,-100,%,-100,99.2,Short-term secondary O2 trim bank 1,
+55,2,linear,1,8,0,100/128,-100,%,-100,99.2,Short-term secondary O2 trim bank 3,
+56,2,linear,0,8,0,100/128,-100,%,-100,99.2,Long-term secondary O2 trim bank 1,
+56,2,linear,1,8,0,100/128,-100,%,-100,99.2,Long-term secondary O2 trim bank 3,
+57,2,linear,0,8,0,100/128,-100,%,-100,99.2,Short-term secondary O2 trim bank 2,
+57,2,linear,1,8,0,100/128,-100,%,-100,99.2,Short-term secondary O2 trim bank 4,
+58,2,linear,0,8,0,100/128,-100,%,-100,99.2,Long-term secondary O2 trim bank 2,
+58,2,linear,1,8,0,100/128,-100,%,-100,99.2,Long-term secondary O2 trim bank 4,
+59,2,linear,0,16,0,10,0,kPa,0,655350,Fuel rail absolute pressure,
+5A,1,linear,0,8,0,100/255,0,%,0,100,Relative accelerator pedal position,
+5B,1,linear,0,8,0,100/255,0,%,0,100,Hybrid battery remaining life,
+5C,1,linear,0,8,0,1,-40,°C,-40,215,Engine oil temperature,Wikipedia lists 210; A - 40 at A = FF and the DBC give 215
+5D,2,linear,0,16,0,1/128,-210,°,-210,301.992,Fuel injection timing,
+5E,2,linear,0,16,0,1/20,0,L/h,0,3276.75,Engine fuel rate,Wikipedia lists 3212.75; the scaling and the DBC give 3276.75
+5F,1,bits,,,,,,,,,Emission requirements,
+60,4,bitmap,,,,,,,,,PIDs supported 61-80,
+61,1,linear,0,8,0,1,-125,%,-125,130,Driver's demand torque,
+62,1,linear,0,8,0,1,-125,%,-125,130,Actual engine torque,
+63,2,linear,0,16,0,1,0,N·m,0,65535,Engine reference torque,
+64,5,linear,0,8,0,1,-125,%,-125,130,Engine torque at idle,
+64,5,linear,1,8,0,1,-125,%,-125,130,Engine torque at point 1,
+64,5,linear,2,8,0,1,-125,%,-125,130,Engine torque at point 2,
+64,5,linear,3,8,0,1,-125,%,-125,130,Engine torque at point 3,
+64,5,linear,4,8,0,1,-125,%,-125,130,Engine torque at point 4,
+65,2,bits,,,,,,,,,Auxiliary inputs and outputs supported,
+66,5,linear,1,16,0,1/32,0,g/s,0,2047.96875,Mass air flow sensor A,A0: sensor A supported; not in the DBC
+66,5,linear,3,16,0,1/32,0,g/s,0,2047.96875,Mass air flow sensor B,A1: sensor B supported; not in the DBC
+67,3,linear,1,8,0,1,-40,°C,-40,215,Coolant temperature sensor 1,A0: sensor 1 supported; not in the DBC
+67,3,linear,2,8,0,1,-40,°C,-40,215,Coolant temperature sensor 2,A1: sensor 2 supported; not in the DBC
+68,3,linear,1,8,0,1,-40,°C,-40,215,Intake air temperature sensor 1,A0: sensor 1 supported; not in the DBC
+68,3,linear,2,8,0,1,-40,°C,-40,215,Intake air temperature sensor 2,A1: sensor 2 supported; not in the DBC
+69,7,complex,,,,,,,,,EGR actual and commanded and error,
+6A,5,complex,,,,,,,,,Diesel intake air flow control,
+6B,5,complex,,,,,,,,,EGR temperature,
+6C,5,complex,,,,,,,,,Throttle actuator control and relative position,
+6D,11,complex,,,,,,,,,Fuel pressure control,
+6E,9,complex,,,,,,,,,Injection pressure control,
+6F,3,complex,,,,,,,,,Turbocharger compressor inlet pressure,
+70,10,complex,,,,,,,,,Boost pressure control,Wikipedia's formula doesn't match its range
+71,6,complex,,,,,,,,,Variable geometry turbo control,
+72,5,complex,,,,,,,,,Wastegate control,
+73,5,complex,,,,,,,,,Exhaust pressure,
+74,5,complex,,,,,,,,,Turbocharger RPM,
+75,7,complex,,,,,,,,,Turbocharger temperature,
+76,7,complex,,,,,,,,,Turbocharger temperature,
+77,5,complex,,,,,,,,,Charge air cooler temperature,
+78,9,complex,,,,,,,,,Exhaust gas temperature bank 1,
+79,9,complex,,,,,,,,,Exhaust gas temperature bank 2,
+7A,7,complex,,,,,,,,,Diesel particulate filter,
+7B,7,complex,,,,,,,,,Diesel particulate filter,
+7C,9,complex,,,,,,,,,Diesel particulate filter temperature,
+7D,1,bits,,,,,,,,,NOx not-to-exceed area status,
+7E,1,bits,,,,,,,,,PM not-to-exceed area status,
+7F,13,complex,,,,,,,,,Engine run time,A support; B-E total; F-I idle; J-M PTO (s)
+80,4,bitmap,,,,,,,,,PIDs supported 81-A0,
+81,41,complex,,,,,,,,,AECD run time #1-#5,
+82,41,complex,,,,,,,,,AECD run time #6-#10,
+83,9,complex,,,,,,,,,NOx sensor,
+84,1,complex,,,,,,,,,Manifold surface temperature,no formula in Wikipedia's table
+85,10,complex,,,,,,,,,NOx reagent system,
+86,5,complex,,,,,,,,,Particulate matter sensor,
+87,5,complex,,,,,,,,,Intake manifold absolute pressure,
+88,13,complex,,,,,,,,,SCR inducement system,
+89,41,complex,,,,,,,,,AECD run time #11-#15,
+8A,41,complex,,,,,,,,,AECD run time #16-#20,
+8B,7,complex,,,,,,,,,Diesel aftertreatment,
+8C,17,complex,,,,,,,,,O2 sensor (wide range),
+8D,1,complex,,,,,,,,,Throttle position G,no formula in Wikipedia's table
+8E,1,linear,0,8,0,1,-125,%,-125,130,Engine friction torque,
+8F,7,complex,,,,,,,,,PM sensor banks 1 and 2,
+90,3,complex,,,,,,,,,WWH-OBD system information,
+91,5,complex,,,,,,,,,WWH-OBD system information,
+92,2,complex,,,,,,,,,Fuel system control,
+93,3,complex,,,,,,,,,WWH-OBD counters support,
+94,12,complex,,,,,,,,,NOx warning and inducement system,
+98,9,complex,,,,,,,,,Exhaust gas temperature sensor,
+99,9,complex,,,,,,,,,Exhaust gas temperature sensor,
+9A,6,complex,,,,,,,,,Hybrid/EV battery voltage,
+9B,4,complex,,,,,,,,,Diesel exhaust fluid sensor,
+9C,17,complex,,,,,,,,,O2 sensor data,
+9D,4,complex,,,,,,,,,Engine fuel rate,
+9E,2,complex,,,,,,,,,Engine exhaust flow rate,no formula in Wikipedia's table
+9F,9,complex,,,,,,,,,Fuel system percentage use,
+A0,4,bitmap,,,,,,,,,PIDs supported A1-C0,
+A1,9,complex,,,,,,,,,NOx sensor corrected,
+A2,2,linear,0,16,0,1/32,0,mg/stroke,0,2047.96875,Cylinder fuel rate,not in the DBC
+A3,9,complex,,,,,,,,,Evaporative system vapor pressure,
+A4,4,complex,,,,,,,,,Transmission actual gear,
+A5,4,complex,,,,,,,,,Commanded DEF dosing,
+A6,4,linear,0,32,0,1/10,0,km,0,429496729.5,Odometer,
+A7,4,complex,,,,,,,,,NOx sensors 3 and 4,
+A8,4,complex,,,,,,,,,NOx sensors 3 and 4 corrected,
+A9,4,bits,,,,,,,,,ABS disable switch state,
+C0,4,bitmap,,,,,,,,,PIDs supported C1-E0,
+C3,2,complex,,,,,,,,,Fuel level input A/B,
+C4,8,complex,,,,,,,,,Exhaust particulate control diagnostic,
+C5,4,complex,,,,,,,,,Fuel pressure A and B,
+C6,7,complex,,,,,,,,,Particulate control inducement,
+C7,2,complex,,,,,,,,,Distance since reflash or module replacement,no formula in Wikipedia's table
+C8,1,bits,,,,,,,,,NCD and PCD warning lamp status,

@@ -387,8 +387,10 @@ void build_negative(const unsigned char* req, unsigned char code,
  * strip lands the bridge on [41][PID][A][B]...: the obd2 set's
  * mux-at-offset-0 grammar.
  * Caller (WriteMsgs, mutex HELD) has verified: [tx_id BE][0x01][PID] or
- * [tx_id BE][0x09][item] (6 bytes) or [tx_id BE][0x22][DID] (7 bytes),
- * and an active filter. False when nothing answers. */
+ * [tx_id BE][0x09][item] (6 bytes), [tx_id BE][0x22][DID] or
+ * [tx_id BE][0x02][PID][frame] (7 bytes), or [tx_id BE][service] for
+ * Services 03, 04, 07 and 0x0A (5 bytes), and an active filter. False
+ * when nothing answers. */
 bool build_obd2_response(const unsigned char* req, unsigned long req_len,
                          long unsupported_nrc,
                          unsigned char* resp, unsigned long* resp_len)
@@ -797,6 +799,14 @@ long __stdcall PassThruWriteMsgs(unsigned long ChannelID,
             unsupported_nrc = strtol(nb, nullptr, 0);
         }
     }
+    {
+        /* Service 04 refused with this code (fake_ecu::Diagnostics) */
+        char nb[32] = {};
+        fake_ecu::diagnostics().clear_nrc =
+            fake_j2534::read_knob("ECUIO_FAKE_CLEAR_NRC", nb, sizeof(nb))
+                ? static_cast<int>(strtol(nb, nullptr, 0))
+                : 0;
+    }
 
     std::unique_lock<std::mutex> lk(fake_j2534::g_lock);
 
@@ -834,8 +844,8 @@ long __stdcall PassThruWriteMsgs(unsigned long ChannelID,
 
     /* RESPONSE GENERATION.
      * A request: Service 01 or 09, EXACTLY 6 bytes with req[4] 0x01 or
-     * 0x09, or Service 0x22, 7 bytes: the adapter-framed logical
-     * message. With
+     * 0x09; Service 0x22 or 02, 7 bytes; Service 03, 04, 07 or 0x0A, 5
+     * bytes: the adapter-framed logical message. With
      * an active filter the ECU it's addressed to answers; without one an
      * ISO 15765 channel receives nothing, so the legacy echo applies.
      * Everything else keeps the deterministic echo semantics. */
@@ -846,9 +856,11 @@ long __stdcall PassThruWriteMsgs(unsigned long ChannelID,
 
         const bool has_filter = (fake_j2534::g_last_filter.filter_id != 0)
                                  && (n >= 4);
-        const bool request = has_filter &&
-            ((n == 6 && (req[4] == 0x01 || req[4] == 0x09)) ||
-             (n == 7 && req[4] == 0x22));
+        const bool request =
+            has_filter && ((n == 6 && (req[4] == 0x01 || req[4] == 0x09)) ||
+                           (n == 7 && (req[4] == 0x22 || req[4] == 0x02)) ||
+                           (n == 5 && (req[4] == 0x03 || req[4] == 0x04 ||
+                                       req[4] == 0x07 || req[4] == 0x0A)));
 
         if (request) {
             if (!fake_j2534::build_obd2_response(req, n, unsupported_nrc,
