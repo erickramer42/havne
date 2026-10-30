@@ -15,6 +15,10 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
   beside the title and stays in place when the view changes, so it no
   longer moves out from under the pointer as the buttons beside it
   change.
+- A release's page opens with a table linking each platform's
+  download, and one build provenance file,
+  `havne-X.Y.Z.intoto.jsonl`, covers every download instead of one
+  beside each, so the list of files is shorter.
 
 ## [0.3.4] - 2026-10-30
 

@@ -52,6 +52,15 @@ its build machine's (2.39). It publishes:
 Each goes into `SHA256SUMS.txt` and gets a provenance attestation, like
 the Windows files.
 
+> **Amended 2026-10-30:** one provenance attestation covers every
+> download, and the release attaches its bundle once, as
+> `havne-X.Y.Z.intoto.jsonl`, instead of a copy beside each file: the
+> release lists eleven files, not eighteen (GitHub has no folders for
+> them). `gh attestation verify <download>` is unchanged, and
+> `--bundle` takes the one file. Each release's notes open with a table
+> linking the file each platform wants; the debug files stay separate
+> downloads, where `gdb` and the Debian convention expect them.
+
 ### 2. What the core package installs
 
 CMake gains `install()` rules, so `cmake --install` lays out the same

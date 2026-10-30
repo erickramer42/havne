@@ -7,9 +7,10 @@ name: Release
 # AppImage, and core alone for Linux as a deb and a tarball (ADR-0035);
 # beside them the Windows executables' PDBs in a zip of their own
 # (ADR-0034) and havne-cli's Linux debug info as a -dbgsym deb and a
-# -debug tarball. Each comes with its SHA-256 and a signed build
-# provenance (attested, and attached as a .intoto.jsonl), and one SPDX
-# SBOM lists what each download contains, attested over them.
+# -debug tarball. Each comes with its SHA-256, and one signed build
+# provenance covers them all (attested, and attached as a single
+# .intoto.jsonl); one SPDX SBOM lists what each download contains,
+# attested over them.
 # A tag with -rcN publishes a pre-release, for a dry run.
 # The tagged commit must already have passed CI (ci.yml's push run).
 #
@@ -368,30 +369,15 @@ jobs:
             > SHA256SUMS.txt)
           cat dist/SHA256SUMS.txt
 
-      - name: Attest the zip's build provenance
-        id: attest-zip
-        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
-        with:
-          subject-path: dist/havne-${{ env.VERSION }}-windows-x64.zip
-
-      - name: Attest the symbols' build provenance
-        id: attest-symbols
-        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
-        with:
-          subject-path: dist/havne-${{ env.VERSION }}-windows-x64-symbols.zip
-
-      - name: Attest the APK's build provenance
-        id: attest-apk
-        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
-        with:
-          subject-path: dist/havne-${{ env.VERSION }}-android-arm64-v8a.apk
-
-      # One attestation over the five Linux files: its bundle names each
-      - name: Attest the Linux files' build provenance
-        id: attest-linux
+      # One attestation over every download: its bundle names each
+      - name: Attest the downloads' build provenance
+        id: attest
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
           subject-path: |
+            ${{ env.ZIP }}
+            ${{ env.SYMBOLS }}
+            ${{ env.APK }}
             ${{ env.APPIMAGE }}
             ${{ env.DEB }}
             ${{ env.DBGSYM }}
@@ -411,31 +397,20 @@ jobs:
             ${{ env.DEB }}
             ${{ env.TARBALL }}
 
-      # The same signed provenance (a Sigstore bundle) as a release file
-      # beside each download. OpenSSF Scorecard's Signed-Releases check
-      # reads release files, not GitHub's attestation store, and counts
-      # *.intoto.jsonl as provenance. A download can also be checked
-      # against its file with gh attestation verify --bundle.
+      # The same signed provenance (a Sigstore bundle) as one release
+      # file. OpenSSF Scorecard's Signed-Releases check reads release
+      # files, not GitHub's attestation store, and counts *.intoto.jsonl
+      # as provenance. Any download can also be checked against it with
+      # gh attestation verify --bundle.
       - name: Copy the provenance into dist
         env:
-          ZIP_BUNDLE: ${{ steps.attest-zip.outputs.bundle-path }}
-          SYMBOLS_BUNDLE: ${{ steps.attest-symbols.outputs.bundle-path }}
-          APK_BUNDLE: ${{ steps.attest-apk.outputs.bundle-path }}
-          LINUX_BUNDLE: ${{ steps.attest-linux.outputs.bundle-path }}
-        run: |
-          cp "$ZIP_BUNDLE" "$ZIP.intoto.jsonl"
-          cp "$SYMBOLS_BUNDLE" "$SYMBOLS.intoto.jsonl"
-          cp "$APK_BUNDLE" "$APK.intoto.jsonl"
-          for f in "$APPIMAGE" "$DEB" "$DBGSYM" "$TARBALL" "$DEBUG_TARBALL"; do
-            cp "$LINUX_BUNDLE" "$f.intoto.jsonl"
-          done
+          BUNDLE: ${{ steps.attest.outputs.bundle-path }}
+        run: cp "$BUNDLE" "dist/havne-$VERSION.intoto.jsonl"
 
       - name: Publish the release
         run: |
-          files=("$SBOM" dist/SHA256SUMS.txt)
-          for f in "$ZIP" "$SYMBOLS" "$APK" "$APPIMAGE" "$DEB" "$DBGSYM" "$TARBALL" "$DEBUG_TARBALL"; do
-            files+=("$f" "$f.intoto.jsonl")
-          done
+          files=("$ZIP" "$SYMBOLS" "$APK" "$APPIMAGE" "$DEB" "$DBGSYM" "$TARBALL" "$DEBUG_TARBALL"
+            "$SBOM" dist/SHA256SUMS.txt "dist/havne-$VERSION.intoto.jsonl")
           if gh release view "$TAG" > /dev/null 2>&1; then
             gh release upload "$TAG" "${files[@]}" --clobber
           else

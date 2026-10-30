@@ -83,6 +83,10 @@ check a download with `apksigner verify --print-certs`. The APK also
 gets its own build provenance, as the zip does, so
 `gh attestation verify` ties it to this repository's workflow.
 
+> **Amended 2026-10-30:** the APK shares one provenance attestation
+> with every other download (ADR-0035 §1's amendment);
+> `gh attestation verify` checks it the same way.
+
 ### 4. What stays as it was
 
 CI's `android-build` still uploads a debug APK for development, and a
