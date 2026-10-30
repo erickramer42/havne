@@ -10,7 +10,8 @@
 //          requests, ECU prefix and DID scan, identification's
 //          requests, ?identify=0 and the report it publishes, and
 //          diagnostics' (ADR-0037): the report, ?diagnose=0 and Read
-//          again.
+//          again, and a clear with the engine stopped and running
+//          (ADR-0038).
 //          test_j2534_health, also cross-arch: the request engine's
 //          pacing (the floor, the wait, negative and pending replies,
 //          two channels at once), the drain in passive mode, and the
@@ -416,6 +417,7 @@ void j2534_worker(ecuio_j2534_transport* t)
     uint32_t published_identity[ECUIO_MAX_CHANNELS] = {};
     uint32_t published_diagnostics[ECUIO_MAX_CHANNELS] = {};
     uint32_t diag_seen = 0;
+    uint32_t clear_seen[ECUIO_MAX_CHANNELS] = {};
     if (requests && t->probe) {
         ecuio_engine_probe(&e, engine_now_us(t));
     }
@@ -465,6 +467,7 @@ void j2534_worker(ecuio_j2534_transport* t)
         }
         if (requests) {
             ecuio_take_diag_request(t->session, &e, diag_seen);
+            ecuio_take_clear_requests(t->session, &e, clear_seen);
         }
         for (uint32_t c = 0; requests && c < t->chan_count; ++c) {
             ecuio_publish_support(t->session, e, c, t->chans[c].rx_id,

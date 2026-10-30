@@ -122,12 +122,14 @@ constexpr uint8_t kFreeze0DSpeed = 80;            /* 80 km/h */
  * fakes share it across a test binary's cases). cleared: Service 04 ran.
  * clears: how many times. clear_nrc: nonzero refuses Service 04 with
  * that code (J1979: an ECU that can't clear with the engine running
- * answers 0x22, conditionsNotCorrect). Tests that clear call
- * reset_diagnostics() first. */
+ * answers 0x22, conditionsNotCorrect). engine_off: PID 0C reads 0
+ * rpm, the key on and the engine stopped, which a clear asks for
+ * (ADR-0038). Tests that clear call reset_diagnostics() first. */
 struct Diagnostics {
     std::atomic<bool> cleared{false};
     std::atomic<unsigned> clears{0};
     std::atomic<int> clear_nrc{0};
+    std::atomic<bool> engine_off{false};
 };
 
 inline Diagnostics& diagnostics()
@@ -142,6 +144,7 @@ inline void reset_diagnostics()
     d.cleared = false;
     d.clears = 0;
     d.clear_nrc = 0;
+    d.engine_off = false;
 }
 
 /* The ID an ECU answers a request on: 11-bit physical requests 0x7E0 to
@@ -500,7 +503,7 @@ inline bool answer(const unsigned char* req, size_t req_len,
         put(&kPid05CoolantTemp, 1);
         break;
     case 0x0C:
-        put(kPid0CRpm, 2);
+        put(diag.engine_off ? zero : kPid0CRpm, 2);
         break;
     case 0x0D:
         put(&kPid0DSpeed, 1);

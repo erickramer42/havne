@@ -620,6 +620,61 @@ TEST_F(Elm327SessionTest, DiagnosticsFillTheReportAndReadAgain)
     }
 }
 
+/* ADR-0038 over ELM327: with the engine stopped, a clear sends 04 once,
+ * with no count digit, after the engine speed, and the report read again
+ * is the fake's cleared one; with it running, no 04 goes out */
+TEST_F(Elm327SessionTest, AClearSends04OnlyWithTheEngineStopped)
+{
+    for (const bool off : {false, true}) {
+        SCOPED_TRACE(off ? "engine off" : "engine running");
+        fake_ecu::reset_diagnostics();
+        fake_ecu::diagnostics().engine_off = off;
+        Session s;
+        ASSERT_EQ(s.create(uri("?probe=0&identify=0")), ECUIO_OK);
+        s.start();
+        ecuio_channel_diagnostics_t d{};
+        ASSERT_TRUE(wait_for(
+            [&] {
+                return ecuio_session_get_channel_diagnostics(s.s, 0, &d) ==
+                           ECUIO_OK &&
+                       (d.flags & ECUIO_DIAG_COMPLETE) != 0;
+            },
+            8000));
+        ASSERT_EQ(ecuio_session_clear_diagnostics(s.s, 0, d.generation),
+                  ECUIO_OK);
+        ASSERT_TRUE(wait_for(
+            [&] {
+                return ecuio_session_get_channel_diagnostics(s.s, 0, &d) ==
+                           ECUIO_OK &&
+                       d.clear != ECUIO_CLEAR_NONE &&
+                       (d.flags & ECUIO_DIAG_COMPLETE) != 0;
+            },
+            8000));
+        if (off) {
+            EXPECT_EQ(d.clear, ECUIO_CLEAR_CLEARED);
+            EXPECT_EQ(d.lists[ECUIO_DIAG_STORED].held, 0u);
+            EXPECT_EQ(d.lists[ECUIO_DIAG_PERMANENT].held, 1u);
+            EXPECT_EQ(fake_count("04"), 1u);
+            const std::vector<std::string> sent = fake_commands();
+            const auto clear = std::find(sent.begin(), sent.end(), "04");
+            ASSERT_NE(clear, sent.end()) << "04 alone, no count digit";
+            /* The speed went before it; the clear's 01 0C carries the count
+             * digit as the rotation's does, so the engine's own tests pin
+             * which one it was (ClearTest) */
+            EXPECT_NE(std::find_if(sent.begin(), clear,
+                                   [](const std::string& c) {
+                                       return c.rfind("010C", 0) == 0;
+                                   }),
+                      clear);
+        } else {
+            EXPECT_EQ(d.clear, ECUIO_CLEAR_ENGINE_RUNNING);
+            EXPECT_EQ(fake_count("04"), 0u);
+            fake_diagnostics::expect_report(d);
+        }
+    }
+    fake_ecu::reset_diagnostics();
+}
+
 /* ?diagnose=0: no diagnostics request goes out, Read again included,
  * and the report says none is asked */
 TEST_F(Elm327SessionTest, DiagnoseOffAsksNoDiagnostics)

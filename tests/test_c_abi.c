@@ -168,6 +168,8 @@ int main(void)
     if (ecuio_session_get_channel_diagnostics(NULL, 0, &diagnostics) !=
             ECUIO_ERR_NULL_ARGUMENT ||
         ecuio_session_read_diagnostics(NULL) != ECUIO_ERR_NULL_ARGUMENT ||
+        ecuio_session_clear_diagnostics(NULL, 0, 0) != ECUIO_ERR_NULL_ARGUMENT ||
+        ECUIO_ERR_REPORT_CHANGED != 17 ||
         (ECUIO_DIAG_ASKED & ECUIO_DIAG_FREEZE_FRAME) != 0 ||
         (ECUIO_DIAG_CLEARING & ECUIO_DIAG_ASKED) != 0 ||
         ECUIO_CLEAR_REPORT_CHANGED != 6u) {

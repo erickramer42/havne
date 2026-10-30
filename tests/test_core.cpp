@@ -325,6 +325,36 @@ TEST(CoreTest, MockDiagnoseOffReportsNone)
     EXPECT_STREQ(ecuio_last_error_detail(), "?diagnose= needs 0 or 1, not '2'");
 }
 
+/* ADR-0038: a clear names the report the caller saved, so anything else
+ * is refused before a request could go: a stale generation, a channel
+ * past the count, a session reading no diagnostics, a closed session */
+TEST(CoreTest, AClearNeedsTheReportTheCallerSaved)
+{
+    EXPECT_EQ(ecuio_session_clear_diagnostics(nullptr, 0, 0),
+              ECUIO_ERR_NULL_ARGUMENT);
+    ecuio_session_t* s = nullptr;
+    ASSERT_EQ(ecuio_session_create("mock://demo", &s), ECUIO_OK);
+    ecuio_channel_diagnostics_t d{};
+    ASSERT_EQ(ecuio_session_get_channel_diagnostics(s, 0, &d), ECUIO_OK);
+    ASSERT_TRUE(d.flags & ECUIO_DIAG_COMPLETE);
+    EXPECT_EQ(ecuio_session_clear_diagnostics(s, 0, d.generation - 1),
+              ECUIO_ERR_REPORT_CHANGED);
+    EXPECT_EQ(ecuio_session_clear_diagnostics(s, 0, d.generation + 1),
+              ECUIO_ERR_REPORT_CHANGED);
+    EXPECT_EQ(ecuio_session_clear_diagnostics(s, 1, d.generation),
+              ECUIO_ERR_INVALID_ARGUMENT);
+    ASSERT_EQ(ecuio_session_close(s), ECUIO_OK);
+    EXPECT_EQ(ecuio_session_clear_diagnostics(s, 0, d.generation),
+              ECUIO_ERR_SESSION_CLOSED);
+    ecuio_session_destroy(s);
+
+    ASSERT_EQ(ecuio_session_create("mock://demo?diagnose=0", &s), ECUIO_OK);
+    EXPECT_EQ(ecuio_session_clear_diagnostics(s, 0, 0),
+              ECUIO_ERR_REPORT_CHANGED)
+        << "nothing read, so nothing saved";
+    ecuio_session_destroy(s);
+}
+
 TEST(CoreTest, StatusStringValidValues) {
     EXPECT_STREQ(ecuio_status_string(ECUIO_OK), "success");
     EXPECT_STREQ(ecuio_status_string(ECUIO_ERR_NULL_ARGUMENT), "null argument");
@@ -341,6 +371,8 @@ TEST(CoreTest, StatusStringValidValues) {
     EXPECT_STREQ(ecuio_status_string(ECUIO_ERR_SURROGATE_FAILED), "surrogate process failed");
     EXPECT_STREQ(ecuio_status_string(ECUIO_ERR_RECORDING_CHANGED),
                  "the recording changed after it was opened");
+    EXPECT_STREQ(ecuio_status_string(ECUIO_ERR_REPORT_CHANGED),
+                 "the diagnostics report changed since it was saved");
     EXPECT_STREQ(ecuio_status_string(ECUIO_ERR_VEHICLE_TIMEOUT),
                  "vehicle not responding (timeout)");
 

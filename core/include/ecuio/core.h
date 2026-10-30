@@ -133,6 +133,11 @@ typedef enum {
     ECUIO_ERR_RECORDING_CHANGED = 16, /* a replay stopped early: its
                                          frames.csv changed or went away
                                          after the session opened it */
+    ECUIO_ERR_REPORT_CHANGED = 17,    /* a clear named a diagnostics report
+                                         that isn't the channel's now: not
+                                         read to the end, a clear running,
+                                         or another generation (ADR-0038);
+                                         nothing was sent */
 
     /* Append-only rule: new codes go HERE, never renumber */
 } ecuio_status_t;
@@ -725,6 +730,25 @@ ecuio_status_t ecuio_session_get_channel_diagnostics(
  * (no channel has ECUIO_DIAG_ASKED). ECUIO_ERR_SESSION_CLOSED after
  * close. */
 ecuio_status_t ecuio_session_read_diagnostics(ecuio_session_t* session);
+
+/* Clears channel `channel`'s trouble codes (ADR-0038): SAE J1979 Service
+ * 04, which on the ECU that obeys it also erases the freeze frame, turns
+ * the MIL off and sets the readiness monitors back to incomplete;
+ * permanent codes stay. generation names the report the caller saved
+ * first (ecuio_session_get_channel_diagnostics): it must be read to the
+ * end, with no clear running, and still be the channel's, or the call
+ * is ECUIO_ERR_REPORT_CHANGED and nothing is sent. On its next pass the
+ * worker checks the generation again and asks the ECU's engine speed
+ * (01 0C); 04 goes out only at 0 rpm. The report's clear field says
+ * what became of it (ECUIO_CLEAR_*), and after a clear the report is
+ * read again. Returns at once, from any thread.
+ * ECUIO_ERR_INVALID_ARGUMENT for a channel past the session info's
+ * channel_count, ECUIO_ERR_SESSION_CLOSED after close. */
+ecuio_status_t ecuio_session_clear_diagnostics(
+    ecuio_session_t* session,
+    uint32_t channel,
+    uint32_t generation
+);
 
 #ifdef __cplusplus
 }
