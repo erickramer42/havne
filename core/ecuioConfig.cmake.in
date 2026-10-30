@@ -7,4 +7,14 @@ include(CMakeFindDependencyMacro)
 find_dependency(Threads)
 
 include("${CMAKE_CURRENT_LIST_DIR}/ecuioTargets.cmake")
+
+# The archive is C++. CMake links a project that enables CXX with the
+# C++ driver, which brings the runtime; a C-only project links with the
+# C driver, so the runtime is named here (as ecuio.pc's Libs do)
+get_property(_ecuio_languages GLOBAL PROPERTY ENABLED_LANGUAGES)
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND NOT "CXX" IN_LIST _ecuio_languages)
+    set_property(TARGET ecuio::core APPEND PROPERTY INTERFACE_LINK_LIBRARIES stdc++ m)
+endif()
+unset(_ecuio_languages)
+
 check_required_components(ecuio)
