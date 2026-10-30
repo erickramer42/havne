@@ -7,13 +7,16 @@
 //
 // What the fakes' engine ECU answers, from the service byte on: the
 // adapter's framing (J2534's 4-byte CAN ID, the ELM327's lines and PCI
-// bytes) is each fake's own.
+// bytes) is each fake's own. Its diagnostics (stored, pending and
+// permanent DTCs, a freeze frame, readiness) are one state per process
+// that Service 04 clears: diagnostics() below.
 
 #ifndef ECUIO_TESTS_FAKE_ECU_H
 #define ECUIO_TESTS_FAKE_ECU_H
 
 #include "ecuio/j2534_ptypes.h" /* ECUIO_PT_MSG_DATA_SIZE */
 
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -71,6 +74,75 @@ constexpr char kEcuName[20] = "FAKE-ECM";
 
 /* The longest reply answer() writes: [62][DID] and 0xF1A2's data. */
 constexpr size_t kReplyMax = 3 + kOverlongDidLen;
+
+/* ---- Diagnostics (SAE J1979 on ISO 15765-4) ----
+ * A DTC is two bytes: the category in A7-A6 (00 P, 01 C, 10 B, 11 U),
+ * then the digits. Each list covers different categories, so a decoder
+ * sees all four. Three stored DTCs make Service 03's reply, [43][count]
+ * [DTCs], 8 bytes: past a Single Frame, so the ISO-TP fakes send it as
+ * a First Frame and a Consecutive Frame. */
+constexpr uint8_t kStoredDtcs[] = {0x03, 0x01,   /* P0301 */
+                                   0x04, 0x20,   /* P0420 */
+                                   0xC1, 0x00};  /* U0100 */
+constexpr uint8_t kPendingDtcs[] = {0x01, 0x71,  /* P0171 */
+                                    0x40, 0x35,  /* C0035 */
+                                    0x90, 0x01}; /* B1001 */
+/* Service 0x0A's permanent DTCs, which Service 04 leaves: only the ECU
+ * clears one, once its monitor passes. J1979 (2002) predates Service
+ * 0x0A; its reply takes 03's and 07's shape. */
+constexpr uint8_t kPermanentDtcs[] = {0x04, 0x20}; /* P0420 */
+
+/* Service 01 PID 01's bytes B-D (PID 0x41's too): spark ignition (B3
+ * clear); misfire, fuel system and components monitored (B2-B0); the
+ * catalyst, evaporative system, oxygen sensor, its heater and EGR/VVT
+ * (C). Completeness bits are 0 for complete: all complete until a
+ * clear, after which C's monitors are incomplete (D = C). */
+constexpr uint8_t kMonitorsB = 0x07;
+constexpr uint8_t kMonitorsC = 0xE5;
+
+/* What a clear resets to 0, with their values before it: distance with
+ * the MIL on (0x21, km), warm-ups (0x30), distance (0x31, km), minutes
+ * with the MIL on (0x4D) and since the clear (0x4E). */
+constexpr uint8_t kPid21MilKm[2] = {0x00, 0x2A}; /* 42 km */
+constexpr uint8_t kPid30WarmUps = 20;
+constexpr uint8_t kPid31ClearKm[2] = {0x04, 0xD2};  /* 1234 km */
+constexpr uint8_t kPid4DMilMin[2] = {0x00, 0x3C};   /* 60 min */
+constexpr uint8_t kPid4EClearMin[2] = {0x0B, 0xB8}; /* 3000 min */
+
+/* The freeze frame (Service 02, frame 0) that P0301 stored: values
+ * unlike the live canned ones, so a test can tell the two apart. */
+constexpr uint8_t kFreezeDtc[2] = {0x03, 0x01};   /* P0301 */
+constexpr uint8_t kFreeze04Load = 0xB3;           /* ~70% */
+constexpr uint8_t kFreeze05Coolant = 130;         /* 90 degC */
+constexpr uint8_t kFreeze0CRpm[2] = {0x2E, 0xE0}; /* 3000 RPM */
+constexpr uint8_t kFreeze0DSpeed = 80;            /* 80 km/h */
+
+/* The diagnostics' state: one per process (the fake J2534 DLL runs in
+ * each session's surrogate, so it starts fresh there; the in-process
+ * fakes share it across a test binary's cases). cleared: Service 04 ran.
+ * clears: how many times. clear_nrc: nonzero refuses Service 04 with
+ * that code (J1979: an ECU that can't clear with the engine running
+ * answers 0x22, conditionsNotCorrect). Tests that clear call
+ * reset_diagnostics() first. */
+struct Diagnostics {
+    std::atomic<bool> cleared{false};
+    std::atomic<unsigned> clears{0};
+    std::atomic<int> clear_nrc{0};
+};
+
+inline Diagnostics& diagnostics()
+{
+    static Diagnostics d;
+    return d;
+}
+
+inline void reset_diagnostics()
+{
+    Diagnostics& d = diagnostics();
+    d.cleared = false;
+    d.clears = 0;
+    d.clear_nrc = 0;
+}
 
 /* The ID an ECU answers a request on: 11-bit physical requests 0x7E0 to
  * 0x7E7 get theirs 8 above, the functional 0x7DF is answered by the
@@ -141,6 +213,7 @@ inline bool supports_pid(unsigned pid)
 {
     switch (pid) {
     case 0x00:
+    case 0x01:
     case 0x04:
     case 0x05:
     case 0x0C:
@@ -149,15 +222,45 @@ inline bool supports_pid(unsigned pid)
     case 0x10:
     case 0x11:
     case 0x20:
+    case 0x21:
     case 0x2F:
+    case 0x30:
+    case 0x31:
     case 0x40:
+    case 0x41:
     case 0x42:
+    case 0x4D:
+    case 0x4E:
     case 0x5C:
     case 0x7F:
         return true;
     default:
         return false;
     }
+}
+
+/* The Service 02 PIDs frame 0 holds: the DTC that stored it (0x02) and
+ * the values above; after a clear, 0x02 alone, reporting 00 00 (J1979:
+ * no freeze frame stored). */
+inline bool supports_freeze_pid(unsigned pid)
+{
+    if (diagnostics().cleared) {
+        return pid == 0x02;
+    }
+    return pid == 0x02 || pid == 0x04 || pid == 0x05 || pid == 0x0C ||
+           pid == 0x0D;
+}
+
+/* A list reply, [service + 0x40][count][DTCs], into out. */
+inline void put_dtcs(uint8_t sid_pr, const uint8_t* dtcs, size_t n,
+                     unsigned char* out, size_t* out_len)
+{
+    out[0] = sid_pr;
+    out[1] = static_cast<unsigned char>(n / 2);
+    if (n > 0) {
+        memcpy(out + 2, dtcs, n);
+    }
+    *out_len = 2 + n;
 }
 
 /* The supported-PID bitmap at PID base (0x00, 0x20, 0x40), into out[4]:
@@ -181,9 +284,13 @@ inline void pid_bitmap(unsigned base, unsigned char* out)
  * out (kReplyMax bytes), from the service byte on: [41][PID][canned]
  * from the values above or a bitmap; [49][item][01][data] for Service
  * 09's VIN (02), CALID (04), CVN (06) and ECU name (0A); or [62][DID]
- * [value] for the DIDs above. Any other PID, item or DID gets a
+ * [value] for the DIDs above. The diagnostics, from diagnostics()'s
+ * state: Services 03, 07 and 0x0A (1 byte) the DTC lists, [43|47|4A]
+ * [count][DTCs]; Service 02 ([02][PID][frame], 3 bytes) the freeze
+ * frame, [42][PID][frame][data]; Service 04 (1 byte) clears, [44], or
+ * refuses with clear_nrc. Any other PID, item, frame or DID gets a
  * negative reply, 7F 01 12 (what the first vehicle answered for PID
- * 0x5C), 7F 09 12 or 7F 22 31. unsupported_nrc is the fakes'
+ * 0x5C), 7F 02 12, 7F 09 12 or 7F 22 31. unsupported_nrc is the fakes'
  * ECUIO_FAKE_UNSUPPORTED_NRC: -1 (unset) keeps those codes, 0 answers
  * nothing (an ECU that stays silent), any other value is the code for
  * all three. False when nothing answers. */
@@ -218,6 +325,86 @@ inline bool answer(const unsigned char* req, size_t req_len,
                                          : static_cast<unsigned char>(i & 0xFF);
         }
         *out_len = 3 + n;
+        return true;
+    }
+    Diagnostics& diag = diagnostics();
+    const bool cleared = diag.cleared;
+    if (req_len == 1) {
+        switch (req[0]) {
+        case 0x03:
+            put_dtcs(0x43, kStoredDtcs, cleared ? 0 : sizeof(kStoredDtcs), out,
+                     out_len);
+            return true;
+        case 0x07:
+            put_dtcs(0x47, kPendingDtcs, cleared ? 0 : sizeof(kPendingDtcs),
+                     out, out_len);
+            return true;
+        case 0x0A:
+            put_dtcs(0x4A, kPermanentDtcs, sizeof(kPermanentDtcs), out,
+                     out_len);
+            return true;
+        case 0x04: {
+            const int nrc = diag.clear_nrc;
+            if (nrc != 0) {
+                out[0] = 0x7F;
+                out[1] = 0x04;
+                out[2] = static_cast<unsigned char>(nrc);
+                *out_len = 3;
+                return true;
+            }
+            diag.cleared = true;
+            diag.clears.fetch_add(1);
+            out[0] = 0x44;
+            *out_len = 1;
+            return true;
+        }
+        default:
+            return false;
+        }
+    }
+    if (req[0] == 0x02 && req_len == 3) {
+        const uint8_t pid = req[1];
+        if (req[2] != 0x00 || (pid != 0x00 && !supports_freeze_pid(pid))) {
+            return refuse(0x12); /* only frame 0 is stored */
+        }
+        out[0] = 0x42;
+        out[1] = pid;
+        out[2] = 0x00;
+        const auto put = [&](const uint8_t* v, size_t n) {
+            memcpy(out + 3, v, n);
+            *out_len = 3 + n;
+        };
+        const uint8_t none[2] = {0x00, 0x00};
+        switch (pid) {
+        case 0x00: {
+            uint8_t bitmap[4] = {};
+            for (unsigned k = 1; k <= 32; ++k) {
+                if (supports_freeze_pid(k)) {
+                    bitmap[(k - 1) / 8] = static_cast<uint8_t>(
+                        bitmap[(k - 1) / 8] | (0x80u >> ((k - 1) % 8)));
+                }
+            }
+            put(bitmap, sizeof(bitmap));
+            break;
+        }
+        case 0x02:
+            put(cleared ? none : kFreezeDtc, 2);
+            break;
+        case 0x04:
+            put(&kFreeze04Load, 1);
+            break;
+        case 0x05:
+            put(&kFreeze05Coolant, 1);
+            break;
+        case 0x0C:
+            put(kFreeze0CRpm, 2);
+            break;
+        case 0x0D:
+            put(&kFreeze0DSpeed, 1);
+            break;
+        default:
+            return false;
+        }
         return true;
     }
     if (req_len != 2) {
@@ -267,12 +454,44 @@ inline bool answer(const unsigned char* req, size_t req_len,
         memcpy(out + 2, v, n);
         *out_len = 2 + n;
     };
+    const uint8_t zero[2] = {0x00, 0x00};
     switch (pid) {
     case 0x00:
     case 0x20:
     case 0x40:
         pid_bitmap(pid, out + 2);
         *out_len = 6;
+        break;
+    case 0x01:
+    case 0x41: {
+        /* 0x01: A7 the MIL, A6-A0 the stored DTCs' count; 0x41's A is
+         * always 0 */
+        const uint8_t stored = static_cast<uint8_t>(sizeof(kStoredDtcs) / 2);
+        const uint8_t a = (pid == 0x41 || cleared)
+                              ? 0x00
+                              : static_cast<uint8_t>(0x80 | stored);
+        const uint8_t status[4] = {a, kMonitorsB, kMonitorsC,
+                                   cleared ? kMonitorsC
+                                           : static_cast<uint8_t>(0x00)};
+        put(status, sizeof(status));
+        break;
+    }
+    case 0x21:
+        put(cleared ? zero : kPid21MilKm, 2);
+        break;
+    case 0x30: {
+        const uint8_t warm_ups = cleared ? 0 : kPid30WarmUps;
+        put(&warm_ups, 1);
+        break;
+    }
+    case 0x31:
+        put(cleared ? zero : kPid31ClearKm, 2);
+        break;
+    case 0x4D:
+        put(cleared ? zero : kPid4DMilMin, 2);
+        break;
+    case 0x4E:
+        put(cleared ? zero : kPid4EClearMin, 2);
         break;
     case 0x04:
         put(&kPid04EngineLoad, 1);

@@ -72,6 +72,11 @@ target_link_libraries(test_obd2 PRIVATE
     GTest::gtest_main
 )
 
+# The Service 01 table the obd2 set and the fakes' ECU are checked against
+target_compile_definitions(test_obd2 PRIVATE
+    ECUIO_OBD2_TABLE="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/obd2/service01.csv"
+)
+
 app_enable_warnings(test_obd2)
 gtest_discover_tests(test_obd2)
 
