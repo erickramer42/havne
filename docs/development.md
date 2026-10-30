@@ -1,7 +1,7 @@
 # Development guide
 
 Building, testing and CI for contributors. For the short build
-instructions, see the [README](../README.md#build).
+instructions, see the [README](../README.md#try-it).
 
 ## Toolchain
 

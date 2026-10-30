@@ -1,7 +1,7 @@
 // File/layer: tests/test_socketcan.cpp | SocketCAN listening's rules (ADR-0032)
 // Testing: UNIT, Qt-free, every platform: socketcan_wire.h (the interface
 //          name, ?filter=, a link from canned netlink messages and the
-//          judgement on it, a kernel frame to an ecuio_frame_t, the
+//          verdict on it, a kernel frame to an ecuio_frame_t, the
 //          clock), the URI's refusals through ecuio_session_create, and
 //          ecuio_can_interfaces' arguments. The transport on a bus is
 //          VcanTest's (Linux)

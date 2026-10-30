@@ -11,8 +11,8 @@ Android baseline (Known Issue #2): the app, and its first route to a
 car, `elm327://` over WiFi, which needs no Bluetooth code. Phase 6 is
 step 3, the phone's Bluetooth without an adapter. Phase 7 is step 4,
 the MX+ through the phone on the car: run it on its own day, with
-Phase 1's install and nothing else. Phase 8 is Known Issue #37's fix,
-background sessions (ADR-0029). The VX's WiFi on a
+Phase 1's install and nothing else. Phase 8 is background sessions
+(ADR-0029): the app keeps reading behind another app. The VX's WiFi on a
 computer is [elm327-bench-runsheet.md](elm327-bench-runsheet.md)'s
 pre-flight and BENCH prep #20.
 
@@ -236,20 +236,20 @@ about 10 s, then on, and come back to Havne.
       Bluetooth on to the first value (~6.5 s through the laptop). Over
       a minute is a finding: Disconnect and connect again
 
-**7d — the app in the background (optional, Known Issue #37).**
+**7d: the app in the background (optional; Phase 8 runs it in full).**
 
 **Action:** connected and idling, press Home for about 20 s, then
 return to Havne.
 
 - [ ] The link survives (no fault, or one that recovers by itself),
-      and Live's chart shows the gap Known Issue #37 describes. Record
-      what the link did
+      the session's notification shows while Havne is in the
+      background, and Live's chart has no gap. Record what the link did
 - [ ] Disconnect, unplug the MX+, key off
 
-## Phase 8 — background sessions (ADR-0029)
+## Phase 8: background sessions (ADR-0029)
 
-The build with Known Issue #37's fix: the app keeps running in the
-background, with a notification while an adapter session is up. 8a at
+The app keeps running in the background, with a notification while an
+adapter session is up. 8a at
 the desk, 8b on the car. The phone's log (`adb logcat`) and the
 recordings are the evidence, so a computer with `adb` afterwards.
 

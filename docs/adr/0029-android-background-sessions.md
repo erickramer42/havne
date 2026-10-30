@@ -97,7 +97,7 @@ the run saw one block 25 s and a second start beside it.
    failed. An abandoned connect that succeeds with no open waiting is
    closed. The rules live in a small Qt-free class, UNIT-tested in
    `test_bridge` beside `blepicker`, which `BtLink` drives. BLE keeps
-   its own path: `QLowEnergyController`'s connect can be cancelled.
+   its own path: `QLowEnergyController`'s connect can be canceled.
 4. **The recorder, the windows and the in-flight cap are unchanged.**
    With the GUI thread running, frames no longer wait for it, so the
    cap stops being the background's limit.
