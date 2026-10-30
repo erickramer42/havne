@@ -3,7 +3,8 @@
 //          bridge's lines stamped, bounded to its newest lines, alone
 //          with developer mode off; the Activity | Frames switch and the
 //          frame table only in developer mode, back to the activity log
-//          when it goes off; either order button, and Latest, at the newest
+//          when it goes off; the switch in the same place in either
+//          view; either order button, and Latest, at the newest
 //          row from a scrolled view (the top newest-first, the end
 //          oldest-first); the link lines in each link state
 //          (tests/qml/tst_linkhealth.qml). The frame table: render
@@ -99,8 +100,8 @@ Pane {
         PageHeader {
             title: qsTr("Log")
 
-            Item { Layout.fillWidth: true }
-
+            // Beside the title, so it stays put when the buttons on the
+            // right change with the view
             Rectangle {
                 visible: Theme.developerMode
                 implicitWidth: viewSwitch.implicitWidth + 4
@@ -127,6 +128,8 @@ Pane {
                     }
                 }
             }
+
+            Item { Layout.fillWidth: true }
 
             // The whole activity log to the clipboard: a phone can't
             // select it (docs/bench-sessions/2026-10-28-android-2.md)
