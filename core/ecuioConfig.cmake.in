@@ -1,0 +1,10 @@
+# find_package(ecuio): Havne's core, the static archive behind the C ABI
+# (ADR-0001), as the imported target ecuio::core. Generated from
+# core/ecuioConfig.cmake.in.
+@PACKAGE_INIT@
+
+include(CMakeFindDependencyMacro)
+find_dependency(Threads)
+
+include("${CMAKE_CURRENT_LIST_DIR}/ecuioTargets.cmake")
+check_required_components(ecuio)

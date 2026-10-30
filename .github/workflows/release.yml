@@ -1,12 +1,15 @@
 name: Release
 
-# A version tag publishes a release with two downloads: a Windows x64
+# A version tag publishes a release with these downloads: a Windows x64
 # zip (the app, the x86 and x64 J2534 surrogates, the Qt runtime and the
-# Visual C++ runtime, running without Qt or Visual Studio) and an Android
-# arm64-v8a APK signed with the release key (ADR-0030), and beside them
-# the Windows executables' PDBs in a zip of their own (ADR-0034). Each
-# comes with its SHA-256 and a signed build provenance (attested, and
-# attached as a .intoto.jsonl).
+# Visual C++ runtime, running without Qt or Visual Studio), an Android
+# arm64-v8a APK signed with the release key (ADR-0030), a Linux x86_64
+# AppImage, and core alone for Linux as a deb and a tarball (ADR-0035);
+# beside them the Windows executables' PDBs in a zip of their own
+# (ADR-0034) and havne-cli's Linux debug info as a -dbgsym deb and a
+# -debug tarball. Each comes with its SHA-256 and a signed build
+# provenance (attested, and attached as a .intoto.jsonl), and one SPDX
+# SBOM lists what each download contains, attested over them.
 # A tag with -rcN publishes a pre-release, for a dry run.
 # The tagged commit must already have passed CI (ci.yml's push run).
 #
@@ -15,8 +18,10 @@ name: Release
 # A manual run rebuilds an existing tag and replaces the release's files:
 #   gh workflow run release.yml -f tag=v0.3.1
 #
-# Jobs: gate (the tag and CI) -> windows and android, side by side ->
-# publish (checksums, provenance, the release). Only android reads the
+# Jobs: gate (the tag and CI) -> windows, android and linux, side by side
+# -> publish (the SBOM, checksums, provenance, the release). Each build
+# job writes a <download>.components.json beside its download for the
+# SBOM (packaging/sbom.py). Only android reads the
 # signing key, from the "release" environment's secrets.
 on:
   push:
@@ -148,6 +153,7 @@ jobs:
           name: windows
           path: |
             dist/havne-${{ env.VERSION }}-windows-x64.zip
+            dist/havne-${{ env.VERSION }}-windows-x64.zip.components.json
             dist/havne-${{ env.VERSION }}-windows-x64-symbols.zip
           if-no-files-found: error
           retention-days: 1
@@ -217,16 +223,83 @@ jobs:
           [ -n "$unsigned" ] || { echo "::error::the build made no unsigned Release APK"; exit 1; }
           bash packaging/android/sign-apk.sh "$unsigned" "$VERSION" dist
 
+      # For the SBOM: the APK's native libraries by origin, and the Java
+      # libraries Gradle resolved for the Release build (offline: the
+      # build above fetched them)
+      - name: The APK's component list
+        run: |
+          qt=$(sed -n 's/^set(PACKAGE_VERSION "\([0-9.]*\)")$/\1/p' "$QT_ROOT_DIR/lib/cmake/Qt6/Qt6ConfigVersionImpl.cmake")
+          [ -n "$qt" ] || { echo "::error::no Qt version in the kit's Qt6ConfigVersionImpl.cmake"; exit 1; }
+          (cd build/app/android-build && ./gradlew -q --offline dependencies --configuration releaseRuntimeClasspath) \
+            > "$RUNNER_TEMP/gradle-deps.txt"
+          python3 packaging/sbom.py apk --apk "dist/havne-$VERSION-android-arm64-v8a.apk" \
+            --qt "$qt" --ndk "$(basename "$APP_NDK_ROOT")" --gradle "$RUNNER_TEMP/gradle-deps.txt"
+
       - name: Upload the APK
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: android
-          path: dist/havne-${{ env.VERSION }}-android-arm64-v8a.apk
+          path: |
+            dist/havne-${{ env.VERSION }}-android-arm64-v8a.apk
+            dist/havne-${{ env.VERSION }}-android-arm64-v8a.apk.components.json
+          if-no-files-found: error
+          retention-days: 1
+
+  # On 24.04, the oldest distribution supported: a binary runs where glibc
+  # is at least its build machine's. The same builds as ci.yml's
+  # linux-appimage and linux-packages, which ran on the tagged commit.
+  linux:
+    needs: gate
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        shell: bash   # -eo pipefail
+    timeout-minutes: 30
+    env:
+      VERSION: ${{ needs.gate.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.TAG }}
+
+      - name: Install Qt 6.12.0 desktop (linux_gcc_64)
+        uses: jurplel/install-qt-action@b344308e4483fc892e0d27b3cd1b173ebdd95f06 # v4.5.0
+        with:
+          version: '6.12.0'
+          host: 'linux'
+          target: 'desktop'
+          arch: 'linux_gcc_64'
+
+      # The xcb platform plugin's libraries, which linuxdeploy bundles;
+      # the probes' header; the packages' tools
+      - name: Install the build's packages
+        run: |
+          sudo apt-get update && sudo apt-get install -y libgl1-mesa-dev libxkbcommon-dev libegl1 libopengl0 \
+            libxcb-cursor0 libxcb-icccm4 libxcb-image0 libxcb-keysyms1 libxcb-randr0 libxcb-render-util0 \
+            libxcb-shape0 libxcb-sync1 libxcb-xfixes0 libxcb-xinerama0 libxcb-xkb1 libxkbcommon-x11-0 \
+            systemtap-sdt-dev ninja-build dpkg-dev
+
+      - name: Build and pack the AppImage
+        run: |
+          cmake -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF -DCMAKE_PREFIX_PATH="$QT_ROOT_DIR"
+          cmake --build build
+          QMAKE="$QT_ROOT_DIR/bin/qmake" bash packaging/linux/make-appimage.sh "$VERSION" build dist
+
+      - name: Build the core packages
+        run: bash packaging/linux/make-core-packages.sh "$VERSION" build-packages dist
+
+      - name: Upload the Linux files
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: linux
+          path: |
+            dist/havne-${{ env.VERSION }}-linux-x86_64.AppImage*
+            dist/havne-core*
           if-no-files-found: error
           retention-days: 1
 
   publish:
-    needs: [gate, windows, android]
+    needs: [gate, windows, android, linux]
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -254,12 +327,38 @@ jobs:
 
       # LF line ends (sha256sum's own): sha256sum -c reads a CR as part
       # of the name
-      - name: Checksums
-        working-directory: dist
+      # Every file the release publishes but the provenance, by name
+      - name: Name the downloads
         run: |
-          sha256sum "havne-$VERSION-windows-x64.zip" "havne-$VERSION-windows-x64-symbols.zip" \
-            "havne-$VERSION-android-arm64-v8a.apk" > SHA256SUMS.txt
-          cat SHA256SUMS.txt
+          {
+            echo "ZIP=dist/havne-$VERSION-windows-x64.zip"
+            echo "SYMBOLS=dist/havne-$VERSION-windows-x64-symbols.zip"
+            echo "APK=dist/havne-$VERSION-android-arm64-v8a.apk"
+            echo "APPIMAGE=dist/havne-$VERSION-linux-x86_64.AppImage"
+            echo "DEB=dist/havne-core_${VERSION}_amd64.deb"
+            echo "DBGSYM=dist/havne-core-dbgsym_${VERSION}_amd64.deb"
+            echo "TARBALL=dist/havne-core-$VERSION-linux-x86_64.tar.gz"
+            echo "DEBUG_TARBALL=dist/havne-core-$VERSION-linux-x86_64-debug.tar.gz"
+            echo "SBOM=dist/havne-$VERSION.spdx.json"
+          } >> "$GITHUB_ENV"
+
+      # One document over every download but the debug files, which carry
+      # no component of their own; validated before anything is published.
+      # The commit's time dates it, so a rerun writes the same document.
+      - name: The SBOM
+        run: |
+          SOURCE_DATE_EPOCH=$(git log -1 --format=%ct) python3 packaging/sbom.py build \
+            --version "$VERSION" --tag "$TAG" --out "$SBOM" "$ZIP" "$APK" "$APPIMAGE" "$DEB" "$TARBALL"
+          python3 -m venv "$RUNNER_TEMP/spdx"
+          "$RUNNER_TEMP/spdx/bin/pip" install --require-hashes -r .github/spdx-requirements.txt
+          "$RUNNER_TEMP/spdx/bin/pyspdxtools" -i "$SBOM"
+
+      - name: Checksums
+        run: |
+          (cd dist && sha256sum "${ZIP#dist/}" "${SYMBOLS#dist/}" "${APK#dist/}" "${APPIMAGE#dist/}" \
+            "${DEB#dist/}" "${DBGSYM#dist/}" "${TARBALL#dist/}" "${DEBUG_TARBALL#dist/}" "${SBOM#dist/}" \
+            > SHA256SUMS.txt)
+          cat dist/SHA256SUMS.txt
 
       - name: Attest the zip's build provenance
         id: attest-zip
@@ -279,6 +378,31 @@ jobs:
         with:
           subject-path: dist/havne-${{ env.VERSION }}-android-arm64-v8a.apk
 
+      # One attestation over the five Linux files: its bundle names each
+      - name: Attest the Linux files' build provenance
+        id: attest-linux
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: |
+            ${{ env.APPIMAGE }}
+            ${{ env.DEB }}
+            ${{ env.DBGSYM }}
+            ${{ env.TARBALL }}
+            ${{ env.DEBUG_TARBALL }}
+
+      # Checked with gh attestation verify <download> -R erickramer42/havne
+      # --predicate-type https://spdx.dev/Document/v2.3
+      - name: Attest the SBOM
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          sbom-path: ${{ env.SBOM }}
+          subject-path: |
+            ${{ env.ZIP }}
+            ${{ env.APK }}
+            ${{ env.APPIMAGE }}
+            ${{ env.DEB }}
+            ${{ env.TARBALL }}
+
       # The same signed provenance (a Sigstore bundle) as a release file
       # beside each download. OpenSSF Scorecard's Signed-Releases check
       # reads release files, not GitHub's attestation store, and counts
@@ -289,18 +413,21 @@ jobs:
           ZIP_BUNDLE: ${{ steps.attest-zip.outputs.bundle-path }}
           SYMBOLS_BUNDLE: ${{ steps.attest-symbols.outputs.bundle-path }}
           APK_BUNDLE: ${{ steps.attest-apk.outputs.bundle-path }}
+          LINUX_BUNDLE: ${{ steps.attest-linux.outputs.bundle-path }}
         run: |
-          cp "$ZIP_BUNDLE" "dist/havne-$VERSION-windows-x64.zip.intoto.jsonl"
-          cp "$SYMBOLS_BUNDLE" "dist/havne-$VERSION-windows-x64-symbols.zip.intoto.jsonl"
-          cp "$APK_BUNDLE" "dist/havne-$VERSION-android-arm64-v8a.apk.intoto.jsonl"
+          cp "$ZIP_BUNDLE" "$ZIP.intoto.jsonl"
+          cp "$SYMBOLS_BUNDLE" "$SYMBOLS.intoto.jsonl"
+          cp "$APK_BUNDLE" "$APK.intoto.jsonl"
+          for f in "$APPIMAGE" "$DEB" "$DBGSYM" "$TARBALL" "$DEBUG_TARBALL"; do
+            cp "$LINUX_BUNDLE" "$f.intoto.jsonl"
+          done
 
       - name: Publish the release
         run: |
-          zip="dist/havne-$VERSION-windows-x64.zip"
-          symbols="dist/havne-$VERSION-windows-x64-symbols.zip"
-          apk="dist/havne-$VERSION-android-arm64-v8a.apk"
-          files=("$zip" "$zip.intoto.jsonl" "$symbols" "$symbols.intoto.jsonl"
-                 "$apk" "$apk.intoto.jsonl" dist/SHA256SUMS.txt)
+          files=("$SBOM" dist/SHA256SUMS.txt)
+          for f in "$ZIP" "$SYMBOLS" "$APK" "$APPIMAGE" "$DEB" "$DBGSYM" "$TARBALL" "$DEBUG_TARBALL"; do
+            files+=("$f" "$f.intoto.jsonl")
+          done
           if gh release view "$TAG" > /dev/null 2>&1; then
             gh release upload "$TAG" "${files[@]}" --clobber
           else

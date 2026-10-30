@@ -5,6 +5,8 @@
 #
 # Packs a built Release tree into an AppImage and checks it:
 #   dist/havne-<version>-linux-x86_64.AppImage
+#   dist/havne-<version>-linux-x86_64.AppImage.components.json, what it
+#     bundles, for the release's SBOM (packaging/sbom.py, ADR-0035 §5)
 # linuxdeploy and its Qt plugin (pinned releases, checked against their
 # SHA-256) gather the app, the Qt libraries, plugins and QML modules it
 # loads, and the desktop entry and icon. The checks:
@@ -90,6 +92,63 @@ if find "$appdir" -path '*plugins/qmltooling*' | grep -q .; then
     die "the AppImage carries qmltooling plugins (a Debug build's QML debugger)"
 fi
 echo "QML debugging: none"
+
+# ---- The component list for the release's SBOM (packaging/sbom.py),
+# from the AppDir: what came from the Qt kit is Qt (its ICU apart), and
+# every other library is the build machine's, named by its package
+command -v dpkg > /dev/null || die "the component list needs dpkg: build on Ubuntu or Debian"
+qt_libs=$("$QMAKE" -query QT_INSTALL_LIBS)
+owner() {   # the package that installed a library; dpkg knows it by the
+            # path the package used, /lib or /usr/lib, link or file
+    local path real
+    real=$(readlink -f "$1")
+    for path in "$1" "${1#/usr}" "$real" "${real#/usr}"; do
+        dpkg -S "$path" 2>/dev/null | sed -n "1s/: .*//p" | grep . && return 0
+    done
+    return 1
+}
+for lib in "$appdir"/usr/lib/*.so*; do
+    base=$(basename "$lib")
+    [ -e "$qt_libs/$base" ] && continue
+    pkg=$(owner "/usr/lib/x86_64-linux-gnu/$base") \
+        || die "$base isn't from the Qt kit or a system package"
+    printf '%s\t%s\t%s\n' "${pkg%%:*}" "$(dpkg-query -W -f='${Version}' "$pkg")" "$base"
+done > "$build/appimage-system-libs.tsv"
+QT_VERSION=$("$QMAKE" -query QT_VERSION) APPDIR=$appdir NAME=$name \
+SYSTEM_LIBS=$build/appimage-system-libs.tsv LINUXDEPLOY=1-alpha-20251107-1 \
+python3 - > "$out/$name.components.json" <<'EOF'
+import json, os, re
+from collections import defaultdict
+appdir, qt = os.environ["APPDIR"], os.environ["QT_VERSION"]
+lib = os.path.join(appdir, "usr/lib")
+system = defaultdict(lambda: {"files": []})
+for line in open(os.environ["SYSTEM_LIBS"]):
+    pkg, ver, base = line.rstrip("\n").split("\t")
+    system[(pkg, ver)]["files"].append(base)
+sys_files = {f for v in system.values() for f in v["files"]}
+kit = sorted(f for f in os.listdir(lib) if ".so" in f and f not in sys_files)
+icu = [f for f in kit if f.startswith("libicu")]
+qt_files = [f for f in kit if f not in icu]
+for sub in ("plugins", "qml"):
+    root = os.path.join(appdir, "usr", sub)
+    for d, _, files in os.walk(root):
+        qt_files += [os.path.relpath(os.path.join(d, f), os.path.join(appdir, "usr"))
+                     for f in files if f.endswith(".so")]
+components = [{"name": "Qt", "version": qt, "supplier": "Organization: The Qt Company",
+               "license": "LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only",
+               "purl": f"pkg:generic/qt@{qt}", "files": qt_files},
+              {"name": "AppImage type 2 runtime", "license": "MIT",
+               "comment": "embedded by linuxdeploy " + os.environ["LINUXDEPLOY"]}]
+if icu:
+    major = sorted({m.group(1) for f in icu if (m := re.search(r"\.so\.(\d+)", f))})
+    components.append({"name": "ICU", "version": ",".join(major), "files": icu,
+                       "comment": "from the Qt kit"})
+for (pkg, ver), v in sorted(system.items()):
+    components.append({"name": pkg, "version": ver, "files": v["files"],
+                       "purl": f"pkg:deb/ubuntu/{pkg}@{ver}?arch=amd64"})
+print(json.dumps({"download": os.environ["NAME"], "components": components}, indent=1, sort_keys=True))
+EOF
+echo "components: $(grep -c '"name"' "$out/$name.components.json") listed"
 
 # ---- Check: the AppImage starts and stays up
 smoke=${SMOKE_SECONDS:-10}

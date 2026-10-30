@@ -7,6 +7,7 @@ find_package(Threads REQUIRED)
 target_link_libraries(havne-cli PRIVATE ecuio-core Threads::Threads)
 app_enable_warnings(havne-cli)
 app_add_version_resource(havne-cli havne-cli "Havne command-line client")
+install(TARGETS havne-cli RUNTIME DESTINATION bin)   # the core package (ADR-0035)
 
 # A J2534 session needs the surrogates beside the exe. The app's build
 # copies havne-cli next to havne.exe, where both are; this copies the

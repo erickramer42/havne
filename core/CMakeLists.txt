@@ -24,11 +24,17 @@ add_library(ecuio-core STATIC
 
 target_include_directories(ecuio-core
     PUBLIC
-        ${CMAKE_CURRENT_SOURCE_DIR}/include
-        ${CMAKE_BINARY_DIR}/generated   # generated version.h
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+        $<BUILD_INTERFACE:${CMAKE_BINARY_DIR}/generated>   # generated version.h
+        $<INSTALL_INTERFACE:include>
 )
 
 app_enable_warnings(ecuio-core)
+
+# The workers are std::threads; a program linking the archive needs the
+# thread library too (glibc before 2.34 kept it apart from libc)
+find_package(Threads REQUIRED)
+target_link_libraries(ecuio-core PRIVATE Threads::Threads)
 
 # bcrypt: BCryptGenRandom names the surrogate's pipe; ws2_32: a WiFi
 # adapter's socket (elm327_tcp.cpp). A static library's private link
@@ -54,3 +60,41 @@ endif()
 # Critical invariant: core never links Qt (ADR-0001). The check lives at
 # the end of the root CMakeLists.txt, after every subdirectory has
 # configured; the CI core-and-tests job also builds core with no Qt at all.
+
+# The core package (ADR-0035 §2): the archive, the public headers, a
+# CMake package (find_package(ecuio) gives ecuio::core) and a pkg-config
+# file, laid out by `cmake --install` for packaging/linux/
+# make-core-packages.sh. Every path is relative to the prefix, so the
+# tarball works wherever it's unpacked. The internal headers stay out.
+if(NOT ANDROID AND NOT IOS)
+    include(CMakePackageConfigHelpers)
+    set_target_properties(ecuio-core PROPERTIES EXPORT_NAME core)
+    install(TARGETS ecuio-core EXPORT ecuio ARCHIVE DESTINATION lib)
+    install(FILES
+            include/ecuio/core.h
+            include/ecuio/j2534.h
+            include/ecuio/profile.h
+            include/ecuio/serial.h
+            include/ecuio/signals.h
+            include/ecuio/socketcan.h
+            include/ecuio/stream.h
+            ${CMAKE_BINARY_DIR}/generated/ecuio/version.h
+        DESTINATION include/ecuio)
+    install(EXPORT ecuio NAMESPACE ecuio:: FILE ecuioTargets.cmake
+        DESTINATION lib/cmake/ecuio)
+    configure_package_config_file(ecuioConfig.cmake.in
+        ${CMAKE_CURRENT_BINARY_DIR}/ecuioConfig.cmake
+        INSTALL_DESTINATION lib/cmake/ecuio)
+    # Before 1.0 a minor version may break the ABI (CHANGELOG.md)
+    write_basic_package_version_file(
+        ${CMAKE_CURRENT_BINARY_DIR}/ecuioConfigVersion.cmake
+        VERSION ${Havne_VERSION} COMPATIBILITY SameMinorVersion)
+    install(FILES
+            ${CMAKE_CURRENT_BINARY_DIR}/ecuioConfig.cmake
+            ${CMAKE_CURRENT_BINARY_DIR}/ecuioConfigVersion.cmake
+        DESTINATION lib/cmake/ecuio)
+    configure_file(ecuio.pc.in ${CMAKE_CURRENT_BINARY_DIR}/ecuio.pc @ONLY)
+    install(FILES ${CMAKE_CURRENT_BINARY_DIR}/ecuio.pc DESTINATION lib/pkgconfig)
+    install(FILES ${PROJECT_SOURCE_DIR}/LICENSE
+        DESTINATION share/doc/havne-core RENAME copyright)
+endif()

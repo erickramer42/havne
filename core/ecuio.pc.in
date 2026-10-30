@@ -1,0 +1,11 @@
+# Havne's core, the static archive behind the C ABI. Generated from
+# core/ecuio.pc.in; the prefix follows the file, so a moved tree works.
+prefix=${pcfiledir}/../..
+includedir=${prefix}/include
+libdir=${prefix}/lib
+
+Name: ecuio
+Description: Havne's ECU reading core (C ABI)
+Version: @Havne_VERSION@
+Cflags: -I${includedir}
+Libs: -L${libdir} -lecuio-core -lstdc++ -lm -pthread
