@@ -1100,4 +1100,14 @@ reprotest varies one build's folder, clock and locale, but both of its
 builds start from the same checkout. Two CI runners' AppImages differed
 in 46 bytes: `rcc` records each embedded file's modification time,
 which is when that runner checked the code out. The core packages
-embed no file times, and the two runners made the same bytes.
+embed no file times, and the two runners made the same bytes. Dated
+by the commit, `QT_RCC_SOURCE_DATE_OVERRIDE` for `rcc` and
+`SOURCE_DATE_EPOCH` for the squashfs, two runners' AppImages matched
+too (2026-10-30, `1b457a4`); `rcc`'s alone left the squashfs's times.
+
+**A suite's first run under the sanitizers is a review of its own.** The
+SocketCAN bus tests had passed on every run before `core-sanitizers`
+brought up `vcan0` (2026-10-30). There UBSan stopped the first case at
+the test's own `memcpy` from an empty vector, an RTR frame's: its
+`data()` may be null, which `memcpy` mustn't get even for no bytes.
+Core was clean.

@@ -148,6 +148,13 @@ once, and the result goes into `docs/testing.md`. A fix that makes them
 match is a later item. **Windows and Android stay
 out:** MSVC needs `/Brepro` and more, and Gradle its own settings.
 
+> **Amended 2026-10-29:** the AppImage is built and packed with the
+> commit's time, `QT_RCC_SOURCE_DATE_OVERRIDE` for the files `rcc`
+> embeds in the app and `SOURCE_DATE_EPOCH` for the squashfs, and two
+> builds of one commit then match (`docs/testing.md`). It stays
+> measured, not gated: CI builds it once per run, and its bundled
+> libraries follow Ubuntu's updates between runs.
+
 ### 5. An SBOM with each release
 
 The release publishes `havne-X.Y.Z.spdx.json`, one SPDX 2.3 document

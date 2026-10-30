@@ -279,6 +279,14 @@ jobs:
             libxcb-shape0 libxcb-sync1 libxcb-xfixes0 libxcb-xinerama0 libxcb-xkb1 libxkbcommon-x11-0 \
             systemtap-sdt-dev ninja-build dpkg-dev
 
+      # rcc's embedded files, the squashfs and the core packages take the
+      # commit's time, so a rebuild of the tag matches (ADR-0035 §4)
+      - name: Date the build by the commit
+        run: |
+          t=$(git log -1 --format=%ct)
+          echo "SOURCE_DATE_EPOCH=$t" >> "$GITHUB_ENV"
+          echo "QT_RCC_SOURCE_DATE_OVERRIDE=$t" >> "$GITHUB_ENV"
+
       - name: Build and pack the AppImage
         run: |
           cmake -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF -DCMAKE_PREFIX_PATH="$QT_ROOT_DIR"

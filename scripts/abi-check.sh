@@ -60,7 +60,8 @@ EOF
 # <source dir> <name>: the core-only tree, its .so and its ABI dump
 dump() {
     local src=$1 name=$2 tree=$OUT/$2
-    # The build option's name before the rename was QTTUNE_BUILD_CORE_ONLY
+    # A base before v0.3.3 knows the option only by its name before the
+    # rename, QTTUNE_BUILD_CORE_ONLY; a newer tree ignores it
     cmake -S "$src" -B "$tree" -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo \
         -DCMAKE_POSITION_INDEPENDENT_CODE=ON -DBUILD_TESTING=OFF \
         -DHAVNE_BUILD_CORE_ONLY=ON -DQTTUNE_BUILD_CORE_ONLY=ON \

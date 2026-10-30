@@ -261,7 +261,7 @@ an issue is resolved it is removed, and its number is not reused.
 | v0.3.1 | Request engine, PID-support probe, `uds-generic`, vehicle identification, imperial units; the first Windows download | ✅ Released |
 | v0.3.2 | Record-replay transport, decoding on the transport's thread, every driver in its own process | ✅ Released |
 | v0.3.3 | ELM327 adapters, preferences and vehicles, Android with Bluetooth and background sessions and a signed APK, the rename to Havne | ✅ Released |
-| v0.3.4 | A command-line client over the C ABI; Linux as a supported desktop; a SocketCAN transport that listens | In progress: the CLI, SocketCAN listening, a session clock that counts sleep, debug symbols and probes, and the Linux downloads with an SBOM built |
+| v0.3.4 | A command-line client over the C ABI; Linux as a supported desktop; a SocketCAN transport that listens | In progress: the CLI, SocketCAN listening, a session clock that counts sleep, debug symbols and probes, the Linux downloads with an SBOM, and the Linux guide built |
 | v0.3.5 | Full OBD-II diagnostics (Services 01–0A, clearing codes); SocketCAN requests through ISO-TP | Planned |
 | v0.4.0 | Python bindings; PCAP export and candump import; ECU, DID and service discovery (needs requests to every ECU and listening to the whole bus first) | Proposed |
 | v0.5.0 | The plugin framework (ADR-0013's profile API), with no manufacturer plugin yet; legacy buses (ISO 9141-2, KWP2000, J1850) | Proposed |
@@ -276,9 +276,12 @@ scheduled. What each holds, past its row:
   a client over the Qt-free core that starts a session, streams frames
   as JSON lines and exits cleanly, with golden runs that hold what the
   C ABI shows a caller. The Linux deb and tarball carry it (below).
-- **Linux as a supported desktop:** CI already builds and tests the app
-  on Ubuntu, and ELM327 runs over termios; the AppImage runs on the
-  distributions. Left: the docs.
+- **Linux as a supported desktop:** CI builds and tests the app on
+  Ubuntu, ELM327 runs over termios, and the AppImage runs on Ubuntu,
+  Arch and Kali; [docs/linux.md](docs/linux.md) is the guide: the
+  downloads, adapters and their permissions, SocketCAN, tracing, and
+  what has run where. Not yet run: the app's window on a Linux desktop
+  and an adapter on a Linux machine.
 - **Linux downloads, an SBOM, reproducible builds:** built
   ([ADR-0035](docs/adr/0035-linux-downloads-sbom-reproducible.md)):
   each release adds the AppImage and core alone as a deb and a tarball
@@ -287,8 +290,8 @@ scheduled. What each holds, past its row:
   SBOM lists every download's components, validated and attested. CI
   builds the core packages twice under `reprotest` and requires the same
   bytes, then installs and uses them. Left: the first release's run of
-  the `linux` and `publish` jobs, and the AppImage's reproducibility,
-  measured but not required.
+  the `linux` and `publish` jobs. The AppImage is built by the commit's
+  time, and two builds of one commit match, but CI doesn't require it.
 - **SocketCAN, listening:** built
   ([ADR-0032](docs/adr/0032-socketcan-listening.md)): raw frames from a
   native CAN interface, listen-only, and `havne-cli play`, a simulated

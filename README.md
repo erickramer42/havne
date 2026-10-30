@@ -159,8 +159,12 @@ unzip it and run `havne.exe`; Qt and the Visual C++ runtime are inside.
 It isn't code-signed, so SmartScreen may ask first (**More info**, then
 **Run anyway**). On Android 12 or later, download and open the release's
 APK on the phone; it's signed with Havne's release key, and each
-release installs over the last. In Settings, tick **Developer mode**
-under Display, then press the `mock://demo` preset and **Connect**.
+release installs over the last. On Linux (x86_64, glibc 2.39 or
+later), from v0.3.4, download the AppImage, make it executable and run it;
+[docs/linux.md](docs/linux.md) covers what it needs, the core packages
+for `havne-cli` and your own programs, serial permissions and
+SocketCAN. In Settings, tick **Developer mode** under Display, then
+press the `mock://demo` preset and **Connect**.
 
 To build from source you need CMake 3.21+, Qt 6.12 and a C++17
 compiler:
@@ -201,6 +205,7 @@ release changed.
 | [docs/adr/](docs/adr/README.md) | The architecture decision records |
 | [docs/testing.md](docs/testing.md) | Test tiers, what each test pins, and what isn't verified |
 | [docs/j2534.md](docs/j2534.md), [docs/elm327.md](docs/elm327.md) | How each adapter transport works |
+| [docs/linux.md](docs/linux.md) | Havne on Linux: the AppImage, the core packages, adapters and permissions, SocketCAN, tracing |
 | [docs/development.md](docs/development.md) | Builds, tests, CI, releases, troubleshooting |
 | [docs/bench-sessions/](docs/bench-sessions/bench-prep.md) | Real-hardware sessions, their run sheets, and what only hardware can confirm |
 | [docs/engineering-log.md](docs/engineering-log.md) | Milestones and lessons learned |

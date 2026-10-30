@@ -138,3 +138,8 @@ The rename is then one mechanical change (files moved first, then
 CMake, types, the QML module and the text), CI and the release workflow
 included; afterwards the old name appears only in the records, which
 keep it, as in the earlier appendices.
+
+*Amended 2026-10-29:* `QTTUNE_BUILD_CORE_ONLY` was honored through
+v0.3.3, as the table says, and v0.3.4 drops it: a tree configured with
+only the old name builds the whole app. A tree configured while the
+alias stood already holds `HAVNE_BUILD_CORE_ONLY` in its cache.

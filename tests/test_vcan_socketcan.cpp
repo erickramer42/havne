@@ -151,13 +151,19 @@ bool send(int fd, canid_t id, const std::vector<uint8_t>& data,
         f.can_id = id;
         f.len = static_cast<uint8_t>(data.size());
         f.flags = fd_flags;
-        std::memcpy(f.data, data.data(), data.size());
+        if (!data.empty()) {
+            std::memcpy(f.data, data.data(), data.size());
+        }
         return ::write(fd, &f, sizeof f) == static_cast<ssize_t>(sizeof f);
     }
     can_frame f{};
     f.can_id = id;
     f.len = static_cast<uint8_t>(data.size());
-    std::memcpy(f.data, data.data(), data.size());
+    // An RTR frame has no data, and an empty vector's data() may be null,
+    // which memcpy mustn't get even for no bytes (UBSan's nonnull check)
+    if (!data.empty()) {
+        std::memcpy(f.data, data.data(), data.size());
+    }
     return ::write(fd, &f, sizeof f) == static_cast<ssize_t>(sizeof f);
 }
 

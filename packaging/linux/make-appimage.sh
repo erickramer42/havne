@@ -16,6 +16,11 @@
 #     would stop at once.
 # The AppImage runs on distributions whose glibc is at least the build
 # machine's: build it on the oldest one to support (CI: Ubuntu 24.04).
+# Two builds of one commit make the same bytes when both carry its time
+# (ADR-0035 §4): rcc records each embedded file's modification time,
+# which a checkout sets, unless QT_RCC_SOURCE_DATE_OVERRIDE is set when
+# the app is built; the squashfs records times unless SOURCE_DATE_EPOCH
+# is set when it's packed.
 #
 # Usage: packaging/linux/make-appimage.sh <version> [build dir] [out dir]
 #   build dir  default build, configured with CMAKE_BUILD_TYPE=Release
@@ -24,6 +29,7 @@
 #   QMAKE            the Qt kit's qmake (default: on PATH, or $QT_ROOT_DIR/bin)
 #   LINUXDEPLOY_DIR  where the tools are kept (default ~/.cache/havne-linuxdeploy)
 #   SMOKE_SECONDS    0 skips the smoke
+#   SOURCE_DATE_EPOCH  the squashfs's times (default: git log -1 --format=%ct)
 # Run from the repository root.
 
 set -euo pipefail
@@ -68,6 +74,11 @@ export PATH="$tools:$PATH"
 # The tools are AppImages themselves: run them extracted, so the build
 # machine needs no FUSE
 export APPIMAGE_EXTRACT_AND_RUN=1
+if [ -z "${SOURCE_DATE_EPOCH:-}" ]; then
+    SOURCE_DATE_EPOCH=$(git log -1 --format=%ct) || die "no SOURCE_DATE_EPOCH and no git history"
+fi
+export SOURCE_DATE_EPOCH
+[ -n "${QT_RCC_SOURCE_DATE_OVERRIDE:-}" ]     || echo "make-appimage: QT_RCC_SOURCE_DATE_OVERRIDE wasn't set: the app embeds its files' checkout times" >&2
 
 # The AppDir: the app, its desktop entry and icon, then Qt
 appdir=$build/AppDir

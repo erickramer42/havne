@@ -71,10 +71,35 @@ jobs:
             -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=address,undefined"
           cmake --build build
 
+      # The simulated CAN bus, as linux-build brings it up, so the
+      # SocketCAN worker and the vcan suites run under the sanitizers too
+      - name: Bring up vcan0
+        run: |
+          sudo modprobe vcan
+          sudo modprobe can-isotp
+          sudo ip link add dev vcan0 type vcan
+          sudo ip link set vcan0 mtu 72
+          sudo ip link set up vcan0
+
+      # ECUIO_VCAN_REQUIRED: VcanTest and SocketCanBusTest fail rather than
+      # skip without vcan0
       - name: Run tests
         env:
           UBSAN_OPTIONS: print_stacktrace=1
+          ECUIO_VCAN_REQUIRED: '1'
         run: ctest --test-dir build --output-on-failure --no-tests=error
+
+      # The interface down and up again needs CAP_NET_ADMIN, as in
+      # linux-build
+      - name: SocketCAN as root (the interface down and up)
+        env:
+          UBSAN_OPTIONS: print_stacktrace=1
+          ECUIO_VCAN_REQUIRED: '1'
+          ECUIO_VCAN_ROOT_REQUIRED: '1'
+        run: >-
+          sudo --preserve-env=UBSAN_OPTIONS,ECUIO_VCAN_REQUIRED,ECUIO_VCAN_ROOT_REQUIRED
+          build/tests/test_vcan
+          --gtest_filter='SocketCanBusTest.TheInterfaceGoingDownIsAHardFailureThatRecovers'
 
   # libFuzzer harnesses (fuzz/) under ASan and UBSan; fuzz/CMakeLists.txt
   # instruments core and the harnesses. Scorecard's Fuzzing check counts
@@ -417,6 +442,14 @@ jobs:
           target: 'desktop'
           arch: 'linux_gcc_64'
 
+      # rcc's embedded files and the squashfs take the commit's time, not
+      # the checkout's, so two builds of one commit match (ADR-0035 §4)
+      - name: Date the build by the commit
+        run: |
+          t=$(git log -1 --format=%ct)
+          echo "SOURCE_DATE_EPOCH=$t" >> "$GITHUB_ENV"
+          echo "QT_RCC_SOURCE_DATE_OVERRIDE=$t" >> "$GITHUB_ENV"
+
       # The xcb platform plugin's libraries, which linuxdeploy bundles
       - name: Build the Release app
         run: |
@@ -431,6 +464,7 @@ jobs:
         run: |
           VERSION=$(sed -n '/^project(Havne/,/)/s/^ *VERSION \([0-9.]*\).*/\1/p' CMakeLists.txt)
           QMAKE="$QT_ROOT_DIR/bin/qmake" bash packaging/linux/make-appimage.sh "$VERSION-ci" build dist
+          sha256sum dist/*.AppImage
 
       - name: Upload the AppImage
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
