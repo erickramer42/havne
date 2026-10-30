@@ -1,6 +1,7 @@
 // File/layer: cli/main.cpp | havne-cli, a command-line client over the C ABI (ADR-0031)
 // Testing: HARNESS: golden runs of the program (CliGoldenTest, against
-//          tests/golden/cli/: the replay fixture, mock://, the refusals),
+//          tests/golden/cli/: the replay fixture, mock:// with its
+//          diagnostics line, the refusals),
 //          its usage errors (CliUsageTest) and, on POSIX, SIGINT and
 //          SIGTERM (CliSignalTest); the formatting, the ring and the
 //          sleep rule UNIT (tests/test_cli.cpp); a real sleep BENCH
@@ -8,6 +9,7 @@
 //
 // Public headers only: what any program linking core can do.
 
+#include "diagnostics_line.h"
 #include "jsonl.h"
 #include "line_ring.h"
 #include "sleep_watch.h"
@@ -321,6 +323,30 @@ void write_session(Output& out, const ecuio_session_info_t& info)
     write_line(out, l);
 }
 
+// One ECU's diagnostics once a read has completed (diagnostics_line.h)
+void write_diagnostics(Output& out, const ecuio_channel_diagnostics_t& d)
+{
+    char buf[8192];
+    cli::Line l(buf, sizeof buf);
+    cli::diagnostics_line(l, d);
+    write_line(out, l);
+}
+
+// A line for each ECU whose diagnostics read has completed since the
+// last call: generations holds each channel's last written
+void poll_diagnostics(Output& out, ecuio_session_t* session, uint32_t channels,
+                      uint32_t* generations)
+{
+    for (uint32_t c = 0; c < channels; ++c) {
+        ecuio_channel_diagnostics_t d;
+        if (ecuio_session_get_channel_diagnostics(session, c, &d) == ECUIO_OK &&
+            (d.flags & ECUIO_DIAG_COMPLETE) && d.generation != generations[c]) {
+            generations[c] = d.generation;
+            write_diagnostics(out, d);
+        }
+    }
+}
+
 void write_signals(Output& out, const ecuio_signal_set_t* set)
 {
     const uint32_t count = set ? set->count : 0;
@@ -516,6 +542,14 @@ int run_stream(const StreamArgs& args)
     const bool replay_ends =
         replay && !(info.flags & ECUIO_SESSION_INFO_REPLAY_LOOP);
     write_session(out, info);
+    // A read that completed at create (the mock's) comes first; the rest
+    // as they complete
+    const uint32_t channels =
+        info.channel_count < ECUIO_SESSION_INFO_MAX_CHANNELS
+            ? info.channel_count
+            : ECUIO_SESSION_INFO_MAX_CHANNELS;
+    uint32_t diag_generations[ECUIO_SESSION_INFO_MAX_CHANNELS] = {};
+    poll_diagnostics(out, session, channels, diag_generations);
     if (args.values) {
         write_signals(out, ecuio_session_signal_set(session));
     }
@@ -570,6 +604,8 @@ int run_stream(const StreamArgs& args)
             l.ch('}');
             write_line(out, l);
         }
+
+        poll_diagnostics(out, session, channels, diag_generations);
 
         int32_t now_error = ECUIO_OK;
         uint32_t now_episodes = 0;

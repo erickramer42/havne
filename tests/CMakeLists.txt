@@ -152,7 +152,8 @@ if(Python3_Interpreter_FOUND)
 endif()
 
 # --- havne-cli (ADR-0031): Qt-free, every desktop platform ---
-# test_cli.cpp: its line formatting and output ring (cli/, header-only).
+# test_cli.cpp: its line formatting and output ring (cli/, header-only;
+# the diagnostics line names codes and monitors through core).
 # The golden runs: the program as a child process, its whole output
 # against tests/golden/cli/ ("core", the version, ignored; mock's t_us
 # too, which is the host's clock). Rewrite one after a deliberate change
@@ -161,7 +162,7 @@ if(TARGET havne-cli)
     add_executable(test_cli test_cli.cpp)
     target_include_directories(test_cli PRIVATE ${CMAKE_SOURCE_DIR}/cli)
     find_package(Threads REQUIRED)
-    target_link_libraries(test_cli PRIVATE GTest::gtest_main Threads::Threads)
+    target_link_libraries(test_cli PRIVATE ecuio-core GTest::gtest_main Threads::Threads)
     app_enable_warnings(test_cli)
     gtest_discover_tests(test_cli PROPERTIES TIMEOUT 30)
 
