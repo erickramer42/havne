@@ -636,8 +636,10 @@ cmake -B build-tidy -G Ninja -DHAVNE_BUILD_CORE_ONLY=ON -DBUILD_TESTING=OFF -DCM
 scripts/tidy.sh                  # one line; each file's output in Testing/tidy/
 ```
 
-Nothing needs building. Another clang-tidy version finds other things
-(`$CLANG_TIDY` names the binary). A warning that is wrong at one line
+Nothing needs building. Another clang-tidy version finds other things,
+so the script refuses one that isn't the pin (an LLVM on PATH, say)
+unless `CLANG_TIDY_ANY=1`, for trying a new pin; `$CLANG_TIDY` names the
+binary, such as a venv's. A warning that is wrong at one line
 gets a `NOLINTNEXTLINE(<check>)` with the reason beside it.
 
 ## Portability traps
