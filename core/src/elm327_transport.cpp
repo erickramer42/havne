@@ -7,7 +7,8 @@
 //          info and the readings' "not present", the requests (the count
 //          digit, and its loss for a reply that spans frames, header
 //          switches, the rotation, the probe, the DID scan,
-//          identification), multi-frame replies, link health and its
+//          identification, diagnostics and Read again), multi-frame
+//          replies, link health and its
 //          recovery (NO DATA, CAN ERROR, a dropped link, an adapter
 //          reset), the pending reply, passive listening (Listening*:
 //          AT MA, the channels' messages, the quiet run, the liveness
@@ -48,8 +49,8 @@
 
 /* The query keys attach reads, for create's check (internal.h). */
 extern "C" const char* const ecuio_elm327_query_keys[] = {
-    "baud",  "serial",   "filter",  "txid", "poll",
-    "probe", "identify", "profile", "did",  nullptr};
+    "baud",     "serial",   "filter",  "txid", "poll", "probe",
+    "identify", "diagnose", "profile", "did",  nullptr};
 
 namespace {
 
@@ -1056,6 +1057,8 @@ void elm327_worker(transport* t)
     link_health h(t->session->last_error, t->session->error_count);
     uint32_t published[ECUIO_MAX_CHANNELS] = {};
     uint32_t published_identity[ECUIO_MAX_CHANNELS] = {};
+    uint32_t published_diagnostics[ECUIO_MAX_CHANNELS] = {};
+    uint32_t diag_seen = 0;
     uint32_t next_chan = 0;
     const bool passive = e.count == 0 && e.scan_count == 0;
     uint32_t relisten_ms = 0;
@@ -1161,10 +1164,13 @@ void elm327_worker(transport* t)
             /* the scan's and identification's unanswered requests */
             ecuio_engine_rescan(&e);
         }
+        ecuio_take_diag_request(t->session, &e, diag_seen);
         for (uint32_t c = 0; c < t->chan_count; ++c) {
             ecuio_publish_support(t->session, e, c, t->rx_ids[c], published[c]);
             ecuio_publish_identity(t->session, e, c, t->rx_ids[c],
                                    published_identity[c]);
+            ecuio_publish_diagnostics(t->session, e, c, t->rx_ids[c],
+                                      published_diagnostics[c]);
         }
 
         if (h.backoff_ms > 0) {
@@ -1215,7 +1221,7 @@ const ecuio_transport_ops_t kElm327Ops = {elm327_start, elm327_detach};
  *           two, which the ELM327 has protocols for
  *   serial  the serial port's rate for a wired adapter, default 38400;
  *           a Bluetooth port ignores it, a TCP address refuses it
- *   filter, txid, poll, probe, identify: the request keys
+ *   filter, txid, poll, probe, identify, diagnose: the request keys
  *           (ecuio_request_param), as for j2534://
  *   profile, did: core's, read by create */
 ecuio_status_t parse_query(const ecuio_uri_query* query, transport* t,

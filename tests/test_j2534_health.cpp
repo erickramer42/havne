@@ -22,7 +22,8 @@
 //          marked. Frames lost (ERR_BUFFER_OVERFLOW with or without a
 //          message, v05.00's BUFFER_OVERFLOW bit) flag the next frame
 //          dispatched with the link unchanged; an ERROR_INDICATION is
-//          no frame.
+//          no frame. Diagnostics (ADR-0037) fill the fake ECU's report
+//          through either surrogate.
 //          The backend setup and the fake's control page are in
 //          j2534_backend_fixture.h.
 
@@ -38,6 +39,7 @@
 #include <cstring>
 #include <thread>
 
+#include "fake_diagnostics.h"
 #include "j2534_backend_fixture.h"
 
 namespace {
@@ -1078,6 +1080,27 @@ TEST_F(J2534HealthTest, LongRepliesArriveWhole)
     EXPECT_EQ(replies.length[2], ECUIO_FRAME_DATA_MAX);
     EXPECT_EQ(replies.flags[2], ECUIO_FRAME_FLAG_TRUNCATED);
     EXPECT_TRUE(replies.filled[2]);
+}
+
+/* Diagnostics (ADR-0037) through the surrogate of either architecture:
+ * the one-byte requests framed, the stored list's First Frame
+ * reassembled, and the whole report filled from the fake ECU */
+TEST_F(J2534HealthTest, DiagnosticsFillTheReportThroughTheSurrogate)
+{
+    ASSERT_NO_FATAL_FAILURE(start_session("?profile=obd2&probe=0&identify=0"));
+    ecuio_channel_diagnostics_t d{};
+    const auto deadline =
+        std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    while ((ecuio_session_get_channel_diagnostics(session, 0, &d) != ECUIO_OK ||
+            (d.flags & ECUIO_DIAG_COMPLETE) == 0) &&
+           std::chrono::steady_clock::now() < deadline) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    ASSERT_NE(d.flags & ECUIO_DIAG_COMPLETE, 0u)
+        << "diagnostics didn't complete";
+    EXPECT_EQ(d.rx_id, 0x7E8u);
+    EXPECT_EQ(d.generation, fake_diagnostics::kItems);
+    fake_diagnostics::expect_report(d);
 }
 
 /* ---- Frames lost (ERR_BUFFER_OVERFLOW, the BUFFER_OVERFLOW bit) ------ */

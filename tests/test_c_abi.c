@@ -96,6 +96,7 @@ int main(void)
     ecuio_session_info_t info;
     ecuio_channel_support_t support;
     ecuio_channel_identity_t identity;
+    ecuio_channel_diagnostics_t diagnostics;
     ecuio_display_value_t shown;
     ecuio_sur_request_t sur_request;
     ecuio_transport_ops_t ops;
@@ -160,6 +161,12 @@ int main(void)
         strcmp(ecuio_monitor_name(8, 0), "Catalyst") != 0 ||
         strcmp(ecuio_monitor_short_name(8, ECUIO_DIAG_COMPRESSION),
                "NMHC catalyst") != 0) {
+        return 1;
+    }
+    if (ecuio_session_get_channel_diagnostics(NULL, 0, &diagnostics) !=
+            ECUIO_ERR_NULL_ARGUMENT ||
+        ecuio_session_read_diagnostics(NULL) != ECUIO_ERR_NULL_ARGUMENT ||
+        (ECUIO_DIAG_ASKED & ECUIO_DIAG_FREEZE_FRAME) != 0) {
         return 1;
     }
     memset(&sur_request, 0, sizeof sur_request);

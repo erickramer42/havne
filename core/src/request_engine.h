@@ -842,9 +842,11 @@ inline void ecuio_engine_diag_settle(ecuio_request_engine* e, uint32_t c,
     ++d.generation;
 }
 
-/* Lists the first items on a channel holding none */
+/* Lists the first items on a channel holding none, and marks its
+ * report asked */
 inline void ecuio_engine_diag_list(ecuio_engine_channel& ch)
 {
+    ch.diag.flags |= ECUIO_DIAG_ASKED;
     for (const auto& q : ECUIO_DIAG_FIRST) {
         ecuio_engine_diag_push(ch, q[0], q[1], q[2], q[3]);
     }

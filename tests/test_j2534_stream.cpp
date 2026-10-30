@@ -24,7 +24,10 @@
 //          worker allocates nothing per frame (tests/new_counter.h).
 //          The
 //          query's split in create: unknown keys named with the ones
-//          j2534:// takes, and ?probe='s malformed forms. The backoff's
+//          j2534:// takes, and ?probe='s malformed forms.
+//          Diagnostics (ADR-0037): the fake ECU's whole report, the
+//          list's turns with the rotation and its one-byte requests,
+//          ?diagnose=0, Read again and the report after close. The backoff's
 //          capped step, the vendor clock's cases and the J2534 status
 //          names are here; the
 //          request engine's pacing and the link-health machine run
@@ -51,6 +54,7 @@
 #include <thread>
 
 #include "fake_control.h"  /* tests: the fake's control page */
+#include "fake_diagnostics.h" /* tests: the fake ECU's report */
 #include "new_counter.h"   /* tests: operator new counted per thread */
 #endif
 
@@ -362,6 +366,9 @@ TEST_F(J2534QueryParamTest, MalformedQueriesRejectedAtSessionCreate)
         "?identify=2",
         "?identify=yes",
         "?identify=0x1",
+        "?diagnose=",
+        "?diagnose=2",
+        "?diagnose=no",
         /* uds-generic (ADR-0020): its DIDs come from ?did=, which no
          * other profile takes */
         "?did=1E1C",
@@ -410,19 +417,26 @@ TEST_F(J2534QueryParamTest, RefusedQueriesNameTheirCause)
     snprintf(uri, sizeof(uri), "j2534://%s?baud=abc&band=250000",
              FAKE_J2534_DLL_PATH);
     EXPECT_EQ(ecuio_session_create(uri, &session), ECUIO_ERR_BAD_URI);
-    EXPECT_STREQ(ecuio_last_error_detail(),
-                 "j2534:// takes no query key 'band', only baud, flags, "
-                 "filter, txid, poll, probe, identify, profile and did");
+    EXPECT_STREQ(
+        ecuio_last_error_detail(),
+        "j2534:// takes no query key 'band', only baud, flags, "
+        "filter, txid, poll, probe, identify, diagnose, profile and did");
     snprintf(uri, sizeof(uri), "j2534://%s?probe=yes", FAKE_J2534_DLL_PATH);
     EXPECT_EQ(ecuio_session_create(uri, &session), ECUIO_ERR_BAD_URI);
     EXPECT_STREQ(ecuio_last_error_detail(), "?probe= needs 0 or 1, not 'yes'");
     snprintf(uri, sizeof(uri), "j2534://%s?identify=yes", FAKE_J2534_DLL_PATH);
     EXPECT_EQ(ecuio_session_create(uri, &session), ECUIO_ERR_BAD_URI);
     EXPECT_STREQ(ecuio_last_error_detail(), "?identify= needs 0 or 1, not 'yes'");
+    snprintf(uri, sizeof(uri), "j2534://%s?diagnose=yes", FAKE_J2534_DLL_PATH);
+    EXPECT_EQ(ecuio_session_create(uri, &session), ECUIO_ERR_BAD_URI);
+    EXPECT_STREQ(ecuio_last_error_detail(),
+                 "?diagnose= needs 0 or 1, not 'yes'");
 
     /* Both values are taken, with any profile. */
-    for (const char* q : {"?profile=raw&probe=0", "?probe=1", "?probe=0&probe=1",
-                          "?profile=raw&identify=0", "?identify=1&probe=0"}) {
+    for (const char* q :
+         {"?profile=raw&probe=0", "?probe=1", "?probe=0&probe=1",
+          "?profile=raw&identify=0", "?identify=1&probe=0",
+          "?profile=raw&diagnose=0", "?diagnose=1"}) {
         snprintf(uri, sizeof(uri), "j2534://%s%s", FAKE_J2534_DLL_PATH, q);
         EXPECT_EQ(start_session_with_uri(uri), ECUIO_OK) << "query: " << q;
     }
@@ -657,6 +671,26 @@ protected:
                               std::chrono::milliseconds(budget_ms);
         for (;;) {
             if (ecuio_session_get_channel_identity(s, 0, &out) == ECUIO_OK &&
+                done(out)) {
+                return true;
+            }
+            if (std::chrono::steady_clock::now() >= deadline) {
+                return false;
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
+    }
+
+    /* The same for channel 0's diagnostics report (ADR-0037). */
+    template <typename Done>
+    static bool wait_for_diagnostics(ecuio_session_t* s,
+                                     ecuio_channel_diagnostics_t& out,
+                                     Done done, int budget_ms)
+    {
+        const auto deadline = std::chrono::steady_clock::now() +
+                              std::chrono::milliseconds(budget_ms);
+        for (;;) {
+            if (ecuio_session_get_channel_diagnostics(s, 0, &out) == ECUIO_OK &&
                 done(out)) {
                 return true;
             }
@@ -1153,9 +1187,10 @@ TEST(J2534StreamTest, UnknownProfileRejectedAtCreate)
 TEST_F(J2534AdoptionTest, Obd2SchedulerRotatesPidsInSetOrder)
 {
     char uri[700];
-    snprintf(uri, sizeof(uri),
-             "j2534://%s?profile=obd2&filter=0x7E8&probe=0&identify=0",
-             FAKE_J2534_DLL_PATH);
+    snprintf(
+        uri, sizeof(uri),
+        "j2534://%s?profile=obd2&filter=0x7E8&probe=0&identify=0&diagnose=0",
+        FAKE_J2534_DLL_PATH);
 
     ecuio_session_t* session = nullptr;
     ASSERT_EQ(ecuio_session_create(uri, &session), ECUIO_OK);
@@ -1321,8 +1356,10 @@ TEST_F(J2534AdoptionTest, RequestsGoToTheirDefsChannel)
     ASSERT_EQ(ecuio_profile_register("test-mode01-routing", &set, nullptr), ECUIO_OK);
 
     char uri[700];
-    snprintf(uri, sizeof(uri), "j2534://%s?profile=test-mode01-routing&probe=0&identify=0",
-             FAKE_J2534_DLL_PATH);
+    snprintf(
+        uri, sizeof(uri),
+        "j2534://%s?profile=test-mode01-routing&probe=0&identify=0&diagnose=0",
+        FAKE_J2534_DLL_PATH);
     ecuio_session_t* session = nullptr;
     ASSERT_EQ(ecuio_session_create(uri, &session), ECUIO_OK);
     ASSERT_EQ(ecuio_session_start(session), ECUIO_OK);
@@ -1548,7 +1585,8 @@ TEST_F(J2534AdoptionTest, PollOverridesSchedulerRotation)
 TEST_F(J2534AdoptionTest, ProbeWalksTheChainBeforeTheRotation)
 {
     char uri[512];
-    snprintf(uri, sizeof(uri), "j2534://%s?identify=0", FAKE_J2534_DLL_PATH);
+    snprintf(uri, sizeof(uri), "j2534://%s?identify=0&diagnose=0",
+             FAKE_J2534_DLL_PATH);
     ecuio_session_t* session = nullptr;
     ASSERT_EQ(ecuio_session_create(uri, &session), ECUIO_OK);
     ASSERT_EQ(ecuio_session_start(session), ECUIO_OK);
@@ -1591,7 +1629,8 @@ TEST_F(J2534AdoptionTest, ProbeDropsWhatTheBitmapsMarkUnsupported)
     KnobGuard silent("ECUIO_FAKE_UNSUPPORTED_NRC", "0");
 
     char uri[700];
-    snprintf(uri, sizeof(uri), "j2534://%s?profile=test-probe-bitmaps&identify=0",
+    snprintf(uri, sizeof(uri),
+             "j2534://%s?profile=test-probe-bitmaps&identify=0&diagnose=0",
              FAKE_J2534_DLL_PATH);
     ecuio_session_t* session = nullptr;
     ASSERT_EQ(ecuio_session_create(uri, &session), ECUIO_OK);
@@ -1626,7 +1665,8 @@ TEST_F(J2534AdoptionTest, ProbeOffSendsTheSetAsWritten)
     ASSERT_NO_FATAL_FAILURE(register_pid_profile("test-probe-off", kPids, 4,
                                                  defs, &set));
     char uri[700];
-    snprintf(uri, sizeof(uri), "j2534://%s?profile=test-probe-off&probe=0&identify=0",
+    snprintf(uri, sizeof(uri),
+             "j2534://%s?profile=test-probe-off&probe=0&identify=0&diagnose=0",
              FAKE_J2534_DLL_PATH);
     ecuio_session_t* session = nullptr;
     ASSERT_EQ(ecuio_session_create(uri, &session), ECUIO_OK);
@@ -1672,7 +1712,8 @@ TEST_F(J2534AdoptionTest, NegativeReplyDropsTheDidTheEcuRefuses)
     ASSERT_EQ(ecuio_profile_register("test-probe-did", &set, nullptr), ECUIO_OK);
 
     char uri[700];
-    snprintf(uri, sizeof(uri), "j2534://%s?profile=test-probe-did&identify=0",
+    snprintf(uri, sizeof(uri),
+             "j2534://%s?profile=test-probe-did&identify=0&diagnose=0",
              FAKE_J2534_DLL_PATH);
     ecuio_session_t* session = nullptr;
     ASSERT_EQ(ecuio_session_create(uri, &session), ECUIO_OK);
@@ -1781,8 +1822,10 @@ TEST_F(J2534AdoptionTest, UdsGenericEcuPrefixAsksThatEcu)
 TEST_F(J2534AdoptionTest, UdsGenericScanFindsWhatTheEcuAnswers)
 {
     char uri[700];
-    snprintf(uri, sizeof(uri), "j2534://%s?profile=uds-generic&did=1E18-1E20&identify=0",
-             FAKE_J2534_DLL_PATH);
+    snprintf(
+        uri, sizeof(uri),
+        "j2534://%s?profile=uds-generic&did=1E18-1E20&identify=0&diagnose=0",
+        FAKE_J2534_DLL_PATH);
     ecuio_session_t* session = nullptr;
     ASSERT_EQ(ecuio_session_create(uri, &session), ECUIO_OK);
     EXPECT_EQ(ecuio_session_signal_set(session)->count, 9u);
@@ -1901,12 +1944,14 @@ TEST_F(J2534AdoptionTest, IdentificationAsksTheListOnceAndReportsIt)
     ecuio_session_destroy(session);
 }
 
-/* ?identify=0 asks nothing of the sort: the first writes are all the
- * rotation's, and the report has no items. ?poll= has none either. */
+/* ?identify=0&diagnose=0 asks nothing of the sort: the first writes are all the
+ * rotation's (diagnostics off too), and the report has no items. ?poll=
+ * has none either. */
 TEST_F(J2534AdoptionTest, IdentifyOffSendsNoIdentificationRequest)
 {
     char uri[700];
-    snprintf(uri, sizeof(uri), "j2534://%s?profile=obd2&probe=0&identify=0",
+    snprintf(uri, sizeof(uri),
+             "j2534://%s?profile=obd2&probe=0&identify=0&diagnose=0",
              FAKE_J2534_DLL_PATH);
     ecuio_session_t* session = nullptr;
     ASSERT_EQ(ecuio_session_create(uri, &session), ECUIO_OK);
@@ -1933,6 +1978,143 @@ TEST_F(J2534AdoptionTest, IdentifyOffSendsNoIdentificationRequest)
     ASSERT_EQ(ecuio_session_create(uri, &session), ECUIO_OK);
     ASSERT_EQ(ecuio_session_get_channel_identity(session, 0, &id), ECUIO_OK);
     EXPECT_EQ(id.items, 0u) << "?poll= asks its one PID alone";
+    ecuio_session_destroy(session);
+}
+
+/* Diagnostics (ADR-0037) take their turns with the rotation, the code
+ * lists as one-byte requests, and fill the report with the fake ECU's
+ * answers: its codes (the stored list a First Frame on ISO-TP), every
+ * monitor and the freeze frame's own values. Identification off, so
+ * the list starts at the second write. */
+TEST_F(J2534AdoptionTest, DiagnosticsReadTheFakeEcusReport)
+{
+    char uri[700];
+    snprintf(uri, sizeof(uri), "j2534://%s?profile=obd2&probe=0&identify=0",
+             FAKE_J2534_DLL_PATH);
+    ecuio_session_t* session = nullptr;
+    ASSERT_EQ(ecuio_session_create(uri, &session), ECUIO_OK);
+    ecuio_channel_diagnostics_t d{};
+    ASSERT_EQ(ecuio_session_get_channel_diagnostics(session, 0, &d), ECUIO_OK);
+    EXPECT_EQ(d.rx_id, 0x7E8u);
+    EXPECT_EQ(d.flags, ECUIO_DIAG_ASKED) << "asked, nothing answered yet";
+    EXPECT_EQ(d.generation, 0u);
+    EXPECT_EQ(ecuio_session_get_channel_diagnostics(session, 1, &d),
+              ECUIO_ERR_INVALID_ARGUMENT);
+    EXPECT_EQ(ecuio_session_get_channel_diagnostics(session, 0, nullptr),
+              ECUIO_ERR_NULL_ARGUMENT);
+    EXPECT_EQ(ecuio_session_get_channel_diagnostics(nullptr, 0, &d),
+              ECUIO_ERR_NULL_ARGUMENT);
+    ASSERT_EQ(ecuio_session_start(session), ECUIO_OK);
+
+    ASSERT_TRUE(wait_for_diagnostics(
+        session, d,
+        [](const ecuio_channel_diagnostics_t& r) {
+            return (r.flags & ECUIO_DIAG_COMPLETE) != 0;
+        },
+        5000))
+        << "diagnostics didn't complete";
+    EXPECT_EQ(d.rx_id, 0x7E8u);
+    EXPECT_EQ(d.generation, fake_diagnostics::kItems) << "one per item settled";
+    fake_diagnostics::expect_report(d);
+
+    /* The rotation's first request, then readiness, then the rotation
+     * and each code list, a service byte alone */
+    expect_write(0, 0x01, 0x04);
+    expect_write(1, 0x01, 0x01);
+    expect_write(2, 0x01, 0x05);
+    const uint8_t lists[] = {0x03, 0x07, 0x0A};
+    for (unsigned long k = 0; k < 3; ++k) {
+        unsigned char wbuf[64] = {};
+        unsigned long wlen = 0, wflags = 0;
+        get_recorded_write(3 + 2 * k, wbuf, &wlen, &wflags);
+        EXPECT_EQ(wlen, 5u) << "write " << 3 + 2 * k;
+        EXPECT_EQ(wbuf[4], lists[k]) << "write " << 3 + 2 * k;
+    }
+    EXPECT_EQ(ecuio_session_close(session), ECUIO_OK);
+    ecuio_session_destroy(session);
+}
+
+/* ?diagnose=0 asks nothing of the sort, and its report says so: no
+ * ECUIO_DIAG_ASKED, nothing settled, even after a Read again. ?poll=
+ * reads none either. */
+TEST_F(J2534AdoptionTest, DiagnoseOffAsksNoDiagnostics)
+{
+    char uri[700];
+    snprintf(uri, sizeof(uri),
+             "j2534://%s?profile=obd2&probe=0&identify=0&diagnose=0",
+             FAKE_J2534_DLL_PATH);
+    ecuio_session_t* session = nullptr;
+    ASSERT_EQ(ecuio_session_create(uri, &session), ECUIO_OK);
+    ASSERT_EQ(ecuio_session_start(session), ECUIO_OK);
+    EXPECT_EQ(ecuio_session_read_diagnostics(session), ECUIO_OK);
+    wait_for_writes(get_write_count, 8, 300);
+    for (unsigned long i = 0; i < 8; ++i) {
+        unsigned char wbuf[64] = {};
+        unsigned long wlen = 0, wflags = 0;
+        get_recorded_write(i, wbuf, &wlen, &wflags);
+        ASSERT_EQ(wlen, 6u) << "write " << i;
+        EXPECT_EQ(wbuf[4], 0x01u) << "write " << i;
+        EXPECT_NE(wbuf[5], 0x01u) << "write " << i << ": no readiness";
+    }
+    ecuio_channel_diagnostics_t d{};
+    ASSERT_EQ(ecuio_session_get_channel_diagnostics(session, 0, &d), ECUIO_OK);
+    EXPECT_EQ(d.rx_id, 0x7E8u);
+    EXPECT_EQ(d.flags, 0u);
+    EXPECT_EQ(d.generation, 0u);
+    EXPECT_EQ(d.readiness, ECUIO_DIAG_UNASKED);
+    EXPECT_EQ(ecuio_session_close(session), ECUIO_OK);
+    ecuio_session_destroy(session);
+
+    snprintf(uri, sizeof(uri), "j2534://%s?profile=obd2&poll=0x0C",
+             FAKE_J2534_DLL_PATH);
+    ASSERT_EQ(ecuio_session_create(uri, &session), ECUIO_OK);
+    ASSERT_EQ(ecuio_session_get_channel_diagnostics(session, 0, &d), ECUIO_OK);
+    EXPECT_EQ(d.flags, 0u) << "?poll= asks its one PID alone";
+    ecuio_session_destroy(session);
+}
+
+/* Read again (ecuio_session_read_diagnostics) asks the whole list once
+ * more after the first read settles: the report starts over, moves its
+ * generation on, and fills again. After close the call is refused and
+ * the report keeps its last update. */
+TEST_F(J2534AdoptionTest, ReadAgainAsksTheListOnceMore)
+{
+    char uri[700];
+    snprintf(uri, sizeof(uri), "j2534://%s?profile=obd2&probe=0&identify=0",
+             FAKE_J2534_DLL_PATH);
+    ecuio_session_t* session = nullptr;
+    ASSERT_EQ(ecuio_session_create(uri, &session), ECUIO_OK);
+    EXPECT_EQ(ecuio_session_read_diagnostics(nullptr), ECUIO_ERR_NULL_ARGUMENT);
+    ASSERT_EQ(ecuio_session_start(session), ECUIO_OK);
+    ecuio_channel_diagnostics_t d{};
+    const auto complete = [](const ecuio_channel_diagnostics_t& r) {
+        return (r.flags & ECUIO_DIAG_COMPLETE) != 0;
+    };
+    ASSERT_TRUE(wait_for_diagnostics(session, d, complete, 5000))
+        << "the first read didn't complete";
+    ASSERT_EQ(d.generation, fake_diagnostics::kItems);
+
+    ASSERT_EQ(ecuio_session_read_diagnostics(session), ECUIO_OK);
+    const uint32_t again =
+        fake_diagnostics::kItems + 1 + fake_diagnostics::kItems;
+    ASSERT_TRUE(wait_for_diagnostics(
+        session, d,
+        [again](const ecuio_channel_diagnostics_t& r) {
+            return r.generation == again &&
+                   (r.flags & ECUIO_DIAG_COMPLETE) != 0;
+        },
+        5000))
+        << "the second read didn't complete; generation " << d.generation;
+    fake_diagnostics::expect_report(d);
+
+    EXPECT_EQ(ecuio_session_close(session), ECUIO_OK);
+    EXPECT_EQ(ecuio_session_read_diagnostics(session),
+              ECUIO_ERR_SESSION_CLOSED);
+    ecuio_channel_diagnostics_t after{};
+    ASSERT_EQ(ecuio_session_get_channel_diagnostics(session, 0, &after),
+              ECUIO_OK);
+    EXPECT_EQ(after.generation, again) << "the last update, kept";
+    EXPECT_EQ(memcmp(&after, &d, sizeof d), 0);
     ecuio_session_destroy(session);
 }
 
@@ -2008,7 +2190,8 @@ TEST_F(J2534AdoptionTest, ProbeResumesWhenTheLinkRecovers)
         std::make_unique<KnobGuard>("ECUIO_FAKE_READ_STATUS", "9");
 
     char uri[700];
-    snprintf(uri, sizeof(uri), "j2534://%s?profile=test-probe-recovery&identify=0",
+    snprintf(uri, sizeof(uri),
+             "j2534://%s?profile=test-probe-recovery&identify=0&diagnose=0",
              FAKE_J2534_DLL_PATH);
     ecuio_session_t* session = nullptr;
     ASSERT_EQ(ecuio_session_create(uri, &session), ECUIO_OK);

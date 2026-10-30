@@ -555,6 +555,13 @@ const char* ecuio_identity_request_name(
 #define ECUIO_DIAG_FREEZE_FRAME          0x00000010u   /* a freeze frame is
                                                           stored: freeze_dtc
                                                           names its code */
+#define ECUIO_DIAG_ASKED                 0x00000020u   /* the session reads
+                                                          this channel's
+                                                          diagnostics; unset
+                                                          under ?diagnose=0,
+                                                          ?poll= or a passive
+                                                          session, whose
+                                                          report stays empty */
 
 /* lists[]: one per service */
 #define ECUIO_DIAG_STORED                0u   /* Service 03: confirmed */
@@ -669,6 +676,26 @@ const char* ecuio_monitor_short_name(
     uint8_t id,
     uint32_t diag_flags
 );
+
+/* Copies what channel `channel`'s ECU has reported of its diagnostics
+ * (ADR-0037) into *out_diagnostics, under the identity report's rules:
+ * the channel is an index below the session info's channel_count
+ * (ECUIO_ERR_INVALID_ARGUMENT otherwise), callable from any thread until
+ * destroy, and after close it keeps the last update. */
+ecuio_status_t ecuio_session_get_channel_diagnostics(
+    const ecuio_session_t* session,
+    uint32_t channel,
+    ecuio_channel_diagnostics_t* out_diagnostics
+);
+
+/* Asks every channel's ECU for its diagnostics again ("Read again"):
+ * each channel whose last read has settled starts over, its report
+ * emptied and its generation moved on; a channel mid-read carries on.
+ * The worker takes the request on its next pass, so it returns at once,
+ * from any thread. Does nothing on a session that reads no diagnostics
+ * (no channel has ECUIO_DIAG_ASKED). ECUIO_ERR_SESSION_CLOSED after
+ * close. */
+ecuio_status_t ecuio_session_read_diagnostics(ecuio_session_t* session);
 
 #ifdef __cplusplus
 }

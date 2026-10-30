@@ -393,6 +393,33 @@ ecuio_status_t ecuio_session_get_channel_identity(
     return ECUIO_OK;
 }
 
+ecuio_status_t ecuio_session_get_channel_diagnostics(
+    const ecuio_session_t* session, uint32_t channel,
+    ecuio_channel_diagnostics_t* out_diagnostics)
+{
+    if (session == nullptr || out_diagnostics == nullptr) {
+        return ECUIO_ERR_NULL_ARGUMENT;
+    }
+    std::lock_guard<std::mutex> lock(session->support_mutex);
+    if (channel >= session->support_count) {
+        return ECUIO_ERR_INVALID_ARGUMENT;
+    }
+    *out_diagnostics = session->diagnostics[channel];
+    return ECUIO_OK;
+}
+
+ecuio_status_t ecuio_session_read_diagnostics(ecuio_session_t* session)
+{
+    if (session == nullptr) {
+        return ECUIO_ERR_NULL_ARGUMENT;
+    }
+    if (session->closed.load()) {
+        return ECUIO_ERR_SESSION_CLOSED;
+    }
+    session->diag_requests.fetch_add(1);
+    return ECUIO_OK;
+}
+
 const char* ecuio_identity_request_name(const uint8_t* request, uint8_t length)
 {
     if (request == nullptr) {
