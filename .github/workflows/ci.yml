@@ -442,6 +442,14 @@ jobs:
           target: 'desktop'
           arch: 'linux_gcc_64'
 
+      # rcc's embedded files and the squashfs take the commit's time, not
+      # the checkout's, so two builds of one commit match (ADR-0035 §4)
+      - name: Date the build by the commit
+        run: |
+          t=$(git log -1 --format=%ct)
+          echo "SOURCE_DATE_EPOCH=$t" >> "$GITHUB_ENV"
+          echo "QT_RCC_SOURCE_DATE_OVERRIDE=$t" >> "$GITHUB_ENV"
+
       # The xcb platform plugin's libraries, which linuxdeploy bundles
       - name: Build the Release app
         run: |
@@ -456,6 +464,7 @@ jobs:
         run: |
           VERSION=$(sed -n '/^project(Havne/,/)/s/^ *VERSION \([0-9.]*\).*/\1/p' CMakeLists.txt)
           QMAKE="$QT_ROOT_DIR/bin/qmake" bash packaging/linux/make-appimage.sh "$VERSION-ci" build dist
+          sha256sum dist/*.AppImage
 
       - name: Upload the AppImage
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

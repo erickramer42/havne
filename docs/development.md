@@ -675,7 +675,7 @@ its usual duration:
 | `macos-build` | macOS (arm64), AppleClang | Builds the full app, then runs ctest. The QML suites' link-state cases skip without the fake. |
 | `linux-build` | Ubuntu, GCC | Builds the full app, brings up `vcan0` (the `vcan` and `can-isotp` modules load as installed on the hosted runners), then runs ctest with `ECUIO_VCAN_REQUIRED=1`, so the simulated-bus suite fails rather than skips without the bus, then the load test as on Windows. Installs QtGui's EGL and OpenGL runtime libraries, which `test_qml` loads. |
 | `abi` | Ubuntu, GCC, no Qt | Installs libabigail and runs `scripts/abi-check.sh` against the newest release tag ([The C ABI check](#the-c-abi-check)); the result goes to the run's summary. |
-| `linux-appimage` | Ubuntu 24.04, GCC | Builds the app in Release and packs it with `packaging/linux/make-appimage.sh` ([Linux: the AppImage](#linux-the-appimage)), then uploads `havne-linux-x86_64` (kept 14 days). On 24.04 because an AppImage runs only where glibc is at least its build machine's. |
+| `linux-appimage` | Ubuntu 24.04, GCC | Builds the app in Release, dated by the commit, and packs it with `packaging/linux/make-appimage.sh` ([Linux: the AppImage](#linux-the-appimage)), printing its SHA-256, then uploads `havne-linux-x86_64` (kept 14 days). On 24.04 because an AppImage runs only where glibc is at least its build machine's. |
 | `linux-packages` | Ubuntu 24.04, GCC | Builds the core packages twice under `reprotest` and fails on any difference, then installs and uses them (`tests/package_check.sh`), builds an SBOM from their component lists and validates it and `sbom.py`'s self-test document with `pyspdxtools`, and uploads `havne-core-linux-x86_64` (kept 14 days) ([Linux: the core packages](#linux-the-core-packages)). |
 | `android-build` | Ubuntu → Android arm64-v8a | Selects NDK r27 and JDK 21 by version, failing with a clear error if the image lacks either. Then cross-builds and packages the APK. Build only, no tests. |
 | `ios-build` | macOS (arm64) → iOS device (arm64) | Unsigned device build with the Xcode generator. Build only, no tests. |
@@ -789,6 +789,14 @@ isn't still running 10 s after it starts on the offscreen platform.
   libxcb-keysyms1 libxcb-randr0 libxcb-render-util0 libxcb-shape0
   libxcb-sync1 libxcb-xfixes0 libxcb-xinerama0 libxcb-xkb1
   libxkbcommon-x11-0` on Ubuntu.
+- **The same bytes from one commit:** two builds match when both carry
+  the commit's time. Set `QT_RCC_SOURCE_DATE_OVERRIDE` to it before
+  `cmake --build`, since `rcc` otherwise records each embedded file's
+  modification time, which is when it was checked out. The script sets
+  `SOURCE_DATE_EPOCH` for the squashfs's times (default
+  `git log -1 --format=%ct`), and warns when the first variable is
+  missing. CI and the release set both:
+  `export SOURCE_DATE_EPOCH=$(git log -1 --format=%ct) QT_RCC_SOURCE_DATE_OVERRIDE=$SOURCE_DATE_EPOCH`.
 - **glibc:** an AppImage runs only where glibc is at least its build
   machine's, so the one to hand out is CI's (`linux-appimage`, Ubuntu
   24.04, glibc 2.39). One built on a newer distribution is for checking
@@ -967,7 +975,8 @@ provenance.
   same checks. A last step writes the APK's component list
   (`sbom.py apk`).
 - **`linux`: build and pack** (Ubuntu 24.04). Qt as `linux-appimage`,
-  the app built and packed by `make-appimage.sh`, then
+  the app built and packed by `make-appimage.sh`, dated by the commit,
+  then
   `make-core-packages.sh`: the same scripts and checks CI ran on the
   commit.
 - **`publish`: the SBOM.** `sbom.py build` over the zip, the APK, the
