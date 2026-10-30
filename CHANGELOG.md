@@ -10,6 +10,12 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
 
 ## [Unreleased]
 
+### Changed
+- The Log page's **Activity | Frames** switch (developer mode) sits
+  beside the title and stays in place when the view changes, so it no
+  longer moves out from under the pointer as the buttons beside it
+  change.
+
 ## [0.3.4] - 2026-10-30
 
 ### Added
