@@ -104,6 +104,48 @@ recordings:
 - **Fuzzing:** `fuzz_replay_file` also takes a `?faults=` query drawn
   from the input.
 
+### 4. Faults at the ISO-TP level: the recording as the ECU
+
+A replay plays whole messages, so a broken Consecutive Frame has
+nothing to happen to there. The same recording can answer a live
+session instead: `tests/vcan_recording_ecu.h` (Linux, test-side) is an
+ECU on `vcan0` that answers each Service 01 request of a requesting
+`socketcan://` session with the recording's reply for that PID at its
+own time since it started, so the recording plays at its pace, and a
+request of several PIDs with J1979's packed answer. The bitmaps are the
+car's, so the probe walks the car's chain; a PID the bitmaps list that
+the recording holds no reply for is refused (`7F 01 12`), as a PID the
+car doesn't answer. A pack's answer is longer than a Single Frame, so
+the session's packing (ADR-0039 Appendix A) runs through core's ISO-TP
+receiver (ADR-0040) on the test car's own bytes.
+
+The ECU frames its replies itself, on a raw socket, so it can break
+them:
+
+| Fault | What the reply gets |
+|---|---|
+| silent | nothing |
+| late | the whole reply 130 ms after the request, past the engine's 100 ms wait |
+| bad sequence | a segmented reply's last Consecutive Frame carries the wrong sequence number |
+| stalled | a segmented reply's last Consecutive Frame comes 160 ms after the frame before, past N_Cr (150 ms) |
+
+- Each fault hits every Nth reply, single-frame and segmented replies
+  counted apart, so a run is the same each time. Counting them together
+  falls into step with the rotation's laps: on the test car's PIDs a
+  lap is fifteen replies, and every fifth reply silent hit each lap's
+  one pack. Periods like 5 and 7 never break three packs in a row; a
+  session whose packs fail that often goes back to one PID per request,
+  as it should.
+- The bitmaps are never broken: the probe's walk ends at its first
+  silence, which is its own rule.
+
+What has to hold, under every fault (`SocketCanFaultTest`): the session
+delivers each reply the bus carried whole, in order, and nothing else
+(a late one is delivered, a broken one never is); the walk reads the
+car's bitmaps; the rotation keeps each PID the recording holds and no
+other, and each is answered; packing holds; core's Flow Control is
+ISO 15765-4's; the link stays healthy.
+
 ## Alternatives considered
 
 - **Faults in the fakes only.** They exist (the knobs), and they stay:
@@ -117,11 +159,18 @@ recordings:
 - **A random seed by default.** Faults would differ run to run, which
   finds more over many runs but makes a failure hard to repeat. Seed 1
   by default, and a test that wants spread loops over seeds.
-- **Faults at the ISO-TP level here.** A replay plays whole messages, so
-  a bad Consecutive Frame has nothing to happen to. That needs the
-  recording to answer a live session as the ECU, frame by frame: v0.3.5's
-  second half of this work, on `vcan0` (Linux, test-side), beside
-  ADR-0040's ISO-TP.
+- **Faults at the ISO-TP level in the replay.** A replay plays whole
+  messages, so a bad Consecutive Frame has nothing to happen to; the
+  recording answering a live session as the ECU, frame by frame, does
+  (section 4).
+- **The kernel's ISO-TP as the ECU** (`vcan_bus::Ecu`, which
+  `SocketCanRequestTest` uses). It frames correctly and can't be made
+  to break a frame; the raw socket can, and the kernel stays the
+  independent check of the frames done right (`IsoTpConformanceTest`).
+- **Faults drawn from a seed, as in the replay.** Random draws break
+  three packs in a row now and then, and the session then rightly
+  unpacks, so a test of what holds under the faults would fail at
+  random. Fixed periods break as often and never that way.
 
 ## Consequences
 

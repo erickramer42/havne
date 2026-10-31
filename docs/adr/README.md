@@ -46,7 +46,7 @@ old one, and the old record's status is updated to point at it.
 | [0038](0038-clearing-trouble-codes.md) | Clearing trouble codes: Service 04 by one path only, each ECU by its own ID, after the report is saved, the engine is seen stopped and the user confirms | Accepted |
 | [0039](0039-full-service01-coverage.md) | Full Service 01 coverage in one `obd2` set: every linear field, two rate classes in the engine (fast and slow, 2:1), then several PIDs per request, the reply split in core's decode | Accepted |
 | [0040](0040-socketcan-requests-isotp.md) | SocketCAN requests: ISO-TP in core, shared with ELM327; a requesting session needs a controller in normal and one-shot mode at a stated rate, and sends nothing more after a CAN error on its first request | Proposed |
-| [0041](0041-replay-fault-injection.md) | Fault injection on a replay: `?faults=` drops, loses to an overflow, corrupts, cuts short or holds back a recording's frames as they play, drawn from `?seed=` so the same URI plays the same faults | Proposed |
+| [0041](0041-replay-fault-injection.md) | Fault injection on a replay: `?faults=` drops, loses to an overflow, corrupts, cuts short or holds back a recording's frames as they play, drawn from `?seed=` so the same URI plays the same faults; and the recording answering a requesting session as the ECU on `vcan0`, its replies broken at the ISO-TP level | Proposed |
 
 ## Adding a record
 
