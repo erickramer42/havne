@@ -81,7 +81,19 @@ struct LinkSpec {
     uint32_t rate = 500000;
     bool ctrlmode = true;
     uint32_t modes = SOCKETCAN_CTRLMODE_LISTENONLY;
+    bool state = true;
+    uint32_t can_state = SOCKETCAN_STATE_ERROR_ACTIVE;
+    bool restart = true;
+    uint32_t restart_ms = 0;
 };
+
+/* A controller a session may send through (ADR-0040 section 2) */
+LinkSpec sender()
+{
+    LinkSpec s;
+    s.modes = SOCKETCAN_CTRLMODE_ONE_SHOT;
+    return s;
+}
 
 std::vector<uint8_t> link_msg(const LinkSpec& s)
 {
@@ -101,10 +113,18 @@ std::vector<uint8_t> link_msg(const LinkSpec& s)
             data = cat({data, attr(SOCKETCAN_IFLA_CAN_BITTIMING,
                                    u32s({s.rate, 875, 125, 6, 7, 2, 1, 4}))});
         }
+        if (s.state) {
+            data = cat(
+                {data, attr(SOCKETCAN_IFLA_CAN_STATE, u32s({s.can_state}))});
+        }
         if (s.ctrlmode) {
             /* struct can_ctrlmode: mask, then flags */
             data = cat({data, attr(SOCKETCAN_IFLA_CAN_CTRLMODE,
                                    u32s({0xFFFFFFFFu, s.modes}))});
+        }
+        if (s.restart) {
+            data = cat({data, attr(SOCKETCAN_IFLA_CAN_RESTART_MS,
+                                   u32s({s.restart_ms}))});
         }
         auto info = attr(SOCKETCAN_IFLA_INFO_KIND, str(s.kind));
         if (!data.empty()) {
@@ -279,6 +299,152 @@ TEST(SocketCanTest, OnlyAListenOnlyControllerOrVcanMayBeListenedTo)
     EXPECT_EQ(socketcan_judge(parsed(v), 0), socketcan_verdict::down);
 }
 
+/* A session that sends (ADR-0040 section 2): a controller in normal
+ * mode at the rate ?baud= states, that never restarts itself, in one-shot
+ * mode while that's the rule, and error-active; vcan always */
+TEST(SocketCanTest, OnlyAControllerThatCanStopAtOnceMaySend)
+{
+    const LinkSpec ok = sender();
+    EXPECT_EQ(socketcan_judge_sender(parsed(ok), 500000),
+              socketcan_send_verdict::ok);
+    {
+        const socketcan_link l = parsed(ok);
+        EXPECT_TRUE(l.has_state);
+        EXPECT_EQ(l.state, SOCKETCAN_STATE_ERROR_ACTIVE);
+        EXPECT_TRUE(l.has_restart_ms);
+        EXPECT_EQ(l.restart_ms, 0u);
+        EXPECT_TRUE(l.one_shot());
+    }
+
+    LinkSpec s = ok;
+    s.modes = SOCKETCAN_CTRLMODE_LISTENONLY;
+    EXPECT_EQ(socketcan_judge_sender(parsed(s), 500000),
+              socketcan_send_verdict::listen_only);
+    s = ok;
+    s.ctrlmode = false;
+    EXPECT_EQ(socketcan_judge_sender(parsed(s), 500000),
+              socketcan_send_verdict::listen_only)
+        << "no mode reported: not known to send";
+    EXPECT_EQ(socketcan_judge_sender(parsed(ok), 0),
+              socketcan_send_verdict::no_rate);
+    EXPECT_EQ(socketcan_judge_sender(parsed(ok), 250000),
+              socketcan_send_verdict::wrong_rate);
+    s = ok;
+    s.restart_ms = 100;
+    EXPECT_EQ(socketcan_judge_sender(parsed(s), 500000),
+              socketcan_send_verdict::restarts_itself);
+    s = ok;
+    s.restart = false;
+    EXPECT_EQ(socketcan_judge_sender(parsed(s), 500000),
+              socketcan_send_verdict::restarts_itself)
+        << "no restart-ms reported";
+    s = ok;
+    s.modes = 0; /* normal mode, as the USB2CAN's firmware has it */
+    EXPECT_EQ(socketcan_judge_sender(parsed(s), 500000),
+              SOCKETCAN_SEND_NEEDS_ONE_SHOT
+                  ? socketcan_send_verdict::no_one_shot
+                  : socketcan_send_verdict::ok);
+    for (uint32_t state : {1u, 2u, 3u, 4u}) { /* warning .. stopped */
+        s = ok;
+        s.can_state = state;
+        EXPECT_EQ(socketcan_judge_sender(parsed(s), 500000),
+                  socketcan_send_verdict::not_error_active)
+            << state;
+    }
+    s = ok;
+    s.state = false;
+    EXPECT_EQ(socketcan_judge_sender(parsed(s), 500000),
+              socketcan_send_verdict::not_error_active)
+        << "no state reported";
+    s = ok;
+    s.up = false;
+    EXPECT_EQ(socketcan_judge_sender(parsed(s), 500000),
+              socketcan_send_verdict::down);
+    s = ok;
+    s.kind = nullptr;
+    EXPECT_EQ(socketcan_judge_sender(parsed(s), 500000),
+              socketcan_send_verdict::not_can);
+
+    LinkSpec v;
+    v.name = "vcan0";
+    v.kind = "vcan";
+    v.bitrate = false;
+    v.ctrlmode = false;
+    v.state = false;
+    v.restart = false;
+    EXPECT_EQ(socketcan_judge_sender(parsed(v), 0), socketcan_send_verdict::ok);
+    EXPECT_EQ(socketcan_judge_sender(parsed(v), 250000),
+              socketcan_send_verdict::ok)
+        << "vcan has no rate";
+    v.up = false;
+    EXPECT_EQ(socketcan_judge_sender(parsed(v), 0),
+              socketcan_send_verdict::down);
+
+    /* the listening judge is unchanged by the new attributes */
+    EXPECT_EQ(socketcan_judge(parsed(ok), 500000),
+              socketcan_verdict::not_listen_only);
+}
+
+/* The first request proves the rate (ADR-0040 section 3): an echo
+ * proves it; before that, an error halts at once and three requests
+ * unseen halt too; once proven, nothing here changes */
+TEST(SocketCanTest, TheFirstEchoProvesTheRateAndAnErrorBeforeItHalts)
+{
+    LinkSpec c = sender();
+    socketcan_proof p = socketcan_proof_for(parsed(c));
+    EXPECT_FALSE(p.proven);
+    EXPECT_EQ(socketcan_proof_on(p, socketcan_sent::unechoed),
+              socketcan_proof_step::send_again);
+    EXPECT_EQ(socketcan_proof_on(p, socketcan_sent::echoed),
+              socketcan_proof_step::proven);
+    EXPECT_EQ(socketcan_proof_on(p, socketcan_sent::error),
+              socketcan_proof_step::carry_on)
+        << "a proven rate: the link health's";
+    EXPECT_EQ(socketcan_proof_on(p, socketcan_sent::unechoed),
+              socketcan_proof_step::carry_on)
+        << "a proven rate: a failed write";
+    EXPECT_FALSE(p.halted);
+
+    p = socketcan_proof_for(parsed(c));
+    EXPECT_EQ(socketcan_proof_on(p, socketcan_sent::error),
+              socketcan_proof_step::halt);
+    EXPECT_TRUE(p.halted);
+    EXPECT_EQ(socketcan_proof_on(p, socketcan_sent::echoed),
+              socketcan_proof_step::carry_on)
+        << "halted for the session";
+    EXPECT_FALSE(p.proven);
+
+    p = socketcan_proof_for(parsed(c));
+    for (uint8_t i = 1; i < SOCKETCAN_PROOF_TRIES; ++i) {
+        EXPECT_EQ(socketcan_proof_on(p, socketcan_sent::unechoed),
+                  socketcan_proof_step::send_again)
+            << int(i);
+    }
+    EXPECT_EQ(socketcan_proof_on(p, socketcan_sent::unechoed),
+              socketcan_proof_step::halt);
+
+    LinkSpec v;
+    v.kind = "vcan";
+    EXPECT_TRUE(socketcan_proof_for(parsed(v)).proven) << "vcan has no rate";
+}
+
+/* A requesting session's kernel filter: each channel's reply and request
+ * IDs, exact, of their width, each once */
+TEST(SocketCanTest, ARequestingSessionFiltersItsChannelsIds)
+{
+    const uint32_t rx[] = {0x7E8, 0x7E9, 0x18DAF110};
+    const uint32_t tx[] = {0x7E0, 0x7E0, 0x18DA10F1};
+    socketcan_filter f[6];
+    ASSERT_EQ(socketcan_channel_filters(rx, tx, 3, f), 5u) << "0x7E0 once";
+    EXPECT_EQ(f[0].id, 0x7E8u);
+    EXPECT_EQ(f[0].mask, SOCKETCAN_SFF_MASK | SOCKETCAN_EFF_FLAG);
+    EXPECT_EQ(f[1].id, 0x7E0u);
+    EXPECT_EQ(f[2].id, 0x7E9u);
+    EXPECT_EQ(f[3].id, 0x18DAF110u | SOCKETCAN_EFF_FLAG);
+    EXPECT_EQ(f[3].mask, SOCKETCAN_EFF_MASK | SOCKETCAN_EFF_FLAG);
+    EXPECT_EQ(f[4].id, 0x18DA10F1u | SOCKETCAN_EFF_FLAG);
+}
+
 TEST(SocketCanTest, DiscoveryListsControllersAndVcanOnly)
 {
     ecuio_can_interface_t item;
@@ -438,13 +604,22 @@ TEST(SocketCanTest, TheUriIsCheckedBeforeAnyInterface)
     EXPECT_NE(c.detail.find("?filter="), std::string::npos) << c.detail;
     c = create("socketcan://vcan0?poll=0x0C");
     EXPECT_EQ(c.status, ECUIO_ERR_BAD_URI);
-    EXPECT_NE(c.detail.find("takes no query key 'poll'"), std::string::npos)
+    EXPECT_NE(c.detail.find("?poll= belongs to a profile that asks an ECU"),
+              std::string::npos)
         << c.detail;
-    c = create("socketcan://vcan0?profile=obd2");
-    EXPECT_EQ(c.status, ECUIO_ERR_NOT_IMPLEMENTED);
-    EXPECT_NE(c.detail.find("only listens"), std::string::npos) << c.detail;
-    c = create("socketcan://vcan0?profile=uds-generic&did=7E0:F190");
-    EXPECT_EQ(c.status, ECUIO_ERR_NOT_IMPLEMENTED) << c.detail;
+    c = create("socketcan://vcan0?profile=obd2&poll=0x1G");
+    EXPECT_EQ(c.status, ECUIO_ERR_BAD_URI);
+    EXPECT_NE(c.detail.find("a PID from 0x00 to 0xFF"), std::string::npos)
+        << c.detail;
+    c = create("socketcan://vcan0?profile=obd2&filter=0x7E8,0x7E9");
+    EXPECT_EQ(c.status, ECUIO_ERR_BAD_URI)
+        << "a profile that requests takes one receive ID";
+    c = create("socketcan://lo?profile=obd2");
+    EXPECT_EQ(c.status, ECUIO_ERR_LOAD_FAILED);
+    EXPECT_NE(c.detail.find("lo isn't a CAN interface"), std::string::npos)
+        << c.detail;
+    c = create("socketcan://lo?profile=uds-generic&did=7E0:F190");
+    EXPECT_EQ(c.status, ECUIO_ERR_LOAD_FAILED) << c.detail;
 #else
     const Created c = create("socketcan://can0");
     EXPECT_EQ(c.status, ECUIO_ERR_NO_TRANSPORT);

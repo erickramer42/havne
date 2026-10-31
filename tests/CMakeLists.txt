@@ -121,10 +121,13 @@ gtest_discover_tests(test_socketcan)
 # CI's linux-build brings it up and sets ECUIO_VCAN_REQUIRED=1.
 # test_vcan_socketcan.cpp: the SocketCAN transport on that bus
 # (ADR-0032, SocketCanBusTest); it holds the binary's new_counter.h.
+# test_vcan_requests.cpp: socketcan:// requesting through ISO-TP against
+# that ECU (ADR-0040, SocketCanRequestTest).
 # RUN_SERIAL: the cases share the bus, and an error frame passes every
 # session's ID filter.
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
-    add_executable(test_vcan test_vcan.cpp test_vcan_socketcan.cpp)
+    add_executable(test_vcan test_vcan.cpp test_vcan_socketcan.cpp
+                   test_vcan_requests.cpp)
     target_compile_definitions(test_vcan PRIVATE
         ECUIO_REPLAY_FIXTURES="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/replay"
     )
