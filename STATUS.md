@@ -90,8 +90,12 @@ SocketCAN requests come next ([roadmap](#roadmap)).
     leave out and says how many; imperial units cover the new units
     (inH2O, gal/h, lb·ft). Verified against the fakes' ECU, which
     answers every linear PID, through J2534 and ELM327, and the car's
-    recordings replay to their own values through the grown set; not
-    yet run on a car (BENCH prep #30).
+    recordings replay to their own values through the grown set. On
+    the test car through the MX+ the probe keeps exactly its bitmaps'
+    43 PIDs, Live hides the rest, and the classes refresh every 0.87 s
+    and 3.53 s at 26 requests a second
+    ([2026-10-31-elm327-vehicle](docs/bench-sessions/2026-10-31-elm327-vehicle.md),
+    BENCH prep #30).
   - **Vehicle identification** at connect
     ([ADR-0021](docs/adr/0021-vehicle-identification.md)), and
     **`uds-generic`**, polling or scanning the DIDs a URI names
@@ -103,7 +107,8 @@ SocketCAN requests come next ([roadmap](#roadmap)).
     again on request, on the Diagnostics page, in the activity log and
     in `havne-cli`'s output; the simulated car has codes of its own.
     Verified against the fakes' ECU through J2534 (both surrogates) and
-    ELM327; not yet on a car (BENCH prep #28).
+    ELM327, and on the test car through the VX and the MX+, which has
+    no codes stored (BENCH prep #28).
   - **Clearing trouble codes**
     ([ADR-0038](docs/adr/0038-clearing-trouble-codes.md)): the page's
     Clear codes… asks first, and the app saves the report to a file of
@@ -335,7 +340,9 @@ scheduled. What each holds, past its row:
   def for every linear field of the Service 01 table, each checked
   against public J1979 tables (`tests/fixtures/obd2/service01.csv`),
   its requests in two rate classes, and Live hiding what a car lacks;
-  on the fakes, the test car to come (BENCH prep #30). Next, several
+  run on the test car (BENCH prep #30), where PIDs 23 and 59 read one
+  sensor (one moves to slow, ADR-0039 §3) and 55 and 56 answer one of
+  their two fields, so two rows never fill. Next, several
   PIDs per request (ADR-0039's Appendix A), after a car run of the
   classes. The bit-field, enumerated and complex PIDs wait for decoder
   kinds of their own (ADR-0039 §2).
@@ -343,8 +350,9 @@ scheduled. What each holds, past its row:
   ([ADR-0037](docs/adr/0037-reading-trouble-codes.md)): stored, pending
   and permanent codes, readiness and the freeze frame (Services 03, 07,
   0A, 01 and 02), on the Diagnostics page, in the activity log and in
-  `havne-cli`; on the test car through both adapters, beside a second
-  scan tool, to come (BENCH prep #28). Clearing is built
+  `havne-cli`; read on the test car through both adapters, with no
+  codes stored; a stored code and a second scan tool's reading beside
+  it are to come (BENCH prep #28). Clearing is built
   ([ADR-0038](docs/adr/0038-clearing-trouble-codes.md)): Service 04 by
   one path, each ECU by its own ID, behind a gate (the report saved
   first, the engine seen stopped by `01 0C`, the user's confirmation);

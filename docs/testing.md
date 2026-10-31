@@ -587,10 +587,13 @@ requests and quiet states
   and its replies of up to 27 bytes arrived whole. An ECU with several
   calibration IDs, or one that leaves an item unanswered while awake,
   hasn't been seen.
-- **Trouble codes have met no ECU.** Readiness, the code lists and the
-  freeze frame are tested against the fakes' ECU and the simulated car
-  only, which share the code's reading of SAE J1979; a car through
-  both adapters, beside a second scan tool, is BENCH prep #28.
+- **Trouble codes have met one ECU, with none stored.** Through both
+  adapters the test car's empty lists, readiness and freeze-frame
+  bitmap read as SAE J1979 says
+  ([2026-10-31-elm327-vehicle](bench-sessions/2026-10-31-elm327-vehicle.md));
+  a stored code, a multi-frame list and the freeze frame's values are
+  tested against the fakes' ECU and the simulated car only, and a
+  second scan tool's reading beside Havne's is BENCH prep #28.
 - **Clearing has met no ECU.** The fakes and the simulated car answer
   `01 0C` and `04` as the code reads SAE J1979; a car's clear, with its
   engine stopped and running, beside a second scan tool, is BENCH prep
