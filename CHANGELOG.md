@@ -89,6 +89,18 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
   a session's replies come without, and `havne-cli stream --values`
   writes them as an `absent` line.
 - Imperial units show Pa as inH2O, L/h as gal/h and N·m as lb·ft.
+- **Requests on SocketCAN**
+  ([ADR-0040](docs/adr/0040-socketcan-requests-isotp.md)): on Linux,
+  `obd2` and `uds-generic` run on a native CAN interface
+  (`socketcan://can0?profile=obd2&baud=500000`), with ISO-TP done in
+  core and the same query keys as `j2534://` and `elm327://`. Havne
+  sends only through a controller brought up to stop at once on a
+  fault (normal mode at the rate `?baud=` states, `restart-ms 0`,
+  `one-shot on`, no errors counted), and after a CAN error on its first
+  request it sends nothing more; each refusal gives the `ip link`
+  commands that fix it. Run on Linux's virtual CAN bus; not yet through
+  a real controller or on a car.
+- An ELM327's replies reassemble through the same ISO-TP code.
 
 ### Changed
 - The simulated car starts each loop with the key on and the engine

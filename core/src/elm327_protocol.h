@@ -11,6 +11,7 @@
 
 #include "ecuio/core.h"    /* ECUIO_FRAME_DATA_MAX */
 #include "ecuio/signals.h" /* the defs the count digit is chosen from */
+#include "isotp.h"         /* a frame line's messages */
 
 #include <stddef.h>
 #include <stdint.h>
@@ -119,11 +120,9 @@ inline int elm327_hex_value(char c)
  * bytes are whole pairs, so an 11-bit line's length tells the two forms
  * apart: odd for three digits, even for four. */
 
-struct elm327_can_line {
-    uint32_t id = 0;
-    uint8_t len = 0; /* data bytes, 1 to 8 */
-    uint8_t data[8] = {};
-};
+/* A frame line is a CAN frame, its data bytes 1 to 8, as isotp.h
+ * takes one. */
+using elm327_can_line = isotp_can;
 
 /* norm is a normalized line (elm327_normalize). False for anything that
  * isn't a frame of the mode's shape; out is written only on true. */
@@ -334,172 +333,10 @@ inline bool elm327_is_echo(const char* line, size_t n, const char* sent)
 }
 
 /* ---- ISO-TP reassembly ----------------------------------------------
- * Per CAN ID, because two ECUs' replies can interleave line by line (the
- * datasheet's 09 04 example). A Single Frame is a message by itself; a
- * First Frame starts one, Consecutive Frames must follow in sequence
- * (21 ... 2F, 20, ...), and padding past the message's length is
- * ignored. Flow Control frames are the adapter's business. */
-
-/* Messages under way at once. The receive filter passes only the
- * channels' reply IDs (at most ECUIO_MAX_CHANNELS), and a mask spanning
- * several can let a few more through; past this the oldest is dropped. */
-constexpr uint32_t ELM327_ISOTP_SLOTS = 8;
-
-struct elm327_isotp_slot {
-    uint32_t id = 0;
-    bool active = false;
-    uint16_t expected = 0; /* the message's length, from its First Frame */
-    uint16_t have = 0;
-    uint8_t next_seq = 0; /* the Consecutive Frame index due, 0-15 */
-    uint32_t started = 0; /* when, in First Frames, to pick the oldest */
-    uint8_t data[ECUIO_FRAME_DATA_MAX] = {};
-};
-
-/* The transport owns one (32 KB: it lives with the transport, never on
- * the worker's stack). */
-struct elm327_isotp {
-    elm327_isotp_slot slots[ELM327_ISOTP_SLOTS];
-    uint32_t first_frames = 0;
-    /* Messages begun and never finished: a gap, a repeat, a short frame,
-     * a new message on the same ID, eviction, the reply's end. */
-    uint32_t dropped = 0;
-    /* Frames no message could use: a bad PCI, a Consecutive Frame with
-     * nothing begun. */
-    uint32_t malformed = 0;
-};
-
-/* A whole message: its CAN ID and its bytes, the service byte first.
- * data points into the frame line given (a Single Frame) or the slot (a
- * multi-frame message) and stays valid until the next take. */
-struct elm327_message {
-    uint32_t id = 0;
-    const uint8_t* data = nullptr;
-    uint16_t len = 0;
-};
-
-enum class elm327_isotp_result : uint8_t {
-    complete,  /* *out holds a whole message */
-    pending,   /* part of a message; more to come */
-    ignored,   /* a Flow Control frame */
-    malformed, /* no message could use it */
-    dropped    /* it ended a message unfinished */
-};
-
-inline elm327_isotp_slot* elm327_isotp_find(elm327_isotp& r, uint32_t id)
-{
-    for (elm327_isotp_slot& s : r.slots) {
-        if (s.active && s.id == id) {
-            return &s;
-        }
-    }
-    return nullptr;
-}
-
-inline elm327_isotp_result elm327_isotp_take(elm327_isotp& r,
-                                             const elm327_can_line& f,
-                                             elm327_message* out)
-{
-    const uint8_t pci = f.data[0];
-    elm327_isotp_slot* s = elm327_isotp_find(r, f.id);
-    switch (pci >> 4) {
-    case 0x0: { /* Single Frame: 1 to 7 bytes */
-        const uint8_t n = pci & 0x0F;
-        if (n == 0 || n > 7 || f.len < 1 + n) {
-            ++r.malformed;
-            return elm327_isotp_result::malformed;
-        }
-        if (s != nullptr) {
-            s->active = false;
-            ++r.dropped;
-        }
-        out->id = f.id;
-        out->data = f.data + 1;
-        out->len = n;
-        return elm327_isotp_result::complete;
-    }
-    case 0x1: { /* First Frame: 8 to 4095 bytes, six of them here */
-        const uint16_t n =
-            static_cast<uint16_t>(((pci & 0x0F) << 8) | f.data[1]);
-        if (f.len != 8 || n < 8) {
-            /* n == 0 is ISO 15765-2's escape to a 32-bit length, which a
-             * reply to these requests never needs */
-            ++r.malformed;
-            return elm327_isotp_result::malformed;
-        }
-        if (s != nullptr) {
-            ++r.dropped; /* the same ID starts over */
-        } else {
-            for (elm327_isotp_slot& c : r.slots) {
-                if (!c.active) {
-                    s = &c;
-                    break;
-                }
-            }
-            if (s == nullptr) {
-                s = &r.slots[0];
-                for (elm327_isotp_slot& c : r.slots) {
-                    if (c.started < s->started) {
-                        s = &c;
-                    }
-                }
-                ++r.dropped; /* the oldest gives way */
-            }
-        }
-        s->id = f.id;
-        s->active = true;
-        s->expected = n;
-        memcpy(s->data, f.data + 2, 6);
-        s->have = 6;
-        s->next_seq = 1;
-        s->started = ++r.first_frames;
-        return elm327_isotp_result::pending;
-    }
-    case 0x2: { /* Consecutive Frame */
-        if (s == nullptr) {
-            ++r.malformed;
-            return elm327_isotp_result::malformed;
-        }
-        const uint16_t left = static_cast<uint16_t>(s->expected - s->have);
-        const uint16_t take = left < 7 ? left : 7;
-        if ((pci & 0x0F) != s->next_seq || f.len < 1 + take) {
-            s->active = false;
-            ++r.dropped;
-            return elm327_isotp_result::dropped;
-        }
-        memcpy(s->data + s->have, f.data + 1, take);
-        s->have = static_cast<uint16_t>(s->have + take);
-        s->next_seq = static_cast<uint8_t>((s->next_seq + 1) & 0x0F);
-        if (s->have < s->expected) {
-            return elm327_isotp_result::pending;
-        }
-        s->active = false;
-        out->id = f.id;
-        out->data = s->data;
-        out->len = s->expected;
-        return elm327_isotp_result::complete;
-    }
-    case 0x3: /* Flow Control */
-        return elm327_isotp_result::ignored;
-    default:
-        ++r.malformed;
-        return elm327_isotp_result::malformed;
-    }
-}
-
-/* The reply ended (the prompt): any message still under way never will
- * finish, since the adapter is no longer listening. Returns how many. */
-inline uint32_t elm327_isotp_end_reply(elm327_isotp& r)
-{
-    uint32_t n = 0;
-    for (elm327_isotp_slot& s : r.slots) {
-        if (s.active) {
-            s.active = false;
-            ++n;
-        }
-    }
-    r.dropped += n;
-    return n;
-}
+ * isotp.h's receiver, untimed: lines come in a burst at the prompt, which
+ * ends a reply (isotp_end_all). Per CAN ID, because two ECUs' replies
+ * can interleave line by line (the datasheet's 09 04 example). Flow
+ * Control frames are the adapter's business (AT CFC1). */
 
 /* ---- Values ---------------------------------------------------------
  * The voltage, from AT RV ("12.6V" on an ELM327, "14.5v" on an OBDX) or

@@ -44,12 +44,12 @@ struct digest {
 
 /* The reassembly is 32 KB: the transport keeps it off the stack, so the
  * harness does too. */
-elm327_isotp g_isotp;
+isotp_rx g_isotp;
 
 void run(const uint8_t* data, size_t size, bool ext29, uint8_t pp,
          digest* d)
 {
-    g_isotp = elm327_isotp{};
+    g_isotp = isotp_rx{};
     elm327_reader r;
     for (size_t i = 0; i < size; ++i) {
         const elm327_step s = elm327_take(r, data[i]);
@@ -71,10 +71,9 @@ void run(const uint8_t* data, size_t size, bool ext29, uint8_t pp,
                 if (f.len < 1 || f.len > 8) abort();
                 if (!ext29 && f.id > 0x7FFu) abort();
                 if (ext29 && f.id > 0x1FFFFFFFu) abort();
-                elm327_message m;
-                const elm327_isotp_result res =
-                    elm327_isotp_take(g_isotp, f, &m);
-                if (res == elm327_isotp_result::complete) {
+                isotp_message m;
+                const isotp_result res = isotp_take(g_isotp, f, 0, &m);
+                if (res == isotp_result::complete) {
                     ++d->messages;
                     if (m.data == nullptr || m.len == 0 || m.len > 4095 ||
                         m.len > ECUIO_FRAME_DATA_MAX || m.id != f.id) {
@@ -86,7 +85,7 @@ void run(const uint8_t* data, size_t size, bool ext29, uint8_t pp,
                     memcpy(copy.get(), m.data, m.len);
                     d->message_bytes += m.len;
                 }
-                for (const elm327_isotp_slot& slot : g_isotp.slots) {
+                for (const isotp_rx_slot& slot : g_isotp.slots) {
                     if (slot.active &&
                         (slot.have > slot.expected || slot.expected < 8 ||
                          slot.expected > 4095 || slot.next_seq > 15)) {
@@ -107,8 +106,8 @@ void run(const uint8_t* data, size_t size, bool ext29, uint8_t pp,
         }
         if (s.prompt) {
             ++d->prompts;
-            (void)elm327_isotp_end_reply(g_isotp);
-            for (const elm327_isotp_slot& slot : g_isotp.slots) {
+            (void)isotp_end_all(g_isotp);
+            for (const isotp_rx_slot& slot : g_isotp.slots) {
                 if (slot.active) abort();
             }
         }

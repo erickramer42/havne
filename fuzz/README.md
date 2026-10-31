@@ -15,6 +15,7 @@ UndefinedBehaviorSanitizer with Clang):
 | `fuzz_replay_file` | Arbitrary rows after a `frames.csv` header (ADR-0017), written to a scratch file in `TEMP`/`TMPDIR` and opened through `ecuio_session_create("replay://…")`, whose attach reads the whole file (ADR-0023). The status is `ECUIO_OK`, with a row count, or `ECUIO_ERR_LOAD_FAILED`, with a one-line detail that never holds the path; two creates agree. It runs at file I/O's pace, a few hundred inputs a second. |
 | `fuzz_socketcan_wire` | SocketCAN's parsers of outside input (`core/src/socketcan_wire.h`, ADR-0032), the first byte picking one: `?filter=` text (at most 8 filters, each ID within its width and flagged 29-bit exactly when above 0x7FF, the mask within that width and carrying the width flag), the kernel's `RTM_NEWLINK` payload (the name and kind terminated; what discovery lists and the verdict on the link agree with it), or a kernel frame (the length within its kind's room, only the flags it can carry). Pure code, so it runs on every platform though the transport is Linux's. Each input is a heap copy of its exact size; two runs agree. |
 | `fuzz_diagnostics` | The request engine reading an ECU's diagnostics and clearing them (`core/src/request_engine.h`, `diagnostics.h`; ADR-0037, ADR-0038), the input a script: each request answered by a timeout, raw bytes, a positive reply with an arbitrary tail (up to 128 bytes, past the 32 codes a list holds) or a negative one, a pending code among them, with Read again, rescans and clears (at the report's generation or one off it) between. `04` goes out only as the next request after the clear's `01 0C` was answered 0 rpm. After every step the report stays within its caps (codes, monitors, freeze-frame values, items), each list holds no more than it reported, every code and monitor it holds has a name, its values are finite, and it reads complete only with nothing left to ask; two runs agree. |
+| `fuzz_isotp` | ISO-TP (`core/src/isotp.h`, ADR-0040), the first byte picking one: arbitrary frames at arbitrary times to the timed receiver across eight IDs (every slot within its bounds, a message never past 4095 bytes or its slot, a Single Frame's within its frame, nothing left past N_Cr after an expiry, nothing left after the end of a reply), or a round trip from the sender to the receiver under the input's Flow Control frames (the sender keeps STmin, the block size and the sequence numbers; a send that ends arrives whole and the same; one overflowed or abandoned sends nothing more). Each message is read through an exact-size copy; two runs agree. |
 
 They aren't ctest tests: a time-bounded fuzzer in the default pass
 would make a green suite stop meaning green. The CI `fuzz` job runs
@@ -32,7 +33,7 @@ libFuzzer, Visual Studio 2022 17.0 or later; nothing else to install):
 
 ```sh
 cmake -B build-fuzz-msvc -A x64 -DHAVNE_BUILD_CORE_ONLY=ON -DBUILD_TESTING=OFF -DECUIO_BUILD_FUZZERS=ON
-cmake --build build-fuzz-msvc --config RelWithDebInfo --target fuzz_decode_signal fuzz_validate_set fuzz_uds_query fuzz_elm327_reply fuzz_replay_file fuzz_socketcan_wire fuzz_diagnostics
+cmake --build build-fuzz-msvc --config RelWithDebInfo --target fuzz_decode_signal fuzz_validate_set fuzz_uds_query fuzz_elm327_reply fuzz_replay_file fuzz_socketcan_wire fuzz_diagnostics fuzz_isotp
 build-fuzz-msvc/fuzz/RelWithDebInfo/fuzz_decode_signal.exe -max_total_time=60
 ```
 
@@ -46,7 +47,7 @@ runtimes are in `libclang-rt-<major>-dev` on Ubuntu):
 ```sh
 cmake -B build-fuzz -DCMAKE_BUILD_TYPE=RelWithDebInfo -DHAVNE_BUILD_CORE_ONLY=ON \
   -DBUILD_TESTING=OFF -DECUIO_BUILD_FUZZERS=ON -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++
-cmake --build build-fuzz --target fuzz_decode_signal fuzz_validate_set fuzz_uds_query fuzz_elm327_reply fuzz_replay_file fuzz_socketcan_wire fuzz_diagnostics
+cmake --build build-fuzz --target fuzz_decode_signal fuzz_validate_set fuzz_uds_query fuzz_elm327_reply fuzz_replay_file fuzz_socketcan_wire fuzz_diagnostics fuzz_isotp
 ./build-fuzz/fuzz/fuzz_decode_signal -max_total_time=60
 ```
 

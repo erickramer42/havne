@@ -37,6 +37,10 @@ constexpr uint32_t SOCKETCAN_ERR_RESTARTED =
     0x00000100u; /* CAN_ERR_RESTARTED */
 constexpr uint32_t SOCKETCAN_CTRLMODE_LISTENONLY =
     0x02u; /* CAN_CTRLMODE_LISTENONLY */
+constexpr uint32_t SOCKETCAN_CTRLMODE_ONE_SHOT =
+    0x08u; /* CAN_CTRLMODE_ONE_SHOT */
+constexpr uint32_t SOCKETCAN_STATE_ERROR_ACTIVE =
+    0; /* CAN_STATE_ERROR_ACTIVE, enum can_state's first */
 
 constexpr uint16_t SOCKETCAN_IFLA_IFNAME = 3;
 constexpr uint16_t SOCKETCAN_IFLA_MTU = 4;
@@ -44,7 +48,9 @@ constexpr uint16_t SOCKETCAN_IFLA_LINKINFO = 18;
 constexpr uint16_t SOCKETCAN_IFLA_INFO_KIND = 1;
 constexpr uint16_t SOCKETCAN_IFLA_INFO_DATA = 2;
 constexpr uint16_t SOCKETCAN_IFLA_CAN_BITTIMING = 1;
+constexpr uint16_t SOCKETCAN_IFLA_CAN_STATE = 4;
 constexpr uint16_t SOCKETCAN_IFLA_CAN_CTRLMODE = 5;
+constexpr uint16_t SOCKETCAN_IFLA_CAN_RESTART_MS = 6;
 constexpr uint16_t SOCKETCAN_NLA_TYPE_MASK =
     0x3FFF; /* without NESTED, BYTEORDER */
 constexpr uint32_t SOCKETCAN_IFF_UP = 0x1;
@@ -182,12 +188,20 @@ struct socketcan_link {
     uint32_t bitrate = 0; /* IFLA_CAN_BITTIMING's first field */
     bool has_ctrlmode = false;
     uint32_t ctrlmode = 0; /* IFLA_CAN_CTRLMODE's flags */
+    bool has_state = false;
+    uint32_t state = 0; /* IFLA_CAN_STATE: enum can_state */
+    bool has_restart_ms = false;
+    uint32_t restart_ms = 0; /* IFLA_CAN_RESTART_MS: 0 = never by itself */
 
     bool is_can() const { return strcmp(kind, "can") == 0; }
     bool is_vcan() const { return strcmp(kind, "vcan") == 0; }
     bool listen_only() const
     {
         return has_ctrlmode && (ctrlmode & SOCKETCAN_CTRLMODE_LISTENONLY) != 0;
+    }
+    bool one_shot() const
+    {
+        return has_ctrlmode && (ctrlmode & SOCKETCAN_CTRLMODE_ONE_SHOT) != 0;
     }
 };
 
@@ -284,6 +298,17 @@ inline bool socketcan_parse_link(const uint8_t* msg, size_t len,
                                             out->has_ctrlmode = true;
                                             out->ctrlmode = u32(
                                                 r + 4); /* mask, then flags */
+                                        } else if (
+                                            u == SOCKETCAN_IFLA_CAN_STATE &&
+                                            k >= 4) {
+                                            out->has_state = true;
+                                            out->state = u32(r);
+                                        } else if (
+                                            u ==
+                                                SOCKETCAN_IFLA_CAN_RESTART_MS &&
+                                            k >= 4) {
+                                            out->has_restart_ms = true;
+                                            out->restart_ms = u32(r);
                                         }
                                     });
                         }
@@ -338,6 +363,153 @@ inline socketcan_verdict socketcan_judge(const socketcan_link& l,
         return socketcan_verdict::wrong_rate;
     }
     return socketcan_verdict::ok;
+}
+
+/* Whether a controller must be in one-shot mode to send (ADR-0040
+ * section 2): open until the desk run measures what a wrong rate puts on
+ * a bus without it; the USB2CAN's firmware offers no one-shot mode */
+constexpr bool SOCKETCAN_SEND_NEEDS_ONE_SHOT = true;
+
+/* Whether a session that requests may send through the link (ADR-0040
+ * section 2), in the order the refusals are checked */
+enum class socketcan_send_verdict {
+    ok,
+    not_can, /* neither a CAN controller nor vcan */
+    down,
+    listen_only,      /* a controller that can't transmit */
+    no_rate,          /* a controller and no ?baud= to check it against */
+    wrong_rate,       /* up at another rate than ?baud= says */
+    restarts_itself,  /* restart-ms set: a bus-off wouldn't be the end */
+    no_one_shot,      /* SOCKETCAN_SEND_NEEDS_ONE_SHOT and not in it */
+    not_error_active, /* the controller already counts errors, or
+                         reports no state */
+};
+
+/* vcan has no rate, no modes and no state: it may always send */
+inline socketcan_send_verdict socketcan_judge_sender(const socketcan_link& l,
+                                                     uint32_t want_baud)
+{
+    if (!l.is_can() && !l.is_vcan()) {
+        return socketcan_send_verdict::not_can;
+    }
+    if (!l.up) {
+        return socketcan_send_verdict::down;
+    }
+    if (l.is_vcan()) {
+        return socketcan_send_verdict::ok;
+    }
+    if (!l.has_ctrlmode || l.listen_only()) {
+        /* no mode reported: as ADR-0032 counts it, not known to send */
+        return socketcan_send_verdict::listen_only;
+    }
+    if (want_baud == 0) {
+        return socketcan_send_verdict::no_rate;
+    }
+    if (l.bitrate != want_baud) {
+        return socketcan_send_verdict::wrong_rate;
+    }
+    if (!l.has_restart_ms || l.restart_ms != 0) {
+        return socketcan_send_verdict::restarts_itself;
+    }
+    if (SOCKETCAN_SEND_NEEDS_ONE_SHOT && !l.one_shot()) {
+        return socketcan_send_verdict::no_one_shot;
+    }
+    if (!l.has_state || l.state != SOCKETCAN_STATE_ERROR_ACTIVE) {
+        return socketcan_send_verdict::not_error_active;
+    }
+    return socketcan_send_verdict::ok;
+}
+
+/* ---- The first request proves the rate (ADR-0040 section 3) ---- */
+
+/* Requests that went out unseen (no echo, no error within N_As) before a
+ * session stops sending: a frame that lost arbitration goes again */
+constexpr uint8_t SOCKETCAN_PROOF_TRIES = 3;
+
+/* What became of a request the worker wrote */
+enum class socketcan_sent {
+    echoed,   /* the controller sent it and a node acknowledged it */
+    unechoed, /* no echo and no error within N_As */
+    error     /* an error frame, or the controller past error-active */
+};
+
+/* What the worker does next */
+enum class socketcan_proof_step {
+    carry_on,   /* nothing changes: the rotation goes on, or stays halted */
+    proven,     /* the rate is proven: the rotation starts */
+    send_again, /* unproven, unseen: the same request again */
+    halt        /* nothing more is sent this session */
+};
+
+struct socketcan_proof {
+    bool proven = false;
+    bool halted = false;
+    uint8_t unechoed = 0; /* in a row, before the proof */
+};
+
+/* vcan has no rate to get wrong: a session on it starts proven */
+inline socketcan_proof socketcan_proof_for(const socketcan_link& l)
+{
+    socketcan_proof p;
+    p.proven = l.is_vcan();
+    return p;
+}
+
+/* Until one request is echoed, the first error or the third request
+ * unseen halts the session; once proven, an unechoed request is a failed
+ * write and an error the link health's, so nothing here changes */
+inline socketcan_proof_step socketcan_proof_on(socketcan_proof& p,
+                                               socketcan_sent what)
+{
+    if (p.halted || p.proven) {
+        return socketcan_proof_step::carry_on;
+    }
+    switch (what) {
+    case socketcan_sent::echoed:
+        p.proven = true;
+        p.unechoed = 0;
+        return socketcan_proof_step::proven;
+    case socketcan_sent::unechoed:
+        if (++p.unechoed < SOCKETCAN_PROOF_TRIES) {
+            return socketcan_proof_step::send_again;
+        }
+        p.halted = true;
+        return socketcan_proof_step::halt;
+    case socketcan_sent::error:
+    default:
+        p.halted = true;
+        return socketcan_proof_step::halt;
+    }
+}
+
+/* ---- A requesting session's filters ---- */
+
+/* Each channel's reply ID (its ECU's frames) and request ID (the echo
+ * of its own), exact, each of its width; out holds 2 * n. */
+inline size_t socketcan_channel_filters(const uint32_t* rx_ids,
+                                        const uint32_t* tx_ids, size_t n,
+                                        socketcan_filter* out)
+{
+    size_t k = 0;
+    auto add = [&](uint32_t id) {
+        /* as ?filter= sets one: the width flag in the ID and the mask */
+        const bool extended = id > SOCKETCAN_SFF_MASK;
+        const uint32_t flagged = id | (extended ? SOCKETCAN_EFF_FLAG : 0);
+        for (size_t i = 0; i < k; ++i) {
+            if (out[i].id == flagged) {
+                return;
+            }
+        }
+        out[k].id = flagged;
+        out[k].mask = (extended ? SOCKETCAN_EFF_MASK : SOCKETCAN_SFF_MASK) |
+                      SOCKETCAN_EFF_FLAG;
+        ++k;
+    };
+    for (size_t c = 0; c < n; ++c) {
+        add(rx_ids[c]);
+        add(tx_ids[c]);
+    }
+    return k;
 }
 
 /* ---- A kernel frame to an ecuio_frame_t ---- */

@@ -83,6 +83,8 @@ which has no bench session):
 |---|---|---|---|
 | 26 | **A real CAN controller, listening:** a `gs_usb` adapter (candleLight firmware) reports its link kind `can`, its bit rate and `CAN_CTRLMODE_LISTENONLY` through rtnetlink as the canned messages in `SocketCanTest` have them; in listen-only mode it never ACKs or sends an error frame; on a car's bus at the right rate its frames arrive with the kernel's times, and at a wrong rate it reports errors but disturbs nothing; unplugged, the session fails hard and recovers when it's back | STILL UNKNOWN: no native CAN adapter on hand | The netlink parsing and the listen-only rule are UNIT-tested over canned messages, and the transport is HARNESS-tested on `vcan0` (`SocketCanBusTest`), which has no controller. WSL's kernel (6.18) has `gs_usb`, `slcan`, `peak_usb`, `kvaser_usb` and the USB/IP client, so an adapter reaches it through `usbipd-win` (2026-10-29) |
 
+| 32 | **A real CAN controller, sending** ([ADR-0040](../adr/0040-socketcan-requests-isotp.md)): a `gs_usb` adapter echoes a frame (`MSG_CONFIRM` on the sending socket) only once a node has acknowledged it; with no other node on its bus, a frame yields no echo and an error frame, and nothing more goes out; on a bus of two at the right rate (the adapter and the VX through the Y-splitter, one terminator) requests echo and the VX hears them; at a wrong rate, the controller's own resends without one-shot mode stop at bus-off after a bounded count (`restart-ms 0`), which decides whether section 2 requires one-shot mode | STILL UNKNOWN: an Innomaker USB2CAN (firmware V3.4.3) is on hand; its driver offers loopback, listen-only and `CC-LEN8-DLC`, not one-shot or bus-error reporting, and sets `IFF_ECHO`; the desk bus waits for a terminator (v0.3.6) | The rules over canned netlink messages (`SocketCanTest.OnlyAControllerThatCanStopAtOnceMaySend`, `.TheFirstEchoProvesTheRateAndAnErrorBeforeItHalts`), and requests on `vcan0`, which echoes every frame (`SocketCanRequestTest`) |
+
 ### The session clock ([ADR-0033](../adr/0033-session-time-counts-sleep.md))
 
 | # | Assumption in the code | State | Evidence |
@@ -115,6 +117,8 @@ which has no bench session):
 - **#25, a BLE adapter's service:** needs a BLE adapter.
 - **#26, a real CAN controller:** a `gs_usb` adapter on the bench, then
   a car through an OBD cable (CAN-H pin 6, CAN-L pin 14), listen-only.
+- **#32, a real CAN controller sending:** the desk bus of the USB2CAN
+  and the VX, once a terminator is on hand, then the car.
 - **#27, a sleep in session time, on Linux:** a Linux machine suspended
   mid-session, if one is at hand (Android is confirmed).
 - **#28, trouble codes on a car:** a stored code and its freeze frame,
