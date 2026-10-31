@@ -122,17 +122,20 @@ gtest_discover_tests(test_socketcan)
 # test_vcan_socketcan.cpp: the SocketCAN transport on that bus
 # (ADR-0032, SocketCanBusTest); it holds the binary's new_counter.h.
 # test_vcan_requests.cpp: socketcan:// requesting through ISO-TP against
-# that ECU (ADR-0040, SocketCanRequestTest).
+# that ECU (ADR-0040, SocketCanRequestTest). test_vcan_isotp.cpp: core's
+# ISO-TP against the kernel's (IsoTpConformanceTest).
 # RUN_SERIAL: the cases share the bus, and an error frame passes every
 # session's ID filter.
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     add_executable(test_vcan test_vcan.cpp test_vcan_socketcan.cpp
-                   test_vcan_requests.cpp)
+                   test_vcan_requests.cpp test_vcan_isotp.cpp)
     target_compile_definitions(test_vcan PRIVATE
         ECUIO_REPLAY_FIXTURES="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/replay"
     )
     find_package(Threads REQUIRED)
     target_link_libraries(test_vcan PRIVATE ecuio-core GTest::gtest_main Threads::Threads)
+    # core/src: isotp.h, pure and internal (test_socketcan's precedent)
+    target_include_directories(test_vcan PRIVATE ${CMAKE_SOURCE_DIR}/core/src)
     app_enable_warnings(test_vcan)
     gtest_discover_tests(test_vcan PROPERTIES TIMEOUT 30 RUN_SERIAL TRUE)
 endif()
