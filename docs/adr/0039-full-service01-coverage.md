@@ -367,8 +367,13 @@ decode, not in a transport.
 > single record is a failure, and three in a row end packing on the
 > channel; the support report's `ECUIO_SUPPORT_PACKED` says a pack was
 > answered, `ECUIO_SUPPORT_UNPACKED` that packing ended. A pack drops
-> nothing. The walk still asks one bitmap per request. Not yet run on
-> a car.
+> nothing. The walk still asks one bitmap per request. Run on the test
+> car through the MX+ the same day
+> ([2026-10-31-elm327-vehicle-2](../bench-sessions/2026-10-31-elm327-vehicle-2.md)):
+> the ECU answered every pack in J1979's form; fast signals refreshed
+> every 0.107 s and slow ones every 0.665 s, against 0.521 s and 2.577 s
+> one PID per request, beating the estimate below. The car answers
+> PID 68 with seven data bytes, so 68 goes alone.
 
 **Fallback.** An ECU that answers a packed request with nothing, with
 a negative reply, or with only its first PID, three times in a row,
