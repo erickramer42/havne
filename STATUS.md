@@ -87,7 +87,8 @@ SocketCAN requests come next ([roadmap](#roadmap)).
     requests run in two rate classes, two fast (rpm, speed, load, MAF,
     throttle, fuel pressure, lambda) to one slow (temperatures,
     pressures, counters); Live hides the signals the car's bitmaps
-    leave out and says how many; imperial units cover the new units
+    leave out and the fields its replies come without (core's absent
+    signals), and says how many; imperial units cover the new units
     (inH2O, gal/h, lb·ft). Verified against the fakes' ECU, which
     answers every linear PID, through J2534 and ELM327, and the car's
     recordings replay to their own values through the grown set. On
@@ -342,10 +343,10 @@ scheduled. What each holds, past its row:
   its requests in two rate classes, and Live hiding what a car lacks;
   run on the test car (BENCH prep #30), where PIDs 23 and 59 read one
   sensor (so a car whose bitmaps list both asks 59 in the slow class,
-  ADR-0039 §3) and 55 and 56 answer one of their two fields, so two
-  rows never fill. Next, several
-  PIDs per request (ADR-0039's Appendix A), after a car run of the
-  classes. The bit-field, enumerated and complex PIDs wait for decoder
+  ADR-0039 §3) and 55 and 56 answer one of their two fields (core
+  reports such a field absent, `ecuio_session_get_absent_signals`, and
+  Live hides it, ADR-0039 §6). Next, several PIDs per request
+  (ADR-0039's Appendix A), now that the car has run the classes. The bit-field, enumerated and complex PIDs wait for decoder
   kinds of their own (ADR-0039 §2).
 - **Trouble codes:** reading is built
   ([ADR-0037](docs/adr/0037-reading-trouble-codes.md)): stored, pending

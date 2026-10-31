@@ -361,3 +361,17 @@ reply in `frames.csv`'s form, `"7F 0A 11"`), `"unanswered"` or
 §1 requires. `cli/diagnostics_line.h` formats it; `CliDiagnosticsTest`
 covers each outcome, and the mock's line is in `CliGoldenTest`'s
 `mock.jsonl`.
+
+## Appendix: 2026-10-31, absent signals
+
+[ADR-0039](0039-full-service01-coverage.md) §6 grows schema 1 by one
+type. With `--values`, `stream` writes an `absent` line (`ids`, the
+signal IDs the `signals` line names) whenever core's list of signals
+the session's frames come without changes
+(`ecuio_session_get_absent_signals`): a def whose key matched three
+frames that ended before its field, while none carried it, as the test
+car's one-byte PID 55 replies leave bank 3's field. The main thread
+polls it in its drain, as it does the diagnostics, so the worker's
+callbacks (§4) are unchanged; a list that empties again writes
+`"ids": []`. `CliReplayTest.AnAbsentFieldIsNamed`
+(`tests/cli_absent.py`) replays such replies.

@@ -3701,6 +3701,75 @@ TEST(CoreTest, ValuesGiveEachTextValueASlotOfItsOwn)
     EXPECT_EQ(ecuio_profile_unregister("test-text-slots"), ECUIO_OK);
 }
 
+/* ADR-0039 §6: the test car answers PID 55 with bank 1's byte alone
+ * (docs/bench-sessions/2026-10-31-elm327-vehicle.md), so the bank 3
+ * field is absent once ECUIO_ABSENT_AFTER_FRAMES replies have ended
+ * before it, and leaves the list when a reply carries it. Bank 1 is
+ * never absent; a session with no values callback judges nothing; the
+ * list stays readable after close. */
+TEST(CoreTest, AFieldPastEveryReplyIsAbsent)
+{
+    const uint16_t b3 = ECUIO_OBD2_PID_SIG_ID(0x55, 1);
+    const ecuio_frame_t one =
+        value_frame(ECUIO_OBD2_ECU_ARB_ID, {0x41, 0x55, 0x80});
+    const ecuio_frame_t both =
+        value_frame(ECUIO_OBD2_ECU_ARB_ID, {0x41, 0x55, 0x80, 0x7F});
+    uint16_t ids[4] = {};
+    uint32_t count = 99;
+
+    ecuio_session_t* session = nullptr;
+    ASSERT_EQ(
+        ecuio_session_create("mock://a?profile=obd2&diagnose=0", &session),
+        ECUIO_OK);
+    ValuesCapture cap;
+    ASSERT_EQ(ecuio_register_values_callback(session, values_capture_cb, &cap),
+              ECUIO_OK);
+    for (uint32_t k = 1; k <= ECUIO_ABSENT_AFTER_FRAMES; ++k) {
+        ecuio_session_dispatch_callbacks(session, &one);
+        ASSERT_EQ(ecuio_session_get_absent_signals(session, ids, 4, &count),
+                  ECUIO_OK);
+        EXPECT_EQ(count, k < ECUIO_ABSENT_AFTER_FRAMES ? 0u : 1u)
+            << "after " << k << " short replies";
+    }
+    EXPECT_EQ(ids[0], b3);
+    EXPECT_EQ(ecuio_session_get_absent_signals(session, nullptr, 0, &count),
+              ECUIO_OK);
+    EXPECT_EQ(count, 1u) << "capacity 0 asks the count";
+    EXPECT_EQ(ecuio_session_get_absent_signals(session, nullptr, 1, &count),
+              ECUIO_ERR_NULL_ARGUMENT);
+
+    ecuio_session_close(session);
+    EXPECT_EQ(ecuio_session_get_absent_signals(session, ids, 4, &count),
+              ECUIO_OK);
+    EXPECT_EQ(count, 1u) << "readable after close";
+    ecuio_session_destroy(session);
+
+    ASSERT_EQ(
+        ecuio_session_create("mock://b?profile=obd2&diagnose=0", &session),
+        ECUIO_OK);
+    ASSERT_EQ(ecuio_register_values_callback(session, values_capture_cb, &cap),
+              ECUIO_OK);
+    for (uint32_t k = 0; k < ECUIO_ABSENT_AFTER_FRAMES; ++k) {
+        ecuio_session_dispatch_callbacks(session, &one);
+    }
+    ecuio_session_dispatch_callbacks(session, &both);
+    ASSERT_EQ(ecuio_session_get_absent_signals(session, ids, 4, &count),
+              ECUIO_OK);
+    EXPECT_EQ(count, 0u) << "a reply that carries it clears it";
+    ecuio_session_destroy(session);
+
+    ASSERT_EQ(
+        ecuio_session_create("mock://c?profile=obd2&diagnose=0", &session),
+        ECUIO_OK);
+    for (uint32_t k = 0; k < ECUIO_ABSENT_AFTER_FRAMES; ++k) {
+        ecuio_session_dispatch_callbacks(session, &one);
+    }
+    ASSERT_EQ(ecuio_session_get_absent_signals(session, ids, 4, &count),
+              ECUIO_OK);
+    EXPECT_EQ(count, 0u) << "no values callback, nothing decoded or judged";
+    ecuio_session_destroy(session);
+}
+
 /* uds-generic's set holds a scanned range's DIDs from create, so a
  * reply for one decodes before the scan has found it (ADR-0024 Â§1) */
 TEST(CoreTest, ValuesOfAScannedDidComeFromTheSetBuiltAtCreate)

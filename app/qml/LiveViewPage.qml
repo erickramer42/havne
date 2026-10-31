@@ -262,7 +262,8 @@ Page {
         }
 
         // What the list leaves out, and why: rows an ECU's supported-PID
-        // bitmaps mark unsupported. The Dashboard keeps them.
+        // bitmaps mark unsupported, and fields its replies come without
+        // (core's absent signals). The Dashboard keeps them.
         Label {
             objectName: "hiddenNote"
             visible: Bridge.signalModel.hiddenCount > 0
@@ -270,8 +271,8 @@ Page {
             wrapMode: Text.WordWrap
             color: Theme.textDim
             text: Bridge.signalModel.hiddenCount === 1
-                  ? qsTr("1 signal hidden: the ECU doesn't support its PID")
-                  : qsTr("%1 signals hidden: the ECU doesn't support their PIDs")
+                  ? qsTr("1 signal hidden: the ECU doesn't send it")
+                  : qsTr("%1 signals hidden: the ECU doesn't send them")
                         .arg(Bridge.signalModel.hiddenCount)
         }
 

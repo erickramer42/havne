@@ -1,7 +1,8 @@
 // File/layer: app/sessionbridge.h | Qt6 Core, app layer, C++17
 // Testing: test_bridge (Qt-linked target): the frame log's ring, order
 //          and payload storage, SignalListModel's history ring and display units,
-//          its hidden rows and LiveSignalModel (BridgeTest.LiveHides*),
+//          its hidden rows (unsupported or absent) and LiveSignalModel
+//          (BridgeTest.LiveHides*),
 //          discoverJ2534Devices' and discoverSerialPorts' marshaling
 //          shape, recentRecordings and replayUriFor
 //          (BridgeTest.RecentRecordings*, .ReplayUriFor*), the delivery figures
@@ -222,6 +223,10 @@ public:
     // The bitmap at PID 0x20 * ((pid - 1) / 0x20) was answered and its
     // bit for pid is clear. A range never answered judges nothing.
     static bool pidMarkedUnsupported(const ecuio_channel_support_t& s, uint8_t pid);
+    // The signals core reports its frames come without
+    // (ecuio_session_get_absent_signals): those rows are hidden too, and
+    // the rest are judged by their support alone. A new set shows all.
+    void applyAbsent(const std::vector<uint16_t>& ids);
 
     // Display units (ADR-0022): rows and history keep the decoded value;
     // value, unit, decimals and chartData() convert on the way out
@@ -279,7 +284,9 @@ private:
         bool isText = false;      // the def's kind is TEXT or HEX
         uint32_t messageId = 0;   // the def's, which names its channel
         uint8_t pid = 0;          // a Service 01 def's PID; 0 for any other
-        bool hidden = false;      // its ECU marks the PID unsupported
+        bool unsupported = false; // its ECU marks the PID unsupported
+        bool absent = false;      // core: its frames come without it
+        bool hidden = false;      // either: Live leaves the row out
         // Whether the strip chart plots this signal. Values and history
         // update regardless: the Dashboard reads every row, and a signal
         // plotted again shows the history it kept meanwhile.
@@ -296,6 +303,9 @@ private:
         qint64 arrivedMs = -1;
     };
 
+    // Hidden is unsupported or absent: re-judges every row, and notifies
+    // the rows that changed, the hidden count and the plotted count
+    void rejudgeHidden();
     static void pushSample(Entry& e, qint64 stamp, double value);
     static void pushWindow(Entry& e, const WindowValue& w);
     // A row's value as displayed in the current unit system
@@ -756,6 +766,12 @@ private:
     void pollChannelSupport();
     uint32_t m_channelCount = 0;
     uint32_t m_supportGeneration[ECUIO_SESSION_INFO_MAX_CHANNELS] = {};
+    // The signals core reports its frames come without (ADR-0039 §6):
+    // read each tick into m_absentRead (sized at connect), handed to the
+    // model when they differ from m_absentIds
+    void pollAbsentSignals();
+    std::vector<uint16_t> m_absentRead;
+    std::vector<uint16_t> m_absentIds;
     // What each channel's ECU said it is (ADR-0021), logged once complete
     void pollChannelIdentity();
     void pollReplayEnd();   // the tick: "Replay finished" once, at the end of the file

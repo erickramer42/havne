@@ -184,7 +184,7 @@ TestCase {
         const list = findChild(page, "signalList")
         const all = Bridge.signalModel.rowCount()
         tryVerify(() => note.visible, 5000, "the note shows")
-        compare(note.text, "2 signals hidden: the ECU doesn't support their PIDs")
+        compare(note.text, "2 signals hidden: the ECU doesn't send them")
         compare(list.count, all - 2, "Live lists the rest")
         compare(Bridge.signalModel.rowCount(), all, "the model keeps every row")
         for (let r = 0; r < list.count; ++r) {

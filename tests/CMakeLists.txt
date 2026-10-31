@@ -200,6 +200,11 @@ if(TARGET havne-cli)
             COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/cli_recording_changed.py
                     $<TARGET_FILE:havne-cli>)
         set_tests_properties(CliReplayTest.ACutRecordingEndsTheStream PROPERTIES TIMEOUT 30)
+        # A field past every reply is named on an absent line (ADR-0039 §6)
+        add_test(NAME CliReplayTest.AnAbsentFieldIsNamed
+            COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/cli_absent.py
+                    $<TARGET_FILE:havne-cli>)
+        set_tests_properties(CliReplayTest.AnAbsentFieldIsNamed PROPERTIES TIMEOUT 30)
     endif()
     function(app_cli_usage name args)
         add_test(NAME CliUsageTest.${name}

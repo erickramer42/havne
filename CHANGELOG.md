@@ -53,9 +53,13 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
   each car only for the ones it has. The fast-changing readings (rpm,
   speed, load, MAF, throttle, fuel pressure, lambda) are asked twice
   for each slow one (temperatures, pressures, counters).
-- Live lists only the signals the car's ECU supports, with a line
-  saying how many it left out; the Dashboard and recordings keep every
-  signal.
+- Live lists only the signals the car's ECU supports and sends, with a
+  line saying how many it left out; the Dashboard and recordings keep
+  every signal. A field the ECU's replies come without (bank 3 of a
+  two-bank engine's oxygen-sensor trims) is left out too.
+- `ecuio_session_get_absent_signals` (core's C API) lists the signals
+  a session's replies come without, and `havne-cli stream --values`
+  writes them as an `absent` line.
 - Imperial units show Pa as inH2O, L/h as gal/h and N·m as lb·ft.
 
 ### Changed

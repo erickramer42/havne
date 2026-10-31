@@ -1,7 +1,7 @@
 // File/layer: core/src/session.h | internal, C++17, Qt-free; the session
 //             struct behind the opaque ecuio_session_t
 // Testing: UNIT: CoreTest (sessions, callbacks, the decoded values and
-//          their buffers, the info, support, identity and diagnostics
+//          their buffers, the absent signals' counts, the info, support, identity and diagnostics
 //          copies); HARNESS: the J2534 and ELM327 suites, whose workers
 //          write support[], identity[] and diagnostics[]
 
@@ -47,6 +47,13 @@ struct ecuio_session {
     std::vector<ecuio_value_t> values;
     std::vector<char> text_scratch;
     uint32_t text_slots = 0;
+    /* Per def, beside values (ADR-0039 §6): the frames whose key matched
+     * but ended before its field, counted up to
+     * ECUIO_ABSENT_AFTER_FRAMES, and whether any carried it. Written by
+     * dispatch on the worker, read by ecuio_session_get_absent_signals
+     * on the caller's thread. */
+    std::unique_ptr<std::atomic<uint8_t>[]> short_frames;
+    std::unique_ptr<std::atomic<uint8_t>[]> carried;
     std::atomic<int32_t> last_error{ECUIO_OK};
     std::atomic<uint32_t> error_count{0};
     /* Written once by the transport's attach, then the profile by

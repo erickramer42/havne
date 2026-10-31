@@ -179,6 +179,22 @@ answered stays listed; a def hidden this way comes back if a rescan
 finds its PID. This is part of the change, not a follow-up: `obd2` is
 the default profile for `j2534://` and `elm327://`.
 
+A PID the bitmaps list can still come without one of its fields: the
+test car answers 55 and 56 with bank 1's byte alone, where J1979 gives
+each a bank 3 byte too
+([2026-10-31-elm327-vehicle](../bench-sessions/2026-10-31-elm327-vehicle.md)).
+Core knows it, because its decode of that field runs past the reply
+(`ECUIO_DECODE_ERR_PAST_PAYLOAD`), so core reports it:
+`ecuio_session_get_absent_signals` (`profile.h`) lists each def whose
+key matched `ECUIO_ABSENT_AFTER_FRAMES` (3) frames that ended before its
+field while none carried it, and drops it once one does. The bridge
+reads the list on its tick and Live hides those rows beside the
+bitmaps' (its note says how many the ECU doesn't send); `havne-cli
+stream --values` writes it as an `absent` line. The judgment is core's
+rather than the bridge's, so a program on the C ABI gets it too; it
+runs on the decode for a values callback, so a session with none
+judges nothing.
+
 ### 7. The fakes
 
 The fakes' ECU (`tests/fake_ecu.h`) answers every linear PID with a

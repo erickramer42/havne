@@ -7,7 +7,8 @@
 //          each window's envelope at its frames' times
 //          (BridgeTest.AWindow*, .TheChartKeepsTheFixturesPeak), rows by
 //          id, the signal model's roles and age, the rows an ECU's
-//          bitmaps mark unsupported, hidden from Live's filtered view
+//          bitmaps mark unsupported or core reports absent, hidden from
+//          Live's filtered view
 //          (BridgeTest.LiveHides*),
 //          refresh, link-state mapping, the activity log's session,
 //          ECU, diagnostics and delivery lines (the ELM327 session line too,
@@ -577,19 +578,41 @@ bool SignalListModel::pidMarkedUnsupported(const ecuio_channel_support_t& s, uin
 
 void SignalListModel::applySupport(const ecuio_channel_support_t* reports, size_t count)
 {
+    for (Entry& e : m_entries) {
+        e.unsupported = false;
+        for (size_t i = 0; e.pid != 0 && i < count; ++i) {
+            if (reports[i].generation != 0 && reports[i].rx_id == e.messageId) {
+                e.unsupported = pidMarkedUnsupported(reports[i], e.pid);
+                break;
+            }
+        }
+    }
+    rejudgeHidden();
+}
+
+void SignalListModel::applyAbsent(const std::vector<uint16_t>& ids)
+{
+    for (Entry& e : m_entries) {
+        e.absent = false;
+    }
+    for (uint16_t id : ids) {
+        const int row = m_rowOfId.value(id, -1);
+        if (row >= 0) {
+            m_entries[static_cast<size_t>(row)].absent = true;
+        }
+    }
+    rejudgeHidden();
+}
+
+void SignalListModel::rejudgeHidden()
+{
     int first = -1;
     int last = -1;
     int hidden = 0;
     int subscribed = 0;
     for (size_t row = 0; row < m_entries.size(); ++row) {
         Entry& e = m_entries[row];
-        bool hide = false;
-        for (size_t i = 0; e.pid != 0 && i < count; ++i) {
-            if (reports[i].generation != 0 && reports[i].rx_id == e.messageId) {
-                hide = pidMarkedUnsupported(reports[i], e.pid);
-                break;
-            }
-        }
+        const bool hide = e.unsupported || e.absent;
         if (hide != e.hidden) {
             e.hidden = hide;
             if (first < 0) first = static_cast<int>(row);
@@ -640,6 +663,7 @@ SessionBridge::SessionBridge(QObject* parent)
         notifyFrameCounts();
         pollLinkHealth();   // every tick while connected: transitions only
         pollChannelSupport();
+        pollAbsentSignals();
         pollChannelIdentity();
         pollChannelDiagnostics();
         pollReplayEnd();
@@ -1023,6 +1047,9 @@ void SessionBridge::applyConnectedState(ecuio_session_t* session, const QString&
     for (uint32_t& g : m_supportGeneration) {
         g = 0;
     }
+    const ecuio_signal_set_t* set = ecuio_session_signal_set(session);
+    m_absentRead.assign((set != nullptr && set->defs != nullptr) ? set->count : 0u, 0);
+    m_absentIds.clear();
     for (uint32_t& g : m_identityGeneration) {
         g = 0;
     }
@@ -1844,6 +1871,30 @@ void SessionBridge::pollChannelSupport()
     if (changed) {
         m_signalModel->applySupport(reports, m_channelCount);
     }
+}
+
+// Live hides the signals core reports its frames come without, as it
+// hides an unsupported PID's (ADR-0039 §6): the fact is core's, the
+// hiding the model's
+void SessionBridge::pollAbsentSignals()
+{
+    if (!m_connected.load(std::memory_order_acquire) || m_session == nullptr ||
+        m_absentRead.empty()) {
+        return;
+    }
+    uint32_t count = 0;
+    if (ecuio_session_get_absent_signals(m_session, m_absentRead.data(),
+                                         static_cast<uint32_t>(m_absentRead.size()),
+                                         &count) != ECUIO_OK) {
+        return;
+    }
+    count = std::min<uint32_t>(count, static_cast<uint32_t>(m_absentRead.size()));
+    if (count == m_absentIds.size() &&
+        std::equal(m_absentIds.begin(), m_absentIds.end(), m_absentRead.begin())) {
+        return;
+    }
+    m_absentIds.assign(m_absentRead.begin(), m_absentRead.begin() + count);
+    m_signalModel->applyAbsent(m_absentIds);
 }
 
 /* One channel's "ECU 0x…:" line: what its supported-PID bitmaps list,

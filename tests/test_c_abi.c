@@ -136,8 +136,13 @@ int main(void)
     if (ecuio_session_get_info(NULL, &info) != ECUIO_ERR_NULL_ARGUMENT) {
         return 1;
     }
-    if (ecuio_register_values_callback(NULL, NULL, NULL) != ECUIO_ERR_NULL_ARGUMENT ||
-        ecuio_unregister_values_callback(NULL, NULL, NULL) != ECUIO_ERR_NULL_ARGUMENT) {
+    if (ecuio_register_values_callback(NULL, NULL, NULL) !=
+            ECUIO_ERR_NULL_ARGUMENT ||
+        ecuio_unregister_values_callback(NULL, NULL, NULL) !=
+            ECUIO_ERR_NULL_ARGUMENT ||
+        ecuio_session_get_absent_signals(NULL, NULL, 0, NULL) !=
+            ECUIO_ERR_NULL_ARGUMENT ||
+        ECUIO_ABSENT_AFTER_FRAMES != 3u) {
         return 1;
     }
     if (ecuio_decode_text(NULL, NULL, 0, NULL, 0) != ECUIO_DECODE_ERR_NULL) {

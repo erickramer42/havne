@@ -47,6 +47,7 @@
 #include <ecuio/profile.h>
 #include <ecuio/signals.h>
 #include <ecuio/serial.h>
+#include <ecuio/signal_sets.h>
 
 #ifdef _WIN32
 #ifndef NOMINMAX
@@ -2970,6 +2971,115 @@ TEST(BridgeTest, LiveHidesTheRowsTheirEcuMarksUnsupported)
     model.setSignalSet(ecuio_obd2_signal_set());
     EXPECT_EQ(model.hiddenCount(), 0);
     EXPECT_EQ(live.rowCount(), rows);
+}
+
+namespace {
+
+/* The obd2 set's row for signal id, or -1 */
+int obd2RowOf(uint16_t id)
+{
+    const ecuio_signal_set_t* set = ecuio_obd2_signal_set();
+    for (uint32_t i = 0; i < set->count; ++i) {
+        if (set->defs[i].id == id)
+            return static_cast<int>(i);
+    }
+    return -1;
+}
+
+} // namespace
+
+/* ADR-0039 §6: a row core reports absent (its field past every reply)
+ * is hidden beside the ones the bitmaps rule out, and shown again when
+ * core no longer reports it; a PID the bitmaps list keeps its other
+ * rows. A new set shows all. */
+TEST(BridgeTest, LiveHidesTheFieldsCoreReportsAbsent)
+{
+    SignalListModel model;
+    model.setSignalSet(ecuio_obd2_signal_set());
+    LiveSignalModel live(&model);
+    const int rows = model.rowCount();
+    const int b1 = obd2RowOf(ECUIO_OBD2_PID_SIG_ID(0x55, 0));
+    const int b3 = obd2RowOf(ECUIO_OBD2_PID_SIG_ID(0x55, 1));
+    ASSERT_GE(b1, 0);
+    ASSERT_GE(b3, 0);
+    const auto hidden = [&model](int row) {
+        return model.data(model.index(row), SignalListModel::HiddenRole)
+            .toBool();
+    };
+
+    model.applyAbsent({ECUIO_OBD2_PID_SIG_ID(0x55, 1)});
+    EXPECT_TRUE(hidden(b3));
+    EXPECT_FALSE(hidden(b1));
+    EXPECT_EQ(model.hiddenCount(), 1);
+    EXPECT_EQ(live.rowCount(), rows - 1);
+    EXPECT_EQ(model.subscribedCount(), rows - 1);
+
+    /* The bitmaps hide theirs beside it; neither undoes the other */
+    ecuio_channel_support_t car{};
+    car.flags = ECUIO_SUPPORT_PROBED;
+    car.rx_id = 0x7E8;
+    car.generation = 1;
+    car.ranges = 0x1; /* 0x01-0x20: all clear but 0x0C */
+    car.pid_bitmap[(0x0C - 1) / 8] = 0x80u >> ((0x0C - 1) % 8);
+    model.applySupport(&car, 1);
+    int unsupported = 0;
+    for (int r = 0; r < rows; ++r) {
+        const unsigned pid = ecuio_obd2_signal_set()->defs[r].mux_key & 0xFFu;
+        unsupported += (pid <= 0x20 && pid != 0x0C) ? 1 : 0;
+    }
+    ASSERT_GT(unsupported, 0);
+    EXPECT_TRUE(hidden(b3)) << "still absent after the support's judgment";
+    EXPECT_EQ(model.hiddenCount(), unsupported + 1);
+
+    model.applyAbsent({});
+    EXPECT_FALSE(hidden(b3)) << "core no longer reports it";
+    EXPECT_EQ(model.hiddenCount(), unsupported);
+
+    model.applyAbsent({ECUIO_OBD2_PID_SIG_ID(0x55, 1)});
+    model.setSignalSet(ecuio_obd2_signal_set());
+    EXPECT_EQ(model.hiddenCount(), 0) << "a new set shows every row";
+}
+
+/* The bridge reads core's absent signals on its tick: a replay of the
+ * test car's one-byte PID 55 replies hides bank 3's row, and only it */
+TEST(BridgeTest, LiveHidesAFieldTheRepliesComeWithout)
+{
+    QTemporaryDir dir;
+    ASSERT_TRUE(dir.isValid());
+    QByteArray text = "host_us,timestamp_us,id,flags,data\n";
+    for (int i = 0; i < 5; ++i) {
+        const QByteArray t = QByteArray::number(10000 * i);
+        text += t + ',' + t + ",0x7E8,0x0,41 55 80\n";
+    }
+    QFile f(dir.filePath(QStringLiteral("frames.csv")));
+    ASSERT_TRUE(f.open(QIODevice::WriteOnly));
+    ASSERT_EQ(f.write(text), text.size());
+    f.close();
+
+    SessionBridge bridge;
+    QStringList log;
+    QObject::connect(&bridge, &SessionBridge::logMessage,
+                     [&log](const QString& line) { log << line; });
+    ASSERT_TRUE(
+        bridge
+            .connectSession(QStringLiteral("replay://%1?profile=obd2&speed=max")
+                                .arg(dir.path()))
+            .isEmpty())
+        << log.join('\n').toStdString();
+    SignalListModel* model = bridge.signalModel();
+    const int b1 = obd2RowOf(ECUIO_OBD2_PID_SIG_ID(0x55, 0));
+    const int b3 = obd2RowOf(ECUIO_OBD2_PID_SIG_ID(0x55, 1));
+    ASSERT_TRUE(
+        spinUntil([model]() { return model->hiddenCount() > 0; }, 5000));
+    spinLoop(200);
+    EXPECT_EQ(model->hiddenCount(), 1);
+    EXPECT_TRUE(
+        model->data(model->index(b3), SignalListModel::HiddenRole).toBool());
+    EXPECT_FALSE(
+        model->data(model->index(b1), SignalListModel::HiddenRole).toBool());
+    EXPECT_TRUE(
+        model->data(model->index(b1), SignalListModel::HasValueRole).toBool());
+    ASSERT_TRUE(disconnectAndWait(bridge));
 }
 
 TEST(BridgeTest, ChannelSupportTextNamesTheEcuAndWhatItDropped)
