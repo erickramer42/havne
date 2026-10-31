@@ -6,7 +6,9 @@
 //          worker (BridgeTest.Values*, .RecordingHoldsEveryValueCoreDecodes),
 //          each window's envelope at its frames' times
 //          (BridgeTest.AWindow*, .TheChartKeepsTheFixturesPeak), rows by
-//          id, the signal model's roles and age
+//          id, the signal model's roles and age, the rows an ECU's
+//          bitmaps mark unsupported, hidden from Live's filtered view
+//          (BridgeTest.LiveHides*),
 //          refresh, link-state mapping, the activity log's session,
 //          ECU, diagnostics and delivery lines (the ELM327 session line too,
 //          the diagnostics line: BridgeTest.ChannelDiagnosticsText*,
@@ -263,6 +265,8 @@ QVariant SignalListModel::data(const QModelIndex& index, int role) const
         case IsTextRole: return e.isText;
         case WindowHighRole: return shown(e, e.windowHigh).value;
         case WindowLowRole: return shown(e, e.windowLow).value;
+        case RowRole: return index.row();
+        case HiddenRole: return e.hidden;
         default: return QVariant();
     }
 }
@@ -281,7 +285,9 @@ QHash<int, QByteArray> SignalListModel::roleNames() const
         {TextRole, "text"},
         {IsTextRole, "isText"},
         {WindowHighRole, "windowHigh"},
-        {WindowLowRole, "windowLow"}
+        {WindowLowRole, "windowLow"},
+        {RowRole, "row"},
+        {HiddenRole, "hidden"}
     };
 }
 
@@ -289,6 +295,8 @@ void SignalListModel::setSignalSet(const ecuio_signal_set_t* set)
 {
     // NULL/empty is valid (the raw profile): clear the model rather
     // than keep the previous session's rows.
+    const bool hadHidden = m_hiddenCount != 0;
+    m_hiddenCount = 0;
     if (set == nullptr || set->defs == nullptr || set->count == 0) {
         beginResetModel();
         m_entries.clear();
@@ -296,6 +304,7 @@ void SignalListModel::setSignalSet(const ecuio_signal_set_t* set)
         m_subscribedCount = 0;
         endResetModel();
         emit subscribedCountChanged();
+        if (hadHidden) emit hiddenCountChanged();
         m_clock.restart();
         return;
     }
@@ -314,6 +323,12 @@ void SignalListModel::setSignalSet(const ecuio_signal_set_t* set)
         e.decimals = set->defs[i].decimal_places;
         e.isText = set->defs[i].kind == ECUIO_VALUE_TEXT ||
                    set->defs[i].kind == ECUIO_VALUE_HEX;
+        e.messageId = set->defs[i].message_id;
+        // A Service 01 reply's key: 41 <PID>, at the payload's start
+        const ecuio_signal_def_t& d = set->defs[i];
+        if (d.mux_offset == 0 && d.mux_length == 2 && (d.mux_key >> 8) == 0x41u) {
+            e.pid = static_cast<uint8_t>(d.mux_key & 0xFFu);
+        }
         // A text row has nothing to plot, so it's never subscribed
         e.subscribed = !e.isText;
         if (e.subscribed) ++m_subscribedCount;
@@ -323,6 +338,7 @@ void SignalListModel::setSignalSet(const ecuio_signal_set_t* set)
     endResetModel();
     // A new set plots every numeric row, whatever the last one plotted
     emit subscribedCountChanged();
+    if (hadHidden) emit hiddenCountChanged();
 
     m_clock.restart();
 }
@@ -471,7 +487,7 @@ QVariantList SignalListModel::chartData() const
     QVariantList out;
     for (size_t row = 0; row < m_entries.size(); ++row) {
         const Entry& e = m_entries[row];
-        if (!e.subscribed || e.histCount == 0) continue;
+        if (!e.subscribed || e.hidden || e.histCount == 0) continue;
 
         const ecuio_display_value_t now = shown(e, e.value);
         QVariantMap m;
@@ -505,9 +521,11 @@ void SignalListModel::toggleSubscribed(int row)
     Entry& e = m_entries[static_cast<size_t>(row)];
     if (e.isText) return;   // nothing to plot
     e.subscribed = !e.subscribed;
-    if (e.subscribed) ++m_subscribedCount; else --m_subscribedCount;
     emit dataChanged(index(row), index(row), {SubscribedRole});
-    emit subscribedCountChanged();
+    if (!e.hidden) {
+        m_subscribedCount += e.subscribed ? 1 : -1;
+        emit subscribedCountChanged();
+    }
 }
 
 QStringList SignalListModel::unplottedNames() const
@@ -531,7 +549,9 @@ void SignalListModel::setUnplotted(const QStringList& names)
         const bool subscribed = !names.contains(QString::fromUtf8(e.name));
         if (subscribed != e.subscribed) {
             e.subscribed = subscribed;
-            m_subscribedCount += subscribed ? 1 : -1;
+            if (!e.hidden) {
+                m_subscribedCount += subscribed ? 1 : -1;
+            }
             changed = true;
         }
     }
@@ -543,12 +563,76 @@ void SignalListModel::setUnplotted(const QStringList& names)
     }
 }
 
+bool SignalListModel::pidMarkedUnsupported(const ecuio_channel_support_t& s, uint8_t pid)
+{
+    if (pid == 0) {
+        return false;
+    }
+    const unsigned range = (pid - 1u) / 0x20u;
+    if ((s.ranges & (1u << range)) == 0) {
+        return false;
+    }
+    return (s.pid_bitmap[(pid - 1u) / 8u] & (0x80u >> ((pid - 1u) % 8u))) == 0;
+}
+
+void SignalListModel::applySupport(const ecuio_channel_support_t* reports, size_t count)
+{
+    int first = -1;
+    int last = -1;
+    int hidden = 0;
+    int subscribed = 0;
+    for (size_t row = 0; row < m_entries.size(); ++row) {
+        Entry& e = m_entries[row];
+        bool hide = false;
+        for (size_t i = 0; e.pid != 0 && i < count; ++i) {
+            if (reports[i].generation != 0 && reports[i].rx_id == e.messageId) {
+                hide = pidMarkedUnsupported(reports[i], e.pid);
+                break;
+            }
+        }
+        if (hide != e.hidden) {
+            e.hidden = hide;
+            if (first < 0) first = static_cast<int>(row);
+            last = static_cast<int>(row);
+        }
+        hidden += e.hidden ? 1 : 0;
+        subscribed += (e.subscribed && !e.hidden) ? 1 : 0;
+    }
+    if (first < 0) {
+        return;
+    }
+    // Live's filtered view re-judges the rows HiddenRole changed in
+    emit dataChanged(index(first), index(last), {HiddenRole});
+    m_hiddenCount = hidden;
+    emit hiddenCountChanged();
+    if (subscribed != m_subscribedCount) {
+        m_subscribedCount = subscribed;
+        emit subscribedCountChanged();
+    }
+}
+
+// ---------------- LiveSignalModel ----------------
+LiveSignalModel::LiveSignalModel(SignalListModel* source, QObject* parent)
+    : QSortFilterProxyModel(parent)
+{
+    // A HiddenRole change re-filters its rows (dynamic filtering, the default)
+    setFilterRole(SignalListModel::HiddenRole);
+    setSourceModel(source);
+}
+
+bool LiveSignalModel::filterAcceptsRow(int sourceRow, const QModelIndex& sourceParent) const
+{
+    const QModelIndex i = sourceModel()->index(sourceRow, 0, sourceParent);
+    return !sourceModel()->data(i, SignalListModel::HiddenRole).toBool();
+}
+
 // ---------------- SessionBridge ----------------
 SessionBridge::SessionBridge(QObject* parent)
     : QObject(parent)
     , m_frameLog(new FrameListModel(this))
     , m_coalesceTimer(new QTimer(this))
     , m_signalModel(new SignalListModel(this))
+    , m_liveSignalModel(new LiveSignalModel(m_signalModel, this))
 {
     (void)ecuio_init();   // optional and always ECUIO_OK (core.h), paired below
 
@@ -1741,14 +1825,24 @@ void SessionBridge::pollChannelSupport()
     if (!m_connected.load(std::memory_order_acquire) || m_session == nullptr) {
         return;
     }
+    ecuio_channel_support_t reports[ECUIO_SESSION_INFO_MAX_CHANNELS] = {};
+    bool changed = false;
     for (uint32_t c = 0; c < m_channelCount; ++c) {
-        ecuio_channel_support_t s{};
-        if (ecuio_session_get_channel_support(m_session, c, &s) != ECUIO_OK ||
-            s.generation == m_supportGeneration[c]) {
+        ecuio_channel_support_t& s = reports[c];
+        if (ecuio_session_get_channel_support(m_session, c, &s) != ECUIO_OK) {
+            s = ecuio_channel_support_t{};   // judges nothing
+            continue;
+        }
+        if (s.generation == m_supportGeneration[c]) {
             continue;
         }
         m_supportGeneration[c] = s.generation;
+        changed = true;
         emit logMessage(channelSupportText(s));
+    }
+    // Live hides the rows the reports mark unsupported (ADR-0039 §6)
+    if (changed) {
+        m_signalModel->applySupport(reports, m_channelCount);
     }
 }
 

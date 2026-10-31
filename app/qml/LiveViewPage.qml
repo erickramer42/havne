@@ -2,7 +2,9 @@
 // Testing: model contract covered by test_bridge; swatch colors, dashes
 //          and banner text by test_qml (tests/qml/tst_liveview.qml, and
 //          tst_linkhealth.qml for the banner in each link state), which
-//          finds items by objectName, and the list giving up rows so the
+//          finds items by objectName, the rows an ECU lacks left out with
+//          the note saying how many (against the fake J2534 DLL), and the
+//          list giving up rows so the
 //          chart stays whole on a short page; the strip chart's layout (ranges,
 //          lanes, gaps, ticks, labels, a crowded trace's band) by tst_chartlayout.qml through
 //          ChartLayout; the drawing itself, sharp under zoom, is verified
@@ -160,7 +162,8 @@ Page {
             Layout.minimumHeight: oneRow
             clip: true
             boundsBehavior: Flickable.StopAtBounds
-            model: Bridge.signalModel
+            // The rows whose PID no ECU marked unsupported (ADR-0039 §6)
+            model: Bridge.liveSignalModel
 
             ScrollBar.vertical: ScrollBar {
                 id: listBar
@@ -174,6 +177,9 @@ Page {
             delegate: Rectangle {
                 id: signalDelegate
                 required property int index
+                // The signal model's row: its plot box and its trace
+                // color, which chartData's `row` names
+                required property int row
                 required property string name
                 required property string unit
                 required property double value
@@ -205,7 +211,7 @@ Page {
                         objectName: "plotCheck"
                         checked: signalDelegate.subscribed
                         enabled: !signalDelegate.isText   // nothing to plot
-                        onToggled: Bridge.signalModel.toggleSubscribed(signalDelegate.index)
+                        onToggled: Bridge.signalModel.toggleSubscribed(signalDelegate.row)
                         Accessible.name: qsTr("Plot %1").arg(signalDelegate.name)
                     }
                     // The chart's legend: this row's trace color, hollow
@@ -216,7 +222,7 @@ Page {
                         // index is -1 while a model reset (a connect)
                         // removes the delegate
                         readonly property color trace: signalDelegate.index >= 0
-                                                       ? root.seriesColor(signalDelegate.index)
+                                                       ? root.seriesColor(signalDelegate.row)
                                                        : "transparent"
                         implicitWidth: 10; implicitHeight: 10   // layout-managed
                         radius: 2
@@ -252,6 +258,20 @@ Page {
                     }
                 }
             }
+        }
+
+        // What the list leaves out, and why: rows an ECU's supported-PID
+        // bitmaps mark unsupported. The Dashboard keeps them.
+        Label {
+            objectName: "hiddenNote"
+            visible: Bridge.signalModel.hiddenCount > 0
+            Layout.fillWidth: true
+            wrapMode: Text.WordWrap
+            color: Theme.textDim
+            text: Bridge.signalModel.hiddenCount === 1
+                  ? qsTr("1 signal hidden: the ECU doesn't support its PID")
+                  : qsTr("%1 signals hidden: the ECU doesn't support their PIDs")
+                        .arg(Bridge.signalModel.hiddenCount)
         }
 
         // ---- Strip chart: per-signal rolling history, one repaint per

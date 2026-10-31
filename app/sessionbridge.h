@@ -1,6 +1,7 @@
 // File/layer: app/sessionbridge.h | Qt6 Core, app layer, C++17
 // Testing: test_bridge (Qt-linked target): the frame log's ring, order
 //          and payload storage, SignalListModel's history ring and display units,
+//          its hidden rows and LiveSignalModel (BridgeTest.LiveHides*),
 //          discoverJ2534Devices' and discoverSerialPorts' marshaling
 //          shape, recentRecordings and replayUriFor
 //          (BridgeTest.RecentRecordings*, .ReplayUriFor*), the delivery figures
@@ -13,6 +14,7 @@
 #include <QObject>
 #include <QString>
 #include <QAbstractListModel>
+#include <QSortFilterProxyModel>
 #include <QVariantList>
 #include <QVariantMap>
 #include <QTimer>
@@ -123,7 +125,10 @@ private:
 class SignalListModel : public QAbstractListModel
 {
     Q_OBJECT
+    // The plotted rows Live shows: hidden rows aren't counted
     Q_PROPERTY(int subscribedCount READ subscribedCount NOTIFY subscribedCountChanged)
+    // The rows whose PID their ECU marks unsupported (applySupport)
+    Q_PROPERTY(int hiddenCount READ hiddenCount NOTIFY hiddenCountChanged)
 
 public:
     explicit SignalListModel(QObject* parent = nullptr);
@@ -176,7 +181,12 @@ public:
                          * and low hold read them, so a peak that isn't
                          * a window's newest value still counts.
                          * Notified with ValueRole. */
-        WindowLowRole
+        WindowLowRole,
+        RowRole,        /* the row in this model, which toggleSubscribed
+                         * takes and chartData's `row` names, whatever
+                         * row a filtered view shows it at */
+        HiddenRole      /* its ECU marks its PID unsupported
+                         * (applySupport): Live leaves the row out */
     };
 
     int rowCount(const QModelIndex& parent = {}) const override;
@@ -200,6 +210,18 @@ public:
     void updateTexts(const std::vector<std::pair<uint16_t, QString>>& texts,
                      qint64 timestampMs = -1);
     int subscribedCount() const { return static_cast<int>(m_subscribedCount); }
+    int hiddenCount() const { return m_hiddenCount; }
+
+    // What the ECUs reported they support (ADR-0039 §6): a Service 01
+    // row (a two-byte key 41 <PID> at offset 0) is hidden when the
+    // report of the channel its message ID names marks its PID
+    // unsupported (pidMarkedUnsupported); every other row, and one with
+    // no such report, is shown. Each call judges every row afresh, so a
+    // rescan that finds a PID shows its row again. A new set shows all.
+    void applySupport(const ecuio_channel_support_t* reports, size_t count);
+    // The bitmap at PID 0x20 * ((pid - 1) / 0x20) was answered and its
+    // bit for pid is clear. A range never answered judges nothing.
+    static bool pidMarkedUnsupported(const ecuio_channel_support_t& s, uint8_t pid);
 
     // Display units (ADR-0022): rows and history keep the decoded value;
     // value, unit, decimals and chartData() convert on the way out
@@ -237,6 +259,7 @@ public:
 signals:
     void valuesUpdated();
     void subscribedCountChanged();
+    void hiddenCountChanged();
 
 private:
     struct Sample {
@@ -254,6 +277,9 @@ private:
         double windowLow = 0.0;
         QString text;             // a text row's latest value
         bool isText = false;      // the def's kind is TEXT or HEX
+        uint32_t messageId = 0;   // the def's, which names its channel
+        uint8_t pid = 0;          // a Service 01 def's PID; 0 for any other
+        bool hidden = false;      // its ECU marks the PID unsupported
         // Whether the strip chart plots this signal. Values and history
         // update regardless: the Dashboard reads every row, and a signal
         // plotted again shows the history it kept meanwhile.
@@ -280,8 +306,23 @@ private:
     // A set's ids are unique (the validator refuses a duplicate).
     QHash<uint16_t, int> m_rowOfId;
     int m_subscribedCount = 0;
+    int m_hiddenCount = 0;
     uint32_t m_units = ECUIO_UNITS_METRIC;
     HostElapsedTimer m_clock;   // fallback stamps; restarted in setSignalSet
+};
+
+// Live's list: SignalListModel without its hidden rows (ADR-0039 §6).
+// The Dashboard reads the whole model, so a gauge keeps its row either
+// way; a row keeps its model row (RowRole) for its plot box and color.
+class LiveSignalModel : public QSortFilterProxyModel
+{
+    Q_OBJECT
+
+public:
+    explicit LiveSignalModel(SignalListModel* source, QObject* parent = nullptr);
+
+protected:
+    bool filterAcceptsRow(int sourceRow, const QModelIndex& sourceParent) const override;
 };
 
 class SessionBridge : public QObject
@@ -300,6 +341,8 @@ class SessionBridge : public QObject
     Q_PROPERTY(int guiNotifyCount READ guiNotifyCount NOTIFY notifyCountChanged)
     Q_PROPERTY(int signalBatchCount READ signalBatchCount NOTIFY signalBatchChanged)
     Q_PROPERTY(SignalListModel* signalModel READ signalModel CONSTANT)
+    // signalModel's rows Live lists: those an ECU hasn't marked unsupported
+    Q_PROPERTY(LiveSignalModel* liveSignalModel READ liveSignalModel CONSTANT)
     Q_PROPERTY(QString currentUri READ currentUri NOTIFY currentUriChanged)
     // currentUri as the header pill and the Dashboard show it (uriLabelFor)
     Q_PROPERTY(QString uriLabel READ uriLabel NOTIFY currentUriChanged)
@@ -349,6 +392,7 @@ public:
     int guiNotifyCount() const { return m_guiNotifyCount; }
     int signalBatchCount() const { return m_signalBatchCount; }
     SignalListModel* signalModel() const { return m_signalModel; }
+    LiveSignalModel* liveSignalModel() const { return m_liveSignalModel; }
     QString currentUri() const { return m_currentUri; }
     QString uriLabel() const { return uriLabelFor(m_currentUri); }
     QString adapterVersions() const { return m_adapterVersions; }
@@ -679,6 +723,7 @@ private:
     quint64 m_valuesDropped = 0;        // this session's, past the limits
 
     SignalListModel* m_signalModel = nullptr;
+    LiveSignalModel* m_liveSignalModel = nullptr;
     int m_guiNotifyCount = 0;
 
     std::atomic<int> m_inFlightFrames{0};   // posted-but-not-yet-processed count

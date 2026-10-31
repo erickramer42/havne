@@ -246,6 +246,22 @@ inline void reset_diagnostics()
     d.engine_off = false;
 }
 
+/* Service 01 PIDs the ECU leaves out of its bitmaps (and refuses when
+ * asked), though it has a reading for them: an ECU that lacks some of
+ * the set's PIDs. Bit pid % 32 of word pid / 32. One per process; the
+ * fake DLL sets it from ECUIO_FAKE_WITHHELD_PIDS on each write. */
+inline std::atomic<uint32_t> (&withheld_pids())[8]
+{
+    static std::atomic<uint32_t> words[8] = {};
+    return words;
+}
+
+inline bool withheld(unsigned pid)
+{
+    return pid <= 0xFF &&
+           ((withheld_pids()[pid / 32].load() >> (pid % 32)) & 1u) != 0;
+}
+
 /* The ID an ECU answers a request on: 11-bit physical requests 0x7E0 to
  * 0x7E7 get theirs 8 above, the functional 0x7DF is answered by the
  * engine ECU (0x7E8), and a 29-bit 18DA<ecu><tester> request by
@@ -313,9 +329,12 @@ inline unsigned long did_length(uint16_t did)
  * (the named values and kCannedPids), 01, 41 and 7F, and the bitmaps
  * that lead to them, 00 to A0 (A0's last bit clear: the chain ends). The
  * bit-field, enumerated and other complex PIDs stay unsupported, so a
- * test has PIDs the probe drops. */
+ * test has PIDs the probe drops; so do the withheld ones. */
 inline bool supports_pid(unsigned pid)
 {
+    if (withheld(pid)) {
+        return false;
+    }
     if (canned_pid(pid) != nullptr) {
         return true;
     }

@@ -811,6 +811,30 @@ long __stdcall PassThruWriteMsgs(unsigned long ChannelID,
             fake_j2534::read_knob("ECUIO_FAKE_ENGINE_OFF", nb, sizeof(nb)) &&
             strtol(nb, nullptr, 0) != 0;
     }
+    {
+        /* PIDs left out of the bitmaps: hex, separated by anything
+         * else ("0A,5C") */
+        char list[128] = {};
+        uint32_t words[8] = {};
+        if (fake_j2534::read_knob("ECUIO_FAKE_WITHHELD_PIDS", list,
+                                  sizeof(list))) {
+            for (const char* s = list; *s != '\0';) {
+                char* end = nullptr;
+                const unsigned long pid = strtoul(s, &end, 16);
+                if (end == s) {
+                    ++s;
+                    continue;
+                }
+                if (pid <= 0xFF) {
+                    words[pid / 32] |= 1u << (pid % 32);
+                }
+                s = end;
+            }
+        }
+        for (unsigned i = 0; i < 8; ++i) {
+            fake_ecu::withheld_pids()[i] = words[i];
+        }
+    }
 
     std::unique_lock<std::mutex> lk(fake_j2534::g_lock);
 

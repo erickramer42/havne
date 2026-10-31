@@ -4,12 +4,15 @@
 //          swatch under mock://demo, filled while plotted and hollow
 //          while not, a text row under uds-generic (the mock answering
 //          its DIDs), the list giving up rows so the chart stays whole
-//          on a short page, and the link banner's message for every state.
+//          on a short page, the rows the fake ECU withholds from its
+//          bitmaps left out with a line saying how many (Windows: the
+//          fake J2534 DLL), and the link banner's message for every state.
 //          The banner on screen in each state is tst_linkhealth.qml's.
 
 import QtQuick
 import QtTest
 import App
+import AppTest
 TestCase {
     id: testCase
     name: "LiveView"
@@ -29,6 +32,7 @@ TestCase {
     function cleanup() {
         Bridge.disconnectSession()
         tryVerify(() => !Bridge.disconnecting, 5000, "disconnect ends")
+        Harness.clearFakeKnobs()
     }
 
     function sameColor(actual, expected, what) {
@@ -162,6 +166,34 @@ TestCase {
         const numberValue = findChild(numberRow, "valueLabel")
         verify(/^\d+/.test(numberValue.text.trim()), "a number shown: " + numberValue.text)
         verify(findChild(numberRow, "plotCheck").enabled, "a number row can be plotted")
+    }
+
+    // The rows whose PID the ECU's bitmaps leave out are hidden, with
+    // one line saying how many and why; the Dashboard's model keeps them
+    function test_hidesThePidsTheEcuLacks() {
+        if (Harness.fakeDllPath === "")
+            skip("needs the fake J2534 DLL (Windows)")
+        Harness.armFakeKnob("ECUIO_FAKE_WITHHELD_PIDS", "0A,5C")
+        // In the window's content, so the note's visibility is its own
+        const page = createTemporaryObject(pageComponent, testCase.Window.window.contentItem)
+        const note = findChild(page, "hiddenNote")
+        verify(page.visible, "the page shows")
+        verify(!note.visible, "no note before the ECU answers")
+        const uri = "j2534://" + Harness.fakeDllPath + "?identify=0&diagnose=0"
+        compare(Bridge.connectSession(uri), "", uri + " connects")
+        const list = findChild(page, "signalList")
+        const all = Bridge.signalModel.rowCount()
+        tryVerify(() => note.visible, 5000, "the note shows")
+        compare(note.text, "2 signals hidden: the ECU doesn't support their PIDs")
+        compare(list.count, all - 2, "Live lists the rest")
+        compare(Bridge.signalModel.rowCount(), all, "the model keeps every row")
+        for (let r = 0; r < list.count; ++r) {
+            list.positionViewAtIndex(r, ListView.Contain)
+            const row = list.itemAtIndex(r)
+            verify(row, "row " + r + " has a delegate")
+            verify(row.name !== "Engine Oil Temp" && row.name !== "Fuel Pressure",
+                   "row " + r + " is " + row.name)
+        }
     }
 
     function test_bannerText_data() {
