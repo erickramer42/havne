@@ -253,8 +253,9 @@ an issue is resolved it is removed, and its number is not reused.
 2. **The iOS app is unvalidated, and no tests run on a phone.** CI
    cross-builds an unsigned iOS arm64 device build and, on request,
    launches the app on the Simulator and screenshots it
-   (`ios-simulator-smoke`); it has never run on a device, which needs
-   signing. The Android app has run on one phone (Android 16) and one
+   (`ios-simulator-smoke`); it has never run on a device. Each run's
+   `havne-ios-arm64-unsigned` artifact can be sideloaded with a
+   tester's own Apple ID ([docs/ios.md](docs/ios.md)). The Android app has run on one phone (Android 16) and one
    car, with the MX+ over classic Bluetooth, in the background and with
    the screen off ([2026-10-28-android-11](docs/bench-sessions/2026-10-28-android-11.md),
    [2026-10-29-android](docs/bench-sessions/2026-10-29-android.md));
