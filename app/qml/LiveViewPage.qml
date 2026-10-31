@@ -240,7 +240,8 @@ Page {
                     Label {
                         objectName: "valueLabel"
                         // Never-arrived signals render "—", not a
-                        // fabricated 0 (unsupported PIDs under obd2).
+                        // fabricated 0 (a PID not yet answered, or refused
+                        // with a negative reply rather than by its bitmap).
                         text: !(Bridge.connected && signalDelegate.hasValue) ? qsTr("—")
                               : signalDelegate.isText ? signalDelegate.text
                               : root.valueText(signalDelegate.value, signalDelegate.decimals,

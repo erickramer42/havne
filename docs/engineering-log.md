@@ -111,6 +111,7 @@ Dates are commit dates.
 | 2026-10-30 | Linux downloads, an SBOM and reproducible core packages ([ADR-0035](adr/0035-linux-downloads-sbom-reproducible.md)): core and `havne-cli` as a deb and a tarball with a CMake package and a pkg-config file, `havne-cli`'s debug info split by build ID; CI builds them under `reprotest` and two runners made the same bytes; the release adds them and the AppImage, and one SPDX SBOM built from what each job packed | `3b86431` |
 | 2026-10-30 | Reading trouble codes ([ADR-0037](adr/0037-reading-trouble-codes.md)): readiness, the stored, pending and permanent codes and the freeze frame, asked once per ECU after identification through the one-shot slot, one-byte requests matched by their service, the freeze frame decoded by the `obd2` defs; a report per ECU through the C ABI with the codes and monitors named in core; a Diagnostics page, an activity-log line and `havne-cli`'s `diagnostics` line; the simulated car's ECU answers as the fakes' does, byte for byte, so all of it shows with no hardware | `551a7ce`, `3300603`, `8b3f5ef`, `dd98f0c`, `afad366`, `58bff2d` |
 | 2026-10-30 | Clearing trouble codes ([ADR-0038](adr/0038-clearing-trouble-codes.md)): Service 04 by one path only, each ECU by its own ID, behind a gate core checks (the report the caller saved, `01 0C` at 0 rpm) and the app completes (the report saved to a file of its own, a confirmation in place); the report read again after it; the simulated car starts every loop with its engine stopped, so a clear runs with no hardware | `f3ae164`, `aa05a64`, `f6419c2`, `4b5f3b6`, `ce6b3c3`, `bd6d612` |
+| 2026-10-31 | Every linear Service 01 reading ([ADR-0039](adr/0039-full-service01-coverage.md)): the `obd2` set grows to a def for every linear field of J1979's Service 01 table, checked against the public tables and J1979 itself; its requests run in two rate classes, two fast to one slow, chosen in core; the fakes' ECU answers every linear PID, its bitmaps chained to A0; Live hides what a car's bitmaps leave out; imperial units for the new units | `1516606`, `28b3f8c`, `4ade947`, `d06b849`, `c2b526c`, `99e22cb` |
 
 ## Lessons learned
 
@@ -1137,3 +1138,14 @@ cycle's limiter-load check held at 95 % only because of where the
 sensor noise fell; the engine-off phase shifted every tick by 17 s,
 and it read 94.95. Its floor is what the model guarantees, near-WOT
 air less the noise, 94 %.
+
+**2026-10-31: full Service 01 coverage (ADR-0039):** **land the
+schedule before the data it schedules.** The rate classes went in on
+the ten PIDs, with their order tests written out by hand, before the
+set grew; the growth then moved only the places where each class
+wraps, and the order tests' diffs read as such. The other way round,
+one commit would have changed both the order and the set, and a wrong
+order would have hidden in it. And **the support report already said
+what Live should hide.** The dropped list holds the first eight drops,
+which on the grown set is fewer than a car drops; the bitmaps and
+`ranges` hold the whole answer, so the bridge reads those.

@@ -180,17 +180,18 @@ engine off. Connect the bare URI and leave it connected into Phase 2:
 - [ ] The probe first: the session log's first writes are the bitmap
       requests (`01 00`, `01 20`, … while each bitmap's last bit is
       set), then the rotation. The ECU line follows within about a
-      second: `ECU 0x7E8: supports N PIDs; 10 requests, …`, naming each
-      PID dropped (on the 2026-10-25 car, six bitmaps, 53 PIDs, `1
-      dropped: 01 5C (not in its supported PIDs)`). Copy the bitmap
-      replies from the `OP_READ frame` lines into the sheet
+      second: `ECU 0x7E8: supports N PIDs; M requests, k dropped: …`,
+      naming the first eight dropped (on the 2026-10-25 car, six
+      bitmaps and 53 PIDs, of which the `obd2` set asks 43). Copy the
+      bitmap replies from the `OP_READ frame` lines into the sheet
 - [ ] Within a few seconds, the identity line: `ECU 0x7E8 identity:
       VIN …; CALID …; …`, and which `22 F1 xx` items were refused
       (`7F 22 31`). It's personal data, scrubbed before the sheet is
       committed. Note the answered DIDs for Phase 3's text DID
-- [ ] Every signal the probe kept populates within about a second; a
-      dropped one stays "—". Plausible engine-off values, the
-      2026-10-25 car's in brackets:
+- [ ] Every signal the probe kept populates within a few seconds (the
+      slow class's take longer), and Live lists no dropped one: its
+      note under the list says how many it hid. Plausible engine-off
+      values, the 2026-10-25 car's in brackets:
 
 | Signal | Expect (engine off) |
 |---|---|
@@ -200,7 +201,7 @@ engine off. Connect the bare URI and leave it connected into Phase 2:
 | Fuel Level | roughly matches the gauge |
 | Battery Voltage (PID 0x42) | 11.8–12.6 V (11.9 V), within 0.1 V of the "Session:" line |
 | MAF | ~0 g/s (0.3) |
-| Engine Oil Temp | "—" where the probe dropped 0x5C |
+| Engine Oil Temp | not on Live where the probe dropped 0x5C; "waiting for data" on the Dashboard |
 
 - [ ] A Live screenshot (Live shows no identification)
 - [ ] Then start the engine **on this connect**, at most about two
@@ -228,11 +229,15 @@ where RPM's two-byte value and the charging voltage move.
       minutes with the cluster's gauge; Fuel Level as before
 - [ ] Values stay bright while they keep arriving; nothing dims, and no
       banner
+- [ ] Live's note under the list says how many signals it hid, the
+      ones the probe dropped (BENCH prep #30)
 - [ ] About a minute of idle, then Disconnect
 
 **Evidence:** a photo of the cluster and the Dashboard or Live
-together, and the recording: each signal's refresh interval from
-`signals.csv`'s `host_us` (about 0.4 s on the 2026-10-25 car),
+together, and the recording: each rate class's refresh interval from
+`signals.csv`'s `host_us` (BENCH prep #30: about 0.8 s fast and 3.2 s
+slow estimated for the test car), the fuel pressures (0A, 23, 59)
+beside each other,
 `frames.csv`'s `timestamp_us` against `host_us` (BENCH prep #5), and
 the session log's stamps for requests a second and each reply's time
 after its request.
@@ -355,6 +360,7 @@ ignition-on.
 | #7 Struct layout | A correct decode in Phases 1–2 implies the layout is right |
 | #8 Vendor timeouts | Read timing visible in the session log stamps |
 | #10 Session info | Phase 0's battery reading against the car's, and against PID 0x42 in Phase 1 |
+| #30 The full `obd2` set | Phase 1's "ECU 0x7E8:" line (PIDs kept and dropped), Live's note, Phase 2's refresh per class, the new values beside a second scan tool, and whether two fuel pressures read one sensor |
 
 ## Teardown
 

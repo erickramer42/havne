@@ -1,6 +1,9 @@
 # ADR-0039: Full Service 01 coverage in one set, paced by rate classes
 
-- **Status:** Accepted. Not yet built.
+- **Status:** Accepted. §1–§7 built on 2026-10-31 (the set, the rate
+  classes, Live hiding what a car lacks, the fakes, imperial units),
+  verified on the fakes; not yet on a car (BENCH prep #30). Appendix A
+  not yet built.
 - **Date:** 2026-10-30.
 - **Builds on:** [ADR-0013](0013-protocol-profiles.md) (profiles chosen
   by the URI), [ADR-0015](0015-request-engine.md) §1 (the rotation),

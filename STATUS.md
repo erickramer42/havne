@@ -1,6 +1,6 @@
 # Havne: Project Status
 
-**Updated:** 2026-10-30 · **Version:** v0.3.4 ·
+**Updated:** 2026-10-31 · **Version:** v0.3.4 ·
 [![CI](https://github.com/erickramer42/havne/actions/workflows/ci.yml/badge.svg)](https://github.com/erickramer42/havne/actions/workflows/ci.yml)
 
 This file covers the project as it stands: what works, what comes
@@ -33,7 +33,8 @@ the same car through the OBDLink MX+ over Bluetooth and the VX in ELM
 mode over USB
 ([2026-10-27](docs/bench-sessions/2026-10-27-elm327-vehicle.md)), and
 the Android app reaches the car through the phone's Bluetooth, in the
-background too. v0.3.5 has begun with trouble codes, read and cleared;
+background too. v0.3.5 has begun with trouble codes, read and cleared,
+and every linear reading of the Service 01 table in the `obd2` set;
 SocketCAN requests come next ([roadmap](#roadmap)).
 
 - **Works:**
@@ -80,6 +81,17 @@ SocketCAN requests come next ([roadmap](#roadmap)).
   - **The PID-support probe** (ADR-0015 §4) drops only what an ECU says
     it lacks, never on silence; on the car it walked six bitmaps and
     dropped `01 5C`.
+  - **Every linear Service 01 reading** ([ADR-0039](docs/adr/0039-full-service01-coverage.md)):
+    the `obd2` set holds a def for every linear field of SAE J1979's
+    Service 01 table, and the probe keeps only the PIDs a car lists. Its
+    requests run in two rate classes, two fast (rpm, speed, load, MAF,
+    throttle, fuel pressure, lambda) to one slow (temperatures,
+    pressures, counters); Live hides the signals the car's bitmaps
+    leave out and says how many; imperial units cover the new units
+    (inH2O, gal/h, lb·ft). Verified against the fakes' ECU, which
+    answers every linear PID, through J2534 and ELM327, and the car's
+    recordings replay to their own values through the grown set; not
+    yet run on a car (BENCH prep #30).
   - **Vehicle identification** at connect
     ([ADR-0021](docs/adr/0021-vehicle-identification.md)), and
     **`uds-generic`**, polling or scanning the DIDs a URI names
@@ -186,8 +198,8 @@ SocketCAN requests come next ([roadmap](#roadmap)).
   ELM327 [bench](docs/bench-sessions/elm327-bench-runsheet.md) and
   [vehicle](docs/bench-sessions/elm327-vehicle-runsheet.md) sheets, and
   the [phone's](docs/bench-sessions/android-phone-runsheet.md).
-- **Tests:** 646 ctest cases on Windows (both trees rebuilt,
-  2026-10-30), all passing but two env-gated skips (the cross-arch
+- **Tests:** 654 ctest cases on Windows (both trees rebuilt,
+  2026-10-31), all passing but two env-gated skips (the cross-arch
   case, and the real-car recordings' diff, run locally), plus the
   cross-arch subset (84/84); 0 MSVC warnings. CI runs ctest on Windows,
   macOS and Linux, with SocketCAN's suites on Linux's `vcan0`; core
@@ -308,7 +320,7 @@ an issue is resolved it is removed, and its number is not reused.
 | v0.3.2 | Record-replay transport, decoding on the transport's thread, every driver in its own process | ✅ Released |
 | v0.3.3 | ELM327 adapters, preferences and vehicles, Android with Bluetooth and background sessions and a signed APK, the rename to Havne | ✅ Released |
 | v0.3.4 | A command-line client over the C ABI; Linux as a supported desktop; a SocketCAN transport that listens | ✅ Released |
-| v0.3.5 | Full OBD-II diagnostics (Services 01–0A, clearing codes); SocketCAN requests through ISO-TP; fault injection on a replay; a performance benchmark with latency per PID | In progress: reading and clearing codes built |
+| v0.3.5 | Full OBD-II diagnostics (Services 01–0A, clearing codes); SocketCAN requests through ISO-TP; fault injection on a replay; a performance benchmark with latency per PID | In progress: reading and clearing codes, and the full Service 01 set, built |
 | v0.3.6–v0.3.9 | Recordings you can open, compare and share: a log viewer with run overlay, CSV import and export with scrubbing, a health report, triggered logging and alerts | Planned |
 | v0.4.0 | Python bindings; PCAP export and candump import; ECU, DID and service discovery (needs requests to every ECU and listening to the whole bus first) | Proposed |
 | v0.5.0 | The plugin framework (ADR-0013's profile API), with no manufacturer plugin yet; legacy buses (ISO 9141-2, KWP2000, J1850) | Proposed |
@@ -318,18 +330,15 @@ scheduled. What each holds, past its row:
 
 ### v0.3.5: full OBD-II diagnostics, SocketCAN requests
 
-- **Full standard OBD-II coverage.** Grow the `obd2` set toward
-  the whole SAE J1979 Service 01 table, including PIDs that carry two
-  values (oxygen sensors with fuel trims), which need two defs on one
-  PID.
-  - The probe drops the PIDs a car's bitmaps mark unsupported, so a
-    bigger set costs only the ones the car has. Each kept PID still
-    costs a request per pass, so the refresh policy ADR-0015 leaves
-    open (rate classes, or a curated set beside a full one) comes with
-    it.
-  - Verify each PID's meaning and formula against a public J1979
-    table. The fake's canned replies share the def's assumptions, so
-    the tests can't catch a wrong PID.
+- **Full standard OBD-II coverage** is built
+  ([ADR-0039](docs/adr/0039-full-service01-coverage.md)): one `obd2` set with a
+  def for every linear field of the Service 01 table, each checked
+  against public J1979 tables (`tests/fixtures/obd2/service01.csv`),
+  its requests in two rate classes, and Live hiding what a car lacks;
+  on the fakes, the test car to come (BENCH prep #30). Next, several
+  PIDs per request (ADR-0039's Appendix A), after a car run of the
+  classes. The bit-field, enumerated and complex PIDs wait for decoder
+  kinds of their own (ADR-0039 §2).
 - **Trouble codes:** reading is built
   ([ADR-0037](docs/adr/0037-reading-trouble-codes.md)): stored, pending
   and permanent codes, readiness and the freeze frame (Services 03, 07,
@@ -413,8 +422,7 @@ across the four releases is decided as they come.
   the viewer shows; computed signals beside it, in a derived-signal
   stage in core that keeps the UI on final display values: boost is
   intake manifold pressure (PID 0x0B) minus barometric pressure (PID
-  0x33), neither yet in the `obd2` set, so both are checked against a
-  public J1979 table first.
+  0x33), both in the `obd2` set.
 
 ### v0.4.0 and v0.5.0 (proposed)
 

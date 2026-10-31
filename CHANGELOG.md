@@ -44,6 +44,19 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
   stopped, then read again; the page and the activity log say what
   became of each (`ECU 0x7E8 clear: cleared`, `not sent: engine
   running (812 rpm)`, …). Not yet run on a car.
+- **Every standard Service 01 reading**
+  ([ADR-0039](docs/adr/0039-full-service01-coverage.md)): the `obd2`
+  profile reads every linear field of SAE J1979's Service 01 table,
+  130 signals in all (both banks' fuel trims, every oxygen sensor, the
+  wide-range sensors' lambda and current, fuel pressure, catalyst
+  temperatures, torque, run times and distances among them), and asks
+  each car only for the ones it has. The fast-changing readings (rpm,
+  speed, load, MAF, throttle, fuel pressure, lambda) are asked twice
+  for each slow one (temperatures, pressures, counters).
+- Live lists only the signals the car's ECU supports, with a line
+  saying how many it left out; the Dashboard and recordings keep every
+  signal.
+- Imperial units show Pa as inH2O, L/h as gal/h and N·m as lb·ft.
 
 ### Changed
 - The simulated car starts each loop with the key on and the engine

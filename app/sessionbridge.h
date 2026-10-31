@@ -160,8 +160,8 @@ public:
         ValueRole,
         SubscribedRole,
         HasValueRole,   /* false until the first sample, so QML can
-                         * show "—" instead of a fake 0 for an
-                         * unsupported PID. Notified per batch;
+                         * show "—" instead of a fake 0 for a PID
+                         * not yet answered or refused. Notified per batch;
                          * LiveView binds it. */
         AgeMsRole,      /* -1 = never arrived; else ms since the last
                          * sample, for dimming stale values. Notified
