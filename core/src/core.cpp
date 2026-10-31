@@ -5,7 +5,8 @@
 //          list length, the list as it stood, no allocation up to
 //          four), the decoded values (CoreTest.Values*: the batch
 //          against direct decodes, a text slot each, the frame
-//          callbacks first), the error strings; the trouble code's and
+//          callbacks first), the error strings, a clear's refusals
+//          (CoreTest.AClearNeedsTheReportTheCallerSaved); the trouble code's and
 //          the monitors' names (DiagnosticsTest, test_obd2);
 //          HARNESS: the J2534 suites and Elm327SessionTest through
 //          create; test_c_abi links the public functions; the USDT
@@ -420,6 +421,34 @@ ecuio_status_t ecuio_session_read_diagnostics(ecuio_session_t* session)
     return ECUIO_OK;
 }
 
+ecuio_status_t ecuio_session_clear_diagnostics(ecuio_session_t* session,
+                                               uint32_t channel,
+                                               uint32_t generation)
+{
+    if (session == nullptr) {
+        return ECUIO_ERR_NULL_ARGUMENT;
+    }
+    if (session->closed.load()) {
+        return ECUIO_ERR_SESSION_CLOSED;
+    }
+    {
+        std::lock_guard<std::mutex> lock(session->support_mutex);
+        if (channel >= session->support_count) {
+            return ECUIO_ERR_INVALID_ARGUMENT;
+        }
+        const ecuio_channel_diagnostics_t& d = session->diagnostics[channel];
+        if ((d.flags & ECUIO_DIAG_COMPLETE) == 0 ||
+            (d.flags & ECUIO_DIAG_CLEARING) != 0 ||
+            d.generation != generation) {
+            return ECUIO_ERR_REPORT_CHANGED;
+        }
+    }
+    /* The generation first: a worker that sees the count moved reads it */
+    session->clear_generation[channel].store(generation);
+    session->clear_requests[channel].fetch_add(1);
+    return ECUIO_OK;
+}
+
 const char* ecuio_identity_request_name(const uint8_t* request, uint8_t length)
 {
     if (request == nullptr) {
@@ -495,6 +524,7 @@ const char* ecuio_status_string(ecuio_status_t status)
         case ECUIO_ERR_VENDOR_REFUSED:          return "the adapter's driver refused";
         case ECUIO_ERR_SURROGATE_FAILED:        return "surrogate process failed";
         case ECUIO_ERR_RECORDING_CHANGED:       return "the recording changed after it was opened";
+        case ECUIO_ERR_REPORT_CHANGED:          return "the diagnostics report changed since it was saved";
         default:                                return "unknown status";
     }
 }

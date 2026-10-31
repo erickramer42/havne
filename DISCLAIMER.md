@@ -3,32 +3,45 @@
 **This software may damage your vehicle's control modules.**
 
 Havne is a cross-platform ECU reader and logger in early development.
-It reads only today. Clearing trouble codes and, later, writing and
-flashing are on the [roadmap](STATUS.md#roadmap). If those features
-are added, errors in this software, its configuration, or your use of
-it may result in:
+It reads, and it can clear trouble codes; writing and flashing are on
+the [roadmap](STATUS.md#roadmap). Clearing already changes the car.
+Errors in this software, its configuration, or your use of it, in
+clearing now and in writing if it is added, may result in:
 
 - Corrupted firmware or calibration ("bricked" modules)
 - Engine or transmission damage
 - Disabled or degraded safety systems (ABS, TCS, stability control)
 - Cleared emissions readiness monitors, so the vehicle fails an
   inspection until it has been driven enough for them to complete
-  again (clearing codes does this)
+  again (clearing codes does this, every time it succeeds)
 
 **Back up your ECU contents before any session where writes are
 possible. Never flash a vehicle with an unstable power supply.**
 
 ## Current state
 
-Havne sends only read-only diagnostic requests: OBD-II Services 01
-("current data"), 02 ("freeze frame data"), 03, 07 and 0A (the
-stored, pending and permanent trouble codes) and 09 ("vehicle
-information"), and UDS Service 0x22 ("read data by identifier"). It
-refuses every other service
+Havne sends diagnostic reads: OBD-II Services 01 ("current data"), 02
+("freeze frame data"), 03, 07 and 0A (the stored, pending and
+permanent trouble codes) and 09 ("vehicle information"), and UDS
+Service 0x22 ("read data by identifier")
 ([ADR-0015](docs/adr/0015-request-engine.md),
-[ADR-0037](docs/adr/0037-reading-trouble-codes.md)). It has **no**
-capability to clear codes, write or flash any ECU. It reaches a
-vehicle through:
+[ADR-0037](docs/adr/0037-reading-trouble-codes.md)).
+
+It sends one request that changes the car: OBD-II Service 04 ("clear
+diagnostic information"), only from the Diagnostics page's **Clear
+codes**, after a confirmation
+([ADR-0038](docs/adr/0038-clearing-trouble-codes.md)). Before it,
+Havne saves the report to a file of its own in the recordings folder
+and sends nothing if it can't; then it asks each ECU its engine speed
+and sends nothing to one whose engine turns. It clears each ECU by its
+own address, never every module at once. On an ECU that obeys, a clear
+erases the stored and pending codes and the freeze frame, turns the
+check-engine light off and sets the readiness monitors back to
+incomplete; permanent codes stay. **Clearing has run only against
+Havne's fakes and its simulated vehicle, never on a car.**
+
+It refuses every other service, and has **no** capability to write or
+flash any ECU. It reaches a vehicle through:
 
 - a **J2534 Pass-Thru** adapter, on Windows only;
 - an **ELM327-compatible** adapter over USB, Bluetooth or WiFi, on
@@ -55,6 +68,10 @@ decisions.
   the wheel.
 - **Route the adapter and its cable** clear of the pedals, the
   steering column and the driver's knees.
+- **Clear codes only once you've read them and mean to.** What a clear
+  erases can't be read back; Havne keeps the report in the recordings
+  folder, but the car's readiness monitors start over and take some
+  driving to complete before an emissions inspection.
 - **A session keeps the adapter awake.** While it's connected, Havne
   asks the engine ECU for data continuously, and on Android it keeps
   running in the background and with the screen off. An adapter left

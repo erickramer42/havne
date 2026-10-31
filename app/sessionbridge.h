@@ -370,6 +370,11 @@ public:
     static QString channelSupportText(const ecuio_channel_support_t& support);  /* its "ECU 0x…:" lines */
     static QString channelIdentityText(const ecuio_channel_identity_t& identity);  /* its "ECU 0x… identity:" lines */
     static QString channelDiagnosticsText(const ecuio_channel_diagnostics_t& diagnostics);  /* its "ECU 0x… diagnostics:" lines */
+    static QString channelClearText(const ecuio_channel_diagnostics_t& diagnostics);  /* its "ECU 0x… clear:" lines (ADR-0038) */
+    // A clear's saved reports, as havne-cli writes them (ADR-0031 §3): a
+    // start line, then one diagnostics line per report
+    static QByteArray diagnosticsFileText(const ecuio_channel_diagnostics_t* reports,
+                                          uint32_t count);
 
     // A session's delivery so far: what the worker handed the bridge,
     // what the in-flight cap dropped, and how long each frame took to
@@ -465,6 +470,15 @@ public:
     // Read again: every ECU's diagnostics asked once more
     // (ecuio_session_read_diagnostics); nothing without a session
     Q_INVOKABLE void readDiagnostics();
+    // Clears the codes of every ECU whose read has completed (ADR-0038):
+    // saves those reports first, to diagnostics-<stamp>[ <vehicle>].jsonl
+    // in the recordings folder (diagnosticsFileText; the vehicle for an
+    // adapter's session only, as a recording's folder), then asks core to
+    // clear each at the generation saved. A failed save sends nothing.
+    // Returns the saved file for display (relative to Documents), or ""
+    // when nothing was sent; each ECU's outcome comes in its report and
+    // the activity log (channelClearText)
+    Q_INVOKABLE QString clearDiagnostics();
     // One ECU's report as the page shows it: ecu ("0x7E8"); asked,
     // complete; readiness (an outcome: "unasked", "answered", "refused",
     // "unanswered") and readinessNrc ("7F 01 12" when refused); mil,
@@ -472,7 +486,11 @@ public:
     // "permanent"), outcome, nrc, codes (["P0301", …]), more (codes past
     // the held ones)}; monitors, [{id, name, complete}]; freeze, {outcome,
     // nrc, stored, code, values: [{name, value, unit, decimals}]}, each
-    // value through the obd2 def that decoded it and the unit system.
+    // value through the obd2 def that decoded it and the unit system;
+    // clearing, and the last clear's clear ("none", "cleared", "refused",
+    // "unanswered", "engineRunning", "noEngineSpeed", "reportChanged"),
+    // clearNrc ("7F 04 22" when refused, "7F 01 12" when the engine speed
+    // was) and clearRpm.
     // Static, so test_bridge pins it without a session.
     static QVariantMap diagnosticsEntry(const ecuio_channel_diagnostics_t& d,
                                         uint32_t units);
@@ -702,6 +720,8 @@ private:
     // logged once per completed read
     void pollChannelDiagnostics();
     uint32_t m_diagnosticsGeneration[ECUIO_SESSION_INFO_MAX_CHANNELS] = {};
+    // A clear asked of each channel, its outcome not yet logged
+    bool m_clearAsked[ECUIO_SESSION_INFO_MAX_CHANNELS] = {};
     // The reports the page shows, as last read, and their entries
     ecuio_channel_diagnostics_t m_diagnosticsShown[ECUIO_SESSION_INFO_MAX_CHANNELS] = {};
     uint32_t m_diagnosticsShownCount = 0;

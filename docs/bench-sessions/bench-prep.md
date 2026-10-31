@@ -91,6 +91,7 @@ which has no bench session):
 | # | Assumption in the code | State | Evidence |
 |---|---|---|---|
 | 28 | **Trouble codes on a real ECU:** the one-byte `03`, `07` and `0A` go out as such (5 bytes with the ID through J2534, two hex digits through an ELM327), and the ECU's `43`, `47` and `4A` replies, a First Frame past two codes, are matched by their service byte; readiness's B, C and D bits mean what J1979 says for the engine's type; the freeze frame's `02 PID 00` replies decode as the Service 01 PIDs do; a car without permanent codes refuses `0A` with a negative reply rather than silence. The MIL, codes and readiness match a second scan tool's reading of the same car | STILL UNKNOWN: not yet run on a car | The fakes answer from `tests/fake_ecu.h` through both adapters' paths (`J2534AdoptionTest.Diagnostics*`, `Elm327SessionTest.Diagnostics*`), and share the code's reading of J1979; only a real ECU tests that reading |
+| 29 | **Clearing codes on a real ECU:** with the engine stopped and the ignition on, `01 0C` answers 0; the one-byte `04` goes out as such (5 bytes with the ID through J2534, `04` with no count digit through an ELM327), and the ECU answers `44`; the read that follows shows the stored and pending codes, the freeze frame and the MIL gone, the permanent codes kept and the readiness monitors incomplete, as a second scan tool reads the car. With the engine running, no `04` goes out (the wire log shows `01 0C` alone), and an ECU that would refuse answers `7F 04 22` | STILL UNKNOWN: not run on a car, by decision: a clear resets the test car's readiness monitors, so it waits for a code worth clearing and a drive to bring them back | The fakes and the simulated car answer as the code reads J1979 (`ClearTest`, `J2534AdoptionTest.AClear*`, `Elm327SessionTest.AClearSends04OnlyWithTheEngineStopped`, `CoreTest.MockClearsTheReportLikeTheFakeEcu`); only a real ECU tests that reading |
 
 ## Still open
 
@@ -108,6 +109,8 @@ which has no bench session):
   mid-session, if one is at hand (Android is confirmed).
 - **#28, trouble codes on a car:** through the VX and the MX+, beside a
   second scan tool's reading.
+- **#29, clearing codes on a car:** once the test car has a code worth
+  clearing and a drive can bring its monitors back.
 - **Every item for any other adapter.** Each CONFIRMED above is the
   VX's. A second adapter, x64 or another vendor's, walks the whole
   list again; the x64 surrogate it would load in has met only the fake

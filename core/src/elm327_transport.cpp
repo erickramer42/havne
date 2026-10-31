@@ -7,7 +7,7 @@
 //          info and the readings' "not present", the requests (the count
 //          digit, and its loss for a reply that spans frames, header
 //          switches, the rotation, the probe, the DID scan,
-//          identification, diagnostics and Read again), multi-frame
+//          identification, diagnostics, Read again and a clear), multi-frame
 //          replies, link health and its
 //          recovery (NO DATA, CAN ERROR, a dropped link, an adapter
 //          reset), the pending reply, passive listening (Listening*:
@@ -1059,6 +1059,7 @@ void elm327_worker(transport* t)
     uint32_t published_identity[ECUIO_MAX_CHANNELS] = {};
     uint32_t published_diagnostics[ECUIO_MAX_CHANNELS] = {};
     uint32_t diag_seen = 0;
+    uint32_t clear_seen[ECUIO_MAX_CHANNELS] = {};
     uint32_t next_chan = 0;
     const bool passive = e.count == 0 && e.scan_count == 0;
     uint32_t relisten_ms = 0;
@@ -1165,6 +1166,7 @@ void elm327_worker(transport* t)
             ecuio_engine_rescan(&e);
         }
         ecuio_take_diag_request(t->session, &e, diag_seen);
+        ecuio_take_clear_requests(t->session, &e, clear_seen);
         for (uint32_t c = 0; c < t->chan_count; ++c) {
             ecuio_publish_support(t->session, e, c, t->rx_ids[c], published[c]);
             ecuio_publish_identity(t->session, e, c, t->rx_ids[c],

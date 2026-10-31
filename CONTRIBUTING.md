@@ -73,8 +73,9 @@ The run sheets in [docs/bench-sessions/](docs/bench-sessions/bench-runsheet.md)
 show what a session checks, and [bench-prep.md](docs/bench-sessions/bench-prep.md)
 lists the assumptions only hardware can confirm. Session sheets in the
 repository are filed by the maintainer, so attach nothing raw to a pull
-request. Read-only sessions only: keep to Havne's own requests, and stop
-if a module behaves unusually ([DISCLAIMER.md](DISCLAIMER.md)).
+request. Keep to Havne's own requests, clear codes only on a car whose
+codes you've read and mean to clear, and stop if a module behaves
+unusually ([DISCLAIMER.md](DISCLAIMER.md)).
 
 ## Governance
 
@@ -102,14 +103,17 @@ maintainer before merging.
 
 ## Scope
 
-Havne is **read-only today**: its request engine sends OBD-II Services 01
-and 09 and UDS Service 0x22 (ReadDataByIdentifier), and refuses any other
-service ([ADR-0015](docs/adr/0015-request-engine.md)). There is no code that
-clears trouble codes, writes or flashes (see [DISCLAIMER.md](DISCLAIMER.md)).
-The [roadmap](STATUS.md#roadmap) plans full OBD-II diagnostics, clearing
-codes included, for v0.3.5, and puts the write path (security access,
-flashing) at 1.0 and later, through manufacturer plugins. Each of those
-needs an ADR before any code. Proposals in these directions are worth
+Havne **reads, and clears trouble codes**: its request engine sends OBD-II
+Services 01, 02, 03, 07, 09 and 0A and UDS Service 0x22
+(ReadDataByIdentifier), and refuses any other service
+([ADR-0015](docs/adr/0015-request-engine.md),
+[ADR-0037](docs/adr/0037-reading-trouble-codes.md)). OBD-II Service 04,
+which clears trouble codes, goes out by one path only, behind a gate
+([ADR-0038](docs/adr/0038-clearing-trouble-codes.md)). There is no code
+that writes or flashes (see [DISCLAIMER.md](DISCLAIMER.md)). The
+[roadmap](STATUS.md#roadmap) puts the write path (security access,
+flashing) at 1.0 and later, through manufacturer plugins, and that needs
+an ADR before any code. Proposals in these directions are worth
 discussing in an issue first: they carry regulatory weight (emissions law,
 warranty, effects on safety systems) that must be designed for, not bolted
 on.
@@ -164,10 +168,14 @@ contributions:
   only where a user or builder sees it.
 - **Core never includes or links Qt.** Decoding, scaling and units live in
   core; the UI receives final display values. A Qt include in `core/` fails CI.
-- **Read-only by construction.** Every request enters the engine through one
-  function that refuses any service but the reads (0x01, 0x02, 0x03, 0x07,
-  0x09, 0x0A and 0x22; never 0x04, which clears trouble codes). A change that
-  sends anything else is a scope change (above), not a patch.
+- **Reads by construction, and one clear.** Every request enters the engine
+  through one function that refuses any service but the reads (0x01, 0x02,
+  0x03, 0x07, 0x09, 0x0A and 0x22), and a `static_assert` keeps 0x04 out of
+  every list. The one path that sends 0x04, which clears trouble codes, is a
+  channel's clear ([ADR-0038](docs/adr/0038-clearing-trouble-codes.md)): the
+  report saved first, the engine seen stopped, the user's confirmation. A
+  change that sends anything else, or reaches 0x04 another way, is a scope
+  change (above), not a patch.
 - **Know your thread.** Frame callbacks run on the transport's worker thread:
   they must not block, and must never close or destroy their session (both
   join that thread). No worker allocates per frame, and tests count it. The

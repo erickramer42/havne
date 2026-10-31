@@ -110,6 +110,7 @@ Dates are commit dates.
 | 2026-10-29 | Debug symbols and probes ([ADR-0034](adr/0034-debug-symbols-and-probes.md)): every MSVC Release build writes PDBs, and the release ships the four executables' PDBs in a zip of their own, each checked against its binary; three USDT probes in core on Linux (a session's start and close, each frame), checked in the ELF notes and fired under `bpftrace` on CI | `75f7daa` |
 | 2026-10-30 | Linux downloads, an SBOM and reproducible core packages ([ADR-0035](adr/0035-linux-downloads-sbom-reproducible.md)): core and `havne-cli` as a deb and a tarball with a CMake package and a pkg-config file, `havne-cli`'s debug info split by build ID; CI builds them under `reprotest` and two runners made the same bytes; the release adds them and the AppImage, and one SPDX SBOM built from what each job packed | `3b86431` |
 | 2026-10-30 | Reading trouble codes ([ADR-0037](adr/0037-reading-trouble-codes.md)): readiness, the stored, pending and permanent codes and the freeze frame, asked once per ECU after identification through the one-shot slot, one-byte requests matched by their service, the freeze frame decoded by the `obd2` defs; a report per ECU through the C ABI with the codes and monitors named in core; a Diagnostics page, an activity-log line and `havne-cli`'s `diagnostics` line; the simulated car's ECU answers as the fakes' does, byte for byte, so all of it shows with no hardware | `551a7ce`, `3300603`, `8b3f5ef`, `dd98f0c`, `afad366`, `58bff2d` |
+| 2026-10-30 | Clearing trouble codes ([ADR-0038](adr/0038-clearing-trouble-codes.md)): Service 04 by one path only, each ECU by its own ID, behind a gate core checks (the report the caller saved, `01 0C` at 0 rpm) and the app completes (the report saved to a file of its own, a confirmation in place); the report read again after it; the simulated car starts every loop with its engine stopped, so a clear runs with no hardware | `f3ae164`, `aa05a64`, `f6419c2`, `4b5f3b6`, `ce6b3c3`, `bd6d612` |
 
 ## Lessons learned
 
@@ -1124,3 +1125,15 @@ Test runs a file's cases by name, not in the order written.** The
 bridge keeps the last read after a disconnect, so a case that
 disconnected, sorting first, left the empty-state case a read to show;
 the empty-state case is named to sort first.
+
+**2026-10-30: clearing trouble codes (ADR-0038):** **a test of what
+shows must first be shown.** The Diagnostics page's QML tests made
+their page under the `TestCase` item, which isn't visible, so every
+`visible` they read was false: their checks that a button was hidden
+passed whatever the page did, and the first check that something
+appeared failed. The page is made in the test's window now. And **a
+bound met by luck moves when anything before it does.** The drive
+cycle's limiter-load check held at 95 % only because of where the
+sensor noise fell; the engine-off phase shifted every tick by 17 s,
+and it read 94.95. Its floor is what the model guarantees, near-WOT
+air less the noise, 94 %.

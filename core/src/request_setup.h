@@ -4,8 +4,8 @@
 //          J2534QueryParamTest and J2534AdoptionTest (the query keys,
 //          the channels, raw on the engine ECU, ?poll=, uds-generic's
 //          scan, identification, diagnostics, the support, identity
-//          and diagnostics reports, Read again), Elm327SessionTest (the
-//          same through an ELM327)
+//          and diagnostics reports, Read again, a clear),
+//          Elm327SessionTest (the same through an ELM327)
 //
 // What a requesting transport (J2534, ELM327) derives from its URI and
 // profile before it opens anything: the request keys' values, the
@@ -367,6 +367,24 @@ inline void ecuio_take_diag_request(ecuio_session_t* session,
     if (asked != seen) {
         seen = asked;
         ecuio_engine_diagnose_again(e);
+    }
+}
+
+/* Starts a clear (ecuio_engine_clear, ADR-0038) on each channel whose
+ * ecuio_session_clear_diagnostics request the worker hasn't taken, at
+ * the generation the caller saved; seen holds the worker's count per
+ * channel. The engine checks the generation again, so a read that
+ * settled since makes it ECUIO_CLEAR_REPORT_CHANGED, sending nothing. */
+inline void ecuio_take_clear_requests(ecuio_session_t* session,
+                                      ecuio_request_engine* e, uint32_t* seen)
+{
+    for (uint32_t c = 0;
+         c < e->chan_count && c < ECUIO_SESSION_INFO_MAX_CHANNELS; ++c) {
+        const uint32_t asked = session->clear_requests[c].load();
+        if (asked != seen[c]) {
+            seen[c] = asked;
+            (void)ecuio_engine_clear(e, c, session->clear_generation[c].load());
+        }
     }
 }
 

@@ -2118,6 +2118,75 @@ TEST_F(J2534AdoptionTest, ReadAgainAsksTheListOnceMore)
     ecuio_session_destroy(session);
 }
 
+/* ADR-0038 through the surrogate: with the fake's engine stopped, a clear
+ * of the report the test saw sends 04, and the report read again holds
+ * the fake's cleared state; the same generation again is refused */
+TEST_F(J2534AdoptionTest, AClearAtAStoppedEngineEmptiesTheReport)
+{
+    KnobGuard off("ECUIO_FAKE_ENGINE_OFF", "1");
+    char uri[700];
+    snprintf(uri, sizeof(uri), "j2534://%s?profile=obd2&probe=0&identify=0",
+             FAKE_J2534_DLL_PATH);
+    ecuio_session_t* session = nullptr;
+    ASSERT_EQ(ecuio_session_create(uri, &session), ECUIO_OK);
+    ASSERT_EQ(ecuio_session_start(session), ECUIO_OK);
+    ecuio_channel_diagnostics_t d{};
+    ASSERT_TRUE(wait_for_diagnostics(
+        session, d,
+        [](const ecuio_channel_diagnostics_t& r) {
+            return (r.flags & ECUIO_DIAG_COMPLETE) != 0;
+        },
+        5000));
+    fake_diagnostics::expect_report(d);
+    const uint32_t saved = d.generation;
+
+    ASSERT_EQ(ecuio_session_clear_diagnostics(session, 0, saved), ECUIO_OK);
+    ASSERT_TRUE(wait_for_diagnostics(
+        session, d,
+        [](const ecuio_channel_diagnostics_t& r) {
+            return r.clear == ECUIO_CLEAR_CLEARED &&
+                   (r.flags & ECUIO_DIAG_COMPLETE) != 0;
+        },
+        5000))
+        << "clear " << int{d.clear} << ", generation " << d.generation;
+    fake_diagnostics::expect_cleared_report(d);
+    EXPECT_EQ(ecuio_session_clear_diagnostics(session, 0, saved),
+              ECUIO_ERR_REPORT_CHANGED)
+        << "the saved report is gone";
+    ecuio_session_destroy(session);
+}
+
+/* The fake's engine turns (2000 rpm): the clear ends unsent, saying so,
+ * and the codes stay */
+TEST_F(J2534AdoptionTest, AClearWithTheEngineRunningSendsNo04)
+{
+    char uri[700];
+    snprintf(uri, sizeof(uri), "j2534://%s?profile=obd2&probe=0&identify=0",
+             FAKE_J2534_DLL_PATH);
+    ecuio_session_t* session = nullptr;
+    ASSERT_EQ(ecuio_session_create(uri, &session), ECUIO_OK);
+    ASSERT_EQ(ecuio_session_start(session), ECUIO_OK);
+    ecuio_channel_diagnostics_t d{};
+    ASSERT_TRUE(wait_for_diagnostics(
+        session, d,
+        [](const ecuio_channel_diagnostics_t& r) {
+            return (r.flags & ECUIO_DIAG_COMPLETE) != 0;
+        },
+        5000));
+    ASSERT_EQ(ecuio_session_clear_diagnostics(session, 0, d.generation),
+              ECUIO_OK);
+    ASSERT_TRUE(wait_for_diagnostics(
+        session, d,
+        [](const ecuio_channel_diagnostics_t& r) {
+            return r.clear != ECUIO_CLEAR_NONE;
+        },
+        5000));
+    EXPECT_EQ(d.clear, ECUIO_CLEAR_ENGINE_RUNNING);
+    EXPECT_EQ(d.clear_rpm, 2000u);
+    fake_diagnostics::expect_report(d);
+    ecuio_session_destroy(session);
+}
+
 /* The worker's whole engine past start-up (the probe's walk, the
  * identification one-shots, the rotation) and the decode for a values
  * callback cost it no allocation per frame, so none can throw. Counts

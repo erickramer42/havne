@@ -10,7 +10,12 @@
 //          refresh, link-state mapping, the activity log's session,
 //          ECU, diagnostics and delivery lines (the ELM327 session line too,
 //          the diagnostics line: BridgeTest.ChannelDiagnosticsText*,
-//          .ConnectLogsTheMocksDiagnostics,
+//          .ConnectLogsTheMocksDiagnostics; a clear's saved report and
+//          lines, ADR-0038: BridgeTest.ChannelClearText*,
+//          .DiagnosticsFileTextIsTheCliLines, .AClearSavesTheReportFirst,
+//          .AFailedSaveSendsNoClear, and on Windows
+//          .AClearRefusedForTheEngineLogsOneLineAndNoRead and
+//          .AClearAtTheFakesStoppedEngineLogsTheReadAfter;
 //          a sleep's line: BridgeTest.ASleepWhileConnectedIsLoggedWithItsLength,
 //          BridgeTest.SessionInfoTextNamesTheAdapter; its versions clause
 //          as adapterVersions, .ConnectLogsTheAdaptersSession), the serial ports as
@@ -30,6 +35,7 @@
 
 #include "sessionbridge.h"
 #include "carryover.h"
+#include "diagnostics_line.h" /* cli/: havne-cli's diagnostics line */
 #include "ecuio/version.h"
 #include "ecuio/signals.h"
 #include "ecuio/j2534.h"
@@ -46,6 +52,7 @@
 #include <QFileInfo>
 #include <QRandomGenerator>
 #include <QRegularExpression>
+#include <QSaveFile>
 #include <QStandardPaths>
 #include <QStringList>
 #include <QtGlobal>
@@ -55,6 +62,21 @@
 #include <cstring>
 
 namespace {
+
+// A file or folder for display: relative to Documents when under it,
+// so the account name stays out of the log and the page
+QString documentsRelative(const QString& path)
+{
+    const QString docs =
+        QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation);
+    if (!docs.isEmpty()) {
+        const QString rel = QDir(docs).relativeFilePath(path);
+        if (QDir::isRelativePath(rel) && !rel.startsWith(QLatin1String(".."))) {
+            return QDir::toNativeSeparators(QStringLiteral("Documents/") + rel);
+        }
+    }
+    return QDir::toNativeSeparators(path);
+}
 
 // A failed create or start, in words: the status, then core's detail
 // (which URI key, which vendor call, the vendor's text) when it has one.
@@ -923,6 +945,9 @@ void SessionBridge::applyConnectedState(ecuio_session_t* session, const QString&
     for (uint32_t& g : m_diagnosticsGeneration) {
         g = 0;
     }
+    for (bool& asked : m_clearAsked) {
+        asked = false;
+    }
     m_diagnosticsShownCount = 0;
     if (!m_diagnostics.isEmpty()) {
         m_diagnostics.clear();
@@ -1140,14 +1165,7 @@ QString SessionBridge::recordingFolder() const
 {
     const QString folder = m_recorder.folder();
     if (folder.isEmpty()) return {};
-    const QString docs = QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation);
-    if (!docs.isEmpty()) {
-        const QString rel = QDir(docs).relativeFilePath(folder);
-        if (QDir::isRelativePath(rel) && !rel.startsWith(QLatin1String(".."))) {
-            return QDir::toNativeSeparators(QStringLiteral("Documents/") + rel);
-        }
-    }
-    return QDir::toNativeSeparators(folder);
+    return documentsRelative(folder);
 }
 
 QUrl SessionBridge::recordingFolderUrl() const
@@ -1863,7 +1881,11 @@ void SessionBridge::pollChannelIdentity()
 /* Each channel's diagnostics report (ADR-0037), logged once per read
  * that completes: at connect, then once per Read again, which moves the
  * generation on. One line per ECU, so a recording's events.log keeps
- * the codes the car had when it was made. */
+ * the codes the car had when it was made. A clear (ADR-0038) moves the
+ * generation with the codes unchanged, while it runs and when it ends
+ * unsent or refused: that logs its own line, once per clear asked, and
+ * no diagnostics line; after a 44 or no answer the read that follows
+ * logs one. */
 void SessionBridge::pollChannelDiagnostics()
 {
     if (!m_connected.load(std::memory_order_acquire) || m_session == nullptr) {
@@ -1880,12 +1902,21 @@ void SessionBridge::pollChannelDiagnostics()
             m_diagnosticsShown[c] = s;
             changed = true;
         }
+        bool clear_only = (s.flags & ECUIO_DIAG_CLEARING) != 0;
+        if (m_clearAsked[c] && !clear_only && s.clear != ECUIO_CLEAR_NONE) {
+            m_clearAsked[c] = false;
+            emit logMessage(channelClearText(s));
+            clear_only = s.clear != ECUIO_CLEAR_CLEARED &&
+                         s.clear != ECUIO_CLEAR_UNANSWERED;
+        }
         if ((s.flags & ECUIO_DIAG_COMPLETE) == 0 ||
             s.generation == m_diagnosticsGeneration[c]) {
             continue;
         }
         m_diagnosticsGeneration[c] = s.generation;
-        emit logMessage(channelDiagnosticsText(s));
+        if (!clear_only) {
+            emit logMessage(channelDiagnosticsText(s));
+        }
     }
     if (changed) {
         m_diagnosticsShownCount = m_channelCount;
@@ -1908,6 +1939,126 @@ void SessionBridge::readDiagnostics()
     if (m_connected.load(std::memory_order_acquire) && m_session != nullptr) {
         (void)ecuio_session_read_diagnostics(m_session);
     }
+}
+
+/* ADR-0038: what a clear erases stays on record, so the reports go to a
+ * file of their own before anything is sent, whether or not the session
+ * records; each ECU is then cleared at the generation that file holds,
+ * so a report that moved on since is refused unsent */
+QString SessionBridge::clearDiagnostics()
+{
+    if (!m_connected.load(std::memory_order_acquire) || m_session == nullptr) {
+        return {};
+    }
+    ecuio_channel_diagnostics_t reports[ECUIO_SESSION_INFO_MAX_CHANNELS];
+    uint32_t channels[ECUIO_SESSION_INFO_MAX_CHANNELS];
+    uint32_t n = 0;
+    for (uint32_t c = 0; c < m_channelCount; ++c) {
+        ecuio_channel_diagnostics_t s{};
+        if (ecuio_session_get_channel_diagnostics(m_session, c, &s) ==
+                ECUIO_OK &&
+            (s.flags & ECUIO_DIAG_COMPLETE) != 0 &&
+            (s.flags & ECUIO_DIAG_CLEARING) == 0) {
+            reports[n] = s;
+            channels[n] = c;
+            ++n;
+        }
+    }
+    if (n == 0) {
+        emit logMessage(
+            QStringLiteral("Clear not sent: no ECU has a completed read"));
+        return {};
+    }
+
+    const auto refuse = [this](const QString& why) {
+        emit logMessage(
+            QStringLiteral("Clear not sent: the report couldn't be saved (%1)")
+                .arg(why));
+        return QString();
+    };
+    const QString root = recordingsRoot();
+    if (root.isEmpty()) {
+        return refuse(QStringLiteral("no Documents folder"));
+    }
+    // The picked vehicle names an adapter's file only, as a recording's
+    // folder (ADR-0027 §1)
+    const bool adapter = m_currentUri.startsWith(QStringLiteral("j2534://"),
+                                                 Qt::CaseInsensitive) ||
+                         m_currentUri.startsWith(QStringLiteral("elm327://"),
+                                                 Qt::CaseInsensitive);
+    const QString label = adapter ? folderLabel(m_vehicleLabel) : QString();
+    const QString base =
+        QStringLiteral("diagnostics-") + QDateTime::currentDateTime().toString(
+                                             QStringLiteral("yyyyMMdd-HHmmss"));
+    QString path;
+    for (int k = 1; k <= 9 && path.isEmpty(); ++k) {
+        const QString name =
+            base + (k > 1 ? QStringLiteral("-%1").arg(k) : QString()) +
+            (label.isEmpty() ? QString() : QLatin1Char(' ') + label) +
+            QStringLiteral(".jsonl");
+        if (!QFileInfo::exists(root + QLatin1Char('/') + name)) {
+            path = root + QLatin1Char('/') + name;
+        }
+    }
+    if (path.isEmpty()) {
+        return refuse(
+            QStringLiteral("nine files already have this second's name"));
+    }
+    /* No folder, no file: either way nothing is sent */
+    const bool folder = QDir().mkpath(root);
+    QSaveFile file(path);
+    const QByteArray text = diagnosticsFileText(reports, n);
+    if (!file.open(QIODevice::WriteOnly) || file.write(text) != text.size() ||
+        !file.commit()) {
+        return refuse(folder ? file.errorString()
+                             : QStringLiteral("can't create %1")
+                                   .arg(documentsRelative(root)));
+    }
+    const QString shown = documentsRelative(path);
+    emit logMessage(
+        QStringLiteral("Diagnostics saved before the clear: %1").arg(shown));
+
+    for (uint32_t i = 0; i < n; ++i) {
+        const ecuio_status_t rc = ecuio_session_clear_diagnostics(
+            m_session, channels[i], reports[i].generation);
+        if (rc == ECUIO_OK) {
+            m_clearAsked[channels[i]] = true;
+        } else {
+            emit logMessage(
+                QStringLiteral("ECU %1 clear: not sent: %2")
+                    .arg(hexId(reports[i].rx_id),
+                         rc == ECUIO_ERR_REPORT_CHANGED
+                             ? QStringLiteral("the report changed")
+                             : QString::fromUtf8(ecuio_status_string(rc))));
+        }
+    }
+    return shown;
+}
+
+QByteArray
+SessionBridge::diagnosticsFileText(const ecuio_channel_diagnostics_t* reports,
+                                   uint32_t count)
+{
+    QByteArray out;
+    char buf[8192];
+    cli::Line start(buf, sizeof buf);
+    start.raw("{\"type\":\"start\"");
+    start.key("schema");
+    start.u64(1);
+    start.key("core");
+    start.string(ecuio_version_string(), SIZE_MAX);
+    start.ch('}');
+    if (start.finish()) {
+        out.append(start.data(), static_cast<qsizetype>(start.size()));
+    }
+    for (uint32_t i = 0; i < count; ++i) {
+        cli::Line l(buf, sizeof buf);
+        cli::diagnostics_line(l, reports[i]);
+        if (l.finish()) {
+            out.append(l.data(), static_cast<qsizetype>(l.size()));
+        }
+    }
+    return out;
 }
 
 QVariantMap
@@ -2023,6 +2174,41 @@ SessionBridge::diagnosticsEntry(const ecuio_channel_diagnostics_t& s,
                                          : QString();
     freeze[QStringLiteral("values")] = values;
     m[QStringLiteral("freeze")] = freeze;
+
+    /* The last clear (ADR-0038) and whether one runs */
+    m[QStringLiteral("clearing")] = (s.flags & ECUIO_DIAG_CLEARING) != 0;
+    QString clear;
+    QString clearNrc;
+    switch (s.clear) {
+    case ECUIO_CLEAR_CLEARED:
+        clear = QStringLiteral("cleared");
+        break;
+    case ECUIO_CLEAR_REFUSED:
+        clear = QStringLiteral("refused");
+        clearNrc = QStringLiteral("7F 04 %1").arg(hexByte(s.clear_nrc));
+        break;
+    case ECUIO_CLEAR_UNANSWERED:
+        clear = QStringLiteral("unanswered");
+        break;
+    case ECUIO_CLEAR_ENGINE_RUNNING:
+        clear = QStringLiteral("engineRunning");
+        break;
+    case ECUIO_CLEAR_NO_ENGINE_SPEED:
+        clear = QStringLiteral("noEngineSpeed");
+        if (s.clear_nrc != 0) {
+            clearNrc = QStringLiteral("7F 01 %1").arg(hexByte(s.clear_nrc));
+        }
+        break;
+    case ECUIO_CLEAR_REPORT_CHANGED:
+        clear = QStringLiteral("reportChanged");
+        break;
+    default:
+        clear = QStringLiteral("none");
+        break;
+    }
+    m[QStringLiteral("clear")] = clear;
+    m[QStringLiteral("clearNrc")] = clearNrc;
+    m[QStringLiteral("clearRpm")] = static_cast<int>(s.clear_rpm);
     return m;
 }
 
@@ -2158,6 +2344,41 @@ QString SessionBridge::channelIdentityText(const ecuio_channel_identity_t& s)
     }
     return QStringLiteral("ECU %1 identity: ").arg(hexId(s.rx_id)) +
            parts.join(QStringLiteral("; "));
+}
+
+/* One channel's "ECU 0x… clear:" line (ADR-0038): what became of the
+ * clear its report names */
+QString SessionBridge::channelClearText(const ecuio_channel_diagnostics_t& s)
+{
+    QString what;
+    switch (s.clear) {
+    case ECUIO_CLEAR_CLEARED:
+        what = QStringLiteral("cleared");
+        break;
+    case ECUIO_CLEAR_REFUSED:
+        what = QStringLiteral("refused (7F 04 %1)").arg(hexByte(s.clear_nrc));
+        break;
+    case ECUIO_CLEAR_UNANSWERED:
+        what = QStringLiteral("no answer");
+        break;
+    case ECUIO_CLEAR_ENGINE_RUNNING:
+        what = QStringLiteral("not sent: engine running (%1 rpm)")
+                   .arg(s.clear_rpm);
+        break;
+    case ECUIO_CLEAR_NO_ENGINE_SPEED:
+        what = s.clear_nrc != 0
+                   ? QStringLiteral("not sent: no engine speed (7F 01 %1)")
+                         .arg(hexByte(s.clear_nrc))
+                   : QStringLiteral("not sent: no engine speed");
+        break;
+    case ECUIO_CLEAR_REPORT_CHANGED:
+        what = QStringLiteral("not sent: the report changed");
+        break;
+    default:
+        what = QStringLiteral("not asked");
+        break;
+    }
+    return QStringLiteral("ECU %1 clear: %2").arg(hexId(s.rx_id), what);
 }
 
 /* One channel's "ECU 0x… diagnostics:" line: the MIL, each code list,

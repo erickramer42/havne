@@ -16,7 +16,7 @@ JSON lines for scripts, and a simulated vehicle runs every page with no
 hardware.
 
 > [!WARNING]
-> **Experimental, read-only.** It has read one car through two adapters, from a laptop and from an Android phone; other vehicles and adapters are untested. Read [DISCLAIMER.md](DISCLAIMER.md) before connecting it to a vehicle.
+> **Experimental.** It has read one car through two adapters, from a laptop and from an Android phone; other vehicles and adapters are untested. It can clear trouble codes, after asking and saving them first, but has cleared them only on its fakes and simulated vehicle, never on a car. Read [DISCLAIMER.md](DISCLAIMER.md) before connecting it to a vehicle.
 
 ![The Havne Dashboard through a quarter mile on the warmed-up simulated vehicle: launch control holds the engine near 4,000 rpm at the line, the tires spin off it, three upshifts at 6,800 rpm refill the shift lights, and speed climbs to about 107 mph at the line while coolant rises from 194 to 216 °F, where the fan cuts in, and the oil from 225 to 239 °F, before the driver lifts](docs/images/dashboard.gif)
 
@@ -118,8 +118,10 @@ a quarter mile off launch control on a warm loop.*
 - **Trouble codes.** At connect, each ECU's check-engine light, its
   stored, pending and permanent codes, its readiness monitors and the
   freeze frame, on a Diagnostics page, in the activity log and from
-  `havne-cli`; reading only
-  ([ADR-0037](docs/adr/0037-reading-trouble-codes.md)).
+  `havne-cli` ([ADR-0037](docs/adr/0037-reading-trouble-codes.md)).
+  Clearing them asks first, saves the report to a file of its own, and
+  sends nothing while the engine turns
+  ([ADR-0038](docs/adr/0038-clearing-trouble-codes.md)).
 - **Recording and replay.** Each connect can record every frame, value
   and event; `replay://` plays a recording back at its own pace or
   faster, through the same decoding

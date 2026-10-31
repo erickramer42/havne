@@ -173,6 +173,13 @@ information) and 0x22 (ReadDataByIdentifier), and nothing else.
 > by core itself through the one-shot slot. 0x04 (clearing codes)
 > stays refused with every service that changes the car.
 
+> **Amended 2026-10-30 ([ADR-0038](0038-clearing-trouble-codes.md)):**
+> 0x04 is sent, by one path only: a channel's clear, which builds the
+> request itself after its gate passes (the report saved at the
+> generation the caller names, the engine seen at 0 rpm). The rule
+> above still holds for everything else: no def, URI key or one-shot
+> list can enrol 0x04, and the engine refuses it from any of them.
+
 ### 4. The probe runs on the engine, and only explicit answers prune
 
 The post-connect probe (ADR-0013 §3) uses the engine before the

@@ -1,11 +1,14 @@
 // File/layer: fuzz/fuzz_diagnostics.cpp | C++17, Qt-free, libFuzzer
 // Testing: FUZZ: the request engine reading an ECU's diagnostics
-//          (ADR-0037) from arbitrary replies: each request the list sends
-//          answered by a timeout, raw bytes, a positive reply with an
-//          arbitrary tail or a negative one, with Read again and rescans
-//          between; the report stays within its caps, every code and
-//          monitor it holds has a name, its values are finite, it reads
-//          complete only with nothing left to ask, two runs agree
+//          (ADR-0037) and clearing them (ADR-0038) from arbitrary
+//          replies: each request answered by a timeout, raw bytes, a
+//          positive reply with an arbitrary tail or a negative one, with
+//          Read again, rescans and clears (at the report's generation or
+//          another) between; 04 goes out only right after the engine
+//          speed read 0 rpm, the report stays within its caps, every
+//          code and monitor it holds has a name, its values are finite,
+//          it reads complete only with nothing left to ask, two runs
+//          agree
 
 #include <ecuio/core.h>
 #include <ecuio/signals.h>
@@ -92,12 +95,20 @@ void run(const uint8_t* data, size_t size, ecuio_channel_diagnostics_t* out)
     ecuio_engine_diagnose(&e, ecuio_obd2_signal_set());
     script s{data, size};
     int64_t now = 0;
+    /* The last reply given to the clear's 01 0C read 0 rpm, and nothing
+     * has been sent since: the one moment 04 may go out */
+    bool stopped = false;
     for (int step = 0; step < 512 && !s.done(); ++step) {
         const uint8_t op = s.next();
         if ((op & 7u) == 0) {
             ecuio_engine_diagnose_again(&e);
         } else if ((op & 7u) == 1) {
             ecuio_engine_rescan(&e);
+        } else if ((op & 7u) == 2) {
+            /* the report's generation, or one off it */
+            const uint32_t off = (op >> 3) % 3u;
+            (void)ecuio_engine_clear(&e, 0,
+                                     e.chans[0].diag.generation + off - 1u);
         } else {
             const int32_t r = ecuio_engine_due(&e, 0, now);
             if (r == ECUIO_ENGINE_NONE) {
@@ -107,6 +118,10 @@ void run(const uint8_t* data, size_t size, ecuio_channel_diagnostics_t* out)
                 continue;
             }
             const ecuio_request q = ecuio_engine_request_of(&e, 0, r);
+            if (q.bytes[0] == 0x04 && !stopped) {
+                abort(); /* 04 without the engine seen stopped */
+            }
+            stopped = false;
             ecuio_engine_sent(&e, 0, r, true, now);
             uint8_t reply[128]; /* past the 32 codes a list holds */
             uint16_t len = 0;
@@ -138,8 +153,11 @@ void run(const uint8_t* data, size_t size, ecuio_channel_diagnostics_t* out)
                 break;
             }
             if (len > 0) {
-                (void)ecuio_engine_on_frame(&e, 0, reply, len, now + 4000,
-                                            nullptr);
+                const ecuio_reply got = ecuio_engine_on_frame(
+                    &e, 0, reply, len, now + 4000, nullptr);
+                stopped = got == ecuio_reply::positive && q.len == 2 &&
+                          q.bytes[0] == 0x01 && q.bytes[1] == 0x0C &&
+                          len >= 4 && reply[2] == 0 && reply[3] == 0;
             }
         }
         now += ECUIO_ENGINE_GAP_US;

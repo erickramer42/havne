@@ -2576,7 +2576,7 @@ Bytes fake_reply(const Bytes& req)
 }
 
 /* Drives channel 0 until its one-shots (walk, identification,
- * diagnostics, scan) have all settled, answering each request through
+ * diagnostics, a clear, scan) have all settled, answering each request through
  * respond; a silent one waits out its wait. Returns what went out, in
  * order. */
 std::vector<SentRequest> drive(ecuio_request_engine* e, int64_t* now,
@@ -2586,7 +2586,8 @@ std::vector<SentRequest> drive(ecuio_request_engine* e, int64_t* now,
     const ecuio_engine_channel& ch = e->chans[0];
     for (int step = 0; step < 1000; ++step) {
         if (!ch.walking && ch.ident_pending == 0 && ch.diag_pending == 0 &&
-            ch.scan_pending == 0 && ch.outstanding == ECUIO_ENGINE_NONE) {
+            ch.scan_pending == 0 && ch.clear_step == ECUIO_CLEAR_STEP_NONE &&
+            ch.outstanding == ECUIO_ENGINE_NONE) {
             return sent;
         }
         const int32_t r = ecuio_engine_due(e, 0, *now);
@@ -2841,4 +2842,293 @@ TEST_F(DiagnosticsTest, ReadAgainStartsOverOnlyOnceSettled)
     EXPECT_EQ(d.lists[ECUIO_DIAG_STORED].held,
               first.lists[ECUIO_DIAG_STORED].held);
     EXPECT_GT(d.generation, first.generation);
+}
+
+namespace {
+
+/* ADR-0038: the clear's gate and steps, against the fake ECU */
+class ClearTest : public DiagnosticsTest
+{};
+
+/* The fake ECU with its engine stopped: 01 0C reads 0 rpm */
+Bytes stopped_engine(const Bytes& req)
+{
+    if (req == Bytes{0x01, 0x0C}) {
+        return {0x41, 0x0C, 0x00, 0x00};
+    }
+    return fake_reply(req);
+}
+
+/* An engine reading only diagnostics, read to the end through the fake;
+ * the report it holds */
+ecuio_channel_diagnostics_t read_report(ecuio_request_engine* e, int64_t* now)
+{
+    ecuio_engine_init(e, 1);
+    ecuio_engine_diagnose(e, ecuio_obd2_signal_set());
+    drive(e, now, fake_reply);
+    ecuio_channel_diagnostics_t d;
+    ecuio_engine_diagnostics(e, 0, &d);
+    return d;
+}
+
+std::vector<Bytes> requests_of(const std::vector<SentRequest>& sent)
+{
+    std::vector<Bytes> out;
+    for (const SentRequest& s : sent) {
+        out.push_back(s.bytes);
+    }
+    return out;
+}
+
+const std::vector<Bytes> kReadAfterAClear = {
+    {0x01, 0x01},       {0x03}, {0x07}, {0x0A}, {0x02, 0x00, 0x00},
+    {0x02, 0x02, 0x00},
+};
+
+} // namespace
+
+/* At 0 rpm the clear sends 04 and reads the report again: the fake's
+ * stored and pending codes and its freeze frame gone, the MIL off, its
+ * catalyst-side monitors incomplete, the permanent code kept */
+TEST_F(ClearTest, AStoppedEngineIsClearedAndReadAgain)
+{
+    static ecuio_request_engine e;
+    int64_t now = 0;
+    ecuio_channel_diagnostics_t d = read_report(&e, &now);
+    ASSERT_TRUE(d.flags & ECUIO_DIAG_COMPLETE);
+    ASSERT_EQ(d.clear, ECUIO_CLEAR_NONE);
+    ASSERT_TRUE(ecuio_engine_clear(&e, 0, d.generation));
+    ecuio_engine_diagnostics(&e, 0, &d);
+    EXPECT_TRUE(d.flags & ECUIO_DIAG_CLEARING);
+
+    const std::vector<Bytes> sent =
+        requests_of(drive(&e, &now, stopped_engine));
+    std::vector<Bytes> expected = {{0x01, 0x0C}, {0x04}};
+    expected.insert(expected.end(), kReadAfterAClear.begin(),
+                    kReadAfterAClear.end());
+    EXPECT_EQ(sent, expected) << "the speed, 04, then the list again";
+    EXPECT_EQ(fake_ecu::diagnostics().clears.load(), 1u);
+
+    ecuio_engine_diagnostics(&e, 0, &d);
+    EXPECT_EQ(d.clear, ECUIO_CLEAR_CLEARED);
+    EXPECT_EQ(d.clear_nrc, 0u);
+    EXPECT_EQ(d.clear_rpm, 0u);
+    EXPECT_EQ(d.flags & (ECUIO_DIAG_COMPLETE | ECUIO_DIAG_CLEARING |
+                         ECUIO_DIAG_MIL_ON | ECUIO_DIAG_FREEZE_FRAME),
+              ECUIO_DIAG_COMPLETE);
+    EXPECT_EQ(d.dtc_count, 0u);
+    EXPECT_EQ(d.lists[ECUIO_DIAG_STORED].held, 0u);
+    EXPECT_EQ(d.lists[ECUIO_DIAG_PENDING].held, 0u);
+    ASSERT_EQ(d.lists[ECUIO_DIAG_PERMANENT].held, 1u);
+    EXPECT_EQ(d.lists[ECUIO_DIAG_PERMANENT].codes[0], 0x0420u);
+    EXPECT_EQ(d.freeze_count, 0u);
+    uint32_t incomplete = 0;
+    for (uint32_t i = 0; i < d.monitor_count; ++i) {
+        incomplete += (d.monitors[i].flags & ECUIO_MONITOR_COMPLETE) ? 0 : 1;
+    }
+    EXPECT_EQ(d.monitor_count, 8u);
+    EXPECT_EQ(incomplete, 5u) << "byte C's monitors start over";
+}
+
+/* A turning engine ends the clear before 04, with the speed it read
+ * (the fake's 2000 rpm); the codes stay as they were */
+TEST_F(ClearTest, ARunningEngineIsNotCleared)
+{
+    static ecuio_request_engine e;
+    int64_t now = 0;
+    ecuio_channel_diagnostics_t d = read_report(&e, &now);
+    const uint32_t before = d.generation;
+    ASSERT_TRUE(ecuio_engine_clear(&e, 0, d.generation));
+    EXPECT_EQ(requests_of(drive(&e, &now, fake_reply)),
+              (std::vector<Bytes>{{0x01, 0x0C}}));
+    EXPECT_EQ(fake_ecu::diagnostics().clears.load(), 0u);
+
+    ecuio_engine_diagnostics(&e, 0, &d);
+    EXPECT_EQ(d.clear, ECUIO_CLEAR_ENGINE_RUNNING);
+    EXPECT_EQ(d.clear_rpm, 2000u);
+    EXPECT_FALSE(d.flags & ECUIO_DIAG_CLEARING);
+    EXPECT_GT(d.generation, before);
+    fake_diagnostics::expect_report(d);
+}
+
+/* A speed that turns at all is running: 1 count (0.25 rpm) reads 1 rpm,
+ * never 0 */
+TEST_F(ClearTest, TheSlowestTurningEngineIsRunning)
+{
+    static ecuio_request_engine e;
+    int64_t now = 0;
+    ecuio_channel_diagnostics_t d = read_report(&e, &now);
+    ASSERT_TRUE(ecuio_engine_clear(&e, 0, d.generation));
+    const Responder crawling = [](const Bytes& req) {
+        return req == Bytes{0x01, 0x0C} ? Bytes{0x41, 0x0C, 0x00, 0x01}
+                                        : fake_reply(req);
+    };
+    EXPECT_EQ(requests_of(drive(&e, &now, crawling)).size(), 1u);
+    ecuio_engine_diagnostics(&e, 0, &d);
+    EXPECT_EQ(d.clear, ECUIO_CLEAR_ENGINE_RUNNING);
+    EXPECT_EQ(d.clear_rpm, 1u);
+}
+
+/* No speed, refused or unanswered, sends nothing more */
+TEST_F(ClearTest, NoEngineSpeedSendsNothing)
+{
+    const std::pair<Bytes, uint8_t> kAnswers[] = {
+        {Bytes{}, 0x00},                 /* silence */
+        {Bytes{0x7F, 0x01, 0x12}, 0x12}, /* refused */
+        {Bytes{0x41, 0x0C, 0x00}, 0x00}, /* cut short */
+    };
+    for (const auto& a : kAnswers) {
+        SCOPED_TRACE(a.first.size());
+        static ecuio_request_engine e;
+        int64_t now = 0;
+        ecuio_channel_diagnostics_t d = read_report(&e, &now);
+        ASSERT_TRUE(ecuio_engine_clear(&e, 0, d.generation));
+        const Bytes answer = a.first;
+        const Responder speed = [answer](const Bytes& req) {
+            return req == Bytes{0x01, 0x0C} ? answer : fake_reply(req);
+        };
+        EXPECT_EQ(requests_of(drive(&e, &now, speed)),
+                  (std::vector<Bytes>{{0x01, 0x0C}}));
+        ecuio_engine_diagnostics(&e, 0, &d);
+        EXPECT_EQ(d.clear, ECUIO_CLEAR_NO_ENGINE_SPEED);
+        EXPECT_EQ(d.clear_nrc, a.second);
+        EXPECT_FALSE(d.flags & ECUIO_DIAG_CLEARING);
+    }
+    EXPECT_EQ(fake_ecu::diagnostics().clears.load(), 0u);
+}
+
+/* A refusal (7F 04 22: the engine's conditions) changed nothing, so
+ * nothing is read again */
+TEST_F(ClearTest, ARefusedClearReadsNothingAgain)
+{
+    fake_ecu::diagnostics().clear_nrc = 0x22;
+    static ecuio_request_engine e;
+    int64_t now = 0;
+    ecuio_channel_diagnostics_t d = read_report(&e, &now);
+    ASSERT_TRUE(ecuio_engine_clear(&e, 0, d.generation));
+    EXPECT_EQ(requests_of(drive(&e, &now, stopped_engine)),
+              (std::vector<Bytes>{{0x01, 0x0C}, {0x04}}));
+    ecuio_engine_diagnostics(&e, 0, &d);
+    EXPECT_EQ(d.clear, ECUIO_CLEAR_REFUSED);
+    EXPECT_EQ(d.clear_nrc, 0x22u);
+    fake_diagnostics::expect_report(d);
+}
+
+/* 04 unanswered may still have cleared: the report is read again, which
+ * here shows the codes kept */
+TEST_F(ClearTest, AnUnansweredClearReadsTheReportAgain)
+{
+    static ecuio_request_engine e;
+    int64_t now = 0;
+    ecuio_channel_diagnostics_t d = read_report(&e, &now);
+    ASSERT_TRUE(ecuio_engine_clear(&e, 0, d.generation));
+    const Responder deaf = [](const Bytes& req) {
+        return req == Bytes{0x04} ? Bytes{} : stopped_engine(req);
+    };
+    const std::vector<Bytes> sent = requests_of(drive(&e, &now, deaf));
+    ASSERT_GE(sent.size(), 3u);
+    EXPECT_EQ(sent[1], (Bytes{0x04}));
+    EXPECT_EQ(sent[2], (Bytes{0x01, 0x01})) << "the read again";
+    ecuio_engine_diagnostics(&e, 0, &d);
+    EXPECT_EQ(d.clear, ECUIO_CLEAR_UNANSWERED);
+    fake_diagnostics::expect_report(d);
+}
+
+/* Only the report the caller saw is cleared: one never read, one mid-
+ * read, or another generation records REPORT_CHANGED and sends nothing;
+ * a channel past the count, or one already clearing, is left as it is */
+TEST_F(ClearTest, OnlyTheReportTheCallerSawIsCleared)
+{
+    static ecuio_request_engine e;
+    int64_t now = 0;
+    ecuio_engine_init(&e, 1);
+    EXPECT_FALSE(ecuio_engine_clear(&e, 0, 0)) << "no diagnostics read";
+    ecuio_channel_diagnostics_t d;
+    ecuio_engine_diagnostics(&e, 0, &d);
+    EXPECT_EQ(d.clear, ECUIO_CLEAR_NONE);
+    EXPECT_EQ(d.generation, 0u);
+
+    ecuio_engine_diagnose(&e, ecuio_obd2_signal_set());
+    EXPECT_FALSE(ecuio_engine_clear(&e, 0, 0)) << "mid-read";
+    ecuio_engine_diagnostics(&e, 0, &d);
+    EXPECT_EQ(d.clear, ECUIO_CLEAR_REPORT_CHANGED);
+    for (const Bytes& b : requests_of(drive(&e, &now, stopped_engine))) {
+        EXPECT_NE(b, (Bytes{0x04}));
+        EXPECT_NE(b, (Bytes{0x01, 0x0C}));
+    }
+
+    ecuio_engine_diagnostics(&e, 0, &d);
+    ASSERT_TRUE(d.flags & ECUIO_DIAG_COMPLETE);
+    EXPECT_FALSE(ecuio_engine_clear(&e, 0, d.generation - 1)) << "older";
+    ecuio_engine_diagnostics(&e, 0, &d);
+    EXPECT_EQ(d.clear, ECUIO_CLEAR_REPORT_CHANGED);
+    EXPECT_FALSE(ecuio_engine_clear(&e, 0, d.generation + 1)) << "newer";
+    ecuio_engine_diagnostics(&e, 0, &d);
+    EXPECT_FALSE(ecuio_engine_clear(&e, 1, d.generation)) << "no channel 1";
+    ecuio_channel_diagnostics_t same;
+    ecuio_engine_diagnostics(&e, 0, &same);
+    EXPECT_EQ(same.generation, d.generation) << "channel 0 untouched";
+    EXPECT_TRUE(requests_of(drive(&e, &now, stopped_engine)).empty());
+    EXPECT_EQ(fake_ecu::diagnostics().clears.load(), 0u);
+
+    ASSERT_TRUE(ecuio_engine_clear(&e, 0, d.generation));
+    ecuio_engine_diagnostics(&e, 0, &d);
+    EXPECT_FALSE(ecuio_engine_clear(&e, 0, d.generation)) << "one at a time";
+    ecuio_channel_diagnostics_t after;
+    ecuio_engine_diagnostics(&e, 0, &after);
+    EXPECT_EQ(after.generation, d.generation) << "the running one untouched";
+    EXPECT_EQ(after.clear, ECUIO_CLEAR_NONE);
+    drive(&e, &now, stopped_engine);
+    EXPECT_EQ(fake_ecu::diagnostics().clears.load(), 1u);
+}
+
+/* A Read again waits for a clear under way, and a later one keeps the
+ * last clear's outcome while the report starts over */
+TEST_F(ClearTest, ReadAgainKeepsTheLastClear)
+{
+    static ecuio_request_engine e;
+    int64_t now = 0;
+    ecuio_channel_diagnostics_t d = read_report(&e, &now);
+    ASSERT_TRUE(ecuio_engine_clear(&e, 0, d.generation));
+    ecuio_engine_diagnose_again(&e);
+    ecuio_engine_rescan(&e);
+    EXPECT_EQ(requests_of(drive(&e, &now, fake_reply)),
+              (std::vector<Bytes>{{0x01, 0x0C}}))
+        << "the clear alone, ended by the running engine";
+
+    ecuio_engine_diagnose_again(&e);
+    std::vector<Bytes> list = requests_of(drive(&e, &now, fake_reply));
+    ASSERT_FALSE(list.empty());
+    EXPECT_EQ(list.front(), (Bytes{0x01, 0x01}));
+    ecuio_engine_diagnostics(&e, 0, &d);
+    EXPECT_EQ(d.clear, ECUIO_CLEAR_ENGINE_RUNNING);
+    EXPECT_EQ(d.clear_rpm, 2000u);
+    fake_diagnostics::expect_report(d);
+}
+
+/* A rescan (the link back to ok) leaves a clearing channel's report as
+ * the caller saved it: an item left unanswered isn't asked again until
+ * the clear ends */
+TEST_F(ClearTest, ARescanWaitsForTheClear)
+{
+    static ecuio_request_engine e;
+    int64_t now = 0;
+    ecuio_engine_init(&e, 1);
+    ecuio_engine_diagnose(&e, ecuio_obd2_signal_set());
+    const Responder no_pending = [](const Bytes& req) {
+        return req == Bytes{0x07} ? Bytes{} : fake_reply(req);
+    };
+    drive(&e, &now, no_pending);
+    ecuio_channel_diagnostics_t d;
+    ecuio_engine_diagnostics(&e, 0, &d);
+    ASSERT_TRUE(d.flags & ECUIO_DIAG_COMPLETE);
+    ASSERT_EQ(d.lists[ECUIO_DIAG_PENDING].outcome, ECUIO_DIAG_UNANSWERED);
+
+    ASSERT_TRUE(ecuio_engine_clear(&e, 0, d.generation));
+    ecuio_engine_rescan(&e);
+    EXPECT_EQ(requests_of(drive(&e, &now, fake_reply)),
+              (std::vector<Bytes>{{0x01, 0x0C}}));
+    ecuio_engine_diagnostics(&e, 0, &d);
+    EXPECT_TRUE(d.flags & ECUIO_DIAG_COMPLETE);
+    EXPECT_EQ(d.lists[ECUIO_DIAG_PENDING].outcome, ECUIO_DIAG_UNANSWERED);
 }

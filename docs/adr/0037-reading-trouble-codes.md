@@ -51,6 +51,10 @@ that changes a session, unlocks or writes, stays refused, so the rule
 of [ADR-0015](0015-request-engine.md) §3 holds for whatever enrolls a
 request: the engine sends no service that changes the car.
 
+> **Amended 2026-10-30 ([ADR-0038](0038-clearing-trouble-codes.md)):**
+> 0x04 is sent by a channel's clear alone, behind its gate; it still
+> never joins this record's list, and every read above stays as it is.
+
 ### 2. One fixed list, asked once per channel, after identification
 
 Every channel that requests also asks, once each and in this order:

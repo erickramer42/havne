@@ -67,6 +67,12 @@ struct ecuio_session {
      * that reads diagnostics asks again when it moves
      * (ecuio_take_diag_request) */
     std::atomic<uint32_t> diag_requests{0};
+    /* ecuio_session_clear_diagnostics's requests, per channel, from any
+     * thread: the generation the caller saved, then the count moved on;
+     * a worker that reads diagnostics takes each new one
+     * (ecuio_take_clear_requests) */
+    std::atomic<uint32_t> clear_generation[ECUIO_SESSION_INFO_MAX_CHANNELS]{};
+    std::atomic<uint32_t> clear_requests[ECUIO_SESSION_INFO_MAX_CHANNELS]{};
 };
 
 #endif /* ECUIO_SESSION_H */

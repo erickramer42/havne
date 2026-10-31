@@ -806,6 +806,10 @@ long __stdcall PassThruWriteMsgs(unsigned long ChannelID,
             fake_j2534::read_knob("ECUIO_FAKE_CLEAR_NRC", nb, sizeof(nb))
                 ? static_cast<int>(strtol(nb, nullptr, 0))
                 : 0;
+        /* PID 0C at 0 rpm: the engine stopped, as a clear needs */
+        fake_ecu::diagnostics().engine_off =
+            fake_j2534::read_knob("ECUIO_FAKE_ENGINE_OFF", nb, sizeof(nb)) &&
+            strtol(nb, nullptr, 0) != 0;
     }
 
     std::unique_lock<std::mutex> lk(fake_j2534::g_lock);
