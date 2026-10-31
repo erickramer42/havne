@@ -210,11 +210,13 @@ Live's strip chart plotted every numeric row it showed: on the test
 car 49 traces, too many to read. A def says where it stands among the
 signals a UI plots first, in `plot_rank` (`signals.h`), which takes one
 of the display block's reserved bytes: 0 is unranked, 1 is first.
-Live plots the `SignalListModel::DefaultPlotted` (10) rows it shows
+Live plots the `SignalListModel::DefaultPlotted` (6) rows it shows
 with the lowest ranks, so a row it hides (section 6) gives its place to the
 next ranked one, and a rescan that shows it takes the place back. A set
 that ranks no def (the mock's, `uds-generic`'s DIDs, a profile
-registered from outside) plots every numeric row, as before.
+registered from outside) plots every numeric row, as before. Six,
+not ten: on a phone ten traces crowd the chart
+([2026-10-31-elm327-vehicle-2](../bench-sessions/2026-10-31-elm327-vehicle-2.md)).
 
 `obd2` ranks fourteen, best first: RPM, coolant, intake air and oil
 temperatures and MAF (the engine's state); then speed, load, timing
@@ -222,7 +224,7 @@ advance, bank 1's short and long fuel trims, MAP (which stands in for
 a speed-density engine's missing MAF), the control module's voltage,
 the accelerator pedal and the commanded lambda. Throttle is left to
 load, which says more of the engine's state. The test car lacks PID 5C,
-so it plots ranks 1 to 4 and 6 to 11.
+so it plots ranks 1 to 4, 6 and 7.
 
 The rank is core's because it describes the signal, as its name and
 decimal places do, and a program on the C ABI reads it from the def;

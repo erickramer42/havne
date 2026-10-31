@@ -57,13 +57,16 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
   line saying how many it left out; the Dashboard and recordings keep
   every signal. A field the ECU's replies come without (bank 3 of a
   two-bank engine's oxygen-sensor trims) is left out too.
-- Live plots ten signals when a session starts, not every one: the
-  first ten the car has of a ranked list (rpm, coolant, intake air and
+- Live plots six signals when a session starts, not every one: the
+  first six the car has of a ranked list (rpm, coolant, intake air and
   oil temperatures, MAF, speed, load, timing advance, the fuel trims,
   then MAP, voltage, the pedal and commanded lambda), so a car without
   one plots the next. A tick or untick is kept for the picked vehicle;
   the mock and `uds-generic` still plot every signal. Each signal def
   carries its place as `plot_rank` (core's C API).
+- Live's chart shows the last 10, 30, 60 or 120 s, picked above it and
+  kept between runs: every trace covers that span, however fast its
+  signal refreshes.
 - With the probe on, a Service 01 request carries up to six PIDs of
   one rate class, each one the car has already answered alone, so a
   pass asks the same signals in fewer requests; `?pack=0` asks one PID
@@ -93,6 +96,11 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
   download, and one build provenance file,
   `havne-X.Y.Z.intoto.jsonl`, covers every download instead of one
   beside each, so the list of files is shorter.
+
+### Fixed
+- Live's time axis no longer draws its captions over one another on a
+  narrow window, such as a phone's: the step between ticks grows until
+  each caption fits.
 
 ## [0.3.4] - 2026-10-30
 

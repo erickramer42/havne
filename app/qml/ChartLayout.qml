@@ -43,10 +43,19 @@ QtObject {
     readonly property real bandSwingShare: 0.1   // of the plot's height, the least swing banded
     readonly property int bandSwingMin: 6        // px, the least on a short plot
 
-    // The time axis's tick step, in seconds, for a span in seconds
-    function tickStep(spanS) {
-        return spanS > 12 ? 5 : spanS > 6 ? 2 : 1
+    // The time axis's tick step, in seconds, for a span in seconds: 1, 2
+    // or 5 by the span, raised through tickSteps until a step is at least
+    // roomPx wide at pxPerS (both optional), so captions never overlap
+    readonly property var tickSteps: [1, 2, 5, 10, 15, 30, 60, 120, 300, 600]
+    function tickStep(spanS, pxPerS, roomPx) {
+        const floor = spanS > 12 ? 5 : spanS > 6 ? 2 : 1
+        for (const step of tickSteps) {
+            if (step >= floor && (!(pxPerS > 0) || step * pxPerS >= roomPx))
+                return step
+        }
+        return tickSteps[tickSteps.length - 1]
     }
+    readonly property int captionGap: 8   // px between two time captions
 
     // A series' value range. decimals is the value's displayed precision:
     // a trace that never moves by half a displayed digit is flat, and a
@@ -212,10 +221,14 @@ QtObject {
 
     // series: [{ samples: [t0, v0, t1, v1, ...] in ms, row, decimals, unit }]
     // opts: { gapMs, minSpanUnits, measure(text) -> width,
-    //         format(value, decimals, unit) -> text }
+    //         format(value, decimals, unit) -> text,
+    //         caption(seconds) -> text (a time tick's, 0 for now; optional),
+    //         windowMs (optional: the time axis spans that much before the
+    //         newest sample, however little history there is) }
     // Returns null when there is nothing to draw (no series with a
     // sample, or no time span), else:
-    // { plotW, plotH, top, hGrid: [y], ticks: [{ x, seconds }] newest first,
+    // { plotW, plotH, top, hGrid: [y], ticks: [{ x, seconds, captioned,
+    //   caption }] newest first,
     //   traces: [{ row, segments: [[{x, y}]], pieces (what's drawn,
     //              each a segment's line or, crowded, bandPieces'),
     //              endY, label, labeled, labelY }]
@@ -235,6 +248,8 @@ QtObject {
                 if (sp[sp.length - 2] > tMax) tMax = sp[sp.length - 2]
             }
         }
+        if (opts.windowMs > 0 && isFinite(tMax))
+            tMin = tMax - opts.windowMs
         if (!isFinite(tMin) || tMax <= tMin)
             return null
 
@@ -273,13 +288,20 @@ QtObject {
         for (let g = 1; g < 4; ++g)
             hGrid.push(top + plotH * g / 4)
 
-        // Time ticks: seconds before the newest sample, newest first
+        // Time ticks: seconds before the newest sample, newest first. A
+        // step fits a centered caption beside its neighbor's, and beside
+        // "now", which is right-aligned at the edge
         const spanS = (tMax - tMin) / 1000
-        const stepS = tickStep(spanS)
+        const caption = opts.caption || (s => String(s))
+        const widest = opts.measure(caption(Math.ceil(spanS)))
+        const nowW = opts.measure(caption(0))
+        const roomPx = widest / 2 + Math.max(widest / 2, nowW) + captionGap
+        const stepS = tickStep(spanS, (plotW - 1) / spanS, roomPx)
         const ticks = []
         for (let k = 0; k * stepS <= spanS; ++k) {
             const x = xOf(tMax - k * stepS * 1000)
-            ticks.push({ x: x, seconds: k * stepS, captioned: k === 0 || x >= minTickX })
+            ticks.push({ x: x, seconds: k * stepS, captioned: k === 0 || x >= minTickX,
+                         caption: caption(k * stepS) })
         }
 
         const out = []

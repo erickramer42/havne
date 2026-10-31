@@ -135,12 +135,13 @@ class SignalListModel : public QAbstractListModel
 public:
     explicit SignalListModel(QObject* parent = nullptr);
 
-    // Rolling history depth per signal: strip chart window. A window
-    // adds one to three samples (its lowest, highest and newest value,
-    // ADR-0005's appendix), so this is about a 12 s trace at 10 Hz.
-    // Kept constexpr so tests can assert exact ring behavior without a
-    // config surface.
-    static constexpr int HistoryCapacity = 360;
+    // Rolling history depth per signal: room for the strip chart's
+    // longest window, 120 s. A 100 ms window adds one to three samples
+    // (its lowest, highest and newest value, ADR-0005's appendix), and a
+    // signal refreshing at 20 Hz or less adds at most two, so 120 s of it
+    // fits; a faster one keeps a shorter span. Kept constexpr so tests
+    // can assert exact ring behavior without a config surface.
+    static constexpr int HistoryCapacity = 2400;
 
     // One signal's coalesce window, as the bridge's staging hands it
     // over: its newest value and its lowest and highest, each at its
@@ -239,7 +240,7 @@ public:
     // How many rows a ranked set plots by default (ADR-0039 section 8):
     // the shown numeric rows with the lowest plot_rank. A set that ranks
     // none plots every numeric row.
-    static constexpr int DefaultPlotted = 10;
+    static constexpr int DefaultPlotted = 6;
 
     // A tick or untick on Live. One that matches the row's default
     // clears the row's choice, so the row follows its default again.
@@ -255,14 +256,18 @@ public:
 
     // Strip-chart pull API: one map per SUBSCRIBED signal with non-empty
     // history: { id, row, name, unit, decimals, value,
-    // samples: [ts, val, ts, val, ...] }
+    // samples: [ts, val, ts, val, ...] }. windowMs > 0 keeps the samples
+    // of the last windowMs before the newest plotted one; columns > 0
+    // keeps, in each of that many equal slices of the window, its lowest
+    // and highest sample (the newest sample always), so a long window
+    // hands the chart at most what it can draw.
     // `row` is the signal's model row, so the trace color can match the
     // list row's swatch and stays put when other signals are unsubscribed.
     // Samples are flattened doubles, oldest-first. Called by the QML
     // Canvas once per valuesUpdated batch (~10 Hz). One call per repaint
     // instead of per-row role lookups keeps the QML side free of
     // role-number hacks.
-    Q_INVOKABLE QVariantList chartData() const;
+    Q_INVOKABLE QVariantList chartData(qint64 windowMs = 0, int columns = 0) const;
 
     /* Periodic age refresh: ageMs is computed lazily from
      * the internal clock, but dataChanged only fires on updateValues:

@@ -345,7 +345,7 @@ scheduled. What each holds, past its row:
   sensor (so a car whose bitmaps list both asks 59 in the slow class,
   ADR-0039 §3) and 55 and 56 answer one of their two fields (core
   reports such a field absent, `ecuio_session_get_absent_signals`, and
-  Live hides it, ADR-0039 §6); Live plots the ten best ranked signals
+  Live hides it, ADR-0039 §6); Live plots the six best ranked signals
   the car has (ADR-0039 section 8). Several PIDs per request is being
   built: core decodes a reply that carries several, record by record,
   with each PID's length as the car sends it, and the engine packs up
@@ -412,10 +412,9 @@ across the four releases is decided as they come.
   listening (v0.4.0).
   - Drawn at scale: each pixel column's lowest and highest, with memory
     bounded on an hour-long recording.
-  - With it, the same chart code on Live: the chart as a time window
-    (the last N seconds, the same span on any adapter, instead of the
-    last 360 points per signal), and on the phone pinch zoom and
-    smaller Dashboard gauges when it's upright.
+  - With it, the same chart code on Live (whose time window, the last
+    10 to 120 s, is built), and on the phone pinch zoom and smaller
+    Dashboard gauges when it's upright.
   - Finding a signal among many: Live's list (every linear field of
     Service 01 a car has) and the viewer's signal picker share one
     filter. A text field matches names and units as typed (case

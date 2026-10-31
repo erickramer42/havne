@@ -38,6 +38,7 @@
 #include <initializer_list>
 #include <memory>
 #include <thread>
+#include <map>
 #include <vector>
 
 #include "blepicker.h"
@@ -3257,6 +3258,73 @@ TEST(BridgeTest, FolderLabelKeepsWhatAFolderNameMay)
 /* ADR-0027 section 1: a vehicle's plotted signals are the rows ticked
  * past the default and unticked from it, read and set by name. The
  * mock's set ranks none, so every numeric row is its default. */
+/* The chart's window (LiveViewPage's 10 to 120 s): chartData keeps the
+ * samples of the last windowMs before the newest plotted one, and with
+ * columns, each slice's lowest and highest in time order and the newest
+ * sample, never more than two a slice plus it */
+TEST(BridgeTest, ChartDataKeepsTheWindowAndEachSlicesExtremes)
+{
+    SignalListModel model;
+    ecuio_signal_def_t defs[2];
+    ecuio_signal_set_t set;
+    buildTestSignalSet(defs, set);
+    model.setSignalSet(&set);
+    /* 1001 rises and falls every second; 2001 tracks the time */
+    for (qint64 t = 0; t < 20000; t += 10) {
+        const double wave = static_cast<double>((t / 10) % 100 < 50 ? (t / 10) % 50
+                                                                    : 50 - (t / 10) % 50);
+        model.updateValues({{uint16_t(1001), wave}, {uint16_t(2001), double(t)}}, t);
+    }
+    const auto samples = [](const QVariantList& data, int s) {
+        return data.at(s).toMap().value("samples").toList();
+    };
+
+    const QVariantList all = model.chartData();
+    ASSERT_EQ(all.size(), 2);
+    EXPECT_EQ(samples(all, 1).size(), 2 * 2000) << "no window: every sample";
+
+    const QVariantList win = model.chartData(5000);
+    const QVariantList w = samples(win, 1);
+    EXPECT_EQ(w.at(0).toDouble(), 19990.0 - 5000.0) << "from the window's start";
+    EXPECT_EQ(w.at(w.size() - 2).toDouble(), 19990.0) << "to the newest";
+    EXPECT_EQ(w.size(), 2 * 501);
+
+    const int columns = 10;
+    const QVariantList cut = model.chartData(5000, columns);
+    for (int s = 0; s < 2; ++s) {
+        const QVariantList c = samples(cut, s);
+        EXPECT_LE(c.size(), 2 * (2 * (columns + 1) + 1)) << s;
+        for (int i = 2; i < c.size(); i += 2) {
+            EXPECT_LT(c.at(i - 2).toDouble(), c.at(i).toDouble()) << "in time order";
+        }
+        EXPECT_EQ(c.at(c.size() - 2).toDouble(), 19990.0) << "the newest kept";
+    }
+    /* Each slice of the wave keeps its own lowest and highest, as the
+     * whole window's samples show them */
+    const QVariantList full = samples(model.chartData(5000), 0);
+    const QVariantList wave = samples(cut, 0);
+    const double from = 19990.0 - 5000.0;
+    const double slice = 5000.0 / columns;
+    std::map<int, std::pair<double, double>> want, got;
+    const auto note = [&](std::map<int, std::pair<double, double>>& m,
+                          const QVariantList& v) {
+        for (int i = 0; i < v.size(); i += 2) {
+            const int k = static_cast<int>((v.at(i).toDouble() - from) / slice);
+            const double x = v.at(i + 1).toDouble();
+            auto it = m.find(k);
+            if (it == m.end()) {
+                m[k] = {x, x};
+            } else {
+                it->second.first = std::min(it->second.first, x);
+                it->second.second = std::max(it->second.second, x);
+            }
+        }
+    };
+    note(want, full);
+    note(got, wave);
+    EXPECT_EQ(got, want) << "each slice's lowest and highest";
+}
+
 TEST(BridgeTest, UnplottedNamesReadAndSetTheChartsRows)
 {
     SessionBridge bridge;
@@ -3341,31 +3409,27 @@ TEST(BridgeTest, ARankedSetPlotsTheTopRankedRowsItShows)
 {
     SignalListModel model;
     model.setSignalSet(ecuio_obd2_signal_set());
-    const QStringList topTen = {
-        QStringLiteral("Engine Load"),    QStringLiteral("Coolant Temp"),
-        QStringLiteral("RPM"),            QStringLiteral("Vehicle Speed"),
-        QStringLiteral("Intake Air Temp"), QStringLiteral("MAF"),
-        QStringLiteral("Engine Oil Temp"),
-        QStringLiteral("Short Term Fuel Trim B1"),
-        QStringLiteral("Long Term Fuel Trim B1"),
-        QStringLiteral("Timing Advance")};
-    EXPECT_EQ(plottedRows(model), topTen) << "ranks 1 to 10, in set order";
+    ASSERT_EQ(SignalListModel::DefaultPlotted, 6);
+    const QStringList topSix = {
+        QStringLiteral("Coolant Temp"),    QStringLiteral("RPM"),
+        QStringLiteral("Vehicle Speed"),   QStringLiteral("Intake Air Temp"),
+        QStringLiteral("MAF"),             QStringLiteral("Engine Oil Temp")};
+    EXPECT_EQ(plottedRows(model), topSix) << "ranks 1 to 6, in set order";
     EXPECT_EQ(model.subscribedCount(), SignalListModel::DefaultPlotted);
 
     const ecuio_channel_support_t car = carWithoutOilTemp();
     model.applySupport(&car, 1);
-    QStringList withMap = topTen;
-    withMap.removeOne(QStringLiteral("Engine Oil Temp"));
-    withMap.insert(withMap.indexOf(QStringLiteral("Timing Advance")),
-                   QStringLiteral("Intake Manifold Pressure"));
-    EXPECT_EQ(plottedRows(model), withMap) << "rank 11 takes the hidden row's place";
+    QStringList withLoad = topSix;
+    withLoad.removeOne(QStringLiteral("Engine Oil Temp"));
+    withLoad.prepend(QStringLiteral("Engine Load"));
+    EXPECT_EQ(plottedRows(model), withLoad) << "rank 7 takes the hidden row's place";
     EXPECT_EQ(model.subscribedCount(), SignalListModel::DefaultPlotted);
 
     ecuio_channel_support_t rescan = car;
     rescan.generation = 2;
     rescan.pid_bitmap[(0x5C - 1) / 8] |= 0x80u >> ((0x5C - 1) % 8);
     model.applySupport(&rescan, 1);
-    EXPECT_EQ(plottedRows(model), topTen) << "and gives it back";
+    EXPECT_EQ(plottedRows(model), topSix) << "and gives it back";
 
     /* A car with fewer ranked rows than that plots all it has */
     ecuio_channel_support_t sparse{};
@@ -3387,10 +3451,10 @@ TEST(BridgeTest, APlotChoiceOutlivesTheDefaultsMoving)
     SignalListModel model;
     model.setSignalSet(ecuio_obd2_signal_set());
     const int rpm = obd2RowOf(ECUIO_OBD2_SIG_RPM_ID);
-    const int map = obd2RowOf(ECUIO_OBD2_PID_SIG_ID(0x0B, 0));
+    const int load = obd2RowOf(ECUIO_OBD2_SIG_ENGINE_LOAD_ID);
     const int pedal = obd2RowOf(ECUIO_OBD2_PID_SIG_ID(0x49, 0));
     ASSERT_GE(rpm, 0);
-    ASSERT_GE(map, 0);
+    ASSERT_GE(load, 0);
     ASSERT_GE(pedal, 0);
     const auto plotted = [&model](int row) {
         return model.data(model.index(row), SignalListModel::SubscribedRole)
@@ -3398,32 +3462,30 @@ TEST(BridgeTest, APlotChoiceOutlivesTheDefaultsMoving)
     };
 
     model.toggleSubscribed(rpm);
-    model.toggleSubscribed(map);
+    model.toggleSubscribed(load);
     EXPECT_FALSE(plotted(rpm));
-    EXPECT_TRUE(plotted(map));
+    EXPECT_TRUE(plotted(load));
     EXPECT_EQ(model.unplottedNames(), QStringList{QStringLiteral("RPM")});
-    EXPECT_EQ(model.plottedNames(),
-              QStringList{QStringLiteral("Intake Manifold Pressure")});
+    EXPECT_EQ(model.plottedNames(), QStringList{QStringLiteral("Engine Load")});
     EXPECT_EQ(model.subscribedCount(), SignalListModel::DefaultPlotted);
 
-    /* MAP's default turns on and RPM's stays on: neither choice moves */
+    /* Load's default turns on and RPM's stays on: neither choice moves */
     const ecuio_channel_support_t car = carWithoutOilTemp();
     model.applySupport(&car, 1);
     EXPECT_FALSE(plotted(rpm)) << "an untick holds against its default";
-    EXPECT_TRUE(plotted(map));
+    EXPECT_TRUE(plotted(load));
     EXPECT_FALSE(plotted(pedal)) << "an untick leaves its place empty";
     EXPECT_EQ(model.subscribedCount(), SignalListModel::DefaultPlotted - 1);
 
     model.toggleSubscribed(rpm);
     EXPECT_TRUE(model.unplottedNames().isEmpty()) << "back to its default";
-    EXPECT_EQ(model.plottedNames(),
-              QStringList{QStringLiteral("Intake Manifold Pressure")})
+    EXPECT_EQ(model.plottedNames(), QStringList{QStringLiteral("Engine Load")})
         << "with no choice of its own";
 
     /* A vehicle's lists, applied whole: every other row to its default */
     model.setPlotChoices({QStringLiteral("Accelerator Pedal D")}, {});
     EXPECT_TRUE(plotted(pedal));
-    EXPECT_TRUE(plotted(map)) << "its default now, with no choice";
+    EXPECT_TRUE(plotted(load)) << "its default now, with no choice";
     EXPECT_TRUE(model.unplottedNames().isEmpty());
     EXPECT_EQ(model.plottedNames(),
               QStringList{QStringLiteral("Accelerator Pedal D")});

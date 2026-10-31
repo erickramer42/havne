@@ -61,6 +61,7 @@
 #include <QtGlobal>
 
 #include <algorithm>
+#include <limits>
 #include <chrono>
 #include <cstring>
 
@@ -316,9 +317,14 @@ void SignalListModel::setSignalSet(const ecuio_signal_set_t* set)
     m_rowOfId.clear();
     m_rowOfId.reserve(static_cast<qsizetype>(set->count));
     m_subscribedCount = 0;
+    // Each entry holds its history ring (tens of KB): built in place,
+    // never on the stack or moved by a reallocation
+    m_entries.reserve(set->count);
 
     for (uint32_t i = 0; i < set->count; ++i) {
-        Entry e = {};   // value-init zeroes the history ring, head, and count
+        // value-init zeroes the history ring, head, and count
+        m_rowOfId.insert(set->defs[i].id, static_cast<int>(m_entries.size()));
+        Entry& e = m_entries.emplace_back();
         e.id = set->defs[i].id;
         qstrncpy(e.name, set->defs[i].name, sizeof(e.name));   // always terminates
         qstrncpy(e.unit, set->defs[i].unit, sizeof(e.unit));
@@ -335,8 +341,6 @@ void SignalListModel::setSignalSet(const ecuio_signal_set_t* set)
         m_ranked = m_ranked || (e.plotRank != 0 && !e.isText);
         // judgePlotted's, below; a text row has nothing to plot
         e.subscribed = false;
-        m_rowOfId.insert(e.id, static_cast<int>(m_entries.size()));
-        m_entries.push_back(e);
     }
     endResetModel();
     // A new set plots its defaults, whatever the last one plotted
@@ -486,12 +490,28 @@ void SignalListModel::pushWindow(Entry& e, const WindowValue& w)
     }
 }
 
-QVariantList SignalListModel::chartData() const
+QVariantList SignalListModel::chartData(qint64 windowMs, int columns) const
 {
+    const auto plotted = [](const Entry& e) {
+        return e.subscribed && !e.hidden && e.histCount != 0;
+    };
+    // The window ends at the newest plotted sample, the chart's "now"
+    qint64 newest = std::numeric_limits<qint64>::min();
+    for (const Entry& e : m_entries) {
+        if (plotted(e)) {
+            const uint32_t last = (e.histHead + HistoryCapacity - 1) % HistoryCapacity;
+            newest = std::max(newest, e.history[last].timestampMs);
+        }
+    }
+    const qint64 from = windowMs > 0 ? newest - windowMs
+                                     : std::numeric_limits<qint64>::min();
+    const double sliceMs = (windowMs > 0 && columns > 0)
+                               ? static_cast<double>(windowMs) / columns : 0.0;
+
     QVariantList out;
     for (size_t row = 0; row < m_entries.size(); ++row) {
         const Entry& e = m_entries[row];
-        if (!e.subscribed || e.hidden || e.histCount == 0) continue;
+        if (!plotted(e)) continue;
 
         const ecuio_display_value_t now = shown(e, e.value);
         QVariantMap m;
@@ -506,13 +526,53 @@ QVariantList SignalListModel::chartData() const
         // When full, the oldest surviving sample sits at histHead (the
         // next eviction slot); while filling, samples are dense from 0.
         QVariantList samples;
-        const uint32_t start = (e.histCount == HistoryCapacity)
-                                ? e.histHead : 0;
-        for (uint32_t i = 0; i < e.histCount; ++i) {
-            const Sample& s = e.history[(start + i) % HistoryCapacity];
+        const auto put = [&](const Sample& s) {
             samples.append(static_cast<double>(s.timestampMs));
             samples.append(now.converted ? shown(e, s.value).value : s.value);
+        };
+        // A slice's lowest and highest, in time order, once each
+        const Sample* low = nullptr;
+        const Sample* high = nullptr;
+        const auto flush = [&]() {
+            if (low != nullptr) {
+                const Sample* a = low->timestampMs <= high->timestampMs ? low : high;
+                const Sample* b = a == low ? high : low;
+                put(*a);
+                if (b != a) put(*b);
+            }
+            low = high = nullptr;
+        };
+        const uint32_t start = (e.histCount == HistoryCapacity)
+                                ? e.histHead : 0;
+        qint64 slice = -1;
+        const Sample* last = nullptr;
+        for (uint32_t i = 0; i < e.histCount; ++i) {
+            const Sample& s = e.history[(start + i) % HistoryCapacity];
+            if (s.timestampMs < from) continue;
+            last = &s;
+            if (sliceMs <= 0.0) {
+                put(s);
+                continue;
+            }
+            const qint64 k = static_cast<qint64>((s.timestampMs - from) / sliceMs);
+            if (k != slice) {
+                flush();
+                slice = k;
+            }
+            if (low == nullptr || s.value < low->value) low = &s;
+            if (high == nullptr || s.value > high->value) high = &s;
         }
+        if (sliceMs > 0.0) {
+            /* the newest sample always: the trace ends, and its label
+             * sits, where the value is now */
+            if (last != nullptr && last != low && last != high) {
+                flush();
+                put(*last);
+            } else {
+                flush();
+            }
+        }
+        if (samples.isEmpty()) continue;
         m["samples"] = samples;
         out.append(m);
     }

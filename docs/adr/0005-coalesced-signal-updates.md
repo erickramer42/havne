@@ -112,3 +112,34 @@ core's clock (`ecuio_clock_us`, [ADR-0033](0033-session-time-counts-sleep.md))
 instead of a `QElapsedTimer`, which on Linux and Android stops while
 the machine sleeps. A value read before a sleep is as old as it is at
 the wake, and its gauge dims then.
+
+## Appendix: a time window on Live (2026-10-31)
+
+With several PIDs per request
+([ADR-0039](0039-full-service01-coverage.md)'s Appendix A) a fast
+signal refreshes every 0.1 s and a slow one every 0.7 s, so 360
+samples covered about 40 s of one and four minutes of another, and
+the chart's span depended on the adapter
+([2026-10-31-elm327-vehicle-2](../bench-sessions/2026-10-31-elm327-vehicle-2.md)).
+Live now shows a window of 10, 30, 60 or 120 s (30 at first), picked
+above the chart and kept between runs; every trace covers that span
+before the newest plotted sample, and the time axis spans it whatever
+the history holds.
+
+- **The ring holds 2,400 samples,** room for 120 s of a signal
+  refreshing at 20 Hz or less, at most two samples a window; a faster
+  one keeps a shorter span. About 38 KB a signal, 5 MB for the full
+  `obd2` set. Each entry is built in place, never copied.
+- **`chartData(windowMs, columns)`** returns the window's samples, and
+  with columns, each of that many equal slices' lowest and highest in
+  time order plus the newest sample, so the chart gets at most two
+  points a pixel column. With no arguments it returns the whole ring,
+  as before.
+- **The time ticks** step 1, 2 or 5 s by the span, then 10, 15, 30, 60
+  s and on until each caption fits beside its neighbor and "now", so
+  a phone's narrow chart never draws captions over one another.
+
+`BridgeTest.ChartDataKeepsTheWindowAndEachSlicesExtremes`,
+`QmlTest.chartlayout` (`test_aWindowSpansTheAxis`,
+`test_captionsNeverOverlap`), `QmlTest.liveview`
+(`test_theWindowIsPickedAboveTheChart`).

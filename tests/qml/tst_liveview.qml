@@ -89,6 +89,22 @@ TestCase {
             compare(list.height, list.count * page.rowHeight, "every row shows")
     }
 
+    // The chart's window: four choices, 30 s at first, the picked one
+    // highlighted and kept by the page
+    function test_theWindowIsPickedAboveTheChart() {
+        const page = createTemporaryObject(pageComponent, testCase)
+        verify(page)
+        const before = page.chartWindowS
+        for (const s of page.chartWindows)
+            verify(findChild(page, "chartWindow_" + s), "a button for " + s + " s")
+        findChild(page, "chartWindow_60").clicked()
+        compare(page.chartWindowS, 60)
+        verify(findChild(page, "chartWindow_60").highlighted)
+        verify(!findChild(page, "chartWindow_10").highlighted)
+        findChild(page, "chartWindow_" + before).clicked()
+        compare(page.chartWindowS, before, "put back as it was")
+    }
+
     function test_colorComesFromTheRow() {
         const page = createTemporaryObject(pageComponent, testCase)
         const n = Theme.seriesColors.length
