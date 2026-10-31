@@ -2668,7 +2668,7 @@ TEST_F(DiagnosticsTest, TheListTakesItsTurnAfterIdentificationAndFillsTheReport)
         {0x02, 0x0C, 0x00},
         {0x02, 0x0D, 0x00},
     };
-    const size_t walk = 3; /* 01 00, 01 20, 01 40 */
+    const size_t walk = 6; /* 01 00 to 01 A0 */
     ASSERT_EQ(once.size(), walk + ECUIO_IDENT_COUNT + kDiag.size() + 1);
     for (size_t i = 0; i < ECUIO_IDENT_COUNT; ++i) {
         EXPECT_EQ(once[walk + i][0], ECUIO_IDENT_REQUESTS[i].bytes[0]);

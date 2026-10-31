@@ -544,11 +544,15 @@ TEST_F(Elm327SessionTest, TheProbeWalksTheChainAndReportsIt)
         },
         5000));
     EXPECT_EQ(sup.rx_id, 0x7E8u);
-    EXPECT_EQ(sup.ranges, 0x07u) << "the bitmaps at 0x00, 0x20 and 0x40";
+    EXPECT_EQ(sup.ranges, 0x3Fu) << "the bitmaps at 0x00 to 0xA0";
     EXPECT_EQ(sup.dropped, 0u) << "the fake supports every obd2 PID";
     EXPECT_EQ(fake_count("01001"), 1u);
     EXPECT_EQ(fake_count("01201"), 1u);
     EXPECT_EQ(fake_count("01401"), 1u);
+    EXPECT_EQ(fake_count("01601"), 1u);
+    EXPECT_EQ(fake_count("01801"), 1u);
+    EXPECT_EQ(fake_count("01A01"), 1u);
+    EXPECT_EQ(fake_count("01C01"), 0u) << "past A0's last bit";
 }
 
 /* Identification's replies span frames (the VIN's 20 bytes: a First

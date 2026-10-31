@@ -1573,15 +1573,17 @@ TEST_F(J2534AdoptionTest, PollOverridesSchedulerRotation)
  * and dropping only on explicit answers.
  * ==================================================================== */
 
-/* The fake's ECU supports the obd2 set's PIDs (and the diagnostics'
- * 01, 21, 30, 31, 41, 4D and 4E), and its bitmaps say so, so the walk
- * asks 0x00, 0x20 and 0x40 (whose last bit is clear) and drops nothing.
- * The expected bitmaps are worked out here from the PIDs by SAE J1979's
- * layout (PID base + k is bit 0x80 >> ((k - 1) % 8) of byte (k - 1) / 8),
- * not taken from the fake:
- *   0x00: 01 04 05 | 0C 0D 0F 10 | 11 | 20  ->  98 1B 80 01
- *   0x20: 21 | 2F 30 | 31 | 40              ->  80 03 80 01
- *   0x40: 41 42 | 4D 4E | | 5C              ->  C0 0C 00 10 */
+/* The fake's ECU supports every linear PID J1979 defines, with 01, 41
+ * and 7F, and its bitmaps say so, so the walk asks 0x00 to 0xA0 (whose
+ * last bit is clear) and drops nothing. The expected bitmaps are worked
+ * out here from the PIDs by SAE J1979's layout (PID base + k is bit
+ * 0x80 >> ((k - 1) % 8) of byte (k - 1) / 8), not taken from the fake:
+ *   0x00: 01 04-08 | 09-10 | 11 14-18 | 19-1B 1F 20  ->  9F FF 9F E3
+ *   0x20: 21-40, every one                         ->  FF FF FF FF
+ *   0x40: 41-48 | 49-50 | 52-58 | 59-5E 60         ->  FF FF 7F FD
+ *   0x60: 61-64 66-68 | | | 7F 80                  ->  F7 00 00 03
+ *   0x80: | 8E | | A0                              ->  00 04 00 01
+ *   0xA0: A2 A6 | | |                              ->  44 00 00 00 */
 TEST_F(J2534AdoptionTest, ProbeWalksTheChainBeforeTheRotation)
 {
     char uri[512];
@@ -1591,12 +1593,15 @@ TEST_F(J2534AdoptionTest, ProbeWalksTheChainBeforeTheRotation)
     ASSERT_EQ(ecuio_session_create(uri, &session), ECUIO_OK);
     ASSERT_EQ(ecuio_session_start(session), ECUIO_OK);
 
-    wait_for_writes(get_write_count, 5, 200);
+    wait_for_writes(get_write_count, 8, 200);
     expect_write(0, 0x01, 0x00);
     expect_write(1, 0x01, 0x20);
     expect_write(2, 0x01, 0x40);
-    expect_write(3, 0x01, 0x04);   /* the rotation, in set order */
-    expect_write(4, 0x01, 0x05);
+    expect_write(3, 0x01, 0x60);
+    expect_write(4, 0x01, 0x80);
+    expect_write(5, 0x01, 0xA0);
+    expect_write(6, 0x01, 0x04); /* the rotation, in set order */
+    expect_write(7, 0x01, 0x05);
 
     ecuio_channel_support_t s = {};
     EXPECT_TRUE(wait_for_support(session, s, [](const ecuio_channel_support_t& r) {
@@ -1604,9 +1609,10 @@ TEST_F(J2534AdoptionTest, ProbeWalksTheChainBeforeTheRotation)
     }, 2000)) << "flags " << s.flags;
     EXPECT_EQ(s.flags, ECUIO_SUPPORT_PROBED | ECUIO_SUPPORT_COMPLETE);
     EXPECT_EQ(s.rx_id, 0x7E8u);
-    EXPECT_EQ(s.ranges, 0x7u);
-    const uint8_t want[32] = {0x98, 0x1B, 0x80, 0x01, 0x80, 0x03,
-                              0x80, 0x01, 0xC0, 0x0C, 0x00, 0x10};
+    EXPECT_EQ(s.ranges, 0x3Fu);
+    const uint8_t want[32] = {0x9F, 0xFF, 0x9F, 0xE3, 0xFF, 0xFF, 0xFF, 0xFF,
+                              0xFF, 0xFF, 0x7F, 0xFD, 0xF7, 0x00, 0x00, 0x03,
+                              0x00, 0x04, 0x00, 0x01, 0x44, 0x00, 0x00, 0x00};
     EXPECT_EQ(memcmp(s.pid_bitmap, want, sizeof(want)), 0);
     EXPECT_EQ(s.requests, 10u);
     EXPECT_EQ(s.dropped, 0u);
@@ -1615,13 +1621,13 @@ TEST_F(J2534AdoptionTest, ProbeWalksTheChainBeforeTheRotation)
     ecuio_session_destroy(session);
 }
 
-/* The bitmaps alone drop what they mark unsupported: 0x0B is clear in
- * 0x00's, 0x5D in 0x40's, and 0x61 lies past the chain's end. The ECU
+/* The bitmaps alone drop what they mark unsupported: 0x12 is clear in
+ * 0x00's, 0x5F in 0x40's, and 0xC3 lies past the chain's end. The ECU
  * answers nothing for an unsupported PID here (as J1979 lets it), so
  * without the walk those three would each wait out 100 ms every pass. */
 TEST_F(J2534AdoptionTest, ProbeDropsWhatTheBitmapsMarkUnsupported)
 {
-    static const uint8_t kPids[] = {0x0B, 0x0C, 0x5D, 0x61};
+    static const uint8_t kPids[] = {0x12, 0x0C, 0x5F, 0xC3};
     static ecuio_signal_def_t defs[4];
     static ecuio_signal_set_t set;
     ASSERT_NO_FATAL_FAILURE(register_pid_profile("test-probe-bitmaps", kPids, 4,
@@ -1636,15 +1642,15 @@ TEST_F(J2534AdoptionTest, ProbeDropsWhatTheBitmapsMarkUnsupported)
     ASSERT_EQ(ecuio_session_create(uri, &session), ECUIO_OK);
     ASSERT_EQ(ecuio_session_start(session), ECUIO_OK);
 
-    wait_for_writes(get_write_count, 8, 300);
-    for (unsigned long i = 3; i < 8; ++i) {
+    wait_for_writes(get_write_count, 11, 300);
+    for (unsigned long i = 6; i < 11; ++i) {
         expect_write(i, 0x01, 0x0C);
     }
     ecuio_channel_support_t s = {};
     ASSERT_EQ(ecuio_session_get_channel_support(session, 0, &s), ECUIO_OK);
     EXPECT_EQ(s.requests, 4u);
     ASSERT_EQ(s.dropped, 3u);
-    const uint8_t gone[3] = {0x0B, 0x5D, 0x61};
+    const uint8_t gone[3] = {0x12, 0x5F, 0xC3};
     for (int i = 0; i < 3; ++i) {
         EXPECT_EQ(s.dropped_list[i].request[0], 0x01u) << i;
         EXPECT_EQ(s.dropped_list[i].request[1], gone[i]) << i;
@@ -1656,10 +1662,10 @@ TEST_F(J2534AdoptionTest, ProbeDropsWhatTheBitmapsMarkUnsupported)
 }
 
 /* ?probe=0 sends the set as written: no walk, and the PIDs the ECU
- * refuses (7F 01 12 for 0x0B, 0x5D and 0x61) stay in the rotation. */
+ * refuses (7F 01 12 for 0x12, 0x5F and 0xC3) stay in the rotation. */
 TEST_F(J2534AdoptionTest, ProbeOffSendsTheSetAsWritten)
 {
-    static const uint8_t kPids[] = {0x0B, 0x0C, 0x5D, 0x61};
+    static const uint8_t kPids[] = {0x12, 0x0C, 0x5F, 0xC3};
     static ecuio_signal_def_t defs[4];
     static ecuio_signal_set_t set;
     ASSERT_NO_FATAL_FAILURE(register_pid_profile("test-probe-off", kPids, 4,
@@ -2246,10 +2252,10 @@ TEST_F(J2534AdoptionTest, TheWorkerAllocatesNothingPerFrame)
  * walk's first bitmap times out, nothing is judged, and every PID stays
  * while the bus is quiet. Once replies flow the link is ok again, and
  * the walk resumes and drops what the bitmaps mark unsupported. The ECU
- * stays silent for an unsupported PID, so only the walk can drop 0x0B. */
+ * stays silent for an unsupported PID, so only the walk can drop 0x12. */
 TEST_F(J2534AdoptionTest, ProbeResumesWhenTheLinkRecovers)
 {
-    static const uint8_t kPids[] = {0x0B, 0x0C};
+    static const uint8_t kPids[] = {0x12, 0x0C};
     static ecuio_signal_def_t defs[2];
     static ecuio_signal_set_t set;
     ASSERT_NO_FATAL_FAILURE(register_pid_profile("test-probe-recovery", kPids,
@@ -2287,9 +2293,9 @@ TEST_F(J2534AdoptionTest, ProbeResumesWhenTheLinkRecovers)
     EXPECT_TRUE(wait_for_support(session, s, [](const ecuio_channel_support_t& r) {
         return (r.flags & ECUIO_SUPPORT_COMPLETE) != 0;
     }, 3000)) << "the walk didn't resume (flags " << s.flags << ")";
-    EXPECT_EQ(s.ranges, 0x7u);
+    EXPECT_EQ(s.ranges, 0x3Fu);
     ASSERT_EQ(s.dropped, 1u);
-    EXPECT_EQ(s.dropped_list[0].request[1], 0x0Bu);
+    EXPECT_EQ(s.dropped_list[0].request[1], 0x12u);
     EXPECT_EQ(s.dropped_list[0].reason, ECUIO_DROP_BITMAP);
 
     EXPECT_EQ(ecuio_session_close(session), ECUIO_OK);

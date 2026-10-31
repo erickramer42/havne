@@ -97,7 +97,7 @@ Run every item on the laptop that goes to the car.
         environment, then the bare URI: "Requests failing";
       - Phases 1–2: relaunch without it, then the bare URI: every
         `obd2` signal shows the fake's canned value, the ECU line reads
-        `ECU 0x7E8: supports 17 PIDs; 10 requests, none dropped`, and
+        `ECU 0x7E8: supports 95 PIDs; 10 requests, none dropped`, and
         the identity line `ECU 0x7E8 identity: VIN FAKEJ2534VIN00001;
         CALID FAKECAL-01; …; 2 refused: …`;
       - Phase 3: `?profile=raw&filter=0x7E8` goes quiet ("Vehicle not

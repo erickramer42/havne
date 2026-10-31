@@ -2411,8 +2411,8 @@ TEST(BridgeTest, ConnectLogsTheAdaptersSession)
 }
 
 /* The probe's answer reaches the activity log once: the fake's ECU lists
- * seventeen PIDs across its three bitmaps (the obd2 set's ten and the
- * diagnostics' seven), so nothing the set asks is dropped. */
+ * every linear PID J1979 defines, with 01, 41 and 7F, across its six
+ * bitmaps, so nothing the set asks is dropped. */
 TEST(BridgeTest, ConnectLogsWhatTheEcuSupports)
 {
     SessionBridge bridge;
@@ -2430,7 +2430,7 @@ TEST(BridgeTest, ConnectLogsWhatTheEcuSupports)
     spinLoop(300);
     ASSERT_EQ(ecu_lines().size(), 1) << ecu_lines().join('\n').toStdString();
     EXPECT_EQ(ecu_lines().first().toStdString(),
-              "ECU 0x7E8: supports 17 PIDs; 10 requests, none dropped");
+              "ECU 0x7E8: supports 95 PIDs; 10 requests, none dropped");
 
     /* Identification (ADR-0021) logs one line once every item has an
      * outcome: the fake's FAKE values, and the two DIDs it refuses. */

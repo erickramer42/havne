@@ -96,14 +96,15 @@ TEST_F(VcanTest, AnUnsupportedPidIsRefused)
 {
     vcan_bus::Ecu ecu;
     ASSERT_TRUE(ecu.ok());
-    EXPECT_EQ(ask(vcan_bus::kRequest, {0x01, 0x60}), (std::vector<uint8_t>{0x7F, 0x01, 0x12}));
+    EXPECT_EQ(ask(vcan_bus::kRequest, {0x01, 0xC0}),
+              (std::vector<uint8_t>{0x7F, 0x01, 0x12}));
 }
 
 TEST_F(VcanTest, ASilentEcuAnswersNothing)
 {
     vcan_bus::Ecu ecu(0); /* unsupported_nrc 0: refusals are silence */
     ASSERT_TRUE(ecu.ok());
-    EXPECT_TRUE(ask(vcan_bus::kRequest, {0x01, 0x60}).empty());
+    EXPECT_TRUE(ask(vcan_bus::kRequest, {0x01, 0xC0}).empty());
     EXPECT_EQ(ecu.answered(), 0u);
 }
 
