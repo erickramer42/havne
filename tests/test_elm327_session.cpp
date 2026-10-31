@@ -515,7 +515,10 @@ TEST_F(Elm327SessionTest, Obd2ValuesArriveFromTheEngineEcu)
     Session s;
     ASSERT_EQ(s.create(uri()), ECUIO_OK) << ecuio_last_error_detail();
     s.start();
-    ASSERT_TRUE(wait_for([&] { return s.cap.count("41 0C") >= 2; }, 5000));
+    /* The second engine speed comes after the probe, identification,
+     * diagnostics and a lap of the whole obd2 set: seconds on a slow
+     * runner */
+    ASSERT_TRUE(wait_for([&] { return s.cap.count("41 0C") >= 2; }, 10000));
     Capture::Frame f{};
     ASSERT_TRUE(s.cap.find("41 0C", &f));
     EXPECT_EQ(f.id, 0x7E8u);
@@ -680,14 +683,16 @@ TEST_F(Elm327SessionTest, AClearSends04OnlyWithTheEngineStopped)
 }
 
 /* ?diagnose=0: no diagnostics request goes out, Read again included,
- * and the report says none is asked */
+ * and the report says none is asked. Diagnostics would take every other
+ * turn, so a count of Service 01 requests shows it, whatever the set's
+ * size (a lap of the obd2 set is too long a wait). */
 TEST_F(Elm327SessionTest, DiagnoseOffAsksNoDiagnostics)
 {
     Session s;
     ASSERT_EQ(s.create(uri("?probe=0&identify=0&diagnose=0")), ECUIO_OK);
     s.start();
     EXPECT_EQ(ecuio_session_read_diagnostics(s.s), ECUIO_OK);
-    ASSERT_TRUE(wait_for([&] { return s.cap.count("41 0C") >= 3; }, 5000));
+    ASSERT_TRUE(wait_for([&] { return fake_count("01") >= 8; }, 5000));
     for (const char* q : {"03", "07", "0A", "02"}) {
         EXPECT_EQ(fake_count(q), 0u) << q;
     }
