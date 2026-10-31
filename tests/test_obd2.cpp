@@ -73,17 +73,36 @@ TEST(Obd2SetTest, SetIsValidAndComplete) {
     const ecuio_signal_set_t* set = ecuio_obd2_signal_set();
     ASSERT_NE(set, nullptr);
     EXPECT_EQ(ecuio_validate_signal_set(set, nullptr), ECUIO_VALIDATE_OK);
-    EXPECT_EQ(set->count, 10u);
+    EXPECT_EQ(set->count, 130u) << "every linear field of J1979's table";
 }
 
-TEST(Obd2SetTest, PidBandDistinctFromMockIds) {
-    /* Guards the 7000-band choice against accidental reuse if the mock
-     * set ever grows. Cheap pin, drift-proof. */
+/* The ten keep 7001-7010, first and in their order; every other def's
+ * ID is ECUIO_OBD2_PID_SIG_ID of its PID and its place among the PID's
+ * fields (ADR-0039 §4), clear of the mock's band and uds-generic's. */
+TEST(Obd2SetTest, IdsFollowTheRule)
+{
     const ecuio_signal_set_t* obd2 = ecuio_obd2_signal_set();
-    for (uint32_t i = 0; i < obd2->count; ++i) {
-        const uint16_t id = obd2->defs[i].id;
-        EXPECT_GE(id, 7001u);
-        EXPECT_LE(id, 7010u);
+    const uint16_t ten[] = {
+        ECUIO_OBD2_SIG_ENGINE_LOAD_ID, ECUIO_OBD2_SIG_COOLANT_TEMP_ID,
+        ECUIO_OBD2_SIG_RPM_ID,         ECUIO_OBD2_SIG_SPEED_ID,
+        ECUIO_OBD2_SIG_IAT_ID,         ECUIO_OBD2_SIG_THROTTLE_ID,
+        ECUIO_OBD2_SIG_FUEL_LEVEL_ID,  ECUIO_OBD2_SIG_BATTERY_V_ID,
+        ECUIO_OBD2_SIG_MAF_ID,         ECUIO_OBD2_SIG_OIL_TEMP_ID};
+    ASSERT_GE(obd2->count, 10u);
+    for (uint32_t i = 0; i < 10; ++i) {
+        EXPECT_EQ(obd2->defs[i].id, ten[i]) << i;
+    }
+    unsigned last_pid = 0, field = 0;
+    for (uint32_t i = 10; i < obd2->count; ++i) {
+        const ecuio_signal_def_t& d = obd2->defs[i];
+        SCOPED_TRACE(d.name);
+        const unsigned pid = d.mux_key & 0xFFu;
+        ASSERT_GE(pid, last_pid) << "the rest in PID order";
+        field = (pid == last_pid) ? field + 1 : 0;
+        last_pid = pid;
+        EXPECT_EQ(d.id, ECUIO_OBD2_PID_SIG_ID(pid, field));
+        EXPECT_GE(d.id, 11000u);
+        EXPECT_LT(d.id, ECUIO_UDS_GENERIC_SIG_ID_BASE);
     }
 }
 
@@ -348,14 +367,21 @@ TEST(RequestEngineTest, Obd2SetEnrolsItsPidsInDefOrder) {
     ecuio_engine_init(&e, 1);
     ASSERT_TRUE(ecuio_engine_derive(&e, ecuio_obd2_signal_set(), &rx, 1,
                                     nullptr));
-    const uint8_t expect[] = {0x04, 0x05, 0x0C, 0x0D,
-                              0x0F, 0x11, 0x2F, 0x42, 0x10, 0x5C};
-    ASSERT_EQ(e.count, sizeof(expect));
+    /* The ten first, then each other PID once, in PID order: a PID with
+     * several fields costs one request */
+    const uint8_t ten[] = {0x04, 0x05, 0x0C, 0x0D, 0x0F,
+                           0x11, 0x2F, 0x42, 0x10, 0x5C};
+    ASSERT_EQ(e.count, 92u) << "J1979's linear PIDs";
     for (uint32_t i = 0; i < e.count; ++i) {
         EXPECT_EQ(e.requests[i].len, 2u) << "index " << i;
         EXPECT_EQ(e.requests[i].bytes[0], 0x01u) << "index " << i;
-        EXPECT_EQ(e.requests[i].bytes[1], expect[i]) << "index " << i;
         EXPECT_EQ(e.requests[i].channel, 0u) << "index " << i;
+        if (i < sizeof(ten)) {
+            EXPECT_EQ(e.requests[i].bytes[1], ten[i]) << "index " << i;
+        } else if (i > sizeof(ten)) {
+            EXPECT_GT(e.requests[i].bytes[1], e.requests[i - 1].bytes[1])
+                << "index " << i;
+        }
     }
 }
 
@@ -620,9 +646,10 @@ std::vector<uint8_t> rotation_of(ecuio_request_engine* e, int n)
 } // namespace
 
 /* The obd2 set's requests take the classes obd2_rates.h gives their
- * PIDs, and the rotation sends two fast ones (in set order) for each
- * slow one (in set order), each class wrapping on its own: the fast
- * class at the seventh request, the slow one at the fifteenth. */
+ * PIDs, and the rotation sends two fast ones for each slow one: the
+ * first turns by hand, then over three times the fast class's length,
+ * every third request slow, each class in set order and wrapping on
+ * its own. */
 TEST(RequestEngineTest, TheObd2SetRunsTwoFastRequestsToOneSlow)
 {
     ecuio_request_engine e;
@@ -636,10 +663,26 @@ TEST(RequestEngineTest, TheObd2SetRunsTwoFastRequestsToOneSlow)
                   !ecuio_obd2_pid_fast(e.requests[i].bytes[1]))
             << "PID " << int(e.requests[i].bytes[1]);
     }
-    const std::vector<uint8_t> want = {0x04, 0x0C, 0x05, 0x0D, 0x11, 0x0F,
-                                       0x10, 0x04, 0x2F, 0x0C, 0x0D, 0x42,
-                                       0x11, 0x10, 0x5C, 0x04, 0x0C, 0x05};
-    EXPECT_EQ(rotation_of(&e, static_cast<int>(want.size())), want);
+    const std::vector<uint8_t> first = {0x04, 0x0C, 0x05, 0x0D, 0x11, 0x0F,
+                                        0x10, 0x06, 0x2F, 0x08, 0x0A, 0x42};
+    std::vector<uint8_t> fast, slow;
+    for (uint32_t i = 0; i < e.count; ++i) {
+        (e.requests[i].slow ? slow : fast).push_back(e.requests[i].bytes[1]);
+    }
+    ASSERT_FALSE(fast.empty());
+    ASSERT_FALSE(slow.empty());
+    const std::vector<uint8_t> sent =
+        rotation_of(&e, static_cast<int>(3 * fast.size()));
+    ASSERT_EQ(sent.size(), 3 * fast.size());
+    EXPECT_EQ(std::vector<uint8_t>(sent.begin(), sent.begin() + 12), first);
+    size_t f = 0, s = 0;
+    for (size_t k = 0; k < sent.size(); ++k) {
+        if (k % 3 == 2) {
+            EXPECT_EQ(sent[k], slow[s++ % slow.size()]) << "turn " << k;
+        } else {
+            EXPECT_EQ(sent[k], fast[f++ % fast.size()]) << "turn " << k;
+        }
+    }
 }
 
 /* A class with nothing to send gives its turns to the other: a table of
@@ -802,10 +845,11 @@ TEST(RequestEngineTest, ProbeWalksTheBitmapsBeforeTheRotation) {
 }
 
 /* The first vehicle's own bitmaps (docs/bench-sessions/2026-10-22-vehicle.md),
- * read off the bytes by J1979's layout there: of the obd2 set, every PID
- * is supported but 0x5C, so the walk drops exactly that one. The 0x40
+ * read off the bytes by J1979's layout there: of the obd2 set's first
+ * ten, every PID is supported but 0x5C, so the walk drops only that one
+ * of them, and of the rest exactly those the bitmaps leave out. The 0x40
  * bitmap's last bit says a fourth exists; it's left unanswered here, so
- * PIDs past 0x60 would stay. */
+ * PIDs past 0x60 stay. */
 TEST(RequestEngineTest, TheFirstVehiclesBitmapsDropOnly0x5C) {
     const uint32_t rx = ECUIO_OBD2_ECU_ARB_ID;
     ecuio_request_engine e;
@@ -827,12 +871,29 @@ TEST(RequestEngineTest, TheFirstVehiclesBitmapsDropOnly0x5C) {
     ASSERT_NO_FATAL_FAILURE(send_bitmap_request(&e, 0, 0x60, now));
     EXPECT_TRUE(ecuio_engine_expire(&e, 0, now + ECUIO_ENGINE_WAIT_US));
 
+    /* Dropped: a PID its answered bitmap marks clear (bit 0x80 >>
+     * ((k - 1) % 8) of byte (k - 1) / 8 for PID base + k). The PIDs past
+     * 0x60, whose bitmap went unanswered, stay; of the ten, only 0x5C
+     * goes, as on the car. */
+    uint32_t dropped = 0;
     for (uint32_t i = 0; i < e.count; ++i) {
-        EXPECT_EQ(e.requests[i].dropped,
-                  (e.requests[i].bytes[1] == 0x5C) ? ECUIO_DROP_BITMAP : 0u)
-            << "PID " << std::hex << int{e.requests[i].bytes[1]};
+        const uint8_t pid = e.requests[i].bytes[1];
+        bool clear = false;
+        for (const auto& b : kCar) {
+            const unsigned k = pid - b.pid;
+            if (pid > b.pid && k <= 32) {
+                clear = ((b.bits >> (32 - k)) & 1u) == 0;
+            }
+        }
+        EXPECT_EQ(e.requests[i].dropped, clear ? ECUIO_DROP_BITMAP : 0u)
+            << "PID " << std::hex << int{pid};
+        if (i < 10) {
+            EXPECT_EQ(clear, pid == 0x5C) << "PID " << std::hex << int{pid};
+        }
+        dropped += clear ? 1u : 0u;
     }
-    EXPECT_EQ(e.chans[0].requests, e.count - 1);
+    EXPECT_GT(dropped, 1u);
+    EXPECT_EQ(e.chans[0].requests, e.count - dropped);
 }
 
 /* A bitmap nobody answers ends the walk with nothing judged: every
@@ -2184,6 +2245,62 @@ TEST_F(Obd2TableTest, EveryObd2DefMatchesItsRow)
         EXPECT_NEAR(d.scale, r->scale, 1e-12 * std::fabs(r->scale));
         EXPECT_DOUBLE_EQ(d.offset, r->offset);
         EXPECT_STREQ(d.unit, r->unit.c_str());
+    }
+}
+
+/* The set covers the table: exactly one def for every linear row (its
+ * PID and start byte), and none for a row of another kind (ADR-0039
+ * §1, §2). */
+TEST_F(Obd2TableTest, EveryLinearRowHasExactlyOneDef)
+{
+    const ecuio_signal_set_t* set = ecuio_obd2_signal_set();
+    for (const PidRow& r : rows_) {
+        SCOPED_TRACE("line " + std::to_string(r.line) + ", " + r.name);
+        unsigned defs = 0;
+        for (uint32_t i = 0; i < set->count; ++i) {
+            const ecuio_signal_def_t& d = set->defs[i];
+            if ((d.mux_key & 0xFFu) == r.pid && d.start_byte == 2 + r.start) {
+                ++defs;
+            }
+        }
+        EXPECT_EQ(defs, r.kind == "linear" ? 1u : 0u);
+    }
+}
+
+/* Every fast PID (obd2_rates.h) is one the set asks */
+TEST_F(Obd2TableTest, EveryFastPidIsInTheSet)
+{
+    const ecuio_signal_set_t* set = ecuio_obd2_signal_set();
+    for (uint8_t pid : ECUIO_OBD2_FAST_PIDS) {
+        bool found = false;
+        for (uint32_t i = 0; i < set->count; ++i) {
+            found = found || (set->defs[i].mux_key & 0xFFu) == pid;
+        }
+        EXPECT_TRUE(found) << "PID " << int(pid);
+        EXPECT_NE(linear(pid, 0), nullptr) << "PID " << int(pid);
+    }
+}
+
+/* A recording keys each value by its name (signals.csv), and so do
+ * Live and the recordings' diff, so every built-in set's names are
+ * unique, and each fits the def's buffer with room for its end */
+TEST(Obd2SetTest, BuiltInSetNamesAreUniqueAndFit)
+{
+    for (const ecuio_signal_set_t* set :
+         {ecuio_obd2_signal_set(), ecuio_mock_signal_set()}) {
+        std::vector<std::string> names;
+        for (uint32_t i = 0; i < set->count; ++i) {
+            const ecuio_signal_def_t& d = set->defs[i];
+            const size_t n = strnlen(d.name, sizeof(d.name));
+            ASSERT_LT(n, sizeof(d.name)) << "def " << d.id;
+            EXPECT_GT(n, 0u) << "def " << d.id;
+            names.emplace_back(d.name, n);
+        }
+        for (size_t i = 0; i < names.size(); ++i) {
+            for (size_t j = i + 1; j < names.size(); ++j) {
+                EXPECT_NE(names[i], names[j]) << "defs " << i << " and " << j;
+            }
+        }
     }
 }
 

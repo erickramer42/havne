@@ -2430,7 +2430,7 @@ TEST(BridgeTest, ConnectLogsWhatTheEcuSupports)
     spinLoop(300);
     ASSERT_EQ(ecu_lines().size(), 1) << ecu_lines().join('\n').toStdString();
     EXPECT_EQ(ecu_lines().first().toStdString(),
-              "ECU 0x7E8: supports 95 PIDs; 10 requests, none dropped");
+              "ECU 0x7E8: supports 95 PIDs; 92 requests, none dropped");
 
     /* Identification (ADR-0021) logs one line once every item has an
      * outcome: the fake's FAKE values, and the two DIDs it refuses. */

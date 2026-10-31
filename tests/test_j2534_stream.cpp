@@ -1181,8 +1181,8 @@ TEST(J2534StreamTest, UnknownProfileRejectedAtCreate)
 
 /* ROTATION: ?profile=obd2&filter=0x7E8, the worker requests the obd2
  * set's PIDs in its two rate classes (ADR-0039 §3): two fast ones (04,
- * 0C, 0D, 11, 10, in set order), then one slow one (05, 0F, 2F, 42, 5C),
- * each class round-robin. Order is asserted from the fake's recorded
+ * 0C, 0D, 11, 10, then the rest in PID order), then one slow one (05,
+ * 0F, 2F, 42, 5C, then the rest), each class round-robin. Order is asserted from the fake's recorded
  * WRITES (deterministic, one per reply), not from received frames.
  * ?probe=0 leaves out the bitmaps the probe asks first
  * (ProbeWalksTheChainBeforeTheRotation). */
@@ -1202,11 +1202,11 @@ TEST_F(J2534AdoptionTest, Obd2SchedulerRotatesPidsInSetOrder)
               ECUIO_OK);
     ASSERT_EQ(ecuio_session_start(session), ECUIO_OK);
 
-    /* The page keeps the first 16 writes: both classes wrap inside them
-     * (the fast one at write 7, the slow one at write 15). */
+    /* The page keeps the first 16 writes: the ten's fast PIDs, then the
+     * table's in PID order, beside the ten's slow ones. */
     wait_for_writes(get_write_count, 16, 250);
-    const uint8_t want[16] = {0x04, 0x0C, 0x05, 0x0D, 0x11, 0x0F, 0x10, 0x04,
-                              0x2F, 0x0C, 0x0D, 0x42, 0x11, 0x10, 0x5C, 0x04};
+    const uint8_t want[16] = {0x04, 0x0C, 0x05, 0x0D, 0x11, 0x0F, 0x10, 0x06,
+                              0x2F, 0x08, 0x0A, 0x42, 0x0B, 0x0E, 0x5C, 0x22};
     for (unsigned long i = 0; i < 16; ++i) {
         expect_write(i, 0x01, want[i]);
     }
@@ -1595,7 +1595,7 @@ TEST_F(J2534AdoptionTest, ProbeWalksTheChainBeforeTheRotation)
                               0xFF, 0xFF, 0x7F, 0xFD, 0xF7, 0x00, 0x00, 0x03,
                               0x00, 0x04, 0x00, 0x01, 0x44, 0x00, 0x00, 0x00};
     EXPECT_EQ(memcmp(s.pid_bitmap, want, sizeof(want)), 0);
-    EXPECT_EQ(s.requests, 10u);
+    EXPECT_EQ(s.requests, 92u);
     EXPECT_EQ(s.dropped, 0u);
 
     EXPECT_EQ(ecuio_session_close(session), ECUIO_OK);
