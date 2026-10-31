@@ -202,6 +202,13 @@ if(TARGET havne-cli)
             -- $<TARGET_FILE:havne-cli> stream
                "replay://${CMAKE_CURRENT_SOURCE_DIR}/fixtures/replay/packed-replies?profile=obd2&speed=max"
                --values)
+        # The same engine start with faults injected (ADR-0041), seeded so
+        # they're the same each run: the stream still ends, and its end line
+        # counts what ?faults= did
+        app_cli_golden(ReplayWithFaultsEndsAndCountsThem replay-faults.jsonl --last 3
+            -- $<TARGET_FILE:havne-cli> stream
+               "${_cli_replay}?profile=obd2&speed=max&faults=drop:10,overflow:5,corrupt:2,truncate:2,stall:1:5&seed=3"
+               --values)
         app_cli_golden(MockDriveCycle mock.jsonl --ignore t_us
             -- $<TARGET_FILE:havne-cli> stream mock://golden --values --count 40)
         app_cli_golden(BadUriIsRefused bad-uri.jsonl --exit 3

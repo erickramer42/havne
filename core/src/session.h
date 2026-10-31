@@ -64,6 +64,14 @@ struct ecuio_session {
     std::unique_ptr<ecuio_frame_t> record_frame;
     uint8_t learned_lengths[256] = {};
     std::atomic<uint64_t> unsplit_replies{0};
+    /* replay://?faults= (ADR-0041): written by the replay worker, read by
+     * ecuio_session_get_replay_faults on the caller's thread */
+    std::atomic<uint64_t> replay_frames_read{0};
+    std::atomic<uint64_t> replay_dropped{0};
+    std::atomic<uint64_t> replay_overflowed{0};
+    std::atomic<uint64_t> replay_corrupted{0};
+    std::atomic<uint64_t> replay_truncated{0};
+    std::atomic<uint64_t> replay_stalled{0};
     std::atomic<int32_t> last_error{ECUIO_OK};
     std::atomic<uint32_t> error_count{0};
     /* Written once by the transport's attach, then the profile by

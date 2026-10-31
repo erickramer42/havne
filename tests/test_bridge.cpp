@@ -4232,6 +4232,66 @@ TEST(BridgeTest, ASleepWhileConnectedIsLoggedWithItsLength)
         [&line](const QByteArray& e) { return e.endsWith(line.toUtf8()); }));
 }
 
+/* A replay with faults injected (ADR-0041) still finishes, and says what
+ * the faults did; the Session line says they were injected; the
+ * recording holds the frames delivered, row for row, and the overflows
+ * the bridge counts are the frames flagged in it. Seed 3 over the engine
+ * start: the CLI's golden, replay-faults.jsonl, has the same counts. */
+TEST(BridgeTest, AFaultedReplayFinishesAndRecordsWhatItDelivered)
+{
+    QTemporaryDir root;
+    ASSERT_TRUE(root.isValid());
+    SessionBridge bridge;
+    bridge.setRecording(true);
+    bridge.setRecordReplaysForTesting(true);
+    bridge.setRecordingsRootForTesting(root.path());
+    QStringList log;
+    QObject::connect(&bridge, &SessionBridge::logMessage,
+                     [&log](const QString& line) { log << line; });
+    const QString uri =
+        QStringLiteral("replay://") + QString::fromUtf8(ECUIO_REPLAY_FIXTURES) +
+        QStringLiteral("/2026-10-25-engine-start?profile=obd2&speed=max&"
+                       "faults=drop:10,overflow:5,corrupt:2,truncate:2,"
+                       "stall:1:5&seed=3");
+    ASSERT_TRUE(bridge.connectSession(uri).isEmpty());
+    const QString finished = QStringLiteral(
+        "Replay finished: 7074 frames, faults injected: 735 dropped, 296 lost "
+        "to an overflow, 119 corrupted, 109 cut short, 70 held back; the "
+        "session stays open");
+    ASSERT_TRUE(spinUntil(
+        [&log, &finished]() { return log.contains(finished); }, 20000))
+        << log.join(QLatin1Char('\n')).toStdString();
+    EXPECT_FALSE(
+        log.filter(QStringLiteral("frames over 297.4 s at full speed, with "
+                                  "faults injected"))
+            .isEmpty())
+        << log.join(QLatin1Char('\n')).toStdString();
+    spinLoop(300);
+    ASSERT_EQ(bridge.droppedFrames(), 0)
+        << "the rows below are whole only without drops";
+    const int overflows = bridge.overflowFrames();
+    ASSERT_TRUE(disconnectAndWait(bridge));
+
+    const QStringList recorded = recordingFolders(root.path());
+    ASSERT_EQ(recorded.size(), 1);
+    const QList<QByteArray> rows =
+        fileLines(root.path() + QStringLiteral("/") + recorded.first() +
+                  QStringLiteral("/frames.csv"));
+    ASSERT_EQ(rows.size(), 1 + 6043) << "the header, then each frame delivered";
+    int flagged = 0;
+    for (qsizetype i = 1; i < rows.size(); ++i) {
+        const QList<QByteArray> cols = rows[i].split(',');
+        ASSERT_GE(cols.size(), 4) << i;
+        bool ok = false;
+        const uint32_t flags = cols[3].toUInt(&ok, 0); /* 0x80 */
+        ASSERT_TRUE(ok) << cols[3].toStdString();
+        flagged += (flags & ECUIO_FRAME_FLAG_OVERFLOW) != 0 ? 1 : 0;
+    }
+    EXPECT_GT(flagged, 0);
+    EXPECT_LE(flagged, 296) << "losses in a row flag one frame";
+    EXPECT_EQ(overflows, flagged);
+}
+
 TEST(BridgeTest, ReplayUriForTakesTheRecordedProfile)
 {
     // A folder as QFileInfo gives it, '/' on every platform
