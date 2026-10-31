@@ -141,7 +141,7 @@ struct ecuio_elm327_transport {
     uint32_t rx_len = 0;
     uint32_t rx_pos = 0;
     elm327_reader reader;
-    elm327_isotp isotp;
+    isotp_rx isotp;
     /* Session time counts from the end of attach, as mock's does; the
      * frame dispatched from here. */
     host_clock::time_point epoch{};
@@ -672,8 +672,8 @@ void note_overflow(transport* t)
 void take_frame(transport* t, const elm327_can_line& f, reply_seen& seen,
                 bool to_engine)
 {
-    elm327_message m;
-    if (elm327_isotp_take(t->isotp, f, &m) != elm327_isotp_result::complete) {
+    isotp_message m;
+    if (isotp_take(t->isotp, f, 0, &m) != isotp_result::complete) {
         return;
     }
     for (uint32_t c = 0; c < t->chan_count; ++c) {
@@ -763,8 +763,8 @@ elm327_io ask(transport* t, uint32_t c, int32_t r, reply_seen& seen)
             break;
         }
     });
-    if (io == elm327_io::prompt && elm327_isotp_end_reply(t->isotp) > 0 &&
-        count > 0 && !pack) {
+    if (io == elm327_io::prompt && isotp_end_all(t->isotp) > 0 && count > 0 &&
+        !pack) {
         /* The digit ended the reply after a First Frame: the PID's reply
          * spans frames, and this one is lost to the engine's wait. From
          * now on it goes without the digit */
@@ -967,7 +967,7 @@ monitor_end listen(transport* t, link_health& h)
         t->rx_pos = 0;
     }
     /* a message under way when the monitor ended never finishes */
-    (void)elm327_isotp_end_reply(t->isotp);
+    (void)isotp_end_all(t->isotp);
     return end;
 }
 

@@ -59,7 +59,7 @@ std::string hex_of(const uint8_t* d, size_t n)
     return s;
 }
 
-std::string message_text(const elm327_message& m)
+std::string message_text(const isotp_message& m)
 {
     std::string id;
     for (int d = 2; d >= 0; --d) {
@@ -74,8 +74,8 @@ Reassembled reassemble(const std::string& bytes,
                        const std::vector<size_t>& chunks)
 {
     elm327_reader r;
-    static elm327_isotp iso; /* 32 KB: kept off the stack */
-    iso = elm327_isotp();
+    static isotp_rx iso; /* 32 KB: kept off the stack */
+    iso = isotp_rx();
     Reassembled out;
     size_t at = 0;
     auto feed = [&](size_t n) {
@@ -86,16 +86,15 @@ Reassembled reassemble(const std::string& bytes,
                 ++out.lines;
                 elm327_can_line f;
                 if (elm327_classify(r, false, &f) == elm327_line::frame) {
-                    elm327_message m;
-                    if (elm327_isotp_take(iso, f, &m) ==
-                        elm327_isotp_result::complete) {
+                    isotp_message m;
+                    if (isotp_take(iso, f, 0, &m) == isotp_result::complete) {
                         out.messages.push_back(message_text(m));
                     }
                 }
             }
             if (s.prompt) {
                 ++out.prompts;
-                elm327_isotp_end_reply(iso);
+                isotp_end_all(iso);
             }
         }
     };
@@ -329,13 +328,13 @@ TEST(Elm327ProtocolTest, FrameLinesFollowTheAddressingMode)
 namespace {
 
 /* A Single Frame's message points into its frame, so the frame is kept
- * here until the next take, as elm327_message's contract asks */
-elm327_isotp_result take(elm327_isotp& iso, const char* line, elm327_message* m,
-                         bool ext29 = false)
+ * here until the next take, as isotp_message's contract asks */
+isotp_result take(isotp_rx& iso, const char* line, isotp_message* m,
+                  bool ext29 = false)
 {
     static elm327_can_line f;
     f = frame_of(line, ext29);
-    return elm327_isotp_take(iso, f, m);
+    return isotp_take(iso, f, 0, m);
 }
 
 } // namespace
@@ -344,17 +343,17 @@ elm327_isotp_result take(elm327_isotp& iso, const char* line, elm327_message* m,
  * A length of 0 or past 7, or one the frame doesn't hold, is malformed. */
 TEST(Elm327ProtocolTest, SingleFramesTakeThePciLength)
 {
-    static elm327_isotp iso;
-    iso = elm327_isotp();
-    elm327_message m;
+    static isotp_rx iso;
+    iso = isotp_rx();
+    isotp_message m;
     ASSERT_EQ(take(iso, "7E8 03 41 0D 32 AA AA AA AA", &m),
-              elm327_isotp_result::complete);
+              isotp_result::complete);
     EXPECT_EQ(message_text(m), "7E8: 41 0D 32");
 
-    EXPECT_EQ(take(iso, "7E8 00 41 0D", &m), elm327_isotp_result::malformed);
+    EXPECT_EQ(take(iso, "7E8 00 41 0D", &m), isotp_result::malformed);
     EXPECT_EQ(take(iso, "7E8 08 41 0D 32 00 00 00 00", &m),
-              elm327_isotp_result::malformed);
-    EXPECT_EQ(take(iso, "7E8 05 41 0D 32", &m), elm327_isotp_result::malformed)
+              isotp_result::malformed);
+    EXPECT_EQ(take(iso, "7E8 05 41 0D 32", &m), isotp_result::malformed)
         << "says five, holds three";
     EXPECT_EQ(iso.malformed, 3u);
     EXPECT_EQ(iso.dropped, 0u);
@@ -364,8 +363,8 @@ TEST(Elm327ProtocolTest, SingleFramesTakeThePciLength)
  * longest a classic CAN reply carries, 4095 bytes, whole. */
 TEST(Elm327ProtocolTest, ALongMessageCrossesTheSequenceWrap)
 {
-    static elm327_isotp iso;
-    iso = elm327_isotp();
+    static isotp_rx iso;
+    iso = isotp_rx();
     std::vector<uint8_t> want(4095);
     for (size_t i = 0; i < want.size(); ++i) {
         want[i] = static_cast<uint8_t>(i * 7 + 3);
@@ -376,24 +375,24 @@ TEST(Elm327ProtocolTest, ALongMessageCrossesTheSequenceWrap)
     f.data[0] = 0x1F;
     f.data[1] = 0xFF;
     memcpy(f.data + 2, want.data(), 6);
-    elm327_message m;
-    ASSERT_EQ(elm327_isotp_take(iso, f, &m), elm327_isotp_result::pending);
+    isotp_message m;
+    ASSERT_EQ(isotp_take(iso, f, 0, &m), isotp_result::first);
     size_t have = 6;
     uint8_t seq = 1;
-    elm327_isotp_result last = elm327_isotp_result::pending;
+    isotp_result last = isotp_result::pending;
     while (have < want.size()) {
         const size_t take_n = std::min<size_t>(7, want.size() - have);
         f.data[0] = static_cast<uint8_t>(0x20 | seq);
         memset(f.data + 1, 0xAA, 7);
         memcpy(f.data + 1, want.data() + have, take_n);
-        last = elm327_isotp_take(iso, f, &m);
+        last = isotp_take(iso, f, 0, &m);
         have += take_n;
         seq = static_cast<uint8_t>((seq + 1) & 0x0F);
         if (have < want.size()) {
-            ASSERT_EQ(last, elm327_isotp_result::pending) << have;
+            ASSERT_EQ(last, isotp_result::pending) << have;
         }
     }
-    ASSERT_EQ(last, elm327_isotp_result::complete);
+    ASSERT_EQ(last, isotp_result::complete);
     ASSERT_EQ(m.len, 4095u);
     EXPECT_EQ(memcmp(m.data, want.data(), want.size()), 0);
     EXPECT_EQ(iso.dropped, 0u);
@@ -404,84 +403,83 @@ TEST(Elm327ProtocolTest, ALongMessageCrossesTheSequenceWrap)
  * First Frame or a Single Frame on the same ID, and the reply's end. */
 TEST(Elm327ProtocolTest, BrokenMessagesAreDroppedAndCounted)
 {
-    static elm327_isotp iso;
-    iso = elm327_isotp();
-    elm327_message m;
+    static isotp_rx iso;
+    iso = isotp_rx();
+    isotp_message m;
     const char* ff = "7E8 10 13 49 04 01 35 36 30";
 
-    ASSERT_EQ(take(iso, ff, &m), elm327_isotp_result::pending);
+    ASSERT_EQ(take(iso, ff, &m), isotp_result::first);
     EXPECT_EQ(take(iso, "7E8 22 00 00 00 00 00 00 31", &m),
-              elm327_isotp_result::dropped)
+              isotp_result::dropped)
         << "21 skipped";
     EXPECT_EQ(iso.dropped, 1u);
 
-    ASSERT_EQ(take(iso, ff, &m), elm327_isotp_result::pending);
+    ASSERT_EQ(take(iso, ff, &m), isotp_result::first);
     ASSERT_EQ(take(iso, "7E8 21 32 38 39 34 39 41 43", &m),
-              elm327_isotp_result::pending);
+              isotp_result::pending);
     EXPECT_EQ(take(iso, "7E8 21 32 38 39 34 39 41 43", &m),
-              elm327_isotp_result::dropped)
+              isotp_result::dropped)
         << "21 again";
     EXPECT_EQ(iso.dropped, 2u);
 
-    ASSERT_EQ(take(iso, ff, &m), elm327_isotp_result::pending);
-    EXPECT_EQ(take(iso, "7E8 21 32 38 39", &m), elm327_isotp_result::dropped)
+    ASSERT_EQ(take(iso, ff, &m), isotp_result::first);
+    EXPECT_EQ(take(iso, "7E8 21 32 38 39", &m), isotp_result::dropped)
         << "three bytes where seven are due";
     EXPECT_EQ(iso.dropped, 3u);
 
-    ASSERT_EQ(take(iso, ff, &m), elm327_isotp_result::pending);
-    ASSERT_EQ(take(iso, ff, &m), elm327_isotp_result::pending)
+    ASSERT_EQ(take(iso, ff, &m), isotp_result::first);
+    ASSERT_EQ(take(iso, ff, &m), isotp_result::first)
         << "a new First Frame starts over";
     EXPECT_EQ(iso.dropped, 4u);
-    ASSERT_EQ(take(iso, "7E8 03 41 0D 32", &m), elm327_isotp_result::complete)
+    ASSERT_EQ(take(iso, "7E8 03 41 0D 32", &m), isotp_result::complete)
         << "a Single Frame is whole whatever came before";
     EXPECT_EQ(iso.dropped, 5u);
 
-    ASSERT_EQ(take(iso, ff, &m), elm327_isotp_result::pending);
-    EXPECT_EQ(elm327_isotp_end_reply(iso), 1u) << "the prompt ends it";
+    ASSERT_EQ(take(iso, ff, &m), isotp_result::first);
+    EXPECT_EQ(isotp_end_all(iso), 1u) << "the prompt ends it";
     EXPECT_EQ(iso.dropped, 6u);
     EXPECT_EQ(take(iso, "7E8 21 32 38 39 34 39 41 43", &m),
-              elm327_isotp_result::malformed)
+              isotp_result::malformed)
         << "nothing under way";
 }
 
 /* What no message can use: a First Frame shorter than eight bytes or
  * announcing fewer than eight, a PCI type past Flow Control. Flow
- * Control frames are ignored. */
+ * Control frames are a sender's, never a message. */
 TEST(Elm327ProtocolTest, FirstFramesAndPciTypesAreChecked)
 {
-    static elm327_isotp iso;
-    iso = elm327_isotp();
-    elm327_message m;
-    EXPECT_EQ(take(iso, "7E8 10 13 49 04 01", &m),
-              elm327_isotp_result::malformed);
+    static isotp_rx iso;
+    iso = isotp_rx();
+    isotp_message m;
+    EXPECT_EQ(take(iso, "7E8 10 13 49 04 01", &m), isotp_result::malformed);
     EXPECT_EQ(take(iso, "7E8 10 07 49 04 01 35 36 30", &m),
-              elm327_isotp_result::malformed)
+              isotp_result::malformed)
         << "seven fits a Single Frame";
     EXPECT_EQ(take(iso, "7E8 10 00 00 00 10 00 49 04", &m),
-              elm327_isotp_result::malformed)
+              isotp_result::malformed)
         << "the 32-bit length escape";
-    EXPECT_EQ(take(iso, "7E8 40 01 02", &m), elm327_isotp_result::malformed);
-    EXPECT_EQ(take(iso, "7E0 30 00 00", &m), elm327_isotp_result::ignored);
+    EXPECT_EQ(take(iso, "7E8 40 01 02", &m), isotp_result::malformed);
+    EXPECT_EQ(take(iso, "7E0 30 00 00", &m), isotp_result::flow);
     EXPECT_EQ(iso.malformed, 4u);
 }
 
 /* With every slot under way, a new message takes the oldest's place. */
 TEST(Elm327ProtocolTest, TheOldestMessageGivesWayWhenEverySlotIsTaken)
 {
-    static elm327_isotp iso;
-    iso = elm327_isotp();
-    elm327_message m;
+    static isotp_rx iso;
+    iso = isotp_rx();
+    isotp_message m;
     elm327_can_line f;
     f.len = 8;
     f.data[0] = 0x10;
     f.data[1] = 0x0D;
-    for (uint32_t i = 0; i <= ELM327_ISOTP_SLOTS; ++i) {
+    for (uint32_t i = 0; i <= ECUIO_ISOTP_SLOTS; ++i) {
         f.id = 0x700 + i;
-        ASSERT_EQ(elm327_isotp_take(iso, f, &m), elm327_isotp_result::pending);
+        ASSERT_EQ(isotp_take(iso, f, 0, &m), isotp_result::first);
     }
     EXPECT_EQ(iso.dropped, 1u);
-    EXPECT_EQ(elm327_isotp_find(iso, 0x700), nullptr) << "the oldest went";
-    EXPECT_NE(elm327_isotp_find(iso, 0x700 + ELM327_ISOTP_SLOTS), nullptr);
+    EXPECT_EQ(isotp_rx_find(iso, 0x700), nullptr) << "the oldest went";
+    EXPECT_NE(isotp_rx_find(iso, 0x700 + ECUIO_ISOTP_SLOTS), nullptr);
 }
 
 /* A negative reply and a pending one arrive as Single Frames and reach the
@@ -495,17 +493,17 @@ TEST(Elm327ProtocolTest, NegativeAndPendingRepliesReachTheEngine)
     ASSERT_EQ(ecuio_engine_add(&e, 0, did, 3), ecuio_engine_add_result::added);
     ecuio_engine_sent(&e, 0, ecuio_engine_due(&e, 0, 0), true, 0);
 
-    static elm327_isotp iso;
-    iso = elm327_isotp();
-    elm327_message m;
+    static isotp_rx iso;
+    iso = isotp_rx();
+    isotp_message m;
     uint8_t nrc = 0;
     ASSERT_EQ(take(iso, "7E8 03 7F 22 78 AA AA AA AA", &m),
-              elm327_isotp_result::complete);
+              isotp_result::complete);
     EXPECT_EQ(ecuio_engine_on_frame(&e, 0, m.data, m.len, 1000, &nrc),
               ecuio_reply::pending);
     EXPECT_EQ(nrc, 0x78u);
 
-    ASSERT_EQ(take(iso, "7E8037F2231", &m), elm327_isotp_result::complete);
+    ASSERT_EQ(take(iso, "7E8037F2231", &m), isotp_result::complete);
     EXPECT_EQ(ecuio_engine_on_frame(&e, 0, m.data, m.len, 2000, &nrc),
               ecuio_reply::negative);
     EXPECT_EQ(nrc, 0x31u);
