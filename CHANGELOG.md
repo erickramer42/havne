@@ -17,8 +17,7 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
   adapter) reads each ECU's check-engine light, its stored, pending and
   permanent trouble codes, its readiness monitors and the freeze frame
   stored with a code, once at connect, taking turns with the live
-  values. Reading only: Havne still can't clear a code. `?diagnose=0`
-  leaves them out.
+  values. `?diagnose=0` leaves them out.
 - **A Diagnostics page** (after Live in the sidebar, "Codes" among a
   narrow window's tabs) shows each ECU's light, its codes by list,
   which monitors are complete and the freeze frame's values in the
@@ -33,8 +32,23 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
 - `havne-cli stream` writes a `diagnostics` line per ECU when its read
   completes: the light, each list's codes, the monitors and the freeze
   frame's values, with a refusal's reply bytes.
+- **Clearing trouble codes**
+  ([ADR-0038](docs/adr/0038-clearing-trouble-codes.md)): **Clear
+  codes…** on the Diagnostics page asks first, saying what a clear
+  erases (the stored and pending codes, the freeze frame, the
+  check-engine light, the readiness monitors' results) and what it
+  keeps (permanent codes). The report is saved to
+  `diagnostics-<date-time>.jsonl` in the recordings folder before
+  anything is sent, and nothing is sent if it can't be. Each ECU is
+  asked its engine speed first and cleared only with the engine
+  stopped, then read again; the page and the activity log say what
+  became of each (`ECU 0x7E8 clear: cleared`, `not sent: engine
+  running (812 rpm)`, …). Not yet run on a car.
 
 ### Changed
+- The simulated car starts each loop with the key on and the engine
+  stopped for 15 s, then a start, so a clear can be shown with no
+  hardware; `mock://`'s first frames read 0 rpm.
 - The Log page's **Activity | Frames** switch (developer mode) sits
   beside the title and stays in place when the view changes, so it no
   longer moves out from under the pointer as the buttons beside it

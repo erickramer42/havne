@@ -230,7 +230,9 @@ The full reference is [j2534.md](j2534.md).
   ([ADR-0021](adr/0021-vehicle-identification.md)), then its trouble
   codes, readiness and freeze frame
   ([ADR-0037](adr/0037-reading-trouble-codes.md)), for the activity
-  log, the recording and the Diagnostics page.
+  log, the recording and the Diagnostics page; and, when the user
+  confirms a clear there, its engine speed and then `04`, at 0 rpm
+  only ([ADR-0038](adr/0038-clearing-trouble-codes.md)).
 - **Teardown order is a hard contract:** join the worker → stop the
   filters → disconnect → close → unload. The worker calls vendor code
   through pointers that dangle once the DLL unmaps.

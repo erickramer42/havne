@@ -1,6 +1,9 @@
 # ADR-0038: Clearing trouble codes, each ECU by its own ID, behind a gate core checks
 
-- **Status:** Accepted. Not yet built.
+- **Status:** Accepted. Built on 2026-10-30: core, the J2534, ELM327
+  and mock transports, the app's saved report, log lines and page; not
+  yet run on a car (BENCH prep #29). Where the build differs, the
+  appendix of 2026-10-30.
 - **Date:** 2026-10-30.
 - **Builds on:** [ADR-0037](0037-reading-trouble-codes.md) (the report
   a clear needs first, its generation, Read again's path through the
@@ -170,3 +173,27 @@ accepts fields that take reserved room at the same size.
   time move with it.
 - A clear costs one `01 0C`, one `04` and the diagnostics list again
   per ECU.
+
+## Appendix: as built (2026-10-30)
+
+Built as decided, but for these:
+
+- **§1's second `static_assert`** checks that the clear's first request
+  is a service the engine allows and that `04` is one it refuses, so
+  the clear state is the one place `04` can come from.
+- **§5, the saved file.** Its first line is `havne-cli`'s start line
+  (`schema`, the core's version), not a line with the time and the
+  vehicle: those are in the file's name, the vehicle for an adapter's
+  session only, as a recording's folder. The file is written when Clear
+  is pressed, so the confirmation says the report goes to the
+  recordings folder first, and the status line names the file after.
+  The activity log's "Diagnostics saved before the clear:" line gives
+  the path relative to Documents, which carries no account name. A
+  recording's `events.log` keeps the activity log's lines (each read's
+  diagnostics line, each clear's), not the file's.
+- **§5, the log lines** add a refusal's bytes to "not sent: no engine
+  speed" when the ECU refused `01 0C` ("(7F 01 12)").
+- **§6, the simulated car's loop** grows by 17 s, not 15: the 15 s with
+  the key on and the engine stopped, then a 2 s start (cranking, the
+  catch). With the pump stopped the coolant doesn't lose heat to the
+  radiator in it.

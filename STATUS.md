@@ -33,13 +33,14 @@ the same car through the OBDLink MX+ over Bluetooth and the VX in ELM
 mode over USB
 ([2026-10-27](docs/bench-sessions/2026-10-27-elm327-vehicle.md)), and
 the Android app reaches the car through the phone's Bluetooth, in the
-background too. v0.3.5 has begun with reading trouble codes; clearing
-them and SocketCAN requests come next ([roadmap](#roadmap)).
+background too. v0.3.5 has begun with trouble codes, read and cleared;
+SocketCAN requests come next ([roadmap](#roadmap)).
 
 - **Works:**
-  - **Mock transport,** on every platform: a scripted drive cycle (a
-    cold start, two pulls onto the fuel-cut limiter, a cruise, a quarter
-    mile off launch control) whose later loops run warm.
+  - **Mock transport,** on every platform: a scripted drive cycle (15 s
+    with the key on and the engine stopped, a cold start, two pulls onto
+    the fuel-cut limiter, a cruise, a quarter mile off launch control)
+    whose later loops start warm, each after its own engine-off spell.
   - **Replay** ([ADR-0023](docs/adr/0023-replay-transport.md)), on every
     platform: `replay://<recording>` plays a recording's `frames.csv`
     back at its own pace or up to 100× faster.
@@ -90,8 +91,15 @@ them and SocketCAN requests come next ([roadmap](#roadmap)).
     again on request, on the Diagnostics page, in the activity log and
     in `havne-cli`'s output; the simulated car has codes of its own.
     Verified against the fakes' ECU through J2534 (both surrogates) and
-    ELM327; not yet on a car (BENCH prep #28). Reading only: clearing
-    is the rest of v0.3.5.
+    ELM327; not yet on a car (BENCH prep #28).
+  - **Clearing trouble codes**
+    ([ADR-0038](docs/adr/0038-clearing-trouble-codes.md)): the page's
+    Clear codes… asks first, and the app saves the report to a file of
+    its own before anything is sent; core asks each ECU its engine
+    speed, sends `04` only at 0 rpm, by the ECU's own ID, and reads the
+    report again; each outcome on the page and in the activity log.
+    Verified against the fakes through J2534 and ELM327 and on the
+    simulated car (its engine-off spell); not on a car (BENCH prep #29).
   - **Profiles** chosen by the URI
     ([ADR-0013](docs/adr/0013-protocol-profiles.md)): `mock`, `raw`,
     `obd2` and `uds-generic`. Each signal def states its kind and byte
@@ -177,7 +185,7 @@ them and SocketCAN requests come next ([roadmap](#roadmap)).
   ELM327 [bench](docs/bench-sessions/elm327-bench-runsheet.md) and
   [vehicle](docs/bench-sessions/elm327-vehicle-runsheet.md) sheets, and
   the [phone's](docs/bench-sessions/android-phone-runsheet.md).
-- **Tests:** 624 ctest cases on Windows (both trees rebuilt,
+- **Tests:** 646 ctest cases on Windows (both trees rebuilt,
   2026-10-30), all passing but two env-gated skips (the cross-arch
   case, and the real-car recordings' diff, run locally), plus the
   cross-arch subset (84/84); 0 MSVC warnings. CI runs ctest on Windows,
@@ -299,7 +307,7 @@ an issue is resolved it is removed, and its number is not reused.
 | v0.3.2 | Record-replay transport, decoding on the transport's thread, every driver in its own process | ✅ Released |
 | v0.3.3 | ELM327 adapters, preferences and vehicles, Android with Bluetooth and background sessions and a signed APK, the rename to Havne | ✅ Released |
 | v0.3.4 | A command-line client over the C ABI; Linux as a supported desktop; a SocketCAN transport that listens | ✅ Released |
-| v0.3.5 | Full OBD-II diagnostics (Services 01–0A, clearing codes); SocketCAN requests through ISO-TP; fault injection on a replay; a performance benchmark with latency per PID | In progress: reading codes built |
+| v0.3.5 | Full OBD-II diagnostics (Services 01–0A, clearing codes); SocketCAN requests through ISO-TP; fault injection on a replay; a performance benchmark with latency per PID | In progress: reading and clearing codes built |
 | v0.3.6–v0.3.9 | Recordings you can open, compare and share: a log viewer with run overlay, CSV import and export with scrubbing, a health report, triggered logging and alerts | Planned |
 | v0.4.0 | Python bindings; PCAP export and candump import; ECU, DID and service discovery (needs requests to every ECU and listening to the whole bus first) | Proposed |
 | v0.5.0 | The plugin framework (ADR-0013's profile API), with no manufacturer plugin yet; legacy buses (ISO 9141-2, KWP2000, J1850) | Proposed |
@@ -326,12 +334,13 @@ scheduled. What each holds, past its row:
   and permanent codes, readiness and the freeze frame (Services 03, 07,
   0A, 01 and 02), on the Diagnostics page, in the activity log and in
   `havne-cli`; on the test car through both adapters, beside a second
-  scan tool, to come (BENCH prep #28). Next, clearing them (Service
-  04), the first request that changes anything in the car, on its own
-  branch and record. It gets its own gate: the codes and freeze frame
-  read and saved first, ignition on with the engine off, and a
-  confirmation that says what clearing resets (the readiness
-  monitors).
+  scan tool, to come (BENCH prep #28). Clearing is built
+  ([ADR-0038](docs/adr/0038-clearing-trouble-codes.md)): Service 04 by
+  one path, each ECU by its own ID, behind a gate (the report saved
+  first, the engine seen stopped by `01 0C`, the user's confirmation);
+  on the fakes and the simulated car. A car's clear waits for one with
+  a code worth clearing and a drive to bring its monitors back (BENCH
+  prep #29).
 - **SocketCAN requests:** ISO-TP segmentation, which J2534 and ELM327
   adapters do themselves, so the request engine and the profiles run on
   a native CAN interface. An ADR first, which also revisits
