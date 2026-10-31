@@ -308,6 +308,11 @@ ecuio_status_t ecuio_session_get_error_state(
                                                           listen-only mode,
                                                           which never
                                                           transmits (ADR-0032) */
+#define ECUIO_SESSION_INFO_REPLAY_FAULTS 0x00000020u   /* replay://?faults=:
+                                                          frames dropped,
+                                                          corrupted or held
+                                                          back on purpose
+                                                          (ADR-0041) */
 
 /* POD, 432 bytes, no hidden padding on any supported platform; pinned
  * by the assertions below. New fields take the reserved room. */
@@ -370,6 +375,37 @@ _Static_assert(offsetof(ecuio_session_info_t, reserved) == 380, "session info re
 ecuio_status_t ecuio_session_get_info(
     const ecuio_session_t* session,
     ecuio_session_info_t* out_info
+);
+
+/* What a replay's ?faults= has done so far (ADR-0041): the recording's
+ * frames read, and how many of them each kind of fault met. A dropped
+ * frame and one lost to an overflow weren't delivered; a corrupted one
+ * had a bit flipped, a truncated one its data cut short; a stalled one
+ * came that much later. POD, 64 bytes. */
+typedef struct ecuio_replay_faults {
+    uint64_t frames;     /* the recording's frames read */
+    uint64_t dropped;    /* not delivered, nothing said */
+    uint64_t overflowed; /* not delivered; the next one OVERFLOW */
+    uint64_t corrupted;
+    uint64_t truncated;
+    uint64_t stalled;
+    uint64_t reserved[2]; /* zero; ABI growth space */
+} ecuio_replay_faults_t;
+
+#if defined(__cplusplus)
+static_assert(sizeof(ecuio_replay_faults_t) == 64, "ecuio_replay_faults_t size is ABI");
+static_assert(offsetof(ecuio_replay_faults_t, stalled) == 40, "replay faults offset is ABI");
+#elif defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
+_Static_assert(sizeof(ecuio_replay_faults_t) == 64, "ecuio_replay_faults_t size is ABI");
+_Static_assert(offsetof(ecuio_replay_faults_t, stalled) == 40, "replay faults offset is ABI");
+#endif
+
+/* Copies the counts into *out; zeros for a session that isn't a replay
+ * with faults. ECUIO_OK; ECUIO_ERR_NULL_ARGUMENT for a NULL session or
+ * out. Callable from any thread until destroy, close included. */
+ecuio_status_t ecuio_session_get_replay_faults(
+    const ecuio_session_t* session,
+    ecuio_replay_faults_t* out
 );
 
 /* What each channel's ECU has said it supports (ADR-0015 §4): its answers

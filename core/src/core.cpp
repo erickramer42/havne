@@ -442,6 +442,25 @@ ecuio_status_t ecuio_session_get_info(
     return ECUIO_OK;
 }
 
+ecuio_status_t ecuio_session_get_replay_faults(const ecuio_session_t* session,
+                                               ecuio_replay_faults_t* out)
+{
+    if (session == nullptr || out == nullptr) {
+        return ECUIO_ERR_NULL_ARGUMENT;
+    }
+    *out = ecuio_replay_faults_t{};
+    const auto get = [](const std::atomic<uint64_t>& a) {
+        return a.load(std::memory_order_relaxed);
+    };
+    out->frames = get(session->replay_frames_read);
+    out->dropped = get(session->replay_dropped);
+    out->overflowed = get(session->replay_overflowed);
+    out->corrupted = get(session->replay_corrupted);
+    out->truncated = get(session->replay_truncated);
+    out->stalled = get(session->replay_stalled);
+    return ECUIO_OK;
+}
+
 ecuio_status_t ecuio_session_get_channel_support(
     const ecuio_session_t* session,
     uint32_t channel,
