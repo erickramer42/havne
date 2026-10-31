@@ -2826,17 +2826,39 @@ QString SessionBridge::uriLabelFor(const QString& uri)
 
 /* A replay without loop=1 stops sending at the end of its file and the
  * session stays open (ADR-0023); this says so once, when every frame the
- * file holds has reached onFrame, taken or dropped */
+ * file holds has been read and every one its ?faults= didn't take
+ * (ADR-0041) has reached onFrame, taken or dropped */
 void SessionBridge::pollReplayEnd()
 {
-    if (m_replayEndLogged ||
-        m_framesDelivered.load(std::memory_order_relaxed) < m_replayFrames) {
+    if (m_replayEndLogged || m_session == nullptr) {
+        return;
+    }
+    ecuio_replay_faults_t f{};
+    ecuio_session_get_replay_faults(m_session, &f);
+    if (f.frames < m_replayFrames ||
+        m_framesDelivered.load(std::memory_order_relaxed) + f.dropped +
+                f.overflowed <
+            m_replayFrames) {
         return;
     }
     m_replayEndLogged = true;
+    if (f.dropped + f.overflowed + f.corrupted + f.truncated + f.stalled ==
+        0) {
+        emit logMessage(
+            QStringLiteral("Replay finished: %1 frames; the session stays open")
+                .arg(m_replayFrames));
+        return;
+    }
     emit logMessage(
-        QStringLiteral("Replay finished: %1 frames; the session stays open")
-            .arg(m_replayFrames));
+        QStringLiteral("Replay finished: %1 frames, faults injected: %2 "
+                       "dropped, %3 lost to an overflow, %4 corrupted, %5 cut "
+                       "short, %6 held back; the session stays open")
+            .arg(m_replayFrames)
+            .arg(f.dropped)
+            .arg(f.overflowed)
+            .arg(f.corrupted)
+            .arg(f.truncated)
+            .arg(f.stalled));
 }
 
 /* A sleep while connected (ADR-0033 §6): the machine's slept count rose
@@ -2891,11 +2913,15 @@ QString SessionBridge::sessionInfoText(const ecuio_session_info_t& info)
                 : QStringLiteral("at %1x").arg(QString::number(
                       info.replay_speed_milli / 1000.0, 'g', 6));
         const bool loop = (info.flags & ECUIO_SESSION_INFO_REPLAY_LOOP) != 0;
+        const bool faults =
+            (info.flags & ECUIO_SESSION_INFO_REPLAY_FAULTS) != 0;
         return QStringLiteral(
-                   "Session: replay of a recording, %1 frames over %2 s %3%4; ")
+                   "Session: replay of a recording, %1 frames over %2 s %3%4%5; ")
                    .arg(info.replay_frames)
                    .arg(QString::number(info.replay_span_ms / 1000.0, 'f', 1),
-                        speed, loop ? QStringLiteral(", looping") : QString()) +
+                        speed, loop ? QStringLiteral(", looping") : QString(),
+                        faults ? QStringLiteral(", with faults injected")
+                               : QString()) +
                profile;
     }
     if (info.backend == ECUIO_BACKEND_SOCKETCAN) {

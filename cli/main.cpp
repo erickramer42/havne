@@ -319,6 +319,10 @@ void write_session(Output& out, const ecuio_session_info_t& info)
         l.u64(info.replay_speed_milli);
         l.key("loop");
         l.raw((info.flags & ECUIO_SESSION_INFO_REPLAY_LOOP) ? "true" : "false");
+        if (info.flags & ECUIO_SESSION_INFO_REPLAY_FAULTS) {
+            l.key("faults");
+            l.raw("true");
+        }
         l.ch('}');
     }
     l.ch('}');
@@ -546,6 +550,44 @@ struct StreamArgs {
     uint64_t seconds = 0;
 };
 
+// A replay that doesn't loop has ended when every row is read and every
+// row its faults didn't take (ADR-0041) has been written: frames lost to
+// ?faults= never arrive, so the rows alone would wait forever
+bool replay_done(const ecuio_session_t* session,
+                 const ecuio_session_info_t& info, uint64_t covered)
+{
+    ecuio_replay_faults_t f;
+    if (ecuio_session_get_replay_faults(session, &f) != ECUIO_OK) {
+        return covered >= info.replay_frames;
+    }
+    return f.frames >= info.replay_frames &&
+           covered + f.dropped + f.overflowed >= info.replay_frames;
+}
+
+// The end line's faults: what a replay's ?faults= did (ADR-0041)
+void write_faults(cli::Line& l, const ecuio_session_t* session)
+{
+    ecuio_replay_faults_t f;
+    if (ecuio_session_get_replay_faults(session, &f) != ECUIO_OK) {
+        return;
+    }
+    l.key("faults");
+    l.ch('{');
+    l.key("frames");
+    l.u64(f.frames);
+    l.key("dropped");
+    l.u64(f.dropped);
+    l.key("overflowed");
+    l.u64(f.overflowed);
+    l.key("corrupted");
+    l.u64(f.corrupted);
+    l.key("truncated");
+    l.u64(f.truncated);
+    l.key("stalled");
+    l.u64(f.stalled);
+    l.ch('}');
+}
+
 int run_stream(const StreamArgs& args)
 {
     Output out;
@@ -631,7 +673,7 @@ int run_stream(const StreamArgs& args)
             reason = "interrupted";
         } else if (args.count && covered >= args.count) {
             reason = "count";
-        } else if (replay_ends && covered >= info.replay_frames) {
+        } else if (replay_ends && replay_done(session, info, covered)) {
             reason = "replay-end";
         } else if (args.seconds &&
                    ecuio_clock_us() - started >= args.seconds * 1000000u) {
@@ -707,7 +749,7 @@ int run_stream(const StreamArgs& args)
         if (args.count && covered > args.count) {
             covered = args.count;
         }
-        char buf[256];
+        char buf[512];
         cli::Line l(buf, sizeof buf);
         l.raw("{\"type\":\"end\"");
         l.key("reason");
@@ -718,6 +760,9 @@ int run_stream(const StreamArgs& args)
         l.u64(stream->ring.dropped_frames());
         l.key("dropped_values");
         l.u64(stream->ring.dropped_values());
+        if (info.flags & ECUIO_SESSION_INFO_REPLAY_FAULTS) {
+            write_faults(l, session);
+        }
         l.ch('}');
         write_line(out, l);
         out.flush();
@@ -1021,7 +1066,7 @@ int run_play(const PlayArgs& args)
             reason = "interrupted";
         } else if (args.count && covered >= args.count) {
             reason = "count";
-        } else if (replay_ends && covered >= info.replay_frames) {
+        } else if (replay_ends && replay_done(session, info, covered)) {
             reason = "replay-end";
         } else if (args.seconds &&
                    ecuio_clock_us() - started >= args.seconds * 1000000u) {
