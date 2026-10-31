@@ -1608,6 +1608,60 @@ TEST_F(J2534AdoptionTest, ProbeWalksTheChainBeforeTheRotation)
  * 0x00's, 0x5F in 0x40's, and 0xC3 lies past the chain's end. The ECU
  * answers nothing for an unsupported PID here (as J1979 lets it), so
  * without the walk those three would each wait out 100 ms every pass. */
+/* ADR-0039 Appendix A through the surrogate: once its PIDs have
+ * answered alone, a request carries several and the fake's ECU answers
+ * each; ?pack=0 asks one PID per request; an ECU answering a pack for
+ * its first PID alone, three in a row, ends packing on the channel */
+TEST_F(J2534AdoptionTest, PackedRequestsReachTheFakesEcu)
+{
+    const auto flags_when = [](ecuio_session_t* session, uint32_t want,
+                               int budget_ms) {
+        ecuio_channel_support_t s = {};
+        (void)wait_for_support(session, s,
+                               [want](const ecuio_channel_support_t& r) {
+                                   return (r.flags & want) != 0;
+                               },
+                               budget_ms);
+        return s.flags;
+    };
+    const auto open = [](const char* query) {
+        char uri[700];
+        snprintf(uri, sizeof(uri), "j2534://%s?identify=0&diagnose=0%s",
+                 FAKE_J2534_DLL_PATH, query);
+        ecuio_session_t* session = nullptr;
+        EXPECT_EQ(ecuio_session_create(uri, &session), ECUIO_OK);
+        EXPECT_EQ(ecuio_session_start(session), ECUIO_OK);
+        return session;
+    };
+
+    ecuio_session_t* session = open("");
+    ASSERT_NE(session, nullptr);
+    uint32_t flags = flags_when(session, ECUIO_SUPPORT_PACKED, 10000);
+    EXPECT_TRUE(flags & ECUIO_SUPPORT_PACKED);
+    EXPECT_FALSE(flags & ECUIO_SUPPORT_UNPACKED);
+    EXPECT_EQ(ecuio_session_close(session), ECUIO_OK);
+    ecuio_session_destroy(session);
+
+    session = open("&pack=0");
+    ASSERT_NE(session, nullptr);
+    unsigned long before = 0;
+    get_write_count(&before);
+    wait_for_writes(get_write_count, before + 150, 1000);
+    flags = flags_when(session, ECUIO_SUPPORT_PACKED, 0);
+    EXPECT_FALSE(flags & (ECUIO_SUPPORT_PACKED | ECUIO_SUPPORT_UNPACKED));
+    EXPECT_EQ(ecuio_session_close(session), ECUIO_OK);
+    ecuio_session_destroy(session);
+
+    KnobGuard first("ECUIO_FAKE_PACK_FIRST_ONLY", "1");
+    session = open("");
+    ASSERT_NE(session, nullptr);
+    flags = flags_when(session, ECUIO_SUPPORT_UNPACKED, 10000);
+    EXPECT_TRUE(flags & ECUIO_SUPPORT_UNPACKED);
+    EXPECT_FALSE(flags & ECUIO_SUPPORT_PACKED);
+    EXPECT_EQ(ecuio_session_close(session), ECUIO_OK);
+    ecuio_session_destroy(session);
+}
+
 TEST_F(J2534AdoptionTest, ProbeDropsWhatTheBitmapsMarkUnsupported)
 {
     static const uint8_t kPids[] = {0x12, 0x0C, 0x5F, 0xC3};

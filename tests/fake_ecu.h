@@ -262,6 +262,17 @@ inline bool withheld(unsigned pid)
            ((withheld_pids()[pid / 32].load() >> (pid % 32)) & 1u) != 0;
 }
 
+/* A Service 01 request carrying several PIDs (ADR-0039 Appendix A)
+ * answered with its first supported PID's record alone, as an ECU that
+ * takes one PID per request might. One per process; the fake DLL sets
+ * it from ECUIO_FAKE_PACK_FIRST_ONLY on each write, the in-process
+ * fakes' tests directly. */
+inline std::atomic<bool>& pack_first_only()
+{
+    static std::atomic<bool> on{false};
+    return on;
+}
+
 /* The ID an ECU answers a request on: 11-bit physical requests 0x7E0 to
  * 0x7E7 get theirs 8 above, the functional 0x7DF is answered by the
  * engine ECU (0x7E8), and a 29-bit 18DA<ecu><tester> request by
@@ -423,7 +434,11 @@ inline void pid_bitmap(unsigned base, unsigned char* out)
  * 0x5C), 7F 02 12, 7F 09 12 or 7F 22 31. unsupported_nrc is the fakes'
  * ECUIO_FAKE_UNSUPPORTED_NRC: -1 (unset) keeps those codes, 0 answers
  * nothing (an ECU that stays silent), any other value is the code for
- * all three. False when nothing answers. */
+ * all three. A Service 01 request of two to six PIDs (01 p1 ... p6)
+ * gets J1979's answer to it (2002, 6.1.2.3): 41, then each supported
+ * PID's record (the PID, its data) in the order asked, an unsupported
+ * one left out, nothing when it supports none; its first record alone
+ * under pack_first_only(). False when nothing answers. */
 inline bool answer(const unsigned char* req, size_t req_len,
                    long unsupported_nrc, unsigned char* out, size_t* out_len)
 {
@@ -535,6 +550,29 @@ inline bool answer(const unsigned char* req, size_t req_len,
         default:
             return false;
         }
+        return true;
+    }
+    if (req[0] == 0x01 && req_len >= 3 && req_len <= 7) {
+        size_t n = 1;
+        out[0] = 0x41;
+        for (size_t k = 1; k < req_len; ++k) {
+            const unsigned char one[2] = {0x01, req[k]};
+            unsigned char rec[kReplyMax];
+            size_t m = 0;
+            if (!supports_pid(req[k]) || !answer(one, 2, -1, rec, &m) ||
+                m < 2 || rec[0] != 0x41 || n + m - 1 > kReplyMax) {
+                continue;
+            }
+            memcpy(out + n, rec + 1, m - 1);
+            n += m - 1;
+            if (pack_first_only()) {
+                break;
+            }
+        }
+        if (n == 1) {
+            return false;
+        }
+        *out_len = n;
         return true;
     }
     if (req_len != 2) {

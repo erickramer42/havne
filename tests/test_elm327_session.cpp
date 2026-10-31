@@ -20,6 +20,7 @@
 #include "ecuio/internal.h"
 #include "ecuio/profile.h"
 #include "elm327_log.h" /* core/src */
+#include "elm327_protocol.h" /* core/src: elm327_pack_count */
 #include "elm327_port.h" /* core/src */
 #include "elm327_tcp.h"  /* core/src */
 #include "elm327_stream.h" /* core/src */
@@ -513,7 +514,8 @@ TEST_F(Elm327SessionTest, AnStnSetNotToWaitOnPendingRepliesIsReported)
 TEST_F(Elm327SessionTest, Obd2ValuesArriveFromTheEngineEcu)
 {
     Session s;
-    ASSERT_EQ(s.create(uri()), ECUIO_OK) << ecuio_last_error_detail();
+    /* One PID per request, so each engine speed is a reply of its own */
+    ASSERT_EQ(s.create(uri("?pack=0")), ECUIO_OK) << ecuio_last_error_detail();
     s.start();
     /* The second engine speed comes after the probe, identification,
      * diagnostics and a lap of the whole obd2 set: seconds on a slow
@@ -529,6 +531,94 @@ TEST_F(Elm327SessionTest, Obd2ValuesArriveFromTheEngineEcu)
     uint32_t episodes = 99;
     EXPECT_EQ(s.state(&episodes), ECUIO_OK);
     EXPECT_EQ(episodes, 0u);
+}
+
+namespace {
+
+/* Channel 0's support flags once done says so, or 0 after budget_ms */
+uint32_t support_flags_when(ecuio_session_t* s, uint32_t want, int budget_ms)
+{
+    ecuio_channel_support_t sup{};
+    (void)wait_for(
+        [&] {
+            return ecuio_session_get_channel_support(s, 0, &sup) == ECUIO_OK &&
+                   (sup.flags & want) != 0;
+        },
+        budget_ms);
+    return sup.flags;
+}
+
+/* The fakes' ECU answering a pack for its first PID alone, for a scope */
+struct FirstPidOnly {
+    FirstPidOnly() { fake_ecu::pack_first_only() = true; }
+    ~FirstPidOnly() { fake_ecu::pack_first_only() = false; }
+};
+
+} // namespace
+
+/* ADR-0039 Appendix A over ELM327: once its PIDs have answered alone,
+ * a request carries several, with the count digit its reply's frames
+ * take (a reply past one Single Frame among them), and the report says
+ * packs were answered; ?pack=0 asks one PID per request */
+TEST_F(Elm327SessionTest, APackedRequestCarriesItsRepliesFrames)
+{
+    {
+        Session s;
+        ASSERT_EQ(s.create(uri("?identify=0&diagnose=0")), ECUIO_OK);
+        s.start();
+        const uint32_t flags =
+            support_flags_when(s.s, ECUIO_SUPPORT_PACKED, 10000);
+        EXPECT_TRUE(flags & ECUIO_SUPPORT_PACKED);
+        EXPECT_FALSE(flags & ECUIO_SUPPORT_UNPACKED);
+    }
+    size_t packs = 0;
+    bool past_one_frame = false;
+    for (const std::string& cmd : fake_commands()) {
+        if (cmd.size() < 7 || cmd.size() % 2 == 0 || cmd.compare(0, 2, "01") != 0) {
+            continue; /* a pack is 01, two or more PIDs and its digit */
+        }
+        ++packs;
+        unsigned char req[8] = {};
+        const size_t len = (cmd.size() - 1) / 2;
+        for (size_t i = 0; i < len; ++i) {
+            req[i] = static_cast<unsigned char>(
+                std::stoul(cmd.substr(2 * i, 2), nullptr, 16));
+        }
+        unsigned char reply[fake_ecu::kReplyMax] = {};
+        size_t n = 0;
+        ASSERT_TRUE(fake_ecu::answer(req, len, -1, reply, &n)) << cmd;
+        const uint8_t digit =
+            static_cast<uint8_t>(std::stoul(cmd.substr(cmd.size() - 1), nullptr, 16));
+        EXPECT_EQ(digit, elm327_pack_count(static_cast<uint32_t>(n), 0x7E0)) << cmd;
+        past_one_frame = past_one_frame || n > 7;
+    }
+    EXPECT_GT(packs, 0u);
+    EXPECT_TRUE(past_one_frame) << "a reply of a First Frame and more";
+
+    Session off;
+    ASSERT_EQ(off.create(uri("?identify=0&diagnose=0&pack=0")), ECUIO_OK);
+    off.start();
+    const auto requests = [] {
+        return on_fake<uint32_t>([](fake_elm327::adapter& a) { return a.requests; });
+    };
+    const uint32_t before = requests();
+    ASSERT_TRUE(wait_for([&] { return requests() >= before + 150; }, 10000));
+    const uint32_t flags = support_flags_when(off.s, ECUIO_SUPPORT_PACKED, 0);
+    EXPECT_FALSE(flags & (ECUIO_SUPPORT_PACKED | ECUIO_SUPPORT_UNPACKED));
+}
+
+/* An adapter's ECU that answers a pack for its first PID alone, three
+ * packs in a row, is asked one PID per request from then on */
+TEST_F(Elm327SessionTest, AnEcuAnsweringOnePidEndsPacking)
+{
+    FirstPidOnly first;
+    Session s;
+    ASSERT_EQ(s.create(uri("?identify=0&diagnose=0")), ECUIO_OK);
+    s.start();
+    const uint32_t flags = support_flags_when(s.s, ECUIO_SUPPORT_UNPACKED, 10000);
+    EXPECT_TRUE(flags & ECUIO_SUPPORT_UNPACKED);
+    EXPECT_FALSE(flags & ECUIO_SUPPORT_PACKED);
+    EXPECT_EQ(s.state(nullptr), ECUIO_OK) << "a fallback, not a fault";
 }
 
 /* The probe walks the supported-PID chain (01 00, 20, 40), and the

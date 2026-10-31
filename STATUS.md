@@ -350,8 +350,8 @@ scheduled. What each holds, past its row:
   built: core decodes a reply that carries several, record by record,
   with each PID's length as the car sends it, and the engine packs up
   to six PIDs of a class per request, falling back to one per request
-  for a car that mishandles them; the fakes answering packed requests
-  and a car run are next
+  for a car that mishandles them, through both adapters against the
+  fakes; a car run is next
   (ADR-0039's Appendix A), now that the car has run the classes. The bit-field, enumerated and complex PIDs wait for decoder
   kinds of their own (ADR-0039 §2).
 - **Trouble codes:** reading is built
