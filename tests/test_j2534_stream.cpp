@@ -369,6 +369,8 @@ TEST_F(J2534QueryParamTest, MalformedQueriesRejectedAtSessionCreate)
         "?diagnose=",
         "?diagnose=2",
         "?diagnose=no",
+        "?pack=",
+        "?pack=on",
         /* uds-generic (ADR-0020): its DIDs come from ?did=, which no
          * other profile takes */
         "?did=1E1C",
@@ -420,7 +422,7 @@ TEST_F(J2534QueryParamTest, RefusedQueriesNameTheirCause)
     EXPECT_STREQ(
         ecuio_last_error_detail(),
         "j2534:// takes no query key 'band', only baud, flags, "
-        "filter, txid, poll, probe, identify, diagnose, profile and did");
+        "filter, txid, poll, probe, identify, diagnose, pack, profile and did");
     snprintf(uri, sizeof(uri), "j2534://%s?probe=yes", FAKE_J2534_DLL_PATH);
     EXPECT_EQ(ecuio_session_create(uri, &session), ECUIO_ERR_BAD_URI);
     EXPECT_STREQ(ecuio_last_error_detail(), "?probe= needs 0 or 1, not 'yes'");

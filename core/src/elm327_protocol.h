@@ -678,6 +678,21 @@ inline uint8_t elm327_response_count(const uint8_t* bytes, size_t n,
     return 1;
 }
 
+/* The response-count digit for a pack (ADR-0039 Appendix A), whose
+ * reply is reply_len bytes: the frames that carries, one Single Frame
+ * up to 7 bytes, else a First Frame (6) and Consecutive Frames (7
+ * each); 0, no digit, for a functional ID (several ECUs answer), an
+ * unknown length or more than 15 frames. */
+inline uint8_t elm327_pack_count(uint32_t reply_len, uint32_t tx_id)
+{
+    if (reply_len == 0 || tx_id == 0x7DFu || tx_id == 0x18DB33F1u) {
+        return 0;
+    }
+    const uint32_t frames =
+        reply_len <= 7 ? 1u : 1u + (reply_len - 6u + 6u) / 7u;
+    return frames <= 15 ? static_cast<uint8_t>(frames) : 0;
+}
+
 inline char elm327_hex_digit(uint32_t v)
 {
     return "0123456789ABCDEF"[v & 0x0F];

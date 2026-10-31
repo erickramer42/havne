@@ -64,6 +64,12 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
   one plots the next. A tick or untick is kept for the picked vehicle;
   the mock and `uds-generic` still plot every signal. Each signal def
   carries its place as `plot_rank` (core's C API).
+- With the probe on, a Service 01 request carries up to six PIDs of
+  one rate class, each one the car has already answered alone, so a
+  pass asks the same signals in fewer requests; `?pack=0` asks one PID
+  per request. A car that answers such requests with silence, a refusal
+  or one PID three times in a row is asked one PID per request for the
+  session, and its support report says so. Not yet run on a car.
 - Core decodes a Service 01 reply that carries several PIDs (as
   J1979 allows, and as other tools' recordings may hold) record by
   record, using each PID's length as the car sends it;

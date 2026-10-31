@@ -33,8 +33,8 @@
 constexpr uint32_t ECUIO_CAN_ID_MAX = 0x1FFFFFFFu; /* 29-bit */
 constexpr uint32_t ECUIO_CAN_ID_11BIT_MAX = 0x7FFu;
 
-/* The request keys' values: filter, txid, poll, probe, identify and
- * diagnose. */
+/* The request keys' values: filter, txid, poll, probe, identify,
+ * diagnose and pack. */
 struct request_params {
     uint32_t rx_id = 0; /* 0 = no ?filter= override */
     uint32_t tx_id = 0; /* 0 = unset: profile's tx, else 0x7E0 */
@@ -44,6 +44,7 @@ struct request_params {
     bool probe = true;    /* ?probe=0 turns it off */
     bool identify = true; /* ?identify=0 turns it off */
     bool diagnose = true; /* ?diagnose=0 turns it off */
+    bool pack = true;     /* ?pack=0 turns it off */
 };
 
 /* Strict unsigned parse: decimal by default, '0x'/'0X' prefix enables
@@ -107,6 +108,8 @@ inline bool ecuio_parse_number(const char* s, size_t len,
  *            with a set's requests
  *   diagnose 0 or 1: trouble codes, readiness and the freeze frame
  *            (ADR-0037), on by default with a set's requests
+ *   pack     0 or 1: several Service 01 PIDs per request (ADR-0039
+ *            Appendix A), on by default with the probe
  * False when q is another key. A bad value leaves p alone and sets
  * *wanted to what it should have been; the caller words the detail. */
 inline bool ecuio_request_param(const ecuio_uri::param& q, request_params* p,
@@ -133,13 +136,16 @@ inline bool ecuio_request_param(const ecuio_uri::param& q, request_params* p,
         }
         return true;
     }
-    if (q.is("probe") || q.is("identify") || q.is("diagnose")) {
+    if (q.is("probe") || q.is("identify") || q.is("diagnose") ||
+        q.is("pack")) {
         if (q.val_len != 1 || (q.val[0] != '0' && q.val[0] != '1')) {
             *wanted = "0 or 1";
         } else if (q.is("probe")) {
             p->probe = q.val[0] == '1';
         } else if (q.is("identify")) {
             p->identify = q.val[0] == '1';
+        } else if (q.is("pack")) {
+            p->pack = q.val[0] == '1';
         } else {
             p->diagnose = q.val[0] == '1';
         }
@@ -291,6 +297,8 @@ inline ecuio_status_t ecuio_build_requests(
         }
     }
     *probe = params.probe && !params.has_poll;
+    /* Packing needs the bitmaps: it packs only the PIDs they list */
+    e->pack = params.pack && *probe;
     const bool requests = e->count > 0 || e->scan_count > 0;
     *identify = params.identify && !params.has_poll && requests;
     if (*identify) {

@@ -347,6 +347,29 @@ decode, not in a transport.
 > `CliGoldenTest.ReplaySplitsPackedReplies` (a hand-written recording,
 > `tests/fixtures/replay/packed-replies/`).
 
+> **Amended 2026-10-31 (the engine):** packing is built in
+> `request_engine.h`, on whenever the probe is (`?pack=0` turns it off,
+> so a car run can compare). The table keeps one request per PID, its
+> classes and drops as they were; when a request's turn comes,
+> `ecuio_engine_gather` adds the next requests of its class while each
+> is packable: a Service 01 PID the bitmaps list, not a bitmap, whose
+> own reply showed a data length no longer than J1979's
+> (`pid_len` per channel; a longer one is never packed, since the
+> split can't tell it from a packed reply). The first lap after the
+> walk is therefore unpacked, and the packs grow as the PIDs answer.
+> A pack (`ECUIO_ENGINE_PACK`, beside the one-shot) carries its reply's
+> length from those lengths (`reply_len`), from which the ELM327
+> transport takes its count digit (`elm327_pack_count`: one Single
+> Frame up to 7 bytes, then a First Frame's 6 and 7 a Consecutive
+> Frame; none to a functional ID or past 15 frames). A positive reply
+> whose first record is any of its PIDs answers it; one whose records
+> fill it exactly, two or more, is a success. Silence, `7F 01 xx` or a
+> single record is a failure, and three in a row end packing on the
+> channel; the support report's `ECUIO_SUPPORT_PACKED` says a pack was
+> answered, `ECUIO_SUPPORT_UNPACKED` that packing ended. A pack drops
+> nothing. The walk still asks one bitmap per request. Not yet run on
+> a car.
+
 **Fallback.** An ECU that answers a packed request with nothing, with
 a negative reply, or with only its first PID, three times in a row,
 puts its channel back to one PID per request for the session, and the

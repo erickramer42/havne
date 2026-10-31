@@ -3579,3 +3579,286 @@ TEST_F(ClearTest, ARescanWaitsForTheClear)
     EXPECT_TRUE(d.flags & ECUIO_DIAG_COMPLETE);
     EXPECT_EQ(d.lists[ECUIO_DIAG_PENDING].outcome, ECUIO_DIAG_UNANSWERED);
 }
+
+/* ---------- several PIDs per request (ADR-0039 Appendix A) ---------- */
+
+namespace {
+
+/* single's answers, a pack answered in J1979's form: each PID's record
+ * from its own reply, in the order asked, a PID it doesn't answer left
+ * out */
+Responder packed_from(Responder single)
+{
+    return [single](const Bytes& req) {
+        if (req.size() <= 2 || req[0] != 0x01) {
+            return single(req);
+        }
+        Bytes out = {0x41};
+        for (size_t k = 1; k < req.size(); ++k) {
+            const Bytes one = single({0x01, req[k]});
+            if (one.size() >= 2 && one[0] == 0x41) {
+                out.insert(out.end(), one.begin() + 1, one.end());
+            }
+        }
+        return out.size() > 1 ? out : Bytes{};
+    };
+}
+
+Bytes packed_fake_reply(const Bytes& req)
+{
+    return packed_from(fake_reply)(req);
+}
+
+/* n turns of channel 0's rotation after a walk of the test car's
+ * bitmaps with packing on, each answered through respond (silence waits
+ * out the wait); what went out, in order */
+std::vector<Bytes> packing_turns(ecuio_request_engine* e, int n,
+                                 const Responder& respond)
+{
+    std::vector<Bytes> sent;
+    int64_t now = 0;
+    for (int k = 0; k < n; ++k) {
+        const int32_t r = ecuio_engine_due(e, 0, now);
+        if (r == ECUIO_ENGINE_NONE) {
+            now += ECUIO_ENGINE_GAP_US;
+            continue;
+        }
+        const ecuio_request& q = ecuio_engine_request_of(e, 0, r);
+        const Bytes req(q.bytes, q.bytes + q.len);
+        sent.push_back(req);
+        EXPECT_EQ(r == ECUIO_ENGINE_PACK, req.size() > 2);
+        ecuio_engine_sent(e, 0, r, true, now);
+        const Bytes reply = respond(req);
+        if (reply.empty()) {
+            now += ECUIO_ENGINE_WAIT_US;
+            EXPECT_TRUE(ecuio_engine_expire(e, 0, now));
+        } else {
+            (void)ecuio_engine_on_frame(e, 0, reply.data(),
+                                        static_cast<uint16_t>(reply.size()),
+                                        now + 4 * kMs, nullptr);
+        }
+        now += ECUIO_ENGINE_GAP_US;
+    }
+    return sent;
+}
+
+/* An engine on the test car's bitmaps, walked, packing on */
+void packing_engine(ecuio_request_engine* e)
+{
+    ASSERT_NO_FATAL_FAILURE(obd2_walked(e, kTestCar));
+    e->pack = true;
+}
+
+bool slow_pid(const ecuio_request_engine& e, uint8_t pid)
+{
+    return class_of(e, pid) == 1;
+}
+
+} // namespace
+
+/* A PID goes in a pack only once its own reply has shown its length,
+ * so the first lap is unpacked; then every request carries up to six
+ * kept PIDs of one class, never a bitmap, and every kept PID is still
+ * asked */
+TEST(RequestEngineTest, PacksCarryUpToSixKeptPidsOfOneClass)
+{
+    ecuio_request_engine e;
+    ASSERT_NO_FATAL_FAILURE(packing_engine(&e));
+    const std::vector<Bytes> sent = packing_turns(&e, 400, packed_fake_reply);
+    std::vector<bool> answered_alone(256, false);
+    size_t packs = 0;
+    for (const Bytes& req : sent) {
+        if (req.size() == 2) {
+            answered_alone[req[1]] = true;
+            continue;
+        }
+        ++packs;
+        ASSERT_LE(req.size(), 1 + ECUIO_ENGINE_PACK_MAX);
+        for (size_t k = 1; k < req.size(); ++k) {
+            SCOPED_TRACE("PID " + std::to_string(req[k]));
+            EXPECT_TRUE(answered_alone[req[k]]) << "packed before it went alone";
+            EXPECT_NE(req[k] % 0x20, 0) << "a bitmap";
+            EXPECT_EQ(slow_pid(e, req[k]), slow_pid(e, req[1])) << "one class";
+        }
+    }
+    EXPECT_GT(packs, 0u);
+
+    /* After the first laps: packs alone, every kept PID among them */
+    std::vector<bool> asked(256, false);
+    size_t singles = 0;
+    for (size_t k = sent.size() - 60; k < sent.size(); ++k) {
+        singles += sent[k].size() == 2 ? 1 : 0;
+        for (size_t b = 1; b < sent[k].size(); ++b) {
+            asked[sent[k][b]] = true;
+        }
+    }
+    EXPECT_EQ(singles, 0u);
+    for (uint32_t i = 0; i < e.count; ++i) {
+        const ecuio_request& r = e.requests[i];
+        if (r.dropped == 0) {
+            EXPECT_TRUE(asked[r.bytes[1]]) << "PID " << int(r.bytes[1]);
+        }
+    }
+    ecuio_channel_support_t s{};
+    ecuio_engine_support(&e, 0, &s);
+    EXPECT_TRUE(s.flags & ECUIO_SUPPORT_PACKED);
+    EXPECT_FALSE(s.flags & ECUIO_SUPPORT_UNPACKED);
+}
+
+/* A pack's reply length is its records' at the lengths their own
+ * replies showed, a short one (the test car's PID 55) included; a PID
+ * whose own reply was longer than J1979's is never packed, since the
+ * split can't tell it from a packed reply */
+TEST(RequestEngineTest, APackIsSizedByItsPidsOwnReplies)
+{
+    ecuio_request_engine e;
+    ASSERT_NO_FATAL_FAILURE(packing_engine(&e));
+    const auto car = [](const Bytes& req) {
+        if (req == Bytes{0x01, 0x55}) {
+            return Bytes{0x41, 0x55, 0x80};
+        }
+        if (req == Bytes{0x01, 0x0C}) {
+            return Bytes{0x41, 0x0C, 0x1A, 0xF8, 0x00};
+        }
+        return req.size() > 2 ? Bytes{} : fake_reply(req);
+    };
+    (void)packing_turns(&e, 200, car);
+    const ecuio_engine_channel& ch = e.chans[0];
+    EXPECT_EQ(ch.pid_len[0x55], 1u);
+    EXPECT_EQ(ch.pid_len[0x0C], ECUIO_ENGINE_PID_LONG);
+
+    ecuio_request_engine f;
+    ASSERT_NO_FATAL_FAILURE(packing_engine(&f));
+    const std::vector<Bytes> sent = packing_turns(&f, 400, packed_from(car));
+    bool packed55 = false;
+    for (const Bytes& req : sent) {
+        for (size_t k = 1; req.size() > 2 && k < req.size(); ++k) {
+            EXPECT_NE(req[k], 0x0C) << "a reply longer than J1979's: alone";
+            packed55 = packed55 || req[k] == 0x55;
+        }
+    }
+    EXPECT_TRUE(packed55);
+    const ecuio_engine_channel& fc = f.chans[0];
+    ASSERT_GT(fc.pack_count, 1u);
+    uint32_t reply = 1;
+    for (uint32_t k = 0; k < fc.pack_count; ++k) {
+        reply += 1u + fc.pid_len[fc.pack.bytes[1 + k]];
+    }
+    EXPECT_EQ(fc.pack.reply_len, reply);
+}
+
+/* A reply whose first record is any PID the pack asked answers it, in
+ * any order, and one that leaves a PID out drops nothing */
+TEST(RequestEngineTest, APackedReplyMatchesByAnyOfItsPids)
+{
+    ecuio_request_engine e;
+    ASSERT_NO_FATAL_FAILURE(packing_engine(&e));
+    const auto reversed_less_one = [](const Bytes& req) {
+        if (req.size() <= 3) {
+            return packed_fake_reply(req);
+        }
+        Bytes back = {0x01};
+        for (size_t k = req.size() - 1; k >= 2; --k) {
+            back.push_back(req[k]); /* the first PID left out */
+        }
+        return packed_fake_reply(back);
+    };
+    (void)packing_turns(&e, 400, reversed_less_one);
+    ecuio_channel_support_t s{};
+    ecuio_engine_support(&e, 0, &s);
+    EXPECT_TRUE(s.flags & ECUIO_SUPPORT_PACKED);
+    EXPECT_FALSE(s.flags & ECUIO_SUPPORT_UNPACKED);
+    for (uint32_t i = 0; i < e.count; ++i) {
+        EXPECT_NE(e.requests[i].dropped, ECUIO_DROP_NOT_SUPPORTED)
+            << "PID " << int(e.requests[i].bytes[1]);
+    }
+    EXPECT_EQ(e.chans[0].pack_failures, 0u);
+}
+
+/* Silence, a negative reply or one record, three packs in a row, puts
+ * the channel back to one PID per request; one answered in between
+ * starts the count again; a pending reply only extends the wait */
+TEST(RequestEngineTest, ThreeFailedPacksEndPackingOnTheChannel)
+{
+    for (const char* how : {"silence", "negative", "first PID only"}) {
+        SCOPED_TRACE(how);
+        ecuio_request_engine e;
+        ASSERT_NO_FATAL_FAILURE(packing_engine(&e));
+        const std::string kind = how;
+        int packs = 0;
+        const std::vector<Bytes> sent =
+            packing_turns(&e, 400, [&](const Bytes& req) {
+                if (req.size() <= 2) {
+                    return fake_reply(req);
+                }
+                ++packs;
+                if (packs == 2) {
+                    return packed_fake_reply(req); /* one in between */
+                }
+                if (kind == "silence") {
+                    return Bytes{};
+                }
+                if (kind == "negative") {
+                    return Bytes{0x7F, 0x01, 0x12};
+                }
+                return fake_reply({0x01, req[1]});
+            });
+        EXPECT_EQ(packs, 1 + 1 + int(ECUIO_ENGINE_PACK_FAILURES));
+        ecuio_channel_support_t s{};
+        ecuio_engine_support(&e, 0, &s);
+        EXPECT_TRUE(s.flags & ECUIO_SUPPORT_UNPACKED);
+        size_t k = sent.size();
+        while (k > 0 && sent[k - 1].size() == 2) {
+            --k;
+        }
+        EXPECT_LT(k + 100, sent.size()) << "one PID per request from then on";
+        for (uint32_t i = 0; i < e.count; ++i) {
+            EXPECT_NE(e.requests[i].dropped, ECUIO_DROP_NOT_SUPPORTED);
+        }
+    }
+
+    ecuio_request_engine e;
+    ASSERT_NO_FATAL_FAILURE(packing_engine(&e));
+    (void)packing_turns(&e, 200, packed_fake_reply);
+    int32_t r = ECUIO_ENGINE_NONE;
+    int64_t now = 10 * 1000 * kMs;
+    for (int k = 0; k < 50 && r != ECUIO_ENGINE_PACK; ++k) {
+        r = ecuio_engine_due(&e, 0, now);
+        if (r != ECUIO_ENGINE_PACK && r != ECUIO_ENGINE_NONE) {
+            ecuio_engine_sent(&e, 0, r, true, now);
+            const Bytes reply =
+                fake_reply({0x01, ecuio_engine_request_of(&e, 0, r).bytes[1]});
+            (void)ecuio_engine_on_frame(&e, 0, reply.data(),
+                                        static_cast<uint16_t>(reply.size()), now,
+                                        nullptr);
+        }
+        now += ECUIO_ENGINE_WAIT_US;
+    }
+    ASSERT_EQ(r, ECUIO_ENGINE_PACK);
+    ecuio_engine_sent(&e, 0, r, true, now);
+    const uint8_t pending[3] = {0x7F, 0x01, 0x78};
+    uint8_t nrc = 0;
+    EXPECT_EQ(ecuio_engine_on_frame(&e, 0, pending, 3, now + kMs, &nrc),
+              ecuio_reply::pending);
+    EXPECT_EQ(nrc, 0x78);
+    EXPECT_FALSE(ecuio_engine_expire(&e, 0, now + ECUIO_ENGINE_WAIT_US + kMs))
+        << "the pending wait";
+    EXPECT_EQ(e.chans[0].pack_failures, 0u);
+}
+
+/* Packing waits for the driver's word, and a set walked with the probe
+ * off has no bitmaps to pack by */
+TEST(RequestEngineTest, PackingIsTheDriversToTurnOn)
+{
+    ecuio_request_engine e;
+    ASSERT_NO_FATAL_FAILURE(obd2_walked(&e, kTestCar));
+    for (const Bytes& req : packing_turns(&e, 300, packed_fake_reply)) {
+        EXPECT_EQ(req.size(), 2u);
+    }
+    ecuio_request_engine f;
+    ASSERT_NO_FATAL_FAILURE(obd2_walked(&f, kTestCar, false));
+    f.pack = true;
+    for (const Bytes& req : packing_turns(&f, 300, packed_fake_reply)) {
+        EXPECT_EQ(req.size(), 2u) << "no bitmaps listed";
+    }
+}

@@ -348,8 +348,10 @@ scheduled. What each holds, past its row:
   Live hides it, ADR-0039 §6); Live plots the ten best ranked signals
   the car has (ADR-0039 section 8). Several PIDs per request is being
   built: core decodes a reply that carries several, record by record,
-  with each PID's length as the car sends it; the engine packing its
-  requests is next
+  with each PID's length as the car sends it, and the engine packs up
+  to six PIDs of a class per request, falling back to one per request
+  for a car that mishandles them; the fakes answering packed requests
+  and a car run are next
   (ADR-0039's Appendix A), now that the car has run the classes. The bit-field, enumerated and complex PIDs wait for decoder
   kinds of their own (ADR-0039 §2).
 - **Trouble codes:** reading is built
