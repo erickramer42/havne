@@ -54,6 +54,16 @@ struct ecuio_session {
      * on the caller's thread. */
     std::unique_ptr<std::atomic<uint8_t>[]> short_frames;
     std::unique_ptr<std::atomic<uint8_t>[]> carried;
+    /* A packed Service 01 reply's split (ADR-0039 Appendix A,
+     * obd2_reply.h): the message IDs a Service 01 def listens on, the
+     * only frames split; the frame each record decodes from; and each
+     * PID's length as this ECU sends it alone, where shorter than
+     * J1979's. Sized by create, touched only by dispatch. The count of
+     * replies that wouldn't split is read on the caller's thread. */
+    std::vector<uint32_t> service01_ids;
+    std::unique_ptr<ecuio_frame_t> record_frame;
+    uint8_t learned_lengths[256] = {};
+    std::atomic<uint64_t> unsplit_replies{0};
     std::atomic<int32_t> last_error{ECUIO_OK};
     std::atomic<uint32_t> error_count{0};
     /* Written once by the transport's attach, then the profile by

@@ -197,6 +197,23 @@ ecuio_status_t ecuio_session_get_absent_signals(
     uint32_t* count
 );
 
+/*
+ * Service 01 replies that carried more than their first PID's record
+ * but wouldn't split into records (ADR-0039 Appendix A): a PID of no
+ * known length, one twice, or records that don't end at the reply's
+ * end. Each decoded its first record alone. Core splits a reply that
+ * carries several PIDs (01 0C 0D ...) record by record, using J1979's
+ * length for each PID, or the shorter one the ECU's single replies
+ * show. Counted from the frames decoded for a values callback.
+ *
+ * ECUIO_OK; ECUIO_ERR_NULL_ARGUMENT for a NULL session or count.
+ * Readable after close.
+ */
+ecuio_status_t ecuio_session_get_unsplit_replies(
+    const ecuio_session_t* session,
+    uint64_t* count
+);
+
 #ifdef __cplusplus
 }
 #endif

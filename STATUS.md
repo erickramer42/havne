@@ -346,7 +346,10 @@ scheduled. What each holds, past its row:
   ADR-0039 §3) and 55 and 56 answer one of their two fields (core
   reports such a field absent, `ecuio_session_get_absent_signals`, and
   Live hides it, ADR-0039 §6); Live plots the ten best ranked signals
-  the car has (ADR-0039 section 8). Next, several PIDs per request
+  the car has (ADR-0039 section 8). Several PIDs per request is being
+  built: core decodes a reply that carries several, record by record,
+  with each PID's length as the car sends it; the engine packing its
+  requests is next
   (ADR-0039's Appendix A), now that the car has run the classes. The bit-field, enumerated and complex PIDs wait for decoder
   kinds of their own (ADR-0039 §2).
 - **Trouble codes:** reading is built
@@ -410,6 +413,13 @@ across the four releases is decided as they come.
     (the last N seconds, the same span on any adapter, instead of the
     last 360 points per signal), and on the phone pinch zoom and
     smaller Dashboard gauges when it's upright.
+  - Finding a signal among many: Live's list (every linear field of
+    Service 01 a car has) and the viewer's signal picker share one
+    filter. A text field matches names and units as typed (case
+    ignored); a "plotted only" switch; and groups as chips (engine,
+    fuel and air, oxygen sensors, temperatures, counters), which takes
+    each def's group from core, as its plot rank comes. The filter
+    hides rows from the list, never from the chart or a recording.
   - Done when two recordings of the mock's pulls overlay aligned on the
     pull's start, and an hour-long recording opens and scrubs within a
     stated memory bound.

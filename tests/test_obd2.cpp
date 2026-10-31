@@ -21,6 +21,7 @@
 #include "../core/src/request_engine.h"
 #include "../core/src/diagnostics.h"
 #include "../core/src/obd2_rates.h"
+#include "../core/src/obd2_reply.h"
 #include "../core/src/uds_generic.h"
 #include "../core/src/uri_query.h"
 #include "ecuio/core.h"
@@ -2436,6 +2437,134 @@ TEST_F(Obd2TableTest, TheFakeEcuAnswersEachSupportedPidWithItsLength)
         EXPECT_TRUE(fake_ecu::supports_pid(set->defs[i].mux_key & 0xFFu))
             << set->defs[i].name;
     }
+}
+
+/* Core's byte count per PID, which splits a packed reply, is the
+ * table's for every PID it lists and 0 for every other */
+TEST_F(Obd2TableTest, CoresByteCountPerPidIsTheTables)
+{
+    for (unsigned pid = 0; pid <= 0xFF; ++pid) {
+        EXPECT_EQ(ECUIO_OBD2_PID_BYTES[pid], bytes_of(pid)) << "PID " << pid;
+    }
+}
+
+/* ---------- a packed reply's records (obd2_reply.h) ---------- */
+
+namespace {
+
+struct Split {
+    ecuio_obd2_reply reply;
+    std::vector<std::pair<unsigned, std::vector<uint8_t>>> records;
+};
+
+/* What ecuio_obd2_split makes of bytes, each record as its PID and data */
+Split split_of(std::initializer_list<uint8_t> bytes, uint8_t* learned)
+{
+    const std::vector<uint8_t> reply(bytes);
+    ecuio_obd2_record out[ECUIO_OBD2_MAX_RECORDS];
+    uint32_t n = 99;
+    Split s;
+    s.reply = ecuio_obd2_split(reply.data(), static_cast<uint16_t>(reply.size()),
+                               learned, out, &n);
+    for (uint32_t k = 0; k < n; ++k) {
+        s.records.push_back(
+            {out[k].pid, std::vector<uint8_t>(reply.begin() + out[k].start,
+                                              reply.begin() + out[k].start +
+                                                  out[k].bytes)});
+    }
+    return s;
+}
+
+using Rec = std::pair<unsigned, std::vector<uint8_t>>;
+
+} // namespace
+
+/* ADR-0039 Appendix A: a reply no longer than its first PID's data is
+ * that PID's alone and decodes as it came; a longer one splits into its
+ * records by J1979's lengths, in the order the ECU sent them */
+TEST(Obd2ReplyTest, APackedReplySplitsIntoItsRecords)
+{
+    uint8_t learned[256] = {};
+    EXPECT_EQ(split_of({0x41, 0x0C, 0x1A, 0xF8}, learned).reply,
+              ecuio_obd2_reply::whole) << "one PID";
+    const Split s =
+        split_of({0x41, 0x0D, 0x32, 0x0C, 0x1A, 0xF8, 0x05, 0x5A}, learned);
+    EXPECT_EQ(s.reply, ecuio_obd2_reply::split);
+    EXPECT_EQ(s.records, (std::vector<Rec>{{0x0D, {0x32}},
+                                           {0x0C, {0x1A, 0xF8}},
+                                           {0x05, {0x5A}}}));
+    EXPECT_EQ(split_of({0x41, 0x00, 1, 2, 3, 4, 0x20, 5, 6, 7, 8}, learned)
+                  .records.size(),
+              2u) << "the walk's bitmaps too";
+    EXPECT_EQ(split_of({0x7F, 0x01, 0x12}, learned).reply,
+              ecuio_obd2_reply::whole) << "not a positive reply";
+    EXPECT_EQ(split_of({0x41, 0x0C}, learned).reply, ecuio_obd2_reply::whole);
+    EXPECT_EQ(split_of({0x41, 0xB0, 1, 2, 3}, learned).reply,
+              ecuio_obd2_reply::whole) << "a first PID of no known length";
+}
+
+/* A reply that won't split decodes its first record alone: a PID of no
+ * known length, one twice, a record past the end or short of it */
+TEST(Obd2ReplyTest, ARecordThatWontSplitStopsIt)
+{
+    uint8_t learned[256] = {};
+    for (const auto& bytes : {
+             std::vector<uint8_t>{0x41, 0x0C, 0x1A, 0xF8, 0xB0, 0x01},
+             std::vector<uint8_t>{0x41, 0x0D, 0x32, 0x0D, 0x33},
+             std::vector<uint8_t>{0x41, 0x0D, 0x32, 0x0C, 0x1A},
+             std::vector<uint8_t>{0x41, 0x0D, 0x32, 0x05, 0x5A, 0x0C}}) {
+        ecuio_obd2_record out[ECUIO_OBD2_MAX_RECORDS];
+        uint32_t n = 99;
+        EXPECT_EQ(ecuio_obd2_split(bytes.data(), static_cast<uint16_t>(bytes.size()),
+                                   learned, out, &n),
+                  ecuio_obd2_reply::unsplit) << bytes.size();
+        EXPECT_EQ(n, 0u);
+    }
+    std::vector<uint8_t> many = {0x41};
+    for (unsigned pid = 0x04; pid <= 0xFF && many.size() < 3 + 2 * ECUIO_OBD2_MAX_RECORDS;
+         ++pid) {
+        if (ECUIO_OBD2_PID_BYTES[pid] == 1) {
+            many.push_back(static_cast<uint8_t>(pid));
+            many.push_back(0x00);
+        }
+    }
+    ASSERT_GT(many.size(), 1 + 2 * ECUIO_OBD2_MAX_RECORDS);
+    ecuio_obd2_record out[ECUIO_OBD2_MAX_RECORDS];
+    uint32_t n = 0;
+    EXPECT_EQ(ecuio_obd2_split(many.data(), static_cast<uint16_t>(many.size()),
+                               learned, out, &n),
+              ecuio_obd2_reply::unsplit) << "past the most records";
+}
+
+/* The test car answers PID 55 with bank 1's byte alone
+ * (docs/bench-sessions/2026-10-31-elm327-vehicle.md): a single reply
+ * shorter than J1979's teaches the length, so a packed reply holding 55
+ * splits; a reply as long as J1979's teaches the table's again */
+TEST(Obd2ReplyTest, AShortSingleReplyTeachesItsLength)
+{
+    uint8_t learned[256] = {};
+    const auto packed = [&learned]() {
+        return split_of({0x41, 0x0C, 0x1A, 0xF8, 0x55, 0x80, 0x0D, 0x32},
+                        learned);
+    };
+    EXPECT_EQ(packed().reply, ecuio_obd2_reply::unsplit)
+        << "by J1979's length, 55 takes 0D's PID";
+
+    EXPECT_EQ(split_of({0x41, 0x55, 0x80}, learned).reply,
+              ecuio_obd2_reply::whole);
+    EXPECT_EQ(learned[0x55], 1u);
+    const Split s = packed();
+    EXPECT_EQ(s.reply, ecuio_obd2_reply::split);
+    EXPECT_EQ(s.records, (std::vector<Rec>{{0x0C, {0x1A, 0xF8}},
+                                           {0x55, {0x80}},
+                                           {0x0D, {0x32}}}));
+
+    EXPECT_EQ(split_of({0x41, 0x55, 0x80, 0x7F}, learned).reply,
+              ecuio_obd2_reply::whole) << "both banks after all";
+    EXPECT_EQ(learned[0x55], 0u) << "the table's length again";
+    EXPECT_EQ(split_of({0x41, 0x0C, 0x1A}, learned).reply,
+              ecuio_obd2_reply::whole);
+    EXPECT_EQ(learned[0x0C], 1u) << "any PID's";
 }
 
 /* ---------- the fakes' ECU: diagnostics (fake_ecu.h) ---------- */

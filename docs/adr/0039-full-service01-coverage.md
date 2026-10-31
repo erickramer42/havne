@@ -327,6 +327,26 @@ of that reply goes undecoded, and the count is published. Replay
 decodes a recorded multi-PID reply the same way, since the split is in
 decode, not in a transport.
 
+> **Amended 2026-10-31:** the test car answers PIDs 55 and 56 with one
+> data byte where J1979 gives two (bank 1's, no bank 3's), so a split by
+> the table alone would read 55's record into the next PID's and decode
+> every record after it wrongly, silently. Core learns each PID's length
+> from the ECU's own replies: a reply no longer than its first PID's
+> length is that PID's alone (decode sees lengths, not requests), and
+> one shorter than J1979's teaches that length, which the split then
+> uses; one as long as J1979's teaches the table's again. A longer reply
+> splits only into records of known length, each PID once, ending
+> exactly at the reply's end; one that won't decodes its first record
+> alone and is counted (`ecuio_session_get_unsplit_replies`, `profile.h`).
+> A PID whose single reply is longer than J1979's can't be told from a
+> packed reply, so the engine (the next step) packs a PID only once its
+> unpacked reply has shown a length the split will use. Built in
+> `core/src/obd2_reply.h` (`ecuio_obd2_split`, `ECUIO_OBD2_PID_BYTES`),
+> decoded in `core.cpp`'s `decode_values` for the IDs a Service 01 def
+> listens on; `Obd2ReplyTest`, `CoreTest.APacked*` and
+> `CliGoldenTest.ReplaySplitsPackedReplies` (a hand-written recording,
+> `tests/fixtures/replay/packed-replies/`).
+
 **Fallback.** An ECU that answers a packed request with nothing, with
 a negative reply, or with only its first PID, three times in a row,
 puts its channel back to one PID per request for the session, and the

@@ -188,6 +188,13 @@ if(TARGET havne-cli)
                --values)
         set_tests_properties(CliGoldenTest.ReplayRunsToItsLastFrame PROPERTIES
             ENVIRONMENT HAVNE_CLI_RING_BYTES=40000)
+        # Service 01 replies carrying several PIDs (ADR-0039 Appendix A),
+        # written by hand: PID 55 alone with bank 1's byte, then packed
+        # replies, one holding 55 at that length, and one that won't split
+        app_cli_golden(ReplaySplitsPackedReplies replay-packed.jsonl
+            -- $<TARGET_FILE:havne-cli> stream
+               "replay://${CMAKE_CURRENT_SOURCE_DIR}/fixtures/replay/packed-replies?profile=obd2&speed=max"
+               --values)
         app_cli_golden(MockDriveCycle mock.jsonl --ignore t_us
             -- $<TARGET_FILE:havne-cli> stream mock://golden --values --count 40)
         app_cli_golden(BadUriIsRefused bad-uri.jsonl --exit 3

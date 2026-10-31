@@ -143,6 +143,8 @@ int main(void)
             ECUIO_ERR_NULL_ARGUMENT ||
         ecuio_session_get_absent_signals(NULL, NULL, 0, NULL) !=
             ECUIO_ERR_NULL_ARGUMENT ||
+        ecuio_session_get_unsplit_replies(NULL, NULL) !=
+            ECUIO_ERR_NULL_ARGUMENT ||
         ECUIO_ABSENT_AFTER_FRAMES != 3u) {
         return 1;
     }
