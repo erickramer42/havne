@@ -11,7 +11,8 @@
 // were its own reply, so every def's key and start byte stay as they are
 // and the wire stays as the ECU sent it. Pure: no session, no allocation.
 
-#pragma once
+#ifndef ECUIO_OBD2_REPLY_H
+#define ECUIO_OBD2_REPLY_H
 
 #include <cstdint>
 
@@ -112,3 +113,5 @@ inline ecuio_obd2_reply ecuio_obd2_split(const uint8_t* reply, uint16_t len,
     }
     return data <= table ? alone() : ecuio_obd2_reply::unsplit;
 }
+
+#endif /* ECUIO_OBD2_REPLY_H */
