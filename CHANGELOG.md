@@ -11,6 +11,11 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
 ## [Unreleased]
 
 ### Added
+- Each CI run builds an unsigned iPhone app, `havne-ios-unsigned.ipa`,
+  that a tester installs with a sideloading tool and their own Apple ID
+  ([docs/ios.md](docs/ios.md)). On iOS the app asks before reaching a
+  WiFi adapter on the local network, and its recordings show in the
+  Files app.
 - **Trouble codes, readiness and the freeze frame**
   ([ADR-0037](docs/adr/0037-reading-trouble-codes.md)): a session that
   asks the car (`obd2` or `uds-generic`, through a J2534 or ELM327

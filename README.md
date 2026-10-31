@@ -245,6 +245,7 @@ release changed.
 | [docs/testing.md](docs/testing.md) | Test tiers, what each test pins, and what isn't verified |
 | [docs/j2534.md](docs/j2534.md), [docs/elm327.md](docs/elm327.md) | How each adapter transport works |
 | [docs/linux.md](docs/linux.md) | Havne on Linux: the AppImage, the core packages, adapters and permissions, SocketCAN, tracing |
+| [docs/ios.md](docs/ios.md) | Havne on iPhone: installing CI's unsigned build with your own Apple ID, what works there |
 | [docs/development.md](docs/development.md) | Builds, tests, CI, releases, troubleshooting |
 | [docs/bench-sessions/](docs/bench-sessions/bench-prep.md) | Real-hardware sessions, their run sheets, and what only hardware can confirm |
 | [docs/engineering-log.md](docs/engineering-log.md) | Milestones and lessons learned |
