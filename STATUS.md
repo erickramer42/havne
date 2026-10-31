@@ -341,8 +341,9 @@ scheduled. What each holds, past its row:
   against public J1979 tables (`tests/fixtures/obd2/service01.csv`),
   its requests in two rate classes, and Live hiding what a car lacks;
   run on the test car (BENCH prep #30), where PIDs 23 and 59 read one
-  sensor (one moves to slow, ADR-0039 §3) and 55 and 56 answer one of
-  their two fields, so two rows never fill. Next, several
+  sensor (so a car whose bitmaps list both asks 59 in the slow class,
+  ADR-0039 §3) and 55 and 56 answer one of their two fields, so two
+  rows never fill. Next, several
   PIDs per request (ADR-0039's Appendix A), after a car run of the
   classes. The bit-field, enumerated and complex PIDs wait for decoder
   kinds of their own (ADR-0039 §2).

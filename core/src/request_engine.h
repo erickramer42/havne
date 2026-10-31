@@ -3,7 +3,8 @@
 //             profile_registry.cpp (the request limit)
 // C++17, Qt-free, no platform headers.
 // Testing: UNIT: derivation, deduplication and the limit, the
-//     read-only rule, rotation per channel and its two rate classes,
+//     read-only rule, rotation per channel and its two rate classes
+//     (a duplicate pair judged at each walk's end),
 //     correlation, the wait, the pending wait and the floor; the
 //     supported-PID walk, its budget,
 //     a bitmap asked again once after another PID's answer, and
@@ -278,6 +279,10 @@ struct ecuio_request_engine {
     /* The obd2 set, whose defs decode the freeze frame (ADR-0037 §4);
      * set by ecuio_engine_diagnose */
     const ecuio_signal_set_t* diag_set = nullptr;
+    /* ADR-0039 §3: PID pairs (keep, demote), two bytes each, that can
+     * read one sensor; set by ecuio_engine_set_duplicates */
+    const uint8_t* duplicates = nullptr;
+    uint32_t duplicate_count = 0;
 };
 
 /* How a frame on a channel relates to its outstanding request. */
@@ -485,6 +490,16 @@ inline void ecuio_engine_classify(ecuio_request_engine* e,
         r.slow =
             (r.len == 2 && r.bytes[0] == 0x01 && !fast(r.bytes[1])) ? 1 : 0;
     }
+}
+
+/* ADR-0039 §3: pairs of fast PIDs that can read one sensor, count pairs
+ * of (keep, demote) bytes, which must outlive the engine. Each walk's end
+ * judges them on its channel (ecuio_engine_judge_duplicates). */
+inline void ecuio_engine_set_duplicates(ecuio_request_engine* e,
+                                        const uint8_t* pairs, uint32_t count)
+{
+    e->duplicates = pairs;
+    e->duplicate_count = count;
 }
 
 /* Channel c's next request of one class, from that class's cursor, or
@@ -1064,9 +1079,32 @@ inline int32_t ecuio_engine_diag_next(const ecuio_request_engine* e, uint32_t c)
     return -1;
 }
 
+/* ADR-0039 §3: for each duplicate pair, the demoted PID's request on
+ * channel c is slow when the channel's answered bitmaps list both PIDs,
+ * and fast otherwise (the pairs are of fast PIDs), so a car that answers
+ * one form keeps it fast and a later walk judges again. */
+inline void ecuio_engine_judge_duplicates(ecuio_request_engine* e, uint32_t c)
+{
+    const ecuio_engine_channel& ch = e->chans[c];
+    for (uint32_t p = 0; p < e->duplicate_count; ++p) {
+        const uint8_t keep = e->duplicates[2 * p];
+        const uint8_t demote = e->duplicates[2 * p + 1];
+        const bool both = ecuio_engine_pid_bit(ch.supported, keep) &&
+                          ecuio_engine_pid_bit(ch.supported, demote);
+        for (uint32_t i = 0; i < e->count; ++i) {
+            ecuio_request& r = e->requests[i];
+            if (r.channel == c && r.len == 2 && r.bytes[0] == 0x01 &&
+                r.bytes[1] == demote) {
+                r.slow = both ? 1 : 0;
+            }
+        }
+    }
+}
+
 /* Ends channel c's walk where it stands, answered or not, and drops each
  * of its Service 01 requests whose PID the answers mark unsupported.
- * PIDs it didn't reach stay: silence isn't an answer. */
+ * PIDs it didn't reach stay: silence isn't an answer. Then judges the
+ * duplicate pairs on what the answers listed. */
 inline void ecuio_engine_end_walk(ecuio_request_engine* e, uint32_t c)
 {
     ecuio_engine_channel& ch = e->chans[c];
@@ -1080,6 +1118,7 @@ inline void ecuio_engine_end_walk(ecuio_request_engine* e, uint32_t c)
             ecuio_engine_drop(e, i, ECUIO_DROP_BITMAP, 0);
         }
     }
+    ecuio_engine_judge_duplicates(e, c);
 }
 
 /* A bitmap reply to the walk on channel c: 41 <PID> b0 b1 b2 b3, PID

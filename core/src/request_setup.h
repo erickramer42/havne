@@ -267,6 +267,10 @@ inline ecuio_status_t ecuio_build_requests(
         (void)ecuio_engine_derive(e, set, rx_ids, chan_count, nullptr);
         if (set == ecuio_obd2_signal_set()) {
             ecuio_engine_classify(e, ecuio_obd2_pid_fast); /* ADR-0039 */
+            ecuio_engine_set_duplicates(
+                e, &ECUIO_OBD2_DUPLICATE_PIDS[0][0],
+                sizeof(ECUIO_OBD2_DUPLICATE_PIDS) /
+                    sizeof(ECUIO_OBD2_DUPLICATE_PIDS[0]));
         }
     } else {
         /* uds-generic (ADR-0020): the rotation from the set's polled

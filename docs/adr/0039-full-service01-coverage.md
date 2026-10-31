@@ -117,8 +117,13 @@ a car run measures each class.
 Fuel pressure is four PIDs, the forms J1979 gives it (gauge, relative
 to the manifold, the high-pressure gauge range, absolute). A car
 answers the forms its fuel system has; the test car answers 0A, 23 and
-59. Whether two of those read one sensor is checked on the car, and a
-duplicate moves to slow.
+59, and 23 and 59 read one value there
+([2026-10-31-elm327-vehicle](../bench-sessions/2026-10-31-elm327-vehicle.md)).
+So the fast list has a companion, pairs of fast PIDs that can read one
+sensor (`ECUIO_OBD2_DUPLICATE_PIDS`: 23 and 59): when a channel's
+bitmaps list both, the second goes slow, judged at each walk's end; a
+car that lists one keeps it fast, and a session without the probe
+keeps both. On the test car that leaves 13 of its 43 PIDs fast.
 
 **The class lives in core, not the def ABI.** The `obd2` set's file
 holds the fast list beside its defs, and request derivation

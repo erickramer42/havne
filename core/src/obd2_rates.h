@@ -2,7 +2,8 @@
 //             obd2 set's rate classes, included by request_setup.h
 // C++17, Qt-free, no platform headers.
 // Testing: UNIT: RequestEngineTest (the classes the obd2 set's requests
-//     get, the rotation's ratio); HARNESS: the J2534 and ELM327 rotation
+//     get, the rotation's ratio, the duplicate pair on the test car's
+//     bitmaps); HARNESS: the J2534 and ELM327 rotation
 //     tests (J2534AdoptionTest, Elm327SessionTest).
 
 #ifndef ECUIO_OBD2_RATES_H
@@ -27,6 +28,15 @@ constexpr uint8_t ECUIO_OBD2_FAST_PIDS[] = {
     0x34, 0x35, 0x36, 0x37, 0x38, 0x39, 0x3A, 0x3B, /* wide-range O2 (mA) */
     0x44,                                           /* commanded lambda */
     0x49,                                           /* pedal D */
+};
+
+/* ADR-0039 §3: fast PIDs that can read one sensor, as (keep, demote)
+ * pairs: when a channel's bitmaps list both, the second goes slow
+ * (ecuio_engine_judge_duplicates). The fuel rail's gauge (23) and
+ * absolute (59) forms read one value on the test car
+ * (docs/bench-sessions/2026-10-31-elm327-vehicle.md). */
+constexpr uint8_t ECUIO_OBD2_DUPLICATE_PIDS[][2] = {
+    {0x23, 0x59},
 };
 
 /* Whether the obd2 set asks pid in the fast class */

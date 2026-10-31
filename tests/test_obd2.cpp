@@ -35,6 +35,7 @@
 #include <functional>
 #include <initializer_list>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace {
@@ -894,6 +895,81 @@ TEST(RequestEngineTest, TheFirstVehiclesBitmapsDropOnly0x5C) {
     }
     EXPECT_GT(dropped, 1u);
     EXPECT_EQ(e.chans[0].requests, e.count - dropped);
+}
+
+namespace {
+
+/* Channel 0 of the obd2 set as the setup builds it (the classes and the
+ * duplicate pairs), walked against bitmaps answered in turn; the last
+ * one's clear last bit ends the walk, unless walk is false. */
+void obd2_walked(ecuio_request_engine* e,
+                 const std::vector<std::pair<uint8_t, uint32_t>>& car,
+                 bool walk = true)
+{
+    const uint32_t rx = ECUIO_OBD2_ECU_ARB_ID;
+    ecuio_engine_init(e, 1);
+    ASSERT_TRUE(
+        ecuio_engine_derive(e, ecuio_obd2_signal_set(), &rx, 1, nullptr));
+    ecuio_engine_classify(e, ecuio_obd2_pid_fast);
+    ecuio_engine_set_duplicates(e, &ECUIO_OBD2_DUPLICATE_PIDS[0][0],
+                                sizeof(ECUIO_OBD2_DUPLICATE_PIDS) /
+                                    sizeof(ECUIO_OBD2_DUPLICATE_PIDS[0]));
+    if (!walk) {
+        return;
+    }
+    ecuio_engine_probe(e, 0);
+    int64_t now = 0;
+    for (const auto& b : car) {
+        ASSERT_NO_FATAL_FAILURE(send_bitmap_request(e, 0, b.first, now));
+        ASSERT_EQ(answer_bitmap(e, 0, b.first, b.second, now + 4 * kMs),
+                  ecuio_reply::positive);
+        now += ECUIO_ENGINE_GAP_US;
+    }
+    ASSERT_FALSE(e->chans[0].walking) << "the last bitmap ends the walk";
+}
+
+/* PID pid's request on channel 0: its class (0 fast, 1 slow), or -1
+ * when it's dropped or not in the table. */
+int class_of(const ecuio_request_engine& e, uint8_t pid)
+{
+    for (uint32_t i = 0; i < e.count; ++i) {
+        const ecuio_request& r = e.requests[i];
+        if (r.len == 2 && r.bytes[0] == 0x01 && r.bytes[1] == pid) {
+            return r.dropped != 0 ? -1 : r.slow;
+        }
+    }
+    return -1;
+}
+
+/* The test car's six bitmaps (docs/bench-sessions/2026-10-25-vehicle.md,
+ * the same on 2026-10-31) */
+const std::vector<std::pair<uint8_t, uint32_t>> kTestCar = {
+    {0x00, 0xFE7FA813u}, {0x20, 0xA017F011u}, {0x40, 0xFED08C81u},
+    {0x60, 0x63080001u}, {0x80, 0x0004000Du}, {0xA0, 0x04000000u}};
+
+} // namespace
+
+/* ADR-0039 §3: the fuel rail's two forms read one value on the test car
+ * (docs/bench-sessions/2026-10-31-elm327-vehicle.md), so when a car's
+ * bitmaps list both, 59 goes slow and 23 stays fast. A car that lists
+ * only 59 keeps it fast, and with no walk nothing is judged. */
+TEST(RequestEngineTest, ADuplicateFuelRailPressureGoesSlow)
+{
+    ecuio_request_engine e;
+    ASSERT_NO_FATAL_FAILURE(obd2_walked(&e, kTestCar));
+    EXPECT_EQ(class_of(e, 0x23), 0);
+    EXPECT_EQ(class_of(e, 0x59), 1) << "both listed: the duplicate is slow";
+    EXPECT_EQ(class_of(e, 0x0A), 0) << "the low-pressure side stays fast";
+
+    std::vector<std::pair<uint8_t, uint32_t>> no23 = kTestCar;
+    no23[1].second &= ~(0x80000000u >> (0x23 - 0x21));
+    ASSERT_NO_FATAL_FAILURE(obd2_walked(&e, no23));
+    EXPECT_EQ(class_of(e, 0x23), -1) << "dropped on its bitmap";
+    EXPECT_EQ(class_of(e, 0x59), 0) << "the only rail pressure stays fast";
+
+    ASSERT_NO_FATAL_FAILURE(obd2_walked(&e, kTestCar, false));
+    EXPECT_EQ(class_of(e, 0x23), 0);
+    EXPECT_EQ(class_of(e, 0x59), 0) << "no walk, nothing judged";
 }
 
 /* A bitmap nobody answers ends the walk with nothing judged: every
