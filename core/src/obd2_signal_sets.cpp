@@ -12,6 +12,7 @@
 #include "ecuio/signals.h"
 #include "ecuio/signal_sets.h"
 
+#include <cstddef>
 #include <cstdint>
 #include <cstdio>
 
@@ -86,7 +87,8 @@ constexpr double kWideV = 8.0 / 65536.0;
 #define U      ECUIO_VALUE_UINT
 #define S      ECUIO_VALUE_INT
 
-const ecuio_signal_def_t kObd2Defs[] = {
+/* Ranked below (kPlotOrder), so not const */
+ecuio_signal_def_t kObd2Defs[] = {
     obd2_def(ECUIO_OBD2_SIG_ENGINE_LOAD_ID, "Engine Load", ECUIO_VALUE_UINT, 8,
              100.0 / 255.0, 0.0, "%", 1, 0x04, ECUIO_BYTE_ORDER_LE),
     obd2_def(ECUIO_OBD2_SIG_COOLANT_TEMP_ID, "Coolant Temp", ECUIO_VALUE_UINT,
@@ -248,6 +250,29 @@ const ecuio_signal_def_t kObd2Defs[] = {
     pid_def(0xA6, 0, 0, "Odometer", U, 32, 0.1, 0.0, "km", 1),
 };
 
+/* The signals a UI plots when a session starts, best first (ADR-0039
+ * section 8): the engine's state, then how hard it works and how it
+ * fuels. A UI plots the first few the car supports, so a car without
+ * one (oil temperature, a MAF) plots the next: MAP stands in for a
+ * speed-density engine's missing MAF. Throttle is left to load, which
+ * says more of the engine's state. */
+const uint16_t kPlotOrder[] = {
+    ECUIO_OBD2_SIG_RPM_ID,
+    ECUIO_OBD2_SIG_COOLANT_TEMP_ID,
+    ECUIO_OBD2_SIG_IAT_ID,
+    ECUIO_OBD2_SIG_MAF_ID,
+    ECUIO_OBD2_SIG_OIL_TEMP_ID,
+    ECUIO_OBD2_SIG_SPEED_ID,
+    ECUIO_OBD2_SIG_ENGINE_LOAD_ID,
+    ECUIO_OBD2_PID_SIG_ID(0x0E, 0),   /* timing advance */
+    ECUIO_OBD2_PID_SIG_ID(0x06, 0),   /* short term fuel trim, bank 1 */
+    ECUIO_OBD2_PID_SIG_ID(0x07, 0),   /* long term fuel trim, bank 1 */
+    ECUIO_OBD2_PID_SIG_ID(0x0B, 0),   /* intake manifold pressure */
+    ECUIO_OBD2_SIG_BATTERY_V_ID,
+    ECUIO_OBD2_PID_SIG_ID(0x49, 0),   /* accelerator pedal D */
+    ECUIO_OBD2_PID_SIG_ID(0x44, 0),   /* commanded lambda */
+};
+
 #undef S
 #undef U
 #undef NM
@@ -264,6 +289,13 @@ const ecuio_channel_decl_t kObd2Channels[] = {
 };
 
 const ecuio_signal_set_t kObd2Set = [] {
+    for (size_t r = 0; r < sizeof kPlotOrder / sizeof kPlotOrder[0]; ++r) {
+        for (ecuio_signal_def_t& d : kObd2Defs) {
+            if (d.id == kPlotOrder[r]) {
+                d.plot_rank = static_cast<uint8_t>(r + 1);
+            }
+        }
+    }
     ecuio_signal_set_t s = {};
     s.layout_version = ECUIO_SIGNAL_SET_LAYOUT;
     s.count = static_cast<uint32_t>(sizeof(kObd2Defs) / sizeof(kObd2Defs[0]));

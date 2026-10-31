@@ -11,7 +11,10 @@ pragma Singleton
 import QtQml
 
 // The vehicles (ADR-0027) as rules on one document,
-// { salt, picked, list: [{ id, label, vinKey, uri, unplotted }] }:
+// { salt, picked, list: [{ id, label, vinKey, uri, plotted, unplotted }] }:
+// plotted and unplotted are the rows ticked past Live's default and
+// unticked from it (ADR-0039 section 8); a stored entry without
+// plotted reads as none.
 // every function takes the document and returns a new one, never
 // changing what it was given, so SettingsPage stores what comes back
 // and the rules test without a page.
@@ -45,7 +48,9 @@ QtObject {
             if (v === null || typeof v !== "object" || !isString(v.id) || v.id === ""
                     || ids[v.id] || !isString(v.label) || v.label.trim() === ""
                     || !isString(v.vinKey) || !isString(v.uri)
-                    || !Array.isArray(v.unplotted) || !v.unplotted.every(isString))
+                    || !Array.isArray(v.unplotted) || !v.unplotted.every(isString)
+                    || (v.plotted !== undefined
+                        && (!Array.isArray(v.plotted) || !v.plotted.every(isString))))
                 return empty()
             ids[v.id] = true
         }
@@ -62,6 +67,7 @@ QtObject {
 
     function entry(v) {
         return { id: v.id, label: v.label, vinKey: v.vinKey, uri: v.uri,
+                 plotted: v.plotted === undefined ? [] : v.plotted.slice(),
                  unplotted: v.unplotted.slice() }
     }
 
@@ -136,7 +142,8 @@ QtObject {
     function add(doc, label) {
         const d = copy(doc)
         const id = nextId(d)
-        d.list.push({ id: id, label: String(label).trim(), vinKey: "", uri: "", unplotted: [] })
+        d.list.push({ id: id, label: String(label).trim(), vinKey: "", uri: "",
+                      plotted: [], unplotted: [] })
         d.picked = id
         return d
     }
@@ -149,6 +156,7 @@ QtObject {
         const d = add(doc, label)
         const v = picked(d)
         v.uri = from.uri
+        v.plotted = from.plotted.slice()
         v.unplotted = from.unplotted.slice()
         return d
     }
@@ -188,8 +196,11 @@ QtObject {
         return change(doc, v => v.uri = uri)
     }
 
-    function rememberUnplotted(doc, names) {
-        return change(doc, v => v.unplotted = names.slice())
+    function rememberPlotting(doc, plotted, unplotted) {
+        return change(doc, v => {
+            v.plotted = plotted.slice()
+            v.unplotted = unplotted.slice()
+        })
     }
 
     // ADR-0027 §4: the VIN key settles which vehicle this is. Returns

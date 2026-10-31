@@ -516,7 +516,7 @@ TEST(SignalsTest, SignalDefLayoutIsPinned)
      *   mux_reserved=10, mux_key=12, kind=16, byte_order=17,
      *   start_byte=18, bit_offset=20, bit_length=21,
      *   byte_length=22, scale=24, offset=32, name=40, unit=72,
-     *   decimal_places=88, display_reserved=89, flags=92,
+     *   decimal_places=88, plot_rank=89, display_reserved=90, flags=92,
      *   reserved=96  =>  sizeof == 120.
      * If this fires, a field moved: bump ECUIO_SIGNAL_SET_LAYOUT. */
     EXPECT_EQ(sizeof(ecuio_signal_def_t), 120u);
@@ -534,7 +534,8 @@ TEST(SignalsTest, SignalDefLayoutIsPinned)
     EXPECT_EQ(offsetof(ecuio_signal_def_t, name), 40u);
     EXPECT_EQ(offsetof(ecuio_signal_def_t, unit), 72u);
     EXPECT_EQ(offsetof(ecuio_signal_def_t, decimal_places), 88u);
-    EXPECT_EQ(offsetof(ecuio_signal_def_t, display_reserved), 89u);
+    EXPECT_EQ(offsetof(ecuio_signal_def_t, plot_rank), 89u);
+    EXPECT_EQ(offsetof(ecuio_signal_def_t, display_reserved), 90u);
     EXPECT_EQ(offsetof(ecuio_signal_def_t, flags), 92u);
     EXPECT_EQ(offsetof(ecuio_signal_def_t, reserved), 96u);
 
@@ -820,8 +821,15 @@ TEST(SignalsTest, ValidatorRefusesEveryNonzeroReservedByte)
             ++checked;
         }
     }
-    /* Every byte that isn't a named value: 2 + 2 + 3 + 4 + 24. */
-    EXPECT_EQ(checked, 35u);
+    /* Every byte that isn't a named value: 2 + 2 + 2 + 4 + 24. */
+    EXPECT_EQ(checked, 34u);
+
+    /* plot_rank took a reserved byte's room: any value is a rank */
+    ecuio_signal_def_t ranked = good;
+    for (unsigned rank : {1u, 10u, 255u}) {
+        ranked.plot_rank = static_cast<uint8_t>(rank);
+        EXPECT_EQ(ecuio_validate_signal(&ranked), ECUIO_VALIDATE_OK) << rank;
+    }
 }
 
 TEST(SignalsTest, ValidatorAcceptsExactlyWhatTheDecoderDecodes)

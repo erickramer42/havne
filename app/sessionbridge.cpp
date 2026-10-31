@@ -298,6 +298,7 @@ void SignalListModel::setSignalSet(const ecuio_signal_set_t* set)
     // than keep the previous session's rows.
     const bool hadHidden = m_hiddenCount != 0;
     m_hiddenCount = 0;
+    m_ranked = false;
     if (set == nullptr || set->defs == nullptr || set->count == 0) {
         beginResetModel();
         m_entries.clear();
@@ -330,14 +331,16 @@ void SignalListModel::setSignalSet(const ecuio_signal_set_t* set)
         if (d.mux_offset == 0 && d.mux_length == 2 && (d.mux_key >> 8) == 0x41u) {
             e.pid = static_cast<uint8_t>(d.mux_key & 0xFFu);
         }
-        // A text row has nothing to plot, so it's never subscribed
-        e.subscribed = !e.isText;
-        if (e.subscribed) ++m_subscribedCount;
+        e.plotRank = d.plot_rank;
+        m_ranked = m_ranked || (e.plotRank != 0 && !e.isText);
+        // judgePlotted's, below; a text row has nothing to plot
+        e.subscribed = false;
         m_rowOfId.insert(e.id, static_cast<int>(m_entries.size()));
         m_entries.push_back(e);
     }
     endResetModel();
-    // A new set plots every numeric row, whatever the last one plotted
+    // A new set plots its defaults, whatever the last one plotted
+    judgePlotted();
     emit subscribedCountChanged();
     if (hadHidden) emit hiddenCountChanged();
 
@@ -521,45 +524,93 @@ void SignalListModel::toggleSubscribed(int row)
     if (row < 0 || row >= static_cast<int>(m_entries.size())) return;
     Entry& e = m_entries[static_cast<size_t>(row)];
     if (e.isText) return;   // nothing to plot
-    e.subscribed = !e.subscribed;
-    emit dataChanged(index(row), index(row), {SubscribedRole});
-    if (!e.hidden) {
-        m_subscribedCount += e.subscribed ? 1 : -1;
-        emit subscribedCountChanged();
-    }
+    const bool plot = !e.subscribed;
+    e.choice = plot == e.plotDefault ? PlotChoice::Default
+             : plot                  ? PlotChoice::Plotted
+                                     : PlotChoice::Unplotted;
+    judgePlotted();
 }
 
-QStringList SignalListModel::unplottedNames() const
+QStringList SignalListModel::plottedNames() const
 {
     QStringList names;
     for (const Entry& e : m_entries) {
-        if (!e.isText && !e.subscribed) {
+        if (!e.isText && e.choice == PlotChoice::Plotted) {
             names << QString::fromUtf8(e.name);
         }
     }
     return names;
 }
 
-void SignalListModel::setUnplotted(const QStringList& names)
+QStringList SignalListModel::unplottedNames() const
 {
-    bool changed = false;
-    for (Entry& e : m_entries) {
-        if (e.isText) {
-            continue;
-        }
-        const bool subscribed = !names.contains(QString::fromUtf8(e.name));
-        if (subscribed != e.subscribed) {
-            e.subscribed = subscribed;
-            if (!e.hidden) {
-                m_subscribedCount += subscribed ? 1 : -1;
-            }
-            changed = true;
+    QStringList names;
+    for (const Entry& e : m_entries) {
+        if (!e.isText && e.choice == PlotChoice::Unplotted) {
+            names << QString::fromUtf8(e.name);
         }
     }
-    if (changed && !m_entries.empty()) {
-        emit dataChanged(index(0),
-                         index(static_cast<int>(m_entries.size()) - 1),
-                         {SubscribedRole});
+    return names;
+}
+
+void SignalListModel::setPlotChoices(const QStringList& plotted, const QStringList& unplotted)
+{
+    for (Entry& e : m_entries) {
+        const QString name = QString::fromUtf8(e.name);
+        e.choice = e.isText                   ? PlotChoice::Default
+                 : unplotted.contains(name)   ? PlotChoice::Unplotted
+                 : plotted.contains(name)     ? PlotChoice::Plotted
+                                              : PlotChoice::Default;
+    }
+    judgePlotted();
+}
+
+void SignalListModel::judgePlotted()
+{
+    // The default: every numeric row, or in a ranked set the
+    // DefaultPlotted shown numeric rows of the lowest rank (a tie in the
+    // set's order), so a row Live hides gives its place to the next
+    std::vector<int> ranked;
+    for (size_t row = 0; row < m_entries.size(); ++row) {
+        const Entry& e = m_entries[row];
+        if (e.plotRank != 0 && !e.isText && !e.hidden) {
+            ranked.push_back(static_cast<int>(row));
+        }
+    }
+    std::stable_sort(ranked.begin(), ranked.end(), [this](int a, int b) {
+        return m_entries[static_cast<size_t>(a)].plotRank
+             < m_entries[static_cast<size_t>(b)].plotRank;
+    });
+    if (ranked.size() > static_cast<size_t>(DefaultPlotted)) {
+        ranked.resize(static_cast<size_t>(DefaultPlotted));
+    }
+    for (Entry& e : m_entries) {
+        e.plotDefault = !m_ranked && !e.isText;
+    }
+    for (int row : ranked) {
+        m_entries[static_cast<size_t>(row)].plotDefault = m_ranked;
+    }
+
+    int first = -1;
+    int last = -1;
+    int subscribed = 0;
+    for (size_t row = 0; row < m_entries.size(); ++row) {
+        Entry& e = m_entries[row];
+        const bool plot = !e.isText
+                       && (e.choice == PlotChoice::Plotted
+                           || (e.choice == PlotChoice::Default && e.plotDefault));
+        if (plot != e.subscribed) {
+            e.subscribed = plot;
+            if (first < 0) first = static_cast<int>(row);
+            last = static_cast<int>(row);
+        }
+        subscribed += (e.subscribed && !e.hidden) ? 1 : 0;
+    }
+    if (first >= 0) {
+        emit dataChanged(index(first), index(last), {SubscribedRole});
+    }
+    if (subscribed != m_subscribedCount) {
+        m_subscribedCount = subscribed;
         emit subscribedCountChanged();
     }
 }
@@ -609,7 +660,6 @@ void SignalListModel::rejudgeHidden()
     int first = -1;
     int last = -1;
     int hidden = 0;
-    int subscribed = 0;
     for (size_t row = 0; row < m_entries.size(); ++row) {
         Entry& e = m_entries[row];
         const bool hide = e.unsupported || e.absent;
@@ -619,7 +669,6 @@ void SignalListModel::rejudgeHidden()
             last = static_cast<int>(row);
         }
         hidden += e.hidden ? 1 : 0;
-        subscribed += (e.subscribed && !e.hidden) ? 1 : 0;
     }
     if (first < 0) {
         return;
@@ -628,10 +677,8 @@ void SignalListModel::rejudgeHidden()
     emit dataChanged(index(first), index(last), {HiddenRole});
     m_hiddenCount = hidden;
     emit hiddenCountChanged();
-    if (subscribed != m_subscribedCount) {
-        m_subscribedCount = subscribed;
-        emit subscribedCountChanged();
-    }
+    // A hidden row's default place goes to the next ranked row
+    judgePlotted();
 }
 
 // ---------------- LiveSignalModel ----------------

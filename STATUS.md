@@ -345,7 +345,8 @@ scheduled. What each holds, past its row:
   sensor (so a car whose bitmaps list both asks 59 in the slow class,
   ADR-0039 §3) and 55 and 56 answer one of their two fields (core
   reports such a field absent, `ecuio_session_get_absent_signals`, and
-  Live hides it, ADR-0039 §6). Next, several PIDs per request
+  Live hides it, ADR-0039 §6); Live plots the ten best ranked signals
+  the car has (ADR-0039 section 8). Next, several PIDs per request
   (ADR-0039's Appendix A), now that the car has run the classes. The bit-field, enumerated and complex PIDs wait for decoder
   kinds of their own (ADR-0039 §2).
 - **Trouble codes:** reading is built
@@ -507,6 +508,11 @@ week or more or a design that needs an ADR first.
   per frame, the worker's largest per-frame cost up to about 500 defs
   (`bench_bridge`,
   [docs/testing.md](docs/testing.md#performance)).
+- **A frame-rate readout in developer mode (S).** The window's drawn
+  frames per second (`QQuickWindow::frameSwapped`, counted each
+  second), shown only in developer mode, so the strip chart's and the
+  gauges' drawing cost can be read on a phone or a slow laptop while a
+  session runs, beside the frame and value rates the benchmark measures.
 
 ### Toolchain
 

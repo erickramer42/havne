@@ -107,6 +107,37 @@ TEST(Obd2SetTest, IdsFollowTheRule)
     }
 }
 
+/* ADR-0039 section 8: the signals a UI plots when a session starts,
+ * ranked 1 up with no gaps or repeats, the five engine-state ones
+ * first; every other def unranked */
+TEST(Obd2SetTest, RanksTheSignalsAUiPlotsFirst)
+{
+    const ecuio_signal_set_t* obd2 = ecuio_obd2_signal_set();
+    const uint16_t order[] = {
+        ECUIO_OBD2_SIG_RPM_ID,          ECUIO_OBD2_SIG_COOLANT_TEMP_ID,
+        ECUIO_OBD2_SIG_IAT_ID,          ECUIO_OBD2_SIG_MAF_ID,
+        ECUIO_OBD2_SIG_OIL_TEMP_ID,     ECUIO_OBD2_SIG_SPEED_ID,
+        ECUIO_OBD2_SIG_ENGINE_LOAD_ID,  ECUIO_OBD2_PID_SIG_ID(0x0E, 0),
+        ECUIO_OBD2_PID_SIG_ID(0x06, 0), ECUIO_OBD2_PID_SIG_ID(0x07, 0),
+        ECUIO_OBD2_PID_SIG_ID(0x0B, 0), ECUIO_OBD2_SIG_BATTERY_V_ID,
+        ECUIO_OBD2_PID_SIG_ID(0x49, 0), ECUIO_OBD2_PID_SIG_ID(0x44, 0)};
+    for (size_t r = 0; r < sizeof order / sizeof order[0]; ++r) {
+        const ecuio_signal_def_t* d = find_def(obd2, order[r]);
+        ASSERT_NE(d, nullptr) << order[r];
+        EXPECT_EQ(d->plot_rank, r + 1) << d->name;
+    }
+    uint32_t ranked = 0;
+    for (uint32_t i = 0; i < obd2->count; ++i) {
+        ranked += obd2->defs[i].plot_rank != 0 ? 1u : 0u;
+    }
+    EXPECT_EQ(ranked, sizeof order / sizeof order[0]) << "the rest unranked";
+
+    const ecuio_signal_set_t* mock = ecuio_mock_signal_set();
+    for (uint32_t i = 0; i < mock->count; ++i) {
+        EXPECT_EQ(mock->defs[i].plot_rank, 0u) << "the mock ranks none: a UI plots all";
+    }
+}
+
 TEST(Obd2SetTest, DeclaresSingleCanChannel) {
     const ecuio_signal_set_t* set = ecuio_obd2_signal_set();
     ASSERT_NE(set, nullptr);

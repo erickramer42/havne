@@ -19,8 +19,10 @@ TestCase {
             picked: "v1",
             list: [
                 { id: "v1", label: "Daily driver", vinKey: "key-a",
-                  uri: "elm327://COM6?profile=obd2", unplotted: ["Intake Air Temp"] },
-                { id: "v2", label: "Weekend car", vinKey: "", uri: "", unplotted: [] }
+                  uri: "elm327://COM6?profile=obd2", plotted: ["Timing Advance"],
+                  unplotted: ["Intake Air Temp"] },
+                { id: "v2", label: "Weekend car", vinKey: "", uri: "", plotted: [],
+                  unplotted: [] }
             ]
         }
     }
@@ -30,11 +32,22 @@ TestCase {
         compare(d, book())
     }
 
+    // An entry stored before plotted existed ticks nothing past the
+    // default (ADR-0039 section 8)
+    function test_anEntryWithoutPlottedReadsAsNone() {
+        const old = book()
+        delete old.list[0].plotted
+        const d = VehicleBook.parse(JSON.stringify(old))
+        compare(d.list[0].plotted, [])
+        compare(d.list[0].unplotted, ["Intake Air Temp"])
+    }
+
     function test_aDamagedDocumentIsDroppedWhole_data() {
         const missing = book(); delete missing.list[1].vinKey
         const twice = book(); twice.list[1].id = "v1"
         const unnamed = book(); unnamed.list[0].label = "  "
         const badList = book(); badList.list[0].unplotted = ["RPM", 3]
+        const badPlotted = book(); badPlotted.list[1].plotted = "RPM"
         return [
             { tag: "not JSON", text: "{vehicles" },
             { tag: "empty", text: "" },
@@ -43,7 +56,8 @@ TestCase {
             { tag: "an entry missing a field", text: JSON.stringify(missing) },
             { tag: "an id twice", text: JSON.stringify(twice) },
             { tag: "a blank label", text: JSON.stringify(unnamed) },
-            { tag: "a name that isn't text", text: JSON.stringify(badList) }
+            { tag: "a name that isn't text", text: JSON.stringify(badList) },
+            { tag: "plotted that isn't a list", text: JSON.stringify(badPlotted) }
         ]
     }
     function test_aDamagedDocumentIsDroppedWhole(data) {
@@ -88,12 +102,14 @@ TestCase {
         compare(added.list.length, 3)
         compare(added.picked, "v3")
         compare(VehicleBook.picked(added),
-                { id: "v3", label: "Track day", vinKey: "", uri: "", unplotted: [] })
+                { id: "v3", label: "Track day", vinKey: "", uri: "", plotted: [],
+                  unplotted: [] })
 
         const copied = VehicleBook.duplicate(d, "Daily driver (copy)")
         const c = VehicleBook.picked(copied)
         compare(c.uri, "elm327://COM6?profile=obd2", "the connection")
-        compare(c.unplotted, ["Intake Air Temp"], "the plotted signals")
+        compare(c.plotted, ["Timing Advance"], "the plotted signals")
+        compare(c.unplotted, ["Intake Air Temp"], "and the unplotted")
         compare(c.vinKey, "", "never the VIN key")
         compare(d, book(), "the given document is unchanged")
     }
@@ -116,7 +132,9 @@ TestCase {
                 "j2534://OBDX Pro - VX")
         compare(VehicleBook.rememberUri(d, "mock://demo"), d)
         compare(VehicleBook.rememberUri(d, "replay://C:/r/frames.csv"), d)
-        compare(VehicleBook.picked(VehicleBook.rememberUnplotted(d, ["RPM"])).unplotted, ["RPM"])
+        const plotting = VehicleBook.picked(VehicleBook.rememberPlotting(d, ["MAP"], ["RPM"]))
+        compare(plotting.plotted, ["MAP"])
+        compare(plotting.unplotted, ["RPM"])
     }
 
     // ADR-0027 §4, row by row
@@ -143,7 +161,7 @@ TestCase {
         compare(r.outcome, "new")
         compare(VehicleBook.picked(r.doc),
                 { id: "v3", label: "Vehicle 1", vinKey: "key-c",
-                  uri: "elm327://COM7?profile=raw", unplotted: [] })
+                  uri: "elm327://COM7?profile=raw", plotted: [], unplotted: [] })
         compare(VehicleBook.logLine(r), "Vehicle: not Daily driver (its VIN differs); saved as Vehicle 1")
 
         r = VehicleBook.recognize(VehicleBook.pick(book(), ""), "key-c", "elm327://COM7")

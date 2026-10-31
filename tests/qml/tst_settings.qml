@@ -952,6 +952,9 @@ TestCase {
         const unticked = Bridge.signalModel.unplottedNames()
         compare(unticked.length, 1)
         compare(page.pickedVehicle.unplotted, unticked, "an untick is kept")
+        Bridge.signalModel.toggleSubscribed(5)   // Throttle Position: unranked
+        compare(Bridge.signalModel.plottedNames(), ["Throttle Position"])
+        compare(page.pickedVehicle.plotted, ["Throttle Position"], "a tick past the default too")
 
         Bridge.disconnectSession()
         tryVerify(() => !Bridge.disconnecting, 5000, "disconnect ends")
@@ -959,6 +962,7 @@ TestCase {
         press(page, "connectButton")
         tryVerify(() => Bridge.connected, 10000, "connects again")
         compare(Bridge.signalModel.unplottedNames(), unticked, "the untick comes back")
+        compare(Bridge.signalModel.plottedNames(), ["Throttle Position"], "and the tick")
         tryVerify(() => log.includes("Vehicle: Daily driver"), 5000, "recognized: " + log.join("\n"))
         Bridge.logMessage.disconnect(collect)
     }

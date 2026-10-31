@@ -388,7 +388,7 @@ int ecuio_validate_signal(const ecuio_signal_def_t* signal)
     }
 
     /* Zero, so a later field can take this room and existing sets
-     * still load. No flag is defined. */
+     * still load. No flag is defined. plot_rank takes any value. */
     if (signal->reserved0 != 0 ||
         !all_zero(signal->mux_reserved, sizeof signal->mux_reserved) ||
         !all_zero(signal->display_reserved, sizeof signal->display_reserved) ||

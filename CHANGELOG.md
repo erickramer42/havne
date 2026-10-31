@@ -57,6 +57,13 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
   line saying how many it left out; the Dashboard and recordings keep
   every signal. A field the ECU's replies come without (bank 3 of a
   two-bank engine's oxygen-sensor trims) is left out too.
+- Live plots ten signals when a session starts, not every one: the
+  first ten the car has of a ranked list (rpm, coolant, intake air and
+  oil temperatures, MAF, speed, load, timing advance, the fuel trims,
+  then MAP, voltage, the pedal and commanded lambda), so a car without
+  one plots the next. A tick or untick is kept for the picked vehicle;
+  the mock and `uds-generic` still plot every signal. Each signal def
+  carries its place as `plot_rank` (core's C API).
 - `ecuio_session_get_absent_signals` (core's C API) lists the signals
   a session's replies come without, and `havne-cli stream --values`
   writes them as an `absent` line.

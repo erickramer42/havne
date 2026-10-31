@@ -228,3 +228,17 @@ and `newSalt()`, the VIN cleared at disconnect.
   settings and a folder with the wrong name, and the log line says so.
 - Dashboard arrangements (STATUS, "User-configurable dashboards") would
   join a vehicle's entry when they exist; the document has room.
+
+## Appendix: plotted and unplotted (2026-10-31)
+
+Live plots a ranked set's top ranked rows rather than every row
+([ADR-0039](0039-full-service01-coverage.md) section 8), so storing
+the unticked rows alone no longer says what a vehicle plots. An entry
+keeps two lists: `unplotted`, the rows the user unticked from
+Live's default, and `plotted`, the rows ticked past it; every other
+row follows the default, so a signal new to the set plots by its
+rank. A stored entry without `plotted` reads as none, so a vehicle
+saved before keeps its unticks; one with `plotted` that isn't a list
+of names drops the document whole, as any damaged field does
+(section 5). `rememberPlotting` stores both, `setPlotChoices` applies
+them.

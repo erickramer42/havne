@@ -65,7 +65,11 @@ typedef struct ecuio_signal_def {
     char     name[32];            /* UTF-8, terminated inside the buffer */
     char     unit[16];            /* UTF-8 (a degree sign, "km/h"), terminated */
     uint8_t  decimal_places;      /* 0..3 */
-    uint8_t  display_reserved[3]; /* zero */
+    uint8_t  plot_rank;           /* 0 = not plotted by default; else the
+                                     def's place, 1 first, among those a
+                                     UI plots when a session starts
+                                     (ADR-0039 section 8) */
+    uint8_t  display_reserved[2]; /* zero */
 
     uint32_t flags;               /* none defined; zero */
     uint32_t reserved[6];         /* zero; ADR-0016 earmarks this room */
@@ -81,6 +85,7 @@ static_assert(offsetof(ecuio_signal_def_t, start_byte) == 18, "def start_byte of
 static_assert(offsetof(ecuio_signal_def_t, byte_length) == 22, "def byte_length offset is ABI");
 static_assert(offsetof(ecuio_signal_def_t, scale) == 24, "def scale offset is ABI");
 static_assert(offsetof(ecuio_signal_def_t, name) == 40, "def name offset is ABI");
+static_assert(offsetof(ecuio_signal_def_t, plot_rank) == 89, "def plot_rank offset is ABI");
 static_assert(offsetof(ecuio_signal_def_t, flags) == 92, "def flags offset is ABI");
 static_assert(offsetof(ecuio_signal_def_t, reserved) == 96, "def reserved offset is ABI");
 #elif defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
@@ -90,6 +95,7 @@ _Static_assert(offsetof(ecuio_signal_def_t, start_byte) == 18, "def start_byte o
 _Static_assert(offsetof(ecuio_signal_def_t, byte_length) == 22, "def byte_length offset is ABI");
 _Static_assert(offsetof(ecuio_signal_def_t, scale) == 24, "def scale offset is ABI");
 _Static_assert(offsetof(ecuio_signal_def_t, name) == 40, "def name offset is ABI");
+_Static_assert(offsetof(ecuio_signal_def_t, plot_rank) == 89, "def plot_rank offset is ABI");
 _Static_assert(offsetof(ecuio_signal_def_t, flags) == 92, "def flags offset is ABI");
 _Static_assert(offsetof(ecuio_signal_def_t, reserved) == 96, "def reserved offset is ABI");
 #endif

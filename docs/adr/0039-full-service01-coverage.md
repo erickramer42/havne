@@ -204,7 +204,36 @@ nothing there. PID 7F, which tests reach today only with `probe=0`
 because the chain stops at 40, becomes reachable through the chain;
 the tests that relied on the probe dropping it change with it.
 
-### 8. Out of this record
+### 8. What Live plots when a session starts
+
+Live's strip chart plotted every numeric row it showed: on the test
+car 49 traces, too many to read. A def says where it stands among the
+signals a UI plots first, in `plot_rank` (`signals.h`), which takes one
+of the display block's reserved bytes: 0 is unranked, 1 is first.
+Live plots the `SignalListModel::DefaultPlotted` (10) rows it shows
+with the lowest ranks, so a row it hides (section 6) gives its place to the
+next ranked one, and a rescan that shows it takes the place back. A set
+that ranks no def (the mock's, `uds-generic`'s DIDs, a profile
+registered from outside) plots every numeric row, as before.
+
+`obd2` ranks fourteen, best first: RPM, coolant, intake air and oil
+temperatures and MAF (the engine's state); then speed, load, timing
+advance, bank 1's short and long fuel trims, MAP (which stands in for
+a speed-density engine's missing MAF), the control module's voltage,
+the accelerator pedal and the commanded lambda. Throttle is left to
+load, which says more of the engine's state. The test car lacks PID 5C,
+so it plots ranks 1 to 4 and 6 to 11.
+
+The rank is core's because it describes the signal, as its name and
+decimal places do, and a program on the C ABI reads it from the def;
+how many to plot is the UI's, for the room its chart has. A tick or
+untick on Live is the user's choice for that row and holds while the
+defaults move; one that matches the row's default clears the choice.
+A vehicle keeps both kinds ([ADR-0027](0027-vehicle-profiles.md)'s
+appendix of 2026-10-31). The Dashboard reads its gauges by name from
+the whole model and doesn't follow the chart's choices.
+
+### 9. Out of this record
 
 - **Banks 3 and 4** of PIDs 06–09, and **bank and sensor names** from
   PIDs 13 and 1D.
@@ -244,8 +273,10 @@ the tests that relied on the probe dropping it change with it.
   from about 0.4 s to about 0.8 s, and the temperatures to about 3.2 s,
   until several PIDs per request (Appendix A), built with the
   classes, brings the fast class well under today's figure.
-- The public header gains one macro and no new types: no ABI change.
-  The new IDs are append-only like every def ID.
+- The public header gains one macro, one function
+  (`ecuio_session_get_absent_signals`, section 6) and the def's `plot_rank`,
+  which takes a reserved byte at offset 89: an addition, no layout
+  change. The new IDs are append-only like every def ID.
 - Recordings hold more signals; existing ones replay and decode as
   before, since decoding works frame by frame and the ten keep their
   IDs and names.

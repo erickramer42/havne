@@ -8,7 +8,8 @@
 //          (BridgeTest.RecentRecordings*, .ReplayUriFor*), the delivery figures
 //          (BridgeTest.DeliveryText*, .DisconnectLogsTheDelivery), the
 //          vehicle's VIN key, label and plotted names (ADR-0027;
-//          BridgeTest.VinFromIdentity*, .UnplottedNames*, …)
+//          BridgeTest.VinFromIdentity*, .UnplottedNames*, …), the default
+//          plot (ADR-0039 section 8; BridgeTest.ARankedSet*, .APlotChoice*)
 
 #pragma once
 
@@ -235,12 +236,22 @@ public:
     uint32_t unitSystem() const { return m_units; }
     void setUnitSystem(uint32_t units);
 
+    // How many rows a ranked set plots by default (ADR-0039 section 8):
+    // the shown numeric rows with the lowest plot_rank. A set that ranks
+    // none plots every numeric row.
+    static constexpr int DefaultPlotted = 10;
+
+    // A tick or untick on Live. One that matches the row's default
+    // clears the row's choice, so the row follows its default again.
     Q_INVOKABLE void toggleSubscribed(int row);
-    // A vehicle's plotted signals (ADR-0027 §1): the names of the
-    // numeric rows the chart leaves out, and setting them, which ticks
-    // every other numeric row. Text rows are never plotted or listed.
+    // A vehicle's plotted signals (ADR-0027 section 1): the names of the
+    // numeric rows the user ticked past the default and unticked from
+    // it, and setting both, which leaves every other numeric row to its
+    // default. A name in both lists is unplotted. Text rows are never
+    // plotted or listed.
+    Q_INVOKABLE QStringList plottedNames() const;
     Q_INVOKABLE QStringList unplottedNames() const;
-    Q_INVOKABLE void setUnplotted(const QStringList& names);
+    Q_INVOKABLE void setPlotChoices(const QStringList& plotted, const QStringList& unplotted);
 
     // Strip-chart pull API: one map per SUBSCRIBED signal with non-empty
     // history: { id, row, name, unit, decimals, value,
@@ -272,6 +283,8 @@ private:
         double value;
     };
 
+    enum class PlotChoice : uint8_t { Default, Plotted, Unplotted };
+
     struct Entry {
         uint16_t id;
         char name[32];
@@ -287,9 +300,14 @@ private:
         bool unsupported = false; // its ECU marks the PID unsupported
         bool absent = false;      // core: its frames come without it
         bool hidden = false;      // either: Live leaves the row out
-        // Whether the strip chart plots this signal. Values and history
-        // update regardless: the Dashboard reads every row, and a signal
-        // plotted again shows the history it kept meanwhile.
+        uint8_t plotRank = 0;     // the def's plot_rank; 0 unranked
+        // The user's tick or untick; Default follows plotDefault
+        PlotChoice choice = PlotChoice::Default;
+        bool plotDefault = false; // judgePlotted's default for the row
+        // Whether the strip chart plots this signal: the choice, else the
+        // default. Values and history update regardless: the Dashboard
+        // reads every row, and a signal plotted again shows the history
+        // it kept meanwhile.
         bool subscribed = true;
         // GUI-thread-only rolling ring, written only by pushSample (from
         // updateValues and updateTexts). Fixed capacity, evict-oldest:
@@ -306,6 +324,10 @@ private:
     // Hidden is unsupported or absent: re-judges every row, and notifies
     // the rows that changed, the hidden count and the plotted count
     void rejudgeHidden();
+    // Each row's default and so its subscribed state, and the plotted
+    // count; notifies the rows that changed and the count. Run after
+    // anything that moves the defaults: a new set, hidden rows, choices.
+    void judgePlotted();
     static void pushSample(Entry& e, qint64 stamp, double value);
     static void pushWindow(Entry& e, const WindowValue& w);
     // A row's value as displayed in the current unit system
@@ -317,6 +339,7 @@ private:
     QHash<uint16_t, int> m_rowOfId;
     int m_subscribedCount = 0;
     int m_hiddenCount = 0;
+    bool m_ranked = false;      // the set ranks a def (plot_rank)
     uint32_t m_units = ECUIO_UNITS_METRIC;
     HostElapsedTimer m_clock;   // fallback stamps; restarted in setSignalSet
 };

@@ -2910,7 +2910,8 @@ TEST(BridgeTest, LiveHidesTheRowsTheirEcuMarksUnsupported)
     EXPECT_GT(pastTheRanges, 0);
     EXPECT_EQ(model.hiddenCount(), expectHidden);
     EXPECT_EQ(hiddenSignals, 1);
-    EXPECT_EQ(model.subscribedCount(), rows - expectHidden);
+    EXPECT_EQ(model.subscribedCount(), SignalListModel::DefaultPlotted)
+        << "a ranked set plots its top ranked rows";
 
     /* Live's rows are the shown ones in order, each naming its model row */
     ASSERT_EQ(live.rowCount(), rows - expectHidden);
@@ -2935,7 +2936,7 @@ TEST(BridgeTest, LiveHidesTheRowsTheirEcuMarksUnsupported)
     EXPECT_TRUE(charted.contains(row0C));
     EXPECT_FALSE(charted.contains(row5C));
     model.toggleSubscribed(row5C);
-    EXPECT_EQ(model.subscribedCount(), rows - expectHidden);
+    EXPECT_EQ(model.subscribedCount(), SignalListModel::DefaultPlotted);
     model.toggleSubscribed(row5C);
 
     /* A rescan that finds 0x5C shows it again */
@@ -2947,7 +2948,7 @@ TEST(BridgeTest, LiveHidesTheRowsTheirEcuMarksUnsupported)
         model.data(model.index(row5C), SignalListModel::HiddenRole).toBool());
     EXPECT_EQ(model.hiddenCount(), expectHidden - 1);
     EXPECT_EQ(live.rowCount(), rows - expectHidden + 1);
-    EXPECT_EQ(model.subscribedCount(), rows - expectHidden + 1);
+    EXPECT_EQ(model.subscribedCount(), SignalListModel::DefaultPlotted);
 
     /* Another ECU's report, or one with nothing learned, hides nothing */
     ecuio_channel_support_t other = car;
@@ -3012,7 +3013,8 @@ TEST(BridgeTest, LiveHidesTheFieldsCoreReportsAbsent)
     EXPECT_FALSE(hidden(b1));
     EXPECT_EQ(model.hiddenCount(), 1);
     EXPECT_EQ(live.rowCount(), rows - 1);
-    EXPECT_EQ(model.subscribedCount(), rows - 1);
+    EXPECT_EQ(model.subscribedCount(), SignalListModel::DefaultPlotted)
+        << "an unranked row's hiding moves no default";
 
     /* The bitmaps hide theirs beside it; neither undoes the other */
     ecuio_channel_support_t car{};
@@ -3252,8 +3254,9 @@ TEST(BridgeTest, FolderLabelKeepsWhatAFolderNameMay)
     EXPECT_EQ(f(std::string(60, 'x').c_str()), std::string(40, 'x'));
 }
 
-/* ADR-0027 §1: a vehicle's plotted signals are the numeric rows the
- * chart leaves out, read and set by name */
+/* ADR-0027 section 1: a vehicle's plotted signals are the rows ticked
+ * past the default and unticked from it, read and set by name. The
+ * mock's set ranks none, so every numeric row is its default. */
 TEST(BridgeTest, UnplottedNamesReadAndSetTheChartsRows)
 {
     SessionBridge bridge;
@@ -3262,8 +3265,8 @@ TEST(BridgeTest, UnplottedNamesReadAndSetTheChartsRows)
     QObject::connect(m, &SignalListModel::subscribedCountChanged,
                      [&countNotified]() { ++countNotified; });
     ASSERT_TRUE(bridge.connectSession(QStringLiteral("mock://demo")).isEmpty());
-    EXPECT_EQ(countNotified, 1) << "a new set's count is notified";
-    ASSERT_GE(m->rowCount(), 3);
+    EXPECT_GE(countNotified, 1) << "a new set's count is notified";
+    ASSERT_GE(m->rowCount(), 4);
     const auto name = [m](int row) {
         return m->data(m->index(row), SignalListModel::NameRole).toString();
     };
@@ -3273,21 +3276,160 @@ TEST(BridgeTest, UnplottedNamesReadAndSetTheChartsRows)
     const int all = m->subscribedCount();
     EXPECT_TRUE(m->unplottedNames().isEmpty())
         << "every numeric row starts plotted";
+    EXPECT_TRUE(m->plottedNames().isEmpty()) << "and none past its default";
 
-    m->setUnplotted({name(0), name(2), QStringLiteral("Not a signal")});
-    EXPECT_EQ(m->unplottedNames(), (QStringList{name(0), name(2)}));
-    EXPECT_EQ(m->subscribedCount(), all - 2);
+    m->setPlotChoices({name(1)},
+                      {name(0), name(2), name(1), QStringLiteral("Not a signal")});
+    EXPECT_EQ(m->unplottedNames(), (QStringList{name(0), name(1), name(2)}))
+        << "a name in both lists is unplotted";
+    EXPECT_TRUE(m->plottedNames().isEmpty());
+    EXPECT_EQ(m->subscribedCount(), all - 3);
     EXPECT_FALSE(plotted(0));
-    EXPECT_TRUE(plotted(1));
+    EXPECT_TRUE(plotted(3));
 
-    m->setUnplotted({});
+    m->setPlotChoices({}, {});
     EXPECT_TRUE(m->unplottedNames().isEmpty());
     EXPECT_EQ(m->subscribedCount(), all);
 
     m->toggleSubscribed(1);
     EXPECT_EQ(m->unplottedNames(), QStringList{name(1)})
         << "a click is read back";
+    m->toggleSubscribed(1);
+    EXPECT_TRUE(m->unplottedNames().isEmpty())
+        << "a click back to the default clears the choice";
+    EXPECT_TRUE(m->plottedNames().isEmpty()) << "rather than turning it over";
     ASSERT_TRUE(disconnectAndWait(bridge));
+}
+
+namespace {
+
+/* The names of the rows the chart plots, in set order */
+QStringList plottedRows(const SignalListModel& model)
+{
+    QStringList names;
+    for (int r = 0; r < model.rowCount(); ++r) {
+        const QModelIndex i = model.index(r);
+        if (model.data(i, SignalListModel::SubscribedRole).toBool()
+                && !model.data(i, SignalListModel::HiddenRole).toBool()) {
+            names << model.data(i, SignalListModel::NameRole).toString();
+        }
+    }
+    return names;
+}
+
+/* The test car's first two ranges with PID 0x5C clear, as its
+ * bitmaps read (docs/bench-sessions/2026-10-31-elm327-vehicle.md) */
+ecuio_channel_support_t carWithoutOilTemp()
+{
+    ecuio_channel_support_t car{};
+    car.flags = ECUIO_SUPPORT_PROBED;
+    car.rx_id = 0x7E8;
+    car.generation = 1;
+    car.ranges = 0x7;
+    const uint8_t bitmaps[12] = {0xFE, 0x7F, 0xA8, 0x13, 0xA0, 0x17,
+                                 0xF0, 0x11, 0xFE, 0xD0, 0x8C, 0x81};
+    memcpy(car.pid_bitmap, bitmaps, sizeof(bitmaps));
+    return car;
+}
+
+} // namespace
+
+/* ADR-0039 section 8: a ranked set plots the DefaultPlotted shown rows
+ * of the lowest plot_rank; a row Live hides gives its place to the
+ * next, and a rescan that shows it takes the place back */
+TEST(BridgeTest, ARankedSetPlotsTheTopRankedRowsItShows)
+{
+    SignalListModel model;
+    model.setSignalSet(ecuio_obd2_signal_set());
+    const QStringList topTen = {
+        QStringLiteral("Engine Load"),    QStringLiteral("Coolant Temp"),
+        QStringLiteral("RPM"),            QStringLiteral("Vehicle Speed"),
+        QStringLiteral("Intake Air Temp"), QStringLiteral("MAF"),
+        QStringLiteral("Engine Oil Temp"),
+        QStringLiteral("Short Term Fuel Trim B1"),
+        QStringLiteral("Long Term Fuel Trim B1"),
+        QStringLiteral("Timing Advance")};
+    EXPECT_EQ(plottedRows(model), topTen) << "ranks 1 to 10, in set order";
+    EXPECT_EQ(model.subscribedCount(), SignalListModel::DefaultPlotted);
+
+    const ecuio_channel_support_t car = carWithoutOilTemp();
+    model.applySupport(&car, 1);
+    QStringList withMap = topTen;
+    withMap.removeOne(QStringLiteral("Engine Oil Temp"));
+    withMap.insert(withMap.indexOf(QStringLiteral("Timing Advance")),
+                   QStringLiteral("Intake Manifold Pressure"));
+    EXPECT_EQ(plottedRows(model), withMap) << "rank 11 takes the hidden row's place";
+    EXPECT_EQ(model.subscribedCount(), SignalListModel::DefaultPlotted);
+
+    ecuio_channel_support_t rescan = car;
+    rescan.generation = 2;
+    rescan.pid_bitmap[(0x5C - 1) / 8] |= 0x80u >> ((0x5C - 1) % 8);
+    model.applySupport(&rescan, 1);
+    EXPECT_EQ(plottedRows(model), topTen) << "and gives it back";
+
+    /* A car with fewer ranked rows than that plots all it has */
+    ecuio_channel_support_t sparse{};
+    sparse.flags = ECUIO_SUPPORT_PROBED;
+    sparse.rx_id = 0x7E8;
+    sparse.generation = 3;
+    sparse.ranges = 0x7; /* 0x01-0x60: only RPM and speed */
+    sparse.pid_bitmap[(0x0C - 1) / 8] |= 0x80u >> ((0x0C - 1) % 8);
+    sparse.pid_bitmap[(0x0D - 1) / 8] |= 0x80u >> ((0x0D - 1) % 8);
+    model.applySupport(&sparse, 1);
+    EXPECT_EQ(plottedRows(model),
+              (QStringList{QStringLiteral("RPM"), QStringLiteral("Vehicle Speed")}));
+}
+
+/* The user's ticks and unticks outlive the defaults moving, and a click
+ * back to the default clears one */
+TEST(BridgeTest, APlotChoiceOutlivesTheDefaultsMoving)
+{
+    SignalListModel model;
+    model.setSignalSet(ecuio_obd2_signal_set());
+    const int rpm = obd2RowOf(ECUIO_OBD2_SIG_RPM_ID);
+    const int map = obd2RowOf(ECUIO_OBD2_PID_SIG_ID(0x0B, 0));
+    const int pedal = obd2RowOf(ECUIO_OBD2_PID_SIG_ID(0x49, 0));
+    ASSERT_GE(rpm, 0);
+    ASSERT_GE(map, 0);
+    ASSERT_GE(pedal, 0);
+    const auto plotted = [&model](int row) {
+        return model.data(model.index(row), SignalListModel::SubscribedRole)
+            .toBool();
+    };
+
+    model.toggleSubscribed(rpm);
+    model.toggleSubscribed(map);
+    EXPECT_FALSE(plotted(rpm));
+    EXPECT_TRUE(plotted(map));
+    EXPECT_EQ(model.unplottedNames(), QStringList{QStringLiteral("RPM")});
+    EXPECT_EQ(model.plottedNames(),
+              QStringList{QStringLiteral("Intake Manifold Pressure")});
+    EXPECT_EQ(model.subscribedCount(), SignalListModel::DefaultPlotted);
+
+    /* MAP's default turns on and RPM's stays on: neither choice moves */
+    const ecuio_channel_support_t car = carWithoutOilTemp();
+    model.applySupport(&car, 1);
+    EXPECT_FALSE(plotted(rpm)) << "an untick holds against its default";
+    EXPECT_TRUE(plotted(map));
+    EXPECT_FALSE(plotted(pedal)) << "an untick leaves its place empty";
+    EXPECT_EQ(model.subscribedCount(), SignalListModel::DefaultPlotted - 1);
+
+    model.toggleSubscribed(rpm);
+    EXPECT_TRUE(model.unplottedNames().isEmpty()) << "back to its default";
+    EXPECT_EQ(model.plottedNames(),
+              QStringList{QStringLiteral("Intake Manifold Pressure")})
+        << "with no choice of its own";
+
+    /* A vehicle's lists, applied whole: every other row to its default */
+    model.setPlotChoices({QStringLiteral("Accelerator Pedal D")}, {});
+    EXPECT_TRUE(plotted(pedal));
+    EXPECT_TRUE(plotted(map)) << "its default now, with no choice";
+    EXPECT_TRUE(model.unplottedNames().isEmpty());
+    EXPECT_EQ(model.plottedNames(),
+              QStringList{QStringLiteral("Accelerator Pedal D")});
+
+    model.setSignalSet(ecuio_obd2_signal_set());
+    EXPECT_TRUE(model.plottedNames().isEmpty()) << "a new set starts with no choices";
 }
 
 /* The identity line (ADR-0021): each answered item by name, the refused
