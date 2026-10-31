@@ -2,9 +2,12 @@
 // Testing: tests/qml/tst_diagnostics.qml (the mock's report: the MIL,
 //          each list's codes, the monitors, the freeze frame's values in
 //          either unit system, Read again, ?diagnose=0 and the empty
-//          state), which finds items by objectName; the entries
-//          themselves by test_bridge (BridgeTest.DiagnosticsEntry*); the
-//          look, manually (the run-havne skill)
+//          state; the clear's confirmation, Cancel sending nothing, a
+//          clear at the mock's stopped engine, and on Windows the fake's
+//          running engine), which finds items by objectName; the entries
+//          themselves and the clear's save by test_bridge
+//          (BridgeTest.DiagnosticsEntry*, .AClear*); the look, manually
+//          (the run-havne skill)
 
 import QtQuick
 import QtQuick.Controls
@@ -16,8 +19,9 @@ pragma ComponentBehavior: Bound
 // check-engine light, the stored, pending and permanent trouble codes,
 // the readiness monitors and the freeze frame. Bridge.diagnostics holds
 // one entry per ECU, its codes already named by core; the page formats
-// nothing but the values' decimals, as Live does. Reading only: Havne
-// has no way to clear a code.
+// nothing but the values' decimals, as Live does. Clearing the codes
+// (ADR-0038) asks first, in place: the confirmation says what a clear
+// erases, and the bridge saves the report before anything is sent.
 Page {
     id: root
     background: Rectangle { color: Theme.bg }
@@ -30,6 +34,38 @@ Page {
     readonly property bool canReadAgain: Bridge.connected &&
         ecus.some(e => e.asked && e.complete)
 
+    // The clear (ADR-0038): its confirmation open; the file the last one
+    // saved the report to; a clear that sent nothing because the report
+    // couldn't be saved
+    property bool confirming: false
+    property string savedTo: ""
+    property bool clearFailed: false
+    readonly property bool clearing: ecus.some(e => e.clearing)
+    // A clear needs what Read again does, and none under way
+    readonly property bool canClear: canReadAgain && !clearing
+
+    Connections {
+        target: Bridge
+        function onConnectedChanged() {
+            root.confirming = false
+            if (Bridge.connected) {
+                root.savedTo = ""
+                root.clearFailed = false
+            }
+        }
+    }
+
+    // The ECUs a clear goes to: each whose read has completed
+    function clearTargets() {
+        return ecus.filter(e => e.asked && e.complete).map(e => e.ecu)
+    }
+
+    function clearCodes() {
+        confirming = false
+        savedTo = Bridge.clearDiagnostics()
+        clearFailed = savedTo === ""
+    }
+
     function statusText() {
         if (Bridge.connecting) return qsTr("Connecting…")
         if (Bridge.disconnecting) return qsTr("Disconnecting…")
@@ -38,13 +74,42 @@ Page {
                                    : qsTr("Connect a session to read trouble codes")
         if (ecus.length === 0)
             return qsTr("This session asks the vehicle nothing, so it reads no codes")
-        return qsTr("Read at connect · Havne reads codes and can't clear them")
+        if (clearing)
+            return qsTr("Clearing: checking that the engine is stopped, then clearing")
+        if (clearFailed)
+            return qsTr("Nothing was cleared: the report couldn't be saved first (the Log page says why)")
+        if (savedTo !== "")
+            return qsTr("The report was saved before the clear: %1").arg(savedTo)
+        return qsTr("Read at connect · Clear codes… asks first and saves the report")
     }
 
     function ecuState(e) {
         if (!e.asked) return qsTr("Not read: diagnose=0, poll= or a profile that asks nothing")
+        if (e.clearing) return qsTr("Clearing…")
         if (!e.complete) return qsTr("Reading…")
         return qsTr("Read")
+    }
+
+    // What became of the ECU's last clear; "" when it had none
+    function clearText(e) {
+        switch (e.clear) {
+        case "cleared":
+            return qsTr("Cleared. What follows is the ECU's read after the clear")
+        case "refused":
+            return qsTr("The ECU refused the clear (%1): nothing was erased").arg(e.clearNrc)
+        case "unanswered":
+            return qsTr("No answer to the clear. What follows is the ECU's read after it")
+        case "engineRunning":
+            return qsTr("Not sent: the engine is running (%1 rpm). Stop it, leave the ignition on, and clear again").arg(e.clearRpm)
+        case "noEngineSpeed":
+            return e.clearNrc !== ""
+                ? qsTr("Not sent: the ECU didn't give its engine speed (%1)").arg(e.clearNrc)
+                : qsTr("Not sent: the ECU didn't give its engine speed")
+        case "reportChanged":
+            return qsTr("Not sent: the report changed after it was saved. Clear again to save this one")
+        default:
+            return ""
+        }
     }
 
     function milText(e) {
@@ -125,13 +190,30 @@ Page {
 
         PageHeader {
             title: qsTr("Diagnostics")
-            Item { Layout.fillWidth: true }
-            ThemedButton {
-                objectName: "readAgain"
-                visible: Bridge.connected
-                enabled: root.canReadAgain
-                text: qsTr("Read again")
-                onClicked: Bridge.readDiagnostics()
+            // The actions, right-aligned; on a phone's width they wrap
+            // under each other rather than push the page past its edge
+            Flow {
+                Layout.fillWidth: true
+                Layout.minimumWidth: Math.max(readAgain.implicitWidth, clearCodes.implicitWidth)
+                Layout.preferredWidth: readAgain.implicitWidth + spacing + clearCodes.implicitWidth
+                layoutDirection: Qt.RightToLeft
+                spacing: Theme.spacing
+                ThemedButton {
+                    id: clearCodes
+                    objectName: "clearCodes"
+                    visible: Bridge.connected
+                    enabled: root.canClear && !root.confirming
+                    text: qsTr("Clear codes…")
+                    onClicked: root.confirming = true
+                }
+                ThemedButton {
+                    id: readAgain
+                    objectName: "readAgain"
+                    visible: Bridge.connected
+                    enabled: root.canReadAgain && !root.clearing && !root.confirming
+                    text: qsTr("Read again")
+                    onClicked: Bridge.readDiagnostics()
+                }
             }
         }
 
@@ -152,6 +234,61 @@ Page {
                 highlighted: true
                 text: qsTr("Connect…")
                 onClicked: root.connectRequested()
+            }
+        }
+
+        // The clear's confirmation, in place (a Popup doesn't scale with
+        // the zoom): what a clear erases, what it keeps, what it needs
+        Rectangle {
+            objectName: "clearConfirmPanel"
+            visible: root.confirming && Bridge.connected
+            Layout.fillWidth: true
+            implicitHeight: confirmBody.implicitHeight + 2 * Theme.pageMargin
+            radius: Theme.radius
+            color: Theme.elevated
+            border.width: 1
+            border.color: Theme.warning
+
+            ColumnLayout {
+                id: confirmBody
+                anchors.fill: parent
+                anchors.margins: Theme.pageMargin
+                spacing: 10
+
+                Label {
+                    Layout.fillWidth: true
+                    wrapMode: Text.Wrap
+                    text: qsTr("Clear the trouble codes of ECU %1?").arg(root.clearTargets().join(", "))
+                    font.weight: Font.DemiBold
+                    color: Theme.text
+                }
+                Label {
+                    objectName: "clearConfirmText"
+                    Layout.fillWidth: true
+                    wrapMode: Text.Wrap
+                    color: Theme.text
+                    text: qsTr("Each ECU that obeys erases its stored and pending codes and its freeze frame, turns the check-engine light off, and sets its readiness monitors back to incomplete. Permanent codes stay: only the ECU clears them, once its monitor passes. Until the monitors complete again, which takes some driving, the car can fail an emissions inspection.") +
+                          "\n\n" +
+                          qsTr("Stop the engine and leave the ignition on: Havne asks each ECU its engine speed first and sends nothing while it turns. The report is saved to the recordings folder first; if it can't be saved, nothing is sent.")
+                }
+                Flow {
+                    Layout.fillWidth: true
+                    spacing: Theme.spacing
+                    ThemedButton {
+                        objectName: "clearConfirm"
+                        text: qsTr("Clear codes")
+                        baseColor: Theme.danger
+                        hoverColor: Qt.lighter(Theme.danger, 1.15)
+                        pressedColor: Qt.darker(Theme.danger, 1.2)
+                        enabled: root.canClear
+                        onClicked: root.clearCodes()
+                    }
+                    ThemedButton {
+                        objectName: "clearCancel"
+                        text: qsTr("Cancel")
+                        onClicked: root.confirming = false
+                    }
+                }
             }
         }
 
@@ -216,6 +353,16 @@ Page {
                 }
             }
 
+            // The last clear's outcome, above the read that followed it
+            Label {
+                objectName: "clearState"
+                visible: text !== ""
+                Layout.fillWidth: true
+                wrapMode: Text.Wrap
+                text: root.clearText(card.ecu)
+                color: card.ecu.clear === "cleared" ? Theme.success : Theme.warning
+            }
+
             ColumnLayout {
                 visible: card.ecu.asked
                 Layout.fillWidth: true
@@ -261,7 +408,9 @@ Page {
                             Layout.fillWidth: true
                             wrapMode: Text.Wrap
                             text: root.codesText(listRow.modelData)
-                            font.family: listRow.modelData.codes.length > 0 ? Theme.monoFamily : ""
+                            // An empty family is a bitmap face on Windows
+                            font.family: listRow.modelData.codes.length > 0 ? Theme.monoFamily
+                                                                            : root.font.family
                             font.pixelSize: listRow.modelData.codes.length > 0 ? 16 : 14
                             color: listRow.modelData.codes.length > 0 ? Theme.text : Theme.textDim
                         }
