@@ -122,8 +122,11 @@ gtest_discover_tests(test_socketcan)
 # test_vcan_socketcan.cpp: the SocketCAN transport on that bus
 # (ADR-0032, SocketCanBusTest); it holds the binary's new_counter.h.
 # test_vcan_requests.cpp: socketcan:// requesting through ISO-TP against
-# that ECU (ADR-0040, SocketCanRequestTest). test_vcan_isotp.cpp: core's
-# ISO-TP against the kernel's (IsoTpConformanceTest).
+# that ECU (ADR-0040, SocketCanRequestTest), and against the test car's
+# recording as the ECU, its replies broken at the ISO-TP level
+# (vcan_recording_ecu.h, ADR-0041 section 4, SocketCanFaultTest).
+# test_vcan_isotp.cpp: core's ISO-TP against the kernel's
+# (IsoTpConformanceTest).
 # RUN_SERIAL: the cases share the bus, and an error frame passes every
 # session's ID filter.
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
