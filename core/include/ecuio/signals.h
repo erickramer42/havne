@@ -65,7 +65,11 @@ typedef struct ecuio_signal_def {
     char     name[32];            /* UTF-8, terminated inside the buffer */
     char     unit[16];            /* UTF-8 (a degree sign, "km/h"), terminated */
     uint8_t  decimal_places;      /* 0..3 */
-    uint8_t  display_reserved[3]; /* zero */
+    uint8_t  plot_rank;           /* 0 = not plotted by default; else the
+                                     def's place, 1 first, among those a
+                                     UI plots when a session starts
+                                     (ADR-0039 section 8) */
+    uint8_t  display_reserved[2]; /* zero */
 
     uint32_t flags;               /* none defined; zero */
     uint32_t reserved[6];         /* zero; ADR-0016 earmarks this room */
@@ -81,6 +85,7 @@ static_assert(offsetof(ecuio_signal_def_t, start_byte) == 18, "def start_byte of
 static_assert(offsetof(ecuio_signal_def_t, byte_length) == 22, "def byte_length offset is ABI");
 static_assert(offsetof(ecuio_signal_def_t, scale) == 24, "def scale offset is ABI");
 static_assert(offsetof(ecuio_signal_def_t, name) == 40, "def name offset is ABI");
+static_assert(offsetof(ecuio_signal_def_t, plot_rank) == 89, "def plot_rank offset is ABI");
 static_assert(offsetof(ecuio_signal_def_t, flags) == 92, "def flags offset is ABI");
 static_assert(offsetof(ecuio_signal_def_t, reserved) == 96, "def reserved offset is ABI");
 #elif defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
@@ -90,6 +95,7 @@ _Static_assert(offsetof(ecuio_signal_def_t, start_byte) == 18, "def start_byte o
 _Static_assert(offsetof(ecuio_signal_def_t, byte_length) == 22, "def byte_length offset is ABI");
 _Static_assert(offsetof(ecuio_signal_def_t, scale) == 24, "def scale offset is ABI");
 _Static_assert(offsetof(ecuio_signal_def_t, name) == 40, "def name offset is ABI");
+_Static_assert(offsetof(ecuio_signal_def_t, plot_rank) == 89, "def plot_rank offset is ABI");
 _Static_assert(offsetof(ecuio_signal_def_t, flags) == 92, "def flags offset is ABI");
 _Static_assert(offsetof(ecuio_signal_def_t, reserved) == 96, "def reserved offset is ABI");
 #endif
@@ -275,7 +281,7 @@ int ecuio_validate_signal_set(const ecuio_signal_set_t* set,
 
 /* Unit systems. Values are append-only. */
 #define ECUIO_UNITS_METRIC    0u   /* as decoded */
-#define ECUIO_UNITS_IMPERIAL  1u   /* mph, degF, psi, lb/min, mi */
+#define ECUIO_UNITS_IMPERIAL  1u   /* mph, degF, psi, lb/min and more */
 
 /* ecuio_display_convert return codes. Values are append-only. */
 #define ECUIO_DISPLAY_OK              0
@@ -306,9 +312,11 @@ _Static_assert(offsetof(ecuio_display_value_t, decimal_places) == 24, "display d
 /* Converts a value in `unit` (a def's unit string) with that def's
  * decimal_places to the unit system `units`. The conversion is chosen
  * by the unit string: under ECUIO_UNITS_IMPERIAL "km/h", degrees C
- * ("\xC2\xB0" "C", UTF-8), "kPa", "g/s" and "km" become "mph",
- * degrees F, "psi" (one more decimal place), "lb/min" (one more) and
- * "mi"; any other unit, and every unit under ECUIO_UNITS_METRIC,
+ * ("\xC2\xB0" "C", UTF-8), "kPa", "g/s", "km", "Pa", "L/h" and
+ * "N\xC2\xB7m" become "mph", degrees F, "psi" (one more decimal
+ * place), "lb/min" (one more), "mi", "inH2O" (two more), "gal/h"
+ * (one more) and "lb\xC2\xB7" "ft", with at most 3 decimal places;
+ * any other unit, and every unit under ECUIO_UNITS_METRIC,
  * passes through unchanged with converted 0. *out is written only on
  * ECUIO_DISPLAY_OK. */
 int ecuio_display_convert(const char* unit, uint8_t decimal_places,

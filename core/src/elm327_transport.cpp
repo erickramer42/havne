@@ -50,7 +50,7 @@
 /* The query keys attach reads, for create's check (internal.h). */
 extern "C" const char* const ecuio_elm327_query_keys[] = {
     "baud",     "serial",   "filter",  "txid", "poll", "probe",
-    "identify", "diagnose", "profile", "did",  nullptr};
+    "identify", "diagnose", "pack",    "profile", "did", nullptr};
 
 namespace {
 
@@ -731,12 +731,14 @@ elm327_io ask(transport* t, uint32_t c, int32_t r, reply_seen& seen)
                                                        : header.io);
     }
     const ecuio_request& q = ecuio_engine_request_of(&e, c, r);
+    const bool pack = r == ECUIO_ENGINE_PACK;
     const uint8_t count =
-        elm327_response_count(q.bytes, q.len, t->tx_ids[c], t->one_frame);
+        pack ? elm327_pack_count(q.reply_len, t->tx_ids[c])
+             : elm327_response_count(q.bytes, q.len, t->tx_ids[c], t->one_frame);
     const uint8_t pid = q.bytes[1]; /* the one-shot settles in the reply */
     char cmd[ELM327_CMD_MAX];
     if (elm327_format_request(q.bytes, q.len, count, cmd, sizeof(cmd)) == 0) {
-        return unsent(elm327_io::prompt); /* never: 2 or 3 bytes */
+        return unsent(elm327_io::prompt); /* never: 1 to 7 bytes */
     }
     ecuio_engine_sent(&e, c, r, true, now_us(t));
     const elm327_io io = command(t, cmd, true, [&](const elm327_reader& line) {
@@ -762,7 +764,7 @@ elm327_io ask(transport* t, uint32_t c, int32_t r, reply_seen& seen)
         }
     });
     if (io == elm327_io::prompt && elm327_isotp_end_reply(t->isotp) > 0 &&
-        count > 0) {
+        count > 0 && !pack) {
         /* The digit ended the reply after a First Frame: the PID's reply
          * spans frames, and this one is lost to the engine's wait. From
          * now on it goes without the digit */

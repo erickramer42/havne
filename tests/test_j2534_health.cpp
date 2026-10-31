@@ -889,14 +889,15 @@ TEST_F(J2534HealthTest, VxRepliesAreSeenWithinASlice)
         << "replies landed after the next request";
 }
 
-/* PID 0x5D is one the fake's ECU doesn't support, and it answers
+/* PID 0x5F is one the fake's ECU doesn't support, and it answers
  * 7F 01 12, as the first vehicle did for 0x5C. The negative reply ends
  * the request like a positive one, so requests keep the floor's pace
  * instead of waiting out 100 ms each, and the ECU answering keeps the
  * link ok. */
 TEST_F(J2534HealthTest, NegativeReplyCompletesItsRequest)
 {
-    ASSERT_NO_FATAL_FAILURE(start_session("?profile=raw&filter=0x7E8&poll=0x5D"));
+    ASSERT_NO_FATAL_FAILURE(
+        start_session("?profile=raw&filter=0x7E8&poll=0x5F"));
     ASSERT_TRUE(wait_for_frames(3, 2000)) << "replies didn't arrive";
 
     EXPECT_GE(writes_during(page, 1000), 20u)

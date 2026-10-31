@@ -42,6 +42,11 @@ extern "C" {
 #define ECUIO_OBD2_SIG_BATTERY_V_ID    7008
 #define ECUIO_OBD2_SIG_MAF_ID          7009
 #define ECUIO_OBD2_SIG_OIL_TEMP_ID     7010
+/* Every other field of J1979's Service 01 table (ADR-0039 §4): the PID,
+ * and the field's place among the PID's fields from 0, so 11000 to
+ * 13047. The ten above keep their IDs. */
+#define ECUIO_OBD2_PID_SIG_ID(pid, field)                                      \
+    (11000u + (unsigned)(pid) * 8u + (unsigned)(field))
 /* ---- uds-generic (ADR-0020) ----
  * Its set is built per session from the URI's ?did= entries, one def
  * per DID in the order listed, with ids from this band: the first def is

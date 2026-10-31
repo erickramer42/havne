@@ -178,6 +178,12 @@ Pane {
         vehicleLabelField.text = ""
     }
 
+    // Live's ticks and unticks, the picked vehicle's from now on
+    function rememberPlotting() {
+        saveVehicles(VehicleBook.rememberPlotting(vehicles, Bridge.signalModel.plottedNames(),
+                                                  Bridge.signalModel.unplottedNames()))
+    }
+
     // The VIN settled which vehicle this is (ADR-0027 §4)
     function recognizeVehicle() {
         if (!VehicleBook.isAdapterUri(Bridge.currentUri))
@@ -190,9 +196,9 @@ Pane {
         const r = VehicleBook.recognize(doc, Bridge.vinKey(doc.salt), Bridge.currentUri)
         saveVehicles(r.doc)
         if (r.outcome === "new" && plottedApplied)
-            saveVehicles(VehicleBook.rememberUnplotted(vehicles, Bridge.signalModel.unplottedNames()))
+            rememberPlotting()
         else if (r.outcome === "switched" && plottedApplied)
-            Bridge.signalModel.setUnplotted(pickedVehicle.unplotted)
+            Bridge.signalModel.setPlotChoices(pickedVehicle.plotted, pickedVehicle.unplotted)
         Bridge.logEvent(VehicleBook.logLine(r))
     }
 
@@ -590,7 +596,8 @@ Pane {
                 // for an adapter's session only (ADR-0027 §1, §2)
                 if (VehicleBook.isAdapterUri(uri) && page.pickedVehicle !== null) {
                     page.saveVehicles(VehicleBook.rememberUri(page.vehicles, uri))
-                    Bridge.signalModel.setUnplotted(page.pickedVehicle.unplotted)
+                    Bridge.signalModel.setPlotChoices(page.pickedVehicle.plotted,
+                                                      page.pickedVehicle.unplotted)
                 }
                 page.plottedApplied = true
             }
@@ -623,8 +630,7 @@ Pane {
         function onSubscribedCountChanged() {
             if (page.plottedApplied && page.pickedVehicle !== null
                     && VehicleBook.isAdapterUri(Bridge.currentUri))
-                page.saveVehicles(VehicleBook.rememberUnplotted(
-                    page.vehicles, Bridge.signalModel.unplottedNames()))
+                page.rememberPlotting()
         }
     }
 

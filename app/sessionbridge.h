@@ -1,18 +1,22 @@
 // File/layer: app/sessionbridge.h | Qt6 Core, app layer, C++17
 // Testing: test_bridge (Qt-linked target): the frame log's ring, order
 //          and payload storage, SignalListModel's history ring and display units,
+//          its hidden rows (unsupported or absent) and LiveSignalModel
+//          (BridgeTest.LiveHides*),
 //          discoverJ2534Devices' and discoverSerialPorts' marshaling
 //          shape, recentRecordings and replayUriFor
 //          (BridgeTest.RecentRecordings*, .ReplayUriFor*), the delivery figures
 //          (BridgeTest.DeliveryText*, .DisconnectLogsTheDelivery), the
 //          vehicle's VIN key, label and plotted names (ADR-0027;
-//          BridgeTest.VinFromIdentity*, .UnplottedNames*, …)
+//          BridgeTest.VinFromIdentity*, .UnplottedNames*, …), the default
+//          plot (ADR-0039 section 8; BridgeTest.ARankedSet*, .APlotChoice*)
 
 #pragma once
 
 #include <QObject>
 #include <QString>
 #include <QAbstractListModel>
+#include <QSortFilterProxyModel>
 #include <QVariantList>
 #include <QVariantMap>
 #include <QTimer>
@@ -123,17 +127,21 @@ private:
 class SignalListModel : public QAbstractListModel
 {
     Q_OBJECT
+    // The plotted rows Live shows: hidden rows aren't counted
     Q_PROPERTY(int subscribedCount READ subscribedCount NOTIFY subscribedCountChanged)
+    // The rows whose PID their ECU marks unsupported (applySupport)
+    Q_PROPERTY(int hiddenCount READ hiddenCount NOTIFY hiddenCountChanged)
 
 public:
     explicit SignalListModel(QObject* parent = nullptr);
 
-    // Rolling history depth per signal: strip chart window. A window
-    // adds one to three samples (its lowest, highest and newest value,
-    // ADR-0005's appendix), so this is about a 12 s trace at 10 Hz.
-    // Kept constexpr so tests can assert exact ring behavior without a
-    // config surface.
-    static constexpr int HistoryCapacity = 360;
+    // Rolling history depth per signal: room for the strip chart's
+    // longest window, 120 s. A 100 ms window adds one to three samples
+    // (its lowest, highest and newest value, ADR-0005's appendix), and a
+    // signal refreshing at 20 Hz or less adds at most two, so 120 s of it
+    // fits; a faster one keeps a shorter span. Kept constexpr so tests
+    // can assert exact ring behavior without a config surface.
+    static constexpr int HistoryCapacity = 2400;
 
     // One signal's coalesce window, as the bridge's staging hands it
     // over: its newest value and its lowest and highest, each at its
@@ -155,8 +163,8 @@ public:
         ValueRole,
         SubscribedRole,
         HasValueRole,   /* false until the first sample, so QML can
-                         * show "—" instead of a fake 0 for an
-                         * unsupported PID. Notified per batch;
+                         * show "—" instead of a fake 0 for a PID
+                         * not yet answered or refused. Notified per batch;
                          * LiveView binds it. */
         AgeMsRole,      /* -1 = never arrived; else ms since the last
                          * sample, for dimming stale values. Notified
@@ -176,7 +184,12 @@ public:
                          * and low hold read them, so a peak that isn't
                          * a window's newest value still counts.
                          * Notified with ValueRole. */
-        WindowLowRole
+        WindowLowRole,
+        RowRole,        /* the row in this model, which toggleSubscribed
+                         * takes and chartData's `row` names, whatever
+                         * row a filtered view shows it at */
+        HiddenRole      /* its ECU marks its PID unsupported
+                         * (applySupport): Live leaves the row out */
     };
 
     int rowCount(const QModelIndex& parent = {}) const override;
@@ -200,6 +213,22 @@ public:
     void updateTexts(const std::vector<std::pair<uint16_t, QString>>& texts,
                      qint64 timestampMs = -1);
     int subscribedCount() const { return static_cast<int>(m_subscribedCount); }
+    int hiddenCount() const { return m_hiddenCount; }
+
+    // What the ECUs reported they support (ADR-0039 §6): a Service 01
+    // row (a two-byte key 41 <PID> at offset 0) is hidden when the
+    // report of the channel its message ID names marks its PID
+    // unsupported (pidMarkedUnsupported); every other row, and one with
+    // no such report, is shown. Each call judges every row afresh, so a
+    // rescan that finds a PID shows its row again. A new set shows all.
+    void applySupport(const ecuio_channel_support_t* reports, size_t count);
+    // The bitmap at PID 0x20 * ((pid - 1) / 0x20) was answered and its
+    // bit for pid is clear. A range never answered judges nothing.
+    static bool pidMarkedUnsupported(const ecuio_channel_support_t& s, uint8_t pid);
+    // The signals core reports its frames come without
+    // (ecuio_session_get_absent_signals): those rows are hidden too, and
+    // the rest are judged by their support alone. A new set shows all.
+    void applyAbsent(const std::vector<uint16_t>& ids);
 
     // Display units (ADR-0022): rows and history keep the decoded value;
     // value, unit, decimals and chartData() convert on the way out
@@ -208,23 +237,37 @@ public:
     uint32_t unitSystem() const { return m_units; }
     void setUnitSystem(uint32_t units);
 
+    // How many rows a ranked set plots by default (ADR-0039 section 8):
+    // the shown numeric rows with the lowest plot_rank. A set that ranks
+    // none plots every numeric row.
+    static constexpr int DefaultPlotted = 6;
+
+    // A tick or untick on Live. One that matches the row's default
+    // clears the row's choice, so the row follows its default again.
     Q_INVOKABLE void toggleSubscribed(int row);
-    // A vehicle's plotted signals (ADR-0027 §1): the names of the
-    // numeric rows the chart leaves out, and setting them, which ticks
-    // every other numeric row. Text rows are never plotted or listed.
+    // A vehicle's plotted signals (ADR-0027 section 1): the names of the
+    // numeric rows the user ticked past the default and unticked from
+    // it, and setting both, which leaves every other numeric row to its
+    // default. A name in both lists is unplotted. Text rows are never
+    // plotted or listed.
+    Q_INVOKABLE QStringList plottedNames() const;
     Q_INVOKABLE QStringList unplottedNames() const;
-    Q_INVOKABLE void setUnplotted(const QStringList& names);
+    Q_INVOKABLE void setPlotChoices(const QStringList& plotted, const QStringList& unplotted);
 
     // Strip-chart pull API: one map per SUBSCRIBED signal with non-empty
     // history: { id, row, name, unit, decimals, value,
-    // samples: [ts, val, ts, val, ...] }
+    // samples: [ts, val, ts, val, ...] }. windowMs > 0 keeps the samples
+    // of the last windowMs before the newest plotted one; columns > 0
+    // keeps, in each of that many equal slices of the window, its lowest
+    // and highest sample (the newest sample always), so a long window
+    // hands the chart at most what it can draw.
     // `row` is the signal's model row, so the trace color can match the
     // list row's swatch and stays put when other signals are unsubscribed.
     // Samples are flattened doubles, oldest-first. Called by the QML
     // Canvas once per valuesUpdated batch (~10 Hz). One call per repaint
     // instead of per-row role lookups keeps the QML side free of
     // role-number hacks.
-    Q_INVOKABLE QVariantList chartData() const;
+    Q_INVOKABLE QVariantList chartData(qint64 windowMs = 0, int columns = 0) const;
 
     /* Periodic age refresh: ageMs is computed lazily from
      * the internal clock, but dataChanged only fires on updateValues:
@@ -237,12 +280,15 @@ public:
 signals:
     void valuesUpdated();
     void subscribedCountChanged();
+    void hiddenCountChanged();
 
 private:
     struct Sample {
         qint64 timestampMs;
         double value;
     };
+
+    enum class PlotChoice : uint8_t { Default, Plotted, Unplotted };
 
     struct Entry {
         uint16_t id;
@@ -254,9 +300,19 @@ private:
         double windowLow = 0.0;
         QString text;             // a text row's latest value
         bool isText = false;      // the def's kind is TEXT or HEX
-        // Whether the strip chart plots this signal. Values and history
-        // update regardless: the Dashboard reads every row, and a signal
-        // plotted again shows the history it kept meanwhile.
+        uint32_t messageId = 0;   // the def's, which names its channel
+        uint8_t pid = 0;          // a Service 01 def's PID; 0 for any other
+        bool unsupported = false; // its ECU marks the PID unsupported
+        bool absent = false;      // core: its frames come without it
+        bool hidden = false;      // either: Live leaves the row out
+        uint8_t plotRank = 0;     // the def's plot_rank; 0 unranked
+        // The user's tick or untick; Default follows plotDefault
+        PlotChoice choice = PlotChoice::Default;
+        bool plotDefault = false; // judgePlotted's default for the row
+        // Whether the strip chart plots this signal: the choice, else the
+        // default. Values and history update regardless: the Dashboard
+        // reads every row, and a signal plotted again shows the history
+        // it kept meanwhile.
         bool subscribed = true;
         // GUI-thread-only rolling ring, written only by pushSample (from
         // updateValues and updateTexts). Fixed capacity, evict-oldest:
@@ -270,6 +326,13 @@ private:
         qint64 arrivedMs = -1;
     };
 
+    // Hidden is unsupported or absent: re-judges every row, and notifies
+    // the rows that changed, the hidden count and the plotted count
+    void rejudgeHidden();
+    // Each row's default and so its subscribed state, and the plotted
+    // count; notifies the rows that changed and the count. Run after
+    // anything that moves the defaults: a new set, hidden rows, choices.
+    void judgePlotted();
     static void pushSample(Entry& e, qint64 stamp, double value);
     static void pushWindow(Entry& e, const WindowValue& w);
     // A row's value as displayed in the current unit system
@@ -280,8 +343,24 @@ private:
     // A set's ids are unique (the validator refuses a duplicate).
     QHash<uint16_t, int> m_rowOfId;
     int m_subscribedCount = 0;
+    int m_hiddenCount = 0;
+    bool m_ranked = false;      // the set ranks a def (plot_rank)
     uint32_t m_units = ECUIO_UNITS_METRIC;
     HostElapsedTimer m_clock;   // fallback stamps; restarted in setSignalSet
+};
+
+// Live's list: SignalListModel without its hidden rows (ADR-0039 §6).
+// The Dashboard reads the whole model, so a gauge keeps its row either
+// way; a row keeps its model row (RowRole) for its plot box and color.
+class LiveSignalModel : public QSortFilterProxyModel
+{
+    Q_OBJECT
+
+public:
+    explicit LiveSignalModel(SignalListModel* source, QObject* parent = nullptr);
+
+protected:
+    bool filterAcceptsRow(int sourceRow, const QModelIndex& sourceParent) const override;
 };
 
 class SessionBridge : public QObject
@@ -300,6 +379,8 @@ class SessionBridge : public QObject
     Q_PROPERTY(int guiNotifyCount READ guiNotifyCount NOTIFY notifyCountChanged)
     Q_PROPERTY(int signalBatchCount READ signalBatchCount NOTIFY signalBatchChanged)
     Q_PROPERTY(SignalListModel* signalModel READ signalModel CONSTANT)
+    // signalModel's rows Live lists: those an ECU hasn't marked unsupported
+    Q_PROPERTY(LiveSignalModel* liveSignalModel READ liveSignalModel CONSTANT)
     Q_PROPERTY(QString currentUri READ currentUri NOTIFY currentUriChanged)
     // currentUri as the header pill and the Dashboard show it (uriLabelFor)
     Q_PROPERTY(QString uriLabel READ uriLabel NOTIFY currentUriChanged)
@@ -349,6 +430,7 @@ public:
     int guiNotifyCount() const { return m_guiNotifyCount; }
     int signalBatchCount() const { return m_signalBatchCount; }
     SignalListModel* signalModel() const { return m_signalModel; }
+    LiveSignalModel* liveSignalModel() const { return m_liveSignalModel; }
     QString currentUri() const { return m_currentUri; }
     QString uriLabel() const { return uriLabelFor(m_currentUri); }
     QString adapterVersions() const { return m_adapterVersions; }
@@ -679,6 +761,7 @@ private:
     quint64 m_valuesDropped = 0;        // this session's, past the limits
 
     SignalListModel* m_signalModel = nullptr;
+    LiveSignalModel* m_liveSignalModel = nullptr;
     int m_guiNotifyCount = 0;
 
     std::atomic<int> m_inFlightFrames{0};   // posted-but-not-yet-processed count
@@ -711,6 +794,12 @@ private:
     void pollChannelSupport();
     uint32_t m_channelCount = 0;
     uint32_t m_supportGeneration[ECUIO_SESSION_INFO_MAX_CHANNELS] = {};
+    // The signals core reports its frames come without (ADR-0039 §6):
+    // read each tick into m_absentRead (sized at connect), handed to the
+    // model when they differ from m_absentIds
+    void pollAbsentSignals();
+    std::vector<uint16_t> m_absentRead;
+    std::vector<uint16_t> m_absentIds;
     // What each channel's ECU said it is (ADR-0021), logged once complete
     void pollChannelIdentity();
     void pollReplayEnd();   // the tick: "Replay finished" once, at the end of the file

@@ -387,7 +387,8 @@ void build_negative(const unsigned char* req, unsigned char code,
  * strip lands the bridge on [41][PID][A][B]...: the obd2 set's
  * mux-at-offset-0 grammar.
  * Caller (WriteMsgs, mutex HELD) has verified: [tx_id BE][0x01][PID] or
- * [tx_id BE][0x09][item] (6 bytes), [tx_id BE][0x22][DID] or
+ * [tx_id BE][0x09][item] (6 bytes), [tx_id BE][0x01] and two to six
+ * PIDs (7 to 11 bytes), [tx_id BE][0x22][DID] or
  * [tx_id BE][0x02][PID][frame] (7 bytes), or [tx_id BE][service] for
  * Services 03, 04, 07 and 0x0A (5 bytes), and an active filter. False
  * when nothing answers. */
@@ -810,6 +811,35 @@ long __stdcall PassThruWriteMsgs(unsigned long ChannelID,
         fake_ecu::diagnostics().engine_off =
             fake_j2534::read_knob("ECUIO_FAKE_ENGINE_OFF", nb, sizeof(nb)) &&
             strtol(nb, nullptr, 0) != 0;
+        /* A packed Service 01 request answered for its first PID alone */
+        fake_ecu::pack_first_only() =
+            fake_j2534::read_knob("ECUIO_FAKE_PACK_FIRST_ONLY", nb,
+                                  sizeof(nb)) &&
+            strtol(nb, nullptr, 0) != 0;
+    }
+    {
+        /* PIDs left out of the bitmaps: hex, separated by anything
+         * else ("0A,5C") */
+        char list[128] = {};
+        uint32_t words[8] = {};
+        if (fake_j2534::read_knob("ECUIO_FAKE_WITHHELD_PIDS", list,
+                                  sizeof(list))) {
+            for (const char* s = list; *s != '\0';) {
+                char* end = nullptr;
+                const unsigned long pid = strtoul(s, &end, 16);
+                if (end == s) {
+                    ++s;
+                    continue;
+                }
+                if (pid <= 0xFF) {
+                    words[pid / 32] |= 1u << (pid % 32);
+                }
+                s = end;
+            }
+        }
+        for (unsigned i = 0; i < 8; ++i) {
+            fake_ecu::withheld_pids()[i] = words[i];
+        }
     }
 
     std::unique_lock<std::mutex> lk(fake_j2534::g_lock);
@@ -862,6 +892,7 @@ long __stdcall PassThruWriteMsgs(unsigned long ChannelID,
                                  && (n >= 4);
         const bool request =
             has_filter && ((n == 6 && (req[4] == 0x01 || req[4] == 0x09)) ||
+                           (n >= 7 && n <= 11 && req[4] == 0x01) ||
                            (n == 7 && (req[4] == 0x22 || req[4] == 0x02)) ||
                            (n == 5 && (req[4] == 0x03 || req[4] == 0x04 ||
                                        req[4] == 0x07 || req[4] == 0x0A)));

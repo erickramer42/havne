@@ -385,6 +385,14 @@ ecuio_status_t ecuio_session_get_info(
 #define ECUIO_SUPPORT_SCAN_COMPLETE      0x00000004u   /* every scanned DID was
                                                           answered, found or
                                                           refused (ADR-0020) */
+#define ECUIO_SUPPORT_PACKED             0x00000008u   /* a request carrying
+                                                          several PIDs was
+                                                          answered with several
+                                                          (ADR-0039 Appendix A) */
+#define ECUIO_SUPPORT_UNPACKED           0x00000010u   /* such requests failed
+                                                          three times in a row:
+                                                          one PID per request
+                                                          for the session */
 
 /* reason: why a request left the rotation */
 #define ECUIO_DROP_BITMAP                1u   /* its PID's bit is clear */

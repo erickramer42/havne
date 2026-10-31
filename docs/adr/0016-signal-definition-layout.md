@@ -339,3 +339,13 @@ The bridge stages text beside numbers and the signal model carries it
 as `text` and `isText`; LiveView shows a text row's text in place of a
 number and never plots it, and the recorder writes it to
 `signals.csv` ([ADR-0017](0017-session-recording.md), appendix).
+
+## Appendix: the plot rank (2026-10-31)
+
+`plot_rank` takes the first of the display block's three reserved
+bytes (offset 89), leaving `display_reserved[2]` at 90: where the
+def stands among the signals a UI plots when a session starts, 0
+unranked, 1 first ([ADR-0039](0039-full-service01-coverage.md)
+section 8). Every value is valid, so the validator no longer checks
+that byte; the layout, its size and `ECUIO_SIGNAL_SET_LAYOUT` are
+unchanged, and a set that leaves it zero ranks nothing.

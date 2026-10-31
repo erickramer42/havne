@@ -110,7 +110,9 @@ a quarter mile off launch control on a warm loop.*
   ports, adapters and CAN interfaces a URI can name; on Linux,
   `havne-cli play` puts the simulated car or a recording on a virtual
   CAN bus ([ADR-0031](docs/adr/0031-command-line-client.md)).
-- **Profiles chosen by the URI.** `obd2` polls standard PIDs,
+- **Profiles chosen by the URI.** `obd2` polls every standard
+  Service 01 reading the car has, the fast-changing ones twice as often
+  ([ADR-0039](docs/adr/0039-full-service01-coverage.md)),
   `uds-generic` polls or scans the UDS identifiers the URI names, and
   `raw` logs frames; the car's VIN and calibration IDs are read at
   connect ([ADR-0013](docs/adr/0013-protocol-profiles.md),

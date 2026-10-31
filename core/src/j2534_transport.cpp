@@ -49,7 +49,7 @@
  * every platform's, so create links where the transport is a stub. */
 extern "C" const char* const ecuio_j2534_query_keys[] = {
     "baud",     "flags",    "filter",  "txid", "poll", "probe",
-    "identify", "diagnose", "profile", "did",  nullptr};
+    "identify", "diagnose", "pack",    "profile", "did", nullptr};
 
 #ifdef _WIN32
 

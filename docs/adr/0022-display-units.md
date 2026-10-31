@@ -46,6 +46,12 @@ that spells a unit the way the built-in sets do converts with no
 table of its own; one that spells it differently passes through
 unconverted, visibly, rather than wrongly.
 
+> **Amended 2026-10-31 ([ADR-0039](0039-full-service01-coverage.md)
+> §4):** the `obd2` set's full Service 01 coverage brings three more
+> units, so imperial also turns Pa into inH2O (conventional inches of
+> water, two more decimal places), L/h into US gal/h (one more) and
+> N·m into lb·ft. The rule is unchanged: one row per unit string.
+
 ### 2. The bridge stores decoded values and converts on the way out
 
 `SignalListModel` keeps each row's decoded value and its history ring

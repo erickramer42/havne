@@ -10,7 +10,8 @@
 # down to structs that:
 #   - keep their size;
 #   - change or delete no member but one named reserved (an array that
-#     shrinks or moves, or a scalar that goes);
+#     shrinks or moves, or a scalar that goes), or one whose type change
+#     is a struct that grew this way (a pointer to it, as a set's defs);
 #   - otherwise only gain members (insertions).
 # So no field outside the reserved room moves, resizes or changes type.
 # Anything else in a changed function (an enum, a return type, a struct
@@ -33,6 +34,7 @@ STRUCT_LINE = re.compile(r"^(?:underlying )?type 'struct (\w+)' changed:$")
 EARLIER = re.compile(r"^type 'struct (\w+)' changed, as reported earlier$")
 RESERVED = r"\w*reserved\w*"
 MEMBER_TYPE_CHANGE = re.compile(rf"^type of '[^']*\b{RESERVED}(\[\d+\])?' changed:$")
+ANY_MEMBER_TYPE_CHANGE = re.compile(r"^type of '[^']*' changed:$")
 MEMBER_GONE = re.compile(rf"^'[^']*\b{RESERVED}(\[\d+\])?', at offset \d+ \(in bits\)$")
 INSERTED = re.compile(r"^'[^']*', at offset \d+ \(in bits\)$")
 ARRAY_DETAIL = re.compile(
@@ -66,7 +68,7 @@ def tree(lines):
     return root.children
 
 
-def struct_grew_into_reserved(node, why):
+def struct_grew_into_reserved(node, grown, why):
     """node: a struct-changed line; True when its change is reserved-room growth"""
     name = STRUCT_LINE.match(node.text).group(1)
     size_kept = False
@@ -87,6 +89,14 @@ def struct_grew_into_reserved(node, why):
             for c in child.children:
                 if OFFSET_TAIL.match(c.text):
                     continue  # the reserved member's own move, after its type
+                if (not MEMBER_TYPE_CHANGE.match(c.text)
+                        and ANY_MEMBER_TYPE_CHANGE.match(c.text) and c.children
+                        and all(PATH_LINE.match(d.text) for d in c.children)):
+                    # another member, its type a path to a changed struct:
+                    # it passes when that struct grew into its room
+                    if all(explained(d, grown, why) for d in c.children):
+                        continue
+                    return False
                 if not MEMBER_TYPE_CHANGE.match(c.text):
                     why.append(f"{name}: {c.text}")
                     return False
@@ -108,7 +118,7 @@ def explained(node, grown, why):
     t = node.text
     struct = STRUCT_LINE.match(t)
     if struct:
-        ok = struct_grew_into_reserved(node, why)
+        ok = struct_grew_into_reserved(node, grown, why)
         if ok:
             grown.add(struct.group(1))
         return ok
@@ -196,6 +206,34 @@ GROWN = """          type size changed from 2304 to 2336 (in bits)
           1 data member insertion:
             'uint32_t baud_hint', at offset 2080 (in bits)
 """
+# A set's pointer member to a def that grew into its room, as
+# ecuio_signal_set's defs did when plot_rank took a reserved byte
+NESTED = """Functions changes summary: 0 Removed, 1 Changed, 0 Added function
+Variables changes summary: 0 Removed, 0 Changed, 0 Added variable
+
+1 function with some indirect sub-type change:
+
+  [C] 'function ecuio_status_t ecuio_profile_register(const char*, const ecuio_signal_set_t*, ecuio_validation_t*)' has some indirect sub-type changes:
+    parameter 2 of type 'const ecuio_signal_set_t*' has sub-type changes:
+      in pointed to type 'const ecuio_signal_set_t':
+        in unqualified underlying type 'typedef ecuio_signal_set_t':
+          underlying type 'struct ecuio_signal_set' changed:
+            type size hasn't changed
+            1 data member change:
+              type of 'const ecuio_signal_def_t* defs' changed:
+                in pointed to type 'const ecuio_signal_def_t':
+                  in unqualified underlying type 'typedef ecuio_signal_def_t':
+                    underlying type 'struct ecuio_signal_def' changed:
+                      type size hasn't changed
+                      1 data member insertion:
+                        'uint8_t plot_rank', at offset 712 (in bits)
+                      1 data member change:
+                        type of 'uint8_t display_reserved[3]' changed:
+                          type name changed from 'uint8_t[3]' to 'uint8_t[2]'
+                          array type size changed from 24 to 16
+                          array type subrange 1 changed length from 3 to 2
+                        and offset changed from 712 to 720 (in bits) (by +8 bits)
+"""
 SCALAR = """          type size hasn't changed
           1 data member deletion:
             'uint32_t reserved', at offset 32896 (in bits)
@@ -208,6 +246,16 @@ def selftest():
     cases = [
         ("growth into reserved[] passes", HEAD + ROOM, True),
         ("a reserved scalar replaced passes", HEAD + SCALAR, True),
+        ("a pointer member to a struct grown into its room passes", NESTED, True),
+        ("a pointer member to a struct that grew fails", NESTED.replace(
+            "                      type size hasn't changed\n",
+            "                      type size changed from 960 to 968 (in bits)\n"), False),
+        ("a pointer member retyped fails", NESTED.replace(
+            "                in pointed to type 'const ecuio_signal_def_t':\n"
+            "                  in unqualified underlying type 'typedef ecuio_signal_def_t':\n",
+            "                in pointed to type 'const ecuio_signal_def_t':\n"
+            "                  typedef name changed from ecuio_signal_def_t to ecuio_other_t\n"
+            "                  in unqualified underlying type 'typedef ecuio_signal_def_t':\n"), False),
         ("fields swapped beside the growth fail", HEAD + SWAP, False),
         ("a field split before the room fails", HEAD + SPLIT, False),
         ("a struct that grew fails", HEAD + GROWN, False),

@@ -102,6 +102,14 @@ Passive mode is unchanged.
   through the same correlation and pacing, and its outcome goes back
   to whoever asked. The rotation resumes after them.
 
+> **Amended 2026-10-30 ([ADR-0039](0039-full-service01-coverage.md)):**
+> the rotation runs two rate classes on each channel, two fast
+> requests to one slow, each class in set order; a class with nothing
+> to ask gives its turns to the other, so a set of one class rotates as
+> above. A Service 01 request may carry up to six PIDs, and its
+> positive reply matches when its first record's PID is one the
+> request asked; the reply is decoded record by record in core.
+
 ### 2. Requests are derived from the definitions, not from profile code
 
 A def's mux key, extended to at most 3 bytes, describes the reply that
@@ -356,6 +364,13 @@ replies correlated with requests:
 **Still open:** the floor's value; the refresh policy once a set grows
 (rate classes, or a curated set beside a full one); several PIDs per
 Service 01 request; decoding on the worker thread.
+
+> **Amended 2026-10-30 ([ADR-0039](0039-full-service01-coverage.md)):**
+> the refresh policy is two rate classes in the engine, in one `obd2`
+> set, and several PIDs per Service 01 request is decided there
+> (its Appendix A). Decoding on the worker is
+> [ADR-0024](0024-decode-on-the-worker.md). The floor stays open until
+> v0.3.5's benchmark measures where a request's time goes.
 
 ## Appendix: the probe as built (2026-10-23)
 

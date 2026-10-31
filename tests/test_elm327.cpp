@@ -711,6 +711,29 @@ TEST(Elm327ProtocolTest, RequestsCarryTheCountDigitOnlyWhereOneReplyIsCertain)
     EXPECT_EQ(elm327_format_request(rpm, 2, 1, out, 7), 6u);
 }
 
+/* A pack's digit (ADR-0039 Appendix A) is the frames its reply carries:
+ * one Single Frame up to 7 bytes, then a First Frame's 6 and 7 a
+ * Consecutive Frame; none to a functional ID, for an unknown length or
+ * past 15 frames; and the command holds six PIDs */
+TEST(Elm327ProtocolTest, APacksCountDigitIsItsReplysFrames)
+{
+    EXPECT_EQ(elm327_pack_count(5, 0x7E0), 1u) << "41 0D xx 05 xx";
+    EXPECT_EQ(elm327_pack_count(7, 0x7E0), 1u);
+    EXPECT_EQ(elm327_pack_count(8, 0x7E0), 2u) << "a First Frame and one more";
+    EXPECT_EQ(elm327_pack_count(13, 0x7E0), 2u);
+    EXPECT_EQ(elm327_pack_count(14, 0x7E0), 3u);
+    EXPECT_EQ(elm327_pack_count(104, 0x18DA10F1), 15u);
+    EXPECT_EQ(elm327_pack_count(105, 0x7E0), 0u) << "past one digit";
+    EXPECT_EQ(elm327_pack_count(0, 0x7E0), 0u);
+    EXPECT_EQ(elm327_pack_count(8, 0x7DF), 0u) << "functional";
+    EXPECT_EQ(elm327_pack_count(8, 0x18DB33F1), 0u) << "functional";
+
+    const uint8_t six[7] = {0x01, 0x04, 0x05, 0x0C, 0x0D, 0x0F, 0x10};
+    char out[24];
+    EXPECT_EQ(elm327_format_request(six, 7, 3, out, sizeof out), 16u);
+    EXPECT_STREQ(out, "0104050C0D0F103\r");
+}
+
 TEST(Elm327ProtocolTest, HeadersAndReceiveFiltersFollowTheMode)
 {
     char cmd[2][24];

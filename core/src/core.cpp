@@ -5,7 +5,9 @@
 //          list length, the list as it stood, no allocation up to
 //          four), the decoded values (CoreTest.Values*: the batch
 //          against direct decodes, a text slot each, the frame
-//          callbacks first), the error strings, a clear's refusals
+//          callbacks first), the absent signals
+//          (CoreTest.AFieldPastEveryReplyIsAbsent), a packed reply's
+//          records (CoreTest.APacked*), the error strings, a clear's refusals
 //          (CoreTest.AClearNeedsTheReportTheCallerSaved); the trouble code's and
 //          the monitors' names (DiagnosticsTest, test_obd2);
 //          HARNESS: the J2534 suites and Elm327SessionTest through
@@ -20,6 +22,7 @@
 #include "uds_generic.h"
 #include "request_engine.h"   /* ECUIO_IDENT_REQUESTS, for the names */
 #include "diagnostics.h"      /* the trouble codes' and monitors' words */
+#include "obd2_reply.h"      /* a packed Service 01 reply's records */
 #include "uri_query.h"
 #include "error_detail.h"
 #include "probes.h"
@@ -227,24 +230,43 @@ namespace {
         }
     }
 
-    /* Decodes frame against the session's set into its buffers
-     * (ADR-0024 §4): the number of values, in the set's order. Each
-     * text value takes the next slot, from the first again each frame;
-     * create gave the session a slot for every text value a frame can
-     * decode to. */
-    uint32_t decode_values(ecuio_session_t* session,
-                           const ecuio_frame_t* frame)
+    /* ADR-0039 §6: def i's decode of a frame its key matched, for
+     * ecuio_session_get_absent_signals: carried, or one more frame too
+     * short for it (saturating at the threshold). Other failures say
+     * nothing about the reply's length. */
+    void note_decode(ecuio_session_t* session, uint32_t i, int rc)
     {
-        const ecuio_signal_set_t* set = session->active_signal_set;
-        if (set == nullptr || set->defs == nullptr ||
-            session->values.size() < set->count) {
-            return 0;
+        if (!session->carried) {
+            return;
         }
-        const uint16_t len = (frame->data_length <= sizeof(frame->data))
-                                 ? frame->data_length
-                                 : static_cast<uint16_t>(sizeof(frame->data));
-        uint32_t n = 0;
-        uint32_t slot = 0;
+        if (rc == ECUIO_DECODE_OK) {
+            if (session->carried[i].load(std::memory_order_relaxed) == 0) {
+                session->carried[i].store(1, std::memory_order_relaxed);
+            }
+        } else if (rc == ECUIO_DECODE_ERR_PAST_PAYLOAD) {
+            const uint8_t n =
+                session->short_frames[i].load(std::memory_order_relaxed);
+            if (n < ECUIO_ABSENT_AFTER_FRAMES) {
+                session->short_frames[i].store(static_cast<uint8_t>(n + 1),
+                                               std::memory_order_relaxed);
+            }
+        }
+    }
+
+    /* A Service 01 reply's key: 41 <PID>, at the payload's start */
+    bool service01_keyed(const ecuio_signal_def_t& def)
+    {
+        return def.mux_offset == 0 && def.mux_length == 2 &&
+               (def.mux_key >> 8) == 0x41u;
+    }
+
+    /* Decodes frame (len bytes of it) against set into the session's
+     * buffers from value n and text slot slot on, each def in the set's
+     * order */
+    void decode_frame(ecuio_session_t* session, const ecuio_signal_set_t* set,
+                      const ecuio_frame_t* frame, uint16_t len, uint32_t& n,
+                      uint32_t& slot)
+    {
         for (uint32_t i = 0; i < set->count; ++i) {
             const ecuio_signal_def_t& def = set->defs[i];
             if (!ecuio_def_applies_to_frame(&def, frame)) {
@@ -259,19 +281,77 @@ namespace {
                 }
                 char* out = session->text_scratch.data() +
                             size_t{slot} * ECUIO_DECODE_TEXT_MAX;
-                if (ecuio_decode_text(&def, frame->data, len, out,
-                                      ECUIO_DECODE_TEXT_MAX) != ECUIO_DECODE_OK) {
+                const int rc = ecuio_decode_text(&def, frame->data, len, out,
+                                                 ECUIO_DECODE_TEXT_MAX);
+                note_decode(session, i, rc);
+                if (rc != ECUIO_DECODE_OK) {
                     continue;
                 }
                 v.text = out;
                 v.text_len = static_cast<uint32_t>(strlen(out));
                 ++slot;
-            } else if (ecuio_decode_signal(&def, frame->data, len, &v.value) !=
-                       ECUIO_DECODE_OK) {
-                continue;
+            } else {
+                const int rc =
+                    ecuio_decode_signal(&def, frame->data, len, &v.value);
+                note_decode(session, i, rc);
+                if (rc != ECUIO_DECODE_OK) {
+                    continue;
+                }
             }
             session->values[n++] = v;
         }
+    }
+
+    /* Decodes frame against the session's set into its buffers
+     * (ADR-0024 section 4): the number of values, in the set's order, or for a
+     * packed Service 01 reply record by record (ADR-0039 Appendix A),
+     * each record a frame of its own in record_frame, so each def
+     * decodes at most once. Each text value takes the next slot, from
+     * the first again each frame; create gave the session a slot for
+     * every text value a frame can decode to. */
+    uint32_t decode_values(ecuio_session_t* session,
+                           const ecuio_frame_t* frame)
+    {
+        const ecuio_signal_set_t* set = session->active_signal_set;
+        if (set == nullptr || set->defs == nullptr ||
+            session->values.size() < set->count) {
+            return 0;
+        }
+        const uint16_t len = (frame->data_length <= sizeof(frame->data))
+                                 ? frame->data_length
+                                 : static_cast<uint16_t>(sizeof(frame->data));
+        uint32_t n = 0;
+        uint32_t slot = 0;
+        const std::vector<uint32_t>& ids = session->service01_ids;
+        if (session->record_frame &&
+            (frame->flags & ECUIO_FRAME_FLAG_ERROR) == 0 &&
+            std::find(ids.begin(), ids.end(), frame->arbitration_id) !=
+                ids.end()) {
+            ecuio_obd2_record records[ECUIO_OBD2_MAX_RECORDS];
+            uint32_t count = 0;
+            const ecuio_obd2_reply reply =
+                ecuio_obd2_split(frame->data, len, session->learned_lengths,
+                                 records, &count);
+            if (reply == ecuio_obd2_reply::split) {
+                ecuio_frame_t& r = *session->record_frame;
+                r.arbitration_id = frame->arbitration_id;
+                r.flags = frame->flags;
+                r.timestamp_us = frame->timestamp_us;
+                r.data[0] = 0x41u;
+                for (uint32_t k = 0; k < count; ++k) {
+                    r.data[1] = records[k].pid;
+                    memcpy(r.data + 2, frame->data + records[k].start,
+                           records[k].bytes);
+                    r.data_length = static_cast<uint16_t>(2 + records[k].bytes);
+                    decode_frame(session, set, &r, r.data_length, n, slot);
+                }
+                return n;
+            }
+            if (reply == ecuio_obd2_reply::unsplit) {
+                session->unsplit_replies.fetch_add(1, std::memory_order_relaxed);
+            }
+        }
+        decode_frame(session, set, frame, len, n, slot);
         return n;
     }
 } // namespace
@@ -375,6 +455,45 @@ ecuio_status_t ecuio_session_get_channel_support(
         return ECUIO_ERR_INVALID_ARGUMENT;
     }
     *out_support = session->support[channel];
+    return ECUIO_OK;
+}
+
+ecuio_status_t ecuio_session_get_absent_signals(
+    const ecuio_session_t* session,
+    uint16_t* ids,
+    uint32_t capacity,
+    uint32_t* count)
+{
+    if (session == nullptr || count == nullptr ||
+        (ids == nullptr && capacity > 0)) {
+        return ECUIO_ERR_NULL_ARGUMENT;
+    }
+    *count = 0;
+    const ecuio_signal_set_t* set = session->active_signal_set;
+    if (set == nullptr || set->defs == nullptr || !session->carried) {
+        return ECUIO_OK;
+    }
+    const uint32_t defs = static_cast<uint32_t>(session->values.size());
+    for (uint32_t i = 0; i < defs; ++i) {
+        if (session->carried[i].load(std::memory_order_relaxed) == 0 &&
+            session->short_frames[i].load(std::memory_order_relaxed) >=
+                ECUIO_ABSENT_AFTER_FRAMES) {
+            if (*count < capacity) {
+                ids[*count] = set->defs[i].id;
+            }
+            ++*count;
+        }
+    }
+    return ECUIO_OK;
+}
+
+ecuio_status_t ecuio_session_get_unsplit_replies(const ecuio_session_t* session,
+                                                uint64_t* count)
+{
+    if (session == nullptr || count == nullptr) {
+        return ECUIO_ERR_NULL_ARGUMENT;
+    }
+    *count = session->unsplit_replies.load(std::memory_order_relaxed);
     return ECUIO_OK;
 }
 
@@ -688,9 +807,23 @@ ecuio_status_t ecuio_session_create(
         profile_set->count > 0) {
         try {
             s->values.resize(profile_set->count);
+            s->short_frames.reset(
+                new std::atomic<uint8_t>[profile_set->count]());
+            s->carried.reset(new std::atomic<uint8_t>[profile_set->count]());
             s->text_slots = text_slots_for(profile_set);
             s->text_scratch.resize(size_t{s->text_slots} *
                                    ECUIO_DECODE_TEXT_MAX);
+            for (uint32_t i = 0; i < profile_set->count; ++i) {
+                const ecuio_signal_def_t& d = profile_set->defs[i];
+                if (service01_keyed(d) &&
+                    std::find(s->service01_ids.begin(), s->service01_ids.end(),
+                              d.message_id) == s->service01_ids.end()) {
+                    s->service01_ids.push_back(d.message_id);
+                }
+            }
+            if (!s->service01_ids.empty()) {
+                s->record_frame.reset(new ecuio_frame_t{});
+            }
         } catch (...) {
             return ECUIO_ERR_OUT_OF_MEMORY;
         }

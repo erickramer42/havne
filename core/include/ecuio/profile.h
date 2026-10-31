@@ -1,6 +1,7 @@
 // File/layer: core/include/ecuio/profile.h | C ABI, public
 // Testing: UNIT (registry lookup/overwrite); session-level selection and
-//          the decoded values (CoreTest.Values*) in test_core; the value
+//          the decoded values (CoreTest.Values*) and the absent signals
+//          (CoreTest.AFieldPastEveryReplyIsAbsent) in test_core; the value
 //          layouts in c_abi; BRIDGE (BridgeTest.BothDecodePathsAgreeOverTheFixture)
 
 #ifndef ECUIO_PROFILE_H
@@ -171,6 +172,46 @@ ecuio_status_t ecuio_unregister_values_callback(
     ecuio_session_t* session,
     ecuio_values_callback_t callback,
     void* user_data
+);
+
+/*
+ * The signals the session's frames name but don't carry (ADR-0039 §6):
+ * a def whose key matched ECUIO_ABSENT_AFTER_FRAMES or more frames, each
+ * ending before its field (ECUIO_DECODE_ERR_PAST_PAYLOAD), while none
+ * carried it, as an ECU that answers PID 55 with bank 1's byte alone.
+ * A signal that arrives later leaves the list. Judged from the frames
+ * decoded for a values callback, so while none is registered nothing
+ * is judged.
+ *
+ * Fills ids with up to capacity signal ids, in the set's order, and
+ * *count with how many there are; capacity 0 (ids may be NULL) asks
+ * the count. ECUIO_OK; ECUIO_ERR_NULL_ARGUMENT for a NULL session or
+ * count, or NULL ids with a capacity. Readable after close.
+ */
+#define ECUIO_ABSENT_AFTER_FRAMES 3u
+
+ecuio_status_t ecuio_session_get_absent_signals(
+    const ecuio_session_t* session,
+    uint16_t* ids,
+    uint32_t capacity,
+    uint32_t* count
+);
+
+/*
+ * Service 01 replies that carried more than their first PID's record
+ * but wouldn't split into records (ADR-0039 Appendix A): a PID of no
+ * known length, one twice, or records that don't end at the reply's
+ * end. Each decoded its first record alone. Core splits a reply that
+ * carries several PIDs (01 0C 0D ...) record by record, using J1979's
+ * length for each PID, or the shorter one the ECU's single replies
+ * show. Counted from the frames decoded for a values callback.
+ *
+ * ECUIO_OK; ECUIO_ERR_NULL_ARGUMENT for a NULL session or count.
+ * Readable after close.
+ */
+ecuio_status_t ecuio_session_get_unsplit_replies(
+    const ecuio_session_t* session,
+    uint64_t* count
 );
 
 #ifdef __cplusplus

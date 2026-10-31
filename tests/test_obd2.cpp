@@ -20,6 +20,8 @@
 #include "ecuio/signal_sets.h"
 #include "../core/src/request_engine.h"
 #include "../core/src/diagnostics.h"
+#include "../core/src/obd2_rates.h"
+#include "../core/src/obd2_reply.h"
 #include "../core/src/uds_generic.h"
 #include "../core/src/uri_query.h"
 #include "ecuio/core.h"
@@ -34,6 +36,7 @@
 #include <functional>
 #include <initializer_list>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace {
@@ -72,17 +75,67 @@ TEST(Obd2SetTest, SetIsValidAndComplete) {
     const ecuio_signal_set_t* set = ecuio_obd2_signal_set();
     ASSERT_NE(set, nullptr);
     EXPECT_EQ(ecuio_validate_signal_set(set, nullptr), ECUIO_VALIDATE_OK);
-    EXPECT_EQ(set->count, 10u);
+    EXPECT_EQ(set->count, 130u) << "every linear field of J1979's table";
 }
 
-TEST(Obd2SetTest, PidBandDistinctFromMockIds) {
-    /* Guards the 7000-band choice against accidental reuse if the mock
-     * set ever grows. Cheap pin, drift-proof. */
+/* The ten keep 7001-7010, first and in their order; every other def's
+ * ID is ECUIO_OBD2_PID_SIG_ID of its PID and its place among the PID's
+ * fields (ADR-0039 §4), clear of the mock's band and uds-generic's. */
+TEST(Obd2SetTest, IdsFollowTheRule)
+{
     const ecuio_signal_set_t* obd2 = ecuio_obd2_signal_set();
+    const uint16_t ten[] = {
+        ECUIO_OBD2_SIG_ENGINE_LOAD_ID, ECUIO_OBD2_SIG_COOLANT_TEMP_ID,
+        ECUIO_OBD2_SIG_RPM_ID,         ECUIO_OBD2_SIG_SPEED_ID,
+        ECUIO_OBD2_SIG_IAT_ID,         ECUIO_OBD2_SIG_THROTTLE_ID,
+        ECUIO_OBD2_SIG_FUEL_LEVEL_ID,  ECUIO_OBD2_SIG_BATTERY_V_ID,
+        ECUIO_OBD2_SIG_MAF_ID,         ECUIO_OBD2_SIG_OIL_TEMP_ID};
+    ASSERT_GE(obd2->count, 10u);
+    for (uint32_t i = 0; i < 10; ++i) {
+        EXPECT_EQ(obd2->defs[i].id, ten[i]) << i;
+    }
+    unsigned last_pid = 0, field = 0;
+    for (uint32_t i = 10; i < obd2->count; ++i) {
+        const ecuio_signal_def_t& d = obd2->defs[i];
+        SCOPED_TRACE(d.name);
+        const unsigned pid = d.mux_key & 0xFFu;
+        ASSERT_GE(pid, last_pid) << "the rest in PID order";
+        field = (pid == last_pid) ? field + 1 : 0;
+        last_pid = pid;
+        EXPECT_EQ(d.id, ECUIO_OBD2_PID_SIG_ID(pid, field));
+        EXPECT_GE(d.id, 11000u);
+        EXPECT_LT(d.id, ECUIO_UDS_GENERIC_SIG_ID_BASE);
+    }
+}
+
+/* ADR-0039 section 8: the signals a UI plots when a session starts,
+ * ranked 1 up with no gaps or repeats, the five engine-state ones
+ * first; every other def unranked */
+TEST(Obd2SetTest, RanksTheSignalsAUiPlotsFirst)
+{
+    const ecuio_signal_set_t* obd2 = ecuio_obd2_signal_set();
+    const uint16_t order[] = {
+        ECUIO_OBD2_SIG_RPM_ID,          ECUIO_OBD2_SIG_COOLANT_TEMP_ID,
+        ECUIO_OBD2_SIG_IAT_ID,          ECUIO_OBD2_SIG_MAF_ID,
+        ECUIO_OBD2_SIG_OIL_TEMP_ID,     ECUIO_OBD2_SIG_SPEED_ID,
+        ECUIO_OBD2_SIG_ENGINE_LOAD_ID,  ECUIO_OBD2_PID_SIG_ID(0x0E, 0),
+        ECUIO_OBD2_PID_SIG_ID(0x06, 0), ECUIO_OBD2_PID_SIG_ID(0x07, 0),
+        ECUIO_OBD2_PID_SIG_ID(0x0B, 0), ECUIO_OBD2_SIG_BATTERY_V_ID,
+        ECUIO_OBD2_PID_SIG_ID(0x49, 0), ECUIO_OBD2_PID_SIG_ID(0x44, 0)};
+    for (size_t r = 0; r < sizeof order / sizeof order[0]; ++r) {
+        const ecuio_signal_def_t* d = find_def(obd2, order[r]);
+        ASSERT_NE(d, nullptr) << order[r];
+        EXPECT_EQ(d->plot_rank, r + 1) << d->name;
+    }
+    uint32_t ranked = 0;
     for (uint32_t i = 0; i < obd2->count; ++i) {
-        const uint16_t id = obd2->defs[i].id;
-        EXPECT_GE(id, 7001u);
-        EXPECT_LE(id, 7010u);
+        ranked += obd2->defs[i].plot_rank != 0 ? 1u : 0u;
+    }
+    EXPECT_EQ(ranked, sizeof order / sizeof order[0]) << "the rest unranked";
+
+    const ecuio_signal_set_t* mock = ecuio_mock_signal_set();
+    for (uint32_t i = 0; i < mock->count; ++i) {
+        EXPECT_EQ(mock->defs[i].plot_rank, 0u) << "the mock ranks none: a UI plots all";
     }
 }
 
@@ -347,14 +400,21 @@ TEST(RequestEngineTest, Obd2SetEnrolsItsPidsInDefOrder) {
     ecuio_engine_init(&e, 1);
     ASSERT_TRUE(ecuio_engine_derive(&e, ecuio_obd2_signal_set(), &rx, 1,
                                     nullptr));
-    const uint8_t expect[] = {0x04, 0x05, 0x0C, 0x0D,
-                              0x0F, 0x11, 0x2F, 0x42, 0x10, 0x5C};
-    ASSERT_EQ(e.count, sizeof(expect));
+    /* The ten first, then each other PID once, in PID order: a PID with
+     * several fields costs one request */
+    const uint8_t ten[] = {0x04, 0x05, 0x0C, 0x0D, 0x0F,
+                           0x11, 0x2F, 0x42, 0x10, 0x5C};
+    ASSERT_EQ(e.count, 92u) << "J1979's linear PIDs";
     for (uint32_t i = 0; i < e.count; ++i) {
         EXPECT_EQ(e.requests[i].len, 2u) << "index " << i;
         EXPECT_EQ(e.requests[i].bytes[0], 0x01u) << "index " << i;
-        EXPECT_EQ(e.requests[i].bytes[1], expect[i]) << "index " << i;
         EXPECT_EQ(e.requests[i].channel, 0u) << "index " << i;
+        if (i < sizeof(ten)) {
+            EXPECT_EQ(e.requests[i].bytes[1], ten[i]) << "index " << i;
+        } else if (i > sizeof(ten)) {
+            EXPECT_GT(e.requests[i].bytes[1], e.requests[i - 1].bytes[1])
+                << "index " << i;
+        }
     }
 }
 
@@ -593,6 +653,116 @@ TEST(RequestEngineTest, NextEventIsTheNearestAcrossChannels) {
         << "channel 1 due";
 }
 
+/* ---------- rate classes (ADR-0039 §3) ---------- */
+
+namespace {
+
+/* The PIDs channel 0 sends over n turns, each request waiting out its
+ * wait (no reply needed to move the rotation on). */
+std::vector<uint8_t> rotation_of(ecuio_request_engine* e, int n)
+{
+    std::vector<uint8_t> sent;
+    int64_t now = 0;
+    for (int k = 0; k < n; ++k) {
+        const int32_t r = ecuio_engine_due(e, 0, now);
+        if (r < 0) {
+            break;
+        }
+        sent.push_back(e->requests[r].bytes[1]);
+        ecuio_engine_sent(e, 0, r, true, now);
+        now += ECUIO_ENGINE_WAIT_US;
+        (void)ecuio_engine_expire(e, 0, now);
+    }
+    return sent;
+}
+
+} // namespace
+
+/* The obd2 set's requests take the classes obd2_rates.h gives their
+ * PIDs, and the rotation sends two fast ones for each slow one: the
+ * first turns by hand, then over three times the fast class's length,
+ * every third request slow, each class in set order and wrapping on
+ * its own. */
+TEST(RequestEngineTest, TheObd2SetRunsTwoFastRequestsToOneSlow)
+{
+    ecuio_request_engine e;
+    ecuio_engine_init(&e, 1);
+    const uint32_t rx = ECUIO_OBD2_ECU_ARB_ID;
+    ASSERT_TRUE(
+        ecuio_engine_derive(&e, ecuio_obd2_signal_set(), &rx, 1, nullptr));
+    ecuio_engine_classify(&e, ecuio_obd2_pid_fast);
+    for (uint32_t i = 0; i < e.count; ++i) {
+        EXPECT_EQ(e.requests[i].slow != 0,
+                  !ecuio_obd2_pid_fast(e.requests[i].bytes[1]))
+            << "PID " << int(e.requests[i].bytes[1]);
+    }
+    const std::vector<uint8_t> first = {0x04, 0x0C, 0x05, 0x0D, 0x11, 0x0F,
+                                        0x10, 0x06, 0x2F, 0x08, 0x0A, 0x42};
+    std::vector<uint8_t> fast, slow;
+    for (uint32_t i = 0; i < e.count; ++i) {
+        (e.requests[i].slow ? slow : fast).push_back(e.requests[i].bytes[1]);
+    }
+    ASSERT_FALSE(fast.empty());
+    ASSERT_FALSE(slow.empty());
+    const std::vector<uint8_t> sent =
+        rotation_of(&e, static_cast<int>(3 * fast.size()));
+    ASSERT_EQ(sent.size(), 3 * fast.size());
+    EXPECT_EQ(std::vector<uint8_t>(sent.begin(), sent.begin() + 12), first);
+    size_t f = 0, s = 0;
+    for (size_t k = 0; k < sent.size(); ++k) {
+        if (k % 3 == 2) {
+            EXPECT_EQ(sent[k], slow[s++ % slow.size()]) << "turn " << k;
+        } else {
+            EXPECT_EQ(sent[k], fast[f++ % fast.size()]) << "turn " << k;
+        }
+    }
+}
+
+/* A class with nothing to send gives its turns to the other: a table of
+ * one class, or one whose other class was dropped, rotates in table
+ * order. A table never classified is all fast. */
+TEST(RequestEngineTest, AClassWithNothingToSendGivesItsTurnsToTheOther)
+{
+    ecuio_request_engine e;
+    ASSERT_NO_FATAL_FAILURE(one_channel_of(&e, {0x05, 0x0F, 0x42}));
+    ecuio_engine_classify(&e, ecuio_obd2_pid_fast);
+    EXPECT_EQ(rotation_of(&e, 7),
+              (std::vector<uint8_t>{0x05, 0x0F, 0x42, 0x05, 0x0F, 0x42, 0x05}))
+        << "slow alone";
+
+    ASSERT_NO_FATAL_FAILURE(one_channel_of(&e, {0x04, 0x0C, 0x0D}));
+    ecuio_engine_classify(&e, ecuio_obd2_pid_fast);
+    EXPECT_EQ(rotation_of(&e, 7),
+              (std::vector<uint8_t>{0x04, 0x0C, 0x0D, 0x04, 0x0C, 0x0D, 0x04}))
+        << "fast alone";
+
+    ASSERT_NO_FATAL_FAILURE(one_channel_of(&e, {0x04, 0x05, 0x0C}));
+    ecuio_engine_classify(&e, ecuio_obd2_pid_fast);
+    e.requests[1].dropped = ECUIO_DROP_BITMAP;
+    EXPECT_EQ(rotation_of(&e, 5),
+              (std::vector<uint8_t>{0x04, 0x0C, 0x04, 0x0C, 0x04}))
+        << "the slow class dropped";
+
+    ASSERT_NO_FATAL_FAILURE(one_channel_of(&e, {0x05, 0x04}));
+    EXPECT_EQ(rotation_of(&e, 4),
+              (std::vector<uint8_t>{0x05, 0x04, 0x05, 0x04}))
+        << "never classified";
+}
+
+/* Only Service 01 requests take a class: a DID stays fast whatever the
+ * predicate says of its high byte. */
+TEST(RequestEngineTest, OnlyServiceOneRequestsAreClassified)
+{
+    ecuio_request_engine e;
+    ecuio_engine_init(&e, 1);
+    const uint8_t did[3] = {0x22, 0x05, 0x01}, pid[2] = {0x01, 0x05};
+    ASSERT_EQ(ecuio_engine_add(&e, 0, did, 3), ecuio_engine_add_result::added);
+    ASSERT_EQ(ecuio_engine_add(&e, 0, pid, 2), ecuio_engine_add_result::added);
+    ecuio_engine_classify(&e, ecuio_obd2_pid_fast);
+    EXPECT_EQ(e.requests[0].slow, 0u);
+    EXPECT_EQ(e.requests[1].slow, 1u);
+}
+
 /* ---------- the probe (ADR-0015 §4) ---------- */
 
 namespace {
@@ -708,10 +878,11 @@ TEST(RequestEngineTest, ProbeWalksTheBitmapsBeforeTheRotation) {
 }
 
 /* The first vehicle's own bitmaps (docs/bench-sessions/2026-10-22-vehicle.md),
- * read off the bytes by J1979's layout there: of the obd2 set, every PID
- * is supported but 0x5C, so the walk drops exactly that one. The 0x40
+ * read off the bytes by J1979's layout there: of the obd2 set's first
+ * ten, every PID is supported but 0x5C, so the walk drops only that one
+ * of them, and of the rest exactly those the bitmaps leave out. The 0x40
  * bitmap's last bit says a fourth exists; it's left unanswered here, so
- * PIDs past 0x60 would stay. */
+ * PIDs past 0x60 stay. */
 TEST(RequestEngineTest, TheFirstVehiclesBitmapsDropOnly0x5C) {
     const uint32_t rx = ECUIO_OBD2_ECU_ARB_ID;
     ecuio_request_engine e;
@@ -733,12 +904,104 @@ TEST(RequestEngineTest, TheFirstVehiclesBitmapsDropOnly0x5C) {
     ASSERT_NO_FATAL_FAILURE(send_bitmap_request(&e, 0, 0x60, now));
     EXPECT_TRUE(ecuio_engine_expire(&e, 0, now + ECUIO_ENGINE_WAIT_US));
 
+    /* Dropped: a PID its answered bitmap marks clear (bit 0x80 >>
+     * ((k - 1) % 8) of byte (k - 1) / 8 for PID base + k). The PIDs past
+     * 0x60, whose bitmap went unanswered, stay; of the ten, only 0x5C
+     * goes, as on the car. */
+    uint32_t dropped = 0;
     for (uint32_t i = 0; i < e.count; ++i) {
-        EXPECT_EQ(e.requests[i].dropped,
-                  (e.requests[i].bytes[1] == 0x5C) ? ECUIO_DROP_BITMAP : 0u)
-            << "PID " << std::hex << int{e.requests[i].bytes[1]};
+        const uint8_t pid = e.requests[i].bytes[1];
+        bool clear = false;
+        for (const auto& b : kCar) {
+            const unsigned k = pid - b.pid;
+            if (pid > b.pid && k <= 32) {
+                clear = ((b.bits >> (32 - k)) & 1u) == 0;
+            }
+        }
+        EXPECT_EQ(e.requests[i].dropped, clear ? ECUIO_DROP_BITMAP : 0u)
+            << "PID " << std::hex << int{pid};
+        if (i < 10) {
+            EXPECT_EQ(clear, pid == 0x5C) << "PID " << std::hex << int{pid};
+        }
+        dropped += clear ? 1u : 0u;
     }
-    EXPECT_EQ(e.chans[0].requests, e.count - 1);
+    EXPECT_GT(dropped, 1u);
+    EXPECT_EQ(e.chans[0].requests, e.count - dropped);
+}
+
+namespace {
+
+/* Channel 0 of the obd2 set as the setup builds it (the classes and the
+ * duplicate pairs), walked against bitmaps answered in turn; the last
+ * one's clear last bit ends the walk, unless walk is false. */
+void obd2_walked(ecuio_request_engine* e,
+                 const std::vector<std::pair<uint8_t, uint32_t>>& car,
+                 bool walk = true)
+{
+    const uint32_t rx = ECUIO_OBD2_ECU_ARB_ID;
+    ecuio_engine_init(e, 1);
+    ASSERT_TRUE(
+        ecuio_engine_derive(e, ecuio_obd2_signal_set(), &rx, 1, nullptr));
+    ecuio_engine_classify(e, ecuio_obd2_pid_fast);
+    ecuio_engine_set_duplicates(e, &ECUIO_OBD2_DUPLICATE_PIDS[0][0],
+                                sizeof(ECUIO_OBD2_DUPLICATE_PIDS) /
+                                    sizeof(ECUIO_OBD2_DUPLICATE_PIDS[0]));
+    if (!walk) {
+        return;
+    }
+    ecuio_engine_probe(e, 0);
+    int64_t now = 0;
+    for (const auto& b : car) {
+        ASSERT_NO_FATAL_FAILURE(send_bitmap_request(e, 0, b.first, now));
+        ASSERT_EQ(answer_bitmap(e, 0, b.first, b.second, now + 4 * kMs),
+                  ecuio_reply::positive);
+        now += ECUIO_ENGINE_GAP_US;
+    }
+    ASSERT_FALSE(e->chans[0].walking) << "the last bitmap ends the walk";
+}
+
+/* PID pid's request on channel 0: its class (0 fast, 1 slow), or -1
+ * when it's dropped or not in the table. */
+int class_of(const ecuio_request_engine& e, uint8_t pid)
+{
+    for (uint32_t i = 0; i < e.count; ++i) {
+        const ecuio_request& r = e.requests[i];
+        if (r.len == 2 && r.bytes[0] == 0x01 && r.bytes[1] == pid) {
+            return r.dropped != 0 ? -1 : r.slow;
+        }
+    }
+    return -1;
+}
+
+/* The test car's six bitmaps (docs/bench-sessions/2026-10-25-vehicle.md,
+ * the same on 2026-10-31) */
+const std::vector<std::pair<uint8_t, uint32_t>> kTestCar = {
+    {0x00, 0xFE7FA813u}, {0x20, 0xA017F011u}, {0x40, 0xFED08C81u},
+    {0x60, 0x63080001u}, {0x80, 0x0004000Du}, {0xA0, 0x04000000u}};
+
+} // namespace
+
+/* ADR-0039 §3: the fuel rail's two forms read one value on the test car
+ * (docs/bench-sessions/2026-10-31-elm327-vehicle.md), so when a car's
+ * bitmaps list both, 59 goes slow and 23 stays fast. A car that lists
+ * only 59 keeps it fast, and with no walk nothing is judged. */
+TEST(RequestEngineTest, ADuplicateFuelRailPressureGoesSlow)
+{
+    ecuio_request_engine e;
+    ASSERT_NO_FATAL_FAILURE(obd2_walked(&e, kTestCar));
+    EXPECT_EQ(class_of(e, 0x23), 0);
+    EXPECT_EQ(class_of(e, 0x59), 1) << "both listed: the duplicate is slow";
+    EXPECT_EQ(class_of(e, 0x0A), 0) << "the low-pressure side stays fast";
+
+    std::vector<std::pair<uint8_t, uint32_t>> no23 = kTestCar;
+    no23[1].second &= ~(0x80000000u >> (0x23 - 0x21));
+    ASSERT_NO_FATAL_FAILURE(obd2_walked(&e, no23));
+    EXPECT_EQ(class_of(e, 0x23), -1) << "dropped on its bitmap";
+    EXPECT_EQ(class_of(e, 0x59), 0) << "the only rail pressure stays fast";
+
+    ASSERT_NO_FATAL_FAILURE(obd2_walked(&e, kTestCar, false));
+    EXPECT_EQ(class_of(e, 0x23), 0);
+    EXPECT_EQ(class_of(e, 0x59), 0) << "no walk, nothing judged";
 }
 
 /* A bitmap nobody answers ends the walk with nothing judged: every
@@ -2093,6 +2356,62 @@ TEST_F(Obd2TableTest, EveryObd2DefMatchesItsRow)
     }
 }
 
+/* The set covers the table: exactly one def for every linear row (its
+ * PID and start byte), and none for a row of another kind (ADR-0039
+ * §1, §2). */
+TEST_F(Obd2TableTest, EveryLinearRowHasExactlyOneDef)
+{
+    const ecuio_signal_set_t* set = ecuio_obd2_signal_set();
+    for (const PidRow& r : rows_) {
+        SCOPED_TRACE("line " + std::to_string(r.line) + ", " + r.name);
+        unsigned defs = 0;
+        for (uint32_t i = 0; i < set->count; ++i) {
+            const ecuio_signal_def_t& d = set->defs[i];
+            if ((d.mux_key & 0xFFu) == r.pid && d.start_byte == 2 + r.start) {
+                ++defs;
+            }
+        }
+        EXPECT_EQ(defs, r.kind == "linear" ? 1u : 0u);
+    }
+}
+
+/* Every fast PID (obd2_rates.h) is one the set asks */
+TEST_F(Obd2TableTest, EveryFastPidIsInTheSet)
+{
+    const ecuio_signal_set_t* set = ecuio_obd2_signal_set();
+    for (uint8_t pid : ECUIO_OBD2_FAST_PIDS) {
+        bool found = false;
+        for (uint32_t i = 0; i < set->count; ++i) {
+            found = found || (set->defs[i].mux_key & 0xFFu) == pid;
+        }
+        EXPECT_TRUE(found) << "PID " << int(pid);
+        EXPECT_NE(linear(pid, 0), nullptr) << "PID " << int(pid);
+    }
+}
+
+/* A recording keys each value by its name (signals.csv), and so do
+ * Live and the recordings' diff, so every built-in set's names are
+ * unique, and each fits the def's buffer with room for its end */
+TEST(Obd2SetTest, BuiltInSetNamesAreUniqueAndFit)
+{
+    for (const ecuio_signal_set_t* set :
+         {ecuio_obd2_signal_set(), ecuio_mock_signal_set()}) {
+        std::vector<std::string> names;
+        for (uint32_t i = 0; i < set->count; ++i) {
+            const ecuio_signal_def_t& d = set->defs[i];
+            const size_t n = strnlen(d.name, sizeof(d.name));
+            ASSERT_LT(n, sizeof(d.name)) << "def " << d.id;
+            EXPECT_GT(n, 0u) << "def " << d.id;
+            names.emplace_back(d.name, n);
+        }
+        for (size_t i = 0; i < names.size(); ++i) {
+            for (size_t j = i + 1; j < names.size(); ++j) {
+                EXPECT_NE(names[i], names[j]) << "defs " << i << " and " << j;
+            }
+        }
+    }
+}
+
 /* Every PID the fakes' ECU supports answers with the table's byte
  * count, and every PID the obd2 set asks is one it supports (else the
  * probe drops it in every test) */
@@ -2118,6 +2437,134 @@ TEST_F(Obd2TableTest, TheFakeEcuAnswersEachSupportedPidWithItsLength)
         EXPECT_TRUE(fake_ecu::supports_pid(set->defs[i].mux_key & 0xFFu))
             << set->defs[i].name;
     }
+}
+
+/* Core's byte count per PID, which splits a packed reply, is the
+ * table's for every PID it lists and 0 for every other */
+TEST_F(Obd2TableTest, CoresByteCountPerPidIsTheTables)
+{
+    for (unsigned pid = 0; pid <= 0xFF; ++pid) {
+        EXPECT_EQ(ECUIO_OBD2_PID_BYTES[pid], bytes_of(pid)) << "PID " << pid;
+    }
+}
+
+/* ---------- a packed reply's records (obd2_reply.h) ---------- */
+
+namespace {
+
+struct Split {
+    ecuio_obd2_reply reply;
+    std::vector<std::pair<unsigned, std::vector<uint8_t>>> records;
+};
+
+/* What ecuio_obd2_split makes of bytes, each record as its PID and data */
+Split split_of(std::initializer_list<uint8_t> bytes, uint8_t* learned)
+{
+    const std::vector<uint8_t> reply(bytes);
+    ecuio_obd2_record out[ECUIO_OBD2_MAX_RECORDS];
+    uint32_t n = 99;
+    Split s;
+    s.reply = ecuio_obd2_split(reply.data(), static_cast<uint16_t>(reply.size()),
+                               learned, out, &n);
+    for (uint32_t k = 0; k < n; ++k) {
+        s.records.push_back(
+            {out[k].pid, std::vector<uint8_t>(reply.begin() + out[k].start,
+                                              reply.begin() + out[k].start +
+                                                  out[k].bytes)});
+    }
+    return s;
+}
+
+using Rec = std::pair<unsigned, std::vector<uint8_t>>;
+
+} // namespace
+
+/* ADR-0039 Appendix A: a reply no longer than its first PID's data is
+ * that PID's alone and decodes as it came; a longer one splits into its
+ * records by J1979's lengths, in the order the ECU sent them */
+TEST(Obd2ReplyTest, APackedReplySplitsIntoItsRecords)
+{
+    uint8_t learned[256] = {};
+    EXPECT_EQ(split_of({0x41, 0x0C, 0x1A, 0xF8}, learned).reply,
+              ecuio_obd2_reply::whole) << "one PID";
+    const Split s =
+        split_of({0x41, 0x0D, 0x32, 0x0C, 0x1A, 0xF8, 0x05, 0x5A}, learned);
+    EXPECT_EQ(s.reply, ecuio_obd2_reply::split);
+    EXPECT_EQ(s.records, (std::vector<Rec>{{0x0D, {0x32}},
+                                           {0x0C, {0x1A, 0xF8}},
+                                           {0x05, {0x5A}}}));
+    EXPECT_EQ(split_of({0x41, 0x00, 1, 2, 3, 4, 0x20, 5, 6, 7, 8}, learned)
+                  .records.size(),
+              2u) << "the walk's bitmaps too";
+    EXPECT_EQ(split_of({0x7F, 0x01, 0x12}, learned).reply,
+              ecuio_obd2_reply::whole) << "not a positive reply";
+    EXPECT_EQ(split_of({0x41, 0x0C}, learned).reply, ecuio_obd2_reply::whole);
+    EXPECT_EQ(split_of({0x41, 0xB0, 1, 2, 3}, learned).reply,
+              ecuio_obd2_reply::whole) << "a first PID of no known length";
+}
+
+/* A reply that won't split decodes its first record alone: a PID of no
+ * known length, one twice, a record past the end or short of it */
+TEST(Obd2ReplyTest, ARecordThatWontSplitStopsIt)
+{
+    uint8_t learned[256] = {};
+    for (const auto& bytes : {
+             std::vector<uint8_t>{0x41, 0x0C, 0x1A, 0xF8, 0xB0, 0x01},
+             std::vector<uint8_t>{0x41, 0x0D, 0x32, 0x0D, 0x33},
+             std::vector<uint8_t>{0x41, 0x0D, 0x32, 0x0C, 0x1A},
+             std::vector<uint8_t>{0x41, 0x0D, 0x32, 0x05, 0x5A, 0x0C}}) {
+        ecuio_obd2_record out[ECUIO_OBD2_MAX_RECORDS];
+        uint32_t n = 99;
+        EXPECT_EQ(ecuio_obd2_split(bytes.data(), static_cast<uint16_t>(bytes.size()),
+                                   learned, out, &n),
+                  ecuio_obd2_reply::unsplit) << bytes.size();
+        EXPECT_EQ(n, 0u);
+    }
+    std::vector<uint8_t> many = {0x41};
+    for (unsigned pid = 0x04; pid <= 0xFF && many.size() < 3 + 2 * ECUIO_OBD2_MAX_RECORDS;
+         ++pid) {
+        if (ECUIO_OBD2_PID_BYTES[pid] == 1) {
+            many.push_back(static_cast<uint8_t>(pid));
+            many.push_back(0x00);
+        }
+    }
+    ASSERT_GT(many.size(), 1 + 2 * ECUIO_OBD2_MAX_RECORDS);
+    ecuio_obd2_record out[ECUIO_OBD2_MAX_RECORDS];
+    uint32_t n = 0;
+    EXPECT_EQ(ecuio_obd2_split(many.data(), static_cast<uint16_t>(many.size()),
+                               learned, out, &n),
+              ecuio_obd2_reply::unsplit) << "past the most records";
+}
+
+/* The test car answers PID 55 with bank 1's byte alone
+ * (docs/bench-sessions/2026-10-31-elm327-vehicle.md): a single reply
+ * shorter than J1979's teaches the length, so a packed reply holding 55
+ * splits; a reply as long as J1979's teaches the table's again */
+TEST(Obd2ReplyTest, AShortSingleReplyTeachesItsLength)
+{
+    uint8_t learned[256] = {};
+    const auto packed = [&learned]() {
+        return split_of({0x41, 0x0C, 0x1A, 0xF8, 0x55, 0x80, 0x0D, 0x32},
+                        learned);
+    };
+    EXPECT_EQ(packed().reply, ecuio_obd2_reply::unsplit)
+        << "by J1979's length, 55 takes 0D's PID";
+
+    EXPECT_EQ(split_of({0x41, 0x55, 0x80}, learned).reply,
+              ecuio_obd2_reply::whole);
+    EXPECT_EQ(learned[0x55], 1u);
+    const Split s = packed();
+    EXPECT_EQ(s.reply, ecuio_obd2_reply::split);
+    EXPECT_EQ(s.records, (std::vector<Rec>{{0x0C, {0x1A, 0xF8}},
+                                           {0x55, {0x80}},
+                                           {0x0D, {0x32}}}));
+
+    EXPECT_EQ(split_of({0x41, 0x55, 0x80, 0x7F}, learned).reply,
+              ecuio_obd2_reply::whole) << "both banks after all";
+    EXPECT_EQ(learned[0x55], 0u) << "the table's length again";
+    EXPECT_EQ(split_of({0x41, 0x0C, 0x1A}, learned).reply,
+              ecuio_obd2_reply::whole);
+    EXPECT_EQ(learned[0x0C], 1u) << "any PID's";
 }
 
 /* ---------- the fakes' ECU: diagnostics (fake_ecu.h) ---------- */
@@ -2668,7 +3115,7 @@ TEST_F(DiagnosticsTest, TheListTakesItsTurnAfterIdentificationAndFillsTheReport)
         {0x02, 0x0C, 0x00},
         {0x02, 0x0D, 0x00},
     };
-    const size_t walk = 3; /* 01 00, 01 20, 01 40 */
+    const size_t walk = 6; /* 01 00 to 01 A0 */
     ASSERT_EQ(once.size(), walk + ECUIO_IDENT_COUNT + kDiag.size() + 1);
     for (size_t i = 0; i < ECUIO_IDENT_COUNT; ++i) {
         EXPECT_EQ(once[walk + i][0], ECUIO_IDENT_REQUESTS[i].bytes[0]);
@@ -3131,4 +3578,287 @@ TEST_F(ClearTest, ARescanWaitsForTheClear)
     ecuio_engine_diagnostics(&e, 0, &d);
     EXPECT_TRUE(d.flags & ECUIO_DIAG_COMPLETE);
     EXPECT_EQ(d.lists[ECUIO_DIAG_PENDING].outcome, ECUIO_DIAG_UNANSWERED);
+}
+
+/* ---------- several PIDs per request (ADR-0039 Appendix A) ---------- */
+
+namespace {
+
+/* single's answers, a pack answered in J1979's form: each PID's record
+ * from its own reply, in the order asked, a PID it doesn't answer left
+ * out */
+Responder packed_from(Responder single)
+{
+    return [single](const Bytes& req) {
+        if (req.size() <= 2 || req[0] != 0x01) {
+            return single(req);
+        }
+        Bytes out = {0x41};
+        for (size_t k = 1; k < req.size(); ++k) {
+            const Bytes one = single({0x01, req[k]});
+            if (one.size() >= 2 && one[0] == 0x41) {
+                out.insert(out.end(), one.begin() + 1, one.end());
+            }
+        }
+        return out.size() > 1 ? out : Bytes{};
+    };
+}
+
+Bytes packed_fake_reply(const Bytes& req)
+{
+    return packed_from(fake_reply)(req);
+}
+
+/* n turns of channel 0's rotation after a walk of the test car's
+ * bitmaps with packing on, each answered through respond (silence waits
+ * out the wait); what went out, in order */
+std::vector<Bytes> packing_turns(ecuio_request_engine* e, int n,
+                                 const Responder& respond)
+{
+    std::vector<Bytes> sent;
+    int64_t now = 0;
+    for (int k = 0; k < n; ++k) {
+        const int32_t r = ecuio_engine_due(e, 0, now);
+        if (r == ECUIO_ENGINE_NONE) {
+            now += ECUIO_ENGINE_GAP_US;
+            continue;
+        }
+        const ecuio_request& q = ecuio_engine_request_of(e, 0, r);
+        const Bytes req(q.bytes, q.bytes + q.len);
+        sent.push_back(req);
+        EXPECT_EQ(r == ECUIO_ENGINE_PACK, req.size() > 2);
+        ecuio_engine_sent(e, 0, r, true, now);
+        const Bytes reply = respond(req);
+        if (reply.empty()) {
+            now += ECUIO_ENGINE_WAIT_US;
+            EXPECT_TRUE(ecuio_engine_expire(e, 0, now));
+        } else {
+            (void)ecuio_engine_on_frame(e, 0, reply.data(),
+                                        static_cast<uint16_t>(reply.size()),
+                                        now + 4 * kMs, nullptr);
+        }
+        now += ECUIO_ENGINE_GAP_US;
+    }
+    return sent;
+}
+
+/* An engine on the test car's bitmaps, walked, packing on */
+void packing_engine(ecuio_request_engine* e)
+{
+    ASSERT_NO_FATAL_FAILURE(obd2_walked(e, kTestCar));
+    e->pack = true;
+}
+
+bool slow_pid(const ecuio_request_engine& e, uint8_t pid)
+{
+    return class_of(e, pid) == 1;
+}
+
+} // namespace
+
+/* A PID goes in a pack only once its own reply has shown its length,
+ * so the first lap is unpacked; then every request carries up to six
+ * kept PIDs of one class, never a bitmap, and every kept PID is still
+ * asked */
+TEST(RequestEngineTest, PacksCarryUpToSixKeptPidsOfOneClass)
+{
+    ecuio_request_engine e;
+    ASSERT_NO_FATAL_FAILURE(packing_engine(&e));
+    const std::vector<Bytes> sent = packing_turns(&e, 400, packed_fake_reply);
+    std::vector<bool> answered_alone(256, false);
+    size_t packs = 0;
+    for (const Bytes& req : sent) {
+        if (req.size() == 2) {
+            answered_alone[req[1]] = true;
+            continue;
+        }
+        ++packs;
+        ASSERT_LE(req.size(), 1 + ECUIO_ENGINE_PACK_MAX);
+        for (size_t k = 1; k < req.size(); ++k) {
+            SCOPED_TRACE("PID " + std::to_string(req[k]));
+            EXPECT_TRUE(answered_alone[req[k]]) << "packed before it went alone";
+            EXPECT_NE(req[k] % 0x20, 0) << "a bitmap";
+            EXPECT_EQ(slow_pid(e, req[k]), slow_pid(e, req[1])) << "one class";
+        }
+    }
+    EXPECT_GT(packs, 0u);
+
+    /* After the first laps: packs alone, every kept PID among them */
+    std::vector<bool> asked(256, false);
+    size_t singles = 0;
+    for (size_t k = sent.size() - 60; k < sent.size(); ++k) {
+        singles += sent[k].size() == 2 ? 1 : 0;
+        for (size_t b = 1; b < sent[k].size(); ++b) {
+            asked[sent[k][b]] = true;
+        }
+    }
+    EXPECT_EQ(singles, 0u);
+    for (uint32_t i = 0; i < e.count; ++i) {
+        const ecuio_request& r = e.requests[i];
+        if (r.dropped == 0) {
+            EXPECT_TRUE(asked[r.bytes[1]]) << "PID " << int(r.bytes[1]);
+        }
+    }
+    ecuio_channel_support_t s{};
+    ecuio_engine_support(&e, 0, &s);
+    EXPECT_TRUE(s.flags & ECUIO_SUPPORT_PACKED);
+    EXPECT_FALSE(s.flags & ECUIO_SUPPORT_UNPACKED);
+}
+
+/* A pack's reply length is its records' at the lengths their own
+ * replies showed, a short one (the test car's PID 55) included; a PID
+ * whose own reply was longer than J1979's is never packed, since the
+ * split can't tell it from a packed reply */
+TEST(RequestEngineTest, APackIsSizedByItsPidsOwnReplies)
+{
+    ecuio_request_engine e;
+    ASSERT_NO_FATAL_FAILURE(packing_engine(&e));
+    const auto car = [](const Bytes& req) {
+        if (req == Bytes{0x01, 0x55}) {
+            return Bytes{0x41, 0x55, 0x80};
+        }
+        if (req == Bytes{0x01, 0x0C}) {
+            return Bytes{0x41, 0x0C, 0x1A, 0xF8, 0x00};
+        }
+        return req.size() > 2 ? Bytes{} : fake_reply(req);
+    };
+    (void)packing_turns(&e, 200, car);
+    const ecuio_engine_channel& ch = e.chans[0];
+    EXPECT_EQ(ch.pid_len[0x55], 1u);
+    EXPECT_EQ(ch.pid_len[0x0C], ECUIO_ENGINE_PID_LONG);
+
+    ecuio_request_engine f;
+    ASSERT_NO_FATAL_FAILURE(packing_engine(&f));
+    const std::vector<Bytes> sent = packing_turns(&f, 400, packed_from(car));
+    bool packed55 = false;
+    for (const Bytes& req : sent) {
+        for (size_t k = 1; req.size() > 2 && k < req.size(); ++k) {
+            EXPECT_NE(req[k], 0x0C) << "a reply longer than J1979's: alone";
+            packed55 = packed55 || req[k] == 0x55;
+        }
+    }
+    EXPECT_TRUE(packed55);
+    const ecuio_engine_channel& fc = f.chans[0];
+    ASSERT_GT(fc.pack_count, 1u);
+    uint32_t reply = 1;
+    for (uint32_t k = 0; k < fc.pack_count; ++k) {
+        reply += 1u + fc.pid_len[fc.pack.bytes[1 + k]];
+    }
+    EXPECT_EQ(fc.pack.reply_len, reply);
+}
+
+/* A reply whose first record is any PID the pack asked answers it, in
+ * any order, and one that leaves a PID out drops nothing */
+TEST(RequestEngineTest, APackedReplyMatchesByAnyOfItsPids)
+{
+    ecuio_request_engine e;
+    ASSERT_NO_FATAL_FAILURE(packing_engine(&e));
+    const auto reversed_less_one = [](const Bytes& req) {
+        if (req.size() <= 3) {
+            return packed_fake_reply(req);
+        }
+        Bytes back = {0x01};
+        for (size_t k = req.size() - 1; k >= 2; --k) {
+            back.push_back(req[k]); /* the first PID left out */
+        }
+        return packed_fake_reply(back);
+    };
+    (void)packing_turns(&e, 400, reversed_less_one);
+    ecuio_channel_support_t s{};
+    ecuio_engine_support(&e, 0, &s);
+    EXPECT_TRUE(s.flags & ECUIO_SUPPORT_PACKED);
+    EXPECT_FALSE(s.flags & ECUIO_SUPPORT_UNPACKED);
+    for (uint32_t i = 0; i < e.count; ++i) {
+        EXPECT_NE(e.requests[i].dropped, ECUIO_DROP_NOT_SUPPORTED)
+            << "PID " << int(e.requests[i].bytes[1]);
+    }
+    EXPECT_EQ(e.chans[0].pack_failures, 0u);
+}
+
+/* Silence, a negative reply or one record, three packs in a row, puts
+ * the channel back to one PID per request; one answered in between
+ * starts the count again; a pending reply only extends the wait */
+TEST(RequestEngineTest, ThreeFailedPacksEndPackingOnTheChannel)
+{
+    for (const char* how : {"silence", "negative", "first PID only"}) {
+        SCOPED_TRACE(how);
+        ecuio_request_engine e;
+        ASSERT_NO_FATAL_FAILURE(packing_engine(&e));
+        const std::string kind = how;
+        int packs = 0;
+        const std::vector<Bytes> sent =
+            packing_turns(&e, 400, [&](const Bytes& req) {
+                if (req.size() <= 2) {
+                    return fake_reply(req);
+                }
+                ++packs;
+                if (packs == 2) {
+                    return packed_fake_reply(req); /* one in between */
+                }
+                if (kind == "silence") {
+                    return Bytes{};
+                }
+                if (kind == "negative") {
+                    return Bytes{0x7F, 0x01, 0x12};
+                }
+                return fake_reply({0x01, req[1]});
+            });
+        EXPECT_EQ(packs, 1 + 1 + int(ECUIO_ENGINE_PACK_FAILURES));
+        ecuio_channel_support_t s{};
+        ecuio_engine_support(&e, 0, &s);
+        EXPECT_TRUE(s.flags & ECUIO_SUPPORT_UNPACKED);
+        size_t k = sent.size();
+        while (k > 0 && sent[k - 1].size() == 2) {
+            --k;
+        }
+        EXPECT_LT(k + 100, sent.size()) << "one PID per request from then on";
+        for (uint32_t i = 0; i < e.count; ++i) {
+            EXPECT_NE(e.requests[i].dropped, ECUIO_DROP_NOT_SUPPORTED);
+        }
+    }
+
+    ecuio_request_engine e;
+    ASSERT_NO_FATAL_FAILURE(packing_engine(&e));
+    (void)packing_turns(&e, 200, packed_fake_reply);
+    int32_t r = ECUIO_ENGINE_NONE;
+    int64_t now = 10 * 1000 * kMs;
+    for (int k = 0; k < 50 && r != ECUIO_ENGINE_PACK; ++k) {
+        r = ecuio_engine_due(&e, 0, now);
+        if (r != ECUIO_ENGINE_PACK && r != ECUIO_ENGINE_NONE) {
+            ecuio_engine_sent(&e, 0, r, true, now);
+            const Bytes reply =
+                fake_reply({0x01, ecuio_engine_request_of(&e, 0, r).bytes[1]});
+            (void)ecuio_engine_on_frame(&e, 0, reply.data(),
+                                        static_cast<uint16_t>(reply.size()), now,
+                                        nullptr);
+        }
+        now += ECUIO_ENGINE_WAIT_US;
+    }
+    ASSERT_EQ(r, ECUIO_ENGINE_PACK);
+    ecuio_engine_sent(&e, 0, r, true, now);
+    const uint8_t pending[3] = {0x7F, 0x01, 0x78};
+    uint8_t nrc = 0;
+    EXPECT_EQ(ecuio_engine_on_frame(&e, 0, pending, 3, now + kMs, &nrc),
+              ecuio_reply::pending);
+    EXPECT_EQ(nrc, 0x78);
+    EXPECT_FALSE(ecuio_engine_expire(&e, 0, now + ECUIO_ENGINE_WAIT_US + kMs))
+        << "the pending wait";
+    EXPECT_EQ(e.chans[0].pack_failures, 0u);
+}
+
+/* Packing waits for the driver's word, and a set walked with the probe
+ * off has no bitmaps to pack by */
+TEST(RequestEngineTest, PackingIsTheDriversToTurnOn)
+{
+    ecuio_request_engine e;
+    ASSERT_NO_FATAL_FAILURE(obd2_walked(&e, kTestCar));
+    for (const Bytes& req : packing_turns(&e, 300, packed_fake_reply)) {
+        EXPECT_EQ(req.size(), 2u);
+    }
+    ecuio_request_engine f;
+    ASSERT_NO_FATAL_FAILURE(obd2_walked(&f, kTestCar, false));
+    f.pack = true;
+    for (const Bytes& req : packing_turns(&f, 300, packed_fake_reply)) {
+        EXPECT_EQ(req.size(), 2u) << "no bitmaps listed";
+    }
 }

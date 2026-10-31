@@ -3,7 +3,8 @@
 //          tests/golden/cli/: the replay fixture, mock:// with its
 //          diagnostics line, the refusals),
 //          its usage errors (CliUsageTest) and, on POSIX, SIGINT and
-//          SIGTERM (CliSignalTest); the formatting, the ring and the
+//          SIGTERM (CliSignalTest), the absent line (CliReplayTest,
+//          tests/cli_absent.py); the formatting, the ring and the
 //          sleep rule UNIT (tests/test_cli.cpp); a real sleep BENCH
 //          (BENCH prep #27)
 //
@@ -22,6 +23,7 @@
 #include "ecuio/socketcan.h"
 
 #include <atomic>
+#include <algorithm>
 #include <cerrno>
 #include <chrono>
 #include <csignal>
@@ -347,6 +349,41 @@ void poll_diagnostics(Output& out, ecuio_session_t* session, uint32_t channels,
     }
 }
 
+// The signals the session's frames come without (ADR-0039 §6), as ids
+// the signals line names, whenever core's list changes; last holds the
+// list last written, read sized to the set
+void poll_absent(Output& out, ecuio_session_t* session,
+                 std::vector<uint16_t>& read, std::vector<uint16_t>& last)
+{
+    uint32_t count = 0;
+    if (read.empty() ||
+        ecuio_session_get_absent_signals(session, read.data(),
+                                         static_cast<uint32_t>(read.size()),
+                                         &count) != ECUIO_OK) {
+        return;
+    }
+    count = std::min<uint32_t>(count, static_cast<uint32_t>(read.size()));
+    if (count == last.size() &&
+        std::equal(last.begin(), last.end(), read.begin())) {
+        return;
+    }
+    last.assign(read.begin(), read.begin() + count);
+    BigLine b(64 + size_t{count} * 8);
+    cli::Line& l = b.line;
+    l.raw("{\"type\":\"absent\"");
+    l.key("ids");
+    l.ch('[');
+    for (uint32_t i = 0; i < count; ++i) {
+        if (i) {
+            l.ch(',');
+        }
+        l.u64(last[i]);
+    }
+    l.ch(']');
+    l.ch('}');
+    write_line(out, l);
+}
+
 void write_signals(Output& out, const ecuio_signal_set_t* set)
 {
     const uint32_t count = set ? set->count : 0;
@@ -550,8 +587,14 @@ int run_stream(const StreamArgs& args)
             : ECUIO_SESSION_INFO_MAX_CHANNELS;
     uint32_t diag_generations[ECUIO_SESSION_INFO_MAX_CHANNELS] = {};
     poll_diagnostics(out, session, channels, diag_generations);
+    // Judged from the values core decodes, so only with --values
+    const ecuio_signal_set_t* set = ecuio_session_signal_set(session);
+    std::vector<uint16_t> absent_read(
+        (args.values && set != nullptr && set->defs != nullptr) ? set->count
+                                                                : 0u);
+    std::vector<uint16_t> absent_last;
     if (args.values) {
-        write_signals(out, ecuio_session_signal_set(session));
+        write_signals(out, set);
     }
     out.flush();
 
@@ -606,6 +649,7 @@ int run_stream(const StreamArgs& args)
         }
 
         poll_diagnostics(out, session, channels, diag_generations);
+        poll_absent(out, session, absent_read, absent_last);
 
         int32_t now_error = ECUIO_OK;
         uint32_t now_episodes = 0;

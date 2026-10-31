@@ -38,6 +38,7 @@
 #include <initializer_list>
 #include <memory>
 #include <thread>
+#include <map>
 #include <vector>
 
 #include "blepicker.h"
@@ -45,7 +46,9 @@
 #include "carryover.h"
 #include "sessionbridge.h"   // SessionBridge + FrameListModel
 #include <ecuio/profile.h>
+#include <ecuio/signals.h>
 #include <ecuio/serial.h>
+#include <ecuio/signal_sets.h>
 
 #ifdef _WIN32
 #ifndef NOMINMAX
@@ -2411,8 +2414,9 @@ TEST(BridgeTest, ConnectLogsTheAdaptersSession)
 }
 
 /* The probe's answer reaches the activity log once: the fake's ECU lists
- * seventeen PIDs across its three bitmaps (the obd2 set's ten and the
- * diagnostics' seven), so nothing the set asks is dropped. */
+ * every linear PID J1979 defines, with 01, 41 and 7F, across its six
+ * bitmaps, so nothing the set asks is dropped. The fake answers packed
+ * requests, so a second line says so, and nothing more follows. */
 TEST(BridgeTest, ConnectLogsWhatTheEcuSupports)
 {
     SessionBridge bridge;
@@ -2425,12 +2429,15 @@ TEST(BridgeTest, ConnectLogsWhatTheEcuSupports)
     const auto ecu_lines = [&log]() {
         return log.filter(QStringLiteral("ECU 0x7E8:"));
     };
-    ASSERT_TRUE(spinUntil([&]() { return !ecu_lines().isEmpty(); }, 5000))
-        << "no ECU line in the log";
+    ASSERT_TRUE(spinUntil([&]() { return ecu_lines().size() >= 2; }, 5000))
+        << ecu_lines().join('\n').toStdString();
     spinLoop(300);
-    ASSERT_EQ(ecu_lines().size(), 1) << ecu_lines().join('\n').toStdString();
-    EXPECT_EQ(ecu_lines().first().toStdString(),
-              "ECU 0x7E8: supports 17 PIDs; 10 requests, none dropped");
+    ASSERT_EQ(ecu_lines().size(), 2) << ecu_lines().join('\n').toStdString();
+    EXPECT_EQ(ecu_lines().at(0).toStdString(),
+              "ECU 0x7E8: supports 95 PIDs; 92 requests, none dropped");
+    EXPECT_EQ(ecu_lines().at(1).toStdString(),
+              "ECU 0x7E8: supports 95 PIDs; 92 requests, none dropped; "
+              "several PIDs per request");
 
     /* Identification (ADR-0021) logs one line once every item has an
      * outcome: the fake's FAKE values, and the two DIDs it refuses. */
@@ -2633,6 +2640,36 @@ TEST(BridgeTest, AClearAtTheFakesStoppedEngineLogsTheReadAfter)
     ASSERT_TRUE(disconnectAndWait(bridge));
 }
 
+/* Live leaves out what the fake ECU withholds from its bitmaps, and
+ * only that: the bridge reads the session's support report (ADR-0039
+ * §6) */
+TEST(BridgeTest, LiveHidesThePidsTheFakeEcuWithholds)
+{
+    FakeHooks hooks;
+    ASSERT_TRUE(hooks.load());
+    FakeEnvArm withheld("ECUIO_FAKE_WITHHELD_PIDS", "0A,5C");
+    SessionBridge bridge;
+    const QString uri = QStringLiteral("j2534://%1?identify=0&diagnose=0")
+                            .arg(QString::fromUtf8(FAKE_J2534_DLL_PATH));
+    ASSERT_TRUE(bridge.connectSession(uri).isEmpty());
+    SignalListModel* model = bridge.signalModel();
+    ASSERT_TRUE(spinUntil([&]() { return model->hiddenCount() > 0; }, 5000))
+        << "nothing hidden";
+    spinLoop(300);
+    QStringList hidden;
+    for (int r = 0; r < model->rowCount(); ++r) {
+        const QModelIndex i = model->index(r);
+        if (model->data(i, SignalListModel::HiddenRole).toBool()) {
+            hidden << model->data(i, SignalListModel::NameRole).toString();
+        }
+    }
+    /* In set order: the ten first, then the table's */
+    EXPECT_EQ(hidden, (QStringList{QStringLiteral("Engine Oil Temp"),
+                                   QStringLiteral("Fuel Pressure")}));
+    EXPECT_EQ(bridge.liveSignalModel()->rowCount(), model->rowCount() - 2);
+    ASSERT_TRUE(disconnectAndWait(bridge));
+}
+
 #endif  // _WIN32
 
 // ---------------------------------------------------------------------------
@@ -2820,6 +2857,238 @@ TEST(BridgeTest, SessionInfoTextNamesTheAdapter)
  * 44 data PIDs to 0x60, whose bit says a fourth exists), a chain
  * answered to its end, one unanswered, and requests dropped for each
  * reason, past the eight a report lists. */
+/* Live leaves out the rows whose PID their ECU's bitmaps mark
+ * unsupported (ADR-0039 §6): on the first vehicle's bitmaps (00, 20 and
+ * 40 answered), 0x5C among them; a PID past an answered range, and a row
+ * no report names, stay. Each report is judged afresh, so a rescan that
+ * finds a PID shows its row again. */
+TEST(BridgeTest, LiveHidesTheRowsTheirEcuMarksUnsupported)
+{
+    SignalListModel model;
+    model.setSignalSet(ecuio_obd2_signal_set());
+    LiveSignalModel live(&model);
+    const int rows = model.rowCount();
+    ASSERT_GT(rows, 0);
+    EXPECT_EQ(model.hiddenCount(), 0);
+    EXPECT_EQ(live.rowCount(), rows);
+    int hiddenSignals = 0;
+    QObject::connect(&model, &SignalListModel::hiddenCountChanged,
+                     [&hiddenSignals]() { ++hiddenSignals; });
+
+    ecuio_channel_support_t car{};
+    car.flags = ECUIO_SUPPORT_PROBED;
+    car.rx_id = 0x7E8;
+    car.generation = 1;
+    car.ranges = 0x7;
+    const uint8_t bitmaps[12] = {0xFE, 0x7F, 0xA8, 0x13, 0xA0, 0x17,
+                                 0xF0, 0x11, 0xFE, 0xD0, 0x8C, 0x81};
+    memcpy(car.pid_bitmap, bitmaps, sizeof(bitmaps));
+    model.applySupport(&car, 1);
+
+    /* The rule, from the bitmaps' bytes: PID p is supported when bit
+     * 0x80 >> ((p - 1) % 8) of byte (p - 1) / 8 is set */
+    const ecuio_signal_set_t* set = ecuio_obd2_signal_set();
+    int expectHidden = 0;
+    int pastTheRanges = 0;
+    int row5C = -1;
+    int row0C = -1;
+    for (int r = 0; r < rows; ++r) {
+        const unsigned pid = set->defs[r].mux_key & 0xFFu;
+        const bool clear = pid <= 0x60 && (bitmaps[(pid - 1) / 8] &
+                                           (0x80u >> ((pid - 1) % 8))) == 0;
+        const QModelIndex i = model.index(r);
+        EXPECT_EQ(model.data(i, SignalListModel::HiddenRole).toBool(), clear)
+            << "PID " << std::hex << pid;
+        EXPECT_EQ(model.data(i, SignalListModel::RowRole).toInt(), r);
+        expectHidden += clear ? 1 : 0;
+        pastTheRanges += pid > 0x60 ? 1 : 0;
+        if (pid == 0x5C)
+            row5C = r;
+        if (pid == 0x0C)
+            row0C = r;
+    }
+    ASSERT_GE(row5C, 0);
+    ASSERT_GE(row0C, 0);
+    EXPECT_TRUE(
+        model.data(model.index(row5C), SignalListModel::HiddenRole).toBool());
+    EXPECT_GT(expectHidden, 1);
+    EXPECT_GT(pastTheRanges, 0);
+    EXPECT_EQ(model.hiddenCount(), expectHidden);
+    EXPECT_EQ(hiddenSignals, 1);
+    EXPECT_EQ(model.subscribedCount(), SignalListModel::DefaultPlotted)
+        << "a ranked set plots its top ranked rows";
+
+    /* Live's rows are the shown ones in order, each naming its model row */
+    ASSERT_EQ(live.rowCount(), rows - expectHidden);
+    int last = -1;
+    for (int r = 0; r < live.rowCount(); ++r) {
+        const QModelIndex i = live.index(r, 0);
+        const int source = live.data(i, SignalListModel::RowRole).toInt();
+        EXPECT_GT(source, last);
+        last = source;
+        EXPECT_FALSE(live.data(i, SignalListModel::HiddenRole).toBool());
+        EXPECT_EQ(live.data(i, SignalListModel::NameRole),
+                  model.data(model.index(source), SignalListModel::NameRole));
+    }
+
+    /* A hidden row is never charted, and its plot box counts nothing */
+    model.updateValues(
+        {{set->defs[row5C].id, 80.0}, {set->defs[row0C].id, 2000.0}}, 100);
+    QList<int> charted;
+    for (const QVariant& v : model.chartData()) {
+        charted << v.toMap().value(QStringLiteral("row")).toInt();
+    }
+    EXPECT_TRUE(charted.contains(row0C));
+    EXPECT_FALSE(charted.contains(row5C));
+    model.toggleSubscribed(row5C);
+    EXPECT_EQ(model.subscribedCount(), SignalListModel::DefaultPlotted);
+    model.toggleSubscribed(row5C);
+
+    /* A rescan that finds 0x5C shows it again */
+    ecuio_channel_support_t rescan = car;
+    rescan.generation = 2;
+    rescan.pid_bitmap[(0x5C - 1) / 8] |= 0x80u >> ((0x5C - 1) % 8);
+    model.applySupport(&rescan, 1);
+    EXPECT_FALSE(
+        model.data(model.index(row5C), SignalListModel::HiddenRole).toBool());
+    EXPECT_EQ(model.hiddenCount(), expectHidden - 1);
+    EXPECT_EQ(live.rowCount(), rows - expectHidden + 1);
+    EXPECT_EQ(model.subscribedCount(), SignalListModel::DefaultPlotted);
+
+    /* Another ECU's report, or one with nothing learned, hides nothing */
+    ecuio_channel_support_t other = car;
+    other.rx_id = 0x7E9;
+    ecuio_channel_support_t nothing = car;
+    nothing.generation = 0;
+    const ecuio_channel_support_t neither[2] = {other, nothing};
+    model.applySupport(neither, 2);
+    EXPECT_EQ(model.hiddenCount(), 0);
+    EXPECT_EQ(live.rowCount(), rows);
+
+    /* A range never answered judges nothing */
+    EXPECT_FALSE(SignalListModel::pidMarkedUnsupported(car, 0x61));
+    EXPECT_FALSE(SignalListModel::pidMarkedUnsupported(car, 0x00));
+    EXPECT_TRUE(SignalListModel::pidMarkedUnsupported(car, 0x5C));
+    EXPECT_FALSE(SignalListModel::pidMarkedUnsupported(car, 0x0C));
+
+    /* A new set shows every row */
+    model.applySupport(&car, 1);
+    ASSERT_GT(model.hiddenCount(), 0);
+    model.setSignalSet(ecuio_obd2_signal_set());
+    EXPECT_EQ(model.hiddenCount(), 0);
+    EXPECT_EQ(live.rowCount(), rows);
+}
+
+namespace {
+
+/* The obd2 set's row for signal id, or -1 */
+int obd2RowOf(uint16_t id)
+{
+    const ecuio_signal_set_t* set = ecuio_obd2_signal_set();
+    for (uint32_t i = 0; i < set->count; ++i) {
+        if (set->defs[i].id == id)
+            return static_cast<int>(i);
+    }
+    return -1;
+}
+
+} // namespace
+
+/* ADR-0039 §6: a row core reports absent (its field past every reply)
+ * is hidden beside the ones the bitmaps rule out, and shown again when
+ * core no longer reports it; a PID the bitmaps list keeps its other
+ * rows. A new set shows all. */
+TEST(BridgeTest, LiveHidesTheFieldsCoreReportsAbsent)
+{
+    SignalListModel model;
+    model.setSignalSet(ecuio_obd2_signal_set());
+    LiveSignalModel live(&model);
+    const int rows = model.rowCount();
+    const int b1 = obd2RowOf(ECUIO_OBD2_PID_SIG_ID(0x55, 0));
+    const int b3 = obd2RowOf(ECUIO_OBD2_PID_SIG_ID(0x55, 1));
+    ASSERT_GE(b1, 0);
+    ASSERT_GE(b3, 0);
+    const auto hidden = [&model](int row) {
+        return model.data(model.index(row), SignalListModel::HiddenRole)
+            .toBool();
+    };
+
+    model.applyAbsent({ECUIO_OBD2_PID_SIG_ID(0x55, 1)});
+    EXPECT_TRUE(hidden(b3));
+    EXPECT_FALSE(hidden(b1));
+    EXPECT_EQ(model.hiddenCount(), 1);
+    EXPECT_EQ(live.rowCount(), rows - 1);
+    EXPECT_EQ(model.subscribedCount(), SignalListModel::DefaultPlotted)
+        << "an unranked row's hiding moves no default";
+
+    /* The bitmaps hide theirs beside it; neither undoes the other */
+    ecuio_channel_support_t car{};
+    car.flags = ECUIO_SUPPORT_PROBED;
+    car.rx_id = 0x7E8;
+    car.generation = 1;
+    car.ranges = 0x1; /* 0x01-0x20: all clear but 0x0C */
+    car.pid_bitmap[(0x0C - 1) / 8] = 0x80u >> ((0x0C - 1) % 8);
+    model.applySupport(&car, 1);
+    int unsupported = 0;
+    for (int r = 0; r < rows; ++r) {
+        const unsigned pid = ecuio_obd2_signal_set()->defs[r].mux_key & 0xFFu;
+        unsupported += (pid <= 0x20 && pid != 0x0C) ? 1 : 0;
+    }
+    ASSERT_GT(unsupported, 0);
+    EXPECT_TRUE(hidden(b3)) << "still absent after the support's judgment";
+    EXPECT_EQ(model.hiddenCount(), unsupported + 1);
+
+    model.applyAbsent({});
+    EXPECT_FALSE(hidden(b3)) << "core no longer reports it";
+    EXPECT_EQ(model.hiddenCount(), unsupported);
+
+    model.applyAbsent({ECUIO_OBD2_PID_SIG_ID(0x55, 1)});
+    model.setSignalSet(ecuio_obd2_signal_set());
+    EXPECT_EQ(model.hiddenCount(), 0) << "a new set shows every row";
+}
+
+/* The bridge reads core's absent signals on its tick: a replay of the
+ * test car's one-byte PID 55 replies hides bank 3's row, and only it */
+TEST(BridgeTest, LiveHidesAFieldTheRepliesComeWithout)
+{
+    QTemporaryDir dir;
+    ASSERT_TRUE(dir.isValid());
+    QByteArray text = "host_us,timestamp_us,id,flags,data\n";
+    for (int i = 0; i < 5; ++i) {
+        const QByteArray t = QByteArray::number(10000 * i);
+        text += t + ',' + t + ",0x7E8,0x0,41 55 80\n";
+    }
+    QFile f(dir.filePath(QStringLiteral("frames.csv")));
+    ASSERT_TRUE(f.open(QIODevice::WriteOnly));
+    ASSERT_EQ(f.write(text), text.size());
+    f.close();
+
+    SessionBridge bridge;
+    QStringList log;
+    QObject::connect(&bridge, &SessionBridge::logMessage,
+                     [&log](const QString& line) { log << line; });
+    ASSERT_TRUE(
+        bridge
+            .connectSession(QStringLiteral("replay://%1?profile=obd2&speed=max")
+                                .arg(dir.path()))
+            .isEmpty())
+        << log.join('\n').toStdString();
+    SignalListModel* model = bridge.signalModel();
+    const int b1 = obd2RowOf(ECUIO_OBD2_PID_SIG_ID(0x55, 0));
+    const int b3 = obd2RowOf(ECUIO_OBD2_PID_SIG_ID(0x55, 1));
+    ASSERT_TRUE(
+        spinUntil([model]() { return model->hiddenCount() > 0; }, 5000));
+    spinLoop(200);
+    EXPECT_EQ(model->hiddenCount(), 1);
+    EXPECT_TRUE(
+        model->data(model->index(b3), SignalListModel::HiddenRole).toBool());
+    EXPECT_FALSE(
+        model->data(model->index(b1), SignalListModel::HiddenRole).toBool());
+    EXPECT_TRUE(
+        model->data(model->index(b1), SignalListModel::HasValueRole).toBool());
+    ASSERT_TRUE(disconnectAndWait(bridge));
+}
+
 TEST(BridgeTest, ChannelSupportTextNamesTheEcuAndWhatItDropped)
 {
     ecuio_channel_support_t car{};
@@ -2850,6 +3119,17 @@ TEST(BridgeTest, ChannelSupportTextNamesTheEcuAndWhatItDropped)
     all.pid_bitmap[0] = 0x81;   /* PIDs 01 and 08 */
     EXPECT_EQ(SessionBridge::channelSupportText(all).toStdString(),
               "ECU 0x18DAF110: supports 2 PIDs; 1 request, none dropped");
+
+    /* Packing (ADR-0039 Appendix A): answered, then given up */
+    ecuio_channel_support_t packed = all;
+    packed.flags |= ECUIO_SUPPORT_PACKED;
+    EXPECT_EQ(SessionBridge::channelSupportText(packed).toStdString(),
+              "ECU 0x18DAF110: supports 2 PIDs; 1 request, none dropped; "
+              "several PIDs per request");
+    packed.flags |= ECUIO_SUPPORT_UNPACKED;
+    EXPECT_EQ(SessionBridge::channelSupportText(packed).toStdString(),
+              "ECU 0x18DAF110: supports 2 PIDs; 1 request, none dropped; "
+              "one PID per request, several went unanswered");
 
     ecuio_channel_support_t part = all;
     part.flags = ECUIO_SUPPORT_PROBED;
@@ -2990,8 +3270,76 @@ TEST(BridgeTest, FolderLabelKeepsWhatAFolderNameMay)
     EXPECT_EQ(f(std::string(60, 'x').c_str()), std::string(40, 'x'));
 }
 
-/* ADR-0027 §1: a vehicle's plotted signals are the numeric rows the
- * chart leaves out, read and set by name */
+/* ADR-0027 section 1: a vehicle's plotted signals are the rows ticked
+ * past the default and unticked from it, read and set by name. The
+ * mock's set ranks none, so every numeric row is its default. */
+/* The chart's window (LiveViewPage's 10 to 120 s): chartData keeps the
+ * samples of the last windowMs before the newest plotted one, and with
+ * columns, each slice's lowest and highest in time order and the newest
+ * sample, never more than two a slice plus it */
+TEST(BridgeTest, ChartDataKeepsTheWindowAndEachSlicesExtremes)
+{
+    SignalListModel model;
+    ecuio_signal_def_t defs[2];
+    ecuio_signal_set_t set;
+    buildTestSignalSet(defs, set);
+    model.setSignalSet(&set);
+    /* 1001 rises and falls every second; 2001 tracks the time */
+    for (qint64 t = 0; t < 20000; t += 10) {
+        const double wave = static_cast<double>((t / 10) % 100 < 50 ? (t / 10) % 50
+                                                                    : 50 - (t / 10) % 50);
+        model.updateValues({{uint16_t(1001), wave}, {uint16_t(2001), double(t)}}, t);
+    }
+    const auto samples = [](const QVariantList& data, int s) {
+        return data.at(s).toMap().value("samples").toList();
+    };
+
+    const QVariantList all = model.chartData();
+    ASSERT_EQ(all.size(), 2);
+    EXPECT_EQ(samples(all, 1).size(), 2 * 2000) << "no window: every sample";
+
+    const QVariantList win = model.chartData(5000);
+    const QVariantList w = samples(win, 1);
+    EXPECT_EQ(w.at(0).toDouble(), 19990.0 - 5000.0) << "from the window's start";
+    EXPECT_EQ(w.at(w.size() - 2).toDouble(), 19990.0) << "to the newest";
+    EXPECT_EQ(w.size(), 2 * 501);
+
+    const int columns = 10;
+    const QVariantList cut = model.chartData(5000, columns);
+    for (int s = 0; s < 2; ++s) {
+        const QVariantList c = samples(cut, s);
+        EXPECT_LE(c.size(), 2 * (2 * (columns + 1) + 1)) << s;
+        for (int i = 2; i < c.size(); i += 2) {
+            EXPECT_LT(c.at(i - 2).toDouble(), c.at(i).toDouble()) << "in time order";
+        }
+        EXPECT_EQ(c.at(c.size() - 2).toDouble(), 19990.0) << "the newest kept";
+    }
+    /* Each slice of the wave keeps its own lowest and highest, as the
+     * whole window's samples show them */
+    const QVariantList full = samples(model.chartData(5000), 0);
+    const QVariantList wave = samples(cut, 0);
+    const double from = 19990.0 - 5000.0;
+    const double slice = 5000.0 / columns;
+    std::map<int, std::pair<double, double>> want, got;
+    const auto note = [&](std::map<int, std::pair<double, double>>& m,
+                          const QVariantList& v) {
+        for (int i = 0; i < v.size(); i += 2) {
+            const int k = static_cast<int>((v.at(i).toDouble() - from) / slice);
+            const double x = v.at(i + 1).toDouble();
+            auto it = m.find(k);
+            if (it == m.end()) {
+                m[k] = {x, x};
+            } else {
+                it->second.first = std::min(it->second.first, x);
+                it->second.second = std::max(it->second.second, x);
+            }
+        }
+    };
+    note(want, full);
+    note(got, wave);
+    EXPECT_EQ(got, want) << "each slice's lowest and highest";
+}
+
 TEST(BridgeTest, UnplottedNamesReadAndSetTheChartsRows)
 {
     SessionBridge bridge;
@@ -3000,8 +3348,8 @@ TEST(BridgeTest, UnplottedNamesReadAndSetTheChartsRows)
     QObject::connect(m, &SignalListModel::subscribedCountChanged,
                      [&countNotified]() { ++countNotified; });
     ASSERT_TRUE(bridge.connectSession(QStringLiteral("mock://demo")).isEmpty());
-    EXPECT_EQ(countNotified, 1) << "a new set's count is notified";
-    ASSERT_GE(m->rowCount(), 3);
+    EXPECT_GE(countNotified, 1) << "a new set's count is notified";
+    ASSERT_GE(m->rowCount(), 4);
     const auto name = [m](int row) {
         return m->data(m->index(row), SignalListModel::NameRole).toString();
     };
@@ -3011,21 +3359,154 @@ TEST(BridgeTest, UnplottedNamesReadAndSetTheChartsRows)
     const int all = m->subscribedCount();
     EXPECT_TRUE(m->unplottedNames().isEmpty())
         << "every numeric row starts plotted";
+    EXPECT_TRUE(m->plottedNames().isEmpty()) << "and none past its default";
 
-    m->setUnplotted({name(0), name(2), QStringLiteral("Not a signal")});
-    EXPECT_EQ(m->unplottedNames(), (QStringList{name(0), name(2)}));
-    EXPECT_EQ(m->subscribedCount(), all - 2);
+    m->setPlotChoices({name(1)},
+                      {name(0), name(2), name(1), QStringLiteral("Not a signal")});
+    EXPECT_EQ(m->unplottedNames(), (QStringList{name(0), name(1), name(2)}))
+        << "a name in both lists is unplotted";
+    EXPECT_TRUE(m->plottedNames().isEmpty());
+    EXPECT_EQ(m->subscribedCount(), all - 3);
     EXPECT_FALSE(plotted(0));
-    EXPECT_TRUE(plotted(1));
+    EXPECT_TRUE(plotted(3));
 
-    m->setUnplotted({});
+    m->setPlotChoices({}, {});
     EXPECT_TRUE(m->unplottedNames().isEmpty());
     EXPECT_EQ(m->subscribedCount(), all);
 
     m->toggleSubscribed(1);
     EXPECT_EQ(m->unplottedNames(), QStringList{name(1)})
         << "a click is read back";
+    m->toggleSubscribed(1);
+    EXPECT_TRUE(m->unplottedNames().isEmpty())
+        << "a click back to the default clears the choice";
+    EXPECT_TRUE(m->plottedNames().isEmpty()) << "rather than turning it over";
     ASSERT_TRUE(disconnectAndWait(bridge));
+}
+
+namespace {
+
+/* The names of the rows the chart plots, in set order */
+QStringList plottedRows(const SignalListModel& model)
+{
+    QStringList names;
+    for (int r = 0; r < model.rowCount(); ++r) {
+        const QModelIndex i = model.index(r);
+        if (model.data(i, SignalListModel::SubscribedRole).toBool()
+                && !model.data(i, SignalListModel::HiddenRole).toBool()) {
+            names << model.data(i, SignalListModel::NameRole).toString();
+        }
+    }
+    return names;
+}
+
+/* The test car's first two ranges with PID 0x5C clear, as its
+ * bitmaps read (docs/bench-sessions/2026-10-31-elm327-vehicle.md) */
+ecuio_channel_support_t carWithoutOilTemp()
+{
+    ecuio_channel_support_t car{};
+    car.flags = ECUIO_SUPPORT_PROBED;
+    car.rx_id = 0x7E8;
+    car.generation = 1;
+    car.ranges = 0x7;
+    const uint8_t bitmaps[12] = {0xFE, 0x7F, 0xA8, 0x13, 0xA0, 0x17,
+                                 0xF0, 0x11, 0xFE, 0xD0, 0x8C, 0x81};
+    memcpy(car.pid_bitmap, bitmaps, sizeof(bitmaps));
+    return car;
+}
+
+} // namespace
+
+/* ADR-0039 section 8: a ranked set plots the DefaultPlotted shown rows
+ * of the lowest plot_rank; a row Live hides gives its place to the
+ * next, and a rescan that shows it takes the place back */
+TEST(BridgeTest, ARankedSetPlotsTheTopRankedRowsItShows)
+{
+    SignalListModel model;
+    model.setSignalSet(ecuio_obd2_signal_set());
+    ASSERT_EQ(SignalListModel::DefaultPlotted, 6);
+    const QStringList topSix = {
+        QStringLiteral("Coolant Temp"),    QStringLiteral("RPM"),
+        QStringLiteral("Vehicle Speed"),   QStringLiteral("Intake Air Temp"),
+        QStringLiteral("MAF"),             QStringLiteral("Engine Oil Temp")};
+    EXPECT_EQ(plottedRows(model), topSix) << "ranks 1 to 6, in set order";
+    EXPECT_EQ(model.subscribedCount(), SignalListModel::DefaultPlotted);
+
+    const ecuio_channel_support_t car = carWithoutOilTemp();
+    model.applySupport(&car, 1);
+    QStringList withLoad = topSix;
+    withLoad.removeOne(QStringLiteral("Engine Oil Temp"));
+    withLoad.prepend(QStringLiteral("Engine Load"));
+    EXPECT_EQ(plottedRows(model), withLoad) << "rank 7 takes the hidden row's place";
+    EXPECT_EQ(model.subscribedCount(), SignalListModel::DefaultPlotted);
+
+    ecuio_channel_support_t rescan = car;
+    rescan.generation = 2;
+    rescan.pid_bitmap[(0x5C - 1) / 8] |= 0x80u >> ((0x5C - 1) % 8);
+    model.applySupport(&rescan, 1);
+    EXPECT_EQ(plottedRows(model), topSix) << "and gives it back";
+
+    /* A car with fewer ranked rows than that plots all it has */
+    ecuio_channel_support_t sparse{};
+    sparse.flags = ECUIO_SUPPORT_PROBED;
+    sparse.rx_id = 0x7E8;
+    sparse.generation = 3;
+    sparse.ranges = 0x7; /* 0x01-0x60: only RPM and speed */
+    sparse.pid_bitmap[(0x0C - 1) / 8] |= 0x80u >> ((0x0C - 1) % 8);
+    sparse.pid_bitmap[(0x0D - 1) / 8] |= 0x80u >> ((0x0D - 1) % 8);
+    model.applySupport(&sparse, 1);
+    EXPECT_EQ(plottedRows(model),
+              (QStringList{QStringLiteral("RPM"), QStringLiteral("Vehicle Speed")}));
+}
+
+/* The user's ticks and unticks outlive the defaults moving, and a click
+ * back to the default clears one */
+TEST(BridgeTest, APlotChoiceOutlivesTheDefaultsMoving)
+{
+    SignalListModel model;
+    model.setSignalSet(ecuio_obd2_signal_set());
+    const int rpm = obd2RowOf(ECUIO_OBD2_SIG_RPM_ID);
+    const int load = obd2RowOf(ECUIO_OBD2_SIG_ENGINE_LOAD_ID);
+    const int pedal = obd2RowOf(ECUIO_OBD2_PID_SIG_ID(0x49, 0));
+    ASSERT_GE(rpm, 0);
+    ASSERT_GE(load, 0);
+    ASSERT_GE(pedal, 0);
+    const auto plotted = [&model](int row) {
+        return model.data(model.index(row), SignalListModel::SubscribedRole)
+            .toBool();
+    };
+
+    model.toggleSubscribed(rpm);
+    model.toggleSubscribed(load);
+    EXPECT_FALSE(plotted(rpm));
+    EXPECT_TRUE(plotted(load));
+    EXPECT_EQ(model.unplottedNames(), QStringList{QStringLiteral("RPM")});
+    EXPECT_EQ(model.plottedNames(), QStringList{QStringLiteral("Engine Load")});
+    EXPECT_EQ(model.subscribedCount(), SignalListModel::DefaultPlotted);
+
+    /* Load's default turns on and RPM's stays on: neither choice moves */
+    const ecuio_channel_support_t car = carWithoutOilTemp();
+    model.applySupport(&car, 1);
+    EXPECT_FALSE(plotted(rpm)) << "an untick holds against its default";
+    EXPECT_TRUE(plotted(load));
+    EXPECT_FALSE(plotted(pedal)) << "an untick leaves its place empty";
+    EXPECT_EQ(model.subscribedCount(), SignalListModel::DefaultPlotted - 1);
+
+    model.toggleSubscribed(rpm);
+    EXPECT_TRUE(model.unplottedNames().isEmpty()) << "back to its default";
+    EXPECT_EQ(model.plottedNames(), QStringList{QStringLiteral("Engine Load")})
+        << "with no choice of its own";
+
+    /* A vehicle's lists, applied whole: every other row to its default */
+    model.setPlotChoices({QStringLiteral("Accelerator Pedal D")}, {});
+    EXPECT_TRUE(plotted(pedal));
+    EXPECT_TRUE(plotted(load)) << "its default now, with no choice";
+    EXPECT_TRUE(model.unplottedNames().isEmpty());
+    EXPECT_EQ(model.plottedNames(),
+              QStringList{QStringLiteral("Accelerator Pedal D")});
+
+    model.setSignalSet(ecuio_obd2_signal_set());
+    EXPECT_TRUE(model.plottedNames().isEmpty()) << "a new set starts with no choices";
 }
 
 /* The identity line (ADR-0021): each answered item by name, the refused

@@ -948,10 +948,13 @@ TestCase {
         verify(log.includes("Vehicle: Daily driver (recognized from now on)"), log.join("\n"))
         verify(!JSON.stringify(page.vehicles).includes("FAKEJ2534VIN"), "no VIN in the store")
 
-        Bridge.signalModel.toggleSubscribed(0)
+        Bridge.signalModel.toggleSubscribed(1)   // Coolant Temp: plotted by rank
         const unticked = Bridge.signalModel.unplottedNames()
-        compare(unticked.length, 1)
+        compare(unticked, ["Coolant Temp"])
         compare(page.pickedVehicle.unplotted, unticked, "an untick is kept")
+        Bridge.signalModel.toggleSubscribed(5)   // Throttle Position: unranked
+        compare(Bridge.signalModel.plottedNames(), ["Throttle Position"])
+        compare(page.pickedVehicle.plotted, ["Throttle Position"], "a tick past the default too")
 
         Bridge.disconnectSession()
         tryVerify(() => !Bridge.disconnecting, 5000, "disconnect ends")
@@ -959,6 +962,7 @@ TestCase {
         press(page, "connectButton")
         tryVerify(() => Bridge.connected, 10000, "connects again")
         compare(Bridge.signalModel.unplottedNames(), unticked, "the untick comes back")
+        compare(Bridge.signalModel.plottedNames(), ["Throttle Position"], "and the tick")
         tryVerify(() => log.includes("Vehicle: Daily driver"), 5000, "recognized: " + log.join("\n"))
         Bridge.logMessage.disconnect(collect)
     }

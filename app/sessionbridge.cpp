@@ -6,7 +6,10 @@
 //          worker (BridgeTest.Values*, .RecordingHoldsEveryValueCoreDecodes),
 //          each window's envelope at its frames' times
 //          (BridgeTest.AWindow*, .TheChartKeepsTheFixturesPeak), rows by
-//          id, the signal model's roles and age
+//          id, the signal model's roles and age, the rows an ECU's
+//          bitmaps mark unsupported or core reports absent, hidden from
+//          Live's filtered view
+//          (BridgeTest.LiveHides*),
 //          refresh, link-state mapping, the activity log's session,
 //          ECU, diagnostics and delivery lines (the ELM327 session line too,
 //          the diagnostics line: BridgeTest.ChannelDiagnosticsText*,
@@ -58,6 +61,7 @@
 #include <QtGlobal>
 
 #include <algorithm>
+#include <limits>
 #include <chrono>
 #include <cstring>
 
@@ -263,6 +267,8 @@ QVariant SignalListModel::data(const QModelIndex& index, int role) const
         case IsTextRole: return e.isText;
         case WindowHighRole: return shown(e, e.windowHigh).value;
         case WindowLowRole: return shown(e, e.windowLow).value;
+        case RowRole: return index.row();
+        case HiddenRole: return e.hidden;
         default: return QVariant();
     }
 }
@@ -281,7 +287,9 @@ QHash<int, QByteArray> SignalListModel::roleNames() const
         {TextRole, "text"},
         {IsTextRole, "isText"},
         {WindowHighRole, "windowHigh"},
-        {WindowLowRole, "windowLow"}
+        {WindowLowRole, "windowLow"},
+        {RowRole, "row"},
+        {HiddenRole, "hidden"}
     };
 }
 
@@ -289,6 +297,9 @@ void SignalListModel::setSignalSet(const ecuio_signal_set_t* set)
 {
     // NULL/empty is valid (the raw profile): clear the model rather
     // than keep the previous session's rows.
+    const bool hadHidden = m_hiddenCount != 0;
+    m_hiddenCount = 0;
+    m_ranked = false;
     if (set == nullptr || set->defs == nullptr || set->count == 0) {
         beginResetModel();
         m_entries.clear();
@@ -296,6 +307,7 @@ void SignalListModel::setSignalSet(const ecuio_signal_set_t* set)
         m_subscribedCount = 0;
         endResetModel();
         emit subscribedCountChanged();
+        if (hadHidden) emit hiddenCountChanged();
         m_clock.restart();
         return;
     }
@@ -305,24 +317,36 @@ void SignalListModel::setSignalSet(const ecuio_signal_set_t* set)
     m_rowOfId.clear();
     m_rowOfId.reserve(static_cast<qsizetype>(set->count));
     m_subscribedCount = 0;
+    // Each entry holds its history ring (tens of KB): built in place,
+    // never on the stack or moved by a reallocation
+    m_entries.reserve(set->count);
 
     for (uint32_t i = 0; i < set->count; ++i) {
-        Entry e = {};   // value-init zeroes the history ring, head, and count
+        // value-init zeroes the history ring, head, and count
+        m_rowOfId.insert(set->defs[i].id, static_cast<int>(m_entries.size()));
+        Entry& e = m_entries.emplace_back();
         e.id = set->defs[i].id;
         qstrncpy(e.name, set->defs[i].name, sizeof(e.name));   // always terminates
         qstrncpy(e.unit, set->defs[i].unit, sizeof(e.unit));
         e.decimals = set->defs[i].decimal_places;
         e.isText = set->defs[i].kind == ECUIO_VALUE_TEXT ||
                    set->defs[i].kind == ECUIO_VALUE_HEX;
-        // A text row has nothing to plot, so it's never subscribed
-        e.subscribed = !e.isText;
-        if (e.subscribed) ++m_subscribedCount;
-        m_rowOfId.insert(e.id, static_cast<int>(m_entries.size()));
-        m_entries.push_back(e);
+        e.messageId = set->defs[i].message_id;
+        // A Service 01 reply's key: 41 <PID>, at the payload's start
+        const ecuio_signal_def_t& d = set->defs[i];
+        if (d.mux_offset == 0 && d.mux_length == 2 && (d.mux_key >> 8) == 0x41u) {
+            e.pid = static_cast<uint8_t>(d.mux_key & 0xFFu);
+        }
+        e.plotRank = d.plot_rank;
+        m_ranked = m_ranked || (e.plotRank != 0 && !e.isText);
+        // judgePlotted's, below; a text row has nothing to plot
+        e.subscribed = false;
     }
     endResetModel();
-    // A new set plots every numeric row, whatever the last one plotted
+    // A new set plots its defaults, whatever the last one plotted
+    judgePlotted();
     emit subscribedCountChanged();
+    if (hadHidden) emit hiddenCountChanged();
 
     m_clock.restart();
 }
@@ -466,12 +490,28 @@ void SignalListModel::pushWindow(Entry& e, const WindowValue& w)
     }
 }
 
-QVariantList SignalListModel::chartData() const
+QVariantList SignalListModel::chartData(qint64 windowMs, int columns) const
 {
+    const auto plotted = [](const Entry& e) {
+        return e.subscribed && !e.hidden && e.histCount != 0;
+    };
+    // The window ends at the newest plotted sample, the chart's "now"
+    qint64 newest = std::numeric_limits<qint64>::min();
+    for (const Entry& e : m_entries) {
+        if (plotted(e)) {
+            const uint32_t last = (e.histHead + HistoryCapacity - 1) % HistoryCapacity;
+            newest = std::max(newest, e.history[last].timestampMs);
+        }
+    }
+    const qint64 from = windowMs > 0 ? newest - windowMs
+                                     : std::numeric_limits<qint64>::min();
+    const double sliceMs = (windowMs > 0 && columns > 0)
+                               ? static_cast<double>(windowMs) / columns : 0.0;
+
     QVariantList out;
     for (size_t row = 0; row < m_entries.size(); ++row) {
         const Entry& e = m_entries[row];
-        if (!e.subscribed || e.histCount == 0) continue;
+        if (!plotted(e)) continue;
 
         const ecuio_display_value_t now = shown(e, e.value);
         QVariantMap m;
@@ -486,13 +526,53 @@ QVariantList SignalListModel::chartData() const
         // When full, the oldest surviving sample sits at histHead (the
         // next eviction slot); while filling, samples are dense from 0.
         QVariantList samples;
-        const uint32_t start = (e.histCount == HistoryCapacity)
-                                ? e.histHead : 0;
-        for (uint32_t i = 0; i < e.histCount; ++i) {
-            const Sample& s = e.history[(start + i) % HistoryCapacity];
+        const auto put = [&](const Sample& s) {
             samples.append(static_cast<double>(s.timestampMs));
             samples.append(now.converted ? shown(e, s.value).value : s.value);
+        };
+        // A slice's lowest and highest, in time order, once each
+        const Sample* low = nullptr;
+        const Sample* high = nullptr;
+        const auto flush = [&]() {
+            if (low != nullptr) {
+                const Sample* a = low->timestampMs <= high->timestampMs ? low : high;
+                const Sample* b = a == low ? high : low;
+                put(*a);
+                if (b != a) put(*b);
+            }
+            low = high = nullptr;
+        };
+        const uint32_t start = (e.histCount == HistoryCapacity)
+                                ? e.histHead : 0;
+        qint64 slice = -1;
+        const Sample* last = nullptr;
+        for (uint32_t i = 0; i < e.histCount; ++i) {
+            const Sample& s = e.history[(start + i) % HistoryCapacity];
+            if (s.timestampMs < from) continue;
+            last = &s;
+            if (sliceMs <= 0.0) {
+                put(s);
+                continue;
+            }
+            const qint64 k = static_cast<qint64>((s.timestampMs - from) / sliceMs);
+            if (k != slice) {
+                flush();
+                slice = k;
+            }
+            if (low == nullptr || s.value < low->value) low = &s;
+            if (high == nullptr || s.value > high->value) high = &s;
         }
+        if (sliceMs > 0.0) {
+            /* the newest sample always: the trace ends, and its label
+             * sits, where the value is now */
+            if (last != nullptr && last != low && last != high) {
+                flush();
+                put(*last);
+            } else {
+                flush();
+            }
+        }
+        if (samples.isEmpty()) continue;
         m["samples"] = samples;
         out.append(m);
     }
@@ -504,43 +584,176 @@ void SignalListModel::toggleSubscribed(int row)
     if (row < 0 || row >= static_cast<int>(m_entries.size())) return;
     Entry& e = m_entries[static_cast<size_t>(row)];
     if (e.isText) return;   // nothing to plot
-    e.subscribed = !e.subscribed;
-    if (e.subscribed) ++m_subscribedCount; else --m_subscribedCount;
-    emit dataChanged(index(row), index(row), {SubscribedRole});
-    emit subscribedCountChanged();
+    const bool plot = !e.subscribed;
+    e.choice = plot == e.plotDefault ? PlotChoice::Default
+             : plot                  ? PlotChoice::Plotted
+                                     : PlotChoice::Unplotted;
+    judgePlotted();
 }
 
-QStringList SignalListModel::unplottedNames() const
+QStringList SignalListModel::plottedNames() const
 {
     QStringList names;
     for (const Entry& e : m_entries) {
-        if (!e.isText && !e.subscribed) {
+        if (!e.isText && e.choice == PlotChoice::Plotted) {
             names << QString::fromUtf8(e.name);
         }
     }
     return names;
 }
 
-void SignalListModel::setUnplotted(const QStringList& names)
+QStringList SignalListModel::unplottedNames() const
 {
-    bool changed = false;
-    for (Entry& e : m_entries) {
-        if (e.isText) {
-            continue;
-        }
-        const bool subscribed = !names.contains(QString::fromUtf8(e.name));
-        if (subscribed != e.subscribed) {
-            e.subscribed = subscribed;
-            m_subscribedCount += subscribed ? 1 : -1;
-            changed = true;
+    QStringList names;
+    for (const Entry& e : m_entries) {
+        if (!e.isText && e.choice == PlotChoice::Unplotted) {
+            names << QString::fromUtf8(e.name);
         }
     }
-    if (changed && !m_entries.empty()) {
-        emit dataChanged(index(0),
-                         index(static_cast<int>(m_entries.size()) - 1),
-                         {SubscribedRole});
+    return names;
+}
+
+void SignalListModel::setPlotChoices(const QStringList& plotted, const QStringList& unplotted)
+{
+    for (Entry& e : m_entries) {
+        const QString name = QString::fromUtf8(e.name);
+        e.choice = e.isText                   ? PlotChoice::Default
+                 : unplotted.contains(name)   ? PlotChoice::Unplotted
+                 : plotted.contains(name)     ? PlotChoice::Plotted
+                                              : PlotChoice::Default;
+    }
+    judgePlotted();
+}
+
+void SignalListModel::judgePlotted()
+{
+    // The default: every numeric row, or in a ranked set the
+    // DefaultPlotted shown numeric rows of the lowest rank (a tie in the
+    // set's order), so a row Live hides gives its place to the next
+    std::vector<int> ranked;
+    for (size_t row = 0; row < m_entries.size(); ++row) {
+        const Entry& e = m_entries[row];
+        if (e.plotRank != 0 && !e.isText && !e.hidden) {
+            ranked.push_back(static_cast<int>(row));
+        }
+    }
+    std::stable_sort(ranked.begin(), ranked.end(), [this](int a, int b) {
+        return m_entries[static_cast<size_t>(a)].plotRank
+             < m_entries[static_cast<size_t>(b)].plotRank;
+    });
+    if (ranked.size() > static_cast<size_t>(DefaultPlotted)) {
+        ranked.resize(static_cast<size_t>(DefaultPlotted));
+    }
+    for (Entry& e : m_entries) {
+        e.plotDefault = !m_ranked && !e.isText;
+    }
+    for (int row : ranked) {
+        m_entries[static_cast<size_t>(row)].plotDefault = m_ranked;
+    }
+
+    int first = -1;
+    int last = -1;
+    int subscribed = 0;
+    for (size_t row = 0; row < m_entries.size(); ++row) {
+        Entry& e = m_entries[row];
+        const bool plot = !e.isText
+                       && (e.choice == PlotChoice::Plotted
+                           || (e.choice == PlotChoice::Default && e.plotDefault));
+        if (plot != e.subscribed) {
+            e.subscribed = plot;
+            if (first < 0) first = static_cast<int>(row);
+            last = static_cast<int>(row);
+        }
+        subscribed += (e.subscribed && !e.hidden) ? 1 : 0;
+    }
+    if (first >= 0) {
+        emit dataChanged(index(first), index(last), {SubscribedRole});
+    }
+    if (subscribed != m_subscribedCount) {
+        m_subscribedCount = subscribed;
         emit subscribedCountChanged();
     }
+}
+
+bool SignalListModel::pidMarkedUnsupported(const ecuio_channel_support_t& s, uint8_t pid)
+{
+    if (pid == 0) {
+        return false;
+    }
+    const unsigned range = (pid - 1u) / 0x20u;
+    if ((s.ranges & (1u << range)) == 0) {
+        return false;
+    }
+    return (s.pid_bitmap[(pid - 1u) / 8u] & (0x80u >> ((pid - 1u) % 8u))) == 0;
+}
+
+void SignalListModel::applySupport(const ecuio_channel_support_t* reports, size_t count)
+{
+    for (Entry& e : m_entries) {
+        e.unsupported = false;
+        for (size_t i = 0; e.pid != 0 && i < count; ++i) {
+            if (reports[i].generation != 0 && reports[i].rx_id == e.messageId) {
+                e.unsupported = pidMarkedUnsupported(reports[i], e.pid);
+                break;
+            }
+        }
+    }
+    rejudgeHidden();
+}
+
+void SignalListModel::applyAbsent(const std::vector<uint16_t>& ids)
+{
+    for (Entry& e : m_entries) {
+        e.absent = false;
+    }
+    for (uint16_t id : ids) {
+        const int row = m_rowOfId.value(id, -1);
+        if (row >= 0) {
+            m_entries[static_cast<size_t>(row)].absent = true;
+        }
+    }
+    rejudgeHidden();
+}
+
+void SignalListModel::rejudgeHidden()
+{
+    int first = -1;
+    int last = -1;
+    int hidden = 0;
+    for (size_t row = 0; row < m_entries.size(); ++row) {
+        Entry& e = m_entries[row];
+        const bool hide = e.unsupported || e.absent;
+        if (hide != e.hidden) {
+            e.hidden = hide;
+            if (first < 0) first = static_cast<int>(row);
+            last = static_cast<int>(row);
+        }
+        hidden += e.hidden ? 1 : 0;
+    }
+    if (first < 0) {
+        return;
+    }
+    // Live's filtered view re-judges the rows HiddenRole changed in
+    emit dataChanged(index(first), index(last), {HiddenRole});
+    m_hiddenCount = hidden;
+    emit hiddenCountChanged();
+    // A hidden row's default place goes to the next ranked row
+    judgePlotted();
+}
+
+// ---------------- LiveSignalModel ----------------
+LiveSignalModel::LiveSignalModel(SignalListModel* source, QObject* parent)
+    : QSortFilterProxyModel(parent)
+{
+    // A HiddenRole change re-filters its rows (dynamic filtering, the default)
+    setFilterRole(SignalListModel::HiddenRole);
+    setSourceModel(source);
+}
+
+bool LiveSignalModel::filterAcceptsRow(int sourceRow, const QModelIndex& sourceParent) const
+{
+    const QModelIndex i = sourceModel()->index(sourceRow, 0, sourceParent);
+    return !sourceModel()->data(i, SignalListModel::HiddenRole).toBool();
 }
 
 // ---------------- SessionBridge ----------------
@@ -549,6 +762,7 @@ SessionBridge::SessionBridge(QObject* parent)
     , m_frameLog(new FrameListModel(this))
     , m_coalesceTimer(new QTimer(this))
     , m_signalModel(new SignalListModel(this))
+    , m_liveSignalModel(new LiveSignalModel(m_signalModel, this))
 {
     (void)ecuio_init();   // optional and always ECUIO_OK (core.h), paired below
 
@@ -556,6 +770,7 @@ SessionBridge::SessionBridge(QObject* parent)
         notifyFrameCounts();
         pollLinkHealth();   // every tick while connected: transitions only
         pollChannelSupport();
+        pollAbsentSignals();
         pollChannelIdentity();
         pollChannelDiagnostics();
         pollReplayEnd();
@@ -939,6 +1154,9 @@ void SessionBridge::applyConnectedState(ecuio_session_t* session, const QString&
     for (uint32_t& g : m_supportGeneration) {
         g = 0;
     }
+    const ecuio_signal_set_t* set = ecuio_session_signal_set(session);
+    m_absentRead.assign((set != nullptr && set->defs != nullptr) ? set->count : 0u, 0);
+    m_absentIds.clear();
     for (uint32_t& g : m_identityGeneration) {
         g = 0;
     }
@@ -1741,19 +1959,55 @@ void SessionBridge::pollChannelSupport()
     if (!m_connected.load(std::memory_order_acquire) || m_session == nullptr) {
         return;
     }
+    ecuio_channel_support_t reports[ECUIO_SESSION_INFO_MAX_CHANNELS] = {};
+    bool changed = false;
     for (uint32_t c = 0; c < m_channelCount; ++c) {
-        ecuio_channel_support_t s{};
-        if (ecuio_session_get_channel_support(m_session, c, &s) != ECUIO_OK ||
-            s.generation == m_supportGeneration[c]) {
+        ecuio_channel_support_t& s = reports[c];
+        if (ecuio_session_get_channel_support(m_session, c, &s) != ECUIO_OK) {
+            s = ecuio_channel_support_t{};   // judges nothing
+            continue;
+        }
+        if (s.generation == m_supportGeneration[c]) {
             continue;
         }
         m_supportGeneration[c] = s.generation;
+        changed = true;
         emit logMessage(channelSupportText(s));
+    }
+    // Live hides the rows the reports mark unsupported (ADR-0039 §6)
+    if (changed) {
+        m_signalModel->applySupport(reports, m_channelCount);
     }
 }
 
+// Live hides the signals core reports its frames come without, as it
+// hides an unsupported PID's (ADR-0039 §6): the fact is core's, the
+// hiding the model's
+void SessionBridge::pollAbsentSignals()
+{
+    if (!m_connected.load(std::memory_order_acquire) || m_session == nullptr ||
+        m_absentRead.empty()) {
+        return;
+    }
+    uint32_t count = 0;
+    if (ecuio_session_get_absent_signals(m_session, m_absentRead.data(),
+                                         static_cast<uint32_t>(m_absentRead.size()),
+                                         &count) != ECUIO_OK) {
+        return;
+    }
+    count = std::min<uint32_t>(count, static_cast<uint32_t>(m_absentRead.size()));
+    if (count == m_absentIds.size() &&
+        std::equal(m_absentIds.begin(), m_absentIds.end(), m_absentRead.begin())) {
+        return;
+    }
+    m_absentIds.assign(m_absentRead.begin(), m_absentRead.begin() + count);
+    m_signalModel->applyAbsent(m_absentIds);
+}
+
 /* One channel's "ECU 0x…:" line: what its supported-PID bitmaps list,
- * and which requests left the rotation, and why. Static, like
+ * which requests left the rotation, and why, and whether its Service 01
+ * requests carry several PIDs (ADR-0039 Appendix A): packing starting or
+ * ending brings a new line, which must not read like the last. Static, like
  * sessionInfoText, so test_bridge pins the wording without an adapter. */
 QString SessionBridge::channelSupportText(const ecuio_channel_support_t& s)
 {
@@ -1827,6 +2081,12 @@ QString SessionBridge::channelSupportText(const ecuio_channel_support_t& s)
                     gone.join(QStringLiteral(", "));
     }
     parts << requests;
+
+    if ((s.flags & ECUIO_SUPPORT_UNPACKED) != 0) {
+        parts << QStringLiteral("one PID per request, several went unanswered");
+    } else if ((s.flags & ECUIO_SUPPORT_PACKED) != 0) {
+        parts << QStringLiteral("several PIDs per request");
+    }
 
     /* The DID scan (ADR-0020): how many DIDs it covers and what each
      * answer was; found ones are polled unless the table was full. */

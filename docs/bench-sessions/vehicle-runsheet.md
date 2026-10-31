@@ -27,18 +27,33 @@ A read-only session on a vehicle's bus. Goals, in order:
    ([ADR-0017](../adr/0017-session-recording.md),
    [ADR-0023](../adr/0023-replay-transport.md)) and the request
    timings ([ADR-0015](../adr/0015-request-engine.md))
+5. The full `obd2` set and its two rate classes
+   ([ADR-0039](../adr/0039-full-service01-coverage.md), BENCH prep
+   #30), and the trouble-code read
+   ([ADR-0037](../adr/0037-reading-trouble-codes.md), BENCH prep #28),
+   each beside a second scan tool
 
 Record everything, including every connect's session log. A session
 that stops at Phase 1 with evidence is worth more than one that runs
 to the end undocumented.
 
+**Which phases.** A session for goal 5 alone runs the pre-flight,
+Phases 1 and 2 and Phase 2b. Phases 0, 3 and 4 settle goals 2 and 3,
+which the `obd2` set and the codes don't touch: run them when the
+request engine's pacing, link health, identification or `uds-generic`
+changed since the last session that ran them.
+
 ## Safety and scope
 
-- **Read-only.** Havne sends only read requests: Service 01 ("show
-  current data"), Service 09 (vehicle information: VIN, calibration
-  IDs) and Service 0x22 (ReadDataByIdentifier), the same read-only
-  services a generic scanner uses. It has no code path that writes,
-  clears codes, changes a diagnostic session or flashes. Read
+- **Read-only.** This sheet sends only read requests: Service 01
+  ("show current data"), the trouble-code reads (Services 02, 03, 07
+  and 0A), Service 09 (vehicle information: VIN, calibration IDs) and
+  Service 0x22 (ReadDataByIdentifier), the read-only services a
+  generic scanner uses. Havne's one write is clearing codes (Service
+  04), sent only from the Diagnostics page's **Clear codes…** after a
+  confirmation; **never press it on this sheet** (a clear resets the
+  readiness monitors, BENCH prep #29). It has no code path that
+  changes a diagnostic session or flashes. Read
   [DISCLAIMER.md](../../DISCLAIMER.md) before starting.
 - **Parked:** transmission in Park (or neutral), parking brake set.
   The engine idles for most of the session: outdoors or with
@@ -70,6 +85,9 @@ to the end undocumented.
 
 Run every item on the laptop that goes to the car.
 
+- [ ] The commit under test is checked out there (`git fetch`, then
+      the branch or tag; `git log -1` into the sheet's header), and
+      the tree is clean
 - [ ] The VX driver is installed on that laptop: the picker lists only
       adapters whose drivers are installed, and shows the VX as "x86"
 - [ ] Fresh build of both trees, **Win32 first**
@@ -97,9 +115,14 @@ Run every item on the laptop that goes to the car.
         environment, then the bare URI: "Requests failing";
       - Phases 1–2: relaunch without it, then the bare URI: every
         `obd2` signal shows the fake's canned value, the ECU line reads
-        `ECU 0x7E8: supports 17 PIDs; 10 requests, none dropped`, and
-        the identity line `ECU 0x7E8 identity: VIN FAKEJ2534VIN00001;
-        CALID FAKECAL-01; …; 2 refused: …`;
+        `ECU 0x7E8: supports 95 PIDs; 92 requests, none dropped` (so
+        Live's note doesn't show), the identity line `ECU 0x7E8
+        identity: VIN FAKEJ2534VIN00001; CALID FAKECAL-01; …; 2
+        refused: …`, and the diagnostics line `ECU 0x7E8 diagnostics:
+        MIL on; stored P0301 P0420 U0100; pending P0171 C0035 B1001;
+        permanent P0420; readiness 8 of 8 complete; freeze frame for
+        P0301`, the same on the Diagnostics page; **Read again** logs
+        it a second time;
       - Phase 3: `?profile=raw&filter=0x7E8` goes quiet ("Vehicle not
         responding"); `?poll=0x0C` shows RPM alone;
         `?profile=uds-generic&did=1E18-1E20,F190:text` gives
@@ -159,8 +182,9 @@ the bare URI for about 30 s:
 - [ ] Writes succeed (`OP_WRITE frame: status 0`) but nothing answers:
       the bus still acknowledges frames with the ignition off. The
       link goes quiet after about 1.2 s; the ECU line reads "no answer
-      to the supported-PID query; 10 requests, none dropped" and the
-      identity line "13 unanswered". On a bus that's fully asleep,
+      to the supported-PID query; 92 requests, none dropped" and the
+      identity line "13 unanswered".
+      Nothing hides on Live (the ECU answered no bitmap). On a bus that's fully asleep,
       writes fail instead (three succeed, the fourth blocks about
       0.5 s and fails with `status 7`) and the link latches "Requests
       failing", as on the no-vehicle bench. Record which
@@ -180,17 +204,18 @@ engine off. Connect the bare URI and leave it connected into Phase 2:
 - [ ] The probe first: the session log's first writes are the bitmap
       requests (`01 00`, `01 20`, … while each bitmap's last bit is
       set), then the rotation. The ECU line follows within about a
-      second: `ECU 0x7E8: supports N PIDs; 10 requests, …`, naming each
-      PID dropped (on the 2026-10-25 car, six bitmaps, 53 PIDs, `1
-      dropped: 01 5C (not in its supported PIDs)`). Copy the bitmap
-      replies from the `OP_READ frame` lines into the sheet
+      second: `ECU 0x7E8: supports N PIDs; M requests, k dropped: …`,
+      naming the first eight dropped (on the 2026-10-25 car, six
+      bitmaps and 53 PIDs, of which the `obd2` set asks 43). Copy the
+      bitmap replies from the `OP_READ frame` lines into the sheet
 - [ ] Within a few seconds, the identity line: `ECU 0x7E8 identity:
       VIN …; CALID …; …`, and which `22 F1 xx` items were refused
       (`7F 22 31`). It's personal data, scrubbed before the sheet is
       committed. Note the answered DIDs for Phase 3's text DID
-- [ ] Every signal the probe kept populates within about a second; a
-      dropped one stays "—". Plausible engine-off values, the
-      2026-10-25 car's in brackets:
+- [ ] Every signal the probe kept populates within a few seconds (the
+      slow class's take longer), and Live lists no dropped one: its
+      note under the list says how many it hid. Plausible engine-off
+      values, the 2026-10-25 car's in brackets:
 
 | Signal | Expect (engine off) |
 |---|---|
@@ -200,7 +225,7 @@ engine off. Connect the bare URI and leave it connected into Phase 2:
 | Fuel Level | roughly matches the gauge |
 | Battery Voltage (PID 0x42) | 11.8–12.6 V (11.9 V), within 0.1 V of the "Session:" line |
 | MAF | ~0 g/s (0.3) |
-| Engine Oil Temp | "—" where the probe dropped 0x5C |
+| Engine Oil Temp | not on Live where the probe dropped 0x5C; "waiting for data" on the Dashboard |
 
 - [ ] A Live screenshot (Live shows no identification)
 - [ ] Then start the engine **on this connect**, at most about two
@@ -228,14 +253,52 @@ where RPM's two-byte value and the charging voltage move.
       minutes with the cluster's gauge; Fuel Level as before
 - [ ] Values stay bright while they keep arriving; nothing dims, and no
       banner
+- [ ] Live's note under the list says how many signals it hid, the
+      ones the probe dropped (BENCH prep #30)
 - [ ] About a minute of idle, then Disconnect
 
 **Evidence:** a photo of the cluster and the Dashboard or Live
-together, and the recording: each signal's refresh interval from
-`signals.csv`'s `host_us` (about 0.4 s on the 2026-10-25 car),
+together, and the recording: each rate class's refresh interval from
+`signals.csv`'s `host_us` (BENCH prep #30: about 0.8 s fast and 3.2 s
+slow estimated for the test car), the fuel pressures (0A, 23, 59)
+beside each other,
 `frames.csv`'s `timestamp_us` against `host_us` (BENCH prep #5), and
 the session log's stamps for requests a second and each reply's time
 after its request.
+
+## Phase 2b: trouble codes and the second scan tool (engine idling)
+
+Phase 1's connect read each ECU's codes, readiness and freeze frame
+after identification; this phase checks them, and the new values,
+against a second scan tool (BENCH prep #28, #30).
+
+**Action, still on Phase 1's connect:**
+- [ ] The activity log's diagnostics line (`ECU 0x7E8 diagnostics:
+      MIL …; stored …; pending …; permanent …; readiness N of M
+      complete …; freeze frame for … | no freeze frame`): copy it into
+      the sheet, and screenshot the Diagnostics page (the codes by
+      list, the monitors, the freeze frame's values). A list refused
+      reads `refused (7F 0A 11)`, say: record which
+- [ ] **Read again** on the Diagnostics page: a second diagnostics
+      line follows, the same as the first unless a monitor finished
+      meanwhile
+- [ ] Disconnect, and wait for `Disconnected:`
+
+**Action, Havne disconnected, the scan tool on the port:**
+- [ ] Its MIL state, stored, pending and permanent codes, readiness
+      monitors (complete, incomplete, not supported) and freeze frame,
+      beside Havne's line
+- [ ] Its live values beside Live's screenshot for a handful of the
+      new PIDs the car kept (fuel trims, an oxygen sensor, the
+      catalyst temperature, the fuel pressures), noting the engine
+      state each was read at
+- [ ] Unplug it before Havne connects again
+
+**Evidence:** the diagnostics lines, the Diagnostics page's
+screenshots, the scan tool's readings (photographed or written down),
+and each difference from Havne's: a code, a monitor or a value that
+disagrees is the finding. Codes carry no identity, but the freeze
+frame's screenshot is checked for a VIN like the rest.
 
 ## Phase 3: the other URIs, engine idling
 
@@ -355,6 +418,8 @@ ignition-on.
 | #7 Struct layout | A correct decode in Phases 1–2 implies the layout is right |
 | #8 Vendor timeouts | Read timing visible in the session log stamps |
 | #10 Session info | Phase 0's battery reading against the car's, and against PID 0x42 in Phase 1 |
+| #28 Trouble codes | Phase 2b: the diagnostics lines and page against the scan tool's MIL, codes, readiness and freeze frame; a refused list's reply bytes |
+| #30 The full `obd2` set | Phase 1's "ECU 0x7E8:" line (PIDs kept and dropped), Live's note, Phase 2's refresh per class, the new values beside a second scan tool, and whether two fuel pressures read one sensor |
 
 ## Teardown
 

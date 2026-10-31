@@ -44,6 +44,46 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
   stopped, then read again; the page and the activity log say what
   became of each (`ECU 0x7E8 clear: cleared`, `not sent: engine
   running (812 rpm)`, …). Not yet run on a car.
+- **Every standard Service 01 reading**
+  ([ADR-0039](docs/adr/0039-full-service01-coverage.md)): the `obd2`
+  profile reads every linear field of SAE J1979's Service 01 table,
+  130 signals in all (both banks' fuel trims, every oxygen sensor, the
+  wide-range sensors' lambda and current, fuel pressure, catalyst
+  temperatures, torque, run times and distances among them), and asks
+  each car only for the ones it has. The fast-changing readings (rpm,
+  speed, load, MAF, throttle, fuel pressure, lambda) are asked twice
+  for each slow one (temperatures, pressures, counters).
+- Live lists only the signals the car's ECU supports and sends, with a
+  line saying how many it left out; the Dashboard and recordings keep
+  every signal. A field the ECU's replies come without (bank 3 of a
+  two-bank engine's oxygen-sensor trims) is left out too.
+- Live plots six signals when a session starts, not every one: the
+  first six the car has of a ranked list (rpm, coolant, intake air and
+  oil temperatures, MAF, speed, load, timing advance, the fuel trims,
+  then MAP, voltage, the pedal and commanded lambda), so a car without
+  one plots the next. A tick or untick is kept for the picked vehicle;
+  the mock and `uds-generic` still plot every signal. Each signal def
+  carries its place as `plot_rank` (core's C API).
+- Live's chart shows the last 10, 30, 60 or 120 s, picked above it and
+  kept between runs: every trace covers that span, however fast its
+  signal refreshes.
+- With the probe on, a Service 01 request carries up to six PIDs of
+  one rate class, each one the car has already answered alone, so a
+  pass asks the same signals in fewer requests; `?pack=0` asks one PID
+  per request. A car that answers such requests with silence, a refusal
+  or one PID three times in a row is asked one PID per request for the
+  session, and its support report says so, as does the activity log's
+  ECU line. On the test car through the MX+, each signal refreshed four
+  to five times as often.
+- Core decodes a Service 01 reply that carries several PIDs (as
+  J1979 allows, and as other tools' recordings may hold) record by
+  record, using each PID's length as the car sends it;
+  `ecuio_session_get_unsplit_replies` counts the ones that wouldn't
+  split.
+- `ecuio_session_get_absent_signals` (core's C API) lists the signals
+  a session's replies come without, and `havne-cli stream --values`
+  writes them as an `absent` line.
+- Imperial units show Pa as inH2O, L/h as gal/h and N·m as lb·ft.
 
 ### Changed
 - The simulated car starts each loop with the key on and the engine
@@ -57,6 +97,11 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
   download, and one build provenance file,
   `havne-X.Y.Z.intoto.jsonl`, covers every download instead of one
   beside each, so the list of files is shorter.
+
+### Fixed
+- Live's time axis no longer draws its captions over one another on a
+  narrow window, such as a phone's: the step between ticks grows until
+  each caption fits.
 
 ## [0.3.4] - 2026-10-30
 

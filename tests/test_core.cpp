@@ -3701,6 +3701,213 @@ TEST(CoreTest, ValuesGiveEachTextValueASlotOfItsOwn)
     EXPECT_EQ(ecuio_profile_unregister("test-text-slots"), ECUIO_OK);
 }
 
+/* ADR-0039 §6: the test car answers PID 55 with bank 1's byte alone
+ * (docs/bench-sessions/2026-10-31-elm327-vehicle.md), so the bank 3
+ * field is absent once ECUIO_ABSENT_AFTER_FRAMES replies have ended
+ * before it, and leaves the list when a reply carries it. Bank 1 is
+ * never absent; a session with no values callback judges nothing; the
+ * list stays readable after close. */
+TEST(CoreTest, AFieldPastEveryReplyIsAbsent)
+{
+    const uint16_t b3 = ECUIO_OBD2_PID_SIG_ID(0x55, 1);
+    const ecuio_frame_t one =
+        value_frame(ECUIO_OBD2_ECU_ARB_ID, {0x41, 0x55, 0x80});
+    const ecuio_frame_t both =
+        value_frame(ECUIO_OBD2_ECU_ARB_ID, {0x41, 0x55, 0x80, 0x7F});
+    uint16_t ids[4] = {};
+    uint32_t count = 99;
+
+    ecuio_session_t* session = nullptr;
+    ASSERT_EQ(
+        ecuio_session_create("mock://a?profile=obd2&diagnose=0", &session),
+        ECUIO_OK);
+    ValuesCapture cap;
+    ASSERT_EQ(ecuio_register_values_callback(session, values_capture_cb, &cap),
+              ECUIO_OK);
+    for (uint32_t k = 1; k <= ECUIO_ABSENT_AFTER_FRAMES; ++k) {
+        ecuio_session_dispatch_callbacks(session, &one);
+        ASSERT_EQ(ecuio_session_get_absent_signals(session, ids, 4, &count),
+                  ECUIO_OK);
+        EXPECT_EQ(count, k < ECUIO_ABSENT_AFTER_FRAMES ? 0u : 1u)
+            << "after " << k << " short replies";
+    }
+    EXPECT_EQ(ids[0], b3);
+    EXPECT_EQ(ecuio_session_get_absent_signals(session, nullptr, 0, &count),
+              ECUIO_OK);
+    EXPECT_EQ(count, 1u) << "capacity 0 asks the count";
+    EXPECT_EQ(ecuio_session_get_absent_signals(session, nullptr, 1, &count),
+              ECUIO_ERR_NULL_ARGUMENT);
+
+    ecuio_session_close(session);
+    EXPECT_EQ(ecuio_session_get_absent_signals(session, ids, 4, &count),
+              ECUIO_OK);
+    EXPECT_EQ(count, 1u) << "readable after close";
+    ecuio_session_destroy(session);
+
+    ASSERT_EQ(
+        ecuio_session_create("mock://b?profile=obd2&diagnose=0", &session),
+        ECUIO_OK);
+    ASSERT_EQ(ecuio_register_values_callback(session, values_capture_cb, &cap),
+              ECUIO_OK);
+    for (uint32_t k = 0; k < ECUIO_ABSENT_AFTER_FRAMES; ++k) {
+        ecuio_session_dispatch_callbacks(session, &one);
+    }
+    ecuio_session_dispatch_callbacks(session, &both);
+    ASSERT_EQ(ecuio_session_get_absent_signals(session, ids, 4, &count),
+              ECUIO_OK);
+    EXPECT_EQ(count, 0u) << "a reply that carries it clears it";
+    ecuio_session_destroy(session);
+
+    ASSERT_EQ(
+        ecuio_session_create("mock://c?profile=obd2&diagnose=0", &session),
+        ECUIO_OK);
+    for (uint32_t k = 0; k < ECUIO_ABSENT_AFTER_FRAMES; ++k) {
+        ecuio_session_dispatch_callbacks(session, &one);
+    }
+    ASSERT_EQ(ecuio_session_get_absent_signals(session, ids, 4, &count),
+              ECUIO_OK);
+    EXPECT_EQ(count, 0u) << "no values callback, nothing decoded or judged";
+    ecuio_session_destroy(session);
+}
+
+namespace {
+
+/* The ids and values of a batch, in its order */
+std::vector<std::pair<uint16_t, double>> id_values(const SeenBatch& b)
+{
+    std::vector<std::pair<uint16_t, double>> out;
+    for (const SeenValue& v : b.values) {
+        out.push_back({v.id, v.value});
+    }
+    return out;
+}
+
+uint64_t unsplit(const ecuio_session_t* session)
+{
+    uint64_t n = 99;
+    EXPECT_EQ(ecuio_session_get_unsplit_replies(session, &n), ECUIO_OK);
+    return n;
+}
+
+} // namespace
+
+/* ADR-0039 Appendix A: a Service 01 reply carrying several PIDs decodes
+ * record by record, each def once, in the order the ECU sent them; one
+ * that won't split decodes its first record and is counted; a frame on
+ * an ID no Service 01 def listens on is never split */
+TEST(CoreTest, APackedReplyDecodesEachRecord)
+{
+    ecuio_session_t* session = nullptr;
+    ASSERT_EQ(
+        ecuio_session_create("mock://p?profile=obd2&diagnose=0", &session),
+        ECUIO_OK);
+    ValuesCapture cap;
+    ASSERT_EQ(ecuio_register_values_callback(session, values_capture_cb, &cap),
+              ECUIO_OK);
+    EXPECT_EQ(unsplit(session), 0u);
+
+    const ecuio_frame_t packed = value_frame(
+        ECUIO_OBD2_ECU_ARB_ID, {0x41, 0x0D, 0x32, 0x0C, 0x1A, 0xF8, 0x05, 0x5A});
+    ecuio_session_dispatch_callbacks(session, &packed);
+    ASSERT_EQ(cap.count(), 1u);
+    EXPECT_EQ(id_values(cap.batches[0]),
+              (std::vector<std::pair<uint16_t, double>>{
+                  {ECUIO_OBD2_SIG_SPEED_ID, 50.0},
+                  {ECUIO_OBD2_SIG_RPM_ID, 1726.0},
+                  {ECUIO_OBD2_SIG_COOLANT_TEMP_ID, 50.0}}));
+    EXPECT_EQ(cap.batches[0].arbitration_id, ECUIO_OBD2_ECU_ARB_ID);
+    EXPECT_EQ(unsplit(session), 0u);
+
+    const ecuio_frame_t stuck = value_frame(
+        ECUIO_OBD2_ECU_ARB_ID, {0x41, 0x0C, 0x1A, 0xF8, 0xB0, 0x01});
+    ecuio_session_dispatch_callbacks(session, &stuck);
+    ASSERT_EQ(cap.count(), 2u);
+    EXPECT_EQ(id_values(cap.batches[1]),
+              (std::vector<std::pair<uint16_t, double>>{
+                  {ECUIO_OBD2_SIG_RPM_ID, 1726.0}}))
+        << "its first record alone";
+    EXPECT_EQ(unsplit(session), 1u);
+
+    const ecuio_frame_t elsewhere =
+        value_frame(0x7E9, {0x41, 0x0D, 0x32, 0x0C, 0x1A, 0xF8});
+    ecuio_session_dispatch_callbacks(session, &elsewhere);
+    EXPECT_EQ(cap.count(), 2u) << "no def listens on 0x7E9";
+    EXPECT_EQ(unsplit(session), 1u);
+
+    ecuio_session_close(session);
+    EXPECT_EQ(unsplit(session), 1u) << "readable after close";
+    uint64_t n = 0;
+    EXPECT_EQ(ecuio_session_get_unsplit_replies(nullptr, &n),
+              ECUIO_ERR_NULL_ARGUMENT);
+    EXPECT_EQ(ecuio_session_get_unsplit_replies(session, nullptr),
+              ECUIO_ERR_NULL_ARGUMENT);
+    ecuio_session_destroy(session);
+}
+
+/* The test car's PID 55 carries bank 1's byte alone: its single replies
+ * teach that length, so a packed reply holding it splits, and bank 3's
+ * field, past every record, is still judged absent */
+TEST(CoreTest, APackedReplySplitsByTheLengthTheEcuSends)
+{
+    ecuio_session_t* session = nullptr;
+    ASSERT_EQ(
+        ecuio_session_create("mock://p?profile=obd2&diagnose=0", &session),
+        ECUIO_OK);
+    ValuesCapture cap;
+    ASSERT_EQ(ecuio_register_values_callback(session, values_capture_cb, &cap),
+              ECUIO_OK);
+    const ecuio_frame_t alone =
+        value_frame(ECUIO_OBD2_ECU_ARB_ID, {0x41, 0x55, 0x80});
+    const ecuio_frame_t packed = value_frame(
+        ECUIO_OBD2_ECU_ARB_ID, {0x41, 0x0C, 0x1A, 0xF8, 0x55, 0x80, 0x0D, 0x32});
+    ecuio_session_dispatch_callbacks(session, &alone);
+    for (uint32_t k = 0; k < ECUIO_ABSENT_AFTER_FRAMES; ++k) {
+        ecuio_session_dispatch_callbacks(session, &packed);
+    }
+    ASSERT_EQ(cap.count(), 1u + ECUIO_ABSENT_AFTER_FRAMES);
+    EXPECT_EQ(id_values(cap.batches.back()),
+              (std::vector<std::pair<uint16_t, double>>{
+                  {ECUIO_OBD2_SIG_RPM_ID, 1726.0},
+                  {ECUIO_OBD2_PID_SIG_ID(0x55, 0), 0.0},
+                  {ECUIO_OBD2_SIG_SPEED_ID, 50.0}}));
+    EXPECT_EQ(unsplit(session), 0u);
+    uint16_t ids[4] = {};
+    uint32_t count = 0;
+    ASSERT_EQ(ecuio_session_get_absent_signals(session, ids, 4, &count),
+              ECUIO_OK);
+    ASSERT_EQ(count, 1u);
+    EXPECT_EQ(ids[0], ECUIO_OBD2_PID_SIG_ID(0x55, 1));
+    ecuio_session_destroy(session);
+}
+
+/* A recording keeps a packed reply as the ECU sent it, so its replay
+ * decodes it the same way, the earlier single reply's length included */
+TEST(CoreTest, APackedReplyReplaysToItsRecords)
+{
+    TempRecording rec(std::string(kFramesHeader) +
+                      "10,1000000,0x7E8,0x0,41 55 80\n"
+                      "600,1000500,0x7E8,0x0,41 0C 1A F8 55 80 0D 32\n");
+    ecuio_session_t* session = nullptr;
+    ASSERT_EQ(ecuio_session_create(rec.uri("?profile=obd2&speed=max").c_str(),
+                                   &session),
+              ECUIO_OK);
+    ValuesCapture cap;
+    ASSERT_EQ(ecuio_register_values_callback(session, values_capture_cb, &cap),
+              ECUIO_OK);
+    ASSERT_EQ(ecuio_session_start(session), ECUIO_OK);
+    ASSERT_TRUE(wait_for([&] { return cap.count() >= 2; }, 2000));
+    ecuio_session_close(session);
+    std::lock_guard<std::mutex> lock(cap.mutex);
+    ASSERT_EQ(cap.batches.size(), 2u);
+    EXPECT_EQ(id_values(cap.batches[1]),
+              (std::vector<std::pair<uint16_t, double>>{
+                  {ECUIO_OBD2_SIG_RPM_ID, 1726.0},
+                  {ECUIO_OBD2_PID_SIG_ID(0x55, 0), 0.0},
+                  {ECUIO_OBD2_SIG_SPEED_ID, 50.0}}));
+    EXPECT_EQ(unsplit(session), 0u);
+    ecuio_session_destroy(session);
+}
+
 /* uds-generic's set holds a scanned range's DIDs from create, so a
  * reply for one decodes before the scan has found it (ADR-0024 Â§1) */
 TEST(CoreTest, ValuesOfAScannedDidComeFromTheSetBuiltAtCreate)
