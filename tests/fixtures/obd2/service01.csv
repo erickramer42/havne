@@ -164,8 +164,8 @@ pid,bytes,kind,start,bits,signed,scale,offset,unit,min,max,name,note
 66,5,linear,3,16,0,1/32,0,g/s,0,2047.96875,Mass air flow sensor B,A1: sensor B supported; not in the DBC
 67,3,linear,1,8,0,1,-40,°C,-40,215,Coolant temperature sensor 1,A0: sensor 1 supported; not in the DBC
 67,3,linear,2,8,0,1,-40,°C,-40,215,Coolant temperature sensor 2,A1: sensor 2 supported; not in the DBC
-68,3,linear,1,8,0,1,-40,°C,-40,215,Intake air temperature sensor 1,A0: sensor 1 supported; not in the DBC
-68,3,linear,2,8,0,1,-40,°C,-40,215,Intake air temperature sensor 2,A1: sensor 2 supported; not in the DBC
+68,7,linear,1,8,0,1,-40,°C,-40,215,Intake air temperature sensor 1,A0: sensor 1 supported; seven bytes for bank 1 sensors 1-3 then bank 2 sensors 1-3 (OBDLink's PID list and the test car; Wikipedia's table gives three); not in the DBC
+68,7,linear,2,8,0,1,-40,°C,-40,215,Intake air temperature sensor 2,A1: sensor 2 supported; seven bytes for bank 1 sensors 1-3 then bank 2 sensors 1-3 (OBDLink's PID list and the test car; Wikipedia's table gives three); not in the DBC
 69,7,complex,,,,,,,,,EGR actual and commanded and error,
 6A,5,complex,,,,,,,,,Diesel intake air flow control,
 6B,5,complex,,,,,,,,,EGR temperature,

@@ -376,6 +376,13 @@ decode, not in a transport.
 > every 0.107 s and slow ones every 0.665 s, against 0.521 s and 2.577 s
 > one PID per request, beating the estimate below. The car answers
 > PID 68 with seven data bytes, so 68 goes alone.
+>
+> **Amended 2026-10-31 (PID 68):** seven is 68's length: a support byte
+> and bank 1 sensors 1 to 3, then bank 2 sensors 1 to 3 (OBDLink's PID
+> list; Wikipedia's table gives the two-sensor three). The Service 01
+> table, core's lengths and the fakes' ECU give seven, so 68 goes in
+> packs; the set still decodes sensors 1 and 2, whose bytes are the
+> same in either layout. 68 in a pack is still to run on a car.
 
 **Fallback.** An ECU that answers a packed request with nothing, with
 a negative reply, or with only its first PID, three times in a row,

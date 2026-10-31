@@ -54,7 +54,7 @@ constexpr uint8_t kPid7FRunTime[13] = {0x07, 0x00, 0x00, 0x0E, 0x10, 0x00, 0x00,
 struct CannedPid {
     uint8_t pid;
     uint8_t len;
-    uint8_t data[5];
+    uint8_t data[7];
 };
 constexpr CannedPid kCannedPids[] = {
     {0x06, 1, {0x82}},                   /* short-term trim B1 +1.6 % */
@@ -130,7 +130,7 @@ constexpr CannedPid kCannedPids[] = {
     {0x64, 5, {0x8C, 0x9B, 0xB9, 0xD7, 0xE1}}, /* 15 30 60 90 100 % */
     {0x66, 5, {0x03, 0x03, 0x20, 0x03, 0x10}}, /* MAF A 25.0, B 24.5 g/s */
     {0x67, 3, {0x03, 0x80, 0x7E}},             /* coolant 1 88, 2 86 degC */
-    {0x68, 3, {0x03, 0x41, 0x4B}},             /* IAT 1 25, 2 35 degC */
+    {0x68, 7, {0x03, 0x41, 0x4B, 0, 0, 0, 0}}, /* IAT 1 25, 2 35 degC */
     {0x8E, 1, {0x85}},                         /* friction torque 8 % */
     {0xA2, 2, {0x01, 0xE0}},                   /* fuel 15.0 mg/stroke */
     {0xA6, 4, {0x00, 0x01, 0xE2, 0x40}},       /* odometer 12345.6 km */
