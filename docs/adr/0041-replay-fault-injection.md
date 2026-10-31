@@ -94,13 +94,21 @@ recordings:
   flagging the next frame delivered; a corruption differing from the
   clean replay in one bit; a truncation shorter; a stall shifting the
   stamps that follow by its length and pacing them so.
-- **The stack under them** (`BridgeTest.ReplayFaults*`): the bridge's
-  overflow count equals the overflows injected; with a fifth of the
-  replies cut short, no signal the car sends is called absent (one
-  whole reply in three is enough); the recording of a faulted replay
-  holds the frames delivered, row for row; a stall longer than the
-  freshness window dims the values and the next frame brightens them;
-  everything runs under the sanitizer jobs.
+- **The stack under them**
+  (`BridgeTest.AFaultedReplayFinishesAndRecordsWhatItDelivered`, the
+  test car's engine start with every kind): the replay finishes and
+  the activity log says what its faults did; the recording holds the
+  frames delivered, row for row; the bridge's overflow count is the
+  frames flagged in it. `havne-cli stream` ends and counts them the
+  same way (`CliGoldenTest.ReplayWithFaultsEndsAndCountsThem`).
+- **The rest is each rule's own test**, which a faulted replay would
+  only run again: a frame cut short counts toward absent and one whole
+  reply keeps a signal present (`CoreTest.AFieldPastEveryReplyIsAbsent`,
+  the bridge's reading of it in
+  `BridgeTest.LiveHidesAFieldTheRepliesComeWithout`); values age while
+  nothing arrives (`BridgeTest.AgeMsRoleEmittedAndRefreshesWhileStalled`),
+  and a stall holds the frames back (`CoreTest.ReplayFaultsStallThePace`).
+  The faults run under the sanitizer job with the rest of `test_core`.
 - **Fuzzing:** `fuzz_replay_file` also takes a `?faults=` query drawn
   from the input.
 
