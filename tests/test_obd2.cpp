@@ -3846,6 +3846,66 @@ TEST(RequestEngineTest, ThreeFailedPacksEndPackingOnTheChannel)
     EXPECT_EQ(e.chans[0].pack_failures, 0u);
 }
 
+/* Out of step, after a pack's wait ended with nothing, the request
+ * before's reply come late answers nothing: a refusal naming Service 01,
+ * or a record of one of the next pack's PIDs. That pack's own reply then
+ * answers it, so late replies never add up to three failures. In step,
+ * the same refusal fails the pack (ThreeFailedPacksEndPackingOnTheChannel) */
+TEST(RequestEngineTest, OutOfStepALateReplyFailsNoPack)
+{
+    ecuio_request_engine e;
+    ASSERT_NO_FATAL_FAILURE(packing_engine(&e));
+    (void)packing_turns(&e, 200, packed_fake_reply);
+    int64_t now = 10 * 1000 * kMs;
+    const auto next_pack = [&] {
+        for (int k = 0; k < 50; ++k, now += ECUIO_ENGINE_GAP_US) {
+            const int32_t r = ecuio_engine_due(&e, 0, now);
+            if (r == ECUIO_ENGINE_PACK) {
+                ecuio_engine_sent(&e, 0, r, true, now);
+                const ecuio_request& q = ecuio_engine_request_of(&e, 0, r);
+                return Bytes(q.bytes, q.bytes + q.len);
+            }
+            if (r != ECUIO_ENGINE_NONE) {
+                ecuio_engine_sent(&e, 0, r, true, now);
+                const Bytes reply = fake_reply(
+                    {0x01, ecuio_engine_request_of(&e, 0, r).bytes[1]});
+                (void)ecuio_engine_on_frame(&e, 0, reply.data(),
+                                            static_cast<uint16_t>(reply.size()),
+                                            now + kMs, nullptr);
+            }
+        }
+        return Bytes{};
+    };
+    const Bytes first = next_pack();
+    ASSERT_GT(first.size(), 2u);
+    now += ECUIO_ENGINE_WAIT_US;
+    ASSERT_TRUE(ecuio_engine_expire(&e, 0, now));
+    EXPECT_EQ(e.chans[0].pack_failures, 1u);
+    EXPECT_FALSE(e.chans[0].in_step);
+
+    now += ECUIO_ENGINE_GAP_US;
+    const Bytes second = next_pack();
+    ASSERT_GT(second.size(), 2u);
+    const Bytes refusal = {0x7F, 0x01, 0x12};
+    const Bytes record = fake_reply({0x01, second[1]});
+    uint8_t nrc = 0;
+    EXPECT_EQ(ecuio_engine_on_frame(&e, 0, refusal.data(), 3, now + kMs, &nrc),
+              ecuio_reply::none);
+    EXPECT_EQ(nrc, 0u);
+    EXPECT_EQ(ecuio_engine_on_frame(&e, 0, record.data(),
+                                    static_cast<uint16_t>(record.size()),
+                                    now + kMs, nullptr),
+              ecuio_reply::none);
+    EXPECT_EQ(e.chans[0].outstanding, ECUIO_ENGINE_PACK) << "still waiting";
+    const Bytes own = packed_fake_reply(second);
+    EXPECT_EQ(ecuio_engine_on_frame(&e, 0, own.data(),
+                                    static_cast<uint16_t>(own.size()),
+                                    now + 2 * kMs, nullptr),
+              ecuio_reply::positive);
+    EXPECT_EQ(e.chans[0].pack_failures, 0u);
+    EXPECT_TRUE(e.chans[0].in_step);
+}
+
 /* Packing waits for the driver's word, and a set walked with the probe
  * off has no bitmaps to pack by */
 TEST(RequestEngineTest, PackingIsTheDriversToTurnOn)

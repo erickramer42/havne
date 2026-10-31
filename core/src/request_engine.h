@@ -1492,8 +1492,11 @@ inline bool ecuio_engine_expire(ecuio_request_engine* e, uint32_t c,
  * first record's PID is one of the pack's answers it, and succeeds when
  * its records, each of a PID the pack asked at the length its own reply
  * showed, fill it exactly and number two or more; a negative reply to
- * Service 01 ends it failed; a pending one extends the wait. Nothing is
- * dropped: the probe alone drops a PID. */
+ * Service 01 ends it failed; a pending one extends the wait. Out of step
+ * (ecuio_engine_on_frame), a reply that would fail it answers nothing:
+ * the request before's, come late, can carry one of the pack's PIDs or
+ * name its service, and the pack's own may follow, its wait judging it.
+ * Nothing is dropped: the probe alone drops a PID. */
 inline ecuio_reply ecuio_engine_pack_reply(ecuio_request_engine* e,
                                            uint32_t c, const uint8_t* data,
                                            uint16_t len, int64_t now_us,
@@ -1509,8 +1512,6 @@ inline ecuio_reply ecuio_engine_pack_reply(ecuio_request_engine* e,
         return false;
     };
     if (len >= 3 && data[0] == 0x41u && asked(data[1])) {
-        ch.outstanding = ECUIO_ENGINE_NONE;
-        ch.in_step = true;
         uint32_t records = 0;
         uint32_t at = 1;
         while (at < len && asked(data[at]) &&
@@ -1518,7 +1519,13 @@ inline ecuio_reply ecuio_engine_pack_reply(ecuio_request_engine* e,
             at += 1u + ch.pid_len[data[at]];
             ++records;
         }
-        if (at == len && records >= 2) {
+        const bool filled = at == len && records >= 2;
+        if (!filled && !ch.in_step) {
+            return ecuio_reply::none;
+        }
+        ch.outstanding = ECUIO_ENGINE_NONE;
+        ch.in_step = true;
+        if (filled) {
             ch.pack_failures = 0;
             if (!ch.packed) {
                 ch.packed = true;
@@ -1529,7 +1536,8 @@ inline ecuio_reply ecuio_engine_pack_reply(ecuio_request_engine* e,
         }
         return ecuio_reply::positive;
     }
-    if (len < 3 || data[0] != ECUIO_NEGATIVE_RESPONSE || data[1] != 0x01u) {
+    if (len < 3 || data[0] != ECUIO_NEGATIVE_RESPONSE || data[1] != 0x01u ||
+        (data[2] != ECUIO_NRC_RESPONSE_PENDING && !ch.in_step)) {
         return ecuio_reply::none;
     }
     if (out_nrc != nullptr) {
