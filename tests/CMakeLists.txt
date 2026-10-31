@@ -105,10 +105,11 @@ endif()
 app_enable_warnings(test_elm327)
 gtest_discover_tests(test_elm327 PROPERTIES TIMEOUT 30)
 
-# --- SocketCAN listening's rules: Qt-free, every platform (UNIT, ADR-0032) ---
+# --- SocketCAN's rules: Qt-free, every platform (UNIT, ADR-0032, ADR-0040) ---
 # socketcan_wire.h is internal and portable (the kernel's values mirrored),
 # so its rules test everywhere; the transport on a bus is test_vcan's.
-add_executable(test_socketcan test_socketcan.cpp)
+# test_isotp.cpp: isotp.h, the ISO-TP that SocketCAN requests run on.
+add_executable(test_socketcan test_socketcan.cpp test_isotp.cpp)
 target_include_directories(test_socketcan PRIVATE ${CMAKE_SOURCE_DIR}/core/src)
 target_link_libraries(test_socketcan PRIVATE ecuio-core GTest::gtest_main)
 app_enable_warnings(test_socketcan)
