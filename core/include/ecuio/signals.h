@@ -275,7 +275,7 @@ int ecuio_validate_signal_set(const ecuio_signal_set_t* set,
 
 /* Unit systems. Values are append-only. */
 #define ECUIO_UNITS_METRIC    0u   /* as decoded */
-#define ECUIO_UNITS_IMPERIAL  1u   /* mph, degF, psi, lb/min, mi */
+#define ECUIO_UNITS_IMPERIAL  1u   /* mph, degF, psi, lb/min and more */
 
 /* ecuio_display_convert return codes. Values are append-only. */
 #define ECUIO_DISPLAY_OK              0
@@ -306,9 +306,11 @@ _Static_assert(offsetof(ecuio_display_value_t, decimal_places) == 24, "display d
 /* Converts a value in `unit` (a def's unit string) with that def's
  * decimal_places to the unit system `units`. The conversion is chosen
  * by the unit string: under ECUIO_UNITS_IMPERIAL "km/h", degrees C
- * ("\xC2\xB0" "C", UTF-8), "kPa", "g/s" and "km" become "mph",
- * degrees F, "psi" (one more decimal place), "lb/min" (one more) and
- * "mi"; any other unit, and every unit under ECUIO_UNITS_METRIC,
+ * ("\xC2\xB0" "C", UTF-8), "kPa", "g/s", "km", "Pa", "L/h" and
+ * "N\xC2\xB7m" become "mph", degrees F, "psi" (one more decimal
+ * place), "lb/min" (one more), "mi", "inH2O" (two more), "gal/h"
+ * (one more) and "lb\xC2\xB7" "ft", with at most 3 decimal places;
+ * any other unit, and every unit under ECUIO_UNITS_METRIC,
  * passes through unchanged with converted 0. *out is written only on
  * ECUIO_DISPLAY_OK. */
 int ecuio_display_convert(const char* unit, uint8_t decimal_places,

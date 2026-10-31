@@ -573,6 +573,10 @@ TEST(SignalsTest, DisplayConvertMapsEachMetricUnitToImperial)
         {"g/s", 1, 100.0, "lb/min", 13.2277357312033, 2},
         {"g/s", 3, 1.0, "lb/min", 0.132277357312033, 3},   /* capped at 3 */
         {"km", 1, 402.336 / 1000.0, "mi", 0.25, 1},
+        {"Pa", 0, 249.08891, "inH2O", 1.0, 2},
+        {"Pa", 2, -8192.0, "inH2O", -32.8878551839180, 3},   /* capped at 3 */
+        {"L/h", 2, 3.785411784, "gal/h", 1.0, 3},
+        {"N\xC2\xB7m", 0, 1.3558179483314004, "lb\xC2\xB7" "ft", 1.0, 0},
     };
     for (const Case& c : kCases) {
         ecuio_display_value_t out;

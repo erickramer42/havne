@@ -82,7 +82,7 @@ constexpr double kWideV = 8.0 / 65536.0;
 #define DEG_C "\xC2\xB0" "C"   /* UTF-8 degree sign, whatever the source encoding */
 #define DEG    "\xC2\xB0"      /* an angle's degree sign */
 #define LAMBDA "\xCE\xBB"      /* lambda, the equivalence ratio */
-#define NM     "N\xC2\xB7m"    /* newton metres, a middle dot */
+#define NM     "N\xC2\xB7m"    /* newton meters, a middle dot */
 #define U      ECUIO_VALUE_UINT
 #define S      ECUIO_VALUE_INT
 
