@@ -145,14 +145,18 @@ if(ANDROID)
         QT_ANDROID_VERSION_NAME "${Havne_VERSION}"
         QT_ANDROID_VERSION_CODE "${_app_version_code}")
 endif()
-# iOS: an asset catalog holding the 1024 px AppIcon, compiled by Xcode
+# iOS: an asset catalog holding the 1024 px AppIcon, compiled by Xcode,
+# and an Info.plist of the app's own (Qt's template plus the local
+# network's prompt and the Files app's view of Documents), which CI's
+# ios-build checks in the bundle
 if(IOS)
     set(app_asset_catalog "${CMAKE_CURRENT_SOURCE_DIR}/ios/Assets.xcassets")
     target_sources(havne PRIVATE "${app_asset_catalog}")
     set_source_files_properties("${app_asset_catalog}" PROPERTIES
         MACOSX_PACKAGE_LOCATION Resources)
     set_target_properties(havne PROPERTIES
-        XCODE_ATTRIBUTE_ASSETCATALOG_COMPILER_APPICON_NAME AppIcon)
+        XCODE_ATTRIBUTE_ASSETCATALOG_COMPILER_APPICON_NAME AppIcon
+        MACOSX_BUNDLE_INFO_PLIST "${CMAKE_CURRENT_SOURCE_DIR}/ios/Info.plist.in")
 endif()
 # Core's TCP socket (elm327://<address>) needs INTERNET: declared here,
 # not left to the permissions Qt adds by default (ADR-0028 §2).
