@@ -101,6 +101,15 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
   commands that fix it. Run on Linux's virtual CAN bus; not yet through
   a real controller or on a car.
 - An ELM327's replies reassemble through the same ISO-TP code.
+- **Fault injection on a replay**
+  ([ADR-0041](docs/adr/0041-replay-fault-injection.md)):
+  `replay://<recording>?faults=drop:5,overflow:1,corrupt:1,truncate:2,stall:1:500`
+  plays a recording with frames dropped, lost to an overflow (the next
+  frame flagged), corrupted (one bit flipped), cut short or held back,
+  each at its chance per frame, the same each run from `?seed=`. The
+  activity log says a replay has faults and what they did when it
+  finishes, `havne-cli stream` writes the counts in its `end` line, and
+  `ecuio_session_get_replay_faults` reads them.
 
 ### Changed
 - The simulated car starts each loop with the key on and the engine
@@ -116,6 +125,9 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
   beside each, so the list of files is shorter.
 
 ### Fixed
+- A replay's end is judged by the rows read and the frames lost to
+  faults, so the activity log's "Replay finished" line and `havne-cli
+  stream`'s end come for a replay whose faults dropped frames.
 - Live's time axis no longer draws its captions over one another on a
   narrow window, such as a phone's: the step between ticks grows until
   each caption fits.

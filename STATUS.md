@@ -46,7 +46,10 @@ v0.3.6 ([roadmap](#roadmap)).
     whose later loops start warm, each after its own engine-off spell.
   - **Replay** ([ADR-0023](docs/adr/0023-replay-transport.md)), on every
     platform: `replay://<recording>` plays a recording's `frames.csv`
-    back at its own pace or up to 100× faster.
+    back at its own pace or up to 100× faster. `?faults=` injects faults
+    as it plays ([ADR-0041](docs/adr/0041-replay-fault-injection.md),
+    proposed): frames dropped, lost to an overflow, corrupted, cut short
+    or held back, the same each time from `?seed=`.
   - **ELM327 adapters** in core, on every platform
     ([ADR-0026](docs/adr/0026-elm327-transport.md)): `elm327://<port>`
     on a serial port, USB or Bluetooth SPP, or at a WiFi adapter's
@@ -397,11 +400,18 @@ scheduled. What each holds, past its row:
     (lengths to 4095 bytes, block sizes, STmin, N_Cr), unit tests of
     every frame kind, wait frames, overflow and N_Bs, and a fuzz target
     (`fuzz_isotp`) beside the ELM327 one, which shares the reassembly.
-- **Fault injection on a replay:** frames dropped, delayed or corrupted
-  (a bad ISO-TP sequence, a late reply) in a replayed session, so the
-  error handling is proven against real traffic with no vehicle.
-  `replay://` already plays byte for byte and the fakes inject faults;
-  injecting into a replay is the new part.
+- **Fault injection on a replay**, in two parts, so the error handling
+  is proven against real traffic with no vehicle:
+  - Built: `replay://...?faults=` drops, loses to an overflow, corrupts,
+    cuts short or holds back the recording's frames as they play, from a
+    seed ([ADR-0041](docs/adr/0041-replay-fault-injection.md)); the
+    session counts each kind (`ecuio_session_get_replay_faults`, the
+    CLI's `end` line, the activity log), and the bridge, the recorder
+    and the CLI are tested under them on the test car's engine start.
+  - Next: a recording answering a requesting `socketcan://` session on
+    `vcan0` as the ECU, with faults at the ISO-TP level (a bad sequence,
+    a Consecutive Frame past N_Cr, a reply past P2, none), for the
+    request engine and core's ISO-TP.
 - **A performance benchmark:** frames per second, throughput and zero
   dropped as published numbers, building on CI's load test and
   `bench_bridge` ([docs/testing.md](docs/testing.md#performance)); and

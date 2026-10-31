@@ -375,3 +375,17 @@ polls it in its drain, as it does the diagnostics, so the worker's
 callbacks (§4) are unchanged; a list that empties again writes
 `"ids": []`. `CliReplayTest.AnAbsentFieldIsNamed`
 (`tests/cli_absent.py`) replays such replies.
+
+## Appendix: 2026-10-31, replay faults
+
+[ADR-0041](0041-replay-fault-injection.md) grows schema 1 by two fields.
+A replay with `?faults=` has `"faults": true` in the `session` line's
+`replay` object, and its `end` line a `faults` object: `frames` (the
+recording's rows read) and the counts `dropped`, `overflowed`,
+`corrupted`, `truncated` and `stalled` (`ecuio_session_get_replay_faults`).
+A replay's end is the rows read and every row the faults didn't take
+written (`covered` plus the dropped and overflowed counts reaching the
+row count), so a stream whose faults lost frames still ends with
+`replay-end`; without faults that is section 6's `covered >= replay_frames` as
+it was. `CliGoldenTest.ReplayWithFaultsEndsAndCountsThem`
+(`tests/golden/cli/replay-faults.jsonl`, seed 3 over the engine start).
