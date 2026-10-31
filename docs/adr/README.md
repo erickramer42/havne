@@ -45,6 +45,7 @@ old one, and the old record's status is updated to point at it.
 | [0037](0037-reading-trouble-codes.md) | Reading trouble codes, readiness and the freeze frame, asked at connect: four more read services, a report per ECU, the codes named in core | Accepted |
 | [0038](0038-clearing-trouble-codes.md) | Clearing trouble codes: Service 04 by one path only, each ECU by its own ID, after the report is saved, the engine is seen stopped and the user confirms | Accepted |
 | [0039](0039-full-service01-coverage.md) | Full Service 01 coverage in one `obd2` set: every linear field, two rate classes in the engine (fast and slow, 2:1), then several PIDs per request, the reply split in core's decode | Accepted |
+| [0040](0040-socketcan-requests-isotp.md) | SocketCAN requests: ISO-TP in core, shared with ELM327; a requesting session needs a controller in normal and one-shot mode at a stated rate, and sends nothing more after a CAN error on its first request | Proposed |
 
 ## Adding a record
 
