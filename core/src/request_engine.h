@@ -3,8 +3,9 @@
 //             profile_registry.cpp (the request limit)
 // C++17, Qt-free, no platform headers.
 // Testing: UNIT: derivation, deduplication and the limit, the
-//     read-only rule, rotation per channel, correlation, the wait, the
-//     pending wait and the floor; the supported-PID walk, its budget,
+//     read-only rule, rotation per channel and its two rate classes,
+//     correlation, the wait, the pending wait and the floor; the
+//     supported-PID walk, its budget,
 //     a bitmap asked again once after another PID's answer, and
 //     its resumption (behind a one-shot already taken), and what each
 //     answer drops; the DID scan's turns, outcomes and rescan;
@@ -37,6 +38,14 @@
  * table. A channel has at most one request outstanding, as ISO 15765
  * physical addressing expects, and walks its own rotation, so channels
  * progress independently.
+ *
+ * Each channel's rotation runs two rate classes (ADR-0039 §3): every
+ * request is fast or slow, and the channel sends
+ * ECUIO_ENGINE_FAST_PER_SLOW fast ones, then one slow one, each class in
+ * table order from its own cursor. A class with nothing to send gives
+ * its turn to the other, so a table of one class rotates in table order.
+ * Requests are fast until ecuio_engine_classify says otherwise; the
+ * driver classifies only the obd2 set's (obd2_rates.h).
  *
  * The probe (§4) runs on the same pacing. Each channel with Service 01
  * requests first walks the supported-PID chain (01 00, then 01 20 while
@@ -95,6 +104,9 @@ constexpr uint8_t ECUIO_NRC_REQUEST_OUT_OF_RANGE = 0x31;
 constexpr uint8_t ECUIO_NRC_SECURITY_ACCESS_DENIED = 0x33;
 constexpr uint8_t ECUIO_NRC_RESPONSE_PENDING = 0x78;
 constexpr uint8_t ECUIO_NRC_NOT_IN_ACTIVE_SESSION = 0x7F;
+
+/* Fast requests a channel sends for each slow one (ADR-0039 §3). */
+constexpr uint32_t ECUIO_ENGINE_FAST_PER_SLOW = 2;
 
 /* ecuio_engine_due's answers besides a table index. */
 constexpr int32_t ECUIO_ENGINE_NONE = -1;   /* nothing to send */
@@ -184,6 +196,7 @@ struct ecuio_request {
     uint8_t channel;
     uint8_t dropped;    /* 0 in the rotation, else why not (ECUIO_DROP_*) */
     uint8_t nrc;        /* the negative reply's code that dropped it */
+    uint8_t slow;       /* 1: the slow class, else fast (ADR-0039 §3) */
 };
 
 struct ecuio_scan_entry {
@@ -199,7 +212,10 @@ struct ecuio_engine_channel {
                                                 * one-shot, or none */
     int64_t deadline_us = 0;    /* when that request's wait ends */
     int64_t next_send_us = 0;   /* the floor: no request before this */
-    uint32_t cursor = 0;        /* where the rotation resumes */
+    uint32_t cursor = 0;        /* where the fast class resumes */
+    uint32_t slow_cursor = 0;   /* where the slow class resumes */
+    uint32_t fast_run = 0;      /* fast requests since the last slow one,
+                                 * at most ECUIO_ENGINE_FAST_PER_SLOW */
     uint32_t requests = 0;      /* this channel's requests in the rotation */
     bool in_step = true;        /* no request has timed out since the last
                                  * positive reply: see ecuio_engine_on_frame */
@@ -456,6 +472,37 @@ inline bool ecuio_engine_derive(ecuio_request_engine* e,
         }
     }
     return true;
+}
+
+/* ADR-0039 §3: puts every Service 01 request whose PID fast() turns
+ * down in the slow class. Other services, and a table never classified,
+ * stay fast. */
+inline void ecuio_engine_classify(ecuio_request_engine* e,
+                                  bool (*fast)(uint8_t pid))
+{
+    for (uint32_t i = 0; i < e->count; ++i) {
+        ecuio_request& r = e->requests[i];
+        r.slow =
+            (r.len == 2 && r.bytes[0] == 0x01 && !fast(r.bytes[1])) ? 1 : 0;
+    }
+}
+
+/* Channel c's next request of one class, from that class's cursor, or
+ * ECUIO_ENGINE_NONE when the class has none in the rotation. */
+inline int32_t ecuio_engine_next_of(ecuio_request_engine* e, uint32_t c,
+                                    bool slow)
+{
+    ecuio_engine_channel& ch = e->chans[c];
+    uint32_t& cursor = slow ? ch.slow_cursor : ch.cursor;
+    for (uint32_t k = 0; k < e->count; ++k) {
+        const uint32_t i = (cursor + k) % e->count;
+        const ecuio_request& r = e->requests[i];
+        if (r.channel == c && r.dropped == 0 && (r.slow != 0) == slow) {
+            cursor = (i + 1) % e->count;
+            return static_cast<int32_t>(i);
+        }
+    }
+    return ECUIO_ENGINE_NONE;
 }
 
 /* The request r names on channel c: a table index, or the one-shot. */
@@ -1212,14 +1259,20 @@ inline int32_t ecuio_engine_due(ecuio_request_engine* e, uint32_t c,
     if (ch.requests == 0) {
         return ECUIO_ENGINE_NONE;
     }
-    for (uint32_t k = 0; k < e->count; ++k) {
-        const uint32_t i = (ch.cursor + k) % e->count;
-        if (e->requests[i].channel == c && e->requests[i].dropped == 0) {
-            ch.cursor = (i + 1) % e->count;
-            return static_cast<int32_t>(i);
-        }
+    const bool slow_turn = ch.fast_run >= ECUIO_ENGINE_FAST_PER_SLOW;
+    int32_t i = ecuio_engine_next_of(e, c, slow_turn);
+    if (i < 0) {
+        i = ecuio_engine_next_of(e, c, !slow_turn);
     }
-    return ECUIO_ENGINE_NONE;
+    if (i < 0) {
+        return ECUIO_ENGINE_NONE;
+    }
+    if (e->requests[i].slow != 0) {
+        ch.fast_run = 0;
+    } else if (ch.fast_run < ECUIO_ENGINE_FAST_PER_SLOW) {
+        ++ch.fast_run;
+    }
+    return i;
 }
 
 /* After the driver's write of request r on channel c, at now_us: a sent

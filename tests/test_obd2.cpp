@@ -20,6 +20,7 @@
 #include "ecuio/signal_sets.h"
 #include "../core/src/request_engine.h"
 #include "../core/src/diagnostics.h"
+#include "../core/src/obd2_rates.h"
 #include "../core/src/uds_generic.h"
 #include "../core/src/uri_query.h"
 #include "ecuio/core.h"
@@ -591,6 +592,99 @@ TEST(RequestEngineTest, NextEventIsTheNearestAcrossChannels) {
               ECUIO_ENGINE_GAP_US - 5 * kMs) << "channel 1's floor";
     EXPECT_EQ(ecuio_engine_next_event_us(&e, ECUIO_ENGINE_GAP_US + 5 * kMs), 0)
         << "channel 1 due";
+}
+
+/* ---------- rate classes (ADR-0039 §3) ---------- */
+
+namespace {
+
+/* The PIDs channel 0 sends over n turns, each request waiting out its
+ * wait (no reply needed to move the rotation on). */
+std::vector<uint8_t> rotation_of(ecuio_request_engine* e, int n)
+{
+    std::vector<uint8_t> sent;
+    int64_t now = 0;
+    for (int k = 0; k < n; ++k) {
+        const int32_t r = ecuio_engine_due(e, 0, now);
+        if (r < 0) {
+            break;
+        }
+        sent.push_back(e->requests[r].bytes[1]);
+        ecuio_engine_sent(e, 0, r, true, now);
+        now += ECUIO_ENGINE_WAIT_US;
+        (void)ecuio_engine_expire(e, 0, now);
+    }
+    return sent;
+}
+
+} // namespace
+
+/* The obd2 set's requests take the classes obd2_rates.h gives their
+ * PIDs, and the rotation sends two fast ones (in set order) for each
+ * slow one (in set order), each class wrapping on its own: the fast
+ * class at the seventh request, the slow one at the fifteenth. */
+TEST(RequestEngineTest, TheObd2SetRunsTwoFastRequestsToOneSlow)
+{
+    ecuio_request_engine e;
+    ecuio_engine_init(&e, 1);
+    const uint32_t rx = ECUIO_OBD2_ECU_ARB_ID;
+    ASSERT_TRUE(
+        ecuio_engine_derive(&e, ecuio_obd2_signal_set(), &rx, 1, nullptr));
+    ecuio_engine_classify(&e, ecuio_obd2_pid_fast);
+    for (uint32_t i = 0; i < e.count; ++i) {
+        EXPECT_EQ(e.requests[i].slow != 0,
+                  !ecuio_obd2_pid_fast(e.requests[i].bytes[1]))
+            << "PID " << int(e.requests[i].bytes[1]);
+    }
+    const std::vector<uint8_t> want = {0x04, 0x0C, 0x05, 0x0D, 0x11, 0x0F,
+                                       0x10, 0x04, 0x2F, 0x0C, 0x0D, 0x42,
+                                       0x11, 0x10, 0x5C, 0x04, 0x0C, 0x05};
+    EXPECT_EQ(rotation_of(&e, static_cast<int>(want.size())), want);
+}
+
+/* A class with nothing to send gives its turns to the other: a table of
+ * one class, or one whose other class was dropped, rotates in table
+ * order. A table never classified is all fast. */
+TEST(RequestEngineTest, AClassWithNothingToSendGivesItsTurnsToTheOther)
+{
+    ecuio_request_engine e;
+    ASSERT_NO_FATAL_FAILURE(one_channel_of(&e, {0x05, 0x0F, 0x42}));
+    ecuio_engine_classify(&e, ecuio_obd2_pid_fast);
+    EXPECT_EQ(rotation_of(&e, 7),
+              (std::vector<uint8_t>{0x05, 0x0F, 0x42, 0x05, 0x0F, 0x42, 0x05}))
+        << "slow alone";
+
+    ASSERT_NO_FATAL_FAILURE(one_channel_of(&e, {0x04, 0x0C, 0x0D}));
+    ecuio_engine_classify(&e, ecuio_obd2_pid_fast);
+    EXPECT_EQ(rotation_of(&e, 7),
+              (std::vector<uint8_t>{0x04, 0x0C, 0x0D, 0x04, 0x0C, 0x0D, 0x04}))
+        << "fast alone";
+
+    ASSERT_NO_FATAL_FAILURE(one_channel_of(&e, {0x04, 0x05, 0x0C}));
+    ecuio_engine_classify(&e, ecuio_obd2_pid_fast);
+    e.requests[1].dropped = ECUIO_DROP_BITMAP;
+    EXPECT_EQ(rotation_of(&e, 5),
+              (std::vector<uint8_t>{0x04, 0x0C, 0x04, 0x0C, 0x04}))
+        << "the slow class dropped";
+
+    ASSERT_NO_FATAL_FAILURE(one_channel_of(&e, {0x05, 0x04}));
+    EXPECT_EQ(rotation_of(&e, 4),
+              (std::vector<uint8_t>{0x05, 0x04, 0x05, 0x04}))
+        << "never classified";
+}
+
+/* Only Service 01 requests take a class: a DID stays fast whatever the
+ * predicate says of its high byte. */
+TEST(RequestEngineTest, OnlyServiceOneRequestsAreClassified)
+{
+    ecuio_request_engine e;
+    ecuio_engine_init(&e, 1);
+    const uint8_t did[3] = {0x22, 0x05, 0x01}, pid[2] = {0x01, 0x05};
+    ASSERT_EQ(ecuio_engine_add(&e, 0, did, 3), ecuio_engine_add_result::added);
+    ASSERT_EQ(ecuio_engine_add(&e, 0, pid, 2), ecuio_engine_add_result::added);
+    ecuio_engine_classify(&e, ecuio_obd2_pid_fast);
+    EXPECT_EQ(e.requests[0].slow, 0u);
+    EXPECT_EQ(e.requests[1].slow, 1u);
 }
 
 /* ---------- the probe (ADR-0015 §4) ---------- */

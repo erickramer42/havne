@@ -21,6 +21,7 @@
 #include "ecuio/signal_sets.h"
 #include "ecuio/signals.h"
 #include "error_detail.h"
+#include "obd2_rates.h"
 #include "request_engine.h"
 #include "session.h"
 #include "uri_query.h"
@@ -238,7 +239,8 @@ inline uint32_t ecuio_poll_channel(const ecuio_signal_set_t* set, uint8_t pid,
  *   uds-generic   -> the rotation from the set's polled head, and the
  *                    scan of its ranges (ADR-0020)
  *   any other set -> the set's rotation (request_engine.h), which
- *                    registration kept within the table
+ *                    registration kept within the table; the obd2
+ *                    set's in its two rate classes (obd2_rates.h)
  *   no requests   -> passive receive
  * then identification (ADR-0021) when the session already requests and
  * neither ?identify=0 nor ?poll=, and diagnostics (ADR-0037, decoded by
@@ -263,6 +265,9 @@ inline ecuio_status_t ecuio_build_requests(
             sizeof(req));
     } else if (session->uds == nullptr) {
         (void)ecuio_engine_derive(e, set, rx_ids, chan_count, nullptr);
+        if (set == ecuio_obd2_signal_set()) {
+            ecuio_engine_classify(e, ecuio_obd2_pid_fast); /* ADR-0039 */
+        }
     } else {
         /* uds-generic (ADR-0020): the rotation from the set's polled
          * head, then each scanned DID once, on the channel of its ECU by

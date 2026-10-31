@@ -1179,10 +1179,12 @@ TEST(J2534StreamTest, UnknownProfileRejectedAtCreate)
 // ADR-0013: obd2 scheduler mode, rotation, coupling, drain
 // ---------------------------------------------------------------------------
 
-/* ROTATION: ?profile=obd2&filter=0x7E8, the worker requests PIDs
- * round-robin in set order. Rotation order is asserted from the fake's
- * recorded WRITES (deterministic, one per reply), not from received
- * frames. ?probe=0 leaves out the bitmaps the probe asks first
+/* ROTATION: ?profile=obd2&filter=0x7E8, the worker requests the obd2
+ * set's PIDs in its two rate classes (ADR-0039 §3): two fast ones (04,
+ * 0C, 0D, 11, 10, in set order), then one slow one (05, 0F, 2F, 42, 5C),
+ * each class round-robin. Order is asserted from the fake's recorded
+ * WRITES (deterministic, one per reply), not from received frames.
+ * ?probe=0 leaves out the bitmaps the probe asks first
  * (ProbeWalksTheChainBeforeTheRotation). */
 TEST_F(J2534AdoptionTest, Obd2SchedulerRotatesPidsInSetOrder)
 {
@@ -1200,35 +1202,14 @@ TEST_F(J2534AdoptionTest, Obd2SchedulerRotatesPidsInSetOrder)
               ECUIO_OK);
     ASSERT_EQ(ecuio_session_start(session), ECUIO_OK);
 
-    /* 3 requests, at least the floor apart; budget 2 s for CI variance. */
-    wait_for_writes(get_write_count, 3, 200);
-
-    unsigned char wbuf[64] = {};
-    unsigned long wlen = 0, wflags = 0;
-
-    get_recorded_write(0, wbuf, &wlen, &wflags);
-    ASSERT_EQ(wlen, 6u);
-    EXPECT_EQ(wbuf[4], 0x01u);
-    EXPECT_EQ(wbuf[5], 0x04u);               /* PID: calculated load */
-    get_recorded_write(1, wbuf, &wlen, &wflags);
-    ASSERT_EQ(wlen, 6u);
-    EXPECT_EQ(wbuf[5], 0x05u);               /* coolant */
-    get_recorded_write(2, wbuf, &wlen, &wflags);
-    ASSERT_EQ(wlen, 6u);
-    EXPECT_EQ(wbuf[5], 0x0Cu);              /* RPM */
-    wait_for_writes(get_write_count, 11, 250);
-    /* The rotation follows kObd2Defs order. With 10 defs, MAF (0x10) and
-     * Oil Temp (0x5C), the last two, take writes 8 and 9, and write 10 wraps
-     * to PID 0x04. */
-    get_recorded_write(8, wbuf, &wlen, &wflags);
-    ASSERT_EQ(wlen, 6u);
-    EXPECT_EQ(wbuf[5], 0x10u);               /* MAF */
-    get_recorded_write(9, wbuf, &wlen, &wflags);
-    ASSERT_EQ(wlen, 6u);
-    EXPECT_EQ(wbuf[5], 0x5Cu);               /* Oil Temp */
-    get_recorded_write(10, wbuf, &wlen, &wflags);
-    ASSERT_EQ(wlen, 6u);
-    EXPECT_EQ(wbuf[5], 0x04u);              /* wrapped: round-robin */
+    /* The page keeps the first 16 writes: both classes wrap inside them
+     * (the fast one at write 7, the slow one at write 15). */
+    wait_for_writes(get_write_count, 16, 250);
+    const uint8_t want[16] = {0x04, 0x0C, 0x05, 0x0D, 0x11, 0x0F, 0x10, 0x04,
+                              0x2F, 0x0C, 0x0D, 0x42, 0x11, 0x10, 0x5C, 0x04};
+    for (unsigned long i = 0; i < 16; ++i) {
+        expect_write(i, 0x01, want[i]);
+    }
 
     /* RX: the next request waits for the reply to the last, so the
      * first three received frames answer the first three requests in
@@ -1240,10 +1221,10 @@ TEST_F(J2534AdoptionTest, Obd2SchedulerRotatesPidsInSetOrder)
         EXPECT_EQ(cap.payloads[i][0], 0x41u);
     }
     EXPECT_EQ(cap.payloads[0][1], 0x04u);
-    EXPECT_EQ(cap.payloads[1][1], 0x05u);
-    EXPECT_EQ(cap.payloads[2][1], 0x0Cu);
-    EXPECT_EQ(cap.payloads[2][2], 0x1Fu);
-    EXPECT_EQ(cap.payloads[2][3], 0x40u);
+    EXPECT_EQ(cap.payloads[1][1], 0x0Cu);
+    EXPECT_EQ(cap.payloads[1][2], 0x1Fu);
+    EXPECT_EQ(cap.payloads[1][3], 0x40u);
+    EXPECT_EQ(cap.payloads[2][1], 0x05u);
     EXPECT_EQ(ecuio_session_close(session), ECUIO_OK);
     ecuio_session_destroy(session);
 }
@@ -1600,8 +1581,8 @@ TEST_F(J2534AdoptionTest, ProbeWalksTheChainBeforeTheRotation)
     expect_write(3, 0x01, 0x60);
     expect_write(4, 0x01, 0x80);
     expect_write(5, 0x01, 0xA0);
-    expect_write(6, 0x01, 0x04); /* the rotation, in set order */
-    expect_write(7, 0x01, 0x05);
+    expect_write(6, 0x01, 0x04); /* the rotation: two fast, one slow */
+    expect_write(7, 0x01, 0x0C);
 
     ecuio_channel_support_t s = {};
     EXPECT_TRUE(wait_for_support(session, s, [](const ecuio_channel_support_t& r) {
@@ -1906,7 +1887,7 @@ TEST_F(J2534AdoptionTest, IdentificationAsksTheListOnceAndReportsIt)
     /* The rotation's first request, then the first item, and so on. */
     expect_write(0, 0x01, 0x04);
     expect_write(1, 0x09, 0x02);
-    expect_write(2, 0x01, 0x05);
+    expect_write(2, 0x01, 0x0C);
     expect_write(3, 0x09, 0x04);
 
     const char* want_text[] = {
@@ -2027,7 +2008,7 @@ TEST_F(J2534AdoptionTest, DiagnosticsReadTheFakeEcusReport)
      * and each code list, a service byte alone */
     expect_write(0, 0x01, 0x04);
     expect_write(1, 0x01, 0x01);
-    expect_write(2, 0x01, 0x05);
+    expect_write(2, 0x01, 0x0C);
     const uint8_t lists[] = {0x03, 0x07, 0x0A};
     for (unsigned long k = 0; k < 3; ++k) {
         unsigned char wbuf[64] = {};
