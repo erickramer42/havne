@@ -2415,7 +2415,8 @@ TEST(BridgeTest, ConnectLogsTheAdaptersSession)
 
 /* The probe's answer reaches the activity log once: the fake's ECU lists
  * every linear PID J1979 defines, with 01, 41 and 7F, across its six
- * bitmaps, so nothing the set asks is dropped. */
+ * bitmaps, so nothing the set asks is dropped. The fake answers packed
+ * requests, so a second line says so, and nothing more follows. */
 TEST(BridgeTest, ConnectLogsWhatTheEcuSupports)
 {
     SessionBridge bridge;
@@ -2428,12 +2429,15 @@ TEST(BridgeTest, ConnectLogsWhatTheEcuSupports)
     const auto ecu_lines = [&log]() {
         return log.filter(QStringLiteral("ECU 0x7E8:"));
     };
-    ASSERT_TRUE(spinUntil([&]() { return !ecu_lines().isEmpty(); }, 5000))
-        << "no ECU line in the log";
+    ASSERT_TRUE(spinUntil([&]() { return ecu_lines().size() >= 2; }, 5000))
+        << ecu_lines().join('\n').toStdString();
     spinLoop(300);
-    ASSERT_EQ(ecu_lines().size(), 1) << ecu_lines().join('\n').toStdString();
-    EXPECT_EQ(ecu_lines().first().toStdString(),
+    ASSERT_EQ(ecu_lines().size(), 2) << ecu_lines().join('\n').toStdString();
+    EXPECT_EQ(ecu_lines().at(0).toStdString(),
               "ECU 0x7E8: supports 95 PIDs; 92 requests, none dropped");
+    EXPECT_EQ(ecu_lines().at(1).toStdString(),
+              "ECU 0x7E8: supports 95 PIDs; 92 requests, none dropped; "
+              "several PIDs per request");
 
     /* Identification (ADR-0021) logs one line once every item has an
      * outcome: the fake's FAKE values, and the two DIDs it refuses. */
@@ -3115,6 +3119,17 @@ TEST(BridgeTest, ChannelSupportTextNamesTheEcuAndWhatItDropped)
     all.pid_bitmap[0] = 0x81;   /* PIDs 01 and 08 */
     EXPECT_EQ(SessionBridge::channelSupportText(all).toStdString(),
               "ECU 0x18DAF110: supports 2 PIDs; 1 request, none dropped");
+
+    /* Packing (ADR-0039 Appendix A): answered, then given up */
+    ecuio_channel_support_t packed = all;
+    packed.flags |= ECUIO_SUPPORT_PACKED;
+    EXPECT_EQ(SessionBridge::channelSupportText(packed).toStdString(),
+              "ECU 0x18DAF110: supports 2 PIDs; 1 request, none dropped; "
+              "several PIDs per request");
+    packed.flags |= ECUIO_SUPPORT_UNPACKED;
+    EXPECT_EQ(SessionBridge::channelSupportText(packed).toStdString(),
+              "ECU 0x18DAF110: supports 2 PIDs; 1 request, none dropped; "
+              "one PID per request, several went unanswered");
 
     ecuio_channel_support_t part = all;
     part.flags = ECUIO_SUPPORT_PROBED;

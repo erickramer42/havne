@@ -2005,7 +2005,9 @@ void SessionBridge::pollAbsentSignals()
 }
 
 /* One channel's "ECU 0x…:" line: what its supported-PID bitmaps list,
- * and which requests left the rotation, and why. Static, like
+ * which requests left the rotation, and why, and whether its Service 01
+ * requests carry several PIDs (ADR-0039 Appendix A): packing starting or
+ * ending brings a new line, which must not read like the last. Static, like
  * sessionInfoText, so test_bridge pins the wording without an adapter. */
 QString SessionBridge::channelSupportText(const ecuio_channel_support_t& s)
 {
@@ -2079,6 +2081,12 @@ QString SessionBridge::channelSupportText(const ecuio_channel_support_t& s)
                     gone.join(QStringLiteral(", "));
     }
     parts << requests;
+
+    if ((s.flags & ECUIO_SUPPORT_UNPACKED) != 0) {
+        parts << QStringLiteral("one PID per request, several went unanswered");
+    } else if ((s.flags & ECUIO_SUPPORT_PACKED) != 0) {
+        parts << QStringLiteral("several PIDs per request");
+    }
 
     /* The DID scan (ADR-0020): how many DIDs it covers and what each
      * answer was; found ones are polled unless the table was full. */

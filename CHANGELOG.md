@@ -72,8 +72,9 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
   pass asks the same signals in fewer requests; `?pack=0` asks one PID
   per request. A car that answers such requests with silence, a refusal
   or one PID three times in a row is asked one PID per request for the
-  session, and its support report says so. On the test car through the
-  MX+, each signal refreshed four to five times as often.
+  session, and its support report says so, as does the activity log's
+  ECU line. On the test car through the MX+, each signal refreshed four
+  to five times as often.
 - Core decodes a Service 01 reply that carries several PIDs (as
   J1979 allows, and as other tools' recordings may hold) record by
   record, using each PID's length as the car sends it;
