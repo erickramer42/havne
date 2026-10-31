@@ -33,9 +33,11 @@ the same car through the OBDLink MX+ over Bluetooth and the VX in ELM
 mode over USB
 ([2026-10-27](docs/bench-sessions/2026-10-27-elm327-vehicle.md)), and
 the Android app reaches the car through the phone's Bluetooth, in the
-background too. v0.3.5 has begun with trouble codes, read and cleared,
-and every linear reading of the Service 01 table in the `obd2` set;
-SocketCAN requests come next ([roadmap](#roadmap)).
+background too. v0.3.5 has trouble codes, read and cleared, every
+linear reading of the Service 01 table in the `obd2` set, and SocketCAN
+requests through ISO-TP in core; fault injection on a replay and a
+performance benchmark come next, and the runs that need hardware move to
+v0.3.6 ([roadmap](#roadmap)).
 
 - **Works:**
   - **Mock transport,** on every platform: a scripted drive cycle (15 s
@@ -149,17 +151,28 @@ SocketCAN requests come next ([roadmap](#roadmap)).
     refusals; a stop from outside ends it cleanly (SIGINT and SIGTERM
     tested on Linux and macOS, Ctrl+Break on Windows), and so does a
     reader closing the pipe (`| head`).
-  - **SocketCAN, listening** ([ADR-0032](docs/adr/0032-socketcan-listening.md)),
-    on Linux: `socketcan://can0` reads a CAN interface's whole bus (or
-    `?filter=`'s IDs) with the kernel's receive times, CAN FD and error
-    frames included, and sends nothing. Core reads the interface and
-    never configures it: a controller that isn't in listen-only mode is
-    refused, with the `ip link` commands that make it so. Settings and
-    `havne-cli devices` list the interfaces. `havne-cli play mock://demo
-    --to vcan0` drives the simulated car on a virtual bus, so the whole
-    path runs with no hardware: verified on `vcan0` (on CI too); no real
-    controller has run yet (BENCH prep #26). Profiles that request
-    (`obd2`, `uds-generic`) wait for ISO-TP.
+  - **SocketCAN** ([ADR-0032](docs/adr/0032-socketcan-listening.md),
+    [ADR-0040](docs/adr/0040-socketcan-requests-isotp.md)), on Linux.
+    Core reads the interface and never configures it, and each refusal
+    names the `ip link` commands that fix it. Settings and `havne-cli
+    devices` list the interfaces.
+    - **Listening:** `socketcan://can0` reads a CAN interface's whole
+      bus (or `?filter=`'s IDs) with the kernel's receive times, CAN FD
+      and error frames included, through a controller in listen-only
+      mode, and sends nothing. `havne-cli play mock://demo --to vcan0`
+      drives the simulated car on a virtual bus.
+    - **Requests:** `obd2` and `uds-generic` run through ISO-TP in core
+      (`core/src/isotp.h`, the reassembly ELM327 uses too), with the
+      request keys of the other two transports. A real controller must
+      be in normal mode at the rate `?baud=` states, never restart
+      itself, be in one-shot mode and be error-active; until its first
+      request comes back from the bus, a CAN error ends the sending.
+    - Verified on `vcan0` (on CI too): listening, and requests against
+      the fakes' ECU answering through the kernel's ISO-TP, core's
+      ISO-TP held to the kernel's as well. No real controller has run
+      yet (BENCH prep #26, #32): the one on hand, an Innomaker USB2CAN,
+      offers no one-shot mode, and whether to require it is the desk
+      run's to settle (ADR-0040 section 2, v0.3.6).
   - **Linux** ([docs/linux.md](docs/linux.md)): the app as an
     AppImage, and core alone as a deb and a tarball (`havne-cli`, the
     static library, its C headers, a CMake package and a pkg-config
@@ -326,8 +339,8 @@ an issue is resolved it is removed, and its number is not reused.
 | v0.3.2 | Record-replay transport, decoding on the transport's thread, every driver in its own process | ✅ Released |
 | v0.3.3 | ELM327 adapters, preferences and vehicles, Android with Bluetooth and background sessions and a signed APK, the rename to Havne | ✅ Released |
 | v0.3.4 | A command-line client over the C ABI; Linux as a supported desktop; a SocketCAN transport that listens | ✅ Released |
-| v0.3.5 | Full OBD-II diagnostics (Services 01–0A, clearing codes); SocketCAN requests through ISO-TP; fault injection on a replay; a performance benchmark with latency per PID | In progress: reading and clearing codes, and the full Service 01 set, built |
-| v0.3.6–v0.3.9 | Recordings you can open, compare and share: a log viewer with run overlay, CSV import and export with scrubbing, a health report, triggered logging and alerts | Planned |
+| v0.3.5 | Full OBD-II diagnostics (Services 01–0A, clearing codes); SocketCAN requests through ISO-TP; fault injection on a replay; a performance benchmark with latency per PID | In progress: reading and clearing codes, the full Service 01 set and SocketCAN requests built |
+| v0.3.6–v0.3.9 | The hardware runs v0.3.5 leaves (SocketCAN through a real controller and on a car, packing through the VX); recordings you can open, compare and share: a log viewer with run overlay, CSV import and export with scrubbing, a health report, triggered logging and alerts | Planned |
 | v0.4.0 | Python bindings; PCAP export and candump import; ECU, DID and service discovery (needs requests to every ECU and listening to the whole bus first) | Proposed |
 | v0.5.0 | The plugin framework (ADR-0013's profile API), with no manufacturer plugin yet; legacy buses (ISO 9141-2, KWP2000, J1850) | Proposed |
 
@@ -352,8 +365,7 @@ scheduled. What each holds, past its row:
   to six PIDs of a class per request, falling back to one per request
   for a car that mishandles them; on the test car through the MX+ each
   signal refreshed four to five times as often (BENCH prep #31); the
-  VX's run is next
-  (ADR-0039's Appendix A), now that the car has run the classes. The bit-field, enumerated and complex PIDs wait for decoder
+  VX's run is v0.3.6's (ADR-0039's Appendix A). The bit-field, enumerated and complex PIDs wait for decoder
   kinds of their own (ADR-0039 §2).
 - **Trouble codes:** reading is built
   ([ADR-0037](docs/adr/0037-reading-trouble-codes.md)): stored, pending
@@ -368,20 +380,22 @@ scheduled. What each holds, past its row:
   on the fakes and the simulated car. A car's clear waits for one with
   a code worth clearing and a drive to bring its monitors back (BENCH
   prep #29).
-- **SocketCAN requests:** ISO-TP segmentation, which J2534 and ELM327
-  adapters do themselves, so the request engine and the profiles run on
-  a native CAN interface. An ADR first, which also revisits
-  [ADR-0032](docs/adr/0032-socketcan-listening.md)'s listen-only rule:
-  a session that sends needs the controller in normal mode, so it says
-  when that's allowed and what then guards a car's bus against a wrong
-  bit rate.
-  - The simulated ECU on `vcan0` answers requests through ISO-TP (the
-    fakes' ECU, `tests/fake_ecu.h`), so all of it runs with no car.
-  - Conformance tests against it: STmin, block sizes, wait frames,
-    flow-control overflow, the N_Bs and N_Cr timeouts, out-of-order
-    sequence numbers. Adapters hide these; on SocketCAN they're core's
-    to get right.
-  - A fuzz target for the ISO-TP reassembly.
+- **SocketCAN requests** are built
+  ([ADR-0040](docs/adr/0040-socketcan-requests-isotp.md), proposed):
+  ISO-TP in core, which J2534 and ELM327 adapters do themselves, so the
+  request engine and the profiles run on a native CAN interface. A
+  session that sends needs the controller in normal mode, so ADR-0040
+  revisits ADR-0032's listen-only rule: the rate stated in `?baud=`, no
+  restart after a bus-off, one-shot mode, error-active, and a first
+  request that comes back from the bus before a second goes out (ISO
+  15765-4's procedure for a wrong rate).
+  - The fakes' ECU on `vcan0` answers requests through the kernel's
+    ISO-TP, so the probe, identification and the diagnostics report
+    run with no car.
+  - Conformance: the receiver and the sender against the kernel's
+    (lengths to 4095 bytes, block sizes, STmin, N_Cr), unit tests of
+    every frame kind, wait frames, overflow and N_Bs, and a fuzz target
+    (`fuzz_isotp`) beside the ELM327 one, which shares the reassembly.
 - **Fault injection on a replay:** frames dropped, delayed or corrupted
   (a bad ISO-TP sequence, a late reply) in a replayed session, so the
   error handling is proven against real traffic with no vehicle.
@@ -394,16 +408,24 @@ scheduled. What each holds, past its row:
   P99, P99.9), as a `latency.csv` per session. A J2534 frame carries
   the adapter's time and an ELM327's the host's, whose jitter includes
   the serial link's, so the output says which.
-- **Done when:** a script reads a live car through SocketCAN at a
-  documented rate. Python bindings come in v0.4.0, so the script is
-  `havne-cli`. The car run needs a SocketCAN adapter and an OBD-to-DB9
-  cable (BENCH prep #26).
+- **Done when:** trouble codes, the full Service 01 set, SocketCAN
+  requests, fault injection on a replay and the benchmark are built
+  and verified with no hardware: the fakes, replays of the test car,
+  `vcan0`. The runs that need hardware are v0.3.6's.
 
 ### v0.3.6 to v0.3.9: recordings you can open, compare and share
 
 A recording becomes something to open offline, line up against
 another, bring in from another logger and post safely; the split
 across the four releases is decided as they come.
+
+- **First, the hardware runs v0.3.5 leaves:** SocketCAN sending through
+  a real controller on the desk, which settles whether ADR-0040
+  requires one-shot mode (BENCH prep #32); then a script reading the
+  test car through SocketCAN at a documented rate, the CLI's
+  `havne-cli` (Python bindings come in v0.4.0), listen-only first
+  (BENCH prep #26 and #19); and several PIDs per request through the
+  VX (BENCH prep #31's other half).
 
 - **A log viewer:** a recording opened offline with seeking, zoom and
   markers, and two runs overlaid on a common zero (a threshold

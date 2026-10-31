@@ -11,7 +11,7 @@ the vehicle I/O and decoding behind a C ABI; a Qt 6 / QML front end
 draws the results on Windows, Linux, macOS and Android. It talks to
 J2534 Pass-Thru adapters on Windows, to ELM327-compatible adapters
 everywhere (USB, Bluetooth, WiFi) and to native CAN interfaces on Linux
-through SocketCAN, listening only. `havne-cli` streams any session as
+through SocketCAN. `havne-cli` streams any session as
 JSON lines for scripts, and a simulated vehicle runs every page with no
 hardware.
 
@@ -100,9 +100,11 @@ a quarter mile off launch control on a warm loop.*
   with sessions that keep running in the background
   ([ADR-0028](docs/adr/0028-app-fed-streams.md),
   [ADR-0029](docs/adr/0029-android-background-sessions.md)); and a
-  native CAN interface on Linux through SocketCAN, listen-only, every
-  frame on the bus or the IDs a filter names
+  native CAN interface on Linux through SocketCAN: listen-only, every
+  frame on the bus or the IDs a filter names, or asking the car through
+  ISO-TP in core
   ([ADR-0032](docs/adr/0032-socketcan-listening.md),
+  [ADR-0040](docs/adr/0040-socketcan-requests-isotp.md),
   [docs/linux.md](docs/linux.md)).
 - **A command-line client.** `havne-cli stream <uri>` writes any
   session's frames, decoded values and link health as JSON lines for
@@ -164,8 +166,8 @@ mode: each session as it happened, then the frames as they arrive.*
    ├── mock://    a scripted drive on a vehicle model
    ├── replay://  a recording's frames.csv at its own pace
    ├── elm327://  a serial port, a WiFi socket, or a link the app opens
-   ├── socketcan:// a Linux CAN interface, listen-only (havne-cli play
-   │              drives the simulated car on a virtual one)
+   ├── socketcan:// a Linux CAN interface, listening or through ISO-TP
+   │              (havne-cli play drives the simulated car on a virtual one)
    └── j2534://   a surrogate process per driver, over a named pipe
           ├── ecuio-j2534-surrogate.exe      (32-bit drivers)
           └── ecuio-j2534-surrogate-x64.exe  (64-bit drivers)

@@ -1,6 +1,7 @@
 # ADR-0040: SocketCAN requests: ISO-TP in core, and a controller that sends only after its first request proves the rate
 
-- **Status:** Proposed.
+- **Status:** Proposed. Built on 2026-10-31 and verified on `vcan0`;
+  section 2's one-shot rule waits for the desk run (BENCH prep #32).
 - **Date:** 2026-10-31.
 - **Builds on:** [ADR-0032](0032-socketcan-listening.md) (the
   transport, the netlink checks, the simulated car on `vcan0`);
@@ -211,10 +212,12 @@ keeps ADR-0032's list of IDs and masks.
   measures what SocketCAN needs.
 - Nothing is allocated per frame (`CoreTest.WorkersAllocateNothingPerFrame`'s
   rule): the receiver's slots live in the transport.
-- **Reports:** the session info gets a flag for one-shot mode beside
-  `ECUIO_SESSION_INFO_LISTEN_ONLY`; ISO-TP's counts are read through a
-  getter in `ecuio/socketcan.h`, and the bridge's activity log writes
-  a line when they change, as it does for unsplit replies.
+- **Counts:** the receiver counts the messages it finishes and drops
+  and the frames no message could use (section 1); they reach the user
+  with the benchmark's report per session (STATUS, v0.3.5), not as a
+  getter of their own. While section 2 requires one-shot mode, a
+  session that sends always has it, so the session info has no flag
+  for it.
 
 ### 6. The simulated ECU answers through ISO-TP
 

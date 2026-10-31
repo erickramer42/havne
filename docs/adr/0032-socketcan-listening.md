@@ -1,6 +1,8 @@
 # ADR-0032: SocketCAN, listening, `socketcan://` reads a Linux CAN interface, listen-only, and a simulated ECU feeds it
 
-- **Status:** Accepted.
+- **Status:** Accepted. Amended by
+  [ADR-0040](0040-socketcan-requests-isotp.md): see the appendix of
+  2026-10-31.
 - **Date:** 2026-10-29. Implemented with this record.
 - **Builds on:** [ADR-0007](0007-uri-selected-transports.md) (a
   transport per URI scheme); [ADR-0013](0013-protocol-profiles.md)
@@ -277,3 +279,14 @@ same way.
   - Profiles built on requests don't run on SocketCAN until v0.3.5.
   - Nothing is verified against a real controller until a CAN adapter
     is on hand.
+
+## Appendix: requests (2026-10-31)
+
+> **Amended 2026-10-31 ([ADR-0040](0040-socketcan-requests-isotp.md)):**
+> a profile that requests (`obd2`, `uds-generic`) runs on
+> `socketcan://`, through ISO-TP in core, and the request keys come with
+> it. Section 3's refusal of such a profile, and section 2's rule that
+> every controller be listen-only, now hold for listening sessions only:
+> a requesting session needs a controller in normal mode, at the rate
+> `?baud=` states, with no restart after a bus-off, in one-shot mode and
+> error-active (ADR-0040 section 2).
