@@ -18,6 +18,9 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QHash>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QRegularExpression>
 #include <QSettings>
 #include <QStringList>
@@ -2539,6 +2542,97 @@ TEST(BridgeTest, RecordingFolderNamesThePickedVehicleForAnAdapterOnly)
         << folders.join(',').toStdString();
 }
 
+/* ADR-0038 through the fake J2534 DLL, whose engine turns (2000 rpm):
+ * the clear ends unsent in one line, and the generations it moved log
+ * no second diagnostics line; a Read again after it logs its read */
+TEST(BridgeTest, AClearRefusedForTheEngineLogsOneLineAndNoRead)
+{
+    FakeHooks hooks;
+    ASSERT_TRUE(hooks.load());
+    QTemporaryDir root;
+    ASSERT_TRUE(root.isValid());
+    SessionBridge bridge;
+    bridge.setRecordingsRootForTesting(root.path());
+    QStringList log;
+    QObject::connect(&bridge, &SessionBridge::logMessage,
+                     [&log](const QString& line) { log << line; });
+    const auto diagnostics_lines = [&log]() {
+        return log.filter(QStringLiteral("ECU 0x7E8 diagnostics: "));
+    };
+    const auto clear_lines = [&log]() {
+        return log.filter(QStringLiteral("ECU 0x7E8 clear: "));
+    };
+    ASSERT_TRUE(
+        bridge
+            .connectSession(QStringLiteral("j2534://%1?probe=0&identify=0")
+                                .arg(QString::fromUtf8(FAKE_J2534_DLL_PATH)))
+            .isEmpty());
+    ASSERT_TRUE(
+        spinUntil([&]() { return diagnostics_lines().size() == 1; }, 5000));
+    EXPECT_FALSE(bridge.clearDiagnostics().isEmpty());
+    ASSERT_TRUE(spinUntil([&]() { return !clear_lines().isEmpty(); }, 5000));
+    spinLoop(500);
+    ASSERT_EQ(clear_lines().size(), 1) << log.join('\n').toStdString();
+    EXPECT_EQ(clear_lines().first().toStdString(),
+              "ECU 0x7E8 clear: not sent: engine running (2000 rpm)");
+    EXPECT_EQ(diagnostics_lines().size(), 1) << log.join('\n').toStdString();
+
+    bridge.readDiagnostics();
+    ASSERT_TRUE(
+        spinUntil([&]() { return diagnostics_lines().size() == 2; }, 5000))
+        << "a read after the clear logs";
+    EXPECT_EQ(diagnostics_lines().at(1).toStdString(), kFakeEcuDiagnosticsLine);
+    spinLoop(300);
+    EXPECT_EQ(clear_lines().size(), 1) << "one line per clear asked";
+    ASSERT_TRUE(disconnectAndWait(bridge));
+}
+
+/* With the fake's engine stopped the clear goes through: its line, then
+ * the read after it, once, though the report passes through an
+ * incomplete read on the way; an adapter's file names the vehicle */
+TEST(BridgeTest, AClearAtTheFakesStoppedEngineLogsTheReadAfter)
+{
+    FakeHooks hooks;
+    ASSERT_TRUE(hooks.load());
+    FakeEnvArm off("ECUIO_FAKE_ENGINE_OFF", "1");
+    QTemporaryDir root;
+    ASSERT_TRUE(root.isValid());
+    SessionBridge bridge;
+    bridge.setRecordingsRootForTesting(root.path());
+    bridge.setVehicleLabel(QStringLiteral("Daily driver"));
+    QStringList log;
+    QObject::connect(&bridge, &SessionBridge::logMessage,
+                     [&log](const QString& line) { log << line; });
+    const auto diagnostics_lines = [&log]() {
+        return log.filter(QStringLiteral("ECU 0x7E8 diagnostics: "));
+    };
+    ASSERT_TRUE(
+        bridge
+            .connectSession(QStringLiteral("j2534://%1?probe=0&identify=0")
+                                .arg(QString::fromUtf8(FAKE_J2534_DLL_PATH)))
+            .isEmpty());
+    ASSERT_TRUE(
+        spinUntil([&]() { return diagnostics_lines().size() == 1; }, 5000));
+    const QString shown = bridge.clearDiagnostics();
+    EXPECT_TRUE(QRegularExpression(
+                    QStringLiteral(
+                        "diagnostics-[0-9]{8}-[0-9]{6} Daily driver\\.jsonl$"))
+                    .match(shown)
+                    .hasMatch())
+        << shown.toStdString();
+    ASSERT_TRUE(
+        spinUntil([&]() { return diagnostics_lines().size() == 2; }, 5000))
+        << log.join('\n').toStdString();
+    spinLoop(500);
+    EXPECT_EQ(log.filter(QStringLiteral("ECU 0x7E8 clear: ")),
+              QStringList{QStringLiteral("ECU 0x7E8 clear: cleared")});
+    ASSERT_EQ(diagnostics_lines().size(), 2) << log.join('\n').toStdString();
+    EXPECT_TRUE(diagnostics_lines().at(1).contains(
+        QStringLiteral("MIL off; stored none; pending none; permanent P0420")))
+        << diagnostics_lines().at(1).toStdString();
+    ASSERT_TRUE(disconnectAndWait(bridge));
+}
+
 #endif  // _WIN32
 
 // ---------------------------------------------------------------------------
@@ -3264,6 +3358,183 @@ TEST(BridgeTest, DiagnosticsFollowTheSession)
     ASSERT_TRUE(
         spinUntil([&]() { return !bridge.diagnostics().isEmpty(); }, 2000));
     EXPECT_FALSE(bridge.diagnostics().at(0).toMap().value("asked").toBool());
+    ASSERT_TRUE(disconnectAndWait(bridge));
+}
+
+/* A clear's line for each outcome (ADR-0038), as the activity log
+ * and a recording's events.log keep it */
+TEST(BridgeTest, ChannelClearTextNamesEachOutcome)
+{
+    ecuio_channel_diagnostics_t d{};
+    d.rx_id = 0x7E8;
+    const auto text = [&d](uint8_t clear, uint8_t nrc, uint32_t rpm) {
+        d.clear = clear;
+        d.clear_nrc = nrc;
+        d.clear_rpm = rpm;
+        return SessionBridge::channelClearText(d).toStdString();
+    };
+    EXPECT_EQ(text(ECUIO_CLEAR_CLEARED, 0, 0), "ECU 0x7E8 clear: cleared");
+    EXPECT_EQ(text(ECUIO_CLEAR_REFUSED, 0x22, 0),
+              "ECU 0x7E8 clear: refused (7F 04 22)");
+    EXPECT_EQ(text(ECUIO_CLEAR_UNANSWERED, 0, 0), "ECU 0x7E8 clear: no answer");
+    EXPECT_EQ(text(ECUIO_CLEAR_ENGINE_RUNNING, 0, 812),
+              "ECU 0x7E8 clear: not sent: engine running (812 rpm)");
+    EXPECT_EQ(text(ECUIO_CLEAR_NO_ENGINE_SPEED, 0, 0),
+              "ECU 0x7E8 clear: not sent: no engine speed");
+    EXPECT_EQ(text(ECUIO_CLEAR_NO_ENGINE_SPEED, 0x12, 0),
+              "ECU 0x7E8 clear: not sent: no engine speed (7F 01 12)");
+    EXPECT_EQ(text(ECUIO_CLEAR_REPORT_CHANGED, 0, 0),
+              "ECU 0x7E8 clear: not sent: the report changed");
+    EXPECT_EQ(text(ECUIO_CLEAR_NONE, 0, 0), "ECU 0x7E8 clear: not asked");
+
+    /* The page's entry carries the same */
+    d.clear = ECUIO_CLEAR_REFUSED;
+    d.clear_nrc = 0x22;
+    QVariantMap e = SessionBridge::diagnosticsEntry(d, ECUIO_UNITS_METRIC);
+    EXPECT_EQ(e.value("clear").toString(), QStringLiteral("refused"));
+    EXPECT_EQ(e.value("clearNrc").toString(), QStringLiteral("7F 04 22"));
+    EXPECT_FALSE(e.value("clearing").toBool());
+    d.clear = ECUIO_CLEAR_ENGINE_RUNNING;
+    d.clear_nrc = 0;
+    d.clear_rpm = 812;
+    d.flags = ECUIO_DIAG_CLEARING;
+    e = SessionBridge::diagnosticsEntry(d, ECUIO_UNITS_METRIC);
+    EXPECT_EQ(e.value("clear").toString(), QStringLiteral("engineRunning"));
+    EXPECT_EQ(e.value("clearRpm").toInt(), 812);
+    EXPECT_TRUE(e.value("clearing").toBool());
+}
+
+/* The saved file is havne-cli's: a start line, then each report as its
+ * diagnostics line, here the mock's before any clear */
+TEST(BridgeTest, DiagnosticsFileTextIsTheCliLines)
+{
+    ecuio_session_t* s = nullptr;
+    ASSERT_EQ(ecuio_session_create("mock://file", &s), ECUIO_OK);
+    ecuio_channel_diagnostics_t d{};
+    ASSERT_EQ(ecuio_session_get_channel_diagnostics(s, 0, &d), ECUIO_OK);
+    ecuio_session_destroy(s);
+
+    const QList<QByteArray> lines =
+        SessionBridge::diagnosticsFileText(&d, 1).split('\n');
+    ASSERT_EQ(lines.size(), 3) << "two lines, each ended";
+    EXPECT_TRUE(lines.at(2).isEmpty());
+    const QJsonObject start = QJsonDocument::fromJson(lines.at(0)).object();
+    EXPECT_EQ(start.value("type").toString(), QStringLiteral("start"));
+    EXPECT_EQ(start.value("schema").toInt(), 1);
+    EXPECT_EQ(start.value("core").toString(),
+              QString::fromUtf8(ecuio_version_string()));
+    const QJsonObject line = QJsonDocument::fromJson(lines.at(1)).object();
+    EXPECT_EQ(line.value("type").toString(), QStringLiteral("diagnostics"));
+    EXPECT_EQ(line.value("rx").toString(), QStringLiteral("0x7E8"));
+    EXPECT_EQ(line.value("generation").toInt(), static_cast<int>(d.generation));
+    EXPECT_TRUE(line.value("readiness").toObject().value("mil").toBool());
+    const QJsonArray stored =
+        line.value("stored").toObject().value("codes").toArray();
+    ASSERT_EQ(stored.size(), 3);
+    EXPECT_EQ(stored.at(0).toString(), QStringLiteral("P0301"));
+    EXPECT_EQ(line.value("freeze").toObject().value("code").toString(),
+              QStringLiteral("P0301"));
+}
+
+/* ADR-0038 on the mock, which starts each loop with its engine stopped:
+ * the report goes to a file of its own first (no vehicle in a mock's
+ * name), then the clear, its line, and the read after it, the only
+ * other diagnostics line */
+TEST(BridgeTest, AClearSavesTheReportFirst)
+{
+    QTemporaryDir root;
+    ASSERT_TRUE(root.isValid());
+    SessionBridge bridge;
+    bridge.setRecordingsRootForTesting(root.path());
+    bridge.setVehicleLabel(QStringLiteral("Daily driver"));
+    QStringList log;
+    QObject::connect(&bridge, &SessionBridge::logMessage,
+                     [&log](const QString& line) { log << line; });
+    const auto diagnostics_lines = [&log]() {
+        return log.filter(QStringLiteral("ECU 0x7E8 diagnostics: "));
+    };
+    const auto clear_lines = [&log]() {
+        return log.filter(QStringLiteral("ECU 0x7E8 clear: "));
+    };
+    ASSERT_TRUE(bridge.connectSession(QStringLiteral("mock://demo")).isEmpty());
+    ASSERT_TRUE(
+        spinUntil([&]() { return diagnostics_lines().size() == 1; }, 2000));
+
+    const QString shown = bridge.clearDiagnostics();
+    const QStringList files =
+        QDir(root.path()).entryList({QStringLiteral("*.jsonl")}, QDir::Files);
+    ASSERT_EQ(files.size(), 1) << files.join(',').toStdString();
+    EXPECT_TRUE(QRegularExpression(
+                    QStringLiteral("^diagnostics-[0-9]{8}-[0-9]{6}\\.jsonl$"))
+                    .match(files.first())
+                    .hasMatch())
+        << files.first().toStdString();
+    EXPECT_TRUE(shown.endsWith(files.first())) << shown.toStdString();
+    QFile saved(root.path() + QLatin1Char('/') + files.first());
+    ASSERT_TRUE(saved.open(QIODevice::ReadOnly));
+    const QList<QByteArray> lines = saved.readAll().split('\n');
+    ASSERT_GE(lines.size(), 2);
+    EXPECT_TRUE(
+        lines.at(1).contains("\"codes\":[\"P0301\",\"P0420\",\"U0100\"]"))
+        << "the codes before the clear: " << lines.at(1).toStdString();
+
+    ASSERT_TRUE(
+        spinUntil([&]() { return diagnostics_lines().size() == 2; }, 2000))
+        << log.join('\n').toStdString();
+    spinLoop(300);
+    ASSERT_EQ(clear_lines().size(), 1) << log.join('\n').toStdString();
+    EXPECT_EQ(clear_lines().first().toStdString(), "ECU 0x7E8 clear: cleared");
+    EXPECT_EQ(diagnostics_lines().size(), 2);
+    const QString after = diagnostics_lines().at(1);
+    EXPECT_TRUE(after.contains(
+        QStringLiteral("MIL off; stored none; pending none; permanent P0420")))
+        << after.toStdString();
+    const QStringList saved_lines =
+        log.filter(QStringLiteral("Diagnostics saved before the clear: "));
+    ASSERT_EQ(saved_lines.size(), 1) << log.join('\n').toStdString();
+    EXPECT_TRUE(saved_lines.first().endsWith(shown));
+    EXPECT_LT(log.indexOf(saved_lines.first()),
+              log.indexOf(clear_lines().first()));
+    EXPECT_LT(log.indexOf(clear_lines().first()), log.indexOf(after));
+    EXPECT_EQ(bridge.diagnostics().at(0).toMap().value("clear").toString(),
+              QStringLiteral("cleared"));
+    ASSERT_TRUE(disconnectAndWait(bridge));
+    EXPECT_TRUE(bridge.clearDiagnostics().isEmpty()) << "no session";
+}
+
+/* A report that can't be saved sends no clear: the root is under a
+ * file, so no folder can be made */
+TEST(BridgeTest, AFailedSaveSendsNoClear)
+{
+    QTemporaryDir root;
+    ASSERT_TRUE(root.isValid());
+    const QString file = root.path() + QStringLiteral("/not-a-folder");
+    {
+        QFile f(file);
+        ASSERT_TRUE(f.open(QIODevice::WriteOnly));
+    }
+    SessionBridge bridge;
+    bridge.setRecordingsRootForTesting(file + QStringLiteral("/recordings"));
+    QStringList log;
+    QObject::connect(&bridge, &SessionBridge::logMessage,
+                     [&log](const QString& line) { log << line; });
+    EXPECT_TRUE(bridge.clearDiagnostics().isEmpty());
+    EXPECT_TRUE(log.isEmpty()) << "no session: nothing to say";
+    ASSERT_TRUE(bridge.connectSession(QStringLiteral("mock://demo")).isEmpty());
+    ASSERT_TRUE(
+        spinUntil([&]() { return !bridge.diagnostics().isEmpty(); }, 2000));
+    EXPECT_TRUE(bridge.clearDiagnostics().isEmpty());
+    spinLoop(300);
+    EXPECT_EQ(log.filter(QStringLiteral(
+                             "Clear not sent: the report couldn't be saved "
+                             "(can't create "))
+                  .size(),
+              1)
+        << log.join('\n').toStdString();
+    EXPECT_TRUE(log.filter(QStringLiteral(" clear: ")).isEmpty());
+    EXPECT_EQ(log.filter(QStringLiteral(" diagnostics: ")).size(), 1);
+    EXPECT_EQ(bridge.diagnostics().at(0).toMap().value("clear").toString(),
+              QStringLiteral("none"));
     ASSERT_TRUE(disconnectAndWait(bridge));
 }
 

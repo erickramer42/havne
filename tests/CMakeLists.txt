@@ -288,6 +288,7 @@ if(NOT HAVNE_BUILD_CORE_ONLY)
 
     target_include_directories(test_bridge PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/../app
+        ${CMAKE_SOURCE_DIR}/cli
     )
 
     # The engine-start fixture, which both decode paths read (ADR-0024)
@@ -325,7 +326,8 @@ if(NOT HAVNE_BUILD_CORE_ONLY)
     )
     set_target_properties(bench_bridge PROPERTIES AUTOMOC ON)
     app_enable_warnings(bench_bridge)
-    target_include_directories(bench_bridge PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../app)
+    target_include_directories(bench_bridge PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../app
+                                                    ${CMAKE_SOURCE_DIR}/cli)
     target_link_libraries(bench_bridge PRIVATE ecuio-core Qt6::Core)
     # The engine-start fixture, replayed as the load test (ADR-0023)
     target_compile_definitions(bench_bridge PRIVATE

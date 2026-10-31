@@ -70,6 +70,9 @@ qt_add_qml_module(app_ui
 )
 
 target_include_directories(app_ui PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+# havne-cli's diagnostics line (cli/diagnostics_line.h, public headers
+# only), which a clear's saved report is written in (ADR-0038)
+target_include_directories(app_ui PRIVATE ${CMAKE_SOURCE_DIR}/cli)
 target_link_libraries(app_ui PUBLIC
     Qt6::Quick
     Qt6::QuickControls2
