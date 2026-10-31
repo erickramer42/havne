@@ -173,7 +173,14 @@ counts the frames per CAN ID.
   and took input, and closing the window ended the app; the app and the
   core built and their tests run with GCC on Ubuntu 26.04; SocketCAN on
   `vcan0`.
-- **Not yet:** the app on a Linux machine's own desktop, an ELM327 adapter
+- **A Linux desktop:** v0.3.4's AppImage on Xubuntu 26.10 (Xfce, an X11
+  session) on a 2011 desktop with a second-generation Core i7 and 8 GB
+  (2026-10-30). Made executable and started as it came, with no FUSE
+  workaround; `mock://demo` ran smoothly, and its recording landed in
+  `~/Documents/Havne/recordings/`. With Live showing, the app took
+  about 12 % of the CPU, and 9–10 % once the OpenGL and font packages
+  above were installed.
+- **Not yet:** an ELM327 adapter
   on a Linux machine (the serial code is tested against a fake adapter
   on a pseudo-terminal), a real CAN controller, and a car through
   SocketCAN. [testing.md](testing.md) keeps the details.

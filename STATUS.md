@@ -150,8 +150,9 @@ SocketCAN requests come next ([roadmap](#roadmap)).
     and requires the same bytes, then installs and builds against
     them; the AppImage is built by the commit's time, and two builds of
     one commit match. The AppImage ran with a window under WSLg on
-    Ubuntu 26.04, Arch and Kali; not yet on a Linux machine's own
-    desktop, nor with an adapter on Linux.
+    Ubuntu 26.04, Arch and Kali, and v0.3.4's on a Linux machine's own
+    desktop (Xubuntu 26.10, X11, `mock://demo` with recording); not yet
+    with an adapter on Linux.
   - **Every release** carries the Windows zip and a zip of its PDBs,
     the signed APK, the Linux files, one SPDX SBOM over them, and
     checksums and one signed provenance over every download
