@@ -42,6 +42,7 @@ old one, and the old record's status is updated to point at it.
 | [0033](0033-session-time-counts-sleep.md) | Session time counts sleep: one host clock for core and the app (`CLOCK_BOOTTIME` on Linux and Android), and a sleep that says so | Accepted |
 | [0034](0034-debug-symbols-and-probes.md) | Debug symbols with each release (PDBs in a zip of their own; split Linux debug info by build ID) and USDT probes in core | Accepted |
 | [0035](0035-linux-downloads-sbom-reproducible.md) | Linux downloads (the AppImage; core alone as a deb and a tarball, with debug info), one SPDX SBOM per release, and core packages reproducible byte for byte | Accepted |
+| [0037](0037-reading-trouble-codes.md) | Reading trouble codes, readiness and the freeze frame, asked at connect: four more read services, a report per ECU, the codes named in core | Accepted |
 
 ## Adding a record
 

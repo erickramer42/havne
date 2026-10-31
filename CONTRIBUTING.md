@@ -165,7 +165,8 @@ contributions:
 - **Core never includes or links Qt.** Decoding, scaling and units live in
   core; the UI receives final display values. A Qt include in `core/` fails CI.
 - **Read-only by construction.** Every request enters the engine through one
-  function that refuses any service but 0x01, 0x09 and 0x22. A change that
+  function that refuses any service but the reads (0x01, 0x02, 0x03, 0x07,
+  0x09, 0x0A and 0x22; never 0x04, which clears trouble codes). A change that
   sends anything else is a scope change (above), not a patch.
 - **Know your thread.** Frame callbacks run on the transport's worker thread:
   they must not block, and must never close or destroy their session (both

@@ -69,7 +69,7 @@ ApplicationWindow {
     readonly property int currentPage: stack.currentIndex
 
     // Page indices, in the order of the sidebar, stack and tab bar
-    readonly property int settingsPage: 4
+    readonly property int settingsPage: 5
 
     function gotoPage(index) { stack.currentIndex = index }
     // Connect… from any page: Settings, with what to connect to open
@@ -286,6 +286,7 @@ ApplicationWindow {
                                 { label: qsTr("Home"), icon: "" },
                                 { label: qsTr("Dashboard"), icon: "" },
                                 { label: qsTr("Live"),   icon: "" },
+                                { label: qsTr("Diagnostics"), icon: "" },
                                 { label: qsTr("Log"),       icon: "" },
                                 { label: qsTr("Settings"),  icon: "" }
                             ]
@@ -314,6 +315,10 @@ ApplicationWindow {
                     DashboardPage { objectName: "dashboardPage" }
                     LiveViewPage {
                         objectName: "livePage"
+                        onConnectRequested: root.openConnect()
+                    }
+                    DiagnosticsPage {
+                        objectName: "diagnosticsPage"
                         onConnectRequested: root.openConnect()
                     }
                     LogPage { objectName: "logPage" }
@@ -366,6 +371,7 @@ ApplicationWindow {
                 ThemedTabButton { text: qsTr("Home") }
                 ThemedTabButton { text: qsTr("Dash") }
                 ThemedTabButton { text: qsTr("Live") }
+                ThemedTabButton { text: qsTr("Codes") }
                 ThemedTabButton { text: qsTr("Log") }
                 ThemedTabButton { text: qsTr("Settings") }
             }

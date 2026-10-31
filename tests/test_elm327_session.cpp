@@ -4,9 +4,10 @@
 //          ADR-0026) end to end against the fake ELM327
 //          (tests/fake_elm327.h) behind the port opener (internal.h):
 //          Elm327SessionTest pins the URI and its refusals, the setup,
-//          the session info, the requests, multi-frame replies, link
-//          health and recovery, and that the worker allocates nothing per
-//          frame. Elm327PortTest (POSIX only) runs the OS's termios port
+//          the session info, the requests, multi-frame replies,
+//          diagnostics (ADR-0037: the report, Read again, ?diagnose=0),
+//          link health and recovery, and that the worker allocates
+//          nothing per frame. Elm327PortTest (POSIX only) runs the OS's termios port
 //          against the fake on a pseudo-terminal; Elm327TcpTest (every
 //          platform) runs the TCP port (core/src/elm327_tcp.cpp) against
 //          the fake behind a loopback listener; Elm327StreamTest (every
@@ -23,6 +24,7 @@
 #include "elm327_tcp.h"  /* core/src */
 #include "elm327_stream.h" /* core/src */
 #include "ecuio/stream.h"
+#include "fake_diagnostics.h"
 #include "fake_elm327.h"
 #include "new_counter.h"
 
@@ -577,6 +579,63 @@ TEST_F(Elm327SessionTest, IdentificationReassemblesItsLongReplies)
     Capture::Frame f{};
     ASSERT_TRUE(s.cap.find("49 02", &f));
     EXPECT_EQ(f.data.size(), 20u);
+}
+
+/* Diagnostics (ADR-0037) through the adapter: the code lists as
+ * one-byte requests with no count digit, the stored list's 8 bytes as a
+ * First Frame and a Consecutive Frame, reassembled, and the whole
+ * report filled from the fake ECU. Read again asks each item once more
+ * and fills it again. */
+TEST_F(Elm327SessionTest, DiagnosticsFillTheReportAndReadAgain)
+{
+    fake_ecu::reset_diagnostics();
+    Session s;
+    ASSERT_EQ(s.create(uri("?probe=0&identify=0")), ECUIO_OK);
+    s.start();
+    ecuio_channel_diagnostics_t d{};
+    const auto read_to = [&](uint32_t generation) {
+        return wait_for(
+            [&] {
+                return ecuio_session_get_channel_diagnostics(s.s, 0, &d) ==
+                           ECUIO_OK &&
+                       d.generation == generation &&
+                       (d.flags & ECUIO_DIAG_COMPLETE) != 0;
+            },
+            8000);
+    };
+    ASSERT_TRUE(read_to(fake_diagnostics::kItems))
+        << "the first read didn't complete; generation " << d.generation;
+    EXPECT_EQ(d.rx_id, 0x7E8u);
+    fake_diagnostics::expect_report(d);
+    for (const char* q : {"03", "07", "0A", "020000"}) {
+        EXPECT_EQ(fake_count(q), 1u) << q;
+    }
+
+    ASSERT_EQ(ecuio_session_read_diagnostics(s.s), ECUIO_OK);
+    ASSERT_TRUE(read_to(2 * fake_diagnostics::kItems + 1))
+        << "the second read didn't complete; generation " << d.generation;
+    fake_diagnostics::expect_report(d);
+    for (const char* q : {"03", "07", "0A", "020000"}) {
+        EXPECT_EQ(fake_count(q), 2u) << q;
+    }
+}
+
+/* ?diagnose=0: no diagnostics request goes out, Read again included,
+ * and the report says none is asked */
+TEST_F(Elm327SessionTest, DiagnoseOffAsksNoDiagnostics)
+{
+    Session s;
+    ASSERT_EQ(s.create(uri("?probe=0&identify=0&diagnose=0")), ECUIO_OK);
+    s.start();
+    EXPECT_EQ(ecuio_session_read_diagnostics(s.s), ECUIO_OK);
+    ASSERT_TRUE(wait_for([&] { return s.cap.count("41 0C") >= 3; }, 5000));
+    for (const char* q : {"03", "07", "0A", "02"}) {
+        EXPECT_EQ(fake_count(q), 0u) << q;
+    }
+    ecuio_channel_diagnostics_t d{};
+    ASSERT_EQ(ecuio_session_get_channel_diagnostics(s.s, 0, &d), ECUIO_OK);
+    EXPECT_EQ(d.flags, 0u);
+    EXPECT_EQ(d.generation, 0u);
 }
 
 /* ISO-TP's longest message, 4095 bytes in 586 frame lines, arrives as
@@ -1457,7 +1516,7 @@ TEST_F(Elm327SessionTest, RefusalsNameTheirCause)
          "?serial= needs a serial rate from 300 to 4000000, not '9'"},
         {uri("?flags=0"), ECUIO_ERR_BAD_URI,
          "elm327:// takes no query key 'flags', only baud, serial, filter, "
-         "txid, poll, probe, identify, profile and did"},
+         "txid, poll, probe, identify, diagnose, profile and did"},
         {uri("?profile=uds-generic&did=7E8:1E1C&did=18DAF110:1E1C"),
          ECUIO_ERR_BAD_URI,
          "the channels mix 11-bit and 29-bit IDs, which one connection "

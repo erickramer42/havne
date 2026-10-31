@@ -115,6 +115,11 @@ a quarter mile off launch control on a warm loop.*
   `raw` logs frames; the car's VIN and calibration IDs are read at
   connect ([ADR-0013](docs/adr/0013-protocol-profiles.md),
   [ADR-0021](docs/adr/0021-vehicle-identification.md)).
+- **Trouble codes.** At connect, each ECU's check-engine light, its
+  stored, pending and permanent codes, its readiness monitors and the
+  freeze frame, on a Diagnostics page, in the activity log and from
+  `havne-cli`; reading only
+  ([ADR-0037](docs/adr/0037-reading-trouble-codes.md)).
 - **Recording and replay.** Each connect can record every frame, value
   and event; `replay://` plays a recording back at its own pace or
   faster, through the same decoding
@@ -145,7 +150,7 @@ mode: each session as it happened, then the frames as they arrive.*
 ## Architecture
 
 ```
- QML pages: Home · Dashboard · Live · Log · Settings
+ QML pages: Home · Dashboard · Live · Diagnostics · Log · Settings
    ▼  properties and list models, GUI thread only
  SessionBridge (app/)          the app's caller of the core: worker → GUI
    │                           marshaling, 100 ms coalescing, link health

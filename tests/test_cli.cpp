@@ -1,7 +1,9 @@
 // File/layer: tests/test_cli.cpp | havne-cli's line formatting and output ring (ADR-0031)
-// Testing: UNIT, Qt-free. The program end to end is the golden runs'
+// Testing: UNIT, Qt-free; the diagnostics line (CliDiagnosticsTest,
+//          ADR-0037) names codes and monitors through core. The program end to end is the golden runs'
 //          (tests/golden/cli/) and CliSignalTest's (tests/CMakeLists.txt)
 
+#include "diagnostics_line.h"
 #include "jsonl.h"
 #include "line_ring.h"
 #include "sleep_watch.h"
@@ -138,6 +140,70 @@ TEST(CliLineTest, HexFormsMatchFramesCsv)
     l.hex_bytes(data, 0);
     EXPECT_EQ(std::string(l.data(), l.size()),
               "\"0x7E8\" \"0x18DAF110\" \"41 0C 1A F8\" \"\"");
+}
+
+/* An ECU that refuses or ignores the list (ADR-0037): each item says
+ * which, a refusal with its reply as frames.csv writes bytes */
+TEST(CliDiagnosticsTest, RefusalsCarryTheirReplyAndSilenceSaysSo)
+{
+    ecuio_channel_diagnostics_t d{};
+    d.flags = ECUIO_DIAG_ASKED | ECUIO_DIAG_COMPLETE;
+    d.rx_id = 0x7E9;
+    d.generation = 6;
+    d.readiness = ECUIO_DIAG_REFUSED;
+    d.readiness_nrc = 0x12;
+    d.lists[ECUIO_DIAG_STORED].outcome = ECUIO_DIAG_UNANSWERED;
+    d.lists[ECUIO_DIAG_PERMANENT].outcome = ECUIO_DIAG_REFUSED;
+    d.lists[ECUIO_DIAG_PERMANENT].nrc = 0x11;
+    d.freeze = ECUIO_DIAG_UNANSWERED;
+    char buf[4096];
+    cli::Line l(buf, sizeof buf);
+    cli::diagnostics_line(l, d);
+    EXPECT_EQ(std::string(l.data(), l.size()),
+              "{\"type\":\"diagnostics\",\"rx\":\"0x7E9\",\"generation\":6,"
+              "\"readiness\":{\"outcome\":\"refused\",\"reply\":\"7F 01 12\"},"
+              "\"stored\":{\"outcome\":\"unanswered\"},"
+              "\"pending\":{\"outcome\":\"unasked\"},"
+              "\"permanent\":{\"outcome\":\"refused\",\"reply\":\"7F 0A 11\"},"
+              "\"freeze\":{\"outcome\":\"unanswered\"}}");
+}
+
+/* A compression engine's monitor by its own name, a list longer than
+ * the codes held (reported says how long), and an answered freeze frame
+ * with none stored (code null) */
+TEST(CliDiagnosticsTest, AnswersNameTheirCodesAndMonitors)
+{
+    ecuio_channel_diagnostics_t d{};
+    d.flags = ECUIO_DIAG_ASKED | ECUIO_DIAG_COMPLETE | ECUIO_DIAG_READINESS |
+              ECUIO_DIAG_COMPRESSION;
+    d.rx_id = 0x7E8;
+    d.generation = 9;
+    d.readiness = ECUIO_DIAG_ANSWERED;
+    d.dtc_count = 0;
+    d.monitor_count = 1;
+    d.monitors[0].id = 8;
+    for (ecuio_dtc_list_t& list : d.lists) {
+        list.outcome = ECUIO_DIAG_ANSWERED;
+    }
+    d.lists[ECUIO_DIAG_PENDING].reported = 40;
+    d.lists[ECUIO_DIAG_PENDING].held = 2;
+    d.lists[ECUIO_DIAG_PENDING].codes[0] = 0x2002;
+    d.lists[ECUIO_DIAG_PENDING].codes[1] = 0xC100;
+    d.freeze = ECUIO_DIAG_ANSWERED;
+    char buf[4096];
+    cli::Line l(buf, sizeof buf);
+    cli::diagnostics_line(l, d);
+    EXPECT_EQ(
+        std::string(l.data(), l.size()),
+        "{\"type\":\"diagnostics\",\"rx\":\"0x7E8\",\"generation\":9,"
+        "\"readiness\":{\"outcome\":\"answered\",\"mil\":false,"
+        "\"dtc_count\":0,\"compression\":true,"
+        "\"monitors\":[{\"name\":\"NMHC catalyst\",\"complete\":false}]},"
+        "\"stored\":{\"outcome\":\"answered\",\"reported\":0,\"codes\":[]},"
+        "\"pending\":{\"outcome\":\"answered\",\"reported\":40,"
+        "\"codes\":[\"P2002\",\"U0100\"]},"
+        "\"permanent\":{\"outcome\":\"answered\",\"reported\":0,\"codes\":[]},"
+        "\"freeze\":{\"outcome\":\"answered\",\"code\":null,\"values\":[]}}");
 }
 
 TEST(CliLineTest, KeysTakeCommasAndAFullLineIsRefused)

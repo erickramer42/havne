@@ -320,7 +320,8 @@ typedef struct ecuio_session_info {
                                  (READ_VBATT; an ELM327's STVR or AT RV);
                                  with ECUIO_SESSION_INFO_VBATT */
     uint32_t channel_count;   /* CAN channels the session filters and
-                                 requests on; 0 for a passive session */
+                                 requests on; 0 for a passive session,
+                                 1 for mock (its simulated engine ECU) */
     uint32_t rx_ids[ECUIO_SESSION_INFO_MAX_CHANNELS];   /* each one's
                                                            receive ID */
     uint32_t tx_ids[ECUIO_SESSION_INFO_MAX_CHANNELS];   /* and transmit ID */
@@ -444,9 +445,10 @@ _Static_assert(offsetof(ecuio_channel_support_t, reserved) == 132, "support rese
 #endif
 
 /* Copies what channel `channel` has learned into *out_support: an index
- * into the session info's channels, below its channel_count, so a mock
- * or passive session has none (ECUIO_ERR_INVALID_ARGUMENT). Callable from
- * any thread until destroy; after close it keeps the last update. */
+ * into the session info's channels, below its channel_count, so a
+ * passive session has none (ECUIO_ERR_INVALID_ARGUMENT); the mock's one
+ * channel learns nothing. Callable from any thread until destroy; after
+ * close it keeps the last update. */
 ecuio_status_t ecuio_session_get_channel_support(
     const ecuio_session_t* session,
     uint32_t channel,
@@ -531,6 +533,171 @@ const char* ecuio_identity_request_name(
     const uint8_t* request,
     uint8_t length
 );
+
+/* What each channel's ECU reports of its emissions diagnostics
+ * (ADR-0037): the MIL and the readiness monitors (Service 01 PID 01),
+ * the stored, pending and permanent trouble codes (Services 03, 07 and
+ * 0A) and the freeze frame (Service 02). The values below are
+ * append-only. */
+#define ECUIO_DIAG_MAX_DTCS              32
+#define ECUIO_DIAG_MAX_MONITORS          12
+#define ECUIO_DIAG_MAX_FREEZE            16
+
+/* flags */
+#define ECUIO_DIAG_COMPLETE              0x00000001u   /* every item answered,
+                                                          refused or timed out */
+#define ECUIO_DIAG_READINESS             0x00000002u   /* PID 01 answered:
+                                                          dtc_count and the
+                                                          monitors hold it */
+#define ECUIO_DIAG_MIL_ON                0x00000004u   /* PID 01's A7 */
+#define ECUIO_DIAG_COMPRESSION           0x00000008u   /* PID 01's B3: a
+                                                          compression-ignition
+                                                          engine, whose monitors
+                                                          C and D name otherwise */
+#define ECUIO_DIAG_FREEZE_FRAME          0x00000010u   /* a freeze frame is
+                                                          stored: freeze_dtc
+                                                          names its code */
+#define ECUIO_DIAG_ASKED                 0x00000020u   /* the session reads
+                                                          this channel's
+                                                          diagnostics; unset
+                                                          under ?diagnose=0,
+                                                          ?poll= or a passive
+                                                          session, whose
+                                                          report stays empty */
+
+/* lists[]: one per service */
+#define ECUIO_DIAG_STORED                0u   /* Service 03: confirmed */
+#define ECUIO_DIAG_PENDING               1u   /* Service 07: not yet confirmed */
+#define ECUIO_DIAG_PERMANENT             2u   /* Service 0A: cleared only by
+                                                 the ECU's own monitor */
+#define ECUIO_DIAG_LISTS                 3u
+
+/* outcome: what became of an item's request, as ECUIO_IDENTITY_* */
+#define ECUIO_DIAG_UNASKED               0u
+#define ECUIO_DIAG_ANSWERED              1u
+#define ECUIO_DIAG_REFUSED               2u   /* nrc holds the code */
+#define ECUIO_DIAG_UNANSWERED            3u
+
+/* ecuio_monitor_t flags */
+#define ECUIO_MONITOR_COMPLETE           0x01u   /* complete, or not
+                                                    applicable (J1979) */
+
+/* POD, 68 bytes. A code is its two bytes, the first high: A7-A6 the
+ * letter (P, C, B, U), then four hex digits (ecuio_dtc_format).
+ * reported is the reply's count byte; held is how many follow in codes,
+ * fewer when the count passes ECUIO_DIAG_MAX_DTCS or the reply ends
+ * first. */
+typedef struct ecuio_dtc_list {
+    uint8_t outcome;          /* ECUIO_DIAG_UNASKED .. _UNANSWERED */
+    uint8_t nrc;              /* the negative reply's code, when refused */
+    uint8_t reported;
+    uint8_t held;
+    uint16_t codes[ECUIO_DIAG_MAX_DTCS];
+} ecuio_dtc_list_t;
+
+/* POD, 4 bytes: one monitor the ECU has (its availability bit set). id
+ * is that bit's place, 0-7 in PID 01's byte B, 8-15 in byte C
+ * (ecuio_monitor_name). */
+typedef struct ecuio_monitor {
+    uint8_t id;
+    uint8_t flags;            /* ECUIO_MONITOR_* */
+    uint8_t reserved[2];      /* zero */
+} ecuio_monitor_t;
+
+/* POD, 16 bytes: one freeze-frame value, decoded by the obd2 set's def
+ * def_id (ADR-0037 §4), in that def's unit. */
+typedef struct ecuio_freeze_value {
+    uint32_t def_id;
+    uint32_t reserved;        /* zero */
+    double value;
+} ecuio_freeze_value_t;
+
+/* POD, 552 bytes, no hidden padding on any supported platform; pinned
+ * by the assertions below. New fields take the reserved room. */
+typedef struct ecuio_channel_diagnostics {
+    uint32_t flags;           /* ECUIO_DIAG_* */
+    uint32_t rx_id;           /* the channel's receive ID: its ECU */
+    uint32_t generation;      /* changes with every item settled; 0 until
+                                 one has been */
+    uint8_t readiness;        /* 01 01's outcome (ECUIO_DIAG_UNASKED ..) */
+    uint8_t readiness_nrc;
+    uint8_t dtc_count;        /* PID 01's A6-A0: the confirmed codes */
+    uint8_t monitor_count;    /* entries of monitors in use */
+    uint8_t freeze;           /* 02 00 00's outcome: the freeze frame */
+    uint8_t freeze_nrc;
+    uint16_t freeze_dtc;      /* the code that stored it (02 02 00); 0 =
+                                 none */
+    uint8_t freeze_count;     /* entries of freeze_values in use */
+    uint8_t reserved0[3];     /* zero */
+    uint32_t reserved[4];     /* zero; ABI growth space */
+    ecuio_dtc_list_t lists[ECUIO_DIAG_LISTS];   /* ECUIO_DIAG_STORED .. */
+    ecuio_monitor_t monitors[ECUIO_DIAG_MAX_MONITORS];
+    uint32_t reserved1;       /* zero; aligns freeze_values */
+    ecuio_freeze_value_t freeze_values[ECUIO_DIAG_MAX_FREEZE];
+} ecuio_channel_diagnostics_t;
+
+#if defined(__cplusplus)
+static_assert(sizeof(ecuio_dtc_list_t) == 68, "ecuio_dtc_list_t size is ABI");
+static_assert(sizeof(ecuio_monitor_t) == 4, "ecuio_monitor_t size is ABI");
+static_assert(sizeof(ecuio_freeze_value_t) == 16, "ecuio_freeze_value_t size is ABI");
+static_assert(sizeof(ecuio_channel_diagnostics_t) == 552, "ecuio_channel_diagnostics_t size is ABI");
+static_assert(offsetof(ecuio_channel_diagnostics_t, lists) == 40, "diagnostics lists offset is ABI");
+static_assert(offsetof(ecuio_channel_diagnostics_t, monitors) == 244, "diagnostics monitors offset is ABI");
+static_assert(offsetof(ecuio_channel_diagnostics_t, freeze_values) == 296, "diagnostics freeze offset is ABI");
+#elif defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
+_Static_assert(sizeof(ecuio_dtc_list_t) == 68, "ecuio_dtc_list_t size is ABI");
+_Static_assert(sizeof(ecuio_monitor_t) == 4, "ecuio_monitor_t size is ABI");
+_Static_assert(sizeof(ecuio_freeze_value_t) == 16, "ecuio_freeze_value_t size is ABI");
+_Static_assert(sizeof(ecuio_channel_diagnostics_t) == 552, "ecuio_channel_diagnostics_t size is ABI");
+_Static_assert(offsetof(ecuio_channel_diagnostics_t, lists) == 40, "diagnostics lists offset is ABI");
+_Static_assert(offsetof(ecuio_channel_diagnostics_t, monitors) == 244, "diagnostics monitors offset is ABI");
+_Static_assert(offsetof(ecuio_channel_diagnostics_t, freeze_values) == 296, "diagnostics freeze offset is ABI");
+#endif
+
+/* A trouble code as it's written: the letter from its first byte's top
+ * two bits (P, C, B, U), then four hex digits ("P0301" for 0x0301,
+ * "U0100" for 0xC100), NUL-terminated in out, which holds at least 6
+ * bytes. ECUIO_ERR_NULL_ARGUMENT for a NULL out,
+ * ECUIO_ERR_INVALID_ARGUMENT for a smaller out_cap (out untouched). */
+ecuio_status_t ecuio_dtc_format(
+    uint16_t code,
+    char* out,
+    uint32_t out_cap
+);
+
+/* A readiness monitor's name, for display ("Catalyst", "Evaporative
+ * system"), and its short form for a log line ("catalyst", "EVAP"). C's
+ * and D's bits name other monitors on a compression-ignition engine:
+ * pass the report's flags, whose ECUIO_DIAG_COMPRESSION picks them. ""
+ * for an id that names no monitor (a reserved bit). Static, never NULL. */
+const char* ecuio_monitor_name(
+    uint8_t id,
+    uint32_t diag_flags
+);
+const char* ecuio_monitor_short_name(
+    uint8_t id,
+    uint32_t diag_flags
+);
+
+/* Copies what channel `channel`'s ECU has reported of its diagnostics
+ * (ADR-0037) into *out_diagnostics, under the identity report's rules:
+ * the channel is an index below the session info's channel_count
+ * (ECUIO_ERR_INVALID_ARGUMENT otherwise), callable from any thread until
+ * destroy, and after close it keeps the last update. */
+ecuio_status_t ecuio_session_get_channel_diagnostics(
+    const ecuio_session_t* session,
+    uint32_t channel,
+    ecuio_channel_diagnostics_t* out_diagnostics
+);
+
+/* Asks every channel's ECU for its diagnostics again ("Read again"):
+ * each channel whose last read has settled starts over, its report
+ * emptied and its generation moved on; a channel mid-read carries on.
+ * The worker takes the request on its next pass, so it returns at once,
+ * from any thread. Does nothing on a session that reads no diagnostics
+ * (no channel has ECUIO_DIAG_ASKED). ECUIO_ERR_SESSION_CLOSED after
+ * close. */
+ecuio_status_t ecuio_session_read_diagnostics(ecuio_session_t* session);
 
 #ifdef __cplusplus
 }

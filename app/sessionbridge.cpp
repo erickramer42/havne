@@ -8,7 +8,9 @@
 //          (BridgeTest.AWindow*, .TheChartKeepsTheFixturesPeak), rows by
 //          id, the signal model's roles and age
 //          refresh, link-state mapping, the activity log's session,
-//          ECU and delivery lines (the ELM327 session line too,
+//          ECU, diagnostics and delivery lines (the ELM327 session line too,
+//          the diagnostics line: BridgeTest.ChannelDiagnosticsText*,
+//          .ConnectLogsTheMocksDiagnostics,
 //          a sleep's line: BridgeTest.ASleepWhileConnectedIsLoggedWithItsLength,
 //          BridgeTest.SessionInfoTextNamesTheAdapter; its versions clause
 //          as adapterVersions, .ConnectLogsTheAdaptersSession), the serial ports as
@@ -533,6 +535,7 @@ SessionBridge::SessionBridge(QObject* parent)
         pollLinkHealth();   // every tick while connected: transitions only
         pollChannelSupport();
         pollChannelIdentity();
+        pollChannelDiagnostics();
         pollReplayEnd();
         pollSleep();
         // Must fire even when nothing arrived this window: dimming exists
@@ -917,6 +920,14 @@ void SessionBridge::applyConnectedState(ecuio_session_t* session, const QString&
     for (uint32_t& g : m_identityGeneration) {
         g = 0;
     }
+    for (uint32_t& g : m_diagnosticsGeneration) {
+        g = 0;
+    }
+    m_diagnosticsShownCount = 0;
+    if (!m_diagnostics.isEmpty()) {
+        m_diagnostics.clear();
+        emit diagnosticsChanged();
+    }
 }
 
 QString SessionBridge::connectSession(const QString& typed)
@@ -1098,6 +1109,9 @@ void SessionBridge::setUnitSystem(int units)
     if (units == unitSystem()) return;
     m_signalModel->setUnitSystem(static_cast<uint32_t>(units));
     emit unitSystemChanged();
+    if (m_diagnosticsShownCount > 0) {
+        rebuildDiagnostics();
+    }
 }
 
 double SessionBridge::displayValue(const QString& unit, double value) const
@@ -1846,6 +1860,172 @@ void SessionBridge::pollChannelIdentity()
     }
 }
 
+/* Each channel's diagnostics report (ADR-0037), logged once per read
+ * that completes: at connect, then once per Read again, which moves the
+ * generation on. One line per ECU, so a recording's events.log keeps
+ * the codes the car had when it was made. */
+void SessionBridge::pollChannelDiagnostics()
+{
+    if (!m_connected.load(std::memory_order_acquire) || m_session == nullptr) {
+        return;
+    }
+    bool changed = m_diagnosticsShownCount != m_channelCount;
+    for (uint32_t c = 0; c < m_channelCount; ++c) {
+        ecuio_channel_diagnostics_t s{};
+        if (ecuio_session_get_channel_diagnostics(m_session, c, &s) !=
+            ECUIO_OK) {
+            continue;
+        }
+        if (memcmp(&s, &m_diagnosticsShown[c], sizeof(s)) != 0) {
+            m_diagnosticsShown[c] = s;
+            changed = true;
+        }
+        if ((s.flags & ECUIO_DIAG_COMPLETE) == 0 ||
+            s.generation == m_diagnosticsGeneration[c]) {
+            continue;
+        }
+        m_diagnosticsGeneration[c] = s.generation;
+        emit logMessage(channelDiagnosticsText(s));
+    }
+    if (changed) {
+        m_diagnosticsShownCount = m_channelCount;
+        rebuildDiagnostics();
+    }
+}
+
+void SessionBridge::rebuildDiagnostics()
+{
+    m_diagnostics.clear();
+    for (uint32_t c = 0; c < m_diagnosticsShownCount; ++c) {
+        m_diagnostics << diagnosticsEntry(m_diagnosticsShown[c],
+                                          m_signalModel->unitSystem());
+    }
+    emit diagnosticsChanged();
+}
+
+void SessionBridge::readDiagnostics()
+{
+    if (m_connected.load(std::memory_order_acquire) && m_session != nullptr) {
+        (void)ecuio_session_read_diagnostics(m_session);
+    }
+}
+
+QVariantMap
+SessionBridge::diagnosticsEntry(const ecuio_channel_diagnostics_t& s,
+                                uint32_t units)
+{
+    const auto outcome = [](uint8_t o) {
+        switch (o) {
+        case ECUIO_DIAG_ANSWERED:
+            return QStringLiteral("answered");
+        case ECUIO_DIAG_REFUSED:
+            return QStringLiteral("refused");
+        case ECUIO_DIAG_UNANSWERED:
+            return QStringLiteral("unanswered");
+        default:
+            return QStringLiteral("unasked");
+        }
+    };
+    const auto nrc = [](uint8_t o, uint8_t service, uint8_t code) {
+        return o == ECUIO_DIAG_REFUSED
+                   ? QStringLiteral("7F %1 %2")
+                         .arg(hexByte(service), hexByte(code))
+                   : QString();
+    };
+    const auto dtc = [](uint16_t code) {
+        char text[8] = {};
+        (void)ecuio_dtc_format(code, text, sizeof(text));
+        return QString::fromLatin1(text);
+    };
+
+    QVariantMap m;
+    m[QStringLiteral("ecu")] = hexId(s.rx_id);
+    m[QStringLiteral("asked")] = (s.flags & ECUIO_DIAG_ASKED) != 0;
+    m[QStringLiteral("complete")] = (s.flags & ECUIO_DIAG_COMPLETE) != 0;
+    m[QStringLiteral("readiness")] = outcome(s.readiness);
+    m[QStringLiteral("readinessNrc")] = nrc(s.readiness, 0x01, s.readiness_nrc);
+    m[QStringLiteral("mil")] = (s.flags & ECUIO_DIAG_MIL_ON) != 0;
+    m[QStringLiteral("dtcCount")] = static_cast<int>(s.dtc_count);
+    m[QStringLiteral("compression")] = (s.flags & ECUIO_DIAG_COMPRESSION) != 0;
+
+    static const char* const kKeys[ECUIO_DIAG_LISTS] = {"stored", "pending",
+                                                        "permanent"};
+    static const uint8_t kServices[ECUIO_DIAG_LISTS] = {0x03, 0x07, 0x0A};
+    QVariantList lists;
+    for (uint32_t l = 0; l < ECUIO_DIAG_LISTS; ++l) {
+        const ecuio_dtc_list_t& list = s.lists[l];
+        const uint8_t held = std::min<uint8_t>(list.held, ECUIO_DIAG_MAX_DTCS);
+        QStringList codes;
+        for (uint8_t i = 0; i < held; ++i) {
+            codes << dtc(list.codes[i]);
+        }
+        QVariantMap e;
+        e[QStringLiteral("key")] = QString::fromLatin1(kKeys[l]);
+        e[QStringLiteral("outcome")] = outcome(list.outcome);
+        e[QStringLiteral("nrc")] = nrc(list.outcome, kServices[l], list.nrc);
+        e[QStringLiteral("codes")] = codes;
+        e[QStringLiteral("more")] =
+            list.reported > held ? list.reported - held : 0;
+        lists << e;
+    }
+    m[QStringLiteral("lists")] = lists;
+
+    QVariantList monitors;
+    const uint8_t n =
+        std::min<uint8_t>(s.monitor_count, ECUIO_DIAG_MAX_MONITORS);
+    for (uint8_t i = 0; i < n; ++i) {
+        QVariantMap e;
+        e[QStringLiteral("id")] = static_cast<int>(s.monitors[i].id);
+        e[QStringLiteral("name")] =
+            QString::fromLatin1(ecuio_monitor_name(s.monitors[i].id, s.flags));
+        e[QStringLiteral("complete")] =
+            (s.monitors[i].flags & ECUIO_MONITOR_COMPLETE) != 0;
+        monitors << e;
+    }
+    m[QStringLiteral("monitors")] = monitors;
+
+    /* Each freeze-frame value by the obd2 def that decoded it (ADR-0037
+     * §4), in the user's units, as Live shows a live one */
+    const ecuio_signal_set_t* obd2 = ecuio_obd2_signal_set();
+    QVariantList values;
+    const uint8_t fn = std::min<uint8_t>(s.freeze_count, ECUIO_DIAG_MAX_FREEZE);
+    for (uint8_t i = 0; i < fn; ++i) {
+        const ecuio_freeze_value_t& f = s.freeze_values[i];
+        for (uint32_t k = 0; k < obd2->count; ++k) {
+            const ecuio_signal_def_t& def = obd2->defs[k];
+            if (def.id != f.def_id) {
+                continue;
+            }
+            ecuio_display_value_t out{};
+            if (ecuio_display_convert(def.unit, def.decimal_places, f.value,
+                                      units, &out) != ECUIO_DISPLAY_OK) {
+                out = {};
+                out.value = f.value;
+                qstrncpy(out.unit, def.unit, sizeof(out.unit));
+                out.decimal_places = def.decimal_places;
+            }
+            QVariantMap e;
+            e[QStringLiteral("name")] = QString::fromUtf8(def.name);
+            e[QStringLiteral("value")] = out.value;
+            e[QStringLiteral("unit")] = QString::fromUtf8(out.unit);
+            e[QStringLiteral("decimals")] =
+                static_cast<int>(out.decimal_places);
+            values << e;
+            break;
+        }
+    }
+    QVariantMap freeze;
+    freeze[QStringLiteral("outcome")] = outcome(s.freeze);
+    freeze[QStringLiteral("nrc")] = nrc(s.freeze, 0x02, s.freeze_nrc);
+    freeze[QStringLiteral("stored")] = (s.flags & ECUIO_DIAG_FREEZE_FRAME) != 0;
+    freeze[QStringLiteral("code")] = (s.flags & ECUIO_DIAG_FREEZE_FRAME) != 0
+                                         ? dtc(s.freeze_dtc)
+                                         : QString();
+    freeze[QStringLiteral("values")] = values;
+    m[QStringLiteral("freeze")] = freeze;
+    return m;
+}
+
 QString SessionBridge::vinFromIdentity(const ecuio_channel_identity_t& identity)
 {
     QString fromService09;
@@ -1977,6 +2157,122 @@ QString SessionBridge::channelIdentityText(const ecuio_channel_identity_t& s)
         parts << QStringLiteral("nothing asked");
     }
     return QStringLiteral("ECU %1 identity: ").arg(hexId(s.rx_id)) +
+           parts.join(QStringLiteral("; "));
+}
+
+/* One channel's "ECU 0x… diagnostics:" line: the MIL, each code list,
+ * readiness (the incomplete monitors by their short names) and the
+ * freeze frame's code, each as answered, refused with its code or
+ * unanswered; an item never asked is left out. Static, like
+ * channelIdentityText, so test_bridge pins the wording without an
+ * adapter. */
+QString
+SessionBridge::channelDiagnosticsText(const ecuio_channel_diagnostics_t& s)
+{
+    const auto dtc = [](uint16_t code) {
+        char text[8] = {};
+        (void)ecuio_dtc_format(code, text, sizeof(text));
+        return QString::fromLatin1(text);
+    };
+    const auto refused = [](uint8_t service, uint8_t nrc) {
+        return QStringLiteral(" refused (7F %1 %2)")
+            .arg(hexByte(service), hexByte(nrc));
+    };
+    QStringList parts;
+    if (s.readiness == ECUIO_DIAG_ANSWERED) {
+        parts << ((s.flags & ECUIO_DIAG_MIL_ON) != 0
+                      ? QStringLiteral("MIL on")
+                      : QStringLiteral("MIL off"));
+    }
+
+    static const char* const kNames[ECUIO_DIAG_LISTS] = {"stored", "pending",
+                                                         "permanent"};
+    static const uint8_t kServices[ECUIO_DIAG_LISTS] = {0x03, 0x07, 0x0A};
+    for (uint32_t l = 0; l < ECUIO_DIAG_LISTS; ++l) {
+        const ecuio_dtc_list_t& list = s.lists[l];
+        const QString name = QString::fromLatin1(kNames[l]);
+        switch (list.outcome) {
+        case ECUIO_DIAG_ANSWERED: {
+            QStringList codes;
+            const uint8_t held =
+                std::min<uint8_t>(list.held, ECUIO_DIAG_MAX_DTCS);
+            for (uint8_t i = 0; i < held; ++i) {
+                codes << dtc(list.codes[i]);
+            }
+            if (codes.isEmpty()) {
+                codes << QStringLiteral("none");
+            }
+            QString part =
+                name + QLatin1Char(' ') + codes.join(QLatin1Char(' '));
+            if (list.reported > held) {
+                part +=
+                    QStringLiteral(" and %1 more").arg(list.reported - held);
+            }
+            parts << part;
+            break;
+        }
+        case ECUIO_DIAG_REFUSED:
+            parts << name + refused(kServices[l], list.nrc);
+            break;
+        case ECUIO_DIAG_UNANSWERED:
+            parts << name + QStringLiteral(" unanswered");
+            break;
+        default:
+            break;
+        }
+    }
+
+    switch (s.readiness) {
+    case ECUIO_DIAG_ANSWERED: {
+        QStringList incomplete;
+        const uint8_t n =
+            std::min<uint8_t>(s.monitor_count, ECUIO_DIAG_MAX_MONITORS);
+        for (uint8_t i = 0; i < n; ++i) {
+            if ((s.monitors[i].flags & ECUIO_MONITOR_COMPLETE) == 0) {
+                incomplete << QString::fromLatin1(
+                    ecuio_monitor_short_name(s.monitors[i].id, s.flags));
+            }
+        }
+        QString part = QStringLiteral("readiness %1 of %2 complete")
+                           .arg(n - incomplete.size())
+                           .arg(n);
+        if (!incomplete.isEmpty()) {
+            part += QStringLiteral(" (%1 incomplete)")
+                        .arg(incomplete.join(QStringLiteral(", ")));
+        }
+        parts << part;
+        break;
+    }
+    case ECUIO_DIAG_REFUSED:
+        parts << QStringLiteral("readiness") + refused(0x01, s.readiness_nrc);
+        break;
+    case ECUIO_DIAG_UNANSWERED:
+        parts << QStringLiteral("readiness unanswered");
+        break;
+    default:
+        break;
+    }
+
+    switch (s.freeze) {
+    case ECUIO_DIAG_ANSWERED:
+        parts << ((s.flags & ECUIO_DIAG_FREEZE_FRAME) != 0
+                      ? QStringLiteral("freeze frame for %1")
+                            .arg(dtc(s.freeze_dtc))
+                      : QStringLiteral("no freeze frame"));
+        break;
+    case ECUIO_DIAG_REFUSED:
+        parts << QStringLiteral("freeze frame") + refused(0x02, s.freeze_nrc);
+        break;
+    case ECUIO_DIAG_UNANSWERED:
+        parts << QStringLiteral("freeze frame unanswered");
+        break;
+    default:
+        break;
+    }
+    if (parts.isEmpty()) {
+        parts << QStringLiteral("nothing asked");
+    }
+    return QStringLiteral("ECU %1 diagnostics: ").arg(hexId(s.rx_id)) +
            parts.join(QStringLiteral("; "));
 }
 

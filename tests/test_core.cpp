@@ -28,6 +28,7 @@ extern "C" {
 #include "ecuio/signals.h"
 #include "ecuio/signal_sets.h"
 #include "ecuio/profile.h"
+#include "fake_diagnostics.h" /* tests: the fake ECU's report, the mock's too */
 }
 
 /* C++ headers (namespaced classes and inline functions): must stay
@@ -94,7 +95,8 @@ TEST(CoreTest, CreateFailuresNameTheirCause) {
                  "j2534://, elm327:// or socketcan://");
     EXPECT_EQ(ecuio_session_create("mock://x?interval=10", &s), ECUIO_ERR_BAD_URI);
     EXPECT_STREQ(ecuio_last_error_detail(),
-                 "mock:// takes no query key 'interval', only profile and did");
+                 "mock:// takes no query key 'interval', only profile, did and "
+                 "diagnose");
     EXPECT_EQ(ecuio_session_create("mock://x?profile=mock&&profile=raw", &s),
               ECUIO_ERR_BAD_URI);
     EXPECT_STREQ(ecuio_last_error_detail(),
@@ -160,11 +162,13 @@ TEST(CoreTest, LastErrorDetailIsPerThread) {
     });
     t.join();
     EXPECT_STREQ(ecuio_last_error_detail(), "no profile is named 'bogus'");
-    EXPECT_EQ(other, "mock:// takes no query key 'interval', only profile and did");
+    EXPECT_EQ(other, "mock:// takes no query key 'interval', only profile, did "
+                     "and diagnose");
 }
 
-/* A mock session says it's one, and names its profile, and reports
- * nothing else; the info outlives close. */
+/* A mock session says it's one, names its profile and its one channel
+ * (the simulated engine ECU), and reports nothing else; the info
+ * outlives close. */
 TEST(CoreTest, MockSessionInfoNamesTheBackend) {
     ecuio_session_t* s = nullptr;
     ASSERT_EQ(ecuio_session_create("mock://demo", &s), ECUIO_OK);
@@ -176,7 +180,9 @@ TEST(CoreTest, MockSessionInfoNamesTheBackend) {
     EXPECT_EQ(info.flags, 0u);
     EXPECT_EQ(info.protocol_id, 0u);
     EXPECT_EQ(info.baud, 0u);
-    EXPECT_EQ(info.channel_count, 0u);
+    EXPECT_EQ(info.channel_count, 1u);
+    EXPECT_EQ(info.rx_ids[0], 0x7E8u);
+    EXPECT_EQ(info.tx_ids[0], 0x7E0u);
     EXPECT_STREQ(info.firmware_version, "");
     EXPECT_STREQ(info.profile, "mock");
     for (uint32_t r : info.reserved) {
@@ -200,12 +206,32 @@ TEST(CoreTest, MockSessionInfoNamesTheBackend) {
 
 /* A mock session has no channels, so no ECU to report on: every index
  * is out of range, and the report is left as it was. */
-TEST(CoreTest, MockSessionHasNoChannelSupport) {
+/* The mock has one channel, the simulated engine ECU (0x7E8, requests
+ * to 0x7E0), whose support and identity reports stay empty: it answers
+ * no bitmap or identification */
+TEST(CoreTest, MockSessionHasOneQuietChannel)
+{
     ecuio_session_t* s = nullptr;
     ASSERT_EQ(ecuio_session_create("mock://demo", &s), ECUIO_OK);
+    ecuio_session_info_t info{};
+    ASSERT_EQ(ecuio_session_get_info(s, &info), ECUIO_OK);
+    EXPECT_EQ(info.channel_count, 1u);
+    EXPECT_EQ(info.rx_ids[0], 0x7E8u);
+    EXPECT_EQ(info.tx_ids[0], 0x7E0u);
     ecuio_channel_support_t support;
     memset(&support, 0xEE, sizeof(support));
-    EXPECT_EQ(ecuio_session_get_channel_support(s, 0, &support),
+    ASSERT_EQ(ecuio_session_get_channel_support(s, 0, &support), ECUIO_OK);
+    EXPECT_EQ(support.rx_id, 0x7E8u);
+    EXPECT_EQ(support.flags, 0u);
+    EXPECT_EQ(support.generation, 0u);
+    ecuio_channel_identity_t identity;
+    memset(&identity, 0xEE, sizeof(identity));
+    ASSERT_EQ(ecuio_session_get_channel_identity(s, 0, &identity), ECUIO_OK);
+    EXPECT_EQ(identity.rx_id, 0x7E8u);
+    EXPECT_EQ(identity.items, 0u);
+    EXPECT_EQ(identity.flags, 0u);
+    memset(&support, 0xEE, sizeof(support));
+    EXPECT_EQ(ecuio_session_get_channel_support(s, 1, &support),
               ECUIO_ERR_INVALID_ARGUMENT);
     EXPECT_EQ(support.flags, 0xEEEEEEEEu);
     EXPECT_EQ(ecuio_session_get_channel_support(s, 0, nullptr),
@@ -213,6 +239,90 @@ TEST(CoreTest, MockSessionHasNoChannelSupport) {
     EXPECT_EQ(ecuio_session_get_channel_support(nullptr, 0, &support),
               ECUIO_ERR_NULL_ARGUMENT);
     ecuio_session_destroy(s);
+}
+
+/* The simulated ECU's diagnostics (ADR-0037) are the fakes' report,
+ * read at create, before start, whatever the profile */
+TEST(CoreTest, MockReportsTheFakeEcusDiagnostics)
+{
+    for (const char* uri :
+         {"mock://demo", "mock://demo?profile=raw", "mock://demo?profile=obd2",
+          "mock://demo?profile=uds-generic&did=1E1C"}) {
+        SCOPED_TRACE(uri);
+        ecuio_session_t* s = nullptr;
+        ASSERT_EQ(ecuio_session_create(uri, &s), ECUIO_OK)
+            << ecuio_last_error_detail();
+        ecuio_channel_diagnostics_t d{};
+        ASSERT_EQ(ecuio_session_get_channel_diagnostics(s, 0, &d), ECUIO_OK);
+        EXPECT_EQ(d.rx_id, 0x7E8u);
+        EXPECT_EQ(d.generation, fake_diagnostics::kItems);
+        fake_diagnostics::expect_report(d);
+        EXPECT_EQ(ecuio_session_get_channel_diagnostics(s, 1, &d),
+                  ECUIO_ERR_INVALID_ARGUMENT);
+        ecuio_session_destroy(s);
+    }
+}
+
+/* Read again on the mock reads the list once more on the worker's next
+ * tick: the generation moves past a second read, the report the same */
+TEST(CoreTest, MockReadAgainReadsTheSameReport)
+{
+    ecuio_session_t* s = nullptr;
+    ASSERT_EQ(ecuio_session_create("mock://demo", &s), ECUIO_OK);
+    EXPECT_EQ(ecuio_session_read_diagnostics(s), ECUIO_OK)
+        << "before start: taken on the first tick";
+    ASSERT_EQ(ecuio_session_start(s), ECUIO_OK);
+    const uint32_t again = 2 * fake_diagnostics::kItems + 1;
+    ecuio_channel_diagnostics_t d{};
+    const auto deadline =
+        std::chrono::steady_clock::now() + std::chrono::seconds(2);
+    while ((ecuio_session_get_channel_diagnostics(s, 0, &d) != ECUIO_OK ||
+            d.generation != again) &&
+           std::chrono::steady_clock::now() < deadline) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    ASSERT_EQ(d.generation, again);
+    fake_diagnostics::expect_report(d);
+
+    /* Two more, one read: the worker takes what has come since it last
+     * looked */
+    EXPECT_EQ(ecuio_session_read_diagnostics(s), ECUIO_OK);
+    EXPECT_EQ(ecuio_session_read_diagnostics(s), ECUIO_OK);
+    const uint32_t third = again + 1 + fake_diagnostics::kItems;
+    const auto deadline2 =
+        std::chrono::steady_clock::now() + std::chrono::seconds(2);
+    while ((ecuio_session_get_channel_diagnostics(s, 0, &d) != ECUIO_OK ||
+            d.generation < third) &&
+           std::chrono::steady_clock::now() < deadline2) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(150));
+    ASSERT_EQ(ecuio_session_get_channel_diagnostics(s, 0, &d), ECUIO_OK);
+    EXPECT_EQ(d.generation, third);
+    EXPECT_EQ(ecuio_session_close(s), ECUIO_OK);
+    EXPECT_EQ(ecuio_session_read_diagnostics(s), ECUIO_ERR_SESSION_CLOSED);
+    ecuio_session_destroy(s);
+}
+
+/* ?diagnose=0 on the mock: the channel stays, its report empty and not
+ * asked, Read again or not; a bad value is refused at create */
+TEST(CoreTest, MockDiagnoseOffReportsNone)
+{
+    ecuio_session_t* s = nullptr;
+    ASSERT_EQ(ecuio_session_create("mock://demo?diagnose=0", &s), ECUIO_OK);
+    ASSERT_EQ(ecuio_session_start(s), ECUIO_OK);
+    EXPECT_EQ(ecuio_session_read_diagnostics(s), ECUIO_OK);
+    std::this_thread::sleep_for(std::chrono::milliseconds(150));
+    ecuio_channel_diagnostics_t d{};
+    ASSERT_EQ(ecuio_session_get_channel_diagnostics(s, 0, &d), ECUIO_OK);
+    EXPECT_EQ(d.rx_id, 0x7E8u);
+    EXPECT_EQ(d.flags, 0u);
+    EXPECT_EQ(d.generation, 0u);
+    ecuio_session_destroy(s);
+
+    EXPECT_EQ(ecuio_session_create("mock://demo?diagnose=2", &s),
+              ECUIO_ERR_BAD_URI);
+    EXPECT_STREQ(ecuio_last_error_detail(), "?diagnose= needs 0 or 1, not '2'");
 }
 
 TEST(CoreTest, StatusStringValidValues) {

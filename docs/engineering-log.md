@@ -109,6 +109,7 @@ Dates are commit dates.
 | 2026-10-29 | Session time counts sleep ([ADR-0033](adr/0033-session-time-counts-sleep.md)): one host clock, `ecuio_clock_us`, for every transport's stamps, the request engine, a recording's `host_us`, a value's age and the CLI, counting the time the machine sleeps on every platform (`CLOCK_BOOTTIME` on Linux and Android, where `steady_clock` stops); the activity log and the CLI say when the machine slept and for how long | `fe37ad4` |
 | 2026-10-29 | Debug symbols and probes ([ADR-0034](adr/0034-debug-symbols-and-probes.md)): every MSVC Release build writes PDBs, and the release ships the four executables' PDBs in a zip of their own, each checked against its binary; three USDT probes in core on Linux (a session's start and close, each frame), checked in the ELF notes and fired under `bpftrace` on CI | `75f7daa` |
 | 2026-10-30 | Linux downloads, an SBOM and reproducible core packages ([ADR-0035](adr/0035-linux-downloads-sbom-reproducible.md)): core and `havne-cli` as a deb and a tarball with a CMake package and a pkg-config file, `havne-cli`'s debug info split by build ID; CI builds them under `reprotest` and two runners made the same bytes; the release adds them and the AppImage, and one SPDX SBOM built from what each job packed | `3b86431` |
+| 2026-10-30 | Reading trouble codes ([ADR-0037](adr/0037-reading-trouble-codes.md)): readiness, the stored, pending and permanent codes and the freeze frame, asked once per ECU after identification through the one-shot slot, one-byte requests matched by their service, the freeze frame decoded by the `obd2` defs; a report per ECU through the C ABI with the codes and monitors named in core; a Diagnostics page, an activity-log line and `havne-cli`'s `diagnostics` line; the simulated car's ECU answers as the fakes' does, byte for byte, so all of it shows with no hardware | `551a7ce`, `3300603`, `8b3f5ef`, `dd98f0c`, `afad366`, `58bff2d` |
 
 ## Lessons learned
 
@@ -1111,3 +1112,15 @@ brought up `vcan0` (2026-10-30). There UBSan stopped the first case at
 the test's own `memcpy` from an empty vector, an RTR frame's: its
 `data()` may be null, which `memcpy` mustn't get even for no bytes.
 Core was clean.
+
+**2026-10-30: trouble codes (ADR-0037):** **an ABI check compares what
+a consumer can reach, and nothing more.** The check linked core's
+archive into a shared object exporting every `ecuio_` name,
+`internal.h`'s included, though that header is never installed. The
+first new query key grew three internal arrays, and the check called
+it a break. It exports the public names alone (`66cba07`), and a
+public function's changed signature still fails it. And **Qt Quick
+Test runs a file's cases by name, not in the order written.** The
+bridge keeps the last read after a disconnect, so a case that
+disconnected, sorting first, left the empty-state case a read to show;
+the empty-state case is named to sort first.

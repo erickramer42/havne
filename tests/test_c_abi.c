@@ -64,6 +64,13 @@ typedef char abi_support_reserved_check[(offsetof(ecuio_channel_support_t, reser
 typedef char abi_identity_item_check[(sizeof(ecuio_identity_item_t) == 72) ? 1 : -1];
 typedef char abi_identity_size_check[(sizeof(ecuio_channel_identity_t) == 1184) ? 1 : -1];
 typedef char abi_identity_list_check[(offsetof(ecuio_channel_identity_t, list) == 32) ? 1 : -1];
+typedef char abi_dtc_list_check[(sizeof(ecuio_dtc_list_t) == 68) ? 1 : -1];
+typedef char abi_monitor_check[(sizeof(ecuio_monitor_t) == 4) ? 1 : -1];
+typedef char abi_freeze_value_check[(sizeof(ecuio_freeze_value_t) == 16) ? 1 : -1];
+typedef char abi_diag_size_check[(sizeof(ecuio_channel_diagnostics_t) == 552) ? 1 : -1];
+typedef char abi_diag_lists_check[(offsetof(ecuio_channel_diagnostics_t, lists) == 40) ? 1 : -1];
+typedef char abi_diag_monitors_check[(offsetof(ecuio_channel_diagnostics_t, monitors) == 244) ? 1 : -1];
+typedef char abi_diag_freeze_check[(offsetof(ecuio_channel_diagnostics_t, freeze_values) == 296) ? 1 : -1];
 typedef char abi_display_size_check[(sizeof(ecuio_display_value_t) == 32) ? 1 : -1];
 typedef char abi_display_unit_check[(offsetof(ecuio_display_value_t, unit) == 8) ? 1 : -1];
 typedef char abi_display_decimals_check[(offsetof(ecuio_display_value_t, decimal_places) == 24) ? 1 : -1];
@@ -89,6 +96,7 @@ int main(void)
     ecuio_session_info_t info;
     ecuio_channel_support_t support;
     ecuio_channel_identity_t identity;
+    ecuio_channel_diagnostics_t diagnostics;
     ecuio_display_value_t shown;
     ecuio_sur_request_t sur_request;
     ecuio_transport_ops_t ops;
@@ -97,6 +105,7 @@ int main(void)
     uint32_t serial_count = 0;
     uint32_t can_count = 0;
     const uint8_t vin_request[2] = {0x09, 0x02};
+    char dtc[6];
     frame.arbitration_id = 0x7FF;
     frame.channel_id = 0;
     frame.data_length = 8;
@@ -145,6 +154,19 @@ int main(void)
         ECUIO_ERR_NULL_ARGUMENT ||
         strcmp(ecuio_identity_request_name(vin_request, 2), "VIN") != 0 ||
         ecuio_identity_request_name(vin_request, 1)[0] != '\0') {
+        return 1;
+    }
+    if (ecuio_dtc_format(0x0301, dtc, sizeof dtc) != ECUIO_OK ||
+        strcmp(dtc, "P0301") != 0 ||
+        strcmp(ecuio_monitor_name(8, 0), "Catalyst") != 0 ||
+        strcmp(ecuio_monitor_short_name(8, ECUIO_DIAG_COMPRESSION),
+               "NMHC catalyst") != 0) {
+        return 1;
+    }
+    if (ecuio_session_get_channel_diagnostics(NULL, 0, &diagnostics) !=
+            ECUIO_ERR_NULL_ARGUMENT ||
+        ecuio_session_read_diagnostics(NULL) != ECUIO_ERR_NULL_ARGUMENT ||
+        (ECUIO_DIAG_ASKED & ECUIO_DIAG_FREEZE_FRAME) != 0) {
         return 1;
     }
     memset(&sur_request, 0, sizeof sur_request);

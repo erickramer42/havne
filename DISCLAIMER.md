@@ -20,10 +20,13 @@ possible. Never flash a vehicle with an unstable power supply.**
 
 ## Current state
 
-Havne sends only read-only diagnostic requests: OBD-II Service 01
-("current data") and Service 09 ("vehicle information"), and UDS
-Service 0x22 ("read data by identifier"). It refuses every other
-service ([ADR-0015](docs/adr/0015-request-engine.md)). It has **no**
+Havne sends only read-only diagnostic requests: OBD-II Services 01
+("current data"), 02 ("freeze frame data"), 03, 07 and 0A (the
+stored, pending and permanent trouble codes) and 09 ("vehicle
+information"), and UDS Service 0x22 ("read data by identifier"). It
+refuses every other service
+([ADR-0015](docs/adr/0015-request-engine.md),
+[ADR-0037](docs/adr/0037-reading-trouble-codes.md)). It has **no**
 capability to clear codes, write or flash any ECU. It reaches a
 vehicle through:
 

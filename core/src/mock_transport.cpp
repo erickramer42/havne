@@ -5,7 +5,12 @@
 //          CoreTest.MockAnswersTheSessionsDids decodes its DID replies
 //          under uds-generic; CoreTest.MockFramesKeepTheTickInterval
 //          bounds the worker's cadence against its timestamps;
-//          CoreTest.SessionTimeRunsOnTheClock (stamps on ecuio_clock_us)
+//          CoreTest.SessionTimeRunsOnTheClock (stamps on ecuio_clock_us);
+//          its one channel and diagnostics (mock_ecu.h, ADR-0037):
+//          CoreTest.MockSessionHasOneQuietChannel,
+//          CoreTest.MockReportsTheFakeEcusDiagnostics,
+//          CoreTest.MockReadAgainReadsTheSameReport,
+//          CoreTest.MockDiagnoseOffReportsNone
 
 #include "ecuio/core.h"
 #include "ecuio/internal.h"
@@ -13,11 +18,14 @@
 #include "ecuio/signals.h"
 #include "ecuio/signal_sets.h"
 #include "mock_drive_cycle.h"
+#include "mock_ecu.h"
 #include "host_clock.h"
+#include "request_setup.h"
 
 #include <atomic>
 #include <chrono>
 #include <cstdio>
+#include <memory>
 #include <thread>
 
 namespace {
@@ -40,11 +48,27 @@ struct ecuio_mock_transport {
      * thread creation publishes it; no further synchronization. */
     host_clock::time_point epoch{};
     ecuio_mock::DriveCycle sim;    /* owned by worker: only touched on worker thread */
+    /* The simulated ECU's diagnostics (mock_ecu.h): an engine asking
+     * only the list, read once at attach and again on each Read again;
+     * nullptr under ?diagnose=0. Attach's, then the worker's alone. */
+    std::unique_ptr<ecuio_request_engine> diag;
+    int64_t diag_now_us = 0;     /* the engine's clock (mock_ecu.h) */
+    uint32_t diag_seen = 0;      /* ecuio_take_diag_request's count */
+    uint32_t diag_published = 0; /* the report's last generation out */
 };
 
 namespace {
 
 void answer_dids(ecuio_mock_transport* t, uint64_t timestamp_us);
+
+/* Reads the simulated ECU's diagnostics to their end and hands the
+ * report to the session */
+void read_diagnostics(ecuio_mock_transport* t)
+{
+    ecuio_mock_ecu_read(t->diag.get(), &t->diag_now_us);
+    ecuio_publish_diagnostics(t->session, *t->diag, 0, ECUIO_MOCK_ECU_RX_ID,
+                              t->diag_published);
+}
 
 /* Worker thread entrypoint */
 void mock_worker(ecuio_mock_transport* t)
@@ -83,6 +107,13 @@ void mock_worker(ecuio_mock_transport* t)
 
         ecuio_session_dispatch_callbacks(t->session, &frame);
         answer_dids(t, frame.timestamp_us);
+        if (t->diag) {
+            const uint32_t before = t->diag->chans[0].diag.generation;
+            ecuio_take_diag_request(t->session, t->diag.get(), t->diag_seen);
+            if (t->diag->chans[0].diag.generation != before) {
+                read_diagnostics(t);
+            }
+        }
         due += interval;
         const auto now = std::chrono::steady_clock::now();
         if (due < now) {
@@ -192,23 +223,37 @@ const ecuio_transport_ops_t kMockTransportOps = {
 
 extern "C" {
 
-/* The mock has no parameters of its own: profile and did are core's, so
- * create refuses every other key, as on j2534://. */
-const char* const ecuio_mock_query_keys[] = {"profile", "did", nullptr};
+/* profile and did are core's; diagnose is the request key
+ * (ecuio_request_param), turning the simulated ECU's diagnostics off.
+ * Create refuses every other key, as on j2534://. */
+const char* const ecuio_mock_query_keys[] = {"profile", "did", "diagnose",
+                                             nullptr};
 
 ecuio_status_t ecuio_mock_transport_attach(ecuio_session_t* session,
                                            const char* uri,
                                            const ecuio_uri_query* query)
 {
     /* The text before the query is a free label (mock://demo); create
-     * has judged the query. */
+     * has split the query into its keys. */
     (void)uri;
-    (void)query;
     if (session->transport != nullptr) {
         return ECUIO_OK; /* idempotent */
     }
+    request_params params;
+    for (size_t i = 0; i < query->count; ++i) {
+        const char* wanted = nullptr;
+        if (ecuio_request_param(query->params[i], &params, &wanted) &&
+            wanted != nullptr) {
+            ecuio_detail_bad_value(query->params[i], wanted);
+            return ECUIO_ERR_BAD_URI;
+        }
+    }
+    ecuio_mock_transport* impl = nullptr;
     try {
-        ecuio_mock_transport* impl = new ecuio_mock_transport();
+        impl = new ecuio_mock_transport();
+        if (params.diagnose) {
+            impl->diag.reset(new ecuio_request_engine());
+        }
         try {
             session->transport = new ecuio_transport_t{&kMockTransportOps, impl};
         } catch (...) {
@@ -218,9 +263,30 @@ ecuio_status_t ecuio_mock_transport_attach(ecuio_session_t* session,
         impl->session = session;  /* for callback dispatch */
         impl->epoch = host_clock::now();  /* session start */
     } catch (...) {
+        delete impl;
         return ECUIO_ERR_OUT_OF_MEMORY;
     }
     session->info.backend = ECUIO_BACKEND_MOCK;
+
+    /* One channel, the simulated engine ECU: its support and identity
+     * reports stay empty (the mock answers no Service 01 bitmap or 09
+     * here), its diagnostics read now, before start, so the report is
+     * there as the session is (ADR-0037). */
+    session->info.channel_count = 1;
+    session->info.rx_ids[0] = ECUIO_MOCK_ECU_RX_ID;
+    session->info.tx_ids[0] = ECUIO_MOCK_ECU_TX_ID;
+    {
+        std::lock_guard<std::mutex> lock(session->support_mutex);
+        session->support_count = 1;
+        session->support[0].rx_id = ECUIO_MOCK_ECU_RX_ID;
+        session->identity[0].rx_id = ECUIO_MOCK_ECU_RX_ID;
+        session->diagnostics[0].rx_id = ECUIO_MOCK_ECU_RX_ID;
+    }
+    if (impl->diag) {
+        ecuio_engine_init(impl->diag.get(), 1);
+        ecuio_engine_diagnose(impl->diag.get(), ecuio_obd2_signal_set());
+        read_diagnostics(impl);
+    }
     /* NOTE: worker thread NOT started here; explicit start required.
      * Keeps registration-only sessions single-threaded for tests. */
     return ECUIO_OK;

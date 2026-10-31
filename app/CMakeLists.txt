@@ -55,6 +55,7 @@ qt_add_qml_module(app_ui
         qml/NavButton.qml
         qml/Theme.qml
         qml/LiveViewPage.qml
+        qml/DiagnosticsPage.qml
         qml/ChartLayout.qml
         qml/VehicleBook.qml
         qml/SignalHub.qml

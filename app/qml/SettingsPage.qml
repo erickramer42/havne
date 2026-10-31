@@ -466,10 +466,12 @@ Pane {
     // (core/src/mock_transport.cpp, replay_transport.cpp,
     // j2534_transport.cpp, elm327_transport.cpp)
     readonly property var schemeKeys: ({
-        "mock": ["profile", "did"],
+        "mock": ["profile", "did", "diagnose"],
         "replay": ["profile", "did", "speed", "loop"],
-        "j2534": ["baud", "flags", "filter", "txid", "poll", "probe", "identify", "profile", "did"],
-        "elm327": ["baud", "serial", "filter", "txid", "poll", "probe", "identify", "profile", "did"],
+        "j2534": ["baud", "flags", "filter", "txid", "poll", "probe", "identify", "diagnose",
+                  "profile", "did"],
+        "elm327": ["baud", "serial", "filter", "txid", "poll", "probe", "identify", "diagnose",
+                   "profile", "did"],
         "socketcan": ["profile", "did", "baud", "filter"]
     })
 

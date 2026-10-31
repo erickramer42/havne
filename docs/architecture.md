@@ -10,7 +10,7 @@ them, a single **bridge** object moves data from the core's worker
 threads onto the GUI thread.
 
 ```
- QML pages: Home · Dashboard · Live · Log · Settings
+ QML pages: Home · Dashboard · Live · Diagnostics · Log · Settings
    │  Theme (colors, link-state labels) · SignalHub (signals by name)
    ▼  properties and list models, GUI thread only
  SessionBridge (app/)          the app's caller of the core
@@ -111,9 +111,10 @@ decode.
 Every scheme shares one strict query grammar (`core/src/uri_query.h`).
 `ecuio_session_create` splits the query once and refuses any key the
 scheme's transport doesn't take, before anything attaches; `mock://`
-takes only `profile` and `did`, both core's, and `replay://` adds
-`speed` (0.1 to 100, or `max`) and `loop`. `j2534://` and `elm327://`
-share the request keys (`filter`, `txid`, `poll`, `probe`, `identify`)
+takes `profile` and `did`, both core's, and `diagnose` for its ECU's
+trouble codes, and `replay://` adds `speed` (0.1 to 100, or `max`) and
+`loop`. `j2534://` and `elm327://` share the request keys (`filter`,
+`txid`, `poll`, `probe`, `identify`, `diagnose`)
 and derive their channels and requests the same way
 (`core/src/request_setup.h`), so a run sheet's query means the same on
 either; `baud` is the CAN rate on both, and `elm327://` adds `serial`,
@@ -226,8 +227,10 @@ The full reference is [j2534.md](j2534.md).
   request leaves only when the ECU says it isn't supported, never on
   silence. Beside the rotation, taking turns with it, each channel asks
   its ECU once what it is, the VIN and its identifiers
-  ([ADR-0021](adr/0021-vehicle-identification.md)), for the activity
-  log and the recording.
+  ([ADR-0021](adr/0021-vehicle-identification.md)), then its trouble
+  codes, readiness and freeze frame
+  ([ADR-0037](adr/0037-reading-trouble-codes.md)), for the activity
+  log, the recording and the Diagnostics page.
 - **Teardown order is a hard contract:** join the worker → stop the
   filters → disconnect → close → unload. The worker calls vendor code
   through pointers that dangle once the DLL unmaps.

@@ -750,10 +750,11 @@ optional Quick plugins this app never uses.
 the newest `vX.Y.Z` tag, or a tag, commit or source folder named as
 its argument. It runs on Linux, with libabigail (`abigail-tools` on
 Ubuntu): each tree's core-only build has its static archive linked
-into a shared object that exports only the `ecuio_` functions, as an
-FFI consumer would load it; `abidw` dumps the functions and the types
-the public headers declare, and `abidiff` compares the two. Output
-goes to `build-abi/` (`report.txt`).
+into a shared object that exports only the public `ecuio_` names, as an
+FFI consumer would load it (none that `internal.h` declares: core
+uses those across its own files and never installs them); `abidw`
+dumps the functions and the types the public headers declare, and
+`abidiff` compares the two. Output goes to `build-abi/` (`report.txt`).
 
 - **Fails:** a function removed or its signature changed; a struct
   field moved, resized or retyped; a struct's size changed; an enum

@@ -1,9 +1,9 @@
 // File/layer: core/src/session.h | internal, C++17, Qt-free; the session
 //             struct behind the opaque ecuio_session_t
 // Testing: UNIT: CoreTest (sessions, callbacks, the decoded values and
-//          their buffers, the info, support and identity copies);
-//          HARNESS: the J2534 suites, whose worker writes support[] and
-//          identity[]
+//          their buffers, the info, support, identity and diagnostics
+//          copies); HARNESS: the J2534 and ELM327 suites, whose workers
+//          write support[], identity[] and diagnostics[]
 
 #ifndef ECUIO_SESSION_H
 #define ECUIO_SESSION_H
@@ -53,14 +53,20 @@ struct ecuio_session {
      * create, before create returns; read-only afterwards, so
      * ecuio_session_get_info needs no lock. */
     ecuio_session_info_t info{};
-    /* What each channel's ECU said it supports, and what it said it is
-     * (ADR-0021): the count and each rx_id set by attach, the rest
-     * updated by the worker, all under the mutex
-     * (ecuio_session_get_channel_support, _identity). */
+    /* What each channel's ECU said it supports, what it said it is
+     * (ADR-0021) and what it reported of its diagnostics (ADR-0037):
+     * the count and each rx_id set by attach, the rest updated by the
+     * worker, all under the mutex (ecuio_session_get_channel_support,
+     * _identity, _diagnostics). */
     mutable std::mutex support_mutex;
     ecuio_channel_support_t support[ECUIO_SESSION_INFO_MAX_CHANNELS]{};
     ecuio_channel_identity_t identity[ECUIO_SESSION_INFO_MAX_CHANNELS]{};
+    ecuio_channel_diagnostics_t diagnostics[ECUIO_SESSION_INFO_MAX_CHANNELS]{};
     uint32_t support_count = 0;
+    /* ecuio_session_read_diagnostics's count, from any thread; a worker
+     * that reads diagnostics asks again when it moves
+     * (ecuio_take_diag_request) */
+    std::atomic<uint32_t> diag_requests{0};
 };
 
 #endif /* ECUIO_SESSION_H */

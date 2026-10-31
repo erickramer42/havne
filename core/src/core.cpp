@@ -5,7 +5,8 @@
 //          list length, the list as it stood, no allocation up to
 //          four), the decoded values (CoreTest.Values*: the batch
 //          against direct decodes, a text slot each, the frame
-//          callbacks first), the error strings;
+//          callbacks first), the error strings; the trouble code's and
+//          the monitors' names (DiagnosticsTest, test_obd2);
 //          HARNESS: the J2534 suites and Elm327SessionTest through
 //          create; test_c_abi links the public functions; the USDT
 //          probes: ProbeNotesTest (their notes) and CI's bpftrace step
@@ -17,6 +18,7 @@
 #include "session.h"
 #include "uds_generic.h"
 #include "request_engine.h"   /* ECUIO_IDENT_REQUESTS, for the names */
+#include "diagnostics.h"      /* the trouble codes' and monitors' words */
 #include "uri_query.h"
 #include "error_detail.h"
 #include "probes.h"
@@ -391,6 +393,33 @@ ecuio_status_t ecuio_session_get_channel_identity(
     return ECUIO_OK;
 }
 
+ecuio_status_t ecuio_session_get_channel_diagnostics(
+    const ecuio_session_t* session, uint32_t channel,
+    ecuio_channel_diagnostics_t* out_diagnostics)
+{
+    if (session == nullptr || out_diagnostics == nullptr) {
+        return ECUIO_ERR_NULL_ARGUMENT;
+    }
+    std::lock_guard<std::mutex> lock(session->support_mutex);
+    if (channel >= session->support_count) {
+        return ECUIO_ERR_INVALID_ARGUMENT;
+    }
+    *out_diagnostics = session->diagnostics[channel];
+    return ECUIO_OK;
+}
+
+ecuio_status_t ecuio_session_read_diagnostics(ecuio_session_t* session)
+{
+    if (session == nullptr) {
+        return ECUIO_ERR_NULL_ARGUMENT;
+    }
+    if (session->closed.load()) {
+        return ECUIO_ERR_SESSION_CLOSED;
+    }
+    session->diag_requests.fetch_add(1);
+    return ECUIO_OK;
+}
+
 const char* ecuio_identity_request_name(const uint8_t* request, uint8_t length)
 {
     if (request == nullptr) {
@@ -404,6 +433,30 @@ const char* ecuio_identity_request_name(const uint8_t* request, uint8_t length)
         }
     }
     return "";
+}
+
+ecuio_status_t ecuio_dtc_format(uint16_t code, char* out, uint32_t out_cap)
+{
+    if (out == nullptr) {
+        return ECUIO_ERR_NULL_ARGUMENT;
+    }
+    if (out_cap < 6) {
+        return ECUIO_ERR_INVALID_ARGUMENT;
+    }
+    ecuio_dtc_text(code, out);
+    return ECUIO_OK;
+}
+
+const char* ecuio_monitor_name(uint8_t id, uint32_t diag_flags)
+{
+    const ecuio_monitor_def* m = ecuio_monitor_find(id, diag_flags);
+    return (m != nullptr) ? m->name : "";
+}
+
+const char* ecuio_monitor_short_name(uint8_t id, uint32_t diag_flags)
+{
+    const ecuio_monitor_def* m = ecuio_monitor_find(id, diag_flags);
+    return (m != nullptr) ? m->short_name : "";
 }
 
 /* Optional no-ops (core.h): core holds no global state that needs

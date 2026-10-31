@@ -14,6 +14,7 @@ UndefinedBehaviorSanitizer with Clang):
 | `fuzz_elm327_reply` | Arbitrary bytes as an ELM327's output (serial, TCP or an app's Bluetooth stream) through the line reader, the line kinds, the frame parser and ISO-TP reassembly (`core/src/elm327_protocol.h`), the first byte picking the addressing mode and an `AT PPS` parameter, with the voltage and `AT PPS` parsers on every line. Each line stays within `ELM327_LINE_MAX` and terminated; a frame line holds 1 to 8 bytes and an ID of its mode; a reassembled message fits a frame, is copied at its exact size (so ASan sees a read past it) and is never longer than its First Frame said; a prompt leaves no message under way; two runs agree. |
 | `fuzz_replay_file` | Arbitrary rows after a `frames.csv` header (ADR-0017), written to a scratch file in `TEMP`/`TMPDIR` and opened through `ecuio_session_create("replay://…")`, whose attach reads the whole file (ADR-0023). The status is `ECUIO_OK`, with a row count, or `ECUIO_ERR_LOAD_FAILED`, with a one-line detail that never holds the path; two creates agree. It runs at file I/O's pace, a few hundred inputs a second. |
 | `fuzz_socketcan_wire` | SocketCAN's parsers of outside input (`core/src/socketcan_wire.h`, ADR-0032), the first byte picking one: `?filter=` text (at most 8 filters, each ID within its width and flagged 29-bit exactly when above 0x7FF, the mask within that width and carrying the width flag), the kernel's `RTM_NEWLINK` payload (the name and kind terminated; what discovery lists and the verdict on the link agree with it), or a kernel frame (the length within its kind's room, only the flags it can carry). Pure code, so it runs on every platform though the transport is Linux's. Each input is a heap copy of its exact size; two runs agree. |
+| `fuzz_diagnostics` | The request engine reading an ECU's diagnostics (`core/src/request_engine.h`, `diagnostics.h`; ADR-0037), the input a script: each request the list sends answered by a timeout, raw bytes, a positive reply with an arbitrary tail (up to 128 bytes, past the 32 codes a list holds) or a negative one, a pending code among them, with Read again and rescans between. After every step the report stays within its caps (codes, monitors, freeze-frame values, items), each list holds no more than it reported, every code and monitor it holds has a name, its values are finite, and it reads complete only with nothing left to ask; two runs agree. |
 
 They aren't ctest tests: a time-bounded fuzzer in the default pass
 would make a green suite stop meaning green. The CI `fuzz` job runs
@@ -31,7 +32,7 @@ libFuzzer, Visual Studio 2022 17.0 or later; nothing else to install):
 
 ```sh
 cmake -B build-fuzz-msvc -A x64 -DHAVNE_BUILD_CORE_ONLY=ON -DBUILD_TESTING=OFF -DECUIO_BUILD_FUZZERS=ON
-cmake --build build-fuzz-msvc --config RelWithDebInfo --target fuzz_decode_signal fuzz_validate_set fuzz_uds_query fuzz_elm327_reply fuzz_replay_file fuzz_socketcan_wire
+cmake --build build-fuzz-msvc --config RelWithDebInfo --target fuzz_decode_signal fuzz_validate_set fuzz_uds_query fuzz_elm327_reply fuzz_replay_file fuzz_socketcan_wire fuzz_diagnostics
 build-fuzz-msvc/fuzz/RelWithDebInfo/fuzz_decode_signal.exe -max_total_time=60
 ```
 
@@ -45,7 +46,7 @@ runtimes are in `libclang-rt-<major>-dev` on Ubuntu):
 ```sh
 cmake -B build-fuzz -DCMAKE_BUILD_TYPE=RelWithDebInfo -DHAVNE_BUILD_CORE_ONLY=ON \
   -DBUILD_TESTING=OFF -DECUIO_BUILD_FUZZERS=ON -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++
-cmake --build build-fuzz --target fuzz_decode_signal fuzz_validate_set fuzz_uds_query fuzz_elm327_reply fuzz_replay_file fuzz_socketcan_wire
+cmake --build build-fuzz --target fuzz_decode_signal fuzz_validate_set fuzz_uds_query fuzz_elm327_reply fuzz_replay_file fuzz_socketcan_wire fuzz_diagnostics
 ./build-fuzz/fuzz/fuzz_decode_signal -max_total_time=60
 ```
 

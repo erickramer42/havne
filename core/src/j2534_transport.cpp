@@ -7,8 +7,10 @@
 //          channel without ?filter=, rotation, ?poll= precedence,
 //          the probe's walk, its drops, ?probe=0 and its resumption on
 //          recovery, the support report it publishes, uds-generic's
-//          requests, ECU prefix and DID scan, and identification's
-//          requests, ?identify=0 and the report it publishes.
+//          requests, ECU prefix and DID scan, identification's
+//          requests, ?identify=0 and the report it publishes, and
+//          diagnostics' (ADR-0037): the report, ?diagnose=0 and Read
+//          again.
 //          test_j2534_health, also cross-arch: the request engine's
 //          pacing (the floor, the wait, negative and pending replies,
 //          two channels at once), the drain in passive mode, and the
@@ -45,8 +47,8 @@
 /* The query keys parse_query reads, for create's check (internal.h);
  * every platform's, so create links where the transport is a stub. */
 extern "C" const char* const ecuio_j2534_query_keys[] = {
-    "baud", "flags", "filter", "txid", "poll", "probe", "identify", "profile",
-    "did", nullptr};
+    "baud",     "flags",    "filter",  "txid", "poll", "probe",
+    "identify", "diagnose", "profile", "did",  nullptr};
 
 #ifdef _WIN32
 
@@ -412,6 +414,8 @@ void j2534_worker(ecuio_j2534_transport* t)
     link_health h(t->session->last_error, t->session->error_count);
     uint32_t published[ECUIO_MAX_CHANNELS] = {};
     uint32_t published_identity[ECUIO_MAX_CHANNELS] = {};
+    uint32_t published_diagnostics[ECUIO_MAX_CHANNELS] = {};
+    uint32_t diag_seen = 0;
     if (requests && t->probe) {
         ecuio_engine_probe(&e, engine_now_us(t));
     }
@@ -459,11 +463,16 @@ void j2534_worker(ecuio_j2534_transport* t)
                 ecuio_engine_rescan(&e);
             }
         }
+        if (requests) {
+            ecuio_take_diag_request(t->session, &e, diag_seen);
+        }
         for (uint32_t c = 0; requests && c < t->chan_count; ++c) {
             ecuio_publish_support(t->session, e, c, t->chans[c].rx_id,
                                   published[c]);
             ecuio_publish_identity(t->session, e, c, t->chans[c].rx_id,
                                    published_identity[c]);
+            ecuio_publish_diagnostics(t->session, e, c, t->chans[c].rx_id,
+                                      published_diagnostics[c]);
         }
 
         if (h.backoff_ms > 0) {
@@ -491,7 +500,7 @@ void j2534_worker(ecuio_j2534_transport* t)
  *   - lowercase keys only:
  *       baud   decimal, nonzero
  *       flags  0x-hex or decimal; 0 legal
- *       filter, txid, poll, probe, identify: the request keys
+ *       filter, txid, poll, probe, identify, diagnose: the request keys
  *              (ecuio_request_param); ?filter='s channel registers a
  *              FLOW_CONTROL filter
  *       profile core's key, read by ecuio_session_create
