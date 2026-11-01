@@ -73,10 +73,12 @@ target_link_libraries(test_obd2 PRIVATE
 )
 
 # The Service 01 table the obd2 set and the fakes' ECU are checked against,
-# and the readiness monitors' names
+# the readiness monitors' names, and the replay fixture the simulated ECU
+# loads
 target_compile_definitions(test_obd2 PRIVATE
     ECUIO_OBD2_TABLE="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/obd2/service01.csv"
     ECUIO_OBD2_MONITORS="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/obd2/monitors.csv"
+    ECUIO_REPLAY_FIXTURES="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/replay"
 )
 
 app_enable_warnings(test_obd2)
@@ -112,6 +114,9 @@ gtest_discover_tests(test_elm327 PROPERTIES TIMEOUT 30)
 add_executable(test_socketcan test_socketcan.cpp test_isotp.cpp)
 target_include_directories(test_socketcan PRIVATE ${CMAKE_SOURCE_DIR}/core/src)
 target_link_libraries(test_socketcan PRIVATE ecuio-core GTest::gtest_main)
+# the simulated ECU loads the replay fixture (SimTest, Linux)
+target_compile_definitions(test_socketcan PRIVATE
+    ECUIO_REPLAY_FIXTURES="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/replay")
 app_enable_warnings(test_socketcan)
 gtest_discover_tests(test_socketcan)
 
@@ -235,6 +240,9 @@ if(TARGET havne-cli)
         # platform (ADR-0046)
         app_cli_golden(SimRefusesABadUri sim-bad-uri.jsonl --exit 3
             -- $<TARGET_FILE:havne-cli> sim "mock://sim?faults=silent:0" --on vcan0)
+        app_cli_golden(SimRefusesARelativeRecording sim-relative-recording.jsonl
+            --exit 3
+            -- $<TARGET_FILE:havne-cli> sim "replay://recordings/run?loop=1" --on vcan0)
         # A replay cut short under it stops early, and the stream ends
         # with it instead of waiting for a last frame that never comes
         add_test(NAME CliReplayTest.ACutRecordingEndsTheStream

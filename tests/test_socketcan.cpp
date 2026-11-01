@@ -686,8 +686,11 @@ TEST(SimTest, TheArgumentsAndTheUriAreCheckedFirst)
     c = sim_create("mock://sim?faults=silent:0", "nosuchcan9");
     EXPECT_EQ(c.status, ECUIO_ERR_BAD_URI);
     EXPECT_NE(c.detail.find("faults:"), std::string::npos) << c.detail;
-    c = sim_create("replay:///tmp/recording", "nosuchcan9");
-    EXPECT_EQ(c.status, ECUIO_ERR_NOT_IMPLEMENTED);
+    c = sim_create("replay://recordings/run", "nosuchcan9");
+    EXPECT_EQ(c.status, ECUIO_ERR_BAD_URI);
+    EXPECT_NE(c.detail.find("absolute"), std::string::npos) << c.detail;
+    c = sim_create("mock://sim?loop=1", "nosuchcan9");
+    EXPECT_EQ(c.status, ECUIO_ERR_BAD_URI);
 #if !ECUIO_HAVE_SOCKETCAN
     c = sim_create("mock://sim", "vcan0");
     EXPECT_EQ(c.status, ECUIO_ERR_NO_TRANSPORT);
@@ -708,5 +711,23 @@ TEST(SimTest, OnlyAVcanInterfaceIsTaken)
     EXPECT_NE(c.detail.find("not vcan"), std::string::npos) << c.detail;
     c = sim_create("mock://sim", "bad name!");
     EXPECT_EQ(c.status, ECUIO_ERR_LOAD_FAILED);
+}
+
+// A recording is read before the interface is judged: its own refusal
+// first, then the interface's
+TEST(SimTest, ARecordingIsReadBeforeTheInterface)
+{
+    SimCreated c = sim_create("replay:///no/such/recording", "nosuchcan9");
+    EXPECT_EQ(c.status, ECUIO_ERR_LOAD_FAILED);
+    EXPECT_NE(c.detail.find("couldn't open"), std::string::npos) << c.detail;
+    const std::string fixture = std::string("replay://") +
+                                ECUIO_REPLAY_FIXTURES +
+                                "/2026-10-25-engine-start";
+    c = sim_create(fixture.c_str(), "nosuchcan9");
+    EXPECT_EQ(c.status, ECUIO_ERR_LOAD_FAILED);
+    EXPECT_NE(c.detail.find("no interface nosuchcan9"), std::string::npos)
+        << c.detail;
+    c = sim_create((fixture + "?loop=1").c_str(), "nosuchcan9");
+    EXPECT_EQ(c.status, ECUIO_ERR_LOAD_FAILED) << "it spans time";
 }
 #endif

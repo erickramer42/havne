@@ -673,10 +673,12 @@ void usage(FILE* to)
         "interface\n"
         "         as they arrive: mock://demo drives the simulated car on it.\n"
         "sim      (Linux) answers OBD-II requests on a virtual CAN interface\n"
-        "         as the simulated car's engine ECU: "
+        "         as an engine ECU: the simulated car's, "
         "mock://sim[?values=drive|\n"
-        "         canned][&vin=<VIN>][&faults=silent:<n>,...]. Ends at Ctrl+C\n"
-        "         or after S seconds.\n"
+        "         canned][&vin=<VIN>][&faults=silent:<n>,...], or a "
+        "recording's,\n"
+        "         replay://<absolute path>[?loop=1][&vin=<VIN>][&faults=...].\n"
+        "         Ends at Ctrl+C or after S seconds.\n"
         "devices  lists the serial ports, J2534 adapters and CAN interfaces a\n"
         "         URI can name.\n"
         "vin      decodes a VIN on this machine: its model year, make and\n"
@@ -960,8 +962,6 @@ std::vector<ecuio_can_interface_t> can_interfaces()
     return list;
 }
 
-// A typed VIN's decode (ADR-0043), offline: spaces dropped and upper
-// case, as Settings' lookup takes it; not a VIN is a usage error
 struct SimArgs {
     const char* uri = nullptr;
     const char* on = nullptr;
@@ -1039,6 +1039,8 @@ int run_sim(const SimArgs& args)
     return out.ok() ? kExitOk : kExitFailed;
 }
 
+// A typed VIN's decode (ADR-0043), offline: spaces dropped and upper
+// case, as Settings' lookup takes it; not a VIN is a usage error
 int run_vin(const char* typed)
 {
     std::string vin;

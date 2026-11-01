@@ -1,8 +1,10 @@
 // File/layer: core/include/ecuio/sim.h | C ABI, public interface
 // Testing: UNIT: SimEcuTest (test_obd2): the answers, the URI and the
-//          faults; SimTest (test_socketcan): the contract's arguments on
-//          every platform; HARNESS: SimBusTest (test_vcan, Linux): a
-//          requesting socketcan:// session against it on vcan0
+//          faults; SimRecordingTest (test_obd2): a recording's answers
+//          and its loading; SimTest (test_socketcan): the contract's
+//          arguments on every platform; HARNESS: SimBusTest (test_vcan,
+//          Linux): a requesting socketcan:// session against it on vcan0,
+//          the mock's car and a recording
 
 #ifndef ECUIO_SIM_H
 #define ECUIO_SIM_H
@@ -17,18 +19,27 @@ extern "C" {
 #endif
 
 /*
- * The simulated ECU (ADR-0046): the mock's engine ECU answering OBD-II
- * requests on a virtual CAN bus (Linux's vcan), as 0x7E8 to 0x7DF and
- * 0x7E0, through core's ISO-TP, so a requesting socketcan:// session
- * (ADR-0040) runs end to end with no hardware.
+ * The simulated ECU (ADR-0046): an engine ECU answering OBD-II requests
+ * on a virtual CAN bus (Linux's vcan), as 0x7E8 to 0x7DF and 0x7E0,
+ * through core's ISO-TP, so a requesting socketcan:// session (ADR-0040)
+ * runs end to end with no hardware.
  *
- * The URI:
+ * The URI, one of:
  *   mock://<label>[?values=drive|canned][&vin=<VIN>][&faults=<f>:<n>[,...]]
- * values: drive (the default) answers Service 01 from the mock's drive
- * cycle, canned the fakes' one reading per linear J1979 PID. vin: what
- * Service 09 item 02 answers, a made-up one by default. faults: silent,
- * late, bad_sequence and stalled, each every nth reply (1-10000), the
- * bitmaps never broken.
+ *   replay://<absolute path>[?loop=0|1][&vin=<VIN>][&faults=<f>:<n>[,...]]
+ * mock://, the mock's car. values: drive (the default) answers Service 01
+ * from the mock's drive cycle, canned the fakes' one reading per linear
+ * J1979 PID. vin: what Service 09 item 02 answers, a made-up one by
+ * default.
+ * replay://, a recording (its folder or its frames.csv): each request
+ * gets the engine ECU's reply the recording held for it at the simulated
+ * ECU's time since create, the car's own bitmaps, identification and
+ * codes; a request it holds no reply for is refused, and a clear always
+ * (a recording can't say what follows one). loop=1 goes round the
+ * recording; by default its last replies hold. vin: what 09 02 answers
+ * instead of the recording's.
+ * faults, both: silent, late, bad_sequence and stalled, each every nth
+ * reply (1-10000), the bitmaps never broken.
  */
 typedef struct ecuio_sim ecuio_sim_t;
 
@@ -68,11 +79,14 @@ _Static_assert(offsetof(ecuio_sim_stats_t, flags) == 72, "sim stats flags offset
  *
  * CONTRACTS:
  * - NULL uri, ifname or out: ECUIO_ERR_NULL_ARGUMENT.
- * - A URI that isn't mock://, a query key other than values, vin and
- *   faults, or a bad value: ECUIO_ERR_BAD_URI. replay:// (a recording
- *   as the ECU, ADR-0046 section 7): ECUIO_ERR_NOT_IMPLEMENTED. Both on
- *   every platform.
+ * - A URI that isn't mock:// or replay://, a query key the scheme
+ *   doesn't take, a bad value, or a recording's path that isn't
+ *   absolute: ECUIO_ERR_BAD_URI, on every platform.
  * - Off Linux: ECUIO_ERR_NO_TRANSPORT.
+ * - replay://: a frames.csv that won't open or whose row won't parse
+ *   (the detail names the line, never the path), or one with no reply
+ *   from the engine ECU: ECUIO_ERR_LOAD_FAILED; loop=1 on a recording
+ *   whose replies share one time: ECUIO_ERR_BAD_URI.
  * - ifname not a vcan interface, or down, or a socket that won't open:
  *   ECUIO_ERR_LOAD_FAILED. A real CAN controller is refused: the
  *   simulated ECU would answer for a car's own.

@@ -4970,8 +4970,43 @@ TEST(SimEcuTest, TheUrisKeysAndRefusals)
             << bad;
         EXPECT_NE(why[0], '\0') << bad;
     }
-    EXPECT_EQ(ecuio_sim_parse_uri("replay:///tmp/x", &c, why, sizeof why),
-              ecuio_sim_uri_result::replay);
+    // replay://: an absolute path, its own keys
+#ifdef _WIN32
+    const std::string abs = "C:/recordings/run 1";
+#else
+    const std::string abs = "/recordings/run 1";
+#endif
+    const std::string replay = "replay://" + abs;
+    ASSERT_EQ(ecuio_sim_parse_uri(replay.c_str(), &c, why, sizeof why),
+              ecuio_sim_uri_result::ok)
+        << why;
+    EXPECT_EQ(c.source, ecuio_sim_source::replay);
+    EXPECT_EQ(std::string(c.path, c.path_len), abs);
+    EXPECT_FALSE(c.loop);
+    EXPECT_FALSE(c.vin_given);
+    const std::string looped =
+        replay + "?loop=1&vin=1FAFAKE10M0000001&faults=late:7";
+    ASSERT_EQ(ecuio_sim_parse_uri(looped.c_str(), &c, why, sizeof why),
+              ecuio_sim_uri_result::ok)
+        << why;
+    EXPECT_EQ(std::string(c.path, c.path_len), abs) << "the path ends at ?";
+    EXPECT_TRUE(c.loop);
+    EXPECT_TRUE(c.vin_given);
+    EXPECT_STREQ(c.vin, "1FAFAKE10M0000001");
+    EXPECT_EQ(c.faults.late, 7u);
+    for (const std::string& bad :
+         {std::string("replay://"), std::string("replay://?loop=1"),
+          std::string("replay://recordings/run"), replay + "?values=canned",
+          replay + "?loop=2", replay + "?speed=2"}) {
+        why[0] = '\0';
+        EXPECT_EQ(ecuio_sim_parse_uri(bad.c_str(), &c, why, sizeof why),
+                  ecuio_sim_uri_result::bad)
+            << bad;
+        EXPECT_NE(why[0], '\0') << bad;
+    }
+    // and mock:// never takes replay's key
+    EXPECT_EQ(ecuio_sim_parse_uri("mock://sim?loop=1", &c, why, sizeof why),
+              ecuio_sim_uri_result::bad);
 }
 
 // Every Nth reply of its kind, single-frame and segmented counted apart;
@@ -4998,4 +5033,275 @@ TEST(SimEcuTest, FaultsBreakEveryNthReplyOfItsKind)
     EXPECT_EQ(ecuio_sim_next_fate(e, pack, 4, 9), ecuio_sim_fate::silent);
     EXPECT_EQ(e.singles, 6u);
     EXPECT_EQ(e.segmented, 3u);
+}
+
+/* ---------- a recording as the simulated ECU (ADR-0046 section 7) ---------- */
+
+namespace {
+
+constexpr int64_t kSecond = 1000000;
+
+/* One recorded frame: the engine ECU's unless id says otherwise */
+void take(ecuio_sim_recording& r, int64_t at_us,
+          std::initializer_list<uint8_t> data, uint32_t id = 0x7E8,
+          uint32_t flags = 0)
+{
+    std::unique_ptr<ecuio_frame_t> f(new ecuio_frame_t());
+    f->arbitration_id = id;
+    f->flags = flags;
+    f->data_length = static_cast<uint16_t>(data.size());
+    std::copy(data.begin(), data.end(), f->data);
+    ecuio_sim_recording_take(r, at_us, *f);
+}
+
+std::vector<uint8_t> rask(const ecuio_sim_recording& r, int64_t now_us,
+                          std::initializer_list<uint8_t> req,
+                          const char* vin = nullptr)
+{
+    const std::vector<uint8_t> q(req);
+    std::vector<uint8_t> out(ECUIO_SIM_RECORDING_REPLY_MAX);
+    const uint32_t n = ecuio_sim_recording_answer(
+        r, now_us, q.data(), static_cast<uint32_t>(q.size()), vin, out.data());
+    out.resize(n);
+    return out;
+}
+
+using Bytes = std::vector<uint8_t>;
+
+/* A scratch frames.csv in TEMP/TMPDIR, removed when it goes */
+struct ScratchCsv {
+    std::string path;
+    explicit ScratchCsv(const char* name, const std::string& text)
+    {
+        const char* dir = std::getenv("TEMP");
+        if (dir == nullptr) {
+            dir = std::getenv("TMPDIR");
+        }
+        path = std::string(dir != nullptr ? dir : "/tmp") + "/ecuio-" + name +
+               ".csv";
+        FILE* f = std::fopen(path.c_str(), "wb");
+        EXPECT_NE(f, nullptr) << path;
+        if (f != nullptr) {
+            std::fwrite(text.data(), 1, text.size(), f);
+            std::fclose(f);
+        }
+    }
+    ~ScratchCsv() { std::remove(path.c_str()); }
+};
+
+} // namespace
+
+// Each kept reply answers the request it came for; a refusal, a clear's
+// 44, another ECU's reply, an error, a 29-bit or a cut-short frame isn't
+// kept
+TEST(SimRecordingTest, KeepsEachReplyUnderTheRequestItAnswers)
+{
+    ecuio_sim_recording r;
+    take(r, 0, {0x41, 0x0C, 0x1A, 0xF8});
+    take(r, 0, {0x42, 0x0C, 0x00, 0x2E, 0xE0});
+    take(r, 0, {0x43, 0x01, 0x03, 0x01});
+    take(r, 0, {0x47, 0x00});
+    take(r, 0, {0x4A, 0x00});
+    take(r, 0, {0x49, 0x0A, 0x01, 'E', 'C', 'M'});
+    take(r, 0, {0x62, 0x1E, 0x05, 0x55});
+    take(r, 0, {0x7F, 0x22, 0x31});
+    take(r, 0, {0x44});
+    take(r, 0, {0x41, 0x0D, 0x32}, 0x7E9);
+    take(r, 0, {0x41, 0x05, 0x7B}, 0x7E8, ECUIO_FRAME_FLAG_ERROR);
+    take(r, 0, {0x41, 0x0F, 0x50}, 0x7E8, ECUIO_FRAME_FLAG_EXTENDED);
+    take(r, 0, {0x41, 0x10, 0x01}, 0x7E8, ECUIO_FRAME_FLAG_TRUNCATED);
+    EXPECT_EQ(r.replies.size(), 7u);
+    EXPECT_EQ(rask(r, 0, {0x01, 0x0C}), (Bytes{0x41, 0x0C, 0x1A, 0xF8}));
+    EXPECT_EQ(rask(r, 0, {0x02, 0x0C, 0x00}),
+              (Bytes{0x42, 0x0C, 0x00, 0x2E, 0xE0}));
+    EXPECT_EQ(rask(r, 0, {0x03}), (Bytes{0x43, 0x01, 0x03, 0x01}));
+    EXPECT_EQ(rask(r, 0, {0x07}), (Bytes{0x47, 0x00}));
+    EXPECT_EQ(rask(r, 0, {0x0A}), (Bytes{0x4A, 0x00}));
+    EXPECT_EQ(rask(r, 0, {0x09, 0x0A}),
+              (Bytes{0x49, 0x0A, 0x01, 'E', 'C', 'M'}));
+    EXPECT_EQ(rask(r, 0, {0x22, 0x1E, 0x05}), (Bytes{0x62, 0x1E, 0x05, 0x55}));
+    for (uint8_t pid : std::initializer_list<uint8_t>{0x0D, 0x05, 0x0F, 0x10}) {
+        EXPECT_EQ(rask(r, 0, {0x01, pid}), (Bytes{0x7F, 0x01, 0x12}))
+            << "not kept: " << int(pid);
+    }
+}
+
+// The reply at the ECU's time: the first before it, the last at or
+// before it between, the last after the end (held), or round the span
+TEST(SimRecordingTest, AnswersAtTheEcusTime)
+{
+    ecuio_sim_recording r;
+    take(r, 1 * kSecond, {0x41, 0x0D, 10});
+    take(r, 3 * kSecond, {0x41, 0x0D, 30});
+    take(r, 5 * kSecond, {0x41, 0x0D, 50});
+    EXPECT_EQ(r.span_us, 5 * kSecond);
+    const auto speed = [&](int64_t at) { return rask(r, at, {0x01, 0x0D})[2]; };
+    EXPECT_EQ(speed(0), 10);
+    EXPECT_EQ(speed(2 * kSecond), 10);
+    EXPECT_EQ(speed(3 * kSecond), 30);
+    EXPECT_EQ(speed(5 * kSecond - 1), 30);
+    EXPECT_EQ(speed(5 * kSecond), 50);
+    EXPECT_EQ(speed(60 * kSecond), 50) << "held after the end";
+    r.loop = true;
+    EXPECT_EQ(speed(6 * kSecond), 10) << "6 s is 1 s into the second lap";
+    EXPECT_EQ(speed(8 * kSecond), 30);
+    EXPECT_EQ(speed(14 * kSecond), 30);
+}
+
+// A packed reply (ADR-0039 Appendix A) is split into its PIDs, and a pack
+// asked is put together from each PID's reply now
+TEST(SimRecordingTest, PacksAreSplitAndPutTogether)
+{
+    ecuio_sim_recording r;
+    take(r, 0, {0x41, 0x0C, 0x1A, 0xF8, 0x0D, 0x32, 0x05, 0x7B});
+    take(r, 2 * kSecond, {0x41, 0x0D, 0x40});
+    EXPECT_EQ(rask(r, 0, {0x01, 0x0D}), (Bytes{0x41, 0x0D, 0x32}));
+    EXPECT_EQ(rask(r, 0, {0x01, 0x05}), (Bytes{0x41, 0x05, 0x7B}));
+    EXPECT_EQ(rask(r, 3 * kSecond, {0x01, 0x05, 0x0D, 0x0C}),
+              (Bytes{0x41, 0x05, 0x7B, 0x0D, 0x40, 0x0C, 0x1A, 0xF8}))
+        << "in the order asked, each PID's newest";
+    EXPECT_EQ(rask(r, 0, {0x01, 0x0C, 0x11}), (Bytes{0x41, 0x0C, 0x1A, 0xF8}))
+        << "a PID it doesn't hold left out";
+    EXPECT_TRUE(rask(r, 0, {0x01, 0x11, 0x0F}).empty()) << "none: silence";
+}
+
+// The car's own bitmaps when the recording holds any (the rest refused,
+// as that car's chain is what it is); worked out from the PIDs it holds
+// when it holds none
+TEST(SimRecordingTest, TheBitmapsAreTheCarsOrWorkedOut)
+{
+    ecuio_sim_recording car;
+    take(car, 0, {0x41, 0x00, 0xBE, 0x3E, 0xB8, 0x11});
+    take(car, 0, {0x41, 0x0C, 0x1A, 0xF8});
+    take(car, 0, {0x41, 0x2F, 0x80}); /* a PID past 0x20, its bitmap unsent */
+    EXPECT_TRUE(car.bitmaps);
+    EXPECT_EQ(rask(car, 0, {0x01, 0x00}),
+              (Bytes{0x41, 0x00, 0xBE, 0x3E, 0xB8, 0x11}));
+    EXPECT_EQ(rask(car, 0, {0x01, 0x20}), (Bytes{0x7F, 0x01, 0x12}))
+        << "the car's chain, not one worked out";
+
+    ecuio_sim_recording none;
+    for (uint8_t pid :
+         std::initializer_list<uint8_t>{0x05, 0x0C, 0x0D, 0x2F, 0x42}) {
+        take(none, 0, {0x41, pid, 0x00, 0x00});
+    }
+    EXPECT_FALSE(none.bitmaps);
+    // 05 is bit 4, 0C and 0D bits 11 and 12, 20 bit 31 (data past it)
+    EXPECT_EQ(rask(none, 0, {0x01, 0x00}),
+              (Bytes{0x41, 0x00, 0x08, 0x18, 0x00, 0x01}));
+    EXPECT_EQ(rask(none, 0, {0x01, 0x20}),
+              (Bytes{0x41, 0x20, 0x00, 0x02, 0x00, 0x01}));
+    EXPECT_EQ(rask(none, 0, {0x01, 0x40}),
+              (Bytes{0x41, 0x40, 0x40, 0x00, 0x00, 0x00}));
+    EXPECT_EQ(rask(none, 0, {0x01, 0x60}), (Bytes{0x7F, 0x01, 0x12}))
+        << "nothing past 0x40";
+}
+
+// A VIN given answers 09 02 instead of the recording's; what it doesn't
+// hold is refused, a clear always
+TEST(SimRecordingTest, TheVinGivenAndTheRefusals)
+{
+    ecuio_sim_recording r;
+    take(r, 0, {0x49, 0x02, 0x01, 'Z', 'Z', 'Z', 'F', 'A', 'K', 'E',
+                '1',  '1',  'M',  '0', '0', '0', '0', '0', '0', '1'});
+    take(r, 0, {0x41, 0x0C, 0x1A, 0xF8});
+    EXPECT_EQ(rask(r, 0, {0x09, 0x02})[3], 'Z') << "the recording's";
+    const Bytes given = rask(r, 0, {0x09, 0x02}, "1FAFAKE10M0000001");
+    ASSERT_EQ(given.size(), 20u);
+    EXPECT_EQ(std::string(given.begin() + 3, given.end()), "1FAFAKE10M0000001");
+    EXPECT_EQ(rask(r, 0, {0x09, 0x04}), (Bytes{0x7F, 0x09, 0x12}));
+    EXPECT_EQ(rask(r, 0, {0x01, 0x05}), (Bytes{0x7F, 0x01, 0x12}));
+    EXPECT_EQ(rask(r, 0, {0x03}), (Bytes{0x7F, 0x03, 0x12}));
+    EXPECT_EQ(rask(r, 0, {0x02, 0x0C, 0x00}), (Bytes{0x7F, 0x02, 0x12}));
+    EXPECT_EQ(rask(r, 0, {0x22, 0xF1, 0x90}), (Bytes{0x7F, 0x22, 0x31}));
+    EXPECT_EQ(rask(r, 0, {0x22, 0xF1, 0x90, 0xF1, 0x8C}),
+              (Bytes{0x7F, 0x22, 0x13}));
+    EXPECT_EQ(rask(r, 0, {0x04}), (Bytes{0x7F, 0x04, 0x22}));
+    EXPECT_EQ(rask(r, 0, {0x10, 0x03}), (Bytes{0x7F, 0x10, 0x11}));
+}
+
+// Through the simulated ECU: its ticks are the recording's time, its
+// functional refusals kept to itself, its VIN given or not
+TEST(SimRecordingTest, TheEcuAnswersFromItsRecording)
+{
+    ecuio_sim_recording r;
+    take(r, 0, {0x41, 0x0D, 10});
+    take(r, 3 * kSecond, {0x41, 0x0D, 30});
+    ecuio_sim_ecu e;
+    e.recording = &r;
+    EXPECT_EQ(ask(e, {0x01, 0x0D}), (Bytes{0x41, 0x0D, 10}));
+    for (int i = 0; i < 60; ++i) { /* 3 s of 50 ms ticks */
+        ecuio_sim_tick(e);
+    }
+    EXPECT_EQ(e.time_us, 3 * kSecond);
+    EXPECT_EQ(ask(e, {0x01, 0x0D}), (Bytes{0x41, 0x0D, 30}));
+    EXPECT_EQ(ask(e, {0x01, 0x05}), (Bytes{0x7F, 0x01, 0x12}));
+    EXPECT_TRUE(ask(e, {0x01, 0x05}, true).empty()) << "functional: silence";
+    EXPECT_EQ(ask(e, {0x09, 0x02}), (Bytes{0x7F, 0x09, 0x12}));
+    std::memcpy(e.config.vin, "1FAFAKE10M0000001", 18);
+    e.config.vin_given = true;
+    EXPECT_EQ(ask(e, {0x09, 0x02}).size(), 20u);
+    EXPECT_EQ(ask(e, {0x04}), (Bytes{0x7F, 0x04, 0x22})) << "never clears";
+}
+
+// The committed fixture (the test car's engine start): the car's
+// bitmaps, its PIDs over the recording, its refusals not kept; the
+// folder or the file
+TEST(SimRecordingTest, TheLoaderReadsTheFixture)
+{
+    const std::string dir =
+        std::string(ECUIO_REPLAY_FIXTURES) + "/2026-10-25-engine-start";
+    for (const std::string& path : {dir, dir + "/frames.csv"}) {
+        ecuio_sim_recording r;
+        ASSERT_EQ(ecuio_sim_load_recording(path, &r), ECUIO_OK)
+            << ecuio_last_error_detail();
+        EXPECT_TRUE(r.bitmaps);
+        EXPECT_EQ(rask(r, 0, {0x01, 0x00}),
+                  (Bytes{0x41, 0x00, 0xFE, 0x7F, 0xA8, 0x13}))
+            << "the fixture's first row";
+        EXPECT_GT(r.span_us, 10 * kSecond);
+        const Bytes first = rask(r, 0, {0x01, 0x0C});
+        const Bytes last = rask(r, r.span_us, {0x01, 0x0C});
+        ASSERT_EQ(first.size(), 4u);
+        ASSERT_EQ(last.size(), 4u);
+        EXPECT_NE(first, last) << "the engine speed moves over the start";
+        EXPECT_EQ(rask(r, 0, {0x22, 0xF1, 0x90}), (Bytes{0x7F, 0x22, 0x31}))
+            << "its refusals aren't replies";
+        EXPECT_EQ(r.replies.size(), 15u) << "9 data PIDs, 6 bitmaps";
+    }
+}
+
+// What the loader refuses, by the line, never naming the path
+TEST(SimRecordingTest, TheLoadersRefusals)
+{
+    const std::string header = "host_us,timestamp_us,id,flags,data\n";
+    struct Case {
+        const char* name;
+        std::string text;
+        const char* says;
+    };
+    const Case cases[] = {
+        {"sim-not-frames", "time,value\n1,2\n", "header row"},
+        {"sim-bad-row", header + "1,1,0x7E8,0x0,41 0C 1A F8\n2,2,7E8,0x0,41\n",
+         "frames.csv line 3"},
+        {"sim-no-ecu", header + "1,1,0x7E9,0x0,41 0C 1A F8\n",
+         "no reply from the engine ECU"},
+        {"sim-empty", "", "empty"},
+    };
+    for (const Case& c : cases) {
+        ScratchCsv csv(c.name, c.text);
+        ecuio_sim_recording r;
+        EXPECT_EQ(ecuio_sim_load_recording(csv.path, &r), ECUIO_ERR_LOAD_FAILED)
+            << c.name;
+        const std::string detail = ecuio_last_error_detail();
+        EXPECT_NE(detail.find(c.says), std::string::npos) << detail;
+        EXPECT_EQ(detail.find("ecuio-"), std::string::npos) << detail;
+    }
+    ecuio_sim_recording r;
+    EXPECT_EQ(ecuio_sim_load_recording(std::string(ECUIO_REPLAY_FIXTURES) +
+                                           "/no-such-recording",
+                                       &r),
+              ECUIO_ERR_LOAD_FAILED);
+    EXPECT_NE(std::string(ecuio_last_error_detail()).find("couldn't open"),
+              std::string::npos);
 }

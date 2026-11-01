@@ -883,3 +883,78 @@ TEST_F(SimBusTest, ABrokenSegmentedReplyIsNeverDelivered)
             << "packs kept coming";
     }
 }
+
+/* replay://: the test car's engine start answers as the car did. The
+ * walk reads its own bitmaps (00 to A0), the rotation keeps the PIDs the
+ * recording holds and only them, packs hold (put together from each
+ * PID's reply), every engine speed decoded is one the car sent, and the
+ * VIN given answers identification */
+TEST_F(SimBusTest, ARecordingAnswersAsTheTestCar)
+{
+    const std::string dir =
+        std::string(ECUIO_REPLAY_FIXTURES) + "/2026-10-25-engine-start";
+    std::set<uint8_t> pids;
+    std::set<double> recorded_rpm;
+    for (const vcan_bus::Message& m :
+         vcan_bus::read_frames_csv((dir + "/frames.csv").c_str())) {
+        if (m.data.size() >= 2 && m.data[0] == 0x41 && m.data[1] % 0x20 != 0) {
+            pids.insert(m.data[1]);
+        }
+        if (m.data.size() == 4 && m.data[0] == 0x41 && m.data[1] == 0x0C) {
+            recorded_rpm.insert((m.data[2] * 256 + m.data[3]) / 4.0);
+        }
+    }
+    ASSERT_FALSE(recorded_rpm.empty());
+    Sim sim("replay://" + dir + "?vin=1FAFAKE10M0000001");
+    ASSERT_EQ(sim.status(), ECUIO_OK) << sim.detail();
+    Rpms rpms;
+    Session s("?profile=obd2&diagnose=0");
+    ASSERT_EQ(s.status(), ECUIO_OK) << s.detail();
+    rpms.listen(s.get());
+    ecuio_channel_support_t sup{};
+    ASSERT_TRUE(wait_for(
+        [&] {
+            return ecuio_session_get_channel_support(s.get(), 0, &sup) ==
+                       ECUIO_OK &&
+                   (sup.flags & ECUIO_SUPPORT_COMPLETE) != 0;
+        },
+        5000ms));
+    EXPECT_EQ(sup.ranges, 0x3Fu) << "the car's bitmaps, 00 to A0";
+    /* each PID the car listed and never sent is dropped once asked */
+    EXPECT_TRUE(wait_for(
+        [&] {
+            return ecuio_session_get_channel_support(s.get(), 0, &sup) ==
+                       ECUIO_OK &&
+                   sup.requests - sup.dropped == pids.size();
+        },
+        10000ms))
+        << sup.requests - sup.dropped << " kept of " << pids.size()
+        << ": the rotation keeps the PIDs the recording holds, and only them";
+    ecuio_channel_identity_t id{};
+    ASSERT_TRUE(wait_for(
+        [&] {
+            return ecuio_session_get_channel_identity(s.get(), 0, &id) ==
+                       ECUIO_OK &&
+                   (id.flags & ECUIO_IDENTITY_COMPLETE) != 0;
+        },
+        10000ms));
+    char vin[ECUIO_VIN_TEXT_LEN];
+    ASSERT_EQ(ecuio_identity_vin(&id, vin, sizeof vin), ECUIO_OK);
+    EXPECT_STREQ(vin, "1FAFAKE10M0000001");
+    ASSERT_TRUE(wait_for([&] { return rpms.seen().size() >= 30; }, 10000ms))
+        << rpms.seen().size();
+    for (double r : rpms.seen()) {
+        EXPECT_EQ(recorded_rpm.count(r), 1u) << r << " r/min isn't the car's";
+    }
+    ASSERT_EQ(ecuio_session_get_channel_support(s.get(), 0, &sup), ECUIO_OK);
+    EXPECT_NE(sup.flags & ECUIO_SUPPORT_PACKED, 0u);
+    EXPECT_EQ(sup.flags & ECUIO_SUPPORT_UNPACKED, 0u);
+    const ecuio_sim_stats_t st = sim.stats();
+    EXPECT_GT(st.replies, 0u);
+    EXPECT_GT(st.refused, 0u) << "the PIDs the car listed and never sent";
+    EXPECT_EQ(st.flags, 0u);
+    int32_t e = 0;
+    uint32_t n = 0;
+    ASSERT_EQ(ecuio_session_get_error_state(s.get(), &e, &n), ECUIO_OK);
+    EXPECT_EQ(e, ECUIO_OK);
+}

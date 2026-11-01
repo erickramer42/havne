@@ -5,17 +5,19 @@
 //          each mode answers, the canned values against the fakes', the
 //          diagnostics against the mock's, a clear, identification, the
 //          refusals and their silence to a functional request, a pack,
-//          the URI's keys and refusals, the faults' grammar and their
-//          periods
+//          the URI's keys and refusals (replay:// too), the faults'
+//          grammar and their periods; SimRecordingTest (test_obd2): the
+//          ECU answering from a recording at its ticks' time
 //
-// What the simulated ECU answers (ADR-0046): the mock's engine ECU, from
-// the service byte on, its framing (ISO-TP) and its bus left to sim.cpp.
-// Service 01 comes from the mock's drive cycle (values=drive) or the
-// fakes' canned readings (values=canned, sim_canned.h); the diagnostics
-// are the mock's (mock_ecu.h's tables, the fakes' codes, monitors and
-// freeze frame) in both; identification is the VIN the URI gives and
-// an ECU name. Faults break every Nth reply, as ADR-0041 section 4's
-// ECU does.
+// What the simulated ECU answers (ADR-0046): the engine ECU, from the
+// service byte on, its framing (ISO-TP) and its bus left to sim.cpp.
+// mock://: Service 01 comes from the mock's drive cycle (values=drive)
+// or the fakes' canned readings (values=canned, sim_canned.h); the
+// diagnostics are the mock's (mock_ecu.h's tables, the fakes' codes,
+// monitors and freeze frame) in both; identification is the VIN the URI
+// gives and an ECU name. replay://: a recording's replies at the ECU's
+// time since it started (sim_recording.h). Faults break every Nth reply,
+// as ADR-0041 section 4's ECU does.
 
 #ifndef ECUIO_SIM_ECU_H
 #define ECUIO_SIM_ECU_H
@@ -25,12 +27,16 @@
 #include "mock_drive_cycle.h"
 #include "mock_ecu.h"
 #include "sim_canned.h"
+#include "sim_recording.h"
 #include "uri_query.h"
+
+#include "absolute_path.h"
 
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
 
+enum class ecuio_sim_source : uint8_t { mock, replay };
 enum class ecuio_sim_values : uint8_t { drive, canned };
 
 /* Every Nth reply of its kind, 0 = never (ADR-0041 section 4) */
@@ -70,17 +76,32 @@ constexpr uint32_t ECUIO_SIM_FUNCTIONAL_ID = 0x7DFu;
 constexpr uint32_t ECUIO_SIM_REQUEST_ID = 0x7E0u;
 constexpr uint32_t ECUIO_SIM_REPLY_ID = 0x7E8u;
 
-/* The longest reply: a pack of six PIDs, the longest PID 13 bytes */
-constexpr uint32_t ECUIO_SIM_REPLY_MAX = 1 + 6 * (1 + 13);
+/* The longest reply: a recording's, ISO-TP's longest message (the mock's
+ * is a pack of six PIDs, the longest PID 13 bytes) */
+constexpr uint32_t ECUIO_SIM_REPLY_MAX = ECUIO_SIM_RECORDING_REPLY_MAX;
+static_assert(1 + 6 * (1 + 13) <= ECUIO_SIM_REPLY_MAX, "the mock's pack fits");
+
+/* One tick of the ECU's clock: the drive cycle's step */
+constexpr int64_t ECUIO_SIM_TICK_US = 50000;
 
 struct ecuio_sim_config {
+    ecuio_sim_source source = ecuio_sim_source::mock;
     ecuio_sim_values values = ecuio_sim_values::drive;
     char vin[ECUIO_VIN_LEN + 1] = {};
+    bool vin_given = false; /* replay: 09 02 answers it, not the car's */
     ecuio_sim_faults faults;
+    /* replay: the recording's path, a view into the URI parsed (valid
+     * while it is), and whether its time goes round its span */
+    const char* path = nullptr;
+    size_t path_len = 0;
+    bool loop = false;
 };
 
 struct ecuio_sim_ecu {
     ecuio_sim_config config;
+    /* replay: the recording loaded (the caller's, outliving the ECU) */
+    const ecuio_sim_recording* recording = nullptr;
+    int64_t time_us = 0;        /* since the ECU started, by its ticks */
     ecuio_mock::DriveCycle car; /* values=drive: stepped by the bus side */
     float engine_s = 0.0f;      /* time since the engine last started */
     bool cleared = false;       /* a 04 was obeyed */
@@ -88,10 +109,15 @@ struct ecuio_sim_ecu {
     uint32_t segmented = 0;
 };
 
-/* One tick of the car (kTickS of its time): the drive cycle steps, and
- * the run time since the engine started counts while it runs */
+/* One tick (kTickS of the ECU's time): its clock runs; the mock's drive
+ * cycle steps, and the run time since the engine started counts while it
+ * runs */
 inline void ecuio_sim_tick(ecuio_sim_ecu& e)
 {
+    e.time_us += ECUIO_SIM_TICK_US;
+    if (e.recording != nullptr) {
+        return;
+    }
     const bool was = e.car.running;
     e.car.step();
     if (!e.car.running) {
@@ -302,7 +328,8 @@ inline uint32_t refuse(uint8_t service, uint8_t nrc, uint8_t* out)
 /* The ECU's reply to req (len bytes, the service byte first) into out
  * (ECUIO_SIM_REPLY_MAX bytes), its length; 0 for none. functional: the
  * request came on 0x7DF, where ISO 14229-1 has an ECU keep its negative
- * replies 11, 12 and 31 to itself. A 04 clears. */
+ * replies 11, 12 and 31 to itself. The mock's ECU clears on a 04; a
+ * recording answers from its replies at the ECU's time. */
 inline uint32_t ecuio_sim_answer(ecuio_sim_ecu& e, const uint8_t* req,
                                  uint32_t len, bool functional, uint8_t* out)
 {
@@ -312,7 +339,11 @@ inline uint32_t ecuio_sim_answer(ecuio_sim_ecu& e, const uint8_t* req,
     }
     const uint8_t service = req[0];
     uint32_t n = 0;
-    if (service == 0x01 && len == 2) {
+    if (e.recording != nullptr) {
+        n = ecuio_sim_recording_answer(
+            *e.recording, e.time_us, req, len,
+            e.config.vin_given ? e.config.vin : nullptr, out);
+    } else if (service == 0x01 && len == 2) {
         out[0] = 0x41;
         out[1] = req[1];
         const uint32_t m = pid_data(e, req[1], out + 2);
@@ -476,41 +507,68 @@ inline bool ecuio_sim_parse_faults(const char* text, size_t len,
     return true;
 }
 
-enum class ecuio_sim_uri_result : uint8_t { ok, bad, replay };
+enum class ecuio_sim_uri_result : uint8_t { ok, bad };
 
-/* The simulated ECU's URI into *out: mock://<label>[?values][&vin]
- * [&faults]. replay:// is the next step (ADR-0046 section 7). why says
- * what's wrong (a line). */
+/* The simulated ECU's URI into *out:
+ *   mock://<label>[?values][&vin][&faults]
+ *   replay://<absolute path>[?loop][&vin][&faults]
+ * (ADR-0046 sections 3 and 7). why says what's wrong (a line). */
 inline ecuio_sim_uri_result ecuio_sim_parse_uri(const char* uri,
                                                 ecuio_sim_config* out,
                                                 char* why, size_t why_cap)
 {
     *out = ecuio_sim_config{};
     std::memcpy(out->vin, ECUIO_SIM_DEFAULT_VIN, sizeof ECUIO_SIM_DEFAULT_VIN);
+    const char* body = nullptr;
     if (std::strncmp(uri, "replay://", 9) == 0) {
+        out->source = ecuio_sim_source::replay;
+        body = uri + 9;
+        const char* q = std::strchr(body, '?');
+        out->path = body;
+        out->path_len =
+            q != nullptr ? static_cast<size_t>(q - body) : std::strlen(body);
+        const std::string path(body, out->path_len);
+#ifdef _WIN32
+        const bool absolute = ecuio_is_absolute_path(path.c_str());
+#else
+        const bool absolute = !path.empty() && path[0] == '/';
+#endif
+        if (path.empty()) {
+            std::snprintf(why, why_cap,
+                          "replay:// needs a recording's "
+                          "folder or its frames.csv");
+            return ecuio_sim_uri_result::bad;
+        }
+        if (!absolute) {
+            std::snprintf(why, why_cap,
+                          "the recording's path must be absolute");
+            return ecuio_sim_uri_result::bad;
+        }
+    } else if (std::strncmp(uri, "mock://", 7) == 0) {
+        body = uri + 7;
+    } else {
         std::snprintf(why, why_cap,
-                      "a recording as the simulated ECU isn't built yet; "
-                      "use mock://");
-        return ecuio_sim_uri_result::replay;
-    }
-    if (std::strncmp(uri, "mock://", 7) != 0) {
-        std::snprintf(why, why_cap, "the simulated ECU takes mock://");
+                      "the simulated ECU takes mock:// or replay://");
         return ecuio_sim_uri_result::bad;
     }
     ecuio_uri_query q;
     const ecuio_uri::split_result split =
-        ecuio_uri::split(ecuio_uri::query_of(uri + 7), &q);
+        ecuio_uri::split(ecuio_uri::query_of(body), &q);
     if (split != ecuio_uri::split_result::ok) {
         std::snprintf(why, why_cap, "the query isn't key=value pairs");
         return ecuio_sim_uri_result::bad;
     }
-    static const char* const kKeys[] = {"values", "vin", "faults", nullptr};
-    if (const ecuio_uri::param* p = ecuio_uri::first_unknown(q, kKeys)) {
+    const bool replay = out->source == ecuio_sim_source::replay;
+    static const char* const kMockKeys[] = {"values", "vin", "faults", nullptr};
+    static const char* const kReplayKeys[] = {"loop", "vin", "faults", nullptr};
+    if (const ecuio_uri::param* p =
+            ecuio_uri::first_unknown(q, replay ? kReplayKeys : kMockKeys)) {
         std::snprintf(why, why_cap,
-                      "the simulated ECU takes no query key '%.*s', only "
-                      "values, vin and faults",
+                      "the simulated ECU takes no query key '%.*s' for %s, "
+                      "only %s, vin and faults",
                       static_cast<int>(p->key_len < 40 ? p->key_len : 40),
-                      p->key);
+                      p->key, replay ? "replay://" : "mock://",
+                      replay ? "loop" : "values");
         return ecuio_sim_uri_result::bad;
     }
     for (size_t i = 0; i < q.count; ++i) {
@@ -541,6 +599,13 @@ inline ecuio_sim_uri_result ecuio_sim_parse_uri(const char* uri,
                 return ecuio_sim_uri_result::bad;
             }
             std::memcpy(out->vin, vin, sizeof vin);
+            out->vin_given = true;
+        } else if (p.is("loop")) {
+            if (!value_is("0") && !value_is("1")) {
+                std::snprintf(why, why_cap, "loop: 0 or 1");
+                return ecuio_sim_uri_result::bad;
+            }
+            out->loop = value_is("1");
         } else if (p.is("faults")) {
             if (!ecuio_sim_parse_faults(p.val, p.val_len, &out->faults, why,
                                         why_cap)) {
