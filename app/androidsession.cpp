@@ -4,6 +4,7 @@
 //          (ADR-0029 section 5)
 
 #include "androidsession.h"
+#include "adapterrelay.h"
 #include "sessionbridge.h"
 
 #include <QJniObject>
@@ -20,9 +21,12 @@ QJniObject appContext()
 
 } // namespace
 
-AndroidSession::AndroidSession(SessionBridge* bridge, QObject* parent)
-    : QObject(parent), m_bridge(bridge)
+AndroidSession::AndroidSession(SessionBridge* bridge, AdapterRelay* relay,
+                               QObject* parent)
+    : QObject(parent), m_bridge(bridge), m_relay(relay)
 {
+    connect(relay, &AdapterRelay::runningChanged, this,
+            &AndroidSession::update);
     connect(bridge, &SessionBridge::connectedChanged, this,
             &AndroidSession::update);
     connect(bridge, &SessionBridge::currentUriChanged, this,
@@ -41,13 +45,19 @@ void AndroidSession::update()
     const bool adapter = m_bridge->connected() &&
                          m_bridge->currentUri().startsWith(
                              QLatin1String("elm327://"), Qt::CaseInsensitive);
-    if (!adapter) {
+    const bool relaying = m_relay->running();
+    if (!adapter && !relaying) {
         stop();
         return;
     }
-    QString text = tr("Connected to %1").arg(m_bridge->uriLabel());
-    if (m_bridge->recordingActive()) {
-        text = tr("%1 · recording").arg(text);
+    QString text;
+    if (relaying) {
+        text = tr("Relaying %1 to a computer").arg(m_relay->adapterUri());
+    } else {
+        text = tr("Connected to %1").arg(m_bridge->uriLabel());
+        if (m_bridge->recordingActive()) {
+            text = tr("%1 · recording").arg(text);
+        }
     }
     if (text == m_shown) {
         return;

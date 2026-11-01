@@ -341,7 +341,7 @@ endif()
 # --- Bridge tests: only when the full app (and Qt) is available ---
 if(NOT HAVNE_BUILD_CORE_ONLY)
 
-    find_package(Qt6 6.12 COMPONENTS Core REQUIRED)   # app/CMakeLists.txt's minimum
+    find_package(Qt6 6.12 COMPONENTS Core Network REQUIRED)   # app/CMakeLists.txt's minimum
 
     add_executable(test_bridge
         test_bridge.cpp
@@ -350,6 +350,7 @@ if(NOT HAVNE_BUILD_CORE_ONLY)
         ../app/blepicker.cpp
         ../app/btconnect.cpp
         ../app/carryover.cpp
+        ../app/adapterrelay.cpp
         fake_bt_socket.h
     )
 
@@ -372,6 +373,7 @@ if(NOT HAVNE_BUILD_CORE_ONLY)
     target_link_libraries(test_bridge PRIVATE
         ecuio-core
         Qt6::Core
+        Qt6::Network
         GTest::gtest
     )
 
