@@ -42,7 +42,9 @@
 //          BridgeTest.AVinSummarySaysItsYearMakeAndCheckDigit, and on
 //          Windows .AConnectsVinReachesQmlOnlyAsASaltedHash; each code's
 //          title and Diagnostics' lookup (ADR-0044):
-//          BridgeTest.DiagnosticsEntryIsWhatThePageShows, .ATypedCodeIsDescribed
+//          BridgeTest.DiagnosticsEntryIsWhatThePageShows, .ATypedCodeIsDescribed;
+//          the inspection line (ADR-0045):
+//          BridgeTest.InspectionEntryIsWhatThePageShows, .DiagnosticsFollowTheSession
 
 #include "sessionbridge.h"
 #include "carryover.h"
@@ -2304,6 +2306,8 @@ void SessionBridge::pollChannelIdentity()
                     QStringLiteral("VIN: ") +
                     vinSummary(vin, QDate::currentDate().year() + 1));
                 emit vehicleIdentified();
+                // the inspection's model year (ADR-0045)
+                emit diagnosticsChanged();
             }
         }
     }
@@ -2416,6 +2420,110 @@ bool SessionBridge::clearFindsNothing() const
         any = true;
     }
     return any;
+}
+
+QVariantMap SessionBridge::inspection() const
+{
+    uint32_t year = 0;
+    ecuio_vin_info_t v{};
+    const QByteArray vin = m_vin.toLatin1();
+    if (!m_vin.isEmpty() &&
+        ecuio_vin_decode(vin.constData(),
+                         static_cast<uint32_t>(QDate::currentDate().year() + 1),
+                         &v) == ECUIO_OK) {
+        year = v.model_year;
+    }
+    return inspectionEntry(m_diagnosticsShown, m_diagnosticsShownCount, year);
+}
+
+QVariantMap
+SessionBridge::inspectionEntry(const ecuio_channel_diagnostics_t* reports,
+                               uint32_t count, uint32_t modelYear)
+{
+    QVariantMap m;
+    ecuio_inspection_t i{};
+    if (ecuio_diag_inspect(reports, count, modelYear, &i) != ECUIO_OK) {
+        i.verdict = ECUIO_INSPECTION_UNKNOWN;
+    }
+    QStringList names;
+    for (uint8_t id = 0; id < 16; ++id) {
+        if (((i.incomplete_ids >> id) & 1u) != 0) {
+            names << QString::fromLatin1(
+                ecuio_monitor_short_name(id, i.diag_flags));
+        }
+    }
+    const QString incomplete =
+        (i.incomplete == 1
+             ? QStringLiteral("1 monitor incomplete")
+             : QStringLiteral("%1 monitors incomplete").arg(i.incomplete)) +
+        QStringLiteral(" (%1)").arg(names.join(QStringLiteral(", ")));
+    QString verdict;
+    QString text;
+    switch (i.verdict) {
+    case ECUIO_INSPECTION_READY:
+        verdict = QStringLiteral("ready");
+        if (i.incomplete == 0) {
+            text =
+                QStringLiteral("Ready for an emissions inspection: every "
+                               "monitor complete, the check-engine light off.");
+        } else if (modelYear == 0) {
+            text =
+                QStringLiteral("Ready for an emissions inspection: %1, which "
+                               "a car of any model year may have.")
+                    .arg(incomplete);
+        } else {
+            text =
+                QStringLiteral("Ready for an emissions inspection: %1, which "
+                               "a model year %2 car may have.")
+                    .arg(incomplete)
+                    .arg(modelYear);
+        }
+        break;
+    case ECUIO_INSPECTION_NOT_READY:
+        verdict = QStringLiteral("not_ready");
+        text =
+            (modelYear == 0
+                 ? QStringLiteral("Not ready for an emissions inspection: %1, "
+                                  "and no model year may have more than 2.")
+                       .arg(incomplete)
+                 : QStringLiteral(
+                       "Not ready for an emissions inspection: %1, "
+                       "and a model year %2 car may have %3 at most.")
+                       .arg(incomplete)
+                       .arg(modelYear)
+                       .arg(i.allowed)) +
+            QStringLiteral(" A station would send it away to be driven until "
+                           "they complete.");
+        break;
+    case ECUIO_INSPECTION_MIL_ON:
+        verdict = QStringLiteral("mil_on");
+        text = QStringLiteral("Would fail an emissions inspection: an ECU "
+                              "commands the check-engine light on.");
+        break;
+    case ECUIO_INSPECTION_YEAR_NEEDED:
+        verdict = QStringLiteral("year_needed");
+        text =
+            QStringLiteral("%1: ready for an emissions inspection if the car "
+                           "is model year 1996-2000, not if it's 2001 or "
+                           "newer, and no VIN gave its year.")
+                .arg(incomplete);
+        break;
+    case ECUIO_INSPECTION_NOT_COVERED:
+        verdict = QStringLiteral("not_covered");
+        text = QStringLiteral("Model year %1: the federal inspection rule "
+                              "covers 1996 and newer.")
+                   .arg(modelYear);
+        break;
+    default:
+        break;
+    }
+    m[QStringLiteral("verdict")] = verdict;
+    m[QStringLiteral("text")] = text;
+    m[QStringLiteral("rule")] = QStringLiteral(
+        "By the federal rule, 40 CFR 85.2222, from the monitors and "
+        "the VIN's model year. A state's program sets its own, "
+        "and some are stricter.");
+    return m;
 }
 
 QStringList SessionBridge::clearTargets() const

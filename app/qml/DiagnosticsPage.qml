@@ -14,7 +14,9 @@
 //          (test_theClearsButtonsCanBeReachedOnAShortPage) and the page
 //          inside the app's window (tests/qml/tst_phone.qml); each
 //          code's title and a typed code's (ADR-0044,
-//          test_codesCarryTheirTitles, test_aTypedCodeIsNamed); the look,
+//          test_codesCarryTheirTitles, test_aTypedCodeIsNamed); the car's
+//          inspection line (ADR-0045, test_theInspectionLineJudgesTheCar);
+//          the look,
 //          manually (the run-havne skill)
 
 import QtQuick
@@ -419,6 +421,45 @@ Page {
                                 text: qsTr("Cancel")
                                 onClicked: Bridge.cancelClearMoving()
                             }
+                        }
+                    }
+                }
+
+                // The car's readiness by the federal inspection rule
+                // (ADR-0045), every ECU judged together, once read
+                Rectangle {
+                    id: inspectionCard
+                    readonly property var entry: Bridge.inspection
+                    objectName: "inspectionCard"
+                    visible: entry.verdict !== ""
+                    Layout.fillWidth: true
+                    implicitHeight: inspectionBody.implicitHeight + 2 * Theme.pageMargin
+                    radius: Theme.radius
+                    color: Theme.surface
+
+                    ColumnLayout {
+                        id: inspectionBody
+                        anchors.fill: parent
+                        anchors.margins: Theme.pageMargin
+                        spacing: 6
+
+                        SectionLabel { text: qsTr("Inspection readiness") }
+                        Label {
+                            objectName: "inspectionText"
+                            Layout.fillWidth: true
+                            wrapMode: Text.Wrap
+                            text: inspectionCard.entry.text
+                            color: inspectionCard.entry.verdict === "ready" ? Theme.success
+                                 : inspectionCard.entry.verdict === "mil_on" ? Theme.danger
+                                 : Theme.warning
+                        }
+                        Label {
+                            objectName: "inspectionRule"
+                            Layout.fillWidth: true
+                            wrapMode: Text.Wrap
+                            text: inspectionCard.entry.rule
+                            color: Theme.textDim
+                            font.pixelSize: 12
                         }
                     }
                 }

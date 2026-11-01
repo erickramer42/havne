@@ -3,7 +3,8 @@
 //          ADR-0037) names codes and monitors through core; the timing line
 //          (CliTimingTest, ADR-0042) has latency.csv's columns; the vin
 //          and identity lines (CliVinTest, ADR-0043) decode through core;
-//          the titles and the dtc line (CliDtcTest, ADR-0044) name through it.
+//          the titles and the dtc line (CliDtcTest, ADR-0044) name through it;
+//          the inspection line (CliInspectionTest, ADR-0045) is core's verdict.
 //          The program end to end is the golden runs'
 //          (tests/golden/cli/) and CliSignalTest's (tests/CMakeLists.txt)
 
@@ -648,4 +649,39 @@ TEST(CliDtcTest, TheFreezeFramesCodeCarriesItsTitle)
             "\"values\":[]}"),
         std::string::npos)
         << line;
+}
+
+TEST(CliInspectionTest, TheVerdictNamesTheIncompleteMonitors)
+{
+    ecuio_inspection_t i{};
+    i.verdict = ECUIO_INSPECTION_NOT_READY;
+    i.incomplete = 2;
+    i.allowed = 1;
+    i.reports = 1;
+    i.incomplete_ids = (1u << 8) | (1u << 10);
+    char buf[1024];
+    cli::Line l(buf, sizeof buf);
+    cli::inspection_line(l, i, 2015);
+    EXPECT_EQ(std::string(l.data(), l.size()),
+              "{\"type\":\"inspection\",\"verdict\":\"not_ready\","
+              "\"model_year\":2015,"
+              "\"incomplete\":[\"Catalyst\",\"Evaporative system\"],"
+              "\"allowed\":1,\"reports\":1,\"rule\":\"40 CFR 85.2222\"}");
+    // no model year: both null; a compression-ignition engine's names
+    i.verdict = ECUIO_INSPECTION_YEAR_NEEDED;
+    i.diag_flags = ECUIO_DIAG_COMPRESSION;
+    i.incomplete_ids = (1u << 8) | (1u << 11);
+    i.allowed = 0;
+    cli::Line n(buf, sizeof buf);
+    cli::inspection_line(n, i, 0);
+    EXPECT_EQ(std::string(n.data(), n.size()),
+              "{\"type\":\"inspection\",\"verdict\":\"year_needed\","
+              "\"model_year\":null,"
+              "\"incomplete\":[\"NMHC catalyst\",\"Boost pressure\"],"
+              "\"allowed\":null,\"reports\":1,\"rule\":\"40 CFR 85.2222\"}");
+    for (uint8_t v = 0; v <= ECUIO_INSPECTION_READING; ++v) {
+        EXPECT_STRNE(cli::inspection_word(v), "") << int(v);
+    }
+    EXPECT_STREQ(cli::inspection_word(ECUIO_INSPECTION_MIL_ON), "mil_on");
+    EXPECT_STREQ(cli::inspection_word(ECUIO_INSPECTION_READY), "ready");
 }

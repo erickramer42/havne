@@ -14,7 +14,9 @@
 //          reply timing (BridgeTest.ARecordingKeepsReplyTimingsSnapshots,
 //          .TimingTextNamesTheRequestsAndTheClock); the VIN's summary
 //          (ADR-0043, BridgeTest.AVinSummarySaysItsYearMakeAndCheckDigit);
-//          a typed code's title (ADR-0044, BridgeTest.ATypedCodeIsDescribed)
+//          a typed code's title (ADR-0044, BridgeTest.ATypedCodeIsDescribed);
+//          the inspection line (ADR-0045,
+//          BridgeTest.InspectionEntryIsWhatThePageShows, .DiagnosticsFollowTheSession)
 
 #pragma once
 
@@ -428,6 +430,10 @@ class SessionBridge : public QObject
     // erases (nothingStored): the confirmation then says a clear would
     // only set the monitors back and reset what the manufacturer chose
     Q_PROPERTY(bool clearFindsNothing READ clearFindsNothing NOTIFY diagnosticsChanged)
+    // The car's readiness against the federal inspection rule (ADR-0045):
+    // every shown report judged together, for the model year of the VIN,
+    // as inspectionEntry gives it
+    Q_PROPERTY(QVariantMap inspection READ inspection NOTIFY diagnosticsChanged)
     // The ECUs whose clear stopped at the vehicle speed (ADR-0038's
     // appendix of 2026-11-01), moving or giving none, as "0x7E8", once
     // every clear asked has ended; the page asks once more, naming
@@ -592,6 +598,16 @@ public:
     // A report a clear goes to: its read complete, no clear under way
     static bool clearTarget(const ecuio_channel_diagnostics_t& report);
     bool clearFindsNothing() const;
+    QVariantMap inspection() const;
+    // ecuio_diag_inspect's verdict over reports for modelYear (0: none
+    // known) as the page shows it: verdict, havne-cli's word ("ready",
+    // "not_ready", "mil_on", "year_needed", "not_covered"), "" while a
+    // read is under way or when no ECU answered PID 01; text, one
+    // sentence naming the incomplete monitors; rule, the rule and its
+    // reach. Static, so test_bridge pins it without a session.
+    static QVariantMap
+    inspectionEntry(const ecuio_channel_diagnostics_t* reports, uint32_t count,
+                    uint32_t modelYear);
     // A report that answered there is nothing to erase: PID 01 with the
     // light off and no confirmed codes, the stored and pending lists
     // answered empty, no freeze frame. A refused or unanswered item is

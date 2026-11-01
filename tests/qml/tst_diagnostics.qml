@@ -12,7 +12,8 @@
 //          list names it), Cancel sending nothing, Clear once at the mock's
 //          stopped engine (its first 15 s), and on Windows the fake's
 //          running engine leaving the codes; at 320 x 400 the
-//          confirmation scrolls, so Clear and Cancel can be reached. The
+//          confirmation scrolls, so Clear and Cancel can be reached; the
+//          car's inspection line (ADR-0045), hidden until a read. The
 //          entries themselves are
 //          test_bridge's (BridgeTest.DiagnosticsEntryIsWhatThePageShows,
 //          .AClear*).
@@ -119,6 +120,24 @@ TestCase {
                 "C0035 and B1001 have none")
         compare(find(card, "titles_permanent").text,
                 "P0420  Catalyst System Efficiency Below Threshold Bank 1")
+    }
+
+    // ADR-0045: the car's verdict above the ECUs, hidden with nothing read
+    // (the cases share the bridge, which keeps the last read: a session
+    // that reads nothing empties it)
+    function test_theInspectionLineJudgesTheCar() {
+        const page = createTemporaryObject(pageComponent, testCase.parent)
+        const card = find(page, "inspectionCard")
+        connectAndRead(page, "mock://demo?diagnose=0")
+        verify(!card.visible, "nothing read, nothing judged")
+        Bridge.disconnectSession()
+        tryVerify(() => !Bridge.connected && !Bridge.disconnecting, 5000)
+        connectAndRead(page, "mock://demo")
+        tryVerify(() => card.visible, 2000)
+        compare(find(page, "inspectionText").text,
+                "Would fail an emissions inspection: an ECU commands the " +
+                "check-engine light on.")
+        verify(find(page, "inspectionRule").text.indexOf("40 CFR 85.2222") > 0)
     }
 
     // ADR-0044: a typed code is named with or without a session

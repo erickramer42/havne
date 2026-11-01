@@ -14,7 +14,8 @@
 //          CoreTest.TheMockHasNoUnsupportedSignals), a packed reply's
 //          records (CoreTest.APacked*), the error strings, a clear's refusals
 //          (CoreTest.AClearNeedsTheReportTheCallerSaved); the trouble code's and
-//          the monitors' names (DiagnosticsTest, test_obd2);
+//          the monitors' names (DiagnosticsTest, test_obd2); the
+//          inspection verdict (InspectionTest, test_obd2);
 //          HARNESS: the J2534 suites and Elm327SessionTest through
 //          create; test_c_abi links the public functions; the USDT
 //          probes: ProbeNotesTest (their notes) and CI's bpftrace step;
@@ -736,6 +737,69 @@ const char* ecuio_monitor_short_name(uint8_t id, uint32_t diag_flags)
 {
     const ecuio_monitor_def* m = ecuio_monitor_find(id, diag_flags);
     return (m != nullptr) ? m->short_name : "";
+}
+
+/* 40 CFR 85.2222(c)(2) and (d)(1) over the car's reports (ADR-0045) */
+ecuio_status_t ecuio_diag_inspect(const ecuio_channel_diagnostics_t* reports,
+                                  uint32_t count, uint32_t model_year,
+                                  ecuio_inspection_t* out)
+{
+    if (out == nullptr || (reports == nullptr && count > 0)) {
+        return ECUIO_ERR_NULL_ARGUMENT;
+    }
+    *out = ecuio_inspection_t{};
+    bool reading = false;
+    bool mil = false;
+    for (uint32_t r = 0; r < count; ++r) {
+        const ecuio_channel_diagnostics_t& d = reports[r];
+        if ((d.flags & ECUIO_DIAG_ASKED) != 0 &&
+            (d.flags & ECUIO_DIAG_COMPLETE) == 0) {
+            reading = true;
+        }
+        if ((d.flags & ECUIO_DIAG_READINESS) == 0) {
+            continue;
+        }
+        ++out->reports;
+        mil = mil || (d.flags & ECUIO_DIAG_MIL_ON) != 0;
+        out->diag_flags |= d.flags & ECUIO_DIAG_COMPRESSION;
+        const uint32_t n =
+            std::min<uint32_t>(d.monitor_count, ECUIO_DIAG_MAX_MONITORS);
+        for (uint32_t i = 0; i < n; ++i) {
+            const ecuio_monitor_t& m = d.monitors[i];
+            if (m.id < 16 && (m.flags & ECUIO_MONITOR_COMPLETE) == 0) {
+                out->incomplete_ids =
+                    static_cast<uint16_t>(out->incomplete_ids | (1u << m.id));
+            }
+        }
+    }
+    for (uint32_t id = 0; id < 16; ++id) {
+        out->incomplete = static_cast<uint8_t>(
+            out->incomplete + ((out->incomplete_ids >> id) & 1u));
+    }
+    if (model_year >= 2001) {
+        out->allowed = 1;
+    } else if (model_year >= 1996) {
+        out->allowed = 2;
+    }
+    if (reading) {
+        out->verdict = ECUIO_INSPECTION_READING;
+    } else if (out->reports == 0) {
+        out->verdict = ECUIO_INSPECTION_UNKNOWN;
+    } else if (model_year != 0 && model_year < 1996) {
+        out->verdict = ECUIO_INSPECTION_NOT_COVERED;
+    } else if (mil) {
+        out->verdict = ECUIO_INSPECTION_MIL_ON;
+    } else if (model_year == 0) {
+        /* one incomplete passes either rule, three fail both */
+        out->verdict = out->incomplete <= 1   ? ECUIO_INSPECTION_READY
+                       : out->incomplete == 2 ? ECUIO_INSPECTION_YEAR_NEEDED
+                                              : ECUIO_INSPECTION_NOT_READY;
+    } else {
+        out->verdict = out->incomplete <= out->allowed
+                           ? ECUIO_INSPECTION_READY
+                           : ECUIO_INSPECTION_NOT_READY;
+    }
+    return ECUIO_OK;
 }
 
 /* Optional no-ops (core.h): core holds no global state that needs

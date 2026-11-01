@@ -14,6 +14,7 @@
 //          monitors against fixtures/obd2/monitors.csv. The signals
 //          their ECU's bitmaps rule out (pid_support.h: PidSupportTest).
 //          The trouble codes' titles and parse (DtcTitleTest, ADR-0044).
+//          The inspection verdict over reports (InspectionTest, ADR-0045).
 //          End-to-end pacing is HARNESS (stream and
 //          health tests) and BENCH (VX), not this file.
 
@@ -4561,4 +4562,137 @@ TEST(DtcTitleTest, ParseRefusesWhatIsntACode)
     uint16_t out = 0;
     EXPECT_EQ(ecuio_dtc_parse(nullptr, &out), ECUIO_ERR_NULL_ARGUMENT);
     EXPECT_EQ(ecuio_dtc_parse("P0301", nullptr), ECUIO_ERR_NULL_ARGUMENT);
+}
+
+namespace {
+
+// A read report whose PID 01 answered: these monitors, the first
+// `incomplete` of them incomplete
+ecuio_channel_diagnostics_t inspected_report(std::initializer_list<uint8_t> ids,
+                                             uint32_t incomplete,
+                                             bool mil = false)
+{
+    ecuio_channel_diagnostics_t d{};
+    d.flags = ECUIO_DIAG_ASKED | ECUIO_DIAG_COMPLETE | ECUIO_DIAG_READINESS |
+              (mil ? ECUIO_DIAG_MIL_ON : 0u);
+    d.readiness = ECUIO_DIAG_ANSWERED;
+    for (uint8_t id : ids) {
+        ecuio_monitor_t& m = d.monitors[d.monitor_count];
+        m.id = id;
+        m.flags = d.monitor_count < incomplete ? 0 : ECUIO_MONITOR_COMPLETE;
+        ++d.monitor_count;
+    }
+    return d;
+}
+
+ecuio_inspection_t inspect(const std::vector<ecuio_channel_diagnostics_t>& r,
+                           uint32_t model_year)
+{
+    ecuio_inspection_t out{};
+    EXPECT_EQ(ecuio_diag_inspect(r.data(), static_cast<uint32_t>(r.size()),
+                                 model_year, &out),
+              ECUIO_OK);
+    return out;
+}
+
+} // namespace
+
+// 40 CFR 85.2222(c)(2): two incomplete for 1996-2000, one from 2001
+TEST(InspectionTest, TheModelYearSetsHowManyMayBeIncomplete)
+{
+    const std::vector<ecuio_channel_diagnostics_t> two = {
+        inspected_report({8, 10, 13, 0}, 2)};
+    const std::vector<ecuio_channel_diagnostics_t> one = {
+        inspected_report({8, 10, 13, 0}, 1)};
+    EXPECT_EQ(inspect(two, 1996).verdict, ECUIO_INSPECTION_READY);
+    EXPECT_EQ(inspect(two, 2000).verdict, ECUIO_INSPECTION_READY);
+    EXPECT_EQ(inspect(two, 2000).allowed, 2);
+    EXPECT_EQ(inspect(two, 2001).verdict, ECUIO_INSPECTION_NOT_READY);
+    EXPECT_EQ(inspect(two, 2001).allowed, 1);
+    EXPECT_EQ(inspect(one, 2001).verdict, ECUIO_INSPECTION_READY);
+    EXPECT_EQ(inspect(one, 2026).verdict, ECUIO_INSPECTION_READY);
+    const std::vector<ecuio_channel_diagnostics_t> three = {
+        inspected_report({8, 10, 13, 0}, 3)};
+    EXPECT_EQ(inspect(three, 1998).verdict, ECUIO_INSPECTION_NOT_READY);
+    const ecuio_inspection_t i = inspect(two, 2001);
+    EXPECT_EQ(i.incomplete, 2);
+    EXPECT_EQ(i.incomplete_ids, (1u << 8) | (1u << 10));
+    EXPECT_EQ(i.reports, 1);
+    EXPECT_EQ(i.diag_flags, 0u);
+}
+
+// With no model year only two incomplete needs one: one passes both
+// rules, three fail both
+TEST(InspectionTest, WithoutAModelYearOnlyTwoIncompleteIsUndecided)
+{
+    for (uint32_t n = 0; n <= 4; ++n) {
+        const ecuio_inspection_t i =
+            inspect({inspected_report({8, 10, 13, 15}, n)}, 0);
+        EXPECT_EQ(i.verdict, n <= 1   ? ECUIO_INSPECTION_READY
+                             : n == 2 ? ECUIO_INSPECTION_YEAR_NEEDED
+                                      : ECUIO_INSPECTION_NOT_READY)
+            << n;
+        EXPECT_EQ(i.incomplete, n);
+        EXPECT_EQ(i.allowed, 0);
+    }
+}
+
+// (d)(1): a commanded MIL fails, whatever the monitors say
+TEST(InspectionTest, ACommandedMilFails)
+{
+    EXPECT_EQ(inspect({inspected_report({8, 10}, 0, true)}, 2015).verdict,
+              ECUIO_INSPECTION_MIL_ON);
+    EXPECT_EQ(inspect({inspected_report({8, 10}, 0, true)}, 0).verdict,
+              ECUIO_INSPECTION_MIL_ON);
+    // on a second ECU only, it still fails the car
+    EXPECT_EQ(
+        inspect({inspected_report({8, 10}, 0), inspected_report({2}, 0, true)},
+                2015)
+            .verdict,
+        ECUIO_INSPECTION_MIL_ON);
+}
+
+// The car's monitors are every ECU's: one incomplete anywhere counts,
+// once however many ECUs have it
+TEST(InspectionTest, ReportsCountTogetherAsOneCar)
+{
+    const ecuio_inspection_t i = inspect(
+        {inspected_report({8, 13}, 1), inspected_report({2, 8}, 2)}, 2015);
+    EXPECT_EQ(i.incomplete, 2); // catalyst on both, components on the second
+    EXPECT_EQ(i.incomplete_ids, (1u << 8) | (1u << 2));
+    EXPECT_EQ(i.reports, 2);
+    EXPECT_EQ(i.verdict, ECUIO_INSPECTION_NOT_READY);
+    // a compression-ignition report names its monitors so
+    ecuio_channel_diagnostics_t diesel = inspected_report({9}, 1);
+    diesel.flags |= ECUIO_DIAG_COMPRESSION;
+    EXPECT_EQ(inspect({diesel}, 2015).diag_flags, ECUIO_DIAG_COMPRESSION);
+}
+
+TEST(InspectionTest, ReadingNoAnswerAndOldCarsHaveNoCount)
+{
+    // a report still being read holds the verdict back
+    ecuio_channel_diagnostics_t reading = inspected_report({8}, 0);
+    reading.flags &= ~ECUIO_DIAG_COMPLETE;
+    EXPECT_EQ(inspect({inspected_report({8}, 0), reading}, 2015).verdict,
+              ECUIO_INSPECTION_READING);
+    // one never asked (?diagnose=0) doesn't
+    ecuio_channel_diagnostics_t unasked{};
+    EXPECT_EQ(inspect({inspected_report({8}, 0), unasked}, 2015).verdict,
+              ECUIO_INSPECTION_READY);
+    // no PID 01 answer from any ECU
+    ecuio_channel_diagnostics_t refused{};
+    refused.flags = ECUIO_DIAG_ASKED | ECUIO_DIAG_COMPLETE;
+    refused.readiness = ECUIO_DIAG_REFUSED;
+    EXPECT_EQ(inspect({refused}, 2015).verdict, ECUIO_INSPECTION_UNKNOWN);
+    EXPECT_EQ(inspect({}, 2015).verdict, ECUIO_INSPECTION_UNKNOWN);
+    // before 1996 the rule says nothing, even with the MIL on
+    EXPECT_EQ(inspect({inspected_report({8}, 0, true)}, 1995).verdict,
+              ECUIO_INSPECTION_NOT_COVERED);
+    ecuio_inspection_t out{};
+    EXPECT_EQ(ecuio_diag_inspect(nullptr, 1, 2015, &out),
+              ECUIO_ERR_NULL_ARGUMENT);
+    EXPECT_EQ(ecuio_diag_inspect(nullptr, 0, 2015, nullptr),
+              ECUIO_ERR_NULL_ARGUMENT);
+    EXPECT_EQ(ecuio_diag_inspect(nullptr, 0, 2015, &out), ECUIO_OK);
+    EXPECT_EQ(out.verdict, ECUIO_INSPECTION_UNKNOWN);
 }

@@ -387,18 +387,56 @@ void poll_identity(Output& out, ecuio_session_t* session, uint32_t channels,
     }
 }
 
+// The car's model year, from the first channel's VIN (the vehicle's,
+// ADR-0027 section 3) decoded as the identity line decodes it; 0 with
+// none
+uint32_t session_model_year(const ecuio_session_t* session)
+{
+    ecuio_channel_identity_t id;
+    char vin[ECUIO_VIN_TEXT_LEN];
+    ecuio_vin_info_t v;
+    if (ecuio_session_get_channel_identity(session, 0, &id) != ECUIO_OK ||
+        ecuio_identity_vin(&id, vin, sizeof vin) != ECUIO_OK ||
+        vin[0] == '\0' ||
+        ecuio_vin_decode(vin, latest_model_year(), &v) != ECUIO_OK) {
+        return 0;
+    }
+    return v.model_year;
+}
+
 // A line for each ECU whose diagnostics read has completed since the
-// last call: generations holds each channel's last written
+// last call: generations holds each channel's last written. After any,
+// once no read is still under way, the car's inspection line
+// (ADR-0045) over every channel's report
 void poll_diagnostics(Output& out, ecuio_session_t* session, uint32_t channels,
                       uint32_t* generations)
 {
+    std::vector<ecuio_channel_diagnostics_t> reports(channels);
+    bool wrote = false;
     for (uint32_t c = 0; c < channels; ++c) {
-        ecuio_channel_diagnostics_t d;
-        if (ecuio_session_get_channel_diagnostics(session, c, &d) == ECUIO_OK &&
-            (d.flags & ECUIO_DIAG_COMPLETE) && d.generation != generations[c]) {
+        ecuio_channel_diagnostics_t& d = reports[c];
+        if (ecuio_session_get_channel_diagnostics(session, c, &d) != ECUIO_OK) {
+            d = ecuio_channel_diagnostics_t{};
+            continue;
+        }
+        if ((d.flags & ECUIO_DIAG_COMPLETE) && d.generation != generations[c]) {
             generations[c] = d.generation;
             write_diagnostics(out, d);
+            wrote = true;
         }
+    }
+    if (!wrote) {
+        return;
+    }
+    const uint32_t year = session_model_year(session);
+    ecuio_inspection_t i;
+    if (ecuio_diag_inspect(reports.data(), channels, year, &i) == ECUIO_OK &&
+        i.verdict != ECUIO_INSPECTION_READING &&
+        i.verdict != ECUIO_INSPECTION_UNKNOWN) {
+        char buf[1024];
+        cli::Line l(buf, sizeof buf);
+        cli::inspection_line(l, i, year);
+        write_line(out, l);
     }
 }
 
