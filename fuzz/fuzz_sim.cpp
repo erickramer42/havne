@@ -1,11 +1,12 @@
 // File/layer: fuzz/fuzz_sim.cpp | C++17, Qt-free, libFuzzer
 // Testing: FUZZ: the simulated ECU (ADR-0046) from arbitrary bytes: the
 //          URI's parser on arbitrary text, and the ECU answering a run of
-//          arbitrary requests off the bus, its car stepped between them.
-//          A reply stays within ECUIO_SIM_REPLY_MAX and is a positive
-//          reply to the request's service or a three-byte negative one
-//          naming it; a fate is one of five, and two ECUs given the same
-//          requests answer the same
+//          arbitrary requests off the bus, its car stepped between them,
+//          the mock's or a recording made of arbitrary frames. A reply
+//          stays within ECUIO_SIM_REPLY_MAX and is a positive reply to
+//          the request's service or a three-byte negative one naming it;
+//          a fate is one of five, and two ECUs given the same requests
+//          answer the same
 
 #include "sim_ecu.h"
 
@@ -21,11 +22,12 @@ namespace {
 /* The ECU answering the requests in data: each a length byte (0-15)
  * then that many bytes, a tick of the car after each. Its replies'
  * bytes, run together, into out. */
-void run(const ecuio_sim_config& config, const uint8_t* data, size_t size,
-         std::string* out)
+void run(const ecuio_sim_config& config, const ecuio_sim_recording* rec,
+         const uint8_t* data, size_t size, std::string* out)
 {
     ecuio_sim_ecu e;
     e.config = config;
+    e.recording = rec;
     size_t at = 0;
     while (at < size) {
         const size_t len = data[at] & 0x0F;
@@ -102,10 +104,53 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size)
     config.faults.late = (data[0] >> 4) & 3;
     config.faults.bad_sequence = (data[0] >> 6) & 1;
     config.faults.stalled = (data[0] >> 7) & 1;
+    ++data;
+    --size;
+    /* 'R' next: a recording first, then the requests. Its frames: a
+     * count byte, then each a length byte (0-15), a flags byte (bit 0 an
+     * ID other than the engine ECU's, the rest the frame's flags' low
+     * bits), a step in 100 ms and its bytes */
+    ecuio_sim_recording rec;
+    const ecuio_sim_recording* source = nullptr;
+    if (size > 1 && data[0] == 'R') {
+        size_t at = 2;
+        const unsigned frames = data[1];
+        ecuio_frame_t* f = new ecuio_frame_t();
+        int64_t t = 0;
+        for (unsigned k = 0; k < frames && at + 3 <= size; ++k) {
+            const size_t len = data[at] & 0x0F;
+            if (len > size - at - 3) {
+                break;
+            }
+            f->arbitration_id = (data[at + 1] & 1) ? 0x7E9u : 0x7E8u;
+            f->flags = data[at + 1] & 0xF0u;
+            t += static_cast<int64_t>(data[at + 2]) * 100000;
+            f->data_length = static_cast<uint16_t>(len);
+            memcpy(f->data, data + at + 3, len);
+            ecuio_sim_recording_take(rec, t, *f);
+            at += 3 + len;
+        }
+        delete f;
+        rec.loop = (config.faults.stalled & 1) != 0;
+        if (rec.span_us < 0) {
+            abort();
+        }
+        for (const auto& kv : rec.replies) {
+            for (const ecuio_sim_take& take : kv.second) {
+                if (take.offset + take.len > rec.bytes.size() ||
+                    take.len > ECUIO_SIM_RECORDING_REPLY_MAX) {
+                    abort();
+                }
+            }
+        }
+        source = &rec;
+        data += at < size ? at : size;
+        size -= at < size ? at : size;
+    }
     std::string a;
     std::string b;
-    run(config, data + 1, size - 1, &a);
-    run(config, data + 1, size - 1, &b);
+    run(config, source, data, size, &a);
+    run(config, source, data, size, &b);
     if (a != b) {
         abort();
     }

@@ -1,28 +1,36 @@
 // File/layer: core/src/sim.cpp | C++17, Qt-free; the bus side Linux only
 //             (SocketCAN), a refusal elsewhere
 // Testing: UNIT: SimTest (test_socketcan): the arguments and the URI's
-//          refusals on every platform, NO_TRANSPORT off Linux; HARNESS:
-//          SimBusTest (test_vcan, Linux): a requesting socketcan://
-//          session against it on vcan0 reads the drive cycle's values,
-//          the diagnostics and the VIN, clears, and stays in step under
-//          every fault
+//          refusals on every platform, NO_TRANSPORT off Linux, a
+//          recording read before the interface; SimRecordingTest
+//          (test_obd2): the loader on the committed fixture and its
+//          refusals; HARNESS: SimBusTest (test_vcan, Linux): a requesting
+//          socketcan:// session against it on vcan0 reads the drive
+//          cycle's values, the diagnostics and the VIN, clears, and stays
+//          in step under every fault, and reads a recording as its car
 //
 // The simulated ECU on a virtual bus (ADR-0046): a CAN_RAW socket on a
 // vcan interface hearing 0x7DF and 0x7E0, requests through core's ISO-TP
 // receiver, each answered by sim_ecu.h and sent through core's ISO-TP
-// sender as 0x7E8, broken as the faults say. One worker thread steps the
-// mock's drive cycle every 50 ms, reads, answers and sends; it allocates
-// nothing.
+// sender as 0x7E8, broken as the faults say. One worker thread ticks the
+// ECU's clock (and the mock's drive cycle) every 50 ms, reads, answers
+// and sends; it allocates nothing. A replay:// recording is read whole at
+// create (ecuio_sim_load_recording, every platform) and only read after.
 
 #include "ecuio/sim.h"
 
 #include "ecuio/internal.h" /* ECUIO_HAVE_SOCKETCAN */
 #include "error_detail.h"
+#include "frames_csv.h"
 #include "sim_ecu.h"
 
 #include <atomic>
+#include <cstdio>
 #include <cstring>
+#include <memory>
 #include <new>
+#include <string>
+#include <vector>
 
 #if ECUIO_HAVE_SOCKETCAN
 
@@ -56,6 +64,7 @@ struct ecuio_sim {
     std::atomic<uint64_t> clears{0};
     std::atomic<uint32_t> flags{0};
 #if ECUIO_HAVE_SOCKETCAN
+    ecuio_sim_recording recording; /* replay://: the ECU's replies */
     ecuio_sim_ecu ecu;
     int fd = -1;
     int stop_fd = -1;
@@ -69,9 +78,9 @@ struct ecuio_sim {
 
 namespace {
 
-constexpr int64_t kTickUs = 50000; /* the drive cycle's kTickS */
+constexpr int64_t kTickUs = ECUIO_SIM_TICK_US;
 static_assert(kTickUs == static_cast<int64_t>(ecuio_mock::kTickS * 1e6f + 0.5f),
-              "one step per tick");
+              "one drive cycle step per tick");
 
 int64_t now_us()
 {
@@ -352,6 +361,65 @@ int open_socket(int32_t ifindex)
 
 #endif /* ECUIO_HAVE_SOCKETCAN */
 
+ecuio_status_t ecuio_sim_load_recording(const std::string& path,
+                                        ecuio_sim_recording* out)
+{
+    using namespace ecuio_frames_csv;
+    try {
+        std::string file = path;
+        to_file(file);
+        native_path native;
+        if (!native.set(file)) {
+            ecuio_detail_set("couldn't open the recording's frames.csv");
+            return ECUIO_ERR_LOAD_FAILED;
+        }
+        const std::unique_ptr<FILE, int (*)(FILE*)> f(native.open(),
+                                                      &std::fclose);
+        if (f == nullptr) {
+            ecuio_detail_set("couldn't open the recording's frames.csv");
+            return ECUIO_ERR_LOAD_FAILED;
+        }
+        std::vector<char> line(kLineMax + 2);
+        const std::unique_ptr<ecuio_frame_t> frame(new ecuio_frame_t());
+        if (!read_header(f.get(), line)) {
+            return ECUIO_ERR_LOAD_FAILED;
+        }
+        ecuio_sim_recording rec;
+        row prev, cur;
+        uint64_t at_us = 0, rows = 0, line_no = 1;
+        bool too_long = false;
+        while (read_line(f.get(), line, &too_long)) {
+            ++line_no;
+            const char* why = nullptr;
+            if (too_long) {
+                why = "the line is longer than any frame's row";
+            } else if (!parse_row(line.data(), &cur, frame.get(), &why)) {
+                /* why is set */
+            }
+            if (why != nullptr) {
+                ecuio_detail_set("frames.csv line %llu: %s",
+                                 static_cast<unsigned long long>(line_no), why);
+                return ECUIO_ERR_LOAD_FAILED;
+            }
+            if (rows > 0) {
+                at_us += step_us(prev, cur);
+            }
+            prev = cur;
+            ++rows;
+            ecuio_sim_recording_take(rec, static_cast<int64_t>(at_us), *frame);
+        }
+        if (rec.replies.empty()) {
+            ecuio_detail_set("the recording holds no reply from the engine "
+                             "ECU (0x7E8) to answer with");
+            return ECUIO_ERR_LOAD_FAILED;
+        }
+        *out = std::move(rec);
+    } catch (const std::bad_alloc&) {
+        return ECUIO_ERR_OUT_OF_MEMORY;
+    }
+    return ECUIO_OK;
+}
+
 extern "C" {
 
 ecuio_status_t ecuio_sim_create(const char* uri, const char* ifname,
@@ -364,13 +432,8 @@ ecuio_status_t ecuio_sim_create(const char* uri, const char* ifname,
     *out = nullptr;
     ecuio_sim_config config;
     char why[256] = {};
-    switch (ecuio_sim_parse_uri(uri, &config, why, sizeof why)) {
-    case ecuio_sim_uri_result::ok:
-        break;
-    case ecuio_sim_uri_result::replay:
-        ecuio_detail_set("%s", why);
-        return ECUIO_ERR_NOT_IMPLEMENTED;
-    case ecuio_sim_uri_result::bad:
+    if (ecuio_sim_parse_uri(uri, &config, why, sizeof why) !=
+        ecuio_sim_uri_result::ok) {
         ecuio_detail_set("%s", why);
         return ECUIO_ERR_BAD_URI;
     }
@@ -379,6 +442,31 @@ ecuio_status_t ecuio_sim_create(const char* uri, const char* ifname,
                      "virtual CAN bus");
     return ECUIO_ERR_NO_TRANSPORT;
 #else
+    std::unique_ptr<ecuio_sim> s(new (std::nothrow) ecuio_sim);
+    if (s == nullptr) {
+        return ECUIO_ERR_OUT_OF_MEMORY;
+    }
+    if (config.source == ecuio_sim_source::replay) {
+        ecuio_status_t loaded = ECUIO_ERR_OUT_OF_MEMORY;
+        try {
+            loaded = ecuio_sim_load_recording(
+                std::string(config.path, config.path_len), &s->recording);
+        } catch (const std::bad_alloc&) {
+        }
+        if (loaded != ECUIO_OK) {
+            return loaded;
+        }
+        /* A loop with no span would answer one instant forever */
+        if (config.loop && s->recording.span_us == 0) {
+            ecuio_detail_set("loop=1 needs a recording that spans time; "
+                             "its replies all share one time");
+            return ECUIO_ERR_BAD_URI;
+        }
+        s->recording.loop = config.loop;
+        s->ecu.recording = &s->recording;
+    }
+    config.path = nullptr; /* the URI's, gone after create */
+    config.path_len = 0;
     if (!socketcan_name_ok(ifname, std::strlen(ifname))) {
         ecuio_detail_set("'%.20s' isn't an interface name", ifname);
         return ECUIO_ERR_LOAD_FAILED;
@@ -405,10 +493,6 @@ ecuio_status_t ecuio_sim_create(const char* uri, const char* ifname,
         ecuio_detail_set("%s is down (sudo ip link set %s up)", ifname, ifname);
         return ECUIO_ERR_LOAD_FAILED;
     }
-    ecuio_sim* s = new (std::nothrow) ecuio_sim;
-    if (s == nullptr) {
-        return ECUIO_ERR_OUT_OF_MEMORY;
-    }
     s->ecu.config = config;
     s->rx.timed = true;
     s->fd = open_socket(link.index);
@@ -419,18 +503,16 @@ ecuio_status_t ecuio_sim_create(const char* uri, const char* ifname,
         if (s->fd >= 0) {
             close(s->fd);
         }
-        delete s;
         return ECUIO_ERR_LOAD_FAILED;
     }
     try {
-        s->worker = std::thread(run, s);
+        s->worker = std::thread(run, s.get());
     } catch (...) {
         close(s->fd);
         close(s->stop_fd);
-        delete s;
         return ECUIO_ERR_OUT_OF_MEMORY;
     }
-    *out = s;
+    *out = s.release();
     return ECUIO_OK;
 #endif
 }
