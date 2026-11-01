@@ -43,6 +43,8 @@ set_target_properties(ecuio-j2534-surrogate PROPERTIES
     OUTPUT_NAME "${_sur_name}"
 )
 app_enable_warnings(ecuio-j2534-surrogate)
+# winmm: timeBeginPeriod, the 1 ms timer the surrogate holds
+target_link_libraries(ecuio-j2534-surrogate PRIVATE winmm)
 app_add_version_resource(ecuio-j2534-surrogate "${_sur_name}"
     "Havne helper for ${_sur_bits} J2534 drivers")
 

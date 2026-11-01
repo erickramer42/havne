@@ -14,7 +14,13 @@
 //     the kernel's ISO-TP, answering at once.
 // Each prints its session's timing report: what the stack adds to the
 // fake's delay, per transport. The fakes answer from canned bytes at a
-// fixed delay, so the spread is the stack's, not an ECU's.
+// fixed delay, so the spread is the stack's, not an ECU's. On Windows
+// the bench holds a 1 ms timer, as the surrogate does: the fake ELM327
+// waits out its delay in this process, and at the default 15.6 ms step
+// its 4 ms read 16.4; at 1 ms it reads 4.6 to 5.1, a timed wait still
+// running up to a millisecond long. The worker adds none of it: with a
+// fake spinning to its reply time, at the default step, ELM327 read 4.0
+// to 4.1 ms (2026-11-01).
 //
 // Run: build/tests/Release/bench_timing.exe [seconds per transport, default 60]
 
@@ -24,6 +30,12 @@
 #include "fake_elm327.h"
 #if defined(__linux__) && !defined(__ANDROID__)
 #include "vcan_bus.h"
+#endif
+#ifdef _WIN32
+#define NOMINMAX
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
+#include <timeapi.h>
 #endif
 
 #include <algorithm>
@@ -164,6 +176,10 @@ void set_env(const char* name, const char* value)
 int main(int argc, char** argv)
 {
     const int seconds = argc > 1 ? std::max(1, std::atoi(argv[1])) : 60;
+#ifdef _WIN32
+    /* The fakes' delays at their length (the header); released at exit */
+    timeBeginPeriod(1);
+#endif
     const std::string query = "?profile=obd2&identify=0&diagnose=0";
     std::printf(
         "| Transport | Fake's delay | Run | Requests | Answers | Timeouts "

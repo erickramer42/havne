@@ -703,4 +703,5 @@ if(WIN32)
     )
     add_dependencies(bench_timing fake_j2534)
     app_deploy_surrogate(bench_timing)
+    target_link_libraries(bench_timing PRIVATE winmm)   # timeBeginPeriod
 endif()

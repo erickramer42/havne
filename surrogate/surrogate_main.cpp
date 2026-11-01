@@ -1,9 +1,11 @@
 // File/layer: surrogate/surrogate_main.cpp | Win32, x86, Qt-free; rebuild build-win32
 // Testing: HARNESS: test_j2534_surrogate, plus the cross-arch routing
-//          case against the Win32-tree build (ADR-0014)
+//          case against the Win32-tree build (ADR-0014); the 1 ms timer
+//          by J2534HealthTest.VxRepliesAreSeenWhenTheSliceEndsNotTheTimersStep
 
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
+#include <timeapi.h>
 
 #include "ecuio/j2534.h"
 #include "ecuio/j2534_ptypes.h"
@@ -24,6 +26,8 @@ static unsigned long g_channel = 0;
  * treated as "not open" and never read or closed. */
 static bool g_have_device = false;
 static bool g_have_channel = false;
+/* The 1 ms timer this process asked for (wmain), given back at shutdown */
+static bool g_fine_timer = false;
 
 typedef long (__stdcall *fn_pt_open)(void*, unsigned long*);
 typedef long (__stdcall *fn_pt_close)(unsigned long);
@@ -476,6 +480,22 @@ int wmain(int argc, wchar_t* argv[])
     if (g_pipe == INVALID_HANDLE_VALUE) return 7;
     stage("pipe connected");
 
+    /* Windows times a wait in its timer's steps, 15.6 ms by default,
+     * and a vendor holds a read for its timeout unless the batch fills
+     * (the VX does; the client asks for one 10 ms slice), so a reply
+     * 4 ms after its request was seen 15.6 ms after it. A surrogate
+     * serves one session, so it asks for 1 ms for its whole life,
+     * before the vendor DLL loads. Since Windows 10 2004 the global
+     * timer is left alone (processes that don't ask keep the default),
+     * and Windows 11 stops honoring it only for a window-owning process
+     * that can't be seen; the surrogate owns none. The cost, timer
+     * interrupts and less CPU power saving, lasts only while a session
+     * runs
+     * (https://learn.microsoft.com/en-us/windows/win32/api/timeapi/nf-timeapi-timebeginperiod). */
+    g_fine_timer = timeBeginPeriod(1) == TIMERR_NOERROR;
+    stage(g_fine_timer ? "timer resolution 1 ms"
+                       : "timer resolution: 1 ms refused, the default kept");
+
     char log_frames[4] = {};
     if (GetEnvironmentVariableA("ECUIO_SUR_LOG_FRAMES", log_frames,
                                 sizeof(log_frames)) > 0 &&
@@ -747,5 +767,7 @@ shutdown:
     if (g_have_device) g_close(g_device_id);
     FreeLibrary(g_module);
     if (g_pipe != INVALID_HANDLE_VALUE) CloseHandle(g_pipe);
+    if (g_fine_timer)
+        timeEndPeriod(1);
     return 0;
 }
