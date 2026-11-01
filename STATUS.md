@@ -297,7 +297,7 @@ on a Linux machine (#27). Any other adapter starts the list again.
 These numbers are stable IDs, and code and docs refer to them. When
 an issue is resolved it is removed, and its number is not reused.
 
-2. **The iOS app is unvalidated, and no tests run on a phone.** CI
+- **#2. The iOS app is unvalidated, and no tests run on a phone.** CI
    cross-builds an unsigned iOS arm64 device build and, on request,
    launches the app on the Simulator and screenshots it
    (`ios-simulator-smoke`); it has never run on a device. Each run's
@@ -312,20 +312,20 @@ an issue is resolved it is removed, and its number is not reused.
    The app needs Android 12 or later; CI uploads the Android build's
    debug APK, and each release carries one signed with the release key
    ([ADR-0030](docs/adr/0030-signed-android-releases.md)).
-6. **The session API is single-caller by contract.** Each session has
+- **#6. The session API is single-caller by contract.** Each session has
    one caller: the bridge in the app, `havne-cli` in its own process
    ([ADR-0031](docs/adr/0031-command-line-client.md)). Two front ends
    sharing one session would need more.
-13. **The picker treats one registry entry as one device.** Multiple
+- **#13. The picker treats one registry entry as one device.** Multiple
     adapters behind one vendor DLL can't be told apart. They would be
     selected through `PassThruOpen`'s `pName` argument, which the
     loader passes as `nullptr`, meaning the default device.
-20. **Pointer-bearing ioctls (`FAST_INIT`, `FIVE_BAUD_INIT`) are out of
+- **#20. Pointer-bearing ioctls (`FAST_INIT`, `FIVE_BAUD_INIT`) are out of
     contract** and refused at both ends. That is fine for ISO 15765,
     since those are ISO 9141/KWP init calls. If a BENCH device needs
     them, give them a dedicated wire form rather than relaxing the
     whitelist.
-29. **The iOS simulator smoke depends on Intel macOS runners.** Qt
+- **#29. The iOS simulator smoke depends on Intel macOS runners.** Qt
     6.12's iOS simulator libraries are x86_64 only, so
     `ios-simulator-smoke` runs on `macos-15-intel`, where the simulator
     runs natively. GitHub has announced the end of Intel macOS runners
