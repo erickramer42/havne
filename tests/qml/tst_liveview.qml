@@ -6,7 +6,8 @@
 //          its DIDs), the list giving up rows so the chart stays whole
 //          on a short page, the rows the fake ECU withholds from its
 //          bitmaps left out with a line saying how many (Windows: the
-//          fake J2534 DLL), and the link banner's message for every state.
+//          fake J2534 DLL), the link banner's message for every state,
+//          and every item inside a phone's 320 px.
 //          The banner on screen in each state is tst_linkhealth.qml's.
 
 import QtQuick
@@ -87,6 +88,38 @@ TestCase {
                + " (its minimum at least), ending at " + bottom() + " of " + page.height)
         if (data.h === 1000)
             compare(list.height, list.count * page.rowHeight, "every row shows")
+    }
+
+    // The items painted past the page's right edge (a Text by its
+    // painted width): the page scrolls in neither direction, so on a
+    // phone they can't be seen
+    function pastTheEdge(item, page, out) {
+        for (let i = 0; i < item.children.length; ++i) {
+            const child = item.children[i]
+            if (!child.visible || child.width <= 0)
+                continue
+            const painted = child.elide !== undefined && !child.clip
+                            ? Math.max(child.width, child.contentWidth) : child.width
+            const right = child.mapToItem(page, painted, 0).x
+            if (right > page.width + 0.5)
+                out.push((child.objectName || child.text || String(child))
+                         + " at " + Math.round(right))
+            pastTheEdge(child, page, out)
+        }
+        return out
+    }
+
+    // The narrowest phone, 320 px: the rows, the window's choices and
+    // the chart all lie inside the page
+    function test_everyItemFitsAPhonesWidth() {
+        const page = createTemporaryObject(sizedPageComponent, testCase,
+                                           { width: 320, height: 700 })
+        compare(Bridge.connectSession("mock://demo"), "", "mock://demo connects")
+        const list = findChild(page, "signalList")
+        tryVerify(() => list.itemAtIndex(0) !== null, 2000, "a row has a delegate")
+        waitForRendering(page)
+        const out = pastTheEdge(page, page, [])
+        compare(out.length, 0, "past 320 px: " + out.join(", "))
     }
 
     // The chart's window: four choices, 30 s at first, the picked one

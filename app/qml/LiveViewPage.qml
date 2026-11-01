@@ -7,8 +7,10 @@
 //          list giving up rows so the
 //          chart stays whole on a short page; the strip chart's layout (ranges,
 //          lanes, gaps, ticks, labels, a crowded trace's band) by tst_chartlayout.qml through
-//          ChartLayout; the drawing itself, sharp under zoom, is verified
-//          manually (docs/testing.md).
+//          ChartLayout; every item inside 320 px alone and inside the
+//          app's window at the test phone's size (tests/qml/tst_phone.qml);
+//          the drawing itself, sharp under zoom, is verified manually
+//          (docs/testing.md).
 
 import QtCore
 import QtQuick
@@ -180,6 +182,10 @@ Page {
             Layout.minimumHeight: oneRow
             clip: true
             boundsBehavior: Flickable.StopAtBounds
+            // No current row: its default highlight animates to a row's old
+            // width, past a phone's edge
+            currentIndex: -1
+            highlightFollowsCurrentItem: false
             // The rows whose PID no ECU marked unsupported (ADR-0039 section 6)
             model: Bridge.liveSignalModel
 
@@ -295,7 +301,9 @@ Page {
                         .arg(Bridge.signalModel.hiddenCount)
         }
 
-        // The chart's time window: the last N seconds of every trace
+        // The chart's time window: the last N seconds of every trace. The
+        // buttons share the row, so on a phone's width they narrow
+        // instead of laying the whole page out past its edge
         RowLayout {
             id: windowRow
             objectName: "chartWindowRow"
@@ -309,6 +317,9 @@ Page {
                 model: root.chartWindows
                 ThemedButton {
                     required property int modelData
+                    Layout.fillWidth: true
+                    Layout.minimumWidth: 44
+                    Layout.maximumWidth: 120
                     objectName: "chartWindow_" + modelData
                     text: qsTr("%1 s").arg(modelData)
                     highlighted: root.chartWindowS === modelData

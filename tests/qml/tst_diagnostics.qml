@@ -10,7 +10,9 @@
 //          and no other, by code reading: the mock has one ECU, so any
 //          list names it), Cancel sending nothing, Clear once at the mock's
 //          stopped engine (its first 15 s), and on Windows the fake's
-//          running engine leaving the codes. The entries themselves are
+//          running engine leaving the codes; at 320 x 400 the
+//          confirmation scrolls, so Clear and Cancel can be reached. The
+//          entries themselves are
 //          test_bridge's (BridgeTest.DiagnosticsEntryIsWhatThePageShows,
 //          .AClear*).
 
@@ -246,6 +248,32 @@ TestCase {
         waitForRendering(page)
         const out = pastTheEdge(page, page, [])
         compare(out.length, 0, "past 320 px: " + out.join(", "))
+        find(page, "clearCancel").clicked()
+    }
+
+    // A short page, 320 x 400 (a phone on its side, or its text set
+    // large): the confirmation scrolls with the page, so Clear and Cancel
+    // can be reached however tall its text runs
+    function test_theClearsButtonsCanBeReachedOnAShortPage() {
+        const page = createTemporaryObject(pageComponent, testCase.parent)
+        page.width = 320
+        page.height = 400
+        connectAndRead(page, "mock://demo")
+        const clear = find(page, "clearCodes")
+        tryVerify(() => clear.enabled, 2000)
+        clear.clicked()
+        waitForRendering(page)
+        const flick = find(page, "diagnosticsFlick")
+        for (const name of ["clearConfirm", "clearCancel"]) {
+            const button = find(page, name)
+            const y = button.mapToItem(flick.contentItem, 0, 0).y
+            flick.contentY = Math.max(0, Math.min(y, flick.contentHeight - flick.height))
+            waitForRendering(page)
+            const top = button.mapToItem(page, 0, 0).y
+            verify(top >= 0 && top + button.height <= page.height + 0.5,
+                   name + " from " + Math.round(top) + " to "
+                   + Math.round(top + button.height) + " of " + page.height)
+        }
         find(page, "clearCancel").clicked()
     }
 

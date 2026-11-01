@@ -7,8 +7,11 @@
 //          clear at the mock's stopped engine, and on Windows the fake's
 //          running engine), which finds items by objectName; the entries
 //          themselves and the clear's save by test_bridge
-//          (BridgeTest.DiagnosticsEntry*, .AClear*); the look, manually
-//          (the run-havne skill)
+//          (BridgeTest.DiagnosticsEntry*, .AClear*); on a phone, the
+//          clear's buttons reached on a short page
+//          (test_theClearsButtonsCanBeReachedOnAShortPage) and the page
+//          inside the app's window (tests/qml/tst_phone.qml); the look,
+//          manually (the run-havne skill)
 
 import QtQuick
 import QtQuick.Controls
@@ -39,6 +42,8 @@ Page {
     // saved the report to; a clear that sent nothing because the report
     // couldn't be saved
     property bool confirming: false
+    // The confirmation opens at the top of the scrolling area
+    onConfirmingChanged: if (confirming) flick.contentY = 0
     property string savedTo: ""
     property bool clearFailed: false
     readonly property bool clearing: ecus.some(e => e.clearing)
@@ -235,65 +240,9 @@ Page {
             }
         }
 
-        // The clear's confirmation, in place (a Popup doesn't scale with
-        // the zoom): what a clear erases, what it keeps, what it needs
-        Rectangle {
-            objectName: "clearConfirmPanel"
-            visible: root.confirming && Bridge.connected
-            Layout.fillWidth: true
-            implicitHeight: confirmBody.implicitHeight + 2 * Theme.pageMargin
-            radius: Theme.radius
-            color: Theme.elevated
-            border.width: 1
-            border.color: Theme.warning
-
-            ColumnLayout {
-                id: confirmBody
-                anchors.fill: parent
-                anchors.margins: Theme.pageMargin
-                spacing: 10
-
-                Label {
-                    objectName: "clearConfirmTitle"
-                    Layout.fillWidth: true
-                    wrapMode: Text.Wrap
-                    // The bridge's list, the one clearDiagnostics sends to
-                    text: qsTr("Clear the trouble codes of ECU %1?").arg(Bridge.clearTargets.join(", "))
-                    font.weight: Font.DemiBold
-                    color: Theme.text
-                }
-                Label {
-                    objectName: "clearConfirmText"
-                    Layout.fillWidth: true
-                    wrapMode: Text.Wrap
-                    color: Theme.text
-                    text: qsTr("Each ECU that obeys erases its stored and pending codes and its freeze frame, turns the check-engine light off, and sets its readiness monitors back to incomplete. Permanent codes stay: only the ECU clears them, once its monitor passes. Until the monitors complete again, which takes some driving, the car can fail an emissions inspection.") +
-                          "\n\n" +
-                          qsTr("Stop the engine and leave the ignition on: Havne asks each ECU its engine speed first and sends nothing while it turns. The report is saved to the recordings folder first; if it can't be saved, nothing is sent.")
-                }
-                Flow {
-                    Layout.fillWidth: true
-                    spacing: Theme.spacing
-                    ThemedButton {
-                        objectName: "clearConfirm"
-                        text: qsTr("Clear codes")
-                        baseColor: Theme.danger
-                        hoverColor: Qt.lighter(Theme.danger, 1.15)
-                        pressedColor: Qt.darker(Theme.danger, 1.2)
-                        enabled: root.canClear
-                        onClicked: root.clearCodes()
-                    }
-                    ThemedButton {
-                        objectName: "clearCancel"
-                        text: qsTr("Cancel")
-                        onClicked: root.confirming = false
-                    }
-                }
-            }
-        }
-
         Flickable {
             id: flick
+            objectName: "diagnosticsFlick"
             Layout.fillWidth: true
             Layout.fillHeight: true
             clip: true
@@ -308,6 +257,65 @@ Page {
                 id: cards
                 width: flick.width - 12
                 spacing: 12
+
+                // The clear's confirmation, in place (a Popup doesn't scale with
+                // the zoom): what a clear erases, what it keeps, what it needs.
+                // It scrolls with the cards, so its buttons can be reached
+                // however tall its text runs on a short page
+                Rectangle {
+                    objectName: "clearConfirmPanel"
+                    visible: root.confirming && Bridge.connected
+                    Layout.fillWidth: true
+                    implicitHeight: confirmBody.implicitHeight + 2 * Theme.pageMargin
+                    radius: Theme.radius
+                    color: Theme.elevated
+                    border.width: 1
+                    border.color: Theme.warning
+
+                    ColumnLayout {
+                        id: confirmBody
+                        anchors.fill: parent
+                        anchors.margins: Theme.pageMargin
+                        spacing: 10
+
+                        Label {
+                            objectName: "clearConfirmTitle"
+                            Layout.fillWidth: true
+                            wrapMode: Text.Wrap
+                            // The bridge's list, the one clearDiagnostics sends to
+                            text: qsTr("Clear the trouble codes of ECU %1?").arg(Bridge.clearTargets.join(", "))
+                            font.weight: Font.DemiBold
+                            color: Theme.text
+                        }
+                        Label {
+                            objectName: "clearConfirmText"
+                            Layout.fillWidth: true
+                            wrapMode: Text.Wrap
+                            color: Theme.text
+                            text: qsTr("Each ECU that obeys erases its stored and pending codes and its freeze frame, turns the check-engine light off, and sets its readiness monitors back to incomplete. Permanent codes stay: only the ECU clears them, once its monitor passes. Until the monitors complete again, which takes some driving, the car can fail an emissions inspection.") +
+                                  "\n\n" +
+                                  qsTr("Stop the engine and leave the ignition on: Havne asks each ECU its engine speed first and sends nothing while it turns. The report is saved to the recordings folder first; if it can't be saved, nothing is sent.")
+                        }
+                        Flow {
+                            Layout.fillWidth: true
+                            spacing: Theme.spacing
+                            ThemedButton {
+                                objectName: "clearConfirm"
+                                text: qsTr("Clear codes")
+                                baseColor: Theme.danger
+                                hoverColor: Qt.lighter(Theme.danger, 1.15)
+                                pressedColor: Qt.darker(Theme.danger, 1.2)
+                                enabled: root.canClear
+                                onClicked: root.clearCodes()
+                            }
+                            ThemedButton {
+                                objectName: "clearCancel"
+                                text: qsTr("Cancel")
+                                onClicked: root.confirming = false
+                            }
+                        }
+                    }
+                }
 
                 Repeater {
                     model: root.ecus
