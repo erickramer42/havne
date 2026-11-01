@@ -515,6 +515,10 @@ sudo ip link set up vcan0
 havne-cli play mock://demo --to vcan0 &
 havne-cli stream "socketcan://vcan0?profile=mock" --values
 
+# The simulated ECU on it (ADR-0046), and a session asking
+havne-cli sim mock://sim --on vcan0 &
+havne-cli stream "socketcan://vcan0?profile=obd2" --values
+
 # A real adapter (gs_usb: candleLight, CANable), listen-only at the bus's rate
 sudo ip link set can0 up type can bitrate 500000 listen-only on
 havne-cli stream socketcan://can0

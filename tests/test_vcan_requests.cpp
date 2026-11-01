@@ -7,12 +7,16 @@
 //          Control's bytes on the wire, and the refusals of a link that
 //          can't send. SocketCanFaultTest: the test car's recording
 //          answering as the ECU (vcan_recording_ecu.h, ADR-0041 section
-//          4), whole and with replies broken at the ISO-TP level. Each
+//          4), whole and with replies broken at the ISO-TP level.
+//          SimBusTest: the simulated ECU (ADR-0046, core's ISO-TP sender)
+//          answering an obd2 session, a clear and every fault. Each
 //          case skips without the interface; ECUIO_VCAN_REQUIRED=1 makes
 //          that a failure.
 
 #include "ecuio/core.h"
 #include "ecuio/profile.h"
+#include "ecuio/signal_sets.h"
+#include "ecuio/sim.h"
 #include "fake_diagnostics.h"
 #include "fake_ecu.h"
 #include "vcan_bus.h"
@@ -611,4 +615,271 @@ TEST_F(SocketCanFaultTest, SilenceAndLateRepliesLeaveTheSessionInStep)
     expect_in_step(r);
     EXPECT_GE(r.silent, kSegmented / 5);
     EXPECT_GE(r.late, kSegmented / 8);
+}
+
+/* ---- The simulated ECU on the bus (ADR-0046) ---- */
+
+/* The simulated ECU on the test's interface, destroyed when it goes */
+class Sim
+{
+public:
+    explicit Sim(const std::string& uri)
+    {
+        status_ =
+            ecuio_sim_create(uri.c_str(), vcan_bus::interface_name(), &sim_);
+        detail_ = ecuio_last_error_detail();
+    }
+    ~Sim() { ecuio_sim_destroy(sim_); }
+    Sim(const Sim&) = delete;
+    Sim& operator=(const Sim&) = delete;
+    ecuio_status_t status() const { return status_; }
+    const std::string& detail() const { return detail_; }
+    ecuio_sim_stats_t stats() const
+    {
+        ecuio_sim_stats_t s{};
+        EXPECT_EQ(ecuio_sim_get_stats(sim_, &s), ECUIO_OK);
+        return s;
+    }
+
+private:
+    ecuio_sim_t* sim_ = nullptr;
+    ecuio_status_t status_ = ECUIO_ERR_NO_TRANSPORT;
+    std::string detail_;
+};
+
+/* The engine speeds a session decoded (obd2's def, packed replies
+ * split by core), in r/min */
+struct Rpms {
+    std::mutex mutex;
+    std::vector<double> rpm;
+    static void on_values(const ecuio_value_batch_t* b, void* user)
+    {
+        auto* self = static_cast<Rpms*>(user);
+        for (uint32_t i = 0; i < b->count; ++i) {
+            if (b->values[i].signal_id == ECUIO_OBD2_SIG_RPM_ID) {
+                std::lock_guard<std::mutex> lock(self->mutex);
+                self->rpm.push_back(b->values[i].value);
+            }
+        }
+    }
+    void listen(ecuio_session_t* s)
+    {
+        ASSERT_EQ(ecuio_register_values_callback(s, &Rpms::on_values, this),
+                  ECUIO_OK);
+    }
+    std::vector<double> seen()
+    {
+        std::lock_guard<std::mutex> lock(mutex);
+        return rpm;
+    }
+};
+
+class SimBusTest : public SocketCanRequestTest
+{};
+
+/* values=drive: the obd2 session reads the simulated car: its bitmaps,
+ * its VIN, the mock's diagnostics, and the engine starting after the key
+ * on (0 rpm for the first 15 s, then the idle) */
+TEST_F(SimBusTest, AnObd2SessionReadsTheSimulatedCar)
+{
+    Sim sim("mock://sim");
+    ASSERT_EQ(sim.status(), ECUIO_OK) << sim.detail();
+    Rpms rpms;
+    Session s("?profile=obd2");
+    ASSERT_EQ(s.status(), ECUIO_OK) << s.detail();
+    rpms.listen(s.get());
+    ecuio_channel_support_t sup{};
+    ASSERT_TRUE(wait_for(
+        [&] {
+            return ecuio_session_get_channel_support(s.get(), 0, &sup) ==
+                       ECUIO_OK &&
+                   (sup.flags & ECUIO_SUPPORT_COMPLETE) != 0;
+        },
+        5000ms));
+    EXPECT_EQ(sup.ranges, 0x07u) << "the bitmaps at 0x00, 0x20 and 0x40";
+    ecuio_channel_identity_t id{};
+    ASSERT_TRUE(wait_for(
+        [&] {
+            return ecuio_session_get_channel_identity(s.get(), 0, &id) ==
+                       ECUIO_OK &&
+                   (id.flags & ECUIO_IDENTITY_COMPLETE) != 0;
+        },
+        10000ms));
+    char vin[ECUIO_VIN_TEXT_LEN];
+    ASSERT_EQ(ecuio_identity_vin(&id, vin, sizeof vin), ECUIO_OK);
+    EXPECT_STREQ(vin, "ZZZFAKE11M0000001");
+    ecuio_channel_diagnostics_t d{};
+    ASSERT_TRUE(wait_for(
+        [&] {
+            return ecuio_session_get_channel_diagnostics(s.get(), 0, &d) ==
+                       ECUIO_OK &&
+                   (d.flags & ECUIO_DIAG_COMPLETE) != 0;
+        },
+        10000ms));
+    fake_diagnostics::expect_report(d);
+    ASSERT_FALSE(rpms.seen().empty());
+    EXPECT_EQ(rpms.seen().front(), 0.0) << "the key on, the engine stopped";
+    EXPECT_TRUE(wait_for(
+        [&] {
+            const std::vector<double> r = rpms.seen();
+            return !r.empty() && r.back() > 500.0;
+        },
+        25000ms))
+        << "the engine starts";
+    const ecuio_sim_stats_t st = sim.stats();
+    EXPECT_GT(st.requests, 0u);
+    EXPECT_GT(st.replies, 0u);
+    EXPECT_EQ(st.flags, 0u);
+    int32_t e = 0;
+    uint32_t n = 0;
+    ASSERT_EQ(ecuio_session_get_error_state(s.get(), &e, &n), ECUIO_OK);
+    EXPECT_EQ(e, ECUIO_OK);
+}
+
+/* values=canned: the fakes' ECU, so the probe walks the same bitmaps and
+ * drops nothing from obd2 */
+TEST_F(SimBusTest, CannedValuesWalkTheFakesBitmaps)
+{
+    Sim sim("mock://sim?values=canned");
+    ASSERT_EQ(sim.status(), ECUIO_OK) << sim.detail();
+    Rpms rpms;
+    Session s("?profile=obd2&identify=0&diagnose=0");
+    ASSERT_EQ(s.status(), ECUIO_OK) << s.detail();
+    rpms.listen(s.get());
+    ecuio_channel_support_t sup{};
+    ASSERT_TRUE(wait_for(
+        [&] {
+            return ecuio_session_get_channel_support(s.get(), 0, &sup) ==
+                       ECUIO_OK &&
+                   (sup.flags & ECUIO_SUPPORT_COMPLETE) != 0;
+        },
+        5000ms));
+    EXPECT_EQ(sup.ranges, 0x3Fu);
+    EXPECT_EQ(sup.dropped, 0u);
+    ASSERT_TRUE(wait_for([&] { return !rpms.seen().empty(); }, 5000ms));
+    EXPECT_EQ(rpms.seen().front(), 2000.0) << "the fakes' reading";
+}
+
+/* A clear at the key on (0 rpm): 04 obeyed, the report read again
+ * cleared */
+TEST_F(SimBusTest, AClearClearsTheSimulatedCar)
+{
+    Sim sim("mock://sim");
+    ASSERT_EQ(sim.status(), ECUIO_OK) << sim.detail();
+    Session s("?profile=obd2&probe=0&identify=0");
+    ASSERT_EQ(s.status(), ECUIO_OK) << s.detail();
+    ecuio_channel_diagnostics_t d{};
+    ASSERT_TRUE(wait_for(
+        [&] {
+            return ecuio_session_get_channel_diagnostics(s.get(), 0, &d) ==
+                       ECUIO_OK &&
+                   (d.flags & ECUIO_DIAG_COMPLETE) != 0;
+        },
+        8000ms));
+    ASSERT_EQ(ecuio_session_clear_diagnostics(s.get(), 0, d.generation),
+              ECUIO_OK);
+    ASSERT_TRUE(wait_for(
+        [&] {
+            return ecuio_session_get_channel_diagnostics(s.get(), 0, &d) ==
+                       ECUIO_OK &&
+                   d.clear == ECUIO_CLEAR_CLEARED &&
+                   (d.flags & ECUIO_DIAG_COMPLETE) != 0;
+        },
+        8000ms));
+    fake_diagnostics::expect_cleared_report(d);
+    EXPECT_EQ(sim.stats().clears, 1u);
+}
+
+/* Every fault, each on a period of its own (two faults on one period
+ * would leave the second never chosen): the session stays in step (the
+ * walk reads the bitmaps, which are never broken; the rotation keeps
+ * going; the link stays healthy) and the simulated ECU counts each */
+TEST_F(SimBusTest, FaultsLeaveTheSessionInStep)
+{
+    Sim sim("mock://sim?values=canned&faults=silent:7,late:11,"
+            "bad_sequence:13,stalled:17");
+    ASSERT_EQ(sim.status(), ECUIO_OK) << sim.detail();
+    Rpms rpms;
+    Session s("?profile=obd2&identify=0&diagnose=0");
+    ASSERT_EQ(s.status(), ECUIO_OK) << s.detail();
+    rpms.listen(s.get());
+    ecuio_channel_support_t sup{};
+    ASSERT_TRUE(wait_for(
+        [&] {
+            return ecuio_session_get_channel_support(s.get(), 0, &sup) ==
+                       ECUIO_OK &&
+                   (sup.flags & ECUIO_SUPPORT_COMPLETE) != 0;
+        },
+        5000ms));
+    EXPECT_EQ(sup.ranges, 0x3Fu);
+    ASSERT_TRUE(wait_for(
+        [&] {
+            const ecuio_sim_stats_t st = sim.stats();
+            return st.silent > 0 && st.late > 0 && st.bad_sequence > 0 &&
+                   st.stalled > 0;
+        },
+        20000ms))
+        << "silent " << sim.stats().silent << ", late " << sim.stats().late
+        << ", bad sequence " << sim.stats().bad_sequence << ", stalled "
+        << sim.stats().stalled;
+    const size_t before = rpms.seen().size();
+    const ecuio_sim_stats_t st0 = sim.stats();
+    /* each silent or late reply costs the session its 100 ms wait, and
+     * packs that keep failing go back to one PID per request, so the
+     * engine speed comes round every second or two */
+    const bool going =
+        wait_for([&] { return rpms.seen().size() > before; }, 10000ms);
+    const ecuio_sim_stats_t st1 = sim.stats();
+    (void)ecuio_session_get_channel_support(s.get(), 0, &sup);
+    EXPECT_TRUE(going) << "the rotation keeps answering: rpm values " << before
+                       << " then " << rpms.seen().size() << "; requests "
+                       << st0.requests << " then " << st1.requests
+                       << ", replies " << st0.replies << " then " << st1.replies
+                       << ", unflowed " << st1.unflowed << "; support flags "
+                       << sup.flags;
+    int32_t e = 0;
+    uint32_t n = 0;
+    ASSERT_EQ(ecuio_session_get_error_state(s.get(), &e, &n), ECUIO_OK);
+    EXPECT_EQ(e, ECUIO_OK);
+}
+
+/* A segmented reply broken at the frame level (a wrong sequence number
+ * on its last Consecutive Frame, or that frame past N_Cr) is one the
+ * session's ISO-TP receiver begins and never finishes: never delivered
+ * whole. One fault at a time, every second segmented reply, so packs
+ * never fail three in a row and keep coming. */
+TEST_F(SimBusTest, ABrokenSegmentedReplyIsNeverDelivered)
+{
+    for (const char* fault : {"bad_sequence", "stalled"}) {
+        SCOPED_TRACE(fault);
+        Sim sim(std::string("mock://sim?values=canned&faults=") + fault + ":2");
+        ASSERT_EQ(sim.status(), ECUIO_OK) << sim.detail();
+        Session s("?profile=obd2&identify=0&diagnose=0");
+        ASSERT_EQ(s.status(), ECUIO_OK) << s.detail();
+        const auto broken = [&sim, fault] {
+            const ecuio_sim_stats_t st = sim.stats();
+            return std::string(fault) == "stalled" ? st.stalled
+                                                   : st.bad_sequence;
+        };
+        ASSERT_TRUE(wait_for([&] { return broken() >= 5; }, 15000ms))
+            << broken();
+        const uint64_t n = broken();
+        /* the timing snapshot comes once a second */
+        ecuio_session_timing_t timing{};
+        EXPECT_TRUE(wait_for(
+            [&] {
+                uint32_t rows = 0;
+                return ecuio_session_get_timing(s.get(), &timing, nullptr, 0,
+                                                &rows) == ECUIO_OK &&
+                       timing.isotp_dropped >= n;
+            },
+            3000ms))
+            << "dropped " << timing.isotp_dropped << " of " << n;
+        ecuio_channel_support_t sup{};
+        ASSERT_EQ(ecuio_session_get_channel_support(s.get(), 0, &sup),
+                  ECUIO_OK);
+        EXPECT_NE(sup.flags & ECUIO_SUPPORT_PACKED, 0u);
+        EXPECT_EQ(sup.flags & ECUIO_SUPPORT_UNPACKED, 0u)
+            << "packs kept coming";
+    }
 }

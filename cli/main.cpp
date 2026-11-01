@@ -11,7 +11,9 @@
 //          DLL (docs/testing.md); the vin command in the golden run and
 //          CliUsageTest, the vin and identity lines UNIT (CliVinTest),
 //          stream's identity line by hand against the fake DLL; the dtc
-//          command in the golden run and CliUsageTest; main's
+//          command in the golden run and CliUsageTest; the sim
+//          command's lines UNIT (CliSimTest), its usage errors
+//          (CliUsageTest), on vcan0 by hand (ADR-0046); main's
 //          catch by reading and clang-tidy
 //          (bugprone-exception-escape)
 //
@@ -22,6 +24,7 @@
 #include "vin_line.h"
 #include "jsonl.h"
 #include "line_ring.h"
+#include "sim_line.h"
 #include "sleep_watch.h"
 
 #include "ecuio/core.h"
@@ -29,6 +32,7 @@
 #include "ecuio/profile.h"
 #include "ecuio/serial.h"
 #include "ecuio/signals.h"
+#include "ecuio/sim.h"
 #include "ecuio/socketcan.h"
 #include "ecuio/vin.h"
 
@@ -80,6 +84,8 @@ constexpr size_t kRingBytes = size_t{1} << 20;
 // values line with text values can take more, and is cut to fit
 constexpr size_t kLineBytes = 32 * 1024;
 constexpr auto kPoll = std::chrono::milliseconds(100);
+// How often sim writes its counts, when they changed
+constexpr uint64_t kSimStatsEveryUs = 10u * 1000 * 1000;
 
 // The ring's size. HAVNE_CLI_RING_BYTES (tests only) makes it small, so
 // a golden run fills it: a replay must then wait, not drop. Never below
@@ -649,6 +655,7 @@ void usage(FILE* to)
         to,
         "usage: havne-cli stream <uri> [--values] [--count N] [--seconds S]\n"
         "       havne-cli play <uri> --to <vcan> [--count N] [--seconds S]\n"
+        "       havne-cli sim <uri> --on <vcan> [--seconds S]\n"
         "       havne-cli devices\n"
         "       havne-cli vin <VIN>\n"
         "       havne-cli dtc <code>\n"
@@ -665,6 +672,11 @@ void usage(FILE* to)
         "play     (Linux) writes a session's frames to a virtual CAN "
         "interface\n"
         "         as they arrive: mock://demo drives the simulated car on it.\n"
+        "sim      (Linux) answers OBD-II requests on a virtual CAN interface\n"
+        "         as the simulated car's engine ECU: "
+        "mock://sim[?values=drive|\n"
+        "         canned][&vin=<VIN>][&faults=silent:<n>,...]. Ends at Ctrl+C\n"
+        "         or after S seconds.\n"
         "devices  lists the serial ports, J2534 adapters and CAN interfaces a\n"
         "         URI can name.\n"
         "vin      decodes a VIN on this machine: its model year, make and\n"
@@ -950,6 +962,83 @@ std::vector<ecuio_can_interface_t> can_interfaces()
 
 // A typed VIN's decode (ADR-0043), offline: spaces dropped and upper
 // case, as Settings' lookup takes it; not a VIN is a usage error
+struct SimArgs {
+    const char* uri = nullptr;
+    const char* on = nullptr;
+    uint64_t seconds = 0;
+};
+
+// The simulated ECU (ADR-0046) answering on a virtual bus until Ctrl+C,
+// --seconds or the bus failing: start, sim, a sim_stats line every 10 s
+// while the counts change, end with them
+int run_sim(const SimArgs& args)
+{
+    install_handlers();
+    Output out;
+    write_start(out);
+    ecuio_sim_t* sim = nullptr;
+    const ecuio_status_t st = ecuio_sim_create(args.uri, args.on, &sim);
+    if (st != ECUIO_OK) {
+        write_error(out, st);
+        out.flush();
+        return kExitConnect;
+    }
+    {
+        char buf[1024];
+        cli::Line l(buf, sizeof buf);
+        cli::sim_line(l, args.uri, args.on);
+        write_line(out, l);
+    }
+    out.flush();
+    const uint64_t started = ecuio_clock_us();
+    uint64_t next_stats = started + kSimStatsEveryUs;
+    ecuio_sim_stats_t last{};
+    ecuio_sim_stats_t s{};
+    const char* reason = nullptr;
+    while (!reason) {
+        std::this_thread::sleep_for(kPoll);
+        (void)ecuio_sim_get_stats(sim, &s);
+        const uint64_t now = ecuio_clock_us();
+        if (g_interrupted.load()) {
+            reason = "interrupted";
+        } else if (s.flags & ECUIO_SIM_FAILED) {
+            reason = "bus-failed";
+        } else if (args.seconds && now - started >= args.seconds * 1000000u) {
+            reason = "seconds";
+        } else if (now >= next_stats) {
+            next_stats = now + kSimStatsEveryUs;
+            if (std::memcmp(&s, &last, sizeof s) != 0) {
+                last = s;
+                char buf[1024];
+                cli::Line l(buf, sizeof buf);
+                cli::sim_stats_line(l, s);
+                write_line(out, l);
+                out.flush();
+            }
+        }
+        if (out.failed) {
+            break; /* a closed pipe ends it quietly */
+        }
+    }
+    ecuio_sim_destroy(sim);
+    if (out.failed) {
+        return out.ok() ? kExitOk : kExitFailed;
+    }
+    char buf[1024];
+    cli::Line l(buf, sizeof buf);
+    cli::sim_end_line(l, reason, s);
+    write_line(out, l);
+    out.flush();
+    if (std::strcmp(reason, "bus-failed") == 0) {
+        std::fprintf(stderr,
+                     "havne-cli: the simulated ECU's bus failed (%s "
+                     "went down or away)\n",
+                     args.on);
+        return kExitFailed;
+    }
+    return out.ok() ? kExitOk : kExitFailed;
+}
+
 int run_vin(const char* typed)
 {
     std::string vin;
@@ -1377,6 +1466,35 @@ int run(int argc, char** argv)
                              "interface is a network device\n");
         return kExitUsage;
 #endif
+    }
+    if (command == "sim") {
+        SimArgs sim;
+        for (int i = 2; i < argc; ++i) {
+            const std::string a = argv[i];
+            if (a == "--on" && i + 1 < argc) {
+                sim.on = argv[++i];
+            } else if (a == "--seconds" && i + 1 < argc) {
+                if (!parse_count(argv[++i], sim.seconds)) {
+                    std::fprintf(
+                        stderr,
+                        "havne-cli: --seconds takes a whole number above 0\n");
+                    return kExitUsage;
+                }
+            } else if (a.rfind("--", 0) == 0 || sim.uri) {
+                std::fprintf(stderr, "havne-cli: unexpected '%s'\n", argv[i]);
+                usage(stderr);
+                return kExitUsage;
+            } else {
+                sim.uri = argv[i];
+            }
+        }
+        if (!sim.uri || !sim.on) {
+            std::fprintf(stderr,
+                         "havne-cli: sim needs a URI and --on <interface>\n");
+            usage(stderr);
+            return kExitUsage;
+        }
+        return run_sim(sim);
     }
     if (command != "stream") {
         usage(stderr);

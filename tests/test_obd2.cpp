@@ -15,6 +15,8 @@
 //          their ECU's bitmaps rule out (pid_support.h: PidSupportTest).
 //          The trouble codes' titles and parse (DtcTitleTest, ADR-0044).
 //          The inspection verdict over reports (InspectionTest, ADR-0045).
+//          The simulated ECU's answers, URI and faults (SimEcuTest,
+//          ADR-0046).
 //          End-to-end pacing is HARNESS (stream and
 //          health tests) and BENCH (VX), not this file.
 
@@ -27,6 +29,7 @@
 #include "../core/src/obd2_rates.h"
 #include "../core/src/obd2_reply.h"
 #include "../core/src/pid_support.h"
+#include "../core/src/sim_ecu.h"
 #include "../core/src/uds_generic.h"
 #include "../core/src/uri_query.h"
 #include "ecuio/core.h"
@@ -4695,4 +4698,304 @@ TEST(InspectionTest, ReadingNoAnswerAndOldCarsHaveNoCount)
               ECUIO_ERR_NULL_ARGUMENT);
     EXPECT_EQ(ecuio_diag_inspect(nullptr, 0, 2015, &out), ECUIO_OK);
     EXPECT_EQ(out.verdict, ECUIO_INSPECTION_UNKNOWN);
+}
+
+/* ---------- the simulated ECU's answers (ADR-0046) ---------- */
+
+namespace {
+
+ecuio_sim_ecu sim_of(ecuio_sim_values values)
+{
+    ecuio_sim_ecu e;
+    e.config.values = values;
+    std::memcpy(e.config.vin, ECUIO_SIM_DEFAULT_VIN,
+                sizeof ECUIO_SIM_DEFAULT_VIN);
+    return e;
+}
+
+std::vector<uint8_t> ask(ecuio_sim_ecu& e, std::initializer_list<uint8_t> req,
+                         bool functional = false)
+{
+    const std::vector<uint8_t> q(req);
+    uint8_t out[ECUIO_SIM_REPLY_MAX];
+    const uint32_t n = ecuio_sim_answer(
+        e, q.data(), static_cast<uint32_t>(q.size()), functional, out);
+    return std::vector<uint8_t>(out, out + n);
+}
+
+/* A Service 01 reply decoded by the obd2 def id */
+double drive_value(const std::vector<uint8_t>& reply, uint16_t id)
+{
+    const ecuio_signal_def_t* d = find_def(ecuio_obd2_signal_set(), id);
+    EXPECT_NE(d, nullptr);
+    const ecuio_frame_t f =
+        make_obd2_frame(reply.data(), static_cast<uint8_t>(reply.size()));
+    double v = -1.0;
+    EXPECT_TRUE(ecuio_def_applies_to_frame(d, &f)) << id;
+    EXPECT_EQ(decode(d, f, &v), ECUIO_DECODE_OK) << id;
+    return v;
+}
+
+} // namespace
+
+// values=drive: each PID through the obd2 set's own def reads the drive
+// cycle's value, to its resolution, while the car moves
+TEST(SimEcuTest, DriveValuesAreTheDriveCyclesThroughTheObd2Defs)
+{
+    ecuio_sim_ecu e = sim_of(ecuio_sim_values::drive);
+    // 60 s in: off the cold start, pulling through the gears
+    for (int i = 0; i < 1200; ++i) {
+        ecuio_sim_tick(e);
+    }
+    const ecuio_mock::DriveCycle& car = e.car;
+    ASSERT_TRUE(car.running);
+    ASSERT_GT(car.speed_kmh, 1.0f);
+    EXPECT_NEAR(drive_value(ask(e, {0x01, 0x0C}), ECUIO_OBD2_SIG_RPM_ID),
+                car.rpm, 0.25);
+    EXPECT_NEAR(drive_value(ask(e, {0x01, 0x0D}), ECUIO_OBD2_SIG_SPEED_ID),
+                car.speed_kmh, 0.5);
+    EXPECT_NEAR(
+        drive_value(ask(e, {0x01, 0x04}), ECUIO_OBD2_SIG_ENGINE_LOAD_ID),
+        car.load_pct, 0.2);
+    EXPECT_NEAR(
+        drive_value(ask(e, {0x01, 0x05}), ECUIO_OBD2_SIG_COOLANT_TEMP_ID),
+        car.coolant_c, 0.5);
+    EXPECT_NEAR(drive_value(ask(e, {0x01, 0x0F}), ECUIO_OBD2_SIG_IAT_ID),
+                car.iat_c, 0.5);
+    EXPECT_NEAR(drive_value(ask(e, {0x01, 0x10}), ECUIO_OBD2_SIG_MAF_ID),
+                car.maf_gs, 0.005);
+    EXPECT_NEAR(drive_value(ask(e, {0x01, 0x11}), ECUIO_OBD2_SIG_THROTTLE_ID),
+                car.throttle_pct, 0.2);
+    EXPECT_NEAR(drive_value(ask(e, {0x01, 0x5C}), ECUIO_OBD2_SIG_OIL_TEMP_ID),
+                car.oil_c, 0.5);
+    EXPECT_NEAR(drive_value(ask(e, {0x01, 0x42}), ECUIO_OBD2_SIG_BATTERY_V_ID),
+                14.1, 0.001);
+    // run time since start, lambda and ambient by J1979's scaling
+    const std::vector<uint8_t> run = ask(e, {0x01, 0x1F});
+    ASSERT_EQ(run.size(), 4u);
+    EXPECT_NEAR((run[2] << 8) | run[3], e.engine_s, 1.0);
+    EXPECT_GT(e.engine_s, 30.0f);
+    const std::vector<uint8_t> lambda = ask(e, {0x01, 0x24});
+    ASSERT_EQ(lambda.size(), 6u);
+    EXPECT_NEAR(((lambda[2] << 8) | lambda[3]) * 2.0 / 65536.0, car.lambda,
+                0.0001);
+    EXPECT_EQ(ask(e, {0x01, 0x46}), (std::vector<uint8_t>{0x41, 0x46, 60}));
+    // the values move: rpm over the next 5 s
+    const double before =
+        drive_value(ask(e, {0x01, 0x0C}), ECUIO_OBD2_SIG_RPM_ID);
+    for (int i = 0; i < 100; ++i) {
+        ecuio_sim_tick(e);
+    }
+    EXPECT_NE(drive_value(ask(e, {0x01, 0x0C}), ECUIO_OBD2_SIG_RPM_ID), before);
+}
+
+// The key on, the engine stopped: 0 rpm, the battery's voltage, no run
+// time
+TEST(SimEcuTest, TheKeyOnWithTheEngineStopped)
+{
+    ecuio_sim_ecu e = sim_of(ecuio_sim_values::drive);
+    ecuio_sim_tick(e);
+    EXPECT_EQ(ask(e, {0x01, 0x0C}), (std::vector<uint8_t>{0x41, 0x0C, 0, 0}));
+    EXPECT_EQ(ask(e, {0x01, 0x42}),
+              (std::vector<uint8_t>{0x41, 0x42, 0x31, 0x38}));
+    EXPECT_EQ(ask(e, {0x01, 0x1F}), (std::vector<uint8_t>{0x41, 0x1F, 0, 0}));
+}
+
+// Each mode's bitmaps list exactly the PIDs it answers, and chain
+TEST(SimEcuTest, TheBitmapsListWhatEachModeAnswers)
+{
+    for (ecuio_sim_values values :
+         {ecuio_sim_values::drive, ecuio_sim_values::canned}) {
+        ecuio_sim_ecu e = sim_of(values);
+        int listed = 0;
+        for (unsigned base = 0; base <= 0xE0; base += 0x20) {
+            const std::vector<uint8_t> b =
+                ask(e, {0x01, static_cast<uint8_t>(base)});
+            if (b.size() != 6) {
+                // a bitmap the chain doesn't reach is refused
+                EXPECT_EQ(b, (std::vector<uint8_t>{0x7F, 0x01, 0x12})) << base;
+                continue;
+            }
+            for (unsigned k = 1; k <= 32 && base + k <= 0xFF; ++k) {
+                const uint8_t pid = static_cast<uint8_t>(base + k);
+                const bool bit =
+                    (b[2 + (k - 1) / 8] & (0x80u >> ((k - 1) % 8))) != 0;
+                const std::vector<uint8_t> r = ask(e, {0x01, pid});
+                EXPECT_EQ(bit, r.size() >= 3 && r[0] == 0x41)
+                    << int(values) << " PID " << std::hex << int(pid);
+                listed += (bit && pid % 0x20 != 0) ? 1 : 0;
+            }
+        }
+        EXPECT_EQ(listed, values == ecuio_sim_values::drive ? 19 : 95);
+    }
+}
+
+// values=canned: every Service 01 PID answered as the fakes' ECU answers
+// it, refusals included (sim_canned.h mirrors tests/fake_ecu.h)
+TEST(SimEcuTest, CannedValuesAreTheFakesOwn)
+{
+    fake_ecu::reset_diagnostics();
+    ecuio_sim_ecu e = sim_of(ecuio_sim_values::canned);
+    for (unsigned pid = 0; pid <= 0xFF; ++pid) {
+        const unsigned char req[2] = {0x01, static_cast<unsigned char>(pid)};
+        unsigned char fake[fake_ecu::kReplyMax];
+        size_t n = 0;
+        ASSERT_TRUE(fake_ecu::answer(req, 2, -1, fake, &n));
+        EXPECT_EQ(ask(e, {0x01, static_cast<uint8_t>(pid)}),
+                  std::vector<uint8_t>(fake, fake + n))
+            << std::hex << pid;
+    }
+    // and after a clear
+    const unsigned char clear[1] = {0x04};
+    unsigned char out[fake_ecu::kReplyMax];
+    size_t n = 0;
+    ASSERT_TRUE(fake_ecu::answer(clear, 1, -1, out, &n));
+    EXPECT_EQ(ask(e, {0x04}), (std::vector<uint8_t>{0x44}));
+    for (unsigned p : {0x01, 0x21, 0x30, 0x31, 0x41, 0x4D, 0x4E}) {
+        const uint8_t pid = static_cast<uint8_t>(p);
+        const unsigned char req[2] = {0x01, pid};
+        ASSERT_TRUE(fake_ecu::answer(req, 2, -1, out, &n));
+        EXPECT_EQ(ask(e, {0x01, pid}), std::vector<uint8_t>(out, out + n))
+            << std::hex << int(pid);
+    }
+    fake_ecu::reset_diagnostics();
+}
+
+// The diagnostics are the mock's (the fakes' codes), before and after a
+// clear
+TEST(SimEcuTest, TheDiagnosticsAreTheMocksAndAClearClearsThem)
+{
+    ecuio_sim_ecu e = sim_of(ecuio_sim_values::drive);
+    EXPECT_EQ(ask(e, {0x03}), (std::vector<uint8_t>{0x43, 0x03, 0x03, 0x01,
+                                                    0x04, 0x20, 0xC1, 0x00}));
+    EXPECT_EQ(ask(e, {0x07}).size(), 8u);
+    EXPECT_EQ(ask(e, {0x0A}), (std::vector<uint8_t>{0x4A, 0x01, 0x04, 0x20}));
+    EXPECT_EQ(ask(e, {0x01, 0x01}),
+              (std::vector<uint8_t>{0x41, 0x01, 0x83, 0x07, 0xE5, 0x00}));
+    EXPECT_EQ(ask(e, {0x02, 0x02, 0x00}),
+              (std::vector<uint8_t>{0x42, 0x02, 0x00, 0x03, 0x01}));
+    EXPECT_EQ(ask(e, {0x02, 0x0C, 0x01}),
+              (std::vector<uint8_t>{0x7F, 0x02, 0x12}));
+    EXPECT_EQ(ask(e, {0x01, 0x31}),
+              (std::vector<uint8_t>{0x41, 0x31, 0x04, 0xD2}));
+    EXPECT_EQ(ask(e, {0x04}), (std::vector<uint8_t>{0x44}));
+    EXPECT_TRUE(e.cleared);
+    EXPECT_EQ(ask(e, {0x03}), (std::vector<uint8_t>{0x43, 0x00}));
+    EXPECT_EQ(ask(e, {0x0A}), (std::vector<uint8_t>{0x4A, 0x01, 0x04, 0x20}))
+        << "permanent codes stay";
+    EXPECT_EQ(ask(e, {0x01, 0x01}),
+              (std::vector<uint8_t>{0x41, 0x01, 0x00, 0x07, 0xE5, 0xE5}));
+    EXPECT_EQ(ask(e, {0x01, 0x31}), (std::vector<uint8_t>{0x41, 0x31, 0, 0}));
+    EXPECT_EQ(ask(e, {0x02, 0x0C, 0x00}),
+              (std::vector<uint8_t>{0x7F, 0x02, 0x12}));
+}
+
+// Service 09: the VIN the URI gave and the ECU name; the rest refused,
+// and a functional request's refusals unsaid (ISO 14229-1)
+TEST(SimEcuTest, IdentificationAndRefusals)
+{
+    ecuio_sim_ecu e = sim_of(ecuio_sim_values::drive);
+    std::vector<uint8_t> vin = ask(e, {0x09, 0x02});
+    ASSERT_EQ(vin.size(), 20u);
+    EXPECT_EQ(std::string(vin.begin() + 3, vin.end()), ECUIO_SIM_DEFAULT_VIN);
+    EXPECT_EQ(vin[2], 0x01);
+    const std::vector<uint8_t> name = ask(e, {0x09, 0x0A});
+    ASSERT_EQ(name.size(), 23u);
+    EXPECT_EQ(std::string(reinterpret_cast<const char*>(name.data()) + 3),
+              "ECM-HavneSim");
+    EXPECT_EQ(ask(e, {0x09, 0x00}),
+              (std::vector<uint8_t>{0x49, 0x00, 0x40, 0x40, 0x00, 0x00}));
+    EXPECT_EQ(ask(e, {0x09, 0x04}), (std::vector<uint8_t>{0x7F, 0x09, 0x12}));
+    EXPECT_EQ(ask(e, {0x22, 0xF1, 0x90}),
+              (std::vector<uint8_t>{0x7F, 0x22, 0x31}));
+    EXPECT_EQ(ask(e, {0x10, 0x03}), (std::vector<uint8_t>{0x7F, 0x10, 0x11}));
+    EXPECT_EQ(ask(e, {0x01, 0x12}), (std::vector<uint8_t>{0x7F, 0x01, 0x12}));
+    EXPECT_TRUE(ask(e, {0x01, 0x12}, true).empty());
+    EXPECT_TRUE(ask(e, {0x10, 0x03}, true).empty());
+    EXPECT_EQ(ask(e, {0x01, 0x0D}, true).size(), 3u) << "a positive one is";
+    ecuio_sim_config c;
+    char why[256];
+    ASSERT_EQ(ecuio_sim_parse_uri("mock://x?vin=1FAFAKE10M0000001", &c, why,
+                                  sizeof why),
+              ecuio_sim_uri_result::ok);
+    e.config = c;
+    vin = ask(e, {0x09, 0x02});
+    EXPECT_EQ(std::string(vin.begin() + 3, vin.end()), "1FAFAKE10M0000001");
+}
+
+// J1979's pack: each PID it has, in the order asked; none, no answer
+TEST(SimEcuTest, APackAnswersEachPidItHas)
+{
+    ecuio_sim_ecu e = sim_of(ecuio_sim_values::canned);
+    EXPECT_EQ(
+        ask(e, {0x01, 0x0D, 0x12, 0x05, 0x0C}),
+        (std::vector<uint8_t>{0x41, 0x0D, 0x00, 0x05, 60, 0x0C, 0x1F, 0x40}));
+    EXPECT_TRUE(ask(e, {0x01, 0x12, 0x13}).empty());
+    // a pack holding run time's 13 bytes is past a Single Frame
+    EXPECT_EQ(ask(e, {0x01, 0x7F, 0x0D}).size(), 1u + 14 + 2);
+}
+
+TEST(SimEcuTest, TheUrisKeysAndRefusals)
+{
+    ecuio_sim_config c;
+    char why[256] = {};
+    ASSERT_EQ(ecuio_sim_parse_uri("mock://sim", &c, why, sizeof why),
+              ecuio_sim_uri_result::ok);
+    EXPECT_EQ(c.values, ecuio_sim_values::drive);
+    EXPECT_STREQ(c.vin, ECUIO_SIM_DEFAULT_VIN);
+    EXPECT_EQ(c.faults.silent + c.faults.late + c.faults.bad_sequence +
+                  c.faults.stalled,
+              0u);
+    ASSERT_EQ(
+        ecuio_sim_parse_uri("mock://sim?values=canned&faults=silent:5,late:7,"
+                            "bad_sequence:3,stalled:11",
+                            &c, why, sizeof why),
+        ecuio_sim_uri_result::ok);
+    EXPECT_EQ(c.values, ecuio_sim_values::canned);
+    EXPECT_EQ(c.faults.silent, 5u);
+    EXPECT_EQ(c.faults.late, 7u);
+    EXPECT_EQ(c.faults.bad_sequence, 3u);
+    EXPECT_EQ(c.faults.stalled, 11u);
+    for (const char* bad :
+         {"socketcan://vcan0", "mock://sim?profile=obd2", "mock://sim?values=x",
+          "mock://sim?vin=1FAFAKE10M000000", "mock://sim?vin=1FAFAKEI0M0000001",
+          "mock://sim?vin=1fafake10m0000001",
+          "mock://sim?faults=", "mock://sim?faults=silent",
+          "mock://sim?faults=silent:0", "mock://sim?faults=silent:10001",
+          "mock://sim?faults=drop:5", "mock://sim?faults=silent:5,",
+          "mock://sim?faults=silent:x", "mock://sim?values"}) {
+        why[0] = '\0';
+        EXPECT_EQ(ecuio_sim_parse_uri(bad, &c, why, sizeof why),
+                  ecuio_sim_uri_result::bad)
+            << bad;
+        EXPECT_NE(why[0], '\0') << bad;
+    }
+    EXPECT_EQ(ecuio_sim_parse_uri("replay:///tmp/x", &c, why, sizeof why),
+              ecuio_sim_uri_result::replay);
+}
+
+// Every Nth reply of its kind, single-frame and segmented counted apart;
+// the bitmaps never; the frame faults on segmented replies only
+TEST(SimEcuTest, FaultsBreakEveryNthReplyOfItsKind)
+{
+    ecuio_sim_ecu e = sim_of(ecuio_sim_values::drive);
+    e.config.faults.silent = 3;
+    e.config.faults.bad_sequence = 2;
+    const uint8_t pid[2] = {0x01, 0x0C};
+    const uint8_t bitmap[2] = {0x01, 0x00};
+    std::vector<ecuio_sim_fate> singles;
+    for (int i = 0; i < 6; ++i) {
+        EXPECT_EQ(ecuio_sim_next_fate(e, bitmap, 2, 6), ecuio_sim_fate::intact);
+        singles.push_back(ecuio_sim_next_fate(e, pid, 2, 4));
+    }
+    EXPECT_EQ(singles, (std::vector<ecuio_sim_fate>{
+                           ecuio_sim_fate::intact, ecuio_sim_fate::intact,
+                           ecuio_sim_fate::silent, ecuio_sim_fate::intact,
+                           ecuio_sim_fate::intact, ecuio_sim_fate::silent}));
+    const uint8_t pack[4] = {0x01, 0x0C, 0x0D, 0x05};
+    EXPECT_EQ(ecuio_sim_next_fate(e, pack, 4, 9), ecuio_sim_fate::intact);
+    EXPECT_EQ(ecuio_sim_next_fate(e, pack, 4, 9), ecuio_sim_fate::bad_sequence);
+    EXPECT_EQ(ecuio_sim_next_fate(e, pack, 4, 9), ecuio_sim_fate::silent);
+    EXPECT_EQ(e.singles, 6u);
+    EXPECT_EQ(e.segmented, 3u);
 }

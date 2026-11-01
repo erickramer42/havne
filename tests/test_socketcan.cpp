@@ -3,12 +3,14 @@
 //          name, ?filter=, a link from canned netlink messages and the
 //          verdict on it, a kernel frame to an ecuio_frame_t, the
 //          clock), the URI's refusals through ecuio_session_create, and
-//          ecuio_can_interfaces' arguments. The transport on a bus is
-//          VcanTest's (Linux)
+//          ecuio_can_interfaces' arguments; the simulated ECU's contract
+//          (SimTest, ADR-0046). The transport on a bus is VcanTest's
+//          (Linux), the simulated ECU on one SimBusTest's
 
 #include "ecuio/core.h"
 #include "ecuio/internal.h"
 #include "ecuio/socketcan.h"
+#include "ecuio/sim.h"
 #include "socketcan_wire.h"
 
 #include <gtest/gtest.h>
@@ -639,5 +641,72 @@ TEST(SocketCanTest, AnInterfaceThatIsntCanIsRefused)
     EXPECT_EQ(c.status, ECUIO_ERR_LOAD_FAILED);
     EXPECT_NE(c.detail.find("lo isn't a CAN interface"), std::string::npos)
         << c.detail;
+}
+#endif
+
+/* ---- The simulated ECU's contract (ADR-0046) ---- */
+
+namespace {
+
+struct SimCreated {
+    ecuio_status_t status;
+    std::string detail;
+};
+
+SimCreated sim_create(const char* uri, const char* ifname)
+{
+    ecuio_sim_t* sim = reinterpret_cast<ecuio_sim_t*>(1);
+    SimCreated c{ecuio_sim_create(uri, ifname, &sim),
+                 ecuio_last_error_detail()};
+    EXPECT_EQ(sim, nullptr) << uri;
+    return c;
+}
+
+} // namespace
+
+TEST(SimTest, TheArgumentsAndTheUriAreCheckedFirst)
+{
+    ecuio_sim_t* sim = nullptr;
+    EXPECT_EQ(ecuio_sim_create(nullptr, "vcan0", &sim),
+              ECUIO_ERR_NULL_ARGUMENT);
+    EXPECT_EQ(ecuio_sim_create("mock://sim", nullptr, &sim),
+              ECUIO_ERR_NULL_ARGUMENT);
+    EXPECT_EQ(ecuio_sim_create("mock://sim", "vcan0", nullptr),
+              ECUIO_ERR_NULL_ARGUMENT);
+    ecuio_sim_stats_t stats;
+    EXPECT_EQ(ecuio_sim_get_stats(nullptr, &stats), ECUIO_ERR_NULL_ARGUMENT);
+    ecuio_sim_destroy(nullptr);
+    // the URI's refusals, on every platform, before any interface
+    SimCreated c = sim_create("mock://sim?profile=obd2", "nosuchcan9");
+    EXPECT_EQ(c.status, ECUIO_ERR_BAD_URI);
+    EXPECT_NE(c.detail.find("no query key 'profile'"), std::string::npos)
+        << c.detail;
+    c = sim_create("socketcan://vcan0", "nosuchcan9");
+    EXPECT_EQ(c.status, ECUIO_ERR_BAD_URI);
+    c = sim_create("mock://sim?faults=silent:0", "nosuchcan9");
+    EXPECT_EQ(c.status, ECUIO_ERR_BAD_URI);
+    EXPECT_NE(c.detail.find("faults:"), std::string::npos) << c.detail;
+    c = sim_create("replay:///tmp/recording", "nosuchcan9");
+    EXPECT_EQ(c.status, ECUIO_ERR_NOT_IMPLEMENTED);
+#if !ECUIO_HAVE_SOCKETCAN
+    c = sim_create("mock://sim", "vcan0");
+    EXPECT_EQ(c.status, ECUIO_ERR_NO_TRANSPORT);
+    EXPECT_NE(c.detail.find("needs Linux"), std::string::npos) << c.detail;
+#endif
+}
+
+#if ECUIO_HAVE_SOCKETCAN
+// Only a virtual bus: never a car's, whatever its state
+TEST(SimTest, OnlyAVcanInterfaceIsTaken)
+{
+    SimCreated c = sim_create("mock://sim", "nosuchcan9");
+    EXPECT_EQ(c.status, ECUIO_ERR_LOAD_FAILED);
+    EXPECT_NE(c.detail.find("no interface nosuchcan9"), std::string::npos)
+        << c.detail;
+    c = sim_create("mock://sim", "lo"); /* every Linux machine has one */
+    EXPECT_EQ(c.status, ECUIO_ERR_LOAD_FAILED);
+    EXPECT_NE(c.detail.find("not vcan"), std::string::npos) << c.detail;
+    c = sim_create("mock://sim", "bad name!");
+    EXPECT_EQ(c.status, ECUIO_ERR_LOAD_FAILED);
 }
 #endif

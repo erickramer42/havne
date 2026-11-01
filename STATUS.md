@@ -166,6 +166,15 @@ hardware ([roadmap](#roadmap)).
       and error frames included, through a controller in listen-only
       mode, and sends nothing. `havne-cli play mock://demo --to vcan0`
       drives the simulated car on a virtual bus.
+    - **The simulated ECU** ([ADR-0046](docs/adr/0046-simulated-ecu.md)):
+      `havne-cli sim mock://sim --on vcan0` answers OBD-II requests on a
+      virtual bus as the simulated car's engine ECU, through core's
+      ISO-TP (`ecuio/sim.h`): the drive cycle's values or the fakes'
+      canned ones, the mock's diagnostics, a VIN, and periodic faults.
+      Verified on `vcan0` (WSL): an obd2 session reads its values,
+      identification, diagnostics and inspection line, clears it, and
+      stays in step under every fault. Left: a recording as the ECU
+      (`replay://`).
     - **Requests:** `obd2` and `uds-generic` run through ISO-TP in core
       (`core/src/isotp.h`, the reassembly ELM327 uses too), with the
       request keys of the other two transports. A real controller must
@@ -255,7 +264,7 @@ hardware ([roadmap](#roadmap)).
   ELM327 [bench](docs/bench-sessions/elm327-bench-runsheet.md) and
   [vehicle](docs/bench-sessions/elm327-vehicle-runsheet.md) sheets, and
   the [phone's](docs/bench-sessions/android-phone-runsheet.md).
-- **Tests:** 795 ctest cases on Windows (both trees rebuilt,
+- **Tests:** 811 ctest cases on Windows (both trees rebuilt,
   2026-11-01), all passing but two env-gated skips (the cross-arch
   case, and the real-car recordings' diff, run locally), plus the
   cross-arch subset (86/86); 0 MSVC warnings. CI runs ctest on Windows,
@@ -407,12 +416,13 @@ reach into car-verified claims and finishes the diagnostics.
   manufacturer code); and a **readiness summary** (built, ADR-0045:
   the federal inspection rule, 40 CFR 85.2222, over every ECU's
   monitors for the VIN's model year).
-- **The simulator as a product:** `havne-cli sim <uri> --on vcan0`,
-  the fakes' ECU and the recording that answers as one promoted from
-  test code into the CLI, answering through core's ISO-TP, with
-  faults given as replay's `?faults=` are. Until SocketCAN's hardware
-  is on hand, it's how anyone runs Havne's SocketCAN requests end to
-  end against a known ECU.
+- **The simulator as a product:** `havne-cli sim <uri> --on vcan0`
+  (built for `mock://`, ADR-0046: the drive cycle or the fakes' canned
+  values, the mock's diagnostics, a VIN, periodic faults, through
+  core's ISO-TP); left: a recording that answers as the ECU
+  (`replay://`), promoted from test code. Until SocketCAN's hardware is
+  on hand, it's how anyone runs Havne's SocketCAN requests end to end
+  against a known ECU.
 - **clang-tidy, tightened and widened:** `google-explicit-constructor`,
   braces around a body on the line after its `if`, and
   `google-readability-casting` (C++ only) are on, over `cli/` too; left:

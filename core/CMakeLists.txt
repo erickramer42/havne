@@ -14,6 +14,7 @@ add_library(ecuio-core STATIC
     src/elm327_stream.cpp
     src/elm327_log.cpp
     src/serial_ports.cpp
+    src/sim.cpp
     src/socketcan_interfaces.cpp
     src/socketcan_transport.cpp
     src/signals.cpp
@@ -78,6 +79,7 @@ if(NOT ANDROID AND NOT IOS)
             include/ecuio/profile.h
             include/ecuio/serial.h
             include/ecuio/signals.h
+            include/ecuio/sim.h
             include/ecuio/socketcan.h
             include/ecuio/stream.h
             include/ecuio/vin.h

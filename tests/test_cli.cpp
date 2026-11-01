@@ -4,13 +4,15 @@
 //          (CliTimingTest, ADR-0042) has latency.csv's columns; the vin
 //          and identity lines (CliVinTest, ADR-0043) decode through core;
 //          the titles and the dtc line (CliDtcTest, ADR-0044) name through it;
-//          the inspection line (CliInspectionTest, ADR-0045) is core's verdict.
+//          the inspection line (CliInspectionTest, ADR-0045) is core's verdict;
+//          the simulated ECU's lines (CliSimTest, ADR-0046).
 //          The program end to end is the golden runs'
 //          (tests/golden/cli/) and CliSignalTest's (tests/CMakeLists.txt)
 
 #include "diagnostics_line.h"
 #include "jsonl.h"
 #include "line_ring.h"
+#include "sim_line.h"
 #include "sleep_watch.h"
 #include "timing_line.h"
 #include "vin_line.h"
@@ -684,4 +686,38 @@ TEST(CliInspectionTest, TheVerdictNamesTheIncompleteMonitors)
     }
     EXPECT_STREQ(cli::inspection_word(ECUIO_INSPECTION_MIL_ON), "mil_on");
     EXPECT_STREQ(cli::inspection_word(ECUIO_INSPECTION_READY), "ready");
+}
+
+TEST(CliSimTest, TheLinesCarryTheUriAndTheCounts)
+{
+    char buf[1024];
+    cli::Line l(buf, sizeof buf);
+    cli::sim_line(l, "mock://sim?values=canned", "vcan0");
+    EXPECT_EQ(std::string(l.data(), l.size()),
+              "{\"type\":\"sim\",\"uri\":\"mock://sim?values=canned\","
+              "\"on\":\"vcan0\"}");
+    ecuio_sim_stats_t s{};
+    s.requests = 10;
+    s.replies = 7;
+    s.refused = 1;
+    s.silent = 2;
+    s.late = 1;
+    s.bad_sequence = 3;
+    s.stalled = 4;
+    s.unflowed = 5;
+    s.clears = 6;
+    const char* counts =
+        "\"requests\":10,\"replies\":7,\"refused\":1,\"silent\":2,\"late\":1,"
+        "\"bad_sequence\":3,\"stalled\":4,\"unflowed\":5,\"clears\":6,";
+    cli::Line st(buf, sizeof buf);
+    cli::sim_stats_line(st, s);
+    EXPECT_EQ(std::string(st.data(), st.size()),
+              std::string("{\"type\":\"sim_stats\",") + counts +
+                  "\"failed\":false}");
+    s.flags = ECUIO_SIM_FAILED;
+    cli::Line e(buf, sizeof buf);
+    cli::sim_end_line(e, "bus-failed", s);
+    EXPECT_EQ(std::string(e.data(), e.size()),
+              std::string("{\"type\":\"end\",\"reason\":\"bus-failed\",") +
+                  counts + "\"failed\":true}");
 }
