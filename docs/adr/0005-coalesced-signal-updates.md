@@ -48,8 +48,8 @@ read history through per-row model roles cheaply.
 - The chart's x-axis resolution is one window, about 100 ms.
   Per-sample timestamps would need decoding to move onto the worker
   (done: the appendix below).
-- Every signal is decoded per frame, whether or not anything is
-  subscribed to it (Known Issue #4).
+- Every signal a frame carries is decoded, whether or not anything is
+  subscribed to it.
 - Flattened arrays are easy to index wrongly. On 2026-10-10 the paint
   code read the newest *value* as the newest timestamp, and no C++
   test could see it. The manual smoke tier caught it.

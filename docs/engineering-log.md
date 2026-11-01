@@ -1149,3 +1149,16 @@ order would have hidden in it. And **the support report already said
 what Live should hide.** The dropped list holds the first eight drops,
 which on the grown set is fewer than a car drops; the bitmaps and
 `ranges` hold the whole answer, so the bridge reads those.
+
+**2026-10-31: the decode's index:** **a regression under the floor
+needs a figure to stand beside.** Growing the `obd2` set to every
+Service 01 field halved the replay load test's sustained rate, and
+CI's floor (10,000 frames a second, set to catch an order of
+magnitude) passed it. It showed only when the benchmark's figures were
+set beside v0.3.4's, and a bisect found the commit, alternating the
+builds run by run, because back-to-back runs of one build varied by
+40 %. And **a test at full speed also tests the speed.** A bridge test
+that replayed with faults at `speed=max` and required no frame dropped
+at the bridge's gate passed because decoding kept the worker slow; with
+the index the worker outran the GUI thread. It runs at 100x, where the
+rows it checks don't depend on which thread is faster.

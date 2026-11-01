@@ -27,7 +27,7 @@ Three needs meet here:
   test car's replies on both dates; a test that replays them and checks the
   values keeps that true without the car.
 - **A load source.** Decoding on the worker (STATUS.md, backlog
-  "Full signal sets at full rate"; Known Issue #4, and per-sample
+  "Full signal sets at full rate", and per-sample
   time on the chart) needs real
   traffic at more than real time, with frames that carry their own
   times. `bench_bridge` measured the GUI thread's match against every

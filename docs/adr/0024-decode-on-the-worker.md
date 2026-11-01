@@ -256,10 +256,22 @@ recorded too.
 
 - **Units:** the bridge still converts on the way out (ADR-0022); core
   delivers decoded values in the def's unit.
-- **Known Issue #4 in kind:** every def is still matched against every
+- **The match against every def:** every def is still matched against every
   frame, now on the worker; the "only while registered" rule is the
   only trim. A per-signal enable mask can come later if a CAN FD rate
   makes the match matter.
+
+  > **Amended 2026-10-31:** the match no longer visits every def. The
+  > full Service 01 set put every `obd2` def on the engine ECU's reply
+  > ID, so each frame read a mux key per def, and the replay load
+  > test's sustained rate fell by about half. Create now indexes the
+  > set by message ID and key shape (`core/src/def_index.h`); a frame
+  > looks up its ID, reads its key once per shape, and only the defs
+  > found go through `ecuio_def_applies_to_frame` and the decode, in
+  > the set's order. The cost per frame follows the values a frame
+  > carries, not the profile ([docs/testing.md](../testing.md#performance)).
+  > Every def that matches still decodes whether or not a view shows
+  > it: the Dashboard reads every signal.
 
 ### 10. The steps
 
