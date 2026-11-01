@@ -10,7 +10,8 @@
 # down to structs that:
 #   - keep their size;
 #   - change or delete no member but one named reserved (an array that
-#     shrinks or moves, or a scalar that goes), or one whose type change
+#     shrinks or moves, a one-element array taken whole as its element
+#     under a new name, or a scalar that goes), or one whose type change
 #     is a struct that grew this way (a pointer to it, as a set's defs);
 #   - otherwise only gain members (insertions).
 # So no field outside the reserved room moves, resizes or changes type.
@@ -45,6 +46,10 @@ ARRAY_DETAIL = re.compile(
     r"|upper bound of '.*' change from '\d+' to '\d+')$"
 )
 OFFSET_TAIL = re.compile(r"^and offset changed from \d+ to \d+ \(in bits\) \(by [+-]\d+ bits\)$")
+# A one-element reserved array taken whole: its element's type, the same
+# bytes at the same offset, and the new name abidiff gives after it
+ONE_TAKEN = re.compile(r"^entity changed from '(\w+)\[1\]' to '(?:typedef )?(\w+)'$")
+RESERVED_RENAMED = re.compile(rf"^and name of '[\w:]*::{RESERVED}' changed to '[\w:]*::\w+'$")
 
 
 class Node:
@@ -89,6 +94,8 @@ def struct_grew_into_reserved(node, grown, why):
             for c in child.children:
                 if OFFSET_TAIL.match(c.text):
                     continue  # the reserved member's own move, after its type
+                if RESERVED_RENAMED.match(c.text):
+                    continue  # its new name, after a whole one taken
                 if (not MEMBER_TYPE_CHANGE.match(c.text)
                         and ANY_MEMBER_TYPE_CHANGE.match(c.text) and c.children
                         and all(PATH_LINE.match(d.text) for d in c.children)):
@@ -101,6 +108,9 @@ def struct_grew_into_reserved(node, grown, why):
                     why.append(f"{name}: {c.text}")
                     return False
                 for detail in c.children:
+                    taken = ONE_TAKEN.match(detail.text)
+                    if taken and taken.group(1) == taken.group(2):
+                        continue
                     if not ARRAY_DETAIL.match(detail.text):
                         why.append(f"{name}: the reserved member changed otherwise: {detail.text}")
                         return False
@@ -234,6 +244,34 @@ Variables changes summary: 0 Removed, 0 Changed, 0 Added variable
                           array type subrange 1 changed length from 3 to 2
                         and offset changed from 712 to 720 (in bits) (by +8 bits)
 """
+# The diagnostics report as v0.3.6 grew it: clear_kmh took a word of
+# reserved[3], and cycle took reserved0[1] whole (abidiff's own lines)
+TAKEN = """Functions changes summary: 0 Removed, 1 Changed, 1 Added functions
+Variables changes summary: 0 Removed, 0 Changed, 0 Added variable
+
+1 function with some indirect sub-type change:
+
+  [C] 'function ecuio_status_t ecuio_session_get_channel_diagnostics(const ecuio_session_t*, uint32_t, ecuio_channel_diagnostics_t*)' has some indirect sub-type changes:
+    parameter 3 of type 'ecuio_channel_diagnostics_t*' has sub-type changes:
+      in pointed to type 'typedef ecuio_channel_diagnostics_t':
+        underlying type 'struct ecuio_channel_diagnostics' changed:
+          type size hasn't changed
+          1 data member insertion:
+            'uint32_t clear_kmh', at offset 224 (in bits)
+          2 data member changes:
+            type of 'uint8_t reserved0[1]' changed:
+              entity changed from 'uint8_t[1]' to 'typedef uint8_t'
+            and name of 'ecuio_channel_diagnostics::reserved0' changed to 'ecuio_channel_diagnostics::cycle'
+            type of 'uint32_t reserved[3]' changed:
+              type name changed from 'uint32_t[3]' to 'uint32_t[2]'
+              array type size changed from 96 to 64
+              array type subrange 1 changed length from 3 to 2
+            and offset changed from 224 to 256 (in bits) (by +32 bits)
+
+1 Added function:
+
+  [A] 'function ecuio_status_t ecuio_session_clear_diagnostics_with(ecuio_session_t*, uint32_t, uint32_t, uint32_t)'    {ecuio_session_clear_diagnostics_with}
+"""
 SCALAR = """          type size hasn't changed
           1 data member deletion:
             'uint32_t reserved', at offset 32896 (in bits)
@@ -246,6 +284,13 @@ def selftest():
     cases = [
         ("growth into reserved[] passes", HEAD + ROOM, True),
         ("a reserved scalar replaced passes", HEAD + SCALAR, True),
+        ("a one-element reserved array taken whole passes", TAKEN, True),
+        ("a one-element reserved array taken as another type fails", TAKEN.replace(
+            "to 'typedef uint8_t'", "to 'typedef uint16_t'"), False),
+        ("a member outside the room renamed fails", TAKEN.replace(
+            "            and name of 'ecuio_channel_diagnostics::reserved0' changed to 'ecuio_channel_diagnostics::cycle'\n",
+            "            and name of 'ecuio_channel_diagnostics::reserved0' changed to 'ecuio_channel_diagnostics::cycle'\n"
+            "            and name of 'ecuio_channel_diagnostics::clear_nrc' changed to 'ecuio_channel_diagnostics::nrc'\n"), False),
         ("a pointer member to a struct grown into its room passes", NESTED, True),
         ("a pointer member to a struct that grew fails", NESTED.replace(
             "                      type size hasn't changed\n",
