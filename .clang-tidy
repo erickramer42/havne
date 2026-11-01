@@ -4,12 +4,16 @@
 # concurrency, performance and portability, plus a few misc checks of the
 # same kind. The style families (readability, modernize,
 # cppcoreguidelines) stay off: the public and J2534 headers must compile
-# as C, and the tree isn't written to them. Two style checks earn their
+# as C, and the tree isn't written to them. Three style checks earn their
 # place: google-explicit-constructor (a one-argument constructor that
-# converts silently) and readability-braces-around-statements for a body
+# converts silently); readability-braces-around-statements for a body
 # on the line after its if, else, for or while, where a second line
 # added under it would run unconditionally (ShortStatementLines 1: a
-# one-line "if (x) return;" stays as written).
+# one-line "if (x) return;" stays as written); and
+# google-readability-casting, since a C-style cast in C++ falls through
+# to reinterpret_cast or drops const where static_cast would refuse to
+# compile. It reads C++ only: the headers that compile as C keep their C
+# casts behind a NOLINTBEGIN with that reason.
 #
 # Turned off, and why:
 #   bugprone-easily-swappable-parameters     the C ABI's flat functions
@@ -41,6 +45,7 @@ Checks: >-
   readability-misleading-indentation,
   readability-braces-around-statements,
   google-explicit-constructor,
+  google-readability-casting,
   -bugprone-easily-swappable-parameters,
   -bugprone-implicit-widening-of-multiplication-result,
   -bugprone-inc-dec-in-conditions,

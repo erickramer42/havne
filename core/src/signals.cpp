@@ -20,7 +20,8 @@ static uint32_t extract_bitfield_le(const uint8_t* data,
 {
     uint32_t result = 0;
     for (uint8_t i = 0; i < bit_length; ++i) {
-        uint32_t abs_bit = (uint32_t)start_byte * 8u + bit_offset + i;
+        uint32_t abs_bit =
+            static_cast<uint32_t>(start_byte) * 8u + bit_offset + i;
         if (data[abs_bit >> 3] & (1u << (abs_bit & 7u))) {
             result |= (1u << i);
         }
@@ -38,7 +39,7 @@ static uint32_t extract_bytes_be(const uint8_t* data,
     uint32_t result = 0;
     const uint8_t n = bit_length / 8;
     for (uint8_t i = 0; i < n; ++i) {
-        result = (result << 8) | data[(uint32_t)start_byte + i];
+        result = (result << 8) | data[static_cast<uint32_t>(start_byte) + i];
     }
     return result;
 }
@@ -57,7 +58,8 @@ static bool read_mux_key(const ecuio_signal_def_t* signal,
                          const uint8_t* payload, uint32_t payload_len,
                          uint32_t* out_key)
 {
-    const uint32_t key_end = (uint32_t)signal->mux_offset + signal->mux_length;
+    const uint32_t key_end =
+        static_cast<uint32_t>(signal->mux_offset) + signal->mux_length;
     if (key_end > payload_len) {
         return false;
     }
@@ -96,7 +98,7 @@ static bool is_whole_bytes(const ecuio_signal_def_t* signal)
 
 static bool all_zero(const void* bytes, size_t n)
 {
-    const unsigned char* p = (const unsigned char*)bytes;
+    const unsigned char* p = static_cast<const unsigned char*>(bytes);
     for (size_t i = 0; i < n; ++i) {
         if (p[i] != 0) {
             return false;
@@ -137,8 +139,8 @@ int ecuio_decode_signal(const ecuio_signal_def_t* signal,
 
     /* Highest bit consumed lies in this byte index: single uniform
        bounds check for every kind and byte order. */
-    uint32_t last_bit = (uint32_t)signal->start_byte * 8u
-                        + signal->bit_offset + signal->bit_length - 1u;
+    uint32_t last_bit = static_cast<uint32_t>(signal->start_byte) * 8u +
+                        signal->bit_offset + signal->bit_length - 1u;
     if ((last_bit >> 3) >= payload_len) {
         return ECUIO_DECODE_ERR_PAST_PAYLOAD;
     }
@@ -168,7 +170,7 @@ int ecuio_decode_signal(const ecuio_signal_def_t* signal,
 
     switch (signal->kind) {
     case ECUIO_VALUE_UINT:
-        *out_value = (double)raw * signal->scale + signal->offset;
+        *out_value = static_cast<double>(raw) * signal->scale + signal->offset;
         return ECUIO_DECODE_OK;
 
     case ECUIO_VALUE_INT: {
@@ -178,7 +180,8 @@ int ecuio_decode_signal(const ecuio_signal_def_t* signal,
         }
         int32_t signed_raw;
         memcpy(&signed_raw, &raw, sizeof signed_raw);
-        *out_value = (double)signed_raw * signal->scale + signal->offset;
+        *out_value =
+            static_cast<double>(signed_raw) * signal->scale + signal->offset;
         return ECUIO_DECODE_OK;
     }
 
@@ -187,7 +190,8 @@ int ecuio_decode_signal(const ecuio_signal_def_t* signal,
          * byte order the payload used. */
         float raw_float;
         memcpy(&raw_float, &raw, sizeof raw_float);
-        *out_value = (double)raw_float * signal->scale + signal->offset;
+        *out_value =
+            static_cast<double>(raw_float) * signal->scale + signal->offset;
         return ECUIO_DECODE_OK;
     }
 
@@ -225,8 +229,8 @@ int ecuio_decode_text(const ecuio_signal_def_t* signal,
     }
     uint32_t n = signal->byte_length;
     if (n == 0) {
-        n = (uint32_t)payload_len - signal->start_byte;
-    } else if ((uint32_t)signal->start_byte + n > payload_len) {
+        n = static_cast<uint32_t>(payload_len) - signal->start_byte;
+    } else if (static_cast<uint32_t>(signal->start_byte) + n > payload_len) {
         return ECUIO_DECODE_ERR_PAST_PAYLOAD;
     }
 
@@ -263,7 +267,8 @@ int ecuio_decode_text(const ecuio_signal_def_t* signal,
     } else {
         for (uint32_t i = 0; i < n && pos + 1u < out_cap; ++i) {
             const uint8_t c = field[i];
-            out[pos++] = (c >= 0x20u && c <= 0x7Eu) ? (char)c : '.';
+            out[pos++] =
+                (c >= 0x20u && c <= 0x7Eu) ? static_cast<char>(c) : '.';
         }
     }
     out[pos] = '\0';
@@ -452,8 +457,9 @@ int ecuio_display_convert(const char* unit, uint8_t decimal_places,
                 result.value = value * c.scale + c.offset;
                 memset(result.unit, 0, sizeof result.unit);
                 memcpy(result.unit, c.to, strlen(c.to));
-                const unsigned dp = (unsigned)decimal_places + c.extra_decimals;
-                result.decimal_places = (uint8_t)(dp > 3u ? 3u : dp);
+                const unsigned dp =
+                    static_cast<unsigned>(decimal_places) + c.extra_decimals;
+                result.decimal_places = static_cast<uint8_t>(dp > 3u ? 3u : dp);
                 result.converted = 1;
                 break;
             }
