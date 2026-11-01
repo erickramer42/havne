@@ -134,13 +134,15 @@ bool read_line(FILE* f, std::vector<char>& buf, bool* too_long)
 
 bool parse_decimal(const char*& p, uint64_t* out)
 {
-    if (*p < '0' || *p > '9')
+    if (*p < '0' || *p > '9') {
         return false;
+    }
     uint64_t v = 0;
     for (; *p >= '0' && *p <= '9'; ++p) {
         const uint64_t d = static_cast<uint64_t>(*p - '0');
-        if (v > (UINT64_MAX - d) / 10)
+        if (v > (UINT64_MAX - d) / 10) {
             return false;
+        }
         v = v * 10 + d;
     }
     *out = v;
@@ -149,25 +151,30 @@ bool parse_decimal(const char*& p, uint64_t* out)
 
 int hex_digit(char c)
 {
-    if (c >= '0' && c <= '9')
+    if (c >= '0' && c <= '9') {
         return c - '0';
-    if (c >= 'A' && c <= 'F')
+    }
+    if (c >= 'A' && c <= 'F') {
         return c - 'A' + 10;
-    if (c >= 'a' && c <= 'f')
+    }
+    if (c >= 'a' && c <= 'f') {
         return c - 'a' + 10;
+    }
     return -1;
 }
 
 bool parse_hex32(const char*& p, uint32_t* out)
 {
-    if (p[0] != '0' || (p[1] != 'x' && p[1] != 'X'))
+    if (p[0] != '0' || (p[1] != 'x' && p[1] != 'X')) {
         return false;
+    }
     p += 2;
     uint32_t v = 0;
     int digits = 0;
     for (int d; (d = hex_digit(*p)) >= 0; ++p) {
-        if (++digits > 8)
+        if (++digits > 8) {
             return false;
+        }
         v = (v << 4) | static_cast<uint32_t>(d);
     }
     *out = v;
@@ -270,8 +277,9 @@ ecuio_status_t check_file(const native_path& path, std::vector<char>& buf,
             std::fclose(f);
             return ECUIO_ERR_LOAD_FAILED;
         }
-        if (n > 0)
+        if (n > 0) {
             span += step_us(prev, cur);
+        }
         prev = cur;
         ++n;
     }
@@ -306,25 +314,31 @@ bool parse_speed(const ecuio_uri::param& p, uint32_t* milli)
     for (; i < p.val_len && p.val[i] >= '0' && p.val[i] <= '9';
          ++i, ++int_digits) {
         whole = whole * 10 + static_cast<uint64_t>(p.val[i] - '0');
-        if (whole > kSpeedMax)
+        if (whole > kSpeedMax) {
             return false;
+        }
     }
     if (i < p.val_len && p.val[i] == '.') {
         for (++i; i < p.val_len && p.val[i] >= '0' && p.val[i] <= '9'; ++i) {
-            if (++frac_digits > 3)
+            if (++frac_digits > 3) {
                 return false;
+            }
             frac = frac * 10 + static_cast<uint64_t>(p.val[i] - '0');
         }
-        if (frac_digits == 0)
+        if (frac_digits == 0) {
             return false;
+        }
     }
-    if (i != p.val_len || int_digits == 0)
+    if (i != p.val_len || int_digits == 0) {
         return false;
-    for (size_t k = frac_digits; k < 3; ++k)
+    }
+    for (size_t k = frac_digits; k < 3; ++k) {
         frac *= 10;
+    }
     const uint64_t v = whole * 1000 + frac;
-    if (v < kSpeedMin || v > kSpeedMax)
+    if (v < kSpeedMin || v > kSpeedMax) {
         return false;
+    }
     *milli = static_cast<uint32_t>(v);
     return true;
 }
@@ -378,8 +392,9 @@ void replay_worker(ecuio_replay_transport* t)
     for (;;) {
         FILE* f = t->path.open();
         if (f == nullptr || !read_header(f, buf)) {
-            if (f != nullptr)
+            if (f != nullptr) {
                 std::fclose(f);
+            }
             stop_early(t);
             return;
         }
@@ -397,8 +412,9 @@ void replay_worker(ecuio_replay_transport* t)
                 stop_early(t);
                 return;
             }
-            if (!first)
+            if (!first) {
                 pass_us += step_us(prev, cur);
+            }
             first = false;
             prev = cur;
             s->replay_frames_read.fetch_add(1, std::memory_order_relaxed);

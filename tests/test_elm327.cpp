@@ -627,7 +627,7 @@ ecuio_signal_set_t set_of(const ecuio_signal_def_t* defs, uint32_t n)
  * any def past the seventh byte, keeps the digit off */
 TEST(Elm327ProtocolTest, TheCountDigitGoesToPidsWhoseDefsFitOneFrame)
 {
-    ecuio_signal_def_t defs[7] = {
+    ecuio_signal_def_t defs[9] = {
         pid_def(0x0C, 2, 2), /* rpm: ends at 4 */
         pid_def(0x42, 2, 2),
         pid_def(0x7F, 3, 4), /* the first field of a long reply: ends at 7 */
@@ -635,19 +635,25 @@ TEST(Elm327ProtocolTest, TheCountDigitGoesToPidsWhoseDefsFitOneFrame)
         pid_def(0x81, 7, 4), /* ends at 11 */
         pid_def(0x01, 2, 1),
         pid_def(0x02, 2, 1),
+        pid_def(0x68, 2, 1), /* ends at 3, but J1979's record is 7 bytes */
+        pid_def(0xB5, 3, 4), /* a PID J1979's table doesn't define */
     };
     defs[5].kind = ECUIO_VALUE_TEXT; /* to the end of the payload */
     defs[5].bit_length = 0;
     defs[6].kind = ECUIO_VALUE_HEX; /* 2 to 7 */
     defs[6].bit_length = 0;
     defs[6].byte_length = 5;
-    const ecuio_signal_set_t set = set_of(defs, 7);
+    const ecuio_signal_set_t set = set_of(defs, 9);
     elm327_one_frame_pids one;
     elm327_one_frame_pids_for(&set, &one);
     EXPECT_TRUE(elm327_one_frame(one, 0x0C));
     EXPECT_TRUE(elm327_one_frame(one, 0x42));
-    EXPECT_TRUE(elm327_one_frame(one, 0x7F))
-        << "the defs are all the rule sees; the transport learns the rest";
+    EXPECT_FALSE(elm327_one_frame(one, 0x7F)) << "J1979: 13 bytes";
+    EXPECT_FALSE(elm327_one_frame(one, 0x68))
+        << "J1979: 7 bytes, a reply of two frames";
+    EXPECT_TRUE(elm327_one_frame(one, 0xB5))
+        << "length unknown: the defs are all the rule sees, and the "
+           "transport learns the rest";
     EXPECT_FALSE(elm327_one_frame(one, 0x81));
     EXPECT_FALSE(elm327_one_frame(one, 0x01));
     EXPECT_TRUE(elm327_one_frame(one, 0x02));

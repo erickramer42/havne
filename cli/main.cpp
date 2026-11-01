@@ -8,7 +8,8 @@
 //          sleep rule UNIT (tests/test_cli.cpp); a real sleep BENCH
 //          (BENCH prep #27);
 //          the timing lines UNIT (CliTimingTest) and by hand against the fake
-//          DLL (docs/testing.md)
+//          DLL (docs/testing.md); main's catch by reading and clang-tidy
+//          (bugprone-exception-escape)
 //
 // Public headers only: what any program linking core can do.
 
@@ -33,6 +34,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <exception>
 #include <memory>
 #include <new>
 #include <string>
@@ -1168,9 +1170,7 @@ int run_play(const PlayArgs& args)
 }
 #endif
 
-} // namespace
-
-int main(int argc, char** argv)
+int run(int argc, char** argv)
 {
 #ifdef _WIN32
     // JSON lines end in \n on every platform
@@ -1265,4 +1265,19 @@ int main(int argc, char** argv)
         return kExitUsage;
     }
     return run_stream(args);
+}
+
+} // namespace
+
+int main(int argc, char** argv)
+{
+    // What throws (an allocation, a thread that won't start) ends as the
+    // ring's out of memory does: a CLI failure with its reason, not
+    // std::terminate
+    try {
+        return run(argc, argv);
+    } catch (const std::exception& e) {
+        std::fprintf(stderr, "havne-cli: %s\n", e.what());
+        return kExitFailed;
+    }
 }

@@ -4,8 +4,8 @@
 // C++17, Qt-free, no platform headers.
 // Testing: UNIT: the code's letter and digits, every monitor's name
 //     against tests/fixtures/obd2/monitors.csv, PID 01 into the
-//     readiness fields, a code list's count, codes and cut
-//     (DiagnosticsTest, test_obd2).
+//     readiness fields, PID 41 onto its monitors, a code list's count,
+//     codes and cut (DiagnosticsTest, test_obd2).
 
 #ifndef ECUIO_DIAGNOSTICS_H
 #define ECUIO_DIAGNOSTICS_H
@@ -119,6 +119,34 @@ inline void ecuio_diag_take_readiness(const uint8_t abcd[4],
         m = ecuio_monitor_t{};
         m.id = id;
         m.flags = incomplete ? 0u : ECUIO_MONITOR_COMPLETE;
+    }
+}
+
+/* PID 41's four data bytes (after 41 41) onto the monitors PID 01
+ * listed: PID 01's layout, its A always 0, an availability bit meaning
+ * enabled this drive cycle and a completeness bit 0 for complete this
+ * cycle (SAE J1979; Wikipedia's "OBD-II PIDs", Service 01 PID 41). A
+ * monitor PID 01 didn't list stays out: the report's monitors are the
+ * ECU's. Sets ECUIO_DIAG_CYCLE. */
+inline void ecuio_diag_take_cycle(const uint8_t abcd[4],
+                                  ecuio_channel_diagnostics_t* out)
+{
+    const uint8_t b = abcd[1], c = abcd[2], d = abcd[3];
+    out->flags |= ECUIO_DIAG_CYCLE;
+    const uint8_t n = out->monitor_count < ECUIO_DIAG_MAX_MONITORS
+                          ? out->monitor_count
+                          : static_cast<uint8_t>(ECUIO_DIAG_MAX_MONITORS);
+    for (uint8_t i = 0; i < n; ++i) {
+        ecuio_monitor_t& m = out->monitors[i];
+        const bool in_b = m.id < 8;
+        const uint8_t bit = static_cast<uint8_t>(in_b ? m.id : m.id - 8);
+        const bool enabled = ((in_b ? b : c) & (1u << bit)) != 0;
+        const bool incomplete =
+            in_b ? (b & (0x10u << bit)) != 0 : (d & (1u << bit)) != 0;
+        m.flags = static_cast<uint8_t>(
+            (m.flags & ECUIO_MONITOR_COMPLETE) |
+            (enabled ? ECUIO_MONITOR_CYCLE_ENABLED : 0u) |
+            (incomplete ? 0u : ECUIO_MONITOR_CYCLE_COMPLETE));
     }
 }
 

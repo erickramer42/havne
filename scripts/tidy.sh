@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# scripts/tidy.sh: clang-tidy over core/ and surrogate/ with .clang-tidy's
+# scripts/tidy.sh: clang-tidy over core/, surrogate/ and cli/ with .clang-tidy's
 # checks, one summary line; each file's output goes to
 # Testing/tidy/<file>.log, and on a warning the warnings are printed and
 # the script exits 1. CI's clang-tidy job runs it.
@@ -90,10 +90,10 @@ root=$(pwd -W 2>/dev/null || pwd)
 # generated files, such as the version resource in the tree's own
 # surrogate/ folder, which clang-tidy can't read
 files=$(grep -oE '"file": *"[^"]*"' "$DB" | sed -E 's/"file": *"(.*)"/\1/' |
-    tr '\\' '/' | grep -E "/(core|surrogate)/" | grep -E '\.(c|cc|cpp|cxx)$' |
+    tr '\\' '/' | grep -E "/(core|surrogate|cli)/" | grep -E '\.(c|cc|cpp|cxx)$' |
     grep -vF "/$TREE/" | sort -u)
 if [ -z "$files" ]; then
-    echo "no core/ or surrogate/ sources in $DB" >&2
+    echo "no core/, surrogate/ or cli/ sources in $DB" >&2
     exit 2
 fi
 count=$(printf '%s\n' "$files" | wc -l | tr -d ' ')

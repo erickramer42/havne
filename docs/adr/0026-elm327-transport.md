@@ -955,3 +955,11 @@ frame lines, so the session tests can fail on what it does
 `.AReplyThatSpansFramesTakesThePidOffTheCountDigit`). Whether an
 adapter counts a `7F xx 78` line toward the digit is still unknown:
 neither the datasheet nor the FRPM says, and the fake doesn't count it.
+
+> Amended 2026-11-01: the rule also reads J1979's length for each PID
+> (`ECUIO_OBD2_PID_BYTES`), so a PID whose reply that length puts past a
+> Single Frame never gets the digit, and its first reply isn't lost (PID
+> 68, whose defs fit one frame, lost one in every `bench_timing` run).
+> The learning above stays for a PID the table doesn't define and an ECU
+> answering longer: `Elm327SessionTest.APidJ1979SaysSpansFramesNeverTakesTheDigit`,
+> `.AReplyLongerThanJ1979SaysTakesThePidOffTheCountDigit`.

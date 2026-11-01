@@ -1,7 +1,8 @@
 // File/layer: tests/qml/tst_diagnostics.qml | Qt Quick Test, QML tier
 // Testing: the Diagnostics page (ADR-0037) against the mock's report
 //          (core/src/mock_ecu.h): the empty state before any connect,
-//          the MIL, the three lists' codes, eight complete monitors, the
+//          the MIL, the three lists' codes, eight complete monitors, done
+//          this drive cycle too, the
 //          freeze frame's code and values in either unit system, Read
 //          again (a second read logged), diagnose=0's state, and the last
 //          read kept after a disconnect; the clear (ADR-0038): its
@@ -116,6 +117,9 @@ TestCase {
         const states = texts(find(card, "monitors"), "monitorState")
         compare(states.length, 8, "the mock's eight monitors")
         verify(states.every(s => s === "Complete"), states.join(", "))
+        const cycle = texts(find(card, "monitors"), "monitorCycle")
+        compare(cycle.length, 8, "this drive cycle, beside each")
+        verify(cycle.every(s => s === "Done"), cycle.join(", "))
         compare(find(card, "freezeLabel").text, "Stored by P0301")
         const values = texts(find(card, "freezeValues"), "freezeValue")
         compare(values, [page.valueText(0xB3 * 100 / 255, 1, "%"),
@@ -168,6 +172,7 @@ TestCase {
                             "asks once more before clearing a moving vehicle",
                             "saved to the recordings folder first"])
             verify(words.indexOf(part) >= 0, "the confirmation says: " + part)
+        verify(words.indexOf("No codes are stored") < 0, "the mock has codes")
         find(page, "clearCancel").clicked()
         verify(!panel.visible)
         verify(clear.enabled)
@@ -203,6 +208,16 @@ TestCase {
         verify(status.indexOf("The report was saved before the clear: ") === 0, status)
         verify(status.endsWith(".jsonl"), status)
         tryVerify(() => clear.enabled, 2000, "a clear can run again")
+
+        // Nothing left to erase: a clear can still go out, and says what
+        // it would do
+        tryVerify(() => Bridge.clearFindsNothing, 2000)
+        clear.clicked()
+        const words = find(page, "clearConfirmText").text
+        verify(words.indexOf("No codes are stored and the check-engine light is off: a clear now only sets the readiness monitors back to incomplete") === 0,
+               words)
+        verify(find(page, "clearConfirm").enabled, "and can still be sent")
+        find(page, "clearCancel").clicked()
     }
 
     // The fake J2534 DLL's engine turns (2000 rpm) and refuses to clear

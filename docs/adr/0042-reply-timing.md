@@ -182,3 +182,38 @@ A car's figures come from its runs' `latency.csv` (v0.3.6's runs).
   - About 200 KB of histograms per requesting session.
   - Latency includes the host and the adapter's link, so it is the
     stack's view, not the ECU's response time alone.
+
+## Appendix: Windows' timer step (2026-11-01)
+
+The first benchmark read a 4 ms reply as 16.4 ms on Windows through
+both fakes, against 4.1 ms on Linux. Raising the timer to 1 ms in one
+process at a time (`timeBeginPeriod`, which since Windows 10 2004
+affects only the processes that call it) separated the causes:
+
+- **J2534:** the VX holds a read for its timeout unless the batch
+  fills, and the worker asks for one 10 ms slice; inside the
+  surrogate, that wait rounded up to the default 15.6 ms step. A real
+  vendor DLL waits in the same process, so this is the stack's, not
+  the fake's. With 1 ms in the surrogate, 11.3 ms, and RPM every
+  164 ms instead of 262.
+- **ELM327:** the fake waits out its 4 ms in the test's own process,
+  and that wait rounded up. With the fake spinning to its reply time
+  instead, at the default step, ELM327 read 4.0 to 4.1 ms and RPM
+  refreshed every 148 ms, Linux's figures: the worker adds nothing,
+  and a real serial port's read returns when its bytes arrive.
+
+**Decision:** the surrogate holds a 1 ms timer for its whole life
+(`surrogate_main.cpp`; one surrogate per session, so only while a
+J2534 session runs), and `bench_timing` holds one so the fakes'
+delays are their length. Windows 11 stops honoring the request only
+for a window-owning process that can't be seen; the surrogate owns no
+window. The cost is the one Microsoft names: more timer interrupts and
+less CPU power saving, while a session runs. The app's own process
+keeps the default: its waits are deadlines (the mock), event-driven
+(the ports, the surrogate's pipe) or backoffs.
+
+**Left:** asking the VX for as many messages as replies are
+outstanding, rather than 16, would end a read when its reply lands
+instead of at the slice; that changes how the adapter is read, so it
+waits for the VX on the bench. What a real VX's replies read comes
+from the car run's `latency.csv`.

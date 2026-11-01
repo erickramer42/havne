@@ -25,8 +25,12 @@
 // reach the GUI thread and values the model. A one-pass run must account
 // for every frame and keep the recording's 1,261.25 rpm peak on the chart
 // (ADR-0005's appendix); the floors below are loose enough for a shared
-// CI runner, so a failure is a regression, not noise. Exit status 1 on
-// any failed check.
+// CI runner, so a failure is a regression, not noise. Two ratios hold
+// whatever the runner's speed, since each compares the bench with
+// itself: core's decode at 1000 defs against 9 (the def index keeps it
+// flat; checking every def made it over 20x), and the looping run's
+// worker rate under obd2 against the same run under raw, which decodes
+// nothing. Exit status 1 on any failed check.
 //
 // The defs sit four to a CAN ID, 16 bits each, as a passive-bus profile
 // packs them; each frame carries one ID, so it decodes four values and
@@ -262,10 +266,18 @@ constexpr double kSustainSeconds = 3.0;
 constexpr double kMinWorkerFramesPerSecond = 10000.0;   // dev: about 370,000
 constexpr double kMaxPacedValueP99Ms = 1000.0;   // dev: about 112, a tick and a bit
 constexpr double kMaxPacedFrameP99Ms = 500.0;    // dev: under 1
+// The ratios, which a slow runner moves on both sides alike: decode at
+// 1000 defs against 9 (dev: 1.26 to 1.94x), and the looping run's rate
+// under obd2 against raw (dev: 0.69 to 0.76), 2026-11-01; a run of the
+// decode ratio is kDecodeFrames frames
+constexpr double kMaxDecodeRatio = 3.0;
+constexpr double kMinDecodingShare = 0.5;
+constexpr int kDecodeFrames = 100000;
 
 struct LoadRun {
     const char* label = "";
     const char* query = "";
+    const char* profile = "obd2";
     bool sustained = false;
     double seconds = 0.0;        // one pass: until every frame is handled or dropped
     double workerRate = 0.0;     // sustained: frames a second through the worker
@@ -287,8 +299,10 @@ void spin(double seconds)
 void replayFixture(LoadRun& run)
 {
     const QString uri =
-        QStringLiteral("replay://%1/2026-10-25-engine-start?profile=obd2&%2")
-            .arg(QStringLiteral(ECUIO_REPLAY_FIXTURES), QString::fromLatin1(run.query));
+        QStringLiteral("replay://%1/2026-10-25-engine-start?profile=%2&%3")
+            .arg(QStringLiteral(ECUIO_REPLAY_FIXTURES),
+                 QString::fromLatin1(run.profile),
+                 QString::fromLatin1(run.query));
     SessionBridge bridge;
     SignalListModel* model = bridge.signalModel();
     QObject::connect(model, &SignalListModel::valuesUpdated, model, [&]() {
@@ -336,6 +350,38 @@ void replayFixture(LoadRun& run)
 
 double ms(uint64_t us) { return static_cast<double>(us) / 1000.0; }
 
+// Core's match and decode alone, microseconds a frame (the median of
+// kRuns), for a profile of n defs: the decode ratio's two sides
+double decodeMicros(int n)
+{
+    std::vector<ecuio_signal_def_t> defs = makeDefs(n);
+    ecuio_signal_set_t set{};
+    set.layout_version = ECUIO_SIGNAL_SET_LAYOUT;
+    set.count = static_cast<uint32_t>(n);
+    set.defs = defs.data();
+    const std::string name = "gate" + std::to_string(n);
+    if (ecuio_profile_register(name.c_str(), &set, nullptr) != ECUIO_OK) {
+        std::fprintf(stderr, "%s refused\n", name.c_str());
+        std::exit(1);
+    }
+    const std::string uri = "mock://bench?profile=" + name;
+    const int ids = (n + kDefsPerId - 1) / kDefsPerId;
+    std::vector<double> runs;
+    for (int r = 0; r < kRuns; ++r) {
+        ecuio_session_t* session = nullptr;
+        if (ecuio_session_create(uri.c_str(), &session) != ECUIO_OK) {
+            std::fprintf(stderr, "create %s failed\n", uri.c_str());
+            std::exit(1);
+        }
+        ecuio_register_values_callback(session, ignoreValues, nullptr);
+        runs.push_back(dispatchMicros(session, kDecodeFrames, ids));
+        ecuio_session_destroy(session);
+    }
+    ecuio_profile_unregister(name.c_str());
+    std::sort(runs.begin(), runs.end());
+    return runs[runs.size() / 2];
+}
+
 std::string quantiles(const LatencyStats& l)
 {
     if (l.count() == 0) return "-";
@@ -356,6 +402,10 @@ bool loadTest(bool withSlowRun)
     runs[2].label = "full speed, looping 3 s";
     runs[2].query = "speed=max&loop=1";
     runs[2].sustained = true;
+    LoadRun raw = runs[2];
+    raw.label = "full speed, looping 3 s, raw (no decode)";
+    raw.profile = "raw";
+    runs.push_back(raw);
     if (withSlowRun) {
         LoadRun slow;
         slow.label = "10x, one pass";
@@ -414,6 +464,25 @@ bool loadTest(bool withSlowRun)
         check(std::abs(r.peakRpm - kFixturePeakRpm) < 0.01,
               at + "the chart lost the recording's peak");
     }
+    const double decode9 = decodeMicros(9);
+    const double decode1000 = decodeMicros(1000);
+    const double decodeRatio = decode1000 / decode9;
+    const double decodingShare = runs[2].workerRate / runs[3].workerRate;
+    std::printf(
+        "\nDecode, 1000 defs against 9: %.3f against %.3f us a frame (%.2fx). "
+        "Looping, obd2 against raw: %.0f against %.0f frames/s (%.2f).\n",
+        decode1000, decode9, decodeRatio, runs[2].workerRate,
+        runs[3].workerRate, decodingShare);
+    char bound[160];
+    std::snprintf(bound, sizeof(bound),
+                  "decode at 1000 defs %.2fx its cost at 9, over %.1fx",
+                  decodeRatio, kMaxDecodeRatio);
+    check(decodeRatio <= kMaxDecodeRatio, bound);
+    std::snprintf(bound, sizeof(bound),
+                  "looping under obd2 at %.2f of raw's rate, under %.2f",
+                  decodingShare, kMinDecodingShare);
+    check(decodingShare >= kMinDecodingShare, bound);
+
     const LoadRun& paced = runs[1];
     check(ms(paced.stats.valueToModel.quantileUs(0.99)) <= kMaxPacedValueP99Ms,
           "100x: values' p99 to the model over " + std::to_string(static_cast<long long>(kMaxPacedValueP99Ms)) + " ms");
@@ -421,11 +490,14 @@ bool loadTest(bool withSlowRun)
           "100x: frames' p99 to the GUI thread over " + std::to_string(static_cast<long long>(kMaxPacedFrameP99Ms)) + " ms");
 
     if (failed.empty()) {
-        std::printf("\nEvery check passed: each one-pass run accounted for every frame "
-                    "and kept the peak; at least %.0f frames/s through the worker; "
-                    "at 100x, p99 under %.0f ms to the model and %.0f ms to the GUI "
-                    "thread.\n",
-                    kMinWorkerFramesPerSecond, kMaxPacedValueP99Ms, kMaxPacedFrameP99Ms);
+        std::printf(
+            "\nEvery check passed: each one-pass run accounted for every frame "
+            "and kept the peak; at least %.0f frames/s through the worker; "
+            "at 100x, p99 under %.0f ms to the model and %.0f ms to the GUI "
+            "thread; decode at 1000 defs within %.1fx its cost at 9; looping "
+            "under obd2 at least %.2f of raw's rate.\n",
+            kMinWorkerFramesPerSecond, kMaxPacedValueP99Ms, kMaxPacedFrameP99Ms,
+            kMaxDecodeRatio, kMinDecodingShare);
         return true;
     }
     std::printf("\n");

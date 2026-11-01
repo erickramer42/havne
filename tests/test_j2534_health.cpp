@@ -806,6 +806,47 @@ TEST_F(J2534HealthTest, VxTimingReportsEachRequestOnTheAdaptersClock)
     }
 }
 
+/* The surrogate holds a 1 ms timer: the fake as the VX holds each read
+ * for its timeout (one 10 ms slice), and a reply 4 ms after its write
+ * is seen when that slice ends. With Windows' default 15.6 ms timer
+ * every request's median read 15.4 to 16.4 ms (bench_timing,
+ * 2026-11-01); with 1 ms, 11.3 ms. 14 ms sits between. */
+TEST_F(J2534HealthTest, VxRepliesAreSeenWhenTheSliceEndsNotTheTimersStep)
+{
+    ASSERT_NO_FATAL_FAILURE(knob("ECUIO_FAKE_VX", "1"));
+    ASSERT_NO_FATAL_FAILURE(start_session("?identify=0&diagnose=0"));
+    ecuio_session_timing_t t{};
+    std::vector<ecuio_request_timing_t> rows(ECUIO_PROFILE_MAX_REQUESTS);
+    uint32_t count = 0;
+    uint64_t answered = 0;
+    const auto deadline =
+        std::chrono::steady_clock::now() + std::chrono::seconds(10);
+    while (std::chrono::steady_clock::now() < deadline) {
+        ASSERT_EQ(ecuio_session_get_timing(session, &t, rows.data(),
+                                           static_cast<uint32_t>(rows.size()),
+                                           &count),
+                  ECUIO_OK);
+        answered = 0;
+        for (uint32_t i = 0; i < count; ++i) {
+            answered += rows[i].answered;
+        }
+        if (answered >= 200) {
+            break;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    }
+    ASSERT_GE(answered, 200u) << "replies timed";
+    for (uint32_t i = 0; i < count; ++i) {
+        const ecuio_request_timing_t& r = rows[i];
+        if (r.answered == 0) {
+            continue;
+        }
+        SCOPED_TRACE("PID " + std::to_string(r.request[1]));
+        EXPECT_LT(r.latency_p50_us, 14000u)
+            << "a read held to the timer's 15.6 ms step";
+    }
+}
+
 /* A TX indication, then the START_OF_MESSAGE indication a vendor queues
  * as a segmented reply starts arriving (the CAN ID alone), then the
  * reply: exactly one frame reaches the session, the reply's. Delivered,

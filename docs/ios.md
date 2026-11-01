@@ -15,7 +15,9 @@ and what it shows is worth reporting, whatever it is.
 
 - An iPhone on **iOS 18 or later**.
 - An **Apple ID**. A free one is enough; a spare one is a good idea,
-  since the tool signs in to Apple with it.
+  since the tool signs in to Apple with it. One in the paid Apple
+  Developer Program works the same way and lasts longer
+  ([below](#with-a-paid-developer-account)).
 - A **Windows or Mac computer** and a USB cable for the first install.
 - The file, `havne-ios-unsigned.ipa`: from a CI run's
   `havne-ios-arm64-unsigned` artifact (Actions, a CI run, Artifacts; a
@@ -51,6 +53,19 @@ Sideloadly to sign it for another seven. Sideloadly can also refresh it
 over WiFi while it runs on the computer, and AltStore does the same.
 
 A free Apple ID holds three sideloaded apps at a time.
+
+### With a paid developer account
+
+An Apple ID in the paid Apple Developer Program signs with the same
+steps, and neither limit above applies: the app keeps opening for up to
+a year, until the membership's own end date, and the three-app limit is
+a free account's. Install the next `.ipa` the same way to update.
+
+A developer can instead sign `Payload/Havne.app` (inside the `.ipa`)
+with their own development certificate and a provisioning profile that
+lists the iPhone, then install it from Xcode's Devices and Simulators
+window. That signature holds the profile and so the iPhone's ID: keep
+that signed copy to yourself.
 
 ## What to try
 

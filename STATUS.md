@@ -107,7 +107,8 @@ hardware ([roadmap](#roadmap)).
   - **Trouble codes, readiness and the freeze frame** at connect
     ([ADR-0037](docs/adr/0037-reading-trouble-codes.md)): each ECU's
     check-engine light, stored, pending and permanent codes, readiness
-    monitors and freeze frame, read once between the live requests and
+    monitors (since the last clear and for this drive cycle) and freeze
+    frame, read once between the live requests and
     again on request, on the Diagnostics page, in the activity log and
     in `havne-cli`'s output; the simulated car has codes of its own.
     Verified against the fakes' ECU through J2534 (both surrogates) and
@@ -232,10 +233,10 @@ hardware ([roadmap](#roadmap)).
   ELM327 [bench](docs/bench-sessions/elm327-bench-runsheet.md) and
   [vehicle](docs/bench-sessions/elm327-vehicle-runsheet.md) sheets, and
   the [phone's](docs/bench-sessions/android-phone-runsheet.md).
-- **Tests:** 752 ctest cases on Windows (both trees rebuilt,
+- **Tests:** 759 ctest cases on Windows (both trees rebuilt,
   2026-11-01), all passing but two env-gated skips (the cross-arch
   case, and the real-car recordings' diff, run locally), plus the
-  cross-arch subset (85/85); 0 MSVC warnings. CI runs ctest on Windows,
+  cross-arch subset (86/86); 0 MSVC warnings. CI runs ctest on Windows,
   macOS and Linux, with SocketCAN's suites on Linux's `vcan0`; core
   under ASan and UBSan, `vcan0` included; 60 s of each libFuzzer
   harness ([fuzz/README.md](fuzz/README.md)); clang-tidy and CodeQL;
@@ -297,7 +298,7 @@ on a Linux machine (#27). Any other adapter starts the list again.
 These numbers are stable IDs, and code and docs refer to them. When
 an issue is resolved it is removed, and its number is not reused.
 
-2. **The iOS app is unvalidated, and no tests run on a phone.** CI
+- **#2. The iOS app is unvalidated, and no tests run on a phone.** CI
    cross-builds an unsigned iOS arm64 device build and, on request,
    launches the app on the Simulator and screenshots it
    (`ios-simulator-smoke`); it has never run on a device. Each run's
@@ -312,20 +313,20 @@ an issue is resolved it is removed, and its number is not reused.
    The app needs Android 12 or later; CI uploads the Android build's
    debug APK, and each release carries one signed with the release key
    ([ADR-0030](docs/adr/0030-signed-android-releases.md)).
-6. **The session API is single-caller by contract.** Each session has
+- **#6. The session API is single-caller by contract.** Each session has
    one caller: the bridge in the app, `havne-cli` in its own process
    ([ADR-0031](docs/adr/0031-command-line-client.md)). Two front ends
    sharing one session would need more.
-13. **The picker treats one registry entry as one device.** Multiple
+- **#13. The picker treats one registry entry as one device.** Multiple
     adapters behind one vendor DLL can't be told apart. They would be
     selected through `PassThruOpen`'s `pName` argument, which the
     loader passes as `nullptr`, meaning the default device.
-20. **Pointer-bearing ioctls (`FAST_INIT`, `FIVE_BAUD_INIT`) are out of
+- **#20. Pointer-bearing ioctls (`FAST_INIT`, `FIVE_BAUD_INIT`) are out of
     contract** and refused at both ends. That is fine for ISO 15765,
     since those are ISO 9141/KWP init calls. If a BENCH device needs
     them, give them a dedicated wire form rather than relaxing the
     whitelist.
-29. **The iOS simulator smoke depends on Intel macOS runners.** Qt
+- **#29. The iOS simulator smoke depends on Intel macOS runners.** Qt
     6.12's iOS simulator libraries are x86_64 only, so
     `ios-simulator-smoke` runs on `macos-15-intel`, where the simulator
     runs natively. GitHub has announced the end of Intel macOS runners
@@ -371,30 +372,29 @@ reach into car-verified claims and finishes the diagnostics.
   than one ECU answering needs (a functional `0x7DF` bitmap request,
   physical `0x7E1` to `0x7E7`), captured under `raw` as evidence for
   v0.4.0's design.
-- **Windows timer resolution:** the benchmark read a 4 ms reply as
-  16.4 ms on Windows, where RPM refreshed every 0.23 to 0.25 s against
-  0.148 s on Linux. If the workers' waits round up to the 15.6 ms
-  step, high-resolution waits give every Windows user more refreshes.
+- **Windows timer resolution:** the surrogate holds a 1 ms timer, so
+  through the fake as the VX a 4 ms reply reads 11.3 ms (one read
+  slice) instead of 16.4, and RPM refreshes every 0.164 s instead of
+  0.246; ELM327 never waited on the timer (ADR-0042's appendix of
+  2026-11-01). Left: the VX on the car confirms it, and asking the VX
+  for as many messages as replies are outstanding would end a read at
+  its reply (the bench first).
 - **Trouble-code descriptions** ("P0301: cylinder 1 misfire") with a
   one-word urgency, from a source chosen first; **VIN decode** (make,
   model and year from the WMI and the model-year digit, offline); and
-  a **readiness summary**: PID 41's monitors for this drive cycle
-  beside PID 01's since the last clear, and a line saying whether the
-  car would pass an inspection.
+  a **readiness summary**: a line saying whether the car would pass an
+  inspection, from the monitors (PID 41's for this drive cycle are
+  shown beside PID 01's) and the model year VIN decode gives.
 - **The simulator as a product:** `havne-cli sim <uri> --on vcan0`,
   the fakes' ECU and the recording that answers as one promoted from
   test code into the CLI, answering through core's ISO-TP, with
   faults given as replay's `?faults=` are. Until SocketCAN's hardware
   is on hand, it's how anyone runs Havne's SocketCAN requests end to
   end against a known ECU.
-- **A performance gate in CI** that doesn't depend on the runner: the
-  decode's cost at 1,000 defs against 9 stays under about 3x, and the
-  load test with decoding against without it.
-- **ELM327's one drop and timeout per run**, seen in every
-  `bench_timing` run, traced and fixed or explained.
-- **clang-tidy, tightened and widened:** `google-explicit-constructor`
-  and braces around every statement, the decoder's C-style casts made
-  `static_cast`, then the gate widened to `cli/` and `app/`.
+- **clang-tidy, tightened and widened:** `google-explicit-constructor`,
+  braces around a body on the line after its `if`, and
+  `google-readability-casting` (C++ only) are on, over `cli/` too; left:
+  `app/`, which needs Qt and moc's files in the tidy job's tree.
 - **An iPhone download, once a device run works:** a tester's run of
   CI's unsigned `.ipa` on an iPhone, filed as a session sheet, first;
   then the release workflow builds and publishes

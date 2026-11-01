@@ -1,10 +1,13 @@
 // File/layer: cli/diagnostics_line.h | havne-cli, an ECU's diagnostics as a line (ADR-0037)
 // Testing: UNIT (tests/test_cli.cpp, CliDiagnosticsTest: every outcome, a
-//          cut list, the freeze frame's values); the mock's line in the
-//          golden run (tests/golden/cli/mock.jsonl)
+//          cut list, the freeze frame's values, this drive cycle's
+//          monitors); the mock's line in the golden run
+//          (tests/golden/cli/mock.jsonl)
 //
 // One ECU's report once a read has completed: readiness (the MIL, the
-// confirmed-code count and each monitor by name), the three code lists,
+// confirmed-code count and each monitor by name, with this drive cycle's
+// state once PID 41 has answered), PID 41's own outcome, the three code
+// lists,
 // each code as it's written ("P0301"), and the freeze frame's values by
 // the obd2 def that decoded them, in its unit, as decoded. An item that
 // was refused carries the negative reply in frames.csv's form.
@@ -21,29 +24,34 @@
 
 namespace cli {
 
-// An item's outcome: "answered", "refused" (with its "reply", "7F 0A
-// 11"), "unanswered" or "unasked"
+// An outcome's word: "answered", "refused", "unanswered", "unsupported"
+// (not asked: the ECU's bitmaps leave the PID out) or "unasked"
+inline const char* diagnostics_outcome_word(uint8_t outcome)
+{
+    switch (outcome) {
+    case ECUIO_DIAG_ANSWERED:
+        return "answered";
+    case ECUIO_DIAG_REFUSED:
+        return "refused";
+    case ECUIO_DIAG_UNANSWERED:
+        return "unanswered";
+    case ECUIO_DIAG_UNSUPPORTED:
+        return "unsupported";
+    default:
+        return "unasked";
+    }
+}
+
+// An item's outcome, a refusal with its "reply" ("7F 0A 11")
 inline void diagnostics_outcome(Line& l, uint8_t outcome, uint8_t service,
                                 uint8_t nrc)
 {
     l.key("outcome");
-    switch (outcome) {
-    case ECUIO_DIAG_ANSWERED:
-        l.string("answered", SIZE_MAX);
-        break;
-    case ECUIO_DIAG_REFUSED: {
-        l.string("refused", SIZE_MAX);
+    l.string(diagnostics_outcome_word(outcome), SIZE_MAX);
+    if (outcome == ECUIO_DIAG_REFUSED) {
         const uint8_t reply[3] = {0x7F, service, nrc};
         l.key("reply");
         l.hex_bytes(reply, sizeof reply);
-        break;
-    }
-    case ECUIO_DIAG_UNANSWERED:
-        l.string("unanswered", SIZE_MAX);
-        break;
-    default:
-        l.string("unasked", SIZE_MAX);
-        break;
     }
 }
 
@@ -81,10 +89,27 @@ inline void diagnostics_line(Line& l, const ecuio_channel_diagnostics_t& d)
             l.key("complete");
             l.raw((d.monitors[i].flags & ECUIO_MONITOR_COMPLETE) ? "true"
                                                                  : "false");
+            if (d.flags & ECUIO_DIAG_CYCLE) {
+                l.key("cycle_enabled");
+                l.raw((d.monitors[i].flags & ECUIO_MONITOR_CYCLE_ENABLED)
+                          ? "true"
+                          : "false");
+                l.key("cycle_complete");
+                l.raw((d.monitors[i].flags & ECUIO_MONITOR_CYCLE_COMPLETE)
+                          ? "true"
+                          : "false");
+            }
             l.ch('}');
         }
         l.ch(']');
     }
+    l.ch('}');
+
+    /* PID 41: the report keeps no refusal's code, so no reply */
+    l.key("cycle");
+    l.ch('{');
+    l.key("outcome");
+    l.string(diagnostics_outcome_word(d.cycle), SIZE_MAX);
     l.ch('}');
 
     static const char* const kLists[ECUIO_DIAG_LISTS] = {"stored", "pending",

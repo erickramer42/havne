@@ -422,6 +422,10 @@ class SessionBridge : public QObject
     // report is a clear target (clearTarget), the rule clearDiagnostics
     // sends by, so the confirmation names exactly them
     Q_PROPERTY(QStringList clearTargets READ clearTargets NOTIFY diagnosticsChanged)
+    // True when every ECU a clear goes to said it holds nothing a clear
+    // erases (nothingStored): the confirmation then says a clear would
+    // only set the monitors back and reset what the manufacturer chose
+    Q_PROPERTY(bool clearFindsNothing READ clearFindsNothing NOTIFY diagnosticsChanged)
     // The ECUs whose clear stopped at the vehicle speed (ADR-0038's
     // appendix of 2026-11-01), moving or giving none, as "0x7E8", once
     // every clear asked has ended; the page asks once more, naming
@@ -466,7 +470,9 @@ public:
     static QString channelSupportText(const ecuio_channel_support_t& support);  /* its "ECU 0x…:" lines */
     static QString channelIdentityText(const ecuio_channel_identity_t& identity);  /* its "ECU 0x… identity:" lines */
     static QString channelDiagnosticsText(const ecuio_channel_diagnostics_t& diagnostics);  /* its "ECU 0x… diagnostics:" lines */
-    static QString channelClearText(const ecuio_channel_diagnostics_t& diagnostics);  /* its "ECU 0x… clear:" lines (ADR-0038) */
+    // its "ECU 0x... clear:" lines (ADR-0038), speeds in the unit system
+    static QString channelClearText(const ecuio_channel_diagnostics_t& diagnostics,
+                                    uint32_t units);
     // A clear's saved reports, as havne-cli writes them (ADR-0031 section 3): a
     // start line, then one diagnostics line per report
     static QByteArray diagnosticsFileText(const ecuio_channel_diagnostics_t* reports,
@@ -566,6 +572,12 @@ public:
     QStringList clearTargets() const;
     // A report a clear goes to: its read complete, no clear under way
     static bool clearTarget(const ecuio_channel_diagnostics_t& report);
+    bool clearFindsNothing() const;
+    // A report that answered there is nothing to erase: PID 01 with the
+    // light off and no confirmed codes, the stored and pending lists
+    // answered empty, no freeze frame. A refused or unanswered item is
+    // not known to be empty, so it never counts as nothing.
+    static bool nothingStored(const ecuio_channel_diagnostics_t& report);
     // Read again: every ECU's diagnostics asked once more
     // (ecuio_session_read_diagnostics); nothing without a session
     Q_INVOKABLE void readDiagnostics();
@@ -594,7 +606,11 @@ public:
     // "unanswered") and readinessNrc ("7F 01 12" when refused); mil,
     // dtcCount, compression; lists, three of {key ("stored", "pending",
     // "permanent"), outcome, nrc, codes (["P0301", ...]), more (codes past
-    // the held ones)}; monitors, [{id, name, complete}]; freeze, {outcome,
+    // the held ones)}; cycle, PID 41's outcome (those above, or
+    // "unsupported": the ECU's bitmaps leave it out, so it wasn't asked);
+    // monitors, [{id, name, complete, cycleEnabled, cycleComplete}], the
+    // last two this drive cycle's (PID 41) once cycle is "answered";
+    // freeze, {outcome,
     // nrc, stored, code, values: [{name, value, unit, decimals}]}, each
     // value through the obd2 def that decoded it and the unit system;
     // clearing, and the last clear's clear ("none", "cleared", "refused",

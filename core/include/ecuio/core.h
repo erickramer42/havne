@@ -608,8 +608,8 @@ ecuio_status_t ecuio_identity_vin(
 );
 
 /* What each channel's ECU reports of its emissions diagnostics
- * (ADR-0037): the MIL and the readiness monitors (Service 01 PID 01),
- * the stored, pending and permanent trouble codes (Services 03, 07 and
+ * (ADR-0037): the MIL and the readiness monitors (Service 01 PID 01,
+ * and PID 41 for this drive cycle), the stored, pending and permanent trouble codes (Services 03, 07 and
  * 0A) and the freeze frame (Service 02). The values below are
  * append-only. */
 #define ECUIO_DIAG_MAX_DTCS              32
@@ -645,6 +645,10 @@ ecuio_status_t ecuio_identity_vin(
 #define ECUIO_DIAG_CLEAR_KMH             0x00000100u   /* the last clear read
                                                           the vehicle speed:
                                                           clear_kmh holds it */
+#define ECUIO_DIAG_CYCLE                 0x00000200u   /* PID 41 answered: the
+                                                          monitors' CYCLE flags
+                                                          hold this drive
+                                                          cycle */
 
 /* lists[]: one per service */
 #define ECUIO_DIAG_STORED                0u   /* Service 03: confirmed */
@@ -658,6 +662,9 @@ ecuio_status_t ecuio_identity_vin(
 #define ECUIO_DIAG_ANSWERED              1u
 #define ECUIO_DIAG_REFUSED               2u   /* nrc holds the code */
 #define ECUIO_DIAG_UNANSWERED            3u
+#define ECUIO_DIAG_UNSUPPORTED           4u   /* not asked: the ECU's
+                                                 support bitmaps leave its
+                                                 PID out */
 
 /* clear: what became of the channel's last clear (ADR-0038) */
 #define ECUIO_CLEAR_NONE                 0u   /* none yet */
@@ -693,6 +700,10 @@ ecuio_status_t ecuio_identity_vin(
 /* ecuio_monitor_t flags */
 #define ECUIO_MONITOR_COMPLETE           0x01u   /* complete, or not
                                                     applicable (J1979) */
+#define ECUIO_MONITOR_CYCLE_ENABLED      0x02u   /* PID 41: enabled this
+                                                    drive cycle */
+#define ECUIO_MONITOR_CYCLE_COMPLETE     0x04u   /* PID 41: complete this
+                                                    drive cycle */
 
 /* POD, 68 bytes. A code is its two bytes, the first high: A7-A6 the
  * letter (P, C, B, U), then four hex digits (ecuio_dtc_format).
@@ -743,7 +754,8 @@ typedef struct ecuio_channel_diagnostics {
     uint8_t clear;            /* the last clear's outcome (ECUIO_CLEAR_*);
                                  kept across reads until the next clear */
     uint8_t clear_nrc;        /* its negative reply's code */
-    uint8_t reserved0[1];     /* zero */
+    uint8_t cycle;            /* 01 41's outcome: this drive cycle's
+                                 monitors (a refusal's code isn't kept) */
     uint32_t clear_rpm;       /* the engine speed its 01 0C read, rounded
                                  up, so a turning engine never reads 0
                                  (ECUIO_DIAG_CLEAR_RPM: one was read) */
@@ -762,6 +774,7 @@ static_assert(sizeof(ecuio_monitor_t) == 4, "ecuio_monitor_t size is ABI");
 static_assert(sizeof(ecuio_freeze_value_t) == 16, "ecuio_freeze_value_t size is ABI");
 static_assert(sizeof(ecuio_channel_diagnostics_t) == 552, "ecuio_channel_diagnostics_t size is ABI");
 static_assert(offsetof(ecuio_channel_diagnostics_t, clear) == 21, "diagnostics clear offset is ABI");
+static_assert(offsetof(ecuio_channel_diagnostics_t, cycle) == 23, "diagnostics cycle offset is ABI");
 static_assert(offsetof(ecuio_channel_diagnostics_t, clear_rpm) == 24, "diagnostics clear_rpm offset is ABI");
 static_assert(offsetof(ecuio_channel_diagnostics_t, clear_kmh) == 28, "diagnostics clear_kmh offset is ABI");
 static_assert(offsetof(ecuio_channel_diagnostics_t, lists) == 40, "diagnostics lists offset is ABI");
@@ -773,6 +786,7 @@ _Static_assert(sizeof(ecuio_monitor_t) == 4, "ecuio_monitor_t size is ABI");
 _Static_assert(sizeof(ecuio_freeze_value_t) == 16, "ecuio_freeze_value_t size is ABI");
 _Static_assert(sizeof(ecuio_channel_diagnostics_t) == 552, "ecuio_channel_diagnostics_t size is ABI");
 _Static_assert(offsetof(ecuio_channel_diagnostics_t, clear) == 21, "diagnostics clear offset is ABI");
+_Static_assert(offsetof(ecuio_channel_diagnostics_t, cycle) == 23, "diagnostics cycle offset is ABI");
 _Static_assert(offsetof(ecuio_channel_diagnostics_t, clear_rpm) == 24, "diagnostics clear_rpm offset is ABI");
 _Static_assert(offsetof(ecuio_channel_diagnostics_t, clear_kmh) == 28, "diagnostics clear_kmh offset is ABI");
 _Static_assert(offsetof(ecuio_channel_diagnostics_t, lists) == 40, "diagnostics lists offset is ABI");

@@ -78,7 +78,8 @@ names, a WiFi adapter's.
   `?did=` parser, the ELM327 reply parsers and the replay reader, 60 s
   each, on every push.
 - **Static analysis:** clang-tidy's analyzer and bug-finding checks
-  over the core and the surrogate, failing CI on any warning; CodeQL
+  over the core, the surrogate and `havne-cli`, failing CI on any
+  warning; CodeQL
   on pushes, pull requests and weekly.
 - **Supply chain:** OpenSSF Scorecard weekly, Dependabot for the
   pinned actions, and build provenance verifiable with
