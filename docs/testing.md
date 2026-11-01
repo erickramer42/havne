@@ -75,6 +75,14 @@ view. `scripts/coverage.sh` runs the same measurement locally
 
 ## Performance
 
+Two runs of one build differ by tens of percent on a desktop, so a
+change is measured against the build before it run by run, not once
+each: `scripts/bench_ab.py [-n N] <tree A> <tree B> load|timing`
+alternates the two trees' `bench_bridge --load` or `bench_timing` and
+prints each figure's median and range per build, with B's median over
+A's. A figure that moves by less than either build's range hasn't
+moved: two runs of one build gave a 100x p99 ratio of 0.79.
+
 ### Cost per frame, by profile size
 
 `tests/bench_bridge.cpp` (target `bench_bridge`, built with the tests,
