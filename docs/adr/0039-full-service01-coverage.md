@@ -3,7 +3,9 @@
 - **Status:** Accepted. §1–§7 built on 2026-10-31 (the set, the rate
   classes, Live hiding what a car lacks, the fakes, imperial units),
   verified on the fakes; not yet on a car (BENCH prep #30). Appendix A
-  not yet built.
+  built on 2026-10-31 (the decode's split and the engine's packing),
+  verified on the fakes and on the test car through the MX+; through
+  the VX to come (BENCH prep #31).
 - **Date:** 2026-10-30.
 - **Builds on:** [ADR-0013](0013-protocol-profiles.md) (profiles chosen
   by the URI), [ADR-0015](0015-request-engine.md) §1 (the rotation),

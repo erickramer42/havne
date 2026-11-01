@@ -354,7 +354,7 @@ scheduled. What each holds, past its row:
   ADR-0039 §3) and 55 and 56 answer one of their two fields (core
   reports such a field absent, `ecuio_session_get_absent_signals`, and
   Live hides it, ADR-0039 §6); Live plots the six best ranked signals
-  the car has (ADR-0039 section 8). Several PIDs per request is being
+  the car has (ADR-0039 section 8). Several PIDs per request is
   built: core decodes a reply that carries several, record by record,
   with each PID's length as the car sends it, and the engine packs up
   to six PIDs of a class per request, falling back to one per request
@@ -376,7 +376,7 @@ scheduled. What each holds, past its row:
   a code worth clearing and a drive to bring its monitors back (BENCH
   prep #29).
 - **SocketCAN requests** are built
-  ([ADR-0040](docs/adr/0040-socketcan-requests-isotp.md), proposed):
+  ([ADR-0040](docs/adr/0040-socketcan-requests-isotp.md)):
   ISO-TP in core, which J2534 and ELM327 adapters do themselves, so the
   request engine and the profiles run on a native CAN interface. A
   session that sends needs the controller in normal mode, so ADR-0040
@@ -407,7 +407,7 @@ scheduled. What each holds, past its row:
     hold (ADR-0041 section 4). It showed late replies ending packing;
     fixed (ADR-0039 Appendix A, the note on late replies).
 - **A performance benchmark**, built
-  ([ADR-0042](docs/adr/0042-reply-timing.md), proposed): every
+  ([ADR-0042](docs/adr/0042-reply-timing.md)): every
   requesting session measures, per request in its rotation, its
   outcomes, its reply latency (host clock) and its refresh interval on
   the frames' own stamps (the adapter's for J2534, the kernel's for

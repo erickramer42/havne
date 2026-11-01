@@ -1,6 +1,8 @@
 # ADR-0041: Fault injection on a replay: a recording played with frames dropped, lost to an overflow, corrupted, cut short or held back, the same each time
 
-- **Status:** Proposed.
+- **Status:** Accepted. Built on 2026-10-31: the faults on a replay
+  (sections 1 to 3) and the recording as the ECU on `vcan0` (section
+  4), verified with no hardware.
 - **Date:** 2026-10-31.
 - **Builds on:** [ADR-0023](0023-replay-transport.md) (`replay://` plays a
   recording byte for byte, at its own pace or faster);
