@@ -1,7 +1,8 @@
 # ADR-0040: SocketCAN requests: ISO-TP in core, and a controller that sends only after its first request proves the rate
 
-- **Status:** Proposed. Built on 2026-10-31 and verified on `vcan0`;
-  section 2's one-shot rule waits for the desk run (BENCH prep #32).
+- **Status:** Accepted. Built on 2026-10-31 and verified on `vcan0`;
+  section 2's one-shot rule is provisional until the desk run (BENCH
+  prep #32).
 - **Date:** 2026-10-31.
 - **Builds on:** [ADR-0032](0032-socketcan-listening.md) (the
   transport, the netlink checks, the simulated car on `vcan0`);

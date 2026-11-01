@@ -1,6 +1,8 @@
 # ADR-0042: Reply timing per request: latency on the host's clock, the refresh interval on the frames' own, published while the session runs
 
-- **Status:** Proposed.
+- **Status:** Accepted. Built on 2026-10-31 and verified through each
+  transport against the fakes (J2534 through the surrogate, ELM327,
+  SocketCAN on `vcan0`); a car's figures come with v0.3.6's runs.
 - **Date:** 2026-10-31.
 - **Builds on:** [ADR-0015](0015-request-engine.md) (the request engine:
   one request outstanding per channel, its wait);
