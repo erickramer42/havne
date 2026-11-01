@@ -455,8 +455,8 @@ inline void ecuio_take_diag_request(ecuio_session_t* session,
 
 /* Starts a clear (ecuio_engine_clear, ADR-0038) on each channel whose
  * ecuio_session_clear_diagnostics request the worker hasn't taken, at
- * the generation the caller saved; seen holds the worker's count per
- * channel. The engine checks the generation again, so a read that
+ * the generation the caller saved and with its flags; seen holds the
+ * worker's count per channel. The engine checks the generation again, so a read that
  * settled since makes it ECUIO_CLEAR_REPORT_CHANGED, sending nothing. */
 inline void ecuio_take_clear_requests(ecuio_session_t* session,
                                       ecuio_request_engine* e, uint32_t* seen)
@@ -466,7 +466,8 @@ inline void ecuio_take_clear_requests(ecuio_session_t* session,
         const uint32_t asked = session->clear_requests[c].load();
         if (asked != seen[c]) {
             seen[c] = asked;
-            (void)ecuio_engine_clear(e, c, session->clear_generation[c].load());
+            (void)ecuio_engine_clear(e, c, session->clear_generation[c].load(),
+                                     session->clear_flags[c].load());
         }
     }
 }

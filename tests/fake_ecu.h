@@ -223,12 +223,16 @@ constexpr uint8_t kFreeze0DSpeed = 80;            /* 80 km/h */
  * that code (J1979: an ECU that can't clear with the engine running
  * answers 0x22, conditionsNotCorrect). engine_off: PID 0C reads 0
  * rpm, the key on and the engine stopped, which a clear asks for
- * (ADR-0038). Tests that clear call reset_diagnostics() first. */
+ * (ADR-0038). speed_kmh: PID 0D reads it (0 to 255), a vehicle moving,
+ * which a clear asks about under the caller's word on a running engine;
+ * -1 reads the canned 0 km/h. Tests that clear call reset_diagnostics()
+ * first. */
 struct Diagnostics {
     std::atomic<bool> cleared{false};
     std::atomic<unsigned> clears{0};
     std::atomic<int> clear_nrc{0};
     std::atomic<bool> engine_off{false};
+    std::atomic<int> speed_kmh{-1};
 };
 
 inline Diagnostics& diagnostics()
@@ -244,6 +248,7 @@ inline void reset_diagnostics()
     d.clears = 0;
     d.clear_nrc = 0;
     d.engine_off = false;
+    d.speed_kmh = -1;
 }
 
 /* Service 01 PIDs the ECU leaves out of its bitmaps (and refuses when
@@ -673,9 +678,12 @@ inline bool answer(const unsigned char* req, size_t req_len,
     case 0x0C:
         put(diag.engine_off ? zero : kPid0CRpm, 2);
         break;
-    case 0x0D:
-        put(&kPid0DSpeed, 1);
+    case 0x0D: {
+        const int kmh = diag.speed_kmh;
+        const uint8_t moving = static_cast<uint8_t>(kmh < 0 ? 0 : kmh);
+        put(kmh < 0 ? &kPid0DSpeed : &moving, 1);
         break;
+    }
     case 0x0F:
         put(&kPid0FIat, 1);
         break;

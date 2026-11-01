@@ -6,8 +6,9 @@ on:
   pull_request:
     branches: [main]
   # Actions > CI > Run workflow, or: gh workflow run ci.yml --ref <branch>
-  # [-f ios_smoke=true | -f smoke_only=true]. A manual run is how a feature
-  # branch gets CI, so it skips the 20-minute iOS simulator smoke unless
+  # [-f ios_smoke=true | -f smoke_only=true]. Feature branches get no run
+  # of their own (dev's push run is the gate). A manual run skips the
+  # 20-minute iOS simulator smoke unless
   # asked: ios_smoke adds it to the whole run, smoke_only runs it with
   # core-and-tests alone. [ios-smoke] in a pushed commit's message also
   # asks for it; re-running a push run replays the push and skips the

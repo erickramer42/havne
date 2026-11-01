@@ -43,6 +43,7 @@ extern "C" {
 #include "mock_ecu.h"      /* core/src: the simulated ECU's answers */
 #include "def_index.h"     /* core/src: the defs a frame can match */
 #include "uds_generic.h"   /* core/src: the template set's identity */
+#include "surrogate_log_names.h" /* core/src: the surrogate logs pruning keeps */
 #include "new_counter.h"   /* tests: operator new counted per thread */
 
 namespace {
@@ -363,6 +364,68 @@ TEST(CoreTest, MockEcuClearsOnlyWithTheEngineStopped)
     fake_diagnostics::expect_cleared_report(d);
 }
 
+/* The caller's word (ecuio_session_clear_diagnostics_with's flags) on
+ * the simulated ECU, no worker: moving, the word on the engine stops at
+ * 01 0D with the drive cycle's speed; the word on a moving vehicle too
+ * clears it, which the mock never refuses */
+TEST(CoreTest, MockEcuClearsAMovingCarOnlyWithTheCallersWord)
+{
+    auto e = std::make_unique<ecuio_request_engine>();
+    ecuio_engine_init(e.get(), 1);
+    ecuio_engine_diagnose(e.get(), ecuio_obd2_signal_set());
+    const ecuio_channel_diagnostics_t& d = e->chans[0].diag;
+    ecuio_mock::DriveCycle car;
+    ecuio_mock_ecu ecu;
+    ecu.engine = &car;
+    int64_t now = 0;
+    ecuio_mock_ecu_read(e.get(), &ecu, &now);
+
+    car.rpm = 2400.0f;
+    car.speed_kmh = 47.6f;
+    ASSERT_TRUE(ecuio_engine_clear(e.get(), 0, d.generation,
+                                   ECUIO_CLEAR_ALLOW_RUNNING));
+    ecuio_mock_ecu_read(e.get(), &ecu, &now);
+    EXPECT_EQ(d.clear, ECUIO_CLEAR_MOVING);
+    EXPECT_EQ(d.clear_kmh, 48u) << "rounded";
+    EXPECT_EQ(d.clear_rpm, 2400u);
+    EXPECT_FALSE(ecu.cleared);
+
+    ASSERT_TRUE(ecuio_engine_clear(e.get(), 0, d.generation,
+                                   ECUIO_CLEAR_ALLOW_RUNNING |
+                                       ECUIO_CLEAR_ALLOW_MOVING));
+    ecuio_mock_ecu_read(e.get(), &ecu, &now);
+    EXPECT_TRUE(ecu.cleared);
+    EXPECT_EQ(d.clear, ECUIO_CLEAR_CLEARED);
+    fake_diagnostics::expect_cleared_report(d);
+}
+
+/* Through the worker: the flags reach the mock's engine. At its start
+ * the engine is stopped and the car stands, so the word on the engine
+ * clears it, both speeds read */
+TEST(CoreTest, TheCallersWordReachesTheWorker)
+{
+    ecuio_session_t* s = nullptr;
+    ASSERT_EQ(ecuio_session_create("mock://demo", &s), ECUIO_OK);
+    ecuio_channel_diagnostics_t d{};
+    ASSERT_EQ(ecuio_session_get_channel_diagnostics(s, 0, &d), ECUIO_OK);
+    EXPECT_EQ(ecuio_session_clear_diagnostics_with(s, 0, d.generation,
+                                                   ECUIO_CLEAR_ALLOW_RUNNING),
+              ECUIO_OK);
+    ASSERT_EQ(ecuio_session_start(s), ECUIO_OK);
+    EXPECT_TRUE(wait_for(
+        [&] {
+            return ecuio_session_get_channel_diagnostics(s, 0, &d) ==
+                       ECUIO_OK &&
+                   d.clear != ECUIO_CLEAR_NONE &&
+                   (d.flags & ECUIO_DIAG_COMPLETE) != 0;
+        },
+        2000));
+    EXPECT_EQ(d.clear, ECUIO_CLEAR_CLEARED);
+    EXPECT_TRUE(d.flags & ECUIO_DIAG_CLEAR_KMH)
+        << "01 0D asked: only the word on the engine asks it";
+    ecuio_session_destroy(s);
+}
+
 /* Through the worker: a session starts with the key on and the engine
  * stopped, so a clear of the report saved at create empties it on an
  * early tick, and that generation is gone; a new connect starts
@@ -415,6 +478,9 @@ TEST(CoreTest, AClearNeedsTheReportTheCallerSaved)
               ECUIO_ERR_REPORT_CHANGED);
     EXPECT_EQ(ecuio_session_clear_diagnostics(s, 1, d.generation),
               ECUIO_ERR_INVALID_ARGUMENT);
+    EXPECT_EQ(ecuio_session_clear_diagnostics_with(s, 0, d.generation, 0x4u),
+              ECUIO_ERR_INVALID_ARGUMENT)
+        << "a flag core doesn't know";
     ASSERT_EQ(ecuio_session_close(s), ECUIO_OK);
     EXPECT_EQ(ecuio_session_clear_diagnostics(s, 0, d.generation),
               ECUIO_ERR_SESSION_CLOSED);
@@ -4636,4 +4702,62 @@ TEST(DefIndexTest, FindsExactlyTheDefsThatApplyInTheSetsOrder)
         }
     }
     EXPECT_GT(found_total, 2000u) << "the frames must match defs often";
+}
+
+/* The surrogate's session logs (surrogate_log_names.h): each kind's name
+ * matched exactly, so pruning TEMP deletes nothing else */
+TEST(CoreTest, SurrogateLogNamesAreMatchedExactly)
+{
+    EXPECT_TRUE(
+        sur_log_is_kept_name(L"ecuio-surrogate.20261101-001100-842.log"));
+    EXPECT_FALSE(sur_log_is_kept_name(L"ecuio-surrogate.log"));
+    EXPECT_FALSE(
+        sur_log_is_kept_name(L"ecuio-surrogate.20261101-001100-842.log.bak"));
+    EXPECT_FALSE(
+        sur_log_is_kept_name(L"ecuio-surrogate.2026110-001100-842.log"));
+
+    EXPECT_TRUE(sur_log_is_per_spawn_name(L"ecuio-surrogate-30584-1.log"));
+    EXPECT_TRUE(sur_log_is_per_spawn_name(
+        L"ecuio-surrogate-4294967295-2147483647.log"));
+    EXPECT_FALSE(sur_log_is_per_spawn_name(
+        L"ecuio-surrogate-42949672951-1.log")); /* 11 digits */
+    EXPECT_FALSE(sur_log_is_per_spawn_name(L"ecuio-surrogate-30584.log"));
+    EXPECT_FALSE(sur_log_is_per_spawn_name(L"ecuio-surrogate-30584-.log"));
+    EXPECT_FALSE(sur_log_is_per_spawn_name(L"ecuio-surrogate--1.log"));
+    EXPECT_FALSE(sur_log_is_per_spawn_name(L"ecuio-surrogate-30584-1.log.txt"));
+    EXPECT_FALSE(sur_log_is_per_spawn_name(L"ecuio-surrogate-30584-1-2.log"));
+    EXPECT_FALSE(sur_log_is_per_spawn_name(L"ecuio-surrogate-x-1.log"));
+    EXPECT_FALSE(sur_log_is_per_spawn_name(L"ecuio-surrogate.log"));
+    EXPECT_FALSE(
+        sur_log_is_per_spawn_name(L"ecuio-surrogate.20261101-001100-842.log"));
+    EXPECT_FALSE(
+        sur_log_is_per_spawn_name(L"ecuio-elm327.20261101-001100-842.log"));
+}
+
+/* Past the newest SUR_LOG_KEEP, the oldest go first, by last write, not
+ * by name: a per-spawn name's PID sorts in no time order */
+TEST(CoreTest, SurrogateLogExcessIsTheOldestByLastWrite)
+{
+    std::vector<SurLogFile> files;
+    for (uint64_t i = 0; i < SUR_LOG_KEEP + 3; ++i) {
+        /* names counting down while the writes count up */
+        files.push_back(SurLogFile{L"ecuio-surrogate-" +
+                                       std::to_wstring(900 - i) + L"-1.log",
+                                   1000 + i});
+    }
+    const std::vector<std::wstring> gone = sur_log_excess(files, SUR_LOG_KEEP);
+    ASSERT_EQ(gone.size(), 3u);
+    EXPECT_EQ(gone[0], L"ecuio-surrogate-900-1.log");
+    EXPECT_EQ(gone[1], L"ecuio-surrogate-899-1.log");
+    EXPECT_EQ(gone[2], L"ecuio-surrogate-898-1.log");
+
+    EXPECT_TRUE(sur_log_excess(std::vector<SurLogFile>(
+                                   files.begin(), files.begin() + SUR_LOG_KEEP),
+                               SUR_LOG_KEEP)
+                    .empty());
+    /* the same write time: the name decides, so a run is the same each time */
+    const std::vector<std::wstring> tie =
+        sur_log_excess({{L"b", 5}, {L"a", 5}, {L"c", 9}}, 2);
+    ASSERT_EQ(tie.size(), 1u);
+    EXPECT_EQ(tie[0], L"a");
 }

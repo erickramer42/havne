@@ -639,6 +639,12 @@ ecuio_status_t ecuio_identity_vin(
                                                           report stays empty */
 #define ECUIO_DIAG_CLEARING              0x00000040u   /* a clear runs on this
                                                           channel (ADR-0038) */
+#define ECUIO_DIAG_CLEAR_RPM             0x00000080u   /* the last clear read
+                                                          the engine speed:
+                                                          clear_rpm holds it */
+#define ECUIO_DIAG_CLEAR_KMH             0x00000100u   /* the last clear read
+                                                          the vehicle speed:
+                                                          clear_kmh holds it */
 
 /* lists[]: one per service */
 #define ECUIO_DIAG_STORED                0u   /* Service 03: confirmed */
@@ -668,6 +674,21 @@ ecuio_status_t ecuio_identity_vin(
 #define ECUIO_CLEAR_REPORT_CHANGED       6u   /* the report wasn't the one
                                                  the caller saved: 04 not
                                                  sent */
+#define ECUIO_CLEAR_MOVING               7u   /* 01 0D read clear_kmh above
+                                                 0 and the call didn't allow
+                                                 a moving vehicle: 04 not
+                                                 sent */
+#define ECUIO_CLEAR_NO_VEHICLE_SPEED     8u   /* 01 0D refused (clear_nrc)
+                                                 or unanswered and the call
+                                                 didn't allow a moving
+                                                 vehicle: 04 not sent */
+
+/* ecuio_session_clear_diagnostics_with's flags */
+#define ECUIO_CLEAR_ALLOW_RUNNING        0x00000001u   /* send 04 at any engine
+                                                          speed; 01 0D is asked
+                                                          after 01 0C */
+#define ECUIO_CLEAR_ALLOW_MOVING         0x00000002u   /* send 04 at any vehicle
+                                                          speed too */
 
 /* ecuio_monitor_t flags */
 #define ECUIO_MONITOR_COMPLETE           0x01u   /* complete, or not
@@ -724,8 +745,11 @@ typedef struct ecuio_channel_diagnostics {
     uint8_t clear_nrc;        /* its negative reply's code */
     uint8_t reserved0[1];     /* zero */
     uint32_t clear_rpm;       /* the engine speed its 01 0C read, rounded
-                                 up, so a turning engine never reads 0 */
-    uint32_t reserved[3];     /* zero; ABI growth space */
+                                 up, so a turning engine never reads 0
+                                 (ECUIO_DIAG_CLEAR_RPM: one was read) */
+    uint32_t clear_kmh;       /* the vehicle speed its 01 0D read, km/h
+                                 (ECUIO_DIAG_CLEAR_KMH: one was read) */
+    uint32_t reserved[2];     /* zero; ABI growth space */
     ecuio_dtc_list_t lists[ECUIO_DIAG_LISTS];   /* ECUIO_DIAG_STORED .. */
     ecuio_monitor_t monitors[ECUIO_DIAG_MAX_MONITORS];
     uint32_t reserved1;       /* zero; aligns freeze_values */
@@ -739,6 +763,7 @@ static_assert(sizeof(ecuio_freeze_value_t) == 16, "ecuio_freeze_value_t size is 
 static_assert(sizeof(ecuio_channel_diagnostics_t) == 552, "ecuio_channel_diagnostics_t size is ABI");
 static_assert(offsetof(ecuio_channel_diagnostics_t, clear) == 21, "diagnostics clear offset is ABI");
 static_assert(offsetof(ecuio_channel_diagnostics_t, clear_rpm) == 24, "diagnostics clear_rpm offset is ABI");
+static_assert(offsetof(ecuio_channel_diagnostics_t, clear_kmh) == 28, "diagnostics clear_kmh offset is ABI");
 static_assert(offsetof(ecuio_channel_diagnostics_t, lists) == 40, "diagnostics lists offset is ABI");
 static_assert(offsetof(ecuio_channel_diagnostics_t, monitors) == 244, "diagnostics monitors offset is ABI");
 static_assert(offsetof(ecuio_channel_diagnostics_t, freeze_values) == 296, "diagnostics freeze offset is ABI");
@@ -749,6 +774,7 @@ _Static_assert(sizeof(ecuio_freeze_value_t) == 16, "ecuio_freeze_value_t size is
 _Static_assert(sizeof(ecuio_channel_diagnostics_t) == 552, "ecuio_channel_diagnostics_t size is ABI");
 _Static_assert(offsetof(ecuio_channel_diagnostics_t, clear) == 21, "diagnostics clear offset is ABI");
 _Static_assert(offsetof(ecuio_channel_diagnostics_t, clear_rpm) == 24, "diagnostics clear_rpm offset is ABI");
+_Static_assert(offsetof(ecuio_channel_diagnostics_t, clear_kmh) == 28, "diagnostics clear_kmh offset is ABI");
 _Static_assert(offsetof(ecuio_channel_diagnostics_t, lists) == 40, "diagnostics lists offset is ABI");
 _Static_assert(offsetof(ecuio_channel_diagnostics_t, monitors) == 244, "diagnostics monitors offset is ABI");
 _Static_assert(offsetof(ecuio_channel_diagnostics_t, freeze_values) == 296, "diagnostics freeze offset is ABI");
@@ -811,11 +837,28 @@ ecuio_status_t ecuio_session_read_diagnostics(ecuio_session_t* session);
  * what became of it (ECUIO_CLEAR_*), and after a clear the report is
  * read again. Returns at once, from any thread.
  * ECUIO_ERR_INVALID_ARGUMENT for a channel past the session info's
- * channel_count, ECUIO_ERR_SESSION_CLOSED after close. */
+ * channel_count, ECUIO_ERR_SESSION_CLOSED after close. The same as
+ * ecuio_session_clear_diagnostics_with and flags 0. */
 ecuio_status_t ecuio_session_clear_diagnostics(
     ecuio_session_t* session,
     uint32_t channel,
     uint32_t generation
+);
+
+/* ecuio_session_clear_diagnostics, with the caller's word on the
+ * engine (ADR-0038's appendix of 2026-11-01). ECUIO_CLEAR_ALLOW_RUNNING:
+ * 04 goes out at any engine speed, the speed only recorded, and an ECU
+ * that gives none is cleared too; 01 0D (vehicle speed) is asked next,
+ * and 04 goes out at 0 km/h, or at any speed with
+ * ECUIO_CLEAR_ALLOW_MOVING; otherwise the clear ends as
+ * ECUIO_CLEAR_MOVING or ECUIO_CLEAR_NO_VEHICLE_SPEED, nothing sent.
+ * clear_rpm and clear_kmh hold what was read (ECUIO_DIAG_CLEAR_RPM,
+ * _KMH). ECUIO_ERR_INVALID_ARGUMENT for any other flag. */
+ecuio_status_t ecuio_session_clear_diagnostics_with(
+    ecuio_session_t* session,
+    uint32_t channel,
+    uint32_t generation,
+    uint32_t flags
 );
 
 #ifdef __cplusplus

@@ -74,6 +74,7 @@ typedef char abi_freeze_value_check[(sizeof(ecuio_freeze_value_t) == 16) ? 1 : -
 typedef char abi_diag_size_check[(sizeof(ecuio_channel_diagnostics_t) == 552) ? 1 : -1];
 typedef char abi_diag_clear_check[(offsetof(ecuio_channel_diagnostics_t, clear) == 21) ? 1 : -1];
 typedef char abi_diag_clear_rpm_check[(offsetof(ecuio_channel_diagnostics_t, clear_rpm) == 24) ? 1 : -1];
+typedef char abi_diag_clear_kmh_check[(offsetof(ecuio_channel_diagnostics_t, clear_kmh) == 28) ? 1 : -1];
 typedef char abi_diag_lists_check[(offsetof(ecuio_channel_diagnostics_t, lists) == 40) ? 1 : -1];
 typedef char abi_diag_monitors_check[(offsetof(ecuio_channel_diagnostics_t, monitors) == 244) ? 1 : -1];
 typedef char abi_diag_freeze_check[(offsetof(ecuio_channel_diagnostics_t, freeze_values) == 296) ? 1 : -1];
@@ -193,6 +194,12 @@ int main(void)
             ECUIO_ERR_NULL_ARGUMENT ||
         ecuio_session_read_diagnostics(NULL) != ECUIO_ERR_NULL_ARGUMENT ||
         ecuio_session_clear_diagnostics(NULL, 0, 0) != ECUIO_ERR_NULL_ARGUMENT ||
+        ecuio_session_clear_diagnostics_with(NULL, 0, 0, ECUIO_CLEAR_ALLOW_RUNNING |
+                                                 ECUIO_CLEAR_ALLOW_MOVING) !=
+            ECUIO_ERR_NULL_ARGUMENT ||
+        (ECUIO_DIAG_CLEAR_RPM & ECUIO_DIAG_CLEARING) != 0 ||
+        (ECUIO_DIAG_CLEAR_KMH & ECUIO_DIAG_CLEAR_RPM) != 0 ||
+        ECUIO_CLEAR_MOVING != 7u || ECUIO_CLEAR_NO_VEHICLE_SPEED != 8u ||
         ECUIO_ERR_REPORT_CHANGED != 17 ||
         (ECUIO_DIAG_ASKED & ECUIO_DIAG_FREEZE_FRAME) != 0 ||
         (ECUIO_DIAG_CLEARING & ECUIO_DIAG_ASKED) != 0 ||

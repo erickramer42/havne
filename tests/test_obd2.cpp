@@ -3364,6 +3364,9 @@ TEST_F(ClearTest, AStoppedEngineIsClearedAndReadAgain)
     EXPECT_EQ(d.clear, ECUIO_CLEAR_CLEARED);
     EXPECT_EQ(d.clear_nrc, 0u);
     EXPECT_EQ(d.clear_rpm, 0u);
+    EXPECT_EQ(d.flags & (ECUIO_DIAG_CLEAR_RPM | ECUIO_DIAG_CLEAR_KMH),
+              ECUIO_DIAG_CLEAR_RPM)
+        << "0 rpm read; no vehicle speed asked without the caller's word";
     EXPECT_EQ(d.flags & (ECUIO_DIAG_COMPLETE | ECUIO_DIAG_CLEARING |
                          ECUIO_DIAG_MIL_ON | ECUIO_DIAG_FREEZE_FRAME),
               ECUIO_DIAG_COMPLETE);
@@ -3446,6 +3449,131 @@ TEST_F(ClearTest, NoEngineSpeedSendsNothing)
         EXPECT_FALSE(d.flags & ECUIO_DIAG_CLEARING);
     }
     EXPECT_EQ(fake_ecu::diagnostics().clears.load(), 0u);
+}
+
+/* The caller's word on a running engine (ADR-0038's appendix of
+ * 2026-11-01): the fake's 2000 rpm is recorded, not a gate; its 0 km/h
+ * sends 04, and the report reads again as at a stopped engine */
+TEST_F(ClearTest, ARunningEngineClearsWithTheCallersWord)
+{
+    static ecuio_request_engine e;
+    int64_t now = 0;
+    ecuio_channel_diagnostics_t d = read_report(&e, &now);
+    ASSERT_TRUE(
+        ecuio_engine_clear(&e, 0, d.generation, ECUIO_CLEAR_ALLOW_RUNNING));
+    const std::vector<Bytes> sent = requests_of(drive(&e, &now, fake_reply));
+    std::vector<Bytes> expected = {{0x01, 0x0C}, {0x01, 0x0D}, {0x04}};
+    expected.insert(expected.end(), kReadAfterAClear.begin(),
+                    kReadAfterAClear.end());
+    EXPECT_EQ(sent, expected) << "both speeds, 04, then the list again";
+    EXPECT_EQ(fake_ecu::diagnostics().clears.load(), 1u);
+
+    ecuio_engine_diagnostics(&e, 0, &d);
+    EXPECT_EQ(d.clear, ECUIO_CLEAR_CLEARED);
+    EXPECT_EQ(d.clear_rpm, 2000u);
+    EXPECT_EQ(d.clear_kmh, 0u);
+    EXPECT_EQ(d.flags & (ECUIO_DIAG_CLEAR_RPM | ECUIO_DIAG_CLEAR_KMH),
+              ECUIO_DIAG_CLEAR_RPM | ECUIO_DIAG_CLEAR_KMH)
+        << "both read, kept across the read after";
+    fake_diagnostics::expect_cleared_report(d);
+}
+
+/* Moving, the caller's word on the engine isn't enough: the clear ends
+ * at 01 0D with the speed it read, nothing sent; the word on a moving
+ * vehicle, at the report's new generation, then clears */
+TEST_F(ClearTest, AMovingVehicleNeedsTheCallersWordOnItToo)
+{
+    static ecuio_request_engine e;
+    int64_t now = 0;
+    ecuio_channel_diagnostics_t d = read_report(&e, &now);
+    const Responder moving = [](const Bytes& req) {
+        return req == Bytes{0x01, 0x0D} ? Bytes{0x41, 0x0D, 0x30}
+                                        : fake_reply(req);
+    };
+    ASSERT_TRUE(
+        ecuio_engine_clear(&e, 0, d.generation, ECUIO_CLEAR_ALLOW_RUNNING));
+    EXPECT_EQ(requests_of(drive(&e, &now, moving)),
+              (std::vector<Bytes>{{0x01, 0x0C}, {0x01, 0x0D}}));
+    ecuio_engine_diagnostics(&e, 0, &d);
+    EXPECT_EQ(d.clear, ECUIO_CLEAR_MOVING);
+    EXPECT_EQ(d.clear_kmh, 48u);
+    EXPECT_EQ(d.clear_rpm, 2000u);
+    EXPECT_FALSE(d.flags & ECUIO_DIAG_CLEARING);
+    EXPECT_EQ(fake_ecu::diagnostics().clears.load(), 0u);
+    fake_diagnostics::expect_report(d);
+
+    ASSERT_TRUE(ecuio_engine_clear(&e, 0, d.generation,
+                                   ECUIO_CLEAR_ALLOW_RUNNING |
+                                       ECUIO_CLEAR_ALLOW_MOVING));
+    const std::vector<Bytes> sent = requests_of(drive(&e, &now, moving));
+    ASSERT_GE(sent.size(), 3u);
+    EXPECT_EQ(std::vector<Bytes>(sent.begin(), sent.begin() + 3),
+              (std::vector<Bytes>{{0x01, 0x0C}, {0x01, 0x0D}, {0x04}}));
+    ecuio_engine_diagnostics(&e, 0, &d);
+    EXPECT_EQ(d.clear, ECUIO_CLEAR_CLEARED);
+    EXPECT_EQ(d.clear_kmh, 48u) << "the speed it cleared at, recorded";
+    EXPECT_EQ(fake_ecu::diagnostics().clears.load(), 1u);
+}
+
+/* No vehicle speed, refused, unanswered or cut short, is no word that the
+ * vehicle stands: nothing is sent, unless the caller allowed it moving */
+TEST_F(ClearTest, NoVehicleSpeedSendsNothingWithoutTheCallersWord)
+{
+    const std::pair<Bytes, uint8_t> kAnswers[] = {
+        {Bytes{}, 0x00},                 /* silence */
+        {Bytes{0x7F, 0x01, 0x12}, 0x12}, /* refused */
+        {Bytes{0x41, 0x0D}, 0x00},       /* cut short */
+    };
+    for (const auto& a : kAnswers) {
+        SCOPED_TRACE(a.first.size());
+        static ecuio_request_engine e;
+        int64_t now = 0;
+        ecuio_channel_diagnostics_t d = read_report(&e, &now);
+        const Bytes answer = a.first;
+        const Responder speed = [answer](const Bytes& req) {
+            return req == Bytes{0x01, 0x0D} ? answer : fake_reply(req);
+        };
+        ASSERT_TRUE(
+            ecuio_engine_clear(&e, 0, d.generation, ECUIO_CLEAR_ALLOW_RUNNING));
+        EXPECT_EQ(requests_of(drive(&e, &now, speed)),
+                  (std::vector<Bytes>{{0x01, 0x0C}, {0x01, 0x0D}}));
+        ecuio_engine_diagnostics(&e, 0, &d);
+        EXPECT_EQ(d.clear, ECUIO_CLEAR_NO_VEHICLE_SPEED);
+        EXPECT_EQ(d.clear_nrc, a.second);
+        EXPECT_FALSE(d.flags & ECUIO_DIAG_CLEAR_KMH);
+        EXPECT_EQ(fake_ecu::diagnostics().clears.load(), 0u);
+
+        ASSERT_TRUE(ecuio_engine_clear(&e, 0, d.generation,
+                                       ECUIO_CLEAR_ALLOW_RUNNING |
+                                           ECUIO_CLEAR_ALLOW_MOVING));
+        drive(&e, &now, speed);
+        ecuio_engine_diagnostics(&e, 0, &d);
+        EXPECT_EQ(d.clear, ECUIO_CLEAR_CLEARED);
+        fake_ecu::reset_diagnostics();
+    }
+}
+
+/* Under the caller's word on the engine, an ECU that gives no engine
+ * speed (a transmission's, say) is asked the vehicle speed and cleared;
+ * the report says no engine speed was read */
+TEST_F(ClearTest, NoEngineSpeedClearsWithTheCallersWord)
+{
+    static ecuio_request_engine e;
+    int64_t now = 0;
+    ecuio_channel_diagnostics_t d = read_report(&e, &now);
+    const Responder no_rpm = [](const Bytes& req) {
+        return req == Bytes{0x01, 0x0C} ? Bytes{} : fake_reply(req);
+    };
+    ASSERT_TRUE(
+        ecuio_engine_clear(&e, 0, d.generation, ECUIO_CLEAR_ALLOW_RUNNING));
+    const std::vector<Bytes> sent = requests_of(drive(&e, &now, no_rpm));
+    ASSERT_GE(sent.size(), 3u);
+    EXPECT_EQ(std::vector<Bytes>(sent.begin(), sent.begin() + 3),
+              (std::vector<Bytes>{{0x01, 0x0C}, {0x01, 0x0D}, {0x04}}));
+    ecuio_engine_diagnostics(&e, 0, &d);
+    EXPECT_EQ(d.clear, ECUIO_CLEAR_CLEARED);
+    EXPECT_FALSE(d.flags & ECUIO_DIAG_CLEAR_RPM);
+    EXPECT_TRUE(d.flags & ECUIO_DIAG_CLEAR_KMH);
 }
 
 /* A refusal (7F 04 22: the engine's conditions) changed nothing, so

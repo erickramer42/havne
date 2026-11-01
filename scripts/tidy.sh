@@ -7,30 +7,66 @@
 # Usage: scripts/tidy.sh [<tree>]     (default build-tidy)
 #
 # The tree is a Ninja (or Makefile) build with a compile database, which
-# the Visual Studio generator doesn't write. On Windows, configure it from
-# a Developer prompt (vcvars64), so the compile database names cl.exe:
+# the Visual Studio generator doesn't write, configured where cl.exe is
+# the compiler. On Windows outside a Developer prompt, the script enters
+# one itself (vswhere's newest VC tools, vcvars64), so the configure and
+# clang-tidy see one MSVC's headers; and it configures a missing tree:
 #
 #   cmake -B build-tidy -G Ninja -DHAVNE_BUILD_CORE_ONLY=ON \
 #         -DBUILD_TESTING=OFF -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
 #
 # Nothing needs building first. clang-tidy is the pinned version in
-# .github/clang-tidy-requirements.txt, found on PATH or named by
-# $CLANG_TIDY. Another version finds other things, so the script refuses
-# it unless CLANG_TIDY_ANY=1 (trying a new pin). To get the pinned one:
+# .github/clang-tidy-requirements.txt: $CLANG_TIDY, else the venv below,
+# else PATH's. Another version finds other things, so the script refuses
+# it unless CLANG_TIDY_ANY=1 (trying a new pin). To get the pinned one
+# (build-tidy-venv/ is git-ignored with the trees):
 #
-#   python -m venv tidyvenv
-#   tidyvenv/Scripts/pip install --require-hashes -r .github/clang-tidy-requirements.txt
-#   CLANG_TIDY=tidyvenv/Scripts/clang-tidy scripts/tidy.sh   # bin/ off Windows
+#   python -m venv build-tidy-venv
+#   build-tidy-venv/Scripts/pip install --require-hashes -r .github/clang-tidy-requirements.txt
 set -u
 cd "$(dirname "$0")/.." || exit 2
 LOGDIR=Testing/tidy
 TREE=${1:-build-tidy}
-TIDY=${CLANG_TIDY:-clang-tidy}
 DB=$TREE/compile_commands.json
 
+# A Developer environment on Windows: vcvars64's variables, read through
+# a cmd of its own and taken into this shell (PATH converted)
+if [ -z "${VCINSTALLDIR:-}" ] && command -v cmd.exe > /dev/null 2>&1; then
+    vswhere="/c/Program Files (x86)/Microsoft Visual Studio/Installer/vswhere.exe"
+    vcvars=$("$vswhere" -latest -products '*' \
+        -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 \
+        -find 'VC\Auxiliary\Build\vcvars64.bat' 2> /dev/null | tr -d '\r' | head -n 1)
+    if [ -z "$vcvars" ]; then
+        echo "no Developer environment, and vswhere finds no VC tools: run from a Developer prompt" >&2
+        exit 2
+    fi
+    bat=$(mktemp --suffix=.cmd)
+    # vcvars64 runs vswhere through PATH, which Git Bash's doesn't hold
+    printf '@set "PATH=%%PATH%%;%s"\r\n@call "%s" > nul\r\n@set\r\n' \
+        "$(cygpath -w "$(dirname "$vswhere")")" "$vcvars" > "$bat"
+    env_out=$(cmd.exe //d //c "$(cygpath -w "$bat")" | tr -d '\r')
+    rm -f "$bat"
+    while IFS='=' read -r name value; do
+        case "$name" in
+            PATH|Path) PATH="$(cygpath -u -p "$value"):$PATH"; export PATH ;;
+            INCLUDE|LIB|LIBPATH|VCINSTALLDIR|VCToolsInstallDir|VCToolsVersion|WindowsSdkDir|WindowsSDKVersion|UCRTVersion|UniversalCRTSdkDir|VSINSTALLDIR|VSCMD_ARG_TGT_ARCH|Platform)
+                export "$name=$value" ;;
+        esac
+    done <<< "$env_out"
+    [ -n "${VCINSTALLDIR:-}" ] || { echo "vcvars64 ($vcvars) set no VCINSTALLDIR" >&2; exit 2; }
+fi
+
 if [ ! -f "$DB" ]; then
-    echo "no $DB: configure the tree first (see the top of $0)" >&2
-    exit 2
+    echo "...   configuring $TREE (Ninja, core only, a compile database)" >&2
+    cmake -B "$TREE" -G Ninja -DHAVNE_BUILD_CORE_ONLY=ON -DBUILD_TESTING=OFF \
+        -DCMAKE_EXPORT_COMPILE_COMMANDS=ON > /dev/null || {
+        echo "configuring $TREE failed: see the top of $0" >&2; exit 2; }
+fi
+
+if [ -n "${CLANG_TIDY:-}" ]; then TIDY=$CLANG_TIDY
+elif [ -x build-tidy-venv/Scripts/clang-tidy.exe ]; then TIDY=build-tidy-venv/Scripts/clang-tidy.exe
+elif [ -x build-tidy-venv/bin/clang-tidy ]; then TIDY=build-tidy-venv/bin/clang-tidy
+else TIDY=clang-tidy
 fi
 if ! version=$("$TIDY" --version 2>/dev/null | grep -oE 'version [0-9.]+'); then
     echo "no clang-tidy at '$TIDY' (set CLANG_TIDY)" >&2

@@ -3,7 +3,8 @@
 - **Status:** Accepted. Built on 2026-10-30: core, the J2534, ELM327
   and mock transports, the app's saved report, log lines and page; not
   yet run on a car (BENCH prep #29). Where the build differs, the
-  appendix of 2026-10-30.
+  appendix of 2026-10-30. A clear with the engine running, on the
+  user's word: the appendix of 2026-11-01.
 - **Date:** 2026-10-30.
 - **Builds on:** [ADR-0037](0037-reading-trouble-codes.md) (the report
   a clear needs first, its generation, Read again's path through the
@@ -197,3 +198,59 @@ Built as decided, but for these:
   the key on and the engine stopped, then a 2 s start (cranking, the
   catch). With the pump stopped the coolant doesn't lose heat to the
   radiator in it.
+
+## Appendix: the user's word on the engine (2026-11-01)
+
+Amends section 2's engine-off gate, section 4's outcomes, section 5's
+confirmation and "The user's word alone for the engine" under
+Alternatives: a clear goes out with the engine running when the user
+says so, and asks once more when the vehicle moves.
+
+**Why.** A car in a reduced-power mode ("limp mode") over a stored code
+may get moving again after a clear, out of traffic, without first
+pulling over and switching the engine off. Scan tools such as OBD Fusion
+warn and still clear. J1979 allows it either way: "All ECUs shall
+respond to this service request with the ignition ON and with the engine
+not running", and an ECU that can't clear in other conditions, "such as
+with the engine running", refuses it or ignores it (SAE J1979 (2002)
+section 5.4.1; (1997) section 5.5.1). The same section lists what a
+clear resets (Context's list, plus PIDs 21, 30, 31, 4D and 4E) and adds:
+"Other manufacturer specific 'clearing/resetting' actions may also
+occur in response to this request message."
+
+**Core.** `ecuio_session_clear_diagnostics` keeps the gate of section 2:
+it is `ecuio_session_clear_diagnostics_with` and flags 0.
+`ECUIO_CLEAR_ALLOW_RUNNING` takes the caller's word on the engine: `01
+0C`'s answer is recorded, not a gate, and an ECU that gives no engine
+speed (a transmission's) is cleared too; `01 0D` (vehicle speed) is
+asked next, and `04` goes out at 0 km/h. Above it, or with no answer,
+the clear ends unsent as `ECUIO_CLEAR_MOVING` (7) or
+`ECUIO_CLEAR_NO_VEHICLE_SPEED` (8), unless `ECUIO_CLEAR_ALLOW_MOVING`
+gave the word on a moving vehicle too. Any other flag is
+`INVALID_ARGUMENT`. The report records what was read: `clear_rpm` and
+`clear_kmh` (in reserved room, offset 28, the size unchanged), each
+flagged by `ECUIO_DIAG_CLEAR_RPM` or `ECUIO_DIAG_CLEAR_KMH`, so a 0 read
+and none read differ. `01 0D` is a read the engine allows; `04` stays
+the clear's alone.
+
+**The app.** The confirmation says a clear works best with the engine
+off and the ignition on, that some ECUs refuse it while the engine runs,
+and that a moving vehicle is asked about once more; Clear sends with the
+word on the engine. Once every ECU's clear has ended, those that stopped
+at the vehicle speed are asked about once more, naming the speed: a clear
+can also reset what the manufacturer chose (the J1979 sentence above),
+so the engine may run differently for a while. Clear sends to those ECUs
+at the generation each ended on (a report read again since is refused
+unsent), with no second file: nothing was sent, and the first holds
+their reports. Cancel sends nothing more. A `7F 04 22` with the engine
+turning says "this ECU won't clear with the engine running: stop and
+turn it off, then try again"; a cleared line names the speeds it went
+out at ("cleared (812 rpm, 0 km/h)").
+
+**The simulated car** answers `01 0D` from its drive cycle and clears
+at any engine speed, as some ECUs do; a refusal is tested through the
+fake ECU's `clear_nrc`.
+
+**Not run on a car.** The first clear on the test car is with the
+engine off (BENCH prep #29); a clear with the engine running is a run of
+its own, on a car whose codes are meant to be cleared.

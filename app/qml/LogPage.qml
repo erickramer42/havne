@@ -18,7 +18,10 @@
 //          .ConnectStartsAnEmptyFrameLog.
 //          Oldest-first follow: manual smoke while mock:// streams,
 //          scroll up by drag, wheel and scroll bar (the view holds), then
-//          "Latest" or scrolling to the end resumes following.
+//          "Latest" or scrolling to the end resumes following. A phone's
+//          width: the Frames view inside 320 px (tst_log.qml's
+//          test_theFramesFitAPhonesWidth) and inside the app's window at
+//          the test phone's size (tests/qml/tst_phone.qml).
 
 import QtQuick
 import QtQuick.Controls
@@ -33,6 +36,9 @@ Pane {
     // raw frame table instead (Theme.developerMode)
     property string view: "activity"
     readonly property bool showingFrames: Theme.developerMode && view === "frames"
+    // A phone's width: the table leaves out DLC, narrows its columns and
+    // wraps the payload under itself rather than cut it off
+    readonly property bool narrowTable: frameList.width < 480   // the rows' narrow too
 
     readonly property int maxLogLines: 200
 
@@ -143,23 +149,6 @@ Pane {
                     activityLog.deselect()
                 }
             }
-
-            // Holds the table still so rows can be read. Frames that
-            // arrive while paused are counted but not logged; decoding,
-            // Live and the Dashboard carry on.
-            ThemedButton {
-                visible: page.showingFrames
-                text: Bridge.logPaused ? qsTr("Resume") : qsTr("Pause")
-                highlighted: Bridge.logPaused
-                enabled: Bridge.connected
-                onClicked: Bridge.logPaused = !Bridge.logPaused
-            }
-            ThemedButton {
-                visible: page.showingFrames
-                text: qsTr("Clear")
-                enabled: Bridge.frameCount > 0
-                onClicked: Bridge.clearFrames()
-            }
         }
 
         // ---- The activity log: every connect, link change, ECU and
@@ -194,55 +183,29 @@ Pane {
             Layout.fillHeight: true
             spacing: Theme.spacing
 
-            // ---- Status, bridge counters and row order ----
-            RowLayout {
+            // ---- Pause, Clear and the row order ----
+            // A Flow, so on a phone's width they wrap rather than lay the
+            // page out past its edge
+            Flow {
                 Layout.fillWidth: true
                 spacing: Theme.spacing
 
-                Label {
-                    Layout.fillWidth: true
-                    elide: Text.ElideRight
-                    text: !Bridge.connected ? qsTr("Idle")
-                        : Bridge.logPaused
-                          ? qsTr("Paused: %1 frames received; new frames aren't logged")
-                                .arg(Bridge.frameCount)
-                        : qsTr("Logging: %1 frames").arg(Bridge.frameCount)
-                    color: !Bridge.connected ? Theme.textDim
-                         : Bridge.logPaused ? Theme.warning
-                         : Theme.success
-                    font.pixelSize: 13
+                // Holds the table still so rows can be read. Frames that
+                // arrive while paused are counted but not logged; decoding,
+                // Live and the Dashboard carry on.
+                ThemedButton {
+                    objectName: "pauseFrames"
+                    text: Bridge.logPaused ? qsTr("Resume") : qsTr("Pause")
+                    highlighted: Bridge.logPaused
+                    enabled: Bridge.connected
+                    onClicked: Bridge.logPaused = !Bridge.logPaused
                 }
-
-                Label {
-                    text: qsTr("%1 dropped").arg(Bridge.droppedFrames)
-                    color: Theme.danger
-                    font.pixelSize: 13
-                    visible: Bridge.droppedFrames > 0
+                ThemedButton {
+                    objectName: "clearFrames"
+                    text: qsTr("Clear")
+                    enabled: Bridge.frameCount > 0
+                    onClicked: Bridge.clearFrames()
                 }
-
-                // Frames that came after the adapter lost some (its buffer
-                // overflowed), as against the ones dropped above
-                Label {
-                    objectName: "overflowLabel"
-                    text: qsTr("%1 after a loss at the adapter")
-                        .arg(Bridge.overflowFrames)
-                    color: Theme.warning
-                    font.pixelSize: 13
-                    visible: Bridge.overflowFrames > 0
-                }
-
-                // Bridge diagnostics: frames delivered to the GUI thread (one
-                // queued call each, ADR-0005's per-frame baseline) and the
-                // coalesced signal batches. Left out at phone width.
-                Label {
-                    text: qsTr("notify %1 · batch %2")
-                        .arg(Bridge.guiNotifyCount)
-                        .arg(Bridge.signalBatchCount)
-                    color: Theme.textDim
-                    font.pixelSize: 13
-                    visible: Bridge.frameCount > 0 && page.width >= 600
-                }
-
                 Rectangle {
                     implicitWidth: order.implicitWidth + 4
                     implicitHeight: order.implicitHeight + 4
@@ -279,6 +242,61 @@ Pane {
                 }
             }
 
+            // ---- Status and bridge counters, wrapping on a phone ----
+            Flow {
+                Layout.fillWidth: true
+                spacing: Theme.spacing
+
+                Label {
+                    width: Math.min(implicitWidth, parent.width)
+                    wrapMode: Text.Wrap
+                    text: !Bridge.connected ? qsTr("Idle")
+                        : Bridge.logPaused
+                          ? qsTr("Paused: %1 frames received; new frames aren't logged")
+                                .arg(Bridge.frameCount)
+                        : qsTr("Logging: %1 frames").arg(Bridge.frameCount)
+                    color: !Bridge.connected ? Theme.textDim
+                         : Bridge.logPaused ? Theme.warning
+                         : Theme.success
+                    font.pixelSize: 13
+                }
+
+                Label {
+                    width: Math.min(implicitWidth, parent.width)
+                    wrapMode: Text.Wrap
+                    text: qsTr("%1 dropped").arg(Bridge.droppedFrames)
+                    color: Theme.danger
+                    font.pixelSize: 13
+                    visible: Bridge.droppedFrames > 0
+                }
+
+                // Frames that came after the adapter lost some (its buffer
+                // overflowed), as against the ones dropped above
+                Label {
+                    width: Math.min(implicitWidth, parent.width)
+                    wrapMode: Text.Wrap
+                    objectName: "overflowLabel"
+                    text: qsTr("%1 after a loss at the adapter")
+                        .arg(Bridge.overflowFrames)
+                    color: Theme.warning
+                    font.pixelSize: 13
+                    visible: Bridge.overflowFrames > 0
+                }
+
+                // Bridge diagnostics: frames delivered to the GUI thread (one
+                // queued call each, ADR-0005's per-frame baseline) and the
+                // coalesced signal batches. Left out at phone width.
+                Label {
+                    text: qsTr("notify %1 · batch %2")
+                        .arg(Bridge.guiNotifyCount)
+                        .arg(Bridge.signalBatchCount)
+                    color: Theme.textDim
+                    font.pixelSize: 13
+                    visible: Bridge.frameCount > 0 && page.width >= 600
+                }
+
+            }
+
             // ---- Frame table ----
             Rectangle {
                 Layout.fillWidth: true
@@ -303,14 +321,16 @@ Pane {
 
                         // Widths MUST match delegate columns below
                         Label { text: qsTr("Time (s)"); color: Theme.textDim; font.pixelSize: 12;
-                                Layout.preferredWidth: 96 }
+                                Layout.preferredWidth: page.narrowTable ? 64 : 96
+                                elide: Text.ElideRight }
                         Label { text: qsTr("DLC"); color: Theme.textDim; font.pixelSize: 12;
+                                visible: !page.narrowTable
                                 Layout.preferredWidth: 36 }
                         Label { text: qsTr("Ext"); color: Theme.textDim; font.pixelSize: 12;
-                                Layout.preferredWidth: 36 }
+                                Layout.preferredWidth: page.narrowTable ? 20 : 36 }
                         // Fits a 29-bit ID ("0x18FF0C00") in the mono face
                         Label { text: qsTr("ID"); color: Theme.textDim; font.pixelSize: 12;
-                                Layout.preferredWidth: 96 }
+                                Layout.preferredWidth: page.narrowTable ? 80 : 96 }
                         Label { text: qsTr("Payload"); color: Theme.textDim; font.pixelSize: 12;
                                 Layout.fillWidth: true }
                     }
@@ -367,8 +387,13 @@ Pane {
                     }
 
                     delegate: RowLayout {
+                        id: frameRow
+                        // The page's narrowTable, read through the view
+                        readonly property bool narrow: ListView.view !== null
+                                                       && ListView.view.width < 480
                         width: frameList.width
-                        height: 26
+                        // Narrow, a long payload wraps onto more lines
+                        height: narrow ? Math.max(26, payloadLabel.implicitHeight + 8) : 26
                         spacing: 8
 
                         required property var model    // role access
@@ -384,11 +409,12 @@ Pane {
                             text: (model.timestampUs / 1e6).toFixed(3)
                             color: Theme.textDim
                             font.family: Theme.monoFamily; font.pixelSize: 12
-                            Layout.preferredWidth: 96
+                            Layout.preferredWidth: frameRow.narrow ? 64 : 96
                             elide: Text.ElideRight
                         }
                         Label {
                             text: model.dlc
+                            visible: !frameRow.narrow
                             color: Theme.text
                             font.family: Theme.monoFamily; font.pixelSize: 12
                             Layout.preferredWidth: 36
@@ -397,7 +423,7 @@ Pane {
                             text: model.extended ? "E" : "-"
                             color: model.extended ? Theme.success : Theme.textDim
                             font.family: Theme.monoFamily; font.pixelSize: 12
-                            Layout.preferredWidth: 36
+                            Layout.preferredWidth: frameRow.narrow ? 20 : 36
                         }
                         Label {
                             // Role name is "arbId" (a quint32): hex-format
@@ -405,15 +431,17 @@ Pane {
                             text: "0x" + model.arbId.toString(16).toUpperCase()
                             color: Theme.textDim
                             font.family: Theme.monoFamily; font.pixelSize: 12
-                            Layout.preferredWidth: 96
+                            Layout.preferredWidth: frameRow.narrow ? 80 : 96
                             elide: Text.ElideRight
                         }
                         Label {
+                            id: payloadLabel
                             text: model.payloadHex   // spaced uppercase bytes, from the bridge
                             color: Theme.text
                             font.family: Theme.monoFamily; font.pixelSize: 12
                             Layout.fillWidth: true
-                            elide: Text.ElideRight
+                            wrapMode: frameRow.narrow ? Text.WrapAnywhere : Text.NoWrap
+                            elide: frameRow.narrow ? Text.ElideNone : Text.ElideRight
                         }
                     }
 

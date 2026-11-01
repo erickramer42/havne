@@ -626,20 +626,23 @@ bug-finding families (bugprone, concurrency, performance, portability,
 a few misc checks) over `core/` and `surrogate/`, and CI's
 `clang-tidy` job fails on any warning. The style families stay off,
 and the file says why each excluded check is excluded. To run it
-locally, install the pinned version and configure a Ninja tree from a
-Developer prompt (the Visual Studio generator writes no compile
-database), then run `scripts/tidy.sh`:
+locally, install the pinned version once into `build-tidy-venv/` (it
+sits with the build trees, so git ignores it), then run
+`scripts/tidy.sh` from any shell:
 
 ```sh
-python -m pip install --require-hashes -r .github/clang-tidy-requirements.txt
-cmake -B build-tidy -G Ninja -DHAVNE_BUILD_CORE_ONLY=ON -DBUILD_TESTING=OFF -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+python -m venv build-tidy-venv
+build-tidy-venv/Scripts/pip install --require-hashes -r .github/clang-tidy-requirements.txt
 scripts/tidy.sh                  # one line; each file's output in Testing/tidy/
 ```
 
-Nothing needs building. Another clang-tidy version finds other things,
-so the script refuses one that isn't the pin (an LLVM on PATH, say)
-unless `CLANG_TIDY_ANY=1`, for trying a new pin; `$CLANG_TIDY` names the
-binary, such as a venv's. A warning that is wrong at one line
+On Windows outside a Developer prompt, the script enters one (vswhere's
+newest VC tools), so clang-tidy and the tree see one MSVC's headers, and
+it configures `build-tidy` (Ninja: the Visual Studio generator writes no
+compile database) when the tree is missing. Nothing needs building.
+Another clang-tidy version finds other things, so the script refuses one
+that isn't the pin (an LLVM on PATH, say) unless `CLANG_TIDY_ANY=1`, for
+trying a new pin; `$CLANG_TIDY` names another binary. A warning that is wrong at one line
 gets a `NOLINTNEXTLINE(<check>)` with the reason beside it.
 
 ## Portability traps
@@ -659,8 +662,10 @@ on MSVC is not necessarily portable:
 
 `ci.yml` runs on every push to `main` and `dev`, on every pull
 request to `main`, and on demand (Actions > CI > Run workflow, on any
-branch, or `gh workflow run ci.yml --ref <branch>`, which is how a
-feature branch gets CI). A manual run leaves out the iOS simulator
+branch, or `gh workflow run ci.yml --ref <branch>`). A feature branch
+gets no run of its own: it is checked locally (`scripts/verify.sh`)
+and merged into `dev`, whose push run is the gate. A manual run
+leaves out the iOS simulator
 smoke unless asked: `-f ios_smoke=true` adds it to the whole run, and
 `-f smoke_only=true` runs it with `core-and-tests` alone, which the
 smoke depends on. Every job that uses Qt

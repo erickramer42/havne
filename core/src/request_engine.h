@@ -13,7 +13,8 @@
 //     identification's turns, outcomes, text and report; the
 //     diagnostics list's turns, its one-byte requests, the freeze
 //     frame's follow-ups and values, rescan and read again; a clear's
-//     gate (the report's generation, the engine speed) and its steps;
+//     gate (the report's generation, the engine speed, under the
+//     caller's word the vehicle speed) and its steps;
 //     packing several PIDs per request, its replies and its fallback
 //     (RequestEngineTest, DiagnosticsTest, ClearTest; test_obd2); the worker that drives it is
 //     HARNESS (J2534AdoptionTest, J2534HealthTest), its timing on a
@@ -208,8 +209,9 @@ constexpr uint32_t ECUIO_DIAG_MAX_ITEMS =
 
 /* A channel's clear: what its one-shot asks next */
 constexpr uint8_t ECUIO_CLEAR_STEP_NONE = 0;
-constexpr uint8_t ECUIO_CLEAR_STEP_SPEED = 1; /* 01 0C */
-constexpr uint8_t ECUIO_CLEAR_STEP_CLEAR = 2; /* 04, the engine seen stopped */
+constexpr uint8_t ECUIO_CLEAR_STEP_SPEED = 1;   /* 01 0C */
+constexpr uint8_t ECUIO_CLEAR_STEP_CLEAR = 2;   /* 04, past the gate */
+constexpr uint8_t ECUIO_CLEAR_STEP_VEHICLE = 3; /* 01 0D, under ALLOW_RUNNING */
 
 struct ecuio_diag_item {
     uint8_t request[3];
@@ -296,6 +298,7 @@ struct ecuio_engine_channel {
     /* Clearing (ADR-0038): the one-shot carries the clear's request
      * while clearing; clear_step is what it asks next. */
     uint8_t clear_step = ECUIO_CLEAR_STEP_NONE;
+    uint32_t clear_flags = 0; /* the call's ECUIO_CLEAR_ALLOW_* */
     bool clearing = false; /* the one-shot is the clear's request */
     /* Packing (ADR-0039 Appendix A): each PID's data length as its own
      * reply showed it (0 not yet, ECUIO_ENGINE_PID_LONG longer than
@@ -398,14 +401,19 @@ static_assert(ecuio_engine_lists_allowed(),
               "every one-shot list asks only what §3 allows, and never 04");
 
 /* A clear (ADR-0038) asks the engine speed, then, only at 0 rpm, sends
- * 04. These are the two requests it builds and nothing else does: 04
+ * 04; with the caller's word on a running engine it asks the vehicle
+ * speed too, and sends 04 at 0 km/h or with the caller's word on a
+ * moving one. These are the requests it builds; 04 only it builds: 04
  * never enters the table or a list, and the table refuses it. */
 constexpr uint8_t ECUIO_CLEAR_SPEED_REQUEST[2] = {0x01, 0x0C};
+constexpr uint8_t ECUIO_CLEAR_VEHICLE_SPEED_REQUEST[2] = {0x01, 0x0D};
 constexpr uint8_t ECUIO_CLEAR_SERVICE = 0x04;
-static_assert(ecuio_engine_service_allowed(ECUIO_CLEAR_SPEED_REQUEST[0]) &&
-                  !ecuio_engine_service_allowed(ECUIO_CLEAR_SERVICE),
-              "a clear reads the engine speed, then sends 04, which nothing "
-              "else may");
+static_assert(
+    ecuio_engine_service_allowed(ECUIO_CLEAR_SPEED_REQUEST[0]) &&
+        ecuio_engine_service_allowed(ECUIO_CLEAR_VEHICLE_SPEED_REQUEST[0]) &&
+        !ecuio_engine_service_allowed(ECUIO_CLEAR_SERVICE),
+    "a clear reads the engine and vehicle speeds, then sends 04, "
+    "which nothing else may");
 
 /* Section 4: what a negative reply's code says of its request, as
  * ECUIO_DROP_*: NOT_SUPPORTED for 0x12 (the first vehicle's answer to an
@@ -1099,11 +1107,16 @@ inline void ecuio_engine_diag_restart(ecuio_engine_channel& ch)
     const uint8_t clear = ch.diag.clear;
     const uint8_t clear_nrc = ch.diag.clear_nrc;
     const uint32_t clear_rpm = ch.diag.clear_rpm;
+    const uint32_t clear_kmh = ch.diag.clear_kmh;
+    const uint32_t read_flags =
+        ch.diag.flags & (ECUIO_DIAG_CLEAR_RPM | ECUIO_DIAG_CLEAR_KMH);
     ch.diag = ecuio_channel_diagnostics_t{};
     ch.diag.generation = generation + 1;
     ch.diag.clear = clear;
     ch.diag.clear_nrc = clear_nrc;
     ch.diag.clear_rpm = clear_rpm;
+    ch.diag.clear_kmh = clear_kmh;
+    ch.diag.flags = read_flags;
     for (uint8_t& b : ch.freeze_bits) {
         b = 0;
     }
@@ -1130,12 +1143,13 @@ inline void ecuio_engine_diagnose_again(ecuio_request_engine* e)
 /* Clears channel c's trouble codes (ADR-0038) when its report is the
  * one the caller saved: read to the end, at generation, with no clear
  * running. The clear then asks the engine speed through the one-shot,
- * and sends 04 only at 0 rpm. Any other report records
- * ECUIO_CLEAR_REPORT_CHANGED and sends nothing. False then, and for a
- * channel past the count, one that reads no diagnostics, or one already
- * clearing (which carries on). */
+ * and sends 04 only at 0 rpm, or under flags' ECUIO_CLEAR_ALLOW_RUNNING
+ * asks the vehicle speed next (ecuio_engine_clear_settle). Any other
+ * report records ECUIO_CLEAR_REPORT_CHANGED and sends nothing. False
+ * then, and for a channel past the count, one that reads no
+ * diagnostics, or one already clearing (which carries on). */
 inline bool ecuio_engine_clear(ecuio_request_engine* e, uint32_t c,
-                               uint32_t generation)
+                               uint32_t generation, uint32_t flags = 0)
 {
     if (c >= e->chan_count) {
         return false;
@@ -1147,6 +1161,8 @@ inline bool ecuio_engine_clear(ecuio_request_engine* e, uint32_t c,
     }
     d.clear_nrc = 0;
     d.clear_rpm = 0;
+    d.clear_kmh = 0;
+    d.flags &= ~(ECUIO_DIAG_CLEAR_RPM | ECUIO_DIAG_CLEAR_KMH);
     ++d.generation;
     if ((d.flags & ECUIO_DIAG_COMPLETE) == 0 || ch.diagnosing ||
         ch.diag_pending > 0 || d.generation != generation + 1) {
@@ -1156,13 +1172,17 @@ inline bool ecuio_engine_clear(ecuio_request_engine* e, uint32_t c,
     d.clear = ECUIO_CLEAR_NONE;
     d.flags |= ECUIO_DIAG_CLEARING;
     ch.clear_step = ECUIO_CLEAR_STEP_SPEED;
+    ch.clear_flags = flags;
     return true;
 }
 
 /* Settles the request channel c's clear has out: answered with the
  * reply, refused with its code, or unanswered (ECUIO_DIAG_*). The engine
  * speed's answer sends 04 next at 0 rpm and ends the clear otherwise;
- * 04's answer ends it, and a 44 or no answer reads the report again. */
+ * under ECUIO_CLEAR_ALLOW_RUNNING it is only recorded, any answer or
+ * none, and the vehicle speed is asked, whose 0 km/h (or anything,
+ * under ECUIO_CLEAR_ALLOW_MOVING) sends 04. 04's answer ends it, and a
+ * 44 or no answer reads the report again. */
 inline void ecuio_engine_clear_settle(ecuio_request_engine* e, uint32_t c,
                                       uint8_t outcome, uint8_t nrc,
                                       const uint8_t* data, uint16_t len)
@@ -1172,18 +1192,40 @@ inline void ecuio_engine_clear_settle(ecuio_request_engine* e, uint32_t c,
     ch.clearing = false;
     bool done = true;
     bool read = false;
+    const bool running_ok = (ch.clear_flags & ECUIO_CLEAR_ALLOW_RUNNING) != 0;
+    const bool moving_ok = (ch.clear_flags & ECUIO_CLEAR_ALLOW_MOVING) != 0;
     if (ch.clear_step == ECUIO_CLEAR_STEP_SPEED) {
-        if (outcome == ECUIO_DIAG_ANSWERED && len >= 4) {
-            const uint32_t raw = (uint32_t{data[2]} << 8) | data[3];
-            if (raw == 0) {
-                ch.clear_step = ECUIO_CLEAR_STEP_CLEAR;
-                done = false;
-            } else {
-                d.clear = ECUIO_CLEAR_ENGINE_RUNNING;
-                d.clear_rpm = (raw + 3) / 4; /* 0.25 rpm a count */
-            }
+        const bool got = outcome == ECUIO_DIAG_ANSWERED && len >= 4;
+        const uint32_t raw = got ? (uint32_t{data[2]} << 8) | data[3] : 0;
+        if (got) {
+            d.clear_rpm = (raw + 3) / 4; /* 0.25 rpm a count */
+            d.flags |= ECUIO_DIAG_CLEAR_RPM;
+        }
+        if (running_ok) {
+            ch.clear_step = ECUIO_CLEAR_STEP_VEHICLE;
+            done = false;
+        } else if (got && raw == 0) {
+            ch.clear_step = ECUIO_CLEAR_STEP_CLEAR;
+            done = false;
+        } else if (got) {
+            d.clear = ECUIO_CLEAR_ENGINE_RUNNING;
         } else {
             d.clear = ECUIO_CLEAR_NO_ENGINE_SPEED;
+            d.clear_nrc = nrc;
+        }
+    } else if (ch.clear_step == ECUIO_CLEAR_STEP_VEHICLE) {
+        const bool got = outcome == ECUIO_DIAG_ANSWERED && len >= 3;
+        if (got) {
+            d.clear_kmh = data[2]; /* 1 km/h a count */
+            d.flags |= ECUIO_DIAG_CLEAR_KMH;
+        }
+        if (moving_ok || (got && data[2] == 0)) {
+            ch.clear_step = ECUIO_CLEAR_STEP_CLEAR;
+            done = false;
+        } else if (got) {
+            d.clear = ECUIO_CLEAR_MOVING;
+        } else {
+            d.clear = ECUIO_CLEAR_NO_VEHICLE_SPEED;
             d.clear_nrc = nrc;
         }
     } else if (outcome == ECUIO_DIAG_ANSWERED) {
@@ -1373,6 +1415,10 @@ inline int32_t ecuio_engine_due(ecuio_request_engine* e, uint32_t c,
         if (ch.clear_step == ECUIO_CLEAR_STEP_SPEED) {
             ch.once.bytes[0] = ECUIO_CLEAR_SPEED_REQUEST[0];
             ch.once.bytes[1] = ECUIO_CLEAR_SPEED_REQUEST[1];
+            ch.once.len = 2;
+        } else if (ch.clear_step == ECUIO_CLEAR_STEP_VEHICLE) {
+            ch.once.bytes[0] = ECUIO_CLEAR_VEHICLE_SPEED_REQUEST[0];
+            ch.once.bytes[1] = ECUIO_CLEAR_VEHICLE_SPEED_REQUEST[1];
             ch.once.len = 2;
         } else {
             ch.once.bytes[0] = ECUIO_CLEAR_SERVICE;

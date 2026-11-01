@@ -4,8 +4,11 @@
 //          replies: each request answered by a timeout, raw bytes, a
 //          positive reply with an arbitrary tail or a negative one, with
 //          Read again, rescans and clears (at the report's generation or
-//          another) between; 04 goes out only right after the engine
-//          speed read 0 rpm, the report stays within its caps, every
+//          another, with any of the caller's flags) between; 04 goes out
+//          only right after its gate: the engine speed read 0 rpm, or
+//          under ECUIO_CLEAR_ALLOW_RUNNING the vehicle speed read 0 km/h,
+//          or asked at all under ECUIO_CLEAR_ALLOW_MOVING too; the
+//          report stays within its caps, every
 //          code and monitor it holds has a name, its values are finite,
 //          it reads complete only with nothing left to ask, two runs
 //          agree
@@ -95,9 +98,13 @@ void run(const uint8_t* data, size_t size, ecuio_channel_diagnostics_t* out)
     ecuio_engine_diagnose(&e, ecuio_obd2_signal_set());
     script s{data, size};
     int64_t now = 0;
-    /* The last reply given to the clear's 01 0C read 0 rpm, and nothing
-     * has been sent since: the one moment 04 may go out */
-    bool stopped = false;
+    /* The flags of the clear under way */
+    uint32_t flags = 0;
+    /* The clear's gate passed with the last request settled, and nothing
+     * has been sent since: the one moment 04 may go out. Without the
+     * caller's word, 01 0C read 0 rpm; with it on the engine, 01 0D read
+     * 0 km/h; with it on a moving vehicle too, 01 0D was asked */
+    bool gate = false;
     for (int step = 0; step < 512 && !s.done(); ++step) {
         const uint8_t op = s.next();
         if ((op & 7u) == 0) {
@@ -107,8 +114,13 @@ void run(const uint8_t* data, size_t size, ecuio_channel_diagnostics_t* out)
         } else if ((op & 7u) == 2) {
             /* the report's generation, or one off it */
             const uint32_t off = (op >> 3) % 3u;
-            (void)ecuio_engine_clear(&e, 0,
-                                     e.chans[0].diag.generation + off - 1u);
+            /* none, the engine, a moving vehicle alone (no word on the
+             * engine, so 01 0D is never asked), both */
+            const uint32_t want = (op >> 6) & 3u;
+            if (ecuio_engine_clear(&e, 0, e.chans[0].diag.generation + off - 1u,
+                                   want)) {
+                flags = want;
+            }
         } else {
             const int32_t r = ecuio_engine_due(&e, 0, now);
             if (r == ECUIO_ENGINE_NONE) {
@@ -118,10 +130,10 @@ void run(const uint8_t* data, size_t size, ecuio_channel_diagnostics_t* out)
                 continue;
             }
             const ecuio_request q = ecuio_engine_request_of(&e, 0, r);
-            if (q.bytes[0] == 0x04 && !stopped) {
-                abort(); /* 04 without the engine seen stopped */
+            if (q.bytes[0] == 0x04 && !gate) {
+                abort(); /* 04 past no gate */
             }
-            stopped = false;
+            gate = false;
             ecuio_engine_sent(&e, 0, r, true, now);
             uint8_t reply[128]; /* past the 32 codes a list holds */
             uint16_t len = 0;
@@ -152,12 +164,21 @@ void run(const uint8_t* data, size_t size, ecuio_channel_diagnostics_t* out)
                 reply[len++] = s.next();
                 break;
             }
+            bool positive = false;
             if (len > 0) {
-                const ecuio_reply got = ecuio_engine_on_frame(
-                    &e, 0, reply, len, now + 4000, nullptr);
-                stopped = got == ecuio_reply::positive && q.len == 2 &&
-                          q.bytes[0] == 0x01 && q.bytes[1] == 0x0C &&
-                          len >= 4 && reply[2] == 0 && reply[3] == 0;
+                positive =
+                    ecuio_engine_on_frame(&e, 0, reply, len, now + 4000,
+                                          nullptr) == ecuio_reply::positive;
+            }
+            const bool running = (flags & ECUIO_CLEAR_ALLOW_RUNNING) != 0;
+            const bool moving =
+                running && (flags & ECUIO_CLEAR_ALLOW_MOVING) != 0;
+            if (q.len == 2 && q.bytes[0] == 0x01 && q.bytes[1] == 0x0C) {
+                gate = !running && positive && len >= 4 && reply[2] == 0 &&
+                       reply[3] == 0;
+            } else if (q.len == 2 && q.bytes[0] == 0x01 && q.bytes[1] == 0x0D) {
+                gate = running &&
+                       (moving || (positive && len >= 3 && reply[2] == 0));
             }
         }
         now += ECUIO_ENGINE_GAP_US;
