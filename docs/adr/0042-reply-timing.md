@@ -1,0 +1,182 @@
+# ADR-0042: Reply timing per request: latency on the host's clock, the refresh interval on the frames' own, published while the session runs
+
+- **Status:** Proposed.
+- **Date:** 2026-10-31.
+- **Builds on:** [ADR-0015](0015-request-engine.md) (the request engine:
+  one request outstanding per channel, its wait);
+  [ADR-0033](0033-session-time-counts-sleep.md) (the host clock);
+  [ADR-0039](0039-full-service01-coverage.md) (rate classes, packing);
+  [ADR-0040](0040-socketcan-requests-isotp.md) section 5 (ISO-TP's
+  counts reach users with this report);
+  [ADR-0017](0017-session-recording.md) (a recording's folder).
+
+## Context
+
+Havne measures how fast it moves frames (`bench_bridge`, CI's load
+test, the activity log's "Delivery:" line), but not what a user of a
+requesting session sees: how long the ECU takes to answer each request,
+and how often each value refreshes. The test car's packing run gave two
+numbers by hand (fast signals every 0.107 s, slow every 0.665 s), read
+off `signals.csv`. A benchmark per request, measured by core and kept
+with the recording, makes those numbers every session's, on every
+transport, and lets a car run compare adapters, packing and rate
+classes from its own files.
+
+Two times matter, and they come from different clocks:
+
+- **Reply latency:** the request's send to its reply. Only the worker
+  sees both ends, so it is the host's clock (ADR-0033), and it includes
+  everything between the worker and the ECU: the adapter, its link
+  (USB, Bluetooth, the serial line), the bus.
+- **Refresh interval:** one request's answer to its next. The frames
+  carry stamps of their own: a J2534 adapter's clock (`j2534_clock.h`),
+  the kernel's receive time on SocketCAN (`socketcan_clock_step`), the
+  host's when an ELM327's line is read. An adapter's or the kernel's
+  stamp leaves the host's scheduling out of the interval.
+
+Neither stamp is pure for a whole session. The J2534 clock takes the
+host's delta when the vendor's clock steps; SocketCAN's kernel time is
+the wall clock (`SO_TIMESTAMPNS`, `CLOCK_REALTIME`), so its transport
+takes the host's delta when it steps backward or runs off. An interval
+across such a frame is part host time.
+
+## Decision
+
+### 1. What is measured, and where
+
+Core's request engine keeps the figures, for each request in the
+rotation (a PID, or a DID under `uds-generic`; one-shots, the walk and
+the scan are not rows):
+
+- **Outcomes:** replies answered (positive), refused (negative), and
+  timeouts (the wait ended with nothing). A PID asked in a pack shares
+  the pack's outcome: each PID whose record the reply carries is
+  answered, a refusal refuses them all, a timeout times them all out,
+  and a PID the reply leaves out gets nothing that pass. `packed`
+  counts the answers and refusals that came to a pack.
+- **Latency:** from the request's write to the reply that completes it,
+  on the host's clock, for every answer and refusal; a pending reply
+  (`7F xx 78`) extends it to the reply that follows. A pack's latency
+  is each of its PIDs' that came back in its reply.
+- **Refresh interval:** from one answer to the next of the same
+  request, on the frames' own stamps. The transport hands the engine
+  each reply's stamp and the count of the host fallbacks its clock has
+  taken so far; an interval with a fallback between its two answers is
+  left out and counted (`interval_mixed`). The session says whose clock
+  the intervals are on: `adapter` (J2534), `kernel` (SocketCAN, the
+  kernel's wall-clock deltas, so a small clock slew passes through),
+  `host` (ELM327).
+
+Each figure is a histogram in fixed memory, log-linear as the bridge's
+delivery figures (`app/latencystats.h`): eight buckets to a power of
+two, exact below 16 microseconds, so a quantile reads at most 12.5 % high and
+never low; up to about 16.8 s, longer ones in the last bucket with
+the exact maximum kept. Recording a sample is a few instructions on
+the worker, with no lock and no allocation. The engine's own tests
+pass no timing and pay nothing.
+
+### 2. The report: rows published every second
+
+- `ecuio_session_get_timing(session, &timing, rows, capacity, &count)`
+  (`profile.h`) copies the session's report and up to `capacity` rows
+  (`count` all of them, as `ecuio_serial_ports` counts). Readable at
+  any time and after close.
+- **A row** (`ecuio_request_timing_t`, 80 bytes): the channel and the
+  request's bytes; answered, refused, timeouts, packed; latency P50,
+  P99, P99.9 and the maximum; the interval's count, mixed count, P50,
+  P99, P99.9 and maximum; flags.
+- **Too few samples:** a P99 needs 100 samples and a P99.9 1,000; below
+  that its flag is clear and the writers leave it empty. A slow PID at
+  0.665 s takes eleven minutes to a P99.9.
+- **The session's part** (`ecuio_session_timing_t`): the session time
+  of the snapshot, the interval clock, and ISO-TP's counts where core
+  reassembles (a requesting SocketCAN or ELM327 session: messages begun
+  and finished, dropped, frames no message could use; ADR-0040 section
+  5). A session with no rotation (mock, replay, a listening session)
+  reports no rows and no counts.
+- The worker publishes the rows at most once a second and once as it
+  stops, so the figures computed into the rows cost the worker one pass
+  over the table a second.
+
+### 3. `latency.csv`, the recording's, and the CLI's `timing` lines
+
+Both writers write the same snapshot, row for row, in the same columns
+under the same names (`ECUIO_TIMING_COLUMNS`, `profile.h`, the one
+list): the recorder's header is that list, and each of the CLI's
+`timing` lines has those keys in that order.
+
+- **A snapshot** every 10 s of session time and one at the end. It
+  holds the rows whose counts changed since the last snapshot, each
+  with `t_s`, the snapshot's session time. The figures are cumulative
+  from the connect. **The last row for each request is its total**; a
+  PID that was dropped or went quiet stops repeating, and its last row
+  stands. Read in order, the snapshots show a session's warm-up apart
+  from its steady state.
+- **The recorder** appends each snapshot to `latency.csv` in the
+  recording's folder (ADR-0017), from the bridge's tick on the GUI
+  thread with the recording's other files. The figures are the
+  worker's, cumulative, so a stall of the GUI thread delays a snapshot
+  but loses nothing from it; an app killed in the background (Android)
+  keeps everything up to its last snapshot.
+- **`havne-cli stream`** writes each snapshot as `timing` lines (schema
+  1 grows by a line type, ADR-0031), and its `end` line carries the
+  ISO-TP counts when the session has them.
+- **The activity log** gets one line at the disconnect: the rows, the
+  replies, the timeouts, the interval's clock, and ISO-TP's counts
+  where they apply.
+
+### 4. The benchmark
+
+What v0.3.5 publishes in [docs/testing.md](../testing.md#performance),
+all with no hardware:
+
+- The delivery figures as today (`bench_bridge --load`: frames a
+  second, throughput, frames dropped), measured again.
+- Reply timing against the fakes' ECU through each transport
+  (`bench_timing`: the fake J2534 DLL in VX mode, the fake ELM327,
+  SocketCAN on `vcan0`): what the stack itself adds, per transport, at
+  P50, P99 and P99.9, with the fake's own reply delay stated beside it.
+
+A car's figures come from its runs' `latency.csv` (v0.3.6's runs).
+
+## Alternatives considered
+
+- **Every request raw** (a row per request sent: its send, its reply or
+  timeout). Exact percentiles offline, nothing lost to buckets, but it
+  needs an event path per request from core to every front end, and a
+  30-minute session is about 70,000 rows. The histograms answer the
+  percentiles to 12.5 %, which is finer than a car's spread.
+- **Latency on the adapter's clock** (J2534's TX indication stamp to
+  the reply's, SocketCAN's echo to the reply). It would leave the host
+  and the adapter's link out, but nothing in v0.3.5 can check what it
+  means: what a vendor's TX indication marks (queued, started, ACKed)
+  is the vendor's, and on a gs_usb controller both stamps are when a
+  USB message reached the host, carrying USB's millisecond polling; on
+  `vcan0` there is no bus at all. It is a v0.3.6 candidate, named for
+  what it is (adapter or kernel latency, not the bus's), checked against
+  an independent listener on the desk bus before it's published.
+- **The refresh interval on the host's clock everywhere.** One place in
+  core and no transport changes, but the host's scheduling would sit in
+  every interval, which an adapter's or the kernel's stamp leaves out.
+- **Rewriting `latency.csv` whole at each snapshot.** A crash between
+  the truncation and the write loses the file; appending loses at most
+  the last snapshot, and keeps the session's run over time.
+- **A recorder thread for the append.** It would keep the file I/O off
+  the GUI thread, but the recording's other files are written there
+  too, and moving recording to a thread of its own is a decision for
+  all three files, not one.
+
+## Consequences
+
+- **Good:**
+  - Every requesting session measures its own reply timing, kept with
+    its recording, so a car run compares adapters, packing and rate
+    classes from its files.
+  - The two writers can't drift apart: one column list, one rule for
+    reading the snapshots.
+  - ISO-TP's counts reach users without a getter of their own.
+- **Bad:**
+  - A getter, two structs and a column list in the C ABI.
+  - About 200 KB of histograms per requesting session.
+  - Latency includes the host and the adapter's link, so it is the
+    stack's view, not the ECU's response time alone.

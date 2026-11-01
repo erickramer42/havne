@@ -5,7 +5,9 @@
 //          the channels, raw on the engine ECU, ?poll=, uds-generic's
 //          scan, identification, diagnostics, the support, identity
 //          and diagnostics reports, Read again, a clear),
-//          Elm327SessionTest (the same through an ELM327)
+//          Elm327SessionTest (the same through an ELM327);
+//          reply timing (ADR-0042): Elm327SessionTest.Timing*,
+//          J2534HealthTest.VxTiming*, SocketCanRequestTest.Timing*
 //
 // What a requesting transport (J2534, ELM327) derives from its URI and
 // profile before it opens anything: the request keys' values, the
@@ -21,6 +23,7 @@
 #include "ecuio/signal_sets.h"
 #include "ecuio/signals.h"
 #include "error_detail.h"
+#include "isotp.h"
 #include "obd2_rates.h"
 #include "request_engine.h"
 #include "session.h"
@@ -28,7 +31,9 @@
 
 #include <cstdint>
 #include <limits>
+#include <memory>
 #include <mutex>
+#include <new>
 
 constexpr uint32_t ECUIO_CAN_ID_MAX = 0x1FFFFFFFu; /* 29-bit */
 constexpr uint32_t ECUIO_CAN_ID_11BIT_MAX = 0x7FFu;
@@ -337,6 +342,67 @@ inline void ecuio_publish_support(ecuio_session_t* session,
     s.rx_id = rx_id;
     std::lock_guard<std::mutex> lock(session->support_mutex);
     session->support[c] = s;
+}
+
+/* Reply timing (ADR-0042) for a requesting session's rotation: the
+ * figures in owner, the engine pointing at them, the intervals on clock
+ * (ECUIO_TIMING_CLOCK_*). A session with no rotation gets none, and so
+ * does one whose figures won't allocate: timing is a report, never a
+ * reason to refuse a connect. */
+inline void ecuio_attach_timing(ecuio_request_engine& e,
+                                std::unique_ptr<ecuio_timing_table>& owner,
+                                uint32_t clock)
+{
+    if (e.count == 0) {
+        return;
+    }
+    owner.reset(new (std::nothrow) ecuio_timing_table());
+    if (owner) {
+        owner->interval_clock = clock;
+        e.timing = owner.get();
+    }
+}
+
+/* Reply timing (ADR-0042): the engine's figures handed to the session as
+ * rows, for ecuio_session_get_timing, at most once a second, and always
+ * when final (the worker stopping). iso is ISO-TP's receiver where core
+ * reassembles, NULL where the adapter does. published_at is the
+ * worker's own. */
+constexpr int64_t ECUIO_TIMING_PUBLISH_US = 1000000;
+
+inline void ecuio_publish_timing(ecuio_session_t* session,
+                                 const ecuio_request_engine& e,
+                                 const isotp_rx* iso, int64_t now_us,
+                                 int64_t& published_at, bool final)
+{
+    if (e.timing == nullptr ||
+        (!final && published_at != 0 &&
+         now_us - published_at < ECUIO_TIMING_PUBLISH_US)) {
+        return;
+    }
+    published_at = now_us;
+    std::lock_guard<std::mutex> lock(session->timing_mutex);
+    ecuio_session_timing_t& t = session->timing;
+    t.snapshot_us = now_us > 0 ? static_cast<uint64_t>(now_us) : 0;
+    t.interval_clock = e.timing->interval_clock;
+    t.rows = e.count;
+    if (iso != nullptr) {
+        t.flags |= ECUIO_TIMING_ISOTP;
+        t.isotp_first_frames = iso->first_frames;
+        t.isotp_completed = iso->completed;
+        t.isotp_dropped = iso->dropped;
+        t.isotp_malformed = iso->malformed;
+    }
+    for (uint32_t i = 0; i < e.count; ++i) {
+        const ecuio_request& q = e.requests[i];
+        ecuio_request_timing_t& row = session->timing_rows[i];
+        row = timing_public(e.timing->rows[i]);
+        row.channel = q.channel;
+        row.length = q.len < 3 ? q.len : 3;
+        for (uint8_t k = 0; k < row.length; ++k) {
+            row.request[k] = q.bytes[k];
+        }
+    }
 }
 
 /* Hands what channel c's ECU has said it is to the session, for

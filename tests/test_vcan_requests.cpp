@@ -383,6 +383,50 @@ TEST_F(SocketCanRequestTest, ARequestingSessionOnVcanNeedsNoRate)
     EXPECT_EQ(s.status(), ECUIO_OK) << "vcan has no rate: " << s.detail();
 }
 
+/* Reply timing (ADR-0042) on SocketCAN: a row per request in the
+ * rotation, the intervals on the kernel's receive times, and ISO-TP's
+ * counts from core's receiver, the VIN's First Frame among them */
+TEST_F(SocketCanRequestTest, TimingReportsEachRequestOnTheKernelsClock)
+{
+    vcan_bus::Ecu ecu;
+    Session s("?profile=obd2&diagnose=0");
+    ASSERT_EQ(s.status(), ECUIO_OK) << s.detail();
+    ecuio_session_timing_t t{};
+    std::vector<ecuio_request_timing_t> rows(ECUIO_PROFILE_MAX_REQUESTS);
+    uint32_t count = 0;
+    const auto intervals = [&] {
+        uint32_t n = 0;
+        for (uint32_t i = 0; i < count && i < rows.size(); ++i) {
+            n += rows[i].intervals;
+        }
+        return n;
+    };
+    ASSERT_TRUE(wait_for(
+        [&] {
+            return ecuio_session_get_timing(s.get(), &t, rows.data(),
+                                            static_cast<uint32_t>(rows.size()),
+                                            &count) == ECUIO_OK &&
+                   intervals() >= 40 && t.isotp_first_frames > 0;
+        },
+        10000ms))
+        << intervals() << " intervals published";
+    EXPECT_EQ(t.interval_clock, ECUIO_TIMING_CLOCK_KERNEL);
+    EXPECT_NE(t.flags & ECUIO_TIMING_ISOTP, 0u);
+    EXPECT_GE(t.isotp_completed, t.isotp_first_frames);
+    EXPECT_EQ(t.isotp_dropped, 0u);
+    EXPECT_EQ(t.isotp_malformed, 0u);
+    for (uint32_t i = 0; i < count; ++i) {
+        const ecuio_request_timing_t& r = rows[i];
+        if (r.answered == 0) {
+            continue;
+        }
+        SCOPED_TRACE("PID " + std::to_string(r.request[1]));
+        EXPECT_GT(r.latency_max_us, 0u);
+        EXPECT_LT(r.latency_p50_us, 100000u) << "within the engine's wait";
+        EXPECT_EQ(r.intervals_mixed, 0u) << "every frame has a kernel time";
+    }
+}
+
 /* The test car's own replies: the probe walks its bitmaps, its PIDs
  * pack into segmented replies through core's ISO-TP, and every reply
  * reaches the session as the car sent it */

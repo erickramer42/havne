@@ -1,6 +1,7 @@
 // File/layer: app/sessionrecorder.cpp | Qt6 Core, app layer, C++17
 // Testing: test_bridge (BridgeTest.Recording*, the vehicle's label in
-//          the folder's name among them), through the bridge
+//          the folder's name among them), through the bridge;
+//          latency.csv: BridgeTest.ARecordingKeepsReplyTimingsSnapshots
 
 #include "sessionrecorder.h"
 
@@ -8,6 +9,9 @@
 #include <QDateTime>
 #include <QDir>
 #include <QTime>
+
+#include <algorithm>
+#include <iterator>
 
 namespace {
 
@@ -35,6 +39,27 @@ QByteArray csvField(const char* text, size_t cap)
 QByteArray hex(quint32 v)
 {
     return "0x" + QByteArray::number(v, 16).toUpper();
+}
+
+/* The interval's clock as havne-cli's timing lines name it */
+QByteArray clockName(uint32_t clock)
+{
+    switch (clock) {
+    case ECUIO_TIMING_CLOCK_HOST:
+        return "host";
+    case ECUIO_TIMING_CLOCK_ADAPTER:
+        return "adapter";
+    case ECUIO_TIMING_CLOCK_KERNEL:
+        return "kernel";
+    default:
+        return "none";
+    }
+}
+
+/* A quantile, or empty when it has too few samples */
+QByteArray quantile(uint32_t us, bool has)
+{
+    return has ? QByteArray::number(us) : QByteArray();
 }
 
 }  // namespace
@@ -69,6 +94,8 @@ bool SessionRecorder::start(const QString& root, const QStringList& header,
     }
 
     m_t0 = Clock::now();
+    m_latency.setFileName(m_folder + QStringLiteral("/latency.csv"));
+    std::fill(std::begin(m_timingTotals), std::end(m_timingTotals), 0);
     m_frameRows = 0;
     m_sampleRows = 0;
     m_ok = true;
@@ -146,9 +173,69 @@ void SessionRecorder::event(const QString& line)
                     + "  " + line.toUtf8() + '\n');
 }
 
+void SessionRecorder::timing(const ecuio_session_timing_t& t,
+                             const ecuio_request_timing_t* rows, uint32_t count,
+                             const uint32_t* rxIds, uint32_t channels)
+{
+    if (!m_active || count == 0)
+        return;
+    const QByteArray at =
+        QByteArray::number(static_cast<double>(t.snapshot_us) / 1e6, 'f', 3);
+    QByteArray block;
+    for (uint32_t i = 0; i < count && i < ECUIO_PROFILE_MAX_REQUESTS; ++i) {
+        const ecuio_request_timing_t& r = rows[i];
+        const quint64 total = quint64{r.answered} + r.refused + r.timeouts;
+        if (total == m_timingTotals[i])
+            continue;
+        m_timingTotals[i] = total;
+        const bool latency = r.answered + r.refused > 0;
+        const bool interval = r.intervals > 0;
+        const uint8_t length = r.length <= 3 ? r.length : 3;
+        block += at + ',' + hex(r.channel < channels ? rxIds[r.channel] : 0) +
+                 ',' +
+                 QByteArray(reinterpret_cast<const char*>(r.request), length)
+                     .toHex(' ')
+                     .toUpper() +
+                 ',' + QByteArray::number(r.answered) + ',' +
+                 QByteArray::number(r.refused) + ',' +
+                 QByteArray::number(r.timeouts) + ',' +
+                 QByteArray::number(r.packed) + ',' +
+                 quantile(r.latency_p50_us, latency) + ',' +
+                 quantile(r.latency_p99_us,
+                          (r.flags & ECUIO_TIMING_LATENCY_P99) != 0) +
+                 ',' +
+                 quantile(r.latency_p999_us,
+                          (r.flags & ECUIO_TIMING_LATENCY_P999) != 0) +
+                 ',' + quantile(r.latency_max_us, latency) + ',' +
+                 QByteArray::number(r.intervals) + ',' +
+                 QByteArray::number(r.intervals_mixed) + ',' +
+                 quantile(r.interval_p50_us, interval) + ',' +
+                 quantile(r.interval_p99_us,
+                          (r.flags & ECUIO_TIMING_INTERVAL_P99) != 0) +
+                 ',' +
+                 quantile(r.interval_p999_us,
+                          (r.flags & ECUIO_TIMING_INTERVAL_P999) != 0) +
+                 ',' + quantile(r.interval_max_us, interval) + ',' +
+                 clockName(t.interval_clock) + '\n';
+    }
+    if (block.isEmpty())
+        return;
+    if (!m_latency.isOpen()) {
+        if (!m_latency.open(QIODevice::WriteOnly | QIODevice::Text)) {
+            m_ok = false;
+            return;
+        }
+        write(m_latency, QByteArray(ECUIO_TIMING_COLUMNS) + '\n');
+    }
+    write(m_latency, block);
+}
+
 void SessionRecorder::flush()
 {
     if (!m_active) return;
+    if (m_ok && m_latency.isOpen() && !m_latency.flush()) {
+        m_ok = false;
+    }
     for (QFile* f : { &m_frames, &m_signals, &m_events }) {
         if (m_ok && !f->flush()) {
             m_ok = false;
@@ -164,5 +251,6 @@ void SessionRecorder::stop(const QString& summary)
     m_frames.close();
     m_signals.close();
     m_events.close();
+    m_latency.close();
     m_active = false;
 }

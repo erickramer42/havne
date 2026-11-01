@@ -22,6 +22,8 @@
 //          session through an app-fed stream (ADR-0028), its failure and
 //          reopen, the open's wait and its stop. BENCH: the Win32 port,
 //          the VX's WiFi.
+//          Reply timing (ADR-0042):
+//          Elm327SessionTest.TimingReportsEachRequestOnTheHostsClock
 
 #include "ecuio/core.h"
 #include "ecuio/internal.h"
@@ -129,6 +131,9 @@ struct ecuio_elm327_transport {
     /* The requests and their pacing (request_engine.h), built at attach,
      * the worker's alone after; probe and identify as for J2534. */
     ecuio_request_engine engine;
+    /* The engine's reply timing (ADR-0042): an ELM327's frames are
+     * stamped as their lines are read, so the intervals are the host's */
+    std::unique_ptr<ecuio_timing_table> timing;
     bool probe = false;
     bool identify = false;
     /* The Service 01 PIDs asked with the response-count digit
@@ -1065,6 +1070,7 @@ void elm327_worker(transport* t)
     uint32_t next_chan = 0;
     const bool passive = e.count == 0 && e.scan_count == 0;
     uint32_t relisten_ms = 0;
+    int64_t timing_at = 0;
     if (t->probe) {
         ecuio_engine_probe(&e, now_us(t));
     }
@@ -1176,6 +1182,8 @@ void elm327_worker(transport* t)
             ecuio_publish_diagnostics(t->session, e, c, t->rx_ids[c],
                                       published_diagnostics[c]);
         }
+        ecuio_publish_timing(t->session, e, &t->isotp, now_us(t), timing_at,
+                             false);
 
         if (h.backoff_ms > 0) {
             if (backoff_sleep(t, h.backoff_ms)) {
@@ -1184,6 +1192,7 @@ void elm327_worker(transport* t)
             h.backoff_ms = link_backoff_next(h.backoff_ms);
         }
     }
+    ecuio_publish_timing(t->session, e, &t->isotp, now_us(t), timing_at, true);
 }
 
 ecuio_status_t elm327_start(ecuio_session_t* session, void* impl)
@@ -1329,6 +1338,7 @@ ecuio_status_t elm327_attach(ecuio_session_t* session, const char* uri,
     if (st != ECUIO_OK) {
         return st;
     }
+    ecuio_attach_timing(t->engine, t->timing, ECUIO_TIMING_CLOCK_HOST);
     elm327_one_frame_pids_for(set, &t->one_frame);
     /* A session that asks nothing listens on its channels (AT MA keeps
      * the receive filter); with none, the whole bus would be raw frames

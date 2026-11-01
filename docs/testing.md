@@ -213,6 +213,66 @@ running (ranges across the runs; milliseconds as median / p99):
   catch a regression of an order of magnitude, and smaller drift shows
   in the summaries. macOS doesn't run it: its runner wakes timers
   100–200 ms late.
+- **Measured again 2026-10-31, v0.3.5's `dev`** (three runs; the
+  machine otherwise near idle, 9 % CPU): every one-pass run handled all
+  7,074 frames with none dropped, timed all 7,061 values and kept the
+  1,261.25 rpm peak; frames reached the GUI thread in 0.07 to 0.09 ms
+  at the median and 0.35 to 0.64 ms at p99. Sustained, looping at full
+  speed, the worker ran 191,000 to 193,000 frames a second, against
+  358,000 to 374,000 for v0.3.4's build run the same minute on the same
+  machine. The difference is the obd2 set's size: it grew to every
+  field of J1979's Service 01 table, its defs share the engine ECU's
+  reply ID, and the worker checks each frame against every def, so
+  each one reads its mux key. With decoding turned off, the builds
+  before and after that change both run about 460,000 frames a second.
+  It is still about 40 times a full classic CAN bus, so nothing a
+  session can carry is lost, and CI's floor (10,000 a second) doesn't
+  see it. The fix, an index from a frame's ID and key to its defs, is
+  in [STATUS.md's backlog](../STATUS.md#performance).
+
+### Reply timing against the fakes
+
+`tests/bench_timing.cpp` (target `bench_timing`, built with the tests,
+never run by ctest; [ADR-0042](adr/0042-reply-timing.md) section 4)
+runs an `obd2` session, the rotation alone, through each transport the
+platform has against the fakes' ECU, then prints the session's timing
+report: the fake J2534 DLL as the VX (each reply 4 ms after its write),
+the fake ELM327 (4 ms after its request), and on Linux SocketCAN on
+`vcan0` against the fakes' ECU through the kernel's ISO-TP (at once).
+The fakes answer from canned bytes at a fixed delay, so the spread is
+the stack's, not an ECU's. Latency is on the host's clock; the
+intervals are PID 0C's (RPM), on the clock the table names.
+
+```sh
+build/tests/Release/bench_timing.exe [seconds per transport, default 60]
+```
+
+On the dev machine, 2026-10-31, 180 s per transport (the machine
+otherwise near idle), packing on, 92 requests in the rotation:
+
+| Transport | Fake's delay | Latency P50 (lowest to highest request) / P99 / max, ms | PID 0C's interval P50 / P99 / P99.9, s (clock) | ISO-TP |
+|---|---|---|---|---|
+| J2534, the fake as the VX (Windows) | 4 ms | 16.3 to 16.4 / 18.4 / 25.6 | 0.246 / 0.262 / n/a, 763 intervals (adapter) | the adapter's |
+| ELM327, the fake (Windows) | 4 ms | 16.4 / 17.2 / 17.2 | 0.229 / 0.262 / n/a, 762 (host) | 5,764 messages, 1 dropped |
+| ELM327, the fake (Linux, WSL) | 4 ms | 4.1 / 4.2 / 4.2 | 0.148 / 0.164 / 0.246, 1,178 (host) | 8,882 messages, 1 dropped |
+| SocketCAN, `vcan0` (Linux, WSL) | none | 0.1 to 0.2 / 0.4 / 4.7 | 0.148 / 0.164 / 0.164, 1,194 (kernel) | 9,000 messages, none dropped |
+
+- **On Linux the stack adds about 0.1 ms:** the ELM327 fake's 4 ms
+  reads 4.1 at the median and 4.2 at p99, and SocketCAN through the
+  kernel's ISO-TP answers in 0.1 to 0.2 ms.
+- **On Windows a 4 ms reply reads 16.4 ms, through either fake:** one
+  step of Windows' default timer (15.6 ms). The fakes' own 4 ms waits,
+  the worker's, or both are rounded up to it; this run doesn't separate
+  them. A car run through the VX (v0.3.6) shows what a real adapter's
+  replies read.
+- **The refresh interval follows the latency:** the rotation is the
+  same 92 requests, packed, so PID 0C refreshes every 0.148 s where a
+  reply takes 4 ms and every 0.23 to 0.25 s where it takes 16 ms. No
+  interval crossed a clock's fallback. P99.9 needs 1,000 intervals,
+  which 180 s gives only on Linux.
+- **One message dropped and one timeout per ELM327 session,** in a
+  10 s run as in a 180 s one, so most likely the reply under way when
+  the session closed; not traced further.
 
 ### Connect cost: a surrogate per session
 
@@ -257,6 +317,10 @@ round trip each, negligible at the transport's read cap
 | Decoded values (ADR-0024): a frame's batch holds every def it decodes, in the set's order, equal to direct `ecuio_decode_*` calls, with the frame's time and ID; a def that can't decode is left out, and a frame that decodes nothing or a raw session delivers no batch. The values callback registers as the frame callback does, runs after the frame callbacks for each frame, and sees its list as it stood when the frame arrived, on and off the stack. Each text value has a slot of its own, counted at create from the set (unkeyed text defs plus, per key shape, the largest group sharing a key), and the slots start again each frame. A `uds-generic` scanned DID decodes from the set built at create. Every batch over the vehicle fixture under `obd2` and the mock's cycle equals the direct decode | `CoreTest.ValuesCallbackDeliversEachFramesDecodeWithItsTime`, `.ValuesCallbackRegistersAsTheFrameCallbackDoes`, `.ValuesFollowTheFrameCallbacks`, `.ValuesReachTheListAsItStoodWhenTheFrameArrived`, `.ValuesGiveEachTextValueASlotOfItsOwn`, `.ValuesOfAScannedDidComeFromTheSetBuiltAtCreate`, `.ValuesMatchDirectDecodesOfEveryFrame`. Each fails against a mutant: one slot for every text value, a slot count without the unkeyed defs, shape groups taken as the largest instead of added, slots that never restart, the frame callbacks skipped, the live values list, a batch without the frame's time, a failed decode delivered as 0 |
 | A Service 01 reply carrying several PIDs (ADR-0039 Appendix A) decodes record by record, each def once, in the order the ECU sent them, live and replayed; each record's length is J1979's (core's table equals the Service 01 table's byte counts) or the shorter one the ECU's single replies showed (the test car's PID 55), which a reply as long as J1979's undoes; a reply that won't split (a PID of no known length, one twice, a record past the end or short of it, more than 16) decodes its first record and is counted; a frame on an ID no Service 01 def listens on is never split | `Obd2ReplyTest.*`, `Obd2TableTest.CoresByteCountPerPidIsTheTables`, `CoreTest.APackedReplyDecodesEachRecord`, `.APackedReplySplitsByTheLengthTheEcuSends`, `.APackedReplyReplaysToItsRecords`, `CliGoldenTest.ReplaySplitsPackedReplies`. Each fails against a mutant (mutation-checked 2026-10-31): the learned lengths ignored, a PID twice allowed, decode never splitting |
 | Several PIDs per request (ADR-0039 Appendix A), the engine against the fakes' ECU on the test car's bitmaps: a PID is packed only after its own reply showed its length, so the first lap is unpacked; then every request carries up to six kept PIDs of one class, never a bitmap, and every kept PID is still asked; a pack's reply length adds its PIDs' own (the test car's one-byte PID 55 included), and a PID whose own reply was longer than J1979's is never packed; a reply whose first record is any PID asked answers it, and one leaving a PID out drops nothing; silence, a refusal or one record three packs in a row end packing on the channel, one answered between starts the count again, and a pending reply extends the wait; out of step (a wait ended with nothing), a late refusal or a single record of one of a pack's PIDs answers nothing and the pack's own reply then succeeds; packing waits for the driver and the bitmaps. ELM327's count digit for a pack is its reply's frames | `RequestEngineTest.PacksCarryUpToSixKeptPidsOfOneClass`, `.APackIsSizedByItsPidsOwnReplies`, `.APackedReplyMatchesByAnyOfItsPids`, `.ThreeFailedPacksEndPackingOnTheChannel`, `.OutOfStepALateReplyFailsNoPack`, `.PackingIsTheDriversToTurnOn`, `Elm327ProtocolTest.APacksCountDigitIsItsReplysFrames`. Each engine case fails against a mutant (mutation-checked 2026-10-31): no second PID, a PID packed before its own reply, classes mixed, a longer reply packed, no reset on a success, only the first PID asked matching. Through the surrogate and over ELM327 against the fakes' ECU, which answers a pack in J1979's form (each supported PID's record, in the order asked) or, under `ECUIO_FAKE_PACK_FIRST_ONLY` (`fake_ecu::pack_first_only()` in process), for its first PID alone: packs are answered and reported, each ELM327 pack carries the digit its reply's frames take (one past a Single Frame among them), `?pack=0` asks one PID per request, and the first-PID-only ECU ends packing: `J2534AdoptionTest.PackedRequestsReachTheFakesEcu`, `Elm327SessionTest.APackedRequestCarriesItsRepliesFrames`, `.AnEcuAnsweringOnePidEndsPacking` (mutation-checked 2026-10-31: the digit always 1, `?pack=0` ignored) |
+| Reply timing (ADR-0042), the histograms: one sample reads back at most an eighth above itself and never below, exactly below 16 microseconds, one past the top band its exact value; quantiles of a distribution within their buckets; a P99 needs 100 samples and a P99.9 1,000, below that 0 with its flag clear; an interval with a fallback of the frames' clock between its answers, or one running backwards, is left out and counted; a refusal has a latency and refreshes nothing | `RequestTimingTest.*` (mutation-checked 2026-10-31: no sample floor, fallbacks ignored) |
+| Reply timing in the engine against the fakes' ECU on the test car's bitmaps: each rotation request's answers and timeouts, its latency from its write to its reply, a timeout with none, its intervals between answers on the host's clock with no stamps given and on the driver's stamps when given (a fallback between two answers leaves that interval out); a pack's reply answers each PID whose record it carries, counted as packed | `RequestEngineTest.TimingRecordsEachRotationRequestsReplies`, `.TimingCountsAPacksAnswersForEachOfItsPids`, `.TimingTakesTheIntervalFromTheDriversStamps` (mutation-checked 2026-10-31: no timeouts, a pack crediting its first record alone, the stamps ignored) |
+| Reply timing through each transport: a row per request in the rotation, each answer at least the fake's delay after its request, the intervals on the adapter's clock (J2534, through the surrogate, the fake as the VX), the kernel's (SocketCAN on `vcan0`) or the host's (ELM327), ISO-TP's counts where core reassembles and none through J2534; published while the session runs, and the final rows, published as the worker stops, read after close; a session with no rotation has no rows, and the getter's NULLs are refused | `J2534HealthTest.VxTimingReportsEachRequestOnTheAdaptersClock` (cross-arch too), `Elm327SessionTest.TimingReportsEachRequestOnTheHostsClock` (mutation-checked 2026-10-31: no final publish), `SocketCanRequestTest.TimingReportsEachRequestOnTheKernelsClock`, `CoreTest.ASessionWithNoRotationHasNoTimingRows`, `c_abi` |
+| `latency.csv` and the CLI's `timing` lines (ADR-0042 section 3): one column list for both (`ECUIO_TIMING_COLUMNS`), a quantile with too few samples empty or `null`, a snapshot every 10 s of session time carrying the rows that changed; a recording of a requesting session through the fake DLL holds the header, then snapshots under their `t_s`, each request's answers never falling from one row to its next, the intervals on the adapter's clock; the activity log's "Reply timing:" line names the requests, their outcomes, the spread of their median latencies, the clock and ISO-TP's counts | `CliTimingTest.*`, `BridgeTest.ARecordingKeepsReplyTimingsSnapshots` (Windows), `.TimingTextNamesTheRequestsAndTheClock`; `havne-cli stream` against the fake DLL for 12 s wrote one snapshot at 10 s and one at the end (manual, 2026-10-31) |
 | The recording holds every value core decodes: over the vehicle fixture under `obd2`, the bridge's `signals.csv` equals, row for row, the batches core delivers to a session of its own | `BridgeTest.RecordingHoldsEveryValueCoreDecodes` |
 | The bridge stages values from the worker (ADR-0024): a frame dropped at the in-flight cap keeps its values, so with the event loop held while 5,000 frames flood in, thousands drop, yet the recording holds every row's value in order and the row shows the last; past a window's sample limit the recording misses values, the activity log says so once and gives the count at disconnect, and the row still shows the newest; a disconnect drains the window it ends | `BridgeTest.ValuesSurviveFramesDroppedAtTheCap`, `.ValuesPastTheWindowsLimitAreCountedAndLogged`, `.ValuesStagedAtDisconnectAreRecorded`. Each fails against a mutant: values never staged, the newest lost past the limit, samples never recorded, no drain at disconnect, the limit never counted, the warning never logged, a staging never reset. The first also fails when the dropped-frame count is zeroed after the worker starts |
 | Real-car recordings decode on the worker as they decoded in the car: each recording's `frames.csv`, replayed through the bridge under the profile and DIDs its connect used, records the values its own `signals.csv` holds. 24,632 values over 25 connects (the two vehicle sessions and the bench), 2026-10-26 | `BridgeTest.VehicleRecordingsReplayToTheirOwnValues`, local only: it skips unless `ECUIO_BENCH_RAW` names the recordings' folder (`Testing/bench-raw`, never committed). A mismatch names the recording, row and signal, never a value |

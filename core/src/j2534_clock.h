@@ -3,6 +3,7 @@
 // C++17, Qt-free, no platform headers.
 // Testing: UNIT: J2534StreamTest.VendorClock* (test_j2534_stream); the
 //     worker's use of it is HARNESS (J2534HealthTest.VendorStampsBecomeSessionTime).
+//     its host_steps count: J2534HealthTest.VxTiming* (ADR-0042)
 
 #ifndef ECUIO_J2534_CLOCK_H
 #define ECUIO_J2534_CLOCK_H
@@ -41,6 +42,9 @@ struct j2534_clock {
     uint32_t last_raw = 0;      /* the previous frame's vendor stamp */
     uint64_t last_host_us = 0;  /* when it reached the transport */
     uint64_t last_us = 0;       /* the timestamp it was given */
+    /* Frames given the host's delta for a step: an interval across one
+     * is part host time (ADR-0042) */
+    uint32_t host_steps = 0;
 };
 
 /* The timestamp for a frame stamped raw by the vendor, reaching the
@@ -65,6 +69,7 @@ inline uint64_t j2534_clock_step(j2534_clock& c, uint32_t raw, uint64_t host_us)
     uint64_t delta = mod + wraps * J2534_CLOCK_WRAP_US;
     if (delta > host_delta + J2534_CLOCK_SLACK_US) {
         delta = host_delta;   /* the vendor clock stepped */
+        ++c.host_steps;
     }
     c.last_raw = raw;
     c.last_host_us = host_us;

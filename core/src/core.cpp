@@ -12,7 +12,8 @@
 //          the monitors' names (DiagnosticsTest, test_obd2);
 //          HARNESS: the J2534 suites and Elm327SessionTest through
 //          create; test_c_abi links the public functions; the USDT
-//          probes: ProbeNotesTest (their notes) and CI's bpftrace step
+//          probes: ProbeNotesTest (their notes) and CI's bpftrace step;
+//          the timing report (CoreTest.ASessionWithNoRotationHasNoTimingRows)
 
 #include "ecuio/version.h"
 #include "ecuio/core.h"
@@ -513,6 +514,24 @@ ecuio_status_t ecuio_session_get_unsplit_replies(const ecuio_session_t* session,
         return ECUIO_ERR_NULL_ARGUMENT;
     }
     *count = session->unsplit_replies.load(std::memory_order_relaxed);
+    return ECUIO_OK;
+}
+
+ecuio_status_t ecuio_session_get_timing(const ecuio_session_t* session,
+                                        ecuio_session_timing_t* timing,
+                                        ecuio_request_timing_t* rows,
+                                        uint32_t capacity, uint32_t* count)
+{
+    if (session == nullptr || timing == nullptr || count == nullptr ||
+        (rows == nullptr && capacity > 0)) {
+        return ECUIO_ERR_NULL_ARGUMENT;
+    }
+    std::lock_guard<std::mutex> lock(session->timing_mutex);
+    *timing = session->timing;
+    *count = session->timing.rows;
+    for (uint32_t i = 0; i < capacity && i < session->timing.rows; ++i) {
+        rows[i] = session->timing_rows[i];
+    }
     return ECUIO_OK;
 }
 

@@ -1,6 +1,7 @@
 // File/layer: app/sessionrecorder.h | Qt6 Core, app layer, C++17
 // Testing: test_bridge (BridgeTest.Recording*, the vehicle's label in
-//          the folder's name among them), through the bridge
+//          the folder's name among them), through the bridge;
+//          latency.csv: BridgeTest.ARecordingKeepsReplyTimingsSnapshots
 
 #pragma once
 
@@ -12,11 +13,13 @@
 #include <cstdint>
 
 #include "ecuio/core.h"
+#include "ecuio/profile.h"
 #include "ecuio/signals.h"
 
 /* One recording per connect (ADR-0017): a folder holding frames.csv
  * (every frame the bridge receives), signals.csv (every decoded value)
- * and events.log (a header, then the activity lines). Times are host
+ * and events.log (a header, then the activity lines), and for a session
+ * with a rotation latency.csv (reply timing's snapshots, ADR-0042). Times are host
  * microseconds since the recording started, on core's clock
  * (ecuio_clock_us), which counts the time the machine sleeps, so a sleep
  * is a gap here as it is in session time (ADR-0033) and a vendor's
@@ -54,6 +57,13 @@ public:
     // A text signal's value, in the same column, CSV-quoted when it needs it
     void sample(Clock::time_point arrived, const ecuio_signal_def_t& def, const QString& text);
     void event(const QString& line);
+    /* Reply timing's snapshot (ADR-0042 section 3): appends the rows
+     * whose counts changed since the snapshot that last carried them to
+     * latency.csv, which the first one with a row creates under its
+     * header (ECUIO_TIMING_COLUMNS). rxIds[channel] names each row's ECU. */
+    void timing(const ecuio_session_timing_t& t,
+                const ecuio_request_timing_t* rows, uint32_t count,
+                const uint32_t* rxIds, uint32_t channels);
     void flush();
     /* Writes the summary to events.log and closes the files. */
     void stop(const QString& summary);
@@ -70,6 +80,8 @@ private:
     QFile m_frames;
     QFile m_signals;
     QFile m_events;
+    QFile m_latency; /* opened by the first timing snapshot with a row */
+    quint64 m_timingTotals[ECUIO_PROFILE_MAX_REQUESTS] = {};
     Clock::time_point m_t0{};
     QString m_folder;
     qint64 m_frameRows = 0;
