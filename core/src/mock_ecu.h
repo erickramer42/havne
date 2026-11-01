@@ -40,11 +40,12 @@ struct ecuio_mock_answer {
 
 /* Readiness: the MIL on, 3 codes; misfire, fuel system and components;
  * catalyst, evaporative system, oxygen sensor, its heater and EGR/VVT,
- * all complete. The lists: P0301 P0420 U0100 stored, P0171 C0035 B1001
+ * all complete, and all enabled and complete this drive cycle (PID 41). The lists: P0301 P0420 U0100 stored, P0171 C0035 B1001
  * pending, P0420 permanent. The freeze frame P0301 stored: PIDs 02 04
  * 05 0C 0D, at 70 % load, 90 degC, 3000 rpm and 80 km/h. */
 constexpr ecuio_mock_answer ECUIO_MOCK_ANSWERS[] = {
     {{0x01, 0x01}, 2, {0x41, 0x01, 0x83, 0x07, 0xE5, 0x00}, 6},
+    {{0x01, 0x41}, 2, {0x41, 0x41, 0x00, 0x07, 0xE5, 0x00}, 6},
     {{0x03}, 1, {0x43, 0x03, 0x03, 0x01, 0x04, 0x20, 0xC1, 0x00}, 8},
     {{0x07}, 1, {0x47, 0x03, 0x01, 0x71, 0x40, 0x35, 0x90, 0x01}, 8},
     {{0x0A}, 1, {0x4A, 0x01, 0x04, 0x20}, 4},
@@ -57,11 +58,13 @@ constexpr ecuio_mock_answer ECUIO_MOCK_ANSWERS[] = {
 };
 
 /* After Service 04, as the fake answers then: the MIL off, no codes;
- * B's monitors complete, C's incomplete (byte D = C); no stored or
+ * B's monitors complete, C's incomplete (byte D = C), for the drive
+ * cycle too (PID 41); no stored or
  * pending codes; P0420 still permanent; the freeze frame gone (02 00
  * 00 lists PID 02 alone, and it reads 00 00) */
 constexpr ecuio_mock_answer ECUIO_MOCK_CLEARED_ANSWERS[] = {
     {{0x01, 0x01}, 2, {0x41, 0x01, 0x00, 0x07, 0xE5, 0xE5}, 6},
+    {{0x01, 0x41}, 2, {0x41, 0x41, 0x00, 0x07, 0xE5, 0xE5}, 6},
     {{0x03}, 1, {0x43, 0x00}, 2},
     {{0x07}, 1, {0x47, 0x00}, 2},
     {{0x0A}, 1, {0x4A, 0x01, 0x04, 0x20}, 4},

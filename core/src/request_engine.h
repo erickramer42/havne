@@ -11,7 +11,8 @@
 //     its resumption (behind a one-shot already taken), and what each
 //     answer drops; the DID scan's turns, outcomes and rescan;
 //     identification's turns, outcomes, text and report; the
-//     diagnostics list's turns, its one-byte requests, the freeze
+//     diagnostics list's turns, its one-byte requests, PID 41 and its
+//     skip when the bitmaps leave it out, the freeze
 //     frame's follow-ups and values, rescan and read again; a clear's
 //     gate (the report's generation, the engine speed, under the
 //     caller's word the vehicle speed) and its steps;
@@ -191,13 +192,14 @@ static_assert(ECUIO_IDENT_COUNT <= ECUIO_IDENTITY_MAX_ITEMS,
  * the item count, or after 62 <DID high> <DID low>. */
 constexpr uint16_t ECUIO_IDENT_DATA_OFFSET = 3;
 
-/* What diagnostics asks first, in this order (ADR-0037 section 2); the freeze
- * frame's code (02 02 00) and values (02 <pid> 00) join the list as the
- * answers call for them. */
+/* What diagnostics asks first, in this order (ADR-0037 section 2): PID
+ * 41, this drive cycle's monitors, right after PID 01's, unless the
+ * support bitmaps leave it out; the freeze frame's code (02 02 00) and
+ * values (02 <pid> 00) join the list as the answers call for them. */
 constexpr uint8_t ECUIO_DIAG_FIRST[][4] = {
     /* the request, then its length */
-    {0x01, 0x01, 0x00, 2}, {0x03, 0x00, 0x00, 1}, {0x07, 0x00, 0x00, 1},
-    {0x0A, 0x00, 0x00, 1}, {0x02, 0x00, 0x00, 3},
+    {0x01, 0x01, 0x00, 2}, {0x01, 0x41, 0x00, 2}, {0x03, 0x00, 0x00, 1},
+    {0x07, 0x00, 0x00, 1}, {0x0A, 0x00, 0x00, 1}, {0x02, 0x00, 0x00, 3},
 };
 constexpr uint32_t ECUIO_DIAG_FIRST_COUNT =
     sizeof(ECUIO_DIAG_FIRST) / sizeof(ECUIO_DIAG_FIRST[0]);
@@ -1016,10 +1018,17 @@ inline void ecuio_engine_diag_settle(ecuio_request_engine* e, uint32_t c,
     const bool answered = outcome == ECUIO_DIAG_ANSWERED;
     switch (it.request[0]) {
     case 0x01:
-        d.readiness = outcome;
-        d.readiness_nrc = nrc;
-        if (answered && len >= 6) {
-            ecuio_diag_take_readiness(data + 2, &d);
+        if (it.request[1] == 0x41) {
+            d.cycle = outcome;
+            if (answered && len >= 6) {
+                ecuio_diag_take_cycle(data + 2, &d);
+            }
+        } else {
+            d.readiness = outcome;
+            d.readiness_nrc = nrc;
+            if (answered && len >= 6) {
+                ecuio_diag_take_readiness(data + 2, &d);
+            }
         }
         break;
     case 0x03:
@@ -1261,6 +1270,26 @@ inline int32_t ecuio_engine_diag_next(const ecuio_request_engine* e, uint32_t c)
     return -1;
 }
 
+/* Settles each unasked Service 01 item of channel c whose PID the walk's
+ * bitmaps state unsupported, unasked: an ECU that says it lacks PID 41
+ * would only let the request wait out its time */
+inline void ecuio_engine_diag_skip_unsupported(ecuio_request_engine* e,
+                                               uint32_t c)
+{
+    ecuio_engine_channel& ch = e->chans[c];
+    for (uint32_t i = 0; i < ch.diag_count; ++i) {
+        const ecuio_diag_item& it = ch.diag_items[i];
+        if (it.outcome == ECUIO_DIAG_UNASKED && it.request[0] == 0x01 &&
+            it.request[1] != 0 &&
+            ecuio_engine_pid_bit(ch.known, it.request[1]) &&
+            !ecuio_engine_pid_bit(ch.supported, it.request[1])) {
+            ch.diag_index = i;
+            ecuio_engine_diag_settle(e, c, ECUIO_DIAG_UNSUPPORTED, 0, nullptr,
+                                     0);
+        }
+    }
+}
+
 /* ADR-0039 section 3: for each duplicate pair, the demoted PID's request on
  * channel c is slow when the channel's answered bitmaps list both PIDs,
  * and fast otherwise (the pairs are of fast PIDs), so a car that answers
@@ -1445,6 +1474,9 @@ inline int32_t ecuio_engine_due(ecuio_request_engine* e, uint32_t c,
             return ECUIO_ENGINE_ONCE;
         }
         ch.ident_pending = 0;   /* the count had drifted; nothing is unasked */
+    }
+    if (ch.diag_pending > 0 && once_turn) {
+        ecuio_engine_diag_skip_unsupported(e, c);
     }
     if (ch.diag_pending > 0 && once_turn) {
         const int32_t i = ecuio_engine_diag_next(e, c);

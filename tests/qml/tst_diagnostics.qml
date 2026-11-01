@@ -1,7 +1,8 @@
 // File/layer: tests/qml/tst_diagnostics.qml | Qt Quick Test, QML tier
 // Testing: the Diagnostics page (ADR-0037) against the mock's report
 //          (core/src/mock_ecu.h): the empty state before any connect,
-//          the MIL, the three lists' codes, eight complete monitors, the
+//          the MIL, the three lists' codes, eight complete monitors, done
+//          this drive cycle too, the
 //          freeze frame's code and values in either unit system, Read
 //          again (a second read logged), diagnose=0's state, and the last
 //          read kept after a disconnect; the clear (ADR-0038): its
@@ -116,6 +117,9 @@ TestCase {
         const states = texts(find(card, "monitors"), "monitorState")
         compare(states.length, 8, "the mock's eight monitors")
         verify(states.every(s => s === "Complete"), states.join(", "))
+        const cycle = texts(find(card, "monitors"), "monitorCycle")
+        compare(cycle.length, 8, "this drive cycle, beside each")
+        verify(cycle.every(s => s === "Done"), cycle.join(", "))
         compare(find(card, "freezeLabel").text, "Stored by P0301")
         const values = texts(find(card, "freezeValues"), "freezeValue")
         compare(values, [page.valueText(0xB3 * 100 / 255, 1, "%"),
