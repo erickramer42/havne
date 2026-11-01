@@ -1,7 +1,7 @@
 // File/layer: core/src/session.h | internal, C++17, Qt-free; the session
 //             struct behind the opaque ecuio_session_t
 // Testing: UNIT: CoreTest (sessions, callbacks, the decoded values and
-//          their buffers, the absent signals' counts, the info, support, identity and diagnostics
+//          their buffers and def index, the absent signals' counts, the info, support, identity and diagnostics
 //          copies, the timing report's); HARNESS: the J2534, ELM327 and
 //          SocketCAN suites, whose workers write support[], identity[],
 //          diagnostics[] and the timing rows
@@ -13,6 +13,7 @@
 #include "ecuio/internal.h"
 #include "ecuio/profile.h"
 #include "ecuio/signals.h"
+#include "def_index.h"
 #include "uds_generic.h"
 
 #include <atomic>
@@ -48,6 +49,10 @@ struct ecuio_session {
     std::vector<ecuio_value_t> values;
     std::vector<char> text_scratch;
     uint32_t text_slots = 0;
+    /* The defs each frame can match (def_index.h), and room for one
+     * frame's finds, one per def; built and sized with the buffers above */
+    ecuio_def_index def_index;
+    std::vector<uint32_t> def_found;
     /* Per def, beside values (ADR-0039 §6): the frames whose key matched
      * but ended before its field, counted up to
      * ECUIO_ABSENT_AFTER_FRAMES, and whether any carried it. Written by

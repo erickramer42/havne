@@ -11,6 +11,7 @@
 #include <cstdlib>
 #include <memory>
 #include <mutex>
+#include <random>
 #include <string>
 #include <thread>
 #include <vector>
@@ -39,6 +40,7 @@ extern "C" {
 #include "replay_faults.h" /* core/src: ?faults= and its draws */
 #include "mock_drive_cycle.h"
 #include "mock_ecu.h"      /* core/src: the simulated ECU's answers */
+#include "def_index.h"     /* core/src: the defs a frame can match */
 #include "uds_generic.h"   /* core/src: the template set's identity */
 #include "new_counter.h"   /* tests: operator new counted per thread */
 
@@ -4480,4 +4482,60 @@ TEST(CoreTest, LinkPublishesOnlyTransitions)
     EXPECT_EQ(published.load(), -99) << "OK to OK is no transition";
     link_on_read(h, true, false, false);
     EXPECT_EQ(published.load(), ECUIO_ERR_TRANSPORT_HARD_FAILURE);
+}
+
+/* The decode's index (def_index.h) finds, for any frame, exactly the
+ * defs ecuio_def_applies_to_frame takes, in the set's order: sets that
+ * mix unkeyed defs and every key shape on a few IDs, keys shared
+ * between defs, against frames too short for a key, error reports and
+ * IDs no def listens on. The bytes come from a small alphabet so keys
+ * match often. */
+TEST(DefIndexTest, FindsExactlyTheDefsThatApplyInTheSetsOrder)
+{
+    std::mt19937 rng(20261031u);
+    const auto pick = [&rng](uint32_t n) {
+        return static_cast<uint32_t>(rng() % n);
+    };
+    const uint32_t ids[] = {0x100u, 0x7E8u, 0x7E9u};
+    const uint8_t alphabet[] = {0x00u, 0x01u, 0x41u, 0x0Cu};
+    uint64_t found_total = 0;
+    for (int round = 0; round < 200; ++round) {
+        std::vector<ecuio_signal_def_t> defs(1 + pick(40));
+        for (ecuio_signal_def_t& d : defs) {
+            d = ecuio_signal_def_t{};
+            d.message_id = ids[pick(3)];
+            d.mux_length = static_cast<uint8_t>(pick(4));
+            if (d.mux_length > 0) {
+                d.mux_offset = static_cast<uint8_t>(pick(3));
+                for (uint8_t b = 0; b < d.mux_length; ++b) {
+                    d.mux_key = (d.mux_key << 8) | alphabet[pick(4)];
+                }
+            }
+        }
+        ecuio_def_index index;
+        ecuio_def_index_build(index, defs.data(),
+                              static_cast<uint32_t>(defs.size()));
+        std::vector<uint32_t> found(defs.size());
+        for (int f = 0; f < 50; ++f) {
+            ecuio_frame_t frame{};
+            frame.arbitration_id = pick(8) == 0 ? 0x123u : ids[pick(3)];
+            frame.flags = pick(10) == 0 ? ECUIO_FRAME_FLAG_ERROR : 0u;
+            frame.data_length = static_cast<uint16_t>(pick(7));
+            for (uint16_t b = 0; b < frame.data_length; ++b) {
+                frame.data[b] = alphabet[pick(4)];
+            }
+            std::vector<uint32_t> want;
+            for (uint32_t i = 0; i < defs.size(); ++i) {
+                if (ecuio_def_applies_to_frame(&defs[i], &frame)) {
+                    want.push_back(i);
+                }
+            }
+            const uint32_t n = ecuio_def_index_find(index, frame, found.data());
+            ASSERT_EQ(std::vector<uint32_t>(found.begin(), found.begin() + n),
+                      want)
+                << "round " << round << ", frame " << f;
+            found_total += n;
+        }
+    }
+    EXPECT_GT(found_total, 2000u) << "the frames must match defs often";
 }
