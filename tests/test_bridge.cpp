@@ -2649,8 +2649,8 @@ TEST(BridgeTest, AClearAtTheFakesRunningEngineGoesThrough)
 
 /* Moving (ECUIO_FAKE_SPEED_KMH 48), the word on the engine isn't enough:
  * the clear ends unsent and clearMoving names the ECU and the speed, in
- * the unit system; the word on a moving vehicle clears it, with no
- * second file. Canceled instead, nothing more is sent */
+ * the unit system, the log's lines too; the word on a moving vehicle
+ * clears it, with no second file. Canceled instead, nothing more is sent */
 TEST(BridgeTest, AClearWhileMovingAsksOnceMore)
 {
     FakeHooks hooks;
@@ -2702,7 +2702,8 @@ TEST(BridgeTest, AClearWhileMovingAsksOnceMore)
                 spinUntil([&]() { return clear_lines().size() == 2; }, 5000))
                 << log.join('\n').toStdString();
             EXPECT_EQ(clear_lines().at(1).toStdString(),
-                      "ECU 0x7E8 clear: cleared (2000 rpm, 48 km/h)");
+                      "ECU 0x7E8 clear: cleared (2000 rpm, 30 mph)")
+                << "the log in the unit system the clear ended in";
             EXPECT_EQ(
                 log.filter(QStringLiteral("Clearing while moving")).size(), 1);
         } else {
@@ -3919,7 +3920,7 @@ TEST(BridgeTest, DiagnosticsFollowTheSession)
 }
 
 /* A clear's line for each outcome (ADR-0038), as the activity log
- * and a recording's events.log keep it */
+ * and a recording's events.log keep it, a speed in the unit system */
 TEST(BridgeTest, ChannelClearTextNamesEachOutcome)
 {
     ecuio_channel_diagnostics_t d{};
@@ -3928,7 +3929,15 @@ TEST(BridgeTest, ChannelClearTextNamesEachOutcome)
         d.clear = clear;
         d.clear_nrc = nrc;
         d.clear_rpm = rpm;
-        return SessionBridge::channelClearText(d).toStdString();
+        return SessionBridge::channelClearText(d, ECUIO_UNITS_METRIC)
+            .toStdString();
+    };
+    const auto imperial = [&d](uint8_t clear, uint32_t rpm) {
+        d.clear = clear;
+        d.clear_nrc = 0;
+        d.clear_rpm = rpm;
+        return SessionBridge::channelClearText(d, ECUIO_UNITS_IMPERIAL)
+            .toStdString();
     };
     EXPECT_EQ(text(ECUIO_CLEAR_CLEARED, 0, 0), "ECU 0x7E8 clear: cleared");
     EXPECT_EQ(text(ECUIO_CLEAR_REFUSED, 0x22, 0),
@@ -3949,6 +3958,8 @@ TEST(BridgeTest, ChannelClearTextNamesEachOutcome)
     d.clear_kmh = 48;
     EXPECT_EQ(text(ECUIO_CLEAR_MOVING, 0, 2000),
               "ECU 0x7E8 clear: not sent: moving (48 km/h)");
+    EXPECT_EQ(imperial(ECUIO_CLEAR_MOVING, 2000),
+              "ECU 0x7E8 clear: not sent: moving (30 mph)");
     EXPECT_EQ(text(ECUIO_CLEAR_NO_VEHICLE_SPEED, 0, 0),
               "ECU 0x7E8 clear: not sent: no vehicle speed");
     EXPECT_EQ(text(ECUIO_CLEAR_NO_VEHICLE_SPEED, 0x12, 0),
@@ -3956,6 +3967,8 @@ TEST(BridgeTest, ChannelClearTextNamesEachOutcome)
     d.flags = ECUIO_DIAG_CLEAR_RPM | ECUIO_DIAG_CLEAR_KMH;
     EXPECT_EQ(text(ECUIO_CLEAR_CLEARED, 0, 812),
               "ECU 0x7E8 clear: cleared (812 rpm, 48 km/h)");
+    EXPECT_EQ(imperial(ECUIO_CLEAR_CLEARED, 812),
+              "ECU 0x7E8 clear: cleared (812 rpm, 30 mph)");
     EXPECT_EQ(text(ECUIO_CLEAR_REFUSED, 0x22, 812),
               "ECU 0x7E8 clear: refused (7F 04 22): this ECU won't clear with "
               "the engine running: stop and turn it off, then try again");
