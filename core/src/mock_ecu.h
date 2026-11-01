@@ -5,6 +5,7 @@
 //          CoreTest.MockDiagnoseOffReportsNone,
 //          CoreTest.MockEcuClearsOnlyWithTheEngineStopped (the clear's
 //          engine speed and 04, ADR-0038),
+//          .MockEcuClearsAMovingCarOnlyWithTheCallersWord (01 0D),
 //          CoreTest.MockClearsTheReportLikeTheFakeEcu (through the worker)
 //
 // The simulated car's engine ECU (mock://, ADR-0037) for the diagnostics
@@ -79,8 +80,9 @@ struct ecuio_mock_ecu {
 
 /* The ECU's reply to q into out (8 bytes), its length, or 0: a request
  * it lacks goes unanswered, as a silent ECU's would. 01 0C reads the
- * engine speed (unanswered with no engine to read); 04 clears and
- * answers 44. */
+ * engine speed and 01 0D the vehicle speed (unanswered with no engine
+ * to read); 04 clears and answers 44, the engine running or not, as
+ * some ECUs do. */
 inline uint8_t ecuio_mock_ecu_reply(ecuio_mock_ecu* ecu, const ecuio_request& q,
                                     uint8_t* out)
 {
@@ -95,6 +97,19 @@ inline uint8_t ecuio_mock_ecu_reply(ecuio_mock_ecu* ecu, const ecuio_request& q,
         out[2] = static_cast<uint8_t>(raw >> 8);
         out[3] = static_cast<uint8_t>(raw);
         return 4;
+    }
+    if (q.len == 2 && q.bytes[0] == ECUIO_CLEAR_VEHICLE_SPEED_REQUEST[0] &&
+        q.bytes[1] == ECUIO_CLEAR_VEHICLE_SPEED_REQUEST[1]) {
+        if (ecu->engine == nullptr) {
+            return 0;
+        }
+        const float kmh = ecu->engine->speed_kmh;
+        out[0] = 0x41;
+        out[1] = 0x0D;
+        out[2] = static_cast<uint8_t>(kmh <= 0.0f     ? 0
+                                      : kmh >= 255.0f ? 255
+                                                      : kmh + 0.5f);
+        return 3;
     }
     if (q.len == 1 && q.bytes[0] == ECUIO_CLEAR_SERVICE) {
         ecu->cleared = true;

@@ -49,14 +49,18 @@ inline double freeze_value(const ecuio_channel_diagnostics_t& d, uint32_t id)
     return std::nan("");
 }
 
+/* What a clear read on its way (the engine's and the vehicle's speeds),
+ * which a clear's own test checks: not the ECU's report */
+constexpr uint32_t kClearReadings = ECUIO_DIAG_CLEAR_RPM | ECUIO_DIAG_CLEAR_KMH;
+
 /* The fake's whole report before a clear: the MIL on, three stored
  * codes, three pending, one permanent, every monitor complete, and a
  * freeze frame stored by P0301 at 3000 rpm */
 inline void expect_report(const ecuio_channel_diagnostics_t& d)
 {
-    EXPECT_EQ(d.flags, ECUIO_DIAG_ASKED | ECUIO_DIAG_COMPLETE |
-                           ECUIO_DIAG_READINESS | ECUIO_DIAG_MIL_ON |
-                           ECUIO_DIAG_FREEZE_FRAME);
+    EXPECT_EQ(d.flags & ~kClearReadings,
+              ECUIO_DIAG_ASKED | ECUIO_DIAG_COMPLETE | ECUIO_DIAG_READINESS |
+                  ECUIO_DIAG_MIL_ON | ECUIO_DIAG_FREEZE_FRAME);
     EXPECT_EQ(d.readiness, ECUIO_DIAG_ANSWERED);
     EXPECT_EQ(d.dtc_count, 3u);
     EXPECT_EQ(d.monitor_count, 8u);
@@ -85,7 +89,7 @@ inline void expect_report(const ecuio_channel_diagnostics_t& d)
  * and byte C's monitors incomplete again, byte B's complete */
 inline void expect_cleared_report(const ecuio_channel_diagnostics_t& d)
 {
-    EXPECT_EQ(d.flags,
+    EXPECT_EQ(d.flags & ~kClearReadings,
               ECUIO_DIAG_ASKED | ECUIO_DIAG_COMPLETE | ECUIO_DIAG_READINESS);
     EXPECT_EQ(d.clear, ECUIO_CLEAR_CLEARED);
     EXPECT_EQ(d.dtc_count, 0u);

@@ -109,6 +109,7 @@ struct ecuio_session {
      * a worker that reads diagnostics takes each new one
      * (ecuio_take_clear_requests) */
     std::atomic<uint32_t> clear_generation[ECUIO_SESSION_INFO_MAX_CHANNELS]{};
+    std::atomic<uint32_t> clear_flags[ECUIO_SESSION_INFO_MAX_CHANNELS]{};
     std::atomic<uint32_t> clear_requests[ECUIO_SESSION_INFO_MAX_CHANNELS]{};
 };
 

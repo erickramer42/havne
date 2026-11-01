@@ -606,11 +606,24 @@ ecuio_status_t ecuio_session_clear_diagnostics(ecuio_session_t* session,
                                                uint32_t channel,
                                                uint32_t generation)
 {
+    return ecuio_session_clear_diagnostics_with(session, channel, generation,
+                                                0);
+}
+
+ecuio_status_t ecuio_session_clear_diagnostics_with(ecuio_session_t* session,
+                                                    uint32_t channel,
+                                                    uint32_t generation,
+                                                    uint32_t flags)
+{
     if (session == nullptr) {
         return ECUIO_ERR_NULL_ARGUMENT;
     }
     if (session->closed.load()) {
         return ECUIO_ERR_SESSION_CLOSED;
+    }
+    if ((flags & ~(ECUIO_CLEAR_ALLOW_RUNNING | ECUIO_CLEAR_ALLOW_MOVING)) !=
+        0) {
+        return ECUIO_ERR_INVALID_ARGUMENT;
     }
     {
         std::lock_guard<std::mutex> lock(session->support_mutex);
@@ -624,8 +637,10 @@ ecuio_status_t ecuio_session_clear_diagnostics(ecuio_session_t* session,
             return ECUIO_ERR_REPORT_CHANGED;
         }
     }
-    /* The generation first: a worker that sees the count moved reads it */
+    /* The generation and flags first: a worker that sees the count moved
+     * reads them */
     session->clear_generation[channel].store(generation);
+    session->clear_flags[channel].store(flags);
     session->clear_requests[channel].fetch_add(1);
     return ECUIO_OK;
 }
