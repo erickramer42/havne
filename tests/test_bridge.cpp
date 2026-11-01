@@ -23,6 +23,7 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QPointer>
 #include <QRegularExpression>
 #include <QSet>
 #include <QSettings>
@@ -46,7 +47,9 @@
 
 #include "blepicker.h"
 #include "btconnect.h"
+#include "btretire.h"
 #include "carryover.h"
+#include "fake_bt_socket.h"
 #include "sessionbridge.h"   // SessionBridge + FrameListModel
 #include <ecuio/profile.h>
 #include <ecuio/signals.h>
@@ -460,6 +463,64 @@ TEST(BridgeTest, BtConnectIgnoresResultsWithNoConnectRunning)
     EXPECT_EQ(r.lost(), BtAction::None);
     EXPECT_EQ(r.close(), BtAction::None);
     EXPECT_FALSE(r.up());
+}
+
+namespace {
+
+using BtState = FakeBtSocket::SocketState;
+
+/* Runs the deletions deleteLater posted, and for ms the timers too */
+void runDeletions(int ms = 0)
+{
+    QElapsedTimer t;
+    t.start();
+    do {
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 10);
+        QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+    } while (t.elapsed() < ms);
+}
+
+} // namespace
+
+// An abort that leaves the socket unconnected (mid-connect, or on a
+// platform whose abort is immediate): it goes at once
+TEST(BridgeTest, BtRetireDeletesAnUnconnectedSocketAtOnce)
+{
+    QPointer<FakeBtSocket> s = new FakeBtSocket(BtState::UnconnectedState);
+    retireBtSocket(s.data());
+    runDeletions();
+    EXPECT_TRUE(s.isNull());
+}
+
+// Android's abort on an open link: the socket is still being written
+// into by Qt's reader thread until it says unconnected. It outlives the
+// link that owned it and every other state, then goes.
+TEST(BridgeTest, BtRetireKeepsASocketUntilItSaysUnconnected)
+{
+    auto* link = new QObject;
+    QPointer<FakeBtSocket> s = new FakeBtSocket(BtState::ConnectedState, link);
+    retireBtSocket(s.data(), 60000);
+    delete link;
+    runDeletions();
+    ASSERT_FALSE(s.isNull()) << "deleted with the link, or at once";
+    EXPECT_EQ(s->parent(), nullptr);
+    s->setState(BtState::ClosingState);
+    runDeletions();
+    ASSERT_FALSE(s.isNull()) << "deleted before it said unconnected";
+    s->setState(BtState::UnconnectedState);
+    runDeletions();
+    EXPECT_TRUE(s.isNull());
+}
+
+// A reader that never stops: the fallback ends it
+TEST(BridgeTest, BtRetireFallsBackWhenItNeverSaysUnconnected)
+{
+    QPointer<FakeBtSocket> s = new FakeBtSocket(BtState::ConnectedState);
+    retireBtSocket(s.data(), 50);
+    runDeletions();
+    ASSERT_FALSE(s.isNull());
+    runDeletions(500);
+    EXPECT_TRUE(s.isNull());
 }
 
 TEST(BridgeTest, FramesMarshalFromWorkerToGuiThread)

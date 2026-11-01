@@ -23,6 +23,7 @@ qt_add_library(app_ui STATIC
     blepicker.h
     btconnect.cpp
     btconnect.h
+    btretire.h
     bluetoothdevices.cpp
     bluetoothdevices.h
     bridgesingleton.h
