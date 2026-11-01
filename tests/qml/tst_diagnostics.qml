@@ -5,7 +5,10 @@
 //          freeze frame's code and values in either unit system, Read
 //          again (a second read logged), diagnose=0's state, and the last
 //          read kept after a disconnect; the clear (ADR-0038): its
-//          confirmation, Cancel sending nothing, Clear once at the mock's
+//          confirmation (naming the ECUs Bridge.clearTargets lists, the
+//          bridge's own rule for a clear; that the title reads that list
+//          and no other, by code reading: the mock has one ECU, so any
+//          list names it), Cancel sending nothing, Clear once at the mock's
 //          stopped engine (its first 15 s), and on Windows the fake's
 //          running engine leaving the codes. The entries themselves are
 //          test_bridge's (BridgeTest.DiagnosticsEntryIsWhatThePageShows,
@@ -149,6 +152,10 @@ TestCase {
         clear.clicked()
         verify(panel.visible, "the confirmation opens")
         verify(!clear.enabled && !find(page, "readAgain").enabled, "both wait for it")
+        compare(Bridge.clearTargets, ["0x7E8"], "the mock's one ECU")
+        compare(find(page, "clearConfirmTitle").text,
+                "Clear the trouble codes of ECU 0x7E8?",
+                "the ECUs the bridge clears")
         const words = find(page, "clearConfirmText").text
         for (const part of ["stored and pending codes", "freeze frame",
                             "check-engine light off", "back to incomplete",

@@ -6,6 +6,7 @@
 //          Elm327SessionTest pins the URI and its refusals, the setup,
 //          the session info, the requests, multi-frame replies,
 //          diagnostics (ADR-0037: the report, Read again, ?diagnose=0),
+//          the signals core lists unsupported (ADR-0039 section 6),
 //          link health and recovery, and that the worker allocates
 //          nothing per frame. Elm327PortTest (POSIX only) runs the OS's termios port
 //          against the fake on a pseudo-terminal; Elm327TcpTest (every
@@ -36,6 +37,7 @@
 #include <filesystem>
 #include <fstream>
 #include <functional>
+#include <initializer_list>
 #include <memory>
 #include <mutex>
 #include <sstream>
@@ -646,6 +648,65 @@ TEST_F(Elm327SessionTest, TheProbeWalksTheChainAndReportsIt)
     EXPECT_EQ(fake_count("01801"), 1u);
     EXPECT_EQ(fake_count("01A01"), 1u);
     EXPECT_EQ(fake_count("01C01"), 0u) << "past A0's last bit";
+}
+
+namespace {
+
+/* PIDs out of the fakes' ECU for a scope (fake_ecu::withheld_pids):
+ * its bitmaps leave them out and asking gets 7F 01 12 */
+struct Withheld {
+    explicit Withheld(std::initializer_list<unsigned> pids)
+    {
+        for (unsigned p : pids) {
+            fake_ecu::withheld_pids()[p / 32] |= 1u << (p % 32);
+        }
+    }
+    ~Withheld()
+    {
+        for (std::atomic<uint32_t>& w : fake_ecu::withheld_pids()) {
+            w = 0;
+        }
+    }
+};
+
+} // namespace
+
+/* ADR-0039 section 6 end to end: the probe reads bitmaps that leave out
+ * the PIDs the ECU withholds, and core lists exactly their signals
+ * unsupported, in the set's order */
+TEST_F(Elm327SessionTest, TheSignalsOfAWithheldPidAreUnsupported)
+{
+    Withheld w({0x0D, 0x46});
+    Session s;
+    ASSERT_EQ(s.create(uri("?identify=0&diagnose=0")), ECUIO_OK);
+    s.start();
+    ecuio_channel_support_t sup{};
+    ASSERT_TRUE(wait_for(
+        [&] {
+            return ecuio_session_get_channel_support(s.s, 0, &sup) ==
+                       ECUIO_OK &&
+                   (sup.flags & ECUIO_SUPPORT_COMPLETE) != 0;
+        },
+        5000));
+    const ecuio_signal_set_t* set = ecuio_session_signal_set(s.s);
+    ASSERT_NE(set, nullptr);
+    std::vector<uint16_t> expected;
+    for (uint32_t i = 0; i < set->count; ++i) {
+        const ecuio_signal_def_t& d = set->defs[i];
+        const unsigned pid = d.mux_key & 0xFFu;
+        if (d.mux_length == 2 && (d.mux_key >> 8) == 0x41 &&
+            (pid == 0x0D || pid == 0x46)) {
+            expected.push_back(d.id);
+        }
+    }
+    ASSERT_EQ(expected.size(), 2u) << "a def each for 0D and 46";
+    std::vector<uint16_t> ids(set->count);
+    uint32_t count = 0;
+    ASSERT_EQ(ecuio_session_get_unsupported_signals(
+                  s.s, ids.data(), static_cast<uint32_t>(ids.size()), &count),
+              ECUIO_OK);
+    ids.resize(count);
+    EXPECT_EQ(ids, expected);
 }
 
 /* Reply timing (ADR-0042) through an ELM327: a row per request in the

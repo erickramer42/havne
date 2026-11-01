@@ -7,7 +7,11 @@
 //          against direct decodes, a text slot each, the frame
 //          callbacks first; the defs each frame is checked against:
 //          DefIndexTest), the absent signals
-//          (CoreTest.AFieldPastEveryReplyIsAbsent), a packed reply's
+//          (CoreTest.AFieldPastEveryReplyIsAbsent), the identity
+//          report's VIN (CoreTest.TheVinIsService09sThenF190s), the
+//          unsupported signals
+//          (PidSupportTest, test_obd2; the call's contract:
+//          CoreTest.TheMockHasNoUnsupportedSignals), a packed reply's
 //          records (CoreTest.APacked*), the error strings, a clear's refusals
 //          (CoreTest.AClearNeedsTheReportTheCallerSaved); the trouble code's and
 //          the monitors' names (DiagnosticsTest, test_obd2);
@@ -25,6 +29,7 @@
 #include "request_engine.h"   /* ECUIO_IDENT_REQUESTS, for the names */
 #include "diagnostics.h"      /* the trouble codes' and monitors' words */
 #include "obd2_reply.h"      /* a packed Service 01 reply's records */
+#include "pid_support.h"     /* the signals their ECU doesn't support */
 #include "uri_query.h"
 #include "error_detail.h"
 #include "probes.h"
@@ -253,13 +258,6 @@ namespace {
                                                std::memory_order_relaxed);
             }
         }
-    }
-
-    /* A Service 01 reply's key: 41 <PID>, at the payload's start */
-    bool service01_keyed(const ecuio_signal_def_t& def)
-    {
-        return def.mux_offset == 0 && def.mux_length == 2 &&
-               (def.mux_key >> 8) == 0x41u;
     }
 
     /* Decodes frame (len bytes of it) against set into the session's
@@ -512,6 +510,27 @@ ecuio_status_t ecuio_session_get_absent_signals(
     return ECUIO_OK;
 }
 
+ecuio_status_t ecuio_session_get_unsupported_signals(
+    const ecuio_session_t* session,
+    uint16_t* ids,
+    uint32_t capacity,
+    uint32_t* count)
+{
+    if (session == nullptr || count == nullptr ||
+        (ids == nullptr && capacity > 0)) {
+        return ECUIO_ERR_NULL_ARGUMENT;
+    }
+    *count = 0;
+    const ecuio_signal_set_t* set = session->active_signal_set;
+    if (set == nullptr) {
+        return ECUIO_OK;
+    }
+    std::lock_guard<std::mutex> lock(session->support_mutex);
+    *count = ecuio_unsupported_signals(*set, session->support,
+                                       session->support_count, ids, capacity);
+    return ECUIO_OK;
+}
+
 ecuio_status_t ecuio_session_get_unsplit_replies(const ecuio_session_t* session,
                                                 uint64_t* count)
 {
@@ -624,6 +643,58 @@ const char* ecuio_identity_request_name(const uint8_t* request, uint8_t length)
         }
     }
     return "";
+}
+
+ecuio_status_t ecuio_identity_vin(const ecuio_channel_identity_t* identity,
+                                  char* out, uint32_t out_cap)
+{
+    if (identity == nullptr || out == nullptr) {
+        return ECUIO_ERR_NULL_ARGUMENT;
+    }
+    if (out_cap < ECUIO_VIN_TEXT_LEN) {
+        return ECUIO_ERR_INVALID_ARGUMENT;
+    }
+    char from_service09[ECUIO_VIN_TEXT_LEN] = "";
+    char from_f190[ECUIO_VIN_TEXT_LEN] = "";
+    const uint32_t items =
+        std::min<uint32_t>(identity->items, ECUIO_IDENTITY_MAX_ITEMS);
+    for (uint32_t i = 0; i < items; ++i) {
+        const ecuio_identity_item_t& it = identity->list[i];
+        char* into = nullptr;
+        if (it.length == 2 && it.request[0] == 0x09 && it.request[1] == 0x02) {
+            into = from_service09;
+        } else if (it.length == 3 && it.request[0] == 0x22 &&
+                   it.request[1] == 0xF1 && it.request[2] == 0x90) {
+            into = from_f190;
+        }
+        if (into == nullptr || it.outcome != ECUIO_IDENTITY_ANSWERED) {
+            continue;
+        }
+        char vin[ECUIO_VIN_TEXT_LEN];
+        uint32_t n = 0;
+        bool fits = true;
+        for (uint32_t k = 0; k < it.text_length && k < ECUIO_IDENTITY_TEXT_LEN;
+             ++k) {
+            char c = it.text[k];
+            if (c >= 'a' && c <= 'z') {
+                c = static_cast<char>(c - 'a' + 'A');
+            } else if (!((c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9'))) {
+                continue;
+            }
+            if (n == ECUIO_VIN_TEXT_LEN - 1) {
+                fits = false;
+                break;
+            }
+            vin[n++] = c;
+        }
+        if (fits && n == ECUIO_VIN_TEXT_LEN - 1) {
+            vin[n] = '\0';
+            std::memcpy(into, vin, sizeof vin);
+        }
+    }
+    const char* vin = from_service09[0] != '\0' ? from_service09 : from_f190;
+    std::memcpy(out, vin, ECUIO_VIN_TEXT_LEN);
+    return ECUIO_OK;
 }
 
 ecuio_status_t ecuio_dtc_format(uint16_t code, char* out, uint32_t out_cap)
@@ -861,7 +932,7 @@ ecuio_status_t ecuio_session_create(
             s->def_found.resize(profile_set->count);
             for (uint32_t i = 0; i < profile_set->count; ++i) {
                 const ecuio_signal_def_t& d = profile_set->defs[i];
-                if (service01_keyed(d) &&
+                if (ecuio_service01_keyed(d) &&
                     std::find(s->service01_ids.begin(), s->service01_ids.end(),
                               d.message_id) == s->service01_ids.end()) {
                     s->service01_ids.push_back(d.message_id);

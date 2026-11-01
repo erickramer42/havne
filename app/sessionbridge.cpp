@@ -6,9 +6,8 @@
 //          worker (BridgeTest.Values*, .RecordingHoldsEveryValueCoreDecodes),
 //          each window's envelope at its frames' times
 //          (BridgeTest.AWindow*, .TheChartKeepsTheFixturesPeak), rows by
-//          id, the signal model's roles and age, the rows an ECU's
-//          bitmaps mark unsupported or core reports absent, hidden from
-//          Live's filtered view
+//          id, the signal model's roles and age, the rows core reports
+//          unsupported or absent, hidden from Live's filtered view
 //          (BridgeTest.LiveHides*),
 //          refresh, link-state mapping, the activity log's session,
 //          ECU, diagnostics and delivery lines (the ELM327 session line too,
@@ -46,6 +45,7 @@
 #include "ecuio/j2534.h"
 #include "ecuio/profile.h"
 #include "ecuio/serial.h"
+#include "ecuio/signal_sets.h"
 #include "ecuio/socketcan.h"
 
 #include <QMetaObject>
@@ -333,13 +333,7 @@ void SignalListModel::setSignalSet(const ecuio_signal_set_t* set)
         e.decimals = set->defs[i].decimal_places;
         e.isText = set->defs[i].kind == ECUIO_VALUE_TEXT ||
                    set->defs[i].kind == ECUIO_VALUE_HEX;
-        e.messageId = set->defs[i].message_id;
-        // A Service 01 reply's key: 41 <PID>, at the payload's start
-        const ecuio_signal_def_t& d = set->defs[i];
-        if (d.mux_offset == 0 && d.mux_length == 2 && (d.mux_key >> 8) == 0x41u) {
-            e.pid = static_cast<uint8_t>(d.mux_key & 0xFFu);
-        }
-        e.plotRank = d.plot_rank;
+        e.plotRank = set->defs[i].plot_rank;
         m_ranked = m_ranked || (e.plotRank != 0 && !e.isText);
         // judgePlotted's, below; a text row has nothing to plot
         e.subscribed = false;
@@ -677,27 +671,15 @@ void SignalListModel::judgePlotted()
     }
 }
 
-bool SignalListModel::pidMarkedUnsupported(const ecuio_channel_support_t& s, uint8_t pid)
-{
-    if (pid == 0) {
-        return false;
-    }
-    const unsigned range = (pid - 1u) / 0x20u;
-    if ((s.ranges & (1u << range)) == 0) {
-        return false;
-    }
-    return (s.pid_bitmap[(pid - 1u) / 8u] & (0x80u >> ((pid - 1u) % 8u))) == 0;
-}
-
-void SignalListModel::applySupport(const ecuio_channel_support_t* reports, size_t count)
+void SignalListModel::applyUnsupported(const std::vector<uint16_t>& ids)
 {
     for (Entry& e : m_entries) {
         e.unsupported = false;
-        for (size_t i = 0; e.pid != 0 && i < count; ++i) {
-            if (reports[i].generation != 0 && reports[i].rx_id == e.messageId) {
-                e.unsupported = pidMarkedUnsupported(reports[i], e.pid);
-                break;
-            }
+    }
+    for (uint16_t id : ids) {
+        const int row = m_rowOfId.value(id, -1);
+        if (row >= 0) {
+            m_entries[static_cast<size_t>(row)].unsupported = true;
         }
     }
     rejudgeHidden();
@@ -849,6 +831,31 @@ void SessionBridge::destroySessionLocked()
 QString SessionBridge::coreVersion() const
 {
     return QString::fromUtf8(ecuio_version_string());
+}
+
+QVariantMap SessionBridge::gaugeSignals() const
+{
+    const auto ids = [](int mock, int obd2) {
+        return QVariantList{mock, obd2};
+    };
+    return {
+        {QStringLiteral("rpm"),
+         ids(ECUIO_MOCK_SIG_RPM_ID, ECUIO_OBD2_SIG_RPM_ID)},
+        {QStringLiteral("speed"),
+         ids(ECUIO_MOCK_SIG_SPEED_ID, ECUIO_OBD2_SIG_SPEED_ID)},
+        {QStringLiteral("coolant"),
+         ids(ECUIO_MOCK_SIG_COOLANT_ID, ECUIO_OBD2_SIG_COOLANT_TEMP_ID)},
+        {QStringLiteral("oil"),
+         ids(ECUIO_MOCK_SIG_OIL_ID, ECUIO_OBD2_SIG_OIL_TEMP_ID)},
+        {QStringLiteral("iat"),
+         ids(ECUIO_MOCK_SIG_IAT_ID, ECUIO_OBD2_SIG_IAT_ID)},
+        {QStringLiteral("maf"),
+         ids(ECUIO_MOCK_SIG_MAF_ID, ECUIO_OBD2_SIG_MAF_ID)},
+        {QStringLiteral("throttle"),
+         ids(ECUIO_MOCK_SIG_THROTTLE_ID, ECUIO_OBD2_SIG_THROTTLE_ID)},
+        {QStringLiteral("load"),
+         ids(ECUIO_MOCK_SIG_LOAD_ID, ECUIO_OBD2_SIG_ENGINE_LOAD_ID)},
+    };
 }
 
 QString SessionBridge::statusString(int statusCode) const
@@ -1160,6 +1167,7 @@ void SessionBridge::applyConnectedState(ecuio_session_t* session, const QString&
     }
     const ecuio_signal_set_t* set = ecuio_session_signal_set(session);
     m_absentRead.assign((set != nullptr && set->defs != nullptr) ? set->count : 0u, 0);
+    m_unsupportedRead.assign(m_absentRead.size(), 0);
     m_absentIds.clear();
     for (uint32_t& g : m_identityGeneration) {
         g = 0;
@@ -2090,12 +2098,10 @@ void SessionBridge::pollChannelSupport()
     if (!m_connected.load(std::memory_order_acquire) || m_session == nullptr) {
         return;
     }
-    ecuio_channel_support_t reports[ECUIO_SESSION_INFO_MAX_CHANNELS] = {};
     bool changed = false;
     for (uint32_t c = 0; c < m_channelCount; ++c) {
-        ecuio_channel_support_t& s = reports[c];
+        ecuio_channel_support_t s{};
         if (ecuio_session_get_channel_support(m_session, c, &s) != ECUIO_OK) {
-            s = ecuio_channel_support_t{};   // judges nothing
             continue;
         }
         if (s.generation == m_supportGeneration[c]) {
@@ -2105,9 +2111,17 @@ void SessionBridge::pollChannelSupport()
         changed = true;
         emit logMessage(channelSupportText(s));
     }
-    // Live hides the rows the reports mark unsupported (ADR-0039 §6)
-    if (changed) {
-        m_signalModel->applySupport(reports, m_channelCount);
+    // Live hides the rows core judges unsupported from the reports
+    // (ADR-0039 section 6)
+    uint32_t count = 0;
+    if (changed && ecuio_session_get_unsupported_signals(
+                       m_session, m_unsupportedRead.data(),
+                       static_cast<uint32_t>(m_unsupportedRead.size()),
+                       &count) == ECUIO_OK) {
+        count = std::min<uint32_t>(
+            count, static_cast<uint32_t>(m_unsupportedRead.size()));
+        m_signalModel->applyUnsupported(std::vector<uint16_t>(
+            m_unsupportedRead.begin(), m_unsupportedRead.begin() + count));
     }
 }
 
@@ -2145,26 +2159,14 @@ QString SessionBridge::channelSupportText(const ecuio_channel_support_t& s)
 
     QStringList parts;
     if ((s.flags & ECUIO_SUPPORT_PROBED) != 0) {
-        /* Data PIDs: the chain's own (0x20, 0x40, ...) don't count, as
-         * the first vehicle's sheet counts them */
-        int pids = 0;
-        for (uint32_t pid = 1; pid <= 0xFF; ++pid) {
-            if (pid % 0x20 != 0 &&
-                (s.pid_bitmap[(pid - 1) / 8] & (0x80u >> ((pid - 1) % 8))) != 0) {
-                ++pids;
-            }
-        }
-        uint32_t top = 0;
-        for (uint32_t i = 0; i < 8; ++i) {
-            if ((s.ranges & (1u << i)) != 0) {
-                top = 0x20u * (i + 1);
-            }
-        }
+        // core's count of the data PIDs, and the last its bitmaps cover
         if ((s.flags & ECUIO_SUPPORT_COMPLETE) != 0) {
-            parts << QStringLiteral("supports %1 PIDs").arg(pids);
+            parts << QStringLiteral("supports %1 PIDs").arg(s.pids_supported);
         } else if (s.ranges != 0) {
-            parts << QStringLiteral("supports %1 PIDs up to %2, no answer past that")
-                         .arg(pids).arg(hexId(top));
+            parts << QStringLiteral(
+                         "supports %1 PIDs up to %2, no answer past that")
+                         .arg(s.pids_supported)
+                         .arg(hexId(s.pids_through));
         } else {
             parts << QStringLiteral("no answer to the supported-PID query");
         }
@@ -2260,7 +2262,11 @@ void SessionBridge::pollChannelIdentity()
         // The vehicle is the first channel's ECU's VIN (ADR-0027 §3);
         // a recovery's re-asks settle on the same one and say nothing
         if (c == 0) {
-            const QString vin = vinFromIdentity(s);
+            char text[ECUIO_VIN_TEXT_LEN];
+            const QString vin =
+                ecuio_identity_vin(&s, text, sizeof text) == ECUIO_OK
+                    ? QString::fromLatin1(text)
+                    : QString();
             if (!vin.isEmpty() && vin != m_vin) {
                 m_vin = vin;
                 emit vehicleIdentified();
@@ -2332,6 +2338,23 @@ void SessionBridge::readDiagnostics()
     }
 }
 
+bool SessionBridge::clearTarget(const ecuio_channel_diagnostics_t& report)
+{
+    return (report.flags & ECUIO_DIAG_COMPLETE) != 0 &&
+           (report.flags & ECUIO_DIAG_CLEARING) == 0;
+}
+
+QStringList SessionBridge::clearTargets() const
+{
+    QStringList ecus;
+    for (uint32_t c = 0; c < m_diagnosticsShownCount; ++c) {
+        if (clearTarget(m_diagnosticsShown[c])) {
+            ecus << hexId(m_diagnosticsShown[c].rx_id);
+        }
+    }
+    return ecus;
+}
+
 /* ADR-0038: what a clear erases stays on record, so the reports go to a
  * file of their own before anything is sent, whether or not the session
  * records; each ECU is then cleared at the generation that file holds,
@@ -2348,8 +2371,7 @@ QString SessionBridge::clearDiagnostics()
         ecuio_channel_diagnostics_t s{};
         if (ecuio_session_get_channel_diagnostics(m_session, c, &s) ==
                 ECUIO_OK &&
-            (s.flags & ECUIO_DIAG_COMPLETE) != 0 &&
-            (s.flags & ECUIO_DIAG_CLEARING) == 0) {
+            clearTarget(s)) {
             reports[n] = s;
             channels[n] = c;
             ++n;
@@ -2601,38 +2623,6 @@ SessionBridge::diagnosticsEntry(const ecuio_channel_diagnostics_t& s,
     m[QStringLiteral("clearNrc")] = clearNrc;
     m[QStringLiteral("clearRpm")] = static_cast<int>(s.clear_rpm);
     return m;
-}
-
-QString SessionBridge::vinFromIdentity(const ecuio_channel_identity_t& identity)
-{
-    QString fromService09;
-    QString fromF190;
-    const uint32_t items =
-        std::min<uint32_t>(identity.items, ECUIO_IDENTITY_MAX_ITEMS);
-    for (uint32_t i = 0; i < items; ++i) {
-        const ecuio_identity_item_t& it = identity.list[i];
-        if (it.outcome != ECUIO_IDENTITY_ANSWERED) {
-            continue;
-        }
-        QString vin;
-        for (uint8_t k = 0; k < it.text_length && k < ECUIO_IDENTITY_TEXT_LEN;
-             ++k) {
-            const QChar ch = QLatin1Char(it.text[k]);
-            if (ch.isLetterOrNumber() && ch.unicode() < 0x80) {
-                vin += ch.toUpper();
-            }
-        }
-        if (vin.size() != 17) {
-            continue;
-        }
-        if (it.length == 2 && it.request[0] == 0x09 && it.request[1] == 0x02) {
-            fromService09 = vin;
-        } else if (it.length == 3 && it.request[0] == 0x22 &&
-                   it.request[1] == 0xF1 && it.request[2] == 0x90) {
-            fromF190 = vin;
-        }
-    }
-    return fromService09.isEmpty() ? fromF190 : fromService09;
 }
 
 QString SessionBridge::vinKey(const QString& salt) const

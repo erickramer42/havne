@@ -2,7 +2,8 @@
 // Testing: tests/qml/tst_diagnostics.qml (the mock's report: the MIL,
 //          each list's codes, the monitors, the freeze frame's values in
 //          either unit system, Read again, ?diagnose=0 and the empty
-//          state; the clear's confirmation, Cancel sending nothing, a
+//          state; the clear's confirmation (naming the bridge's
+//          targets), Cancel sending nothing, a
 //          clear at the mock's stopped engine, and on Windows the fake's
 //          running engine), which finds items by objectName; the entries
 //          themselves and the clear's save by test_bridge
@@ -41,8 +42,10 @@ Page {
     property string savedTo: ""
     property bool clearFailed: false
     readonly property bool clearing: ecus.some(e => e.clearing)
-    // A clear needs what Read again does, and none under way
-    readonly property bool canClear: canReadAgain && !clearing
+    // A clear needs a session, an ECU the bridge would clear, and none
+    // under way
+    readonly property bool canClear: Bridge.connected &&
+        Bridge.clearTargets.length > 0 && !clearing
 
     Connections {
         target: Bridge
@@ -53,11 +56,6 @@ Page {
                 root.clearFailed = false
             }
         }
-    }
-
-    // The ECUs a clear goes to: each whose read has completed
-    function clearTargets() {
-        return ecus.filter(e => e.asked && e.complete).map(e => e.ecu)
     }
 
     function clearCodes() {
@@ -256,9 +254,11 @@ Page {
                 spacing: 10
 
                 Label {
+                    objectName: "clearConfirmTitle"
                     Layout.fillWidth: true
                     wrapMode: Text.Wrap
-                    text: qsTr("Clear the trouble codes of ECU %1?").arg(root.clearTargets().join(", "))
+                    // The bridge's list, the one clearDiagnostics sends to
+                    text: qsTr("Clear the trouble codes of ECU %1?").arg(Bridge.clearTargets.join(", "))
                     font.weight: Font.DemiBold
                     color: Theme.text
                 }

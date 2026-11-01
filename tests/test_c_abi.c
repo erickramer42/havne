@@ -63,7 +63,8 @@ typedef char abi_support_size_check[(sizeof(ecuio_channel_support_t) == 152) ? 1
 typedef char abi_support_bitmap_check[(offsetof(ecuio_channel_support_t, pid_bitmap) == 24) ? 1 : -1];
 typedef char abi_support_list_check[(offsetof(ecuio_channel_support_t, dropped_list) == 56) ? 1 : -1];
 typedef char abi_support_scan_check[(offsetof(ecuio_channel_support_t, scan_total) == 120) ? 1 : -1];
-typedef char abi_support_reserved_check[(offsetof(ecuio_channel_support_t, reserved) == 132) ? 1 : -1];
+typedef char abi_support_pids_check[(offsetof(ecuio_channel_support_t, pids_supported) == 132) ? 1 : -1];
+typedef char abi_support_reserved_check[(offsetof(ecuio_channel_support_t, reserved) == 136) ? 1 : -1];
 typedef char abi_identity_item_check[(sizeof(ecuio_identity_item_t) == 72) ? 1 : -1];
 typedef char abi_identity_size_check[(sizeof(ecuio_channel_identity_t) == 1184) ? 1 : -1];
 typedef char abi_identity_list_check[(offsetof(ecuio_channel_identity_t, list) == 32) ? 1 : -1];
@@ -147,6 +148,10 @@ int main(void)
         ecuio_unregister_values_callback(NULL, NULL, NULL) !=
             ECUIO_ERR_NULL_ARGUMENT ||
         ecuio_session_get_absent_signals(NULL, NULL, 0, NULL) !=
+            ECUIO_ERR_NULL_ARGUMENT ||
+        ecuio_session_get_unsupported_signals(NULL, NULL, 0, NULL) !=
+            ECUIO_ERR_NULL_ARGUMENT ||
+        ecuio_identity_vin(NULL, NULL, ECUIO_VIN_TEXT_LEN) !=
             ECUIO_ERR_NULL_ARGUMENT ||
         ecuio_session_get_unsplit_replies(NULL, NULL) !=
             ECUIO_ERR_NULL_ARGUMENT ||

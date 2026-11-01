@@ -200,6 +200,27 @@ ecuio_status_t ecuio_session_get_absent_signals(
 );
 
 /*
+ * The Service 01 signals their ECU says it doesn't support (ADR-0039
+ * section 6): a def keyed 41 <PID> at the payload's start whose PID the
+ * supported-PID bitmaps of the channel its message ID names leave out
+ * (ecuio_session_get_channel_support). A range whose bitmap was never
+ * answered, a channel that has learned nothing yet, and every other def
+ * judge nothing. A rescan that finds a PID takes its signals off the
+ * list.
+ *
+ * Fills ids with up to capacity signal ids, in the set's order, and
+ * *count with how many there are; capacity 0 (ids may be NULL) asks
+ * the count. ECUIO_OK; ECUIO_ERR_NULL_ARGUMENT for a NULL session or
+ * count, or NULL ids with a capacity. Readable after close.
+ */
+ecuio_status_t ecuio_session_get_unsupported_signals(
+    const ecuio_session_t* session,
+    uint16_t* ids,
+    uint32_t capacity,
+    uint32_t* count
+);
+
+/*
  * Service 01 replies that carried more than their first PID's record
  * but wouldn't split into records (ADR-0039 Appendix A): a PID of no
  * known length, one twice, or records that don't end at the reply's

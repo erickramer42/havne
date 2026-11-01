@@ -11,7 +11,9 @@
 //          obd2 set and the fakes' ECU; that ECU's diagnostics
 //          (fake_ecu.h). The trouble codes' and monitors' words and
 //          the replies into the report (diagnostics.h), the
-//          monitors against fixtures/obd2/monitors.csv. End-to-end pacing is HARNESS (stream and
+//          monitors against fixtures/obd2/monitors.csv. The signals
+//          their ECU's bitmaps rule out (pid_support.h: PidSupportTest).
+//          End-to-end pacing is HARNESS (stream and
 //          health tests) and BENCH (VX), not this file.
 
 #include <gtest/gtest.h>
@@ -22,6 +24,7 @@
 #include "../core/src/diagnostics.h"
 #include "../core/src/obd2_rates.h"
 #include "../core/src/obd2_reply.h"
+#include "../core/src/pid_support.h"
 #include "../core/src/uds_generic.h"
 #include "../core/src/uri_query.h"
 #include "ecuio/core.h"
@@ -4133,4 +4136,126 @@ TEST(RequestEngineTest, TimingTakesTheIntervalFromTheDriversStamps)
     }
     EXPECT_GT(mixed, 0u);
     EXPECT_LE(mixed, kept) << "one fallback, at most one per request";
+}
+
+namespace {
+
+/* The first vehicle's support report: the bitmaps at 00, 20 and 40
+ * (docs/bench-sessions/2026-10-22-vehicle.md), from the engine ECU */
+ecuio_channel_support_t first_vehicle()
+{
+    ecuio_channel_support_t car{};
+    car.flags = ECUIO_SUPPORT_PROBED;
+    car.rx_id = 0x7E8;
+    car.generation = 1;
+    car.ranges = 0x7;
+    const uint8_t bitmaps[12] = {0xFE, 0x7F, 0xA8, 0x13, 0xA0, 0x17,
+                                 0xF0, 0x11, 0xFE, 0xD0, 0x8C, 0x81};
+    memcpy(car.pid_bitmap, bitmaps, sizeof(bitmaps));
+    return car;
+}
+
+/* The obd2 set's unsupported ids against reports */
+std::vector<uint16_t> unsupported(const ecuio_channel_support_t* reports,
+                                  uint32_t n)
+{
+    const ecuio_signal_set_t* set = ecuio_obd2_signal_set();
+    std::vector<uint16_t> ids(set->count);
+    const uint32_t count = ecuio_unsupported_signals(
+        *set, reports, n, ids.data(), static_cast<uint32_t>(ids.size()));
+    EXPECT_LE(count, ids.size());
+    ids.resize(count);
+    return ids;
+}
+
+} // namespace
+
+/* ADR-0039 section 6: a Service 01 signal is unsupported when its ECU's
+ * answered bitmap clears its PID's bit; the rule from the bitmaps'
+ * bytes: PID p is supported when bit 0x80 >> ((p - 1) % 8) of byte
+ * (p - 1) / 8 is set. Ranges never answered (past 0x60 here) and PID 0
+ * judge nothing */
+TEST(PidSupportTest, TheBitmapsMarkTheirClearPidsUnsupported)
+{
+    const ecuio_channel_support_t car = first_vehicle();
+    const uint8_t* bitmaps = car.pid_bitmap;
+    const ecuio_signal_set_t* set = ecuio_obd2_signal_set();
+    std::vector<uint16_t> expected;
+    int pastTheRanges = 0;
+    for (uint32_t i = 0; i < set->count; ++i) {
+        const unsigned pid = set->defs[i].mux_key & 0xFFu;
+        if (pid <= 0x60 &&
+            (bitmaps[(pid - 1) / 8] & (0x80u >> ((pid - 1) % 8))) == 0) {
+            expected.push_back(set->defs[i].id);
+        }
+        pastTheRanges += pid > 0x60 ? 1 : 0;
+    }
+    ASSERT_GT(expected.size(), 1u);
+    ASSERT_GT(pastTheRanges, 0);
+    EXPECT_EQ(unsupported(&car, 1), expected);
+
+    EXPECT_TRUE(ecuio_pid_marked_unsupported(car, 0x5C));
+    EXPECT_FALSE(ecuio_pid_marked_unsupported(car, 0x0C));
+    EXPECT_FALSE(ecuio_pid_marked_unsupported(car, 0x61))
+        << "a range never answered";
+    EXPECT_FALSE(ecuio_pid_marked_unsupported(car, 0x00));
+
+    /* A rescan that finds 0x5C takes its signal off */
+    ecuio_channel_support_t rescan = car;
+    rescan.generation = 2;
+    rescan.pid_bitmap[(0x5C - 1) / 8] |= 0x80u >> ((0x5C - 1) % 8);
+    const std::vector<uint16_t> after = unsupported(&rescan, 1);
+    EXPECT_EQ(after.size(), expected.size() - 1);
+    for (uint16_t id : after) {
+        EXPECT_NE(id, ECUIO_OBD2_PID_SIG_ID(0x5C, 0));
+    }
+}
+
+/* The first vehicle's sheet counts 44 data PIDs to 0x60 (0x20 and 0x40,
+ * the chain's links, and 0x60 left out); the bitmaps cover what their
+ * ranges answered */
+TEST(PidSupportTest, TheCountLeavesOutTheChainsOwnPids)
+{
+    const ecuio_channel_support_t car = first_vehicle();
+    EXPECT_EQ(ecuio_supported_pid_count(car.pid_bitmap), 44u);
+    uint8_t chain[32] = {};
+    chain[(0x20 - 1) / 8] = 0x01; /* 0x20 */
+    chain[(0x40 - 1) / 8] = 0x01; /* 0x40 */
+    EXPECT_EQ(ecuio_supported_pid_count(chain), 0u);
+    chain[0] = 0x80;  /* 0x01 */
+    chain[31] = 0x02; /* 0xFF */
+    EXPECT_EQ(ecuio_supported_pid_count(chain), 2u);
+    EXPECT_EQ(ecuio_pids_through(car.ranges), 0x60u);
+    EXPECT_EQ(ecuio_pids_through(0x3F), 0xC0u);
+    EXPECT_EQ(ecuio_pids_through(0x1), 0x20u);
+    EXPECT_EQ(ecuio_pids_through(0), 0u);
+}
+
+/* Only the report of the channel a def's message ID names judges it,
+ * and one with nothing learned judges nothing; a set with no Service 01
+ * keys has none; the count is all of them, the first capacity copied */
+TEST(PidSupportTest, OnlyTheDefsOwnEcusReportJudgesIt)
+{
+    const ecuio_channel_support_t car = first_vehicle();
+    ecuio_channel_support_t other = car;
+    other.rx_id = 0x7E9;
+    ecuio_channel_support_t nothing = car;
+    nothing.generation = 0;
+    const ecuio_channel_support_t neither[2] = {other, nothing};
+    EXPECT_TRUE(unsupported(neither, 2).empty());
+    EXPECT_TRUE(unsupported(nullptr, 0).empty());
+    const ecuio_channel_support_t both[2] = {other, car};
+    EXPECT_EQ(unsupported(both, 2), unsupported(&car, 1));
+
+    const ecuio_signal_set_t* mock = ecuio_mock_signal_set();
+    EXPECT_EQ(ecuio_unsupported_signals(*mock, &car, 1, nullptr, 0), 0u);
+
+    const ecuio_signal_set_t* set = ecuio_obd2_signal_set();
+    const uint32_t all = ecuio_unsupported_signals(*set, &car, 1, nullptr, 0);
+    ASSERT_GT(all, 2u);
+    uint16_t two[3] = {0, 0, 0xFFFF};
+    EXPECT_EQ(ecuio_unsupported_signals(*set, &car, 1, two, 2), all);
+    EXPECT_EQ(two[0], unsupported(&car, 1)[0]);
+    EXPECT_EQ(two[1], unsupported(&car, 1)[1]);
+    EXPECT_EQ(two[2], 0xFFFF) << "nothing past the capacity";
 }

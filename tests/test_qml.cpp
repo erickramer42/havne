@@ -13,12 +13,17 @@
 #include <QTemporaryDir>
 #include <QtQuickTest>
 
+#include <cstdio>
+#include <cstring>
 #include <memory>
 #include <utility>
+#include <vector>
 
 #include "bluetoothdevices.h"
 #include "bridgesingleton.h"
 #include "sessionbridge.h"
+#include "ecuio/profile.h"
+#include "ecuio/signals.h"
 
 #ifdef _WIN32
 #ifndef NOMINMAX
@@ -68,6 +73,30 @@ public:
         Q_UNUSED(name)
         Q_UNUSED(value)
 #endif
+    }
+
+    // Registers the mock's set with every def renamed ("Renamed RPM", ...)
+    // as a profile, and returns its name ("" if refused): the Dashboard's
+    // gauges must find their signals by ID alone. The registry keeps the
+    // set's pointer, so it lives as long as the process.
+    Q_INVOKABLE QString registerRenamedMock()
+    {
+        static std::vector<ecuio_signal_def_t> defs;
+        static ecuio_signal_set_t set{};
+        if (defs.empty()) {
+            const ecuio_signal_set_t* mock = ecuio_mock_signal_set();
+            defs.assign(mock->defs, mock->defs + mock->count);
+            for (ecuio_signal_def_t& d : defs) {
+                char name[sizeof d.name];
+                std::snprintf(name, sizeof name, "Renamed %s", d.name);
+                std::memcpy(d.name, name, sizeof name);
+            }
+            set = *mock;
+            set.defs = defs.data();
+        }
+        return ecuio_profile_register("renamed-mock", &set, nullptr) == ECUIO_OK
+                   ? QStringLiteral("renamed-mock")
+                   : QString();
     }
 
     Q_INVOKABLE void clearFakeKnobs()
