@@ -202,7 +202,7 @@ jobs:
           path: artifacts/
           if-no-files-found: ignore
 
-  # clang-tidy over core/ and surrogate/ with .clang-tidy's checks (the
+  # clang-tidy over core/, surrogate/ and cli/ with .clang-tidy's checks (the
   # static analyzer and the bug-finding families); any warning fails it.
   # Windows, because the J2534 layer and the surrogate compile only
   # there, and a Ninja tree from a Developer shell, because the Visual
@@ -220,7 +220,7 @@ jobs:
       - name: Install clang-tidy
         run: python -m pip install --require-hashes -r .github/clang-tidy-requirements.txt
 
-      - name: clang-tidy (core, J2534, surrogate)
+      - name: clang-tidy (core, J2534, surrogate, CLI)
         run: |
           $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" `
             -latest -products * -property installationPath `
