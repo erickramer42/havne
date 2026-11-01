@@ -331,13 +331,29 @@ void hold_on_error(const ecuio_frame_t* f, void* user_data)
  * after the Flow Control. The worker reads them 200 ms late, past N_Cr
  * (150 ms), and the VIN is still whole. The ECU answers 09 02 once, so
  * a request asked again can't stand in for the first; other requests
- * get the fakes' Single Frames, or nothing */
-TEST_F(SocketCanRequestTest, AReplyOnTimeSurvivesAWorkerHeldUpMidMessage)
+ * get the fakes' Single Frames, or nothing. The ECU's thread can itself
+ * be late (ASan on a loaded runner): a run whose last Consecutive Frame
+ * went over 100 ms after the First Frame was late on the bus too, so it
+ * tests nothing and runs again, three runs at most */
+struct HeldWorkerRun {
+    bool on_time = false;
+    bool held = false;
+    bool segmented = false;
+    uint32_t outcome = 0;
+    std::string text;
+};
+
+HeldWorkerRun run_held_worker()
 {
+    HeldWorkerRun r;
     vcan_bus::Fd bus = vcan_bus::open_raw();
-    ASSERT_TRUE(bus.ok());
+    EXPECT_TRUE(bus.ok());
+    if (!bus.ok()) {
+        return r;
+    }
     std::atomic<bool> stop{false};
     std::atomic<bool> segmented{false};
+    std::atomic<bool> on_time{false};
     std::thread ecu([&] {
         const char* vin = fake_ecu::kVin; /* 17 characters: 20 bytes */
         bool vin_sent = false;
@@ -357,6 +373,7 @@ TEST_F(SocketCanRequestTest, AReplyOnTimeSurvivesAWorkerHeldUpMidMessage)
                 (void)put(bus.get(), vcan_bus::kReply,
                           {0x10, 0x14, 0x49, 0x02, 0x01, uint8_t(vin[0]),
                            uint8_t(vin[1]), uint8_t(vin[2])});
+                const auto first = std::chrono::steady_clock::now();
                 (void)put(bus.get(), CAN_ERR_FLAG | CAN_ERR_CRTL,
                           {0, CAN_ERR_CRTL_RX_WARNING, 0, 0, 0, 0, 0, 0});
                 bool flowed = false;
@@ -380,6 +397,7 @@ TEST_F(SocketCanRequestTest, AReplyOnTimeSurvivesAWorkerHeldUpMidMessage)
                 }
                 segmented = put(bus.get(), vcan_bus::kReply, cf1) &&
                             put(bus.get(), vcan_bus::kReply, cf2);
+                on_time = std::chrono::steady_clock::now() - first <= 100ms;
                 continue;
             }
             unsigned char reply[ECUIO_PT_MSG_DATA_SIZE];
@@ -406,13 +424,28 @@ TEST_F(SocketCanRequestTest, AReplyOnTimeSurvivesAWorkerHeldUpMidMessage)
                        id.list[0].outcome != ECUIO_IDENTITY_UNASKED;
             },
             8000ms));
-        EXPECT_TRUE(held.load()) << "the worker was never held";
-        EXPECT_TRUE(segmented.load()) << "the Consecutive Frames never went";
-        EXPECT_EQ(id.list[0].outcome, ECUIO_IDENTITY_ANSWERED);
-        EXPECT_STREQ(id.list[0].text, fake_ecu::kVin);
+        r.outcome = id.list[0].outcome;
+        r.text = id.list[0].text;
     }
     stop = true;
     ecu.join();
+    r.on_time = on_time.load();
+    r.held = held.load();
+    r.segmented = segmented.load();
+    return r;
+}
+
+TEST_F(SocketCanRequestTest, AReplyOnTimeSurvivesAWorkerHeldUpMidMessage)
+{
+    HeldWorkerRun r;
+    for (int run = 0; run < 3 && !r.on_time; ++run) {
+        r = run_held_worker();
+    }
+    EXPECT_TRUE(r.held) << "the worker was never held";
+    EXPECT_TRUE(r.segmented) << "the Consecutive Frames never went";
+    ASSERT_TRUE(r.on_time) << "the ECU's thread was late in three runs";
+    EXPECT_EQ(r.outcome, ECUIO_IDENTITY_ANSWERED);
+    EXPECT_EQ(r.text, fake_ecu::kVin);
 }
 
 /* The whole diagnostics report (ADR-0037), the stored list's 8 bytes a
