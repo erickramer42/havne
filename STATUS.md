@@ -390,10 +390,10 @@ reach into car-verified claims and finishes the diagnostics.
   faults given as replay's `?faults=` are. Until SocketCAN's hardware
   is on hand, it's how anyone runs Havne's SocketCAN requests end to
   end against a known ECU.
-- **clang-tidy, tightened and widened:** `google-explicit-constructor`
-  and braces around a body on the line after its `if` are on; left: the
-  decoder's C-style casts made `static_cast`, then the gate widened to
-  `cli/` and `app/`.
+- **clang-tidy, tightened and widened:** `google-explicit-constructor`,
+  braces around a body on the line after its `if`, and
+  `google-readability-casting` (C++ only) are on; left: the gate widened
+  to `cli/` and `app/`.
 - **An iPhone download, once a device run works:** a tester's run of
   CI's unsigned `.ipa` on an iPhone, filed as a session sheet, first;
   then the release workflow builds and publishes
