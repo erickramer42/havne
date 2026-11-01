@@ -12,6 +12,7 @@
 #include "ecuio/core.h"    /* ECUIO_FRAME_DATA_MAX */
 #include "ecuio/signals.h" /* the defs the count digit is chosen from */
 #include "isotp.h"         /* a frame line's messages */
+#include "obd2_reply.h"    /* J1979's record length per PID */
 
 #include <stddef.h>
 #include <stdint.h>
@@ -464,10 +465,13 @@ inline uint32_t elm327_def_end(const ecuio_signal_def_t& d)
 
 /* The PIDs a set's requests get the response-count digit for: the
  * supported-PID bitmaps (0x00, 0x20, ... 0xE0: four data bytes), and
- * each PID whose every def keyed 41 <PID> ends within a Single Frame. A
- * PID's reply length is J1979's, not the def's, so a def reading the
- * first bytes of a longer reply misleads the rule; the transport takes
- * the PID out when a reply spans frames after all. A NULL set gives the
+ * each PID whose every def keyed 41 <PID> ends within a Single Frame and
+ * whose reply, at J1979's length (ECUIO_OBD2_PID_BYTES), fits one too:
+ * a def reading the first bytes of a longer reply (PID 68's first
+ * sensor of seven bytes) would otherwise ask for one frame, and the
+ * adapter would cut the reply after it. For a PID that table doesn't
+ * define, the transport takes it out when a reply spans frames after
+ * all, losing that reply. A NULL set gives the
  * bitmaps alone. */
 inline void elm327_one_frame_pids_for(const ecuio_signal_set_t* set,
                                       elm327_one_frame_pids* out)
@@ -484,7 +488,9 @@ inline void elm327_one_frame_pids_for(const ecuio_signal_set_t* set,
             const uint8_t pid = static_cast<uint8_t>(d.mux_key);
             const uint32_t end = elm327_def_end(d);
             elm327_one_frame_set(listed, pid, true);
-            if (end == 0 || end > ELM327_SINGLE_FRAME_MAX) {
+            const uint32_t j1979 = ECUIO_OBD2_PID_BYTES[pid];
+            if (end == 0 || end > ELM327_SINGLE_FRAME_MAX ||
+                (j1979 != 0 && 2u + j1979 > ELM327_SINGLE_FRAME_MAX)) {
                 elm327_one_frame_set(longer, pid, true);
             }
         }

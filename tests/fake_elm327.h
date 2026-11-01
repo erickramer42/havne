@@ -45,6 +45,10 @@
 //                kLateResetMs late, after anything sent meanwhile was
 //                taken (the MX+ over a new Bluetooth link,
 //                docs/bench-sessions/2026-10-29-android.md); one link
+//   longer_pid   a Service 01 PID (-1 none) whose positive reply the ECU
+//                pads with zeros to 13 data bytes, a First Frame and two
+//                Consecutive Frames: an ECU answering longer than J1979's
+//                length for it
 //
 // AT MA monitors (ADR-0026's appendix "passive listening"): the
 // messages bus() puts on the bus print, one ISO-TP frame a line, while
@@ -88,6 +92,7 @@ struct knobs {
     bool hung = false;
     bool full_ends_monitor = false;
     bool stale_banner = false;
+    int longer_pid = -1;
 };
 
 /* The fake's STN firmware string: an STN chip's shape, a version no chip
@@ -730,6 +735,12 @@ private:
             answer_len > 4095) {
             reply("NO DATA", at);
             return;
+        }
+        if (k.longer_pid >= 0 && answer_[0] == 0x41 &&
+            answer_[1] == static_cast<uint8_t>(k.longer_pid) &&
+            answer_len < 15) {
+            memset(answer_ + answer_len, 0, 15 - answer_len);
+            answer_len = 15;
         }
         if (k.pending) {
             const uint8_t wait[3] = {0x7F, req[0], 0x78};
