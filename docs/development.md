@@ -662,8 +662,10 @@ on MSVC is not necessarily portable:
 
 `ci.yml` runs on every push to `main` and `dev`, on every pull
 request to `main`, and on demand (Actions > CI > Run workflow, on any
-branch, or `gh workflow run ci.yml --ref <branch>`, which is how a
-feature branch gets CI). A manual run leaves out the iOS simulator
+branch, or `gh workflow run ci.yml --ref <branch>`). A feature branch
+gets no run of its own: it is checked locally (`scripts/verify.sh`)
+and merged into `dev`, whose push run is the gate. A manual run
+leaves out the iOS simulator
 smoke unless asked: `-f ios_smoke=true` adds it to the whole run, and
 `-f smoke_only=true` runs it with `core-and-tests` alone, which the
 smoke depends on. Every job that uses Qt
