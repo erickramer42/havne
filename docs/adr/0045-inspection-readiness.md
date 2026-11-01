@@ -16,7 +16,7 @@ a battery change, the monitors start over)?
 
 The federal rule for an OBD inspection is 40 CFR 85.2222
 (https://www.ecfr.gov/current/title-40/chapter-I/subchapter-C/part-85/subpart-W/section-85.2222;
-its text as of 2026-11-01):
+the eCFR's text as of 2026-10-29):
 
 - **(c)(1):** a car with incomplete monitors is sent away to be driven,
   and fails on a second visit still incomplete;
@@ -101,8 +101,10 @@ answered PID 01.
 - **Bad:**
   - A state program stricter than the federal rule can fail a car this
     calls ready.
-  - The MIL's bulb check ((d)(4)) and a station's other tests are out of
-    reach: the verdict is the OBD readiness part only.
+  - The inspector's look at the lamp itself ((d)(3) and (d)(4): lit
+    when commanded, lit at key-on with the engine off) and a station's
+    other tests are out of reach: the verdict is the OBD readiness part
+    only.
   - A misread model year (a VIN's year code outside the car's own cycle)
     moves the allowance; the year shown beside the verdict makes that
     visible.
