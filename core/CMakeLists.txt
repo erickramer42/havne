@@ -19,6 +19,7 @@ add_library(ecuio-core STATIC
     src/signal_sets.cpp
     src/obd2_signal_sets.cpp
     src/uds_generic.cpp
+    src/vin.cpp
     src/j2534_surrogate_client.cpp
 )
 
@@ -78,6 +79,7 @@ if(NOT ANDROID AND NOT IOS)
             include/ecuio/signals.h
             include/ecuio/socketcan.h
             include/ecuio/stream.h
+            include/ecuio/vin.h
             ${CMAKE_BINARY_DIR}/generated/ecuio/version.h
         DESTINATION include/ecuio)
     install(EXPORT ecuio NAMESPACE ecuio:: FILE ecuioTargets.cmake

@@ -214,6 +214,14 @@ hardware ([roadmap](#roadmap)).
     adapter URI and Live's plotted signals and names its recordings'
     folders; a salted hash of the VIN recognizes it at the next
     connect. Made, copied, renamed and forgotten in the app.
+  - **VIN decode** ([ADR-0043](docs/adr/0043-vin-decode.md)): the
+    model year, the make and the check digit, on the device, by 49 CFR
+    565.15 and the manufacturer codes of NHTSA vPIC's standalone
+    database (a table committed from it); the activity log's `VIN:`
+    line and Settings' lookup in the app, `havne-cli vin` and
+    `stream`'s `identity` line. Verified at UNIT (the regulation's
+    sample VIN, each year rule) and in the bridge, QML and CLI tests;
+    the test car's own VIN not yet.
   - **Evidence for field sessions:** opt-in recording of every frame,
     decoded value and activity line per connect
     ([ADR-0017](docs/adr/0017-session-recording.md)), and a surrogate
@@ -233,7 +241,7 @@ hardware ([roadmap](#roadmap)).
   ELM327 [bench](docs/bench-sessions/elm327-bench-runsheet.md) and
   [vehicle](docs/bench-sessions/elm327-vehicle-runsheet.md) sheets, and
   the [phone's](docs/bench-sessions/android-phone-runsheet.md).
-- **Tests:** 759 ctest cases on Windows (both trees rebuilt,
+- **Tests:** 776 ctest cases on Windows (both trees rebuilt,
   2026-11-01), all passing but two env-gated skips (the cross-arch
   case, and the real-car recordings' diff, run locally), plus the
   cross-arch subset (86/86); 0 MSVC warnings. CI runs ctest on Windows,
@@ -380,11 +388,12 @@ reach into car-verified claims and finishes the diagnostics.
   for as many messages as replies are outstanding would end a read at
   its reply (the bench first).
 - **Trouble-code descriptions** ("P0301: cylinder 1 misfire") with a
-  one-word urgency, from a source chosen first; **VIN decode** (make,
-  model and year from the WMI and the model-year digit, offline); and
-  a **readiness summary**: a line saying whether the car would pass an
-  inspection, from the monitors (PID 41's for this drive cycle are
-  shown beside PID 01's) and the model year VIN decode gives.
+  one-word urgency, from a source chosen first; **VIN decode** (built,
+  ADR-0043: the year and the make, offline; the model isn't in a
+  manufacturer code); and a **readiness summary**: a line saying
+  whether the car would pass an inspection, from the monitors (PID
+  41's for this drive cycle are shown beside PID 01's) and the model
+  year VIN decode gives.
 - **The simulator as a product:** `havne-cli sim <uri> --on vcan0`,
   the fakes' ECU and the recording that answers as one promoted from
   test code into the CLI, answering through core's ISO-TP, with

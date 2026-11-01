@@ -8,13 +8,17 @@
 //          sleep rule UNIT (tests/test_cli.cpp); a real sleep BENCH
 //          (BENCH prep #27);
 //          the timing lines UNIT (CliTimingTest) and by hand against the fake
-//          DLL (docs/testing.md); main's catch by reading and clang-tidy
+//          DLL (docs/testing.md); the vin command in the golden run and
+//          CliUsageTest, the vin and identity lines UNIT (CliVinTest),
+//          stream's identity line by hand against the fake DLL; main's
+//          catch by reading and clang-tidy
 //          (bugprone-exception-escape)
 //
 // Public headers only: what any program linking core can do.
 
 #include "diagnostics_line.h"
 #include "timing_line.h"
+#include "vin_line.h"
 #include "jsonl.h"
 #include "line_ring.h"
 #include "sleep_watch.h"
@@ -25,6 +29,7 @@
 #include "ecuio/serial.h"
 #include "ecuio/signals.h"
 #include "ecuio/socketcan.h"
+#include "ecuio/vin.h"
 
 #include <atomic>
 #include <algorithm>
@@ -34,6 +39,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <ctime>
 #include <exception>
 #include <memory>
 #include <new>
@@ -343,6 +349,43 @@ void write_diagnostics(Output& out, const ecuio_channel_diagnostics_t& d)
     write_line(out, l);
 }
 
+// The latest model year a VIN can carry (ADR-0043): this year plus one,
+// the bridge's bound too
+uint32_t latest_model_year()
+{
+    const std::time_t now = std::time(nullptr);
+    std::tm utc{};
+#ifdef _WIN32
+    if (gmtime_s(&utc, &now) != 0) {
+        return 0;
+    }
+#else
+    if (gmtime_r(&now, &utc) == nullptr) {
+        return 0;
+    }
+#endif
+    return static_cast<uint32_t>(utc.tm_year + 1900 + 1);
+}
+
+// A line for each ECU whose identity has settled since the last call
+// (vin_line.h): generations holds each channel's last written
+void poll_identity(Output& out, ecuio_session_t* session, uint32_t channels,
+                   uint32_t* generations)
+{
+    for (uint32_t c = 0; c < channels; ++c) {
+        ecuio_channel_identity_t id;
+        if (ecuio_session_get_channel_identity(session, c, &id) == ECUIO_OK &&
+            (id.flags & ECUIO_IDENTITY_COMPLETE) &&
+            id.generation != generations[c]) {
+            generations[c] = id.generation;
+            char buf[4096];
+            cli::Line l(buf, sizeof buf);
+            cli::identity_line(l, id, latest_model_year());
+            write_line(out, l);
+        }
+    }
+}
+
 // A line for each ECU whose diagnostics read has completed since the
 // last call: generations holds each channel's last written
 void poll_diagnostics(Output& out, ecuio_session_t* session, uint32_t channels,
@@ -568,6 +611,7 @@ void usage(FILE* to)
         "usage: havne-cli stream <uri> [--values] [--count N] [--seconds S]\n"
         "       havne-cli play <uri> --to <vcan> [--count N] [--seconds S]\n"
         "       havne-cli devices\n"
+        "       havne-cli vin <VIN>\n"
         "       havne-cli --version | --help\n"
         "\n"
         "stream   opens the session <uri> names (mock://, replay://, "
@@ -583,6 +627,8 @@ void usage(FILE* to)
         "         as they arrive: mock://demo drives the simulated car on it.\n"
         "devices  lists the serial ports, J2534 adapters and CAN interfaces a\n"
         "         URI can name.\n"
+        "vin      decodes a VIN on this machine: its model year, make and\n"
+        "         check digit (49 CFR 565, NHTSA vPIC's manufacturer codes).\n"
         "\n"
         "Exit: 0 the stream ended, 1 the CLI failed, 2 usage, 3 the connect "
         "failed.\n");
@@ -688,6 +734,8 @@ int run_stream(const StreamArgs& args)
             ? info.channel_count
             : ECUIO_SESSION_INFO_MAX_CHANNELS;
     uint32_t diag_generations[ECUIO_SESSION_INFO_MAX_CHANNELS] = {};
+    uint32_t identity_generations[ECUIO_SESSION_INFO_MAX_CHANNELS] = {};
+    poll_identity(out, session, channels, identity_generations);
     poll_diagnostics(out, session, channels, diag_generations);
     // Judged from the values core decodes, so only with --values
     const ecuio_signal_set_t* set = ecuio_session_signal_set(session);
@@ -752,6 +800,7 @@ int run_stream(const StreamArgs& args)
             write_line(out, l);
         }
 
+        poll_identity(out, session, channels, identity_generations);
         poll_diagnostics(out, session, channels, diag_generations);
         poll_absent(out, session, absent_read, absent_last);
         poll_timing(out, session, info, timing_snaps, timing_rows, false);
@@ -855,6 +904,33 @@ std::vector<ecuio_can_interface_t> can_interfaces()
         list.resize(count < list.size() ? count : list.size());
     }
     return list;
+}
+
+// A typed VIN's decode (ADR-0043), offline: spaces dropped and upper
+// case, as Settings' lookup takes it; not a VIN is a usage error
+int run_vin(const char* typed)
+{
+    std::string vin;
+    for (const char* p = typed; *p != '\0'; ++p) {
+        if (*p != ' ') {
+            vin += (*p >= 'a' && *p <= 'z') ? static_cast<char>(*p - 'a' + 'A')
+                                            : *p;
+        }
+    }
+    ecuio_vin_info_t info;
+    if (ecuio_vin_decode(vin.c_str(), 0, &info) != ECUIO_OK) {
+        std::fprintf(stderr,
+                     "havne-cli: not a VIN: 49 CFR 565 takes 17 digits and "
+                     "capital letters, never I, O or Q\n");
+        return kExitUsage;
+    }
+    Output out;
+    write_start(out);
+    char buf[512];
+    cli::Line l(buf, sizeof buf);
+    cli::vin_line(l, vin.c_str(), latest_model_year());
+    write_line(out, l);
+    return out.ok() ? kExitOk : kExitFailed;
 }
 
 int run_devices()
@@ -1191,6 +1267,9 @@ int run(int argc, char** argv)
     }
     if (command == "devices" && argc == 2) {
         return run_devices();
+    }
+    if (command == "vin" && argc == 3) {
+        return run_vin(argv[2]);
     }
     if (command == "play") {
 #if HAVNE_CLI_PLAY

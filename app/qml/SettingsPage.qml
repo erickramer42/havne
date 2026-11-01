@@ -21,6 +21,8 @@
 //          that fills the field, locked during a session, a mock session
 //          left alone, and (Windows, the fake) an adapter's connect
 //          keeping its URI and plotting, its VIN learned and logged;
+//          a typed VIN decoded and kept nowhere (ADR-0043,
+//          test_aTypedVinIsDecodedOnTheDevice);
 //          every item inside the page's width at a phone's (320 px); a
 //          recording that ends listed, its row filling the field with a
 //          replay that connects under the recorded profile and DIDs; the
@@ -1075,6 +1077,39 @@ Pane {
                         text: qsTr("Cancel")
                         onClicked: page.confirming = ""
                     }
+                }
+
+                // ---- A VIN looked up (ADR-0043): decoded here, never kept ----
+                LabeledFlow {
+                    label: qsTr("Look up a VIN:")
+
+                    TextField {
+                        id: vinLookupField
+                        objectName: "vinLookupField"
+                        width: Math.min(300, parent.width)
+                        maximumLength: 32
+                        placeholderText: qsTr("17 characters")
+                        inputMethodHints: Qt.ImhPreferUppercase | Qt.ImhNoPredictiveText | Qt.ImhSensitiveData
+                    }
+                }
+
+                Label {
+                    readonly property string summary: Bridge.describeVin(vinLookupField.text)
+                    objectName: "vinLookupResult"
+                    visible: summary !== ""
+                    text: summary.charAt(0).toUpperCase() + summary.slice(1)
+                    color: Theme.text
+                    wrapMode: Text.Wrap
+                    Layout.fillWidth: true
+                }
+
+                Label {
+                    objectName: "vinLookupHint"
+                    text: qsTr("By 49 CFR 565 and NHTSA's vPIC list (%1), on this device; the VIN isn't saved. The connected car's goes in the activity log.")
+                              .arg(Bridge.vinSource())
+                    color: Theme.textDim
+                    wrapMode: Text.Wrap
+                    Layout.fillWidth: true
                 }
             }
 

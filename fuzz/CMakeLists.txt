@@ -24,7 +24,7 @@ endif()
 
 set(_ecuio_fuzzers fuzz_decode_signal fuzz_validate_set fuzz_uds_query
     fuzz_elm327_reply fuzz_replay_file fuzz_socketcan_wire fuzz_diagnostics
-    fuzz_isotp)
+    fuzz_isotp fuzz_vin)
 
 if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang" AND
    NOT CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC")

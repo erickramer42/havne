@@ -48,6 +48,7 @@ old one, and the old record's status is updated to point at it.
 | [0040](0040-socketcan-requests-isotp.md) | SocketCAN requests: ISO-TP in core, shared with ELM327; a requesting session needs a controller in normal and one-shot mode at a stated rate, and sends nothing more after a CAN error on its first request | Accepted |
 | [0041](0041-replay-fault-injection.md) | Fault injection on a replay: `?faults=` drops, loses to an overflow, corrupts, cuts short or holds back a recording's frames as they play, drawn from `?seed=` so the same URI plays the same faults; and the recording answering a requesting session as the ECU on `vcan0`, its replies broken at the ISO-TP level | Accepted |
 | [0042](0042-reply-timing.md) | Reply timing per request: latency on the host's clock, the refresh interval on the frames' own (the adapter's, the kernel's or the host's, said), log-linear histograms in core published every second; `latency.csv` and the CLI's `timing` lines append the changed rows every 10 s | Accepted |
+| [0043](0043-vin-decode.md) | VIN decode on the device: the model year and check digit by 49 CFR 565.15, the make by the manufacturer codes of NHTSA vPIC's standalone database (a table committed from it, trailers left out), in core's `vin.h`; the app's `VIN:` line and Settings lookup, `havne-cli vin` and `stream`'s `identity` line | Accepted |
 
 ## Adding a record
 

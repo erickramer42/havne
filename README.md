@@ -124,7 +124,7 @@ mode: each session as it happened, then the frames as they arrive.*
  SessionBridge (app/)          the app's caller of the core: worker → GUI
    │                           marshaling, 100 ms coalescing, link health
    │   havne-cli (cli/)        a second front end: a session as JSON lines
-   ▼  C ABI: core.h · signals.h · profile.h · j2534.h · serial.h · stream.h · socketcan.h
+   ▼  C ABI: core.h · signals.h · profile.h · j2534.h · serial.h · stream.h · socketcan.h · vin.h
  ecuio-core (core/)            no Qt, ever: sessions, profiles, decoding
    ├── mock://    a scripted drive on a vehicle model
    ├── replay://  a recording's frames.csv at its own pace
