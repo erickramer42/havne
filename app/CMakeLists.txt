@@ -119,13 +119,17 @@ endif()
 # The name people see is capitalized: Apple's bundle, which Finder and
 # the home screen show (iOS's display name is Xcode's PRODUCT_NAME, the
 # output name), and Android's launcher label. Executables elsewhere stay
-# lowercase, as havne.exe and Linux's havne
+# lowercase, as havne.exe and Linux's havne. Both bundle versions are
+# project()'s: left unset, Qt fills in its placeholder, x.y for the
+# version iOS shows (0.3 for 0.3.5), which CI's ios-build refuses
 if(APPLE)
     set_target_properties(havne PROPERTIES
         MACOSX_BUNDLE TRUE
         OUTPUT_NAME Havne
         MACOSX_BUNDLE_BUNDLE_NAME Havne
-        MACOSX_BUNDLE_GUI_IDENTIFIER io.github.erickramer42.havne)
+        MACOSX_BUNDLE_GUI_IDENTIFIER io.github.erickramer42.havne
+        MACOSX_BUNDLE_SHORT_VERSION_STRING "${Havne_VERSION}"
+        MACOSX_BUNDLE_BUNDLE_VERSION "${Havne_VERSION}")
 endif()
 # The app icon (packaging/icons/make_icons.py writes both). Android: an
 # adaptive launcher icon, vector drawables in the package source's res/;
