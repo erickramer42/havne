@@ -703,8 +703,8 @@ jobs:
       # The device build as an unsigned .ipa, for sideloading
       # (docs/ios.md): the tester's own tool signs it with their Apple ID,
       # so the file carries no provisioning profile and no device's ID.
-      # Fails if the bundle lacks app/ios/Info.plist.in's keys, or holds a
-      # signature or a profile.
+      # Fails if the bundle lacks app/ios/Info.plist.in's keys, its versions
+      # aren't project()'s, or it holds a signature or a profile.
       - name: Package unsigned .ipa
         run: |
           app=$(find build -type d -name Havne.app -path '*Release-iphoneos*' | head -n 1)
@@ -719,6 +719,11 @@ jobs:
             fail "UIFileSharingEnabled isn't true in Info.plist"
           [ "$(key LSSupportsOpeningDocumentsInPlace)" = true ] ||
             fail "LSSupportsOpeningDocumentsInPlace isn't true in Info.plist"
+          VERSION=$(sed -n '/^project(Havne/,/)/s/^ *VERSION \([0-9.]*\).*/\1/p' CMakeLists.txt)
+          [ -n "$VERSION" ] || fail "no VERSION in project(Havne ...)"
+          for k in CFBundleShortVersionString CFBundleVersion; do
+            [ "$(key $k)" = "$VERSION" ] || fail "$k is '$(key $k)', not $VERSION"
+          done
           [ ! -e "$app/embedded.mobileprovision" ] || fail "a provisioning profile in the bundle"
           [ ! -e "$app/_CodeSignature" ] || fail "a signature in the bundle"
           echo "Havne $(key CFBundleShortVersionString) ($(key CFBundleVersion)), iOS $(key MinimumOSVersion) or later"
