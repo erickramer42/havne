@@ -994,4 +994,13 @@ fake ELM327 can do either (`pending_counted`).
 `Elm327SessionTest.AScannedDidTakesTheCountDigitUntilItsReplySpansFrames`,
 `.AScannedDidHeldPendingIsAskedAgainWithoutTheDigit`,
 `.IdentificationReassemblesItsLongReplies` (F190's First Frame, then
-F190 without the digit). Not yet run on an adapter.
+F190 without the digit).
+
+*Amended 2026-11-01:* on the test car through the MX+ (relayed by the
+phone, [ADR-0047](0047-adapter-relay.md);
+[2026-11-01-android](../bench-sessions/2026-11-01-android.md)), a
+block of 1,024 DIDs on the engine ECU with the digit and `scan=first`
+completed in 32.9 s, about 31 DIDs a second, the MX+'s Service 01
+pace. Every reply was one line (4 answered, 1,020 refused), so no DID
+was asked again without the digit; a reply that spans frames or is
+held pending on an adapter is still to come.

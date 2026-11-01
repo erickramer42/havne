@@ -358,8 +358,10 @@ havne-cli stream "elm327://127.0.0.1:35000?poll=0x0C" --seconds 30
 - [ ] **Stop relaying**: the stream ends with the port failing, the
       notification goes, and Connect is enabled again
 
-**9b: on the car, a long run.** Ignition on, engine off, the battery on
-a tender.
+**9b: on the car, a long run.** Ignition on. For a block or two, the
+engine off is fine; for the hour, the engine running (outdoors, or the
+garage door open): with the ignition on, the car draws more than a
+battery tender supplies.
 
 **Action:** **Relay**, the screen off, then on the computer a DID sweep
 block (ADR-0020's appendix of 2026-11-01):
@@ -391,6 +393,7 @@ havne-cli stream "elm327://127.0.0.1:35000?profile=uds-generic&did=1000-13FF&sca
 | A crash on Disconnect, `SIGSEGV` in the `QtBtInputStream` thread | The closed link's socket deleted while Qt's Java reader still wrote into it ([ADR-0028](../adr/0028-app-fed-streams.md)'s appendix of 2026-11-01): copy the backtrace and the APK's commit |
 | No paired devices listed with Bluetooth on | Copy the count line and the line under it; `adb logcat -d | grep -i -E "havne|bluetooth"` if `adb` is at hand |
 | havne-cli through the relay: "the connection was refused" | `adb forward tcp:35000 tcp:35000` not run (or the phone replugged: run it again), or the relay not started |
+| havne-cli through the relay: "the port failed during the adapter's setup" at once | Another computer (or a second `havne-cli`) already holds the relay: it takes one at a time |
 | The relay stops with the screen off | Battery saver on, or Android stopped the service: copy `adb logcat -d | grep -i -E "havne|SessionService"` |
 
 ## Post-session actions
