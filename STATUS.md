@@ -560,8 +560,20 @@ week or more or a design that needs an ADR first.
   survive frames dropped under load; the chart shows each value at its
   frame's time and keeps a window's peak. Left: the bridge's 4 KB copy
   per frame, the worker's largest per-frame cost up to about 500 defs
-  (`bench_bridge`,
-  [docs/testing.md](docs/testing.md#performance)).
+  on their own CAN IDs (`bench_bridge`,
+  [docs/testing.md](docs/testing.md#performance)), and the decode's
+  pass over every def (the next item).
+- **Decode only the defs a frame can match (S; before v0.3.5's
+  release).** The worker checks each frame against every def of the
+  session's set (`decode_values` in `core/src/core.cpp`). The obd2
+  set's defs share the engine ECU's reply ID, so each one gets past the
+  ID check and reads its mux key, and with every Service 01 field in
+  the set that halves the replay load test's sustained throughput
+  ([docs/testing.md](docs/testing.md#load-test-the-replay-fixture-through-the-bridge)).
+  An index from a frame's ID and key to the defs that can match it,
+  built once per set at create, makes the cost per frame independent
+  of the set's size. Done when the load test's throughput is back near
+  v0.3.4's and `bench_bridge`'s cost per def stays flat.
 - **A frame-rate readout in developer mode (S).** The window's drawn
   frames per second (`QQuickWindow::frameSwapped`, counted each
   second), shown only in developer mode, so the strip chart's and the

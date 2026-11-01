@@ -220,10 +220,15 @@ running (ranges across the runs; milliseconds as median / p99):
   at the median and 0.35 to 0.64 ms at p99. Sustained, looping at full
   speed, the worker ran 191,000 to 193,000 frames a second, against
   358,000 to 374,000 for v0.3.4's build run the same minute on the same
-  machine: v0.3.5's merged work has halved the replay's sustained
-  throughput, and the cause isn't found yet. It is still about 40
-  times a full classic CAN bus, so nothing a session can carry is
-  lost, and CI's floor (10,000 a second) doesn't see it.
+  machine. The difference is the obd2 set's size: it grew to every
+  field of J1979's Service 01 table, its defs share the engine ECU's
+  reply ID, and the worker checks each frame against every def, so
+  each one reads its mux key. With decoding turned off, the builds
+  before and after that change both run about 460,000 frames a second.
+  It is still about 40 times a full classic CAN bus, so nothing a
+  session can carry is lost, and CI's floor (10,000 a second) doesn't
+  see it. The fix, an index from a frame's ID and key to its defs, is
+  in [STATUS.md's backlog](../STATUS.md#performance).
 
 ### Reply timing against the fakes
 
