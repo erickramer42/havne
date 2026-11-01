@@ -427,8 +427,9 @@ reach into car-verified claims and finishes the diagnostics.
   SocketCAN requests end to end against a known ECU.
 - **clang-tidy, tightened and widened:** `google-explicit-constructor`,
   braces around a body on the line after its `if`, and
-  `google-readability-casting` (C++ only) are on, over `cli/` too; left:
-  `app/`, which needs Qt and moc's files in the tidy job's tree.
+  `google-readability-casting` (C++ only) are on, over `cli/` and
+  `app/` too (the tidy job's tree has Qt; the app's Android-only
+  sources aren't in it).
 - **An iPhone download, once a device run works:** a tester's run of
   CI's unsigned `.ipa` on an iPhone, filed as a session sheet, first;
   then the release workflow builds and publishes

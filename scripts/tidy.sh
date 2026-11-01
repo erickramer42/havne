@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
-# scripts/tidy.sh: clang-tidy over core/, surrogate/ and cli/ with .clang-tidy's
-# checks, one summary line; each file's output goes to
-# Testing/tidy/<file>.log, and on a warning the warnings are printed and
-# the script exits 1. CI's clang-tidy job runs it.
+# scripts/tidy.sh: clang-tidy over core/, surrogate/ and cli/, and app/ in a
+# tree with Qt, with .clang-tidy's checks, one summary line; each file's
+# output goes to Testing/tidy/<file>.log, and on a warning the warnings
+# are printed and the script exits 1. CI's clang-tidy job runs it.
 #
-# Usage: scripts/tidy.sh [<tree>]     (default build-tidy)
+# Usage: scripts/tidy.sh [<tree>]               (default build-tidy)
+#        scripts/tidy.sh --qt <kit> [<tree>]    (default build-tidy-qt)
 #
 # The tree is a Ninja (or Makefile) build with a compile database, which
 # the Visual Studio generator doesn't write, configured where cl.exe is
@@ -15,7 +16,14 @@
 #   cmake -B build-tidy -G Ninja -DHAVNE_BUILD_CORE_ONLY=ON \
 #         -DBUILD_TESTING=OFF -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
 #
-# Nothing needs building first. clang-tidy is the pinned version in
+# With --qt, the tree is the whole project against that Qt kit (for
+# example C:/Qt/6.12.0/msvc2022_64), so app/ is checked too, and the
+# script generates the app's moc output (the *_autogen targets) before
+# clang-tidy reads the sources; nothing else is built. The app's
+# Android-only sources (btstream.cpp, androidsession.cpp) aren't in a
+# desktop tree's database, so they aren't checked.
+#
+# Otherwise nothing needs building first. clang-tidy is the pinned version in
 # .github/clang-tidy-requirements.txt: $CLANG_TIDY, else the venv below,
 # else PATH's. Another version finds other things, so the script refuses
 # it unless CLANG_TIDY_ANY=1 (trying a new pin). To get the pinned one
@@ -26,7 +34,14 @@
 set -u
 cd "$(dirname "$0")/.." || exit 2
 LOGDIR=Testing/tidy
-TREE=${1:-build-tidy}
+QT_KIT=
+if [ "${1:-}" = --qt ]; then
+    QT_KIT=${2:?"--qt takes the Qt kit's folder"}
+    shift 2
+    TREE=${1:-build-tidy-qt}
+else
+    TREE=${1:-build-tidy}
+fi
 DB=$TREE/compile_commands.json
 
 # A Developer environment on Windows: vcvars64's variables, read through
@@ -56,11 +71,28 @@ if [ -z "${VCINSTALLDIR:-}" ] && command -v cmd.exe > /dev/null 2>&1; then
     [ -n "${VCINSTALLDIR:-}" ] || { echo "vcvars64 ($vcvars) set no VCINSTALLDIR" >&2; exit 2; }
 fi
 
-if [ ! -f "$DB" ]; then
+if [ -n "$QT_KIT" ] && [ ! -f "$DB" ]; then
+    echo "...   configuring $TREE (Ninja, Qt at $QT_KIT, a compile database)" >&2
+    cmake -B "$TREE" -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF \
+        -DCMAKE_PREFIX_PATH="$QT_KIT" -DCMAKE_EXPORT_COMPILE_COMMANDS=ON > /dev/null || {
+        echo "configuring $TREE failed: see the top of $0" >&2; exit 2; }
+elif [ ! -f "$DB" ]; then
     echo "...   configuring $TREE (Ninja, core only, a compile database)" >&2
     cmake -B "$TREE" -G Ninja -DHAVNE_BUILD_CORE_ONLY=ON -DBUILD_TESTING=OFF \
         -DCMAKE_EXPORT_COMPILE_COMMANDS=ON > /dev/null || {
         echo "configuring $TREE failed: see the top of $0" >&2; exit 2; }
+fi
+# The app's sources include their moc output, which only a build writes
+if [ -n "$QT_KIT" ]; then
+    autogen=$(ninja -C "$TREE" -t targets all | grep -oE '^[A-Za-z0-9_]+_autogen:' |
+        tr -d ':' | sort -u)
+    if [ -z "$autogen" ]; then
+        echo "no *_autogen targets in $TREE: was it configured with Qt?" >&2
+        exit 2
+    fi
+    # shellcheck disable=SC2086
+    cmake --build "$TREE" --target $autogen > /dev/null || {
+        echo "generating the moc output in $TREE failed" >&2; exit 2; }
 fi
 
 if [ -n "${CLANG_TIDY:-}" ]; then TIDY=$CLANG_TIDY
@@ -86,14 +118,14 @@ mkdir -p "$LOGDIR"
 rm -f "$LOGDIR"/*.log
 
 root=$(pwd -W 2>/dev/null || pwd)
-# C and C++ sources in the source tree only: the database also lists
+# C and C++ sources in the source tree only (app/ in a tree with Qt): the database also lists
 # generated files, such as the version resource in the tree's own
 # surrogate/ folder, which clang-tidy can't read
 files=$(grep -oE '"file": *"[^"]*"' "$DB" | sed -E 's/"file": *"(.*)"/\1/' |
-    tr '\\' '/' | grep -E "/(core|surrogate|cli)/" | grep -E '\.(c|cc|cpp|cxx)$' |
+    tr '\\' '/' | grep -E "/(core|surrogate|cli|app)/" | grep -E '\.(c|cc|cpp|cxx)$' |
     grep -vF "/$TREE/" | sort -u)
 if [ -z "$files" ]; then
-    echo "no core/, surrogate/ or cli/ sources in $DB" >&2
+    echo "no core/, surrogate/, cli/ or app/ sources in $DB" >&2
     exit 2
 fi
 count=$(printf '%s\n' "$files" | wc -l | tr -d ' ')

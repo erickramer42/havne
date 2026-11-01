@@ -1,0 +1,7 @@
+# The top-level .clang-tidy's checks, for the app's sources. One change:
+# the app's headers keep #pragma once, which every compiler that builds
+# the app (MSVC, GCC, Clang and AppleClang, the NDK's Clang) supports,
+# and which the tests' headers use too; core's headers keep include
+# guards, since the public ones compile as strict C for any consumer.
+InheritParentConfig: true
+Checks: '-portability-avoid-pragma-once'

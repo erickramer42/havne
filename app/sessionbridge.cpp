@@ -100,7 +100,7 @@ QString documentsRelative(const QString& path)
 // Call it on the thread that made the call: the detail is thread-local.
 QString failureText(ecuio_status_t rc)
 {
-    const QString status = QString::fromUtf8(ecuio_status_string(rc));
+    QString status = QString::fromUtf8(ecuio_status_string(rc));
     const char* detail = ecuio_last_error_detail();
     if (detail == nullptr || detail[0] == '\0') {
         return status;
@@ -575,7 +575,7 @@ QVariantList SignalListModel::chartData(qint64 windowMs, int columns) const
                 put(s);
                 continue;
             }
-            const qint64 k = static_cast<qint64>((s.timestampMs - from) / sliceMs);
+            const qint64 k = static_cast<qint64>(static_cast<double>(s.timestampMs - from) / sliceMs);
             if (k != slice) {
                 flush();
                 slice = k;
@@ -1003,8 +1003,9 @@ QString SessionBridge::replayUriFor(const QString& folder,
                   QStringLiteral("?profile=") + profile;
     // did= belongs to uds-generic alone; core refuses it under any other
     if (profile == QLatin1String("uds-generic")) {
-        for (const QString& did : dids)
+        for (const QString& did : dids) {
             uri += QLatin1Char('&') + did;
+        }
     }
     return uri;
 }
@@ -1012,8 +1013,9 @@ QString SessionBridge::replayUriFor(const QString& folder,
 QVariantList SessionBridge::recentRecordings(int limit) const
 {
     QVariantList out;
-    if (limit <= 0)
+    if (limit <= 0) {
         return out;
+    }
     // "<yyyyMMdd-HHmmss>[-n][ <label>]" (SessionRecorder::start): by name,
     // last first, is newest first
     static const QRegularExpression kName(
@@ -1023,20 +1025,23 @@ QVariantList SessionBridge::recentRecordings(int limit) const
     // the stamp)
     QFileInfoList folders;
     for (const QString& root : {recordingsRoot(), earlierRecordingsRoot()}) {
-        if (!root.isEmpty())
+        if (!root.isEmpty()) {
             folders +=
                 QDir(root).entryInfoList(QDir::Dirs | QDir::NoDotAndDotDot);
+        }
     }
     std::sort(folders.begin(), folders.end(),
               [](const QFileInfo& a, const QFileInfo& b) {
                   return a.fileName() > b.fileName();
               });
     for (const QFileInfo& info : folders) {
-        if (out.size() >= limit)
+        if (out.size() >= limit) {
             break;
+        }
         const QString folder = info.absoluteFilePath();
-        if (!QFileInfo::exists(folder + QStringLiteral("/frames.csv")))
+        if (!QFileInfo::exists(folder + QStringLiteral("/frames.csv"))) {
             continue;
+        }
 
         // The header's "uri" line, among events.log's first few
         QString recorded;
@@ -1058,8 +1063,9 @@ QVariantList SessionBridge::recentRecordings(int limit) const
             title = QStringLiteral("%1-%2-%3 %4:%5:%6")
                         .arg(m.captured(1), m.captured(2), m.captured(3),
                              m.captured(4), m.captured(5), m.captured(6));
-            if (m.hasCaptured(7))
+            if (m.hasCaptured(7)) {
                 title += QStringLiteral(" · ") + m.captured(7);
+            }
         }
         const QString uri = replayUriFor(folder, recorded);
         QVariantMap row;
@@ -1488,8 +1494,9 @@ void SessionBridge::applyFrameLoggingEnv()
 
 QString SessionBridge::recordingsRoot() const
 {
-    if (!m_recordingsRoot.isEmpty())
+    if (!m_recordingsRoot.isEmpty()) {
         return m_recordingsRoot;
+    }
     const QString docs =
         QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation);
     return docs.isEmpty() ? QString()
@@ -1498,10 +1505,12 @@ QString SessionBridge::recordingsRoot() const
 
 QString SessionBridge::earlierRecordingsRoot() const
 {
-    if (!m_earlierRecordingsRoot.isEmpty())
+    if (!m_earlierRecordingsRoot.isEmpty()) {
         return m_earlierRecordingsRoot;
-    if (!m_recordingsRoot.isEmpty())
+    }
+    if (!m_recordingsRoot.isEmpty()) {
         return QString(); // a test's own root: Documents is never read
+    }
     const QString docs =
         QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation);
     const QString root = docs + QLatin1Char('/') + earlierProductName() +
@@ -2000,8 +2009,9 @@ SessionBridge::timingText(const ecuio_session_timing_t& t,
     uint32_t low = UINT32_MAX;
     uint32_t high = 0;
     for (const ecuio_request_timing_t& r : rows) {
-        if (r.answered + r.refused + r.timeouts == 0)
+        if (r.answered + r.refused + r.timeouts == 0) {
             continue;
+        }
         ++asked;
         answered += r.answered;
         refused += r.refused;
@@ -2334,6 +2344,9 @@ void SessionBridge::pollChannelDiagnostics()
             ECUIO_OK) {
             continue;
         }
+        // The struct has no padding (core.h pins it); its doubles compare
+        // by their bits, which is what a change test wants
+        // NOLINTNEXTLINE(bugprone-suspicious-memory-comparison)
         if (memcmp(&s, &m_diagnosticsShown[c], sizeof(s)) != 0) {
             m_diagnosticsShown[c] = s;
             changed = true;

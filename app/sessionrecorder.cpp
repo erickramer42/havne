@@ -177,16 +177,18 @@ void SessionRecorder::timing(const ecuio_session_timing_t& t,
                              const ecuio_request_timing_t* rows, uint32_t count,
                              const uint32_t* rxIds, uint32_t channels)
 {
-    if (!m_active || count == 0)
+    if (!m_active || count == 0) {
         return;
+    }
     const QByteArray at =
         QByteArray::number(static_cast<double>(t.snapshot_us) / 1e6, 'f', 3);
     QByteArray block;
     for (uint32_t i = 0; i < count && i < ECUIO_PROFILE_MAX_REQUESTS; ++i) {
         const ecuio_request_timing_t& r = rows[i];
         const quint64 total = quint64{r.answered} + r.refused + r.timeouts;
-        if (total == m_timingTotals[i])
+        if (total == m_timingTotals[i]) {
             continue;
+        }
         m_timingTotals[i] = total;
         const bool latency = r.answered + r.refused > 0;
         const bool interval = r.intervals > 0;
@@ -218,8 +220,9 @@ void SessionRecorder::timing(const ecuio_session_timing_t& t,
                  ',' + quantile(r.interval_max_us, interval) + ',' +
                  clockName(t.interval_clock) + '\n';
     }
-    if (block.isEmpty())
+    if (block.isEmpty()) {
         return;
+    }
     if (!m_latency.isOpen()) {
         if (!m_latency.open(QIODevice::WriteOnly | QIODevice::Text)) {
             m_ok = false;
