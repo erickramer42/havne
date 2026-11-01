@@ -16,8 +16,10 @@
 //          lines, ADR-0038: BridgeTest.ChannelClearText*,
 //          .DiagnosticsFileTextIsTheCliLines, .AClearSavesTheReportFirst,
 //          .AFailedSaveSendsNoClear, and on Windows
-//          .AClearRefusedForTheEngineLogsOneLineAndNoRead and
-//          .AClearAtTheFakesStoppedEngineLogsTheReadAfter;
+//          .AClearTheEngineRefusesLogsOneLineAndNoRead,
+//          .AClearAtTheFakesRunningEngineGoesThrough,
+//          .AClearWhileMovingAsksOnceMore (the moving vehicle's
+//          question) and .AClearAtTheFakesStoppedEngineLogsTheReadAfter;
 //          a sleep's line: BridgeTest.ASleepWhileConnectedIsLoggedWithItsLength,
 //          BridgeTest.SessionInfoTextNamesTheAdapter; its versions clause
 //          as adapterVersions, .ConnectLogsTheAdaptersSession), the serial ports as
@@ -1178,6 +1180,11 @@ void SessionBridge::applyConnectedState(ecuio_session_t* session, const QString&
     for (bool& asked : m_clearAsked) {
         asked = false;
     }
+    for (bool& waiting : m_clearWaiting) {
+        waiting = false;
+    }
+    m_clearSavedTo.clear();
+    emit clearMovingChanged();
     m_diagnosticsShownCount = 0;
     if (!m_diagnostics.isEmpty()) {
         m_diagnostics.clear();
@@ -1395,6 +1402,7 @@ void SessionBridge::setUnitSystem(int units)
     if (units == unitSystem()) return;
     m_signalModel->setUnitSystem(static_cast<uint32_t>(units));
     emit unitSystemChanged();
+    emit clearMovingChanged();
     if (m_diagnosticsShownCount > 0) {
         rebuildDiagnostics();
     }
@@ -2289,6 +2297,7 @@ void SessionBridge::pollChannelDiagnostics()
         return;
     }
     bool changed = m_diagnosticsShownCount != m_channelCount;
+    bool clear_ended = false;
     for (uint32_t c = 0; c < m_channelCount; ++c) {
         ecuio_channel_diagnostics_t s{};
         if (ecuio_session_get_channel_diagnostics(m_session, c, &s) !=
@@ -2302,7 +2311,16 @@ void SessionBridge::pollChannelDiagnostics()
         bool clear_only = (s.flags & ECUIO_DIAG_CLEARING) != 0;
         if (m_clearAsked[c] && !clear_only && s.clear != ECUIO_CLEAR_NONE) {
             m_clearAsked[c] = false;
+            clear_ended = true;
             emit logMessage(channelClearText(s));
+            if (s.clear == ECUIO_CLEAR_MOVING ||
+                s.clear == ECUIO_CLEAR_NO_VEHICLE_SPEED) {
+                m_clearWaiting[c] = true;
+                m_clearWaitGeneration[c] = s.generation;
+                m_clearWaitKmh[c] = (s.flags & ECUIO_DIAG_CLEAR_KMH) != 0
+                                        ? s.clear_kmh
+                                        : UINT32_MAX;
+            }
             clear_only = s.clear != ECUIO_CLEAR_CLEARED &&
                          s.clear != ECUIO_CLEAR_UNANSWERED;
         }
@@ -2318,6 +2336,9 @@ void SessionBridge::pollChannelDiagnostics()
     if (changed) {
         m_diagnosticsShownCount = m_channelCount;
         rebuildDiagnostics();
+    }
+    if (clear_ended) {
+        emit clearMovingChanged();
     }
 }
 
@@ -2430,10 +2451,16 @@ QString SessionBridge::clearDiagnostics()
     const QString shown = documentsRelative(path);
     emit logMessage(
         QStringLiteral("Diagnostics saved before the clear: %1").arg(shown));
+    m_clearSavedTo = shown;
+    for (bool& waiting : m_clearWaiting) {
+        waiting = false;
+    }
+    emit clearMovingChanged();
 
     for (uint32_t i = 0; i < n; ++i) {
-        const ecuio_status_t rc = ecuio_session_clear_diagnostics(
-            m_session, channels[i], reports[i].generation);
+        const ecuio_status_t rc = ecuio_session_clear_diagnostics_with(
+            m_session, channels[i], reports[i].generation,
+            ECUIO_CLEAR_ALLOW_RUNNING);
         if (rc == ECUIO_OK) {
             m_clearAsked[channels[i]] = true;
         } else {
@@ -2446,6 +2473,84 @@ QString SessionBridge::clearDiagnostics()
         }
     }
     return shown;
+}
+
+QStringList SessionBridge::clearMoving() const
+{
+    QStringList ecus;
+    for (uint32_t c = 0; c < m_channelCount; ++c) {
+        if (m_clearAsked[c]) {
+            return {}; /* asked once all have ended */
+        }
+    }
+    for (uint32_t c = 0; c < m_channelCount; ++c) {
+        if (m_clearWaiting[c]) {
+            ecus << hexId(m_diagnosticsShown[c].rx_id);
+        }
+    }
+    return ecus;
+}
+
+QString SessionBridge::clearMovingSpeed() const
+{
+    uint32_t kmh = UINT32_MAX;
+    for (uint32_t c = 0; c < m_channelCount; ++c) {
+        if (m_clearWaiting[c] && m_clearWaitKmh[c] != UINT32_MAX &&
+            (kmh == UINT32_MAX || m_clearWaitKmh[c] > kmh)) {
+            kmh = m_clearWaitKmh[c];
+        }
+    }
+    if (kmh == UINT32_MAX) {
+        return {};
+    }
+    return QStringLiteral("%1 %2")
+        .arg(qRound(displayValue(QStringLiteral("km/h"), kmh)))
+        .arg(displayUnit(QStringLiteral("km/h")));
+}
+
+void SessionBridge::clearDiagnosticsMoving()
+{
+    if (!m_connected.load(std::memory_order_acquire) || m_session == nullptr ||
+        clearMoving().isEmpty()) {
+        return;
+    }
+    emit logMessage(QStringLiteral("Clearing while moving; the report was "
+                                   "saved before the clear: %1")
+                        .arg(m_clearSavedTo));
+    for (uint32_t c = 0; c < m_channelCount; ++c) {
+        if (!m_clearWaiting[c]) {
+            continue;
+        }
+        m_clearWaiting[c] = false;
+        const ecuio_status_t rc = ecuio_session_clear_diagnostics_with(
+            m_session, c, m_clearWaitGeneration[c],
+            ECUIO_CLEAR_ALLOW_RUNNING | ECUIO_CLEAR_ALLOW_MOVING);
+        if (rc == ECUIO_OK) {
+            m_clearAsked[c] = true;
+        } else {
+            emit logMessage(
+                QStringLiteral("ECU %1 clear: not sent: %2")
+                    .arg(hexId(m_diagnosticsShown[c].rx_id),
+                         rc == ECUIO_ERR_REPORT_CHANGED
+                             ? QStringLiteral("the report changed")
+                             : QString::fromUtf8(ecuio_status_string(rc))));
+        }
+    }
+    emit clearMovingChanged();
+}
+
+void SessionBridge::cancelClearMoving()
+{
+    const QStringList ecus = clearMoving();
+    if (ecus.isEmpty()) {
+        return;
+    }
+    for (bool& waiting : m_clearWaiting) {
+        waiting = false;
+    }
+    emit logMessage(QStringLiteral("Clear while moving not sent: %1")
+                        .arg(ecus.join(QStringLiteral(", "))));
+    emit clearMovingChanged();
 }
 
 QByteArray
@@ -2615,6 +2720,15 @@ SessionBridge::diagnosticsEntry(const ecuio_channel_diagnostics_t& s,
     case ECUIO_CLEAR_REPORT_CHANGED:
         clear = QStringLiteral("reportChanged");
         break;
+    case ECUIO_CLEAR_MOVING:
+        clear = QStringLiteral("moving");
+        break;
+    case ECUIO_CLEAR_NO_VEHICLE_SPEED:
+        clear = QStringLiteral("noVehicleSpeed");
+        if (s.clear_nrc != 0) {
+            clearNrc = QStringLiteral("7F 01 %1").arg(hexByte(s.clear_nrc));
+        }
+        break;
     default:
         clear = QStringLiteral("none");
         break;
@@ -2622,6 +2736,21 @@ SessionBridge::diagnosticsEntry(const ecuio_channel_diagnostics_t& s,
     m[QStringLiteral("clear")] = clear;
     m[QStringLiteral("clearNrc")] = clearNrc;
     m[QStringLiteral("clearRpm")] = static_cast<int>(s.clear_rpm);
+    /* What the clear read: the engine turning (a 7F 04 22 then means it
+     * won't clear running), and the vehicle speed in the unit system */
+    m[QStringLiteral("clearRunning")] =
+        (s.flags & ECUIO_DIAG_CLEAR_RPM) != 0 && s.clear_rpm > 0;
+    QString clearSpeed;
+    if ((s.flags & ECUIO_DIAG_CLEAR_KMH) != 0) {
+        ecuio_display_value_t out{};
+        if (ecuio_display_convert("km/h", 0, s.clear_kmh, units, &out) ==
+            ECUIO_DISPLAY_OK) {
+            clearSpeed = QStringLiteral("%1 %2")
+                             .arg(qRound(out.value))
+                             .arg(QString::fromUtf8(out.unit));
+        }
+    }
+    m[QStringLiteral("clearSpeed")] = clearSpeed;
     return m;
 }
 
@@ -2732,12 +2861,29 @@ QString SessionBridge::channelIdentityText(const ecuio_channel_identity_t& s)
 QString SessionBridge::channelClearText(const ecuio_channel_diagnostics_t& s)
 {
     QString what;
+    const bool rpm_read = (s.flags & ECUIO_DIAG_CLEAR_RPM) != 0;
+    const bool kmh_read = (s.flags & ECUIO_DIAG_CLEAR_KMH) != 0;
     switch (s.clear) {
     case ECUIO_CLEAR_CLEARED:
         what = QStringLiteral("cleared");
+        /* The speeds it was cleared at, when the user's word let it run */
+        if (kmh_read) {
+            what +=
+                QStringLiteral(" (%1, %2 km/h)")
+                    .arg(rpm_read ? QStringLiteral("%1 rpm").arg(s.clear_rpm)
+                                  : QStringLiteral("engine speed unknown"))
+                    .arg(s.clear_kmh);
+        }
         break;
     case ECUIO_CLEAR_REFUSED:
         what = QStringLiteral("refused (7F 04 %1)").arg(hexByte(s.clear_nrc));
+        /* J1979: an ECU that can't clear with the engine running answers
+         * conditionsNotCorrect */
+        if (s.clear_nrc == 0x22 && rpm_read && s.clear_rpm > 0) {
+            what += QStringLiteral(": this ECU won't clear with the engine "
+                                   "running: stop and turn it off, then try "
+                                   "again");
+        }
         break;
     case ECUIO_CLEAR_UNANSWERED:
         what = QStringLiteral("no answer");
@@ -2754,6 +2900,15 @@ QString SessionBridge::channelClearText(const ecuio_channel_diagnostics_t& s)
         break;
     case ECUIO_CLEAR_REPORT_CHANGED:
         what = QStringLiteral("not sent: the report changed");
+        break;
+    case ECUIO_CLEAR_MOVING:
+        what = QStringLiteral("not sent: moving (%1 km/h)").arg(s.clear_kmh);
+        break;
+    case ECUIO_CLEAR_NO_VEHICLE_SPEED:
+        what = s.clear_nrc != 0
+                   ? QStringLiteral("not sent: no vehicle speed (7F 01 %1)")
+                         .arg(hexByte(s.clear_nrc))
+                   : QStringLiteral("not sent: no vehicle speed");
         break;
     default:
         what = QStringLiteral("not asked");

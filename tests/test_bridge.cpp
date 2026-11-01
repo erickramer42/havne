@@ -2563,13 +2563,16 @@ TEST(BridgeTest, RecordingFolderNamesThePickedVehicleForAnAdapterOnly)
         << folders.join(',').toStdString();
 }
 
-/* ADR-0038 through the fake J2534 DLL, whose engine turns (2000 rpm):
- * the clear ends unsent in one line, and the generations it moved log
- * no second diagnostics line; a Read again after it logs its read */
-TEST(BridgeTest, AClearRefusedForTheEngineLogsOneLineAndNoRead)
+/* ADR-0038 through the fake J2534 DLL, whose engine turns (2000 rpm)
+ * and refuses to clear running (ECUIO_FAKE_CLEAR_NRC 0x22, J1979's
+ * conditionsNotCorrect): the refusal is one line that says why, and the
+ * generations the clear moved log no second diagnostics line; a Read
+ * again after it logs its read */
+TEST(BridgeTest, AClearTheEngineRefusesLogsOneLineAndNoRead)
 {
     FakeHooks hooks;
     ASSERT_TRUE(hooks.load());
+    FakeEnvArm refuses("ECUIO_FAKE_CLEAR_NRC", "0x22");
     QTemporaryDir root;
     ASSERT_TRUE(root.isValid());
     SessionBridge bridge;
@@ -2595,7 +2598,8 @@ TEST(BridgeTest, AClearRefusedForTheEngineLogsOneLineAndNoRead)
     spinLoop(500);
     ASSERT_EQ(clear_lines().size(), 1) << log.join('\n').toStdString();
     EXPECT_EQ(clear_lines().first().toStdString(),
-              "ECU 0x7E8 clear: not sent: engine running (2000 rpm)");
+              "ECU 0x7E8 clear: refused (7F 04 22): this ECU won't clear with "
+              "the engine running: stop and turn it off, then try again");
     EXPECT_EQ(diagnostics_lines().size(), 1) << log.join('\n').toStdString();
 
     bridge.readDiagnostics();
@@ -2606,6 +2610,121 @@ TEST(BridgeTest, AClearRefusedForTheEngineLogsOneLineAndNoRead)
     spinLoop(300);
     EXPECT_EQ(clear_lines().size(), 1) << "one line per clear asked";
     ASSERT_TRUE(disconnectAndWait(bridge));
+}
+
+/* The user's word on the engine (ADR-0038's appendix of 2026-11-01): the
+ * fake's engine turns (2000 rpm) and its car stands, so the clear goes
+ * through, its line naming both speeds */
+TEST(BridgeTest, AClearAtTheFakesRunningEngineGoesThrough)
+{
+    FakeHooks hooks;
+    ASSERT_TRUE(hooks.load());
+    QTemporaryDir root;
+    ASSERT_TRUE(root.isValid());
+    SessionBridge bridge;
+    bridge.setRecordingsRootForTesting(root.path());
+    QStringList log;
+    QObject::connect(&bridge, &SessionBridge::logMessage,
+                     [&log](const QString& line) { log << line; });
+    const auto diagnostics_lines = [&log]() {
+        return log.filter(QStringLiteral("ECU 0x7E8 diagnostics: "));
+    };
+    ASSERT_TRUE(
+        bridge
+            .connectSession(QStringLiteral("j2534://%1?probe=0&identify=0")
+                                .arg(QString::fromUtf8(FAKE_J2534_DLL_PATH)))
+            .isEmpty());
+    ASSERT_TRUE(
+        spinUntil([&]() { return diagnostics_lines().size() == 1; }, 5000));
+    EXPECT_FALSE(bridge.clearDiagnostics().isEmpty());
+    ASSERT_TRUE(
+        spinUntil([&]() { return diagnostics_lines().size() == 2; }, 5000))
+        << log.join('\n').toStdString();
+    EXPECT_EQ(log.filter(QStringLiteral("ECU 0x7E8 clear: ")),
+              QStringList{QStringLiteral(
+                  "ECU 0x7E8 clear: cleared (2000 rpm, 0 km/h)")});
+    EXPECT_TRUE(bridge.clearMoving().isEmpty()) << "nothing waits";
+    ASSERT_TRUE(disconnectAndWait(bridge));
+}
+
+/* Moving (ECUIO_FAKE_SPEED_KMH 48), the word on the engine isn't enough:
+ * the clear ends unsent and clearMoving names the ECU and the speed, in
+ * the unit system; the word on a moving vehicle clears it, with no
+ * second file. Canceled instead, nothing more is sent */
+TEST(BridgeTest, AClearWhileMovingAsksOnceMore)
+{
+    FakeHooks hooks;
+    ASSERT_TRUE(hooks.load());
+    FakeEnvArm moving("ECUIO_FAKE_SPEED_KMH", "48");
+    for (const bool word : {true, false}) {
+        SCOPED_TRACE(word ? "cleared moving" : "canceled");
+        QTemporaryDir root;
+        ASSERT_TRUE(root.isValid());
+        SessionBridge bridge;
+        bridge.setRecordingsRootForTesting(root.path());
+        QStringList log;
+        QObject::connect(&bridge, &SessionBridge::logMessage,
+                         [&log](const QString& line) { log << line; });
+        const auto clear_lines = [&log]() {
+            return log.filter(QStringLiteral("ECU 0x7E8 clear: "));
+        };
+        int moving_signals = 0;
+        QObject::connect(&bridge, &SessionBridge::clearMovingChanged,
+                         [&moving_signals]() { ++moving_signals; });
+        ASSERT_TRUE(bridge
+                        .connectSession(
+                            QStringLiteral("j2534://%1?probe=0&identify=0")
+                                .arg(QString::fromUtf8(FAKE_J2534_DLL_PATH)))
+                        .isEmpty());
+        ASSERT_TRUE(spinUntil(
+            [&]() {
+                return !log.filter(QStringLiteral("ECU 0x7E8 diagnostics: "))
+                            .isEmpty();
+            },
+            5000));
+        EXPECT_FALSE(bridge.clearDiagnostics().isEmpty());
+        ASSERT_TRUE(
+            spinUntil([&]() { return !bridge.clearMoving().isEmpty(); }, 5000))
+            << log.join('\n').toStdString();
+        EXPECT_EQ(clear_lines(),
+                  QStringList{QStringLiteral(
+                      "ECU 0x7E8 clear: not sent: moving (48 km/h)")});
+        EXPECT_EQ(bridge.clearMoving(), QStringList{QStringLiteral("0x7E8")});
+        EXPECT_EQ(bridge.clearMovingSpeed(), QStringLiteral("48 km/h"));
+        bridge.setUnitSystem(ECUIO_UNITS_IMPERIAL);
+        EXPECT_EQ(bridge.clearMovingSpeed(), QStringLiteral("30 mph"));
+        EXPECT_GT(moving_signals, 0);
+
+        if (word) {
+            bridge.clearDiagnosticsMoving();
+            EXPECT_TRUE(bridge.clearMoving().isEmpty());
+            ASSERT_TRUE(
+                spinUntil([&]() { return clear_lines().size() == 2; }, 5000))
+                << log.join('\n').toStdString();
+            EXPECT_EQ(clear_lines().at(1).toStdString(),
+                      "ECU 0x7E8 clear: cleared (2000 rpm, 48 km/h)");
+            EXPECT_EQ(
+                log.filter(QStringLiteral("Clearing while moving")).size(), 1);
+        } else {
+            bridge.cancelClearMoving();
+            EXPECT_TRUE(bridge.clearMoving().isEmpty());
+            EXPECT_EQ(log.filter(QStringLiteral("Clear while moving not sent: "
+                                                "0x7E8"))
+                          .size(),
+                      1);
+            spinLoop(500);
+            EXPECT_EQ(clear_lines().size(), 1) << "nothing more sent";
+            bridge.clearDiagnosticsMoving();
+            spinLoop(300);
+            EXPECT_EQ(clear_lines().size(), 1) << "nothing waits to send";
+        }
+        EXPECT_EQ(QDir(root.path())
+                      .entryList({QStringLiteral("*.jsonl")}, QDir::Files)
+                      .size(),
+                  1)
+            << "one saved file";
+        ASSERT_TRUE(disconnectAndWait(bridge));
+    }
 }
 
 /* With the fake's engine stopped the clear goes through: its line, then
@@ -2646,7 +2765,8 @@ TEST(BridgeTest, AClearAtTheFakesStoppedEngineLogsTheReadAfter)
         << log.join('\n').toStdString();
     spinLoop(500);
     EXPECT_EQ(log.filter(QStringLiteral("ECU 0x7E8 clear: ")),
-              QStringList{QStringLiteral("ECU 0x7E8 clear: cleared")});
+              QStringList{
+                  QStringLiteral("ECU 0x7E8 clear: cleared (0 rpm, 0 km/h)")});
     ASSERT_EQ(diagnostics_lines().size(), 2) << log.join('\n').toStdString();
     EXPECT_TRUE(diagnostics_lines().at(1).contains(
         QStringLiteral("MIL off; stored none; pending none; permanent P0420")))
@@ -3824,6 +3944,33 @@ TEST(BridgeTest, ChannelClearTextNamesEachOutcome)
               "ECU 0x7E8 clear: not sent: the report changed");
     EXPECT_EQ(text(ECUIO_CLEAR_NONE, 0, 0), "ECU 0x7E8 clear: not asked");
 
+    /* Under the user's word (ADR-0038's appendix of 2026-11-01): what was
+     * read, the vehicle's speed, and why an ECU refused a running engine */
+    d.clear_kmh = 48;
+    EXPECT_EQ(text(ECUIO_CLEAR_MOVING, 0, 2000),
+              "ECU 0x7E8 clear: not sent: moving (48 km/h)");
+    EXPECT_EQ(text(ECUIO_CLEAR_NO_VEHICLE_SPEED, 0, 0),
+              "ECU 0x7E8 clear: not sent: no vehicle speed");
+    EXPECT_EQ(text(ECUIO_CLEAR_NO_VEHICLE_SPEED, 0x12, 0),
+              "ECU 0x7E8 clear: not sent: no vehicle speed (7F 01 12)");
+    d.flags = ECUIO_DIAG_CLEAR_RPM | ECUIO_DIAG_CLEAR_KMH;
+    EXPECT_EQ(text(ECUIO_CLEAR_CLEARED, 0, 812),
+              "ECU 0x7E8 clear: cleared (812 rpm, 48 km/h)");
+    EXPECT_EQ(text(ECUIO_CLEAR_REFUSED, 0x22, 812),
+              "ECU 0x7E8 clear: refused (7F 04 22): this ECU won't clear with "
+              "the engine running: stop and turn it off, then try again");
+    EXPECT_EQ(text(ECUIO_CLEAR_REFUSED, 0x22, 0),
+              "ECU 0x7E8 clear: refused (7F 04 22)")
+        << "at 0 rpm, not the engine";
+    d.flags = ECUIO_DIAG_CLEAR_KMH;
+    EXPECT_EQ(text(ECUIO_CLEAR_CLEARED, 0, 0),
+              "ECU 0x7E8 clear: cleared (engine speed unknown, 48 km/h)");
+    d.flags = ECUIO_DIAG_CLEAR_RPM;
+    EXPECT_EQ(text(ECUIO_CLEAR_CLEARED, 0, 0), "ECU 0x7E8 clear: cleared")
+        << "no vehicle speed asked: the stopped engine's clear";
+    d.flags = 0;
+    d.clear_kmh = 0;
+
     /* The page's entry carries the same */
     d.clear = ECUIO_CLEAR_REFUSED;
     d.clear_nrc = 0x22;
@@ -3839,6 +3986,20 @@ TEST(BridgeTest, ChannelClearTextNamesEachOutcome)
     EXPECT_EQ(e.value("clear").toString(), QStringLiteral("engineRunning"));
     EXPECT_EQ(e.value("clearRpm").toInt(), 812);
     EXPECT_TRUE(e.value("clearing").toBool());
+    EXPECT_FALSE(e.value("clearRunning").toBool()) << "no reading flagged";
+    EXPECT_EQ(e.value("clearSpeed").toString(), QString());
+    d.clear = ECUIO_CLEAR_MOVING;
+    d.clear_kmh = 48;
+    d.flags = ECUIO_DIAG_CLEAR_RPM | ECUIO_DIAG_CLEAR_KMH;
+    e = SessionBridge::diagnosticsEntry(d, ECUIO_UNITS_IMPERIAL);
+    EXPECT_EQ(e.value("clear").toString(), QStringLiteral("moving"));
+    EXPECT_TRUE(e.value("clearRunning").toBool());
+    EXPECT_EQ(e.value("clearSpeed").toString(), QStringLiteral("30 mph"));
+    d.clear = ECUIO_CLEAR_NO_VEHICLE_SPEED;
+    d.clear_nrc = 0x12;
+    e = SessionBridge::diagnosticsEntry(d, ECUIO_UNITS_METRIC);
+    EXPECT_EQ(e.value("clear").toString(), QStringLiteral("noVehicleSpeed"));
+    EXPECT_EQ(e.value("clearNrc").toString(), QStringLiteral("7F 01 12"));
 }
 
 /* The saved file is havne-cli's: a start line, then each report as its
@@ -3938,7 +4099,9 @@ TEST(BridgeTest, AClearSavesTheReportFirst)
         << log.join('\n').toStdString();
     spinLoop(300);
     ASSERT_EQ(clear_lines().size(), 1) << log.join('\n').toStdString();
-    EXPECT_EQ(clear_lines().first().toStdString(), "ECU 0x7E8 clear: cleared");
+    EXPECT_EQ(clear_lines().first().toStdString(),
+              "ECU 0x7E8 clear: cleared (0 rpm, 0 km/h)")
+        << "the mock's key-on: engine stopped, car standing";
     EXPECT_EQ(diagnostics_lines().size(), 2);
     const QString after = diagnostics_lines().at(1);
     EXPECT_TRUE(after.contains(

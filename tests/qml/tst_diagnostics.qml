@@ -49,6 +49,8 @@ TestCase {
         Bridge.disconnectSession()
         tryVerify(() => !Bridge.disconnecting, 5000, "disconnect ends")
         Bridge.unitSystem = 0
+        // A knob a failed case armed never reaches the next case
+        Harness.clearFakeKnobs()
     }
 
     // The activity log's lines holding text, of those logged since init
@@ -162,7 +164,9 @@ TestCase {
         for (const part of ["stored and pending codes", "freeze frame",
                             "check-engine light off", "back to incomplete",
                             "Permanent codes stay", "emissions inspection",
-                            "leave the ignition on", "saved to the recordings folder first"])
+                            "the engine off and the ignition on", "refuse it while the engine runs",
+                            "asks once more before clearing a moving vehicle",
+                            "saved to the recordings folder first"])
             verify(words.indexOf(part) >= 0, "the confirmation says: " + part)
         find(page, "clearCancel").clicked()
         verify(!panel.visible)
@@ -187,7 +191,7 @@ TestCase {
         const card = () => find(page, "ecu_0x7E8")
         tryVerify(() => find(card(), "clearState").text.indexOf("Cleared") === 0, 3000,
                   "the clear's outcome on the card")
-        compare(logged("ECU 0x7E8 clear: "), ["ECU 0x7E8 clear: cleared"], "sent once")
+        compare(logged("ECU 0x7E8 clear: "), ["ECU 0x7E8 clear: cleared (0 rpm, 0 km/h)"], "sent once")
         compare(find(card(), "codes_stored").text, "None")
         compare(find(card(), "codes_stored").font.family, page.font.family,
                 "the page's own face, not an empty family's bitmap one")
@@ -201,11 +205,13 @@ TestCase {
         tryVerify(() => clear.enabled, 2000, "a clear can run again")
     }
 
-    // The fake J2534 DLL's engine turns (2000 rpm): the clear goes
-    // unsent, the card says why and keeps the codes
-    function test_clearWithTheFakesEngineRunningSendsNothing() {
+    // The fake J2534 DLL's engine turns (2000 rpm) and refuses to clear
+    // running (ECUIO_FAKE_CLEAR_NRC 0x22): the clear goes out on the
+    // confirmation's word, and the card says why nothing was erased
+    function test_clearTheFakesRunningEngineRefusesSaysWhy() {
         if (Harness.fakeDllPath === "")
             skip("needs the fake J2534 DLL (Windows)")
+        Harness.armFakeKnob("ECUIO_FAKE_CLEAR_NRC", "0x22")
         const page = createTemporaryObject(pageComponent, testCase.parent)
         connectAndRead(page, "j2534://" + Harness.fakeDllPath + "?probe=0&identify=0")
         const clear = find(page, "clearCodes")
@@ -215,8 +221,45 @@ TestCase {
         const card = () => find(page, "ecu_0x7E8")
         tryVerify(() => find(card(), "clearState").text !== "", 5000)
         compare(find(card(), "clearState").text,
-                "Not sent: the engine is running (2000 rpm). Stop it, leave the ignition on, and clear again")
+                "This ECU won't clear with the engine running (7F 04 22): stop and turn it off, then try again. Nothing was erased")
         compare(find(card(), "codes_stored").text, "P0301  P0420  U0100")
+    }
+
+    // Moving (ECUIO_FAKE_SPEED_KMH 48): the clear stops at the speed and
+    // the page asks once more, naming it in the unit system; Cancel sends
+    // nothing more, and asked again, Clear while moving clears
+    function test_clearOfAMovingVehicleAsksOnceMore() {
+        if (Harness.fakeDllPath === "")
+            skip("needs the fake J2534 DLL (Windows)")
+        Harness.armFakeKnob("ECUIO_FAKE_SPEED_KMH", "48")
+        Bridge.unitSystem = 0 /* metric; cleanup() restores it */
+        const page = createTemporaryObject(pageComponent, testCase.parent)
+        connectAndRead(page, "j2534://" + Harness.fakeDllPath + "?probe=0&identify=0")
+        const panel = find(page, "clearMovingPanel")
+        const card = () => find(page, "ecu_0x7E8")
+        for (const word of [false, true]) {
+            const clear = find(page, "clearCodes")
+            tryVerify(() => clear.enabled, 5000, "a clear can run")
+            clear.clicked()
+            find(page, "clearConfirm").clicked()
+            tryVerify(() => panel.visible, 5000, "asked once more")
+            compare(find(page, "clearMovingTitle").text,
+                    "The vehicle reads 48 km/h. Clear ECU 0x7E8 anyway?")
+            verify(!clear.enabled, "no second clear while it asks")
+            compare(find(card(), "clearState").text,
+                    "Not sent: the vehicle was moving (48 km/h)")
+            if (!word) {
+                find(page, "clearMovingCancel").clicked()
+                verify(!panel.visible)
+                compare(find(card(), "codes_stored").text, "P0301  P0420  U0100")
+                continue
+            }
+            find(page, "clearMovingConfirm").clicked()
+            verify(!panel.visible)
+            tryVerify(() => find(card(), "clearState").text.indexOf("Cleared") === 0,
+                      5000, "cleared while moving")
+            tryVerify(() => find(card(), "codes_stored").text === "None", 5000)
+        }
     }
 
     // Items whose right edge lies past page's (a Label by what it paints)

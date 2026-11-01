@@ -32,9 +32,13 @@ diagnostic information"), only from the Diagnostics page's **Clear
 codes**, after a confirmation
 ([ADR-0038](docs/adr/0038-clearing-trouble-codes.md)). Before it,
 Havne saves the report to a file of its own in the recordings folder
-and sends nothing if it can't; then it asks each ECU its engine speed
-and sends nothing to one whose engine turns. It clears each ECU by its
-own address, never every module at once. On an ECU that obeys, a clear
+and sends nothing if it can't. The confirmation says a clear works best
+with the engine off and the ignition on; Havne then asks each ECU its
+engine and vehicle speeds and clears at any engine speed, but asks once
+more, naming the speed, before clearing one whose vehicle moves. Some
+ECUs refuse a clear while the engine runs, and a clear may also reset
+other values the manufacturer chose. It clears each ECU by its own
+address, never every module at once. On an ECU that obeys, a clear
 erases the stored and pending codes and the freeze frame, turns the
 check-engine light off and sets the readiness monitors back to
 incomplete; permanent codes stay. **Clearing has run only against

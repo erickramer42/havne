@@ -173,7 +173,8 @@ contributions:
   0x03, 0x07, 0x09, 0x0A and 0x22), and a `static_assert` keeps 0x04 out of
   every list. The one path that sends 0x04, which clears trouble codes, is a
   channel's clear ([ADR-0038](docs/adr/0038-clearing-trouble-codes.md)): the
-  report saved first, the engine seen stopped, the user's confirmation. A
+  report saved first, the user's confirmation, the engine seen stopped or the
+  user's word on it, and once more on a moving vehicle. A
   change that sends anything else, or reaches 0x04 another way, is a scope
   change (above), not a patch.
 - **Know your thread.** Frame callbacks run on the transport's worker thread:

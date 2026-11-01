@@ -422,6 +422,13 @@ class SessionBridge : public QObject
     // report is a clear target (clearTarget), the rule clearDiagnostics
     // sends by, so the confirmation names exactly them
     Q_PROPERTY(QStringList clearTargets READ clearTargets NOTIFY diagnosticsChanged)
+    // The ECUs whose clear stopped at the vehicle speed (ADR-0038's
+    // appendix of 2026-11-01), moving or giving none, as "0x7E8", once
+    // every clear asked has ended; the page asks once more, naming
+    // clearMovingSpeed ("48 km/h" in the unit system, "" when no ECU gave
+    // one), and clearDiagnosticsMoving sends to exactly them
+    Q_PROPERTY(QStringList clearMoving READ clearMoving NOTIFY clearMovingChanged)
+    Q_PROPERTY(QString clearMovingSpeed READ clearMovingSpeed NOTIFY clearMovingChanged)
 
 public:
     explicit SessionBridge(QObject* parent = nullptr);
@@ -566,11 +573,22 @@ public:
     // saves those reports first, to diagnostics-<stamp>[ <vehicle>].jsonl
     // in the recordings folder (diagnosticsFileText; the vehicle for an
     // adapter's session only, as a recording's folder), then asks core to
-    // clear each at the generation saved. A failed save sends nothing.
-    // Returns the saved file for display (relative to Documents), or ""
-    // when nothing was sent; each ECU's outcome comes in its report and
-    // the activity log (channelClearText)
+    // clear each at the generation saved, at any engine speed
+    // (ECUIO_CLEAR_ALLOW_RUNNING: the user's word, given in the page's
+    // confirmation). A failed save sends nothing. Returns the saved file
+    // for display (relative to Documents), or "" when nothing was sent;
+    // each ECU's outcome comes in its report and the activity log
+    // (channelClearText), and a moving vehicle's in clearMoving
     Q_INVOKABLE QString clearDiagnostics();
+    // The user's word on a moving vehicle too: clears each clearMoving
+    // ECU at the generation its clear ended on, so a report read again
+    // since (not the one the saved file holds) is refused unsent. No
+    // second file: nothing was sent, and the first holds their reports
+    Q_INVOKABLE void clearDiagnosticsMoving();
+    // No word on a moving vehicle: clearMoving empties, nothing more sent
+    Q_INVOKABLE void cancelClearMoving();
+    QStringList clearMoving() const;
+    QString clearMovingSpeed() const;
     // One ECU's report as the page shows it: ecu ("0x7E8"); asked,
     // complete; readiness (an outcome: "unasked", "answered", "refused",
     // "unanswered") and readinessNrc ("7F 01 12" when refused); mil,
@@ -654,6 +672,7 @@ signals:
     void recordingStateChanged();
     void unitSystemChanged();
     void diagnosticsChanged();
+    void clearMovingChanged();
 
 private:
     static void onFrame(const ecuio_frame_t* frame, void* user_data);
@@ -832,6 +851,14 @@ private:
     uint32_t m_diagnosticsGeneration[ECUIO_SESSION_INFO_MAX_CHANNELS] = {};
     // A clear asked of each channel, its outcome not yet logged
     bool m_clearAsked[ECUIO_SESSION_INFO_MAX_CHANNELS] = {};
+    // A clear that stopped at the vehicle speed, waiting for the word on
+    // a moving vehicle: the generation it ended on, the speed it read
+    // (UINT32_MAX: none)
+    bool m_clearWaiting[ECUIO_SESSION_INFO_MAX_CHANNELS] = {};
+    uint32_t m_clearWaitGeneration[ECUIO_SESSION_INFO_MAX_CHANNELS] = {};
+    uint32_t m_clearWaitKmh[ECUIO_SESSION_INFO_MAX_CHANNELS] = {};
+    // The file the last clear saved its reports to, as shown
+    QString m_clearSavedTo;
     // The reports the page shows, as last read, and their entries
     ecuio_channel_diagnostics_t m_diagnosticsShown[ECUIO_SESSION_INFO_MAX_CHANNELS] = {};
     uint32_t m_diagnosticsShownCount = 0;

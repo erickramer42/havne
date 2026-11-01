@@ -851,6 +851,60 @@ TEST_F(Elm327SessionTest, DiagnosticsFillTheReportAndReadAgain)
     }
 }
 
+/* The caller's word over ELM327 (ADR-0038's appendix of 2026-11-01): at
+ * the fake's running engine and 0 km/h, 01 0D goes after 01 0C and 04
+ * clears; moving, nothing goes until the word on a moving vehicle too */
+TEST_F(Elm327SessionTest, AClearWithTheCallersWordSendsAtARunningEngine)
+{
+    for (const int kmh : {-1, 48}) {
+        SCOPED_TRACE(kmh < 0 ? "standing" : "moving");
+        fake_ecu::reset_diagnostics();
+        fake_ecu::diagnostics().speed_kmh = kmh;
+        Session s;
+        ASSERT_EQ(s.create(uri("?probe=0&identify=0")), ECUIO_OK);
+        s.start();
+        ecuio_channel_diagnostics_t d{};
+        const auto settled = [&] {
+            return ecuio_session_get_channel_diagnostics(s.s, 0, &d) ==
+                       ECUIO_OK &&
+                   d.clear != ECUIO_CLEAR_NONE &&
+                   (d.flags & ECUIO_DIAG_COMPLETE) != 0 &&
+                   (d.flags & ECUIO_DIAG_CLEARING) == 0;
+        };
+        ASSERT_TRUE(wait_for(
+            [&] {
+                return ecuio_session_get_channel_diagnostics(s.s, 0, &d) ==
+                           ECUIO_OK &&
+                       (d.flags & ECUIO_DIAG_COMPLETE) != 0;
+            },
+            8000));
+        ASSERT_EQ(ecuio_session_clear_diagnostics_with(
+                      s.s, 0, d.generation, ECUIO_CLEAR_ALLOW_RUNNING),
+                  ECUIO_OK);
+        ASSERT_TRUE(wait_for(settled, 8000));
+        EXPECT_EQ(d.clear_rpm, 2000u);
+        if (kmh < 0) {
+            EXPECT_EQ(d.clear, ECUIO_CLEAR_CLEARED);
+            EXPECT_EQ(fake_ecu::diagnostics().clears.load(), 1u);
+            continue;
+        }
+        EXPECT_EQ(d.clear, ECUIO_CLEAR_MOVING);
+        EXPECT_EQ(d.clear_kmh, 48u);
+        EXPECT_EQ(fake_ecu::diagnostics().clears.load(), 0u);
+        ASSERT_EQ(ecuio_session_clear_diagnostics_with(
+                      s.s, 0, d.generation,
+                      ECUIO_CLEAR_ALLOW_RUNNING | ECUIO_CLEAR_ALLOW_MOVING),
+                  ECUIO_OK);
+        ASSERT_TRUE(wait_for(
+            [&] { return settled() && d.clear == ECUIO_CLEAR_CLEARED; }, 8000))
+            << "clear " << int{d.clear};
+        /* The ECU's own count: the fake's command record keeps only the
+         * session's first commands */
+        EXPECT_EQ(fake_ecu::diagnostics().clears.load(), 1u);
+        EXPECT_EQ(d.lists[ECUIO_DIAG_STORED].held, 0u);
+    }
+}
+
 /* ADR-0038 over ELM327: with the engine stopped, a clear sends 04 once,
  * with no count digit, after the engine speed, and the report read again
  * is the fake's cleared one; with it running, no 04 goes out */

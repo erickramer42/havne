@@ -364,6 +364,68 @@ TEST(CoreTest, MockEcuClearsOnlyWithTheEngineStopped)
     fake_diagnostics::expect_cleared_report(d);
 }
 
+/* The caller's word (ecuio_session_clear_diagnostics_with's flags) on
+ * the simulated ECU, no worker: moving, the word on the engine stops at
+ * 01 0D with the drive cycle's speed; the word on a moving vehicle too
+ * clears it, which the mock never refuses */
+TEST(CoreTest, MockEcuClearsAMovingCarOnlyWithTheCallersWord)
+{
+    auto e = std::make_unique<ecuio_request_engine>();
+    ecuio_engine_init(e.get(), 1);
+    ecuio_engine_diagnose(e.get(), ecuio_obd2_signal_set());
+    const ecuio_channel_diagnostics_t& d = e->chans[0].diag;
+    ecuio_mock::DriveCycle car;
+    ecuio_mock_ecu ecu;
+    ecu.engine = &car;
+    int64_t now = 0;
+    ecuio_mock_ecu_read(e.get(), &ecu, &now);
+
+    car.rpm = 2400.0f;
+    car.speed_kmh = 47.6f;
+    ASSERT_TRUE(ecuio_engine_clear(e.get(), 0, d.generation,
+                                   ECUIO_CLEAR_ALLOW_RUNNING));
+    ecuio_mock_ecu_read(e.get(), &ecu, &now);
+    EXPECT_EQ(d.clear, ECUIO_CLEAR_MOVING);
+    EXPECT_EQ(d.clear_kmh, 48u) << "rounded";
+    EXPECT_EQ(d.clear_rpm, 2400u);
+    EXPECT_FALSE(ecu.cleared);
+
+    ASSERT_TRUE(ecuio_engine_clear(e.get(), 0, d.generation,
+                                   ECUIO_CLEAR_ALLOW_RUNNING |
+                                       ECUIO_CLEAR_ALLOW_MOVING));
+    ecuio_mock_ecu_read(e.get(), &ecu, &now);
+    EXPECT_TRUE(ecu.cleared);
+    EXPECT_EQ(d.clear, ECUIO_CLEAR_CLEARED);
+    fake_diagnostics::expect_cleared_report(d);
+}
+
+/* Through the worker: the flags reach the mock's engine. At its start
+ * the engine is stopped and the car stands, so the word on the engine
+ * clears it, both speeds read */
+TEST(CoreTest, TheCallersWordReachesTheWorker)
+{
+    ecuio_session_t* s = nullptr;
+    ASSERT_EQ(ecuio_session_create("mock://demo", &s), ECUIO_OK);
+    ecuio_channel_diagnostics_t d{};
+    ASSERT_EQ(ecuio_session_get_channel_diagnostics(s, 0, &d), ECUIO_OK);
+    EXPECT_EQ(ecuio_session_clear_diagnostics_with(s, 0, d.generation,
+                                                   ECUIO_CLEAR_ALLOW_RUNNING),
+              ECUIO_OK);
+    ASSERT_EQ(ecuio_session_start(s), ECUIO_OK);
+    EXPECT_TRUE(wait_for(
+        [&] {
+            return ecuio_session_get_channel_diagnostics(s, 0, &d) ==
+                       ECUIO_OK &&
+                   d.clear != ECUIO_CLEAR_NONE &&
+                   (d.flags & ECUIO_DIAG_COMPLETE) != 0;
+        },
+        2000));
+    EXPECT_EQ(d.clear, ECUIO_CLEAR_CLEARED);
+    EXPECT_TRUE(d.flags & ECUIO_DIAG_CLEAR_KMH)
+        << "01 0D asked: only the word on the engine asks it";
+    ecuio_session_destroy(s);
+}
+
 /* Through the worker: a session starts with the key on and the engine
  * stopped, so a clear of the report saved at create empties it on an
  * early tick, and that generation is gone; a new connect starts
@@ -416,6 +478,9 @@ TEST(CoreTest, AClearNeedsTheReportTheCallerSaved)
               ECUIO_ERR_REPORT_CHANGED);
     EXPECT_EQ(ecuio_session_clear_diagnostics(s, 1, d.generation),
               ECUIO_ERR_INVALID_ARGUMENT);
+    EXPECT_EQ(ecuio_session_clear_diagnostics_with(s, 0, d.generation, 0x4u),
+              ECUIO_ERR_INVALID_ARGUMENT)
+        << "a flag core doesn't know";
     ASSERT_EQ(ecuio_session_close(s), ECUIO_OK);
     EXPECT_EQ(ecuio_session_clear_diagnostics(s, 0, d.generation),
               ECUIO_ERR_SESSION_CLOSED);

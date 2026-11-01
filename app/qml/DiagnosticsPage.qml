@@ -5,7 +5,8 @@
 //          state; the clear's confirmation (naming the bridge's
 //          targets), Cancel sending nothing, a
 //          clear at the mock's stopped engine, and on Windows the fake's
-//          running engine), which finds items by objectName; the entries
+//          running engine refusing and its moving vehicle asked about
+//          once more), which finds items by objectName; the entries
 //          themselves and the clear's save by test_bridge
 //          (BridgeTest.DiagnosticsEntry*, .AClear*); on a phone, the
 //          clear's buttons reached on a short page
@@ -47,13 +48,20 @@ Page {
     property string savedTo: ""
     property bool clearFailed: false
     readonly property bool clearing: ecus.some(e => e.clearing)
-    // A clear needs a session, an ECU the bridge would clear, and none
-    // under way
+    // A clear needs a session, an ECU the bridge would clear, none under
+    // way, and no moving vehicle's question open
     readonly property bool canClear: Bridge.connected &&
-        Bridge.clearTargets.length > 0 && !clearing
+        Bridge.clearTargets.length > 0 && !clearing &&
+        Bridge.clearMoving.length === 0
 
     Connections {
         target: Bridge
+        // The moving vehicle's question opens at the top of the scrolling
+        // area, as the first does
+        function onClearMovingChanged() {
+            if (Bridge.clearMoving.length > 0)
+                flick.contentY = 0
+        }
         function onConnectedChanged() {
             root.confirming = false
             if (Bridge.connected) {
@@ -78,7 +86,7 @@ Page {
         if (ecus.length === 0)
             return qsTr("This session asks the vehicle nothing, so it reads no codes")
         if (clearing)
-            return qsTr("Clearing: checking that the engine is stopped, then clearing")
+            return qsTr("Clearing: reading the engine and vehicle speeds, then clearing")
         if (clearFailed)
             return qsTr("Nothing was cleared: the report couldn't be saved first (the Log page says why)")
         if (savedTo !== "")
@@ -99,6 +107,10 @@ Page {
         case "cleared":
             return qsTr("Cleared. What follows is the ECU's read after the clear")
         case "refused":
+            // J1979: an ECU that can't clear with the engine running
+            // answers conditionsNotCorrect
+            if (e.clearRunning && e.clearNrc === "7F 04 22")
+                return qsTr("This ECU won't clear with the engine running (%1): stop and turn it off, then try again. Nothing was erased").arg(e.clearNrc)
             return qsTr("The ECU refused the clear (%1): nothing was erased").arg(e.clearNrc)
         case "unanswered":
             return qsTr("No answer to the clear. What follows is the ECU's read after it")
@@ -110,6 +122,12 @@ Page {
                 : qsTr("Not sent: the ECU didn't give its engine speed")
         case "reportChanged":
             return qsTr("Not sent: the report changed after it was saved. Clear again to save this one")
+        case "moving":
+            return qsTr("Not sent: the vehicle was moving (%1)").arg(e.clearSpeed)
+        case "noVehicleSpeed":
+            return e.clearNrc !== ""
+                ? qsTr("Not sent: the ECU didn't give the vehicle speed (%1)").arg(e.clearNrc)
+                : qsTr("Not sent: the ECU didn't give the vehicle speed")
         default:
             return ""
         }
@@ -294,7 +312,7 @@ Page {
                             color: Theme.text
                             text: qsTr("Each ECU that obeys erases its stored and pending codes and its freeze frame, turns the check-engine light off, and sets its readiness monitors back to incomplete. Permanent codes stay: only the ECU clears them, once its monitor passes. Until the monitors complete again, which takes some driving, the car can fail an emissions inspection.") +
                                   "\n\n" +
-                                  qsTr("Stop the engine and leave the ignition on: Havne asks each ECU its engine speed first and sends nothing while it turns. The report is saved to the recordings folder first; if it can't be saved, nothing is sent.")
+                                  qsTr("A clear works best with the engine off and the ignition on; some ECUs refuse it while the engine runs. Havne asks each ECU its engine and vehicle speeds first, and asks once more before clearing a moving vehicle. The report is saved to the recordings folder first; if it can't be saved, nothing is sent.")
                         }
                         Flow {
                             Layout.fillWidth: true
@@ -312,6 +330,67 @@ Page {
                                 objectName: "clearCancel"
                                 text: qsTr("Cancel")
                                 onClicked: root.confirming = false
+                            }
+                        }
+                    }
+                }
+
+                // The moving vehicle's question (ADR-0038's appendix of
+                // 2026-11-01): the ECUs whose clear stopped at the vehicle
+                // speed, once every clear has ended; the speed named
+                Rectangle {
+                    objectName: "clearMovingPanel"
+                    visible: Bridge.connected && Bridge.clearMoving.length > 0
+                    Layout.fillWidth: true
+                    implicitHeight: movingBody.implicitHeight + 2 * Theme.pageMargin
+                    radius: Theme.radius
+                    color: Theme.elevated
+                    border.width: 1
+                    border.color: Theme.danger
+
+                    ColumnLayout {
+                        id: movingBody
+                        anchors.fill: parent
+                        anchors.margins: Theme.pageMargin
+                        spacing: 10
+
+                        Label {
+                            objectName: "clearMovingTitle"
+                            Layout.fillWidth: true
+                            wrapMode: Text.Wrap
+                            text: Bridge.clearMovingSpeed !== ""
+                                ? qsTr("The vehicle reads %1. Clear ECU %2 anyway?")
+                                      .arg(Bridge.clearMovingSpeed)
+                                      .arg(Bridge.clearMoving.join(", "))
+                                : qsTr("ECU %1 didn't give the vehicle speed. Clear it anyway?")
+                                      .arg(Bridge.clearMoving.join(", "))
+                            font.weight: Font.DemiBold
+                            color: Theme.text
+                        }
+                        Label {
+                            objectName: "clearMovingText"
+                            Layout.fillWidth: true
+                            wrapMode: Text.Wrap
+                            color: Theme.text
+                            // J1979: "Other manufacturer specific
+                            // clearing/resetting actions may also occur"
+                            text: qsTr("A clear can also reset other values the manufacturer chose, so the engine may run differently for a while. The report saved before the clear holds these codes.")
+                        }
+                        Flow {
+                            Layout.fillWidth: true
+                            spacing: Theme.spacing
+                            ThemedButton {
+                                objectName: "clearMovingConfirm"
+                                text: qsTr("Clear while moving")
+                                baseColor: Theme.danger
+                                hoverColor: Qt.lighter(Theme.danger, 1.15)
+                                pressedColor: Qt.darker(Theme.danger, 1.2)
+                                onClicked: Bridge.clearDiagnosticsMoving()
+                            }
+                            ThemedButton {
+                                objectName: "clearMovingCancel"
+                                text: qsTr("Cancel")
+                                onClicked: Bridge.cancelClearMoving()
                             }
                         }
                     }
