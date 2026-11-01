@@ -111,6 +111,20 @@ QString hexByte(uint8_t b)
                                     QLatin1Char('0')).toUpper();
 }
 
+// A clear's vehicle speed in the unit system, converted by core
+// (ADR-0022): "48 km/h", "30 mph"; "" if core can't convert it.
+QString clearSpeedText(uint32_t kmh, uint32_t units)
+{
+    ecuio_display_value_t out{};
+    if (ecuio_display_convert("km/h", 0, kmh, units, &out) !=
+        ECUIO_DISPLAY_OK) {
+        return {};
+    }
+    return QStringLiteral("%1 %2")
+        .arg(qRound(out.value))
+        .arg(QString::fromUtf8(out.unit));
+}
+
 // Widens [first, last] to take row; first < 0 is an empty range.
 void widenRows(int row, int& first, int& last)
 {
@@ -2312,7 +2326,7 @@ void SessionBridge::pollChannelDiagnostics()
         if (m_clearAsked[c] && !clear_only && s.clear != ECUIO_CLEAR_NONE) {
             m_clearAsked[c] = false;
             clear_ended = true;
-            emit logMessage(channelClearText(s));
+            emit logMessage(channelClearText(s, m_signalModel->unitSystem()));
             if (s.clear == ECUIO_CLEAR_MOVING ||
                 s.clear == ECUIO_CLEAR_NO_VEHICLE_SPEED) {
                 m_clearWaiting[c] = true;
@@ -2740,17 +2754,9 @@ SessionBridge::diagnosticsEntry(const ecuio_channel_diagnostics_t& s,
      * won't clear running), and the vehicle speed in the unit system */
     m[QStringLiteral("clearRunning")] =
         (s.flags & ECUIO_DIAG_CLEAR_RPM) != 0 && s.clear_rpm > 0;
-    QString clearSpeed;
-    if ((s.flags & ECUIO_DIAG_CLEAR_KMH) != 0) {
-        ecuio_display_value_t out{};
-        if (ecuio_display_convert("km/h", 0, s.clear_kmh, units, &out) ==
-            ECUIO_DISPLAY_OK) {
-            clearSpeed = QStringLiteral("%1 %2")
-                             .arg(qRound(out.value))
-                             .arg(QString::fromUtf8(out.unit));
-        }
-    }
-    m[QStringLiteral("clearSpeed")] = clearSpeed;
+    m[QStringLiteral("clearSpeed")] = (s.flags & ECUIO_DIAG_CLEAR_KMH) != 0
+                                          ? clearSpeedText(s.clear_kmh, units)
+                                          : QString();
     return m;
 }
 
@@ -2857,8 +2863,9 @@ QString SessionBridge::channelIdentityText(const ecuio_channel_identity_t& s)
 }
 
 /* One channel's "ECU 0x… clear:" line (ADR-0038): what became of the
- * clear its report names */
-QString SessionBridge::channelClearText(const ecuio_channel_diagnostics_t& s)
+ * clear its report names, a speed in the unit system the page shows */
+QString SessionBridge::channelClearText(const ecuio_channel_diagnostics_t& s,
+                                        uint32_t units)
 {
     QString what;
     const bool rpm_read = (s.flags & ECUIO_DIAG_CLEAR_RPM) != 0;
@@ -2869,10 +2876,10 @@ QString SessionBridge::channelClearText(const ecuio_channel_diagnostics_t& s)
         /* The speeds it was cleared at, when the user's word let it run */
         if (kmh_read) {
             what +=
-                QStringLiteral(" (%1, %2 km/h)")
+                QStringLiteral(" (%1, %2)")
                     .arg(rpm_read ? QStringLiteral("%1 rpm").arg(s.clear_rpm)
                                   : QStringLiteral("engine speed unknown"))
-                    .arg(s.clear_kmh);
+                    .arg(clearSpeedText(s.clear_kmh, units));
         }
         break;
     case ECUIO_CLEAR_REFUSED:
@@ -2902,7 +2909,8 @@ QString SessionBridge::channelClearText(const ecuio_channel_diagnostics_t& s)
         what = QStringLiteral("not sent: the report changed");
         break;
     case ECUIO_CLEAR_MOVING:
-        what = QStringLiteral("not sent: moving (%1 km/h)").arg(s.clear_kmh);
+        what = QStringLiteral("not sent: moving (%1)")
+                   .arg(clearSpeedText(s.clear_kmh, units));
         break;
     case ECUIO_CLEAR_NO_VEHICLE_SPEED:
         what = s.clear_nrc != 0

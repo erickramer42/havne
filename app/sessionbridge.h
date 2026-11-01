@@ -466,7 +466,9 @@ public:
     static QString channelSupportText(const ecuio_channel_support_t& support);  /* its "ECU 0x…:" lines */
     static QString channelIdentityText(const ecuio_channel_identity_t& identity);  /* its "ECU 0x… identity:" lines */
     static QString channelDiagnosticsText(const ecuio_channel_diagnostics_t& diagnostics);  /* its "ECU 0x… diagnostics:" lines */
-    static QString channelClearText(const ecuio_channel_diagnostics_t& diagnostics);  /* its "ECU 0x… clear:" lines (ADR-0038) */
+    // its "ECU 0x... clear:" lines (ADR-0038), speeds in the unit system
+    static QString channelClearText(const ecuio_channel_diagnostics_t& diagnostics,
+                                    uint32_t units);
     // A clear's saved reports, as havne-cli writes them (ADR-0031 section 3): a
     // start line, then one diagnostics line per report
     static QByteArray diagnosticsFileText(const ecuio_channel_diagnostics_t* reports,
