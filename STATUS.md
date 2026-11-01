@@ -35,9 +35,9 @@ mode over USB
 the Android app reaches the car through the phone's Bluetooth, in the
 background too. v0.3.5 has trouble codes, read and cleared, every
 linear reading of the Service 01 table in the `obd2` set, and SocketCAN
-requests through ISO-TP in core; fault injection on a replay and a
-performance benchmark come next, and the runs that need hardware move to
-v0.3.6 ([roadmap](#roadmap)).
+requests through ISO-TP in core, fault injection on a replay, and
+reply timing per request with a benchmark of it; the runs that need
+hardware move to v0.3.6 ([roadmap](#roadmap)).
 
 - **Works:**
   - **Mock transport,** on every platform: a scripted drive cycle (15 s
@@ -343,7 +343,7 @@ an issue is resolved it is removed, and its number is not reused.
 | v0.3.2 | Record-replay transport, decoding on the transport's thread, every driver in its own process | ✅ Released |
 | v0.3.3 | ELM327 adapters, preferences and vehicles, Android with Bluetooth and background sessions and a signed APK, the rename to Havne | ✅ Released |
 | v0.3.4 | A command-line client over the C ABI; Linux as a supported desktop; a SocketCAN transport that listens | ✅ Released |
-| v0.3.5 | Full OBD-II diagnostics (Services 01–0A, clearing codes); SocketCAN requests through ISO-TP; fault injection on a replay; a performance benchmark with latency per PID | In progress: reading and clearing codes, the full Service 01 set and SocketCAN requests built |
+| v0.3.5 | Full OBD-II diagnostics (Services 01–0A, clearing codes); SocketCAN requests through ISO-TP; fault injection on a replay; a performance benchmark with latency per PID | In progress: reading and clearing codes, the full Service 01 set, SocketCAN requests, fault injection on a replay and reply timing built |
 | v0.3.6–v0.3.9 | The hardware runs v0.3.5 leaves (SocketCAN through a real controller and on a car, packing through the VX); recordings you can open, compare and share: a log viewer with run overlay, CSV import and export with scrubbing, a health report, triggered logging and alerts | Planned |
 | v0.4.0 | Python bindings; PCAP export and candump import; ECU, DID and service discovery (needs requests to every ECU and listening to the whole bus first) | Proposed |
 | v0.5.0 | The plugin framework (ADR-0013's profile API), with no manufacturer plugin yet; legacy buses (ISO 9141-2, KWP2000, J1850) | Proposed |
@@ -412,13 +412,22 @@ scheduled. What each holds, past its row:
     `vcan0` as the ECU, with faults at the ISO-TP level (a bad sequence,
     a Consecutive Frame past N_Cr, a reply past P2, none), for the
     request engine and core's ISO-TP.
-- **A performance benchmark:** frames per second, throughput and zero
-  dropped as published numbers, building on CI's load test and
-  `bench_bridge` ([docs/testing.md](docs/testing.md#performance)); and
-  per PID, reply latency and the spread of its refresh interval (P50,
-  P99, P99.9), as a `latency.csv` per session. A J2534 frame carries
-  the adapter's time and an ELM327's the host's, whose jitter includes
-  the serial link's, so the output says which.
+- **A performance benchmark**, built
+  ([ADR-0042](docs/adr/0042-reply-timing.md), proposed): every
+  requesting session measures, per request in its rotation, its
+  outcomes, its reply latency (host clock) and its refresh interval on
+  the frames' own stamps (the adapter's for J2534, the kernel's for
+  SocketCAN, the host's for ELM327, said in the output; an interval
+  across a fallback to the host's delta is left out and counted), at
+  P50, P99 and P99.9 from log-linear histograms in core
+  (`ecuio_session_get_timing`). A recording keeps them in `latency.csv`
+  and `havne-cli stream` in `timing` lines: a snapshot of the rows that
+  changed every 10 s and at the end, under one column list. ISO-TP's
+  counts come with them. `bench_timing` measures what the stack adds
+  through each transport against the fakes, and `bench_bridge --load`
+  the delivery figures
+  ([docs/testing.md](docs/testing.md#reply-timing-against-the-fakes)). A
+  car's figures come from v0.3.6's runs.
 - **Done when:** trouble codes, the full Service 01 set, SocketCAN
   requests, fault injection on a replay and the benchmark are built
   and verified with no hardware: the fakes, replays of the test car,

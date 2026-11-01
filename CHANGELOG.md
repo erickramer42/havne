@@ -110,6 +110,15 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
   activity log says a replay has faults and what they did when it
   finishes, `havne-cli stream` writes the counts in its `end` line, and
   `ecuio_session_get_replay_faults` reads them.
+- **Reply timing per request**
+  ([ADR-0042](docs/adr/0042-reply-timing.md)): a requesting session
+  measures each PID's (or DID's) answers, refusals and timeouts, its
+  reply latency and its refresh interval at P50, P99 and P99.9, the
+  interval on the adapter's, the kernel's or the host's clock, as the
+  output says. A recording of the session holds them in `latency.csv`,
+  added to every 10 s, and `havne-cli stream` writes them as `timing`
+  lines; the activity log sums them up at the disconnect, with ISO-TP's
+  counts on SocketCAN and ELM327. `ecuio_session_get_timing` reads them.
 
 ### Changed
 - The simulated car starts each loop with the key on and the engine

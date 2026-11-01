@@ -389,3 +389,17 @@ row count), so a stream whose faults lost frames still ends with
 `replay-end`; without faults that is section 6's `covered >= replay_frames` as
 it was. `CliGoldenTest.ReplayWithFaultsEndsAndCountsThem`
 (`tests/golden/cli/replay-faults.jsonl`, seed 3 over the engine start).
+
+## Appendix: 2026-10-31, reply timing
+
+[ADR-0042](0042-reply-timing.md) grows schema 1 by a line type and a
+field. A requesting session's `stream` writes `timing` lines: every 10 s
+of session time and once before `end`, one for each request whose counts
+changed since the last, its keys `ECUIO_TIMING_COLUMNS` in order (the
+columns of a recording's `latency.csv`; `t_s` the snapshot's session
+time, `ecu` and `request` in `frames.csv`'s forms, a quantile with too
+few samples `null`, `interval_clock` `adapter`, `kernel` or `host`). The
+last line for a request is its total. The `end` line carries `isotp`
+(`first_frames`, `completed`, `dropped`, `malformed`) where core
+reassembles. A session with no rotation writes neither, so the golden
+runs (mock, replay) are unchanged. `CliTimingTest`.
