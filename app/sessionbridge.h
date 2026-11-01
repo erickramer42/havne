@@ -422,6 +422,10 @@ class SessionBridge : public QObject
     // report is a clear target (clearTarget), the rule clearDiagnostics
     // sends by, so the confirmation names exactly them
     Q_PROPERTY(QStringList clearTargets READ clearTargets NOTIFY diagnosticsChanged)
+    // True when every ECU a clear goes to said it holds nothing a clear
+    // erases (nothingStored): the confirmation then says a clear would
+    // only set the monitors back and reset what the manufacturer chose
+    Q_PROPERTY(bool clearFindsNothing READ clearFindsNothing NOTIFY diagnosticsChanged)
     // The ECUs whose clear stopped at the vehicle speed (ADR-0038's
     // appendix of 2026-11-01), moving or giving none, as "0x7E8", once
     // every clear asked has ended; the page asks once more, naming
@@ -568,6 +572,12 @@ public:
     QStringList clearTargets() const;
     // A report a clear goes to: its read complete, no clear under way
     static bool clearTarget(const ecuio_channel_diagnostics_t& report);
+    bool clearFindsNothing() const;
+    // A report that answered there is nothing to erase: PID 01 with the
+    // light off and no confirmed codes, the stored and pending lists
+    // answered empty, no freeze frame. A refused or unanswered item is
+    // not known to be empty, so it never counts as nothing.
+    static bool nothingStored(const ecuio_channel_diagnostics_t& report);
     // Read again: every ECU's diagnostics asked once more
     // (ecuio_session_read_diagnostics); nothing without a session
     Q_INVOKABLE void readDiagnostics();

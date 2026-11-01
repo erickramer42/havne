@@ -17,6 +17,7 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
 ### Changed
 
 - Clearing trouble codes no longer needs the engine off. The confirmation says a clear works best with the engine off and the ignition on; the clear then goes out with the engine running, and if an ECU refuses it running, its card and the activity log say so. If the vehicle is moving, the Diagnostics page asks once more, naming the speed, before clearing.
+- When no ECU has codes stored, the clear's confirmation says so: a clear then only sets the readiness monitors back to incomplete and resets any values the manufacturer chose.
 
 ### Fixed
 

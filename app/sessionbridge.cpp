@@ -2379,6 +2379,33 @@ bool SessionBridge::clearTarget(const ecuio_channel_diagnostics_t& report)
            (report.flags & ECUIO_DIAG_CLEARING) == 0;
 }
 
+bool SessionBridge::nothingStored(const ecuio_channel_diagnostics_t& r)
+{
+    const auto empty = [&r](uint32_t list) {
+        return r.lists[list].outcome == ECUIO_DIAG_ANSWERED &&
+               r.lists[list].reported == 0 && r.lists[list].held == 0;
+    };
+    return (r.flags & ECUIO_DIAG_READINESS) != 0 &&
+           (r.flags & ECUIO_DIAG_MIL_ON) == 0 && r.dtc_count == 0 &&
+           empty(ECUIO_DIAG_STORED) && empty(ECUIO_DIAG_PENDING) &&
+           (r.flags & ECUIO_DIAG_FREEZE_FRAME) == 0;
+}
+
+bool SessionBridge::clearFindsNothing() const
+{
+    bool any = false;
+    for (uint32_t c = 0; c < m_diagnosticsShownCount; ++c) {
+        if (!clearTarget(m_diagnosticsShown[c])) {
+            continue;
+        }
+        if (!nothingStored(m_diagnosticsShown[c])) {
+            return false;
+        }
+        any = true;
+    }
+    return any;
+}
+
 QStringList SessionBridge::clearTargets() const
 {
     QStringList ecus;
