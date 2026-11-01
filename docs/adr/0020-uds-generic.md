@@ -187,3 +187,10 @@ doesn't scan:
 ([ADR-0031](0031-command-line-client.md)'s appendix of the same
 date), so a script can run one block a connect and stop when it's
 asked.
+
+*Amended 2026-11-01:* on the test car through the MX+, relayed by the
+phone ([2026-11-01-android](../bench-sessions/2026-11-01-android.md)),
+`did=1000-13FF&scan=first` completed in 32.9 s (about 31 DIDs a
+second) and ended `scanned`, 36 s from connect to end with the
+adapter's setup; a whole range per ECU, 64 blocks, is about 38 minutes
+at that pace.

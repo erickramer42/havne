@@ -1,7 +1,8 @@
 # ADR-0047: The phone relays a paired Bluetooth adapter to a computer over USB, on its own loopback address, for havne-cli
 
 - **Status:** Accepted. Built; tested on the desktop with a fake adapter,
-  not yet run on the phone.
+  and run on the car through the test phone (the appendix of
+  2026-11-01); the screen-off hour is still to run.
 - **Date:** 2026-11-01.
 - **Builds on:** [ADR-0028](0028-app-fed-streams.md) (the phone's
   Bluetooth links), [ADR-0029](0029-android-background-sessions.md)
@@ -111,5 +112,24 @@ charges over the same USB cable.
   adapter's loss ending the computer's link, a computer leaving keeping
   the adapter, stop, and the URIs it refuses. The Bluetooth half is
   compiled by CI's `android-build` and runs only on the phone.
-- Left: the phone at the desk with the MX+ (a `havne-cli stream` through
-  `adb forward`, the screen off for an hour), then the car.
+- On the phone: the appendix of 2026-11-01.
+
+## Appendix: 2026-11-01, the first run on the car
+
+[2026-11-01-android](../bench-sessions/2026-11-01-android.md) ran the
+run sheet's Phase 9a on the test car through the MX+, and one 9b block:
+
+- Five `havne-cli` runs through `adb forward`, about 31 requests a
+  second (the MX+'s own pace over Bluetooth) with no frame dropped.
+  Runs 1 to 3 shared one RFCOMM connect: the adapter is held between
+  computers (section 2).
+- A second computer was closed before its `ATZ` was answered, its
+  error "the port failed during the adapter's setup", and the first ran
+  on. Stop relaying ended the computer's link with a hard failure, and
+  the notification and the foreground service went with it.
+- One DID sweep block, 1,024 DIDs with `scan=first`, completed in
+  32.9 s.
+
+Left: an hour or more of blocks with the screen off. The block ran
+with the screen on, and with the ignition on the battery fell on its
+tender, so the hour runs with the engine running.

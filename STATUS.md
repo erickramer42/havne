@@ -423,8 +423,17 @@ reach into car-verified claims and finishes the diagnostics.
   adapter relayed to a computer on the phone's USB cable, so havne-cli
   reaches an adapter only the phone can (`adb forward`, then
   `elm327://127.0.0.1:35000`); tested on the desktop with a fake
-  adapter. Left: the phone run sheet's Phase 9, at the desk, then a
-  long run on the car.
+  adapter, and on the test car through the MX+
+  ([2026-11-01-android](docs/bench-sessions/2026-11-01-android.md):
+  the run sheet's Phase 9a and one sweep block). Left: an hour or more
+  of sweep blocks with the screen off.
+- **A faster DID scan** (built, ADR-0020's and ADR-0026's appendices
+  of 2026-11-01): `?scan=first` asks a `did=` range back to back before
+  polling what it found, an ELM327 gets the response-count digit for
+  one DID, and `havne-cli stream` reports a `scan` line and stops with
+  `--until-scanned`. On the test car through the MX+, a 1,024-DID block
+  took 32.9 s. Left: a reply that spans frames or is held pending,
+  on an adapter.
 - **The simulator as a product:** `havne-cli sim <uri> --on vcan0`
   (built, ADR-0046: `mock://`, the drive cycle or the fakes' canned
   values, the mock's diagnostics, a VIN, periodic faults; `replay://`,
