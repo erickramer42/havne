@@ -1145,10 +1145,9 @@ TEST_F(Elm327SessionTest, ALongServiceOnePidGoesWithoutTheCountDigit)
 }
 
 /* A def that fits a Single Frame (0x7F's total, bytes 3 to 6) can't say
- * the reply is longer: the first request goes with the digit, the
- * adapter stops after the First Frame, and from then on the PID goes
- * without it and its replies arrive whole */
-TEST_F(Elm327SessionTest, AReplyThatSpansFramesTakesThePidOffTheCountDigit)
+ * the reply is longer, but J1979's 13 bytes for the PID do: no request
+ * carries the digit, and every reply arrives whole, the first too */
+TEST_F(Elm327SessionTest, APidJ1979SaysSpansFramesNeverTakesTheDigit)
 {
     static ecuio_signal_def_t def;
     static ecuio_signal_set_t set;
@@ -1165,6 +1164,29 @@ TEST_F(Elm327SessionTest, AReplyThatSpansFramesTakesThePidOffTheCountDigit)
     const std::vector<uint32_t> counts =
         on_fake<std::vector<uint32_t>>([](fake_elm327::adapter& a) {
             return std::vector<uint32_t>{a.count("017F1"), a.count("017F")};
+        });
+    EXPECT_EQ(counts[0], 0u) << "no digit, the first request too";
+    EXPECT_GE(counts[1], 2u);
+}
+
+/* An ECU answering a PID longer than J1979 gives it (0x0C, 2 bytes, here
+ * 13): the first request goes with the digit, the adapter stops after
+ * the First Frame, and from then on the PID goes without it and its
+ * replies arrive whole */
+TEST_F(Elm327SessionTest, AReplyLongerThanJ1979SaysTakesThePidOffTheCountDigit)
+{
+    set_knobs([](fake_elm327::knobs& k) { k.longer_pid = 0x0C; });
+    Session s;
+    ASSERT_EQ(s.create(uri("?poll=0x0C&identify=0")), ECUIO_OK)
+        << ecuio_last_error_detail();
+    s.start();
+    ASSERT_TRUE(wait_for([&] { return s.cap.count("41 0C") >= 2; }, 3000));
+    Capture::Frame f{};
+    ASSERT_TRUE(s.cap.find("41 0C", &f));
+    EXPECT_EQ(f.data.size(), 15u);
+    const std::vector<uint32_t> counts =
+        on_fake<std::vector<uint32_t>>([](fake_elm327::adapter& a) {
+            return std::vector<uint32_t>{a.count("010C1"), a.count("010C")};
         });
     EXPECT_EQ(counts[0], 1u) << "the digit once, on the first request";
     EXPECT_GE(counts[1] - counts[0], 2u) << "then none";
