@@ -6,11 +6,14 @@
 //          SIGTERM (CliSignalTest), the absent line (CliReplayTest,
 //          tests/cli_absent.py); the formatting, the ring and the
 //          sleep rule UNIT (tests/test_cli.cpp); a real sleep BENCH
-//          (BENCH prep #27)
+//          (BENCH prep #27);
+//          the timing lines UNIT (CliTimingTest) and by hand against the fake
+//          DLL (docs/testing.md)
 //
 // Public headers only: what any program linking core can do.
 
 #include "diagnostics_line.h"
+#include "timing_line.h"
 #include "jsonl.h"
 #include "line_ring.h"
 #include "sleep_watch.h"
@@ -353,6 +356,61 @@ void poll_diagnostics(Output& out, ecuio_session_t* session, uint32_t channels,
     }
 }
 
+// Reply timing's snapshots (ADR-0042 section 3): every 10 s of session
+// time, and once at the end (final), a timing line for each request whose
+// counts changed since the last; rows is sized before the session starts
+void poll_timing(Output& out, ecuio_session_t* session,
+                 const ecuio_session_info_t& info, cli::TimingSnapshots& snaps,
+                 std::vector<ecuio_request_timing_t>& rows, bool final)
+{
+    ecuio_session_timing_t t;
+    uint32_t count = 0;
+    if (ecuio_session_get_timing(session, &t, nullptr, 0, &count) != ECUIO_OK ||
+        count == 0 || (!final && !snaps.due(t.snapshot_us)) ||
+        ecuio_session_get_timing(session, &t, rows.data(),
+                                 static_cast<uint32_t>(rows.size()),
+                                 &count) != ECUIO_OK) {
+        return;
+    }
+    snaps.taken(t.snapshot_us);
+    const uint32_t n =
+        count < rows.size() ? count : static_cast<uint32_t>(rows.size());
+    for (uint32_t i = 0; i < n; ++i) {
+        if (!snaps.changed(i, rows[i])) {
+            continue;
+        }
+        const uint32_t rx = rows[i].channel < ECUIO_SESSION_INFO_MAX_CHANNELS
+                                ? info.rx_ids[rows[i].channel]
+                                : 0;
+        char buf[1024];
+        cli::Line l(buf, sizeof buf);
+        cli::timing_line(l, t.snapshot_us, rx, rows[i], t.interval_clock);
+        write_line(out, l);
+    }
+}
+
+// The end line's ISO-TP counts, where core reassembles (ADR-0040 section 5)
+void write_isotp(cli::Line& l, const ecuio_session_t* session)
+{
+    ecuio_session_timing_t t;
+    uint32_t count = 0;
+    if (ecuio_session_get_timing(session, &t, nullptr, 0, &count) != ECUIO_OK ||
+        (t.flags & ECUIO_TIMING_ISOTP) == 0) {
+        return;
+    }
+    l.key("isotp");
+    l.ch('{');
+    l.key("first_frames");
+    l.u64(t.isotp_first_frames);
+    l.key("completed");
+    l.u64(t.isotp_completed);
+    l.key("dropped");
+    l.u64(t.isotp_dropped);
+    l.key("malformed");
+    l.u64(t.isotp_malformed);
+    l.ch('}');
+}
+
 // The signals the session's frames come without (ADR-0039 §6), as ids
 // the signals line names, whenever core's list changes; last holds the
 // list last written, read sized to the set
@@ -635,6 +693,8 @@ int run_stream(const StreamArgs& args)
         (args.values && set != nullptr && set->defs != nullptr) ? set->count
                                                                 : 0u);
     std::vector<uint16_t> absent_last;
+    cli::TimingSnapshots timing_snaps;
+    std::vector<ecuio_request_timing_t> timing_rows(ECUIO_PROFILE_MAX_REQUESTS);
     if (args.values) {
         write_signals(out, set);
     }
@@ -692,6 +752,7 @@ int run_stream(const StreamArgs& args)
 
         poll_diagnostics(out, session, channels, diag_generations);
         poll_absent(out, session, absent_read, absent_last);
+        poll_timing(out, session, info, timing_snaps, timing_rows, false);
 
         int32_t now_error = ECUIO_OK;
         uint32_t now_episodes = 0;
@@ -745,6 +806,7 @@ int run_stream(const StreamArgs& args)
 
     int code = kExitOk;
     if (!out.failed) {
+        poll_timing(out, session, info, timing_snaps, timing_rows, true);
         uint64_t covered = stream->covered.load();
         if (args.count && covered > args.count) {
             covered = args.count;
@@ -763,6 +825,7 @@ int run_stream(const StreamArgs& args)
         if (info.flags & ECUIO_SESSION_INFO_REPLAY_FAULTS) {
             write_faults(l, session);
         }
+        write_isotp(l, session);
         l.ch('}');
         write_line(out, l);
         out.flush();

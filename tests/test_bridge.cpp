@@ -22,6 +22,7 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QRegularExpression>
+#include <QSet>
 #include <QSettings>
 #include <QStringList>
 #include <QTemporaryDir>
@@ -4706,6 +4707,104 @@ TEST(BridgeTest, DeliveryTextNamesFramesDropsAndTimes)
               "to the model in median 53 ms, p99 99 ms, max 99 ms "
               "(10 past the staging's limit, not timed)");
 }
+
+/* The activity log's "Reply timing:" line (ADR-0042): the requests asked,
+ * their outcomes, the spread of their median latencies, the intervals'
+ * clock and ISO-TP's counts where core reassembles; nothing when no
+ * request was asked */
+TEST(BridgeTest, TimingTextNamesTheRequestsAndTheClock)
+{
+    ecuio_session_timing_t t{};
+    std::vector<ecuio_request_timing_t> rows(3);
+    EXPECT_TRUE(SessionBridge::timingText(t, rows).isEmpty());
+
+    t.interval_clock = ECUIO_TIMING_CLOCK_ADAPTER;
+    rows[0].answered = 100;
+    rows[0].latency_p50_us = 4200;
+    rows[1].answered = 50;
+    rows[1].timeouts = 2;
+    rows[1].latency_p50_us = 12400;
+    EXPECT_EQ(
+        SessionBridge::timingText(t, rows).toStdString(),
+        "Reply timing: 2 requests, 150 answered, none refused, 2 timed out; "
+        "latency P50 4.2 ms to 12 ms; intervals on the adapter's clock");
+
+    t.interval_clock = ECUIO_TIMING_CLOCK_KERNEL;
+    t.flags = ECUIO_TIMING_ISOTP;
+    t.isotp_completed = 640;
+    t.isotp_first_frames = 40;
+    t.isotp_dropped = 1;
+    rows[1] = ecuio_request_timing_t{};
+    rows[2].refused = 1;
+    rows[2].latency_p50_us = 4200;
+    EXPECT_EQ(
+        SessionBridge::timingText(t, rows).toStdString(),
+        "Reply timing: 2 requests, 100 answered, 1 refused, none timed out; "
+        "latency P50 4.2 ms; intervals on the kernel's receive times; "
+        "ISO-TP: 640 messages, 40 segmented, 1 dropped, none unusable");
+}
+
+#ifdef _WIN32
+
+/* A recording of a requesting session holds latency.csv (ADR-0042
+ * section 3): its header is ECUIO_TIMING_COLUMNS, then the snapshots,
+ * each a block of the rows that changed under one t_s, the figures
+ * cumulative, so each request's answers never fall from one row of it
+ * to the next; the intervals on the fake's own clock; the activity log
+ * names the timing at the disconnect */
+TEST(BridgeTest, ARecordingKeepsReplyTimingsSnapshots)
+{
+    FakeHooks hooks;
+    ASSERT_TRUE(hooks.load());
+    QTemporaryDir root;
+    ASSERT_TRUE(root.isValid());
+    SessionBridge bridge;
+    bridge.setRecordingsRootForTesting(root.path());
+    bridge.setRecording(true);
+    bridge.setTimingEveryForTesting(1000 * 1000);
+    QStringList log;
+    QObject::connect(&bridge, &SessionBridge::logMessage,
+                     [&log](const QString& line) { log << line; });
+    const QString uri = QStringLiteral("j2534://%1?identify=0&diagnose=0")
+                            .arg(QString::fromUtf8(FAKE_J2534_DLL_PATH));
+    ASSERT_TRUE(bridge.connectSession(uri).isEmpty());
+    spinLoop(3500);
+    ASSERT_TRUE(disconnectAndWait(bridge));
+    ASSERT_TRUE(spinUntil([&]() { return !bridge.recordingActive(); }, 5000));
+
+    const QStringList folders = recordingFolders(root.path());
+    ASSERT_EQ(folders.size(), 1);
+    const QList<QByteArray> lines =
+        fileLines(root.path() + QStringLiteral("/") + folders.first() +
+                  QStringLiteral("/latency.csv"));
+    ASSERT_GT(lines.size(), 2);
+    EXPECT_EQ(lines.first(), QByteArray(ECUIO_TIMING_COLUMNS));
+    const int columns =
+        static_cast<int>(QByteArray(ECUIO_TIMING_COLUMNS).count(',')) + 1;
+    QSet<QByteArray> snapshots;
+    QHash<QByteArray, qint64> answered;
+    for (qsizetype i = 1; i < lines.size(); ++i) {
+        const QList<QByteArray> cols = lines[i].split(',');
+        ASSERT_EQ(cols.size(), columns) << lines[i].toStdString();
+        snapshots.insert(cols[0]);
+        EXPECT_EQ(cols[1], QByteArray("0x7E8"));
+        EXPECT_EQ(cols.last(), QByteArray("adapter"));
+        const qint64 n = cols[3].toLongLong();
+        EXPECT_GE(n, answered.value(cols[2], 0))
+            << "cumulative: " << cols[2].toStdString();
+        answered[cols[2]] = n;
+    }
+    EXPECT_GE(snapshots.size(), 3) << "every second, then the last";
+    EXPECT_GT(answered.size(), 10);
+    bool named = false;
+    for (const QString& line : log) {
+        named = named || (line.startsWith(QStringLiteral("Reply timing: ")) &&
+                          line.contains(QStringLiteral("the adapter's clock")));
+    }
+    EXPECT_TRUE(named) << log.join(QLatin1Char('\n')).toStdString();
+}
+
+#endif // _WIN32
 
 /* At disconnect the activity log says how the session's frames and
  * values were delivered: over the engine-start fixture at full speed,

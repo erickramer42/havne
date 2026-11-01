@@ -1,12 +1,14 @@
 // File/layer: tests/test_cli.cpp | havne-cli's line formatting and output ring (ADR-0031)
 // Testing: UNIT, Qt-free; the diagnostics line (CliDiagnosticsTest,
-//          ADR-0037) names codes and monitors through core. The program end to end is the golden runs'
+//          ADR-0037) names codes and monitors through core; the timing line
+//          (CliTimingTest, ADR-0042) has latency.csv's columns. The program end to end is the golden runs'
 //          (tests/golden/cli/) and CliSignalTest's (tests/CMakeLists.txt)
 
 #include "diagnostics_line.h"
 #include "jsonl.h"
 #include "line_ring.h"
 #include "sleep_watch.h"
+#include "timing_line.h"
 
 #include <gtest/gtest.h>
 
@@ -371,4 +373,111 @@ TEST(CliSleepTest, ARiseOfASecondInOnePollIsASleep)
     EXPECT_EQ(w.poll(106900000), 0u) << "0.6 s more: not 1.5 s";
     EXPECT_EQ(w.poll(107900000), 1000000u) << "a second exactly";
     EXPECT_EQ(w.poll(5), 0u) << "a count that went back";
+}
+
+// ---- Reply timing (ADR-0042) ---------------------------------------------
+
+namespace {
+
+// The keys of a flat JSON object, in order
+std::vector<std::string> keys_of(const std::string& line)
+{
+    std::vector<std::string> keys;
+    size_t at = 0;
+    while ((at = line.find('"', at)) != std::string::npos) {
+        const size_t end = line.find('"', at + 1);
+        if (end == std::string::npos) {
+            break;
+        }
+        if (end + 1 < line.size() && line[end + 1] == ':') {
+            keys.push_back(line.substr(at + 1, end - at - 1));
+        }
+        at = end + 1;
+    }
+    return keys;
+}
+
+std::string timing_text(const ecuio_request_timing_t& r, uint32_t clock)
+{
+    char buf[1024];
+    cli::Line l(buf, sizeof buf);
+    cli::timing_line(l, 12345678, 0x7E8, r, clock);
+    return std::string(l.data(), l.size());
+}
+
+} // namespace
+
+// A timing line's keys are latency.csv's columns, in their order: one list
+// (ECUIO_TIMING_COLUMNS) for both writers
+TEST(CliTimingTest, ALinesKeysAreTheCsvsColumns)
+{
+    ecuio_request_timing_t r{};
+    r.length = 2;
+    r.request[0] = 0x01;
+    r.request[1] = 0x0C;
+    std::vector<std::string> columns;
+    std::string all = ECUIO_TIMING_COLUMNS;
+    for (size_t at = 0; at <= all.size();) {
+        const size_t comma = all.find(',', at);
+        const size_t end = comma == std::string::npos ? all.size() : comma;
+        columns.push_back(all.substr(at, end - at));
+        at = end + 1;
+    }
+    std::vector<std::string> keys =
+        keys_of(timing_text(r, ECUIO_TIMING_CLOCK_HOST));
+    ASSERT_FALSE(keys.empty());
+    EXPECT_EQ(keys.front(), "type");
+    keys.erase(keys.begin());
+    EXPECT_EQ(keys, columns);
+}
+
+// The figures in frames.csv's forms; a quantile with too few samples, or
+// none at all, is null
+TEST(CliTimingTest, AQuantileWithTooFewSamplesIsNull)
+{
+    ecuio_request_timing_t r{};
+    r.length = 2;
+    r.request[0] = 0x01;
+    r.request[1] = 0x0C;
+    r.answered = 120;
+    r.timeouts = 2;
+    r.packed = 100;
+    r.latency_p50_us = 4100;
+    r.latency_p99_us = 6100;
+    r.latency_max_us = 7000;
+    r.flags = ECUIO_TIMING_LATENCY_P99;
+    const std::string line = timing_text(r, ECUIO_TIMING_CLOCK_ADAPTER);
+    EXPECT_NE(line.find("\"t_s\":12.346"), std::string::npos) << line;
+    EXPECT_NE(line.find("\"ecu\":\"0x7E8\""), std::string::npos) << line;
+    EXPECT_NE(line.find("\"request\":\"01 0C\""), std::string::npos) << line;
+    EXPECT_NE(line.find("\"latency_p50_us\":4100"), std::string::npos) << line;
+    EXPECT_NE(line.find("\"latency_p99_us\":6100"), std::string::npos) << line;
+    EXPECT_NE(line.find("\"latency_p999_us\":null"), std::string::npos) << line;
+    EXPECT_NE(line.find("\"interval_p50_us\":null"), std::string::npos)
+        << "no intervals: " << line;
+    EXPECT_NE(line.find("\"interval_clock\":\"adapter\""), std::string::npos)
+        << line;
+    EXPECT_EQ(line.back(), '}');
+}
+
+// A snapshot every 10 s of session time, carrying the rows whose counts
+// changed since the one that last carried them
+TEST(CliTimingTest, ASnapshotCarriesTheRowsThatChanged)
+{
+    cli::TimingSnapshots s;
+    EXPECT_FALSE(s.due(9999999));
+    EXPECT_TRUE(s.due(10000000));
+    s.taken(10500000);
+    EXPECT_FALSE(s.due(20000000));
+    EXPECT_TRUE(s.due(20500000));
+
+    ecuio_request_timing_t r{};
+    EXPECT_FALSE(s.changed(0, r)) << "nothing yet";
+    r.answered = 3;
+    EXPECT_TRUE(s.changed(0, r));
+    EXPECT_FALSE(s.changed(0, r)) << "carried once";
+    r.timeouts = 1;
+    EXPECT_TRUE(s.changed(0, r)) << "a timeout counts";
+    EXPECT_TRUE(s.changed(1, r)) << "each row its own";
+    EXPECT_FALSE(s.changed(ECUIO_PROFILE_MAX_REQUESTS, r));
 }

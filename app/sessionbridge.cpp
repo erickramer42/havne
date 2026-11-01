@@ -35,6 +35,8 @@
 //          .AConnectsVinReachesQmlOnlyAsASaltedHash and
 //          .RecordingFolderNamesThePickedVehicleForAnAdapterOnly). QML
 //          rendering: manual smoke.
+//          reply timing's snapshots and line (ADR-0042):
+//          BridgeTest.ARecordingKeepsReplyTimingsSnapshots, .TimingText*
 
 #include "sessionbridge.h"
 #include "carryover.h"
@@ -775,6 +777,7 @@ SessionBridge::SessionBridge(QObject* parent)
         pollChannelDiagnostics();
         pollReplayEnd();
         pollSleep();
+        pollTiming();
         // Must fire even when nothing arrived this window: dimming exists
         // for rows that STOPPED updating. 100 ms is well
         // inside the 3 s dim threshold and the span emission is one
@@ -1092,6 +1095,7 @@ QString SessionBridge::startSession(ecuio_session_t* session)
     m_frameLatency.clear();
     m_valueLatency.clear();
     m_valuesStaged = 0;
+    m_timingNextUs = m_timingEveryUs;
     prepareValueStaging(ecuio_session_signal_set(session));
     m_accepting.store(true, std::memory_order_release);
     const ecuio_status_t rc = ecuio_session_start(session);
@@ -1314,21 +1318,52 @@ void SessionBridge::disconnectSession()
     // The teardown thread is the session's one caller from here: the
     // session API is single-caller by contract.
     m_disconnectThread = std::thread([this, session, uri]() {
-        ecuio_session_destroy(session);    // closes first, joining the worker
-
-        QMetaObject::invokeMethod(this, [this, uri]() {
-            // JOIN FIRST, then clear the flag, then emit, as the
-            // connect completion does: a QML handler inside
-            // disconnectingChanged may start the next connect.
-            if (m_disconnectThread.joinable()) {
-                m_disconnectThread.join();
+        // Close joins the worker, whose last act publishes reply timing's
+        // final rows (ADR-0042); they're read here because destroy frees
+        // them
+        ecuio_session_close(session);
+        ecuio_session_timing_t timing{};
+        ecuio_session_info_t info{};
+        std::vector<ecuio_request_timing_t> rows;
+        uint32_t count = 0;
+        if (ecuio_session_get_timing(session, &timing, nullptr, 0, &count) ==
+                ECUIO_OK &&
+            count > 0) {
+            rows.resize(count);
+            if (ecuio_session_get_timing(session, &timing, rows.data(), count,
+                                         &count) != ECUIO_OK) {
+                count = 0;
             }
-            m_disconnecting = false;
-            emit disconnectingChanged();
-            emit logMessage(QStringLiteral("Disconnected: %1").arg(uri));
-            // Kept open until here, so it brackets the whole teardown
-            stopRecording(QStringLiteral("disconnected"));
-        }, Qt::QueuedConnection);
+            rows.resize(std::min<size_t>(count, rows.size()));
+        }
+        (void)ecuio_session_get_info(session, &info);
+        ecuio_session_destroy(session);
+
+        QMetaObject::invokeMethod(
+            this,
+            [this, uri, timing, info, rows]() {
+                // JOIN FIRST, then clear the flag, then emit, as the
+                // connect completion does: a QML handler inside
+                // disconnectingChanged may start the next connect.
+                if (m_disconnectThread.joinable()) {
+                    m_disconnectThread.join();
+                }
+                m_disconnecting = false;
+                emit disconnectingChanged();
+                const QString timingLine = timingText(timing, rows);
+                if (!timingLine.isEmpty()) {
+                    m_recorder.timing(
+                        timing, rows.data(), static_cast<uint32_t>(rows.size()),
+                        info.rx_ids,
+                        std::min<uint32_t>(info.channel_count,
+                                           ECUIO_SESSION_INFO_MAX_CHANNELS));
+                    emit logMessage(timingLine);
+                }
+                emit logMessage(QStringLiteral("Disconnected: %1").arg(uri));
+                // Kept open until here, so it brackets the whole teardown
+                stopRecording(QStringLiteral("disconnected"));
+            },
+            Qt::QueuedConnection);
     });
 }
 
@@ -1909,6 +1944,102 @@ QString SessionBridge::deliveryText(const DeliveryStats& s)
         }
     }
     return line;
+}
+
+// "Reply timing: 23 requests, 4512 answered, none refused, 2 timed out;
+// latency P50 4.2 ms to 5.3 ms; intervals on the adapter's clock; ISO-TP:
+// 640 messages, 40 segmented, none dropped, none unusable". Each
+// request's figures are in the recording's latency.csv.
+QString
+SessionBridge::timingText(const ecuio_session_timing_t& t,
+                          const std::vector<ecuio_request_timing_t>& rows)
+{
+    uint32_t asked = 0;
+    quint64 answered = 0;
+    quint64 refused = 0;
+    quint64 timeouts = 0;
+    uint32_t low = UINT32_MAX;
+    uint32_t high = 0;
+    for (const ecuio_request_timing_t& r : rows) {
+        if (r.answered + r.refused + r.timeouts == 0)
+            continue;
+        ++asked;
+        answered += r.answered;
+        refused += r.refused;
+        timeouts += r.timeouts;
+        if (r.answered + r.refused > 0) {
+            low = std::min(low, r.latency_p50_us);
+            high = std::max(high, r.latency_p50_us);
+        }
+    }
+    if (asked == 0) {
+        return {};
+    }
+    const auto count = [](quint64 n) {
+        return n == 0 ? QStringLiteral("none") : QString::number(n);
+    };
+    QString line =
+        QStringLiteral(
+            "Reply timing: %1 requests, %2 answered, %3 refused, %4 timed out")
+            .arg(asked)
+            .arg(answered)
+            .arg(count(refused), count(timeouts));
+    if (low != UINT32_MAX) {
+        line += low == high
+                    ? QStringLiteral("; latency P50 %1").arg(latencyText(low))
+                    : QStringLiteral("; latency P50 %1 to %2")
+                          .arg(latencyText(low), latencyText(high));
+    }
+    switch (t.interval_clock) {
+    case ECUIO_TIMING_CLOCK_ADAPTER:
+        line += QStringLiteral("; intervals on the adapter's clock");
+        break;
+    case ECUIO_TIMING_CLOCK_KERNEL:
+        line += QStringLiteral("; intervals on the kernel's receive times");
+        break;
+    case ECUIO_TIMING_CLOCK_HOST:
+        line += QStringLiteral("; intervals on the host's clock");
+        break;
+    default:
+        break;
+    }
+    if (t.flags & ECUIO_TIMING_ISOTP) {
+        line +=
+            QStringLiteral(
+                "; ISO-TP: %1 messages, %2 segmented, %3 dropped, %4 unusable")
+                .arg(t.isotp_completed)
+                .arg(t.isotp_first_frames)
+                .arg(count(t.isotp_dropped), count(t.isotp_malformed));
+    }
+    return line;
+}
+
+void SessionBridge::pollTiming()
+{
+    if (m_session == nullptr || !m_recorder.active()) {
+        return;
+    }
+    ecuio_session_timing_t t{};
+    uint32_t count = 0;
+    if (ecuio_session_get_timing(m_session, &t, nullptr, 0, &count) !=
+            ECUIO_OK ||
+        count == 0 || t.snapshot_us < m_timingNextUs) {
+        return;
+    }
+    std::vector<ecuio_request_timing_t> rows(count);
+    if (ecuio_session_get_timing(m_session, &t, rows.data(), count, &count) !=
+        ECUIO_OK) {
+        return;
+    }
+    m_timingNextUs = t.snapshot_us + m_timingEveryUs;
+    ecuio_session_info_t info{};
+    (void)ecuio_session_get_info(m_session, &info);
+    m_recorder.timing(
+        t, rows.data(),
+        std::min<uint32_t>(count, static_cast<uint32_t>(rows.size())),
+        info.rx_ids,
+        std::min<uint32_t>(info.channel_count,
+                           ECUIO_SESSION_INFO_MAX_CHANNELS));
 }
 
 void SessionBridge::pollLinkHealth()

@@ -9,7 +9,9 @@
 //          (BridgeTest.DeliveryText*, .DisconnectLogsTheDelivery), the
 //          vehicle's VIN key, label and plotted names (ADR-0027;
 //          BridgeTest.VinFromIdentity*, .UnplottedNames*, …), the default
-//          plot (ADR-0039 section 8; BridgeTest.ARankedSet*, .APlotChoice*)
+//          plot (ADR-0039 section 8; BridgeTest.ARankedSet*, .APlotChoice*);
+//          reply timing (BridgeTest.ARecordingKeepsReplyTimingsSnapshots,
+//          .TimingTextNamesTheRequestsAndTheClock)
 
 #pragma once
 
@@ -474,6 +476,10 @@ public:
     };
     DeliveryStats deliveryStats() const;
     static QString deliveryText(const DeliveryStats& stats);  /* the activity log's "Delivery:" line */
+    /* The activity log's "Reply timing:" line at a disconnect (ADR-0042);
+     * empty when no request was asked */
+    static QString timingText(const ecuio_session_timing_t& timing,
+                              const std::vector<ecuio_request_timing_t>& rows);
 
     Q_INVOKABLE QString statusString(int statusCode) const;
     Q_INVOKABLE int maxFrameCount() const { return FrameListModel::MaxFrames; }
@@ -599,6 +605,9 @@ public:
     // Test seam: a sleep of this long, added to what core's count says,
     // for the tick to find (no runner can sleep)
     void addSleptForTesting(uint64_t us) { m_sleptAddedForTesting += us; }
+    // Test seam: reply timing's snapshots this often in session time, not
+    // every 10 s
+    void setTimingEveryForTesting(uint64_t us) { m_timingEveryUs = us; }
 
 public slots:
     // Both connects take the URI as typed and trim the spaces around it
@@ -804,6 +813,11 @@ private:
     void pollChannelIdentity();
     void pollReplayEnd();   // the tick: "Replay finished" once, at the end of the file
     void pollSleep();       // the tick: "Asleep for N s" after a sleep
+    // The tick: reply timing's snapshot into latency.csv every 10 s of
+    // session time (ADR-0042 section 3); the last comes at the teardown
+    void pollTiming();
+    uint64_t m_timingEveryUs = 10u * 1000 * 1000;
+    uint64_t m_timingNextUs = 0;
     uint32_t m_identityGeneration[ECUIO_SESSION_INFO_MAX_CHANNELS] = {};
     // What each channel's ECU reported of its diagnostics (ADR-0037),
     // logged once per completed read
