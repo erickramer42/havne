@@ -5,15 +5,19 @@ _From Norwegian *havn*, a harbor or port: Havne reaches a car through its ports.
 [![CI](https://github.com/erickramer42/havne/actions/workflows/ci.yml/badge.svg)](https://github.com/erickramer42/havne/actions/workflows/ci.yml) [![Coverage](https://codecov.io/gh/erickramer42/havne/graph/badge.svg)](https://codecov.io/gh/erickramer42/havne) [![Release](https://img.shields.io/github/v/release/erickramer42/havne)](https://github.com/erickramer42/havne/releases/latest)
 [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/erickramer42/havne/badge)](https://scorecard.dev/viewer/?uri=github.com/erickramer42/havne) [![OpenSSF Best Practices](https://www.bestpractices.dev/projects/15816/badge)](https://www.bestpractices.dev/projects/15816)
 
-Havne reads a car's computer and shows what it says: live
-gauges, a strip chart, a log of every frame. A Qt-free C++17 core does
-the vehicle I/O and decoding behind a C ABI; a Qt 6 / QML front end
-draws the results on Windows, Linux, macOS and Android. It talks to
-J2534 Pass-Thru adapters on Windows, to ELM327-compatible adapters
-everywhere (USB, Bluetooth, WiFi) and to native CAN interfaces on Linux
-through SocketCAN. `havne-cli` streams any session as
-JSON lines for scripts, and a simulated vehicle runs every page with no
+Havne is an OBD-II scan tool and data logger: live gauges, a strip
+chart, the trouble codes and readiness monitors, and a log of
+every frame, recorded and replayed on request. It runs on Windows,
+Linux, macOS and Android (iOS builds and runs on the Simulator), and
+reaches the car through J2534 Pass-Thru adapters on Windows,
+ELM327-compatible adapters over USB, Bluetooth or WiFi everywhere, and
+SocketCAN on Linux. A simulated vehicle runs every page with no
 hardware.
+
+Underneath is a Qt-free C++17 core that does all the vehicle I/O and
+decoding behind a stable C ABI. The Qt 6 / QML app is one front end
+over it; `havne-cli`, which streams any session as JSON lines, is a
+second, written against the public headers alone.
 
 > [!WARNING]
 > **Experimental.** It has read one car through two adapters, from a laptop and from an Android phone; other vehicles and adapters are untested. It can clear trouble codes, after asking and saving them first, but has cleared them only on its fakes and simulated vehicle, never on a car. Read [DISCLAIMER.md](DISCLAIMER.md) before connecting it to a vehicle.
@@ -25,123 +29,82 @@ a quarter mile off launch control on a warm loop.*
 
 ## Engineering highlights
 
-- **Vendor drivers run in a process of their own.** J2534 drivers are
-  third-party DLLs, often 32-bit. The loader reads each DLL's PE header
-  and runs it in a single-threaded surrogate process of the same
-  architecture behind a private named pipe, so a crashing driver ends
-  its surrogate, not the app, and every vendor call lands in one log
-  ([ADR-0025](docs/adr/0025-one-j2534-backend.md),
+- **Vendor drivers run out of process.** Each J2534 DLL, often 32-bit,
+  runs in a single-threaded surrogate of its own architecture behind a
+  private named pipe, so a crashing driver ends its surrogate, not the
+  app ([ADR-0025](docs/adr/0025-one-j2534-backend.md),
   [ADR-0014](docs/adr/0014-single-threaded-surrogate.md)).
-- **A bounded data path, measured.** Callbacks dispatch from a
-  snapshot, the transport's worker decodes and allocates nothing per
-  frame (a test counts its allocations), backpressure bounds the frames
-  in flight, and values reach QML at 10 Hz whatever the bus rate. A
-  recorded engine start replayed through the app sustains 375,000 to
-  565,000 frames a second through decode, more than 80 times a full
-  classic CAN bus, and CI re-runs that load test on every push
-  ([ADR-0024](docs/adr/0024-decode-on-the-worker.md),
+- **A bounded, measured data path.** The worker decodes with no
+  allocation per frame, backpressure bounds the frames in flight, and
+  QML gets values at 10 Hz whatever the bus rate. A recorded engine
+  start replays through decode at over 300,000 frames a second, about
+  70 times a full classic CAN bus, and CI re-runs that load test on
+  every push ([ADR-0024](docs/adr/0024-decode-on-the-worker.md),
   [docs/testing.md](docs/testing.md#load-test-the-replay-fixture-through-the-bridge)).
-- **Requests follow the replies.** One request out per ECU, the next
-  when the answer is in; a supported-PID probe drops only what the ECU
-  says it lacks, never on silence; nothing but read services can be
-  sent ([ADR-0015](docs/adr/0015-request-engine.md)). On the car,
-  about 26 requests a second through J2534 and over 30 through an
-  ELM327 on Bluetooth.
-- **Link health that names the right problem.** Reads and writes are
-  judged apart, so a quiet bus (ignition off) isn't an adapter fault
-  and failing requests aren't a dead adapter; recovery backs off from
-  100 ms to 5 s. A value never received shows "—", never 0.
-- **Protocol parsers built to be fuzzed.** The ELM327 wire layer is
-  pure (no I/O, no clock, no allocation), so every rule is a unit test
-  over canned bytes, and libFuzzer runs it, the signal decoder, the
-  validators, the replay reader and SocketCAN's parsers in CI under
-  ASan and UBSan ([fuzz/README.md](fuzz/README.md)).
-- **A stable C ABI.** Opaque handles, flat functions and POD structs
-  with reserved room, append-only enums; a strict-C compile of every
-  public header pins the layout, a CI job compares the ABI with the
-  last release's, and another builds and tests the core on a machine
-  with no Qt ([ADR-0001](docs/adr/0001-qt-free-core-c-abi.md)).
-  `havne-cli` is a second front end written against the public headers
-  alone ([ADR-0031](docs/adr/0031-command-line-client.md)).
-- **Downloads anyone can check.** Every download carries a signed build
-  provenance and is listed in an SPDX SBOM; the Linux core packages
-  build to the same bytes under varied folders, clocks and locales,
-  which CI checks on every change, and two runners built the same
-  AppImage from one commit. Each release ships its PDBs and Linux debug
-  info, and USDT probes let `bpftrace` and `perf` time the frame path
-  of a running build
-  ([ADR-0034](docs/adr/0034-debug-symbols-and-probes.md),
-  [ADR-0035](docs/adr/0035-linux-downloads-sbom-reproducible.md)).
-- **Verified in tiers, and honest about it.** Unit, bridge and Qt Quick
-  tests; a harness tier that drives the whole J2534 stack against an
-  in-tree fake vendor DLL (through the 32-bit surrogate too), the
-  ELM327 transport against a fake adapter, and SocketCAN and a
-  simulated ECU on Linux's virtual CAN bus; clang-tidy and CodeQL; a
-  signed build provenance on every download. What only hardware can
-  confirm is listed, and every real-adapter session is written up
+- **Requests follow the replies.** One request per ECU at a time; the
+  supported-PID probe drops only what the ECU says it lacks, never on
+  silence. Only reads go out, and one clear, which asks first, saves
+  the report and refuses while the engine turns
+  ([ADR-0015](docs/adr/0015-request-engine.md),
+  [ADR-0038](docs/adr/0038-clearing-trouble-codes.md)).
+- **ISO-TP, held to the kernel's.** Core's own ISO-TP, shared by
+  ELM327 and SocketCAN, is tested on a virtual CAN bus against Linux's
+  independent implementation, and against a recording of the test car
+  answering as the ECU with its replies broken on purpose
+  ([ADR-0040](docs/adr/0040-socketcan-requests-isotp.md),
+  [ADR-0041](docs/adr/0041-replay-fault-injection.md)).
+- **Pure parsers, fuzzed.** The ELM327 wire layer and ISO-TP have no
+  I/O, clock or allocation, so every rule is a unit test over canned
+  bytes; they and the other parsers run under libFuzzer with ASan and
+  UBSan in CI ([fuzz/README.md](fuzz/README.md)).
+- **A stable C ABI.** Opaque handles, flat functions, POD structs with
+  reserved room; CI compiles every public header as strict C, compares
+  the ABI with the last release's and builds the core with no Qt
+  installed ([ADR-0001](docs/adr/0001-qt-free-core-c-abi.md)).
+- **Verified in tiers, and honest about it.** A harness tier drives the
+  whole J2534 stack against an in-tree fake driver, 32-bit included,
+  and ELM327 against a fake adapter. What only hardware can confirm is
+  listed, each real-hardware session is written up, and each decision
+  is an [ADR](docs/adr/README.md) with the alternatives it turned down
   ([docs/testing.md](docs/testing.md),
   [bench-prep.md](docs/bench-sessions/bench-prep.md)).
-- **Decisions on record.** Every design decision is an
-  [architecture decision record](docs/adr/README.md), with the
-  alternatives it turned down and dated appendices where hardware
-  changed the plan; lessons go in an
-  [engineering log](docs/engineering-log.md).
+- **Downloads anyone can check.** Signed build provenance and an SPDX
+  SBOM for every download, Linux core packages that build to the same
+  bytes, and debug symbols with each release
+  ([ADR-0034](docs/adr/0034-debug-symbols-and-probes.md),
+  [ADR-0035](docs/adr/0035-linux-downloads-sbom-reproducible.md)).
 
 ## What it does
 
-- **Dashboard, Live and Log pages.** Gauges with shift lights, peak
-  hold and stale dimming; decoded values and a strip chart that keeps
-  each 100 ms window's peak; an activity log of every connect, link
-  change, adapter and ECU, with the raw frames in developer mode.
-- **Four ways to reach a car.** J2534 Pass-Thru on Windows
-  ([docs/j2534.md](docs/j2534.md)); ELM327-compatible adapters on a
-  serial port, Bluetooth or WiFi on every desktop
-  ([docs/elm327.md](docs/elm327.md)); an Android phone's Bluetooth,
-  with sessions that keep running in the background
-  ([ADR-0028](docs/adr/0028-app-fed-streams.md),
-  [ADR-0029](docs/adr/0029-android-background-sessions.md)); and a
-  native CAN interface on Linux through SocketCAN: listen-only, every
-  frame on the bus or the IDs a filter names, or asking the car through
-  ISO-TP in core
-  ([ADR-0032](docs/adr/0032-socketcan-listening.md),
-  [ADR-0040](docs/adr/0040-socketcan-requests-isotp.md),
-  [docs/linux.md](docs/linux.md)).
-- **A command-line client.** `havne-cli stream <uri>` writes any
-  session's frames, decoded values and link health as JSON lines for
-  `jq`, scripts and headless logging; `havne-cli devices` lists the
-  ports, adapters and CAN interfaces a URI can name; on Linux,
-  `havne-cli play` puts the simulated car or a recording on a virtual
-  CAN bus ([ADR-0031](docs/adr/0031-command-line-client.md)).
-- **Profiles chosen by the URI.** `obd2` polls every standard
-  Service 01 reading the car has, the fast-changing ones twice as often
-  ([ADR-0039](docs/adr/0039-full-service01-coverage.md)),
-  `uds-generic` polls or scans the UDS identifiers the URI names, and
-  `raw` logs frames; the car's VIN and calibration IDs are read at
-  connect ([ADR-0013](docs/adr/0013-protocol-profiles.md),
-  [ADR-0021](docs/adr/0021-vehicle-identification.md)).
-- **Trouble codes.** At connect, each ECU's check-engine light, its
-  stored, pending and permanent codes, its readiness monitors and the
-  freeze frame, on a Diagnostics page, in the activity log and from
-  `havne-cli` ([ADR-0037](docs/adr/0037-reading-trouble-codes.md)).
-  Clearing them asks first, saves the report to a file of its own, and
-  sends nothing while the engine turns
-  ([ADR-0038](docs/adr/0038-clearing-trouble-codes.md)).
-- **Recording and replay.** Each connect can record every frame, value
-  and event; `replay://` plays a recording back at its own pace or
-  faster, through the same decoding
-  ([ADR-0017](docs/adr/0017-session-recording.md),
-  [ADR-0023](docs/adr/0023-replay-transport.md)). If the computer or
-  phone sleeps mid-session, the sleep is a gap on Live and in the
-  recording, and the activity log says how long it was
-  ([ADR-0033](docs/adr/0033-session-time-counts-sleep.md)).
-- **Vehicles and preferences.** Name a car once and it remembers its
-  adapter, what Live plots and its recordings' folder; it's recognized
-  next time by a salted hash of its VIN. Metric or imperial, zoom and
-  the last connection are kept between runs.
-- **A simulated vehicle.** A modeled car (gearing, airflow, tires with
-  weight transfer, coolant and oil heat) drives a cold start, two pulls
-  onto the rev limiter, a cruise and a quarter mile, with readings that
-  stay consistent with each other the way a real ECU's log does.
+- **Four pages:** a Dashboard of gauges with shift lights and peak
+  hold; Live, the values and a strip chart; Diagnostics; and a Log of
+  every connect and link change, with the raw frames in developer mode.
+- **Three kinds of adapter:** J2534 on Windows; ELM327 over a serial
+  port, Bluetooth or WiFi, on the desktop and on Android, where
+  sessions keep running in the background; SocketCAN on Linux,
+  listening or asking the car ([docs/j2534.md](docs/j2534.md),
+  [docs/elm327.md](docs/elm327.md), [docs/linux.md](docs/linux.md)).
+- **Trouble codes:** each ECU's check-engine light, its stored, pending
+  and permanent codes, readiness monitors and freeze frame, read at
+  connect; clearing asks first and saves the report
+  ([ADR-0037](docs/adr/0037-reading-trouble-codes.md)).
+- **Profiles chosen by the URI:** `obd2` polls every standard
+  Service 01 reading the car has, the fast-changing ones more often;
+  `uds-generic` polls or scans the UDS identifiers the URI names; `raw`
+  logs frames. The VIN and calibration IDs are read at connect, and
+  each request's reply time is measured
+  ([ADR-0039](docs/adr/0039-full-service01-coverage.md),
+  [ADR-0042](docs/adr/0042-reply-timing.md)).
+- **`havne-cli`:** any session's frames, values and link health as JSON
+  lines; on Linux, the simulated car or a recording played onto a
+  virtual CAN bus ([ADR-0031](docs/adr/0031-command-line-client.md)).
+- **Recording and replay:** every frame, value and event of a connect;
+  `replay://` plays it back at its own pace or faster, through the same
+  decoding, with faults injected on request
+  ([ADR-0023](docs/adr/0023-replay-transport.md)).
+- **A simulated vehicle:** a modeled car (gearing, airflow, tire slip,
+  coolant and oil heat) drives a cold start, pulls onto the limiter, a
+  cruise and a quarter mile, its readings consistent with each other.
 
 | Live view | Link health |
 |---|---|
@@ -184,7 +147,8 @@ it, a frame's path from transport to screen included.
 | File | What it shows |
 |---|---|
 | [`core/src/request_engine.h`](core/src/request_engine.h) | The request engine: pacing, the probe, the DID scan and identification, with no I/O and no clock, so every rule is a unit test |
-| [`core/src/elm327_protocol.h`](core/src/elm327_protocol.h) | A pure protocol layer: line reading, frame parsing, ISO-TP reassembly; fuzzed |
+| [`core/src/isotp.h`](core/src/isotp.h) | ISO-TP on classic CAN, shared by ELM327 and SocketCAN: reassembly, Flow Control, the timers, with no I/O and no clock; fuzzed |
+| [`core/src/elm327_protocol.h`](core/src/elm327_protocol.h) | A pure protocol layer: line reading and frame parsing; fuzzed |
 | [`core/src/j2534_surrogate_client.cpp`](core/src/j2534_surrogate_client.cpp), [`surrogate/surrogate_main.cpp`](surrogate/surrogate_main.cpp) | Both ends of the out-of-process driver host: the pipe's protections, late replies, a child that dies |
 | [`core/src/link_health.h`](core/src/link_health.h) | The link's state machine, shared by both adapter transports |
 | [`app/sessionbridge.cpp`](app/sessionbridge.cpp) | The worker-to-GUI boundary: backpressure, coalescing, recording |
@@ -231,7 +195,7 @@ latest release. Next:
 
 | Version | Plan |
 |---|---|
-| v0.3.6 | The car runs the adapters on hand can make; trouble-code descriptions, VIN decode and a readiness summary; the simulated ECU as `havne-cli sim` |
+| v0.3.6 | Car runs with every adapter on hand; trouble-code descriptions, VIN decode and a readiness summary; the simulated ECU as `havne-cli sim` |
 | v0.3.7-v0.3.9 | A log viewer that overlays runs; CSV import and export, scrubbed for sharing; a health report; Python bindings; triggered logging and alerts |
 | Later | SocketCAN through a real controller, when the hardware is on hand; discovery and capture formats; a plugin framework; older buses |
 
