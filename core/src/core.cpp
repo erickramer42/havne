@@ -128,10 +128,12 @@ namespace {
         }
         std::sort(keys.begin(), keys.end(),
                   [](const text_key& a, const text_key& b) {
-                      if (a.message_id != b.message_id)
+                      if (a.message_id != b.message_id) {
                           return a.message_id < b.message_id;
-                      if (a.shape != b.shape)
+                      }
+                      if (a.shape != b.shape) {
                           return a.shape < b.shape;
+                      }
                       return a.key < b.key;
                   });
         uint32_t best = 0;
