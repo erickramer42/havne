@@ -1,8 +1,8 @@
-# clang-tidy's checks for core/ and surrogate/: scripts/tidy.sh, and the
-# clang-tidy job in CI, which fails on any warning. The families that find
-# bugs run whole: clang-analyzer (the static analyzer), bugprone,
-# concurrency, performance and portability, plus a few misc checks of the
-# same kind. The style families (readability, modernize,
+# clang-tidy's checks for core/, surrogate/ and cli/: scripts/tidy.sh,
+# and the clang-tidy job in CI, which fails on any warning. The families
+# that find bugs run whole: clang-analyzer (the static analyzer),
+# bugprone, concurrency, performance and portability, plus a few misc
+# checks of the same kind. The style families (readability, modernize,
 # cppcoreguidelines) stay off: the public and J2534 headers must compile
 # as C, and the tree isn't written to them. Three style checks earn their
 # place: google-explicit-constructor (a one-argument constructor that
@@ -54,4 +54,4 @@ Checks: >-
 WarningsAsErrors: '*'
 CheckOptions:
   readability-braces-around-statements.ShortStatementLines: 1
-HeaderFilterRegex: '.*[/\\](core|surrogate)[/\\].*'
+HeaderFilterRegex: '.*[/\\](core|surrogate|cli)[/\\].*'

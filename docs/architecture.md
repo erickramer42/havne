@@ -442,7 +442,7 @@ The bridge polls it on its 100 ms tick and maps it for the UI
 | Cross-arch | x64 tests driving the x86 surrogate and fake. Local only; CI never runs it |
 | Sanitizers | Core under ASan/UBSan in CI |
 | Fuzzing | The signal decoder, the validators, the `uds-generic` query parser, the ELM327 reply parsers and the replay reader under libFuzzer, 60 s each in CI ([fuzz/README.md](../fuzz/README.md)) |
-| Static analysis | clang-tidy's analyzer and bug-finding checks over core and the surrogate, any warning failing CI; CodeQL too |
+| Static analysis | clang-tidy's analyzer and bug-finding checks over core, the surrogate and `havne-cli`, any warning failing CI; CodeQL too |
 | Load test | A recorded engine start replayed through the bridge on Windows and Linux CI: throughput, drops and latency, failing on a lost frame or peak or a gross regression |
 | Simulator smoke | The iOS app launches and draws |
 | Manual smoke | The real app, page by page |

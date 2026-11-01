@@ -392,8 +392,8 @@ reach into car-verified claims and finishes the diagnostics.
   end against a known ECU.
 - **clang-tidy, tightened and widened:** `google-explicit-constructor`,
   braces around a body on the line after its `if`, and
-  `google-readability-casting` (C++ only) are on; left: the gate widened
-  to `cli/` and `app/`.
+  `google-readability-casting` (C++ only) are on, over `cli/` too; left:
+  `app/`, which needs Qt and moc's files in the tidy job's tree.
 - **An iPhone download, once a device run works:** a tester's run of
   CI's unsigned `.ipa` on an iPhone, filed as a session sheet, first;
   then the release workflow builds and publishes
