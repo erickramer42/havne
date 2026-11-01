@@ -229,6 +229,13 @@ hardware ([roadmap](#roadmap)).
     `diagnostics` line and `havne-cli dtc`. Checked against J2012's
     2002 pages on 110 codes and against the other open lists; verified at
     UNIT and in the bridge, QML and CLI tests.
+  - **Inspection readiness** ([ADR-0045](docs/adr/0045-inspection-readiness.md)):
+    every ECU's monitors and check-engine light judged as one car by the
+    federal OBD inspection rule (40 CFR 85.2222: two incomplete for
+    1996-2000, one from 2001, a commanded light fails) for the VIN's
+    model year; Diagnostics' card and `stream`'s `inspection` line.
+    Verified at UNIT and in the bridge, QML and CLI tests; not yet on the
+    test car.
   - **Evidence for field sessions:** opt-in recording of every frame,
     decoded value and activity line per connect
     ([ADR-0017](docs/adr/0017-session-recording.md)), and a surrogate
@@ -248,7 +255,7 @@ hardware ([roadmap](#roadmap)).
   ELM327 [bench](docs/bench-sessions/elm327-bench-runsheet.md) and
   [vehicle](docs/bench-sessions/elm327-vehicle-runsheet.md) sheets, and
   the [phone's](docs/bench-sessions/android-phone-runsheet.md).
-- **Tests:** 788 ctest cases on Windows (both trees rebuilt,
+- **Tests:** 795 ctest cases on Windows (both trees rebuilt,
   2026-11-01), all passing but two env-gated skips (the cross-arch
   case, and the real-car recordings' diff, run locally), plus the
   cross-arch subset (86/86); 0 MSVC warnings. CI runs ctest on Windows,
@@ -397,10 +404,9 @@ reach into car-verified claims and finishes the diagnostics.
 - **Trouble-code titles** (built, ADR-0044: the generic powertrain
   and network codes; no urgency, which no source rates); **VIN decode**
   (built, ADR-0043: the year and the make, offline; the model isn't in a
-  manufacturer code); and a **readiness summary**: a line saying
-  whether the car would pass an inspection, from the monitors (PID
-  41's for this drive cycle are shown beside PID 01's) and the model
-  year VIN decode gives.
+  manufacturer code); and a **readiness summary** (built, ADR-0045:
+  the federal inspection rule, 40 CFR 85.2222, over every ECU's
+  monitors for the VIN's model year).
 - **The simulator as a product:** `havne-cli sim <uri> --on vcan0`,
   the fakes' ECU and the recording that answers as one promoted from
   test code into the CLI, answering through core's ISO-TP, with

@@ -50,6 +50,7 @@ old one, and the old record's status is updated to point at it.
 | [0042](0042-reply-timing.md) | Reply timing per request: latency on the host's clock, the refresh interval on the frames' own (the adapter's, the kernel's or the host's, said), log-linear histograms in core published every second; `latency.csv` and the CLI's `timing` lines append the changed rows every 10 s | Accepted |
 | [0043](0043-vin-decode.md) | VIN decode on the device: the model year and check digit by 49 CFR 565.15, the make by the manufacturer codes of NHTSA vPIC's standalone database (a table committed from it, trailers left out), in core's `vin.h`; the app's `VIN:` line and Settings lookup, `havne-cli vin` and `stream`'s `identity` line | Accepted |
 | [0044](0044-trouble-code-titles.md) | Trouble-code titles on the device: SAE J2012's names for the generic powertrain and network codes (P0, P2, P34-P39, U0, U3; a manufacturer's and body and chassis codes left out) from Wal33D's MIT list, a table committed from it with its notice compiled in; Diagnostics' titles and lookup, the CLI's `titles` and `havne-cli dtc` | Accepted |
+| [0045](0045-inspection-readiness.md) | Inspection readiness: every ECU's monitors and MIL judged as one car by the federal OBD inspection rule, 40 CFR 85.2222 (two incomplete for 1996-2000, one from 2001, a commanded MIL fails), for the VIN's model year, in core's `ecuio_diag_inspect`; Diagnostics' card and `stream`'s `inspection` line | Accepted |
 
 ## Adding a record
 

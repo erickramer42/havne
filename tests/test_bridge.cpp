@@ -6,6 +6,8 @@
 //          log's lines, connect and disconnect threads, both decode
 //          paths over the vehicle fixture, recording, the stream
 //          preparer's refusal (ADR-0028), the BLE service picker
+//          and the inspection line (ADR-0045,
+//          BridgeTest.InspectionEntryIsWhatThePageShows)
 
 #include <gtest/gtest.h>
 
@@ -3949,6 +3951,9 @@ TEST(BridgeTest, DiagnosticsFollowTheSession)
             .toString();
     };
     EXPECT_EQ(speedUnit(), QStringLiteral("km/h"));
+    // the mock's light is on: the car's verdict (ADR-0045)
+    EXPECT_EQ(bridge.inspection().value("verdict").toString(),
+              QStringLiteral("mil_on"));
     bridge.setUnitSystem(ECUIO_UNITS_IMPERIAL);
     EXPECT_EQ(speedUnit(), QStringLiteral("mph"));
     bridge.setUnitSystem(ECUIO_UNITS_METRIC);
@@ -3969,6 +3974,8 @@ TEST(BridgeTest, DiagnosticsFollowTheSession)
     ASSERT_TRUE(
         spinUntil([&]() { return !bridge.diagnostics().isEmpty(); }, 2000));
     EXPECT_FALSE(bridge.diagnostics().at(0).toMap().value("asked").toBool());
+    EXPECT_TRUE(bridge.inspection().value("verdict").toString().isEmpty())
+        << "nothing read, nothing judged";
     ASSERT_TRUE(disconnectAndWait(bridge));
 }
 
@@ -5526,6 +5533,82 @@ TEST(BridgeTest, SessionInfoTextDescribesAReplay)
 
 /* ADR-0044: Diagnostics' lookup of a typed code: spaces and lower case
  * taken, a title, a code with none, not a code */
+namespace {
+
+// A read report whose PID 01 answered, the first `incomplete` of the
+// monitors incomplete
+ecuio_channel_diagnostics_t readinessReport(std::initializer_list<uint8_t> ids,
+                                            uint32_t incomplete,
+                                            bool mil = false)
+{
+    ecuio_channel_diagnostics_t d{};
+    d.flags = ECUIO_DIAG_ASKED | ECUIO_DIAG_COMPLETE | ECUIO_DIAG_READINESS |
+              (mil ? ECUIO_DIAG_MIL_ON : 0u);
+    d.readiness = ECUIO_DIAG_ANSWERED;
+    for (uint8_t id : ids) {
+        d.monitors[d.monitor_count].id = id;
+        d.monitors[d.monitor_count].flags =
+            d.monitor_count < incomplete ? 0 : ECUIO_MONITOR_COMPLETE;
+        ++d.monitor_count;
+    }
+    return d;
+}
+
+} // namespace
+
+/* The inspection line as Diagnostics shows it (ADR-0045): each verdict's
+ * word, as havne-cli writes it, and its sentence */
+TEST(BridgeTest, InspectionEntryIsWhatThePageShows)
+{
+    const auto entry = [](const ecuio_channel_diagnostics_t& d, uint32_t year) {
+        return SessionBridge::inspectionEntry(&d, 1, year);
+    };
+    QVariantMap m = entry(readinessReport({8, 10, 13}, 0), 2015);
+    EXPECT_EQ(m.value("verdict").toString(), QStringLiteral("ready"));
+    EXPECT_EQ(m.value("text").toString(),
+              QStringLiteral("Ready for an emissions inspection: every monitor "
+                             "complete, the check-engine light off."));
+    EXPECT_TRUE(
+        m.value("rule").toString().contains(QStringLiteral("40 CFR 85.2222")));
+    m = entry(readinessReport({10, 8, 13}, 1), 2015);
+    EXPECT_EQ(m.value("text").toString(),
+              QStringLiteral("Ready for an emissions inspection: 1 monitor "
+                             "incomplete (EVAP), which a model year 2015 car "
+                             "may have."));
+    m = entry(readinessReport({8, 10, 13}, 2), 2015);
+    EXPECT_EQ(m.value("verdict").toString(), QStringLiteral("not_ready"));
+    EXPECT_EQ(
+        m.value("text").toString(),
+        QStringLiteral("Not ready for an emissions inspection: 2 monitors "
+                       "incomplete (catalyst, EVAP), and a model year "
+                       "2015 car may have 1 at most. A station would "
+                       "send it away to be driven until they complete."));
+    EXPECT_EQ(entry(readinessReport({8, 10, 13}, 2), 1999)
+                  .value("verdict")
+                  .toString(),
+              QStringLiteral("ready"));
+    m = entry(readinessReport({8, 10, 13}, 2), 0);
+    EXPECT_EQ(m.value("verdict").toString(), QStringLiteral("year_needed"));
+    EXPECT_EQ(
+        m.value("text").toString(),
+        QStringLiteral("2 monitors incomplete (catalyst, EVAP): ready for "
+                       "an emissions inspection if the car is model year "
+                       "1996-2000, not if it's 2001 or newer, and no VIN "
+                       "gave its year."));
+    EXPECT_EQ(
+        entry(readinessReport({8}, 0, true), 2015).value("verdict").toString(),
+        QStringLiteral("mil_on"));
+    EXPECT_EQ(entry(readinessReport({8}, 0), 1995).value("verdict").toString(),
+              QStringLiteral("not_covered"));
+    ecuio_channel_diagnostics_t reading = readinessReport({8}, 0);
+    reading.flags &= ~ECUIO_DIAG_COMPLETE;
+    EXPECT_TRUE(entry(reading, 2015).value("verdict").toString().isEmpty());
+    EXPECT_TRUE(SessionBridge::inspectionEntry(nullptr, 0, 2015)
+                    .value("text")
+                    .toString()
+                    .isEmpty());
+}
+
 TEST(BridgeTest, ATypedCodeIsDescribed)
 {
     SessionBridge bridge;

@@ -847,6 +847,71 @@ const char* ecuio_monitor_short_name(
     uint32_t diag_flags
 );
 
+/* Whether a car's readiness would pass the federal OBD inspection rule
+ * (ADR-0045): 40 CFR 85.2222(c), a model year 1996-2000 car with two
+ * monitors incomplete at most, a 2001 or newer one with one, and (d) a
+ * commanded MIL fails. A state's program sets its own rule, and some
+ * are stricter. The values below are append-only. */
+#define ECUIO_INSPECTION_UNKNOWN         0u   /* no report counted: none
+                                                 asked, or no ECU answered
+                                                 PID 01 */
+#define ECUIO_INSPECTION_READY           1u   /* MIL off, incomplete <=
+                                                 allowed */
+#define ECUIO_INSPECTION_NOT_READY       2u   /* MIL off, incomplete >
+                                                 allowed: (c)(1) sends the
+                                                 car away to be driven */
+#define ECUIO_INSPECTION_MIL_ON          3u   /* an ECU commands the MIL:
+                                                 (d)(1) fails it */
+#define ECUIO_INSPECTION_YEAR_NEEDED     4u   /* MIL off, two incomplete,
+                                                 no model year: 1996-2000
+                                                 allows them, 2001 on not */
+#define ECUIO_INSPECTION_NOT_COVERED     5u   /* a model year before 1996,
+                                                 which the rule doesn't
+                                                 cover */
+#define ECUIO_INSPECTION_READING         6u   /* a report asked is still
+                                                 being read */
+
+/* POD, 24 bytes, no hidden padding; pinned by the assertions below. */
+typedef struct ecuio_inspection {
+    uint8_t verdict;          /* ECUIO_INSPECTION_* */
+    uint8_t incomplete;       /* monitors some ECU reports incomplete */
+    uint8_t allowed;          /* incomplete monitors the rule allows the
+                                 model year: 2 for 1996-2000, 1 for 2001
+                                 on, 0 for none given or before 1996 */
+    uint8_t reports;          /* reports counted: PID 01 answered */
+    uint16_t incomplete_ids;  /* bit n: monitor id n is incomplete */
+    uint16_t reserved0;       /* zero */
+    uint32_t diag_flags;      /* ECUIO_DIAG_COMPRESSION when a counted
+                                 report's engine is compression ignition:
+                                 the flags ecuio_monitor_name takes */
+    uint32_t reserved[3];     /* zero; ABI growth space */
+} ecuio_inspection_t;
+
+#if defined(__cplusplus)
+static_assert(sizeof(ecuio_inspection_t) == 24, "ecuio_inspection_t size is ABI");
+static_assert(offsetof(ecuio_inspection_t, diag_flags) == 8, "inspection diag_flags offset is ABI");
+#elif defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
+_Static_assert(sizeof(ecuio_inspection_t) == 24, "ecuio_inspection_t size is ABI");
+_Static_assert(offsetof(ecuio_inspection_t, diag_flags) == 8, "inspection diag_flags offset is ABI");
+#endif
+
+/* Judges count reports together, as one car (ADR-0045): a monitor is
+ * incomplete when any ECU that has it says so, and the MIL is on when
+ * any ECU commands it. A report counts once PID 01 has answered
+ * (ECUIO_DIAG_READINESS); while one asked (ECUIO_DIAG_ASKED) isn't
+ * complete the verdict is ECUIO_INSPECTION_READING. model_year is the
+ * car's (ecuio_vin_decode), 0 when none is known. In order: READING,
+ * UNKNOWN, NOT_COVERED, MIL_ON, then the count against the model year's
+ * allowance; with no model year, two incomplete is YEAR_NEEDED. The
+ * counts are filled in for every verdict. ECUIO_ERR_NULL_ARGUMENT for a
+ * NULL out, or a NULL reports with count above 0. */
+ecuio_status_t ecuio_diag_inspect(
+    const ecuio_channel_diagnostics_t* reports,
+    uint32_t count,
+    uint32_t model_year,
+    ecuio_inspection_t* out
+);
+
 /* Copies what channel `channel`'s ECU has reported of its diagnostics
  * (ADR-0037) into *out_diagnostics, under the identity report's rules:
  * the channel is an index below the session info's channel_count

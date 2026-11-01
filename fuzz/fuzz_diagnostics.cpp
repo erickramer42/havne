@@ -10,7 +10,8 @@
 //          or asked at all under ECUIO_CLEAR_ALLOW_MOVING too; the
 //          report stays within its caps, every
 //          code and monitor it holds has a name, its values are finite,
-//          it reads complete only with nothing left to ask, two runs
+//          it reads complete only with nothing left to ask, its
+//          inspection verdict (ADR-0045) counts within it, two runs
 //          agree
 
 #include <ecuio/core.h>
@@ -85,6 +86,20 @@ void check(const ecuio_request_engine& e)
     }
     for (uint32_t i = 0; i < d.freeze_count; ++i) {
         if (!isfinite(d.freeze_values[i].value)) {
+            abort();
+        }
+    }
+    /* the inspection verdict (ADR-0045): counts within the report, and
+     * every incomplete monitor named */
+    ecuio_inspection_t in;
+    if (ecuio_diag_inspect(&d, 1, 2015, &in) != ECUIO_OK ||
+        in.verdict > ECUIO_INSPECTION_READING ||
+        in.incomplete > d.monitor_count || in.reports > 1) {
+        abort();
+    }
+    for (uint8_t id = 0; id < 16; ++id) {
+        if (((in.incomplete_ids >> id) & 1u) != 0 &&
+            ecuio_monitor_name(id, in.diag_flags)[0] == '\0') {
             abort();
         }
     }

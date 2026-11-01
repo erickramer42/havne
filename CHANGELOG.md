@@ -12,6 +12,8 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
 
 ### Added
 
+- Inspection readiness: the Diagnostics page says whether the car would pass the federal OBD inspection rule (40 CFR 85.2222) today, from every ECU's monitors and check-engine light and the model year in its VIN, and names the monitors still incomplete. `havne-cli stream` writes the same as an `inspection` line. A state's program may be stricter.
+- `ecuio_diag_inspect` and `ecuio_inspection_t` in core's C API.
 - Trouble codes with their names: the Diagnostics page shows SAE J2012's title beside each generic powertrain and network code ("P0301  Cylinder 1 Misfire Detected") and the freeze frame's, and **Look up a code** names a typed one, offline. `havne-cli`'s `diagnostics` line carries the same as `titles`, and `havne-cli dtc <code>` looks one up. The titles come from Wal33D's dtc-database under its MIT license, whose notice ships with every download.
 - `ecuio_dtc_parse`, `ecuio_dtc_title`, `ecuio_dtc_title_source` and `ecuio_dtc_title_notice` in core's C API.
 - The VIN decoded on the device, with nothing sent anywhere: the model year, the make and whether the check digit matches, by 49 CFR 565 and the manufacturer codes in NHTSA's vPIC database. The activity log adds a `VIN:` line for the connected car, and Settings' Vehicle section has **Look up a VIN** for a typed one, never saved. `havne-cli vin <VIN>` does the same, and `havne-cli stream` writes an `identity` line per ECU: each identification item and the VIN's decode.
