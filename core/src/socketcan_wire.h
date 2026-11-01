@@ -337,7 +337,7 @@ inline bool socketcan_interface_from(const socketcan_link& l,
     return true;
 }
 
-/* Whether a session may listen on the link (ADR-0032 §2), in the order
+/* Whether a session may listen on the link (ADR-0032 section 2), in the order
  * the refusals are checked */
 enum class socketcan_verdict {
     ok,
@@ -563,14 +563,14 @@ inline void socketcan_to_frame(const socketcan_raw& in, ecuio_frame_t* out)
 }
 
 /* An error frame that ends reception: bus-off, or the controller
- * restarting after one (ADR-0032 §6) */
+ * restarting after one (ADR-0032 section 6) */
 inline bool socketcan_error_is_hard(uint32_t can_id)
 {
     return (can_id & SOCKETCAN_ERR_FLAG) &&
            (can_id & (SOCKETCAN_ERR_BUSOFF | SOCKETCAN_ERR_RESTARTED)) != 0;
 }
 
-/* ---- The clock (ADR-0032 §5) ---- */
+/* ---- The clock (ADR-0032 section 5) ---- */
 
 /* A frame is received before it's read, so a kernel delta that puts it
  * later than the read by more than this, or a backward one, means the
@@ -589,7 +589,7 @@ struct socketcan_clock {
 
 /* A frame's session time from the kernel's receive time (ns, wall clock;
  * 0 when the frame came without one) and the session's host time at the
- * read (µs since attach). The first frame takes the host's time; each
+ * read (us since attach). The first frame takes the host's time; each
  * later one adds the kernel's delta since the frame before, unless it
  * stepped. Frames read late after a stall keep their kernel spacing.
  * Never decreases. */

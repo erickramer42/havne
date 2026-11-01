@@ -3,7 +3,7 @@
 #          linux-packages validates its self-test document with
 #          pyspdxtools, and release.yml's publish job the release's
 #
-# The release's SBOM (ADR-0035 §5): one SPDX 2.3 JSON document naming
+# The release's SBOM (ADR-0035 section 5): one SPDX 2.3 JSON document naming
 # each download, by file name and SHA-256, and what it contains. Each
 # build job writes a component list beside its download,
 # <download>.components.json, from what it actually packed:

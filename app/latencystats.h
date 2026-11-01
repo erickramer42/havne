@@ -9,7 +9,7 @@
 
 // A latency distribution in fixed memory, for the bridge's delivery
 // figures. Each sample in microseconds falls in a bucket an eighth of
-// its power of two wide (exact below 16 µs), so a quantile reads back
+// its power of two wide (exact below 16 us), so a quantile reads back
 // at most 12.5 % above the true value and never below it; recording one
 // is a few instructions and allocates nothing.
 class LatencyStats
@@ -28,7 +28,7 @@ public:
     uint64_t count() const { return m_count; }
     uint64_t maxUs() const { return m_max; }
 
-    // The q quantile (0 to 1) in µs: the top of the bucket holding it,
+    // The q quantile (0 to 1) in us: the top of the bucket holding it,
     // capped at the largest sample, so 1.0 gives the maximum exactly. 0
     // with no samples.
     uint64_t quantileUs(double q) const
@@ -52,10 +52,10 @@ public:
 
 private:
     static constexpr int kSub = 8;      // buckets per power of two
-    static constexpr int kBands = 40;   // up to 2^42 µs, about 50 days
+    static constexpr int kBands = 40;   // up to 2^42 us, about 50 days
     static constexpr int kBuckets = (kBands + 1) * kSub;
 
-    // Below 16 µs a bucket per µs; from 2^b up (b >= 4), eight buckets
+    // Below 16 us a bucket per us; from 2^b up (b >= 4), eight buckets
     // across [2^b, 2^(b+1))
     static int bucketOf(uint64_t v)
     {

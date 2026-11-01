@@ -3,7 +3,7 @@
 - **Status:** Accepted.
 - **Date:** 2026-10-28.
 - **Builds on:** [ADR-0026](0026-elm327-transport.md) (the ELM327
-  transport, whose §1 leaves the byte stream as the seam for this
+  transport, whose section 1 leaves the byte stream as the seam for this
   record, and whose appendix "WiFi over TCP" gives the mobile apps
   their first route to a car); [ADR-0001](0001-qt-free-core-c-abi.md)
   (the C ABI is the boundary, and core never links Qt).
@@ -102,7 +102,7 @@ void ecuio_stream_failed(ecuio_stream_t* stream, const char* reason);
   payload is the ATT MTU less 3, 20 bytes before negotiation). A write
   that fails afterward is a `failed`.
 - **Failure:** `failed` ends the stream's link. The worker's next read
-  or write sees the port failed, which ADR-0026 §6 maps to a hard
+  or write sees the port failed, which ADR-0026 section 6 maps to a hard
   failure: an episode, then a reopen on the backoff. The reopen calls
   `open` again, so the backoff paces the app's reconnects, and the app
   never retries on its own.
@@ -120,7 +120,7 @@ void ecuio_stream_failed(ecuio_stream_t* stream, const char* reason);
 Core's port glue is a third opener beside the serial port and the TCP
 socket (`core/src/elm327_stream.{h,cpp}`), so the protocol layer, the
 worker, link health, the wire log and passive listening run unchanged.
-The wire log names the link "bt:… (app stream)".
+The wire log names the link "bt:... (app stream)".
 
 ### 2. The app's Bluetooth, Android first
 
@@ -141,7 +141,7 @@ QtBluetooth is found; on Android only for now):
      and one writable characteristic.
 
   The list comes from what adapters are commonly reported to use. None
-  is verified here (§5). The picker is a pure function over the
+  is verified here (section 5). The picker is a pure function over the
   discovered services, so a test can check it without hardware.
 - **Settings' device list** gains the phone's Bluetooth adapters: the
   paired classic devices, and BLE devices found by a scan started
@@ -181,7 +181,7 @@ build).
 
 | Tier | What |
 |---|---|
-| HARNESS (`test_elm327`, Qt-free, every CI job) | The fake ELM327 behind `ecuio_stream_*`: a pump thread plays the app (`open` → `opened`, `write` → the fake → `received`). A whole session's setup and polling through it; `failed` mid-session → hard failure, `close`, then `open` again on the backoff and recovery; an open that never answers, refused after its wait; a stop during that wait; an unregistered kind; `unregister` refused while held; bytes past the buffer; pushes after `close` discarded |
+| HARNESS (`test_elm327`, Qt-free, every CI job) | The fake ELM327 behind `ecuio_stream_*`: a pump thread plays the app (`open` to `opened`, `write` to the fake to `received`). A whole session's setup and polling through it; `failed` mid-session to hard failure, `close`, then `open` again on the backoff and recovery; an open that never answers, refused after its wait; a stop during that wait; an unregistered kind; `unregister` refused while held; bytes past the buffer; pushes after `close` discarded |
 | UNIT (`test_c_abi`) | `stream.h` as strict C |
 | UNIT (`test_bridge`) | The BLE service picker over made-up service lists; the device list's URI rows |
 | BENCH (the phone) | The APK launches; `mock://` and `replay://`; the VX's WiFi, `elm327://192.168.4.1:23`; the permissions prompts; where the logs and recordings land |
@@ -212,7 +212,7 @@ item records it as open.
   the buffer and the timing, and the app never blocks.
 - **The app connects first and hands core an open stream.** That works
   for the connect, but a dropped link then needs a second path for the
-  reconnect, outside the backoff ADR-0026 §6 already gives every port.
+  reconnect, outside the backoff ADR-0026 section 6 already gives every port.
   With `open` as a callback, one path serves both, and the backoff
   paces the app.
 - **Bluetooth in core.** Four native stacks, one of them Java-only.
@@ -250,15 +250,15 @@ item records it as open.
 Step 1 closed with the sixth phone run
 ([2026-10-28-android-6](../bench-sessions/2026-10-28-android-6.md)).
 Step 2 is built: `ecuio/stream.h`, `core/src/elm327_stream.{h,cpp}`, and
-the HARNESS cases of §4 (`Elm327StreamTest`), with the strict-C check
-in `test_c_abi`. Building it settled five points that §1 leaves open or
+the HARNESS cases of section 4 (`Elm327StreamTest`), with the strict-C check
+in `test_c_abi`. Building it settled five points that section 1 leaves open or
 states otherwise:
 
 - **A whole name is one stream.** `open` takes no address, so core
   can't tell the app which adapter to reach under a kind. The app
   registers a stream per adapter, `bt:00:11:22:33:44:55`, and core
   matches the whole name; one never registered is "no such port". Where
-  §1 says "a name with a kind that isn't registered", read "a name that
+  section 1 says "a name with a kind that isn't registered", read "a name that
   isn't registered".
 - **`reserved[5]`, not `[4]`.** With four, the callbacks struct ends in
   4 bytes of padding on 64-bit. Five make it 56 bytes with none, pinned
@@ -271,7 +271,7 @@ states otherwise:
   stream is free for the next session.
 - **The stop reaches the wait through the transport.** The worker's
   reopen waits with the session's stop flag; attach has no stop of its
-  own, as §1 says. A test-only setter in `internal.h`
+  own, as section 1 says. A test-only setter in `internal.h`
   (`ecuio_elm327_set_stream_open_ms`) shortens the 10 s for the case of
   an open that never answers.
 
@@ -283,14 +283,14 @@ Pushes between a `close` and the next `open` are discarded, and the next
 Step 3 is built, compiled by CI's `android-build` and not yet run on a
 phone: `app/btstream.{h,cpp}` (the links, Android only),
 `app/bluetoothdevices.{h,cpp}` (the `Bluetooth` QML singleton, the list
-and the permission), `app/blepicker.{h,cpp}` (§2's service list as a
+and the permission), `app/blepicker.{h,cpp}` (section 2's service list as a
 pure function, UNIT-tested in `test_bridge`), and Settings' rows. It
 settled five points:
 
 - **Android 12 (API 31) is the minimum.** It is the first release with
   `BLUETOOTH_CONNECT` and `BLUETOOTH_SCAN`; older ones want location
   permission for a scan, a path the one phone here (Android 16) can't
-  test. §2's "the minimum SDK decides whether that path exists" is
+  test. Section 2's "the minimum SDK decides whether that path exists" is
   decided: it doesn't. CI's `android-build` checks the minimum and the
   two permissions, the scan's `neverForLocation` included.
 - **The paired list is Android's own.** Qt lists no paired devices, so
@@ -317,7 +317,7 @@ settled five points:
 ran with no adapter
 ([2026-10-28-android-7](../bench-sessions/2026-10-28-android-7.md)):
 the prompt came once, when Adapter opened; a pair of earbuds offered
-an SPP service and an LED light a BLE service none of §2's list names
+an SPP service and an LED light a BLE service none of section 2's list names
 (the last rule chose it); both links opened and carried `ATZ` out, and
 with nothing answering the connect failed after 5 s and the link
 closed. An adapter's answers wait for the MX+ (step 4).
@@ -332,7 +332,7 @@ a second (about 32 through the laptop), and a Bluetooth drop failed
 the stream at once and recovered on the backoff, values back 4.2 s
 after Bluetooth came on. The stream's contract held on a real link.
 
-One thing it didn't hold: the app in the background. §2 queues core's
+One thing it didn't hold: the app in the background. Section 2 queues core's
 calls to the GUI thread, where QtBluetooth delivers its signals, and
 Android pauses that thread in the background, so a write waits there
 until the app returns and the session faults on core's 5 s silence. On
@@ -344,11 +344,11 @@ fix, which also has to keep the link running in the background.
 
 ## Appendix: 2026-10-29, signed releases
 
-§3 kept release builds and a signing key out of this record, and the
+Section 3 kept release builds and a signing key out of this record, and the
 release workflow Windows-only until Known Issue #2 closed. Known Issue
 #2 now covers iOS and the missing on-phone test suite, and the Android
 app has run on a phone and a car, so releases carry an APK signed with
 a release key from v0.3.3 on: [ADR-0030](0030-signed-android-releases.md).
-CI's debug APK and local builds stay as §3 describes them, for
+CI's debug APK and local builds stay as section 3 describes them, for
 development and for phone runs that read the wire logs through
 `run-as`.

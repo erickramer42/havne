@@ -509,7 +509,7 @@ int wmain(int argc, wchar_t* argv[])
 
     /* Resolve the nine mandatory exports. Ioctl falls back to the
      * legacy 'PassThruIoCtl' spelling after the spec's 'PassThruIoctl'
-     * (SAE J2534-1 §7.3.19; the OBDX Pro VX exports that). */
+     * (SAE J2534-1 section 7.3.19; the OBDX Pro VX exports that). */
     g_open         = reinterpret_cast<fn_pt_open>(resolve_export(g_module, "PassThruOpen", nullptr));
     g_close        = reinterpret_cast<fn_pt_close>(resolve_export(g_module, "PassThruClose", nullptr));
     g_connect      = reinterpret_cast<fn_pt_connect>(resolve_export(g_module, "PassThruConnect", nullptr));

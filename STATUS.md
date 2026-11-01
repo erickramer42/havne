@@ -1,6 +1,6 @@
 # Havne: Project Status
 
-**Updated:** 2026-10-31 · **Version:** v0.3.4 ·
+**Updated:** 2026-10-31, **Version:** v0.3.4,
 [![CI](https://github.com/erickramer42/havne/actions/workflows/ci.yml/badge.svg)](https://github.com/erickramer42/havne/actions/workflows/ci.yml)
 
 This file covers the project as it stands: what works, what comes
@@ -36,8 +36,9 @@ the Android app reaches the car through the phone's Bluetooth, in the
 background too. v0.3.5 has trouble codes, read and cleared, every
 linear reading of the Service 01 table in the `obd2` set, and SocketCAN
 requests through ISO-TP in core, fault injection on a replay, and
-reply timing per request with a benchmark of it; the runs that need
-hardware move to v0.3.6 ([roadmap](#roadmap)).
+reply timing per request with a benchmark of it; the car runs the
+adapters on hand can make are v0.3.6's, and SocketCAN's wait for their
+hardware ([roadmap](#roadmap)).
 
 - **Works:**
   - **Mock transport,** on every platform: a scripted drive cycle (15 s
@@ -46,7 +47,7 @@ hardware move to v0.3.6 ([roadmap](#roadmap)).
     whose later loops start warm, each after its own engine-off spell.
   - **Replay** ([ADR-0023](docs/adr/0023-replay-transport.md)), on every
     platform: `replay://<recording>` plays a recording's `frames.csv`
-    back at its own pace or up to 100× faster. `?faults=` injects faults
+    back at its own pace or up to 100x faster. `?faults=` injects faults
     as it plays ([ADR-0041](docs/adr/0041-replay-fault-injection.md),
     proposed): frames dropped, lost to an overflow, corrupted, cut short
     or held back, the same each time from `?seed=`.
@@ -83,7 +84,7 @@ hardware move to v0.3.6 ([roadmap](#roadmap)).
     the next when the reply is in, a 100 ms wait and a 20 ms floor;
     reads only (Services 01, 02, 03, 07, 09, 0A and 0x22). About 26 a
     second on the car.
-  - **The PID-support probe** (ADR-0015 §4) drops only what an ECU says
+  - **The PID-support probe** (ADR-0015 section 4) drops only what an ECU says
     it lacks, never on silence; on the car it walked six bitmaps and
     dropped `01 5C`.
   - **Every linear Service 01 reading** ([ADR-0039](docs/adr/0039-full-service01-coverage.md)):
@@ -94,7 +95,7 @@ hardware move to v0.3.6 ([roadmap](#roadmap)).
     pressures, counters); Live hides the signals the car's bitmaps
     leave out and the fields its replies come without (core's absent
     signals), and says how many; imperial units cover the new units
-    (inH2O, gal/h, lb·ft). Verified against the fakes' ECU, which
+    (`inH2O`, `gal/h`, `lb·ft`). Verified against the fakes' ECU, which
     answers every linear PID, through J2534 and ELM327, and the car's
     recordings replay to their own values through the grown set. On
     the test car through the MX+ the probe keeps exactly its bitmaps'
@@ -117,7 +118,7 @@ hardware move to v0.3.6 ([roadmap](#roadmap)).
     no codes stored (BENCH prep #28).
   - **Clearing trouble codes**
     ([ADR-0038](docs/adr/0038-clearing-trouble-codes.md)): the page's
-    Clear codes… asks first, and the app saves the report to a file of
+    Clear codes... asks first, and the app saves the report to a file of
     its own before anything is sent; core asks each ECU its engine
     speed, sends `04` only at 0 rpm, by the ECU's own ID, and reads the
     report again; each outcome on the page and in the activity log.
@@ -175,7 +176,8 @@ hardware move to v0.3.6 ([roadmap](#roadmap)).
       ISO-TP held to the kernel's as well. No real controller has run
       yet (BENCH prep #26, #32): the one on hand, an Innomaker USB2CAN,
       offers no one-shot mode, and whether to require it is the desk
-      run's to settle (ADR-0040 section 2, v0.3.6).
+      run's to settle (ADR-0040 section 2), once the desk bus has its
+      terminator.
   - **Linux** ([docs/linux.md](docs/linux.md)): the app as an
     AppImage, and core alone as a deb and a tarball (`havne-cli`, the
     static library, its C headers, a CMake package and a pkg-config
@@ -220,10 +222,10 @@ hardware move to v0.3.6 ([roadmap](#roadmap)).
   ELM327 [bench](docs/bench-sessions/elm327-bench-runsheet.md) and
   [vehicle](docs/bench-sessions/elm327-vehicle-runsheet.md) sheets, and
   the [phone's](docs/bench-sessions/android-phone-runsheet.md).
-- **Tests:** 654 ctest cases on Windows (both trees rebuilt,
+- **Tests:** 739 ctest cases on Windows (both trees rebuilt,
   2026-10-31), all passing but two env-gated skips (the cross-arch
   case, and the real-car recordings' diff, run locally), plus the
-  cross-arch subset (84/84); 0 MSVC warnings. CI runs ctest on Windows,
+  cross-arch subset (85/85); 0 MSVC warnings. CI runs ctest on Windows,
   macOS and Linux, with SocketCAN's suites on Linux's `vcan0`; core
   under ASan and UBSan, `vcan0` included; 60 s of each libFuzzer
   harness ([fuzz/README.md](fuzz/README.md)); clang-tidy and CodeQL;
@@ -243,7 +245,7 @@ hardware move to v0.3.6 ([roadmap](#roadmap)).
 | Signal decode | Linear scaling in `double` of unsigned, signed and binary32 fields in either byte order, gated on message ID and a mux key of up to 3 bytes; text and hex fields; a validator that accepts exactly what the decoder decodes | [ADR-0004](docs/adr/0004-signal-decoding-model.md), [ADR-0016](docs/adr/0016-signal-definition-layout.md) |
 | Mock transport | A ~2-minute drive cycle on a vehicle model (`core/src/mock_drive_cycle.h`) whose readings stay consistent with each other, every tick round-tripped through the mock set (`CoreTest.MockDriveCycle*`) | none |
 | Replay transport | UNIT-tested, against a scrubbed real-bus fixture too; passive, default profile `raw` | [ADR-0023](docs/adr/0023-replay-transport.md) |
-| Bridge and models | Worker → GUI marshaling with bounded backpressure, 100 ms coalescing, a 10k-row frame log, a 360-point history per signal (each 100 ms window's lowest, highest and newest), link-health polling, recording; QML reaches it as the `Bridge` singleton | [ADR-0003](docs/adr/0003-backpressure-bounds-in-flight-frames.md), [ADR-0005](docs/adr/0005-coalesced-signal-updates.md) |
+| Bridge and models | Worker to GUI marshaling with bounded backpressure, 100 ms coalescing, a 10k-row frame log, a 360-point history per signal (each 100 ms window's lowest, highest and newest), link-health polling, recording; QML reaches it as the `Bridge` singleton | [ADR-0003](docs/adr/0003-backpressure-bounds-in-flight-frames.md), [ADR-0005](docs/adr/0005-coalesced-signal-updates.md) |
 | QML pages | Home, Dashboard, Live, Log, Settings; `test_qml` runs them against a real bridge, offscreen | [docs/architecture.md](docs/architecture.md#the-ui-layer) |
 | J2534 | HARNESS-verified through the surrogate: x64 in CI, x86 cross-arch. BENCH: one adapter, quiet bus. Vehicle: one car, read-only, through the surrogate, two sessions | [docs/j2534.md](docs/j2534.md) |
 | ELM327 | HARNESS-verified against a fake ELM327 on every platform (serial, TCP, app stream). BENCH: the VX on USB and WiFi, no bus. Vehicle: one car, read-only, through the MX+ (Bluetooth) and the VX (USB) | [docs/elm327.md](docs/elm327.md) |
@@ -327,20 +329,25 @@ an issue is resolved it is removed, and its number is not reused.
 
 | Version | Scope | Status |
 |---|---|---|
-| v0.1.0 | Skeleton: core ABI, Qt shell, responsive layout | ✅ Released |
-| v0.2.0 | Callback API, mock transport, live frame log, CI | ✅ Released |
-| v0.3.0 | Signal decoding, LiveView, J2534 transport, live vehicle read and logging | ✅ Released |
-| v0.3.1 | Request engine, PID-support probe, `uds-generic`, vehicle identification, imperial units; the first Windows download | ✅ Released |
-| v0.3.2 | Record-replay transport, decoding on the transport's thread, every driver in its own process | ✅ Released |
-| v0.3.3 | ELM327 adapters, preferences and vehicles, Android with Bluetooth and background sessions and a signed APK, the rename to Havne | ✅ Released |
-| v0.3.4 | A command-line client over the C ABI; Linux as a supported desktop; a SocketCAN transport that listens | ✅ Released |
-| v0.3.5 | Full OBD-II diagnostics (Services 01–0A, clearing codes); SocketCAN requests through ISO-TP; fault injection on a replay; a performance benchmark with latency per PID | In progress: reading and clearing codes, the full Service 01 set, SocketCAN requests, fault injection on a replay and reply timing built |
-| v0.3.6–v0.3.9 | The hardware runs v0.3.5 leaves (SocketCAN through a real controller and on a car, packing through the VX); recordings you can open, compare and share: a log viewer with run overlay, CSV import and export with scrubbing, a health report, triggered logging and alerts | Planned |
-| v0.4.0 | Python bindings; PCAP export and candump import; ECU, DID and service discovery (needs requests to every ECU and listening to the whole bus first) | Proposed |
+| v0.1.0 | Skeleton: core ABI, Qt shell, responsive layout | Released |
+| v0.2.0 | Callback API, mock transport, live frame log, CI | Released |
+| v0.3.0 | Signal decoding, LiveView, J2534 transport, live vehicle read and logging | Released |
+| v0.3.1 | Request engine, PID-support probe, `uds-generic`, vehicle identification, imperial units; the first Windows download | Released |
+| v0.3.2 | Record-replay transport, decoding on the transport's thread, every driver in its own process | Released |
+| v0.3.3 | ELM327 adapters, preferences and vehicles, Android with Bluetooth and background sessions and a signed APK, the rename to Havne | Released |
+| v0.3.4 | A command-line client over the C ABI; Linux as a supported desktop; a SocketCAN transport that listens | Released |
+| v0.3.5 | Full OBD-II diagnostics (Services 01-0A, clearing codes); SocketCAN requests through ISO-TP; fault injection on a replay; a performance benchmark with latency per PID | Built; the release in preparation |
+| v0.3.6 | Proven and finished: the car runs the adapters on hand can make (packing through the VX, more than one ECU captured); Windows timer resolution; trouble-code descriptions, VIN decode and a readiness summary; the simulated ECU as `havne-cli sim`; a performance gate in CI; clang-tidy tightened | Planned |
+| v0.3.7 | A log viewer: recordings opened offline, two runs overlaid on a common zero | Planned |
+| v0.3.8 | CSV import and export, scrubbed for sharing; a health report; the Log page's frame filter; Python bindings | Planned |
+| v0.3.9 | Conditions: triggered logging, alerts and markers; computed signals | Planned |
+| Waiting on hardware | SocketCAN through a real controller: the desk run that settles one-shot mode, then the test car | Not versioned |
+| v0.4.0 | ECU, DID and service discovery (needs requests to every ECU and listening to the whole bus first), with a simulated car of several modules; PCAP export and candump import | Proposed |
 | v0.5.0 | The plugin framework (ADR-0013's profile API), with no manufacturer plugin yet; legacy buses (ISO 9141-2, KWP2000, J1850) | Proposed |
 
 The planned releases are in order; the proposed ones are not
-scheduled. What each holds, past its row:
+scheduled. The SocketCAN runs go into the first release after their
+hardware is on hand. What each holds, past its row:
 
 ### v0.3.5: full OBD-II diagnostics, SocketCAN requests
 
@@ -351,9 +358,9 @@ scheduled. What each holds, past its row:
   its requests in two rate classes, and Live hiding what a car lacks;
   run on the test car (BENCH prep #30), where PIDs 23 and 59 read one
   sensor (so a car whose bitmaps list both asks 59 in the slow class,
-  ADR-0039 §3) and 55 and 56 answer one of their two fields (core
+  ADR-0039 section 3) and 55 and 56 answer one of their two fields (core
   reports such a field absent, `ecuio_session_get_absent_signals`, and
-  Live hides it, ADR-0039 §6); Live plots the six best ranked signals
+  Live hides it, ADR-0039 section 6); Live plots the six best ranked signals
   the car has (ADR-0039 section 8). Several PIDs per request is
   built: core decodes a reply that carries several, record by record,
   with each PID's length as the car sends it, and the engine packs up
@@ -361,7 +368,7 @@ scheduled. What each holds, past its row:
   for a car that mishandles them; on the test car through the MX+ each
   signal refreshed four to five times as often (BENCH prep #31); the
   VX's run is v0.3.6's (ADR-0039's Appendix A). The bit-field, enumerated and complex PIDs wait for decoder
-  kinds of their own (ADR-0039 §2).
+  kinds of their own (ADR-0039 section 2).
 - **Trouble codes:** reading is built
   ([ADR-0037](docs/adr/0037-reading-trouble-codes.md)): stored, pending
   and permanent codes, readiness and the freeze frame (Services 03, 07,
@@ -425,73 +432,129 @@ scheduled. What each holds, past its row:
 - **Done when:** trouble codes, the full Service 01 set, SocketCAN
   requests, fault injection on a replay and the benchmark are built
   and verified with no hardware: the fakes, replays of the test car,
-  `vcan0`. The runs that need hardware are v0.3.6's.
+  `vcan0`. The runs that need hardware are v0.3.6's, and SocketCAN's
+  wait for theirs.
 
-### v0.3.6 to v0.3.9: recordings you can open, compare and share
+### v0.3.6: proven and finished
 
-A recording becomes something to open offline, line up against
-another, bring in from another logger and post safely; the split
-across the four releases is decided as they come.
+v0.3.5's features are verified on the fakes, the simulated bus and,
+for ELM327, the test car. v0.3.6 turns what the adapters on hand can
+reach into car-verified claims and finishes the diagnostics.
 
-- **First, the hardware runs v0.3.5 leaves:** SocketCAN sending through
-  a real controller on the desk, which settles whether ADR-0040
-  requires one-shot mode (BENCH prep #32); then a script reading the
-  test car through SocketCAN at a documented rate, the CLI's
-  `havne-cli` (Python bindings come in v0.4.0), listen-only first
-  (BENCH prep #26 and #19); and several PIDs per request through the
-  VX (BENCH prep #31's other half).
+- **The car runs:** several PIDs per request through the VX (BENCH
+  prep #31's other half), with the adapter's share of a reply's
+  latency beside it (ADR-0042); and on the same run, the data more
+  than one ECU answering needs (a functional `0x7DF` bitmap request,
+  physical `0x7E1` to `0x7E7`), captured under `raw` as evidence for
+  v0.4.0's design.
+- **Windows timer resolution:** the benchmark read a 4 ms reply as
+  16.4 ms on Windows, where RPM refreshed every 0.23 to 0.25 s against
+  0.148 s on Linux. If the workers' waits round up to the 15.6 ms
+  step, high-resolution waits give every Windows user more refreshes.
+- **Trouble-code descriptions** ("P0301: cylinder 1 misfire") with a
+  one-word urgency, from a source chosen first; **VIN decode** (make,
+  model and year from the WMI and the model-year digit, offline); and
+  a **readiness summary**: PID 41's monitors for this drive cycle
+  beside PID 01's since the last clear, and a line saying whether the
+  car would pass an inspection.
+- **The simulator as a product:** `havne-cli sim <uri> --on vcan0`,
+  the fakes' ECU and the recording that answers as one promoted from
+  test code into the CLI, answering through core's ISO-TP, with
+  faults given as replay's `?faults=` are. Until SocketCAN's hardware
+  is on hand, it's how anyone runs Havne's SocketCAN requests end to
+  end against a known ECU.
+- **A performance gate in CI** that doesn't depend on the runner: the
+  decode's cost at 1,000 defs against 9 stays under about 3x, and the
+  load test with decoding against without it.
+- **ELM327's one drop and timeout per run**, seen in every
+  `bench_timing` run, traced and fixed or explained.
+- **clang-tidy, tightened and widened:** `google-explicit-constructor`
+  and braces around every statement, the decoder's C-style casts made
+  `static_cast`, then the gate widened to `cli/` and `app/`.
+- **Done when:** the VX's packing run and the capture of more than one
+  ECU are filed; the timer change is measured on Windows either way;
+  and `havne-cli stream socketcan://vcan0?profile=obd2` against
+  `havne-cli sim` reads the simulated car's values and diagnostics.
 
-- **A log viewer:** a recording opened offline with seeking, zoom and
-  markers, and two runs overlaid on a common zero (a threshold
-  crossing or a marker). Seeking needs no new format, since `host_us`
-  only increases; the recording container waits for whole-bus
-  listening (v0.4.0).
-  - Drawn at scale: each pixel column's lowest and highest, with memory
-    bounded on an hour-long recording.
-  - With it, the same chart code on Live (whose time window, the last
-    10 to 120 s, is built), and on the phone pinch zoom and smaller
-    Dashboard gauges when it's upright.
-  - Finding a signal among many: Live's list (every linear field of
-    Service 01 a car has) and the viewer's signal picker share one
-    filter. A text field matches names and units as typed (case
-    ignored); a "plotted only" switch; and groups as chips (engine,
-    fuel and air, oxygen sensors, temperatures, counters), which takes
-    each def's group from core, as its plot rank comes. The filter
-    hides rows from the list, never from the chart or a recording.
-  - Done when two recordings of the mock's pulls overlay aligned on the
-    pull's start, and an hour-long recording opens and scrubs within a
-    stated memory bound.
-- **In and out:** CSV import of another logger's timed signals through
-  a column map, with a fuzz target for its parser; CSV export; every
-  export scrubbed of VINs, calibration IDs, serials and paths; a
-  health report (trouble codes, readiness, identification with the
-  VIN decoded to make, model and year, and key values) as one scrubbed
-  export, with readiness for the current drive cycle (PID 41) and a
-  summary of whether the car would pass an inspection.
-  - The Log page's frames: a filter by the columns an engineer reads a
-    bus by (the ID, one or a list, a range or an ID and mask; the
-    length; the payload, a byte at a position or a masked hex sequence
-    such as `41 0C`; the flags; a time range), a per-ID view (each
-    ID's newest frame, count and rate, the bytes that changed
-    highlighted), an export of what the filter shows, and copied rows
-    for quick notes.
-- **Conditions:** one condition model in core, data rather than code,
-  for triggered logging (record while a condition holds, or a window
-  around a link fault), alerts (color, sound or a banner), and markers
-  the viewer shows; computed signals beside it, in a derived-signal
-  stage in core that keeps the UI on final display values: boost is
-  intake manifold pressure (PID 0x0B) minus barometric pressure (PID
-  0x33), both in the `obd2` set.
+### Waiting on hardware: SocketCAN through a real controller
+
+No version until the hardware is on hand: the desk bus's terminator
+for the desk run (a USB-to-CAN adapter is on hand, BENCH prep #32), an
+OBD-to-DB9 cable for the car, and, if the desk run finds that sending
+needs one-shot mode, an adapter whose driver offers it.
+
+- The desk run, which settles whether ADR-0040 section 2 requires
+  one-shot mode (`SOCKETCAN_SEND_NEEDS_ONE_SHOT`, BENCH prep #32).
+- SocketCAN on the test car, listen-only first, then requests (BENCH
+  prep #26 and #19), with a `havne-cli` script reading the car at a
+  documented rate.
+- **Done when:** that script's run is filed and the one-shot rule is
+  settled either way.
+
+### v0.3.7: the log viewer
+
+- A recording opened offline with seeking, zoom and markers, and two
+  runs overlaid on a common zero (a threshold crossing or a marker).
+  Seeking needs no new format, since `host_us` only increases; the
+  recording container waits for whole-bus listening (v0.4.0).
+- Drawn at scale: each pixel column's lowest and highest, with memory
+  bounded on an hour-long recording.
+- With it, the same chart code on Live (whose time window, the last
+  10 to 120 s, is built), and on the phone pinch zoom and smaller
+  Dashboard gauges when it's upright.
+- Finding a signal among many: Live's list (every linear field of
+  Service 01 a car has) and the viewer's signal picker share one
+  filter. A text field matches names and units as typed (case
+  ignored); a "plotted only" switch; and groups as chips (engine, fuel
+  and air, oxygen sensors, temperatures, counters), which takes each
+  def's group from core, as its plot rank comes. The filter hides rows
+  from the list, never from the chart or a recording.
+- **Done when:** two recordings of the mock's pulls overlay aligned on
+  the pull's start, and an hour-long recording opens and scrubs within
+  a stated memory bound.
+
+### v0.3.8: in and out, and Python bindings
+
+- CSV import of another logger's timed signals through a column map,
+  with a fuzz target for its parser; CSV export of signals or frames
+  over a time range picked in the viewer.
+- Every export scrubbed of VINs, calibration IDs, serials and paths,
+  and a health report as one scrubbed export: trouble codes with their
+  descriptions and the freeze frame, the readiness summary,
+  identification with the VIN decoded, and key values.
+- The Log page's frames: a filter by the columns an engineer reads a
+  bus by (the ID, one or a list, a range or an ID and mask; the
+  length; the payload, a byte at a position or a masked hex sequence
+  such as `41 0C`; the flags; a time range), a per-ID view (each ID's
+  newest frame, count and rate, the bytes that changed highlighted),
+  an export of what the filter shows, and copied rows.
+- Python bindings over the C ABI, the replaceable-UI claim shown in a
+  second language.
+- **Done when:** a Python script opens SocketCAN, decodes PIDs and
+  prints the values, and an export of a recording passes the leak
+  check.
+
+### v0.3.9: conditions
+
+- One condition model in core, data rather than code, for triggered
+  logging (record while a condition holds, or a window around a link
+  fault), alerts (color, sound or a banner) and markers the viewer
+  shows.
+- Computed signals beside it, in a derived-signal stage in core that
+  keeps the UI on final display values: boost is intake manifold
+  pressure (PID 0x0B) minus barometric pressure (PID 0x33), both in
+  the `obd2` set.
 
 ### v0.4.0 and v0.5.0 (proposed)
 
-- **v0.4.0:** Python bindings over the C ABI; PCAP export and candump
-  import (a fuzz target for the candump parser); discovering which
-  ECUs answer and what they offer, which needs requests to more than
-  one ECU and listening to the whole bus first, with the simulated ECU
-  grown to several modules (engine, transmission, body) to test them
-  with no car. Done when a Python script opens SocketCAN, decodes PIDs
-  and prints the values.
+- **v0.4.0:** discovering which ECUs answer and what they offer,
+  driven from `havne-cli` and designed from what v0.3.6's car run
+  captured. It needs requests to more than one ECU and listening to the
+  whole bus first. The simulated car grows to several modules (engine,
+  transmission, body) to test it with no car. PCAP export and candump
+  import come with it, with a fuzz target for the candump parser. Done
+  when `havne-cli` lists every module that answers on the simulated
+  car, and on the test car what v0.3.6's capture showed.
 - **v0.5.0:** a plugin framework (ADR-0013's profile API made
   general); the pre-2008 buses (ISO 9141-2, KWP2000, J1850), through
   ELM327 and J2534.
@@ -536,7 +599,7 @@ week or more or a design that needs an ADR first.
 ### Vehicle coverage
 
 - **Custom derived channels (M).** Beyond the computed signals planned
-  for v0.3.6–v0.3.9: a user-facing expression per channel
+  for v0.3.9: a user-facing expression per channel
   (differences, unit conversions, smoothing). Stays in core, so the UI
   still gets final display values, and is the same
   data-describing-arithmetic shape ADR-0015 uses for requests.
@@ -547,7 +610,7 @@ week or more or a design that needs an ADR first.
   limited by the ECU's response time, with no per-frame GUI-thread
   cost. Requests already follow the replies
   ([ADR-0015](docs/adr/0015-request-engine.md)), and the frame log is
-  a fixed ring of plain rows, about 2 µs a frame at its cap. Core
+  a fixed ring of plain rows, about 2 us a frame at its cap. Core
   decodes on the worker and the bridge stages its values
   ([ADR-0024](docs/adr/0024-decode-on-the-worker.md)), so the GUI
   thread's cost per frame doesn't grow with the profile and values

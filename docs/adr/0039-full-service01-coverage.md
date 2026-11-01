@@ -1,6 +1,6 @@
 # ADR-0039: Full Service 01 coverage in one set, paced by rate classes
 
-- **Status:** Accepted. §1–§7 built on 2026-10-31 (the set, the rate
+- **Status:** Accepted. Sections 1-7 built on 2026-10-31 (the set, the rate
   classes, Live hiding what a car lacks, the fakes, imperial units),
   verified on the fakes; not yet on a car (BENCH prep #30). Appendix A
   built on 2026-10-31 (the decode's split and the engine's packing),
@@ -8,13 +8,13 @@
   the VX to come (BENCH prep #31).
 - **Date:** 2026-10-30.
 - **Builds on:** [ADR-0013](0013-protocol-profiles.md) (profiles chosen
-  by the URI), [ADR-0015](0015-request-engine.md) §1 (the rotation),
-  §4 (the probe) and its "still open" list, [ADR-0016](0016-signal-definition-layout.md)
+  by the URI), [ADR-0015](0015-request-engine.md) section 1 (the rotation),
+  section 4 (the probe) and its "still open" list, [ADR-0016](0016-signal-definition-layout.md)
   (the def's layout), [ADR-0017](0017-session-recording.md) (recordings
   keep the wire), [ADR-0024](0024-decode-on-the-worker.md) (decoding in
-  core, on the worker), [ADR-0037](0037-reading-trouble-codes.md) §4
+  core, on the worker), [ADR-0037](0037-reading-trouble-codes.md) section 4
   (the freeze frame decoded with `obd2`'s defs).
-- **Amends:** [ADR-0015](0015-request-engine.md) §1 and its "still
+- **Amends:** [ADR-0015](0015-request-engine.md) section 1 and its "still
   open" list, with dated notes: the rotation runs two rate classes, and
   a Service 01 request may carry several PIDs (Appendix A), whose reply
   matches by its first record's PID.
@@ -23,22 +23,22 @@
 
 The `obd2` set decodes ten Service 01 PIDs, each a single field.
 `tests/fixtures/obd2/service01.csv` holds J1979's whole Service 01
-table, one row per field: 174 PIDs, of which 92 are linear (raw ×
+table, one row per field: 174 PIDs, of which 92 are linear (raw x
 scale + offset), 130 fields between them; the rest are bitmaps (the
 probe's), bit fields, enumerations, the freeze frame's DTC, and
 layouts the sources leave open.
 
 **What the table rests on.** Its rows come from Wikipedia's table,
 each linear row checked against CSS Electronics' OBD2 DBC (v4.3). On
-2026-10-30 the 91 linear rows of PIDs 04–4E (67 PIDs) were checked
+2026-10-30 the 91 linear rows of PIDs 04-4E (67 PIDs) were checked
 against SAE J1979 (2002) itself, its Appendix B: every scale, offset,
-sign and range agrees. J1979 (2002) reserves 4F–FF, so the 39 linear
+sign and range agrees. J1979 (2002) reserves 4F-FF, so the 39 linear
 rows past 4E (25 PIDs) rest on the two secondary sources only. The
 check found two things the table doesn't carry:
 
-- PIDs 06–09 (the fuel trims) carry a second byte, banks 3 and 4, on
+- PIDs 06-09 (the fuel trims) carry a second byte, banks 3 and 4, on
   an engine that has them; the table gives each one byte.
-- PIDs 14–1B, 24–2B and 34–3B name a sensor by position, 1 to 8. Which
+- PIDs 14-1B, 24-2B and 34-3B name a sensor by position, 1 to 8. Which
   bank and sensor a position is depends on whether the ECU supports
   PID 13 (two banks of four) or 1D (four banks of two).
 
@@ -52,7 +52,7 @@ linear PIDs lie past 4E (55 56 59 62 63 67 68 8E A6).
 
 **What a PID costs.** The engine sends one request per PID per pass,
 two defs on one PID sharing it (`ecuio_engine_add` answers
-`duplicate`). On the test car it ran 26–28 requests a second
+`duplicate`). On the test car it ran 26-28 requests a second
 (ADR-0015's appendix), so one flat rotation refreshes each PID about
 every (kept PIDs / 27) seconds: the ten `obd2` signals about every
 0.4 s, the car's 43 linear PIDs about every 1.6 s. Engine speed every
@@ -71,7 +71,7 @@ knows which signals move fast avoids both.
 
 The `obd2` set holds a def for every linear field of the table, 130 in
 all. There is no second Service 01 profile. The probe drops what a car
-lacks (ADR-0015 §4), so a session asks only the PIDs the car has: 43
+lacks (ADR-0015 section 4), so a session asks only the PIDs the car has: 43
 on the test car.
 
 ### 2. Linear fields only
@@ -89,7 +89,7 @@ Each Service 01 request is **fast** or **slow**:
 - **Fast:** what a driver or a logged pull watches change within a
   second: 04 (load), 06 and 08 (short-term trims), 0A, 22, 23 and 59
   (fuel pressure), 0B (MAP), 0C (rpm), 0D (speed), 0E (timing), 10
-  (MAF), 11 (throttle), 24–2B and 34–3B (the wide-range sensors'
+  (MAF), 11 (throttle), 24-2B and 34-3B (the wide-range sensors'
   lambda), 44 (commanded lambda), 49 (pedal D). On the test car, 14 of
   its 43.
 - **Slow:** everything else: temperatures, barometric and evaporative
@@ -140,24 +140,24 @@ validator code.
 
 - **IDs:** one rule in the public `signal_sets.h` in place of a macro
   per field, `ECUIO_OBD2_PID_SIG_ID(pid, field) = 11000 + pid * 8 +
-  field` (field: the row's order within its PID, 0–4), so 11000–13047:
-  16-bit, clear of the mock's 1001–10001 and `uds-generic`'s 20000 and
-  up. The ten defs `obd2` has today keep their IDs (7001–7010) and
+  field` (field: the row's order within its PID, 0-4), so 11000-13047:
+  16-bit, clear of the mock's 1001-10001 and `uds-generic`'s 20000 and
+  up. The ten defs `obd2` has today keep their IDs (7001-7010) and
   names, so every existing recording decodes as before, the freeze
   frame's values keep their IDs, and the Dashboard's gauges, which
   name those IDs, are unchanged.
 - **Names are unique within the set, and fit the def's 31 bytes.**
   `signals.csv` keys each value by its name (`host_us,signal,value,unit`),
   and so do Live and the recordings' diff. The table repeats nine
-  names (24–2B and 34–3B, 32 and 54) and 27 run past 31 bytes, so the
+  names (24-2B and 34-3B, 32 and 54) and 27 run past 31 bytes, so the
   display names are written for the set, not copied: "O2 S1 lambda
   (V)" and "O2 S1 lambda (mA)", "Catalyst temp B1 S1", "Evap vapor
   pressure" and "Evap vapor pressure (wide)". A test checks both rules
   for every built-in set.
 - **Units** are the table's unit column, which already uses the sets'
   strings. The ones `kImperial` lacks get rows where a conversion is
-  usual (Pa to inH2O, L/h to gal/h, N·m to lb·ft); λ, V, mA, s, min, %
-  and ° stay as they are.
+  usual (Pa to inH2O, L/h to gal/h, `N·m` to `lb·ft`); `λ`, `V`, `mA`, `s`, `min`, `%`
+  and `°C` stay as they are.
 
 ### 5. Defs written by hand, checked against the table
 
@@ -196,6 +196,13 @@ stream --values` writes it as an `absent` line. The judgment is core's
 rather than the bridge's, so a program on the C ABI gets it too; it
 runs on the decode for a values callback, so a session with none
 judges nothing.
+
+> **Amended 2026-10-31:** the bitmaps' rule is core's too, as the
+> absent signals' is: `ecuio_session_get_unsupported_signals`
+> (`profile.h`) lists each def keyed `41 <PID>` whose PID its channel's
+> answered bitmaps leave out, with the absent signals' contract, and the
+> bridge hands Live those IDs. A range never answered still judges
+> nothing, and a rescan that finds a PID takes its defs off the list.
 
 ### 7. The fakes
 
@@ -239,13 +246,13 @@ the whole model and doesn't follow the chart's choices.
 
 ### 9. Out of this record
 
-- **Banks 3 and 4** of PIDs 06–09, and **bank and sensor names** from
+- **Banks 3 and 4** of PIDs 06-09, and **bank and sensor names** from
   PIDs 13 and 1D.
-- **The freeze frame** keeps its ADR-0037 §4 rules: the PIDs its
+- **The freeze frame** keeps its ADR-0037 section 4 rules: the PIDs its
   bitmap lists that the set defines, at most `ECUIO_DIAG_MAX_FREEZE`
   (16). A larger set lets it decode more of a frame's PIDs, up to that
   cap.
-- The bit-field, enumeration and complex PIDs (§2).
+- The bit-field, enumeration and complex PIDs (section 2).
 - **Signals no Service 01 PID carries:** transmission fluid and
   differential temperatures, oil pressure, knock retard. They are
   manufacturer DIDs (the roadmap's first manufacturer signal set), read
@@ -262,14 +269,14 @@ the whole model and doesn't follow the chart's choices.
   (Context).
 - **Rate classes in the def ABI now.** It lets outside profiles class
   their own defs, but grows the def struct and the validator for a
-  need no outside profile has. Deferred (§3).
+  need no outside profile has. Deferred (section 3).
 - **Periods instead of a ratio** (fast every pass, slow every 3 s).
   The share each class gets would then depend on the ECU's pace: a
   slow ECU spends its time on slow PIDs. Rejected.
 - **Grow the set without classes.** Every signal at the slow pace on
   a car with many PIDs. Rejected.
 - **Generate the defs from the CSV** at build time. It removes the
-  test's independence (§5). Rejected.
+  test's independence (section 5). Rejected.
 
 ## Consequences
 
@@ -294,10 +301,10 @@ the whole model and doesn't follow the chart's choices.
 
 ## Appendix A: several PIDs per request
 
-Decided with §§1–7 and built after them, once a car run has measured
+Decided with sections 1-7 and built after them, once a car run has measured
 the class rule, so packing is measured against it.
 
-**What J1979 allows** (2002, §6.1.2.3–6.1.2.4, Tables 123 and 124): a
+**What J1979 allows** (2002, section 6.1.2.3-6.1.2.4, Tables 123 and 124): a
 Service 01 request carries one to six PIDs; the ECU answers with a
 record (`PID`, its data bytes) for each it supports, in any order;
 PIDs it doesn't support are left out, with no negative reply; an ECU
@@ -437,4 +444,4 @@ Considered beside Appendix A, none decided:
 - **Demand-driven classes** (what's on screen or plotted goes fast).
   It couples the engine to the UI, and a recording wants every signal
   at a known pace whatever the screen shows. Not planned.
-- **Rate classes per def in the ABI** (§3), for outside profiles.
+- **Rate classes per def in the ABI** (section 3), for outside profiles.

@@ -9,7 +9,7 @@
   (the CLI's lines); [ADR-0029](0029-android-background-sessions.md)
   and its appendix "the phone run, and a wake lock" (the CPU's sleep
   joined the values on either side); [ADR-0032](0032-socketcan-listening.md)
-  §5 (the kernel's receive time, anchored to the session).
+  section 5 (the kernel's receive time, anchored to the session).
 
 ## Context
 
@@ -40,7 +40,7 @@ activity log's wall-clock column, read against its session seconds,
 showed the hole. Data that weren't read were drawn and recorded as if
 they had been.
 
-Since then, ADR-0029 §2's wake lock keeps the CPU awake through an
+Since then, ADR-0029 section 2's wake lock keeps the CPU awake through an
 adapter session. A sleep still happens:
 - under `mock://` and `replay://` on a phone, which hold no wake lock
   by design
@@ -72,9 +72,9 @@ ECUIO_API uint64_t ecuio_clock_slept_us(void);
 
 | Platform | `ecuio_clock_us` | `ecuio_clock_slept_us` |
 |---|---|---|
-| Linux, Android | `CLOCK_BOOTTIME` | `CLOCK_BOOTTIME` − `CLOCK_MONOTONIC` |
-| Windows | `QueryPerformanceCounter` | `QueryInterruptTimePrecise` − `QueryUnbiasedInterruptTimePrecise` |
-| macOS, iOS | `clock_gettime_nsec_np(CLOCK_MONOTONIC_RAW)` | that − `CLOCK_UPTIME_RAW` |
+| Linux, Android | `CLOCK_BOOTTIME` | `CLOCK_BOOTTIME` - `CLOCK_MONOTONIC` |
+| Windows | `QueryPerformanceCounter` | `QueryInterruptTimePrecise` - `QueryUnbiasedInterruptTimePrecise` |
+| macOS, iOS | `clock_gettime_nsec_np(CLOCK_MONOTONIC_RAW)` | that - `CLOCK_UPTIME_RAW` |
 
 Each platform's clock is named outright rather than left to the
 standard library's choice, so the property rests on documented OS
@@ -135,7 +135,7 @@ wire: nothing answered while the machine slept.
 
 `socketcan_clock_step` lets the host's delta stand in when the kernel's
 delta would put a frame more than a second past the moment it's read
-(ADR-0032 §5). The kernel stamps on `CLOCK_REALTIME`, which counts a
+(ADR-0032 section 5). The kernel stamps on `CLOCK_REALTIME`, which counts a
 sleep. With a host clock that stopped, the first frame after a wake
 fell back to the host's delta and lost the gap. With this clock, the
 two deltas agree, and the kernel's time stands. `j2534_clock_step` is
@@ -231,4 +231,4 @@ build of `27592cf` on the test phone under `mock://`:
   674.46 s; about 91 s on a clock that stops in sleep).
 - **A freeze with a sleep inside it** is one gap, longer than its
   "Asleep" line, which counts the sleep alone (357.5 s with 342.1 s
-  asleep). §6's line reports the machine's sleep, not the app's freeze.
+  asleep). Section 6's line reports the machine's sleep, not the app's freeze.

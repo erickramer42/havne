@@ -546,7 +546,7 @@ TEST(SocketCanTest, TheClockTakesTheHostsTimeThenTheKernelsSpacing)
 }
 
 /* The kernel's wall clock counts a sleep, and so does the host's
- * (ADR-0033 §5): the two deltas agree, so the gap stands. A host clock
+ * (ADR-0033 section 5): the two deltas agree, so the gap stands. A host clock
  * that stopped in the sleep would put the kernel's delta past the read
  * and lose the gap to its own */
 TEST(SocketCanTest, ASleepKeepsItsGap)

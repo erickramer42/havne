@@ -1,6 +1,6 @@
 // File/layer: app/qml/RingGauge.qml | Qt6 Quick + Shapes, UI layer
 // Testing: manual smoke: DashboardPage under mock://demo; coolant
-//          crosses cold → normal during warm-up; legible at 140 px
+//          crosses cold -> normal during warm-up; legible at 140 px
 
 import QtQuick
 import QtQuick.Shapes

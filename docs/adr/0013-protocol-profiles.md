@@ -1,8 +1,8 @@
 # ADR-0013: Protocol profiles, selection by URI, capability by probe
 
 - **Status:** Accepted. [ADR-0015](0015-request-engine.md) supersedes
-  §1's placement of request correlation in the profile and §5's
-  callback table as the plugin seam, and amends §3's probe semantics.
+  section 1's placement of request correlation in the profile and section 5's
+  callback table as the plugin seam, and amends section 3's probe semantics.
 - **Date:** 2026-10-17
 - **Supersedes:** none. Extends [ADR-0012](0012-j2534-transport-adoption.md) (moves the request loop out of the transport) and begins closing Known Issues #15/#21 in STATUS.md.
 
@@ -21,13 +21,13 @@ Additionally, the request loop's placement is wrong: it lives in the J2534 trans
 1. **A profile is a core-resident object that owns three concerns:** what to request, how to correlate and interpret responses, and which signal set describes the vehicle. The transport retains only byte movement; the bridge reads the *active* set over the ABI instead of choosing one.
 
 2. **Profile selection is static, declared in the URI.**
-   - `mock://` → profile `mock` (the existing mock signal set).
-   - `j2534://` → profile `obd2` by default.
+   - `mock://` to profile `mock` (the existing mock signal set).
+   - `j2534://` to profile `obd2` by default.
    - `?profile=<name>` overrides the default. `?profile=raw` selects the null profile (no requests, no signal set; Log page only) and is today's behavior promoted to a named thing.
    - Selection rules join the existing strict grammar: lowercase, unknown names rejected at `ecuio_session_create` before any DLL loads (`ECUIO_ERR_NO_TRANSPORT`), last occurrence wins. The URI must fully determine session behavior; every bench sheet records a URI, and it must be complete provenance.
    - Profiles are string-keyed in a registry, not an ABI enum, so v0.5.0 out-of-tree manufacturer plugins register names without ABI churn.
 
-3. **Probing is a phase inside a profile, never a selection mechanism.** The `obd2` profile gains (in its v2) a post-connect probe: the PID 0x00→0x20→0x40… bitmask chain, driven through the profile's own request/response callbacks. Probe failure degrades to the static signal set; it never fails the session. Selection is never inferred from what the vehicle says, because the things this project ultimately wants to select (Mazda/Honda UDS) cannot be announced. **What you connect to is a decision; what it supports is a discovery.**
+3. **Probing is a phase inside a profile, never a selection mechanism.** The `obd2` profile gains (in its v2) a post-connect probe: the PID 0x00 to 0x20 to 0x40... bitmask chain, driven through the profile's own request/response callbacks. Probe failure degrades to the static signal set; it never fails the session. Selection is never inferred from what the vehicle says, because the things this project ultimately wants to select (Mazda/Honda UDS) cannot be announced. **What you connect to is a decision; what it supports is a discovery.**
 
 4. **Multi-responder is a first-class part of the contract.** A profile declares a list of channels:
 
@@ -82,7 +82,7 @@ Additionally, the request loop's placement is wrong: it lives in the J2534 trans
 - The channel-decl list is the one surface a plugin can request filters through; it must be bounded and validated at registration (plugins are eventually native code selected by name from a folder: opt-in, like all tuner software, but the blast radius is the filter table, not the process).
 - **The pre-2008 fleet needs transport-protocol work below this ADR.**
   Target-era cars split cleanly: 2008+ is CAN (ISO 15765 / UDS) and
-  this architecture serves it directly; 1996–2007 is OBD-II over
+  this architecture serves it directly; 1996-2007 is OBD-II over
   legacy buses: ISO 9141-2/KWP2000 (Mazda NB/late NA, early Mazda
   3/6, pre-2008 Ford/GM), J1850 VPW (GM), J1850 PWM (Ford): none of
   which this transport connects. Legacy-bus support is its own
@@ -95,10 +95,10 @@ Additionally, the request loop's placement is wrong: it lives in the J2534 trans
   anywhere; `raw` stays valid on every protocol, which is its job.
 - **Connect-time protocol auto-detection is a possible future
   transport feature, not a profile-selection mechanism.** Real scan
-  tools auto-detect which of the five OBD-II flavors a 1996–2007 car
+  tools auto-detect which of the five OBD-II flavors a 1996-2007 car
   speaks (`?proto=auto`-style). That detection is transport-layer
   negotiation and is legitimately detectable: unlike profiles,
-  which this ADR keeps statically selected (§3). The two kinds of
+  which this ADR keeps statically selected (section 3). The two kinds of
   probing must never be conflated: the vehicle answers an
   OBD-II-flavor query; it cannot announce which profile to use.
 - Everything here remains read-only telemetry. Profiles that write (session control, security access) are v0.4 scope and subject to the regulatory posture in DISCLAIMER.md.
@@ -108,7 +108,7 @@ Additionally, the request loop's placement is wrong: it lives in the J2534 trans
 ## Appendix: slice 2 implementation notes (2026-10-18)
 
 **Status:** implemented; HARNESS-verified
-Extends §6's `obd2` v1 bullet with the concrete mechanisms slice 2
+Extends section 6's `obd2` v1 bullet with the concrete mechanisms slice 2
 chose, and records what was learned during implementation. The
 decision text above is unchanged: this appendix is the
 implementation record.
@@ -121,8 +121,8 @@ implementation record.
 >   offset 0 (`mux_offset == 0`).
 > - Requests are `[4-byte ID][01][PID]` sent with `ISO15765_FRAME_PAD`.
 > - The fake answers `[rx ID][41][PID][data]`.
-> - Coolant and intake-air temperature are `UINT8` with a −40 offset
->   (J1979: unsigned A − 40).
+> - Coolant and intake-air temperature are `UINT8` with a -40 offset
+>   (J1979: unsigned A - 40).
 >
 > The slice-2 text below is kept as the record of what slice 2
 > shipped. Where it disagrees with this note, the note and the code are
@@ -158,7 +158,7 @@ up empty and the worker runs `?poll=` or passive.
 > keeps its own check for the enrolment shape.
 
 > **Amended 2026-10-22 ([ADR-0016](0016-signal-definition-layout.md)
-> §4):** one helper, `ecuio_mode01_pid` in `pid_scheduler.h`, holds
+> section 4):** one helper, `ecuio_mode01_pid` in `pid_scheduler.h`, holds
 > the enrolment test: a 2-byte key at offset 0 whose first byte is
 > `0x41`, with the PID in the low byte. `ecuio_sched_from_set` had
 > checked the length and offset but not the `0x41`, so another
@@ -223,7 +223,7 @@ Enforcement point: `j2534_start` checks `sched_mode && rx_id == 0`
 and returns `QT_ERR_NO_TRANSPORT` BEFORE connecting the channel. It
 lives at start rather than in `parse_query` because the trigger is
 the profile, not a URI token. The profile-declares-channel
-refinement (§4) will let `obd2` supply the 7E0/7E8 defaults itself;
+refinement (section 4) will let `obd2` supply the 7E0/7E8 defaults itself;
 this check then becomes the backstop for a user override that did
 not break it.
 
@@ -262,14 +262,14 @@ are 2-byte big-endian; all others are single-byte.
 
 > **Amended 2026-10-21:** the set adds index 8, PID 0x10 MAF (2 bytes,
 > BE, `0.01` g/s), and index 9, PID 0x5F Trans Fluid Temp (1 byte,
-> −40, uint8). Both fit the v1 shapes above, so the decoder needed no
+> -40, uint8). Both fit the v1 shapes above, so the decoder needed no
 > extension. At one request per 100 ms, each PID in an N-PID set
-> refreshes every N × 100 ms, so every PID added slows the rest; at
+> refreshes every N x 100 ms, so every PID added slows the rest; at
 > 10 PIDs that's 1 s. `kObd2Defs` in `core/src/obd2_signal_sets.cpp`
 > is the source of truth for the current set.
 >
 > **Corrected 2026-10-21:** index 9 is PID 0x5C, engine oil
-> temperature (1 byte, −40, uint8). PID 0x5F is the bit-encoded
+> temperature (1 byte, -40, uint8). PID 0x5F is the bit-encoded
 > "emission requirements" byte, and transmission fluid temperature
 > isn't a standard Mode-01 PID (it's manufacturer-specific, usually
 > Mode 22). The 0x5F def was written from memory, and the fake's
@@ -332,13 +332,13 @@ the cycle.
 ## Appendix: slice 3 implementation notes (channel declarations) (2026-10-19)
 
 **Status:** implemented; HARNESS-verified
-Implements §4 for the `obd2` v1 set. The decision text above is
+Implements section 4 for the `obd2` v1 set. The decision text above is
 unchanged: this appendix is the implementation record.
 
 ### Shipped ABI shape
 
 `QttuneChannelDecl` (signals.h) is `{ uint32_t rx_id; uint32_t tx_id; }`
-(the §4 sketch used `unsigned long`); the shipped POD uses
+(the section 4 sketch used `unsigned long`); the shipped POD uses
 fixed-width types per the C-ABI rule (append-only, POD-only growth).
 `QttuneSignalSet` gains trailing `channel_count`/`channels` and the
 obd2 set bumps its version to 2. Capacity is `QTTUNE_MAX_CHANNELS`
@@ -379,7 +379,7 @@ supplies 7E0/7E8 itself.
 mid-loop failure unwinds already-registered ones so no partial filter
 state survives a failed start. Detach stops every channel's filter
 best-effort before disconnect (ADR-0012's vendor-compat priority).
-The worker routes scheduler requests by PID → def message_id →
+The worker routes scheduler requests by PID to def message_id to
 channel index (`rx_for_pid`), keeping `pid_scheduler.h` profile-
 agnostic; `pump_one` matches the 4-byte header against every
 channel's rx, stripping and stamping on hit. Non-matching frames
@@ -392,6 +392,13 @@ are dropped but still consume drain budget (bounds loop time).
 > listed first, would have taken that PID's requests to its own
 > channel. `J2534AdoptionTest.Mode01RequestRoutesPastOtherServiceKeys`
 > pins it.
+
+> **Amended 2026-10-31:** the request engine
+> ([ADR-0015](0015-request-engine.md)) took over the routing: each
+> request goes to the channel its def's message ID names, and
+> `rx_for_pid` and its test went with the scheduler.
+> `RequestEngineTest.RequestsAreKeptOncePerChannel` pins the rule, and
+> `J2534AdoptionTest.RequestsGoToTheirDefsChannel` the worker's writes.
 
 The worker's error/backoff state moved from struct members to
 worker-local variables as part of the rework.

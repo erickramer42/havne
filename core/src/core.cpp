@@ -101,7 +101,7 @@ namespace {
     }
 
     /* The most text values one frame can decode to against set
-     * (ADR-0024 §4). On one message ID, every unkeyed text def matches
+     * (ADR-0024 section 4). On one message ID, every unkeyed text def matches
      * every frame; of the keyed ones, one frame holds one key of each
      * shape (offset and length), so each shape adds its largest group
      * sharing one key. The answer is the largest such total over the
@@ -237,7 +237,7 @@ namespace {
         }
     }
 
-    /* ADR-0039 §6: def i's decode of a frame its key matched, for
+    /* ADR-0039 section 6: def i's decode of a frame its key matched, for
      * ecuio_session_get_absent_signals: carried, or one more frame too
      * short for it (saturating at the threshold). Other failures say
      * nothing about the reply's length. */
@@ -915,7 +915,7 @@ ecuio_status_t ecuio_session_create(
      * and the worker both run after this store. */
     s->active_signal_set = profile_set;
 
-    /* The decode's buffers (ADR-0024 §4, §6), sized once: the set never
+    /* The decode's buffers (ADR-0024 section 4, section 6), sized once: the set never
      * changes after this */
     if (profile_set != nullptr && profile_set->defs != nullptr &&
         profile_set->count > 0) {

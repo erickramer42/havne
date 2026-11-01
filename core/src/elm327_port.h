@@ -2,12 +2,12 @@
 // Testing: HARNESS: Elm327PortTest (test_elm327, POSIX): the termios
 //          port over a pseudo-terminal, its read timeouts and its end
 //          when the far side closes, and a whole session through it;
-//          the Win32 port is verified at BENCH (ADR-0026 §8)
+//          the Win32 port is verified at BENCH (ADR-0026 section 8)
 //
 // The OS's serial ports behind ecuio_elm327_port_ops_t (internal.h):
 // CreateFileW on \\.\COMn on Windows, open and termios elsewhere. A
 // paired Bluetooth SPP adapter is a serial port on all three desktop
-// systems, so this covers USB and classic Bluetooth alike (ADR-0026 §1).
+// systems, so this covers USB and classic Bluetooth alike (ADR-0026 section 1).
 // A WiFi adapter's socket is elm327_tcp.h's, reached through the same
 // opener.
 

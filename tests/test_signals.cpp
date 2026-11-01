@@ -47,7 +47,7 @@ TEST_F(SignalDecodeTest, ValidInt8WithSignExtension) {
     strncpy(signal.unit, "°C", sizeof(signal.unit));
     signal.decimal_places = 0;
     
-    uint8_t frame[8] = {0x00, 0xFF, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}; /* -1 °C after offset */
+    uint8_t frame[8] = {0x00, 0xFF, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}; /* -1 deg C after offset */
     double value = 0.0;
     
     int result = ecuio_decode_signal(&signal, frame, 8, &value);
@@ -195,14 +195,14 @@ TEST(SignalsTest, MockSetDecodesReasonably) {
     const ecuio_signal_set_t* set = ecuio_mock_signal_set();
     uint8_t frame[ECUIO_MOCK_TELEMETRY_PAYLOAD_LEN] = {
                          0xE8, 0x03, // RPM raw 1000
-                         0x64,       // Coolant raw 100 → 60°C
-                         0x3C,       // Speed raw 60 → 60 km/h
-                         0x80,       // Throttle raw 128 → 50.2%
-                         0x74,       // IAT raw 116 → 76°C
-                         0xCD,       // Load raw 0xCD → 80.4%
-                         0x84, 0x1D, // MAF raw 0x1D84 = 7556 → 75.56 g/s
-                         0x78,       // Oil raw 120 → 80°C
-                         0x14, 0x6E};// Lambda raw 0x6E14 = 28180 → 0.86
+                         0x64,       // Coolant raw 100 -> 60 deg C
+                         0x3C,       // Speed raw 60 -> 60 km/h
+                         0x80,       // Throttle raw 128 -> 50.2%
+                         0x74,       // IAT raw 116 -> 76 deg C
+                         0xCD,       // Load raw 0xCD -> 80.4%
+                         0x84, 0x1D, // MAF raw 0x1D84 = 7556 -> 75.56 g/s
+                         0x78,       // Oil raw 120 -> 80 deg C
+                         0x14, 0x6E};// Lambda raw 0x6E14 = 28180 -> 0.86
 
     for (uint32_t i = 0; i < set->count; ++i) {
         double val = 0.0;

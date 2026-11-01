@@ -180,7 +180,7 @@ Page {
             Layout.minimumHeight: oneRow
             clip: true
             boundsBehavior: Flickable.StopAtBounds
-            // The rows whose PID no ECU marked unsupported (ADR-0039 §6)
+            // The rows whose PID no ECU marked unsupported (ADR-0039 section 6)
             model: Bridge.liveSignalModel
 
             ScrollBar.vertical: ScrollBar {

@@ -4,7 +4,7 @@
 //          label's rule and its defaults, each change returning a new
 //          document and leaving the one it was given alone, a connection
 //          and plotted signals kept for adapter sessions only, and each
-//          row of §4's table with its log line.
+//          row of section 4's table with its log line.
 
 import QtQuick
 import QtTest
@@ -137,7 +137,7 @@ TestCase {
         compare(plotting.unplotted, ["RPM"])
     }
 
-    // ADR-0027 §4, row by row
+    // ADR-0027 section 4, row by row
     function test_theVinKeySettlesTheVehicle() {
         let r = VehicleBook.recognize(book(), "key-a", "elm327://COM6")
         compare(r.outcome, "same")

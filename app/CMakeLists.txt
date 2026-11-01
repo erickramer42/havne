@@ -79,7 +79,7 @@ target_link_libraries(app_ui PUBLIC
     ecuio-core
 )
 app_enable_warnings(app_ui)
-# The phone's Bluetooth (ADR-0028 §2): the links behind core's app-fed
+# The phone's Bluetooth (ADR-0028 section 2): the links behind core's app-fed
 # streams, on Android only, so no desktop build ships it unverified.
 # Elsewhere the Bluetooth singleton lists nothing.
 if(ANDROID)
@@ -88,7 +88,7 @@ if(ANDROID)
     target_link_libraries(app_ui PUBLIC Qt6::Bluetooth)
     target_compile_definitions(app_ui PUBLIC APP_BLUETOOTH)
     # The foreground service held while an adapter session is up
-    # (ADR-0029 §2; its Java half is in android/src)
+    # (ADR-0029 section 2; its Java half is in android/src)
     target_sources(app_ui PRIVATE androidsession.cpp androidsession.h)
 endif()
 # MSVC's C4702 (unreachable code) fires inside Qt's inline headers, as
@@ -159,7 +159,7 @@ if(IOS)
         MACOSX_BUNDLE_INFO_PLIST "${CMAKE_CURRENT_SOURCE_DIR}/ios/Info.plist.in")
 endif()
 # Core's TCP socket (elm327://<address>) needs INTERNET: declared here,
-# not left to the permissions Qt adds by default (ADR-0028 §2).
+# not left to the permissions Qt adds by default (ADR-0028 section 2).
 # CI's android-build checks the merged manifest for it.
 # Bluetooth needs CONNECT (a paired adapter, the paired list) and SCAN
 # (BLE), the scan declared never for location. Android 12 (API 31) is the
@@ -171,7 +171,7 @@ if(ANDROID)
     qt_add_android_permission(havne NAME android.permission.BLUETOOTH_CONNECT)
     qt_add_android_permission(havne NAME android.permission.BLUETOOTH_SCAN
         ATTRIBUTES usesPermissionFlags neverForLocation)
-    # The session's foreground service (ADR-0029 §2), type connectedDevice:
+    # The session's foreground service (ADR-0029 section 2), type connectedDevice:
     # its two permissions, CHANGE_NETWORK_STATE so a WiFi adapter's session
     # qualifies without Bluetooth granted, and its notification
     qt_add_android_permission(havne NAME android.permission.FOREGROUND_SERVICE)
@@ -232,7 +232,7 @@ if(WIN32 AND TARGET ecuio-j2534-surrogate)
     )
 endif()
 
-# havne-cli ships beside havne.exe (ADR-0031 §7), where it finds both
+# havne-cli ships beside havne.exe (ADR-0031 section 7), where it finds both
 # surrogates, and stage.ps1 packs the folder
 if(WIN32 AND TARGET havne-cli)
     add_dependencies(havne havne-cli)

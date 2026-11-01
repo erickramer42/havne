@@ -3,7 +3,7 @@
 //          reads the platform's clock); BENCH: a real sleep
 //          (docs/bench-sessions/bench-prep.md, BENCH prep #27)
 //
-// The host clock session time runs on (ADR-0033 §1). Each platform's
+// The host clock session time runs on (ADR-0033 section 1). Each platform's
 // clock is named outright rather than left to steady_clock's choice, so
 // counting sleep rests on documented OS behavior: CLOCK_BOOTTIME on
 // Linux and Android, QueryPerformanceCounter on Windows ("including the

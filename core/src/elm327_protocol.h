@@ -1,5 +1,5 @@
 // File/layer: core/src/elm327_protocol.h | internal, not ABI-exported;
-//             the ELM327 wire (ADR-0026 §3), for the ELM327 transport
+//             the ELM327 wire (ADR-0026 section 3), for the ELM327 transport
 // C++17, Qt-free, no platform headers. No I/O, no clock, no allocation.
 // Testing: UNIT: Elm327ProtocolTest (test_elm327): canned transcripts
 //     chunked every way, every line kind, ISO-TP reassembly, the values,
@@ -174,7 +174,7 @@ inline bool elm327_parse_can(const char* norm, size_t n, bool ext29,
 }
 
 /* ---- Line kinds -----------------------------------------------------
- * What a line in a request's reply is (ADR-0026 §6 maps each to the
+ * What a line in a request's reply is (ADR-0026 section 6 maps each to the
  * link). The words are matched without spaces and in any case, so a
  * clone that prints NODATA under AT S0 reads as an ELM327's NO DATA. */
 enum class elm327_line : uint8_t {
@@ -497,7 +497,7 @@ inline void elm327_one_frame_pids_for(const ecuio_signal_set_t* set,
     }
 }
 
-/* The response-count digit for a request (ADR-0026 §3; the datasheet
+/* The response-count digit for a request (ADR-0026 section 3; the datasheet
  * from v1.3, which counts lines): 1 for a Service 01 request to a
  * physical ID whose PID is in one, so one ECU answers in one line; 0, no
  * digit, otherwise. A digit too small ends the reply early and loses a
@@ -645,7 +645,7 @@ inline size_t elm327_format_receive_filter(const uint32_t* ids, size_t count,
     return 2;
 }
 
-/* The protocol for the addressing mode and the CAN rate (ADR-0026 §2):
+/* The protocol for the addressing mode and the CAN rate (ADR-0026 section 2):
  * '6' 11-bit 500 kbit/s, '7' 29-bit 500, '8' 11-bit 250, '9' 29-bit 250;
  * 0 for any other rate. */
 inline char elm327_protocol_for(bool ext29, unsigned long baud)

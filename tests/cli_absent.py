@@ -2,7 +2,7 @@
 # Testing: HARNESS (ctest CliReplayTest.AnAbsentFieldIsNamed): havne-cli
 #          stream --values writes an absent line naming the signals the
 #          session's frames come without (ecuio_session_get_absent_signals,
-#          ADR-0039 §6)
+#          ADR-0039 section 6)
 #
 #   python tests/cli_absent.py <havne-cli>
 #

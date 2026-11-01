@@ -13,7 +13,7 @@
 // profile before it opens anything: the request keys' values, the
 // channels, the requests (request_engine.h), and the reports its worker
 // publishes. One place, so a run sheet's query means the same on either
-// scheme (ADR-0026 §2).
+// scheme (ADR-0026 section 2).
 
 #ifndef ECUIO_REQUEST_SETUP_H
 #define ECUIO_REQUEST_SETUP_H
@@ -107,7 +107,7 @@ inline bool ecuio_parse_number(const char* s, size_t len,
  *   poll     PID 0x00..0xFF: one Service 01 request, repeated as the
  *            whole rotation (0x00 reads the supported-PIDs bitmap);
  *            replaces the profile's requests
- *   probe    0 or 1: the supported-PID probe (ADR-0015 §4), on by
+ *   probe    0 or 1: the supported-PID probe (ADR-0015 section 4), on by
  *            default
  *   identify 0 or 1: vehicle identification (ADR-0021), on by default
  *            with a set's requests

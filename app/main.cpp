@@ -85,7 +85,7 @@ static void darkenAndroidWindow()
 
 #ifdef Q_OS_ANDROID
 // No drawing while the app isn't active. With the event loops kept running
-// in the background (ADR-0029 §1), Qt 6.12's Android plugin, handling the
+// in the background (ADR-0029 section 1), Qt 6.12's Android plugin, handling the
 // screen going off, destroys the window's surface and then still delivers
 // an expose that draws; the draw waits for Android to make a new surface,
 // which it doesn't with the screen off, and the thread that draws stops
@@ -171,7 +171,7 @@ int main(int argc, char *argv[])
     BridgeSingleton::instance = &bridge;
     bluetooth.attachTo(&bridge);
 #ifdef Q_OS_ANDROID
-    // The foreground service while an adapter session is up (ADR-0029 §2)
+    // The foreground service while an adapter session is up (ADR-0029 section 2)
     AndroidSession androidSession(&bridge);
 #endif
 

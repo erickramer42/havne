@@ -45,7 +45,7 @@
  * physical addressing expects, and walks its own rotation, so channels
  * progress independently.
  *
- * Each channel's rotation runs two rate classes (ADR-0039 §3): every
+ * Each channel's rotation runs two rate classes (ADR-0039 section 3): every
  * request is fast or slow, and the channel sends
  * ECUIO_ENGINE_FAST_PER_SLOW fast ones, then one slow one, each class in
  * table order from its own cursor. A class with nothing to send gives
@@ -53,7 +53,7 @@
  * Requests are fast until ecuio_engine_classify says otherwise; the
  * driver classifies only the obd2 set's (obd2_rates.h).
  *
- * The probe (§4) runs on the same pacing. Each channel with Service 01
+ * The probe (section 4) runs on the same pacing. Each channel with Service 01
  * requests first walks the supported-PID chain (01 00, then 01 20 while
  * each bitmap's last bit says the next exists, up to 01 E0), one request
  * at a time through the channel's one-shot slot, and its rotation starts
@@ -124,7 +124,7 @@ constexpr uint8_t ECUIO_NRC_SECURITY_ACCESS_DENIED = 0x33;
 constexpr uint8_t ECUIO_NRC_RESPONSE_PENDING = 0x78;
 constexpr uint8_t ECUIO_NRC_NOT_IN_ACTIVE_SESSION = 0x7F;
 
-/* Fast requests a channel sends for each slow one (ADR-0039 §3). */
+/* Fast requests a channel sends for each slow one (ADR-0039 section 3). */
 constexpr uint32_t ECUIO_ENGINE_FAST_PER_SLOW = 2;
 
 /* ecuio_engine_due's answers besides a table index. */
@@ -190,7 +190,7 @@ static_assert(ECUIO_IDENT_COUNT <= ECUIO_IDENTITY_MAX_ITEMS,
  * the item count, or after 62 <DID high> <DID low>. */
 constexpr uint16_t ECUIO_IDENT_DATA_OFFSET = 3;
 
-/* What diagnostics asks first, in this order (ADR-0037 §2); the freeze
+/* What diagnostics asks first, in this order (ADR-0037 section 2); the freeze
  * frame's code (02 02 00) and values (02 <pid> 00) join the list as the
  * answers call for them. */
 constexpr uint8_t ECUIO_DIAG_FIRST[][4] = {
@@ -226,7 +226,7 @@ struct ecuio_request {
     uint8_t channel;
     uint8_t dropped;    /* 0 in the rotation, else why not (ECUIO_DROP_*) */
     uint8_t nrc;        /* the negative reply's code that dropped it */
-    uint8_t slow;       /* 1: the slow class, else fast (ADR-0039 §3) */
+    uint8_t slow;       /* 1: the slow class, else fast (ADR-0039 section 3) */
     uint8_t reply_len;  /* a pack's reply, its records' lengths added; 0
                            for every other request */
 };
@@ -314,14 +314,14 @@ struct ecuio_request_engine {
     uint32_t count = 0;
     ecuio_engine_channel chans[ECUIO_MAX_CHANNELS] = {};
     uint32_t chan_count = 0;
-    bool probe = false;         /* §4 on: walks run, explicit answers drop */
+    bool probe = false;         /* section 4 on: walks run, explicit answers drop */
     int64_t walk_until_us = 0;  /* the walk's budget ends */
     ecuio_scan_entry scan[ECUIO_ENGINE_SCAN_MAX] = {};
     uint32_t scan_count = 0;
-    /* The obd2 set, whose defs decode the freeze frame (ADR-0037 §4);
+    /* The obd2 set, whose defs decode the freeze frame (ADR-0037 section 4);
      * set by ecuio_engine_diagnose */
     const ecuio_signal_set_t* diag_set = nullptr;
-    /* ADR-0039 §3: PID pairs (keep, demote), two bytes each, that can
+    /* ADR-0039 section 3: PID pairs (keep, demote), two bytes each, that can
      * read one sensor; set by ecuio_engine_set_duplicates */
     const uint8_t* duplicates = nullptr;
     uint32_t duplicate_count = 0;
@@ -365,7 +365,7 @@ enum class ecuio_reply {
 
 enum class ecuio_engine_add_result { added, duplicate, refused, full };
 
-/* §3: the services a request may carry. 0x01 (current data), 0x02 (the
+/* Section 3: the services a request may carry. 0x01 (current data), 0x02 (the
  * freeze frame), 0x03, 0x07 and 0x0A (stored, pending and permanent
  * trouble codes; ADR-0037), 0x09 (vehicle information) and 0x22
  * (ReadDataByIdentifier); nothing that clears codes, changes a session,
@@ -407,7 +407,7 @@ static_assert(ecuio_engine_service_allowed(ECUIO_CLEAR_SPEED_REQUEST[0]) &&
               "a clear reads the engine speed, then sends 04, which nothing "
               "else may");
 
-/* §4: what a negative reply's code says of its request, as
+/* Section 4: what a negative reply's code says of its request, as
  * ECUIO_DROP_*: NOT_SUPPORTED for 0x12 (the first vehicle's answer to an
  * unsupported PID) and 0x31; SERVICE for 0x11; ACCESS for 0x33 and 0x7F,
  * since the engine never unlocks or changes the session; 0 for any code
@@ -428,7 +428,7 @@ inline uint8_t ecuio_engine_drop_reason(uint8_t nrc)
     }
 }
 
-/* §2: the request whose positive reply carries a def's value. The def's
+/* Section 2: the request whose positive reply carries a def's value. The def's
  * mux key sits at payload offset 0 and opens that reply: a 2-byte
  * 41 <PID> asks for 01 <PID>, a 3-byte 62 <DID> for 22 <DID>. Any other
  * key requests nothing, though it still decodes; Service 09 values are
@@ -469,7 +469,7 @@ inline void ecuio_engine_init(ecuio_request_engine* e, uint32_t chan_count)
 
 /* Adds a request to channel's rotation, after the ones already there.
  * The same request on the same channel is kept once. Refused: a service
- * §3 doesn't allow, a length other than 2 or 3, a channel past the
+ * section 3 doesn't allow, a length other than 2 or 3, a channel past the
  * table. */
 inline ecuio_engine_add_result ecuio_engine_add(ecuio_request_engine* e,
                                                 uint32_t channel,
@@ -516,7 +516,7 @@ inline uint32_t ecuio_engine_channel_for(const ecuio_signal_def_t* d,
     return 0;
 }
 
-/* §2: enrols every request a set's defs derive, in def order, one per
+/* Section 2: enrols every request a set's defs derive, in def order, one per
  * distinct request and channel, so several defs read from one reply
  * cost one request. rx_ids holds each channel's receive ID. True when
  * every request fit; otherwise the table holds the first
@@ -549,7 +549,7 @@ inline bool ecuio_engine_derive(ecuio_request_engine* e,
     return true;
 }
 
-/* ADR-0039 §3: puts every Service 01 request whose PID fast() turns
+/* ADR-0039 section 3: puts every Service 01 request whose PID fast() turns
  * down in the slow class. Other services, and a table never classified,
  * stay fast. */
 inline void ecuio_engine_classify(ecuio_request_engine* e,
@@ -562,7 +562,7 @@ inline void ecuio_engine_classify(ecuio_request_engine* e,
     }
 }
 
-/* ADR-0039 §3: pairs of fast PIDs that can read one sensor, count pairs
+/* ADR-0039 section 3: pairs of fast PIDs that can read one sensor, count pairs
  * of (keep, demote) bytes, which must outlive the engine. Each walk's end
  * judges them on its channel (ecuio_engine_judge_duplicates). */
 inline void ecuio_engine_set_duplicates(ecuio_request_engine* e,
@@ -965,7 +965,7 @@ inline void ecuio_engine_diag_push_values(const ecuio_request_engine* e,
 
 /* A freeze-frame value's reply, 42 <pid> 00 <data>, read as the Service
  * 01 reply 41 <pid> <data> it mirrors, through each diag_set def of the
- * PID (ADR-0037 §4) */
+ * PID (ADR-0037 section 4) */
 inline void ecuio_engine_diag_take_value(const ecuio_request_engine* e,
                                          ecuio_channel_diagnostics_t& d,
                                          const uint8_t* data, uint16_t len)
@@ -1219,7 +1219,7 @@ inline int32_t ecuio_engine_diag_next(const ecuio_request_engine* e, uint32_t c)
     return -1;
 }
 
-/* ADR-0039 §3: for each duplicate pair, the demoted PID's request on
+/* ADR-0039 section 3: for each duplicate pair, the demoted PID's request on
  * channel c is slow when the channel's answered bitmaps list both PIDs,
  * and fast otherwise (the pairs are of fast PIDs), so a car that answers
  * one form keeps it fast and a later walk judges again. */
@@ -1294,7 +1294,7 @@ inline void ecuio_engine_take_bitmap(ecuio_request_engine* e, uint32_t c,
     }
 }
 
-/* §4: turns the probe on and starts the walk on every channel that has
+/* Section 4: turns the probe on and starts the walk on every channel that has
  * Service 01 requests in its rotation and whose chain isn't answered to
  * its end yet. A walk resumes at the first bitmap it hasn't had, so the
  * one at connect and each after a recovery (the driver's call) together

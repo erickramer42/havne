@@ -17,7 +17,7 @@ extern "C" {
 #endif
 
 /*
- * Serial-port discovery for elm327:// (ADR-0026 §7).
+ * Serial-port discovery for elm327:// (ADR-0026 section 7).
  *
  * Lists the ports the OS knows and opens none of them: an ELM327's
  * commands could disturb whatever is behind a port that isn't an

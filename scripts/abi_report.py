@@ -24,7 +24,7 @@ import re
 import sys
 
 # A step on the way to a changed type ("parameter 1 of type …", "in
-# pointed to type …", "in unqualified underlying type …", a function
+# pointed to type ...", "in unqualified underlying type ...", a function
 # pointer's type): it passes when everything under it does. What
 # changed is said by the lines under the steps, and a change that isn't
 # a struct's (an enumerator, a size, a typedef's name) is a line no

@@ -17,7 +17,7 @@ extern "C" {
  * J2534 vendor discovery.
  *
  * Enumerates registered Pass-Thru function libraries per SAE J2534-1 (v4.04):
- *   HKLM\SOFTWARE\Pass-Thru Support.04.04\<VendorName>  → FUNCTIONLIBRARY
+ *   HKLM\SOFTWARE\Pass-Thru Support.04.04\<VendorName>  -> FUNCTIONLIBRARY
  * (both WOW64 registry views, plus the unhyphenated root some
  * installers write; see implementation).
  */

@@ -56,7 +56,7 @@ once.
    - `signals.csv`: `host_us,signal,value,unit`, one row per decoded
      value, stamped with its frame's `host_us`, the value to 12
      significant digits. UTF-8 with a byte-order mark, so a spreadsheet
-     reads "°C" correctly.
+     reads `°C` correctly.
    - `events.log`: a header (start time, core version, URI, the signal
      set's names, the frame-logging state), then each activity line
      with its local time and seconds since the start, then a summary

@@ -84,7 +84,7 @@ TEST(Obd2SetTest, SetIsValidAndComplete) {
 
 /* The ten keep 7001-7010, first and in their order; every other def's
  * ID is ECUIO_OBD2_PID_SIG_ID of its PID and its place among the PID's
- * fields (ADR-0039 §4), clear of the mock's band and uds-generic's. */
+ * fields (ADR-0039 section 4), clear of the mock's band and uds-generic's. */
 TEST(Obd2SetTest, IdsFollowTheRule)
 {
     const ecuio_signal_set_t* obd2 = ecuio_obd2_signal_set();
@@ -462,7 +462,7 @@ TEST(RequestEngineTest, RequestsAreKeptOncePerChannel) {
     EXPECT_EQ(e.chans[1].requests, 2u);
 }
 
-/* §3: whatever reaches the table, only reads go out (ADR-0037 adds the
+/* Section 3: whatever reaches the table, only reads go out (ADR-0037 adds the
  * trouble codes' and the freeze frame's). Service 0x04 clears the
  * emission DTCs; 0x10, 0x27, 0x2E, 0x31 and 0x11 change a session,
  * unlock, write, run a routine or reset. */
@@ -657,7 +657,7 @@ TEST(RequestEngineTest, NextEventIsTheNearestAcrossChannels) {
         << "channel 1 due";
 }
 
-/* ---------- rate classes (ADR-0039 §3) ---------- */
+/* ---------- rate classes (ADR-0039 section 3) ---------- */
 
 namespace {
 
@@ -767,7 +767,7 @@ TEST(RequestEngineTest, OnlyServiceOneRequestsAreClassified)
     EXPECT_EQ(e.requests[1].slow, 1u);
 }
 
-/* ---------- the probe (ADR-0015 §4) ---------- */
+/* ---------- the probe (ADR-0015 section 4) ---------- */
 
 namespace {
 
@@ -985,7 +985,7 @@ const std::vector<std::pair<uint8_t, uint32_t>> kTestCar = {
 
 } // namespace
 
-/* ADR-0039 §3: the fuel rail's two forms read one value on the test car
+/* ADR-0039 section 3: the fuel rail's two forms read one value on the test car
  * (docs/bench-sessions/2026-10-31-elm327-vehicle.md), so when a car's
  * bitmaps list both, 59 goes slow and 23 stays fast. A car that lists
  * only 59 keeps it fast, and with no walk nothing is judged. */
@@ -2362,7 +2362,7 @@ TEST_F(Obd2TableTest, EveryObd2DefMatchesItsRow)
 
 /* The set covers the table: exactly one def for every linear row (its
  * PID and start byte), and none for a row of another kind (ADR-0039
- * §1, §2). */
+ * section 1, section 2). */
 TEST_F(Obd2TableTest, EveryLinearRowHasExactlyOneDef)
 {
     const ecuio_signal_set_t* set = ecuio_obd2_signal_set();

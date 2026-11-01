@@ -130,7 +130,7 @@ jobs:
       # and verify.sh runs the cross-arch suite. LINK (read by link.exe
       # itself) makes each binary record only its PDB's file name, not
       # the runner's path; CMake's Visual Studio generator can't pass the
-      # % through (ADR-0034 §1), and stage.ps1 checks it took.
+      # % through (ADR-0034 section 1), and stage.ps1 checks it took.
       - name: Build the x86 surrogate
         env:
           LINK: /PDBALTPATH:%_PDB%
@@ -281,7 +281,7 @@ jobs:
             systemtap-sdt-dev ninja-build dpkg-dev
 
       # rcc's embedded files, the squashfs and the core packages take the
-      # commit's time, so a rebuild of the tag matches (ADR-0035 §4)
+      # commit's time, so a rebuild of the tag matches (ADR-0035 section 4)
       - name: Date the build by the commit
         run: |
           t=$(git log -1 --format=%ct)

@@ -70,7 +70,7 @@ havne-cli --version | --help
 - **`devices`** lists what a URI can name: the serial ports
   (`ecuio_serial_ports`) and, on Windows, the J2534 adapters
   (`ecuio_j2534_discover_devices`). It opens nothing. Its output is
-  schema 1 too (§3): `start`, then a `port` or `j2534` line per device;
+  schema 1 too (section 3): `start`, then a `port` or `j2534` line per device;
   no `end` line, since a list has no stream to end, and exit 0 says it
   is whole.
 
@@ -95,7 +95,7 @@ for, they print plain text there.
 | `frame` | each frame | `t_us`, `id` (`"0x7E8"`), `ch`, `flags`, `data` (hex pairs, `"41 0C 1A F8"`, as `frames.csv` writes them) |
 | `values` | with `--values`, each batch, after its frame | `t_us`, `id`, `values`: `[{"id":1,"value":2512.5}]`, or `"text"` for the text kinds |
 | `health` | when the link state or its episode count changes | `code`, `message` (`ecuio_status_string`), `episodes` |
-| `dropped` | directly before the first line that got into the ring after lines were lost (§4) | `frames`, `values`: the lines lost since the last report |
+| `dropped` | directly before the first line that got into the ring after lines were lost (section 4) | `frames`, `values`: the lines lost since the last report |
 | `end` | last | `reason` (`"interrupted"`, `"count"`, `"seconds"`, `"replay-end"`), `frames` (written or dropped; with `--count`, at most `N`), `dropped_frames`, `dropped_values`: the stream's totals |
 | `error` | instead of `session`, when the connect fails | `code`, `message`, `detail` (`ecuio_last_error_detail`) |
 | `port` | `devices`: each serial port | `name`, `device` (Windows' driver device, else `""`), `uri` (`"elm327://COM5"`) |
@@ -163,7 +163,7 @@ The signal handlers only set a flag. The main thread sees it within
 100 ms and closes the session on a second thread, draining the ring
 while close joins the worker (a replay's last push may be waiting for
 room), then writes what is left and the `end` line, destroys the
-session and exits. A closed standard output (`havne-cli stream … |
+session and exits. A closed standard output (`havne-cli stream ... |
 head`) ends the stream the same way, with no message and no `end`
 line, and the ring stops its waits, since nothing drains it any more.
 How a closed pipe shows differs by platform:
@@ -295,7 +295,7 @@ roadmap asks of the CLI.
 
 ## Appendix: 2026-10-29, SocketCAN
 
-[ADR-0032](0032-socketcan-listening.md) grows schema 1 the way §3
+[ADR-0032](0032-socketcan-listening.md) grows schema 1 the way section 3
 allows, adding without changing anything a reader already reads:
 
 - **`session`:** `backend` takes `"socketcan"`, and `listen_only`
@@ -308,7 +308,7 @@ allows, adding without changing anything a reader already reads:
   session's frames to a virtual CAN interface. Its output: `start`, the
   source's `session`, a `play` line (`to`, `fd`), and an `end` line
   whose `frames` is joined by `sent` and `skipped`; no `frame` lines.
-  It ends as `stream` does, and its exit codes are §5's. Elsewhere it
+  It ends as `stream` does, and its exit codes are section 5's. Elsewhere it
   is a usage error that says it needs Linux.
 
 ## Appendix: 2026-10-29, a sleep
@@ -328,8 +328,8 @@ and `play` counted to `replay_frames` and waited for the rest, which
 never came: a script piping a replay sat there for good. Both now end
 on that code, with a fifth `end` reason, `"recording-changed"`, after
 `stream`'s `health` line (code 16), and exit 0 as for any `end` reason
-(§5): the stream ended, and its health line says why it ended short.
-A new value of `reason` grows schema 1 the way §3 allows; a reader that
+(section 5): the stream ended, and its health line says why it ended short.
+A new value of `reason` grows schema 1 the way section 3 allows; a reader that
 knows only the four first ones still reads the line.
 `CliReplayTest.ACutRecordingEndsTheStream` (`tests/cli_recording_changed.py`)
 cuts a recording half a second into its play.
@@ -342,7 +342,7 @@ completes (`ECUIO_DIAG_COMPLETE`, at a generation not yet written):
 right after `session` for a read that finished before the stream began
 (the mock's, at create), then from the main thread's drain as reads
 complete, a Read again's included. The main thread polls the report,
-so the worker's callbacks (§4) are unchanged. Its fields:
+so the worker's callbacks (section 4) are unchanged. Its fields:
 
 - `rx` and `generation`;
 - `readiness`: `outcome`, and when answered `mil`, `dtc_count`,
@@ -358,13 +358,13 @@ An `outcome` is `"answered"`, `"refused"` (with `reply`, the negative
 reply in `frames.csv`'s form, `"7F 0A 11"`), `"unanswered"` or
 `"unasked"`. The names come from core (`ecuio_dtc_format`,
 `ecuio_monitor_name`, the `obd2` set), through the public headers as
-§1 requires. `cli/diagnostics_line.h` formats it; `CliDiagnosticsTest`
+section 1 requires. `cli/diagnostics_line.h` formats it; `CliDiagnosticsTest`
 covers each outcome, and the mock's line is in `CliGoldenTest`'s
 `mock.jsonl`.
 
 ## Appendix: 2026-10-31, absent signals
 
-[ADR-0039](0039-full-service01-coverage.md) §6 grows schema 1 by one
+[ADR-0039](0039-full-service01-coverage.md) section 6 grows schema 1 by one
 type. With `--values`, `stream` writes an `absent` line (`ids`, the
 signal IDs the `signals` line names) whenever core's list of signals
 the session's frames come without changes
@@ -372,7 +372,7 @@ the session's frames come without changes
 frames that ended before its field, while none carried it, as the test
 car's one-byte PID 55 replies leave bank 3's field. The main thread
 polls it in its drain, as it does the diagnostics, so the worker's
-callbacks (§4) are unchanged; a list that empties again writes
+callbacks (section 4) are unchanged; a list that empties again writes
 `"ids": []`. `CliReplayTest.AnAbsentFieldIsNamed`
 (`tests/cli_absent.py`) replays such replies.
 

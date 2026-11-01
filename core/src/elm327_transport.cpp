@@ -61,14 +61,14 @@ namespace {
 std::atomic<ecuio_elm327_port_open_t> g_opener{nullptr};
 
 /* The serial rate a wired ELM327 starts at with its rate pin high; the
- * other is 9600 (ADR-0026 §2). */
+ * other is 9600 (ADR-0026 section 2). */
 constexpr uint32_t ELM327_SERIAL_DEFAULT = 38400;
 constexpr uint32_t ELM327_SERIAL_MIN = 300;
 constexpr uint32_t ELM327_SERIAL_MAX = 4000000;
 constexpr unsigned long ELM327_CAN_BAUD_DEFAULT = 500000;
 
 /* No line and no prompt this long: the adapter, or the link to it, has
- * failed (ADR-0026 §6). Counted from the last line, so a pending reply's
+ * failed (ADR-0026 section 6). Counted from the last line, so a pending reply's
  * wait (an STN listening past 7F xx 78) never runs into it. */
 constexpr uint32_t ELM327_PROMPT_TIMEOUT_MS = 5000;
 
@@ -100,7 +100,7 @@ enum class elm327_io {
     silent,  /* no line and no prompt for ELM327_PROMPT_TIMEOUT_MS */
     failed,  /* the port failed */
     stopped, /* the session is closing */
-    reset    /* the adapter reset on its own (ADR-0026 §6) */
+    reset    /* the adapter reset on its own (ADR-0026 section 6) */
 };
 
 struct ecuio_elm327_transport {
@@ -379,7 +379,7 @@ struct setup_answer {
     char first[ELM327_QUOTE_MAX + 1] = {}; /* else the first line */
 };
 
-/* A contract command (ADR-0026 §3): its answer must be OK. An answer
+/* A contract command (ADR-0026 section 3): its answer must be OK. An answer
  * that holds a reset's banner instead belonged to a reset still
  * finishing when the command went out (the MX+ on a new Bluetooth link
  * answered AT Z twice, the second time late:
@@ -492,7 +492,7 @@ setup_answer identify(transport* t, const char* cmd, char* version,
     return a;
 }
 
-/* The setup's contract commands (ADR-0026 §3), each answered before the
+/* The setup's contract commands (ADR-0026 section 3), each answered before the
  * next: a known state, then everything the framing rests on. Any
  * answer but OK refuses, so an adapter never runs half-configured. The
  * reset is sent twice at most: an adapter still monitoring the bus takes
@@ -560,7 +560,7 @@ ecuio_status_t run_setup(transport* t, char* version, size_t version_cap)
     return ECUIO_OK;
 }
 
-/* A reading's first line that matches (ADR-0026 §3): anything else,
+/* A reading's first line that matches (ADR-0026 section 3): anything else,
  * '?' included, means "not present", and nothing fails. */
 template <typename Match>
 bool reading(transport* t, const char* cmd, char* out, size_t cap,
@@ -576,7 +576,7 @@ bool reading(transport* t, const char* cmd, char* out, size_t cap,
     return io == elm327_io::prompt && found;
 }
 
-/* The session info (ADR-0019, ADR-0026 §7): what the session runs on,
+/* The session info (ADR-0019, ADR-0026 section 7): what the session runs on,
  * then the readings. A reading the adapter refuses leaves its flag
  * clear. */
 void describe_session(transport* t, const char* reset_version,
@@ -708,7 +708,7 @@ void take_frame(transport* t, const elm327_can_line& f, reply_seen& seen,
     }
 }
 
-/* Asks request r of channel c (ADR-0026 §3): its header if another
+/* Asks request r of channel c (ADR-0026 section 3): its header if another
  * channel's is set, then the request with the response-count digit when
  * its reply is taken to fit one Single Frame (elm327_response_count),
  * then the reply to its prompt. */
@@ -1037,7 +1037,7 @@ bool backoff_sleep(transport* t, uint32_t ms)
     return true;
 }
 
-/* The worker (ADR-0026 §3): the request engine driven as the J2534
+/* The worker (ADR-0026 section 3): the request engine driven as the J2534
  * worker drives it, with one command outstanding for the whole adapter,
  * since an ELM327 takes the next command only after its prompt. Each
  * pass ends the waits that ran out, asks the first channel in turn with
@@ -1046,7 +1046,7 @@ bool backoff_sleep(transport* t, uint32_t ms)
  * request's floor or wait, or, with nothing left to ask, for the idle
  * read's 100 ms, which counts toward quiet as J2534's passive reads do.
  *
- * Link health (ADR-0026 §6, link_health.h): a reply with a channel's
+ * Link health (ADR-0026 section 6, link_health.h): a reply with a channel's
  * message is OK; NO DATA leaves the engine's wait to time the request
  * out; CAN ERROR and its kin, or '?', is a write that failed; a port
  * that fails, or no prompt within 5 s, is a hard failure, after which
@@ -1212,7 +1212,7 @@ ecuio_status_t elm327_start(ecuio_session_t* session, void* impl)
 }
 
 /* Joins the worker, then closes the port. The adapter keeps the setup
- * until its next reset; nothing it holds was written (ADR-0026 §5). */
+ * until its next reset; nothing it holds was written (ADR-0026 section 5). */
 void elm327_detach(ecuio_session_t* session, void* impl)
 {
     (void)session;

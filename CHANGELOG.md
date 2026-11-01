@@ -39,7 +39,7 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
   frame's values, with a refusal's reply bytes.
 - **Clearing trouble codes**
   ([ADR-0038](docs/adr/0038-clearing-trouble-codes.md)): **Clear
-  codes…** on the Diagnostics page asks first, saying what a clear
+  codes...** on the Diagnostics page asks first, saying what a clear
   erases (the stored and pending codes, the freeze frame, the
   check-engine light, the readiness monitors' results) and what it
   keeps (permanent codes). The report is saved to
@@ -48,7 +48,7 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
   asked its engine speed first and cleared only with the engine
   stopped, then read again; the page and the activity log say what
   became of each (`ECU 0x7E8 clear: cleared`, `not sent: engine
-  running (812 rpm)`, …). Not yet run on a car.
+  running (812 rpm)`, ...). Not yet run on a car.
 - **Every standard Service 01 reading**
   ([ADR-0039](docs/adr/0039-full-service01-coverage.md)): the `obd2`
   profile reads every linear field of SAE J1979's Service 01 table,
@@ -88,7 +88,13 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
 - `ecuio_session_get_absent_signals` (core's C API) lists the signals
   a session's replies come without, and `havne-cli stream --values`
   writes them as an `absent` line.
-- Imperial units show Pa as inH2O, L/h as gal/h and N·m as lb·ft.
+- Core's C API makes three more judgments for a front end:
+  `ecuio_session_get_unsupported_signals` lists the signals whose PID
+  the ECU doesn't support, `ecuio_identity_vin` picks the VIN from an
+  identification report, and each channel's support report counts its
+  supported PIDs (`pids_supported`) and the highest PID its bitmaps
+  answered for (`pids_through`).
+- Imperial units show Pa as inH2O, L/h as gal/h and `N·m` as `lb·ft`.
 - **Requests on SocketCAN**
   ([ADR-0040](docs/adr/0040-socketcan-requests-isotp.md)): on Linux,
   `obd2` and `uds-generic` run on a native CAN interface
@@ -98,8 +104,10 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
   fault (normal mode at the rate `?baud=` states, `restart-ms 0`,
   `one-shot on`, no errors counted), and after a CAN error on its first
   request it sends nothing more; each refusal gives the `ip link`
-  commands that fix it. Run on Linux's virtual CAN bus; not yet through
-  a real controller or on a car.
+  commands that fix it. ISO-TP's timeouts run on the kernel's receive
+  times, so a reply the bus carried on time still counts when the
+  computer is slow to read it. Run on Linux's virtual CAN bus; not yet
+  through a real controller or on a car.
 - An ELM327's replies reassemble through the same ISO-TP code.
 - **Fault injection on a replay**
   ([ADR-0041](docs/adr/0041-replay-fault-injection.md)):
@@ -261,7 +269,7 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
   DIDs, and the Record sessions switch between runs. A URI that failed
   to connect isn't kept.
 - Settings' adapter list shows each device's firmware versions as last
-  seen at a connect ("last seen: …"), without opening the adapter. A
+  seen at a connect ("last seen: ..."), without opening the adapter. A
   serial port shows whatever adapter answered on it last.
 - Vehicles ([ADR-0027](docs/adr/0027-vehicle-profiles.md)). Settings'
   Vehicle row keeps named vehicles: pick one before connecting and it
@@ -285,7 +293,7 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
   It has read a car through an OBDLink MX+.
 - On Android, an adapter session keeps running in the background and
   with the screen off, recording included. While it's connected a
-  notification says so ("Connected to …", "· recording"), with a
+  notification says so ("Connected to ...", "· recording"), with a
   small gauge in the status bar and no sound; a tap opens the app. Havne asks once, at the first adapter connect, to
   show notifications, and the phone stays awake (not its screen) for
   as long as the session lasts. A dropped classic Bluetooth link
@@ -321,7 +329,7 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
   heading saying what it holds now: Adapter (the devices found, then
   the WiFi addresses and other choices the list doesn't show), Vehicle,
   What to read, Recording (with the recent recordings to replay) and
-  Display. Connect… on Home, Live or the header opens Settings with
+  Display. Connect... on Home, Live or the header opens Settings with
   Adapter unfolded. A button too long for a phone's width wraps its
   text.
 - Selecting a device, a recording or a preset in Settings scrolls back

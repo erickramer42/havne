@@ -24,7 +24,7 @@
 #include <cstdint>
 
 /* How long an open waits for the app's opened or failed: a BLE connect
- * with its service discovery takes seconds (ADR-0028 §1). */
+ * with its service discovery takes seconds (ADR-0028 section 1). */
 constexpr uint32_t ELM327_STREAM_OPEN_MS = 10000;
 
 /* The bytes received and not yet read that a stream holds, allocated at

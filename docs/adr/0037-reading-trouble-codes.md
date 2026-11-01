@@ -4,14 +4,14 @@
   and mock transports, the app's page and log line, and `havne-cli`'s
   line; not yet run on a car (BENCH prep #28).
 - **Date:** 2026-10-30.
-- **Builds on:** [ADR-0015](0015-request-engine.md) §1 (one-shot
-  requests through the engine's pacing) and §3 (the services the engine
+- **Builds on:** [ADR-0015](0015-request-engine.md) section 1 (one-shot
+  requests through the engine's pacing) and section 3 (the services the engine
   may send, which this record amends); [ADR-0021](0021-vehicle-identification.md)
   (a fixed list asked once per channel, the text made in core, a report
   per channel through the C ABI, one line in the activity log), whose
   shape this record repeats; [ADR-0016](0016-signal-definition-layout.md)
   (the `obd2` set's defs, which decode the freeze frame).
-- **Amends:** [ADR-0015](0015-request-engine.md) §3, with a dated note:
+- **Amends:** [ADR-0015](0015-request-engine.md) section 3, with a dated note:
   the allowed services grow by four reads.
 
 ## Context
@@ -23,7 +23,7 @@ monitors have run. SAE J1979 carries all of it in read-only services:
 
 | Request | Reply | What it holds |
 |---|---|---|
-| `01 01` | `41 01 A B C D` | A7 the MIL, A6–A0 the stored-code count; B3 the engine type (compression or spark); B, C, D which monitors exist and which are incomplete |
+| `01 01` | `41 01 A B C D` | A7 the MIL, A6-A0 the stored-code count; B3 the engine type (compression or spark); B, C, D which monitors exist and which are incomplete |
 | `03` | `43 n DTC…` | Stored (confirmed) codes, `n` of them, two bytes each |
 | `07` | `47 n DTC…` | Pending codes: seen on this or the last drive cycle, not yet confirmed |
 | `0A` | `4A n DTC…` | Permanent codes: only the ECU's own monitor clears them (cars from 2010) |
@@ -48,7 +48,7 @@ they're shown.
 `ecuio_engine_service_allowed` takes 0x02, 0x03, 0x07 and 0x0A beside
 0x01, 0x09 and 0x22. All are reads. 0x04 (clear), and every service
 that changes a session, unlocks or writes, stays refused, so the rule
-of [ADR-0015](0015-request-engine.md) §3 holds for whatever enrolls a
+of [ADR-0015](0015-request-engine.md) section 3 holds for whatever enrolls a
 request: the engine sends no service that changes the car.
 
 > **Amended 2026-10-30 ([ADR-0038](0038-clearing-trouble-codes.md)):**
@@ -90,7 +90,7 @@ freeze-frame values (a def ID and its value). Reserved words for growth.
 `ecuio_session_get_channel_diagnostics` copies it under the identity
 report's rules.
 
-- `ecuio_dtc_format(code, out)` names a code: A7–A6 the letter (P, C,
+- `ecuio_dtc_format(code, out)` names a code: A7-A6 the letter (P, C,
   B, U), then four hex digits ("P0301"). `ecuio_monitor_name(id,
   compression)` names a monitor; C and D's bits mean different monitors
   on spark and compression engines, hence the flag. The UI receives
@@ -205,5 +205,5 @@ datasheet does.
   channel).
 - A `7F 03 11` (Service 03 unsupported) settles that item only: no
   rotation request uses these services, so nothing is dropped.
-- Clearing (Service 04) gets its own record, which amends §1, and its
+- Clearing (Service 04) gets its own record, which amends section 1, and its
   own gate.

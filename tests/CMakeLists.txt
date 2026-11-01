@@ -156,7 +156,7 @@ if(Python3_Interpreter_FOUND)
         COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/golden.py selftest)
     add_test(NAME AbiReportTest.SelfTest
         COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/scripts/abi_report.py selftest)
-    # packaging/sbom.py, the release's SBOM (ADR-0035 §5)
+    # packaging/sbom.py, the release's SBOM (ADR-0035 section 5)
     add_test(NAME SbomTest.SelfTest
         COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/packaging/sbom.py selftest)
 endif()
@@ -224,7 +224,7 @@ if(TARGET havne-cli)
             COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/cli_recording_changed.py
                     $<TARGET_FILE:havne-cli>)
         set_tests_properties(CliReplayTest.ACutRecordingEndsTheStream PROPERTIES TIMEOUT 30)
-        # A field past every reply is named on an absent line (ADR-0039 §6)
+        # A field past every reply is named on an absent line (ADR-0039 section 6)
         add_test(NAME CliReplayTest.AnAbsentFieldIsNamed
             COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/cli_absent.py
                     $<TARGET_FILE:havne-cli>)
@@ -241,7 +241,7 @@ if(TARGET havne-cli)
     app_cli_usage(AnUnknownOptionIsUsage "stream|mock://x|--fast")
     app_cli_usage(ACountOfZeroIsUsage "stream|mock://x|--count|0")
     app_cli_usage(TwoUrisIsUsage "stream|mock://a|mock://b")
-    # A stop from outside (ADR-0031 §6): SIGINT and SIGTERM on POSIX;
+    # A stop from outside (ADR-0031 section 6): SIGINT and SIGTERM on POSIX;
     # on Windows Ctrl+Break to a child in a process group of its own
     # (Ctrl+C can't be sent to one), skipped where there's no console
     if(UNIX)
@@ -281,7 +281,7 @@ target_link_libraries(test_c_abi PRIVATE
 add_test(NAME c_abi COMMAND test_c_abi)
 set_tests_properties(c_abi PROPERTIES LABELS "abi")
 
-# Core's USDT probes (ADR-0034 §4) in each binary that links core and
+# Core's USDT probes (ADR-0034 section 4) in each binary that links core and
 # ships or runs here: their ELF notes, which is all a tracer reads.
 # Only where core was built with them (Linux with <sys/sdt.h>).
 if(ECUIO_HAVE_SDT)

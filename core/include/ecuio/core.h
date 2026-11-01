@@ -408,7 +408,7 @@ ecuio_status_t ecuio_session_get_replay_faults(
     ecuio_replay_faults_t* out
 );
 
-/* What each channel's ECU has said it supports (ADR-0015 §4): its answers
+/* What each channel's ECU has said it supports (ADR-0015 section 4): its answers
  * to the supported-PID chain, and the requests left out of the rotation
  * because it refused them. The J2534 worker updates it as the answers
  * arrive. The values below are append-only. */
@@ -696,7 +696,7 @@ typedef struct ecuio_monitor {
 } ecuio_monitor_t;
 
 /* POD, 16 bytes: one freeze-frame value, decoded by the obd2 set's def
- * def_id (ADR-0037 §4), in that def's unit. */
+ * def_id (ADR-0037 section 4), in that def's unit. */
 typedef struct ecuio_freeze_value {
     uint32_t def_id;
     uint32_t reserved;        /* zero */

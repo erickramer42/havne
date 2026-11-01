@@ -4,7 +4,7 @@
 //          defaults, New, Duplicate, Rename, Forget the VIN, Forget and
 //          Forget all, a connection and plotted signals remembered for
 //          adapter sessions only, and the VIN key settling the vehicle
-//          (each row of ADR-0027 §4's table, with its log line).
+//          (each row of ADR-0027 section 4's table, with its log line).
 //          SettingsPage.qml wires it (tests/qml/tst_settings.qml).
 
 pragma Singleton
@@ -31,7 +31,7 @@ QtObject {
     }
 
     // The stored text, or an empty document when it doesn't parse or any
-    // entry is missing a field (dropped whole, ADR-0027 §5)
+    // entry is missing a field (dropped whole, ADR-0027 section 5)
     function parse(text) {
         let d
         try {
@@ -189,7 +189,7 @@ QtObject {
         return empty()
     }
 
-    // A connect's URI, kept for an adapter session only (ADR-0027 §1)
+    // A connect's URI, kept for an adapter session only (ADR-0027 section 1)
     function rememberUri(doc, uri) {
         if (!isAdapterUri(uri))
             return doc
@@ -203,7 +203,7 @@ QtObject {
         })
     }
 
-    // ADR-0027 §4: the VIN key settles which vehicle this is. Returns
+    // ADR-0027 section 4: the VIN key settles which vehicle this is. Returns
     // { doc, outcome, label, previous }: outcome "same", "learned",
     // "switched" or "new"; label the vehicle now picked; previous the
     // one picked before, "" for none

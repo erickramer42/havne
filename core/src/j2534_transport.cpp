@@ -139,7 +139,7 @@ struct ecuio_j2534_transport {
      *                identification items, or the one ?poll= request,
      *                which outranks them all; empty for passive receive.
      *                Built at attach, the worker's alone after.
-     *   probe        ADR-0015 §4 for the set's rotation: on unless
+     *   probe        ADR-0015 section 4 for the set's rotation: on unless
      *                ?probe=0 or ?poll=. Frozen pre-thread.
      *   identify     ADR-0021: each channel asks its ECU's identity
      *                once; on with the set's requests unless ?identify=0
@@ -392,7 +392,7 @@ uint32_t read_timeout_ms(int64_t next_us)
 /* Worker entrypoint: mirrors mock_worker's discipline: impl-owned
  * state, dispatch through the session snapshot path, stop via atom.
  *
- * One loop serves every mode (ADR-0015 §1). With requests (the set's
+ * One loop serves every mode (ADR-0015 section 1). With requests (the set's
  * rotation, or ?poll='s one), each pass ends the waits that ran out,
  * sends each idle channel's next request once its floor has passed,
  * then reads once, for at most the slice, and gives a matched frame to
@@ -402,7 +402,7 @@ uint32_t read_timeout_ms(int64_t next_us)
  * once, so every mode drains what has arrived; an empty one waits out
  * its timeout.
  *
- * With the probe on (§4) the engine walks each channel's supported-PID
+ * With the probe on (section 4) the engine walks each channel's supported-PID
  * chain before its rotation, and the walk resumes, where it stopped,
  * whenever the link returns to OK: a connect with the ignition off
  * answers nothing, and the ECU's answers come once it wakes.

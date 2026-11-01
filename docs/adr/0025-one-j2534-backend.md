@@ -1,7 +1,7 @@
 # ADR-0025: One J2534 backend, every vendor DLL runs in a surrogate process
 
 - **Status:** Accepted.
-- **Date:** 2026-10-26. All three steps (§6) built with this record.
+- **Date:** 2026-10-26. All three steps (section 6) built with this record.
   Step 2 also took the health and connect suites' `/InProc` half and
   their parameter: with routing sending x64 DLLs to the surrogate, no
   session can reach in-proc. Step 3 also took `ecuio_j2534_backend_name`
@@ -78,7 +78,7 @@ same J2534 semantics:
   |---|---|
   | A PE for x86 (I386) | `ecuio-j2534-surrogate.exe`, as today |
   | A PE for x64 (AMD64) | `ecuio-j2534-surrogate-x64.exe`, new |
-  | A PE for another machine (ARM64, IA64, …) | `ecuio-j2534-surrogate-x64.exe`, which loads it or refuses it as the app's own process would |
+  | A PE for another machine (ARM64, IA64, ...) | `ecuio-j2534-surrogate-x64.exe`, which loads it or refuses it as the app's own process would |
   | Unreadable, or not a PE | Refused: `ECUIO_ERR_LOAD_FAILED` before any spawn |
 
 - The x86 name stays, so the release layout, the run sheets and the
@@ -191,18 +191,18 @@ same J2534 semantics:
 Each is one commit, verified by `scripts/verify.sh`, cross-arch
 included.
 
-1. **Tests onto the control page.** The page grows (§5); every J2534
+1. **Tests onto the control page.** The page grows (section 5); every J2534
    test and the bridge's fake tests read it; the in-proc-only hooks
    leave `fake_j2534.def`. Routing unchanged; both trees rebuilt (the
    page layout is shared).
-2. **x64 DLLs through the x64 surrogate.** The routing table (§1), the
+2. **x64 DLLs through the x64 surrogate.** The routing table (section 1), the
    exe's name and its deploy, `ECUIO_SURROGATE_X64_EXE`, `stage.ps1`,
    the session line, the crash test, and ADR-0009's record: its status
    line says its routing table is superseded by this record, and a
    dated appendix says what replaced it (the table stays, as a record
    isn't rewritten; ADR-0008's status line names ADR-0014 the same
    way). The in-proc code is unreachable from here.
-3. **The in-proc backend deleted** (§2), with the `/InProc` halves and
+3. **The in-proc backend deleted** (section 2), with the `/InProc` halves and
    `ecuio_j2534_force_surrogate_for_testing`. A deletion: no test's
    expectations change.
 
@@ -248,13 +248,13 @@ included.
   `ECUIO_ERR_SURROGATE_FAILED` and the detail naming the exe, where an
   x64 DLL loaded with nothing beside the app before. The app's build
   copies it from its own tree, so a build has it; `stage.ps1` keeps a
-  release from shipping without it (§4).
+  release from shipping without it (section 4).
 - **The release zip carries a second exe,** checked like the first.
 - **Pointer-bearing ioctls stay out of reach.** `FAST_INIT` and
   `FIVE_BAUD_INIT` pass pointers to structs (Known Issue #20). In-proc
   they could have been called directly; now they need wire forms in the
   relay (ADR-0011) if K-line support is ever wanted.
 - **Debugging a vendor DLL** means attaching to the child, not the app.
-- ADR-0009's routing table is replaced by §1, and step 2 marks it so
-  (§6); its sniff carries over, and so does its rule that a file that
+- ADR-0009's routing table is replaced by section 1, and step 2 marks it so
+  (section 6); its sniff carries over, and so does its rule that a file that
   can't be a DLL fails without a spawn.

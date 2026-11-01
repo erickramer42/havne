@@ -24,7 +24,7 @@ namespace {
  * 4-byte address header: [0x41][PID][A][B]...
  *   - mux key: bytes 0..1, compared as 0x4100|PID (mode echo + PID)
  *   - data: from byte 2; multi-byte fields are big-endian (J1979's
- *     256·A + B), the rest single bytes
+ *     256*A + B), the rest single bytes
  *   - no PCI byte: the adapter does the ISO-TP framing
  *   - temperatures are 8-bit UINT (J1979: A - 40, so -40..215 degC)
  * Scaling follows SAE J1979 Service 01, typed out here and checked
@@ -105,9 +105,9 @@ ecuio_signal_def_t kObd2Defs[] = {
              100.0 / 255.0, 0.0, "%", 1, 0x2F, ECUIO_BYTE_ORDER_LE),
     obd2_def(ECUIO_OBD2_SIG_BATTERY_V_ID, "Battery Voltage", ECUIO_VALUE_UINT,
              16, 0.001, 0.0, "V", 2, 0x42, ECUIO_BYTE_ORDER_BE),
-    /* SAE J1979 PID 0x10: air flow rate, (256·A + B)/100 g/s. Two-byte
+    /* SAE J1979 PID 0x10: air flow rate, (256*A + B)/100 g/s. Two-byte
      * big-endian like RPM/0x42; the 0.01 scale needs no decoder
-     * extension (generic raw·scale + offset). Shown to one decimal. */
+     * extension (generic raw*scale + offset). Shown to one decimal. */
     obd2_def(ECUIO_OBD2_SIG_MAF_ID, "MAF", ECUIO_VALUE_UINT, 16, 0.01, 0.0,
              "g/s", 1, 0x10, ECUIO_BYTE_ORDER_BE),
     /* SAE J1979 PID 0x5C: engine oil temperature, A - 40 degC, the same
@@ -117,7 +117,7 @@ ecuio_signal_def_t kObd2Defs[] = {
      * byte, not a temperature. */
     obd2_def(ECUIO_OBD2_SIG_OIL_TEMP_ID, "Engine Oil Temp", ECUIO_VALUE_UINT, 8,
              1.0, -40.0, DEG_C, 0, 0x5C, ECUIO_BYTE_ORDER_LE),
-    /* The rest of the table, in PID order (ADR-0039 §1): pid, field,
+    /* The rest of the table, in PID order (ADR-0039 section 1): pid, field,
      * start, name, kind, bits, scale, offset, unit, decimals */
     pid_def(0x06, 0, 0, "Short Term Fuel Trim B1", U, 8, kTrim, -100.0, "%", 1),
     pid_def(0x07, 0, 0, "Long Term Fuel Trim B1", U, 8, kTrim, -100.0, "%", 1),
@@ -280,7 +280,7 @@ const uint16_t kPlotOrder[] = {
 #undef DEG
 #undef DEG_C
 
-/* ADR-0013 §4: the obd2 profile declares the standard physical pair,
+/* ADR-0013 section 4: the obd2 profile declares the standard physical pair,
  * 0x7E8 (ECU response) / 0x7E0 (tester request). The transport
  * registers its receive filter and addresses requests from this list;
  * ?filter= and ?txid= override it. Multi-ECU profiles add entries. */

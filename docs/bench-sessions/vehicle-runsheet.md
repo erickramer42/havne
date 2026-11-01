@@ -50,7 +50,7 @@ changed since the last session that ran them.
   and 0A), Service 09 (vehicle information: VIN, calibration IDs) and
   Service 0x22 (ReadDataByIdentifier), the read-only services a
   generic scanner uses. Havne's one write is clearing codes (Service
-  04), sent only from the Diagnostics page's **Clear codes…** after a
+  04), sent only from the Diagnostics page's **Clear codes...** after a
   confirmation; **never press it on this sheet** (a clear resets the
   readiness monitors, BENCH prep #29). It has no code path that
   changes a diagnostic session or flashes. Read
@@ -113,12 +113,12 @@ Run every item on the laptop that goes to the car.
       query:
       - Phase 0: launch with `ECUIO_FAKE_WRITE_STATUS=7` in the
         environment, then the bare URI: "Requests failing";
-      - Phases 1–2: relaunch without it, then the bare URI: every
+      - Phases 1-2: relaunch without it, then the bare URI: every
         `obd2` signal shows the fake's canned value, the ECU line reads
         `ECU 0x7E8: supports 95 PIDs; 92 requests, none dropped` (so
         Live's note doesn't show), the identity line `ECU 0x7E8
-        identity: VIN FAKEJ2534VIN00001; CALID FAKECAL-01; …; 2
-        refused: …`, and the diagnostics line `ECU 0x7E8 diagnostics:
+        identity: VIN FAKEJ2534VIN00001; CALID FAKECAL-01; ...; 2
+        refused: ...`, and the diagnostics line `ECU 0x7E8 diagnostics:
         MIL on; stored P0301 P0420 U0100; pending P0171 C0035 B1001;
         permanent P0420; readiness 8 of 8 complete; freeze frame for
         P0301`, the same on the Diagnostics page; **Read again** logs
@@ -202,14 +202,14 @@ engine off. Connect the bare URI and leave it connected into Phase 2:
 
 **Expected:**
 - [ ] The probe first: the session log's first writes are the bitmap
-      requests (`01 00`, `01 20`, … while each bitmap's last bit is
+      requests (`01 00`, `01 20`, ... while each bitmap's last bit is
       set), then the rotation. The ECU line follows within about a
       second: `ECU 0x7E8: supports N PIDs; M requests, k dropped: …`,
       naming the first eight dropped (on the 2026-10-25 car, six
       bitmaps and 53 PIDs, of which the `obd2` set asks 43). Copy the
       bitmap replies from the `OP_READ frame` lines into the sheet
 - [ ] Within a few seconds, the identity line: `ECU 0x7E8 identity:
-      VIN …; CALID …; …`, and which `22 F1 xx` items were refused
+      VIN ...; CALID ...; ...`, and which `22 F1 xx` items were refused
       (`7F 22 31`). It's personal data, scrubbed before the sheet is
       committed. Note the answered DIDs for Phase 3's text DID
 - [ ] Every signal the probe kept populates within a few seconds (the
@@ -221,9 +221,9 @@ engine off. Connect the bare URI and leave it connected into Phase 2:
 |---|---|
 | RPM, Vehicle Speed, Engine Load | 0 |
 | Throttle Position | steady (22 %) |
-| Coolant Temp, Intake Air Temp | near ambient on a cold engine (62–63 °C and 58–62 °C: that engine was warm) |
+| Coolant Temp, Intake Air Temp | near ambient on a cold engine (62-63 deg C and 58-62 deg C: that engine was warm) |
 | Fuel Level | roughly matches the gauge |
-| Battery Voltage (PID 0x42) | 11.8–12.6 V (11.9 V), within 0.1 V of the "Session:" line |
+| Battery Voltage (PID 0x42) | 11.8-12.6 V (11.9 V), within 0.1 V of the "Session:" line |
 | MAF | ~0 g/s (0.3) |
 | Engine Oil Temp | not on Live where the probe dropped 0x5C; "waiting for data" on the Dashboard |
 
@@ -247,9 +247,9 @@ ambient, which a wrong scale or byte order can still produce; idle is
 where RPM's two-byte value and the charging voltage move.
 
 **Expected:**
-- [ ] RPM settles at about 600–900 (750–850 on the 2026-10-25 car,
+- [ ] RPM settles at about 600-900 (750-850 on the 2026-10-25 car,
       after a start peak near 1,260), matching the tachometer within
-      its needle; Battery Voltage 13.4–14.5 V; Coolant Temp rising over
+      its needle; Battery Voltage 13.4-14.5 V; Coolant Temp rising over
       minutes with the cluster's gauge; Fuel Level as before
 - [ ] Values stay bright while they keep arriving; nothing dims, and no
       banner
@@ -274,8 +274,8 @@ against a second scan tool (BENCH prep #28, #30).
 
 **Action, still on Phase 1's connect:**
 - [ ] The activity log's diagnostics line (`ECU 0x7E8 diagnostics:
-      MIL …; stored …; pending …; permanent …; readiness N of M
-      complete …; freeze frame for … | no freeze frame`): copy it into
+      MIL ...; stored ...; pending ...; permanent ...; readiness N of M
+      complete ...; freeze frame for ... | no freeze frame`): copy it into
       the sheet, and screenshot the Diagnostics page (the codes by
       list, the monitors, the freeze frame's values). A list refused
       reads `refused (7F 0A 11)`, say: record which
@@ -359,7 +359,7 @@ One connect each, Disconnect between them; the engine keeps idling.
 
        j2534://OBDX Pro - VX?profile=raw&filter=0x7E8&poll=0x00
 
-   and `poll=0x20`, `0x40`, … while each reply's last bit is set. Each
+   and `poll=0x20`, `0x40`, ... while each reply's last bit is set. Each
    reply is `41 <PID>` plus four bytes, one bit per PID, most
    significant first (SAE J1979 Service 01).
 
@@ -397,13 +397,13 @@ ignition-on.
 | Writes fail with the ignition on (`OP_WRITE: status` nonzero) | BENCH prep #2, request framing (6-byte logical message with `ISO15765_FRAME_PAD`); then baud (500 k assumed) or a 29-bit vehicle (prep #4). The bare URI is 11-bit only. 29-bit IDs given with `?filter=`/`?txid=` connect with `CAN_29BIT_ID` automatically, but no 29-bit OBD IDs are prepared: record and stop rather than improvise |
 | Writes succeed but no frames arrive | The ECU doesn't answer physical 0x7E0: retry Phase 3's one PID with `?poll=0x0C&txid=0x7DF` (functional request, replies still on 0x7E8); then the flow-control filter (prep #1) |
 | `0x7E8` frames on the Log page, but Live shows "—" everywhere | Payload shape: stamping already proves the channel matched, so suspect a PCI byte left in-band shifting `[41][PID]`. The `OP_READ frame` lines show the bytes as the vendor returned them |
-| Values implausible (−40 °C, huge RPM) | Scaling or byte order: temperatures are unsigned 8-bit with a −40 offset; 2-byte PIDs are big-endian |
+| Values implausible (-40 deg C, huge RPM) | Scaling or byte order: temperatures are unsigned 8-bit with a -40 offset; 2-byte PIDs are big-endian |
 | Link flips between ok and quiet while frames arrive | Unmatched frames interleaving with replies; note the frame IDs |
 | Values refresh much slower than once a rotation | Replies arriving after the next request: compare each `OP_READ frame` stamp with the request before it. Measure; don't fix in the session |
 | The scan finds nothing: every DID `7F 22 31` | The ECU keeps its identification DIDs for another diagnostic session, or uses another range. Compare with the identity line's `22 F1 xx` items: if those answered, the scan should find them too. With nothing found there's nothing left to ask, so the link turns quiet a second after the last refusal, by design. Havne never changes the session |
 | Every Service 0x22 reply is `7F 22 11` | The ECU doesn't serve Service 0x22 here: every identification DID and scanned DID is asked once and refused (`scan: 128 DIDs, 0 found, 128 refused`), then quiet, as in the row above. Identification by Service 09 still works |
 | The identity line never arrives | An item left unanswered holds the line until the link recovers and the re-ask settles. Find the `22 F1 xx` or `09 xx` request with no reply in the session log; the ECU line doesn't wait for it |
-| "Disconnecting…" lasts seconds | A wedged adapter. The teardown runs off the GUI thread and gives up after about 6 s. Note how long (the `Disconnecting:` and `Disconnected:` lines bracket it) and whether the session log says `child unresponsive`. A frozen window is a bug: capture the session log |
+| "Disconnecting..." lasts seconds | A wedged adapter. The teardown runs off the GUI thread and gives up after about 6 s. Note how long (the `Disconnecting:` and `Disconnected:` lines bracket it) and whether the session log says `child unresponsive`. A frozen window is a bug: capture the session log |
 | App crashes | Abort. Copy the session logs (`%TEMP%\ecuio-surrogate*.log`) before relaunching |
 
 ## Evidence against the [BENCH prep list](bench-prep.md)
@@ -415,7 +415,7 @@ ignition-on.
 | #4 29-bit addressing | 11-bit IDs expected; any 29-bit traffic is news |
 | #5 Timestamp units | Phase 2's `frames.csv`: `timestamp_us` deltas against `host_us` deltas. The VX's clock doesn't reset at connect and wraps 71.6 min after it starts; session time runs through the wrap |
 | #6 ReadMsgs statuses | Session log: does any `OP_READ frame: status 9` line appear (`ERR_TIMEOUT` with data)? So far replies came with status 0 and empty reads with 16 |
-| #7 Struct layout | A correct decode in Phases 1–2 implies the layout is right |
+| #7 Struct layout | A correct decode in Phases 1-2 implies the layout is right |
 | #8 Vendor timeouts | Read timing visible in the session log stamps |
 | #10 Session info | Phase 0's battery reading against the car's, and against PID 0x42 in Phase 1 |
 | #28 Trouble codes | Phase 2b: the diagnostics lines and page against the scan tool's MIL, codes, readiness and freeze frame; a refused list's reply bytes |

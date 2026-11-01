@@ -195,7 +195,7 @@ counts the frames per CAN ID.
   (2026-10-30). Made executable and started as it came, with no FUSE
   workaround; `mock://demo` ran smoothly, and its recording landed in
   `~/Documents/Havne/recordings/`. With Live showing, the app took
-  about 12 % of the CPU, and 9–10 % once the OpenGL and font packages
+  about 12 % of the CPU, and 9-10 % once the OpenGL and font packages
   above were installed.
 - **Not yet:** an ELM327 adapter
   on a Linux machine (the serial code is tested against a fake adapter

@@ -411,7 +411,7 @@ void write_isotp(cli::Line& l, const ecuio_session_t* session)
     l.ch('}');
 }
 
-// The signals the session's frames come without (ADR-0039 §6), as ids
+// The signals the session's frames come without (ADR-0039 section 6), as ids
 // the signals line names, whenever core's list changes; last holds the
 // list last written, read sized to the set
 void poll_absent(Output& out, ecuio_session_t* session,
@@ -936,7 +936,7 @@ int run_devices()
 }
 
 #if HAVNE_CLI_PLAY
-// play (ADR-0032 §8): a session's frames written to a virtual CAN
+// play (ADR-0032 section 8): a session's frames written to a virtual CAN
 // interface as they arrive, so the mock's car (or a recording) drives on
 // a bus a socketcan:// session, or any SocketCAN tool, can listen to
 struct Player {

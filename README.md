@@ -18,7 +18,7 @@ hardware.
 > [!WARNING]
 > **Experimental.** It has read one car through two adapters, from a laptop and from an Android phone; other vehicles and adapters are untested. It can clear trouble codes, after asking and saving them first, but has cleared them only on its fakes and simulated vehicle, never on a car. Read [DISCLAIMER.md](DISCLAIMER.md) before connecting it to a vehicle.
 
-![The Havne Dashboard through a quarter mile on the warmed-up simulated vehicle: launch control holds the engine near 4,000 rpm at the line, the tires spin off it, three upshifts at 6,800 rpm refill the shift lights, and speed climbs to about 107 mph at the line while coolant rises from 194 to 216 °F, where the fan cuts in, and the oil from 225 to 239 °F, before the driver lifts](docs/images/dashboard.gif)
+![The Havne Dashboard through a quarter mile on the warmed-up simulated vehicle: launch control holds the engine near 4,000 rpm at the line, the tires spin off it, three upshifts at 6,800 rpm refill the shift lights, and speed climbs to about 107 mph at the line while coolant rises from 194 to 216 deg F, where the fan cuts in, and the oil from 225 to 239 deg F, before the driver lifts](docs/images/dashboard.gif)
 
 *The Dashboard on the simulated vehicle (`mock://demo`), in real time:
 a quarter mile off launch control on a warm loop.*
@@ -230,9 +230,10 @@ latest release. Next:
 
 | Version | Plan |
 |---|---|
-| v0.3.5 | Full OBD-II diagnostics, reading and clearing trouble codes; SocketCAN requests through ISO-TP |
-| v0.3.6–v0.3.9 | A log viewer that overlays runs; CSV import and export, scrubbed for sharing; a health report; triggered logging and alerts |
-| Later | Python bindings, capture formats and discovery; a plugin framework; older buses |
+| v0.3.5 | Full OBD-II diagnostics, reading and clearing trouble codes; SocketCAN requests through ISO-TP; fault injection on a replay; reply timing per PID |
+| v0.3.6 | The car runs the adapters on hand can make; trouble-code descriptions, VIN decode and a readiness summary; the simulated ECU as `havne-cli sim` |
+| v0.3.7-v0.3.9 | A log viewer that overlays runs; CSV import and export, scrubbed for sharing; a health report; Python bindings; triggered logging and alerts |
+| Later | SocketCAN through a real controller, when the hardware is on hand; discovery and capture formats; a plugin framework; older buses |
 
 [STATUS.md](STATUS.md) holds what works, what's verified, the known
 issues and the full roadmap; [CHANGELOG.md](CHANGELOG.md) what each

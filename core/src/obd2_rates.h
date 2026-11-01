@@ -11,7 +11,7 @@
 
 #include <stdint.h>
 
-/* ADR-0039 §3: the Service 01 PIDs the obd2 set asks in the fast class,
+/* ADR-0039 section 3: the Service 01 PIDs the obd2 set asks in the fast class,
  * what a driver or a logged pull watches change within a second: load,
  * the short-term trims, fuel pressure in each of J1979's forms, MAP,
  * rpm, speed, timing, MAF, throttle, the wide-range sensors' lambda,
@@ -30,7 +30,7 @@ constexpr uint8_t ECUIO_OBD2_FAST_PIDS[] = {
     0x49,                                           /* pedal D */
 };
 
-/* ADR-0039 §3: fast PIDs that can read one sensor, as (keep, demote)
+/* ADR-0039 section 3: fast PIDs that can read one sensor, as (keep, demote)
  * pairs: when a channel's bitmaps list both, the second goes slow
  * (ecuio_engine_judge_duplicates). The fuel rail's gauge (23) and
  * absolute (59) forms read one value on the test car

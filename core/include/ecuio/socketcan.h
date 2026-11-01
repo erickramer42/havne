@@ -17,7 +17,7 @@ extern "C" {
 #endif
 
 /*
- * CAN-interface discovery for socketcan:// (ADR-0032 §7), Linux only.
+ * CAN-interface discovery for socketcan:// (ADR-0032 section 7), Linux only.
  *
  * Lists the network interfaces whose link kind is "can" (a CAN
  * controller: candleLight and CANable through gs_usb, PEAK, Kvaser, an

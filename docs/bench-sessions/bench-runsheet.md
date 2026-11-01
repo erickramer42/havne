@@ -111,7 +111,7 @@ URI. Leave it about two minutes:
 
 ## Phase 3: the vehicle session's other URIs
 
-**Action:** connect each for 15–30 s:
+**Action:** connect each for 15-30 s:
 
     j2534://OBDX Pro - VX?poll=0x0C
     j2534://OBDX Pro - VX?profile=uds-generic&did=F180-F1FF

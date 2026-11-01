@@ -43,7 +43,7 @@ read history through per-row model roles cheaply.
 
 ## Consequences
 
-- GUI emissions drop about 20× at mock rate (measured against the
+- GUI emissions drop about 20x at mock rate (measured against the
   `guiNotifyCount` baseline) and no longer depend on the frame rate.
 - The chart's x-axis resolution is one window, about 100 ms.
   Per-sample timestamps would need decoding to move onto the worker
@@ -65,15 +65,15 @@ axis stay.
 - **Samples carry their own time.** A history sample's time is its
   frame's session time in milliseconds (`timestamp_us / 1000`), not the
   tick that drained it. The chart's x-axis is session time: under a
-  replay it is the recording's time, so a replay at 10× shows ten
+  replay it is the recording's time, so a replay at 10x shows ten
   seconds of the recording in each second.
 - **A window keeps its envelope, not just its newest value.** For each
   signal the bridge's staging keeps the window's newest value and its
   lowest and highest, each with its time. The tick hands the model one
-  entry per signal (ADR-0024 §7), and the model's history takes the
+  entry per signal (ADR-0024 section 7), and the model's history takes the
   distinct points among the three, in time order: one to three a
   window. A short peak inside a window stays on the chart at its own
-  time. The engine-start recording peaks at 1,261 rpm; replayed at 10×
+  time. The engine-start recording peaks at 1,261 rpm; replayed at 10x
   with the newest value alone, the model's highest was 1,232.
 - **The ring holds 360 samples,** three windows' worth for each of the
   120 it held, so the trace still spans about 12 s at 10 Hz.
@@ -102,7 +102,7 @@ gives each row its last window's highest and lowest beside the newest
 value (`windowHigh`, `windowLow`, displayed like the value), and the
 gauges' peak and low holds take them, so a gauge holds the peak the
 chart shows. Holding the newest value alone, the engine-start
-recording replayed at 100× never reached its 1,261 rpm on the tach
+recording replayed at 100x never reached its 1,261 rpm on the tach
 (`QmlTest.dashboard`).
 
 ## Appendix: the model's timer counts sleep (2026-10-29)

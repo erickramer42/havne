@@ -1,4 +1,4 @@
-// File/layer: cli/line_ring.h | havne-cli, the worker-to-output ring (ADR-0031 §4)
+// File/layer: cli/line_ring.h | havne-cli, the worker-to-output ring (ADR-0031 section 4)
 // Testing: UNIT (tests/test_cli.cpp, CliRingTest)
 //
 // One ring of text between core's worker, which pushes finished lines,

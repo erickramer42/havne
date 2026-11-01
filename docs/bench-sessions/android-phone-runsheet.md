@@ -1,12 +1,12 @@
 # Android phone run sheet: the app on a phone, the VX's WiFi, then Bluetooth
 
 **Date:** <date>  **Phone:** Android <version> (12 or later)
-**Adapter:** OBDX Pro VX over WiFi, no vehicle (Phases 1–6); the
+**Adapter:** OBDX Pro VX over WiFi, no vehicle (Phases 1-6); the
 OBDLink MX+ on the test car (Phase 7)
 **Havne build:** <commit hash> (CI run <run id>)
 
 Fill in a copy as `docs/bench-sessions/<date>-android[-n].md`. Phases
-1–5 are step 1 of [ADR-0028](../adr/0028-app-fed-streams.md), the
+1-5 are step 1 of [ADR-0028](../adr/0028-app-fed-streams.md), the
 Android baseline (Known Issue #2): the app, and its first route to a
 car, `elm327://` over WiFi, which needs no Bluetooth code. Phase 6 is
 step 3, the phone's Bluetooth without an adapter. Phase 7 is step 4,
@@ -72,8 +72,8 @@ unknown developer ("Install anyway").
 
 ## Phase 2: mock
 
-**Action:** Settings → **Display** → **Developer mode** on, then
-**Adapter** → **Mock**, then
+**Action:** Settings > **Display** > **Developer mode** on, then
+**Adapter** > **Mock**, then
 **Connect**.
 
 - [ ] Turn the phone to landscape and back once more, then on the
@@ -91,13 +91,13 @@ unknown developer ("Install anyway").
 
 ## Phase 3: a recording, then its replay
 
-**Action:** Settings → **Recording** → **Record sessions** on, connect `mock://demo`
+**Action:** Settings > **Recording** > **Record sessions** on, connect `mock://demo`
 for about 20 s, disconnect.
 
 - [ ] The activity log's "Recording:" line. Copy it: it says where
       Android put the recordings (BENCH prep #23). An error instead
       (the folder couldn't be made): copy it, and skip the replay
-- [ ] Settings → **Recording**, its recent recordings: the newest row has this
+- [ ] Settings > **Recording**, its recent recordings: the newest row has this
       recording's time and "mock://demo · replays as mock". Select it:
       the field gets its `replay://` address. Connect, and confirm the
       values play back
@@ -111,7 +111,7 @@ to stay connected. In Havne, Settings: `elm327://192.168.4.1:23?profile=raw&poll
 **Connect**.
 
 - [ ] Connects within a few seconds. Copy the "Session:" line: on
-      USB power alone, "ELM327 adapter (ELM327 V2.1); …; battery
+      USB power alone, "ELM327 adapter (ELM327 V2.1); ...; battery
       0.0 V", as on the computer
 - [ ] Amber "Link quiet" within about 3 s (no bus: every request
       `NO DATA`, BENCH prep #15), no fault, for about 30 s
@@ -150,7 +150,7 @@ which isn't part of the name).
       each "Bluetooth, paired · <address>" (headphones and the like
       too: the list can't tell an adapter without connecting). Copy
       the count line
-- [ ] **Scan for BLE**: the button reads "Scanning…" for about 8 s;
+- [ ] **Scan for BLE**: the button reads "Scanning..." for about 8 s;
       BLE devices nearby join the list as "Bluetooth LE · <address>",
       or the line under it says the scan found none
 - [ ] Select a paired device that isn't an adapter (headphones, a
@@ -200,7 +200,7 @@ for about 30 s.
 
 - [ ] It connects within a few seconds. Copy the "Session:" line:
       `ELM327 adapter (ELM327 v1.4b, STN2255 v5.12.2); ISO 15765 at
-      500000 baud; profile obd2, …; battery …` (12.1 V through the
+      500000 baud; profile obd2, ...; battery ...` (12.1 V through the
       laptop with the ignition off)
 - [ ] Quiet with the ignition off, as through the laptop ("Link
       quiet"). Disconnect
@@ -211,13 +211,13 @@ for about 30 s.
 connect through the start and a minute of idling.
 
 - [ ] The ECU line within a few seconds: `ECU 0x7E8: supports 53
-      PIDs; …, 1 dropped: 01 5C (not in its supported PIDs)`
+      PIDs; ..., 1 dropped: 01 5C (not in its supported PIDs)`
 - [ ] The identity line (personal data: never photographed, scrubbed
       from the sheet)
 - [ ] Start the engine within about two minutes. RPM rises within a
       second on Live and the Dashboard. A drop in the crank recovers by
       itself: record how long
-- [ ] Idling: RPM against the tachometer, Battery Voltage 13.4–14.5 V,
+- [ ] Idling: RPM against the tachometer, Battery Voltage 13.4-14.5 V,
       Coolant Temp rising with the gauge. A screenshot of the Dashboard
       (no identity line in view). Disconnect
 - [ ] The rate: put `?poll=0x0C` after the address in the field,
@@ -288,7 +288,7 @@ safety hold.
 
 - [ ] At the first adapter connect Android asks to allow
       notifications: allow it. A notification, "Havne" over "Connected to
-      …" with "· recording", for as long as the session is up, and
+      ..." with "· recording", for as long as the session is up, and
       the gauge icon in the status bar, with no sound or vibration
 - [ ] The notification and the header name the adapter as
       `elm327://bt:…:` and the address's last two parts only, never
@@ -302,7 +302,7 @@ safety hold.
       ([2026-10-28-android-10](2026-10-28-android-10.md)). Note the
       times the screen went off and on
 - [ ] Afterwards, with `adb`: the recording's Delivery line (events.log,
-      at the disconnect), "to the GUI thread … max" well under a second
+      at the disconnect), "to the GUI thread ... max" well under a second
 - [ ] Afterwards, with `adb`: in the recording's events.log, the
       time between two lines by the clock (the first column) and by
       the session ("+seconds") agree within a second across the
@@ -334,7 +334,7 @@ safety hold.
    the screenshots and the wire log to a folder beside it. Scrub them
    as [bench-runsheet.md](bench-runsheet.md) says: the VX's MAC (in its
    network's name), no names, no paths with an account name
-2. Mark BENCH prep #21–#24 in [bench-prep.md](bench-prep.md). Scrub
+2. Mark BENCH prep #21-#24 in [bench-prep.md](bench-prep.md). Scrub
    Bluetooth addresses from the sheet and screenshots: `<BT address>`.
    After Phase 7, also the identity line, and the wire log's
    identification replies (`49 02` VIN, `49 04` CALID, `62 F1 xx`

@@ -2,9 +2,9 @@
 
 - **Status:** Accepted.
 - **Date:** 2026-10-23. Implemented with this record.
-- **Builds on:** [ADR-0013](0013-protocol-profiles.md) §6 (the ship
+- **Builds on:** [ADR-0013](0013-protocol-profiles.md) section 6 (the ship
   order names `uds-generic` as the research profile),
-  [ADR-0015](0015-request-engine.md) §2 (a def keyed `62 <DID>` enrols
+  [ADR-0015](0015-request-engine.md) section 2 (a def keyed `62 <DID>` enrols
   `22 <DID>`) and its Consequences (a per-session set built at create;
   values shown raw until a formula is known), and
   [ADR-0016](0016-signal-definition-layout.md)'s text kinds.
@@ -105,7 +105,7 @@ QML tests show a text row on every platform.
 
 ## Alternatives considered
 
-- **`did=` implies the profile.** Rejected: ADR-0013 §2 wants the URI to
+- **`did=` implies the profile.** Rejected: ADR-0013 section 2 wants the URI to
   say what a session is, and `?profile=obd2&did=` would need a rule of
   its own. The Settings page will build the URI, so the typing cost
   lands there.

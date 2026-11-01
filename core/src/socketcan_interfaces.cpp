@@ -4,7 +4,7 @@
 //          every platform); HARNESS: VcanTest.InterfacesListVcan0 (Linux);
 //          the attributes' parsing is socketcan_wire.h's, UNIT
 //
-// CAN-interface discovery (ecuio/socketcan.h, ADR-0032 §7) and the link
+// CAN-interface discovery (ecuio/socketcan.h, ADR-0032 section 7) and the link
 // lookup the SocketCAN transport checks an interface with
 // (socketcan_netlink.h).
 

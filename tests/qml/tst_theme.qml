@@ -56,7 +56,7 @@ TestCase {
     }
 
     // A trace in the danger color would read as an alarm, so no series
-    // color is a saturated hue within 20° of it
+    // color is a saturated hue within 20 degrees of it
     function test_seriesColorsLeaveOutTheDangerHue() {
         const danger = Qt.color(Theme.danger).hsvHue
         for (const c of Theme.seriesColors) {

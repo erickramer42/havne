@@ -3,7 +3,7 @@
 //          <sys/sdt.h>); HARNESS: CI's linux-build bpftrace step (each
 //          probe fires, on a havne-cli mock:// stream)
 //
-// USDT probes in core (ADR-0034 §4): named points a tracer (bpftrace,
+// USDT probes in core (ADR-0034 section 4): named points a tracer (bpftrace,
 // perf) can attach to in a running process. On Linux with systemtap's
 // header-only <sys/sdt.h> (CMake sets ECUIO_HAVE_SDT), each is one nop
 // plus a .note.stapsdt entry naming it and where its arguments live;

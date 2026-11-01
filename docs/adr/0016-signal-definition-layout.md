@@ -9,7 +9,7 @@
   model: the type enum, `num_bytes`, Intel-only byte order with a
   flags bit held for Motorola, and the 88-byte size. Its linear
   scaling, message-ID gate and mock-encoder rule stand.
-- **Amends:** [ADR-0015](0015-request-engine.md) §2. Its 3-byte mux
+- **Amends:** [ADR-0015](0015-request-engine.md) section 2. Its 3-byte mux
   keys land here, and its "No struct change" reasoning no longer
   holds, because core reads a layout version.
 
@@ -25,7 +25,7 @@ passed by pointer and kept by the registry
 ([ADR-0013](0013-protocol-profiles.md)). Its layout has outgrown
 ADR-0004:
 
-- **Width is stated three ways.** The type enum (`UINT8` …
+- **Width is stated three ways.** The type enum (`UINT8` ...
   `FLOAT32`), `num_bytes` and `bit_length` each give one. Decode
   extracts `bit_length` bits and never compares it with the type, and
   `num_bytes` only bounds `bit_offset + bit_length`. A 12-bit field
@@ -50,7 +50,7 @@ ADR-0004:
   frame's `data_length` is `uint16_t`, so every caller narrows. A
   `uint8_t` `start_byte` can't reach past byte 255 of a reassembled
   ISO 15765 message, which can carry 4,095 bytes.
-- **Mux keys stop at 2 bytes.** ADR-0015 §2 needs 3, for `62 <DID>`.
+- **Mux keys stop at 2 bytes.** ADR-0015 section 2 needs 3, for `62 <DID>`.
 - **A refused registration doesn't say why.** Registration returns
   `INVALID_ARGUMENT` for every validator failure, so a set author
   finds the failing def by hand.
@@ -202,7 +202,7 @@ typedef struct ecuio_signal_set {
   field can take reserved room and old sets keep loading.
 - The def's 24-byte tail is earmarked. `reserved[0]` (offset 96) holds
   the unit's quantity when unit conversion lands. `reserved[1]` is
-  free. `reserved[2..5]` (offsets 104–119) are free and 8-byte
+  free. `reserved[2..5]` (offsets 104-119) are free and 8-byte
   aligned, which fits a two-double display range.
 
 ### 7. Validation says why
@@ -251,8 +251,8 @@ not listed are unchanged.
 | 14 | `FLOAT32` | Narrowed: a `FLOAT` that isn't 32 bits at bit 0; both byte orders decode |
 | 15 | `RESERVED` | New: a reserved byte, or `flags`, isn't zero |
 | 16 | `BYTE_ORDER` | New: an unknown `byte_order` |
-| −15 | `LAYOUT` | New: `layout_version` isn't `ECUIO_SIGNAL_SET_LAYOUT`, checked before any def is read |
-| −16 | `SET_RESERVED` | New: a reserved field of the set isn't zero |
+| -15 | `LAYOUT` | New: `layout_version` isn't `ECUIO_SIGNAL_SET_LAYOUT`, checked before any def is read |
+| -16 | `SET_RESERVED` | New: a reserved field of the set isn't zero |
 
 The validator still accepts exactly what the decoder decodes, for
 the fields decode reads. The layout version and the reserved bytes
@@ -334,7 +334,7 @@ a buffer that never cuts. `ecuio_decode_signal` still refuses the text
 kinds and `ecuio_decode_text` the numeric ones, so the validator's
 contract reads: a def validates if and only if one of the two decodes
 it. The mux key gates text as it gates numbers, and a text def whose
-key is a `62 <DID>` enrols its request like any other (ADR-0015 §2).
+key is a `62 <DID>` enrols its request like any other (ADR-0015 section 2).
 The bridge stages text beside numbers and the signal model carries it
 as `text` and `isText`; LiveView shows a text row's text in place of a
 number and never plots it, and the recorder writes it to

@@ -18,7 +18,7 @@
 //          the obd2 block covers rotation, routing to each def's
 //          channel, Service 0x22 and a backlog beside the replies, plus
 //          ?poll= precedence over the profile's rotation. The probe
-//          (ADR-0015 §4): the bitmap walk before the rotation, what the
+//          (ADR-0015 section 4): the bitmap walk before the rotation, what the
 //          bitmaps and a negative reply drop, ?probe=0, the walk resumed
 //          after a quiet bus, and each channel's support report. The
 //          worker allocates nothing per frame (tests/new_counter.h).
@@ -543,7 +543,7 @@ TEST(J2534StreamTest, DirectLoadUriDeliversInjectedFramesExactly)
     EXPECT_EQ(static_cast<unsigned>(cap.payload_lens[0]), 8u);
 
     /* Session time (j2534_clock.h): the first frame the host's since
-     * attach, not the vendor's hour; then the vendor's 1000 µs steps. */
+     * attach, not the vendor's hour; then the vendor's 1000 us steps. */
     const uint64_t since_create = static_cast<uint64_t>(
         std::chrono::duration_cast<std::chrono::microseconds>(
             std::chrono::steady_clock::now() - before_create).count());
@@ -1035,7 +1035,7 @@ TEST_F(J2534AdoptionTest, PassiveReceiveWithFilterNoPoll)
     };
     inject(frame, sizeof(frame), 1000, 0, 1);
 
-    /* Wait for read → strip → dispatch */
+    /* Wait for read -> strip -> dispatch */
     wait_for_count(cap, 1, 50);
     EXPECT_EQ(cap.count.load(), 1u);
 
@@ -1182,7 +1182,7 @@ TEST(J2534StreamTest, UnknownProfileRejectedAtCreate)
 // ---------------------------------------------------------------------------
 
 /* ROTATION: ?profile=obd2&filter=0x7E8, the worker requests the obd2
- * set's PIDs in its two rate classes (ADR-0039 §3): two fast ones (04,
+ * set's PIDs in its two rate classes (ADR-0039 section 3): two fast ones (04,
  * 0C, 0D, 11, 10, then the rest in PID order), then one slow one (05,
  * 0F, 2F, 42, 5C, then the rest), each class round-robin. Order is asserted from the fake's recorded
  * WRITES (deterministic, one per reply), not from received frames.
@@ -1370,7 +1370,7 @@ TEST_F(J2534AdoptionTest, RequestsGoToTheirDefsChannel)
     ecuio_session_destroy(session);
 }
 
-/* SERVICE 0x22 (ADR-0015 §2): a def keyed 62 <DID> enrols the request
+/* SERVICE 0x22 (ADR-0015 section 2): a def keyed 62 <DID> enrols the request
  * 22 <DID>, 7 bytes on the wire, and decodes the reply. The fake's ECU
  * knows DID 0x1E1C and answers 62 1E 1C 12 34, so the value is 0x1234,
  * worked out here from the reply's bytes, not from the def. */
@@ -1552,7 +1552,7 @@ TEST_F(J2534AdoptionTest, PollOverridesSchedulerRotation)
 }
 
 /* ====================================================================
- * The probe (ADR-0015 §4): the supported-PID walk before the rotation,
+ * The probe (ADR-0015 section 4): the supported-PID walk before the rotation,
  * and dropping only on explicit answers.
  * ==================================================================== */
 

@@ -3,7 +3,7 @@
 //          registered stream with a pump thread as the app, its failure
 //          and reopen, the open's refusals and its wait, the registry's
 //          rules, the buffer's overflow; UNIT: test_c_abi: stream.h as
-//          strict C; Vehicle: the MX+ through Android (ADR-0028 §4)
+//          strict C; Vehicle: the MX+ through Android (ADR-0028 section 4)
 
 #include "elm327_stream.h"
 #include "elm327_port.h" /* ELM327_PORT_NAME_MAX */

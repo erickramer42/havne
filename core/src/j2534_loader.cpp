@@ -39,7 +39,7 @@ struct ecuio_j2534_handle {
 
 namespace {
 
-/* Root registry keys swept by discovery, per SAE J2534-1 v4.04 §5.3
+/* Root registry keys swept by discovery, per SAE J2534-1 v4.04 section 5.3
  * ("Pass-Thru Support.04.04") PLUS the no-hyphen variant some vendor
  * installers write ("PassThruSupport.04.04", as the OBDX Pro does).
  * Both spellings exist in the wild; the spec spelling is kept first
@@ -148,7 +148,7 @@ PeSniff sniff_pe(const char* dll_path)
         out.arch = ECUIO_DLL_ARCH_X86;
     } else if (machine == IMAGE_FILE_MACHINE_AMD64) {
         out.arch = ECUIO_DLL_ARCH_X64;
-    }   /* ARM64, Itanium, …: UNKNOWN, hosted by the x64 surrogate */
+    }   /* ARM64, Itanium, ...: UNKNOWN, hosted by the x64 surrogate */
     return out;
 }
 
