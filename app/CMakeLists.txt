@@ -9,7 +9,7 @@
 
 # 6.12 is the version CI and local builds use (macOS needs it), and
 # REQUIRES sets every Qt policy up to it to NEW, QTP0004 among them.
-find_package(Qt6 6.12 REQUIRED COMPONENTS Quick QuickControls2)
+find_package(Qt6 6.12 REQUIRED COMPONENTS Quick QuickControls2 Network)
 
 qt_standard_project_setup(REQUIRES 6.12)
 
@@ -19,6 +19,8 @@ qt_standard_project_setup(REQUIRES 6.12)
 # the plugin with Q_IMPORT_QML_PLUGIN(AppPlugin), or the module's
 # types are never registered.
 qt_add_library(app_ui STATIC
+    adapterrelay.cpp
+    adapterrelay.h
     blepicker.cpp
     blepicker.h
     btconnect.cpp
@@ -77,6 +79,7 @@ target_include_directories(app_ui PRIVATE ${CMAKE_SOURCE_DIR}/cli)
 target_link_libraries(app_ui PUBLIC
     Qt6::Quick
     Qt6::QuickControls2
+    Qt6::Network
     ecuio-core
 )
 app_enable_warnings(app_ui)
@@ -86,6 +89,8 @@ app_enable_warnings(app_ui)
 if(ANDROID)
     find_package(Qt6 6.12 REQUIRED COMPONENTS Bluetooth)
     target_sources(app_ui PRIVATE btstream.cpp btstream.h)
+    # A paired adapter relayed to a computer over USB (ADR-0047)
+    target_sources(app_ui PRIVATE btrelay.cpp btrelay.h)
     target_link_libraries(app_ui PUBLIC Qt6::Bluetooth)
     target_compile_definitions(app_ui PUBLIC APP_BLUETOOTH)
     # The foreground service held while an adapter session is up

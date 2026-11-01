@@ -267,7 +267,7 @@ hardware ([roadmap](#roadmap)).
   ELM327 [bench](docs/bench-sessions/elm327-bench-runsheet.md) and
   [vehicle](docs/bench-sessions/elm327-vehicle-runsheet.md) sheets, and
   the [phone's](docs/bench-sessions/android-phone-runsheet.md).
-- **Tests:** 823 ctest cases on Windows (both trees rebuilt,
+- **Tests:** 840 ctest cases on Windows (both trees rebuilt,
   2026-11-01), all passing but two env-gated skips (the cross-arch
   case, and the real-car recordings' diff, run locally), plus the
   cross-arch subset (86/86); 0 MSVC warnings. CI runs ctest on Windows,
@@ -419,6 +419,12 @@ reach into car-verified claims and finishes the diagnostics.
   manufacturer code); and a **readiness summary** (built, ADR-0045:
   the federal inspection rule, 40 CFR 85.2222, over every ECU's
   monitors for the VIN's model year).
+- **The phone as a relay** (built, ADR-0047): a paired Bluetooth
+  adapter relayed to a computer on the phone's USB cable, so havne-cli
+  reaches an adapter only the phone can (`adb forward`, then
+  `elm327://127.0.0.1:35000`); tested on the desktop with a fake
+  adapter. Left: the phone run sheet's Phase 9, at the desk, then a
+  long run on the car.
 - **The simulator as a product:** `havne-cli sim <uri> --on vcan0`
   (built, ADR-0046: `mock://`, the drive cycle or the fakes' canned
   values, the mock's diagnostics, a VIN, periodic faults; `replay://`,

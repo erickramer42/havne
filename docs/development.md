@@ -483,6 +483,16 @@ havne-cli vin <VIN>                                       # a VIN's year, make a
 havne-cli dtc P0301                                       # a trouble code's title, offline
 ```
 
+An adapter only the phone reaches: the app relays it to a computer on
+its USB cable ([ADR-0047](adr/0047-adapter-relay.md); Settings, Adapter,
+the adapter's row, then **Relay**, in developer mode), and havne-cli
+connects as to a WiFi adapter:
+
+```sh
+adb forward tcp:35000 tcp:35000
+havne-cli stream "elm327://127.0.0.1:35000?poll=0x0C" --seconds 30
+```
+
 Its output is JSON lines, schema 1 (ADR-0031 section 3); a `slept` line marks
 a gap the machine's sleep made (ADR-0033 section 6). Its tests are
 `test_cli` (the formatting, the ring and the sleep rule) and ctest's `CliGoldenTest`,

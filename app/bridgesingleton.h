@@ -1,7 +1,7 @@
 // File/layer: app/bridgesingleton.h | Qt6 Qml, app layer, C++17
 // Testing: manual smoke (the app driven through UI Automation): every
-//          page binds Bridge.*; all_qmllint resolves Bridge's properties through this
-//          registration
+//          page binds Bridge.*; all_qmllint resolves Bridge's and Relay's
+//          properties through these registrations
 
 #pragma once
 
@@ -9,6 +9,7 @@
 #include <QQmlEngine>
 #include <QtQml/qqmlregistration.h>
 
+#include "adapterrelay.h"
 #include "sessionbridge.h"
 
 // Exposes main()'s bridge to QML as the `Bridge` singleton of the App
@@ -34,6 +35,28 @@ public:
         // main() owns it; the engine must never delete it.
         QJSEngine::setObjectOwnership(instance, QJSEngine::CppOwnership);
         return instance;
+    }
+};
+
+// main()'s adapter relay as the `Relay` singleton (ADR-0047); without
+// one (the QML tests'), the engine's own, which can't relay
+struct RelaySingleton
+{
+    Q_GADGET
+    QML_FOREIGN(AdapterRelay)
+    QML_SINGLETON
+    QML_NAMED_ELEMENT(Relay)
+
+public:
+    static AdapterRelay* create(QQmlEngine*, QJSEngine* engine)
+    {
+        AdapterRelay* relay = AdapterRelay::instance;
+        if (relay == nullptr) {
+            return new AdapterRelay; // the engine's
+        }
+        Q_ASSERT(engine->thread() == relay->thread());
+        QJSEngine::setObjectOwnership(relay, QJSEngine::CppOwnership);
+        return relay;
     }
 };
 

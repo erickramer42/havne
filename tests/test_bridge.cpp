@@ -1,4 +1,4 @@
-// File/layer: tests/test_bridge.cpp | GTest + QtCore, app-layer tests
+// File/layer: tests/test_bridge.cpp | GTest + QtCore/Network, app-layer tests
 // Testing: UNIT/HARNESS: the bridge and its models against the real mock
 //          worker (and, on Windows, the fake J2534 DLL): marshaling,
 //          coalescing, backpressure, the frame log's ring and order, the
@@ -7,7 +7,9 @@
 //          paths over the vehicle fixture, recording, the stream
 //          preparer's refusal (ADR-0028), the BLE service picker
 //          and the inspection line (ADR-0045,
-//          BridgeTest.InspectionEntryIsWhatThePageShows)
+//          BridgeTest.InspectionEntryIsWhatThePageShows), and the adapter
+//          relay over loopback TCP with a fake adapter (ADR-0047,
+//          BridgeTest.Relay*)
 
 #include <gtest/gtest.h>
 
@@ -16,6 +18,7 @@
 #include <QDir>
 #include <QDirIterator>
 #include <QElapsedTimer>
+#include <QHostAddress>
 #include <QEventLoop>
 #include <QFile>
 #include <QFileInfo>
@@ -27,6 +30,7 @@
 #include <QRegularExpression>
 #include <QSet>
 #include <QSettings>
+#include <QTcpSocket>
 #include <QStringList>
 #include <QTemporaryDir>
 #include <QTimer>
@@ -45,6 +49,7 @@
 #include <map>
 #include <vector>
 
+#include "adapterrelay.h"
 #include "blepicker.h"
 #include "btconnect.h"
 #include "btretire.h"
@@ -521,6 +526,240 @@ TEST(BridgeTest, BtRetireFallsBackWhenItNeverSaysUnconnected)
     ASSERT_FALSE(s.isNull());
     runDeletions(500);
     EXPECT_TRUE(s.isNull());
+}
+
+// ---- The adapter relay (ADR-0047): a fake adapter, real loopback TCP ----
+namespace {
+
+// What the relay did to its adapter, kept past the adapter, which the
+// relay owns and deletes at stop
+struct RelayFakeState {
+    int opens = 0;
+    int closes = 0;
+    QByteArray written;
+    RelayAdapter* live = nullptr; // the adapter, while it exists
+};
+
+class FakeRelayAdapter : public RelayAdapter
+{
+public:
+    explicit FakeRelayAdapter(std::shared_ptr<RelayFakeState> s)
+        : m_s(std::move(s))
+    {
+        m_s->live = this;
+    }
+    ~FakeRelayAdapter() override { m_s->live = nullptr; }
+    void open() override { ++m_s->opens; }
+    void write(const QByteArray& bytes) override { m_s->written += bytes; }
+    void close() override { ++m_s->closes; }
+
+private:
+    std::shared_ptr<RelayFakeState> m_s;
+};
+
+// A relay whose factory makes fake adapters, listening on a port the
+// system picks
+struct RelayFixture {
+    std::shared_ptr<RelayFakeState> s = std::make_shared<RelayFakeState>();
+    QString address;
+    AdapterRelay relay;
+
+    RelayFixture()
+    {
+        relay.setFactory([this](const QString& a) {
+            address = a;
+            return std::unique_ptr<RelayAdapter>(new FakeRelayAdapter(s));
+        });
+    }
+    QString start() { return relay.start("elm327://bt:00:11:22:33:44:55", 0); }
+    void adapterOpens() { s->live->opened(); }
+    void adapterSays(const QByteArray& b) { s->live->received(b); }
+    void adapterFails(const QString& why) { s->live->failed(why); }
+};
+
+// A computer: a socket to the relay's port, connected once the relay
+// has taken it
+std::unique_ptr<QTcpSocket> computerOn(AdapterRelay& relay)
+{
+    auto c = std::make_unique<QTcpSocket>();
+    c->connectToHost(QHostAddress::LocalHost,
+                     static_cast<quint16>(relay.port()));
+    EXPECT_TRUE(c->waitForConnected(3000)) << c->errorString().toStdString();
+    return c;
+}
+
+QByteArray readFor(QTcpSocket& c, int want, int timeout_ms = 3000)
+{
+    QByteArray got;
+    spinUntil(
+        [&] {
+            got += c.readAll();
+            return got.size() >= want;
+        },
+        timeout_ms, 10);
+    return got;
+}
+
+bool closedFromTheFarSide(QTcpSocket& c, int timeout_ms = 3000)
+{
+    return spinUntil(
+        [&] { return c.state() == QAbstractSocket::UnconnectedState; },
+        timeout_ms, 10);
+}
+
+} // namespace
+
+// The computer's bytes reach the adapter and the adapter's the computer,
+// in order, counted; the address is the URI's, its query left out
+TEST(BridgeTest, RelayPassesBytesBothWaysInOrder)
+{
+    RelayFixture f;
+    ASSERT_EQ(f.start(), QString());
+    EXPECT_TRUE(f.relay.running());
+    EXPECT_GT(f.relay.port(), 0);
+    EXPECT_EQ(f.address, QStringLiteral("00:11:22:33:44:55"));
+    EXPECT_EQ(f.s->opens, 1) << "the adapter opens at start";
+    f.adapterOpens();
+    auto c = computerOn(f.relay);
+    ASSERT_TRUE(spinUntil([&] { return f.relay.computerConnected(); }, 3000, 10));
+    c->write("ATZ\r");
+    c->write("ATE0\r");
+    ASSERT_TRUE(spinUntil([&] { return f.s->written.size() >= 9; }, 3000, 10));
+    EXPECT_EQ(f.s->written, QByteArray("ATZ\rATE0\r"));
+    f.adapterSays("ELM327 v1.5\r\r>");
+    f.adapterSays("OK\r\r>");
+    EXPECT_EQ(readFor(*c, 19),QByteArray("ELM327 v1.5\r\r>OK\r\r>"));
+    EXPECT_EQ(f.relay.bytesOut(), 9);
+    EXPECT_EQ(f.relay.bytesIn(), 19);
+}
+
+// A computer that connects before the adapter is open: its bytes wait for
+// the open and then go in order; a computer sending past what a setup
+// would is disconnected
+TEST(BridgeTest, RelayHoldsAComputersBytesUntilTheAdapterOpens)
+{
+    RelayFixture f;
+    ASSERT_EQ(f.start(), QString());
+    auto c = computerOn(f.relay);
+    ASSERT_TRUE(spinUntil([&] { return f.relay.computerConnected(); }, 3000, 10));
+    c->write("ATZ\r");
+    spinLoop(100);
+    EXPECT_TRUE(f.s->written.isEmpty()) << "nothing before the open";
+    EXPECT_EQ(f.s->opens, 1) << "an open under way isn't asked again";
+    f.adapterOpens();
+    EXPECT_EQ(f.s->written, QByteArray("ATZ\r"));
+    c->write("ATI\r");
+    ASSERT_TRUE(spinUntil([&] { return f.s->written.size() >= 8; }, 3000, 10));
+    EXPECT_EQ(f.s->written, QByteArray("ATZ\rATI\r"));
+
+    RelayFixture g;
+    ASSERT_EQ(g.start(), QString());
+    auto d = computerOn(g.relay);
+    ASSERT_TRUE(spinUntil([&] { return g.relay.computerConnected(); }, 3000, 10));
+    d->write(QByteArray(AdapterRelay::kHeldMax + 1, 'A'));
+    EXPECT_TRUE(closedFromTheFarSide(*d));
+    EXPECT_FALSE(g.relay.computerConnected());
+    EXPECT_TRUE(g.s->written.isEmpty());
+}
+
+// One computer at a time: a second is closed and the first carries on
+TEST(BridgeTest, RelayRefusesASecondComputer)
+{
+    RelayFixture f;
+    ASSERT_EQ(f.start(), QString());
+    f.adapterOpens();
+    auto first = computerOn(f.relay);
+    ASSERT_TRUE(spinUntil([&] { return f.relay.computerConnected(); }, 3000, 10));
+    auto second = computerOn(f.relay);
+    EXPECT_TRUE(closedFromTheFarSide(*second));
+    first->write("ATZ\r");
+    ASSERT_TRUE(spinUntil([&] { return f.s->written.size() >= 4; }, 3000, 10));
+    EXPECT_EQ(f.s->written, QByteArray("ATZ\r"));
+    EXPECT_EQ(first->state(), QAbstractSocket::ConnectedState);
+}
+
+// The adapter's link dropping ends the computer's, so its core sees the
+// port fail and connects again; that computer opens the adapter again
+TEST(BridgeTest, RelayEndsTheComputersLinkWithTheAdapters)
+{
+    RelayFixture f;
+    ASSERT_EQ(f.start(), QString());
+    f.adapterOpens();
+    auto c = computerOn(f.relay);
+    ASSERT_TRUE(spinUntil([&] { return f.relay.computerConnected(); }, 3000, 10));
+    f.adapterFails(QStringLiteral("the adapter disconnected"));
+    EXPECT_TRUE(closedFromTheFarSide(*c));
+    EXPECT_TRUE(f.relay.status().contains(QStringLiteral("the adapter disconnected")))
+        << f.relay.status().toStdString();
+    EXPECT_TRUE(f.relay.running()) << "still listening";
+    auto again = computerOn(f.relay);
+    ASSERT_TRUE(spinUntil([&] { return f.relay.computerConnected(); }, 3000, 10));
+    EXPECT_EQ(f.s->opens, 2) << "the next computer opens the adapter";
+}
+
+// A computer leaving keeps the adapter's link for the next one
+TEST(BridgeTest, RelayKeepsTheAdapterWhenTheComputerLeaves)
+{
+    RelayFixture f;
+    ASSERT_EQ(f.start(), QString());
+    f.adapterOpens();
+    {
+        auto c = computerOn(f.relay);
+        ASSERT_TRUE(spinUntil([&] { return f.relay.computerConnected(); }, 3000, 10));
+        c->disconnectFromHost();
+        ASSERT_TRUE(spinUntil([&] { return !f.relay.computerConnected(); }, 3000, 10));
+    }
+    EXPECT_EQ(f.s->closes, 0);
+    EXPECT_TRUE(f.relay.status().contains(QStringLiteral("waiting for a computer")))
+        << f.relay.status().toStdString();
+    f.adapterSays("stray\r"); // nobody to take it
+    auto next = computerOn(f.relay);
+    ASSERT_TRUE(spinUntil([&] { return f.relay.computerConnected(); }, 3000, 10));
+    EXPECT_EQ(f.s->opens, 1) << "not opened again";
+    next->write("ATZ\r");
+    ASSERT_TRUE(spinUntil([&] { return f.s->written.size() >= 4; }, 3000, 10));
+    f.adapterSays(">");
+    EXPECT_EQ(readFor(*next, 1), QByteArray(">")) << "no stray bytes first";
+}
+
+// Stop ends the computer's link, the listening and the adapter's link
+TEST(BridgeTest, RelayStopEndsEverything)
+{
+    RelayFixture f;
+    ASSERT_EQ(f.start(), QString());
+    f.adapterOpens();
+    const int port = f.relay.port();
+    auto c = computerOn(f.relay);
+    ASSERT_TRUE(spinUntil([&] { return f.relay.computerConnected(); }, 3000, 10));
+    f.relay.stop();
+    EXPECT_FALSE(f.relay.running());
+    EXPECT_EQ(f.relay.port(), 0);
+    EXPECT_EQ(f.s->closes, 1);
+    EXPECT_EQ(f.s->live, nullptr) << "the adapter goes with the relay";
+    EXPECT_TRUE(closedFromTheFarSide(*c));
+    QTcpSocket late;
+    late.connectToHost(QHostAddress::LocalHost, static_cast<quint16>(port));
+    EXPECT_FALSE(late.waitForConnected(500)) << "nothing listens";
+}
+
+// What it relays: a paired classic adapter's URI, in a build that can
+TEST(BridgeTest, RelayRefusesWhatItCantRelay)
+{
+    AdapterRelay none;
+    EXPECT_FALSE(none.available());
+    EXPECT_FALSE(none.start("elm327://bt:00:11:22:33:44:55", 0).isEmpty());
+    EXPECT_FALSE(none.running());
+
+    RelayFixture f;
+    for (const char* uri : {"elm327://ble:00:11:22:33:44:55", "elm327://COM5",
+                            "elm327://bt:", "mock://demo",
+                            "elm327://192.168.0.10:35000"}) {
+        EXPECT_FALSE(f.relay.start(uri, 0).isEmpty()) << uri;
+        EXPECT_FALSE(f.relay.running()) << uri;
+    }
+    EXPECT_EQ(f.s->opens, 0);
+    ASSERT_EQ(f.start(), QString());
+    EXPECT_FALSE(f.start().isEmpty()) << "one relay at a time";
 }
 
 TEST(BridgeTest, FramesMarshalFromWorkerToGuiThread)

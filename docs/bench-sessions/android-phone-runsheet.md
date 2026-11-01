@@ -325,6 +325,58 @@ safety hold.
 - [ ] Disconnect: the notification goes at once
 - [ ] Disconnect, unplug the MX+, key off
 
+## Phase 9: the adapter relayed to a computer (ADR-0047)
+
+The phone holds the MX+'s Bluetooth link and a computer on its USB
+cable runs `havne-cli` through it. 9a at the desk with the MX+ on a
+bench supply or the car, 9b on the car for a long run. Developer mode
+on; USB debugging on and this computer authorized; the phone charging
+on the cable; **battery saver off** (it can stop the foreground
+service).
+
+**9a: at the desk.**
+
+**Action:** Settings, Adapter: select the MX+ row, then **Relay**. On
+the computer:
+
+```sh
+adb forward tcp:35000 tcp:35000
+havne-cli stream "elm327://127.0.0.1:35000?poll=0x0C" --seconds 30
+```
+
+- [ ] The relay's line says "Opening the adapter", then "The adapter is
+      open; waiting for a computer on port 35000 ..."; the notification
+      reads "Relaying elm327://bt:... to a computer"
+- [ ] Connect is disabled while it relays
+- [ ] The stream's `session` line, then frames (`41 0C ...`) for 30 s
+      and an `end` line; the relay's counts rise while it runs and its
+      line says "Relaying to a computer"
+- [ ] Run the stream again: the relay keeps the adapter (no "Opening
+      the adapter" between the runs) and the second run streams the same
+- [ ] A second `havne-cli stream` while the first runs: it fails to
+      connect (`error` line, exit 3), and the first carries on
+- [ ] **Stop relaying**: the stream ends with the port failing, the
+      notification goes, and Connect is enabled again
+
+**9b: on the car, a long run.** Ignition on, engine off, the battery on
+a tender.
+
+**Action:** **Relay**, the screen off, then on the computer a DID sweep
+block (ADR-0020's appendix of 2026-11-01):
+
+```sh
+havne-cli stream "elm327://127.0.0.1:35000?profile=uds-generic&did=1000-13FF&scan=first&identify=0&diagnose=0" \
+  --until-scanned --seconds 900 > block.jsonl
+```
+
+- [ ] The `end` line's reason is `scanned`; the last `scan` line's
+      `left` is 0
+- [ ] With the screen off for the whole block (an hour or more for
+      several), the relay kept running: no `health` line with a fault
+      in the output, the notification still up when the screen comes on
+- [ ] Note the DIDs a second from the `scan` lines (`done` over their
+      times)
+
 ## If it fails, suspect
 
 | Symptom | Suspect |
@@ -338,6 +390,8 @@ safety hold.
 | The MX+ "didn't answer ATZ within 5 s" | Its Power light off (it takes power from the car only), or the laptop or the OBDLink app holding it: close them, connect again |
 | A crash on Disconnect, `SIGSEGV` in the `QtBtInputStream` thread | The closed link's socket deleted while Qt's Java reader still wrote into it ([ADR-0028](../adr/0028-app-fed-streams.md)'s appendix of 2026-11-01): copy the backtrace and the APK's commit |
 | No paired devices listed with Bluetooth on | Copy the count line and the line under it; `adb logcat -d | grep -i -E "havne|bluetooth"` if `adb` is at hand |
+| havne-cli through the relay: "the connection was refused" | `adb forward tcp:35000 tcp:35000` not run (or the phone replugged: run it again), or the relay not started |
+| The relay stops with the screen off | Battery saver on, or Android stopped the service: copy `adb logcat -d | grep -i -E "havne|SessionService"` |
 
 ## Post-session actions
 
