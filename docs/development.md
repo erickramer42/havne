@@ -476,6 +476,8 @@ build copies it next to `havne.exe`.
 havne-cli stream mock://demo --values --count 20          # the simulated car
 havne-cli stream "replay://<folder>?profile=obd2&speed=max" --values > run.jsonl
 havne-cli stream elm327://COM5 --seconds 60               # an adapter: as the app would
+havne-cli stream "elm327://COM5?profile=uds-generic&did=1000-13FF&scan=first" \
+  --until-scanned --seconds 600                           # one block of a DID sweep
 havne-cli devices                                         # what a URI can name
 havne-cli vin <VIN>                                       # a VIN's year, make and check digit, offline
 havne-cli dtc P0301                                       # a trouble code's title, offline

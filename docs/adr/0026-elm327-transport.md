@@ -453,6 +453,10 @@ UI needs no new code.
   and the engine waits out its pending wait (5.05 s) and asks again.
   The count digit is never sent with 0x22 or 0x09, where a `78` is
   plausible. The test car never sent a `78` to the J2534 sessions.
+
+  > Amended 2026-11-01: a one-DID 0x22 request now takes it, and a
+  > `78` or a reply spanning frames takes the DID back off it (the
+  > appendix of 2026-11-01, "the count digit for one DID").
 - **STN answers:** what the MX201 answers to `AT I`, `STI` and
   `AT PPS` (whether any parameter has been changed by another app),
   and which STN chip it is (STN2255 or STN2256). The FRPM gives the
@@ -963,3 +967,31 @@ neither the datasheet nor the FRPM says, and the fake doesn't count it.
 > The learning above stays for a PID the table doesn't define and an ECU
 > answering longer: `Elm327SessionTest.APidJ1979SaysSpansFramesNeverTakesTheDigit`,
 > `.AReplyLongerThanJ1979SaysTakesThePidOffTheCountDigit`.
+
+## Appendix: 2026-11-01, the count digit for one DID
+
+The digit went only with Service 01, since a 0x22 reply can span
+frames or be held pending (`7F 22 78`). A DID scan pays for that on
+every DID: most are refused in one line (`7F 22 31`), and each
+then waits out the adapter's timer. `elm327_response_count` now gives
+`1` to a one-DID 0x22 request to a physical ID too, unless the DID is
+in the transport's `long_dids` (a 64 Kbit set, empty at attach). When
+the prompt comes with the request still unanswered and either a
+message under way (the reply spans frames) or a `7F 22 78` seen (an
+adapter that counts the pending line), the transport puts the DID in
+the set, writes a wire-log line ("22 F1A0's reply spans frames: asked
+again, and with no response count from now on") and takes the request
+back (`ecuio_engine_sent(..., false)`): a scanned DID or an
+identification item is asked again at once with no digit, so a found
+DID isn't lost to the wait, and a polled one goes without it from its
+next turn. An answer that arrives with the digit, a positive reply in
+one line or a refusal, is untouched. Service 01's rule above is
+unchanged.
+
+Whether an adapter counts the pending line is still unknown, so the
+fake ELM327 can do either (`pending_counted`).
+`Elm327ProtocolTest.RequestsCarryTheCountDigitOnlyWhereOneReplyIsLikely`,
+`Elm327SessionTest.AScannedDidTakesTheCountDigitUntilItsReplySpansFrames`,
+`.AScannedDidHeldPendingIsAskedAgainWithoutTheDigit`,
+`.IdentificationReassemblesItsLongReplies` (F190's First Frame, then
+F190 without the digit). Not yet run on an adapter.

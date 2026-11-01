@@ -159,3 +159,31 @@ session:
   reply, and with nothing left to ask the link went quiet 1.9 s in,
   as the appendix of 2026-10-24 to ADR-0015 says it should. F188 and
   F190 as text refreshed about 13 times a second.
+
+## Appendix: 2026-11-01, a sweep at the adapter's pace
+
+A scan of a whole range per ECU (`did=0000-FFFF` in blocks of
+`ECUIO_ENGINE_SCAN_MAX`, one connect each) is a sweep, and two things
+in section 3 set its pace: each DID's turn alternates with the
+rotation once anything is found, and over an ELM327 each request
+without the response-count digit waits out the adapter's `AT ST` timer
+after its reply ([ADR-0026](0026-elm327-transport.md)'s appendix of
+2026-10-29). Two changes, both opt-in or invisible to a session that
+doesn't scan:
+
+- **`?scan=first`** (`turns`, the default, keeps section 3's
+  alternation): while a channel has DIDs left to scan, its one-shots go
+  back to back and the rotation waits until they are asked; the found
+  DIDs are polled from then on. Any other profile refuses it
+  (`BAD_URI`), since only uds-generic scans. On `vcan0` against
+  `havne-cli sim` (2026-11-01), 256 DIDs with one listed DID polled
+  took 10.3 s taking turns and 5.1 s with `first`, the engine's 20 ms
+  floor setting both. `RequestEngineTest.ScanFirstAsksEveryDidBeforeTheRotation`,
+  `Elm327SessionTest.ScanFirstAsksTheRangeBeforeTheRotation`,
+  `.ScanFirstBelongsToUdsGeneric`.
+- **The digit for one DID:** ADR-0026's appendix of the same date.
+
+`havne-cli stream` adds a `scan` line and `--until-scanned`
+([ADR-0031](0031-command-line-client.md)'s appendix of the same
+date), so a script can run one block a connect and stop when it's
+asked.

@@ -784,7 +784,8 @@ TEST_F(Elm327SessionTest, TimingReportsEachRequestOnTheHostsClock)
 
 /* Identification's replies span frames (the VIN's 20 bytes: a First
  * Frame and two Consecutive Frames), are reassembled and reach the
- * identity report; Service 09 and 0x22 carry no count digit */
+ * identity report; Service 09 carries no count digit, and a 0x22 item's,
+ * cut after the First Frame, is asked again without it */
 TEST_F(Elm327SessionTest, IdentificationReassemblesItsLongReplies)
 {
     Session s;
@@ -805,8 +806,8 @@ TEST_F(Elm327SessionTest, IdentificationReassemblesItsLongReplies)
     EXPECT_STREQ(id.list[0].text, "FAKEJ2534VIN00001");
     EXPECT_EQ(fake_count("0902"), 1u);
     EXPECT_EQ(fake_count("09021"), 0u);
-    EXPECT_EQ(fake_count("22F190"), 1u);
-    EXPECT_EQ(fake_count("22F1901"), 0u);
+    EXPECT_EQ(fake_count("22F1901"), 1u);
+    EXPECT_EQ(fake_count("22F190"), 2u) << "22F1901, then 22F190";
     Capture::Frame f{};
     ASSERT_TRUE(s.cap.find("49 02", &f));
     EXPECT_EQ(f.data.size(), 20u);
@@ -1033,7 +1034,7 @@ TEST_F(Elm327SessionTest, EachChannelIsAskedUnderItsOwnHeader)
         if (sent[i].rfind("ATSH", 0) == 0) {
             EXPECT_NE(sent[i], header) << "AT SH repeated at " << i;
             header = sent[i];
-        } else if (sent[i] == "221E1C") {
+        } else if (sent[i].rfind("221E1C", 0) == 0) {
             EXPECT_TRUE(header == "ATSH7E0" || header == "ATSH7E1" ||
                         (header.empty() && i == setup.size()))
                 << sent[i] << " at " << i;
@@ -1296,6 +1297,120 @@ TEST_F(Elm327SessionTest, NoDataGoesQuietWithoutAnEpisode)
     EXPECT_EQ(episodes, 0u);
     set_knobs([](fake_elm327::knobs& k) { k.no_data = false; });
     EXPECT_TRUE(wait_for([&] { return s.state() == ECUIO_OK; }, 3000));
+}
+
+/* A scanned DID goes with the count digit, so a refusal (7F 22 31, one
+ * line) ends the exchange at once; a long DID's reply, cut after its
+ * First Frame, is asked again without it, found and never lost, and
+ * the rotation it joins asks it without the digit too */
+TEST_F(Elm327SessionTest, AScannedDidTakesTheCountDigitUntilItsReplySpansFrames)
+{
+    Session s;
+    ASSERT_EQ(s.create(uri("?profile=uds-generic&did=F19E-F1A0&identify=0"
+                           "&diagnose=0")),
+              ECUIO_OK)
+        << ecuio_last_error_detail();
+    s.start();
+    ecuio_channel_support_t sup{};
+    ASSERT_TRUE(wait_for(
+        [&] {
+            return ecuio_session_get_channel_support(s.s, 0, &sup) ==
+                       ECUIO_OK &&
+                   (sup.flags & ECUIO_SUPPORT_SCAN_COMPLETE) != 0;
+        },
+        3000));
+    EXPECT_EQ(sup.scan_found, 1u);
+    EXPECT_EQ(sup.scan_refused, 2u);
+    EXPECT_EQ(sup.scan_done, 3u) << "nothing unanswered";
+    ASSERT_TRUE(wait_for([&] { return s.cap.count("62 F1 A0") >= 2; }, 3000))
+        << "found, then polled";
+    Capture::Frame f{};
+    ASSERT_TRUE(s.cap.find("62 F1 A0", &f));
+    EXPECT_EQ(f.data.size(), 3u + fake_ecu::kLongDidLen);
+    EXPECT_EQ(fake_count("22F19E1"), 1u);
+    EXPECT_EQ(fake_count("22F19F1"), 1u);
+    EXPECT_EQ(fake_count("22F1A01"), 1u) << "the digit once";
+    EXPECT_GE(fake_count("22F1A0"), 3u) << "then none: the retry and the poll";
+}
+
+/* An adapter whose response count counts the ECU's 7F 22 78: the digit
+ * ends the exchange before the answer, so the request is asked again
+ * without it, and the DID is found, not left unanswered */
+TEST_F(Elm327SessionTest, AScannedDidHeldPendingIsAskedAgainWithoutTheDigit)
+{
+    set_knobs([](fake_elm327::knobs& k) {
+        k.pending = true;
+        k.pending_counted = true;
+    });
+    Session s;
+    ASSERT_EQ(s.create(uri("?profile=uds-generic&did=1E1C-1E1D&identify=0"
+                           "&diagnose=0")),
+              ECUIO_OK)
+        << ecuio_last_error_detail();
+    s.start();
+    ecuio_channel_support_t sup{};
+    ASSERT_TRUE(wait_for(
+        [&] {
+            return ecuio_session_get_channel_support(s.s, 0, &sup) ==
+                       ECUIO_OK &&
+                   (sup.flags & ECUIO_SUPPORT_SCAN_COMPLETE) != 0;
+        },
+        3000));
+    EXPECT_EQ(sup.scan_found, 1u);
+    EXPECT_EQ(sup.scan_refused, 1u);
+    EXPECT_EQ(sup.scan_done, 2u) << "nothing unanswered";
+    EXPECT_EQ(fake_count("221E1C1"), 1u);
+    EXPECT_EQ(fake_count("221E1D1"), 1u);
+    EXPECT_GE(fake_count("221E1C"), 2u);
+    EXPECT_GE(fake_count("221E1D"), 2u);
+    EXPECT_EQ(s.state(), ECUIO_OK);
+}
+
+/* ?scan=first: every scanned DID is asked before the listed one's
+ * second poll, where the turns would alternate them */
+TEST_F(Elm327SessionTest, ScanFirstAsksTheRangeBeforeTheRotation)
+{
+    Session s;
+    ASSERT_EQ(s.create(uri("?profile=uds-generic&did=1E1C&did=1E00-1E07"
+                           "&scan=first&identify=0&diagnose=0")),
+              ECUIO_OK)
+        << ecuio_last_error_detail();
+    s.start();
+    ecuio_channel_support_t sup{};
+    ASSERT_TRUE(wait_for(
+        [&] {
+            return ecuio_session_get_channel_support(s.s, 0, &sup) ==
+                       ECUIO_OK &&
+                   (sup.flags & ECUIO_SUPPORT_SCAN_COMPLETE) != 0;
+        },
+        3000));
+    ASSERT_TRUE(wait_for([&] { return fake_count("221E1C") >= 2; }, 3000));
+    const std::vector<std::string> sent = fake_commands();
+    size_t last_scan = 0;
+    std::vector<size_t> polls;
+    for (size_t i = 0; i < sent.size(); ++i) {
+        if (sent[i].rfind("221E0", 0) == 0) {
+            last_scan = i;
+        } else if (sent[i].rfind("221E1C", 0) == 0) {
+            polls.push_back(i);
+        }
+    }
+    ASSERT_GE(polls.size(), 2u);
+    EXPECT_LT(last_scan, polls[0]) << "the rotation waits for the scan";
+    EXPECT_EQ(sup.scan_done, 8u);
+}
+
+/* ?scan= takes turns or first, and first only where a scan can run */
+TEST_F(Elm327SessionTest, ScanFirstBelongsToUdsGeneric)
+{
+    Session s;
+    EXPECT_EQ(s.create(uri("?scan=first")), ECUIO_ERR_BAD_URI);
+    EXPECT_NE(strstr(ecuio_last_error_detail(), "uds-generic"), nullptr)
+        << ecuio_last_error_detail();
+    EXPECT_EQ(s.create(uri("?profile=uds-generic&did=1E1C&scan=fast")),
+              ECUIO_ERR_BAD_URI);
+    EXPECT_NE(strstr(ecuio_last_error_detail(), "turns or first"), nullptr)
+        << ecuio_last_error_detail();
 }
 
 /* A scan whose DIDs are all refused leaves nothing to ask: the worker
@@ -1881,7 +1996,7 @@ TEST_F(Elm327SessionTest, RefusalsNameTheirCause)
          "?serial= needs a serial rate from 300 to 4000000, not '9'"},
         {uri("?flags=0"), ECUIO_ERR_BAD_URI,
          "elm327:// takes no query key 'flags', only baud, serial, filter, "
-         "txid, poll, probe, identify, diagnose, pack, profile and did"},
+         "txid, poll, probe, identify, diagnose, pack, scan, profile and did"},
         {uri("?profile=uds-generic&did=7E8:1E1C&did=18DAF110:1E1C"),
          ECUIO_ERR_BAD_URI,
          "the channels mix 11-bit and 29-bit IDs, which one connection "

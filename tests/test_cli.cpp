@@ -5,13 +5,15 @@
 //          and identity lines (CliVinTest, ADR-0043) decode through core;
 //          the titles and the dtc line (CliDtcTest, ADR-0044) name through it;
 //          the inspection line (CliInspectionTest, ADR-0045) is core's verdict;
-//          the simulated ECU's lines (CliSimTest, ADR-0046).
+//          the simulated ECU's lines (CliSimTest, ADR-0046); the DID
+//          scan's line and --until-scanned's end (CliScanTest, ADR-0020).
 //          The program end to end is the golden runs'
 //          (tests/golden/cli/) and CliSignalTest's (tests/CMakeLists.txt)
 
 #include "diagnostics_line.h"
 #include "jsonl.h"
 #include "line_ring.h"
+#include "scan_line.h"
 #include "sim_line.h"
 #include "sleep_watch.h"
 #include "timing_line.h"
@@ -526,6 +528,70 @@ TEST(CliTimingTest, ASnapshotCarriesTheRowsThatChanged)
     EXPECT_TRUE(s.changed(0, r)) << "a timeout counts";
     EXPECT_TRUE(s.changed(1, r)) << "each row its own";
     EXPECT_FALSE(s.changed(ECUIO_PROFILE_MAX_REQUESTS, r));
+}
+
+// A DID scan's progress, from the channel's support report
+TEST(CliScanTest, ALineCarriesTheScansCounts)
+{
+    ecuio_channel_support_t s{};
+    s.rx_id = 0x7E8;
+    s.scan_total = 1024;
+    s.scan_done = 300;
+    s.scan_found = 7;
+    s.scan_refused = 293;
+    s.scan_polled = 7;
+    char buf[512];
+    cli::Line l(buf, sizeof buf);
+    cli::scan_line(l, s);
+    ASSERT_TRUE(l.finish());
+    EXPECT_EQ(std::string(l.data(), l.size()),
+              "{\"type\":\"scan\",\"ecu\":\"0x7E8\",\"total\":1024,"
+              "\"done\":300,\"found\":7,\"refused\":293,\"left\":724,"
+              "\"polled\":7,\"complete\":false}\n");
+}
+
+// While a scan runs, a change is written at most once a second; its end at
+// once, and every change on the stream's last read; a channel with no scan
+// never
+TEST(CliScanTest, AChangeIsWrittenOnceASecondAndTheEndAtOnce)
+{
+    ecuio_channel_support_t s{};
+    s.scan_total = 4;
+    cli::ScanSeen seen;
+    EXPECT_TRUE(cli::scan_due(s, seen, 0)) << "the first read";
+    EXPECT_FALSE(cli::scan_due(s, seen, 2000000)) << "nothing changed";
+    s.scan_done = 1;
+    EXPECT_TRUE(cli::scan_due(s, seen, 2000000));
+    s.scan_done = 2;
+    EXPECT_FALSE(cli::scan_due(s, seen, 2500000)) << "within the second";
+    EXPECT_TRUE(cli::scan_due(s, seen, 2500000, true)) << "the last read";
+    s.scan_done = 3;
+    EXPECT_TRUE(cli::scan_due(s, seen, 3500001));
+    s.scan_done = 4;
+    s.flags = ECUIO_SUPPORT_SCAN_COMPLETE;
+    EXPECT_TRUE(cli::scan_due(s, seen, 3500002)) << "the end, at once";
+    EXPECT_FALSE(cli::scan_due(s, seen, 9000000));
+
+    ecuio_channel_support_t none{};
+    cli::ScanSeen none_seen;
+    EXPECT_FALSE(cli::scan_due(none, none_seen, 0));
+    EXPECT_FALSE(cli::scan_due(none, none_seen, 0, true));
+}
+
+// --until-scanned ends once every channel with a scan has completed it;
+// with none scanning there is nothing to wait for
+TEST(CliScanTest, UntilScannedWaitsForEveryChannelThatScans)
+{
+    ecuio_channel_support_t s[3] = {};
+    EXPECT_FALSE(cli::scans_any(s, 3));
+    EXPECT_FALSE(cli::scans_complete(s, 3)) << "nothing scans";
+    s[0].scan_total = 4;
+    s[2].scan_total = 2;
+    EXPECT_TRUE(cli::scans_any(s, 3));
+    s[0].flags = ECUIO_SUPPORT_SCAN_COMPLETE;
+    EXPECT_FALSE(cli::scans_complete(s, 3)) << "the third still scans";
+    s[2].flags = ECUIO_SUPPORT_SCAN_COMPLETE;
+    EXPECT_TRUE(cli::scans_complete(s, 3)) << "the second has no scan";
 }
 
 /* ADR-0043: a VIN's decode, field by field (the VINs made up around FAKE,

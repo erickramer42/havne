@@ -30,6 +30,7 @@
 #include "uri_query.h"
 
 #include <cstdint>
+#include <cstring>
 #include <limits>
 #include <memory>
 #include <mutex>
@@ -50,6 +51,7 @@ struct request_params {
     bool identify = true; /* ?identify=0 turns it off */
     bool diagnose = true; /* ?diagnose=0 turns it off */
     bool pack = true;     /* ?pack=0 turns it off */
+    bool scan_first = false; /* ?scan=first: the DID scan before the rotation */
 };
 
 /* Strict unsigned parse: decimal by default, '0x'/'0X' prefix enables
@@ -115,6 +117,9 @@ inline bool ecuio_parse_number(const char* s, size_t len,
  *            (ADR-0037), on by default with a set's requests
  *   pack     0 or 1: several Service 01 PIDs per request (ADR-0039
  *            Appendix A), on by default with the probe
+ *   scan     turns or first: uds-generic's DID scan taking turns with
+ *            the rotation (the default), or asked back to back with the
+ *            rotation waiting until it ends (ADR-0020)
  * False when q is another key. A bad value leaves p alone and sets
  * *wanted to what it should have been; the caller words the detail. */
 inline bool ecuio_request_param(const ecuio_uri::param& q, request_params* p,
@@ -153,6 +158,16 @@ inline bool ecuio_request_param(const ecuio_uri::param& q, request_params* p,
             p->pack = q.val[0] == '1';
         } else {
             p->diagnose = q.val[0] == '1';
+        }
+        return true;
+    }
+    if (q.is("scan")) {
+        if (q.val_len == 5 && memcmp(q.val, "first", 5) == 0) {
+            p->scan_first = true;
+        } else if (q.val_len == 5 && memcmp(q.val, "turns", 5) == 0) {
+            p->scan_first = false;
+        } else {
+            *wanted = "turns or first";
         }
         return true;
     }
@@ -262,13 +277,20 @@ inline uint32_t ecuio_poll_channel(const ecuio_signal_set_t* set, uint8_t pid,
  * or they go out against guaranteed silence forever. A set's requests
  * get theirs from the set; ?poll= may take ?filter= or the profile's
  * declared channels. BAD_URI with the detail set when they have none,
- * before any hardware is touched. */
+ * or for ?scan=first outside uds-generic, which alone scans, before any
+ * hardware is touched. */
 inline ecuio_status_t ecuio_build_requests(
     const ecuio_session_t* session, const ecuio_signal_set_t* set,
     const request_params& params, const uint32_t* rx_ids, uint32_t chan_count,
     ecuio_request_engine* e, bool* probe, bool* identify)
 {
     ecuio_engine_init(e, chan_count);
+    if (params.scan_first && session->uds == nullptr) {
+        ecuio_detail_set("?scan=first belongs to profile=uds-generic, the "
+                         "profile that scans DIDs");
+        return ECUIO_ERR_BAD_URI;
+    }
+    e->scan_first = params.scan_first;
     if (params.has_poll) {
         const uint8_t req[2] = {0x01, params.poll_pid};
         (void)ecuio_engine_add(

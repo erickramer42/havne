@@ -1413,6 +1413,44 @@ TEST(RequestEngineTest, ScanTakesTurnsWithTheRotationAndKeepsWhatItFinds) {
     EXPECT_EQ(s.dropped, 0u);
 }
 
+/* ?scan=first: while DIDs are left to scan, the scan sends every turn and
+ * the rotation, the listed DID and the ones found, waits; once the last is
+ * asked, the rotation runs. */
+TEST(RequestEngineTest, ScanFirstAsksEveryDidBeforeTheRotation) {
+    ecuio_request_engine e;
+    ecuio_engine_init(&e, 1);
+    e.scan_first = true;
+    const uint8_t did_c[3] = {0x22, 0x1E, 0x1C};
+    ASSERT_EQ(ecuio_engine_add(&e, 0, did_c, 3), ecuio_engine_add_result::added);
+    for (uint16_t d = 0x1E20; d < 0x1E24; ++d) {
+        ASSERT_TRUE(ecuio_engine_scan_add(&e, 0, d));
+    }
+
+    int64_t now = 0;
+    for (uint16_t d = 0x1E20; d < 0x1E24; ++d) {
+        ASSERT_NO_FATAL_FAILURE(send_scan_request(&e, 0, d, now))
+            << "the scan's turn, back to back";
+        if (d == 0x1E21) {
+            EXPECT_EQ(answer_did(&e, 0, d, now + 4 * kMs), ecuio_reply::positive);
+        } else {
+            EXPECT_EQ(answer_negative(&e, 0, 0x22, 0x31, now + 4 * kMs),
+                      ecuio_reply::negative);
+        }
+        now += ECUIO_ENGINE_GAP_US;
+    }
+    EXPECT_EQ(e.chans[0].requests, 2u) << "the found DID joined the rotation";
+    ASSERT_NO_FATAL_FAILURE(send_rotation(&e, 0, 0, now)) << "the scan is over";
+    EXPECT_EQ(answer_did(&e, 0, 0x1E1C, now + 4 * kMs), ecuio_reply::positive);
+    now += ECUIO_ENGINE_GAP_US;
+    ASSERT_NO_FATAL_FAILURE(send_rotation(&e, 0, 1, now));
+
+    ecuio_channel_support_t s;
+    ecuio_engine_support(&e, 0, &s);
+    EXPECT_EQ(s.flags, ECUIO_SUPPORT_SCAN_COMPLETE);
+    EXPECT_EQ(s.scan_found, 1u);
+    EXPECT_EQ(s.scan_refused, 3u);
+}
+
 /* A channel with nothing to rotate scans every turn. A DID nobody answers
  * is unanswered, not refused: the scan ends with it open, and a rescan
  * (the driver's, when the link recovers) asks it again. */

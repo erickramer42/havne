@@ -232,6 +232,10 @@ if(TARGET havne-cli)
         # A typed trouble code's title (ADR-0044), spaces and lower case taken
         app_cli_golden(ADtcIsNamed dtc.jsonl
             -- $<TARGET_FILE:havne-cli> dtc "p0 301")
+        # --until-scanned (ADR-0020) on a session with no did= range: it
+        # ends before it starts, its reason saying why
+        app_cli_golden(NothingToScanEndsAtOnce nothing-to-scan.jsonl
+            -- $<TARGET_FILE:havne-cli> stream mock://golden --until-scanned)
         app_cli_golden(BadUriIsRefused bad-uri.jsonl --exit 3
             -- $<TARGET_FILE:havne-cli> stream "mock://golden?speed=2")
         app_cli_golden(UnknownProfileIsRefused unknown-profile.jsonl --exit 3
@@ -266,6 +270,7 @@ if(TARGET havne-cli)
     app_cli_usage(AnUnknownOptionIsUsage "stream|mock://x|--fast")
     app_cli_usage(ACountOfZeroIsUsage "stream|mock://x|--count|0")
     app_cli_usage(TwoUrisIsUsage "stream|mock://a|mock://b")
+    app_cli_usage(UntilScannedWithoutAUriIsUsage "stream|--until-scanned")
     app_cli_usage(VinWithoutOneIsUsage "vin")
     app_cli_usage(NotAVinIsUsage "vin|FAKEJ2534VIN00001")
     app_cli_usage(TwoVinsIsUsage "vin|1FAFAKE10M0000001|1FAFAKE10M0000001")
