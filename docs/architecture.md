@@ -17,7 +17,7 @@ threads onto the GUI thread.
    │  worker → GUI marshaling, 100 ms coalescing, link-health polling
    │                   havne-cli (cli/): a session as JSON lines on
    │                   standard output, the public headers alone (ADR-0031)
-   ▼  C ABI: core.h · signals.h · profile.h · j2534.h · serial.h · stream.h · socketcan.h
+   ▼  C ABI: core.h · signals.h · profile.h · j2534.h · serial.h · stream.h · socketcan.h · vin.h
  ecuio-core (core/)           no Qt, ever
    │  sessions + callbacks · profiles + decode · transports
    ├── mock://    worker thread, scripted drive cycle

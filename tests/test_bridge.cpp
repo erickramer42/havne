@@ -2515,6 +2515,9 @@ TEST(BridgeTest, AConnectsVinReachesQmlOnlyAsASaltedHash)
     int identified = 0;
     QObject::connect(&bridge, &SessionBridge::vehicleIdentified,
                      [&identified]() { ++identified; });
+    QStringList log;
+    QObject::connect(&bridge, &SessionBridge::logMessage,
+                     [&log](const QString& line) { log << line; });
     EXPECT_TRUE(bridge.vinKey(QStringLiteral("salt")).isEmpty())
         << "no session, no key";
     const QString uri = QStringLiteral("j2534://%1")
@@ -2531,8 +2534,45 @@ TEST(BridgeTest, AConnectsVinReachesQmlOnlyAsASaltedHash)
         << "the salt is in the key";
     spinLoop(300);
     EXPECT_EQ(identified, 1) << "once a session";
+    // ADR-0043: its decode is logged once too; the fake's has an I
+    EXPECT_EQ(log.filter(QRegularExpression(QStringLiteral("^VIN: "))),
+              QStringList{QStringLiteral(
+                  "VIN: not a VIN: 49 CFR 565 takes 17 digits and capital "
+                  "letters, never I, O or Q")});
     ASSERT_TRUE(disconnectAndWait(bridge));
     EXPECT_TRUE(bridge.vinKey(QStringLiteral("salt")).isEmpty());
+}
+
+/* ADR-0043: the "VIN:" line and Settings' lookup, one summary. The VINs
+ * are made up around FAKE, their check digits by 49 CFR 565.15 */
+TEST(BridgeTest, AVinSummarySaysItsYearMakeAndCheckDigit)
+{
+    EXPECT_EQ(
+        SessionBridge::vinSummary(QStringLiteral("1FAFAKE10M0000001"), 2027),
+        QStringLiteral("model year 2021; Ford (manufacturer code 1FA); "
+                       "check digit matches"));
+    EXPECT_EQ(
+        SessionBridge::vinSummary(QStringLiteral("1FAFAKE13Y0000001"), 2027),
+        QStringLiteral("model year 2000 (not 2030, which is still ahead); "
+                       "Ford (manufacturer code 1FA); check digit matches"));
+    EXPECT_EQ(
+        SessionBridge::vinSummary(QStringLiteral("ZZZFAKE10U0000001"), 2027),
+        QStringLiteral("no model year (position 10 is U); manufacturer "
+                       "code ZZZ isn't in NHTSA's list; check digit 0 "
+                       "isn't the 1 it works out to (North America "
+                       "requires it; other markets may not)"));
+    EXPECT_EQ(SessionBridge::vinSummary(
+                  QStringLiteral("1FAFAKE10M000000") + QChar(0xC9), 2027)
+                  .left(10),
+              QStringLiteral("not a VIN:"));
+    SessionBridge bridge;
+    EXPECT_EQ(
+        bridge.describeVin(QStringLiteral(" 1fa fake10m 0000001 ")).left(14),
+        QStringLiteral("model year 202"))
+        << "spaces dropped, upper-cased";
+    EXPECT_TRUE(bridge.describeVin(QStringLiteral("  ")).isEmpty());
+    EXPECT_TRUE(
+        bridge.vinSource().startsWith(QStringLiteral("vPICList_lite_")));
 }
 
 /* ADR-0027 section 2: an adapter session's recording folder names the picked

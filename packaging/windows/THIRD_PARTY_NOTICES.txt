@@ -32,6 +32,18 @@ Havne is an independent project, not affiliated with or endorsed by
 The Qt Company.
 
 
+NHTSA vPIC manufacturer codes
+-----------------------------
+
+The makes Havne shows for a VIN's manufacturer code come from the
+standalone database of NHTSA's Product Information Catalog and Vehicle
+Listing (vPIC), https://vpic.nhtsa.dot.gov/downloads/, a work of the
+US government, whose terms of use call it public information that may
+be distributed or copied. The release used is named in Havne's source
+(core/src/vin_wmi_table.h). NHTSA gives no warranty of its accuracy,
+and Havne is not affiliated with or endorsed by NHTSA.
+
+
 Microsoft Visual C++ Runtime
 ----------------------------
 

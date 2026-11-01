@@ -37,7 +37,10 @@
 //          .RecordingFolderNamesThePickedVehicleForAnAdapterOnly). QML
 //          rendering: manual smoke.
 //          reply timing's snapshots and line (ADR-0042):
-//          BridgeTest.ARecordingKeepsReplyTimingsSnapshots, .TimingText*
+//          BridgeTest.ARecordingKeepsReplyTimingsSnapshots, .TimingText*;
+//          the VIN's decode, its log line and Settings' lookup (ADR-0043):
+//          BridgeTest.AVinSummarySaysItsYearMakeAndCheckDigit, and on
+//          Windows .AConnectsVinReachesQmlOnlyAsASaltedHash
 
 #include "sessionbridge.h"
 #include "carryover.h"
@@ -49,10 +52,12 @@
 #include "ecuio/serial.h"
 #include "ecuio/signal_sets.h"
 #include "ecuio/socketcan.h"
+#include "ecuio/vin.h"
 
 #include <QMetaObject>
 #include <QByteArray>
 #include <QCryptographicHash>
+#include <QDate>
 #include <QDateTime>
 #include <QDir>
 #include <QFile>
@@ -2291,6 +2296,11 @@ void SessionBridge::pollChannelIdentity()
                     : QString();
             if (!vin.isEmpty() && vin != m_vin) {
                 m_vin = vin;
+                // What the VIN says of the car (ADR-0043), beside the
+                // identity line that holds it
+                emit logMessage(
+                    QStringLiteral("VIN: ") +
+                    vinSummary(vin, QDate::currentDate().year() + 1));
                 emit vehicleIdentified();
             }
         }
@@ -2803,6 +2813,60 @@ QString SessionBridge::vinKey(const QString& salt) const
         QCryptographicHash::hash((salt + m_vin).toUtf8(),
                                  QCryptographicHash::Sha256)
             .toHex());
+}
+
+QString SessionBridge::vinSummary(const QString& vin, int latestModelYear)
+{
+    const QByteArray text = vin.toLatin1();
+    ecuio_vin_info_t v{};
+    if (vin.size() != ECUIO_VIN_LEN ||
+        ecuio_vin_decode(text.constData(),
+                         static_cast<uint32_t>(std::max(latestModelYear, 0)),
+                         &v) != ECUIO_OK) {
+        return QStringLiteral(
+            "not a VIN: 49 CFR 565 takes 17 digits and capital "
+            "letters, never I, O or Q");
+    }
+    QStringList parts;
+    if (v.model_year == 0) {
+        parts << QStringLiteral("no model year (position 10 is %1)")
+                     .arg(vin.at(9));
+    } else if ((v.flags & ECUIO_VIN_YEAR_EARLIER) != 0) {
+        parts << QStringLiteral("model year %1 (not %2, which is still ahead)")
+                     .arg(v.model_year)
+                     .arg(v.model_year + 30);
+    } else {
+        parts << QStringLiteral("model year %1").arg(v.model_year);
+    }
+    const QString make = QString::fromLatin1(ecuio_vin_make(v.wmi));
+    const QString wmi = QString::fromLatin1(v.wmi);
+    parts << (make.isEmpty()
+                  ? QStringLiteral("manufacturer code %1 isn't in NHTSA's list")
+                        .arg(wmi)
+                  : QStringLiteral("%1 (manufacturer code %2)").arg(make, wmi));
+    parts << ((v.flags & ECUIO_VIN_CHECK_MATCHES) != 0
+                  ? QStringLiteral("check digit matches")
+                  : QStringLiteral(
+                        "check digit %1 isn't the %2 it works out to (North "
+                        "America requires it; other markets may not)")
+                        .arg(vin.at(8))
+                        .arg(QChar::fromLatin1(v.check_digit)));
+    return parts.join(QStringLiteral("; "));
+}
+
+QString SessionBridge::describeVin(const QString& typed) const
+{
+    QString vin = typed.toUpper();
+    vin.remove(QLatin1Char(' '));
+    if (vin.isEmpty()) {
+        return {};
+    }
+    return vinSummary(vin, QDate::currentDate().year() + 1);
+}
+
+QString SessionBridge::vinSource() const
+{
+    return QString::fromLatin1(ecuio_vin_source());
 }
 
 QString SessionBridge::newSalt() const

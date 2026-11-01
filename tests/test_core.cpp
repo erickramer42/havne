@@ -31,6 +31,7 @@ extern "C" {
 #include "ecuio/signals.h"
 #include "ecuio/signal_sets.h"
 #include "ecuio/profile.h"
+#include "ecuio/vin.h"
 #include "fake_diagnostics.h" /* tests: the fake ECU's report, the mock's too */
 }
 
@@ -4760,4 +4761,134 @@ TEST(CoreTest, SurrogateLogExcessIsTheOldestByLastWrite)
         sur_log_excess({{L"b", 5}, {L"a", 5}, {L"c", 9}}, 2);
     ASSERT_EQ(tie.size(), 1u);
     EXPECT_EQ(tie[0], L"a");
+}
+
+// ---- VIN decode (ADR-0043): 49 CFR 565.15 and NHTSA vPIC's codes. The
+// VINs are made up around "FAKE", their check digits worked out by the
+// regulation's Tables III and IV, but for Table VI's own sample.
+
+namespace {
+
+ecuio_vin_info_t vin_decoded(const char* vin, uint32_t latest = 0)
+{
+    ecuio_vin_info_t info;
+    std::memset(&info, 0xA5, sizeof info);
+    EXPECT_EQ(ecuio_vin_decode(vin, latest, &info), ECUIO_OK) << vin;
+    return info;
+}
+
+} // namespace
+
+TEST(VinTest, TheRegulationsSampleDecodes)
+{
+    // 565.15(c)(5), Table VI: check digit 4; position 7 is a 9, so its
+    // year code 5 is 2005
+    const ecuio_vin_info_t v = vin_decoded("1G4AH59H45G118341");
+    EXPECT_EQ(v.flags, ECUIO_VIN_CHECK_MATCHES);
+    EXPECT_EQ(v.check_digit, '4');
+    EXPECT_EQ(v.model_year, 2005);
+    EXPECT_STREQ(v.wmi, "1G4");
+    EXPECT_EQ(v.wmi_length, 3);
+    EXPECT_STREQ(ecuio_vin_make(v.wmi), "Buick");
+    for (uint32_t r : v.reserved) {
+        EXPECT_EQ(r, 0u);
+    }
+}
+
+TEST(VinTest, PositionSevenPlacesTheYearInItsCycle)
+{
+    // Table VII's note: a letter in 7 is 2010-2039, a digit 1980-2009
+    EXPECT_EQ(vin_decoded("1FAFAKE10M0000001").model_year, 2021);
+    EXPECT_EQ(vin_decoded("1FAAB12C5FAKE0001").model_year, 1985);
+    // Table VII's own rows, 2005 to 2039, against the decode
+    const char* codes = "56789ABCDEFGHJKLMNPRSTVWXY123456789";
+    for (int i = 0; codes[i] != '\0'; ++i) {
+        char vin[] = "1FAFAKE1?M0000001";
+        vin[9] = codes[i];
+        const int year = 2005 + i;
+        // The check digit doesn't matter to the year; position 7 picks
+        // the cycle's half, a digit for the years before 2010
+        vin[6] = year < 2010 ? '1' : 'E';
+        vin[8] = '0';
+        EXPECT_EQ(vin_decoded(vin).model_year, year) << vin;
+    }
+}
+
+TEST(VinTest, ACodeThatIsNoYearHasNone)
+{
+    for (char c : {'0', 'U', 'Z'}) {
+        char vin[] = "1FAFAKE10M0000001";
+        vin[9] = c;
+        EXPECT_EQ(vin_decoded(vin).model_year, 0) << c;
+    }
+}
+
+TEST(VinTest, AYearPastTheLatestIsTheCyclesEarlierOne)
+{
+    // Y is 2030 by a letter in 7; past 2027, it is 2000
+    ecuio_vin_info_t v = vin_decoded("1FAFAKE13Y0000001", 2027);
+    EXPECT_EQ(v.model_year, 2000);
+    EXPECT_EQ(v.flags, ECUIO_VIN_CHECK_MATCHES | ECUIO_VIN_YEAR_EARLIER);
+    // Within the bound, or with none, it stays
+    v = vin_decoded("1FAFAKE13Y0000001", 2030);
+    EXPECT_EQ(v.model_year, 2030);
+    EXPECT_EQ(v.flags, ECUIO_VIN_CHECK_MATCHES);
+    EXPECT_EQ(vin_decoded("1FAFAKE13Y0000001").model_year, 2030);
+    // A digit in 7 is already the earlier half
+    EXPECT_EQ(vin_decoded("1FAAB12C5FAKE0001", 1980).model_year, 1985);
+}
+
+TEST(VinTest, TheCheckDigitIsComputedAndCompared)
+{
+    // Remainder 10 is an X
+    ecuio_vin_info_t v = vin_decoded("1FAFAKE1XM0000006");
+    EXPECT_EQ(v.check_digit, 'X');
+    EXPECT_EQ(v.flags & ECUIO_VIN_CHECK_MATCHES, ECUIO_VIN_CHECK_MATCHES);
+    // A wrong digit decodes the same, flagged: many markets need none
+    v = vin_decoded("1FAFAKE18M0000001");
+    EXPECT_EQ(v.check_digit, '0');
+    EXPECT_EQ(v.flags & ECUIO_VIN_CHECK_MATCHES, 0u);
+    EXPECT_EQ(v.model_year, 2021);
+    EXPECT_STREQ(v.wmi, "1FA");
+}
+
+TEST(VinTest, ANineInPositionThreeIsASixCharacterCode)
+{
+    // 565.15(a): positions 1-3 and 12-14
+    const ecuio_vin_info_t v = vin_decoded("1A9FAKE18MA596001");
+    EXPECT_STREQ(v.wmi, "1A9596");
+    EXPECT_EQ(v.wmi_length, 6);
+    EXPECT_STREQ(ecuio_vin_make(v.wmi), "ACG");
+    EXPECT_STREQ(ecuio_vin_make("1A9"), "");
+}
+
+TEST(VinTest, TheMakeIsVpicsForTheCode)
+{
+    EXPECT_STREQ(ecuio_vin_make("1FA"), "Ford");
+    EXPECT_STREQ(ecuio_vin_make("JN1"), "Datsun, Infiniti or Nissan");
+    EXPECT_STREQ(ecuio_vin_make("ZZZ"), "");
+    EXPECT_STREQ(ecuio_vin_make("1F"), "");
+    EXPECT_STREQ(ecuio_vin_make("1FAX"), "");
+    EXPECT_STREQ(ecuio_vin_make("1fa"), "");
+    EXPECT_STREQ(ecuio_vin_make(""), "");
+    EXPECT_STREQ(ecuio_vin_make(nullptr), "");
+    EXPECT_EQ(std::strncmp(ecuio_vin_source(), "vPICList_lite_", 14), 0);
+}
+
+TEST(VinTest, OnlyAVinIsDecoded)
+{
+    ecuio_vin_info_t v;
+    for (const char* bad :
+         {"1FAFAKE10M000000", "1FAFAKE10M00000011", "1faFAKE10M0000001",
+          "1FAFAKE10M000000I", "1FAFAKE10M000000O", "1FAFAKE10M000000Q",
+          "1FAFAKE10M00000-1", "", "FAKEJ2534VIN00001"}) {
+        std::memset(&v, 0xA5, sizeof v);
+        EXPECT_EQ(ecuio_vin_decode(bad, 0, &v), ECUIO_ERR_INVALID_ARGUMENT)
+            << bad;
+        EXPECT_EQ(v.flags, 0u) << bad;
+        EXPECT_EQ(v.wmi[0], '\0') << bad;
+    }
+    EXPECT_EQ(ecuio_vin_decode(nullptr, 0, &v), ECUIO_ERR_NULL_ARGUMENT);
+    EXPECT_EQ(ecuio_vin_decode("1FAFAKE10M0000001", 0, nullptr),
+              ECUIO_ERR_NULL_ARGUMENT);
 }

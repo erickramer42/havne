@@ -12,6 +12,8 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
 
 ### Added
 
+- The VIN decoded on the device, with nothing sent anywhere: the model year, the make and whether the check digit matches, by 49 CFR 565 and the manufacturer codes in NHTSA's vPIC database. The activity log adds a `VIN:` line for the connected car, and Settings' Vehicle section has **Look up a VIN** for a typed one, never saved. `havne-cli vin <VIN>` does the same, and `havne-cli stream` writes an `identity` line per ECU: each identification item and the VIN's decode.
+- `ecuio/vin.h` in core's C API: `ecuio_vin_decode`, `ecuio_vin_make` and `ecuio_vin_source`.
 - The Diagnostics page shows each readiness monitor for this drive cycle beside its state since the last clear: done, not yet, or disabled for the rest of the drive. `havne-cli`'s `diagnostics` line carries the same, with PID 41's own outcome.
 - A channel's diagnostics report in core's C API holds this drive cycle's monitors (Service 01 PID 41: `ECUIO_MONITOR_CYCLE_ENABLED`, `ECUIO_MONITOR_CYCLE_COMPLETE`, `ECUIO_DIAG_CYCLE`, the `cycle` outcome), and a new outcome, `ECUIO_DIAG_UNSUPPORTED`, for an item whose PID the ECU says it lacks, which is then not asked.
 - `ecuio_session_clear_diagnostics_with` in core's C API: a clear with the caller's word on a running engine and on a moving vehicle. A channel's diagnostics report records the engine and vehicle speeds a clear read (`clear_kmh`, `ECUIO_DIAG_CLEAR_RPM`, `ECUIO_DIAG_CLEAR_KMH`) and two outcomes, moving and no vehicle speed.

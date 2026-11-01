@@ -1,7 +1,9 @@
 // File/layer: tests/test_cli.cpp | havne-cli's line formatting and output ring (ADR-0031)
 // Testing: UNIT, Qt-free; the diagnostics line (CliDiagnosticsTest,
 //          ADR-0037) names codes and monitors through core; the timing line
-//          (CliTimingTest, ADR-0042) has latency.csv's columns. The program end to end is the golden runs'
+//          (CliTimingTest, ADR-0042) has latency.csv's columns; the vin
+//          and identity lines (CliVinTest, ADR-0043) decode through core.
+//          The program end to end is the golden runs'
 //          (tests/golden/cli/) and CliSignalTest's (tests/CMakeLists.txt)
 
 #include "diagnostics_line.h"
@@ -9,13 +11,16 @@
 #include "line_ring.h"
 #include "sleep_watch.h"
 #include "timing_line.h"
+#include "vin_line.h"
 
 #include <gtest/gtest.h>
 
 #include <atomic>
 #include <chrono>
 #include <cmath>
+#include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <limits>
 #include <string>
 #include <thread>
@@ -513,4 +518,89 @@ TEST(CliTimingTest, ASnapshotCarriesTheRowsThatChanged)
     EXPECT_TRUE(s.changed(0, r)) << "a timeout counts";
     EXPECT_TRUE(s.changed(1, r)) << "each row its own";
     EXPECT_FALSE(s.changed(ECUIO_PROFILE_MAX_REQUESTS, r));
+}
+
+/* ADR-0043: a VIN's decode, field by field (the VINs made up around FAKE,
+ * their check digits by 49 CFR 565.15) */
+TEST(CliVinTest, ADecodeCarriesEachField)
+{
+    char buf[512];
+    cli::Line l(buf, sizeof buf);
+    cli::vin_line(l, "1FAFAKE13Y0000001", 2027);
+    const std::string source = ecuio_vin_source();
+    EXPECT_EQ(
+        std::string(l.data(), l.size()),
+        "{\"type\":\"vin\",\"vin\":\"1FAFAKE13Y0000001\",\"decoded\":true,"
+        "\"model_year\":2000,\"year_earlier\":true,\"make\":\"Ford\","
+        "\"wmi\":\"1FA\",\"check_digit\":\"3\",\"check_matches\":true,"
+        "\"source\":\"" +
+            source + "\"}");
+
+    cli::Line u(buf, sizeof buf);
+    cli::vin_line(u, "ZZZFAKE18U0000001", 0);
+    EXPECT_EQ(
+        std::string(u.data(), u.size()),
+        "{\"type\":\"vin\",\"vin\":\"ZZZFAKE18U0000001\",\"decoded\":true,"
+        "\"model_year\":null,\"year_earlier\":false,\"make\":null,"
+        "\"wmi\":\"ZZZ\",\"check_digit\":\"1\",\"check_matches\":false,"
+        "\"source\":\"" +
+            source + "\"}");
+}
+
+TEST(CliVinTest, NotAVinIsNotDecoded)
+{
+    char buf[512];
+    cli::Line l(buf, sizeof buf);
+    cli::vin_line(l, "FAKEJ2534VIN00001", 0);
+    EXPECT_EQ(
+        std::string(l.data(), l.size()),
+        "{\"type\":\"vin\",\"vin\":\"FAKEJ2534VIN00001\",\"decoded\":false}");
+}
+
+/* ADR-0021: the identity line names each item, its request and its
+ * outcome, then the VIN core takes from it, decoded */
+TEST(CliVinTest, AnIdentityLineCarriesItsItemsAndVin)
+{
+    ecuio_channel_identity_t id{};
+    id.flags = ECUIO_IDENTITY_COMPLETE;
+    id.rx_id = 0x7E8;
+    id.generation = 4;
+    id.items = 3;
+    auto item = [&id](uint32_t i, uint8_t a, uint8_t b, uint8_t outcome,
+                      const char* text, uint8_t nrc) {
+        ecuio_identity_item_t& it = id.list[i];
+        it.request[0] = a;
+        it.request[1] = b;
+        it.length = 2;
+        it.outcome = outcome;
+        it.nrc = nrc;
+        std::snprintf(it.text, sizeof it.text, "%s", text);
+        it.text_length = static_cast<uint8_t>(std::strlen(it.text));
+    };
+    item(0, 0x09, 0x02, ECUIO_IDENTITY_ANSWERED, "1FAFAKE10M0000001", 0);
+    item(1, 0x09, 0x04, ECUIO_IDENTITY_REFUSED, "", 0x12);
+    item(2, 0x09, 0x06, ECUIO_IDENTITY_UNANSWERED, "", 0);
+    char buf[4096];
+    cli::Line l(buf, sizeof buf);
+    cli::identity_line(l, id, 2027);
+    const std::string line(l.data(), l.size());
+    EXPECT_EQ(
+        line.substr(0, line.find(",\"source\":")),
+        "{\"type\":\"identity\",\"rx\":\"0x7E8\",\"generation\":4,\"items\":["
+        "{\"name\":\"VIN\",\"request\":\"09 02\",\"outcome\":\"answered\","
+        "\"text\":\"1FAFAKE10M0000001\"},"
+        "{\"name\":\"CALID\",\"request\":\"09 04\",\"outcome\":\"refused\","
+        "\"reply\":\"7F 09 12\"},"
+        "{\"name\":\"CVN\",\"request\":\"09 06\",\"outcome\":\"unanswered\"}],"
+        "\"vin\":{\"vin\":\"1FAFAKE10M0000001\",\"decoded\":true,"
+        "\"model_year\":2021,\"year_earlier\":false,\"make\":\"Ford\","
+        "\"wmi\":\"1FA\",\"check_digit\":\"0\",\"check_matches\":true");
+    EXPECT_EQ(line.substr(line.size() - 2), "}}");
+
+    // With no VIN among the answers, "vin" is null
+    id.list[0].outcome = ECUIO_IDENTITY_UNANSWERED;
+    cli::Line n(buf, sizeof buf);
+    cli::identity_line(n, id, 2027);
+    const std::string none(n.data(), n.size());
+    EXPECT_EQ(none.substr(none.size() - 12), ",\"vin\":null}");
 }

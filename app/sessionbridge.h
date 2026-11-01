@@ -12,7 +12,8 @@
 //          BridgeTest.UnplottedNames*, ...), the default
 //          plot (ADR-0039 section 8; BridgeTest.ARankedSet*, .APlotChoice*);
 //          reply timing (BridgeTest.ARecordingKeepsReplyTimingsSnapshots,
-//          .TimingTextNamesTheRequestsAndTheClock)
+//          .TimingTextNamesTheRequestsAndTheClock); the VIN's summary
+//          (ADR-0043, BridgeTest.AVinSummarySaysItsYearMakeAndCheckDigit)
 
 #pragma once
 
@@ -555,6 +556,16 @@ public:
     // or with no session. newSalt() is 16 random bytes as hex.
     Q_INVOKABLE QString vinKey(const QString& salt) const;
     Q_INVOKABLE QString newSalt() const;
+    // What a VIN says without asking anyone (ADR-0043): the model year,
+    // the make and the check digit in one line, as the activity log's
+    // "VIN:" line gives them for the connected car. describeVin() is
+    // Settings' lookup of a typed VIN (spaces dropped, upper-cased, never
+    // kept; "" when empty); vinSummary() takes the latest model year
+    // (this year plus one in both), so tests pin it. vinSource() names
+    // the vPIC release the makes come from.
+    Q_INVOKABLE QString describeVin(const QString& typed) const;
+    Q_INVOKABLE QString vinSource() const;
+    static QString vinSummary(const QString& vin, int latestModelYear);
     // A line in the activity log (and a recording's events.log), for the
     // app's own events: the vehicle lines of ADR-0027 section 4
     Q_INVOKABLE void logEvent(const QString& line) { emit logMessage(line); }

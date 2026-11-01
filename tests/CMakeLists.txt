@@ -159,6 +159,9 @@ if(Python3_Interpreter_FOUND)
     # packaging/sbom.py, the release's SBOM (ADR-0035 section 5)
     add_test(NAME SbomTest.SelfTest
         COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/packaging/sbom.py selftest)
+    # scripts/vpic_wmi.py, the VIN table's generator (ADR-0043 section 2)
+    add_test(NAME VpicWmiTest.SelfTest
+        COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/scripts/vpic_wmi.py --selftest)
 endif()
 
 # --- havne-cli (ADR-0031): Qt-free, every desktop platform ---
@@ -214,6 +217,10 @@ if(TARGET havne-cli)
                --values)
         app_cli_golden(MockDriveCycle mock.jsonl --ignore t_us
             -- $<TARGET_FILE:havne-cli> stream mock://golden --values --count 40)
+        # A typed VIN's decode (ADR-0043), made up around FAKE: the model
+        # year a letter in position 7 places, the make by vPIC's code
+        app_cli_golden(AVinIsDecoded vin.jsonl
+            -- $<TARGET_FILE:havne-cli> vin "1fa fake10m0000001")
         app_cli_golden(BadUriIsRefused bad-uri.jsonl --exit 3
             -- $<TARGET_FILE:havne-cli> stream "mock://golden?speed=2")
         app_cli_golden(UnknownProfileIsRefused unknown-profile.jsonl --exit 3
@@ -241,6 +248,9 @@ if(TARGET havne-cli)
     app_cli_usage(AnUnknownOptionIsUsage "stream|mock://x|--fast")
     app_cli_usage(ACountOfZeroIsUsage "stream|mock://x|--count|0")
     app_cli_usage(TwoUrisIsUsage "stream|mock://a|mock://b")
+    app_cli_usage(VinWithoutOneIsUsage "vin")
+    app_cli_usage(NotAVinIsUsage "vin|FAKEJ2534VIN00001")
+    app_cli_usage(TwoVinsIsUsage "vin|1FAFAKE10M0000001|1FAFAKE10M0000001")
     # A stop from outside (ADR-0031 section 6): SIGINT and SIGTERM on POSIX;
     # on Windows Ctrl+Break to a child in a process group of its own
     # (Ctrl+C can't be sent to one), skipped where there's no console
