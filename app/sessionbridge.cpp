@@ -40,7 +40,9 @@
 //          BridgeTest.ARecordingKeepsReplyTimingsSnapshots, .TimingText*;
 //          the VIN's decode, its log line and Settings' lookup (ADR-0043):
 //          BridgeTest.AVinSummarySaysItsYearMakeAndCheckDigit, and on
-//          Windows .AConnectsVinReachesQmlOnlyAsASaltedHash
+//          Windows .AConnectsVinReachesQmlOnlyAsASaltedHash; each code's
+//          title and Diagnostics' lookup (ADR-0044):
+//          BridgeTest.DiagnosticsEntryIsWhatThePageShows, .ATypedCodeIsDescribed
 
 #include "sessionbridge.h"
 #include "carryover.h"
@@ -2679,14 +2681,17 @@ SessionBridge::diagnosticsEntry(const ecuio_channel_diagnostics_t& s,
         const ecuio_dtc_list_t& list = s.lists[l];
         const uint8_t held = std::min<uint8_t>(list.held, ECUIO_DIAG_MAX_DTCS);
         QStringList codes;
+        QStringList titles; // each code's (ADR-0044), "" with none
         for (uint8_t i = 0; i < held; ++i) {
             codes << dtc(list.codes[i]);
+            titles << QString::fromLatin1(ecuio_dtc_title(list.codes[i]));
         }
         QVariantMap e;
         e[QStringLiteral("key")] = QString::fromLatin1(kKeys[l]);
         e[QStringLiteral("outcome")] = outcome(list.outcome);
         e[QStringLiteral("nrc")] = nrc(list.outcome, kServices[l], list.nrc);
         e[QStringLiteral("codes")] = codes;
+        e[QStringLiteral("titles")] = titles;
         e[QStringLiteral("more")] =
             list.reported > held ? list.reported - held : 0;
         lists << e;
@@ -2748,6 +2753,10 @@ SessionBridge::diagnosticsEntry(const ecuio_channel_diagnostics_t& s,
     freeze[QStringLiteral("code")] = (s.flags & ECUIO_DIAG_FREEZE_FRAME) != 0
                                          ? dtc(s.freeze_dtc)
                                          : QString();
+    freeze[QStringLiteral("title")] =
+        (s.flags & ECUIO_DIAG_FREEZE_FRAME) != 0
+            ? QString::fromLatin1(ecuio_dtc_title(s.freeze_dtc))
+            : QString();
     freeze[QStringLiteral("values")] = values;
     m[QStringLiteral("freeze")] = freeze;
 
@@ -2867,6 +2876,39 @@ QString SessionBridge::describeVin(const QString& typed) const
 QString SessionBridge::vinSource() const
 {
     return QString::fromLatin1(ecuio_vin_source());
+}
+
+QString SessionBridge::describeDtc(const QString& typed) const
+{
+    QString text = typed.toUpper();
+    text.remove(QLatin1Char(' '));
+    if (text.isEmpty()) {
+        return {};
+    }
+    const QByteArray latin = text.toLatin1();
+    uint16_t code = 0;
+    if (text.size() != 5 ||
+        ecuio_dtc_parse(latin.constData(), &code) != ECUIO_OK) {
+        return QStringLiteral("not a trouble code: a letter P, C, B or U, then "
+                              "four hex digits, the first 0-3");
+    }
+    const QString title = QString::fromLatin1(ecuio_dtc_title(code));
+    return title.isEmpty()
+               ? QStringLiteral("%1: no title here (Havne names SAE's generic "
+                                "powertrain and network codes; a manufacturer "
+                                "defines its own)")
+                     .arg(text)
+               : QStringLiteral("%1: %2").arg(text, title);
+}
+
+QString SessionBridge::dtcTitleSource() const
+{
+    return QString::fromLatin1(ecuio_dtc_title_source());
+}
+
+QString SessionBridge::dtcTitleNotice() const
+{
+    return QString::fromLatin1(ecuio_dtc_title_notice());
 }
 
 QString SessionBridge::newSalt() const

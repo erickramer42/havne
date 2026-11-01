@@ -162,6 +162,9 @@ if(Python3_Interpreter_FOUND)
     # scripts/vpic_wmi.py, the VIN table's generator (ADR-0043 section 2)
     add_test(NAME VpicWmiTest.SelfTest
         COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/scripts/vpic_wmi.py --selftest)
+    # scripts/dtc_titles.py, the trouble-code titles' generator (ADR-0044)
+    add_test(NAME DtcTitlesTest.SelfTest
+        COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/scripts/dtc_titles.py --selftest)
 endif()
 
 # --- havne-cli (ADR-0031): Qt-free, every desktop platform ---
@@ -221,6 +224,9 @@ if(TARGET havne-cli)
         # year a letter in position 7 places, the make by vPIC's code
         app_cli_golden(AVinIsDecoded vin.jsonl
             -- $<TARGET_FILE:havne-cli> vin "1fa fake10m0000001")
+        # A typed trouble code's title (ADR-0044), spaces and lower case taken
+        app_cli_golden(ADtcIsNamed dtc.jsonl
+            -- $<TARGET_FILE:havne-cli> dtc "p0 301")
         app_cli_golden(BadUriIsRefused bad-uri.jsonl --exit 3
             -- $<TARGET_FILE:havne-cli> stream "mock://golden?speed=2")
         app_cli_golden(UnknownProfileIsRefused unknown-profile.jsonl --exit 3
@@ -251,6 +257,9 @@ if(TARGET havne-cli)
     app_cli_usage(VinWithoutOneIsUsage "vin")
     app_cli_usage(NotAVinIsUsage "vin|FAKEJ2534VIN00001")
     app_cli_usage(TwoVinsIsUsage "vin|1FAFAKE10M0000001|1FAFAKE10M0000001")
+    app_cli_usage(DtcWithoutOneIsUsage "dtc")
+    app_cli_usage(NotADtcIsUsage "dtc|P5301")
+    app_cli_usage(TwoDtcsIsUsage "dtc|P0301|P0420")
     # A stop from outside (ADR-0031 section 6): SIGINT and SIGTERM on POSIX;
     # on Windows Ctrl+Break to a child in a process group of its own
     # (Ctrl+C can't be sent to one), skipped where there's no console

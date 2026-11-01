@@ -222,6 +222,13 @@ hardware ([roadmap](#roadmap)).
     `stream`'s `identity` line. Verified at UNIT (the regulation's
     sample VIN, each year rule) and in the bridge, QML and CLI tests;
     the test car's own VIN not yet.
+  - **Trouble-code titles** ([ADR-0044](docs/adr/0044-trouble-code-titles.md)):
+    SAE J2012's names for the generic powertrain and network codes, from
+    Wal33D's MIT list (a table committed from it, its notice in every
+    download), on the Diagnostics page, in its lookup, in the CLI's
+    `diagnostics` line and `havne-cli dtc`. Checked against J2012's
+    2002 pages on 110 codes and against the other open lists; verified at
+    UNIT and in the bridge, QML and CLI tests.
   - **Evidence for field sessions:** opt-in recording of every frame,
     decoded value and activity line per connect
     ([ADR-0017](docs/adr/0017-session-recording.md)), and a surrogate
@@ -241,7 +248,7 @@ hardware ([roadmap](#roadmap)).
   ELM327 [bench](docs/bench-sessions/elm327-bench-runsheet.md) and
   [vehicle](docs/bench-sessions/elm327-vehicle-runsheet.md) sheets, and
   the [phone's](docs/bench-sessions/android-phone-runsheet.md).
-- **Tests:** 776 ctest cases on Windows (both trees rebuilt,
+- **Tests:** 788 ctest cases on Windows (both trees rebuilt,
   2026-11-01), all passing but two env-gated skips (the cross-arch
   case, and the real-car recordings' diff, run locally), plus the
   cross-arch subset (86/86); 0 MSVC warnings. CI runs ctest on Windows,
@@ -387,9 +394,9 @@ reach into car-verified claims and finishes the diagnostics.
   2026-11-01). Left: the VX on the car confirms it, and asking the VX
   for as many messages as replies are outstanding would end a read at
   its reply (the bench first).
-- **Trouble-code descriptions** ("P0301: cylinder 1 misfire") with a
-  one-word urgency, from a source chosen first; **VIN decode** (built,
-  ADR-0043: the year and the make, offline; the model isn't in a
+- **Trouble-code titles** (built, ADR-0044: the generic powertrain
+  and network codes; no urgency, which no source rates); **VIN decode**
+  (built, ADR-0043: the year and the make, offline; the model isn't in a
   manufacturer code); and a **readiness summary**: a line saying
   whether the car would pass an inspection, from the monitors (PID
   41's for this drive cycle are shown beside PID 01's) and the model

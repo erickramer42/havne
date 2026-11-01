@@ -12,7 +12,9 @@
 //          (BridgeTest.DiagnosticsEntry*, .AClear*); on a phone, the
 //          clear's buttons reached on a short page
 //          (test_theClearsButtonsCanBeReachedOnAShortPage) and the page
-//          inside the app's window (tests/qml/tst_phone.qml); the look,
+//          inside the app's window (tests/qml/tst_phone.qml); each
+//          code's title and a typed code's (ADR-0044,
+//          test_codesCarryTheirTitles, test_aTypedCodeIsNamed); the look,
 //          manually (the run-havne skill)
 
 import QtQuick
@@ -167,6 +169,14 @@ Page {
         }
     }
 
+    // Each titled code of an answered list on a line of its own (ADR-0044);
+    // a code with no title is in the codes line alone
+    function titlesText(list) {
+        if (list.outcome !== "answered") return ""
+        return list.codes.map((c, i) => list.titles[i] !== "" ? c + "  " + list.titles[i] : "")
+                         .filter(line => line !== "").join("\n")
+    }
+
     // A list's codes, or what became of its request
     function codesText(list) {
         switch (list.outcome) {
@@ -183,7 +193,9 @@ Page {
     function freezeText(f) {
         switch (f.outcome) {
         case "answered":
-            return f.stored ? qsTr("Stored by %1").arg(f.code) : qsTr("None stored")
+            if (!f.stored) return qsTr("None stored")
+            return f.title !== "" ? qsTr("Stored by %1 (%2)").arg(f.code, f.title)
+                                  : qsTr("Stored by %1").arg(f.code)
         case "refused":    return qsTr("Refused (%1)").arg(f.nrc)
         case "unanswered": return qsTr("No answer")
         default:           return qsTr("Not asked yet")
@@ -415,6 +427,67 @@ Page {
                     model: root.ecus
                     delegate: EcuCard {}
                 }
+
+                // A typed code's title (ADR-0044): with or without a session
+                Rectangle {
+                    objectName: "dtcLookup"
+                    Layout.fillWidth: true
+                    implicitHeight: lookupBody.implicitHeight + 2 * Theme.pageMargin
+                    radius: Theme.radius
+                    color: Theme.surface
+
+                    ColumnLayout {
+                        id: lookupBody
+                        anchors.fill: parent
+                        anchors.margins: Theme.pageMargin
+                        spacing: 6
+
+                        SectionLabel { text: qsTr("Look up a code") }
+                        TextField {
+                            id: dtcLookupField
+                            objectName: "dtcLookupField"
+                            Layout.fillWidth: true
+                            Layout.maximumWidth: 300
+                            maximumLength: 16
+                            placeholderText: qsTr("P0301")
+                            inputMethodHints: Qt.ImhPreferUppercase | Qt.ImhNoPredictiveText
+                        }
+                        Label {
+                            readonly property string summary: Bridge.describeDtc(dtcLookupField.text)
+                            objectName: "dtcLookupResult"
+                            visible: summary !== ""
+                            Layout.fillWidth: true
+                            wrapMode: Text.Wrap
+                            text: summary.charAt(0).toUpperCase() + summary.slice(1)
+                            color: Theme.text
+                        }
+                        Label {
+                            objectName: "dtcLookupHint"
+                            Layout.fillWidth: true
+                            wrapMode: Text.Wrap
+                            text: qsTr("SAE J2012's titles for generic powertrain and network codes, from %1 (MIT), on this device.")
+                                      .arg(Bridge.dtcTitleSource())
+                            color: Theme.textDim
+                            font.pixelSize: 12
+                        }
+                        ThemedButton {
+                            id: noticeToggle
+                            objectName: "dtcNoticeToggle"
+                            property bool open: false
+                            text: open ? qsTr("Hide the list's license") : qsTr("The list's license")
+                            onClicked: open = !open
+                        }
+                        Label {
+                            objectName: "dtcNotice"
+                            visible: noticeToggle.open
+                            Layout.fillWidth: true
+                            wrapMode: Text.Wrap
+                            text: Bridge.dtcTitleNotice()
+                            color: Theme.textDim
+                            font.pixelSize: 11
+                        }
+                    }
+                }
             }
         }
     }
@@ -515,6 +588,15 @@ Page {
                                                                             : root.font.family
                             font.pixelSize: listRow.modelData.codes.length > 0 ? 16 : 14
                             color: listRow.modelData.codes.length > 0 ? Theme.text : Theme.textDim
+                        }
+                        Label {
+                            objectName: "titles_" + listRow.modelData.key
+                            visible: text !== ""
+                            Layout.fillWidth: true
+                            wrapMode: Text.Wrap
+                            text: root.titlesText(listRow.modelData)
+                            color: Theme.textDim
+                            font.pixelSize: 13
                         }
                     }
                 }

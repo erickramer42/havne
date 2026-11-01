@@ -2,7 +2,8 @@
 // Testing: UNIT, Qt-free; the diagnostics line (CliDiagnosticsTest,
 //          ADR-0037) names codes and monitors through core; the timing line
 //          (CliTimingTest, ADR-0042) has latency.csv's columns; the vin
-//          and identity lines (CliVinTest, ADR-0043) decode through core.
+//          and identity lines (CliVinTest, ADR-0043) decode through core;
+//          the titles and the dtc line (CliDtcTest, ADR-0044) name through it.
 //          The program end to end is the golden runs'
 //          (tests/golden/cli/) and CliSignalTest's (tests/CMakeLists.txt)
 
@@ -209,10 +210,14 @@ TEST(CliDiagnosticsTest, AnswersNameTheirCodesAndMonitors)
         "\"dtc_count\":0,\"compression\":true,"
         "\"monitors\":[{\"name\":\"NMHC catalyst\",\"complete\":false}]},"
         "\"cycle\":{\"outcome\":\"unsupported\"},"
-        "\"stored\":{\"outcome\":\"answered\",\"reported\":0,\"codes\":[]},"
+        "\"stored\":{\"outcome\":\"answered\",\"reported\":0,\"codes\":[],"
+        "\"titles\":[]},"
         "\"pending\":{\"outcome\":\"answered\",\"reported\":40,"
-        "\"codes\":[\"P2002\",\"U0100\"]},"
-        "\"permanent\":{\"outcome\":\"answered\",\"reported\":0,\"codes\":[]},"
+        "\"codes\":[\"P2002\",\"U0100\"],"
+        "\"titles\":[\"Particulate Filter Efficiency Below Threshold Bank 1\","
+        "\"Lost Communication With ECM/PCM A\"]},"
+        "\"permanent\":{\"outcome\":\"answered\",\"reported\":0,\"codes\":[],"
+        "\"titles\":[]},"
         "\"freeze\":{\"outcome\":\"answered\",\"code\":null,\"values\":[]}}");
 }
 
@@ -603,4 +608,44 @@ TEST(CliVinTest, AnIdentityLineCarriesItsItemsAndVin)
     cli::identity_line(n, id, 2027);
     const std::string none(n.data(), n.size());
     EXPECT_EQ(none.substr(none.size() - 12), ",\"vin\":null}");
+}
+
+/* ADR-0044: a code's title, null for one the list lacks (a chassis code,
+ * a manufacturer's), the freeze frame's beside its code */
+TEST(CliDtcTest, ATitleOrNull)
+{
+    char buf[512];
+    cli::Line l(buf, sizeof buf);
+    cli::dtc_line(l, 0x0301);
+    const std::string source = ecuio_dtc_title_source();
+    EXPECT_EQ(std::string(l.data(), l.size()),
+              "{\"type\":\"dtc\",\"code\":\"P0301\","
+              "\"title\":\"Cylinder 1 Misfire Detected\","
+              "\"source\":\"" +
+                  source + "\"}");
+    for (uint16_t none : {uint16_t{0x4035}, uint16_t{0x1234}}) {
+        cli::Line n(buf, sizeof buf);
+        cli::dtc_line(n, none);
+        const std::string line(n.data(), n.size());
+        EXPECT_NE(line.find(",\"title\":null,"), std::string::npos) << line;
+    }
+}
+
+TEST(CliDtcTest, TheFreezeFramesCodeCarriesItsTitle)
+{
+    ecuio_channel_diagnostics_t d{};
+    d.flags = ECUIO_DIAG_ASKED | ECUIO_DIAG_COMPLETE | ECUIO_DIAG_FREEZE_FRAME;
+    d.freeze = ECUIO_DIAG_ANSWERED;
+    d.freeze_dtc = 0x0420;
+    char buf[4096];
+    cli::Line l(buf, sizeof buf);
+    cli::diagnostics_line(l, d);
+    const std::string line(l.data(), l.size());
+    EXPECT_NE(
+        line.find(
+            "\"freeze\":{\"outcome\":\"answered\",\"code\":\"P0420\","
+            "\"title\":\"Catalyst System Efficiency Below Threshold Bank 1\","
+            "\"values\":[]}"),
+        std::string::npos)
+        << line;
 }

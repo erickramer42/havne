@@ -3823,6 +3823,16 @@ TEST(BridgeTest, DiagnosticsEntryIsWhatThePageShows)
         EXPECT_EQ(list.value("key").toString(), keys.at(l));
         EXPECT_EQ(list.value("outcome").toString(), QStringLiteral("answered"));
         EXPECT_EQ(list.value("codes").toStringList(), codes.at(l));
+        // Each code's title beside it, "" with none (ADR-0044)
+        const QStringList listed = list.value("titles").toStringList();
+        ASSERT_EQ(listed.size(), codes.at(l).size());
+        for (int i = 0; i < listed.size(); ++i) {
+            uint16_t raw = 0;
+            ASSERT_EQ(
+                ecuio_dtc_parse(codes.at(l).at(i).toLatin1().constData(), &raw),
+                ECUIO_OK);
+            EXPECT_EQ(listed.at(i), QString::fromLatin1(ecuio_dtc_title(raw)));
+        }
         EXPECT_EQ(list.value("more").toInt(), 0);
     }
 
@@ -5512,4 +5522,20 @@ TEST(BridgeTest, SessionInfoTextDescribesAReplay)
               "Session: replay of a recording, 7194 frames over 275.2 s at "
               "full speed; "
               "profile obd2");
+}
+
+/* ADR-0044: Diagnostics' lookup of a typed code: spaces and lower case
+ * taken, a title, a code with none, not a code */
+TEST(BridgeTest, ATypedCodeIsDescribed)
+{
+    SessionBridge bridge;
+    EXPECT_EQ(bridge.describeDtc(QStringLiteral(" p0 301 ")),
+              QStringLiteral("P0301: Cylinder 1 Misfire Detected"));
+    EXPECT_TRUE(bridge.describeDtc(QStringLiteral("C0035"))
+                    .startsWith(QStringLiteral("C0035: no title here")));
+    EXPECT_TRUE(bridge.describeDtc(QStringLiteral("P0301X"))
+                    .startsWith(QStringLiteral("not a trouble code")));
+    EXPECT_TRUE(bridge.describeDtc(QStringLiteral("   ")).isEmpty());
+    EXPECT_TRUE(bridge.dtcTitleSource().startsWith(
+        QStringLiteral("Wal33D/dtc-database ")));
 }
