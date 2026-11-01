@@ -165,8 +165,12 @@ The app connects to `socketcan://vcan0?profile=obd2` the same way.
 starts after 15 s with the key on); `?values=canned` answers every
 linear J1979 PID with one reading instead, `?vin=` sets the VIN it
 gives, and `?faults=silent:5,late:7,bad_sequence:5,stalled:7` breaks
-every Nth reply. It answers only on a `vcan` interface, never on a
-car's bus.
+every Nth reply. `replay:///path/to/recording` answers as the car in
+a recording did instead: each request gets the reply the recording
+holds for it at the sim's time since it started (the car's own
+bitmaps, values, identification and codes; `?loop=1` goes round the
+recording, `?vin=` replaces its VIN; a clear is refused). It answers
+only on a `vcan` interface, never on a car's bus.
 
 ## Where Havne keeps things
 

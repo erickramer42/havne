@@ -1,7 +1,7 @@
-# ADR-0046: The simulated ECU as a product: `havne-cli sim` answers as the mock's engine ECU on a virtual CAN bus, through core's ISO-TP, with periodic faults
+# ADR-0046: The simulated ECU as a product: `havne-cli sim` answers as the mock's engine ECU or a recording's on a virtual CAN bus, through core's ISO-TP, with periodic faults
 
-- **Status:** Accepted. The mock's car is built (sections 1 to 6); a
-  recording as the ECU (section 7) is the next step.
+- **Status:** Accepted. Built: the mock's car (sections 1 to 6) and a
+  recording as the ECU (section 7).
 - **Date:** 2026-11-01.
 - **Builds on:** [ADR-0032](0032-socketcan-listening.md) and
   [ADR-0040](0040-socketcan-requests-isotp.md) (SocketCAN, requests
@@ -71,8 +71,8 @@ mock://<label>[?values=drive|canned][&vin=<17 characters>][&faults=<fault>:<n>[,
   never broken, `bad_sequence` and `stalled` on segmented replies only.
   Periods, not chances, for the reason that section gives.
 
-Any other key is `BAD_URI`, naming the keys taken. `replay://` is
-`NOT_IMPLEMENTED` until section 7.
+Any other key is `BAD_URI`, naming the keys taken. `replay://` takes
+its own keys (section 7).
 
 ### 4. What it answers
 
@@ -108,11 +108,54 @@ sim like any other SocketCAN bus (`socketcan://vcan0?profile=obd2`),
 which is what the sim is for; running one is a developer's or a
 tester's step, done from a terminal next to the app.
 
-### 7. Next: a recording as the ECU
+### 7. A recording as the ECU
 
-`replay://<path>` as the sim's source, `tests/vcan_recording_ecu.h`'s
-ECU promoted: each Service 01 request answered with the recording's
-reply at its time since the start, the car's own bitmaps.
+```
+replay://<absolute path>[?loop=0|1][&vin=<17 characters>][&faults=<fault>:<n>[,...]]
+```
+
+The path is a recording's folder or its `frames.csv` (ADR-0017), read
+as `replay://` reads it (`core/src/frames_csv.h`, shared) and absolute
+for the same reason (`BAD_URI` otherwise, on every platform). Create
+reads the whole file before it judges the interface, so a bad file is
+reported first (`LOAD_FAILED`, the line named, never the path). It
+keeps the engine ECU's (0x7E8) whole positive replies, each under the
+request it answers (`core/src/sim_recording.h`, pure):
+
+| Reply | Answers |
+|---|---|
+| `41 <PID>` (a packed one split first, `ecuio_obd2_split`) | `01 <PID>`, and its record in any pack asked |
+| `42 <PID> <frame>` | `02 <PID> <frame>` |
+| `43`, `47`, `4A` | `03`, `07`, `0A` |
+| `49 <item>` | `09 <item>` |
+| `62 <DID>` | `22 <DID>` |
+
+with its time since the recording started (replay's session time).
+A request gets the reply held for it at the simulated ECU's time since
+create, counted in its own 50 ms ticks: the last at or before that
+time, the first one before it, the last one after the recording ends
+(held), or with `loop=1` the time taken round the recording's span
+(`BAD_URI` for a recording whose replies share one time). A pack
+(two to six PIDs) is put together from each PID's reply in the order
+asked, so packing works against any recording, packed or not.
+
+- **Bitmaps:** the car's own when the recording holds any (one it
+  doesn't hold is refused: that car's chain is what it is), else
+  worked out from the PIDs it holds, as the mock's are.
+- **Refusals:** a request it holds no reply for is refused (`7F 01 12`,
+  `7F 22 31`, `7F <service> 12` for 02, 03, 07, 09 and 0A), and the
+  functional ones kept to itself as in section 4. A clear (`04`) is
+  always refused, `7F 04 22`: a recording can't say what the car
+  answers after one.
+- **`vin`:** what `09 02` answers instead of the recording's.
+- **Faults:** as section 3's, the same counters.
+
+A recording made with the probe holds the car's bitmaps and its
+Service 01 replies; identification and diagnostics answer only when
+the session that made it read them. `tests/vcan_recording_ecu.h`
+stays as test code: its log of every reply sent and its fate is the
+oracle `SocketCanFaultTest` compares a session against, which the
+product has no need to keep.
 
 ## Alternatives considered
 
@@ -126,6 +169,13 @@ reply at its time since the start, the car's own bitmaps.
 - **The fakes' canned values only:** every linear PID, but none moves;
   the drive cycle is the default so a session against the sim looks
   like a car being driven.
+- **A recording replayed frame for frame, as `play` puts it on a
+  bus:** a session's requests would get the replies of another
+  session's rotation, out of step with what it asks; keyed by request,
+  each request gets an answer to itself.
+- **A recording's clear obeyed, its later codes answered empty:** it
+  would invent the car's state after a clear, which the recording
+  never saw.
 
 ## Consequences
 
@@ -133,6 +183,9 @@ reply at its time since the start, the car's own bitmaps.
   - Anyone on Linux runs Havne's SocketCAN requests end to end, the
     obd2 profile, diagnostics, identification and the inspection line,
     with no hardware; faults show what a bad bus does.
+  - A recording from any transport (J2534, ELM327, SocketCAN) answers
+    a live session as the car did, its own bitmaps and values, so a
+    car's session runs again at the desk.
   - Core's ISO-TP sender, so far only unit-tested, carries real replies.
 - **Bad:**
   - A new public header and its ABI for a testing tool.
