@@ -10,6 +10,19 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
 
 ## [Unreleased]
 
+### Added
+
+- `ecuio_session_clear_diagnostics_with` in core's C API: a clear with the caller's word on a running engine and on a moving vehicle. A channel's diagnostics report records the engine and vehicle speeds a clear read (`clear_kmh`, `ECUIO_DIAG_CLEAR_RPM`, `ECUIO_DIAG_CLEAR_KMH`) and two outcomes, moving and no vehicle speed.
+
+### Changed
+
+- Clearing trouble codes no longer needs the engine off. The confirmation says a clear works best with the engine off and the ignition on; the clear then goes out with the engine running, and if an ECU refuses it running, its card and the activity log say so. If the vehicle is moving, the Diagnostics page asks once more, naming the speed, before clearing.
+
+### Fixed
+
+- On a phone, Live and the Log's frame table ran off the right edge of the screen; they now fit its width, and the frame table wraps a long payload under its row.
+- On a phone, the confirmation for clearing codes could run past the bottom of the screen with no way to reach Clear or Cancel; it now scrolls with the page.
+
 ## [0.3.5] - 2026-11-01
 
 ### Added
