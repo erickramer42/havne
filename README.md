@@ -224,13 +224,13 @@ troubleshooting.
 
 ## Status
 
-v0.3.4 (`havne-cli`, Linux as a supported desktop with SocketCAN
-listening, the core as packages, debug symbols and an SBOM) is the
+v0.3.5 (trouble codes read and cleared, every standard Service 01
+reading with several PIDs per request, SocketCAN requests through
+ISO-TP, fault injection on a replay, reply timing per PID) is the
 latest release. Next:
 
 | Version | Plan |
 |---|---|
-| v0.3.5 | Full OBD-II diagnostics, reading and clearing trouble codes; SocketCAN requests through ISO-TP; fault injection on a replay; reply timing per PID |
 | v0.3.6 | The car runs the adapters on hand can make; trouble-code descriptions, VIN decode and a readiness summary; the simulated ECU as `havne-cli sim` |
 | v0.3.7-v0.3.9 | A log viewer that overlays runs; CSV import and export, scrubbed for sharing; a health report; Python bindings; triggered logging and alerts |
 | Later | SocketCAN through a real controller, when the hardware is on hand; discovery and capture formats; a plugin framework; older buses |

@@ -10,6 +10,8 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
 
 ## [Unreleased]
 
+## [0.3.5] - 2026-11-01
+
 ### Added
 - Each CI run builds an unsigned iPhone app, `havne-ios-unsigned.ipa`,
   that a tester installs with a sideloading tool and their own Apple ID
@@ -541,7 +543,8 @@ The first release with a Windows download
   shell with a responsive layout.
 - CI on Windows, macOS and Linux, running the core's tests.
 
-[Unreleased]: https://github.com/erickramer42/havne/compare/v0.3.4...HEAD
+[Unreleased]: https://github.com/erickramer42/havne/compare/v0.3.5...HEAD
+[0.3.5]: https://github.com/erickramer42/havne/compare/v0.3.4...v0.3.5
 [0.3.4]: https://github.com/erickramer42/havne/compare/v0.3.3...v0.3.4
 [0.3.3]: https://github.com/erickramer42/havne/compare/v0.3.2...v0.3.3
 [0.3.2]: https://github.com/erickramer42/havne/compare/v0.3.1...v0.3.2

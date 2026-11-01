@@ -1,6 +1,6 @@
 # Havne: Project Status
 
-**Updated:** 2026-10-31, **Version:** v0.3.4,
+**Updated:** 2026-11-01, **Version:** v0.3.5,
 [![CI](https://github.com/erickramer42/havne/actions/workflows/ci.yml/badge.svg)](https://github.com/erickramer42/havne/actions/workflows/ci.yml)
 
 This file covers the project as it stands: what works, what comes
@@ -14,11 +14,11 @@ Safety, regulatory and warranty caveats are in
 
 ## Where things stand
 
-**Current phase: v0.3.5, in progress.** v0.3.4 is out: `havne-cli`, a
-command-line client over the C ABI; Linux as a supported desktop,
-with the AppImage, the core as a deb and a tarball, and SocketCAN
-listening; debug symbols, an SBOM and reproducible Linux downloads
-with each release. Changes since then go under
+**Current phase: v0.3.6, next.** v0.3.5 is out: trouble codes, read
+and cleared; every linear reading of the Service 01 table, several
+PIDs per request; SocketCAN requests through ISO-TP in core; fault
+injection on a replay; and reply timing per request. Changes since
+then go under
 [CHANGELOG.md's "Unreleased"](CHANGELOG.md#unreleased). The J2534 stack is verified
 end to end against a fake vendor DLL, through the x64 and the x86
 surrogate. One real J2534 adapter, the OBDX Pro VX, has run on a quiet
@@ -33,11 +33,8 @@ the same car through the OBDLink MX+ over Bluetooth and the VX in ELM
 mode over USB
 ([2026-10-27](docs/bench-sessions/2026-10-27-elm327-vehicle.md)), and
 the Android app reaches the car through the phone's Bluetooth, in the
-background too. v0.3.5 has trouble codes, read and cleared, every
-linear reading of the Service 01 table in the `obd2` set, and SocketCAN
-requests through ISO-TP in core, fault injection on a replay, and
-reply timing per request with a benchmark of it; the car runs the
-adapters on hand can make are v0.3.6's, and SocketCAN's wait for their
+background too. Next comes v0.3.6, the car runs the adapters on hand
+can make and the diagnostics finished; SocketCAN's runs wait for their
 hardware ([roadmap](#roadmap)).
 
 - **Works:**
@@ -189,6 +186,16 @@ hardware ([roadmap](#roadmap)).
     Ubuntu 26.04, Arch and Kali, and v0.3.4's on a Linux machine's own
     desktop (Xubuntu 26.10, X11, `mock://demo` with recording); not yet
     with an adapter on Linux.
+  - **Reply timing** ([ADR-0042](docs/adr/0042-reply-timing.md)): every
+    requesting session measures, per request in its rotation, its
+    outcomes, its reply latency (host clock) and its refresh interval
+    on the frames' own stamps (the adapter's for J2534, the kernel's
+    for SocketCAN, the host's for ELM327) at P50, P99 and P99.9, into a
+    recording's `latency.csv`, `havne-cli`'s `timing` lines and the
+    activity log's summary at the disconnect; `bench_timing` measures
+    what the stack adds through each transport against the fakes
+    ([docs/testing.md](docs/testing.md#reply-timing-against-the-fakes)).
+    Left: a car's figures, from v0.3.6's runs.
   - **Every release** carries the Windows zip and a zip of its PDBs,
     the signed APK, the Linux files, one SPDX SBOM over them, and
     checksums and one signed provenance over every download
@@ -336,7 +343,7 @@ an issue is resolved it is removed, and its number is not reused.
 | v0.3.2 | Record-replay transport, decoding on the transport's thread, every driver in its own process | Released |
 | v0.3.3 | ELM327 adapters, preferences and vehicles, Android with Bluetooth and background sessions and a signed APK, the rename to Havne | Released |
 | v0.3.4 | A command-line client over the C ABI; Linux as a supported desktop; a SocketCAN transport that listens | Released |
-| v0.3.5 | Full OBD-II diagnostics (Services 01-0A, clearing codes); SocketCAN requests through ISO-TP; fault injection on a replay; a performance benchmark with latency per PID | Built; the release in preparation |
+| v0.3.5 | Full OBD-II diagnostics (Services 01-0A, clearing codes); SocketCAN requests through ISO-TP; fault injection on a replay; a performance benchmark with latency per PID | Released |
 | v0.3.6 | Proven and finished: the car runs the adapters on hand can make (packing through the VX, more than one ECU captured); Windows timer resolution; trouble-code descriptions, VIN decode and a readiness summary; the simulated ECU as `havne-cli sim`; a performance gate in CI; clang-tidy tightened | Planned |
 | v0.3.7 | A log viewer: recordings opened offline, two runs overlaid on a common zero | Planned |
 | v0.3.8 | CSV import and export, scrubbed for sharing; a health report; the Log page's frame filter; Python bindings | Planned |
@@ -348,92 +355,6 @@ an issue is resolved it is removed, and its number is not reused.
 The planned releases are in order; the proposed ones are not
 scheduled. The SocketCAN runs go into the first release after their
 hardware is on hand. What each holds, past its row:
-
-### v0.3.5: full OBD-II diagnostics, SocketCAN requests
-
-- **Full standard OBD-II coverage** is built
-  ([ADR-0039](docs/adr/0039-full-service01-coverage.md)): one `obd2` set with a
-  def for every linear field of the Service 01 table, each checked
-  against public J1979 tables (`tests/fixtures/obd2/service01.csv`),
-  its requests in two rate classes, and Live hiding what a car lacks;
-  run on the test car (BENCH prep #30), where PIDs 23 and 59 read one
-  sensor (so a car whose bitmaps list both asks 59 in the slow class,
-  ADR-0039 section 3) and 55 and 56 answer one of their two fields (core
-  reports such a field absent, `ecuio_session_get_absent_signals`, and
-  Live hides it, ADR-0039 section 6); Live plots the six best ranked signals
-  the car has (ADR-0039 section 8). Several PIDs per request is
-  built: core decodes a reply that carries several, record by record,
-  with each PID's length as the car sends it, and the engine packs up
-  to six PIDs of a class per request, falling back to one per request
-  for a car that mishandles them; on the test car through the MX+ each
-  signal refreshed four to five times as often (BENCH prep #31); the
-  VX's run is v0.3.6's (ADR-0039's Appendix A). The bit-field, enumerated and complex PIDs wait for decoder
-  kinds of their own (ADR-0039 section 2).
-- **Trouble codes:** reading is built
-  ([ADR-0037](docs/adr/0037-reading-trouble-codes.md)): stored, pending
-  and permanent codes, readiness and the freeze frame (Services 03, 07,
-  0A, 01 and 02), on the Diagnostics page, in the activity log and in
-  `havne-cli`; read on the test car through both adapters, with no
-  codes stored; a stored code and a second scan tool's reading beside
-  it are to come (BENCH prep #28). Clearing is built
-  ([ADR-0038](docs/adr/0038-clearing-trouble-codes.md)): Service 04 by
-  one path, each ECU by its own ID, behind a gate (the report saved
-  first, the engine seen stopped by `01 0C`, the user's confirmation);
-  on the fakes and the simulated car. A car's clear waits for one with
-  a code worth clearing and a drive to bring its monitors back (BENCH
-  prep #29).
-- **SocketCAN requests** are built
-  ([ADR-0040](docs/adr/0040-socketcan-requests-isotp.md)):
-  ISO-TP in core, which J2534 and ELM327 adapters do themselves, so the
-  request engine and the profiles run on a native CAN interface. A
-  session that sends needs the controller in normal mode, so ADR-0040
-  revisits ADR-0032's listen-only rule: the rate stated in `?baud=`, no
-  restart after a bus-off, one-shot mode, error-active, and a first
-  request that comes back from the bus before a second goes out (ISO
-  15765-4's procedure for a wrong rate).
-  - The fakes' ECU on `vcan0` answers requests through the kernel's
-    ISO-TP, so the probe, identification and the diagnostics report
-    run with no car.
-  - Conformance: the receiver and the sender against the kernel's
-    (lengths to 4095 bytes, block sizes, STmin, N_Cr), unit tests of
-    every frame kind, wait frames, overflow and N_Bs, and a fuzz target
-    (`fuzz_isotp`) beside the ELM327 one, which shares the reassembly.
-- **Fault injection on a replay**, in two parts, so the error handling
-  is proven against real traffic with no vehicle:
-  - Built: `replay://...?faults=` drops, loses to an overflow, corrupts,
-    cuts short or holds back the recording's frames as they play, from a
-    seed ([ADR-0041](docs/adr/0041-replay-fault-injection.md)); the
-    session counts each kind (`ecuio_session_get_replay_faults`, the
-    CLI's `end` line, the activity log), and the bridge, the recorder
-    and the CLI are tested under them on the test car's engine start.
-  - Built: the same recording answering a requesting `socketcan://`
-    session on `vcan0` as the ECU, its packed replies segmented, with
-    faults at the ISO-TP level (no reply, a late one, a Consecutive
-    Frame out of sequence or past N_Cr): every reply the bus carried
-    whole is delivered and no broken one, and the rotation and packing
-    hold (ADR-0041 section 4). It showed late replies ending packing;
-    fixed (ADR-0039 Appendix A, the note on late replies).
-- **A performance benchmark**, built
-  ([ADR-0042](docs/adr/0042-reply-timing.md)): every
-  requesting session measures, per request in its rotation, its
-  outcomes, its reply latency (host clock) and its refresh interval on
-  the frames' own stamps (the adapter's for J2534, the kernel's for
-  SocketCAN, the host's for ELM327, said in the output; an interval
-  across a fallback to the host's delta is left out and counted), at
-  P50, P99 and P99.9 from log-linear histograms in core
-  (`ecuio_session_get_timing`). A recording keeps them in `latency.csv`
-  and `havne-cli stream` in `timing` lines: a snapshot of the rows that
-  changed every 10 s and at the end, under one column list. ISO-TP's
-  counts come with them. `bench_timing` measures what the stack adds
-  through each transport against the fakes, and `bench_bridge --load`
-  the delivery figures
-  ([docs/testing.md](docs/testing.md#reply-timing-against-the-fakes)). A
-  car's figures come from v0.3.6's runs.
-- **Done when:** trouble codes, the full Service 01 set, SocketCAN
-  requests, fault injection on a replay and the benchmark are built
-  and verified with no hardware: the fakes, replays of the test car,
-  `vcan0`. The runs that need hardware are v0.3.6's, and SocketCAN's
-  wait for theirs.
 
 ### v0.3.6: proven and finished
 
