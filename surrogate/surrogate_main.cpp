@@ -767,7 +767,8 @@ shutdown:
     if (g_have_device) g_close(g_device_id);
     FreeLibrary(g_module);
     if (g_pipe != INVALID_HANDLE_VALUE) CloseHandle(g_pipe);
-    if (g_fine_timer)
+    if (g_fine_timer) {
         timeEndPeriod(1);
+    }
     return 0;
 }

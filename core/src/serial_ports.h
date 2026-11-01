@@ -29,16 +29,20 @@ inline bool serial_name_less(const char* a, const char* b)
 {
     while (*a != '\0' && *b != '\0') {
         if (serial_is_digit(*a) && serial_is_digit(*b)) {
-            while (*a == '0')
+            while (*a == '0') {
                 ++a;
-            while (*b == '0')
+            }
+            while (*b == '0') {
                 ++b;
+            }
             size_t na = 0;
             size_t nb = 0;
-            while (serial_is_digit(a[na]))
+            while (serial_is_digit(a[na])) {
                 ++na;
-            while (serial_is_digit(b[nb]))
+            }
+            while (serial_is_digit(b[nb])) {
                 ++nb;
+            }
             if (na != nb) {
                 return na < nb;
             }
@@ -74,8 +78,9 @@ inline bool serial_dev_listed(const char* entry, bool apple)
             continue;
         }
         const char* p = entry + n;
-        while (serial_is_digit(*p))
+        while (serial_is_digit(*p)) {
             ++p;
+        }
         return *p == '\0';
     }
     return false;
@@ -110,10 +115,12 @@ inline void serial_ports_finish(std::vector<ecuio_serial_port_t>& found,
     std::stable_sort(
         found.begin(), found.end(),
         [](const ecuio_serial_port_t& a, const ecuio_serial_port_t& b) {
-            if (serial_name_less(a.name, b.name))
+            if (serial_name_less(a.name, b.name)) {
                 return true;
-            if (serial_name_less(b.name, a.name))
+            }
+            if (serial_name_less(b.name, a.name)) {
                 return false;
+            }
             return strcmp(a.name, b.name) < 0;
         });
     found.erase(std::unique(found.begin(), found.end(),

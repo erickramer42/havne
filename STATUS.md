@@ -232,10 +232,10 @@ hardware ([roadmap](#roadmap)).
   ELM327 [bench](docs/bench-sessions/elm327-bench-runsheet.md) and
   [vehicle](docs/bench-sessions/elm327-vehicle-runsheet.md) sheets, and
   the [phone's](docs/bench-sessions/android-phone-runsheet.md).
-- **Tests:** 752 ctest cases on Windows (both trees rebuilt,
+- **Tests:** 755 ctest cases on Windows (both trees rebuilt,
   2026-11-01), all passing but two env-gated skips (the cross-arch
   case, and the real-car recordings' diff, run locally), plus the
-  cross-arch subset (85/85); 0 MSVC warnings. CI runs ctest on Windows,
+  cross-arch subset (86/86); 0 MSVC warnings. CI runs ctest on Windows,
   macOS and Linux, with SocketCAN's suites on Linux's `vcan0`; core
   under ASan and UBSan, `vcan0` included; 60 s of each libFuzzer
   harness ([fuzz/README.md](fuzz/README.md)); clang-tidy and CodeQL;
@@ -390,11 +390,10 @@ reach into car-verified claims and finishes the diagnostics.
   faults given as replay's `?faults=` are. Until SocketCAN's hardware
   is on hand, it's how anyone runs Havne's SocketCAN requests end to
   end against a known ECU.
-- **ELM327's one drop and timeout per run**, seen in every
-  `bench_timing` run, traced and fixed or explained.
 - **clang-tidy, tightened and widened:** `google-explicit-constructor`
-  and braces around every statement, the decoder's C-style casts made
-  `static_cast`, then the gate widened to `cli/` and `app/`.
+  and braces around a body on the line after its `if` are on; left: the
+  decoder's C-style casts made `static_cast`, then the gate widened to
+  `cli/` and `app/`.
 - **An iPhone download, once a device run works:** a tester's run of
   CI's unsigned `.ipa` on an iPhone, filed as a session sheet, first;
   then the release workflow builds and publishes

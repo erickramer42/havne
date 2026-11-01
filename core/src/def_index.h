@@ -65,12 +65,15 @@ inline void ecuio_def_index_build(ecuio_def_index& index,
                  keyed ? d.mux_key : 0u, i});
     }
     std::sort(items.begin(), items.end(), [](const item& a, const item& b) {
-        if (a.message_id != b.message_id)
+        if (a.message_id != b.message_id) {
             return a.message_id < b.message_id;
-        if (a.shape != b.shape)
+        }
+        if (a.shape != b.shape) {
             return a.shape < b.shape;
-        if (a.key != b.key)
+        }
+        if (a.key != b.key) {
             return a.key < b.key;
+        }
         return a.def < b.def;
     });
     index.groups.clear();
