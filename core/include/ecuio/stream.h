@@ -27,7 +27,7 @@ extern "C" {
  * interpret (the adapter's address); 127 bytes at most. The whole name
  * names one link, so the app registers one stream per adapter. Once
  * registered,
- * elm327://<name>[?…] connects through it, with every elm327:// key but
+ * elm327://<name>[?...] connects through it, with every elm327:// key but
  * ?serial= (a stream has no serial rate). An unregistered name is
  * ECUIO_ERR_LOAD_FAILED at connect, "no such port", as a missing COM port
  * is.

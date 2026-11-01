@@ -9,7 +9,7 @@
 //          (BridgeTest.DeliveryText*, .DisconnectLogsTheDelivery), the
 //          vehicle's VIN key, label and plotted names (ADR-0027;
 //          the VIN core reads, CoreTest.TheVinIsService09sThenF190s;
-//          BridgeTest.UnplottedNames*, …), the default
+//          BridgeTest.UnplottedNames*, ...), the default
 //          plot (ADR-0039 section 8; BridgeTest.ARankedSet*, .APlotChoice*);
 //          reply timing (BridgeTest.ARecordingKeepsReplyTimingsSnapshots,
 //          .TimingTextNamesTheRequestsAndTheClock)
@@ -346,7 +346,7 @@ private:
     HostElapsedTimer m_clock;   // fallback stamps; restarted in setSignalSet
 };
 
-// Live's list: SignalListModel without its hidden rows (ADR-0039 §6).
+// Live's list: SignalListModel without its hidden rows (ADR-0039 section 6).
 // The Dashboard reads the whole model, so a gauge keeps its row either
 // way; a row keeps its model row (RowRole) for its plot box and color.
 class LiveSignalModel : public QSortFilterProxyModel
@@ -405,7 +405,7 @@ class SessionBridge : public QObject
     Q_PROPERTY(QString recordingFolder READ recordingFolder NOTIFY recordingStateChanged)
     Q_PROPERTY(QUrl recordingFolderUrl READ recordingFolderUrl NOTIFY recordingStateChanged)
     Q_PROPERTY(bool recordingActive READ recordingActive NOTIFY recordingStateChanged)
-    // The picked vehicle's label (ADR-0027 §2), "" for none: an adapter
+    // The picked vehicle's label (ADR-0027 section 2), "" for none: an adapter
     // session's recording folder is named "<stamp> <label>". Settings
     // sets it before each connect.
     Q_PROPERTY(QString vehicleLabel READ vehicleLabel WRITE setVehicleLabel NOTIFY vehicleLabelChanged)
@@ -452,7 +452,7 @@ public:
     static constexpr int maxInFlightForTesting() { return MaxInFlightFrames; }
     ecuio_session_t* pendingSessionForTesting() const { return m_pendingSession.load(); }
     QString linkState() const;
-    static QString linkStateForError(int32_t errorCode);  /* code → state string; static so tests need no session */
+    static QString linkStateForError(int32_t errorCode);  /* code -> state string; static so tests need no session */
     static QString uriLabelFor(const QString& uri);  /* a direct-load DLL or replay path cut to its last name, a Bluetooth address to its last two octets */
     static QString sessionInfoText(const ecuio_session_info_t& info);  /* the activity log's "Session:" line */
     static QString versionsText(const ecuio_session_info_t& info);  /* its versions clause; "" with none read */
@@ -460,7 +460,7 @@ public:
     static QString channelIdentityText(const ecuio_channel_identity_t& identity);  /* its "ECU 0x… identity:" lines */
     static QString channelDiagnosticsText(const ecuio_channel_diagnostics_t& diagnostics);  /* its "ECU 0x… diagnostics:" lines */
     static QString channelClearText(const ecuio_channel_diagnostics_t& diagnostics);  /* its "ECU 0x… clear:" lines (ADR-0038) */
-    // A clear's saved reports, as havne-cli writes them (ADR-0031 §3): a
+    // A clear's saved reports, as havne-cli writes them (ADR-0031 section 3): a
     // start line, then one diagnostics line per report
     static QByteArray diagnosticsFileText(const ecuio_channel_diagnostics_t* reports,
                                           uint32_t count);
@@ -498,13 +498,13 @@ public:
     // values only (rule 2): dllPath is exposed because it is the user's
     // route to a direct-load URI, not for parsing.
     Q_INVOKABLE QVariantList discoverJ2534Devices() const;
-    // The machine's serial ports, for elm327:// (ADR-0026 §7): one map
+    // The machine's serial ports, for elm327:// (ADR-0026 section 7): one map
     // per port, { name, device } as QStrings, in core's order. name is
     // what follows elm327://; device is the driver's device on Windows
     // ("\Device\BthModem0"), "" elsewhere. A registry read or a /dev
     // listing; no port is opened, so it's safe to call from QML.
     Q_INVOKABLE QVariantList discoverSerialPorts() const;
-    // The machine's CAN interfaces, for socketcan:// (ADR-0032 §7), Linux
+    // The machine's CAN interfaces, for socketcan:// (ADR-0032 section 7), Linux
     // only: one map per interface, { name, kind, up, listenOnly, fd,
     // bitrate }, kind "can" or "vcan", bitrate in bit/s (0 for vcan). A
     // netlink read; nothing is opened. Empty elsewhere.
@@ -537,13 +537,13 @@ public:
     bool recordingActive() const { return m_recorder.active(); }
     QString vehicleLabel() const { return m_vehicleLabel; }
     void setVehicleLabel(const QString& label);
-    // The VIN (ADR-0027 §3) stays in the bridge: QML gets a salted
+    // The VIN (ADR-0027 section 3) stays in the bridge: QML gets a salted
     // SHA-256 of it, as lowercase hex, and "" before vehicleIdentified()
     // or with no session. newSalt() is 16 random bytes as hex.
     Q_INVOKABLE QString vinKey(const QString& salt) const;
     Q_INVOKABLE QString newSalt() const;
     // A line in the activity log (and a recording's events.log), for the
-    // app's own events: the vehicle lines of ADR-0027 §4
+    // app's own events: the vehicle lines of ADR-0027 section 4
     Q_INVOKABLE void logEvent(const QString& line) { emit logMessage(line); }
     // A label as a recording folder takes it: letters, digits, space,
     // -, _ and ., trimmed, at most 40 characters, no trailing dot
@@ -575,7 +575,7 @@ public:
     // complete; readiness (an outcome: "unasked", "answered", "refused",
     // "unanswered") and readinessNrc ("7F 01 12" when refused); mil,
     // dtcCount, compression; lists, three of {key ("stored", "pending",
-    // "permanent"), outcome, nrc, codes (["P0301", …]), more (codes past
+    // "permanent"), outcome, nrc, codes (["P0301", ...]), more (codes past
     // the held ones)}; monitors, [{id, name, complete}]; freeze, {outcome,
     // nrc, stored, code, values: [{name, value, unit, decimals}]}, each
     // value through the obd2 def that decoded it and the unit system;
@@ -645,7 +645,7 @@ signals:
     void connectResult(const QString& uri, const QString& error);
     void logMessage(const QString& line);
     // The first channel's identity named a VIN this session hadn't
-    // (ADR-0027 §3): vinKey() has an answer now
+    // (ADR-0027 section 3): vinKey() has an answer now
     void vehicleIdentified();
     void vehicleLabelChanged();
     void linkStateChanged();
@@ -710,7 +710,7 @@ private:
     // A replay without loop: its frames, and whether its end is logged
     uint32_t m_replayFrames = 0;
     bool m_replayEndLogged = true;
-    // The machine's slept count at the last tick (ADR-0033 §6), and the
+    // The machine's slept count at the last tick (ADR-0033 section 6), and the
     // test seam's addition to it
     uint64_t m_sleptUs = 0;
     uint64_t m_sleptAddedForTesting = 0;
@@ -744,7 +744,7 @@ private:
         std::vector<char> text;        // the text samples' bytes
         std::vector<double> newest;    // per def: its newest numeric value
         // per def: the window's lowest and highest, and each value's
-        // frame time in session µs
+        // frame time in session us
         std::vector<double> lowest;
         std::vector<double> highest;
         std::vector<uint64_t> newestUs;
@@ -810,7 +810,7 @@ private:
     // The signals core reports their ECU doesn't support, read into
     // m_unsupportedRead (sized at connect) when a report changes
     std::vector<uint16_t> m_unsupportedRead;
-    // The signals core reports its frames come without (ADR-0039 §6):
+    // The signals core reports its frames come without (ADR-0039 section 6):
     // read each tick into m_absentRead (sized at connect), handed to the
     // model when they differ from m_absentIds
     void pollAbsentSignals();

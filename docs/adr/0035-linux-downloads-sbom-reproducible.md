@@ -6,7 +6,7 @@
   `docs/development.md`, "Releases");
   [ADR-0001](0001-qt-free-core-c-abi.md) (the C ABI the core package
   carries); [ADR-0031](0031-command-line-client.md) (`havne-cli`);
-  [ADR-0034](0034-debug-symbols-and-probes.md) §2 (Linux debug info, which
+  [ADR-0034](0034-debug-symbols-and-probes.md) section 2 (Linux debug info, which
   this record builds).
 
 ## Context
@@ -47,7 +47,7 @@ its build machine's (2.39). It publishes:
 | `havne-X.Y.Z-linux-x86_64.AppImage` | the app, as `make-appimage.sh` packs it |
 | `havne-core_X.Y.Z_amd64.deb` | `havne-cli`, the static library, the public headers, a pkg-config file and a CMake package |
 | `havne-core-X.Y.Z-linux-x86_64.tar.gz` | the same tree, relocatable, for any glibc 2.39+ distribution |
-| `havne-core-dbgsym_X.Y.Z_amd64.deb` and `havne-core-X.Y.Z-linux-x86_64-debug.tar.gz` | `havne-cli`'s debug info (§3) |
+| `havne-core-dbgsym_X.Y.Z_amd64.deb` and `havne-core-X.Y.Z-linux-x86_64-debug.tar.gz` | `havne-cli`'s debug info (section 3) |
 
 Each goes into `SHA256SUMS.txt` and gets a provenance attestation, like
 the Windows files.
@@ -106,7 +106,7 @@ the tarballs with GNU tar. No
 `debian/` directory and no debhelper: the packages are built from the
 tree CMake installs, and the same script makes the tarball.
 
-### 3. Debug info (ADR-0034 §2)
+### 3. Debug info (ADR-0034 section 2)
 
 The Linux packages build in `Release`, the configuration CI tests,
 with `-g` added (`CMAKE_CXX_FLAGS`; it doesn't change the code), and
@@ -122,7 +122,7 @@ The `-dbgsym` deb holds that tree (Debian's layout: `Section: debug`,
 `Depends: havne-core (= X.Y.Z)`). The `-debug` tarball holds the same
 tree to unpack under `/`. `gdb`, `perf report` and `debuginfod` clients
 find the file by build ID. The binaries keep the USDT probes
-(ADR-0034 §4): the build installs `systemtap-sdt-dev`.
+(ADR-0034 section 4): the build installs `systemtap-sdt-dev`.
 
 ### 4. Reproducible: the core packages, byte for byte
 
@@ -196,7 +196,7 @@ the Linux Foundation's `spdx-tools` validate it. Either would serve.
 
 - **HARNESS, CI's `linux-packages` (Ubuntu 24.04, every push):**
   - builds the packages with `make-core-packages.sh`
-  - runs reprotest over `make-core-packages.sh` (§4). The script
+  - runs reprotest over `make-core-packages.sh` (section 4). The script
     itself fails a package without the USDT probes, with a build ID or
     debug link that doesn't match, with an internal header, or with a
     file that names the build's folders.
@@ -227,7 +227,7 @@ the Linux Foundation's `spdx-tools` validate it. Either would serve.
 - **A `debian/` directory with debhelper.** It's Debian's own recipe,
   and `dh_strip` makes the `-dbgsym` package. It brings a second build
   description beside CMake's, and builds only debs.
-- **A shared library now.** See §2: the soname policy belongs with the
+- **A shared library now.** See section 2: the soname policy belongs with the
   bindings that need it.
 - **One SPDX document per download.** That's more files on the release
   page for the same content. One document names every download, and its

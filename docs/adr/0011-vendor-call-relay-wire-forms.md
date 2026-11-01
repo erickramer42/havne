@@ -32,7 +32,7 @@ transport-layer work.
 
 **Filters.**
 - Carry flat mask, pattern and (optional) flow-control byte arrays of
-  1–12 bytes each, and the lengths must match.
+  1-12 bytes each, and the lengths must match.
 - A flow-control array is allowed only with `FLOW_CONTROL_FILTER`.
 - The child expands them into `PASSTHRU_MSG` triplets.
 
@@ -45,7 +45,7 @@ transport-layer work.
 
 **Test observability.** The fake DLL answers every write with a
 deterministic echo: byte 0 + 0x40, the UDS/OBD positive-response
-convention. That makes the whole request→response loop visible
+convention. That makes the whole request to response loop visible
 through the ring, from either architecture.
 
 ## Alternatives considered

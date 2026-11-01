@@ -1,6 +1,6 @@
 # File/layer: tests/cli_signal.sh | test-only, POSIX sh
 # Testing: HARNESS (ctest CliSignalTest): SIGINT and SIGTERM end a
-#          running havne-cli stream cleanly (ADR-0031 §5)
+#          running havne-cli stream cleanly (ADR-0031 section 5)
 #
 #   sh tests/cli_signal.sh <havne-cli>
 #

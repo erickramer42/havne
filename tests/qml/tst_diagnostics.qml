@@ -140,7 +140,7 @@ TestCase {
         tryVerify(() => diagnosticsLines() === 2, 2000, "Read again logs a second read")
     }
 
-    // Clear codes… opens the confirmation in place and locks both buttons;
+    // Clear codes... opens the confirmation in place and locks both buttons;
     // Cancel closes it and nothing is saved or sent
     function test_clearAsksFirstAndCancelSendsNothing() {
         const page = createTemporaryObject(pageComponent, testCase.parent)

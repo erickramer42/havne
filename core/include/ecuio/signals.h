@@ -100,7 +100,7 @@ _Static_assert(offsetof(ecuio_signal_def_t, flags) == 92, "def flags offset is A
 _Static_assert(offsetof(ecuio_signal_def_t, reserved) == 96, "def reserved offset is ABI");
 #endif
 
-/* ADR-0013 §4: profile-declared channels. rx_id is the
+/* ADR-0013 section 4: profile-declared channels. rx_id is the
  * flow-control filter target (receive); tx_id is the request
  * destination. Sets declaring none (raw/mock) keep channel_count
  * 0: no filters, no requests, exactly today's behavior. This is

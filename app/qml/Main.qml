@@ -1,10 +1,10 @@
 // File/layer: app/qml/Main.qml | Qt6 Quick, UI layer
-// Testing: manual smoke: navigation, sidebar↔TabBar at 720px, header
+// Testing: manual smoke: navigation, sidebar <-> TabBar at 720px, header
 //          pill elides at 400 px, keyboard focus rings, the window opens
-//          within a 1280 × 720 screen, zoom steps with Ctrl + / Ctrl − /
+//          within a 1280 x 720 screen, zoom steps with Ctrl + / Ctrl - /
 //          Ctrl 0 and Settings' Display row and survives a restart, as
 //          does the unit system (2026-10-24) and developer mode
-//          (2026-10-27); Home's Connect… opens Settings with Adapter
+//          (2026-10-27); Home's Connect... opens Settings with Adapter
 //          unfolded (2026-10-28). The safe area's margins (Android's system
 //          bars), the window filling a phone's screen after it turns,
 //          and the "Display:" line a phone logs in developer mode:
@@ -25,8 +25,8 @@ ApplicationWindow {
     // A phone's window fills the screen, and follows it when the phone
     // turns: a size short of the screen leaves bands at the right and the
     // bottom (docs/bench-sessions/2026-10-28-android-4.md). A desktop's
-    // opens at 1280 × 800, or less so it fits the screen (a 1080p laptop
-    // at 150 % scaling has 1280 × 720, the taskbar included), and keeps
+    // opens at 1280 x 800, or less so it fits the screen (a 1080p laptop
+    // at 150 % scaling has 1280 x 720, the taskbar included), and keeps
     // it: Component.onCompleted ends the binding, which would resize the
     // window on another monitor
     width: Theme.mobile ? Screen.desktopAvailableWidth
@@ -72,7 +72,7 @@ ApplicationWindow {
     readonly property int settingsPage: 5
 
     function gotoPage(index) { stack.currentIndex = index }
-    // Connect… from any page: Settings, with what to connect to open
+    // Connect... from any page: Settings, with what to connect to open
     function openConnect() {
         settingsView.showAdapters()
         gotoPage(settingsPage)
@@ -262,7 +262,7 @@ ApplicationWindow {
                 Layout.fillHeight: true
                 spacing: 0
 
-                // ---- Sidebar (≥720px): one full-height panel ----
+                // ---- Sidebar (>= 720px): one full-height panel ----
                 Rectangle {
                     visible: !root.isCompact
                     Layout.fillHeight: true

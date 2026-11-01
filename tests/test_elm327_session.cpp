@@ -368,7 +368,7 @@ protected:
 
 /* The setup's contract commands in order, then the readings, then the
  * requests: the obd2 profile's probe first, each Service 01 request to
- * the engine ECU with the count digit (ADR-0026 §3) */
+ * the engine ECU with the count digit (ADR-0026 section 3) */
 TEST_F(Elm327SessionTest, SetupRunsTheContractThenTheReadings)
 {
     Session s;
@@ -390,7 +390,7 @@ TEST_F(Elm327SessionTest, SetupRunsTheContractThenTheReadings)
         << "a bare CR repeats the last command";
 }
 
-/* What the session runs on (ADR-0026 §7): the backend, ISO 15765 at the
+/* What the session runs on (ADR-0026 section 7): the backend, ISO 15765 at the
  * CAN rate, the channel, an STN's two version strings and STVR's
  * voltage */
 TEST_F(Elm327SessionTest, TheSessionInfoSaysWhatItRunsOn)
@@ -1173,7 +1173,7 @@ TEST_F(Elm327SessionTest, RepeatedPendingRepliesHoldTheReadPastFiveSeconds)
         << "both pending replies, and maybe the next request's first";
 }
 
-/* Read-only (ADR-0026 §5): nothing written to the adapter's memory, no
+/* Read-only (ADR-0026 section 5): nothing written to the adapter's memory, no
  * serial number asked, no monitor, no OBDX binary mode, across a session
  * that probes, identifies and polls */
 TEST_F(Elm327SessionTest, NothingIsWrittenOrAskedThatTheAdrRulesOut)
@@ -2073,7 +2073,7 @@ TEST(Elm327LogTest, KeptNamesAndTextHaveTheirShape)
 }
 
 /* What a frame costs the worker: no operator new between two frames once
- * the session runs, for its frames and its values (ADR-0026 §3), with
+ * the session runs, for its frames and its values (ADR-0026 section 3), with
  * the wire log taking every request and reply too */
 namespace {
 struct WorkerNews {
@@ -2169,7 +2169,7 @@ TEST_F(Elm327SessionTest, ListeningAllocatesNothingPerFrame)
 
 #ifndef _WIN32
 
-/* ---- The POSIX port over a pseudo-terminal (ADR-0026 §8) ---------------
+/* ---- The POSIX port over a pseudo-terminal (ADR-0026 section 8) ---------------
  * The fake ELM327 on the master side, the transport's termios port on
  * the slave: the real port code, its settings and its timeouts. */
 namespace {

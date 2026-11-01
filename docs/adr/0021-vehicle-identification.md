@@ -2,18 +2,18 @@
 
 - **Status:** Accepted.
 - **Date:** 2026-10-23. Implemented with this record.
-- **Builds on:** [ADR-0015](0015-request-engine.md) §1 (one-shot
-  requests through the engine's pacing) and §3 (Service 09 is among the
+- **Builds on:** [ADR-0015](0015-request-engine.md) section 1 (one-shot
+  requests through the engine's pacing) and section 3 (Service 09 is among the
   read-only services the engine sends), whose scope left the text
   values of Service 09 to a record of their own; [ADR-0020](0020-uds-generic.md)
-  §3 (the one-shot slot taking turns with the rotation, and the report
+  section 3 (the one-shot slot taking turns with the rotation, and the report
   that carries what it learned); [ADR-0017](0017-session-recording.md)
   (the activity log's lines land in a recording's `events.log`).
 
 ## Context
 
 A session knows which adapter it runs on ([ADR-0019](0019-session-info.md))
-and what each ECU supports ([ADR-0015](0015-request-engine.md) §4), but
+and what each ECU supports ([ADR-0015](0015-request-engine.md) section 4), but
 not which vehicle it is talking to. A session sheet has to carry the
 VIN and the calibration IDs by hand, a recording can't be told from
 another car's, and the planned per-vehicle profiles need a key.
@@ -21,7 +21,7 @@ another car's, and the planned per-vehicle profiles need a key.
 The standard services carry what's needed. SAE J1979 Service 09 gives
 the VIN (item 02), the calibration IDs (04), their verification numbers
 (06) and the ECU's name (0A); ISO 14229-1's identification DIDs
-(`F187`–`F195`) give the part, software and hardware numbers, the
+(`F187`-`F195`) give the part, software and hardware numbers, the
 supplier, the serial and the VIN again (`F190`). All are read-only, and
 all answer once: nothing in them changes during a session, so they
 don't belong in the rotation. Their replies are text or short binary,
@@ -79,7 +79,7 @@ it beside the support report, under the same mutex;
 `ecuio_session_get_channel_identity` copies it, with the support
 report's rules (a channel index below the session's channel count, any
 thread, the last update after close). `ecuio_identity_request_name`
-gives an item's display name ("VIN", "CALID", …) so the list and its
+gives an item's display name ("VIN", "CALID", ...) so the list and its
 words live in one place.
 
 ### 4. One line in the activity log, once complete
@@ -130,7 +130,7 @@ no channels and no engine, and `mock://` sessions report no identity.
 ## Consequences
 
 - A connect sends thirteen more requests per channel, interleaved with
-  the rotation: about a second against a quick ECU, up to 13 × 120 ms
+  the rotation: about a second against a quick ECU, up to 13 x 120 ms
   on one that answers nothing. `?identify=0` removes them; tests that
   pin write order use it, as they use `?probe=0`.
 - The VIN and the ECU's serial land in the activity log and in every
@@ -143,7 +143,7 @@ no channels and no engine, and `mock://` sessions report no identity.
 - A negative `7F 22 11` to an identification DID drops every Service
   0x22 request of the channel's rotation while the probe is on, as the
   scan's would: the ECU said the service is unsupported.
-- The late-negative caveat of [ADR-0020](0020-uds-generic.md) §3 holds
+- The late-negative caveat of [ADR-0020](0020-uds-generic.md) section 3 holds
   here too: an item is settled by either reply whatever the channel's
   step, so a negative reply arriving after its request timed out can
   count the item out as refused.

@@ -1,5 +1,5 @@
 // File/layer: app/sessionbridge.cpp | Qt6 Core, app layer, C++17
-// Testing: test_bridge (QtCore only): worker→GUI marshaling, coalescing,
+// Testing: test_bridge (QtCore only): worker->GUI marshaling, coalescing,
 //          in-flight backpressure, the frame log's ring and order, its
 //          rows' payload storage (BridgeTest.FrameLogHoldsLongPayloadsOnlyWhileShown)
 //          and the counters on the tick, core's values staged from the
@@ -1520,7 +1520,7 @@ void SessionBridge::startRecording(const QString& uri, const ecuio_signal_set_t*
                       .arg(QString::fromUtf8(frameLogging)),
     };
 
-    // The picked vehicle names an adapter's session only (ADR-0027 §1):
+    // The picked vehicle names an adapter's session only (ADR-0027 section 1):
     // a mock or a replay isn't that car
     const bool adapter =
         uri.startsWith(QStringLiteral("j2534://"), Qt::CaseInsensitive) ||
@@ -1864,7 +1864,7 @@ void SessionBridge::drainValues()
 }
 
 // The tick's half: the window's values into the model, one entry per
-// signal, whatever the frame rate (ADR-0024 §7)
+// signal, whatever the frame rate (ADR-0024 section 7)
 void SessionBridge::flushValues()
 {
     drainValues();
@@ -1897,7 +1897,7 @@ SessionBridge::DeliveryStats SessionBridge::deliveryStats() const
 
 namespace {
 
-// A latency for the activity log: µs below a millisecond, then ms with
+// A latency for the activity log: us below a millisecond, then ms with
 // one decimal below 10 ms, then whole ms
 QString latencyText(uint64_t us)
 {
@@ -1918,7 +1918,7 @@ QString quantilesText(const LatencyStats& l)
 } // namespace
 
 // "Delivery: 7074 frames, none dropped; to the GUI thread in median
-// 31 µs, p99 412 µs, max 1.2 ms; 28296 values, to the model in median
+// 31 us, p99 412 us, max 1.2 ms; 28296 values, to the model in median
 // 51 ms, p99 99 ms, max 101 ms". A quantile is the top of its bucket,
 // at most 12.5 % above the true value (LatencyStats).
 QString SessionBridge::deliveryText(const DeliveryStats& s)
@@ -2090,7 +2090,7 @@ void SessionBridge::pollLinkHealth()
     emit linkStateChanged();
 }
 
-/* What each channel's ECU said it supports (ADR-0015 §4), in the
+/* What each channel's ECU said it supports (ADR-0015 section 4), in the
  * activity log once per update: the probe's walk ending, and each
  * request it drops. Generation 0 is nothing learned yet. */
 void SessionBridge::pollChannelSupport()
@@ -2126,7 +2126,7 @@ void SessionBridge::pollChannelSupport()
 }
 
 // Live hides the signals core reports its frames come without, as it
-// hides an unsupported PID's (ADR-0039 §6): the fact is core's, the
+// hides an unsupported PID's (ADR-0039 section 6): the fact is core's, the
 // hiding the model's
 void SessionBridge::pollAbsentSignals()
 {
@@ -2259,7 +2259,7 @@ void SessionBridge::pollChannelIdentity()
         }
         m_identityGeneration[c] = s.generation;
         emit logMessage(channelIdentityText(s));
-        // The vehicle is the first channel's ECU's VIN (ADR-0027 §3);
+        // The vehicle is the first channel's ECU's VIN (ADR-0027 section 3);
         // a recovery's re-asks settle on the same one and say nothing
         if (c == 0) {
             char text[ECUIO_VIN_TEXT_LEN];
@@ -2394,7 +2394,7 @@ QString SessionBridge::clearDiagnostics()
         return refuse(QStringLiteral("no Documents folder"));
     }
     // The picked vehicle names an adapter's file only, as a recording's
-    // folder (ADR-0027 §1)
+    // folder (ADR-0027 section 1)
     const bool adapter = m_currentUri.startsWith(QStringLiteral("j2534://"),
                                                  Qt::CaseInsensitive) ||
                          m_currentUri.startsWith(QStringLiteral("elm327://"),
@@ -2549,7 +2549,7 @@ SessionBridge::diagnosticsEntry(const ecuio_channel_diagnostics_t& s,
     m[QStringLiteral("monitors")] = monitors;
 
     /* Each freeze-frame value by the obd2 def that decoded it (ADR-0037
-     * §4), in the user's units, as Live shows a live one */
+     * section 4), in the user's units, as Live shows a live one */
     const ecuio_signal_set_t* obd2 = ecuio_obd2_signal_set();
     QVariantList values;
     const uint8_t fn = std::min<uint8_t>(s.freeze_count, ECUIO_DIAG_MAX_FREEZE);
@@ -2880,7 +2880,7 @@ SessionBridge::channelDiagnosticsText(const ecuio_channel_diagnostics_t& s)
 
 /* The URI as the header pill and the Dashboard show it. A direct-load
  * selector (one holding a separator, as resolve_uri tells a path from a
- * vendor name) is cut to the DLL's file name, j2534://…/vendor.dll, so
+ * vendor name) is cut to the DLL's file name, j2534://.../vendor.dll, so
  * a local folder never reaches the screen or a screenshot, and a long
  * path can't elide the DLL off the pill's end. The query stays; every
  * other URI is unchanged. Settings and the activity log keep it whole. */
@@ -2982,7 +2982,7 @@ void SessionBridge::pollReplayEnd()
             .arg(f.stalled));
 }
 
-/* A sleep while connected (ADR-0033 §6): the machine's slept count rose
+/* A sleep while connected (ADR-0033 section 6): the machine's slept count rose
  * a second or more since the last tick. Session time counts the sleep, so
  * Live and the recording show it as a gap; this says what the gap is.
  * Smaller rises are taken in without a line */

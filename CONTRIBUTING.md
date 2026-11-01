@@ -17,7 +17,7 @@ Read [docs/architecture.md](docs/architecture.md) first: it is a short map
 of how the parts fit together and why, and each section points to the
 document that holds the detail. Then, by what you want to do:
 
-| You want to… | Read |
+| You want to... | Read |
 |---|---|
 | Know what works, what's broken and what's planned | [STATUS.md](STATUS.md): "Where things stand", "Known issues", the roadmap |
 | Find something to work on | STATUS.md's [backlog](STATUS.md#backlog) (sized **S**, **M** or **L**; an **S** item is the gentlest start) and [docs/testing.md's gaps](docs/testing.md#gaps-not-verified) |

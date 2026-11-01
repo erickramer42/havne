@@ -233,8 +233,8 @@ The full reference is [j2534.md](j2534.md).
   log, the recording and the Diagnostics page; and, when the user
   confirms a clear there, its engine speed and then `04`, at 0 rpm
   only ([ADR-0038](adr/0038-clearing-trouble-codes.md)).
-- **Teardown order is a hard contract:** join the worker → stop the
-  filters → disconnect → close → unload. The worker calls vendor code
+- **Teardown order is a hard contract:** join the worker, then stop the
+  filters, disconnect, close and unload. The worker calls vendor code
   through pointers that dangle once the DLL unmaps.
 - **Never trust a vendor's message count under an error status.** Real
   adapters leave it untouched, so trusting it would replay stale

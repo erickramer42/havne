@@ -1,6 +1,6 @@
 // File/layer: tests/fake_elm327.h | test-only, C++17, Qt-free, no
 //             platform headers; header-only
-// Testing: the HARNESS tier's ELM327 (ADR-0026 §8). Elm327SessionTest
+// Testing: the HARNESS tier's ELM327 (ADR-0026 section 8). Elm327SessionTest
 //          puts it behind the transport's port opener (internal.h);
 //          Elm327PortTest (POSIX) puts it on the far side of a
 //          pseudo-terminal

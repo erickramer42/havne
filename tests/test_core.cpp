@@ -1862,7 +1862,7 @@ TEST(CoreTest, MockFramesKeepTheTickInterval)
         << gaps;
 }
 
-/* Session time's clock (ADR-0033 §1) never goes back, nor does its slept
+/* Session time's clock (ADR-0033 section 1) never goes back, nor does its slept
  * count, and while the machine is awake it keeps the waits' pace */
 TEST(CoreTest, ClockNeverGoesBackAndKeepsPace)
 {
@@ -2161,7 +2161,7 @@ TEST(CoreTest, ProfileRegisterReportsTheValidatorResult) {
 
 TEST(CoreTest, ProfileRegisterRefusesMoreRequestsThanTheEngineHolds) {
     /* A set may derive at most ECUIO_PROFILE_MAX_REQUESTS requests
-     * (ADR-0015 §2), so a session never leaves one unasked with nothing
+     * (ADR-0015 section 2), so a session never leaves one unasked with nothing
      * to say why. Defs read from one reply count once: def 1 reads PID
      * 0x00's reply, as def 0 does. One past the limit is refused, naming
      * the first def that didn't fit, and leaves nothing registered. */
@@ -2233,7 +2233,7 @@ TEST(CoreTest, ProfileUnregisterKeepsExistingSessionsOnTheirSet) {
 }
 
 TEST(CoreTest, MockSessionSelectsMockSet) {
-    /* Scheme default: mock:// → the mock profile's set. */
+    /* Scheme default: mock:// -> the mock profile's set. */
     ecuio_session_t* session = nullptr;
     ASSERT_EQ(ecuio_session_create("mock://profile-default", &session),
               ECUIO_OK);
@@ -2377,7 +2377,7 @@ TEST(CoreTest, ProfileQueryLastValidWinsAcrossDuplicates) {
               ecuio_mock_signal_set());    /* last (name63) won */
     ecuio_session_destroy(session);
 
-    /* And the inverse order: raw last → null set */
+    /* And the inverse order: raw last -> null set */
     std::string uri2 = "mock://x?profile=" + name63 + "&profile=raw";
     ASSERT_EQ(ecuio_session_create(uri2.c_str(), &session), ECUIO_OK);
     EXPECT_EQ(ecuio_session_signal_set(session), nullptr);
@@ -3892,7 +3892,7 @@ TEST(CoreTest, ValuesReachTheListAsItStoodWhenTheFrameArrived)
     }
 }
 
-/* Every text value of a batch has bytes of its own (ADR-0024 Â§4): an
+/* Every text value of a batch has bytes of its own (ADR-0024 section 4): an
  * unkeyed def, two defs sharing a one-byte key and one with a two-byte
  * key all match "ABCD", four text values at once; a def keyed on
  * another byte doesn't match. The next frame starts from the first slot
@@ -3985,7 +3985,7 @@ TEST(CoreTest, ASessionWithNoRotationHasNoTimingRows)
     ecuio_session_destroy(session);
 }
 
-/* ADR-0039 §6: the test car answers PID 55 with bank 1's byte alone
+/* ADR-0039 section 6: the test car answers PID 55 with bank 1's byte alone
  * (docs/bench-sessions/2026-10-31-elm327-vehicle.md), so the bank 3
  * field is absent once ECUIO_ABSENT_AFTER_FRAMES replies have ended
  * before it, and leaves the list when a reply carries it. Bank 1 is
@@ -4290,7 +4290,7 @@ TEST(CoreTest, APackedReplyReplaysToItsRecords)
 }
 
 /* uds-generic's set holds a scanned range's DIDs from create, so a
- * reply for one decodes before the scan has found it (ADR-0024 Â§1) */
+ * reply for one decodes before the scan has found it (ADR-0024 section 1) */
 TEST(CoreTest, ValuesOfAScannedDidComeFromTheSetBuiltAtCreate)
 {
     ecuio_session_t* session = nullptr;

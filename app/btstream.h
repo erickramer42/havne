@@ -1,7 +1,7 @@
 // File/layer: app/btstream.h | Qt6 Core/Bluetooth, app layer, C++17;
 //             built on Android only (APP_BLUETOOTH)
 // Testing: CI's android-build compiles it; the BLE service choice is
-//          blepicker.h's, UNIT-tested; BENCH: the phone (ADR-0028 §4);
+//          blepicker.h's, UNIT-tested; BENCH: the phone (ADR-0028 section 4);
 //          Vehicle: the MX+ through Android's classic Bluetooth. BLE is
 //          fake-tested in core only, until a BLE adapter is on hand
 
@@ -29,7 +29,7 @@ class QLowEnergyController;
 // ecuio_stream_opened, _received and _failed. Core's backoff paces the
 // reopens, so the link never retries on its own.
 //   Classic: an RFCOMM socket to the SPP service of a paired adapter,
-//        one connect at a time (btconnect.h, ADR-0029 §3).
+//        one connect at a time (btconnect.h, ADR-0029 section 3).
 //   BLE: a GATT connection, its services discovered and the one
 //        pickBleService chooses, notifications on, writes split to the
 //        ATT MTU less 3.

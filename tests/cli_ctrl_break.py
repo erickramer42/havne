@@ -1,7 +1,7 @@
 # File/layer: tests/cli_ctrl_break.py | test-only, Python 3.8+, Windows
 # Testing: HARNESS (ctest CliSignalTest.CtrlBreakEndsTheStreamCleanly):
 #          the console's Ctrl+Break ends a running havne-cli stream
-#          cleanly (ADR-0031 §5), through the handler Ctrl+C and a closed
+#          cleanly (ADR-0031 section 5), through the handler Ctrl+C and a closed
 #          console take too
 #
 #   python tests/cli_ctrl_break.py <havne-cli> <replay uri>

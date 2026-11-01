@@ -194,7 +194,7 @@ TestCase {
     }
 
     // A step of two units over a minimum span of twenty takes a tenth of
-    // the height, where it would otherwise fill it (fuel level, 71–73 %)
+    // the height, where it would otherwise fill it (fuel level, 71-73 %)
     function test_minimumSpanKeepsSmallStepsSmall() {
         const fuel = [series(0, [[0, 71], [1000, 73], [2000, 71], [3000, 73]])]
         const wide = layout(fuel, { minSpanUnits: 20 })

@@ -46,7 +46,7 @@ extern "C" {
 /* The longest profile name: what a ?profile= value can carry. */
 #define ECUIO_PROFILE_NAME_MAX 63
 
-/* The most requests a set's defs may derive (ADR-0015 §2): one per
+/* The most requests a set's defs may derive (ADR-0015 section 2): one per
  * distinct request and channel, so defs read from one reply count
  * once. */
 #define ECUIO_PROFILE_MAX_REQUESTS 128
@@ -177,7 +177,7 @@ ecuio_status_t ecuio_unregister_values_callback(
 );
 
 /*
- * The signals the session's frames name but don't carry (ADR-0039 §6):
+ * The signals the session's frames name but don't carry (ADR-0039 section 6):
  * a def whose key matched ECUIO_ABSENT_AFTER_FRAMES or more frames, each
  * ending before its field (ECUIO_DECODE_ERR_PAST_PAYLOAD), while none
  * carried it, as an ECU that answers PID 55 with bank 1's byte alone.

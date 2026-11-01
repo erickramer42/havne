@@ -361,7 +361,7 @@ TEST(CliRingTest, WakeEndsADrainsWait)
     waker.join();
 }
 
-// A sleep is a rise of a second or more in one poll (ADR-0033 §6), told
+// A sleep is a rise of a second or more in one poll (ADR-0033 section 6), told
 // once; smaller rises are taken in, so they never add up to a line
 TEST(CliSleepTest, ARiseOfASecondInOnePollIsASleep)
 {

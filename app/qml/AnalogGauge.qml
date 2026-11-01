@@ -178,7 +178,7 @@ GaugeBase {
             readonly property bool major: Math.abs(steps - Math.round(steps)) < 1e-6
 
             width: gauge.width; height: gauge.height
-            rotation: gauge.angleOf(v) + 90   // 0° rotation = 12 o'clock
+            rotation: gauge.angleOf(v) + 90   // 0 degrees rotation = 12 o'clock
 
             Rectangle {
                 antialiasing: true

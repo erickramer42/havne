@@ -47,10 +47,10 @@ table of its own; one that spells it differently passes through
 unconverted, visibly, rather than wrongly.
 
 > **Amended 2026-10-31 ([ADR-0039](0039-full-service01-coverage.md)
-> §4):** the `obd2` set's full Service 01 coverage brings three more
+> section 4):** the `obd2` set's full Service 01 coverage brings three more
 > units, so imperial also turns Pa into inH2O (conventional inches of
 > water, two more decimal places), L/h into US gal/h (one more) and
-> N·m into lb·ft. The rule is unchanged: one row per unit string.
+> `N·m` into `lb·ft`. The rule is unchanged: one row per unit string.
 
 ### 2. The bridge stores decoded values and converts on the way out
 
@@ -123,5 +123,5 @@ The app starts in imperial until the Units row is used: `Main.qml`'s
 wins over it. Only the display default moved. The bridge still starts
 in metric, which is what core decoded, so a bridge without the app's
 window (`test_bridge`, and any value the window can't read back) shows
-decoded units, and recordings keep the decoded value and unit as §3
+decoded units, and recordings keep the decoded value and unit as section 3
 decided.

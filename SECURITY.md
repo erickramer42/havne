@@ -7,8 +7,8 @@ release only.
 
 | Version | Supported |
 |---|---|
-| Latest v0.3.x release | ✅ |
-| Anything older | ❌ |
+| Latest v0.3.x release | Yes |
+| Anything older | No |
 
 A release is what the
 [releases page](https://github.com/erickramer42/havne/releases) offers:

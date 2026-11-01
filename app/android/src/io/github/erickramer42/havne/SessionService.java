@@ -1,6 +1,6 @@
 // File/layer: app/android/src/.../SessionService.java | Java, Android only
 // Testing: CI's android-build compiles it and checks the manifest names it;
-//          BENCH and Vehicle on the phone (ADR-0029 §5): the notification
+//          BENCH and Vehicle on the phone (ADR-0029 section 5): the notification
 //          while an adapter session is up, none after, the session running
 //          on with the screen off
 
@@ -24,7 +24,7 @@ import android.os.PowerManager;
 import android.util.Log;
 
 // The foreground service held while an adapter session is up (ADR-0029
-// §2), so Android keeps the process running with the screen off. It does
+// section 2), so Android keeps the process running with the screen off. It does
 // no work itself: core's threads and the GUI thread do the session's. Its
 // notification says what is connected; a tap opens the app.
 // androidsession.cpp starts, updates and stops it through JNI.

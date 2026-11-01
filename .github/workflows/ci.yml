@@ -39,7 +39,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       # systemtap-sdt-dev: <sys/sdt.h>, so core carries its USDT probes
-      # (ADR-0034 §4) and ProbeNotesTest runs
+      # (ADR-0034 section 4) and ProbeNotesTest runs
       - name: Build core + tests (no Qt present)
         run: |
           sudo apt-get update && sudo apt-get install -y systemtap-sdt-dev
@@ -414,7 +414,7 @@ jobs:
           sudo --preserve-env=ECUIO_VCAN_REQUIRED,ECUIO_VCAN_ROOT_REQUIRED
           build/tests/test_vcan
           --gtest_filter='SocketCanBusTest.TheInterfaceGoingDownIsAHardFailureThatRecovers'
-      # Core's probes fire in a running program (ADR-0034 §4): bpftrace
+      # Core's probes fire in a running program (ADR-0034 section 4): bpftrace
       # attaches to havne-cli's and counts a mock:// stream's
       - name: USDT probes under bpftrace
         run: sudo sh tests/probe_trace.sh build/cli/havne-cli
@@ -461,7 +461,7 @@ jobs:
           arch: 'linux_gcc_64'
 
       # rcc's embedded files and the squashfs take the commit's time, not
-      # the checkout's, so two builds of one commit match (ADR-0035 §4)
+      # the checkout's, so two builds of one commit match (ADR-0035 section 4)
       - name: Date the build by the commit
         run: |
           t=$(git log -1 --format=%ct)
@@ -558,7 +558,7 @@ jobs:
 
       # Qt 6.7+ publishes Android kits under the all_os host. A mobile kit
       # needs the desktop Qt of the build host too; --autodesktop installs it.
-      # qtconnectivity is QtBluetooth, the phone's links (ADR-0028 §2).
+      # qtconnectivity is QtBluetooth, the phone's links (ADR-0028 section 2).
       - name: Install Qt 6.12.0 (android_arm64_v8a + linux host)
         uses: jurplel/install-qt-action@b344308e4483fc892e0d27b3cd1b173ebdd95f06 # v4.5.0
         with:
@@ -604,7 +604,7 @@ jobs:
           cmake --build build --target apk
 
       # Core's TCP socket needs INTERNET; Bluetooth needs CONNECT and SCAN,
-      # the scan never for location, on Android 12 and later (ADR-0028 §2
+      # the scan never for location, on Android 12 and later (ADR-0028 section 2
       # and its appendix of 2026-10-28). A manifest without them fails
       # here, not on a phone.
       - name: Check the manifest's permissions, minimum SDK and icon
@@ -662,7 +662,7 @@ jobs:
           grep -q 'android:dataExtractionRules="@xml/data_extraction_rules"' "$MANIFEST" \
             || { echo "::error::$MANIFEST names no data extraction rules"; exit 1; }
 
-      # The debug-signed APK, for sideloading onto a phone (ADR-0028 §3).
+      # The debug-signed APK, for sideloading onto a phone (ADR-0028 section 3).
       # Each run signs with a new debug key, so a phone uninstalls the
       # previous build before installing the next.
       - name: Upload APK

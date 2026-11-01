@@ -24,7 +24,7 @@ with no hidden padding. `static_assert`s pin its size and offsets.
 | `timestamp_us` | `uint64_t` | Microseconds since session start |
 | `arbitration_id` | `uint32_t` | CAN ID |
 | `channel_id` | `uint16_t` | Bus index only; it never multiplexes an ID |
-| `data_length` | `uint16_t` | Bytes used in `data`, 0–64 |
+| `data_length` | `uint16_t` | Bytes used in `data`, 0-64 |
 | `data[64]` | `uint8_t` | Inline payload |
 | `flags` | `uint32_t` | `ECUIO_FRAME_FLAG_*`: EXTENDED, REMOTE, FD, BITRATE_SWITCH, ERROR, TX_ECHO |
 | `reserved` | `uint32_t` | Producers leave it zero |

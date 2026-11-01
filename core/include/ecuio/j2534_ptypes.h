@@ -131,7 +131,7 @@ static inline unsigned long ecuio_trusted_count(unsigned long status,
 #define ECUIO_PT_ISO15765_ADDR_TYPE     0x0080UL
 #define ECUIO_PT_CAN_29BIT_ID           0x0100UL
 
-/* Two bits J2534-1 v05.00 (2022, §9.1) defines where v04.04 reserves
+/* Two bits J2534-1 v05.00 (2022, section 9.1) defines where v04.04 reserves
  * them: ERROR_INDICATION, an indication carrying error information,
  * and BUFFER_OVERFLOW, set on "the first successfully received message
  * after the overflow condition has cleared". A read returning that

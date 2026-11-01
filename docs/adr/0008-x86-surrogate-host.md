@@ -35,7 +35,7 @@ functions).
   `PassThruReadMsgs` into the ring. The read pump runs only while a
   channel is connected.
 - **Diagnosability.** Each startup stage that can fail exits with its
-  own code (1–7, listed in [docs/j2534.md](../j2534.md#surrogate)),
+  own code (1-7, listed in [docs/j2534.md](../j2534.md#surrogate)),
   and the client traces its failure paths through `SUR_LOG`.
 - **Build.** Only the surrogate and the vendor DLLs are x86. They come
   from a second, core-only Win32 build tree.

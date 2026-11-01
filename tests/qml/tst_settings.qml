@@ -235,7 +235,7 @@ TestCase {
             verify(!find(page, name).visible, name + " folded again")
     }
 
-    // Connect… elsewhere opens what to connect to, at the page's top
+    // Connect... elsewhere opens what to connect to, at the page's top
     function test_showAdaptersOpensWhatToConnectTo() {
         const page = createPage(true)
         page.j2534Devices = []
@@ -401,7 +401,7 @@ TestCase {
     }
 
     // The phone's Bluetooth adapters join the list after the ports
-    // (ADR-0028 §2): a paired classic one fills elm327://bt:<address>, a
+    // (ADR-0028 section 2): a paired classic one fills elm327://bt:<address>, a
     // BLE one elm327://ble:<address>, the query kept; the count names
     // them. The desktop lists none, so the test sets them
     function test_bluetoothRowsFillAStreamUri() {
@@ -441,7 +441,7 @@ TestCase {
     }
 
     // A machine's CAN interfaces join the list after the ports (ADR-0032
-    // §7): a row fills socketcan://<name>, and its line says why core
+    // section 7): a row fills socketcan://<name>, and its line says why core
     // would refuse it before a connect is tried. Only Linux lists any, so
     // the test sets them
     function test_canRowsFillASocketcanUri() {
@@ -835,7 +835,7 @@ TestCase {
         return page.vehicles.list.map(v => v.label)
     }
 
-    // ADR-0027 §1: every change to the list is made in the section, a
+    // ADR-0027 section 1: every change to the list is made in the section, a
     // label typed or left to its default
     function test_theVehicleSectionMakesNamesAndForgetsVehicles() {
         let page = createPage()
@@ -927,7 +927,7 @@ TestCase {
         Bridge.signalModel.toggleSubscribed(0)
     }
 
-    // ADR-0027 §2-§4 through the fake: the connect keeps the URI, the VIN
+    // ADR-0027 sections 2-4 through the fake: the connect keeps the URI, the VIN
     // is learned and logged, Live's plotting is kept and comes back
     function test_anAdaptersConnectKeepsItsVehiclesSetup() {
         if (Harness.fakeDllPath === "")

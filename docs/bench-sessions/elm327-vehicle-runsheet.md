@@ -64,8 +64,8 @@ serials): scrub before committing.
 **Expected:**
 - [ ] Connect succeeds within a few seconds; the Host and Link lights
       change. Copy the "Session:" line: `ELM327 adapter (ELM327 v1.4b,
-      STN2255 v…)` (or STN2256), `ISO 15765 at 500000 baud; profile
-      obd2, channel 0x7E8/0x7E0 (rx/tx); battery …`. The battery within
+      STN2255 v...)` (or STN2256), `ISO 15765 at 500000 baud; profile
+      obd2, channel 0x7E8/0x7E0 (rx/tx); battery ...`. The battery within
       0.2 V of Phase 0's
 - [ ] No "set not to wait past 7F xx 78" note. If it's there, record
       it: another app changed the adapter's parameter 2A, and Havne
@@ -85,7 +85,7 @@ and stop (#12).
 keep this connect through the start.
 
 - [ ] The ECU line within a few seconds: `ECU 0x7E8: supports 53 PIDs;
-      …, 1 dropped: 01 5C (not in its supported PIDs)` on this car
+      ..., 1 dropped: 01 5C (not in its supported PIDs)` on this car
 - [ ] In the wire log, a reply line: its ID as `7E8` or `07E8` (#14),
       and any `7F xx 78` line (#17)
 - [ ] The identity line (personal data: scrub it), with the same items
@@ -100,7 +100,7 @@ keep this connect through the start.
 ## Phase 3: idling
 
 - [ ] On the same connect, about a minute: RPM against the tachometer,
-      Battery Voltage 13.4–14.5 V, Coolant Temp rising with the gauge.
+      Battery Voltage 13.4-14.5 V, Coolant Temp rising with the gauge.
       A photo of the cluster with the Dashboard. Disconnect
 - [ ] The rate: `elm327://COMn?poll=0x0C` for about 15 s, RPM alone on
       Live. Disconnect. From the recording's `frames.csv`, the replies a
@@ -147,7 +147,7 @@ the laptop's Bluetooth off for about 10 s, then on.
    scrubbed (no VIN, CALID or serials: the identity line, Phase 5's
    scan, and the identification replies in the wire logs); the
    recordings stay on the laptop
-3. Mark BENCH prep #12–#17 for the MX+ in [bench-prep.md](bench-prep.md),
+3. Mark BENCH prep #12-#17 for the MX+ in [bench-prep.md](bench-prep.md),
    and record the rate and the drop's recovery time in ADR-0026 as a
    dated appendix
 4. Update STATUS.md and testing.md's Vehicle tier and gaps

@@ -317,7 +317,7 @@ TEST(BridgeTest, BlePickerExpandsShortUuids)
               QStringLiteral("6e400001-b5a3-f393-e0a9-e50e24dcca9e"));
 }
 
-// ADR-0028 §2's order: the Nordic UART service first, then FFF0, then
+// ADR-0028 section 2's order: the Nordic UART service first, then FFF0, then
 // FFE0, whatever order the adapter lists them in
 TEST(BridgeTest, BlePickerTakesTheListedServicesInOrder)
 {
@@ -953,7 +953,7 @@ TEST(BridgeTest, AWindowShowsItsNewestAndChartsItsEnvelope)
 
 namespace {
 
-/* Dispatches n frames with ID 0x123 and stamps first, first + 1, …,
+/* Dispatches n frames with ID 0x123 and stamps first, first + 1, ...,
  * letting each burst drain so none is dropped at the in-flight gate. */
 void dispatchNumbered(SessionBridge& bridge, int first, int n)
 {
@@ -1273,7 +1273,7 @@ TEST(BridgeTest, DispatchedShortFrameHonorsDataLength)
 
     // Unique timestamp so we can find OUR row among mock frames
     ecuio_frame_t f{};
-    f.timestamp_us = 777777;   // steady-clock µs from the mock won't collide
+    f.timestamp_us = 777777;   // steady-clock us from the mock won't collide
     f.arbitration_id = 0x0C0;  // telemetry ID: decodes (gate-consistent)
     f.channel_id = 0;
     f.data_length = 4;          // the whole point: NOT 8
@@ -2506,7 +2506,7 @@ TEST(BridgeTest, RefusedStartNamesItsCauseAndLeavesNoSession)
     EXPECT_TRUE(bridge.connected());
     ASSERT_TRUE(disconnectAndWait(bridge));
 }
-/* ADR-0027 §3: the fake's VIN reaches QML only as a salted SHA-256, once
+/* ADR-0027 section 3: the fake's VIN reaches QML only as a salted SHA-256, once
  * a session, and nothing is left of it after the disconnect. A bare URI
  * runs obd2, whose rotation asks the identity. */
 TEST(BridgeTest, AConnectsVinReachesQmlOnlyAsASaltedHash)
@@ -2535,7 +2535,7 @@ TEST(BridgeTest, AConnectsVinReachesQmlOnlyAsASaltedHash)
     EXPECT_TRUE(bridge.vinKey(QStringLiteral("salt")).isEmpty());
 }
 
-/* ADR-0027 §2: an adapter session's recording folder names the picked
+/* ADR-0027 section 2: an adapter session's recording folder names the picked
  * vehicle, as a folder name may take it; a mock session's doesn't. */
 TEST(BridgeTest, RecordingFolderNamesThePickedVehicleForAnAdapterOnly)
 {
@@ -2656,7 +2656,7 @@ TEST(BridgeTest, AClearAtTheFakesStoppedEngineLogsTheReadAfter)
 
 /* Live leaves out what the fake ECU withholds from its bitmaps, and
  * only that: the bridge reads the session's support report (ADR-0039
- * §6) */
+ * section 6) */
 TEST(BridgeTest, LiveHidesThePidsTheFakeEcuWithholds)
 {
     FakeHooks hooks;
@@ -3002,7 +3002,7 @@ int obd2RowOf(uint16_t id)
 
 } // namespace
 
-/* ADR-0039 §6: a row core reports absent (its field past every reply)
+/* ADR-0039 section 6: a row core reports absent (its field past every reply)
  * is hidden beside the ones the bitmaps rule out, and shown again when
  * core no longer reports it; a PID the bitmaps list keeps its other
  * rows. A new set shows all. */
@@ -3210,7 +3210,7 @@ TEST(BridgeTest, NewSaltIsSixteenRandomBytes)
     EXPECT_NE(a, b);
 }
 
-/* ADR-0027 §2: a label as a recording folder may take it */
+/* ADR-0027 section 2: a label as a recording folder may take it */
 TEST(BridgeTest, FolderLabelKeepsWhatAFolderNameMay)
 {
     const auto f = [](const char* label) {
@@ -4158,7 +4158,7 @@ TEST(BridgeTest, ReplayOfAMockRecordingDecodesWhatWasRecorded)
 
 /* Settings' recordings list: a recording replays under the profile it
  * was recorded with, so a tap leaves nothing to type */
-/* A sleep while connected (ADR-0033 §6) is one activity line saying how
+/* A sleep while connected (ADR-0033 section 6) is one activity line saying how
  * long, in the recording's events.log too; a rise under a second, one
  * before the connect, or one after the disconnect says nothing. No runner
  * can sleep, so the seam adds to the count the tick reads */
@@ -4607,7 +4607,7 @@ TEST(BridgeTest, TheChartKeepsTheFixturesPeak)
 }
 
 /* LatencyStats reads a quantile back at the top of the bucket holding
- * it: exact below 16 µs, at most an eighth above the true value past
+ * it: exact below 16 us, at most an eighth above the true value past
  * that, never below it, and the maximum exactly */
 TEST(BridgeTest, LatencyStatsReadsQuantilesWithinABucket)
 {
@@ -4646,7 +4646,7 @@ TEST(BridgeTest, LatencyStatsReadsQuantilesWithinABucket)
 }
 
 /* The activity log's "Delivery:" line: frames and drops, what was still
- * queued, then each path's median, p99 and max (µs below a millisecond,
+ * queued, then each path's median, p99 and max (us below a millisecond,
  * ms with a decimal below 10, whole ms past that); a session that
  * decoded nothing has no values clause */
 TEST(BridgeTest, DeliveryTextNamesFramesDropsAndTimes)
@@ -4934,7 +4934,7 @@ std::vector<double> recordedRpm(const QString& root)
 
 /* Values come from core's worker, not from the frames the GUI thread
  * handles, so a frame dropped at the in-flight cap keeps its values
- * (ADR-0024 §7): with the event loop held while a replay floods in,
+ * (ADR-0024 section 7): with the event loop held while a replay floods in,
  * thousands of frames drop, yet the recording holds every row's RPM in
  * order and the row shows the last one */
 TEST(BridgeTest, ValuesSurviveFramesDroppedAtTheCap)

@@ -3,7 +3,7 @@
 // Testing: test_qml (tests/qml/tst_settings.qml): the rows, and the
 //          desktop's refusal of a bt: URI through the bridge; CI's
 //          android-build compiles the Android half; BENCH: the phone run
-//          (ADR-0028 §4)
+//          (ADR-0028 section 4)
 
 #include "bluetoothdevices.h"
 #include "sessionbridge.h"

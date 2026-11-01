@@ -206,7 +206,7 @@ if ($cliEnd -notmatch '^\{"type":"end","reason":"count","frames":5,') {
 Write-Host 'smoke: havne-cli.exe streamed 5 mock:// frames'
 
 # ---- The component list for the release's SBOM (packaging/sbom.py,
-# ADR-0035 §5): every DLL in the folder belongs to a component, by name,
+# ADR-0035 section 5): every DLL in the folder belongs to a component, by name,
 # with the version its own version resource carries; one that doesn't
 # fails the release rather than go unlisted. Havne's executables are
 # sbom.py's to add.

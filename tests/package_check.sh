@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # File/layer: tests/package_check.sh | packaging check, Linux (CI's linux-packages)
 # Testing: HARNESS: this is the test: the core packages as a user gets
-#          them (ADR-0035 §6). Needs sudo, gdb, pkg-config and a C compiler.
+#          them (ADR-0035 section 6). Needs sudo, gdb, pkg-config and a C compiler.
 #
 # Installs the deb and its -dbgsym with apt, then:
 #   - runs havne-cli from PATH against mock://

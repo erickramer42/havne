@@ -25,7 +25,7 @@
 //          recording that ends listed, its row filling the field with a
 //          replay that connects under the recorded profile and DIDs; the
 //          five sections folded at first, each heading's summary,
-//          chevron and fold; Connect… elsewhere opening Adapter; the
+//          chevron and fold; Connect... elsewhere opening Adapter; the
 //          Record line saying a
 //          replay isn't recorded; a preset of another scheme dropping
 //          the keys it doesn't take and the mock profile on an adapter.
@@ -35,7 +35,7 @@
 //          fills the URI field only, Connect button drives
 //          connectSessionAsync (UI stays responsive while a vendor blocks
 //          ~8 s), Record sessions fixed during a session and its folder
-//          shown relative to Documents; at 1280 × 650 the page scrolls;
+//          shown relative to Documents; at 1280 x 650 the page scrolls;
 //          the Display row steps Theme.zoom; developer mode kept between
 //          runs (Main.qml). The recording's bridge side:
 //          BridgeTest.Recording*. The Units row sets Bridge.unitSystem
@@ -63,18 +63,18 @@ Pane {
     // Empty on non-Windows or when no drivers are installed.
     property var j2534Devices: []
 
-    // The machine's serial ports, for elm327:// (ADR-0026 §7): [{ name,
+    // The machine's serial ports, for elm327:// (ADR-0026 section 7): [{ name,
     // device }, ...], device the driver's on Windows, "" elsewhere. Every
     // port is listed, whatever is behind it: none is opened until Connect
     property var serialPorts: []
 
-    // The machine's CAN interfaces, for socketcan:// (ADR-0032 §7): [{
+    // The machine's CAN interfaces, for socketcan:// (ADR-0032 section 7): [{
     // name, kind, up, listenOnly, fd, bitrate }, ...]. Empty off Linux.
     // Listed whatever their mode; core refuses a controller that isn't
     // listen-only, and the row says so first
     property var canInterfaces: []
 
-    // The phone's Bluetooth adapters (ADR-0028 §2): [{ name, address,
+    // The phone's Bluetooth adapters (ADR-0028 section 2): [{ name, address,
     // kind }], kind "bt" (classic, paired) or "ble". Empty off Android
     property var bluetoothAdapters: Bluetooth.adapters
 
@@ -184,7 +184,7 @@ Pane {
                                                   Bridge.signalModel.unplottedNames()))
     }
 
-    // The VIN settled which vehicle this is (ADR-0027 §4)
+    // The VIN settled which vehicle this is (ADR-0027 section 4)
     function recognizeVehicle() {
         if (!VehicleBook.isAdapterUri(Bridge.currentUri))
             return
@@ -300,7 +300,7 @@ Pane {
         }
     }
 
-    // Connect… on Home, Live or the header lands here: what to connect to
+    // Connect... on Home, Live or the header lands here: what to connect to
     // is open, folded or not before
     function showAdapters() {
         adapterSection.open = true
@@ -593,7 +593,7 @@ Pane {
                 sessionSettings.uri = uri
                 page.rememberVersions(uri, Bridge.adapterVersions)
                 // The picked vehicle's connection and plotted signals,
-                // for an adapter's session only (ADR-0027 §1, §2)
+                // for an adapter's session only (ADR-0027 section 1, section 2)
                 if (VehicleBook.isAdapterUri(uri) && page.pickedVehicle !== null) {
                     page.saveVehicles(VehicleBook.rememberUri(page.vehicles, uri))
                     Bridge.signalModel.setPlotChoices(page.pickedVehicle.plotted,

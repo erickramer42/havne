@@ -380,7 +380,7 @@ Pane {
                         // build error: the column would render empty and
                         // throw per delegate.
                         Label {
-                            // Session-relative µs, shown as s.mmm
+                            // Session-relative us, shown as s.mmm
                             text: (model.timestampUs / 1e6).toFixed(3)
                             color: Theme.textDim
                             font.family: Theme.monoFamily; font.pixelSize: 12

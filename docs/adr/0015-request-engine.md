@@ -2,14 +2,14 @@
 
 - **Status:** Accepted. The values left open under "Open until the
   first vehicle session" are chosen in the appendix of 2026-10-23,
-  from the measurements in the appendix of 2026-10-22. §1 to §4 are
+  from the measurements in the appendix of 2026-10-22. Section 1 to section 4 are
   built; the probe's details as built are in the second appendix of
   2026-10-23.
 - **Date:** 2026-10-21
 - **Supersedes:** [ADR-0013](0013-protocol-profiles.md)
-  §1's placement of request correlation in the profile, and §5's
-  callback table as the plugin seam. Amends §3's probe semantics.
-  Leaves §2 (static selection by URI), §4 (declared channels) and §6
+  section 1's placement of request correlation in the profile, and section 5's
+  callback table as the plugin seam. Amends section 3's probe semantics.
+  Leaves section 2 (static selection by URI), section 4 (declared channels) and section 6
   (ship order) as they are.
 
 **Scope.** This record covers sending requests and classifying their
@@ -33,7 +33,7 @@ with a short first-read timeout; `?poll=` writes one request, reads
 once, then sleeps. Three things follow:
 
 - **Refresh is set by the clock, not the ECU.** Each of a set's N PIDs
-  refreshes every N × 100 ms however fast the ECU answers, so growing
+  refreshes every N x 100 ms however fast the ECU answers, so growing
   the set toward the full SAE J1979 Service 01 table makes every
   signal slower.
 - **Replies often land a cycle late.** ISO 15765-4 lets an ECU take up
@@ -48,9 +48,9 @@ once, then sleeps. Three things follow:
   have to tell a positive reply from a negative one, and a "response
   pending" from either.
 
-ADR-0013 put correlation in the profile (§1) and planned a native
+ADR-0013 put correlation in the profile (section 1) and planned a native
 callback table, `next_request` / `accept_response`, as the seam for
-v0.5.0 manufacturer plugins (§5). The shipped profile slices went the
+v0.5.0 manufacturer plugins (section 5). The shipped profile slices went the
 other way, and it worked: the `obd2` rotation is derived from data,
 the 2-byte mux key `0x41 <PID>` on each def, and no profile code runs
 on the worker thread. Nothing has needed the callback table yet, and
@@ -67,7 +67,7 @@ rotation, `?poll=`, the probe, and later the vehicle-information read.
 Passive mode is unchanged.
 
 - **One outstanding request per channel.** A declared channel (an
-  rx/tx pair, ADR-0013 §4) has at most one request in flight, as ISO
+  rx/tx pair, ADR-0013 section 4) has at most one request in flight, as ISO
   15765 physical addressing expects. Channels progress independently,
   so a PCM and a TCM are served in parallel on the one J2534 channel.
 - **Correlation.** A frame answers a channel's outstanding request
@@ -88,7 +88,7 @@ Passive mode is unchanged.
 - **Reply classes.** Every request ends as exactly one of: positive,
   negative (with its code), or timed out. "Pending" is a state on the
   way, not an outcome. Positive replies are dispatched and decoded as
-  today. The class feeds the probe (§4) and link health:
+  today. The class feeds the probe (section 4) and link health:
   - a positive or negative reply, or a pending one, is the ECU
     answering, which sets `ECUIO_OK`;
   - consecutive timeouts count toward the quiet debounce, which keeps
@@ -118,12 +118,12 @@ derived from it, so the def alone says what to request.
 
 - **Enrolment rule.** A def whose mux key sits at payload offset 0 and
   starts with the positive-response ID of service 0x01 or 0x22 (0x41 or
-  0x62) enrols one rotation request: the service ID − 0x40, followed by
+  0x62) enrols one rotation request: the service ID - 0x40, followed by
   the rest of the key. The request goes to the channel whose rx ID is
   the def's `message_id`. Requests are deduplicated per channel, so
   several defs on one reply (an oxygen sensor's voltage and trim) cost
   one request. Service 09 never enrols; its values are read once, with
-  one-shot requests (§1).
+  one-shot requests (section 1).
 
   | Reply carrying the value | Mux key | Request sent |
   |---|---|---|
@@ -141,10 +141,10 @@ derived from it, so the def alone says what to request.
   frame-match helper and the validator accept a key length of 3; keys
   of length 1 and 2 behave as before. `ecuio_signal_set_t` doesn't grow,
   so no set version has to be read, which core doesn't do today.
-- **ADR-0013 §5's callback table is not built.** A manufacturer plugin
+- **ADR-0013 section 5's callback table is not built.** A manufacturer plugin
   is data: a signal set and its channel list, validated at
   registration. No plugin code runs on the worker thread, so a plugin
-  can't deadlock it or break the teardown order, and §3 can be
+  can't deadlock it or break the teardown order, and section 3 can be
   enforced on everything a plugin asks for. If a protocol ever needs
   logic that data can't express, a new record revisits this.
 
@@ -165,7 +165,7 @@ derived from it, so the def alone says what to request.
 The engine sends services 0x01 (current data), 0x09 (vehicle
 information) and 0x22 (ReadDataByIdentifier), and nothing else.
 
-- No set can ask for anything else. The enrolment rule (§2) produces
+- No set can ask for anything else. The enrolment rule (section 2) produces
   only 0x01 and 0x22 requests, and one-shot requests come from core
   itself (the probe and the vehicle-information read).
 - The engine refuses to send any other service even if one reaches
@@ -190,11 +190,11 @@ information) and 0x22 (ReadDataByIdentifier), and nothing else.
 
 ### 4. The probe runs on the engine, and only explicit answers prune
 
-The post-connect probe (ADR-0013 §3) uses the engine before the
+The post-connect probe (ADR-0013 section 3) uses the engine before the
 rotation starts.
 
-- **Service 01:** the supported-PID bitmap chain, PID 0x00 → 0x20 →
-  0x40 …, per channel.
+- **Service 01:** the supported-PID bitmap chain, PID 0x00 to 0x20 to
+  0x40 ..., per channel.
 - **Service 0x22:** one request per enrolled DID.
 - **A request leaves the rotation only on an explicit "not
   supported"** from an ECU that answered something in the same pass:
@@ -214,9 +214,15 @@ rotation starts.
   would never learn what the ECU supports.
 - **Bounded.** The probe has a total time budget. Requests it didn't
   reach stay in the rotation, and probe failure degrades to the static
-  set, as ADR-0013 §3 requires.
+  set, as ADR-0013 section 3 requires.
 - **`?probe=0`** skips the probe. Like every query key, it gets
   rejection tests for its malformed forms.
+
+> **Amended 2026-10-31:** the channel support report counts what the
+> walk found: `pids_supported`, the data PIDs the bitmaps list (the
+> chain's own, 0x20, 0x40 and so on, not counted), and `pids_through`,
+> the last PID the answered bitmaps cover. The activity log's ECU line
+> prints core's count, so it and a program on the C ABI agree.
 
 ## Open until the first vehicle session
 
@@ -228,7 +234,7 @@ chosen values go in the dated appendix.
 | The wait's margin over P2, and whether P2 and P2* match the ISO 15765-4 text | Request-to-reply times from the session log's `OP_WRITE frame` / `OP_READ frame` stamps, per PID; the standard's text |
 | Whether the ECUs send "response pending" at all | The session log |
 | A minimum gap between requests on a channel | Needs the engine on a vehicle: the second vehicle session |
-| The refresh policy once the set grows: rate classes (fast signals every cycle, slow ones rarely) or a curated `obd2` beside an `obd2-full` | Measured reply latency × the supported-PID count from the bitmaps |
+| The refresh policy once the set grows: rate classes (fast signals every cycle, slow ones rarely) or a curated `obd2` beside an `obd2-full` | Measured reply latency x the supported-PID count from the bitmaps |
 | Whether to send several PIDs per Service 01 request | The standard's text and ECU behavior on a vehicle. Not part of this record; it needs a splitter for the combined reply, and would build on the engine |
 | Whether decoding moves to the worker thread | Frames per second and GUI-thread cost measured with the engine running. It is the path to per-sample timestamps either way (built: [ADR-0024](0024-decode-on-the-worker.md)) |
 
@@ -241,9 +247,9 @@ appendix, before and after the engine.
 - **Keep the fixed slot and shorten it.** A shorter cycle wastes time
   on a fast ECU, still misses a slow reply, and still can't tell
   which request a reply answers or handle "pending".
-- **Native profile callbacks as the plugin seam (ADR-0013 §5).**
+- **Native profile callbacks as the plugin seam (ADR-0013 section 5).**
   Deferred, not rejected outright. Native code on the worker thread
-  can deadlock it or break the teardown contract, and §3 couldn't be
+  can deadlock it or break the teardown contract, and section 3 couldn't be
   enforced on it. Everything planned through v0.5.0 is fixed-shape
   request-and-reply that data describes.
 - **A set-wide request service** (a new `ecuio_signal_set_t` field). One
@@ -280,7 +286,7 @@ appendix, before and after the engine.
   URI grammar is decided in its own slice, with values shown raw (the
   reply's data bytes as an unsigned big-endian number) until a formula
   is known; the payload log keeps the bytes.
-- Ship order stays as ADR-0013 §6 has it: `obd2` with the probe, then
+- Ship order stays as ADR-0013 section 6 has it: `obd2` with the probe, then
   `uds-generic` to research DIDs on a vehicle, then curated sets.
   Curated sets are scoped to a platform (for example `<make>-<platform>`),
   because DIDs and formulas vary by platform and model year.
@@ -294,44 +300,44 @@ surrogate, engine off and idling. The open values are still to be
 chosen; these are the measurements they wait on.
 
 - **Reply time.** From each request's `TX_INDICATION` to its reply,
-  in the vendor's clock: median about 4 ms, 95th percentile 9–10 ms in
+  in the vendor's clock: median about 4 ms, 95th percentile 9-10 ms in
   every connect, longest 83 ms, over 4,809 replies; far inside P2
   (50 ms). The indication marks the vendor's write call returning,
-  not the frame leaving: 12–22 % of replies are stamped before their
+  not the frame leaving: 12-22 % of replies are stamped before their
   own request's indication, by up to 43 ms. So the indication can't
   serve as the send time, and a wait timed from the write's return is
   conservative.
 - **Response pending:** none. The only negative reply was `7F 01 12`
   for an unsupported PID (`0x5C`), on every request for it.
-- **Supported PIDs:** 44 in `0x01`–`0x60`, and the `0x60` bit is set,
+- **Supported PIDs:** 44 in `0x01`-`0x60`, and the `0x60` bit is set,
   so the bitmap chain continues past `0x60`.
 - **Late replies under the fixed slot:** 9 of 3,657 scheduler replies
   arrived after the next request was written.
 - **Refresh at ten PIDs under the fixed slot:** about 1.1 s per signal
-  (requests every 100–123 ms on that laptop, 109–112 ms on average);
+  (requests every 100-123 ms on that laptop, 109-112 ms on average);
   `?poll=` ran at about 229 ms per request.
 
 ## Appendix: the values, and the engine as built (2026-10-23)
 
-§1 to §3 are built: `core/src/request_engine.h` holds the engine, and
+Sections 1 to 3 are built: `core/src/request_engine.h` holds the engine, and
 the J2534 worker drives it in one loop for the rotation, `?poll=` and
 passive receive. The engine does no I/O and reads no clock; the
 worker passes the time in, writes the requests it hands out and gives
 it the frames it reads. So its rules are unit-tested with the time
 passed in (`RequestEngineTest`), and another transport could drive
-it. §4, the probe, isn't built yet. The values left open are these:
+it. Section 4, the probe, isn't built yet. The values left open are these:
 
 | Value | Chosen | From |
 |---|---|---|
-| Wait | 100 ms | P2 (50 ms) plus 50 ms for the adapter. On the first vehicle the 95th percentile was 9–10 ms and the longest reply 83 ms (appendix of 2026-10-22), both timed from the write call's return, as the wait is |
+| Wait | 100 ms | P2 (50 ms) plus 50 ms for the adapter. On the first vehicle the 95th percentile was 9-10 ms and the longest reply 83 ms (appendix of 2026-10-22), both timed from the write call's return, as the wait is |
 | Pending wait | 5.05 s | P2* (5 s), the same margin. The first vehicle sent no "response pending" |
 | Floor | 20 ms per channel | No vehicle has run the engine. At most 50 requests a second per channel, five times the fixed slot's rate the car handled; set again from the second vehicle session |
 | Read slice | 10 ms | The VX holds a read for its whole timeout unless the batch fills, and the surrogate asks for 16 messages; a read held for the wait would see a 4 ms reply only when it ended |
-| Requests per set | 128 | `ECUIO_PROFILE_MAX_REQUESTS`. More than the 44 PIDs the first vehicle supports in `0x01`–`0x60`, with room for DIDs |
+| Requests per set | 128 | `ECUIO_PROFILE_MAX_REQUESTS`. More than the 44 PIDs the first vehicle supports in `0x01`-`0x60`, with room for DIDs |
 
 P2 and P2* are ISO 14229-2's defaults for the server's response time
 and the time after a pending reply, with the client adding its own
-latency on top (ΔP2): checked against a public summary of those timing
+latency on top (delta P2): checked against a public summary of those timing
 parameters ([UDS time parameters](https://uds.readthedocs.io/en/latest/pages/knowledge_base/time_parameters.html)),
 not the ISO 15765-4 text.
 
@@ -339,14 +345,14 @@ not the ISO 15765-4 text.
 last one on its channel completes or its wait runs out, and never
 sooner than the floor after the last. A channel whose ECU answers
 within the floor gets a request every 20 ms, and a set of N PIDs on
-it refreshes each about every N × 20 ms, against N × 100 ms with the fixed slot
+it refreshes each about every N x 20 ms, against N x 100 ms with the fixed slot
 (about 1.1 s per signal for `obd2`'s ten on the first vehicle).
 Against the fake, which answers at once and returns empty reads at
 once, it ran at 32 requests a second: the worker's own sleeps, in
 Windows' 15.6 ms steps, set the pace there. The vehicle figure is for
 the second session.
 
-**Link health with the engine.** §1 keeps the quiet debounce, counted
+**Link health with the engine.** section 1 keeps the quiet debounce, counted
 in the requests' own unit: ten requests in a row whose wait ran out.
 In passive mode the unit stays the read, ten that brought nothing from
 an ECU we talk to. Two rules changed with it, both decided once
@@ -374,8 +380,8 @@ Service 01 request; decoding on the worker thread.
 
 ## Appendix: the probe as built (2026-10-23)
 
-§4 is built in `core/src/request_engine.h` and driven by the J2534
-worker. These are the choices it makes where §4 left room:
+Section 4 is built in `core/src/request_engine.h` and driven by the J2534
+worker. These are the choices it makes where section 4 left room:
 
 - **The walk.** Each channel with Service 01 requests asks `01 00`
   before its rotation starts, then each next bitmap while the last bit
@@ -389,7 +395,7 @@ worker. These are the choices it makes where §4 left room:
   as unsupported. The engine follows that convention: a clear last bit
   ends the chain and marks every later PID unsupported. The J1979 text
   itself wasn't consulted.
-- **What drops.** §4's table, with one code added: negative 0x12
+- **What drops.** section 4's table, with one code added: negative 0x12
   (sub-function not supported) drops its request, as 0x31 does. It's
   what the first vehicle answered for PID 0x5C. While the probe is on,
   the table applies to every reply, not only the walk's: a DID's first
@@ -432,7 +438,7 @@ worker. These are the choices it makes where §4 left room:
 
 The text values this record's scope left to a record of their own have
 it: [ADR-0021](0021-vehicle-identification.md). Service 09's items and
-the identification DIDs go out as the one-shot requests §1 describes,
+the identification DIDs go out as the one-shot requests section 1 describes,
 through the slot the probe and the scan use, taking turns with the
 rotation, and their text is formed in core.
 
@@ -466,7 +472,7 @@ its last reply, though the ECU answered everything, because a link that
 asks nothing can't tell an ECU that went away from one with nothing to
 say. The alternatives were stopping the 100 Hz reads but keeping the
 state, which can't see an ECU go away, and a heartbeat request the
-engine would send with no def asking for it, which §1 doesn't allow.
+engine would send with no def asking for it, which section 1 doesn't allow.
 `J2534HealthTest.NothingLeftToAskGoesQuiet` pins it on both backends.
 
 ## Appendix: the engine on a vehicle (2026-10-25)
@@ -475,7 +481,7 @@ The second vehicle session ran the engine on the first session's car
 ([session sheet](../bench-sessions/2026-10-25-vehicle.md)), and its numbers are the first measurements the open values
 had:
 
-- **Pace.** Service 01 ran at 26–28 requests a second on one channel,
+- **Pace.** Service 01 ran at 26-28 requests a second on one channel,
   so the ten `obd2` signals refreshed about every 0.4 s (the fixed
   100 ms slot gave 1.1 s). Replies came 19 ms after their request
   (median; 90th percentile 30 ms, longest 116 ms), measured by the

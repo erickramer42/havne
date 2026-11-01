@@ -25,7 +25,7 @@
 struct ecuio_session {
     std::atomic<bool> closed{false};
     /* The worker was started: a start after it is the transport's no-op,
-     * and the session_start probe marks the first only (ADR-0034 §4).
+     * and the session_start probe marks the first only (ADR-0034 section 4).
      * The session's one caller alone reads and writes it. */
     bool started = false;
     std::mutex callback_mutex;
@@ -41,7 +41,7 @@ struct ecuio_session {
      * transport reads its scan list at attach. NULL under any other
      * profile. */
     std::unique_ptr<ecuio_uds_session> uds;
-    /* The decode's buffers (ADR-0024 §4, §6), sized by create from the
+    /* The decode's buffers (ADR-0024 section 4, section 6), sized by create from the
      * set, which never changes: one value per def, and text_slots
      * slots of ECUIO_DECODE_TEXT_MAX bytes, one per text value a frame
      * can decode. Only dispatch touches them, on the session's one
@@ -53,7 +53,7 @@ struct ecuio_session {
      * frame's finds, one per def; built and sized with the buffers above */
     ecuio_def_index def_index;
     std::vector<uint32_t> def_found;
-    /* Per def, beside values (ADR-0039 §6): the frames whose key matched
+    /* Per def, beside values (ADR-0039 section 6): the frames whose key matched
      * but ended before its field, counted up to
      * ECUIO_ABSENT_AFTER_FRAMES, and whether any carried it. Written by
      * dispatch on the worker, read by ecuio_session_get_absent_signals

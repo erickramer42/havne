@@ -129,7 +129,7 @@ struct ecuio_socketcan_transport {
 
 namespace {
 
-/* A CAN_RAW socket on the link, set up as ADR-0032 §4 says: CAN FD,
+/* A CAN_RAW socket on the link, set up as ADR-0032 section 4 says: CAN FD,
  * error frames, the kernel's receive time, its drop count, the filters.
  * -1 with errno set on failure. */
 int open_socket(const ecuio_socketcan_transport* t, int ifindex)

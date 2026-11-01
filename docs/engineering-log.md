@@ -25,7 +25,7 @@ Dates are commit dates.
 | 2026-10-13 | Phase 3 HARNESS tier: transport vtable, registry discovery, fake DLL, loader, session-integrated J2534 transport | `844f44e`, `1752fc9`, `9b33aeb`, `0fa4883`, `1cc3334` |
 | 2026-10-13 | URI query parameters; SettingsPage device picker | `728533e`, `167ac88` |
 | 2026-10-14 | Frame ABI redesign, close/destroy split, message-ID decode gate (`feat!`) | `d0fb07e` |
-| 2026-10-14 | Phase 3 Parts 1–3: PE architecture annotation, x86 surrogate host, cross-arch verification, PE routing | `16e3aed`, `96acce9`, `5681ca7`, `d98792f` |
+| 2026-10-14 | Phase 3 Parts 1-3: PE architecture annotation, x86 surrogate host, cross-arch verification, PE routing | `16e3aed`, `96acce9`, `5681ca7`, `d98792f` |
 | 2026-10-14 | J2534-1 v04.04 types verification and fix | `046b320` |
 | 2026-10-15 | Phase 3 Part 4: write/ioctl/filter relay through both backends | `6aaf441` |
 | 2026-10-15 | Phase 3 Part 5: transport adoption ([ADR-0012](adr/0012-j2534-transport-adoption.md)) | `161af4a` |
@@ -44,7 +44,7 @@ Dates are commit dates.
 | 2026-10-20 | Scripted mock drive cycle: warm-up, 2nd- and 3rd-gear limiter pulls, quarter-mile run (#9 closed) | `c0b102d` |
 | 2026-10-20 | CI on all five targets: Linux full build; Android arm64 and iOS device cross-builds; iOS Simulator launch smoke with screenshots, on pull requests and on request (#3 closed; #30 opened and resolved the same day) | `4dd15ca`, `a430af7`, `923f479`, `f282275`, `4be8ba5`, `a0f5c0f` |
 | 2026-10-20 | Code review 2026-10-20 fixes: vendor message counts ignored under hard errors (finding 1), surrogate open diagnostics name the stalled stage (finding 3), `?poll=` outranks the profile's rotation (finding 12), the Log page's ID column binds the real `arbId` role (finding 13) | `6420f09`, `5ec331c`, `90020bd`, `1674f5c` |
-| 2026-10-20 | Code review 2026-10-20 follow-up: stale dimming driven by the model's `ageMs` (finding 14); one health machine for reads and writes, with `QT_ERR_REQUEST_FAILED` latched by failed writes, hard read failures first, unmatched frames read as quiet, one quiet debounce that clears the backoff, and backoff growth pinned (findings 4–7, 15, 17) | `7e9bd5e`, `946bdf5` |
+| 2026-10-20 | Code review 2026-10-20 follow-up: stale dimming driven by the model's `ageMs` (finding 14); one health machine for reads and writes, with `QT_ERR_REQUEST_FAILED` latched by failed writes, hard read failures first, unmatched frames read as quiet, one quiet debounce that clears the backoff, and backoff growth pinned (findings 4-7, 15, 17) | `7e9bd5e`, `946bdf5` |
 | 2026-10-20 | One timestamped session log for the surrogate's client and child (#23 closed); a per-spawn log for a concurrent session (finding 9); `OP_OPEN` tells an exiting child from a blocked vendor; merged via PR #11 | `995519b` |
 | 2026-10-20 | UI for `QT_ERR_REQUEST_FAILED` (a `requests` link state); link-state color and label centralized in `Theme`; every test that arms a fake knob clears all of them | `da3aa57`, `3c28b63`, `25d0a6f` |
 | 2026-10-20 | Dashboard: analog, ring, digital and bar gauges with shift lights and peak hold, fed by name through `SignalHub`; merged via PR #12 | `40e51ce` |
@@ -62,7 +62,7 @@ Dates are commit dates.
 | 2026-10-21 | UI/UX review pass: Settings is the only connect flow; Theme palette, mono family and page margin; chart value labels, seconds axis and flat-trace lanes; Log `s.mmm` times, Pause and order toggle; display names, units and decimals from core; merged via PR #16 | `8a5e2b5` |
 | 2026-10-21 | `scripts/verify.sh`: both trees, the suite and the cross-arch subset in four lines; a `smoke_only` manual CI run | `3a187c4`, `90e57c6` |
 | 2026-10-21 | Request engine design ([ADR-0015](adr/0015-request-engine.md), Proposed) | `ea6e4c9` |
-| 2026-10-21 | Disconnect tears down off the GUI thread, with "Disconnecting…" on every connection surface (#33 closed) | `ebfa918` |
+| 2026-10-21 | Disconnect tears down off the GUI thread, with "Disconnecting..." on every connection surface (#33 closed) | `ebfa918` |
 | 2026-10-21 | Hygiene pass: a private surrogate pipe passing one inherited handle; UTF-8 paths, UTF-16 at every Windows call; a validator that accepts exactly what the decoder decodes; registry validation and unregister; one URI query grammar; warnings on for every target; prefixed status and ID names; the `Bridge` QML singleton | `cd7ef50` |
 | 2026-10-22 | The core's C ABI takes the `ecuio_` prefix; the app keeps the product's name ([ADR-0001](adr/0001-qt-free-core-c-abi.md), appendix of 2026-10-22) | `f07c013` |
 | 2026-10-22 | Signal definition layout ([ADR-0016](adr/0016-signal-definition-layout.md)): value kinds and explicit byte order, `double` decode with 16-bit lengths, 3-byte mux keys, a set layout version, zero-checked reserved room, and validation that names the failing element; one Mode-01 key test for enrolment and request routing | `0ae8024`, `6337b6f`, `d809cb7`, `5735dd6` |
@@ -71,7 +71,7 @@ Dates are commit dates.
 | 2026-10-22 | Session recording ([ADR-0017](adr/0017-session-recording.md)): every frame, decoded value and activity line per connect; `frames.csv` is the replay format | `f590613` |
 | 2026-10-22 | Quiet-bus BENCH run of the vehicle session's URIs with recording on: requests failing and quiet on the VX; its timestamps are microseconds and its empty read is `ERR_BUFFER_EMPTY` ([session sheet](bench-sessions/2026-10-22.md)) | build `0a8beae` |
 | 2026-10-22 | First read-only vehicle session: the engine ECU answers the `obd2` scheduler, `?poll=` and the PID bitmaps through the VX; values decode and track the cluster, meeting v0.3.0's tag conditions ([session sheet](bench-sessions/2026-10-22-vehicle.md)) | `9a2c2ee` |
-| 2026-10-22 | The Dashboard fits a short, wide window (a wide arrangement), Settings scrolls, and the whole UI zooms (Ctrl + / Ctrl − / Ctrl 0), kept between runs | `0a94049` |
+| 2026-10-22 | The Dashboard fits a short, wide window (a wide arrangement), Settings scrolls, and the whole UI zooms (Ctrl + / Ctrl - / Ctrl 0), kept between runs | `0a94049` |
 | 2026-10-22 | v0.3.0 released: the version string reads 0.3.0 | tag `v0.3.0` |
 | 2026-10-22 | Request-engine groundwork: link health runs through both backends, the fake's control page reaching the surrogate child mid-session | `5961027` |
 | 2026-10-22 | Request-engine groundwork: the fake models the OBDX Pro VX (`ECUIO_FAKE_VX`): held reads, `ERR_BUFFER_EMPTY`, TX indications, 4 ms replies, the no-ACK bus | `81798f3` |
@@ -86,7 +86,7 @@ Dates are commit dates.
 | 2026-10-23 | The J2534 helpers below the connect path take ADR-0018's codes on both backends: a vendor's refusal, a surrogate that stopped answering and a bad shape no longer read alike ([ADR-0018](adr/0018-connect-failure-reporting.md), appendix) | `76189e7` |
 | 2026-10-23 | `ecuio_init` and `ecuio_shutdown` are documented as the optional no-ops they are, and the UI's init-failure paths, which could never run, are gone | `cf03331` |
 | 2026-10-23 | The request engine ([ADR-0015](adr/0015-request-engine.md), accepted): requests derive from the defs, Service 01 and 0x22, and follow the replies, one out per channel, with a 100 ms wait and a 20 ms floor; one worker loop for the rotation, `?poll=` and passive receive, each draining what has arrived; registration caps a set at 128 requests; a frame for no channel counts as a quiet read, and a hard failure steps down to requests failing when reads recover (Known Issue #11 closed) | `91e2daa` |
-| 2026-10-23 | The PID-support probe ([ADR-0015](adr/0015-request-engine.md) §4, appendix): each ECU's supported-PID bitmaps before its rotation, requests dropped only on an explicit answer, the walk resumed when the link recovers, `?probe=0`; the activity log names each ECU and what it supports (`ecuio_session_get_channel_support`); create splits the URI query once and refuses unknown keys for every scheme | `fdb12e1`, `7d297b4` |
+| 2026-10-23 | The PID-support probe ([ADR-0015](adr/0015-request-engine.md) section 4, appendix): each ECU's supported-PID bitmaps before its rotation, requests dropped only on an explicit answer, the walk resumed when the link recovers, `?probe=0`; the activity log names each ECU and what it supports (`ecuio_session_get_channel_support`); create splits the URI query once and refuses unknown keys for every scheme | `fdb12e1`, `7d297b4` |
 | 2026-10-23 | A frame carries a whole ISO 15765 message: `ecuio_frame_t` holds 4 KB, both J2534 read paths hand the transport the vendor's message untouched through one copy, a read's reply crosses the surrogate pipe at the length it needs, and `ecuio_profile_lookup` and `ecuio_session_send` take ADR-0018's codes ([ADR-0006](adr/0006-frame-abi-v0.3.md), appendix) | `4d4e13c` |
 | 2026-10-23 | Text values: `TEXT` and `HEX` defs read a byte field as ASCII or hex pairs (`ecuio_decode_text`, `byte_length` in the def's reserved room), the signal model carries text rows, LiveView shows them unplotted, and the recorder writes them ([ADR-0016](adr/0016-signal-definition-layout.md) and [ADR-0017](adr/0017-session-recording.md), appendices) | `882b1a3` |
 | 2026-10-23 | The `uds-generic` profile ([ADR-0020](adr/0020-uds-generic.md)): `?did=` names the DIDs (an ECU prefix, a type, a range), create builds a set the session owns, single DIDs are polled and ranges scanned once beside the rotation by the request engine, the found ones joining it; the support report and the ECU line carry the scan's counts; the mock answers the DIDs, so a QML test shows a text row; `fuzz_uds_query` | `9107312` |
@@ -112,13 +112,19 @@ Dates are commit dates.
 | 2026-10-30 | Reading trouble codes ([ADR-0037](adr/0037-reading-trouble-codes.md)): readiness, the stored, pending and permanent codes and the freeze frame, asked once per ECU after identification through the one-shot slot, one-byte requests matched by their service, the freeze frame decoded by the `obd2` defs; a report per ECU through the C ABI with the codes and monitors named in core; a Diagnostics page, an activity-log line and `havne-cli`'s `diagnostics` line; the simulated car's ECU answers as the fakes' does, byte for byte, so all of it shows with no hardware | `551a7ce`, `3300603`, `8b3f5ef`, `dd98f0c`, `afad366`, `58bff2d` |
 | 2026-10-30 | Clearing trouble codes ([ADR-0038](adr/0038-clearing-trouble-codes.md)): Service 04 by one path only, each ECU by its own ID, behind a gate core checks (the report the caller saved, `01 0C` at 0 rpm) and the app completes (the report saved to a file of its own, a confirmation in place); the report read again after it; the simulated car starts every loop with its engine stopped, so a clear runs with no hardware | `f3ae164`, `aa05a64`, `f6419c2`, `4b5f3b6`, `ce6b3c3`, `bd6d612` |
 | 2026-10-31 | Every linear Service 01 reading ([ADR-0039](adr/0039-full-service01-coverage.md)): the `obd2` set grows to a def for every linear field of J1979's Service 01 table, checked against the public tables and J1979 itself; its requests run in two rate classes, two fast to one slow, chosen in core; the fakes' ECU answers every linear PID, its bitmaps chained to A0; Live hides what a car's bitmaps leave out; imperial units for the new units | `1516606`, `28b3f8c`, `4ade947`, `d06b849`, `c2b526c`, `99e22cb` |
+| 2026-10-31 | An unsigned iOS app for sideloading: each CI run builds `havne-ios-unsigned.ipa`, checked for its Info.plist keys and for holding no signature, for a tester to sign with their own Apple ID ([docs/ios.md](ios.md)) | `86b5b8f` |
+| 2026-10-31 | SocketCAN requests ([ADR-0040](adr/0040-socketcan-requests-isotp.md)): ISO-TP in core, pure, with ISO 15765-4's timeouts, shared with ELM327's reassembly and held to the kernel's on `vcan0`; `socketcan://` runs `obd2` and `uds-generic` only through a controller that stops at once on a fault, and sends a second request only once the first came back from the bus | `2e00cb4`, `ae56a0b` |
+| 2026-10-31 | Fault injection on a replay ([ADR-0041](adr/0041-replay-fault-injection.md)): `?faults=` drops, loses to an overflow, corrupts, cuts short or holds back a recording's frames, the same from each seed, counted per kind; then the test car's recording answering a requesting session on `vcan0` as the ECU, its replies broken at the ISO-TP level, which found late replies ending packing | `f6b2b60`, `4cb0c42`, `8e70eb1`, `b2c72f1` |
+| 2026-10-31 | Reply timing per request ([ADR-0042](adr/0042-reply-timing.md)): each request's outcomes, latency on the host's clock and refresh interval on the frames' own stamps at P50, P99 and P99.9, in `latency.csv` and `havne-cli`'s `timing` lines; `bench_timing` measures each transport against the fakes | `d5b4f4b`, `7c8b618`, `25c53c7` |
+| 2026-10-31 | The decode's index: each frame is checked only against the defs its CAN ID and key can match, so the decode's cost doesn't grow with the profile (Known Issue #4 closed); found by bisecting the replay load test's halved rate | `439664a` |
+| 2026-10-31 | v0.3.5's review pass and its fixes: SocketCAN's ISO-TP judges a Consecutive Frame's timeout on the kernel's receive time, after the reads, so a held-up worker keeps a reply the bus carried on time; core, not the bridge, decides which signals the ECU doesn't support, which item is the VIN and how many PIDs it supports (`ecuio_session_get_unsupported_signals`, `ecuio_identity_vin`, the support report's counts); the Dashboard finds its signals by core's IDs; the clear's confirmation names the ECUs the clear goes to | `955e15a`, `a6ee64c` |
 
 ## Lessons learned
 
 **2026-10-04: callback API round:** dropped never-implemented registration
 handle (pair-identity instead), duplicate registration idempotent-success,
 tests assert actual behavior, snapshot-dispatch mandated so callback
-reentry can't deadlock. MSVC caught an implicit int→enum conversion
+reentry can't deadlock. MSVC caught an implicit int to enum conversion
 (C2664): three-compiler matrix earns its keep.
 
 **2026-10-05: bridge + log round:** (1) captureless lambdas unsafe as
@@ -142,12 +148,12 @@ ordered before discovery (we hit exit 0xc0000135 until reordered).
 Ubuntu rejects; C++17 code needs plain constructor helpers. (2)
 `strncpy_s`/`_TRUNCATE` are MSVC-only Annex K, absent from glibc, so
 "fix a warning" edits can compile locally and fail only CI; direction of
-travel matters (MSVC-green ≠ portable). Use a small bounded-copy helper.
+travel matters (MSVC-green != portable). Use a small bounded-copy helper.
 (3) **Cumulative count is not backpressure**: gating delivery on lifetime
 frame count froze the stream permanently at 10k while the model's ring
 eviction sat unused. Bound in-flight queue depth, not totals; pair drop
 statistics with liveness tests. Also, measuring before optimizing: the
-guiNotifyCount instrumentation locked the 20× coalescing-reduction claim
+guiNotifyCount instrumentation locked the 20x coalescing-reduction claim
 with a baseline number. New-QML-file linker failures (QmlCacheGeneratedCode
 unresolved externals) mean stale QML cache: clean reconfigure fixes.
 
@@ -194,7 +200,7 @@ is diagnosing its own environment.** (4) **Unverified war stories rot.**
 
 **2026-10-14: F-series (Frame ABI + Lifecycle + Gate):** ABI-breaking frame
 redesign, close/destroy split, message-ID decode gate, strict-C ABI
-verification. Test count rises 64→70. Lessons: (1) ABI breaks require
+verification. Test count rises 64 to 70. Lessons: (1) ABI breaks require
 version-string sync. (2) Poll-until-condition waits eliminate wall-clock
 dependence. (3) Shared constants beat comments.
 
@@ -242,7 +248,7 @@ surrogate with zero transport changes. A routing decision placed higher
 forks every future capability; placed at the loader it is inherited for
 free by all of them. (2) **A sniffer's failure mode is a routing
 decision:** returning "x86" on unreadable PE would have spawned
-surrogate processes for garbage paths; returning "unknown → in-proc"
+surrogate processes for garbage paths; returning "unknown means in-proc"
 preserves the honest LoadLibraryEx failure. The docstring said one
 thing, the code did another: the routing work surfaced the contract
 violation that had been hiding in discovery since Part 1. (3) **Test
@@ -293,7 +299,7 @@ identical at seam and child, and the parity test drives BOTH.
 scripted-response fake requires an ARMING hook, and an x64 test
 process cannot reach into the x86 child's fake instance to arm one
 (the exact gap `OP_INJECT` exists to bridge). The deterministic echo
-(byte 0 + 0x40) makes the full request→response loop observable
+(byte 0 + 0x40) makes the full request to response loop observable
 through the ring from either arch with zero new protocol surface:
 design the observable, not the mechanism. (4) **Writing the tests is
 the design review:** composing the caller-facing ioctl test exposed a
@@ -368,7 +374,7 @@ string literals are ABI too.** The ptypes round verified structs and
 constants against public references, but export NAMES are string
 literals at call sites, outside any shared header, so the verification
 rigor never touched them. Our unverified `PassThruIoCtl` literal
-diverged from the spec's `PassThruIoctl` (J2534-1_0500 §7.3.19; every
+diverged from the spec's `PassThruIoctl` (J2534-1_0500 section 7.3.19; every
 public reference agrees), and the fake exported what the resolver
 asked for: 92 green tests certified our own typo until the first
 real vendor (OBDX Pro VX) died on it in 16 ms. (2) **Check the
@@ -592,7 +598,7 @@ all; automakers expose it through Mode 22. The def, the fake's canned
 reply and the decode test all came from the same assumption, so the
 suite was green, and a vehicle that supports 0x5F would have shown its
 enum byte as a temperature. `9b71174` replaced it with engine oil
-temperature (0x5C, the same A − 40 shape). It's the J2534 lesson again,
+temperature (0x5C, the same A - 40 shape). It's the J2534 lesson again,
 for PIDs: check every def against a public J1979 table, never memory.
 (2) **A red build can look partial.** `6807e93` committed a
 `git stash pop` conflict in `LiveViewPage.qml`: three marker blocks,
@@ -606,7 +612,7 @@ pop, and smoke what is being committed. The conflict's two sides were
 two answers to the same Live problem; the resolution keeps the
 row-keyed colors with `Theme`'s palette and dashes rows past it.
 
-**2026-10-21: hygiene pass (review items H1–H8):** four lessons.
+**2026-10-21: hygiene pass (review items H1-H8):** four lessons.
 (1) **An ASCII path can't catch an ANSI bug.** Every `*A` call works
 for an ASCII path, so the encoding bug survived a suite whose paths
 were all ASCII. A non-ASCII test has to use characters outside the
@@ -623,7 +629,7 @@ quietly reversed each one's check; `qttune_def_applies_to_frame` makes
 an old caller fail to link instead. (4) **A cast outside an enum's range is
 undefined in C++**, and the sanitizer job would flag it: the
 validator's type test stays inside the enum's range rather than
-probing with −1.
+probing with -1.
 
 **2026-10-22: signal definition layout
 ([ADR-0016](adr/0016-signal-definition-layout.md)):** two lessons.
@@ -800,7 +806,7 @@ end has to run before the one that stubs it is trusted.
 
 **2026-10-24: the frame log's ring:** **a model's rows can read right
 while its signals say otherwise.** The frame log became a fixed ring of
-plain rows, which took a frame at the 10k cap from 45 µs to 2 µs (no
+plain rows, which took a frame at the 10k cap from 45 us to 2 us (no
 view attached). The first ring test read every row back and checked the
 order both ways, and a mutation that announced the removal at the
 newest end instead of the oldest passed it: `data()` was right, only a
@@ -813,8 +819,8 @@ at a time can contradict itself in every frame.** The drive cycle's
 tests bounded each signal and round-tripped it through the wire, and
 all of them passed while the limiter dropped the load to 45 % on each
 bounce, so MAF sawed between 137 and 294 g/s though fuel cut leaves
-the air flowing, and the warm loop's intake air reached 65 °C at
-163 km/h, 40 °C over ambient, like a turbo car's. Each value was in range;
+the air flowing, and the warm loop's intake air reached 65 deg C at
+163 km/h, 40 deg C over ambient, like a turbo car's. Each value was in range;
 together they were no car. The rewrite was driven by checks across
 signals at every tick: rpm against wheel speed in gear, MAF against
 rpm and load, lambda against fuel cut, speed against the clutch. Those
@@ -830,7 +836,7 @@ stepped the drive cycle 50 ms per frame and then slept 50 ms, and
 Windows rounds a sleep up to its 15.6 ms timer step, so frames came
 62.3 ms apart and the car played at 80 % speed against its own
 timestamps: a 5 s limiter hold lasted 6.2 s on the clock, and a drag
-run's 0–100 time read slow. The deterministic cycle tests never saw it,
+run's 0-100 time read slow. The deterministic cycle tests never saw it,
 because they step with no clock at all; recording the Dashboard for the
 README did, when the 2nd-gear pull arrived seven seconds after the
 phase script said it would. The worker now sleeps to a deadline that
@@ -845,7 +851,7 @@ the cold fast idle held 1430 rpm for 17 s, the 100 km/h cruise held
 2995 rpm and 100 km/h for 10 s, and staging held 815 rpm for 7.7 s,
 because the idle controller and the driver's speed hold were exact
 loops with nothing to disturb them. The first vehicle's own log showed
-the opposite: its fast idle wandered 1,400–1,460 rpm. The other tells
+the opposite: its fast idle wandered 1,400-1,460 rpm. The other tells
 were the hand-offs between phases, where the script, not the car,
 moved: the driver pressing the throttle with the clutch in, the blade
 snapping shut as the fast idle ended, a lift off the limiter that sat
@@ -859,25 +865,25 @@ fails a reading that holds still or steps between phases.
 
 **2026-10-25: the mock's cold demo:** **check a model against the
 window it's watched in, not only the tests' window.** The README's
-Dashboard GIF showed coolant and oil under 100 °F through a
+Dashboard GIF showed coolant and oil under 100 deg F through a
 full-throttle pull. The cold start's warm-up rate came from the first
 vehicle and was right, but one loop is about two minutes and the GIF
 was taken 29 s in, so every frame showed a cold engine. Later loops
 already carried the heat over, yet measuring ten of them showed the
 model never looked like a hard-driven car either: the radiator held
-the coolant at 88–95 °C even at WOT, and the oil topped out at 104 °C
-while swinging 14 °C inside one quarter mile, which a 5–6 L sump
+the coolant at 88-95 deg C even at WOT, and the oil topped out at 104 deg C
+while swinging 14 deg C inside one quarter mile, which a 5-6 L sump
 can't do. The fix kept the first loop cold and retuned the heat paths:
 a radiator that can't keep up at WOT, piston and bearing heat into the
 oil, and a sump mass that lets one pull move it only several degrees.
 The second loop warms through the thermostat; from the third the
-coolant runs 88–102 °C, and by the fifth the oil has built to
-108–117 °C. `CoreTest.MockDriveCycleLaterLoopsRunAtOperatingTemperature`
+coolant runs 88-102 deg C, and by the fifth the oil has built to
+108-117 deg C. `CoreTest.MockDriveCycleLaterLoopsRunAtOperatingTemperature`
 pins both loops' character, and the GIF is now a quarter mile on a warm
 loop. A review of the first retune found three things the tests hadn't
 pinned: the oil's friction heat was added on top of the fuel's heat
 rather than taken from it, the weaker radiator had left the fan
-(102 °C) out of reach, so it never ran, and the docs' "from the third
+(102 deg C) out of reach, so it never ran, and the docs' "from the third
 loop" figures came from the sixth. The heat shares, masses and
 radiator now sit in named constants, the friction share comes out of
 the block's when fueled, the fan cuts in on the quarter mile, and the
@@ -906,7 +912,7 @@ could see. A replay's first frame is due the instant it starts, and at
 full speed the whole file can go in that window; the round-trip test
 lost it every run. The callback's gate now opens just before the
 start. The replay also gave Known Issue #10 its first evidence: the
-engine start replayed at 10× showed a Dashboard RPM peak of 1,195
+engine start replayed at 10x showed a Dashboard RPM peak of 1,195
 against the recording's 1,261, the peak overwritten within its 100 ms
 window.
 
@@ -919,7 +925,7 @@ that held the event loop while a replay flooded in found it, at first
 as a failure that came and went. Anything a connect resets belongs
 before the start, with the gate. And **a benchmark column is cheaper
 than a review:** the model's update per tick searched every row for
-each value, quadratic in the profile (819 µs a tick at 1000 defs),
+each value, quadratic in the profile (819 us a tick at 1000 defs),
 which no review had flagged; adding the tick to `bench_bridge` to
 cite in the ADR showed it the first time it ran. Last, **the comparison
 that mattered was already on disk:** the plan was to keep both decode
@@ -938,7 +944,7 @@ the suites only by halving them (step 2), and deleting the in-proc
 calls, a net 367 lines of the loader, left every test's expectation
 standing (step 3). The parity suite had been the evidence for the
 change: the write cap, the SCONFIG codes and the ioctl cut each
-diverged between the backends until a test ran both. The price, 18–28
+diverged between the backends until a test ran both. The price, 18-28
 ms a connect (docs/testing.md, "Connect cost: a surrogate per
 session"), is one no user waits on.
 
@@ -1071,7 +1077,7 @@ read again. The first frame queued after the loss carries it, so the
 test sends one more frame once the stall ends. Two smaller lessons from
 the same day: **a kernel constant mirrored for portability is checked
 against the real one where it exists**, which caught `NLA_TYPE_MASK`
-being an `int` complement (−49153, not 0x3FFF) at the first Linux
+being an `int` complement (-49153, not 0x3FFF) at the first Linux
 compile; and **a virtual device's defaults move with the kernel**: WSL's
 6.18 creates `vcan0` with CAN XL's MTU (2060), so CAN FD works there
 with no setup, while CI sets 72 explicitly rather than trust a default.

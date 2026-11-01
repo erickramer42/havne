@@ -55,7 +55,7 @@ option(HAVNE_BUILD_CORE_ONLY "Build core library and tests; skip Qt app" OFF)
 # fuzz/README.md has the local recipe.
 option(ECUIO_BUILD_FUZZERS "Build libFuzzer harnesses (Clang or MSVC)" OFF)
 
-# Symbols for every MSVC Release build (ADR-0034 §1): a PDB beside each
+# Symbols for every MSVC Release build (ADR-0034 section 1): a PDB beside each
 # binary, with the optimizations /DEBUG would turn off kept, so the code
 # is a plain Release build's. The binary records only the PDB's file
 # name, not the build's path, which names the account on a dev machine.

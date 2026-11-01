@@ -7,10 +7,10 @@
 - **Date:** 2026-10-30.
 - **Builds on:** [ADR-0037](0037-reading-trouble-codes.md) (the report
   a clear needs first, its generation, Read again's path through the
-  worker); [ADR-0015](0015-request-engine.md) §1 (the one-shot slot)
-  and §3 (the services the engine may send).
-- **Amends:** [ADR-0015](0015-request-engine.md) §3 and
-  [ADR-0037](0037-reading-trouble-codes.md) §1, with dated notes:
+  worker); [ADR-0015](0015-request-engine.md) section 1 (the one-shot slot)
+  and section 3 (the services the engine may send).
+- **Amends:** [ADR-0015](0015-request-engine.md) section 3 and
+  [ADR-0037](0037-reading-trouble-codes.md) section 1, with dated notes:
   Service 04 is sent, by one path only.
 
 ## Context
@@ -43,7 +43,7 @@ that says what clearing resets.
 `ecuio_engine_service_allowed` stays reads only, and the `static_assert`
 that keeps 04 out of every one-shot list stays. A channel's clear is a
 small state of its own in the engine, which builds the one byte `04`
-itself after its gate (§2) passes, through the same one-shot slot as
+itself after its gate (section 2) passes, through the same one-shot slot as
 identification and diagnostics, so it takes its turn with the rotation.
 Nothing else can enrol 04: not a def, not a URI key, not a list. A
 second `static_assert` checks that the only request the clear state
@@ -66,7 +66,7 @@ builds is `04`.
   ends the clear unsent, as "engine running" with the speed it read;
   no answer, or a negative one, ends it unsent as "no engine speed".
   The ignition being on is what the ECU's answering shows.
-- **The user's word** is the app's (§5): core can't see a confirmation,
+- **The user's word** is the app's (section 5): core can't see a confirmation,
   and doesn't pretend to through a flag.
 
 ### 3. Each ECU by its own ID
@@ -85,7 +85,7 @@ outcome (`ECUIO_CLEAR_NONE`, `_CLEARED`, `_REFUSED` with its code,
 `_NO_ENGINE_SPEED`, `_REPORT_CHANGED`) and its code and speed, and a
 flag, `ECUIO_DIAG_CLEARING`, while one runs. After a `44`, or no answer
 to `04` (which may still have cleared), the channel reads its
-diagnostics again at once (ADR-0037 §2's list), so the report shows
+diagnostics again at once (ADR-0037 section 2's list), so the report shows
 what the ECU holds after the clear, at a new generation; a refusal
 changed nothing, so nothing is read. The clear's outcome stays until
 the next clear, a Read again included. The ABI check's growth rule
@@ -102,7 +102,7 @@ accepts fields that take reserved room at the same size.
   label. A write that fails stops the clear. The activity log names the
   file, never its folder's path. A recording, when on, keeps the lines
   in its `events.log` as well.
-- **Confirmed in place.** The Diagnostics page's "Clear codes…" button,
+- **Confirmed in place.** The Diagnostics page's "Clear codes..." button,
   enabled once a read has completed while connected, opens a
   confirmation that says what clearing erases (the list in Context;
   permanent codes stay), that the engine must be off with the ignition
@@ -178,10 +178,10 @@ accepts fields that take reserved room at the same size.
 
 Built as decided, but for these:
 
-- **§1's second `static_assert`** checks that the clear's first request
+- **Section 1's second `static_assert`** checks that the clear's first request
   is a service the engine allows and that `04` is one it refuses, so
   the clear state is the one place `04` can come from.
-- **§5, the saved file.** Its first line is `havne-cli`'s start line
+- **Section 5, the saved file.** Its first line is `havne-cli`'s start line
   (`schema`, the core's version), not a line with the time and the
   vehicle: those are in the file's name, the vehicle for an adapter's
   session only, as a recording's folder. The file is written when Clear
@@ -191,9 +191,9 @@ Built as decided, but for these:
   the path relative to Documents, which carries no account name. A
   recording's `events.log` keeps the activity log's lines (each read's
   diagnostics line, each clear's), not the file's.
-- **§5, the log lines** add a refusal's bytes to "not sent: no engine
+- **Section 5, the log lines** add a refusal's bytes to "not sent: no engine
   speed" when the ECU refused `01 0C` ("(7F 01 12)").
-- **§6, the simulated car's loop** grows by 17 s, not 15: the 15 s with
+- **Section 6, the simulated car's loop** grows by 17 s, not 15: the 15 s with
   the key on and the engine stopped, then a 2 s start (cranking, the
   catch). With the pump stopped the coolant doesn't lose heat to the
   radiator in it.

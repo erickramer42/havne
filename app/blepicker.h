@@ -3,7 +3,7 @@
 //          order over made-up service lists, a service missing its
 //          characteristics passed over, the first service with a notifying
 //          and a writable characteristic last, and none; BENCH: none
-//          until a BLE adapter is on hand (ADR-0028 §4)
+//          until a BLE adapter is on hand (ADR-0028 section 4)
 
 #pragma once
 
@@ -38,11 +38,11 @@ struct BlePick {
     bool found() const { return service >= 0; }
 };
 
-// "fff0" → "0000fff0-0000-1000-8000-00805f9b34fb"; a 128-bit UUID comes
+// "fff0" -> "0000fff0-0000-1000-8000-00805f9b34fb"; a 128-bit UUID comes
 // back lower case without braces
 QString bleUuid(const QString& uuid);
 
-// ADR-0028 §2's list, the first match in this order:
+// ADR-0028 section 2's list, the first match in this order:
 //   1. the Nordic UART service: write 6E400002, notify 6E400003
 //   2. FFF0: write FFF2, notify FFF1
 //   3. FFE0: FFE1 both writes and notifies

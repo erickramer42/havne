@@ -1,4 +1,4 @@
-// File/layer: cli/jsonl.h | havne-cli, JSON-lines formatting (ADR-0031 §3)
+// File/layer: cli/jsonl.h | havne-cli, JSON-lines formatting (ADR-0031 section 3)
 // Testing: UNIT (tests/test_cli.cpp, CliLineTest)
 //
 // Builds one JSON line into a caller's fixed buffer: no allocation, so
