@@ -679,25 +679,40 @@ TEST(Elm327ProtocolTest, TheCountDigitGoesToPidsWhoseDefsFitOneFrame)
     EXPECT_TRUE(elm327_one_frame(one, 0x00)) << "a neighbor's bit stays";
 }
 
-TEST(Elm327ProtocolTest, RequestsCarryTheCountDigitOnlyWhereOneReplyIsCertain)
+TEST(Elm327ProtocolTest, RequestsCarryTheCountDigitOnlyWhereOneReplyIsLikely)
 {
     elm327_one_frame_pids one;
     elm327_one_frame_set(one, 0x0C, true);
+    elm327_long_dids long_dids;
     const uint8_t rpm[2] = {0x01, 0x0C};
     const uint8_t speed[2] = {0x01, 0x0D};
     const uint8_t vin[2] = {0x09, 0x02};
     const uint8_t did[3] = {0x22, 0x1E, 0x1C};
+    const uint8_t two_dids[5] = {0x22, 0x1E, 0x1C, 0x1E, 0x1D};
     const uint8_t did_0c[3] = {0x01, 0x0C, 0x00};
-    EXPECT_EQ(elm327_response_count(rpm, 2, 0x7E0, one), 1u);
-    EXPECT_EQ(elm327_response_count(rpm, 2, 0x18DA10F1, one), 1u);
-    EXPECT_EQ(elm327_response_count(rpm, 2, 0x7DF, one), 0u) << "functional";
-    EXPECT_EQ(elm327_response_count(rpm, 2, 0x18DB33F1, one), 0u)
+    EXPECT_EQ(elm327_response_count(rpm, 2, 0x7E0, one, long_dids), 1u);
+    EXPECT_EQ(elm327_response_count(rpm, 2, 0x18DA10F1, one, long_dids), 1u);
+    EXPECT_EQ(elm327_response_count(rpm, 2, 0x7DF, one, long_dids), 0u)
         << "functional";
-    EXPECT_EQ(elm327_response_count(speed, 2, 0x7E0, one), 0u)
+    EXPECT_EQ(elm327_response_count(rpm, 2, 0x18DB33F1, one, long_dids), 0u)
+        << "functional";
+    EXPECT_EQ(elm327_response_count(speed, 2, 0x7E0, one, long_dids), 0u)
         << "not in the set";
-    EXPECT_EQ(elm327_response_count(vin, 2, 0x7E0, one), 0u);
-    EXPECT_EQ(elm327_response_count(did, 3, 0x7E0, one), 0u);
-    EXPECT_EQ(elm327_response_count(did_0c, 3, 0x7E0, one), 0u);
+    EXPECT_EQ(elm327_response_count(vin, 2, 0x7E0, one, long_dids), 0u);
+    EXPECT_EQ(elm327_response_count(did, 3, 0x7E0, one, long_dids), 1u)
+        << "a DID until its reply needs more than one line";
+    EXPECT_EQ(elm327_response_count(did, 3, 0x7DF, one, long_dids), 0u)
+        << "functional";
+    EXPECT_EQ(elm327_response_count(two_dids, 5, 0x7E0, one, long_dids), 0u);
+    EXPECT_EQ(elm327_response_count(did_0c, 3, 0x7E0, one, long_dids), 0u);
+    elm327_long_did_set(long_dids, 0x1E1C);
+    EXPECT_EQ(elm327_response_count(did, 3, 0x7E0, one, long_dids), 0u)
+        << "a DID whose reply has needed more";
+    EXPECT_TRUE(elm327_long_did(long_dids, 0x1E1C));
+    EXPECT_FALSE(elm327_long_did(long_dids, 0x1E1D)) << "a neighbor's bit";
+    EXPECT_FALSE(elm327_long_did(long_dids, 0x1E1B));
+    elm327_long_did_set(long_dids, 0xFFFF);
+    EXPECT_TRUE(elm327_long_did(long_dids, 0xFFFF)) << "the last bit";
 
     char out[32];
     EXPECT_EQ(elm327_format_request(rpm, 2, 1, out, sizeof out), 6u);

@@ -403,3 +403,21 @@ last line for a request is its total. The `end` line carries `isotp`
 (`first_frames`, `completed`, `dropped`, `malformed`) where core
 reassembles. A session with no rotation writes neither, so the golden
 runs (mock, replay) are unchanged. `CliTimingTest`.
+
+## Appendix: 2026-11-01, a DID scan's progress and end
+
+Schema 1 grows by one type and one end reason
+([ADR-0020](0020-uds-generic.md)'s appendix of the same date).
+`stream` writes a `scan` line for each ECU whose scan of a `did=` range
+moved (`ecu`, `total`, `done`, `found`, `refused`, `left`, `polled`,
+`complete`, from `ecuio_session_get_channel_support`): at most one a
+second while it runs, at once when it completes, and once more before
+`end` when the counts moved since. The main thread polls it in its
+drain, as it does the diagnostics. `--until-scanned` ends the stream
+with `"reason": "scanned"` once every channel with a scan has
+completed it; a session with no range to scan ends before it starts,
+`"nothing-to-scan"`. A DID nobody answered isn't done (it waits for a
+rescan), so a script caps the wait with `--seconds`. The found DIDs'
+replies are the stream's frames. `cli/scan_line.h`, `CliScanTest`,
+`CliGoldenTest.NothingToScanEndsAtOnce`; end to end on `vcan0` against
+`havne-cli sim` by hand.

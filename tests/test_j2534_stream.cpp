@@ -422,7 +422,7 @@ TEST_F(J2534QueryParamTest, RefusedQueriesNameTheirCause)
     EXPECT_STREQ(
         ecuio_last_error_detail(),
         "j2534:// takes no query key 'band', only baud, flags, "
-        "filter, txid, poll, probe, identify, diagnose, pack, profile and did");
+        "filter, txid, poll, probe, identify, diagnose, pack, scan, profile and did");
     snprintf(uri, sizeof(uri), "j2534://%s?probe=yes", FAKE_J2534_DLL_PATH);
     EXPECT_EQ(ecuio_session_create(uri, &session), ECUIO_ERR_BAD_URI);
     EXPECT_STREQ(ecuio_last_error_detail(), "?probe= needs 0 or 1, not 'yes'");

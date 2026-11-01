@@ -22,6 +22,7 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
 - `ecuio/vin.h` in core's C API: `ecuio_vin_decode`, `ecuio_vin_make` and `ecuio_vin_source`.
 - The Diagnostics page shows each readiness monitor for this drive cycle beside its state since the last clear: done, not yet, or disabled for the rest of the drive. `havne-cli`'s `diagnostics` line carries the same, with PID 41's own outcome.
 - A channel's diagnostics report in core's C API holds this drive cycle's monitors (Service 01 PID 41: `ECUIO_MONITOR_CYCLE_ENABLED`, `ECUIO_MONITOR_CYCLE_COMPLETE`, `ECUIO_DIAG_CYCLE`, the `cycle` outcome), and a new outcome, `ECUIO_DIAG_UNSUPPORTED`, for an item whose PID the ECU says it lacks, which is then not asked.
+- A faster DID scan: `?scan=first` under `profile=uds-generic` asks a `did=` range back to back before polling what it found, and over an ELM327 each scanned DID is asked so the adapter returns as soon as a one-line answer is in. `havne-cli stream` writes a `scan` line with the scan's progress, and `--until-scanned` ends the stream once every range is asked.
 - `ecuio_session_clear_diagnostics_with` in core's C API: a clear with the caller's word on a running engine and on a moving vehicle. A channel's diagnostics report records the engine and vehicle speeds a clear read (`clear_kmh`, `ECUIO_DIAG_CLEAR_RPM`, `ECUIO_DIAG_CLEAR_KMH`) and two outcomes, moving and no vehicle speed.
 
 ### Changed

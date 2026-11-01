@@ -477,9 +477,9 @@ Pane {
         "mock": ["profile", "did", "diagnose"],
         "replay": ["profile", "did", "speed", "loop"],
         "j2534": ["baud", "flags", "filter", "txid", "poll", "probe", "identify", "diagnose",
-                  "profile", "did"],
+                  "pack", "scan", "profile", "did"],
         "elm327": ["baud", "serial", "filter", "txid", "poll", "probe", "identify", "diagnose",
-                   "profile", "did"],
+                   "pack", "scan", "profile", "did"],
         "socketcan": ["profile", "did", "baud", "filter"]
     })
 

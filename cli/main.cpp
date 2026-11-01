@@ -1,7 +1,8 @@
 // File/layer: cli/main.cpp | havne-cli, a command-line client over the C ABI (ADR-0031)
 // Testing: HARNESS: golden runs of the program (CliGoldenTest, against
 //          tests/golden/cli/: the replay fixture, mock:// with its
-//          diagnostics line, the refusals),
+//          diagnostics line, the refusals, --until-scanned with nothing
+//          to scan),
 //          its usage errors (CliUsageTest) and, on POSIX, SIGINT and
 //          SIGTERM (CliSignalTest), the absent line (CliReplayTest,
 //          tests/cli_absent.py); the formatting, the ring and the
@@ -24,6 +25,7 @@
 #include "vin_line.h"
 #include "jsonl.h"
 #include "line_ring.h"
+#include "scan_line.h"
 #include "sim_line.h"
 #include "sleep_watch.h"
 
@@ -393,6 +395,29 @@ void poll_identity(Output& out, ecuio_session_t* session, uint32_t channels,
     }
 }
 
+// A scan line per ECU whose DID scan moved (cli/scan_line.h), every
+// change when final; the channels' reports into reports[], for
+// --until-scanned
+void poll_scan(Output& out, ecuio_session_t* session, uint32_t channels,
+               cli::ScanSeen* seen, ecuio_channel_support_t* reports,
+               bool final = false)
+{
+    const uint64_t now = ecuio_clock_us();
+    for (uint32_t c = 0; c < channels; ++c) {
+        ecuio_channel_support_t& s = reports[c];
+        if (ecuio_session_get_channel_support(session, c, &s) != ECUIO_OK) {
+            s = ecuio_channel_support_t{};
+            continue;
+        }
+        if (cli::scan_due(s, seen[c], now, final)) {
+            char buf[512];
+            cli::Line l(buf, sizeof buf);
+            cli::scan_line(l, s);
+            write_line(out, l);
+        }
+    }
+}
+
 // The car's model year, from the first channel's VIN (the vehicle's,
 // ADR-0027 section 3) decoded as the identity line decodes it; 0 with
 // none
@@ -654,6 +679,7 @@ void usage(FILE* to)
     std::fprintf(
         to,
         "usage: havne-cli stream <uri> [--values] [--count N] [--seconds S]\n"
+        "                         [--until-scanned]\n"
         "       havne-cli play <uri> --to <vcan> [--count N] [--seconds S]\n"
         "       havne-cli sim <uri> --on <vcan> [--seconds S]\n"
         "       havne-cli devices\n"
@@ -668,7 +694,9 @@ void usage(FILE* to)
         "         --values adds the values its profile decodes. Ends at "
         "Ctrl+C,\n"
         "         after N frames, after S seconds, or at a replay's last "
-        "frame.\n"
+        "frame;\n"
+        "         --until-scanned also once uds-generic's did= ranges are "
+        "asked.\n"
         "play     (Linux) writes a session's frames to a virtual CAN "
         "interface\n"
         "         as they arrive: mock://demo drives the simulated car on it.\n"
@@ -710,6 +738,7 @@ struct StreamArgs {
     bool values = false;
     uint64_t count = 0;
     uint64_t seconds = 0;
+    bool until_scanned = false;
 };
 
 // A replay that doesn't loop has ended when every row is read and every
@@ -793,6 +822,9 @@ int run_stream(const StreamArgs& args)
     uint32_t identity_generations[ECUIO_SESSION_INFO_MAX_CHANNELS] = {};
     poll_identity(out, session, channels, identity_generations);
     poll_diagnostics(out, session, channels, diag_generations);
+    cli::ScanSeen scan_seen[ECUIO_SESSION_INFO_MAX_CHANNELS] = {};
+    ecuio_channel_support_t scan_reports[ECUIO_SESSION_INFO_MAX_CHANNELS] = {};
+    poll_scan(out, session, channels, scan_seen, scan_reports);
     // Judged from the values core decodes, so only with --values
     const ecuio_signal_set_t* set = ecuio_session_signal_set(session);
     std::vector<uint16_t> absent_read(
@@ -811,7 +843,11 @@ int run_stream(const StreamArgs& args)
         ecuio_register_values_callback(session, on_values, stream.get());
     }
     install_handlers();
-    st = ecuio_session_start(session);
+    // --until-scanned with no did= range to scan has nothing to wait for:
+    // it ends before it starts
+    const bool nothing_to_scan =
+        args.until_scanned && !cli::scans_any(scan_reports, channels);
+    st = nothing_to_scan ? ECUIO_OK : ecuio_session_start(session);
     if (st != ECUIO_OK) {
         write_error(out, st);
         out.flush();
@@ -825,7 +861,7 @@ int run_stream(const StreamArgs& args)
     cli::SleepWatch sleep_watch(ecuio_clock_slept_us());
     int32_t last_error = ECUIO_OK;
     uint32_t episodes = 0;
-    const char* reason = nullptr;
+    const char* reason = nothing_to_scan ? "nothing-to-scan" : nullptr;
     while (!reason) {
         const size_t n = stream->ring.drain(drained.data(), kPoll);
         out.write(drained.data(), n);
@@ -844,6 +880,9 @@ int run_stream(const StreamArgs& args)
         } else if (args.seconds &&
                    ecuio_clock_us() - started >= args.seconds * 1000000u) {
             reason = "seconds";
+        } else if (args.until_scanned &&
+                   cli::scans_complete(scan_reports, channels)) {
+            reason = "scanned";
         }
 
         if (const uint64_t slept = sleep_watch.poll(ecuio_clock_slept_us())) {
@@ -858,6 +897,7 @@ int run_stream(const StreamArgs& args)
 
         poll_identity(out, session, channels, identity_generations);
         poll_diagnostics(out, session, channels, diag_generations);
+        poll_scan(out, session, channels, scan_seen, scan_reports);
         poll_absent(out, session, absent_read, absent_last);
         poll_timing(out, session, info, timing_snaps, timing_rows, false);
 
@@ -913,6 +953,7 @@ int run_stream(const StreamArgs& args)
 
     int code = kExitOk;
     if (!out.failed) {
+        poll_scan(out, session, channels, scan_seen, scan_reports, true);
         poll_timing(out, session, info, timing_snaps, timing_rows, true);
         uint64_t covered = stream->covered.load();
         if (args.count && covered > args.count) {
@@ -1507,6 +1548,8 @@ int run(int argc, char** argv)
         const std::string a = argv[i];
         if (a == "--values") {
             args.values = true;
+        } else if (a == "--until-scanned") {
+            args.until_scanned = true;
         } else if (a == "--count" && i + 1 < argc) {
             if (!parse_count(argv[++i], args.count)) {
                 std::fprintf(

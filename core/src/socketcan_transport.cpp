@@ -38,7 +38,7 @@ extern "C" {
  * a profile that requests, not for a key the scheme doesn't take */
 const char* const ecuio_socketcan_query_keys[] = {
     "profile", "did",      "baud",     "filter", "txid", "poll",
-    "probe",   "identify", "diagnose", "pack",   nullptr};
+    "probe",   "identify", "diagnose", "pack",   "scan",   nullptr};
 }
 
 #if ECUIO_HAVE_SOCKETCAN
@@ -862,7 +862,8 @@ ecuio_socketcan_transport_attach(ecuio_session_t* session, const char* uri,
         }
         if (!requesting &&
             (p.is("txid") || p.is("poll") || p.is("probe") ||
-             p.is("identify") || p.is("diagnose") || p.is("pack"))) {
+             p.is("identify") || p.is("diagnose") || p.is("pack") ||
+             p.is("scan"))) {
             ecuio_detail_set("?%.*s= belongs to a profile that asks an ECU, "
                              "and this one only listens",
                              static_cast<int>(p.key_len), p.key);
