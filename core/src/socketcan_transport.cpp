@@ -10,7 +10,11 @@
 //          fakes' ECU on vcan0). A failed poll other than EINTR by code
 //          reading only: nothing makes the kernel fail one on demand;
 //          Reply timing on the kernel's clock (ADR-0042):
-//          SocketCanRequestTest.TimingReportsEachRequestOnTheKernelsClock
+//          SocketCanRequestTest.TimingReportsEachRequestOnTheKernelsClock;
+//          ISO-TP's N_Cr on the kernel's receive times:
+//          SocketCanRequestTest.AReplyOnTimeSurvivesAWorkerHeldUpMidMessage
+//          (a worker held inside its reads; one held between passes, which
+//          the expiry after the reads covers, by code reading only)
 //
 // socketcan:// (ADR-0032, ADR-0040): a Linux CAN interface. Attach reads
 // the interface through rtnetlink and refuses one a session can't use
@@ -248,11 +252,14 @@ struct read_frame {
 };
 
 /* A requesting session's worker (ADR-0040 sections 3 and 5): each pass
- * expires the engine's waits and ISO-TP's, judges a request whose echo is
- * late, sends the next request due (one awaiting its echo at a time),
- * waits on the socket until the next event, then takes every frame
- * waiting: an error frame, an echo, or an ECU's frame through ISO-TP, a
- * First Frame answered with Flow Control in the same pass. Link health
+ * expires the engine's waits, judges a request whose echo is late, sends
+ * the next request due (one awaiting its echo at a time), waits on the
+ * socket until the next event, then takes every frame waiting: an error
+ * frame, an echo, or an ECU's frame through ISO-TP, a First Frame
+ * answered with Flow Control in the same pass. ISO-TP judges N_Cr on the
+ * kernel's receive times, and expires after the reads, so a worker held
+ * up (the OS, a slow callback) never drops a reply the bus carried on
+ * time. Link health
  * as J2534's: a reply OK, a request unanswered a timeout, an unechoed
  * request a failed write, a bus-off or the interface gone a hard
  * failure; the rate's proof (socketcan_proof_on) decides when sending
@@ -323,7 +330,6 @@ void request_worker(ecuio_socketcan_transport* t)
                 link_on_request_timeout(h);
             }
         }
-        (void)isotp_expire(iso, now);
         if (pending.active && now - pending.at_us > ECUIO_ISOTP_N_AS_US) {
             settle(socketcan_sent::unechoed);
         }
@@ -393,6 +399,7 @@ void request_worker(ecuio_socketcan_transport* t)
         }
 
         bool matched = false;
+        int64_t newest = -1; /* the last frame's receive time */
         for (int i = 0; ready > 0 && i < kReadBurst; ++i) {
             struct iovec iov = {raw, sizeof raw};
             struct msghdr msg;
@@ -441,6 +448,7 @@ void request_worker(ecuio_socketcan_transport* t)
             now = now_us(t);
             const uint64_t stamp = socketcan_clock_step(
                 clock, kernel_ns, static_cast<uint64_t>(now));
+            newest = static_cast<int64_t>(stamp);
             uint32_t can_id;
             std::memcpy(&can_id, raw, 4);
             const uint8_t len = raw[4];
@@ -482,7 +490,7 @@ void request_worker(ecuio_socketcan_transport* t)
                     continue;
                 }
                 isotp_message m;
-                const isotp_result res = isotp_take(iso, f, now, &m);
+                const isotp_result res = isotp_take(iso, f, newest, &m);
                 if (res == isotp_result::first) {
                     /* ISO 15765-4: within 25 ms of the First Frame */
                     (void)write_frame(t->fd, isotp_flow_control(t->tx_ids[c]),
@@ -515,6 +523,7 @@ void request_worker(ecuio_socketcan_transport* t)
         if (matched) {
             link_on_read(h, false, true, false);
         }
+        (void)isotp_expire(iso, newest >= 0 ? newest : now_us(t));
 
         if (h.recovered) {
             h.recovered = false;

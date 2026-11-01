@@ -20,6 +20,9 @@
 
 #include <gtest/gtest.h>
 
+#include <linux/can/error.h>
+
+#include <atomic>
 #include <chrono>
 #include <cstdlib>
 #include <cstring>
@@ -301,6 +304,115 @@ TEST_F(SocketCanRequestTest, IdentificationReadsTheVinAcrossFrames)
     EXPECT_EQ(id.list[0].request[1], 0x02);
     EXPECT_EQ(id.list[0].outcome, ECUIO_IDENTITY_ANSWERED);
     EXPECT_STREQ(id.list[0].text, fake_ecu::kVin);
+}
+
+/* A frame of up to 8 bytes onto the bus from a raw socket */
+bool put(int fd, canid_t id, const std::vector<uint8_t>& data)
+{
+    can_frame f{};
+    f.can_id = id;
+    f.len = static_cast<uint8_t>(data.size());
+    std::memcpy(f.data, data.data(), data.size());
+    return ::write(fd, &f, sizeof f) == static_cast<ssize_t>(sizeof f);
+}
+
+/* Holds the worker 200 ms on the first error frame it dispatches */
+void hold_on_error(const ecuio_frame_t* f, void* user_data)
+{
+    auto* held = static_cast<std::atomic<bool>*>(user_data);
+    if ((f->flags & ECUIO_FRAME_FLAG_ERROR) != 0 && !held->exchange(true)) {
+        std::this_thread::sleep_for(200ms);
+    }
+}
+
+/* N_Cr is the gap between frames on the bus, not between their reads:
+ * the VIN's First Frame, then an error frame the session's callback
+ * holds the worker on, while the ECU sends its Consecutive Frames 10 ms
+ * after the Flow Control. The worker reads them 200 ms late, past N_Cr
+ * (150 ms), and the VIN is still whole. The ECU answers 09 02 once, so
+ * a request asked again can't stand in for the first; other requests
+ * get the fakes' Single Frames, or nothing */
+TEST_F(SocketCanRequestTest, AReplyOnTimeSurvivesAWorkerHeldUpMidMessage)
+{
+    vcan_bus::Fd bus = vcan_bus::open_raw();
+    ASSERT_TRUE(bus.ok());
+    std::atomic<bool> stop{false};
+    std::atomic<bool> segmented{false};
+    std::thread ecu([&] {
+        const char* vin = fake_ecu::kVin; /* 17 characters: 20 bytes */
+        bool vin_sent = false;
+        can_frame f;
+        while (!stop.load()) {
+            if (vcan_bus::read_for(bus.get(), &f, sizeof f, 20) !=
+                    static_cast<long>(sizeof f) ||
+                f.can_id != vcan_bus::kRequest || f.len < 2 || f.data[0] > 7 ||
+                f.data[0] == 0) {
+                continue;
+            }
+            if (f.data[1] == 0x09 && f.data[2] == 0x02) {
+                if (vin_sent) {
+                    continue;
+                }
+                vin_sent = true;
+                (void)put(bus.get(), vcan_bus::kReply,
+                          {0x10, 0x14, 0x49, 0x02, 0x01, uint8_t(vin[0]),
+                           uint8_t(vin[1]), uint8_t(vin[2])});
+                (void)put(bus.get(), CAN_ERR_FLAG | CAN_ERR_CRTL,
+                          {0, CAN_ERR_CRTL_RX_WARNING, 0, 0, 0, 0, 0, 0});
+                bool flowed = false;
+                const auto end = std::chrono::steady_clock::now() + 1s;
+                while (!flowed && std::chrono::steady_clock::now() < end) {
+                    flowed = vcan_bus::read_for(bus.get(), &f, sizeof f, 20) ==
+                                 static_cast<long>(sizeof f) &&
+                             f.can_id == vcan_bus::kRequest &&
+                             (f.data[0] & 0xF0) == 0x30;
+                }
+                if (!flowed) {
+                    continue;
+                }
+                std::this_thread::sleep_for(10ms);
+                std::vector<uint8_t> cf1 = {0x21}, cf2 = {0x22};
+                for (int k = 3; k < 10; ++k) {
+                    cf1.push_back(uint8_t(vin[k]));
+                }
+                for (int k = 10; k < 17; ++k) {
+                    cf2.push_back(uint8_t(vin[k]));
+                }
+                segmented = put(bus.get(), vcan_bus::kReply, cf1) &&
+                            put(bus.get(), vcan_bus::kReply, cf2);
+                continue;
+            }
+            unsigned char reply[ECUIO_PT_MSG_DATA_SIZE];
+            size_t n = 0;
+            if (fake_ecu::answer(f.data + 1, f.data[0], -1, reply, &n) &&
+                n <= 7) {
+                std::vector<uint8_t> sf = {uint8_t(n)};
+                sf.insert(sf.end(), reply, reply + n);
+                sf.resize(8, vcan_bus::kPad);
+                (void)put(bus.get(), vcan_bus::kReply, sf);
+            }
+        }
+    });
+    std::atomic<bool> held{false};
+    {
+        Session s("?profile=obd2&probe=0&diagnose=0", hold_on_error, &held);
+        EXPECT_EQ(s.status(), ECUIO_OK) << s.detail();
+        ecuio_channel_identity_t id{};
+        EXPECT_TRUE(wait_for(
+            [&] {
+                return ecuio_session_get_channel_identity(s.get(), 0, &id) ==
+                           ECUIO_OK &&
+                       id.items > 0 &&
+                       id.list[0].outcome != ECUIO_IDENTITY_UNASKED;
+            },
+            8000ms));
+        EXPECT_TRUE(held.load()) << "the worker was never held";
+        EXPECT_TRUE(segmented.load()) << "the Consecutive Frames never went";
+        EXPECT_EQ(id.list[0].outcome, ECUIO_IDENTITY_ANSWERED);
+        EXPECT_STREQ(id.list[0].text, fake_ecu::kVin);
+    }
+    stop = true;
+    ecu.join();
 }
 
 /* The whole diagnostics report (ADR-0037), the stored list's 8 bytes a
