@@ -683,3 +683,18 @@ if(WIN32)
         PROPERTIES TIMEOUT ${J2534_TEST_TIMEOUT_SECONDS}
     )
 endif()
+
+# Reply timing against the fakes' ECU through each transport this
+# platform has (ADR-0042 section 4), a measurement for docs/testing.md;
+# built with the tests, never run by ctest
+find_package(Threads REQUIRED)
+add_executable(bench_timing bench_timing.cpp)
+target_link_libraries(bench_timing PRIVATE ecuio-core Threads::Threads)
+app_enable_warnings(bench_timing)
+if(WIN32)
+    target_compile_definitions(bench_timing PRIVATE
+        FAKE_J2534_DLL_PATH="$<TARGET_FILE:fake_j2534>"
+    )
+    add_dependencies(bench_timing fake_j2534)
+    app_deploy_surrogate(bench_timing)
+endif()
