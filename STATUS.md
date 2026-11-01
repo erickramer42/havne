@@ -344,7 +344,7 @@ an issue is resolved it is removed, and its number is not reused.
 | v0.3.3 | ELM327 adapters, preferences and vehicles, Android with Bluetooth and background sessions and a signed APK, the rename to Havne | Released |
 | v0.3.4 | A command-line client over the C ABI; Linux as a supported desktop; a SocketCAN transport that listens | Released |
 | v0.3.5 | Full OBD-II diagnostics (Services 01-0A, clearing codes); SocketCAN requests through ISO-TP; fault injection on a replay; a performance benchmark with latency per PID | Released |
-| v0.3.6 | Proven and finished: the car runs the adapters on hand can make (packing through the VX, more than one ECU captured); Windows timer resolution; trouble-code descriptions, VIN decode and a readiness summary; the simulated ECU as `havne-cli sim`; a performance gate in CI; clang-tidy tightened | Planned |
+| v0.3.6 | Proven and finished: the car runs the adapters on hand can make (packing through the VX, more than one ECU captured); Windows timer resolution; trouble-code descriptions, VIN decode and a readiness summary; the simulated ECU as `havne-cli sim`; a performance gate in CI; clang-tidy tightened; an iPhone download once a device run works | Planned |
 | v0.3.7 | A log viewer: recordings opened offline, two runs overlaid on a common zero | Planned |
 | v0.3.8 | CSV import and export, scrubbed for sharing; a health report; the Log page's frame filter; Python bindings | Planned |
 | v0.3.9 | Conditions: triggered logging, alerts and markers; computed signals | Planned |
@@ -392,6 +392,14 @@ reach into car-verified claims and finishes the diagnostics.
 - **clang-tidy, tightened and widened:** `google-explicit-constructor`
   and braces around every statement, the decoder's C-style casts made
   `static_cast`, then the gate widened to `cli/` and `app/`.
+- **An iPhone download, once a device run works:** a tester's run of
+  CI's unsigned `.ipa` on an iPhone, filed as a session sheet, first;
+  then the release workflow builds and publishes
+  `havne-X.Y.Z-ios-arm64-unsigned.ipa` with the other downloads
+  (provenance, the SBOM and the checksums), the release checks read its
+  version and that it carries no signature, and the notes' Try it
+  points at [docs/ios.md](docs/ios.md). Without the device run, it
+  waits for a later release.
 - **Done when:** the VX's packing run and the capture of more than one
   ECU are filed; the timer change is measured on Windows either way;
   and `havne-cli stream socketcan://vcan0?profile=obd2` against
