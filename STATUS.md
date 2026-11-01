@@ -371,10 +371,13 @@ reach into car-verified claims and finishes the diagnostics.
   than one ECU answering needs (a functional `0x7DF` bitmap request,
   physical `0x7E1` to `0x7E7`), captured under `raw` as evidence for
   v0.4.0's design.
-- **Windows timer resolution:** the benchmark read a 4 ms reply as
-  16.4 ms on Windows, where RPM refreshed every 0.23 to 0.25 s against
-  0.148 s on Linux. If the workers' waits round up to the 15.6 ms
-  step, high-resolution waits give every Windows user more refreshes.
+- **Windows timer resolution:** the surrogate holds a 1 ms timer, so
+  through the fake as the VX a 4 ms reply reads 11.3 ms (one read
+  slice) instead of 16.4, and RPM refreshes every 0.164 s instead of
+  0.246; ELM327 never waited on the timer (ADR-0042's appendix of
+  2026-11-01). Left: the VX on the car confirms it, and asking the VX
+  for as many messages as replies are outstanding would end a read at
+  its reply (the bench first).
 - **Trouble-code descriptions** ("P0301: cylinder 1 misfire") with a
   one-word urgency, from a source chosen first; **VIN decode** (make,
   model and year from the WMI and the model-year digit, offline); and

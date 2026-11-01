@@ -240,22 +240,30 @@ otherwise near idle), packing on, 92 requests in the rotation:
 
 | Transport | Fake's delay | Latency P50 (lowest to highest request) / P99 / max, ms | PID 0C's interval P50 / P99 / P99.9, s (clock) | ISO-TP |
 |---|---|---|---|---|
-| J2534, the fake as the VX (Windows) | 4 ms | 16.3 to 16.4 / 18.4 / 25.6 | 0.246 / 0.262 / n/a, 763 intervals (adapter) | the adapter's |
-| ELM327, the fake (Windows) | 4 ms | 16.4 / 17.2 / 17.2 | 0.229 / 0.262 / n/a, 762 (host) | 5,764 messages, 1 dropped |
+| J2534, the fake as the VX (Windows, 2026-11-01, 60 s) | 4 ms | 11.3 / 12.6 / 12.6 | 0.164 / 0.180 / n/a, 366 intervals (adapter) | the adapter's |
+| ELM327, the fake (Windows, 2026-11-01, 60 s) | 4 ms | 4.6 to 5.1 / 6.1 / 6.6 | 0.164 / 0.180 / n/a, 374 (host) | 2,851 messages, 1 dropped |
 | ELM327, the fake (Linux, WSL) | 4 ms | 4.1 / 4.2 / 4.2 | 0.148 / 0.164 / 0.246, 1,178 (host) | 8,882 messages, 1 dropped |
 | SocketCAN, `vcan0` (Linux, WSL) | none | 0.1 to 0.2 / 0.4 / 4.7 | 0.148 / 0.164 / 0.164, 1,194 (kernel) | 9,000 messages, none dropped |
 
 - **On Linux the stack adds about 0.1 ms:** the ELM327 fake's 4 ms
   reads 4.1 at the median and 4.2 at p99, and SocketCAN through the
   kernel's ISO-TP answers in 0.1 to 0.2 ms.
-- **On Windows a 4 ms reply reads 16.4 ms, through either fake:** one
-  step of Windows' default timer (15.6 ms). The fakes' own 4 ms waits,
-  the worker's, or both are rounded up to it; this run doesn't separate
-  them. A car run through the VX (v0.3.6) shows what a real adapter's
-  replies read.
+- **On Windows, J2534 reads a 4 ms reply when the read's 10 ms slice
+  ends:** the VX holds a read for its timeout unless the batch fills,
+  and the surrogate holds a 1 ms timer, so the slice ends at 10 ms and
+  the reply reads 11.3. At Windows' default 15.6 ms step it read 16.4
+  ([ADR-0042](adr/0042-reply-timing.md)'s appendix of 2026-11-01). A
+  car run through the VX (v0.3.6) shows what a real adapter's replies
+  read.
+- **ELM327 on Windows adds nothing either:** the bench holds a 1 ms
+  timer for the fake, whose timed 4 ms wait still runs up to a
+  millisecond long (4.6 to 5.1); with the fake spinning to its reply
+  time instead, at the default step, ELM327 read 4.0 to 4.1 ms and PID
+  0C refreshed every 0.148 s, Linux's figures (2026-11-01).
 - **The refresh interval follows the latency:** the rotation is the
   same 92 requests, packed, so PID 0C refreshes every 0.148 s where a
-  reply takes 4 ms and every 0.23 to 0.25 s where it takes 16 ms. No
+  reply takes 4 ms, 0.164 s where it takes 5 to 11, and every 0.23 to
+  0.25 s where it took 16 ms (2026-10-31, at Windows' default step). No
   interval crossed a clock's fallback. P99.9 needs 1,000 intervals,
   which 180 s gives only on Linux.
 - **One message dropped and one timeout per ELM327 session,** in a
@@ -309,6 +317,7 @@ round trip each, negligible at the transport's read cap
 | Reply timing (ADR-0042), the histograms: one sample reads back at most an eighth above itself and never below, exactly below 16 microseconds, one past the top band its exact value; quantiles of a distribution within their buckets; a P99 needs 100 samples and a P99.9 1,000, below that 0 with its flag clear; an interval with a fallback of the frames' clock between its answers, or one running backwards, is left out and counted; a refusal has a latency and refreshes nothing | `RequestTimingTest.*` (mutation-checked 2026-10-31: no sample floor, fallbacks ignored) |
 | Reply timing in the engine against the fakes' ECU on the test car's bitmaps: each rotation request's answers and timeouts, its latency from its write to its reply, a timeout with none, its intervals between answers on the host's clock with no stamps given and on the driver's stamps when given (a fallback between two answers leaves that interval out); a pack's reply answers each PID whose record it carries, counted as packed | `RequestEngineTest.TimingRecordsEachRotationRequestsReplies`, `.TimingCountsAPacksAnswersForEachOfItsPids`, `.TimingTakesTheIntervalFromTheDriversStamps` (mutation-checked 2026-10-31: no timeouts, a pack crediting its first record alone, the stamps ignored) |
 | Reply timing through each transport: a row per request in the rotation, each answer at least the fake's delay after its request, the intervals on the adapter's clock (J2534, through the surrogate, the fake as the VX), the kernel's (SocketCAN on `vcan0`) or the host's (ELM327), ISO-TP's counts where core reassembles and none through J2534; published while the session runs, and the final rows, published as the worker stops, read after close; a session with no rotation has no rows, and the getter's NULLs are refused | `J2534HealthTest.VxTimingReportsEachRequestOnTheAdaptersClock` (cross-arch too), `Elm327SessionTest.TimingReportsEachRequestOnTheHostsClock` (mutation-checked 2026-10-31: no final publish), `SocketCanRequestTest.TimingReportsEachRequestOnTheKernelsClock`, `CoreTest.ASessionWithNoRotationHasNoTimingRows`, `c_abi` |
+| The surrogate holds a 1 ms timer: through the fake as the VX (a reply 4 ms after its write, each read held for one 10 ms slice), every request's median latency is under 14 ms, where Windows' default 15.6 ms step put it at 15.4 to 16.4 ([ADR-0042](adr/0042-reply-timing.md)'s appendix of 2026-11-01) | `J2534HealthTest.VxRepliesAreSeenWhenTheSliceEndsNotTheTimersStep` (mutation-checked 2026-11-01: no `timeBeginPeriod` failed every request) |
 | `latency.csv` and the CLI's `timing` lines (ADR-0042 section 3): one column list for both (`ECUIO_TIMING_COLUMNS`), a quantile with too few samples empty or `null`, a snapshot every 10 s of session time carrying the rows that changed; a recording of a requesting session through the fake DLL holds the header, then snapshots under their `t_s`, each request's answers never falling from one row to its next, the intervals on the adapter's clock; the activity log's "Reply timing:" line names the requests, their outcomes, the spread of their median latencies, the clock and ISO-TP's counts | `CliTimingTest.*`, `BridgeTest.ARecordingKeepsReplyTimingsSnapshots` (Windows), `.TimingTextNamesTheRequestsAndTheClock`; `havne-cli stream` against the fake DLL for 12 s wrote one snapshot at 10 s and one at the end (manual, 2026-10-31) |
 | The recording holds every value core decodes: over the vehicle fixture under `obd2`, the bridge's `signals.csv` equals, row for row, the batches core delivers to a session of its own | `BridgeTest.RecordingHoldsEveryValueCoreDecodes` |
 | The bridge stages values from the worker (ADR-0024): a frame dropped at the in-flight cap keeps its values, so with the event loop held while 5,000 frames flood in, thousands drop, yet the recording holds every row's value in order and the row shows the last; past a window's sample limit the recording misses values, the activity log says so once and gives the count at disconnect, and the row still shows the newest; a disconnect drains the window it ends | `BridgeTest.ValuesSurviveFramesDroppedAtTheCap`, `.ValuesPastTheWindowsLimitAreCountedAndLogged`, `.ValuesStagedAtDisconnectAreRecorded`. Each fails against a mutant: values never staged, the newest lost past the limit, samples never recorded, no drain at disconnect, the limit never counted, the warning never logged, a staging never reset. The first also fails when the dropped-frame count is zeroed after the worker starts |

@@ -20,6 +20,7 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
 
 ### Fixed
 
+- Through a J2534 adapter on Windows, values refresh about a third more often: a reply was seen up to 15.6 ms after it arrived, Windows' default timer step, and is now seen within the 10 ms the read waits (measured against the test adapter's stand-in, not yet on a car).
 - On a phone, Live and the Log's frame table ran off the right edge of the screen; they now fit its width, and the frame table wraps a long payload under its row.
 - On a phone, the confirmation for clearing codes could run past the bottom of the screen with no way to reach Clear or Cancel; it now scrolls with the page.
 
