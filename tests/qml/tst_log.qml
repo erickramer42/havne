@@ -7,7 +7,8 @@
 //          back to the activity log. Settings'
 //          developer box sets Theme.developerMode and the mock:// preset
 //          follows it. Copy puts the whole log on the clipboard and
-//          leaves nothing selected. How the page looks is manual smoke.
+//          leaves nothing selected. The Frames view lies inside 320 px.
+//          How the page looks is manual smoke.
 
 import QtQuick
 import QtTest
@@ -92,6 +93,40 @@ TestCase {
         verify(activity.visible, "back to the activity log")
         verify(!frames.visible)
         verify(!toFrames.visible)
+    }
+
+    // The items painted past the page's right edge (a Text by its
+    // painted width): the page scrolls in neither direction, so on a
+    // phone they can't be seen
+    function pastTheEdge(item, page, out) {
+        for (let i = 0; i < item.children.length; ++i) {
+            const child = item.children[i]
+            if (!child.visible || child.width <= 0)
+                continue
+            const painted = child.elide !== undefined && !child.clip
+                            ? Math.max(child.width, child.contentWidth) : child.width
+            const right = child.mapToItem(page, painted, 0).x
+            if (right > page.width + 0.5)
+                out.push((child.objectName || child.text || String(child))
+                         + " at " + Math.round(right))
+            pastTheEdge(child, page, out)
+        }
+        return out
+    }
+
+    // The narrowest phone, 320 px: the Frames view's header, status
+    // line and table, a row's payload among them, lie inside the page
+    function test_theFramesFitAPhonesWidth() {
+        Theme.developerMode = true
+        const page = createTemporaryObject(logComponent, testCase.parent,
+                                           { width: 320, height: 700 })
+        find(page, "view_frames").clicked()
+        const list = find(page, "frameList")
+        compare(Bridge.connectSession("mock://demo"), "")
+        tryVerify(() => list.count > 0 && list.itemAtIndex(0) !== null, 2000, "a row shows")
+        waitForRendering(page)
+        const out = pastTheEdge(page, page, [])
+        compare(out.length, 0, "past 320 px: " + out.join(", "))
     }
 
     // The switch stays where it is when the view changes, though the
