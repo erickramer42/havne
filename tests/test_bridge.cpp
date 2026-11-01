@@ -4056,6 +4056,45 @@ TEST(BridgeTest, AClearGoesToCompletedReportsNotClearing)
     EXPECT_TRUE(bridge.clearTargets().isEmpty()) << "no session, no report";
 }
 
+/* A clear with nothing to erase still goes out (a reset after a repair
+ * is a use), and the confirmation says so: only what the ECU answered
+ * counts as empty */
+TEST(BridgeTest, NothingStoredIsWhatTheEcuAnsweredEmpty)
+{
+    ecuio_channel_diagnostics_t r{};
+    r.flags = ECUIO_DIAG_COMPLETE | ECUIO_DIAG_READINESS;
+    r.lists[ECUIO_DIAG_STORED].outcome = ECUIO_DIAG_ANSWERED;
+    r.lists[ECUIO_DIAG_PENDING].outcome = ECUIO_DIAG_ANSWERED;
+    r.lists[ECUIO_DIAG_PERMANENT].outcome = ECUIO_DIAG_ANSWERED;
+    r.lists[ECUIO_DIAG_PERMANENT].reported = 1;
+    r.lists[ECUIO_DIAG_PERMANENT].held = 1;
+    EXPECT_TRUE(SessionBridge::nothingStored(r))
+        << "a permanent code isn't a clear's to erase";
+
+    const auto with = [&r](auto change) {
+        ecuio_channel_diagnostics_t c = r;
+        change(c);
+        return SessionBridge::nothingStored(c);
+    };
+    EXPECT_FALSE(with([](auto& c) { c.flags |= ECUIO_DIAG_MIL_ON; }));
+    EXPECT_FALSE(with([](auto& c) { c.dtc_count = 1; }));
+    EXPECT_FALSE(with([](auto& c) { c.flags |= ECUIO_DIAG_FREEZE_FRAME; }));
+    EXPECT_FALSE(
+        with([](auto& c) { c.lists[ECUIO_DIAG_STORED].reported = 2; }));
+    EXPECT_FALSE(with([](auto& c) { c.lists[ECUIO_DIAG_PENDING].held = 1; }));
+    EXPECT_FALSE(with([](auto& c) { c.flags &= ~ECUIO_DIAG_READINESS; }))
+        << "PID 01 unanswered: the light unknown";
+    EXPECT_FALSE(with([](auto& c) {
+        c.lists[ECUIO_DIAG_STORED].outcome = ECUIO_DIAG_REFUSED;
+    })) << "a refused list isn't known to be empty";
+    EXPECT_FALSE(with([](auto& c) {
+        c.lists[ECUIO_DIAG_PENDING].outcome = ECUIO_DIAG_UNANSWERED;
+    }));
+
+    SessionBridge bridge;
+    EXPECT_FALSE(bridge.clearFindsNothing()) << "no report: nothing known";
+}
+
 TEST(BridgeTest, AClearSavesTheReportFirst)
 {
     QTemporaryDir root;

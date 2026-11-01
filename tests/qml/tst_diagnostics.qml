@@ -168,6 +168,7 @@ TestCase {
                             "asks once more before clearing a moving vehicle",
                             "saved to the recordings folder first"])
             verify(words.indexOf(part) >= 0, "the confirmation says: " + part)
+        verify(words.indexOf("No codes are stored") < 0, "the mock has codes")
         find(page, "clearCancel").clicked()
         verify(!panel.visible)
         verify(clear.enabled)
@@ -203,6 +204,16 @@ TestCase {
         verify(status.indexOf("The report was saved before the clear: ") === 0, status)
         verify(status.endsWith(".jsonl"), status)
         tryVerify(() => clear.enabled, 2000, "a clear can run again")
+
+        // Nothing left to erase: a clear can still go out, and says what
+        // it would do
+        tryVerify(() => Bridge.clearFindsNothing, 2000)
+        clear.clicked()
+        const words = find(page, "clearConfirmText").text
+        verify(words.indexOf("No codes are stored and the check-engine light is off: a clear now only sets the readiness monitors back to incomplete") === 0,
+               words)
+        verify(find(page, "clearConfirm").enabled, "and can still be sent")
+        find(page, "clearCancel").clicked()
     }
 
     // The fake J2534 DLL's engine turns (2000 rpm) and refuses to clear

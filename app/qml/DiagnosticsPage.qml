@@ -310,7 +310,12 @@ Page {
                             Layout.fillWidth: true
                             wrapMode: Text.Wrap
                             color: Theme.text
-                            text: qsTr("Each ECU that obeys erases its stored and pending codes and its freeze frame, turns the check-engine light off, and sets its readiness monitors back to incomplete. Permanent codes stay: only the ECU clears them, once its monitor passes. Until the monitors complete again, which takes some driving, the car can fail an emissions inspection.") +
+                            // J1979: "Other manufacturer specific
+                            // clearing/resetting actions may also occur"
+                            text: (Bridge.clearFindsNothing
+                                   ? qsTr("No codes are stored and the check-engine light is off: a clear now only sets the readiness monitors back to incomplete and resets any values the manufacturer chose.") + "\n\n"
+                                   : "") +
+                                  qsTr("Each ECU that obeys erases its stored and pending codes and its freeze frame, turns the check-engine light off, and sets its readiness monitors back to incomplete. Permanent codes stay: only the ECU clears them, once its monitor passes. Until the monitors complete again, which takes some driving, the car can fail an emissions inspection.") +
                                   "\n\n" +
                                   qsTr("A clear works best with the engine off and the ignition on; some ECUs refuse it while the engine runs. Havne asks each ECU its engine and vehicle speeds first, and asks once more before clearing a moving vehicle. The report is saved to the recordings folder first; if it can't be saved, nothing is sent.")
                         }
