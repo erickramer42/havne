@@ -116,6 +116,8 @@ protected:
 // refuses them and keeps the dark title bar the color scheme gives it
 static void colorTitleBar(QWindow *window)
 {
+    // WId is the window's HWND held as an integer: the cast is Qt's own
+    // NOLINTNEXTLINE(performance-no-int-to-ptr)
     const auto hwnd = reinterpret_cast<HWND>(window->winId());
     const COLORREF caption = RGB(0x1e, 0x1e, 0x2e); // Theme.surface
     const COLORREF text = RGB(0xe8, 0xe8, 0xf0);    // Theme.text
@@ -195,8 +197,10 @@ int main(int argc, char *argv[])
         window->installEventFilter(new NoDrawWhileInactive(window));
 #endif
 #ifdef Q_OS_WIN
-    if (auto *window = qobject_cast<QWindow *>(engine.rootObjects().constFirst()))
+    if (auto *window =
+            qobject_cast<QWindow *>(engine.rootObjects().constFirst())) {
         colorTitleBar(window);
+    }
 #endif
 
     return app.exec();

@@ -629,13 +629,14 @@ format only the lines you change: `git clang-format` after staging.
 
 **clang-tidy:** `.clang-tidy` runs the static analyzer and the
 bug-finding families (bugprone, concurrency, performance, portability,
-a few misc checks) over `core/`, `surrogate/` and `cli/`, and CI's
-`clang-tidy` job fails on any warning. The style families stay off
+a few misc checks) over `core/`, `surrogate/`, `cli/` and `app/`, and
+CI's `clang-tidy` job fails on any warning. The style families stay off
 but for three checks: `google-explicit-constructor`, braces around a
 body on the line after its `if`, `else`, `for` or `while`, and
 `google-readability-casting` (no C-style casts in C++; the headers that
 compile as C keep theirs behind a `NOLINTBEGIN`). The file says why each
-is on and why each excluded check is excluded. To run it
+is on and why each excluded check is excluded; `app/.clang-tidy` lets the
+app's headers keep `#pragma once`. To run it
 locally, install the pinned version once into `build-tidy-venv/` (it
 sits with the build trees, so git ignores it), then run
 `scripts/tidy.sh` from any shell:
@@ -644,12 +645,17 @@ sits with the build trees, so git ignores it), then run
 python -m venv build-tidy-venv
 build-tidy-venv/Scripts/pip install --require-hashes -r .github/clang-tidy-requirements.txt
 scripts/tidy.sh                  # one line; each file's output in Testing/tidy/
+scripts/tidy.sh --qt C:/Qt/6.12.0/msvc2022_64   # app/ too, in build-tidy-qt
 ```
 
 On Windows outside a Developer prompt, the script enters one (vswhere's
 newest VC tools), so clang-tidy and the tree see one MSVC's headers, and
 it configures `build-tidy` (Ninja: the Visual Studio generator writes no
-compile database) when the tree is missing. Nothing needs building.
+compile database) when the tree is missing. Nothing needs building:
+with `--qt`, the tree is the whole project against that kit, and the
+script generates only the app's moc output before clang-tidy reads it.
+The app's Android-only sources aren't in a desktop tree, so they aren't
+checked.
 Another clang-tidy version finds other things, so the script refuses one
 that isn't the pin (an LLVM on PATH, say) unless `CLANG_TIDY_ANY=1`, for
 trying a new pin; `$CLANG_TIDY` names another binary. A warning that is wrong at one line
@@ -687,7 +693,7 @@ its usual duration:
 | `core-and-tests` | Ubuntu, GCC, no Qt | Builds core and the Qt-free tests, then runs ctest. This enforces "core never links Qt." Gates every other job. |
 | `core-sanitizers` | Ubuntu, GCC, no Qt | The same build and tests in Debug under AddressSanitizer and UndefinedBehaviorSanitizer. LeakSanitizer runs too, so a test that closes a session without destroying it fails here. It brings up `vcan0` as `linux-build` does and requires the vcan suites (`ECUIO_VCAN_REQUIRED`), so the SocketCAN worker runs under the sanitizers, the interface's down-and-up case as root. Blocking since its first green run (2026-10-20). |
 | `fuzz` | Ubuntu, Clang, no Qt | Installs the image's clang with its `libclang-rt` runtimes, checks that `-fsanitize=fuzzer` links, builds `fuzz/` (`-DECUIO_BUILD_FUZZERS=ON`, RelWithDebInfo), runs each harness for 60 s, and uploads any crashing input ([fuzz/README.md](../fuzz/README.md)) |
-| `clang-tidy` | Windows, MSVC's headers | Installs the hash-pinned clang-tidy wheel, configures a core-only Ninja tree in a Developer shell, and runs `scripts/tidy.sh` over core, the J2534 layer, the surrogate and `havne-cli`. Any warning fails it. Nothing is built. |
+| `clang-tidy` | Windows, MSVC's headers | Installs the hash-pinned clang-tidy wheel, installs Qt as `win-build` does, and in a Developer shell runs `scripts/tidy.sh --qt` (a Ninja tree with Qt) over core, the J2534 layer, the surrogate, `havne-cli` and the desktop app. Any warning fails it. Only the app's moc output is built. |
 | `win-build` | Windows, MSVC 2022 | Builds the full app, then runs ctest (the bridge, J2534 and QML suites included), then the load test (`bench_bridge --load`): its table goes to the run's summary, and the step fails on a broken invariant, a bound far below the dev machine's figures, or one of two ratios that compare the run with itself (decode at 1,000 defs against 9, looping with decoding against without) ([testing.md](testing.md#load-test-the-replay-fixture-through-the-bridge)) |
 | `macos-build` | macOS (arm64), AppleClang | Builds the full app, then runs ctest. The QML suites' link-state cases skip without the fake. |
 | `linux-build` | Ubuntu, GCC | Builds the full app, brings up `vcan0` (the `vcan` and `can-isotp` modules load as installed on the hosted runners), then runs ctest with `ECUIO_VCAN_REQUIRED=1`, so the simulated-bus suite fails rather than skips without the bus, then the load test as on Windows. Installs QtGui's EGL and OpenGL runtime libraries, which `test_qml` loads. |

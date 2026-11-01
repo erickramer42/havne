@@ -548,7 +548,7 @@ public:
     static QString replayUriFor(const QString& folder,
                                 const QString& recordedUri);
     int linkErrorCode() const { return m_linkErrorCode; }
-    int errorEpisodes() const { return m_errorEpisodes; }
+    int errorEpisodes() const { return static_cast<int>(m_errorEpisodes); }
     bool logPaused() const { return m_logPaused; }
     void setLogPaused(bool paused);
     bool recording() const { return m_recording; }

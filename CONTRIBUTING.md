@@ -218,8 +218,8 @@ with the guide for the language they touch.
   conversions).
 
 Beyond formatting: every first-party target builds with `/W4` or
-`-Wall -Wextra` at zero warnings on MSVC; `core/`, `surrogate/` and `cli/` pass
-clang-tidy with the checks in [.clang-tidy](.clang-tidy) (`scripts/tidy.sh`,
+`-Wall -Wextra` at zero warnings on MSVC; `core/`, `surrogate/`, `cli/` and
+`app/` pass clang-tidy with the checks in [.clang-tidy](.clang-tidy) (`scripts/tidy.sh`,
 and CI fails on any warning; [docs/development.md](docs/development.md)
 says how to run it). Comments and committed docs describe the present and
 explain why: no change history ("used to", "now"), which belongs in the
