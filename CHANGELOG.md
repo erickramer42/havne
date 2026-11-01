@@ -12,6 +12,8 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
 
 ### Added
 
+- The Diagnostics page shows each readiness monitor for this drive cycle beside its state since the last clear: done, not yet, or disabled for the rest of the drive. `havne-cli`'s `diagnostics` line carries the same, with PID 41's own outcome.
+- A channel's diagnostics report in core's C API holds this drive cycle's monitors (Service 01 PID 41: `ECUIO_MONITOR_CYCLE_ENABLED`, `ECUIO_MONITOR_CYCLE_COMPLETE`, `ECUIO_DIAG_CYCLE`, the `cycle` outcome), and a new outcome, `ECUIO_DIAG_UNSUPPORTED`, for an item whose PID the ECU says it lacks, which is then not asked.
 - `ecuio_session_clear_diagnostics_with` in core's C API: a clear with the caller's word on a running engine and on a moving vehicle. A channel's diagnostics report records the engine and vehicle speeds a clear read (`clear_kmh`, `ECUIO_DIAG_CLEAR_RPM`, `ECUIO_DIAG_CLEAR_KMH`) and two outcomes, moving and no vehicle speed.
 
 ### Changed

@@ -107,7 +107,8 @@ hardware ([roadmap](#roadmap)).
   - **Trouble codes, readiness and the freeze frame** at connect
     ([ADR-0037](docs/adr/0037-reading-trouble-codes.md)): each ECU's
     check-engine light, stored, pending and permanent codes, readiness
-    monitors and freeze frame, read once between the live requests and
+    monitors (since the last clear and for this drive cycle) and freeze
+    frame, read once between the live requests and
     again on request, on the Diagnostics page, in the activity log and
     in `havne-cli`'s output; the simulated car has codes of its own.
     Verified against the fakes' ECU through J2534 (both surrogates) and
@@ -232,7 +233,7 @@ hardware ([roadmap](#roadmap)).
   ELM327 [bench](docs/bench-sessions/elm327-bench-runsheet.md) and
   [vehicle](docs/bench-sessions/elm327-vehicle-runsheet.md) sheets, and
   the [phone's](docs/bench-sessions/android-phone-runsheet.md).
-- **Tests:** 755 ctest cases on Windows (both trees rebuilt,
+- **Tests:** 759 ctest cases on Windows (both trees rebuilt,
   2026-11-01), all passing but two env-gated skips (the cross-arch
   case, and the real-car recordings' diff, run locally), plus the
   cross-arch subset (86/86); 0 MSVC warnings. CI runs ctest on Windows,
@@ -381,9 +382,9 @@ reach into car-verified claims and finishes the diagnostics.
 - **Trouble-code descriptions** ("P0301: cylinder 1 misfire") with a
   one-word urgency, from a source chosen first; **VIN decode** (make,
   model and year from the WMI and the model-year digit, offline); and
-  a **readiness summary**: PID 41's monitors for this drive cycle
-  beside PID 01's since the last clear, and a line saying whether the
-  car would pass an inspection.
+  a **readiness summary**: a line saying whether the car would pass an
+  inspection, from the monitors (PID 41's for this drive cycle are
+  shown beside PID 01's) and the model year VIN decode gives.
 - **The simulator as a product:** `havne-cli sim <uri> --on vcan0`,
   the fakes' ECU and the recording that answers as one promoted from
   test code into the CLI, answering through core's ISO-TP, with

@@ -76,6 +76,17 @@ taking turns with the rotation like it, so live values keep their pace.
 - `?diagnose=0` turns it off for a session, as `?identify=0` does
   identification; `?poll=` and a passive session ask nothing.
 
+> **Amended 2026-11-01:** `01 41`, the monitors for this drive cycle,
+> follows `01 01` in the list. Its reply has PID 01's layout with A
+> always 0 (SAE J1979; Wikipedia's "OBD-II PIDs", Service 01 PID 41):
+> an availability bit means enabled this cycle, a completeness bit 0
+> complete this cycle. It marks the monitors PID 01 listed
+> (`ECUIO_MONITOR_CYCLE_ENABLED`, `_CYCLE_COMPLETE`, `ECUIO_DIAG_CYCLE`,
+> its outcome in `cycle`, the reserved byte at 23) and adds none. An
+> ECU whose support bitmaps leave a Service 01 item's PID out isn't
+> asked it: the item settles `ECUIO_DIAG_UNSUPPORTED` (4), unsent, so a
+> car without PID 41 costs no timeout.
+
 ### 3. The report is raw codes; the words are core's
 
 `ecuio_channel_diagnostics_t` (`core.h`, fixed size, pinned by static
