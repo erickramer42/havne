@@ -811,6 +811,11 @@ long __stdcall PassThruWriteMsgs(unsigned long ChannelID,
         fake_ecu::diagnostics().engine_off =
             fake_j2534::read_knob("ECUIO_FAKE_ENGINE_OFF", nb, sizeof(nb)) &&
             strtol(nb, nullptr, 0) != 0;
+        /* PID 0D at this speed: the vehicle moving */
+        fake_ecu::diagnostics().speed_kmh =
+            fake_j2534::read_knob("ECUIO_FAKE_SPEED_KMH", nb, sizeof(nb))
+                ? static_cast<int>(strtol(nb, nullptr, 0))
+                : -1;
         /* A packed Service 01 request answered for its first PID alone */
         fake_ecu::pack_first_only() =
             fake_j2534::read_knob("ECUIO_FAKE_PACK_FIRST_ONLY", nb,
