@@ -6,8 +6,10 @@
 //          one terminated detail that never holds the path, a success
 //          counts the rows, two creates agree. An input starting with 'F'
 //          carries a ?faults= query on its first line (ADR-0041): a
-//          refusal of it is BAD_URI, and a fault set that parses draws
-//          within its bounds for frames of every length
+//          refusal of it is BAD_URI, or UNKNOWN_PROFILE for a profile key
+//          the text adds after an '&', each with a one-line detail; and a
+//          fault set that parses draws within its bounds for frames of
+//          every length
 
 #include <ecuio/core.h>
 
@@ -156,11 +158,15 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size)
         a.span_ms != b.span_ms) {
         abort();
     }
+    /* The faults' text reaches the query as is, so an '&' in it adds
+     * keys of its own: a profile it names may not exist */
+    const bool query_refused =
+        a.rc == ECUIO_ERR_BAD_URI || a.rc == ECUIO_ERR_UNKNOWN_PROFILE;
     if (a.rc != ECUIO_OK && a.rc != ECUIO_ERR_LOAD_FAILED &&
-        !(faulted && a.rc == ECUIO_ERR_BAD_URI)) {
+        !(faulted && query_refused)) {
         abort();
     }
-    if (a.rc == ECUIO_ERR_BAD_URI) {
+    if (query_refused) {
         if (a.detail.empty() || a.detail.find('\n') != std::string::npos) {
             abort();
         }
