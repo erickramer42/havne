@@ -21,9 +21,10 @@
 
 namespace fake_diagnostics {
 
-/* The items the fake's report takes: readiness, the three lists, the
- * freeze frame's bitmap and code, and its four values (04 05 0C 0D) */
-constexpr uint32_t kItems = 10;
+/* The items the fake's report takes: readiness, this drive cycle's
+ * (PID 41), the three lists, the freeze frame's bitmap and code, and its
+ * four values (04 05 0C 0D) */
+constexpr uint32_t kItems = 11;
 
 /* The obd2 set's def reading Service 01 PID pid */
 inline uint32_t obd2_def_id(uint8_t pid)
@@ -54,16 +55,25 @@ inline double freeze_value(const ecuio_channel_diagnostics_t& d, uint32_t id)
 constexpr uint32_t kClearReadings = ECUIO_DIAG_CLEAR_RPM | ECUIO_DIAG_CLEAR_KMH;
 
 /* The fake's whole report before a clear: the MIL on, three stored
- * codes, three pending, one permanent, every monitor complete, and a
- * freeze frame stored by P0301 at 3000 rpm */
+ * codes, three pending, one permanent, every monitor complete, enabled
+ * and complete this drive cycle too, and a freeze frame stored by P0301
+ * at 3000 rpm */
 inline void expect_report(const ecuio_channel_diagnostics_t& d)
 {
     EXPECT_EQ(d.flags & ~kClearReadings,
               ECUIO_DIAG_ASKED | ECUIO_DIAG_COMPLETE | ECUIO_DIAG_READINESS |
-                  ECUIO_DIAG_MIL_ON | ECUIO_DIAG_FREEZE_FRAME);
+                  ECUIO_DIAG_CYCLE | ECUIO_DIAG_MIL_ON |
+                  ECUIO_DIAG_FREEZE_FRAME);
     EXPECT_EQ(d.readiness, ECUIO_DIAG_ANSWERED);
+    EXPECT_EQ(d.cycle, ECUIO_DIAG_ANSWERED);
     EXPECT_EQ(d.dtc_count, 3u);
-    EXPECT_EQ(d.monitor_count, 8u);
+    ASSERT_EQ(d.monitor_count, 8u);
+    for (uint32_t i = 0; i < d.monitor_count; ++i) {
+        EXPECT_EQ(d.monitors[i].flags, ECUIO_MONITOR_COMPLETE |
+                                           ECUIO_MONITOR_CYCLE_ENABLED |
+                                           ECUIO_MONITOR_CYCLE_COMPLETE)
+            << "monitor " << int{d.monitors[i].id};
+    }
     const std::vector<std::vector<uint16_t>> kLists = {
         {0x0301, 0x0420, 0xC100}, {0x0171, 0x4035, 0x9001}, {0x0420}};
     for (uint32_t l = 0; l < ECUIO_DIAG_LISTS; ++l) {
@@ -86,17 +96,22 @@ inline void expect_report(const ecuio_channel_diagnostics_t& d)
 
 /* The fake's report read again after its clear (ADR-0038): the MIL off,
  * no stored or pending codes, P0420 still permanent, no freeze frame,
- * and byte C's monitors incomplete again, byte B's complete */
+ * and byte C's monitors incomplete again, byte B's complete, since the
+ * clear and this drive cycle alike, every one enabled */
 inline void expect_cleared_report(const ecuio_channel_diagnostics_t& d)
 {
     EXPECT_EQ(d.flags & ~kClearReadings,
-              ECUIO_DIAG_ASKED | ECUIO_DIAG_COMPLETE | ECUIO_DIAG_READINESS);
+              ECUIO_DIAG_ASKED | ECUIO_DIAG_COMPLETE | ECUIO_DIAG_READINESS |
+                  ECUIO_DIAG_CYCLE);
     EXPECT_EQ(d.clear, ECUIO_CLEAR_CLEARED);
     EXPECT_EQ(d.dtc_count, 0u);
     ASSERT_EQ(d.monitor_count, 8u);
     for (uint32_t i = 0; i < d.monitor_count; ++i) {
-        EXPECT_EQ((d.monitors[i].flags & ECUIO_MONITOR_COMPLETE) != 0,
-                  d.monitors[i].id < 8)
+        const uint8_t done =
+            d.monitors[i].id < 8
+                ? ECUIO_MONITOR_COMPLETE | ECUIO_MONITOR_CYCLE_COMPLETE
+                : 0u;
+        EXPECT_EQ(d.monitors[i].flags, ECUIO_MONITOR_CYCLE_ENABLED | done)
             << "monitor " << int{d.monitors[i].id};
     }
     for (uint32_t l : {ECUIO_DIAG_STORED, ECUIO_DIAG_PENDING}) {

@@ -2064,17 +2064,19 @@ TEST_F(J2534AdoptionTest, DiagnosticsReadTheFakeEcusReport)
     fake_diagnostics::expect_report(d);
 
     /* The rotation's first request, then readiness, then the rotation
-     * and each code list, a service byte alone */
+     * and this drive cycle's (PID 41), then each code list, a service
+     * byte alone, the rotation between each */
     expect_write(0, 0x01, 0x04);
     expect_write(1, 0x01, 0x01);
     expect_write(2, 0x01, 0x0C);
+    expect_write(3, 0x01, 0x41);
     const uint8_t lists[] = {0x03, 0x07, 0x0A};
     for (unsigned long k = 0; k < 3; ++k) {
         unsigned char wbuf[64] = {};
         unsigned long wlen = 0, wflags = 0;
-        get_recorded_write(3 + 2 * k, wbuf, &wlen, &wflags);
-        EXPECT_EQ(wlen, 5u) << "write " << 3 + 2 * k;
-        EXPECT_EQ(wbuf[4], lists[k]) << "write " << 3 + 2 * k;
+        get_recorded_write(5 + 2 * k, wbuf, &wlen, &wflags);
+        EXPECT_EQ(wlen, 5u) << "write " << 5 + 2 * k;
+        EXPECT_EQ(wbuf[4], lists[k]) << "write " << 5 + 2 * k;
     }
     EXPECT_EQ(ecuio_session_close(session), ECUIO_OK);
     ecuio_session_destroy(session);

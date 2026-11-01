@@ -606,7 +606,11 @@ public:
     // "unanswered") and readinessNrc ("7F 01 12" when refused); mil,
     // dtcCount, compression; lists, three of {key ("stored", "pending",
     // "permanent"), outcome, nrc, codes (["P0301", ...]), more (codes past
-    // the held ones)}; monitors, [{id, name, complete}]; freeze, {outcome,
+    // the held ones)}; cycle, PID 41's outcome (those above, or
+    // "unsupported": the ECU's bitmaps leave it out, so it wasn't asked);
+    // monitors, [{id, name, complete, cycleEnabled, cycleComplete}], the
+    // last two this drive cycle's (PID 41) once cycle is "answered";
+    // freeze, {outcome,
     // nrc, stored, code, values: [{name, value, unit, decimals}]}, each
     // value through the obd2 def that decoded it and the unit system;
     // clearing, and the last clear's clear ("none", "cleared", "refused",

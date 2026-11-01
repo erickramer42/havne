@@ -2632,6 +2632,8 @@ SessionBridge::diagnosticsEntry(const ecuio_channel_diagnostics_t& s,
             return QStringLiteral("refused");
         case ECUIO_DIAG_UNANSWERED:
             return QStringLiteral("unanswered");
+        case ECUIO_DIAG_UNSUPPORTED:
+            return QStringLiteral("unsupported");
         default:
             return QStringLiteral("unasked");
         }
@@ -2657,6 +2659,7 @@ SessionBridge::diagnosticsEntry(const ecuio_channel_diagnostics_t& s,
     m[QStringLiteral("mil")] = (s.flags & ECUIO_DIAG_MIL_ON) != 0;
     m[QStringLiteral("dtcCount")] = static_cast<int>(s.dtc_count);
     m[QStringLiteral("compression")] = (s.flags & ECUIO_DIAG_COMPRESSION) != 0;
+    m[QStringLiteral("cycle")] = outcome(s.cycle);
 
     static const char* const kKeys[ECUIO_DIAG_LISTS] = {"stored", "pending",
                                                         "permanent"};
@@ -2690,6 +2693,10 @@ SessionBridge::diagnosticsEntry(const ecuio_channel_diagnostics_t& s,
             QString::fromLatin1(ecuio_monitor_name(s.monitors[i].id, s.flags));
         e[QStringLiteral("complete")] =
             (s.monitors[i].flags & ECUIO_MONITOR_COMPLETE) != 0;
+        e[QStringLiteral("cycleEnabled")] =
+            (s.monitors[i].flags & ECUIO_MONITOR_CYCLE_ENABLED) != 0;
+        e[QStringLiteral("cycleComplete")] =
+            (s.monitors[i].flags & ECUIO_MONITOR_CYCLE_COMPLETE) != 0;
         monitors << e;
     }
     m[QStringLiteral("monitors")] = monitors;

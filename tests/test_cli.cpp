@@ -164,6 +164,7 @@ TEST(CliDiagnosticsTest, RefusalsCarryTheirReplyAndSilenceSaysSo)
     EXPECT_EQ(std::string(l.data(), l.size()),
               "{\"type\":\"diagnostics\",\"rx\":\"0x7E9\",\"generation\":6,"
               "\"readiness\":{\"outcome\":\"refused\",\"reply\":\"7F 01 12\"},"
+              "\"cycle\":{\"outcome\":\"unasked\"},"
               "\"stored\":{\"outcome\":\"unanswered\"},"
               "\"pending\":{\"outcome\":\"unasked\"},"
               "\"permanent\":{\"outcome\":\"refused\",\"reply\":\"7F 0A 11\"},"
@@ -184,6 +185,7 @@ TEST(CliDiagnosticsTest, AnswersNameTheirCodesAndMonitors)
     d.dtc_count = 0;
     d.monitor_count = 1;
     d.monitors[0].id = 8;
+    d.cycle = ECUIO_DIAG_UNSUPPORTED;
     for (ecuio_dtc_list_t& list : d.lists) {
         list.outcome = ECUIO_DIAG_ANSWERED;
     }
@@ -201,11 +203,42 @@ TEST(CliDiagnosticsTest, AnswersNameTheirCodesAndMonitors)
         "\"readiness\":{\"outcome\":\"answered\",\"mil\":false,"
         "\"dtc_count\":0,\"compression\":true,"
         "\"monitors\":[{\"name\":\"NMHC catalyst\",\"complete\":false}]},"
+        "\"cycle\":{\"outcome\":\"unsupported\"},"
         "\"stored\":{\"outcome\":\"answered\",\"reported\":0,\"codes\":[]},"
         "\"pending\":{\"outcome\":\"answered\",\"reported\":40,"
         "\"codes\":[\"P2002\",\"U0100\"]},"
         "\"permanent\":{\"outcome\":\"answered\",\"reported\":0,\"codes\":[]},"
         "\"freeze\":{\"outcome\":\"answered\",\"code\":null,\"values\":[]}}");
+}
+
+/* PID 41 answered: each monitor says whether this drive cycle enabled
+ * it and whether it completed, beside PID 01's state since the clear */
+TEST(CliDiagnosticsTest, MonitorsCarryThisDriveCycle)
+{
+    ecuio_channel_diagnostics_t d{};
+    d.flags = ECUIO_DIAG_ASKED | ECUIO_DIAG_COMPLETE | ECUIO_DIAG_READINESS |
+              ECUIO_DIAG_CYCLE;
+    d.rx_id = 0x7E8;
+    d.generation = 2;
+    d.readiness = ECUIO_DIAG_ANSWERED;
+    d.cycle = ECUIO_DIAG_ANSWERED;
+    d.monitor_count = 2;
+    d.monitors[0].id = 0;
+    d.monitors[0].flags = ECUIO_MONITOR_COMPLETE | ECUIO_MONITOR_CYCLE_ENABLED;
+    d.monitors[1].id = 8;
+    d.monitors[1].flags = ECUIO_MONITOR_CYCLE_COMPLETE;
+    char buf[4096];
+    cli::Line l(buf, sizeof buf);
+    cli::diagnostics_line(l, d);
+    const std::string line(l.data(), l.size());
+    EXPECT_NE(line.find("\"monitors\":["
+                        "{\"name\":\"Misfire\",\"complete\":true,"
+                        "\"cycle_enabled\":true,\"cycle_complete\":false},"
+                        "{\"name\":\"Catalyst\",\"complete\":false,"
+                        "\"cycle_enabled\":false,\"cycle_complete\":true}]},"
+                        "\"cycle\":{\"outcome\":\"answered\"},"),
+              std::string::npos)
+        << line;
 }
 
 TEST(CliLineTest, KeysTakeCommasAndAFullLineIsRefused)

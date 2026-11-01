@@ -3771,6 +3771,7 @@ TEST(BridgeTest, DiagnosticsEntryIsWhatThePageShows)
     EXPECT_TRUE(e.value("mil").toBool());
     EXPECT_EQ(e.value("dtcCount").toInt(), 3);
     EXPECT_FALSE(e.value("compression").toBool());
+    EXPECT_EQ(e.value("cycle").toString(), QStringLiteral("answered"));
 
     const QVariantList lists = e.value("lists").toList();
     ASSERT_EQ(lists.size(), 3);
@@ -3790,6 +3791,8 @@ TEST(BridgeTest, DiagnosticsEntryIsWhatThePageShows)
     for (const QVariant& m : monitors) {
         names << m.toMap().value("name").toString();
         EXPECT_TRUE(m.toMap().value("complete").toBool());
+        EXPECT_TRUE(m.toMap().value("cycleEnabled").toBool());
+        EXPECT_TRUE(m.toMap().value("cycleComplete").toBool());
     }
     EXPECT_EQ(names,
               (QStringList{"Misfire", "Fuel system", "Comprehensive components",

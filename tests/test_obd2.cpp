@@ -2964,6 +2964,55 @@ TEST_F(DiagnosticsTest, ReadinessFromTheFakeEcu)
     }
 }
 
+/* PID 41 onto each monitor PID 01 listed, from that monitor's own two
+ * bits: enabled this drive cycle or not, complete this cycle or not;
+ * PID 01's completeness stays as it was */
+TEST_F(DiagnosticsTest, EachMonitorReadsThisDriveCycleFromItsOwnBits)
+{
+    std::string why;
+    const std::vector<MonitorRow> rows = load_monitors(&why);
+    ASSERT_FALSE(rows.empty()) << why;
+    for (const MonitorRow& r : rows) {
+        SCOPED_TRACE("monitors.csv line " + std::to_string(r.line));
+        for (bool enabled : {false, true}) {
+            for (bool incomplete : {false, true}) {
+                ecuio_channel_diagnostics_t d{};
+                ecuio_diag_take_readiness(readiness_bytes(r, true).data(), &d);
+                ASSERT_EQ(d.monitor_count, 1u);
+                std::vector<uint8_t> cycle = readiness_bytes(r, incomplete);
+                if (!enabled) {
+                    /* the availability bit off; B3, the engine type, stays */
+                    const std::vector<uint8_t> lone = readiness_bytes(r, false);
+                    cycle[1] =
+                        static_cast<uint8_t>(cycle[1] & ~(lone[1] & ~0x08u));
+                    cycle[2] = static_cast<uint8_t>(cycle[2] & ~lone[2]);
+                }
+                ecuio_diag_take_cycle(cycle.data(), &d);
+                EXPECT_TRUE(d.flags & ECUIO_DIAG_CYCLE);
+                EXPECT_EQ(d.monitors[0].flags,
+                          (enabled ? ECUIO_MONITOR_CYCLE_ENABLED : 0u) |
+                              (incomplete ? 0u : ECUIO_MONITOR_CYCLE_COMPLETE))
+                    << "enabled " << enabled << " incomplete " << incomplete;
+            }
+        }
+    }
+}
+
+/* A monitor PID 41 enables but PID 01 doesn't list stays out: the
+ * report's monitors are the ones the ECU has */
+TEST_F(DiagnosticsTest, ThisDriveCycleAddsNoMonitor)
+{
+    const uint8_t misfire[4] = {0x00, 0x01, 0x00, 0x00};
+    ecuio_channel_diagnostics_t d{};
+    ecuio_diag_take_readiness(misfire, &d);
+    const uint8_t every[4] = {0x00, 0x07, 0xFF, 0x00};
+    ecuio_diag_take_cycle(every, &d);
+    ASSERT_EQ(d.monitor_count, 1u);
+    EXPECT_EQ(d.monitors[0].flags, ECUIO_MONITOR_COMPLETE |
+                                       ECUIO_MONITOR_CYCLE_ENABLED |
+                                       ECUIO_MONITOR_CYCLE_COMPLETE);
+}
+
 /* The count as the ECU said it, and the codes the list and the reply
  * both hold */
 TEST_F(DiagnosticsTest, ACodeListHoldsWhatTheReplyCarries)
@@ -3109,6 +3158,7 @@ TEST_F(DiagnosticsTest, TheListTakesItsTurnAfterIdentificationAndFillsTheReport)
     }
     const std::vector<Bytes> kDiag = {
         {0x01, 0x01},
+        {0x01, 0x41},
         {0x03},
         {0x07},
         {0x0A},
@@ -3137,6 +3187,36 @@ TEST_F(DiagnosticsTest, TheListTakesItsTurnAfterIdentificationAndFillsTheReport)
     fake_diagnostics::expect_report(d);
 }
 
+/* An ECU whose bitmaps leave PID 41 out isn't asked it: the item
+ * settles unsupported, unsent, and the rest of the report is the
+ * fake's */
+TEST_F(DiagnosticsTest, APid41TheBitmapsLeaveOutIsNotAsked)
+{
+    struct Withhold41 {
+        Withhold41()
+        {
+            fake_ecu::withheld_pids()[0x41 / 32] |= 1u << (0x41 % 32);
+        }
+        ~Withhold41() { fake_ecu::withheld_pids()[0x41 / 32] = 0; }
+    } withhold;
+    static ecuio_request_engine e;
+    ASSERT_NO_FATAL_FAILURE(full_engine(&e));
+    int64_t now = 0;
+    for (const SentRequest& r : drive(&e, &now, fake_reply)) {
+        EXPECT_NE(r.bytes, (Bytes{0x01, 0x41})) << "asked though unsupported";
+    }
+    ecuio_channel_diagnostics_t d;
+    ecuio_engine_diagnostics(&e, 0, &d);
+    EXPECT_EQ(d.cycle, ECUIO_DIAG_UNSUPPORTED);
+    EXPECT_FALSE(d.flags & ECUIO_DIAG_CYCLE);
+    EXPECT_TRUE(d.flags & ECUIO_DIAG_COMPLETE);
+    EXPECT_EQ(d.generation, fake_diagnostics::kItems) << "settled once";
+    ASSERT_EQ(d.monitor_count, 8u);
+    for (uint32_t i = 0; i < d.monitor_count; ++i) {
+        EXPECT_EQ(d.monitors[i].flags, ECUIO_MONITOR_COMPLETE);
+    }
+}
+
 /* After a clear: no codes stored, the freeze frame's code 00 00, so no
  * values are asked; the permanent code stays */
 TEST_F(DiagnosticsTest, NoFreezeFrameStoredAsksNoValues)
@@ -3147,13 +3227,13 @@ TEST_F(DiagnosticsTest, NoFreezeFrameStoredAsksNoValues)
     ecuio_engine_diagnose(&e, ecuio_obd2_signal_set());
     int64_t now = 0;
     const std::vector<SentRequest> sent = drive(&e, &now, fake_reply);
-    ASSERT_EQ(sent.size(), 6u);
+    ASSERT_EQ(sent.size(), 7u);
     EXPECT_EQ(sent.back().bytes, (Bytes{0x02, 0x02, 0x00}));
 
     ecuio_channel_diagnostics_t d;
     ecuio_engine_diagnostics(&e, 0, &d);
-    EXPECT_EQ(d.flags,
-              ECUIO_DIAG_ASKED | ECUIO_DIAG_COMPLETE | ECUIO_DIAG_READINESS);
+    EXPECT_EQ(d.flags, ECUIO_DIAG_ASKED | ECUIO_DIAG_COMPLETE |
+                           ECUIO_DIAG_READINESS | ECUIO_DIAG_CYCLE);
     EXPECT_EQ(d.dtc_count, 0u);
     EXPECT_EQ(d.lists[ECUIO_DIAG_STORED].outcome, ECUIO_DIAG_ANSWERED);
     EXPECT_EQ(d.lists[ECUIO_DIAG_STORED].held, 0u);
@@ -3227,6 +3307,12 @@ TEST_F(DiagnosticsTest, AOneByteRequestIsAnsweredByItsServiceAlone)
     ecuio_engine_sent(&e, 0, ECUIO_ENGINE_ONCE, true, now);
     const Bytes readiness = fake_reply({0x01, 0x01});
     ASSERT_EQ(ecuio_engine_on_frame(&e, 0, readiness.data(), 6, now, nullptr),
+              ecuio_reply::positive);
+    now += ECUIO_ENGINE_GAP_US;
+    ASSERT_EQ(ecuio_engine_due(&e, 0, now), ECUIO_ENGINE_ONCE);
+    ecuio_engine_sent(&e, 0, ECUIO_ENGINE_ONCE, true, now);
+    const Bytes cycle = fake_reply({0x01, 0x41});
+    ASSERT_EQ(ecuio_engine_on_frame(&e, 0, cycle.data(), 6, now, nullptr),
               ecuio_reply::positive);
 
     now += ECUIO_ENGINE_GAP_US;
@@ -3332,8 +3418,8 @@ std::vector<Bytes> requests_of(const std::vector<SentRequest>& sent)
 }
 
 const std::vector<Bytes> kReadAfterAClear = {
-    {0x01, 0x01},       {0x03}, {0x07}, {0x0A}, {0x02, 0x00, 0x00},
-    {0x02, 0x02, 0x00},
+    {0x01, 0x01},       {0x01, 0x41},       {0x03}, {0x07}, {0x0A},
+    {0x02, 0x00, 0x00}, {0x02, 0x02, 0x00},
 };
 
 } // namespace

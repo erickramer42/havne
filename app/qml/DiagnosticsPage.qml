@@ -1,6 +1,7 @@
 // File/layer: app/qml/DiagnosticsPage.qml | Qt6 Quick, UI layer
 // Testing: tests/qml/tst_diagnostics.qml (the mock's report: the MIL,
-//          each list's codes, the monitors, the freeze frame's values in
+//          each list's codes, the monitors since the clear and this
+//          drive cycle (PID 41), the freeze frame's values in
 //          either unit system, Read again, ?diagnose=0 and the empty
 //          state; the clear's confirmation (naming the bridge's
 //          targets), Cancel sending nothing, a
@@ -192,6 +193,15 @@ Page {
     function readinessSummary(e) {
         const done = e.monitors.filter(m => m.complete).length
         return qsTr("%1 of %2 complete").arg(done).arg(e.monitors.length)
+    }
+
+    // A monitor this drive cycle (PID 41), under the "This drive" head:
+    // complete, enabled and not complete yet, or off for the rest of
+    // the cycle
+    function cycleText(m) {
+        if (!m.cycleEnabled)
+            return qsTr("Off")
+        return m.cycleComplete ? qsTr("Done") : qsTr("Not yet")
     }
 
     // The monitors' and values' rows stop here, so a state or a value
@@ -519,31 +529,58 @@ Page {
                     text: qsTr("The ECU reports none")
                     color: Theme.textDim
                 }
-                ColumnLayout {
+                // One row a monitor: its name, this drive cycle's state
+                // (PID 41, once answered: a column with its head) and
+                // its state since the last clear (PID 01). A grid, so
+                // the states line up under their heads; a hidden cell
+                // takes no place, so without PID 41 a row is two cells.
+                GridLayout {
+                    id: monitorGrid
                     objectName: "monitors"
+                    readonly property bool cycleShown: card.ecu.cycle === "answered"
                     Layout.fillWidth: true
                     Layout.maximumWidth: root.rowsMaxWidth
-                    spacing: 2
+                    visible: card.ecu.monitors.length > 0
+                    columns: cycleShown ? 3 : 2
+                    columnSpacing: Theme.spacing
+                    rowSpacing: 2
+                    Item {
+                        visible: monitorGrid.cycleShown
+                        Layout.fillWidth: true
+                    }
+                    Label {
+                        visible: monitorGrid.cycleShown
+                        text: qsTr("This drive")
+                        color: Theme.textDim
+                        font.pixelSize: 12
+                    }
+                    Label {
+                        visible: monitorGrid.cycleShown
+                        text: qsTr("Since clear")
+                        color: Theme.textDim
+                        font.pixelSize: 12
+                    }
                     Repeater {
-                        model: card.ecu.monitors
-                        delegate: RowLayout {
-                            id: monitorRow
-                            required property var modelData
-                            Layout.fillWidth: true
-                            spacing: Theme.spacing
-                            Label {
-                                Layout.fillWidth: true
-                                elide: Text.ElideRight
-                                text: monitorRow.modelData.name
-                                color: Theme.text
-                            }
-                            Label {
-                                objectName: "monitorState"
-                                text: monitorRow.modelData.complete ? qsTr("Complete")
-                                                                    : qsTr("Incomplete")
-                                color: monitorRow.modelData.complete ? Theme.success
-                                                                     : Theme.warning
-                            }
+                        // three cells a monitor: name, this drive, since the clear
+                        model: card.ecu.monitors.length * 3
+                        delegate: Label {
+                            id: monitorCell
+                            required property int index
+                            readonly property var monitor: card.ecu.monitors[Math.floor(index / 3)]
+                            readonly property int column: index % 3
+                            objectName: column === 1 ? "monitorCycle"
+                                      : column === 2 ? "monitorState" : "monitorName"
+                            visible: column !== 1 || monitorGrid.cycleShown
+                            Layout.fillWidth: column === 0
+                            elide: column === 0 ? Text.ElideRight : Text.ElideNone
+                            text: column === 0 ? monitor.name
+                                  : column === 1 ? root.cycleText(monitor)
+                                  : monitor.complete ? qsTr("Complete") : qsTr("Incomplete")
+                            color: column === 0 ? Theme.text
+                                   : column === 1 ? (!monitor.cycleEnabled ? Theme.textDim
+                                                     : monitor.cycleComplete ? Theme.success
+                                                     : Theme.warning)
+                                   : monitor.complete ? Theme.success : Theme.warning
                         }
                     }
                 }
