@@ -20,6 +20,7 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
 
 ### Fixed
 
+- Over an ELM327 adapter, the first reading of a PID whose reply spans two CAN frames (such as PID 68, intake air temperature) was lost and counted as a timeout: the request asked the adapter for one frame. It now asks for the whole reply from the start.
 - On a phone, Live and the Log's frame table ran off the right edge of the screen; they now fit its width, and the frame table wraps a long payload under its row.
 - On a phone, the confirmation for clearing codes could run past the bottom of the screen with no way to reach Clear or Cancel; it now scrolls with the page.
 
