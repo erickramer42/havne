@@ -236,6 +236,16 @@ about 10 s, then on, and come back to Havne.
       Bluetooth on to the first value (~6.5 s through the laptop). Over
       a minute is a finding: Disconnect and connect again
 
+**7c2: Disconnect while replies arrive.**
+
+**Action:** connect a URI that keeps the replies coming
+(`elm327://bt:<addr>?profile=obd2`), let values flow for about 10 s,
+tap Disconnect; repeat 20 times.
+
+- [ ] No crash on any of them: the app stays in front, and each
+      recording ends `end disconnected`. A crash names its thread in
+      `adb logcat -d` (copy the `Fatal signal` lines and the backtrace)
+
 **7d: the app in the background (optional; Phase 8 runs it in full).**
 
 **Action:** connected and idling, press Home for about 20 s, then
@@ -326,6 +336,7 @@ safety hold.
 | "the network is unreachable" or a permission error on WiFi | `INTERNET` missing from the manifest, which CI checks: copy the error whole |
 | No permission prompt, and the list says to allow Nearby devices | The permission was refused earlier: allow it in Android's settings |
 | The MX+ "didn't answer ATZ within 5 s" | Its Power light off (it takes power from the car only), or the laptop or the OBDLink app holding it: close them, connect again |
+| A crash on Disconnect, `SIGSEGV` in the `QtBtInputStream` thread | The closed link's socket deleted while Qt's Java reader still wrote into it ([ADR-0028](../adr/0028-app-fed-streams.md)'s appendix of 2026-11-01): copy the backtrace and the APK's commit |
 | No paired devices listed with Bluetooth on | Copy the count line and the line under it; `adb logcat -d | grep -i -E "havne|bluetooth"` if `adb` is at hand |
 
 ## Post-session actions
