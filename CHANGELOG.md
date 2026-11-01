@@ -12,6 +12,8 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
 
 ### Added
 
+- A simulated ECU on Linux's virtual CAN bus: `havne-cli sim mock://sim --on vcan0` answers OBD-II requests as the simulated car's engine ECU, so `havne-cli stream "socketcan://vcan0?profile=obd2"` or the app reads its values, identification and trouble codes with no hardware. `?values=canned`, `?vin=` and `?faults=` change what it answers.
+- `ecuio/sim.h` in core's C API: `ecuio_sim_create`, `ecuio_sim_get_stats` and `ecuio_sim_destroy`.
 - Inspection readiness: the Diagnostics page says whether the car would pass the federal OBD inspection rule (40 CFR 85.2222) today, from every ECU's monitors and check-engine light and the model year in its VIN, and names the monitors still incomplete. `havne-cli stream` writes the same as an `inspection` line. A state's program may be stricter.
 - `ecuio_diag_inspect` and `ecuio_inspection_t` in core's C API.
 - Trouble codes with their names: the Diagnostics page shows SAE J2012's title beside each generic powertrain and network code ("P0301  Cylinder 1 Misfire Detected") and the freeze frame's, and **Look up a code** names a typed one, offline. `havne-cli`'s `diagnostics` line carries the same as `titles`, and `havne-cli dtc <code>` looks one up. The titles come from Wal33D's dtc-database under its MIT license, whose notice ships with every download.

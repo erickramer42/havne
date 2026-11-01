@@ -22,6 +22,7 @@
 #include "ecuio/stream.h"
 #include "ecuio/serial.h"
 #include "ecuio/vin.h"
+#include "ecuio/sim.h"
 #include "ecuio/socketcan.h"
 #include "ecuio/profile.h"
 #include "ecuio/signal_sets.h"
@@ -96,6 +97,8 @@ typedef char abi_serial_device_check[(offsetof(ecuio_serial_port_t, device) == 1
 typedef char abi_serial_flags_check[(offsetof(ecuio_serial_port_t, flags) == 256) ? 1 : -1];
 typedef char abi_inspection_size_check[(sizeof(ecuio_inspection_t) == 24) ? 1 : -1];
 typedef char abi_inspection_flags_check[(offsetof(ecuio_inspection_t, diag_flags) == 8) ? 1 : -1];
+typedef char abi_sim_stats_size_check[(sizeof(ecuio_sim_stats_t) == 96) ? 1 : -1];
+typedef char abi_sim_stats_flags_check[(offsetof(ecuio_sim_stats_t, flags) == 72) ? 1 : -1];
 typedef char abi_vin_size_check[(sizeof(ecuio_vin_info_t) == 32) ? 1 : -1];
 typedef char abi_vin_wmi_check[(offsetof(ecuio_vin_info_t, wmi) == 8) ? 1 : -1];
 typedef char abi_can_size_check[(sizeof(ecuio_can_interface_t) == 64) ? 1 : -1];
@@ -121,6 +124,8 @@ int main(void)
     uint32_t serial_count = 0;
     uint32_t can_count = 0;
     ecuio_vin_info_t vin_info;
+    ecuio_sim_t* sim = NULL;
+    ecuio_sim_stats_t sim_stats;
     ecuio_inspection_t inspection;
     const uint8_t vin_request[2] = {0x09, 0x02};
     char dtc[6];
@@ -238,6 +243,12 @@ int main(void)
         ECUIO_INSPECTION_READING != 6u) {
         return 1;
     }
+    if (ecuio_sim_create(NULL, "vcan0", &sim) != ECUIO_ERR_NULL_ARGUMENT ||
+        ecuio_sim_get_stats(NULL, &sim_stats) != ECUIO_ERR_NULL_ARGUMENT ||
+        sim != NULL || ECUIO_SIM_FAILED != 1u) {
+        return 1;
+    }
+    ecuio_sim_destroy(NULL);
     if (ecuio_vin_decode(NULL, 0, &vin_info) != ECUIO_ERR_NULL_ARGUMENT ||
         ecuio_vin_make(NULL)[0] != 0 || ecuio_vin_source()[0] == 0) {
         return 1;

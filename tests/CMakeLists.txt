@@ -231,6 +231,10 @@ if(TARGET havne-cli)
             -- $<TARGET_FILE:havne-cli> stream "mock://golden?speed=2")
         app_cli_golden(UnknownProfileIsRefused unknown-profile.jsonl --exit 3
             -- $<TARGET_FILE:havne-cli> stream "mock://golden?profile=nonesuch")
+        # The simulated ECU's URI is checked before any bus, on every
+        # platform (ADR-0046)
+        app_cli_golden(SimRefusesABadUri sim-bad-uri.jsonl --exit 3
+            -- $<TARGET_FILE:havne-cli> sim "mock://sim?faults=silent:0" --on vcan0)
         # A replay cut short under it stops early, and the stream ends
         # with it instead of waiting for a last frame that never comes
         add_test(NAME CliReplayTest.ACutRecordingEndsTheStream
@@ -260,6 +264,10 @@ if(TARGET havne-cli)
     app_cli_usage(DtcWithoutOneIsUsage "dtc")
     app_cli_usage(NotADtcIsUsage "dtc|P5301")
     app_cli_usage(TwoDtcsIsUsage "dtc|P0301|P0420")
+    app_cli_usage(SimWithoutAnInterfaceIsUsage "sim|mock://sim")
+    app_cli_usage(SimWithoutAUriIsUsage "sim|--on|vcan0")
+    app_cli_usage(SimSecondsOfZeroIsUsage "sim|mock://sim|--on|vcan0|--seconds|0")
+    app_cli_usage(TwoSimUrisIsUsage "sim|mock://a|mock://b|--on|vcan0")
     # A stop from outside (ADR-0031 section 6): SIGINT and SIGTERM on POSIX;
     # on Windows Ctrl+Break to a child in a process group of its own
     # (Ctrl+C can't be sent to one), skipped where there's no console
