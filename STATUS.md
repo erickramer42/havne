@@ -300,15 +300,6 @@ an issue is resolved it is removed, and its number is not reused.
    The app needs Android 12 or later; CI uploads the Android build's
    debug APK, and each release carries one signed with the release key
    ([ADR-0030](docs/adr/0030-signed-android-releases.md)).
-4. **Every def is matched against every frame, on the transport's
-   worker** ([ADR-0024](docs/adr/0024-decode-on-the-worker.md)). A
-   subscription can't trim that work: it is the chart's filter only,
-   because the Dashboard reads every signal. Measured, it costs about
-   1.4 to 2.2 µs a frame at 1000 defs (the figure varies by session),
-   well inside the J2534 worker's 10 ms read slice, and the GUI
-   thread's cost per frame no longer depends on it
-   ([docs/testing.md](docs/testing.md#performance)). A per-signal enable
-   mask can trim it if a CAN FD rate makes it matter.
 6. **The session API is single-caller by contract.** Each session has
    one caller: the bridge in the app, `havne-cli` in its own process
    ([ADR-0031](docs/adr/0031-command-line-client.md)). Two front ends
@@ -561,22 +552,11 @@ week or more or a design that needs an ADR first.
   ([ADR-0024](docs/adr/0024-decode-on-the-worker.md)), so the GUI
   thread's cost per frame doesn't grow with the profile and values
   survive frames dropped under load; the chart shows each value at its
-  frame's time and keeps a window's peak. Left: the bridge's 4 KB copy
-  per frame, the worker's largest per-frame cost up to about 500 defs
-  on their own CAN IDs (`bench_bridge`,
-  [docs/testing.md](docs/testing.md#performance)), and the decode's
-  pass over every def (the next item).
-- **Decode only the defs a frame can match (S; before v0.3.5's
-  release).** The worker checks each frame against every def of the
-  session's set (`decode_values` in `core/src/core.cpp`). The obd2
-  set's defs share the engine ECU's reply ID, so each one gets past the
-  ID check and reads its mux key, and with every Service 01 field in
-  the set that halves the replay load test's sustained throughput
-  ([docs/testing.md](docs/testing.md#load-test-the-replay-fixture-through-the-bridge)).
-  An index from a frame's ID and key to the defs that can match it,
-  built once per set at create, makes the cost per frame independent
-  of the set's size. Done when the load test's throughput is back near
-  v0.3.4's and `bench_bridge`'s cost per def stays flat.
+  frame's time and keeps a window's peak; each frame is checked only
+  against the defs its CAN ID and key can match, so the decode's cost
+  doesn't grow with the profile either. Left: the bridge's 4 KB copy
+  per frame, the worker's largest per-frame cost (`bench_bridge`,
+  [docs/testing.md](docs/testing.md#performance)).
 - **A frame-rate readout in developer mode (S).** The window's drawn
   frames per second (`QQuickWindow::frameSwapped`, counted each
   second), shown only in developer mode, so the strip chart's and the

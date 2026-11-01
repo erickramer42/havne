@@ -5,7 +5,8 @@
 //          list length, the list as it stood, no allocation up to
 //          four), the decoded values (CoreTest.Values*: the batch
 //          against direct decodes, a text slot each, the frame
-//          callbacks first), the absent signals
+//          callbacks first; the defs each frame is checked against:
+//          DefIndexTest), the absent signals
 //          (CoreTest.AFieldPastEveryReplyIsAbsent), a packed reply's
 //          records (CoreTest.APacked*), the error strings, a clear's refusals
 //          (CoreTest.AClearNeedsTheReportTheCallerSaved); the trouble code's and
@@ -263,12 +264,16 @@ namespace {
 
     /* Decodes frame (len bytes of it) against set into the session's
      * buffers from value n and text slot slot on, each def in the set's
-     * order */
+     * order; only the defs the index finds for the frame are checked */
     void decode_frame(ecuio_session_t* session, const ecuio_signal_set_t* set,
                       const ecuio_frame_t* frame, uint16_t len, uint32_t& n,
                       uint32_t& slot)
     {
-        for (uint32_t i = 0; i < set->count; ++i) {
+        uint32_t* found = session->def_found.data();
+        const uint32_t count =
+            ecuio_def_index_find(session->def_index, *frame, found);
+        for (uint32_t k = 0; k < count; ++k) {
+            const uint32_t i = found[k];
             const ecuio_signal_def_t& def = set->defs[i];
             if (!ecuio_def_applies_to_frame(&def, frame)) {
                 continue;
@@ -851,6 +856,9 @@ ecuio_status_t ecuio_session_create(
             s->text_slots = text_slots_for(profile_set);
             s->text_scratch.resize(size_t{s->text_slots} *
                                    ECUIO_DECODE_TEXT_MAX);
+            ecuio_def_index_build(s->def_index, profile_set->defs,
+                                  profile_set->count);
+            s->def_found.resize(profile_set->count);
             for (uint32_t i = 0; i < profile_set->count; ++i) {
                 const ecuio_signal_def_t& d = profile_set->defs[i];
                 if (service01_keyed(d) &&

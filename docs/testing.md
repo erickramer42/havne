@@ -81,52 +81,41 @@ view. `scripts/coverage.sh` runs the same measurement locally
 never run by ctest) measures each thread's work per frame through the
 bridge, by the size of the session's profile:
 - **On the worker** ([ADR-0024](adr/0024-decode-on-the-worker.md)):
-  `onFrame` (the frame's 4 KB copy and the queued call), core's match
-  of the frame against every def and decode into a batch (Known Issue
-  #4), and the bridge's staging of that batch.
+  `onFrame` (the frame's 4 KB copy and the queued call), core's lookup
+  of the defs the frame can match (by its CAN ID and key,
+  `core/src/def_index.h`) and their decode into a batch, and the
+  bridge's staging of that batch.
 - **On the GUI thread:** the drain (the queued call, the frame log and
   the counters), and one 100 ms tick's update of a model of N rows.
 
 Recording is off and no view is attached. The defs sit four to a CAN
 ID, 16 bits each, as a passive-bus profile packs them, so each frame
-decodes four values and is checked against every def. A raw session,
-which decodes nothing, is the baseline.
+decodes the four values on its ID. A raw session, which decodes
+nothing, is the baseline.
 
 ```sh
 build/tests/Release/bench_bridge.exe [frames per run, default 20000]
 ```
 
-On the dev machine, 2026-10-27, with no heavy process running
-(Release; each figure the median of three runs of 20,000 frames; the
-ranges are across three such measurements):
+On the dev machine, 2026-10-31, with no heavy process running
+(Release; three runs of 20,000 frames each, the range across them):
 
-| Defs | Worker: match and decode, µs a frame | GUI thread: one tick's update, µs |
+| Defs | Worker: lookup and decode, microseconds a frame | GUI thread: one tick's update, microseconds |
 |---|---|---|
-| 9 | 0.08–0.09 | 0.3–0.7 |
-| 100 | 0.26–0.28 | 1.8–2.3 |
-| 250 | 0.50–0.53 | 4.4–5.7 |
-| 500 | 0.92–0.94 | 8.9–9.1 |
-| 1000 | 1.76–1.77 | 18.1–18.6 |
+| 9 | 0.08 | 0.3 |
+| 100 | 0.13 to 0.15 | 1.9 to 2.2 |
+| 250 | 0.13 to 0.14 | 4.8 to 5.8 |
+| 500 | 0.13 to 0.16 | 9.5 to 10.9 |
+| 1000 | 0.13 | 18.6 to 19.6 |
 
-- **The match and decode cost about 1.7 ns a def a frame.** Against
-  the bus: classic CAN at 500 kbit/s carries at most about 4,500
-  eight-byte frames a second, so 1000 defs take about 8 ms of the
-  worker's second, under 1 %. The first vehicle's request rotation ran
-  about 26 frames a second. A CAN FD bus can run several times the
-  classic rate: at 25,000 frames a second the same profile would take
-  about 4.4 % (worked out from these numbers; no CAN FD bus was
-  measured). It sits well inside the J2534 worker's 10 ms read slice.
-- **The decode figure varies between sessions more than within one.**
-  The three measurements above agree within 0.01 µs, but other
-  sessions on the same machine read 1.37 to 2.16 µs at 1000 defs
-  ([ADR-0024](adr/0024-decode-on-the-worker.md)), so read it as about
-  1.4 to 2.2 ns a def a frame: 6 to 10 ms of the worker's second on a
-  full classic bus, 3.4 to 5.4 % at the CAN FD rate above. The tick
-  and the drain stay within their ranges across those sessions.
-- **The 4 KB copy is the worker's largest cost up to about 500 defs:**
-  `onFrame` (the copy and the queued call) takes 0.9 to 2.1 µs at any
-  profile size, more than the match and decode until 1000 defs, where
-  the decode passes it.
+- **The lookup and decode cost the same at any profile size:** a frame
+  is checked only against the defs on its CAN ID with its key, so the
+  cost follows the values a frame carries (four here), not the
+  profile. Checking every def instead cost about 1.7 ns a def a frame
+  (1.76 microseconds at 1000 defs, 2026-10-27).
+- **The 4 KB copy is the worker's largest cost:** `onFrame` (the copy
+  and the queued call) takes 0.9 to 1.9 microseconds at any profile
+  size, several times the lookup and decode.
 - **The GUI thread's cost per frame doesn't grow with the profile:**
   its drain stays under 0.4 µs from a raw session to 1000 defs, because
   the decode runs on the worker. The bridge's staging of a batch is
@@ -220,15 +209,14 @@ running (ranges across the runs; milliseconds as median / p99):
   at the median and 0.35 to 0.64 ms at p99. Sustained, looping at full
   speed, the worker ran 191,000 to 193,000 frames a second, against
   358,000 to 374,000 for v0.3.4's build run the same minute on the same
-  machine. The difference is the obd2 set's size: it grew to every
+  machine. The difference was the obd2 set's size: it grew to every
   field of J1979's Service 01 table, its defs share the engine ECU's
-  reply ID, and the worker checks each frame against every def, so
-  each one reads its mux key. With decoding turned off, the builds
-  before and after that change both run about 460,000 frames a second.
-  It is still about 40 times a full classic CAN bus, so nothing a
-  session can carry is lost, and CI's floor (10,000 a second) doesn't
-  see it. The fix, an index from a frame's ID and key to its defs, is
-  in [STATUS.md's backlog](../STATUS.md#performance).
+  reply ID, and the worker checked each frame against every def, so
+  each one read its mux key. With decoding turned off, the builds
+  before and after that change both ran about 460,000 frames a second.
+  With the lookup by ID and key (the cost per frame above), the same
+  test runs 344,000 to 450,000 frames a second, against 191,000 to
+  282,000 for the build before it, the two alternated run by run.
 
 ### Reply timing against the fakes
 
@@ -315,6 +303,7 @@ round trip each, negligible at the transport's read cap
 | No transport's worker allocates per frame, so no `bad_alloc` can leave a worker: a dispatch to up to four callbacks takes its snapshot on the stack, and past start-up the mock's, replay's (looping, the file reopened each pass, under `obd2`) and the J2534 worker's (through the surrogate, against the fake: the probe, identification and the rotation) frames cost no `operator new`, with a values callback registered, so the decode and its batch are counted too. `tests/new_counter.h` counts `operator new` per thread, read from a callback on the worker; a fifth callback is seen allocating, so the count isn't vacuous | `CoreTest.DispatchToAShortListAllocatesNothing`, `.WorkersAllocateNothingPerFrame`, `J2534AdoptionTest.TheWorkerAllocatesNothingPerFrame`. Each fails against the per-frame vector copy; the dispatch cases against a heap path that stops at four, four sent to the heap, and a dispatch over the live list; the worker case against a replay worker that reallocates its line buffer per row. Counts `operator new` only: `malloc` and `fopen` report failure as null, which the code checks |
 | Callbacks run on the worker thread | `CoreTest`, through `ecuio_session_start` |
 | Decoded values (ADR-0024): a frame's batch holds every def it decodes, in the set's order, equal to direct `ecuio_decode_*` calls, with the frame's time and ID; a def that can't decode is left out, and a frame that decodes nothing or a raw session delivers no batch. The values callback registers as the frame callback does, runs after the frame callbacks for each frame, and sees its list as it stood when the frame arrived, on and off the stack. Each text value has a slot of its own, counted at create from the set (unkeyed text defs plus, per key shape, the largest group sharing a key), and the slots start again each frame. A `uds-generic` scanned DID decodes from the set built at create. Every batch over the vehicle fixture under `obd2` and the mock's cycle equals the direct decode | `CoreTest.ValuesCallbackDeliversEachFramesDecodeWithItsTime`, `.ValuesCallbackRegistersAsTheFrameCallbackDoes`, `.ValuesFollowTheFrameCallbacks`, `.ValuesReachTheListAsItStoodWhenTheFrameArrived`, `.ValuesGiveEachTextValueASlotOfItsOwn`, `.ValuesOfAScannedDidComeFromTheSetBuiltAtCreate`, `.ValuesMatchDirectDecodesOfEveryFrame`. Each fails against a mutant: one slot for every text value, a slot count without the unkeyed defs, shape groups taken as the largest instead of added, slots that never restart, the frame callbacks skipped, the live values list, a batch without the frame's time, a failed decode delivered as 0 |
+| The defs a frame is checked against (`core/src/def_index.h`): for any frame, exactly the defs `ecuio_def_applies_to_frame` takes over the whole set, in the set's order, over sets mixing unkeyed defs and every key shape on shared IDs, keys shared between defs, against frames too short for a key, error reports and IDs no def listens on | `DefIndexTest.FindsExactlyTheDefsThatApplyInTheSetsOrder` (mutation-checked 2026-10-31: the runs never sorted, unkeyed defs left out, a key ending at the frame's end refused, error reports found); the batches through it: `CoreTest.Values*`, `.APacked*` |
 | A Service 01 reply carrying several PIDs (ADR-0039 Appendix A) decodes record by record, each def once, in the order the ECU sent them, live and replayed; each record's length is J1979's (core's table equals the Service 01 table's byte counts) or the shorter one the ECU's single replies showed (the test car's PID 55), which a reply as long as J1979's undoes; a reply that won't split (a PID of no known length, one twice, a record past the end or short of it, more than 16) decodes its first record and is counted; a frame on an ID no Service 01 def listens on is never split | `Obd2ReplyTest.*`, `Obd2TableTest.CoresByteCountPerPidIsTheTables`, `CoreTest.APackedReplyDecodesEachRecord`, `.APackedReplySplitsByTheLengthTheEcuSends`, `.APackedReplyReplaysToItsRecords`, `CliGoldenTest.ReplaySplitsPackedReplies`. Each fails against a mutant (mutation-checked 2026-10-31): the learned lengths ignored, a PID twice allowed, decode never splitting |
 | Several PIDs per request (ADR-0039 Appendix A), the engine against the fakes' ECU on the test car's bitmaps: a PID is packed only after its own reply showed its length, so the first lap is unpacked; then every request carries up to six kept PIDs of one class, never a bitmap, and every kept PID is still asked; a pack's reply length adds its PIDs' own (the test car's one-byte PID 55 included), and a PID whose own reply was longer than J1979's is never packed; a reply whose first record is any PID asked answers it, and one leaving a PID out drops nothing; silence, a refusal or one record three packs in a row end packing on the channel, one answered between starts the count again, and a pending reply extends the wait; out of step (a wait ended with nothing), a late refusal or a single record of one of a pack's PIDs answers nothing and the pack's own reply then succeeds; packing waits for the driver and the bitmaps. ELM327's count digit for a pack is its reply's frames | `RequestEngineTest.PacksCarryUpToSixKeptPidsOfOneClass`, `.APackIsSizedByItsPidsOwnReplies`, `.APackedReplyMatchesByAnyOfItsPids`, `.ThreeFailedPacksEndPackingOnTheChannel`, `.OutOfStepALateReplyFailsNoPack`, `.PackingIsTheDriversToTurnOn`, `Elm327ProtocolTest.APacksCountDigitIsItsReplysFrames`. Each engine case fails against a mutant (mutation-checked 2026-10-31): no second PID, a PID packed before its own reply, classes mixed, a longer reply packed, no reset on a success, only the first PID asked matching. Through the surrogate and over ELM327 against the fakes' ECU, which answers a pack in J1979's form (each supported PID's record, in the order asked) or, under `ECUIO_FAKE_PACK_FIRST_ONLY` (`fake_ecu::pack_first_only()` in process), for its first PID alone: packs are answered and reported, each ELM327 pack carries the digit its reply's frames take (one past a Single Frame among them), `?pack=0` asks one PID per request, and the first-PID-only ECU ends packing: `J2534AdoptionTest.PackedRequestsReachTheFakesEcu`, `Elm327SessionTest.APackedRequestCarriesItsRepliesFrames`, `.AnEcuAnsweringOnePidEndsPacking` (mutation-checked 2026-10-31: the digit always 1, `?pack=0` ignored) |
 | Reply timing (ADR-0042), the histograms: one sample reads back at most an eighth above itself and never below, exactly below 16 microseconds, one past the top band its exact value; quantiles of a distribution within their buckets; a P99 needs 100 samples and a P99.9 1,000, below that 0 with its flag clear; an interval with a fallback of the frames' clock between its answers, or one running backwards, is left out and counted; a refusal has a latency and refreshes nothing | `RequestTimingTest.*` (mutation-checked 2026-10-31: no sample floor, fallbacks ignored) |

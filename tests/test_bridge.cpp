@@ -4237,7 +4237,9 @@ TEST(BridgeTest, ASleepWhileConnectedIsLoggedWithItsLength)
  * the faults did; the Session line says they were injected; the
  * recording holds the frames delivered, row for row, and the overflows
  * the bridge counts are the frames flagged in it. Seed 3 over the engine
- * start: the CLI's golden, replay-faults.jsonl, has the same counts. */
+ * start: the CLI's golden, replay-faults.jsonl, has the same counts.
+ * Paced at 100x: at full speed the worker can outrun the GUI thread,
+ * and frames dropped at the bridge's gate would leave rows out. */
 TEST(BridgeTest, AFaultedReplayFinishesAndRecordsWhatItDelivered)
 {
     QTemporaryDir root;
@@ -4251,7 +4253,7 @@ TEST(BridgeTest, AFaultedReplayFinishesAndRecordsWhatItDelivered)
                      [&log](const QString& line) { log << line; });
     const QString uri =
         QStringLiteral("replay://") + QString::fromUtf8(ECUIO_REPLAY_FIXTURES) +
-        QStringLiteral("/2026-10-25-engine-start?profile=obd2&speed=max&"
+        QStringLiteral("/2026-10-25-engine-start?profile=obd2&speed=100&"
                        "faults=drop:10,overflow:5,corrupt:2,truncate:2,"
                        "stall:1:5&seed=3");
     ASSERT_TRUE(bridge.connectSession(uri).isEmpty());
@@ -4262,10 +4264,9 @@ TEST(BridgeTest, AFaultedReplayFinishesAndRecordsWhatItDelivered)
     ASSERT_TRUE(spinUntil(
         [&log, &finished]() { return log.contains(finished); }, 20000))
         << log.join(QLatin1Char('\n')).toStdString();
-    EXPECT_FALSE(
-        log.filter(QStringLiteral("frames over 297.4 s at full speed, with "
-                                  "faults injected"))
-            .isEmpty())
+    EXPECT_FALSE(log.filter(QStringLiteral("frames over 297.4 s at 100x, with "
+                                           "faults injected"))
+                     .isEmpty())
         << log.join(QLatin1Char('\n')).toStdString();
     spinLoop(300);
     ASSERT_EQ(bridge.droppedFrames(), 0)
