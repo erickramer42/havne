@@ -337,6 +337,7 @@ if(NOT HAVNE_BUILD_CORE_ONLY)
         ../app/blepicker.cpp
         ../app/btconnect.cpp
         ../app/carryover.cpp
+        fake_bt_socket.h
     )
 
     set_target_properties(test_bridge PROPERTIES AUTOMOC ON)
