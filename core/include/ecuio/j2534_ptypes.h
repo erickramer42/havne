@@ -238,9 +238,12 @@ static inline void ecuio_pt_rx_from_msg(const PASSTHRU_MSG* m,
 {
     const unsigned long n = (m->DataSize < ECUIO_PT_MSG_DATA_SIZE)
                             ? m->DataSize : ECUIO_PT_MSG_DATA_SIZE;
+    /* C casts: this header compiles as C too (test_c_abi.c) */
+    /* NOLINTBEGIN(google-readability-casting) */
     out->rx_status = (uint32_t)m->RxStatus;
     out->timestamp = (uint32_t)m->Timestamp;
     out->data_size = (uint32_t)n;
+    /* NOLINTEND(google-readability-casting) */
     memcpy(out->data, m->Data, n);
 }
 
@@ -284,8 +287,11 @@ static inline void ecuio_pt_sconfig_flatten(const SCONFIG* cfg, uint32_t n,
 {
     uint32_t i;
     for (i = 0; i < n; ++i) {
+        /* C casts, as in ecuio_pt_rx_from_msg */
+        /* NOLINTBEGIN(google-readability-casting) */
         const uint32_t param = (uint32_t)cfg[i].Parameter;
         const uint32_t value = (uint32_t)cfg[i].Value;
+        /* NOLINTEND(google-readability-casting) */
         memcpy(flat + i * 8, &param, 4);
         memcpy(flat + i * 8 + 4, &value, 4);
     }

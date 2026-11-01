@@ -625,9 +625,11 @@ format only the lines you change: `git clang-format` after staging.
 bug-finding families (bugprone, concurrency, performance, portability,
 a few misc checks) over `core/` and `surrogate/`, and CI's
 `clang-tidy` job fails on any warning. The style families stay off
-but for two checks, `google-explicit-constructor` and braces around a
-body on the line after its `if`, `else`, `for` or `while`; the file
-says why each is on and why each excluded check is excluded. To run it
+but for three checks: `google-explicit-constructor`, braces around a
+body on the line after its `if`, `else`, `for` or `while`, and
+`google-readability-casting` (no C-style casts in C++; the headers that
+compile as C keep theirs behind a `NOLINTBEGIN`). The file says why each
+is on and why each excluded check is excluded. To run it
 locally, install the pinned version once into `build-tidy-venv/` (it
 sits with the build trees, so git ignores it), then run
 `scripts/tidy.sh` from any shell:
