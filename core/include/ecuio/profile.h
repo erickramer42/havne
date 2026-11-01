@@ -1,7 +1,10 @@
 // File/layer: core/include/ecuio/profile.h | C ABI, public
 // Testing: UNIT (registry lookup/overwrite); session-level selection and
-//          the decoded values (CoreTest.Values*) in test_core; the value
-//          layouts in c_abi; BRIDGE (BridgeTest.BothDecodePathsAgreeOverTheFixture)
+//          the decoded values (CoreTest.Values*) and the absent signals
+//          (CoreTest.AFieldPastEveryReplyIsAbsent) in test_core; the value
+//          layouts in c_abi; BRIDGE (BridgeTest.BothDecodePathsAgreeOverTheFixture);
+//          the timing report (ADR-0042): RequestTimingTest, the transports'
+//          Timing* cases, CoreTest.ASessionWithNoRotationHasNoTimingRows, c_abi
 
 #ifndef ECUIO_PROFILE_H
 #define ECUIO_PROFILE_H
@@ -43,7 +46,7 @@ extern "C" {
 /* The longest profile name: what a ?profile= value can carry. */
 #define ECUIO_PROFILE_NAME_MAX 63
 
-/* The most requests a set's defs may derive (ADR-0015 §2): one per
+/* The most requests a set's defs may derive (ADR-0015 section 2): one per
  * distinct request and channel, so defs read from one reply count
  * once. */
 #define ECUIO_PROFILE_MAX_REQUESTS 128
@@ -171,6 +174,174 @@ ecuio_status_t ecuio_unregister_values_callback(
     ecuio_session_t* session,
     ecuio_values_callback_t callback,
     void* user_data
+);
+
+/*
+ * The signals the session's frames name but don't carry (ADR-0039 section 6):
+ * a def whose key matched ECUIO_ABSENT_AFTER_FRAMES or more frames, each
+ * ending before its field (ECUIO_DECODE_ERR_PAST_PAYLOAD), while none
+ * carried it, as an ECU that answers PID 55 with bank 1's byte alone.
+ * A signal that arrives later leaves the list. Judged from the frames
+ * decoded for a values callback, so while none is registered nothing
+ * is judged.
+ *
+ * Fills ids with up to capacity signal ids, in the set's order, and
+ * *count with how many there are; capacity 0 (ids may be NULL) asks
+ * the count. ECUIO_OK; ECUIO_ERR_NULL_ARGUMENT for a NULL session or
+ * count, or NULL ids with a capacity. Readable after close.
+ */
+#define ECUIO_ABSENT_AFTER_FRAMES 3u
+
+ecuio_status_t ecuio_session_get_absent_signals(
+    const ecuio_session_t* session,
+    uint16_t* ids,
+    uint32_t capacity,
+    uint32_t* count
+);
+
+/*
+ * The Service 01 signals their ECU says it doesn't support (ADR-0039
+ * section 6): a def keyed 41 <PID> at the payload's start whose PID the
+ * supported-PID bitmaps of the channel its message ID names leave out
+ * (ecuio_session_get_channel_support). A range whose bitmap was never
+ * answered, a channel that has learned nothing yet, and every other def
+ * judge nothing. A rescan that finds a PID takes its signals off the
+ * list.
+ *
+ * Fills ids with up to capacity signal ids, in the set's order, and
+ * *count with how many there are; capacity 0 (ids may be NULL) asks
+ * the count. ECUIO_OK; ECUIO_ERR_NULL_ARGUMENT for a NULL session or
+ * count, or NULL ids with a capacity. Readable after close.
+ */
+ecuio_status_t ecuio_session_get_unsupported_signals(
+    const ecuio_session_t* session,
+    uint16_t* ids,
+    uint32_t capacity,
+    uint32_t* count
+);
+
+/*
+ * Service 01 replies that carried more than their first PID's record
+ * but wouldn't split into records (ADR-0039 Appendix A): a PID of no
+ * known length, one twice, or records that don't end at the reply's
+ * end. Each decoded its first record alone. Core splits a reply that
+ * carries several PIDs (01 0C 0D ...) record by record, using J1979's
+ * length for each PID, or the shorter one the ECU's single replies
+ * show. Counted from the frames decoded for a values callback.
+ *
+ * ECUIO_OK; ECUIO_ERR_NULL_ARGUMENT for a NULL session or count.
+ * Readable after close.
+ */
+ecuio_status_t ecuio_session_get_unsplit_replies(
+    const ecuio_session_t* session,
+    uint64_t* count
+);
+
+/*
+ * Reply timing per request (ADR-0042): for each request in a session's
+ * rotation (a PID, or a DID under uds-generic), its outcomes, its reply
+ * latency (the request's write to the reply that completes it, on the
+ * host's clock) and its refresh interval (one answer to the next, on
+ * the frames' own stamps: interval_clock says whose). Quantiles read at
+ * most 12.5 % above the true value; a P99 needs ECUIO_TIMING_P99_SAMPLES
+ * samples and a P99.9 ECUIO_TIMING_P999_SAMPLES, and below that it is 0
+ * with its flag clear. Figures are cumulative from the connect; the
+ * worker publishes them at most once a second and once as it stops.
+ * The values below are append-only.
+ */
+#define ECUIO_TIMING_P99_SAMPLES   100u
+#define ECUIO_TIMING_P999_SAMPLES  1000u
+
+/* interval_clock; KERNEL is the kernel's receive times, as wall-clock
+ * deltas */
+#define ECUIO_TIMING_CLOCK_NONE    0u   /* no rotation */
+#define ECUIO_TIMING_CLOCK_HOST    1u   /* as the worker read them (ELM327) */
+#define ECUIO_TIMING_CLOCK_ADAPTER 2u   /* the adapter's (J2534) */
+#define ECUIO_TIMING_CLOCK_KERNEL  3u   /* the kernel's (SocketCAN) */
+
+/* ecuio_session_timing_t flags */
+#define ECUIO_TIMING_ISOTP         0x00000001u   /* core reassembles */
+
+/* ecuio_request_timing_t flags: a quantile with enough samples */
+#define ECUIO_TIMING_LATENCY_P99   0x00000001u
+#define ECUIO_TIMING_LATENCY_P999  0x00000002u
+#define ECUIO_TIMING_INTERVAL_P99  0x00000004u
+#define ECUIO_TIMING_INTERVAL_P999 0x00000008u
+
+/* The columns of a recording's latency.csv and the keys of havne-cli's
+ * timing lines, in order (ADR-0042 section 3): a snapshot's session
+ * time, the channel's reply ID, the request's bytes, then a row's
+ * fields, then the interval's clock. One list, so the two writers stay
+ * alike. */
+#define ECUIO_TIMING_COLUMNS                                               \
+    "t_s,ecu,request,answered,refused,timeouts,packed,"                    \
+    "latency_p50_us,latency_p99_us,latency_p999_us,latency_max_us,"        \
+    "intervals,intervals_mixed,interval_p50_us,interval_p99_us,"           \
+    "interval_p999_us,interval_max_us,interval_clock"
+
+typedef struct ecuio_session_timing {
+    uint64_t snapshot_us;        /* the session time the rows were published */
+    uint32_t flags;              /* ECUIO_TIMING_ISOTP */
+    uint32_t interval_clock;     /* ECUIO_TIMING_CLOCK_* */
+    uint32_t rows;               /* requests with a row */
+    /* ISO-TP's receiver, where core reassembles (ADR-0040 section 5) */
+    uint32_t isotp_first_frames; /* segmented messages begun */
+    uint32_t isotp_completed;    /* messages finished, single frames too */
+    uint32_t isotp_dropped;      /* begun and never finished */
+    uint32_t isotp_malformed;    /* frames no message could use */
+    uint32_t reserved[7];
+} ecuio_session_timing_t;
+
+typedef struct ecuio_request_timing {
+    uint8_t  channel;
+    uint8_t  length;             /* request[0..length): the service, the key */
+    uint8_t  request[3];
+    uint8_t  reserved0[3];
+    uint32_t flags;              /* ECUIO_TIMING_LATENCY_P99 ... */
+    uint32_t answered;           /* positive replies */
+    uint32_t refused;            /* negative replies */
+    uint32_t timeouts;           /* waits that ended with nothing */
+    uint32_t packed;             /* answers and refusals that came to a pack */
+    uint32_t latency_p50_us;     /* over answers and refusals */
+    uint32_t latency_p99_us;
+    uint32_t latency_p999_us;
+    uint32_t latency_max_us;
+    uint32_t intervals;          /* between answers, on interval_clock */
+    uint32_t intervals_mixed;    /* left out: a fallback to the host's
+                                    delta between their two answers */
+    uint32_t interval_p50_us;
+    uint32_t interval_p99_us;
+    uint32_t interval_p999_us;
+    uint32_t interval_max_us;
+    uint32_t reserved[3];
+} ecuio_request_timing_t;
+
+#if defined(__cplusplus)
+static_assert(sizeof(ecuio_session_timing_t) == 64, "ecuio_session_timing_t size is ABI");
+static_assert(sizeof(ecuio_request_timing_t) == 80, "ecuio_request_timing_t size is ABI");
+static_assert(offsetof(ecuio_request_timing_t, flags) == 8, "timing flags offset is ABI");
+static_assert(offsetof(ecuio_request_timing_t, intervals) == 44, "intervals offset is ABI");
+#elif defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
+_Static_assert(sizeof(ecuio_session_timing_t) == 64, "ecuio_session_timing_t size is ABI");
+_Static_assert(sizeof(ecuio_request_timing_t) == 80, "ecuio_request_timing_t size is ABI");
+_Static_assert(offsetof(ecuio_request_timing_t, flags) == 8, "timing flags offset is ABI");
+_Static_assert(offsetof(ecuio_request_timing_t, intervals) == 44, "intervals offset is ABI");
+#endif
+
+/*
+ * Copies the session's timing report and up to capacity rows, in the
+ * engine's table order, and sets *count to how many rows there are;
+ * capacity 0 (rows may be NULL) asks the count. A session with no
+ * rotation (mock, replay) has none. ECUIO_OK; ECUIO_ERR_NULL_ARGUMENT for
+ * a NULL session, timing or count, or NULL rows with a capacity.
+ * Readable at any time and after close.
+ */
+ecuio_status_t ecuio_session_get_timing(
+    const ecuio_session_t* session,
+    ecuio_session_timing_t* timing,
+    ecuio_request_timing_t* rows,
+    uint32_t capacity,
+    uint32_t* count
 );
 
 #ifdef __cplusplus

@@ -194,7 +194,7 @@ TestCase {
     }
 
     // A step of two units over a minimum span of twenty takes a tenth of
-    // the height, where it would otherwise fill it (fuel level, 71–73 %)
+    // the height, where it would otherwise fill it (fuel level, 71-73 %)
     function test_minimumSpanKeepsSmallStepsSmall() {
         const fuel = [series(0, [[0, 71], [1000, 73], [2000, 71], [3000, 73]])]
         const wide = layout(fuel, { minSpanUnits: 20 })
@@ -259,6 +259,41 @@ TestCase {
         compare(ChartLayout.tickStep(12), 2)
         compare(ChartLayout.tickStep(12.5), 5)
         compare(ChartLayout.tickStep(60), 5)
+        compare(ChartLayout.tickStep(60, 20, 40), 5, "room enough at 5 s")
+        compare(ChartLayout.tickStep(60, 6, 40), 10, "raised until 40 px fit")
+        compare(ChartLayout.tickStep(300, 1, 40), 60)
+        compare(ChartLayout.tickStep(3, 100, 40), 1, "never under the span's step")
+        compare(ChartLayout.tickStep(5000, 0.01, 40), 600, "the longest step at most")
+    }
+
+    // A window fixes the time axis's span before the newest sample, so
+    // two seconds of history sit at the right of a 30 s axis
+    function test_aWindowSpansTheAxis() {
+        const l = layout([series(0, [[100000, 0], [102000, 1]])], { windowMs: 30000 })
+        compare(l.ticks[l.ticks.length - 1].seconds, 30, "the axis runs back 30 s")
+        const xs = l.traces[0].segments[0].map(p => p.x)
+        verify(xs[0] > l.plotW * 0.9, "the first sample is at x " + xs[0] + " of " + l.plotW)
+        compare(xs[xs.length - 1], l.plotW - 1, "the newest at the right edge")
+    }
+
+    // A long span on a narrow plot (Live on a phone, 45 s in about 380
+    // px) takes a step whose captions don't overlap one another or "now"
+    function test_captionsNeverOverlap() {
+        const caption = s => s === 0 ? "now" : "\u2212" + s + " s"
+        const measure = text => 9 * text.length
+        const l = ChartLayout.layout([series(0, [[0, 0], [45000, 1]])], 420, 200, {
+            gapMs: 0, minSpanUnits: 0, measure: measure,
+            format: (v, d, u) => v.toFixed(d), caption: caption })
+        verify(l.ticks.length > 1)
+        compare(l.ticks[0].caption, "now")
+        compare(l.ticks[1].caption, "\u2212" + l.ticks[1].seconds + " s")
+        const shown = l.ticks.filter(t => t.captioned)
+        for (let i = 1; i < shown.length; ++i) {
+            const right = shown[i].x + measure(shown[i].caption) / 2
+            const left = i === 1 ? shown[0].x - measure(shown[0].caption)
+                                 : shown[i - 1].x - measure(shown[i - 1].caption) / 2
+            verify(right <= left, "caption " + i + " ends at " + right + ", the next starts at " + left)
+        }
     }
 
     // Ticks count seconds back from the newest sample, newest first; a

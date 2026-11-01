@@ -10,6 +10,145 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
 
 ## [Unreleased]
 
+### Added
+- Each CI run builds an unsigned iPhone app, `havne-ios-unsigned.ipa`,
+  that a tester installs with a sideloading tool and their own Apple ID
+  ([docs/ios.md](docs/ios.md)). On iOS the app asks before reaching a
+  WiFi adapter on the local network, and its recordings show in the
+  Files app.
+- **Trouble codes, readiness and the freeze frame**
+  ([ADR-0037](docs/adr/0037-reading-trouble-codes.md)): a session that
+  asks the car (`obd2` or `uds-generic`, through a J2534 or ELM327
+  adapter) reads each ECU's check-engine light, its stored, pending and
+  permanent trouble codes, its readiness monitors and the freeze frame
+  stored with a code, once at connect, taking turns with the live
+  values. `?diagnose=0` leaves them out.
+- **A Diagnostics page** (after Live in the sidebar, "Codes" among a
+  narrow window's tabs) shows each ECU's light, its codes by list,
+  which monitors are complete and the freeze frame's values in the
+  chosen units; **Read again** asks once more. The last read stays on
+  the page after a disconnect.
+- The activity log gets one line per ECU per read
+  (`ECU 0x7E8 diagnostics: MIL on; stored P0301 …`), so a recording's
+  `events.log` keeps the codes as they were.
+- The simulated car (`mock://`) has an engine ECU with trouble codes, a
+  readiness report and a freeze frame, so the page and the log line
+  show with no hardware (`?diagnose=0` leaves them out).
+- `havne-cli stream` writes a `diagnostics` line per ECU when its read
+  completes: the light, each list's codes, the monitors and the freeze
+  frame's values, with a refusal's reply bytes.
+- **Clearing trouble codes**
+  ([ADR-0038](docs/adr/0038-clearing-trouble-codes.md)): **Clear
+  codes...** on the Diagnostics page asks first, saying what a clear
+  erases (the stored and pending codes, the freeze frame, the
+  check-engine light, the readiness monitors' results) and what it
+  keeps (permanent codes). The report is saved to
+  `diagnostics-<date-time>.jsonl` in the recordings folder before
+  anything is sent, and nothing is sent if it can't be. Each ECU is
+  asked its engine speed first and cleared only with the engine
+  stopped, then read again; the page and the activity log say what
+  became of each (`ECU 0x7E8 clear: cleared`, `not sent: engine
+  running (812 rpm)`, ...). Not yet run on a car.
+- **Every standard Service 01 reading**
+  ([ADR-0039](docs/adr/0039-full-service01-coverage.md)): the `obd2`
+  profile reads every linear field of SAE J1979's Service 01 table,
+  130 signals in all (both banks' fuel trims, every oxygen sensor, the
+  wide-range sensors' lambda and current, fuel pressure, catalyst
+  temperatures, torque, run times and distances among them), and asks
+  each car only for the ones it has. The fast-changing readings (rpm,
+  speed, load, MAF, throttle, fuel pressure, lambda) are asked twice
+  for each slow one (temperatures, pressures, counters).
+- Live lists only the signals the car's ECU supports and sends, with a
+  line saying how many it left out; the Dashboard and recordings keep
+  every signal. A field the ECU's replies come without (bank 3 of a
+  two-bank engine's oxygen-sensor trims) is left out too.
+- Live plots six signals when a session starts, not every one: the
+  first six the car has of a ranked list (rpm, coolant, intake air and
+  oil temperatures, MAF, speed, load, timing advance, the fuel trims,
+  then MAP, voltage, the pedal and commanded lambda), so a car without
+  one plots the next. A tick or untick is kept for the picked vehicle;
+  the mock and `uds-generic` still plot every signal. Each signal def
+  carries its place as `plot_rank` (core's C API).
+- Live's chart shows the last 10, 30, 60 or 120 s, picked above it and
+  kept between runs: every trace covers that span, however fast its
+  signal refreshes.
+- With the probe on, a Service 01 request carries up to six PIDs of
+  one rate class, each one the car has already answered alone, so a
+  pass asks the same signals in fewer requests; `?pack=0` asks one PID
+  per request. A car that answers such requests with silence, a refusal
+  or one PID three times in a row is asked one PID per request for the
+  session, and its support report says so, as does the activity log's
+  ECU line. On the test car through the MX+, each signal refreshed four
+  to five times as often.
+- Core decodes a Service 01 reply that carries several PIDs (as
+  J1979 allows, and as other tools' recordings may hold) record by
+  record, using each PID's length as the car sends it;
+  `ecuio_session_get_unsplit_replies` counts the ones that wouldn't
+  split.
+- `ecuio_session_get_absent_signals` (core's C API) lists the signals
+  a session's replies come without, and `havne-cli stream --values`
+  writes them as an `absent` line.
+- Core's C API makes three more judgments for a front end:
+  `ecuio_session_get_unsupported_signals` lists the signals whose PID
+  the ECU doesn't support, `ecuio_identity_vin` picks the VIN from an
+  identification report, and each channel's support report counts its
+  supported PIDs (`pids_supported`) and the highest PID its bitmaps
+  answered for (`pids_through`).
+- Imperial units show Pa as inH2O, L/h as gal/h and `N·m` as `lb·ft`.
+- **Requests on SocketCAN**
+  ([ADR-0040](docs/adr/0040-socketcan-requests-isotp.md)): on Linux,
+  `obd2` and `uds-generic` run on a native CAN interface
+  (`socketcan://can0?profile=obd2&baud=500000`), with ISO-TP done in
+  core and the same query keys as `j2534://` and `elm327://`. Havne
+  sends only through a controller brought up to stop at once on a
+  fault (normal mode at the rate `?baud=` states, `restart-ms 0`,
+  `one-shot on`, no errors counted), and after a CAN error on its first
+  request it sends nothing more; each refusal gives the `ip link`
+  commands that fix it. ISO-TP's timeouts run on the kernel's receive
+  times, so a reply the bus carried on time still counts when the
+  computer is slow to read it. Run on Linux's virtual CAN bus; not yet
+  through a real controller or on a car.
+- An ELM327's replies reassemble through the same ISO-TP code.
+- **Fault injection on a replay**
+  ([ADR-0041](docs/adr/0041-replay-fault-injection.md)):
+  `replay://<recording>?faults=drop:5,overflow:1,corrupt:1,truncate:2,stall:1:500`
+  plays a recording with frames dropped, lost to an overflow (the next
+  frame flagged), corrupted (one bit flipped), cut short or held back,
+  each at its chance per frame, the same each run from `?seed=`. The
+  activity log says a replay has faults and what they did when it
+  finishes, `havne-cli stream` writes the counts in its `end` line, and
+  `ecuio_session_get_replay_faults` reads them.
+- **Reply timing per request**
+  ([ADR-0042](docs/adr/0042-reply-timing.md)): a requesting session
+  measures each PID's (or DID's) answers, refusals and timeouts, its
+  reply latency and its refresh interval at P50, P99 and P99.9, the
+  interval on the adapter's, the kernel's or the host's clock, as the
+  output says. A recording of the session holds them in `latency.csv`,
+  added to every 10 s, and `havne-cli stream` writes them as `timing`
+  lines; the activity log sums them up at the disconnect, with ISO-TP's
+  counts on SocketCAN and ELM327. `ecuio_session_get_timing` reads them.
+
+### Changed
+- The simulated car starts each loop with the key on and the engine
+  stopped for 15 s, then a start, so a clear can be shown with no
+  hardware; `mock://`'s first frames read 0 rpm.
+- The Log page's **Activity | Frames** switch (developer mode) sits
+  beside the title and stays in place when the view changes, so it no
+  longer moves out from under the pointer as the buttons beside it
+  change.
+- A release's page opens with a table linking each platform's
+  download, and one build provenance file,
+  `havne-X.Y.Z.intoto.jsonl`, covers every download instead of one
+  beside each, so the list of files is shorter.
+
+### Fixed
+- A replay's end is judged by the rows read and the frames lost to
+  faults, so the activity log's "Replay finished" line and `havne-cli
+  stream`'s end come for a replay whose faults dropped frames.
+- Live's time axis no longer draws its captions over one another on a
+  narrow window, such as a phone's: the step between ticks grows until
+  each caption fits.
+
 ## [0.3.4] - 2026-10-30
 
 ### Added
@@ -130,7 +269,7 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
   DIDs, and the Record sessions switch between runs. A URI that failed
   to connect isn't kept.
 - Settings' adapter list shows each device's firmware versions as last
-  seen at a connect ("last seen: …"), without opening the adapter. A
+  seen at a connect ("last seen: ..."), without opening the adapter. A
   serial port shows whatever adapter answered on it last.
 - Vehicles ([ADR-0027](docs/adr/0027-vehicle-profiles.md)). Settings'
   Vehicle row keeps named vehicles: pick one before connecting and it
@@ -154,7 +293,7 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
   It has read a car through an OBDLink MX+.
 - On Android, an adapter session keeps running in the background and
   with the screen off, recording included. While it's connected a
-  notification says so ("Connected to …", "· recording"), with a
+  notification says so ("Connected to ...", "· recording"), with a
   small gauge in the status bar and no sound; a tap opens the app. Havne asks once, at the first adapter connect, to
   show notifications, and the phone stays awake (not its screen) for
   as long as the session lasts. A dropped classic Bluetooth link
@@ -190,7 +329,7 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
   heading saying what it holds now: Adapter (the devices found, then
   the WiFi addresses and other choices the list doesn't show), Vehicle,
   What to read, Recording (with the recent recordings to replay) and
-  Display. Connect… on Home, Live or the header opens Settings with
+  Display. Connect... on Home, Live or the header opens Settings with
   Adapter unfolded. A button too long for a phone's width wraps its
   text.
 - Selecting a device, a recording or a preset in Settings scrolls back

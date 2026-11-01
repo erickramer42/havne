@@ -40,7 +40,7 @@ Rectangle {
             y: Math.max(Theme.pageMargin, (flick.height - height) / 2)
             spacing: 24
 
-            // Logo block: animated tachometer mark, 0..8 ×1000 r/min, red
+            // Logo block: animated tachometer mark, 0..8 x1000 r/min, red
             // from 6.5. No numerals or readout; at this size they'd crowd it.
             Rectangle {
                 id: logo
@@ -144,7 +144,7 @@ Rectangle {
                         readonly property bool major: index % 2 === 0
 
                         width: logo.width; height: logo.height
-                        rotation: logo.angleOf(v) + 90   // 0° rotation = 12 o'clock
+                        rotation: logo.angleOf(v) + 90   // 0 degrees rotation = 12 o'clock
 
                         Rectangle {
                             antialiasing: true

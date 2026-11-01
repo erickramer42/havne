@@ -7,7 +7,8 @@
 //          info and the readings' "not present", the requests (the count
 //          digit, and its loss for a reply that spans frames, header
 //          switches, the rotation, the probe, the DID scan,
-//          identification), multi-frame replies, link health and its
+//          identification, diagnostics, Read again and a clear), multi-frame
+//          replies, link health and its
 //          recovery (NO DATA, CAN ERROR, a dropped link, an adapter
 //          reset), the pending reply, passive listening (Listening*:
 //          AT MA, the channels' messages, the quiet run, the liveness
@@ -21,6 +22,8 @@
 //          session through an app-fed stream (ADR-0028), its failure and
 //          reopen, the open's wait and its stop. BENCH: the Win32 port,
 //          the VX's WiFi.
+//          Reply timing (ADR-0042):
+//          Elm327SessionTest.TimingReportsEachRequestOnTheHostsClock
 
 #include "ecuio/core.h"
 #include "ecuio/internal.h"
@@ -48,8 +51,8 @@
 
 /* The query keys attach reads, for create's check (internal.h). */
 extern "C" const char* const ecuio_elm327_query_keys[] = {
-    "baud",  "serial",   "filter",  "txid", "poll",
-    "probe", "identify", "profile", "did",  nullptr};
+    "baud",     "serial",   "filter",  "txid", "poll", "probe",
+    "identify", "diagnose", "pack",    "profile", "did", nullptr};
 
 namespace {
 
@@ -58,14 +61,14 @@ namespace {
 std::atomic<ecuio_elm327_port_open_t> g_opener{nullptr};
 
 /* The serial rate a wired ELM327 starts at with its rate pin high; the
- * other is 9600 (ADR-0026 §2). */
+ * other is 9600 (ADR-0026 section 2). */
 constexpr uint32_t ELM327_SERIAL_DEFAULT = 38400;
 constexpr uint32_t ELM327_SERIAL_MIN = 300;
 constexpr uint32_t ELM327_SERIAL_MAX = 4000000;
 constexpr unsigned long ELM327_CAN_BAUD_DEFAULT = 500000;
 
 /* No line and no prompt this long: the adapter, or the link to it, has
- * failed (ADR-0026 §6). Counted from the last line, so a pending reply's
+ * failed (ADR-0026 section 6). Counted from the last line, so a pending reply's
  * wait (an STN listening past 7F xx 78) never runs into it. */
 constexpr uint32_t ELM327_PROMPT_TIMEOUT_MS = 5000;
 
@@ -97,7 +100,7 @@ enum class elm327_io {
     silent,  /* no line and no prompt for ELM327_PROMPT_TIMEOUT_MS */
     failed,  /* the port failed */
     stopped, /* the session is closing */
-    reset    /* the adapter reset on its own (ADR-0026 §6) */
+    reset    /* the adapter reset on its own (ADR-0026 section 6) */
 };
 
 struct ecuio_elm327_transport {
@@ -128,6 +131,9 @@ struct ecuio_elm327_transport {
     /* The requests and their pacing (request_engine.h), built at attach,
      * the worker's alone after; probe and identify as for J2534. */
     ecuio_request_engine engine;
+    /* The engine's reply timing (ADR-0042): an ELM327's frames are
+     * stamped as their lines are read, so the intervals are the host's */
+    std::unique_ptr<ecuio_timing_table> timing;
     bool probe = false;
     bool identify = false;
     /* The Service 01 PIDs asked with the response-count digit
@@ -140,7 +146,7 @@ struct ecuio_elm327_transport {
     uint32_t rx_len = 0;
     uint32_t rx_pos = 0;
     elm327_reader reader;
-    elm327_isotp isotp;
+    isotp_rx isotp;
     /* Session time counts from the end of attach, as mock's does; the
      * frame dispatched from here. */
     host_clock::time_point epoch{};
@@ -373,7 +379,7 @@ struct setup_answer {
     char first[ELM327_QUOTE_MAX + 1] = {}; /* else the first line */
 };
 
-/* A contract command (ADR-0026 §3): its answer must be OK. An answer
+/* A contract command (ADR-0026 section 3): its answer must be OK. An answer
  * that holds a reset's banner instead belonged to a reset still
  * finishing when the command went out (the MX+ on a new Bluetooth link
  * answered AT Z twice, the second time late:
@@ -486,7 +492,7 @@ setup_answer identify(transport* t, const char* cmd, char* version,
     return a;
 }
 
-/* The setup's contract commands (ADR-0026 §3), each answered before the
+/* The setup's contract commands (ADR-0026 section 3), each answered before the
  * next: a known state, then everything the framing rests on. Any
  * answer but OK refuses, so an adapter never runs half-configured. The
  * reset is sent twice at most: an adapter still monitoring the bus takes
@@ -554,7 +560,7 @@ ecuio_status_t run_setup(transport* t, char* version, size_t version_cap)
     return ECUIO_OK;
 }
 
-/* A reading's first line that matches (ADR-0026 §3): anything else,
+/* A reading's first line that matches (ADR-0026 section 3): anything else,
  * '?' included, means "not present", and nothing fails. */
 template <typename Match>
 bool reading(transport* t, const char* cmd, char* out, size_t cap,
@@ -570,7 +576,7 @@ bool reading(transport* t, const char* cmd, char* out, size_t cap,
     return io == elm327_io::prompt && found;
 }
 
-/* The session info (ADR-0019, ADR-0026 §7): what the session runs on,
+/* The session info (ADR-0019, ADR-0026 section 7): what the session runs on,
  * then the readings. A reading the adapter refuses leaves its flag
  * clear. */
 void describe_session(transport* t, const char* reset_version,
@@ -671,8 +677,8 @@ void note_overflow(transport* t)
 void take_frame(transport* t, const elm327_can_line& f, reply_seen& seen,
                 bool to_engine)
 {
-    elm327_message m;
-    if (elm327_isotp_take(t->isotp, f, &m) != elm327_isotp_result::complete) {
+    isotp_message m;
+    if (isotp_take(t->isotp, f, 0, &m) != isotp_result::complete) {
         return;
     }
     for (uint32_t c = 0; c < t->chan_count; ++c) {
@@ -702,7 +708,7 @@ void take_frame(transport* t, const elm327_can_line& f, reply_seen& seen,
     }
 }
 
-/* Asks request r of channel c (ADR-0026 §3): its header if another
+/* Asks request r of channel c (ADR-0026 section 3): its header if another
  * channel's is set, then the request with the response-count digit when
  * its reply is taken to fit one Single Frame (elm327_response_count),
  * then the reply to its prompt. */
@@ -730,12 +736,14 @@ elm327_io ask(transport* t, uint32_t c, int32_t r, reply_seen& seen)
                                                        : header.io);
     }
     const ecuio_request& q = ecuio_engine_request_of(&e, c, r);
+    const bool pack = r == ECUIO_ENGINE_PACK;
     const uint8_t count =
-        elm327_response_count(q.bytes, q.len, t->tx_ids[c], t->one_frame);
+        pack ? elm327_pack_count(q.reply_len, t->tx_ids[c])
+             : elm327_response_count(q.bytes, q.len, t->tx_ids[c], t->one_frame);
     const uint8_t pid = q.bytes[1]; /* the one-shot settles in the reply */
     char cmd[ELM327_CMD_MAX];
     if (elm327_format_request(q.bytes, q.len, count, cmd, sizeof(cmd)) == 0) {
-        return unsent(elm327_io::prompt); /* never: 2 or 3 bytes */
+        return unsent(elm327_io::prompt); /* never: 1 to 7 bytes */
     }
     ecuio_engine_sent(&e, c, r, true, now_us(t));
     const elm327_io io = command(t, cmd, true, [&](const elm327_reader& line) {
@@ -760,8 +768,8 @@ elm327_io ask(transport* t, uint32_t c, int32_t r, reply_seen& seen)
             break;
         }
     });
-    if (io == elm327_io::prompt && elm327_isotp_end_reply(t->isotp) > 0 &&
-        count > 0) {
+    if (io == elm327_io::prompt && isotp_end_all(t->isotp) > 0 && count > 0 &&
+        !pack) {
         /* The digit ended the reply after a First Frame: the PID's reply
          * spans frames, and this one is lost to the engine's wait. From
          * now on it goes without the digit */
@@ -964,7 +972,7 @@ monitor_end listen(transport* t, link_health& h)
         t->rx_pos = 0;
     }
     /* a message under way when the monitor ended never finishes */
-    (void)elm327_isotp_end_reply(t->isotp);
+    (void)isotp_end_all(t->isotp);
     return end;
 }
 
@@ -1029,7 +1037,7 @@ bool backoff_sleep(transport* t, uint32_t ms)
     return true;
 }
 
-/* The worker (ADR-0026 §3): the request engine driven as the J2534
+/* The worker (ADR-0026 section 3): the request engine driven as the J2534
  * worker drives it, with one command outstanding for the whole adapter,
  * since an ELM327 takes the next command only after its prompt. Each
  * pass ends the waits that ran out, asks the first channel in turn with
@@ -1038,7 +1046,7 @@ bool backoff_sleep(transport* t, uint32_t ms)
  * request's floor or wait, or, with nothing left to ask, for the idle
  * read's 100 ms, which counts toward quiet as J2534's passive reads do.
  *
- * Link health (ADR-0026 §6, link_health.h): a reply with a channel's
+ * Link health (ADR-0026 section 6, link_health.h): a reply with a channel's
  * message is OK; NO DATA leaves the engine's wait to time the request
  * out; CAN ERROR and its kin, or '?', is a write that failed; a port
  * that fails, or no prompt within 5 s, is a hard failure, after which
@@ -1056,9 +1064,13 @@ void elm327_worker(transport* t)
     link_health h(t->session->last_error, t->session->error_count);
     uint32_t published[ECUIO_MAX_CHANNELS] = {};
     uint32_t published_identity[ECUIO_MAX_CHANNELS] = {};
+    uint32_t published_diagnostics[ECUIO_MAX_CHANNELS] = {};
+    uint32_t diag_seen = 0;
+    uint32_t clear_seen[ECUIO_MAX_CHANNELS] = {};
     uint32_t next_chan = 0;
     const bool passive = e.count == 0 && e.scan_count == 0;
     uint32_t relisten_ms = 0;
+    int64_t timing_at = 0;
     if (t->probe) {
         ecuio_engine_probe(&e, now_us(t));
     }
@@ -1161,11 +1173,17 @@ void elm327_worker(transport* t)
             /* the scan's and identification's unanswered requests */
             ecuio_engine_rescan(&e);
         }
+        ecuio_take_diag_request(t->session, &e, diag_seen);
+        ecuio_take_clear_requests(t->session, &e, clear_seen);
         for (uint32_t c = 0; c < t->chan_count; ++c) {
             ecuio_publish_support(t->session, e, c, t->rx_ids[c], published[c]);
             ecuio_publish_identity(t->session, e, c, t->rx_ids[c],
                                    published_identity[c]);
+            ecuio_publish_diagnostics(t->session, e, c, t->rx_ids[c],
+                                      published_diagnostics[c]);
         }
+        ecuio_publish_timing(t->session, e, &t->isotp, now_us(t), timing_at,
+                             false);
 
         if (h.backoff_ms > 0) {
             if (backoff_sleep(t, h.backoff_ms)) {
@@ -1174,6 +1192,7 @@ void elm327_worker(transport* t)
             h.backoff_ms = link_backoff_next(h.backoff_ms);
         }
     }
+    ecuio_publish_timing(t->session, e, &t->isotp, now_us(t), timing_at, true);
 }
 
 ecuio_status_t elm327_start(ecuio_session_t* session, void* impl)
@@ -1193,7 +1212,7 @@ ecuio_status_t elm327_start(ecuio_session_t* session, void* impl)
 }
 
 /* Joins the worker, then closes the port. The adapter keeps the setup
- * until its next reset; nothing it holds was written (ADR-0026 §5). */
+ * until its next reset; nothing it holds was written (ADR-0026 section 5). */
 void elm327_detach(ecuio_session_t* session, void* impl)
 {
     (void)session;
@@ -1215,7 +1234,7 @@ const ecuio_transport_ops_t kElm327Ops = {elm327_start, elm327_detach};
  *           two, which the ELM327 has protocols for
  *   serial  the serial port's rate for a wired adapter, default 38400;
  *           a Bluetooth port ignores it, a TCP address refuses it
- *   filter, txid, poll, probe, identify: the request keys
+ *   filter, txid, poll, probe, identify, diagnose: the request keys
  *           (ecuio_request_param), as for j2534://
  *   profile, did: core's, read by create */
 ecuio_status_t parse_query(const ecuio_uri_query* query, transport* t,
@@ -1319,6 +1338,7 @@ ecuio_status_t elm327_attach(ecuio_session_t* session, const char* uri,
     if (st != ECUIO_OK) {
         return st;
     }
+    ecuio_attach_timing(t->engine, t->timing, ECUIO_TIMING_CLOCK_HOST);
     elm327_one_frame_pids_for(set, &t->one_frame);
     /* A session that asks nothing listens on its channels (AT MA keeps
      * the receive filter); with none, the whole bus would be raw frames

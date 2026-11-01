@@ -1,14 +1,23 @@
 // File/layer: app/sessionbridge.cpp | Qt6 Core, app layer, C++17
-// Testing: test_bridge (QtCore only): worker→GUI marshaling, coalescing,
+// Testing: test_bridge (QtCore only): worker->GUI marshaling, coalescing,
 //          in-flight backpressure, the frame log's ring and order, its
 //          rows' payload storage (BridgeTest.FrameLogHoldsLongPayloadsOnlyWhileShown)
 //          and the counters on the tick, core's values staged from the
 //          worker (BridgeTest.Values*, .RecordingHoldsEveryValueCoreDecodes),
 //          each window's envelope at its frames' times
 //          (BridgeTest.AWindow*, .TheChartKeepsTheFixturesPeak), rows by
-//          id, the signal model's roles and age
+//          id, the signal model's roles and age, the rows core reports
+//          unsupported or absent, hidden from Live's filtered view
+//          (BridgeTest.LiveHides*),
 //          refresh, link-state mapping, the activity log's session,
-//          ECU and delivery lines (the ELM327 session line too,
+//          ECU, diagnostics and delivery lines (the ELM327 session line too,
+//          the diagnostics line: BridgeTest.ChannelDiagnosticsText*,
+//          .ConnectLogsTheMocksDiagnostics; a clear's saved report and
+//          lines, ADR-0038: BridgeTest.ChannelClearText*,
+//          .DiagnosticsFileTextIsTheCliLines, .AClearSavesTheReportFirst,
+//          .AFailedSaveSendsNoClear, and on Windows
+//          .AClearRefusedForTheEngineLogsOneLineAndNoRead and
+//          .AClearAtTheFakesStoppedEngineLogsTheReadAfter;
 //          a sleep's line: BridgeTest.ASleepWhileConnectedIsLoggedWithItsLength,
 //          BridgeTest.SessionInfoTextNamesTheAdapter; its versions clause
 //          as adapterVersions, .ConnectLogsTheAdaptersSession), the serial ports as
@@ -25,14 +34,18 @@
 //          .AConnectsVinReachesQmlOnlyAsASaltedHash and
 //          .RecordingFolderNamesThePickedVehicleForAnAdapterOnly). QML
 //          rendering: manual smoke.
+//          reply timing's snapshots and line (ADR-0042):
+//          BridgeTest.ARecordingKeepsReplyTimingsSnapshots, .TimingText*
 
 #include "sessionbridge.h"
 #include "carryover.h"
+#include "diagnostics_line.h" /* cli/: havne-cli's diagnostics line */
 #include "ecuio/version.h"
 #include "ecuio/signals.h"
 #include "ecuio/j2534.h"
 #include "ecuio/profile.h"
 #include "ecuio/serial.h"
+#include "ecuio/signal_sets.h"
 #include "ecuio/socketcan.h"
 
 #include <QMetaObject>
@@ -44,15 +57,32 @@
 #include <QFileInfo>
 #include <QRandomGenerator>
 #include <QRegularExpression>
+#include <QSaveFile>
 #include <QStandardPaths>
 #include <QStringList>
 #include <QtGlobal>
 
 #include <algorithm>
+#include <limits>
 #include <chrono>
 #include <cstring>
 
 namespace {
+
+// A file or folder for display: relative to Documents when under it,
+// so the account name stays out of the log and the page
+QString documentsRelative(const QString& path)
+{
+    const QString docs =
+        QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation);
+    if (!docs.isEmpty()) {
+        const QString rel = QDir(docs).relativeFilePath(path);
+        if (QDir::isRelativePath(rel) && !rel.startsWith(QLatin1String(".."))) {
+            return QDir::toNativeSeparators(QStringLiteral("Documents/") + rel);
+        }
+    }
+    return QDir::toNativeSeparators(path);
+}
 
 // A failed create or start, in words: the status, then core's detail
 // (which URI key, which vendor call, the vendor's text) when it has one.
@@ -239,6 +269,8 @@ QVariant SignalListModel::data(const QModelIndex& index, int role) const
         case IsTextRole: return e.isText;
         case WindowHighRole: return shown(e, e.windowHigh).value;
         case WindowLowRole: return shown(e, e.windowLow).value;
+        case RowRole: return index.row();
+        case HiddenRole: return e.hidden;
         default: return QVariant();
     }
 }
@@ -257,7 +289,9 @@ QHash<int, QByteArray> SignalListModel::roleNames() const
         {TextRole, "text"},
         {IsTextRole, "isText"},
         {WindowHighRole, "windowHigh"},
-        {WindowLowRole, "windowLow"}
+        {WindowLowRole, "windowLow"},
+        {RowRole, "row"},
+        {HiddenRole, "hidden"}
     };
 }
 
@@ -265,6 +299,9 @@ void SignalListModel::setSignalSet(const ecuio_signal_set_t* set)
 {
     // NULL/empty is valid (the raw profile): clear the model rather
     // than keep the previous session's rows.
+    const bool hadHidden = m_hiddenCount != 0;
+    m_hiddenCount = 0;
+    m_ranked = false;
     if (set == nullptr || set->defs == nullptr || set->count == 0) {
         beginResetModel();
         m_entries.clear();
@@ -272,6 +309,7 @@ void SignalListModel::setSignalSet(const ecuio_signal_set_t* set)
         m_subscribedCount = 0;
         endResetModel();
         emit subscribedCountChanged();
+        if (hadHidden) emit hiddenCountChanged();
         m_clock.restart();
         return;
     }
@@ -281,24 +319,30 @@ void SignalListModel::setSignalSet(const ecuio_signal_set_t* set)
     m_rowOfId.clear();
     m_rowOfId.reserve(static_cast<qsizetype>(set->count));
     m_subscribedCount = 0;
+    // Each entry holds its history ring (tens of KB): built in place,
+    // never on the stack or moved by a reallocation
+    m_entries.reserve(set->count);
 
     for (uint32_t i = 0; i < set->count; ++i) {
-        Entry e = {};   // value-init zeroes the history ring, head, and count
+        // value-init zeroes the history ring, head, and count
+        m_rowOfId.insert(set->defs[i].id, static_cast<int>(m_entries.size()));
+        Entry& e = m_entries.emplace_back();
         e.id = set->defs[i].id;
         qstrncpy(e.name, set->defs[i].name, sizeof(e.name));   // always terminates
         qstrncpy(e.unit, set->defs[i].unit, sizeof(e.unit));
         e.decimals = set->defs[i].decimal_places;
         e.isText = set->defs[i].kind == ECUIO_VALUE_TEXT ||
                    set->defs[i].kind == ECUIO_VALUE_HEX;
-        // A text row has nothing to plot, so it's never subscribed
-        e.subscribed = !e.isText;
-        if (e.subscribed) ++m_subscribedCount;
-        m_rowOfId.insert(e.id, static_cast<int>(m_entries.size()));
-        m_entries.push_back(e);
+        e.plotRank = set->defs[i].plot_rank;
+        m_ranked = m_ranked || (e.plotRank != 0 && !e.isText);
+        // judgePlotted's, below; a text row has nothing to plot
+        e.subscribed = false;
     }
     endResetModel();
-    // A new set plots every numeric row, whatever the last one plotted
+    // A new set plots its defaults, whatever the last one plotted
+    judgePlotted();
     emit subscribedCountChanged();
+    if (hadHidden) emit hiddenCountChanged();
 
     m_clock.restart();
 }
@@ -442,12 +486,28 @@ void SignalListModel::pushWindow(Entry& e, const WindowValue& w)
     }
 }
 
-QVariantList SignalListModel::chartData() const
+QVariantList SignalListModel::chartData(qint64 windowMs, int columns) const
 {
+    const auto plotted = [](const Entry& e) {
+        return e.subscribed && !e.hidden && e.histCount != 0;
+    };
+    // The window ends at the newest plotted sample, the chart's "now"
+    qint64 newest = std::numeric_limits<qint64>::min();
+    for (const Entry& e : m_entries) {
+        if (plotted(e)) {
+            const uint32_t last = (e.histHead + HistoryCapacity - 1) % HistoryCapacity;
+            newest = std::max(newest, e.history[last].timestampMs);
+        }
+    }
+    const qint64 from = windowMs > 0 ? newest - windowMs
+                                     : std::numeric_limits<qint64>::min();
+    const double sliceMs = (windowMs > 0 && columns > 0)
+                               ? static_cast<double>(windowMs) / columns : 0.0;
+
     QVariantList out;
     for (size_t row = 0; row < m_entries.size(); ++row) {
         const Entry& e = m_entries[row];
-        if (!e.subscribed || e.histCount == 0) continue;
+        if (!plotted(e)) continue;
 
         const ecuio_display_value_t now = shown(e, e.value);
         QVariantMap m;
@@ -462,13 +522,53 @@ QVariantList SignalListModel::chartData() const
         // When full, the oldest surviving sample sits at histHead (the
         // next eviction slot); while filling, samples are dense from 0.
         QVariantList samples;
-        const uint32_t start = (e.histCount == HistoryCapacity)
-                                ? e.histHead : 0;
-        for (uint32_t i = 0; i < e.histCount; ++i) {
-            const Sample& s = e.history[(start + i) % HistoryCapacity];
+        const auto put = [&](const Sample& s) {
             samples.append(static_cast<double>(s.timestampMs));
             samples.append(now.converted ? shown(e, s.value).value : s.value);
+        };
+        // A slice's lowest and highest, in time order, once each
+        const Sample* low = nullptr;
+        const Sample* high = nullptr;
+        const auto flush = [&]() {
+            if (low != nullptr) {
+                const Sample* a = low->timestampMs <= high->timestampMs ? low : high;
+                const Sample* b = a == low ? high : low;
+                put(*a);
+                if (b != a) put(*b);
+            }
+            low = high = nullptr;
+        };
+        const uint32_t start = (e.histCount == HistoryCapacity)
+                                ? e.histHead : 0;
+        qint64 slice = -1;
+        const Sample* last = nullptr;
+        for (uint32_t i = 0; i < e.histCount; ++i) {
+            const Sample& s = e.history[(start + i) % HistoryCapacity];
+            if (s.timestampMs < from) continue;
+            last = &s;
+            if (sliceMs <= 0.0) {
+                put(s);
+                continue;
+            }
+            const qint64 k = static_cast<qint64>((s.timestampMs - from) / sliceMs);
+            if (k != slice) {
+                flush();
+                slice = k;
+            }
+            if (low == nullptr || s.value < low->value) low = &s;
+            if (high == nullptr || s.value > high->value) high = &s;
         }
+        if (sliceMs > 0.0) {
+            /* the newest sample always: the trace ends, and its label
+             * sits, where the value is now */
+            if (last != nullptr && last != low && last != high) {
+                flush();
+                put(*last);
+            } else {
+                flush();
+            }
+        }
+        if (samples.isEmpty()) continue;
         m["samples"] = samples;
         out.append(m);
     }
@@ -480,43 +580,164 @@ void SignalListModel::toggleSubscribed(int row)
     if (row < 0 || row >= static_cast<int>(m_entries.size())) return;
     Entry& e = m_entries[static_cast<size_t>(row)];
     if (e.isText) return;   // nothing to plot
-    e.subscribed = !e.subscribed;
-    if (e.subscribed) ++m_subscribedCount; else --m_subscribedCount;
-    emit dataChanged(index(row), index(row), {SubscribedRole});
-    emit subscribedCountChanged();
+    const bool plot = !e.subscribed;
+    e.choice = plot == e.plotDefault ? PlotChoice::Default
+             : plot                  ? PlotChoice::Plotted
+                                     : PlotChoice::Unplotted;
+    judgePlotted();
 }
 
-QStringList SignalListModel::unplottedNames() const
+QStringList SignalListModel::plottedNames() const
 {
     QStringList names;
     for (const Entry& e : m_entries) {
-        if (!e.isText && !e.subscribed) {
+        if (!e.isText && e.choice == PlotChoice::Plotted) {
             names << QString::fromUtf8(e.name);
         }
     }
     return names;
 }
 
-void SignalListModel::setUnplotted(const QStringList& names)
+QStringList SignalListModel::unplottedNames() const
 {
-    bool changed = false;
-    for (Entry& e : m_entries) {
-        if (e.isText) {
-            continue;
-        }
-        const bool subscribed = !names.contains(QString::fromUtf8(e.name));
-        if (subscribed != e.subscribed) {
-            e.subscribed = subscribed;
-            m_subscribedCount += subscribed ? 1 : -1;
-            changed = true;
+    QStringList names;
+    for (const Entry& e : m_entries) {
+        if (!e.isText && e.choice == PlotChoice::Unplotted) {
+            names << QString::fromUtf8(e.name);
         }
     }
-    if (changed && !m_entries.empty()) {
-        emit dataChanged(index(0),
-                         index(static_cast<int>(m_entries.size()) - 1),
-                         {SubscribedRole});
+    return names;
+}
+
+void SignalListModel::setPlotChoices(const QStringList& plotted, const QStringList& unplotted)
+{
+    for (Entry& e : m_entries) {
+        const QString name = QString::fromUtf8(e.name);
+        e.choice = e.isText                   ? PlotChoice::Default
+                 : unplotted.contains(name)   ? PlotChoice::Unplotted
+                 : plotted.contains(name)     ? PlotChoice::Plotted
+                                              : PlotChoice::Default;
+    }
+    judgePlotted();
+}
+
+void SignalListModel::judgePlotted()
+{
+    // The default: every numeric row, or in a ranked set the
+    // DefaultPlotted shown numeric rows of the lowest rank (a tie in the
+    // set's order), so a row Live hides gives its place to the next
+    std::vector<int> ranked;
+    for (size_t row = 0; row < m_entries.size(); ++row) {
+        const Entry& e = m_entries[row];
+        if (e.plotRank != 0 && !e.isText && !e.hidden) {
+            ranked.push_back(static_cast<int>(row));
+        }
+    }
+    std::stable_sort(ranked.begin(), ranked.end(), [this](int a, int b) {
+        return m_entries[static_cast<size_t>(a)].plotRank
+             < m_entries[static_cast<size_t>(b)].plotRank;
+    });
+    if (ranked.size() > static_cast<size_t>(DefaultPlotted)) {
+        ranked.resize(static_cast<size_t>(DefaultPlotted));
+    }
+    for (Entry& e : m_entries) {
+        e.plotDefault = !m_ranked && !e.isText;
+    }
+    for (int row : ranked) {
+        m_entries[static_cast<size_t>(row)].plotDefault = m_ranked;
+    }
+
+    int first = -1;
+    int last = -1;
+    int subscribed = 0;
+    for (size_t row = 0; row < m_entries.size(); ++row) {
+        Entry& e = m_entries[row];
+        const bool plot = !e.isText
+                       && (e.choice == PlotChoice::Plotted
+                           || (e.choice == PlotChoice::Default && e.plotDefault));
+        if (plot != e.subscribed) {
+            e.subscribed = plot;
+            if (first < 0) first = static_cast<int>(row);
+            last = static_cast<int>(row);
+        }
+        subscribed += (e.subscribed && !e.hidden) ? 1 : 0;
+    }
+    if (first >= 0) {
+        emit dataChanged(index(first), index(last), {SubscribedRole});
+    }
+    if (subscribed != m_subscribedCount) {
+        m_subscribedCount = subscribed;
         emit subscribedCountChanged();
     }
+}
+
+void SignalListModel::applyUnsupported(const std::vector<uint16_t>& ids)
+{
+    for (Entry& e : m_entries) {
+        e.unsupported = false;
+    }
+    for (uint16_t id : ids) {
+        const int row = m_rowOfId.value(id, -1);
+        if (row >= 0) {
+            m_entries[static_cast<size_t>(row)].unsupported = true;
+        }
+    }
+    rejudgeHidden();
+}
+
+void SignalListModel::applyAbsent(const std::vector<uint16_t>& ids)
+{
+    for (Entry& e : m_entries) {
+        e.absent = false;
+    }
+    for (uint16_t id : ids) {
+        const int row = m_rowOfId.value(id, -1);
+        if (row >= 0) {
+            m_entries[static_cast<size_t>(row)].absent = true;
+        }
+    }
+    rejudgeHidden();
+}
+
+void SignalListModel::rejudgeHidden()
+{
+    int first = -1;
+    int last = -1;
+    int hidden = 0;
+    for (size_t row = 0; row < m_entries.size(); ++row) {
+        Entry& e = m_entries[row];
+        const bool hide = e.unsupported || e.absent;
+        if (hide != e.hidden) {
+            e.hidden = hide;
+            if (first < 0) first = static_cast<int>(row);
+            last = static_cast<int>(row);
+        }
+        hidden += e.hidden ? 1 : 0;
+    }
+    if (first < 0) {
+        return;
+    }
+    // Live's filtered view re-judges the rows HiddenRole changed in
+    emit dataChanged(index(first), index(last), {HiddenRole});
+    m_hiddenCount = hidden;
+    emit hiddenCountChanged();
+    // A hidden row's default place goes to the next ranked row
+    judgePlotted();
+}
+
+// ---------------- LiveSignalModel ----------------
+LiveSignalModel::LiveSignalModel(SignalListModel* source, QObject* parent)
+    : QSortFilterProxyModel(parent)
+{
+    // A HiddenRole change re-filters its rows (dynamic filtering, the default)
+    setFilterRole(SignalListModel::HiddenRole);
+    setSourceModel(source);
+}
+
+bool LiveSignalModel::filterAcceptsRow(int sourceRow, const QModelIndex& sourceParent) const
+{
+    const QModelIndex i = sourceModel()->index(sourceRow, 0, sourceParent);
+    return !sourceModel()->data(i, SignalListModel::HiddenRole).toBool();
 }
 
 // ---------------- SessionBridge ----------------
@@ -525,6 +746,7 @@ SessionBridge::SessionBridge(QObject* parent)
     , m_frameLog(new FrameListModel(this))
     , m_coalesceTimer(new QTimer(this))
     , m_signalModel(new SignalListModel(this))
+    , m_liveSignalModel(new LiveSignalModel(m_signalModel, this))
 {
     (void)ecuio_init();   // optional and always ECUIO_OK (core.h), paired below
 
@@ -532,9 +754,12 @@ SessionBridge::SessionBridge(QObject* parent)
         notifyFrameCounts();
         pollLinkHealth();   // every tick while connected: transitions only
         pollChannelSupport();
+        pollAbsentSignals();
         pollChannelIdentity();
+        pollChannelDiagnostics();
         pollReplayEnd();
         pollSleep();
+        pollTiming();
         // Must fire even when nothing arrived this window: dimming exists
         // for rows that STOPPED updating. 100 ms is well
         // inside the 3 s dim threshold and the span emission is one
@@ -606,6 +831,31 @@ void SessionBridge::destroySessionLocked()
 QString SessionBridge::coreVersion() const
 {
     return QString::fromUtf8(ecuio_version_string());
+}
+
+QVariantMap SessionBridge::gaugeSignals() const
+{
+    const auto ids = [](int mock, int obd2) {
+        return QVariantList{mock, obd2};
+    };
+    return {
+        {QStringLiteral("rpm"),
+         ids(ECUIO_MOCK_SIG_RPM_ID, ECUIO_OBD2_SIG_RPM_ID)},
+        {QStringLiteral("speed"),
+         ids(ECUIO_MOCK_SIG_SPEED_ID, ECUIO_OBD2_SIG_SPEED_ID)},
+        {QStringLiteral("coolant"),
+         ids(ECUIO_MOCK_SIG_COOLANT_ID, ECUIO_OBD2_SIG_COOLANT_TEMP_ID)},
+        {QStringLiteral("oil"),
+         ids(ECUIO_MOCK_SIG_OIL_ID, ECUIO_OBD2_SIG_OIL_TEMP_ID)},
+        {QStringLiteral("iat"),
+         ids(ECUIO_MOCK_SIG_IAT_ID, ECUIO_OBD2_SIG_IAT_ID)},
+        {QStringLiteral("maf"),
+         ids(ECUIO_MOCK_SIG_MAF_ID, ECUIO_OBD2_SIG_MAF_ID)},
+        {QStringLiteral("throttle"),
+         ids(ECUIO_MOCK_SIG_THROTTLE_ID, ECUIO_OBD2_SIG_THROTTLE_ID)},
+        {QStringLiteral("load"),
+         ids(ECUIO_MOCK_SIG_LOAD_ID, ECUIO_OBD2_SIG_ENGINE_LOAD_ID)},
+    };
 }
 
 QString SessionBridge::statusString(int statusCode) const
@@ -852,6 +1102,7 @@ QString SessionBridge::startSession(ecuio_session_t* session)
     m_frameLatency.clear();
     m_valueLatency.clear();
     m_valuesStaged = 0;
+    m_timingNextUs = m_timingEveryUs;
     prepareValueStaging(ecuio_session_signal_set(session));
     m_accepting.store(true, std::memory_order_release);
     const ecuio_status_t rc = ecuio_session_start(session);
@@ -914,8 +1165,23 @@ void SessionBridge::applyConnectedState(ecuio_session_t* session, const QString&
     for (uint32_t& g : m_supportGeneration) {
         g = 0;
     }
+    const ecuio_signal_set_t* set = ecuio_session_signal_set(session);
+    m_absentRead.assign((set != nullptr && set->defs != nullptr) ? set->count : 0u, 0);
+    m_unsupportedRead.assign(m_absentRead.size(), 0);
+    m_absentIds.clear();
     for (uint32_t& g : m_identityGeneration) {
         g = 0;
+    }
+    for (uint32_t& g : m_diagnosticsGeneration) {
+        g = 0;
+    }
+    for (bool& asked : m_clearAsked) {
+        asked = false;
+    }
+    m_diagnosticsShownCount = 0;
+    if (!m_diagnostics.isEmpty()) {
+        m_diagnostics.clear();
+        emit diagnosticsChanged();
     }
 }
 
@@ -1060,21 +1326,52 @@ void SessionBridge::disconnectSession()
     // The teardown thread is the session's one caller from here: the
     // session API is single-caller by contract.
     m_disconnectThread = std::thread([this, session, uri]() {
-        ecuio_session_destroy(session);    // closes first, joining the worker
-
-        QMetaObject::invokeMethod(this, [this, uri]() {
-            // JOIN FIRST, then clear the flag, then emit, as the
-            // connect completion does: a QML handler inside
-            // disconnectingChanged may start the next connect.
-            if (m_disconnectThread.joinable()) {
-                m_disconnectThread.join();
+        // Close joins the worker, whose last act publishes reply timing's
+        // final rows (ADR-0042); they're read here because destroy frees
+        // them
+        ecuio_session_close(session);
+        ecuio_session_timing_t timing{};
+        ecuio_session_info_t info{};
+        std::vector<ecuio_request_timing_t> rows;
+        uint32_t count = 0;
+        if (ecuio_session_get_timing(session, &timing, nullptr, 0, &count) ==
+                ECUIO_OK &&
+            count > 0) {
+            rows.resize(count);
+            if (ecuio_session_get_timing(session, &timing, rows.data(), count,
+                                         &count) != ECUIO_OK) {
+                count = 0;
             }
-            m_disconnecting = false;
-            emit disconnectingChanged();
-            emit logMessage(QStringLiteral("Disconnected: %1").arg(uri));
-            // Kept open until here, so it brackets the whole teardown
-            stopRecording(QStringLiteral("disconnected"));
-        }, Qt::QueuedConnection);
+            rows.resize(std::min<size_t>(count, rows.size()));
+        }
+        (void)ecuio_session_get_info(session, &info);
+        ecuio_session_destroy(session);
+
+        QMetaObject::invokeMethod(
+            this,
+            [this, uri, timing, info, rows]() {
+                // JOIN FIRST, then clear the flag, then emit, as the
+                // connect completion does: a QML handler inside
+                // disconnectingChanged may start the next connect.
+                if (m_disconnectThread.joinable()) {
+                    m_disconnectThread.join();
+                }
+                m_disconnecting = false;
+                emit disconnectingChanged();
+                const QString timingLine = timingText(timing, rows);
+                if (!timingLine.isEmpty()) {
+                    m_recorder.timing(
+                        timing, rows.data(), static_cast<uint32_t>(rows.size()),
+                        info.rx_ids,
+                        std::min<uint32_t>(info.channel_count,
+                                           ECUIO_SESSION_INFO_MAX_CHANNELS));
+                    emit logMessage(timingLine);
+                }
+                emit logMessage(QStringLiteral("Disconnected: %1").arg(uri));
+                // Kept open until here, so it brackets the whole teardown
+                stopRecording(QStringLiteral("disconnected"));
+            },
+            Qt::QueuedConnection);
     });
 }
 
@@ -1098,6 +1395,9 @@ void SessionBridge::setUnitSystem(int units)
     if (units == unitSystem()) return;
     m_signalModel->setUnitSystem(static_cast<uint32_t>(units));
     emit unitSystemChanged();
+    if (m_diagnosticsShownCount > 0) {
+        rebuildDiagnostics();
+    }
 }
 
 double SessionBridge::displayValue(const QString& unit, double value) const
@@ -1126,14 +1426,7 @@ QString SessionBridge::recordingFolder() const
 {
     const QString folder = m_recorder.folder();
     if (folder.isEmpty()) return {};
-    const QString docs = QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation);
-    if (!docs.isEmpty()) {
-        const QString rel = QDir(docs).relativeFilePath(folder);
-        if (QDir::isRelativePath(rel) && !rel.startsWith(QLatin1String(".."))) {
-            return QDir::toNativeSeparators(QStringLiteral("Documents/") + rel);
-        }
-    }
-    return QDir::toNativeSeparators(folder);
+    return documentsRelative(folder);
 }
 
 QUrl SessionBridge::recordingFolderUrl() const
@@ -1227,7 +1520,7 @@ void SessionBridge::startRecording(const QString& uri, const ecuio_signal_set_t*
                       .arg(QString::fromUtf8(frameLogging)),
     };
 
-    // The picked vehicle names an adapter's session only (ADR-0027 §1):
+    // The picked vehicle names an adapter's session only (ADR-0027 section 1):
     // a mock or a replay isn't that car
     const bool adapter =
         uri.startsWith(QStringLiteral("j2534://"), Qt::CaseInsensitive) ||
@@ -1571,7 +1864,7 @@ void SessionBridge::drainValues()
 }
 
 // The tick's half: the window's values into the model, one entry per
-// signal, whatever the frame rate (ADR-0024 §7)
+// signal, whatever the frame rate (ADR-0024 section 7)
 void SessionBridge::flushValues()
 {
     drainValues();
@@ -1604,7 +1897,7 @@ SessionBridge::DeliveryStats SessionBridge::deliveryStats() const
 
 namespace {
 
-// A latency for the activity log: µs below a millisecond, then ms with
+// A latency for the activity log: us below a millisecond, then ms with
 // one decimal below 10 ms, then whole ms
 QString latencyText(uint64_t us)
 {
@@ -1625,7 +1918,7 @@ QString quantilesText(const LatencyStats& l)
 } // namespace
 
 // "Delivery: 7074 frames, none dropped; to the GUI thread in median
-// 31 µs, p99 412 µs, max 1.2 ms; 28296 values, to the model in median
+// 31 us, p99 412 us, max 1.2 ms; 28296 values, to the model in median
 // 51 ms, p99 99 ms, max 101 ms". A quantile is the top of its bucket,
 // at most 12.5 % above the true value (LatencyStats).
 QString SessionBridge::deliveryText(const DeliveryStats& s)
@@ -1659,6 +1952,102 @@ QString SessionBridge::deliveryText(const DeliveryStats& s)
         }
     }
     return line;
+}
+
+// "Reply timing: 23 requests, 4512 answered, none refused, 2 timed out;
+// latency P50 4.2 ms to 5.3 ms; intervals on the adapter's clock; ISO-TP:
+// 640 messages, 40 segmented, none dropped, none unusable". Each
+// request's figures are in the recording's latency.csv.
+QString
+SessionBridge::timingText(const ecuio_session_timing_t& t,
+                          const std::vector<ecuio_request_timing_t>& rows)
+{
+    uint32_t asked = 0;
+    quint64 answered = 0;
+    quint64 refused = 0;
+    quint64 timeouts = 0;
+    uint32_t low = UINT32_MAX;
+    uint32_t high = 0;
+    for (const ecuio_request_timing_t& r : rows) {
+        if (r.answered + r.refused + r.timeouts == 0)
+            continue;
+        ++asked;
+        answered += r.answered;
+        refused += r.refused;
+        timeouts += r.timeouts;
+        if (r.answered + r.refused > 0) {
+            low = std::min(low, r.latency_p50_us);
+            high = std::max(high, r.latency_p50_us);
+        }
+    }
+    if (asked == 0) {
+        return {};
+    }
+    const auto count = [](quint64 n) {
+        return n == 0 ? QStringLiteral("none") : QString::number(n);
+    };
+    QString line =
+        QStringLiteral(
+            "Reply timing: %1 requests, %2 answered, %3 refused, %4 timed out")
+            .arg(asked)
+            .arg(answered)
+            .arg(count(refused), count(timeouts));
+    if (low != UINT32_MAX) {
+        line += low == high
+                    ? QStringLiteral("; latency P50 %1").arg(latencyText(low))
+                    : QStringLiteral("; latency P50 %1 to %2")
+                          .arg(latencyText(low), latencyText(high));
+    }
+    switch (t.interval_clock) {
+    case ECUIO_TIMING_CLOCK_ADAPTER:
+        line += QStringLiteral("; intervals on the adapter's clock");
+        break;
+    case ECUIO_TIMING_CLOCK_KERNEL:
+        line += QStringLiteral("; intervals on the kernel's receive times");
+        break;
+    case ECUIO_TIMING_CLOCK_HOST:
+        line += QStringLiteral("; intervals on the host's clock");
+        break;
+    default:
+        break;
+    }
+    if (t.flags & ECUIO_TIMING_ISOTP) {
+        line +=
+            QStringLiteral(
+                "; ISO-TP: %1 messages, %2 segmented, %3 dropped, %4 unusable")
+                .arg(t.isotp_completed)
+                .arg(t.isotp_first_frames)
+                .arg(count(t.isotp_dropped), count(t.isotp_malformed));
+    }
+    return line;
+}
+
+void SessionBridge::pollTiming()
+{
+    if (m_session == nullptr || !m_recorder.active()) {
+        return;
+    }
+    ecuio_session_timing_t t{};
+    uint32_t count = 0;
+    if (ecuio_session_get_timing(m_session, &t, nullptr, 0, &count) !=
+            ECUIO_OK ||
+        count == 0 || t.snapshot_us < m_timingNextUs) {
+        return;
+    }
+    std::vector<ecuio_request_timing_t> rows(count);
+    if (ecuio_session_get_timing(m_session, &t, rows.data(), count, &count) !=
+        ECUIO_OK) {
+        return;
+    }
+    m_timingNextUs = t.snapshot_us + m_timingEveryUs;
+    ecuio_session_info_t info{};
+    (void)ecuio_session_get_info(m_session, &info);
+    m_recorder.timing(
+        t, rows.data(),
+        std::min<uint32_t>(count, static_cast<uint32_t>(rows.size())),
+        info.rx_ids,
+        std::min<uint32_t>(info.channel_count,
+                           ECUIO_SESSION_INFO_MAX_CHANNELS));
 }
 
 void SessionBridge::pollLinkHealth()
@@ -1701,7 +2090,7 @@ void SessionBridge::pollLinkHealth()
     emit linkStateChanged();
 }
 
-/* What each channel's ECU said it supports (ADR-0015 §4), in the
+/* What each channel's ECU said it supports (ADR-0015 section 4), in the
  * activity log once per update: the probe's walk ending, and each
  * request it drops. Generation 0 is nothing learned yet. */
 void SessionBridge::pollChannelSupport()
@@ -1709,45 +2098,75 @@ void SessionBridge::pollChannelSupport()
     if (!m_connected.load(std::memory_order_acquire) || m_session == nullptr) {
         return;
     }
+    bool changed = false;
     for (uint32_t c = 0; c < m_channelCount; ++c) {
         ecuio_channel_support_t s{};
-        if (ecuio_session_get_channel_support(m_session, c, &s) != ECUIO_OK ||
-            s.generation == m_supportGeneration[c]) {
+        if (ecuio_session_get_channel_support(m_session, c, &s) != ECUIO_OK) {
+            continue;
+        }
+        if (s.generation == m_supportGeneration[c]) {
             continue;
         }
         m_supportGeneration[c] = s.generation;
+        changed = true;
         emit logMessage(channelSupportText(s));
+    }
+    // Live hides the rows core judges unsupported from the reports
+    // (ADR-0039 section 6)
+    uint32_t count = 0;
+    if (changed && ecuio_session_get_unsupported_signals(
+                       m_session, m_unsupportedRead.data(),
+                       static_cast<uint32_t>(m_unsupportedRead.size()),
+                       &count) == ECUIO_OK) {
+        count = std::min<uint32_t>(
+            count, static_cast<uint32_t>(m_unsupportedRead.size()));
+        m_signalModel->applyUnsupported(std::vector<uint16_t>(
+            m_unsupportedRead.begin(), m_unsupportedRead.begin() + count));
     }
 }
 
+// Live hides the signals core reports its frames come without, as it
+// hides an unsupported PID's (ADR-0039 section 6): the fact is core's, the
+// hiding the model's
+void SessionBridge::pollAbsentSignals()
+{
+    if (!m_connected.load(std::memory_order_acquire) || m_session == nullptr ||
+        m_absentRead.empty()) {
+        return;
+    }
+    uint32_t count = 0;
+    if (ecuio_session_get_absent_signals(m_session, m_absentRead.data(),
+                                         static_cast<uint32_t>(m_absentRead.size()),
+                                         &count) != ECUIO_OK) {
+        return;
+    }
+    count = std::min<uint32_t>(count, static_cast<uint32_t>(m_absentRead.size()));
+    if (count == m_absentIds.size() &&
+        std::equal(m_absentIds.begin(), m_absentIds.end(), m_absentRead.begin())) {
+        return;
+    }
+    m_absentIds.assign(m_absentRead.begin(), m_absentRead.begin() + count);
+    m_signalModel->applyAbsent(m_absentIds);
+}
+
 /* One channel's "ECU 0x…:" line: what its supported-PID bitmaps list,
- * and which requests left the rotation, and why. Static, like
+ * which requests left the rotation, and why, and whether its Service 01
+ * requests carry several PIDs (ADR-0039 Appendix A): packing starting or
+ * ending brings a new line, which must not read like the last. Static, like
  * sessionInfoText, so test_bridge pins the wording without an adapter. */
 QString SessionBridge::channelSupportText(const ecuio_channel_support_t& s)
 {
 
     QStringList parts;
     if ((s.flags & ECUIO_SUPPORT_PROBED) != 0) {
-        /* Data PIDs: the chain's own (0x20, 0x40, ...) don't count, as
-         * the first vehicle's sheet counts them */
-        int pids = 0;
-        for (uint32_t pid = 1; pid <= 0xFF; ++pid) {
-            if (pid % 0x20 != 0 &&
-                (s.pid_bitmap[(pid - 1) / 8] & (0x80u >> ((pid - 1) % 8))) != 0) {
-                ++pids;
-            }
-        }
-        uint32_t top = 0;
-        for (uint32_t i = 0; i < 8; ++i) {
-            if ((s.ranges & (1u << i)) != 0) {
-                top = 0x20u * (i + 1);
-            }
-        }
+        // core's count of the data PIDs, and the last its bitmaps cover
         if ((s.flags & ECUIO_SUPPORT_COMPLETE) != 0) {
-            parts << QStringLiteral("supports %1 PIDs").arg(pids);
+            parts << QStringLiteral("supports %1 PIDs").arg(s.pids_supported);
         } else if (s.ranges != 0) {
-            parts << QStringLiteral("supports %1 PIDs up to %2, no answer past that")
-                         .arg(pids).arg(hexId(top));
+            parts << QStringLiteral(
+                         "supports %1 PIDs up to %2, no answer past that")
+                         .arg(s.pids_supported)
+                         .arg(hexId(s.pids_through));
         } else {
             parts << QStringLiteral("no answer to the supported-PID query");
         }
@@ -1796,6 +2215,12 @@ QString SessionBridge::channelSupportText(const ecuio_channel_support_t& s)
     }
     parts << requests;
 
+    if ((s.flags & ECUIO_SUPPORT_UNPACKED) != 0) {
+        parts << QStringLiteral("one PID per request, several went unanswered");
+    } else if ((s.flags & ECUIO_SUPPORT_PACKED) != 0) {
+        parts << QStringLiteral("several PIDs per request");
+    }
+
     /* The DID scan (ADR-0020): how many DIDs it covers and what each
      * answer was; found ones are polled unless the table was full. */
     if (s.scan_total > 0) {
@@ -1834,10 +2259,14 @@ void SessionBridge::pollChannelIdentity()
         }
         m_identityGeneration[c] = s.generation;
         emit logMessage(channelIdentityText(s));
-        // The vehicle is the first channel's ECU's VIN (ADR-0027 §3);
+        // The vehicle is the first channel's ECU's VIN (ADR-0027 section 3);
         // a recovery's re-asks settle on the same one and say nothing
         if (c == 0) {
-            const QString vin = vinFromIdentity(s);
+            char text[ECUIO_VIN_TEXT_LEN];
+            const QString vin =
+                ecuio_identity_vin(&s, text, sizeof text) == ECUIO_OK
+                    ? QString::fromLatin1(text)
+                    : QString();
             if (!vin.isEmpty() && vin != m_vin) {
                 m_vin = vin;
                 emit vehicleIdentified();
@@ -1846,36 +2275,354 @@ void SessionBridge::pollChannelIdentity()
     }
 }
 
-QString SessionBridge::vinFromIdentity(const ecuio_channel_identity_t& identity)
+/* Each channel's diagnostics report (ADR-0037), logged once per read
+ * that completes: at connect, then once per Read again, which moves the
+ * generation on. One line per ECU, so a recording's events.log keeps
+ * the codes the car had when it was made. A clear (ADR-0038) moves the
+ * generation with the codes unchanged, while it runs and when it ends
+ * unsent or refused: that logs its own line, once per clear asked, and
+ * no diagnostics line; after a 44 or no answer the read that follows
+ * logs one. */
+void SessionBridge::pollChannelDiagnostics()
 {
-    QString fromService09;
-    QString fromF190;
-    const uint32_t items =
-        std::min<uint32_t>(identity.items, ECUIO_IDENTITY_MAX_ITEMS);
-    for (uint32_t i = 0; i < items; ++i) {
-        const ecuio_identity_item_t& it = identity.list[i];
-        if (it.outcome != ECUIO_IDENTITY_ANSWERED) {
+    if (!m_connected.load(std::memory_order_acquire) || m_session == nullptr) {
+        return;
+    }
+    bool changed = m_diagnosticsShownCount != m_channelCount;
+    for (uint32_t c = 0; c < m_channelCount; ++c) {
+        ecuio_channel_diagnostics_t s{};
+        if (ecuio_session_get_channel_diagnostics(m_session, c, &s) !=
+            ECUIO_OK) {
             continue;
         }
-        QString vin;
-        for (uint8_t k = 0; k < it.text_length && k < ECUIO_IDENTITY_TEXT_LEN;
-             ++k) {
-            const QChar ch = QLatin1Char(it.text[k]);
-            if (ch.isLetterOrNumber() && ch.unicode() < 0x80) {
-                vin += ch.toUpper();
-            }
+        if (memcmp(&s, &m_diagnosticsShown[c], sizeof(s)) != 0) {
+            m_diagnosticsShown[c] = s;
+            changed = true;
         }
-        if (vin.size() != 17) {
+        bool clear_only = (s.flags & ECUIO_DIAG_CLEARING) != 0;
+        if (m_clearAsked[c] && !clear_only && s.clear != ECUIO_CLEAR_NONE) {
+            m_clearAsked[c] = false;
+            emit logMessage(channelClearText(s));
+            clear_only = s.clear != ECUIO_CLEAR_CLEARED &&
+                         s.clear != ECUIO_CLEAR_UNANSWERED;
+        }
+        if ((s.flags & ECUIO_DIAG_COMPLETE) == 0 ||
+            s.generation == m_diagnosticsGeneration[c]) {
             continue;
         }
-        if (it.length == 2 && it.request[0] == 0x09 && it.request[1] == 0x02) {
-            fromService09 = vin;
-        } else if (it.length == 3 && it.request[0] == 0x22 &&
-                   it.request[1] == 0xF1 && it.request[2] == 0x90) {
-            fromF190 = vin;
+        m_diagnosticsGeneration[c] = s.generation;
+        if (!clear_only) {
+            emit logMessage(channelDiagnosticsText(s));
         }
     }
-    return fromService09.isEmpty() ? fromF190 : fromService09;
+    if (changed) {
+        m_diagnosticsShownCount = m_channelCount;
+        rebuildDiagnostics();
+    }
+}
+
+void SessionBridge::rebuildDiagnostics()
+{
+    m_diagnostics.clear();
+    for (uint32_t c = 0; c < m_diagnosticsShownCount; ++c) {
+        m_diagnostics << diagnosticsEntry(m_diagnosticsShown[c],
+                                          m_signalModel->unitSystem());
+    }
+    emit diagnosticsChanged();
+}
+
+void SessionBridge::readDiagnostics()
+{
+    if (m_connected.load(std::memory_order_acquire) && m_session != nullptr) {
+        (void)ecuio_session_read_diagnostics(m_session);
+    }
+}
+
+bool SessionBridge::clearTarget(const ecuio_channel_diagnostics_t& report)
+{
+    return (report.flags & ECUIO_DIAG_COMPLETE) != 0 &&
+           (report.flags & ECUIO_DIAG_CLEARING) == 0;
+}
+
+QStringList SessionBridge::clearTargets() const
+{
+    QStringList ecus;
+    for (uint32_t c = 0; c < m_diagnosticsShownCount; ++c) {
+        if (clearTarget(m_diagnosticsShown[c])) {
+            ecus << hexId(m_diagnosticsShown[c].rx_id);
+        }
+    }
+    return ecus;
+}
+
+/* ADR-0038: what a clear erases stays on record, so the reports go to a
+ * file of their own before anything is sent, whether or not the session
+ * records; each ECU is then cleared at the generation that file holds,
+ * so a report that moved on since is refused unsent */
+QString SessionBridge::clearDiagnostics()
+{
+    if (!m_connected.load(std::memory_order_acquire) || m_session == nullptr) {
+        return {};
+    }
+    ecuio_channel_diagnostics_t reports[ECUIO_SESSION_INFO_MAX_CHANNELS];
+    uint32_t channels[ECUIO_SESSION_INFO_MAX_CHANNELS];
+    uint32_t n = 0;
+    for (uint32_t c = 0; c < m_channelCount; ++c) {
+        ecuio_channel_diagnostics_t s{};
+        if (ecuio_session_get_channel_diagnostics(m_session, c, &s) ==
+                ECUIO_OK &&
+            clearTarget(s)) {
+            reports[n] = s;
+            channels[n] = c;
+            ++n;
+        }
+    }
+    if (n == 0) {
+        emit logMessage(
+            QStringLiteral("Clear not sent: no ECU has a completed read"));
+        return {};
+    }
+
+    const auto refuse = [this](const QString& why) {
+        emit logMessage(
+            QStringLiteral("Clear not sent: the report couldn't be saved (%1)")
+                .arg(why));
+        return QString();
+    };
+    const QString root = recordingsRoot();
+    if (root.isEmpty()) {
+        return refuse(QStringLiteral("no Documents folder"));
+    }
+    // The picked vehicle names an adapter's file only, as a recording's
+    // folder (ADR-0027 section 1)
+    const bool adapter = m_currentUri.startsWith(QStringLiteral("j2534://"),
+                                                 Qt::CaseInsensitive) ||
+                         m_currentUri.startsWith(QStringLiteral("elm327://"),
+                                                 Qt::CaseInsensitive);
+    const QString label = adapter ? folderLabel(m_vehicleLabel) : QString();
+    const QString base =
+        QStringLiteral("diagnostics-") + QDateTime::currentDateTime().toString(
+                                             QStringLiteral("yyyyMMdd-HHmmss"));
+    QString path;
+    for (int k = 1; k <= 9 && path.isEmpty(); ++k) {
+        const QString name =
+            base + (k > 1 ? QStringLiteral("-%1").arg(k) : QString()) +
+            (label.isEmpty() ? QString() : QLatin1Char(' ') + label) +
+            QStringLiteral(".jsonl");
+        if (!QFileInfo::exists(root + QLatin1Char('/') + name)) {
+            path = root + QLatin1Char('/') + name;
+        }
+    }
+    if (path.isEmpty()) {
+        return refuse(
+            QStringLiteral("nine files already have this second's name"));
+    }
+    /* No folder, no file: either way nothing is sent */
+    const bool folder = QDir().mkpath(root);
+    QSaveFile file(path);
+    const QByteArray text = diagnosticsFileText(reports, n);
+    if (!file.open(QIODevice::WriteOnly) || file.write(text) != text.size() ||
+        !file.commit()) {
+        return refuse(folder ? file.errorString()
+                             : QStringLiteral("can't create %1")
+                                   .arg(documentsRelative(root)));
+    }
+    const QString shown = documentsRelative(path);
+    emit logMessage(
+        QStringLiteral("Diagnostics saved before the clear: %1").arg(shown));
+
+    for (uint32_t i = 0; i < n; ++i) {
+        const ecuio_status_t rc = ecuio_session_clear_diagnostics(
+            m_session, channels[i], reports[i].generation);
+        if (rc == ECUIO_OK) {
+            m_clearAsked[channels[i]] = true;
+        } else {
+            emit logMessage(
+                QStringLiteral("ECU %1 clear: not sent: %2")
+                    .arg(hexId(reports[i].rx_id),
+                         rc == ECUIO_ERR_REPORT_CHANGED
+                             ? QStringLiteral("the report changed")
+                             : QString::fromUtf8(ecuio_status_string(rc))));
+        }
+    }
+    return shown;
+}
+
+QByteArray
+SessionBridge::diagnosticsFileText(const ecuio_channel_diagnostics_t* reports,
+                                   uint32_t count)
+{
+    QByteArray out;
+    char buf[8192];
+    cli::Line start(buf, sizeof buf);
+    start.raw("{\"type\":\"start\"");
+    start.key("schema");
+    start.u64(1);
+    start.key("core");
+    start.string(ecuio_version_string(), SIZE_MAX);
+    start.ch('}');
+    if (start.finish()) {
+        out.append(start.data(), static_cast<qsizetype>(start.size()));
+    }
+    for (uint32_t i = 0; i < count; ++i) {
+        cli::Line l(buf, sizeof buf);
+        cli::diagnostics_line(l, reports[i]);
+        if (l.finish()) {
+            out.append(l.data(), static_cast<qsizetype>(l.size()));
+        }
+    }
+    return out;
+}
+
+QVariantMap
+SessionBridge::diagnosticsEntry(const ecuio_channel_diagnostics_t& s,
+                                uint32_t units)
+{
+    const auto outcome = [](uint8_t o) {
+        switch (o) {
+        case ECUIO_DIAG_ANSWERED:
+            return QStringLiteral("answered");
+        case ECUIO_DIAG_REFUSED:
+            return QStringLiteral("refused");
+        case ECUIO_DIAG_UNANSWERED:
+            return QStringLiteral("unanswered");
+        default:
+            return QStringLiteral("unasked");
+        }
+    };
+    const auto nrc = [](uint8_t o, uint8_t service, uint8_t code) {
+        return o == ECUIO_DIAG_REFUSED
+                   ? QStringLiteral("7F %1 %2")
+                         .arg(hexByte(service), hexByte(code))
+                   : QString();
+    };
+    const auto dtc = [](uint16_t code) {
+        char text[8] = {};
+        (void)ecuio_dtc_format(code, text, sizeof(text));
+        return QString::fromLatin1(text);
+    };
+
+    QVariantMap m;
+    m[QStringLiteral("ecu")] = hexId(s.rx_id);
+    m[QStringLiteral("asked")] = (s.flags & ECUIO_DIAG_ASKED) != 0;
+    m[QStringLiteral("complete")] = (s.flags & ECUIO_DIAG_COMPLETE) != 0;
+    m[QStringLiteral("readiness")] = outcome(s.readiness);
+    m[QStringLiteral("readinessNrc")] = nrc(s.readiness, 0x01, s.readiness_nrc);
+    m[QStringLiteral("mil")] = (s.flags & ECUIO_DIAG_MIL_ON) != 0;
+    m[QStringLiteral("dtcCount")] = static_cast<int>(s.dtc_count);
+    m[QStringLiteral("compression")] = (s.flags & ECUIO_DIAG_COMPRESSION) != 0;
+
+    static const char* const kKeys[ECUIO_DIAG_LISTS] = {"stored", "pending",
+                                                        "permanent"};
+    static const uint8_t kServices[ECUIO_DIAG_LISTS] = {0x03, 0x07, 0x0A};
+    QVariantList lists;
+    for (uint32_t l = 0; l < ECUIO_DIAG_LISTS; ++l) {
+        const ecuio_dtc_list_t& list = s.lists[l];
+        const uint8_t held = std::min<uint8_t>(list.held, ECUIO_DIAG_MAX_DTCS);
+        QStringList codes;
+        for (uint8_t i = 0; i < held; ++i) {
+            codes << dtc(list.codes[i]);
+        }
+        QVariantMap e;
+        e[QStringLiteral("key")] = QString::fromLatin1(kKeys[l]);
+        e[QStringLiteral("outcome")] = outcome(list.outcome);
+        e[QStringLiteral("nrc")] = nrc(list.outcome, kServices[l], list.nrc);
+        e[QStringLiteral("codes")] = codes;
+        e[QStringLiteral("more")] =
+            list.reported > held ? list.reported - held : 0;
+        lists << e;
+    }
+    m[QStringLiteral("lists")] = lists;
+
+    QVariantList monitors;
+    const uint8_t n =
+        std::min<uint8_t>(s.monitor_count, ECUIO_DIAG_MAX_MONITORS);
+    for (uint8_t i = 0; i < n; ++i) {
+        QVariantMap e;
+        e[QStringLiteral("id")] = static_cast<int>(s.monitors[i].id);
+        e[QStringLiteral("name")] =
+            QString::fromLatin1(ecuio_monitor_name(s.monitors[i].id, s.flags));
+        e[QStringLiteral("complete")] =
+            (s.monitors[i].flags & ECUIO_MONITOR_COMPLETE) != 0;
+        monitors << e;
+    }
+    m[QStringLiteral("monitors")] = monitors;
+
+    /* Each freeze-frame value by the obd2 def that decoded it (ADR-0037
+     * section 4), in the user's units, as Live shows a live one */
+    const ecuio_signal_set_t* obd2 = ecuio_obd2_signal_set();
+    QVariantList values;
+    const uint8_t fn = std::min<uint8_t>(s.freeze_count, ECUIO_DIAG_MAX_FREEZE);
+    for (uint8_t i = 0; i < fn; ++i) {
+        const ecuio_freeze_value_t& f = s.freeze_values[i];
+        for (uint32_t k = 0; k < obd2->count; ++k) {
+            const ecuio_signal_def_t& def = obd2->defs[k];
+            if (def.id != f.def_id) {
+                continue;
+            }
+            ecuio_display_value_t out{};
+            if (ecuio_display_convert(def.unit, def.decimal_places, f.value,
+                                      units, &out) != ECUIO_DISPLAY_OK) {
+                out = {};
+                out.value = f.value;
+                qstrncpy(out.unit, def.unit, sizeof(out.unit));
+                out.decimal_places = def.decimal_places;
+            }
+            QVariantMap e;
+            e[QStringLiteral("name")] = QString::fromUtf8(def.name);
+            e[QStringLiteral("value")] = out.value;
+            e[QStringLiteral("unit")] = QString::fromUtf8(out.unit);
+            e[QStringLiteral("decimals")] =
+                static_cast<int>(out.decimal_places);
+            values << e;
+            break;
+        }
+    }
+    QVariantMap freeze;
+    freeze[QStringLiteral("outcome")] = outcome(s.freeze);
+    freeze[QStringLiteral("nrc")] = nrc(s.freeze, 0x02, s.freeze_nrc);
+    freeze[QStringLiteral("stored")] = (s.flags & ECUIO_DIAG_FREEZE_FRAME) != 0;
+    freeze[QStringLiteral("code")] = (s.flags & ECUIO_DIAG_FREEZE_FRAME) != 0
+                                         ? dtc(s.freeze_dtc)
+                                         : QString();
+    freeze[QStringLiteral("values")] = values;
+    m[QStringLiteral("freeze")] = freeze;
+
+    /* The last clear (ADR-0038) and whether one runs */
+    m[QStringLiteral("clearing")] = (s.flags & ECUIO_DIAG_CLEARING) != 0;
+    QString clear;
+    QString clearNrc;
+    switch (s.clear) {
+    case ECUIO_CLEAR_CLEARED:
+        clear = QStringLiteral("cleared");
+        break;
+    case ECUIO_CLEAR_REFUSED:
+        clear = QStringLiteral("refused");
+        clearNrc = QStringLiteral("7F 04 %1").arg(hexByte(s.clear_nrc));
+        break;
+    case ECUIO_CLEAR_UNANSWERED:
+        clear = QStringLiteral("unanswered");
+        break;
+    case ECUIO_CLEAR_ENGINE_RUNNING:
+        clear = QStringLiteral("engineRunning");
+        break;
+    case ECUIO_CLEAR_NO_ENGINE_SPEED:
+        clear = QStringLiteral("noEngineSpeed");
+        if (s.clear_nrc != 0) {
+            clearNrc = QStringLiteral("7F 01 %1").arg(hexByte(s.clear_nrc));
+        }
+        break;
+    case ECUIO_CLEAR_REPORT_CHANGED:
+        clear = QStringLiteral("reportChanged");
+        break;
+    default:
+        clear = QStringLiteral("none");
+        break;
+    }
+    m[QStringLiteral("clear")] = clear;
+    m[QStringLiteral("clearNrc")] = clearNrc;
+    m[QStringLiteral("clearRpm")] = static_cast<int>(s.clear_rpm);
+    return m;
 }
 
 QString SessionBridge::vinKey(const QString& salt) const
@@ -1980,9 +2727,160 @@ QString SessionBridge::channelIdentityText(const ecuio_channel_identity_t& s)
            parts.join(QStringLiteral("; "));
 }
 
+/* One channel's "ECU 0x… clear:" line (ADR-0038): what became of the
+ * clear its report names */
+QString SessionBridge::channelClearText(const ecuio_channel_diagnostics_t& s)
+{
+    QString what;
+    switch (s.clear) {
+    case ECUIO_CLEAR_CLEARED:
+        what = QStringLiteral("cleared");
+        break;
+    case ECUIO_CLEAR_REFUSED:
+        what = QStringLiteral("refused (7F 04 %1)").arg(hexByte(s.clear_nrc));
+        break;
+    case ECUIO_CLEAR_UNANSWERED:
+        what = QStringLiteral("no answer");
+        break;
+    case ECUIO_CLEAR_ENGINE_RUNNING:
+        what = QStringLiteral("not sent: engine running (%1 rpm)")
+                   .arg(s.clear_rpm);
+        break;
+    case ECUIO_CLEAR_NO_ENGINE_SPEED:
+        what = s.clear_nrc != 0
+                   ? QStringLiteral("not sent: no engine speed (7F 01 %1)")
+                         .arg(hexByte(s.clear_nrc))
+                   : QStringLiteral("not sent: no engine speed");
+        break;
+    case ECUIO_CLEAR_REPORT_CHANGED:
+        what = QStringLiteral("not sent: the report changed");
+        break;
+    default:
+        what = QStringLiteral("not asked");
+        break;
+    }
+    return QStringLiteral("ECU %1 clear: %2").arg(hexId(s.rx_id), what);
+}
+
+/* One channel's "ECU 0x… diagnostics:" line: the MIL, each code list,
+ * readiness (the incomplete monitors by their short names) and the
+ * freeze frame's code, each as answered, refused with its code or
+ * unanswered; an item never asked is left out. Static, like
+ * channelIdentityText, so test_bridge pins the wording without an
+ * adapter. */
+QString
+SessionBridge::channelDiagnosticsText(const ecuio_channel_diagnostics_t& s)
+{
+    const auto dtc = [](uint16_t code) {
+        char text[8] = {};
+        (void)ecuio_dtc_format(code, text, sizeof(text));
+        return QString::fromLatin1(text);
+    };
+    const auto refused = [](uint8_t service, uint8_t nrc) {
+        return QStringLiteral(" refused (7F %1 %2)")
+            .arg(hexByte(service), hexByte(nrc));
+    };
+    QStringList parts;
+    if (s.readiness == ECUIO_DIAG_ANSWERED) {
+        parts << ((s.flags & ECUIO_DIAG_MIL_ON) != 0
+                      ? QStringLiteral("MIL on")
+                      : QStringLiteral("MIL off"));
+    }
+
+    static const char* const kNames[ECUIO_DIAG_LISTS] = {"stored", "pending",
+                                                         "permanent"};
+    static const uint8_t kServices[ECUIO_DIAG_LISTS] = {0x03, 0x07, 0x0A};
+    for (uint32_t l = 0; l < ECUIO_DIAG_LISTS; ++l) {
+        const ecuio_dtc_list_t& list = s.lists[l];
+        const QString name = QString::fromLatin1(kNames[l]);
+        switch (list.outcome) {
+        case ECUIO_DIAG_ANSWERED: {
+            QStringList codes;
+            const uint8_t held =
+                std::min<uint8_t>(list.held, ECUIO_DIAG_MAX_DTCS);
+            for (uint8_t i = 0; i < held; ++i) {
+                codes << dtc(list.codes[i]);
+            }
+            if (codes.isEmpty()) {
+                codes << QStringLiteral("none");
+            }
+            QString part =
+                name + QLatin1Char(' ') + codes.join(QLatin1Char(' '));
+            if (list.reported > held) {
+                part +=
+                    QStringLiteral(" and %1 more").arg(list.reported - held);
+            }
+            parts << part;
+            break;
+        }
+        case ECUIO_DIAG_REFUSED:
+            parts << name + refused(kServices[l], list.nrc);
+            break;
+        case ECUIO_DIAG_UNANSWERED:
+            parts << name + QStringLiteral(" unanswered");
+            break;
+        default:
+            break;
+        }
+    }
+
+    switch (s.readiness) {
+    case ECUIO_DIAG_ANSWERED: {
+        QStringList incomplete;
+        const uint8_t n =
+            std::min<uint8_t>(s.monitor_count, ECUIO_DIAG_MAX_MONITORS);
+        for (uint8_t i = 0; i < n; ++i) {
+            if ((s.monitors[i].flags & ECUIO_MONITOR_COMPLETE) == 0) {
+                incomplete << QString::fromLatin1(
+                    ecuio_monitor_short_name(s.monitors[i].id, s.flags));
+            }
+        }
+        QString part = QStringLiteral("readiness %1 of %2 complete")
+                           .arg(n - incomplete.size())
+                           .arg(n);
+        if (!incomplete.isEmpty()) {
+            part += QStringLiteral(" (%1 incomplete)")
+                        .arg(incomplete.join(QStringLiteral(", ")));
+        }
+        parts << part;
+        break;
+    }
+    case ECUIO_DIAG_REFUSED:
+        parts << QStringLiteral("readiness") + refused(0x01, s.readiness_nrc);
+        break;
+    case ECUIO_DIAG_UNANSWERED:
+        parts << QStringLiteral("readiness unanswered");
+        break;
+    default:
+        break;
+    }
+
+    switch (s.freeze) {
+    case ECUIO_DIAG_ANSWERED:
+        parts << ((s.flags & ECUIO_DIAG_FREEZE_FRAME) != 0
+                      ? QStringLiteral("freeze frame for %1")
+                            .arg(dtc(s.freeze_dtc))
+                      : QStringLiteral("no freeze frame"));
+        break;
+    case ECUIO_DIAG_REFUSED:
+        parts << QStringLiteral("freeze frame") + refused(0x02, s.freeze_nrc);
+        break;
+    case ECUIO_DIAG_UNANSWERED:
+        parts << QStringLiteral("freeze frame unanswered");
+        break;
+    default:
+        break;
+    }
+    if (parts.isEmpty()) {
+        parts << QStringLiteral("nothing asked");
+    }
+    return QStringLiteral("ECU %1 diagnostics: ").arg(hexId(s.rx_id)) +
+           parts.join(QStringLiteral("; "));
+}
+
 /* The URI as the header pill and the Dashboard show it. A direct-load
  * selector (one holding a separator, as resolve_uri tells a path from a
- * vendor name) is cut to the DLL's file name, j2534://…/vendor.dll, so
+ * vendor name) is cut to the DLL's file name, j2534://.../vendor.dll, so
  * a local folder never reaches the screen or a screenshot, and a long
  * path can't elide the DLL off the pill's end. The query stays; every
  * other URI is unchanged. Settings and the activity log keep it whole. */
@@ -2049,20 +2947,42 @@ QString SessionBridge::uriLabelFor(const QString& uri)
 
 /* A replay without loop=1 stops sending at the end of its file and the
  * session stays open (ADR-0023); this says so once, when every frame the
- * file holds has reached onFrame, taken or dropped */
+ * file holds has been read and every one its ?faults= didn't take
+ * (ADR-0041) has reached onFrame, taken or dropped */
 void SessionBridge::pollReplayEnd()
 {
-    if (m_replayEndLogged ||
-        m_framesDelivered.load(std::memory_order_relaxed) < m_replayFrames) {
+    if (m_replayEndLogged || m_session == nullptr) {
+        return;
+    }
+    ecuio_replay_faults_t f{};
+    ecuio_session_get_replay_faults(m_session, &f);
+    if (f.frames < m_replayFrames ||
+        m_framesDelivered.load(std::memory_order_relaxed) + f.dropped +
+                f.overflowed <
+            m_replayFrames) {
         return;
     }
     m_replayEndLogged = true;
+    if (f.dropped + f.overflowed + f.corrupted + f.truncated + f.stalled ==
+        0) {
+        emit logMessage(
+            QStringLiteral("Replay finished: %1 frames; the session stays open")
+                .arg(m_replayFrames));
+        return;
+    }
     emit logMessage(
-        QStringLiteral("Replay finished: %1 frames; the session stays open")
-            .arg(m_replayFrames));
+        QStringLiteral("Replay finished: %1 frames, faults injected: %2 "
+                       "dropped, %3 lost to an overflow, %4 corrupted, %5 cut "
+                       "short, %6 held back; the session stays open")
+            .arg(m_replayFrames)
+            .arg(f.dropped)
+            .arg(f.overflowed)
+            .arg(f.corrupted)
+            .arg(f.truncated)
+            .arg(f.stalled));
 }
 
-/* A sleep while connected (ADR-0033 §6): the machine's slept count rose
+/* A sleep while connected (ADR-0033 section 6): the machine's slept count rose
  * a second or more since the last tick. Session time counts the sleep, so
  * Live and the recording show it as a gap; this says what the gap is.
  * Smaller rises are taken in without a line */
@@ -2114,11 +3034,15 @@ QString SessionBridge::sessionInfoText(const ecuio_session_info_t& info)
                 : QStringLiteral("at %1x").arg(QString::number(
                       info.replay_speed_milli / 1000.0, 'g', 6));
         const bool loop = (info.flags & ECUIO_SESSION_INFO_REPLAY_LOOP) != 0;
+        const bool faults =
+            (info.flags & ECUIO_SESSION_INFO_REPLAY_FAULTS) != 0;
         return QStringLiteral(
-                   "Session: replay of a recording, %1 frames over %2 s %3%4; ")
+                   "Session: replay of a recording, %1 frames over %2 s %3%4%5; ")
                    .arg(info.replay_frames)
                    .arg(QString::number(info.replay_span_ms / 1000.0, 'f', 1),
-                        speed, loop ? QStringLiteral(", looping") : QString()) +
+                        speed, loop ? QStringLiteral(", looping") : QString(),
+                        faults ? QStringLiteral(", with faults injected")
+                               : QString()) +
                profile;
     }
     if (info.backend == ECUIO_BACKEND_SOCKETCAN) {

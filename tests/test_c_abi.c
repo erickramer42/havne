@@ -35,6 +35,8 @@
  * pedantic C89, complementing the header's _Static_assert (C11+). */
 typedef char abi_frame_size_check[(sizeof(ecuio_frame_t) == 4120) ? 1 : -1];
 typedef char abi_data_offset_check[(offsetof(ecuio_frame_t, data) == 16) ? 1 : -1];
+typedef char abi_replay_faults_size_check[(sizeof(ecuio_replay_faults_t) == 64) ? 1 : -1];
+typedef char abi_replay_faults_stalled_check[(offsetof(ecuio_replay_faults_t, stalled) == 40) ? 1 : -1];
 typedef char abi_data_size_check[(sizeof(((ecuio_frame_t*)0)->data) == ECUIO_FRAME_DATA_MAX) ? 1 : -1];
 typedef char abi_flags_offset_check[(offsetof(ecuio_frame_t, flags) == 4112) ? 1 : -1];
 typedef char abi_def_size_check[(sizeof(ecuio_signal_def_t) == 120) ? 1 : -1];
@@ -43,6 +45,7 @@ typedef char abi_def_start_byte_check[(offsetof(ecuio_signal_def_t, start_byte) 
 typedef char abi_def_byte_length_check[(offsetof(ecuio_signal_def_t, byte_length) == 22) ? 1 : -1];
 typedef char abi_def_scale_check[(offsetof(ecuio_signal_def_t, scale) == 24) ? 1 : -1];
 typedef char abi_def_name_check[(offsetof(ecuio_signal_def_t, name) == 40) ? 1 : -1];
+typedef char abi_def_plot_rank_check[(offsetof(ecuio_signal_def_t, plot_rank) == 89) ? 1 : -1];
 typedef char abi_def_flags_check[(offsetof(ecuio_signal_def_t, flags) == 92) ? 1 : -1];
 typedef char abi_def_reserved_check[(offsetof(ecuio_signal_def_t, reserved) == 96) ? 1 : -1];
 typedef char abi_set_layout_check[(offsetof(ecuio_signal_set_t, layout_version) == 0) ? 1 : -1];
@@ -60,10 +63,20 @@ typedef char abi_support_size_check[(sizeof(ecuio_channel_support_t) == 152) ? 1
 typedef char abi_support_bitmap_check[(offsetof(ecuio_channel_support_t, pid_bitmap) == 24) ? 1 : -1];
 typedef char abi_support_list_check[(offsetof(ecuio_channel_support_t, dropped_list) == 56) ? 1 : -1];
 typedef char abi_support_scan_check[(offsetof(ecuio_channel_support_t, scan_total) == 120) ? 1 : -1];
-typedef char abi_support_reserved_check[(offsetof(ecuio_channel_support_t, reserved) == 132) ? 1 : -1];
+typedef char abi_support_pids_check[(offsetof(ecuio_channel_support_t, pids_supported) == 132) ? 1 : -1];
+typedef char abi_support_reserved_check[(offsetof(ecuio_channel_support_t, reserved) == 136) ? 1 : -1];
 typedef char abi_identity_item_check[(sizeof(ecuio_identity_item_t) == 72) ? 1 : -1];
 typedef char abi_identity_size_check[(sizeof(ecuio_channel_identity_t) == 1184) ? 1 : -1];
 typedef char abi_identity_list_check[(offsetof(ecuio_channel_identity_t, list) == 32) ? 1 : -1];
+typedef char abi_dtc_list_check[(sizeof(ecuio_dtc_list_t) == 68) ? 1 : -1];
+typedef char abi_monitor_check[(sizeof(ecuio_monitor_t) == 4) ? 1 : -1];
+typedef char abi_freeze_value_check[(sizeof(ecuio_freeze_value_t) == 16) ? 1 : -1];
+typedef char abi_diag_size_check[(sizeof(ecuio_channel_diagnostics_t) == 552) ? 1 : -1];
+typedef char abi_diag_clear_check[(offsetof(ecuio_channel_diagnostics_t, clear) == 21) ? 1 : -1];
+typedef char abi_diag_clear_rpm_check[(offsetof(ecuio_channel_diagnostics_t, clear_rpm) == 24) ? 1 : -1];
+typedef char abi_diag_lists_check[(offsetof(ecuio_channel_diagnostics_t, lists) == 40) ? 1 : -1];
+typedef char abi_diag_monitors_check[(offsetof(ecuio_channel_diagnostics_t, monitors) == 244) ? 1 : -1];
+typedef char abi_diag_freeze_check[(offsetof(ecuio_channel_diagnostics_t, freeze_values) == 296) ? 1 : -1];
 typedef char abi_display_size_check[(sizeof(ecuio_display_value_t) == 32) ? 1 : -1];
 typedef char abi_display_unit_check[(offsetof(ecuio_display_value_t, unit) == 8) ? 1 : -1];
 typedef char abi_display_decimals_check[(offsetof(ecuio_display_value_t, decimal_places) == 24) ? 1 : -1];
@@ -72,6 +85,9 @@ typedef char abi_value_text_check[(offsetof(ecuio_value_t, text) == 16) ? 1 : -1
 typedef char abi_value_size_check[(sizeof(void*) != 8 || sizeof(ecuio_value_t) == 24) ? 1 : -1];
 typedef char abi_batch_values_check[(offsetof(ecuio_value_batch_t, values) == 24) ? 1 : -1];
 typedef char abi_batch_size_check[(sizeof(void*) != 8 || sizeof(ecuio_value_batch_t) == 32) ? 1 : -1];
+typedef char abi_session_timing_size_check[(sizeof(ecuio_session_timing_t) == 64) ? 1 : -1];
+typedef char abi_request_timing_size_check[(sizeof(ecuio_request_timing_t) == 80) ? 1 : -1];
+typedef char abi_request_timing_intervals_check[(offsetof(ecuio_request_timing_t, intervals) == 44) ? 1 : -1];
 typedef char abi_serial_size_check[(sizeof(ecuio_serial_port_t) == 288) ? 1 : -1];
 typedef char abi_serial_device_check[(offsetof(ecuio_serial_port_t, device) == 128) ? 1 : -1];
 typedef char abi_serial_flags_check[(offsetof(ecuio_serial_port_t, flags) == 256) ? 1 : -1];
@@ -89,6 +105,7 @@ int main(void)
     ecuio_session_info_t info;
     ecuio_channel_support_t support;
     ecuio_channel_identity_t identity;
+    ecuio_channel_diagnostics_t diagnostics;
     ecuio_display_value_t shown;
     ecuio_sur_request_t sur_request;
     ecuio_transport_ops_t ops;
@@ -97,6 +114,7 @@ int main(void)
     uint32_t serial_count = 0;
     uint32_t can_count = 0;
     const uint8_t vin_request[2] = {0x09, 0x02};
+    char dtc[6];
     frame.arbitration_id = 0x7FF;
     frame.channel_id = 0;
     frame.data_length = 8;
@@ -125,8 +143,25 @@ int main(void)
     if (ecuio_session_get_info(NULL, &info) != ECUIO_ERR_NULL_ARGUMENT) {
         return 1;
     }
-    if (ecuio_register_values_callback(NULL, NULL, NULL) != ECUIO_ERR_NULL_ARGUMENT ||
-        ecuio_unregister_values_callback(NULL, NULL, NULL) != ECUIO_ERR_NULL_ARGUMENT) {
+    if (ecuio_register_values_callback(NULL, NULL, NULL) !=
+            ECUIO_ERR_NULL_ARGUMENT ||
+        ecuio_unregister_values_callback(NULL, NULL, NULL) !=
+            ECUIO_ERR_NULL_ARGUMENT ||
+        ecuio_session_get_absent_signals(NULL, NULL, 0, NULL) !=
+            ECUIO_ERR_NULL_ARGUMENT ||
+        ecuio_session_get_unsupported_signals(NULL, NULL, 0, NULL) !=
+            ECUIO_ERR_NULL_ARGUMENT ||
+        ecuio_identity_vin(NULL, NULL, ECUIO_VIN_TEXT_LEN) !=
+            ECUIO_ERR_NULL_ARGUMENT ||
+        ecuio_session_get_unsplit_replies(NULL, NULL) !=
+            ECUIO_ERR_NULL_ARGUMENT ||
+        ecuio_session_get_replay_faults(NULL, NULL) !=
+            ECUIO_ERR_NULL_ARGUMENT ||
+        ecuio_session_get_timing(NULL, NULL, NULL, 0, NULL) !=
+            ECUIO_ERR_NULL_ARGUMENT ||
+        sizeof(ECUIO_TIMING_COLUMNS) < 2u ||
+        (ECUIO_SESSION_INFO_REPLAY_FAULTS & ECUIO_SESSION_INFO_LISTEN_ONLY) != 0u ||
+        ECUIO_ABSENT_AFTER_FRAMES != 3u) {
         return 1;
     }
     if (ecuio_decode_text(NULL, NULL, 0, NULL, 0) != ECUIO_DECODE_ERR_NULL) {
@@ -145,6 +180,23 @@ int main(void)
         ECUIO_ERR_NULL_ARGUMENT ||
         strcmp(ecuio_identity_request_name(vin_request, 2), "VIN") != 0 ||
         ecuio_identity_request_name(vin_request, 1)[0] != '\0') {
+        return 1;
+    }
+    if (ecuio_dtc_format(0x0301, dtc, sizeof dtc) != ECUIO_OK ||
+        strcmp(dtc, "P0301") != 0 ||
+        strcmp(ecuio_monitor_name(8, 0), "Catalyst") != 0 ||
+        strcmp(ecuio_monitor_short_name(8, ECUIO_DIAG_COMPRESSION),
+               "NMHC catalyst") != 0) {
+        return 1;
+    }
+    if (ecuio_session_get_channel_diagnostics(NULL, 0, &diagnostics) !=
+            ECUIO_ERR_NULL_ARGUMENT ||
+        ecuio_session_read_diagnostics(NULL) != ECUIO_ERR_NULL_ARGUMENT ||
+        ecuio_session_clear_diagnostics(NULL, 0, 0) != ECUIO_ERR_NULL_ARGUMENT ||
+        ECUIO_ERR_REPORT_CHANGED != 17 ||
+        (ECUIO_DIAG_ASKED & ECUIO_DIAG_FREEZE_FRAME) != 0 ||
+        (ECUIO_DIAG_CLEARING & ECUIO_DIAG_ASKED) != 0 ||
+        ECUIO_CLEAR_REPORT_CHANGED != 6u) {
         return 1;
     }
     memset(&sur_request, 0, sizeof sur_request);

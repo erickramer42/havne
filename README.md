@@ -11,14 +11,14 @@ the vehicle I/O and decoding behind a C ABI; a Qt 6 / QML front end
 draws the results on Windows, Linux, macOS and Android. It talks to
 J2534 Pass-Thru adapters on Windows, to ELM327-compatible adapters
 everywhere (USB, Bluetooth, WiFi) and to native CAN interfaces on Linux
-through SocketCAN, listening only. `havne-cli` streams any session as
+through SocketCAN. `havne-cli` streams any session as
 JSON lines for scripts, and a simulated vehicle runs every page with no
 hardware.
 
 > [!WARNING]
-> **Experimental, read-only.** It has read one car through two adapters, from a laptop and from an Android phone; other vehicles and adapters are untested. Read [DISCLAIMER.md](DISCLAIMER.md) before connecting it to a vehicle.
+> **Experimental.** It has read one car through two adapters, from a laptop and from an Android phone; other vehicles and adapters are untested. It can clear trouble codes, after asking and saving them first, but has cleared them only on its fakes and simulated vehicle, never on a car. Read [DISCLAIMER.md](DISCLAIMER.md) before connecting it to a vehicle.
 
-![The Havne Dashboard through a quarter mile on the warmed-up simulated vehicle: launch control holds the engine near 4,000 rpm at the line, the tires spin off it, three upshifts at 6,800 rpm refill the shift lights, and speed climbs to about 107 mph at the line while coolant rises from 194 to 216 °F, where the fan cuts in, and the oil from 225 to 239 °F, before the driver lifts](docs/images/dashboard.gif)
+![The Havne Dashboard through a quarter mile on the warmed-up simulated vehicle: launch control holds the engine near 4,000 rpm at the line, the tires spin off it, three upshifts at 6,800 rpm refill the shift lights, and speed climbs to about 107 mph at the line while coolant rises from 194 to 216 deg F, where the fan cuts in, and the oil from 225 to 239 deg F, before the driver lifts](docs/images/dashboard.gif)
 
 *The Dashboard on the simulated vehicle (`mock://demo`), in real time:
 a quarter mile off launch control on a warm loop.*
@@ -100,9 +100,11 @@ a quarter mile off launch control on a warm loop.*
   with sessions that keep running in the background
   ([ADR-0028](docs/adr/0028-app-fed-streams.md),
   [ADR-0029](docs/adr/0029-android-background-sessions.md)); and a
-  native CAN interface on Linux through SocketCAN, listen-only, every
-  frame on the bus or the IDs a filter names
+  native CAN interface on Linux through SocketCAN: listen-only, every
+  frame on the bus or the IDs a filter names, or asking the car through
+  ISO-TP in core
   ([ADR-0032](docs/adr/0032-socketcan-listening.md),
+  [ADR-0040](docs/adr/0040-socketcan-requests-isotp.md),
   [docs/linux.md](docs/linux.md)).
 - **A command-line client.** `havne-cli stream <uri>` writes any
   session's frames, decoded values and link health as JSON lines for
@@ -110,11 +112,20 @@ a quarter mile off launch control on a warm loop.*
   ports, adapters and CAN interfaces a URI can name; on Linux,
   `havne-cli play` puts the simulated car or a recording on a virtual
   CAN bus ([ADR-0031](docs/adr/0031-command-line-client.md)).
-- **Profiles chosen by the URI.** `obd2` polls standard PIDs,
+- **Profiles chosen by the URI.** `obd2` polls every standard
+  Service 01 reading the car has, the fast-changing ones twice as often
+  ([ADR-0039](docs/adr/0039-full-service01-coverage.md)),
   `uds-generic` polls or scans the UDS identifiers the URI names, and
   `raw` logs frames; the car's VIN and calibration IDs are read at
   connect ([ADR-0013](docs/adr/0013-protocol-profiles.md),
   [ADR-0021](docs/adr/0021-vehicle-identification.md)).
+- **Trouble codes.** At connect, each ECU's check-engine light, its
+  stored, pending and permanent codes, its readiness monitors and the
+  freeze frame, on a Diagnostics page, in the activity log and from
+  `havne-cli` ([ADR-0037](docs/adr/0037-reading-trouble-codes.md)).
+  Clearing them asks first, saves the report to a file of its own, and
+  sends nothing while the engine turns
+  ([ADR-0038](docs/adr/0038-clearing-trouble-codes.md)).
 - **Recording and replay.** Each connect can record every frame, value
   and event; `replay://` plays a recording back at its own pace or
   faster, through the same decoding
@@ -132,15 +143,20 @@ a quarter mile off launch control on a warm loop.*
   onto the rev limiter, a cruise and a quarter mile, with readings that
   stay consistent with each other the way a real ECU's log does.
 
-| Live view | Activity log | Link health |
-|---|---|---|
-| [![Live view: RPM, speed, MAF and lambda plotted through a 3rd-gear pull onto the limiter](docs/images/live.png)](docs/images/live.png) | [![The Log page's activity log: a mock session's connect, its Session line, the Delivery line at the disconnect (none dropped, the GUI thread's wait in microseconds) and a second connect](docs/images/log.png)](docs/images/log.png) | [![Live view over J2534 with every request failing: an amber "Requests failing" banner and pill, and each signal waiting for data](docs/images/link-health.png)](docs/images/link-health.png) |
-| A 3rd-gear pull onto the limiter: rpm, speed and MAF rise together, then rpm saws while speed holds and lambda swings lean on each fuel cut | Each session as it happened: the connect, the "Session:" line, and how its frames reached the screen | Every request refused by the fake J2534 driver: the link reads "requests failing", not idle, and the page says what to check |
+| Live view | Link health |
+|---|---|
+| [![Live view: RPM, speed, MAF and lambda plotted through a 3rd-gear pull onto the limiter](docs/images/live.png)](docs/images/live.png) | [![Live view over J2534 with every request failing: an amber "Requests failing" banner and pill, and each signal waiting for data](docs/images/link-health.png)](docs/images/link-health.png) |
+| A 3rd-gear pull onto the limiter: rpm, speed and MAF rise together, then rpm saws while speed holds and lambda swings lean on each fuel cut | Every request refused by the fake J2534 driver: the link reads "requests failing", not idle, and the page says what to check |
+
+![The Log page in developer mode on the simulated vehicle: the activity log holds two connects with their Session lines and, between them, the Delivery line of the disconnect (none dropped, the GUI thread's wait in microseconds); the pointer clicks Frames and the raw frame table streams, newest first, each frame's time, length, standard or extended ID and payload; then it clicks back to Activity](docs/images/log.gif)
+
+*The Log page on the simulated vehicle (`mock://demo`), in developer
+mode: each session as it happened, then the frames as they arrive.*
 
 ## Architecture
 
 ```
- QML pages: Home · Dashboard · Live · Log · Settings
+ QML pages: Home · Dashboard · Live · Diagnostics · Log · Settings
    ▼  properties and list models, GUI thread only
  SessionBridge (app/)          the app's caller of the core: worker → GUI
    │                           marshaling, 100 ms coalescing, link health
@@ -150,8 +166,8 @@ a quarter mile off launch control on a warm loop.*
    ├── mock://    a scripted drive on a vehicle model
    ├── replay://  a recording's frames.csv at its own pace
    ├── elm327://  a serial port, a WiFi socket, or a link the app opens
-   ├── socketcan:// a Linux CAN interface, listen-only (havne-cli play
-   │              drives the simulated car on a virtual one)
+   ├── socketcan:// a Linux CAN interface, listening or through ISO-TP
+   │              (havne-cli play drives the simulated car on a virtual one)
    └── j2534://   a surrogate process per driver, over a named pipe
           ├── ecuio-j2534-surrogate.exe      (32-bit drivers)
           └── ecuio-j2534-surrogate-x64.exe  (64-bit drivers)
@@ -214,9 +230,10 @@ latest release. Next:
 
 | Version | Plan |
 |---|---|
-| v0.3.5 | Full OBD-II diagnostics, reading and clearing trouble codes; SocketCAN requests through ISO-TP |
-| v0.3.6–v0.3.9 | A log viewer that overlays runs; CSV import and export, scrubbed for sharing; a health report; triggered logging and alerts |
-| Later | Python bindings, capture formats and discovery; a plugin framework; older buses |
+| v0.3.5 | Full OBD-II diagnostics, reading and clearing trouble codes; SocketCAN requests through ISO-TP; fault injection on a replay; reply timing per PID |
+| v0.3.6 | The car runs the adapters on hand can make; trouble-code descriptions, VIN decode and a readiness summary; the simulated ECU as `havne-cli sim` |
+| v0.3.7-v0.3.9 | A log viewer that overlays runs; CSV import and export, scrubbed for sharing; a health report; Python bindings; triggered logging and alerts |
+| Later | SocketCAN through a real controller, when the hardware is on hand; discovery and capture formats; a plugin framework; older buses |
 
 [STATUS.md](STATUS.md) holds what works, what's verified, the known
 issues and the full roadmap; [CHANGELOG.md](CHANGELOG.md) what each
@@ -231,6 +248,7 @@ release changed.
 | [docs/testing.md](docs/testing.md) | Test tiers, what each test pins, and what isn't verified |
 | [docs/j2534.md](docs/j2534.md), [docs/elm327.md](docs/elm327.md) | How each adapter transport works |
 | [docs/linux.md](docs/linux.md) | Havne on Linux: the AppImage, the core packages, adapters and permissions, SocketCAN, tracing |
+| [docs/ios.md](docs/ios.md) | Havne on iPhone: installing CI's unsigned build with your own Apple ID, what works there |
 | [docs/development.md](docs/development.md) | Builds, tests, CI, releases, troubleshooting |
 | [docs/bench-sessions/](docs/bench-sessions/bench-prep.md) | Real-hardware sessions, their run sheets, and what only hardware can confirm |
 | [docs/engineering-log.md](docs/engineering-log.md) | Milestones and lessons learned |

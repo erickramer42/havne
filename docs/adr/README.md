@@ -27,7 +27,7 @@ old one, and the old record's status is updated to point at it.
 | [0018](0018-connect-failure-reporting.md) | Connect failures say why: four status codes and a thread-local detail with the vendor's text | Accepted |
 | [0019](0019-session-info.md) | Sessions say what they run on: an info struct (backend, channel, profile, battery, versions) and the activity log's "Session:" line | Accepted |
 | [0020](0020-uds-generic.md) | `uds-generic`: DIDs named in the URI (`?did=`), a set built per session, ranges scanned once beside the rotation | Accepted |
-| [0021](0021-vehicle-identification.md) | Vehicle identification: the VIN and the ECU's identifiers (Service 09, DIDs F187–F195) asked once per channel at connect, a report per channel and one activity-log line | Accepted |
+| [0021](0021-vehicle-identification.md) | Vehicle identification: the VIN and the ECU's identifiers (Service 09, DIDs F187-F195) asked once per channel at connect, a report per channel and one activity-log line | Accepted |
 | [0022](0022-display-units.md) | Display units: metric or imperial, converted in core by unit string at the UI's edge; recordings keep decoded values | Accepted |
 | [0023](0023-replay-transport.md) | Replay transport: `replay://` plays a recording's `frames.csv` back through the frame API, paced by its session time | Accepted |
 | [0024](0024-decode-on-the-worker.md) | Decoding on the worker: a values callback delivers each frame's decoded signals with the frame's time | Accepted |
@@ -42,6 +42,12 @@ old one, and the old record's status is updated to point at it.
 | [0033](0033-session-time-counts-sleep.md) | Session time counts sleep: one host clock for core and the app (`CLOCK_BOOTTIME` on Linux and Android), and a sleep that says so | Accepted |
 | [0034](0034-debug-symbols-and-probes.md) | Debug symbols with each release (PDBs in a zip of their own; split Linux debug info by build ID) and USDT probes in core | Accepted |
 | [0035](0035-linux-downloads-sbom-reproducible.md) | Linux downloads (the AppImage; core alone as a deb and a tarball, with debug info), one SPDX SBOM per release, and core packages reproducible byte for byte | Accepted |
+| [0037](0037-reading-trouble-codes.md) | Reading trouble codes, readiness and the freeze frame, asked at connect: four more read services, a report per ECU, the codes named in core | Accepted |
+| [0038](0038-clearing-trouble-codes.md) | Clearing trouble codes: Service 04 by one path only, each ECU by its own ID, after the report is saved, the engine is seen stopped and the user confirms | Accepted |
+| [0039](0039-full-service01-coverage.md) | Full Service 01 coverage in one `obd2` set: every linear field, two rate classes in the engine (fast and slow, 2:1), then several PIDs per request, the reply split in core's decode | Accepted |
+| [0040](0040-socketcan-requests-isotp.md) | SocketCAN requests: ISO-TP in core, shared with ELM327; a requesting session needs a controller in normal and one-shot mode at a stated rate, and sends nothing more after a CAN error on its first request | Accepted |
+| [0041](0041-replay-fault-injection.md) | Fault injection on a replay: `?faults=` drops, loses to an overflow, corrupts, cuts short or holds back a recording's frames as they play, drawn from `?seed=` so the same URI plays the same faults; and the recording answering a requesting session as the ECU on `vcan0`, its replies broken at the ISO-TP level | Accepted |
+| [0042](0042-reply-timing.md) | Reply timing per request: latency on the host's clock, the refresh interval on the frames' own (the adapter's, the kernel's or the host's, said), log-linear histograms in core published every second; `latency.csv` and the CLI's `timing` lines append the changed rows every 10 s | Accepted |
 
 ## Adding a record
 

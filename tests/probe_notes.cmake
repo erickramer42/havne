@@ -1,6 +1,6 @@
 # File/layer: tests/probe_notes.cmake | test-only, cmake -P, Linux with <sys/sdt.h>
 # Testing: UNIT (ProbeNotesTest): core's USDT probes are in a binary that
-#          links it (ADR-0034 §4)
+#          links it (ADR-0034 section 4)
 #
 #   cmake -DREADELF=<readelf> -DBINARY=<file> -P probe_notes.cmake
 #

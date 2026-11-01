@@ -46,7 +46,7 @@ activity log (`events.log` when recording) has the link's states.
 & LPT)"; in Settings, press **Refresh**.
 
 - [ ] A new `COMn` in both, the Settings row reading "Serial port, for
-      elm327:// · \Device\…". Copy the port and the device name. The
+      elm327://, \Device\...". Copy the port and the device name. The
       VX is a USB CDC serial device (VID 0483, PID 5740, STM32's virtual
       COM port): "OBDX Pro Serial (COM4)" on the dev machine, where
       OBDX's `obdxdriver.inf` names it; Windows 10 and 11 bind their own
@@ -70,8 +70,8 @@ Connect, and leave it about a minute.
       `ELM327 V2.1`, then `< OK` to each command (or what came instead);
       after each request, `NO DATA` (#15) and the time to its prompt
 - [ ] Connect succeeds within a few seconds. Copy the "Session:" line:
-      `ELM327 adapter (ELM327 v…); ISO 15765 at 500000 baud; profile
-      obd2, channel 0x7E8/0x7E0 (rx/tx); …`. No STN part (the VX isn't
+      `ELM327 adapter (ELM327 v...); ISO 15765 at 500000 baud; profile
+      obd2, channel 0x7E8/0x7E0 (rx/tx); ...`. No STN part (the VX isn't
       one, so `STI` is refused), and the battery `0.0 V` or "no battery
       reading" on USB power (the J2534 path read 0.0 V, BENCH prep #10)
 - [ ] Amber "Link quiet" in the header (Live's banner: "Vehicle not
@@ -83,7 +83,7 @@ Connect, and leave it about a minute.
 - [ ] Disconnect: `Disconnected:` at once
 
 A refused connect names the command and the answer ("the adapter on
-COMn answered ATxx with '…', not OK"): copy it verbatim and stop. That
+COMn answered ATxx with '...', not OK"): copy it verbatim and stop. That
 answer is the finding (#12).
 
 ## Phase 3: the cable pulled
@@ -113,7 +113,7 @@ the USB cable for about 10 s, then plug it back in.
 |---|---|
 | "COMn: the port is in use by another program" | The vendor app, or a `j2534://` session, holds it |
 | "the adapter on COMn didn't answer ATZ within 5 s" | The serial rate: retry with `?serial=115200`. Then a port that isn't the VX's |
-| "answered ATZ with '…', not an ELM327 version", or ATI | Garbled text: the serial rate, as above. Readable text: the adapter isn't in ELM mode, or another device is on the port |
+| "answered ATZ with '...', not an ELM327 version", or ATI | Garbled text: the serial rate, as above. Readable text: the adapter isn't in ELM mode, or another device is on the port |
 | Connects, then red "Adapter fault" with the cable in | The port's reads or writes failing: copy the activity log whole |
 | The app crashes | Capture the activity log and stop |
 
@@ -122,5 +122,5 @@ the USB cable for about 10 s, then plug it back in.
 1. Copy this sheet, filled in, to `docs/bench-sessions/<date>-elm327-bench.md`,
    and the session's wire logs to a folder beside it. Scrub them as
    [bench-runsheet.md](bench-runsheet.md) says: no names, no local paths
-2. Mark BENCH prep #11–#16 for the VX in [bench-prep.md](bench-prep.md)
+2. Mark BENCH prep #11-#16 for the VX in [bench-prep.md](bench-prep.md)
 3. Update STATUS.md, and testing.md's gaps (the Win32 port)

@@ -1,7 +1,8 @@
 // File/layer: tests/qml/tst_dashboard.qml | Qt Quick Test, QML tier
-// Testing: SignalHub's name lookup over the bridge's signal model,
-//          including a profile switch, and the Dashboard's Taps: which
-//          signal each gauge reads and the note it shows with no
+// Testing: SignalHub's lookup by def ID over the bridge's signal
+//          model, including a profile switch, and the Dashboard's Taps:
+//          which signal each gauge reads (by ID: a set that names every
+//          def otherwise still drives each gauge) and the note it shows with no
 //          session, before the first value, with a value, and when the
 //          profile lacks the signal (?profile=raw); imperial units on the
 //          gauges, their scales and zones, the peaks cleared on a
@@ -22,18 +23,23 @@ TestCase {
     Component { id: hubComponent; SignalHub {} }
     Component { id: pageComponent; DashboardPage { width: 1280; height: 800 } }
 
-    // Each gauge's label and the signal its Tap reads, under the names
-    // the mock and obd2 sets share
+    // Each gauge's label and its key in Bridge.gaugeSignals, with the
+    // name the mock set gives the signal
     readonly property var gaugeSignals: ({
-        "Engine speed": "RPM",
-        "Vehicle speed": "Vehicle Speed",
-        "Coolant": "Coolant Temp",
-        "Oil temp": "Engine Oil Temp",
-        "IAT": "Intake Air Temp",
-        "MAF": "MAF",
-        "Throttle": "Throttle Position",
-        "Engine load": "Engine Load"
+        "Engine speed": ["rpm", "RPM"],
+        "Vehicle speed": ["speed", "Vehicle Speed"],
+        "Coolant": ["coolant", "Coolant Temp"],
+        "Oil temp": ["oil", "Engine Oil Temp"],
+        "IAT": ["iat", "Intake Air Temp"],
+        "MAF": ["maf", "MAF"],
+        "Throttle": ["throttle", "Throttle Position"],
+        "Engine load": ["load", "Engine Load"]
     })
+
+    // The IDs the gauge labeled `label` looks up
+    function idsOf(label) {
+        return Bridge.gaugeSignals[gaugeSignals[label][0]]
+    }
 
     // A binding error in the app's QML fails the test
     function init() {
@@ -68,27 +74,29 @@ TestCase {
         return found
     }
 
-    function test_hubFindsSignalsByName() {
+    function test_hubFindsSignalsById() {
         const hub = createTemporaryObject(hubComponent, testCase)
         connect("mock://demo")
         verify(hub.count > 0)
-        compare(Object.keys(hub.byName).length, hub.count, "one entry per signal name")
+        compare(Object.keys(hub.byId).length, hub.count, "one entry per def")
         for (const label in gaugeSignals) {
-            const name = gaugeSignals[label]
-            const entry = hub.lookup([name])
-            verify(entry, name + " is in the mock set")
-            compare(entry.name, name)
+            const entry = hub.lookup(idsOf(label))
+            verify(entry, label + "'s signal is in the mock set")
+            compare(entry.id, idsOf(label)[0], label + ": the mock's ID")
+            compare(entry.name, gaugeSignals[label][1])
         }
-        // The first name the set has wins; none of them, null
-        verify(hub.lookup(["No such signal", "RPM"]) === hub.lookup(["RPM"]))
-        compare(hub.lookup(["No such signal"]), null)
+        // The first ID the set has wins; none of them, null
+        const rpm = idsOf("Engine speed")
+        verify(hub.lookup([65535, rpm[0]]) === hub.lookup(rpm))
+        compare(hub.lookup([65535]), null)
         compare(hub.lookup([]), null)
+        compare(hub.lookup(undefined), null)
     }
 
     function test_hubEntryFollowsTheModel() {
         const hub = createTemporaryObject(hubComponent, testCase)
         connect("mock://demo")
-        const rpm = hub.lookup(["RPM"])
+        const rpm = hub.lookup(idsOf("Engine speed"))
         compare(rpm.hasValue, false, "no value before the first batch")
         compare(rpm.ageMs, -1)
         tryVerify(() => rpm.hasValue, 3000, "a value arrives")
@@ -101,17 +109,18 @@ TestCase {
     function test_hubFollowsAProfileSwitch() {
         const hub = createTemporaryObject(hubComponent, testCase)
         connect("mock://demo")
-        verify(hub.lookup(["RPM"]))
+        const rpm = idsOf("Engine speed")
+        verify(hub.lookup(rpm))
 
         cleanup()
         connect("mock://demo?profile=raw")
         compare(hub.count, 0, "raw decodes nothing")
-        compare(Object.keys(hub.byName).length, 0)
-        compare(hub.lookup(["RPM"]), null)
+        compare(Object.keys(hub.byId).length, 0)
+        compare(hub.lookup(rpm), null)
 
         cleanup()
         connect("mock://demo")
-        verify(hub.lookup(["RPM"]), "RPM is back with the mock set")
+        verify(hub.lookup(rpm), "RPM is back with the mock set")
     }
 
     function test_gaugesSayThereIsNoSession() {
@@ -141,7 +150,7 @@ TestCase {
                   3000, "every gauge gets a value")
         for (const label in gaugeSignals) {
             const g = all[label]
-            const entry = hub.lookup([gaugeSignals[label]])
+            const entry = hub.lookup(idsOf(label))
             compare(g.note, "", label)
             compare(g.decimals, entry.decimals, label + " decimals")
             if (entry.unit !== "")
@@ -149,6 +158,24 @@ TestCase {
             compare(g.valueText,
                     Number(entry.value).toLocaleString(Qt.locale(), 'f', entry.decimals),
                     label + " readout")
+        }
+    }
+
+    // A set that names every def otherwise (the mock's, renamed): each
+    // gauge still reads its signal, found by core's def ID
+    function test_aRenamedSetStillDrivesEveryGauge() {
+        const profile = Harness.registerRenamedMock()
+        verify(profile !== "", "the renamed set registers")
+        const page = createTemporaryObject(pageComponent, testCase)
+        const hub = createTemporaryObject(hubComponent, testCase)
+        const all = gauges(page)
+        connect("mock://demo?profile=" + profile)
+        tryVerify(() => Object.keys(gaugeSignals).every(label => all[label].hasValue),
+                  3000, "every gauge gets a value")
+        for (const label in gaugeSignals) {
+            compare(all[label].note, "", label)
+            const entry = hub.lookup(idsOf(label))
+            verify(entry.name !== gaugeSignals[label][1], label + ": named otherwise")
         }
     }
 

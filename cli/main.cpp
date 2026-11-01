@@ -1,13 +1,19 @@
 // File/layer: cli/main.cpp | havne-cli, a command-line client over the C ABI (ADR-0031)
 // Testing: HARNESS: golden runs of the program (CliGoldenTest, against
-//          tests/golden/cli/: the replay fixture, mock://, the refusals),
+//          tests/golden/cli/: the replay fixture, mock:// with its
+//          diagnostics line, the refusals),
 //          its usage errors (CliUsageTest) and, on POSIX, SIGINT and
-//          SIGTERM (CliSignalTest); the formatting, the ring and the
+//          SIGTERM (CliSignalTest), the absent line (CliReplayTest,
+//          tests/cli_absent.py); the formatting, the ring and the
 //          sleep rule UNIT (tests/test_cli.cpp); a real sleep BENCH
-//          (BENCH prep #27)
+//          (BENCH prep #27);
+//          the timing lines UNIT (CliTimingTest) and by hand against the fake
+//          DLL (docs/testing.md)
 //
 // Public headers only: what any program linking core can do.
 
+#include "diagnostics_line.h"
+#include "timing_line.h"
 #include "jsonl.h"
 #include "line_ring.h"
 #include "sleep_watch.h"
@@ -20,6 +26,7 @@
 #include "ecuio/socketcan.h"
 
 #include <atomic>
+#include <algorithm>
 #include <cerrno>
 #include <chrono>
 #include <csignal>
@@ -315,8 +322,126 @@ void write_session(Output& out, const ecuio_session_info_t& info)
         l.u64(info.replay_speed_milli);
         l.key("loop");
         l.raw((info.flags & ECUIO_SESSION_INFO_REPLAY_LOOP) ? "true" : "false");
+        if (info.flags & ECUIO_SESSION_INFO_REPLAY_FAULTS) {
+            l.key("faults");
+            l.raw("true");
+        }
         l.ch('}');
     }
+    l.ch('}');
+    write_line(out, l);
+}
+
+// One ECU's diagnostics once a read has completed (diagnostics_line.h)
+void write_diagnostics(Output& out, const ecuio_channel_diagnostics_t& d)
+{
+    char buf[8192];
+    cli::Line l(buf, sizeof buf);
+    cli::diagnostics_line(l, d);
+    write_line(out, l);
+}
+
+// A line for each ECU whose diagnostics read has completed since the
+// last call: generations holds each channel's last written
+void poll_diagnostics(Output& out, ecuio_session_t* session, uint32_t channels,
+                      uint32_t* generations)
+{
+    for (uint32_t c = 0; c < channels; ++c) {
+        ecuio_channel_diagnostics_t d;
+        if (ecuio_session_get_channel_diagnostics(session, c, &d) == ECUIO_OK &&
+            (d.flags & ECUIO_DIAG_COMPLETE) && d.generation != generations[c]) {
+            generations[c] = d.generation;
+            write_diagnostics(out, d);
+        }
+    }
+}
+
+// Reply timing's snapshots (ADR-0042 section 3): every 10 s of session
+// time, and once at the end (final), a timing line for each request whose
+// counts changed since the last; rows is sized before the session starts
+void poll_timing(Output& out, ecuio_session_t* session,
+                 const ecuio_session_info_t& info, cli::TimingSnapshots& snaps,
+                 std::vector<ecuio_request_timing_t>& rows, bool final)
+{
+    ecuio_session_timing_t t;
+    uint32_t count = 0;
+    if (ecuio_session_get_timing(session, &t, nullptr, 0, &count) != ECUIO_OK ||
+        count == 0 || (!final && !snaps.due(t.snapshot_us)) ||
+        ecuio_session_get_timing(session, &t, rows.data(),
+                                 static_cast<uint32_t>(rows.size()),
+                                 &count) != ECUIO_OK) {
+        return;
+    }
+    snaps.taken(t.snapshot_us);
+    const uint32_t n =
+        count < rows.size() ? count : static_cast<uint32_t>(rows.size());
+    for (uint32_t i = 0; i < n; ++i) {
+        if (!snaps.changed(i, rows[i])) {
+            continue;
+        }
+        const uint32_t rx = rows[i].channel < ECUIO_SESSION_INFO_MAX_CHANNELS
+                                ? info.rx_ids[rows[i].channel]
+                                : 0;
+        char buf[1024];
+        cli::Line l(buf, sizeof buf);
+        cli::timing_line(l, t.snapshot_us, rx, rows[i], t.interval_clock);
+        write_line(out, l);
+    }
+}
+
+// The end line's ISO-TP counts, where core reassembles (ADR-0040 section 5)
+void write_isotp(cli::Line& l, const ecuio_session_t* session)
+{
+    ecuio_session_timing_t t;
+    uint32_t count = 0;
+    if (ecuio_session_get_timing(session, &t, nullptr, 0, &count) != ECUIO_OK ||
+        (t.flags & ECUIO_TIMING_ISOTP) == 0) {
+        return;
+    }
+    l.key("isotp");
+    l.ch('{');
+    l.key("first_frames");
+    l.u64(t.isotp_first_frames);
+    l.key("completed");
+    l.u64(t.isotp_completed);
+    l.key("dropped");
+    l.u64(t.isotp_dropped);
+    l.key("malformed");
+    l.u64(t.isotp_malformed);
+    l.ch('}');
+}
+
+// The signals the session's frames come without (ADR-0039 section 6), as ids
+// the signals line names, whenever core's list changes; last holds the
+// list last written, read sized to the set
+void poll_absent(Output& out, ecuio_session_t* session,
+                 std::vector<uint16_t>& read, std::vector<uint16_t>& last)
+{
+    uint32_t count = 0;
+    if (read.empty() ||
+        ecuio_session_get_absent_signals(session, read.data(),
+                                         static_cast<uint32_t>(read.size()),
+                                         &count) != ECUIO_OK) {
+        return;
+    }
+    count = std::min<uint32_t>(count, static_cast<uint32_t>(read.size()));
+    if (count == last.size() &&
+        std::equal(last.begin(), last.end(), read.begin())) {
+        return;
+    }
+    last.assign(read.begin(), read.begin() + count);
+    BigLine b(64 + size_t{count} * 8);
+    cli::Line& l = b.line;
+    l.raw("{\"type\":\"absent\"");
+    l.key("ids");
+    l.ch('[');
+    for (uint32_t i = 0; i < count; ++i) {
+        if (i) {
+            l.ch(',');
+        }
+        l.u64(last[i]);
+    }
+    l.ch(']');
     l.ch('}');
     write_line(out, l);
 }
@@ -483,6 +608,44 @@ struct StreamArgs {
     uint64_t seconds = 0;
 };
 
+// A replay that doesn't loop has ended when every row is read and every
+// row its faults didn't take (ADR-0041) has been written: frames lost to
+// ?faults= never arrive, so the rows alone would wait forever
+bool replay_done(const ecuio_session_t* session,
+                 const ecuio_session_info_t& info, uint64_t covered)
+{
+    ecuio_replay_faults_t f;
+    if (ecuio_session_get_replay_faults(session, &f) != ECUIO_OK) {
+        return covered >= info.replay_frames;
+    }
+    return f.frames >= info.replay_frames &&
+           covered + f.dropped + f.overflowed >= info.replay_frames;
+}
+
+// The end line's faults: what a replay's ?faults= did (ADR-0041)
+void write_faults(cli::Line& l, const ecuio_session_t* session)
+{
+    ecuio_replay_faults_t f;
+    if (ecuio_session_get_replay_faults(session, &f) != ECUIO_OK) {
+        return;
+    }
+    l.key("faults");
+    l.ch('{');
+    l.key("frames");
+    l.u64(f.frames);
+    l.key("dropped");
+    l.u64(f.dropped);
+    l.key("overflowed");
+    l.u64(f.overflowed);
+    l.key("corrupted");
+    l.u64(f.corrupted);
+    l.key("truncated");
+    l.u64(f.truncated);
+    l.key("stalled");
+    l.u64(f.stalled);
+    l.ch('}');
+}
+
 int run_stream(const StreamArgs& args)
 {
     Output out;
@@ -516,8 +679,24 @@ int run_stream(const StreamArgs& args)
     const bool replay_ends =
         replay && !(info.flags & ECUIO_SESSION_INFO_REPLAY_LOOP);
     write_session(out, info);
+    // A read that completed at create (the mock's) comes first; the rest
+    // as they complete
+    const uint32_t channels =
+        info.channel_count < ECUIO_SESSION_INFO_MAX_CHANNELS
+            ? info.channel_count
+            : ECUIO_SESSION_INFO_MAX_CHANNELS;
+    uint32_t diag_generations[ECUIO_SESSION_INFO_MAX_CHANNELS] = {};
+    poll_diagnostics(out, session, channels, diag_generations);
+    // Judged from the values core decodes, so only with --values
+    const ecuio_signal_set_t* set = ecuio_session_signal_set(session);
+    std::vector<uint16_t> absent_read(
+        (args.values && set != nullptr && set->defs != nullptr) ? set->count
+                                                                : 0u);
+    std::vector<uint16_t> absent_last;
+    cli::TimingSnapshots timing_snaps;
+    std::vector<ecuio_request_timing_t> timing_rows(ECUIO_PROFILE_MAX_REQUESTS);
     if (args.values) {
-        write_signals(out, ecuio_session_signal_set(session));
+        write_signals(out, set);
     }
     out.flush();
 
@@ -554,7 +733,7 @@ int run_stream(const StreamArgs& args)
             reason = "interrupted";
         } else if (args.count && covered >= args.count) {
             reason = "count";
-        } else if (replay_ends && covered >= info.replay_frames) {
+        } else if (replay_ends && replay_done(session, info, covered)) {
             reason = "replay-end";
         } else if (args.seconds &&
                    ecuio_clock_us() - started >= args.seconds * 1000000u) {
@@ -570,6 +749,10 @@ int run_stream(const StreamArgs& args)
             l.ch('}');
             write_line(out, l);
         }
+
+        poll_diagnostics(out, session, channels, diag_generations);
+        poll_absent(out, session, absent_read, absent_last);
+        poll_timing(out, session, info, timing_snaps, timing_rows, false);
 
         int32_t now_error = ECUIO_OK;
         uint32_t now_episodes = 0;
@@ -623,11 +806,12 @@ int run_stream(const StreamArgs& args)
 
     int code = kExitOk;
     if (!out.failed) {
+        poll_timing(out, session, info, timing_snaps, timing_rows, true);
         uint64_t covered = stream->covered.load();
         if (args.count && covered > args.count) {
             covered = args.count;
         }
-        char buf[256];
+        char buf[512];
         cli::Line l(buf, sizeof buf);
         l.raw("{\"type\":\"end\"");
         l.key("reason");
@@ -638,6 +822,10 @@ int run_stream(const StreamArgs& args)
         l.u64(stream->ring.dropped_frames());
         l.key("dropped_values");
         l.u64(stream->ring.dropped_values());
+        if (info.flags & ECUIO_SESSION_INFO_REPLAY_FAULTS) {
+            write_faults(l, session);
+        }
+        write_isotp(l, session);
         l.ch('}');
         write_line(out, l);
         out.flush();
@@ -748,7 +936,7 @@ int run_devices()
 }
 
 #if HAVNE_CLI_PLAY
-// play (ADR-0032 §8): a session's frames written to a virtual CAN
+// play (ADR-0032 section 8): a session's frames written to a virtual CAN
 // interface as they arrive, so the mock's car (or a recording) drives on
 // a bus a socketcan:// session, or any SocketCAN tool, can listen to
 struct Player {
@@ -941,7 +1129,7 @@ int run_play(const PlayArgs& args)
             reason = "interrupted";
         } else if (args.count && covered >= args.count) {
             reason = "count";
-        } else if (replay_ends && covered >= info.replay_frames) {
+        } else if (replay_ends && replay_done(session, info, covered)) {
             reason = "replay-end";
         } else if (args.seconds &&
                    ecuio_clock_us() - started >= args.seconds * 1000000u) {

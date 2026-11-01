@@ -2,7 +2,7 @@
 
 - **Status:** Accepted.
 - **Date:** 2026-10-26. Built with this record, in its three steps
-  (§10); the chart's side is ADR-0005's appendix of the same date.
+  (section 10); the chart's side is ADR-0005's appendix of the same date.
 - **Builds on:** [ADR-0002](0002-callback-pair-identity-snapshot-dispatch.md)
   (callback identity and snapshot dispatch, which the new callback
   shares); [ADR-0003](0003-backpressure-bounds-in-flight-frames.md) (the
@@ -28,7 +28,7 @@ in the order a user meets them:
 - **Peaks drop out of the chart.** One value per signal per window
   survives, stamped with the window's time. The committed engine-start
   recording (`tests/fixtures/replay/2026-10-25-engine-start`) peaks at
-  1,261 rpm; replayed under `obd2` at 10× through the bridge, the
+  1,261 rpm; replayed under `obd2` at 10x through the bridge, the
   highest RPM the model ever held was 1,232. At `speed=max` the whole
   297 s collapses into a tick or two, and the model's highest was 758.
 - **Every front end copies the loop.** The C ABI exists so a UI is a
@@ -40,7 +40,7 @@ in the order a user meets them:
 
 It isn't a CPU problem. `bench_bridge` (docs/testing.md, Performance)
 measured, on 2026-10-26 (Release, dev machine, median of three runs of
-20,000 frames, µs), with the bridge's rows found by id and its staging
+20,000 frames, us), with the bridge's rows found by id and its staging
 by def index:
 
 | Defs | GUI thread a frame (drain) | of it, match and decode | worker's side a frame (`onFrame`) | one tick's `updateValues` |
@@ -55,17 +55,17 @@ by def index:
 - The match and decode cost about 1.4 ns a def a frame: at a full
   500 kbit/s classic CAN bus (about 4,500 frames a second), 1000 defs
   take under 1 % of a thread. Moving the work doesn't make it free; it
-  moves it to the worker, where 1.4 µs a frame sits well inside the
+  moves it to the worker, where 1.4 us a frame sits well inside the
   J2534 worker's 10 ms read slice.
 - The worker's side of a frame, the 4 KB copy and the queued call, costs
   more than the decode at any profile size. It is unchanged by this
   record (see Consequences).
 - The tick's update is linear in the profile. Until the same day each
   value searched the model's rows and the bridge's staging, and the
-  tick grew with the square of the profile (819 µs at 1000 defs, the
+  tick grew with the square of the profile (819 us at 1000 defs, the
   same session); that was fixed on its own, ahead of this record, so the
   numbers above measure the decode and not the search.
-- The fixture at 10× delivered all 7,074 frames with none dropped, and
+- The fixture at 10x delivered all 7,074 frames with none dropped, and
   at `max` none dropped either: on this machine the backlog never
   reached the cap, so the drop path is still unexercised by a replay.
 
@@ -85,7 +85,7 @@ The session's set is fixed for the session's life: `profile.h` states
 it is written once at create and read-only afterwards. `uds-generic`
 holds every DID it was given in its set from create, polled and scanned
 alike (`ecuio_uds_build`); its scan changes what the request engine
-asks, never the set. Everything §4 and §6 size at create rests on that
+asks, never the set. Everything section 4 and section 6 size at create rests on that
 rule. A change that lets a set change after create moves that sizing
 with it, outside dispatch, and needs an appendix here.
 
@@ -158,7 +158,7 @@ first, in def order, and the next batch starts from the first again,
 so no two values of one batch share bytes and no value outlives its
 batch.
 
-The slot count is fixed at create, from the set (§1): the most text
+The slot count is fixed at create, from the set (section 1): the most text
 defs any one frame can match. A def matches a frame by its
 `message_id`, then by its mux key, if it has one, read at its own
 `mux_offset` and `mux_length` (`ecuio_def_applies_to_frame`). So, for
@@ -209,8 +209,8 @@ heap past that, with the frame or batch dropped if that copy fails.
 ### 6. Nothing allocates on the worker
 
 The batch's value array (one entry per def in the set) and the text
-scratch (§4) are allocated by `ecuio_session_create`, once the set is
-known, and they never change, because the set never does (§1). The
+scratch (section 4) are allocated by `ecuio_session_create`, once the set is
+known, and they never change, because the set never does (section 1). The
 decode, the batch and the dispatch allocate nothing per frame.
 `CoreTest.WorkersAllocateNothingPerFrame` and
 `J2534AdoptionTest.TheWorkerAllocatesNothingPerFrame` register a values
@@ -256,10 +256,22 @@ recorded too.
 
 - **Units:** the bridge still converts on the way out (ADR-0022); core
   delivers decoded values in the def's unit.
-- **Known Issue #4 in kind:** every def is still matched against every
+- **The match against every def:** every def is still matched against every
   frame, now on the worker; the "only while registered" rule is the
   only trim. A per-signal enable mask can come later if a CAN FD rate
   makes the match matter.
+
+  > **Amended 2026-10-31:** the match no longer visits every def. The
+  > full Service 01 set put every `obd2` def on the engine ECU's reply
+  > ID, so each frame read a mux key per def, and the replay load
+  > test's sustained rate fell by about half. Create now indexes the
+  > set by message ID and key shape (`core/src/def_index.h`); a frame
+  > looks up its ID, reads its key once per shape, and only the defs
+  > found go through `ecuio_def_applies_to_frame` and the decode, in
+  > the set's order. The cost per frame follows the values a frame
+  > carries, not the profile ([docs/testing.md](../testing.md#performance)).
+  > Every def that matches still decodes whether or not a view shows
+  > it: the Dashboard reads every signal.
 
 ### 10. The steps
 
@@ -281,7 +293,7 @@ recorded too.
   callbacks, no decode while none is registered); every batch equal to
   direct `ecuio_decode_*` calls on the same frame, for the mock set, for
   `obd2` over the fixture and for `uds-generic` text; the allocation
-  cases with a values callback registered. Two cases for §4 and §1: a
+  cases with a values callback registered. Two cases for section 4 and section 1: a
   set with several text defs that match one frame (unkeyed and keyed of
   two shapes) gets a distinct pointer per value, each with its own
   text, which a single shared slot fails; and a `uds-generic` session
@@ -335,7 +347,7 @@ recorded too.
   says when.
 - The decode's cost moves to the worker, and the GUI thread keeps only
   the frame log and the staged drain, bounded by the profile, not the
-  bus rate (§7).
+  bus rate (section 7).
 - The worker's 4 KB copy per frame into the bridge's queued call stays,
   and it is the largest per-frame cost measured. Copying only a frame's
   `data_length` bytes is a separate change, if the frame log needs it.
@@ -344,8 +356,8 @@ recorded too.
 
 ## Appendix: steps 1 and 2 built and measured (2026-10-26)
 
-- **Step 1** (`0ea4126`): the calls and structs of §3, the decode in
-  dispatch, the shared snapshot and the text slots of §4.
+- **Step 1** (`0ea4126`): the calls and structs of section 3, the decode in
+  dispatch, the shared snapshot and the text slots of section 4.
   `CoreTest.Values*` checks every batch against direct decodes,
   including every frame of the vehicle fixture.
 - **Step 2:** the bridge registers its values callback beside its frame
@@ -360,16 +372,16 @@ recorded too.
   connect used: 24,632 decoded values, every one equal to the
   `signals.csv` row the GUI-thread decode wrote in the car
   (`BridgeTest.VehicleRecordingsReplayToTheirOwnValues`, local only).
-- **`bench_bridge` after step 2** (µs a frame unless marked; the
+- **`bench_bridge` after step 2** (us a frame unless marked; the
   median of three runs, two runs' range):
 
   | Defs | GUI thread (drain) | worker: `onFrame` | worker: core's decode | worker: bridge's staging | one tick's `updateValues` |
   |---|---|---|---|---|---|
-  | raw | 0.59–0.73 | 2.18–2.35 | n/a | n/a | n/a |
-  | 9 | 0.79 | 2.31–2.33 | 0.08–0.10 | 0.06–0.08 | 0.1 |
-  | 100 | 0.67–0.71 | 2.22 | 0.29 | 0.08–0.14 | 0.7–1.0 |
-  | 250 | 0.70–0.72 | 2.14–2.26 | 0.52–0.53 | 0.32–0.39 | 1.9–5.3 |
-  | 1000 | 0.42–0.52 | 1.61–1.79 | 2.13–2.16 | 0.19–0.29 | 14.7–23.6 |
+  | raw | 0.59-0.73 | 2.18-2.35 | n/a | n/a | n/a |
+  | 9 | 0.79 | 2.31-2.33 | 0.08-0.10 | 0.06-0.08 | 0.1 |
+  | 100 | 0.67-0.71 | 2.22 | 0.29 | 0.08-0.14 | 0.7-1.0 |
+  | 250 | 0.70-0.72 | 2.14-2.26 | 0.52-0.53 | 0.32-0.39 | 1.9-5.3 |
+  | 1000 | 0.42-0.52 | 1.61-1.79 | 2.13-2.16 | 0.19-0.29 | 14.7-23.6 |
 
   The GUI thread's cost per frame no longer grows with the profile. The
   decode moved to the worker at about the cost it had on the GUI
@@ -379,7 +391,7 @@ recorded too.
   the drops of a replay that passed the in-flight cap before then went
   uncounted. It zeroes the count before the start.
 - **The chart's peak waited for step 3:** after step 2 the fixture at
-  10× still peaked at 1,232 rpm on the model.
+  10x still peaked at 1,232 rpm on the model.
 
 ## Appendix: step 3, the chart (2026-10-26)
 
@@ -390,7 +402,7 @@ recorded too.
   signal), the chart's x-axis is session time, and a row's age counts
   from its value's arrival.
 - The engine-start fixture's 1,261.25 rpm peak reaches the chart at
-  100× (`BridgeTest.TheChartKeepsTheFixturesPeak`), and `bench_bridge`
-  reads 1,261 at 10× and at `max`, against 1,232 and 758 before.
+  100x (`BridgeTest.TheChartKeepsTheFixturesPeak`), and `bench_bridge`
+  reads 1,261 at 10x and at `max`, against 1,232 and 758 before.
 - On `mock://demo` the trace shows the drive cycle's noise inside each
   window, which the newest value alone smoothed away.

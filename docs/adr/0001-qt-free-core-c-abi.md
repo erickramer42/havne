@@ -112,7 +112,7 @@ only those places. The core keeps `ecuio`.
 | | Build options and variables a builder types: `QTTUNE_BUILD_CORE_ONLY`, `QTTUNE_SETTINGS_DIR`, `project(QtTune …)` | `HAVNE_BUILD_CORE_ONLY` (the old one honored for one release, with a warning), `HAVNE_SETTINGS_DIR`, `project(Havne …)` |
 | | The repository, `qttune` | `havne` (GitHub redirects the old URL) |
 | Internal | QML module `QtTune` (`QtTunePlugin`), `QtTuneBridge` (`qttunebridge.{h,cpp}`), `qttune_ui`, `qttune_uiplugin` | `App` (`AppPlugin`), `SessionBridge` (`sessionbridge.{h,cpp}`), `app_ui`, `app_uiplugin` |
-| | CMake functions and variables (`qttune_enable_warnings`, `qttune_add_version_resource`, `qttune_deploy_surrogate`, `_qttune_*`), compile definitions (`QTTUNE_BLUETOOTH`, `QTTUNE_RC_*`, …), `packaging/icons/qttune*.svg` | `app_*`, `APP_*`, `packaging/icons/app*.svg` |
+| | CMake functions and variables (`qttune_enable_warnings`, `qttune_add_version_resource`, `qttune_deploy_surrogate`, `_qttune_*`), compile definitions (`QTTUNE_BLUETOOTH`, `QTTUNE_RC_*`, ...), `packaging/icons/qttune*.svg` | `app_*`, `APP_*`, `packaging/icons/app*.svg` |
 | Core | `ecuio_*`, `ecuio-core`, `ecuio-j2534-surrogate`, `ECUIO_*` | unchanged |
 
 The user's data comes along:

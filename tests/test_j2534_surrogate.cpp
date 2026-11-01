@@ -39,6 +39,7 @@
 #include <cstring>
 #include <string>
 #include <thread>
+#include <vector>
 #include <cstdlib>
 #include <windows.h>
 
@@ -1264,6 +1265,71 @@ TEST(J2534SurrogateTest, ABatchOfLongMessagesCrossesThePipeWhole)
     const std::string log = read_session_log(path);
     EXPECT_NE(log.find("OP_READ: status 0, frames 16"), std::string::npos)
         << "the sixteen didn't come back in one read:\n" << log;
+}
+
+/* A request to 0x7E0 on a channel filtered for 0x7E8, and the reply
+ * after its 4-byte ID ({} when none came within a second) */
+static std::vector<uint8_t> ask_ecu(ecuio_j2534_sur_handle_t* h,
+                                    unsigned long channel,
+                                    std::vector<uint8_t> req)
+{
+    req.insert(req.begin(), {0x00, 0x00, 0x07, 0xE0});
+    uint32_t written = 0;
+    EXPECT_EQ(ecuio_j2534_sur_write_frame(
+                  h, channel, req.data(), static_cast<uint32_t>(req.size()),
+                  ECUIO_PT_TX_ISO15765_FRAME_PAD, 0, &written),
+              ECUIO_OK);
+    ecuio_pt_rx_t m = {};
+    bool got = false;
+    for (int i = 0; i < 20 && !got; ++i) {
+        (void)ecuio_j2534_sur_read_msg(h, channel, &m, 50, &got);
+    }
+    if (!got || m.data_size < 4) {
+        return {};
+    }
+    return std::vector<uint8_t>(m.data + 4, m.data + m.data_size);
+}
+
+/* The fakes' ECU's diagnostics through the fake DLL in the surrogate
+ * (fake_ecu.h; the adapter's side, so no ISO-TP framing): Service 03's
+ * list, a clear refused under ECUIO_FAKE_CLEAR_NRC, then one taken in a
+ * fresh child, whose diagnostics start uncleared (one state per
+ * process) */
+TEST(J2534SurrogateTest, TheFakeEcuAnswersTheDiagnosticServices)
+{
+    const unsigned char mask[4] = {0xFF, 0xFF, 0xFF, 0xFF};
+    const unsigned char pattern[4] = {0x00, 0x00, 0x07, 0xE8};
+    const std::vector<uint8_t> stored = {0x43, 0x03, 0x03, 0x01,
+                                         0x04, 0x20, 0xC1, 0x00};
+    for (const bool refused : {true, false}) {
+        SCOPED_TRACE(refused ? "ECUIO_FAKE_CLEAR_NRC=0x22" : "no knob");
+        EnvArm nrc("ECUIO_FAKE_CLEAR_NRC", refused ? "0x22" : nullptr);
+        ecuio_j2534_sur_handle_t* h = nullptr;
+        ASSERT_EQ(ecuio_j2534_sur_open(fake_dll_path(), fake_dll_arch(), &h),
+                  ECUIO_OK);
+        unsigned long channel = 0;
+        ASSERT_EQ(ecuio_j2534_sur_connect_channel(h, 0, 0, &channel), ECUIO_OK);
+        unsigned long filter_id = 0;
+        ASSERT_EQ(ecuio_j2534_sur_start_msg_filter(
+                      h, channel, ECUIO_PT_PASS_FILTER, mask, 4, pattern, 4,
+                      nullptr, 0, 0, &filter_id),
+                  ECUIO_OK);
+
+        EXPECT_EQ(ask_ecu(h, channel, {0x03}), stored);
+        if (refused) {
+            EXPECT_EQ(ask_ecu(h, channel, {0x04}),
+                      (std::vector<uint8_t>{0x7F, 0x04, 0x22}));
+            EXPECT_EQ(ask_ecu(h, channel, {0x03}), stored);
+        } else {
+            EXPECT_EQ(ask_ecu(h, channel, {0x04}),
+                      (std::vector<uint8_t>{0x44}));
+            EXPECT_EQ(ask_ecu(h, channel, {0x03}),
+                      (std::vector<uint8_t>{0x43, 0x00}));
+            EXPECT_EQ(ask_ecu(h, channel, {0x02, 0x02, 0x00}),
+                      (std::vector<uint8_t>{0x42, 0x02, 0x00, 0x00, 0x00}));
+        }
+        EXPECT_EQ(ecuio_j2534_sur_close(h), ECUIO_OK);
+    }
 }
 
 /* Count-trust rule, surrogate half: a vendor returning a hard error

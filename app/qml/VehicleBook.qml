@@ -4,14 +4,17 @@
 //          defaults, New, Duplicate, Rename, Forget the VIN, Forget and
 //          Forget all, a connection and plotted signals remembered for
 //          adapter sessions only, and the VIN key settling the vehicle
-//          (each row of ADR-0027 §4's table, with its log line).
+//          (each row of ADR-0027 section 4's table, with its log line).
 //          SettingsPage.qml wires it (tests/qml/tst_settings.qml).
 
 pragma Singleton
 import QtQml
 
 // The vehicles (ADR-0027) as rules on one document,
-// { salt, picked, list: [{ id, label, vinKey, uri, unplotted }] }:
+// { salt, picked, list: [{ id, label, vinKey, uri, plotted, unplotted }] }:
+// plotted and unplotted are the rows ticked past Live's default and
+// unticked from it (ADR-0039 section 8); a stored entry without
+// plotted reads as none.
 // every function takes the document and returns a new one, never
 // changing what it was given, so SettingsPage stores what comes back
 // and the rules test without a page.
@@ -28,7 +31,7 @@ QtObject {
     }
 
     // The stored text, or an empty document when it doesn't parse or any
-    // entry is missing a field (dropped whole, ADR-0027 §5)
+    // entry is missing a field (dropped whole, ADR-0027 section 5)
     function parse(text) {
         let d
         try {
@@ -45,7 +48,9 @@ QtObject {
             if (v === null || typeof v !== "object" || !isString(v.id) || v.id === ""
                     || ids[v.id] || !isString(v.label) || v.label.trim() === ""
                     || !isString(v.vinKey) || !isString(v.uri)
-                    || !Array.isArray(v.unplotted) || !v.unplotted.every(isString))
+                    || !Array.isArray(v.unplotted) || !v.unplotted.every(isString)
+                    || (v.plotted !== undefined
+                        && (!Array.isArray(v.plotted) || !v.plotted.every(isString))))
                 return empty()
             ids[v.id] = true
         }
@@ -62,6 +67,7 @@ QtObject {
 
     function entry(v) {
         return { id: v.id, label: v.label, vinKey: v.vinKey, uri: v.uri,
+                 plotted: v.plotted === undefined ? [] : v.plotted.slice(),
                  unplotted: v.unplotted.slice() }
     }
 
@@ -136,7 +142,8 @@ QtObject {
     function add(doc, label) {
         const d = copy(doc)
         const id = nextId(d)
-        d.list.push({ id: id, label: String(label).trim(), vinKey: "", uri: "", unplotted: [] })
+        d.list.push({ id: id, label: String(label).trim(), vinKey: "", uri: "",
+                      plotted: [], unplotted: [] })
         d.picked = id
         return d
     }
@@ -149,6 +156,7 @@ QtObject {
         const d = add(doc, label)
         const v = picked(d)
         v.uri = from.uri
+        v.plotted = from.plotted.slice()
         v.unplotted = from.unplotted.slice()
         return d
     }
@@ -181,18 +189,21 @@ QtObject {
         return empty()
     }
 
-    // A connect's URI, kept for an adapter session only (ADR-0027 §1)
+    // A connect's URI, kept for an adapter session only (ADR-0027 section 1)
     function rememberUri(doc, uri) {
         if (!isAdapterUri(uri))
             return doc
         return change(doc, v => v.uri = uri)
     }
 
-    function rememberUnplotted(doc, names) {
-        return change(doc, v => v.unplotted = names.slice())
+    function rememberPlotting(doc, plotted, unplotted) {
+        return change(doc, v => {
+            v.plotted = plotted.slice()
+            v.unplotted = unplotted.slice()
+        })
     }
 
-    // ADR-0027 §4: the VIN key settles which vehicle this is. Returns
+    // ADR-0027 section 4: the VIN key settles which vehicle this is. Returns
     // { doc, outcome, label, previous }: outcome "same", "learned",
     // "switched" or "new"; label the vehicle now picked; previous the
     // one picked before, "" for none

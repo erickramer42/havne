@@ -4,9 +4,11 @@
 //          ADR-0026) end to end against the fake ELM327
 //          (tests/fake_elm327.h) behind the port opener (internal.h):
 //          Elm327SessionTest pins the URI and its refusals, the setup,
-//          the session info, the requests, multi-frame replies, link
-//          health and recovery, and that the worker allocates nothing per
-//          frame. Elm327PortTest (POSIX only) runs the OS's termios port
+//          the session info, the requests, multi-frame replies,
+//          diagnostics (ADR-0037: the report, Read again, ?diagnose=0),
+//          the signals core lists unsupported (ADR-0039 section 6),
+//          link health and recovery, and that the worker allocates
+//          nothing per frame. Elm327PortTest (POSIX only) runs the OS's termios port
 //          against the fake on a pseudo-terminal; Elm327TcpTest (every
 //          platform) runs the TCP port (core/src/elm327_tcp.cpp) against
 //          the fake behind a loopback listener; Elm327StreamTest (every
@@ -19,10 +21,12 @@
 #include "ecuio/internal.h"
 #include "ecuio/profile.h"
 #include "elm327_log.h" /* core/src */
+#include "elm327_protocol.h" /* core/src: elm327_pack_count */
 #include "elm327_port.h" /* core/src */
 #include "elm327_tcp.h"  /* core/src */
 #include "elm327_stream.h" /* core/src */
 #include "ecuio/stream.h"
+#include "fake_diagnostics.h"
 #include "fake_elm327.h"
 #include "new_counter.h"
 
@@ -33,6 +37,7 @@
 #include <filesystem>
 #include <fstream>
 #include <functional>
+#include <initializer_list>
 #include <memory>
 #include <mutex>
 #include <sstream>
@@ -363,7 +368,7 @@ protected:
 
 /* The setup's contract commands in order, then the readings, then the
  * requests: the obd2 profile's probe first, each Service 01 request to
- * the engine ECU with the count digit (ADR-0026 §3) */
+ * the engine ECU with the count digit (ADR-0026 section 3) */
 TEST_F(Elm327SessionTest, SetupRunsTheContractThenTheReadings)
 {
     Session s;
@@ -385,7 +390,7 @@ TEST_F(Elm327SessionTest, SetupRunsTheContractThenTheReadings)
         << "a bare CR repeats the last command";
 }
 
-/* What the session runs on (ADR-0026 §7): the backend, ISO 15765 at the
+/* What the session runs on (ADR-0026 section 7): the backend, ISO 15765 at the
  * CAN rate, the channel, an STN's two version strings and STVR's
  * voltage */
 TEST_F(Elm327SessionTest, TheSessionInfoSaysWhatItRunsOn)
@@ -511,9 +516,13 @@ TEST_F(Elm327SessionTest, AnStnSetNotToWaitOnPendingRepliesIsReported)
 TEST_F(Elm327SessionTest, Obd2ValuesArriveFromTheEngineEcu)
 {
     Session s;
-    ASSERT_EQ(s.create(uri()), ECUIO_OK) << ecuio_last_error_detail();
+    /* One PID per request, so each engine speed is a reply of its own */
+    ASSERT_EQ(s.create(uri("?pack=0")), ECUIO_OK) << ecuio_last_error_detail();
     s.start();
-    ASSERT_TRUE(wait_for([&] { return s.cap.count("41 0C") >= 2; }, 5000));
+    /* The second engine speed comes after the probe, identification,
+     * diagnostics and a lap of the whole obd2 set: seconds on a slow
+     * runner */
+    ASSERT_TRUE(wait_for([&] { return s.cap.count("41 0C") >= 2; }, 10000));
     Capture::Frame f{};
     ASSERT_TRUE(s.cap.find("41 0C", &f));
     EXPECT_EQ(f.id, 0x7E8u);
@@ -524,6 +533,94 @@ TEST_F(Elm327SessionTest, Obd2ValuesArriveFromTheEngineEcu)
     uint32_t episodes = 99;
     EXPECT_EQ(s.state(&episodes), ECUIO_OK);
     EXPECT_EQ(episodes, 0u);
+}
+
+namespace {
+
+/* Channel 0's support flags once done says so, or 0 after budget_ms */
+uint32_t support_flags_when(ecuio_session_t* s, uint32_t want, int budget_ms)
+{
+    ecuio_channel_support_t sup{};
+    (void)wait_for(
+        [&] {
+            return ecuio_session_get_channel_support(s, 0, &sup) == ECUIO_OK &&
+                   (sup.flags & want) != 0;
+        },
+        budget_ms);
+    return sup.flags;
+}
+
+/* The fakes' ECU answering a pack for its first PID alone, for a scope */
+struct FirstPidOnly {
+    FirstPidOnly() { fake_ecu::pack_first_only() = true; }
+    ~FirstPidOnly() { fake_ecu::pack_first_only() = false; }
+};
+
+} // namespace
+
+/* ADR-0039 Appendix A over ELM327: once its PIDs have answered alone,
+ * a request carries several, with the count digit its reply's frames
+ * take (a reply past one Single Frame among them), and the report says
+ * packs were answered; ?pack=0 asks one PID per request */
+TEST_F(Elm327SessionTest, APackedRequestCarriesItsRepliesFrames)
+{
+    {
+        Session s;
+        ASSERT_EQ(s.create(uri("?identify=0&diagnose=0")), ECUIO_OK);
+        s.start();
+        const uint32_t flags =
+            support_flags_when(s.s, ECUIO_SUPPORT_PACKED, 10000);
+        EXPECT_TRUE(flags & ECUIO_SUPPORT_PACKED);
+        EXPECT_FALSE(flags & ECUIO_SUPPORT_UNPACKED);
+    }
+    size_t packs = 0;
+    bool past_one_frame = false;
+    for (const std::string& cmd : fake_commands()) {
+        if (cmd.size() < 7 || cmd.size() % 2 == 0 || cmd.compare(0, 2, "01") != 0) {
+            continue; /* a pack is 01, two or more PIDs and its digit */
+        }
+        ++packs;
+        unsigned char req[8] = {};
+        const size_t len = (cmd.size() - 1) / 2;
+        for (size_t i = 0; i < len; ++i) {
+            req[i] = static_cast<unsigned char>(
+                std::stoul(cmd.substr(2 * i, 2), nullptr, 16));
+        }
+        unsigned char reply[fake_ecu::kReplyMax] = {};
+        size_t n = 0;
+        ASSERT_TRUE(fake_ecu::answer(req, len, -1, reply, &n)) << cmd;
+        const uint8_t digit =
+            static_cast<uint8_t>(std::stoul(cmd.substr(cmd.size() - 1), nullptr, 16));
+        EXPECT_EQ(digit, elm327_pack_count(static_cast<uint32_t>(n), 0x7E0)) << cmd;
+        past_one_frame = past_one_frame || n > 7;
+    }
+    EXPECT_GT(packs, 0u);
+    EXPECT_TRUE(past_one_frame) << "a reply of a First Frame and more";
+
+    Session off;
+    ASSERT_EQ(off.create(uri("?identify=0&diagnose=0&pack=0")), ECUIO_OK);
+    off.start();
+    const auto requests = [] {
+        return on_fake<uint32_t>([](fake_elm327::adapter& a) { return a.requests; });
+    };
+    const uint32_t before = requests();
+    ASSERT_TRUE(wait_for([&] { return requests() >= before + 150; }, 10000));
+    const uint32_t flags = support_flags_when(off.s, ECUIO_SUPPORT_PACKED, 0);
+    EXPECT_FALSE(flags & (ECUIO_SUPPORT_PACKED | ECUIO_SUPPORT_UNPACKED));
+}
+
+/* An adapter's ECU that answers a pack for its first PID alone, three
+ * packs in a row, is asked one PID per request from then on */
+TEST_F(Elm327SessionTest, AnEcuAnsweringOnePidEndsPacking)
+{
+    FirstPidOnly first;
+    Session s;
+    ASSERT_EQ(s.create(uri("?identify=0&diagnose=0")), ECUIO_OK);
+    s.start();
+    const uint32_t flags = support_flags_when(s.s, ECUIO_SUPPORT_UNPACKED, 10000);
+    EXPECT_TRUE(flags & ECUIO_SUPPORT_UNPACKED);
+    EXPECT_FALSE(flags & ECUIO_SUPPORT_PACKED);
+    EXPECT_EQ(s.state(nullptr), ECUIO_OK) << "a fallback, not a fault";
 }
 
 /* The probe walks the supported-PID chain (01 00, 20, 40), and the
@@ -542,11 +639,147 @@ TEST_F(Elm327SessionTest, TheProbeWalksTheChainAndReportsIt)
         },
         5000));
     EXPECT_EQ(sup.rx_id, 0x7E8u);
-    EXPECT_EQ(sup.ranges, 0x07u) << "the bitmaps at 0x00, 0x20 and 0x40";
+    EXPECT_EQ(sup.ranges, 0x3Fu) << "the bitmaps at 0x00 to 0xA0";
     EXPECT_EQ(sup.dropped, 0u) << "the fake supports every obd2 PID";
     EXPECT_EQ(fake_count("01001"), 1u);
     EXPECT_EQ(fake_count("01201"), 1u);
     EXPECT_EQ(fake_count("01401"), 1u);
+    EXPECT_EQ(fake_count("01601"), 1u);
+    EXPECT_EQ(fake_count("01801"), 1u);
+    EXPECT_EQ(fake_count("01A01"), 1u);
+    EXPECT_EQ(fake_count("01C01"), 0u) << "past A0's last bit";
+}
+
+namespace {
+
+/* PIDs out of the fakes' ECU for a scope (fake_ecu::withheld_pids):
+ * its bitmaps leave them out and asking gets 7F 01 12 */
+struct Withheld {
+    explicit Withheld(std::initializer_list<unsigned> pids)
+    {
+        for (unsigned p : pids) {
+            fake_ecu::withheld_pids()[p / 32] |= 1u << (p % 32);
+        }
+    }
+    ~Withheld()
+    {
+        for (std::atomic<uint32_t>& w : fake_ecu::withheld_pids()) {
+            w = 0;
+        }
+    }
+};
+
+} // namespace
+
+/* ADR-0039 section 6 end to end: the probe reads bitmaps that leave out
+ * the PIDs the ECU withholds, and core lists exactly their signals
+ * unsupported, in the set's order */
+TEST_F(Elm327SessionTest, TheSignalsOfAWithheldPidAreUnsupported)
+{
+    Withheld w({0x0D, 0x46});
+    Session s;
+    ASSERT_EQ(s.create(uri("?identify=0&diagnose=0")), ECUIO_OK);
+    s.start();
+    ecuio_channel_support_t sup{};
+    ASSERT_TRUE(wait_for(
+        [&] {
+            return ecuio_session_get_channel_support(s.s, 0, &sup) ==
+                       ECUIO_OK &&
+                   (sup.flags & ECUIO_SUPPORT_COMPLETE) != 0;
+        },
+        5000));
+    const ecuio_signal_set_t* set = ecuio_session_signal_set(s.s);
+    ASSERT_NE(set, nullptr);
+    std::vector<uint16_t> expected;
+    for (uint32_t i = 0; i < set->count; ++i) {
+        const ecuio_signal_def_t& d = set->defs[i];
+        const unsigned pid = d.mux_key & 0xFFu;
+        if (d.mux_length == 2 && (d.mux_key >> 8) == 0x41 &&
+            (pid == 0x0D || pid == 0x46)) {
+            expected.push_back(d.id);
+        }
+    }
+    ASSERT_EQ(expected.size(), 2u) << "a def each for 0D and 46";
+    std::vector<uint16_t> ids(set->count);
+    uint32_t count = 0;
+    ASSERT_EQ(ecuio_session_get_unsupported_signals(
+                  s.s, ids.data(), static_cast<uint32_t>(ids.size()), &count),
+              ECUIO_OK);
+    ids.resize(count);
+    EXPECT_EQ(ids, expected);
+}
+
+/* Reply timing (ADR-0042) through an ELM327: a row per request in the
+ * rotation, each answered one at least the fake's reply delay after its
+ * request, the intervals on the host's clock (an ELM327's lines are
+ * stamped as they're read), ISO-TP's counts from core's reassembly; the
+ * rows published while the session runs and kept after close */
+TEST_F(Elm327SessionTest, TimingReportsEachRequestOnTheHostsClock)
+{
+    set_knobs([](fake_elm327::knobs& k) { k.reply_delay_ms = 10; });
+    Session s;
+    ASSERT_EQ(s.create(uri("?identify=0&diagnose=0")), ECUIO_OK);
+    s.start();
+    ecuio_session_timing_t t{};
+    std::vector<ecuio_request_timing_t> rows(ECUIO_PROFILE_MAX_REQUESTS);
+    uint32_t count = 0;
+    const auto answered = [&] {
+        uint32_t n = 0;
+        for (uint32_t i = 0; i < count && i < rows.size(); ++i) {
+            n += rows[i].answered;
+        }
+        return n;
+    };
+    ASSERT_TRUE(wait_for(
+        [&] {
+            return ecuio_session_get_timing(s.s, &t, rows.data(),
+                                            static_cast<uint32_t>(rows.size()),
+                                            &count) == ECUIO_OK &&
+                   answered() >= 40;
+        },
+        10000))
+        << answered() << " answers published";
+    EXPECT_EQ(t.interval_clock, ECUIO_TIMING_CLOCK_HOST);
+    EXPECT_NE(t.flags & ECUIO_TIMING_ISOTP, 0u);
+    EXPECT_GT(t.isotp_completed, 0u);
+    EXPECT_GT(t.snapshot_us, 0u);
+    EXPECT_GT(count, 10u);
+    EXPECT_EQ(t.rows, count);
+    for (uint32_t i = 0; i < count; ++i) {
+        const ecuio_request_timing_t& r = rows[i];
+        EXPECT_EQ(r.channel, 0u);
+        EXPECT_EQ(r.length, 2u);
+        EXPECT_EQ(r.request[0], 0x01);
+        if (r.answered > 0) {
+            SCOPED_TRACE("PID " + std::to_string(r.request[1]));
+            EXPECT_GE(r.latency_p50_us, 10000u) << "the fake's delay";
+            EXPECT_GE(r.latency_max_us, r.latency_p50_us);
+        }
+    }
+
+    /* Right after a publish, half a second, then close: only the final
+     * publish, as the worker stops, can carry that half second's answers */
+    const uint64_t seen = t.snapshot_us;
+    ASSERT_TRUE(wait_for(
+        [&] {
+            return ecuio_session_get_timing(s.s, &t, rows.data(),
+                                            static_cast<uint32_t>(rows.size()),
+                                            &count) == ECUIO_OK &&
+                   t.snapshot_us != seen;
+        },
+        3000));
+    const uint32_t before = answered();
+    std::this_thread::sleep_for(std::chrono::milliseconds(500));
+    ecuio_session_close(s.s);
+    ecuio_session_timing_t after{};
+    uint32_t after_count = 0;
+    ASSERT_EQ(ecuio_session_get_timing(s.s, &after, rows.data(),
+                                       static_cast<uint32_t>(rows.size()),
+                                       &after_count),
+              ECUIO_OK);
+    EXPECT_EQ(after_count, count) << "readable after close";
+    EXPECT_GT(after.snapshot_us, t.snapshot_us) << "the final rows";
+    EXPECT_GT(answered(), before) << "the last half second's answers";
 }
 
 /* Identification's replies span frames (the VIN's 20 bytes: a First
@@ -577,6 +810,120 @@ TEST_F(Elm327SessionTest, IdentificationReassemblesItsLongReplies)
     Capture::Frame f{};
     ASSERT_TRUE(s.cap.find("49 02", &f));
     EXPECT_EQ(f.data.size(), 20u);
+}
+
+/* Diagnostics (ADR-0037) through the adapter: the code lists as
+ * one-byte requests with no count digit, the stored list's 8 bytes as a
+ * First Frame and a Consecutive Frame, reassembled, and the whole
+ * report filled from the fake ECU. Read again asks each item once more
+ * and fills it again. */
+TEST_F(Elm327SessionTest, DiagnosticsFillTheReportAndReadAgain)
+{
+    fake_ecu::reset_diagnostics();
+    Session s;
+    ASSERT_EQ(s.create(uri("?probe=0&identify=0")), ECUIO_OK);
+    s.start();
+    ecuio_channel_diagnostics_t d{};
+    const auto read_to = [&](uint32_t generation) {
+        return wait_for(
+            [&] {
+                return ecuio_session_get_channel_diagnostics(s.s, 0, &d) ==
+                           ECUIO_OK &&
+                       d.generation == generation &&
+                       (d.flags & ECUIO_DIAG_COMPLETE) != 0;
+            },
+            8000);
+    };
+    ASSERT_TRUE(read_to(fake_diagnostics::kItems))
+        << "the first read didn't complete; generation " << d.generation;
+    EXPECT_EQ(d.rx_id, 0x7E8u);
+    fake_diagnostics::expect_report(d);
+    for (const char* q : {"03", "07", "0A", "020000"}) {
+        EXPECT_EQ(fake_count(q), 1u) << q;
+    }
+
+    ASSERT_EQ(ecuio_session_read_diagnostics(s.s), ECUIO_OK);
+    ASSERT_TRUE(read_to(2 * fake_diagnostics::kItems + 1))
+        << "the second read didn't complete; generation " << d.generation;
+    fake_diagnostics::expect_report(d);
+    for (const char* q : {"03", "07", "0A", "020000"}) {
+        EXPECT_EQ(fake_count(q), 2u) << q;
+    }
+}
+
+/* ADR-0038 over ELM327: with the engine stopped, a clear sends 04 once,
+ * with no count digit, after the engine speed, and the report read again
+ * is the fake's cleared one; with it running, no 04 goes out */
+TEST_F(Elm327SessionTest, AClearSends04OnlyWithTheEngineStopped)
+{
+    for (const bool off : {false, true}) {
+        SCOPED_TRACE(off ? "engine off" : "engine running");
+        fake_ecu::reset_diagnostics();
+        fake_ecu::diagnostics().engine_off = off;
+        Session s;
+        ASSERT_EQ(s.create(uri("?probe=0&identify=0")), ECUIO_OK);
+        s.start();
+        ecuio_channel_diagnostics_t d{};
+        ASSERT_TRUE(wait_for(
+            [&] {
+                return ecuio_session_get_channel_diagnostics(s.s, 0, &d) ==
+                           ECUIO_OK &&
+                       (d.flags & ECUIO_DIAG_COMPLETE) != 0;
+            },
+            8000));
+        ASSERT_EQ(ecuio_session_clear_diagnostics(s.s, 0, d.generation),
+                  ECUIO_OK);
+        ASSERT_TRUE(wait_for(
+            [&] {
+                return ecuio_session_get_channel_diagnostics(s.s, 0, &d) ==
+                           ECUIO_OK &&
+                       d.clear != ECUIO_CLEAR_NONE &&
+                       (d.flags & ECUIO_DIAG_COMPLETE) != 0;
+            },
+            8000));
+        if (off) {
+            EXPECT_EQ(d.clear, ECUIO_CLEAR_CLEARED);
+            EXPECT_EQ(d.lists[ECUIO_DIAG_STORED].held, 0u);
+            EXPECT_EQ(d.lists[ECUIO_DIAG_PERMANENT].held, 1u);
+            EXPECT_EQ(fake_count("04"), 1u);
+            const std::vector<std::string> sent = fake_commands();
+            const auto clear = std::find(sent.begin(), sent.end(), "04");
+            ASSERT_NE(clear, sent.end()) << "04 alone, no count digit";
+            /* The speed went before it; the clear's 01 0C carries the count
+             * digit as the rotation's does, so the engine's own tests pin
+             * which one it was (ClearTest) */
+            EXPECT_NE(std::find_if(sent.begin(), clear,
+                                   [](const std::string& c) {
+                                       return c.rfind("010C", 0) == 0;
+                                   }),
+                      clear);
+        } else {
+            EXPECT_EQ(d.clear, ECUIO_CLEAR_ENGINE_RUNNING);
+            EXPECT_EQ(fake_count("04"), 0u);
+            fake_diagnostics::expect_report(d);
+        }
+    }
+    fake_ecu::reset_diagnostics();
+}
+
+/* ?diagnose=0: no diagnostics request goes out, Read again included,
+ * and the report says none is asked. Diagnostics would take every other
+ * turn, so a count of Service 01 requests shows it, whatever the set's
+ * size (a lap of the obd2 set is too long a wait). */
+TEST_F(Elm327SessionTest, DiagnoseOffAsksNoDiagnostics)
+{
+    Session s;
+    ASSERT_EQ(s.create(uri("?probe=0&identify=0&diagnose=0")), ECUIO_OK);
+    s.start();
+    EXPECT_EQ(ecuio_session_read_diagnostics(s.s), ECUIO_OK);
+    ASSERT_TRUE(wait_for([&] { return fake_count("01") >= 8; }, 5000));
+    for (const char* q : {"03", "07", "0A", "02"}) {
+        EXPECT_EQ(fake_count(q), 0u) << q;
+    }
+    ecuio_channel_diagnostics_t d{};
+    ASSERT_EQ(ecuio_session_get_channel_diagnostics(s.s, 0, &d), ECUIO_OK);
+    EXPECT_EQ(d.flags, 0u);
+    EXPECT_EQ(d.generation, 0u);
 }
 
 /* ISO-TP's longest message, 4095 bytes in 586 frame lines, arrives as
@@ -826,7 +1173,7 @@ TEST_F(Elm327SessionTest, RepeatedPendingRepliesHoldTheReadPastFiveSeconds)
         << "both pending replies, and maybe the next request's first";
 }
 
-/* Read-only (ADR-0026 §5): nothing written to the adapter's memory, no
+/* Read-only (ADR-0026 section 5): nothing written to the adapter's memory, no
  * serial number asked, no monitor, no OBDX binary mode, across a session
  * that probes, identifies and polls */
 TEST_F(Elm327SessionTest, NothingIsWrittenOrAskedThatTheAdrRulesOut)
@@ -1415,6 +1762,7 @@ TEST_F(Elm327SessionTest, MalformedUrisAreRefusedBeforeThePortOpens)
         uri("?poll="),
         uri("?probe=2"),
         uri("?identify=yes"),
+        uri("?pack=2"),
         uri("?flags=0"),
         uri("?profile=uds-generic&did=7E8:1E1C&did=18DAF110:1E1C"),
         uri("?profile=uds-generic"),
@@ -1457,7 +1805,7 @@ TEST_F(Elm327SessionTest, RefusalsNameTheirCause)
          "?serial= needs a serial rate from 300 to 4000000, not '9'"},
         {uri("?flags=0"), ECUIO_ERR_BAD_URI,
          "elm327:// takes no query key 'flags', only baud, serial, filter, "
-         "txid, poll, probe, identify, profile and did"},
+         "txid, poll, probe, identify, diagnose, pack, profile and did"},
         {uri("?profile=uds-generic&did=7E8:1E1C&did=18DAF110:1E1C"),
          ECUIO_ERR_BAD_URI,
          "the channels mix 11-bit and 29-bit IDs, which one connection "
@@ -1725,7 +2073,7 @@ TEST(Elm327LogTest, KeptNamesAndTextHaveTheirShape)
 }
 
 /* What a frame costs the worker: no operator new between two frames once
- * the session runs, for its frames and its values (ADR-0026 §3), with
+ * the session runs, for its frames and its values (ADR-0026 section 3), with
  * the wire log taking every request and reply too */
 namespace {
 struct WorkerNews {
@@ -1821,7 +2169,7 @@ TEST_F(Elm327SessionTest, ListeningAllocatesNothingPerFrame)
 
 #ifndef _WIN32
 
-/* ---- The POSIX port over a pseudo-terminal (ADR-0026 §8) ---------------
+/* ---- The POSIX port over a pseudo-terminal (ADR-0026 section 8) ---------------
  * The fake ELM327 on the master side, the transport's termios port on
  * the slave: the real port code, its settings and its timeouts. */
 namespace {

@@ -3,7 +3,7 @@
 // Testing: HARNESS: Elm327PortTest (test_elm327, POSIX): the termios
 //          port over a pseudo-terminal pair; Elm327TcpTest (every
 //          platform): an address reaching the TCP opener; BENCH: the
-//          Win32 port (ADR-0026 §8: Windows has no built-in virtual COM
+//          Win32 port (ADR-0026 section 8: Windows has no built-in virtual COM
 //          pair, a known gap)
 
 #include "elm327_port.h"

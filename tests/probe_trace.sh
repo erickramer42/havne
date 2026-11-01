@@ -1,7 +1,7 @@
 #!/bin/sh
 # File/layer: tests/probe_trace.sh | test-only, POSIX sh, Linux, root
 # Testing: HARNESS (CI's linux-build, "USDT probes under bpftrace"): core's
-#          probes fire in a running havne-cli (ADR-0034 §4)
+#          probes fire in a running havne-cli (ADR-0034 section 4)
 #
 #   sudo sh tests/probe_trace.sh <havne-cli>
 #

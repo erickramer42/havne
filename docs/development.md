@@ -142,9 +142,9 @@ cmake --build build-core --config Release
 
 **The cross-arch tree** is the Win32 tree of the Windows recipe
 above: besides the surrogate it builds the x86 fake DLLs that test
-the x64 → x86 path. Only the surrogate and vendor DLLs are ever x86.
+the x64 to x86 path. Only the surrogate and vendor DLLs are ever x86.
 
-> ⚠️ **Rebuild both trees** after any change to `j2534_ptypes.h` or
+> **Note:** **Rebuild both trees** after any change to `j2534_ptypes.h` or
 > `surrogate_protocol.h`. Their constants are ABI between binaries
 > built in separate trees. Each tree's configure step hashes the two
 > headers into `ECUIO_SUR_FINGERPRINT`, and the surrogate refuses an
@@ -285,7 +285,7 @@ negative assertion will catch it, but best not to trigger it).
 ## Recommended verification sequence
 
 `scripts/verify.sh` (Git Bash on Windows; any shell elsewhere) runs
-steps 1–3 below and prints one line per step (a run on the dev
+steps 1-3 below and prints one line per step (a run on the dev
 machine, 2026-10-26; the times vary with the machine's load):
 
 ```sh
@@ -479,8 +479,8 @@ havne-cli stream elm327://COM5 --seconds 60               # an adapter: as the a
 havne-cli devices                                         # what a URI can name
 ```
 
-Its output is JSON lines, schema 1 (ADR-0031 §3); a `slept` line marks
-a gap the machine's sleep made (ADR-0033 §6). Its tests are
+Its output is JSON lines, schema 1 (ADR-0031 section 3); a `slept` line marks
+a gap the machine's sleep made (ADR-0033 section 6). Its tests are
 `test_cli` (the formatting, the ring and the sleep rule) and ctest's `CliGoldenTest`,
 `CliUsageTest` and `CliSignalTest`. A golden run compares the whole
 output with `tests/golden/cli/`; after a deliberate change to what it
@@ -591,7 +591,7 @@ build-core/cli/havne-cli`).
 | J2534 test fails as `Failed (Timeout)` | A genuine hang, bounded by the 30 s ceiling. Attach to the surviving test and surrogate processes and check thread wait states before killing; the child log is `%TEMP%\ecuio-surrogate.log`, and earlier spawns' logs are kept beside it under dated names. |
 | Linker warning LNK4070 on a fake DLL | The `.def` file's `LIBRARY` directive disagrees with the output filename. Make them match. |
 | A mobile build fails during test discovery, or tries to run a test binary | `BUILD_TESTING` is on. Cross builds must pass `-DBUILD_TESTING=OFF` (see Mobile above). |
-| Re-running a skipped `ios-simulator-smoke` skips it again | A re-run replays the original event and commit, so the job's condition comes out the same. Start a manual run instead that asks for it (Actions → CI → Run workflow and tick `ios_smoke`, or `gh workflow run ci.yml --ref <branch> -f ios_smoke=true`); `smoke_only` instead skips the other platform jobs. A commit whose message contains `[ios-smoke]` also works. |
+| Re-running a skipped `ios-simulator-smoke` skips it again | A re-run replays the original event and commit, so the job's condition comes out the same. Start a manual run instead that asks for it (Actions > CI > Run workflow and tick `ios_smoke`, or `gh workflow run ci.yml --ref <branch> -f ios_smoke=true`); `smoke_only` instead skips the other platform jobs. A commit whose message contains `[ios-smoke]` also works. |
 | `ios-simulator-smoke` passes, but the app screenshots are blank | Seen once, on the first run (2026-10-20). That run launched the app straight after a cold boot, and the frame was blank at 15 s. With the boot overlapping the build, the next run drew by 15 s. If it recurs: a blank `home.png` means the runner's simulator display is at fault. No `QSG_INFO` lines in stderr means the window was never exposed. `QSG_INFO` present with blank shots means frames aren't reaching the screen, so try another `QSG_RHI_BACKEND`. A blank 15 s shot with a drawn 45 s shot means a slow first frame. |
 | `ios-simulator-smoke` fails with "Havne exited within 45 s", and the printed stderr says `Failed to initialize graphics backend` | Qt Quick couldn't get a Metal device from the runner VM. Check the boot step's `system_profiler` output. Before suspecting the app, try `SIMCTL_CHILD_QSG_RHI_BACKEND=opengl` on the launch line. |
 | `ios-simulator-smoke` fails with "No available iPhone simulator on iOS 18 or later" | The runner image dropped its iOS 18+ runtimes, or the job moved to a runner without them. The step prints the available devices. |
@@ -653,12 +653,12 @@ on MSVC is not necessarily portable:
   `signal_sets.cpp`.
 - `strncpy_s` / Annex K is MSVC-only. Use a bounded copy such as
   `copy_str()`.
-- An implicit int→enum conversion fails on MSVC with C2664.
+- An implicit int to enum conversion fails on MSVC with C2664.
 
 ## CI
 
 `ci.yml` runs on every push to `main` and `dev`, on every pull
-request to `main`, and on demand (Actions → CI → Run workflow, on any
+request to `main`, and on demand (Actions > CI > Run workflow, on any
 branch, or `gh workflow run ci.yml --ref <branch>`, which is how a
 feature branch gets CI). A manual run leaves out the iOS simulator
 smoke unless asked: `-f ios_smoke=true` adds it to the whole run, and
@@ -679,9 +679,9 @@ its usual duration:
 | `abi` | Ubuntu, GCC, no Qt | Installs libabigail and runs `scripts/abi-check.sh` against the newest release tag ([The C ABI check](#the-c-abi-check)); the result goes to the run's summary. |
 | `linux-appimage` | Ubuntu 24.04, GCC | Builds the app in Release, dated by the commit, and packs it with `packaging/linux/make-appimage.sh` ([Linux: the AppImage](#linux-the-appimage)), printing its SHA-256, then uploads `havne-linux-x86_64` (kept 14 days). On 24.04 because an AppImage runs only where glibc is at least its build machine's. |
 | `linux-packages` | Ubuntu 24.04, GCC | Builds the core packages twice under `reprotest` and fails on any difference, then installs and uses them (`tests/package_check.sh`), builds an SBOM from their component lists and validates it and `sbom.py`'s self-test document with `pyspdxtools`, and uploads `havne-core-linux-x86_64` (kept 14 days) ([Linux: the core packages](#linux-the-core-packages)). |
-| `android-build` | Ubuntu → Android arm64-v8a | Selects NDK r27 and JDK 21 by version, failing with a clear error if the image lacks either. Then cross-builds and packages the APK. Build only, no tests. |
-| `ios-build` | macOS (arm64) → iOS device (arm64) | Unsigned device build with the Xcode generator. Build only, no tests. |
-| `ios-simulator-smoke` | macOS 15 Intel → iOS Simulator (x86_64) | Runs on a manual run with `ios_smoke` or `smoke_only` ticked, or when the pushed commit's message contains `[ios-smoke]`; skipped on pull requests, other pushes and other manual runs (about 20 minutes on the Intel runner). Boots the newest iOS 18+ iPhone while the app builds, then installs and launches the app. Passes if QML loaded and the app is still running 45 s later. Uploads the `ios-simulator-smoke` artifact: a home-screen control shot, app shots at 15 s and 45 s, the app's stdout/stderr (with `QSG_INFO`), plus crash reports on failure. The job log also prints the stderr. |
+| `android-build` | Ubuntu to Android arm64-v8a | Selects NDK r27 and JDK 21 by version, failing with a clear error if the image lacks either. Then cross-builds and packages the APK. Build only, no tests. |
+| `ios-build` | macOS (arm64) to iOS device (arm64) | Unsigned device build with the Xcode generator. Checks the bundle's Info.plist keys (`app/ios/Info.plist.in`) and that it holds no signature or provisioning profile, then uploads it as an unsigned `.ipa`, `havne-ios-arm64-unsigned` (kept 14 days), for sideloading ([ios.md](ios.md)). Build only, no tests. |
+| `ios-simulator-smoke` | macOS 15 Intel to iOS Simulator (x86_64) | Runs on a manual run with `ios_smoke` or `smoke_only` ticked, or when the pushed commit's message contains `[ios-smoke]`; skipped on pull requests, other pushes and other manual runs (about 20 minutes on the Intel runner). Boots the newest iOS 18+ iPhone while the app builds, then installs and launches the app. Passes if QML loaded and the app is still running 45 s later. Uploads the `ios-simulator-smoke` artifact: a home-screen control shot, app shots at 15 s and 45 s, the app's stdout/stderr (with `QSG_INFO`), plus crash reports on failure. The job log also prints the stderr. |
 
 The smoke job's pass/fail proves the app starts and stays up. Only
 the screenshots show that it drew anything. It doesn't tap through
@@ -711,7 +711,7 @@ weekly. `codeql.yml` runs CodeQL on pushes to `main` and `dev`, pull
 requests and a weekly schedule: C++ from a Windows core-only build
 (core, the J2534 layer and the surrogate; not the app or QML) and the
 workflows. Results land in the repository's code-scanning dashboard,
-which needs CodeQL's default setup off (Settings → Code security),
+which needs CodeQL's default setup off (Settings to Code security),
 because GitHub refuses advanced-setup uploads while default setup is
 on.
 
@@ -750,10 +750,11 @@ optional Quick plugins this app never uses.
 the newest `vX.Y.Z` tag, or a tag, commit or source folder named as
 its argument. It runs on Linux, with libabigail (`abigail-tools` on
 Ubuntu): each tree's core-only build has its static archive linked
-into a shared object that exports only the `ecuio_` functions, as an
-FFI consumer would load it; `abidw` dumps the functions and the types
-the public headers declare, and `abidiff` compares the two. Output
-goes to `build-abi/` (`report.txt`).
+into a shared object that exports only the public `ecuio_` names, as an
+FFI consumer would load it (none that `internal.h` declares: core
+uses those across its own files and never installs them); `abidw`
+dumps the functions and the types the public headers declare, and
+`abidiff` compares the two. Output goes to `build-abi/` (`report.txt`).
 
 - **Fails:** a function removed or its signature changed; a struct
   field moved, resized or retyped; a struct's size changed; an enum
@@ -855,7 +856,7 @@ and `perf report` find the debug file by the binary's build ID.
 ### The SBOM
 
 `packaging/sbom.py` writes the release's SPDX 2.3 document
-(ADR-0035 §5) from the component lists the build jobs write beside each
+(ADR-0035 section 5) from the component lists the build jobs write beside each
 download (`<download>.components.json`): `stage.ps1` (every DLL in the
 Windows folder, by its version resource; an unknown one fails the
 stage), `make-appimage.sh` (Qt and ICU from the kit, every other
@@ -883,8 +884,8 @@ A version tag publishes these downloads through
   Ubuntu 24.04, so they run where glibc is 2.39 or later.
 
 Beside them: the Windows PDBs and `havne-cli`'s Linux debug info, an
-SPDX SBOM of every download, `SHA256SUMS.txt`, and each file's
-provenance.
+SPDX SBOM of every download, `SHA256SUMS.txt`, and one build
+provenance over every file.
 
 **To release:**
 
@@ -892,7 +893,9 @@ provenance.
    `CMakeLists.txt`, move CHANGELOG.md's "Unreleased" entries under
    `## [X.Y.Z] - <date>` (and add its compare link at the foot), and
    add `docs/releases/vX.Y.Z.md`, the release notes, starting from
-   those entries. Say what's new, and what's verified at which tier
+   those entries. Open with a Downloads table linking the file each
+   platform wants, since the release's own list is flat and sorted by
+   name. Say what's new, and what's verified at which tier
    ([testing.md](testing.md)), including what hasn't run on hardware,
    and give the release key's certificate fingerprint.
 2. Push that commit to `main` and wait for its CI run to pass: the
@@ -987,18 +990,18 @@ provenance.
   `pyspdxtools` before anything is published.
 - **`publish`: checksums and provenance.** `SHA256SUMS.txt` lists every
   download, the debug files and the SBOM, with LF line ends.
-  `actions/attest-build-provenance` signs a SLSA build provenance for
-  each download (one attestation covers the five Linux files), tied to
-  this repository's workflow, and stores it in GitHub's attestation
-  store; `actions/attest` attests the SBOM over the downloads it
-  describes. The job also
-  copies each Sigstore bundle into `dist/` as `<download>.intoto.jsonl`,
-  because OpenSSF Scorecard's Signed-Releases check reads only release
-  files (it counts `*.intoto.jsonl` as provenance and `*.sig`, `*.asc`
-  or `*.sigstore.json` as signatures), and so a download can be checked
-  with `gh attestation verify <file> --bundle <file>.intoto.jsonl`.
+  `actions/attest-build-provenance` signs one SLSA build provenance
+  over every download, tied to this repository's workflow, and stores
+  it in GitHub's attestation store; `actions/attest` attests the SBOM
+  over the downloads it describes. The job also copies the Sigstore
+  bundle into `dist/` as `havne-X.Y.Z.intoto.jsonl`, one file for all
+  the downloads, because OpenSSF Scorecard's Signed-Releases check
+  reads only release files (it counts `*.intoto.jsonl` as provenance
+  and `*.sig`, `*.asc` or `*.sigstore.json` as signatures), and so a
+  download can be checked with
+  `gh attestation verify <file> --bundle havne-X.Y.Z.intoto.jsonl`.
 - **`publish`: the release.** `gh release create` with the downloads,
-  their `.intoto.jsonl` files, the SBOM, `SHA256SUMS.txt` and the notes
+  the provenance bundle, the SBOM, `SHA256SUMS.txt` and the notes
   file. A
   manual run for an existing tag
   (`gh workflow run release.yml -f tag=vX.Y.Z`) rebuilds it and
@@ -1037,7 +1040,7 @@ once:
    ```
 
 3. **The environment:** a GitHub environment named `release` that only
-   `v*` tags and `main` may deploy to (Settings → Environments, or
+   `v*` tags and `main` may deploy to (Settings to Environments, or
    `gh api -X PUT repos/<repo>/environments/release` with a custom
    deployment policy, then one tag rule and one branch rule).
 4. **Its secrets,** from stdin, so neither lands in the shell's

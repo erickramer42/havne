@@ -147,7 +147,7 @@ binary it builds carries the probes, and so will the packages.
   mock://probes --count 100`. It expects:
   - at least 100 `frame` hits
   - one `session_start` and one `session_close`
-- **Release:** `stage.ps1`'s PDB checks, as §1, on every release and
+- **Release:** `stage.ps1`'s PDB checks, as section 1, on every release and
   the `rc` dry run. A PDB from another build under the right name
   fails them.
 - **Every other platform** builds the macros to nothing, and every CI

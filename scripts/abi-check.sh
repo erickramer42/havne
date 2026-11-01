@@ -6,9 +6,10 @@
 # Holds the C ABI to its promises (ADR-0001): the core at HEAD against
 # a release's, with libabigail. Each tree's core-only build (debug info,
 # position independent) has its static archive linked whole into a
-# shared object that exports only the ecuio_ functions, as an FFI
-# consumer would load it; abidw dumps the functions and the types the
-# public headers (core/include) declare, and abidiff compares the two.
+# shared object that exports only the public ecuio_ names (none that
+# internal.h declares), as an FFI consumer would load it; abidw dumps
+# the functions and the types the public headers (core/include)
+# declare, and abidiff compares the two.
 #   - An incompatible change fails: a function removed or its signature
 #     changed, a struct field moved or retyped, a struct's size changed,
 #     an enum value renumbered.
@@ -52,10 +53,23 @@ else
     base_name=$base
 fi
 
-# Only the C ABI is exported, as a shared core would export it
-cat > "$OUT/exports.map" <<'EOF'
-{ global: ecuio_*; local: *; };
-EOF
+# Only the C ABI is exported, as a shared core would export it: the
+# archive's ecuio_ symbols less what internal.h declares (the transport
+# seams, the query keys, the test hooks), which core uses across its own
+# files under the same prefix but never installs. Exact names, each
+# tree's own: a glob for internal.h's would hang on ld's precedence rules
+exports() {
+    local lib=$1 internal=$2/core/include/ecuio/internal.h
+    {
+        echo '{ global:'
+        nm -g --defined-only "$lib" | awk '$3 ~ /^ecuio_/ { print $3 }' | sort -u \
+            | comm -23 - <( [ -f "$internal" ] \
+                && grep -vE '^\s*(\*|/\*|//)' "$internal" \
+                | grep -oE '\becuio_[a-z0-9_]+(\(|\[\])' | sed -E 's/(\(|\[\])$//' | sort -u ) \
+            | sed 's/$/;/'
+        echo 'local: *; };'
+    }
+}
 
 # <source dir> <name>: the core-only tree, its .so and its ABI dump
 dump() {
@@ -72,9 +86,10 @@ dump() {
     local lib
     lib=$(find "$tree" -name 'libecuio-core.a' | head -n 1)
     [ -n "$lib" ] || die "$name: no libecuio-core.a"
+    exports "$lib" "$src" > "$tree.exports.map"
     "${CXX:-c++}" -shared -o "$tree/libecuio-core.so" \
         -Wl,--whole-archive "$lib" -Wl,--no-whole-archive \
-        -Wl,--version-script="$OUT/exports.map" -pthread
+        -Wl,--version-script="$tree.exports.map" -pthread
     abidw --headers-dir "$src/core/include" --drop-private-types --no-show-locs \
         --out-file "$OUT/$name.abi" "$tree/libecuio-core.so"
     # The exported functions: the dump's declarations also hold C++

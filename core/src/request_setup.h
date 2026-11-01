@@ -3,14 +3,17 @@
 // Testing: HARNESS: through both requesting transports:
 //          J2534QueryParamTest and J2534AdoptionTest (the query keys,
 //          the channels, raw on the engine ECU, ?poll=, uds-generic's
-//          scan, identification, the support and identity reports),
-//          Elm327SessionTest (the same through an ELM327)
+//          scan, identification, diagnostics, the support, identity
+//          and diagnostics reports, Read again, a clear),
+//          Elm327SessionTest (the same through an ELM327);
+//          reply timing (ADR-0042): Elm327SessionTest.Timing*,
+//          J2534HealthTest.VxTiming*, SocketCanRequestTest.Timing*
 //
 // What a requesting transport (J2534, ELM327) derives from its URI and
 // profile before it opens anything: the request keys' values, the
 // channels, the requests (request_engine.h), and the reports its worker
 // publishes. One place, so a run sheet's query means the same on either
-// scheme (ADR-0026 §2).
+// scheme (ADR-0026 section 2).
 
 #ifndef ECUIO_REQUEST_SETUP_H
 #define ECUIO_REQUEST_SETUP_H
@@ -20,18 +23,23 @@
 #include "ecuio/signal_sets.h"
 #include "ecuio/signals.h"
 #include "error_detail.h"
+#include "isotp.h"
+#include "obd2_rates.h"
 #include "request_engine.h"
 #include "session.h"
 #include "uri_query.h"
 
 #include <cstdint>
 #include <limits>
+#include <memory>
 #include <mutex>
+#include <new>
 
 constexpr uint32_t ECUIO_CAN_ID_MAX = 0x1FFFFFFFu; /* 29-bit */
 constexpr uint32_t ECUIO_CAN_ID_11BIT_MAX = 0x7FFu;
 
-/* The request keys' values: filter, txid, poll, probe and identify. */
+/* The request keys' values: filter, txid, poll, probe, identify,
+ * diagnose and pack. */
 struct request_params {
     uint32_t rx_id = 0; /* 0 = no ?filter= override */
     uint32_t tx_id = 0; /* 0 = unset: profile's tx, else 0x7E0 */
@@ -40,6 +48,8 @@ struct request_params {
     uint8_t poll_pid = 0; /* valid when has_poll; 0x00 allowed */
     bool probe = true;    /* ?probe=0 turns it off */
     bool identify = true; /* ?identify=0 turns it off */
+    bool diagnose = true; /* ?diagnose=0 turns it off */
+    bool pack = true;     /* ?pack=0 turns it off */
 };
 
 /* Strict unsigned parse: decimal by default, '0x'/'0X' prefix enables
@@ -97,10 +107,14 @@ inline bool ecuio_parse_number(const char* s, size_t len,
  *   poll     PID 0x00..0xFF: one Service 01 request, repeated as the
  *            whole rotation (0x00 reads the supported-PIDs bitmap);
  *            replaces the profile's requests
- *   probe    0 or 1: the supported-PID probe (ADR-0015 §4), on by
+ *   probe    0 or 1: the supported-PID probe (ADR-0015 section 4), on by
  *            default
  *   identify 0 or 1: vehicle identification (ADR-0021), on by default
  *            with a set's requests
+ *   diagnose 0 or 1: trouble codes, readiness and the freeze frame
+ *            (ADR-0037), on by default with a set's requests
+ *   pack     0 or 1: several Service 01 PIDs per request (ADR-0039
+ *            Appendix A), on by default with the probe
  * False when q is another key. A bad value leaves p alone and sets
  * *wanted to what it should have been; the caller words the detail. */
 inline bool ecuio_request_param(const ecuio_uri::param& q, request_params* p,
@@ -127,13 +141,18 @@ inline bool ecuio_request_param(const ecuio_uri::param& q, request_params* p,
         }
         return true;
     }
-    if (q.is("probe") || q.is("identify")) {
+    if (q.is("probe") || q.is("identify") || q.is("diagnose") ||
+        q.is("pack")) {
         if (q.val_len != 1 || (q.val[0] != '0' && q.val[0] != '1')) {
             *wanted = "0 or 1";
         } else if (q.is("probe")) {
             p->probe = q.val[0] == '1';
-        } else {
+        } else if (q.is("identify")) {
             p->identify = q.val[0] == '1';
+        } else if (q.is("pack")) {
+            p->pack = q.val[0] == '1';
+        } else {
+            p->diagnose = q.val[0] == '1';
         }
         return true;
     }
@@ -231,10 +250,13 @@ inline uint32_t ecuio_poll_channel(const ecuio_signal_set_t* set, uint8_t pid,
  *   uds-generic   -> the rotation from the set's polled head, and the
  *                    scan of its ranges (ADR-0020)
  *   any other set -> the set's rotation (request_engine.h), which
- *                    registration kept within the table
+ *                    registration kept within the table; the obd2
+ *                    set's in its two rate classes (obd2_rates.h)
  *   no requests   -> passive receive
  * then identification (ADR-0021) when the session already requests and
- * neither ?identify=0 nor ?poll=. *probe and *identify get what the
+ * neither ?identify=0 nor ?poll=, and diagnostics (ADR-0037, decoded by
+ * the obd2 set whatever the profile) by the same rule with ?diagnose=0.
+ * *probe and *identify get what the
  * worker runs: ?poll= sends its one request as asked, whatever the ECU
  * says. Then the coupling check: requests need a channel to receive on,
  * or they go out against guaranteed silence forever. A set's requests
@@ -254,6 +276,13 @@ inline ecuio_status_t ecuio_build_requests(
             sizeof(req));
     } else if (session->uds == nullptr) {
         (void)ecuio_engine_derive(e, set, rx_ids, chan_count, nullptr);
+        if (set == ecuio_obd2_signal_set()) {
+            ecuio_engine_classify(e, ecuio_obd2_pid_fast); /* ADR-0039 */
+            ecuio_engine_set_duplicates(
+                e, &ECUIO_OBD2_DUPLICATE_PIDS[0][0],
+                sizeof(ECUIO_OBD2_DUPLICATE_PIDS) /
+                    sizeof(ECUIO_OBD2_DUPLICATE_PIDS[0]));
+        }
     } else {
         /* uds-generic (ADR-0020): the rotation from the set's polled
          * head, then each scanned DID once, on the channel of its ECU by
@@ -273,10 +302,15 @@ inline ecuio_status_t ecuio_build_requests(
         }
     }
     *probe = params.probe && !params.has_poll;
+    /* Packing needs the bitmaps: it packs only the PIDs they list */
+    e->pack = params.pack && *probe;
     const bool requests = e->count > 0 || e->scan_count > 0;
     *identify = params.identify && !params.has_poll && requests;
     if (*identify) {
         ecuio_engine_identify(e);
+    }
+    if (params.diagnose && !params.has_poll && requests) {
+        ecuio_engine_diagnose(e, ecuio_obd2_signal_set());
     }
 
     if (requests && chan_count == 0) {
@@ -310,6 +344,67 @@ inline void ecuio_publish_support(ecuio_session_t* session,
     session->support[c] = s;
 }
 
+/* Reply timing (ADR-0042) for a requesting session's rotation: the
+ * figures in owner, the engine pointing at them, the intervals on clock
+ * (ECUIO_TIMING_CLOCK_*). A session with no rotation gets none, and so
+ * does one whose figures won't allocate: timing is a report, never a
+ * reason to refuse a connect. */
+inline void ecuio_attach_timing(ecuio_request_engine& e,
+                                std::unique_ptr<ecuio_timing_table>& owner,
+                                uint32_t clock)
+{
+    if (e.count == 0) {
+        return;
+    }
+    owner.reset(new (std::nothrow) ecuio_timing_table());
+    if (owner) {
+        owner->interval_clock = clock;
+        e.timing = owner.get();
+    }
+}
+
+/* Reply timing (ADR-0042): the engine's figures handed to the session as
+ * rows, for ecuio_session_get_timing, at most once a second, and always
+ * when final (the worker stopping). iso is ISO-TP's receiver where core
+ * reassembles, NULL where the adapter does. published_at is the
+ * worker's own. */
+constexpr int64_t ECUIO_TIMING_PUBLISH_US = 1000000;
+
+inline void ecuio_publish_timing(ecuio_session_t* session,
+                                 const ecuio_request_engine& e,
+                                 const isotp_rx* iso, int64_t now_us,
+                                 int64_t& published_at, bool final)
+{
+    if (e.timing == nullptr ||
+        (!final && published_at != 0 &&
+         now_us - published_at < ECUIO_TIMING_PUBLISH_US)) {
+        return;
+    }
+    published_at = now_us;
+    std::lock_guard<std::mutex> lock(session->timing_mutex);
+    ecuio_session_timing_t& t = session->timing;
+    t.snapshot_us = now_us > 0 ? static_cast<uint64_t>(now_us) : 0;
+    t.interval_clock = e.timing->interval_clock;
+    t.rows = e.count;
+    if (iso != nullptr) {
+        t.flags |= ECUIO_TIMING_ISOTP;
+        t.isotp_first_frames = iso->first_frames;
+        t.isotp_completed = iso->completed;
+        t.isotp_dropped = iso->dropped;
+        t.isotp_malformed = iso->malformed;
+    }
+    for (uint32_t i = 0; i < e.count; ++i) {
+        const ecuio_request& q = e.requests[i];
+        ecuio_request_timing_t& row = session->timing_rows[i];
+        row = timing_public(e.timing->rows[i]);
+        row.channel = q.channel;
+        row.length = q.len < 3 ? q.len : 3;
+        for (uint8_t k = 0; k < row.length; ++k) {
+            row.request[k] = q.bytes[k];
+        }
+    }
+}
+
 /* Hands what channel c's ECU has said it is to the session, for
  * ecuio_session_get_channel_identity, when an item has settled. */
 inline void ecuio_publish_identity(ecuio_session_t* session,
@@ -327,8 +422,58 @@ inline void ecuio_publish_identity(ecuio_session_t* session,
     session->identity[c] = s;
 }
 
-/* Each channel's ECU, its requests and its identification items, nothing
- * learned yet: what attach hands the session before the worker runs. */
+/* Hands what channel c's ECU has reported of its diagnostics to the
+ * session, for ecuio_session_get_channel_diagnostics, when an item has
+ * settled or a read has started over. */
+inline void ecuio_publish_diagnostics(ecuio_session_t* session,
+                                      const ecuio_request_engine& e, uint32_t c,
+                                      uint32_t rx_id, uint32_t& published)
+{
+    if (e.chans[c].diag.generation == published) {
+        return;
+    }
+    published = e.chans[c].diag.generation;
+    ecuio_channel_diagnostics_t s;
+    ecuio_engine_diagnostics(&e, c, &s);
+    s.rx_id = rx_id;
+    std::lock_guard<std::mutex> lock(session->support_mutex);
+    session->diagnostics[c] = s;
+}
+
+/* Starts the diagnostics over (ecuio_engine_diagnose_again) when
+ * ecuio_session_read_diagnostics has been called since the worker last
+ * looked; seen is the worker's count. */
+inline void ecuio_take_diag_request(ecuio_session_t* session,
+                                    ecuio_request_engine* e, uint32_t& seen)
+{
+    const uint32_t asked = session->diag_requests.load();
+    if (asked != seen) {
+        seen = asked;
+        ecuio_engine_diagnose_again(e);
+    }
+}
+
+/* Starts a clear (ecuio_engine_clear, ADR-0038) on each channel whose
+ * ecuio_session_clear_diagnostics request the worker hasn't taken, at
+ * the generation the caller saved; seen holds the worker's count per
+ * channel. The engine checks the generation again, so a read that
+ * settled since makes it ECUIO_CLEAR_REPORT_CHANGED, sending nothing. */
+inline void ecuio_take_clear_requests(ecuio_session_t* session,
+                                      ecuio_request_engine* e, uint32_t* seen)
+{
+    for (uint32_t c = 0;
+         c < e->chan_count && c < ECUIO_SESSION_INFO_MAX_CHANNELS; ++c) {
+        const uint32_t asked = session->clear_requests[c].load();
+        if (asked != seen[c]) {
+            seen[c] = asked;
+            (void)ecuio_engine_clear(e, c, session->clear_generation[c].load());
+        }
+    }
+}
+
+/* Each channel's ECU, its requests, its identification and diagnostics
+ * items, nothing learned yet: what attach hands the session before the
+ * worker runs. */
 inline void ecuio_seed_reports(ecuio_session_t* session,
                                const ecuio_request_engine& e,
                                const uint32_t* rx_ids, uint32_t chan_count)
@@ -340,6 +485,8 @@ inline void ecuio_seed_reports(ecuio_session_t* session,
         session->support[c].rx_id = rx_ids[c];
         ecuio_engine_identity(&e, c, &session->identity[c]);
         session->identity[c].rx_id = rx_ids[c];
+        ecuio_engine_diagnostics(&e, c, &session->diagnostics[c]);
+        session->diagnostics[c].rx_id = rx_ids[c];
     }
 }
 

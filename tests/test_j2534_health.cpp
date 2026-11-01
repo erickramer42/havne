@@ -22,7 +22,8 @@
 //          marked. Frames lost (ERR_BUFFER_OVERFLOW with or without a
 //          message, v05.00's BUFFER_OVERFLOW bit) flag the next frame
 //          dispatched with the link unchanged; an ERROR_INDICATION is
-//          no frame.
+//          no frame. Diagnostics (ADR-0037) fill the fake ECU's report
+//          through either surrogate.
 //          The backend setup and the fake's control page are in
 //          j2534_backend_fixture.h.
 
@@ -36,8 +37,11 @@
 #include <atomic>
 #include <chrono>
 #include <cstring>
+#include <string>
 #include <thread>
+#include <vector>
 
+#include "fake_diagnostics.h"
 #include "j2534_backend_fixture.h"
 
 namespace {
@@ -759,6 +763,49 @@ TEST_F(J2534HealthTest, VxReplyArrivesBeforeTheNextRequest)
         << "replies landed after the next request";
 }
 
+/* Reply timing (ADR-0042) through the surrogate, the fake as the VX
+ * (each reply 4 ms after its write, stamped by the fake's own clock):
+ * a row per request, each answer at least the fake's delay after its
+ * write on the host's clock, the intervals on the adapter's stamps,
+ * none across a fallback, and no ISO-TP counts (the adapter reassembles) */
+TEST_F(J2534HealthTest, VxTimingReportsEachRequestOnTheAdaptersClock)
+{
+    ASSERT_NO_FATAL_FAILURE(knob("ECUIO_FAKE_VX", "1"));
+    ASSERT_NO_FATAL_FAILURE(start_session("?identify=0&diagnose=0"));
+    ecuio_session_timing_t t{};
+    std::vector<ecuio_request_timing_t> rows(ECUIO_PROFILE_MAX_REQUESTS);
+    uint32_t count = 0;
+    uint32_t intervals = 0;
+    const auto deadline =
+        std::chrono::steady_clock::now() + std::chrono::seconds(10);
+    while (std::chrono::steady_clock::now() < deadline) {
+        ASSERT_EQ(ecuio_session_get_timing(session, &t, rows.data(),
+                                           static_cast<uint32_t>(rows.size()),
+                                           &count),
+                  ECUIO_OK);
+        intervals = 0;
+        for (uint32_t i = 0; i < count; ++i) {
+            intervals += rows[i].intervals;
+        }
+        if (intervals >= 40) {
+            break;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    }
+    ASSERT_GE(intervals, 40u) << "intervals published";
+    EXPECT_EQ(t.interval_clock, ECUIO_TIMING_CLOCK_ADAPTER);
+    EXPECT_EQ(t.flags & ECUIO_TIMING_ISOTP, 0u);
+    for (uint32_t i = 0; i < count; ++i) {
+        const ecuio_request_timing_t& r = rows[i];
+        if (r.answered == 0) {
+            continue;
+        }
+        SCOPED_TRACE("PID " + std::to_string(r.request[1]));
+        EXPECT_GE(r.latency_p50_us, 4000u) << "the fake's reply delay";
+        EXPECT_EQ(r.intervals_mixed, 0u);
+    }
+}
+
 /* A TX indication, then the START_OF_MESSAGE indication a vendor queues
  * as a segmented reply starts arriving (the CAN ID alone), then the
  * reply: exactly one frame reaches the session, the reply's. Delivered,
@@ -887,14 +934,15 @@ TEST_F(J2534HealthTest, VxRepliesAreSeenWithinASlice)
         << "replies landed after the next request";
 }
 
-/* PID 0x5D is one the fake's ECU doesn't support, and it answers
+/* PID 0x5F is one the fake's ECU doesn't support, and it answers
  * 7F 01 12, as the first vehicle did for 0x5C. The negative reply ends
  * the request like a positive one, so requests keep the floor's pace
  * instead of waiting out 100 ms each, and the ECU answering keeps the
  * link ok. */
 TEST_F(J2534HealthTest, NegativeReplyCompletesItsRequest)
 {
-    ASSERT_NO_FATAL_FAILURE(start_session("?profile=raw&filter=0x7E8&poll=0x5D"));
+    ASSERT_NO_FATAL_FAILURE(
+        start_session("?profile=raw&filter=0x7E8&poll=0x5F"));
     ASSERT_TRUE(wait_for_frames(3, 2000)) << "replies didn't arrive";
 
     EXPECT_GE(writes_during(page, 1000), 20u)
@@ -1078,6 +1126,27 @@ TEST_F(J2534HealthTest, LongRepliesArriveWhole)
     EXPECT_EQ(replies.length[2], ECUIO_FRAME_DATA_MAX);
     EXPECT_EQ(replies.flags[2], ECUIO_FRAME_FLAG_TRUNCATED);
     EXPECT_TRUE(replies.filled[2]);
+}
+
+/* Diagnostics (ADR-0037) through the surrogate of either architecture:
+ * the one-byte requests framed, the stored list's First Frame
+ * reassembled, and the whole report filled from the fake ECU */
+TEST_F(J2534HealthTest, DiagnosticsFillTheReportThroughTheSurrogate)
+{
+    ASSERT_NO_FATAL_FAILURE(start_session("?profile=obd2&probe=0&identify=0"));
+    ecuio_channel_diagnostics_t d{};
+    const auto deadline =
+        std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    while ((ecuio_session_get_channel_diagnostics(session, 0, &d) != ECUIO_OK ||
+            (d.flags & ECUIO_DIAG_COMPLETE) == 0) &&
+           std::chrono::steady_clock::now() < deadline) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    ASSERT_NE(d.flags & ECUIO_DIAG_COMPLETE, 0u)
+        << "diagnostics didn't complete";
+    EXPECT_EQ(d.rx_id, 0x7E8u);
+    EXPECT_EQ(d.generation, fake_diagnostics::kItems);
+    fake_diagnostics::expect_report(d);
 }
 
 /* ---- Frames lost (ERR_BUFFER_OVERFLOW, the BUFFER_OVERFLOW bit) ------ */

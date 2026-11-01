@@ -2,7 +2,7 @@
 // Testing: test_qml (tests/qml/tst_settings.qml): the Bluetooth rows in
 //          Settings' device list and the field they fill; a bt: URI on the
 //          desktop refused before core is asked, its reason in the error
-//          line. BENCH: the phone (ADR-0028 §4): the permission prompt,
+//          line. BENCH: the phone (ADR-0028 section 4): the permission prompt,
 //          the paired list, the BLE scan; Vehicle: the MX+ through it
 
 #pragma once
@@ -23,7 +23,7 @@ class QBluetoothDeviceDiscoveryAgent;
 #endif
 
 // The phone's Bluetooth adapters for Settings, and the links core reads
-// them through (ADR-0028 §2). The paired adapters come from Android's own
+// them through (ADR-0028 section 2). The paired adapters come from Android's own
 // list, a BLE adapter from a scan Settings starts; each row is
 // elm327://bt:<address> (classic, the SPP service) or elm327://ble:<address>.
 // Before a connect the bridge asks prepare(), which registers that

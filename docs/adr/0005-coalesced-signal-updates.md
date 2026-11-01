@@ -43,13 +43,13 @@ read history through per-row model roles cheaply.
 
 ## Consequences
 
-- GUI emissions drop about 20× at mock rate (measured against the
+- GUI emissions drop about 20x at mock rate (measured against the
   `guiNotifyCount` baseline) and no longer depend on the frame rate.
 - The chart's x-axis resolution is one window, about 100 ms.
   Per-sample timestamps would need decoding to move onto the worker
   (done: the appendix below).
-- Every signal is decoded per frame, whether or not anything is
-  subscribed to it (Known Issue #4).
+- Every signal a frame carries is decoded, whether or not anything is
+  subscribed to it.
 - Flattened arrays are easy to index wrongly. On 2026-10-10 the paint
   code read the newest *value* as the newest timestamp, and no C++
   test could see it. The manual smoke tier caught it.
@@ -65,15 +65,15 @@ axis stay.
 - **Samples carry their own time.** A history sample's time is its
   frame's session time in milliseconds (`timestamp_us / 1000`), not the
   tick that drained it. The chart's x-axis is session time: under a
-  replay it is the recording's time, so a replay at 10× shows ten
+  replay it is the recording's time, so a replay at 10x shows ten
   seconds of the recording in each second.
 - **A window keeps its envelope, not just its newest value.** For each
   signal the bridge's staging keeps the window's newest value and its
   lowest and highest, each with its time. The tick hands the model one
-  entry per signal (ADR-0024 §7), and the model's history takes the
+  entry per signal (ADR-0024 section 7), and the model's history takes the
   distinct points among the three, in time order: one to three a
   window. A short peak inside a window stays on the chart at its own
-  time. The engine-start recording peaks at 1,261 rpm; replayed at 10×
+  time. The engine-start recording peaks at 1,261 rpm; replayed at 10x
   with the newest value alone, the model's highest was 1,232.
 - **The ring holds 360 samples,** three windows' worth for each of the
   120 it held, so the trace still spans about 12 s at 10 Hz.
@@ -102,7 +102,7 @@ gives each row its last window's highest and lowest beside the newest
 value (`windowHigh`, `windowLow`, displayed like the value), and the
 gauges' peak and low holds take them, so a gauge holds the peak the
 chart shows. Holding the newest value alone, the engine-start
-recording replayed at 100× never reached its 1,261 rpm on the tach
+recording replayed at 100x never reached its 1,261 rpm on the tach
 (`QmlTest.dashboard`).
 
 ## Appendix: the model's timer counts sleep (2026-10-29)
@@ -112,3 +112,34 @@ core's clock (`ecuio_clock_us`, [ADR-0033](0033-session-time-counts-sleep.md))
 instead of a `QElapsedTimer`, which on Linux and Android stops while
 the machine sleeps. A value read before a sleep is as old as it is at
 the wake, and its gauge dims then.
+
+## Appendix: a time window on Live (2026-10-31)
+
+With several PIDs per request
+([ADR-0039](0039-full-service01-coverage.md)'s Appendix A) a fast
+signal refreshes every 0.1 s and a slow one every 0.7 s, so 360
+samples covered about 40 s of one and four minutes of another, and
+the chart's span depended on the adapter
+([2026-10-31-elm327-vehicle-2](../bench-sessions/2026-10-31-elm327-vehicle-2.md)).
+Live now shows a window of 10, 30, 60 or 120 s (30 at first), picked
+above the chart and kept between runs; every trace covers that span
+before the newest plotted sample, and the time axis spans it whatever
+the history holds.
+
+- **The ring holds 2,400 samples,** room for 120 s of a signal
+  refreshing at 20 Hz or less, at most two samples a window; a faster
+  one keeps a shorter span. About 38 KB a signal, 5 MB for the full
+  `obd2` set. Each entry is built in place, never copied.
+- **`chartData(windowMs, columns)`** returns the window's samples, and
+  with columns, each of that many equal slices' lowest and highest in
+  time order plus the newest sample, so the chart gets at most two
+  points a pixel column. With no arguments it returns the whole ring,
+  as before.
+- **The time ticks** step 1, 2 or 5 s by the span, then 10, 15, 30, 60
+  s and on until each caption fits beside its neighbor and "now", so
+  a phone's narrow chart never draws captions over one another.
+
+`BridgeTest.ChartDataKeepsTheWindowAndEachSlicesExtremes`,
+`QmlTest.chartlayout` (`test_aWindowSpansTheAxis`,
+`test_captionsNeverOverlap`), `QmlTest.liveview`
+(`test_theWindowIsPickedAboveTheChart`).

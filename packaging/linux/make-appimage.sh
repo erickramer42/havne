@@ -6,7 +6,7 @@
 # Packs a built Release tree into an AppImage and checks it:
 #   dist/havne-<version>-linux-x86_64.AppImage
 #   dist/havne-<version>-linux-x86_64.AppImage.components.json, what it
-#     bundles, for the release's SBOM (packaging/sbom.py, ADR-0035 §5)
+#     bundles, for the release's SBOM (packaging/sbom.py, ADR-0035 section 5)
 # linuxdeploy and its Qt plugin (pinned releases, checked against their
 # SHA-256) gather the app, the Qt libraries, plugins and QML modules it
 # loads, and the desktop entry and icon. The checks:
@@ -17,7 +17,7 @@
 # The AppImage runs on distributions whose glibc is at least the build
 # machine's: build it on the oldest one to support (CI: Ubuntu 24.04).
 # Two builds of one commit make the same bytes when both carry its time
-# (ADR-0035 §4): rcc records each embedded file's modification time,
+# (ADR-0035 section 4): rcc records each embedded file's modification time,
 # which a checkout sets, unless QT_RCC_SOURCE_DATE_OVERRIDE is set when
 # the app is built; the squashfs records times unless SOURCE_DATE_EPOCH
 # is set when it's packed.

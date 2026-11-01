@@ -78,7 +78,7 @@ the worker has been joined.
   timeout, `ERR_BUFFER_EMPTY` to "no frame", and anything else to a
   hard failure.
 - Every read is a pipe round trip. At the transport's read cap
-  (≤100 reads/s) that cost is negligible, and receive latency is now
+  (<= 100 reads/s) that cost is negligible, and receive latency is now
   bounded by the vendor's own `ReadMsgs` timeout instead of the old
   pump's sleep granularity.
 - `ecuio_sur_response_t` grows to 1368 bytes to carry the batch.

@@ -1,10 +1,10 @@
 // File/layer: app/qml/DashboardPage.qml | Qt6 Quick, UI layer
 // Testing: manual smoke: mock://demo drives every gauge; resize across
-//          760 px content width (4 ↔ 2 grid columns) and 600 px (compact
-//          gaps), and to 1280 × 650 (the wide arrangement fits without
+//          760 px content width (4 <-> 2 grid columns) and 600 px (compact
+//          gaps), and to 1280 x 650 (the wide arrangement fits without
 //          scrolling); gauges sweep once per session. test_qml
-//          (tests/qml/tst_dashboard.qml) covers each Tap's lookup and
-//          note, the gauges' imperial units, scales and zones, the
+//          (tests/qml/tst_dashboard.qml) covers each Tap's lookup by
+//          def ID (a set naming its defs otherwise too) and note, the gauges' imperial units, scales and zones, the
 //          peaks cleared on a change of units, and a peak held from
 //          inside a window (the replayed fixture); tst_linkhealth.qml the
 //          header's link state, found by objectName
@@ -25,15 +25,15 @@ Page {
 
     SignalHub { id: hub }
 
-    // One gauge input: the first of `names` the active profile provides.
-    // The mock and obd2 sets share display names; a profile that names a
-    // signal differently adds its name to the list. Unit and decimals are
+    // One gauge input: the first of `ids` (core's def IDs, from
+    // Bridge.gaugeSignals) the active profile provides, whatever it names
+    // the signal. Unit and decimals are
     // core's display strings. `high` and `low` are the last window's,
     // for the gauges' holds. `note` explains an empty gauge instead of
     // showing a fake zero.
     component Tap: QtObject {
-        required property var names
-        readonly property SignalHub.Entry entry: hub.lookup(names)
+        required property var ids
+        readonly property SignalHub.Entry entry: hub.lookup(ids)
         readonly property bool live: Bridge.connected && entry !== null && entry.hasValue
         readonly property real value: entry ? entry.value : 0
         readonly property real high: entry ? entry.windowHigh : 0
@@ -47,14 +47,14 @@ Page {
                                      : ""
     }
 
-    Tap { id: rpm;      names: ["RPM"] }
-    Tap { id: speed;    names: ["Vehicle Speed"] }
-    Tap { id: coolant;  names: ["Coolant Temp"] }
-    Tap { id: oil;      names: ["Engine Oil Temp"] }
-    Tap { id: iat;      names: ["Intake Air Temp"] }
-    Tap { id: maf;      names: ["MAF"] }
-    Tap { id: throttle; names: ["Throttle Position"] }
-    Tap { id: load;     names: ["Engine Load"] }
+    Tap { id: rpm;      ids: Bridge.gaugeSignals.rpm }
+    Tap { id: speed;    ids: Bridge.gaugeSignals.speed }
+    Tap { id: coolant;  ids: Bridge.gaugeSignals.coolant }
+    Tap { id: oil;      ids: Bridge.gaugeSignals.oil }
+    Tap { id: iat;      ids: Bridge.gaugeSignals.iat }
+    Tap { id: maf;      ids: Bridge.gaugeSignals.maf }
+    Tap { id: throttle; ids: Bridge.gaugeSignals.throttle }
+    Tap { id: load;     ids: Bridge.gaugeSignals.load }
 
     // Sizes for the gauge arrangements below
     QtObject {
@@ -183,11 +183,11 @@ Page {
             // ---- Gauges, in one of three arrangements:
             // - stacked: the two dials side by side, the four tiles in a
             //   row below them, then the two bars;
-            // - narrow (a phone): one dial per row, the tiles 2 × 2, one
+            // - narrow (a phone): one dial per row, the tiles 2 x 2, one
             //   bar per row;
             // - wide, when the stacked arrangement would overflow a short,
             //   wide page (a 1080p laptop at 150 % scaling): the two dials
-            //   and the tiles, 2 × 2, side by side in one row sized to the
+            //   and the tiles, 2 x 2, side by side in one row sized to the
             //   page's height.
             // Each grid holds only single-cell items, so uniformCellWidths
             // keeps its columns equal.
@@ -257,7 +257,7 @@ Page {
                     }
                 }
 
-                // The tiles: four in a row below the dials, or 2 × 2
+                // The tiles: four in a row below the dials, or 2 x 2
                 GridLayout {
                     Layout.columnSpan: fit.wide ? 1 : dials.columns
                     Layout.fillWidth: true
@@ -278,7 +278,7 @@ Page {
                             value: coolant.value; windowHigh: coolant.high; windowLow: coolant.low
                             hasValue: coolant.live; stale: coolant.stale
                             note: coolant.note
-                            // From 0 °C, so a cold engine at ambient reads on
+                            // From 0 deg C, so a cold engine at ambient reads on
                             // the scale instead of pinning at its start
                             from: root.shown(root.degC, 0); to: root.shown(root.degC, 130)
                             coldBelow: root.shown(root.degC, 60)
@@ -298,7 +298,7 @@ Page {
                             value: oil.value; windowHigh: oil.high; windowLow: oil.low
                             hasValue: oil.live; stale: oil.stale
                             note: oil.note
-                            // From 0 °C, like coolant
+                            // From 0 deg C, like coolant
                             from: root.shown(root.degC, 0); to: root.shown(root.degC, 160)
                             coldBelow: root.shown(root.degC, 70)
                             warnFrom: root.shown(root.degC, 125)

@@ -36,7 +36,7 @@ QtObject {
     // engine's 100 ms wait each, so about 1 s for the obd2 set.
     readonly property int staleMs:          3000
 
-    // The whole UI's zoom, set with Ctrl + / Ctrl − / Ctrl 0 or from
+    // The whole UI's zoom, set with Ctrl + / Ctrl - / Ctrl 0 or from
     // Settings. Main.qml lays the UI out at the window's size divided by
     // it and scales the result, so every page reflows as if the window
     // were that size, and stores it between runs.
@@ -88,7 +88,7 @@ QtObject {
         "#e879f9",   // fuchsia
     ]
 
-    // Link state → color. Whitelists the healthy and the explained
+    // Link state -> color. Whitelists the healthy and the explained
     // states; fault, degraded and any future state fall to danger.
     function linkColor(state: string): color {
         switch (state) {
@@ -101,7 +101,7 @@ QtObject {
         }
     }
 
-    // Link state → short status label (header pill, Home card). Unknown
+    // Link state -> short status label (header pill, Home card). Unknown
     // states fall to "Link degraded", mirroring linkColor. LiveView's
     // banner keeps its own longer messages, which carry the episode count
     // and error code.

@@ -72,6 +72,13 @@ target_link_libraries(test_obd2 PRIVATE
     GTest::gtest_main
 )
 
+# The Service 01 table the obd2 set and the fakes' ECU are checked against,
+# and the readiness monitors' names
+target_compile_definitions(test_obd2 PRIVATE
+    ECUIO_OBD2_TABLE="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/obd2/service01.csv"
+    ECUIO_OBD2_MONITORS="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/obd2/monitors.csv"
+)
+
 app_enable_warnings(test_obd2)
 gtest_discover_tests(test_obd2)
 
@@ -98,10 +105,11 @@ endif()
 app_enable_warnings(test_elm327)
 gtest_discover_tests(test_elm327 PROPERTIES TIMEOUT 30)
 
-# --- SocketCAN listening's rules: Qt-free, every platform (UNIT, ADR-0032) ---
+# --- SocketCAN's rules: Qt-free, every platform (UNIT, ADR-0032, ADR-0040) ---
 # socketcan_wire.h is internal and portable (the kernel's values mirrored),
 # so its rules test everywhere; the transport on a bus is test_vcan's.
-add_executable(test_socketcan test_socketcan.cpp)
+# test_isotp.cpp: isotp.h, the ISO-TP that SocketCAN requests run on.
+add_executable(test_socketcan test_socketcan.cpp test_isotp.cpp)
 target_include_directories(test_socketcan PRIVATE ${CMAKE_SOURCE_DIR}/core/src)
 target_link_libraries(test_socketcan PRIVATE ecuio-core GTest::gtest_main)
 app_enable_warnings(test_socketcan)
@@ -113,15 +121,24 @@ gtest_discover_tests(test_socketcan)
 # CI's linux-build brings it up and sets ECUIO_VCAN_REQUIRED=1.
 # test_vcan_socketcan.cpp: the SocketCAN transport on that bus
 # (ADR-0032, SocketCanBusTest); it holds the binary's new_counter.h.
+# test_vcan_requests.cpp: socketcan:// requesting through ISO-TP against
+# that ECU (ADR-0040, SocketCanRequestTest), and against the test car's
+# recording as the ECU, its replies broken at the ISO-TP level
+# (vcan_recording_ecu.h, ADR-0041 section 4, SocketCanFaultTest).
+# test_vcan_isotp.cpp: core's ISO-TP against the kernel's
+# (IsoTpConformanceTest).
 # RUN_SERIAL: the cases share the bus, and an error frame passes every
 # session's ID filter.
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
-    add_executable(test_vcan test_vcan.cpp test_vcan_socketcan.cpp)
+    add_executable(test_vcan test_vcan.cpp test_vcan_socketcan.cpp
+                   test_vcan_requests.cpp test_vcan_isotp.cpp)
     target_compile_definitions(test_vcan PRIVATE
         ECUIO_REPLAY_FIXTURES="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/replay"
     )
     find_package(Threads REQUIRED)
     target_link_libraries(test_vcan PRIVATE ecuio-core GTest::gtest_main Threads::Threads)
+    # core/src: isotp.h, pure and internal (test_socketcan's precedent)
+    target_include_directories(test_vcan PRIVATE ${CMAKE_SOURCE_DIR}/core/src)
     app_enable_warnings(test_vcan)
     gtest_discover_tests(test_vcan PROPERTIES TIMEOUT 30 RUN_SERIAL TRUE)
 endif()
@@ -139,13 +156,14 @@ if(Python3_Interpreter_FOUND)
         COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/golden.py selftest)
     add_test(NAME AbiReportTest.SelfTest
         COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/scripts/abi_report.py selftest)
-    # packaging/sbom.py, the release's SBOM (ADR-0035 §5)
+    # packaging/sbom.py, the release's SBOM (ADR-0035 section 5)
     add_test(NAME SbomTest.SelfTest
         COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/packaging/sbom.py selftest)
 endif()
 
 # --- havne-cli (ADR-0031): Qt-free, every desktop platform ---
-# test_cli.cpp: its line formatting and output ring (cli/, header-only).
+# test_cli.cpp: its line formatting and output ring (cli/, header-only;
+# the diagnostics line names codes and monitors through core).
 # The golden runs: the program as a child process, its whole output
 # against tests/golden/cli/ ("core", the version, ignored; mock's t_us
 # too, which is the host's clock). Rewrite one after a deliberate change
@@ -154,7 +172,7 @@ if(TARGET havne-cli)
     add_executable(test_cli test_cli.cpp)
     target_include_directories(test_cli PRIVATE ${CMAKE_SOURCE_DIR}/cli)
     find_package(Threads REQUIRED)
-    target_link_libraries(test_cli PRIVATE GTest::gtest_main Threads::Threads)
+    target_link_libraries(test_cli PRIVATE ecuio-core GTest::gtest_main Threads::Threads)
     app_enable_warnings(test_cli)
     gtest_discover_tests(test_cli PROPERTIES TIMEOUT 30)
 
@@ -180,6 +198,20 @@ if(TARGET havne-cli)
                --values)
         set_tests_properties(CliGoldenTest.ReplayRunsToItsLastFrame PROPERTIES
             ENVIRONMENT HAVNE_CLI_RING_BYTES=40000)
+        # Service 01 replies carrying several PIDs (ADR-0039 Appendix A),
+        # written by hand: PID 55 alone with bank 1's byte, then packed
+        # replies, one holding 55 at that length, and one that won't split
+        app_cli_golden(ReplaySplitsPackedReplies replay-packed.jsonl
+            -- $<TARGET_FILE:havne-cli> stream
+               "replay://${CMAKE_CURRENT_SOURCE_DIR}/fixtures/replay/packed-replies?profile=obd2&speed=max"
+               --values)
+        # The same engine start with faults injected (ADR-0041), seeded so
+        # they're the same each run: the stream still ends, and its end line
+        # counts what ?faults= did
+        app_cli_golden(ReplayWithFaultsEndsAndCountsThem replay-faults.jsonl --last 3
+            -- $<TARGET_FILE:havne-cli> stream
+               "${_cli_replay}?profile=obd2&speed=max&faults=drop:10,overflow:5,corrupt:2,truncate:2,stall:1:5&seed=3"
+               --values)
         app_cli_golden(MockDriveCycle mock.jsonl --ignore t_us
             -- $<TARGET_FILE:havne-cli> stream mock://golden --values --count 40)
         app_cli_golden(BadUriIsRefused bad-uri.jsonl --exit 3
@@ -192,6 +224,11 @@ if(TARGET havne-cli)
             COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/cli_recording_changed.py
                     $<TARGET_FILE:havne-cli>)
         set_tests_properties(CliReplayTest.ACutRecordingEndsTheStream PROPERTIES TIMEOUT 30)
+        # A field past every reply is named on an absent line (ADR-0039 section 6)
+        add_test(NAME CliReplayTest.AnAbsentFieldIsNamed
+            COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/cli_absent.py
+                    $<TARGET_FILE:havne-cli>)
+        set_tests_properties(CliReplayTest.AnAbsentFieldIsNamed PROPERTIES TIMEOUT 30)
     endif()
     function(app_cli_usage name args)
         add_test(NAME CliUsageTest.${name}
@@ -204,7 +241,7 @@ if(TARGET havne-cli)
     app_cli_usage(AnUnknownOptionIsUsage "stream|mock://x|--fast")
     app_cli_usage(ACountOfZeroIsUsage "stream|mock://x|--count|0")
     app_cli_usage(TwoUrisIsUsage "stream|mock://a|mock://b")
-    # A stop from outside (ADR-0031 §6): SIGINT and SIGTERM on POSIX;
+    # A stop from outside (ADR-0031 section 6): SIGINT and SIGTERM on POSIX;
     # on Windows Ctrl+Break to a child in a process group of its own
     # (Ctrl+C can't be sent to one), skipped where there's no console
     if(UNIX)
@@ -244,7 +281,7 @@ target_link_libraries(test_c_abi PRIVATE
 add_test(NAME c_abi COMMAND test_c_abi)
 set_tests_properties(c_abi PROPERTIES LABELS "abi")
 
-# Core's USDT probes (ADR-0034 §4) in each binary that links core and
+# Core's USDT probes (ADR-0034 section 4) in each binary that links core and
 # ships or runs here: their ELF notes, which is all a tracer reads.
 # Only where core was built with them (Linux with <sys/sdt.h>).
 if(ECUIO_HAVE_SDT)
@@ -278,8 +315,12 @@ if(NOT HAVNE_BUILD_CORE_ONLY)
     set_target_properties(test_bridge PROPERTIES AUTOMOC ON)
     app_enable_warnings(test_bridge)
 
+    # core/src for pid_support.h: core's judgment of the unsupported
+    # signals, fed to the model (test_core's precedent)
     target_include_directories(test_bridge PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/../app
+        ${CMAKE_SOURCE_DIR}/cli
+        ${CMAKE_SOURCE_DIR}/core/src
     )
 
     # The engine-start fixture, which both decode paths read (ADR-0024)
@@ -317,7 +358,8 @@ if(NOT HAVNE_BUILD_CORE_ONLY)
     )
     set_target_properties(bench_bridge PROPERTIES AUTOMOC ON)
     app_enable_warnings(bench_bridge)
-    target_include_directories(bench_bridge PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../app)
+    target_include_directories(bench_bridge PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../app
+                                                    ${CMAKE_SOURCE_DIR}/cli)
     target_link_libraries(bench_bridge PRIVATE ecuio-core Qt6::Core)
     # The engine-start fixture, replayed as the load test (ADR-0023)
     target_compile_definitions(bench_bridge PRIVATE
@@ -646,4 +688,19 @@ if(WIN32)
     gtest_discover_tests(test_j2534_routing
         PROPERTIES TIMEOUT ${J2534_TEST_TIMEOUT_SECONDS}
     )
+endif()
+
+# Reply timing against the fakes' ECU through each transport this
+# platform has (ADR-0042 section 4), a measurement for docs/testing.md;
+# built with the tests, never run by ctest
+find_package(Threads REQUIRED)
+add_executable(bench_timing bench_timing.cpp)
+target_link_libraries(bench_timing PRIVATE ecuio-core Threads::Threads)
+app_enable_warnings(bench_timing)
+if(WIN32)
+    target_compile_definitions(bench_timing PRIVATE
+        FAKE_J2534_DLL_PATH="$<TARGET_FILE:fake_j2534>"
+    )
+    add_dependencies(bench_timing fake_j2534)
+    app_deploy_surrogate(bench_timing)
 endif()

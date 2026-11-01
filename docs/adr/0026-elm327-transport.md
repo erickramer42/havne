@@ -50,7 +50,7 @@ v1.4b) fixes most of the wire:
   default, with adaptive timing on) after the last one.
 - The failure words are fixed: `NO DATA` (the timer ran out with no
   reply), `CAN ERROR` (the CAN system couldn't initialize, send or
-  receive, "often … simply from not being connected to a CAN
+  receive, "often ... simply from not being connected to a CAN
   system"), `BUFFER FULL` (its 256-byte transmit buffer overflowed and
   data was lost), `STOPPED` (an operation interrupted by a received
   character), `?` (a command it didn't understand), plus `<DATA ERROR`,
@@ -170,9 +170,9 @@ elm327://<port>[?profile=<name>][&did=…][&baud=500000|250000][&serial=<n>][&fi
 Unknown keys and malformed values fail at create, before the port is
 opened (`ecuio_elm327_query_keys`, rejection tests for each malformed
 form). A port that can't be opened is `ECUIO_ERR_LOAD_FAILED` with the
-OS's reason ("COM5: the port is in use by another program", "…: no
+OS's reason ("COM5: the port is in use by another program", "...: no
 such port"). That is the code's reuse the replay transport made
-first: its text reads "what the URI names couldn't be …", which fits a
+first: its text reads "what the URI names couldn't be ...", which fits a
 port as it fits a recording. An adapter that doesn't answer the reset
 as an ELM327 does is `ECUIO_ERR_VENDOR_REFUSED`, with what it said.
 Neither detail holds a path with an account name, since port names
@@ -210,7 +210,7 @@ depends on.
   `V1.4` and `v2.1` for the same command set.
 - **ISO-TP reassembly per CAN ID:** a Single Frame's length comes from
   its PCI byte; a First Frame's 12-bit length starts a message;
-  Consecutive Frames must follow in sequence (`21` … `2F`, `20`, …).
+  Consecutive Frames must follow in sequence (`21` ... `2F`, `20`, ...).
   A gap, a duplicate or a length mismatch drops that ID's message and
   counts it. A complete message becomes one `ecuio_frame_t`, the same
   shape the J2534 transport delivers: `arbitration_id` from the line,
@@ -237,7 +237,7 @@ present", and the field stays empty.
 | `AT SH <tx>` | contract | the first channel's request ID |
 | `AT CF`/`AT CM`, or `AT CRA <rx>` for one channel | contract | receive only the channels' reply IDs |
 | `AT AT1` | contract | adaptive timing (the default, set explicitly) |
-| `AT ST 19` | contract | the first reply's timeout, matched to the engine's 100 ms wait so the adapter and the engine give up together: 0x19 × 4 ms = 100 ms on an ELM327 (default about 200 ms). On an OBDLink 0x19 is already the default; the FRPM gives its step as 4.096 ms there, 102 ms |
+| `AT ST 19` | contract | the first reply's timeout, matched to the engine's 100 ms wait so the adapter and the engine give up together: 0x19 x 4 ms = 100 ms on an ELM327 (default about 200 ms). On an OBDLink 0x19 is already the default; the FRPM gives its step as 4.096 ms there, 102 ms |
 | `AT I` | reading | the version string for the session info |
 | `STI` | reading | an STN chip's firmware (`STN<id> vX.Y.Z`). A plain ELM327 answers `?`, which means it isn't an STN, not that it failed |
 | `STVR` on an STN, else `AT RV` | reading | the adapter's input voltage, for `vbatt_mv`. Dashes (over 65.5 V) or anything unparsable mean no reading |
@@ -297,10 +297,15 @@ session is refused at create, with a detail that says so.
 ### 5. Read-only, as every session is
 
 Requests come only from the engine, and the engine refuses any
-service but 0x01, 0x09 and 0x22 (ADR-0015 §3). The worker sends no
+service but 0x01, 0x09 and 0x22 (ADR-0015 section 3). The worker sends no
 other OBD bytes. The AT commands it sends configure the adapter and
 never reach the bus as diagnostic requests. No URI key sends raw text
 to the adapter.
+
+> **Amended 2026-10-30 ([ADR-0037](0037-reading-trouble-codes.md)):**
+> the engine's reads grow by 0x02, 0x03, 0x07 and 0x0A (the freeze
+> frame and the trouble codes), which this transport sends as it sends
+> the others; 0x04 stays refused.
 
 The adapter is left as it was found. The transport never writes its
 non-volatile memory: no `AT PP … SV`/`ON`, `STWBR`, `STRSTNVM`,
@@ -529,7 +534,7 @@ UI needs no new code.
 ## Appendix: 2026-10-27, no bench supply for the MX+
 
 There is no 12 V supply on hand, and the MX201 takes its power only
-from the OBD connector, so the MX+ first powers up on the car. As §8
+from the OBD connector, so the MX+ first powers up on the car. As section 8
 provides, its bench items move to the vehicle session, ahead of its
 first request:
 
@@ -549,7 +554,7 @@ port, its ELM answers, its voltage reading).
 
 ## Appendix: 2026-10-27, a wire log
 
-Several of §8's bench items are what the adapter prints: each setup
+Several of section 8's bench items are what the adapter prints: each setup
 command's answer, how an 11-bit ID is printed, a `7F xx 78` line, and
 how long a request waits for its prompt with nothing to answer. The
 J2534 path has the surrogate's session log for that; `elm327://` had
@@ -586,11 +591,11 @@ A device that isn't an ELM327 is still refused, now at `AT I`.
 
 `NO DATA` with no bus means the VX can't tell a missing bus from an
 ECU that doesn't answer, so on the bench it reads as quiet
-("Vehicle not responding"), not "Requests failing". §6's mapping is
+("Vehicle not responding"), not "Requests failing". Section 6's mapping is
 unchanged: on a car the bus is there.
 
 An adapter that resets on its own is found by its version line
-arriving unasked (§6). The VX's reset prints none, so a reset
+arriving unasked (section 6). The VX's reset prints none, so a reset
 without a power cut would go unseen; on USB it can't lose power
 without the port closing, which reopens the port and runs the setup
 again. What it prints on power-up is for its next session's wire log.
@@ -653,7 +658,7 @@ reopen's 5-second backoff and the setup).
 ## Appendix: 2026-10-27, passive listening
 
 The request path has run on a car (the appendix "the first vehicle
-session"), so §4's later step is built. This appendix settles its
+session"), so section 4's later step is built. This appendix settles its
 details. A session with nothing to ask (`raw` without `?poll=`, or a
 profile with no requests) listens with `AT MA` instead of being refused
 at create.
@@ -664,12 +669,12 @@ the CAN receive filter the setup sets (`AT CRA`, or `AT CF` and
 and CRA. The FRPM says `ATMA` opens the flow control, pass and block
 filters but not the CAN hardware filter, which `STMA` opens as well. So
 `AT MA` hears exactly the channels' reply IDs on both chips, as a J2534
-passive session does, and §3's one path for every adapter holds. The
+passive session does, and section 3's one path for every adapter holds. The
 FRPM lists `ATMA` among the commands kept for backwards compatibility;
 the STN still answers it.
 
 **What it hears:**
-- **The channels, from §2:** `?filter=`, the profile's, or for `raw`
+- **The channels, from section 2:** `?filter=`, the profile's, or for `raw`
   the default profile's engine ECU.
 - **A session with no channel is still refused at create:** a profile
   that declares none, without `?filter=`. An unfiltered bus is more than
@@ -679,7 +684,7 @@ the STN still answers it.
   more than diagnostics) would be a step of its own.
 - **The monitor is silent.** Both manuals say it sends no ACK and no
   flow control, so a passive session never reaches the bus, which goes
-  beyond §5.
+  beyond section 5.
 - **A multi-frame message completes only when the tester it answers
   sends the flow control.**
 
@@ -701,24 +706,24 @@ the prompt, with `STOPPED` before it.
   the next connect: the setup sends `AT Z` twice at most for exactly
   that case.
 
-**Link health**, §6's table for a session that only listens:
+**Link health**, section 6's table for a session that only listens:
 
 | What happens | State |
 |---|---|
 | A whole message from a channel | `ECUIO_OK` |
 | No message: each 100 ms read counts toward the quiet run, as J2534's passive reads do | `ECUIO_ERR_VEHICLE_TIMEOUT` (quiet), no episode |
 | 5 s with no line at all | the worker stops the monitor. `STOPPED` and the prompt within 5 s show the adapter is there, and `AT MA` starts again with the state unchanged. No prompt is a hard failure. A quiet bus and a hung adapter look the same until the adapter is asked |
-| The port fails | `ECUIO_ERR_TRANSPORT_HARD_FAILURE`; the port is reopened and the setup runs on the backoff's schedule, then `AT MA` (§6) |
+| The port fails | `ECUIO_ERR_TRANSPORT_HARD_FAILURE`; the port is reopened and the setup runs on the backoff's schedule, then `AT MA` (section 6) |
 | `BUFFER FULL` | frames lost (below), the state unchanged. If a prompt follows (the monitor ended), `AT MA` again at once |
 | The monitor ends unasked any other way (`CAN ERROR`, `STOPPED` with no stop sent, a prompt) | logged, and `AT MA` again on the backoff's schedule; counts as quiet. The VX answers `NO DATA` with no bus at all (the appendix "the VX's answers"), so a missing bus isn't something the monitor can report reliably |
-| `LV RESET`, or the version string | the setup again, as §6 |
+| `LV RESET`, or the version string | the setup again, as section 6 |
 
 **Frames lost.** `BUFFER FULL` means the adapter dropped lines it
 couldn't send in time, and how many is unknown.
 - **The next frame dispatched carries a new flag,**
   `ECUIO_FRAME_FLAG_OVERFLOW` (`0x80`, appended): frames were lost
   before this one. The flag is J2534's own rule. J2534-1 (v05.00,
-  §7.2.2.1 and its error handling) sets the `BUFFER_OVERFLOW` bit of
+  section 7.2.2.1 and its error handling) sets the `BUFFER_OVERFLOW` bit of
   `RxStatus` "for the first successfully received message after the
   overflow condition has cleared". A read that returns such a message
   answers `ERR_BUFFER_OVERFLOW`, with the messages it read.
@@ -771,7 +776,7 @@ failure. The stop at close went the same way.
 
 ## Appendix: 2026-10-27, WiFi over TCP
 
-§9's item 6 names a TCP socket as a second kind of port. A WiFi
+Section 9's item 6 names a TCP socket as a second kind of port. A WiFi
 adapter runs its own access point and takes a TCP connection on a fixed
 address:
 - **The OBDX:** 192.168.4.1, port 23. Its "How to Connect to
@@ -785,7 +790,7 @@ address:
 The ELM command set is the
 same over the socket as over a serial port, so only the port changes.
 The setup, the worker, the monitor and link health run unchanged, behind
-§1's byte-stream interface (`ecuio_elm327_port_ops_t`). A socket in
+section 1's byte-stream interface (`ecuio_elm327_port_ops_t`). A socket in
 core also serves step 6's mobile apps: WiFi reaches a car from iOS
 without BLE.
 
@@ -793,7 +798,7 @@ without BLE.
 `elm327://192.168.0.10:35000`.
 - **Which kind of port.** The text before the query is a TCP address
   when it's a dotted IPv4 address, a colon and a port from 1 to 65535.
-  Anything else is a serial port, as in §2. The two can't be confused:
+  Anything else is a serial port, as in section 2. The two can't be confused:
   a `COMn` name has no dot or colon, and a POSIX device starts with `/`.
 - **The port is required.** The adapters differ (23, 30000 or 35000), and a
   default would turn a wrong guess into "connection refused", which
@@ -806,7 +811,7 @@ without BLE.
   serial rate, and a run sheet that carries one over from a USB session
   should be told so. A Bluetooth port takes the key and ignores it only
   because core can't tell it from a USB port; a socket it can tell.
-- **Every other key** works as in §2.
+- **Every other key** works as in section 2.
 
 **Connecting:**
 - **A 2 s limit.** The opener connects without blocking and waits at
@@ -822,7 +827,7 @@ without BLE.
   failure, as a Bluetooth port's silence is.
 - **The far side closing** (a read of 0 bytes) or resetting is a failed
   read, as a pulled cable is. It is a hard failure, and the socket is
-  reconnected and the setup runs on the backoff (§6). A laptop that
+  reconnected and the setup runs on the backoff (section 6). A laptop that
   leaves the adapter's network and rejoins it recovers without a
   reconnect.
 - **No `SIGPIPE`.** On POSIX a write to a closed socket must not raise
@@ -833,11 +838,11 @@ without BLE.
   core.h promises.
 - **Failures** read as a serial port's do: `LOAD_FAILED` with the
   address and the reason. Examples: "192.168.0.10:35000: no answer
-  within 2 s (is this computer on the adapter's WiFi?)", "…: the
-  connection was refused", "…: the network is unreachable".
+  within 2 s (is this computer on the adapter's WiFi?)", "...: the
+  connection was refused", "...: the network is unreachable".
 
 **No discovery.** Settings lists no WiFi adapters. Finding one would
-mean connecting to addresses on the network: the write §7 won't make to
+mean connecting to addresses on the network: the write section 7 won't make to
 an unknown serial port. The user joins the adapter's network and types
 its address. The URI field's hint and the `elm327://` preset name both
 forms. The address is the session's port name: it appears in the
@@ -856,7 +861,7 @@ data, so a record keeps it.
   the socket it accepts. So the real TCP opener runs in CI on Linux,
   macOS and Windows: its reads, its timeouts, and its end when the far
   side closes. It is the first Win32 port code CI runs (the serial
-  port's stays a BENCH item, §8). Loopback only, so no firewall prompt.
+  port's stays a BENCH item, section 8). Loopback only, so no firewall prompt.
   The tests:
   - a whole session through the socket;
   - the far side closing, then listening again: a hard failure, then
@@ -917,7 +922,7 @@ link at a time.
 
 ## Appendix: 2026-10-29, the count digit and long Service 01 replies
 
-§9's step 4 sent the digit with every Service 01 request to a physical
+Section 9's step 4 sent the digit with every Service 01 request to a physical
 ID, on the reasoning that one ECU answers in one Single Frame. The
 datasheet counts the digit in lines ("Setting the number of
 responses": `09 02 5` for the VIN's five lines, and "if you should
@@ -930,7 +935,7 @@ times out every time. The shipped `obd2` set asks none of them, so a
 registered set naming one was the only way to meet it.
 
 The digit now goes only where the reply is expected to fit:
-- **The bitmaps** (`0x00`, `0x20`, … `0xE0`): four data bytes, always.
+- **The bitmaps** (`0x00`, `0x20`, ... `0xE0`): four data bytes, always.
 - **A PID whose every def** keyed `41 <PID>` ends within the Single
   Frame (`elm327_one_frame_pids_for` in `core/src/elm327_protocol.h`).
   A PID no def describes (`?poll=` under `raw`) gets none.

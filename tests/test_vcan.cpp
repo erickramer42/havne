@@ -96,14 +96,15 @@ TEST_F(VcanTest, AnUnsupportedPidIsRefused)
 {
     vcan_bus::Ecu ecu;
     ASSERT_TRUE(ecu.ok());
-    EXPECT_EQ(ask(vcan_bus::kRequest, {0x01, 0x60}), (std::vector<uint8_t>{0x7F, 0x01, 0x12}));
+    EXPECT_EQ(ask(vcan_bus::kRequest, {0x01, 0xC0}),
+              (std::vector<uint8_t>{0x7F, 0x01, 0x12}));
 }
 
 TEST_F(VcanTest, ASilentEcuAnswersNothing)
 {
     vcan_bus::Ecu ecu(0); /* unsupported_nrc 0: refusals are silence */
     ASSERT_TRUE(ecu.ok());
-    EXPECT_TRUE(ask(vcan_bus::kRequest, {0x01, 0x60}).empty());
+    EXPECT_TRUE(ask(vcan_bus::kRequest, {0x01, 0xC0}).empty());
     EXPECT_EQ(ecu.answered(), 0u);
 }
 
@@ -141,6 +142,38 @@ TEST_F(VcanTest, AListenerSeesTheConversationFrameByFrame)
     EXPECT_EQ(frames[1].data[1], vin.size());
     EXPECT_EQ(std::vector<uint8_t>(frames[4].data + 1, frames[4].data + 8),
               std::vector<uint8_t>(vin.end() - 7, vin.end()));
+}
+
+/* The diagnostics through the kernel's ISO-TP: Service 03's three
+ * stored DTCs (8 bytes with the service and the count) take a First
+ * Frame and a Consecutive Frame, and come back whole; a clear empties
+ * the list */
+TEST_F(VcanTest, TheDtcListTakesTwoFramesAndAClearEmptiesIt)
+{
+    fake_ecu::reset_diagnostics();
+    vcan_bus::Fd listener = vcan_bus::open_raw();
+    ASSERT_TRUE(listener.ok());
+    vcan_bus::Ecu ecu;
+    ASSERT_TRUE(ecu.ok());
+    EXPECT_EQ(
+        ask(vcan_bus::kRequest, {0x03}),
+        (std::vector<uint8_t>{0x43, 0x03, 0x03, 0x01, 0x04, 0x20, 0xC1, 0x00}));
+    std::vector<can_frame> replies;
+    for (const can_frame& f : drain(listener.get(), 200)) {
+        if (f.can_id == vcan_bus::kReply) {
+            replies.push_back(f);
+        }
+    }
+    ASSERT_EQ(replies.size(), 2u);
+    EXPECT_EQ(replies[0].data[0], 0x10) << "a First Frame";
+    EXPECT_EQ(replies[0].data[1], 8) << "of 8 bytes";
+    EXPECT_EQ(replies[1].data[0], 0x21) << "its Consecutive Frame";
+
+    EXPECT_EQ(ask(vcan_bus::kRequest, {0x04}), (std::vector<uint8_t>{0x44}));
+    EXPECT_EQ(ask(vcan_bus::kRequest, {0x03}),
+              (std::vector<uint8_t>{0x43, 0x00}));
+    EXPECT_EQ(fake_ecu::diagnostics().clears.load(), 1u);
+    fake_ecu::reset_diagnostics();
 }
 
 /* The recorded engine start's replies go out in order, each a padded

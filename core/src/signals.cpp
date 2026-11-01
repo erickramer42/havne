@@ -388,7 +388,7 @@ int ecuio_validate_signal(const ecuio_signal_def_t* signal)
     }
 
     /* Zero, so a later field can take this room and existing sets
-     * still load. No flag is defined. */
+     * still load. No flag is defined. plot_rank takes any value. */
     if (signal->reserved0 != 0 ||
         !all_zero(signal->mux_reserved, sizeof signal->mux_reserved) ||
         !all_zero(signal->display_reserved, sizeof signal->display_reserved) ||
@@ -416,6 +416,11 @@ static const display_conversion kImperial[] = {
     {"kPa",               "psi",               0.145037737730209, 0.0,  1},
     {"g/s",               "lb/min",            0.132277357312033, 0.0,  1},
     {"km",                "mi",                0.621371192237334, 0.0,  0},
+    /* Conventional inches of water: 25.4 mm at 1000 kg/m3, standard g */
+    {"Pa",                "inH2O",             1.0 / 249.08891,   0.0,  2},
+    /* US gallons */
+    {"L/h",               "gal/h",             1.0 / 3.785411784, 0.0,  1},
+    {"N\xC2\xB7m",        "lb\xC2\xB7" "ft",   0.737562149277265, 0.0,  0},
 };
 
 int ecuio_display_convert(const char* unit, uint8_t decimal_places,

@@ -2,12 +2,15 @@
 // Testing: model contract covered by test_bridge; swatch colors, dashes
 //          and banner text by test_qml (tests/qml/tst_liveview.qml, and
 //          tst_linkhealth.qml for the banner in each link state), which
-//          finds items by objectName, and the list giving up rows so the
+//          finds items by objectName, the rows an ECU lacks left out with
+//          the note saying how many (against the fake J2534 DLL), and the
+//          list giving up rows so the
 //          chart stays whole on a short page; the strip chart's layout (ranges,
 //          lanes, gaps, ticks, labels, a crowded trace's band) by tst_chartlayout.qml through
 //          ChartLayout; the drawing itself, sharp under zoom, is verified
 //          manually (docs/testing.md).
 
+import QtCore
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
@@ -22,6 +25,18 @@ Page {
 
     // Settings owns connecting; Main opens it
     signal connectRequested()
+
+    // The strip chart's time window, in seconds: one of chartWindows,
+    // kept between runs. The bridge keeps 120 s of history per signal
+    readonly property var chartWindows: [10, 30, 60, 120]
+    readonly property int chartWindowS: chartWindows.includes(liveSettings.chartWindowS)
+                                        ? liveSettings.chartWindowS : 30
+    onChartWindowSChanged: chart.requestPaint()
+    Settings {
+        id: liveSettings
+        category: "live"
+        property int chartWindowS: 30
+    }
 
     readonly property int rowHeight: 44
     // The strip chart's least height; the list gives up rows before the
@@ -150,7 +165,12 @@ Page {
             objectName: "signalList"
             readonly property bool overflows: contentHeight > height
             readonly property real oneRow: Math.min(count, 1) * root.rowHeight
-            readonly property real roomAbove: column.height - y - column.spacing - root.chartMinHeight
+            // Below the list: the hidden note when shown, the window row,
+            // then the chart at its minimum
+            readonly property real roomAbove: column.height - y - column.spacing
+                                              - (hiddenNote.visible ? hiddenNote.height + column.spacing : 0)
+                                              - windowRow.height - column.spacing
+                                              - root.chartMinHeight
 
             Layout.fillWidth: true
             Layout.preferredHeight: count * root.rowHeight
@@ -160,7 +180,8 @@ Page {
             Layout.minimumHeight: oneRow
             clip: true
             boundsBehavior: Flickable.StopAtBounds
-            model: Bridge.signalModel
+            // The rows whose PID no ECU marked unsupported (ADR-0039 section 6)
+            model: Bridge.liveSignalModel
 
             ScrollBar.vertical: ScrollBar {
                 id: listBar
@@ -174,6 +195,9 @@ Page {
             delegate: Rectangle {
                 id: signalDelegate
                 required property int index
+                // The signal model's row: its plot box and its trace
+                // color, which chartData's `row` names
+                required property int row
                 required property string name
                 required property string unit
                 required property double value
@@ -205,7 +229,7 @@ Page {
                         objectName: "plotCheck"
                         checked: signalDelegate.subscribed
                         enabled: !signalDelegate.isText   // nothing to plot
-                        onToggled: Bridge.signalModel.toggleSubscribed(signalDelegate.index)
+                        onToggled: Bridge.signalModel.toggleSubscribed(signalDelegate.row)
                         Accessible.name: qsTr("Plot %1").arg(signalDelegate.name)
                     }
                     // The chart's legend: this row's trace color, hollow
@@ -216,7 +240,7 @@ Page {
                         // index is -1 while a model reset (a connect)
                         // removes the delegate
                         readonly property color trace: signalDelegate.index >= 0
-                                                       ? root.seriesColor(signalDelegate.index)
+                                                       ? root.seriesColor(signalDelegate.row)
                                                        : "transparent"
                         implicitWidth: 10; implicitHeight: 10   // layout-managed
                         radius: 2
@@ -234,7 +258,8 @@ Page {
                     Label {
                         objectName: "valueLabel"
                         // Never-arrived signals render "—", not a
-                        // fabricated 0 (unsupported PIDs under obd2).
+                        // fabricated 0 (a PID not yet answered, or refused
+                        // with a negative reply rather than by its bitmap).
                         text: !(Bridge.connected && signalDelegate.hasValue) ? qsTr("—")
                               : signalDelegate.isText ? signalDelegate.text
                               : root.valueText(signalDelegate.value, signalDelegate.decimals,
@@ -252,6 +277,46 @@ Page {
                     }
                 }
             }
+        }
+
+        // What the list leaves out, and why: rows an ECU's supported-PID
+        // bitmaps mark unsupported, and fields its replies come without
+        // (core's absent signals). The Dashboard keeps them.
+        Label {
+            id: hiddenNote
+            objectName: "hiddenNote"
+            visible: Bridge.signalModel.hiddenCount > 0
+            Layout.fillWidth: true
+            wrapMode: Text.WordWrap
+            color: Theme.textDim
+            text: Bridge.signalModel.hiddenCount === 1
+                  ? qsTr("1 signal hidden: the ECU doesn't send it")
+                  : qsTr("%1 signals hidden: the ECU doesn't send them")
+                        .arg(Bridge.signalModel.hiddenCount)
+        }
+
+        // The chart's time window: the last N seconds of every trace
+        RowLayout {
+            id: windowRow
+            objectName: "chartWindowRow"
+            Layout.fillWidth: true
+            spacing: 6
+            Label {
+                text: qsTr("Window")
+                color: Theme.textDim
+            }
+            Repeater {
+                model: root.chartWindows
+                ThemedButton {
+                    required property int modelData
+                    objectName: "chartWindow_" + modelData
+                    text: qsTr("%1 s").arg(modelData)
+                    highlighted: root.chartWindowS === modelData
+                    Accessible.name: qsTr("Show the last %1 seconds").arg(modelData)
+                    onClicked: liveSettings.chartWindowS = modelData
+                }
+            }
+            Item { Layout.fillWidth: true }
         }
 
         // ---- Strip chart: per-signal rolling history, one repaint per
@@ -303,7 +368,8 @@ Page {
                     ctx.fillStyle = Theme.surface
                     ctx.fillRect(0, 0, shownW, shownH)
 
-                    const series = Bridge.signalModel.chartData()
+                    const series = Bridge.signalModel.chartData(root.chartWindowS * 1000,
+                                                                Math.ceil(shownW))
                     if (!series || series.length === 0) {
                         ctx.fillStyle = Theme.textDim
                         ctx.font = "12px sans-serif"
@@ -316,7 +382,9 @@ Page {
                     const l = ChartLayout.layout(series, shownW, shownH, {
                         gapMs: root.staleMs, minSpanUnits: root.minSpanUnits,
                         measure: text => ctx.measureText(text).width,
-                        format: root.valueText })
+                        format: root.valueText,
+                        windowMs: root.chartWindowS * 1000,
+                        caption: s => s === 0 ? qsTr("now") : qsTr("−%1 s").arg(s) })
                     if (!l) return
 
                     // Grid: quarter lines, and one vertical per time tick
@@ -339,8 +407,7 @@ Page {
                     for (const tick of l.ticks) {
                         if (!tick.captioned) continue
                         ctx.textAlign = tick.seconds === 0 ? "right" : "center"
-                        ctx.fillText(tick.seconds === 0 ? qsTr("now") : qsTr("−%1 s").arg(tick.seconds),
-                                     tick.x, l.top + l.plotH + 3)
+                        ctx.fillText(tick.caption, tick.x, l.top + l.plotH + 3)
                     }
 
                     // Traces, each piece its own stroke (a gap is a break);

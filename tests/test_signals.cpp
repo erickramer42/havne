@@ -47,7 +47,7 @@ TEST_F(SignalDecodeTest, ValidInt8WithSignExtension) {
     strncpy(signal.unit, "°C", sizeof(signal.unit));
     signal.decimal_places = 0;
     
-    uint8_t frame[8] = {0x00, 0xFF, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}; /* -1 °C after offset */
+    uint8_t frame[8] = {0x00, 0xFF, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}; /* -1 deg C after offset */
     double value = 0.0;
     
     int result = ecuio_decode_signal(&signal, frame, 8, &value);
@@ -195,14 +195,14 @@ TEST(SignalsTest, MockSetDecodesReasonably) {
     const ecuio_signal_set_t* set = ecuio_mock_signal_set();
     uint8_t frame[ECUIO_MOCK_TELEMETRY_PAYLOAD_LEN] = {
                          0xE8, 0x03, // RPM raw 1000
-                         0x64,       // Coolant raw 100 → 60°C
-                         0x3C,       // Speed raw 60 → 60 km/h
-                         0x80,       // Throttle raw 128 → 50.2%
-                         0x74,       // IAT raw 116 → 76°C
-                         0xCD,       // Load raw 0xCD → 80.4%
-                         0x84, 0x1D, // MAF raw 0x1D84 = 7556 → 75.56 g/s
-                         0x78,       // Oil raw 120 → 80°C
-                         0x14, 0x6E};// Lambda raw 0x6E14 = 28180 → 0.86
+                         0x64,       // Coolant raw 100 -> 60 deg C
+                         0x3C,       // Speed raw 60 -> 60 km/h
+                         0x80,       // Throttle raw 128 -> 50.2%
+                         0x74,       // IAT raw 116 -> 76 deg C
+                         0xCD,       // Load raw 0xCD -> 80.4%
+                         0x84, 0x1D, // MAF raw 0x1D84 = 7556 -> 75.56 g/s
+                         0x78,       // Oil raw 120 -> 80 deg C
+                         0x14, 0x6E};// Lambda raw 0x6E14 = 28180 -> 0.86
 
     for (uint32_t i = 0; i < set->count; ++i) {
         double val = 0.0;
@@ -516,7 +516,7 @@ TEST(SignalsTest, SignalDefLayoutIsPinned)
      *   mux_reserved=10, mux_key=12, kind=16, byte_order=17,
      *   start_byte=18, bit_offset=20, bit_length=21,
      *   byte_length=22, scale=24, offset=32, name=40, unit=72,
-     *   decimal_places=88, display_reserved=89, flags=92,
+     *   decimal_places=88, plot_rank=89, display_reserved=90, flags=92,
      *   reserved=96  =>  sizeof == 120.
      * If this fires, a field moved: bump ECUIO_SIGNAL_SET_LAYOUT. */
     EXPECT_EQ(sizeof(ecuio_signal_def_t), 120u);
@@ -534,7 +534,8 @@ TEST(SignalsTest, SignalDefLayoutIsPinned)
     EXPECT_EQ(offsetof(ecuio_signal_def_t, name), 40u);
     EXPECT_EQ(offsetof(ecuio_signal_def_t, unit), 72u);
     EXPECT_EQ(offsetof(ecuio_signal_def_t, decimal_places), 88u);
-    EXPECT_EQ(offsetof(ecuio_signal_def_t, display_reserved), 89u);
+    EXPECT_EQ(offsetof(ecuio_signal_def_t, plot_rank), 89u);
+    EXPECT_EQ(offsetof(ecuio_signal_def_t, display_reserved), 90u);
     EXPECT_EQ(offsetof(ecuio_signal_def_t, flags), 92u);
     EXPECT_EQ(offsetof(ecuio_signal_def_t, reserved), 96u);
 
@@ -573,6 +574,10 @@ TEST(SignalsTest, DisplayConvertMapsEachMetricUnitToImperial)
         {"g/s", 1, 100.0, "lb/min", 13.2277357312033, 2},
         {"g/s", 3, 1.0, "lb/min", 0.132277357312033, 3},   /* capped at 3 */
         {"km", 1, 402.336 / 1000.0, "mi", 0.25, 1},
+        {"Pa", 0, 249.08891, "inH2O", 1.0, 2},
+        {"Pa", 2, -8192.0, "inH2O", -32.8878551839180, 3},   /* capped at 3 */
+        {"L/h", 2, 3.785411784, "gal/h", 1.0, 3},
+        {"N\xC2\xB7m", 0, 1.3558179483314004, "lb\xC2\xB7" "ft", 1.0, 0},
     };
     for (const Case& c : kCases) {
         ecuio_display_value_t out;
@@ -816,8 +821,15 @@ TEST(SignalsTest, ValidatorRefusesEveryNonzeroReservedByte)
             ++checked;
         }
     }
-    /* Every byte that isn't a named value: 2 + 2 + 3 + 4 + 24. */
-    EXPECT_EQ(checked, 35u);
+    /* Every byte that isn't a named value: 2 + 2 + 2 + 4 + 24. */
+    EXPECT_EQ(checked, 34u);
+
+    /* plot_rank took a reserved byte's room: any value is a rank */
+    ecuio_signal_def_t ranked = good;
+    for (unsigned rank : {1u, 10u, 255u}) {
+        ranked.plot_rank = static_cast<uint8_t>(rank);
+        EXPECT_EQ(ecuio_validate_signal(&ranked), ECUIO_VALIDATE_OK) << rank;
+    }
 }
 
 TEST(SignalsTest, ValidatorAcceptsExactlyWhatTheDecoderDecodes)

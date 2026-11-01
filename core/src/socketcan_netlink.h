@@ -6,7 +6,7 @@
 //     attributes' parsing is socketcan_wire.h's, UNIT on every platform
 //
 // The kernel's list of network links over rtnetlink (RTM_GETLINK, a
-// dump), which needs no privileges (ADR-0032 §2). A stack buffer and a
+// dump), which needs no privileges (ADR-0032 section 2). A stack buffer and a
 // socket per call: the worker calls it again when it reopens a socket,
 // and allocates nothing.
 

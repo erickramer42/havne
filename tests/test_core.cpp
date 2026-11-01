@@ -9,7 +9,10 @@
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
+#include <initializer_list>
+#include <memory>
 #include <mutex>
+#include <random>
 #include <string>
 #include <thread>
 #include <vector>
@@ -28,13 +31,17 @@ extern "C" {
 #include "ecuio/signals.h"
 #include "ecuio/signal_sets.h"
 #include "ecuio/profile.h"
+#include "fake_diagnostics.h" /* tests: the fake ECU's report, the mock's too */
 }
 
 /* C++ headers (namespaced classes and inline functions): must stay
  * outside the extern "C" block above. */
 #include "error_detail.h" /* core/src: a refused vendor call's words */
 #include "link_health.h"  /* core/src: the workers' link-health rules */
+#include "replay_faults.h" /* core/src: ?faults= and its draws */
 #include "mock_drive_cycle.h"
+#include "mock_ecu.h"      /* core/src: the simulated ECU's answers */
+#include "def_index.h"     /* core/src: the defs a frame can match */
 #include "uds_generic.h"   /* core/src: the template set's identity */
 #include "new_counter.h"   /* tests: operator new counted per thread */
 
@@ -94,7 +101,8 @@ TEST(CoreTest, CreateFailuresNameTheirCause) {
                  "j2534://, elm327:// or socketcan://");
     EXPECT_EQ(ecuio_session_create("mock://x?interval=10", &s), ECUIO_ERR_BAD_URI);
     EXPECT_STREQ(ecuio_last_error_detail(),
-                 "mock:// takes no query key 'interval', only profile and did");
+                 "mock:// takes no query key 'interval', only profile, did and "
+                 "diagnose");
     EXPECT_EQ(ecuio_session_create("mock://x?profile=mock&&profile=raw", &s),
               ECUIO_ERR_BAD_URI);
     EXPECT_STREQ(ecuio_last_error_detail(),
@@ -160,11 +168,13 @@ TEST(CoreTest, LastErrorDetailIsPerThread) {
     });
     t.join();
     EXPECT_STREQ(ecuio_last_error_detail(), "no profile is named 'bogus'");
-    EXPECT_EQ(other, "mock:// takes no query key 'interval', only profile and did");
+    EXPECT_EQ(other, "mock:// takes no query key 'interval', only profile, did "
+                     "and diagnose");
 }
 
-/* A mock session says it's one, and names its profile, and reports
- * nothing else; the info outlives close. */
+/* A mock session says it's one, names its profile and its one channel
+ * (the simulated engine ECU), and reports nothing else; the info
+ * outlives close. */
 TEST(CoreTest, MockSessionInfoNamesTheBackend) {
     ecuio_session_t* s = nullptr;
     ASSERT_EQ(ecuio_session_create("mock://demo", &s), ECUIO_OK);
@@ -176,7 +186,9 @@ TEST(CoreTest, MockSessionInfoNamesTheBackend) {
     EXPECT_EQ(info.flags, 0u);
     EXPECT_EQ(info.protocol_id, 0u);
     EXPECT_EQ(info.baud, 0u);
-    EXPECT_EQ(info.channel_count, 0u);
+    EXPECT_EQ(info.channel_count, 1u);
+    EXPECT_EQ(info.rx_ids[0], 0x7E8u);
+    EXPECT_EQ(info.tx_ids[0], 0x7E0u);
     EXPECT_STREQ(info.firmware_version, "");
     EXPECT_STREQ(info.profile, "mock");
     for (uint32_t r : info.reserved) {
@@ -200,18 +212,218 @@ TEST(CoreTest, MockSessionInfoNamesTheBackend) {
 
 /* A mock session has no channels, so no ECU to report on: every index
  * is out of range, and the report is left as it was. */
-TEST(CoreTest, MockSessionHasNoChannelSupport) {
+/* The mock has one channel, the simulated engine ECU (0x7E8, requests
+ * to 0x7E0), whose support and identity reports stay empty: it answers
+ * no bitmap or identification */
+TEST(CoreTest, MockSessionHasOneQuietChannel)
+{
     ecuio_session_t* s = nullptr;
     ASSERT_EQ(ecuio_session_create("mock://demo", &s), ECUIO_OK);
+    ecuio_session_info_t info{};
+    ASSERT_EQ(ecuio_session_get_info(s, &info), ECUIO_OK);
+    EXPECT_EQ(info.channel_count, 1u);
+    EXPECT_EQ(info.rx_ids[0], 0x7E8u);
+    EXPECT_EQ(info.tx_ids[0], 0x7E0u);
     ecuio_channel_support_t support;
     memset(&support, 0xEE, sizeof(support));
-    EXPECT_EQ(ecuio_session_get_channel_support(s, 0, &support),
+    ASSERT_EQ(ecuio_session_get_channel_support(s, 0, &support), ECUIO_OK);
+    EXPECT_EQ(support.rx_id, 0x7E8u);
+    EXPECT_EQ(support.flags, 0u);
+    EXPECT_EQ(support.generation, 0u);
+    ecuio_channel_identity_t identity;
+    memset(&identity, 0xEE, sizeof(identity));
+    ASSERT_EQ(ecuio_session_get_channel_identity(s, 0, &identity), ECUIO_OK);
+    EXPECT_EQ(identity.rx_id, 0x7E8u);
+    EXPECT_EQ(identity.items, 0u);
+    EXPECT_EQ(identity.flags, 0u);
+    memset(&support, 0xEE, sizeof(support));
+    EXPECT_EQ(ecuio_session_get_channel_support(s, 1, &support),
               ECUIO_ERR_INVALID_ARGUMENT);
     EXPECT_EQ(support.flags, 0xEEEEEEEEu);
     EXPECT_EQ(ecuio_session_get_channel_support(s, 0, nullptr),
               ECUIO_ERR_NULL_ARGUMENT);
     EXPECT_EQ(ecuio_session_get_channel_support(nullptr, 0, &support),
               ECUIO_ERR_NULL_ARGUMENT);
+    ecuio_session_destroy(s);
+}
+
+/* The simulated ECU's diagnostics (ADR-0037) are the fakes' report,
+ * read at create, before start, whatever the profile */
+TEST(CoreTest, MockReportsTheFakeEcusDiagnostics)
+{
+    for (const char* uri :
+         {"mock://demo", "mock://demo?profile=raw", "mock://demo?profile=obd2",
+          "mock://demo?profile=uds-generic&did=1E1C"}) {
+        SCOPED_TRACE(uri);
+        ecuio_session_t* s = nullptr;
+        ASSERT_EQ(ecuio_session_create(uri, &s), ECUIO_OK)
+            << ecuio_last_error_detail();
+        ecuio_channel_diagnostics_t d{};
+        ASSERT_EQ(ecuio_session_get_channel_diagnostics(s, 0, &d), ECUIO_OK);
+        EXPECT_EQ(d.rx_id, 0x7E8u);
+        EXPECT_EQ(d.generation, fake_diagnostics::kItems);
+        fake_diagnostics::expect_report(d);
+        EXPECT_EQ(ecuio_session_get_channel_diagnostics(s, 1, &d),
+                  ECUIO_ERR_INVALID_ARGUMENT);
+        ecuio_session_destroy(s);
+    }
+}
+
+/* Read again on the mock reads the list once more on the worker's next
+ * tick: the generation moves past a second read, the report the same */
+TEST(CoreTest, MockReadAgainReadsTheSameReport)
+{
+    ecuio_session_t* s = nullptr;
+    ASSERT_EQ(ecuio_session_create("mock://demo", &s), ECUIO_OK);
+    EXPECT_EQ(ecuio_session_read_diagnostics(s), ECUIO_OK)
+        << "before start: taken on the first tick";
+    ASSERT_EQ(ecuio_session_start(s), ECUIO_OK);
+    const uint32_t again = 2 * fake_diagnostics::kItems + 1;
+    ecuio_channel_diagnostics_t d{};
+    const auto deadline =
+        std::chrono::steady_clock::now() + std::chrono::seconds(2);
+    while ((ecuio_session_get_channel_diagnostics(s, 0, &d) != ECUIO_OK ||
+            d.generation != again) &&
+           std::chrono::steady_clock::now() < deadline) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    ASSERT_EQ(d.generation, again);
+    fake_diagnostics::expect_report(d);
+
+    /* Two more, one read: the worker takes what has come since it last
+     * looked */
+    EXPECT_EQ(ecuio_session_read_diagnostics(s), ECUIO_OK);
+    EXPECT_EQ(ecuio_session_read_diagnostics(s), ECUIO_OK);
+    const uint32_t third = again + 1 + fake_diagnostics::kItems;
+    const auto deadline2 =
+        std::chrono::steady_clock::now() + std::chrono::seconds(2);
+    while ((ecuio_session_get_channel_diagnostics(s, 0, &d) != ECUIO_OK ||
+            d.generation < third) &&
+           std::chrono::steady_clock::now() < deadline2) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(150));
+    ASSERT_EQ(ecuio_session_get_channel_diagnostics(s, 0, &d), ECUIO_OK);
+    EXPECT_EQ(d.generation, third);
+    EXPECT_EQ(ecuio_session_close(s), ECUIO_OK);
+    EXPECT_EQ(ecuio_session_read_diagnostics(s), ECUIO_ERR_SESSION_CLOSED);
+    ecuio_session_destroy(s);
+}
+
+/* ?diagnose=0 on the mock: the channel stays, its report empty and not
+ * asked, Read again or not; a bad value is refused at create */
+TEST(CoreTest, MockDiagnoseOffReportsNone)
+{
+    ecuio_session_t* s = nullptr;
+    ASSERT_EQ(ecuio_session_create("mock://demo?diagnose=0", &s), ECUIO_OK);
+    ASSERT_EQ(ecuio_session_start(s), ECUIO_OK);
+    EXPECT_EQ(ecuio_session_read_diagnostics(s), ECUIO_OK);
+    std::this_thread::sleep_for(std::chrono::milliseconds(150));
+    ecuio_channel_diagnostics_t d{};
+    ASSERT_EQ(ecuio_session_get_channel_diagnostics(s, 0, &d), ECUIO_OK);
+    EXPECT_EQ(d.rx_id, 0x7E8u);
+    EXPECT_EQ(d.flags, 0u);
+    EXPECT_EQ(d.generation, 0u);
+    ecuio_session_destroy(s);
+
+    EXPECT_EQ(ecuio_session_create("mock://demo?diagnose=2", &s),
+              ECUIO_ERR_BAD_URI);
+    EXPECT_STREQ(ecuio_last_error_detail(), "?diagnose= needs 0 or 1, not '2'");
+}
+
+/* ADR-0038 on the simulated ECU, no worker: at an engine speed the
+ * drive cycle could give it, a clear asks 01 0C and stops there while
+ * the engine turns; with it stopped, 04 clears the ECU and the list read
+ * again is the fake's cleared report */
+TEST(CoreTest, MockEcuClearsOnlyWithTheEngineStopped)
+{
+    auto e = std::make_unique<ecuio_request_engine>();
+    ecuio_engine_init(e.get(), 1);
+    ecuio_engine_diagnose(e.get(), ecuio_obd2_signal_set());
+    const ecuio_channel_diagnostics_t& d = e->chans[0].diag;
+    ecuio_mock::DriveCycle car;
+    ecuio_mock_ecu ecu;
+    ecu.engine = &car;
+    int64_t now = 0;
+    ecuio_mock_ecu_read(e.get(), &ecu, &now);
+    fake_diagnostics::expect_report(d);
+
+    car.rpm = 812.25f;
+    ASSERT_TRUE(ecuio_engine_clear(e.get(), 0, d.generation));
+    ecuio_mock_ecu_read(e.get(), &ecu, &now);
+    EXPECT_EQ(d.clear, ECUIO_CLEAR_ENGINE_RUNNING);
+    EXPECT_EQ(d.clear_rpm, 813u) << "rounded up";
+    EXPECT_FALSE(ecu.cleared);
+    fake_diagnostics::expect_report(d);
+
+    car.rpm = 0.0f;
+    ASSERT_TRUE(ecuio_engine_clear(e.get(), 0, d.generation));
+    ecuio_mock_ecu_read(e.get(), &ecu, &now);
+    EXPECT_TRUE(ecu.cleared);
+    fake_diagnostics::expect_cleared_report(d);
+}
+
+/* Through the worker: a session starts with the key on and the engine
+ * stopped, so a clear of the report saved at create empties it on an
+ * early tick, and that generation is gone; a new connect starts
+ * uncleared */
+TEST(CoreTest, MockClearsTheReportLikeTheFakeEcu)
+{
+    ecuio_session_t* s = nullptr;
+    ASSERT_EQ(ecuio_session_create("mock://demo", &s), ECUIO_OK);
+    ecuio_channel_diagnostics_t d{};
+    ASSERT_EQ(ecuio_session_get_channel_diagnostics(s, 0, &d), ECUIO_OK);
+    const uint32_t saved = d.generation;
+    EXPECT_EQ(ecuio_session_clear_diagnostics(s, 0, saved), ECUIO_OK)
+        << "before start: taken on the first tick";
+    ASSERT_EQ(ecuio_session_start(s), ECUIO_OK);
+    EXPECT_TRUE(wait_for(
+        [&] {
+            return ecuio_session_get_channel_diagnostics(s, 0, &d) ==
+                       ECUIO_OK &&
+                   d.clear != ECUIO_CLEAR_NONE &&
+                   (d.flags & ECUIO_DIAG_COMPLETE) != 0;
+        },
+        2000));
+    fake_diagnostics::expect_cleared_report(d);
+    EXPECT_EQ(ecuio_session_clear_diagnostics(s, 0, saved),
+              ECUIO_ERR_REPORT_CHANGED);
+    ecuio_session_destroy(s);
+
+    ASSERT_EQ(ecuio_session_create("mock://demo", &s), ECUIO_OK);
+    ASSERT_EQ(ecuio_session_get_channel_diagnostics(s, 0, &d), ECUIO_OK);
+    fake_diagnostics::expect_report(d);
+    EXPECT_EQ(d.clear, ECUIO_CLEAR_NONE);
+    ecuio_session_destroy(s);
+}
+
+/* ADR-0038: a clear names the report the caller saved, so anything else
+ * is refused before a request could go: a stale generation, a channel
+ * past the count, a session reading no diagnostics, a closed session */
+TEST(CoreTest, AClearNeedsTheReportTheCallerSaved)
+{
+    EXPECT_EQ(ecuio_session_clear_diagnostics(nullptr, 0, 0),
+              ECUIO_ERR_NULL_ARGUMENT);
+    ecuio_session_t* s = nullptr;
+    ASSERT_EQ(ecuio_session_create("mock://demo", &s), ECUIO_OK);
+    ecuio_channel_diagnostics_t d{};
+    ASSERT_EQ(ecuio_session_get_channel_diagnostics(s, 0, &d), ECUIO_OK);
+    ASSERT_TRUE(d.flags & ECUIO_DIAG_COMPLETE);
+    EXPECT_EQ(ecuio_session_clear_diagnostics(s, 0, d.generation - 1),
+              ECUIO_ERR_REPORT_CHANGED);
+    EXPECT_EQ(ecuio_session_clear_diagnostics(s, 0, d.generation + 1),
+              ECUIO_ERR_REPORT_CHANGED);
+    EXPECT_EQ(ecuio_session_clear_diagnostics(s, 1, d.generation),
+              ECUIO_ERR_INVALID_ARGUMENT);
+    ASSERT_EQ(ecuio_session_close(s), ECUIO_OK);
+    EXPECT_EQ(ecuio_session_clear_diagnostics(s, 0, d.generation),
+              ECUIO_ERR_SESSION_CLOSED);
+    ecuio_session_destroy(s);
+
+    ASSERT_EQ(ecuio_session_create("mock://demo?diagnose=0", &s), ECUIO_OK);
+    EXPECT_EQ(ecuio_session_clear_diagnostics(s, 0, 0),
+              ECUIO_ERR_REPORT_CHANGED)
+        << "nothing read, so nothing saved";
     ecuio_session_destroy(s);
 }
 
@@ -231,6 +443,8 @@ TEST(CoreTest, StatusStringValidValues) {
     EXPECT_STREQ(ecuio_status_string(ECUIO_ERR_SURROGATE_FAILED), "surrogate process failed");
     EXPECT_STREQ(ecuio_status_string(ECUIO_ERR_RECORDING_CHANGED),
                  "the recording changed after it was opened");
+    EXPECT_STREQ(ecuio_status_string(ECUIO_ERR_REPORT_CHANGED),
+                 "the diagnostics report changed since it was saved");
     EXPECT_STREQ(ecuio_status_string(ECUIO_ERR_VEHICLE_TIMEOUT),
                  "vehicle not responding (timeout)");
 
@@ -709,7 +923,7 @@ namespace {
 /* The mock's physical envelope across a whole drive cycle. Shared by
  * the worker test below, which sees only the first second of the
  * cycle, and the deterministic cycle tests, which see all of it. */
-constexpr float kMockRpmMin = 600.0f;
+constexpr float kMockRpmMin = 0.0f; /* key on, the engine stopped */
 constexpr float kMockRpmMax = 7100.0f;
 constexpr float kMockCoolantMin = 15.0f;
 constexpr float kMockCoolantMax = 110.0f;
@@ -833,7 +1047,7 @@ struct PhaseStats {
 struct LoopRun {
     PhaseStats phase[kPhaseCount];
     std::vector<Phase> order;  /* phases in visit order */
-    bool closed = false;       /* looped back to Roll2nd */
+    bool closed = false;       /* looped back to KeyOn */
     DriveCycle end;
 };
 
@@ -842,8 +1056,8 @@ const PhaseStats& stats(const LoopRun& r, Phase p)
     return r.phase[static_cast<int>(p)];
 }
 
-/* Step one loop, WarmUp through Cooldown, stopping at the tick that
- * returns to Roll2nd. Bounded at 10 simulated minutes. */
+/* Step one loop, KeyOn through Cooldown, stopping at the tick that
+ * returns to KeyOn. Bounded at 10 simulated minutes. */
 LoopRun run_one_loop()
 {
     LoopRun r;
@@ -881,13 +1095,13 @@ LoopRun run_one_loop()
 TEST(CoreTest, MockDriveCycleVisitsEveryPhaseInOrder)
 {
     const LoopRun r = run_one_loop();
-    ASSERT_TRUE(r.closed) << "the cycle never looped back to Roll2nd";
+    ASSERT_TRUE(r.closed) << "the cycle never looped back to KeyOn";
     ASSERT_EQ(r.order.size(), static_cast<size_t>(kPhaseCount));
     for (int i = 0; i < kPhaseCount; ++i) {
         EXPECT_EQ(static_cast<int>(r.order[static_cast<size_t>(i)]), i)
             << "visit " << i;
     }
-    EXPECT_EQ(r.end.phase, Phase::Roll2nd);
+    EXPECT_EQ(r.end.phase, Phase::KeyOn);
 }
 
 TEST(CoreTest, MockDriveCycleSecondGearPullHoldsTheLimiter)
@@ -1217,7 +1431,9 @@ TEST(CoreTest, MockDriveCycleSignalsStayPhysical)
 
         const float estimate = ecuio_mock::maf_wot_gs(dc.rpm) * dc.load_pct / 100.0f;
         EXPECT_NEAR(dc.maf_gs, estimate, 0.1f * estimate + 0.5f) << "tick " << dc.tick;
-        EXPECT_GT(dc.maf_gs, 5.0f) << "engine running, tick " << dc.tick;
+        if (dc.running && dc.rpm >= 600.0f) {
+            EXPECT_GT(dc.maf_gs, 5.0f) << "engine running, tick " << dc.tick;
+        }
         EXPECT_GE(dc.throttle_pct, ecuio_mock::kTpClosedPct - 0.01f);
         EXPECT_LE(dc.throttle_pct, ecuio_mock::kTpWotPct + 0.01f);
 
@@ -1249,10 +1465,11 @@ TEST(CoreTest, MockDriveCycleReadingsNeverHoldDeadStill)
 {
     /* A running engine's rpm, as the wire carries it, never holds one
      * value for long: the idle hunts, the driver's speed wanders, the
-     * crank reading jitters. And away from the moments that are quick
-     * on a real car (a shift, the limiter, the launch and the drag run),
-     * rpm never steps between ticks by more than an engine can change,
-     * phase changes included. */
+     * crank reading jitters. A stopped one reads 0 (KeyOn). And away
+     * from the moments that are quick on a real car (a shift, the
+     * limiter, the launch and the drag run), rpm never steps between
+     * ticks by more than an engine can change, phase changes, a stop and
+     * a start included. */
     DriveCycle dc;
     uint8_t payload[ECUIO_MOCK_TELEMETRY_PAYLOAD_LEN] = {};
     uint16_t last_raw = 0;
@@ -1264,7 +1481,9 @@ TEST(CoreTest, MockDriveCycleReadingsNeverHoldDeadStill)
         dc.step();
         ecuio_mock::encode_payload(dc, payload);
         const uint16_t raw = static_cast<uint16_t>(payload[0] | (payload[1] << 8));
-        same = (dc.tick > 1 && raw == last_raw) ? same + 1 : 0;
+        same = (dc.tick > 1 && raw == last_raw && dc.phase != Phase::KeyOn)
+                   ? same + 1
+                   : 0;
         longest = std::max(longest, same);
         last_raw = raw;
 
@@ -1280,6 +1499,71 @@ TEST(CoreTest, MockDriveCycleReadingsNeverHoldDeadStill)
     ASSERT_EQ(dc.loops, 2u) << "two loops never completed";
     EXPECT_LE(longest, 10u) << "rpm read the same for over half a second";
     EXPECT_LE(worst_step, 150.0f) << "rpm stepped at tick " << worst_tick;
+}
+
+TEST(CoreTest, MockDriveCycleEachLoopStartsWithTheEngineStopped)
+{
+    /* Every loop starts with 15 s of the key on and the engine stopped,
+     * where a clear can run (ADR-0038): from the first tick on the
+     * first loop, and once the engine has run down from idle on later
+     * ones, it reads 0 rpm with no air, no speed and the sensor lean,
+     * and with the pump stopped the warm coolant soaks heat from the
+     * block rather than losing it to the radiator. Then the starter
+     * cranks it, and it catches and runs at its idle by the end of the
+     * start. */
+    constexpr uint32_t kLoops = 3;
+    uint32_t key_on[kLoops] = {}, stopped[kLoops] = {};
+    float crank_hi[kLoops] = {}, start_end_rpm[kLoops] = {};
+    float soak_entry[kLoops] = {}, soak_lo[kLoops] = {};
+    bool started[kLoops] = {};
+    bool ran_with_key_on = false;
+    DriveCycle dc;
+    EXPECT_EQ(dc.phase, Phase::KeyOn);
+    EXPECT_EQ(dc.rpm, 0.0f);
+    while (dc.loops < kLoops && dc.tick < ecuio_mock::ticks_for(1200.0f)) {
+        dc.step();
+        if (dc.loops >= kLoops) {
+            break;
+        }
+        const uint32_t i = dc.loops;
+        if (dc.phase == Phase::KeyOn) {
+            if (key_on[i] == 0) {
+                soak_entry[i] = soak_lo[i] = dc.coolant_c;
+            }
+            soak_lo[i] = std::fmin(soak_lo[i], dc.coolant_c);
+            ++key_on[i];
+            ran_with_key_on = ran_with_key_on || dc.running;
+            if (dc.rpm == 0.0f) {
+                ++stopped[i];
+                EXPECT_EQ(dc.maf_gs, 0.0f) << "tick " << dc.tick;
+                EXPECT_EQ(dc.load_pct, 0.0f) << "tick " << dc.tick;
+                EXPECT_EQ(dc.speed_kmh, 0.0f) << "tick " << dc.tick;
+                EXPECT_GT(dc.lambda, 1.3f) << "tick " << dc.tick;
+            }
+        } else if (dc.phase == Phase::Start) {
+            if (!dc.running) {
+                crank_hi[i] = std::fmax(crank_hi[i], dc.rpm);
+            }
+            start_end_rpm[i] = dc.rpm;
+            started[i] = dc.running;
+        }
+    }
+    ASSERT_EQ(dc.loops, kLoops) << "three loops never completed";
+    EXPECT_FALSE(ran_with_key_on);
+    ASSERT_GT(soak_entry[kLoops - 1], ecuio_mock::kThermostatOpenC);
+    EXPECT_GE(soak_lo[kLoops - 1], soak_entry[kLoops - 1] - 0.1f)
+        << "the radiator cooled a stopped engine";
+    for (uint32_t i = 0; i < kLoops; ++i) {
+        SCOPED_TRACE(i + 1);
+        EXPECT_EQ(key_on[i], ecuio_mock::kKeyOnTicks);
+        EXPECT_GE(stopped[i], ecuio_mock::ticks_for(14.0f))
+            << "it ran down within a second";
+        EXPECT_GE(crank_hi[i], 180.0f);
+        EXPECT_LE(crank_hi[i], 260.0f);
+        EXPECT_TRUE(started[i]);
+        EXPECT_GE(start_end_rpm[i], 700.0f);
+        EXPECT_LE(start_end_rpm[i], 1500.0f);
+    }
 }
 
 TEST(CoreTest, MockDriveCycleLimiterCutsFuelNotAir)
@@ -1307,7 +1591,7 @@ TEST(CoreTest, MockDriveCycleLimiterCutsFuelNotAir)
         ++ticks;
     });
     ASSERT_EQ(ticks, ecuio_mock::ticks_for(5.0f));
-    EXPECT_GE(min_load, 95.0f);
+    EXPECT_GE(min_load, 94.0f) << "near WOT air, less the MAF noise";
     EXPECT_GE(min_maf, 0.9f * pull_maf);
     EXPECT_GT(max_lambda, 1.6f);
     EXPECT_GT(cut, ticks / 2) << "the limiter should spend most of its time in cut";
@@ -1578,7 +1862,7 @@ TEST(CoreTest, MockFramesKeepTheTickInterval)
         << gaps;
 }
 
-/* Session time's clock (ADR-0033 §1) never goes back, nor does its slept
+/* Session time's clock (ADR-0033 section 1) never goes back, nor does its slept
  * count, and while the machine is awake it keeps the waits' pace */
 TEST(CoreTest, ClockNeverGoesBackAndKeepsPace)
 {
@@ -1877,7 +2161,7 @@ TEST(CoreTest, ProfileRegisterReportsTheValidatorResult) {
 
 TEST(CoreTest, ProfileRegisterRefusesMoreRequestsThanTheEngineHolds) {
     /* A set may derive at most ECUIO_PROFILE_MAX_REQUESTS requests
-     * (ADR-0015 §2), so a session never leaves one unasked with nothing
+     * (ADR-0015 section 2), so a session never leaves one unasked with nothing
      * to say why. Defs read from one reply count once: def 1 reads PID
      * 0x00's reply, as def 0 does. One past the limit is refused, naming
      * the first def that didn't fit, and leaves nothing registered. */
@@ -1949,7 +2233,7 @@ TEST(CoreTest, ProfileUnregisterKeepsExistingSessionsOnTheirSet) {
 }
 
 TEST(CoreTest, MockSessionSelectsMockSet) {
-    /* Scheme default: mock:// → the mock profile's set. */
+    /* Scheme default: mock:// -> the mock profile's set. */
     ecuio_session_t* session = nullptr;
     ASSERT_EQ(ecuio_session_create("mock://profile-default", &session),
               ECUIO_OK);
@@ -2093,7 +2377,7 @@ TEST(CoreTest, ProfileQueryLastValidWinsAcrossDuplicates) {
               ecuio_mock_signal_set());    /* last (name63) won */
     ecuio_session_destroy(session);
 
-    /* And the inverse order: raw last → null set */
+    /* And the inverse order: raw last -> null set */
     std::string uri2 = "mock://x?profile=" + name63 + "&profile=raw";
     ASSERT_EQ(ecuio_session_create(uri2.c_str(), &session), ECUIO_OK);
     EXPECT_EQ(ecuio_session_signal_set(session), nullptr);
@@ -2855,6 +3139,251 @@ TEST(CoreTest, ReplayRefusesABadRecordingWithItsLineNumber)
 
 /* The path must be absolute; a folder means its frames.csv; speed, loop
  * and unknown keys are judged before the file is read */
+/* ---- Fault injection on a replay (ADR-0041) ---- */
+
+namespace {
+
+/* A faulted replay of n rows at max speed, run to its end: the frames
+ * delivered and the counts */
+struct FaultedRun {
+    std::vector<ecuio_frame_t> frames;
+    ecuio_replay_faults_t counts{};
+    uint32_t info_flags = 0;
+};
+
+FaultedRun run_faulted(const TempRecording& rec, const std::string& query,
+                       uint64_t rows)
+{
+    FaultedRun r;
+    ReplayCapture capture;
+    ecuio_session_t* session = start_replay(rec.uri(query.c_str()), &capture);
+    if (session == nullptr) {
+        return r;
+    }
+    EXPECT_TRUE(wait_for(
+        [&] {
+            ecuio_replay_faults_t c{};
+            ecuio_session_get_replay_faults(session, &c);
+            return c.frames == rows &&
+                   capture.count() == rows - c.dropped - c.overflowed;
+        },
+        10000))
+        << query;
+    EXPECT_EQ(ecuio_session_close(session), ECUIO_OK);
+    EXPECT_EQ(ecuio_session_get_replay_faults(session, &r.counts), ECUIO_OK);
+    ecuio_session_info_t info{};
+    EXPECT_EQ(ecuio_session_get_info(session, &info), ECUIO_OK);
+    r.info_flags = info.flags;
+    ecuio_session_destroy(session);
+    std::lock_guard<std::mutex> lock(capture.mutex);
+    r.frames = capture.frames;
+    return r;
+}
+
+/* Within six standard deviations of n * p: a bound no seed should miss */
+void expect_rate(uint64_t got, uint64_t n, double p, const char* what)
+{
+    const double mean = n * p;
+    const double sd = std::sqrt(n * p * (1 - p));
+    EXPECT_GE(static_cast<double>(got), mean - 6 * sd) << what;
+    EXPECT_LE(static_cast<double>(got), mean + 6 * sd) << what;
+}
+
+int bits_apart(const ecuio_frame_t& f, const uint8_t* want, uint16_t len)
+{
+    int n = 0;
+    for (uint16_t i = 0; i < len; ++i) {
+        uint8_t x = static_cast<uint8_t>(f.data[i] ^ want[i]);
+        for (; x != 0; x &= static_cast<uint8_t>(x - 1)) {
+            ++n;
+        }
+    }
+    return n;
+}
+
+} // namespace
+
+/* ?faults= and ?seed=: each kind once, a percent over 0 and up to 100
+ * with three decimals at most, a stall's length 1 to 10000 ms, a seed
+ * from 1; anything else refused, through the session too */
+TEST(CoreTest, ReplayFaultsReadTheirQuery)
+{
+    const auto parses = [](const char* q, replay_faults* f = nullptr) {
+        replay_faults scratch;
+        replay_faults* out = f != nullptr ? f : &scratch;
+        return replay_parse_faults(q, std::strlen(q), out);
+    };
+    replay_faults f;
+    ASSERT_TRUE(parses("drop:2,overflow:0.5,corrupt:100,truncate:12.125,"
+                       "stall:1:250",
+                       &f));
+    EXPECT_TRUE(f.any);
+    EXPECT_EQ(f.rate[REPLAY_FAULT_DROP], 2000u);
+    EXPECT_EQ(f.rate[REPLAY_FAULT_OVERFLOW], 500u);
+    EXPECT_EQ(f.rate[REPLAY_FAULT_CORRUPT], 100000u);
+    EXPECT_EQ(f.rate[REPLAY_FAULT_TRUNCATE], 12125u);
+    EXPECT_EQ(f.rate[REPLAY_FAULT_STALL], 1000u);
+    EXPECT_EQ(f.stall_ms, 250u);
+    EXPECT_TRUE(parses("stall:0.001:10000"));
+    for (const char* bad :
+         {"",           "drop",         "drop:",         "drop:0",
+          "drop:0.000", "drop:100.001", "drop:101",      "drop:1.2345",
+          "drop:-1",    "drop:1e2",     "drop: 1",       "drop:2,drop:3",
+          "stall:5",    "stall:5:0",    "stall:5:10001", "drop:5:10",
+          "nope:5",     "drop:5,",      ",drop:5",       "Drop:5"}) {
+        EXPECT_FALSE(parses(bad)) << bad;
+    }
+    uint32_t seed = 0;
+    EXPECT_TRUE(replay_parse_seed("4294967295", 10, &seed));
+    EXPECT_EQ(seed, 4294967295u);
+    for (const char* bad : {"0", "4294967296", "", "x", "-1", "1 "}) {
+        EXPECT_FALSE(replay_parse_seed(bad, std::strlen(bad), &seed)) << bad;
+    }
+
+    TempRecording rec(paced_rows(2));
+    for (const char* q :
+         {"?faults=drop:0", "?faults=", "?seed=0", "?faults=drop:5&seed=x"}) {
+        ecuio_session_t* session = nullptr;
+        EXPECT_EQ(ecuio_session_create(rec.uri(q).c_str(), &session),
+                  ECUIO_ERR_BAD_URI)
+            << q;
+        EXPECT_EQ(session, nullptr);
+    }
+    ecuio_session_t* session = nullptr;
+    ASSERT_EQ(ecuio_session_create(rec.uri("?faults=drop:5").c_str(), &session),
+              ECUIO_OK);
+    ecuio_session_info_t info{};
+    ASSERT_EQ(ecuio_session_get_info(session, &info), ECUIO_OK);
+    EXPECT_NE(info.flags & ECUIO_SESSION_INFO_REPLAY_FAULTS, 0u);
+    ecuio_session_destroy(session);
+}
+
+/* The same seed plays the same faults, frame for frame; another seed
+ * others. A replay without faults counts its frames and nothing else. */
+TEST(CoreTest, ReplayFaultsAreTheSameFromTheSameSeed)
+{
+    TempRecording rec(paced_rows(300, 1000));
+    const std::string q =
+        "?speed=max&faults=drop:10,overflow:5,corrupt:10,truncate:10";
+    const FaultedRun a = run_faulted(rec, q + "&seed=7", 300);
+    const FaultedRun b = run_faulted(rec, q + "&seed=7", 300);
+    const FaultedRun c = run_faulted(rec, q + "&seed=8", 300);
+    ASSERT_EQ(a.frames.size(), b.frames.size());
+    for (size_t i = 0; i < a.frames.size(); ++i) {
+        ASSERT_EQ(a.frames[i].data_length, b.frames[i].data_length) << i;
+        EXPECT_EQ(std::memcmp(a.frames[i].data, b.frames[i].data,
+                              a.frames[i].data_length),
+                  0)
+            << i;
+        EXPECT_EQ(a.frames[i].flags, b.frames[i].flags) << i;
+        EXPECT_EQ(a.frames[i].timestamp_us, b.frames[i].timestamp_us) << i;
+    }
+    EXPECT_EQ(std::memcmp(&a.counts, &b.counts, sizeof a.counts), 0);
+    EXPECT_NE(std::memcmp(&a.counts, &c.counts, sizeof a.counts), 0)
+        << "seed 8 drew the same counts as seed 7";
+
+    const FaultedRun clean = run_faulted(rec, "?speed=max", 300);
+    EXPECT_EQ(clean.frames.size(), 300u);
+    EXPECT_EQ(clean.counts.frames, 300u);
+    EXPECT_EQ(clean.counts.dropped + clean.counts.overflowed +
+                  clean.counts.corrupted + clean.counts.truncated +
+                  clean.counts.stalled,
+              0u);
+    EXPECT_EQ(clean.info_flags & ECUIO_SESSION_INFO_REPLAY_FAULTS, 0u);
+}
+
+/* Each kind does what it counts: a drop removes the frame, an overflow
+ * too and flags the next one delivered, a corruption flips one bit, a
+ * truncation shortens the data, a stall pushes every later stamp back;
+ * each near its rate */
+TEST(CoreTest, ReplayFaultsDoWhatTheyCount)
+{
+    constexpr uint64_t kRows = 1000;
+    TempRecording rec(paced_rows(static_cast<int>(kRows), 1000));
+    const uint8_t clean[4] = {0x41, 0x0C, 0x1F, 0x40};
+
+    FaultedRun r = run_faulted(rec, "?speed=max&faults=drop:20", kRows);
+    EXPECT_EQ(r.frames.size() + r.counts.dropped, kRows);
+    expect_rate(r.counts.dropped, kRows, 0.2, "drop");
+    for (const ecuio_frame_t& f : r.frames) {
+        EXPECT_EQ(f.flags & ECUIO_FRAME_FLAG_OVERFLOW, 0u)
+            << "a drop says nothing";
+    }
+
+    r = run_faulted(rec, "?speed=max&faults=overflow:20", kRows);
+    EXPECT_EQ(r.frames.size() + r.counts.overflowed, kRows);
+    expect_rate(r.counts.overflowed, kRows, 0.2, "overflow");
+    uint64_t flagged = 0;
+    for (const ecuio_frame_t& f : r.frames) {
+        flagged += (f.flags & ECUIO_FRAME_FLAG_OVERFLOW) != 0 ? 1 : 0;
+    }
+    EXPECT_GT(flagged, 0u);
+    EXPECT_LE(flagged, r.counts.overflowed) << "losses in a row flag one frame";
+    /* a flagged frame's stamp is past a missing row's: rows are 1 ms apart */
+    for (size_t i = 1; i < r.frames.size(); ++i) {
+        if (r.frames[i].flags & ECUIO_FRAME_FLAG_OVERFLOW) {
+            EXPECT_GE(r.frames[i].timestamp_us - r.frames[i - 1].timestamp_us,
+                      2000u)
+                << i;
+        }
+    }
+
+    r = run_faulted(rec, "?speed=max&faults=corrupt:100", kRows);
+    ASSERT_EQ(r.frames.size(), kRows);
+    EXPECT_EQ(r.counts.corrupted, kRows);
+    for (const ecuio_frame_t& f : r.frames) {
+        ASSERT_EQ(f.data_length, 4u);
+        EXPECT_EQ(bits_apart(f, clean, 4), 1);
+    }
+
+    r = run_faulted(rec, "?speed=max&faults=truncate:30", kRows);
+    ASSERT_EQ(r.frames.size(), kRows);
+    expect_rate(r.counts.truncated, kRows, 0.3, "truncate");
+    uint64_t shorter = 0;
+    for (const ecuio_frame_t& f : r.frames) {
+        ASSERT_LE(f.data_length, 4u);
+        if (f.data_length < 4) {
+            ++shorter;
+        }
+        EXPECT_EQ(std::memcmp(f.data, clean, f.data_length), 0)
+            << "a truncation keeps what's left as it was";
+    }
+    EXPECT_EQ(shorter, r.counts.truncated);
+
+    r = run_faulted(rec, "?speed=max&faults=stall:5:40", kRows);
+    ASSERT_EQ(r.frames.size(), kRows);
+    expect_rate(r.counts.stalled, kRows, 0.05, "stall");
+    /* the recording's own steps are 1 ms; each stall adds 40 */
+    uint64_t pushed = 0;
+    for (size_t i = 1; i < r.frames.size(); ++i) {
+        const uint64_t step =
+            r.frames[i].timestamp_us - r.frames[i - 1].timestamp_us;
+        ASSERT_TRUE(step == 1000u || step == 41000u) << i << ": " << step;
+        pushed += step == 41000u ? 1 : 0;
+    }
+    const bool first_stalled = r.frames[0].timestamp_us == 40000u;
+    EXPECT_EQ(pushed + (first_stalled ? 1 : 0), r.counts.stalled);
+}
+
+/* A stall is paced: at speed 1 the frames after it come that much later */
+TEST(CoreTest, ReplayFaultsStallThePace)
+{
+    TempRecording rec(paced_rows(3, 10000));
+    ReplayCapture capture;
+    const auto t0 = std::chrono::steady_clock::now();
+    ecuio_session_t* session =
+        start_replay(rec.uri("?faults=stall:100:150"), &capture);
+    ASSERT_NE(session, nullptr);
+    ASSERT_TRUE(wait_for([&] { return capture.count() == 3; }, 5000));
+    const auto spent = std::chrono::duration_cast<std::chrono::milliseconds>(
+                           capture.arrived[2] - t0)
+                           .count();
+    EXPECT_GE(spent, 3 * 150 + 20) << "three stalls and the recording's 20 ms";
+    EXPECT_EQ(capture.frames[2].timestamp_us, 3u * 150000u + 20000u);
+    ecuio_session_close(session);
+    ecuio_session_destroy(session);
+}
+
 TEST(CoreTest, ReplayJudgesItsPathAndQuery)
 {
     TempRecording folder(paced_rows(2), /*as_folder=*/true);
@@ -2903,7 +3432,7 @@ TEST(CoreTest, ReplayJudgesItsPathAndQuery)
         ECUIO_ERR_BAD_URI);
     EXPECT_STREQ(ecuio_last_error_detail(),
                  "replay:// takes no query key 'baud', only profile, did, "
-                 "speed and loop");
+                 "speed, loop, faults and seed");
 
     TempRecording empty_dir_marker("", /*as_folder=*/true);
     std::remove(empty_dir_marker.csv.c_str());
@@ -3363,7 +3892,7 @@ TEST(CoreTest, ValuesReachTheListAsItStoodWhenTheFrameArrived)
     }
 }
 
-/* Every text value of a batch has bytes of its own (ADR-0024 Â§4): an
+/* Every text value of a batch has bytes of its own (ADR-0024 section 4): an
  * unkeyed def, two defs sharing a one-byte key and one with a two-byte
  * key all match "ABCD", four text values at once; a def keyed on
  * another byte doesn't match. The next frame starts from the first slot
@@ -3421,8 +3950,347 @@ TEST(CoreTest, ValuesGiveEachTextValueASlotOfItsOwn)
     EXPECT_EQ(ecuio_profile_unregister("test-text-slots"), ECUIO_OK);
 }
 
+/* Reply timing (ADR-0042): a session with no rotation has no rows and
+ * no clock, the count asked with capacity 0, and the NULLs refused */
+TEST(CoreTest, ASessionWithNoRotationHasNoTimingRows)
+{
+    ecuio_session_t* session = nullptr;
+    ASSERT_EQ(ecuio_session_create("mock://a?profile=obd2", &session),
+              ECUIO_OK);
+    ASSERT_EQ(ecuio_session_start(session), ECUIO_OK);
+    std::this_thread::sleep_for(std::chrono::milliseconds(200));
+    ecuio_session_timing_t t{};
+    t.rows = 99;
+    ecuio_request_timing_t row{};
+    uint32_t count = 99;
+    EXPECT_EQ(ecuio_session_get_timing(session, &t, nullptr, 0, &count),
+              ECUIO_OK);
+    EXPECT_EQ(count, 0u);
+    EXPECT_EQ(t.rows, 0u);
+    EXPECT_EQ(t.interval_clock, ECUIO_TIMING_CLOCK_NONE);
+    EXPECT_EQ(t.flags, 0u);
+    EXPECT_EQ(ecuio_session_get_timing(session, &t, &row, 1, &count), ECUIO_OK);
+    EXPECT_EQ(ecuio_session_get_timing(nullptr, &t, &row, 1, &count),
+              ECUIO_ERR_NULL_ARGUMENT);
+    EXPECT_EQ(ecuio_session_get_timing(session, nullptr, &row, 1, &count),
+              ECUIO_ERR_NULL_ARGUMENT);
+    EXPECT_EQ(ecuio_session_get_timing(session, &t, &row, 1, nullptr),
+              ECUIO_ERR_NULL_ARGUMENT);
+    EXPECT_EQ(ecuio_session_get_timing(session, &t, nullptr, 1, &count),
+              ECUIO_ERR_NULL_ARGUMENT);
+    ecuio_session_close(session);
+    EXPECT_EQ(ecuio_session_get_timing(session, &t, nullptr, 0, &count),
+              ECUIO_OK)
+        << "readable after close";
+    ecuio_session_destroy(session);
+}
+
+/* ADR-0039 section 6: the test car answers PID 55 with bank 1's byte alone
+ * (docs/bench-sessions/2026-10-31-elm327-vehicle.md), so the bank 3
+ * field is absent once ECUIO_ABSENT_AFTER_FRAMES replies have ended
+ * before it, and leaves the list when a reply carries it. Bank 1 is
+ * never absent; a session with no values callback judges nothing; the
+ * list stays readable after close. */
+TEST(CoreTest, AFieldPastEveryReplyIsAbsent)
+{
+    const uint16_t b3 = ECUIO_OBD2_PID_SIG_ID(0x55, 1);
+    const ecuio_frame_t one =
+        value_frame(ECUIO_OBD2_ECU_ARB_ID, {0x41, 0x55, 0x80});
+    const ecuio_frame_t both =
+        value_frame(ECUIO_OBD2_ECU_ARB_ID, {0x41, 0x55, 0x80, 0x7F});
+    uint16_t ids[4] = {};
+    uint32_t count = 99;
+
+    ecuio_session_t* session = nullptr;
+    ASSERT_EQ(
+        ecuio_session_create("mock://a?profile=obd2&diagnose=0", &session),
+        ECUIO_OK);
+    ValuesCapture cap;
+    ASSERT_EQ(ecuio_register_values_callback(session, values_capture_cb, &cap),
+              ECUIO_OK);
+    for (uint32_t k = 1; k <= ECUIO_ABSENT_AFTER_FRAMES; ++k) {
+        ecuio_session_dispatch_callbacks(session, &one);
+        ASSERT_EQ(ecuio_session_get_absent_signals(session, ids, 4, &count),
+                  ECUIO_OK);
+        EXPECT_EQ(count, k < ECUIO_ABSENT_AFTER_FRAMES ? 0u : 1u)
+            << "after " << k << " short replies";
+    }
+    EXPECT_EQ(ids[0], b3);
+    EXPECT_EQ(ecuio_session_get_absent_signals(session, nullptr, 0, &count),
+              ECUIO_OK);
+    EXPECT_EQ(count, 1u) << "capacity 0 asks the count";
+    EXPECT_EQ(ecuio_session_get_absent_signals(session, nullptr, 1, &count),
+              ECUIO_ERR_NULL_ARGUMENT);
+
+    ecuio_session_close(session);
+    EXPECT_EQ(ecuio_session_get_absent_signals(session, ids, 4, &count),
+              ECUIO_OK);
+    EXPECT_EQ(count, 1u) << "readable after close";
+    ecuio_session_destroy(session);
+
+    ASSERT_EQ(
+        ecuio_session_create("mock://b?profile=obd2&diagnose=0", &session),
+        ECUIO_OK);
+    ASSERT_EQ(ecuio_register_values_callback(session, values_capture_cb, &cap),
+              ECUIO_OK);
+    for (uint32_t k = 0; k < ECUIO_ABSENT_AFTER_FRAMES; ++k) {
+        ecuio_session_dispatch_callbacks(session, &one);
+    }
+    ecuio_session_dispatch_callbacks(session, &both);
+    ASSERT_EQ(ecuio_session_get_absent_signals(session, ids, 4, &count),
+              ECUIO_OK);
+    EXPECT_EQ(count, 0u) << "a reply that carries it clears it";
+    ecuio_session_destroy(session);
+
+    ASSERT_EQ(
+        ecuio_session_create("mock://c?profile=obd2&diagnose=0", &session),
+        ECUIO_OK);
+    for (uint32_t k = 0; k < ECUIO_ABSENT_AFTER_FRAMES; ++k) {
+        ecuio_session_dispatch_callbacks(session, &one);
+    }
+    ASSERT_EQ(ecuio_session_get_absent_signals(session, ids, 4, &count),
+              ECUIO_OK);
+    EXPECT_EQ(count, 0u) << "no values callback, nothing decoded or judged";
+    ecuio_session_destroy(session);
+}
+
+/* ADR-0027 section 3: the VIN a vehicle is known by: 09 02's text, else
+ * F190's; letters and digits only, upper case, at 17 characters */
+TEST(CoreTest, TheVinIsService09sThenF190s)
+{
+    const auto item = [](std::initializer_list<uint8_t> request,
+                         uint8_t outcome, const std::string& text) {
+        ecuio_identity_item_t it{};
+        uint8_t k = 0;
+        for (uint8_t b : request) {
+            it.request[k++] = b;
+        }
+        it.length = k;
+        it.outcome = outcome;
+        it.text_length = static_cast<uint8_t>(text.size());
+        memcpy(it.text, text.data(), text.size());
+        return it;
+    };
+    const auto vin = [](const ecuio_channel_identity_t& id) {
+        char out[ECUIO_VIN_TEXT_LEN] = "x";
+        EXPECT_EQ(ecuio_identity_vin(&id, out, sizeof out), ECUIO_OK);
+        return std::string(out);
+    };
+    ecuio_channel_identity_t id{};
+    id.flags = ECUIO_IDENTITY_COMPLETE;
+    id.items = 2;
+    id.list[0] =
+        item({0x22, 0xF1, 0x90}, ECUIO_IDENTITY_ANSWERED, "f190vin0000000002");
+    id.list[1] = item({0x09, 0x02}, ECUIO_IDENTITY_ANSWERED,
+                      std::string(2, '\0') + " FAKEJ2534VIN00001");
+    EXPECT_EQ(vin(id), "FAKEJ2534VIN00001")
+        << "09 02 first, its padding dropped";
+
+    id.list[1].outcome = ECUIO_IDENTITY_REFUSED;
+    EXPECT_EQ(vin(id), "F190VIN0000000002")
+        << "F190 when 09 02 wasn't answered, in upper case";
+
+    id.list[0] =
+        item({0x22, 0xF1, 0x90}, ECUIO_IDENTITY_ANSWERED, "FAKEJ2534VIN0001");
+    EXPECT_EQ(vin(id), "") << "16 characters";
+    id.list[0] =
+        item({0x22, 0xF1, 0x90}, ECUIO_IDENTITY_ANSWERED, "FAKEJ2534VIN000012");
+    EXPECT_EQ(vin(id), "") << "18 characters";
+
+    id.list[0] =
+        item({0x09, 0x04}, ECUIO_IDENTITY_ANSWERED, "CALIBRATION00001X");
+    EXPECT_EQ(vin(id), "") << "a CALID of 17 isn't a VIN";
+
+    id.items = 1;
+    id.list[1] =
+        item({0x09, 0x02}, ECUIO_IDENTITY_ANSWERED, "FAKEJ2534VIN00001");
+    EXPECT_EQ(vin(id), "") << "past the count isn't read";
+
+    char small[ECUIO_VIN_TEXT_LEN - 1] = "x";
+    EXPECT_EQ(ecuio_identity_vin(&id, small, sizeof small),
+              ECUIO_ERR_INVALID_ARGUMENT);
+    EXPECT_EQ(small[0], 'x') << "untouched";
+    EXPECT_EQ(ecuio_identity_vin(nullptr, small, sizeof small),
+              ECUIO_ERR_NULL_ARGUMENT);
+    EXPECT_EQ(ecuio_identity_vin(&id, nullptr, ECUIO_VIN_TEXT_LEN),
+              ECUIO_ERR_NULL_ARGUMENT);
+}
+
+/* ecuio_session_get_unsupported_signals' contract: the mock's channel
+ * has learned nothing (generation 0), so none, before start and after
+ * close; NULLs refused as the absent signals' are. The judgment itself
+ * is PidSupportTest's (test_obd2), and a session's through a fake ECU
+ * Elm327SessionTest.TheSignalsOfAWithheldPidAreUnsupported */
+TEST(CoreTest, TheMockHasNoUnsupportedSignals)
+{
+    ecuio_session_t* session = nullptr;
+    ASSERT_EQ(
+        ecuio_session_create("mock://a?profile=obd2&diagnose=0", &session),
+        ECUIO_OK);
+    uint16_t ids[4] = {};
+    uint32_t count = 99;
+    ASSERT_EQ(ecuio_session_get_unsupported_signals(session, ids, 4, &count),
+              ECUIO_OK);
+    EXPECT_EQ(count, 0u);
+    EXPECT_EQ(
+        ecuio_session_get_unsupported_signals(session, nullptr, 0, &count),
+        ECUIO_OK);
+    EXPECT_EQ(
+        ecuio_session_get_unsupported_signals(session, nullptr, 1, &count),
+        ECUIO_ERR_NULL_ARGUMENT);
+    EXPECT_EQ(ecuio_session_get_unsupported_signals(session, ids, 4, nullptr),
+              ECUIO_ERR_NULL_ARGUMENT);
+    EXPECT_EQ(ecuio_session_get_unsupported_signals(nullptr, ids, 4, &count),
+              ECUIO_ERR_NULL_ARGUMENT);
+    ASSERT_EQ(ecuio_session_start(session), ECUIO_OK);
+    ecuio_session_close(session);
+    count = 99;
+    EXPECT_EQ(ecuio_session_get_unsupported_signals(session, ids, 4, &count),
+              ECUIO_OK);
+    EXPECT_EQ(count, 0u) << "readable after close";
+    ecuio_session_destroy(session);
+}
+
+namespace {
+
+/* The ids and values of a batch, in its order */
+std::vector<std::pair<uint16_t, double>> id_values(const SeenBatch& b)
+{
+    std::vector<std::pair<uint16_t, double>> out;
+    for (const SeenValue& v : b.values) {
+        out.push_back({v.id, v.value});
+    }
+    return out;
+}
+
+uint64_t unsplit(const ecuio_session_t* session)
+{
+    uint64_t n = 99;
+    EXPECT_EQ(ecuio_session_get_unsplit_replies(session, &n), ECUIO_OK);
+    return n;
+}
+
+} // namespace
+
+/* ADR-0039 Appendix A: a Service 01 reply carrying several PIDs decodes
+ * record by record, each def once, in the order the ECU sent them; one
+ * that won't split decodes its first record and is counted; a frame on
+ * an ID no Service 01 def listens on is never split */
+TEST(CoreTest, APackedReplyDecodesEachRecord)
+{
+    ecuio_session_t* session = nullptr;
+    ASSERT_EQ(
+        ecuio_session_create("mock://p?profile=obd2&diagnose=0", &session),
+        ECUIO_OK);
+    ValuesCapture cap;
+    ASSERT_EQ(ecuio_register_values_callback(session, values_capture_cb, &cap),
+              ECUIO_OK);
+    EXPECT_EQ(unsplit(session), 0u);
+
+    const ecuio_frame_t packed = value_frame(
+        ECUIO_OBD2_ECU_ARB_ID, {0x41, 0x0D, 0x32, 0x0C, 0x1A, 0xF8, 0x05, 0x5A});
+    ecuio_session_dispatch_callbacks(session, &packed);
+    ASSERT_EQ(cap.count(), 1u);
+    EXPECT_EQ(id_values(cap.batches[0]),
+              (std::vector<std::pair<uint16_t, double>>{
+                  {ECUIO_OBD2_SIG_SPEED_ID, 50.0},
+                  {ECUIO_OBD2_SIG_RPM_ID, 1726.0},
+                  {ECUIO_OBD2_SIG_COOLANT_TEMP_ID, 50.0}}));
+    EXPECT_EQ(cap.batches[0].arbitration_id, ECUIO_OBD2_ECU_ARB_ID);
+    EXPECT_EQ(unsplit(session), 0u);
+
+    const ecuio_frame_t stuck = value_frame(
+        ECUIO_OBD2_ECU_ARB_ID, {0x41, 0x0C, 0x1A, 0xF8, 0xB0, 0x01});
+    ecuio_session_dispatch_callbacks(session, &stuck);
+    ASSERT_EQ(cap.count(), 2u);
+    EXPECT_EQ(id_values(cap.batches[1]),
+              (std::vector<std::pair<uint16_t, double>>{
+                  {ECUIO_OBD2_SIG_RPM_ID, 1726.0}}))
+        << "its first record alone";
+    EXPECT_EQ(unsplit(session), 1u);
+
+    const ecuio_frame_t elsewhere =
+        value_frame(0x7E9, {0x41, 0x0D, 0x32, 0x0C, 0x1A, 0xF8});
+    ecuio_session_dispatch_callbacks(session, &elsewhere);
+    EXPECT_EQ(cap.count(), 2u) << "no def listens on 0x7E9";
+    EXPECT_EQ(unsplit(session), 1u);
+
+    ecuio_session_close(session);
+    EXPECT_EQ(unsplit(session), 1u) << "readable after close";
+    uint64_t n = 0;
+    EXPECT_EQ(ecuio_session_get_unsplit_replies(nullptr, &n),
+              ECUIO_ERR_NULL_ARGUMENT);
+    EXPECT_EQ(ecuio_session_get_unsplit_replies(session, nullptr),
+              ECUIO_ERR_NULL_ARGUMENT);
+    ecuio_session_destroy(session);
+}
+
+/* The test car's PID 55 carries bank 1's byte alone: its single replies
+ * teach that length, so a packed reply holding it splits, and bank 3's
+ * field, past every record, is still judged absent */
+TEST(CoreTest, APackedReplySplitsByTheLengthTheEcuSends)
+{
+    ecuio_session_t* session = nullptr;
+    ASSERT_EQ(
+        ecuio_session_create("mock://p?profile=obd2&diagnose=0", &session),
+        ECUIO_OK);
+    ValuesCapture cap;
+    ASSERT_EQ(ecuio_register_values_callback(session, values_capture_cb, &cap),
+              ECUIO_OK);
+    const ecuio_frame_t alone =
+        value_frame(ECUIO_OBD2_ECU_ARB_ID, {0x41, 0x55, 0x80});
+    const ecuio_frame_t packed = value_frame(
+        ECUIO_OBD2_ECU_ARB_ID, {0x41, 0x0C, 0x1A, 0xF8, 0x55, 0x80, 0x0D, 0x32});
+    ecuio_session_dispatch_callbacks(session, &alone);
+    for (uint32_t k = 0; k < ECUIO_ABSENT_AFTER_FRAMES; ++k) {
+        ecuio_session_dispatch_callbacks(session, &packed);
+    }
+    ASSERT_EQ(cap.count(), 1u + ECUIO_ABSENT_AFTER_FRAMES);
+    EXPECT_EQ(id_values(cap.batches.back()),
+              (std::vector<std::pair<uint16_t, double>>{
+                  {ECUIO_OBD2_SIG_RPM_ID, 1726.0},
+                  {ECUIO_OBD2_PID_SIG_ID(0x55, 0), 0.0},
+                  {ECUIO_OBD2_SIG_SPEED_ID, 50.0}}));
+    EXPECT_EQ(unsplit(session), 0u);
+    uint16_t ids[4] = {};
+    uint32_t count = 0;
+    ASSERT_EQ(ecuio_session_get_absent_signals(session, ids, 4, &count),
+              ECUIO_OK);
+    ASSERT_EQ(count, 1u);
+    EXPECT_EQ(ids[0], ECUIO_OBD2_PID_SIG_ID(0x55, 1));
+    ecuio_session_destroy(session);
+}
+
+/* A recording keeps a packed reply as the ECU sent it, so its replay
+ * decodes it the same way, the earlier single reply's length included */
+TEST(CoreTest, APackedReplyReplaysToItsRecords)
+{
+    TempRecording rec(std::string(kFramesHeader) +
+                      "10,1000000,0x7E8,0x0,41 55 80\n"
+                      "600,1000500,0x7E8,0x0,41 0C 1A F8 55 80 0D 32\n");
+    ecuio_session_t* session = nullptr;
+    ASSERT_EQ(ecuio_session_create(rec.uri("?profile=obd2&speed=max").c_str(),
+                                   &session),
+              ECUIO_OK);
+    ValuesCapture cap;
+    ASSERT_EQ(ecuio_register_values_callback(session, values_capture_cb, &cap),
+              ECUIO_OK);
+    ASSERT_EQ(ecuio_session_start(session), ECUIO_OK);
+    ASSERT_TRUE(wait_for([&] { return cap.count() >= 2; }, 2000));
+    ecuio_session_close(session);
+    std::lock_guard<std::mutex> lock(cap.mutex);
+    ASSERT_EQ(cap.batches.size(), 2u);
+    EXPECT_EQ(id_values(cap.batches[1]),
+              (std::vector<std::pair<uint16_t, double>>{
+                  {ECUIO_OBD2_SIG_RPM_ID, 1726.0},
+                  {ECUIO_OBD2_PID_SIG_ID(0x55, 0), 0.0},
+                  {ECUIO_OBD2_SIG_SPEED_ID, 50.0}}));
+    EXPECT_EQ(unsplit(session), 0u);
+    ecuio_session_destroy(session);
+}
+
 /* uds-generic's set holds a scanned range's DIDs from create, so a
- * reply for one decodes before the scan has found it (ADR-0024 Â§1) */
+ * reply for one decodes before the scan has found it (ADR-0024 section 1) */
 TEST(CoreTest, ValuesOfAScannedDidComeFromTheSetBuiltAtCreate)
 {
     ecuio_session_t* session = nullptr;
@@ -3712,4 +4580,60 @@ TEST(CoreTest, LinkPublishesOnlyTransitions)
     EXPECT_EQ(published.load(), -99) << "OK to OK is no transition";
     link_on_read(h, true, false, false);
     EXPECT_EQ(published.load(), ECUIO_ERR_TRANSPORT_HARD_FAILURE);
+}
+
+/* The decode's index (def_index.h) finds, for any frame, exactly the
+ * defs ecuio_def_applies_to_frame takes, in the set's order: sets that
+ * mix unkeyed defs and every key shape on a few IDs, keys shared
+ * between defs, against frames too short for a key, error reports and
+ * IDs no def listens on. The bytes come from a small alphabet so keys
+ * match often. */
+TEST(DefIndexTest, FindsExactlyTheDefsThatApplyInTheSetsOrder)
+{
+    std::mt19937 rng(20261031u);
+    const auto pick = [&rng](uint32_t n) {
+        return static_cast<uint32_t>(rng() % n);
+    };
+    const uint32_t ids[] = {0x100u, 0x7E8u, 0x7E9u};
+    const uint8_t alphabet[] = {0x00u, 0x01u, 0x41u, 0x0Cu};
+    uint64_t found_total = 0;
+    for (int round = 0; round < 200; ++round) {
+        std::vector<ecuio_signal_def_t> defs(1 + pick(40));
+        for (ecuio_signal_def_t& d : defs) {
+            d = ecuio_signal_def_t{};
+            d.message_id = ids[pick(3)];
+            d.mux_length = static_cast<uint8_t>(pick(4));
+            if (d.mux_length > 0) {
+                d.mux_offset = static_cast<uint8_t>(pick(3));
+                for (uint8_t b = 0; b < d.mux_length; ++b) {
+                    d.mux_key = (d.mux_key << 8) | alphabet[pick(4)];
+                }
+            }
+        }
+        ecuio_def_index index;
+        ecuio_def_index_build(index, defs.data(),
+                              static_cast<uint32_t>(defs.size()));
+        std::vector<uint32_t> found(defs.size());
+        for (int f = 0; f < 50; ++f) {
+            ecuio_frame_t frame{};
+            frame.arbitration_id = pick(8) == 0 ? 0x123u : ids[pick(3)];
+            frame.flags = pick(10) == 0 ? ECUIO_FRAME_FLAG_ERROR : 0u;
+            frame.data_length = static_cast<uint16_t>(pick(7));
+            for (uint16_t b = 0; b < frame.data_length; ++b) {
+                frame.data[b] = alphabet[pick(4)];
+            }
+            std::vector<uint32_t> want;
+            for (uint32_t i = 0; i < defs.size(); ++i) {
+                if (ecuio_def_applies_to_frame(&defs[i], &frame)) {
+                    want.push_back(i);
+                }
+            }
+            const uint32_t n = ecuio_def_index_find(index, frame, found.data());
+            ASSERT_EQ(std::vector<uint32_t>(found.begin(), found.begin() + n),
+                      want)
+                << "round " << round << ", frame " << f;
+            found_total += n;
+        }
+    }
+    EXPECT_GT(found_total, 2000u) << "the frames must match defs often";
 }

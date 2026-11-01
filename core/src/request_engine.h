@@ -3,15 +3,22 @@
 //             profile_registry.cpp (the request limit)
 // C++17, Qt-free, no platform headers.
 // Testing: UNIT: derivation, deduplication and the limit, the
-//     read-only rule, rotation per channel, correlation, the wait, the
-//     pending wait and the floor; the supported-PID walk, its budget,
+//     read-only rule, rotation per channel and its two rate classes
+//     (a duplicate pair judged at each walk's end),
+//     correlation, the wait, the pending wait and the floor; the
+//     supported-PID walk, its budget,
 //     a bitmap asked again once after another PID's answer, and
 //     its resumption (behind a one-shot already taken), and what each
 //     answer drops; the DID scan's turns, outcomes and rescan;
-//     identification's turns, outcomes, text and report
-//     (RequestEngineTest, test_obd2); the worker that drives it is
+//     identification's turns, outcomes, text and report; the
+//     diagnostics list's turns, its one-byte requests, the freeze
+//     frame's follow-ups and values, rescan and read again; a clear's
+//     gate (the report's generation, the engine speed) and its steps;
+//     packing several PIDs per request, its replies and its fallback
+//     (RequestEngineTest, DiagnosticsTest, ClearTest; test_obd2); the worker that drives it is
 //     HARNESS (J2534AdoptionTest, J2534HealthTest), its timing on a
 //     vehicle BENCH.
+//     reply timing (ADR-0042): RequestEngineTest.Timing*
 
 #ifndef ECUIO_REQUEST_ENGINE_H
 #define ECUIO_REQUEST_ENGINE_H
@@ -19,6 +26,10 @@
 #include "ecuio/core.h"
 #include "ecuio/profile.h"
 #include "ecuio/signals.h"
+#include "diagnostics.h"
+#include "obd2_reply.h"
+#include "pid_support.h"
+#include "request_timing.h"
 
 #include <stdint.h>
 
@@ -34,7 +45,15 @@
  * physical addressing expects, and walks its own rotation, so channels
  * progress independently.
  *
- * The probe (§4) runs on the same pacing. Each channel with Service 01
+ * Each channel's rotation runs two rate classes (ADR-0039 section 3): every
+ * request is fast or slow, and the channel sends
+ * ECUIO_ENGINE_FAST_PER_SLOW fast ones, then one slow one, each class in
+ * table order from its own cursor. A class with nothing to send gives
+ * its turn to the other, so a table of one class rotates in table order.
+ * Requests are fast until ecuio_engine_classify says otherwise; the
+ * driver classifies only the obd2 set's (obd2_rates.h).
+ *
+ * The probe (section 4) runs on the same pacing. Each channel with Service 01
  * requests first walks the supported-PID chain (01 00, then 01 20 while
  * each bitmap's last bit says the next exists, up to 01 E0), one request
  * at a time through the channel's one-shot slot, and its rotation starts
@@ -60,7 +79,29 @@
  * and the 0x22 identification DIDs, taking turns with the rotation like
  * the scan. A positive reply's data is kept as text, a negative one as
  * its code, a timeout as unanswered, asked again on ecuio_engine_rescan.
- * Nothing it learns enters the rotation. */
+ * Nothing it learns enters the rotation.
+ *
+ * Diagnostics (ADR-0037) runs on the same slot, after identification
+ * and ahead of the scan: when the driver asks for it
+ * (ecuio_engine_diagnose), every channel asks readiness (01 01), the
+ * stored, pending and permanent codes (03, 07, 0A: one byte, no key) and
+ * the freeze frame's PIDs (02 00 00); the freeze frame's code and values
+ * follow as its answers say one is stored. The answers go into a report
+ * per channel (diagnostics.h); ecuio_engine_diagnose_again asks it all
+ * again.
+ *
+ * Packing (ADR-0039 Appendix A), when the driver turns it on with the
+ * probe: a rotation request whose turn comes carries with it the next
+ * requests of its class, up to ECUIO_ENGINE_PACK_MAX PIDs in one
+ * request (01 p1 ... p6), each a Service 01 PID the bitmaps list, not a
+ * bitmap, and one whose own reply has shown its length (no longer than
+ * J1979's, so core's decode splits the packed reply the same way,
+ * obd2_reply.h). Until a PID has answered alone it goes alone, so the
+ * first lap after the walk is unpacked. A positive reply whose first
+ * record's PID is one of the pack's answers it; a PID it leaves out has
+ * no value that pass and isn't dropped. A pack answered with silence, a
+ * negative reply or one record ECUIO_ENGINE_PACK_FAILURES times in a row
+ * puts the channel back to one PID per request for the session. */
 
 /* Timing (ADR-0015, appendix of 2026-10-23). The wait is the server's
  * response time P2 (50 ms) plus 50 ms for the adapter: the longest reply
@@ -83,9 +124,21 @@ constexpr uint8_t ECUIO_NRC_SECURITY_ACCESS_DENIED = 0x33;
 constexpr uint8_t ECUIO_NRC_RESPONSE_PENDING = 0x78;
 constexpr uint8_t ECUIO_NRC_NOT_IN_ACTIVE_SESSION = 0x7F;
 
+/* Fast requests a channel sends for each slow one (ADR-0039 section 3). */
+constexpr uint32_t ECUIO_ENGINE_FAST_PER_SLOW = 2;
+
 /* ecuio_engine_due's answers besides a table index. */
 constexpr int32_t ECUIO_ENGINE_NONE = -1;   /* nothing to send */
 constexpr int32_t ECUIO_ENGINE_ONCE = -2;   /* the channel's one-shot */
+constexpr int32_t ECUIO_ENGINE_PACK = -3;   /* the channel's packed request */
+
+/* Packing (ADR-0039 Appendix A): J1979's most PIDs in one request; the
+ * failed packs in a row that end packing on a channel; a PID's length
+ * when its own reply was longer than J1979's, which the split can't
+ * tell from a packed reply, so it's never packed. */
+constexpr uint32_t ECUIO_ENGINE_PACK_MAX = 6;
+constexpr uint32_t ECUIO_ENGINE_PACK_FAILURES = 3;
+constexpr uint8_t ECUIO_ENGINE_PID_LONG = 0xFF;
 
 /* A bitmap reply: 41 <PID> and four bytes, one bit per PID. */
 constexpr uint8_t ECUIO_BITMAP_REPLY_LEN = 6;
@@ -137,12 +190,45 @@ static_assert(ECUIO_IDENT_COUNT <= ECUIO_IDENTITY_MAX_ITEMS,
  * the item count, or after 62 <DID high> <DID low>. */
 constexpr uint16_t ECUIO_IDENT_DATA_OFFSET = 3;
 
+/* What diagnostics asks first, in this order (ADR-0037 section 2); the freeze
+ * frame's code (02 02 00) and values (02 <pid> 00) join the list as the
+ * answers call for them. */
+constexpr uint8_t ECUIO_DIAG_FIRST[][4] = {
+    /* the request, then its length */
+    {0x01, 0x01, 0x00, 2}, {0x03, 0x00, 0x00, 1}, {0x07, 0x00, 0x00, 1},
+    {0x0A, 0x00, 0x00, 1}, {0x02, 0x00, 0x00, 3},
+};
+constexpr uint32_t ECUIO_DIAG_FIRST_COUNT =
+    sizeof(ECUIO_DIAG_FIRST) / sizeof(ECUIO_DIAG_FIRST[0]);
+
+/* The first items, the freeze frame's code, and a value request per
+ * freeze-frame value at most */
+constexpr uint32_t ECUIO_DIAG_MAX_ITEMS =
+    ECUIO_DIAG_FIRST_COUNT + 1 + ECUIO_DIAG_MAX_FREEZE;
+
+/* A channel's clear: what its one-shot asks next */
+constexpr uint8_t ECUIO_CLEAR_STEP_NONE = 0;
+constexpr uint8_t ECUIO_CLEAR_STEP_SPEED = 1; /* 01 0C */
+constexpr uint8_t ECUIO_CLEAR_STEP_CLEAR = 2; /* 04, the engine seen stopped */
+
+struct ecuio_diag_item {
+    uint8_t request[3];
+    uint8_t len;     /* 1 to 3 */
+    uint8_t outcome; /* ECUIO_DIAG_UNASKED .. _UNANSWERED */
+    uint8_t nrc;
+};
+
 struct ecuio_request {
-    uint8_t bytes[3];   /* the service ID, then the key */
-    uint8_t len;        /* 2 or 3 */
+    uint8_t bytes[1 + ECUIO_ENGINE_PACK_MAX]; /* the service ID, then the
+                                               * key; a pack's PIDs */
+    uint8_t len;        /* 2 or 3 in the rotation; a one-shot's 1 to 3; a
+                           pack's 3 to 7 */
     uint8_t channel;
     uint8_t dropped;    /* 0 in the rotation, else why not (ECUIO_DROP_*) */
     uint8_t nrc;        /* the negative reply's code that dropped it */
+    uint8_t slow;       /* 1: the slow class, else fast (ADR-0039 section 3) */
+    uint8_t reply_len;  /* a pack's reply, its records' lengths added; 0
+                           for every other request */
 };
 
 struct ecuio_scan_entry {
@@ -157,8 +243,12 @@ struct ecuio_engine_channel {
     int32_t outstanding = ECUIO_ENGINE_NONE;   /* a table index, the
                                                 * one-shot, or none */
     int64_t deadline_us = 0;    /* when that request's wait ends */
+    int64_t sent_us = 0;        /* when it went out (ADR-0042) */
     int64_t next_send_us = 0;   /* the floor: no request before this */
-    uint32_t cursor = 0;        /* where the rotation resumes */
+    uint32_t cursor = 0;        /* where the fast class resumes */
+    uint32_t slow_cursor = 0;   /* where the slow class resumes */
+    uint32_t fast_run = 0;      /* fast requests since the last slow one,
+                                 * at most ECUIO_ENGINE_FAST_PER_SLOW */
     uint32_t requests = 0;      /* this channel's requests in the rotation */
     bool in_step = true;        /* no request has timed out since the last
                                  * positive reply: see ecuio_engine_on_frame */
@@ -195,6 +285,28 @@ struct ecuio_engine_channel {
     bool identifying = false;   /* the one-shot is an item */
     uint32_t ident_index = 0;   /* the item out, while identifying */
     uint32_t ident_generation = 0;   /* bumped as each item settles */
+    /* Diagnostics: the one-shot carries an item while diagnosing. */
+    ecuio_diag_item diag_items[ECUIO_DIAG_MAX_ITEMS] = {};
+    uint32_t diag_count = 0;     /* items listed; 0 = not diagnosing */
+    uint32_t diag_pending = 0;   /* unasked items */
+    bool diagnosing = false;     /* the one-shot is an item */
+    uint32_t diag_index = 0;     /* the item out, while diagnosing */
+    uint8_t freeze_bits[4] = {}; /* 02 00 00's answer: PIDs 01 to 20 */
+    ecuio_channel_diagnostics_t diag = {}; /* the report, but rx_id */
+    /* Clearing (ADR-0038): the one-shot carries the clear's request
+     * while clearing; clear_step is what it asks next. */
+    uint8_t clear_step = ECUIO_CLEAR_STEP_NONE;
+    bool clearing = false; /* the one-shot is the clear's request */
+    /* Packing (ADR-0039 Appendix A): each PID's data length as its own
+     * reply showed it (0 not yet, ECUIO_ENGINE_PID_LONG longer than
+     * J1979's); the pack out or last sent, and its requests' rows. */
+    uint8_t pid_len[256] = {};
+    ecuio_request pack = {};
+    uint32_t pack_rows[ECUIO_ENGINE_PACK_MAX] = {};
+    uint32_t pack_count = 0;
+    uint32_t pack_failures = 0; /* failed packs in a row */
+    bool packed = false;        /* a pack was answered with several records */
+    bool unpacked = false;      /* packing ended for the session */
 };
 
 struct ecuio_request_engine {
@@ -202,11 +314,46 @@ struct ecuio_request_engine {
     uint32_t count = 0;
     ecuio_engine_channel chans[ECUIO_MAX_CHANNELS] = {};
     uint32_t chan_count = 0;
-    bool probe = false;         /* §4 on: walks run, explicit answers drop */
+    bool probe = false;         /* section 4 on: walks run, explicit answers drop */
     int64_t walk_until_us = 0;  /* the walk's budget ends */
     ecuio_scan_entry scan[ECUIO_ENGINE_SCAN_MAX] = {};
     uint32_t scan_count = 0;
+    /* The obd2 set, whose defs decode the freeze frame (ADR-0037 section 4);
+     * set by ecuio_engine_diagnose */
+    const ecuio_signal_set_t* diag_set = nullptr;
+    /* ADR-0039 section 3: PID pairs (keep, demote), two bytes each, that can
+     * read one sensor; set by ecuio_engine_set_duplicates */
+    const uint8_t* duplicates = nullptr;
+    uint32_t duplicate_count = 0;
+    bool pack = false;          /* several PIDs per request (the driver's) */
+    /* Reply timing (ADR-0042): the driver's, NULL for none. Before each
+     * frame it hands over, a driver whose frames carry stamps of their
+     * own sets stamp_us (session time on the frames' clock) and
+     * stamp_breaks (how often that clock has taken the host's delta);
+     * otherwise the intervals are on the host's clock, from now_us. */
+    ecuio_timing_table* timing = nullptr;
+    bool stamp_set = false;
+    int64_t stamp_us = 0;
+    uint32_t stamp_breaks = 0;
 };
+
+/* A rotation request's answer or refusal, for reply timing */
+inline void ecuio_engine_time_reply(ecuio_request_engine* e, uint32_t c,
+                                    uint32_t row, bool positive, bool packed,
+                                    int64_t now_us)
+{
+    if (e->timing == nullptr || row >= ECUIO_PROFILE_MAX_REQUESTS) {
+        return;
+    }
+    timing_row& r = e->timing->rows[row];
+    const int64_t latency = now_us - e->chans[c].sent_us;
+    if (positive) {
+        timing_answered(r, latency, e->stamp_set ? e->stamp_us : now_us,
+                        e->stamp_breaks, packed);
+    } else {
+        timing_refused(r, latency, packed);
+    }
+}
 
 /* How a frame on a channel relates to its outstanding request. */
 enum class ecuio_reply {
@@ -218,17 +365,49 @@ enum class ecuio_reply {
 
 enum class ecuio_engine_add_result { added, duplicate, refused, full };
 
-/* §3: the services a request may carry. 0x01 (current data), 0x09
- * (vehicle information) and 0x22 (ReadDataByIdentifier); nothing that
- * changes a session, unlocks or writes. Every request enters the table
- * through ecuio_engine_add, which refuses the rest, so the rule holds
- * whatever path enrols a request. */
-inline bool ecuio_engine_service_allowed(uint8_t sid)
+/* Section 3: the services a request may carry. 0x01 (current data), 0x02 (the
+ * freeze frame), 0x03, 0x07 and 0x0A (stored, pending and permanent
+ * trouble codes; ADR-0037), 0x09 (vehicle information) and 0x22
+ * (ReadDataByIdentifier); nothing that clears codes, changes a session,
+ * unlocks or writes. Every request enters the table through
+ * ecuio_engine_add, which refuses the rest, and the one-shot lists are
+ * checked against it below, so the rule holds whatever path enrols a
+ * request. */
+constexpr bool ecuio_engine_service_allowed(uint8_t sid)
 {
-    return sid == 0x01 || sid == 0x09 || sid == 0x22;
+    return sid == 0x01 || sid == 0x02 || sid == 0x03 || sid == 0x07 ||
+           sid == 0x09 || sid == 0x0A || sid == 0x22;
 }
 
-/* §4: what a negative reply's code says of its request, as
+constexpr bool ecuio_engine_lists_allowed()
+{
+    for (const ecuio_ident_request& q : ECUIO_IDENT_REQUESTS) {
+        if (!ecuio_engine_service_allowed(q.bytes[0])) {
+            return false;
+        }
+    }
+    for (const auto& q : ECUIO_DIAG_FIRST) {
+        if (!ecuio_engine_service_allowed(q[0])) {
+            return false;
+        }
+    }
+    return ecuio_engine_service_allowed(0x02) &&
+           !ecuio_engine_service_allowed(0x04);
+}
+static_assert(ecuio_engine_lists_allowed(),
+              "every one-shot list asks only what §3 allows, and never 04");
+
+/* A clear (ADR-0038) asks the engine speed, then, only at 0 rpm, sends
+ * 04. These are the two requests it builds and nothing else does: 04
+ * never enters the table or a list, and the table refuses it. */
+constexpr uint8_t ECUIO_CLEAR_SPEED_REQUEST[2] = {0x01, 0x0C};
+constexpr uint8_t ECUIO_CLEAR_SERVICE = 0x04;
+static_assert(ecuio_engine_service_allowed(ECUIO_CLEAR_SPEED_REQUEST[0]) &&
+                  !ecuio_engine_service_allowed(ECUIO_CLEAR_SERVICE),
+              "a clear reads the engine speed, then sends 04, which nothing "
+              "else may");
+
+/* Section 4: what a negative reply's code says of its request, as
  * ECUIO_DROP_*: NOT_SUPPORTED for 0x12 (the first vehicle's answer to an
  * unsupported PID) and 0x31; SERVICE for 0x11; ACCESS for 0x33 and 0x7F,
  * since the engine never unlocks or changes the session; 0 for any code
@@ -249,7 +428,7 @@ inline uint8_t ecuio_engine_drop_reason(uint8_t nrc)
     }
 }
 
-/* §2: the request whose positive reply carries a def's value. The def's
+/* Section 2: the request whose positive reply carries a def's value. The def's
  * mux key sits at payload offset 0 and opens that reply: a 2-byte
  * 41 <PID> asks for 01 <PID>, a 3-byte 62 <DID> for 22 <DID>. Any other
  * key requests nothing, though it still decodes; Service 09 values are
@@ -290,7 +469,7 @@ inline void ecuio_engine_init(ecuio_request_engine* e, uint32_t chan_count)
 
 /* Adds a request to channel's rotation, after the ones already there.
  * The same request on the same channel is kept once. Refused: a service
- * §3 doesn't allow, a length other than 2 or 3, a channel past the
+ * section 3 doesn't allow, a length other than 2 or 3, a channel past the
  * table. */
 inline ecuio_engine_add_result ecuio_engine_add(ecuio_request_engine* e,
                                                 uint32_t channel,
@@ -337,7 +516,7 @@ inline uint32_t ecuio_engine_channel_for(const ecuio_signal_def_t* d,
     return 0;
 }
 
-/* §2: enrols every request a set's defs derive, in def order, one per
+/* Section 2: enrols every request a set's defs derive, in def order, one per
  * distinct request and channel, so several defs read from one reply
  * cost one request. rx_ids holds each channel's receive ID. True when
  * every request fit; otherwise the table holds the first
@@ -370,11 +549,122 @@ inline bool ecuio_engine_derive(ecuio_request_engine* e,
     return true;
 }
 
-/* The request r names on channel c: a table index, or the one-shot. */
+/* ADR-0039 section 3: puts every Service 01 request whose PID fast() turns
+ * down in the slow class. Other services, and a table never classified,
+ * stay fast. */
+inline void ecuio_engine_classify(ecuio_request_engine* e,
+                                  bool (*fast)(uint8_t pid))
+{
+    for (uint32_t i = 0; i < e->count; ++i) {
+        ecuio_request& r = e->requests[i];
+        r.slow =
+            (r.len == 2 && r.bytes[0] == 0x01 && !fast(r.bytes[1])) ? 1 : 0;
+    }
+}
+
+/* ADR-0039 section 3: pairs of fast PIDs that can read one sensor, count pairs
+ * of (keep, demote) bytes, which must outlive the engine. Each walk's end
+ * judges them on its channel (ecuio_engine_judge_duplicates). */
+inline void ecuio_engine_set_duplicates(ecuio_request_engine* e,
+                                        const uint8_t* pairs, uint32_t count)
+{
+    e->duplicates = pairs;
+    e->duplicate_count = count;
+}
+
+/* Channel c's next request of one class, from that class's cursor, or
+ * ECUIO_ENGINE_NONE when the class has none in the rotation. */
+inline int32_t ecuio_engine_next_of(ecuio_request_engine* e, uint32_t c,
+                                    bool slow)
+{
+    ecuio_engine_channel& ch = e->chans[c];
+    uint32_t& cursor = slow ? ch.slow_cursor : ch.cursor;
+    for (uint32_t k = 0; k < e->count; ++k) {
+        const uint32_t i = (cursor + k) % e->count;
+        const ecuio_request& r = e->requests[i];
+        if (r.channel == c && r.dropped == 0 && (r.slow != 0) == slow) {
+            cursor = (i + 1) % e->count;
+            return static_cast<int32_t>(i);
+        }
+    }
+    return ECUIO_ENGINE_NONE;
+}
+
+/* The request r names on channel c: a table index, the one-shot or the
+ * pack. */
 inline const ecuio_request& ecuio_engine_request_of(
     const ecuio_request_engine* e, uint32_t c, int32_t r)
 {
-    return (r == ECUIO_ENGINE_ONCE) ? e->chans[c].once : e->requests[r];
+    return (r == ECUIO_ENGINE_ONCE)   ? e->chans[c].once
+           : (r == ECUIO_ENGINE_PACK) ? e->chans[c].pack
+                                      : e->requests[r];
+}
+
+/* Whether request i of channel c may go in a pack: packing on and not
+ * ended, the walk over, a Service 01 PID the bitmaps list that isn't a
+ * bitmap, whose own reply showed a length the split will use. */
+inline bool ecuio_engine_packable(const ecuio_request_engine* e, uint32_t c,
+                                  uint32_t i)
+{
+    const ecuio_engine_channel& ch = e->chans[c];
+    const ecuio_request& r = e->requests[i];
+    if (!e->pack || ch.unpacked || ch.walking || r.channel != c ||
+        r.dropped != 0 || r.len != 2 || r.bytes[0] != 0x01) {
+        return false;
+    }
+    const uint8_t pid = r.bytes[1];
+    return pid % 0x20u != 0 && (ch.supported[(pid - 1u) / 8u] &
+                                (0x80u >> ((pid - 1u) % 8u))) != 0 &&
+           ch.pid_len[pid] != 0 && ch.pid_len[pid] != ECUIO_ENGINE_PID_LONG;
+}
+
+/* Request i, due on channel c, alone or as the first of a pack: the
+ * next requests of its class from that class's cursor join it while
+ * each may (ecuio_engine_packable), up to ECUIO_ENGINE_PACK_MAX; the
+ * first that may not stops the pack and goes next, alone. Returns i, or
+ * ECUIO_ENGINE_PACK with the pack in ch.pack, its cursor past the last
+ * request it took. */
+inline int32_t ecuio_engine_gather(ecuio_request_engine* e, uint32_t c,
+                                   int32_t i)
+{
+    ecuio_engine_channel& ch = e->chans[c];
+    if (!ecuio_engine_packable(e, c, static_cast<uint32_t>(i))) {
+        return i;
+    }
+    const bool slow = e->requests[i].slow != 0;
+    uint32_t& cursor = slow ? ch.slow_cursor : ch.cursor;
+    ch.pack_rows[0] = static_cast<uint32_t>(i);
+    ch.pack_count = 1;
+    for (uint32_t k = 0; k < e->count && ch.pack_count < ECUIO_ENGINE_PACK_MAX;
+         ++k) {
+        const uint32_t j = (cursor + k) % e->count;
+        const ecuio_request& r = e->requests[j];
+        if (r.channel != c || r.dropped != 0 || (r.slow != 0) != slow) {
+            continue;
+        }
+        if (j == static_cast<uint32_t>(i) || !ecuio_engine_packable(e, c, j)) {
+            break;
+        }
+        ch.pack_rows[ch.pack_count++] = j;
+        cursor = (j + 1) % e->count;
+        k = static_cast<uint32_t>(-1); /* the cursor moved: look from it */
+    }
+    if (ch.pack_count < 2) {
+        return i;
+    }
+    ch.pack = ecuio_request{};
+    ch.pack.bytes[0] = 0x01;
+    uint32_t reply = 1;
+    for (uint32_t k = 0; k < ch.pack_count; ++k) {
+        const uint8_t pid = e->requests[ch.pack_rows[k]].bytes[1];
+        ch.pack.bytes[1 + k] = pid;
+        reply += 1u + ch.pid_len[pid];
+    }
+    ch.pack.len = static_cast<uint8_t>(1 + ch.pack_count);
+    ch.pack.channel = static_cast<uint8_t>(c);
+    ch.pack.slow = slow ? 1 : 0;
+    ch.pack.reply_len = static_cast<uint8_t>(reply);
+    return ECUIO_ENGINE_PACK;
 }
 
 /* Adds did to channel's scan (ADR-0020): asked once, 22 <DID>, outside
@@ -440,9 +730,10 @@ inline void ecuio_engine_scan_settle(ecuio_request_engine* e, uint32_t c,
     ++ch.generation;
 }
 
-/* Asks every unanswered scan entry and identification item again: the
- * driver's call when the link returns to ok, as the walk resumes.
- * Silence wasn't an answer. */
+/* Asks every unanswered scan entry, identification item and diagnostics
+ * item again: the driver's call when the link returns to ok, as the walk
+ * resumes. Silence wasn't an answer. A channel mid-clear keeps its
+ * report as the caller saved it until the clear ends. */
 inline void ecuio_engine_rescan(ecuio_request_engine* e)
 {
     for (uint32_t i = 0; i < e->scan_count; ++i) {
@@ -458,6 +749,14 @@ inline void ecuio_engine_rescan(ecuio_request_engine* e)
             if (ch.ident[i].outcome == ECUIO_IDENTITY_UNANSWERED) {
                 ch.ident[i].outcome = ECUIO_IDENTITY_UNASKED;
                 ++ch.ident_pending;
+            }
+        }
+        for (uint32_t i = 0;
+             i < ch.diag_count && ch.clear_step == ECUIO_CLEAR_STEP_NONE; ++i) {
+            if (ch.diag_items[i].outcome == ECUIO_DIAG_UNANSWERED) {
+                ch.diag_items[i].outcome = ECUIO_DIAG_UNASKED;
+                ++ch.diag_pending;
+                ch.diag.flags &= ~ECUIO_DIAG_COMPLETE;
             }
         }
     }
@@ -609,9 +908,343 @@ inline bool ecuio_engine_pid_bit(const uint8_t* bits, uint8_t pid)
     return (bits[(pid - 1) / 8] & (0x80u >> ((pid - 1) % 8))) != 0;
 }
 
+/* Lists one more diagnostics item on channel ch, unasked; false when
+ * the list is full. */
+inline bool ecuio_engine_diag_push(ecuio_engine_channel& ch, uint8_t b0,
+                                   uint8_t b1, uint8_t b2, uint8_t len)
+{
+    if (ch.diag_count >= ECUIO_DIAG_MAX_ITEMS) {
+        return false;
+    }
+    ecuio_diag_item& it = ch.diag_items[ch.diag_count++];
+    it = ecuio_diag_item{};
+    it.request[0] = b0;
+    it.request[1] = b1;
+    it.request[2] = b2;
+    it.len = len;
+    ++ch.diag_pending;
+    ch.diag.flags &= ~ECUIO_DIAG_COMPLETE;
+    return true;
+}
+
+/* The diag_set's first def that reads Service 01 PID pid, or nullptr */
+inline const ecuio_signal_def_t*
+ecuio_engine_diag_def(const ecuio_request_engine* e, uint8_t pid,
+                      uint32_t from = 0)
+{
+    const ecuio_signal_set_t* set = e->diag_set;
+    if (set == nullptr || set->defs == nullptr) {
+        return nullptr;
+    }
+    for (uint32_t i = from; i < set->count; ++i) {
+        const ecuio_signal_def_t& d = set->defs[i];
+        if (d.mux_offset == 0 && d.mux_length == 2 &&
+            d.mux_key == (0x4100u | pid)) {
+            return &d;
+        }
+    }
+    return nullptr;
+}
+
+/* The freeze frame's values, once one is stored: 02 <pid> 00 for each
+ * PID its bitmap lists that the diag_set decodes, up to the values the
+ * report holds */
+inline void ecuio_engine_diag_push_values(const ecuio_request_engine* e,
+                                          ecuio_engine_channel& ch)
+{
+    uint32_t asked = 0;
+    for (uint8_t pid = 0x03; pid < 0x20 && asked < ECUIO_DIAG_MAX_FREEZE;
+         ++pid) {
+        if (ecuio_engine_pid_bit(ch.freeze_bits, pid) &&
+            ecuio_engine_diag_def(e, pid) != nullptr &&
+            ecuio_engine_diag_push(ch, 0x02, pid, 0x00, 3)) {
+            ++asked;
+        }
+    }
+}
+
+/* A freeze-frame value's reply, 42 <pid> 00 <data>, read as the Service
+ * 01 reply 41 <pid> <data> it mirrors, through each diag_set def of the
+ * PID (ADR-0037 section 4) */
+inline void ecuio_engine_diag_take_value(const ecuio_request_engine* e,
+                                         ecuio_channel_diagnostics_t& d,
+                                         const uint8_t* data, uint16_t len)
+{
+    uint8_t payload[16] = {0x41, data[1]};
+    uint16_t n = 2;
+    for (uint16_t i = 3; i < len && n < sizeof(payload); ++i) {
+        payload[n++] = data[i];
+    }
+    for (const ecuio_signal_def_t* def = ecuio_engine_diag_def(e, data[1]);
+         def != nullptr && d.freeze_count < ECUIO_DIAG_MAX_FREEZE;
+         def = ecuio_engine_diag_def(
+             e, data[1], static_cast<uint32_t>(def - e->diag_set->defs) + 1)) {
+        double v = 0;
+        if (ecuio_decode_signal(def, payload, n, &v) == 0) {
+            ecuio_freeze_value_t& f = d.freeze_values[d.freeze_count++];
+            f = ecuio_freeze_value_t{};
+            f.def_id = def->id;
+            f.value = v;
+        }
+    }
+}
+
+/* Settles the item channel c has out: answered, with the reply (the
+ * whole frame), refused with its code, or unanswered; the report takes
+ * what it says, and the freeze frame's answers list what comes next */
+inline void ecuio_engine_diag_settle(ecuio_request_engine* e, uint32_t c,
+                                     uint8_t outcome, uint8_t nrc,
+                                     const uint8_t* data, uint16_t len)
+{
+    ecuio_engine_channel& ch = e->chans[c];
+    ecuio_diag_item& it = ch.diag_items[ch.diag_index];
+    ecuio_channel_diagnostics_t& d = ch.diag;
+    ch.diagnosing = false;
+    it.outcome = outcome;
+    it.nrc = nrc;
+    if (ch.diag_pending > 0) {
+        --ch.diag_pending;
+    }
+    const bool answered = outcome == ECUIO_DIAG_ANSWERED;
+    switch (it.request[0]) {
+    case 0x01:
+        d.readiness = outcome;
+        d.readiness_nrc = nrc;
+        if (answered && len >= 6) {
+            ecuio_diag_take_readiness(data + 2, &d);
+        }
+        break;
+    case 0x03:
+    case 0x07:
+    case 0x0A: {
+        ecuio_dtc_list_t& l =
+            d.lists[it.request[0] == 0x03   ? ECUIO_DIAG_STORED
+                    : it.request[0] == 0x07 ? ECUIO_DIAG_PENDING
+                                            : ECUIO_DIAG_PERMANENT];
+        l.outcome = outcome;
+        l.nrc = nrc;
+        if (answered) {
+            ecuio_diag_take_codes(data, len, &l);
+        }
+        break;
+    }
+    case 0x02:
+        if (it.request[1] == 0x00) {
+            /* The freeze frame's PIDs: its code next, if listed, else
+             * straight to its values */
+            d.freeze = outcome;
+            d.freeze_nrc = nrc;
+            if (answered && len >= 7) {
+                for (uint32_t b = 0; b < 4; ++b) {
+                    ch.freeze_bits[b] = data[3 + b];
+                }
+                if (ecuio_engine_pid_bit(ch.freeze_bits, 0x02)) {
+                    ecuio_engine_diag_push(ch, 0x02, 0x02, 0x00, 3);
+                } else {
+                    ecuio_engine_diag_push_values(e, ch);
+                }
+            }
+        } else if (it.request[1] == 0x02) {
+            /* 00 00: no freeze frame is stored, so no values to ask */
+            if (answered && len >= 5) {
+                d.freeze_dtc = static_cast<uint16_t>((data[3] << 8) | data[4]);
+                if (d.freeze_dtc != 0) {
+                    d.flags |= ECUIO_DIAG_FREEZE_FRAME;
+                    ecuio_engine_diag_push_values(e, ch);
+                }
+            }
+        } else if (answered && len >= 3) {
+            ecuio_engine_diag_take_value(e, d, data, len);
+        }
+        break;
+    default:
+        break;
+    }
+    if (ch.diag_pending == 0) {
+        d.flags |= ECUIO_DIAG_COMPLETE;
+    }
+    ++d.generation;
+}
+
+/* Lists the first items on a channel holding none, and marks its
+ * report asked */
+inline void ecuio_engine_diag_list(ecuio_engine_channel& ch)
+{
+    ch.diag.flags |= ECUIO_DIAG_ASKED;
+    for (const auto& q : ECUIO_DIAG_FIRST) {
+        ecuio_engine_diag_push(ch, q[0], q[1], q[2], q[3]);
+    }
+}
+
+/* Diagnostics (ADR-0037): gives every channel the list to ask, through
+ * the one-shot slot after identification and ahead of the scan; set
+ * decodes the freeze frame (the obd2 set). Idempotent: a channel
+ * already holding the list keeps its answers. */
+inline void ecuio_engine_diagnose(ecuio_request_engine* e,
+                                  const ecuio_signal_set_t* set)
+{
+    e->diag_set = set;
+    for (uint32_t c = 0; c < e->chan_count; ++c) {
+        if (e->chans[c].diag_count == 0) {
+            ecuio_engine_diag_list(e->chans[c]);
+        }
+    }
+}
+
+/* Starts channel ch's read over: its report empty but for the last
+ * clear's outcome, its generation moved on */
+inline void ecuio_engine_diag_restart(ecuio_engine_channel& ch)
+{
+    const uint32_t generation = ch.diag.generation;
+    const uint8_t clear = ch.diag.clear;
+    const uint8_t clear_nrc = ch.diag.clear_nrc;
+    const uint32_t clear_rpm = ch.diag.clear_rpm;
+    ch.diag = ecuio_channel_diagnostics_t{};
+    ch.diag.generation = generation + 1;
+    ch.diag.clear = clear;
+    ch.diag.clear_nrc = clear_nrc;
+    ch.diag.clear_rpm = clear_rpm;
+    for (uint8_t& b : ch.freeze_bits) {
+        b = 0;
+    }
+    ch.diag_count = 0;
+    ch.diag_pending = 0;
+    ecuio_engine_diag_list(ch);
+}
+
+/* Asks the whole list again on every channel whose last read has
+ * settled ("Read again"): its report starts over, its generation moves
+ * on. A channel mid-read, mid-clear, or never asked, is left as it is. */
+inline void ecuio_engine_diagnose_again(ecuio_request_engine* e)
+{
+    for (uint32_t c = 0; c < e->chan_count; ++c) {
+        ecuio_engine_channel& ch = e->chans[c];
+        if (ch.diag_count == 0 || ch.diagnosing || ch.diag_pending > 0 ||
+            ch.clear_step != ECUIO_CLEAR_STEP_NONE) {
+            continue;
+        }
+        ecuio_engine_diag_restart(ch);
+    }
+}
+
+/* Clears channel c's trouble codes (ADR-0038) when its report is the
+ * one the caller saved: read to the end, at generation, with no clear
+ * running. The clear then asks the engine speed through the one-shot,
+ * and sends 04 only at 0 rpm. Any other report records
+ * ECUIO_CLEAR_REPORT_CHANGED and sends nothing. False then, and for a
+ * channel past the count, one that reads no diagnostics, or one already
+ * clearing (which carries on). */
+inline bool ecuio_engine_clear(ecuio_request_engine* e, uint32_t c,
+                               uint32_t generation)
+{
+    if (c >= e->chan_count) {
+        return false;
+    }
+    ecuio_engine_channel& ch = e->chans[c];
+    ecuio_channel_diagnostics_t& d = ch.diag;
+    if (ch.diag_count == 0 || ch.clear_step != ECUIO_CLEAR_STEP_NONE) {
+        return false;
+    }
+    d.clear_nrc = 0;
+    d.clear_rpm = 0;
+    ++d.generation;
+    if ((d.flags & ECUIO_DIAG_COMPLETE) == 0 || ch.diagnosing ||
+        ch.diag_pending > 0 || d.generation != generation + 1) {
+        d.clear = ECUIO_CLEAR_REPORT_CHANGED;
+        return false;
+    }
+    d.clear = ECUIO_CLEAR_NONE;
+    d.flags |= ECUIO_DIAG_CLEARING;
+    ch.clear_step = ECUIO_CLEAR_STEP_SPEED;
+    return true;
+}
+
+/* Settles the request channel c's clear has out: answered with the
+ * reply, refused with its code, or unanswered (ECUIO_DIAG_*). The engine
+ * speed's answer sends 04 next at 0 rpm and ends the clear otherwise;
+ * 04's answer ends it, and a 44 or no answer reads the report again. */
+inline void ecuio_engine_clear_settle(ecuio_request_engine* e, uint32_t c,
+                                      uint8_t outcome, uint8_t nrc,
+                                      const uint8_t* data, uint16_t len)
+{
+    ecuio_engine_channel& ch = e->chans[c];
+    ecuio_channel_diagnostics_t& d = ch.diag;
+    ch.clearing = false;
+    bool done = true;
+    bool read = false;
+    if (ch.clear_step == ECUIO_CLEAR_STEP_SPEED) {
+        if (outcome == ECUIO_DIAG_ANSWERED && len >= 4) {
+            const uint32_t raw = (uint32_t{data[2]} << 8) | data[3];
+            if (raw == 0) {
+                ch.clear_step = ECUIO_CLEAR_STEP_CLEAR;
+                done = false;
+            } else {
+                d.clear = ECUIO_CLEAR_ENGINE_RUNNING;
+                d.clear_rpm = (raw + 3) / 4; /* 0.25 rpm a count */
+            }
+        } else {
+            d.clear = ECUIO_CLEAR_NO_ENGINE_SPEED;
+            d.clear_nrc = nrc;
+        }
+    } else if (outcome == ECUIO_DIAG_ANSWERED) {
+        d.clear = ECUIO_CLEAR_CLEARED;
+        read = true;
+    } else if (outcome == ECUIO_DIAG_REFUSED) {
+        d.clear = ECUIO_CLEAR_REFUSED;
+        d.clear_nrc = nrc;
+    } else {
+        d.clear = ECUIO_CLEAR_UNANSWERED;
+        read = true;
+    }
+    if (done) {
+        ch.clear_step = ECUIO_CLEAR_STEP_NONE;
+        d.flags &= ~ECUIO_DIAG_CLEARING;
+    }
+    ++d.generation;
+    if (read) {
+        ecuio_engine_diag_restart(ch);
+    }
+}
+
+/* The next unasked diagnostics item of channel c, in list order; -1
+ * when none. */
+inline int32_t ecuio_engine_diag_next(const ecuio_request_engine* e, uint32_t c)
+{
+    const ecuio_engine_channel& ch = e->chans[c];
+    for (uint32_t i = 0; i < ch.diag_count; ++i) {
+        if (ch.diag_items[i].outcome == ECUIO_DIAG_UNASKED) {
+            return static_cast<int32_t>(i);
+        }
+    }
+    return -1;
+}
+
+/* ADR-0039 section 3: for each duplicate pair, the demoted PID's request on
+ * channel c is slow when the channel's answered bitmaps list both PIDs,
+ * and fast otherwise (the pairs are of fast PIDs), so a car that answers
+ * one form keeps it fast and a later walk judges again. */
+inline void ecuio_engine_judge_duplicates(ecuio_request_engine* e, uint32_t c)
+{
+    const ecuio_engine_channel& ch = e->chans[c];
+    for (uint32_t p = 0; p < e->duplicate_count; ++p) {
+        const uint8_t keep = e->duplicates[2 * p];
+        const uint8_t demote = e->duplicates[2 * p + 1];
+        const bool both = ecuio_engine_pid_bit(ch.supported, keep) &&
+                          ecuio_engine_pid_bit(ch.supported, demote);
+        for (uint32_t i = 0; i < e->count; ++i) {
+            ecuio_request& r = e->requests[i];
+            if (r.channel == c && r.len == 2 && r.bytes[0] == 0x01 &&
+                r.bytes[1] == demote) {
+                r.slow = both ? 1 : 0;
+            }
+        }
+    }
+}
+
 /* Ends channel c's walk where it stands, answered or not, and drops each
  * of its Service 01 requests whose PID the answers mark unsupported.
- * PIDs it didn't reach stay: silence isn't an answer. */
+ * PIDs it didn't reach stay: silence isn't an answer. Then judges the
+ * duplicate pairs on what the answers listed. */
 inline void ecuio_engine_end_walk(ecuio_request_engine* e, uint32_t c)
 {
     ecuio_engine_channel& ch = e->chans[c];
@@ -625,6 +1258,7 @@ inline void ecuio_engine_end_walk(ecuio_request_engine* e, uint32_t c)
             ecuio_engine_drop(e, i, ECUIO_DROP_BITMAP, 0);
         }
     }
+    ecuio_engine_judge_duplicates(e, c);
 }
 
 /* A bitmap reply to the walk on channel c: 41 <PID> b0 b1 b2 b3, PID
@@ -660,7 +1294,7 @@ inline void ecuio_engine_take_bitmap(ecuio_request_engine* e, uint32_t c,
     }
 }
 
-/* §4: turns the probe on and starts the walk on every channel that has
+/* Section 4: turns the probe on and starts the walk on every channel that has
  * Service 01 requests in its rotation and whose chain isn't answered to
  * its end yet. A walk resumes at the first bitmap it hasn't had, so the
  * one at connect and each after a recovery (the driver's call) together
@@ -705,10 +1339,12 @@ inline void ecuio_engine_probe(ecuio_request_engine* e, int64_t now_us)
 }
 
 /* What channel c sends next: ECUIO_ENGINE_ONCE for an identification
- * item or a scanned DID already in the one-shot (its write failed), then
- * while its walk has a bitmap to ask, then, taking turns with the
- * rotation, for the next identification item, then for the next scanned
- * DID, else the next request of its rotation, or ECUIO_ENGINE_NONE while
+ * item, a diagnostics item, a clear's request or a scanned DID already
+ * in the one-shot (its write failed), then while its walk has a bitmap
+ * to ask, then, taking turns with the rotation, for a clear's next
+ * request, the next identification item, then the next diagnostics
+ * item, then the next scanned DID, else the next
+ * request of its rotation, or ECUIO_ENGINE_NONE while
  * one is outstanding, before the floor, or when there is nothing to
  * send. A walk out of budget ends here. Moves the rotation past the
  * request it returns; ecuio_engine_sent records what became of it. */
@@ -721,7 +1357,7 @@ inline int32_t ecuio_engine_due(ecuio_request_engine* e, uint32_t c,
     }
     /* Taken before a probe started the walk: it goes first, so its reply
      * settles it and no other request's reply does. */
-    if (ch.identifying || ch.scanning) {
+    if (ch.identifying || ch.diagnosing || ch.scanning || ch.clearing) {
         return ECUIO_ENGINE_ONCE;
     }
     if (ch.walking) {
@@ -732,6 +1368,21 @@ inline int32_t ecuio_engine_due(ecuio_request_engine* e, uint32_t c,
         ecuio_engine_end_walk(e, c);
     }
     const bool once_turn = ch.requests == 0 || ch.scan_turn;
+    if (ch.clear_step != ECUIO_CLEAR_STEP_NONE && once_turn) {
+        ch.once = ecuio_request{};
+        if (ch.clear_step == ECUIO_CLEAR_STEP_SPEED) {
+            ch.once.bytes[0] = ECUIO_CLEAR_SPEED_REQUEST[0];
+            ch.once.bytes[1] = ECUIO_CLEAR_SPEED_REQUEST[1];
+            ch.once.len = 2;
+        } else {
+            ch.once.bytes[0] = ECUIO_CLEAR_SERVICE;
+            ch.once.len = 1;
+        }
+        ch.once.channel = static_cast<uint8_t>(c);
+        ch.clearing = true;
+        ch.scan_turn = false;
+        return ECUIO_ENGINE_ONCE;
+    }
     if (ch.ident_pending > 0 && once_turn) {
         const int32_t i = ecuio_engine_ident_next(e, c);
         if (i >= 0) {
@@ -748,6 +1399,23 @@ inline int32_t ecuio_engine_due(ecuio_request_engine* e, uint32_t c,
             return ECUIO_ENGINE_ONCE;
         }
         ch.ident_pending = 0;   /* the count had drifted; nothing is unasked */
+    }
+    if (ch.diag_pending > 0 && once_turn) {
+        const int32_t i = ecuio_engine_diag_next(e, c);
+        if (i >= 0) {
+            const ecuio_diag_item& it = ch.diag_items[i];
+            ch.once = ecuio_request{};
+            for (uint8_t k = 0; k < it.len; ++k) {
+                ch.once.bytes[k] = it.request[k];
+            }
+            ch.once.len = it.len;
+            ch.once.channel = static_cast<uint8_t>(c);
+            ch.diagnosing = true;
+            ch.diag_index = static_cast<uint32_t>(i);
+            ch.scan_turn = false;
+            return ECUIO_ENGINE_ONCE;
+        }
+        ch.diag_pending = 0; /* the count had drifted; nothing is unasked */
     }
     if (ch.scan_pending > 0 && once_turn) {
         const int32_t i = ecuio_engine_scan_next(e, c);
@@ -770,14 +1438,32 @@ inline int32_t ecuio_engine_due(ecuio_request_engine* e, uint32_t c,
     if (ch.requests == 0) {
         return ECUIO_ENGINE_NONE;
     }
-    for (uint32_t k = 0; k < e->count; ++k) {
-        const uint32_t i = (ch.cursor + k) % e->count;
-        if (e->requests[i].channel == c && e->requests[i].dropped == 0) {
-            ch.cursor = (i + 1) % e->count;
-            return static_cast<int32_t>(i);
-        }
+    const bool slow_turn = ch.fast_run >= ECUIO_ENGINE_FAST_PER_SLOW;
+    int32_t i = ecuio_engine_next_of(e, c, slow_turn);
+    if (i < 0) {
+        i = ecuio_engine_next_of(e, c, !slow_turn);
     }
-    return ECUIO_ENGINE_NONE;
+    if (i < 0) {
+        return ECUIO_ENGINE_NONE;
+    }
+    if (e->requests[i].slow != 0) {
+        ch.fast_run = 0;
+    } else if (ch.fast_run < ECUIO_ENGINE_FAST_PER_SLOW) {
+        ++ch.fast_run;
+    }
+    return ecuio_engine_gather(e, c, i);
+}
+
+/* A pack on channel c that failed: silence, a negative reply or one
+ * record. The ECUIO_ENGINE_PACK_FAILURES-th in a row ends packing on
+ * the channel for the session. */
+inline void ecuio_engine_pack_failed(ecuio_request_engine* e, uint32_t c)
+{
+    ecuio_engine_channel& ch = e->chans[c];
+    if (++ch.pack_failures >= ECUIO_ENGINE_PACK_FAILURES && !ch.unpacked) {
+        ch.unpacked = true;
+        ++ch.generation;
+    }
 }
 
 /* After the driver's write of request r on channel c, at now_us: a sent
@@ -790,6 +1476,9 @@ inline void ecuio_engine_sent(ecuio_request_engine* e, uint32_t c,
     ecuio_engine_channel& ch = e->chans[c];
     ch.outstanding = sent ? r : ECUIO_ENGINE_NONE;
     ch.deadline_us = now_us + ECUIO_ENGINE_WAIT_US;
+    if (sent) {
+        ch.sent_us = now_us;
+    }
     ch.next_send_us = now_us + ECUIO_ENGINE_GAP_US;
 }
 
@@ -798,8 +1487,8 @@ inline void ecuio_engine_sent(ecuio_request_engine* e, uint32_t c,
  * so the channel is out of step until a positive reply. A bitmap that
  * times out ends the walk, unless a reply naming another PID came
  * while it waited: then it's asked once more, while the budget lasts.
- * A scanned DID or an identification item that times out is
- * unanswered. */
+ * A scanned DID, an identification item, a diagnostics item or a
+ * clear's request that times out is unanswered. */
 inline bool ecuio_engine_expire(ecuio_request_engine* e, uint32_t c,
                                 int64_t now_us)
 {
@@ -807,12 +1496,27 @@ inline bool ecuio_engine_expire(ecuio_request_engine* e, uint32_t c,
     if (ch.outstanding == ECUIO_ENGINE_NONE || now_us < ch.deadline_us) {
         return false;
     }
-    const bool once = ch.outstanding == ECUIO_ENGINE_ONCE;
+    const int32_t out = ch.outstanding;
+    const bool once = out == ECUIO_ENGINE_ONCE;
+    const bool pack = out == ECUIO_ENGINE_PACK;
     ch.outstanding = ECUIO_ENGINE_NONE;
     ch.in_step = false;
-    if (once && ch.identifying) {
+    if (e->timing != nullptr && out >= 0) {
+        ++e->timing->rows[out].timeouts;
+    } else if (e->timing != nullptr && pack) {
+        for (uint32_t k = 0; k < ch.pack_count; ++k) {
+            ++e->timing->rows[ch.pack_rows[k]].timeouts;
+        }
+    }
+    if (pack) {
+        ecuio_engine_pack_failed(e, c);
+    } else if (once && ch.clearing) {
+        ecuio_engine_clear_settle(e, c, ECUIO_DIAG_UNANSWERED, 0, nullptr, 0);
+    } else if (once && ch.identifying) {
         ecuio_engine_ident_settle(e, c, ECUIO_IDENTITY_UNANSWERED, 0,
                                   nullptr, 0);
+    } else if (once && ch.diagnosing) {
+        ecuio_engine_diag_settle(e, c, ECUIO_DIAG_UNANSWERED, 0, nullptr, 0);
     } else if (once && ch.scanning) {
         ecuio_engine_scan_settle(e, c, ECUIO_SCAN_UNANSWERED, 0);
     } else if (once) {
@@ -824,6 +1528,105 @@ inline bool ecuio_engine_expire(ecuio_request_engine* e, uint32_t c,
     }
     ch.walk_stray = false;
     return true;
+}
+
+/* A frame on channel c while its pack is out: a positive reply whose
+ * first record's PID is one of the pack's answers it, and succeeds when
+ * its records, each of a PID the pack asked at the length its own reply
+ * showed, fill it exactly and number two or more; a negative reply to
+ * Service 01 ends it failed; a pending one extends the wait. Out of step
+ * (ecuio_engine_on_frame), a reply that would fail it answers nothing:
+ * the request before's, come late, can carry one of the pack's PIDs or
+ * name its service, and the pack's own may follow, its wait judging it.
+ * Nothing is dropped: the probe alone drops a PID. */
+inline ecuio_reply ecuio_engine_pack_reply(ecuio_request_engine* e,
+                                           uint32_t c, const uint8_t* data,
+                                           uint16_t len, int64_t now_us,
+                                           uint8_t* out_nrc)
+{
+    ecuio_engine_channel& ch = e->chans[c];
+    const auto asked = [&ch](uint8_t pid) {
+        for (uint32_t k = 0; k < ch.pack_count; ++k) {
+            if (ch.pack.bytes[1 + k] == pid) {
+                return true;
+            }
+        }
+        return false;
+    };
+    if (len >= 3 && data[0] == 0x41u && asked(data[1])) {
+        uint32_t records = 0;
+        uint32_t at = 1;
+        while (at < len && asked(data[at]) &&
+               at + 1u + ch.pid_len[data[at]] <= len) {
+            at += 1u + ch.pid_len[data[at]];
+            ++records;
+        }
+        const bool filled = at == len && records >= 2;
+        if (!filled && !ch.in_step) {
+            return ecuio_reply::none;
+        }
+        ch.outstanding = ECUIO_ENGINE_NONE;
+        ch.in_step = true;
+        if (filled) {
+            ch.pack_failures = 0;
+            if (!ch.packed) {
+                ch.packed = true;
+                ++ch.generation;
+            }
+        } else {
+            ecuio_engine_pack_failed(e, c);
+        }
+        return ecuio_reply::positive;
+    }
+    if (len < 3 || data[0] != ECUIO_NEGATIVE_RESPONSE || data[1] != 0x01u ||
+        (data[2] != ECUIO_NRC_RESPONSE_PENDING && !ch.in_step)) {
+        return ecuio_reply::none;
+    }
+    if (out_nrc != nullptr) {
+        *out_nrc = data[2];
+    }
+    if (data[2] == ECUIO_NRC_RESPONSE_PENDING) {
+        ch.deadline_us = now_us + ECUIO_ENGINE_PENDING_WAIT_US;
+        return ecuio_reply::pending;
+    }
+    ch.outstanding = ECUIO_ENGINE_NONE;
+    ecuio_engine_pack_failed(e, c);
+    return ecuio_reply::negative;
+}
+
+/* A pack's reply, for reply timing: each PID whose record came back is
+ * answered, every PID refused by a refusal; a PID the reply left out
+ * gets nothing that pass (ADR-0042 section 1) */
+inline void ecuio_engine_time_pack(ecuio_request_engine* e, uint32_t c,
+                                   ecuio_reply reply, const uint8_t* data,
+                                   uint16_t len, int64_t now_us)
+{
+    const ecuio_engine_channel& ch = e->chans[c];
+    if (e->timing == nullptr) {
+        return;
+    }
+    if (reply == ecuio_reply::negative) {
+        for (uint32_t k = 0; k < ch.pack_count; ++k) {
+            ecuio_engine_time_reply(e, c, ch.pack_rows[k], false, true, now_us);
+        }
+        return;
+    }
+    if (reply != ecuio_reply::positive) {
+        return;
+    }
+    uint32_t at = 1;
+    while (at < len) {
+        const uint8_t pid = data[at];
+        uint32_t k = 0;
+        while (k < ch.pack_count && ch.pack.bytes[1 + k] != pid) {
+            ++k;
+        }
+        if (k == ch.pack_count || at + 1u + ch.pid_len[pid] > len) {
+            return;
+        }
+        ecuio_engine_time_reply(e, c, ch.pack_rows[k], true, true, now_us);
+        at += 1u + ch.pid_len[pid];
+    }
 }
 
 /* A frame received on channel c, its payload after the CAN ID (at most
@@ -841,8 +1644,11 @@ inline bool ecuio_engine_expire(ecuio_request_engine* e, uint32_t c,
  * either reply, in step or not: its answer counts once, and a late
  * negative reply can at worst count the DID out now as refused, while
  * the reply that was really its own still decodes through its def. An
- * identification item is settled the same way. *out_nrc (when not NULL)
- * gets the code of a negative or pending reply. */
+ * identification item, a diagnostics item and a clear's request are
+ * settled the same way;
+ * a one-byte request (03, 07, 0A) has no key, so its service's reply
+ * alone answers it. *out_nrc (when not NULL) gets the code of a negative
+ * or pending reply. */
 inline ecuio_reply ecuio_engine_on_frame(ecuio_request_engine* e, uint32_t c,
                                          const uint8_t* data, uint16_t len,
                                          int64_t now_us, uint8_t* out_nrc)
@@ -852,14 +1658,38 @@ inline ecuio_reply ecuio_engine_on_frame(ecuio_request_engine* e, uint32_t c,
         return ecuio_reply::none;
     }
     const int32_t out = ch.outstanding;
+    if (out == ECUIO_ENGINE_PACK) {
+        const ecuio_reply reply =
+            ecuio_engine_pack_reply(e, c, data, len, now_us, out_nrc);
+        ecuio_engine_time_pack(e, c, reply, data, len, now_us);
+        return reply;
+    }
     const ecuio_request& r = ecuio_engine_request_of(e, c, out);
     if (len >= r.len && data[0] == static_cast<uint8_t>(r.bytes[0] + 0x40) &&
-        data[1] == r.bytes[1] && (r.len < 3 || data[2] == r.bytes[2])) {
+        (r.len < 2 || data[1] == r.bytes[1]) &&
+        (r.len < 3 || data[2] == r.bytes[2])) {
         ch.outstanding = ECUIO_ENGINE_NONE;
         ch.in_step = true;
-        if (out == ECUIO_ENGINE_ONCE && ch.identifying) {
+        if (out >= 0) {
+            ecuio_engine_time_reply(e, c, static_cast<uint32_t>(out), true,
+                                    false, now_us);
+        }
+        if (out >= 0 && r.len == 2 && r.bytes[0] == 0x01) {
+            /* A PID's own reply: its length, for packing */
+            const uint32_t bytes = len - 2u;
+            const uint32_t table = ECUIO_OBD2_PID_BYTES[r.bytes[1]];
+            ch.pid_len[r.bytes[1]] =
+                bytes == 0       ? 0
+                : bytes <= table ? static_cast<uint8_t>(bytes)
+                                 : ECUIO_ENGINE_PID_LONG;
+        }
+        if (out == ECUIO_ENGINE_ONCE && ch.clearing) {
+            ecuio_engine_clear_settle(e, c, ECUIO_DIAG_ANSWERED, 0, data, len);
+        } else if (out == ECUIO_ENGINE_ONCE && ch.identifying) {
             ecuio_engine_ident_settle(e, c, ECUIO_IDENTITY_ANSWERED, 0,
                                       data, len);
+        } else if (out == ECUIO_ENGINE_ONCE && ch.diagnosing) {
+            ecuio_engine_diag_settle(e, c, ECUIO_DIAG_ANSWERED, 0, data, len);
         } else if (out == ECUIO_ENGINE_ONCE && ch.scanning) {
             ecuio_engine_scan_settle(e, c, ECUIO_SCAN_FOUND, 0);
         } else if (out == ECUIO_ENGINE_ONCE) {
@@ -872,7 +1702,7 @@ inline ecuio_reply ecuio_engine_on_frame(ecuio_request_engine* e, uint32_t c,
         return ecuio_reply::positive;
     }
     if (out == ECUIO_ENGINE_ONCE && ch.walking && !ch.identifying &&
-        !ch.scanning && len >= 2 &&
+        !ch.diagnosing && !ch.scanning && !ch.clearing && len >= 2 &&
         data[0] == static_cast<uint8_t>(r.bytes[0] + 0x40)) {
         ch.walk_stray = true; /* another PID's answer, not the bitmap's */
     }
@@ -889,6 +1719,10 @@ inline ecuio_reply ecuio_engine_on_frame(ecuio_request_engine* e, uint32_t c,
         return ecuio_reply::pending;
     }
     ch.outstanding = ECUIO_ENGINE_NONE;
+    if (out >= 0) {
+        ecuio_engine_time_reply(e, c, static_cast<uint32_t>(out), false, false,
+                                now_us);
+    }
     const uint8_t service = r.bytes[0];
     const uint8_t reason = (e->probe && ch.in_step)
                                ? ecuio_engine_drop_reason(code) : 0;
@@ -902,9 +1736,13 @@ inline ecuio_reply ecuio_engine_on_frame(ecuio_request_engine* e, uint32_t c,
     } else if (reason != 0 && out != ECUIO_ENGINE_ONCE) {
         ecuio_engine_drop(e, static_cast<uint32_t>(out), reason, code);
     }
-    if (out == ECUIO_ENGINE_ONCE && ch.identifying) {
+    if (out == ECUIO_ENGINE_ONCE && ch.clearing) {
+        ecuio_engine_clear_settle(e, c, ECUIO_DIAG_REFUSED, code, nullptr, 0);
+    } else if (out == ECUIO_ENGINE_ONCE && ch.identifying) {
         ecuio_engine_ident_settle(e, c, ECUIO_IDENTITY_REFUSED, code,
                                   nullptr, 0);
+    } else if (out == ECUIO_ENGINE_ONCE && ch.diagnosing) {
+        ecuio_engine_diag_settle(e, c, ECUIO_DIAG_REFUSED, code, nullptr, 0);
     } else if (out == ECUIO_ENGINE_ONCE && ch.scanning) {
         ecuio_engine_scan_settle(e, c, ECUIO_SCAN_REFUSED, code);
     } else if (out == ECUIO_ENGINE_ONCE) {
@@ -923,7 +1761,8 @@ inline int64_t ecuio_engine_next_event_us(const ecuio_request_engine* e,
     for (uint32_t c = 0; c < e->chan_count; ++c) {
         const ecuio_engine_channel& ch = e->chans[c];
         if (ch.outstanding == ECUIO_ENGINE_NONE && ch.requests == 0 &&
-            !ch.walking && ch.scan_pending == 0 && ch.ident_pending == 0) {
+            !ch.walking && ch.scan_pending == 0 && ch.ident_pending == 0 &&
+            ch.diag_pending == 0 && ch.clear_step == ECUIO_CLEAR_STEP_NONE) {
             continue;
         }
         const int64_t at = (ch.outstanding != ECUIO_ENGINE_NONE)
@@ -944,12 +1783,16 @@ inline void ecuio_engine_support(const ecuio_request_engine* e, uint32_t c,
     const ecuio_engine_channel& ch = e->chans[c];
     *out = ecuio_channel_support_t{};
     out->flags = (ch.probed ? ECUIO_SUPPORT_PROBED : 0u) |
-                 (ch.walked ? ECUIO_SUPPORT_COMPLETE : 0u);
+                 (ch.walked ? ECUIO_SUPPORT_COMPLETE : 0u) |
+                 (ch.packed ? ECUIO_SUPPORT_PACKED : 0u) |
+                 (ch.unpacked ? ECUIO_SUPPORT_UNPACKED : 0u);
     out->generation = ch.generation;
     out->ranges = ch.ranges;
     for (uint32_t b = 0; b < sizeof(out->pid_bitmap); ++b) {
         out->pid_bitmap[b] = ch.supported[b];
     }
+    out->pids_supported = ecuio_supported_pid_count(ch.supported);
+    out->pids_through = ecuio_pids_through(ch.ranges);
     for (uint32_t i = 0; i < e->count; ++i) {
         const ecuio_request& r = e->requests[i];
         if (r.channel != c) {
@@ -988,6 +1831,15 @@ inline void ecuio_engine_support(const ecuio_request_engine* e, uint32_t c,
     if (out->scan_total > 0 && out->scan_done == out->scan_total) {
         out->flags |= ECUIO_SUPPORT_SCAN_COMPLETE;
     }
+}
+
+/* What channel c's ECU has said of its diagnostics, for the session's
+ * report; the driver adds the channel's rx_id. Complete once every item
+ * listed has an outcome. */
+inline void ecuio_engine_diagnostics(const ecuio_request_engine* e, uint32_t c,
+                                     ecuio_channel_diagnostics_t* out)
+{
+    *out = e->chans[c].diag;
 }
 
 /* What channel c's ECU has said it is, for

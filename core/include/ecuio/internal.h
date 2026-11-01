@@ -81,7 +81,7 @@ ecuio_status_t ecuio_mock_transport_attach(ecuio_session_t* session,
                                             const struct ecuio_uri_query* query);
 
 /* Replay transport factory (ADR-0023), every platform:
- *   replay://<path>[?profile=…][&did=…][&speed=<0.1..100>|max][&loop=1]
+ *   replay://<path>[?profile=...][&did=...][&speed=<0.1..100>|max][&loop=1]
  * <path> is absolute: a recording's folder, or a path ending in .csv for
  * its frames.csv. Attach reads the whole file and refuses a bad row with
  * its line number (LOAD_FAILED); a bad value or path is BAD_URI. Fills
@@ -92,8 +92,8 @@ ecuio_status_t ecuio_replay_transport_attach(ecuio_session_t* session,
                                               const struct ecuio_uri_query* query);
 
 /* ELM327 transport factory (ADR-0026), every platform:
- *   elm327://<port>[?profile=…][&did=…][&baud=500000|250000][&serial=<n>]
- *                  [&filter=…][&txid=…][&poll=…][&probe=0|1][&identify=0|1]
+ *   elm327://<port>[?profile=...][&did=...][&baud=500000|250000][&serial=<n>]
+ *                  [&filter=...][&txid=...][&poll=...][&probe=0|1][&identify=0|1]
  * <port> is COMn on Windows, a /dev/ path elsewhere, a WiFi adapter's
  * address, or an app-fed stream's name (ecuio/stream.h). Attach checks the
  * values, derives the channels and requests as J2534 attach does
@@ -108,8 +108,8 @@ ecuio_status_t ecuio_elm327_transport_attach(ecuio_session_t* session,
 
 /* SocketCAN transport factory (ADR-0032), Linux only
  * (ECUIO_HAVE_SOCKETCAN):
- *   socketcan://<interface>[?profile=…][&baud=500000|250000]
- *                          [&filter=<id>[/<mask>],…]
+ *   socketcan://<interface>[?profile=...][&baud=500000|250000]
+ *                          [&filter=<id>[/<mask>],...]
  * Listens: refuses a profile that requests (NOT_IMPLEMENTED), reads the
  * interface through rtnetlink and refuses one that isn't CAN, is down,
  * is a controller not in listen-only mode (LOAD_FAILED) or runs at
@@ -199,7 +199,7 @@ void ecuio_elm327_set_log_dir(const char* dir);
  *           nothing dropped. Needs a channel, from filter or the
  *           profile's declarations; rejected at attach (still before any
  *           DLL load) when neither supplies one
- *   probe   0 or 1 (default 1, ADR-0015 §4): walk each ECU's
+ *   probe   0 or 1 (default 1, ADR-0015 section 4): walk each ECU's
  *           supported-PID chain before the rotation and drop the
  *           requests it explicitly refuses; 0 sends the set as written
  *   profile name: validated by ecuio_session_create before attach
@@ -299,7 +299,7 @@ ecuio_status_t ecuio_j2534_ioctl(ecuio_j2534_handle_t* handle,
  * for PASS/BLOCK filters pass fc_len 0 and flow_control NULL).
  * tx_flags stamps the filter messages' TxFlags (CAN_29BIT_ID for
  * 29-bit matching: mask and pattern are compared against the frame
- * ID in the filter messages' Data[], big-endian, per J2534-1 §5.7). */
+ * ID in the filter messages' Data[], big-endian, per J2534-1 section 5.7). */
 ecuio_status_t ecuio_j2534_start_msg_filter(ecuio_j2534_handle_t* handle,
                                             unsigned long channel,
                                             uint32_t filter_type,

@@ -55,6 +55,7 @@ qt_add_qml_module(app_ui
         qml/NavButton.qml
         qml/Theme.qml
         qml/LiveViewPage.qml
+        qml/DiagnosticsPage.qml
         qml/ChartLayout.qml
         qml/VehicleBook.qml
         qml/SignalHub.qml
@@ -69,13 +70,16 @@ qt_add_qml_module(app_ui
 )
 
 target_include_directories(app_ui PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+# havne-cli's diagnostics line (cli/diagnostics_line.h, public headers
+# only), which a clear's saved report is written in (ADR-0038)
+target_include_directories(app_ui PRIVATE ${CMAKE_SOURCE_DIR}/cli)
 target_link_libraries(app_ui PUBLIC
     Qt6::Quick
     Qt6::QuickControls2
     ecuio-core
 )
 app_enable_warnings(app_ui)
-# The phone's Bluetooth (ADR-0028 §2): the links behind core's app-fed
+# The phone's Bluetooth (ADR-0028 section 2): the links behind core's app-fed
 # streams, on Android only, so no desktop build ships it unverified.
 # Elsewhere the Bluetooth singleton lists nothing.
 if(ANDROID)
@@ -84,7 +88,7 @@ if(ANDROID)
     target_link_libraries(app_ui PUBLIC Qt6::Bluetooth)
     target_compile_definitions(app_ui PUBLIC APP_BLUETOOTH)
     # The foreground service held while an adapter session is up
-    # (ADR-0029 §2; its Java half is in android/src)
+    # (ADR-0029 section 2; its Java half is in android/src)
     target_sources(app_ui PRIVATE androidsession.cpp androidsession.h)
 endif()
 # MSVC's C4702 (unreachable code) fires inside Qt's inline headers, as
@@ -115,13 +119,17 @@ endif()
 # The name people see is capitalized: Apple's bundle, which Finder and
 # the home screen show (iOS's display name is Xcode's PRODUCT_NAME, the
 # output name), and Android's launcher label. Executables elsewhere stay
-# lowercase, as havne.exe and Linux's havne
+# lowercase, as havne.exe and Linux's havne. Both bundle versions are
+# project()'s: left unset, Qt fills in its placeholder, x.y for the
+# version iOS shows (0.3 for 0.3.5), which CI's ios-build refuses
 if(APPLE)
     set_target_properties(havne PROPERTIES
         MACOSX_BUNDLE TRUE
         OUTPUT_NAME Havne
         MACOSX_BUNDLE_BUNDLE_NAME Havne
-        MACOSX_BUNDLE_GUI_IDENTIFIER io.github.erickramer42.havne)
+        MACOSX_BUNDLE_GUI_IDENTIFIER io.github.erickramer42.havne
+        MACOSX_BUNDLE_SHORT_VERSION_STRING "${Havne_VERSION}"
+        MACOSX_BUNDLE_BUNDLE_VERSION "${Havne_VERSION}")
 endif()
 # The app icon (packaging/icons/make_icons.py writes both). Android: an
 # adaptive launcher icon, vector drawables in the package source's res/;
@@ -141,17 +149,21 @@ if(ANDROID)
         QT_ANDROID_VERSION_NAME "${Havne_VERSION}"
         QT_ANDROID_VERSION_CODE "${_app_version_code}")
 endif()
-# iOS: an asset catalog holding the 1024 px AppIcon, compiled by Xcode
+# iOS: an asset catalog holding the 1024 px AppIcon, compiled by Xcode,
+# and an Info.plist of the app's own (Qt's template plus the local
+# network's prompt and the Files app's view of Documents), which CI's
+# ios-build checks in the bundle
 if(IOS)
     set(app_asset_catalog "${CMAKE_CURRENT_SOURCE_DIR}/ios/Assets.xcassets")
     target_sources(havne PRIVATE "${app_asset_catalog}")
     set_source_files_properties("${app_asset_catalog}" PROPERTIES
         MACOSX_PACKAGE_LOCATION Resources)
     set_target_properties(havne PROPERTIES
-        XCODE_ATTRIBUTE_ASSETCATALOG_COMPILER_APPICON_NAME AppIcon)
+        XCODE_ATTRIBUTE_ASSETCATALOG_COMPILER_APPICON_NAME AppIcon
+        MACOSX_BUNDLE_INFO_PLIST "${CMAKE_CURRENT_SOURCE_DIR}/ios/Info.plist.in")
 endif()
 # Core's TCP socket (elm327://<address>) needs INTERNET: declared here,
-# not left to the permissions Qt adds by default (ADR-0028 §2).
+# not left to the permissions Qt adds by default (ADR-0028 section 2).
 # CI's android-build checks the merged manifest for it.
 # Bluetooth needs CONNECT (a paired adapter, the paired list) and SCAN
 # (BLE), the scan declared never for location. Android 12 (API 31) is the
@@ -163,7 +175,7 @@ if(ANDROID)
     qt_add_android_permission(havne NAME android.permission.BLUETOOTH_CONNECT)
     qt_add_android_permission(havne NAME android.permission.BLUETOOTH_SCAN
         ATTRIBUTES usesPermissionFlags neverForLocation)
-    # The session's foreground service (ADR-0029 §2), type connectedDevice:
+    # The session's foreground service (ADR-0029 section 2), type connectedDevice:
     # its two permissions, CHANGE_NETWORK_STATE so a WiFi adapter's session
     # qualifies without Bluetooth granted, and its notification
     qt_add_android_permission(havne NAME android.permission.FOREGROUND_SERVICE)
@@ -224,7 +236,7 @@ if(WIN32 AND TARGET ecuio-j2534-surrogate)
     )
 endif()
 
-# havne-cli ships beside havne.exe (ADR-0031 §7), where it finds both
+# havne-cli ships beside havne.exe (ADR-0031 section 7), where it finds both
 # surrogates, and stage.ps1 packs the folder
 if(WIN32 AND TARGET havne-cli)
     add_dependencies(havne havne-cli)

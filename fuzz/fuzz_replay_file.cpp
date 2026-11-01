@@ -4,9 +4,14 @@
 //          attach, which reads the whole file (ADR-0023): the status is
 //          ECUIO_OK or ECUIO_ERR_LOAD_FAILED, a refusal names its line in
 //          one terminated detail that never holds the path, a success
-//          counts the rows, two creates agree
+//          counts the rows, two creates agree. An input starting with 'F'
+//          carries a ?faults= query on its first line (ADR-0041): a
+//          refusal of it is BAD_URI, and a fault set that parses draws
+//          within its bounds for frames of every length
 
 #include <ecuio/core.h>
+
+#include "replay_faults.h" /* core/src: ?faults= and its draws, pure */
 
 #include <stddef.h>
 #include <stdint.h>
@@ -91,6 +96,46 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size)
     /* Thousands of rows; a longer file only repeats them. */
     if (size > 262144) return 0;
 
+    /* 'F', then the faults' text to the first newline (64 bytes at most) */
+    std::string faults;
+    const bool faulted = size > 0 && data[0] == 'F';
+    if (faulted) {
+        size_t n = 1;
+        while (n < size && n <= 64 && data[n] != '\n')
+            ++n;
+        faults.assign(reinterpret_cast<const char*>(data) + 1, n - 1);
+        if (faults.find('\0') != std::string::npos)
+            return 0;
+        const size_t skip = n < size ? n + 1 : n;
+        data += skip;
+        size -= skip;
+
+        replay_faults parsed;
+        if (replay_parse_faults(faults.data(), faults.size(), &parsed)) {
+            if (!parsed.any)
+                abort();
+            uint32_t state = 1;
+            for (uint32_t len = 0; len < 80; ++len) {
+                const uint16_t data_len =
+                    static_cast<uint16_t>(len % 9 == 8 ? 4096 : len);
+                const replay_fault_verdict v =
+                    replay_fault_draw(parsed, state, data_len);
+                if (v.stall_ms > REPLAY_FAULT_STALL_MS_MAX)
+                    abort();
+                if (v.overflow && !v.drop)
+                    abort();
+                if (v.drop && (v.corrupt || v.truncate))
+                    abort();
+                if (v.corrupt && v.corrupt_bit >= data_len * 8u)
+                    abort();
+                if (v.truncate && v.truncate_to >= data_len)
+                    abort();
+                if (state == 0)
+                    abort();
+            }
+        }
+    }
+
     /* The header row, so the rows themselves are what's fuzzed; the
      * input is everything after it, NULs and all. */
     const std::string& path = scratch();
@@ -103,14 +148,24 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size)
     }
     fclose(f);
 
-    const std::string uri = "replay://" + path;
+    const std::string uri =
+        "replay://" + path + (faulted ? "?faults=" + faults : std::string());
     const created a = create(uri);
     const created b = create(uri);
     if (a.rc != b.rc || a.detail != b.detail || a.frames != b.frames ||
         a.span_ms != b.span_ms) {
         abort();
     }
-    if (a.rc != ECUIO_OK && a.rc != ECUIO_ERR_LOAD_FAILED) abort();
+    if (a.rc != ECUIO_OK && a.rc != ECUIO_ERR_LOAD_FAILED &&
+        !(faulted && a.rc == ECUIO_ERR_BAD_URI)) {
+        abort();
+    }
+    if (a.rc == ECUIO_ERR_BAD_URI) {
+        if (a.detail.empty() || a.detail.find('\n') != std::string::npos) {
+            abort();
+        }
+        return 0;
+    }
     if (a.rc == ECUIO_ERR_LOAD_FAILED) {
         if (a.detail.empty() || a.detail.find('\n') != std::string::npos ||
             a.detail.find(path) != std::string::npos) {

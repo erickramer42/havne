@@ -2,7 +2,7 @@
 
 - **Status:** Accepted.
 - **Date:** 2026-10-29.
-- **Builds on:** [ADR-0028](0028-app-fed-streams.md) §3 (the debug APK
+- **Builds on:** [ADR-0028](0028-app-fed-streams.md) section 3 (the debug APK
   from CI, which this record leaves as it is for development);
   [ADR-0029](0029-android-background-sessions.md) (the app the APK
   carries).
@@ -83,10 +83,14 @@ check a download with `apksigner verify --print-certs`. The APK also
 gets its own build provenance, as the zip does, so
 `gh attestation verify` ties it to this repository's workflow.
 
+> **Amended 2026-10-30:** the APK shares one provenance attestation
+> with every other download (ADR-0035 section 1's amendment);
+> `gh attestation verify` checks it the same way.
+
 ### 4. What stays as it was
 
 CI's `android-build` still uploads a debug APK for development, and a
-local build still signs with the machine's debug key (ADR-0028 §3).
+local build still signs with the machine's debug key (ADR-0028 section 3).
 Phone runs that need the wire logs use those builds: a release build
 isn't debuggable, so `run-as` can't read its private files. Each key is
 a different app to Android, so moving a phone between a release and a

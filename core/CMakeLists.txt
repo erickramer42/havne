@@ -43,7 +43,7 @@ if(WIN32)
     target_link_libraries(ecuio-core PRIVATE bcrypt ws2_32)
 endif()
 
-# USDT probes (ADR-0034 §4, core/src/probes.h): systemtap's header-only
+# USDT probes (ADR-0034 section 4, core/src/probes.h): systemtap's header-only
 # <sys/sdt.h> (systemtap-sdt-dev), on Linux but not Android, whose NDK
 # has none. Without it the probes compile to nothing. ECUIO_HAVE_SDT is
 # a cache variable, so tests/ sees it too (ProbeNotesTest).
@@ -61,7 +61,7 @@ endif()
 # the end of the root CMakeLists.txt, after every subdirectory has
 # configured; the CI core-and-tests job also builds core with no Qt at all.
 
-# The core package (ADR-0035 §2): the archive, the public headers, a
+# The core package (ADR-0035 section 2): the archive, the public headers, a
 # CMake package (find_package(ecuio) gives ecuio::core) and a pkg-config
 # file, laid out by `cmake --install` for packaging/linux/
 # make-core-packages.sh. Every path is relative to the prefix, so the

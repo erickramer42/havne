@@ -61,7 +61,7 @@ bool is_built_in(const char* name)
 
 /* 1..ECUIO_PROFILE_NAME_MAX characters of [a-z0-9._-]: a name a
  * ?profile= value can carry ('&' would end it) and that reads the same
- * in every URI (keys and names are lowercase, ADR-0013 §2). */
+ * in every URI (keys and names are lowercase, ADR-0013 section 2). */
 bool is_valid_name(const char* name)
 {
     size_t n = 0;

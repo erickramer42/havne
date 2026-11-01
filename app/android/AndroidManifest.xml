@@ -51,7 +51,7 @@
             <!-- The GUI thread keeps running in the background: without
                  this Qt stops its event loop when the app is suspended,
                  and the bridge, the recorder and the Bluetooth link stop
-                 with it (ADR-0029 §1) -->
+                 with it (ADR-0029 section 1) -->
             <meta-data
                 android:name="android.app.background_running"
                 android:value="true" />
@@ -59,7 +59,7 @@
 
         <!-- Held while an adapter session is up, with its notification, so
              Android keeps the process running with the screen off
-             (ADR-0029 §2) -->
+             (ADR-0029 section 2) -->
         <service
             android:name="io.github.erickramer42.havne.SessionService"
             android:exported="false"

@@ -4,7 +4,7 @@
 //          every platform); HARNESS: VcanTest.InterfacesListVcan0 (Linux);
 //          the attributes' parsing is socketcan_wire.h's, UNIT
 //
-// CAN-interface discovery (ecuio/socketcan.h, ADR-0032 §7) and the link
+// CAN-interface discovery (ecuio/socketcan.h, ADR-0032 section 7) and the link
 // lookup the SocketCAN transport checks an interface with
 // (socketcan_netlink.h).
 
@@ -42,6 +42,13 @@ static_assert(SOCKETCAN_ERR_RESTARTED == CAN_ERR_RESTARTED,
               "CAN_ERR_RESTARTED");
 static_assert(SOCKETCAN_CTRLMODE_LISTENONLY == CAN_CTRLMODE_LISTENONLY,
               "CAN_CTRLMODE_LISTENONLY");
+static_assert(SOCKETCAN_CTRLMODE_ONE_SHOT == CAN_CTRLMODE_ONE_SHOT,
+              "CAN_CTRLMODE_ONE_SHOT");
+static_assert(SOCKETCAN_STATE_ERROR_ACTIVE == CAN_STATE_ERROR_ACTIVE,
+              "CAN_STATE_ERROR_ACTIVE");
+static_assert(SOCKETCAN_IFLA_CAN_STATE == IFLA_CAN_STATE, "IFLA_CAN_STATE");
+static_assert(SOCKETCAN_IFLA_CAN_RESTART_MS == IFLA_CAN_RESTART_MS,
+              "IFLA_CAN_RESTART_MS");
 static_assert(SOCKETCAN_IFLA_IFNAME == IFLA_IFNAME, "IFLA_IFNAME");
 static_assert(SOCKETCAN_IFLA_MTU == IFLA_MTU, "IFLA_MTU");
 static_assert(SOCKETCAN_IFLA_LINKINFO == IFLA_LINKINFO, "IFLA_LINKINFO");

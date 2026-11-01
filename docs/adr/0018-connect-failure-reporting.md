@@ -169,6 +169,6 @@ example in section 2 shows the earlier form. Pinned by
 the URI names". The code covers a replay's recording as well as an
 adapter's DLL ([ADR-0023](0023-replay-transport.md)), and the bridge
 puts the status before the detail, so a replay refused for an empty
-`frames.csv` read "failed to load transport library: …". The detail
+`frames.csv` read "failed to load transport library: ...". The detail
 after the colon still says which: the DLL and the loader's words, or
 the recording's line.

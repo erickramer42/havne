@@ -125,7 +125,7 @@ static int check_set(const ecuio_signal_set_t* set, uint32_t* index)
             }
         }
     }
-    /* ADR-0013 §4: channel declarations, bounded, legal CAN
+    /* ADR-0013 section 4: channel declarations, bounded, legal CAN
      * ids, unique rx. Negative codes so they can't collide with
      * ecuio_validate_signal's per-def returns. */
     if (set->channel_count > 0) {

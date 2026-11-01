@@ -29,7 +29,7 @@ eviction never ran, because no frame ever reached it.
 
 ## Consequences
 
-- The stream never freezes. At mock rate, in-flight sits at 0–2, and
+- The stream never freezes. At mock rate, in-flight sits at 0-2, and
   the drop counter rises only under a real backlog (a stalled GUI
   thread).
 - The regression test is `BridgeTest.StreamingContinuesPastTenThousandFrames`.

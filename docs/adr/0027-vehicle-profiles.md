@@ -20,7 +20,7 @@ can't be told apart by car without opening each `events.log`.
 Two facts shape a fix:
 
 - **The VIN arrives after the connect.** Identification runs on the
-  open session (ADR-0021 §1), a second or two in, while the profile and
+  open session (ADR-0021 section 1), a second or two in, while the profile and
   the DIDs are in the URI the session was opened with. A vehicle's
   settings that shape the session therefore have to be chosen before
   connecting, and the VIN can only confirm or correct that choice.
@@ -41,7 +41,7 @@ A vehicle has a label ("Daily driver"), and remembers:
 - **its plotted signals:** the names of the rows unticked on Live
   (every numeric row starts ticked, so storing the exceptions keeps a
   signal new to the set plotted);
-- **its VIN key** (§3), once a connect has learned it.
+- **its VIN key** (section 3), once a connect has learned it.
 
 Settings gets a Vehicle section above the presets: one button per
 saved vehicle, the picked one highlighted, wrapping onto more lines as
@@ -55,7 +55,7 @@ empty, New and Duplicate use a default, which a line under the field
 names, and whatever the user types instead replaces it.
 
 - New's default is "Vehicle N", the lowest N no vehicle's label holds.
-  A vehicle §4 saves for an unknown VIN gets the same default, so both
+  A vehicle section 4 saves for an unknown VIN gets the same default, so both
   paths name alike.
 - Duplicate's default is "<label> (copy)", then "<label> (copy 2)" and
   on; a copy's copy continues the count ("<label> (copy 2)", not
@@ -76,13 +76,13 @@ don't fit the zoomed UI):
 - **New:** an empty vehicle, picked.
 - **Duplicate:** a copy of the picked vehicle's connection and plotted
   signals, picked, without its VIN key, so the next car connected
-  under it is learned as itself (§4). One car's setup becomes the
+  under it is learned as itself (section 4). One car's setup becomes the
   start of another's.
 - **Rename:** the picked vehicle takes the typed label.
 - **Forget the VIN:** clears the key, so the next connect learns
   again; for a car whose ECU was replaced, or one learned by mistake.
 - **Forget:** removes the vehicle.
-- **Forget all vehicles:** removes every vehicle and the salt (§3), as
+- **Forget all vehicles:** removes every vehicle and the salt (section 3), as
   before the first one was saved.
 
 The two that remove something ask once, in place: the
@@ -90,7 +90,7 @@ button's row turns into "Forget Daily driver?" with Forget and Cancel,
 and Cancel or picking another vehicle backs out. Nothing in the
 section is enabled while a session is connecting, connected or
 disconnecting (the page's `idle`), so the vehicle a session runs under
-can't change or vanish beneath it; §4's switch is the one change made
+can't change or vanish beneath it; section 4's switch is the one change made
 during a session.
 
 A vehicle applies to adapter sessions only. A `mock://` or `replay://`
@@ -109,7 +109,7 @@ recording after it.
   characters; `-n` still breaks a tie). The bridge takes the label
   before the connect (`Bridge.vehicleLabel`), because the folder opens
   before the first frame (ADR-0017) and long before the VIN.
-- **The activity log** names the vehicle once the VIN settles it (§4),
+- **The activity log** names the vehicle once the VIN settles it (section 4),
   so `events.log` records which car a recording is.
 
 ### 3. The VIN is kept as a salted hash
@@ -127,6 +127,13 @@ protection: a 17-character VIN of a known make and model has a small
 enough serial space that the salt beside it doesn't stop a brute force.
 The VIN itself stays where ADR-0021 put it, in the activity log and
 `events.log`.
+
+> **Amended 2026-10-31:** which item is the VIN is core's rule:
+> `ecuio_identity_vin` (`core.h`) takes `09 02`'s text, else
+> `22 F190`'s, keeps its ASCII letters and digits in upper case and
+> returns it only at 17 of them. The bridge calls it once the identity
+> is complete and hashes what it returns, so a program on the C ABI
+> reads the same VIN.
 
 ### 4. The VIN settles which vehicle it is
 
@@ -150,8 +157,8 @@ log line says which car it is. One key belongs to one vehicle.
 
 The vehicles are one JSON document in QML `Settings` (category
 `vehicles`, beside `session`), as `adapterVersions` is:
-`{ "salt": "…", "picked": "<id>", "list": [ { "id", "label",
-"vinKey", "uri", "unplotted": [ … ] } ] }`. The rules (parse and
+`{ "salt": "...", "picked": "<id>", "list": [ { "id", "label",
+"vinKey", "uri", "unplotted": [ ... ] } ] }`. The rules (parse and
 validate, a label's validity, new, duplicate, rename, forget the VIN,
 forget, forget all, recognize, remember a connection or a plotted
 list) are pure functions in a `pragma Singleton` QML object,
@@ -192,7 +199,7 @@ and `newSalt()`, the VIN cleared at disconnect.
   characters) and model-year character are standard, but its model is
   in the manufacturer's own descriptor section, which only a
   maker-by-maker table or an online decoder reads. An online decoder
-  sends the VIN off the device, against §3; an offline table of
+  sends the VIN off the device, against section 3; an offline table of
   manufacturer codes gives the make alone, drifts, and misnames
   rebadged and imported cars. And the label reaches folder names and
   logs that get shared, where "Vehicle 2" says nothing about the car.
@@ -200,7 +207,7 @@ and `newSalt()`, the VIN cleared at disconnect.
 - **Leave deleting and copying to the settings file.** The store is
   one JSON value, so a skilled user could edit it, but on Windows it's
   in the registry, on a phone it can't be reached at all, and a
-  mistyped edit drops the whole document (§5). Each operation is a
+  mistyped edit drops the whole document (section 5). Each operation is a
   button instead.
 - **Rename the recording's folder when the VIN settles it.** On
   Windows a folder with open files can't be renamed, and the folder's
@@ -228,3 +235,17 @@ and `newSalt()`, the VIN cleared at disconnect.
   settings and a folder with the wrong name, and the log line says so.
 - Dashboard arrangements (STATUS, "User-configurable dashboards") would
   join a vehicle's entry when they exist; the document has room.
+
+## Appendix: plotted and unplotted (2026-10-31)
+
+Live plots a ranked set's top ranked rows rather than every row
+([ADR-0039](0039-full-service01-coverage.md) section 8), so storing
+the unticked rows alone no longer says what a vehicle plots. An entry
+keeps two lists: `unplotted`, the rows the user unticked from
+Live's default, and `plotted`, the rows ticked past it; every other
+row follows the default, so a signal new to the set plots by its
+rank. A stored entry without `plotted` reads as none, so a vehicle
+saved before keeps its unticks; one with `plotted` that isn't a list
+of names drops the document whole, as any damaged field does
+(section 5). `rememberPlotting` stores both, `setPlotChoices` applies
+them.

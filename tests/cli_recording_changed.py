@@ -3,7 +3,7 @@
 #          a replay whose recording is cut short under it stops early
 #          (ECUIO_ERR_RECORDING_CHANGED), and havne-cli stream ends with
 #          it rather than waiting for a last frame that never comes
-#          (ADR-0031 §5)
+#          (ADR-0031 section 5)
 #
 #   python tests/cli_recording_changed.py <havne-cli>
 #

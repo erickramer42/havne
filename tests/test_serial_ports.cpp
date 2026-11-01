@@ -1,6 +1,6 @@
 // File/layer: tests/test_serial_ports.cpp | GTest, UNIT tier, headless CI job
 // Testing: UNIT: serial-port discovery (core/include/ecuio/serial.h,
-//          core/src/serial_ports.h; ADR-0026 §7): the order with digit
+//          core/src/serial_ports.h; ADR-0026 section 7): the order with digit
 //          runs by value, the /dev names listed on macOS and elsewhere,
 //          the dedupe and the copy up to a capacity over made-up ports,
 //          the null arguments, and the contract against the machine's

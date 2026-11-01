@@ -235,7 +235,7 @@ TestCase {
             verify(!find(page, name).visible, name + " folded again")
     }
 
-    // Connect… elsewhere opens what to connect to, at the page's top
+    // Connect... elsewhere opens what to connect to, at the page's top
     function test_showAdaptersOpensWhatToConnectTo() {
         const page = createPage(true)
         page.j2534Devices = []
@@ -401,7 +401,7 @@ TestCase {
     }
 
     // The phone's Bluetooth adapters join the list after the ports
-    // (ADR-0028 §2): a paired classic one fills elm327://bt:<address>, a
+    // (ADR-0028 section 2): a paired classic one fills elm327://bt:<address>, a
     // BLE one elm327://ble:<address>, the query kept; the count names
     // them. The desktop lists none, so the test sets them
     function test_bluetoothRowsFillAStreamUri() {
@@ -441,7 +441,7 @@ TestCase {
     }
 
     // A machine's CAN interfaces join the list after the ports (ADR-0032
-    // §7): a row fills socketcan://<name>, and its line says why core
+    // section 7): a row fills socketcan://<name>, and its line says why core
     // would refuse it before a connect is tried. Only Linux lists any, so
     // the test sets them
     function test_canRowsFillASocketcanUri() {
@@ -628,6 +628,16 @@ TestCase {
         press(page, "preset_mock")
         compare(uri.text, "mock://demo?profile=uds-generic",
                 "a new scheme keeps the keys it takes: the mock takes no identify=")
+    }
+
+    // diagnose= (ADR-0037) is a key the mock takes too: it survives the
+    // move from an adapter to the simulated car
+    function test_diagnoseOffCrossesToTheMock() {
+        const page = createPage()
+        const uri = find(page, "uriField")
+        type(uri, "j2534://V?identify=0&diagnose=0")
+        press(page, "preset_mock")
+        compare(uri.text, "mock://demo?diagnose=0")
     }
 
     // The vehicle run sheet's URIs, typed, pass through untouched
@@ -825,7 +835,7 @@ TestCase {
         return page.vehicles.list.map(v => v.label)
     }
 
-    // ADR-0027 §1: every change to the list is made in the section, a
+    // ADR-0027 section 1: every change to the list is made in the section, a
     // label typed or left to its default
     function test_theVehicleSectionMakesNamesAndForgetsVehicles() {
         let page = createPage()
@@ -917,7 +927,7 @@ TestCase {
         Bridge.signalModel.toggleSubscribed(0)
     }
 
-    // ADR-0027 §2-§4 through the fake: the connect keeps the URI, the VIN
+    // ADR-0027 sections 2-4 through the fake: the connect keeps the URI, the VIN
     // is learned and logged, Live's plotting is kept and comes back
     function test_anAdaptersConnectKeepsItsVehiclesSetup() {
         if (Harness.fakeDllPath === "")
@@ -938,10 +948,13 @@ TestCase {
         verify(log.includes("Vehicle: Daily driver (recognized from now on)"), log.join("\n"))
         verify(!JSON.stringify(page.vehicles).includes("FAKEJ2534VIN"), "no VIN in the store")
 
-        Bridge.signalModel.toggleSubscribed(0)
+        Bridge.signalModel.toggleSubscribed(1)   // Coolant Temp: plotted by rank
         const unticked = Bridge.signalModel.unplottedNames()
-        compare(unticked.length, 1)
+        compare(unticked, ["Coolant Temp"])
         compare(page.pickedVehicle.unplotted, unticked, "an untick is kept")
+        Bridge.signalModel.toggleSubscribed(5)   // Throttle Position: unranked
+        compare(Bridge.signalModel.plottedNames(), ["Throttle Position"])
+        compare(page.pickedVehicle.plotted, ["Throttle Position"], "a tick past the default too")
 
         Bridge.disconnectSession()
         tryVerify(() => !Bridge.disconnecting, 5000, "disconnect ends")
@@ -949,6 +962,7 @@ TestCase {
         press(page, "connectButton")
         tryVerify(() => Bridge.connected, 10000, "connects again")
         compare(Bridge.signalModel.unplottedNames(), unticked, "the untick comes back")
+        compare(Bridge.signalModel.plottedNames(), ["Throttle Position"], "and the tick")
         tryVerify(() => log.includes("Vehicle: Daily driver"), 5000, "recognized: " + log.join("\n"))
         Bridge.logMessage.disconnect(collect)
     }

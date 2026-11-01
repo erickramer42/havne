@@ -119,7 +119,7 @@ the run saw one block 25 s and a second start beside it.
   never be stopped, so the link would survive; but the chart, the
   recorder and the activity log would still stop, and frames past the
   cap would still be lost from the recording. Kept as the fallback if
-  §1's background drawing proves unsafe on a phone.
+  section 1's background drawing proves unsafe on a phone.
 - **The recorder in core** (ADR-0017's alternative): it would record
   through any GUI pause, but needs new ABI for values and events, and
   leaves the chart and the link as they are.
@@ -140,7 +140,7 @@ the run saw one block 25 s and a second start beside it.
   shown. If that costs enough to matter, the bridge can skip the
   model's updates while suspended and keep recording.
 - Qt's warning stands until the phone runs pass: a crash on return
-  sends §1 back to the alternative above.
+  sends section 1 back to the alternative above.
 - The manifest is the app's own, so a Qt upgrade means diffing it
   against the new template. The rename (Havne) moves the service's
   package with the rest.
@@ -157,24 +157,24 @@ the build of `ee1db00` on Android 16:
   stayed connected through 2 minutes on Home and the screen off, the
   notification with it; Android never froze the app while the service
   ran. Bluetooth off and on with the screen off recovered in 4.0 s
-  with one socket connect (§3).
+  with one socket connect (section 3).
 - **The CPU still sleeps.** With the screen off it slept about 100 s
   of one 118 s stretch: no request went out and no frame came in. The
   service keeps the process from being frozen, not the CPU awake. Core's
   host clock on Android (`CLOCK_MONOTONIC`) doesn't count deep sleep, so
   Live and the recording joined the values on either side with no gap;
   only the activity log's wall-clock column against its session
-  seconds shows it. **§2 adds a partial wake lock**, held by the
+  seconds shows it. **Section 2 adds a partial wake lock**, held by the
   service from its start to its stop (`WAKE_LOCK`, granted without a
   prompt; CI's manifest check names it): the CPU runs for as long as
   an adapter session does, the screen still goes off. Phase 8b's
   screen off runs again on the car, and its sheet now compares the two
   clocks.
-- **`mock://` and `replay://` pause in the background**, as §2 left
+- **`mock://` and `replay://` pause in the background**, as section 2 left
   them without the service: Android froze the app's process once
   (19:52:49 to 19:58:45) and let the CPU sleep another time, so a run
   may or may not show a gap, as Android decides. Accepted: they are
-  desk tools. §5's first check expected no gap; the sheet no longer
+  desk tools. Section 5's first check expected no gap; the sheet no longer
   does.
 - Whether core's host clock should count deep sleep (`CLOCK_BOOTTIME`
   on Android and Linux), so that a sleep shows as a gap, is a decision
@@ -199,8 +199,8 @@ under `mock://`, in some screen-offs and not others.
   render loop the render thread waits there and the GUI thread waits
   on it; under the basic loop the GUI thread waits there itself. Qt's
   guard against it holds only while the event loops are stopped, which
-  §1 turns off.
-- **§1 adds: no drawing while the app isn't active.** On Android the
+  section 1 turns off.
+- **Section 1 adds: no drawing while the app isn't active.** On Android the
   window drops `Expose` and `UpdateRequest` events unless the app is
   Active (`main.cpp`'s `NoDrawWhileInactive`), and Qt Quick runs its
   basic render loop (`QSG_RENDER_LOOP=basic` unless set), so every draw
@@ -216,7 +216,7 @@ under `mock://`, in some screen-offs and not others.
 > the screen off with QtTune in front for five minutes, then Home, with
 > no gap over 1 s in 481 s. The same run found `BtLink::write` reading
 > the socket's error after a failed write whose handler had already
-> dropped the socket (§3's rules report and drop on a failure); it now
+> dropped the socket (section 3's rules report and drop on a failure); it now
 > checks the socket is still there.
 - Keeping the Bluetooth link and the recorder off the GUI thread, the
   alternative this ADR set aside, would make any other GUI-thread stall

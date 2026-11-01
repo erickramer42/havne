@@ -2,11 +2,11 @@
 // Testing: UNIT: BridgeTest.BtConnect* (test_bridge): an open while a
 //          connect runs adopts it, an abandoned connect that succeeds is
 //          closed, a failed adopted connect starts a fresh one, one connect
-//          at a time throughout; BENCH: the phone (ADR-0029 §5)
+//          at a time throughout; BENCH: the phone (ADR-0029 section 5)
 
 #pragma once
 
-// When a classic Bluetooth link connects, as plain rules (ADR-0029 §3), so
+// When a classic Bluetooth link connects, as plain rules (ADR-0029 section 3), so
 // they are testable without a phone. QtBluetooth's Android socket connects
 // through Java's blocking connect(), which an abort can't cut short: the
 // connect runs to its end, up to half a minute, whatever the link does. So

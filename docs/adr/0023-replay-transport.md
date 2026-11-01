@@ -27,7 +27,7 @@ Three needs meet here:
   test car's replies on both dates; a test that replays them and checks the
   values keeps that true without the car.
 - **A load source.** Decoding on the worker (STATUS.md, backlog
-  "Full signal sets at full rate"; Known Issue #4, and per-sample
+  "Full signal sets at full rate", and per-sample
   time on the chart) needs real
   traffic at more than real time, with frames that carry their own
   times. `bench_bridge` measured the GUI thread's match against every
@@ -112,7 +112,7 @@ the row's `timestamp_us`; a row whose `timestamp_us` steps backwards
 A frame's own `timestamp_us` is the recording's session time, rebased
 so the first row is 0 and pushed on by the file's span on each loop,
 so it never decreases. Under `speed` other than 1 it runs at the
-recording's pace, not the wall clock's: a frame replayed at 10× still
+recording's pace, not the wall clock's: a frame replayed at 10x still
 says when it crossed the car's bus. That is what makes a replay the
 load test for per-sample time on the chart. `id`,
 `flags` and `data` go out as recorded, the `TRUNCATED`, `EXTENDED` and
@@ -176,7 +176,7 @@ load test for per-sample time on the chart. `id`,
   identification reply (`49 02/04/06/0A`, `62 F1 xx`, six rows) removed,
   nothing else changed. A test replays it under `obd2` at `max`, checks
   the sheet's values (RPM peaking at 1,261, the module voltage's 9.56 V
-  dip at the starter, coolant 60 to 86 °C), and fails if the fixture
+  dip at the starter, coolant 60 to 86 deg C), and fails if the fixture
   holds an identification reply. Only the scrubbed copy is committed;
   the raw recordings stay in `Testing/bench-raw/`.
 
@@ -240,7 +240,7 @@ the change. Those numbers go in that ADR.
   of columns in the recorder needs a reader change in the same commit,
   which the round-trip test catches.
 
-- Settings takes a replay as a typed URI. A "Replay a recording…" row
+- Settings takes a replay as a typed URI. A "Replay a recording..." row
   with a folder picker would bring Qt Quick Dialogs, a new Qt module
   for the app, for one convenience that no test needs; deferred.
 

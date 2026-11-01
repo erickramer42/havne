@@ -1,4 +1,4 @@
-// File/layer: cli/sleep_watch.h | havne-cli, a sleep between two polls (ADR-0033 §6)
+// File/layer: cli/sleep_watch.h | havne-cli, a sleep between two polls (ADR-0033 section 6)
 // Testing: UNIT (tests/test_cli.cpp, CliSleepTest); a real sleep BENCH
 //          (BENCH prep #27)
 //

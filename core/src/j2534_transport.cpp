@@ -7,8 +7,11 @@
 //          channel without ?filter=, rotation, ?poll= precedence,
 //          the probe's walk, its drops, ?probe=0 and its resumption on
 //          recovery, the support report it publishes, uds-generic's
-//          requests, ECU prefix and DID scan, and identification's
-//          requests, ?identify=0 and the report it publishes.
+//          requests, ECU prefix and DID scan, identification's
+//          requests, ?identify=0 and the report it publishes, and
+//          diagnostics' (ADR-0037): the report, ?diagnose=0 and Read
+//          again, and a clear with the engine stopped and running
+//          (ADR-0038).
 //          test_j2534_health, also cross-arch: the request engine's
 //          pacing (the floor, the wait, negative and pending replies,
 //          two channels at once), the drain in passive mode, and the
@@ -21,7 +24,9 @@
 //          BUFFER_OVERFLOW bit) flagged on the next frame with the link
 //          unchanged.
 // CI: non-Windows builds a linking stub; core.cpp routes j2534://
-//     only on _WIN32, so the stub is unreachable there
+//     only on _WIN32, so the stub is unreachable there;
+//          Reply timing on the adapter's clock (ADR-0042):
+//          J2534HealthTest.VxTimingReportsEachRequestOnTheAdaptersClock
 
 #include "ecuio/core.h"
 #include "ecuio/internal.h"
@@ -45,8 +50,8 @@
 /* The query keys parse_query reads, for create's check (internal.h);
  * every platform's, so create links where the transport is a stub. */
 extern "C" const char* const ecuio_j2534_query_keys[] = {
-    "baud", "flags", "filter", "txid", "poll", "probe", "identify", "profile",
-    "did", nullptr};
+    "baud",     "flags",    "filter",  "txid", "poll", "probe",
+    "identify", "diagnose", "pack",    "profile", "did", nullptr};
 
 #ifdef _WIN32
 
@@ -134,7 +139,7 @@ struct ecuio_j2534_transport {
      *                identification items, or the one ?poll= request,
      *                which outranks them all; empty for passive receive.
      *                Built at attach, the worker's alone after.
-     *   probe        ADR-0015 §4 for the set's rotation: on unless
+     *   probe        ADR-0015 section 4 for the set's rotation: on unless
      *                ?probe=0 or ?poll=. Frozen pre-thread.
      *   identify     ADR-0021: each channel asks its ECU's identity
      *                once; on with the set's requests unless ?identify=0
@@ -142,6 +147,7 @@ struct ecuio_j2534_transport {
     j2534_channel chans[ECUIO_MAX_CHANNELS] = {};
     uint32_t chan_count = 0;
     ecuio_request_engine engine;
+    std::unique_ptr<ecuio_timing_table> timing; /* the engine's, ADR-0042 */
     bool probe = false;
     bool identify = false;
     /* Frame time (j2534_clock.h): the host's at the first frame, counted
@@ -386,7 +392,7 @@ uint32_t read_timeout_ms(int64_t next_us)
 /* Worker entrypoint: mirrors mock_worker's discipline: impl-owned
  * state, dispatch through the session snapshot path, stop via atom.
  *
- * One loop serves every mode (ADR-0015 §1). With requests (the set's
+ * One loop serves every mode (ADR-0015 section 1). With requests (the set's
  * rotation, or ?poll='s one), each pass ends the waits that ran out,
  * sends each idle channel's next request once its floor has passed,
  * then reads once, for at most the slice, and gives a matched frame to
@@ -396,7 +402,7 @@ uint32_t read_timeout_ms(int64_t next_us)
  * once, so every mode drains what has arrived; an empty one waits out
  * its timeout.
  *
- * With the probe on (§4) the engine walks each channel's supported-PID
+ * With the probe on (section 4) the engine walks each channel's supported-PID
  * chain before its rotation, and the walk resumes, where it stopped,
  * whenever the link returns to OK: a connect with the ignition off
  * answers nothing, and the ECU's answers come once it wakes.
@@ -412,6 +418,10 @@ void j2534_worker(ecuio_j2534_transport* t)
     link_health h(t->session->last_error, t->session->error_count);
     uint32_t published[ECUIO_MAX_CHANNELS] = {};
     uint32_t published_identity[ECUIO_MAX_CHANNELS] = {};
+    uint32_t published_diagnostics[ECUIO_MAX_CHANNELS] = {};
+    uint32_t diag_seen = 0;
+    uint32_t clear_seen[ECUIO_MAX_CHANNELS] = {};
+    int64_t timing_at = 0;
     if (requests && t->probe) {
         ecuio_engine_probe(&e, engine_now_us(t));
     }
@@ -445,6 +455,10 @@ void j2534_worker(ecuio_j2534_transport* t)
         const auto read_start = std::chrono::steady_clock::now();
         const read_outcome o = pump_one(t, timeout_ms);
         if (requests && o.matched) {
+            /* the refresh interval on the adapter's clock (ADR-0042) */
+            e.stamp_set = true;
+            e.stamp_us = static_cast<int64_t>(t->rx_frame.timestamp_us);
+            e.stamp_breaks = t->clock.host_steps;
             (void)ecuio_engine_on_frame(&e, o.chan, o.payload, o.len,
                                         engine_now_us(t), nullptr);
         }
@@ -459,12 +473,20 @@ void j2534_worker(ecuio_j2534_transport* t)
                 ecuio_engine_rescan(&e);
             }
         }
+        if (requests) {
+            ecuio_take_diag_request(t->session, &e, diag_seen);
+            ecuio_take_clear_requests(t->session, &e, clear_seen);
+        }
         for (uint32_t c = 0; requests && c < t->chan_count; ++c) {
             ecuio_publish_support(t->session, e, c, t->chans[c].rx_id,
                                   published[c]);
             ecuio_publish_identity(t->session, e, c, t->chans[c].rx_id,
                                    published_identity[c]);
+            ecuio_publish_diagnostics(t->session, e, c, t->chans[c].rx_id,
+                                      published_diagnostics[c]);
         }
+        ecuio_publish_timing(t->session, e, nullptr, engine_now_us(t),
+                             timing_at, false);
 
         if (h.backoff_ms > 0) {
             if (backoff_sleep(t, h.backoff_ms)) {
@@ -483,6 +505,8 @@ void j2534_worker(ecuio_j2534_transport* t)
             }
         }
     }
+    ecuio_publish_timing(t->session, e, nullptr, engine_now_us(t), timing_at,
+                         true);
 }
 
 /* The query's values (ecuio_j2534_query_keys). Contract (strict: a bad
@@ -491,7 +515,7 @@ void j2534_worker(ecuio_j2534_transport* t)
  *   - lowercase keys only:
  *       baud   decimal, nonzero
  *       flags  0x-hex or decimal; 0 legal
- *       filter, txid, poll, probe, identify: the request keys
+ *       filter, txid, poll, probe, identify, diagnose: the request keys
  *              (ecuio_request_param); ?filter='s channel registers a
  *              FLOW_CONTROL filter
  *       profile core's key, read by ecuio_session_create
@@ -804,6 +828,7 @@ ecuio_status_t j2534_attach(ecuio_session_t* session, const char* uri,
     if (st != ECUIO_OK) {
         return st;
     }
+    ecuio_attach_timing(t->engine, t->timing, ECUIO_TIMING_CLOCK_ADAPTER);
 
     /* Connect flags: ?flags= as given, plus CAN_29BIT_ID when the
      * channels use 29-bit IDs, so the channel opens at the width its

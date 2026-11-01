@@ -5,7 +5,7 @@
 #          package_check.sh installs and uses what it makes
 #
 # Builds core and havne-cli from the source tree and packs them
-# (ADR-0035 §2–4), into the out dir:
+# (ADR-0035 section 2-4), into the out dir:
 #   havne-core_<version>_amd64.deb                  /usr: havne-cli, the
 #       static archive, the public headers, a CMake package, ecuio.pc
 #   havne-core-dbgsym_<version>_amd64.deb           havne-cli's debug info
@@ -21,7 +21,7 @@
 #   - time: SOURCE_DATE_EPOCH (default the commit's time) for every
 #     file's time, dpkg-deb's and tar's
 #   - order, owners and modes set, never the build machine's
-# Checks: the USDT probes are in (ADR-0034 §4), the build ID and debug
+# Checks: the USDT probes are in (ADR-0034 section 4), the build ID and debug
 # link match, no internal header ships, and no file holds a build path.
 #
 # Usage: packaging/linux/make-core-packages.sh <version> [build dir] [out dir]
@@ -78,7 +78,7 @@ tarroot=$stage/$tarname
 cmake --install "$build" --prefix "$debroot/usr" > /dev/null
 cmake --install "$build" --prefix "$tarroot" > /dev/null
 
-# havne-cli's debug info, by build ID (ADR-0034 §2)
+# havne-cli's debug info, by build ID (ADR-0034 section 2)
 cli=$build/cli/havne-cli
 id=$(readelf -n "$cli" | sed -n 's/^ *Build ID: *\([0-9a-f]*\)$/\1/p')
 [ "${#id}" -ge 16 ] || die "havne-cli has no GNU build ID"

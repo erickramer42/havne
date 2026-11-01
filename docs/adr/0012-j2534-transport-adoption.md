@@ -21,9 +21,9 @@ After Part 4 the vendor-call relay works through both backends, but
 
    | Parameter | Range | Default | What it does |
    |---|---|---|---|
-   | `?filter=` | 1–`0x1FFFFFFF` | none | Receive ID. Registers a `FLOW_CONTROL` filter at start. |
-   | `?txid=` | 1–`0x1FFFFFFF` | `0x7E0` (OBD-II physical) | Transmit ID. |
-   | `?poll=` | PID 1–`0xFF` | none | Runs a Mode-01 request loop every 100 ms. |
+   | `?filter=` | 1-`0x1FFFFFFF` | none | Receive ID. Registers a `FLOW_CONTROL` filter at start. |
+   | `?txid=` | 1-`0x1FFFFFFF` | `0x7E0` (OBD-II physical) | Transmit ID. |
+   | `?poll=` | PID 1-`0xFF` | none | Runs a Mode-01 request loop every 100 ms. |
 
    If either ID is above `0x7FF`, `CAN_29BIT_ID` is set on both the
    filter and the writes.

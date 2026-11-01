@@ -2,8 +2,9 @@
 // Testing: the Log page shows the activity log: "Ready.", then each line
 //          the bridge logs, stamped HH:MM:SS.mmm, kept to its newest
 //          lines. With developer mode off it shows nothing else; on, the
-//          Activity | Frames switch shows the raw frame table, and turning
-//          developer mode off goes back to the activity log. Settings'
+//          Activity | Frames switch shows the raw frame table, staying in
+//          place in either view, and turning developer mode off goes
+//          back to the activity log. Settings'
 //          developer box sets Theme.developerMode and the mock:// preset
 //          follows it. Copy puts the whole log on the clipboard and
 //          leaves nothing selected. How the page looks is manual smoke.
@@ -91,6 +92,24 @@ TestCase {
         verify(activity.visible, "back to the activity log")
         verify(!frames.visible)
         verify(!toFrames.visible)
+    }
+
+    // The switch stays where it is when the view changes, though the
+    // buttons beside it do: a second click lands on the other option
+    function test_theViewSwitchStaysPut() {
+        Theme.developerMode = true
+        const page = create(logComponent)
+        const toFrames = find(page, "view_frames")
+        const where = () => toFrames.mapToItem(page, 0, 0).x
+        waitForRendering(page)
+        const before = where()
+        toFrames.clicked()
+        verify(find(page, "frameView").visible)
+        waitForRendering(page)
+        compare(where(), before, "the switch in the Frames view")
+        find(page, "view_activity").clicked()
+        waitForRendering(page)
+        compare(where(), before, "and back in the Activity view")
     }
 
     // Either order button, and Latest, goes to the newest row: the top in

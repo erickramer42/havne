@@ -8,7 +8,11 @@
 //          query);
 //          BridgeTest.ReplayOfAMockRecordingDecodesWhatWasRecorded (the
 //          round trip through SessionRecorder), .ReplayThatStopsEarlySaysSo;
-//          CoreTest.ReplayOfTheVehicleFixtureDecodesTheSheetsValues
+//          CoreTest.ReplayOfTheVehicleFixtureDecodesTheSheetsValues;
+//          CoreTest.ReplayFaults* (?faults= and ?seed=: each kind's
+//          effect, its count and the same faults from the same seed),
+//          BridgeTest.ReplayFaults* (the bridge and the recorder under
+//          them)
 //
 // replay:// (ADR-0023): a recording's frames.csv (ADR-0017) played back
 // through the frame API. Attach reads the whole file once and refuses a
@@ -16,11 +20,14 @@
 // and sends each frame when the recording's own session time, divided by
 // the speed, has passed. Passive: no requests and no link health, except
 // that a file changed since attach stops playback with
-// ECUIO_ERR_RECORDING_CHANGED in the error state.
+// ECUIO_ERR_RECORDING_CHANGED in the error state. ?faults= (ADR-0041)
+// drops, corrupts, cuts short or holds back frames as they play, drawn
+// from ?seed= so the same URI plays the same faults.
 
 #include "ecuio/core.h"
 #include "ecuio/internal.h"
 #include "error_detail.h"
+#include "replay_faults.h"
 #include "session.h"
 #include "uri_query.h"
 
@@ -335,6 +342,7 @@ struct ecuio_replay_transport {
                                              plays */
     uint32_t speed_milli = kSpeedDefault; /* 0 = max */
     bool loop = false;
+    replay_faults faults; /* ?faults=, ?seed= */
     std::thread worker;
     std::mutex mutex;
     std::condition_variable wake;
@@ -360,7 +368,13 @@ void replay_worker(ecuio_replay_transport* t)
     const auto start = std::chrono::steady_clock::now();
     std::vector<char>& buf = t->line;
     ecuio_frame_t* frame = t->frame.get();
+    ecuio_session_t* s = t->session;
     uint64_t base_us = 0; /* session time at the start of this pass */
+    /* ADR-0041: the draws run on across passes; stalls push every later
+     * frame back */
+    uint32_t draws = t->faults.seed;
+    uint64_t stalled_us = 0;
+    bool overflow_pending = false;
     for (;;) {
         FILE* f = t->path.open();
         if (f == nullptr || !read_header(f, buf)) {
@@ -387,7 +401,37 @@ void replay_worker(ecuio_replay_transport* t)
                 pass_us += step_us(prev, cur);
             first = false;
             prev = cur;
-            const uint64_t now_us = base_us + pass_us;
+            s->replay_frames_read.fetch_add(1, std::memory_order_relaxed);
+            if (t->faults.any) {
+                const replay_fault_verdict v =
+                    replay_fault_draw(t->faults, draws, frame->data_length);
+                if (v.stall_ms != 0) {
+                    stalled_us += static_cast<uint64_t>(v.stall_ms) * 1000;
+                    s->replay_stalled.fetch_add(1, std::memory_order_relaxed);
+                }
+                if (v.drop) {
+                    (v.overflow ? s->replay_overflowed : s->replay_dropped)
+                        .fetch_add(1, std::memory_order_relaxed);
+                    overflow_pending = overflow_pending || v.overflow;
+                    continue;
+                }
+                if (v.corrupt) {
+                    frame->data[v.corrupt_bit / 8] ^=
+                        static_cast<uint8_t>(1u << (v.corrupt_bit % 8));
+                    s->replay_corrupted.fetch_add(1, std::memory_order_relaxed);
+                }
+                if (v.truncate) {
+                    std::memset(frame->data + v.truncate_to, 0,
+                                frame->data_length - v.truncate_to);
+                    frame->data_length = v.truncate_to;
+                    s->replay_truncated.fetch_add(1, std::memory_order_relaxed);
+                }
+                if (overflow_pending) {
+                    frame->flags |= ECUIO_FRAME_FLAG_OVERFLOW;
+                    overflow_pending = false;
+                }
+            }
+            const uint64_t now_us = base_us + pass_us + stalled_us;
             frame->timestamp_us = now_us;
             {
                 std::unique_lock<std::mutex> lock(t->mutex);
@@ -459,8 +503,8 @@ const ecuio_transport_ops_t kReplayTransportOps = {replay_start, replay_detach};
 
 extern "C" {
 
-const char* const ecuio_replay_query_keys[] = {"profile", "did", "speed",
-                                               "loop", nullptr};
+const char* const ecuio_replay_query_keys[] = {
+    "profile", "did", "speed", "loop", "faults", "seed", nullptr};
 
 ecuio_status_t ecuio_replay_transport_attach(ecuio_session_t* session,
                                              const char* uri,
@@ -471,6 +515,7 @@ ecuio_status_t ecuio_replay_transport_attach(ecuio_session_t* session,
     }
     uint32_t speed = kSpeedDefault;
     bool loop = false;
+    replay_faults faults;
     for (size_t i = 0; i < query->count; ++i) { /* duplicates: last wins */
         const ecuio_uri::param& p = query->params[i];
         if (p.is("speed") && !parse_speed(p, &speed)) {
@@ -484,6 +529,24 @@ ecuio_status_t ecuio_replay_transport_attach(ecuio_session_t* session,
                 return ECUIO_ERR_BAD_URI;
             }
             loop = p.val[0] == '1';
+        }
+        if (p.is("faults")) {
+            replay_faults f;
+            f.seed = faults.seed;
+            if (!replay_parse_faults(p.val, p.val_len, &f)) {
+                ecuio_detail_set(
+                    "?faults= takes <kind>:<percent> joined by ',', each kind "
+                    "once: drop, overflow, corrupt, truncate, and "
+                    "stall:<percent>:<ms> (1 to 10000 ms); a percent is more "
+                    "than 0 and at most 100, with up to three decimals");
+                return ECUIO_ERR_BAD_URI;
+            }
+            faults = f;
+        }
+        if (p.is("seed") &&
+            !replay_parse_seed(p.val, p.val_len, &faults.seed)) {
+            ecuio_detail_set("?seed= takes a number from 1 to 4294967295");
+            return ECUIO_ERR_BAD_URI;
         }
     }
 
@@ -548,6 +611,7 @@ ecuio_status_t ecuio_replay_transport_attach(ecuio_session_t* session,
         impl->session = session;
         impl->speed_milli = speed;
         impl->loop = loop;
+        impl->faults = faults;
         session->transport =
             new ecuio_transport_t{&kReplayTransportOps, nullptr};
         session->transport->impl = impl.release();
@@ -563,6 +627,9 @@ ecuio_status_t ecuio_replay_transport_attach(ecuio_session_t* session,
     session->info.replay_speed_milli = speed;
     if (loop) {
         session->info.flags |= ECUIO_SESSION_INFO_REPLAY_LOOP;
+    }
+    if (faults.any) {
+        session->info.flags |= ECUIO_SESSION_INFO_REPLAY_FAULTS;
     }
     return ECUIO_OK;
 }

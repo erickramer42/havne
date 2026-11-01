@@ -1,2 +1,2 @@
 {"schema": 1, "type": "start"}
-{"code": 12, "detail": "mock:// takes no query key 'speed', only profile and did", "message": "malformed transport URI", "type": "error"}
+{"code": 12, "detail": "mock:// takes no query key 'speed', only profile, did and diagnose", "message": "malformed transport URI", "type": "error"}

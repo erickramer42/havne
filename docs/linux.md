@@ -88,7 +88,7 @@ was built.
 | ELM327 over USB (an OBDLink, the OBDX Pro in its ELM mode) | `elm327:///dev/ttyUSB0` (or `ttyACM0`). Settings lists `ttyUSB*`, `ttyACM*` and `rfcomm*` |
 | ELM327 over WiFi | `elm327://192.168.0.10:35000` once the computer has joined the adapter's network |
 | ELM327 over Bluetooth Classic | bind the paired adapter to a serial device, `sudo rfcomm bind 0 <address>`, then `elm327:///dev/rfcomm0` |
-| A CAN interface (candleLight, CANable, PEAK, Kvaser) | `socketcan://can0`, listen-only (below) |
+| A CAN interface (candleLight, CANable, PEAK, Kvaser) | `socketcan://can0`, listen-only, or `socketcan://can0?profile=obd2&baud=500000` to ask the car (below) |
 | J2534 | Windows only: J2534 drivers are Windows DLLs |
 
 **Serial ports need a group.** A serial device belongs to the `dialout`
@@ -105,20 +105,37 @@ Linux desktop a Classic adapter goes through `rfcomm` as above.
 
 ### SocketCAN
 
-`socketcan://` reads a CAN interface you have brought up, and sends
-nothing; Havne never configures an interface. It refuses a controller
-that could transmit, so bring it up in listen-only mode at the bus's
-rate:
+`socketcan://` uses a CAN interface you have brought up; Havne never
+configures one. Settings and `havne-cli devices` list them.
+
+**Listening** (`raw`, the default, or `mock`) sends nothing and needs a
+controller that can't transmit, so bring it up in listen-only mode at
+the bus's rate:
 
 ```sh
 sudo ip link set can0 up type can bitrate 500000 listen-only on
 havne-cli stream socketcan://can0
 ```
 
-Settings and `havne-cli devices` list the CAN interfaces. Profiles that
-ask the car (`obd2`, `uds-generic`) don't run on SocketCAN yet: a
-session there logs the bus (`raw`) or decodes the simulated car
-(`mock`).
+**Asking the car** (`obd2`, `uds-generic`) sends requests through ISO-TP
+in core ([ADR-0040](adr/0040-socketcan-requests-isotp.md)), so the
+controller transmits. A controller at the wrong rate disturbs the car's
+bus, so Havne sends only through one brought up to stop at once: in
+normal mode at the rate `?baud=` states, never restarting itself after
+a bus-off, in one-shot mode (a failed frame goes out once) and with no
+errors counted. Until its first request comes back from the bus, a CAN
+error ends the session's sending. Check the rate with a listening
+session first, while the car's bus has traffic, then:
+
+```sh
+sudo ip link set can0 down
+sudo ip link set can0 up type can bitrate 500000 restart-ms 0 one-shot on
+havne-cli stream "socketcan://can0?profile=obd2&baud=500000" --values
+```
+
+Not every adapter's driver offers one-shot mode
+(`ip -details link show can0` lists what it supports); one without it
+can listen but not ask. No real controller has sent through Havne yet.
 
 **Without hardware,** Linux's virtual CAN bus carries the simulated car:
 
@@ -173,7 +190,14 @@ counts the frames per CAN ID.
   and took input, and closing the window ended the app; the app and the
   core built and their tests run with GCC on Ubuntu 26.04; SocketCAN on
   `vcan0`.
-- **Not yet:** the app on a Linux machine's own desktop, an ELM327 adapter
+- **A Linux desktop:** v0.3.4's AppImage on Xubuntu 26.10 (Xfce, an X11
+  session) on a 2011 desktop with a second-generation Core i7 and 8 GB
+  (2026-10-30). Made executable and started as it came, with no FUSE
+  workaround; `mock://demo` ran smoothly, and its recording landed in
+  `~/Documents/Havne/recordings/`. With Live showing, the app took
+  about 12 % of the CPU, and 9-10 % once the OpenGL and font packages
+  above were installed.
+- **Not yet:** an ELM327 adapter
   on a Linux machine (the serial code is tested against a fake adapter
   on a pseudo-terminal), a real CAN controller, and a car through
   SocketCAN. [testing.md](testing.md) keeps the details.

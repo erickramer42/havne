@@ -1,7 +1,7 @@
 // File/layer: app/androidsession.cpp | Qt6 Core, app layer, C++17; built on
 //             Android only
 // Testing: CI's android-build compiles it; BENCH and Vehicle on the phone
-//          (ADR-0029 §5)
+//          (ADR-0029 section 5)
 
 #include "androidsession.h"
 #include "sessionbridge.h"

@@ -52,3 +52,10 @@ struct SignalListModelForeign
     QML_FOREIGN(SignalListModel)
     QML_ANONYMOUS
 };
+
+struct LiveSignalModelForeign
+{
+    Q_GADGET
+    QML_FOREIGN(LiveSignalModel)
+    QML_ANONYMOUS
+};

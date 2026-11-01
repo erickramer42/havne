@@ -18,7 +18,11 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QHash>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QRegularExpression>
+#include <QSet>
 #include <QSettings>
 #include <QStringList>
 #include <QTemporaryDir>
@@ -35,6 +39,7 @@
 #include <initializer_list>
 #include <memory>
 #include <thread>
+#include <map>
 #include <vector>
 
 #include "blepicker.h"
@@ -42,7 +47,10 @@
 #include "carryover.h"
 #include "sessionbridge.h"   // SessionBridge + FrameListModel
 #include <ecuio/profile.h>
+#include <ecuio/signals.h>
 #include <ecuio/serial.h>
+#include <ecuio/signal_sets.h>
+#include "pid_support.h" // core/src: core's judgment, fed to the model
 
 #ifdef _WIN32
 #ifndef NOMINMAX
@@ -56,6 +64,18 @@
 #endif
 
 namespace {
+
+/* The obd2 set's signals core judges unsupported against reports: what
+ * ecuio_session_get_unsupported_signals hands the bridge */
+std::vector<uint16_t> unsupportedIds(const ecuio_channel_support_t* reports,
+                                     uint32_t n)
+{
+    const ecuio_signal_set_t* set = ecuio_obd2_signal_set();
+    std::vector<uint16_t> ids(set->count);
+    ids.resize(ecuio_unsupported_signals(*set, reports, n, ids.data(),
+                                         static_cast<uint32_t>(ids.size())));
+    return ids;
+}
 
 /* Spin the GUI event loop for `ms`, letting queued invocations drain.
  * Without this, worker-posted lambdas never execute. */
@@ -144,6 +164,13 @@ QByteArray osEnv(const char* name)
 #endif
 }
 
+/* The fake ECU's diagnostics as the activity log words them (ADR-0037):
+ * the fake J2534 DLL's and the mock's alike (core/src/mock_ecu.h) */
+const char* const kFakeEcuDiagnosticsLine =
+    "ECU 0x7E8 diagnostics: MIL on; stored P0301 P0420 U0100; pending P0171 "
+    "C0035 B1001; permanent P0420; readiness 8 of 8 complete; freeze frame "
+    "for P0301";
+
 } // namespace
 
 int main(int argc, char** argv)
@@ -201,7 +228,7 @@ TEST(BridgeTest, FailedConnectNamesItsCause)
     SessionBridge bridge;
     EXPECT_EQ(bridge.connectSession("mock://demo?interval=10"),
               QStringLiteral("malformed transport URI: mock:// takes no query "
-                             "key 'interval', only profile and did"));
+                             "key 'interval', only profile, did and diagnose"));
     EXPECT_EQ(bridge.connectSession("mock://demo?profile=bogus"),
               QStringLiteral("unknown profile: no profile is named 'bogus'"));
     EXPECT_FALSE(bridge.connected());
@@ -290,7 +317,7 @@ TEST(BridgeTest, BlePickerExpandsShortUuids)
               QStringLiteral("6e400001-b5a3-f393-e0a9-e50e24dcca9e"));
 }
 
-// ADR-0028 §2's order: the Nordic UART service first, then FFF0, then
+// ADR-0028 section 2's order: the Nordic UART service first, then FFF0, then
 // FFE0, whatever order the adapter lists them in
 TEST(BridgeTest, BlePickerTakesTheListedServicesInOrder)
 {
@@ -926,7 +953,7 @@ TEST(BridgeTest, AWindowShowsItsNewestAndChartsItsEnvelope)
 
 namespace {
 
-/* Dispatches n frames with ID 0x123 and stamps first, first + 1, …,
+/* Dispatches n frames with ID 0x123 and stamps first, first + 1, ...,
  * letting each burst drain so none is dropped at the in-flight gate. */
 void dispatchNumbered(SessionBridge& bridge, int first, int n)
 {
@@ -1246,7 +1273,7 @@ TEST(BridgeTest, DispatchedShortFrameHonorsDataLength)
 
     // Unique timestamp so we can find OUR row among mock frames
     ecuio_frame_t f{};
-    f.timestamp_us = 777777;   // steady-clock µs from the mock won't collide
+    f.timestamp_us = 777777;   // steady-clock us from the mock won't collide
     f.arbitration_id = 0x0C0;  // telemetry ID: decodes (gate-consistent)
     f.channel_id = 0;
     f.data_length = 4;          // the whole point: NOT 8
@@ -2401,8 +2428,9 @@ TEST(BridgeTest, ConnectLogsTheAdaptersSession)
 }
 
 /* The probe's answer reaches the activity log once: the fake's ECU lists
- * the obd2 set's ten PIDs across its three bitmaps, so nothing is
- * dropped. */
+ * every linear PID J1979 defines, with 01, 41 and 7F, across its six
+ * bitmaps, so nothing the set asks is dropped. The fake answers packed
+ * requests, so a second line says so, and nothing more follows. */
 TEST(BridgeTest, ConnectLogsWhatTheEcuSupports)
 {
     SessionBridge bridge;
@@ -2415,12 +2443,15 @@ TEST(BridgeTest, ConnectLogsWhatTheEcuSupports)
     const auto ecu_lines = [&log]() {
         return log.filter(QStringLiteral("ECU 0x7E8:"));
     };
-    ASSERT_TRUE(spinUntil([&]() { return !ecu_lines().isEmpty(); }, 5000))
-        << "no ECU line in the log";
+    ASSERT_TRUE(spinUntil([&]() { return ecu_lines().size() >= 2; }, 5000))
+        << ecu_lines().join('\n').toStdString();
     spinLoop(300);
-    ASSERT_EQ(ecu_lines().size(), 1) << ecu_lines().join('\n').toStdString();
-    EXPECT_EQ(ecu_lines().first().toStdString(),
-              "ECU 0x7E8: supports 10 PIDs; 10 requests, none dropped");
+    ASSERT_EQ(ecu_lines().size(), 2) << ecu_lines().join('\n').toStdString();
+    EXPECT_EQ(ecu_lines().at(0).toStdString(),
+              "ECU 0x7E8: supports 95 PIDs; 92 requests, none dropped");
+    EXPECT_EQ(ecu_lines().at(1).toStdString(),
+              "ECU 0x7E8: supports 95 PIDs; 92 requests, none dropped; "
+              "several PIDs per request");
 
     /* Identification (ADR-0021) logs one line once every item has an
      * outcome: the fake's FAKE values, and the two DIDs it refuses. */
@@ -2438,6 +2469,20 @@ TEST(BridgeTest, ConnectLogsWhatTheEcuSupports)
               "supplier FAKE SUPPLIER; ECU serial FAKE-SERIAL-000001; "
               "VIN (F190) FAKEJ2534VIN00001; hardware number FAKE-HW-01; "
               "2 refused: 22 F1 94 (7F 22 31), 22 F1 95 (7F 22 31)");
+
+    /* Diagnostics (ADR-0037) log one line once the list has settled:
+     * the fake ECU's codes, readiness and freeze frame */
+    const auto diagnostics_lines = [&log]() {
+        return log.filter(QStringLiteral("ECU 0x7E8 diagnostics:"));
+    };
+    ASSERT_TRUE(
+        spinUntil([&]() { return !diagnostics_lines().isEmpty(); }, 5000))
+        << "no diagnostics line in the log";
+    spinLoop(300);
+    ASSERT_EQ(diagnostics_lines().size(), 1)
+        << diagnostics_lines().join('\n').toStdString();
+    EXPECT_EQ(diagnostics_lines().first().toStdString(),
+              kFakeEcuDiagnosticsLine);
     ASSERT_TRUE(disconnectAndWait(bridge));
 }
 
@@ -2461,7 +2506,7 @@ TEST(BridgeTest, RefusedStartNamesItsCauseAndLeavesNoSession)
     EXPECT_TRUE(bridge.connected());
     ASSERT_TRUE(disconnectAndWait(bridge));
 }
-/* ADR-0027 §3: the fake's VIN reaches QML only as a salted SHA-256, once
+/* ADR-0027 section 3: the fake's VIN reaches QML only as a salted SHA-256, once
  * a session, and nothing is left of it after the disconnect. A bare URI
  * runs obd2, whose rotation asks the identity. */
 TEST(BridgeTest, AConnectsVinReachesQmlOnlyAsASaltedHash)
@@ -2490,7 +2535,7 @@ TEST(BridgeTest, AConnectsVinReachesQmlOnlyAsASaltedHash)
     EXPECT_TRUE(bridge.vinKey(QStringLiteral("salt")).isEmpty());
 }
 
-/* ADR-0027 §2: an adapter session's recording folder names the picked
+/* ADR-0027 section 2: an adapter session's recording folder names the picked
  * vehicle, as a folder name may take it; a mock session's doesn't. */
 TEST(BridgeTest, RecordingFolderNamesThePickedVehicleForAnAdapterOnly)
 {
@@ -2516,6 +2561,127 @@ TEST(BridgeTest, RecordingFolderNamesThePickedVehicleForAnAdapterOnly)
         << folders.join(',').toStdString();
     EXPECT_EQ(folders.filter(named).size(), 1)
         << folders.join(',').toStdString();
+}
+
+/* ADR-0038 through the fake J2534 DLL, whose engine turns (2000 rpm):
+ * the clear ends unsent in one line, and the generations it moved log
+ * no second diagnostics line; a Read again after it logs its read */
+TEST(BridgeTest, AClearRefusedForTheEngineLogsOneLineAndNoRead)
+{
+    FakeHooks hooks;
+    ASSERT_TRUE(hooks.load());
+    QTemporaryDir root;
+    ASSERT_TRUE(root.isValid());
+    SessionBridge bridge;
+    bridge.setRecordingsRootForTesting(root.path());
+    QStringList log;
+    QObject::connect(&bridge, &SessionBridge::logMessage,
+                     [&log](const QString& line) { log << line; });
+    const auto diagnostics_lines = [&log]() {
+        return log.filter(QStringLiteral("ECU 0x7E8 diagnostics: "));
+    };
+    const auto clear_lines = [&log]() {
+        return log.filter(QStringLiteral("ECU 0x7E8 clear: "));
+    };
+    ASSERT_TRUE(
+        bridge
+            .connectSession(QStringLiteral("j2534://%1?probe=0&identify=0")
+                                .arg(QString::fromUtf8(FAKE_J2534_DLL_PATH)))
+            .isEmpty());
+    ASSERT_TRUE(
+        spinUntil([&]() { return diagnostics_lines().size() == 1; }, 5000));
+    EXPECT_FALSE(bridge.clearDiagnostics().isEmpty());
+    ASSERT_TRUE(spinUntil([&]() { return !clear_lines().isEmpty(); }, 5000));
+    spinLoop(500);
+    ASSERT_EQ(clear_lines().size(), 1) << log.join('\n').toStdString();
+    EXPECT_EQ(clear_lines().first().toStdString(),
+              "ECU 0x7E8 clear: not sent: engine running (2000 rpm)");
+    EXPECT_EQ(diagnostics_lines().size(), 1) << log.join('\n').toStdString();
+
+    bridge.readDiagnostics();
+    ASSERT_TRUE(
+        spinUntil([&]() { return diagnostics_lines().size() == 2; }, 5000))
+        << "a read after the clear logs";
+    EXPECT_EQ(diagnostics_lines().at(1).toStdString(), kFakeEcuDiagnosticsLine);
+    spinLoop(300);
+    EXPECT_EQ(clear_lines().size(), 1) << "one line per clear asked";
+    ASSERT_TRUE(disconnectAndWait(bridge));
+}
+
+/* With the fake's engine stopped the clear goes through: its line, then
+ * the read after it, once, though the report passes through an
+ * incomplete read on the way; an adapter's file names the vehicle */
+TEST(BridgeTest, AClearAtTheFakesStoppedEngineLogsTheReadAfter)
+{
+    FakeHooks hooks;
+    ASSERT_TRUE(hooks.load());
+    FakeEnvArm off("ECUIO_FAKE_ENGINE_OFF", "1");
+    QTemporaryDir root;
+    ASSERT_TRUE(root.isValid());
+    SessionBridge bridge;
+    bridge.setRecordingsRootForTesting(root.path());
+    bridge.setVehicleLabel(QStringLiteral("Daily driver"));
+    QStringList log;
+    QObject::connect(&bridge, &SessionBridge::logMessage,
+                     [&log](const QString& line) { log << line; });
+    const auto diagnostics_lines = [&log]() {
+        return log.filter(QStringLiteral("ECU 0x7E8 diagnostics: "));
+    };
+    ASSERT_TRUE(
+        bridge
+            .connectSession(QStringLiteral("j2534://%1?probe=0&identify=0")
+                                .arg(QString::fromUtf8(FAKE_J2534_DLL_PATH)))
+            .isEmpty());
+    ASSERT_TRUE(
+        spinUntil([&]() { return diagnostics_lines().size() == 1; }, 5000));
+    const QString shown = bridge.clearDiagnostics();
+    EXPECT_TRUE(QRegularExpression(
+                    QStringLiteral(
+                        "diagnostics-[0-9]{8}-[0-9]{6} Daily driver\\.jsonl$"))
+                    .match(shown)
+                    .hasMatch())
+        << shown.toStdString();
+    ASSERT_TRUE(
+        spinUntil([&]() { return diagnostics_lines().size() == 2; }, 5000))
+        << log.join('\n').toStdString();
+    spinLoop(500);
+    EXPECT_EQ(log.filter(QStringLiteral("ECU 0x7E8 clear: ")),
+              QStringList{QStringLiteral("ECU 0x7E8 clear: cleared")});
+    ASSERT_EQ(diagnostics_lines().size(), 2) << log.join('\n').toStdString();
+    EXPECT_TRUE(diagnostics_lines().at(1).contains(
+        QStringLiteral("MIL off; stored none; pending none; permanent P0420")))
+        << diagnostics_lines().at(1).toStdString();
+    ASSERT_TRUE(disconnectAndWait(bridge));
+}
+
+/* Live leaves out what the fake ECU withholds from its bitmaps, and
+ * only that: the bridge reads the session's support report (ADR-0039
+ * section 6) */
+TEST(BridgeTest, LiveHidesThePidsTheFakeEcuWithholds)
+{
+    FakeHooks hooks;
+    ASSERT_TRUE(hooks.load());
+    FakeEnvArm withheld("ECUIO_FAKE_WITHHELD_PIDS", "0A,5C");
+    SessionBridge bridge;
+    const QString uri = QStringLiteral("j2534://%1?identify=0&diagnose=0")
+                            .arg(QString::fromUtf8(FAKE_J2534_DLL_PATH));
+    ASSERT_TRUE(bridge.connectSession(uri).isEmpty());
+    SignalListModel* model = bridge.signalModel();
+    ASSERT_TRUE(spinUntil([&]() { return model->hiddenCount() > 0; }, 5000))
+        << "nothing hidden";
+    spinLoop(300);
+    QStringList hidden;
+    for (int r = 0; r < model->rowCount(); ++r) {
+        const QModelIndex i = model->index(r);
+        if (model->data(i, SignalListModel::HiddenRole).toBool()) {
+            hidden << model->data(i, SignalListModel::NameRole).toString();
+        }
+    }
+    /* In set order: the ten first, then the table's */
+    EXPECT_EQ(hidden, (QStringList{QStringLiteral("Engine Oil Temp"),
+                                   QStringLiteral("Fuel Pressure")}));
+    EXPECT_EQ(bridge.liveSignalModel()->rowCount(), model->rowCount() - 2);
+    ASSERT_TRUE(disconnectAndWait(bridge));
 }
 
 #endif  // _WIN32
@@ -2705,6 +2871,234 @@ TEST(BridgeTest, SessionInfoTextNamesTheAdapter)
  * 44 data PIDs to 0x60, whose bit says a fourth exists), a chain
  * answered to its end, one unanswered, and requests dropped for each
  * reason, past the eight a report lists. */
+/* Live leaves out the rows core judges unsupported (ADR-0039 section 6;
+ * the rule is PidSupportTest's): on the first vehicle's bitmaps (00, 20
+ * and 40 answered), 0x5C among them; a PID past an answered range, and a
+ * row no report names, stay. Each list is applied afresh, so a rescan
+ * that finds a PID shows its row again. */
+TEST(BridgeTest, LiveHidesTheRowsTheirEcuMarksUnsupported)
+{
+    SignalListModel model;
+    model.setSignalSet(ecuio_obd2_signal_set());
+    LiveSignalModel live(&model);
+    const int rows = model.rowCount();
+    ASSERT_GT(rows, 0);
+    EXPECT_EQ(model.hiddenCount(), 0);
+    EXPECT_EQ(live.rowCount(), rows);
+    int hiddenSignals = 0;
+    QObject::connect(&model, &SignalListModel::hiddenCountChanged,
+                     [&hiddenSignals]() { ++hiddenSignals; });
+
+    ecuio_channel_support_t car{};
+    car.flags = ECUIO_SUPPORT_PROBED;
+    car.rx_id = 0x7E8;
+    car.generation = 1;
+    car.ranges = 0x7;
+    const uint8_t bitmaps[12] = {0xFE, 0x7F, 0xA8, 0x13, 0xA0, 0x17,
+                                 0xF0, 0x11, 0xFE, 0xD0, 0x8C, 0x81};
+    memcpy(car.pid_bitmap, bitmaps, sizeof(bitmaps));
+    model.applyUnsupported(unsupportedIds(&car, 1));
+
+    /* The rule, from the bitmaps' bytes: PID p is supported when bit
+     * 0x80 >> ((p - 1) % 8) of byte (p - 1) / 8 is set */
+    const ecuio_signal_set_t* set = ecuio_obd2_signal_set();
+    int expectHidden = 0;
+    int pastTheRanges = 0;
+    int row5C = -1;
+    int row0C = -1;
+    for (int r = 0; r < rows; ++r) {
+        const unsigned pid = set->defs[r].mux_key & 0xFFu;
+        const bool clear = pid <= 0x60 && (bitmaps[(pid - 1) / 8] &
+                                           (0x80u >> ((pid - 1) % 8))) == 0;
+        const QModelIndex i = model.index(r);
+        EXPECT_EQ(model.data(i, SignalListModel::HiddenRole).toBool(), clear)
+            << "PID " << std::hex << pid;
+        EXPECT_EQ(model.data(i, SignalListModel::RowRole).toInt(), r);
+        expectHidden += clear ? 1 : 0;
+        pastTheRanges += pid > 0x60 ? 1 : 0;
+        if (pid == 0x5C)
+            row5C = r;
+        if (pid == 0x0C)
+            row0C = r;
+    }
+    ASSERT_GE(row5C, 0);
+    ASSERT_GE(row0C, 0);
+    EXPECT_TRUE(
+        model.data(model.index(row5C), SignalListModel::HiddenRole).toBool());
+    EXPECT_GT(expectHidden, 1);
+    EXPECT_GT(pastTheRanges, 0);
+    EXPECT_EQ(model.hiddenCount(), expectHidden);
+    EXPECT_EQ(hiddenSignals, 1);
+    EXPECT_EQ(model.subscribedCount(), SignalListModel::DefaultPlotted)
+        << "a ranked set plots its top ranked rows";
+
+    /* Live's rows are the shown ones in order, each naming its model row */
+    ASSERT_EQ(live.rowCount(), rows - expectHidden);
+    int last = -1;
+    for (int r = 0; r < live.rowCount(); ++r) {
+        const QModelIndex i = live.index(r, 0);
+        const int source = live.data(i, SignalListModel::RowRole).toInt();
+        EXPECT_GT(source, last);
+        last = source;
+        EXPECT_FALSE(live.data(i, SignalListModel::HiddenRole).toBool());
+        EXPECT_EQ(live.data(i, SignalListModel::NameRole),
+                  model.data(model.index(source), SignalListModel::NameRole));
+    }
+
+    /* A hidden row is never charted, and its plot box counts nothing */
+    model.updateValues(
+        {{set->defs[row5C].id, 80.0}, {set->defs[row0C].id, 2000.0}}, 100);
+    QList<int> charted;
+    for (const QVariant& v : model.chartData()) {
+        charted << v.toMap().value(QStringLiteral("row")).toInt();
+    }
+    EXPECT_TRUE(charted.contains(row0C));
+    EXPECT_FALSE(charted.contains(row5C));
+    model.toggleSubscribed(row5C);
+    EXPECT_EQ(model.subscribedCount(), SignalListModel::DefaultPlotted);
+    model.toggleSubscribed(row5C);
+
+    /* A rescan that finds 0x5C shows it again */
+    ecuio_channel_support_t rescan = car;
+    rescan.generation = 2;
+    rescan.pid_bitmap[(0x5C - 1) / 8] |= 0x80u >> ((0x5C - 1) % 8);
+    model.applyUnsupported(unsupportedIds(&rescan, 1));
+    EXPECT_FALSE(
+        model.data(model.index(row5C), SignalListModel::HiddenRole).toBool());
+    EXPECT_EQ(model.hiddenCount(), expectHidden - 1);
+    EXPECT_EQ(live.rowCount(), rows - expectHidden + 1);
+    EXPECT_EQ(model.subscribedCount(), SignalListModel::DefaultPlotted);
+
+    /* Another ECU's report, or one with nothing learned, hides nothing */
+    ecuio_channel_support_t other = car;
+    other.rx_id = 0x7E9;
+    ecuio_channel_support_t nothing = car;
+    nothing.generation = 0;
+    const ecuio_channel_support_t neither[2] = {other, nothing};
+    model.applyUnsupported(unsupportedIds(neither, 2));
+    EXPECT_EQ(model.hiddenCount(), 0);
+    EXPECT_EQ(live.rowCount(), rows);
+
+    /* A new set shows every row */
+    model.applyUnsupported(unsupportedIds(&car, 1));
+    ASSERT_GT(model.hiddenCount(), 0);
+    model.setSignalSet(ecuio_obd2_signal_set());
+    EXPECT_EQ(model.hiddenCount(), 0);
+    EXPECT_EQ(live.rowCount(), rows);
+}
+
+namespace {
+
+/* The obd2 set's row for signal id, or -1 */
+int obd2RowOf(uint16_t id)
+{
+    const ecuio_signal_set_t* set = ecuio_obd2_signal_set();
+    for (uint32_t i = 0; i < set->count; ++i) {
+        if (set->defs[i].id == id)
+            return static_cast<int>(i);
+    }
+    return -1;
+}
+
+} // namespace
+
+/* ADR-0039 section 6: a row core reports absent (its field past every reply)
+ * is hidden beside the ones the bitmaps rule out, and shown again when
+ * core no longer reports it; a PID the bitmaps list keeps its other
+ * rows. A new set shows all. */
+TEST(BridgeTest, LiveHidesTheFieldsCoreReportsAbsent)
+{
+    SignalListModel model;
+    model.setSignalSet(ecuio_obd2_signal_set());
+    LiveSignalModel live(&model);
+    const int rows = model.rowCount();
+    const int b1 = obd2RowOf(ECUIO_OBD2_PID_SIG_ID(0x55, 0));
+    const int b3 = obd2RowOf(ECUIO_OBD2_PID_SIG_ID(0x55, 1));
+    ASSERT_GE(b1, 0);
+    ASSERT_GE(b3, 0);
+    const auto hidden = [&model](int row) {
+        return model.data(model.index(row), SignalListModel::HiddenRole)
+            .toBool();
+    };
+
+    model.applyAbsent({ECUIO_OBD2_PID_SIG_ID(0x55, 1)});
+    EXPECT_TRUE(hidden(b3));
+    EXPECT_FALSE(hidden(b1));
+    EXPECT_EQ(model.hiddenCount(), 1);
+    EXPECT_EQ(live.rowCount(), rows - 1);
+    EXPECT_EQ(model.subscribedCount(), SignalListModel::DefaultPlotted)
+        << "an unranked row's hiding moves no default";
+
+    /* The bitmaps hide theirs beside it; neither undoes the other */
+    ecuio_channel_support_t car{};
+    car.flags = ECUIO_SUPPORT_PROBED;
+    car.rx_id = 0x7E8;
+    car.generation = 1;
+    car.ranges = 0x1; /* 0x01-0x20: all clear but 0x0C */
+    car.pid_bitmap[(0x0C - 1) / 8] = 0x80u >> ((0x0C - 1) % 8);
+    model.applyUnsupported(unsupportedIds(&car, 1));
+    int unsupported = 0;
+    for (int r = 0; r < rows; ++r) {
+        const unsigned pid = ecuio_obd2_signal_set()->defs[r].mux_key & 0xFFu;
+        unsupported += (pid <= 0x20 && pid != 0x0C) ? 1 : 0;
+    }
+    ASSERT_GT(unsupported, 0);
+    EXPECT_TRUE(hidden(b3)) << "still absent after the support's judgment";
+    EXPECT_EQ(model.hiddenCount(), unsupported + 1);
+
+    model.applyAbsent({});
+    EXPECT_FALSE(hidden(b3)) << "core no longer reports it";
+    EXPECT_EQ(model.hiddenCount(), unsupported);
+
+    model.applyAbsent({ECUIO_OBD2_PID_SIG_ID(0x55, 1)});
+    model.setSignalSet(ecuio_obd2_signal_set());
+    EXPECT_EQ(model.hiddenCount(), 0) << "a new set shows every row";
+}
+
+/* The bridge reads core's absent signals on its tick: a replay of the
+ * test car's one-byte PID 55 replies hides bank 3's row, and only it */
+TEST(BridgeTest, LiveHidesAFieldTheRepliesComeWithout)
+{
+    QTemporaryDir dir;
+    ASSERT_TRUE(dir.isValid());
+    QByteArray text = "host_us,timestamp_us,id,flags,data\n";
+    for (int i = 0; i < 5; ++i) {
+        const QByteArray t = QByteArray::number(10000 * i);
+        text += t + ',' + t + ",0x7E8,0x0,41 55 80\n";
+    }
+    QFile f(dir.filePath(QStringLiteral("frames.csv")));
+    ASSERT_TRUE(f.open(QIODevice::WriteOnly));
+    ASSERT_EQ(f.write(text), text.size());
+    f.close();
+
+    SessionBridge bridge;
+    QStringList log;
+    QObject::connect(&bridge, &SessionBridge::logMessage,
+                     [&log](const QString& line) { log << line; });
+    ASSERT_TRUE(
+        bridge
+            .connectSession(QStringLiteral("replay://%1?profile=obd2&speed=max")
+                                .arg(dir.path()))
+            .isEmpty())
+        << log.join('\n').toStdString();
+    SignalListModel* model = bridge.signalModel();
+    const int b1 = obd2RowOf(ECUIO_OBD2_PID_SIG_ID(0x55, 0));
+    const int b3 = obd2RowOf(ECUIO_OBD2_PID_SIG_ID(0x55, 1));
+    ASSERT_TRUE(
+        spinUntil([model]() { return model->hiddenCount() > 0; }, 5000));
+    spinLoop(200);
+    EXPECT_EQ(model->hiddenCount(), 1);
+    EXPECT_TRUE(
+        model->data(model->index(b3), SignalListModel::HiddenRole).toBool());
+    EXPECT_FALSE(
+        model->data(model->index(b1), SignalListModel::HiddenRole).toBool());
+    EXPECT_TRUE(
+        model->data(model->index(b1), SignalListModel::HasValueRole).toBool());
+    ASSERT_TRUE(disconnectAndWait(bridge));
+}
+
+/* The counts are core's (pids_supported, pids_through: PidSupportTest);
+ * the line says them */
 TEST(BridgeTest, ChannelSupportTextNamesTheEcuAndWhatItDropped)
 {
     ecuio_channel_support_t car{};
@@ -2712,9 +3106,8 @@ TEST(BridgeTest, ChannelSupportTextNamesTheEcuAndWhatItDropped)
     car.rx_id = 0x7E8;
     car.requests = 10;
     car.ranges = 0x7;
-    const uint8_t bitmaps[12] = {0xFE, 0x7F, 0xA8, 0x13, 0xA0, 0x17,
-                                 0xF0, 0x11, 0xFE, 0xD0, 0x8C, 0x81};
-    memcpy(car.pid_bitmap, bitmaps, sizeof(bitmaps));
+    car.pids_supported = 44;
+    car.pids_through = 0x60;
     car.dropped = 1;
     car.dropped_list[0] = {{0x01, 0x5C, 0x00}, 2, ECUIO_DROP_BITMAP, 0, {0, 0}};
     EXPECT_EQ(SessionBridge::channelSupportText(car).toStdString(),
@@ -2732,14 +3125,27 @@ TEST(BridgeTest, ChannelSupportTextNamesTheEcuAndWhatItDropped)
     all.rx_id = 0x18DAF110;
     all.requests = 1;
     all.ranges = 0x1;
-    all.pid_bitmap[0] = 0x81;   /* PIDs 01 and 08 */
+    all.pids_supported = 2;
+    all.pids_through = 0x20;
     EXPECT_EQ(SessionBridge::channelSupportText(all).toStdString(),
               "ECU 0x18DAF110: supports 2 PIDs; 1 request, none dropped");
+
+    /* Packing (ADR-0039 Appendix A): answered, then given up */
+    ecuio_channel_support_t packed = all;
+    packed.flags |= ECUIO_SUPPORT_PACKED;
+    EXPECT_EQ(SessionBridge::channelSupportText(packed).toStdString(),
+              "ECU 0x18DAF110: supports 2 PIDs; 1 request, none dropped; "
+              "several PIDs per request");
+    packed.flags |= ECUIO_SUPPORT_UNPACKED;
+    EXPECT_EQ(SessionBridge::channelSupportText(packed).toStdString(),
+              "ECU 0x18DAF110: supports 2 PIDs; 1 request, none dropped; "
+              "one PID per request, several went unanswered");
 
     ecuio_channel_support_t part = all;
     part.flags = ECUIO_SUPPORT_PROBED;
     part.ranges = 0;
-    part.pid_bitmap[0] = 0;
+    part.pids_supported = 0;
+    part.pids_through = 0;
     EXPECT_EQ(SessionBridge::channelSupportText(part).toStdString(),
               "ECU 0x18DAF110: no answer to the supported-PID query; "
               "1 request, none dropped");
@@ -2792,61 +3198,6 @@ TEST(BridgeTest, ChannelSupportTextNamesTheEcuAndWhatItDropped)
               "ECU 0x7E9: 128 requests, none dropped; "
               "scan: 256 DIDs, 130 found (128 polled), 120 refused, 6 unanswered");
 }
-/* ADR-0027 §3: the VIN a vehicle is known by, from the first channel's
- * report: 09 02's text, else F190's; letters and digits only, upper
- * case, at 17 characters. */
-TEST(BridgeTest, VinFromIdentityTakesService09ThenF190)
-{
-    const auto item = [](std::initializer_list<uint8_t> request,
-                         uint8_t outcome, const std::string& text) {
-        ecuio_identity_item_t it{};
-        uint8_t k = 0;
-        for (uint8_t b : request) {
-            it.request[k++] = b;
-        }
-        it.length = k;
-        it.outcome = outcome;
-        it.text_length = static_cast<uint8_t>(text.size());
-        memcpy(it.text, text.data(), text.size());
-        return it;
-    };
-    ecuio_channel_identity_t id{};
-    id.flags = ECUIO_IDENTITY_COMPLETE;
-    id.items = 2;
-    id.list[0] =
-        item({0x22, 0xF1, 0x90}, ECUIO_IDENTITY_ANSWERED, "f190vin0000000002");
-    id.list[1] = item({0x09, 0x02}, ECUIO_IDENTITY_ANSWERED,
-                      std::string(2, '\0') + " FAKEJ2534VIN00001");
-    EXPECT_EQ(SessionBridge::vinFromIdentity(id).toStdString(),
-              "FAKEJ2534VIN00001")
-        << "09 02 first, its padding dropped";
-
-    id.list[1].outcome = ECUIO_IDENTITY_REFUSED;
-    EXPECT_EQ(SessionBridge::vinFromIdentity(id).toStdString(),
-              "F190VIN0000000002")
-        << "F190 when 09 02 wasn't answered, in upper case";
-
-    id.list[0] =
-        item({0x22, 0xF1, 0x90}, ECUIO_IDENTITY_ANSWERED, "FAKEJ2534VIN0001");
-    EXPECT_TRUE(SessionBridge::vinFromIdentity(id).isEmpty())
-        << "16 characters";
-    id.list[0] =
-        item({0x22, 0xF1, 0x90}, ECUIO_IDENTITY_ANSWERED, "FAKEJ2534VIN000012");
-    EXPECT_TRUE(SessionBridge::vinFromIdentity(id).isEmpty())
-        << "18 characters";
-
-    id.list[0] =
-        item({0x09, 0x04}, ECUIO_IDENTITY_ANSWERED, "CALIBRATION00001X");
-    EXPECT_TRUE(SessionBridge::vinFromIdentity(id).isEmpty())
-        << "a CALID of 17 isn't a VIN";
-
-    id.items = 1;
-    id.list[1] =
-        item({0x09, 0x02}, ECUIO_IDENTITY_ANSWERED, "FAKEJ2534VIN00001");
-    EXPECT_TRUE(SessionBridge::vinFromIdentity(id).isEmpty())
-        << "past the count isn't read";
-}
-
 TEST(BridgeTest, NewSaltIsSixteenRandomBytes)
 {
     SessionBridge bridge;
@@ -2859,7 +3210,7 @@ TEST(BridgeTest, NewSaltIsSixteenRandomBytes)
     EXPECT_NE(a, b);
 }
 
-/* ADR-0027 §2: a label as a recording folder may take it */
+/* ADR-0027 section 2: a label as a recording folder may take it */
 TEST(BridgeTest, FolderLabelKeepsWhatAFolderNameMay)
 {
     const auto f = [](const char* label) {
@@ -2875,8 +3226,76 @@ TEST(BridgeTest, FolderLabelKeepsWhatAFolderNameMay)
     EXPECT_EQ(f(std::string(60, 'x').c_str()), std::string(40, 'x'));
 }
 
-/* ADR-0027 §1: a vehicle's plotted signals are the numeric rows the
- * chart leaves out, read and set by name */
+/* ADR-0027 section 1: a vehicle's plotted signals are the rows ticked
+ * past the default and unticked from it, read and set by name. The
+ * mock's set ranks none, so every numeric row is its default. */
+/* The chart's window (LiveViewPage's 10 to 120 s): chartData keeps the
+ * samples of the last windowMs before the newest plotted one, and with
+ * columns, each slice's lowest and highest in time order and the newest
+ * sample, never more than two a slice plus it */
+TEST(BridgeTest, ChartDataKeepsTheWindowAndEachSlicesExtremes)
+{
+    SignalListModel model;
+    ecuio_signal_def_t defs[2];
+    ecuio_signal_set_t set;
+    buildTestSignalSet(defs, set);
+    model.setSignalSet(&set);
+    /* 1001 rises and falls every second; 2001 tracks the time */
+    for (qint64 t = 0; t < 20000; t += 10) {
+        const double wave = static_cast<double>((t / 10) % 100 < 50 ? (t / 10) % 50
+                                                                    : 50 - (t / 10) % 50);
+        model.updateValues({{uint16_t(1001), wave}, {uint16_t(2001), double(t)}}, t);
+    }
+    const auto samples = [](const QVariantList& data, int s) {
+        return data.at(s).toMap().value("samples").toList();
+    };
+
+    const QVariantList all = model.chartData();
+    ASSERT_EQ(all.size(), 2);
+    EXPECT_EQ(samples(all, 1).size(), 2 * 2000) << "no window: every sample";
+
+    const QVariantList win = model.chartData(5000);
+    const QVariantList w = samples(win, 1);
+    EXPECT_EQ(w.at(0).toDouble(), 19990.0 - 5000.0) << "from the window's start";
+    EXPECT_EQ(w.at(w.size() - 2).toDouble(), 19990.0) << "to the newest";
+    EXPECT_EQ(w.size(), 2 * 501);
+
+    const int columns = 10;
+    const QVariantList cut = model.chartData(5000, columns);
+    for (int s = 0; s < 2; ++s) {
+        const QVariantList c = samples(cut, s);
+        EXPECT_LE(c.size(), 2 * (2 * (columns + 1) + 1)) << s;
+        for (int i = 2; i < c.size(); i += 2) {
+            EXPECT_LT(c.at(i - 2).toDouble(), c.at(i).toDouble()) << "in time order";
+        }
+        EXPECT_EQ(c.at(c.size() - 2).toDouble(), 19990.0) << "the newest kept";
+    }
+    /* Each slice of the wave keeps its own lowest and highest, as the
+     * whole window's samples show them */
+    const QVariantList full = samples(model.chartData(5000), 0);
+    const QVariantList wave = samples(cut, 0);
+    const double from = 19990.0 - 5000.0;
+    const double slice = 5000.0 / columns;
+    std::map<int, std::pair<double, double>> want, got;
+    const auto note = [&](std::map<int, std::pair<double, double>>& m,
+                          const QVariantList& v) {
+        for (int i = 0; i < v.size(); i += 2) {
+            const int k = static_cast<int>((v.at(i).toDouble() - from) / slice);
+            const double x = v.at(i + 1).toDouble();
+            auto it = m.find(k);
+            if (it == m.end()) {
+                m[k] = {x, x};
+            } else {
+                it->second.first = std::min(it->second.first, x);
+                it->second.second = std::max(it->second.second, x);
+            }
+        }
+    };
+    note(want, full);
+    note(got, wave);
+    EXPECT_EQ(got, want) << "each slice's lowest and highest";
+}
+
 TEST(BridgeTest, UnplottedNamesReadAndSetTheChartsRows)
 {
     SessionBridge bridge;
@@ -2885,8 +3304,8 @@ TEST(BridgeTest, UnplottedNamesReadAndSetTheChartsRows)
     QObject::connect(m, &SignalListModel::subscribedCountChanged,
                      [&countNotified]() { ++countNotified; });
     ASSERT_TRUE(bridge.connectSession(QStringLiteral("mock://demo")).isEmpty());
-    EXPECT_EQ(countNotified, 1) << "a new set's count is notified";
-    ASSERT_GE(m->rowCount(), 3);
+    EXPECT_GE(countNotified, 1) << "a new set's count is notified";
+    ASSERT_GE(m->rowCount(), 4);
     const auto name = [m](int row) {
         return m->data(m->index(row), SignalListModel::NameRole).toString();
     };
@@ -2896,21 +3315,154 @@ TEST(BridgeTest, UnplottedNamesReadAndSetTheChartsRows)
     const int all = m->subscribedCount();
     EXPECT_TRUE(m->unplottedNames().isEmpty())
         << "every numeric row starts plotted";
+    EXPECT_TRUE(m->plottedNames().isEmpty()) << "and none past its default";
 
-    m->setUnplotted({name(0), name(2), QStringLiteral("Not a signal")});
-    EXPECT_EQ(m->unplottedNames(), (QStringList{name(0), name(2)}));
-    EXPECT_EQ(m->subscribedCount(), all - 2);
+    m->setPlotChoices({name(1)},
+                      {name(0), name(2), name(1), QStringLiteral("Not a signal")});
+    EXPECT_EQ(m->unplottedNames(), (QStringList{name(0), name(1), name(2)}))
+        << "a name in both lists is unplotted";
+    EXPECT_TRUE(m->plottedNames().isEmpty());
+    EXPECT_EQ(m->subscribedCount(), all - 3);
     EXPECT_FALSE(plotted(0));
-    EXPECT_TRUE(plotted(1));
+    EXPECT_TRUE(plotted(3));
 
-    m->setUnplotted({});
+    m->setPlotChoices({}, {});
     EXPECT_TRUE(m->unplottedNames().isEmpty());
     EXPECT_EQ(m->subscribedCount(), all);
 
     m->toggleSubscribed(1);
     EXPECT_EQ(m->unplottedNames(), QStringList{name(1)})
         << "a click is read back";
+    m->toggleSubscribed(1);
+    EXPECT_TRUE(m->unplottedNames().isEmpty())
+        << "a click back to the default clears the choice";
+    EXPECT_TRUE(m->plottedNames().isEmpty()) << "rather than turning it over";
     ASSERT_TRUE(disconnectAndWait(bridge));
+}
+
+namespace {
+
+/* The names of the rows the chart plots, in set order */
+QStringList plottedRows(const SignalListModel& model)
+{
+    QStringList names;
+    for (int r = 0; r < model.rowCount(); ++r) {
+        const QModelIndex i = model.index(r);
+        if (model.data(i, SignalListModel::SubscribedRole).toBool()
+                && !model.data(i, SignalListModel::HiddenRole).toBool()) {
+            names << model.data(i, SignalListModel::NameRole).toString();
+        }
+    }
+    return names;
+}
+
+/* The test car's first two ranges with PID 0x5C clear, as its
+ * bitmaps read (docs/bench-sessions/2026-10-31-elm327-vehicle.md) */
+ecuio_channel_support_t carWithoutOilTemp()
+{
+    ecuio_channel_support_t car{};
+    car.flags = ECUIO_SUPPORT_PROBED;
+    car.rx_id = 0x7E8;
+    car.generation = 1;
+    car.ranges = 0x7;
+    const uint8_t bitmaps[12] = {0xFE, 0x7F, 0xA8, 0x13, 0xA0, 0x17,
+                                 0xF0, 0x11, 0xFE, 0xD0, 0x8C, 0x81};
+    memcpy(car.pid_bitmap, bitmaps, sizeof(bitmaps));
+    return car;
+}
+
+} // namespace
+
+/* ADR-0039 section 8: a ranked set plots the DefaultPlotted shown rows
+ * of the lowest plot_rank; a row Live hides gives its place to the
+ * next, and a rescan that shows it takes the place back */
+TEST(BridgeTest, ARankedSetPlotsTheTopRankedRowsItShows)
+{
+    SignalListModel model;
+    model.setSignalSet(ecuio_obd2_signal_set());
+    ASSERT_EQ(SignalListModel::DefaultPlotted, 6);
+    const QStringList topSix = {
+        QStringLiteral("Coolant Temp"),    QStringLiteral("RPM"),
+        QStringLiteral("Vehicle Speed"),   QStringLiteral("Intake Air Temp"),
+        QStringLiteral("MAF"),             QStringLiteral("Engine Oil Temp")};
+    EXPECT_EQ(plottedRows(model), topSix) << "ranks 1 to 6, in set order";
+    EXPECT_EQ(model.subscribedCount(), SignalListModel::DefaultPlotted);
+
+    const ecuio_channel_support_t car = carWithoutOilTemp();
+    model.applyUnsupported(unsupportedIds(&car, 1));
+    QStringList withLoad = topSix;
+    withLoad.removeOne(QStringLiteral("Engine Oil Temp"));
+    withLoad.prepend(QStringLiteral("Engine Load"));
+    EXPECT_EQ(plottedRows(model), withLoad) << "rank 7 takes the hidden row's place";
+    EXPECT_EQ(model.subscribedCount(), SignalListModel::DefaultPlotted);
+
+    ecuio_channel_support_t rescan = car;
+    rescan.generation = 2;
+    rescan.pid_bitmap[(0x5C - 1) / 8] |= 0x80u >> ((0x5C - 1) % 8);
+    model.applyUnsupported(unsupportedIds(&rescan, 1));
+    EXPECT_EQ(plottedRows(model), topSix) << "and gives it back";
+
+    /* A car with fewer ranked rows than that plots all it has */
+    ecuio_channel_support_t sparse{};
+    sparse.flags = ECUIO_SUPPORT_PROBED;
+    sparse.rx_id = 0x7E8;
+    sparse.generation = 3;
+    sparse.ranges = 0x7; /* 0x01-0x60: only RPM and speed */
+    sparse.pid_bitmap[(0x0C - 1) / 8] |= 0x80u >> ((0x0C - 1) % 8);
+    sparse.pid_bitmap[(0x0D - 1) / 8] |= 0x80u >> ((0x0D - 1) % 8);
+    model.applyUnsupported(unsupportedIds(&sparse, 1));
+    EXPECT_EQ(plottedRows(model),
+              (QStringList{QStringLiteral("RPM"), QStringLiteral("Vehicle Speed")}));
+}
+
+/* The user's ticks and unticks outlive the defaults moving, and a click
+ * back to the default clears one */
+TEST(BridgeTest, APlotChoiceOutlivesTheDefaultsMoving)
+{
+    SignalListModel model;
+    model.setSignalSet(ecuio_obd2_signal_set());
+    const int rpm = obd2RowOf(ECUIO_OBD2_SIG_RPM_ID);
+    const int load = obd2RowOf(ECUIO_OBD2_SIG_ENGINE_LOAD_ID);
+    const int pedal = obd2RowOf(ECUIO_OBD2_PID_SIG_ID(0x49, 0));
+    ASSERT_GE(rpm, 0);
+    ASSERT_GE(load, 0);
+    ASSERT_GE(pedal, 0);
+    const auto plotted = [&model](int row) {
+        return model.data(model.index(row), SignalListModel::SubscribedRole)
+            .toBool();
+    };
+
+    model.toggleSubscribed(rpm);
+    model.toggleSubscribed(load);
+    EXPECT_FALSE(plotted(rpm));
+    EXPECT_TRUE(plotted(load));
+    EXPECT_EQ(model.unplottedNames(), QStringList{QStringLiteral("RPM")});
+    EXPECT_EQ(model.plottedNames(), QStringList{QStringLiteral("Engine Load")});
+    EXPECT_EQ(model.subscribedCount(), SignalListModel::DefaultPlotted);
+
+    /* Load's default turns on and RPM's stays on: neither choice moves */
+    const ecuio_channel_support_t car = carWithoutOilTemp();
+    model.applyUnsupported(unsupportedIds(&car, 1));
+    EXPECT_FALSE(plotted(rpm)) << "an untick holds against its default";
+    EXPECT_TRUE(plotted(load));
+    EXPECT_FALSE(plotted(pedal)) << "an untick leaves its place empty";
+    EXPECT_EQ(model.subscribedCount(), SignalListModel::DefaultPlotted - 1);
+
+    model.toggleSubscribed(rpm);
+    EXPECT_TRUE(model.unplottedNames().isEmpty()) << "back to its default";
+    EXPECT_EQ(model.plottedNames(), QStringList{QStringLiteral("Engine Load")})
+        << "with no choice of its own";
+
+    /* A vehicle's lists, applied whole: every other row to its default */
+    model.setPlotChoices({QStringLiteral("Accelerator Pedal D")}, {});
+    EXPECT_TRUE(plotted(pedal));
+    EXPECT_TRUE(plotted(load)) << "its default now, with no choice";
+    EXPECT_TRUE(model.unplottedNames().isEmpty());
+    EXPECT_EQ(model.plottedNames(),
+              QStringList{QStringLiteral("Accelerator Pedal D")});
+
+    model.setSignalSet(ecuio_obd2_signal_set());
+    EXPECT_TRUE(model.plottedNames().isEmpty()) << "a new set starts with no choices";
 }
 
 /* The identity line (ADR-0021): each answered item by name, the refused
@@ -2967,6 +3519,478 @@ TEST(BridgeTest, ChannelIdentityTextNamesWhatTheEcuSaid)
     none.rx_id = 0x7E8;
     EXPECT_EQ(SessionBridge::channelIdentityText(none).toStdString(),
               "ECU 0x7E8 identity: nothing asked");
+}
+
+/* The mock's one ECU reports the fake ECU's diagnostics, so the line
+ * the activity log and a recording's events.log keep is the same on
+ * every platform: logged once, after the Session line */
+TEST(BridgeTest, ConnectLogsTheMocksDiagnostics)
+{
+    SessionBridge bridge;
+    QStringList log;
+    QObject::connect(&bridge, &SessionBridge::logMessage,
+                     [&log](const QString& line) { log << line; });
+    ASSERT_TRUE(bridge.connectSession(QStringLiteral("mock://demo")).isEmpty());
+    const auto lines = [&log]() {
+        return log.filter(QStringLiteral(" diagnostics: "));
+    };
+    ASSERT_TRUE(spinUntil([&]() { return !lines().isEmpty(); }, 2000))
+        << "no diagnostics line in the log";
+    spinLoop(300);
+    ASSERT_EQ(lines().size(), 1) << lines().join('\n').toStdString();
+    EXPECT_EQ(lines().first().toStdString(), kFakeEcuDiagnosticsLine);
+    EXPECT_GT(
+        log.indexOf(lines().first()),
+        log.indexOf(QStringLiteral("Session: mock transport; profile mock")));
+    ASSERT_TRUE(disconnectAndWait(bridge));
+
+    /* ?diagnose=0: no line */
+    log.clear();
+    ASSERT_TRUE(bridge.connectSession(QStringLiteral("mock://demo?diagnose=0"))
+                    .isEmpty());
+    spinLoop(300);
+    EXPECT_TRUE(lines().isEmpty()) << lines().join('\n').toStdString();
+    ASSERT_TRUE(disconnectAndWait(bridge));
+}
+
+/* The diagnostics line's wording: each list as answered, cut, refused
+ * or unanswered; readiness with the incomplete monitors by their short
+ * names, a compression engine's by its own; the freeze frame's code or
+ * its absence; nothing asked */
+TEST(BridgeTest, ChannelDiagnosticsTextNamesWhatTheEcuReported)
+{
+    const auto monitor = [](uint8_t id, bool complete) {
+        ecuio_monitor_t m{};
+        m.id = id;
+        m.flags = complete ? ECUIO_MONITOR_COMPLETE : 0;
+        return m;
+    };
+
+    ecuio_channel_diagnostics_t older{};
+    older.flags = ECUIO_DIAG_ASKED | ECUIO_DIAG_COMPLETE | ECUIO_DIAG_READINESS;
+    older.rx_id = 0x7E8;
+    older.readiness = ECUIO_DIAG_ANSWERED;
+    older.monitor_count = 4;
+    older.monitors[0] = monitor(0, true);
+    older.monitors[1] = monitor(8, false);
+    older.monitors[2] = monitor(10, false);
+    older.monitors[3] = monitor(14, true);
+    older.lists[ECUIO_DIAG_STORED].outcome = ECUIO_DIAG_ANSWERED;
+    older.lists[ECUIO_DIAG_PENDING].outcome = ECUIO_DIAG_ANSWERED;
+    older.lists[ECUIO_DIAG_PENDING].reported = 5;
+    older.lists[ECUIO_DIAG_PENDING].held = 2;
+    older.lists[ECUIO_DIAG_PENDING].codes[0] = 0x0171;
+    older.lists[ECUIO_DIAG_PENDING].codes[1] = 0x4035;
+    older.lists[ECUIO_DIAG_PERMANENT].outcome = ECUIO_DIAG_REFUSED;
+    older.lists[ECUIO_DIAG_PERMANENT].nrc = 0x11;
+    older.freeze = ECUIO_DIAG_ANSWERED;
+    EXPECT_EQ(
+        SessionBridge::channelDiagnosticsText(older).toStdString(),
+        "ECU 0x7E8 diagnostics: MIL off; stored none; pending P0171 C0035 "
+        "and 3 more; permanent refused (7F 0A 11); readiness 2 of 4 "
+        "complete (catalyst, EVAP incomplete); no freeze frame");
+
+    ecuio_channel_diagnostics_t diesel{};
+    diesel.flags = ECUIO_DIAG_ASKED | ECUIO_DIAG_COMPLETE |
+                   ECUIO_DIAG_READINESS | ECUIO_DIAG_MIL_ON |
+                   ECUIO_DIAG_COMPRESSION | ECUIO_DIAG_FREEZE_FRAME;
+    diesel.rx_id = 0x7E8;
+    diesel.readiness = ECUIO_DIAG_ANSWERED;
+    diesel.monitor_count = 2;
+    diesel.monitors[0] = monitor(8, false);
+    diesel.monitors[1] = monitor(14, false);
+    diesel.lists[ECUIO_DIAG_STORED].outcome = ECUIO_DIAG_ANSWERED;
+    diesel.lists[ECUIO_DIAG_STORED].reported = 1;
+    diesel.lists[ECUIO_DIAG_STORED].held = 1;
+    diesel.lists[ECUIO_DIAG_STORED].codes[0] = 0x2002;
+    diesel.freeze = ECUIO_DIAG_ANSWERED;
+    diesel.freeze_dtc = 0x2002;
+    EXPECT_EQ(
+        SessionBridge::channelDiagnosticsText(diesel).toStdString(),
+        "ECU 0x7E8 diagnostics: MIL on; stored P2002; readiness 0 of 2 "
+        "complete (NMHC catalyst, PM filter incomplete); freeze frame for "
+        "P2002");
+
+    ecuio_channel_diagnostics_t silent{};
+    silent.flags = ECUIO_DIAG_ASKED | ECUIO_DIAG_COMPLETE;
+    silent.rx_id = 0x18DAF110;
+    silent.readiness = ECUIO_DIAG_UNANSWERED;
+    for (ecuio_dtc_list_t& l : silent.lists) {
+        l.outcome = ECUIO_DIAG_UNANSWERED;
+    }
+    silent.freeze = ECUIO_DIAG_REFUSED;
+    silent.freeze_nrc = 0x12;
+    EXPECT_EQ(SessionBridge::channelDiagnosticsText(silent).toStdString(),
+              "ECU 0x18DAF110 diagnostics: stored unanswered; pending "
+              "unanswered; permanent unanswered; readiness unanswered; freeze "
+              "frame refused (7F 02 12)");
+
+    ecuio_channel_diagnostics_t none{};
+    none.rx_id = 0x7E8;
+    EXPECT_EQ(SessionBridge::channelDiagnosticsText(none).toStdString(),
+              "ECU 0x7E8 diagnostics: nothing asked");
+}
+
+/* The page's entry for an ECU (ADR-0037): the mock's report, named and
+ * converted as the Diagnostics page shows it, in either unit system */
+TEST(BridgeTest, DiagnosticsEntryIsWhatThePageShows)
+{
+    ecuio_session_t* s = nullptr;
+    ASSERT_EQ(ecuio_session_create("mock://demo", &s), ECUIO_OK);
+    ecuio_channel_diagnostics_t d{};
+    ASSERT_EQ(ecuio_session_get_channel_diagnostics(s, 0, &d), ECUIO_OK);
+    ecuio_session_destroy(s);
+
+    const QVariantMap e =
+        SessionBridge::diagnosticsEntry(d, ECUIO_UNITS_METRIC);
+    EXPECT_EQ(e.value("ecu").toString(), QStringLiteral("0x7E8"));
+    EXPECT_TRUE(e.value("asked").toBool());
+    EXPECT_TRUE(e.value("complete").toBool());
+    EXPECT_EQ(e.value("readiness").toString(), QStringLiteral("answered"));
+    EXPECT_TRUE(e.value("mil").toBool());
+    EXPECT_EQ(e.value("dtcCount").toInt(), 3);
+    EXPECT_FALSE(e.value("compression").toBool());
+
+    const QVariantList lists = e.value("lists").toList();
+    ASSERT_EQ(lists.size(), 3);
+    const QStringList keys = {"stored", "pending", "permanent"};
+    const QList<QStringList> codes = {
+        {"P0301", "P0420", "U0100"}, {"P0171", "C0035", "B1001"}, {"P0420"}};
+    for (int l = 0; l < 3; ++l) {
+        const QVariantMap list = lists.at(l).toMap();
+        EXPECT_EQ(list.value("key").toString(), keys.at(l));
+        EXPECT_EQ(list.value("outcome").toString(), QStringLiteral("answered"));
+        EXPECT_EQ(list.value("codes").toStringList(), codes.at(l));
+        EXPECT_EQ(list.value("more").toInt(), 0);
+    }
+
+    const QVariantList monitors = e.value("monitors").toList();
+    QStringList names;
+    for (const QVariant& m : monitors) {
+        names << m.toMap().value("name").toString();
+        EXPECT_TRUE(m.toMap().value("complete").toBool());
+    }
+    EXPECT_EQ(names,
+              (QStringList{"Misfire", "Fuel system", "Comprehensive components",
+                           "Catalyst", "Evaporative system", "Oxygen sensor",
+                           "Oxygen sensor heater", "EGR and/or VVT system"}));
+
+    const QVariantMap freeze = e.value("freeze").toMap();
+    EXPECT_EQ(freeze.value("outcome").toString(), QStringLiteral("answered"));
+    EXPECT_TRUE(freeze.value("stored").toBool());
+    EXPECT_EQ(freeze.value("code").toString(), QStringLiteral("P0301"));
+    const auto value = [](const QVariantMap& f, int i) {
+        return f.value("values").toList().at(i).toMap();
+    };
+    ASSERT_EQ(freeze.value("values").toList().size(), 4);
+    EXPECT_EQ(value(freeze, 0).value("name").toString(),
+              QStringLiteral("Engine Load"));
+    EXPECT_NEAR(value(freeze, 0).value("value").toDouble(), 0xB3 * 100.0 / 255,
+                1e-9);
+    EXPECT_EQ(value(freeze, 0).value("decimals").toInt(), 1);
+    EXPECT_EQ(value(freeze, 1).value("name").toString(),
+              QStringLiteral("Coolant Temp"));
+    EXPECT_EQ(value(freeze, 1).value("value").toDouble(), 90.0);
+    EXPECT_EQ(value(freeze, 1).value("unit").toString(),
+              QString::fromUtf8("\xC2\xB0"
+                                "C"));
+    EXPECT_EQ(value(freeze, 2).value("name").toString(), QStringLiteral("RPM"));
+    EXPECT_EQ(value(freeze, 2).value("value").toDouble(), 3000.0);
+    EXPECT_EQ(value(freeze, 3).value("name").toString(),
+              QStringLiteral("Vehicle Speed"));
+    EXPECT_EQ(value(freeze, 3).value("unit").toString(),
+              QStringLiteral("km/h"));
+
+    /* The same report in imperial units: the values convert, as Live's do */
+    const QVariantMap us =
+        SessionBridge::diagnosticsEntry(d, ECUIO_UNITS_IMPERIAL)
+            .value("freeze")
+            .toMap();
+    EXPECT_EQ(value(us, 1).value("unit").toString(),
+              QString::fromUtf8("\xC2\xB0"
+                                "F"));
+    EXPECT_NEAR(value(us, 1).value("value").toDouble(), 194.0, 1e-9);
+    EXPECT_EQ(value(us, 3).value("unit").toString(), QStringLiteral("mph"));
+    EXPECT_NEAR(value(us, 3).value("value").toDouble(), 80.0 / 1.609344, 1e-9);
+
+    /* Refusals carry their reply; an unasked report says so */
+    ecuio_channel_diagnostics_t old{};
+    old.flags = ECUIO_DIAG_ASKED | ECUIO_DIAG_COMPLETE;
+    old.rx_id = 0x7E9;
+    old.readiness = ECUIO_DIAG_REFUSED;
+    old.readiness_nrc = 0x12;
+    old.lists[ECUIO_DIAG_PERMANENT].outcome = ECUIO_DIAG_REFUSED;
+    old.lists[ECUIO_DIAG_PERMANENT].nrc = 0x11;
+    old.lists[ECUIO_DIAG_STORED].outcome = ECUIO_DIAG_ANSWERED;
+    old.lists[ECUIO_DIAG_STORED].reported = 40;
+    old.lists[ECUIO_DIAG_STORED].held = 1;
+    old.lists[ECUIO_DIAG_STORED].codes[0] = 0xC100;
+    old.freeze = ECUIO_DIAG_UNANSWERED;
+    const QVariantMap o =
+        SessionBridge::diagnosticsEntry(old, ECUIO_UNITS_METRIC);
+    EXPECT_EQ(o.value("ecu").toString(), QStringLiteral("0x7E9"));
+    EXPECT_EQ(o.value("readiness").toString(), QStringLiteral("refused"));
+    EXPECT_EQ(o.value("readinessNrc").toString(), QStringLiteral("7F 01 12"));
+    EXPECT_EQ(o.value("lists").toList().at(0).toMap().value("more").toInt(),
+              39);
+    EXPECT_EQ(
+        o.value("lists").toList().at(1).toMap().value("outcome").toString(),
+        QStringLiteral("unasked"));
+    EXPECT_EQ(o.value("lists").toList().at(2).toMap().value("nrc").toString(),
+              QStringLiteral("7F 0A 11"));
+    EXPECT_EQ(o.value("freeze").toMap().value("outcome").toString(),
+              QStringLiteral("unanswered"));
+    EXPECT_FALSE(SessionBridge::diagnosticsEntry(ecuio_channel_diagnostics_t{},
+                                                 ECUIO_UNITS_METRIC)
+                     .value("asked")
+                     .toBool());
+}
+
+/* Bridge.diagnostics follows the session: the mock's report after the
+ * first tick, converted again when the unit system changes, kept after
+ * disconnect, emptied at the next connect, and Read again moves it on */
+TEST(BridgeTest, DiagnosticsFollowTheSession)
+{
+    SessionBridge bridge;
+    bridge.setUnitSystem(ECUIO_UNITS_METRIC);
+    QStringList log;
+    QObject::connect(&bridge, &SessionBridge::logMessage,
+                     [&log](const QString& line) { log << line; });
+    EXPECT_TRUE(bridge.diagnostics().isEmpty());
+    bridge.readDiagnostics(); // no session: nothing happens
+    ASSERT_TRUE(bridge.connectSession(QStringLiteral("mock://demo")).isEmpty());
+    ASSERT_TRUE(
+        spinUntil([&]() { return !bridge.diagnostics().isEmpty(); }, 2000));
+    const auto speedUnit = [&bridge]() {
+        return bridge.diagnostics()
+            .at(0)
+            .toMap()
+            .value("freeze")
+            .toMap()
+            .value("values")
+            .toList()
+            .at(3)
+            .toMap()
+            .value("unit")
+            .toString();
+    };
+    EXPECT_EQ(speedUnit(), QStringLiteral("km/h"));
+    bridge.setUnitSystem(ECUIO_UNITS_IMPERIAL);
+    EXPECT_EQ(speedUnit(), QStringLiteral("mph"));
+    bridge.setUnitSystem(ECUIO_UNITS_METRIC);
+
+    const auto lines = [&log]() {
+        return log.filter(QStringLiteral(" diagnostics: "));
+    };
+    ASSERT_TRUE(spinUntil([&]() { return lines().size() == 1; }, 2000));
+    bridge.readDiagnostics();
+    ASSERT_TRUE(spinUntil([&]() { return lines().size() == 2; }, 2000))
+        << "Read again logs a second read";
+
+    ASSERT_TRUE(disconnectAndWait(bridge));
+    EXPECT_EQ(bridge.diagnostics().size(), 1) << "the last read, kept";
+    ASSERT_TRUE(bridge.connectSession(QStringLiteral("mock://demo?diagnose=0"))
+                    .isEmpty());
+    EXPECT_TRUE(bridge.diagnostics().isEmpty()) << "emptied at connect";
+    ASSERT_TRUE(
+        spinUntil([&]() { return !bridge.diagnostics().isEmpty(); }, 2000));
+    EXPECT_FALSE(bridge.diagnostics().at(0).toMap().value("asked").toBool());
+    ASSERT_TRUE(disconnectAndWait(bridge));
+}
+
+/* A clear's line for each outcome (ADR-0038), as the activity log
+ * and a recording's events.log keep it */
+TEST(BridgeTest, ChannelClearTextNamesEachOutcome)
+{
+    ecuio_channel_diagnostics_t d{};
+    d.rx_id = 0x7E8;
+    const auto text = [&d](uint8_t clear, uint8_t nrc, uint32_t rpm) {
+        d.clear = clear;
+        d.clear_nrc = nrc;
+        d.clear_rpm = rpm;
+        return SessionBridge::channelClearText(d).toStdString();
+    };
+    EXPECT_EQ(text(ECUIO_CLEAR_CLEARED, 0, 0), "ECU 0x7E8 clear: cleared");
+    EXPECT_EQ(text(ECUIO_CLEAR_REFUSED, 0x22, 0),
+              "ECU 0x7E8 clear: refused (7F 04 22)");
+    EXPECT_EQ(text(ECUIO_CLEAR_UNANSWERED, 0, 0), "ECU 0x7E8 clear: no answer");
+    EXPECT_EQ(text(ECUIO_CLEAR_ENGINE_RUNNING, 0, 812),
+              "ECU 0x7E8 clear: not sent: engine running (812 rpm)");
+    EXPECT_EQ(text(ECUIO_CLEAR_NO_ENGINE_SPEED, 0, 0),
+              "ECU 0x7E8 clear: not sent: no engine speed");
+    EXPECT_EQ(text(ECUIO_CLEAR_NO_ENGINE_SPEED, 0x12, 0),
+              "ECU 0x7E8 clear: not sent: no engine speed (7F 01 12)");
+    EXPECT_EQ(text(ECUIO_CLEAR_REPORT_CHANGED, 0, 0),
+              "ECU 0x7E8 clear: not sent: the report changed");
+    EXPECT_EQ(text(ECUIO_CLEAR_NONE, 0, 0), "ECU 0x7E8 clear: not asked");
+
+    /* The page's entry carries the same */
+    d.clear = ECUIO_CLEAR_REFUSED;
+    d.clear_nrc = 0x22;
+    QVariantMap e = SessionBridge::diagnosticsEntry(d, ECUIO_UNITS_METRIC);
+    EXPECT_EQ(e.value("clear").toString(), QStringLiteral("refused"));
+    EXPECT_EQ(e.value("clearNrc").toString(), QStringLiteral("7F 04 22"));
+    EXPECT_FALSE(e.value("clearing").toBool());
+    d.clear = ECUIO_CLEAR_ENGINE_RUNNING;
+    d.clear_nrc = 0;
+    d.clear_rpm = 812;
+    d.flags = ECUIO_DIAG_CLEARING;
+    e = SessionBridge::diagnosticsEntry(d, ECUIO_UNITS_METRIC);
+    EXPECT_EQ(e.value("clear").toString(), QStringLiteral("engineRunning"));
+    EXPECT_EQ(e.value("clearRpm").toInt(), 812);
+    EXPECT_TRUE(e.value("clearing").toBool());
+}
+
+/* The saved file is havne-cli's: a start line, then each report as its
+ * diagnostics line, here the mock's before any clear */
+TEST(BridgeTest, DiagnosticsFileTextIsTheCliLines)
+{
+    ecuio_session_t* s = nullptr;
+    ASSERT_EQ(ecuio_session_create("mock://file", &s), ECUIO_OK);
+    ecuio_channel_diagnostics_t d{};
+    ASSERT_EQ(ecuio_session_get_channel_diagnostics(s, 0, &d), ECUIO_OK);
+    ecuio_session_destroy(s);
+
+    const QList<QByteArray> lines =
+        SessionBridge::diagnosticsFileText(&d, 1).split('\n');
+    ASSERT_EQ(lines.size(), 3) << "two lines, each ended";
+    EXPECT_TRUE(lines.at(2).isEmpty());
+    const QJsonObject start = QJsonDocument::fromJson(lines.at(0)).object();
+    EXPECT_EQ(start.value("type").toString(), QStringLiteral("start"));
+    EXPECT_EQ(start.value("schema").toInt(), 1);
+    EXPECT_EQ(start.value("core").toString(),
+              QString::fromUtf8(ecuio_version_string()));
+    const QJsonObject line = QJsonDocument::fromJson(lines.at(1)).object();
+    EXPECT_EQ(line.value("type").toString(), QStringLiteral("diagnostics"));
+    EXPECT_EQ(line.value("rx").toString(), QStringLiteral("0x7E8"));
+    EXPECT_EQ(line.value("generation").toInt(), static_cast<int>(d.generation));
+    EXPECT_TRUE(line.value("readiness").toObject().value("mil").toBool());
+    const QJsonArray stored =
+        line.value("stored").toObject().value("codes").toArray();
+    ASSERT_EQ(stored.size(), 3);
+    EXPECT_EQ(stored.at(0).toString(), QStringLiteral("P0301"));
+    EXPECT_EQ(line.value("freeze").toObject().value("code").toString(),
+              QStringLiteral("P0301"));
+}
+
+/* ADR-0038 on the mock, which starts each loop with its engine stopped:
+ * the report goes to a file of its own first (no vehicle in a mock's
+ * name), then the clear, its line, and the read after it, the only
+ * other diagnostics line */
+/* ADR-0038: the one rule for a clear's ECUs, which the confirmation
+ * names (clearTargets) and clearDiagnostics sends to: a completed read,
+ * no clear under way */
+TEST(BridgeTest, AClearGoesToCompletedReportsNotClearing)
+{
+    ecuio_channel_diagnostics_t r{};
+    EXPECT_FALSE(SessionBridge::clearTarget(r)) << "a read under way";
+    r.flags = ECUIO_DIAG_COMPLETE;
+    EXPECT_TRUE(SessionBridge::clearTarget(r));
+    r.flags = ECUIO_DIAG_COMPLETE | ECUIO_DIAG_CLEARING;
+    EXPECT_FALSE(SessionBridge::clearTarget(r)) << "a clear under way";
+    r.flags = ECUIO_DIAG_CLEARING;
+    EXPECT_FALSE(SessionBridge::clearTarget(r));
+
+    SessionBridge bridge;
+    EXPECT_TRUE(bridge.clearTargets().isEmpty()) << "no session, no report";
+}
+
+TEST(BridgeTest, AClearSavesTheReportFirst)
+{
+    QTemporaryDir root;
+    ASSERT_TRUE(root.isValid());
+    SessionBridge bridge;
+    bridge.setRecordingsRootForTesting(root.path());
+    bridge.setVehicleLabel(QStringLiteral("Daily driver"));
+    QStringList log;
+    QObject::connect(&bridge, &SessionBridge::logMessage,
+                     [&log](const QString& line) { log << line; });
+    const auto diagnostics_lines = [&log]() {
+        return log.filter(QStringLiteral("ECU 0x7E8 diagnostics: "));
+    };
+    const auto clear_lines = [&log]() {
+        return log.filter(QStringLiteral("ECU 0x7E8 clear: "));
+    };
+    ASSERT_TRUE(bridge.connectSession(QStringLiteral("mock://demo")).isEmpty());
+    ASSERT_TRUE(
+        spinUntil([&]() { return diagnostics_lines().size() == 1; }, 2000));
+
+    const QString shown = bridge.clearDiagnostics();
+    const QStringList files =
+        QDir(root.path()).entryList({QStringLiteral("*.jsonl")}, QDir::Files);
+    ASSERT_EQ(files.size(), 1) << files.join(',').toStdString();
+    EXPECT_TRUE(QRegularExpression(
+                    QStringLiteral("^diagnostics-[0-9]{8}-[0-9]{6}\\.jsonl$"))
+                    .match(files.first())
+                    .hasMatch())
+        << files.first().toStdString();
+    EXPECT_TRUE(shown.endsWith(files.first())) << shown.toStdString();
+    QFile saved(root.path() + QLatin1Char('/') + files.first());
+    ASSERT_TRUE(saved.open(QIODevice::ReadOnly));
+    const QList<QByteArray> lines = saved.readAll().split('\n');
+    ASSERT_GE(lines.size(), 2);
+    EXPECT_TRUE(
+        lines.at(1).contains("\"codes\":[\"P0301\",\"P0420\",\"U0100\"]"))
+        << "the codes before the clear: " << lines.at(1).toStdString();
+
+    ASSERT_TRUE(
+        spinUntil([&]() { return diagnostics_lines().size() == 2; }, 2000))
+        << log.join('\n').toStdString();
+    spinLoop(300);
+    ASSERT_EQ(clear_lines().size(), 1) << log.join('\n').toStdString();
+    EXPECT_EQ(clear_lines().first().toStdString(), "ECU 0x7E8 clear: cleared");
+    EXPECT_EQ(diagnostics_lines().size(), 2);
+    const QString after = diagnostics_lines().at(1);
+    EXPECT_TRUE(after.contains(
+        QStringLiteral("MIL off; stored none; pending none; permanent P0420")))
+        << after.toStdString();
+    const QStringList saved_lines =
+        log.filter(QStringLiteral("Diagnostics saved before the clear: "));
+    ASSERT_EQ(saved_lines.size(), 1) << log.join('\n').toStdString();
+    EXPECT_TRUE(saved_lines.first().endsWith(shown));
+    EXPECT_LT(log.indexOf(saved_lines.first()),
+              log.indexOf(clear_lines().first()));
+    EXPECT_LT(log.indexOf(clear_lines().first()), log.indexOf(after));
+    EXPECT_EQ(bridge.diagnostics().at(0).toMap().value("clear").toString(),
+              QStringLiteral("cleared"));
+    ASSERT_TRUE(disconnectAndWait(bridge));
+    EXPECT_TRUE(bridge.clearDiagnostics().isEmpty()) << "no session";
+}
+
+/* A report that can't be saved sends no clear: the root is under a
+ * file, so no folder can be made */
+TEST(BridgeTest, AFailedSaveSendsNoClear)
+{
+    QTemporaryDir root;
+    ASSERT_TRUE(root.isValid());
+    const QString file = root.path() + QStringLiteral("/not-a-folder");
+    {
+        QFile f(file);
+        ASSERT_TRUE(f.open(QIODevice::WriteOnly));
+    }
+    SessionBridge bridge;
+    bridge.setRecordingsRootForTesting(file + QStringLiteral("/recordings"));
+    QStringList log;
+    QObject::connect(&bridge, &SessionBridge::logMessage,
+                     [&log](const QString& line) { log << line; });
+    EXPECT_TRUE(bridge.clearDiagnostics().isEmpty());
+    EXPECT_TRUE(log.isEmpty()) << "no session: nothing to say";
+    ASSERT_TRUE(bridge.connectSession(QStringLiteral("mock://demo")).isEmpty());
+    ASSERT_TRUE(
+        spinUntil([&]() { return !bridge.diagnostics().isEmpty(); }, 2000));
+    EXPECT_TRUE(bridge.clearDiagnostics().isEmpty());
+    spinLoop(300);
+    EXPECT_EQ(log.filter(QStringLiteral(
+                             "Clear not sent: the report couldn't be saved "
+                             "(can't create "))
+                  .size(),
+              1)
+        << log.join('\n').toStdString();
+    EXPECT_TRUE(log.filter(QStringLiteral(" clear: ")).isEmpty());
+    EXPECT_EQ(log.filter(QStringLiteral(" diagnostics: ")).size(), 1);
+    EXPECT_EQ(bridge.diagnostics().at(0).toMap().value("clear").toString(),
+              QStringLiteral("none"));
+    ASSERT_TRUE(disconnectAndWait(bridge));
 }
 
 TEST(BridgeTest, ConnectLogsTheMockSession)
@@ -3134,7 +4158,7 @@ TEST(BridgeTest, ReplayOfAMockRecordingDecodesWhatWasRecorded)
 
 /* Settings' recordings list: a recording replays under the profile it
  * was recorded with, so a tap leaves nothing to type */
-/* A sleep while connected (ADR-0033 §6) is one activity line saying how
+/* A sleep while connected (ADR-0033 section 6) is one activity line saying how
  * long, in the recording's events.log too; a rise under a second, one
  * before the connect, or one after the disconnect says nothing. No runner
  * can sleep, so the seam adds to the count the tick reads */
@@ -3180,6 +4204,67 @@ TEST(BridgeTest, ASleepWhileConnectedIsLoggedWithItsLength)
     EXPECT_TRUE(std::any_of(
         events.cbegin(), events.cend(),
         [&line](const QByteArray& e) { return e.endsWith(line.toUtf8()); }));
+}
+
+/* A replay with faults injected (ADR-0041) still finishes, and says what
+ * the faults did; the Session line says they were injected; the
+ * recording holds the frames delivered, row for row, and the overflows
+ * the bridge counts are the frames flagged in it. Seed 3 over the engine
+ * start: the CLI's golden, replay-faults.jsonl, has the same counts.
+ * Paced at 100x: at full speed the worker can outrun the GUI thread,
+ * and frames dropped at the bridge's gate would leave rows out. */
+TEST(BridgeTest, AFaultedReplayFinishesAndRecordsWhatItDelivered)
+{
+    QTemporaryDir root;
+    ASSERT_TRUE(root.isValid());
+    SessionBridge bridge;
+    bridge.setRecording(true);
+    bridge.setRecordReplaysForTesting(true);
+    bridge.setRecordingsRootForTesting(root.path());
+    QStringList log;
+    QObject::connect(&bridge, &SessionBridge::logMessage,
+                     [&log](const QString& line) { log << line; });
+    const QString uri =
+        QStringLiteral("replay://") + QString::fromUtf8(ECUIO_REPLAY_FIXTURES) +
+        QStringLiteral("/2026-10-25-engine-start?profile=obd2&speed=100&"
+                       "faults=drop:10,overflow:5,corrupt:2,truncate:2,"
+                       "stall:1:5&seed=3");
+    ASSERT_TRUE(bridge.connectSession(uri).isEmpty());
+    const QString finished = QStringLiteral(
+        "Replay finished: 7074 frames, faults injected: 735 dropped, 296 lost "
+        "to an overflow, 119 corrupted, 109 cut short, 70 held back; the "
+        "session stays open");
+    ASSERT_TRUE(spinUntil(
+        [&log, &finished]() { return log.contains(finished); }, 20000))
+        << log.join(QLatin1Char('\n')).toStdString();
+    EXPECT_FALSE(log.filter(QStringLiteral("frames over 297.4 s at 100x, with "
+                                           "faults injected"))
+                     .isEmpty())
+        << log.join(QLatin1Char('\n')).toStdString();
+    spinLoop(300);
+    ASSERT_EQ(bridge.droppedFrames(), 0)
+        << "the rows below are whole only without drops";
+    const int overflows = bridge.overflowFrames();
+    ASSERT_TRUE(disconnectAndWait(bridge));
+
+    const QStringList recorded = recordingFolders(root.path());
+    ASSERT_EQ(recorded.size(), 1);
+    const QList<QByteArray> rows =
+        fileLines(root.path() + QStringLiteral("/") + recorded.first() +
+                  QStringLiteral("/frames.csv"));
+    ASSERT_EQ(rows.size(), 1 + 6043) << "the header, then each frame delivered";
+    int flagged = 0;
+    for (qsizetype i = 1; i < rows.size(); ++i) {
+        const QList<QByteArray> cols = rows[i].split(',');
+        ASSERT_GE(cols.size(), 4) << i;
+        bool ok = false;
+        const uint32_t flags = cols[3].toUInt(&ok, 0); /* 0x80 */
+        ASSERT_TRUE(ok) << cols[3].toStdString();
+        flagged += (flags & ECUIO_FRAME_FLAG_OVERFLOW) != 0 ? 1 : 0;
+    }
+    EXPECT_GT(flagged, 0);
+    EXPECT_LE(flagged, 296) << "losses in a row flag one frame";
+    EXPECT_EQ(overflows, flagged);
 }
 
 TEST(BridgeTest, ReplayUriForTakesTheRecordedProfile)
@@ -3522,7 +4607,7 @@ TEST(BridgeTest, TheChartKeepsTheFixturesPeak)
 }
 
 /* LatencyStats reads a quantile back at the top of the bucket holding
- * it: exact below 16 µs, at most an eighth above the true value past
+ * it: exact below 16 us, at most an eighth above the true value past
  * that, never below it, and the maximum exactly */
 TEST(BridgeTest, LatencyStatsReadsQuantilesWithinABucket)
 {
@@ -3561,7 +4646,7 @@ TEST(BridgeTest, LatencyStatsReadsQuantilesWithinABucket)
 }
 
 /* The activity log's "Delivery:" line: frames and drops, what was still
- * queued, then each path's median, p99 and max (µs below a millisecond,
+ * queued, then each path's median, p99 and max (us below a millisecond,
  * ms with a decimal below 10, whole ms past that); a session that
  * decoded nothing has no values clause */
 TEST(BridgeTest, DeliveryTextNamesFramesDropsAndTimes)
@@ -3596,6 +4681,104 @@ TEST(BridgeTest, DeliveryTextNamesFramesDropsAndTimes)
               "to the model in median 53 ms, p99 99 ms, max 99 ms "
               "(10 past the staging's limit, not timed)");
 }
+
+/* The activity log's "Reply timing:" line (ADR-0042): the requests asked,
+ * their outcomes, the spread of their median latencies, the intervals'
+ * clock and ISO-TP's counts where core reassembles; nothing when no
+ * request was asked */
+TEST(BridgeTest, TimingTextNamesTheRequestsAndTheClock)
+{
+    ecuio_session_timing_t t{};
+    std::vector<ecuio_request_timing_t> rows(3);
+    EXPECT_TRUE(SessionBridge::timingText(t, rows).isEmpty());
+
+    t.interval_clock = ECUIO_TIMING_CLOCK_ADAPTER;
+    rows[0].answered = 100;
+    rows[0].latency_p50_us = 4200;
+    rows[1].answered = 50;
+    rows[1].timeouts = 2;
+    rows[1].latency_p50_us = 12400;
+    EXPECT_EQ(
+        SessionBridge::timingText(t, rows).toStdString(),
+        "Reply timing: 2 requests, 150 answered, none refused, 2 timed out; "
+        "latency P50 4.2 ms to 12 ms; intervals on the adapter's clock");
+
+    t.interval_clock = ECUIO_TIMING_CLOCK_KERNEL;
+    t.flags = ECUIO_TIMING_ISOTP;
+    t.isotp_completed = 640;
+    t.isotp_first_frames = 40;
+    t.isotp_dropped = 1;
+    rows[1] = ecuio_request_timing_t{};
+    rows[2].refused = 1;
+    rows[2].latency_p50_us = 4200;
+    EXPECT_EQ(
+        SessionBridge::timingText(t, rows).toStdString(),
+        "Reply timing: 2 requests, 100 answered, 1 refused, none timed out; "
+        "latency P50 4.2 ms; intervals on the kernel's receive times; "
+        "ISO-TP: 640 messages, 40 segmented, 1 dropped, none unusable");
+}
+
+#ifdef _WIN32
+
+/* A recording of a requesting session holds latency.csv (ADR-0042
+ * section 3): its header is ECUIO_TIMING_COLUMNS, then the snapshots,
+ * each a block of the rows that changed under one t_s, the figures
+ * cumulative, so each request's answers never fall from one row of it
+ * to the next; the intervals on the fake's own clock; the activity log
+ * names the timing at the disconnect */
+TEST(BridgeTest, ARecordingKeepsReplyTimingsSnapshots)
+{
+    FakeHooks hooks;
+    ASSERT_TRUE(hooks.load());
+    QTemporaryDir root;
+    ASSERT_TRUE(root.isValid());
+    SessionBridge bridge;
+    bridge.setRecordingsRootForTesting(root.path());
+    bridge.setRecording(true);
+    bridge.setTimingEveryForTesting(1000 * 1000);
+    QStringList log;
+    QObject::connect(&bridge, &SessionBridge::logMessage,
+                     [&log](const QString& line) { log << line; });
+    const QString uri = QStringLiteral("j2534://%1?identify=0&diagnose=0")
+                            .arg(QString::fromUtf8(FAKE_J2534_DLL_PATH));
+    ASSERT_TRUE(bridge.connectSession(uri).isEmpty());
+    spinLoop(3500);
+    ASSERT_TRUE(disconnectAndWait(bridge));
+    ASSERT_TRUE(spinUntil([&]() { return !bridge.recordingActive(); }, 5000));
+
+    const QStringList folders = recordingFolders(root.path());
+    ASSERT_EQ(folders.size(), 1);
+    const QList<QByteArray> lines =
+        fileLines(root.path() + QStringLiteral("/") + folders.first() +
+                  QStringLiteral("/latency.csv"));
+    ASSERT_GT(lines.size(), 2);
+    EXPECT_EQ(lines.first(), QByteArray(ECUIO_TIMING_COLUMNS));
+    const int columns =
+        static_cast<int>(QByteArray(ECUIO_TIMING_COLUMNS).count(',')) + 1;
+    QSet<QByteArray> snapshots;
+    QHash<QByteArray, qint64> answered;
+    for (qsizetype i = 1; i < lines.size(); ++i) {
+        const QList<QByteArray> cols = lines[i].split(',');
+        ASSERT_EQ(cols.size(), columns) << lines[i].toStdString();
+        snapshots.insert(cols[0]);
+        EXPECT_EQ(cols[1], QByteArray("0x7E8"));
+        EXPECT_EQ(cols.last(), QByteArray("adapter"));
+        const qint64 n = cols[3].toLongLong();
+        EXPECT_GE(n, answered.value(cols[2], 0))
+            << "cumulative: " << cols[2].toStdString();
+        answered[cols[2]] = n;
+    }
+    EXPECT_GE(snapshots.size(), 3) << "every second, then the last";
+    EXPECT_GT(answered.size(), 10);
+    bool named = false;
+    for (const QString& line : log) {
+        named = named || (line.startsWith(QStringLiteral("Reply timing: ")) &&
+                          line.contains(QStringLiteral("the adapter's clock")));
+    }
+    EXPECT_TRUE(named) << log.join(QLatin1Char('\n')).toStdString();
+}
+
+#endif // _WIN32
 
 /* At disconnect the activity log says how the session's frames and
  * values were delivered: over the engine-start fixture at full speed,
@@ -3751,7 +4934,7 @@ std::vector<double> recordedRpm(const QString& root)
 
 /* Values come from core's worker, not from the frames the GUI thread
  * handles, so a frame dropped at the in-flight cap keeps its values
- * (ADR-0024 §7): with the event loop held while a replay floods in,
+ * (ADR-0024 section 7): with the event loop held while a replay floods in,
  * thousands of frames drop, yet the recording holds every row's RPM in
  * order and the row shows the last one */
 TEST(BridgeTest, ValuesSurviveFramesDroppedAtTheCap)

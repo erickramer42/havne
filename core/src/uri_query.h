@@ -28,7 +28,7 @@ struct param {
     size_t val_len;
 
     /* Keys match exactly, so they're case-sensitive (lowercase by
-     * convention, ADR-0013 §2). */
+     * convention, ADR-0013 section 2). */
     bool is(const char* name) const
     {
         return key_len == strlen(name) && strncmp(key, name, key_len) == 0;

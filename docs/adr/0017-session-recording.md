@@ -56,7 +56,7 @@ once.
    - `signals.csv`: `host_us,signal,value,unit`, one row per decoded
      value, stamped with its frame's `host_us`, the value to 12
      significant digits. UTF-8 with a byte-order mark, so a spreadsheet
-     reads "°C" correctly.
+     reads `°C` correctly.
    - `events.log`: a header (start time, core version, URI, the signal
      set's names, the frame-logging state), then each activity line
      with its local time and seconds since the start, then a summary
@@ -167,3 +167,14 @@ clock it was taken from doesn't on Linux and Android, so a sleep there
 left no gap in `host_us`. The format is unchanged; a sleep is a gap in
 `host_us` as in `timestamp_us`, and `events.log` names it ("Asleep for
 N s").
+
+## Appendix: 2026-10-31, latency.csv
+
+A recording of a requesting session also holds `latency.csv`, reply
+timing's snapshots ([ADR-0042](0042-reply-timing.md) section 3): its
+header `ECUIO_TIMING_COLUMNS` (`profile.h`), then every 10 s of session
+time and at the disconnect the rows whose counts changed, each under its
+snapshot's `t_s`, the figures cumulative from the connect, so the last
+row for a request is its total. The recorder creates it with the first
+snapshot that has a row, so a mock or replay recording has none.
+`BridgeTest.ARecordingKeepsReplyTimingsSnapshots`.

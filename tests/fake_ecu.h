@@ -7,13 +7,16 @@
 //
 // What the fakes' engine ECU answers, from the service byte on: the
 // adapter's framing (J2534's 4-byte CAN ID, the ELM327's lines and PCI
-// bytes) is each fake's own.
+// bytes) is each fake's own. Its diagnostics (stored, pending and
+// permanent DTCs, a freeze frame, readiness) are one state per process
+// that Service 04 clears: diagnostics() below.
 
 #ifndef ECUIO_TESTS_FAKE_ECU_H
 #define ECUIO_TESTS_FAKE_ECU_H
 
 #include "ecuio/j2534_ptypes.h" /* ECUIO_PT_MSG_DATA_SIZE */
 
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -39,11 +42,110 @@ constexpr uint8_t kPid42Volts[2] = {0x36, 0x30}; /* 0x3630 = 13872 mV */
 constexpr uint8_t kPid5COilTemp = 0x78;          /* 120 - 40 = 80 degC */
 /* PID 0x7F, engine run time: J1979's 13 data bytes, a reply no Single
  * Frame holds (the support byte, then the total, idle and PTO times, 4
- * bytes each in seconds: 3600, 900 and 0). Supported, but past the
- * bitmaps' chain (0x60 isn't), so the probe drops it: a test asking it
- * turns the probe off. */
+ * bytes each in seconds: 3600, 900 and 0). */
 constexpr uint8_t kPid7FRunTime[13] = {0x07, 0x00, 0x00, 0x0E, 0x10, 0x00, 0x00,
                                        0x03, 0x84, 0x00, 0x00, 0x00, 0x00};
+
+/* The rest of J1979's linear PIDs (tests/fixtures/obd2/service01.csv's
+ * linear rows): one plausible reading each, like the values above, at
+ * the table's byte count. Written as raw bytes from J1979's scaling, the
+ * reading in the comment, so a def that scales wrong reads something
+ * else. 66, 67 and 68 start with their support byte (both sensors). */
+struct CannedPid {
+    uint8_t pid;
+    uint8_t len;
+    uint8_t data[7];
+};
+constexpr CannedPid kCannedPids[] = {
+    {0x06, 1, {0x82}},                   /* short-term trim B1 +1.6 % */
+    {0x07, 1, {0x7C}},                   /* long-term trim B1 -3.1 % */
+    {0x08, 1, {0x81}},                   /* short-term trim B2 +0.8 % */
+    {0x09, 1, {0x7E}},                   /* long-term trim B2 -1.6 % */
+    {0x0A, 1, {0x7F}},                   /* fuel pressure 381 kPa */
+    {0x0B, 1, {0x23}},                   /* MAP 35 kPa */
+    {0x0E, 1, {0x98}},                   /* timing 12 degrees */
+    {0x14, 2, {0x5A, 0x82}},             /* O2 1: 0.450 V, trim +1.6 % */
+    {0x15, 2, {0x8C, 0xFF}},             /* O2 2: 0.700 V, not in trim */
+    {0x16, 2, {0x50, 0x80}},             /* O2 3: 0.400 V, trim 0 % */
+    {0x17, 2, {0x8C, 0xFF}},             /* O2 4: 0.700 V, not in trim */
+    {0x18, 2, {0x5C, 0x81}},             /* O2 5: 0.460 V, trim +0.8 % */
+    {0x19, 2, {0x8A, 0xFF}},             /* O2 6: 0.690 V, not in trim */
+    {0x1A, 2, {0x58, 0x7F}},             /* O2 7: 0.440 V, trim -0.8 % */
+    {0x1B, 2, {0x8E, 0xFF}},             /* O2 8: 0.710 V, not in trim */
+    {0x1F, 2, {0x02, 0x58}},             /* run time 600 s */
+    {0x22, 2, {0x0E, 0xD5}},             /* rail pressure 300.0 kPa */
+    {0x23, 2, {0x03, 0xE8}},             /* rail gauge 10000 kPa */
+    {0x24, 4, {0x80, 0x00, 0x50, 0x00}}, /* wide O2 1: lambda 1.000, 2.50 V */
+    {0x25, 4, {0x7F, 0x5C, 0x50, 0x00}}, /* wide O2 2: lambda 0.995, 2.50 V */
+    {0x26, 4, {0x80, 0xA4, 0x4F, 0x00}}, /* wide O2 3: lambda 1.005, 2.47 V */
+    {0x27, 4, {0x80, 0x00, 0x50, 0x00}}, /* wide O2 4: lambda 1.000, 2.50 V */
+    {0x28, 4, {0x7F, 0xAE, 0x50, 0x80}}, /* wide O2 5: lambda 0.998, 2.52 V */
+    {0x29, 4, {0x80, 0x52, 0x4F, 0x80}}, /* wide O2 6: lambda 1.003, 2.48 V */
+    {0x2A, 4, {0x80, 0x00, 0x50, 0x00}}, /* wide O2 7: lambda 1.000, 2.50 V */
+    {0x2B, 4, {0x80, 0x00, 0x50, 0x00}}, /* wide O2 8: lambda 1.000, 2.50 V */
+    {0x2C, 1, {0x1A}},                   /* commanded EGR 10.2 % */
+    {0x2D, 1, {0x80}},                   /* EGR error 0 % */
+    {0x2E, 1, {0x33}},                   /* commanded purge 20 % */
+    {0x32, 2, {0xFE, 0x70}},             /* evap pressure -100 Pa (signed) */
+    {0x33, 1, {0x65}},                   /* barometric 101 kPa */
+    {0x34, 4, {0x7F, 0x5C, 0x80, 0x0D}}, /* wide O2 1: 0.995, 0.05 mA */
+    {0x35, 4, {0x80, 0x00, 0x80, 0x00}}, /* wide O2 2: lambda 1.000, 0 mA */
+    {0x36, 4, {0x80, 0xA4, 0x7F, 0xF3}}, /* wide O2 3: 1.005, -0.05 mA */
+    {0x37, 4, {0x80, 0x00, 0x80, 0x00}}, /* wide O2 4: lambda 1.000, 0 mA */
+    {0x38, 4, {0x7F, 0xAE, 0x80, 0x0D}}, /* wide O2 5: 0.998, 0.05 mA */
+    {0x39, 4, {0x80, 0x52, 0x7F, 0xF3}}, /* wide O2 6: 1.003, -0.05 mA */
+    {0x3A, 4, {0x80, 0x00, 0x80, 0x00}}, /* wide O2 7: lambda 1.000, 0 mA */
+    {0x3B, 4, {0x80, 0x00, 0x80, 0x00}}, /* wide O2 8: lambda 1.000, 0 mA */
+    {0x3C, 2, {0x1A, 0xF4}},             /* catalyst B1 S1 650.0 degC */
+    {0x3D, 2, {0x1A, 0x90}},             /* catalyst B2 S1 640.0 degC */
+    {0x3E, 2, {0x15, 0xE0}},             /* catalyst B1 S2 520.0 degC */
+    {0x3F, 2, {0x15, 0x7C}},             /* catalyst B2 S2 510.0 degC */
+    {0x43, 2, {0x00, 0x40}},             /* absolute load 25.1 % */
+    {0x44, 2, {0x80, 0x00}},             /* commanded lambda 1.000 */
+    {0x45, 1, {0x0D}},                   /* relative throttle 5.1 % */
+    {0x46, 1, {0x3E}},                   /* ambient 22 degC */
+    {0x47, 1, {0x26}},                   /* throttle B 14.9 % */
+    {0x48, 1, {0x26}},                   /* throttle C 14.9 % */
+    {0x49, 1, {0x29}},                   /* pedal D 16.1 % */
+    {0x4A, 1, {0x14}},                   /* pedal E 7.8 % */
+    {0x4B, 1, {0x14}},                   /* pedal F 7.8 % */
+    {0x4C, 1, {0x12}},                   /* commanded throttle 7.1 % */
+    {0x4F, 4, {0x02, 0x08, 0x80, 0x19}}, /* maxima 2, 8 V, 128 mA, 250 kPa */
+    {0x50, 4, {0x28, 0x00, 0x00, 0x00}}, /* maximum MAF 400 g/s */
+    {0x52, 1, {0x1A}},                   /* ethanol 10.2 % */
+    {0x53, 2, {0x4E, 0xE8}},             /* evap pressure 101.000 kPa abs. */
+    {0x54, 2, {0xFF, 0x9C}},             /* evap pressure -100 Pa (signed) */
+    {0x55, 2, {0x81, 0x80}},             /* 2nd short trims B1 +0.8, B3 0 % */
+    {0x56, 2, {0x7E, 0x80}},             /* 2nd long trims B1 -1.6, B3 0 % */
+    {0x57, 2, {0x80, 0x80}},             /* 2nd short trims B2, B4 0 % */
+    {0x58, 2, {0x7F, 0x80}},             /* 2nd long trims B2 -0.8, B4 0 % */
+    {0x59, 2, {0x03, 0xF2}},             /* rail absolute 10100 kPa */
+    {0x5A, 1, {0x1A}},                   /* relative pedal 10.2 % */
+    {0x5B, 1, {0xCC}},                   /* hybrid battery life 80 % */
+    {0x5D, 2, {0x6E, 0x00}},             /* injection timing 10.0 degrees */
+    {0x5E, 2, {0x00, 0x32}},             /* fuel rate 2.50 L/h */
+    {0x61, 1, {0x91}},                   /* driver's demand torque 20 % */
+    {0x62, 1, {0x8F}},                   /* actual torque 18 % */
+    {0x63, 2, {0x01, 0xA4}},             /* reference torque 420 N.m */
+    {0x64, 5, {0x8C, 0x9B, 0xB9, 0xD7, 0xE1}}, /* 15 30 60 90 100 % */
+    {0x66, 5, {0x03, 0x03, 0x20, 0x03, 0x10}}, /* MAF A 25.0, B 24.5 g/s */
+    {0x67, 3, {0x03, 0x80, 0x7E}},             /* coolant 1 88, 2 86 degC */
+    {0x68, 7, {0x03, 0x41, 0x4B, 0, 0, 0, 0}}, /* IAT 1 25, 2 35 degC */
+    {0x8E, 1, {0x85}},                         /* friction torque 8 % */
+    {0xA2, 2, {0x01, 0xE0}},                   /* fuel 15.0 mg/stroke */
+    {0xA6, 4, {0x00, 0x01, 0xE2, 0x40}},       /* odometer 12345.6 km */
+};
+
+/* kCannedPids' entry for pid, or nullptr */
+inline const CannedPid* canned_pid(unsigned pid)
+{
+    for (const CannedPid& c : kCannedPids) {
+        if (c.pid == pid) {
+            return &c;
+        }
+    }
+    return nullptr;
+}
 
 /* The Service 0x22 DIDs the ECU knows: ADR-0015's example, and three
  * whose replies are long, filled with their byte index (& 0xFF). A
@@ -71,6 +173,105 @@ constexpr char kEcuName[20] = "FAKE-ECM";
 
 /* The longest reply answer() writes: [62][DID] and 0xF1A2's data. */
 constexpr size_t kReplyMax = 3 + kOverlongDidLen;
+
+/* ---- Diagnostics (SAE J1979 on ISO 15765-4) ----
+ * A DTC is two bytes: the category in A7-A6 (00 P, 01 C, 10 B, 11 U),
+ * then the digits. Each list covers different categories, so a decoder
+ * sees all four. Three stored DTCs make Service 03's reply, [43][count]
+ * [DTCs], 8 bytes: past a Single Frame, so the ISO-TP fakes send it as
+ * a First Frame and a Consecutive Frame. */
+constexpr uint8_t kStoredDtcs[] = {0x03, 0x01,   /* P0301 */
+                                   0x04, 0x20,   /* P0420 */
+                                   0xC1, 0x00};  /* U0100 */
+constexpr uint8_t kPendingDtcs[] = {0x01, 0x71,  /* P0171 */
+                                    0x40, 0x35,  /* C0035 */
+                                    0x90, 0x01}; /* B1001 */
+/* Service 0x0A's permanent DTCs, which Service 04 leaves: only the ECU
+ * clears one, once its monitor passes. J1979 (2002) predates Service
+ * 0x0A; its reply takes 03's and 07's shape. */
+constexpr uint8_t kPermanentDtcs[] = {0x04, 0x20}; /* P0420 */
+
+/* Service 01 PID 01's bytes B-D (PID 0x41's too): spark ignition (B3
+ * clear); misfire, fuel system and components monitored (B2-B0); the
+ * catalyst, evaporative system, oxygen sensor, its heater and EGR/VVT
+ * (C). Completeness bits are 0 for complete: all complete until a
+ * clear, after which C's monitors are incomplete (D = C). */
+constexpr uint8_t kMonitorsB = 0x07;
+constexpr uint8_t kMonitorsC = 0xE5;
+
+/* What a clear resets to 0, with their values before it: distance with
+ * the MIL on (0x21, km), warm-ups (0x30), distance (0x31, km), minutes
+ * with the MIL on (0x4D) and since the clear (0x4E). */
+constexpr uint8_t kPid21MilKm[2] = {0x00, 0x2A}; /* 42 km */
+constexpr uint8_t kPid30WarmUps = 20;
+constexpr uint8_t kPid31ClearKm[2] = {0x04, 0xD2};  /* 1234 km */
+constexpr uint8_t kPid4DMilMin[2] = {0x00, 0x3C};   /* 60 min */
+constexpr uint8_t kPid4EClearMin[2] = {0x0B, 0xB8}; /* 3000 min */
+
+/* The freeze frame (Service 02, frame 0) that P0301 stored: values
+ * unlike the live canned ones, so a test can tell the two apart. */
+constexpr uint8_t kFreezeDtc[2] = {0x03, 0x01};   /* P0301 */
+constexpr uint8_t kFreeze04Load = 0xB3;           /* ~70% */
+constexpr uint8_t kFreeze05Coolant = 130;         /* 90 degC */
+constexpr uint8_t kFreeze0CRpm[2] = {0x2E, 0xE0}; /* 3000 RPM */
+constexpr uint8_t kFreeze0DSpeed = 80;            /* 80 km/h */
+
+/* The diagnostics' state: one per process (the fake J2534 DLL runs in
+ * each session's surrogate, so it starts fresh there; the in-process
+ * fakes share it across a test binary's cases). cleared: Service 04 ran.
+ * clears: how many times. clear_nrc: nonzero refuses Service 04 with
+ * that code (J1979: an ECU that can't clear with the engine running
+ * answers 0x22, conditionsNotCorrect). engine_off: PID 0C reads 0
+ * rpm, the key on and the engine stopped, which a clear asks for
+ * (ADR-0038). Tests that clear call reset_diagnostics() first. */
+struct Diagnostics {
+    std::atomic<bool> cleared{false};
+    std::atomic<unsigned> clears{0};
+    std::atomic<int> clear_nrc{0};
+    std::atomic<bool> engine_off{false};
+};
+
+inline Diagnostics& diagnostics()
+{
+    static Diagnostics d;
+    return d;
+}
+
+inline void reset_diagnostics()
+{
+    Diagnostics& d = diagnostics();
+    d.cleared = false;
+    d.clears = 0;
+    d.clear_nrc = 0;
+    d.engine_off = false;
+}
+
+/* Service 01 PIDs the ECU leaves out of its bitmaps (and refuses when
+ * asked), though it has a reading for them: an ECU that lacks some of
+ * the set's PIDs. Bit pid % 32 of word pid / 32. One per process; the
+ * fake DLL sets it from ECUIO_FAKE_WITHHELD_PIDS on each write. */
+inline std::atomic<uint32_t> (&withheld_pids())[8]
+{
+    static std::atomic<uint32_t> words[8] = {};
+    return words;
+}
+
+inline bool withheld(unsigned pid)
+{
+    return pid <= 0xFF &&
+           ((withheld_pids()[pid / 32].load() >> (pid % 32)) & 1u) != 0;
+}
+
+/* A Service 01 request carrying several PIDs (ADR-0039 Appendix A)
+ * answered with its first supported PID's record alone, as an ECU that
+ * takes one PID per request might. One per process; the fake DLL sets
+ * it from ECUIO_FAKE_PACK_FIRST_ONLY on each write, the in-process
+ * fakes' tests directly. */
+inline std::atomic<bool>& pack_first_only()
+{
+    static std::atomic<bool> on{false};
+    return on;
+}
 
 /* The ID an ECU answers a request on: 11-bit physical requests 0x7E0 to
  * 0x7E7 get theirs 8 above, the functional 0x7DF is answered by the
@@ -135,12 +336,25 @@ inline unsigned long did_length(uint16_t did)
     }
 }
 
-/* The Service 01 PIDs the ECU supports: its canned ones, and the
- * bitmaps that lead to them (all but 0x7F's). */
+/* The Service 01 PIDs the ECU supports: every linear one J1979 defines
+ * (the named values and kCannedPids), 01, 41 and 7F, and the bitmaps
+ * that lead to them, 00 to A0 (A0's last bit clear: the chain ends). The
+ * bit-field, enumerated and other complex PIDs stay unsupported, so a
+ * test has PIDs the probe drops; so do the withheld ones. */
 inline bool supports_pid(unsigned pid)
 {
+    if (withheld(pid)) {
+        return false;
+    }
+    if (canned_pid(pid) != nullptr) {
+        return true;
+    }
     switch (pid) {
+    case 0x60:
+    case 0x80:
+    case 0xA0:
     case 0x00:
+    case 0x01:
     case 0x04:
     case 0x05:
     case 0x0C:
@@ -149,15 +363,45 @@ inline bool supports_pid(unsigned pid)
     case 0x10:
     case 0x11:
     case 0x20:
+    case 0x21:
     case 0x2F:
+    case 0x30:
+    case 0x31:
     case 0x40:
+    case 0x41:
     case 0x42:
+    case 0x4D:
+    case 0x4E:
     case 0x5C:
     case 0x7F:
         return true;
     default:
         return false;
     }
+}
+
+/* The Service 02 PIDs frame 0 holds: the DTC that stored it (0x02) and
+ * the values above; after a clear, 0x02 alone, reporting 00 00 (J1979:
+ * no freeze frame stored). */
+inline bool supports_freeze_pid(unsigned pid)
+{
+    if (diagnostics().cleared) {
+        return pid == 0x02;
+    }
+    return pid == 0x02 || pid == 0x04 || pid == 0x05 || pid == 0x0C ||
+           pid == 0x0D;
+}
+
+/* A list reply, [service + 0x40][count][DTCs], into out. */
+inline void put_dtcs(uint8_t sid_pr, const uint8_t* dtcs, size_t n,
+                     unsigned char* out, size_t* out_len)
+{
+    out[0] = sid_pr;
+    out[1] = static_cast<unsigned char>(n / 2);
+    if (n > 0) {
+        memcpy(out + 2, dtcs, n);
+    }
+    *out_len = 2 + n;
 }
 
 /* The supported-PID bitmap at PID base (0x00, 0x20, 0x40), into out[4]:
@@ -181,12 +425,20 @@ inline void pid_bitmap(unsigned base, unsigned char* out)
  * out (kReplyMax bytes), from the service byte on: [41][PID][canned]
  * from the values above or a bitmap; [49][item][01][data] for Service
  * 09's VIN (02), CALID (04), CVN (06) and ECU name (0A); or [62][DID]
- * [value] for the DIDs above. Any other PID, item or DID gets a
+ * [value] for the DIDs above. The diagnostics, from diagnostics()'s
+ * state: Services 03, 07 and 0x0A (1 byte) the DTC lists, [43|47|4A]
+ * [count][DTCs]; Service 02 ([02][PID][frame], 3 bytes) the freeze
+ * frame, [42][PID][frame][data]; Service 04 (1 byte) clears, [44], or
+ * refuses with clear_nrc. Any other PID, item, frame or DID gets a
  * negative reply, 7F 01 12 (what the first vehicle answered for PID
- * 0x5C), 7F 09 12 or 7F 22 31. unsupported_nrc is the fakes'
+ * 0x5C), 7F 02 12, 7F 09 12 or 7F 22 31. unsupported_nrc is the fakes'
  * ECUIO_FAKE_UNSUPPORTED_NRC: -1 (unset) keeps those codes, 0 answers
  * nothing (an ECU that stays silent), any other value is the code for
- * all three. False when nothing answers. */
+ * all three. A Service 01 request of two to six PIDs (01 p1 ... p6)
+ * gets J1979's answer to it (2002, 6.1.2.3): 41, then each supported
+ * PID's record (the PID, its data) in the order asked, an unsupported
+ * one left out, nothing when it supports none; its first record alone
+ * under pack_first_only(). False when nothing answers. */
 inline bool answer(const unsigned char* req, size_t req_len,
                    long unsupported_nrc, unsigned char* out, size_t* out_len)
 {
@@ -218,6 +470,109 @@ inline bool answer(const unsigned char* req, size_t req_len,
                                          : static_cast<unsigned char>(i & 0xFF);
         }
         *out_len = 3 + n;
+        return true;
+    }
+    Diagnostics& diag = diagnostics();
+    const bool cleared = diag.cleared;
+    if (req_len == 1) {
+        switch (req[0]) {
+        case 0x03:
+            put_dtcs(0x43, kStoredDtcs, cleared ? 0 : sizeof(kStoredDtcs), out,
+                     out_len);
+            return true;
+        case 0x07:
+            put_dtcs(0x47, kPendingDtcs, cleared ? 0 : sizeof(kPendingDtcs),
+                     out, out_len);
+            return true;
+        case 0x0A:
+            put_dtcs(0x4A, kPermanentDtcs, sizeof(kPermanentDtcs), out,
+                     out_len);
+            return true;
+        case 0x04: {
+            const int nrc = diag.clear_nrc;
+            if (nrc != 0) {
+                out[0] = 0x7F;
+                out[1] = 0x04;
+                out[2] = static_cast<unsigned char>(nrc);
+                *out_len = 3;
+                return true;
+            }
+            diag.cleared = true;
+            diag.clears.fetch_add(1);
+            out[0] = 0x44;
+            *out_len = 1;
+            return true;
+        }
+        default:
+            return false;
+        }
+    }
+    if (req[0] == 0x02 && req_len == 3) {
+        const uint8_t pid = req[1];
+        if (req[2] != 0x00 || (pid != 0x00 && !supports_freeze_pid(pid))) {
+            return refuse(0x12); /* only frame 0 is stored */
+        }
+        out[0] = 0x42;
+        out[1] = pid;
+        out[2] = 0x00;
+        const auto put = [&](const uint8_t* v, size_t n) {
+            memcpy(out + 3, v, n);
+            *out_len = 3 + n;
+        };
+        const uint8_t none[2] = {0x00, 0x00};
+        switch (pid) {
+        case 0x00: {
+            uint8_t bitmap[4] = {};
+            for (unsigned k = 1; k <= 32; ++k) {
+                if (supports_freeze_pid(k)) {
+                    bitmap[(k - 1) / 8] = static_cast<uint8_t>(
+                        bitmap[(k - 1) / 8] | (0x80u >> ((k - 1) % 8)));
+                }
+            }
+            put(bitmap, sizeof(bitmap));
+            break;
+        }
+        case 0x02:
+            put(cleared ? none : kFreezeDtc, 2);
+            break;
+        case 0x04:
+            put(&kFreeze04Load, 1);
+            break;
+        case 0x05:
+            put(&kFreeze05Coolant, 1);
+            break;
+        case 0x0C:
+            put(kFreeze0CRpm, 2);
+            break;
+        case 0x0D:
+            put(&kFreeze0DSpeed, 1);
+            break;
+        default:
+            return false;
+        }
+        return true;
+    }
+    if (req[0] == 0x01 && req_len >= 3 && req_len <= 7) {
+        size_t n = 1;
+        out[0] = 0x41;
+        for (size_t k = 1; k < req_len; ++k) {
+            const unsigned char one[2] = {0x01, req[k]};
+            unsigned char rec[kReplyMax];
+            size_t m = 0;
+            if (!supports_pid(req[k]) || !answer(one, 2, -1, rec, &m) ||
+                m < 2 || rec[0] != 0x41 || n + m - 1 > kReplyMax) {
+                continue;
+            }
+            memcpy(out + n, rec + 1, m - 1);
+            n += m - 1;
+            if (pack_first_only()) {
+                break;
+            }
+        }
+        if (n == 1) {
+            return false;
+        }
+        *out_len = n;
         return true;
     }
     if (req_len != 2) {
@@ -267,12 +622,47 @@ inline bool answer(const unsigned char* req, size_t req_len,
         memcpy(out + 2, v, n);
         *out_len = 2 + n;
     };
+    const uint8_t zero[2] = {0x00, 0x00};
     switch (pid) {
     case 0x00:
     case 0x20:
     case 0x40:
+    case 0x60:
+    case 0x80:
+    case 0xA0:
         pid_bitmap(pid, out + 2);
         *out_len = 6;
+        break;
+    case 0x01:
+    case 0x41: {
+        /* 0x01: A7 the MIL, A6-A0 the stored DTCs' count; 0x41's A is
+         * always 0 */
+        const uint8_t stored = static_cast<uint8_t>(sizeof(kStoredDtcs) / 2);
+        const uint8_t a = (pid == 0x41 || cleared)
+                              ? 0x00
+                              : static_cast<uint8_t>(0x80 | stored);
+        const uint8_t status[4] = {a, kMonitorsB, kMonitorsC,
+                                   cleared ? kMonitorsC
+                                           : static_cast<uint8_t>(0x00)};
+        put(status, sizeof(status));
+        break;
+    }
+    case 0x21:
+        put(cleared ? zero : kPid21MilKm, 2);
+        break;
+    case 0x30: {
+        const uint8_t warm_ups = cleared ? 0 : kPid30WarmUps;
+        put(&warm_ups, 1);
+        break;
+    }
+    case 0x31:
+        put(cleared ? zero : kPid31ClearKm, 2);
+        break;
+    case 0x4D:
+        put(cleared ? zero : kPid4DMilMin, 2);
+        break;
+    case 0x4E:
+        put(cleared ? zero : kPid4EClearMin, 2);
         break;
     case 0x04:
         put(&kPid04EngineLoad, 1);
@@ -281,7 +671,7 @@ inline bool answer(const unsigned char* req, size_t req_len,
         put(&kPid05CoolantTemp, 1);
         break;
     case 0x0C:
-        put(kPid0CRpm, 2);
+        put(diag.engine_off ? zero : kPid0CRpm, 2);
         break;
     case 0x0D:
         put(&kPid0DSpeed, 1);
@@ -307,8 +697,14 @@ inline bool answer(const unsigned char* req, size_t req_len,
     case 0x7F:
         put(kPid7FRunTime, sizeof(kPid7FRunTime));
         break;
-    default:
-        return false;
+    default: {
+        const CannedPid* c = canned_pid(pid);
+        if (c == nullptr) {
+            return false;
+        }
+        put(c->data, c->len);
+        break;
+    }
     }
     return true;
 }

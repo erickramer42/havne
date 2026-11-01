@@ -1,20 +1,23 @@
 // File/layer: app/qml/SignalHub.qml | Qt6 Quick, UI layer
-// Testing: test_qml (tests/qml/tst_dashboard.qml): lookup by name,
+// Testing: test_qml (tests/qml/tst_dashboard.qml): lookup by def ID,
 //          values following the model, and a profile switch, alone and
-//          under the Dashboard's gauges
+//          under the Dashboard's gauges, a set whose defs are named
+//          otherwise too
 
 import QtQuick
 
-// Name-keyed view of Bridge.signalModel. The model is keyed by row;
-// a gauge wants "the RPM signal", whichever profile named it. Each row
-// is mirrored into an Entry whose required properties re-bind on the
-// model's dataChanged, the same path LiveView's delegates use.
-// byName is replaced, never mutated, so lookup() bindings re-run when
-// rows come and go (a profile switch resets the model).
+// ID-keyed view of Bridge.signalModel. The model is keyed by row; a
+// gauge wants "the RPM signal" by core's stable def ID, whatever the
+// set names it (Bridge.gaugeSignals). Each row is mirrored into an
+// Entry whose required properties re-bind on the model's dataChanged,
+// the same path LiveView's delegates use. byId is replaced, never
+// mutated, so lookup() bindings re-run when rows come and go (a
+// profile switch resets the model).
 Instantiator {
     id: hub
 
     component Entry: QtObject {
+        required property int id           // core's def ID
         required property string name
         required property string unit       // as displayed, from core
         required property double value
@@ -25,27 +28,27 @@ Instantiator {
         required property double ageMs   // -1 = never arrived
     }
 
-    property var byName: ({})
+    property var byId: ({})
 
     model: Bridge.signalModel
     delegate: Entry {}
 
     onObjectAdded: (index, object) => {
-        const m = Object.assign({}, hub.byName)
-        m[object.name] = object
-        hub.byName = m
+        const m = Object.assign({}, hub.byId)
+        m[object.id] = object
+        hub.byId = m
     }
     onObjectRemoved: (index, object) => {
-        if (hub.byName[object.name] !== object) return
-        const m = Object.assign({}, hub.byName)
-        delete m[object.name]
-        hub.byName = m
+        if (hub.byId[object.id] !== object) return
+        const m = Object.assign({}, hub.byId)
+        delete m[object.id]
+        hub.byId = m
     }
 
-    // First of `names` the active signal set provides, else null
-    function lookup(names) {
-        for (const n of names) {
-            const e = byName[n]
+    // First of `ids` the active signal set provides, else null
+    function lookup(ids) {
+        for (const id of ids ?? []) {
+            const e = byId[id]
             if (e) return e
         }
         return null
