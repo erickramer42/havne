@@ -408,10 +408,13 @@ scheduled. What each holds, past its row:
     session counts each kind (`ecuio_session_get_replay_faults`, the
     CLI's `end` line, the activity log), and the bridge, the recorder
     and the CLI are tested under them on the test car's engine start.
-  - Next: a recording answering a requesting `socketcan://` session on
-    `vcan0` as the ECU, with faults at the ISO-TP level (a bad sequence,
-    a Consecutive Frame past N_Cr, a reply past P2, none), for the
-    request engine and core's ISO-TP.
+  - Built: the same recording answering a requesting `socketcan://`
+    session on `vcan0` as the ECU, its packed replies segmented, with
+    faults at the ISO-TP level (no reply, a late one, a Consecutive
+    Frame out of sequence or past N_Cr): every reply the bus carried
+    whole is delivered and no broken one, and the rotation and packing
+    hold (ADR-0041 section 4). It showed late replies ending packing;
+    fixed (ADR-0039 Appendix A, the note on late replies).
 - **A performance benchmark:** frames per second, throughput and zero
   dropped as published numbers, building on CI's load test and
   `bench_bridge` ([docs/testing.md](docs/testing.md#performance)); and

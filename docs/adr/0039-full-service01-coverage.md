@@ -383,6 +383,21 @@ decode, not in a transport.
 > table, core's lengths and the fakes' ECU give seven, so 68 goes in
 > packs; the set still decodes sensors 1 and 2, whose bytes are the
 > same in either layout. 68 in a pack is still to run on a car.
+>
+> **Amended 2026-10-31 (late replies):** the test car's recording
+> answering as the ECU on `vcan0` with a reply late now and then
+> (ADR-0041 section 4) unpacked the session within a few laps. A
+> request whose wait ended takes its channel out of step (the rule
+> `ecuio_engine_on_frame` keeps for a negative reply, which names no
+> key), and its reply, come late, arrives while the next request is
+> out; when that is a pack, a refusal (`7F 01 12`) or a single record
+> of one of its PIDs counted as the pack failing, so three late
+> replies ended packing for the session. Out of step, a reply that
+> would fail a pack now answers nothing: the pack's own may follow,
+> and if it doesn't, its wait counts the failure as before. In step,
+> a refusal or a single record still fails it.
+> `RequestEngineTest.OutOfStepALateReplyFailsNoPack`,
+> `SocketCanFaultTest.SilenceAndLateRepliesLeaveTheSessionInStep`.
 
 **Fallback.** An ECU that answers a packed request with nothing, with
 a negative reply, or with only its first PID, three times in a row,
