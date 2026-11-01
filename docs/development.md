@@ -623,7 +623,7 @@ format only the lines you change: `git clang-format` after staging.
 
 **clang-tidy:** `.clang-tidy` runs the static analyzer and the
 bug-finding families (bugprone, concurrency, performance, portability,
-a few misc checks) over `core/` and `surrogate/`, and CI's
+a few misc checks) over `core/`, `surrogate/` and `cli/`, and CI's
 `clang-tidy` job fails on any warning. The style families stay off
 but for three checks: `google-explicit-constructor`, braces around a
 body on the line after its `if`, `else`, `for` or `while`, and
@@ -681,7 +681,7 @@ its usual duration:
 | `core-and-tests` | Ubuntu, GCC, no Qt | Builds core and the Qt-free tests, then runs ctest. This enforces "core never links Qt." Gates every other job. |
 | `core-sanitizers` | Ubuntu, GCC, no Qt | The same build and tests in Debug under AddressSanitizer and UndefinedBehaviorSanitizer. LeakSanitizer runs too, so a test that closes a session without destroying it fails here. It brings up `vcan0` as `linux-build` does and requires the vcan suites (`ECUIO_VCAN_REQUIRED`), so the SocketCAN worker runs under the sanitizers, the interface's down-and-up case as root. Blocking since its first green run (2026-10-20). |
 | `fuzz` | Ubuntu, Clang, no Qt | Installs the image's clang with its `libclang-rt` runtimes, checks that `-fsanitize=fuzzer` links, builds `fuzz/` (`-DECUIO_BUILD_FUZZERS=ON`, RelWithDebInfo), runs each harness for 60 s, and uploads any crashing input ([fuzz/README.md](../fuzz/README.md)) |
-| `clang-tidy` | Windows, MSVC's headers | Installs the hash-pinned clang-tidy wheel, configures a core-only Ninja tree in a Developer shell, and runs `scripts/tidy.sh` over core, the J2534 layer and the surrogate. Any warning fails it. Nothing is built. |
+| `clang-tidy` | Windows, MSVC's headers | Installs the hash-pinned clang-tidy wheel, configures a core-only Ninja tree in a Developer shell, and runs `scripts/tidy.sh` over core, the J2534 layer, the surrogate and `havne-cli`. Any warning fails it. Nothing is built. |
 | `win-build` | Windows, MSVC 2022 | Builds the full app, then runs ctest (the bridge, J2534 and QML suites included), then the load test (`bench_bridge --load`): its table goes to the run's summary, and the step fails on a broken invariant, a bound far below the dev machine's figures, or one of two ratios that compare the run with itself (decode at 1,000 defs against 9, looping with decoding against without) ([testing.md](testing.md#load-test-the-replay-fixture-through-the-bridge)) |
 | `macos-build` | macOS (arm64), AppleClang | Builds the full app, then runs ctest. The QML suites' link-state cases skip without the fake. |
 | `linux-build` | Ubuntu, GCC | Builds the full app, brings up `vcan0` (the `vcan` and `can-isotp` modules load as installed on the hosted runners), then runs ctest with `ECUIO_VCAN_REQUIRED=1`, so the simulated-bus suite fails rather than skips without the bus, then the load test as on Windows. Installs QtGui's EGL and OpenGL runtime libraries, which `test_qml` loads. |
