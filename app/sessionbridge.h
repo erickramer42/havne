@@ -8,7 +8,8 @@
 //          (BridgeTest.RecentRecordings*, .ReplayUriFor*), the delivery figures
 //          (BridgeTest.DeliveryText*, .DisconnectLogsTheDelivery), the
 //          vehicle's VIN key, label and plotted names (ADR-0027;
-//          BridgeTest.VinFromIdentity*, .UnplottedNames*, …), the default
+//          the VIN core reads, CoreTest.TheVinIsService09sThenF190s;
+//          BridgeTest.UnplottedNames*, …), the default
 //          plot (ADR-0039 section 8; BridgeTest.ARankedSet*, .APlotChoice*);
 //          reply timing (BridgeTest.ARecordingKeepsReplyTimingsSnapshots,
 //          .TimingTextNamesTheRequestsAndTheClock)
@@ -131,7 +132,7 @@ class SignalListModel : public QAbstractListModel
     Q_OBJECT
     // The plotted rows Live shows: hidden rows aren't counted
     Q_PROPERTY(int subscribedCount READ subscribedCount NOTIFY subscribedCountChanged)
-    // The rows whose PID their ECU marks unsupported (applySupport)
+    // The rows Live leaves out: unsupported or absent (rejudgeHidden)
     Q_PROPERTY(int hiddenCount READ hiddenCount NOTIFY hiddenCountChanged)
 
 public:
@@ -190,8 +191,9 @@ public:
         RowRole,        /* the row in this model, which toggleSubscribed
                          * takes and chartData's `row` names, whatever
                          * row a filtered view shows it at */
-        HiddenRole      /* its ECU marks its PID unsupported
-                         * (applySupport): Live leaves the row out */
+        HiddenRole      /* core reports it unsupported or absent
+                         * (applyUnsupported, applyAbsent): Live
+                         * leaves the row out */
     };
 
     int rowCount(const QModelIndex& parent = {}) const override;
@@ -217,16 +219,11 @@ public:
     int subscribedCount() const { return static_cast<int>(m_subscribedCount); }
     int hiddenCount() const { return m_hiddenCount; }
 
-    // What the ECUs reported they support (ADR-0039 §6): a Service 01
-    // row (a two-byte key 41 <PID> at offset 0) is hidden when the
-    // report of the channel its message ID names marks its PID
-    // unsupported (pidMarkedUnsupported); every other row, and one with
-    // no such report, is shown. Each call judges every row afresh, so a
-    // rescan that finds a PID shows its row again. A new set shows all.
-    void applySupport(const ecuio_channel_support_t* reports, size_t count);
-    // The bitmap at PID 0x20 * ((pid - 1) / 0x20) was answered and its
-    // bit for pid is clear. A range never answered judges nothing.
-    static bool pidMarkedUnsupported(const ecuio_channel_support_t& s, uint8_t pid);
+    // The signals core reports their ECU doesn't support
+    // (ecuio_session_get_unsupported_signals, ADR-0039 section 6): those
+    // rows are hidden. Each call judges every row afresh, so a rescan
+    // that finds a PID shows its row again. A new set shows all.
+    void applyUnsupported(const std::vector<uint16_t>& ids);
     // The signals core reports its frames come without
     // (ecuio_session_get_absent_signals): those rows are hidden too, and
     // the rest are judged by their support alone. A new set shows all.
@@ -302,9 +299,7 @@ private:
         double windowLow = 0.0;
         QString text;             // a text row's latest value
         bool isText = false;      // the def's kind is TEXT or HEX
-        uint32_t messageId = 0;   // the def's, which names its channel
-        uint8_t pid = 0;          // a Service 01 def's PID; 0 for any other
-        bool unsupported = false; // its ECU marks the PID unsupported
+        bool unsupported = false; // core: its ECU doesn't support it
         bool absent = false;      // core: its frames come without it
         bool hidden = false;      // either: Live leaves the row out
         uint8_t plotRank = 0;     // the def's plot_rank; 0 unranked
@@ -369,6 +364,11 @@ class SessionBridge : public QObject
 {
     Q_OBJECT
     Q_PROPERTY(QString coreVersion READ coreVersion CONSTANT)
+    // The signals the Dashboard's gauges read: each gauge's key ("rpm",
+    // "speed", ...) to the def IDs core's sets give it (signal_sets.h),
+    // the first one the session's set has wins. By ID, so a def core
+    // names otherwise keeps its gauge
+    Q_PROPERTY(QVariantMap gaugeSignals READ gaugeSignals CONSTANT)
     Q_PROPERTY(bool connected READ connected NOTIFY connectedChanged)
     Q_PROPERTY(bool connecting READ connecting NOTIFY connectingChanged)
     Q_PROPERTY(bool disconnecting READ disconnecting NOTIFY disconnectingChanged)
@@ -418,12 +418,17 @@ class SessionBridge : public QObject
     // refreshed on the tick as a read settles each item, and when the
     // unit system changes; emptied at connect, kept after disconnect
     Q_PROPERTY(QVariantList diagnostics READ diagnostics NOTIFY diagnosticsChanged)
+    // The ECUs a clear goes to (ADR-0038), as "0x7E8": each whose shown
+    // report is a clear target (clearTarget), the rule clearDiagnostics
+    // sends by, so the confirmation names exactly them
+    Q_PROPERTY(QStringList clearTargets READ clearTargets NOTIFY diagnosticsChanged)
 
 public:
     explicit SessionBridge(QObject* parent = nullptr);
     ~SessionBridge() override;
 
     QString coreVersion() const;
+    QVariantMap gaugeSignals() const;
     bool connected() const { return m_connected.load(std::memory_order_acquire); }
     int frameCount() const { return m_currentFrameCount; }
     int droppedFrames() const { return m_droppedFrames.load(std::memory_order_relaxed); }
@@ -540,10 +545,6 @@ public:
     // A line in the activity log (and a recording's events.log), for the
     // app's own events: the vehicle lines of ADR-0027 §4
     Q_INVOKABLE void logEvent(const QString& line) { emit logMessage(line); }
-    // The VIN in an identity report: 09 02's text, or 22 F190's when 09
-    // 02 wasn't answered, letters and digits only, upper case, accepted
-    // at 17 characters; "" otherwise. Static, so tests need no session.
-    static QString vinFromIdentity(const ecuio_channel_identity_t& identity);
     // A label as a recording folder takes it: letters, digits, space,
     // -, _ and ., trimmed, at most 40 characters, no trailing dot
     static QString folderLabel(const QString& label);
@@ -555,6 +556,9 @@ public:
     Q_INVOKABLE double displayValue(const QString& unit, double value) const;
     Q_INVOKABLE QString displayUnit(const QString& unit) const;
     QVariantList diagnostics() const { return m_diagnostics; }
+    QStringList clearTargets() const;
+    // A report a clear goes to: its read complete, no clear under way
+    static bool clearTarget(const ecuio_channel_diagnostics_t& report);
     // Read again: every ECU's diagnostics asked once more
     // (ecuio_session_read_diagnostics); nothing without a session
     Q_INVOKABLE void readDiagnostics();
@@ -803,6 +807,9 @@ private:
     void pollChannelSupport();
     uint32_t m_channelCount = 0;
     uint32_t m_supportGeneration[ECUIO_SESSION_INFO_MAX_CHANNELS] = {};
+    // The signals core reports their ECU doesn't support, read into
+    // m_unsupportedRead (sized at connect) when a report changes
+    std::vector<uint16_t> m_unsupportedRead;
     // The signals core reports its frames come without (ADR-0039 §6):
     // read each tick into m_absentRead (sized at connect), handed to the
     // model when they differ from m_absentIds

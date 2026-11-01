@@ -9,6 +9,7 @@
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
+#include <initializer_list>
 #include <memory>
 #include <mutex>
 #include <random>
@@ -4050,6 +4051,103 @@ TEST(CoreTest, AFieldPastEveryReplyIsAbsent)
     ASSERT_EQ(ecuio_session_get_absent_signals(session, ids, 4, &count),
               ECUIO_OK);
     EXPECT_EQ(count, 0u) << "no values callback, nothing decoded or judged";
+    ecuio_session_destroy(session);
+}
+
+/* ADR-0027 section 3: the VIN a vehicle is known by: 09 02's text, else
+ * F190's; letters and digits only, upper case, at 17 characters */
+TEST(CoreTest, TheVinIsService09sThenF190s)
+{
+    const auto item = [](std::initializer_list<uint8_t> request,
+                         uint8_t outcome, const std::string& text) {
+        ecuio_identity_item_t it{};
+        uint8_t k = 0;
+        for (uint8_t b : request) {
+            it.request[k++] = b;
+        }
+        it.length = k;
+        it.outcome = outcome;
+        it.text_length = static_cast<uint8_t>(text.size());
+        memcpy(it.text, text.data(), text.size());
+        return it;
+    };
+    const auto vin = [](const ecuio_channel_identity_t& id) {
+        char out[ECUIO_VIN_TEXT_LEN] = "x";
+        EXPECT_EQ(ecuio_identity_vin(&id, out, sizeof out), ECUIO_OK);
+        return std::string(out);
+    };
+    ecuio_channel_identity_t id{};
+    id.flags = ECUIO_IDENTITY_COMPLETE;
+    id.items = 2;
+    id.list[0] =
+        item({0x22, 0xF1, 0x90}, ECUIO_IDENTITY_ANSWERED, "f190vin0000000002");
+    id.list[1] = item({0x09, 0x02}, ECUIO_IDENTITY_ANSWERED,
+                      std::string(2, '\0') + " FAKEJ2534VIN00001");
+    EXPECT_EQ(vin(id), "FAKEJ2534VIN00001")
+        << "09 02 first, its padding dropped";
+
+    id.list[1].outcome = ECUIO_IDENTITY_REFUSED;
+    EXPECT_EQ(vin(id), "F190VIN0000000002")
+        << "F190 when 09 02 wasn't answered, in upper case";
+
+    id.list[0] =
+        item({0x22, 0xF1, 0x90}, ECUIO_IDENTITY_ANSWERED, "FAKEJ2534VIN0001");
+    EXPECT_EQ(vin(id), "") << "16 characters";
+    id.list[0] =
+        item({0x22, 0xF1, 0x90}, ECUIO_IDENTITY_ANSWERED, "FAKEJ2534VIN000012");
+    EXPECT_EQ(vin(id), "") << "18 characters";
+
+    id.list[0] =
+        item({0x09, 0x04}, ECUIO_IDENTITY_ANSWERED, "CALIBRATION00001X");
+    EXPECT_EQ(vin(id), "") << "a CALID of 17 isn't a VIN";
+
+    id.items = 1;
+    id.list[1] =
+        item({0x09, 0x02}, ECUIO_IDENTITY_ANSWERED, "FAKEJ2534VIN00001");
+    EXPECT_EQ(vin(id), "") << "past the count isn't read";
+
+    char small[ECUIO_VIN_TEXT_LEN - 1] = "x";
+    EXPECT_EQ(ecuio_identity_vin(&id, small, sizeof small),
+              ECUIO_ERR_INVALID_ARGUMENT);
+    EXPECT_EQ(small[0], 'x') << "untouched";
+    EXPECT_EQ(ecuio_identity_vin(nullptr, small, sizeof small),
+              ECUIO_ERR_NULL_ARGUMENT);
+    EXPECT_EQ(ecuio_identity_vin(&id, nullptr, ECUIO_VIN_TEXT_LEN),
+              ECUIO_ERR_NULL_ARGUMENT);
+}
+
+/* ecuio_session_get_unsupported_signals' contract: the mock's channel
+ * has learned nothing (generation 0), so none, before start and after
+ * close; NULLs refused as the absent signals' are. The judgment itself
+ * is PidSupportTest's (test_obd2), and a session's through a fake ECU
+ * Elm327SessionTest.TheSignalsOfAWithheldPidAreUnsupported */
+TEST(CoreTest, TheMockHasNoUnsupportedSignals)
+{
+    ecuio_session_t* session = nullptr;
+    ASSERT_EQ(
+        ecuio_session_create("mock://a?profile=obd2&diagnose=0", &session),
+        ECUIO_OK);
+    uint16_t ids[4] = {};
+    uint32_t count = 99;
+    ASSERT_EQ(ecuio_session_get_unsupported_signals(session, ids, 4, &count),
+              ECUIO_OK);
+    EXPECT_EQ(count, 0u);
+    EXPECT_EQ(
+        ecuio_session_get_unsupported_signals(session, nullptr, 0, &count),
+        ECUIO_OK);
+    EXPECT_EQ(
+        ecuio_session_get_unsupported_signals(session, nullptr, 1, &count),
+        ECUIO_ERR_NULL_ARGUMENT);
+    EXPECT_EQ(ecuio_session_get_unsupported_signals(session, ids, 4, nullptr),
+              ECUIO_ERR_NULL_ARGUMENT);
+    EXPECT_EQ(ecuio_session_get_unsupported_signals(nullptr, ids, 4, &count),
+              ECUIO_ERR_NULL_ARGUMENT);
+    ASSERT_EQ(ecuio_session_start(session), ECUIO_OK);
+    ecuio_session_close(session);
+    count = 99;
+    EXPECT_EQ(ecuio_session_get_unsupported_signals(session, ids, 4, &count),
+              ECUIO_OK);
+    EXPECT_EQ(count, 0u) << "readable after close";
     ecuio_session_destroy(session);
 }
 

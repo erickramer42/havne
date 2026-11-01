@@ -315,9 +315,12 @@ if(NOT HAVNE_BUILD_CORE_ONLY)
     set_target_properties(test_bridge PROPERTIES AUTOMOC ON)
     app_enable_warnings(test_bridge)
 
+    # core/src for pid_support.h: core's judgment of the unsupported
+    # signals, fed to the model (test_core's precedent)
     target_include_directories(test_bridge PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/../app
         ${CMAKE_SOURCE_DIR}/cli
+        ${CMAKE_SOURCE_DIR}/core/src
     )
 
     # The engine-start fixture, which both decode paths read (ADR-0024)

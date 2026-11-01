@@ -476,7 +476,13 @@ typedef struct ecuio_channel_support {
     uint16_t scan_refused;    /* answered negative */
     uint16_t scan_polled;     /* found ones now in the rotation */
     uint16_t scan_reserved;   /* zero */
-    uint32_t reserved[5];     /* zero; ABI growth space */
+    uint16_t pids_supported;  /* the data PIDs the bitmaps list: the
+                                 chain's own (0x20, 0x40, ...) not
+                                 counted */
+    uint16_t pids_through;    /* the last PID the answered bitmaps cover,
+                                 0x20 * (i + 1) for ranges' highest bit
+                                 i; 0 with none answered */
+    uint32_t reserved[4];     /* zero; ABI growth space */
 } ecuio_channel_support_t;
 
 #if defined(__cplusplus)
@@ -484,13 +490,15 @@ static_assert(sizeof(ecuio_dropped_request_t) == 8, "ecuio_dropped_request_t siz
 static_assert(sizeof(ecuio_channel_support_t) == 152, "ecuio_channel_support_t size is ABI");
 static_assert(offsetof(ecuio_channel_support_t, pid_bitmap) == 24, "support bitmap offset is ABI");
 static_assert(offsetof(ecuio_channel_support_t, scan_total) == 120, "support scan offset is ABI");
-static_assert(offsetof(ecuio_channel_support_t, reserved) == 132, "support reserved offset is ABI");
+static_assert(offsetof(ecuio_channel_support_t, pids_supported) == 132, "support pids offset is ABI");
+static_assert(offsetof(ecuio_channel_support_t, reserved) == 136, "support reserved offset is ABI");
 #elif defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
 _Static_assert(sizeof(ecuio_dropped_request_t) == 8, "ecuio_dropped_request_t size is ABI");
 _Static_assert(sizeof(ecuio_channel_support_t) == 152, "ecuio_channel_support_t size is ABI");
 _Static_assert(offsetof(ecuio_channel_support_t, pid_bitmap) == 24, "support bitmap offset is ABI");
 _Static_assert(offsetof(ecuio_channel_support_t, scan_total) == 120, "support scan offset is ABI");
-_Static_assert(offsetof(ecuio_channel_support_t, reserved) == 132, "support reserved offset is ABI");
+_Static_assert(offsetof(ecuio_channel_support_t, pids_supported) == 132, "support pids offset is ABI");
+_Static_assert(offsetof(ecuio_channel_support_t, reserved) == 136, "support reserved offset is ABI");
 #endif
 
 /* Copies what channel `channel` has learned into *out_support: an index
@@ -581,6 +589,22 @@ ecuio_status_t ecuio_session_get_channel_identity(
 const char* ecuio_identity_request_name(
     const uint8_t* request,
     uint8_t length
+);
+
+/* The vehicle's VIN in an identity report (ADR-0027 section 3): 09 02's
+ * answer, else 22 F190's when 09 02 wasn't answered, each kept to its
+ * ASCII letters and digits in upper case and taken only at 17 of them;
+ * no other item is (a CALID of 17 characters isn't a VIN). Writes the
+ * VIN and a NUL into out, or "" when the report holds none. ECUIO_OK;
+ * ECUIO_ERR_NULL_ARGUMENT for a NULL identity or out;
+ * ECUIO_ERR_INVALID_ARGUMENT for an out_cap under ECUIO_VIN_TEXT_LEN,
+ * out untouched. */
+#define ECUIO_VIN_TEXT_LEN 18
+
+ecuio_status_t ecuio_identity_vin(
+    const ecuio_channel_identity_t* identity,
+    char* out,
+    uint32_t out_cap
 );
 
 /* What each channel's ECU reports of its emissions diagnostics

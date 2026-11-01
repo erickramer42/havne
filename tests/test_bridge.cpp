@@ -50,6 +50,7 @@
 #include <ecuio/signals.h>
 #include <ecuio/serial.h>
 #include <ecuio/signal_sets.h>
+#include "pid_support.h" // core/src: core's judgment, fed to the model
 
 #ifdef _WIN32
 #ifndef NOMINMAX
@@ -63,6 +64,18 @@
 #endif
 
 namespace {
+
+/* The obd2 set's signals core judges unsupported against reports: what
+ * ecuio_session_get_unsupported_signals hands the bridge */
+std::vector<uint16_t> unsupportedIds(const ecuio_channel_support_t* reports,
+                                     uint32_t n)
+{
+    const ecuio_signal_set_t* set = ecuio_obd2_signal_set();
+    std::vector<uint16_t> ids(set->count);
+    ids.resize(ecuio_unsupported_signals(*set, reports, n, ids.data(),
+                                         static_cast<uint32_t>(ids.size())));
+    return ids;
+}
 
 /* Spin the GUI event loop for `ms`, letting queued invocations drain.
  * Without this, worker-posted lambdas never execute. */
@@ -2858,11 +2871,11 @@ TEST(BridgeTest, SessionInfoTextNamesTheAdapter)
  * 44 data PIDs to 0x60, whose bit says a fourth exists), a chain
  * answered to its end, one unanswered, and requests dropped for each
  * reason, past the eight a report lists. */
-/* Live leaves out the rows whose PID their ECU's bitmaps mark
- * unsupported (ADR-0039 §6): on the first vehicle's bitmaps (00, 20 and
- * 40 answered), 0x5C among them; a PID past an answered range, and a row
- * no report names, stay. Each report is judged afresh, so a rescan that
- * finds a PID shows its row again. */
+/* Live leaves out the rows core judges unsupported (ADR-0039 section 6;
+ * the rule is PidSupportTest's): on the first vehicle's bitmaps (00, 20
+ * and 40 answered), 0x5C among them; a PID past an answered range, and a
+ * row no report names, stay. Each list is applied afresh, so a rescan
+ * that finds a PID shows its row again. */
 TEST(BridgeTest, LiveHidesTheRowsTheirEcuMarksUnsupported)
 {
     SignalListModel model;
@@ -2884,7 +2897,7 @@ TEST(BridgeTest, LiveHidesTheRowsTheirEcuMarksUnsupported)
     const uint8_t bitmaps[12] = {0xFE, 0x7F, 0xA8, 0x13, 0xA0, 0x17,
                                  0xF0, 0x11, 0xFE, 0xD0, 0x8C, 0x81};
     memcpy(car.pid_bitmap, bitmaps, sizeof(bitmaps));
-    model.applySupport(&car, 1);
+    model.applyUnsupported(unsupportedIds(&car, 1));
 
     /* The rule, from the bitmaps' bytes: PID p is supported when bit
      * 0x80 >> ((p - 1) % 8) of byte (p - 1) / 8 is set */
@@ -2949,7 +2962,7 @@ TEST(BridgeTest, LiveHidesTheRowsTheirEcuMarksUnsupported)
     ecuio_channel_support_t rescan = car;
     rescan.generation = 2;
     rescan.pid_bitmap[(0x5C - 1) / 8] |= 0x80u >> ((0x5C - 1) % 8);
-    model.applySupport(&rescan, 1);
+    model.applyUnsupported(unsupportedIds(&rescan, 1));
     EXPECT_FALSE(
         model.data(model.index(row5C), SignalListModel::HiddenRole).toBool());
     EXPECT_EQ(model.hiddenCount(), expectHidden - 1);
@@ -2962,18 +2975,12 @@ TEST(BridgeTest, LiveHidesTheRowsTheirEcuMarksUnsupported)
     ecuio_channel_support_t nothing = car;
     nothing.generation = 0;
     const ecuio_channel_support_t neither[2] = {other, nothing};
-    model.applySupport(neither, 2);
+    model.applyUnsupported(unsupportedIds(neither, 2));
     EXPECT_EQ(model.hiddenCount(), 0);
     EXPECT_EQ(live.rowCount(), rows);
 
-    /* A range never answered judges nothing */
-    EXPECT_FALSE(SignalListModel::pidMarkedUnsupported(car, 0x61));
-    EXPECT_FALSE(SignalListModel::pidMarkedUnsupported(car, 0x00));
-    EXPECT_TRUE(SignalListModel::pidMarkedUnsupported(car, 0x5C));
-    EXPECT_FALSE(SignalListModel::pidMarkedUnsupported(car, 0x0C));
-
     /* A new set shows every row */
-    model.applySupport(&car, 1);
+    model.applyUnsupported(unsupportedIds(&car, 1));
     ASSERT_GT(model.hiddenCount(), 0);
     model.setSignalSet(ecuio_obd2_signal_set());
     EXPECT_EQ(model.hiddenCount(), 0);
@@ -3029,7 +3036,7 @@ TEST(BridgeTest, LiveHidesTheFieldsCoreReportsAbsent)
     car.generation = 1;
     car.ranges = 0x1; /* 0x01-0x20: all clear but 0x0C */
     car.pid_bitmap[(0x0C - 1) / 8] = 0x80u >> ((0x0C - 1) % 8);
-    model.applySupport(&car, 1);
+    model.applyUnsupported(unsupportedIds(&car, 1));
     int unsupported = 0;
     for (int r = 0; r < rows; ++r) {
         const unsigned pid = ecuio_obd2_signal_set()->defs[r].mux_key & 0xFFu;
@@ -3090,6 +3097,8 @@ TEST(BridgeTest, LiveHidesAFieldTheRepliesComeWithout)
     ASSERT_TRUE(disconnectAndWait(bridge));
 }
 
+/* The counts are core's (pids_supported, pids_through: PidSupportTest);
+ * the line says them */
 TEST(BridgeTest, ChannelSupportTextNamesTheEcuAndWhatItDropped)
 {
     ecuio_channel_support_t car{};
@@ -3097,9 +3106,8 @@ TEST(BridgeTest, ChannelSupportTextNamesTheEcuAndWhatItDropped)
     car.rx_id = 0x7E8;
     car.requests = 10;
     car.ranges = 0x7;
-    const uint8_t bitmaps[12] = {0xFE, 0x7F, 0xA8, 0x13, 0xA0, 0x17,
-                                 0xF0, 0x11, 0xFE, 0xD0, 0x8C, 0x81};
-    memcpy(car.pid_bitmap, bitmaps, sizeof(bitmaps));
+    car.pids_supported = 44;
+    car.pids_through = 0x60;
     car.dropped = 1;
     car.dropped_list[0] = {{0x01, 0x5C, 0x00}, 2, ECUIO_DROP_BITMAP, 0, {0, 0}};
     EXPECT_EQ(SessionBridge::channelSupportText(car).toStdString(),
@@ -3117,7 +3125,8 @@ TEST(BridgeTest, ChannelSupportTextNamesTheEcuAndWhatItDropped)
     all.rx_id = 0x18DAF110;
     all.requests = 1;
     all.ranges = 0x1;
-    all.pid_bitmap[0] = 0x81;   /* PIDs 01 and 08 */
+    all.pids_supported = 2;
+    all.pids_through = 0x20;
     EXPECT_EQ(SessionBridge::channelSupportText(all).toStdString(),
               "ECU 0x18DAF110: supports 2 PIDs; 1 request, none dropped");
 
@@ -3135,7 +3144,8 @@ TEST(BridgeTest, ChannelSupportTextNamesTheEcuAndWhatItDropped)
     ecuio_channel_support_t part = all;
     part.flags = ECUIO_SUPPORT_PROBED;
     part.ranges = 0;
-    part.pid_bitmap[0] = 0;
+    part.pids_supported = 0;
+    part.pids_through = 0;
     EXPECT_EQ(SessionBridge::channelSupportText(part).toStdString(),
               "ECU 0x18DAF110: no answer to the supported-PID query; "
               "1 request, none dropped");
@@ -3188,61 +3198,6 @@ TEST(BridgeTest, ChannelSupportTextNamesTheEcuAndWhatItDropped)
               "ECU 0x7E9: 128 requests, none dropped; "
               "scan: 256 DIDs, 130 found (128 polled), 120 refused, 6 unanswered");
 }
-/* ADR-0027 §3: the VIN a vehicle is known by, from the first channel's
- * report: 09 02's text, else F190's; letters and digits only, upper
- * case, at 17 characters. */
-TEST(BridgeTest, VinFromIdentityTakesService09ThenF190)
-{
-    const auto item = [](std::initializer_list<uint8_t> request,
-                         uint8_t outcome, const std::string& text) {
-        ecuio_identity_item_t it{};
-        uint8_t k = 0;
-        for (uint8_t b : request) {
-            it.request[k++] = b;
-        }
-        it.length = k;
-        it.outcome = outcome;
-        it.text_length = static_cast<uint8_t>(text.size());
-        memcpy(it.text, text.data(), text.size());
-        return it;
-    };
-    ecuio_channel_identity_t id{};
-    id.flags = ECUIO_IDENTITY_COMPLETE;
-    id.items = 2;
-    id.list[0] =
-        item({0x22, 0xF1, 0x90}, ECUIO_IDENTITY_ANSWERED, "f190vin0000000002");
-    id.list[1] = item({0x09, 0x02}, ECUIO_IDENTITY_ANSWERED,
-                      std::string(2, '\0') + " FAKEJ2534VIN00001");
-    EXPECT_EQ(SessionBridge::vinFromIdentity(id).toStdString(),
-              "FAKEJ2534VIN00001")
-        << "09 02 first, its padding dropped";
-
-    id.list[1].outcome = ECUIO_IDENTITY_REFUSED;
-    EXPECT_EQ(SessionBridge::vinFromIdentity(id).toStdString(),
-              "F190VIN0000000002")
-        << "F190 when 09 02 wasn't answered, in upper case";
-
-    id.list[0] =
-        item({0x22, 0xF1, 0x90}, ECUIO_IDENTITY_ANSWERED, "FAKEJ2534VIN0001");
-    EXPECT_TRUE(SessionBridge::vinFromIdentity(id).isEmpty())
-        << "16 characters";
-    id.list[0] =
-        item({0x22, 0xF1, 0x90}, ECUIO_IDENTITY_ANSWERED, "FAKEJ2534VIN000012");
-    EXPECT_TRUE(SessionBridge::vinFromIdentity(id).isEmpty())
-        << "18 characters";
-
-    id.list[0] =
-        item({0x09, 0x04}, ECUIO_IDENTITY_ANSWERED, "CALIBRATION00001X");
-    EXPECT_TRUE(SessionBridge::vinFromIdentity(id).isEmpty())
-        << "a CALID of 17 isn't a VIN";
-
-    id.items = 1;
-    id.list[1] =
-        item({0x09, 0x02}, ECUIO_IDENTITY_ANSWERED, "FAKEJ2534VIN00001");
-    EXPECT_TRUE(SessionBridge::vinFromIdentity(id).isEmpty())
-        << "past the count isn't read";
-}
-
 TEST(BridgeTest, NewSaltIsSixteenRandomBytes)
 {
     SessionBridge bridge;
@@ -3434,7 +3389,7 @@ TEST(BridgeTest, ARankedSetPlotsTheTopRankedRowsItShows)
     EXPECT_EQ(model.subscribedCount(), SignalListModel::DefaultPlotted);
 
     const ecuio_channel_support_t car = carWithoutOilTemp();
-    model.applySupport(&car, 1);
+    model.applyUnsupported(unsupportedIds(&car, 1));
     QStringList withLoad = topSix;
     withLoad.removeOne(QStringLiteral("Engine Oil Temp"));
     withLoad.prepend(QStringLiteral("Engine Load"));
@@ -3444,7 +3399,7 @@ TEST(BridgeTest, ARankedSetPlotsTheTopRankedRowsItShows)
     ecuio_channel_support_t rescan = car;
     rescan.generation = 2;
     rescan.pid_bitmap[(0x5C - 1) / 8] |= 0x80u >> ((0x5C - 1) % 8);
-    model.applySupport(&rescan, 1);
+    model.applyUnsupported(unsupportedIds(&rescan, 1));
     EXPECT_EQ(plottedRows(model), topSix) << "and gives it back";
 
     /* A car with fewer ranked rows than that plots all it has */
@@ -3455,7 +3410,7 @@ TEST(BridgeTest, ARankedSetPlotsTheTopRankedRowsItShows)
     sparse.ranges = 0x7; /* 0x01-0x60: only RPM and speed */
     sparse.pid_bitmap[(0x0C - 1) / 8] |= 0x80u >> ((0x0C - 1) % 8);
     sparse.pid_bitmap[(0x0D - 1) / 8] |= 0x80u >> ((0x0D - 1) % 8);
-    model.applySupport(&sparse, 1);
+    model.applyUnsupported(unsupportedIds(&sparse, 1));
     EXPECT_EQ(plottedRows(model),
               (QStringList{QStringLiteral("RPM"), QStringLiteral("Vehicle Speed")}));
 }
@@ -3487,7 +3442,7 @@ TEST(BridgeTest, APlotChoiceOutlivesTheDefaultsMoving)
 
     /* Load's default turns on and RPM's stays on: neither choice moves */
     const ecuio_channel_support_t car = carWithoutOilTemp();
-    model.applySupport(&car, 1);
+    model.applyUnsupported(unsupportedIds(&car, 1));
     EXPECT_FALSE(plotted(rpm)) << "an untick holds against its default";
     EXPECT_TRUE(plotted(load));
     EXPECT_FALSE(plotted(pedal)) << "an untick leaves its place empty";
@@ -3922,6 +3877,24 @@ TEST(BridgeTest, DiagnosticsFileTextIsTheCliLines)
  * the report goes to a file of its own first (no vehicle in a mock's
  * name), then the clear, its line, and the read after it, the only
  * other diagnostics line */
+/* ADR-0038: the one rule for a clear's ECUs, which the confirmation
+ * names (clearTargets) and clearDiagnostics sends to: a completed read,
+ * no clear under way */
+TEST(BridgeTest, AClearGoesToCompletedReportsNotClearing)
+{
+    ecuio_channel_diagnostics_t r{};
+    EXPECT_FALSE(SessionBridge::clearTarget(r)) << "a read under way";
+    r.flags = ECUIO_DIAG_COMPLETE;
+    EXPECT_TRUE(SessionBridge::clearTarget(r));
+    r.flags = ECUIO_DIAG_COMPLETE | ECUIO_DIAG_CLEARING;
+    EXPECT_FALSE(SessionBridge::clearTarget(r)) << "a clear under way";
+    r.flags = ECUIO_DIAG_CLEARING;
+    EXPECT_FALSE(SessionBridge::clearTarget(r));
+
+    SessionBridge bridge;
+    EXPECT_TRUE(bridge.clearTargets().isEmpty()) << "no session, no report";
+}
+
 TEST(BridgeTest, AClearSavesTheReportFirst)
 {
     QTemporaryDir root;

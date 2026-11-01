@@ -1597,6 +1597,9 @@ TEST_F(J2534AdoptionTest, ProbeWalksTheChainBeforeTheRotation)
                               0xFF, 0xFF, 0x7F, 0xFD, 0xF7, 0x00, 0x00, 0x03,
                               0x00, 0x04, 0x00, 0x01, 0x44, 0x00, 0x00, 0x00};
     EXPECT_EQ(memcmp(s.pid_bitmap, want, sizeof(want)), 0);
+    /* want's 100 set bits, less the chain's 20, 40, 60, 80 and A0 */
+    EXPECT_EQ(s.pids_supported, 95u);
+    EXPECT_EQ(s.pids_through, 0xC0u) << "A0's bitmap covers A1 to C0";
     EXPECT_EQ(s.requests, 92u);
     EXPECT_EQ(s.dropped, 0u);
 

@@ -28,6 +28,7 @@
 #include "ecuio/signals.h"
 #include "diagnostics.h"
 #include "obd2_reply.h"
+#include "pid_support.h"
 #include "request_timing.h"
 
 #include <stdint.h>
@@ -1790,6 +1791,8 @@ inline void ecuio_engine_support(const ecuio_request_engine* e, uint32_t c,
     for (uint32_t b = 0; b < sizeof(out->pid_bitmap); ++b) {
         out->pid_bitmap[b] = ch.supported[b];
     }
+    out->pids_supported = ecuio_supported_pid_count(ch.supported);
+    out->pids_through = ecuio_pids_through(ch.ranges);
     for (uint32_t i = 0; i < e->count; ++i) {
         const ecuio_request& r = e->requests[i];
         if (r.channel != c) {

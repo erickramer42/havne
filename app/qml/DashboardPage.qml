@@ -3,8 +3,8 @@
 //          760 px content width (4 ↔ 2 grid columns) and 600 px (compact
 //          gaps), and to 1280 × 650 (the wide arrangement fits without
 //          scrolling); gauges sweep once per session. test_qml
-//          (tests/qml/tst_dashboard.qml) covers each Tap's lookup and
-//          note, the gauges' imperial units, scales and zones, the
+//          (tests/qml/tst_dashboard.qml) covers each Tap's lookup by
+//          def ID (a set naming its defs otherwise too) and note, the gauges' imperial units, scales and zones, the
 //          peaks cleared on a change of units, and a peak held from
 //          inside a window (the replayed fixture); tst_linkhealth.qml the
 //          header's link state, found by objectName
@@ -25,15 +25,15 @@ Page {
 
     SignalHub { id: hub }
 
-    // One gauge input: the first of `names` the active profile provides.
-    // The mock and obd2 sets share display names; a profile that names a
-    // signal differently adds its name to the list. Unit and decimals are
+    // One gauge input: the first of `ids` (core's def IDs, from
+    // Bridge.gaugeSignals) the active profile provides, whatever it names
+    // the signal. Unit and decimals are
     // core's display strings. `high` and `low` are the last window's,
     // for the gauges' holds. `note` explains an empty gauge instead of
     // showing a fake zero.
     component Tap: QtObject {
-        required property var names
-        readonly property SignalHub.Entry entry: hub.lookup(names)
+        required property var ids
+        readonly property SignalHub.Entry entry: hub.lookup(ids)
         readonly property bool live: Bridge.connected && entry !== null && entry.hasValue
         readonly property real value: entry ? entry.value : 0
         readonly property real high: entry ? entry.windowHigh : 0
@@ -47,14 +47,14 @@ Page {
                                      : ""
     }
 
-    Tap { id: rpm;      names: ["RPM"] }
-    Tap { id: speed;    names: ["Vehicle Speed"] }
-    Tap { id: coolant;  names: ["Coolant Temp"] }
-    Tap { id: oil;      names: ["Engine Oil Temp"] }
-    Tap { id: iat;      names: ["Intake Air Temp"] }
-    Tap { id: maf;      names: ["MAF"] }
-    Tap { id: throttle; names: ["Throttle Position"] }
-    Tap { id: load;     names: ["Engine Load"] }
+    Tap { id: rpm;      ids: Bridge.gaugeSignals.rpm }
+    Tap { id: speed;    ids: Bridge.gaugeSignals.speed }
+    Tap { id: coolant;  ids: Bridge.gaugeSignals.coolant }
+    Tap { id: oil;      ids: Bridge.gaugeSignals.oil }
+    Tap { id: iat;      ids: Bridge.gaugeSignals.iat }
+    Tap { id: maf;      ids: Bridge.gaugeSignals.maf }
+    Tap { id: throttle; ids: Bridge.gaugeSignals.throttle }
+    Tap { id: load;     ids: Bridge.gaugeSignals.load }
 
     // Sizes for the gauge arrangements below
     QtObject {
