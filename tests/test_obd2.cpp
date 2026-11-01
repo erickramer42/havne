@@ -13,6 +13,7 @@
 //          the replies into the report (diagnostics.h), the
 //          monitors against fixtures/obd2/monitors.csv. The signals
 //          their ECU's bitmaps rule out (pid_support.h: PidSupportTest).
+//          The trouble codes' titles and parse (DtcTitleTest, ADR-0044).
 //          End-to-end pacing is HARNESS (stream and
 //          health tests) and BENCH (VX), not this file.
 
@@ -4472,4 +4473,92 @@ TEST(PidSupportTest, OnlyTheDefsOwnEcusReportJudgesIt)
     EXPECT_EQ(two[0], unsupported(&car, 1)[0]);
     EXPECT_EQ(two[1], unsupported(&car, 1)[1]);
     EXPECT_EQ(two[2], 0xFFFF) << "nothing past the capacity";
+}
+
+// ---- Trouble-code titles (ADR-0044): Wal33D's generic list, SAE J2012's
+// powertrain and network ranges only
+
+namespace {
+
+// J2012's ranges SAE controls, of the letters the table keeps
+bool sae_titled_range(uint16_t code)
+{
+    const unsigned letter = code >> 14;
+    const unsigned d1 = (code >> 12) & 3;
+    const unsigned d2 = (code >> 8) & 0xF;
+    if (letter == 0) { // P
+        return d1 == 0 || d1 == 2 || (d1 == 3 && d2 >= 4 && d2 <= 9);
+    }
+    if (letter == 3) { // U
+        return d1 == 0 || d1 == 3;
+    }
+    return false; // C and B are left out
+}
+
+} // namespace
+
+TEST(DtcTitleTest, CommonCodesHaveTheirTitles)
+{
+    EXPECT_STREQ(ecuio_dtc_title(0x0301), "Cylinder 1 Misfire Detected");
+    EXPECT_STREQ(ecuio_dtc_title(0x0420),
+                 "Catalyst System Efficiency Below Threshold Bank 1");
+    EXPECT_STREQ(ecuio_dtc_title(0x0171), "System Too Lean Bank 1");
+    EXPECT_STREQ(ecuio_dtc_title(0xC100), "Lost Communication With ECM/PCM A");
+    // An en dash in the source is a hyphen here
+    EXPECT_STREQ(ecuio_dtc_title(0x2110),
+                 "Throttle Actuator A Control System - Forced Limited RPM");
+    EXPECT_EQ(
+        std::strncmp(ecuio_dtc_title_source(), "Wal33D/dtc-database ", 20), 0);
+}
+
+TEST(DtcTitleTest, OnlySaesPowertrainAndNetworkRangesHaveTitles)
+{
+    // Every code: a title only in the ranges kept, each plain ASCII text;
+    // most of the ranges' codes are listed (J2012 leaves some reserved)
+    int titled = 0;
+    for (uint32_t c = 0; c <= 0xFFFF; ++c) {
+        const char* t = ecuio_dtc_title(static_cast<uint16_t>(c));
+        ASSERT_NE(t, nullptr);
+        if (*t == '\0') {
+            continue;
+        }
+        ++titled;
+        EXPECT_TRUE(sae_titled_range(static_cast<uint16_t>(c)))
+            << std::hex << c;
+        for (const char* p = t; *p != '\0'; ++p) {
+            EXPECT_TRUE(*p >= 32 && *p <= 126) << std::hex << c;
+        }
+    }
+    EXPECT_GT(titled, 8000);
+    // The fake ECU's: a manufacturer's code and a chassis code have none
+    EXPECT_STREQ(ecuio_dtc_title(0x1234), ""); // P1234
+    EXPECT_STREQ(ecuio_dtc_title(0x4035), ""); // C0035
+    EXPECT_STREQ(ecuio_dtc_title(0x9001), ""); // B1001
+    EXPECT_STREQ(ecuio_dtc_title(0xD000), ""); // U1000
+}
+
+TEST(DtcTitleTest, ParseIsFormatsInverse)
+{
+    for (uint32_t c = 0; c <= 0xFFFF; ++c) {
+        char text[8] = {};
+        ASSERT_EQ(ecuio_dtc_format(static_cast<uint16_t>(c), text, sizeof text),
+                  ECUIO_OK);
+        uint16_t back = 0;
+        ASSERT_EQ(ecuio_dtc_parse(text, &back), ECUIO_OK) << text;
+        EXPECT_EQ(back, c) << text;
+    }
+}
+
+TEST(DtcTitleTest, ParseRefusesWhatIsntACode)
+{
+    for (const char* bad : {"p0301", "P4301", "P030", "P03011", "X0301",
+                            "P03G1", "P03a1", "", " P0301", "P0301 "}) {
+        uint16_t out = 0xABCD;
+        EXPECT_EQ(ecuio_dtc_parse(bad, &out), ECUIO_ERR_INVALID_ARGUMENT)
+            << bad;
+        EXPECT_EQ(out, 0xABCD) << bad;
+    }
+    uint16_t out = 0;
+    EXPECT_EQ(ecuio_dtc_parse(nullptr, &out), ECUIO_ERR_NULL_ARGUMENT);
+    EXPECT_EQ(ecuio_dtc_parse("P0301", nullptr), ECUIO_ERR_NULL_ARGUMENT);
 }

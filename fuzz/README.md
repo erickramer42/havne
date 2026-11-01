@@ -17,6 +17,7 @@ UndefinedBehaviorSanitizer with Clang):
 | `fuzz_diagnostics` | The request engine reading an ECU's diagnostics and clearing them (`core/src/request_engine.h`, `diagnostics.h`; ADR-0037, ADR-0038), the input a script: each request answered by a timeout, raw bytes, a positive reply with an arbitrary tail (up to 128 bytes, past the 32 codes a list holds) or a negative one, a pending code among them, with Read again, rescans and clears (at the report's generation or one off it) between. `04` goes out only as the next request after its gate: the clear's `01 0C` answered 0 rpm, or, with the caller's word on the engine (any of the call's flags is fuzzed), its `01 0D` answered 0 km/h, or asked at all with the word on a moving vehicle too. After every step the report stays within its caps (codes, monitors, freeze-frame values, items), each list holds no more than it reported, every code and monitor it holds has a name, its values are finite, and it reads complete only with nothing left to ask; two runs agree. |
 | `fuzz_isotp` | ISO-TP (`core/src/isotp.h`, ADR-0040), the first byte picking one: arbitrary frames at arbitrary times to the timed receiver across eight IDs (every slot within its bounds, a message never past 4095 bytes or its slot, a Single Frame's within its frame, nothing left past N_Cr after an expiry, nothing left after the end of a reply), or a round trip from the sender to the receiver under the input's Flow Control frames (the sender keeps STmin, the block size and the sequence numbers; a send that ends arrives whole and the same; one overflowed or abandoned sends nothing more). Each message is read through an exact-size copy; two runs agree. |
 | `fuzz_vin` | VIN decode (`core/src/vin.cpp`, ADR-0043): arbitrary text as a VIN under an arbitrary latest model year, and as a manufacturer code. A refusal leaves the info zeroed; a decode is 17 characters, its year 0 or 1980-2039 and never past the bound once the note's later half, its check digit 0-9 or X matching position 9 exactly when flagged, its code 3 or 6 long, its reserved room zero; a make is never NULL; two calls agree. |
+| `fuzz_dtc` | A typed trouble code (`ecuio_dtc_parse`, `core/src/dtc_titles.cpp`, ADR-0044): arbitrary text. A refusal leaves the code untouched; a parse formats back to the same text through `ecuio_dtc_format`, and its title is never NULL. |
 
 They aren't ctest tests: a time-bounded fuzzer in the default pass
 would make a green suite stop meaning green. The CI `fuzz` job runs
@@ -34,7 +35,7 @@ libFuzzer, Visual Studio 2022 17.0 or later; nothing else to install):
 
 ```sh
 cmake -B build-fuzz-msvc -A x64 -DHAVNE_BUILD_CORE_ONLY=ON -DBUILD_TESTING=OFF -DECUIO_BUILD_FUZZERS=ON
-cmake --build build-fuzz-msvc --config RelWithDebInfo --target fuzz_decode_signal fuzz_validate_set fuzz_uds_query fuzz_elm327_reply fuzz_replay_file fuzz_socketcan_wire fuzz_diagnostics fuzz_isotp fuzz_vin
+cmake --build build-fuzz-msvc --config RelWithDebInfo --target fuzz_decode_signal fuzz_validate_set fuzz_uds_query fuzz_elm327_reply fuzz_replay_file fuzz_socketcan_wire fuzz_diagnostics fuzz_isotp fuzz_vin fuzz_dtc
 build-fuzz-msvc/fuzz/RelWithDebInfo/fuzz_decode_signal.exe -max_total_time=60
 ```
 
@@ -48,7 +49,7 @@ runtimes are in `libclang-rt-<major>-dev` on Ubuntu):
 ```sh
 cmake -B build-fuzz -DCMAKE_BUILD_TYPE=RelWithDebInfo -DHAVNE_BUILD_CORE_ONLY=ON \
   -DBUILD_TESTING=OFF -DECUIO_BUILD_FUZZERS=ON -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++
-cmake --build build-fuzz --target fuzz_decode_signal fuzz_validate_set fuzz_uds_query fuzz_elm327_reply fuzz_replay_file fuzz_socketcan_wire fuzz_diagnostics fuzz_isotp fuzz_vin
+cmake --build build-fuzz --target fuzz_decode_signal fuzz_validate_set fuzz_uds_query fuzz_elm327_reply fuzz_replay_file fuzz_socketcan_wire fuzz_diagnostics fuzz_isotp fuzz_vin fuzz_dtc
 ./build-fuzz/fuzz/fuzz_decode_signal -max_total_time=60
 ```
 

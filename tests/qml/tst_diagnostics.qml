@@ -106,6 +106,38 @@ TestCase {
         verify(!find(page, "clearCodes").visible, "nor a clear")
     }
 
+    // ADR-0044: each titled code on a line of its own under its list; a
+    // chassis or a manufacturer's code stays in the codes line alone
+    function test_codesCarryTheirTitles() {
+        const page = createTemporaryObject(pageComponent, testCase.parent)
+        const card = connectAndRead(page, "mock://demo")
+        compare(find(card, "titles_stored").text,
+                "P0301  Cylinder 1 Misfire Detected\n" +
+                "P0420  Catalyst System Efficiency Below Threshold Bank 1\n" +
+                "U0100  Lost Communication With ECM/PCM A")
+        compare(find(card, "titles_pending").text, "P0171  System Too Lean Bank 1",
+                "C0035 and B1001 have none")
+        compare(find(card, "titles_permanent").text,
+                "P0420  Catalyst System Efficiency Below Threshold Bank 1")
+    }
+
+    // ADR-0044: a typed code is named with or without a session
+    function test_aTypedCodeIsNamed() {
+        const page = createTemporaryObject(pageComponent, testCase.parent)
+        const field = find(page, "dtcLookupField")
+        const result = find(page, "dtcLookupResult")
+        verify(!result.visible, "nothing typed, nothing said")
+        verify(find(page, "dtcLookupHint").text.indexOf("Wal33D/dtc-database ") > 0)
+        field.text = "p 0301"
+        compare(result.text, "P0301: Cylinder 1 Misfire Detected")
+        field.text = "P1234"
+        verify(result.text.indexOf("P1234: no title here") === 0, result.text)
+        field.text = "P5301"
+        verify(result.text.indexOf("Not a trouble code") === 0, result.text)
+        field.text = ""
+        verify(!result.visible)
+    }
+
     function test_theMocksReportFillsThePage() {
         const page = createTemporaryObject(pageComponent, testCase.parent)
         const card = connectAndRead(page, "mock://demo")
@@ -120,7 +152,7 @@ TestCase {
         const cycle = texts(find(card, "monitors"), "monitorCycle")
         compare(cycle.length, 8, "this drive cycle, beside each")
         verify(cycle.every(s => s === "Done"), cycle.join(", "))
-        compare(find(card, "freezeLabel").text, "Stored by P0301")
+        compare(find(card, "freezeLabel").text, "Stored by P0301 (Cylinder 1 Misfire Detected)")
         const values = texts(find(card, "freezeValues"), "freezeValue")
         compare(values, [page.valueText(0xB3 * 100 / 255, 1, "%"),
                          page.valueText(90, 0, "°C"),

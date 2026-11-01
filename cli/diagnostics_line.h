@@ -1,14 +1,17 @@
 // File/layer: cli/diagnostics_line.h | havne-cli, an ECU's diagnostics as a line (ADR-0037)
 // Testing: UNIT (tests/test_cli.cpp, CliDiagnosticsTest: every outcome, a
 //          cut list, the freeze frame's values, this drive cycle's
-//          monitors); the mock's line in the golden run
-//          (tests/golden/cli/mock.jsonl)
+//          monitors, each code's title); the mock's line in the golden run
+//          (tests/golden/cli/mock.jsonl); the dtc line (CliDtcTest,
+//          ADR-0044)
 //
 // One ECU's report once a read has completed: readiness (the MIL, the
 // confirmed-code count and each monitor by name, with this drive cycle's
 // state once PID 41 has answered), PID 41's own outcome, the three code
 // lists,
-// each code as it's written ("P0301"), and the freeze frame's values by
+// each code as it's written ("P0301") with its title beside it in
+// "titles" (ADR-0044; null where the list has none), and the freeze
+// frame's code, its title and its values by
 // the obd2 def that decoded them, in its unit, as decoded. An item that
 // was refused carries the negative reply in frames.csv's form.
 
@@ -53,6 +56,33 @@ inline void diagnostics_outcome(Line& l, uint8_t outcome, uint8_t service,
         l.key("reply");
         l.hex_bytes(reply, sizeof reply);
     }
+}
+
+// A code's title (ecuio_dtc_title), or null when the list has none
+inline void dtc_title(Line& l, uint16_t code)
+{
+    const char* title = ecuio_dtc_title(code);
+    if (*title == '\0') {
+        l.raw("null");
+    } else {
+        l.string(title, SIZE_MAX);
+    }
+}
+
+// A typed code's line (`havne-cli dtc`): the code as written, its
+// title or null, and where the titles come from
+inline void dtc_line(Line& l, uint16_t code)
+{
+    char text[8] = {};
+    (void)ecuio_dtc_format(code, text, sizeof text);
+    l.raw("{\"type\":\"dtc\"");
+    l.key("code");
+    l.string(text, sizeof text);
+    l.key("title");
+    dtc_title(l, code);
+    l.key("source");
+    l.string(ecuio_dtc_title_source(), SIZE_MAX);
+    l.ch('}');
 }
 
 // The whole line, without its newline; l.finish() adds it
@@ -137,6 +167,16 @@ inline void diagnostics_line(Line& l, const ecuio_channel_diagnostics_t& d)
                 l.string(code, sizeof code);
             }
             l.ch(']');
+            // Each code's title beside it (ADR-0044), null with none
+            l.key("titles");
+            l.ch('[');
+            for (uint32_t i = 0; i < held; ++i) {
+                if (i) {
+                    l.ch(',');
+                }
+                dtc_title(l, list.codes[i]);
+            }
+            l.ch(']');
         }
         l.ch('}');
     }
@@ -150,6 +190,8 @@ inline void diagnostics_line(Line& l, const ecuio_channel_diagnostics_t& d)
             char code[8] = {};
             (void)ecuio_dtc_format(d.freeze_dtc, code, sizeof code);
             l.string(code, sizeof code);
+            l.key("title");
+            dtc_title(l, d.freeze_dtc);
         } else {
             l.raw("null");
         }

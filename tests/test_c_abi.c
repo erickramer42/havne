@@ -223,6 +223,11 @@ int main(void)
     if (ecuio_can_interfaces(NULL, 1, &can_count) != ECUIO_ERR_NULL_ARGUMENT) {
         return 1;
     }
+    if (ecuio_dtc_parse(NULL, NULL) != ECUIO_ERR_NULL_ARGUMENT ||
+        ecuio_dtc_title(0x0301)[0] == 0 || ecuio_dtc_title_source()[0] == 0 ||
+        ecuio_dtc_title_notice()[0] == 0) {
+        return 1;
+    }
     if (ecuio_vin_decode(NULL, 0, &vin_info) != ECUIO_ERR_NULL_ARGUMENT ||
         ecuio_vin_make(NULL)[0] != 0 || ecuio_vin_source()[0] == 0) {
         return 1;

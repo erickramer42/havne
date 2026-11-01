@@ -1,0 +1,49 @@
+Data from others in Havne's core
+================================
+
+Havne itself is licensed under the MIT license (the copyright file
+beside this one). Its core library also carries the data below, each
+under its own terms.
+
+
+Wal33D/dtc-database: trouble-code titles
+----------------------------------------
+
+The titles Havne shows for SAE J2012's generic powertrain and network
+trouble codes come from Wal33D's dtc-database,
+https://github.com/Wal33D/dtc-database (the commit is named in Havne's
+source, core/src/dtc_titles_table.h), under its MIT license:
+
+    MIT License
+
+    Copyright (c) 2024 Wal33D (Waleed Judah)
+
+    Permission is hereby granted, free of charge, to any person obtaining a copy
+    of this software and associated documentation files (the "Software"), to deal
+    in the Software without restriction, including without limitation the rights
+    to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+    copies of the Software, and to permit persons to whom the Software is
+    furnished to do so, subject to the following conditions:
+
+    The above copyright notice and this permission notice shall be included in all
+    copies or substantial portions of the Software.
+
+    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+    IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+    FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+    AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+    LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+    OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+    SOFTWARE.
+
+
+NHTSA vPIC manufacturer codes
+-----------------------------
+
+The makes Havne shows for a VIN's manufacturer code come from the
+standalone database of NHTSA's Product Information Catalog and Vehicle
+Listing (vPIC), https://vpic.nhtsa.dot.gov/downloads/, a work of the
+US government, whose terms of use call it public information that may
+be distributed or copied. The release used is named in Havne's source
+(core/src/vin_wmi_table.h). NHTSA gives no warranty of its accuracy,
+and Havne is not affiliated with or endorsed by NHTSA.

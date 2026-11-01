@@ -478,6 +478,7 @@ havne-cli stream "replay://<folder>?profile=obd2&speed=max" --values > run.jsonl
 havne-cli stream elm327://COM5 --seconds 60               # an adapter: as the app would
 havne-cli devices                                         # what a URI can name
 havne-cli vin <VIN>                                       # a VIN's year, make and check digit, offline
+havne-cli dtc P0301                                       # a trouble code's title, offline
 ```
 
 Its output is JSON lines, schema 1 (ADR-0031 section 3); a `slept` line marks

@@ -13,7 +13,8 @@
 //          plot (ADR-0039 section 8; BridgeTest.ARankedSet*, .APlotChoice*);
 //          reply timing (BridgeTest.ARecordingKeepsReplyTimingsSnapshots,
 //          .TimingTextNamesTheRequestsAndTheClock); the VIN's summary
-//          (ADR-0043, BridgeTest.AVinSummarySaysItsYearMakeAndCheckDigit)
+//          (ADR-0043, BridgeTest.AVinSummarySaysItsYearMakeAndCheckDigit);
+//          a typed code's title (ADR-0044, BridgeTest.ATypedCodeIsDescribed)
 
 #pragma once
 
@@ -565,6 +566,13 @@ public:
     // the vPIC release the makes come from.
     Q_INVOKABLE QString describeVin(const QString& typed) const;
     Q_INVOKABLE QString vinSource() const;
+    // A typed trouble code's title (ADR-0044), Diagnostics' lookup:
+    // "P0301: Cylinder 1 Misfire Detected", spaces dropped and upper-cased,
+    // "" when empty. dtcTitleSource() names the list, dtcTitleNotice()
+    // gives its license, which the page shows on request.
+    Q_INVOKABLE QString describeDtc(const QString& typed) const;
+    Q_INVOKABLE QString dtcTitleSource() const;
+    Q_INVOKABLE QString dtcTitleNotice() const;
     static QString vinSummary(const QString& vin, int latestModelYear);
     // A line in the activity log (and a recording's events.log), for the
     // app's own events: the vehicle lines of ADR-0027 section 4

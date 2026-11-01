@@ -1,6 +1,7 @@
 # core/CMakeLists.txt
 add_library(ecuio-core STATIC
     src/core.cpp
+    src/dtc_titles.cpp
     src/host_clock.cpp
     src/profile_registry.cpp
     src/mock_transport.cpp
@@ -99,4 +100,8 @@ if(NOT ANDROID AND NOT IOS)
     install(FILES ${CMAKE_CURRENT_BINARY_DIR}/ecuio.pc DESTINATION lib/pkgconfig)
     install(FILES ${PROJECT_SOURCE_DIR}/LICENSE
         DESTINATION share/doc/havne-core RENAME copyright)
+    # The data core carries from others (ADR-0043, ADR-0044): the trouble
+    # codes' titles under their MIT notice, vPIC's makes
+    install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/THIRD_PARTY_NOTICES.txt
+        DESTINATION share/doc/havne-core RENAME THIRD_PARTY_NOTICES)
 endif()

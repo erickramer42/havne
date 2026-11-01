@@ -10,7 +10,8 @@
 //          the timing lines UNIT (CliTimingTest) and by hand against the fake
 //          DLL (docs/testing.md); the vin command in the golden run and
 //          CliUsageTest, the vin and identity lines UNIT (CliVinTest),
-//          stream's identity line by hand against the fake DLL; main's
+//          stream's identity line by hand against the fake DLL; the dtc
+//          command in the golden run and CliUsageTest; main's
 //          catch by reading and clang-tidy
 //          (bugprone-exception-escape)
 //
@@ -612,6 +613,7 @@ void usage(FILE* to)
         "       havne-cli play <uri> --to <vcan> [--count N] [--seconds S]\n"
         "       havne-cli devices\n"
         "       havne-cli vin <VIN>\n"
+        "       havne-cli dtc <code>\n"
         "       havne-cli --version | --help\n"
         "\n"
         "stream   opens the session <uri> names (mock://, replay://, "
@@ -629,6 +631,8 @@ void usage(FILE* to)
         "         URI can name.\n"
         "vin      decodes a VIN on this machine: its model year, make and\n"
         "         check digit (49 CFR 565, NHTSA vPIC's manufacturer codes).\n"
+        "dtc      names a trouble code (P0301): SAE J2012's title for a\n"
+        "         generic powertrain or network code.\n"
         "\n"
         "Exit: 0 the stream ended, 1 the CLI failed, 2 usage, 3 the connect "
         "failed.\n");
@@ -929,6 +933,32 @@ int run_vin(const char* typed)
     char buf[512];
     cli::Line l(buf, sizeof buf);
     cli::vin_line(l, vin.c_str(), latest_model_year());
+    write_line(out, l);
+    return out.ok() ? kExitOk : kExitFailed;
+}
+
+// A typed trouble code's title (ADR-0044), as Diagnostics' lookup takes
+// it: spaces dropped and upper case; not a code is a usage error
+int run_dtc(const char* typed)
+{
+    std::string text;
+    for (const char* p = typed; *p != '\0'; ++p) {
+        if (*p != ' ') {
+            text += (*p >= 'a' && *p <= 'z') ? static_cast<char>(*p - 'a' + 'A')
+                                             : *p;
+        }
+    }
+    uint16_t code = 0;
+    if (ecuio_dtc_parse(text.c_str(), &code) != ECUIO_OK) {
+        std::fprintf(stderr, "havne-cli: not a trouble code: a letter P, C, B "
+                             "or U, then four hex digits, the first 0-3\n");
+        return kExitUsage;
+    }
+    Output out;
+    write_start(out);
+    char buf[512];
+    cli::Line l(buf, sizeof buf);
+    cli::dtc_line(l, code);
     write_line(out, l);
     return out.ok() ? kExitOk : kExitFailed;
 }
@@ -1270,6 +1300,9 @@ int run(int argc, char** argv)
     }
     if (command == "vin" && argc == 3) {
         return run_vin(argv[2]);
+    }
+    if (command == "dtc" && argc == 3) {
+        return run_dtc(argv[2]);
     }
     if (command == "play") {
 #if HAVNE_CLI_PLAY

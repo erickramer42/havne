@@ -805,6 +805,34 @@ ecuio_status_t ecuio_dtc_format(
     uint32_t out_cap
 );
 
+/* The other way (ADR-0044): "P0301" to 0x0301, "U0100" to 0xC100. text
+ * is a letter, P, C, B or U, then a digit 0-3 and three hex digits, all
+ * upper case, then a NUL. ECUIO_ERR_NULL_ARGUMENT for a NULL text or
+ * out; ECUIO_ERR_INVALID_ARGUMENT for anything else (out untouched). */
+ecuio_status_t ecuio_dtc_parse(
+    const char* text,
+    uint16_t* out
+);
+
+/* A code's title (ADR-0044): SAE J2012's name for a generic powertrain
+ * or network code (P0, P2, P34-P39, U0 and U3), "Cylinder 1 Misfire
+ * Detected" for 0x0301, from Wal33D's dtc-database (MIT; its notice is
+ * in the third-party notices). "" for any other code: a manufacturer's
+ * range, a body or chassis code, or one the list lacks. Static, never
+ * NULL. */
+const char* ecuio_dtc_title(
+    uint16_t code
+);
+
+/* Where the titles come from: "Wal33D/dtc-database 04c43d7" (the
+ * project and its commit). Static, never NULL. */
+const char* ecuio_dtc_title_source(void);
+
+/* The list's copyright and permission notice, its MIT license whole,
+ * lines ending in a newline: carried in every binary that holds the
+ * titles, for a program to show. Static, never NULL. */
+const char* ecuio_dtc_title_notice(void);
+
 /* A readiness monitor's name, for display ("Catalyst", "Evaporative
  * system"), and its short form for a log line ("catalyst", "EVAP"). C's
  * and D's bits name other monitors on a compression-ignition engine:
