@@ -159,6 +159,20 @@ running (ranges across the runs; milliseconds as median / p99):
 | 10x, one pass (29.75 s) | 7,074 / 0 | | 0.04-0.05 / 0.32-0.35 | 49 / 112-115 | 1,261.25 |
 | Full speed, looping 3 s | 1.44-1.72 million / 0-955 | 417,000-474,000 | 0.24-0.26 / 1.15-1.28 | 90-98 / 111-113 | |
 
+- **Two ratios gate CI** whatever the runner's speed, each comparing
+  the bench with itself: core's decode at 1,000 defs within 3x its
+  cost at 9 (1.26 to 1.94x in four runs on the dev machine,
+  2026-11-01), and the looping run under `obd2` at least 0.5 of the
+  same run under `raw`, which decodes nothing (0.69 to 0.76). With the
+  decode visiting every def instead of the ones the index finds, both
+  failed (27x, 0.48), where the 10,000 frames a second floor still
+  passed at 229,915.
+- **The looping runs pass the staging's capacity:** at about 400,000
+  frames a second the bridge counts most values past it, as
+  [ADR-0024](adr/0024-decode-on-the-worker.md) bounds it; the model
+  still gets each signal's newest value every tick, and only the
+  one-pass runs, at the recording's own rate or a multiple, are held to
+  timing every value.
 - **Throughput:** across thirteen runs that day (the three above and
   ten more), the worker sustains 375,000 to 565,000 frames a second,
   more than 80 times a fully loaded classic CAN bus (about 4,500

@@ -390,9 +390,6 @@ reach into car-verified claims and finishes the diagnostics.
   faults given as replay's `?faults=` are. Until SocketCAN's hardware
   is on hand, it's how anyone runs Havne's SocketCAN requests end to
   end against a known ECU.
-- **A performance gate in CI** that doesn't depend on the runner: the
-  decode's cost at 1,000 defs against 9 stays under about 3x, and the
-  load test with decoding against without it.
 - **ELM327's one drop and timeout per run**, seen in every
   `bench_timing` run, traced and fixed or explained.
 - **clang-tidy, tightened and widened:** `google-explicit-constructor`
