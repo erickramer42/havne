@@ -24,7 +24,9 @@
 //          BUFFER_OVERFLOW bit) flagged on the next frame with the link
 //          unchanged.
 // CI: non-Windows builds a linking stub; core.cpp routes j2534://
-//     only on _WIN32, so the stub is unreachable there
+//     only on _WIN32, so the stub is unreachable there;
+//          Reply timing on the adapter's clock (ADR-0042):
+//          J2534HealthTest.VxTimingReportsEachRequestOnTheAdaptersClock
 
 #include "ecuio/core.h"
 #include "ecuio/internal.h"
@@ -145,6 +147,7 @@ struct ecuio_j2534_transport {
     j2534_channel chans[ECUIO_MAX_CHANNELS] = {};
     uint32_t chan_count = 0;
     ecuio_request_engine engine;
+    std::unique_ptr<ecuio_timing_table> timing; /* the engine's, ADR-0042 */
     bool probe = false;
     bool identify = false;
     /* Frame time (j2534_clock.h): the host's at the first frame, counted
@@ -418,6 +421,7 @@ void j2534_worker(ecuio_j2534_transport* t)
     uint32_t published_diagnostics[ECUIO_MAX_CHANNELS] = {};
     uint32_t diag_seen = 0;
     uint32_t clear_seen[ECUIO_MAX_CHANNELS] = {};
+    int64_t timing_at = 0;
     if (requests && t->probe) {
         ecuio_engine_probe(&e, engine_now_us(t));
     }
@@ -451,6 +455,10 @@ void j2534_worker(ecuio_j2534_transport* t)
         const auto read_start = std::chrono::steady_clock::now();
         const read_outcome o = pump_one(t, timeout_ms);
         if (requests && o.matched) {
+            /* the refresh interval on the adapter's clock (ADR-0042) */
+            e.stamp_set = true;
+            e.stamp_us = static_cast<int64_t>(t->rx_frame.timestamp_us);
+            e.stamp_breaks = t->clock.host_steps;
             (void)ecuio_engine_on_frame(&e, o.chan, o.payload, o.len,
                                         engine_now_us(t), nullptr);
         }
@@ -477,6 +485,8 @@ void j2534_worker(ecuio_j2534_transport* t)
             ecuio_publish_diagnostics(t->session, e, c, t->chans[c].rx_id,
                                       published_diagnostics[c]);
         }
+        ecuio_publish_timing(t->session, e, nullptr, engine_now_us(t),
+                             timing_at, false);
 
         if (h.backoff_ms > 0) {
             if (backoff_sleep(t, h.backoff_ms)) {
@@ -495,6 +505,8 @@ void j2534_worker(ecuio_j2534_transport* t)
             }
         }
     }
+    ecuio_publish_timing(t->session, e, nullptr, engine_now_us(t), timing_at,
+                         true);
 }
 
 /* The query's values (ecuio_j2534_query_keys). Contract (strict: a bad
@@ -816,6 +828,7 @@ ecuio_status_t j2534_attach(ecuio_session_t* session, const char* uri,
     if (st != ECUIO_OK) {
         return st;
     }
+    ecuio_attach_timing(t->engine, t->timing, ECUIO_TIMING_CLOCK_ADAPTER);
 
     /* Connect flags: ?flags= as given, plus CAN_29BIT_ID when the
      * channels use 29-bit IDs, so the channel opens at the width its

@@ -37,7 +37,9 @@
 #include <atomic>
 #include <chrono>
 #include <cstring>
+#include <string>
 #include <thread>
+#include <vector>
 
 #include "fake_diagnostics.h"
 #include "j2534_backend_fixture.h"
@@ -759,6 +761,49 @@ TEST_F(J2534HealthTest, VxReplyArrivesBeforeTheNextRequest)
     ASSERT_GE(delivered.count.load(), 10) << "replies didn't arrive";
     EXPECT_EQ(delivered.after_next_write.load(), 0)
         << "replies landed after the next request";
+}
+
+/* Reply timing (ADR-0042) through the surrogate, the fake as the VX
+ * (each reply 4 ms after its write, stamped by the fake's own clock):
+ * a row per request, each answer at least the fake's delay after its
+ * write on the host's clock, the intervals on the adapter's stamps,
+ * none across a fallback, and no ISO-TP counts (the adapter reassembles) */
+TEST_F(J2534HealthTest, VxTimingReportsEachRequestOnTheAdaptersClock)
+{
+    ASSERT_NO_FATAL_FAILURE(knob("ECUIO_FAKE_VX", "1"));
+    ASSERT_NO_FATAL_FAILURE(start_session("?identify=0&diagnose=0"));
+    ecuio_session_timing_t t{};
+    std::vector<ecuio_request_timing_t> rows(ECUIO_PROFILE_MAX_REQUESTS);
+    uint32_t count = 0;
+    uint32_t intervals = 0;
+    const auto deadline =
+        std::chrono::steady_clock::now() + std::chrono::seconds(10);
+    while (std::chrono::steady_clock::now() < deadline) {
+        ASSERT_EQ(ecuio_session_get_timing(session, &t, rows.data(),
+                                           static_cast<uint32_t>(rows.size()),
+                                           &count),
+                  ECUIO_OK);
+        intervals = 0;
+        for (uint32_t i = 0; i < count; ++i) {
+            intervals += rows[i].intervals;
+        }
+        if (intervals >= 40) {
+            break;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    }
+    ASSERT_GE(intervals, 40u) << "intervals published";
+    EXPECT_EQ(t.interval_clock, ECUIO_TIMING_CLOCK_ADAPTER);
+    EXPECT_EQ(t.flags & ECUIO_TIMING_ISOTP, 0u);
+    for (uint32_t i = 0; i < count; ++i) {
+        const ecuio_request_timing_t& r = rows[i];
+        if (r.answered == 0) {
+            continue;
+        }
+        SCOPED_TRACE("PID " + std::to_string(r.request[1]));
+        EXPECT_GE(r.latency_p50_us, 4000u) << "the fake's reply delay";
+        EXPECT_EQ(r.intervals_mixed, 0u);
+    }
 }
 
 /* A TX indication, then the START_OF_MESSAGE indication a vendor queues

@@ -2,8 +2,9 @@
 //             struct behind the opaque ecuio_session_t
 // Testing: UNIT: CoreTest (sessions, callbacks, the decoded values and
 //          their buffers, the absent signals' counts, the info, support, identity and diagnostics
-//          copies); HARNESS: the J2534 and ELM327 suites, whose workers
-//          write support[], identity[] and diagnostics[]
+//          copies, the timing report's); HARNESS: the J2534, ELM327 and
+//          SocketCAN suites, whose workers write support[], identity[],
+//          diagnostics[] and the timing rows
 
 #ifndef ECUIO_SESSION_H
 #define ECUIO_SESSION_H
@@ -72,6 +73,12 @@ struct ecuio_session {
     std::atomic<uint64_t> replay_corrupted{0};
     std::atomic<uint64_t> replay_truncated{0};
     std::atomic<uint64_t> replay_stalled{0};
+    /* Reply timing (ADR-0042): the rows a requesting worker publishes at
+     * most once a second, read by ecuio_session_get_timing on the
+     * caller's thread, both under the mutex */
+    mutable std::mutex timing_mutex;
+    ecuio_session_timing_t timing{};
+    ecuio_request_timing_t timing_rows[ECUIO_PROFILE_MAX_REQUESTS]{};
     std::atomic<int32_t> last_error{ECUIO_OK};
     std::atomic<uint32_t> error_count{0};
     /* Written once by the transport's attach, then the profile by

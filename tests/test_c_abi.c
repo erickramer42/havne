@@ -84,6 +84,9 @@ typedef char abi_value_text_check[(offsetof(ecuio_value_t, text) == 16) ? 1 : -1
 typedef char abi_value_size_check[(sizeof(void*) != 8 || sizeof(ecuio_value_t) == 24) ? 1 : -1];
 typedef char abi_batch_values_check[(offsetof(ecuio_value_batch_t, values) == 24) ? 1 : -1];
 typedef char abi_batch_size_check[(sizeof(void*) != 8 || sizeof(ecuio_value_batch_t) == 32) ? 1 : -1];
+typedef char abi_session_timing_size_check[(sizeof(ecuio_session_timing_t) == 64) ? 1 : -1];
+typedef char abi_request_timing_size_check[(sizeof(ecuio_request_timing_t) == 80) ? 1 : -1];
+typedef char abi_request_timing_intervals_check[(offsetof(ecuio_request_timing_t, intervals) == 44) ? 1 : -1];
 typedef char abi_serial_size_check[(sizeof(ecuio_serial_port_t) == 288) ? 1 : -1];
 typedef char abi_serial_device_check[(offsetof(ecuio_serial_port_t, device) == 128) ? 1 : -1];
 typedef char abi_serial_flags_check[(offsetof(ecuio_serial_port_t, flags) == 256) ? 1 : -1];
@@ -149,6 +152,9 @@ int main(void)
             ECUIO_ERR_NULL_ARGUMENT ||
         ecuio_session_get_replay_faults(NULL, NULL) !=
             ECUIO_ERR_NULL_ARGUMENT ||
+        ecuio_session_get_timing(NULL, NULL, NULL, 0, NULL) !=
+            ECUIO_ERR_NULL_ARGUMENT ||
+        sizeof(ECUIO_TIMING_COLUMNS) < 2u ||
         (ECUIO_SESSION_INFO_REPLAY_FAULTS & ECUIO_SESSION_INFO_LISTEN_ONLY) != 0u ||
         ECUIO_ABSENT_AFTER_FRAMES != 3u) {
         return 1;

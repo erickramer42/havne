@@ -18,6 +18,7 @@
 //     (RequestEngineTest, DiagnosticsTest, ClearTest; test_obd2); the worker that drives it is
 //     HARNESS (J2534AdoptionTest, J2534HealthTest), its timing on a
 //     vehicle BENCH.
+//     reply timing (ADR-0042): RequestEngineTest.Timing*
 
 #ifndef ECUIO_REQUEST_ENGINE_H
 #define ECUIO_REQUEST_ENGINE_H
@@ -27,6 +28,7 @@
 #include "ecuio/signals.h"
 #include "diagnostics.h"
 #include "obd2_reply.h"
+#include "request_timing.h"
 
 #include <stdint.h>
 
@@ -240,6 +242,7 @@ struct ecuio_engine_channel {
     int32_t outstanding = ECUIO_ENGINE_NONE;   /* a table index, the
                                                 * one-shot, or none */
     int64_t deadline_us = 0;    /* when that request's wait ends */
+    int64_t sent_us = 0;        /* when it went out (ADR-0042) */
     int64_t next_send_us = 0;   /* the floor: no request before this */
     uint32_t cursor = 0;        /* where the fast class resumes */
     uint32_t slow_cursor = 0;   /* where the slow class resumes */
@@ -322,7 +325,34 @@ struct ecuio_request_engine {
     const uint8_t* duplicates = nullptr;
     uint32_t duplicate_count = 0;
     bool pack = false;          /* several PIDs per request (the driver's) */
+    /* Reply timing (ADR-0042): the driver's, NULL for none. Before each
+     * frame it hands over, a driver whose frames carry stamps of their
+     * own sets stamp_us (session time on the frames' clock) and
+     * stamp_breaks (how often that clock has taken the host's delta);
+     * otherwise the intervals are on the host's clock, from now_us. */
+    ecuio_timing_table* timing = nullptr;
+    bool stamp_set = false;
+    int64_t stamp_us = 0;
+    uint32_t stamp_breaks = 0;
 };
+
+/* A rotation request's answer or refusal, for reply timing */
+inline void ecuio_engine_time_reply(ecuio_request_engine* e, uint32_t c,
+                                    uint32_t row, bool positive, bool packed,
+                                    int64_t now_us)
+{
+    if (e->timing == nullptr || row >= ECUIO_PROFILE_MAX_REQUESTS) {
+        return;
+    }
+    timing_row& r = e->timing->rows[row];
+    const int64_t latency = now_us - e->chans[c].sent_us;
+    if (positive) {
+        timing_answered(r, latency, e->stamp_set ? e->stamp_us : now_us,
+                        e->stamp_breaks, packed);
+    } else {
+        timing_refused(r, latency, packed);
+    }
+}
 
 /* How a frame on a channel relates to its outstanding request. */
 enum class ecuio_reply {
@@ -1445,6 +1475,9 @@ inline void ecuio_engine_sent(ecuio_request_engine* e, uint32_t c,
     ecuio_engine_channel& ch = e->chans[c];
     ch.outstanding = sent ? r : ECUIO_ENGINE_NONE;
     ch.deadline_us = now_us + ECUIO_ENGINE_WAIT_US;
+    if (sent) {
+        ch.sent_us = now_us;
+    }
     ch.next_send_us = now_us + ECUIO_ENGINE_GAP_US;
 }
 
@@ -1462,10 +1495,18 @@ inline bool ecuio_engine_expire(ecuio_request_engine* e, uint32_t c,
     if (ch.outstanding == ECUIO_ENGINE_NONE || now_us < ch.deadline_us) {
         return false;
     }
-    const bool once = ch.outstanding == ECUIO_ENGINE_ONCE;
-    const bool pack = ch.outstanding == ECUIO_ENGINE_PACK;
+    const int32_t out = ch.outstanding;
+    const bool once = out == ECUIO_ENGINE_ONCE;
+    const bool pack = out == ECUIO_ENGINE_PACK;
     ch.outstanding = ECUIO_ENGINE_NONE;
     ch.in_step = false;
+    if (e->timing != nullptr && out >= 0) {
+        ++e->timing->rows[out].timeouts;
+    } else if (e->timing != nullptr && pack) {
+        for (uint32_t k = 0; k < ch.pack_count; ++k) {
+            ++e->timing->rows[ch.pack_rows[k]].timeouts;
+        }
+    }
     if (pack) {
         ecuio_engine_pack_failed(e, c);
     } else if (once && ch.clearing) {
@@ -1544,6 +1585,41 @@ inline ecuio_reply ecuio_engine_pack_reply(ecuio_request_engine* e,
     return ecuio_reply::negative;
 }
 
+/* A pack's reply, for reply timing: each PID whose record came back is
+ * answered, every PID refused by a refusal; a PID the reply left out
+ * gets nothing that pass (ADR-0042 section 1) */
+inline void ecuio_engine_time_pack(ecuio_request_engine* e, uint32_t c,
+                                   ecuio_reply reply, const uint8_t* data,
+                                   uint16_t len, int64_t now_us)
+{
+    const ecuio_engine_channel& ch = e->chans[c];
+    if (e->timing == nullptr) {
+        return;
+    }
+    if (reply == ecuio_reply::negative) {
+        for (uint32_t k = 0; k < ch.pack_count; ++k) {
+            ecuio_engine_time_reply(e, c, ch.pack_rows[k], false, true, now_us);
+        }
+        return;
+    }
+    if (reply != ecuio_reply::positive) {
+        return;
+    }
+    uint32_t at = 1;
+    while (at < len) {
+        const uint8_t pid = data[at];
+        uint32_t k = 0;
+        while (k < ch.pack_count && ch.pack.bytes[1 + k] != pid) {
+            ++k;
+        }
+        if (k == ch.pack_count || at + 1u + ch.pid_len[pid] > len) {
+            return;
+        }
+        ecuio_engine_time_reply(e, c, ch.pack_rows[k], true, true, now_us);
+        at += 1u + ch.pid_len[pid];
+    }
+}
+
 /* A frame received on channel c, its payload after the CAN ID (at most
  * the first six bytes are read, except that an identification reply's
  * data becomes the item's text). A positive or negative reply completes
@@ -1574,7 +1650,10 @@ inline ecuio_reply ecuio_engine_on_frame(ecuio_request_engine* e, uint32_t c,
     }
     const int32_t out = ch.outstanding;
     if (out == ECUIO_ENGINE_PACK) {
-        return ecuio_engine_pack_reply(e, c, data, len, now_us, out_nrc);
+        const ecuio_reply reply =
+            ecuio_engine_pack_reply(e, c, data, len, now_us, out_nrc);
+        ecuio_engine_time_pack(e, c, reply, data, len, now_us);
+        return reply;
     }
     const ecuio_request& r = ecuio_engine_request_of(e, c, out);
     if (len >= r.len && data[0] == static_cast<uint8_t>(r.bytes[0] + 0x40) &&
@@ -1582,6 +1661,10 @@ inline ecuio_reply ecuio_engine_on_frame(ecuio_request_engine* e, uint32_t c,
         (r.len < 3 || data[2] == r.bytes[2])) {
         ch.outstanding = ECUIO_ENGINE_NONE;
         ch.in_step = true;
+        if (out >= 0) {
+            ecuio_engine_time_reply(e, c, static_cast<uint32_t>(out), true,
+                                    false, now_us);
+        }
         if (out >= 0 && r.len == 2 && r.bytes[0] == 0x01) {
             /* A PID's own reply: its length, for packing */
             const uint32_t bytes = len - 2u;
@@ -1627,6 +1710,10 @@ inline ecuio_reply ecuio_engine_on_frame(ecuio_request_engine* e, uint32_t c,
         return ecuio_reply::pending;
     }
     ch.outstanding = ECUIO_ENGINE_NONE;
+    if (out >= 0) {
+        ecuio_engine_time_reply(e, c, static_cast<uint32_t>(out), false, false,
+                                now_us);
+    }
     const uint8_t service = r.bytes[0];
     const uint8_t reason = (e->probe && ch.in_step)
                                ? ecuio_engine_drop_reason(code) : 0;

@@ -8,7 +8,9 @@
 //          overflow, error frames, no allocation per frame) and
 //          SocketCanRequestTest.* (requests through ISO-TP against the
 //          fakes' ECU on vcan0). A failed poll other than EINTR by code
-//          reading only: nothing makes the kernel fail one on demand
+//          reading only: nothing makes the kernel fail one on demand;
+//          Reply timing on the kernel's clock (ADR-0042):
+//          SocketCanRequestTest.TimingReportsEachRequestOnTheKernelsClock
 //
 // socketcan:// (ADR-0032, ADR-0040): a Linux CAN interface. Attach reads
 // the interface through rtnetlink and refuses one a session can't use
@@ -96,6 +98,7 @@ struct ecuio_socketcan_transport {
     uint32_t tx_ids[ECUIO_MAX_CHANNELS] = {};
     bool ext29[ECUIO_MAX_CHANNELS] = {};
     ecuio_request_engine engine;
+    std::unique_ptr<ecuio_timing_table> timing; /* the engine's, ADR-0042 */
     bool probe = false;
     bool identify = false;
     std::unique_ptr<isotp_rx> isotp;
@@ -269,6 +272,7 @@ void request_worker(ecuio_socketcan_transport* t)
     uint32_t diag_seen = 0;
     uint32_t clear_seen[ECUIO_MAX_CHANNELS] = {};
     uint32_t next_chan = 0;
+    int64_t timing_at = 0;
     sent_request pending;
     alignas(struct canfd_frame) uint8_t raw[CANFD_MTU];
     alignas(struct cmsghdr)
@@ -496,6 +500,11 @@ void request_worker(ecuio_socketcan_transport* t)
                     std::memcpy(reply.data, m.data, m.len);
                     reply.data_length = m.len;
                     ecuio_session_dispatch_callbacks(s, &reply);
+                    /* the refresh interval on the kernel's receive
+                     * times (ADR-0042) */
+                    e.stamp_set = true;
+                    e.stamp_us = static_cast<int64_t>(stamp);
+                    e.stamp_breaks = clock.host_steps;
                     (void)ecuio_engine_on_frame(
                         &e, c, reply.data, reply.data_length, now, nullptr);
                     matched = true;
@@ -523,7 +532,9 @@ void request_worker(ecuio_socketcan_transport* t)
             ecuio_publish_diagnostics(s, e, c, t->rx_ids[c],
                                       published_diagnostics[c]);
         }
+        ecuio_publish_timing(s, e, &iso, now_us(t), timing_at, false);
     }
+    ecuio_publish_timing(s, e, &iso, now_us(t), timing_at, true);
 }
 
 void socketcan_worker(ecuio_socketcan_transport* t)
@@ -925,6 +936,7 @@ ecuio_socketcan_transport_attach(ecuio_session_t* session, const char* uri,
             if (st != ECUIO_OK) {
                 return st;
             }
+            ecuio_attach_timing(r.engine, r.timing, ECUIO_TIMING_CLOCK_KERNEL);
             r.isotp.reset(new isotp_rx());
             r.isotp->timed = true;
             r.sender.reset(new isotp_tx());

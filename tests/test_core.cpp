@@ -3947,6 +3947,41 @@ TEST(CoreTest, ValuesGiveEachTextValueASlotOfItsOwn)
     EXPECT_EQ(ecuio_profile_unregister("test-text-slots"), ECUIO_OK);
 }
 
+/* Reply timing (ADR-0042): a session with no rotation has no rows and
+ * no clock, the count asked with capacity 0, and the NULLs refused */
+TEST(CoreTest, ASessionWithNoRotationHasNoTimingRows)
+{
+    ecuio_session_t* session = nullptr;
+    ASSERT_EQ(ecuio_session_create("mock://a?profile=obd2", &session),
+              ECUIO_OK);
+    ASSERT_EQ(ecuio_session_start(session), ECUIO_OK);
+    std::this_thread::sleep_for(std::chrono::milliseconds(200));
+    ecuio_session_timing_t t{};
+    t.rows = 99;
+    ecuio_request_timing_t row{};
+    uint32_t count = 99;
+    EXPECT_EQ(ecuio_session_get_timing(session, &t, nullptr, 0, &count),
+              ECUIO_OK);
+    EXPECT_EQ(count, 0u);
+    EXPECT_EQ(t.rows, 0u);
+    EXPECT_EQ(t.interval_clock, ECUIO_TIMING_CLOCK_NONE);
+    EXPECT_EQ(t.flags, 0u);
+    EXPECT_EQ(ecuio_session_get_timing(session, &t, &row, 1, &count), ECUIO_OK);
+    EXPECT_EQ(ecuio_session_get_timing(nullptr, &t, &row, 1, &count),
+              ECUIO_ERR_NULL_ARGUMENT);
+    EXPECT_EQ(ecuio_session_get_timing(session, nullptr, &row, 1, &count),
+              ECUIO_ERR_NULL_ARGUMENT);
+    EXPECT_EQ(ecuio_session_get_timing(session, &t, &row, 1, nullptr),
+              ECUIO_ERR_NULL_ARGUMENT);
+    EXPECT_EQ(ecuio_session_get_timing(session, &t, nullptr, 1, &count),
+              ECUIO_ERR_NULL_ARGUMENT);
+    ecuio_session_close(session);
+    EXPECT_EQ(ecuio_session_get_timing(session, &t, nullptr, 0, &count),
+              ECUIO_OK)
+        << "readable after close";
+    ecuio_session_destroy(session);
+}
+
 /* ADR-0039 §6: the test car answers PID 55 with bank 1's byte alone
  * (docs/bench-sessions/2026-10-31-elm327-vehicle.md), so the bank 3
  * field is absent once ECUIO_ABSENT_AFTER_FRAMES replies have ended

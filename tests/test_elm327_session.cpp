@@ -648,6 +648,79 @@ TEST_F(Elm327SessionTest, TheProbeWalksTheChainAndReportsIt)
     EXPECT_EQ(fake_count("01C01"), 0u) << "past A0's last bit";
 }
 
+/* Reply timing (ADR-0042) through an ELM327: a row per request in the
+ * rotation, each answered one at least the fake's reply delay after its
+ * request, the intervals on the host's clock (an ELM327's lines are
+ * stamped as they're read), ISO-TP's counts from core's reassembly; the
+ * rows published while the session runs and kept after close */
+TEST_F(Elm327SessionTest, TimingReportsEachRequestOnTheHostsClock)
+{
+    set_knobs([](fake_elm327::knobs& k) { k.reply_delay_ms = 10; });
+    Session s;
+    ASSERT_EQ(s.create(uri("?identify=0&diagnose=0")), ECUIO_OK);
+    s.start();
+    ecuio_session_timing_t t{};
+    std::vector<ecuio_request_timing_t> rows(ECUIO_PROFILE_MAX_REQUESTS);
+    uint32_t count = 0;
+    const auto answered = [&] {
+        uint32_t n = 0;
+        for (uint32_t i = 0; i < count && i < rows.size(); ++i) {
+            n += rows[i].answered;
+        }
+        return n;
+    };
+    ASSERT_TRUE(wait_for(
+        [&] {
+            return ecuio_session_get_timing(s.s, &t, rows.data(),
+                                            static_cast<uint32_t>(rows.size()),
+                                            &count) == ECUIO_OK &&
+                   answered() >= 40;
+        },
+        10000))
+        << answered() << " answers published";
+    EXPECT_EQ(t.interval_clock, ECUIO_TIMING_CLOCK_HOST);
+    EXPECT_NE(t.flags & ECUIO_TIMING_ISOTP, 0u);
+    EXPECT_GT(t.isotp_completed, 0u);
+    EXPECT_GT(t.snapshot_us, 0u);
+    EXPECT_GT(count, 10u);
+    EXPECT_EQ(t.rows, count);
+    for (uint32_t i = 0; i < count; ++i) {
+        const ecuio_request_timing_t& r = rows[i];
+        EXPECT_EQ(r.channel, 0u);
+        EXPECT_EQ(r.length, 2u);
+        EXPECT_EQ(r.request[0], 0x01);
+        if (r.answered > 0) {
+            SCOPED_TRACE("PID " + std::to_string(r.request[1]));
+            EXPECT_GE(r.latency_p50_us, 10000u) << "the fake's delay";
+            EXPECT_GE(r.latency_max_us, r.latency_p50_us);
+        }
+    }
+
+    /* Right after a publish, half a second, then close: only the final
+     * publish, as the worker stops, can carry that half second's answers */
+    const uint64_t seen = t.snapshot_us;
+    ASSERT_TRUE(wait_for(
+        [&] {
+            return ecuio_session_get_timing(s.s, &t, rows.data(),
+                                            static_cast<uint32_t>(rows.size()),
+                                            &count) == ECUIO_OK &&
+                   t.snapshot_us != seen;
+        },
+        3000));
+    const uint32_t before = answered();
+    std::this_thread::sleep_for(std::chrono::milliseconds(500));
+    ecuio_session_close(s.s);
+    ecuio_session_timing_t after{};
+    uint32_t after_count = 0;
+    ASSERT_EQ(ecuio_session_get_timing(s.s, &after, rows.data(),
+                                       static_cast<uint32_t>(rows.size()),
+                                       &after_count),
+              ECUIO_OK);
+    EXPECT_EQ(after_count, count) << "readable after close";
+    EXPECT_GT(after.snapshot_us, t.snapshot_us) << "the final rows";
+    EXPECT_GT(answered(), before) << "the last half second's answers";
+}
+
 /* Identification's replies span frames (the VIN's 20 bytes: a First
  * Frame and two Consecutive Frames), are reassembled and reach the
  * identity report; Service 09 and 0x22 carry no count digit */

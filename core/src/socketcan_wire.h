@@ -5,7 +5,8 @@
 // those exist), so every rule below is a unit test on every platform.
 // Testing: UNIT: SocketCanTest.* (test_socketcan): the interface name,
 //     the filters, a link's netlink attributes and the verdict on them,
-//     a kernel frame to an ecuio_frame_t, the clock
+//     a kernel frame to an ecuio_frame_t, the clock;
+//     the clock's host_steps: SocketCanRequestTest.Timing* (ADR-0042)
 //
 // SocketCAN listening (ADR-0032): what a session reads from the kernel,
 // with no I/O.
@@ -581,6 +582,9 @@ struct socketcan_clock {
     uint64_t last_kernel_ns = 0;
     uint64_t last_host_us = 0;
     uint64_t last_out_us = 0;
+    /* Frames given the host's delta (no kernel time, or a step): an
+     * interval across one is part host time (ADR-0042) */
+    uint32_t host_steps = 0;
 };
 
 /* A frame's session time from the kernel's receive time (ns, wall clock;
@@ -602,13 +606,18 @@ inline uint64_t socketcan_clock_step(socketcan_clock& c, uint64_t kernel_ns,
     const uint64_t host_delta =
         host_us >= c.last_host_us ? host_us - c.last_host_us : 0;
     uint64_t delta = host_delta;
+    bool kernel = false;
     if (kernel_ns != 0 && c.last_kernel_ns != 0 &&
         kernel_ns >= c.last_kernel_ns) {
         const uint64_t kernel_delta = (kernel_ns - c.last_kernel_ns) / 1000;
         if (c.last_out_us + kernel_delta <=
             host_us + SOCKETCAN_CLOCK_SLACK_US) {
             delta = kernel_delta;
+            kernel = true;
         }
+    }
+    if (!kernel) {
+        ++c.host_steps;
     }
     c.last_kernel_ns = kernel_ns;
     c.last_host_us = host_us;

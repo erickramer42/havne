@@ -35,6 +35,7 @@
 #include <fstream>
 #include <functional>
 #include <initializer_list>
+#include <memory>
 #include <string>
 #include <utility>
 #include <vector>
@@ -3861,4 +3862,215 @@ TEST(RequestEngineTest, PackingIsTheDriversToTurnOn)
     for (const Bytes& req : packing_turns(&f, 300, packed_fake_reply)) {
         EXPECT_EQ(req.size(), 2u) << "no bitmaps listed";
     }
+}
+
+/* ---- Reply timing (ADR-0042, request_timing.h) ---------------------- */
+
+/* One sample reads back at most an eighth above itself and never below,
+ * exactly below 16 us, and a sample past the top band reads its exact
+ * value */
+TEST(RequestTimingTest, AQuantileReadsAtMostAnEighthHigh)
+{
+    for (uint32_t v = 0; v < (1u << 24); v = v < 64 ? v + 1 : v + v / 7) {
+        timing_hist h;
+        h.add(v);
+        const uint32_t q = h.quantile(0.5);
+        ASSERT_GE(q, v);
+        ASSERT_LE(static_cast<double>(q), static_cast<double>(v) * 1.125) << v;
+        if (v < 16) {
+            ASSERT_EQ(q, v);
+        }
+    }
+    timing_hist past;
+    past.add(20 * 1000 * 1000);
+    past.add(1000);
+    EXPECT_EQ(past.quantile(1.0), 20u * 1000 * 1000);
+    EXPECT_EQ(past.max_us, 20u * 1000 * 1000);
+}
+
+/* Over 1 to 1000 us, each quantile is within its bucket above the true
+ * one, capped at the largest sample */
+TEST(RequestTimingTest, QuantilesOfADistribution)
+{
+    timing_hist h;
+    for (int v = 1; v <= 1000; ++v) {
+        h.add(v);
+    }
+    EXPECT_EQ(h.count, 1000u);
+    EXPECT_GE(h.quantile(0.5), 500u);
+    EXPECT_LE(h.quantile(0.5), 563u);
+    EXPECT_GE(h.quantile(0.99), 990u);
+    EXPECT_LE(h.quantile(0.99), 1000u);
+    EXPECT_EQ(h.quantile(1.0), 1000u);
+    EXPECT_EQ(timing_hist().quantile(0.5), 0u) << "no samples";
+}
+
+/* A P99 needs 100 samples and a P99.9 1,000; below, 0 and no flag */
+TEST(RequestTimingTest, TooFewSamplesLeaveAQuantileEmpty)
+{
+    for (uint32_t n : {99u, 100u, 999u, 1000u}) {
+        SCOPED_TRACE(n);
+        timing_row r;
+        for (uint32_t k = 0; k <= n; ++k) {
+            timing_answered(r, 4000, static_cast<int64_t>(k) * 100000, 0,
+                            false);
+        }
+        /* n + 1 answers: n + 1 latencies, n intervals */
+        const ecuio_request_timing_t row = timing_public(r);
+        EXPECT_EQ(row.answered, n + 1);
+        EXPECT_EQ(row.intervals, n);
+        EXPECT_EQ(row.latency_p50_us, 4000u);
+        EXPECT_EQ((row.flags & ECUIO_TIMING_INTERVAL_P99) != 0, n >= 100);
+        EXPECT_EQ(row.interval_p99_us, n >= 100 ? 100000u : 0u);
+        EXPECT_EQ((row.flags & ECUIO_TIMING_INTERVAL_P999) != 0, n >= 1000);
+        EXPECT_EQ(row.interval_p999_us, n >= 1000 ? 100000u : 0u);
+        EXPECT_NE(row.flags & ECUIO_TIMING_LATENCY_P99, 0u);
+        EXPECT_EQ((row.flags & ECUIO_TIMING_LATENCY_P999) != 0, n + 1 >= 1000);
+    }
+}
+
+/* An interval with a fallback of the frames' clock between its answers,
+ * or one running backwards, is counted apart and kept out */
+TEST(RequestTimingTest, AnIntervalAcrossAClockFallbackIsLeftOut)
+{
+    timing_row r;
+    timing_answered(r, 4000, 0, 0, false);
+    timing_answered(r, 4000, 100000, 0, false);
+    timing_answered(r, 4000, 200000, 1, false); /* a fallback between */
+    timing_answered(r, 4000, 300000, 1, false);
+    timing_answered(r, 4000, 250000, 1, false); /* backwards */
+    EXPECT_EQ(r.interval.count, 2u);
+    EXPECT_EQ(r.intervals_mixed, 2u);
+    EXPECT_EQ(r.interval.max_us, 100000u);
+    timing_refused(r, 6000, true);
+    EXPECT_EQ(r.refused, 1u);
+    EXPECT_EQ(r.packed, 1u);
+    EXPECT_EQ(r.latency.count, 6u) << "a refusal has a latency";
+    EXPECT_EQ(r.interval.count, 2u) << "but refreshes nothing";
+}
+
+namespace {
+
+/* The figures of an engine walked on the test car's bitmaps, timing on,
+ * after n turns answered through respond, each reply 4 ms after its
+ * request */
+std::unique_ptr<ecuio_timing_table>
+timed_turns(ecuio_request_engine* e, bool pack, int n, const Responder& respond)
+{
+    auto timing = std::make_unique<ecuio_timing_table>();
+    if (pack) {
+        packing_engine(e);
+    } else {
+        obd2_walked(e, kTestCar);
+    }
+    e->timing = timing.get();
+    (void)packing_turns(e, n, respond);
+    return timing;
+}
+
+} // namespace
+
+/* Each rotation request's answers and timeouts, its latency from its
+ * write to its reply, and its intervals between answers on the host's
+ * clock when the driver gives no stamps */
+TEST(RequestEngineTest, TimingRecordsEachRotationRequestsReplies)
+{
+    ecuio_request_engine e;
+    const auto silent0D = [](const Bytes& req) {
+        return req == Bytes{0x01, 0x0D} ? Bytes{} : fake_reply(req);
+    };
+    const auto t = timed_turns(&e, false, 400, silent0D);
+    uint32_t rows = 0;
+    for (uint32_t i = 0; i < e.count; ++i) {
+        const ecuio_request& q = e.requests[i];
+        const timing_row& r = t->rows[i];
+        SCOPED_TRACE("PID " + std::to_string(q.bytes[1]));
+        if (q.dropped != 0) {
+            EXPECT_EQ(r.answered, 0u);
+            continue;
+        }
+        ++rows;
+        if (q.bytes[1] == 0x0D) {
+            EXPECT_EQ(r.answered, 0u);
+            EXPECT_GT(r.timeouts, 0u);
+            EXPECT_EQ(r.latency.count, 0u) << "a timeout has no latency";
+            continue;
+        }
+        EXPECT_GT(r.answered, 1u);
+        EXPECT_EQ(r.timeouts, 0u);
+        EXPECT_EQ(r.packed, 0u);
+        EXPECT_EQ(r.latency.quantile(0.5), 4000u);
+        EXPECT_EQ(r.latency.max_us, 4000u);
+        EXPECT_EQ(r.interval.count, r.answered - 1);
+        EXPECT_GT(r.interval.quantile(0.5), 0u);
+    }
+    EXPECT_GT(rows, 10u);
+}
+
+/* A pack's reply answers each PID whose record it carries, with the
+ * pack's latency, counted as packed */
+TEST(RequestEngineTest, TimingCountsAPacksAnswersForEachOfItsPids)
+{
+    ecuio_request_engine e;
+    const auto t = timed_turns(&e, true, 400, packed_fake_reply);
+    uint32_t packed = 0;
+    uint32_t kept = 0;
+    uint32_t packed_rows = 0;
+    for (uint32_t i = 0; i < e.count; ++i) {
+        const timing_row& r = t->rows[i];
+        if (e.requests[i].dropped != 0) {
+            continue;
+        }
+        SCOPED_TRACE("PID " + std::to_string(e.requests[i].bytes[1]));
+        ++kept;
+        packed_rows += r.packed > 0 ? 1 : 0;
+        EXPECT_GT(r.answered, 0u);
+        EXPECT_LE(r.packed, r.answered);
+        EXPECT_EQ(r.latency.max_us, 4000u);
+        packed += r.packed;
+    }
+    EXPECT_GT(packed, 100u);
+    EXPECT_GT(packed_rows * 4, kept * 3)
+        << "every record of a pack's reply answers its PID, not the first "
+           "alone";
+}
+
+/* The driver's stamps time the intervals: on the frames' clock, an
+ * interval across one of its fallbacks left out and counted */
+TEST(RequestEngineTest, TimingTakesTheIntervalFromTheDriversStamps)
+{
+    ecuio_request_engine e;
+    obd2_walked(&e, kTestCar);
+    auto timing = std::make_unique<ecuio_timing_table>();
+    e.timing = timing.get();
+    e.stamp_set = true;
+    int64_t now = 10 * 1000 * kMs;
+    int answers = 0;
+    for (int k = 0; k < 300; ++k, now += ECUIO_ENGINE_GAP_US) {
+        const int32_t r = ecuio_engine_due(&e, 0, now);
+        if (r == ECUIO_ENGINE_NONE) {
+            continue;
+        }
+        ecuio_engine_sent(&e, 0, r, true, now);
+        const ecuio_request& q = ecuio_engine_request_of(&e, 0, r);
+        const Bytes reply = fake_reply(Bytes(q.bytes, q.bytes + q.len));
+        e.stamp_us = static_cast<int64_t>(answers) * 7000; /* 7 ms apart */
+        e.stamp_breaks = answers >= 150 ? 1u : 0u;
+        (void)ecuio_engine_on_frame(&e, 0, reply.data(),
+                                    static_cast<uint16_t>(reply.size()),
+                                    now + 4 * kMs, nullptr);
+        ++answers;
+    }
+    uint32_t mixed = 0;
+    uint32_t kept = 0;
+    for (uint32_t i = 0; i < e.count; ++i) {
+        const timing_row& r = timing->rows[i];
+        kept += e.requests[i].dropped == 0 ? 1 : 0;
+        if (r.interval.count > 0) {
+            EXPECT_EQ(r.interval.max_us % 7000, 0u) << "the stamps', not now's";
+        }
+        mixed += r.intervals_mixed;
+    }
+    EXPECT_GT(mixed, 0u);
+    EXPECT_LE(mixed, kept) << "one fallback, at most one per request";
 }
