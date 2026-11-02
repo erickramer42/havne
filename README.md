@@ -198,16 +198,15 @@ troubleshooting.
 
 ## Status
 
-v0.3.5 (trouble codes read and cleared, every standard Service 01
-reading with several PIDs per request, SocketCAN requests through
-ISO-TP, fault injection on a replay, reply timing per PID) is the
-latest release. Next:
+v0.3.6 (trouble codes by name, VIN decode and inspection readiness,
+clearing with the engine running, the simulated ECU, the phone as a
+relay, and car runs through both adapters on hand) is the latest
+release. Next:
 
 | Version | Plan |
 |---|---|
-| v0.3.6 | Car runs with every adapter on hand; trouble-code descriptions, VIN decode and a readiness summary; the simulated ECU as `havne-cli sim`; the phone as a relay; clearing with the engine running |
 | v0.3.7-v0.3.9 | A log viewer that overlays runs; CSV import and export, scrubbed for sharing; a health report; Python bindings; triggered logging and alerts |
-| Later | SocketCAN through a real controller, when the hardware is on hand; an iPhone download, once a tester's device run works; discovery and capture formats; a plugin framework; older buses |
+| Later | SocketCAN through a real controller, once its desk and car runs are made; an iPhone download, once a tester's device run works; discovery and capture formats; a plugin framework; older buses |
 
 [STATUS.md](STATUS.md) holds what works, what's verified, the known
 issues and the full roadmap; [CHANGELOG.md](CHANGELOG.md) what each

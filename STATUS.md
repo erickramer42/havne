@@ -1,6 +1,6 @@
 # Havne: Project Status
 
-**Updated:** 2026-11-02, **Version:** v0.3.5,
+**Updated:** 2026-11-02, **Version:** v0.3.6,
 [![CI](https://github.com/erickramer42/havne/actions/workflows/ci.yml/badge.svg)](https://github.com/erickramer42/havne/actions/workflows/ci.yml)
 
 This file covers the project as it stands: what works, what comes
@@ -14,11 +14,12 @@ Safety, regulatory and warranty caveats are in
 
 ## Where things stand
 
-**Current phase: v0.3.6, next.** v0.3.5 is out: trouble codes, read
-and cleared; every linear reading of the Service 01 table, several
-PIDs per request; SocketCAN requests through ISO-TP in core; fault
-injection on a replay; and reply timing per request. Changes since
-then go under
+**Current phase: v0.3.7, next.** v0.3.6 is out: the car runs the
+adapters on hand can make (several PIDs per request through the VX,
+two ECUs, DID scans, the first clears); trouble-code titles, VIN
+decode and inspection readiness; clearing with the engine running;
+the simulated ECU as `havne-cli sim`; the phone as a relay; and
+Windows' 1 ms timer for J2534. Changes since then go under
 [CHANGELOG.md's "Unreleased"](CHANGELOG.md#unreleased). The J2534 stack is verified
 end to end against a fake vendor DLL, through the x64 and the x86
 surrogate. One real J2534 adapter, the OBDX Pro VX, has run on a quiet
@@ -33,10 +34,9 @@ the same car through the OBDLink MX+ over Bluetooth and the VX in ELM
 mode over USB
 ([2026-10-27](docs/bench-sessions/2026-10-27-elm327-vehicle.md)), and
 the Android app reaches the car through the phone's Bluetooth, in the
-background too. Next comes v0.3.6, the car runs the adapters on hand
-can make and the diagnostics finished; SocketCAN's runs wait for their
-hardware ([roadmap](#roadmap)). v0.3.6's car runs are filed, through
-both adapters, and its features are in; what remains is its release.
+background too. Next comes v0.3.7, the log viewer; SocketCAN's runs
+through a real controller have their desk hardware on hand
+([roadmap](#roadmap)).
 
 - **Works:**
   - **Mock transport,** on every platform: a scripted drive cycle (15 s
@@ -77,6 +77,11 @@ both adapters, and its features are in; what remains is its release.
     [ADR-0014](docs/adr/0014-single-threaded-surrogate.md)), and
     channels and filters derived from the profile, so a bare
     `j2534://` streams ([ADR-0012](docs/adr/0012-j2534-transport-adoption.md)).
+    The surrogate holds Windows' 1 ms timer, so a held read ends at
+    its slice: through the fake as the VX a 4 ms reply reads 11.3 ms
+    instead of 16.4, and on the test car 28 % more replies arrived in
+    the same time (ADR-0042's appendix of 2026-11-01,
+    [2026-11-01-vehicle](docs/bench-sessions/2026-11-01-vehicle.md)).
   - **Requests follow the replies**
     ([ADR-0015](docs/adr/0015-request-engine.md)): one out per channel,
     the next when the reply is in, a 100 ms wait and a 20 ms floor;
@@ -100,7 +105,16 @@ both adapters, and its features are in; what remains is its release.
     43 PIDs, Live hides the rest, and the classes refresh every 0.87 s
     and 3.53 s at 26 requests a second
     ([2026-10-31-elm327-vehicle](docs/bench-sessions/2026-10-31-elm327-vehicle.md),
-    BENCH prep #30).
+    BENCH prep #30). Several PIDs per request (ADR-0039's Appendix A):
+    up to six of a class in one request, one per request again for a
+    car that mishandles them, and packed again after an ignition cycle
+    once the car answers; on the test car each signal refreshed four
+    to five times as often through the MX+, and through the VX 2.7
+    times as many replies arrived a minute and RPM 2.8 times as often
+    (BENCH prep #31;
+    [2026-10-31-elm327-vehicle-2](docs/bench-sessions/2026-10-31-elm327-vehicle-2.md),
+    [2026-11-01-vehicle](docs/bench-sessions/2026-11-01-vehicle.md),
+    [2026-11-02-vehicle](docs/bench-sessions/2026-11-02-vehicle.md)).
   - **Vehicle identification** at connect
     ([ADR-0021](docs/adr/0021-vehicle-identification.md)), and
     **`uds-generic`**, polling or scanning the DIDs a URI names
@@ -132,6 +146,10 @@ both adapters, and its features are in; what remains is its release.
     ([ADR-0013](docs/adr/0013-protocol-profiles.md)): `mock`, `raw`,
     `obd2` and `uds-generic`. Each signal def states its kind and byte
     order ([ADR-0016](docs/adr/0016-signal-definition-layout.md)).
+    `uds-generic` scans a `?did=` range with `?scan=first` back to
+    back before polling what it found: about 30 DIDs a second on the
+    test car through both adapters, a 1,024-DID block in about 30 s
+    ([ADR-0020](docs/adr/0020-uds-generic.md)'s appendices).
   - **Connects explain themselves:** a failure says why, with the
     vendor's own text
     ([ADR-0018](docs/adr/0018-connect-failure-reporting.md)); a success
@@ -284,9 +302,10 @@ both adapters, and its features are in; what remains is its release.
   cross-arch subset (87/87); 0 MSVC warnings. CI runs ctest on Windows,
   macOS and Linux, with SocketCAN's suites on Linux's `vcan0`; core
   under ASan and UBSan, `vcan0` included; 60 s of each libFuzzer
-  harness ([fuzz/README.md](fuzz/README.md)); clang-tidy and CodeQL;
-  the C ABI against the last release's; the load test on Windows and
-  Linux; line coverage on Windows; the AppImage, built and started
+  harness ([fuzz/README.md](fuzz/README.md)); clang-tidy over core,
+  the surrogate, `havne-cli` and the app, and CodeQL; the C ABI
+  against the last release's; the load test on Windows and Linux,
+  gated on two ratios rather than the runner's speed; line coverage on Windows; the AppImage, built and started
   offscreen; the core packages, built twice to the same bytes, then
   installed and built against; the probes under `bpftrace`; the
   Android and iOS cross-builds; and, on request, an iOS Simulator
@@ -393,7 +412,7 @@ an issue is resolved it is removed, and its number is not reused.
 | v0.3.3 | ELM327 adapters, preferences and vehicles, Android with Bluetooth and background sessions and a signed APK, the rename to Havne | Released |
 | v0.3.4 | A command-line client over the C ABI; Linux as a supported desktop; a SocketCAN transport that listens | Released |
 | v0.3.5 | Full OBD-II diagnostics (Services 01-0A, clearing codes); SocketCAN requests through ISO-TP; fault injection on a replay; a performance benchmark with latency per PID | Released |
-| v0.3.6 | Proven and finished: the car runs the adapters on hand can make (packing through the VX, more than one ECU captured); Windows timer resolution; trouble-code descriptions, VIN decode and a readiness summary; the simulated ECU as `havne-cli sim`; the phone as a relay; clearing with the engine running; a performance gate in CI; clang-tidy tightened | Planned |
+| v0.3.6 | Proven and finished: the car runs the adapters on hand can make (packing through the VX, more than one ECU captured); Windows timer resolution; trouble-code descriptions, VIN decode and a readiness summary; the simulated ECU as `havne-cli sim`; the phone as a relay; clearing with the engine running; a performance gate in CI; clang-tidy tightened | Released |
 | v0.3.7 | A log viewer: recordings opened offline, two runs overlaid on a common zero | Planned |
 | v0.3.8 | CSV import and export, scrubbed for sharing; a health report; the Log page's frame filter; Python bindings | Planned |
 | v0.3.9 | Conditions: triggered logging, alerts and markers; computed signals | Planned |
@@ -406,75 +425,6 @@ The planned releases are in order; the proposed ones are not
 scheduled. The SocketCAN runs go into the first release after their
 hardware is on hand, the iPhone download into the first after a
 tester's device run. What each holds, past its row:
-
-### v0.3.6: proven and finished
-
-v0.3.5's features are verified on the fakes, the simulated bus and,
-for ELM327, the test car. v0.3.6 turns what the adapters on hand can
-reach into car-verified claims and finishes the diagnostics.
-
-- **The car runs:** several PIDs per request through the VX (BENCH
-  prep #31's other half), with each reply's latency on the host's
-  clock beside it (ADR-0042; the adapter's share waits for the desk
-  bus, below); and on the same run, the data more
-  than one ECU answering needs (a functional `0x7DF` bitmap request,
-  physical `0x7E1` to `0x7E7`), captured under `raw` as evidence for
-  v0.4.0's design. Done through both adapters
-  ([2026-11-01-android](docs/bench-sessions/2026-11-01-android.md),
-  [2026-11-01-vehicle](docs/bench-sessions/2026-11-01-vehicle.md)):
-  through the VX, 2.7 times as many replies a minute packed and RPM
-  2.8 times as often; two ECUs answer Service 01, both to a functional
-  request. A functional request's segmented reply (F190) timed out
-  through the VX, its Flow Control sent on 0x7DF; it goes on the
-  physical request ID, as ISO 15765-4 has it, and through the VX F190
-  answers through 0x7DF as often as through 0x7E0. The same re-runs
-  found packing back after an ignition cycle and both DID blocks
-  complete ([2026-11-02-vehicle](docs/bench-sessions/2026-11-02-vehicle.md)).
-- **Windows timer resolution:** the surrogate holds a 1 ms timer, so
-  through the fake as the VX a 4 ms reply reads 11.3 ms (one read
-  slice) instead of 16.4, and RPM refreshes every 0.164 s instead of
-  0.246; ELM327 never waited on the timer (ADR-0042's appendix of
-  2026-11-01). On the test car through the VX, an A/B of four runs:
-  28 % more replies with it, the median reply 3 ms sooner
-  ([2026-11-01-vehicle](docs/bench-sessions/2026-11-01-vehicle.md)).
-- **Trouble-code titles** (built, ADR-0044: the generic powertrain
-  and network codes; no urgency, which no source rates); **VIN decode**
-  (built, ADR-0043: the year and the make, offline; the model isn't in a
-  manufacturer code); and a **readiness summary** (built, ADR-0045:
-  the federal inspection rule, 40 CFR 85.2222, over every ECU's
-  monitors for the VIN's model year).
-- **The phone as a relay** (built, ADR-0047): a paired Bluetooth
-  adapter relayed to a computer on the phone's USB cable, so havne-cli
-  reaches an adapter only the phone can (`adb forward`, then
-  `elm327://127.0.0.1:35000`); tested on the desktop with a fake
-  adapter, and on the test car through the MX+
-  ([2026-11-01-android](docs/bench-sessions/2026-11-01-android.md):
-  the run sheet's Phase 9a, and a sweep of the engine ECU's 64,509
-  remaining DIDs in 36 minutes with the screen off).
-- **A faster DID scan** (built, ADR-0020's and ADR-0026's appendices
-  of 2026-11-01): `?scan=first` asks a `did=` range back to back before
-  polling what it found, an ELM327 gets the response-count digit for
-  one DID, and `havne-cli stream` reports a `scan` line and stops with
-  `--until-scanned`. On the test car through the MX+, a 1,024-DID block
-  took 32.9 s, and a DID whose reply spans frames was asked again
-  without the digit, as built; one whose reply runs past a few frames
-  waits until the ECU has sent the rest, which the sweep showed it
-  needs and the car confirms.
-- **The simulator as a product:** `havne-cli sim <uri> --on vcan0`
-  (built, ADR-0046: `mock://`, the drive cycle or the fakes' canned
-  values, the mock's diagnostics, a VIN, periodic faults; `replay://`,
-  a recording answering as its car; through core's ISO-TP). Until
-  SocketCAN's hardware is on hand, it's how anyone runs Havne's
-  SocketCAN requests end to end against a known ECU.
-- **clang-tidy, tightened and widened:** `google-explicit-constructor`,
-  braces around a body on the line after its `if`, and
-  `google-readability-casting` (C++ only) are on, over `cli/` and
-  `app/` too (the tidy job's tree has Qt; the app's Android-only
-  sources aren't in it).
-- **Done when:** the VX's packing run and the capture of more than one
-  ECU are filed; the timer change is measured on Windows either way;
-  and `havne-cli stream socketcan://vcan0?profile=obd2` against
-  `havne-cli sim` reads the simulated car's values and diagnostics.
 
 ### Waiting on a tester: an iPhone download
 

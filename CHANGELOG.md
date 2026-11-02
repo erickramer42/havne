@@ -10,6 +10,8 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
 
 ## [Unreleased]
 
+## [0.3.6] - 2026-11-02
+
 ### Added
 
 - A simulated ECU on Linux's virtual CAN bus: `havne-cli sim mock://sim --on vcan0` answers OBD-II requests as the simulated car's engine ECU, so `havne-cli stream "socketcan://vcan0?profile=obd2"` or the app reads its values, identification and trouble codes with no hardware. `?values=canned`, `?vin=` and `?faults=` change what it answers. `havne-cli sim replay://<recording> --on vcan0` answers as the car in a recording did: its own supported PIDs, its values as they changed, and the identification and trouble codes it gave when the recording holds them.
@@ -577,7 +579,8 @@ The first release with a Windows download
   shell with a responsive layout.
 - CI on Windows, macOS and Linux, running the core's tests.
 
-[Unreleased]: https://github.com/erickramer42/havne/compare/v0.3.5...HEAD
+[Unreleased]: https://github.com/erickramer42/havne/compare/v0.3.6...HEAD
+[0.3.6]: https://github.com/erickramer42/havne/compare/v0.3.5...v0.3.6
 [0.3.5]: https://github.com/erickramer42/havne/compare/v0.3.4...v0.3.5
 [0.3.4]: https://github.com/erickramer42/havne/compare/v0.3.3...v0.3.4
 [0.3.3]: https://github.com/erickramer42/havne/compare/v0.3.2...v0.3.3
