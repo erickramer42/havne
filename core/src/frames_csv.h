@@ -209,7 +209,9 @@ inline bool read_header(FILE* f, std::vector<char>& buf)
         return false;
     }
     const char* line = buf.data();
-    if (static_cast<unsigned char>(line[0]) == 0xEF) {
+    if (static_cast<unsigned char>(line[0]) == 0xEF &&
+        static_cast<unsigned char>(line[1]) == 0xBB &&
+        static_cast<unsigned char>(line[2]) == 0xBF) {
         line += 3; /* a byte-order mark, should an editor add one */
     }
     if (std::strcmp(line, kHeader) != 0) {
