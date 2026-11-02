@@ -49,7 +49,7 @@ jobs:
 
       - name: Run tests
         run: |
-          ctest --test-dir build -C Release --output-on-failure
+          ctest --test-dir build -C Release --output-on-failure --no-tests=error
 
   # Core and its Qt-free tests under AddressSanitizer and
   # UndefinedBehaviorSanitizer; LeakSanitizer runs with ASan on Linux, so
