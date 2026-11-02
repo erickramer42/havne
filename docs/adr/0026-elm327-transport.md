@@ -1002,5 +1002,26 @@ phone, [ADR-0047](0047-adapter-relay.md);
 block of 1,024 DIDs on the engine ECU with the digit and `scan=first`
 completed in 32.9 s, about 31 DIDs a second, the MX+'s Service 01
 pace. Every reply was one line (4 answered, 1,020 refused), so no DID
-was asked again without the digit; a reply that spans frames or is
-held pending on an adapter is still to come.
+was asked again without the digit. In the same session's capture of
+more than one ECU, `22F1901` to the engine ECU brought its First Frame
+alone and the prompt (the MX+ counts a First Frame as the one
+response), and the transport asked F190 again without the digit and
+had the whole VIN. A reply held pending on an adapter is still to
+come.
+
+*Amended 2026-11-01:* a sweep of the engine ECU's DIDs found that
+asking again at once fails a long reply. The adapter sends flow
+control after the First Frame, so the ECU sends the rest (`22 DE00`'s
+131 bytes: 18 Consecutive Frames about 8 ms apart) and takes no
+request meanwhile: asked again 0 or 50 ms after the prompt it gave NO
+DATA, at 150 ms the whole reply. The VIN's three frames had finished
+before its re-ask. A scanned DID asked into NO DATA waits for a
+rescan, so its block never completed. The transport now holds a
+channel after a cut reply for 10 ms each Consecutive Frame still to
+come (from the First Frame's length) plus 50 ms, a second at most,
+asking nothing of that ECU meanwhile, and a request asked again into
+NO DATA is held again twice as long, twice at most (a second, two,
+four: ISO-TP's longest reply at the test car's pace takes 4.7 s).
+`Elm327SessionTest.ACutDidIsAskedAgainOnceTheEcuHasSentTheRest`,
+`.ACutDidAnsweredNoDataIsHeldAgainLonger`; the fake ELM327's
+`cut_gap_ms` is the ECU sending on.

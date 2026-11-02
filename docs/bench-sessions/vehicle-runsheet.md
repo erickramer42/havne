@@ -32,6 +32,10 @@ A read-only session on a vehicle's bus. Goals, in order:
    #30), and the trouble-code read
    ([ADR-0037](../adr/0037-reading-trouble-codes.md), BENCH prep #28),
    each beside a second scan tool
+6. Several PIDs per request through the VX (BENCH prep #31), with the
+   reply timing beside it ([ADR-0042](../adr/0042-reply-timing.md)),
+   and the VX's view of more than one ECU (STATUS, v0.3.6; the MX+'s
+   is [2026-11-01-android](2026-11-01-android.md))
 
 Record everything, including every connect's session log. A session
 that stops at Phase 1 with evidence is worth more than one that runs
@@ -41,7 +45,8 @@ to the end undocumented.
 Phases 1 and 2 and Phase 2b. Phases 0, 3 and 4 settle goals 2 and 3,
 which the `obd2` set and the codes don't touch: run them when the
 request engine's pacing, link health, identification or `uds-generic`
-changed since the last session that ran them.
+changed since the last session that ran them. Goal 6 is Phases 3b and
+3c, from `havne-cli` on the same laptop, the engine idling.
 
 ## Safety and scope
 
@@ -367,6 +372,71 @@ One connect each, Disconnect between them; the engine keeps idling.
 from the scan and the text DID carries the VIN and the ECU's serial,
 so it's scrubbed before any of it is committed.
 
+## Phase 3b: several PIDs per request (BENCH prep #31), engine idling
+
+From a terminal on the laptop, `havne-cli` beside the app's build
+(`build/cli/Release/havne-cli.exe`), the app disconnected. Two runs of
+60 s, packing on (the default) and off:
+
+    havne-cli stream "j2534://OBDX Pro - VX" --seconds 60 > pack-on.jsonl
+    havne-cli stream "j2534://OBDX Pro - VX?pack=0" --seconds 60 > pack-off.jsonl
+
+- [ ] pack-on: the `timing` lines' `packed` count climbs from the
+      second lap on (a PID is packed only after its own reply showed
+      its length, so the first lap goes one PID a request), and no
+      `health` line; the last line's `answered` and `timeouts` noted
+- [ ] pack-off: `packed` stays 0
+- [ ] RPM's refresh (`interval_p50_us` on `01 0C`'s row) packed
+      against unpacked, and the latency P50 and P99 of each: the
+      surrogate's 1 ms timer should put a reply at about 11 ms, not 16
+      (ADR-0042's appendix of 2026-11-01)
+- [ ] If the ECU refuses packs (`7F 01 12`, or replies that don't
+      split): after three failures the channel goes unpacked and stays
+      so, and nothing is dropped. That's the fallback BENCH prep #31's
+      other half asks for: record it, it isn't a fault
+
+## Phase 3c: more than one ECU, engine idling
+
+The same terminal. Each target asked two questions for 10 s each, all
+read-only: `01 00` (Service 01's supported-PID bitmap) under `raw` with
+`?poll=0x00` (`raw` with no `?poll=` asks nothing and only listens),
+and `22 F190` (the VIN DID) under `uds-generic`. Physical `0x7E0` to
+`0x7E7` (replies on the ID + 8), then functional `0x7DF` heard on each
+of `0x7E8` to `0x7EF` in turn: a URI's `filter=` passes one reply ID a
+session. In Git Bash:
+
+    V="j2534://OBDX Pro - VX"
+    OBD="profile=raw&poll=0x00"
+    UDS="profile=uds-generic&did=F190&identify=0&diagnose=0"
+    for t in 0 1 2 3 4 5 6 7; do
+      rx=$(printf 0x7E%X $((t + 8)))
+      havne-cli stream "$V?$OBD&filter=$rx&txid=0x7E$t" --seconds 10 > phys-7E$t-obd.jsonl
+      havne-cli stream "$V?$UDS&filter=$rx&txid=0x7E$t" --seconds 10 > phys-7E$t-uds.jsonl
+    done
+    for r in 8 9 A B C D E F; do
+      havne-cli stream "$V?$OBD&filter=0x7E$r&txid=0x7DF" --seconds 10 > func-7E$r-obd.jsonl
+      havne-cli stream "$V?$UDS&filter=0x7E$r&txid=0x7DF" --seconds 10 > func-7E$r-uds.jsonl
+    done
+
+On the test car through the MX+ (2026-11-01-android): `0x7E0` and
+`0x7E1` answer `01 00`, both through `0x7DF` too; `0x7E1` refuses F190
+with `7F 22 31` physically and is silent to it functionally; `0x7E2`
+to `0x7E7` are silent.
+
+- [ ] The same ECUs answer through the VX, and the same refusals and
+      silences; any difference between the adapters is the finding
+- [ ] The functional rate against the physical: through the MX+ it was
+      half (the adapter waits out its timer after a functional
+      request); through J2534 it may differ, and that's the number
+      v0.4.0 needs
+- [ ] F190 through `0x7DF` to `0x7E8`: a three-frame reply needs flow
+      control sent to the ECU's physical ID; if the functional session
+      times out where the physical one answers, note it
+
+**Evidence:** the `.jsonl` files and each connect's session log
+(`%TEMP%\ecuio-surrogate*.log`). F190's replies are the VIN: scrub
+before committing anything.
+
 ## Phase 4: restart (link health through an ignition cycle)
 
 **Action:** connect the bare URI with the engine idling. Key off (the
@@ -419,6 +489,7 @@ ignition-on.
 | #8 Vendor timeouts | Read timing visible in the session log stamps |
 | #10 Session info | Phase 0's battery reading against the car's, and against PID 0x42 in Phase 1 |
 | #28 Trouble codes | Phase 2b: the diagnostics lines and page against the scan tool's MIL, codes, readiness and freeze frame; a refused list's reply bytes |
+| #31 Several PIDs per request | Phase 3b: `packed` climbing with no fault, or the fallback after three refused packs, and the two runs' refresh and latency |
 | #30 The full `obd2` set | Phase 1's "ECU 0x7E8:" line (PIDs kept and dropped), Live's note, Phase 2's refresh per class, the new values beside a second scan tool, and whether two fuel pressures read one sensor |
 
 ## Teardown

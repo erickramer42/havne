@@ -2,7 +2,7 @@
 
 - **Status:** Accepted. Built; tested on the desktop with a fake adapter,
   and run on the car through the test phone (the appendix of
-  2026-11-01); the screen-off hour is still to run.
+  2026-11-01), the screen off for 36 minutes.
 - **Date:** 2026-11-01.
 - **Builds on:** [ADR-0028](0028-app-fed-streams.md) (the phone's
   Bluetooth links), [ADR-0029](0029-android-background-sessions.md)
@@ -130,6 +130,8 @@ run sheet's Phase 9a on the test car through the MX+, and one 9b block:
 - One DID sweep block, 1,024 DIDs with `scan=first`, completed in
   32.9 s.
 
-Left: an hour or more of blocks with the screen off. The block ran
-with the screen on, and with the ignition on the battery fell on its
-tender, so the hour runs with the engine running.
+Then, the engine idling, the screen off from the first block to the
+last: a sweep of the engine ECU's whole DID range, 63 blocks over 36
+minutes, each a computer's connect, with no fault; the foreground
+service and its wake lock held throughout and the app's process was
+never frozen.

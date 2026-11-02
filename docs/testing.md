@@ -254,8 +254,8 @@ otherwise near idle), packing on, 92 requests in the rotation:
 
 | Transport | Fake's delay | Latency P50 (lowest to highest request) / P99 / max, ms | PID 0C's interval P50 / P99 / P99.9, s (clock) | ISO-TP |
 |---|---|---|---|---|
-| J2534, the fake as the VX (Windows, 2026-11-01, 60 s) | 4 ms | 11.3 / 12.6 / 12.6 | 0.164 / 0.180 / n/a, 366 intervals (adapter) | the adapter's |
-| ELM327, the fake (Windows, 2026-11-01, 60 s) | 4 ms | 4.6 to 5.1 / 6.1 / 6.6 | 0.164 / 0.180 / n/a, 374 (host) | 2,851 messages, 1 dropped |
+| J2534, the fake as the VX (Windows, 2026-11-01, 60 s) | 4 ms | 11.3 / 12.8 / 12.9 | 0.164 / 0.180 / n/a, 368 intervals (adapter) | the adapter's |
+| ELM327, the fake (Windows, 2026-11-01, 60 s) | 4 ms | 4.6 / 6.1 / 6.5 | 0.164 / 0.180 / n/a, 377 (host) | 2,873 messages, none dropped |
 | ELM327, the fake (Linux, WSL) | 4 ms | 4.1 / 4.2 / 4.2 | 0.148 / 0.164 / 0.246, 1,178 (host) | 8,882 messages, 1 dropped |
 | SocketCAN, `vcan0` (Linux, WSL) | none | 0.1 to 0.2 / 0.4 / 4.7 | 0.148 / 0.164 / 0.164, 1,194 (kernel) | 9,000 messages, none dropped |
 
@@ -280,12 +280,12 @@ otherwise near idle), packing on, 92 requests in the rotation:
   0.25 s where it took 16 ms (2026-10-31, at Windows' default step). No
   interval crossed a clock's fallback. P99.9 needs 1,000 intervals,
   which 180 s gives only on Linux.
-- **One message dropped and one timeout per ELM327 session** in the
-  runs above were PID 68's first reply, about 6 s in: its defs fit a
-  Single Frame, so it went with the count digit `1`, and the fake cut
-  its two-frame reply after the first. The digit now follows J1979's
-  length too, and a 12 s run (2026-11-01) dropped none and timed none
-  out.
+- **The ELM327 rows' one dropped message** (the Linux row, measured
+  before the fix) was PID 68's first reply, about 6 s in: its defs fit
+  a Single Frame, so it went with the count digit `1`, and the fake cut
+  its two-frame reply after the first. The digit follows J1979's length
+  too, and the Windows rows' 60 s run (2026-11-01, a sweep through the
+  phone's relay running beside it) dropped none and timed none out.
 
 ### Connect cost: a surrogate per session
 
