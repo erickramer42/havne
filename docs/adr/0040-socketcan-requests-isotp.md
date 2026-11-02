@@ -341,3 +341,8 @@ test car through the VX:
 [2026-11-01-vehicle](../bench-sessions/2026-11-01-vehicle.md)).
 `IsoTpTest.AFunctionalRequestsFlowControlGoesToThePhysicalId`,
 `SimBusTest.AFunctionalRequestsSegmentedReplyCompletes`.
+
+*Amended 2026-11-02:* on the test car through the VX, F190 through
+0x7DF answered 144 times in 10 s with no timeout, against 145 through
+0x7E0 ([2026-11-02-vehicle](../bench-sessions/2026-11-02-vehicle.md)).
+SocketCAN's side has met only the simulated ECU.

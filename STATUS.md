@@ -416,8 +416,10 @@ reach into car-verified claims and finishes the diagnostics.
   2.8 times as often; two ECUs answer Service 01, both to a functional
   request. A functional request's segmented reply (F190) timed out
   through the VX, its Flow Control sent on 0x7DF; it goes on the
-  physical request ID now, as ISO 15765-4 has it, which the fakes and
-  the simulated ECU confirm and the car has yet to.
+  physical request ID, as ISO 15765-4 has it, and through the VX F190
+  answers through 0x7DF as often as through 0x7E0. The same re-runs
+  found packing back after an ignition cycle and both DID blocks
+  complete ([2026-11-02-vehicle](docs/bench-sessions/2026-11-02-vehicle.md)).
 - **Windows timer resolution:** the surrogate holds a 1 ms timer, so
   through the fake as the VX a 4 ms reply reads 11.3 ms (one read
   slice) instead of 16.4, and RPM refreshes every 0.164 s instead of

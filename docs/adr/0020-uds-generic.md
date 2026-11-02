@@ -210,3 +210,8 @@ on each reply; its request times out each lap.
 `RequestEngineTest.ALateReplyStillAnswersItsScannedDid`,
 `J2534HealthTest.AScannedDidsLateLongReplyIsFound`
 (`ECUIO_FAKE_LONG_REPLY_DELAY_MS`).
+
+*Amended 2026-11-02:* both blocks again through the VX, with the
+change: each completed about 30 s in and ended `scanned`, DA9E and DE00
+found, 46 and 4 DIDs in all
+([2026-11-02-vehicle](../bench-sessions/2026-11-02-vehicle.md)).
