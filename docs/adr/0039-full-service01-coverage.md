@@ -416,6 +416,17 @@ The fakes' ECU answers packed requests, and a fake knob makes it
 answer only the first PID, so the fallback is tested through J2534
 and ELM327.
 
+> **Amended 2026-11-01 (an ignition cycle):** on the test car through
+> the VX, a key cycle while packing left the session unpacked for good:
+> with the ECU off, every request went unanswered, packs among them,
+> and three of those ended packing. The fallback now lasts until the
+> link recovers: `ecuio_engine_rescan`, which each worker calls then,
+> judges packing again. An ECU that refuses packs answers its other
+> requests, so its link never recovers and its channel stays unpacked;
+> one that went quiet packs again once it answers.
+> `RequestEngineTest.PackingResumesOnceTheLinkRecovers`,
+> `Elm327SessionTest.PackingResumesAfterTheEcuWentQuiet`.
+
 **The adapters.** J2534 adapters do the ISO-TP framing of a longer
 reply; ELM327's response-count digit (`elm327_response_count`) counts
 frames, so the engine passes the expected reply length (from the
