@@ -39,6 +39,7 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
 - On a phone, Live and the Log's frame table ran off the right edge of the screen; they now fit its width, and the frame table wraps a long payload under its row.
 - On a phone, the confirmation for clearing codes could run past the bottom of the screen with no way to reach Clear or Cancel; it now scrolls with the page.
 - On a phone, tapping Disconnect while an adapter's replies were still arriving over Bluetooth could crash the app (once in eight disconnects on a car). The closed link's socket now stays until Android has stopped reading it (20 disconnects on a car, none crashed).
+- A DID scan through a J2534 adapter could stop one DID short and never finish, so `havne-cli stream --until-scanned` ran until `--seconds`: a long reply that came after its request's wait was dropped. A scanned DID's late reply now counts it found.
 
 ## [0.3.5] - 2026-11-01
 
