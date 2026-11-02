@@ -428,10 +428,14 @@ inline socketcan_send_verdict socketcan_judge_sender(const socketcan_link& l,
  * session stops sending: a frame that lost arbitration goes again */
 constexpr uint8_t SOCKETCAN_PROOF_TRIES = 3;
 
+/* How long after the first echo an error frame still unproves the rate:
+ * N_As (ISO 15765-2), which socketcan_transport.cpp asserts equal */
+constexpr int64_t SOCKETCAN_PROOF_QUIET_US = 25000;
+
 /* What became of a request the worker wrote */
 enum class socketcan_sent {
-    echoed,   /* the controller sent it (one adapter echoes before any
-                 node acknowledged it: Known Issue #40) */
+    echoed,   /* the controller sent it: not proof that a node acknowledged
+                 it (one adapter echoes first, the error frame after) */
     unechoed, /* no echo and no error within N_As */
     error     /* an error frame, or the controller past error-active */
 };
@@ -439,6 +443,7 @@ enum class socketcan_sent {
 /* What the worker does next */
 enum class socketcan_proof_step {
     carry_on,   /* nothing changes: the rotation goes on, or stays halted */
+    confirming, /* echoed: nothing more is sent until the proof settles */
     proven,     /* the rate is proven: the rotation starts */
     send_again, /* unproven, unseen: the same request again */
     halt        /* nothing more is sent this session */
@@ -447,7 +452,10 @@ enum class socketcan_proof_step {
 struct socketcan_proof {
     bool proven = false;
     bool halted = false;
-    uint8_t unechoed = 0; /* in a row, before the proof */
+    bool confirming = false; /* echoed; an error frame may still follow */
+    uint8_t unechoed = 0;    /* in a row, before the proof */
+    int64_t echoed_us = 0;   /* when the confirming echo was read */
+    int64_t quiet_us = SOCKETCAN_PROOF_QUIET_US; /* a test may lengthen it */
 };
 
 /* vcan has no rate to get wrong: a session on it starts proven */
@@ -458,20 +466,34 @@ inline socketcan_proof socketcan_proof_for(const socketcan_link& l)
     return p;
 }
 
-/* Until one request is echoed, the first error or the third request
- * unseen halts the session; once proven, an unechoed request is a failed
- * write and an error the link health's, so nothing here changes */
-inline socketcan_proof_step socketcan_proof_on(socketcan_proof& p,
-                                               socketcan_sent what)
+/* Until the rate is proven, the first error or the third request unseen
+ * halts the session, and an echo starts the confirmation
+ * (socketcan_proof_settle): a controller may echo a frame before any
+ * node acknowledged it (the desk bus's adapter reported the missing ACK
+ * 1.5 ms after its echo, ADR-0040's appendix of 2026-11-02), so an error
+ * frame within the quiet time still halts. Once proven, an unechoed
+ * request is a failed write and an error the link health's, so nothing
+ * here changes */
+inline socketcan_proof_step
+socketcan_proof_on(socketcan_proof& p, socketcan_sent what, int64_t now_us)
 {
     if (p.halted || p.proven) {
         return socketcan_proof_step::carry_on;
     }
+    if (p.confirming) {
+        if (what == socketcan_sent::error) {
+            p.confirming = false;
+            p.halted = true;
+            return socketcan_proof_step::halt;
+        }
+        return socketcan_proof_step::carry_on;
+    }
     switch (what) {
     case socketcan_sent::echoed:
-        p.proven = true;
+        p.confirming = true;
+        p.echoed_us = now_us;
         p.unechoed = 0;
-        return socketcan_proof_step::proven;
+        return socketcan_proof_step::confirming;
     case socketcan_sent::unechoed:
         if (++p.unechoed < SOCKETCAN_PROOF_TRIES) {
             return socketcan_proof_step::send_again;
@@ -483,6 +505,19 @@ inline socketcan_proof_step socketcan_proof_on(socketcan_proof& p,
         p.halted = true;
         return socketcan_proof_step::halt;
     }
+}
+
+/* A confirming echo proves the rate once a reply came (an ECU answered
+ * at this rate) or the quiet time passed with no error frame */
+inline socketcan_proof_step
+socketcan_proof_settle(socketcan_proof& p, int64_t now_us, bool answered)
+{
+    if (!p.confirming || (!answered && now_us - p.echoed_us <= p.quiet_us)) {
+        return socketcan_proof_step::carry_on;
+    }
+    p.confirming = false;
+    p.proven = true;
+    return socketcan_proof_step::proven;
 }
 
 /* ---- A requesting session's filters ---- */

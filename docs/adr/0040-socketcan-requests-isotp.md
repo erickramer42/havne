@@ -2,8 +2,9 @@
 
 - **Status:** Accepted. Built on 2026-10-31 and verified on `vcan0`;
   section 2's one-shot rule confirmed on a desk bus (the appendix of
-  2026-11-02); section 3's echo, as proof of the rate, refuted there for
-  one adapter (Known Issue #40).
+  2026-11-02); section 3's proof waits after the echo for a reply or
+  N_As with no error frame, since one adapter echoes first (the same
+  appendix).
 - **Date:** 2026-10-31.
 - **Builds on:** [ADR-0032](0032-socketcan-listening.md) (the
   transport, the netlink checks, the simulated car on `vcan0`);
@@ -381,3 +382,17 @@ Havne refuses that controller for sending, so `cansend` sent.
   `listen-only off` is said, and a `cansend` through it returns 0 and
   sends nothing; the refusal for a controller without one-shot mode
   suggests `one-shot on` even when the driver's supported modes lack it.
+
+*Amended 2026-11-02 (the proof's fix):* section 3's table reads, for an
+unproven session: the echo starts the proof, and nothing more is sent
+until the request's reply comes (proven) or N_As (25 ms) passes after
+the echo with no error frame (proven); an error frame in that time
+halts the sending, as one before the echo does
+(`socketcan_proof_on`, `socketcan_proof_settle` in
+`core/src/socketcan_wire.h`). `vcan` still starts proven; a test-only
+switch (`ecuio_socketcan_set_vcan_unproven`) starts it unproven, so
+the proof runs on `vcan0`.
+`SocketCanTest.AnEchoThenAReplyOrQuietProvesTheRateAndAnErrorHalts`,
+`SocketCanRequestTest.AnUnprovenSessionIsProvenByTheEcusReply`,
+`.AnUnprovenSessionIsProvenByQuietAfterItsEcho`,
+`.AnErrorFrameAfterTheFirstEchoHalts`.
