@@ -269,7 +269,7 @@ hardware ([roadmap](#roadmap)).
   ELM327 [bench](docs/bench-sessions/elm327-bench-runsheet.md) and
   [vehicle](docs/bench-sessions/elm327-vehicle-runsheet.md) sheets, and
   the [phone's](docs/bench-sessions/android-phone-runsheet.md).
-- **Tests:** 846 ctest cases on Windows (both trees rebuilt,
+- **Tests:** 849 ctest cases on Windows (both trees rebuilt,
   2026-11-01), all passing but two env-gated skips (the cross-arch
   case, and the real-car recordings' diff, run locally), plus the
   cross-arch subset (87/87); 0 MSVC warnings. CI runs ctest on Windows,
@@ -371,23 +371,6 @@ an issue is resolved it is removed, and its number is not reused.
     run), or Qt's arm64 simulator libraries if Qt ships them. Apple is
     also winding down Rosetta, so the first option has its own end
     date.
-- **#38. A functional request whose reply is segmented never completes
-    through J2534.** The session's `FLOW_CONTROL` filter names the
-    channel's `tx_id` as its flow-control ID, so with `?txid=0x7DF` the
-    adapter sends its Flow Control on the functional ID, and ISO
-    15765-4 has the ECU wait for it on its physical ID. On the test car
-    through the VX, F190 asked through 0x7DF timed out ten of ten while
-    the physical request answered
-    ([2026-11-01-vehicle](docs/bench-sessions/2026-11-01-vehicle.md));
-    single-frame replies, such as the bitmaps, answer functionally.
-    The cause is read from the code, not a capture of the bus.
-- **#39. `havne-cli` didn't end when a surrogate never answered its
-    handshake.** On the laptop, the antivirus held a newly built x86
-    surrogate at its first run; the session log stopped at the spawn
-    line, and the CLI didn't end on its own, where the handshake's 8 s
-    window should fail the connect
-    ([2026-11-01-vehicle](docs/bench-sessions/2026-11-01-vehicle.md)).
-    Not reproduced off that laptop.
 
 ## Roadmap
 
@@ -401,17 +384,19 @@ an issue is resolved it is removed, and its number is not reused.
 | v0.3.3 | ELM327 adapters, preferences and vehicles, Android with Bluetooth and background sessions and a signed APK, the rename to Havne | Released |
 | v0.3.4 | A command-line client over the C ABI; Linux as a supported desktop; a SocketCAN transport that listens | Released |
 | v0.3.5 | Full OBD-II diagnostics (Services 01-0A, clearing codes); SocketCAN requests through ISO-TP; fault injection on a replay; a performance benchmark with latency per PID | Released |
-| v0.3.6 | Proven and finished: the car runs the adapters on hand can make (packing through the VX, more than one ECU captured); Windows timer resolution; trouble-code descriptions, VIN decode and a readiness summary; the simulated ECU as `havne-cli sim`; a performance gate in CI; clang-tidy tightened; an iPhone download once a device run works | Planned |
+| v0.3.6 | Proven and finished: the car runs the adapters on hand can make (packing through the VX, more than one ECU captured); Windows timer resolution; trouble-code descriptions, VIN decode and a readiness summary; the simulated ECU as `havne-cli sim`; a performance gate in CI; clang-tidy tightened | Planned |
 | v0.3.7 | A log viewer: recordings opened offline, two runs overlaid on a common zero | Planned |
 | v0.3.8 | CSV import and export, scrubbed for sharing; a health report; the Log page's frame filter; Python bindings | Planned |
 | v0.3.9 | Conditions: triggered logging, alerts and markers; computed signals | Planned |
 | Waiting on hardware | SocketCAN through a real controller: the desk run that settles one-shot mode, then the test car | Not versioned |
+| Waiting on a tester | An iPhone download: a tester's run of CI's `.ipa` on a device, then the release publishes it | Not versioned |
 | v0.4.0 | ECU, DID and service discovery (needs requests to every ECU and listening to the whole bus first), with a simulated car of several modules; PCAP export and candump import | Proposed |
 | v0.5.0 | The plugin framework (ADR-0013's profile API), with no manufacturer plugin yet; legacy buses (ISO 9141-2, KWP2000, J1850) | Proposed |
 
 The planned releases are in order; the proposed ones are not
 scheduled. The SocketCAN runs go into the first release after their
-hardware is on hand. What each holds, past its row:
+hardware is on hand, the iPhone download into the first after a
+tester's device run. What each holds, past its row:
 
 ### v0.3.6: proven and finished
 
@@ -429,8 +414,10 @@ reach into car-verified claims and finishes the diagnostics.
   [2026-11-01-vehicle](docs/bench-sessions/2026-11-01-vehicle.md)):
   through the VX, 2.7 times as many replies a minute packed and RPM
   2.8 times as often; two ECUs answer Service 01, both to a functional
-  request (a functional request's segmented reply through J2534 is
-  Known Issue #38).
+  request. A functional request's segmented reply (F190) timed out
+  through the VX, its Flow Control sent on 0x7DF; it goes on the
+  physical request ID now, as ISO 15765-4 has it, which the fakes and
+  the simulated ECU confirm and the car has yet to.
 - **Windows timer resolution:** the surrogate holds a 1 ms timer, so
   through the fake as the VX a 4 ms reply reads 11.3 ms (one read
   slice) instead of 16.4, and RPM refreshes every 0.164 s instead of
@@ -475,18 +462,19 @@ reach into car-verified claims and finishes the diagnostics.
   `google-readability-casting` (C++ only) are on, over `cli/` and
   `app/` too (the tidy job's tree has Qt; the app's Android-only
   sources aren't in it).
-- **An iPhone download, once a device run works:** a tester's run of
-  CI's unsigned `.ipa` on an iPhone, filed as a session sheet, first;
-  then the release workflow builds and publishes
-  `havne-X.Y.Z-ios-arm64-unsigned.ipa` with the other downloads
-  (provenance, the SBOM and the checksums), the release checks read its
-  version and that it carries no signature, and the notes' Try it
-  points at [docs/ios.md](docs/ios.md). Without the device run, it
-  waits for a later release.
 - **Done when:** the VX's packing run and the capture of more than one
   ECU are filed; the timer change is measured on Windows either way;
   and `havne-cli stream socketcan://vcan0?profile=obd2` against
   `havne-cli sim` reads the simulated car's values and diagnostics.
+
+### Waiting on a tester: an iPhone download
+
+No version until a tester has run CI's unsigned `.ipa` on an iPhone
+and the run is filed as a session sheet. Then the release workflow
+builds and publishes `havne-X.Y.Z-ios-arm64-unsigned.ipa` with the
+other downloads (provenance, the SBOM and the checksums), the release
+checks read its version and that it carries no signature, and the
+notes' Try it points at [docs/ios.md](docs/ios.md).
 
 ### Waiting on hardware: SocketCAN through a real controller
 

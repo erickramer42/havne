@@ -3,7 +3,8 @@
 //          tests/golden/cli/: the replay fixture, mock:// with its
 //          diagnostics line, the refusals, --until-scanned with nothing
 //          to scan),
-//          its usage errors (CliUsageTest) and, on POSIX, SIGINT and
+//          its usage errors (CliUsageTest), the connect's deadline
+//          (CliConnectTest, Windows, the fake DLL) and, on POSIX, SIGINT and
 //          SIGTERM (CliSignalTest), the absent line (CliReplayTest,
 //          tests/cli_absent.py); the formatting, the ring and the
 //          sleep rule UNIT (tests/test_cli.cpp); a real sleep BENCH
@@ -42,6 +43,7 @@
 #include <algorithm>
 #include <cerrno>
 #include <chrono>
+#include <condition_variable>
 #include <csignal>
 #include <cstdio>
 #include <cstdlib>
@@ -49,6 +51,7 @@
 #include <ctime>
 #include <exception>
 #include <memory>
+#include <mutex>
 #include <new>
 #include <string>
 #include <system_error>
@@ -116,6 +119,34 @@ size_t ring_bytes()
     return v < floor        ? floor
            : v > kRingBytes ? kRingBytes
                             : static_cast<size_t>(v);
+}
+
+// How long a connect may take. Each of core's waits on the way has a
+// bound of its own, the longest the surrogate's handshake and its
+// OP_OPEN (8 s each); a stuck spawn held one connect past all of them
+// (an antivirus holding a newly built surrogate; ADR-0031's appendix of
+// 2026-11-01), so the CLI keeps a deadline of its own. HAVNE_CLI_CONNECT_MS (tests only)
+// shortens it.
+constexpr unsigned long kConnectMs = 60 * 1000;
+
+unsigned long connect_ms()
+{
+    char env[32] = {};
+#ifdef _WIN32
+    const DWORD n =
+        GetEnvironmentVariableA("HAVNE_CLI_CONNECT_MS", env, sizeof env);
+    if (n == 0 || n >= sizeof env) {
+        return kConnectMs;
+    }
+#else
+    const char* value = std::getenv("HAVNE_CLI_CONNECT_MS");
+    if (!value || std::strlen(value) >= sizeof env) {
+        return kConnectMs;
+    }
+    std::memcpy(env, value, std::strlen(value));
+#endif
+    const unsigned long v = std::strtoul(env, nullptr, 10);
+    return v >= 100 ? v : kConnectMs;
 }
 
 std::atomic<bool> g_interrupted{false};
@@ -239,7 +270,55 @@ void write_start(Output& out)
 // An error line, with core's detail for the last connect unless given
 // one of the CLI's own
 void write_error(Output& out, ecuio_status_t status,
-                 const char* detail = nullptr)
+                 const char* detail = nullptr);
+
+// ecuio_session_create within connect_ms(): on a thread of its own, the
+// detail carried back from it (it's per thread). Past the deadline, the
+// error line and exit 3 at once; the process's end ends the surrogate
+// with it (its job object), wherever the connect was held.
+ecuio_status_t create_within(Output& out, const char* uri,
+                             ecuio_session_t** session, std::string* detail)
+{
+    struct Connect {
+        std::mutex mutex;
+        std::condition_variable cv;
+        bool done = false;
+        ecuio_status_t status = ECUIO_ERR_TRANSPORT_HARD_FAILURE;
+        ecuio_session_t* session = nullptr;
+        std::string detail;
+        std::string uri;
+    };
+    auto c = std::make_shared<Connect>();
+    c->uri = uri;
+    std::thread([c] {
+        ecuio_session_t* s = nullptr;
+        const ecuio_status_t st = ecuio_session_create(c->uri.c_str(), &s);
+        const std::string why = ecuio_last_error_detail();
+        std::lock_guard<std::mutex> lock(c->mutex);
+        c->status = st;
+        c->session = s;
+        c->detail = why;
+        c->done = true;
+        c->cv.notify_all();
+    }).detach();
+    const unsigned long ms = connect_ms();
+    std::unique_lock<std::mutex> lock(c->mutex);
+    if (!c->cv.wait_for(lock, std::chrono::milliseconds(ms),
+                        [&] { return c->done; })) {
+        char why[96];
+        std::snprintf(why, sizeof why, "the connect didn't finish within %lu s",
+                      (ms + 999) / 1000);
+        write_error(out, ECUIO_ERR_TRANSPORT_HARD_FAILURE, why);
+        out.flush();
+        std::fflush(stderr);
+        std::_Exit(kExitConnect);
+    }
+    *session = c->session;
+    *detail = c->detail;
+    return c->status;
+}
+
+void write_error(Output& out, ecuio_status_t status, const char* detail)
 {
     if (detail == nullptr) {
         detail = ecuio_last_error_detail();
@@ -798,9 +877,10 @@ int run_stream(const StreamArgs& args)
 
     write_start(out);
     ecuio_session_t* session = nullptr;
-    ecuio_status_t st = ecuio_session_create(args.uri, &session);
+    std::string detail;
+    ecuio_status_t st = create_within(out, args.uri, &session, &detail);
     if (st != ECUIO_OK) {
-        write_error(out, st);
+        write_error(out, st, detail.c_str());
         out.flush();
         return kExitConnect;
     }
@@ -1359,9 +1439,10 @@ int run_play(const PlayArgs& args)
     }
 
     ecuio_session_t* session = nullptr;
-    ecuio_status_t st = ecuio_session_create(args.uri, &session);
+    std::string detail;
+    ecuio_status_t st = create_within(out, args.uri, &session, &detail);
     if (st != ECUIO_OK) {
-        write_error(out, st);
+        write_error(out, st, detail.c_str());
         out.flush();
         close(player.fd);
         return kExitConnect;

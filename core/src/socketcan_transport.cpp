@@ -493,7 +493,9 @@ void request_worker(ecuio_socketcan_transport* t)
                 const isotp_result res = isotp_take(iso, f, newest, &m);
                 if (res == isotp_result::first) {
                     /* ISO 15765-4: within 25 ms of the First Frame */
-                    (void)write_frame(t->fd, isotp_flow_control(t->tx_ids[c]),
+                    (void)write_frame(t->fd,
+                                      isotp_flow_control(isotp_flow_control_id(
+                                          t->rx_ids[c], t->tx_ids[c])),
                                       t->ext29[c]);
                 } else if (res == isotp_result::complete) {
                     ecuio_frame_t& reply = *t->reply;

@@ -325,3 +325,19 @@ length to 4095 bytes).
     the only guard against that, and it's the user's step.
   - Requests lost to arbitration in one-shot mode on a busy bus cost
     refresh rate; the benchmark will say how much.
+
+## Appendix: 2026-11-01, Flow Control after a functional request
+
+A functional request (`?txid=0x7DF`, or `0x18DB33F1`) is answered by
+each ECU on its physical response ID, and ISO 15765-4:2005 section
+6.3.2.1 has the tester send a segmented reply's Flow Control on the
+physical request ID paired with it ("shall only be used for physically
+addressed FlowControl frames"): 0x7E0 for 0x7E8. The worker sent it on
+the request's ID, 0x7DF, where the simulated ECU, like a real one,
+never looks, so the reply never went on.
+`isotp_flow_control_id(rx, tx)` (`core/src/isotp.h`) gives the ID, and
+the J2534 transport's `FLOW_CONTROL` filter uses the same rule (the
+test car through the VX:
+[2026-11-01-vehicle](../bench-sessions/2026-11-01-vehicle.md)).
+`IsoTpTest.AFunctionalRequestsFlowControlGoesToThePhysicalId`,
+`SimBusTest.AFunctionalRequestsSegmentedReplyCompletes`.

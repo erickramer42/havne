@@ -38,7 +38,7 @@ constexpr uint32_t kMagic = 0x43464345u;   /* "ECFC" */
 /* Raised with any change to Page. A fake whose layout differs (a
  * build-win32 fake older than the tests) ignores the page, as it
  * ignores a wrong magic, and a test sees opener() stay 0. */
-constexpr uint32_t kLayout = 2;
+constexpr uint32_t kLayout = 3;
 constexpr uint32_t kMaxKnobs = 16;
 constexpr uint32_t kNameLen = 48;
 constexpr uint32_t kValueLen = 32;
@@ -71,6 +71,7 @@ struct Filter {
     uint32_t len;            /* of mask and pattern alike */
     uint8_t mask[kFilterMax];
     uint8_t pattern[kFilterMax];
+    uint8_t flow[kFilterMax]; /* a FLOW_CONTROL filter's message */
 };
 
 struct Page {
@@ -94,7 +95,7 @@ struct Page {
     uint32_t last_stopped;   /* the last filter ID stopped; 0 = none */
 };
 static_assert(sizeof(Page) == 12 + kMaxKnobs * 80 + kInboxDepth * 76 + 20 +
-                                  kWriteDepth * 72 + 12 + 36 + 4,
+                                  kWriteDepth * 72 + 12 + 48 + 4,
               "the page's layout must match in x86 and x64 builds");
 
 class Guard {
@@ -329,7 +330,7 @@ inline void record_connect(Page* p, uint32_t protocol, uint32_t flags,
 /* Fake side: a filter it started (len at most kFilterMax). */
 inline void record_filter(Page* p, uint32_t id, uint32_t type,
                           const uint8_t* mask, const uint8_t* pattern,
-                          uint32_t len)
+                          uint32_t len, const uint8_t* flow)
 {
     Guard g(p);
     Filter& f = p->last_filter;
@@ -340,6 +341,7 @@ inline void record_filter(Page* p, uint32_t id, uint32_t type,
     memset(f.pattern, 0, kFilterMax);
     memcpy(f.mask, mask, f.len);
     memcpy(f.pattern, pattern, f.len);
+    memcpy(f.flow, flow, kFilterMax);
 }
 
 /* Fake side: a filter ID it was asked to stop. */
