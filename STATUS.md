@@ -259,7 +259,7 @@ hardware ([roadmap](#roadmap)).
     phone's sleeps, [2026-10-29-android-2](docs/bench-sessions/2026-10-29-android-2.md);
     a Linux machine's suspend is left, BENCH prep #27).
 - **Not yet:** real hardware beyond two adapters and one car: 29-bit
-  addressing, more than one ECU answering, a real x64 driver,
+  addressing, more than one ECU answering in one session, a real x64 driver,
   and other vendors ([BENCH prep](docs/bench-sessions/bench-prep.md),
   [testing.md](docs/testing.md#gaps-not-verified)). The run sheets are
   [bench-runsheet.md](docs/bench-sessions/bench-runsheet.md),
@@ -405,7 +405,10 @@ reach into car-verified claims and finishes the diagnostics.
   latency beside it (ADR-0042); and on the same run, the data more
   than one ECU answering needs (a functional `0x7DF` bitmap request,
   physical `0x7E1` to `0x7E7`), captured under `raw` as evidence for
-  v0.4.0's design.
+  v0.4.0's design. Through the MX+, done
+  ([2026-11-01-android](docs/bench-sessions/2026-11-01-android.md)):
+  two ECUs answer Service 01, both to a functional request; the VX's
+  capture is left.
 - **Windows timer resolution:** the surrogate holds a 1 ms timer, so
   through the fake as the VX a 4 ms reply reads 11.3 ms (one read
   slice) instead of 16.4, and RPM refreshes every 0.164 s instead of
@@ -425,15 +428,18 @@ reach into car-verified claims and finishes the diagnostics.
   `elm327://127.0.0.1:35000`); tested on the desktop with a fake
   adapter, and on the test car through the MX+
   ([2026-11-01-android](docs/bench-sessions/2026-11-01-android.md):
-  the run sheet's Phase 9a and one sweep block). Left: an hour or more
-  of sweep blocks with the screen off.
+  the run sheet's Phase 9a, and a sweep of the engine ECU's 64,509
+  remaining DIDs in 36 minutes with the screen off).
 - **A faster DID scan** (built, ADR-0020's and ADR-0026's appendices
   of 2026-11-01): `?scan=first` asks a `did=` range back to back before
   polling what it found, an ELM327 gets the response-count digit for
   one DID, and `havne-cli stream` reports a `scan` line and stops with
   `--until-scanned`. On the test car through the MX+, a 1,024-DID block
-  took 32.9 s. Left: a reply that spans frames or is held pending,
-  on an adapter.
+  took 32.9 s, and a DID whose reply spans frames was asked again
+  without the digit, as built; one whose reply runs past a few frames
+  waits until the ECU has sent the rest, which the sweep showed it
+  needs and the car confirms. Left: a reply held pending, on an
+  adapter.
 - **The simulator as a product:** `havne-cli sim <uri> --on vcan0`
   (built, ADR-0046: `mock://`, the drive cycle or the fakes' canned
   values, the mock's diagnostics, a VIN, periodic faults; `replay://`,
