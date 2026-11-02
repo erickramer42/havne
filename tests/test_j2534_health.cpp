@@ -34,6 +34,7 @@
 #include "ecuio/profile.h"
 
 #ifdef _WIN32
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <cstring>
@@ -810,7 +811,9 @@ TEST_F(J2534HealthTest, VxTimingReportsEachRequestOnTheAdaptersClock)
  * for its timeout (one 10 ms slice), and a reply 4 ms after its write
  * is seen when that slice ends. With Windows' default 15.6 ms timer
  * every request's median read 15.4 to 16.4 ms (bench_timing,
- * 2026-11-01); with 1 ms, 11.3 ms. 14 ms sits between. */
+ * 2026-11-01); with 1 ms, 11.3 ms. 14 ms sits between, for the median
+ * of the requests' medians: a slow-class PID has few replies in the
+ * run, and on a loaded CI runner one median alone read 14.2 ms. */
 TEST_F(J2534HealthTest, VxRepliesAreSeenWhenTheSliceEndsNotTheTimersStep)
 {
     ASSERT_NO_FATAL_FAILURE(knob("ECUIO_FAKE_VX", "1"));
@@ -836,15 +839,16 @@ TEST_F(J2534HealthTest, VxRepliesAreSeenWhenTheSliceEndsNotTheTimersStep)
         std::this_thread::sleep_for(std::chrono::milliseconds(50));
     }
     ASSERT_GE(answered, 200u) << "replies timed";
+    std::vector<uint32_t> medians;
     for (uint32_t i = 0; i < count; ++i) {
-        const ecuio_request_timing_t& r = rows[i];
-        if (r.answered == 0) {
-            continue;
+        if (rows[i].answered >= 5) {
+            medians.push_back(rows[i].latency_p50_us);
         }
-        SCOPED_TRACE("PID " + std::to_string(r.request[1]));
-        EXPECT_LT(r.latency_p50_us, 14000u)
-            << "a read held to the timer's 15.6 ms step";
     }
+    ASSERT_GE(medians.size(), 3u) << "requests with five replies or more";
+    std::sort(medians.begin(), medians.end());
+    EXPECT_LT(medians[medians.size() / 2], 14000u)
+        << "reads held to the timer's 15.6 ms step";
 }
 
 /* A TX indication, then the START_OF_MESSAGE indication a vendor queues
