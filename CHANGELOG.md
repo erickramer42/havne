@@ -2,8 +2,9 @@
 
 What changed in each release, for people using Havne. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
-versions follow [Semantic Versioning](https://semver.org/) (before
-1.0, a minor version may break the C ABI). A release's full notes,
+from v0.4.0 versions follow [Semantic Versioning](https://semver.org/)
+(before 1.0, a minor version may break the C ABI;
+[ADR-0048](docs/adr/0048-semantic-versioning.md)). A release's full notes,
 the text of its GitHub release, are in [docs/releases/](docs/releases/).
 How each change was built, with its commits and the lessons along the
 way, is in [docs/engineering-log.md](docs/engineering-log.md).
