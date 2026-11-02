@@ -22,7 +22,7 @@ second, written against the public headers alone.
 > [!WARNING]
 > **Experimental.** It has read one car through two adapters, from a laptop and from an Android phone; other vehicles and adapters are untested. It can clear trouble codes, after asking and saving them first; it has cleared one car with none stored, with the engine stopped and running, and has erased a stored code only on its fakes and simulated vehicle. Read [DISCLAIMER.md](DISCLAIMER.md) before connecting it to a vehicle.
 
-![The Havne Dashboard through a quarter mile on the warmed-up simulated vehicle: launch control holds the engine near 4,000 rpm at the line, the tires spin off it, three upshifts at 6,800 rpm refill the shift lights, and speed climbs to about 107 mph at the line while coolant rises from 194 to 216 deg F, where the fan cuts in, and the oil from 225 to 239 deg F, before the driver lifts](docs/images/dashboard.gif)
+![The Havne Dashboard through a quarter mile on the warmed-up simulated vehicle: launch control holds the engine near 4,000 rpm at the line, the tires spin off it, three upshifts at 6,800 rpm refill the shift lights, and speed climbs to about 107 mph at the line while coolant rises from 194 to 216 deg F, where the fan cuts in, and the oil from 221 to 235 deg F, before the driver lifts](docs/images/dashboard.gif)
 
 *The Dashboard on the simulated vehicle (`mock://demo`), in real time:
 a quarter mile off launch control on a warm loop.*
@@ -127,6 +127,13 @@ a quarter mile off launch control on a warm loop.*
 |---|---|
 | [![Live view: RPM, speed, MAF and lambda plotted through a 3rd-gear pull onto the limiter](docs/images/live.png)](docs/images/live.png) | [![Live view over J2534 with every request failing: an amber "Requests failing" banner and pill, and each signal waiting for data](docs/images/link-health.png)](docs/images/link-health.png) |
 | A 3rd-gear pull onto the limiter: rpm, speed and MAF rise together, then rpm saws while speed holds and lambda swings lean on each fuel cut | Every request refused by the fake J2534 driver: the link reads "requests failing", not idle, and the page says what to check |
+
+![The Diagnostics page on the simulated vehicle: the inspection readiness card says it would fail an emissions inspection because an ECU commands the check-engine light on; ECU 0x7E8 lists three stored codes (P0301, P0420, U0100), three pending (P0171, C0035, B1001) and one permanent (P0420), each P and U code with its title, such as "P0301 Cylinder 1 Misfire Detected"; below, the readiness monitors, each done this drive and complete since the last clear](docs/images/diagnostics.png)
+
+*The Diagnostics page on the simulated vehicle (`mock://demo`): the
+inspection verdict, each stored, pending and permanent code with its
+SAE J2012 title, and the readiness monitors for this drive and since
+the last clear.*
 
 ![The Log page in developer mode on the simulated vehicle: the activity log holds two connects with their Session lines and, between them, the Delivery line of the disconnect (none dropped, the GUI thread's wait in microseconds); the pointer clicks Frames and the raw frame table streams, newest first, each frame's time, length, standard or extended ID and payload; then it clicks back to Activity](docs/images/log.gif)
 
