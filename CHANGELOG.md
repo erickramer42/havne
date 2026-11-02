@@ -12,8 +12,18 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
 
 ### Added
 
+- A simulated ECU on Linux's virtual CAN bus: `havne-cli sim mock://sim --on vcan0` answers OBD-II requests as the simulated car's engine ECU, so `havne-cli stream "socketcan://vcan0?profile=obd2"` or the app reads its values, identification and trouble codes with no hardware. `?values=canned`, `?vin=` and `?faults=` change what it answers. `havne-cli sim replay://<recording> --on vcan0` answers as the car in a recording did: its own supported PIDs, its values as they changed, and the identification and trouble codes it gave when the recording holds them.
+- `ecuio/sim.h` in core's C API: `ecuio_sim_create`, `ecuio_sim_get_stats` and `ecuio_sim_destroy`.
+- Inspection readiness: the Diagnostics page says whether the car would pass the federal OBD inspection rule (40 CFR 85.2222) today, from every ECU's monitors and check-engine light and the model year in its VIN, and names the monitors still incomplete. `havne-cli stream` writes the same as an `inspection` line. A state's program may be stricter.
+- `ecuio_diag_inspect` and `ecuio_inspection_t` in core's C API.
+- Trouble codes with their names: the Diagnostics page shows SAE J2012's title beside each generic powertrain and network code ("P0301  Cylinder 1 Misfire Detected") and the freeze frame's, and **Look up a code** names a typed one, offline. `havne-cli`'s `diagnostics` line carries the same as `titles`, and `havne-cli dtc <code>` looks one up. The titles come from Wal33D's dtc-database under its MIT license, whose notice ships with every download.
+- `ecuio_dtc_parse`, `ecuio_dtc_title`, `ecuio_dtc_title_source` and `ecuio_dtc_title_notice` in core's C API.
+- The VIN decoded on the device, with nothing sent anywhere: the model year, the make and whether the check digit matches, by 49 CFR 565 and the manufacturer codes in NHTSA's vPIC database. The activity log adds a `VIN:` line for the connected car, and Settings' Vehicle section has **Look up a VIN** for a typed one, never saved. `havne-cli vin <VIN>` does the same, and `havne-cli stream` writes an `identity` line per ECU: each identification item and the VIN's decode.
+- `ecuio/vin.h` in core's C API: `ecuio_vin_decode`, `ecuio_vin_make` and `ecuio_vin_source`.
 - The Diagnostics page shows each readiness monitor for this drive cycle beside its state since the last clear: done, not yet, or disabled for the rest of the drive. `havne-cli`'s `diagnostics` line carries the same, with PID 41's own outcome.
 - A channel's diagnostics report in core's C API holds this drive cycle's monitors (Service 01 PID 41: `ECUIO_MONITOR_CYCLE_ENABLED`, `ECUIO_MONITOR_CYCLE_COMPLETE`, `ECUIO_DIAG_CYCLE`, the `cycle` outcome), and a new outcome, `ECUIO_DIAG_UNSUPPORTED`, for an item whose PID the ECU says it lacks, which is then not asked.
+- A faster DID scan: `?scan=first` under `profile=uds-generic` asks a `did=` range back to back before polling what it found, and over an ELM327 each scanned DID is asked so the adapter returns as soon as a one-line answer is in. `havne-cli stream` writes a `scan` line with the scan's progress, and `--until-scanned` ends the stream once every range is asked.
+- The phone relays a paired Bluetooth adapter to a computer on its USB cable, so `havne-cli` on the computer reaches an adapter only the phone can: in developer mode, select the adapter in Settings and press **Relay**, then on the computer `adb forward tcp:35000 tcp:35000` and `elm327://127.0.0.1:35000`. The relay listens on the phone alone, never on a network, takes one computer at a time and keeps running with the screen off.
 - `ecuio_session_clear_diagnostics_with` in core's C API: a clear with the caller's word on a running engine and on a moving vehicle. A channel's diagnostics report records the engine and vehicle speeds a clear read (`clear_kmh`, `ECUIO_DIAG_CLEAR_RPM`, `ECUIO_DIAG_CLEAR_KMH`) and two outcomes, moving and no vehicle speed.
 
 ### Changed
@@ -27,6 +37,7 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
 - Over an ELM327 adapter, the first reading of a PID whose reply spans two CAN frames (such as PID 68, intake air temperature) was lost and counted as a timeout: the request asked the adapter for one frame. It now asks for the whole reply from the start.
 - On a phone, Live and the Log's frame table ran off the right edge of the screen; they now fit its width, and the frame table wraps a long payload under its row.
 - On a phone, the confirmation for clearing codes could run past the bottom of the screen with no way to reach Clear or Cancel; it now scrolls with the page.
+- On a phone, tapping Disconnect while an adapter's replies were still arriving over Bluetooth could crash the app (once in eight disconnects on a car). The closed link's socket now stays until Android has stopped reading it (20 disconnects on a car, none crashed).
 
 ## [0.3.5] - 2026-11-01
 

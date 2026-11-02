@@ -1,11 +1,13 @@
 // File/layer: app/btstream.cpp | Qt6 Core/Bluetooth, app layer, C++17;
 //             built on Android only (APP_BLUETOOTH)
 // Testing: CI's android-build compiles it; BENCH and Vehicle on the phone
-//          (ADR-0028 section 4, ADR-0029 section 5); the BLE choice and the classic
-//          connect's rules are UNIT-tested (blepicker.h, btconnect.h)
+//          (ADR-0028 section 4, ADR-0029 section 5); the BLE choice, the
+//          classic connect's rules and an aborted socket's retirement are
+//          UNIT-tested (blepicker.h, btconnect.h, btretire.h)
 
 #include "btstream.h"
 #include "blepicker.h"
+#include "btretire.h"
 
 #include <QBluetoothDeviceInfo>
 #include <QBluetoothSocket>
@@ -171,13 +173,15 @@ void BtLink::classicFailed(const QString& why)
 }
 
 // Only once its connect has ended: an abort mid-connect waits for Java's
-// connect() anyway, and a second socket would connect beside it
+// connect() anyway, and a second socket would connect beside it. The
+// aborted socket goes once Qt's reader thread has stopped writing into
+// it (btretire.h), not with the link.
 void BtLink::dropSocket()
 {
     if (m_socket != nullptr) {
         m_socket->disconnect(this);
         m_socket->abort();
-        m_socket->deleteLater();
+        retireBtSocket(m_socket);
         m_socket = nullptr;
     }
 }

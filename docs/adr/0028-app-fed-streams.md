@@ -352,3 +352,32 @@ a release key from v0.3.3 on: [ADR-0030](0030-signed-android-releases.md).
 CI's debug APK and local builds stay as section 3 describes them, for
 development and for phone runs that read the wire logs through
 `run-as`.
+
+## Appendix: 2026-11-01, a disconnect while replies arrive
+
+A phone run on the test car crashed the app on a Disconnect, once in
+eight: `SIGSEGV` (a write to address 0) in a `memcpy` called from Qt's
+`QtBtInputStream` thread, through `libQt6Bluetooth`, while a
+`uds-generic` session's replies were arriving. The recording had
+closed. Qt 6.12's Android socket explains it: `abort()` only asks Java
+to close the socket, and Qt's Java reader thread goes on copying each
+block it reads into the socket's own buffer, through a pointer to it,
+until its `read()` throws; its last call then sets `UnconnectedState`
+(`inputThreadError`). The link deleted the socket at the next pass of
+the event loop after `abort()`, so a block read in between was written
+into a freed socket.
+
+An aborted socket now leaves its link and goes once it says it's
+unconnected, or after 5 s for a reader that never stops
+(`app/btretire.h`, `retireBtSocket`); one already unconnected (an abort
+mid-connect) goes at once, as before. A link going away takes no
+socket with it. `BridgeTest.BtRetire*` pins the rule against a stand-in
+socket, at the desk; Phase 7c2 of the phone run sheet (20 disconnects
+while replies arrive) is the car's check.
+
+*Amended 2026-11-01:* 7c2 ran on the test car through the MX+
+([2026-11-01-android](../bench-sessions/2026-11-01-android.md)): 20
+disconnects while Service 01 replies arrived, no crash, the app's
+process the same throughout, and every recording ending
+`end disconnected`.
+

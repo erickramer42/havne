@@ -3,7 +3,10 @@
 // Testing: the HARNESS tier's ELM327 (ADR-0026 section 8). Elm327SessionTest
 //          puts it behind the transport's port opener (internal.h);
 //          Elm327PortTest (POSIX) puts it on the far side of a
-//          pseudo-terminal
+//          pseudo-terminal; pending_counted is the other reading of the
+//          count digit (Elm327SessionTest.AScannedDidHeldPending...);
+//          cut_gap_ms an ECU sending a cut reply's rest
+//          (Elm327SessionTest.ACutDid*)
 //
 // An ELM327 as its datasheet and the OBDLink manual describe it, bytes
 // in and bytes out: the AT settings it keeps (echo, linefeeds, spaces,
@@ -29,6 +32,10 @@
 //                read, as an STN prints and listens past it;
 //                pending_count of them, pending_gap_ms apart (an ECU
 //                repeats it while it works)
+//   pending_counted  a response count counts each 7F xx 78 as a line,
+//                so a request with the digit 1 ends after the first
+//                one, and the answer never prints (an adapter that
+//                doesn't wait past a pending reply)
 //   reply_delay_ms  each request's reply and prompt this long after it
 //   unsupported_nrc fake_ecu::answer's (-1 the ECU's codes, 0 silence)
 //   four_digit_ids  11-bit IDs printed as two bytes (07E8)
@@ -45,6 +52,11 @@
 //                kLateResetMs late, after anything sent meanwhile was
 //                taken (the MX+ over a new Bluetooth link,
 //                docs/bench-sessions/2026-10-29-android.md); one link
+//   cut_gap_ms   a reply the count digit cut goes on on the bus, one
+//                Consecutive Frame this often, and the ECU answers no
+//                request until it's sent (NO DATA): an ECU the adapter
+//                sent flow control (the test car's engine ECU, 8 ms;
+//                docs/bench-sessions/2026-11-01-android.md); 0 none
 //   longer_pid   a Service 01 PID (-1 none) whose positive reply the ECU
 //                pads with zeros to 13 data bytes, a First Frame and two
 //                Consecutive Frames: an ECU answering longer than J1979's
@@ -83,6 +95,7 @@ struct knobs {
     bool pending = false;
     uint32_t pending_count = 1;
     uint32_t pending_gap_ms = 0;
+    bool pending_counted = false;
     uint32_t reply_delay_ms = 0;
     long unsupported_nrc = -1;
     bool four_digit_ids = false;
@@ -92,6 +105,7 @@ struct knobs {
     bool hung = false;
     bool full_ends_monitor = false;
     bool stale_banner = false;
+    uint32_t cut_gap_ms = 0;
     int longer_pid = -1;
 };
 
@@ -322,6 +336,8 @@ private:
     uint32_t cf_ = 0;
     uint32_t cm_ = 0;
     bool monitoring_ = false;
+    /* cut_gap_ms: the ECU sends a cut reply's rest until then */
+    int64_t busy_until_ = 0;
     /* The frame lines a reply may still print: its response count, or
      * kNoCount */
     static constexpr uint32_t kNoCount = UINT32_MAX;
@@ -721,6 +737,11 @@ private:
             return;
         }
         const int64_t at = now + int64_t{k.reply_delay_ms} * 1000;
+        if (now < busy_until_) {
+            /* still sending a cut reply: the request goes unheard */
+            reply("NO DATA", at);
+            return;
+        }
         if (k.can_error) {
             reply("CAN ERROR", at);
             return;
@@ -742,20 +763,36 @@ private:
             memset(answer_ + answer_len, 0, 15 - answer_len);
             answer_len = 15;
         }
+        const uint32_t lines =
+            (count_digit == 0) ? kNoCount : static_cast<uint32_t>(count_digit);
         if (k.pending) {
             const uint8_t wait[3] = {0x7F, req[0], 0x78};
+            if (k.pending_counted) {
+                lines_left_ = lines;
+            }
             for (uint32_t i = 0; i < k.pending_count; ++i) {
                 message(rx, wait, sizeof(wait),
                         now + int64_t{i} * k.pending_gap_ms * 1000);
             }
         }
-        /* A 7F xx 78 isn't counted: the datasheet doesn't say whether it
-         * is, and the transport's pending tests take it that an adapter
-         * waiting past one (parameter 2A) waits for the answer */
-        lines_left_ =
-            (count_digit == 0) ? kNoCount : static_cast<uint32_t>(count_digit);
+        /* By default a 7F xx 78 isn't counted: the datasheet doesn't say
+         * whether it is, and the transport's pending tests take it that
+         * an adapter waiting past one (parameter 2A) waits for the
+         * answer; pending_counted is the other reading */
+        if (!k.pending || !k.pending_counted) {
+            lines_left_ = lines;
+        }
         message(rx, answer_, answer_len, at);
         lines_left_ = kNoCount;
+        const uint32_t frames =
+            (answer_len <= 7)
+                ? 1u
+                : 1u + static_cast<uint32_t>((answer_len - 6 + 6) / 7);
+        if (k.cut_gap_ms > 0 && count_digit > 0 && !k.pending &&
+            frames > static_cast<uint32_t>(count_digit)) {
+            busy_until_ =
+                at + (int64_t{frames} - count_digit) * k.cut_gap_ms * 1000;
+        }
         end_line(at);
         prompt(at);
     }

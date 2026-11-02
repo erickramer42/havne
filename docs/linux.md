@@ -151,6 +151,27 @@ havne-cli stream "socketcan://vcan0?profile=mock" --values
 or connect the app to `socketcan://vcan0?profile=mock` while `play`
 runs. `play` writes only to virtual interfaces, never to a real bus.
 
+**A simulated ECU to ask** ([ADR-0046](adr/0046-simulated-ecu.md)):
+`havne-cli sim` answers OBD-II requests on the virtual bus as the
+simulated car's engine ECU, so the requesting profiles run end to end:
+
+```sh
+havne-cli sim mock://sim --on vcan0 &
+havne-cli stream "socketcan://vcan0?profile=obd2" --values
+```
+
+The app connects to `socketcan://vcan0?profile=obd2` the same way.
+`mock://sim` answers from the simulated car's drive cycle (the engine
+starts after 15 s with the key on); `?values=canned` answers every
+linear J1979 PID with one reading instead, `?vin=` sets the VIN it
+gives, and `?faults=silent:5,late:7,bad_sequence:5,stalled:7` breaks
+every Nth reply. `replay:///path/to/recording` answers as the car in
+a recording did instead: each request gets the reply the recording
+holds for it at the sim's time since it started (the car's own
+bitmaps, values, identification and codes; `?loop=1` goes round the
+recording, `?vin=` replaces its VIN; a clear is refused). It answers
+only on a `vcan` interface, never on a car's bus.
+
 ## Where Havne keeps things
 
 | What | Where |

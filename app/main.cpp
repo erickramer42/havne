@@ -33,6 +33,10 @@
 #ifdef Q_OS_ANDROID
 #include "androidsession.h"
 #endif
+#ifdef APP_BLUETOOTH
+#include "btrelay.h"
+#endif
+#include "adapterrelay.h"
 #include "bluetoothdevices.h"
 #include "bridgesingleton.h"
 #include "carryover.h"
@@ -116,6 +120,8 @@ protected:
 // refuses them and keeps the dark title bar the color scheme gives it
 static void colorTitleBar(QWindow *window)
 {
+    // WId is the window's HWND held as an integer: the cast is Qt's own
+    // NOLINTNEXTLINE(performance-no-int-to-ptr)
     const auto hwnd = reinterpret_cast<HWND>(window->winId());
     const COLORREF caption = RGB(0x1e, 0x1e, 0x2e); // Theme.surface
     const COLORREF text = RGB(0xe8, 0xe8, 0xf0);    // Theme.text
@@ -170,9 +176,19 @@ int main(int argc, char *argv[])
     SessionBridge bridge;
     BridgeSingleton::instance = &bridge;
     bluetooth.attachTo(&bridge);
+    // A paired adapter relayed to a computer over USB (ADR-0047): the
+    // phone's build alone has a factory, so elsewhere it can't start
+    AdapterRelay relay;
+    AdapterRelay::instance = &relay;
+#ifdef APP_BLUETOOTH
+    relay.setFactory([](const QString& address) {
+        return std::unique_ptr<RelayAdapter>(new BtRelayAdapter(address));
+    });
+#endif
 #ifdef Q_OS_ANDROID
-    // The foreground service while an adapter session is up (ADR-0029 section 2)
-    AndroidSession androidSession(&bridge);
+    // The foreground service while an adapter session is up or a relay
+    // runs (ADR-0029 section 2)
+    AndroidSession androidSession(&bridge, &relay);
 #endif
 
     QQmlApplicationEngine engine;
@@ -195,8 +211,10 @@ int main(int argc, char *argv[])
         window->installEventFilter(new NoDrawWhileInactive(window));
 #endif
 #ifdef Q_OS_WIN
-    if (auto *window = qobject_cast<QWindow *>(engine.rootObjects().constFirst()))
+    if (auto *window =
+            qobject_cast<QWindow *>(engine.rootObjects().constFirst())) {
         colorTitleBar(window);
+    }
 #endif
 
     return app.exec();

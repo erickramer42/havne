@@ -1,0 +1,2 @@
+{"schema": 1, "type": "start"}
+{"check_digit": "0", "check_matches": true, "decoded": true, "make": "Ford", "model_year": 2021, "source": "vPICList_lite_2026_10", "type": "vin", "vin": "1FAFAKE10M0000001", "wmi": "1FA", "year_earlier": false}

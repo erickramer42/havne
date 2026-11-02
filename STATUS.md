@@ -123,8 +123,10 @@ hardware ([roadmap](#roadmap)).
     moves (ADR-0038's appendix of 2026-11-01), then reads the report
     again; each outcome on the page and in the activity log. Verified
     against the fakes through J2534 and ELM327 (running, standing,
-    moving, refused) and on the simulated car; not on a car (BENCH prep
-    #29).
+    moving, refused), on the simulated car, and on the test car through
+    the MX+ with the engine off and running, a car with no codes
+    ([2026-11-01-android](docs/bench-sessions/2026-11-01-android.md),
+    BENCH prep #29).
   - **Profiles** chosen by the URI
     ([ADR-0013](docs/adr/0013-protocol-profiles.md)): `mock`, `raw`,
     `obd2` and `uds-generic`. Each signal def states its kind and byte
@@ -166,6 +168,18 @@ hardware ([roadmap](#roadmap)).
       and error frames included, through a controller in listen-only
       mode, and sends nothing. `havne-cli play mock://demo --to vcan0`
       drives the simulated car on a virtual bus.
+    - **The simulated ECU** ([ADR-0046](docs/adr/0046-simulated-ecu.md)):
+      `havne-cli sim mock://sim --on vcan0` answers OBD-II requests on a
+      virtual bus as the simulated car's engine ECU, through core's
+      ISO-TP (`ecuio/sim.h`): the drive cycle's values or the fakes'
+      canned ones, the mock's diagnostics, a VIN, and periodic faults;
+      or `replay://<recording>`, the replies the car gave, each keyed by
+      the request it answers, at the sim's time since it started.
+      Verified on `vcan0` (WSL): an obd2 session reads its values,
+      identification, diagnostics and inspection line, clears it, and
+      stays in step under every fault; against the test car's engine
+      start, it walks the car's bitmaps, keeps exactly the recorded
+      PIDs, packs, and decodes only engine speeds the car sent.
     - **Requests:** `obd2` and `uds-generic` run through ISO-TP in core
       (`core/src/isotp.h`, the reassembly ELM327 uses too), with the
       request keys of the other two transports. A real controller must
@@ -214,6 +228,28 @@ hardware ([roadmap](#roadmap)).
     adapter URI and Live's plotted signals and names its recordings'
     folders; a salted hash of the VIN recognizes it at the next
     connect. Made, copied, renamed and forgotten in the app.
+  - **VIN decode** ([ADR-0043](docs/adr/0043-vin-decode.md)): the
+    model year, the make and the check digit, on the device, by 49 CFR
+    565.15 and the manufacturer codes of NHTSA vPIC's standalone
+    database (a table committed from it); the activity log's `VIN:`
+    line and Settings' lookup in the app, `havne-cli vin` and
+    `stream`'s `identity` line. Verified at UNIT (the regulation's
+    sample VIN, each year rule) and in the bridge, QML and CLI tests;
+    the test car's own VIN not yet.
+  - **Trouble-code titles** ([ADR-0044](docs/adr/0044-trouble-code-titles.md)):
+    SAE J2012's names for the generic powertrain and network codes, from
+    Wal33D's MIT list (a table committed from it, its notice in every
+    download), on the Diagnostics page, in its lookup, in the CLI's
+    `diagnostics` line and `havne-cli dtc`. Checked against J2012's
+    2002 pages on 110 codes and against the other open lists; verified at
+    UNIT and in the bridge, QML and CLI tests.
+  - **Inspection readiness** ([ADR-0045](docs/adr/0045-inspection-readiness.md)):
+    every ECU's monitors and check-engine light judged as one car by the
+    federal OBD inspection rule (40 CFR 85.2222: two incomplete for
+    1996-2000, one from 2001, a commanded light fails) for the VIN's
+    model year; Diagnostics' card and `stream`'s `inspection` line.
+    Verified at UNIT and in the bridge, QML and CLI tests; not yet on the
+    test car.
   - **Evidence for field sessions:** opt-in recording of every frame,
     decoded value and activity line per connect
     ([ADR-0017](docs/adr/0017-session-recording.md)), and a surrogate
@@ -225,7 +261,7 @@ hardware ([roadmap](#roadmap)).
     phone's sleeps, [2026-10-29-android-2](docs/bench-sessions/2026-10-29-android-2.md);
     a Linux machine's suspend is left, BENCH prep #27).
 - **Not yet:** real hardware beyond two adapters and one car: 29-bit
-  addressing, more than one ECU answering, a real x64 driver,
+  addressing, more than one ECU answering in one session, a real x64 driver,
   and other vendors ([BENCH prep](docs/bench-sessions/bench-prep.md),
   [testing.md](docs/testing.md#gaps-not-verified)). The run sheets are
   [bench-runsheet.md](docs/bench-sessions/bench-runsheet.md),
@@ -233,7 +269,7 @@ hardware ([roadmap](#roadmap)).
   ELM327 [bench](docs/bench-sessions/elm327-bench-runsheet.md) and
   [vehicle](docs/bench-sessions/elm327-vehicle-runsheet.md) sheets, and
   the [phone's](docs/bench-sessions/android-phone-runsheet.md).
-- **Tests:** 759 ctest cases on Windows (both trees rebuilt,
+- **Tests:** 842 ctest cases on Windows (both trees rebuilt,
   2026-11-01), all passing but two env-gated skips (the cross-arch
   case, and the real-car recordings' diff, run locally), plus the
   cross-arch subset (86/86); 0 MSVC warnings. CI runs ctest on Windows,
@@ -371,7 +407,10 @@ reach into car-verified claims and finishes the diagnostics.
   latency beside it (ADR-0042); and on the same run, the data more
   than one ECU answering needs (a functional `0x7DF` bitmap request,
   physical `0x7E1` to `0x7E7`), captured under `raw` as evidence for
-  v0.4.0's design.
+  v0.4.0's design. Through the MX+, done
+  ([2026-11-01-android](docs/bench-sessions/2026-11-01-android.md)):
+  two ECUs answer Service 01, both to a functional request; the VX's
+  capture is left.
 - **Windows timer resolution:** the surrogate holds a 1 ms timer, so
   through the fake as the VX a 4 ms reply reads 11.3 ms (one read
   slice) instead of 16.4, and RPM refreshes every 0.164 s instead of
@@ -379,22 +418,41 @@ reach into car-verified claims and finishes the diagnostics.
   2026-11-01). Left: the VX on the car confirms it, and asking the VX
   for as many messages as replies are outstanding would end a read at
   its reply (the bench first).
-- **Trouble-code descriptions** ("P0301: cylinder 1 misfire") with a
-  one-word urgency, from a source chosen first; **VIN decode** (make,
-  model and year from the WMI and the model-year digit, offline); and
-  a **readiness summary**: a line saying whether the car would pass an
-  inspection, from the monitors (PID 41's for this drive cycle are
-  shown beside PID 01's) and the model year VIN decode gives.
-- **The simulator as a product:** `havne-cli sim <uri> --on vcan0`,
-  the fakes' ECU and the recording that answers as one promoted from
-  test code into the CLI, answering through core's ISO-TP, with
-  faults given as replay's `?faults=` are. Until SocketCAN's hardware
-  is on hand, it's how anyone runs Havne's SocketCAN requests end to
-  end against a known ECU.
+- **Trouble-code titles** (built, ADR-0044: the generic powertrain
+  and network codes; no urgency, which no source rates); **VIN decode**
+  (built, ADR-0043: the year and the make, offline; the model isn't in a
+  manufacturer code); and a **readiness summary** (built, ADR-0045:
+  the federal inspection rule, 40 CFR 85.2222, over every ECU's
+  monitors for the VIN's model year).
+- **The phone as a relay** (built, ADR-0047): a paired Bluetooth
+  adapter relayed to a computer on the phone's USB cable, so havne-cli
+  reaches an adapter only the phone can (`adb forward`, then
+  `elm327://127.0.0.1:35000`); tested on the desktop with a fake
+  adapter, and on the test car through the MX+
+  ([2026-11-01-android](docs/bench-sessions/2026-11-01-android.md):
+  the run sheet's Phase 9a, and a sweep of the engine ECU's 64,509
+  remaining DIDs in 36 minutes with the screen off).
+- **A faster DID scan** (built, ADR-0020's and ADR-0026's appendices
+  of 2026-11-01): `?scan=first` asks a `did=` range back to back before
+  polling what it found, an ELM327 gets the response-count digit for
+  one DID, and `havne-cli stream` reports a `scan` line and stops with
+  `--until-scanned`. On the test car through the MX+, a 1,024-DID block
+  took 32.9 s, and a DID whose reply spans frames was asked again
+  without the digit, as built; one whose reply runs past a few frames
+  waits until the ECU has sent the rest, which the sweep showed it
+  needs and the car confirms. Left: a reply held pending, on an
+  adapter.
+- **The simulator as a product:** `havne-cli sim <uri> --on vcan0`
+  (built, ADR-0046: `mock://`, the drive cycle or the fakes' canned
+  values, the mock's diagnostics, a VIN, periodic faults; `replay://`,
+  a recording answering as its car; through core's ISO-TP). Until
+  SocketCAN's hardware is on hand, it's how anyone runs Havne's
+  SocketCAN requests end to end against a known ECU.
 - **clang-tidy, tightened and widened:** `google-explicit-constructor`,
   braces around a body on the line after its `if`, and
-  `google-readability-casting` (C++ only) are on, over `cli/` too; left:
-  `app/`, which needs Qt and moc's files in the tidy job's tree.
+  `google-readability-casting` (C++ only) are on, over `cli/` and
+  `app/` too (the tidy job's tree has Qt; the app's Android-only
+  sources aren't in it).
 - **An iPhone download, once a device run works:** a tester's run of
   CI's unsigned `.ipa` on an iPhone, filed as a session sheet, first;
   then the release workflow builds and publishes

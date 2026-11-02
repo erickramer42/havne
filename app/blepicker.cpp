@@ -44,8 +44,9 @@ BlePick named(const std::vector<BleService>& services, const QString& service,
         }
         const int w = indexOf(s, write);
         const int n = indexOf(s, notify);
-        if (w >= 0 && n >= 0 && writable(s.characteristics[size_t(w)]) &&
-            notifying(s.characteristics[size_t(n)])) {
+        if (w >= 0 && n >= 0 &&
+            writable(s.characteristics[static_cast<size_t>(w)]) &&
+            notifying(s.characteristics[static_cast<size_t>(n)])) {
             return {static_cast<int>(i), w, n};
         }
     }

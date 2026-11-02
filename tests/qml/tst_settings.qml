@@ -835,6 +835,28 @@ TestCase {
         return page.vehicles.list.map(v => v.label)
     }
 
+    // ADR-0043: a typed VIN is decoded on the device, by the bridge's one
+    // summary, and kept nowhere (made up around FAKE, its check digit by
+    // 49 CFR 565.15)
+    function test_aTypedVinIsDecodedOnTheDevice() {
+        const page = createPage()
+        const field = find(page, "vinLookupField")
+        const result = find(page, "vinLookupResult")
+        verify(!result.visible, "nothing typed, nothing said")
+        verify(find(page, "vinLookupHint").text.indexOf("(vPICList_lite_") > 0,
+               "the hint names the vPIC release")
+
+        field.text = "1fa fake10m0000001"
+        verify(result.visible)
+        compare(result.text, "Model year 2021; Ford (manufacturer code 1FA); check digit matches")
+        compare(JSON.stringify(page.vehicles).indexOf("FAKE10"), -1, "not in the vehicles")
+
+        field.text = "FAKEJ2534VIN00001"
+        compare(result.text, "Not a VIN: 49 CFR 565 takes 17 digits and capital letters, never I, O or Q")
+        field.text = ""
+        verify(!result.visible)
+    }
+
     // ADR-0027 section 1: every change to the list is made in the section, a
     // label typed or left to its default
     function test_theVehicleSectionMakesNamesAndForgetsVehicles() {

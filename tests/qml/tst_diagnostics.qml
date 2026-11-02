@@ -12,7 +12,8 @@
 //          list names it), Cancel sending nothing, Clear once at the mock's
 //          stopped engine (its first 15 s), and on Windows the fake's
 //          running engine leaving the codes; at 320 x 400 the
-//          confirmation scrolls, so Clear and Cancel can be reached. The
+//          confirmation scrolls, so Clear and Cancel can be reached; the
+//          car's inspection line (ADR-0045), hidden until a read. The
 //          entries themselves are
 //          test_bridge's (BridgeTest.DiagnosticsEntryIsWhatThePageShows,
 //          .AClear*).
@@ -106,6 +107,67 @@ TestCase {
         verify(!find(page, "clearCodes").visible, "nor a clear")
     }
 
+    // ADR-0044: each titled code on a line of its own under its list; a
+    // chassis or a manufacturer's code stays in the codes line alone
+    function test_codesCarryTheirTitles() {
+        const page = createTemporaryObject(pageComponent, testCase.parent)
+        const card = connectAndRead(page, "mock://demo")
+        compare(find(card, "titles_stored").text,
+                "P0301  Cylinder 1 Misfire Detected\n" +
+                "P0420  Catalyst System Efficiency Below Threshold Bank 1\n" +
+                "U0100  Lost Communication With ECM/PCM A")
+        compare(find(card, "titles_pending").text, "P0171  System Too Lean Bank 1",
+                "C0035 and B1001 have none")
+        compare(find(card, "titles_permanent").text,
+                "P0420  Catalyst System Efficiency Below Threshold Bank 1")
+    }
+
+    // ADR-0045: the car's verdict above the ECUs, hidden with nothing read
+    // (the cases share the bridge, which keeps the last read: a session
+    // that reads nothing empties it)
+    function test_theInspectionLineJudgesTheCar() {
+        const page = createTemporaryObject(pageComponent, testCase.parent)
+        const card = find(page, "inspectionCard")
+        connectAndRead(page, "mock://demo?diagnose=0")
+        verify(!card.visible, "nothing read, nothing judged")
+        Bridge.disconnectSession()
+        tryVerify(() => !Bridge.connected && !Bridge.disconnecting, 5000)
+        connectAndRead(page, "mock://demo")
+        tryVerify(() => card.visible, 2000)
+        compare(find(page, "inspectionText").text,
+                "Would fail an emissions inspection: an ECU commands the " +
+                "check-engine light on.")
+        verify(find(page, "inspectionRule").text.indexOf("40 CFR 85.2222") > 0)
+    }
+
+    // ADR-0044: a typed code is named with or without a session
+    function test_aTypedCodeIsNamed() {
+        const page = createTemporaryObject(pageComponent, testCase.parent)
+        const field = find(page, "dtcLookupField")
+        const result = find(page, "dtcLookupResult")
+        verify(!result.visible, "nothing typed, nothing said")
+        field.text = "p 0301"
+        compare(result.text, "P0301: Cylinder 1 Misfire Detected")
+        field.text = "P1234"
+        verify(result.text.indexOf("P1234: no title here") === 0, result.text)
+        field.text = "P5301"
+        verify(result.text.indexOf("Not a trouble code") === 0, result.text)
+        field.text = ""
+        verify(!result.visible)
+        // The list's source and license are the packages' notices and the
+        // release notes, not the page's
+        const said = []
+        const walk = item => {
+            for (let i = 0; i < item.children.length; ++i) {
+                const c = item.children[i]
+                if (typeof c.text === "string") said.push(c.text)
+                walk(c)
+            }
+        }
+        walk(page)
+        verify(!said.some(s => /Wal33D|MIT|license/i.test(s)), "no source or license on the page")
+    }
+
     function test_theMocksReportFillsThePage() {
         const page = createTemporaryObject(pageComponent, testCase.parent)
         const card = connectAndRead(page, "mock://demo")
@@ -120,7 +182,7 @@ TestCase {
         const cycle = texts(find(card, "monitors"), "monitorCycle")
         compare(cycle.length, 8, "this drive cycle, beside each")
         verify(cycle.every(s => s === "Done"), cycle.join(", "))
-        compare(find(card, "freezeLabel").text, "Stored by P0301")
+        compare(find(card, "freezeLabel").text, "Stored by P0301 (Cylinder 1 Misfire Detected)")
         const values = texts(find(card, "freezeValues"), "freezeValue")
         compare(values, [page.valueText(0xB3 * 100 / 255, 1, "%"),
                          page.valueText(90, 0, "°C"),

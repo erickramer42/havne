@@ -1,4 +1,5 @@
-# clang-tidy's checks for core/, surrogate/ and cli/: scripts/tidy.sh,
+# clang-tidy's checks for core/, surrogate/, cli/ and app/ (app/.clang-tidy
+# adds one exception): scripts/tidy.sh,
 # and the clang-tidy job in CI, which fails on any warning. The families
 # that find bugs run whole: clang-analyzer (the static analyzer),
 # bugprone, concurrency, performance and portability, plus a few misc
@@ -54,4 +55,4 @@ Checks: >-
 WarningsAsErrors: '*'
 CheckOptions:
   readability-braces-around-statements.ShortStatementLines: 1
-HeaderFilterRegex: '.*[/\\](core|surrogate|cli)[/\\].*'
+HeaderFilterRegex: '.*[/\\](core|surrogate|cli|app)[/\\].*'

@@ -73,10 +73,12 @@ target_link_libraries(test_obd2 PRIVATE
 )
 
 # The Service 01 table the obd2 set and the fakes' ECU are checked against,
-# and the readiness monitors' names
+# the readiness monitors' names, and the replay fixture the simulated ECU
+# loads
 target_compile_definitions(test_obd2 PRIVATE
     ECUIO_OBD2_TABLE="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/obd2/service01.csv"
     ECUIO_OBD2_MONITORS="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/obd2/monitors.csv"
+    ECUIO_REPLAY_FIXTURES="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/replay"
 )
 
 app_enable_warnings(test_obd2)
@@ -112,6 +114,9 @@ gtest_discover_tests(test_elm327 PROPERTIES TIMEOUT 30)
 add_executable(test_socketcan test_socketcan.cpp test_isotp.cpp)
 target_include_directories(test_socketcan PRIVATE ${CMAKE_SOURCE_DIR}/core/src)
 target_link_libraries(test_socketcan PRIVATE ecuio-core GTest::gtest_main)
+# the simulated ECU loads the replay fixture (SimTest, Linux)
+target_compile_definitions(test_socketcan PRIVATE
+    ECUIO_REPLAY_FIXTURES="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/replay")
 app_enable_warnings(test_socketcan)
 gtest_discover_tests(test_socketcan)
 
@@ -159,6 +164,12 @@ if(Python3_Interpreter_FOUND)
     # packaging/sbom.py, the release's SBOM (ADR-0035 section 5)
     add_test(NAME SbomTest.SelfTest
         COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/packaging/sbom.py selftest)
+    # scripts/vpic_wmi.py, the VIN table's generator (ADR-0043 section 2)
+    add_test(NAME VpicWmiTest.SelfTest
+        COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/scripts/vpic_wmi.py --selftest)
+    # scripts/dtc_titles.py, the trouble-code titles' generator (ADR-0044)
+    add_test(NAME DtcTitlesTest.SelfTest
+        COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/scripts/dtc_titles.py --selftest)
 endif()
 
 # --- havne-cli (ADR-0031): Qt-free, every desktop platform ---
@@ -214,10 +225,28 @@ if(TARGET havne-cli)
                --values)
         app_cli_golden(MockDriveCycle mock.jsonl --ignore t_us
             -- $<TARGET_FILE:havne-cli> stream mock://golden --values --count 40)
+        # A typed VIN's decode (ADR-0043), made up around FAKE: the model
+        # year a letter in position 7 places, the make by vPIC's code
+        app_cli_golden(AVinIsDecoded vin.jsonl
+            -- $<TARGET_FILE:havne-cli> vin "1fa fake10m0000001")
+        # A typed trouble code's title (ADR-0044), spaces and lower case taken
+        app_cli_golden(ADtcIsNamed dtc.jsonl
+            -- $<TARGET_FILE:havne-cli> dtc "p0 301")
+        # --until-scanned (ADR-0020) on a session with no did= range: it
+        # ends before it starts, its reason saying why
+        app_cli_golden(NothingToScanEndsAtOnce nothing-to-scan.jsonl
+            -- $<TARGET_FILE:havne-cli> stream mock://golden --until-scanned)
         app_cli_golden(BadUriIsRefused bad-uri.jsonl --exit 3
             -- $<TARGET_FILE:havne-cli> stream "mock://golden?speed=2")
         app_cli_golden(UnknownProfileIsRefused unknown-profile.jsonl --exit 3
             -- $<TARGET_FILE:havne-cli> stream "mock://golden?profile=nonesuch")
+        # The simulated ECU's URI is checked before any bus, on every
+        # platform (ADR-0046)
+        app_cli_golden(SimRefusesABadUri sim-bad-uri.jsonl --exit 3
+            -- $<TARGET_FILE:havne-cli> sim "mock://sim?faults=silent:0" --on vcan0)
+        app_cli_golden(SimRefusesARelativeRecording sim-relative-recording.jsonl
+            --exit 3
+            -- $<TARGET_FILE:havne-cli> sim "replay://recordings/run?loop=1" --on vcan0)
         # A replay cut short under it stops early, and the stream ends
         # with it instead of waiting for a last frame that never comes
         add_test(NAME CliReplayTest.ACutRecordingEndsTheStream
@@ -241,6 +270,17 @@ if(TARGET havne-cli)
     app_cli_usage(AnUnknownOptionIsUsage "stream|mock://x|--fast")
     app_cli_usage(ACountOfZeroIsUsage "stream|mock://x|--count|0")
     app_cli_usage(TwoUrisIsUsage "stream|mock://a|mock://b")
+    app_cli_usage(UntilScannedWithoutAUriIsUsage "stream|--until-scanned")
+    app_cli_usage(VinWithoutOneIsUsage "vin")
+    app_cli_usage(NotAVinIsUsage "vin|FAKEJ2534VIN00001")
+    app_cli_usage(TwoVinsIsUsage "vin|1FAFAKE10M0000001|1FAFAKE10M0000001")
+    app_cli_usage(DtcWithoutOneIsUsage "dtc")
+    app_cli_usage(NotADtcIsUsage "dtc|P5301")
+    app_cli_usage(TwoDtcsIsUsage "dtc|P0301|P0420")
+    app_cli_usage(SimWithoutAnInterfaceIsUsage "sim|mock://sim")
+    app_cli_usage(SimWithoutAUriIsUsage "sim|--on|vcan0")
+    app_cli_usage(SimSecondsOfZeroIsUsage "sim|mock://sim|--on|vcan0|--seconds|0")
+    app_cli_usage(TwoSimUrisIsUsage "sim|mock://a|mock://b|--on|vcan0")
     # A stop from outside (ADR-0031 section 6): SIGINT and SIGTERM on POSIX;
     # on Windows Ctrl+Break to a child in a process group of its own
     # (Ctrl+C can't be sent to one), skipped where there's no console
@@ -301,7 +341,7 @@ endif()
 # --- Bridge tests: only when the full app (and Qt) is available ---
 if(NOT HAVNE_BUILD_CORE_ONLY)
 
-    find_package(Qt6 6.12 COMPONENTS Core REQUIRED)   # app/CMakeLists.txt's minimum
+    find_package(Qt6 6.12 COMPONENTS Core Network REQUIRED)   # app/CMakeLists.txt's minimum
 
     add_executable(test_bridge
         test_bridge.cpp
@@ -310,6 +350,8 @@ if(NOT HAVNE_BUILD_CORE_ONLY)
         ../app/blepicker.cpp
         ../app/btconnect.cpp
         ../app/carryover.cpp
+        ../app/adapterrelay.cpp
+        fake_bt_socket.h
     )
 
     set_target_properties(test_bridge PROPERTIES AUTOMOC ON)
@@ -331,6 +373,7 @@ if(NOT HAVNE_BUILD_CORE_ONLY)
     target_link_libraries(test_bridge PRIVATE
         ecuio-core
         Qt6::Core
+        Qt6::Network
         GTest::gtest
     )
 

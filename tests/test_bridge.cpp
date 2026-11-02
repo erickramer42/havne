@@ -1,4 +1,4 @@
-// File/layer: tests/test_bridge.cpp | GTest + QtCore, app-layer tests
+// File/layer: tests/test_bridge.cpp | GTest + QtCore/Network, app-layer tests
 // Testing: UNIT/HARNESS: the bridge and its models against the real mock
 //          worker (and, on Windows, the fake J2534 DLL): marshaling,
 //          coalescing, backpressure, the frame log's ring and order, the
@@ -6,6 +6,10 @@
 //          log's lines, connect and disconnect threads, both decode
 //          paths over the vehicle fixture, recording, the stream
 //          preparer's refusal (ADR-0028), the BLE service picker
+//          and the inspection line (ADR-0045,
+//          BridgeTest.InspectionEntryIsWhatThePageShows), and the adapter
+//          relay over loopback TCP with a fake adapter (ADR-0047,
+//          BridgeTest.Relay*)
 
 #include <gtest/gtest.h>
 
@@ -14,6 +18,7 @@
 #include <QDir>
 #include <QDirIterator>
 #include <QElapsedTimer>
+#include <QHostAddress>
 #include <QEventLoop>
 #include <QFile>
 #include <QFileInfo>
@@ -21,9 +26,11 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QPointer>
 #include <QRegularExpression>
 #include <QSet>
 #include <QSettings>
+#include <QTcpSocket>
 #include <QStringList>
 #include <QTemporaryDir>
 #include <QTimer>
@@ -42,9 +49,12 @@
 #include <map>
 #include <vector>
 
+#include "adapterrelay.h"
 #include "blepicker.h"
 #include "btconnect.h"
+#include "btretire.h"
 #include "carryover.h"
+#include "fake_bt_socket.h"
 #include "sessionbridge.h"   // SessionBridge + FrameListModel
 #include <ecuio/profile.h>
 #include <ecuio/signals.h>
@@ -458,6 +468,298 @@ TEST(BridgeTest, BtConnectIgnoresResultsWithNoConnectRunning)
     EXPECT_EQ(r.lost(), BtAction::None);
     EXPECT_EQ(r.close(), BtAction::None);
     EXPECT_FALSE(r.up());
+}
+
+namespace {
+
+using BtState = FakeBtSocket::SocketState;
+
+/* Runs the deletions deleteLater posted, and for ms the timers too */
+void runDeletions(int ms = 0)
+{
+    QElapsedTimer t;
+    t.start();
+    do {
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 10);
+        QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+    } while (t.elapsed() < ms);
+}
+
+} // namespace
+
+// An abort that leaves the socket unconnected (mid-connect, or on a
+// platform whose abort is immediate): it goes at once
+TEST(BridgeTest, BtRetireDeletesAnUnconnectedSocketAtOnce)
+{
+    QPointer<FakeBtSocket> s = new FakeBtSocket(BtState::UnconnectedState);
+    retireBtSocket(s.data());
+    runDeletions();
+    EXPECT_TRUE(s.isNull());
+}
+
+// Android's abort on an open link: the socket is still being written
+// into by Qt's reader thread until it says unconnected. It outlives the
+// link that owned it and every other state, then goes.
+TEST(BridgeTest, BtRetireKeepsASocketUntilItSaysUnconnected)
+{
+    auto* link = new QObject;
+    QPointer<FakeBtSocket> s = new FakeBtSocket(BtState::ConnectedState, link);
+    retireBtSocket(s.data(), 60000);
+    delete link;
+    runDeletions();
+    ASSERT_FALSE(s.isNull()) << "deleted with the link, or at once";
+    EXPECT_EQ(s->parent(), nullptr);
+    s->setState(BtState::ClosingState);
+    runDeletions();
+    ASSERT_FALSE(s.isNull()) << "deleted before it said unconnected";
+    s->setState(BtState::UnconnectedState);
+    runDeletions();
+    EXPECT_TRUE(s.isNull());
+}
+
+// A reader that never stops: the fallback ends it
+TEST(BridgeTest, BtRetireFallsBackWhenItNeverSaysUnconnected)
+{
+    QPointer<FakeBtSocket> s = new FakeBtSocket(BtState::ConnectedState);
+    retireBtSocket(s.data(), 50);
+    runDeletions();
+    ASSERT_FALSE(s.isNull());
+    runDeletions(500);
+    EXPECT_TRUE(s.isNull());
+}
+
+// ---- The adapter relay (ADR-0047): a fake adapter, real loopback TCP ----
+namespace {
+
+// What the relay did to its adapter, kept past the adapter, which the
+// relay owns and deletes at stop
+struct RelayFakeState {
+    int opens = 0;
+    int closes = 0;
+    QByteArray written;
+    RelayAdapter* live = nullptr; // the adapter, while it exists
+};
+
+class FakeRelayAdapter : public RelayAdapter
+{
+public:
+    explicit FakeRelayAdapter(std::shared_ptr<RelayFakeState> s)
+        : m_s(std::move(s))
+    {
+        m_s->live = this;
+    }
+    ~FakeRelayAdapter() override { m_s->live = nullptr; }
+    void open() override { ++m_s->opens; }
+    void write(const QByteArray& bytes) override { m_s->written += bytes; }
+    void close() override { ++m_s->closes; }
+
+private:
+    std::shared_ptr<RelayFakeState> m_s;
+};
+
+// A relay whose factory makes fake adapters, listening on a port the
+// system picks
+struct RelayFixture {
+    std::shared_ptr<RelayFakeState> s = std::make_shared<RelayFakeState>();
+    QString address;
+    AdapterRelay relay;
+
+    RelayFixture()
+    {
+        relay.setFactory([this](const QString& a) {
+            address = a;
+            return std::unique_ptr<RelayAdapter>(new FakeRelayAdapter(s));
+        });
+    }
+    QString start() { return relay.start("elm327://bt:00:11:22:33:44:55", 0); }
+    void adapterOpens() { s->live->opened(); }
+    void adapterSays(const QByteArray& b) { s->live->received(b); }
+    void adapterFails(const QString& why) { s->live->failed(why); }
+};
+
+// A computer: a socket to the relay's port, connected once the relay
+// has taken it
+std::unique_ptr<QTcpSocket> computerOn(AdapterRelay& relay)
+{
+    auto c = std::make_unique<QTcpSocket>();
+    c->connectToHost(QHostAddress::LocalHost,
+                     static_cast<quint16>(relay.port()));
+    EXPECT_TRUE(c->waitForConnected(3000)) << c->errorString().toStdString();
+    return c;
+}
+
+QByteArray readFor(QTcpSocket& c, int want, int timeout_ms = 3000)
+{
+    QByteArray got;
+    spinUntil(
+        [&] {
+            got += c.readAll();
+            return got.size() >= want;
+        },
+        timeout_ms, 10);
+    return got;
+}
+
+bool closedFromTheFarSide(QTcpSocket& c, int timeout_ms = 3000)
+{
+    return spinUntil(
+        [&] { return c.state() == QAbstractSocket::UnconnectedState; },
+        timeout_ms, 10);
+}
+
+} // namespace
+
+// The computer's bytes reach the adapter and the adapter's the computer,
+// in order, counted; the address is the URI's, its query left out
+TEST(BridgeTest, RelayPassesBytesBothWaysInOrder)
+{
+    RelayFixture f;
+    ASSERT_EQ(f.start(), QString());
+    EXPECT_TRUE(f.relay.running());
+    EXPECT_GT(f.relay.port(), 0);
+    EXPECT_EQ(f.address, QStringLiteral("00:11:22:33:44:55"));
+    EXPECT_EQ(f.s->opens, 1) << "the adapter opens at start";
+    f.adapterOpens();
+    auto c = computerOn(f.relay);
+    ASSERT_TRUE(spinUntil([&] { return f.relay.computerConnected(); }, 3000, 10));
+    c->write("ATZ\r");
+    c->write("ATE0\r");
+    ASSERT_TRUE(spinUntil([&] { return f.s->written.size() >= 9; }, 3000, 10));
+    EXPECT_EQ(f.s->written, QByteArray("ATZ\rATE0\r"));
+    f.adapterSays("ELM327 v1.5\r\r>");
+    f.adapterSays("OK\r\r>");
+    EXPECT_EQ(readFor(*c, 19),QByteArray("ELM327 v1.5\r\r>OK\r\r>"));
+    EXPECT_EQ(f.relay.bytesOut(), 9);
+    EXPECT_EQ(f.relay.bytesIn(), 19);
+}
+
+// A computer that connects before the adapter is open: its bytes wait for
+// the open and then go in order; a computer sending past what a setup
+// would is disconnected
+TEST(BridgeTest, RelayHoldsAComputersBytesUntilTheAdapterOpens)
+{
+    RelayFixture f;
+    ASSERT_EQ(f.start(), QString());
+    auto c = computerOn(f.relay);
+    ASSERT_TRUE(spinUntil([&] { return f.relay.computerConnected(); }, 3000, 10));
+    c->write("ATZ\r");
+    spinLoop(100);
+    EXPECT_TRUE(f.s->written.isEmpty()) << "nothing before the open";
+    EXPECT_EQ(f.s->opens, 1) << "an open under way isn't asked again";
+    f.adapterOpens();
+    EXPECT_EQ(f.s->written, QByteArray("ATZ\r"));
+    c->write("ATI\r");
+    ASSERT_TRUE(spinUntil([&] { return f.s->written.size() >= 8; }, 3000, 10));
+    EXPECT_EQ(f.s->written, QByteArray("ATZ\rATI\r"));
+
+    RelayFixture g;
+    ASSERT_EQ(g.start(), QString());
+    auto d = computerOn(g.relay);
+    ASSERT_TRUE(spinUntil([&] { return g.relay.computerConnected(); }, 3000, 10));
+    d->write(QByteArray(AdapterRelay::kHeldMax + 1, 'A'));
+    EXPECT_TRUE(closedFromTheFarSide(*d));
+    EXPECT_FALSE(g.relay.computerConnected());
+    EXPECT_TRUE(g.s->written.isEmpty());
+}
+
+// One computer at a time: a second is closed and the first carries on
+TEST(BridgeTest, RelayRefusesASecondComputer)
+{
+    RelayFixture f;
+    ASSERT_EQ(f.start(), QString());
+    f.adapterOpens();
+    auto first = computerOn(f.relay);
+    ASSERT_TRUE(spinUntil([&] { return f.relay.computerConnected(); }, 3000, 10));
+    auto second = computerOn(f.relay);
+    EXPECT_TRUE(closedFromTheFarSide(*second));
+    first->write("ATZ\r");
+    ASSERT_TRUE(spinUntil([&] { return f.s->written.size() >= 4; }, 3000, 10));
+    EXPECT_EQ(f.s->written, QByteArray("ATZ\r"));
+    EXPECT_EQ(first->state(), QAbstractSocket::ConnectedState);
+}
+
+// The adapter's link dropping ends the computer's, so its core sees the
+// port fail and connects again; that computer opens the adapter again
+TEST(BridgeTest, RelayEndsTheComputersLinkWithTheAdapters)
+{
+    RelayFixture f;
+    ASSERT_EQ(f.start(), QString());
+    f.adapterOpens();
+    auto c = computerOn(f.relay);
+    ASSERT_TRUE(spinUntil([&] { return f.relay.computerConnected(); }, 3000, 10));
+    f.adapterFails(QStringLiteral("the adapter disconnected"));
+    EXPECT_TRUE(closedFromTheFarSide(*c));
+    EXPECT_TRUE(f.relay.status().contains(QStringLiteral("the adapter disconnected")))
+        << f.relay.status().toStdString();
+    EXPECT_TRUE(f.relay.running()) << "still listening";
+    auto again = computerOn(f.relay);
+    ASSERT_TRUE(spinUntil([&] { return f.relay.computerConnected(); }, 3000, 10));
+    EXPECT_EQ(f.s->opens, 2) << "the next computer opens the adapter";
+}
+
+// A computer leaving keeps the adapter's link for the next one
+TEST(BridgeTest, RelayKeepsTheAdapterWhenTheComputerLeaves)
+{
+    RelayFixture f;
+    ASSERT_EQ(f.start(), QString());
+    f.adapterOpens();
+    {
+        auto c = computerOn(f.relay);
+        ASSERT_TRUE(spinUntil([&] { return f.relay.computerConnected(); }, 3000, 10));
+        c->disconnectFromHost();
+        ASSERT_TRUE(spinUntil([&] { return !f.relay.computerConnected(); }, 3000, 10));
+    }
+    EXPECT_EQ(f.s->closes, 0);
+    EXPECT_TRUE(f.relay.status().contains(QStringLiteral("waiting for a computer")))
+        << f.relay.status().toStdString();
+    f.adapterSays("stray\r"); // nobody to take it
+    auto next = computerOn(f.relay);
+    ASSERT_TRUE(spinUntil([&] { return f.relay.computerConnected(); }, 3000, 10));
+    EXPECT_EQ(f.s->opens, 1) << "not opened again";
+    next->write("ATZ\r");
+    ASSERT_TRUE(spinUntil([&] { return f.s->written.size() >= 4; }, 3000, 10));
+    f.adapterSays(">");
+    EXPECT_EQ(readFor(*next, 1), QByteArray(">")) << "no stray bytes first";
+}
+
+// Stop ends the computer's link, the listening and the adapter's link
+TEST(BridgeTest, RelayStopEndsEverything)
+{
+    RelayFixture f;
+    ASSERT_EQ(f.start(), QString());
+    f.adapterOpens();
+    const int port = f.relay.port();
+    auto c = computerOn(f.relay);
+    ASSERT_TRUE(spinUntil([&] { return f.relay.computerConnected(); }, 3000, 10));
+    f.relay.stop();
+    EXPECT_FALSE(f.relay.running());
+    EXPECT_EQ(f.relay.port(), 0);
+    EXPECT_EQ(f.s->closes, 1);
+    EXPECT_EQ(f.s->live, nullptr) << "the adapter goes with the relay";
+    EXPECT_TRUE(closedFromTheFarSide(*c));
+    QTcpSocket late;
+    late.connectToHost(QHostAddress::LocalHost, static_cast<quint16>(port));
+    EXPECT_FALSE(late.waitForConnected(500)) << "nothing listens";
+}
+
+// What it relays: a paired classic adapter's URI, in a build that can
+TEST(BridgeTest, RelayRefusesWhatItCantRelay)
+{
+    AdapterRelay none;
+    EXPECT_FALSE(none.available());
+    EXPECT_FALSE(none.start("elm327://bt:00:11:22:33:44:55", 0).isEmpty());
+    EXPECT_FALSE(none.running());
+
+    RelayFixture f;
+    for (const char* uri : {"elm327://ble:00:11:22:33:44:55", "elm327://COM5",
+                            "elm327://bt:", "mock://demo",
+                            "elm327://192.168.0.10:35000"}) {
+        EXPECT_FALSE(f.relay.start(uri, 0).isEmpty()) << uri;
+        EXPECT_FALSE(f.relay.running()) << uri;
+    }
+    EXPECT_EQ(f.s->opens, 0);
+    ASSERT_EQ(f.start(), QString());
+    EXPECT_FALSE(f.start().isEmpty()) << "one relay at a time";
 }
 
 TEST(BridgeTest, FramesMarshalFromWorkerToGuiThread)
@@ -2515,6 +2817,9 @@ TEST(BridgeTest, AConnectsVinReachesQmlOnlyAsASaltedHash)
     int identified = 0;
     QObject::connect(&bridge, &SessionBridge::vehicleIdentified,
                      [&identified]() { ++identified; });
+    QStringList log;
+    QObject::connect(&bridge, &SessionBridge::logMessage,
+                     [&log](const QString& line) { log << line; });
     EXPECT_TRUE(bridge.vinKey(QStringLiteral("salt")).isEmpty())
         << "no session, no key";
     const QString uri = QStringLiteral("j2534://%1")
@@ -2531,8 +2836,45 @@ TEST(BridgeTest, AConnectsVinReachesQmlOnlyAsASaltedHash)
         << "the salt is in the key";
     spinLoop(300);
     EXPECT_EQ(identified, 1) << "once a session";
+    // ADR-0043: its decode is logged once too; the fake's has an I
+    EXPECT_EQ(log.filter(QRegularExpression(QStringLiteral("^VIN: "))),
+              QStringList{QStringLiteral(
+                  "VIN: not a VIN: 49 CFR 565 takes 17 digits and capital "
+                  "letters, never I, O or Q")});
     ASSERT_TRUE(disconnectAndWait(bridge));
     EXPECT_TRUE(bridge.vinKey(QStringLiteral("salt")).isEmpty());
+}
+
+/* ADR-0043: the "VIN:" line and Settings' lookup, one summary. The VINs
+ * are made up around FAKE, their check digits by 49 CFR 565.15 */
+TEST(BridgeTest, AVinSummarySaysItsYearMakeAndCheckDigit)
+{
+    EXPECT_EQ(
+        SessionBridge::vinSummary(QStringLiteral("1FAFAKE10M0000001"), 2027),
+        QStringLiteral("model year 2021; Ford (manufacturer code 1FA); "
+                       "check digit matches"));
+    EXPECT_EQ(
+        SessionBridge::vinSummary(QStringLiteral("1FAFAKE13Y0000001"), 2027),
+        QStringLiteral("model year 2000 (not 2030, which is still ahead); "
+                       "Ford (manufacturer code 1FA); check digit matches"));
+    EXPECT_EQ(
+        SessionBridge::vinSummary(QStringLiteral("ZZZFAKE10U0000001"), 2027),
+        QStringLiteral("no model year (position 10 is U); manufacturer "
+                       "code ZZZ isn't in NHTSA's list; check digit 0 "
+                       "isn't the 1 it works out to (North America "
+                       "requires it; other markets may not)"));
+    EXPECT_EQ(SessionBridge::vinSummary(
+                  QStringLiteral("1FAFAKE10M000000") + QChar(0xC9), 2027)
+                  .left(10),
+              QStringLiteral("not a VIN:"));
+    SessionBridge bridge;
+    EXPECT_EQ(
+        bridge.describeVin(QStringLiteral(" 1fa fake10m 0000001 ")).left(14),
+        QStringLiteral("model year 202"))
+        << "spaces dropped, upper-cased";
+    EXPECT_TRUE(bridge.describeVin(QStringLiteral("  ")).isEmpty());
+    EXPECT_TRUE(
+        bridge.vinSource().startsWith(QStringLiteral("vPICList_lite_")));
 }
 
 /* ADR-0027 section 2: an adapter session's recording folder names the picked
@@ -3783,6 +4125,16 @@ TEST(BridgeTest, DiagnosticsEntryIsWhatThePageShows)
         EXPECT_EQ(list.value("key").toString(), keys.at(l));
         EXPECT_EQ(list.value("outcome").toString(), QStringLiteral("answered"));
         EXPECT_EQ(list.value("codes").toStringList(), codes.at(l));
+        // Each code's title beside it, "" with none (ADR-0044)
+        const QStringList listed = list.value("titles").toStringList();
+        ASSERT_EQ(listed.size(), codes.at(l).size());
+        for (int i = 0; i < listed.size(); ++i) {
+            uint16_t raw = 0;
+            ASSERT_EQ(
+                ecuio_dtc_parse(codes.at(l).at(i).toLatin1().constData(), &raw),
+                ECUIO_OK);
+            EXPECT_EQ(listed.at(i), QString::fromLatin1(ecuio_dtc_title(raw)));
+        }
         EXPECT_EQ(list.value("more").toInt(), 0);
     }
 
@@ -3899,6 +4251,9 @@ TEST(BridgeTest, DiagnosticsFollowTheSession)
             .toString();
     };
     EXPECT_EQ(speedUnit(), QStringLiteral("km/h"));
+    // the mock's light is on: the car's verdict (ADR-0045)
+    EXPECT_EQ(bridge.inspection().value("verdict").toString(),
+              QStringLiteral("mil_on"));
     bridge.setUnitSystem(ECUIO_UNITS_IMPERIAL);
     EXPECT_EQ(speedUnit(), QStringLiteral("mph"));
     bridge.setUnitSystem(ECUIO_UNITS_METRIC);
@@ -3919,6 +4274,8 @@ TEST(BridgeTest, DiagnosticsFollowTheSession)
     ASSERT_TRUE(
         spinUntil([&]() { return !bridge.diagnostics().isEmpty(); }, 2000));
     EXPECT_FALSE(bridge.diagnostics().at(0).toMap().value("asked").toBool());
+    EXPECT_TRUE(bridge.inspection().value("verdict").toString().isEmpty())
+        << "nothing read, nothing judged";
     ASSERT_TRUE(disconnectAndWait(bridge));
 }
 
@@ -5472,4 +5829,94 @@ TEST(BridgeTest, SessionInfoTextDescribesAReplay)
               "Session: replay of a recording, 7194 frames over 275.2 s at "
               "full speed; "
               "profile obd2");
+}
+
+/* ADR-0044: Diagnostics' lookup of a typed code: spaces and lower case
+ * taken, a title, a code with none, not a code */
+namespace {
+
+// A read report whose PID 01 answered, the first `incomplete` of the
+// monitors incomplete
+ecuio_channel_diagnostics_t readinessReport(std::initializer_list<uint8_t> ids,
+                                            uint32_t incomplete,
+                                            bool mil = false)
+{
+    ecuio_channel_diagnostics_t d{};
+    d.flags = ECUIO_DIAG_ASKED | ECUIO_DIAG_COMPLETE | ECUIO_DIAG_READINESS |
+              (mil ? ECUIO_DIAG_MIL_ON : 0u);
+    d.readiness = ECUIO_DIAG_ANSWERED;
+    for (uint8_t id : ids) {
+        d.monitors[d.monitor_count].id = id;
+        d.monitors[d.monitor_count].flags =
+            d.monitor_count < incomplete ? 0 : ECUIO_MONITOR_COMPLETE;
+        ++d.monitor_count;
+    }
+    return d;
+}
+
+} // namespace
+
+/* The inspection line as Diagnostics shows it (ADR-0045): each verdict's
+ * word, as havne-cli writes it, and its sentence */
+TEST(BridgeTest, InspectionEntryIsWhatThePageShows)
+{
+    const auto entry = [](const ecuio_channel_diagnostics_t& d, uint32_t year) {
+        return SessionBridge::inspectionEntry(&d, 1, year);
+    };
+    QVariantMap m = entry(readinessReport({8, 10, 13}, 0), 2015);
+    EXPECT_EQ(m.value("verdict").toString(), QStringLiteral("ready"));
+    EXPECT_EQ(m.value("text").toString(),
+              QStringLiteral("Ready for an emissions inspection: every monitor "
+                             "complete, the check-engine light off."));
+    EXPECT_TRUE(
+        m.value("rule").toString().contains(QStringLiteral("40 CFR 85.2222")));
+    m = entry(readinessReport({10, 8, 13}, 1), 2015);
+    EXPECT_EQ(m.value("text").toString(),
+              QStringLiteral("Ready for an emissions inspection: 1 monitor "
+                             "incomplete (EVAP), which a model year 2015 car "
+                             "may have."));
+    m = entry(readinessReport({8, 10, 13}, 2), 2015);
+    EXPECT_EQ(m.value("verdict").toString(), QStringLiteral("not_ready"));
+    EXPECT_EQ(
+        m.value("text").toString(),
+        QStringLiteral("Not ready for an emissions inspection: 2 monitors "
+                       "incomplete (catalyst, EVAP), and a model year "
+                       "2015 car may have 1 at most. A station would "
+                       "send it away to be driven until they complete."));
+    EXPECT_EQ(entry(readinessReport({8, 10, 13}, 2), 1999)
+                  .value("verdict")
+                  .toString(),
+              QStringLiteral("ready"));
+    m = entry(readinessReport({8, 10, 13}, 2), 0);
+    EXPECT_EQ(m.value("verdict").toString(), QStringLiteral("year_needed"));
+    EXPECT_EQ(
+        m.value("text").toString(),
+        QStringLiteral("2 monitors incomplete (catalyst, EVAP): ready for "
+                       "an emissions inspection if the car is model year "
+                       "1996-2000, not if it's 2001 or newer, and no VIN "
+                       "gave its year."));
+    EXPECT_EQ(
+        entry(readinessReport({8}, 0, true), 2015).value("verdict").toString(),
+        QStringLiteral("mil_on"));
+    EXPECT_EQ(entry(readinessReport({8}, 0), 1995).value("verdict").toString(),
+              QStringLiteral("not_covered"));
+    ecuio_channel_diagnostics_t reading = readinessReport({8}, 0);
+    reading.flags &= ~ECUIO_DIAG_COMPLETE;
+    EXPECT_TRUE(entry(reading, 2015).value("verdict").toString().isEmpty());
+    EXPECT_TRUE(SessionBridge::inspectionEntry(nullptr, 0, 2015)
+                    .value("text")
+                    .toString()
+                    .isEmpty());
+}
+
+TEST(BridgeTest, ATypedCodeIsDescribed)
+{
+    SessionBridge bridge;
+    EXPECT_EQ(bridge.describeDtc(QStringLiteral(" p0 301 ")),
+              QStringLiteral("P0301: Cylinder 1 Misfire Detected"));
+    EXPECT_TRUE(bridge.describeDtc(QStringLiteral("C0035"))
+                    .startsWith(QStringLiteral("C0035: no title here")));
+    EXPECT_TRUE(bridge.describeDtc(QStringLiteral("P0301X"))
+                    .startsWith(QStringLiteral("not a trouble code")));
+    EXPECT_TRUE(bridge.describeDtc(QStringLiteral("   ")).isEmpty());
 }

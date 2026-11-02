@@ -1,16 +1,22 @@
 // File/layer: cli/diagnostics_line.h | havne-cli, an ECU's diagnostics as a line (ADR-0037)
 // Testing: UNIT (tests/test_cli.cpp, CliDiagnosticsTest: every outcome, a
 //          cut list, the freeze frame's values, this drive cycle's
-//          monitors); the mock's line in the golden run
-//          (tests/golden/cli/mock.jsonl)
+//          monitors, each code's title); the mock's line in the golden run
+//          (tests/golden/cli/mock.jsonl); the dtc line (CliDtcTest,
+//          ADR-0044); the inspection line (CliInspectionTest, ADR-0045)
 //
 // One ECU's report once a read has completed: readiness (the MIL, the
 // confirmed-code count and each monitor by name, with this drive cycle's
 // state once PID 41 has answered), PID 41's own outcome, the three code
 // lists,
-// each code as it's written ("P0301"), and the freeze frame's values by
+// each code as it's written ("P0301") with its title beside it in
+// "titles" (ADR-0044; null where the list has none), and the freeze
+// frame's code, its title and its values by
 // the obd2 def that decoded them, in its unit, as decoded. An item that
 // was refused carries the negative reply in frames.csv's form.
+//
+// Once every ECU's read has completed, the inspection line judges the
+// car's readiness by the federal rule (ADR-0045).
 
 #ifndef HAVNE_CLI_DIAGNOSTICS_LINE_H
 #define HAVNE_CLI_DIAGNOSTICS_LINE_H
@@ -53,6 +59,98 @@ inline void diagnostics_outcome(Line& l, uint8_t outcome, uint8_t service,
         l.key("reply");
         l.hex_bytes(reply, sizeof reply);
     }
+}
+
+// A code's title (ecuio_dtc_title), or null when the list has none
+inline void dtc_title(Line& l, uint16_t code)
+{
+    const char* title = ecuio_dtc_title(code);
+    if (*title == '\0') {
+        l.raw("null");
+    } else {
+        l.string(title, SIZE_MAX);
+    }
+}
+
+// A typed code's line (`havne-cli dtc`): the code as written, its
+// title or null, and where the titles come from
+inline void dtc_line(Line& l, uint16_t code)
+{
+    char text[8] = {};
+    (void)ecuio_dtc_format(code, text, sizeof text);
+    l.raw("{\"type\":\"dtc\"");
+    l.key("code");
+    l.string(text, sizeof text);
+    l.key("title");
+    dtc_title(l, code);
+    l.key("source");
+    l.string(ecuio_dtc_title_source(), SIZE_MAX);
+    l.ch('}');
+}
+
+// A verdict's word: "ready", "not_ready", "mil_on", "year_needed",
+// "not_covered", "reading" or "unknown"
+inline const char* inspection_word(uint8_t verdict)
+{
+    switch (verdict) {
+    case ECUIO_INSPECTION_READY:
+        return "ready";
+    case ECUIO_INSPECTION_NOT_READY:
+        return "not_ready";
+    case ECUIO_INSPECTION_MIL_ON:
+        return "mil_on";
+    case ECUIO_INSPECTION_YEAR_NEEDED:
+        return "year_needed";
+    case ECUIO_INSPECTION_NOT_COVERED:
+        return "not_covered";
+    case ECUIO_INSPECTION_READING:
+        return "reading";
+    default:
+        return "unknown";
+    }
+}
+
+// The car's readiness against the federal rule (ADR-0045), every ECU's
+// report judged together: the verdict, the model year it was judged for
+// (null with none), the incomplete monitors by name, how many the rule
+// allows that year (null with no year), the reports counted and the rule
+inline void inspection_line(Line& l, const ecuio_inspection_t& i,
+                            uint32_t model_year)
+{
+    l.raw("{\"type\":\"inspection\"");
+    l.key("verdict");
+    l.string(inspection_word(i.verdict), SIZE_MAX);
+    l.key("model_year");
+    if (model_year == 0) {
+        l.raw("null");
+    } else {
+        l.u64(model_year);
+    }
+    l.key("incomplete");
+    l.ch('[');
+    bool first = true;
+    for (uint8_t id = 0; id < 16; ++id) {
+        if (((i.incomplete_ids >> id) & 1u) == 0) {
+            continue;
+        }
+        if (!first) {
+            l.ch(',');
+        }
+        first = false;
+        l.string(ecuio_monitor_name(id, i.diag_flags), SIZE_MAX);
+    }
+    l.ch(']');
+    l.key("allowed");
+    if (model_year == 0) {
+        l.raw("null");
+    } else {
+        l.u64(i.allowed);
+    }
+    l.key("reports");
+    l.u64(i.reports);
+    l.key("rule");
+    l.string("40 CFR 85.2222", SIZE_MAX);
+    l.ch('}');
 }
 
 // The whole line, without its newline; l.finish() adds it
@@ -137,6 +235,16 @@ inline void diagnostics_line(Line& l, const ecuio_channel_diagnostics_t& d)
                 l.string(code, sizeof code);
             }
             l.ch(']');
+            // Each code's title beside it (ADR-0044), null with none
+            l.key("titles");
+            l.ch('[');
+            for (uint32_t i = 0; i < held; ++i) {
+                if (i) {
+                    l.ch(',');
+                }
+                dtc_title(l, list.codes[i]);
+            }
+            l.ch(']');
         }
         l.ch('}');
     }
@@ -150,6 +258,8 @@ inline void diagnostics_line(Line& l, const ecuio_channel_diagnostics_t& d)
             char code[8] = {};
             (void)ecuio_dtc_format(d.freeze_dtc, code, sizeof code);
             l.string(code, sizeof code);
+            l.key("title");
+            dtc_title(l, d.freeze_dtc);
         } else {
             l.raw("null");
         }

@@ -144,7 +144,8 @@ jobs:
             -DECUIO_BUILD_FUZZERS=ON \
             -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++
           cmake --build build-fuzz --target fuzz_decode_signal fuzz_validate_set fuzz_uds_query \
-            fuzz_elm327_reply fuzz_replay_file fuzz_socketcan_wire fuzz_diagnostics fuzz_isotp
+            fuzz_elm327_reply fuzz_replay_file fuzz_socketcan_wire fuzz_diagnostics fuzz_isotp \
+            fuzz_vin fuzz_dtc fuzz_sim
 
       - name: fuzz_decode_signal (60 s)
         run: |
@@ -194,6 +195,24 @@ jobs:
           ./build-fuzz/fuzz/fuzz_isotp -max_total_time=60 -timeout=25 \
             -rss_limit_mb=2560 -artifact_prefix=artifacts/ -print_final_stats=1
 
+      - name: fuzz_vin (60 s)
+        run: |
+          mkdir -p artifacts
+          ./build-fuzz/fuzz/fuzz_vin -max_total_time=60 -timeout=25 \
+            -rss_limit_mb=2560 -artifact_prefix=artifacts/ -print_final_stats=1
+
+      - name: fuzz_dtc (60 s)
+        run: |
+          mkdir -p artifacts
+          ./build-fuzz/fuzz/fuzz_dtc -max_total_time=60 -timeout=25 \
+            -rss_limit_mb=2560 -artifact_prefix=artifacts/ -print_final_stats=1
+
+      - name: fuzz_sim (60 s)
+        run: |
+          mkdir -p artifacts
+          ./build-fuzz/fuzz/fuzz_sim -max_total_time=60 -timeout=25 \
+            -rss_limit_mb=2560 -artifact_prefix=artifacts/ -print_final_stats=1
+
       - name: Upload fuzz artifacts
         if: failure()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -202,25 +221,37 @@ jobs:
           path: artifacts/
           if-no-files-found: ignore
 
-  # clang-tidy over core/, surrogate/ and cli/ with .clang-tidy's checks (the
-  # static analyzer and the bug-finding families); any warning fails it.
-  # Windows, because the J2534 layer and the surrogate compile only
-  # there, and a Ninja tree from a Developer shell, because the Visual
-  # Studio generator writes no compile database. Nothing is built.
-  # clang-tidy is the hash-pinned wheel in
+  # clang-tidy over core/, surrogate/, cli/ and app/ with .clang-tidy's
+  # checks (the static analyzer and the bug-finding families); any warning
+  # fails it. Windows, because the J2534 layer and the surrogate compile
+  # only there, and a Ninja tree from a Developer shell, because the
+  # Visual Studio generator writes no compile database. The tree has Qt
+  # for app/, and only the app's moc output is built (scripts/tidy.sh
+  # --qt). clang-tidy is the hash-pinned wheel in
   # .github/clang-tidy-requirements.txt, bumped by hand.
   clang-tidy:
     if: ${{ !inputs.smoke_only }}
     runs-on: windows-latest
     needs: core-and-tests
-    timeout-minutes: 15
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Install clang-tidy
         run: python -m pip install --require-hashes -r .github/clang-tidy-requirements.txt
 
-      - name: clang-tidy (core, J2534, surrogate, CLI)
+      # The same Qt install as win-build; see the notes there.
+      - name: Install aqtinstall (pinned master commit)
+        run: python -m pip install "aqtinstall @ git+https://github.com/miurahr/aqtinstall@076e1659807d0b362a3ed684d54c2e9c775eb9c7"
+
+      - name: Install Qt 6.12.0
+        run: |
+          $prefix = "${env:GITHUB_WORKSPACE}\Qt\6.12.0\msvc2022_64"
+          New-Item -ItemType Directory -Force -Path $prefix | Out-Null
+          python -m aqt install-qt windows desktop 6.12.0 win64_msvc2022_64 --outputdir "${env:GITHUB_WORKSPACE}\Qt" --external 7z
+          "QT_PREFIX=$prefix" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: clang-tidy (core, J2534, surrogate, CLI, app)
         run: |
           $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" `
             -latest -products * -property installationPath `
@@ -228,11 +259,8 @@ jobs:
           Import-Module "$vs\Common7\Tools\Microsoft.VisualStudio.DevShell.dll"
           Enter-VsDevShell -VsInstallPath $vs -SkipAutomaticLocation `
             -DevCmdArguments '-arch=x64 -host_arch=x64'
-          cmake -B build-tidy -G Ninja -DHAVNE_BUILD_CORE_ONLY=ON `
-            -DBUILD_TESTING=OFF -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           clang-tidy --version
-          & "$env:ProgramFiles\Git\bin\bash.exe" scripts/tidy.sh build-tidy
+          & "$env:ProgramFiles\Git\bin\bash.exe" scripts/tidy.sh --qt ($env:QT_PREFIX -replace '\\', '/') build-tidy
 
   win-build:
     if: ${{ !inputs.smoke_only }}

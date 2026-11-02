@@ -21,6 +21,8 @@
 //          that fills the field, locked during a session, a mock session
 //          left alone, and (Windows, the fake) an adapter's connect
 //          keeping its URI and plotting, its VIN learned and logged;
+//          a typed VIN decoded and kept nowhere (ADR-0043,
+//          test_aTypedVinIsDecodedOnTheDevice);
 //          every item inside the page's width at a phone's (320 px); a
 //          recording that ends listed, its row filling the field with a
 //          replay that connects under the recorded profile and DIDs; the
@@ -40,7 +42,9 @@
 //          runs (Main.qml). The recording's bridge side:
 //          BridgeTest.Recording*. The Units row sets Bridge.unitSystem
 //          (tst_settings.qml); its conversions: SignalsTest.DisplayConvert*,
-//          BridgeTest.UnitSystem*.
+//          BridgeTest.UnitSystem*. The relay's line beside its button at
+//          a phone's width: tst_phone.qml; the relay itself:
+//          BridgeTest.Relay*.
 
 import QtCore
 import QtQuick
@@ -117,6 +121,15 @@ Pane {
         if (!c.listenOnly)
             return qsTr("CAN interface, not listen-only: socketcan:// refuses it until it is")
         return qsTr("CAN interface, listen-only at %1 bit/s, for socketcan://").arg(c.bitrate)
+    }
+
+    // A byte count in words: 512 B, 3.4 KB, 1.2 MB
+    function byteText(n) {
+        if (n < 1024)
+            return qsTr("%1 B").arg(n)
+        if (n < 1024 * 1024)
+            return qsTr("%1 KB").arg((n / 1024).toFixed(1))
+        return qsTr("%1 MB").arg((n / (1024 * 1024)).toFixed(1))
     }
 
     function withVersions(row) {
@@ -475,9 +488,9 @@ Pane {
         "mock": ["profile", "did", "diagnose"],
         "replay": ["profile", "did", "speed", "loop"],
         "j2534": ["baud", "flags", "filter", "txid", "poll", "probe", "identify", "diagnose",
-                  "profile", "did"],
+                  "pack", "scan", "profile", "did"],
         "elm327": ["baud", "serial", "filter", "txid", "poll", "probe", "identify", "diagnose",
-                   "profile", "did"],
+                   "pack", "scan", "profile", "did"],
         "socketcan": ["profile", "did", "baud", "filter"]
     })
 
@@ -716,7 +729,9 @@ Pane {
                     highlighted: !Bridge.connected
                     // Disconnect is always offered; Connect only while idle
                     // with a URI to connect
-                    enabled: Bridge.connected || (page.idle && uriField.text !== "")
+                    // and no relay holds the adapter (ADR-0047)
+                    enabled: Bridge.connected
+                             || (page.idle && uriField.text !== "" && !Relay.running)
                     onClicked: {
                         if (Bridge.connected) {
                             Bridge.disconnectSession()
@@ -883,6 +898,61 @@ Pane {
                                 font.pointSize: 8
                                 elide: Text.ElideMiddle
                                 Layout.fillWidth: true
+                            }
+                        }
+                    }
+                }
+
+                // ---- Relay (the phone, developer mode; ADR-0047): the
+                // selected Bluetooth adapter relayed to a computer over USB,
+                // for havne-cli there ----
+                ColumnLayout {
+                    objectName: "relayBox"
+                    visible: Relay.available && Theme.developerMode
+                    Layout.fillWidth: true
+                    spacing: Theme.spacing
+
+                    Label {
+                        objectName: "relayStatus"
+                        text: Relay.running
+                              ? Relay.status
+                              : qsTr("Relay to a computer over USB: select a paired adapter above, "
+                                     + "Relay, then on the computer adb forward tcp:%1 tcp:%1 "
+                                     + "and havne-cli on elm327://127.0.0.1:%1")
+                                    .arg(Relay.defaultPort)
+                        color: Relay.running ? Theme.text : Theme.textDim
+                        wrapMode: Text.WordWrap
+                        Layout.fillWidth: true
+                    }
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: Theme.spacing
+
+                        Label {
+                            objectName: "relayTraffic"
+                            visible: Relay.running
+                            text: qsTr("%1 from the adapter, %2 to it")
+                                  .arg(page.byteText(Relay.bytesIn))
+                                  .arg(page.byteText(Relay.bytesOut))
+                            color: Theme.textDim
+                            // Beside the button on a phone's width
+                            wrapMode: Text.WordWrap
+                            Layout.fillWidth: true
+                        }
+                        ThemedButton {
+                            objectName: "relayButton"
+                            text: Relay.running ? qsTr("Stop relaying") : qsTr("Relay")
+                            // Not beside a session: the adapter takes one link
+                            enabled: Relay.running
+                                     || (page.idle && /^elm327:\/\/bt:/i.test(uriField.text))
+                            onClicked: {
+                                if (Relay.running) {
+                                    Relay.stop()
+                                    return
+                                }
+                                const why = Relay.start(uriField.text)
+                                errorLabel.text = why
+                                errorLabel.visible = why !== ""
                             }
                         }
                     }
@@ -1075,6 +1145,39 @@ Pane {
                         text: qsTr("Cancel")
                         onClicked: page.confirming = ""
                     }
+                }
+
+                // ---- A VIN looked up (ADR-0043): decoded here, never kept ----
+                LabeledFlow {
+                    label: qsTr("Look up a VIN:")
+
+                    TextField {
+                        id: vinLookupField
+                        objectName: "vinLookupField"
+                        width: Math.min(300, parent.width)
+                        maximumLength: 32
+                        placeholderText: qsTr("17 characters")
+                        inputMethodHints: Qt.ImhPreferUppercase | Qt.ImhNoPredictiveText | Qt.ImhSensitiveData
+                    }
+                }
+
+                Label {
+                    readonly property string summary: Bridge.describeVin(vinLookupField.text)
+                    objectName: "vinLookupResult"
+                    visible: summary !== ""
+                    text: summary.charAt(0).toUpperCase() + summary.slice(1)
+                    color: Theme.text
+                    wrapMode: Text.Wrap
+                    Layout.fillWidth: true
+                }
+
+                Label {
+                    objectName: "vinLookupHint"
+                    text: qsTr("By 49 CFR 565 and NHTSA's vPIC list (%1), on this device; the VIN isn't saved. The connected car's goes in the activity log.")
+                              .arg(Bridge.vinSource())
+                    color: Theme.textDim
+                    wrapMode: Text.Wrap
+                    Layout.fillWidth: true
                 }
             }
 

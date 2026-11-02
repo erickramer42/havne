@@ -1,22 +1,32 @@
 // File/layer: cli/main.cpp | havne-cli, a command-line client over the C ABI (ADR-0031)
 // Testing: HARNESS: golden runs of the program (CliGoldenTest, against
 //          tests/golden/cli/: the replay fixture, mock:// with its
-//          diagnostics line, the refusals),
+//          diagnostics line, the refusals, --until-scanned with nothing
+//          to scan),
 //          its usage errors (CliUsageTest) and, on POSIX, SIGINT and
 //          SIGTERM (CliSignalTest), the absent line (CliReplayTest,
 //          tests/cli_absent.py); the formatting, the ring and the
 //          sleep rule UNIT (tests/test_cli.cpp); a real sleep BENCH
 //          (BENCH prep #27);
 //          the timing lines UNIT (CliTimingTest) and by hand against the fake
-//          DLL (docs/testing.md); main's catch by reading and clang-tidy
+//          DLL (docs/testing.md); the vin command in the golden run and
+//          CliUsageTest, the vin and identity lines UNIT (CliVinTest),
+//          stream's identity line by hand against the fake DLL; the dtc
+//          command in the golden run and CliUsageTest; the sim
+//          command's lines UNIT (CliSimTest), its usage errors
+//          (CliUsageTest), on vcan0 by hand (ADR-0046); main's
+//          catch by reading and clang-tidy
 //          (bugprone-exception-escape)
 //
 // Public headers only: what any program linking core can do.
 
 #include "diagnostics_line.h"
 #include "timing_line.h"
+#include "vin_line.h"
 #include "jsonl.h"
 #include "line_ring.h"
+#include "scan_line.h"
+#include "sim_line.h"
 #include "sleep_watch.h"
 
 #include "ecuio/core.h"
@@ -24,7 +34,9 @@
 #include "ecuio/profile.h"
 #include "ecuio/serial.h"
 #include "ecuio/signals.h"
+#include "ecuio/sim.h"
 #include "ecuio/socketcan.h"
+#include "ecuio/vin.h"
 
 #include <atomic>
 #include <algorithm>
@@ -34,6 +46,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <ctime>
 #include <exception>
 #include <memory>
 #include <new>
@@ -73,6 +86,8 @@ constexpr size_t kRingBytes = size_t{1} << 20;
 // values line with text values can take more, and is cut to fit
 constexpr size_t kLineBytes = 32 * 1024;
 constexpr auto kPoll = std::chrono::milliseconds(100);
+// How often sim writes its counts, when they changed
+constexpr uint64_t kSimStatsEveryUs = 10u * 1000 * 1000;
 
 // The ring's size. HAVNE_CLI_RING_BYTES (tests only) makes it small, so
 // a golden run fills it: a replay must then wait, not drop. Never below
@@ -343,18 +358,116 @@ void write_diagnostics(Output& out, const ecuio_channel_diagnostics_t& d)
     write_line(out, l);
 }
 
+// The latest model year a VIN can carry (ADR-0043): this year plus one,
+// the bridge's bound too
+uint32_t latest_model_year()
+{
+    const std::time_t now = std::time(nullptr);
+    std::tm utc{};
+#ifdef _WIN32
+    if (gmtime_s(&utc, &now) != 0) {
+        return 0;
+    }
+#else
+    if (gmtime_r(&now, &utc) == nullptr) {
+        return 0;
+    }
+#endif
+    return static_cast<uint32_t>(utc.tm_year + 1900 + 1);
+}
+
+// A line for each ECU whose identity has settled since the last call
+// (vin_line.h): generations holds each channel's last written
+void poll_identity(Output& out, ecuio_session_t* session, uint32_t channels,
+                   uint32_t* generations)
+{
+    for (uint32_t c = 0; c < channels; ++c) {
+        ecuio_channel_identity_t id;
+        if (ecuio_session_get_channel_identity(session, c, &id) == ECUIO_OK &&
+            (id.flags & ECUIO_IDENTITY_COMPLETE) &&
+            id.generation != generations[c]) {
+            generations[c] = id.generation;
+            char buf[4096];
+            cli::Line l(buf, sizeof buf);
+            cli::identity_line(l, id, latest_model_year());
+            write_line(out, l);
+        }
+    }
+}
+
+// A scan line per ECU whose DID scan moved (cli/scan_line.h), every
+// change when final; the channels' reports into reports[], for
+// --until-scanned
+void poll_scan(Output& out, ecuio_session_t* session, uint32_t channels,
+               cli::ScanSeen* seen, ecuio_channel_support_t* reports,
+               bool final = false)
+{
+    const uint64_t now = ecuio_clock_us();
+    for (uint32_t c = 0; c < channels; ++c) {
+        ecuio_channel_support_t& s = reports[c];
+        if (ecuio_session_get_channel_support(session, c, &s) != ECUIO_OK) {
+            s = ecuio_channel_support_t{};
+            continue;
+        }
+        if (cli::scan_due(s, seen[c], now, final)) {
+            char buf[512];
+            cli::Line l(buf, sizeof buf);
+            cli::scan_line(l, s);
+            write_line(out, l);
+        }
+    }
+}
+
+// The car's model year, from the first channel's VIN (the vehicle's,
+// ADR-0027 section 3) decoded as the identity line decodes it; 0 with
+// none
+uint32_t session_model_year(const ecuio_session_t* session)
+{
+    ecuio_channel_identity_t id;
+    char vin[ECUIO_VIN_TEXT_LEN];
+    ecuio_vin_info_t v;
+    if (ecuio_session_get_channel_identity(session, 0, &id) != ECUIO_OK ||
+        ecuio_identity_vin(&id, vin, sizeof vin) != ECUIO_OK ||
+        vin[0] == '\0' ||
+        ecuio_vin_decode(vin, latest_model_year(), &v) != ECUIO_OK) {
+        return 0;
+    }
+    return v.model_year;
+}
+
 // A line for each ECU whose diagnostics read has completed since the
-// last call: generations holds each channel's last written
+// last call: generations holds each channel's last written. After any,
+// once no read is still under way, the car's inspection line
+// (ADR-0045) over every channel's report
 void poll_diagnostics(Output& out, ecuio_session_t* session, uint32_t channels,
                       uint32_t* generations)
 {
+    std::vector<ecuio_channel_diagnostics_t> reports(channels);
+    bool wrote = false;
     for (uint32_t c = 0; c < channels; ++c) {
-        ecuio_channel_diagnostics_t d;
-        if (ecuio_session_get_channel_diagnostics(session, c, &d) == ECUIO_OK &&
-            (d.flags & ECUIO_DIAG_COMPLETE) && d.generation != generations[c]) {
+        ecuio_channel_diagnostics_t& d = reports[c];
+        if (ecuio_session_get_channel_diagnostics(session, c, &d) != ECUIO_OK) {
+            d = ecuio_channel_diagnostics_t{};
+            continue;
+        }
+        if ((d.flags & ECUIO_DIAG_COMPLETE) && d.generation != generations[c]) {
             generations[c] = d.generation;
             write_diagnostics(out, d);
+            wrote = true;
         }
+    }
+    if (!wrote) {
+        return;
+    }
+    const uint32_t year = session_model_year(session);
+    ecuio_inspection_t i;
+    if (ecuio_diag_inspect(reports.data(), channels, year, &i) == ECUIO_OK &&
+        i.verdict != ECUIO_INSPECTION_READING &&
+        i.verdict != ECUIO_INSPECTION_UNKNOWN) {
+        char buf[1024];
+        cli::Line l(buf, sizeof buf);
+        cli::inspection_line(l, i, year);
+        write_line(out, l);
     }
 }
 
@@ -566,8 +679,12 @@ void usage(FILE* to)
     std::fprintf(
         to,
         "usage: havne-cli stream <uri> [--values] [--count N] [--seconds S]\n"
+        "                         [--until-scanned]\n"
         "       havne-cli play <uri> --to <vcan> [--count N] [--seconds S]\n"
+        "       havne-cli sim <uri> --on <vcan> [--seconds S]\n"
         "       havne-cli devices\n"
+        "       havne-cli vin <VIN>\n"
+        "       havne-cli dtc <code>\n"
         "       havne-cli --version | --help\n"
         "\n"
         "stream   opens the session <uri> names (mock://, replay://, "
@@ -577,12 +694,25 @@ void usage(FILE* to)
         "         --values adds the values its profile decodes. Ends at "
         "Ctrl+C,\n"
         "         after N frames, after S seconds, or at a replay's last "
-        "frame.\n"
+        "frame;\n"
+        "         --until-scanned also once uds-generic's did= ranges are "
+        "asked.\n"
         "play     (Linux) writes a session's frames to a virtual CAN "
         "interface\n"
         "         as they arrive: mock://demo drives the simulated car on it.\n"
+        "sim      (Linux) answers OBD-II requests on a virtual CAN interface\n"
+        "         as an engine ECU: the simulated car's, "
+        "mock://sim[?values=drive|\n"
+        "         canned][&vin=<VIN>][&faults=silent:<n>,...], or a "
+        "recording's,\n"
+        "         replay://<absolute path>[?loop=1][&vin=<VIN>][&faults=...].\n"
+        "         Ends at Ctrl+C or after S seconds.\n"
         "devices  lists the serial ports, J2534 adapters and CAN interfaces a\n"
         "         URI can name.\n"
+        "vin      decodes a VIN on this machine: its model year, make and\n"
+        "         check digit (49 CFR 565, NHTSA vPIC's manufacturer codes).\n"
+        "dtc      names a trouble code (P0301): SAE J2012's title for a\n"
+        "         generic powertrain or network code.\n"
         "\n"
         "Exit: 0 the stream ended, 1 the CLI failed, 2 usage, 3 the connect "
         "failed.\n");
@@ -608,6 +738,7 @@ struct StreamArgs {
     bool values = false;
     uint64_t count = 0;
     uint64_t seconds = 0;
+    bool until_scanned = false;
 };
 
 // A replay that doesn't loop has ended when every row is read and every
@@ -688,7 +819,12 @@ int run_stream(const StreamArgs& args)
             ? info.channel_count
             : ECUIO_SESSION_INFO_MAX_CHANNELS;
     uint32_t diag_generations[ECUIO_SESSION_INFO_MAX_CHANNELS] = {};
+    uint32_t identity_generations[ECUIO_SESSION_INFO_MAX_CHANNELS] = {};
+    poll_identity(out, session, channels, identity_generations);
     poll_diagnostics(out, session, channels, diag_generations);
+    cli::ScanSeen scan_seen[ECUIO_SESSION_INFO_MAX_CHANNELS] = {};
+    ecuio_channel_support_t scan_reports[ECUIO_SESSION_INFO_MAX_CHANNELS] = {};
+    poll_scan(out, session, channels, scan_seen, scan_reports);
     // Judged from the values core decodes, so only with --values
     const ecuio_signal_set_t* set = ecuio_session_signal_set(session);
     std::vector<uint16_t> absent_read(
@@ -707,7 +843,11 @@ int run_stream(const StreamArgs& args)
         ecuio_register_values_callback(session, on_values, stream.get());
     }
     install_handlers();
-    st = ecuio_session_start(session);
+    // --until-scanned with no did= range to scan has nothing to wait for:
+    // it ends before it starts
+    const bool nothing_to_scan =
+        args.until_scanned && !cli::scans_any(scan_reports, channels);
+    st = nothing_to_scan ? ECUIO_OK : ecuio_session_start(session);
     if (st != ECUIO_OK) {
         write_error(out, st);
         out.flush();
@@ -721,7 +861,7 @@ int run_stream(const StreamArgs& args)
     cli::SleepWatch sleep_watch(ecuio_clock_slept_us());
     int32_t last_error = ECUIO_OK;
     uint32_t episodes = 0;
-    const char* reason = nullptr;
+    const char* reason = nothing_to_scan ? "nothing-to-scan" : nullptr;
     while (!reason) {
         const size_t n = stream->ring.drain(drained.data(), kPoll);
         out.write(drained.data(), n);
@@ -740,6 +880,9 @@ int run_stream(const StreamArgs& args)
         } else if (args.seconds &&
                    ecuio_clock_us() - started >= args.seconds * 1000000u) {
             reason = "seconds";
+        } else if (args.until_scanned &&
+                   cli::scans_complete(scan_reports, channels)) {
+            reason = "scanned";
         }
 
         if (const uint64_t slept = sleep_watch.poll(ecuio_clock_slept_us())) {
@@ -752,7 +895,9 @@ int run_stream(const StreamArgs& args)
             write_line(out, l);
         }
 
+        poll_identity(out, session, channels, identity_generations);
         poll_diagnostics(out, session, channels, diag_generations);
+        poll_scan(out, session, channels, scan_seen, scan_reports);
         poll_absent(out, session, absent_read, absent_last);
         poll_timing(out, session, info, timing_snaps, timing_rows, false);
 
@@ -808,6 +953,7 @@ int run_stream(const StreamArgs& args)
 
     int code = kExitOk;
     if (!out.failed) {
+        poll_scan(out, session, channels, scan_seen, scan_reports, true);
         poll_timing(out, session, info, timing_snaps, timing_rows, true);
         uint64_t covered = stream->covered.load();
         if (args.count && covered > args.count) {
@@ -855,6 +1001,136 @@ std::vector<ecuio_can_interface_t> can_interfaces()
         list.resize(count < list.size() ? count : list.size());
     }
     return list;
+}
+
+struct SimArgs {
+    const char* uri = nullptr;
+    const char* on = nullptr;
+    uint64_t seconds = 0;
+};
+
+// The simulated ECU (ADR-0046) answering on a virtual bus until Ctrl+C,
+// --seconds or the bus failing: start, sim, a sim_stats line every 10 s
+// while the counts change, end with them
+int run_sim(const SimArgs& args)
+{
+    install_handlers();
+    Output out;
+    write_start(out);
+    ecuio_sim_t* sim = nullptr;
+    const ecuio_status_t st = ecuio_sim_create(args.uri, args.on, &sim);
+    if (st != ECUIO_OK) {
+        write_error(out, st);
+        out.flush();
+        return kExitConnect;
+    }
+    {
+        char buf[1024];
+        cli::Line l(buf, sizeof buf);
+        cli::sim_line(l, args.uri, args.on);
+        write_line(out, l);
+    }
+    out.flush();
+    const uint64_t started = ecuio_clock_us();
+    uint64_t next_stats = started + kSimStatsEveryUs;
+    ecuio_sim_stats_t last{};
+    ecuio_sim_stats_t s{};
+    const char* reason = nullptr;
+    while (!reason) {
+        std::this_thread::sleep_for(kPoll);
+        (void)ecuio_sim_get_stats(sim, &s);
+        const uint64_t now = ecuio_clock_us();
+        if (g_interrupted.load()) {
+            reason = "interrupted";
+        } else if (s.flags & ECUIO_SIM_FAILED) {
+            reason = "bus-failed";
+        } else if (args.seconds && now - started >= args.seconds * 1000000u) {
+            reason = "seconds";
+        } else if (now >= next_stats) {
+            next_stats = now + kSimStatsEveryUs;
+            if (std::memcmp(&s, &last, sizeof s) != 0) {
+                last = s;
+                char buf[1024];
+                cli::Line l(buf, sizeof buf);
+                cli::sim_stats_line(l, s);
+                write_line(out, l);
+                out.flush();
+            }
+        }
+        if (out.failed) {
+            break; /* a closed pipe ends it quietly */
+        }
+    }
+    ecuio_sim_destroy(sim);
+    if (out.failed) {
+        return out.ok() ? kExitOk : kExitFailed;
+    }
+    char buf[1024];
+    cli::Line l(buf, sizeof buf);
+    cli::sim_end_line(l, reason, s);
+    write_line(out, l);
+    out.flush();
+    if (std::strcmp(reason, "bus-failed") == 0) {
+        std::fprintf(stderr,
+                     "havne-cli: the simulated ECU's bus failed (%s "
+                     "went down or away)\n",
+                     args.on);
+        return kExitFailed;
+    }
+    return out.ok() ? kExitOk : kExitFailed;
+}
+
+// A typed VIN's decode (ADR-0043), offline: spaces dropped and upper
+// case, as Settings' lookup takes it; not a VIN is a usage error
+int run_vin(const char* typed)
+{
+    std::string vin;
+    for (const char* p = typed; *p != '\0'; ++p) {
+        if (*p != ' ') {
+            vin += (*p >= 'a' && *p <= 'z') ? static_cast<char>(*p - 'a' + 'A')
+                                            : *p;
+        }
+    }
+    ecuio_vin_info_t info;
+    if (ecuio_vin_decode(vin.c_str(), 0, &info) != ECUIO_OK) {
+        std::fprintf(stderr,
+                     "havne-cli: not a VIN: 49 CFR 565 takes 17 digits and "
+                     "capital letters, never I, O or Q\n");
+        return kExitUsage;
+    }
+    Output out;
+    write_start(out);
+    char buf[512];
+    cli::Line l(buf, sizeof buf);
+    cli::vin_line(l, vin.c_str(), latest_model_year());
+    write_line(out, l);
+    return out.ok() ? kExitOk : kExitFailed;
+}
+
+// A typed trouble code's title (ADR-0044), as Diagnostics' lookup takes
+// it: spaces dropped and upper case; not a code is a usage error
+int run_dtc(const char* typed)
+{
+    std::string text;
+    for (const char* p = typed; *p != '\0'; ++p) {
+        if (*p != ' ') {
+            text += (*p >= 'a' && *p <= 'z') ? static_cast<char>(*p - 'a' + 'A')
+                                             : *p;
+        }
+    }
+    uint16_t code = 0;
+    if (ecuio_dtc_parse(text.c_str(), &code) != ECUIO_OK) {
+        std::fprintf(stderr, "havne-cli: not a trouble code: a letter P, C, B "
+                             "or U, then four hex digits, the first 0-3\n");
+        return kExitUsage;
+    }
+    Output out;
+    write_start(out);
+    char buf[512];
+    cli::Line l(buf, sizeof buf);
+    cli::dtc_line(l, code);
+    write_line(out, l);
+    return out.ok() ? kExitOk : kExitFailed;
 }
 
 int run_devices()
@@ -1192,6 +1468,12 @@ int run(int argc, char** argv)
     if (command == "devices" && argc == 2) {
         return run_devices();
     }
+    if (command == "vin" && argc == 3) {
+        return run_vin(argv[2]);
+    }
+    if (command == "dtc" && argc == 3) {
+        return run_dtc(argv[2]);
+    }
     if (command == "play") {
 #if HAVNE_CLI_PLAY
         PlayArgs play;
@@ -1228,6 +1510,35 @@ int run(int argc, char** argv)
         return kExitUsage;
 #endif
     }
+    if (command == "sim") {
+        SimArgs sim;
+        for (int i = 2; i < argc; ++i) {
+            const std::string a = argv[i];
+            if (a == "--on" && i + 1 < argc) {
+                sim.on = argv[++i];
+            } else if (a == "--seconds" && i + 1 < argc) {
+                if (!parse_count(argv[++i], sim.seconds)) {
+                    std::fprintf(
+                        stderr,
+                        "havne-cli: --seconds takes a whole number above 0\n");
+                    return kExitUsage;
+                }
+            } else if (a.rfind("--", 0) == 0 || sim.uri) {
+                std::fprintf(stderr, "havne-cli: unexpected '%s'\n", argv[i]);
+                usage(stderr);
+                return kExitUsage;
+            } else {
+                sim.uri = argv[i];
+            }
+        }
+        if (!sim.uri || !sim.on) {
+            std::fprintf(stderr,
+                         "havne-cli: sim needs a URI and --on <interface>\n");
+            usage(stderr);
+            return kExitUsage;
+        }
+        return run_sim(sim);
+    }
     if (command != "stream") {
         usage(stderr);
         return kExitUsage;
@@ -1237,6 +1548,8 @@ int run(int argc, char** argv)
         const std::string a = argv[i];
         if (a == "--values") {
             args.values = true;
+        } else if (a == "--until-scanned") {
+            args.until_scanned = true;
         } else if (a == "--count" && i + 1 < argc) {
             if (!parse_count(argv[++i], args.count)) {
                 std::fprintf(

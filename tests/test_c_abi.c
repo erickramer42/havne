@@ -21,6 +21,8 @@
 #include "ecuio/j2534.h"
 #include "ecuio/stream.h"
 #include "ecuio/serial.h"
+#include "ecuio/vin.h"
+#include "ecuio/sim.h"
 #include "ecuio/socketcan.h"
 #include "ecuio/profile.h"
 #include "ecuio/signal_sets.h"
@@ -93,6 +95,12 @@ typedef char abi_request_timing_intervals_check[(offsetof(ecuio_request_timing_t
 typedef char abi_serial_size_check[(sizeof(ecuio_serial_port_t) == 288) ? 1 : -1];
 typedef char abi_serial_device_check[(offsetof(ecuio_serial_port_t, device) == 128) ? 1 : -1];
 typedef char abi_serial_flags_check[(offsetof(ecuio_serial_port_t, flags) == 256) ? 1 : -1];
+typedef char abi_inspection_size_check[(sizeof(ecuio_inspection_t) == 24) ? 1 : -1];
+typedef char abi_inspection_flags_check[(offsetof(ecuio_inspection_t, diag_flags) == 8) ? 1 : -1];
+typedef char abi_sim_stats_size_check[(sizeof(ecuio_sim_stats_t) == 96) ? 1 : -1];
+typedef char abi_sim_stats_flags_check[(offsetof(ecuio_sim_stats_t, flags) == 72) ? 1 : -1];
+typedef char abi_vin_size_check[(sizeof(ecuio_vin_info_t) == 32) ? 1 : -1];
+typedef char abi_vin_wmi_check[(offsetof(ecuio_vin_info_t, wmi) == 8) ? 1 : -1];
 typedef char abi_can_size_check[(sizeof(ecuio_can_interface_t) == 64) ? 1 : -1];
 typedef char abi_can_flags_check[(offsetof(ecuio_can_interface_t, flags) == 32) ? 1 : -1];
 typedef char abi_stream_flags_check[(offsetof(ecuio_stream_callbacks_t, flags) == 4 * sizeof(void*)) ? 1 : -1];
@@ -115,6 +123,10 @@ int main(void)
     ecuio_stream_t* stream = NULL;
     uint32_t serial_count = 0;
     uint32_t can_count = 0;
+    ecuio_vin_info_t vin_info;
+    ecuio_sim_t* sim = NULL;
+    ecuio_sim_stats_t sim_stats;
+    ecuio_inspection_t inspection;
     const uint8_t vin_request[2] = {0x09, 0x02};
     char dtc[6];
     frame.arbitration_id = 0x7FF;
@@ -217,6 +229,28 @@ int main(void)
         return 1;
     }
     if (ecuio_can_interfaces(NULL, 1, &can_count) != ECUIO_ERR_NULL_ARGUMENT) {
+        return 1;
+    }
+    if (ecuio_dtc_parse(NULL, NULL) != ECUIO_ERR_NULL_ARGUMENT ||
+        ecuio_dtc_title(0x0301)[0] == 0 || ecuio_dtc_title_source()[0] == 0 ||
+        ecuio_dtc_title_notice()[0] == 0) {
+        return 1;
+    }
+    if (ecuio_diag_inspect(NULL, 0, 2001, &inspection) != ECUIO_OK ||
+        inspection.verdict != ECUIO_INSPECTION_UNKNOWN ||
+        ecuio_diag_inspect(NULL, 1, 2001, &inspection) !=
+            ECUIO_ERR_NULL_ARGUMENT ||
+        ECUIO_INSPECTION_READING != 6u) {
+        return 1;
+    }
+    if (ecuio_sim_create(NULL, "vcan0", &sim) != ECUIO_ERR_NULL_ARGUMENT ||
+        ecuio_sim_get_stats(NULL, &sim_stats) != ECUIO_ERR_NULL_ARGUMENT ||
+        sim != NULL || ECUIO_SIM_FAILED != 1u) {
+        return 1;
+    }
+    ecuio_sim_destroy(NULL);
+    if (ecuio_vin_decode(NULL, 0, &vin_info) != ECUIO_ERR_NULL_ARGUMENT ||
+        ecuio_vin_make(NULL)[0] != 0 || ecuio_vin_source()[0] == 0) {
         return 1;
     }
     memset(&stream_cb, 0, sizeof stream_cb);

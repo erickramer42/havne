@@ -14,21 +14,24 @@ QString earlierProductName()
 int carryOverSettings(const QString& fromOrg, const QString& fromApp,
                       const QString& toOrg, const QString& toApp)
 {
-    if (fromOrg == toOrg && fromApp == toApp)
+    if (fromOrg == toOrg && fromApp == toApp) {
         return 0;
+    }
     // Without fallbacks: only the user's own store for each name, never
     // the organization's or the system's keys
     QSettings to(QSettings::defaultFormat(), QSettings::UserScope, toOrg,
                  toApp);
     to.setFallbacksEnabled(false);
-    if (!to.allKeys().isEmpty())
+    if (!to.allKeys().isEmpty()) {
         return 0;
+    }
     QSettings from(QSettings::defaultFormat(), QSettings::UserScope, fromOrg,
                    fromApp);
     from.setFallbacksEnabled(false);
     const QStringList keys = from.allKeys();
-    for (const QString& key : keys)
+    for (const QString& key : keys) {
         to.setValue(key, from.value(key));
+    }
     to.sync();
     return static_cast<int>(keys.size());
 }

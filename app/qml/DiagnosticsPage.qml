@@ -12,7 +12,11 @@
 //          (BridgeTest.DiagnosticsEntry*, .AClear*); on a phone, the
 //          clear's buttons reached on a short page
 //          (test_theClearsButtonsCanBeReachedOnAShortPage) and the page
-//          inside the app's window (tests/qml/tst_phone.qml); the look,
+//          inside the app's window (tests/qml/tst_phone.qml); each
+//          code's title and a typed code's (ADR-0044,
+//          test_codesCarryTheirTitles, test_aTypedCodeIsNamed); the car's
+//          inspection line (ADR-0045, test_theInspectionLineJudgesTheCar);
+//          the look,
 //          manually (the run-havne skill)
 
 import QtQuick
@@ -167,6 +171,14 @@ Page {
         }
     }
 
+    // Each titled code of an answered list on a line of its own (ADR-0044);
+    // a code with no title is in the codes line alone
+    function titlesText(list) {
+        if (list.outcome !== "answered") return ""
+        return list.codes.map((c, i) => list.titles[i] !== "" ? c + "  " + list.titles[i] : "")
+                         .filter(line => line !== "").join("\n")
+    }
+
     // A list's codes, or what became of its request
     function codesText(list) {
         switch (list.outcome) {
@@ -183,7 +195,9 @@ Page {
     function freezeText(f) {
         switch (f.outcome) {
         case "answered":
-            return f.stored ? qsTr("Stored by %1").arg(f.code) : qsTr("None stored")
+            if (!f.stored) return qsTr("None stored")
+            return f.title !== "" ? qsTr("Stored by %1 (%2)").arg(f.code, f.title)
+                                  : qsTr("Stored by %1").arg(f.code)
         case "refused":    return qsTr("Refused (%1)").arg(f.nrc)
         case "unanswered": return qsTr("No answer")
         default:           return qsTr("Not asked yet")
@@ -411,9 +425,84 @@ Page {
                     }
                 }
 
+                // The car's readiness by the federal inspection rule
+                // (ADR-0045), every ECU judged together, once read
+                Rectangle {
+                    id: inspectionCard
+                    readonly property var entry: Bridge.inspection
+                    objectName: "inspectionCard"
+                    visible: entry.verdict !== ""
+                    Layout.fillWidth: true
+                    implicitHeight: inspectionBody.implicitHeight + 2 * Theme.pageMargin
+                    radius: Theme.radius
+                    color: Theme.surface
+
+                    ColumnLayout {
+                        id: inspectionBody
+                        anchors.fill: parent
+                        anchors.margins: Theme.pageMargin
+                        spacing: 6
+
+                        SectionLabel { text: qsTr("Inspection readiness") }
+                        Label {
+                            objectName: "inspectionText"
+                            Layout.fillWidth: true
+                            wrapMode: Text.Wrap
+                            text: inspectionCard.entry.text
+                            color: inspectionCard.entry.verdict === "ready" ? Theme.success
+                                 : inspectionCard.entry.verdict === "mil_on" ? Theme.danger
+                                 : Theme.warning
+                        }
+                        Label {
+                            objectName: "inspectionRule"
+                            Layout.fillWidth: true
+                            wrapMode: Text.Wrap
+                            text: inspectionCard.entry.rule
+                            color: Theme.textDim
+                            font.pixelSize: 12
+                        }
+                    }
+                }
+
                 Repeater {
                     model: root.ecus
                     delegate: EcuCard {}
+                }
+
+                // A typed code's title (ADR-0044): with or without a session
+                Rectangle {
+                    objectName: "dtcLookup"
+                    Layout.fillWidth: true
+                    implicitHeight: lookupBody.implicitHeight + 2 * Theme.pageMargin
+                    radius: Theme.radius
+                    color: Theme.surface
+
+                    ColumnLayout {
+                        id: lookupBody
+                        anchors.fill: parent
+                        anchors.margins: Theme.pageMargin
+                        spacing: 6
+
+                        SectionLabel { text: qsTr("Look up a code") }
+                        TextField {
+                            id: dtcLookupField
+                            objectName: "dtcLookupField"
+                            Layout.fillWidth: true
+                            Layout.maximumWidth: 300
+                            maximumLength: 16
+                            placeholderText: qsTr("P0301")
+                            inputMethodHints: Qt.ImhPreferUppercase | Qt.ImhNoPredictiveText
+                        }
+                        Label {
+                            readonly property string summary: Bridge.describeDtc(dtcLookupField.text)
+                            objectName: "dtcLookupResult"
+                            visible: summary !== ""
+                            Layout.fillWidth: true
+                            wrapMode: Text.Wrap
+                            text: summary.charAt(0).toUpperCase() + summary.slice(1)
+                            color: Theme.text
+                        }
+                    }
                 }
             }
         }
@@ -515,6 +604,15 @@ Page {
                                                                             : root.font.family
                             font.pixelSize: listRow.modelData.codes.length > 0 ? 16 : 14
                             color: listRow.modelData.codes.length > 0 ? Theme.text : Theme.textDim
+                        }
+                        Label {
+                            objectName: "titles_" + listRow.modelData.key
+                            visible: text !== ""
+                            Layout.fillWidth: true
+                            wrapMode: Text.Wrap
+                            text: root.titlesText(listRow.modelData)
+                            color: Theme.textDim
+                            font.pixelSize: 13
                         }
                     }
                 }

@@ -453,6 +453,10 @@ UI needs no new code.
   and the engine waits out its pending wait (5.05 s) and asks again.
   The count digit is never sent with 0x22 or 0x09, where a `78` is
   plausible. The test car never sent a `78` to the J2534 sessions.
+
+  > Amended 2026-11-01: a one-DID 0x22 request now takes it, and a
+  > `78` or a reply spanning frames takes the DID back off it (the
+  > appendix of 2026-11-01, "the count digit for one DID").
 - **STN answers:** what the MX201 answers to `AT I`, `STI` and
   `AT PPS` (whether any parameter has been changed by another app),
   and which STN chip it is (STN2255 or STN2256). The FRPM gives the
@@ -963,3 +967,61 @@ neither the datasheet nor the FRPM says, and the fake doesn't count it.
 > The learning above stays for a PID the table doesn't define and an ECU
 > answering longer: `Elm327SessionTest.APidJ1979SaysSpansFramesNeverTakesTheDigit`,
 > `.AReplyLongerThanJ1979SaysTakesThePidOffTheCountDigit`.
+
+## Appendix: 2026-11-01, the count digit for one DID
+
+The digit went only with Service 01, since a 0x22 reply can span
+frames or be held pending (`7F 22 78`). A DID scan pays for that on
+every DID: most are refused in one line (`7F 22 31`), and each
+then waits out the adapter's timer. `elm327_response_count` now gives
+`1` to a one-DID 0x22 request to a physical ID too, unless the DID is
+in the transport's `long_dids` (a 64 Kbit set, empty at attach). When
+the prompt comes with the request still unanswered and either a
+message under way (the reply spans frames) or a `7F 22 78` seen (an
+adapter that counts the pending line), the transport puts the DID in
+the set, writes a wire-log line ("22 F1A0's reply spans frames: asked
+again, and with no response count from now on") and takes the request
+back (`ecuio_engine_sent(..., false)`): a scanned DID or an
+identification item is asked again at once with no digit, so a found
+DID isn't lost to the wait, and a polled one goes without it from its
+next turn. An answer that arrives with the digit, a positive reply in
+one line or a refusal, is untouched. Service 01's rule above is
+unchanged.
+
+Whether an adapter counts the pending line is still unknown, so the
+fake ELM327 can do either (`pending_counted`).
+`Elm327ProtocolTest.RequestsCarryTheCountDigitOnlyWhereOneReplyIsLikely`,
+`Elm327SessionTest.AScannedDidTakesTheCountDigitUntilItsReplySpansFrames`,
+`.AScannedDidHeldPendingIsAskedAgainWithoutTheDigit`,
+`.IdentificationReassemblesItsLongReplies` (F190's First Frame, then
+F190 without the digit).
+
+*Amended 2026-11-01:* on the test car through the MX+ (relayed by the
+phone, [ADR-0047](0047-adapter-relay.md);
+[2026-11-01-android](../bench-sessions/2026-11-01-android.md)), a
+block of 1,024 DIDs on the engine ECU with the digit and `scan=first`
+completed in 32.9 s, about 31 DIDs a second, the MX+'s Service 01
+pace. Every reply was one line (4 answered, 1,020 refused), so no DID
+was asked again without the digit. In the same session's capture of
+more than one ECU, `22F1901` to the engine ECU brought its First Frame
+alone and the prompt (the MX+ counts a First Frame as the one
+response), and the transport asked F190 again without the digit and
+had the whole VIN. A reply held pending on an adapter is still to
+come.
+
+*Amended 2026-11-01:* a sweep of the engine ECU's DIDs found that
+asking again at once fails a long reply. The adapter sends flow
+control after the First Frame, so the ECU sends the rest (`22 DE00`'s
+131 bytes: 18 Consecutive Frames about 8 ms apart) and takes no
+request meanwhile: asked again 0 or 50 ms after the prompt it gave NO
+DATA, at 150 ms the whole reply. The VIN's three frames had finished
+before its re-ask. A scanned DID asked into NO DATA waits for a
+rescan, so its block never completed. The transport now holds a
+channel after a cut reply for 10 ms each Consecutive Frame still to
+come (from the First Frame's length) plus 50 ms, a second at most,
+asking nothing of that ECU meanwhile, and a request asked again into
+NO DATA is held again twice as long, twice at most (a second, two,
+four: ISO-TP's longest reply at the test car's pace takes 4.7 s).
+`Elm327SessionTest.ACutDidIsAskedAgainOnceTheEcuHasSentTheRest`,
+`.ACutDidAnsweredNoDataIsHeldAgainLonger`; the fake ELM327's
+`cut_gap_ms` is the ECU sending on.

@@ -37,7 +37,14 @@
 //          .RecordingFolderNamesThePickedVehicleForAnAdapterOnly). QML
 //          rendering: manual smoke.
 //          reply timing's snapshots and line (ADR-0042):
-//          BridgeTest.ARecordingKeepsReplyTimingsSnapshots, .TimingText*
+//          BridgeTest.ARecordingKeepsReplyTimingsSnapshots, .TimingText*;
+//          the VIN's decode, its log line and Settings' lookup (ADR-0043):
+//          BridgeTest.AVinSummarySaysItsYearMakeAndCheckDigit, and on
+//          Windows .AConnectsVinReachesQmlOnlyAsASaltedHash; each code's
+//          title and Diagnostics' lookup (ADR-0044):
+//          BridgeTest.DiagnosticsEntryIsWhatThePageShows, .ATypedCodeIsDescribed;
+//          the inspection line (ADR-0045):
+//          BridgeTest.InspectionEntryIsWhatThePageShows, .DiagnosticsFollowTheSession
 
 #include "sessionbridge.h"
 #include "carryover.h"
@@ -49,10 +56,12 @@
 #include "ecuio/serial.h"
 #include "ecuio/signal_sets.h"
 #include "ecuio/socketcan.h"
+#include "ecuio/vin.h"
 
 #include <QMetaObject>
 #include <QByteArray>
 #include <QCryptographicHash>
+#include <QDate>
 #include <QDateTime>
 #include <QDir>
 #include <QFile>
@@ -91,7 +100,7 @@ QString documentsRelative(const QString& path)
 // Call it on the thread that made the call: the detail is thread-local.
 QString failureText(ecuio_status_t rc)
 {
-    const QString status = QString::fromUtf8(ecuio_status_string(rc));
+    QString status = QString::fromUtf8(ecuio_status_string(rc));
     const char* detail = ecuio_last_error_detail();
     if (detail == nullptr || detail[0] == '\0') {
         return status;
@@ -566,7 +575,7 @@ QVariantList SignalListModel::chartData(qint64 windowMs, int columns) const
                 put(s);
                 continue;
             }
-            const qint64 k = static_cast<qint64>((s.timestampMs - from) / sliceMs);
+            const qint64 k = static_cast<qint64>(static_cast<double>(s.timestampMs - from) / sliceMs);
             if (k != slice) {
                 flush();
                 slice = k;
@@ -994,8 +1003,9 @@ QString SessionBridge::replayUriFor(const QString& folder,
                   QStringLiteral("?profile=") + profile;
     // did= belongs to uds-generic alone; core refuses it under any other
     if (profile == QLatin1String("uds-generic")) {
-        for (const QString& did : dids)
+        for (const QString& did : dids) {
             uri += QLatin1Char('&') + did;
+        }
     }
     return uri;
 }
@@ -1003,8 +1013,9 @@ QString SessionBridge::replayUriFor(const QString& folder,
 QVariantList SessionBridge::recentRecordings(int limit) const
 {
     QVariantList out;
-    if (limit <= 0)
+    if (limit <= 0) {
         return out;
+    }
     // "<yyyyMMdd-HHmmss>[-n][ <label>]" (SessionRecorder::start): by name,
     // last first, is newest first
     static const QRegularExpression kName(
@@ -1014,20 +1025,23 @@ QVariantList SessionBridge::recentRecordings(int limit) const
     // the stamp)
     QFileInfoList folders;
     for (const QString& root : {recordingsRoot(), earlierRecordingsRoot()}) {
-        if (!root.isEmpty())
+        if (!root.isEmpty()) {
             folders +=
                 QDir(root).entryInfoList(QDir::Dirs | QDir::NoDotAndDotDot);
+        }
     }
     std::sort(folders.begin(), folders.end(),
               [](const QFileInfo& a, const QFileInfo& b) {
                   return a.fileName() > b.fileName();
               });
     for (const QFileInfo& info : folders) {
-        if (out.size() >= limit)
+        if (out.size() >= limit) {
             break;
+        }
         const QString folder = info.absoluteFilePath();
-        if (!QFileInfo::exists(folder + QStringLiteral("/frames.csv")))
+        if (!QFileInfo::exists(folder + QStringLiteral("/frames.csv"))) {
             continue;
+        }
 
         // The header's "uri" line, among events.log's first few
         QString recorded;
@@ -1049,8 +1063,9 @@ QVariantList SessionBridge::recentRecordings(int limit) const
             title = QStringLiteral("%1-%2-%3 %4:%5:%6")
                         .arg(m.captured(1), m.captured(2), m.captured(3),
                              m.captured(4), m.captured(5), m.captured(6));
-            if (m.hasCaptured(7))
+            if (m.hasCaptured(7)) {
                 title += QStringLiteral(" · ") + m.captured(7);
+            }
         }
         const QString uri = replayUriFor(folder, recorded);
         QVariantMap row;
@@ -1479,8 +1494,9 @@ void SessionBridge::applyFrameLoggingEnv()
 
 QString SessionBridge::recordingsRoot() const
 {
-    if (!m_recordingsRoot.isEmpty())
+    if (!m_recordingsRoot.isEmpty()) {
         return m_recordingsRoot;
+    }
     const QString docs =
         QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation);
     return docs.isEmpty() ? QString()
@@ -1489,10 +1505,12 @@ QString SessionBridge::recordingsRoot() const
 
 QString SessionBridge::earlierRecordingsRoot() const
 {
-    if (!m_earlierRecordingsRoot.isEmpty())
+    if (!m_earlierRecordingsRoot.isEmpty()) {
         return m_earlierRecordingsRoot;
-    if (!m_recordingsRoot.isEmpty())
+    }
+    if (!m_recordingsRoot.isEmpty()) {
         return QString(); // a test's own root: Documents is never read
+    }
     const QString docs =
         QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation);
     const QString root = docs + QLatin1Char('/') + earlierProductName() +
@@ -1991,8 +2009,9 @@ SessionBridge::timingText(const ecuio_session_timing_t& t,
     uint32_t low = UINT32_MAX;
     uint32_t high = 0;
     for (const ecuio_request_timing_t& r : rows) {
-        if (r.answered + r.refused + r.timeouts == 0)
+        if (r.answered + r.refused + r.timeouts == 0) {
             continue;
+        }
         ++asked;
         answered += r.answered;
         refused += r.refused;
@@ -2291,7 +2310,14 @@ void SessionBridge::pollChannelIdentity()
                     : QString();
             if (!vin.isEmpty() && vin != m_vin) {
                 m_vin = vin;
+                // What the VIN says of the car (ADR-0043), beside the
+                // identity line that holds it
+                emit logMessage(
+                    QStringLiteral("VIN: ") +
+                    vinSummary(vin, QDate::currentDate().year() + 1));
                 emit vehicleIdentified();
+                // the inspection's model year (ADR-0045)
+                emit diagnosticsChanged();
             }
         }
     }
@@ -2318,6 +2344,9 @@ void SessionBridge::pollChannelDiagnostics()
             ECUIO_OK) {
             continue;
         }
+        // The struct has no padding (core.h pins it); its doubles compare
+        // by their bits, which is what a change test wants
+        // NOLINTNEXTLINE(bugprone-suspicious-memory-comparison)
         if (memcmp(&s, &m_diagnosticsShown[c], sizeof(s)) != 0) {
             m_diagnosticsShown[c] = s;
             changed = true;
@@ -2404,6 +2433,110 @@ bool SessionBridge::clearFindsNothing() const
         any = true;
     }
     return any;
+}
+
+QVariantMap SessionBridge::inspection() const
+{
+    uint32_t year = 0;
+    ecuio_vin_info_t v{};
+    const QByteArray vin = m_vin.toLatin1();
+    if (!m_vin.isEmpty() &&
+        ecuio_vin_decode(vin.constData(),
+                         static_cast<uint32_t>(QDate::currentDate().year() + 1),
+                         &v) == ECUIO_OK) {
+        year = v.model_year;
+    }
+    return inspectionEntry(m_diagnosticsShown, m_diagnosticsShownCount, year);
+}
+
+QVariantMap
+SessionBridge::inspectionEntry(const ecuio_channel_diagnostics_t* reports,
+                               uint32_t count, uint32_t modelYear)
+{
+    QVariantMap m;
+    ecuio_inspection_t i{};
+    if (ecuio_diag_inspect(reports, count, modelYear, &i) != ECUIO_OK) {
+        i.verdict = ECUIO_INSPECTION_UNKNOWN;
+    }
+    QStringList names;
+    for (uint8_t id = 0; id < 16; ++id) {
+        if (((i.incomplete_ids >> id) & 1u) != 0) {
+            names << QString::fromLatin1(
+                ecuio_monitor_short_name(id, i.diag_flags));
+        }
+    }
+    const QString incomplete =
+        (i.incomplete == 1
+             ? QStringLiteral("1 monitor incomplete")
+             : QStringLiteral("%1 monitors incomplete").arg(i.incomplete)) +
+        QStringLiteral(" (%1)").arg(names.join(QStringLiteral(", ")));
+    QString verdict;
+    QString text;
+    switch (i.verdict) {
+    case ECUIO_INSPECTION_READY:
+        verdict = QStringLiteral("ready");
+        if (i.incomplete == 0) {
+            text =
+                QStringLiteral("Ready for an emissions inspection: every "
+                               "monitor complete, the check-engine light off.");
+        } else if (modelYear == 0) {
+            text =
+                QStringLiteral("Ready for an emissions inspection: %1, which "
+                               "a car of any model year may have.")
+                    .arg(incomplete);
+        } else {
+            text =
+                QStringLiteral("Ready for an emissions inspection: %1, which "
+                               "a model year %2 car may have.")
+                    .arg(incomplete)
+                    .arg(modelYear);
+        }
+        break;
+    case ECUIO_INSPECTION_NOT_READY:
+        verdict = QStringLiteral("not_ready");
+        text =
+            (modelYear == 0
+                 ? QStringLiteral("Not ready for an emissions inspection: %1, "
+                                  "and no model year may have more than 2.")
+                       .arg(incomplete)
+                 : QStringLiteral(
+                       "Not ready for an emissions inspection: %1, "
+                       "and a model year %2 car may have %3 at most.")
+                       .arg(incomplete)
+                       .arg(modelYear)
+                       .arg(i.allowed)) +
+            QStringLiteral(" A station would send it away to be driven until "
+                           "they complete.");
+        break;
+    case ECUIO_INSPECTION_MIL_ON:
+        verdict = QStringLiteral("mil_on");
+        text = QStringLiteral("Would fail an emissions inspection: an ECU "
+                              "commands the check-engine light on.");
+        break;
+    case ECUIO_INSPECTION_YEAR_NEEDED:
+        verdict = QStringLiteral("year_needed");
+        text =
+            QStringLiteral("%1: ready for an emissions inspection if the car "
+                           "is model year 1996-2000, not if it's 2001 or "
+                           "newer, and no VIN gave its year.")
+                .arg(incomplete);
+        break;
+    case ECUIO_INSPECTION_NOT_COVERED:
+        verdict = QStringLiteral("not_covered");
+        text = QStringLiteral("Model year %1: the federal inspection rule "
+                              "covers 1996 and newer.")
+                   .arg(modelYear);
+        break;
+    default:
+        break;
+    }
+    m[QStringLiteral("verdict")] = verdict;
+    m[QStringLiteral("text")] = text;
+    m[QStringLiteral("rule")] = QStringLiteral(
+        "By the federal rule, 40 CFR 85.2222, from the monitors and "
+        "the VIN's model year. A state's program sets its own, "
+        "and some are stricter.");
+    return m;
 }
 
 QStringList SessionBridge::clearTargets() const
@@ -2669,14 +2802,17 @@ SessionBridge::diagnosticsEntry(const ecuio_channel_diagnostics_t& s,
         const ecuio_dtc_list_t& list = s.lists[l];
         const uint8_t held = std::min<uint8_t>(list.held, ECUIO_DIAG_MAX_DTCS);
         QStringList codes;
+        QStringList titles; // each code's (ADR-0044), "" with none
         for (uint8_t i = 0; i < held; ++i) {
             codes << dtc(list.codes[i]);
+            titles << QString::fromLatin1(ecuio_dtc_title(list.codes[i]));
         }
         QVariantMap e;
         e[QStringLiteral("key")] = QString::fromLatin1(kKeys[l]);
         e[QStringLiteral("outcome")] = outcome(list.outcome);
         e[QStringLiteral("nrc")] = nrc(list.outcome, kServices[l], list.nrc);
         e[QStringLiteral("codes")] = codes;
+        e[QStringLiteral("titles")] = titles;
         e[QStringLiteral("more")] =
             list.reported > held ? list.reported - held : 0;
         lists << e;
@@ -2738,6 +2874,10 @@ SessionBridge::diagnosticsEntry(const ecuio_channel_diagnostics_t& s,
     freeze[QStringLiteral("code")] = (s.flags & ECUIO_DIAG_FREEZE_FRAME) != 0
                                          ? dtc(s.freeze_dtc)
                                          : QString();
+    freeze[QStringLiteral("title")] =
+        (s.flags & ECUIO_DIAG_FREEZE_FRAME) != 0
+            ? QString::fromLatin1(ecuio_dtc_title(s.freeze_dtc))
+            : QString();
     freeze[QStringLiteral("values")] = values;
     m[QStringLiteral("freeze")] = freeze;
 
@@ -2803,6 +2943,83 @@ QString SessionBridge::vinKey(const QString& salt) const
         QCryptographicHash::hash((salt + m_vin).toUtf8(),
                                  QCryptographicHash::Sha256)
             .toHex());
+}
+
+QString SessionBridge::vinSummary(const QString& vin, int latestModelYear)
+{
+    const QByteArray text = vin.toLatin1();
+    ecuio_vin_info_t v{};
+    if (vin.size() != ECUIO_VIN_LEN ||
+        ecuio_vin_decode(text.constData(),
+                         static_cast<uint32_t>(std::max(latestModelYear, 0)),
+                         &v) != ECUIO_OK) {
+        return QStringLiteral(
+            "not a VIN: 49 CFR 565 takes 17 digits and capital "
+            "letters, never I, O or Q");
+    }
+    QStringList parts;
+    if (v.model_year == 0) {
+        parts << QStringLiteral("no model year (position 10 is %1)")
+                     .arg(vin.at(9));
+    } else if ((v.flags & ECUIO_VIN_YEAR_EARLIER) != 0) {
+        parts << QStringLiteral("model year %1 (not %2, which is still ahead)")
+                     .arg(v.model_year)
+                     .arg(v.model_year + 30);
+    } else {
+        parts << QStringLiteral("model year %1").arg(v.model_year);
+    }
+    const QString make = QString::fromLatin1(ecuio_vin_make(v.wmi));
+    const QString wmi = QString::fromLatin1(v.wmi);
+    parts << (make.isEmpty()
+                  ? QStringLiteral("manufacturer code %1 isn't in NHTSA's list")
+                        .arg(wmi)
+                  : QStringLiteral("%1 (manufacturer code %2)").arg(make, wmi));
+    parts << ((v.flags & ECUIO_VIN_CHECK_MATCHES) != 0
+                  ? QStringLiteral("check digit matches")
+                  : QStringLiteral(
+                        "check digit %1 isn't the %2 it works out to (North "
+                        "America requires it; other markets may not)")
+                        .arg(vin.at(8))
+                        .arg(QChar::fromLatin1(v.check_digit)));
+    return parts.join(QStringLiteral("; "));
+}
+
+QString SessionBridge::describeVin(const QString& typed) const
+{
+    QString vin = typed.toUpper();
+    vin.remove(QLatin1Char(' '));
+    if (vin.isEmpty()) {
+        return {};
+    }
+    return vinSummary(vin, QDate::currentDate().year() + 1);
+}
+
+QString SessionBridge::vinSource() const
+{
+    return QString::fromLatin1(ecuio_vin_source());
+}
+
+QString SessionBridge::describeDtc(const QString& typed) const
+{
+    QString text = typed.toUpper();
+    text.remove(QLatin1Char(' '));
+    if (text.isEmpty()) {
+        return {};
+    }
+    const QByteArray latin = text.toLatin1();
+    uint16_t code = 0;
+    if (text.size() != 5 ||
+        ecuio_dtc_parse(latin.constData(), &code) != ECUIO_OK) {
+        return QStringLiteral("not a trouble code: a letter P, C, B or U, then "
+                              "four hex digits, the first 0-3");
+    }
+    const QString title = QString::fromLatin1(ecuio_dtc_title(code));
+    return title.isEmpty()
+               ? QStringLiteral("%1: no title here (Havne names SAE's generic "
+                                "powertrain and network codes; a manufacturer "
+                                "defines its own)")
+                     .arg(text)
+               : QStringLiteral("%1: %2").arg(text, title);
 }
 
 QString SessionBridge::newSalt() const

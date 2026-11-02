@@ -9,7 +9,8 @@
 //     supported-PID walk, its budget,
 //     a bitmap asked again once after another PID's answer, and
 //     its resumption (behind a one-shot already taken), and what each
-//     answer drops; the DID scan's turns, outcomes and rescan;
+//     answer drops; the DID scan's turns (and ?scan=first's), outcomes
+//     and rescan;
 //     identification's turns, outcomes, text and report; the
 //     diagnostics list's turns, its one-byte requests, PID 41 and its
 //     skip when the bitmaps leave it out, the freeze
@@ -73,7 +74,11 @@
  * A positive reply puts the DID in the rotation (while the table has
  * room); a negative one counts it refused; one that times out is asked
  * again when the driver calls ecuio_engine_rescan, as the link recovers.
- * The scan runs whether or not the probe is on.
+ * The scan runs whether or not the probe is on. With scan_first (the
+ * URI's ?scan=first), a channel with DIDs left to scan sends its
+ * one-shots back to back and its rotation waits until they are asked:
+ * a sweep of a range at the adapter's pace, the found DIDs refreshing
+ * only once it ends.
  *
  * Identification (ADR-0021) runs on the same slot, ahead of the scan:
  * when the driver asks for it (ecuio_engine_identify), every channel
@@ -323,6 +328,7 @@ struct ecuio_request_engine {
     int64_t walk_until_us = 0;  /* the walk's budget ends */
     ecuio_scan_entry scan[ECUIO_ENGINE_SCAN_MAX] = {};
     uint32_t scan_count = 0;
+    bool scan_first = false;    /* the scan doesn't take turns with the rotation */
     /* The obd2 set, whose defs decode the freeze frame (ADR-0037 section 4);
      * set by ecuio_engine_diagnose */
     const ecuio_signal_set_t* diag_set = nullptr;
@@ -1438,7 +1444,8 @@ inline int32_t ecuio_engine_due(ecuio_request_engine* e, uint32_t c,
         }
         ecuio_engine_end_walk(e, c);
     }
-    const bool once_turn = ch.requests == 0 || ch.scan_turn;
+    const bool once_turn = ch.requests == 0 || ch.scan_turn ||
+                           (e->scan_first && ch.scan_pending > 0);
     if (ch.clear_step != ECUIO_CLEAR_STEP_NONE && once_turn) {
         ch.once = ecuio_request{};
         if (ch.clear_step == ECUIO_CLEAR_STEP_SPEED) {

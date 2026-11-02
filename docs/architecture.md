@@ -17,7 +17,7 @@ threads onto the GUI thread.
    │  worker → GUI marshaling, 100 ms coalescing, link-health polling
    │                   havne-cli (cli/): a session as JSON lines on
    │                   standard output, the public headers alone (ADR-0031)
-   ▼  C ABI: core.h · signals.h · profile.h · j2534.h · serial.h · stream.h · socketcan.h
+   ▼  C ABI: core.h · signals.h · profile.h · j2534.h · serial.h · stream.h · socketcan.h · vin.h · sim.h
  ecuio-core (core/)           no Qt, ever
    │  sessions + callbacks · profiles + decode · transports
    ├── mock://    worker thread, scripted drive cycle
@@ -442,7 +442,7 @@ The bridge polls it on its 100 ms tick and maps it for the UI
 | Cross-arch | x64 tests driving the x86 surrogate and fake. Local only; CI never runs it |
 | Sanitizers | Core under ASan/UBSan in CI |
 | Fuzzing | The signal decoder, the validators, the `uds-generic` query parser, the ELM327 reply parsers and the replay reader under libFuzzer, 60 s each in CI ([fuzz/README.md](../fuzz/README.md)) |
-| Static analysis | clang-tidy's analyzer and bug-finding checks over core, the surrogate and `havne-cli`, any warning failing CI; CodeQL too |
+| Static analysis | clang-tidy's analyzer and bug-finding checks over core, the surrogate, `havne-cli` and the desktop app, any warning failing CI; CodeQL too |
 | Load test | A recorded engine start replayed through the bridge on Windows and Linux CI: throughput, drops and latency, failing on a lost frame or peak or a gross regression |
 | Simulator smoke | The iOS app launches and draws |
 | Manual smoke | The real app, page by page |

@@ -124,13 +124,14 @@ mode: each session as it happened, then the frames as they arrive.*
  SessionBridge (app/)          the app's caller of the core: worker → GUI
    │                           marshaling, 100 ms coalescing, link health
    │   havne-cli (cli/)        a second front end: a session as JSON lines
-   ▼  C ABI: core.h · signals.h · profile.h · j2534.h · serial.h · stream.h · socketcan.h
+   ▼  C ABI: core.h · signals.h · profile.h · j2534.h · serial.h · stream.h · socketcan.h · vin.h · sim.h
  ecuio-core (core/)            no Qt, ever: sessions, profiles, decoding
    ├── mock://    a scripted drive on a vehicle model
    ├── replay://  a recording's frames.csv at its own pace
    ├── elm327://  a serial port, a WiFi socket, or a link the app opens
    ├── socketcan:// a Linux CAN interface, listening or through ISO-TP
-   │              (havne-cli play drives the simulated car on a virtual one)
+   │              (havne-cli play drives the simulated car on a virtual one,
+   │               havne-cli sim answers as its engine ECU)
    └── j2534://   a surrogate process per driver, over a named pipe
           ├── ecuio-j2534-surrogate.exe      (32-bit drivers)
           └── ecuio-j2534-surrogate-x64.exe  (64-bit drivers)

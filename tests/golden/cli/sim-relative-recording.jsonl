@@ -1,0 +1,2 @@
+{"schema": 1, "type": "start"}
+{"code": 12, "detail": "the recording's path must be absolute", "message": "malformed transport URI", "type": "error"}

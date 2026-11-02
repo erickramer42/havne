@@ -3,8 +3,8 @@
 // C++17, Qt-free, no platform headers. No I/O, no clock, no allocation.
 // Testing: UNIT: Elm327ProtocolTest (test_elm327): canned transcripts
 //     chunked every way, every line kind, ISO-TP reassembly, the values,
-//     the commands it formats and the PIDs given the response count, and
-//     replies reaching the request engine.
+//     the commands it formats, the PIDs and DIDs given the response
+//     count, and replies reaching the request engine.
 
 #ifndef ECUIO_ELM327_PROTOCOL_H
 #define ECUIO_ELM327_PROTOCOL_H
@@ -455,6 +455,23 @@ inline void elm327_one_frame_set(elm327_one_frame_pids& s, uint8_t pid, bool on)
                                               : (s.bits[pid / 8] & ~bit));
 }
 
+/* The DIDs whose 22 <DID> reply has needed more than one line: a First
+ * Frame and its Consecutive Frames, or a pending reply (7F 22 78) before
+ * the answer. Bit 0x80 >> (d % 8) of byte d / 8; empty at attach. */
+struct elm327_long_dids {
+    uint8_t bits[8192] = {};
+};
+
+inline bool elm327_long_did(const elm327_long_dids& s, uint16_t did)
+{
+    return (s.bits[did / 8] & (0x80u >> (did % 8))) != 0;
+}
+
+inline void elm327_long_did_set(elm327_long_dids& s, uint16_t did)
+{
+    s.bits[did / 8] = static_cast<uint8_t>(s.bits[did / 8] | (0x80u >> (did % 8)));
+}
+
 /* Where a def's field ends in its message, or 0 when that isn't known (a
  * text field running to the end of the payload). */
 inline uint32_t elm327_def_end(const ecuio_signal_def_t& d)
@@ -507,21 +524,33 @@ inline void elm327_one_frame_pids_for(const ecuio_signal_set_t* set,
 }
 
 /* The response-count digit for a request (ADR-0026 section 3; the datasheet
- * from v1.3, which counts lines): 1 for a Service 01 request to a
- * physical ID whose PID is in one, so one ECU answers in one line; 0, no
- * digit, otherwise. A digit too small ends the reply early and loses a
- * multi-frame message; a Service 09 or 0x22 reply can span frames or be
- * held pending (7F xx 78), and a functional ID (0x7DF, 0x18DB33F1) can
- * draw several ECUs. */
+ * from v1.3, which counts lines): 1 to a physical ID, so one ECU answers
+ * in one line, for a Service 01 request whose PID is in one, and for a
+ * one-DID 0x22 request whose DID isn't in long_dids (ADR-0020's appendix
+ * of 2026-11-01: a scanned DID is mostly refused in one line, and the
+ * digit spares the adapter's wait after it); 0, no digit, otherwise. A
+ * digit too small ends the reply early: the transport takes a 0x22
+ * request back when its reply spanned frames or was held pending (7F 22
+ * 78), and asks its DID with no digit from then on. A Service 09 reply
+ * can span frames, and a functional ID (0x7DF, 0x18DB33F1) can draw
+ * several ECUs. */
 inline uint8_t elm327_response_count(const uint8_t* bytes, size_t n,
                                      uint32_t tx_id,
-                                     const elm327_one_frame_pids& one)
+                                     const elm327_one_frame_pids& one,
+                                     const elm327_long_dids& long_dids)
 {
-    if (n != 2 || bytes[0] != 0x01 || tx_id == 0x7DFu || tx_id == 0x18DB33F1u ||
-        !elm327_one_frame(one, bytes[1])) {
+    if (tx_id == 0x7DFu || tx_id == 0x18DB33F1u) {
         return 0;
     }
-    return 1;
+    if (n == 2 && bytes[0] == 0x01 && elm327_one_frame(one, bytes[1])) {
+        return 1;
+    }
+    if (n == 3 && bytes[0] == 0x22 &&
+        !elm327_long_did(long_dids,
+                         static_cast<uint16_t>((bytes[1] << 8) | bytes[2]))) {
+        return 1;
+    }
+    return 0;
 }
 
 /* The response-count digit for a pack (ADR-0039 Appendix A), whose

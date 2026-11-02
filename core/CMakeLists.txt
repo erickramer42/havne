@@ -1,6 +1,7 @@
 # core/CMakeLists.txt
 add_library(ecuio-core STATIC
     src/core.cpp
+    src/dtc_titles.cpp
     src/host_clock.cpp
     src/profile_registry.cpp
     src/mock_transport.cpp
@@ -13,12 +14,14 @@ add_library(ecuio-core STATIC
     src/elm327_stream.cpp
     src/elm327_log.cpp
     src/serial_ports.cpp
+    src/sim.cpp
     src/socketcan_interfaces.cpp
     src/socketcan_transport.cpp
     src/signals.cpp
     src/signal_sets.cpp
     src/obd2_signal_sets.cpp
     src/uds_generic.cpp
+    src/vin.cpp
     src/j2534_surrogate_client.cpp
 )
 
@@ -76,8 +79,10 @@ if(NOT ANDROID AND NOT IOS)
             include/ecuio/profile.h
             include/ecuio/serial.h
             include/ecuio/signals.h
+            include/ecuio/sim.h
             include/ecuio/socketcan.h
             include/ecuio/stream.h
+            include/ecuio/vin.h
             ${CMAKE_BINARY_DIR}/generated/ecuio/version.h
         DESTINATION include/ecuio)
     install(EXPORT ecuio NAMESPACE ecuio:: FILE ecuioTargets.cmake
@@ -97,4 +102,8 @@ if(NOT ANDROID AND NOT IOS)
     install(FILES ${CMAKE_CURRENT_BINARY_DIR}/ecuio.pc DESTINATION lib/pkgconfig)
     install(FILES ${PROJECT_SOURCE_DIR}/LICENSE
         DESTINATION share/doc/havne-core RENAME copyright)
+    # The data core carries from others (ADR-0043, ADR-0044): the trouble
+    # codes' titles under their MIT notice, vPIC's makes
+    install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/THIRD_PARTY_NOTICES.txt
+        DESTINATION share/doc/havne-core RENAME THIRD_PARTY_NOTICES)
 endif()
