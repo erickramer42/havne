@@ -502,31 +502,6 @@ Page {
                             text: summary.charAt(0).toUpperCase() + summary.slice(1)
                             color: Theme.text
                         }
-                        Label {
-                            objectName: "dtcLookupHint"
-                            Layout.fillWidth: true
-                            wrapMode: Text.Wrap
-                            text: qsTr("SAE J2012's titles for generic powertrain and network codes, from %1 (MIT), on this device.")
-                                      .arg(Bridge.dtcTitleSource())
-                            color: Theme.textDim
-                            font.pixelSize: 12
-                        }
-                        ThemedButton {
-                            id: noticeToggle
-                            objectName: "dtcNoticeToggle"
-                            property bool open: false
-                            text: open ? qsTr("Hide the list's license") : qsTr("The list's license")
-                            onClicked: open = !open
-                        }
-                        Label {
-                            objectName: "dtcNotice"
-                            visible: noticeToggle.open
-                            Layout.fillWidth: true
-                            wrapMode: Text.Wrap
-                            text: Bridge.dtcTitleNotice()
-                            color: Theme.textDim
-                            font.pixelSize: 11
-                        }
                     }
                 }
             }

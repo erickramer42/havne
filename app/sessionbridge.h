@@ -574,11 +574,9 @@ public:
     Q_INVOKABLE QString vinSource() const;
     // A typed trouble code's title (ADR-0044), Diagnostics' lookup:
     // "P0301: Cylinder 1 Misfire Detected", spaces dropped and upper-cased,
-    // "" when empty. dtcTitleSource() names the list, dtcTitleNotice()
-    // gives its license, which the page shows on request.
+    // "" when empty. The list's source and license are the packages'
+    // notices and the release notes', not the page's.
     Q_INVOKABLE QString describeDtc(const QString& typed) const;
-    Q_INVOKABLE QString dtcTitleSource() const;
-    Q_INVOKABLE QString dtcTitleNotice() const;
     static QString vinSummary(const QString& vin, int latestModelYear);
     // A line in the activity log (and a recording's events.log), for the
     // app's own events: the vehicle lines of ADR-0027 section 4

@@ -146,7 +146,6 @@ TestCase {
         const field = find(page, "dtcLookupField")
         const result = find(page, "dtcLookupResult")
         verify(!result.visible, "nothing typed, nothing said")
-        verify(find(page, "dtcLookupHint").text.indexOf("Wal33D/dtc-database ") > 0)
         field.text = "p 0301"
         compare(result.text, "P0301: Cylinder 1 Misfire Detected")
         field.text = "P1234"
@@ -155,6 +154,18 @@ TestCase {
         verify(result.text.indexOf("Not a trouble code") === 0, result.text)
         field.text = ""
         verify(!result.visible)
+        // The list's source and license are the packages' notices and the
+        // release notes, not the page's
+        const said = []
+        const walk = item => {
+            for (let i = 0; i < item.children.length; ++i) {
+                const c = item.children[i]
+                if (typeof c.text === "string") said.push(c.text)
+                walk(c)
+            }
+        }
+        walk(page)
+        verify(!said.some(s => /Wal33D|MIT|license/i.test(s)), "no source or license on the page")
     }
 
     function test_theMocksReportFillsThePage() {

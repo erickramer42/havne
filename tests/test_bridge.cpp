@@ -5919,6 +5919,4 @@ TEST(BridgeTest, ATypedCodeIsDescribed)
     EXPECT_TRUE(bridge.describeDtc(QStringLiteral("P0301X"))
                     .startsWith(QStringLiteral("not a trouble code")));
     EXPECT_TRUE(bridge.describeDtc(QStringLiteral("   ")).isEmpty());
-    EXPECT_TRUE(bridge.dtcTitleSource().startsWith(
-        QStringLiteral("Wal33D/dtc-database ")));
 }

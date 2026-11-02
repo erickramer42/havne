@@ -92,6 +92,12 @@ list, so:
   `share/doc/havne-core/THIRD_PARTY_NOTICES` (with vPIC's, ADR-0043);
 - the app shows it on request, under Diagnostics' lookup.
 
+*Amended 2026-11-01:* the app names neither the list nor its license on
+Diagnostics: the page is for the car's codes, and the notice is met by
+the binaries and the notices files above. The release notes name both
+sources under "Third-party data". The lookup and the titles beside the
+car's codes stay.
+
 Havne's own license stays MIT.
 
 ### 4. Each front end
