@@ -414,8 +414,9 @@ for ELM327, the test car. v0.3.6 turns what the adapters on hand can
 reach into car-verified claims and finishes the diagnostics.
 
 - **The car runs:** several PIDs per request through the VX (BENCH
-  prep #31's other half), with the adapter's share of a reply's
-  latency beside it (ADR-0042); and on the same run, the data more
+  prep #31's other half), with each reply's latency on the host's
+  clock beside it (ADR-0042; the adapter's share waits for the desk
+  bus, below); and on the same run, the data more
   than one ECU answering needs (a functional `0x7DF` bitmap request,
   physical `0x7E1` to `0x7E7`), captured under `raw` as evidence for
   v0.4.0's design. Done through both adapters
@@ -486,16 +487,20 @@ notes' Try it points at [docs/ios.md](docs/ios.md).
 
 ### Waiting on hardware: SocketCAN through a real controller
 
-No version until the hardware is on hand: the desk bus's terminator
-for the desk run (a USB-to-CAN adapter is on hand, BENCH prep #32), an
-OBD-to-DB9 cable for the car, and, if the desk run finds that sending
-needs one-shot mode, an adapter whose driver offers it.
+No version until its runs are made. The desk run's hardware is on
+hand (a USB-to-CAN adapter and the desk bus's terminator, BENCH prep
+#32); the car needs an OBD-to-DB9 cable, and, if the desk run finds
+that sending needs one-shot mode, an adapter whose driver offers it.
 
 - The desk run, which settles whether ADR-0040 section 2 requires
   one-shot mode (`SOCKETCAN_SEND_NEEDS_ONE_SHOT`, BENCH prep #32).
 - SocketCAN on the test car, listen-only first, then requests (BENCH
   prep #26 and #19), with a `havne-cli` script reading the car at a
   documented rate.
+- A reply's latency on the adapter's clock (ADR-0042's alternative:
+  J2534's TX indication stamp to the reply's, SocketCAN's echo to the
+  reply), checked against an independent listener on the desk bus
+  before it's published.
 - **Done when:** that script's run is filed and the one-shot rule is
   settled either way.
 
