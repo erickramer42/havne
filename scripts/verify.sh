@@ -13,8 +13,10 @@
 #               builds projects side by side; the root CMakeLists.txt
 #               adds /MP for a project's files): a clean build of build/
 #               takes about a quarter of the time it does one at a time
-#   ctest       the suite, or the -R subset (an -R matching nothing fails).
-#               On Windows, ECUIO_EXPECT_J2534_DEVICES=1 makes the
+#   ctest       the suite, or the -R subset (an -R matching nothing fails),
+#               HAVNE_VERIFY_JOBS cases at a time (default 8: the suite
+#               took 34 s at 8 against 260 s one at a time on the dev
+#               machine; 1 runs them one at a time). On Windows, ECUIO_EXPECT_J2534_DEVICES=1 makes the
 #               discovery test demand a device from the registry, since
 #               the dev machine has a Pass-Thru driver installed;
 #               --no-devices for a machine without one
@@ -45,7 +47,7 @@ while [ $# -gt 0 ]; do
         --no-cross) cross=0 ;;
         --no-devices) devices=0 ;;
         -R) regex="${2:-}"; shift ;;
-        -h|--help) sed -n '2,27p' "$0"; exit 0 ;;
+        -h|--help) sed -n '2,30p' "$0"; exit 0 ;;
         *) echo "unknown argument: $1 (see --help)" >&2; exit 2 ;;
     esac
     shift
@@ -115,10 +117,11 @@ fi
 if [ "$windows" = 1 ] && [ "$devices" = 1 ]; then
     export ECUIO_EXPECT_J2534_DEVICES=1
 fi
+jobs=${HAVNE_VERIFY_JOBS:-8}
 if [ -n "$regex" ]; then
-    run ctest ctest --test-dir build -C Release --output-on-failure --no-tests=error -R "$regex"
+    run ctest ctest --test-dir build -C Release -j "$jobs" --output-on-failure --no-tests=error -R "$regex"
 else
-    run ctest ctest --test-dir build -C Release --output-on-failure --no-tests=error
+    run ctest ctest --test-dir build -C Release -j "$jobs" --output-on-failure --no-tests=error
 fi
 [ "$rc" = 0 ] || ctest_failed ctest
 line ctest ok "$dur" "$(ctest_summary "$LOGDIR/ctest.log")"
@@ -127,7 +130,7 @@ if [ "$cross" = 1 ] && [ "$have_win32" = 1 ] && [ -z "$regex" ]; then
     ECUIO_SURROGATE_EXE="$(cygpath -m "$PWD")/build-win32/surrogate/Release/ecuio-j2534-surrogate.exe"
     ECUIO_FAKE_DLL="$(cygpath -m "$PWD")/build-win32/tests/Release/fake_j2534.dll"
     export ECUIO_SURROGATE_EXE ECUIO_FAKE_DLL
-    run cross-arch ctest --test-dir build -C Release --output-on-failure \
+    run cross-arch ctest --test-dir build -C Release -j "$jobs" --output-on-failure \
         --no-tests=error -R "J2534Routing|J2534Surrogate|J2534(Health|Connect)Test\."
     [ "$rc" = 0 ] || ctest_failed cross-arch
     summary=$(ctest_summary "$LOGDIR/cross-arch.log")
