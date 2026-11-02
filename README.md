@@ -43,8 +43,8 @@ a quarter mile off launch control on a warm loop.*
   [docs/testing.md](docs/testing.md#load-test-the-replay-fixture-through-the-bridge)).
 - **Requests follow the replies.** One request per ECU at a time; the
   supported-PID probe drops only what the ECU says it lacks, never on
-  silence. Only reads go out, and one clear, which asks first, saves
-  the report, and asks once more while the car moves
+  silence. A clear asks first, saves the report, and asks once more
+  while the car moves
   ([ADR-0015](docs/adr/0015-request-engine.md),
   [ADR-0038](docs/adr/0038-clearing-trouble-codes.md)).
 - **ISO-TP, held to the kernel's.** Core's own ISO-TP, shared by

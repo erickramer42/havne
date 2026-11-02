@@ -22,7 +22,7 @@ then go under
 [CHANGELOG.md's "Unreleased"](CHANGELOG.md#unreleased). The J2534 stack is verified
 end to end against a fake vendor DLL, through the x64 and the x86
 surrogate. One real J2534 adapter, the OBDX Pro VX, has run on a quiet
-bench bus and in two read-only sessions on one car
+bench bus and in two sessions on one car
 ([2026-10-22](docs/bench-sessions/2026-10-22-vehicle.md),
 [2026-10-25](docs/bench-sessions/2026-10-25-vehicle.md)): the engine
 ECU answered, the values decoded and tracked the cluster, and the
@@ -79,7 +79,7 @@ hardware ([roadmap](#roadmap)).
   - **Requests follow the replies**
     ([ADR-0015](docs/adr/0015-request-engine.md)): one out per channel,
     the next when the reply is in, a 100 ms wait and a 20 ms floor;
-    reads only (Services 01, 02, 03, 07, 09, 0A and 0x22). About 26 a
+    the services 01, 02, 03, 07, 09, 0A and 0x22. About 26 a
     second on the car.
   - **The PID-support probe** (ADR-0015 section 4) drops only what an ECU says
     it lacks, never on silence; on the car it walked six bitmaps and
@@ -294,8 +294,8 @@ hardware ([roadmap](#roadmap)).
 | Replay transport | UNIT-tested, against a scrubbed real-bus fixture too; passive, default profile `raw` | [ADR-0023](docs/adr/0023-replay-transport.md) |
 | Bridge and models | Worker to GUI marshaling with bounded backpressure, 100 ms coalescing, a 10k-row frame log, a 360-point history per signal (each 100 ms window's lowest, highest and newest), link-health polling, recording; QML reaches it as the `Bridge` singleton | [ADR-0003](docs/adr/0003-backpressure-bounds-in-flight-frames.md), [ADR-0005](docs/adr/0005-coalesced-signal-updates.md) |
 | QML pages | Home, Dashboard, Live, Log, Settings; `test_qml` runs them against a real bridge, offscreen | [docs/architecture.md](docs/architecture.md#the-ui-layer) |
-| J2534 | HARNESS-verified through the surrogate: x64 in CI, x86 cross-arch. BENCH: one adapter, quiet bus. Vehicle: one car, read-only, through the surrogate, two sessions | [docs/j2534.md](docs/j2534.md) |
-| ELM327 | HARNESS-verified against a fake ELM327 on every platform (serial, TCP, app stream). BENCH: the VX on USB and WiFi, no bus. Vehicle: one car, read-only, through the MX+ (Bluetooth) and the VX (USB) | [docs/elm327.md](docs/elm327.md) |
+| J2534 | HARNESS-verified through the surrogate: x64 in CI, x86 cross-arch. BENCH: one adapter, quiet bus. Vehicle: one car, through the surrogate, two sessions | [docs/j2534.md](docs/j2534.md) |
+| ELM327 | HARNESS-verified against a fake ELM327 on every platform (serial, TCP, app stream). BENCH: the VX on USB and WiFi, no bus. Vehicle: one car, through the MX+ (Bluetooth) and the VX (USB) | [docs/elm327.md](docs/elm327.md) |
 | Android app | Android 12 and later; Bluetooth through the phone, background sessions. On one phone and one car, with the MX+; built in CI, no tests run on the phone | [ADR-0028](docs/adr/0028-app-fed-streams.md), [ADR-0029](docs/adr/0029-android-background-sessions.md) |
 
 ## The ELM327 transport
