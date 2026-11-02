@@ -367,8 +367,9 @@ inline socketcan_verdict socketcan_judge(const socketcan_link& l,
 }
 
 /* Whether a controller must be in one-shot mode to send (ADR-0040
- * section 2): open until the desk run measures what a wrong rate puts on
- * a bus without it; the USB2CAN's firmware offers no one-shot mode */
+ * section 2): yes. Without it, a frame no node acknowledges is sent
+ * again forever at error-passive, never bus-off (ADR-0040's appendix of
+ * 2026-11-02, the desk bus) */
 constexpr bool SOCKETCAN_SEND_NEEDS_ONE_SHOT = true;
 
 /* Whether a session that requests may send through the link (ADR-0040
@@ -429,7 +430,8 @@ constexpr uint8_t SOCKETCAN_PROOF_TRIES = 3;
 
 /* What became of a request the worker wrote */
 enum class socketcan_sent {
-    echoed,   /* the controller sent it and a node acknowledged it */
+    echoed,   /* the controller sent it (one adapter echoes before any
+                 node acknowledged it: Known Issue #40) */
     unechoed, /* no echo and no error within N_As */
     error     /* an error frame, or the controller past error-active */
 };
