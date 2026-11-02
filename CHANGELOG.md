@@ -37,7 +37,7 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
 - Over an ELM327 adapter, the first reading of a PID whose reply spans two CAN frames (such as PID 68, intake air temperature) was lost and counted as a timeout: the request asked the adapter for one frame. It now asks for the whole reply from the start.
 - On a phone, Live and the Log's frame table ran off the right edge of the screen; they now fit its width, and the frame table wraps a long payload under its row.
 - On a phone, the confirmation for clearing codes could run past the bottom of the screen with no way to reach Clear or Cancel; it now scrolls with the page.
-- On a phone, tapping Disconnect while an adapter's replies were still arriving over Bluetooth could crash the app (once in eight disconnects on a car). The closed link's socket now stays until Android has stopped reading it (checked at the desk; the car run is still to come).
+- On a phone, tapping Disconnect while an adapter's replies were still arriving over Bluetooth could crash the app (once in eight disconnects on a car). The closed link's socket now stays until Android has stopped reading it (20 disconnects on a car, none crashed).
 
 ## [0.3.5] - 2026-11-01
 
