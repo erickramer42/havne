@@ -3,7 +3,8 @@
 //          connected to mock://demo with developer mode on: each page's
 //          items lie inside the window's width, the Log page in its
 //          Frames view too. The pages' own tests run them at 320 px
-//          alone; this one runs them as the window holds them. How they
+//          alone; this one runs them as the window holds them, and the
+//          relay's line beside its button. How they
 //          look on a phone is the phone's run.
 
 import QtQuick
@@ -24,6 +25,7 @@ TestCase {
     }
 
     function cleanup() {
+        Relay.stop()
         Theme.developerMode = false
         Bridge.disconnectSession()
         tryVerify(() => !Bridge.disconnecting, 5000, "disconnect ends")
@@ -102,5 +104,30 @@ TestCase {
         compare(out.length, 0, "past " + main.contentItem.width + " px: " + out.join(", "))
         if (data.tag === "diagnosticsPage")
             find(page, "clearCancel").clicked()
+    }
+
+    // The relay's line beside its button (ADR-0047): the traffic wraps in
+    // its own width rather than running under Stop relaying
+    function test_relayTrafficFitsBesideItsButton() {
+        const main = createTemporaryObject(mainComponent, testCase)
+        verify(main, "Main loads")
+        Theme.developerMode = true   // after Main, which loads the stored one
+        main.width = 384
+        main.height = 800
+        main.font.pixelSize = 16
+        const page = find(main.contentItem, "settingsPage")
+        main.gotoPage(Array.from(page.parent.children).indexOf(page))
+        find(page, "adapterSection").open = true   // the relay's box is in it
+        compare(Relay.start("elm327://bt:00:11:22:33:44:55", 0), "", "the relay starts")
+        const traffic = find(page, "relayTraffic")
+        const button = find(page, "relayButton")
+        tryVerify(() => traffic.visible && button.text === "Stop relaying", 2000,
+                  "the relay's line and Stop relaying are shown")
+        waitForRendering(main.contentItem)
+        verify(traffic.contentWidth <= traffic.width + 0.5,
+               "the traffic, " + Math.round(traffic.contentWidth) + " px, fits its "
+               + Math.round(traffic.width) + " px")
+        verify(traffic.mapToItem(page, traffic.contentWidth, 0).x
+               <= button.mapToItem(page, 0, 0).x + 0.5, "it ends before the button")
     }
 }

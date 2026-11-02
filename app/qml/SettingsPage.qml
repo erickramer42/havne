@@ -42,7 +42,9 @@
 //          runs (Main.qml). The recording's bridge side:
 //          BridgeTest.Recording*. The Units row sets Bridge.unitSystem
 //          (tst_settings.qml); its conversions: SignalsTest.DisplayConvert*,
-//          BridgeTest.UnitSystem*.
+//          BridgeTest.UnitSystem*. The relay's line beside its button at
+//          a phone's width: tst_phone.qml; the relay itself:
+//          BridgeTest.Relay*.
 
 import QtCore
 import QtQuick
@@ -933,6 +935,8 @@ Pane {
                                   .arg(page.byteText(Relay.bytesIn))
                                   .arg(page.byteText(Relay.bytesOut))
                             color: Theme.textDim
+                            // Beside the button on a phone's width
+                            wrapMode: Text.WordWrap
                             Layout.fillWidth: true
                         }
                         ThemedButton {
