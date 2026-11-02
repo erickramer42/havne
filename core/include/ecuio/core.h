@@ -428,7 +428,8 @@ ecuio_status_t ecuio_session_get_replay_faults(
 #define ECUIO_SUPPORT_UNPACKED           0x00000010u   /* such requests failed
                                                           three times in a row:
                                                           one PID per request
-                                                          for the session */
+                                                          until the link
+                                                          recovers */
 
 /* reason: why a request left the rotation */
 #define ECUIO_DROP_BITMAP                1u   /* its PID's bit is clear */

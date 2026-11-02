@@ -4076,6 +4076,45 @@ TEST(RequestEngineTest, APackedReplyMatchesByAnyOfItsPids)
 /* Silence, a negative reply or one record, three packs in a row, puts
  * the channel back to one PID per request; one answered in between
  * starts the count again; a pending reply only extends the wait */
+/* An ECU that goes quiet (the ignition off) leaves its packs unanswered
+ * along with everything else, so the channel unpacks; once the link
+ * recovers (the driver's rescan) packing is judged again and resumes */
+TEST(RequestEngineTest, PackingResumesOnceTheLinkRecovers)
+{
+    ecuio_request_engine e;
+    ASSERT_NO_FATAL_FAILURE(packing_engine(&e));
+    int turn = 0;
+    int packs_before = 0;
+    int packs_after = 0;
+    uint32_t quiet_flags = 0;
+    (void)packing_turns(&e, 600, [&](const Bytes& req) {
+        ++turn;
+        if (turn <= 200) {
+            packs_before += req.size() > 2 ? 1 : 0;
+            return packed_fake_reply(req);
+        }
+        if (turn <= 300) {
+            return Bytes{};
+        }
+        if (turn == 301) {
+            ecuio_channel_support_t s{};
+            ecuio_engine_support(&e, 0, &s);
+            quiet_flags = s.flags;
+            ecuio_engine_rescan(&e);
+        }
+        packs_after += req.size() > 2 ? 1 : 0;
+        return packed_fake_reply(req);
+    });
+    EXPECT_GT(packs_before, 0);
+    EXPECT_TRUE(quiet_flags & ECUIO_SUPPORT_UNPACKED)
+        << "the quiet ECU unpacked it";
+    EXPECT_GT(packs_after, 50);
+    ecuio_channel_support_t s{};
+    ecuio_engine_support(&e, 0, &s);
+    EXPECT_FALSE(s.flags & ECUIO_SUPPORT_UNPACKED);
+    EXPECT_TRUE(s.flags & ECUIO_SUPPORT_PACKED);
+}
+
 TEST(RequestEngineTest, ThreeFailedPacksEndPackingOnTheChannel)
 {
     for (const char* how : {"silence", "negative", "first PID only"}) {

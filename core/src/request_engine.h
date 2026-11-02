@@ -108,7 +108,11 @@
  * record's PID is one of the pack's answers it; a PID it leaves out has
  * no value that pass and isn't dropped. A pack answered with silence, a
  * negative reply or one record ECUIO_ENGINE_PACK_FAILURES times in a row
- * puts the channel back to one PID per request for the session. */
+ * puts the channel back to one PID per request until the link recovers
+ * (ecuio_engine_rescan): an ECU that went quiet (the ignition off) left
+ * its packs unanswered along with everything else, so packing is judged
+ * again once it answers. An ECU that refuses packs answers the rest, so
+ * its link never recovers and its channel stays unpacked. */
 
 /* Timing (ADR-0015, appendix of 2026-10-23). The wait is the server's
  * response time P2 (50 ms) plus 50 ms for the adapter: the longest reply
@@ -316,7 +320,7 @@ struct ecuio_engine_channel {
     uint32_t pack_count = 0;
     uint32_t pack_failures = 0; /* failed packs in a row */
     bool packed = false;        /* a pack was answered with several records */
-    bool unpacked = false;      /* packing ended for the session */
+    bool unpacked = false;      /* packing ended until a rescan */
 };
 
 struct ecuio_request_engine {
@@ -793,6 +797,11 @@ inline void ecuio_engine_rescan(ecuio_request_engine* e)
     }
     for (uint32_t c = 0; c < e->chan_count; ++c) {
         ecuio_engine_channel& ch = e->chans[c];
+        if (ch.unpacked) {
+            ch.unpacked = false;
+            ch.pack_failures = 0;
+            ++ch.generation;
+        }
         for (uint32_t i = 0; i < ch.ident_count; ++i) {
             if (ch.ident[i].outcome == ECUIO_IDENTITY_UNANSWERED) {
                 ch.ident[i].outcome = ECUIO_IDENTITY_UNASKED;
@@ -1573,7 +1582,7 @@ inline int32_t ecuio_engine_due(ecuio_request_engine* e, uint32_t c,
 
 /* A pack on channel c that failed: silence, a negative reply or one
  * record. The ECUIO_ENGINE_PACK_FAILURES-th in a row ends packing on
- * the channel for the session. */
+ * the channel until ecuio_engine_rescan. */
 inline void ecuio_engine_pack_failed(ecuio_request_engine* e, uint32_t c)
 {
     ecuio_engine_channel& ch = e->chans[c];

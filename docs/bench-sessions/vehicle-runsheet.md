@@ -392,7 +392,8 @@ From a terminal on the laptop, `havne-cli` beside the app's build
       (ADR-0042's appendix of 2026-11-01)
 - [ ] If the ECU refuses packs (`7F 01 12`, or replies that don't
       split): after three failures the channel goes unpacked and stays
-      so, and nothing is dropped. That's the fallback BENCH prep #31's
+      so while the ECU answers its other requests, and nothing is
+      dropped. That's the fallback BENCH prep #31's
       other half asks for: record it, it isn't a fault
 
 ## Phase 3c: more than one ECU, engine idling
@@ -452,6 +453,9 @@ ignition-on.
       100 ms to a 5 s cap, so the next can be up to 5 s away. Record
       the time from the restart to the first value; longer than about
       10 s is a finding
+- [ ] Packing resumes: the bare URI packs, the requests unanswered
+      while the engine is off end it, and once the link recovers the
+      `timing` lines' `packed` counts climb again
 - [ ] Optional, the probe on a cold connect: Disconnect, key off,
       connect the bare URI, then start the engine at once. The ECU
       line reads "no answer to the supported-PID query" and "none
