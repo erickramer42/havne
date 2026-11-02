@@ -9,7 +9,10 @@
 #   win32       build-win32's surrogate and fake DLLs (Windows, when
 #               build-win32 exists). First, because the app build copies
 #               the Win32 surrogate next to havne.exe.
-#   build       the build tree
+#   build       the build tree. Both builds pass --parallel (MSBuild
+#               builds projects side by side; the root CMakeLists.txt
+#               adds /MP for a project's files): a clean build of build/
+#               takes about a quarter of the time it does one at a time
 #   ctest       the suite, or the -R subset (an -R matching nothing fails).
 #               On Windows, ECUIO_EXPECT_J2534_DEVICES=1 makes the
 #               discovery test demand a device from the registry, since
@@ -98,12 +101,12 @@ ctest_failed() {
 
 if [ "$tests_only" = 0 ]; then
     if [ "$have_win32" = 1 ]; then
-        run win32 cmake --build build-win32 --config Release \
+        run win32 cmake --build build-win32 --config Release --parallel \
             --target ecuio-j2534-surrogate fake_j2534 fake_j2534_legacy
         [ "$rc" = 0 ] || build_failed win32
         line win32 ok "$dur" "$(warnings win32) warnings"
     fi
-    run build cmake --build build --config Release
+    run build cmake --build build --config Release --parallel
     [ "$rc" = 0 ] || build_failed build
     line build ok "$dur" "$(warnings build) warnings"
 fi
