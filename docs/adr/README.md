@@ -54,6 +54,7 @@ old one, and the old record's status is updated to point at it.
 | [0046](0046-simulated-ecu.md) | The simulated ECU as a product: `havne-cli sim` answers OBD-II requests on a virtual CAN bus (vcan only) as the mock's engine ECU, through core's ISO-TP (`ecuio/sim.h`): the drive cycle's values or the fakes' canned ones, the mock's diagnostics, a VIN, faults every Nth reply; or a recording's replies, each keyed by the request it answers, at the sim's time | Accepted |
 | [0047](0047-adapter-relay.md) | The phone relays a paired Bluetooth adapter to a computer over USB: the app listens on its own loopback address and passes bytes to the adapter's RFCOMM link, adb's forward carries them, and havne-cli connects as to a WiFi adapter (`elm327://127.0.0.1:35000`); one computer at a time, the adapter held between computers, developer mode only, the foreground service holding it | Accepted |
 | [0048](0048-semantic-versioning.md) | Semantic versioning from v0.4.0: a minor release per feature release while 0.x, 1.0.0 the finished reader, 2.0 the write path; the CMake package keeps `SameMinorVersion` until 1.0 | Accepted |
+| [0049](0049-recordings-in-core.md) | Recordings in core: a writer thread the worker feeds, for the app and havne-cli alike, dropping counted rows rather than blocking; a reader with a per-second summary and offset index, its memory bound stated; markers and alignment | Proposed |
 
 ## Adding a record
 
