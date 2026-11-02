@@ -25,6 +25,8 @@
 #include <gtest/gtest.h>
 
 #include <linux/can/error.h>
+#include <pthread.h>
+#include <sched.h>
 
 #include <atomic>
 #include <chrono>
@@ -338,9 +340,14 @@ void hold_on_error(const ecuio_frame_t* f, void* user_data)
  * get the fakes' Single Frames, or nothing. The ECU's thread can itself
  * be late (ASan on a loaded runner): a run whose last Consecutive Frame
  * went over 100 ms after the First Frame was late on the bus too, so it
- * tests nothing and runs again, three runs at most */
+ * tests nothing and runs again, three runs at most. So does a run whose
+ * frames the bus carried out of order: vcan queues each frame on the
+ * sending CPU's backlog, so a thread moving between CPUs under load can
+ * have its frames delivered out of order, which a real bus never does.
+ * The ECU's thread stays on one CPU, and a listener checks the order */
 struct HeldWorkerRun {
     bool on_time = false;
+    bool in_order = false;
     bool held = false;
     bool segmented = false;
     uint32_t outcome = 0;
@@ -358,7 +365,16 @@ HeldWorkerRun run_held_worker()
     std::atomic<bool> stop{false};
     std::atomic<bool> segmented{false};
     std::atomic<bool> on_time{false};
+    vcan_bus::Fd listener = vcan_bus::open_raw();
+    EXPECT_TRUE(listener.ok());
     std::thread ecu([&] {
+        const int cpu = sched_getcpu();
+        if (cpu >= 0) {
+            cpu_set_t one;
+            CPU_ZERO(&one);
+            CPU_SET(cpu, &one);
+            (void)pthread_setaffinity_np(pthread_self(), sizeof one, &one);
+        }
         const char* vin = fake_ecu::kVin; /* 17 characters: 20 bytes */
         bool vin_sent = false;
         can_frame f;
@@ -433,6 +449,18 @@ HeldWorkerRun run_held_worker()
     }
     stop = true;
     ecu.join();
+    /* The VIN's frames as the bus carried them: 10, 21, 22 */
+    std::vector<uint8_t> pcis;
+    can_frame f;
+    while (listener.ok() &&
+           vcan_bus::read_for(listener.get(), &f, sizeof f, 0) ==
+               static_cast<long>(sizeof f)) {
+        if (f.can_id == vcan_bus::kReply && f.len == 8 &&
+            (f.data[0] == 0x10 || f.data[0] == 0x21 || f.data[0] == 0x22)) {
+            pcis.push_back(f.data[0]);
+        }
+    }
+    r.in_order = pcis == std::vector<uint8_t>{0x10, 0x21, 0x22};
     r.on_time = on_time.load();
     r.held = held.load();
     r.segmented = segmented.load();
@@ -442,12 +470,13 @@ HeldWorkerRun run_held_worker()
 TEST_F(SocketCanRequestTest, AReplyOnTimeSurvivesAWorkerHeldUpMidMessage)
 {
     HeldWorkerRun r;
-    for (int run = 0; run < 3 && !r.on_time; ++run) {
+    for (int run = 0; run < 3 && !(r.on_time && r.in_order); ++run) {
         r = run_held_worker();
     }
     EXPECT_TRUE(r.held) << "the worker was never held";
     EXPECT_TRUE(r.segmented) << "the Consecutive Frames never went";
     ASSERT_TRUE(r.on_time) << "the ECU's thread was late in three runs";
+    ASSERT_TRUE(r.in_order) << "the bus reordered the VIN in three runs";
     EXPECT_EQ(r.outcome, ECUIO_IDENTITY_ANSWERED);
     EXPECT_EQ(r.text, fake_ecu::kVin);
 }
