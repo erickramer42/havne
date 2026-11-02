@@ -1366,6 +1366,63 @@ TEST_F(Elm327SessionTest, AScannedDidHeldPendingIsAskedAgainWithoutTheDigit)
     EXPECT_EQ(s.state(), ECUIO_OK);
 }
 
+/* A reply the digit cut goes on on the bus, and the ECU takes no request
+ * until it's sent (the test car's engine ECU, 8 ms a Consecutive Frame):
+ * the DID is asked again once the rest has gone, not into NO DATA, so the
+ * scan completes with it found */
+TEST_F(Elm327SessionTest, ACutDidIsAskedAgainOnceTheEcuHasSentTheRest)
+{
+    set_knobs([](fake_elm327::knobs& k) { k.cut_gap_ms = 8; });
+    Session s;
+    ASSERT_EQ(s.create(uri("?profile=uds-generic&did=F19E-F1A0&identify=0"
+                           "&diagnose=0")),
+              ECUIO_OK)
+        << ecuio_last_error_detail();
+    s.start();
+    ecuio_channel_support_t sup{};
+    ASSERT_TRUE(wait_for(
+        [&] {
+            return ecuio_session_get_channel_support(s.s, 0, &sup) ==
+                       ECUIO_OK &&
+                   (sup.flags & ECUIO_SUPPORT_SCAN_COMPLETE) != 0;
+        },
+        3000))
+        << "scan: " << sup.scan_done << " done of " << sup.scan_total;
+    EXPECT_EQ(sup.scan_found, 1u);
+    EXPECT_EQ(sup.scan_refused, 2u);
+    EXPECT_EQ(sup.scan_done, 3u) << "nothing unanswered";
+    EXPECT_EQ(fake_count("22F1A01"), 1u) << "the digit once";
+    ASSERT_TRUE(wait_for([&] { return s.cap.count("62 F1 A0") >= 1; }, 3000));
+    EXPECT_EQ(s.state(), ECUIO_OK);
+}
+
+/* An ECU slower than the hold allows (15 ms a frame): the DID asked again
+ * gets NO DATA, and is held again, longer, and found */
+TEST_F(Elm327SessionTest, ACutDidAnsweredNoDataIsHeldAgainLonger)
+{
+    set_knobs([](fake_elm327::knobs& k) { k.cut_gap_ms = 15; });
+    Session s;
+    ASSERT_EQ(s.create(uri("?profile=uds-generic&did=F19F-F1A0&identify=0"
+                           "&diagnose=0")),
+              ECUIO_OK)
+        << ecuio_last_error_detail();
+    s.start();
+    ecuio_channel_support_t sup{};
+    ASSERT_TRUE(wait_for(
+        [&] {
+            return ecuio_session_get_channel_support(s.s, 0, &sup) ==
+                       ECUIO_OK &&
+                   (sup.flags & ECUIO_SUPPORT_SCAN_COMPLETE) != 0;
+        },
+        4000))
+        << "scan: " << sup.scan_done << " done of " << sup.scan_total;
+    EXPECT_EQ(sup.scan_found, 1u) << "found after the second hold";
+    EXPECT_EQ(sup.scan_done, 2u) << "nothing unanswered";
+    EXPECT_EQ(fake_count("22F1A01"), 1u) << "the digit once";
+    EXPECT_GE(fake_count("22F1A0"), 2u) << "NO DATA once, then the answer";
+    EXPECT_EQ(s.state(), ECUIO_OK);
+}
+
 /* ?scan=first: every scanned DID is asked before the listed one's
  * second poll, where the turns would alternate them */
 TEST_F(Elm327SessionTest, ScanFirstAsksTheRangeBeforeTheRotation)
