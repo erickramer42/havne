@@ -156,6 +156,30 @@ TEST(CoreTest, VendorDetailIsOneLine)
     ecuio_detail_clear();
 }
 
+/* An open refused with the vendor's own status and no text asks after
+ * the two usual causes; the vendor's text, a status J2534 names, or
+ * another call keeps the plain form. */
+TEST(CoreTest, AnOpenRefusedWithoutTextAsksAfterTheAdapter)
+{
+    ecuio_detail_set_vendor("PassThruOpen", 34, nullptr);
+    EXPECT_STREQ(ecuio_last_error_detail(),
+                 "PassThruOpen returned status 34 (0x22, vendor-specific): "
+                 "is the adapter attached, and not open in another program?");
+    ecuio_detail_set_vendor("PassThruOpen", 34, " \r\n");
+    EXPECT_STREQ(ecuio_last_error_detail(),
+                 "PassThruOpen returned status 34 (0x22, vendor-specific): "
+                 "is the adapter attached, and not open in another program?");
+    ecuio_detail_set_vendor("PassThruOpen", 34, "in use");
+    EXPECT_STREQ(ecuio_last_error_detail(),
+                 "PassThruOpen returned status 34 (0x22, vendor-specific): "
+                 "in use");
+    ecuio_detail_set_vendor("PassThruOpen", 8, nullptr);
+    EXPECT_STREQ(
+        ecuio_last_error_detail(),
+        "PassThruOpen returned status 8 (0x8, ERR_DEVICE_NOT_CONNECTED)");
+    ecuio_detail_clear();
+}
+
 /* Per thread, like dlerror(): a failure on one thread leaves another
  * thread's detail as it was. */
 TEST(CoreTest, LastErrorDetailIsPerThread) {

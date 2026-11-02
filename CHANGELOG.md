@@ -10,6 +10,10 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
 
 ## [Unreleased]
 
+### Changed
+
+- A J2534 adapter that refuses to open without saying why gets an error that asks whether the adapter is attached and not open in another program, the two usual causes, instead of naming the status alone.
+
 ## [0.3.6] - 2026-11-02
 
 ### Added
